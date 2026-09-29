@@ -1,17 +1,11 @@
 import type { PrismaClient } from "@prisma/client";
 import {
-  classifyPlanApplicationAvailability,
   type ConversationMentionType,
   type MentionFailureReason,
 } from "@lib/core";
-import {
-  type CapabilitySnapshotVersion,
-  type DerivedReference,
-} from "@lib/contracts";
 
 import { publicGenerationInput } from "./generation-input.js";
 import { classifyMentionAvailability } from "./mention-availability.js";
-import { loadPlanApplicationFacts } from "./plan-application-facts.js";
 import {
   resolveLogicalSlots,
   type OutputSlotStatus,
@@ -86,13 +80,8 @@ export interface SnapshotConversationState {
     created_at: string;
     mentions: SnapshotMentionView[];
   }>;
-  /** 已原子接纳的不可变计划卡（T09，IK67H6，契约 §9）：按 ordinal 排序。
-   *  临时候选与验证失败的候选永不进入此列表（AC#8）。 */
-  plan_messages: SnapshotPlanMessageView[];
-  /** 已创建的视频场景卡（IK67H9，T11）：plan_message 应用产物，按 id 升序。 */
+  /** 已创建的视频场景卡（IK67H9，T11）：按 id 升序。 */
   scene_cards: SnapshotSceneCardView[];
-  /** 成功应用 PlanMessage 的不可变回执（IK67H9，T11）：按 applied_at 升序。 */
-  plan_applications: SnapshotPlanApplicationReceiptView[];
   /** SceneCard 生成记录（IK67HB，T13）：generation origins/summaries 恢复权威子集，按 id 升序。 */
   scene_card_generation_records: SnapshotSceneCardGenerationRecordView[];
   /** StoryboardPreview 分镜预览（IK67HF，T15）：从 SceneCard 触发的可选旁路预览会话，按 id 升序。 */
@@ -121,35 +110,6 @@ export interface SnapshotMentionView {
   snapshot?: unknown;
 }
 
-/** Snapshot 计划卡投影（T09）：直接透传冻结的不可变字段（JSON 原样），
- *  application_kind / ordinal / 序列标签供前端渲染，content_markdown 为唯一权威正文。 */
-export interface SnapshotPlanMessageView {
-  message_id: string;
-  conversation_id: string;
-  agent_run_id: string;
-  ordinal: number;
-  total_in_batch: number;
-  sequence_label: string | null;
-  application_kind: string;
-  target_scene_card_mention_id: string | null;
-  base_scene_card_version: number | null;
-  content_markdown: string;
-  derived_references: unknown;
-  frozen_generation_parameters: unknown;
-  capability_snapshot_version: unknown;
-  provider_prompt_projection: unknown;
-  base_plan_message_id: string | null;
-  source_plan_message_id: string | null;
-  /** 首次成功应用时间（T10，IK67H8）；null = 未应用。 */
-  applied_at: string | null;
-  /** 首个图片 GenerationJob（T10，IK67H8）；null = 未应用。 */
-  first_generation_job_id: string | null;
-  /** 当前应用可用性（T10，IK67H8）：基于素材可用性 + 能力漂移；snapshot 不查余额，
-   *  故不会是 retryable_blocked（仅 available / requires_new_plan）。 */
-  application_availability: "available" | "requires_new_plan";
-  created_at: string;
-}
-
 /** Snapshot 场景卡投影（IK67H9，T11）：视频 SceneCard 的权威正文与版本，供前端渲染与编辑。
  *  生成预设/记录等明细由专属读路径提供，此处只投身份 + 正文。 */
 export interface SnapshotSceneCardView {
@@ -160,17 +120,6 @@ export interface SnapshotSceneCardView {
   version: number;
 }
 
-/** Snapshot 计划应用回执投影（IK67H9，T11）：不可变事实，证明正文与参数来自被应用的 PlanMessage。 */
-export interface SnapshotPlanApplicationReceiptView {
-  receipt_id: string;
-  message_id: string;
-  application_kind: string;
-  scene_card_id: string | null;
-  first_generation_job_id: string;
-  command_id: string;
-  applied_at: string;
-}
-
 /** Snapshot 场景卡生成记录投影（IK67HB，T13；IK67HE/T14 增 slots）：generation origins/summaries 恢复权威子集。
  *  完整 Preset 参数不进 Snapshot（省体积），编辑器打开时按需 GET 只读端点。
  *  slots 为该记录下全部 job 的输出槽聚合（含重试 job 的新槽），按 slot_index 升序。 */
@@ -179,7 +128,6 @@ export interface SnapshotSceneCardGenerationRecordView {
   scene_card_id: string;
   summary_status: string;
   first_generation_job_id: string;
-  plan_message_id: string;
   output_slots: SnapshotOutputSlotView[];
 }
 
@@ -362,35 +310,11 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         display_name: string;
         snapshot: unknown;
       }> = [];
-      const [messages, planMessageRows, capabilityRows, maxCursorRow, sceneCardRows, applicationRows, recordRows, previewRows] =
+      const [messages, maxCursorRow, sceneCardRows, recordRows, previewRows] =
         await Promise.all([
           prisma.conversation_messages.findMany({
             where: { project_id: pid, is_delete: 0 },
             orderBy: { sequence_no: "asc" },
-          }),
-          prisma.plan_messages.findMany({
-            where: { project_id: pid },
-            orderBy: [{ agent_run_id: "asc" }, { ordinal: "asc" }],
-          }),
-          // 能力漂移检测（T10）：按 model_id+capability_type 建表，与冻结快照比对。
-          // is_delete=true 的行不返回 → key 缺失即视为漂移。
-          prisma.generation_model_capability.findMany({
-            where: { is_delete: false },
-            select: {
-              model_id: true,
-              capability_type: true,
-              version: true,
-              enabled: true,
-              is_delete: true,
-              supported_sizes: true,
-              supported_aspect_ratios: true,
-              supported_durations: true,
-              supported_formats: true,
-              default_size: true,
-              default_format: true,
-              default_aspect_ratio: true,
-              default_duration: true,
-            },
           }),
           // cursor 改雪花后 project_event_stream.high_watermark 不再维护；
           // 当前水位直接取 project_events 的最大 cursor。
@@ -410,20 +334,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
               version: true,
             },
           }),
-          // IK67H9：计划应用回执投影（不可变，按 applied_at 升序）。
-          prisma.plan_application_receipts.findMany({
-            where: { project_id: pid },
-            orderBy: { applied_at: "asc" },
-            select: {
-              id: true,
-              message_id: true,
-              application_kind: true,
-              scene_card_id: true,
-              first_generation_job_id: true,
-              command_id: true,
-              applied_at: true,
-            },
-          }),
           // IK67HB：场景卡生成记录投影（未删除，按 id 升序）。
           prisma.scene_card_generation_records.findMany({
             where: { project_id: pid, is_delete: 0 },
@@ -433,7 +343,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
               scene_card_id: true,
               summary_status: true,
               first_generation_job_id: true,
-              plan_message_id: true,
             },
           }),
           // IK67HF：分镜预览投影（未删除，按 id 升序）。画格经 first_generation_job_id 关联 job 取。
@@ -552,16 +461,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         current.push(projected);
         mentionsByMessage.set(messageId, current);
       }
-      const capabilityByKey = new Map(
-        capabilityRows.map((cap) => [
-          `${cap.model_id}:${cap.capability_type}`,
-          cap,
-        ]),
-      );
-      const mentionById = new Map(
-        mentionRows.map((mention) => [mention.id.toString(), mention]),
-      );
-
       return {
         conversation_messages: messages.map((message) => ({
           message_id: message.id.toString(),
@@ -574,63 +473,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           created_at: message.gmt_create.toISOString(),
           mentions: mentionsByMessage.get(message.id.toString()) ?? [],
         })),
-        plan_messages: planMessageRows.map((plan) => {
-          const derivedReferences = (
-            plan.derived_references ?? []
-          ) as DerivedReference[];
-          const snapshot =
-            plan.capability_snapshot_version as CapabilitySnapshotVersion;
-          const cap = capabilityByKey.get(
-            `${snapshot.model_id}:${snapshot.capability_type}`,
-          );
-          // 事实采集收敛到共用 helper：读路径 missingMention="unavailable" 保留原义——
-          // 遍历冻结引用列表，取不到 mention 即判失效，前端展示「需重新计划」。
-          const { mentionUnavailable, capabilityDrifted } =
-            loadPlanApplicationFacts({
-              derivedReferences,
-              mentionFacts: mentionById,
-              assetById,
-              missingMention: "unavailable",
-              projectId: pid,
-              userId: uid,
-              capabilitySnapshot: snapshot,
-              currentCapability: cap,
-            });
-          // snapshot 不查余额（balanceSufficient null）→ 不会是 retryable_blocked。
-          const availability = classifyPlanApplicationAvailability({
-            mentionUnavailable,
-            capabilityDrifted,
-            balanceSufficient: null,
-          });
-          return {
-            message_id: plan.message_id.toString(),
-            conversation_id: plan.conversation_id.toString(),
-            agent_run_id: plan.agent_run_id.toString(),
-            ordinal: plan.ordinal,
-            total_in_batch: plan.total_in_batch,
-            sequence_label: plan.sequence_label,
-            application_kind: plan.application_kind,
-            target_scene_card_mention_id:
-              plan.target_scene_card_mention_id?.toString() ?? null,
-            base_scene_card_version: plan.base_scene_card_version,
-            content_markdown: plan.content_markdown,
-            derived_references: plan.derived_references,
-            frozen_generation_parameters: plan.frozen_generation_parameters,
-            capability_snapshot_version: plan.capability_snapshot_version,
-            provider_prompt_projection: plan.provider_prompt_projection,
-            base_plan_message_id: plan.base_plan_message_id?.toString() ?? null,
-            source_plan_message_id:
-              plan.source_plan_message_id?.toString() ?? null,
-            applied_at: plan.applied_at?.toISOString() ?? null,
-            first_generation_job_id:
-              plan.first_generation_job_id?.toString() ?? null,
-            application_availability:
-              availability === "requires_new_plan"
-                ? "requires_new_plan"
-                : "available",
-            created_at: plan.gmt_create.toISOString(),
-          };
-        }),
         scene_cards: sceneCardRows.map((card) => ({
           scene_card_id: card.id.toString(),
           title: card.title,
@@ -638,21 +480,11 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           content_markdown: card.content_markdown,
           version: card.version,
         })),
-        plan_applications: applicationRows.map((receipt) => ({
-          receipt_id: receipt.id.toString(),
-          message_id: receipt.message_id.toString(),
-          application_kind: receipt.application_kind,
-          scene_card_id: receipt.scene_card_id?.toString() ?? null,
-          first_generation_job_id: receipt.first_generation_job_id.toString(),
-          command_id: receipt.command_id,
-          applied_at: receipt.applied_at.toISOString(),
-        })),
         scene_card_generation_records: recordRows.map((record) => ({
           record_id: record.id.toString(),
           scene_card_id: record.scene_card_id.toString(),
           summary_status: record.summary_status,
           first_generation_job_id: record.first_generation_job_id.toString(),
-          plan_message_id: record.plan_message_id.toString(),
           output_slots: slotsByRecord.get(record.id.toString()) ?? [],
         })),
         storyboard_previews: previewRows.map((preview) => ({

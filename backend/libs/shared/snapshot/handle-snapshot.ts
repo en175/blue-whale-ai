@@ -62,9 +62,7 @@ export interface SnapshotData {
     version: number | null;
   };
   conversation_messages: readonly unknown[];
-  plan_messages: readonly unknown[];
   scene_cards: readonly unknown[];
-  plan_applications: readonly unknown[];
   scene_card_generation_records: readonly unknown[];
   storyboard_previews: readonly unknown[];
   generation_jobs: SnapshotGenerationJob[];
@@ -161,37 +159,9 @@ export async function handleGetSnapshot(
         })),
       }),
     ),
-    plan_messages: conversation.plan_messages.map((plan) => ({
-      ...plan,
-      message_id: wireInteger(plan.message_id),
-      conversation_id: wireInteger(plan.conversation_id),
-      agent_run_id: wireInteger(plan.agent_run_id),
-      target_scene_card_mention_id:
-        plan.target_scene_card_mention_id === null
-          ? null
-          : wireInteger(plan.target_scene_card_mention_id),
-      base_plan_message_id:
-        plan.base_plan_message_id === null
-          ? null
-          : wireInteger(plan.base_plan_message_id),
-      source_plan_message_id:
-        plan.source_plan_message_id === null
-          ? null
-          : wireInteger(plan.source_plan_message_id),
-    })),
     scene_cards: conversation.scene_cards.map((card) => ({
       ...card,
       scene_card_id: wireInteger(card.scene_card_id),
-    })),
-    plan_applications: conversation.plan_applications.map((receipt) => ({
-      ...receipt,
-      receipt_id: wireInteger(receipt.receipt_id),
-      message_id: wireInteger(receipt.message_id),
-      scene_card_id:
-        receipt.scene_card_id === null
-          ? null
-          : wireInteger(receipt.scene_card_id),
-      first_generation_job_id: wireInteger(receipt.first_generation_job_id),
     })),
     scene_card_generation_records:
       conversation.scene_card_generation_records.map((record) => ({
@@ -199,7 +169,6 @@ export async function handleGetSnapshot(
         record_id: wireInteger(record.record_id),
         scene_card_id: wireInteger(record.scene_card_id),
         first_generation_job_id: wireInteger(record.first_generation_job_id),
-        plan_message_id: wireInteger(record.plan_message_id),
       })),
     storyboard_previews: conversation.storyboard_previews.map((preview) => ({
       ...preview,

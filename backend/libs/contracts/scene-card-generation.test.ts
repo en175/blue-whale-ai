@@ -283,7 +283,6 @@ describe("SceneCardGenerationRecordView contract", () => {
       scene_card_id: "5001",
       summary_status: "generating",
       first_generation_job_id: "9001",
-      plan_message_id: "1001",
     });
     expect(view.summary_status).toBe("generating");
   });
@@ -295,18 +294,19 @@ describe("SceneCardGenerationRecordView contract", () => {
         scene_card_id: "5001",
         summary_status: "pending",
         first_generation_job_id: "9001",
-        plan_message_id: "1001",
       }),
     ).toThrow();
   });
 
-  it("拒绝缺 plan_message_id", () => {
+  // 计划通道退役后 plan_message_id 不再是投影字段，多余键被 strict() 拒绝。
+  it("拒绝多余的 plan_message_id（已随计划通道退役）", () => {
     expect(() =>
       sceneCardGenerationRecordViewSchema.parse({
         record_id: "8001",
         scene_card_id: "5001",
         summary_status: "success",
         first_generation_job_id: "9001",
+        plan_message_id: "1001",
       }),
     ).toThrow();
   });

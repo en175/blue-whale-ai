@@ -162,7 +162,9 @@ export function sanitizeEvidenceText(text) {
 // ============================== factDigest（纯函数） ==============================
 // 字段选取对齐 snapshot-recovery-blackbox.test.mjs:388-419：跨重启比较的最小稳定身份集合。
 
-/** 产品事实摘要：跨重启比较的最小稳定身份集合（不含瞬时字段）。 */
+/** 产品事实摘要：跨重启比较的最小稳定身份集合（不含瞬时字段）。
+ *  原 `plans` / `receipts` 两个维度随计划通道退役（`plan_messages` / `plan_application_receipts`
+ *  已删表、快照不再投影）——留着只会是恒空维度，比对失去意义，故一并去掉。 */
 export function computeFactDigest(snapshot) {
   const canvasNodes = snapshot?.canvas?.nodes
     ? JSON.parse(snapshot.canvas.nodes)
@@ -170,15 +172,6 @@ export function computeFactDigest(snapshot) {
   return {
     messages: (snapshot?.conversation_messages ?? [])
       .map((m) => `${m.message_id}:${m.role}:${m.sequence_no}`)
-      .sort(),
-    plans: (snapshot?.plan_messages ?? [])
-      .map(
-        (p) =>
-          `${p.message_id}:${p.application_kind}:${p.applied_at ?? "unapplied"}`,
-      )
-      .sort(),
-    receipts: (snapshot?.plan_applications ?? [])
-      .map((r) => `${r.receipt_id}:${r.application_kind}:${r.command_id}`)
       .sort(),
     sceneCards: (snapshot?.scene_cards ?? [])
       .map((c) => `${c.scene_card_id}:${c.version}`)
@@ -200,8 +193,6 @@ export function diffFactDigests(expected, actual) {
   const problems = [];
   const fields = [
     "messages",
-    "plans",
-    "receipts",
     "sceneCards",
     "records",
     "jobs",

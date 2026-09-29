@@ -145,15 +145,14 @@ export const sceneCardRegenerationRequestSchema = z
 /** SceneCardGenerationRecord 的 Snapshot 投影（CONTEXT L82-88 / spec）：恢复权威的 generation origins/
  *  summaries 子集。完整 Preset 参数不进 Snapshot（省体积），编辑器打开时按需 GET 只读端点。
  *  - record_id：记录身份；
- *  - first_generation_job_id：该记录首个 GenerationJob（首次应用或本次再生成）；
- *  - plan_message_id：来源 PlanMessage（重试不创建新 Receipt，来源始终指向首次应用的 PlanMessage）。 */
+ *  - first_generation_job_id：该记录首个 GenerationJob（首次应用或本次再生成）。
+ *  plan_message_id 随计划通道退役（来源表已 DROP），不再投影。 */
 export const sceneCardGenerationRecordViewSchema = z
   .object({
     record_id: decimalIdSchema,
     scene_card_id: decimalIdSchema,
     summary_status: sceneCardGenerationRecordStatusSchema,
     first_generation_job_id: decimalIdSchema,
-    plan_message_id: decimalIdSchema,
   })
   .strict();
 
