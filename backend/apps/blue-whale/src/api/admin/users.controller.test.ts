@@ -1,22 +1,39 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AdminException } from "@lib/shared/errors/admin-error.js";
+// 只替换网络函数，两个错误类用真实现——「billing 没配 / billing 挂了各回什么状态码」
+// 是这条端点对外契约的一部分，换成假的等于把这条断言删掉（与 consumption-records.controller.test 同款）。
+const { grantCredits } = vi.hoisted(() => ({ grantCredits: vi.fn() }));
+
+vi.mock("@lib/shared/billing/billing-admin-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@lib/shared/billing/billing-admin-client.js")>();
+  return { ...actual, grantCredits };
+});
+
+import {
+  BillingAdminConfigError,
+  BillingAdminError,
+} from "@lib/shared/billing/billing-admin-client.js";
 import { AdminUsersController } from "./users.controller.js";
 
 // 冻结强制登出：freeze 在本地把 bw_users.status 置为 DISABLED 后 best-effort
 // 踢该用户全部会话，审计 detail 记 revokedSessions；unfreeze 不碰会话。
-// 加扣余额（adjustBalance）属计费域，尚未实现——必须显式报错，不能静默成功。
+// 发放积分（adjustBalance）：调 billing 的发放接口，**不写我们自己的库**；只加不减，
+// 幂等键必填，审计 action 落 `user.adjust_balance`（前端「调整记录」tab 过滤的就是它）
+// 且 detail 带 value。
 
 function createController(overrides: {
   setUserStatus?: ReturnType<typeof vi.fn>;
   revokeAllForUser?: ReturnType<typeof vi.fn>;
   operationLogCreate?: ReturnType<typeof vi.fn>;
+  userExists?: ReturnType<typeof vi.fn>;
 } = {}) {
   const operationLog = { create: overrides.operationLogCreate ?? vi.fn().mockResolvedValue(undefined) };
   const sessions = { revokeAllForUser: overrides.revokeAllForUser ?? vi.fn().mockResolvedValue(0) };
   const identity = {
     listAdminUsers: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     setUserStatus: overrides.setUserStatus ?? vi.fn().mockResolvedValue(true),
+    userExists: overrides.userExists ?? vi.fn().mockResolvedValue(true),
   };
   const controller = new AdminUsersController(
     identity as never,
@@ -36,6 +53,10 @@ const ADMIN_CTX = {
 };
 
 describe("AdminUsersController.manage（冻结强制登出）", () => {
+  beforeEach(() => {
+    grantCredits.mockReset();
+  });
+
   it("freeze：先本地置 DISABLED，再踢该用户全部会话，返回吊销数", async () => {
     const { controller, identity, sessions } = createController({
       revokeAllForUser: vi.fn().mockResolvedValue(3),
@@ -147,17 +168,201 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
   });
 
-  it("adjustBalance：计费域未接入 → 501 明确报错，不静默成功、不动会话", async () => {
+  it("adjustBalance：调 billing 发放（source=gift / bizType=grant），幂等键取 Idempotency-Key 头", async () => {
+    grantCredits.mockResolvedValue({ lotId: "9", duplicated: false, existingBizId: null });
     const { controller, sessions } = createController();
+
+    const result = await controller.manage(
+      ADMIN_CTX.user,
+      ADMIN_CTX.rawUserId,
+      { action: "adjustBalance", reason: "补偿", value: 10 },
+      ADMIN_CTX.authorization,
+      undefined,
+      "key-1",
+    );
+
+    expect(grantCredits).toHaveBeenCalledWith({
+      userId: 42,
+      credits: 10,
+      // ⚠️ 这三个值各有一条理由，别当装饰：source 决定有效期与财报口径（赠送=成本）；
+      //    bizType 是 idx_ledger__biz 的查询键（写 recharge 会让这笔混进充值那堆）；
+      //    bizId 就是幂等键本身。
+      source: "gift",
+      bizType: "grant",
+      bizId: "key-1",
+    });
+    expect(result).toEqual({ success: true, data: { credits: 10, duplicated: false } });
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it("adjustBalance：幂等命中（409）时 credits 为 null、审计不写 value —— 不谎报一次发放", async () => {
+    grantCredits.mockResolvedValue({ lotId: "", duplicated: true, existingBizId: "key-1" });
+    const { controller, operationLog } = createController();
+
     await expect(
       controller.manage(
         ADMIN_CTX.user,
         ADMIN_CTX.rawUserId,
         { action: "adjustBalance", reason: "补偿", value: 10 },
         ADMIN_CTX.authorization,
+        undefined,
+        "key-1",
       ),
-    ).rejects.toBeInstanceOf(AdminException);
-    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+    ).resolves.toEqual({ success: true, data: { credits: null, duplicated: true } });
+
+    // 那一笔是**上一次**发的，而且管理员可能改了数字再重试 —— 把本次请求值写进审计，
+    // 就等于让「调整记录」断言一笔账本里查不到的发放。
+    const detail = JSON.parse(
+      (operationLog.create.mock.calls[0]?.[0] as { detail: string }).detail,
+    ) as Record<string, unknown>;
+    expect(detail).toMatchObject({ duplicated: true });
+    expect(detail).not.toHaveProperty("value");
+  });
+
+  it("adjustBalance：用户不存在 → 404，一笔都不发（billing 没有用户表，没人兜底）", async () => {
+    const { controller } = createController({
+      userExists: vi.fn().mockResolvedValue(false),
+    });
+
+    await expect(
+      controller.manage(
+        ADMIN_CTX.user,
+        ADMIN_CTX.rawUserId,
+        { action: "adjustBalance", reason: "补偿", value: 10 },
+        ADMIN_CTX.authorization,
+        undefined,
+        "key-1",
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(grantCredits).not.toHaveBeenCalled();
+  });
+
+  it("adjustBalance：value 超过安全整数范围 → 400（JS 已经四舍五入过，放过去就是发错数）", async () => {
+    const { controller } = createController();
+
+    for (const value of [1e21, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(
+        controller.manage(
+          ADMIN_CTX.user,
+          ADMIN_CTX.rawUserId,
+          { action: "adjustBalance", reason: "补偿", value },
+          ADMIN_CTX.authorization,
+          undefined,
+          "key-1",
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(grantCredits).not.toHaveBeenCalled();
+  });
+
+  it("adjustBalance：审计 action 落 user.adjust_balance 且 detail 带 value", async () => {
+    grantCredits.mockResolvedValue({ lotId: "9", duplicated: false, existingBizId: null });
+    const { controller, operationLog } = createController();
+
+    await controller.manage(
+      ADMIN_CTX.user,
+      ADMIN_CTX.rawUserId,
+      { action: "adjustBalance", reason: "补偿", value: 10 },
+      ADMIN_CTX.authorization,
+      undefined,
+      "key-1",
+    );
+
+    // 键名与前端 UserManage 的 ACTION_LABELS / adjusts 过滤是一对：落错名字不会报错，
+    // 只会让「调整记录」tab 永远空着。
+    expect(operationLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "user.adjust_balance",
+        target: "user:42",
+        detail: expect.stringContaining('"value":10'),
+      }),
+    );
+  });
+
+  it("adjustBalance：缺 Idempotency-Key → 400，一笔都不发", async () => {
+    const { controller } = createController();
+
+    await expect(
+      controller.manage(
+        ADMIN_CTX.user,
+        ADMIN_CTX.rawUserId,
+        { action: "adjustBalance", reason: "补偿", value: 10 },
+        ADMIN_CTX.authorization,
+        undefined,
+        "   ",
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(grantCredits).not.toHaveBeenCalled();
+  });
+
+  it("adjustBalance：value 须为正整数（0/负数/小数/非数字/缺失全拒），一笔都不发", async () => {
+    const { controller } = createController();
+
+    for (const value of [0, -5, 1.5, "10", undefined, null, Number.NaN]) {
+      await expect(
+        controller.manage(
+          ADMIN_CTX.user,
+          ADMIN_CTX.rawUserId,
+          { action: "adjustBalance", reason: "补偿", value },
+          ADMIN_CTX.authorization,
+          undefined,
+          "key-1",
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(grantCredits).not.toHaveBeenCalled();
+  });
+
+  it("adjustBalance：billing 管理端没配 → 503（重试不会好，要人去改配置）", async () => {
+    grantCredits.mockRejectedValue(new BillingAdminConfigError("缺 BILLING_ADMIN_URL"));
+    const { controller, operationLog } = createController();
+
+    await expect(
+      controller.manage(
+        ADMIN_CTX.user,
+        ADMIN_CTX.rawUserId,
+        { action: "adjustBalance", reason: "补偿", value: 10 },
+        ADMIN_CTX.authorization,
+        undefined,
+        "key-1",
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+    // 没发出去就不能记一笔「发过了」的审计
+    expect(operationLog.create).not.toHaveBeenCalled();
+  });
+
+  it("adjustBalance：billing 调用失败 → 502 且带原因，绝不静默成功", async () => {
+    grantCredits.mockRejectedValue(new BillingAdminError("billing 管理端返回 HTTP 500"));
+    const { controller } = createController();
+
+    await expect(
+      controller.manage(
+        ADMIN_CTX.user,
+        ADMIN_CTX.rawUserId,
+        { action: "adjustBalance", reason: "补偿", value: 10 },
+        ADMIN_CTX.authorization,
+        undefined,
+        "key-1",
+      ),
+    ).rejects.toMatchObject({ status: 502, message: expect.stringContaining("发放积分失败") });
+  });
+
+  it("adjustBalance：网络层失败（连接被拒/超时）也是 502，不是 500", async () => {
+    // 共享客户端的 `send()` 直接 return fetch(...)，网络异常不包装成 BillingAdminError。
+    // 而那恰恰是「billing 挂了」最常见的一种 —— 落成 500 会让值班的人以为是代码问题。
+    grantCredits.mockRejectedValue(new TypeError("fetch failed"));
+    const { controller } = createController();
+
+    await expect(
+      controller.manage(
+        ADMIN_CTX.user,
+        ADMIN_CTX.rawUserId,
+        { action: "adjustBalance", reason: "补偿", value: 10 },
+        ADMIN_CTX.authorization,
+        undefined,
+        "key-1",
+      ),
+    ).rejects.toMatchObject({ status: 502, message: expect.stringContaining("不可达") });
   });
 
   it("userId 非正整数或 reason 缺失 → 400，不调任何写操作", async () => {

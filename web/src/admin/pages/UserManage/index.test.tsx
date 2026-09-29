@@ -86,6 +86,7 @@ beforeEach(() => {
     total: 1,
   });
   adminApi.fetchOperationLogs.mockResolvedValue([]);
+  adminApi.manageAdminUser.mockResolvedValue({ credits: 10, duplicated: false });
 });
 
 afterEach(async () => {
@@ -127,5 +128,142 @@ describe('UserManage 用户 ID 展示', () => {
       (el) => el.textContent === '用户ID',
     );
     expect(idLabel?.parentElement?.parentElement?.textContent).toBe('用户ID42');
+  });
+});
+
+/**
+ * 发放积分：这一组钉的是**钱路径上的两条硬性质**——只加不减、一次意图一把幂等键。
+ * 它们错了都不会报错：前者会让管理员以为加了钱其实没加，后者会在超时重发时发两笔。
+ */
+describe('UserManage 发放积分', () => {
+  async function openGrantModal() {
+    await renderPage();
+    await clickGrantButton();
+  }
+
+  /** 只点按钮，不重新渲染页面 —— 用于「关掉再开」这种同一页内的往返。 */
+  async function clickGrantButton() {
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('button[aria-label="发放积分 Alice"]')?.click();
+    });
+    await settle();
+  }
+
+  async function settle() {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  /** React 受控输入：直接改 `value` 不触发 onChange，得走原生 setter 再派发 input 事件。 */
+  async function fill(placeholder: string, value: string) {
+    const input = [...document.querySelectorAll<HTMLInputElement>('input')].find(
+      (i) => i.placeholder === placeholder,
+    );
+    if (!input) throw new Error(`没有找到输入框：${placeholder}`);
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  function confirmButton(): HTMLButtonElement {
+    const found = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === '确认发放',
+    );
+    if (!found) throw new Error('没有找到「确认发放」按钮');
+    return found;
+  }
+
+  it('发放成功：正整数 + 一次意图一把幂等键', async () => {
+    await openGrantModal();
+    await fill('请输入积分数量', '10');
+    await fill('请输入原因（必填）', '补偿');
+    await act(async () => confirmButton().click());
+
+    expect(adminApi.manageAdminUser).toHaveBeenCalledWith(42, {
+      action: 'adjustBalance',
+      reason: '补偿',
+      value: 10,
+      idempotencyKey: expect.any(String),
+    });
+    const key = adminApi.manageAdminUser.mock.calls[0]?.[1]?.idempotencyKey;
+    expect(typeof key).toBe('string');
+    expect((key as string).length).toBeGreaterThan(0);
+  });
+
+  it('发放失败后重试复用**同一把**幂等键（否则超时重发就是两笔）', async () => {
+    adminApi.manageAdminUser.mockRejectedValueOnce(new Error('network down'));
+    await openGrantModal();
+    await fill('请输入积分数量', '10');
+    await fill('请输入原因（必填）', '补偿');
+
+    await act(async () => confirmButton().click());
+    await settle();
+    await act(async () => confirmButton().click());
+
+    expect(adminApi.manageAdminUser).toHaveBeenCalledTimes(2);
+    const first = adminApi.manageAdminUser.mock.calls[0]?.[1]?.idempotencyKey;
+    const second = adminApi.manageAdminUser.mock.calls[1]?.[1]?.idempotencyKey;
+    expect(first).toBeTruthy();
+    expect(second).toBe(first);
+  });
+
+  it('关掉再开是一次**新意图**：换一把新钥匙（否则第二笔会被当成重试吞掉）', async () => {
+    await openGrantModal();
+    await fill('请输入积分数量', '10');
+    await fill('请输入原因（必填）', '补偿');
+    await act(async () => confirmButton().click());
+
+    // 发放成功后弹窗关闭；同一页内再点一次按钮 = 一次新的意图
+    await clickGrantButton();
+    await fill('请输入积分数量', '20');
+    await fill('请输入原因（必填）', '再发一笔');
+    await act(async () => confirmButton().click());
+
+    expect(adminApi.manageAdminUser).toHaveBeenCalledTimes(2);
+    const first = adminApi.manageAdminUser.mock.calls[0]?.[1]?.idempotencyKey;
+    const second = adminApi.manageAdminUser.mock.calls[1]?.[1]?.idempotencyKey;
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
+
+  it('0 / 负数 / 小数 / 超出安全整数范围都是非法值：按钮禁用，一笔都不提交', async () => {
+    for (const bad of ['0', '-5', '1.5', '1e21']) {
+      // 每一轮都要**换一张干净的页面**：afterEach 只在 it 之间跑，同一个 it 里
+      // 多次 openGrantModal 会叠出多个 root，querySelector 永远命中第一个。
+      if (root) await act(async () => root.unmount());
+      mountNode?.remove();
+      vi.clearAllMocks();
+      adminApi.fetchAdminUsers.mockResolvedValue({
+        list: [
+          {
+            userId: 42,
+            nickname: 'Alice',
+            phone: '',
+            balance: 100,
+            totalRecharge: 0,
+            totalSpend: 0,
+            role: 1,
+            status: 'active',
+            createdAt: '2026-08-01T00:00:00.000Z',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+          },
+        ],
+        total: 1,
+      });
+      adminApi.fetchOperationLogs.mockResolvedValue([]);
+      adminApi.manageAdminUser.mockResolvedValue({ credits: 10, duplicated: false });
+
+      await openGrantModal();
+      await fill('请输入积分数量', bad);
+      await fill('请输入原因（必填）', '补偿');
+
+      expect(confirmButton().disabled).toBe(true);
+      await act(async () => confirmButton().click());
+      expect(adminApi.manageAdminUser).not.toHaveBeenCalled();
+    }
   });
 });

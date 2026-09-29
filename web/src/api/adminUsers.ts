@@ -57,15 +57,45 @@ export function fetchAdminUsers(
 /** 用户管理操作类型 */
 export type UserManageAction = 'freeze' | 'unfreeze' | 'adjustBalance';
 
-/** POST /api/admin/users/:userId/manage 冻结/解冻/调整积分（reason 必填；adjustBalance 时 value 非零，正增负减），服务端自动写审计日志 */
+/** 加积分的结果。`duplicated` = 幂等命中：这笔之前发过了，本次没有重复发放。 */
+export interface AdjustBalanceResult {
+  /** 本次实际发放的整数积分。**幂等命中时为 `null`** —— 那一次什么都没发，
+   *  而「本次请求值」可能已被改过，回它等于谎报一个账本里没有的金额。 */
+  credits: number | null;
+  duplicated: boolean;
+}
+
+/**
+ * POST /api/admin/users/:userId/manage 冻结/解冻/加积分（reason 必填）；服务端自动写审计日志。
+ *
+ * `adjustBalance` 时 `value` 须为**正整数**（本接口只加不减），且**必须带
+ * `idempotencyKey`**：服务端拿它当 billing 发放的幂等键，缺了直接 400。少了它，
+ * 「网络超时 → 管理员再点一次」就是发两笔，而两笔在账本上都合法，事后分不出哪笔是重试。
+ *
+ * 钥匙**一次用户意图一把**（`./idempotencyKey` 的 `newIdempotencyKey`），在该次意图的
+ * 重试路径上复用；不要在请求函数里现造 —— 那样服务端每次拿到的都是新钥匙，等于没有幂等。
+ *
+ * 返回值按 action 分叉：`freeze` → `{ revokedSessions }`，`adjustBalance` →
+ * {@link AdjustBalanceResult}，`unfreeze` → `null`。调用方按自己的 action 取。
+ */
 export function manageAdminUser(
   userId: number,
-  params: { action: UserManageAction; reason: string; value?: number }
+  params: {
+    action: UserManageAction;
+    reason: string;
+    value?: number;
+    idempotencyKey?: string;
+  }
 ) {
-  return apiRequest<null>(`/api/admin/users/${userId}/manage`, {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
+  const { idempotencyKey, ...body } = params;
+  return apiRequest<AdjustBalanceResult | { revokedSessions: number } | null>(
+    `/api/admin/users/${userId}/manage`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
+    }
+  );
 }
 
 // ---------- TanStack Query 工厂 ----------
