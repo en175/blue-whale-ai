@@ -421,14 +421,6 @@ export {
 } from "./result.js";
 export {
   agentRunPinSchema,
-  agentRunPublicProjectionSchema,
-  agentRunStageSchema,
-  agentRunTerminalReasonSchema,
-  agentRunWorkSchema,
-  agentRuntimeManifestSchema,
-  agentProvisionalDeliveryStatusSchema,
-  agentProvisionalInterruptionReasonSchema,
-  agentProviderCallStatusSchema,
   autoCreativeSkillActivationSchema,
   autoCreativeSkillCandidateSchema,
   creativeSkillActivationSchema,
@@ -437,33 +429,24 @@ export {
   runtimeBudgetPolicySchema,
   runtimeResourceSchema,
   toolGrantSchema,
-  assetContextProjectionSchema,
-  sceneCardContextProjectionSchema,
-  mentionInputEntrySchema,
-  mentionInputSnapshotSchema,
   canonicalAgentRunPinDigestInput,
   canonicalizeJsonValue,
   type AgentRunPin,
-  type AgentRunPublicProjection,
-  type AgentRunStage,
-  type AgentRunTerminalReason,
-  type AgentProvisionalDeliveryStatus,
-  type AgentProvisionalInterruptionReason,
-  type AgentProviderCallStatus,
-  type AgentRunWork,
-  type AgentHistoryMessage,
-  type AgentRuntimeManifest,
   type AutoCreativeSkillCandidate,
   type AutoCreativeSkillActivation,
   type CreativeSkillActivation,
   type CreativeSkillResource,
+} from "./agent-runtime.js";
+export {
+  assetContextProjectionSchema,
+  sceneCardContextProjectionSchema,
   type AssetContextProjection,
   type SceneCardContextProjection,
-  type MentionInputEntry,
-  type MentionInputSnapshot,
-  type MentionAvailability,
-  type MentionFailureReason,
-} from "./agent-runtime.js";
+} from "./context-projection.js";
+export type {
+  MentionAvailability,
+  MentionFailureReason,
+} from "./mention.js";
 export {
   derivedReferenceSchema,
   frozenGenerationParametersSchema,
