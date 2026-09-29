@@ -145,7 +145,11 @@ export interface GenerationCommandRepo {
   ): Promise<void>;
 }
 
-const SOURCE_BOTTOM_DOCK = "bottom_dock";
+export const SOURCE_BOTTOM_DOCK = "bottom_dock";
+
+/** 视频任务的 strategy_version（video 分支兜底值）——建任务/重试/成片（IKIZQC
+ *  finalize-repo）三处同源，改视频策略版本只动这一个常量。 */
+export const VIDEO_STRATEGY_VERSION = "seedance-2.0-v1";
 
 
 /** cost_reservations 的行值：只有**重试**会从原 job 的行里原样搬运一次，其余一律兜底。
@@ -235,7 +239,7 @@ export async function createJobWithinTx(
       project_action_identity: input.actionIdentity,
       strategy_version:
         input.type === "video"
-          ? "seedance-2.0-v1"
+          ? VIDEO_STRATEGY_VERSION
           : input.type === "audio"
             ? "audio-sync-v1"
             : "image-sync-v1",
@@ -526,7 +530,7 @@ export function createGenerationCommandRepo(
             strategy_version:
               original.strategy_version ??
               (original.type === "video"
-                ? "seedance-2.0-v1"
+                ? VIDEO_STRATEGY_VERSION
                 : original.type === "audio"
                   ? "audio-sync-v1"
                   : "image-sync-v1"),

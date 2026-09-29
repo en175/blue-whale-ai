@@ -41,6 +41,7 @@ class VideoSampleContractGoldenTest {
         assertThat(VideoSampleContract.FINALIZE_WINDOW_DAYS).isEqualTo(7);
         assertThat(VideoSampleContract.FINALIZE_SAFETY_MARGIN_MS).isEqualTo(3_600_000L);
         assertThat(VideoSampleContract.INPUT_SAMPLE_MODE).isEqualTo("sample_mode");
+        assertThat(VideoSampleContract.VIDEO_FINAL_RESOLUTION).isEqualTo("1080p");
     }
 
     @Test

@@ -189,6 +189,9 @@ export const videoStageJobProjectionSchema = z
     /** 样片的实际转成片截止时间；null = 缺可信上游 created_at（禁用成片，样片仍保留）。 */
     finalize_deadline_at: z.string().nullable(),
     charge_state: chargeStateSchema.nullable(),
+    /** 成功按真实用量结算后的整数积分；结算前 NULL。回填链路（billing 结算 →
+     *  本列）首版未闭合——全仓暂无写入点，由 IKJ8KK 承接闭合；前端对 null 须有
+     *  兜底（只显示 charge_state 阶段文案、无数额）。 */
     actual_credits: z.number().int().nullable(),
   })
   .strict();

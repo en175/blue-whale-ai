@@ -192,6 +192,7 @@ model generation_jobs {
   /// 旧任务与非两阶段任务 NULL。
   charge_state             String?   @db.VarChar(16)
   /// 成功按真实用量结算后的整数积分（billing 结算回填，异步）；结算前 NULL。
+  /// 回填链路首版未闭合（全仓暂无写入点），由 IKJ8KK 承接；前端对 NULL 有兜底。
   actual_credits           Int?
 
   @@index([project_id], map: "idx_project_id")

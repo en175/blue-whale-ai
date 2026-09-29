@@ -13,6 +13,10 @@ public final class VideoSampleContract {
     /** input 快照里的样片标记键（接纳侧在样片分支冻结 {@code sample_mode: true}）。 */
     public static final String INPUT_SAMPLE_MODE = "sample_mode";
 
+    /** 成片分辨率（TS 契约 {@code VIDEO_FINAL_RESOLUTION} 镜像）——finalize 请求体
+     *  显式声明的唯一合法值（网关校验显式分辨率只能取该值）。 */
+    public static final String VIDEO_FINAL_RESOLUTION = "1080p";
+
     /** 官方窗口：Draft ID 自上游 Draft created_at 起 7 天有效（IKIZBQ）。 */
     public static final long FINALIZE_WINDOW_DAYS = 7;
 

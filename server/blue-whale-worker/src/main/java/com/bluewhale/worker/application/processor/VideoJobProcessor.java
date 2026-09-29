@@ -324,10 +324,12 @@ public class VideoJobProcessor implements JobProcessor {
                 // 失败等纯排查文案无状态 cause（httpStatus=null），不受影响、永远保留字样
                 message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
             }
-            // IKJ80P：submit 阶段（providerTaskId 尚未取得）读超时 = 网关可能随后仍完成建单
-            // 扣量，但 task_id 无从取得（new-api 网关无按条件查询已建任务的接口）。重试 submit
-            // 会双扣（MediaKit 家族同款取舍「宁可不重试也不双跑」），故这里落显式失败终态并
-            // 打孤儿标记，供告警与对账清单（SQL 见 ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN）。
+            // IKJ80P 孤儿标记判定——IKIZQD 起不再命中：submit 阶段异常已由
+            // dispatchSubmission 消化（读超时/响应丢失留 checking 锁定，不重提不退款；
+            // 网关拒绝挂 HTTP cause 重抛，不命中 SocketTimeout 判定）；poll 阶段
+            // providerTaskId 必非 null。本布尔因此恒 false，孤儿标记不再新写——键名、
+            // 分支与对账 SQL（ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN）仅为 IKJ80P 时代
+            // 写入的存量历史行保留。
             boolean submitTimeoutOrphan = claim.providerTaskId() == null
                     && hasSocketTimeoutCause(error);
             if (submitTimeoutOrphan) {
@@ -430,6 +432,17 @@ public class VideoJobProcessor implements JobProcessor {
     /**
      * IKIZQD：结果不明留痕（best-effort）——checking 行 + charge_state='held' 是人工核对的
      * 主数据，这里补「为何不明」。日志落库失败不抛：任务仍处锁定，不能因记日志失败改道。
+     *
+     * <p>人工核对入口（契约 §六）：checking 是一等 status，对账清单直接按状态查：
+     * <pre>{@code
+     * SELECT id, user_id, project_id, video_stage, charge_state, provider_task_id, gmt_create
+     * FROM generation_jobs
+     * WHERE type = 'video' AND status = 'checking';
+     * }</pre>
+     * 逐行核对本仓 input、网关任务、上游结果与账单四方后按契约三选一：明确成功恢复原
+     * 任务，明确失败释放该阶段预扣，仍不明保持锁定。核对期间预扣持留、再次提交被
+     * 1014 submission_unknown 拒绝；checking 行不被 claim 候选与恢复扫描选中，不会
+     * 被自动重提。
      */
     private void recordSubmissionUnknown(ClaimedVideoJobDto claim, Exception error) {
         String message = error.getMessage() != null ? error.getMessage()

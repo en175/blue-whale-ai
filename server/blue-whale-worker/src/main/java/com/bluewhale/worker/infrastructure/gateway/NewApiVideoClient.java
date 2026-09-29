@@ -2,6 +2,7 @@ package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.domain.contract.VideoSampleContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -237,7 +238,7 @@ public class NewApiVideoClient {
         String traceId = UUID.randomUUID().toString();
 
         ObjectNode body = JSON.createObjectNode();
-        body.put("resolution", "1080p");
+        body.put("resolution", VideoSampleContract.VIDEO_FINAL_RESOLUTION);
 
         String bodyJson;
         try {

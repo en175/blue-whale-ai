@@ -1,6 +1,10 @@
 import { assertPureJobInput } from "./job-input-purity.js";
 import { withBillingCompensation, type JobBilling } from "./job-billing.js";
-import type { CreatedJob } from "./generation-command-repo.js";
+import {
+  SOURCE_BOTTOM_DOCK,
+  VIDEO_STRATEGY_VERSION,
+  type CreatedJob,
+} from "./generation-command-repo.js";
 import {
   FINALIZE_GENERATION_JOB_OPERATION,
   readCreateIdempotency,
@@ -170,14 +174,14 @@ async function createFinalizeJobWithinTx(
       project_id: BigInt(input.projectId),
       user_id: BigInt(input.userId),
       type: "video",
-      source: "bottom_dock",
+      source: SOURCE_BOTTOM_DOCK,
       status: "queued",
       progress: 0,
       input: input.input as never,
       expected_output_count: 1,
       action_identity: input.actionIdentity,
       project_action_identity: input.actionIdentity,
-      strategy_version: "seedance-2.0-v1",
+      strategy_version: VIDEO_STRATEGY_VERSION,
       execution_deadline_at: deadline,
       next_action_at: now,
       fencing_token: 0,
