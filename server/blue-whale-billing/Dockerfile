@@ -27,7 +27,7 @@ RUN mvn -B -q -s docker-settings.xml -pl blue-whale-billing -am dependency:go-of
 
 COPY blue-whale-common/src blue-whale-common/src
 COPY blue-whale-billing/src blue-whale-billing/src
-RUN mvn -B -q -s docker-settings.xml -pl blue-whale-billing -am -DskipTests package
+RUN mvn -B -q -s docker-settings.xml -pl blue-whale-billing -am -Dmaven.test.skip=true package
 
 # ---------- 阶段2：运行时 ----------
 FROM eclipse-temurin:21-jre
