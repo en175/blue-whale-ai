@@ -2,7 +2,7 @@
  * 管理端 API：充值记录（`GET /api/admin/recharge-records`）
  *
  * 数据源是我们自己的 `recharge_orders`（本地表），所以是 **offset 分页 + 有总数**。
- * 与消费记录（读 billing 账本、游标分页、无总数）形状不同，但两者用同一个
+ * 与积分记录（读 billing 账本、游标分页、无总数）形状不同，但两者用同一个
  * `Pagination` 组件，翻页观感一致。
  * ============================================ */
 import { queryOptions } from '@tanstack/react-query';

@@ -1,5 +1,5 @@
 /* ============================================
- * 管理端 API：消费记录（`GET /api/admin/consumption-records`）
+ * 管理端 API：积分记录（`GET /api/admin/consumption-records`）
  *
  * ⚠️ 数据源是 **billing 的账本**（经 backend 的 BFF 转出），不是我们的库：
  *    钱只从 billing 的复式账本进出，本地任何一张表都只是它的投影。

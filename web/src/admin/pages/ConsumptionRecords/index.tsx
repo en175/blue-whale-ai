@@ -1,5 +1,5 @@
 /* ============================================
- * ConsumptionRecords 消费记录：全站积分流水（读 billing 账本）
+ * ConsumptionRecords 积分记录：全站积分流水（读 billing 账本）
  * 数据源 GET /api/admin/consumption-records（BFF → billing 的 /admin/transactions）
  *
  * 骨架（筛选状态机 / 三态 / 分页接线）在 `../../components/AdminQueryTable`；
@@ -177,7 +177,7 @@ export default function ConsumptionRecords() {
     <AdminQueryTable
       title={
         <>
-          消费记录{' '}
+          积分记录{' '}
           <Hint title="为什么有的行写着「预扣」">
             {/* ⚠️ 每个 div 的文字写成**一整行**：JSX 把源码里的换行折成一个空格，
                 中文句子中途换行会在面板里留下一个「预扣额， 发放」那样的空档。 */}
@@ -195,8 +195,8 @@ export default function ConsumptionRecords() {
       hasFilters={filters.hasApplied}
       filteredEmptyMessage="没有匹配的流水"
       emptyMessage="暂无流水"
-      errorMessage="获取消费记录失败"
-      tableErrorMessage="消费记录加载失败"
+      errorMessage="获取积分记录失败"
+      tableErrorMessage="积分记录加载失败"
       columns={columns}
       rows={rows}
       rowKey={(row) => row.id}

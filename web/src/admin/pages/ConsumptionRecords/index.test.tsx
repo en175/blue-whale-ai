@@ -102,7 +102,7 @@ afterEach(async () => {
   mountNode?.remove();
 });
 
-describe('ConsumptionRecords 消费记录（游标分页）', () => {
+describe('ConsumptionRecords 积分记录（游标分页）', () => {
   it('首次加载不带游标，且因为是全站视图所以 userId 一个也不传', async () => {
     await renderPage();
 
