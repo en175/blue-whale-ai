@@ -148,7 +148,6 @@ export interface RechargeOrderView {
   productName: string;
   status: RechargeOrderStatus;
   paidAt: string | null;
-  grantLotId: string | null;
   notifyCount: number;
   createdAt: string;
   /**
@@ -384,7 +383,6 @@ export interface RechargeOrderRepo {
    */
   markPaid(input: {
     tradeNo: string;
-    grantLotId?: string;
     creditsExpireAt?: Date;
     /**
      * 首购判定结果（`first` / `repeat`）；不传 = 这一单没有首购这回事，保持 `unknown`。
@@ -441,7 +439,6 @@ function toView(row: any): RechargeOrderView {
     productName: row.product_name,
     status,
     paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
-    grantLotId: row.grant_lot_id === null ? null : row.grant_lot_id.toString(),
     notifyCount: row.notify_count,
     createdAt: new Date(row.gmt_create).toISOString(),
     // 存量行没有这一列（本列上线前建的）→ null，不是 0：0 个月是个「立即过期」的承诺，
@@ -660,15 +657,12 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
       return r.count > 0;
     },
 
-    async markPaid({ tradeNo, grantLotId, creditsExpireAt, firstPurchaseState }) {
+    async markPaid({ tradeNo, creditsExpireAt, firstPurchaseState }) {
       const r = await prisma.recharge_orders.updateMany({
         where: { trade_no: tradeNo, status: { not: RECHARGE_ORDER_STATUS.paid } },
         data: {
           status: RECHARGE_ORDER_STATUS.paid,
           paid_at: new Date(),
-          // 只有真拿到批次 id 时才写：幂等命中（409）那条路径拿不到它，
-          // 写 null 会把早先那次成功留下的批次号抹掉
-          ...(grantLotId ? { grant_lot_id: BigInt(grantLotId) } : {}),
           // 到期时刻：与刚发给 billing 的那个值是**同一个**（调用方算一次、传两处），
           // 订单快照记的才是「真实发出去的那批积分什么时候到期」
           ...(creditsExpireAt ? { credits_expire_at: creditsExpireAt } : {}),

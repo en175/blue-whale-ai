@@ -24,7 +24,6 @@ const ROW = {
   bonus_credits: 1000n,
   first_purchase_eligible: 1,
   first_purchase_state: "first",
-  grant_lot_id: 12n,
   notify_count: 2,
   gmt_create: new Date("2026-09-25T00:00:00Z"),
 };
@@ -51,7 +50,6 @@ function snapshotRow(overrides: Record<string, unknown> = {}) {
     credits_per_yuan: 15,
     status: "pending",
     paid_at: null,
-    grant_lot_id: null,
     notify_count: 0,
     gmt_create: new Date("2026-09-26T00:00:00Z"),
     ...overrides,
@@ -114,7 +112,6 @@ describe("createRechargeOrderRepo.list", () => {
       productName: "轻量尝鲜",
       status: "paid",
       paidAt: "2026-09-25T00:05:00.000Z",
-      grantLotId: "12",
       notifyCount: 2,
       createdAt: "2026-09-25T00:00:00.000Z",
       // 钱到的时刻（不是 paid_at）：主动对账靠它算「持有分钟数」
@@ -247,19 +244,18 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
     });
   });
 
-  it("★ markPaid 把**真实发给 billing 的**到期时刻写进快照（与批次同一处落地）", async () => {
+  it("★ markPaid 把**真实发给 billing 的**到期时刻写进快照（与发放同一处落地）", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const repo = createRechargeOrderRepo({ recharge_orders: { updateMany } } as never);
     const expiresAt = new Date("2028-09-27T10:00:00.000Z");
 
-    await repo.markPaid({ tradeNo: "RC20260926001", grantLotId: "42", creditsExpireAt: expiresAt });
+    await repo.markPaid({ tradeNo: "RC20260926001", creditsExpireAt: expiresAt });
 
     expect(updateMany).toHaveBeenCalledWith({
       where: { trade_no: "RC20260926001", status: { not: "paid" } },
       data: {
         status: "paid",
         paid_at: expect.any(Date),
-        grant_lot_id: 42n,
         // 这一列记的必须是「真实发出去那批积分什么时候到期」，而不是下单时估的另一个数
         credits_expire_at: expiresAt,
         gmt_modified: expect.any(Date),

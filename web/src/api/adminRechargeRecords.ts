@@ -65,8 +65,6 @@ export interface AdminRechargeRecord {
   creditsPerYuan: number;
   status: AdminRechargeStatus;
   paidAt: string | null;
-  /** billing 的发放批次 id；未到账为 null */
-  grantLotId: string | null;
   /** 网关回调到达次数（只做可观测，不参与到账判定） */
   notifyCount: number;
   createdAt: string;
