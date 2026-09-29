@@ -24,6 +24,14 @@
 # 随后 buf generate 会因找不到 buf.yaml 失败。
 !contracts/
 !contracts/**
+# 后端 Java 镜像（server/blue-whale-{worker,billing}/Dockerfile）的构建上下文也是仓库根：
+# 模块在 server/ 下、契约 proto 在 contracts/ 下，两者是**兄弟目录** —— blue-whale-common 的
+# protobuf-maven-plugin 按 ${basedir}/../../contracts/proto 取源，必须同时在上下文里，
+# 否则 com.bluewhale.contracts.* 生成不出来，billing 主源码直接编译失败（实测：testCompile 与
+# compile 两处 package does not exist）。下面 **/target 会把 server/*/target 挡在外面，
+# 上下文只多带源码（约 20M）。
+!server/
+!server/**
 # IK7ERQ：builder 阶段 pnpm test:ci 需跨端契约的 JSON Schema 与夹具进 build context。
 # 只放行 docs/specs 下的 .json（schema）与 fixtures 子树（约 104K），散文 .md 仍排除。
 !docs/
@@ -35,3 +43,7 @@
 **/.next
 **/dist
 **/*.tsbuildinfo
+# Maven 构建产物不进上下文（多阶段构建镜像内自编译）：server/*/target 最大可达数十 MB，
+# 且陈旧 jar 一旦进上下文会被 COPY 层吃进去。与 server/.dockerignore 的 target/ 同义，
+# 只是镜像上下文抬到仓库根后，那条不再生效（Docker 只认上下文根的那一份）。
+**/target
