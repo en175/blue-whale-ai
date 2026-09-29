@@ -142,8 +142,10 @@ cd backend && PORT=3100 \
 
 - **不配不影响视频/图片生成**：任务落库后 enqueue 会打一条 WARN（「未经 MQ 派发（未配置
   ROCKETMQ_ENDPOINTS），将由 worker 恢复扫描捞起消费」）——job 行已提交，worker-java
-  `RecoveryService` 的恢复扫描会把它捞起派发，只慢一个恢复周期。**这不是故障**，排查时
-  别被这条日志引向 RocketMQ（IKJ6DK 的教训）；2026-09-29 起它已从 ERROR 降为 WARN。
+  `RecoveryService` 的恢复扫描会把它捞起派发，只慢一个恢复周期——**前提是有 worker-java
+  进程连着同一个库在跑**（本技能的启动步骤不含 worker-java；纯本地不起它时任务停在
+  queued 无人消费）。**这不是故障**，排查时别被这条日志引向 RocketMQ（IKJ6DK 的教训）；
+  2026-09-29 起它已从 ERROR 降为 WARN。
 - **要跑音频生成必须配**：audio / media-extract 任务 enqueue 失败是 fail-fast（任务直接置
   failed，用户可见失败），本地验音频路径得给一个可达的 MQ。
 - **想走真实 MQ 即时派发**：本地 `bw-rmq-proxy` 起着的话给
