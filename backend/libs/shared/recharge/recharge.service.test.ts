@@ -353,7 +353,8 @@ describe("RechargeService — 回调到账", () => {
     expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
     const order = orders.get(created.tradeNo);
     expect(order?.status).toBe("paid");
-    expect(order?.grant_lot_id).toBe(42n);
+    // 批次号**不再落本地**（本列已退役）：权威在 billing，按 `biz_id = 订单号` 反查得到。
+    // 发放本身是否发生由上一条 `http.granted` 断言。
     expect(order?.paid_at).toBeInstanceOf(Date);
     // 顺序本身要钉住：只看最终值是 paid 的话，「先写 paid、事后补一次 paid_pending」也是绿的。
     // 发放失败时订单必须**看得见**地停在 paid_pending，这个顺序就是那个保证。

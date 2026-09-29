@@ -308,7 +308,16 @@ export interface GrantCreditsInput {
 }
 
 export interface GrantCreditsResult {
-  /** billing 批次 id（本地订单留一份用于对账）；幂等命中时为空串 */
+  /**
+   * billing 批次 id；幂等命中时为空串。
+   *
+   * <p>⚠️ 回带它只是如实描述 billing 的响应 —— **本地不再留副本**：订单表过去存它的那一列
+   * 已退役（见迁移 056）。要反查某单进了哪个批次，用 billing 的
+   * `grant_key = 'purchased:<订单号>'`（有唯一索引；别用没索引、且会同时命中赠送那批的
+   * `biz_id`）。
+   * 要反查某单进了哪个批次，用 billing 的 `grant_key = 'purchased:<订单号>'`
+   * （有唯一索引；别用没索引且会同时命中赠送那批的 `biz_id`）。
+   */
   lotId: string;
   /** 幂等命中：这笔之前已经发过了（409），本次没有重复发放 */
   duplicated: boolean;

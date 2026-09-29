@@ -47,7 +47,6 @@ const ROWS = [
   creditsPerYuan: 15,
   status,
   paidAt: null,
-  grantLotId: null,
   notifyCount: 0,
   createdAt: '2026-09-27T10:00:00+08:00',
   // 首购加赠那一列：默认**这单没有赠送**（不参与 / 没配额度）。

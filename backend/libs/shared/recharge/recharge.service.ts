@@ -873,7 +873,10 @@ export class RechargeService {
         ? null
         : creditsExpireAt(paidAt, settled.creditsValidMonths);
 
-    const { lotId, duplicated } = await grantCredits({
+    // ⚠️ 只取 `duplicated`：`grantCredits` 回带的 `lotId` 我们**不再落本地**。
+    //    批次的权威在 billing，按 `biz_id = 订单号` 就能反查到这一单发了哪几批；
+    //    订单表存一份是副本（ADR-0114：每个服务只认自己库里的数据）。
+    const { duplicated } = await grantCredits({
       userId: Number(order.userId),
       credits: order.credits,
       // 幂等键用我们自己的交易单号：它先于调用存在，且事后能回答「这积分是从哪来的」
@@ -894,7 +897,6 @@ export class RechargeService {
 
     const updated = await this.repo.markPaid({
       tradeNo: order.tradeNo,
-      ...(lotId ? { grantLotId: lotId } : {}),
       // 与发给 billing 的**同一个值**：订单快照记的必须是真实发出去那批积分的到期时刻，
       // 而不是下单时估的另一个数（那两个数必然差一截，快照就成了一句假话）
       ...(expiresAt ? { creditsExpireAt: expiresAt } : {}),

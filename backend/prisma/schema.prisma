@@ -706,7 +706,6 @@ model recharge_orders {
   config_version          Int       @default(0)
 
   paid_at          DateTime? @db.DateTime(0)
-  grant_lot_id     BigInt?
   /// **首次**进入 paid_pending（钱到了、积分还没发）的时刻；主动对账据此算持有分钟数。
   /// ⚠️ 不能用 gmt_modified 顶替（回调到达与查单名额都会改它）。
   /// NULL = 本列上线前进入该状态的存量单

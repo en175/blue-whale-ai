@@ -138,7 +138,6 @@ export function makePrisma() {
           status: "pending",
           paid_at: null,
           paid_pending_at: null,
-          grant_lot_id: null,
           last_query_at: null,
           notify_count: 0,
           is_delete: 0,
