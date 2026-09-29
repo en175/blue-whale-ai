@@ -208,3 +208,107 @@ describe("★ 计费契约对账：MQ topic", () => {
     expect(workerDefaultTopics()).toEqual(EXPECTED);
   });
 });
+
+/* ── 4. 错误码：Java 码表 ↔ TS 反解常量 ↔ proto 失败语义注释 ─────────────── */
+
+/**
+ * Java 侧的**唯一**码表（`BillingErrorTaxonomy.Code` 枚举）。
+ *
+ * 三处传输层（用户面 gRPC / 管理面 gRPC / 管理面 HTTP）此前各持一份同名字面量，
+ * 靠注释写着「改一处等于三处」—— 没有任何机制守。现在只有这一份。
+ *
+ * 同时取出每个码配的 gRPC status：调用方是按 **(状态, 原因词) 一起判**的，
+ * 只对原因词那一半对账，状态漂了不会有任何东西红。
+ */
+const JAVA_ERROR_CODE_ROWS = (() => {
+  const src = stripComments(read(`${JAVA_BILLING}adapter/inbound/BillingErrorTaxonomy.java`));
+  const body = src.slice(src.indexOf("public enum Code"));
+  return [...body.matchAll(/^\s*([A-Z][A-Z0-9_]*)\(\s*"([^"]+)"\s*,\s*Status\.Code\.([A-Z_]+)/gm)].map(
+    (m) => ({ name: m[1], wire: m[2], grpc: m[3] }),
+  );
+})();
+
+const JAVA_ERROR_CODES = JAVA_ERROR_CODE_ROWS.map((row) => row.wire).sort();
+
+/**
+ * TS 侧用来**反解** status description 的原因词常量。
+ *
+ * `toBillingHoldError` 拿它们对 `error.rawMessage` 做 `includes` —— 服务端换个措辞，
+ * 这里就静默匹配不上、退化成 502，两边日志都正常。
+ */
+const TS_REASON_WORDS = (() => {
+  const src = read("backend/libs/shared/billing/billing-client.ts");
+  return [...src.matchAll(/const\s+REASON_[A-Z0-9_]+\s*=\s*'([A-Z_]+)'/g)]
+    .map((m) => m[1])
+    .sort();
+})();
+
+describe("★ 计费契约对账：错误码", () => {
+  it("Java 码表就是这六个", () => {
+    // 显式列举而不是「大于 N 条」：**增删一个码都是一次契约变更**，
+    // 应该在这条上红一次、逼人确认（proto 注释、TS 反解、调用方都要跟着看），
+    // 而不是安静地滑过去。
+    expect(JAVA_ERROR_CODES.length, "BillingErrorTaxonomy.Code 没解析出任何一条").toBeGreaterThan(
+      3,
+    );
+    expect(JAVA_ERROR_CODES).toEqual([
+      "DUPLICATE",
+      "INSUFFICIENT_CREDITS",
+      "INTERNAL",
+      "INVALID_ARGUMENT",
+      "NOT_FOUND",
+      "UNPRICEABLE",
+    ]);
+
+    // 常量名与 wire 字面量必须同名：不同名的话「改这个码」要改两处，而常量名那一处
+    // 不在 wire 上 —— 改漏了不会有任何东西红，只会在读代码时让人以为有第二个码。
+    expect(
+      JAVA_ERROR_CODE_ROWS.map((row) => row.name).sort(),
+      "枚举常量名与 wire 字面量不一致",
+    ).toEqual(JAVA_ERROR_CODES);
+  });
+
+  it("★ TS 侧反解用的每个原因词，都在 Java 码表里", () => {
+    // 这条守的正是那个**静默**失败：TS 按字面量反解 status description，
+    // Java 改码或改措辞 → 匹配不上 → 落到 502 `billing_error`，没有任何信号。
+    expect(TS_REASON_WORDS.length, "billing-client.ts 没解析出 REASON_* 常量，正则失效了")
+      .toBeGreaterThan(1);
+
+    for (const word of TS_REASON_WORDS) {
+      expect(JAVA_ERROR_CODES, `TS 反解的原因词 ${word} 不在 Java 码表里`).toContain(word);
+    }
+  });
+
+  it("proto 失败语义注释里的「状态 / 原因词」两半，都与 Java 码表对得上", () => {
+    // proto 是契约本身：它写 `→ <gRPC status> / <原因词>`。
+    // ⚠️ 只取斜杠后那一半是不够的 —— 状态那一半漂了不会有任何东西红，
+    //    而调用方正是按 (状态, 原因词) **一起**判的（见 toBillingHoldError）。
+    const mentioned = [
+      ...read(`${PROTO}billing.proto`).matchAll(/→\s*([A-Z_]+)\s*\/\s*([A-Z_]+)/g),
+    ].map((m) => ({ grpc: m[1], wire: m[2] }));
+    expect(mentioned.length, "proto 里没解析出「→ 状态 / 原因词」，正则失效了").toBeGreaterThan(1);
+
+    for (const { grpc, wire } of mentioned) {
+      const row = JAVA_ERROR_CODE_ROWS.find((r) => r.wire === wire);
+      expect(row, `proto 里点名的 ${wire} 不在 Java 码表里`).toBeDefined();
+      expect(row?.grpc, `${wire}：proto 配的状态与 Java 码表不一致`).toBe(grpc);
+    }
+  });
+
+  it("码表只在 BillingErrorTaxonomy 一处定义：三处传输层不再自持", () => {
+    // 这条是「单一定义点」本身的守卫。没有它，下一份码表会以「就近方便」为由长回来 ——
+    // 而三份同名字面量恰恰是此前那套「改一处、漏两处」的成因。
+    const adapters = [
+      `${JAVA_BILLING}adapter/inbound/grpc/BillingGrpcService.java`,
+      `${JAVA_BILLING}adapter/inbound/grpc/BillingAdminGrpcService.java`,
+      `${JAVA_BILLING}adapter/inbound/http/AdminExceptionHandler.java`,
+    ];
+
+    for (const path of adapters) {
+      expect(
+        stripComments(read(path)),
+        `${path} 又自持了一份错误码表 —— 码只该在 BillingErrorTaxonomy 定义`,
+      ).not.toMatch(/static\s+final\s+String\s+CODE_[A-Z0-9_]+\s*=/);
+    }
+  });
+});

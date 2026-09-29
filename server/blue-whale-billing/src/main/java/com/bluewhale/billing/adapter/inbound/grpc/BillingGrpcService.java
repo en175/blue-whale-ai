@@ -1,16 +1,13 @@
 package com.bluewhale.billing.adapter.inbound.grpc;
 
+import com.bluewhale.billing.adapter.inbound.BillingErrorTaxonomy;
 import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.command.HoldCommand;
 import com.bluewhale.billing.application.command.QuoteQuery;
 import com.bluewhale.billing.application.view.TransactionView;
-import com.bluewhale.billing.application.CatalogCompiler;
 import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.HoldResult;
-import com.bluewhale.billing.domain.ledger.InsufficientCreditsException;
-import com.bluewhale.billing.domain.pricing.BasePriceResolver;
-import com.bluewhale.billing.domain.pricing.PricingEngine;
 import com.bluewhale.billing.domain.pricing.PricingResult;
 import com.bluewhale.billing.domain.pricing.Usage;
 import com.bluewhale.contracts.billing.v1.AppliedDiscount;
@@ -52,10 +49,7 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
 
     private static final DateTimeFormatter RFC3339 = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
-    // ⚠️ 错误码是**契约的一部分**（proto 里逐条列了），调用方按它决定 fail closed 的方式。
-    //    改这些字面量等于改契约，要同步改 proto 注释与调用方。
-    private static final String CODE_INSUFFICIENT_CREDITS = "INSUFFICIENT_CREDITS";
-    private static final String CODE_UNPRICEABLE = "UNPRICEABLE";
+    // 错误码与「异常 → 码」的判定都在 {@link BillingErrorTaxonomy}：三处传输层共用一处定义。
 
     private final BillingApplicationService billing;
 
@@ -272,35 +266,18 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
     /**
      * 异常 → gRPC status。
      *
-     * <p>判断顺序从具体到宽泛：{@link InsufficientCreditsException} 是
-     * {@link RuntimeException} 但不是 {@link IllegalArgumentException}，
-     * 而下面还有个兜 {@code IllegalArgumentException} 的分支——顺序反了就会把
-     * 「余额不足」翻译成「参数错误」，调用方据此 fail open。
+     * <p>判定与码表都在 {@link BillingErrorTaxonomy}（三处传输层共用一处定义），
+     * 本方法只剩「搬成 gRPC 的 {@link Status}」这件事。
      */
     private Status toStatus(RuntimeException e) {
-        if (e instanceof InsufficientCreditsException) {
-            return Status.FAILED_PRECONDITION
-                    .withDescription(CODE_INSUFFICIENT_CREDITS + ": " + e.getMessage());
+        BillingErrorTaxonomy.Failure failure =
+                BillingErrorTaxonomy.classify(e, BillingErrorTaxonomy.Surface.USER);
+        if (failure.internal()) {
+            // ⚠️ 内部错误**不外泄细节**：栈信息可能带库表名、SQL 片段或金额，
+            //    只进日志。调用方拿到统一的一句话，靠 traceId 对回去。
+            log.error("billing RPC 内部错误", e);
         }
-        if (e instanceof PricingEngine.RuleNotFoundException
-                || e instanceof BasePriceResolver.UnpriceableSpecException
-                || e instanceof Usage.ContractQuantityUnavailableException
-                // 请求带来的规则快照编不过（能力行里那条规则坏了）：与「规则漏配」同一立场——
-                // **不能当作免费放行**，要拒绝提交并让运维去修那条规则。
-                // 这是第二道闸门：写侧（backend 保存能力行时）拦的是「脏配置存不进去」，
-                // 这里拦的是「脏配置已经在库里了」。
-                || e instanceof CatalogCompiler.CompileException) {
-            // 计价配置缺失 = 这次提交算不出价。调用方须**拒绝提交**（fail closed），
-            // 不能当作免费放行。对运维是一条明确的「补配置」信号。
-            return Status.INVALID_ARGUMENT
-                    .withDescription(CODE_UNPRICEABLE + ": " + e.getMessage());
-        }
-        if (e instanceof IllegalArgumentException) {
-            return Status.INVALID_ARGUMENT.withDescription(e.getMessage());
-        }
-        // ⚠️ 内部错误**不外泄细节**：栈信息可能带库表名、SQL 片段或金额，
-        //    只进日志。调用方拿到统一的一句话，靠 traceId 对回去。
-        log.error("billing RPC 内部错误", e);
-        return Status.INTERNAL.withDescription("billing 内部错误");
+        return Status.fromCode(failure.code().grpcCode())
+                .withDescription(failure.description());
     }
 }

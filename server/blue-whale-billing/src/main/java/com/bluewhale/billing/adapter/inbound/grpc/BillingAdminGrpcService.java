@@ -1,15 +1,12 @@
 package com.bluewhale.billing.adapter.inbound.grpc;
 
-import com.bluewhale.billing.adapter.inbound.http.AdminNotFoundException;
+import com.bluewhale.billing.adapter.inbound.BillingErrorTaxonomy;
 import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.view.TransactionView;
 import com.bluewhale.billing.application.CatalogCompiler;
 import com.bluewhale.billing.application.CatalogHolder;
 import com.bluewhale.billing.domain.DbTime;
-import com.bluewhale.billing.domain.ledger.InsufficientCreditsException;
-import com.bluewhale.billing.domain.pricing.BasePriceResolver;
-import com.bluewhale.billing.domain.pricing.PricingEngine;
 import com.bluewhale.contracts.billing.v1.AdminConsumedCreditsRequest;
 import com.bluewhale.contracts.billing.v1.AdminConsumedCreditsResponse;
 import com.bluewhale.contracts.billing.v1.AdminExpiringLot;
@@ -26,7 +23,6 @@ import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -70,13 +66,8 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
     /** 与 gRPC 用户面、HTTP 管理面同一口径（RFC3339 带偏移，不用 unix 秒）。 */
     private static final DateTimeFormatter RFC3339 = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
-    // ⚠️ 错误码是**契约的一部分**，与 AdminExceptionHandler 里的常量逐字相同。
-    //    改一处等于三处（proto 注释、HTTP、这里）都要改。
-    private static final String CODE_INSUFFICIENT_CREDITS = "INSUFFICIENT_CREDITS";
-    private static final String CODE_UNPRICEABLE = "UNPRICEABLE";
-    private static final String CODE_DUPLICATE = "DUPLICATE";
-    private static final String CODE_INVALID = "INVALID_ARGUMENT";
-    private static final String CODE_NOT_FOUND = "NOT_FOUND";
+    // 错误码与「异常 → 码」的判定都在 {@link BillingErrorTaxonomy}：三处传输层共用一处定义，
+    // 本类不再自持一份码表（此前那份与 AdminExceptionHandler 的逐字相同、靠人肉同步）。
 
     private final BillingApplicationService billing;
     private final CatalogHolder catalog;
@@ -266,51 +257,23 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
     /**
      * 异常 → gRPC status。
      *
-     * <p>⚠️ 判断顺序从具体到宽泛。{@link InsufficientCreditsException} 是
-     * {@link RuntimeException} 但不是 {@link IllegalArgumentException}；而
-     * {@link AdminNotFoundException} 若继承自 {@code IllegalArgumentException}，
-     * 排到下面就会被翻译成 INVALID_ARGUMENT（400 语义），运营看到的从
-     * 「这条已经不在了，刷新一下」退化成「你填的不对，回去改表单」——
-     * 两句人话要做的事完全相反。
+     * <p>判定与码表都在 {@link BillingErrorTaxonomy}（三处传输层共用一处定义），
+     * 本方法只剩「搬成 gRPC 的 {@link Status}」这件事。分支顺序那条隐性知识也随之收走。
      *
-     * <p>词表与 {@code AdminExceptionHandler} **逐条对齐**（见类注释）。本类当前只实现
-     * 读的那半，但映射写全了：一个有洞的异常映射器比没有更糟 —— 后来的人看到
-     * 「这里映射了异常」就会信任它，直到某天一条写接口把 DUPLICATE 翻成内部错误。
+     * <p>⚠️ 本类的 {@link CatalogCompiler.CompileException} 归 {@code INVALID_ARGUMENT}
+     * （调用方是运营，提交的**就是**那份文档）；用户面归 {@code UNPRICEABLE}
+     * （用户改不了配置，只能换模型）。这个区分是刻意的，现在写在分类器 {@code classify}
+     * 里唯一一处，而不是散在两个文件的注释里。
      */
     private Status toStatus(RuntimeException e) {
-        if (e instanceof InsufficientCreditsException) {
-            return Status.FAILED_PRECONDITION
-                    .withDescription(CODE_INSUFFICIENT_CREDITS + ": " + e.getMessage());
+        BillingErrorTaxonomy.Failure failure =
+                BillingErrorTaxonomy.classify(e, BillingErrorTaxonomy.Surface.ADMIN);
+        if (failure.internal()) {
+            // ⚠️ 内部错误**不外泄细节**：栈信息可能带库表名、SQL 片段或金额，只进日志。
+            //    调用方拿到统一的一句话，靠 traceId 对回去（与用户面同一立场）。
+            log.error("billing 管理端 RPC 内部错误", e);
         }
-        if (e instanceof PricingEngine.RuleNotFoundException
-                || e instanceof BasePriceResolver.UnpriceableSpecException) {
-            // 运行期算不出价：请求本身合法，是规则没覆盖到这个组合。
-            // 对调用方是「这次提交不该继续」，对运维是「去补配置」。
-            return Status.INVALID_ARGUMENT
-                    .withDescription(CODE_UNPRICEABLE + ": " + e.getMessage());
-        }
-        if (e instanceof CatalogCompiler.CompileException) {
-            // 与上面**刻意分开**：那个是「按现有目录算不出价」，这个是「你要发布的这份
-            // 文档本身不成立」。混成一个码，运维无法判断该查目录还是查自己刚提交的文档。
-            return Status.INVALID_ARGUMENT
-                    .withDescription(CODE_INVALID + ": " + e.getMessage());
-        }
-        if (e instanceof AdminNotFoundException) {
-            // ⚠️ 必须排在下面 IllegalArgumentException 之前（见方法注释）
-            return Status.NOT_FOUND
-                    .withDescription(CODE_NOT_FOUND + ": " + e.getMessage());
-        }
-        if (e instanceof DuplicateKeyException) {
-            // 幂等键撞车 = 这次操作之前已经成功过。不是失败，是**已经做过了**。
-            return Status.ALREADY_EXISTS
-                    .withDescription(CODE_DUPLICATE + ": 该幂等键已存在：这次操作之前已经成功过，未重复执行");
-        }
-        if (e instanceof IllegalArgumentException) {
-            return Status.INVALID_ARGUMENT.withDescription(CODE_INVALID + ": " + e.getMessage());
-        }
-        // ⚠️ 内部错误**不外泄细节**：栈信息可能带库表名、SQL 片段或金额，只进日志。
-        //    调用方拿到统一的一句话，靠 traceId 对回去（与用户面同一立场）。
-        log.error("billing 管理端 RPC 内部错误", e);
-        return Status.INTERNAL.withDescription("billing 内部错误");
+        return Status.fromCode(failure.code().grpcCode())
+                .withDescription(failure.description());
     }
 }
