@@ -13,7 +13,7 @@
 import { vi } from "vitest";
 import type { TopupTierPermission } from "@lib/shared/persistence/index.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
-import type { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
+import { stubTierRepo } from "@lib/shared/topup-tier/topup-tier.testlib.js";
 import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
 import { GRANT_RETRY_WINDOW_MS } from "./recharge-grant-sweeper.js";
 import { RechargeService } from "./recharge.service.js";
@@ -355,6 +355,16 @@ export const TIER = {
   createdAt: "2026-09-01T00:00:00.000Z",
   updatedAt: "2026-09-01T00:00:00.000Z",
   /**
+   * 卡片文案三件套（PRD §10.2）：纯展示层字段，服务端不下发也不算，夹具给空串即可。
+   *
+   * <p>但**必须存在** —— 少了它们 `Tier` 就不满足 `TopupTierView`，把本夹具喂进 repo 类型的
+   * 地方会报 TS2322。本仓测试文件默认不进任何 `tsc`（`backend/tsconfig.json` 排除
+   * `*.test.ts` / `*.testlib.ts`），所以这错误只在编辑器里、或显式把测试文件纳入编译时才露出来。
+   */
+  description: "",
+  activityTag: "",
+  buttonText: "",
+  /**
    * 首购加赠（PRD §10.2）：`firstPurchaseEligible` 决定是否参与，`bonusCredits` 是赠送额度。
    *
    * <p>夹具默认**不参与**（`false` / `0`）：既有用例讲的都是本金那条链路，
@@ -391,10 +401,10 @@ export async function makeService(
   // 用 Map 而不是单个变量：下单防重要能造出「换了档位」与「同一档位改了配置」两种情形
   const tiersById = new Map<string, Tier>();
   tiersById.set(TIER.id, { ...TIER });
-  const tiers = {
+  const tiers = stubTierRepo({
     listActive: async () => [...tiersById.values()],
     getById: async (id: string) => tiersById.get(id) ?? null,
-  } as unknown as TopupTierService;
+  });
   const service = new RechargeService(
     { client: prisma } as never,
     tiers,

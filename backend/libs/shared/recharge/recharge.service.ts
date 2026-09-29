@@ -102,6 +102,7 @@ import {
   type RechargeOrderRepo,
   type RechargeOrderStatus,
   type RechargeOrderView,
+  type TopupTierRepo,
 } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { buildCustomOrderPlan } from "@lib/shared/recharge-custom/order-spec.js";
@@ -134,7 +135,7 @@ import {
   displayTierName,
   tierDeniedHint,
 } from "@lib/shared/topup-tier/constants.js";
-import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
+import { TOPUP_TIER_REPO_TOKEN } from "@lib/shared/topup-tier/topup-tier.tokens.js";
 
 /**
  * 网关订单有效期 2 小时（下单不带 `expiredTime` 时网关的默认值）。
@@ -362,7 +363,8 @@ export class RechargeService {
    */
   constructor(
     private readonly prisma: PrismaService,
-    private readonly topupTier: TopupTierService,
+    @Inject(TOPUP_TIER_REPO_TOKEN)
+    private readonly topupTier: TopupTierRepo,
     private readonly settings: SystemSettingsService,
     private readonly custom: RechargeCustomService,
     @Inject(GRANT_RETRY_WINDOW_MS_TOKEN)

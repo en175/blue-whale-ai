@@ -7,8 +7,8 @@ import {
   SYSTEM_SETTINGS_SECRET_ENV,
   SystemSettingsService,
 } from "@lib/shared/system-settings/index.js";
-import type { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
 import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
+import { stubTierRepo } from "@lib/shared/topup-tier/topup-tier.testlib.js";
 import {
   APP_SECRET,
   NOTIFY_URL,
@@ -258,7 +258,7 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     });
     const service = new RechargeService(
       { client: prisma } as never,
-      { listActive: async () => [], getById: async () => null } as unknown as TopupTierService,
+      stubTierRepo({ listActive: async () => [], getById: async () => null }),
       settings,
       new RechargeCustomService({ client: prisma } as never),
       GRANT_RETRY_WINDOW_MS,

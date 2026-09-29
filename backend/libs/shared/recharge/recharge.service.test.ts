@@ -8,8 +8,8 @@ import {
   SYSTEM_SETTINGS_SECRET_ENV,
   SystemSettingsService,
 } from "@lib/shared/system-settings/index.js";
-import type { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
 import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
+import { stubTierRepo } from "@lib/shared/topup-tier/topup-tier.testlib.js";
 import {
   APP_SECRET,
   NOTIFY_URL,
@@ -240,10 +240,10 @@ describe("RechargeService — 下单", () => {
         hccb_notify_url: NOTIFY_URL,
       },
     });
-    const tiers = {
+    const tiers = stubTierRepo({
       listActive: async () => [],
       getById: async () => ({ ...TIER, status: "inactive" as const }),
-    } as unknown as TopupTierService;
+    });
     const service = new RechargeService(
       { client: prisma } as never,
       tiers,
@@ -271,10 +271,10 @@ describe("RechargeService — 下单", () => {
         hccb_notify_url: NOTIFY_URL,
       },
     });
-    const tiers = {
+    const tiers = stubTierRepo({
       listActive: async () => [],
       getById: async () => ({ ...TIER, status: "draft" as const }),
-    } as unknown as TopupTierService;
+    });
     const service = new RechargeService(
       { client: prisma } as never,
       tiers,
@@ -296,10 +296,10 @@ describe("RechargeService — 下单", () => {
     await settings.update({
       credentials: { hccb_mch_no: "M0001", hccb_app_id: "", hccb_app_secret: "", hccb_notify_url: "" },
     });
-    const tiers = {
+    const tiers = stubTierRepo({
       listActive: async () => [TIER],
       getById: async () => TIER,
-    } as unknown as TopupTierService;
+    });
     const service = new RechargeService(
       { client: prisma } as never,
       tiers,

@@ -146,8 +146,6 @@ export interface TopupTierRepo {
   remove(id: string): Promise<boolean>;
   /** 批量更新排序 */
   updateSortOrder(items: { id: string; sortOrder: number }[]): Promise<void>;
-  /** 当前最大 sort_order */
-  maxSortOrder(): Promise<number>;
 }
 
 /* ---------- helpers ---------- */
@@ -400,14 +398,6 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
           }),
         ),
       );
-    },
-
-    async maxSortOrder() {
-      const r = await prisma.topup_tiers.aggregate({
-        where: { is_delete: 0 },
-        _max: { sort_order: true },
-      });
-      return r._max.sort_order ?? 0;
     },
   };
 }

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Param,
   Post,
   Put,
@@ -24,9 +25,10 @@ import {
   parseTierPermission,
   parseTierStatus,
 } from "@lib/shared/topup-tier/constants.js";
-import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
+import { TOPUP_TIER_REPO_TOKEN } from "@lib/shared/topup-tier/topup-tier.tokens.js";
 import type {
   TopupTierPermission,
+  TopupTierRepo,
   TopupTierStatus,
 } from "@lib/shared/persistence/index.js";
 
@@ -140,7 +142,8 @@ function readCardFields(body: Record<string, unknown>): Partial<TierCardFields> 
 @UseGuards(AdminGuard)
 export class AdminTopupTiersController {
   constructor(
-    private readonly topupTier: TopupTierService,
+    @Inject(TOPUP_TIER_REPO_TOKEN)
+    private readonly topupTier: TopupTierRepo,
     private readonly tierAudit: TierAuditService,
   ) {}
 
