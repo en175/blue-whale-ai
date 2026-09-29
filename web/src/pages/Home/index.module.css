@@ -16,6 +16,8 @@
   height: var(--header-height);
   display: flex;
   align-items: center;
+  /* 积分超市 / 积分余额 / 头像 三件套间距固定 24px */
+  gap: 24px;
   z-index: 10;
 }
 

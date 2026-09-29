@@ -3,6 +3,8 @@
  * ============================================ */
 import { useState } from 'react';
 import UserDropdown from '@/components/UserDropdown';
+import CreditsBadge from './components/CreditsBadge';
+import CreditsShopButton from './components/CreditsShopButton';
 import ChatBox from './components/ChatBox';
 import CardGallery from './components/CardGallery';
 import styles from './index.module.css';
@@ -13,8 +15,10 @@ export default function Home() {
 
   return (
     <div className={styles.home}>
-      {/* 右上角用户 - 绝对定位与画布页一致 */}
+      {/* 右上角积分超市 + 积分余额 + 用户 - 绝对定位与画布页一致 */}
       <div className={styles.topBar}>
+        <CreditsShopButton />
+        <CreditsBadge />
         <UserDropdown />
       </div>
 

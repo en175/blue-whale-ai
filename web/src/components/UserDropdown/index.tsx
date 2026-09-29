@@ -7,11 +7,8 @@ import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText,
-  Wallet,
   Settings,
   LogOut,
-  Coins,
-  ChevronDown,
 } from 'lucide-react';
 import styles from './index.module.css';
 import { getCurrentUser, subscribe, isAdmin, setSession } from '@/utils/auth';
@@ -25,7 +22,6 @@ import { USER_DROPDOWN_MENU_ITEMS } from './menuItems';
 
 const menuIcons = {
   account: FileText,
-  recharge: Wallet,
   settings: Settings,
 } as const;
 
@@ -34,7 +30,6 @@ export default function UserDropdown() {
   const [open, setOpen] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
   const showRecharge = useRechargeUiStore((s) => s.open);
-  const openRecharge = useRechargeUiStore((s) => s.openRecharge);
   const closeRecharge = useRechargeUiStore((s) => s.closeRecharge);
   const [showLogin, setShowLogin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -73,6 +68,20 @@ export default function UserDropdown() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // 鼠标移出关闭（宽限 120ms，避免指针移向面板途中误关）
+  const closeTimer = useRef<number | null>(null);
+  const cancelClose = () => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = window.setTimeout(() => setOpen(false), 120);
+  };
+  useEffect(() => cancelClose, []);
+
   // 未登录：展示「登录」按钮，点击弹出登录弹窗
   if (!user) {
     return (
@@ -96,16 +105,18 @@ export default function UserDropdown() {
   };
 
   return (
-    <div className={styles.wrapper} ref={ref}>
-      {/* 触发按钮 */}
-      <button className={styles.trigger} onClick={() => setOpen(!open)}>
+    <div
+      className={styles.wrapper}
+      ref={ref}
+      onMouseEnter={() => {
+        cancelClose();
+        setOpen(true);
+      }}
+      onMouseLeave={scheduleClose}
+    >
+      {/* 触发按钮：仅头像，悬停展开下拉 */}
+      <button className={styles.trigger} aria-label={user.username}>
         <div className={styles.triggerAvatar}>{user.username.charAt(0).toUpperCase()}</div>
-        <span className={styles.triggerName}>{user.username}</span>
-        <ChevronDown
-          size={16}
-          strokeWidth={2}
-          className={`${styles.triggerArrow} ${open ? styles.arrowUp : ''}`}
-        />
       </button>
 
       {/* 下拉面板 */}
@@ -119,19 +130,6 @@ export default function UserDropdown() {
               <span className={styles.userMeta}>ID：{user.userId}</span>
               {user.email && <span className={styles.userMeta}>{user.email}</span>}
             </div>
-          </div>
-
-          {/* 积分余额 */}
-          <div className={styles.pointsRow}>
-            <div className={styles.pointsLeft}>
-              <div className={styles.pointsIcon}>
-                <Coins size={16} strokeWidth={2} />
-              </div>
-              <span className={styles.pointsLabel}>积分余额</span>
-            </div>
-            <span className={styles.pointsValue}>
-              {credits === null ? '--' : credits.toLocaleString()}
-            </span>
           </div>
 
           {/* 分隔线 */}
@@ -150,7 +148,6 @@ export default function UserDropdown() {
                   onClick={() => {
                     setOpen(false);
                     if (item.key === 'account') setShowAccount(true);
-                    if (item.key === 'recharge') openRecharge();
                     if (item.key === 'settings') navigate('/admin');
                   }}
                 >
@@ -187,7 +184,6 @@ export default function UserDropdown() {
           nickname={user.username}
           balance={credits}
           onClose={() => setShowAccount(false)}
-          onOpenRecharge={openRecharge}
         />
       )}
       {/* 积分充值弹窗（用户菜单与生成前余额拦截共用） */}

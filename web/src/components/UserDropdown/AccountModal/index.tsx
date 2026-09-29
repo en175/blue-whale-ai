@@ -1,5 +1,6 @@
 /* ============================================
- * AccountModal 账号信息弹窗：ID/昵称/修改密码/充值与账户记录入口
+ * AccountModal 账号信息弹窗：ID/昵称/修改密码/账户记录入口
+ * 充值入口已统一收到首页顶栏「积分超市」，这里不再给第二入口
  * ============================================ */
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -13,7 +14,6 @@ interface AccountModalProps {
   nickname: string;
   balance: number | null;
   onClose: () => void;
-  onOpenRecharge: () => void;
 }
 
 export default function AccountModal({
@@ -21,7 +21,6 @@ export default function AccountModal({
   nickname,
   balance,
   onClose,
-  onOpenRecharge,
 }: AccountModalProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showRecords, setShowRecords] = useState(false);
@@ -57,16 +56,13 @@ export default function AccountModal({
           </div>
         </div>
 
-        {/* 积分余额 */}
+        {/* 积分余额（充值入口已统一收到首页顶栏「积分超市」） */}
         <div className={`${styles.row} ${styles.rowLast}`}>
           <span className={styles.label}>积分余额</span>
           <div className={styles.rowRight}>
             <span className={styles.balance}>
               {balance === null ? '--' : balance.toLocaleString()}
             </span>
-            <button className={`${styles.link} ${styles.linkBlue}`} onClick={onOpenRecharge}>
-              去充值
-            </button>
             <button className={styles.link} onClick={() => setShowRecords(true)}>
               账户记录
             </button>

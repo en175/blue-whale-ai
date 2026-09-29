@@ -47,7 +47,6 @@ async function renderAccountModal(onClose = vi.fn()) {
         nickname: 'alice',
         balance: 0,
         onClose,
-        onOpenRecharge: vi.fn(),
       }),
     );
   });
