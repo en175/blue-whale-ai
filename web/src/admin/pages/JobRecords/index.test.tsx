@@ -134,4 +134,47 @@ describe('JobRecords 任务记录 · 模型列', () => {
     // 模型列的位置：任务 ID / 用户 ID / 项目 ID / 类型 / 模型
     expect(cells[4]).toBe('—');
   });
+
+  it('★ 首次查询**不带** status / type —— 哨兵漏下去会把列表静默过滤成空', async () => {
+    await renderPage();
+
+    const first = api.fetchAdminJobRecords.mock.calls[0]?.[0] as Record<string, unknown>;
+
+    // ⚠️ 先证明**调用确实发生过**：`calls[0]?.[0]` 在没调用时是 `undefined`，
+    //    而下一条断言对 `undefined` 也是绿的 —— 不先钉这一句，这个闸门就有暗门。
+    expect(api.fetchAdminJobRecords).toHaveBeenCalled();
+
+    // 「全部」由**空值**表达，不是哨兵值。这条是本工单要消灭的那个 bug 的**直接闸门**：
+    // 一旦有人把 `'all'` 写回 EMPTY_FILTERS 而判据没跟着改，请求里就会多出
+    // `status=all` —— 而列表**不报错**，只会静默为空。所以只能从请求参数上钉。
+    expect(first).not.toHaveProperty('status');
+    expect(first).not.toHaveProperty('type');
+  });
+
+  it('★ 有筛选而结果为空时说「没有匹配的任务」—— 判据走**生效条件**，不是草稿', async () => {
+    api.fetchAdminJobRecords.mockResolvedValue({ list: [], total: 0 });
+    await renderPage();
+
+    // 还没筛选：说「暂无任务」
+    expect(document.body.textContent).toContain('暂无任务');
+
+    const input = [...document.querySelectorAll('input')].find(
+      (el) => el.placeholder === '用户 ID',
+    ) as HTMLInputElement;
+    await act(async () => {
+      // React 受控输入：要绕过它自己的 value setter 才会触发 onChange
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setValue?.call(input, '9001');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const search = [...document.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('查询'),
+    );
+    await act(async () => search?.click());
+    for (let i = 0; i < 10; i += 1) await settle();
+
+    // 提交之后才改口径 —— 页面把 `hasFilters` 接到生效条件上，而不是草稿
+    expect(document.body.textContent).toContain('没有匹配的任务');
+  });
 });
