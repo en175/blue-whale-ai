@@ -718,9 +718,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   }, [attachControlListeners]);
 
   /** 开播（IKJ7RS 建；IKJ7S1 分双路）。未选中卡：把离屏解码元素移入内容区播放层，同一元素
-   *  从头、有声开播。选中已布防卡：树内控件视频就地从头开播（原生控件保留，muted/volume
-   *  维持用户控件状态——元素存活期内有效，不做任何记忆）。两路 play() 被浏览器自动播放
-   *  策略拒绝时静默降级静音重试（catch 分支，无任何提示，不做预先探测）。 */
+   *  从头、有声开播。选中已布防卡：树内控件视频就地从头开播（IKI5YM 合并后无原生控件，
+   *  自绘控件承担暂停/进度，muted/volume 维持元素状态——元素存活期内有效，不做任何记忆）。
+   *  两路 play() 被浏览器自动播放策略拒绝时静默降级静音重试（catch 分支，无任何提示，不做预先探测）。 */
   const startHoverPlayback = useCallback(() => {
     const video = videoRef.current;
     if (!video || hoverSessionRef.current) return;

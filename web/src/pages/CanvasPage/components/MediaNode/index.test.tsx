@@ -1596,7 +1596,9 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     await renderNode('video', { data: { src: 'https://x/main.mp4', toolMode: 'select' } });
     await act(async () => { vi.advanceTimersByTime(200); });
     const armed = mountNode.querySelector('video')!;
-    expect(armed.hasAttribute('controls')).toBe(true);
+    // IKI5YM 合并口径：树内视频无原生控件（画面区拖拽前提），自绘控件承担播放控制
+    expect(armed.hasAttribute('controls')).toBe(false);
+    expect(contentCard().querySelector('button[aria-label="播放"]')).toBeTruthy();
     await hoverInto(contentCard());
     await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS - 1); });
     expect(playSpy).not.toHaveBeenCalled();
@@ -1665,11 +1667,13 @@ describe('MediaNode 视频卡选中态悬停播放（IKJ7S1：尾播特权与手
     return mountNode.querySelector('video')!;
   }
 
-  it('选中卡悬停自动开播：树内控件视频就地起播，原生控件与禁画中画/下载/倍速配置保留', async () => {
+  it('选中卡悬停自动开播：树内控件视频就地起播，自绘控件承担播放控制（IKI5YM 合并口径）', async () => {
     const { playSpy, pauseSpy } = stubHoverMedia();
     await renderSelectedArmedVideo();
     const armed = armedVideo();
-    expect(armed.hasAttribute('controls')).toBe(true);
+    // IKI5YM 合并口径：布防卡树内视频无原生控件（画面区拖拽前提），自绘控件承担控制
+    expect(armed.hasAttribute('controls')).toBe(false);
+    expect(contentCard().querySelector('[data-testid="video-seek-track"]')).toBeTruthy();
     await hoverInto(contentCard());
     await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
     // 就地开播：同一元素、不迁移进播放层（布防卡无播放层）、有声从头
@@ -1680,10 +1684,11 @@ describe('MediaNode 视频卡选中态悬停播放（IKJ7S1：尾播特权与手
     expect(armed.muted).toBe(false);
     expect(armed.currentTime).toBe(0);
     expect(armed.loop).toBe(false);
-    // 原生控件与控件配置在播放中保持：controls、禁下载/倍速列表、禁画中画
-    expect(armed.hasAttribute('controls')).toBe(true);
-    expect(armed.outerHTML).toContain('nodownload noplaybackrate');
-    expect(armed.outerHTML).toContain('disablepictureinpicture');
+    // 播放中原生控件不回归（IKI5YM 画面区拖拽前提），自绘控件持续可达；
+    // 下载/倍速/画中画入口随原生控件一并移除（较 controlsList 禁配置更强），
+    // 手动让位/接管仍经元素 pause/play/seeked 事件生效（本 describe 下方用例覆盖）
+    expect(armed.hasAttribute('controls')).toBe(false);
+    expect(contentCard().querySelector('[data-testid="video-seek-track"]')).toBeTruthy();
   });
 
   it('尾播特权：播放中移开不停止，继续播到本轮 ended 定格末帧（不归零、不移出）', async () => {
