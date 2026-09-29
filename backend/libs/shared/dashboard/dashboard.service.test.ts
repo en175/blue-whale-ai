@@ -115,7 +115,7 @@ function makeService(options: {
     : vi.fn().mockResolvedValue(options.rechargeRows ?? []);
   const service = new DashboardService(
     {
-      listAdminUsers: vi.fn().mockResolvedValue({ total: options.totalUsers ?? 7 }),
+      countAdminUsers: vi.fn().mockResolvedValue(options.totalUsers ?? 7),
     } as never,
     {
       client: { generation_jobs: { groupBy }, recharge_orders: { groupBy: rechargeGroupBy } },

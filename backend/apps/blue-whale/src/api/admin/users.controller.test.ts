@@ -27,11 +27,12 @@ function createController(overrides: {
   revokeAllForUser?: ReturnType<typeof vi.fn>;
   operationLogCreate?: ReturnType<typeof vi.fn>;
   userExists?: ReturnType<typeof vi.fn>;
+  listAdminUsers?: ReturnType<typeof vi.fn>;
 } = {}) {
   const operationLog = { create: overrides.operationLogCreate ?? vi.fn().mockResolvedValue(undefined) };
   const sessions = { revokeAllForUser: overrides.revokeAllForUser ?? vi.fn().mockResolvedValue(0) };
   const identity = {
-    listAdminUsers: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    listAdminUsers: overrides.listAdminUsers ?? vi.fn().mockResolvedValue({ items: [], total: 0 }),
     setUserStatus: overrides.setUserStatus ?? vi.fn().mockResolvedValue(true),
     userExists: overrides.userExists ?? vi.fn().mockResolvedValue(true),
   };
@@ -379,5 +380,36 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
     }
     expect(identity.setUserStatus).not.toHaveBeenCalled();
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 列表的余额三列来自 billing（IKJ5M7），于是这条**只读**接口多了一条失败路径 ——
+ * 它此前读的是我们自己的库，不可能失败。
+ *
+ * 两条断言各钉一件事：状态码要能判出「该找谁」（配置错 vs 等服务恢复），
+ * 以及**不能**把它兜成空列表 —— 空列表让人得出「一个用户都没有」，
+ * 兜成三列全 0 则与「这用户真没积分」长得一模一样，那正是这次要消灭的症状。
+ */
+describe("AdminUsersController.list（余额三列来自 billing）", () => {
+  it("billing 管理端没配 → 503（重试不会好，要人去改配置）", async () => {
+    const { controller } = createController({
+      listAdminUsers: vi
+        .fn()
+        .mockRejectedValue(new BillingAdminConfigError("缺 BILLING_ADMIN_URL")),
+    });
+
+    await expect(controller.list(USER, BEARER, {})).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("billing 调用失败 → 502 且带原因，不回落成空列表", async () => {
+    const { controller } = createController({
+      listAdminUsers: vi.fn().mockRejectedValue(new BillingAdminError("服务不可用")),
+    });
+
+    await expect(controller.list(USER, BEARER, {})).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringContaining("用户列表查询失败"),
+    });
   });
 });

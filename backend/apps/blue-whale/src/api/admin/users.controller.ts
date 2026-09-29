@@ -86,8 +86,12 @@ export class AdminUsersController {
     // ★ 查我们自己的库，不再转发 new-api。
     //   原来那条链路有两个问题：new-api 独立后会断；且它要求调用者在 new-api 那边
     //   也是管理员 —— 于是「我们给了 super_admin 却看不到列表」。
-    const result = await this.identity.listAdminUsers(options);
-    return { success: true, data: { list: result.items, total: result.total } };
+    try {
+      const result = await this.identity.listAdminUsers(options);
+      return { success: true, data: { list: result.items, total: result.total } };
+    } catch (error) {
+      throw toUserListError(error);
+    }
   }
 
   @Post(":userId/manage")
@@ -245,9 +249,8 @@ export class AdminUsersController {
         ipAddress: xForwardedFor?.split(",")[0]?.trim() ?? null,
       });
     } catch (error) {
-      // best-effort 审计，失败不阻断 —— 但必须留日志：发积分这一行的审计是管理端
-      // 「钱动过没有」的**唯一**界面证据（用户列表的余额列还没接上，见 IKJ5M7），
-      // 静默吞掉就是钱动了而任何地方都看不到。
+      // best-effort 审计，失败不阻断 —— 但必须留日志：发积分这一行的审计回答的是
+      // 「**谁在什么时候**发的」，那是余额列（无论接没接上）都答不了的。
       this.logger.error(
         `审计写入失败 ${action} user=${userId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -259,4 +262,24 @@ export class AdminUsersController {
     if (granted) return { success: true, data: granted };
     return { success: true, data: null };
   }
+}
+
+/**
+ * billing 的两类失败分开报，各自带一个**可判**的状态码（与积分记录页同一口径）。
+ *
+ * <p>IKJ5M7 之后列表上的余额三列来自 billing，于是这条只读接口多了一条失败路径 ——
+ * 而它此前不可能失败（读的是我们自己的库）。**配不出地址**要人去改配置并重启，
+ * 这一次请求重试也不会好，所以是 503；**调用失败**等 billing 恢复就好，是 502。
+ * 混成一个 500，值班的人只能靠读文案猜该找谁。
+ *
+ * <p>⚠️ 两种情况都**不能**回落成「三列全 0」：那正是这次要消灭的症状 ——
+ * 「计费挂了」与「这个用户真的没积分」在界面上长得一模一样，管理员没法分辨。
+ */
+function toUserListError(error: unknown): AdminException {
+  if (error instanceof AdminException) return error;
+  if (error instanceof BillingAdminConfigError) {
+    return new AdminException(503, `用户列表不可用：${error.message}`);
+  }
+  const detail = error instanceof BillingAdminError ? error.message : "未知错误";
+  return new AdminException(502, `用户列表查询失败：${detail}`);
 }

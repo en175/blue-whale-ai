@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
+import { fetchAdminUserStats } from "@lib/shared/billing/billing-admin-client.js";
 import { roleRank } from "@lib/core/identity/roles.js";
 
 /**
@@ -12,11 +13,16 @@ import { roleRank } from "@lib/core/identity/roles.js";
  * 一个荒唐的状态：`lxq1234` 在我们这有 `super_admin`，却因为 new-api 说它不是管理员
  * 而看不到用户列表。**管理端不该有两个管理员概念。**
  *
- * <h2>余额三列暂时是 0</h2>
+ * <h2>余额三列来自 billing（IKJ5M7 回填）</h2>
  *
- * `balance` / `totalRecharge` / `totalSpend` 属于计费域，而计费侧还没按用户维度接过来。
- * 这里返回 0 而不是从 new-api 借——借过来的数会随 new-api 独立一起消失，
- * 而且会让「已经切干净了」这个判断变得不成立。等计费接上再回填。
+ * `balance` / `totalRecharge` / `totalSpend` 属于计费域，从前这里是硬编码的 0
+ * （注释写着「等计费接上再回填」）。现在接上了：**一页问一次** `AdminQueryUserStats`
+ * （批量接口，不是逐用户调——那才是 N+1），口径逐条写在那条 rpc 的契约注释里。
+ *
+ * ⚠️ **不回落成 0**：billing 不可达时本方法**抛错**，整个用户列表跟着报错。理由见
+ * {@link fetchAdminUserStats} —— 回落成 0 会让「计费挂了」与「这个用户真的没积分」
+ * 在界面上长得**一模一样**，而「三列全是 0」正是这次要消灭的那个症状。
+ * 用户列表是管理端读自己家库、顺手展示计费数据的页面；宁可它报错，也不要它撒谎。
  */
 export interface AdminUserRow {
   userId: number;
@@ -41,13 +47,35 @@ export interface AdminUserListOptions {
 
 export interface AdminUserQuery {
   listAdminUsers(options: AdminUserListOptions): Promise<{ items: AdminUserRow[]; total: number }>;
+  /**
+   * **只数用户总数**，不取列表。
+   *
+   * <p>给不需要行的调用方（仪表盘的「总用户数」）。它原先调 `listAdminUsers` 再读 `total`，
+   * 代价是顺带跑完整个列表查询与角色批量查询 —— IKJ5M7 之后还会多一次**计费调用**，
+   * 于是计费不可达会把「总用户数」一起带走（见 `countAdminUsers` 实现处的注释）。
+   */
+  countAdminUsers(): Promise<number>;
 }
+
+/**
+ * 用户列表的**基线条件**（不含任何筛选）—— 列表与计数共用同一个。
+ *
+ * <p>刻意提出来而不是各写一遍：两处一旦分叉（比如给列表加了新过滤却忘了给计数加），
+ * 仪表盘的「总用户数」与用户列表翻到底的行数就会对不上，而两边看起来都正常。
+ */
+const BASE_WHERE = { is_delete: false } as const;
 
 export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
   return {
+    async countAdminUsers() {
+      // 只查总用户数，**不碰计费** —— 仪表盘只要这一个数，没必要为它拉一页用户、
+      // 也没道理让计费不可达把仪表盘上另外四个数与它一起带走。
+      return prisma.bw_users.count({ where: BASE_WHERE });
+    },
+
     async listAdminUsers({ keyword, status, page = 1, pageSize = 100 }) {
       const where = {
-        is_delete: false,
+        ...BASE_WHERE,
         // status: 1 = 启用（我们库里存 'NORMAL'）；0 = 禁用
         // 本仓开了 exactOptionalPropertyTypes：不能给 ?: 属性传 undefined，只能条件展开
         ...(status === undefined ? {} : { status: status === 1 ? "NORMAL" : "DISABLED" }),
@@ -101,14 +129,19 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
         codesByUser.set(key, [...(codesByUser.get(key) ?? []), code]);
       }
 
+      // 余额三列（IKJ5M7）：属于计费域，**一页一次批量问过来**——逐用户调就是 100 次
+      // 跨进程往返。⚠️ 它抛错就整条列表失败，故意不兜成 0（见文件头那段）。
+      const stats = await fetchAdminUserStats(rows.map((r) => Number(r.id)));
+
       const items: AdminUserRow[] = rows.map((r) => ({
         userId: Number(r.id),
         nickname: r.username,
         phone: r.phone ?? "",
-        // 计费域尚未按用户维度接过来，先给 0；不是从 new-api 借的数
-        balance: 0,
-        totalRecharge: 0,
-        totalSpend: 0,
+        // 三列都来自 billing（同一次批量调用）。取不到只可能是服务端换了实现 ——
+        // 它保证请求里的每个 id 都回一项；真取不到时兜 0 好过让整页炸在渲染上
+        balance: stats.get(Number(r.id))?.availableCredits ?? 0,
+        totalRecharge: stats.get(Number(r.id))?.totalRecharged ?? 0,
+        totalSpend: stats.get(Number(r.id))?.totalConsumed ?? 0,
         role: roleRank(codesByUser.get(r.id.toString()) ?? []),
         status: r.status === "NORMAL" ? "active" : "disabled",
         createdAt: r.gmt_create.toISOString(),
