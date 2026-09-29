@@ -26,7 +26,7 @@ const STATUSES = RECHARGE_ORDER_STATUSES;
  *
  * <p>数据源是**我们自己的** `recharge_orders`（ADR-0114 决策 7：充值已接回，走
  * BlueWhalePay 的杭州银行渠道，不再经由 new-api）。所以这一页读的是本地表、
- * offset 分页、**有总数**——与消费记录那条读 billing 账本的游标分页形状不同。
+ * offset 分页、**有总数**——与积分记录那条读 billing 账本的游标分页形状不同。
  *
  * <p>⚠️ 与用户端的 `/api/recharge/orders/:tradeNo` 不是一回事：那条经
  *    `RechargeService.loadOwnOrder` 强制归属校验（只能查自己的单），

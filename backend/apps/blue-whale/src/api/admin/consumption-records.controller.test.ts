@@ -13,7 +13,7 @@ vi.mock("@lib/shared/billing/billing-admin-client.js", async (importOriginal) =>
 import { BillingAdminConfigError, BillingAdminError } from "@lib/shared/billing/billing-admin-client.js";
 import { AdminConsumptionRecordsController } from "./consumption-records.controller.js";
 
-// 消费记录读的是 billing 的账本（游标分页、无总数）。本测试钉住的是管理面**独有的那条自由度**：
+// 积分记录读的是 billing 的账本（游标分页、无总数）。本测试钉住的是管理面**独有的那条自由度**：
 // userId 可以不传 = 全站流水——用户面的 ListTransactions 里它是必填的。
 
 const controller = new AdminConsumptionRecordsController();

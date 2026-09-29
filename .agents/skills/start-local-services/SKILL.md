@@ -47,7 +47,7 @@ nohup mvn -o -pl blue-whale-billing -am spring-boot:run > /tmp/bw-billing.log 2>
 任何能到达 4003 的人 POST 一次 `/admin/credits/grants` 就能造钱。默认关掉之后，
 本地要跑**充值到账 / 发布目录 / 折扣 / 促销**这些写操作，就得显式打开它；
 不给的话表现为「充值下单 503 / 发放积分失败」，而服务本身一切正常。
-读的那半边不受影响（消费记录、流水现在走 gRPC 的 `BillingAdminService`）。
+读的那半边不受影响（积分记录、流水现在走 gRPC 的 `BillingAdminService`）。
 
 - HTTP/admin 走 `4003`，**gRPC 走 `4004`**——后端要连的是后者（`BILLING_GRPC_URL=http://127.0.0.1:4004`）
 - 库是 `bw_billing`（billing 自己的库，Flyway 管 schema，**不归 Prisma**）
