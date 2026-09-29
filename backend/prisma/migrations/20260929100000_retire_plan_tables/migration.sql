@@ -31,14 +31,14 @@
 --   SELECT COUNT(*) FROM plan_application_receipts;
 -- 任一非零 → 按 IKEEFV 的「只报告不删」保留表，DROP 迁移不再落地。
 -- 另：届时 DROP 前应确认全库无 FOREIGN KEY / 视图 / 触发器指向这两张表
---（IKEEFV 的核实只覆盖它自己删的 3 张，不构成对这两张的结论）。
+-- （IKEEFV 的核实只覆盖它自己删的 3 张，不构成对这两张的结论）。
 --
 -- ── 本迁移实际做什么 ──────────────────────────────────────────────────────────
 -- `scene_card_generation_records.plan_message_id` / `application_receipt_id` 是 NOT NULL **且有历史值**，
 -- 按 IKEEFV「只报告不删」**保留列**，只放宽为 NULL-able —— 代码侧不再写入，历史行原值不动。
 -- 放宽是必需的：写入方删除后新行无值可填，不放宽则 `regenerateSceneCard` 写库直接失败。
 -- 基线定义见 `001_baseline.sql`：两列均为 `BIGINT NOT NULL`、无默认值、无注释、不在任何索引内
---（`idx_record_scene` / `idx_record_project` / `idx_record_status` 都不含它们），故去掉 NOT NULL 无副作用。
+-- （`idx_record_scene` / `idx_record_project` / `idx_record_status` 都不含它们），故去掉 NOT NULL 无副作用。
 --
 -- ── 回读验证（执行后）────────────────────────────────────────────────────────
 --   SHOW COLUMNS FROM scene_card_generation_records LIKE 'plan\_message_id';       -- Null 应为 YES
