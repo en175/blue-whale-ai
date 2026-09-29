@@ -10,7 +10,6 @@ export {
   type AssetContextProjection,
   type SceneCardContextProjection,
 } from "./context-projection.js";
-import { planCardCandidateSchema } from "./plan-message.js";
 
 const digestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const stableIdSchema = z.string().regex(/^[a-z][a-z0-9_.-]{0,127}$/);
@@ -294,66 +293,6 @@ export const agentRunWorkSchema = z
   })
   .strict();
 
-const runCommitBase = z.object({
-  schema_version: z.literal(1),
-  advance_id: decimalIdSchema,
-  fencing_token: decimalIdSchema,
-  expected_run_version: z.number().int().nonnegative(),
-  request_digest: digestSchema,
-});
-
-export const awaitingInputStageSchema = z.enum([
-  "alignment",
-  "awaiting_final_confirmation",
-]);
-
-export const agentRunCommitSchema = z.discriminatedUnion("outcome", [
-  runCommitBase
-    .extend({
-      outcome: z.literal("completed"),
-      assistant_message: z.object({ content: z.string().min(1) }).strict(),
-      reasoning_summary: z.string().min(1).max(280),
-      auto_creative_skill_activation:
-        autoCreativeSkillActivationSchema.nullable(),
-    })
-    .strict(),
-  runCommitBase
-    .extend({
-      outcome: z.literal("failed"),
-      failure: z
-        .object({
-          code: stableIdSchema,
-          message: z.string().min(1).max(1000),
-        })
-        .strict(),
-    })
-    .strict(),
-  runCommitBase
-    .extend({
-      outcome: z.literal("awaiting_input"),
-      assistant_message: z.object({ content: z.string().min(1) }).strict(),
-      reasoning_summary: z.string().min(1).max(280),
-      input_request: z
-        .object({ question: z.string().min(1).max(2000) })
-        .strict(),
-      stage: awaitingInputStageSchema,
-    })
-    .strict(),
-  runCommitBase
-    .extend({
-      outcome: z.literal("cancelled"),
-    })
-    .strict(),
-  runCommitBase
-    .extend({
-      outcome: z.literal("completed_with_plan"),
-      reasoning_summary: z.string().min(1).max(280),
-      plan_cards: z.array(planCardCandidateSchema).min(1).max(20),
-      capability_snapshot_version: z.literal(1),
-    })
-    .strict(),
-]);
-
 export type AgentRuntimeManifest = z.infer<typeof agentRuntimeManifestSchema>;
 export type AgentRunPin = z.infer<typeof agentRunPinSchema>;
 export type AutoCreativeSkillCandidate = z.infer<
@@ -386,7 +325,6 @@ export type MentionInputEntry = z.infer<typeof mentionInputEntrySchema>;
 export type MentionInputSnapshot = z.infer<typeof mentionInputSnapshotSchema>;
 export type MentionAvailability = MentionInputEntry["availability"];
 export type MentionFailureReason = z.infer<typeof mentionFailureReasonSchema>;
-export type AgentRunCommit = z.infer<typeof agentRunCommitSchema>;
 
 /** JSON 值键序规范化：递归按 key 排序，得到确定性序列化输入（digest 计算的共享基元）。 */
 export function canonicalizeJsonValue(value: unknown): unknown {
