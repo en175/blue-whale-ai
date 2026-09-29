@@ -3,7 +3,7 @@ package com.bluewhale.worker.application.service;
 import com.bluewhale.worker.application.processor.AudioVideoMuxJobProcessor;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -72,6 +72,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -120,6 +121,11 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
 
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService realService;
+    /** 真库终态收口（IKIWP8 ③）：发布/失败/探测直连。 */
+    static JobFinalizer realFinalizer;
+    /** 真实领取服务与真实 Mapper（IKIWP8：领取收敛为唯一管道 JobClaimService.claim）。 */
+    static JobClaimService realClaimService;
+    static GenerationJobMapper realJobMapper;
     static JdbcTemplate jdbc;
 
     /** 最小 Spring 上下文：与金标夹具同款（Hikari +08:00 会话、7 Mapper、7-mapper 测试直连 service）。 */
@@ -192,6 +198,23 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm);
         }
 
+        /**
+         * 真库 JobFinalizer（IKIWP8 ③）：终态收口方法已从 JobStateMachineService 删除，
+         * 测试直连 finalizer；按 7-mapper 兼容构造的内部装配逐项复制，共用同一批真库 mapper。
+         */
+        @Bean
+        JobFinalizer finalizer(
+                GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
+                GenerationOutputSlotMapper sm, ProjectEventMapper pem,
+                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
+            ProjectEventPublisher events = new ProjectEventPublisher(pem);
+            return new JobFinalizer(jm, am, jlm, sm,
+                    new SceneCardGenerationRecordSync(sm, rm, events),
+                    new StoryboardPreviewSync(sm, pm, events),
+                    events,
+                    JobSettlementPublisher.noop());
+        }
+
         private static <T> MapperFactoryBean<T> factory(Class<T> mapperIf, SqlSessionFactory sf)
                 throws Exception {
             MapperFactoryBean<T> b = new MapperFactoryBean<>(mapperIf);
@@ -208,6 +231,9 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         }
         ctx = new AnnotationConfigApplicationContext(TestConfig.class);
         realService = ctx.getBean(JobStateMachineService.class);
+        realFinalizer = ctx.getBean(JobFinalizer.class);
+        realJobMapper = ctx.getBean(GenerationJobMapper.class);
+        realClaimService = new JobClaimService(realJobMapper);
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
     }
 
@@ -275,11 +301,12 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
     /** 有状态 TOS 替身 + 全链处理器：转存落 objects 表，deleteUnpublishedObject 真删。 */
     private record WiredProcessor(
             AudioVideoMuxJobProcessor processor,
-            JobStateMachineService spyService,
+            JobFinalizer spyFinalizer,
             ConcurrentHashMap<String, byte[]> objects) {}
 
     private WiredProcessor wireProcessor(ConcurrentHashMap<String, byte[]> objects, String storageKey) {
         JobStateMachineService spyService = spy(realService);
+        JobFinalizer spyFinalizer = spy(realFinalizer);
         GenerationCredentialService credentials = mock(GenerationCredentialService.class);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
@@ -300,8 +327,9 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             return null;
         }).when(relay).deleteUnpublishedObject(anyString());
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay, producer);
-        return new WiredProcessor(processor, spyService, objects);
+        var processor = new AudioVideoMuxJobProcessor(spyService, realClaimService, realJobMapper, spyFinalizer,
+                credentials, gateway, relay, producer);
+        return new WiredProcessor(processor, spyFinalizer, objects);
     }
 
     /** 独立 JDBC 连接（非池内）：模拟服务端仍在进行的发布事务（guard CAS + Asset 插入，未提交）。 */
@@ -428,7 +456,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             executeInFlightPublish(raw, jobId, dto.workerId(), dto.fencingToken(), oldKey);
             rawTxOpen.countDown();
             throw new RuntimeException("发布事务提交窗口断连（结果不明）");
-        }).when(wired.spyService()).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
+        }).when(wired.spyFinalizer()).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
 
         // 探测钩子：首轮真跑（行锁被在飞事务占用 → in-flight）；后续轮等主线程落定 raw 事务再放行（交错确定化）
         doAnswer(invocation -> {
@@ -439,7 +467,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             }
             assertThat(rawTxSettled.await(20, TimeUnit.SECONDS)).as("主线程应先落定在飞事务").isTrue();
             return (Boolean) invocation.callRealMethod();
-        }).when(wired.spyService()).hasInFlightJobWriteTransaction(String.valueOf(jobId));
+        }).when(wired.spyFinalizer()).hasInFlightJobWriteTransaction(String.valueOf(jobId));
 
         ExecutorService single = Executors.newSingleThreadExecutor();
         try {
@@ -463,7 +491,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         assertThat(job.getStatus()).isEqualTo("succeeded");
         assertThat(job.getLeaseOwner()).isNull();
         // 旧执行者 fencing：发布异常上抛后的 fail 尝试被守卫拒绝，不能改写成功终态
-        verify(wired.spyService()).failMediaExtractJob(any());
+        verify(wired.spyFinalizer()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
         assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
         assertThat(readJob(jobId).getError()).isNull();
         assertThat(probes.get()).isEqualTo(2);
@@ -491,7 +519,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             executeInFlightPublish(raw, jobId, dto.workerId(), dto.fencingToken(), oldKey);
             rawTxOpen.countDown();
             throw new RuntimeException("发布事务提交窗口断连（结果不明）");
-        }).when(wired.spyService()).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
+        }).when(wired.spyFinalizer()).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
 
         doAnswer(invocation -> {
             if (probes.incrementAndGet() == 1) {
@@ -501,7 +529,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             }
             assertThat(rawTxSettled.await(20, TimeUnit.SECONDS)).as("主线程应先回滚在飞事务").isTrue();
             return (Boolean) invocation.callRealMethod();
-        }).when(wired.spyService()).hasInFlightJobWriteTransaction(String.valueOf(jobId));
+        }).when(wired.spyFinalizer()).hasInFlightJobWriteTransaction(String.valueOf(jobId));
 
         ExecutorService single = Executors.newSingleThreadExecutor();
         try {
@@ -549,14 +577,14 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                     + "lease_expires_at=? WHERE id=?", WorkerClock.now().plusMinutes(5), jobId);
             Long newToken = jdbc.queryForObject("SELECT fencing_token FROM generation_jobs WHERE id=?",
                     Long.class, jobId);
-            boolean published = realService.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
+            boolean published = realFinalizer.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
                     String.valueOf(jobId), "99", "9", "amux-new", newToken,
                     "https://bkt.tos.example.com/" + newKey, newKey, "video/mp4",
                     (long) NEW_KEY_PAYLOAD.length, "md5", 227.0, "1920x1080", "12"));
             assertThat(published).as("新执行者用新键发布应成功").isTrue();
             objects.put(newKey, NEW_KEY_PAYLOAD);
             return false;
-        }).when(wired.spyService()).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
+        }).when(wired.spyFinalizer()).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
 
         wired.processor().handle(String.valueOf(jobId));
 
@@ -572,17 +600,17 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         assertThat(job.getStatus()).isEqualTo("succeeded");
 
         // 旧执行者 fencing：迟到 fail（旧 worker/token）被守卫拒绝——不能写 Asset、不能改写成功终态
-        assertThat(realService.failMediaExtractJob(new com.bluewhale.worker.domain.dto.FailMediaExtractDto(
-                String.valueOf(jobId), oldWorkerId.get(), oldToken.get(),
-                "audio_video_mux_failed", "迟到失败", Map.of()))).isFalse();
-        assertThat(realService.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
+        assertThat(realFinalizer.failMediaExtractJob(
+                String.valueOf(jobId), "audio_video_mux_failed", "迟到失败", Map.of(),
+                oldWorkerId.get(), oldToken.get())).isFalse();
+        assertThat(realFinalizer.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
                 String.valueOf(jobId), "99", "9", oldWorkerId.get(), oldToken.get(),
                 "https://bkt.tos.example.com/" + oldKey, oldKey, "video/mp4",
                 (long) OLD_KEY_PAYLOAD.length, "md5", 227.0, "1920x1080", "12"))).isFalse();
         assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
         assertThat(countAssets(jobId, oldKey)).isZero();
         // 守卫拒绝路径不落失败终态（对象键清理即收口）
-        verify(wired.spyService(), never()).failMediaExtractJob(any());
+        verify(wired.spyFinalizer(), never()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
     }
 
     /**
@@ -604,13 +632,15 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         AtomicReference<Long> oldToken = new AtomicReference<>();
         TosVideoMediaRelay relay = new TosVideoMediaRelay(realTosStandin(objects, null), "bkt", "tos.example.com");
         JobStateMachineService spyService = spy(realService);
+        JobFinalizer spyFinalizer = spy(realFinalizer);
         GenerationCredentialService credentials = mock(GenerationCredentialService.class);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay,
+        var processor = new AudioVideoMuxJobProcessor(spyService, realClaimService, realJobMapper, spyFinalizer,
+                credentials, gateway, relay,
                 mock(GenerationMessageProducer.class));
 
         CountDownLatch rawTxOpen = new CountDownLatch(1);
@@ -630,7 +660,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             executeInFlightPublish(raw, jobId, dto.workerId(), dto.fencingToken(), dto.storageKey());
             rawTxOpen.countDown();
             throw new RuntimeException("发布事务提交窗口断连（结果不明）");
-        }).when(spyService).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
+        }).when(spyFinalizer).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
 
         // 探测钩子：首轮真跑（行锁被在飞事务占用 → in-flight）；后续轮等主线程落定 raw 事务再放行
         doAnswer(invocation -> {
@@ -641,7 +671,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             }
             assertThat(rawTxSettled.await(20, TimeUnit.SECONDS)).as("主线程应先落定在飞事务").isTrue();
             return (Boolean) invocation.callRealMethod();
-        }).when(spyService).hasInFlightJobWriteTransaction(String.valueOf(jobId));
+        }).when(spyFinalizer).hasInFlightJobWriteTransaction(String.valueOf(jobId));
 
         ExecutorService single = Executors.newSingleThreadExecutor();
         try {
@@ -667,12 +697,12 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         assertThat(job.getStatus()).isEqualTo("succeeded");
         assertThat(job.getLeaseOwner()).isNull();
         // 旧执行者 fencing：发布异常上抛后的 fail 尝试被守卫拒绝，不能改写成功终态
-        verify(spyService).failMediaExtractJob(any());
+        verify(spyFinalizer).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
         assertThat(readJob(jobId).getError()).isNull();
-        assertThat(realService.failMediaExtractJob(new com.bluewhale.worker.domain.dto.FailMediaExtractDto(
-                String.valueOf(jobId), oldWorkerId.get(), oldToken.get(),
-                "audio_video_mux_failed", "迟到失败", Map.of()))).isFalse();
-        assertThat(realService.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
+        assertThat(realFinalizer.failMediaExtractJob(
+                String.valueOf(jobId), "audio_video_mux_failed", "迟到失败", Map.of(),
+                oldWorkerId.get(), oldToken.get())).isFalse();
+        assertThat(realFinalizer.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
                 String.valueOf(jobId), "99", "9", oldWorkerId.get(), oldToken.get(),
                 "https://bkt.tos.example.com/" + realKey.get(), realKey.get(), "video/mp4",
                 (long) SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT, "md5", 227.0, "1920x1080", "12"))).isFalse();
@@ -698,14 +728,16 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         AtomicReference<String> realKey = new AtomicReference<>();
         TosVideoMediaRelay relay = new TosVideoMediaRelay(realTosStandin(objects, null), "bkt", "tos.example.com");
         JobStateMachineService spyService = spy(realService);
+        JobFinalizer spyFinalizer = spy(realFinalizer);
         GenerationCredentialService credentials = mock(GenerationCredentialService.class);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
-        AudioVideoMuxJobProcessor processor = new AudioVideoMuxJobProcessor(spyService, credentials,
-                gateway, relay, mock(GenerationMessageProducer.class));
+        AudioVideoMuxJobProcessor processor = new AudioVideoMuxJobProcessor(spyService,
+                realClaimService, realJobMapper, spyFinalizer, credentials, gateway, relay,
+                mock(GenerationMessageProducer.class));
 
         CountDownLatch rawTxOpen = new CountDownLatch(1);
         CountDownLatch failAttempted = new CountDownLatch(1);
@@ -720,20 +752,20 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             executeInFlightPublish(raw, jobId, dto.workerId(), dto.fencingToken(), dto.storageKey());
             rawTxOpen.countDown();
             throw new RuntimeException("发布事务提交窗口断连（结果不明）");
-        }).when(spyService).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
+        }).when(spyFinalizer).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
 
         // 全部探测轮真跑：行锁被在飞事务占用 → in-flight；窗口耗尽即 UNCONFIRMED（默认 3 轮）
         doAnswer(invocation -> {
             probes.incrementAndGet();
             return invocation.callRealMethod();
-        }).when(spyService).hasInFlightJobWriteTransaction(String.valueOf(jobId));
+        }).when(spyFinalizer).hasInFlightJobWriteTransaction(String.valueOf(jobId));
 
         // fail 落库钩子：[pending-cleanup] 记录在 discard 内同步先于 fail 写出——latch 放行即
         // 留痕已定；真实 fail UPDATE 阻塞在在飞事务行锁上，等主线程提交后守卫不命中（已 succeeded）
         doAnswer(invocation -> {
             failAttempted.countDown();
             return invocation.callRealMethod();
-        }).when(spyService).failMediaExtractJob(any(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class));
+        }).when(spyFinalizer).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
 
         Logger processorLogger = (Logger) LoggerFactory.getLogger(AudioVideoMuxJobProcessor.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -763,19 +795,19 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             assertThat(countAssets(jobId, realKey.get())).isOne();
             GenerationJobEntity job = readJob(jobId);
             assertThat(job.getStatus()).isEqualTo("succeeded");
-            verify(spyService).failMediaExtractJob(any());
+            verify(spyFinalizer).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
             assertThat(readJob(jobId).getError()).isNull();
 
             // 恢复复判：状态恢复后再次调用同一清理决策（发布结果不明口径）——探测锁空闲 +
             // Asset 引用已可见 → REFERENCED 保留，对象不删
-            ClaimedMediaExtractJobDto jobDto = new ClaimedMediaExtractJobDto(String.valueOf(jobId),
-                    "99", "9", Map.of(), "mux-task-1", "amux-recheck", job.getFencingToken(),
-                    0, 0, WorkerClock.now(), null);
+            ClaimedJob jobDto = new ClaimedJob(String.valueOf(jobId),
+                    "99", "9", Map.of(), "audio_video_mux", "mux-task-1", false, "amux-recheck",
+                    job.getFencingToken(), 0, 0, WorkerClock.now(), null, null);
             TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay.StoredVideo(
                     "https://bkt.tos.example.com/" + realKey.get(), realKey.get(), "video/mp4",
                     (long) SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT, "md5");
             var decision = AudioVideoMuxJobProcessor.class.getDeclaredMethod(
-                    "discardUnpublishedTransfer", ClaimedMediaExtractJobDto.class,
+                    "discardUnpublishedTransfer", ClaimedJob.class,
                     TosVideoMediaRelay.StoredVideo.class, boolean.class);
             decision.setAccessible(true);
             decision.invoke(processor, jobDto, stored, true);
@@ -807,18 +839,20 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                 .deleteObject(any(DeleteObjectInput.class));
         TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
         JobStateMachineService spyService = spy(realService);
+        JobFinalizer spyFinalizer = spy(realFinalizer);
         GenerationCredentialService credentials = mock(GenerationCredentialService.class);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay,
+        var processor = new AudioVideoMuxJobProcessor(spyService, realClaimService, realJobMapper, spyFinalizer,
+                credentials, gateway, relay,
                 mock(GenerationMessageProducer.class));
         doAnswer(invocation -> {
             realKey.set(((PublishAudioVideoMuxDto) invocation.getArgument(0)).storageKey());
             throw new RuntimeException("发布事务结果不明");
-        }).when(spyService).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
+        }).when(spyFinalizer).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
 
         Logger relayLogger = (Logger) LoggerFactory.getLogger(TosVideoMediaRelay.class);
         ListAppender<ILoggingEvent> relayLogs = new ListAppender<>();
@@ -845,7 +879,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                     .contains("audio_video_mux_failed")
                     .contains("发布事务结果不明")
                     .doesNotContain("TOS 删除");
-            verify(spyService).failMediaExtractJob(any());
+            verify(spyFinalizer).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
         } finally {
             relayLogger.detachAppender(relayLogs);
         }

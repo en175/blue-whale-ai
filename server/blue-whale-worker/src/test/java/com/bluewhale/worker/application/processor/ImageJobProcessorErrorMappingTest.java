@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
@@ -48,6 +49,7 @@ import static org.mockito.Mockito.*;
 class ImageJobProcessorErrorMappingTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiImageClient imageClient;
@@ -59,7 +61,7 @@ class ImageJobProcessorErrorMappingTest {
     @BeforeEach
     void setUp() {
         processor = new ImageJobProcessor(
-                stateMachine, assetSource, credentialService,
+                stateMachine, finalizer, assetSource, credentialService,
                 imageClient, capabilityMapper, tosService);
     }
 
@@ -269,7 +271,7 @@ class ImageJobProcessorErrorMappingTest {
         assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(35));
 
         // 不应调用 failJob
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -442,7 +444,7 @@ class ImageJobProcessorErrorMappingTest {
 
     private void verifyFailWithCode(String expectedCode) {
         ArgumentCaptor<String> codeCaptor = ArgumentCaptor.forClass(String.class);
-        verify(stateMachine).failJob(anyString(), codeCaptor.capture(), anyString(),
+        verify(finalizer).failJob(anyString(), codeCaptor.capture(), anyString(),
                 any(Map.class), anyString(), anyLong());
         assertThat(codeCaptor.getValue()).isEqualTo(expectedCode);
     }

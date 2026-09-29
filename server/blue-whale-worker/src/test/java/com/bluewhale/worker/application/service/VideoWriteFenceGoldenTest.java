@@ -43,11 +43,19 @@ class VideoWriteFenceGoldenTest {
     @Mock private StoryboardPreviewMapper storyboardPreviewMapper;
 
     private JobStateMachineService service;
+    private JobFinalizer finalizer;
 
     @BeforeEach
     void setUp() {
         service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper,
                 projectEventMapper, slotMapper, sceneCardRecordMapper, storyboardPreviewMapper);
+        // 终态收口（刀④）：publish 族已从 JobStateMachineService 拆到 JobFinalizer，共享同一组 mapper mock。
+        ProjectEventPublisher events = new ProjectEventPublisher(projectEventMapper);
+        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper,
+                new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper, events),
+                new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper, events),
+                events,
+                JobSettlementPublisher.noop());
     }
 
     private static String updateSqlOf(String methodName) {
@@ -136,7 +144,7 @@ class VideoWriteFenceGoldenTest {
             return 1;
         }).when(assetMapper).insert(any(com.bluewhale.worker.domain.entity.AssetEntity.class));
 
-        boolean ok = service.publishVideoResult("300", "42", "9", "w1", 5,
+        boolean ok = finalizer.publishVideoResult("300", "42", "9", "w1", 5,
                 "https://x/v.mp4", "generated/9/video/abc.mp4", "video/mp4", 123L,
                 "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5, null);
 

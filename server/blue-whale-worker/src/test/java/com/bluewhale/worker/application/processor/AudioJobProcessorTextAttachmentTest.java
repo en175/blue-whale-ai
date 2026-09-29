@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -43,6 +44,7 @@ import static org.mockito.Mockito.*;
 class AudioJobProcessorTextAttachmentTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiAudioClient audioClient;
@@ -52,7 +54,7 @@ class AudioJobProcessorTextAttachmentTest {
 
     @BeforeEach
     void setUp() {
-        processor = new AudioJobProcessor(stateMachine, assetSource, credentialService, audioClient, tosService);
+        processor = new AudioJobProcessor(stateMachine, finalizer, assetSource, credentialService, audioClient, tosService);
     }
 
     /** 走通成功路径：generate 返回 data → TOS 转存 → createAsset → completeJob。 */
@@ -66,7 +68,7 @@ class AudioJobProcessorTextAttachmentTest {
         when(tosService.uploadBytes(any(), eq("audio/mpeg")))
                 .thenReturn(new TosMediaStorage.UploadResult("https://pub/a.mp3", "k", "audio/mpeg", 3L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.createAsset(any())).thenReturn("a1");
-        when(stateMachine.completeJob(eq("100"), anyList(), anyString(), anyLong(), any()))
+        when(finalizer.completeJob(eq("100"), anyList(), anyString(), anyLong(), any()))
                 .thenReturn(true);
     }
 
@@ -103,7 +105,7 @@ class AudioJobProcessorTextAttachmentTest {
                 eq("生成环境音"), any());
         // ★ 第 5 个参数是产出音频的真实秒数（12.4s → 12）——它一路走到 billing 的
         //   usage.seconds，是音频按秒计价的**唯一**数据来源。丢了它结算会被拒。
-        verify(stateMachine).completeJob(eq("100"), eq(List.of("a1")), anyString(), eq(5L), eq(12L));
+        verify(finalizer).completeJob(eq("100"), eq(List.of("a1")), anyString(), eq(5L), eq(12L));
         // IKGS73：md5 必须从 TOS 上传出口穿透到建资产入参
         ArgumentCaptor<JobStateMachineService.CreateAssetInput> assetCaptor =
                 ArgumentCaptor.forClass(JobStateMachineService.CreateAssetInput.class);
@@ -170,7 +172,7 @@ class AudioJobProcessorTextAttachmentTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failJob(eq("100"),
+        verify(finalizer).failJob(eq("100"),
                 eq(GenerationError.ERROR_INVALID_INPUT),
                 eq("缺少 prompt 或 model_id"), any(), anyString(), anyLong());
         verify(audioClient, never()).generate(anyString(), anyString(), anyString(), any());

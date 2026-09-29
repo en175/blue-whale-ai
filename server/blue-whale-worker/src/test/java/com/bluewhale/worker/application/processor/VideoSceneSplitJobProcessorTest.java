@@ -1,8 +1,11 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -17,6 +20,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +55,9 @@ import static org.mockito.Mockito.*;
 class VideoSceneSplitJobProcessorTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitSegmentScenesClient segmentScenesClient;
@@ -70,9 +77,9 @@ class VideoSceneSplitJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VideoSceneSplitJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, segmentScenesClient, mediaRelay, producer);
-        when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
+        when(finalizer.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
@@ -94,30 +101,30 @@ class VideoSceneSplitJobProcessorTest {
                 .thenReturn(source);
     }
 
-    private ClaimedVideoSceneSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                    int pollCount) {
         return makeClaim(input, providerTaskId, pollCount, null);
     }
 
-    private ClaimedVideoSceneSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                    int pollCount, String parentProviderTaskId) {
-        return new ClaimedVideoSceneSplitJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, 0,
-                parentProviderTaskId);
+        return new ClaimedJob(
+                "100", "42", "9", input, "video_scene_split", providerTaskId, false, "worker-1",
+                5L, pollCount, 0, null, null, parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, null, 0)));
     }
 
     private void stubPollClaim(Map<String, Object> input, int pollCount) {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, "amk-task-1", pollCount)));
     }
 
     private void assertFailCode(String expectedCode) {
-        verify(stateMachine).failVideoJob(eq("100"), eq(expectedCode), anyString(),
+        verify(finalizer).failVideoJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
     }
 
@@ -132,27 +139,27 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine, never()).publishVideoSceneSplitResult(any());
+        verify(finalizer, never()).publishVideoSceneSplitResult(any());
     }
 
     // ========== input 业务键兜底校验（权威复核在创建入口） ==========
@@ -227,7 +234,7 @@ class VideoSceneSplitJobProcessorTest {
         verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "fine");
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VideoSceneSplitJobProcessor.SCENE_SPLIT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -307,7 +314,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且切片数组非空 → 不提交，直接逐段转存发布（payload 与正常完成同型）")
     void parentReuseSuccess_publishesWithoutSubmit() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-1")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-1"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.5, List.of(
@@ -317,7 +324,7 @@ class VideoSceneSplitJobProcessorTest {
         stubSourceAsset();
         when(mediaRelay.persist("https://volc/old-seg1.mp4", "9")).thenReturn(stored(1));
         when(mediaRelay.persist("https://volc/old-seg2.mp4", "9")).thenReturn(stored(2));
-        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(true);
+        when(finalizer.publishVideoSceneSplitResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -326,7 +333,7 @@ class VideoSceneSplitJobProcessorTest {
         verify(mediaRelay).persist("https://volc/old-seg2.mp4", "9");
         ArgumentCaptor<PublishVideoSceneSplitDto> captor =
                 ArgumentCaptor.forClass(PublishVideoSceneSplitDto.class);
-        verify(stateMachine).publishVideoSceneSplitResult(captor.capture());
+        verify(finalizer).publishVideoSceneSplitResult(captor.capture());
         PublishVideoSceneSplitDto published = captor.getValue();
         assertThat(published.durationSec()).isEqualTo(95.5);
         assertThat(published.segments()).hasSize(2);
@@ -342,14 +349,14 @@ class VideoSceneSplitJobProcessorTest {
         PublishVideoSceneSplitDto.Segment second = published.segments().get(1);
         assertThat(second.segmentIndex()).isEqualTo(2);
         assertThat(second.endTimeSec()).isEqualTo(95.5);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
     void parentReuseFailed_fallThrough() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-fail")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-fail"))
                 .thenReturn(new SceneSplitTaskObservation("failed", null, null,
@@ -362,14 +369,14 @@ class VideoSceneSplitJobProcessorTest {
         processor.handle("100");
 
         verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
     void parentReuseLeaseLostBeforeSubmit_stops() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-race")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-race"))
                 .thenThrow(new RuntimeException("HTTP 503"));
@@ -385,7 +392,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-gone")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-gone"))
                 .thenThrow(new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -398,7 +405,7 @@ class VideoSceneSplitJobProcessorTest {
         processor.handle("100");
 
         verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -420,7 +427,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务成功但切片数组为空 → 回退正常重新提交")
     void parentReuseEmptySegments_fallThrough() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-empty")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-empty"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(),
@@ -434,14 +441,14 @@ class VideoSceneSplitJobProcessorTest {
 
         verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
         verify(mediaRelay, never()).persist(anyString(), anyString());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 收割发布失败（段切片下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
     void parentReusePublishFails_fallThrough() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-stale")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-stale"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
@@ -457,21 +464,21 @@ class VideoSceneSplitJobProcessorTest {
         processor.handle("100");
 
         verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
     void parentReusePublishGuardMissed_stopWithoutSubmit() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-guard")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-guard"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
                         new SegmentObservation(0.0, 95.0, "https://volc/old-seg1.mp4")),
                         null, null));
         when(mediaRelay.persist("https://volc/old-seg1.mp4", "9")).thenReturn(stored(1));
-        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(false);
+        when(finalizer.publishVideoSceneSplitResult(any())).thenReturn(false);
         stubSourceAsset();
 
         processor.handle("100");
@@ -480,14 +487,14 @@ class VideoSceneSplitJobProcessorTest {
         // 任务保持 processing 由新 worker 重新领取继续收割
         verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 收割发布期段转存续租未命中（renew false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
     void parentReuseSegmentLeaseRenewMissed_stopWithoutSubmit() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-renew")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-renew"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
@@ -507,8 +514,8 @@ class VideoSceneSplitJobProcessorTest {
         verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(mediaRelay, times(1)).persist(anyString(), anyString());
-        verify(stateMachine, never()).publishVideoSceneSplitResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).publishVideoSceneSplitResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -527,7 +534,7 @@ class VideoSceneSplitJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoSceneSplitJobProcessor.SCENE_SPLIT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -559,7 +566,7 @@ class VideoSceneSplitJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoSceneSplitJobProcessor.SCENE_SPLIT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -577,7 +584,7 @@ class VideoSceneSplitJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoSceneSplitJobProcessor.SCENE_SPLIT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -592,7 +599,7 @@ class VideoSceneSplitJobProcessorTest {
         processor.handle("100");
 
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
                 eq("场景切分轮询超时（超过 " + VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS
                         + " 次），上游持续错误: MediaKit 场景切分任务查询超时"),
@@ -618,7 +625,7 @@ class VideoSceneSplitJobProcessorTest {
         // 「: HTTP 503」片段（冒号保留），上游可读原因保留
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         assertThat(messageCaptor.getValue()).doesNotContain("503")
@@ -644,7 +651,7 @@ class VideoSceneSplitJobProcessorTest {
         processor.handle("100");
 
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -672,7 +679,7 @@ class VideoSceneSplitJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
                 eq("输入视频解析失败，请更换素材后重试"),
                 any(), eq("worker-1"), eq(5L));
@@ -708,7 +715,7 @@ class VideoSceneSplitJobProcessorTest {
 
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
@@ -735,7 +742,7 @@ class VideoSceneSplitJobProcessorTest {
         when(mediaRelay.persist("https://volc/seg1.mp4", "9")).thenReturn(stored(1));
         when(mediaRelay.persist("https://volc/seg2.mp4", "9")).thenReturn(stored(2));
         when(mediaRelay.persist("https://volc/seg3.mp4", "9")).thenReturn(stored(3));
-        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(true);
+        when(finalizer.publishVideoSceneSplitResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -745,7 +752,7 @@ class VideoSceneSplitJobProcessorTest {
         verify(mediaRelay).persist("https://volc/seg3.mp4", "9");
         ArgumentCaptor<PublishVideoSceneSplitDto> captor =
                 ArgumentCaptor.forClass(PublishVideoSceneSplitDto.class);
-        verify(stateMachine).publishVideoSceneSplitResult(captor.capture());
+        verify(finalizer).publishVideoSceneSplitResult(captor.capture());
         PublishVideoSceneSplitDto published = captor.getValue();
         assertThat(published.durationSec()).isEqualTo(95.5);
         assertThat(published.segments()).hasSize(3);
@@ -761,7 +768,7 @@ class VideoSceneSplitJobProcessorTest {
         PublishVideoSceneSplitDto.Segment third = published.segments().get(2);
         assertThat(third.segmentIndex()).isEqualTo(3);
         assertThat(third.endTimeSec()).isEqualTo(95.5);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -775,13 +782,13 @@ class VideoSceneSplitJobProcessorTest {
                         new SegmentObservation(0.0, 95.0, "https://volc/whole.mp4")),
                         null, null));
         when(mediaRelay.persist("https://volc/whole.mp4", "9")).thenReturn(stored(1));
-        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(true);
+        when(finalizer.publishVideoSceneSplitResult(any())).thenReturn(true);
 
         processor.handle("100");
 
         ArgumentCaptor<PublishVideoSceneSplitDto> captor =
                 ArgumentCaptor.forClass(PublishVideoSceneSplitDto.class);
-        verify(stateMachine).publishVideoSceneSplitResult(captor.capture());
+        verify(finalizer).publishVideoSceneSplitResult(captor.capture());
         PublishVideoSceneSplitDto published = captor.getValue();
         assertThat(published.segments()).hasSize(1);
         assertThat(published.segments().get(0).segmentIndex()).isEqualTo(1);
@@ -799,13 +806,13 @@ class VideoSceneSplitJobProcessorTest {
                         new SegmentObservation(0.0, 40.0, "https://volc/seg1.mp4")),
                         null, null));
         when(mediaRelay.persist(anyString(), eq("9"))).thenReturn(stored(1));
-        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(true);
+        when(finalizer.publishVideoSceneSplitResult(any())).thenReturn(true);
 
         processor.handle("100");
 
         ArgumentCaptor<PublishVideoSceneSplitDto> captor =
                 ArgumentCaptor.forClass(PublishVideoSceneSplitDto.class);
-        verify(stateMachine).publishVideoSceneSplitResult(captor.capture());
+        verify(finalizer).publishVideoSceneSplitResult(captor.capture());
         assertThat(captor.getValue().durationSec()).isEqualTo(95.0);
     }
 
@@ -839,11 +846,11 @@ class VideoSceneSplitJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
                 eq("第 2 段切片下载转存失败: 段切片下载失败: HTTP 404"),
                 any(), eq("worker-1"), eq(5L));
-        verify(stateMachine, never()).publishVideoSceneSplitResult(any());
+        verify(finalizer, never()).publishVideoSceneSplitResult(any());
     }
 
     @Test
@@ -860,7 +867,7 @@ class VideoSceneSplitJobProcessorTest {
         when(mediaRelay.persist("https://volc/seg1.mp4", "9")).thenReturn(stored(1));
         when(mediaRelay.persist("https://volc/seg2.mp4", "9")).thenReturn(stored(2));
         when(mediaRelay.persist("https://volc/seg3.mp4", "9")).thenReturn(stored(3));
-        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(true);
+        when(finalizer.publishVideoSceneSplitResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -876,7 +883,7 @@ class VideoSceneSplitJobProcessorTest {
         assertThat(renewCaptor.getAllValues())
                 .extracting(UpdateVideoSceneSplitProgressDto::progress)
                 .containsExactly(0, 33, 66);
-        verify(stateMachine).publishVideoSceneSplitResult(any());
+        verify(finalizer).publishVideoSceneSplitResult(any());
     }
 
     @Test
@@ -898,8 +905,8 @@ class VideoSceneSplitJobProcessorTest {
 
         verify(mediaRelay, times(1)).persist(anyString(), anyString());
         verify(mediaRelay, never()).persist("https://volc/seg2.mp4", "9");
-        verify(stateMachine, never()).publishVideoSceneSplitResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).publishVideoSceneSplitResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -907,7 +914,7 @@ class VideoSceneSplitJobProcessorTest {
     @DisplayName("TOS 未配置 → 1046（切片链接 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VideoSceneSplitJobProcessor noRelayProcessor = new VideoSceneSplitJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, segmentScenesClient, null, producer);
         stubPollClaim(input("standard"), 3);
         when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
@@ -917,10 +924,10 @@ class VideoSceneSplitJobProcessorTest {
 
         noRelayProcessor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
                 eq("场景切分转存存储未配置"), any(), eq("worker-1"), eq(5L));
-        verify(stateMachine, never()).publishVideoSceneSplitResult(any());
+        verify(finalizer, never()).publishVideoSceneSplitResult(any());
     }
 
     @Test
@@ -933,11 +940,11 @@ class VideoSceneSplitJobProcessorTest {
                         new SegmentObservation(0.0, 95.0, "https://volc/seg1.mp4")),
                         null, null));
         when(mediaRelay.persist(anyString(), eq("9"))).thenReturn(stored(1));
-        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(false);
+        when(finalizer.publishVideoSceneSplitResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 

@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
-import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEraseDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageEraseContract;
@@ -11,6 +13,7 @@ import com.bluewhale.worker.domain.error.ImageEraseError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitEraseClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -52,7 +55,9 @@ class ImageEraseJobProcessorTest {
     private static final byte[] PNG_1X1 = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
-    @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitEraseClient mediaKitEraseClient;
@@ -65,9 +70,10 @@ class ImageEraseJobProcessorTest {
     @BeforeEach
     void setUp() throws Exception {
         processor = new ImageEraseJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                claimService, jobMapper, finalizer,
+                new AssetSourceService(assetMapper),
                 credentialService, mediaKitEraseClient, tosService);
-        when(stateMachine.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
+        when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
         // 结果图桩（24h 有效的火山 URL 用本地 HttpServer 模拟）
@@ -88,8 +94,9 @@ class ImageEraseJobProcessorTest {
         resultServer.stop(0);
     }
 
-    private ClaimedImageEraseJobDto makeClaim(Map<String, Object> input) {
-        return new ClaimedImageEraseJobDto("100", "42", "9", input, "worker-1", 5L);
+    private ClaimedJob makeClaim(Map<String, Object> input) {
+        return new ClaimedJob("100", "42", "9", input, "image_erase",
+                null, false, "worker-1", 5L, 0, 0, null, null, null);
     }
 
     private Map<String, Object> textSceneInput() {
@@ -130,7 +137,7 @@ class ImageEraseJobProcessorTest {
     }
 
     private void stubClaim(Map<String, Object> input) {
-        when(stateMachine.claimImageErase(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input)));
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
     }
@@ -139,11 +146,11 @@ class ImageEraseJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), eq("9")))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/erased.png", "uploads/9/image/erased.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEraseResult(any())).thenReturn(true);
+        when(finalizer.publishImageEraseResult(any())).thenReturn(true);
     }
 
     private void assertFailCode(String expectedCode) {
-        verify(stateMachine).failJob(eq("100"), eq(expectedCode), anyString(),
+        verify(finalizer).failJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
     }
 
@@ -152,26 +159,26 @@ class ImageEraseJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimImageErase(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimImageErase(eq("100"), anyString())).thenReturn(Optional.empty());
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString())).thenReturn(Optional.empty());
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine, never()).publishImageEraseResult(any());
+        verify(finalizer, never()).publishImageEraseResult(any());
     }
 
     // ========== input 业务键与场景-遮罩组合兜底校验（§15.2；权威复核在创建入口 IKGOT4） ==========
@@ -342,7 +349,7 @@ class ImageEraseJobProcessorTest {
         verify(mediaKitEraseClient).erase(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("full_screen_text_erase"), isNull());
         ArgumentCaptor<PublishImageEraseDto> captor = ArgumentCaptor.forClass(PublishImageEraseDto.class);
-        verify(stateMachine).publishImageEraseResult(captor.capture());
+        verify(finalizer).publishImageEraseResult(captor.capture());
         PublishImageEraseDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/erased.png");
         assertThat(published.storageKey()).isEqualTo("uploads/9/image/erased.png");
@@ -354,7 +361,7 @@ class ImageEraseJobProcessorTest {
         // 全套测试照样绿，而 assets.md5 会静默变空 —— 正是本单要消灭的那类失效。
         // （已实测：去掉 ImageEraseJobProcessor 里的 stored.md5() 后，本文件 17 条全绿。）
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -374,8 +381,8 @@ class ImageEraseJobProcessorTest {
         // 出站映射：area 场景 maskUrl=遮罩 Asset url（落库即 TOS public-read）
         verify(mediaKitEraseClient).erase(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("selected_area_erase"), eq("https://example.com/mask.png"));
-        verify(stateMachine).publishImageEraseResult(any());
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).publishImageEraseResult(any());
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -396,7 +403,7 @@ class ImageEraseJobProcessorTest {
 
         assertFailCode(ImageEraseContract.ERROR_IMAGE_ERASE_FAILED);
         verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
-        verify(stateMachine, never()).publishImageEraseResult(any());
+        verify(finalizer, never()).publishImageEraseResult(any());
     }
 
     @Test
@@ -409,11 +416,11 @@ class ImageEraseJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEraseResult(any())).thenReturn(false);
+        when(finalizer.publishImageEraseResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 }

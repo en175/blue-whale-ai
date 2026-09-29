@@ -48,8 +48,10 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
     private static AudioMixCrossRuntimeDbGuard.Target target;
     private static HikariDataSource dataSource;
     private static JobStateMachineService service;
+    private static JobFinalizer finalizer;
     private static JdbcTemplate jdbc;
     private static GenerationJobMapper jobMapper;
+    private static JobClaimService claimService;
 
     @BeforeAll
     static void boot() throws Exception {
@@ -71,6 +73,7 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
         factory.setDataSource(dataSource);
         SqlSessionFactory session = factory.getObject();
         jobMapper = mapper(GenerationJobMapper.class, session);
+        claimService = new JobClaimService(jobMapper);
         service = new JobStateMachineService(jobMapper,
                 mapper(AssetMapper.class, session),
                 mapper(GenerationJobLogMapper.class, session),
@@ -78,6 +81,19 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
                 mapper(GenerationOutputSlotMapper.class, session),
                 mapper(SceneCardGenerationRecordMapper.class, session),
                 mapper(StoryboardPreviewMapper.class, session));
+
+        // IKIWP8 ③：终态收口直连 JobFinalizer（与 service 同库同 SqlSessionFactory）。
+        var assetMapper = mapper(AssetMapper.class, session);
+        var jobLogMapper = mapper(GenerationJobLogMapper.class, session);
+        var slotMapper = mapper(GenerationOutputSlotMapper.class, session);
+        var events = new ProjectEventPublisher(mapper(ProjectEventMapper.class, session));
+        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper,
+                new SceneCardGenerationRecordSync(slotMapper,
+                        mapper(SceneCardGenerationRecordMapper.class, session), events),
+                new StoryboardPreviewSync(slotMapper,
+                        mapper(StoryboardPreviewMapper.class, session), events),
+                events,
+                JobSettlementPublisher.noop());
     }
 
     @AfterAll
@@ -111,7 +127,7 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
             var gateway = mock(NewApiMediaKitMixAudioClient.class);
             var relay = mock(TosAudioMediaRelay.class);
             var producer = mock(GenerationMessageProducer.class);
-            new AudioMixJobProcessor(service, credentials, gateway, relay, producer).handle(jobId);
+            new AudioMixJobProcessor(service, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle(jobId);
             assertThat(readJob(Long.parseLong(jobId)).getStatus()).isEqualTo("cancelled");
             assertThat(countAssets(Long.parseLong(jobId))).isZero();
             verifyNoInteractions(credentials, gateway, relay, producer);
@@ -131,7 +147,7 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
         var base = new AtomicReference<String>();
         String oldFence = System.getenv("IKI68N_OLD_FENCE");
         if (oldFence != null) {
-            assertThat(service.publishAudioMixResult(new com.bluewhale.worker.domain.dto.PublishMediaExtractDto(
+            assertThat(finalizer.publishAudioMixResult(new com.bluewhale.worker.domain.dto.PublishMediaExtractDto(
                     jobId, "0", "9", "amix-stale", Long.parseLong(oldFence),
                     "https://stale.invalid/out.mp3", "generated/9/audio/stale.mp3", "audio/mpeg",
                     1L, "0123456789abcdef0123456789abcdef", 1.0))).isFalse();
@@ -178,7 +194,8 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
                         "0123456789abcdef0123456789abcdef");
             });
             GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-            var processor = new AudioMixJobProcessor(service, new GenerationCredentialService(),
+            var processor = new AudioMixJobProcessor(service, claimService, jobMapper, finalizer,
+                    new GenerationCredentialService(),
                     new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(base.get())), relay, producer);
             processor.handle(jobId);
             assertThat(readJob(Long.parseLong(jobId)).getProviderTaskId()).isEqualTo("cross-task-1");

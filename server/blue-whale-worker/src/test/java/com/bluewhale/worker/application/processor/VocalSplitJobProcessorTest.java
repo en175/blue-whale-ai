@@ -1,9 +1,11 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedVocalSplitJobDto;
-import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVocalSplitDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.VocalSplitContract;
@@ -16,6 +18,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +54,9 @@ import static org.mockito.Mockito.*;
 class VocalSplitJobProcessorTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitSeparateVoiceClient separateVoiceClient;
@@ -71,9 +77,11 @@ class VocalSplitJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VocalSplitJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer,
+                new AssetSourceService(assetMapper),
                 credentialService, separateVoiceClient, mediaRelay, producer);
-        when(stateMachine.failVocalSplitJob(any())).thenReturn(true);
+        when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
+                anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
@@ -89,34 +97,34 @@ class VocalSplitJobProcessorTest {
                 .thenReturn(source);
     }
 
-    private ClaimedVocalSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                               int pollCount, int progress) {
         return makeClaim(input, providerTaskId, pollCount, progress, null);
     }
 
-    private ClaimedVocalSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                               int pollCount, int progress,
                                               String parentProviderTaskId) {
-        return new ClaimedVocalSplitJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, progress,
-                parentProviderTaskId);
+        return new ClaimedJob(
+                "100", "42", "9", input, "vocal_split", providerTaskId, false,
+                "worker-1", 5L, pollCount, progress, null, null, parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, null, 0, 0)));
     }
 
     private void stubPollClaim(Map<String, Object> input, int pollCount, int progress) {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, "amk-task-1", pollCount, progress)));
     }
 
     private void assertFailCode(String expectedCode) {
-        ArgumentCaptor<FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(FailMediaExtractDto.class);
-        verify(stateMachine).failVocalSplitJob(captor.capture());
-        assertThat(captor.getValue().code()).isEqualTo(expectedCode);
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), anyString(), any(),
+                eq("worker-1"), eq(5L));
+        assertThat(code.getValue()).isEqualTo(expectedCode);
     }
 
     // ========== claim 语义（沿用家族口径：DB 异常上抛保重投） ==========
@@ -124,25 +132,27 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failVocalSplitJob(any());
-        verify(stateMachine, never()).publishVocalSplitResult(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+        verify(finalizer, never()).publishVocalSplitResult(any());
     }
 
     // ========== input 业务键兜底校验（创建入口复核是权威） ==========
@@ -253,7 +263,8 @@ class VocalSplitJobProcessorTest {
                 true, "drama", "aac");
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -329,14 +340,15 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failVocalSplitJob(captor.capture());
-        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
-        assertThat(failure.code()).isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.captor();
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(),
+                details.capture(), eq("worker-1"), eq(5L));
+        assertThat(code.getValue()).isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
         // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
-        assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
-        assertThat(failure.details())
+        assertThat(message.getValue()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(details.getValue())
                 .containsEntry("raw", "人声背景分离任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
                 .containsEntry("http_status", 401);
     }
@@ -346,7 +358,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且轨数组齐全 → 不提交，直接逐轨转存发布（payload 与正常完成同型）")
     void parentReuseSuccess_publishesWithoutSubmit() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-1")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-1"))
                 .thenReturn(twoTrackObservation(65.5));
@@ -354,7 +366,7 @@ class VocalSplitJobProcessorTest {
                 .thenReturn(stored("voice"));
         when(mediaRelay.persist("https://volc/background.aac?auth_key=...", "9", "aac"))
                 .thenReturn(stored("bg"));
-        when(stateMachine.publishVocalSplitResult(any())).thenReturn(true);
+        when(finalizer.publishVocalSplitResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -364,20 +376,21 @@ class VocalSplitJobProcessorTest {
         verify(mediaRelay).persist("https://volc/background.aac?auth_key=...", "9", "aac");
         ArgumentCaptor<PublishVocalSplitDto> captor =
                 ArgumentCaptor.forClass(PublishVocalSplitDto.class);
-        verify(stateMachine).publishVocalSplitResult(captor.capture());
+        verify(finalizer).publishVocalSplitResult(captor.capture());
         PublishVocalSplitDto published = captor.getValue();
         assertThat(published.tracks()).hasSize(2);
         assertThat(published.tracks().get(0).trackType()).isEqualTo("voice");
         assertThat(published.tracks().get(0).url()).isEqualTo("https://tos/out-voice");
         assertThat(published.tracks().get(1).trackType()).isEqualTo("background");
         assertThat(published.tracks().get(1).durationSec()).isEqualTo(65.5);
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
     void parentReuseFailed_fallThrough() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-fail")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-fail"))
                 .thenReturn(new SeparateVoiceTaskObservation("failed", null, null,
@@ -392,13 +405,14 @@ class VocalSplitJobProcessorTest {
 
         verify(separateVoiceClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq(true), eq("audio"), eq("aac"));
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
     void parentReuseLeaseLostBeforeSubmit_stops() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-race")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-race"))
                 .thenThrow(new RuntimeException("HTTP 503"));
@@ -414,7 +428,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-gone")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-gone"))
                 .thenThrow(new VocalSplitError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -429,7 +443,8 @@ class VocalSplitJobProcessorTest {
 
         verify(separateVoiceClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq(true), eq("audio"), eq("aac"));
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -452,7 +467,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务成功但轨数组不齐（drama 场景缺 sfx 轨）→ 回退正常重新提交")
     void parentReuseIncompleteResult_fallThrough() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("drama"), null, 0, 0, "amk-parent-empty")));
         // 三分法场景但父任务 result 只带两轨（缺 sfx）
         Map<String, String> trackUrls = new LinkedHashMap<>();
@@ -477,7 +492,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割发布失败（轨转存下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
     void parentReusePublishFails_fallThrough() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-stale")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-stale"))
                 .thenReturn(twoTrackObservation(65.5));
@@ -493,18 +508,19 @@ class VocalSplitJobProcessorTest {
 
         verify(separateVoiceClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq(true), eq("audio"), eq("aac"));
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
     void parentReusePublishGuardMissed_stopWithoutSubmit() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-guard")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-guard"))
                 .thenReturn(twoTrackObservation(65.5));
         when(mediaRelay.persist(anyString(), eq("9"), eq("aac"))).thenReturn(stored("v"));
-        when(stateMachine.publishVocalSplitResult(any())).thenReturn(false);
+        when(finalizer.publishVocalSplitResult(any())).thenReturn(false);
         stubSourceAsset("video");
 
         processor.handle("100");
@@ -514,7 +530,8 @@ class VocalSplitJobProcessorTest {
         verify(separateVoiceClient, never()).submit(anyString(), anyString(), anyBoolean(),
                 anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     // ========== poll 相：状态机 + 进度口径（对齐家族） ==========
@@ -532,7 +549,8 @@ class VocalSplitJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -563,7 +581,8 @@ class VocalSplitJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -580,7 +599,8 @@ class VocalSplitJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -593,17 +613,19 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(FailMediaExtractDto.class);
-        verify(stateMachine).failVocalSplitJob(captor.capture());
-        assertThat(captor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.captor();
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(),
+                details.capture(), eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
-        assertThat(captor.getValue().message())
+        assertThat(message.getValue())
                 .isEqualTo("人声背景分离轮询超时（超过 "
                         + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
                         + " 次），上游持续错误: MediaKit 人声背景分离任务查询超时");
         // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
-        assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
+        assertThat(details.getValue()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
@@ -619,18 +641,20 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<FailMediaExtractDto> gatewayCaptor =
-                ArgumentCaptor.forClass(FailMediaExtractDto.class);
-        verify(stateMachine).failVocalSplitJob(gatewayCaptor.capture());
-        assertThat(gatewayCaptor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.captor();
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(),
+                details.capture(), eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
         // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
-        assertThat(gatewayCaptor.getValue().message())
+        assertThat(message.getValue())
                 .isEqualTo("人声背景分离轮询超时（超过 "
                         + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
                         + " 次），上游持续错误: MediaKit 人声背景分离任务查询失败:")
                 .doesNotContain("503");
-        assertThat(gatewayCaptor.getValue().details())
+        assertThat(details.getValue())
                 .containsEntry("http_status", 503)
                 .containsEntry("raw", "人声背景分离轮询超时（超过 "
                         + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
@@ -652,7 +676,8 @@ class VocalSplitJobProcessorTest {
         processor.handle("100");
 
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -681,12 +706,13 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(FailMediaExtractDto.class);
-        verify(stateMachine).failVocalSplitJob(captor.capture());
-        assertThat(captor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(), any(),
+                eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
-        assertThat(captor.getValue().message()).isEqualTo("输入音频解析失败，请更换素材后重试");
+        assertThat(message.getValue()).isEqualTo("输入音频解析失败，请更换素材后重试");
     }
 
     @Test
@@ -711,12 +737,13 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(FailMediaExtractDto.class);
-        verify(stateMachine).failVocalSplitJob(captor.capture());
-        assertThat(captor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(), any(),
+                eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
-        assertThat(captor.getValue().message()).isEqualTo("人声背景分离任务失败");
+        assertThat(message.getValue()).isEqualTo("人声背景分离任务失败");
     }
 
     // ========== completed：逐轨转存与多轨资产回填（两轨 / 三轨） ==========
@@ -755,7 +782,7 @@ class VocalSplitJobProcessorTest {
                 .thenReturn(stored("voice"));
         when(mediaRelay.persist(eq("https://volc/background.aac?auth_key=..."), eq("9"), eq("aac")))
                 .thenReturn(stored("bg"));
-        when(stateMachine.publishVocalSplitResult(any())).thenReturn(true);
+        when(finalizer.publishVocalSplitResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -764,7 +791,7 @@ class VocalSplitJobProcessorTest {
         verify(mediaRelay).persist("https://volc/background.aac?auth_key=...", "9", "aac");
         ArgumentCaptor<PublishVocalSplitDto> captor =
                 ArgumentCaptor.forClass(PublishVocalSplitDto.class);
-        verify(stateMachine).publishVocalSplitResult(captor.capture());
+        verify(finalizer).publishVocalSplitResult(captor.capture());
         PublishVocalSplitDto published = captor.getValue();
         assertThat(published.tracks()).hasSize(2);
         assertThat(published.tracks().get(0).trackType()).isEqualTo("voice");
@@ -776,7 +803,8 @@ class VocalSplitJobProcessorTest {
         assertThat(published.tracks().get(1).trackType()).isEqualTo("background");
         assertThat(published.tracks().get(1).url()).isEqualTo("https://tos/out-bg");
         assertThat(published.tracks().get(1).durationSec()).isEqualTo(65.5);
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -792,20 +820,21 @@ class VocalSplitJobProcessorTest {
                 .thenReturn(stored("music"));
         when(mediaRelay.persist(eq("https://volc/sfx.aac"), eq("9"), eq("aac")))
                 .thenReturn(stored("sfx"));
-        when(stateMachine.publishVocalSplitResult(any())).thenReturn(true);
+        when(finalizer.publishVocalSplitResult(any())).thenReturn(true);
 
         processor.handle("100");
 
         verify(mediaRelay, times(3)).persist(anyString(), eq("9"), eq("aac"));
         ArgumentCaptor<PublishVocalSplitDto> captor =
                 ArgumentCaptor.forClass(PublishVocalSplitDto.class);
-        verify(stateMachine).publishVocalSplitResult(captor.capture());
+        verify(finalizer).publishVocalSplitResult(captor.capture());
         assertThat(captor.getValue().tracks())
                 .extracting(PublishVocalSplitDto.PublishVocalSplitTrackDto::trackType)
                 .containsExactly("voice", "music", "sfx");
         assertThat(captor.getValue().tracks().get(1).url()).isEqualTo("https://tos/out-music");
         assertThat(captor.getValue().tracks().get(2).url()).isEqualTo("https://tos/out-sfx");
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -816,13 +845,13 @@ class VocalSplitJobProcessorTest {
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(twoTrackObservation(null));
         when(mediaRelay.persist(anyString(), eq("9"), eq("aac"))).thenReturn(stored("v"));
-        when(stateMachine.publishVocalSplitResult(any())).thenReturn(true);
+        when(finalizer.publishVocalSplitResult(any())).thenReturn(true);
 
         processor.handle("100");
 
         ArgumentCaptor<PublishVocalSplitDto> captor =
                 ArgumentCaptor.forClass(PublishVocalSplitDto.class);
-        verify(stateMachine).publishVocalSplitResult(captor.capture());
+        verify(finalizer).publishVocalSplitResult(captor.capture());
         assertThat(captor.getValue().tracks()).hasSize(2);
         assertThat(captor.getValue().tracks().get(0).durationSec()).isEqualTo(65.0);
         assertThat(captor.getValue().tracks().get(1).durationSec()).isEqualTo(65.0);
@@ -842,21 +871,23 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(FailMediaExtractDto.class);
-        verify(stateMachine).failVocalSplitJob(captor.capture());
-        assertThat(captor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(), any(),
+                eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
-        assertThat(captor.getValue().message()).contains("sfx");
+        assertThat(message.getValue()).contains("sfx");
         verify(mediaRelay, never()).persist(anyString(), anyString(), anyString());
-        verify(stateMachine, never()).publishVocalSplitResult(any());
+        verify(finalizer, never()).publishVocalSplitResult(any());
     }
 
     @Test
     @DisplayName("TOS 未配置 → 1047（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VocalSplitJobProcessor noRelayProcessor = new VocalSplitJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer,
+                new AssetSourceService(assetMapper),
                 credentialService, separateVoiceClient, null, producer);
         stubPollClaim(input("audio"), 3, 7);
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
@@ -864,13 +895,14 @@ class VocalSplitJobProcessorTest {
 
         noRelayProcessor.handle("100");
 
-        ArgumentCaptor<FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(FailMediaExtractDto.class);
-        verify(stateMachine).failVocalSplitJob(captor.capture());
-        assertThat(captor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(), any(),
+                eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
-        assertThat(captor.getValue().message()).isEqualTo("音频转存存储未配置");
-        verify(stateMachine, never()).publishVocalSplitResult(any());
+        assertThat(message.getValue()).isEqualTo("音频转存存储未配置");
+        verify(finalizer, never()).publishVocalSplitResult(any());
     }
 
     @Test
@@ -887,7 +919,7 @@ class VocalSplitJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
-        verify(stateMachine, never()).publishVocalSplitResult(any());
+        verify(finalizer, never()).publishVocalSplitResult(any());
     }
 
     @Test
@@ -898,11 +930,12 @@ class VocalSplitJobProcessorTest {
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(twoTrackObservation(65.5));
         when(mediaRelay.persist(anyString(), eq("9"), eq("aac"))).thenReturn(stored("v"));
-        when(stateMachine.publishVocalSplitResult(any())).thenReturn(false);
+        when(finalizer.publishVocalSplitResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failVocalSplitJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     // ========== 瞬时轮询错误判定（家族同语义） ==========

@@ -9,6 +9,7 @@ import com.bluewhale.worker.application.processor.ImageJobProcessor;
 import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import com.bluewhale.worker.application.processor.VideoJobProcessor;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
@@ -252,6 +253,7 @@ class StartupContractTest {
     void videoTagPinnedAcrossConsumerProcessorAndRoute() {
         VideoJobProcessor processor = new VideoJobProcessor(
                 mock(JobStateMachineService.class),
+                mock(JobFinalizer.class),
                 mock(AssetSourceService.class),
                 mock(GenerationCredentialService.class),
                 mock(NewApiVideoClient.class),

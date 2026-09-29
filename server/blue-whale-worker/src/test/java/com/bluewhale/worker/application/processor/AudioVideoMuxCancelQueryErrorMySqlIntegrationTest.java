@@ -1,6 +1,12 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.application.service.JobSettlementPublisher;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.application.service.ProjectEventPublisher;
+import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
+import com.bluewhale.worker.application.service.StoryboardPreviewSync;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
@@ -106,6 +112,11 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
 
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService realService;
+    /** 真库终态收口（IKIWP8 ③）：发布/失败/探测直连。 */
+    static JobFinalizer realFinalizer;
+    /** 工具族领取管道（IKIWP8）：与 realService 共用同一个真库 jobMapper（取自同一 Spring 上下文）。 */
+    static JobClaimService claimService;
+    static GenerationJobMapper realJobMapper;
     static JdbcTemplate jdbc;
 
     /** 最小 Spring 上下文：与金标夹具同款（Hikari +08:00 会话、7 Mapper、直连 service）。 */
@@ -178,6 +189,23 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
             return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm);
         }
 
+        /**
+         * 真库 JobFinalizer（IKIWP8 ③）：终态收口方法已从 JobStateMachineService 删除，
+         * 测试直连 finalizer；按 7-mapper 兼容构造的内部装配逐项复制，共用同一批真库 mapper。
+         */
+        @Bean
+        JobFinalizer finalizer(
+                GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
+                GenerationOutputSlotMapper sm, ProjectEventMapper pem,
+                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
+            ProjectEventPublisher events = new ProjectEventPublisher(pem);
+            return new JobFinalizer(jm, am, jlm, sm,
+                    new SceneCardGenerationRecordSync(sm, rm, events),
+                    new StoryboardPreviewSync(sm, pm, events),
+                    events,
+                    JobSettlementPublisher.noop());
+        }
+
         private static <T> MapperFactoryBean<T> factory(Class<T> mapperIf, SqlSessionFactory sf)
                 throws Exception {
             MapperFactoryBean<T> b = new MapperFactoryBean<>(mapperIf);
@@ -194,6 +222,9 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         }
         ctx = new AnnotationConfigApplicationContext(TestConfig.class);
         realService = ctx.getBean(JobStateMachineService.class);
+        realFinalizer = ctx.getBean(JobFinalizer.class);
+        realJobMapper = ctx.getBean(GenerationJobMapper.class);
+        claimService = new JobClaimService(realJobMapper);
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
     }
 
@@ -261,10 +292,12 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
     private record WiredProcessor(
             AudioVideoMuxJobProcessor processor,
             JobStateMachineService spyService,
+            JobFinalizer spyFinalizer,
             ConcurrentHashMap<String, byte[]> objects) {}
 
     private WiredProcessor wireProcessor(ConcurrentHashMap<String, byte[]> objects, String storageKey) {
         JobStateMachineService spyService = spy(realService);
+        JobFinalizer spyFinalizer = spy(realFinalizer);
         GenerationCredentialService credentials = mock(GenerationCredentialService.class);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
@@ -285,8 +318,9 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
             return null;
         }).when(relay).deleteUnpublishedObject(anyString());
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay, producer);
-        return new WiredProcessor(processor, spyService, objects);
+        var processor = new AudioVideoMuxJobProcessor(spyService, claimService, realJobMapper, spyFinalizer,
+                credentials, gateway, relay, producer);
+        return new WiredProcessor(processor, spyService, spyFinalizer, objects);
     }
 
     /** 转存成功返回后的首次取消状态查询（第 4 次）注入 DB 异常；前三段真跑（未命中取消）。 */
@@ -425,14 +459,15 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         AtomicReference<String> realKey = new AtomicReference<>();
         TosVideoMediaRelay relay = new TosVideoMediaRelay(realTosStandin(objects, realKey), "bkt", "tos.example.com");
         JobStateMachineService spyService = spy(realService);
+        JobFinalizer spyFinalizer = spy(realFinalizer);
         GenerationCredentialService credentials = mock(GenerationCredentialService.class);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay,
-                mock(GenerationMessageProducer.class));
+        var processor = new AudioVideoMuxJobProcessor(spyService, claimService, realJobMapper, spyFinalizer,
+                credentials, gateway, relay, mock(GenerationMessageProducer.class));
         throwOnPostTransferCancelQuery(spyService, jobId);
 
         processor.handle(String.valueOf(jobId));
@@ -462,8 +497,8 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         // fail 落库自身也失败（DB 持续不可用）
         doAnswer(invocation -> {
             throw new RuntimeException("fail 落库断连");
-        }).when(wired.spyService())
-                .failMediaExtractJob(any(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class));
+        }).when(wired.spyFinalizer())
+                .failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
 
         List<String> logs = captureProcessorLogs(() ->
                 assertThatThrownBy(() -> wired.processor().handle(String.valueOf(jobId)))

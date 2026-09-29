@@ -1,8 +1,11 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
@@ -15,6 +18,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,6 +52,9 @@ import static org.mockito.Mockito.*;
 class VideoEnhanceJobProcessorTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitEnhanceVideoClient enhanceVideoClient;
@@ -68,9 +75,9 @@ class VideoEnhanceJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VideoEnhanceJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, enhanceVideoClient, mediaRelay, producer);
-        when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
+        when(finalizer.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
@@ -89,30 +96,30 @@ class VideoEnhanceJobProcessorTest {
                 .thenReturn(source);
     }
 
-    private ClaimedVideoEnhanceJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                 int pollCount) {
         return makeClaim(input, providerTaskId, pollCount, null);
     }
 
-    private ClaimedVideoEnhanceJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                 int pollCount, String parentProviderTaskId) {
-        return new ClaimedVideoEnhanceJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, 0,
-                parentProviderTaskId);
+        return new ClaimedJob(
+                "100", "42", "9", input, "video_enhance", providerTaskId, false, "worker-1",
+                5L, pollCount, 0, null, null, parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, null, 0)));
     }
 
     private void stubPollClaim(Map<String, Object> input, int pollCount) {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, "amk-task-1", pollCount)));
     }
 
     private void assertFailCode(String expectedCode) {
-        verify(stateMachine).failVideoJob(eq("100"), eq(expectedCode), anyString(),
+        verify(finalizer).failVideoJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
     }
 
@@ -121,27 +128,27 @@ class VideoEnhanceJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine, never()).publishVideoEnhanceResult(any());
+        verify(finalizer, never()).publishVideoEnhanceResult(any());
     }
 
     // ========== input 业务键兜底校验（权威复核在创建入口 IKH3VE） ==========
@@ -216,7 +223,7 @@ class VideoEnhanceJobProcessorTest {
         verify(enhanceVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4", "2k");
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -296,7 +303,7 @@ class VideoEnhanceJobProcessorTest {
 
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED), messageCaptor.capture(),
                 detailsCaptor.capture(), eq("worker-1"), eq(5L));
         // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
@@ -311,7 +318,7 @@ class VideoEnhanceJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
     void parentReuseSuccess_publishesWithoutSubmit() {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("2k"), null, 0, "amk-parent-1")));
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-1"))
                 .thenReturn(new EnhanceVideoTaskObservation("succeeded",
@@ -321,7 +328,7 @@ class VideoEnhanceJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishVideoEnhanceResult(any())).thenReturn(true);
+        when(finalizer.publishVideoEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -329,7 +336,7 @@ class VideoEnhanceJobProcessorTest {
         verify(mediaRelay).persist("https://volc/old-out.mp4?auth_key=...", "9");
         ArgumentCaptor<PublishVideoEnhanceDto> captor =
                 ArgumentCaptor.forClass(PublishVideoEnhanceDto.class);
-        verify(stateMachine).publishVideoEnhanceResult(captor.capture());
+        verify(finalizer).publishVideoEnhanceResult(captor.capture());
         PublishVideoEnhanceDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/out.mp4");
         assertThat(published.storageKey()).isEqualTo("generated/9/video/abc.mp4");
@@ -342,14 +349,14 @@ class VideoEnhanceJobProcessorTest {
         assertThat(published.durationSec()).isEqualTo(65.5);
         assertThat(published.resolution()).isEqualTo("2k");
         assertThat(published.fps()).isEqualTo(30.0);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
     void parentReuseFailed_fallThrough() {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("1080p"), null, 0, "amk-parent-fail")));
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-fail"))
                 .thenReturn(new EnhanceVideoTaskObservation("failed", null, null, null, null,
@@ -363,14 +370,14 @@ class VideoEnhanceJobProcessorTest {
 
         verify(enhanceVideoClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq("1080p"));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
     void parentReuseLeaseLostBeforeSubmit_stops() {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("1080p"), null, 0, "amk-parent-race")));
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-race"))
                 .thenThrow(new RuntimeException("HTTP 503"));
@@ -386,7 +393,7 @@ class VideoEnhanceJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("1080p"), null, 0, "amk-parent-gone")));
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-gone"))
                 .thenThrow(new VideoEnhanceError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -400,7 +407,7 @@ class VideoEnhanceJobProcessorTest {
 
         verify(enhanceVideoClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq("1080p"));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -423,7 +430,7 @@ class VideoEnhanceJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务成功但结果 URL 为空（结果不齐全）→ 回退正常重新提交")
     void parentReuseIncompleteResult_fallThrough() {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("1080p"), null, 0, "amk-parent-empty")));
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-empty"))
                 .thenReturn(new EnhanceVideoTaskObservation("succeeded", null, null, null, null,
@@ -443,7 +450,7 @@ class VideoEnhanceJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割发布失败（转存下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
     void parentReusePublishFails_fallThrough() {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("1080p"), null, 0, "amk-parent-stale")));
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-stale"))
                 .thenReturn(new EnhanceVideoTaskObservation("succeeded",
@@ -459,14 +466,14 @@ class VideoEnhanceJobProcessorTest {
 
         verify(enhanceVideoClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq("1080p"));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
     @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
     void parentReusePublishGuardMissed_stopWithoutSubmit() {
-        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("1080p"), null, 0, "amk-parent-guard")));
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-guard"))
                 .thenReturn(new EnhanceVideoTaskObservation("succeeded",
@@ -476,7 +483,7 @@ class VideoEnhanceJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishVideoEnhanceResult(any())).thenReturn(false);
+        when(finalizer.publishVideoEnhanceResult(any())).thenReturn(false);
 
         processor.handle("100");
 
@@ -485,7 +492,7 @@ class VideoEnhanceJobProcessorTest {
         // 保持 processing，由新 worker 重新领取后重新检查父任务继续收割
         verify(enhanceVideoClient, never()).submit(anyString(), anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -505,7 +512,7 @@ class VideoEnhanceJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -538,7 +545,7 @@ class VideoEnhanceJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -556,7 +563,7 @@ class VideoEnhanceJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -571,7 +578,7 @@ class VideoEnhanceJobProcessorTest {
         processor.handle("100");
 
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED),
                 eq("画质增强轮询超时（超过 " + VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS
                         + " 次），上游持续错误: MediaKit 画质增强任务查询超时"),
@@ -597,7 +604,7 @@ class VideoEnhanceJobProcessorTest {
         // 「: HTTP 503」片段（冒号保留），上游可读原因保留
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         assertThat(messageCaptor.getValue()).doesNotContain("503")
@@ -623,7 +630,7 @@ class VideoEnhanceJobProcessorTest {
         processor.handle("100");
 
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -651,7 +658,7 @@ class VideoEnhanceJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED),
                 eq("仅支持 SDR 视频"),
                 any(), eq("worker-1"), eq(5L));
@@ -684,7 +691,7 @@ class VideoEnhanceJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishVideoEnhanceResult(any())).thenReturn(true);
+        when(finalizer.publishVideoEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -692,7 +699,7 @@ class VideoEnhanceJobProcessorTest {
         verify(mediaRelay).persist("https://volc/out.mp4?auth_key=...", "9");
         ArgumentCaptor<PublishVideoEnhanceDto> captor =
                 ArgumentCaptor.forClass(PublishVideoEnhanceDto.class);
-        verify(stateMachine).publishVideoEnhanceResult(captor.capture());
+        verify(finalizer).publishVideoEnhanceResult(captor.capture());
         PublishVideoEnhanceDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/out.mp4");
         assertThat(published.storageKey()).isEqualTo("generated/9/video/abc.mp4");
@@ -705,7 +712,7 @@ class VideoEnhanceJobProcessorTest {
         assertThat(published.durationSec()).isEqualTo(65.5);
         assertThat(published.resolution()).isEqualTo("2k");
         assertThat(published.fps()).isEqualTo(30.0);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -721,13 +728,13 @@ class VideoEnhanceJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 1L, null));
-        when(stateMachine.publishVideoEnhanceResult(any())).thenReturn(true);
+        when(finalizer.publishVideoEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
 
         ArgumentCaptor<PublishVideoEnhanceDto> captor =
                 ArgumentCaptor.forClass(PublishVideoEnhanceDto.class);
-        verify(stateMachine).publishVideoEnhanceResult(captor.capture());
+        verify(finalizer).publishVideoEnhanceResult(captor.capture());
         // 官方 duration 也缺失 → 回落源 duration_ms 换算秒
         assertThat(captor.getValue().durationSec()).isEqualTo(65.0);
         // 4k 档短边 2160、长边 1920*2160/1080=3840
@@ -754,7 +761,7 @@ class VideoEnhanceJobProcessorTest {
     @DisplayName("TOS 未配置 → 1045（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VideoEnhanceJobProcessor noRelayProcessor = new VideoEnhanceJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, enhanceVideoClient, null, producer);
         stubPollClaim(input("1080p"), 3);
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -763,10 +770,10 @@ class VideoEnhanceJobProcessorTest {
 
         noRelayProcessor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED),
                 eq("画质增强转存存储未配置"), any(), eq("worker-1"), eq(5L));
-        verify(stateMachine, never()).publishVideoEnhanceResult(any());
+        verify(finalizer, never()).publishVideoEnhanceResult(any());
     }
 
     @Test
@@ -781,11 +788,11 @@ class VideoEnhanceJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 1L, null));
-        when(stateMachine.publishVideoEnhanceResult(any())).thenReturn(false);
+        when(finalizer.publishVideoEnhanceResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -802,7 +809,7 @@ class VideoEnhanceJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED);
-        verify(stateMachine, never()).publishVideoEnhanceResult(any());
+        verify(finalizer, never()).publishVideoEnhanceResult(any());
     }
 
     // ========== 输出宽高推导（官方仅返回档位字符串，短边 = 码率参考表档位口径） ==========

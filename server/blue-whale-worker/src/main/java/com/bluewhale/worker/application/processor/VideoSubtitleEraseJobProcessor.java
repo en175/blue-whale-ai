@@ -1,8 +1,11 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
@@ -15,6 +18,7 @@ import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSubtitleEraseClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSubtitleEraseClient.SubtitleEraseTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import org.slf4j.Logger;
@@ -35,7 +39,7 @@ import java.util.Set;
  * 本仓首个 MediaKit **异步任务**：编排复用视频生成的多步状态机骨架（每步 = 一次 MQ 消费，
  * fencing / 租约 / claim-by-id 全部走视频件，不新建任务状态机形态）：
  * <ol>
- *   <li>claimVideoSubtitleErase（富投影：providerTaskId / pollCount / progress）</li>
+ *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（返 task_id）→
  *       markProviderSubmitted（存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
  *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
@@ -74,6 +78,10 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
+    /** 领取规格（IKIWP8 / ADR-0119）：候选 = type + 单源白名单；租约 420s。 */
+    private static final int LEASE_SECONDS = 420;
+    private static final List<String> CLAIM_SOURCES = List.of(VideoSubtitleEraseContract.SOURCE);
+
     /**
      * 轮询步调 5s（视频骨架 VIDEO_POLL_INTERVAL_MS 同值）。
      */
@@ -86,6 +94,9 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
     public static final int MAX_SUBTITLE_ERASE_POLLS = 720;
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
+    private final JobClaimService claimService;
+    private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
     private final NewApiMediaKitSubtitleEraseClient subtitleEraseClient;
@@ -95,6 +106,9 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
 
     public VideoSubtitleEraseJobProcessor(
             JobStateMachineService stateMachine,
+            JobClaimService claimService,
+            GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitSubtitleEraseClient subtitleEraseClient,
@@ -103,6 +117,10 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
+        this.claimService = claimService;
+        this.claimSpec = ClaimSpec.bySources(
+                VideoSubtitleEraseContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.subtitleEraseClient = subtitleEraseClient;
@@ -117,6 +135,14 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
     }
 
     /**
+     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
+     */
+    @Override
+    public Optional<ClaimSpec> claimSpec() {
+        return Optional.of(claimSpec);
+    }
+
+    /**
      * 处理一个 video_subtitle_erase step。
      * <p>
      * claim 在 try 外（视频骨架同构：DB 异常上抛 → consumer 不 ack → 重投）；
@@ -124,16 +150,16 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
      */
     @Override
     public void handle(String jobId) {
-        Optional<ClaimedVideoSubtitleEraseJobDto> claimOpt;
+        Optional<ClaimedJob> claimOpt;
         try {
-            claimOpt = stateMachine.claimVideoSubtitleErase(jobId, workerId);
+            claimOpt = claimService.claim(claimSpec, jobId, workerId);
         } catch (Exception error) {
             log.error("[video_subtitle_erase] claim 失败 jobId={}: {}", jobId, error.getMessage(), error);
             throw error; // 保持不 ack → RocketMQ 重投
         }
         if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒
 
-        ClaimedVideoSubtitleEraseJobDto claim = claimOpt.get();
+        ClaimedJob claim = claimOpt.get();
         log.info("[video_subtitle_erase] 已领取 jobId={} token={} providerTaskId={} pollCount={}",
                 claim.id(), claim.fencingToken(), claim.providerTaskId(), claim.pollCount());
 
@@ -156,7 +182,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
     /**
      * 分相主逻辑（视频骨架 runVideoStep 同构）：凭证 → submit 相 / poll 相。
      */
-    private void runStep(ClaimedVideoSubtitleEraseJobDto claim) {
+    private void runStep(ClaimedJob claim) {
         // 取明文凭证（§17.2 基础设施键；与视频/image_erase 同构，修正四：明文直通）
         Object credentialObj = claim.input().get("provider_credential");
         if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
@@ -186,7 +212,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
     /**
      * 提交相：解析冻结 input + 源视频 → 网关提交 → markProviderSubmitted → 续排轮询。
      */
-    private void submitPhase(ClaimedVideoSubtitleEraseJobDto claim, String providerToken) {
+    private void submitPhase(ClaimedJob claim, String providerToken) {
         // 0. IKI89U（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
         //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
@@ -224,8 +250,8 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
         // 2. 解析源视频素材：Asset url 落库即公网 public-read，直接作 video_url（§17.5）
         AssetEntity source = assetSource.resolve(
                 Long.parseLong(sourceAssetId),
-                Long.parseLong(claim.user_id()),
-                Long.parseLong(claim.project_id()));
+                Long.parseLong(claim.userId()),
+                Long.parseLong(claim.projectId()));
         if (source == null || !"video".equals(source.getType())
                 || source.getUrl() == null || source.getUrl().isEmpty()) {
             failClaimed(claim, VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED,
@@ -256,7 +282,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
      * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（含超限）/ failed 终态 /
      * completed 立即下载转存发布。
      */
-    private void pollPhase(ClaimedVideoSubtitleEraseJobDto claim, String providerToken) {
+    private void pollPhase(ClaimedJob claim, String providerToken) {
         SubtitleEraseTaskObservation observation;
         try {
             observation = subtitleEraseClient.poll(providerToken, claim.providerTaskId());
@@ -339,7 +365,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
      * 返回发布守卫结果（IKI89U：重试收割据此判定复用是否成立；false = 守卫未命中，
      * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
      */
-    private boolean publishResult(ClaimedVideoSubtitleEraseJobDto claim,
+    private boolean publishResult(ClaimedJob claim,
                                   SubtitleEraseTaskObservation observation) {
         // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（对齐 image_erase 的强依赖口径）
         if (mediaRelay == null) {
@@ -348,7 +374,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
                     "去字幕转存存储未配置");
         }
         TosVideoMediaRelay.StoredVideo stored =
-                mediaRelay.persist(observation.videoUrl(), claim.user_id());
+                mediaRelay.persist(observation.videoUrl(), claim.userId());
         log.info("[video_subtitle_erase] 转存完成 jobId={} storageKey={} size={}",
                 claim.id(), stored.storageKey(), stored.size());
 
@@ -362,8 +388,8 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
         if (sourceAssetId != null) {
             AssetEntity source = assetSource.resolve(
                     Long.parseLong(sourceAssetId),
-                    Long.parseLong(claim.user_id()),
-                    Long.parseLong(claim.project_id()));
+                    Long.parseLong(claim.userId()),
+                    Long.parseLong(claim.projectId()));
             if (source != null) {
                 width = source.getWidth();
                 height = source.getHeight();
@@ -375,10 +401,10 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
         Double durationSec = observation.durationSec() != null
                 ? observation.durationSec() : sourceDurationSec;
 
-        boolean published = stateMachine.publishVideoSubtitleEraseResult(new PublishVideoSubtitleEraseDto(
+        boolean published = finalizer.publishVideoSubtitleEraseResult(new PublishVideoSubtitleEraseDto(
                 claim.id(),
-                claim.project_id(),
-                claim.user_id(),
+                claim.projectId(),
+                claim.userId(),
                 claim.workerId(),
                 claim.fencingToken(),
                 stored.url(),
@@ -481,7 +507,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
 
     /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at，视频骨架语义对齐；
      *  去字幕无输出槽位，槽位段天然空转；details.raw 透传原始原因）。 */
-    private void failClaimed(ClaimedVideoSubtitleEraseJobDto claim, String code, String msg) {
+    private void failClaimed(ClaimedJob claim, String code, String msg) {
         failClaimed(claim, code, msg, null);
     }
 
@@ -490,7 +516,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
      *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。轮询预算耗尽
      *  分支同样按 cause 透传（IKIN6X，父单 IKIN6H「有 cause 即透传」与迁移契约 §20 口径）：
      *  瞬时错误耗尽预算且 cause 携带状态即写，无 cause（超时 / 连接失败）不写。 */
-    private void failClaimed(ClaimedVideoSubtitleEraseJobDto claim, String code, String msg,
+    private void failClaimed(ClaimedJob claim, String code, String msg,
                              Integer httpStatus) {
         log.warn("video_subtitle_erase job 失败 jobId={} code={} message={}", claim.id(), code, msg);
         Map<String, Object> details = new HashMap<>();
@@ -498,7 +524,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
-        stateMachine.failVideoJob(claim.id(), code, msg, details,
+        finalizer.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
 

@@ -1,11 +1,14 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
+import com.bluewhale.worker.domain.contract.AudioTrimContract;
+import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.ProjectEventEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
@@ -87,10 +90,28 @@ class JobStateMachineServiceGoldenMirrorTest {
 
     private JobStateMachineService service;
 
+    /**
+     * 终态收口（IKIWP8 / ADR-0119 commit ③）：门面上的 complete/fail/publish 零逻辑转发方法已
+     * 删除，测试改为直呼真实的 {@link JobFinalizer}。7-mapper 构造器不暴露内部 finalizer，
+     * 故此处按生产 7-mapper 构造器的**逐字相同**表达式自建一份（同一个被 mock 的 mapper 集合）。
+     */
+    private JobFinalizer finalizer;
+
+    /** 工具族领取管道（IKIWP8）：与 service 共用同一个被 mock 的 jobMapper。 */
+    private JobClaimService claimService;
+
     @BeforeEach
     void setUp() {
         service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper,
                 projectEventMapper, slotMapper, sceneCardRecordMapper, storyboardPreviewMapper);
+        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper,
+                new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper,
+                        new ProjectEventPublisher(projectEventMapper)),
+                new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,
+                        new ProjectEventPublisher(projectEventMapper)),
+                new ProjectEventPublisher(projectEventMapper),
+                JobSettlementPublisher.noop());
+        claimService = new JobClaimService(jobMapper);
     }
 
     @Test
@@ -107,7 +128,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setLeaseExpiresAt(null); // 孤儿
         candidate.setInput("{\"videoUrl\":\"https://example.com/video.mp4\"}");
 
-        when(jobMapper.findMediaExtractCandidate(300L)).thenReturn(candidate);
+        when(jobMapper.findCandidateByTypeOnly(300L, "media_extract")).thenReturn(candidate);
         when(jobMapper.claimMediaExtractCas(
                 eq(300L),
                 eq("worker-1"),
@@ -117,11 +138,14 @@ class JobStateMachineServiceGoldenMirrorTest {
         )).thenReturn(1);
 
         // when
-        Optional<ClaimedMediaExtractJobDto> result = service.claimMediaExtract("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
+                        jobMapper::claimMediaExtractCas),
+                "300", "worker-1");
 
         // then
         assertThat(result).isPresent();
-        ClaimedMediaExtractJobDto claimed = result.get();
+        ClaimedJob claimed = result.get();
         assertThat(claimed.fencingToken()).isEqualTo(5L); // 增后 token = 4 + 1
 
         // 断言 CAS where 含 status='processing'（不强制 queued）
@@ -221,9 +245,12 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("claimMediaExtract: no candidate → empty")
     void claimMediaExtract_noCandidate() {
-        when(jobMapper.findMediaExtractCandidate(300L)).thenReturn(null);
+        when(jobMapper.findCandidateByTypeOnly(300L, "media_extract")).thenReturn(null);
 
-        Optional<ClaimedMediaExtractJobDto> result = service.claimMediaExtract("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
+                        jobMapper::claimMediaExtractCas),
+                "300", "worker-1");
 
         assertThat(result).isEmpty();
     }
@@ -236,7 +263,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setFencingToken(4L);
         candidate.setStatus("queued");
 
-        when(jobMapper.findMediaExtractCandidate(300L)).thenReturn(candidate);
+        when(jobMapper.findCandidateByTypeOnly(300L, "media_extract")).thenReturn(candidate);
         when(jobMapper.claimMediaExtractCas(
                 eq(300L),
                 eq("worker-1"),
@@ -245,7 +272,10 @@ class JobStateMachineServiceGoldenMirrorTest {
                 eq("queued")
         )).thenReturn(0); // CAS rejected
 
-        Optional<ClaimedMediaExtractJobDto> result = service.claimMediaExtract("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
+                        jobMapper::claimMediaExtractCas),
+                "300", "worker-1");
 
         assertThat(result).isEmpty();
     }
@@ -290,7 +320,10 @@ class JobStateMachineServiceGoldenMirrorTest {
         );
 
         // when
-        boolean result = service.publishMediaExtractResult(input);
+        boolean result = finalizer.publishMediaExtractResult(
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), input.url(), input.storageKey(), input.mime(),
+                input.size(), input.md5(), input.duration());
 
         // then
         assertThat(result).isTrue();
@@ -328,7 +361,10 @@ class JobStateMachineServiceGoldenMirrorTest {
                 "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef", 12.5
         );
 
-        boolean result = service.publishMediaExtractResult(input);
+        boolean result = finalizer.publishMediaExtractResult(
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), input.url(), input.storageKey(), input.mime(),
+                input.size(), input.md5(), input.duration());
 
         assertThat(result).isFalse();
         verify(assetMapper, never()).insert(any(AssetEntity.class));
@@ -349,7 +385,9 @@ class JobStateMachineServiceGoldenMirrorTest {
         );
 
         // when
-        boolean result = service.failMediaExtractJob(input);
+        boolean result = finalizer.failMediaExtractJob(
+                input.jobId(), input.code(), input.message(), input.details(),
+                input.workerId(), input.fencingToken());
 
         // then
         assertThat(result).isTrue();
@@ -390,7 +428,9 @@ class JobStateMachineServiceGoldenMirrorTest {
                 null
         );
 
-        boolean result = service.failMediaExtractJob(input);
+        boolean result = finalizer.failMediaExtractJob(
+                input.jobId(), input.code(), input.message(), input.details(),
+                input.workerId(), input.fencingToken());
 
         assertThat(result).isFalse();
         verify(jobLogMapper, never()).insert(any(GenerationJobLogEntity.class));
@@ -401,10 +441,11 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("claimAudioTrim: no candidate → empty")
     void claimAudioTrim_noCandidate() {
-        when(jobMapper.findAudioTrimCandidate(300L)).thenReturn(null);
+        when(jobMapper.findCandidateByTypeOnly(300L, "audio_trim")).thenReturn(null);
 
-        Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> result =
-                service.claimAudioTrim("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
+                "300", "worker-1");
 
         assertThat(result).isEmpty();
     }
@@ -417,7 +458,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setFencingToken(4L);
         candidate.setStatus("queued");
 
-        when(jobMapper.findAudioTrimCandidate(300L)).thenReturn(candidate);
+        when(jobMapper.findCandidateByTypeOnly(300L, "audio_trim")).thenReturn(candidate);
         when(jobMapper.claimImageCas(
                 eq(300L),
                 eq("worker-1"),
@@ -426,8 +467,9 @@ class JobStateMachineServiceGoldenMirrorTest {
                 eq("queued")
         )).thenReturn(0); // CAS rejected
 
-        Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> result =
-                service.claimAudioTrim("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
+                "300", "worker-1");
 
         assertThat(result).isEmpty();
     }
@@ -455,7 +497,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                 );
 
         // when
-        boolean result = service.publishAudioTrimResult(input);
+        boolean result = finalizer.publishAudioTrimResult(input);
 
         // then
         assertThat(result).isTrue();
@@ -494,7 +536,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                         "audio/mpeg", 1024L, null, null
                 );
 
-        boolean result = service.publishAudioTrimResult(input);
+        boolean result = finalizer.publishAudioTrimResult(input);
 
         assertThat(result).isFalse();
         verify(assetMapper, never()).insert(any(AssetEntity.class));
@@ -516,7 +558,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                 );
 
         // when
-        boolean result = service.failAudioTrimJob(input);
+        boolean result = finalizer.failAudioTrimJob(input);
 
         // then
         assertThat(result).isTrue();
@@ -558,7 +600,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                         null
                 );
 
-        boolean result = service.failAudioTrimJob(input);
+        boolean result = finalizer.failAudioTrimJob(input);
 
         assertThat(result).isFalse();
         verify(jobLogMapper, never()).insert(any(GenerationJobLogEntity.class));
@@ -696,7 +738,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         // when
-        boolean result = service.completeJob("300", List.of("888"), "worker-1", 5L);
+        boolean result = finalizer.completeJob("300", List.of("888"), "worker-1", 5L);
 
         // then
         assertThat(result).isTrue();
@@ -711,7 +753,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     void completeJob_fenceFail() {
         when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(0);
 
-        boolean result = service.completeJob("300", List.of("888"), "worker-1", 5L);
+        boolean result = finalizer.completeJob("300", List.of("888"), "worker-1", 5L);
 
         assertThat(result).isFalse();
         verify(slotMapper, never()).findByJobId(anyLong());
@@ -727,7 +769,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         // when
-        boolean result = service.failJob("300", "provider_failed", "TTS 调用失败",
+        boolean result = finalizer.failJob("300", "provider_failed", "TTS 调用失败",
                 Map.of("raw", "connection refused"), "worker-1", 5L);
 
         // then
@@ -744,7 +786,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     void failJob_fenceFail() {
         when(jobMapper.failJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(0);
 
-        boolean result = service.failJob("300", "provider_failed", "err",
+        boolean result = finalizer.failJob("300", "provider_failed", "err",
                 null, "worker-1", 5L);
 
         assertThat(result).isFalse();
@@ -873,7 +915,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         // when: 只产出 2 张图
-        boolean result = service.completeJob("300", List.of("100", "101"), "worker-1", 5L);
+        boolean result = finalizer.completeJob("300", List.of("100", "101"), "worker-1", 5L);
 
         // then
         assertThat(result).isTrue();
@@ -901,7 +943,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
-        boolean result = service.completeJob("300", List.of("100", "101"), "worker-1", 5L);
+        boolean result = finalizer.completeJob("300", List.of("100", "101"), "worker-1", 5L);
 
         assertThat(result).isTrue();
         verify(slotMapper).updateSlot(10L, "succeeded", 100L);
@@ -924,7 +966,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         // 0 个 asset → 全槽失败
-        boolean result = service.completeJob("300", List.of(), "worker-1", 5L);
+        boolean result = finalizer.completeJob("300", List.of(), "worker-1", 5L);
 
         assertThat(result).isTrue();
         verify(slotMapper).updateSlotStatus(10L, "failed");
@@ -955,7 +997,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         record.setId(500L); record.setProjectId(42L); record.setVersion(2);
         when(sceneCardRecordMapper.selectById(500L)).thenReturn(record);
 
-        boolean result = service.completeJob("300", List.of("99", "98"), "worker-1", 5L);
+        boolean result = finalizer.completeJob("300", List.of("99", "98"), "worker-1", 5L);
 
         assertThat(result).isTrue();
         verify(sceneCardRecordMapper).updateSummaryStatus(500L, "success");
@@ -982,7 +1024,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         record.setId(500L); record.setProjectId(42L); record.setVersion(2);
         when(sceneCardRecordMapper.selectById(500L)).thenReturn(record);
 
-        service.completeJob("300", List.of("99"), "worker-1", 5L);
+        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
 
         verify(sceneCardRecordMapper).updateSummaryStatus(500L, "partial");
         verify(jobMapper).updateJobStatus(300L, "partially_succeeded");
@@ -999,7 +1041,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "succeeded", 100));
         when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
 
-        service.completeJob("300", List.of("99"), "worker-1", 5L);
+        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
 
         // record mapper 不应被调用
         verify(sceneCardRecordMapper, never()).updateSummaryStatus(anyLong(), anyString());
@@ -1025,7 +1067,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         updated.setId(700L); updated.setVersion(2);
         when(storyboardPreviewMapper.selectById(700L)).thenReturn(updated);
 
-        service.completeJob("300", List.of("99"), "worker-1", 5L);
+        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
 
         verify(storyboardPreviewMapper).findByFirstGenerationJobId(300L);
         verify(storyboardPreviewMapper).updateSummaryStatus(700L, "success");
@@ -1044,7 +1086,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         // storyboard_preview 反查无命中
         when(storyboardPreviewMapper.findByFirstGenerationJobId(300L)).thenReturn(null);
 
-        service.completeJob("300", List.of("99"), "worker-1", 5L);
+        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
 
         verify(storyboardPreviewMapper).findByFirstGenerationJobId(300L);
         verify(storyboardPreviewMapper, never()).updateSummaryStatus(anyLong(), anyString());
@@ -1137,7 +1179,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                                 "video/mp4", 2048L, "md5-2", 1920, 1080)));
 
         // when
-        boolean result = service.publishVideoSceneSplitResult(input);
+        boolean result = finalizer.publishVideoSceneSplitResult(input);
 
         // then
         assertThat(result).isTrue();
@@ -1193,7 +1235,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                         "https://tos/seg.mp4", "generated/9/video/seg.mp4",
                         "video/mp4", 1024L, "md5", 1920, 1080)));
 
-        boolean result = service.publishVideoSceneSplitResult(input);
+        boolean result = finalizer.publishVideoSceneSplitResult(input);
 
         assertThat(result).isFalse();
         verify(assetMapper, never()).insert(any(AssetEntity.class));
@@ -1219,7 +1261,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                 1920, 1080, 65.5, "1080p", 60.0);
 
         // when
-        boolean result = service.publishVideoFrameInterpolationResult(input);
+        boolean result = finalizer.publishVideoFrameInterpolationResult(input);
 
         // then
         assertThat(result).isTrue();
@@ -1266,7 +1308,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                 "https://tos/out.mp4", "generated/9/video/out.mp4", "video/mp4", 123_456L, "md5-x",
                 1920, 1080, 65.5, "1080p", 60.0);
 
-        boolean result = service.publishVideoFrameInterpolationResult(input);
+        boolean result = finalizer.publishVideoFrameInterpolationResult(input);
 
         assertThat(result).isFalse();
         verify(assetMapper, never()).insert(any(AssetEntity.class));

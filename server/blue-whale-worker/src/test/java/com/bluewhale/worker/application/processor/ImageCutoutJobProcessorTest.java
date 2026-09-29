@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
-import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedImageCutoutJobDto;
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageCutoutDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageCutoutContract;
@@ -11,6 +13,7 @@ import com.bluewhale.worker.domain.error.ImageCutoutError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitCutoutClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -61,7 +64,9 @@ class ImageCutoutJobProcessorTest {
     private static final byte[] PNG_1X1 = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
-    @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitCutoutClient mediaKitCutoutClient;
@@ -74,9 +79,10 @@ class ImageCutoutJobProcessorTest {
     @BeforeEach
     void setUp() throws Exception {
         processor = new ImageCutoutJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                claimService, jobMapper, finalizer,
+                new AssetSourceService(assetMapper),
                 credentialService, mediaKitCutoutClient, tosService);
-        when(stateMachine.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
+        when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
         // 结果图桩（24h 有效的火山 URL 用本地 HttpServer 模拟）
@@ -97,8 +103,9 @@ class ImageCutoutJobProcessorTest {
         resultServer.stop(0);
     }
 
-    private ClaimedImageCutoutJobDto makeClaim(Map<String, Object> input) {
-        return new ClaimedImageCutoutJobDto("100", "42", "9", input, "worker-1", 5L);
+    private ClaimedJob makeClaim(Map<String, Object> input) {
+        return new ClaimedJob("100", "42", "9", input, "image_cutout",
+                null, false, "worker-1", 5L, 0, 0, null, null, null);
     }
 
     private Map<String, Object> generalSceneInput() {
@@ -133,7 +140,7 @@ class ImageCutoutJobProcessorTest {
     }
 
     private void stubClaim(Map<String, Object> input) {
-        when(stateMachine.claimImageCutout(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input)));
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
     }
@@ -142,11 +149,11 @@ class ImageCutoutJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), eq("9")))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/cutout.png", "uploads/9/image/cutout.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageCutoutResult(any())).thenReturn(true);
+        when(finalizer.publishImageCutoutResult(any())).thenReturn(true);
     }
 
     private void assertFailCode(String expectedCode) {
-        verify(stateMachine).failJob(eq("100"), eq(expectedCode), anyString(),
+        verify(finalizer).failJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
     }
 
@@ -207,26 +214,26 @@ class ImageCutoutJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimImageCutout(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimImageCutout(eq("100"), anyString())).thenReturn(Optional.empty());
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString())).thenReturn(Optional.empty());
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine, never()).publishImageCutoutResult(any());
+        verify(finalizer, never()).publishImageCutoutResult(any());
     }
 
     // ========== input 业务键与场景-增强键组合兜底校验（权威复核在创建入口 IKGXM1） ==========
@@ -412,7 +419,7 @@ class ImageCutoutJobProcessorTest {
         verify(mediaKitCutoutClient).cutout(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("general"), isNull(), isNull(), isNull(), isNull());
         ArgumentCaptor<PublishImageCutoutDto> captor = ArgumentCaptor.forClass(PublishImageCutoutDto.class);
-        verify(stateMachine).publishImageCutoutResult(captor.capture());
+        verify(finalizer).publishImageCutoutResult(captor.capture());
         PublishImageCutoutDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/cutout.png");
         assertThat(published.storageKey()).isEqualTo("uploads/9/image/cutout.png");
@@ -424,7 +431,7 @@ class ImageCutoutJobProcessorTest {
         assertThat(published.height()).isEqualTo(600);
         // IKGS73：md5 必须从 stored 穿透到发布入参（assets.md5 去重依赖）。
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -444,11 +451,11 @@ class ImageCutoutJobProcessorTest {
         verify(mediaKitCutoutClient).cutout(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("human"), eq(true), eq("#FFFFFF"), eq(10), eq(true));
         ArgumentCaptor<PublishImageCutoutDto> captor = ArgumentCaptor.forClass(PublishImageCutoutDto.class);
-        verify(stateMachine).publishImageCutoutResult(captor.capture());
+        verify(finalizer).publishImageCutoutResult(captor.capture());
         // 官方响应缺宽高 → 结果图 ImageIO 解析兜底（1x1 PNG）
         assertThat(captor.getValue().width()).isEqualTo(1);
         assertThat(captor.getValue().height()).isEqualTo(1);
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -470,7 +477,7 @@ class ImageCutoutJobProcessorTest {
 
         assertFailCode(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
         verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
-        verify(stateMachine, never()).publishImageCutoutResult(any());
+        verify(finalizer, never()).publishImageCutoutResult(any());
     }
 
     @Test
@@ -484,11 +491,11 @@ class ImageCutoutJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/c.png", "uploads/9/image/c.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageCutoutResult(any())).thenReturn(false);
+        when(finalizer.publishImageCutoutResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -514,7 +521,7 @@ class ImageCutoutJobProcessorTest {
         assertFailCode(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
         // 闸门拦在 uploadImageBytes 之前：既不落脏资产，也不留终态 succeeded
         verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
-        verify(stateMachine, never()).publishImageCutoutResult(any());
+        verify(finalizer, never()).publishImageCutoutResult(any());
     }
 
     @Test
@@ -531,8 +538,8 @@ class ImageCutoutJobProcessorTest {
 
         // setUp 的桩图 PNG_1X1 解出来是 alpha=127：判据若写成「非 255 即空」会在这里误杀
         verify(tosService).uploadImageBytes(eq(PNG_1X1), anyString(), eq("9"));
-        verify(stateMachine).publishImageCutoutResult(any());
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).publishImageCutoutResult(any());
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -551,8 +558,8 @@ class ImageCutoutJobProcessorTest {
         processor.handle("100");
 
         verify(tosService).uploadImageBytes(any(), anyString(), eq("9"));
-        verify(stateMachine).publishImageCutoutResult(any());
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).publishImageCutoutResult(any());
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -577,7 +584,7 @@ class ImageCutoutJobProcessorTest {
 
         assertFailCode(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
         verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
-        verify(stateMachine, never()).publishImageCutoutResult(any());
+        verify(finalizer, never()).publishImageCutoutResult(any());
     }
 
     @Test
@@ -595,8 +602,8 @@ class ImageCutoutJobProcessorTest {
         processor.handle("100");
 
         verify(tosService).uploadImageBytes(any(), anyString(), eq("9"));
-        verify(stateMachine).publishImageCutoutResult(any());
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).publishImageCutoutResult(any());
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -615,8 +622,8 @@ class ImageCutoutJobProcessorTest {
         processor.handle("100");
 
         verify(tosService).uploadImageBytes(any(), anyString(), eq("9"));
-        verify(stateMachine).publishImageCutoutResult(any());
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).publishImageCutoutResult(any());
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -636,8 +643,8 @@ class ImageCutoutJobProcessorTest {
 
         // 魔数认不出 → sniffImageMime 兜底 image/png，mime 照常带过去（不是 null）
         verify(tosService).uploadImageBytes(eq(garbage), eq("image/png"), eq("9"));
-        verify(stateMachine).publishImageCutoutResult(any());
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).publishImageCutoutResult(any());
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 }

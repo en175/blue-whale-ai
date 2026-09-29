@@ -3,9 +3,21 @@ package com.bluewhale.worker.application.processor;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.application.service.JobSettlementPublisher;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.application.service.ProjectEventPublisher;
+import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
+import com.bluewhale.worker.application.service.StoryboardPreviewSync;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
+import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
+import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
+import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.zaxxer.hikari.HikariDataSource;
@@ -51,6 +63,20 @@ class PromptPlanVideoIntegrationTest {
         DataSourceTransactionManager transactionManager(DataSource source) {
             return new DataSourceTransactionManager(source);
         }
+
+        /** 终态收口（刀④）：真库直连装配，MQ 生产者为 noop（本测试无外部队列）。 */
+        @Bean
+        JobFinalizer finalizer(
+                GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
+                GenerationOutputSlotMapper sm, ProjectEventMapper pem,
+                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
+            ProjectEventPublisher events = new ProjectEventPublisher(pem);
+            return new JobFinalizer(jm, am, jlm, sm,
+                    new SceneCardGenerationRecordSync(sm, rm, events),
+                    new StoryboardPreviewSync(sm, pm, events),
+                    events,
+                    JobSettlementPublisher.noop());
+        }
     }
 
     @Test
@@ -67,6 +93,7 @@ class PromptPlanVideoIntegrationTest {
                 }
             };
             var processor = new VideoJobProcessor(context.getBean(JobStateMachineService.class),
+                    context.getBean(JobFinalizer.class),
                     context.getBean(AssetSourceService.class), new GenerationCredentialService(),
                     new NewApiVideoClient(new UpstreamBaseUrl(System.getenv("IKETSX_PROVIDER_URL"))), relay, queue);
             processor.handle(System.getenv("IKETSX_JOB_ID"));

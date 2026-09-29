@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -51,6 +52,7 @@ class ImageJobProcessorI2iAliasTest {
     private static final String ALIAS = "nano-banana-2-i2i";
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiImageClient imageClient;
@@ -65,7 +67,7 @@ class ImageJobProcessorI2iAliasTest {
     @BeforeEach
     void setUp() {
         processor = new ImageJobProcessor(
-                stateMachine, assetSource, credentialService,
+                stateMachine, finalizer, assetSource, credentialService,
                 imageClient, capabilityMapper, tosService);
     }
 

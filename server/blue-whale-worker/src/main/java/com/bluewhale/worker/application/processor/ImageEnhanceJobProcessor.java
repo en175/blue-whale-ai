@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
-import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageEnhanceContract;
@@ -11,6 +13,7 @@ import com.bluewhale.worker.domain.error.ImageEnhanceError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitClient;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +28,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -63,7 +67,13 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
-    private final JobStateMachineService stateMachine;
+    /** 领取规格（IKIWP8 / ADR-0119）：候选 = type + 单源白名单；租约 420s（> MediaKit 读超时 + 转存余量）。 */
+    private static final int LEASE_SECONDS = 420;
+    private static final List<String> CLAIM_SOURCES = List.of(ImageEnhanceContract.SOURCE);
+
+    private final JobClaimService claimService;
+    private final JobFinalizer finalizer;
+    private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
     private final NewApiMediaKitClient mediaKitClient;
@@ -72,13 +82,18 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
     private final HttpClient fetchClient;
 
     public ImageEnhanceJobProcessor(
-            JobStateMachineService stateMachine,
+            JobClaimService claimService,
+            GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitClient mediaKitClient,
             TosMediaStorage tosService
     ) {
-        this.stateMachine = stateMachine;
+        this.claimService = claimService;
+        this.finalizer = finalizer;
+        this.claimSpec = ClaimSpec.bySources(
+                ImageEnhanceContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.mediaKitClient = mediaKitClient;
@@ -96,6 +111,14 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
     }
 
     /**
+     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
+     */
+    @Override
+    public Optional<ClaimSpec> claimSpec() {
+        return Optional.of(claimSpec);
+    }
+
+    /**
      * 处理一个 image_enhance job。
      * <p>
      * claim 在 try 外（IKC9EJ 同构：DB 异常上抛 → consumer 不 ack → 重投）；
@@ -103,16 +126,16 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
      */
     @Override
     public void handle(String jobId) {
-        Optional<ClaimedImageEnhanceJobDto> claimOpt;
+        Optional<ClaimedJob> claimOpt;
         try {
-            claimOpt = stateMachine.claimImageEnhance(jobId, workerId);
+            claimOpt = claimService.claim(claimSpec, jobId, workerId);
         } catch (Exception error) {
             log.error("[image_enhance] claim 失败 jobId={}: {}", jobId, error.getMessage(), error);
             throw error; // 保持不 ack → RocketMQ 重投
         }
         if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒
 
-        ClaimedImageEnhanceJobDto claim = claimOpt.get();
+        ClaimedJob claim = claimOpt.get();
         log.info("[image_enhance] 已领取 jobId={} token={}", claim.id(), claim.fencingToken());
 
         try {
@@ -125,7 +148,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
         }
     }
 
-    private void processClaimedJob(ClaimedImageEnhanceJobDto claim) {
+    private void processClaimedJob(ClaimedJob claim) {
         Map<String, Object> input = claim.input();
 
         // 1. 解析冻结 input 六键（§14.2：六键恒在、值恒为合法枚举；此处为 worker 兜底防御）
@@ -228,7 +251,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
 
         // 8. 终态收口：建 Asset（type=image / source=generated / generation_job_id）→ succeeded
         //    （免费工具无结算联动，同 extract 的 publishMediaExtractResult 形态，§14.5）
-        boolean published = stateMachine.publishImageEnhanceResult(new PublishImageEnhanceDto(
+        boolean published = finalizer.publishImageEnhanceResult(new PublishImageEnhanceDto(
                 claim.id(),
                 claim.projectId(),
                 claim.userId(),
@@ -311,10 +334,10 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
     }
 
     /** 失败处理：与图片任务同构走通用 failJob（details.raw 透传原始原因）。 */
-    private void failClaimed(ClaimedImageEnhanceJobDto claim, String code, String msg) {
+    private void failClaimed(ClaimedJob claim, String code, String msg) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
-        stateMachine.failJob(claim.id(), code, msg, details,
+        finalizer.failJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
 

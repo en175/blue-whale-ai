@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -44,6 +45,7 @@ public class AudioJobProcessor implements JobProcessor {
     private static final Logger log = LoggerFactory.getLogger(AudioJobProcessor.class);
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
     private final NewApiAudioClient audioClient;
@@ -52,12 +54,14 @@ public class AudioJobProcessor implements JobProcessor {
 
     public AudioJobProcessor(
             JobStateMachineService stateMachine,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiAudioClient audioClient,
             TosMediaStorage tosService
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.audioClient = audioClient;
@@ -96,7 +100,7 @@ public class AudioJobProcessor implements JobProcessor {
         if (job.cancelRequested()) {
             log.info("[audio] 取消已执行(cancelRequested) jobId={}", job.id());
             // 音频无 cancel-before-dispatch 端点——直接 fail（与 TS cancelVideoBeforeDispatch 语义等价）
-            stateMachine.failJob(job.id(), GenerationError.ERROR_PROVIDER_FAILED,
+            finalizer.failJob(job.id(), GenerationError.ERROR_PROVIDER_FAILED,
                     "任务已取消", null, workerId, job.fencingToken());
             return;
         }
@@ -228,7 +232,7 @@ public class AudioJobProcessor implements JobProcessor {
         }
 
         // 9. completeJob（generation-worker.ts:445 finishJob）—— 带上按秒计价的权威量
-        boolean completed = stateMachine.completeJob(
+        boolean completed = finalizer.completeJob(
                 job.id(), List.of(assetId), workerId, job.fencingToken(), audioSeconds);
         if (completed) {
             log.info("[audio] 发布成功 jobId={} assetId={}", job.id(), assetId);
@@ -353,7 +357,7 @@ public class AudioJobProcessor implements JobProcessor {
     private void failClaimed(ClaimedJobDto job, String code, String msg) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
-        stateMachine.failJob(job.id(), code, msg, details, workerId, job.fencingToken());
+        finalizer.failJob(job.id(), code, msg, details, workerId, job.fencingToken());
     }
 
     private static String strOrEmpty(Map<String, Object> map, String key) {

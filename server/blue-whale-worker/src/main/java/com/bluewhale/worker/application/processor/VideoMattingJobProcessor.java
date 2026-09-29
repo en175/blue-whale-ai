@@ -1,8 +1,11 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoMattingDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -16,6 +19,7 @@ import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMatteVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMatteVideoClient.MatteVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import org.slf4j.Logger;
@@ -24,6 +28,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -37,7 +42,7 @@ import java.util.concurrent.TimeUnit;
  * IKHJRC，契约 IKHK7F，附录 C 触点③）。编排与去字幕 / HD 高清 / 场景切分同构（视频轮询
  * 骨架，每步 = 一次 MQ 消费，fencing / 租约 / claim-by-id 全部走视频件）：
  * <ol>
- *   <li>claimVideoMatting（富投影：providerTaskId / pollCount / progress）</li>
+ *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
  *   <li>providerTaskId==null → 解析冻结 input（mode / format / background_color）+ 源视频
  *       素材 → 网关按模式分流提交（portrait → matte-portrait-video、greenscreen →
  *       matte-greenscreen-video，路径与模型名走契约常量；出站 model / video_url / format /
@@ -110,6 +115,10 @@ public class VideoMattingJobProcessor implements JobProcessor {
      */
     public static final int MAX_VIDEO_MATTING_POLLS = 720;
 
+    /** 领取规格（IKIWP8 / ADR-0119）。 */
+    private static final int LEASE_SECONDS = 420;
+    private static final List<String> CLAIM_SOURCES = List.of(VideoMattingContract.SOURCE);
+
     /**
      * 结果转存期租约心跳周期 60s（IKHSFD）：claim 租约 420s 的 1/7——下载整段兜底 10 分钟 +
      * TOS 上传全程持续续租，合法的长时间转存不被 recovery 当孤儿重复领取；心跳未命中（已被
@@ -126,6 +135,9 @@ public class VideoMattingJobProcessor implements JobProcessor {
             });
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
+    private final JobClaimService claimService;
+    private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
     private final NewApiMediaKitMatteVideoClient matteVideoClient;
@@ -142,6 +154,9 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
     public VideoMattingJobProcessor(
             JobStateMachineService stateMachine,
+            JobClaimService claimService,
+            GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitMatteVideoClient matteVideoClient,
@@ -150,6 +165,10 @@ public class VideoMattingJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
+        this.claimService = claimService;
+        this.claimSpec = ClaimSpec.bySources(
+                VideoMattingContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.matteVideoClient = matteVideoClient;
@@ -164,6 +183,14 @@ public class VideoMattingJobProcessor implements JobProcessor {
     }
 
     /**
+     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
+     */
+    @Override
+    public Optional<ClaimSpec> claimSpec() {
+        return Optional.of(claimSpec);
+    }
+
+    /**
      * 处理一个 video_matting step。
      * <p>
      * claim 在 try 外（视频骨架同构：DB 异常上抛 → consumer 不 ack → 重投）；
@@ -171,16 +198,16 @@ public class VideoMattingJobProcessor implements JobProcessor {
      */
     @Override
     public void handle(String jobId) {
-        Optional<ClaimedVideoMattingJobDto> claimOpt;
+        Optional<ClaimedJob> claimOpt;
         try {
-            claimOpt = stateMachine.claimVideoMatting(jobId, workerId);
+            claimOpt = claimService.claim(claimSpec, jobId, workerId);
         } catch (Exception error) {
             log.error("[video_matting] claim 失败 jobId={}: {}", jobId, error.getMessage(), error);
             throw error; // 保持不 ack → RocketMQ 重投
         }
         if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒
 
-        ClaimedVideoMattingJobDto claim = claimOpt.get();
+        ClaimedJob claim = claimOpt.get();
         log.info("[video_matting] 已领取 jobId={} token={} providerTaskId={} pollCount={}",
                 claim.id(), claim.fencingToken(), claim.providerTaskId(), claim.pollCount());
 
@@ -203,7 +230,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
     /**
      * 分相主逻辑（视频骨架 runVideoStep 同构）：凭证 → submit 相 / poll 相。
      */
-    private void runStep(ClaimedVideoMattingJobDto claim) {
+    private void runStep(ClaimedJob claim) {
         // 取明文凭证（基础设施键；与视频/去字幕同构，冻结在创建入口 IKHK98）
         Object credentialObj = claim.input().get("provider_credential");
         if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
@@ -233,7 +260,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
     /**
      * 提交相：解析冻结 input + 源视频 → 网关按模式分流提交 → markProviderSubmitted → 续排轮询。
      */
-    private void submitPhase(ClaimedVideoMattingJobDto claim, String providerToken) {
+    private void submitPhase(ClaimedJob claim, String providerToken) {
         // 0. IKI89Z（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
         //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
@@ -288,8 +315,8 @@ public class VideoMattingJobProcessor implements JobProcessor {
         //    时长门槛（10 分钟置灰）在创建入口复核，worker 不重复——缺权威值不臆造，交供应商拒。
         AssetEntity source = assetSource.resolve(
                 Long.parseLong(sourceAssetId),
-                Long.parseLong(claim.user_id()),
-                Long.parseLong(claim.project_id()));
+                Long.parseLong(claim.userId()),
+                Long.parseLong(claim.projectId()));
         if (source == null || !"video".equals(source.getType())
                 || source.getUrl() == null || source.getUrl().isEmpty()) {
             failClaimed(claim, VideoMattingContract.ERROR_VIDEO_MATTING_FAILED,
@@ -324,7 +351,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * completed 成功判据（不新立标准）。返回 null=齐全；非空=未齐原因短句（嵌进共享骨架
      * 「未命中(父任务{})」日志）。
      */
-    private String mattingResultIncomplete(ClaimedVideoMattingJobDto claim,
+    private String mattingResultIncomplete(ClaimedJob claim,
                                            MatteVideoTaskObservation observation) {
         if (observation.videoUrl() == null || observation.videoUrl().isEmpty()) {
             return "结果视频缺失";
@@ -341,7 +368,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（含超限）/ failed 终态 /
      * completed 立即下载转存发布。
      */
-    private void pollPhase(ClaimedVideoMattingJobDto claim, String providerToken) {
+    private void pollPhase(ClaimedJob claim, String providerToken) {
         MatteVideoTaskObservation observation;
         try {
             observation = matteVideoClient.poll(providerToken, claim.providerTaskId());
@@ -439,7 +466,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 既有静默 return fencing 语义；发布调用抛异常（结果不明）先经有界核实确认发布事务
      * 已结束且无引用才删，异常照常上抛走既有 fail 终态路径（IKIN8Z 同口径）。
      */
-    private boolean publishResult(ClaimedVideoMattingJobDto claim,
+    private boolean publishResult(ClaimedJob claim,
                                   MatteVideoTaskObservation observation) {
         // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（去字幕家族口径）
         if (mediaRelay == null) {
@@ -465,8 +492,8 @@ public class VideoMattingJobProcessor implements JobProcessor {
         if (sourceAssetId != null) {
             AssetEntity source = assetSource.resolve(
                     Long.parseLong(sourceAssetId),
-                    Long.parseLong(claim.user_id()),
-                    Long.parseLong(claim.project_id()));
+                    Long.parseLong(claim.userId()),
+                    Long.parseLong(claim.projectId()));
             if (source != null) {
                 width = source.getWidth();
                 height = source.getHeight();
@@ -494,7 +521,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
             // 流式 + 本工具上限（审查修复 P2）：家族字节数组路径的 200MB 上限与堆绑死，而本工具
             // 源素材上限就是 200MB、成品为 10 分钟档重编码（WEBM 带 alpha 可更大）——走
             // persistStreaming（下载落临时文件、上传流式读），上限按契约 MAX_RESULT_BYTES
-            stored = mediaRelay.persistStreaming(observation.videoUrl(), claim.user_id(),
+            stored = mediaRelay.persistStreaming(observation.videoUrl(), claim.userId(),
                     VideoMattingContract.MAX_RESULT_BYTES, abortHandle);
         } catch (TosVideoMediaRelay.TransferAbortedException e) {
             // 外部信号中止（租约已失）≠ 任务失败：本 worker 静默退出，不落失败终态——
@@ -534,10 +561,10 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
         boolean published;
         try {
-            published = stateMachine.publishVideoMattingResult(new PublishVideoMattingDto(
+            published = finalizer.publishVideoMattingResult(new PublishVideoMattingDto(
                     claim.id(),
-                    claim.project_id(),
-                    claim.user_id(),
+                    claim.projectId(),
+                    claim.userId(),
                     claim.workerId(),
                     claim.fencingToken(),
                     stored.url(),
@@ -575,7 +602,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 通道（心跳 abort 或守卫拒绝）到达本入口，与失租同路；发布事务从未开始或已同步结束，
      * 单次 {@code hasPublishedAsset} 核实未被 Asset 引用即删。
      */
-    private void discardUnpublishedTransfer(ClaimedVideoMattingJobDto claim,
+    private void discardUnpublishedTransfer(ClaimedJob claim,
                                             TosVideoMediaRelay.StoredVideo stored) {
         discardUnpublishedTransfer(claim, stored, false);
     }
@@ -597,7 +624,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * storageKey 含每次执行独有随机 uuid，删除不会波及接管者或重试的新产物。核实或删除
      * 自身异常只留结构化待处理记录（含对象身份），不改变主语义、不落额外终态。
      */
-    private void discardUnpublishedTransfer(ClaimedVideoMattingJobDto claim,
+    private void discardUnpublishedTransfer(ClaimedJob claim,
                                             TosVideoMediaRelay.StoredVideo stored,
                                             boolean publishOutcomeUncertain) {
         try {
@@ -615,7 +642,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
                     }
                     case SETTLED_UNREFERENCED -> { /* 事务已结束且无引用，向下删除 */ }
                 }
-            } else if (stateMachine.hasPublishedAsset(claim.id(), stored.storageKey())) {
+            } else if (finalizer.hasPublishedAsset(claim.id(), stored.storageKey())) {
                 log.warn("[video_matting] 转存对象已被 Asset 引用，保留不清理 jobId={} storageKey={}",
                         claim.id(), stored.storageKey());
                 return;
@@ -650,7 +677,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      */
     private UnpublishedTransferCheck awaitPublishSettledAndUnreferenced(String jobId, String storageKey) {
         for (int attempt = 1; ; attempt++) {
-            if (stateMachine.hasInFlightJobWriteTransaction(jobId)) {
+            if (finalizer.hasInFlightJobWriteTransaction(jobId)) {
                 if (attempt >= publishSettleProbeAttempts) return UnpublishedTransferCheck.UNCONFIRMED;
                 try {
                     Thread.sleep(publishSettleProbeDelayMs);
@@ -660,7 +687,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
                 }
                 continue;
             }
-            return stateMachine.hasPublishedAsset(jobId, storageKey)
+            return finalizer.hasPublishedAsset(jobId, storageKey)
                     ? UnpublishedTransferCheck.REFERENCED
                     : UnpublishedTransferCheck.SETTLED_UNREFERENCED;
         }
@@ -683,7 +710,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 中止时已发起 PUT 的对象由 relay 内部清理，转存成功返回后失租/守卫拒绝的本次
      * 上传对象由 publishResult 的放弃路径核实清理（IKIN7Z），不再留无 Asset 引用孤儿。
      */
-    private boolean renewLeaseForResultTransfer(ClaimedVideoMattingJobDto claim) {
+    private boolean renewLeaseForResultTransfer(ClaimedJob claim) {
         try {
             boolean renewed = stateMachine.updateVideoMattingProgress(
                     new UpdateVideoMattingProgressDto(
@@ -767,7 +794,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
     /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at，视频骨架语义对齐；
      *  智能抠像无输出槽位，槽位段天然空转；details.raw 透传原始原因）。 */
-    private void failClaimed(ClaimedVideoMattingJobDto claim, String code, String msg) {
+    private void failClaimed(ClaimedJob claim, String code, String msg) {
         failClaimed(claim, code, msg, null);
     }
 
@@ -776,7 +803,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。轮询预算耗尽
      *  分支同样按 cause 透传（IKIN6X，父单 IKIN6H「有 cause 即透传」与迁移契约 §20 口径）：
      *  瞬时错误耗尽预算且 cause 携带状态即写，无 cause（超时 / 连接失败）不写。 */
-    private void failClaimed(ClaimedVideoMattingJobDto claim, String code, String msg,
+    private void failClaimed(ClaimedJob claim, String code, String msg,
                              Integer httpStatus) {
         log.warn("video_matting job 失败 jobId={} code={} message={}", claim.id(), code, msg);
         Map<String, Object> details = new HashMap<>();
@@ -784,7 +811,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
-        stateMachine.failVideoJob(claim.id(), code, msg, details,
+        finalizer.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
 

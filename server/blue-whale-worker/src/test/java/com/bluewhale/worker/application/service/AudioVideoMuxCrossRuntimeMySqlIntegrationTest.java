@@ -48,8 +48,10 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
     private static AudioVideoMuxCrossRuntimeDbGuard.Target target;
     private static HikariDataSource dataSource;
     private static JobStateMachineService service;
+    private static JobFinalizer finalizer;
     private static JdbcTemplate jdbc;
     private static GenerationJobMapper jobMapper;
+    private static JobClaimService claimService;
 
     @BeforeAll
     static void boot() throws Exception {
@@ -70,6 +72,7 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
         factory.setDataSource(dataSource);
         SqlSessionFactory session = factory.getObject();
         jobMapper = mapper(GenerationJobMapper.class, session);
+        claimService = new JobClaimService(jobMapper);
         service = new JobStateMachineService(jobMapper,
                 mapper(AssetMapper.class, session),
                 mapper(GenerationJobLogMapper.class, session),
@@ -77,6 +80,19 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
                 mapper(GenerationOutputSlotMapper.class, session),
                 mapper(SceneCardGenerationRecordMapper.class, session),
                 mapper(StoryboardPreviewMapper.class, session));
+
+        // IKIWP8 ③：终态收口直连 JobFinalizer（与 service 同库同 SqlSessionFactory）。
+        var assetMapper = mapper(AssetMapper.class, session);
+        var jobLogMapper = mapper(GenerationJobLogMapper.class, session);
+        var slotMapper = mapper(GenerationOutputSlotMapper.class, session);
+        var events = new ProjectEventPublisher(mapper(ProjectEventMapper.class, session));
+        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper,
+                new SceneCardGenerationRecordSync(slotMapper,
+                        mapper(SceneCardGenerationRecordMapper.class, session), events),
+                new StoryboardPreviewSync(slotMapper,
+                        mapper(StoryboardPreviewMapper.class, session), events),
+                events,
+                JobSettlementPublisher.noop());
     }
 
     @AfterAll
@@ -110,7 +126,7 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
             var gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
             var relay = mock(TosVideoMediaRelay.class);
             var producer = mock(GenerationMessageProducer.class);
-            new AudioVideoMuxJobProcessor(service, credentials, gateway, relay, producer).handle(jobId);
+            new AudioVideoMuxJobProcessor(service, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle(jobId);
             assertThat(readJob(Long.parseLong(jobId)).getStatus()).isEqualTo("cancelled");
             assertThat(countAssets(Long.parseLong(jobId))).isZero();
             verifyNoInteractions(credentials, gateway, relay, producer);
@@ -125,7 +141,7 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
         String oldFence = System.getenv("IKIHPJ_OLD_FENCE");
         if (oldFence != null) {
             // 陈旧 fence（外层传真实 fence+5）复放不得发布资产。
-            assertThat(service.publishAudioVideoMuxResult(new com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto(
+            assertThat(finalizer.publishAudioVideoMuxResult(new com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto(
                     jobId, "0", "9", "amux-stale", Long.parseLong(oldFence),
                     "https://stale.invalid/out.mp4", "generated/9/video/stale.mp4", "video/mp4",
                     1L, "0123456789abcdef0123456789abcdef", 1.0, "1920x1080", "12"))).isFalse();
@@ -172,7 +188,8 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
                         "0123456789abcdef0123456789abcdef");
             });
             GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-            var processor = new AudioVideoMuxJobProcessor(service, new GenerationCredentialService(),
+            var processor = new AudioVideoMuxJobProcessor(service, claimService, jobMapper, finalizer,
+                    new GenerationCredentialService(),
                     new NewApiMediaKitMuxAudioVideoClient(new UpstreamBaseUrl(base.get())), relay, producer);
             processor.handle(jobId);
             assertThat(readJob(Long.parseLong(jobId)).getProviderTaskId()).isEqualTo("cross-task-1");

@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.error.AudioProviderError;
@@ -32,6 +33,7 @@ import static org.mockito.Mockito.*;
 class AudioJobProcessorErrorMappingTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiAudioClient audioClient;
@@ -41,7 +43,7 @@ class AudioJobProcessorErrorMappingTest {
 
     @BeforeEach
     void setUp() {
-        processor = new AudioJobProcessor(stateMachine, assetSource, credentialService, audioClient, tosService);
+        processor = new AudioJobProcessor(stateMachine, finalizer, assetSource, credentialService, audioClient, tosService);
     }
 
     @Test
@@ -57,7 +59,7 @@ class AudioJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failJob(eq("100"),
+        verify(finalizer).failJob(eq("100"),
                 eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
                 contains("凭证"), any(), anyString(), anyLong());
     }
@@ -75,7 +77,7 @@ class AudioJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failJob(eq("100"),
+        verify(finalizer).failJob(eq("100"),
                 eq(GenerationError.ERROR_INVALID_INPUT),
                 anyString(), any(), anyString(), anyLong());
     }
@@ -95,7 +97,7 @@ class AudioJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failJob(eq("100"),
+        verify(finalizer).failJob(eq("100"),
                 eq(GenerationError.ERROR_INVALID_REFERENCE),
                 contains("旧参考字段"), any(), anyString(), anyLong());
     }
@@ -118,7 +120,7 @@ class AudioJobProcessorErrorMappingTest {
         processor.handle("100");
 
         ArgumentCaptor<String> codeCaptor = ArgumentCaptor.forClass(String.class);
-        verify(stateMachine).failJob(eq("100"), codeCaptor.capture(),
+        verify(finalizer).failJob(eq("100"), codeCaptor.capture(),
                 anyString(), any(), anyString(), anyLong());
         assertThat(codeCaptor.getValue()).isEqualTo(GenerationError.ERROR_PROVIDER_TIMEOUT);
     }
@@ -141,7 +143,7 @@ class AudioJobProcessorErrorMappingTest {
         processor.handle("100");
 
         ArgumentCaptor<String> codeCaptor = ArgumentCaptor.forClass(String.class);
-        verify(stateMachine).failJob(eq("100"), codeCaptor.capture(),
+        verify(finalizer).failJob(eq("100"), codeCaptor.capture(),
                 anyString(), any(), anyString(), anyLong());
         assertThat(codeCaptor.getValue()).isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
     }
@@ -154,7 +156,7 @@ class AudioJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(),
+        verify(finalizer, never()).failJob(anyString(), anyString(),
                 anyString(), any(), anyString(), anyLong());
     }
 
@@ -174,7 +176,7 @@ class AudioJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failJob(eq("100"),
+        verify(finalizer).failJob(eq("100"),
                 eq(GenerationError.ERROR_PROVIDER_FAILED),
                 anyString(), any(), anyString(), anyLong());
     }

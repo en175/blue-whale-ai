@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
@@ -68,6 +69,7 @@ public class ImageJobProcessor implements JobProcessor {
     private static final int MAX_IMAGE_RETRIES = 3;
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
     private final NewApiImageClient imageClient;
@@ -78,6 +80,7 @@ public class ImageJobProcessor implements JobProcessor {
 
     public ImageJobProcessor(
             JobStateMachineService stateMachine,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiImageClient imageClient,
@@ -85,6 +88,7 @@ public class ImageJobProcessor implements JobProcessor {
             TosMediaStorage tosService
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.imageClient = imageClient;
@@ -124,7 +128,7 @@ public class ImageJobProcessor implements JobProcessor {
         // cancelRequested → 取消（generation-worker.ts:237-241）
         if (job.cancelRequested()) {
             log.info("[image] 取消已执行(cancelRequested) jobId={}", job.id());
-            stateMachine.failJob(job.id(), GenerationError.ERROR_PROVIDER_FAILED,
+            finalizer.failJob(job.id(), GenerationError.ERROR_PROVIDER_FAILED,
                     "任务已取消", null, workerId, job.fencingToken());
             return;
         }
@@ -167,7 +171,7 @@ public class ImageJobProcessor implements JobProcessor {
         log.error("[image] 终态失败 jobId={} code={}: {}", job.id(), errorCode, errorMsg);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", errorMsg);
-        stateMachine.failJob(job.id(), errorCode, errorMsg, details,
+        finalizer.failJob(job.id(), errorCode, errorMsg, details,
                 workerId, job.fencingToken());
     }
 
@@ -419,7 +423,7 @@ public class ImageJobProcessor implements JobProcessor {
 
         // 13. completeJob（generation-worker.ts:684 finishJob）
         // 修正一：不传 actualAmountFen（结算不在范围）
-        boolean completed = stateMachine.completeJob(
+        boolean completed = finalizer.completeJob(
                 job.id(), assetIds, workerId, job.fencingToken());
         if (completed) {
             log.info("[image] 发布成功 jobId={} assetCount={}", job.id(), assetIds.size());
@@ -565,7 +569,7 @@ public class ImageJobProcessor implements JobProcessor {
     private void failClaimed(ClaimedJobDto job, String code, String msg) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
-        stateMachine.failJob(job.id(), code, msg, details, workerId, job.fencingToken());
+        finalizer.failJob(job.id(), code, msg, details, workerId, job.fencingToken());
     }
 
     private static String strOrEmpty(Map<String, Object> map, String key) {

@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
-import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
+import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageEnhanceContract;
@@ -11,6 +13,7 @@ import com.bluewhale.worker.domain.error.ImageEnhanceError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -52,7 +55,9 @@ class ImageEnhanceJobProcessorTest {
     private static final byte[] PNG_1X1 = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
-    @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitClient mediaKitClient;
@@ -65,9 +70,10 @@ class ImageEnhanceJobProcessorTest {
     @BeforeEach
     void setUp() throws Exception {
         processor = new ImageEnhanceJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                claimService, jobMapper, finalizer,
+                new AssetSourceService(assetMapper),
                 credentialService, mediaKitClient, tosService);
-        when(stateMachine.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
+        when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
         // 结果图桩（24h 有效的火山 URL 用本地 HttpServer 模拟）
@@ -88,8 +94,9 @@ class ImageEnhanceJobProcessorTest {
         resultServer.stop(0);
     }
 
-    private ClaimedImageEnhanceJobDto makeClaim(Map<String, Object> input) {
-        return new ClaimedImageEnhanceJobDto("100", "42", "9", input, "worker-1", 5L);
+    private ClaimedJob makeClaim(Map<String, Object> input) {
+        return new ClaimedJob("100", "42", "9", input, "image_enhance",
+                null, false, "worker-1", 5L, 0, 0, null, null, null);
     }
 
     private Map<String, Object> validInput() {
@@ -114,13 +121,13 @@ class ImageEnhanceJobProcessorTest {
     }
 
     private void stubClaim(Map<String, Object> input) {
-        when(stateMachine.claimImageEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input)));
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
     }
 
     private void assertFailCode(String expectedCode) {
-        verify(stateMachine).failJob(eq("100"), eq(expectedCode), anyString(),
+        verify(finalizer).failJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
     }
 
@@ -129,26 +136,26 @@ class ImageEnhanceJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimImageEnhance(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimImageEnhance(eq("100"), anyString())).thenReturn(Optional.empty());
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString())).thenReturn(Optional.empty());
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine, never()).publishImageEnhanceResult(any());
+        verify(finalizer, never()).publishImageEnhanceResult(any());
     }
 
     // ========== input 冻结六键兜底校验（§14.2；权威复核在创建入口 IKGM99） ==========
@@ -249,7 +256,6 @@ class ImageEnhanceJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_CONTENT_REJECTED);
-        verify(stateMachine, never()).requeueImageJobForRetry(anyString(), any());
     }
 
     @Test
@@ -278,7 +284,6 @@ class ImageEnhanceJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED);
-        verify(stateMachine, never()).requeueImageJobForRetry(anyString(), any());
     }
 
     @Test
@@ -308,7 +313,7 @@ class ImageEnhanceJobProcessorTest {
         when(tosService.uploadImageBytes(any(), eq("image/png"), eq("9")))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/enhanced.png", "uploads/9/image/enhanced.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEnhanceResult(any())).thenReturn(true);
+        when(finalizer.publishImageEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -316,7 +321,7 @@ class ImageEnhanceJobProcessorTest {
         verify(mediaKitClient).enhance(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("max"), eq(4), eq("fidelity_first"), eq(false));
         ArgumentCaptor<PublishImageEnhanceDto> captor = ArgumentCaptor.forClass(PublishImageEnhanceDto.class);
-        verify(stateMachine).publishImageEnhanceResult(captor.capture());
+        verify(finalizer).publishImageEnhanceResult(captor.capture());
         PublishImageEnhanceDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/enhanced.png");
         assertThat(published.storageKey()).isEqualTo("uploads/9/image/enhanced.png");
@@ -327,7 +332,7 @@ class ImageEnhanceJobProcessorTest {
         // IKGS73：md5 必须从 stored 穿透到发布入参。没有这条，processor 哪天传了 null，
         // 全套测试照样绿，而 assets.md5 会静默变空 —— 正是本单要消灭的那类失效。
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -345,7 +350,7 @@ class ImageEnhanceJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEnhanceResult(any())).thenReturn(true);
+        when(finalizer.publishImageEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -368,7 +373,7 @@ class ImageEnhanceJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEnhanceResult(any())).thenReturn(true);
+        when(finalizer.publishImageEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -393,7 +398,7 @@ class ImageEnhanceJobProcessorTest {
 
         assertFailCode(ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED);
         verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
-        verify(stateMachine, never()).publishImageEnhanceResult(any());
+        verify(finalizer, never()).publishImageEnhanceResult(any());
     }
 
     @Test
@@ -406,11 +411,11 @@ class ImageEnhanceJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEnhanceResult(any())).thenReturn(false);
+        when(finalizer.publishImageEnhanceResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 }

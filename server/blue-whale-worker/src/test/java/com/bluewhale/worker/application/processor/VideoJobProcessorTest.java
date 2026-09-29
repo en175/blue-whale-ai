@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -55,6 +56,7 @@ import static org.mockito.Mockito.*;
 class VideoJobProcessorTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiVideoClient videoClient;
@@ -66,7 +68,7 @@ class VideoJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VideoJobProcessor(
-                stateMachine, assetSource, credentialService,
+                stateMachine, finalizer, assetSource, credentialService,
                 videoClient, mediaRelay, producer);
     }
 
@@ -84,7 +86,7 @@ class VideoJobProcessorTest {
         processor.handle("100");
 
         verify(stateMachine).cancelVideoBeforeDispatch(eq("100"), anyString(), eq(1L));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
     @Test
@@ -98,7 +100,7 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(anyString(), eq("task-123"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
 
@@ -171,7 +173,7 @@ class VideoJobProcessorTest {
 
         processor.handle("111");
 
-        verify(stateMachine).failVideoJob(eq("111"), eq(GenerationError.ERROR_INVALID_INPUT),
+        verify(finalizer).failVideoJob(eq("111"), eq(GenerationError.ERROR_INVALID_INPUT),
                 anyString(), any(), anyString(), anyLong());
         verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
     }
@@ -230,13 +232,13 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("103", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("103"), anyString());
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .failVideoJob(eq("103"), eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
                         anyString(), any(), anyString(), eq(1L));
 
         processor.handle("103");
 
-        verify(stateMachine).failVideoJob(eq("103"), eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
+        verify(finalizer).failVideoJob(eq("103"), eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
                 anyString(), any(), anyString(), eq(1L));
     }
 
@@ -253,14 +255,14 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("parent-task-789"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
 
         processor.handle("104");
 
         verify(videoClient, never()).submit(anyString(), any());
-        verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
+        verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any());
     }
 
@@ -303,7 +305,7 @@ class VideoJobProcessorTest {
         processor.handle("117");
 
         verify(mediaRelay, never()).persist(anyString(), anyString());
-        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
         verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
         verify(stateMachine).markProviderSubmitted("117", "video-worker", 1L, "new-task-blank");
@@ -350,9 +352,9 @@ class VideoJobProcessorTest {
         verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
         verify(stateMachine).markProviderSubmitted("118", "video-worker", 1L, "new-task-expired");
         verify(producer).enqueue(eq("118"), eq(5000L));
-        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
     @Test
@@ -366,7 +368,7 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("parent-task-stale"));
         doReturn(new StoredVideo("http://tos/stale.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
-        doReturn(false).when(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
+        doReturn(false).when(finalizer).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
 
         processor.handle("114");
@@ -374,7 +376,7 @@ class VideoJobProcessorTest {
         verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
     @Test
@@ -387,10 +389,10 @@ class VideoJobProcessorTest {
                 "115", "1", "42", baseInput(), null, false,
                 "video-worker-new", 2L, 0, 0, "parent-task-tko");
         VideoJobProcessor staleProcessor = new VideoJobProcessor(
-                stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+                stateMachine, finalizer, assetSource, credentialService, videoClient, mediaRelay, producer,
                 "video-worker-old");
         VideoJobProcessor newProcessor = new VideoJobProcessor(
-                stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+                stateMachine, finalizer, assetSource, credentialService, videoClient, mediaRelay, producer,
                 "video-worker-new");
         doReturn(Optional.of(staleWorker)).when(stateMachine)
                 .claimVideoJobById("115", "video-worker-old");
@@ -401,7 +403,7 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("parent-task-tko"));
         doReturn(new StoredVideo("http://tos/tko.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
-        doReturn(false).doReturn(true).when(stateMachine)
+        doReturn(false).doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
 
@@ -409,20 +411,20 @@ class VideoJobProcessorTest {
         newProcessor.handle("115");     // 新 Worker：重新领取同一 GenerationJob → 收割发布成功
 
         verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
-        var publishOrder = inOrder(stateMachine);
+        var publishOrder = inOrder(stateMachine, finalizer);
         publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-old");
-        publishOrder.verify(stateMachine).publishVideoResult(eq("115"), eq("1"), eq("42"),
+        publishOrder.verify(finalizer).publishVideoResult(eq("115"), eq("1"), eq("42"),
                 eq("video-worker-old"), eq(1L), anyString(), anyString(), anyString(),
                 any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
         publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-new");
-        publishOrder.verify(stateMachine).publishVideoResult(eq("115"), eq("1"), eq("42"),
+        publishOrder.verify(finalizer).publishVideoResult(eq("115"), eq("1"), eq("42"),
                 eq("video-worker-new"), eq(2L), anyString(), anyString(), anyString(),
                 any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
-        verify(stateMachine, times(2)).publishVideoResult(anyString(), anyString(), anyString(),
+        verify(finalizer, times(2)).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
     // ========== poll 路径 ==========
@@ -454,7 +456,7 @@ class VideoJobProcessorTest {
         doReturn("token").when(credentialService).open(anyString());
         doReturn(new VideoTaskObservation("processing", 90, null, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-107"));
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                         anyString(), any(), anyString(), eq(1L));
 
@@ -462,7 +464,7 @@ class VideoJobProcessorTest {
 
         var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
         var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(stateMachine).failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+        verify(finalizer).failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
         // processing 达上限无 cause → 文案不变、不写 http_status 键（IKIN6Y 反例）
         assertThat(messageCaptor.getValue())
@@ -489,7 +491,7 @@ class VideoJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll(eq("109"), anyString(), eq(1L), eq(30));
         verify(producer).enqueue(eq("109"), eq(5000L));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -503,7 +505,7 @@ class VideoJobProcessorTest {
         doReturn("token").when(credentialService).open(anyString());
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
                 .when(videoClient).poll(eq("token"), eq("task-110"));
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                         anyString(), any(), anyString(), eq(1L));
 
@@ -511,7 +513,7 @@ class VideoJobProcessorTest {
 
         var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
         var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(stateMachine).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+        verify(finalizer).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
         // 超时形态（无状态 cause）达上限 → 文案保持现状、不写 http_status 键（IKIN6Y 反例）
         assertThat(messageCaptor.getValue()).isEqualTo("视频生成轮询超时（超过 "
@@ -534,7 +536,7 @@ class VideoJobProcessorTest {
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "网关繁忙",
                 new NewApiVideoClient.HttpStatusException(503)))
                 .when(videoClient).poll(eq("token"), eq("task-111"));
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .failVideoJob(eq("111"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                         anyString(), any(), anyString(), eq(1L));
 
@@ -542,7 +544,7 @@ class VideoJobProcessorTest {
 
         var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
         var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(stateMachine).failVideoJob(eq("111"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+        verify(finalizer).failVideoJob(eq("111"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
         // 网关文案无「: HTTP <code>」字样 → 剥离无命中、文案原样；状态照写 details（IKIN6Y）
         assertThat(messageCaptor.getValue()).isEqualTo("视频生成轮询超时（超过 "
@@ -571,7 +573,7 @@ class VideoJobProcessorTest {
 
         var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
         var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(stateMachine).failVideoJob(eq("121"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+        verify(finalizer).failVideoJob(eq("121"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
         @SuppressWarnings("unchecked")
         Map<String, Object> details = detailsCaptor.getValue();
@@ -602,7 +604,7 @@ class VideoJobProcessorTest {
         processor.handle("112");
 
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -617,14 +619,14 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("task-108"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 1024L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
 
         processor.handle("108");
 
         verify(mediaRelay).persist(eq("http://video.mp4"), anyString());
-        verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
+        verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"),
                 eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any());
     }
@@ -642,17 +644,17 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("task-109a"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 1024L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(), anyString(), anyLong(),
                         anyString(), anyString(), anyString(), any(), anyString(), isNull(), isNull(), anyDouble(), any());
 
         processor.handle("109a");
 
         // 发布被调用且尺寸为 null（不因「视频尺寸无效」失败）
-        verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(), anyString(),
+        verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(), anyString(),
                 anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"), eq(1024L), eq("0123456789abcdef0123456789abcdef"),
                 isNull(), isNull(), anyDouble(), any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -666,13 +668,13 @@ class VideoJobProcessorTest {
         doReturn(new VideoTaskObservation("failed", 100, null, null,
                 new TaskError("content_rejected", "内容违规"), null))
                 .when(videoClient).poll(eq("token"), eq("task-109"));
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .failVideoJob(eq("109"), eq("content_rejected"),
                         eq("内容违规"), any(), anyString(), eq(1L));
 
         processor.handle("109");
 
-        verify(stateMachine).failVideoJob(eq("109"), eq("content_rejected"),
+        verify(finalizer).failVideoJob(eq("109"), eq("content_rejected"),
                 eq("内容违规"), any(), anyString(), eq(1L));
     }
 
@@ -688,14 +690,14 @@ class VideoJobProcessorTest {
                 new TaskError("content_rejected_reference",
                         "The request failed because the output video may be related to copyright restrictions. Request id: req-2048"), null))
                 .when(videoClient).poll(eq("token"), eq("task-109a"));
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .failVideoJob(eq("109a"), eq("content_rejected_reference"),
                         eq("The request failed because the output video may be related to copyright restrictions. Request id: req-2048"),
                         any(), anyString(), eq(1L));
 
         processor.handle("109a");
 
-        verify(stateMachine).failVideoJob(eq("109a"), eq("content_rejected_reference"),
+        verify(finalizer).failVideoJob(eq("109a"), eq("content_rejected_reference"),
                 eq("The request failed because the output video may be related to copyright restrictions. Request id: req-2048"),
                 any(), anyString(), eq(1L));
     }
@@ -709,13 +711,13 @@ class VideoJobProcessorTest {
         doReturn("token").when(credentialService).open(anyString());
         doReturn(new VideoTaskObservation("succeeded", 100, null, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-110"));
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                         anyString(), any(), anyString(), eq(1L));
 
         processor.handle("110");
 
-        verify(stateMachine).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+        verify(finalizer).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                 anyString(), any(), anyString(), eq(1L));
     }
 
@@ -739,7 +741,7 @@ class VideoJobProcessorTest {
 
         var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
         var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(stateMachine).failVideoJob(eq("119"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+        verify(finalizer).failVideoJob(eq("119"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
         @SuppressWarnings("unchecked")
         Map<String, Object> details = detailsCaptor.getValue();
@@ -767,7 +769,7 @@ class VideoJobProcessorTest {
 
         var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
         var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(stateMachine).failVideoJob(eq("120"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+        verify(finalizer).failVideoJob(eq("120"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
         @SuppressWarnings("unchecked")
         Map<String, Object> details = detailsCaptor.getValue();
@@ -1158,7 +1160,7 @@ class VideoJobProcessorTest {
 
         // 断言的是不变式「这个 job 没被判失败」，不是「没抛被删门控的那个错误码」——
         // 后者只钉住 unsupported_input，将来若有谁重加一道名字门控换了错误码就漏过去了。
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
         verify(videoClient).submit(eq("token"), captor.capture());
         assertThat(captor.getValue().model()).isEqualTo("doubao-seedance-2-5-260628");
@@ -1193,7 +1195,7 @@ class VideoJobProcessorTest {
         processor.handle("602");
 
         // 同上：只断言「没被判失败」，不绑定任何具体错误码。
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
         verify(videoClient).submit(eq("token"), captor.capture());
         assertThat(captor.getValue().model()).isEqualTo("doubao-seedance-2-5-260628");

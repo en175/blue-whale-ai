@@ -1,12 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedImageCutoutJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.contract.JobStatusEnum;
@@ -26,7 +21,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -35,8 +29,9 @@ import java.util.Optional;
  * <p>
  * 职责已拆往：{@link JobClaimService}（claim 族）、{@link JobFinalizer}（complete/fail/publish/
  * createAsset 终态收口）、{@link ProjectEventPublisher}（事件）、{@link SceneCardGenerationRecordSync}/
- * {@link StoryboardPreviewSync}（摘要同步）。本类保留公共 API 签名不变（processor/测试零改动），
- * 只留与 DB 心跳/轮询紧耦合的薄方法（progress 续租、requeue、markSubmitted、reschedule、cancel）。
+ * {@link StoryboardPreviewSync}（摘要同步）。complete/fail/publish 转发门面已解散（ADR-0119 commit ③）：
+ * 处理器直接注入 {@link JobFinalizer} 直呼，本类只留与 DB 心跳/轮询紧耦合的薄方法
+ * （progress 续租、requeue、markSubmitted、reschedule、cancel）与 createAsset。
  * <p>
  * 第 5 类媒体扩展触点：{@link JobClaimService} 加 claim*、{@link JobFinalizer} 加 payload 组装策略
  * （契约附录 C），本门面不加方法。
@@ -48,10 +43,10 @@ public class JobStateMachineService {
 
     private static final int LEASE_SECONDS = 120; // 契约 §3.2：IMAGE_JOB_LEASE_SECONDS 默认 120s
 
-    /** video_scene_split 进度续租秒数（与 JobClaimService.VIDEO_SCENE_SPLIT_LEASE_SECONDS 同值）。 */
+    /** video_scene_split 进度续租秒数（与 VideoSceneSplitJobProcessor 的 ClaimSpec 租约同值）。 */
     private static final int VIDEO_SCENE_SPLIT_PROGRESS_LEASE_SECONDS = 420;
 
-    /** video_matting 进度续租秒数（与 JobClaimService.VIDEO_MATTING_LEASE_SECONDS 同值）。 */
+    /** video_matting 进度续租秒数（与 VideoMattingJobProcessor 的 ClaimSpec 租约同值）。 */
     private static final int VIDEO_MATTING_PROGRESS_LEASE_SECONDS = 420;
 
     /** 八个 MediaKit 家族原有的 420 秒租约，长于上游 submit 的 30 秒超时。 */
@@ -110,38 +105,12 @@ public class JobStateMachineService {
         this.finalizer = finalizer;
     }
 
-    // ========== claim 族（委托 JobClaimService） ==========
-
-    public Optional<ClaimedMediaExtractJobDto> claimMediaExtract(String jobId, String workerId) {
-        return claimService.claimMediaExtract(jobId, workerId);
-    }
-
-    /** 以 audio_mix 类型和 dock 来源筛选候选；委托统一的轮询音频 CAS 领取，未命中返回空。 */
-    public Optional<ClaimedMediaExtractJobDto> claimAudioMix(String jobId, String workerId) {
-        return claimService.claimAudioMix(jobId, workerId);
-    }
-
     public boolean cancelAudioMixIfRequested(String jobId, String workerId, long fencingToken) {
         return jobMapper.cancelAudioMixIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
     }
 
-    /** 以 audio_video_mux 类型和 dock 来源筛选候选；委托统一的轮询音频 CAS 领取（IKIHPJ）。 */
-    public Optional<ClaimedMediaExtractJobDto> claimAudioVideoMux(String jobId, String workerId) {
-        return claimService.claimAudioVideoMux(jobId, workerId);
-    }
-
     public boolean cancelAudioVideoMuxIfRequested(String jobId, String workerId, long fencingToken) {
         return jobMapper.cancelAudioVideoMuxIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
-    }
-
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
-            String jobId, String workerId) {
-        return claimService.claimAudioTrim(jobId, workerId);
-    }
-
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto> claimAudioSpeed(
-            String jobId, String workerId) {
-        return claimService.claimAudioSpeed(jobId, workerId);
     }
 
     public Optional<ClaimedJobDto> claimAudioJobById(String jobId, String workerId) {
@@ -156,81 +125,7 @@ public class JobStateMachineService {
         return claimService.claimVideoJobById(jobId, workerId);
     }
 
-    public Optional<ClaimedImageEnhanceJobDto> claimImageEnhance(String jobId, String workerId) {
-        return claimService.claimImageEnhance(jobId, workerId);
-    }
-
-    public Optional<ClaimedImageEraseJobDto> claimImageErase(String jobId, String workerId) {
-        return claimService.claimImageErase(jobId, workerId);
-    }
-
-    public Optional<ClaimedImageCutoutJobDto> claimImageCutout(String jobId, String workerId) {
-        return claimService.claimImageCutout(jobId, workerId);
-    }
-
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto> claimImageOutpaint(
-            String jobId, String workerId) {
-        return claimService.claimImageOutpaint(jobId, workerId);
-    }
-
-    public Optional<ClaimedVideoSubtitleEraseJobDto> claimVideoSubtitleErase(String jobId, String workerId) {
-        return claimService.claimVideoSubtitleErase(jobId, workerId);
-    }
-
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto> claimVideoEnhance(
-            String jobId, String workerId) {
-        return claimService.claimVideoEnhance(jobId, workerId);
-    }
-
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedVocalSplitJobDto> claimVocalSplit(
-            String jobId, String workerId) {
-        return claimService.claimVocalSplit(jobId, workerId);
-    }
-
     // ========== 终态收口（委托 JobFinalizer） ==========
-
-    public boolean completeJob(String jobId, List<String> assetIds, String workerId, long fencingToken) {
-        return finalizer.completeJob(jobId, assetIds, workerId, fencingToken);
-    }
-
-    /**
-     * 完成作业，附带**产出音频的真实时长**（音频按秒计价的权威用量，见
-     * {@code JobFinalizer#completeJob} 的说明）。
-     *
-     * @param upstreamSeconds 产出音频的真实时长，整秒；{@code null} = 这次没有
-     */
-    public boolean completeJob(String jobId, List<String> assetIds, String workerId,
-                               long fencingToken, Long upstreamSeconds) {
-        return finalizer.completeJob(jobId, assetIds, workerId, fencingToken, upstreamSeconds);
-    }
-
-    public boolean failJob(String jobId, String errorCode, String errorMessage,
-                           Map<String, Object> details, String workerId, long fencingToken) {
-        return finalizer.failJob(jobId, errorCode, errorMessage, details, workerId, fencingToken);
-    }
-
-    public boolean publishMediaExtractResult(
-            String jobId, String projectId, String userId, String workerId, long fencingToken,
-            String url, String storageKey, String mime, Long size, String md5, Double duration
-    ) {
-        return finalizer.publishMediaExtractResult(
-                jobId, projectId, userId, workerId, fencingToken, url, storageKey, mime, size, md5, duration);
-    }
-
-    public boolean publishVideoResult(String jobId, String projectId, String userId,
-                                      String workerId, long fencingToken,
-                                      String url, String storageKey, String mime, Long size, String md5,
-                                      Integer width, Integer height, double duration,
-                                      Long upstreamTotalTokens) {
-        return finalizer.publishVideoResult(
-                jobId, projectId, userId, workerId, fencingToken,
-                url, storageKey, mime, size, md5, width, height, duration, upstreamTotalTokens);
-    }
-
-    public boolean failVideoJob(String jobId, String errorCode, String errorMessage,
-                                Map<String, Object> details, String workerId, long fencingToken) {
-        return finalizer.failVideoJob(jobId, errorCode, errorMessage, details, workerId, fencingToken);
-    }
 
     public String createAsset(CreateAssetInput input) {
         return finalizer.createAsset(
@@ -258,154 +153,6 @@ public class JobStateMachineService {
             String workerId,
             long fencingToken
     ) {}
-
-    // ========== media_extract 直通（DTO 形态，MediaExtractJobProcessor 专用） ==========
-
-    public boolean publishMediaExtractResult(com.bluewhale.worker.domain.dto.PublishMediaExtractDto input) {
-        return finalizer.publishMediaExtractResult(
-                input.jobId(), input.projectId(), input.userId(), input.workerId(), input.fencingToken(),
-                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(), input.duration());
-    }
-
-    /** 委托音频混合终态事务；仅当前租约与 fencing token 有效时创建长期 Asset 并成功，失效返回 false。 */
-    public boolean publishAudioMixResult(com.bluewhale.worker.domain.dto.PublishMediaExtractDto input) {
-        return finalizer.publishAudioMixResult(input);
-    }
-
-    /** 委托音视频合成终态事务；仅当前租约与 fencing token 有效时创建长期视频 Asset 并成功（IKIHPJ）。 */
-    public boolean publishAudioVideoMuxResult(com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto input) {
-        return finalizer.publishAudioVideoMuxResult(input);
-    }
-
-    /** 委托转存对象权威发布核实（IKIN03）：processor 清理未发布对象前的判据——已被 Asset 引用即保留。 */
-    public boolean hasPublishedAsset(String jobId, String storageKey) {
-        return finalizer.hasPublishedAsset(jobId, storageKey);
-    }
-
-    /** 委托「可能发布该对象键的事务已结束」核实（IKIN8Z）：generation_jobs 行写锁被占 = 仍可能提交。 */
-    public boolean hasInFlightJobWriteTransaction(String jobId) {
-        return finalizer.hasInFlightJobWriteTransaction(jobId);
-    }
-
-    public boolean failMediaExtractJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {
-        return finalizer.failMediaExtractJob(
-                input.jobId(), input.code(), input.message(), input.details(),
-                input.workerId(), input.fencingToken());
-    }
-
-    // ========== audio_trim 直通（DTO 形态，AudioTrimJobProcessor 专用，IKHB6S） ==========
-
-    public boolean publishAudioTrimResult(com.bluewhale.worker.domain.dto.PublishAudioTrimDto input) {
-        return finalizer.publishAudioTrimResult(input);
-    }
-
-    public boolean failAudioTrimJob(com.bluewhale.worker.domain.dto.FailAudioTrimDto input) {
-        return finalizer.failAudioTrimJob(input);
-    }
-
-    // ========== audio_speed 直通（DTO 形态，AudioSpeedJobProcessor 专用，IKHW5A） ==========
-
-    public boolean publishAudioSpeedResult(com.bluewhale.worker.domain.dto.PublishAudioSpeedDto input) {
-        return finalizer.publishAudioSpeedResult(input);
-    }
-
-    public boolean failAudioSpeedJob(com.bluewhale.worker.domain.dto.FailAudioSpeedDto input) {
-        return finalizer.failAudioSpeedJob(input);
-    }
-
-    // ========== image_enhance 直通（DTO 形态，ImageEnhanceJobProcessor 专用；失败复用通用 failJob） ==========
-
-    public boolean publishImageEnhanceResult(com.bluewhale.worker.domain.dto.PublishImageEnhanceDto input) {
-        return finalizer.publishImageEnhanceResult(input);
-    }
-
-    // ========== image_erase 直通（DTO 形态，ImageEraseJobProcessor 专用；失败复用通用 failJob） ==========
-
-    public boolean publishImageEraseResult(com.bluewhale.worker.domain.dto.PublishImageEraseDto input) {
-        return finalizer.publishImageEraseResult(input);
-    }
-
-    // ========== image_cutout 直通（DTO 形态，ImageCutoutJobProcessor 专用；失败复用通用 failJob） ===
-    public boolean publishImageCutoutResult(com.bluewhale.worker.domain.dto.PublishImageCutoutDto input) {
-        return finalizer.publishImageCutoutResult(input);
-    }
-
-    // ========== image_outpaint 直通（DTO 形态，ImageOutpaintJobProcessor 专用；失败复用通用 failJob） ==========
-
-    public boolean publishImageOutpaintResult(
-            com.bluewhale.worker.domain.dto.PublishImageOutpaintDto input) {
-        return finalizer.publishImageOutpaintResult(input);
-    }
-
-    // ========== video_subtitle_erase 直通（DTO 形态，VideoSubtitleEraseJobProcessor 专用；
-    //            失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
-
-    public boolean publishVideoSubtitleEraseResult(
-            com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto input) {
-        return finalizer.publishVideoSubtitleEraseResult(input);
-    }
-
-    // ========== video_enhance 直通（DTO 形态，VideoEnhanceJobProcessor 专用；
-    //            失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
-
-    public boolean publishVideoEnhanceResult(
-            com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto input) {
-        return finalizer.publishVideoEnhanceResult(input);
-    }
-
-    // ========== vocal_split 直通（DTO 形态，VocalSplitJobProcessor 专用；
-    //            失败复用 failMediaExtractJob 守卫——轮询型任务守卫多清 next_poll_at，
-    //            跨工具复用同款 SQL，video_enhance 复用 failVideoJob 同例） ==========
-
-    public boolean publishVocalSplitResult(
-            com.bluewhale.worker.domain.dto.PublishVocalSplitDto input) {
-        return finalizer.publishVocalSplitResult(input);
-    }
-
-    public boolean failVocalSplitJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {
-        return finalizer.failMediaExtractJob(
-                input.jobId(), input.code(), input.message(), input.details(),
-                input.workerId(), input.fencingToken());
-    }
-
-    // ========== video_scene_split 直通（DTO 形态，VideoSceneSplitJobProcessor 专用；
-    //            失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
-
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto> claimVideoSceneSplit(
-            String jobId, String workerId) {
-        return claimService.claimVideoSceneSplit(jobId, workerId);
-    }
-
-    public boolean publishVideoSceneSplitResult(
-            com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto input) {
-        return finalizer.publishVideoSceneSplitResult(input);
-    }
-
-    // ========== video_matting 直通（DTO 形态，VideoMattingJobProcessor 专用；
-    //            失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
-
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto> claimVideoMatting(
-            String jobId, String workerId) {
-        return claimService.claimVideoMatting(jobId, workerId);
-    }
-
-    public boolean publishVideoMattingResult(
-            com.bluewhale.worker.domain.dto.PublishVideoMattingDto input) {
-        return finalizer.publishVideoMattingResult(input);
-    }
-
-    // ========== video_frame_interpolation 直通（DTO 形态，VideoFrameInterpolationJobProcessor
-    //            专用，IKHLKJ；失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
-
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoFrameInterpolationJobDto>
-            claimVideoFrameInterpolation(String jobId, String workerId) {
-        return claimService.claimVideoFrameInterpolation(jobId, workerId);
-    }
-
-    public boolean publishVideoFrameInterpolationResult(
-            com.bluewhale.worker.domain.dto.PublishVideoFrameInterpolationDto input) {
-        return finalizer.publishVideoFrameInterpolationResult(input);
-    }
 
     /**
      * 取消 video_frame_interpolation 作业（IKHLKJ；CAS 与
@@ -470,7 +217,7 @@ public class JobStateMachineService {
      * 会在租约过期后判孤儿重投，新 claim 从头重新下载全部段（每轮重复带宽消耗）；
      * 非重试任务在创建后 120 分钟重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后不再扫描；
      * 重试任务有 IKIDEK 的 10 分钟有界接手期。
-     * 续租秒数与 JobClaimService.VIDEO_SCENE_SPLIT_LEASE_SECONDS 同值（单段转存窗口），
+     * 续租秒数与 VideoSceneSplitJobProcessor 的 ClaimSpec 租约同值（单段转存窗口），
      * 不复用 LEASE_SECONDS(120s)——大段下载+TOS 上传可超 120s，段中途即会过期。
      */
     public boolean updateVideoSceneSplitProgress(
