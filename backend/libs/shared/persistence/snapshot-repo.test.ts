@@ -285,16 +285,7 @@ describe("SnapshotRepo.loadConversationState", () => {
         findMany: vi.fn().mockResolvedValue([]),
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
       },
-      plan_messages: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
       scene_cards: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      generation_model_capability: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      plan_application_receipts: {
         findMany: vi.fn().mockResolvedValue([]),
       },
       scene_card_generation_records: {
@@ -315,9 +306,7 @@ describe("SnapshotRepo.loadConversationState", () => {
       conversation_messages: [
         expect.objectContaining({ message_id: "8", sequence_no: 1 }),
       ],
-      plan_messages: [],
       scene_cards: [],
-      plan_applications: [],
       scene_card_generation_records: [],
       storyboard_previews: [],
       high_watermark_cursor: "12",
@@ -347,11 +336,6 @@ describe("SnapshotRepo.loadConversationState", () => {
       project_events: {
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
       },
-      plan_messages: { findMany: vi.fn().mockResolvedValue([]) },
-      generation_model_capability: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      plan_application_receipts: { findMany: vi.fn().mockResolvedValue([]) },
       scene_card_generation_records: { findMany: vi.fn().mockResolvedValue([]) },
       storyboard_previews: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
@@ -365,127 +349,6 @@ describe("SnapshotRepo.loadConversationState", () => {
     expect(state.conversation_messages[0]?.mentions).toEqual([]);
     expect(assetsFindMany).not.toHaveBeenCalled();
   });
-
-  // —— plan_messages.application_availability 投影（IK6MZU）：复用 loadPlanApplicationFacts，
-  //    读路径 missingMention="unavailable"，不查余额（恒 available/requires_new_plan）。——
-  describe("plan_messages.application_availability 投影（IK6MZU）", () => {
-    const CAP_FIELDS = {
-      supported_sizes: ["1024x1024"],
-      supported_aspect_ratios: ["1:1"],
-      supported_durations: null,
-      supported_formats: ["png"],
-      default_size: "1024x1024",
-      default_format: "png",
-      default_aspect_ratio: "1:1",
-      default_duration: null,
-    };
-    const SNAPSHOT = {
-      schema_version: 1,
-      capability_type: "image",
-      model_id: "doubao-seedream-5.0-lite",
-      provider_id: "doubao",
-      row_version: 3,
-      digest: capabilityDigest(CAP_FIELDS),
-    };
-
-    function buildPlanMessage(derivedReferences: unknown[]) {
-      return {
-        message_id: 500n,
-        conversation_id: 50n,
-        agent_run_id: 9n,
-        project_id: 42n,
-        ordinal: 1,
-        total_in_batch: 1,
-        sequence_label: null,
-        application_kind: "image_generate",
-        target_scene_card_mention_id: null,
-        base_scene_card_version: null,
-        content_markdown: "一只蓝鲸",
-        derived_references: derivedReferences,
-        frozen_generation_parameters: {},
-        capability_snapshot_version: SNAPSHOT,
-        provider_prompt_projection: {},
-        base_plan_message_id: null,
-        source_plan_message_id: null,
-        applied_at: null,
-        first_generation_job_id: null,
-        gmt_create: new Date("2026-08-05T00:00:00.000Z"),
-      };
-    }
-
-    function matchingCapability(overrides: Record<string, unknown> = {}) {
-      return {
-        model_id: "doubao-seedream-5.0-lite",
-        capability_type: "image",
-        version: 3,
-        enabled: true,
-        is_delete: false,
-        ...CAP_FIELDS,
-        ...overrides,
-      };
-    }
-
-    // IKEEFV：mention 表已删——原 mentionRow/assetRow 夹具与 assets 查询随下线。
-    function buildPrisma(opts: {
-      planMessages: unknown[];
-      capabilityRows?: unknown[];
-    }) {
-      return {
-        conversation_messages: { findMany: vi.fn().mockResolvedValue([]) },
-        plan_messages: {
-          findMany: vi.fn().mockResolvedValue(opts.planMessages),
-        },
-        generation_model_capability: {
-          findMany: vi.fn().mockResolvedValue(
-            opts.capabilityRows ?? [matchingCapability()],
-          ),
-        },
-        project_events: {
-          aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 0n } }),
-        },
-        scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
-        plan_application_receipts: { findMany: vi.fn().mockResolvedValue([]) },
-        scene_card_generation_records: { findMany: vi.fn().mockResolvedValue([]) },
-        storyboard_previews: { findMany: vi.fn().mockResolvedValue([]) },
-        generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
-      } as unknown as PrismaClient;
-    }
-
-    async function firstAvailability(prisma: PrismaClient) {
-      const state = await createSnapshotRepo(prisma).loadConversationState(
-        "42",
-        "100",
-      );
-      return state.plan_messages[0]?.application_availability ?? "MISSING";
-    }
-
-    // IKEEFV：mention 表已删 → mentionById 恒空，asset 冻结引用一律缺 mention
-    // fail-closed（前端「需重新计划」）。能力漂移分支被缺 mention 短路、在快照
-    // 读路径不再可达，原「能力行缺失 / row_version 变 / enabled=false」三例随下线
-    //（判定逻辑本体由 regen 侧与 plan-application-internals 覆盖）。
-    it("asset 冻结引用 mention 不可解析 → requires_new_plan（IKEEFV fail-closed）", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
-      });
-      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
-    });
-
-    it("scene_card 引用跳过（不参与判定）→ available", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([{ mention_id: "555", type: "scene_card" }])],
-        // 555 mention 不存在也无所谓——scene_card 引用被 helper 跳过
-      });
-      expect(await firstAvailability(prisma)).toBe("available");
-    });
-
-    it("读路径不查余额：投影恒为 available | requires_new_plan", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([])],
-      });
-      const availability = await firstAvailability(prisma);
-      expect(["available", "requires_new_plan"]).toContain(availability);
-    });
-  });
 });
 
 describe("SnapshotRepo.loadConversationState output slots", () => {
@@ -493,13 +356,10 @@ describe("SnapshotRepo.loadConversationState output slots", () => {
     const empty = () => ({ findMany: vi.fn().mockResolvedValue([]) });
     const prisma = {
       conversation_messages: empty(),
-      plan_messages: empty(),
-      generation_model_capability: empty(),
       project_events: {
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: null } }),
       },
       scene_cards: empty(),
-      plan_application_receipts: empty(),
       scene_card_generation_records: {
         findMany: vi.fn().mockResolvedValue([
           {
@@ -507,7 +367,6 @@ describe("SnapshotRepo.loadConversationState output slots", () => {
             scene_card_id: 66n,
             summary_status: "partial",
             first_generation_job_id: 300n,
-            plan_message_id: 44n,
           },
         ]),
       },

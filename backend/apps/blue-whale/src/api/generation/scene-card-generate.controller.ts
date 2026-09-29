@@ -158,7 +158,6 @@ export class SceneCardGenerateController {
         reference_assets: result.preset.reference_assets,
         capability_snapshot_version: result.preset.capability_snapshot_version,
       },
-      projection: result.projection,
     });
   }
 

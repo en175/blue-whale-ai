@@ -313,37 +313,6 @@ CREATE TABLE `agent_runs` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `plan_messages` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `message_id` BIGINT NOT NULL,
-    `conversation_id` BIGINT NOT NULL,
-    `project_id` BIGINT NOT NULL,
-    `agent_run_id` BIGINT NOT NULL,
-    `ordinal` INTEGER NOT NULL,
-    `total_in_batch` INTEGER NOT NULL,
-    `sequence_label` VARCHAR(255) NULL,
-    `application_kind` VARCHAR(32) NOT NULL,
-    `target_scene_card_mention_id` BIGINT NULL,
-    `base_scene_card_version` INTEGER NULL,
-    `content_markdown` LONGTEXT NOT NULL,
-    `derived_references` JSON NOT NULL,
-    `frozen_generation_parameters` JSON NOT NULL,
-    `capability_snapshot_version` JSON NOT NULL,
-    `provider_prompt_projection` JSON NOT NULL,
-    `base_plan_message_id` BIGINT NULL,
-    `source_plan_message_id` BIGINT NULL,
-    `applied_at` DATETIME(0) NULL,
-    `first_generation_job_id` BIGINT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    UNIQUE INDEX `uk_plan_message_message`(`message_id`),
-    INDEX `idx_plan_message_project`(`project_id`),
-    INDEX `idx_plan_message_agent_run`(`agent_run_id`),
-    INDEX `idx_plan_message_application_kind`(`application_kind`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
 CREATE TABLE `command_idempotency` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -686,29 +655,6 @@ CREATE TABLE `generation_job_logs` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `plan_application_receipts` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `message_id` BIGINT NOT NULL,
-    `project_id` BIGINT NOT NULL,
-    `conversation_id` BIGINT NULL,
-    `agent_run_id` BIGINT NULL,
-    `application_kind` VARCHAR(32) NOT NULL,
-    `scene_card_id` BIGINT NULL,
-    `first_generation_job_id` BIGINT NOT NULL,
-    `command_id` VARCHAR(128) NOT NULL,
-    `content_digest` VARCHAR(80) NOT NULL,
-    `result_version` INTEGER NULL,
-    `preset_digest` VARCHAR(80) NULL,
-    `target_scene_card_mention_id` BIGINT NULL,
-    `applied_at` DATETIME(0) NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    UNIQUE INDEX `uk_plan_application_receipt_message`(`message_id`),
-    INDEX `idx_plan_application_job`(`first_generation_job_id`),
-    UNIQUE INDEX `uk_plan_application_command`(`project_id`, `command_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
 -- CreateTable
 CREATE TABLE `scene_card_generation_presets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
@@ -734,8 +680,8 @@ CREATE TABLE `scene_card_generation_records` (
     `scene_card_id` BIGINT NOT NULL,
     `project_id` BIGINT NOT NULL,
     `summary_status` VARCHAR(16) NOT NULL,
-    `plan_message_id` BIGINT NOT NULL,
-    `application_receipt_id` BIGINT NOT NULL,
+    `plan_message_id` BIGINT NULL,
+    `application_receipt_id` BIGINT NULL,
     `first_generation_job_id` BIGINT NOT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),

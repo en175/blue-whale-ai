@@ -50,7 +50,6 @@ export {
   type SnapshotMentionView,
   type SnapshotAssetRow,
   type SnapshotSceneCardView,
-  type SnapshotPlanApplicationReceiptView,
   type SnapshotSceneCardGenerationRecordView,
   type SnapshotStoryboardPreviewView,
 } from "./snapshot-repo.js";

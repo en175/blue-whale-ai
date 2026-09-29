@@ -108,8 +108,6 @@ export interface SceneCardGenerationPresetView {
     reference_assets: unknown;
     capability_snapshot_version: unknown;
   };
-  /** 首个 PlanMessage 的 ProviderPromptProjection 提示词（AC#2 只读展示）；追溯不到为 null。 */
-  projection: { prompt_text: string } | null;
 }
 
 export type SceneCardGenerationPresetViewResult =
@@ -500,20 +498,10 @@ async function regenerateSceneCardInTransaction(
   )
     return { kind: "capability_drift" } as const;
 
-  // 4. 反查首次 Receipt（CONTEXT L99-101：重试不创建新 Receipt，来源指向首次 PlanMessage 与回执）。
-  const firstReceipt = await tx.plan_application_receipts.findFirst({
-    where: {
-      scene_card_id: sceneCardId,
-      application_kind: "scene_card_create",
-    },
-    orderBy: { id: "asc" },
-    select: { id: true, message_id: true },
-  });
-  if (!firstReceipt)
-    return {
-      kind: "validation_failed",
-      reason: "missing first application receipt for scene_card",
-    };
+  // （原「4. 反查首次 Receipt」已随计划通道退役删除：Receipt 的写入方在 IKCKOW/IKD806 就已删掉，
+  //   这条门槛只会把「无回执的场景卡」（如经素材库 copySceneCardToProject 复制来的）挡在生成之外。
+  //   它原本只是溯源用途——「重试不创建新 Receipt，来源指向首次应用」——不是权限校验，
+  //   所有权与预设校验在本函数更前面，去掉不削弱授权边界。）
 
   // 5. 能力漂移检测（AC#4）：按提交的 model_id/provider_id 查当前行，比对 row_version + digest。
   const capability = await tx.generation_model_capability.findUnique({
@@ -643,7 +631,6 @@ async function regenerateSceneCardInTransaction(
     sceneCardId: sceneCardId.toString(),
     input: {
       scene_card_id: sceneCardId.toString(),
-      plan_message_id: firstReceipt.message_id.toString(),
       prompt_text: sceneCard.content_markdown,
       parameters: input.parameters,
       reference_assets: input.reference_assets,
@@ -662,14 +649,14 @@ async function regenerateSceneCardInTransaction(
   });
   let cursor = createdJob.cursor;
 
-  // 9. INSERT scene_card_generation_records（新记录，summary_status=generating，来源指向首次）。
+  // 9. INSERT scene_card_generation_records（新记录，summary_status=generating）。
+  //    plan_message_id / application_receipt_id 两列随计划通道退役不再写入（列为 NOT NULL，
+  //    迁移已放宽为 NULL-able；历史行保持原值不动）。
   const record = await tx.scene_card_generation_records.create({
     data: {
       scene_card_id: sceneCardId,
       project_id: projectId,
       summary_status: "generating",
-      plan_message_id: firstReceipt.message_id,
-      application_receipt_id: firstReceipt.id,
       first_generation_job_id: BigInt(createdJob.generation_job_id),
     },
   });
@@ -717,7 +704,6 @@ async function regenerateSceneCardInTransaction(
       record_id: record.id.toString(),
       scene_card_id: sceneCardId.toString(),
       generation_job_id: createdJob.generation_job_id,
-      plan_message_id: firstReceipt.message_id.toString(),
     },
   });
   cursor = Math.max(
@@ -779,22 +765,8 @@ export function createSceneCardGenerationRepo(
         },
       });
       if (!preset) return { kind: "not_found" } as const;
-      const firstRecord = await prisma.scene_card_generation_records.findFirst({
-        where: { scene_card_id: sid, project_id: pid, is_delete: 0 },
-        orderBy: { id: "asc" },
-        select: { plan_message_id: true },
-      });
-      let projection: { prompt_text: string } | null = null;
-      if (firstRecord) {
-        const planMessage = await prisma.plan_messages.findUnique({
-          where: { id: firstRecord.plan_message_id },
-          select: { provider_prompt_projection: true },
-        });
-        const raw = planMessage?.provider_prompt_projection as
-          { prompt_text?: unknown } | null | undefined;
-        if (typeof raw?.prompt_text === "string")
-          projection = { prompt_text: raw.prompt_text };
-      }
+      // （原「首个 PlanMessage 的 ProviderPromptProjection」读取已随计划通道退役删除：
+      //   它的数据源 plan_messages 零写入方，且该字段的唯一消费者是前端一个从未被调用的 fetch。）
       return {
         kind: "found",
         scene_card: {
@@ -810,7 +782,6 @@ export function createSceneCardGenerationRepo(
           reference_assets: preset.reference_assets,
           capability_snapshot_version: preset.capability_snapshot_version,
         },
-        projection,
       };
     },
   };

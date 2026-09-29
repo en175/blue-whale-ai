@@ -34,8 +34,6 @@ export interface GenerationPreset {
 export interface SceneCardPresetData {
   scene_card: SceneCardInfo;
   preset: GenerationPreset;
-  /** 投影提示词文本，无投影时为 null */
-  projection: { prompt_text: string } | null;
 }
 
 /** 获取场景卡生成预设（场景卡编辑器打开时只读视图） */

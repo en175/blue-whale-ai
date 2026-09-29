@@ -37,9 +37,7 @@ function buildDeps(assets: Array<Record<string, unknown>>) {
         .mockResolvedValue({ generation_jobs: [], assets }),
       loadConversationState: vi.fn().mockResolvedValue({
         conversation_messages: [],
-        plan_messages: [],
         scene_cards: [],
-        plan_applications: [],
         scene_card_generation_records: [],
         storyboard_previews: [],
         high_watermark_cursor: "0",

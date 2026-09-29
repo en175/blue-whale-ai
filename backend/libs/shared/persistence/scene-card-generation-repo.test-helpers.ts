@@ -134,10 +134,6 @@ export function buildTx(
       create: vi.fn().mockResolvedValue({ id: 8001n }),
       ...overrides.scene_card_generation_records,
     },
-    plan_application_receipts: {
-      findFirst: vi.fn().mockResolvedValue({ id: 7001n, message_id: 4001n }),
-      ...overrides.plan_application_receipts,
-    },
     generation_model_capability: {
       findUnique: vi.fn().mockResolvedValue(buildCapabilityRow()),
       ...overrides.generation_model_capability,

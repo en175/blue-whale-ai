@@ -72,11 +72,6 @@ export {
   type AccessTokenClaims,
 } from "./jwt.js";
 export {
-  classifyPlanApplicationAvailability,
-  type PlanApplicationAvailabilityInput,
-  type PlanApplicationAvailabilityStatus,
-} from "./plan-application-availability.js";
-export {
   requestSmsCode,
   type RequestSmsCodeInput,
   type RequestSmsCodeDeps,

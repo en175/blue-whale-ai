@@ -188,10 +188,6 @@ function buildTx(
       create: vi.fn().mockResolvedValue({ id: 8001n }),
       ...overrides.scene_card_generation_records,
     },
-    plan_application_receipts: {
-      findFirst: vi.fn().mockResolvedValue({ id: 7001n, message_id: 4001n }),
-      ...overrides.plan_application_receipts,
-    },
     generation_model_capability: {
       findUnique: vi.fn().mockResolvedValue(buildCapabilityRow()),
       ...overrides.generation_model_capability,
@@ -317,7 +313,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.command_idempotency.create).toHaveBeenCalledOnce();
   });
 
-  it("新 record 来源指向首次 PlanMessage 与首次 Receipt（CONTEXT L99-101）", async () => {
+  it("新 record 不再写 plan 溯源列（计划通道已退役）", async () => {
     const tx = buildTx({});
     const { repo } = repoWith(tx);
 
@@ -325,8 +321,8 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
     const recordArg =
       tx.scene_card_generation_records.create.mock.calls[0][0].data;
-    expect(recordArg.plan_message_id).toBe(4001n);
-    expect(recordArg.application_receipt_id).toBe(7001n);
+    expect(recordArg.plan_message_id).toBeUndefined();
+    expect(recordArg.application_receipt_id).toBeUndefined();
     expect(recordArg.summary_status).toBe("generating");
   });
 
@@ -339,7 +335,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     const jobArg = tx.generation_jobs.create.mock.calls[0][0].data;
     expect(jobArg.source).toBe("scene_card");
     expect(jobArg.retry_of_job_id).toBeUndefined();
-    expect(jobArg.input.plan_message_id).toBe("4001");
+    expect(jobArg.input.plan_message_id).toBeUndefined();
     expect(jobArg.input.parameters.duration).toBe(5);
   });
 
@@ -798,15 +794,15 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
 
-  it("无首次 Receipt 返回 validation_failed", async () => {
-    const tx = buildTx({
-      plan_application_receipts: {
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
-    });
+  // ★ 回归：拆除「首次 Receipt」门槛后，无回执的场景卡（如经素材库
+  //   copySceneCardToProject 复制来的——它是 scene_cards 全仓唯一的创建点，但不写回执）
+  //   必须也能生成。改动前这里返回 validation_failed("missing first application receipt")。
+  it("★ 无首次 Receipt 也能生成（复制来的场景卡不再被挡）", async () => {
+    const tx = buildTx({});
     const { repo } = repoWith(tx);
     const result = await repo.regenerateSceneCard(baseInput);
-    expect(result.kind).toBe("validation_failed");
+    expect(result.kind).toBe("applied");
+    expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
   });
 
   // IKEEFV：mention 表已删，引用素材不再可解析——fail-closed 拒绝语义与旧
