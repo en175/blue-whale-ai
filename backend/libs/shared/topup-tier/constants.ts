@@ -190,13 +190,19 @@ const AUTO_NAME_RE = /^\d+积分$/;
  * 读档位时的展示名归一。
  *
  * <p>没起名的档位，服务端在**创建那一刻**把名字烘成 `${当时的到账积分}积分`。
- * 而到账积分现在是从定价目录派生的（`原价 × creditsPerYuan`）——**换算口径一改，
- * 老档位的名字就与它旁边那个数字对不上了**：列表里显示「5000000积分」、到账却是 150。
- * 用户和管理员都会当成扣错了。
+ * 而到账积分是**运营在后台配的配置值**（`base_credits`），**不是**从原价派生的 ——
+ * 2026-09-27 起推翻了「原价 × creditsPerYuan」那条老口径（充值常有折扣：¥499 的档
+ * 到账 7,500 积分，而 499×15=7,485）。**配置一改，老档位的名字就与它旁边那个数字对不上**：
+ * 列表里显示「5000000积分」、到账却是 150。用户和管理员都会当成扣错了。
  *
  * <p>所以读取时：**只对「看起来是自动生成的」名字重新派生**，人工起过的名字一律不动——
  * 名字是运营的表达，「春季特惠」不该被我们改写。
+ *
+ * @param storedName     库里存的那个名字
+ * @param grantedCredits 这一档**现在**的到账积分数（`base_credits` 配置值），
+ *                       用来给自动生成的旧名重新派生。参数刻意不叫 `derived*` 一类的名字：
+ *                       它不是从别处派生出来的量，就是运营配的那个数。
  */
-export function displayTierName(storedName: string, derivedAmount: number): string {
-  return AUTO_NAME_RE.test(storedName.trim()) ? `${derivedAmount}积分` : storedName;
+export function displayTierName(storedName: string, grantedCredits: number): string {
+  return AUTO_NAME_RE.test(storedName.trim()) ? `${grantedCredits}积分` : storedName;
 }
