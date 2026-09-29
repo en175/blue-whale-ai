@@ -113,12 +113,13 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
     }
 
     /**
-     * 运营面的一行 —— 与用户面 {@code UserTransaction} 同一个读模型，多两列。
+     * 运营面的一行 —— 与用户面 {@code UserTransaction} 同一个读模型，多三列。
      *
-     * <p>⚠️ {@code reservedCredits} 用 proto3 的 {@code optional} 表达 presence，
-     * 而不是「0 = 没有」：{@code 0} 是「冻了 0 分」，**缺值**是「这一行压根没有预扣这回事」
-     * （发放行、账本行）。前端靠这个区别决定显不显示那一行小字 —— 混成一个数就会出现
-     * 「发放行显示预扣 0」。所以这里**判空用 {@code != null}，不是真值判断**。
+     * <p>⚠️ {@code reservedCredits} 与 {@code generationJobId} 都用 proto3 的 {@code optional}
+     * 表达 presence，而不是「0 = 没有」：{@code 0} 是「冻了 0 分」/「任务 0」，
+     * **缺值**是「这一行压根没有预扣 / 没有任务这回事」（发放行、账本行）。
+     * 前端靠这个区别决定显不显示那一行小字 —— 混成一个数就会出现「发放行显示预扣 0」。
+     * 所以这里**判空用 {@code != null}，不是真值判断**。
      */
     private static AdminTransactionItem toItem(TransactionView view) {
         AdminTransactionItem.Builder item = AdminTransactionItem.newBuilder()
@@ -137,6 +138,10 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
                         : RFC3339.format(view.settledAt().atZone(DbTime.ZONE)));
         if (view.reservedCredits() != null) {
             item.setReservedCredits(view.reservedCredits());
+        }
+        // 消费行的 join key —— 供给 BFF 回自己库查任务语义（类型 / 模型 / 提示词）
+        if (view.generationJobId() != null) {
+            item.setGenerationJobId(view.generationJobId());
         }
         return item.build();
     }

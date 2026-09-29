@@ -50,6 +50,19 @@ public class TransactionRow {
      */
     private Long reservedCredits;
 
+    /**
+     * 这行关联的生成任务（{@code billing_cost_reservations.generation_job_id}）。
+     *
+     * <p>只有消费行（{@code id} 形如 {@code res:7}）有值——那一行的身份就是一条预留，
+     * 而预留上的 {@code generation_job_id} 是 NOT NULL 的。发放行与账本行没有任务，
+     * 为 {@code null}（**不是 0**：本仓没有「任务 0」这种东西）。
+     *
+     * <p>⚠️ **它是给 backend 用的 join key，不是给人看的**：billing 只存 id，任务的类型 /
+     * 模型 / 提示词都在 backend 自己的库（ADR-0114 不共享库，这里读不到）。管理面的
+     * BFF 拿这批 id 回自己库批量查后合并进响应 —— 消费行在后台才答得出「这是什么任务」。
+     */
+    private Long generationJobId;
+
     /** pending | done。 */
     private String status;
 
@@ -78,6 +91,8 @@ public class TransactionRow {
     public void setAmount(Long amount) { this.amount = amount; }
     public Long getReservedCredits() { return reservedCredits; }
     public void setReservedCredits(Long reservedCredits) { this.reservedCredits = reservedCredits; }
+    public Long getGenerationJobId() { return generationJobId; }
+    public void setGenerationJobId(Long generationJobId) { this.generationJobId = generationJobId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }

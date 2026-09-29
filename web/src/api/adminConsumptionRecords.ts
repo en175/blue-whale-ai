@@ -39,6 +39,26 @@ export interface AdminConsumptionRecord {
    * 未结算行（pending）的 `credits` 本就是预扣额，两个数相同。
    */
   reserved_credits?: number | null;
+  /**
+   * 该行关联任务的**类型**（`generation_jobs.type`，如 `text2video`）。
+   *
+   * ⚠️ 「没有」的两种形态与 `reserved_credits` 逐字相同（见上），判空一律 `== null`。
+   *    这一组有**三种**「没有」，且含义不同，界面上要分开对待：
+   *      - 整组为「没有」→ 这一行不是消费任务（发放 / 账本），或后端是旧构建
+   *      - `task_type` 有值但 `model_id` 为「没有」→ 免费工具族天生没有模型，**不是查不到**
+   *      - `task_type` 有值但 `prompt` 为「没有」→ 这个任务就没写提示词
+   *
+   * 展示口径：任务类型用 `taskTypeLabel()`（见页面），模型用 `model_label ?? model_id ?? '—'`，
+   * **不要在前端拼模型名**——中文名维护在 `generation_model_capability.model_label`，
+   * 拼出来的名字与「模型列表」页对不上，运营会以为是两个模型。
+   */
+  task_type?: string | null;
+  /** 该行关联任务用的模型 id（`input.model_id`）；免费工具族为「没有」 */
+  model_id?: string | null;
+  /** 模型的展示名；能力表查不到时为「没有」（此时前端回落显示 `model_id`） */
+  model_label?: string | null;
+  /** 该行关联任务的提示词原文（`input.prompt`）。**全文返回**，由界面决定怎么展示 */
+  prompt?: string | null;
   /** pending | done */
   status: string;
   created_at: string;

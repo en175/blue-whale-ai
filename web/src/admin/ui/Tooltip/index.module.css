@@ -44,6 +44,37 @@
   background: var(--admin-accent-soft);
 }
 
+/* 自定义 trigger（`trigger` 传了内容时走这条）：**文字也是触发器的一部分**。
+   与上面那个图标按钮的区别：不占固定 24px、不加药丸底 —— 内容决定尺寸，
+   否则「图片 ⓘ」这种会被撑成两截。
+
+   `cursor: help` 与 `.trigger` 同款：这块东西点/悬停**不执行操作**，只是把收起来的内容
+   摊开。用 `pointer` 会让人以为点下去会跳转或提交。 */
+.triggerInline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--admin-space-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: help;
+  transition: color 120ms ease;
+}
+
+/* 收起时**不抢眼**：数据格子里的东西不该比数据本身更突出。
+   悬停/聚焦/展开才染成强调色——那是「这里有东西可以摊开」的提示。
+   文字与图标**同色**（都 `inherit`）：它们是同一个触发器，分两档颜色会让图标看着像
+   第二个元素；要拉开层次就在调用方那边处理，别写在这里。 */
+.triggerInline:hover,
+.triggerInline:focus-visible,
+.triggerInline[aria-expanded='true'] {
+  color: var(--admin-accent);
+  outline: none;
+}
+
 .portal {
   position: fixed;
   z-index: 400;

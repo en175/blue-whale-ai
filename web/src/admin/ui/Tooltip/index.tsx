@@ -20,6 +20,14 @@ interface TooltipProps {
   content: ReactNode;
   /** 读屏用的可读名（图标本身没有文字）。 */
   label?: string;
+  /**
+   * 自定义触发元素。**不传 = 默认的「?」图标**（`Hint` 走的就是这条）。
+   *
+   * <p>传了就把整块元素做成触发器，用于「悬停看明细」这类挂在**数据**上、而不是
+   * 挂在**说明**上的浮层 —— 数据格子里没有位置放一个 `?`，读者要的也不是「解释」，
+   * 而是被收起来的那部分内容本身。
+   */
+  trigger?: ReactNode;
 }
 
 /** 面板与图标之间的间隙：够看清是同一组，又小到鼠标能直接移进去。 */
@@ -49,7 +57,7 @@ const ESTIMATED_WIDTH = 400;
  *
  * <p>**触屏没有 hover**：点击也能开合；开了之后 Esc 与点击别处都能收。
  */
-export default function Tooltip({ title, content, label = '说明' }: TooltipProps) {
+export default function Tooltip({ title, content, label = '说明', trigger }: TooltipProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -145,7 +153,7 @@ export default function Tooltip({ title, content, label = '说明' }: TooltipPro
       <button
         ref={triggerRef}
         type="button"
-        className={styles.trigger}
+        className={trigger === undefined ? styles.trigger : styles.triggerInline}
         aria-label={label}
         aria-expanded={anchor !== null}
         aria-describedby={anchor ? panelId : undefined}
@@ -155,7 +163,7 @@ export default function Tooltip({ title, content, label = '说明' }: TooltipPro
         onBlur={hide}
         onClick={toggle}
       >
-        <CircleHelp size={15} strokeWidth={2} />
+        {trigger ?? <CircleHelp size={15} strokeWidth={2} />}
       </button>
       {anchor !== null &&
         createPortal(

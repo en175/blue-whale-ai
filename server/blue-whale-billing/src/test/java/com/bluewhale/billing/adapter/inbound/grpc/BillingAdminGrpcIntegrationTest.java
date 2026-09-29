@@ -309,6 +309,24 @@ class BillingAdminGrpcIntegrationTest {
     }
 
     @Test
+    void 消费行_带得出关联的生成任务_发放行是缺值() {
+        userFacing.hold(hold(USER, "adm-job-1", 9_207L));
+        // 结算换了 amount 与 status，但那一行仍是**同一条预留**（res:{预留id} 不变）——
+        // join key 必须跟得住状态转换，否则积分记录页里已结算的行就查不到任务了
+        credits.settle(9_207L, 30);
+
+        AdminTransactionItem consume = rowOf(adminList(USER), "consume");
+        // ★ 它是给 backend 用的 join key，不是给人看的：任务的类型 / 模型 / 提示词都在
+        //   backend 自己的库里（ADR-0114 不共享库，billing 读不到），由管理面 BFF 拿这批
+        //   id 回自己库批量查后合并进同一个响应。
+        assertThat(consume.hasGenerationJobId()).isTrue();
+        assertThat(consume.getGenerationJobId()).isEqualTo(9_207L);
+
+        // 发放不是任务：与 reservedCredits 同一个 presence 口径 —— 是**缺值**，不是「任务 0」
+        assertThat(rowOf(adminList(USER), "gift").hasGenerationJobId()).isFalse();
+    }
+
+    @Test
     void 未结算的消费行_预扣额仍是预扣时的那个数() {
         userFacing.hold(hold(USER, "adm-pending-1", 9_206L));
 

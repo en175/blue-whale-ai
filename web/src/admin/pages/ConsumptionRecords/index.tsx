@@ -17,9 +17,10 @@
  *    所以这一列**只在两个数不一致时**补一行「预扣 N」——理由见下面的渲染注释。
  * ============================================ */
 import { useQuery } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
+import { Eye, Search } from 'lucide-react';
 import {
   adminConsumptionRecordsOptions,
+  type AdminConsumptionRecord,
   type AdminConsumptionRecordQuery,
 } from '@/api/adminConsumptionRecords';
 import AdminQueryTable, {
@@ -27,7 +28,8 @@ import AdminQueryTable, {
   type CursorPaginationState,
 } from '../../components/AdminQueryTable';
 import { useAppliedFilters, useCursorStack } from '../../components/AdminQueryTable/useQueryFilters';
-import { Badge, Button, Hint, Input, Select } from '../../ui';
+import { Badge, Button, Hint, Input, MetaRow, Select, Tooltip } from '../../ui';
+import { taskTypeLabel } from '../../taskTypeLabels';
 
 const PAGE_SIZE = 20;
 
@@ -56,6 +58,29 @@ const SECONDARY_TEXT = {
   fontSize: 'var(--admin-font-xs)',
   color: 'var(--admin-text-muted)',
 } as const;
+
+/**
+ * 明细面板里的提示词正文：**保留换行**（提示词常是多行写的，折成一坨没法读）+ 长词强制断行。
+ *
+ * <p>换行是这里唯一需要页面自己说的样式 —— 面板的宽度/高度上限、内滚、正文字号
+ * 都由 {@link Tooltip} 的面板兜着（见 `ui/Tooltip/index.module.css` 的 `.panel`）。
+ */
+const PROMPT_TEXT = {
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'anywhere',
+} as const;
+
+/**
+ * 任务明细面板与任务格共用的模型展示口径 —— 与 JobRecords 的 `modelText` 逐字相同。
+ *
+ * <p>「有展示名用展示名，没有就原样显示 model_id，都没有才是「—」」。
+ * **不要在前端拼模型名**：中文名维护在 `generation_model_capability.model_label`，
+ * 拼出来的名字与「模型列表」页对不上，运营会以为是两个模型。
+ *
+ * <p>`??` 一层层往下落，正是为了空值只有两种形态（`null` / 键不存在）——
+ * 三种「没有」在界面上是同一格「—」，不必分开。
+ */
+const modelText = (row: AdminConsumptionRecord) => row.model_label ?? row.model_id ?? '—';
 
 /**
  * 契约里的流水类型（billing 的 TransactionType）。**空串 = 全部** —— 与另外两张记录页
@@ -115,7 +140,57 @@ export default function ConsumptionRecords() {
       header: '类型',
       render: (row) => <Badge tone="neutral">{TYPE_LABELS[row.type] ?? row.type}</Badge>,
     },
-    { key: 'title', header: '说明', render: (row) => row.title },
+    {
+      key: 'task',
+      header: '任务',
+      render: (row) => {
+        // 任务语义来自**我们自己库**的 generation_jobs：BFF 拿 billing 给的 jobId
+        // 批量补上 type / model / prompt。账本本身答不出「这是什么任务」。
+        //
+        // ⚠️ 判空一律 `== null`（不能 `=== null`，更不能真值判断）：缺值有两种形态，
+        //    老后端压根没投影这几个键时整个键**不存在**。
+        if (row.task_type == null) {
+          // 非消费行（发放 / 账本），或后端是旧构建 —— 回到账本自带的 title。
+          // 这个回落不是兜底摆设：老后端 + 新前端时它是这一列**唯一**有的信息。
+          return row.title;
+        }
+        const typeLabel = taskTypeLabel(row.task_type);
+        // 格子里只留**类别**，明细（模型、提示词）收进悬停面板。
+        //
+        // 为什么不铺开：模型名 + 提示词一行放不下 —— 全铺出来要么把表撑散，要么截断成
+        // 没用的半句（而且一行挂一个按钮，20 行就是 20 个描边方块，比数据还抢眼）。
+        // 这一列绝大多数时候只被扫一眼「这是个什么任务」，再决定要不要看细节。
+        return (
+          <Tooltip
+            label="任务明细"
+            // 类型名放**面板标题**而不是正文第一行：它和触发器的文字是同一个词，
+            // 正文里再列一遍就是同一句话说两次。标题槽本来就是给「这面板在讲什么」的。
+            title={typeLabel}
+            trigger={
+              <>
+                {typeLabel}
+                {/* 图标是「这里还有东西」的标记。不加它，一行纯文字看不出能悬停。
+                    尺寸跟 `ui/Tooltip` 默认的 `?` 图标一致（15）——同一种交互不该有第二种大小。 */}
+                <Eye size={15} strokeWidth={2} />
+              </>
+            }
+            content={
+              <MetaRow
+                items={[
+                  { label: '模型', value: modelText(row) },
+                  {
+                    label: '提示词',
+                    // 没有提示词（免费工具族、老任务）给「—」而不是空白：
+                    // 空着读起来像「还在加载」，而这是查询已经答完的结论。
+                    value: <div style={PROMPT_TEXT}>{row.prompt ?? '—'}</div>,
+                  },
+                ]}
+              />
+            }
+          />
+        );
+      },
+    },
     {
       key: 'credits',
       header: '积分',

@@ -115,3 +115,6 @@ dist/
 # 构建时生成保证「同一份 .proto 产出两端一致的代码」。见 contracts/README.md。
 backend/libs/contracts/gen/
 server/libs/target/generated-sources/proto/
+
+# Playwright MCP 的产物（截图/控制台日志/快照）：调试痕迹，不进仓
+.playwright-mcp/

@@ -231,6 +231,52 @@ describe("billing-admin-client", () => {
     expect(page.items[1]?.reservedCredits).toBe(100);
   });
 
+  it("流水：生成任务 id 没设 → null；设了 → **字符串**，且大 id 不丢精度", async () => {
+    // ⚠️ 这一列是 join key（拿它回自己库查任务、取提示词），所以**不能过 `Number()`**：
+    //    int64 在 protobuf-es 里是 bigint，超过 2^53 时 Number 会**静默**丢精度——
+    //    查不到还好，查到**另一个任务**就是把别人的提示词给运营看了。
+    //    下面这个 id 特意取在 2^53 之上。
+    const HUGE_JOB_ID = 9_007_199_254_740_993n;
+    freshGrpcUrl();
+    grpcAdminService({
+      adminListTransactions: () =>
+        create(AdminListTransactionsResponseSchema, {
+          items: [
+            // 发放行：**不设** generationJobId（presence 缺席，不是「任务 0」）
+            create(AdminTransactionItemSchema, {
+              id: "lot:1",
+              userId: 7n,
+              type: "gift",
+              direction: "in",
+              title: "运营赠送",
+              amount: 100n,
+              status: "done",
+              createdAt: "2026-09-26T10:00:00+08:00",
+            }),
+            // 消费行：设了任务 id
+            create(AdminTransactionItemSchema, {
+              id: "res:9",
+              userId: 7n,
+              type: "consume",
+              direction: "out",
+              title: "生成消费",
+              amount: 30n,
+              generationJobId: HUGE_JOB_ID,
+              status: "done",
+              createdAt: "2026-09-26T10:01:00+08:00",
+            }),
+          ],
+        }),
+    });
+
+    const page = await listAdminTransactions({ pageSize: 50 });
+
+    expect(page.items[0]?.generationJobId).toBeNull();
+    expect(page.items[1]?.generationJobId).toBe("9007199254740993");
+    // 走 Number 会得到 9007199254740992 —— 少 1，且**不报错**
+    expect(page.items[1]?.generationJobId).not.toBe("9007199254740992");
+  });
+
   it("流水：userId 不传 = **全站**（发的是 0 这个哨兵值，不是「用户 0」）", async () => {
     freshGrpcUrl();
     const seen: bigint[] = [];

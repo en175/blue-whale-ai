@@ -297,7 +297,8 @@ message AdminListTransactionsResponse {
   common.v1.PageResponse page = 2;
 }
 
-// 运营面的一行流水 —— 与 UserTransaction 同一个读模型，多 `user_id` 与 `reserved_credits`。
+// 运营面的一行流水 —— 与 UserTransaction 同一个读模型，多 `user_id` / `reserved_credits`
+// 与 `generation_job_id` 三个管理面独有的列。
 message AdminTransactionItem {
   string id         = 1;
   // 归属用户。**管理面独有的列** —— UserTransaction 里没有它（用户只看自己那份，带了是冗余）。
@@ -321,6 +322,17 @@ message AdminTransactionItem {
   string status     = 8; // pending | done
   string created_at = 9; // RFC3339
   string settled_at = 10; // RFC3339，未结算为空串
+  // ★ 该行关联的生成任务（`billing_cost_reservations.generation_job_id`）。**只有消费行有值。**
+  //
+  // ⚠️ 与 `reserved_credits` 同一个 presence 口径：缺值不是「任务 0」，是「这一行压根
+  //    没有任务」（发放行 / 账本行）。消费行侧该列 NOT NULL，所以有就是有。
+  //
+  // ⚠️ **它不是给用户看的，是给 backend 用的 join key。** billing 只存 id、不存任务的
+  //    语义：任务类型在 `generation_jobs.type`，模型与提示词在 `input` 里，而那两个都在
+  //    backend 自己的库（ADR-0114 决策 4：不共享库，billing 读不到 `blue_whale`）。
+  //    所以由 backend 拿到这批 id 回自己库批量查、解析后合并进 BFF 的响应——
+  //    与 `HoldRequest.rule_snapshot` 是同一条思路：谁拥有那份数据，谁在能拿到的时候负责。
+  optional int64 generation_job_id = 11;
 }
 
 message AdminQueryBalanceRequest {
