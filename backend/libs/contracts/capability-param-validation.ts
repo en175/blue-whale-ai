@@ -7,7 +7,14 @@
 // 这里把 Dock 的扁平字段（resolution + aspect_ratio + duration）归一化后同源校验。
 // 后续可把 checkCapabilityLimit 迁到本文件共享（IKE7JP 下一步）。
 
-import { ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION, ERROR_CAPABILITY_UNSUPPORTED_RATIO, ERROR_CAPABILITY_UNSUPPORTED_DURATION, ERROR_TASK_TYPE_PARAM_CONSTRAINT } from "./error-codes.js";
+import {
+  ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION,
+  ERROR_CAPABILITY_UNSUPPORTED_RATIO,
+  ERROR_CAPABILITY_UNSUPPORTED_DURATION,
+  ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+  ERROR_CODES,
+  errorCodeToNumeric,
+} from "./error-codes.js";
 
 /** 提交侧能力目录行（handleCreateGenerationJob 已从 listEnabledByType 取回）。 */
 export interface CapabilityLimitInput {
@@ -111,9 +118,11 @@ export function resolveVideoTaskType(
 
 /** IKJ795：编辑/延长 + 非 adaptive 比例拒单的用户向文案（结构化码 task_type_param_constraint 的话）。
  *  ⚠️ 不出现 edit/adaptive 等内部词——用户不需要知道任务类型枚举；「自动」对应前端
- *     adaptive 档的用户可见文案（IKJ794），一键修复动作 = 把比例切换为自动后重交。 */
+ *     adaptive 档的用户可见文案（IKJ794），一键修复动作 = 把比例切换为自动后重交。
+ *  文案唯一来源 = error-codes.ts 的 ERROR_CODES 表（字符串码 → 数值码 → 文案查表取回），
+ *  不在本文件再抄第二份字面量——两份会静默漂移。 */
 export const TASK_TYPE_PARAM_CONSTRAINT_MESSAGE =
-  "提示词包含修改、替换或延长原视频的意图，输出比例将自动跟随参考视频，请将比例切换为「自动」后重试";
+  ERROR_CODES[errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT)]!;
 
 /** 快照上冻结任务类型的键名（GenerationJob.input.video_task_type）。 */
 export const FROZEN_VIDEO_TASK_TYPE_KEY = "video_task_type";
