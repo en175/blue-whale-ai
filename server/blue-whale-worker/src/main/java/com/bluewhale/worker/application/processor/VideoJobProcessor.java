@@ -788,6 +788,11 @@ public class VideoJobProcessor implements JobProcessor {
         // 缺失或非布尔 → null → 出站不下发，维持上游默认。
         Boolean generateAudio = input.get("generate_audio") instanceof Boolean b ? b : null;
 
+        // IKJ79A：快照冻结的视频任务类型（IKJ795 接纳侧判定冻结，键名同 TS 契约
+        // FROZEN_VIDEO_TASK_TYPE_KEY）。执行层只读不重算；缺失/非字符串 → null，
+        // 出站侧按 default 处理（frozenVideoTaskTypeOf 同口径，不回溯历史任务）。
+        String videoTaskType = input.get("video_task_type") instanceof String s ? s : null;
+
         // 校验（:598-606）。IKFPYX：duration=-1（模型自动选时长）**仅 edit/prolong 任务合法**，
         // 其余任务须 duration>0。
         // 判定用**主提示词**（basePrompt）而非组合后 prompt：官方口径是「提示词中需包含关键词」，
@@ -821,7 +826,7 @@ public class VideoJobProcessor implements JobProcessor {
             }
             return new VideoSubmitInput(model, prompt, duration,
                     strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references,
-                    generateAudio, sample);
+                    generateAudio, sample, videoTaskType);
         }
 
         // 参考素材解析（video-job-runner.ts:608-650）
@@ -983,12 +988,12 @@ public class VideoJobProcessor implements JobProcessor {
             }
             merged.addAll(references);
             return new VideoSubmitInput(model, prompt, duration, resolution, ratio,
-                    null, null, merged, generateAudio, sample);
+                    null, null, merged, generateAudio, sample, videoTaskType);
         }
 
         return new VideoSubmitInput(
                 model, prompt, duration, resolution, ratio,
-                firstFrameImage, lastFrameImage, references, generateAudio, sample
+                firstFrameImage, lastFrameImage, references, generateAudio, sample, videoTaskType
         );
     }
 

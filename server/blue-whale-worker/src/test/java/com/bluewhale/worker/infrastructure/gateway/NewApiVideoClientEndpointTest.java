@@ -35,11 +35,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * 视频提交出站协议钉桩测试（IKFFWH）。
  * <p>
- * 覆盖 metadata.content 的角色映射与素材库引用载体：
+ * 覆盖 metadata.content 的角色映射与素材库引用：
  * <ul>
  *   <li>单数组路径：帧以带 role 的 reference 条目提交 → {@code role: first_frame/last_frame}；
  *       素材库引用 url 为 {@code asset://<素材ID>}，按 type 推导 reference_image/audio/video。</li>
  *   <li>旧字段路径：独立首尾帧字段照旧转 first_frame/last_frame（回归不动）。</li>
+ *   <li>IKJ79A：Seedance 2.5 全能参考显式任务类型——按快照任务类型下发
+ *       omni_reference_task_type 与出站 ratio/duration 约束（09-22 TEMP FIX 已删）；
+ *       上游 TaskTypeMismatch/TaskTypeConstraint 异步错误归类 1056。</li>
  * </ul>
  */
 class NewApiVideoClientEndpointTest {
@@ -136,16 +139,17 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
-    @DisplayName("TEMP FIX：doubao-seedance-2-5 带参考视频 → duration 强制 -1、ratio 强制 adaptive")
-    void seedance25WithVideoReferenceForcesAdaptiveAndAutoDuration() throws Exception {
+    @DisplayName("IKJ79A 编辑单：2.5+参考视频+edit → omni=edit 且 ratio=adaptive、duration=-1（强制跟随）")
+    void seedance25EditTaskForcesAdaptiveAndAutoDuration() throws Exception {
         VideoSubmitInput input = new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null);
+                null, "edit");
 
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
 
         JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("metadata").get("omni_reference_task_type").asText()).isEqualTo("edit");
         assertThat(body.get("duration").asDouble()).isEqualTo(-1.0);
         assertThat(body.get("metadata").get("duration").asDouble()).isEqualTo(-1.0);
         assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("adaptive");
@@ -155,25 +159,134 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
-    @DisplayName("TEMP FIX 边界：无参考视频的 seedance-2-5、或其他模型带参考视频 → 原值不动")
-    void seedance25OverrideOnlyWhenVideoReferencePresent() throws Exception {
-        // 只有图片参考（含首尾帧）→ 不触发
+    @DisplayName("IKJ79A 延长单：prolong → omni=extend 且 ratio=adaptive、duration 透传用户所选")
+    void seedance25ProlongTaskLocksRatioOnlyAndKeepsUserDuration() throws Exception {
+        VideoSubmitInput input = new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "把视频向后延长", 12.0, "720p", "16:9", null, null,
+                List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
+                null, "prolong");
+
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("metadata").get("omni_reference_task_type").asText()).isEqualTo("extend");
+        assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("adaptive");
+        // 官方 extend 只锁比例不锁时长：duration 透传用户所选（含默认档）
+        assertThat(body.get("duration").asDouble()).isEqualTo(12.0);
+        assertThat(body.get("metadata").get("duration").asDouble()).isEqualTo(12.0);
+    }
+
+    @Test
+    @DisplayName("IKJ79A 纯参考单：default → omni=reference 且用户比例/时长原样透传（首次真正生效）")
+    void seedance25ReferenceTaskPassesThroughUserRatioAndDuration() throws Exception {
+        VideoSubmitInput input = new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "一只猫在海边跑步", 8.0, "720p", "9:16", null, null,
+                List.of(new VideoReference("video", "https://tos.test/ref.mp4", null),
+                        new VideoReference("image", "https://tos.test/a.png", null)),
+                null, "default");
+
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("metadata").get("omni_reference_task_type").asText()).isEqualTo("reference");
+        // TEMP FIX 已删：不再被静默改写为 adaptive/-1
+        assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("9:16");
+        assertThat(body.get("duration").asDouble()).isEqualTo(8.0);
+        assertThat(body.get("metadata").get("duration").asDouble()).isEqualTo(8.0);
+    }
+
+    @Test
+    @DisplayName("IKJ79A 存量快照：无 video_task_type（null）→ 按 default → reference，原样透传")
+    void seedance25LegacySnapshotWithoutTaskTypeFallsBackToReference() throws Exception {
+        // 9 参兼容构造器 = 快照未携带 video_task_type 的存量任务
+        VideoSubmitInput input = new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "16:9", null, null,
+                List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
+                null);
+
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("metadata").get("omni_reference_task_type").asText()).isEqualTo("reference");
+        assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("16:9");
+        assertThat(body.get("duration").asDouble()).isEqualTo(5.0);
+
+        // 非法值同口径按 default（frozenVideoTaskTypeOf 语义，不重算）
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "16:9", null, null,
-                List.of(new VideoReference("image", "https://tos.test/a.png", null)),
-                null));
-        JsonNode imageOnly = JSON.readTree(lastBody.get());
-        assertThat(imageOnly.get("duration").asDouble()).isEqualTo(5.0);
-        assertThat(imageOnly.get("metadata").get("ratio").asText()).isEqualTo("16:9");
+                List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
+                null, "banana"));
+        assertThat(JSON.readTree(lastBody.get()).get("metadata").get("omni_reference_task_type").asText())
+                .isEqualTo("reference");
+    }
 
-        // 其他 model id 带参考视频 → 不触发
+    @Test
+    @DisplayName("IKJ79A 边界：2.0 系列与首尾帧/无参考视频均不下发 omni、原值不动")
+    void omniTaskTypeOnlyForSeedance25WithVideoReference() throws Exception {
+        // 2.0 系列：不下发该参数、行为不变（官方允许 2.0 编辑任务指定比例）
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-0-260128", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null));
-        JsonNode otherModel = JSON.readTree(lastBody.get());
-        assertThat(otherModel.get("duration").asDouble()).isEqualTo(5.0);
-        assertThat(otherModel.get("metadata").get("ratio").asText()).isEqualTo("16:9");
+                null, "edit"));
+        JsonNode seedance20 = JSON.readTree(lastBody.get());
+        assertThat(seedance20.get("metadata").has("omni_reference_task_type")).isFalse();
+        assertThat(seedance20.get("duration").asDouble()).isEqualTo(5.0);
+        assertThat(seedance20.get("metadata").get("ratio").asText()).isEqualTo("16:9");
+
+        // 首尾帧任务：维持角色驱动（content[].role=first_frame），不下发该参数
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "adaptive",
+                "https://tos.test/first.png", "https://tos.test/last.png",
+                List.of(), null, "first_last_frame"));
+        JsonNode firstLast = JSON.readTree(lastBody.get());
+        assertThat(firstLast.get("metadata").has("omni_reference_task_type")).isFalse();
+        assertThat(firstLast.get("duration").asDouble()).isEqualTo(5.0);
+
+        // 只有图片参考（无参考视频）→ 官方 edit/extend 均要求 reference_video，不下发
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
+                List.of(new VideoReference("image", "https://tos.test/a.png", null)),
+                null, "edit"));
+        JsonNode imageOnly = JSON.readTree(lastBody.get());
+        assertThat(imageOnly.get("metadata").has("omni_reference_task_type")).isFalse();
+        assertThat(imageOnly.get("metadata").get("ratio").asText()).isEqualTo("16:9");
+    }
+
+    @Test
+    @DisplayName("IKJ79A: poll 异步 TaskTypeMismatch/TaskTypeConstraint → task_type_param_constraint(1056)")
+    void pollTaskTypeMismatchMapsToUserFacingConstraintCode() throws Exception {
+        // 上游二次判定错位：模型语义判定的任务类型与指定类型不一致（data.error.code 携带官方码）
+        server.createContext("/v1/video/generations/task-mismatch", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-mismatch\",\"status\":\"FAILURE\"," +
+                    "\"error\":{\"code\":\"InvalidParameter.TaskTypeMismatch\"," +
+                    "\"message\":\"The actual task type is inconsistent with the specified omni_reference_task_type.\"}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+        // 参数与任务类型不兼容（顶层 fail_reason 携带官方码）
+        server.createContext("/v1/video/generations/task-constraint", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-constraint\",\"status\":\"FAILURE\"," +
+                    "\"fail_reason\":\"InvalidParameter.TaskTypeConstraint: ratio must be adaptive when omni_reference_task_type is edit.\"}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        NewApiVideoClient client = new NewApiVideoClient(new UpstreamBaseUrl(baseUrl));
+        VideoTaskObservation mismatch = client.poll("t", "task-mismatch");
+        assertThat(mismatch.status()).isEqualTo("failed");
+        assertThat(mismatch.error().code()).isEqualTo("task_type_param_constraint");
+
+        VideoTaskObservation constraint = client.poll("t", "task-constraint");
+        assertThat(constraint.status()).isEqualTo("failed");
+        assertThat(constraint.error().code()).isEqualTo("task_type_param_constraint");
     }
 
     @Test
