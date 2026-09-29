@@ -103,6 +103,13 @@ afterEach(async () => {
 });
 
 describe('ConsumptionRecords 积分记录（游标分页）', () => {
+  it('页面标题是「积分记录」', async () => {
+    await renderPage();
+
+    // 钉住改名本身：这一页记的是全站积分流水（含充值/赠送/过期），不只消费。
+    expect(document.body.textContent).toContain('积分记录');
+  });
+
   it('首次加载不带游标，且因为是全站视图所以 userId 一个也不传', async () => {
     await renderPage();
 

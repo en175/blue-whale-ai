@@ -14,7 +14,7 @@ function parsePageSize(raw: string | undefined): number {
 }
 
 /**
- * 消费记录（管理端）。
+ * 积分记录（管理端）。
  *
  * <p>数据源是 **billing 的账本**——不是我们的库。判据很简单：钱只从 billing 的
  * 复式账本进出，本地任何一张表都只是它的投影（`recharge_orders` 是充值订单的**订单**，
@@ -106,8 +106,8 @@ export class AdminConsumptionRecordsController {
 function toConsumptionError(error: unknown): AdminException {
   if (error instanceof AdminException) return error;
   if (error instanceof BillingAdminConfigError) {
-    return new AdminException(503, `消费记录不可用：${error.message}`);
+    return new AdminException(503, `积分记录不可用：${error.message}`);
   }
   const detail = error instanceof BillingAdminError ? error.message : "未知错误";
-  return new AdminException(502, `消费记录查询失败：${detail}`);
+  return new AdminException(502, `积分记录查询失败：${detail}`);
 }

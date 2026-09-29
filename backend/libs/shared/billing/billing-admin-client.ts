@@ -486,7 +486,7 @@ export async function listAdminTransactions(
         // ★ **presence → null**：proto 那边 `optional` 没设就是 `undefined`，
         //   而本文件的契约是「没有预扣 = null」。这一步把「缺值」收敛成**唯一一种**形态。
         //   ⚠️ 漏了它，前端会拿到第三种形态（`undefined`）：`undefined !== null` 为真，
-        //   于是「没有预扣」的行被当成「有值」送进渲染 —— 2026-09-26 消费记录页整页白屏
+        //   于是「没有预扣」的行被当成「有值」送进渲染 —— 2026-09-26 积分记录页整页白屏
         //   就是这么来的（当时后端旧构建压根不投影这一列，键整个消失）。
         reservedCredits: item.reservedCredits === undefined ? null : Number(item.reservedCredits),
         status: item.status,
