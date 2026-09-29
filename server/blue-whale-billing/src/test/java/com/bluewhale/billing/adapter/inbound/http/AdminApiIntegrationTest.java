@@ -196,6 +196,32 @@ class AdminApiIntegrationTest {
     }
 
     @Test
+    void 幂等键撞车_409要带回既有那一笔的归属() throws Exception {
+        // 「这个键用过了」不足以让调用方下结论：它可能是**我自己**之前发的（重放，
+        // 业务上已经做过了），也可能是**别人**先占的（这一笔不该发）。两者在 wire 上
+        // 都是 409、duplicated 都是 true，差别只在这个额外字段 ——
+        // 调用方要拿它去写审计列，所以它必须带上。
+        mvc.perform(post("/admin/credits/grants")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userId":9321,"source":"bonus","amount":1000,"bizId":"owner-first",
+                                 "grantKey":"bonus:tier:9321:7"}
+                                """))
+                .andExpect(status().isOk());
+
+        // 同一把键、**另一个 bizId** 再发一次 → 409，回带的是先到那一笔的 bizId
+        mvc.perform(post("/admin/credits/grants")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userId":9321,"source":"bonus","amount":1000,"bizId":"owner-second",
+                                 "grantKey":"bonus:tier:9321:7"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DUPLICATE"))
+                .andExpect(jsonPath("$.existingBizId").value("owner-first"));
+    }
+
+    @Test
     void 充值本金_按两年策略带有效期_而不是永久() throws Exception {
         mvc.perform(post("/admin/credits/grants")
                         .contentType(MediaType.APPLICATION_JSON)

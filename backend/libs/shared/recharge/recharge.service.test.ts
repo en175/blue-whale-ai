@@ -507,6 +507,103 @@ describe("RechargeService — 回调到账", () => {
   });
 });
 
+describe("RechargeService — 首购加赠（每档首次）", () => {
+  beforeEach(() => {
+    vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
+    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
+    vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
+    freshGrpcUrl();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("★ 同一档位第一笔支付发赠送批次，第二笔不发（幂等键按用户+档位裁决）", async () => {
+    // 这条守的是「档位配了 bonus_credits、下单路径从来没读过它」那个缺陷：
+    // 管理端在宣传「首购加赠 1000 分」，而钱照收、分不发。
+    const http = makeHttp();
+    grpcActiveCatalog();
+    const { service, orders, setTier } = await makeService();
+    setTier({ firstPurchaseEligible: true, bonusCredits: 1_000 });
+
+    const first = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    expect(orders.get(first.tradeNo)?.bonus_credits).toBe(1_000n);
+    expect(await service.handleNotify(await signed(notifyParams(first.tradeNo)))).toBe(true);
+
+    // 两笔发放：本金 + 赠送
+    expect(http.granted).toEqual([
+      { amount: 7_500, bizId: first.tradeNo },
+      { amount: 1_000, bizId: first.tradeNo },
+    ]);
+    expect(http.grantBodies[1]).toMatchObject({
+      source: "bonus",
+      // ⚠️ 幂等键按 **用户+档位** 取，不是按订单：判「谁是首单」的是它
+      grantKey: `bonus:tier:9001:${TIER.id}`,
+    });
+    expect(orders.get(first.tradeNo)?.first_purchase_state).toBe("first");
+
+    // ── 第二笔：**另一张订单**，同样的键 → billing 回 409 → 不发赠送 ──
+    const second = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    expect(await service.handleNotify(await signed(notifyParams(second.tradeNo)))).toBe(true);
+
+    // 只多了本金那一笔，没有第二笔赠送
+    expect(http.granted).toEqual([
+      { amount: 7_500, bizId: first.tradeNo },
+      { amount: 1_000, bizId: first.tradeNo },
+      { amount: 7_500, bizId: second.tradeNo },
+    ]);
+    expect(orders.get(second.tradeNo)?.first_purchase_state).toBe("repeat");
+    // 快照仍记着「这单挂着 1000 赠送」，实际没发 —— 两列合起来才讲得清
+    expect(orders.get(second.tradeNo)?.bonus_credits).toBe(1_000n);
+  });
+
+  it("★ 重放不会把「本单发出的赠送」记成 repeat（撞键要看归属）", async () => {
+    // 发放成功、但进程在写订单状态之前死掉 —— 网关重投 / 对账 / 人工补发都会把
+    // fulfill 再跑一遍，于是**两笔发放都撞回 409**。
+    // 只按「撞没撞键」判，就会给「确实发出了赠送的那一单」写上 repeat，
+    // 而那是个假事实：这一列将来要回答「用户到底拿到赠送没有」。
+    const http = makeHttp();
+    grpcActiveCatalog();
+    const { service, orders, setTier } = await makeService();
+    setTier({ firstPurchaseEligible: true, bonusCredits: 1_000 });
+
+    const order = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    await service.handleNotify(await signed(notifyParams(order.tradeNo)));
+    expect(orders.get(order.tradeNo)?.first_purchase_state).toBe("first");
+
+    // 造那个「死在中途」的状态：积分发了，状态没落
+    const row = orders.get(order.tradeNo)!;
+    row.status = "paid_pending";
+    row.first_purchase_state = "unknown";
+
+    await service.handleNotify(await signed(notifyParams(order.tradeNo)));
+
+    // 两次发放都 409，但键归本单 → 是重放，仍然 first
+    expect(orders.get(order.tradeNo)?.first_purchase_state).toBe("first");
+    expect(http.granted).toEqual([
+      { amount: 7_500, bizId: order.tradeNo },
+      { amount: 1_000, bizId: order.tradeNo },
+    ]);
+  });
+
+  it("档位不参与首购：不发赠送批次，状态保持 unknown", async () => {
+    // 夹具默认就是不参与；这里钉住「不参与 ≠ 判定为重复」——
+    // 那是两件不同的事，写成 repeat 会让运营以为用户已经用过了。
+    const http = makeHttp();
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+
+    await service.handleNotify(await signed(notifyParams(created.tradeNo)));
+
+    expect(http.granted).toEqual([{ amount: 7_500, bizId: created.tradeNo }]);
+    const row = orders.get(created.tradeNo);
+    expect(row?.bonus_credits).toBe(0n);
+    expect(row?.first_purchase_state).toBe("unknown");
+  });
+});
+
 describe("RechargeService — 查单补偿（回调丢失时）", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");

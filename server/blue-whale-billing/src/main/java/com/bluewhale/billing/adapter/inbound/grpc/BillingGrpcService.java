@@ -24,6 +24,7 @@ import com.bluewhale.contracts.billing.v1.QueryBalanceRequest;
 import com.bluewhale.contracts.billing.v1.QueryBalanceResponse;
 import com.bluewhale.contracts.billing.v1.QuoteRequest;
 import com.bluewhale.contracts.billing.v1.QuoteResponse;
+import com.bluewhale.contracts.billing.v1.SourceCredits;
 import com.bluewhale.contracts.billing.v1.UserTransaction;
 import com.bluewhale.contracts.common.v1.PageResponse;
 import io.grpc.Status;
@@ -115,6 +116,16 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                         // 免时区歧义）。用库内口径（北京时间）渲染，与用户看到的账单一致。
                         .setExpiresAt(RFC3339.format(lot.expiresAt().atZone(DbTime.ZONE)))
                         .setSource(lot.source())
+                        .build());
+            }
+
+            // 按来源拆开的可用积分。**它不违反上面那条单金额规则**：Σ bySource 逐字等于
+            // availableCredits（同一条 SQL 的两种投影），是同一个金额的分项，不是第二个金额。
+            // 用户界面「总积分 = 各类型之和」靠的就是这个等式。
+            for (BalanceView.SourceCredits item : balance.bySource()) {
+                response.addBySource(SourceCredits.newBuilder()
+                        .setSource(item.source())
+                        .setCredits(item.credits())
                         .build());
             }
             observer.onNext(response.build());

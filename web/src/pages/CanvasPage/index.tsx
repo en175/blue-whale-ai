@@ -2219,7 +2219,7 @@ export default function CanvasPage() {
     ids.forEach((id) => pendingNodeIdsRef.current.delete(id));
   }, []);
   const updateUser = useAuthStore((s) => s.updateUser);
-  const setCredits = useAuthStore((s) => s.setCredits);
+  const setUsage = useAuthStore((s) => s.setUsage);
   /** 新建商品节点序号（商品 1、商品 2…） */
   const productSeq = useRef(0);
 
@@ -2235,15 +2235,15 @@ export default function CanvasPage() {
     let alive = true;
     fetchCredits()
       .then((d) => {
-        if (alive) setCredits(d.credits);
+        if (alive) setUsage(d);
       })
       .catch(() => {
-        if (alive) setCredits(null);
+        if (alive) setUsage(null);
       });
     return () => {
       alive = false;
     };
-  }, [setCredits]);
+  }, [setUsage]);
 
   // 加载项目列表；落点三级规则（IKH1YK）：?project= 合法值 > 上次打开 > 首项；无项目自动创建
   useEffect(() => {

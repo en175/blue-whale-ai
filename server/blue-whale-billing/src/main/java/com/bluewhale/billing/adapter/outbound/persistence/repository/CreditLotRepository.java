@@ -1,6 +1,7 @@
 package com.bluewhale.billing.adapter.outbound.persistence.repository;
 
 import com.bluewhale.billing.domain.DbTime;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity;
 import com.bluewhale.billing.adapter.outbound.persistence.mapper.CreditLotMapper;
 import com.bluewhale.billing.domain.ledger.CreditSource;
@@ -78,10 +79,56 @@ public class CreditLotRepository {
                 .toList();
     }
 
+    /**
+     * 按发放幂等键查**已经发出去那一笔的 `biz_id`**（即「是谁发的」）。
+     *
+     * <p>为什么需要它：幂等键撞车（409）只告诉调用方「这个键已经用过了」，而调用方往往
+     * 需要区分「<b>我自己</b>之前发过」与「<b>别人</b>先占了」。这两件事在业务上完全不同——
+     * 前者是「我这一单已经发了」，后者是「这一单不该发」。只有这个键的**归属**能分辨。
+     *
+     * <p>撞车发生在**别处**（比如账本那条唯一索引）时键不存在于批次表，返回 {@code null}——
+     * 调用方拿不到归属时应当如实说「不知道」，不要猜。
+     *
+     * @param grantKey 发放幂等键
+     * @return 该键对应批次的 {@code biz_id}；键不存在时 {@code null}
+     */
+    public String findBizIdByGrantKey(String grantKey) {
+        CreditLotEntity entity = mapper.selectOne(new LambdaQueryWrapper<CreditLotEntity>()
+                .eq(CreditLotEntity::getGrantKey, grantKey)
+                .select(CreditLotEntity::getBizId));
+        return entity == null ? null : entity.getBizId();
+    }
+
     /** 可用余额 = Σ(remaining − frozen)，仅计未过期的批次。 */
     public long availableCredits(long userId) {
         return mapper.sumAvailable(userId);
     }
+
+    /**
+     * 可用余额按来源拆开（用户界面「总积分 = 各类型之和」）。
+     *
+     * <p>与 {@link #availableCredits} 是**同一条 SQL 的两种投影**：谓词逐字相同，
+     * 只多一个 {@code GROUP BY source}。所以两者的和必然相等——调用方若发现不等，
+     * 那是有人把其中一处的 WHERE 改单边了，不是取整或口径差异。
+     *
+     * <p>来源用 {@link CreditSource} 承载而不是裸 {@code String}：库里出现枚举外的值时
+     * 要在**这里**就炸（{@code CreditSource.of} 抛 {@code IllegalArgumentException}），
+     * 而不是让它一路漂到界面上变成一个没人认识的中文标签。
+     */
+    public List<SourceAvailable> availableCreditsBySource(long userId) {
+        return mapper.sumAvailableBySource(userId).stream()
+                .map(row -> new SourceAvailable(CreditSource.of(row.getSource()),
+                        row.getCredits() == null ? 0L : row.getCredits()))
+                .toList();
+    }
+
+    /**
+     * 一个来源的可用积分。
+     *
+     * @param source  批次来源
+     * @param credits 该类可用积分 Σ(remaining − frozen)；全被冻结时为 0
+     */
+    public record SourceAvailable(CreditSource source, long credits) {}
 
     /**
      * 临期批次（按到期时间从近到远）。

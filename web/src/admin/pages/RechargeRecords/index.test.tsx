@@ -50,7 +50,23 @@ const ROWS = [
   grantLotId: null,
   notifyCount: 0,
   createdAt: '2026-09-27T10:00:00+08:00',
+  // 首购加赠那一列：默认**这单没有赠送**（不参与 / 没配额度）。
+  // 大部分用例讲的是到账与补发，不该被赠送夹带；要测赠送的用例自己覆盖。
+  bonusCredits: 0,
+  firstPurchaseEligible: 0,
+  firstPurchaseState: 'unknown',
 }));
+
+/** 造一行「档位配了首购加赠」的单，默认额度 1000、结果未判定 */
+function withBonus(patch: Record<string, unknown>) {
+  return {
+    ...ROWS[0]!,
+    firstPurchaseEligible: 1,
+    bonusCredits: 1_000,
+    firstPurchaseState: 'unknown',
+    ...patch,
+  };
+}
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -150,6 +166,55 @@ async function clickRowButton(tradeNo: string, label: string) {
   });
   await settle();
 }
+
+describe('充值记录页 — 赠送积分列', () => {
+  it('★ 三种结果各自有说法，没赠送显示「—」而不是 0', async () => {
+    // 这一列存在的理由就是本工单：档位配了赠送、产品里却**无处确认它生没生效**。
+    // 而这一列唯一不能犯的错是把「没发」显示成「已发」——那正好把要查的问题盖住。
+    api.fetchRecords.mockResolvedValue({
+      list: [
+        withBonus({ tradeNo: 'g-first', firstPurchaseState: 'first' }),
+        withBonus({ tradeNo: 'g-repeat', firstPurchaseState: 'repeat' }),
+        withBonus({ tradeNo: 'g-unknown', firstPurchaseState: 'unknown' }),
+        // 档位不参与首购
+        { ...ROWS[0]!, tradeNo: 'g-ineligible' },
+        // 参与首购但没配额度
+        withBonus({ tradeNo: 'g-zero', bonusCredits: 0 }),
+      ],
+      total: 5,
+    });
+    await renderPage();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('+1,000 已发');
+    expect(text).toContain('1,000 未发 · 该档位已用过');
+    expect(text).toContain('1,000 未判定');
+    // 「没有赠送」与「送 0 分」是两件事：两条都必须是「—」，不能写成 0。
+    // ⚠️ 按**列序号**取（赠送积分是第 5 列）：别的列（网关单号、支付时间）也用「—」，
+    //    全表数「—」会连它们一起数进来。
+    const bonusCells = [...document.body.querySelectorAll('tbody tr')].map(
+      (tr) => tr.querySelectorAll('td')[4]?.textContent ?? '',
+    );
+    expect(bonusCells.filter((text) => text === '—')).toHaveLength(2);
+    // 没额度的单不许出现任何「已发」字样（把「没赠送」说成「发了 0 分」同样是撒谎）
+    expect(bonusCells.filter((text) => text.includes('已发'))).toHaveLength(1);
+    expect(bonusCells.some((text) => /^\+?0\b/.test(text))).toBe(false);
+  });
+
+  it('未到账的单（还没走发放）显示「未判定」，不显示「已发」', async () => {
+    // 判定发生在**发放**那一步，所以「还没支付」的单必然是 unknown。
+    // 若这里显示成「已发」，运营会以为赠送已经出去了。
+    api.fetchRecords.mockResolvedValue({
+      list: [withBonus({ tradeNo: 'g-pending', status: 'pending' })],
+      total: 1,
+    });
+    await renderPage();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('1,000 未判定');
+    expect(text).not.toContain('已发');
+  });
+});
 
 describe('充值记录页 — 人工补发（E-1 的那条出口）', () => {
   it('★ 只有「钱收了、积分没发出去」两种状态才有重试按钮', async () => {

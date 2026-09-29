@@ -20,12 +20,20 @@ import java.util.List;
  *                          读出来是正数），**管理面专属**：它记的是平台少收了多少，
  *                          不是用户的钱，出现在用户界面上既没有用处也违反单金额规则
  * @param expiring          临期批次，供前端提示「X 积分将于 Y 日过期」
+ * @param bySource          可用积分**按来源拆开**（充值 / 充值赠送 / 每日赠送…）。
+ *                          ⚠️ 它不是第二个金额，是 {@link #availableCredits} 的分项：
+ *                          Σ 必须等于它——两者出自同一条 SQL 的两种投影
+ *                          （见 {@code CreditLotRepository#availableCreditsBySource}）。
+ *                          「任何用户可见界面永远只出现一个金额」约束的是不许有**两个
+ *                          互相独立**的数（§2.3.1）；分身加起来就是那个数，不违反它。
  */
 public record BalanceView(long availableCredits, long frozenCredits,
-                          long receivableCredits, List<ExpiringLot> expiring) {
+                          long receivableCredits, List<ExpiringLot> expiring,
+                          List<SourceCredits> bySource) {
 
     public BalanceView {
         expiring = List.copyOf(expiring);
+        bySource = List.copyOf(bySource);
     }
 
     /**
@@ -45,4 +53,13 @@ public record BalanceView(long availableCredits, long frozenCredits,
      *               「充值赠送的 500 分即将过期」与「补偿的 500 分即将过期」对用户是不同的信息
      */
     public record ExpiringLot(long credits, Instant expiresAt, String source) {}
+
+    /**
+     * 一个来源的可用积分。
+     *
+     * @param source  {@code CreditSource.key()}（批次的取名，与流水侧的 {@code recharge}
+     *                等**不是同一套**——展示文案按本字段映射，别照抄流水的类型表）
+     * @param credits 该类可用积分 Σ(remaining − frozen)；全被冻结时为 0
+     */
+    public record SourceCredits(String source, long credits) {}
 }

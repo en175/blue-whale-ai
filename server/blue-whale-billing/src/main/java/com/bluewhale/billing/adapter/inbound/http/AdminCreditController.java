@@ -7,6 +7,7 @@ import com.bluewhale.billing.domain.ledger.CreditSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -64,14 +65,36 @@ public class AdminCreditController {
     @PostMapping("/grants")
     public GrantResponse grant(@RequestBody GrantRequest request) {
         CreditSource source = CreditSource.of(request.source());
-        long lotId = billing.grant(
-                request.userId(),
-                source,
-                request.amount(),
-                request.bizType() == null ? "grant" : request.bizType(),
-                request.bizId(),
-                request.grantKey() == null ? source.key() + ":" + request.bizId() : request.grantKey(),
-                request.expiresAt());
+        // 默认键与显式键在这里合成一处，撞车时要拿它去查归属（见下面的 catch）
+        String grantKey = request.grantKey() == null
+                ? source.key() + ":" + request.bizId()
+                : request.grantKey();
+        long lotId;
+        try {
+            lotId = billing.grant(
+                    request.userId(),
+                    source,
+                    request.amount(),
+                    request.bizType() == null ? "grant" : request.bizType(),
+                    request.bizId(),
+                    grantKey,
+                    request.expiresAt());
+        } catch (DuplicateKeyException e) {
+            // ⚠️ **只在撞车这一刻查一次归属**，正常路径一次多余的查询都不加。
+            //
+            // 409 本身分不出「我自己之前发过」与「别人先占了这个键」——而这两件事在业务上
+            // 是相反的结论（重放 vs 不该发）。调用方要据此写审计列，所以把既有批次的
+            // biz_id 带回去让它自己判。查不到（撞的是别的唯一索引）就如实给 null。
+            //
+            // ⚠️⚠️ **这段能成立，靠的是「这里没有活动事务」**：唯一的事务在
+            //   `CreditService.grant` 上，异常穿出它时回滚已经完成，所以下面这次读
+            //   跑在一条干净的自动提交连接上、读到的是已提交状态。
+            //   若哪天给本控制器（或本方法）加上 `@Transactional`，这次读就会被并进
+            //   一个 rollback-only 的事务，机制会在很难查的地方坏掉 ——
+            //   真要加事务，就得改成把归属**从事务内部带出来**（让 `grant` 返回
+            //   `{lotId, duplicated, existingBizId}`），而不是像现在这样回滚后再读一次。
+            throw new DuplicateGrantKeyException(billing.findGrantOwner(grantKey));
+        }
 
         return new GrantResponse(lotId, request.userId(), source.key(), request.amount());
     }

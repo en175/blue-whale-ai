@@ -82,14 +82,12 @@
  *   3. **`tier_id` 写 NULL**：自定义充值没有档位（迁移 050 把它改成可空）。
  *      编一个 0/1 出来会被按 tier_id 聚合的对账当成真档位。
  *
- * ⚠️ **首购相关的两条刻意没做**（产品的决定，不是遗漏）：
- *   · PRD §7.2 的「购买后将失去首购加赠资格」确认提示；
- *   · PRD §7.4 的「支付成功后该账号视为已首购」。
- *   原因：**首购功能本身还没定形** —— 「每档独立算一次还是每账号只一次」未决（#40 停放中）。
- *   在首购状态怎么算都还没定的时候写「占用资格」，会先冻住一个可能被推翻的口径，
- *   而它一旦落进订单快照（`first_purchase_state`）就改不回来了。
- *   所以自定义充值单的第一购两列仍是默认值（`unknown` / `0` = 不参与加赠），
- *   等 #40 定了再一起补 —— 那时要动的是这里与 `buildCustomOrderSpec`。
+ * ⚠️ **首购加赠的口径已定，但只对档位单生效**：
+ *   口径 = 「**每档独立算一次**」（#40 停放期间悬而未决的那条，2026-09-28 定）。
+ *   判定与发放都在 `fulfill`（键按 用户+档位 取，见 `grantFirstPurchaseBonus`）。
+ *   · 仍**没做**的：PRD §7.2 的「购买后将失去首购加赠资格」确认提示。
+ *   · **自定义充值单不参与**：没有档位，也就没有「每档」可言。所以
+ *     `buildCustomOrderSpec` 的两列仍是默认值（`unknown` / `0` = 不参与加赠）。
  * ============================================ */import { randomBytes } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
@@ -251,8 +249,21 @@ export interface OrderSpec {
   productType: "tier" | "custom";
   productName: string;
   configVersion: number;
-  /** 赠送积分；不传 = 走 repo 的默认值 0 */
+  /**
+   * 本单**应发的**赠送积分快照（首购加赠）；档位不参与首购时为 0。
+   *
+   * <p>⚠️ 它是「这单挂着多少赠送」的配置快照，**不是最终发放额**：档位参与首购、
+   * 但用户已经在这个档位用过赠送时，本列仍是配置值，而实际没发 ——
+   * 「到底发没发」由 {@link firstPurchaseState} 回答。两列合起来才讲得清这一单，
+   * 缺一个就会把「没资格」误读成「这个档位不送」。
+   */
   bonusCredits?: number;
+  /**
+   * 该档位是否参与首购加赠（配置快照，0 / 1）。
+   *
+   * <p>下单时快照、发放时读它决定要不要尝试发赠送批次；档位后来改了配置也不回溯。
+   */
+  firstPurchaseEligible?: number;
   /**
    * 到账积分有效期快照，单位**月**（档位读 `credits_valid_months`，自定义充值读配置）。
    *
@@ -485,6 +496,19 @@ export class RechargeService {
       productType: "tier",
       productName: displayTierName(tier.name, credits),
       configVersion: tier.version,
+      // 首购加赠：配置快照随单落库，**发放在 fulfill**。
+      //
+      // 为什么下单只快照、不在下单时判定「是不是首购」：判据是「这个用户在这个档位上
+      // 有没有成功支付过」，而下单此刻可能已经有一笔同档位的未支付单——两笔都判「是首单」
+      // 是必然发生的。真正的闸放在发放那一步，用 billing 的唯一索引原子裁决
+      // （见 fulfill 里的 `bonus:tier:{userId}:{tierId}`）。
+      //
+      // ⚠️ 档位不参与首购时不写 bonusCredits（落到默认 0）：这一列在订单上表达的是
+      //    「本单挂着多少赠送」。不参与却写个非零值，会让对账以为欠用户一笔赠送。
+      firstPurchaseEligible: tier.firstPurchaseEligible ? 1 : 0,
+      ...(tier.firstPurchaseEligible && tier.bonusCredits > 0
+        ? { bonusCredits: tier.bonusCredits }
+        : {}),
       // 有效期快照的是**月数**（运营在后台配的那个数），到期时刻发放那一刻按
       // 支付成功时间折出来 —— 起算点见 `credits-validity.ts`
       creditsValidMonths: tier.creditsValidMonths,
@@ -527,8 +551,10 @@ export class RechargeService {
 
     // 落库时把**商品快照**一起写死（PRD §9.3）：商品名用展示名（用户此刻看到的那串字），
     // 配置版本取配置行此刻的 version（运营之后改价/改名都 +1，据此可判「这单是改价前还是改价后」）。
-    // 首购与赠送那几列此刻仍是常量，取值在 repo 的写入侧一处；权限结果与有效期月数
-    // 由各自的 spec 带过来（那里才是判定发生的地方）。
+    // 首购加赠的两列（是否参与 / 挂着多少赠送）由 spec 带过来快照，
+    // 权限结果与有效期月数同理（那里才是判定发生的地方）；
+    // **判定结果**（`first_purchase_state`）不在下单时定 —— 它由发放那一步裁决后回写，
+    // 理由见 `grantFirstPurchaseBonus`（两笔未支付单都会自认首单）。
     const tradeNo = generateTradeNo();
     await this.repo.create({
       tradeNo,
@@ -541,6 +567,12 @@ export class RechargeService {
       productName: spec.productName,
       configVersion: spec.configVersion,
       ...(spec.bonusCredits !== undefined ? { bonusCredits: spec.bonusCredits } : {}),
+      // ⚠️ 这一列**必须真的落库**：发放那一步（`grantFirstPurchaseBonus`）读的是订单快照，
+      //    不是当前档位配置。少了它，档位配的首购加赠会在到账时被判成「不参与」而静默不发 ——
+      //    正是「配了不生效」那类缺陷的翻版。
+      ...(spec.firstPurchaseEligible !== undefined
+        ? { firstPurchaseEligible: spec.firstPurchaseEligible }
+        : {}),
       // 有效期只存**月数**：到期时刻的起算点是支付成功时刻，下单这一刻算不出来
       // （见 `credits-validity.ts`）
       ...(spec.creditsValidMonths !== undefined
@@ -917,12 +949,22 @@ export class RechargeService {
       ...(expiresAt ? { expiresAt } : {}),
     });
 
+    // ── 首购加赠：**必须在本金之后** ────────────────────────────────────────────
+    //
+    // 两笔发放不是原子的。顺序反过来的话，进程崩在中间会变成「送了赠品、本金没给」——
+    // 而卡在中间时订单仍是 `paid_pending`，下一次回调或对账会重跑本方法：
+    // 本金那笔幂等（duplicated），赠送那笔重试。所以「先本金后赠送」不是风格，
+    // 是这条重试路径唯一安全的顺序。
+    const firstPurchaseState = await this.grantFirstPurchaseBonus(settled, expiresAt);
+
     const updated = await this.repo.markPaid({
       tradeNo: order.tradeNo,
       ...(lotId ? { grantLotId: lotId } : {}),
       // 与发给 billing 的**同一个值**：订单快照记的必须是真实发出去那批积分的到期时刻，
       // 而不是下单时估的另一个数（那两个数必然差一截，快照就成了一句假话）
       ...(expiresAt ? { creditsExpireAt: expiresAt } : {}),
+      // 首购加赠的判定结果（只有真判定过才写，见下面 grantFirstPurchaseBonus）
+      ...(firstPurchaseState ? { firstPurchaseState } : {}),
     });
     if (!updated) {
       // 不是错误：并发/重投下另一个请求已经记过了。billing 的幂等键保证只发了一次
@@ -930,6 +972,73 @@ export class RechargeService {
         `订单已到账，本次为重放 tradeNo=${order.tradeNo} duplicated=${duplicated}`,
       );
     }
+  }
+
+  /**
+   * 首购加赠：为**该档位的第一次成功支付**发一批 `bonus` 积分。
+   *
+   * <h2>为什么判定放在这里，而不是下单时</h2>
+   *
+   * 判据是「这个用户在这个档位上有没有成功支付过的单」。下单那一刻可能同时存在两笔
+   * 同档位的未支付单——两笔都会把自己判成「首单」，这是必然会发生的，不是边缘情况。
+   *
+   * <h2>闸在哪</h2>
+   *
+   * 幂等键取 **`bonus:tier:{userId}:{tierId}`**（按用户+档位，不是按订单），
+   * 交给 billing 的 `uk_lots__grant_key` 唯一索引去裁决：并发的第二笔必然拿到 409，
+   * 也就是 `duplicated: true`。**先到 billing 的那笔赢**，不需要新表、不需要行锁，
+   * 也没有任何一条路径能绕过它。
+   *
+   * <p>代价说清楚：极端并发下赢家是「先到达 billing 的」而不是「先支付的」。
+   * 两笔在同一秒内支付时这个差别用户感知不到，换来的是一个不可能被绕过的闸——
+   * 值。
+   *
+   * @return `first` = 本单是该档位首次、赠送已发（含**重放**：键归本单）｜
+   *         `repeat` = 该档位已用过赠送（键归**别的**单）｜
+   *         `null` = 没判定出结论：这一单没有首购这回事（档位不参与 / 无赠送额度），
+   *                 或撞键但**拿不到归属** —— 后者宁可留 `unknown` 也不猜
+   */
+  private async grantFirstPurchaseBonus(
+    settled: RechargeOrderView,
+    expiresAt: Date | null,
+  ): Promise<string | null> {
+    // 档位不参与首购，或这单根本没挂赠送 → 没有可判定的事，保持 `unknown`
+    if (settled.firstPurchaseEligible !== 1 || settled.bonusCredits <= 0) return null;
+    // 没有档位的单（自定义充值）不存在「每档首次」这个概念
+    if (settled.tierId === null) return null;
+
+    const { duplicated, existingBizId } = await grantCredits({
+      userId: Number(settled.userId),
+      credits: settled.bonusCredits,
+      source: "bonus",
+      // bizId 仍用本单号：它是这批赠送的**来路**（谁触发的），事后要能回答
+      bizId: settled.tradeNo,
+      // ⚠️ 幂等键才是「首购」的判据所在，与 bizId 是两回事：
+      //    bizId 回答「这分从哪来」，grantKey 回答「什么时候只能发一次」。
+      grantKey: `bonus:tier:${settled.userId}:${settled.tierId}`,
+      // 有效期与本金**同一个值**：档位卡片对用户写的就是那几个月，赠送批次突然
+      // 换个更短的有效期而界面从没说过，只会变成客服工单。
+      ...(expiresAt ? { expiresAt } : {}),
+    });
+
+    if (!duplicated) return "first";
+
+    // ⚠️ **撞键 ≠ 这一单没发。** 键是按「用户+档位」取的，所以它很可能正是**本单**
+    //    上一次尝试留下的：发放成功、进程在写订单状态之前死掉，于是网关重投 / 对账 /
+    //    人工补发会把 `fulfill` 再跑一遍，两笔发放都撞回 409。
+    //    此时写成 `repeat` 就是对「确实发出了赠送的那一单」撒谎 —— 而这列将来是要被
+    //    用来回答「这个用户到底拿到赠送没有」的。
+    //
+    //    分辨只能靠归属：键归本单 → 是重放，仍然 `first`；归别人 → 才是真的重复购买。
+    if (existingBizId === null) {
+      // 拿不到归属（老版本 billing 不带该字段，或撞的是别的唯一索引）：如实记「不知道」。
+      // 宁可让这一列停在 `unknown`，也不要写一个我们并不掌握的结论。
+      this.logger.warn(
+        `首购赠送撞键但拿不到归属，状态保持未判定 tradeNo=${settled.tradeNo}`,
+      );
+      return null;
+    }
+    return existingBizId === settled.tradeNo ? "first" : "repeat";
   }
 
   /* ---------- 主动对账（定时任务） ---------- */

@@ -13,6 +13,12 @@ import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js"
  *
  * <p>返回的 `credits` 是**整数积分**（账本单位），不是 new-api 的 quota：
  * 用户看到的数就是 billing 记的数，中间不再有一次 50,000 的换算。
+ *
+ * <p>`by_source` 是同一笔余额**按来源拆开**的分量（充值 / 充值赠送 / 每日赠送…）。
+ * ⚠️ 它不是第二个金额：**Σ by_source 逐字等于 `credits`**（服务端由同一条 SQL 的
+ * 两种投影保证）。前端「总积分 = 各类型之和」靠的就是这个等式；两边对不上是 bug，
+ * 不是口径差异。`credits` 保留不动，是为了既有消费端（画布顶栏、额度闸、充值弹窗）
+ * 不必跟着改。
  */
 @Controller("usage")
 export class UsageController {
@@ -20,7 +26,13 @@ export class UsageController {
   async token(@CurrentUser() user: AuthenticatedUser) {
     try {
       const balance = await sharedBillingClient().queryBalance(Number(user.userId));
-      return ok({ credits: balance.availableCredits });
+      return ok({
+        credits: balance.availableCredits,
+        by_source: balance.bySource.map((item) => ({
+          source: item.source,
+          credits: item.credits,
+        })),
+      });
     } catch (error) {
       throw toBillingError(error, "余额查询暂不可用");
     }

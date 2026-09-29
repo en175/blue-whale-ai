@@ -225,6 +225,8 @@ export function defaultCustomConfigRow(overrides: Row = {}): Row {
 /** 网关 + 发放（HTTP）的桩，按 URL 分流并记录调用。目录与余额都走 gRPC，不在这里。 */
 export function makeHttp(gatewayState = 1) {
   const granted: { amount: number; bizId: string }[] = [];
+  /** 已用掉的幂等键 → **是谁发的**（`bizId`）。409 的判据与归属都靠它，见下面那段注释 */
+  const grantedKeys = new Map<string, string>();
   /**
    * 发放请求的**原始报文**（与 `granted` 分开：那个只留 amount/bizId，被一堆用例用
    * `toEqual` 精确断言着）。`expiresAt` 这条显式覆盖（运营配的有效期月数有没有真的
@@ -249,11 +251,26 @@ export function makeHttp(gatewayState = 1) {
         return new Response("boom", { status: 500 });
       }
       const bizId = String(body.bizId);
-      if (granted.some((g) => g.bizId === bizId)) {
-        return new Response(JSON.stringify({ code: "DUPLICATE" }), { status: 409 });
+      // 幂等键与 billing 同口径：显式传了 `grantKey` 就用它，否则默认 `source:bizId`。
+      //
+      // ⚠️ 两者不是一回事，桩必须一起模拟：首购加赠按 **用户+档位** 取键
+      // （`bonus:tier:{userId}:{tierId}`），两笔**不同订单**（不同 bizId）会撞同一个键——
+      // 而那正是「谁是首单」的判据。只按 bizId 去重的话，第二笔会照样发放成功，
+      // 于是这个桩会把真环境里拦得住的东西放过去。
+      const idempotencyKey = String(body.grantKey ?? `${String(body.source ?? "purchased")}:${bizId}`);
+      const owner = grantedKeys.get(idempotencyKey);
+      if (owner !== undefined) {
+        // ⚠️ 409 必须带上**归属**（`existingBizId`），与真 billing 一样：
+        //    调用方靠它区分「我自己之前发过」与「别人先占了」。桩不带的话，
+        //    「重放不写假的 repeat」那条路径在测试里根本走不到，用例会假绿。
+        return new Response(
+          JSON.stringify({ code: "DUPLICATE", message: "该幂等键已存在", existingBizId: owner }),
+          { status: 409 },
+        );
       }
+      grantedKeys.set(idempotencyKey, bizId);
       granted.push({ amount: Number(body.amount), bizId });
-      return json({ lotId: 42, userId: body.userId, source: "purchased", amount: body.amount });
+      return json({ lotId: 42, userId: body.userId, source: body.source ?? "purchased", amount: body.amount });
     }
     if (target.endsWith("/api/pay/unifiedOrder")) {
       if (unifiedOrderFailures > 0) {
@@ -337,6 +354,14 @@ export const TIER = {
   permissionDeniedHint: "",
   createdAt: "2026-09-01T00:00:00.000Z",
   updatedAt: "2026-09-01T00:00:00.000Z",
+  /**
+   * 首购加赠（PRD §10.2）：`firstPurchaseEligible` 决定是否参与，`bonusCredits` 是赠送额度。
+   *
+   * <p>夹具默认**不参与**（`false` / `0`）：既有用例讲的都是本金那条链路，
+   * 不该被赠送夹带。要用赠送的用例自己 `setTier({ firstPurchaseEligible: true, bonusCredits: … })`。
+   */
+  firstPurchaseEligible: false,
+  bonusCredits: 0,
 };
 
 export type Tier = typeof TIER;

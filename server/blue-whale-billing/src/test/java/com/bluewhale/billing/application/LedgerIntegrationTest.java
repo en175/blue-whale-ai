@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Level;
 import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
 import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
 import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.Account;
 import com.bluewhale.billing.domain.ledger.Allocation;
@@ -72,6 +73,7 @@ class LedgerIntegrationTest {
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private CreditService credits;
+    @Autowired private BillingApplicationService billing;
     @Autowired private CreditLotRepository lots;
     @Autowired private LedgerRepository ledger;
     @Autowired private ReservationRepository reservations;
@@ -445,6 +447,40 @@ class LedgerIntegrationTest {
         assertThat(frozenOf(expiring)).isEqualTo(60);
         assertThat(frozenOf(expired)).isZero();
         assertInvariant();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 按来源拆分的可用积分（用户界面「总积分 = 各类型之和」）
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    void 可用积分按来源拆分_各分量之和等于总额() {
+        grant(CreditSource.PURCHASED, 1_500, null, "bs-purchased");
+        grant(CreditSource.BONUS, 1_000, Instant.now().plus(30, ChronoUnit.DAYS), "bs-bonus");
+        // 已过期的那批：两个口径里都必须被排除，否则下面的等式不再成立
+        grant(CreditSource.DAILY, 777, Instant.now().minus(1, ChronoUnit.HOURS), "bs-expired");
+
+        BalanceView balance = billing.balance(USER);
+
+        assertThat(balance.availableCredits()).isEqualTo(2_500);
+
+        Map<String, Long> bySource = new LinkedHashMap<>();
+        for (BalanceView.SourceCredits item : balance.bySource()) {
+            bySource.put(item.source(), item.credits());
+        }
+        assertThat(bySource)
+                .containsEntry(CreditSource.PURCHASED.key(), 1_500L)
+                .containsEntry(CreditSource.BONUS.key(), 1_000L)
+                // 过期批次不该出现在拆分里（与总额同一套谓词）
+                .doesNotContainKey(CreditSource.DAILY.key());
+
+        // ★ 本用例的题眼：分量加起来**就是**总额。
+        //   两者出自同一条 SQL 的两种投影（见 CreditLotMapper.xml 的 sumAvailable /
+        //   sumAvailableBySource），所以这条等式是构造出来的性质。谁把其中一处的
+        //   WHERE 改单边了，这里立刻红 —— 那是这个特性唯一会「静默错」的地方。
+        assertThat(balance.bySource().stream().mapToLong(BalanceView.SourceCredits::credits).sum())
+                .as("Σ 各来源 == 可用总额")
+                .isEqualTo(balance.availableCredits());
     }
 
     // ─────────────────────────────────────────────────────────────

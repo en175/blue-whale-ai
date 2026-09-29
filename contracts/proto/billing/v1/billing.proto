@@ -148,6 +148,28 @@ message QueryBalanceResponse {
   int64 available_credits = 1; // 整数积分，Σ(remaining − frozen)
   int64 frozen_credits    = 2; // 整数积分
   repeated ExpiringLot expiring = 3; // 临期批次，前端展示「X 积分将于 Y 日过期」
+
+  // 按来源拆分的**可用**积分（充值 / 充值赠送 / 每日赠送…）。
+  //
+  // ⚠️ **这不是第二个金额**，是同一个金额的分量：`Σ by_source` 必须**逐字等于**
+  //    `available_credits`（同一条 WHERE：该用户的、未过期的批次；只多一个 GROUP BY）。
+  //    这是本字段能存在的唯一理由 —— 「任何用户可见界面永远只出现一个金额」
+  //    （《计费逻辑详细设计》§2.3.1）讲的是**不许出现两个互相独立的数**，
+  //    不是「不许知道钱由什么构成」。拆出来的分量加起来必须就是那一个数，
+  //    对不上就是 bug，不是口径差异。
+  //
+  // 列出仍持有**未过期**批次的来源（某来源可用为 0 时仍会出现 —— 它确实存在，
+  // 只是都被冻结了）。顺序不约定，消费端自己按文案表排。
+  repeated SourceCredits by_source = 4;
+}
+
+// 一个来源的可用积分。`source` 取自批次的 `CreditSource.key()` ——
+// **注意与流水侧的取名不同**：批次写 `purchased`，而 `UserTransaction.type` 显示 `recharge`
+// （`TransactionType` 是另一套字面量）。要展示文案时按本字段的批次口径映射。
+message SourceCredits {
+  string source  = 1; // compensation | bonus | gift | daily | invite
+                      // | register | redeem | subscription | purchased
+  int64  credits = 2; // 该类可用积分 Σ(remaining − frozen)
 }
 
 message ExpiringLot {
