@@ -262,6 +262,24 @@
   display: none;
 }
 
+/* 悬停预览播放层（IKJ7RS）：absolute 铺满 .mediaVideoLayer、盖在首帧画布上，空层零视觉；
+   pointer-events:none 指针穿透（!832 合同：不抢节点点击/悬浮工具条/小地图命中），
+   不打 transform 避免新增合成层化路径；移入的 video 无控件，与 .mediaVideo 同款
+   contain 铺排黑底（圆角由 .mediaVideoLayer 的 overflow:hidden 承担） */
+.mediaHoverPreviewLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.mediaHoverPreviewLayer video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background-color: #000;
+}
+
 /* 合规校验通过图标：跟在文件名后方，不遮挡图片 */
 .complianceBadge {
   flex-shrink: 0;

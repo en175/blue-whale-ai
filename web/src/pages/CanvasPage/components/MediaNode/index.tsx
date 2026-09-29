@@ -28,6 +28,7 @@ import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
+import { HOVER_PREVIEW_DELAY_MS, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
@@ -359,15 +360,33 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
    *  Chromium 视频 GPU 层会把工具栏/小地图的点击偷走：节点被选中且直接开播。 */
   const videoInteractive = Boolean(selected) && isSelect && !subtitleEraseLocked;
   const [videoControlsArmed, setVideoControlsArmed] = useState(false);
+  /** 悬停预览会话进行中（IKJ7RS）：起播置 true，ended/停止翻回。真值期布防延后——
+   *  点选过渡（点击正在悬停播放的卡）靠它保住同一视频元素续播、声画不中断（选中卡规则归 IKJ7S1）。 */
+  const [hoverPlaying, setHoverPlaying] = useState(false);
+  /** 悬停预览播放层宿主：空层零视觉零命中；开播时把离屏解码 video 命令式移入本层 */
+  const hoverPreviewHostRef = useRef<HTMLDivElement | null>(null);
+  /** 悬停会话（元素 + ended 监听 + 离屏宿主原址）：元素即离屏解码 videoRef.current，
+   *  会话持有到停止为止；homeHost 供停止时原址移回 */
+  const hoverSessionRef = useRef<{
+    video: HTMLVideoElement;
+    onEnded: () => void;
+    homeHost: Node | null;
+  } | null>(null);
+  /** 100ms 布防计时器：计时内移开即取消（划过不播，保持首帧海报） */
+  const hoverTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (!videoInteractive) {
       setVideoControlsArmed(false);
-      videoRef.current?.pause();
+      // 会话播放中的元素就是 videoRef.current（IKJ7RS）：本 effect 随 hoverPlaying 翻转重跑时不得代停
+      if (!hoverPlaying) videoRef.current?.pause();
       return;
     }
+    // 点选过渡（IKJ7RS）：悬停播放中的卡被点选，布防（树内控件 video 挂载）延后到
+    // ended 之后（hoverPlaying 翻回时本 effect 重跑），保证同一元素声画不中断
+    if (hoverPlaying) return;
     const timer = window.setTimeout(() => setVideoControlsArmed(true), 80);
     return () => window.clearTimeout(timer);
-  }, [videoInteractive]);
+  }, [videoInteractive, hoverPlaying]);
 
   /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
   const commitName = useCallback(() => {
@@ -514,6 +533,125 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   useEffect(() => {
     setVideoError(null);
   }, [data.src, data.srcH264]);
+
+  /** 悬停预览排除态与起播门（IKJ7RS）：blocked=会话排除态（会话中出现即停），
+   *  eligible=起播门（另要求未选中——选中卡规则归 IKJ7S1，点选过渡靠会话续播衔接） */
+  const hoverPreviewInput = {
+    mediaType: data.mediaType,
+    src: data.src,
+    toolMode: data.toolMode,
+    hasVideoError: videoError != null,
+    genStatus: data.genStatus,
+    draft: data.draft,
+    assetMissing: data.assetMissing,
+    emptyShell: data.emptyShell,
+    subtitleEraseLocked,
+    splitEditing: data.splitEditing === true,
+    selected,
+  };
+  const hoverPreviewBlocked = videoHoverPreviewBlocked(hoverPreviewInput);
+  const hoverPreviewEligible = videoHoverPreviewEligible(hoverPreviewInput);
+
+  /** 结束悬停预览会话（IKJ7RS）：停播、归零回首帧、元素移出播放层（首帧海报画布随显）。
+   *  幂等：无会话/空层时安全 no-op。 */
+  const endHoverPlayback = useCallback(() => {
+    if (hoverTimerRef.current != null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    const session = hoverSessionRef.current;
+    hoverSessionRef.current = null;
+    if (session) {
+      session.video.removeEventListener('ended', session.onEnded);
+      session.video.pause();
+      try {
+        session.video.currentTime = 0;
+      } catch {
+        // 元数据未就绪时个别实现拒绝赋值：无碍，下次起播仍会归零
+      }
+      // 原址移回离屏宿主（解码缓存与挂载状态保持 hover 前原样）；点选过渡布防翻转
+      // 会拆宿主，届时 isConnected 为 false 跳过——元素随播放层卸载即停
+      if (session.homeHost?.isConnected) session.homeHost.appendChild(session.video);
+    }
+    const host = hoverPreviewHostRef.current;
+    while (host && host.firstChild) host.removeChild(host.firstChild);
+    setHoverPlaying(false);
+  }, []);
+
+  /** 开播（IKJ7RS）：把离屏解码元素移入内容区播放层，同一元素从头、有声开播；
+   *  play() 被浏览器自动播放策略拒绝时静默降级静音重试（catch 分支，无任何提示，
+   *  不做预先探测）。 */
+  const startHoverPlayback = useCallback(() => {
+    const video = videoRef.current;
+    const host = hoverPreviewHostRef.current;
+    if (!video || !host || hoverSessionRef.current) return;
+    video.loop = false;
+    const onEnded = () => {
+      // 播完一轮定格末帧不循环（元素留在播放层）；hoverPlaying 翻回放行点选过渡布防
+      setHoverPlaying(false);
+    };
+    hoverSessionRef.current = { video, onEnded, homeHost: video.parentNode };
+    video.addEventListener('ended', onEnded);
+    while (host.firstChild) host.removeChild(host.firstChild);
+    host.appendChild(video);
+    try {
+      video.currentTime = 0;
+    } catch {
+      // 未加载出元数据时本就从 0 起播，忽略
+    }
+    video.muted = false;
+    setHoverPlaying(true);
+    video.play().catch(() => {
+      // 有声开播被拒（hover 非用户激活手势）：静默降级静音开播，无任何提示
+      if (hoverSessionRef.current?.video !== video) return;
+      video.muted = true;
+      video.play().catch(() => {
+        // 静音仍被拒的极端环境：维持首帧海报静默
+      });
+    });
+  }, []);
+
+  /** 进入内容区（IKJ7RS）：满 100ms 才开播，计时内划过不播（保持首帧海报无视觉变化） */
+  const handleContentPointerEnter = useCallback(() => {
+    if (!hoverPreviewEligible) return;
+    if (hoverSessionRef.current || hoverTimerRef.current != null) return;
+    hoverTimerRef.current = window.setTimeout(() => {
+      hoverTimerRef.current = null;
+      startHoverPlayback();
+    }, HOVER_PREVIEW_DELAY_MS);
+  }, [hoverPreviewEligible, startHoverPlayback]);
+
+  /** 移出内容区（IKJ7RS）：计时内移开不播；播放中移开立即停并回首帧海报。
+   *  点选过渡后（已选中）播放归属选中卡规则（IKJ7S1），移开不停。 */
+  const handleContentPointerLeave = useCallback(() => {
+    if (hoverTimerRef.current != null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    if (selected) return;
+    endHoverPlayback();
+  }, [selected, endHoverPlayback]);
+
+  /** 排除态出现（会话锁定/生成流程/素材缺失/空壳/加载失败/抓手）立即结束会话（IKJ7RS） */
+  useEffect(() => {
+    if (hoverPreviewBlocked) endHoverPlayback();
+  }, [hoverPreviewBlocked, endHoverPlayback]);
+
+  /** 选中翻转：取消在途布防计时（点选先于 100ms 布防完成则不起播，点选过渡只衔接
+   *  已在悬停播放的会话），过渡会话交由后续流程接管（IKJ7RS） */
+  useEffect(() => {
+    if (!selected || hoverTimerRef.current == null) return;
+    window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = null;
+  }, [selected]);
+
+  /** 点选过渡后取消选中：回到未选中规则立即停播（IKJ7RS） */
+  useEffect(() => {
+    if (!selected && hoverSessionRef.current != null) endHoverPlayback();
+  }, [selected, endHoverPlayback]);
+
+  /** 卸载清理（IKJ7RS）：停播 + 移出播放层，防元素与监听泄漏 */
+  useEffect(endHoverPlayback, [endHoverPlayback]);
 
   /** 元数据/首帧/缓存命中共用：立刻回填已能量到的时长，seek 完成后再补宽高。
    *  静默解码失败形态（Windows/Edge 无 HEVC 解码实测）：数据齐（readyState≥2）
@@ -872,7 +1010,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         </span>
       )}
       {nameError && <div role="alert" className="nodrag nopan">{nameError}</div>}
-      <div className={`${styles.contentCard} ${isAudio ? styles.audioCard : ''}`} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
+      {/* 悬停预览指针只挂内容区（IKJ7RS）：标题行（双击改名/合规角标）不触发播放 */}
+      <div
+        className={`${styles.contentCard} ${isAudio ? styles.audioCard : ''}`}
+        data-testid="media-content"
+        style={{ width: contentBox.width, height: contentBox.height }}
+        onPointerEnter={handleContentPointerEnter}
+        onPointerLeave={handleContentPointerLeave}
+      >
         {showTargetHandle && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
           <HandlePlus />
@@ -981,7 +1126,18 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
                     ))}
                   </video>
                 ) : (
-                  <canvas ref={videoPosterRef} className={styles.mediaVideoPoster} aria-hidden />
+                  <>
+                    <canvas ref={videoPosterRef} className={styles.mediaVideoPoster} aria-hidden />
+                    {/* 悬停预览播放层（IKJ7RS）：悬停开播时把离屏解码 video 命令式移入本层
+                        （点选过渡同一元素续播的承载）。无控件纯展示、指针穿透
+                        （pointer-events:none，!832 合同同款不打 transform），空层零视觉零命中。 */}
+                    <div
+                      ref={hoverPreviewHostRef}
+                      className={styles.mediaHoverPreviewLayer}
+                      aria-hidden
+                      data-testid="video-hover-preview"
+                    />
+                  </>
                 )}
               </div>
             )}
