@@ -257,8 +257,10 @@
   background-color: #000;
 }
 
-/* 隐藏 Chromium/Edge 原生控件右下角三点溢出菜单 */
-.mediaVideo::-webkit-media-controls-overflow-button {
+/* 隐藏 Chromium/Edge 原生控件右下角三点溢出菜单（树内 .mediaVideo 与收养布防后的
+   悬停层 video 同口径） */
+.mediaVideo::-webkit-media-controls-overflow-button,
+.mediaHoverPreviewLayer video::-webkit-media-controls-overflow-button {
   display: none;
 }
 

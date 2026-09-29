@@ -780,7 +780,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   }, [selected, endHoverPlayback]);
 
   /** 排除态出现（会话锁定/生成流程/素材缺失/空壳/加载失败/抓手/多选）立即结束会话
-   *  （IKJ7RS 建；IKJ7S1 加入多选抑制）：选中卡树内会话同口径就地停播，画面保持当前帧 */
+   *  （IKJ7RS 建；IKJ7S1 加入多选抑制）：选中卡树内会话同口径就地停播——本 effect 只停播
+   *  不重置帧，画面随后由排除态自身的卸载/锁层接管（非保持当前帧） */
   useEffect(() => {
     if (hoverPreviewBlocked) endHoverPlayback();
   }, [hoverPreviewBlocked, endHoverPlayback]);
@@ -868,6 +869,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     video.preload = 'auto';
     video.controls = false;
     video.disablePictureInPicture = true;
+    /* 收养布防（IKJ7OS 故事 16）把原生控件开在本元素上：nodrag/nopan 防在控件上拖进度/
+       音量连动节点拖动（React Flow 沿祖先链找 .nodrag 放行），controlsList 与树内元素
+       同口径禁下载/倍速/远程投放 */
+    video.className = 'nodrag nopan';
+    video.setAttribute('controlslist', 'nodownload noplaybackrate noremoteplayback nopictureinpicture');
     videoRef.current = video;
     for (const source of videoSourceList(data.src, data.srcH264)) {
       const el = document.createElement('source');

@@ -1296,6 +1296,11 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     await act(async () => { vi.advanceTimersByTime(1); });
     expect(decoder.controls).toBe(true);
     expect(mountNode.querySelector('video[controls]')).toBe(decoder);
+    // 收养控件合同（IKJ7OS 评审收口）：元素自创建即带 nodrag/nopan——在控件上拖进度/音量
+    // 不连动节点拖动（React Flow 沿祖先链找 .nodrag 放行）；controlslist 同树内口径禁下载/倍速
+    expect(decoder.classList.contains('nodrag')).toBe(true);
+    expect(decoder.classList.contains('nopan')).toBe(true);
+    expect(decoder.getAttribute('controlslist')).toBe('nodownload noplaybackrate noremoteplayback nopictureinpicture');
     expect(playSpy).toHaveBeenCalledTimes(1);
     expect(pauseSpy).not.toHaveBeenCalled();
   });
@@ -1356,6 +1361,24 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     expect(playSpy).toHaveBeenCalledTimes(2);
     expect(hoverPreviewVideo()).toBe(decoder);
     expect(decoder.currentTime).toBe(0);
+  });
+
+  it('收养会话拖进度（故事14/15 收养路）：seeked 即接管从拖动点续播、让位解除，不归零不打回开头', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    await act(async () => { vi.advanceTimersByTime(80); });
+    expect(decoder.controls).toBe(true);
+    // 先手动暂停让位，再拖进度：seeked 解除让位、从拖动点续播（jsdom 恒 paused，play 必调）
+    await act(async () => { decoder.dispatchEvent(new Event('pause')); });
+    decoder.currentTime = 4.4;
+    await act(async () => { decoder.dispatchEvent(new Event('seeked')); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(decoder.currentTime).toBe(4.4);
+    expect(pauseSpy).not.toHaveBeenCalled();
   });
 
   it('触屏 pointerenter 不起播：悬停起播限定鼠标指针，触屏维持点选+控件现状（故事29）', async () => {
