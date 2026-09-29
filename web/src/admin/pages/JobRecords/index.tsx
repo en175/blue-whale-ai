@@ -2,12 +2,12 @@
  * JobRecords 任务记录：全站生成任务查询
  * 数据源 GET /api/admin/job-records（我们自己的 generation_jobs）
  *
- * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**。
+ * 骨架（筛选状态机 / 三态 / 分页接线）在 `../../components/AdminQueryTable`；
+ * 本页只**声明**筛选长什么样、有哪些列、空态说什么。
  *
  * ⚠️ 这一页**不是账单**：任务 ≠ 消费。任务可能失败全额返还（用户净变化 0，
  *    账本里不会出现一行消费），也可能一个任务对应多次扣费。要看钱去消费记录页。
  * ============================================ */
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import {
@@ -15,22 +15,13 @@ import {
   type AdminJobRecord,
   type AdminJobRecordQuery,
 } from '@/api/adminJobRecords';
-import { isApiError } from '@/api/http';
 import { TASK_TYPE_OPTIONS } from '../../taskTypeLabels';
-import {
-  Alert,
-  Badge,
-  Button,
-  Empty,
-  Input,
-  Page,
-  PageHeader,
-  Pagination,
-  Select,
-  Table,
-  Toolbar,
-  type BadgeTone,
-} from '../../ui';
+import AdminQueryTable, {
+  type Column,
+  type OffsetPaginationState,
+} from '../../components/AdminQueryTable';
+import { useAppliedFilters, usePagedQuery } from '../../components/AdminQueryTable/useQueryFilters';
+import { Badge, Button, Input, Select, type BadgeTone } from '../../ui';
 
 const PAGE_SIZE = 20;
 
@@ -67,11 +58,6 @@ const STATUS_TONES: Record<string, BadgeTone> = {
   cancelled: 'neutral',
 };
 
-const STATUS_OPTIONS = [
-  { value: 'all', label: '全部状态' },
-  ...Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
-];
-
 /**
  * 任务类型选项（含「全部」）——来自 `../../taskTypeLabels`，**全管理端只有那一份**。
  *
@@ -81,26 +67,41 @@ const STATUS_OPTIONS = [
  */
 const TYPE_OPTIONS = TASK_TYPE_OPTIONS;
 
-interface Filters {
+/**
+ * 筛选条件的形状。
+ *
+ * <p>⚠️ 用 `type` 而不是 `interface`：TS 只给对象**类型别名**隐式索引签名，
+ * 而 `useAppliedFilters` 的约束是 `Record<string, string>`（它要靠 `Object.values` 判空）。
+ */
+type Filters = {
   userId: string;
   projectId: string;
   type: string;
   status: string;
-}
+};
 
-// ⚠️ `type` 的默认是**空串**，不是 'all'。它曾经是 'all'，而判空用的是 `applied.type.trim()`
-//    —— 'all' 是**真值**，于是每次查询都实打实地带上 `type=all`，列表被过滤成空。
-//    「全部」在这里由**空值**表达（下拉的第一个选项 value=''），不需要哨兵值。
-const EMPTY_FILTERS: Filters = { userId: '', projectId: '', type: '', status: 'all' };
+/**
+ * 空筛选条件。
+ *
+ * <p>⚠️ 「全部」一律由**空串**表达（两个下拉的第一项 `value` 都是 `''`），**没有哨兵值**。
+ * 这里曾经是 `status: 'all'`，而查询侧的判据是 `applied.type.trim()` 那种「非空即带上」——
+ * `'all'` 是真值，于是每次查询都实打实带上 `status=all`，列表被过滤成空。
+ * 现在判据与哨兵口径同源（见下面的 `hasFilters` 与查询对象），这类分歧不可能再只出现一半。
+ */
+const EMPTY_FILTERS: Filters = { userId: '', projectId: '', type: '', status: '' };
+
+const STATUS_OPTIONS = [
+  { value: '', label: '全部状态' },
+  ...Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
+];
 
 export default function JobRecords() {
-  const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS);
-  // 查询条件与输入框分离：否则每敲一个字符都发一次请求
-  const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS);
-  const [page, setPage] = useState(1);
+  const filters = useAppliedFilters(EMPTY_FILTERS);
+  const paging = usePagedQuery(filters.epoch);
+  const { applied, draft, setDraft, apply, reset } = filters;
 
   const query: AdminJobRecordQuery = {
-    page,
+    page: paging.page,
     pageSize: PAGE_SIZE,
     ...(applied.userId ? { userId: applied.userId } : {}),
     ...(applied.projectId ? { projectId: applied.projectId } : {}),
@@ -109,168 +110,109 @@ export default function JobRecords() {
     // 传下去的就是选项的原值，中间没有校验。库里出现表里没收录的类型时选不到它，
     // 那属于前端漏收录（补 `../../taskTypeLabels`），不是这条筛选坏了
     ...(applied.type.trim() ? { type: applied.type.trim() } : {}),
-    ...(applied.status !== 'all' ? { status: applied.status } : {}),
+    ...(applied.status ? { status: applied.status } : {}),
   };
   const list = useQuery(adminJobRecordsOptions(query));
 
-  const apply = () => {
-    setApplied(draft);
-    // 换了筛选条件还停在第 3 页，看到的会是一个莫名其妙的空列表
-    setPage(1);
-  };
+  const columns: Column<AdminJobRecord>[] = [
+    { key: 'job_id', header: '任务 ID', render: (row) => row.job_id },
+    { key: 'user_id', header: '用户 ID', render: (row) => row.user_id },
+    { key: 'project_id', header: '项目 ID', render: (row) => row.project_id || '—' },
+    {
+      key: 'type',
+      header: '类型',
+      render: (row) => <Badge tone="neutral">{row.type}</Badge>,
+    },
+    { key: 'model', header: '模型', render: modelText },
+    {
+      key: 'status',
+      header: '状态',
+      render: (row) => (
+        <Badge dot tone={STATUS_TONES[row.status] ?? 'neutral'}>
+          {STATUS_LABELS[row.status] ?? row.status}
+        </Badge>
+      ),
+    },
+    { key: 'progress', header: '进度', render: (row) => `${row.progress}%` },
+    { key: 'retry_count', header: '重试', render: (row) => row.retry_count },
+    { key: 'created_at', header: '创建时间', render: (row) => fmtTime(row.created_at) },
+    { key: 'updated_at', header: '更新时间', render: (row) => fmtTime(row.updated_at) },
+    { key: 'error', header: '失败原因', render: (row) => (row.error ? row.error.message : '—') },
+  ];
 
-  const reset = () => {
-    setDraft(EMPTY_FILTERS);
-    setApplied(EMPTY_FILTERS);
-    setPage(1);
+  const pagination: OffsetPaginationState = {
+    kind: 'offset',
+    page: paging.page,
+    pageSize: PAGE_SIZE,
+    total: list.data?.total ?? 0,
+    prev: paging.prev,
+    next: paging.next,
   };
-
-  const rows = list.data?.list ?? [];
-  const total = list.data?.total ?? 0;
-  const filtered =
-    applied.userId || applied.projectId || applied.type.trim() || applied.status !== 'all';
 
   return (
-    <Page>
-      <PageHeader
-        title="任务记录"
-        subtitle="全站生成任务的执行状态；失败原因与用户在任务详情里看到的是同一份文案"
-      />
-
-      <Toolbar
-        actions={
-          <>
-            <Button size="sm" onClick={reset} disabled={list.isFetching}>
-              重置
-            </Button>
-            <Button
-              size="sm"
-              variant="primary"
-              icon={<Search size={15} strokeWidth={2} />}
-              onClick={apply}
-              disabled={list.isFetching}
-            >
-              查询
-            </Button>
-          </>
-        }
-      >
-        <Input
-          style={{ width: 160 }}
-          placeholder="用户 ID"
-          value={draft.userId}
-          onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') apply();
-          }}
-        />
-        <Input
-          style={{ width: 160 }}
-          placeholder="项目 ID"
-          value={draft.projectId}
-          onChange={(e) => setDraft((d) => ({ ...d, projectId: e.target.value }))}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') apply();
-          }}
-        />
-        <Select
-          aria-label="任务类型"
-          options={TYPE_OPTIONS}
-          value={draft.type}
-          onChange={(type) => setDraft((d) => ({ ...d, type }))}
-        />
-        <Select
-          aria-label="任务状态"
-          options={STATUS_OPTIONS}
-          value={draft.status}
-          onChange={(status) => setDraft((d) => ({ ...d, status }))}
-        />
-      </Toolbar>
-
-      {list.isError && (
-        <Alert tone="danger">
-          {isApiError(list.error) ? list.error.message : '获取任务记录失败'}
-        </Alert>
-      )}
-
-      <Table>
-        <thead>
-          <tr>
-            <th>任务 ID</th>
-            <th>用户 ID</th>
-            <th>项目 ID</th>
-            <th>类型</th>
-            <th>模型</th>
-            <th>状态</th>
-            <th>进度</th>
-            <th>重试</th>
-            <th>创建时间</th>
-            <th>更新时间</th>
-            <th>失败原因</th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.isPending && (
-            <tr>
-              <td colSpan={11}>
-                <Empty message="加载中…" />
-              </td>
-            </tr>
-          )}
-          {!list.isPending && list.isError && (
-            <tr>
-              <td colSpan={11}>
-                <Empty
-                  message="任务记录加载失败"
-                  extra={
-                    <Button size="sm" onClick={() => void list.refetch()}>
-                      重试
-                    </Button>
-                  }
-                />
-              </td>
-            </tr>
-          )}
-          {!list.isPending && !list.isError && rows.length === 0 && (
-            <tr>
-              <td colSpan={11}>
-                <Empty message={filtered ? '没有匹配的任务' : '暂无任务'} />
-              </td>
-            </tr>
-          )}
-          {rows.map((row) => (
-            <tr key={row.job_id}>
-              <td>{row.job_id}</td>
-              <td>{row.user_id}</td>
-              <td>{row.project_id || '—'}</td>
-              <td>
-                <Badge tone="neutral">{row.type}</Badge>
-              </td>
-              <td>{modelText(row)}</td>
-              <td>
-                <Badge dot tone={STATUS_TONES[row.status] ?? 'neutral'}>
-                  {STATUS_LABELS[row.status] ?? row.status}
-                </Badge>
-              </td>
-              <td>{row.progress}%</td>
-              <td>{row.retry_count}</td>
-              <td>{fmtTime(row.created_at)}</td>
-              <td>{fmtTime(row.updated_at)}</td>
-              <td>{row.error ? row.error.message : '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-
-      <Pagination
-        page={page}
-        pageSize={PAGE_SIZE}
-        total={total}
-        hasNext={page * PAGE_SIZE < total}
-        loading={list.isFetching}
-        onPrev={() => setPage((p) => Math.max(1, p - 1))}
-        onNext={() => setPage((p) => p + 1)}
-      />
-    </Page>
+    <AdminQueryTable
+      title="任务记录"
+      subtitle="全站生成任务的执行状态；失败原因与用户在任务详情里看到的是同一份文案"
+      hasFilters={filters.hasApplied}
+      filteredEmptyMessage="没有匹配的任务"
+      emptyMessage="暂无任务"
+      errorMessage="获取任务记录失败"
+      tableErrorMessage="任务记录加载失败"
+      columns={columns}
+      rows={list.data?.list ?? []}
+      rowKey={(row) => row.job_id}
+      status={list}
+      pagination={pagination}
+      filters={
+        <>
+          <Input
+            style={{ width: 160 }}
+            placeholder="用户 ID"
+            value={draft.userId}
+            onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') apply();
+            }}
+          />
+          <Input
+            style={{ width: 160 }}
+            placeholder="项目 ID"
+            value={draft.projectId}
+            onChange={(e) => setDraft((d) => ({ ...d, projectId: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') apply();
+            }}
+          />
+          <Select
+            aria-label="任务类型"
+            options={TYPE_OPTIONS}
+            value={draft.type}
+            onChange={(type) => setDraft((d) => ({ ...d, type }))}
+          />
+          <Select
+            aria-label="任务状态"
+            options={STATUS_OPTIONS}
+            value={draft.status}
+            onChange={(status) => setDraft((d) => ({ ...d, status }))}
+          />
+        </>
+      }
+      actions={
+        <>
+          <Button size="sm" onClick={reset} disabled={list.isFetching}>
+            重置
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<Search size={15} strokeWidth={2} />}
+            onClick={apply}
+            disabled={list.isFetching}
+          >
+            查询
+          </Button>
+        </>
+      }
+    />
   );
 }

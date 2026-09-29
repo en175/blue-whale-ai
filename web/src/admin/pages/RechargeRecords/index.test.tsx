@@ -18,7 +18,7 @@ vi.mock('@/api/adminRechargeRecords', async (importOriginal) => {
     ...actual,
     adminRechargeRecordsOptions: (query: unknown) => ({
       queryKey: actual.adminRechargeRecordKeys.list(query as never),
-      queryFn: api.fetchRecords,
+      queryFn: () => api.fetchRecords(query),
     }),
     retryAdminRechargeGrant: api.retryGrant,
   };
@@ -261,5 +261,17 @@ describe('充值记录页 — 人工补发（E-1 的那条出口）', () => {
     await clickRowButton('trade-1', '重试发放');
 
     expect(document.body.textContent).toContain('该订单尚未收到款项');
+  });
+});
+
+describe('充值记录页 — 哨兵口径', () => {
+  it('★ 首次查询**不带** status —— 哨兵漏下去会把列表静默过滤成空', async () => {
+    // 「全部」由**空值**表达。`'all'` 是真值，一旦写回 EMPTY_FILTERS 而判据没跟着改，
+    // 请求里就会多出 `status=all` —— 列表**不报错**，只会静默为空。
+    await renderPage();
+
+    expect(api.fetchRecords).toHaveBeenCalled();
+    const first = api.fetchRecords.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(first).not.toHaveProperty('status');
   });
 });

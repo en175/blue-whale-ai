@@ -269,3 +269,15 @@ describe('ConsumptionRecords 消费记录（游标分页）', () => {
     expect(api.fetchAdminConsumptionRecords.mock.calls[2]?.[0]?.userId).toBe('9001');
   });
 });
+
+describe('ConsumptionRecords — 哨兵口径', () => {
+  it('★ 首次查询**不带** type —— 哨兵漏下去会把列表静默过滤成空', async () => {
+    // 「全部」由**空值**表达。`'all'` 是真值，一旦写回 EMPTY_FILTERS 而判据没跟着改，
+    // 请求里就会多出 `type=all` —— 列表**不报错**，只会静默为空。所以从请求参数上钉。
+    await renderPage();
+
+    expect(api.fetchAdminConsumptionRecords).toHaveBeenCalled();
+    const first = api.fetchAdminConsumptionRecords.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(first).not.toHaveProperty('type');
+  });
+});
