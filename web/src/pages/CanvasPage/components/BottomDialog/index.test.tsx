@@ -58,8 +58,11 @@ const kling: GenerationModel = {
 
 let root: Root;
 let mountNode: HTMLDivElement;
+/** 草稿参数回写 spy（每次 renderDialog 重置）——IKJ4W6 断言提交/落盘值仍是内部键 adaptive */
+let paramsSpy: ReturnType<typeof vi.fn>;
 
 async function renderDialog(onClose = vi.fn()) {
+  paramsSpy = vi.fn();
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
@@ -72,7 +75,7 @@ async function renderDialog(onClose = vi.fn()) {
           onClose,
           onSend: vi.fn(),
           videoMediaRefs: { reference: [] },
-          videoDraftBinding: { onParamsChange: vi.fn() },
+          videoDraftBinding: { onParamsChange: paramsSpy },
         })
       ),
     );
@@ -232,5 +235,74 @@ describe('IKI61N 时长滑杆键盘操作（Esc 关闭对话框，组件内自�
     expect(slider.max).toBe('15');
     expect(slider.step).toBe('1');
     expect(slider.value).toBe('10');
+  });
+});
+
+/* IKJ4W6：视频比例内部键 `adaptive`（跟随输入）界面统一显示 `auto`。
+   展示名与内部名必须分离——写回 draft/提交的仍是 adaptive，否则上游火山拒单。 */
+describe('IKJ4W6 画布比例显示 auto', () => {
+  /** 2.5 形态：支持 adaptive，默认选中该档。 */
+  const adaptiveModel: GenerationModel = {
+    ...seedance,
+    model_id: 'seedance-2-5',
+    model_label: 'Seedance 2.5',
+    supported_aspect_ratios: ['16:9', '9:16', 'adaptive'],
+    default_aspect_ratio: 'adaptive',
+  };
+
+  async function openConfig() {
+    const configBtn = [...mountNode.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Seedance 2.5'),
+    );
+    expect(configBtn).toBeTruthy();
+    await act(async () => {
+      configBtn?.click();
+    });
+  }
+
+  it('支持 adaptive 的模型默认选中「跟随输入」：状态栏与选项均显示 auto，不出现 adaptive', async () => {
+    fetchGenerationModels.mockResolvedValue([adaptiveModel]);
+    await renderDialog();
+    await openConfig();
+
+    // 状态栏「模型|比例|分辨率|时长」里的比例项是 auto
+    expect(mountNode.textContent).toContain('Seedance 2.5|auto|720p|10s');
+    expect(mountNode.textContent).not.toContain('adaptive');
+
+    // 选项按钮文案同为 auto
+    const option = [...mountNode.querySelectorAll(`.${styles.ratioGroup} button`)].find((button) =>
+      button.textContent?.includes('auto'),
+    );
+    expect(option).toBeTruthy();
+  });
+
+  it('默认选中档回写草稿仍用内部键 adaptive（展示名不回写）', async () => {
+    fetchGenerationModels.mockResolvedValue([adaptiveModel]);
+    await renderDialog();
+
+    expect(paramsSpy).toHaveBeenCalled();
+    const patch = paramsSpy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(patch.ratio).toBe('adaptive');
+    expect(patch.ratio).not.toBe('auto');
+  });
+
+  it('点选 auto 档：界面选中但写回草稿的仍是 adaptive', async () => {
+    fetchGenerationModels.mockResolvedValue([
+      { ...adaptiveModel, supported_aspect_ratios: ['16:9', 'adaptive'], default_aspect_ratio: '16:9' },
+    ]);
+    await renderDialog();
+    await openConfig();
+
+    const option = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.ratioGroup} button`)].find((button) =>
+      button.textContent?.includes('auto'),
+    )!;
+    await act(async () => {
+      option.click();
+    });
+
+    const patch = paramsSpy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(patch.ratio).toBe('adaptive');
+    // 状态栏此刻显示 auto
+    expect(mountNode.textContent).toContain('Seedance 2.5|auto|');
   });
 });

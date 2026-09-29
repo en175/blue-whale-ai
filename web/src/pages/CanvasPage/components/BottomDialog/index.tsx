@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import RatioIcon from '@/components/RatioIcon';
+import { videoRatioLabel } from '@/lib/video-aspect-ratio';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildVideoJobReferences } from '../../videoJobReferences';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
@@ -1038,7 +1039,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
                     }}
                   >
                     <RatioIcon ratio={r} />
-                    <span>{r}</span>
+                    {/* IKJ4W6：内部键 adaptive 展示为 auto；选中/提交值仍是 adaptive。 */}
+                    <span>{videoRatioLabel(r)}</span>
                   </button>
                 ))}
               </div>
@@ -1238,7 +1240,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             {!forceAdaptive && (
               <>
                 <span className={styles.barDivider}>|</span>
-                <span>{selectedRatio}</span>
+                {/* IKJ4W6：内部键 adaptive 展示为 auto；selectedRatio/提交值仍是 adaptive。 */}
+                <span>{videoRatioLabel(selectedRatio)}</span>
               </>
             )}
             <span className={styles.barDivider}>|</span>

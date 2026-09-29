@@ -1096,6 +1096,83 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
   });
 });
 
+/* IKJ4W6：视频比例内部键 `adaptive`（跟随输入）界面统一显示 `auto` 且默认选中。
+   核心不变式：**展示名 ≠ 内部名**——提交/落草稿的 ratio 仍必须是 adaptive
+   （worker 侧 NewApiVideoClient 强制要求，写成 auto 视频直接失败）。 */
+describe('IKJ4W6 画布视频比例显示 auto 并默认选中', () => {
+  /** 2.5 形态：支持 adaptive 且默认选中该档（种子 doubao-seedance-2-5-260628 同口径）。 */
+  const adaptiveModel = {
+    model_id: 'seedance-2-5',
+    provider_id: 'prov',
+    model_label: '测试视频模型',
+    icon: null,
+    supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
+    supported_aspect_ratios: ['16:9', '9:16', 'adaptive'],
+    supported_formats: [],
+    supported_durations: { min: 4, max: 12, step: 1 },
+    default_size: '720p',
+    default_format: null,
+    default_aspect_ratio: 'adaptive',
+    default_duration: 5,
+    features: {
+      reference_image: true,
+      image_reference_max: 10,
+      watermark: false,
+      quantity_max: 1,
+      sequential_image_generation: false,
+      stream: false,
+      tools: false,
+      first_frame: true,
+      last_frame: true,
+      first_last_frame: true,
+      audio: false,
+    },
+    is_default: true,
+    version: 1,
+    digest: '',
+  };
+
+  it('模型默认 adaptive 时配置状态栏显示 auto（不出现英文 adaptive）', async () => {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [adaptiveModel]);
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
+    await waitModelReady();
+    // 新建草稿默认文生视频，比例项照常可见；展示名映射为 auto
+    expect(container.textContent).toContain('测试视频模型|auto|720p');
+    expect(container.textContent).not.toContain('adaptive');
+  });
+
+  it('默认选中档提交时 parameters.aspect_ratio 仍是内部键 adaptive', async () => {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [adaptiveModel]);
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
+    await waitModelReady();
+    await typePrompt('默认跟随输入');
+
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    // 界面显示 auto，发给后端/上游的仍是 adaptive——把展示名回写会让视频直接失败
+    expect((payload.parameters as Record<string, unknown>).aspect_ratio).toBe('adaptive');
+  });
+
+  it('未支持 adaptive 的模型：状态栏照常显示固定比例，不出现 auto', async () => {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [
+      {
+        ...adaptiveModel,
+        model_id: 'seedance-2',
+        supported_aspect_ratios: ['16:9', '9:16'],
+        default_aspect_ratio: '16:9',
+      },
+    ]);
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
+    await waitModelReady();
+    expect(container.textContent).toContain('测试视频模型|16:9|720p');
+  });
+});
+
 /* IKIPSX（IKGUXU D-01）：新建视频草稿默认模式写入 draftMode。
    创建路径：画布常规新建（无 seed）也要把当前默认模式写入草稿 data.draftMode，与面板默认显示同源；
    提交路径：startGenerationJob 兜底——草稿已保存模式优先，否则用当前面板选中模式，
