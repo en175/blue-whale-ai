@@ -57,6 +57,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *       见 {@link #未结算_显示预计消耗且没有结算时刻()}。</li>
  *   <li><b>游标分页</b>——{@code PageResponse} 只有 next_page_token（没有总数），
  *       且账本与流水持续新增，offset 会漏数据。见 {@link #游标翻页_跨三类来源不重不漏()}。</li>
+ *   <li><b>退回不新增一行</b>——任务失败全额退回时，那条 pending 行**原地转成 refund**
+ *       （{@code id} 不变、方向变 in、金额仍是预扣额），不是「消费一行 + 退回一行」。
+ *       见 {@link #全额返还_那条pending行转为refund而不是消失()}。</li>
  * </ol>
  *
  * <p>门控与其它集成测试同一口径（{@code BILLING_DB_PASSWORD}）：本切片的价值全在
@@ -264,17 +267,43 @@ class ListTransactionsIntegrationTest {
     }
 
     @Test
-    void 全额返还_不产生流水行() {
+    void 全额返还_那条pending行转为refund而不是消失() {
         stub.hold(hold("cmd-5", 9_105L));
+
+        // 先记下「处理中」那一刻的 id —— 退回之后这行必须**还是它**
+        String pendingId = rowOf(list(newPageRequest(20, ""), USER).getItemsList(), "consume").getId();
+
         credits.refund(9_105L, "任务失败");
 
         List<UserTransaction> items = list(newPageRequest(20, ""), USER).getItemsList();
 
-        // 预扣被原样解冻（借 frozen / 贷 wallet，净变化 0）：用户从来没有被扣过，
-        // 所以既不该看到「消费 0」也不该看到「退还 100」——那条 pending 行直接消失。
-        // 这是「一个业务动作一行」的另一面：没有发生的消费不构成一行流水。
-        assertThat(items).hasSize(1);
-        assertThat(items.get(0).getType()).isEqualTo("gift");
+        // 两行：setUp 的发放 + 这条退回。**退回那行没有消失**。
+        // 用户提交时已经看到过那条「-100 处理中」（可用余额也确实降过），
+        // 失败后让它凭空消失，等于流水在用户眼皮底下少了一行。
+        assertThat(items).hasSize(2);
+
+        UserTransaction refund = rowOf(items, "refund");
+        assertThat(refund.getDirection()).isEqualTo("in");
+        assertThat(refund.getStatus()).isEqualTo("done");
+        // 退的就是当初冻的那个数 —— 这笔钱从头到尾没真正被扣走
+        assertThat(refund.getAmount()).isEqualTo(100);
+        // ★ 同一个 job 只有一条预留（uk_reservation__job），所以是**替换不是新增**：
+        //    id 与那条 pending 行逐字相同，永远不会出现「消费一行 + 退回一行」
+        assertThat(refund.getId()).isEqualTo(pendingId);
+        // 文案以预扣时的快照作前缀，用户认得出是哪一单退回来的。
+        // ⚠️ 刻意**不用** Reservation.releaseNote —— 那列装的是「任务失败」这类内部原文，
+        //    还有「超时兜底释放」那种更不该对客的说法；这一行就是钉「没用它」。
+        assertThat(refund.getTitle()).isEqualTo(TITLE + " · 退回");
+        assertThat(refund.getSettledAt()).isNotEmpty();
+
+        // 原来那条消费行已经不在了 —— 它是被**换成**退回行的
+        assertThat(items).noneMatch(item -> item.getType().equals("consume"));
+        // 退回凭证（借 frozen / 贷 wallet，净变化 0）本身依然不出行
+        assertThat(items).noneMatch(item -> item.getId().startsWith("led:"));
+
+        // 类型过滤对退回同样生效：契约里 refund 一直是合法值，从前查它是一张**永远空**的页
+        assertThat(list("refund", USER).getItemsList()).hasSize(1);
+        assertThat(list("consume", USER).getItemsList()).isEmpty();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -316,6 +345,52 @@ class ListTransactionsIntegrationTest {
         assertThat(seen).containsExactly(
                 "res:" + res, "lot:" + d, "lot:" + c, "lot:" + b, "lot:" + a, "lot:" + seed);
         assertThat(pages).isEqualTo(3);
+    }
+
+    /**
+     * 翻页途中那行**原地转换**——排序三元组不变，所以既不重复也不漏。
+     *
+     * <p>这是本设计最依赖的一条不变量：预留行由 {@code held} 转 {@code settled} 或
+     * {@code released} 时，{@code type}/{@code direction}/{@code status} 全变，
+     * 但 {@code created_at}（= {@code gmt_create}，DDL 上没有 ON UPDATE）、
+     * {@code kind}（字面量）、{@code src_id}（= {@code id}）三个都不动。
+     * 客户端拿上一页的 token 接着翻时，那一行既不会被当成新行重新出现，也不会被跳过。
+     */
+    @Test
+    void 游标翻页_跨状态转换不重不漏() {
+        long a = credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "tr-a");
+        long b = credits.grant(USER, CreditSource.INVITE, 20, null, "grant", "i", "tr-b");
+        long res = holdAndReturnReservationId("cmd-tr", 9_120L);
+        long seed = lotIdOf("seed-1");
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 4 HOUR WHERE id = ?", seed);
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 3 HOUR WHERE id = ?", a);
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 2 HOUR WHERE id = ?", b);
+        jdbc.update("UPDATE billing_cost_reservations SET gmt_create = NOW() - INTERVAL 1 HOUR WHERE id = ?", res);
+
+        // 第一页（倒序取 2 行）= 最新的两行：预留 + b。预留那行此刻还是「处理中」
+        ListTransactionsResponse first = list(newPageRequest(2, ""), USER);
+        assertThat(first.getItemsList()).extracting(UserTransaction::getId)
+                .containsExactly("res:" + res, "lot:" + b);
+        assertThat(first.getItemsList().get(0).getType()).isEqualTo("consume");
+        assertThat(first.getItemsList().get(0).getStatus()).isEqualTo("pending");
+        String token = first.getPage().getNextPageToken();
+        assertThat(token).as("后面还有行，游标必须给出").isNotEmpty();
+
+        // ★ 拿到 token 之后、翻第二页之前，第一页那行**换了形态**
+        credits.refund(9_120L, "任务失败");
+
+        // 第二页照旧：不重复第一页的行，也没漏掉剩下的
+        ListTransactionsResponse second = list(newPageRequest(2, token), USER);
+        assertThat(second.getItemsList()).extracting(UserTransaction::getId)
+                .containsExactly("lot:" + a, "lot:" + seed);
+        assertThat(second.getPage().getNextPageToken()).isEmpty();
+
+        // 四行、id 各一次；那行现在是 refund，而且**只出现一次**
+        List<String> seen = new ArrayList<>();
+        first.getItemsList().forEach(item -> seen.add(item.getId()));
+        second.getItemsList().forEach(item -> seen.add(item.getId()));
+        assertThat(seen).hasSize(4).doesNotHaveDuplicates();
+        assertThat(list("refund", USER).getItemsList()).hasSize(1);
     }
 
     @Test

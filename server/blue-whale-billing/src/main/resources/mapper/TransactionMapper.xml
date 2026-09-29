@@ -19,10 +19,12 @@
      展示类型来自批次上的 source —— 这是**唯一**记录「这 500 分是怎么来的」的地方，
      所以这一族不能从账本出（账本分录只有 biz_type='grant'，看不出 daily 还是 invite）。
 
-  ② 消费（out）            ← billing_cost_reservations
-     每个 job 恰好一条预留（uk_reservation__job 唯一）。状态与两个金额都在这里：
-     held → pending（金额 = 预扣额，即用户提交时看到的「预计消耗」），
-     settled → done（金额 = actual_credits，结算定下的**最终值**）。
+  ② 消费 / 退回（out / in）← billing_cost_reservations
+     每个 job 恰好一条预留（uk_reservation__job 唯一）。**一个 job 恒一行**，形态随状态变：
+     held     → consume / pending（金额 = 预扣额，即用户提交时看到的「预计消耗」），
+     settled  → consume / done   （金额 = actual_credits，结算定下的**最终值**），
+     released → refund  / done   （金额 = reserved_credits，全额退回当初冻的那个数）。
+     ⚠️ 三态共用同一个主键 `res:{预留 id}`——退回是那一行**变了**，不是多出一行。
      ⚠️ 预扣额另出一列 `reserved_credits`（**管理面独用**）：结算后金额换成实际值，
         「当初冻了多少」就只剩这一列能答——详见下面 ② 分支的注释。
 
@@ -42,6 +44,10 @@
       · settle 凭证不出现在 ③（它的用户可见形态就是 ② 里那条转为 done 的行——
         同一 job 出两行才是真正的重复）
       · grant / recharge 凭证不出现在 ③（它们在 ① 里，且带着 ③ 拿不到的来源）
+      · refund 凭证也不出现在 ③（净变化 0）——**但退回这件事并没有因此消失**：
+        它的用户可见形态是 ② 里那条转为 refund 的行（那一行**同时也不再是消费**了，
+        所以这里再出一行是平白多一行，而不是「两行都在」）。另有更硬的一道闸：
+        ③ 的白名单只有 expire / adjust，refund 压根不在其列
     一句话：三类按「动作类型」互斥分工，合起来恰好覆盖全部动作。
 
   ── 排序键 ──────────────────────────────────────────────────────────────
@@ -121,12 +127,13 @@
       UNION ALL
 
       <!--
-        ② 消费：预留表。
+        ② 消费 / 退回：预留表。**一个 job 恒一行**，行的形态随状态变。
 
         amount 随 status 取不同的列，是「一个金额」这条硬规则在 SQL 里的落点：
-          held    → reserved_credits（预计消耗，用户提交时看到的那个数）
-          settled → actual_credits  （最终值）
-        两个值不会同时出现——它们先后占同一列，所以界面上永远只有一个金额。
+          held     → reserved_credits（预计消耗，用户提交时看到的那个数）
+          settled  → actual_credits  （最终值）
+          released → reserved_credits（全额退回：退的就是当初冻的那个数）
+        三个值不会同时出现——它们先后占同一列，所以界面上永远只有一个金额。
 
         reserved_credits 另出一列（**管理面独用**）：settled 之后 amount 已经换成实际值，
         「当初冻了多少」就再也无处可读了 —— 而用户余额先降后回的差额恰恰要靠它解释
@@ -136,26 +143,72 @@
            与 {@code TransactionView} 的说明——「用户界面永远只出现一个金额」不受影响。
         held 行的这两个数是同一个值（amount 就是预扣额），由调用方决定要不要重复展示。
 
-        released（任务失败全额返）刻意**不出行**：那次动作对用户资产的净变化是 0
-        （借 frozen / 贷 wallet，钱原样回到可用），用户不该看到一行「消费 0」或
-        「退还 40」——他从未被扣过。撤销的是一笔从未发生的消费，不是一笔收入。
+        ★ released（任务失败全额返，**或超时兜底释放**）**不消失，而是换一行**：
+        转为 type=refund / direction=in / status=done，金额仍是当初冻的那个数。
+
+        从前那种「把 status = 'released' 的行直接滤掉」的写法有两个说不通的地方：
+          · 用户**已经看到过**那条 pending 行（可用余额也真的降过），随后它凭空消失。
+            这不是「一笔从未发生的消费」，是流水在用户眼皮底下少了一行 ——
+            与上面那条「冻 12、实扣 1，那 11 的来回无人交代」是同一个问题的更重版本
+            （那条至少还留了一行，这条一行都不留）。
+          · released 还有**第二条来源**：ReservationSweeper 按时间兜底释放跑超阈值的预留
+            （它看不到 job 终态 —— billing 与 backend 不共享库）。那种单**平台没收到钱**
+            （SettlementService 里「终态事件晚于兜底释放」那条 WARN 说的就是它），
+            却同样在用户流水里不留痕迹，比「任务失败退回」更该被看见。
+
+        ⚠️ **不会出现两行**：同一 job 只有一条预留（uk_reservation__job 唯一），
+           而 tx_id 恒为 res:{预留 id} —— 一行从 pending「-12」变成 done「+12」，id 不变。
+        ⚠️ kind 保持 'consume' 不动：它是游标排序三元组 (created_at, kind, src_id)
+           的一员，改了会在同一秒内跳行，而排序键必须是不可变量。
+           —— 也正因为这三个键在状态转换时都不变，客户端翻页途中那行换形态不会重复、
+           也不会被跳过（ListTransactionsIntegrationTest#游标翻页_跨状态转换不重不漏 钉住）。
+
+        ⚠️ **这一改会让存量数据「多出」行来**：已经 released 的历史预留，从上线那一刻起
+           开始出现在用户（与管理端）流水里；它们的时间显示的是**预扣时刻**
+           （created_at = gmt_create），不是退回时刻 —— 兜底释放那类两个时刻可能差几天。
+           它们落在用户早已翻过去的旧位置、不在顶部。这是预期效果（那些动作真实发生过），
+           但没有任何别的痕迹提示这件事，所以记在这里。
+
+        ⚠️ V7__reservation_user_index.sql 的头部注释里还写着旧的谓词
+           （WHERE r.status != 'released'）。那份迁移**改不动**（Flyway 校验 checksum，
+           改已执行的迁移会让每个存量库起不来）；索引本身仍然对 —— 去掉一个非等值谓词
+           只会让优化器更自由，只是那段论证针对的语句已经不存在了。
       -->
       SELECT CONCAT('res:', r.id) AS tx_id,
-             'consume' AS type,
-             'out' AS direction,
-             <!-- 提交方没给文案时兜一个通用词；空标题在下拉列表里是「一行空白」 -->
-             CASE WHEN r.title = '' THEN '生成消费' ELSE r.title END AS title,
+             <!-- 只有 released 走 refund；另两态都是消费 -->
+             CASE WHEN r.status = 'released' THEN 'refund' ELSE 'consume' END AS type,
+             CASE WHEN r.status = 'released' THEN 'in'     ELSE 'out'     END AS direction,
+             <!-- 提交方没给文案时兜一个通用词；空标题在下拉列表里是「一行空白」。
+                  退回行以预扣行的快照作前缀 —— 用户认得出是「哪一单」退回来的。
+                  ⚠️ **不要拿 Reservation.releaseNote 来填**：那列可能装着
+                     「超时兜底释放」这类内部话术，用户不该看到「兜底」「未收费」。 -->
+             CASE WHEN r.status = 'released'
+                  THEN CASE WHEN r.title = '' THEN '生成退回'
+                            ELSE CONCAT(r.title, ' · 退回') END
+                  ELSE CASE WHEN r.title = '' THEN '生成消费' ELSE r.title END
+             END AS title,
+             <!-- 三个状态共用这一个金额列（「一个金额」那条硬规则）。
+                  ⚠️ released 落在 ELSE 上取 reserved_credits —— 不是「因为没结算」，
+                     而是因为 markReleased 把 actual_credits 写成了 0（CostReservationMapper）。
+                     别把这里「化简」成「终态统一取 actual_credits」：那会让退回行显示 +0。 -->
              CASE WHEN r.status = 'settled' THEN r.actual_credits ELSE r.reserved_credits END AS amount,
              r.reserved_credits AS reserved_credits,
-             CASE WHEN r.status = 'settled' THEN 'done' ELSE 'pending' END AS status,
+             <!-- 两个终态（settled / released）都已落地，只有 held 还在处理中。
+                  ⚠️ 判据写成「= held 的补集」而不是「= settled」：后者会把 released 漏成
+                     pending。合法取值只有 Reservation.Status 那三个（库里没有 CHECK 约束），
+                     真冒出第四个时它会落到 done —— 那是个**错的**结论，只是至少吵得响
+                     （settled_at 也会被一起填上）。新增状态时这里必须表态。 -->
+             CASE WHEN r.status = 'held' THEN 'pending' ELSE 'done' END AS status,
              r.gmt_create AS created_at,
-             CASE WHEN r.status = 'settled' THEN r.gmt_modified END AS settled_at,
+             <!-- 与 status 同一个补集口径：没落地就没有结算时刻 -->
+             CASE WHEN r.status = 'held' THEN NULL ELSE r.gmt_modified END AS settled_at,
              'consume' AS kind,
              r.id AS src_id,
              r.user_id AS user_id
       FROM billing_cost_reservations r
-      WHERE r.status != 'released'
-        <if test="userId != null">AND r.user_id = #{userId}</if>
+      <where>
+        <if test="userId != null">r.user_id = #{userId}</if>
+      </where>
 
       UNION ALL
 
@@ -173,8 +226,11 @@
           · wallet 与 frozen 都是贷方为正的科目（Account.normalDebit 均为 false），
             所以贷方 +amount、借方 -amount（见 LedgerRepository 的 balance_delta 口径）
           · 平台侧科目（revenue / cost / receivable）不参与——它们不是用户的钱
-        net 为 0 的凭证被 HAVING 丢掉：那种动作只把钱在用户的两个口袋之间挪了一下，
-        不构成流水（hold 与 refund 正是如此，见文件头的「不重」说明）。
+        net 为 0 的凭证被 HAVING 丢掉：那种动作只把钱在用户的两个口袋之间挪了一下。
+        hold 与 refund 都是这样 —— 但「凭证不出行」不等于「那件事看不见」：
+        它们的用户可见形态在 ② 里（hold 是那条 pending 行，refund 是**同一条**行
+        后来转成的 refund 行），所以这里丢掉不会让任何一个业务动作消失。
+        见文件头的「不重」说明。
 
         ⚠️ 'wallet' / 'frozen' 与 'credit' 是 Account / LedgerEntry.Direction 的落库字面值，
            改名时必须同步这里；TransactionsIntegrationTest 会经真实凭证路径把这条钉住。
