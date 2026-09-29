@@ -68,6 +68,53 @@
   </select>
 
   <!--
+    ★ 批量版 sumAvailable：一次问一批用户的可用余额（管理端用户列表的一列）。
+
+    ⚠️ WHERE 与上面的 sumAvailable **逐字相同**（只多一个 user_id IN）—— 这不是巧合，
+       是要求：列表页那一列与详情页显示的必须是同一个数。两处谓词一旦分叉，
+       运营会在列表上看到一个、点进详情看到另一个，而两边都不报错。
+
+    ⚠️ 走 idx_lots__user_id (user_id, id)：前导列等值 + IN 是索引区间扫描，
+       GROUP BY user_id 与索引首列同序，不需要文件排序。
+
+    ⚠️ **没有批次的用户不会出现在结果里**（GROUP BY 的语义），不是返回一行 0。
+       需要补零的是调用方（它手里才有请求清单）；在这层补零得先知道问过哪些 id，
+       而那是本层拿不到的信息。
+  -->
+  <select id="sumAvailableByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
+    SELECT user_id, COALESCE(SUM(remaining - frozen), 0) AS amount
+    FROM billing_credit_lots
+    WHERE user_id IN
+      <foreach collection="userIds" item="uid" open="(" separator="," close=")">#{uid}</foreach>
+      AND (expires_at IS NULL OR expires_at > NOW())
+    GROUP BY user_id
+  </select>
+
+  <!--
+    ★ 批量版的「按来源发放合计」：Σ amount，只算给定来源的批次。
+       管理端用户列表的「累计充值」列用它（调用方传 purchased）。
+
+    ⚠️ 取 amount（发放量）而不是 remaining - frozen（可用量）：消耗过之后可用量就
+       小于发放量，而「累计充值」问的是**历史上充了多少**，不是现在还剩多少。
+       amount 也是这份历史里唯一不会被后续动作改动的列 —— 结算与过期核销都只动 remaining。
+
+    ⚠️ source 由调用方从 CreditSource.key() 传进来，**不在这里写字面量**：硬编码的
+       source = 'purchased' 会在枚举改名时静默变成「一条都查不到 → 全员 0」，
+       而 0 看起来又是一个完全合法的数（同一个坑见上面 source_priority 那段）。
+
+    ⚠️ 本语句**不筛 expires_at**：它问的是「发过多少」，与批次过期没过期无关 ——
+       过期只是把剩余的作废，不改变「当初充了 500」这个事实。
+  -->
+  <select id="sumGrantedByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
+    SELECT user_id, COALESCE(SUM(amount), 0) AS amount
+    FROM billing_credit_lots
+    WHERE user_id IN
+      <foreach collection="userIds" item="uid" open="(" separator="," close=")">#{uid}</foreach>
+      AND source = #{source}
+    GROUP BY user_id
+  </select>
+
+  <!--
     ★ 已到期、仍有可核销量的批次（过期核销任务用）。
 
     三个条件：

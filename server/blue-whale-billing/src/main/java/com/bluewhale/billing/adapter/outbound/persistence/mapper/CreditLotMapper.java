@@ -3,6 +3,7 @@ package com.bluewhale.billing.adapter.outbound.persistence.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity;
 import com.bluewhale.billing.adapter.outbound.persistence.row.SourceAvailableRow;
+import com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -17,12 +18,14 @@ import java.util.List;
  * 调用方用 {@code LambdaQueryWrapper} 拼条件即可——**这类 SQL 是纯样板**，
  * 手写只会多一处改列名时要同步的地方。
  *
- * <p>下面这八个方法例外，它们各自带着 Wrapper 表达不了的东西，
+ * <p>下面这十个方法例外，它们各自带着 Wrapper 表达不了的东西，
  * 因此语句落在 {@code resources/mapper/CreditLotMapper.xml}：
  * <ul>
  *   <li>{@link #lockActiveLots} —— 四级 ORDER BY（含 {@code expires_at IS NULL} 这种布尔排序）
  *       与 {@code FOR UPDATE} 行锁</li>
  *   <li>{@link #sumAvailable} —— 聚合表达式 {@code SUM(remaining - frozen)}</li>
+ *   <li>{@link #sumAvailableByUser} / {@link #sumGrantedByUser} —— 同两个聚合的**批量版**
+ *       （{@code user_id IN} + {@code GROUP BY}），管理端列表页用</li>
  *   <li>{@link #listDueLots} —— 全表范围的 {@code expires_at} 区间扫描 + LIMIT（过期核销用），
  *       与下面三个「只针对某个用户」的取数不是一回事</li>
  *   <li>{@link #lockById} —— 按主键读并锁住该行（核销要「读到什么就销掉什么」）</li>
@@ -59,6 +62,38 @@ public interface CreditLotMapper extends BaseMapper<CreditLotEntity> {
      * <p>返回的来源是「仍持有未过期批次」的那些；某来源可用为 0（全被冻结）时仍会返回。
      */
     List<SourceAvailableRow> sumAvailableBySource(@Param("userId") long userId);
+
+    /**
+     * 批量版的 {@link #sumAvailable}：一次问一批用户的可用余额（管理端用户列表）。
+     *
+     * <p>⚠️ WHERE 与 {@link #sumAvailable} **逐字相同**（只多一个 {@code user_id IN}）——
+     * 这不是巧合，是要求：列表页那一列与详情页显示的必须是同一个数。两处谓词一旦分叉，
+     * 运营会在列表上看到一个数、点进详情看到另一个，而两边都不报错。
+     *
+     * @param userIds 一批用户 id。**调用方须保证非空** —— 空集合会拼出 {@code IN ()}
+     *                这个语法错误；本层不兜底，因为「压根没有用户可问」是调用方才知道的事
+     *                （见 {@code BillingApplicationService#userStats} 的空集早返回）
+     */
+    List<UserAmountRow> sumAvailableByUser(@Param("userIds") List<Long> userIds);
+
+    /**
+     * 批量版的「按来源发放合计」：Σ{@code amount}，只算给定来源的批次。
+     *
+     * <p>管理端「累计充值」用它（传 {@code purchased}）：问的是用户**自己充了多少**，
+     * 所以只算充值本金，不含充值赠送（赠送落在 {@code bonus} 那个来源上）。
+     *
+     * <p>⚠️ 取 {@code amount}（发放量）而不是 {@code remaining - frozen}（可用量）：
+     * 消耗过之后可用量就小于发放量，而「累计充值」问的是历史充了多少，不是现在还剩多少。
+     * {@code amount} 也是这份历史里唯一不会被后续动作改动的列（结算与过期核销都只动
+     * {@code remaining}）。
+     *
+     * <p>⚠️ {@code source} 由调用方从 {@code CreditSource#key()} 传进来，**不在 SQL 里
+     * 写字面量**：硬编码的 {@code source = 'purchased'} 会在枚举改名时静默变成
+     * 「一条都查不到 → 全员 0」，而 0 看起来又是一个完全合法的数（同一个坑见本类上方
+     * 关于 {@code source_priority} 的那段）。
+     */
+    List<UserAmountRow> sumGrantedByUser(@Param("userIds") List<Long> userIds,
+                                         @Param("source") String source);
 
     /**
      * 已到期、仍有可核销量的批次（**跨全部用户**，最久到期的在前）。

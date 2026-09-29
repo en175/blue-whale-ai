@@ -10,6 +10,8 @@ import com.bluewhale.contracts.billing.v1.AdminListTransactionsRequest;
 import com.bluewhale.contracts.billing.v1.AdminListTransactionsResponse;
 import com.bluewhale.contracts.billing.v1.AdminQueryBalanceRequest;
 import com.bluewhale.contracts.billing.v1.AdminQueryBalanceResponse;
+import com.bluewhale.contracts.billing.v1.AdminQueryUserStatsRequest;
+import com.bluewhale.contracts.billing.v1.AdminQueryUserStatsResponse;
 import com.bluewhale.contracts.billing.v1.AdminTransactionItem;
 import com.bluewhale.contracts.billing.v1.BillingAdminServiceGrpc;
 import com.bluewhale.contracts.billing.v1.BillingServiceGrpc;
@@ -569,6 +571,84 @@ class BillingAdminGrpcIntegrationTest {
                 .containsExactlyElementsOf(userRows.stream().map(UserTransaction::getId).toList());
         assertThat(adminRows.stream().map(AdminTransactionItem::getAmount).toList())
                 .containsExactlyElementsOf(userRows.stream().map(UserTransaction::getAmount).toList());
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 批量三列：管理端用户列表的「余额 / 累计充值 / 累计消费」
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * ★ 一次问一批，三列各归各的主人，且**查无此人回一项全 0**。
+     *
+     * <p>这条接口存在的理由是消掉列表页的 N+1（一页 100 个用户，逐个调
+     * {@code AdminQueryBalance} 就是 100 次跨进程往返）。所以断言的重点不只是
+     * 「数字对不对」，还有**一次调用同时答完所有人**——包括那个什么都没做过的，
+     * 他也要在结果里，而不是缺键（缺键会让调用方把「没这个人」当成一次失败）。
+     */
+    @Test
+    void 批量三列_一次问一批_各归各的且查无此人是0() {
+        // USER：充值本金 500 + 充值赠送 100，再消费掉 30
+        credits.grant(USER, CreditSource.PURCHASED, 500, null, "recharge", "r-1", "gk-1");
+        credits.grant(USER, CreditSource.BONUS, 100, null, "recharge", "r-1", "gk-2");
+        userFacing.hold(hold(USER, "adm-batch-1", 9_401L));
+        credits.settle(9_401L, 30);
+
+        AdminQueryUserStatsResponse response = admin.adminQueryUserStats(
+                AdminQueryUserStatsRequest.newBuilder()
+                        .addAllUserIds(List.of(USER, OTHER_USER, 9_999L))
+                        .build());
+
+        assertThat(response.getStatsMap()).containsOnlyKeys(USER, OTHER_USER, 9_999L);
+
+        // setUp 发过 10000 gift；预扣 100 后结算实扣 30 → 可用 = 10000 + 500 + 100 − 30
+        assertThat(response.getStatsOrThrow(USER).getAvailableCredits()).isEqualTo(10_570);
+        // ★ 累计充值只算 purchased 本金 500，**不含**充值赠送的 100：
+        //   这一列问的是「用户自己充了多少钱」，把赠送折进去运营就对不上营收了
+        assertThat(response.getStatsOrThrow(USER).getTotalRecharged()).isEqualTo(500);
+        assertThat(response.getStatsOrThrow(USER).getTotalConsumed()).isEqualTo(30);
+
+        // 另一个用户只有 setUp 那 10000 gift：没充值、没消费 —— 各归各的，没串号
+        assertThat(response.getStatsOrThrow(OTHER_USER).getAvailableCredits()).isEqualTo(10_000);
+        assertThat(response.getStatsOrThrow(OTHER_USER).getTotalRecharged()).isZero();
+        assertThat(response.getStatsOrThrow(OTHER_USER).getTotalConsumed()).isZero();
+
+        // 查无此人回一项全 0：账本上它与「余额为 0」无从区分，不是另一种哨兵值
+        assertThat(response.getStatsOrThrow(9_999L).getAvailableCredits()).isZero();
+        assertThat(response.getStatsOrThrow(9_999L).getTotalRecharged()).isZero();
+    }
+
+    /**
+     * 批量那一列的「可用」与单人 {@code AdminQueryBalance} **逐字相同**。
+     *
+     * <p>两条 rpc 各有一条 SQL，谓词是刻意复制的（只多一个 {@code user_id IN}）。
+     * 今天它们相等是构造出来的，但**没有任何东西挡着后来的人只改一处** —— 那时
+     * 运营会在列表上看到一个余额、点进详情看到另一个，而两边都不报错。这条就是那个挡板。
+     */
+    @Test
+    void 批量三列的可用_与单人余额是同一个数() {
+        credits.grant(USER, CreditSource.PURCHASED, 500, null, "recharge", "r-2", "gk-3");
+        userFacing.hold(hold(USER, "adm-batch-2", 9_402L));
+
+        long fromBatch = admin.adminQueryUserStats(AdminQueryUserStatsRequest.newBuilder()
+                        .addUserIds(USER).build())
+                .getStatsOrThrow(USER).getAvailableCredits();
+        long fromSingle = admin.adminQueryBalance(AdminQueryBalanceRequest.newBuilder()
+                        .setUserId(USER).build()).getAvailableCredits();
+
+        assertThat(fromBatch).as("列表页与详情页显示的余额").isEqualTo(fromSingle);
+    }
+
+    /**
+     * 空请求回空表，**不能报错**。
+     *
+     * <p>应用层据此早返回：空集合拼进 {@code IN ()} 是 SQL 语法错误，会以一个 INTERNAL
+     * 冒出来 —— 而「这一页一个用户都没有」完全正常（筛完没结果、页翻过了头）。
+     * 那种情况下报 500，运营看到的是一个假的故障。
+     */
+    @Test
+    void 批量三列_空请求回空表而不是报错() {
+        assertThat(admin.adminQueryUserStats(AdminQueryUserStatsRequest.getDefaultInstance())
+                .getStatsMap()).isEmpty();
     }
 
     // ─────────────────────────────────────────────────────────────

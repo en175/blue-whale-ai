@@ -5,6 +5,7 @@ import com.bluewhale.billing.application.command.QuoteQuery;
 import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.application.view.TransactionType;
 import com.bluewhale.billing.application.view.TransactionView;
+import com.bluewhale.billing.application.view.UserStatsView;
 import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.Account;
 import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
@@ -24,6 +25,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 计费的应用层 —— **传输层唯一该调的东西**。
@@ -454,5 +458,44 @@ public class BillingApplicationService {
         }
         // 瞬时 → 库内北京墙钟只走 DbTime 一处；与写入侧同一口径，比较才有意义
         return reservations.sumSettledActualCredits(DbTime.toDb(from), DbTime.toDb(to));
+    }
+
+    /**
+     * **一批用户**的「可用 / 累计充值 / 累计消费」—— 管理端用户列表用。
+     *
+     * <p>为什么必须是批量的：列表页一页最多 100 个用户，逐个调 {@link #balance(long)}
+     * 就是 100 次跨进程往返、每次还要各算一遍批次。这里一次问完，三条语句
+     * （两条按批次表、一条按预留表）在内存里按 {@code user_id} 并起来。
+     *
+     * <p>⚠️ 三列的口径见 {@link UserStatsView}。其中「可用」与 {@link #balance(long)}
+     * 的 {@code availableCredits} 出自**同一条 WHERE**（只多一个 {@code user_id IN}），
+     * 所以列表页与详情页显示的是同一个数 —— 这不是巧合，是要求。
+     *
+     * <p>⚠️ 请求里的每个 id 都会出现在结果里（查无则三列全 0）：聚合结果里「没有这个
+     * 用户」的三种来源（没批次 / 没充值 / 没结算）在这里收敛成同一个数，而**哪些 id
+     * 需要补零**只有这一层同时知道请求清单与聚合结果。调用方不必再自己兜一遍。
+     *
+     * @param userIds 要问的用户 id。空或 {@code null} = 返回空表且**不发 SQL** ——
+     *                空集合会拼出 {@code IN ()} 这个语法错误，早返回是唯一正确的兜底
+     */
+    public Map<Long, UserStatsView> userStats(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, Long> available = lots.availableCreditsOf(userIds);
+        // 累计充值 = 充值本金（purchased）的发放合计，**不含充值赠送**（见 UserStatsView）
+        Map<Long, Long> recharged = lots.grantedCreditsOf(userIds, CreditSource.PURCHASED);
+        Map<Long, Long> consumed = reservations.sumSettledActualByUser(userIds);
+
+        // LinkedHashMap：保持请求里的顺序，让「页面上的行序」与「返回的 map 序」一致
+        Map<Long, UserStatsView> result = new LinkedHashMap<>();
+        for (Long userId : userIds) {
+            result.put(userId, new UserStatsView(
+                    available.getOrDefault(userId, 0L),
+                    recharged.getOrDefault(userId, 0L),
+                    consumed.getOrDefault(userId, 0L)));
+        }
+        return result;
     }
 }

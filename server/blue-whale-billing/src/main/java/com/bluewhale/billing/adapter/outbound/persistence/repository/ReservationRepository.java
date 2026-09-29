@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bluewhale.billing.adapter.outbound.persistence.entity.CostReservationEntity;
 import com.bluewhale.billing.adapter.outbound.persistence.mapper.CostReservationMapper;
 import com.bluewhale.billing.adapter.outbound.persistence.row.StaleReservationRow;
+import com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow;
 import com.bluewhale.billing.domain.ledger.Allocation;
 import com.bluewhale.billing.domain.ledger.Reservation;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Repository;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -97,6 +99,21 @@ public class ReservationRepository {
      */
     public long sumSettledActualCredits(LocalDateTime from, LocalDateTime to) {
         return mapper.sumSettledActualCredits(from, to);
+    }
+
+    /**
+     * **一批用户**的已结算实际消耗（管理端用户列表的「累计消费」列）。
+     *
+     * <p>与 {@link #sumSettledActualCredits} 同一个口径（只算 {@code settled}、
+     * {@code SUM(actual_credits)}），只把「时间区间」换成「按用户」—— 列表页那一列
+     * 与仪表盘的全站合计必须能对上，理由见
+     * {@link CostReservationMapper#sumSettledActualByUser}。
+     *
+     * @param userIds 非空。空集合会拼出 {@code IN ()} 语法错，本层不兜底
+     * @return 只含**确有已结算预留**的用户；其余用户不在表里（调用方按 0 处理）
+     */
+    public Map<Long, Long> sumSettledActualByUser(List<Long> userIds) {
+        return UserAmountRow.toMap(mapper.sumSettledActualByUser(userIds));
     }
 
     /**

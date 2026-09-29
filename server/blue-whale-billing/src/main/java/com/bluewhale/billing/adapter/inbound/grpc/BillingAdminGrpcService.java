@@ -16,7 +16,10 @@ import com.bluewhale.contracts.billing.v1.AdminListTransactionsRequest;
 import com.bluewhale.contracts.billing.v1.AdminListTransactionsResponse;
 import com.bluewhale.contracts.billing.v1.AdminQueryBalanceRequest;
 import com.bluewhale.contracts.billing.v1.AdminQueryBalanceResponse;
+import com.bluewhale.contracts.billing.v1.AdminQueryUserStatsRequest;
+import com.bluewhale.contracts.billing.v1.AdminQueryUserStatsResponse;
 import com.bluewhale.contracts.billing.v1.AdminTransactionItem;
+import com.bluewhale.contracts.billing.v1.AdminUserStats;
 import com.bluewhale.contracts.billing.v1.BillingAdminServiceGrpc;
 import com.bluewhale.contracts.common.v1.PageResponse;
 import io.grpc.Status;
@@ -177,6 +180,37 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
                         .setSource(lot.source())
                         .build());
             }
+            observer.onNext(response.build());
+            observer.onCompleted();
+        } catch (RuntimeException e) {
+            observer.onError(toStatus(e).asRuntimeException());
+        }
+    }
+
+    /**
+     * 一批用户的「可用 / 累计充值 / 累计消费」（管理端用户列表）。
+     *
+     * <p>⚠️ 用户不存在**不是错误**，与 {@link #adminQueryBalance} 同一条立场：
+     * 账本上「查无此人」与「余额为 0」无从区分（没有批次即没有余额）。响应注释里
+     * 因此写着「缺键按 0 渲染」。
+     *
+     * <p>⚠️ 这是**批量**接口，一次问一页（最多 100 个）。别拿它去逐个问 ——
+     * 那正是它存在要消掉的那个 N+1。应用层已保证「请求里的每个 id 都会回一项」，
+     * 所以这里只管投影，不必补零。
+     *
+     * <p>三列的口径（尤其「累计充值只算 purchased 本金」）见 {@code UserStatsView}。
+     */
+    @Override
+    public void adminQueryUserStats(AdminQueryUserStatsRequest request,
+                                    StreamObserver<AdminQueryUserStatsResponse> observer) {
+        try {
+            AdminQueryUserStatsResponse.Builder response = AdminQueryUserStatsResponse.newBuilder();
+            billing.userStats(request.getUserIdsList()).forEach((userId, stats) ->
+                    response.putStats(userId, AdminUserStats.newBuilder()
+                            .setAvailableCredits(stats.availableCredits())
+                            .setTotalRecharged(stats.totalRecharged())
+                            .setTotalConsumed(stats.totalConsumed())
+                            .build()));
             observer.onNext(response.build());
             observer.onCompleted();
         } catch (RuntimeException e) {
