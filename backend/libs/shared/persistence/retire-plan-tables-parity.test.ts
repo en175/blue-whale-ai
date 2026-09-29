@@ -14,7 +14,7 @@ const migrationSql = readFileSync(
   "utf8",
 );
 const standaloneSql = readFileSync(
-  new URL("../../../prisma/schema/056_retire_plan_tables.sql", import.meta.url),
+  new URL("../../../prisma/schema/057_retire_plan_tables.sql", import.meta.url),
   "utf8",
 );
 const snapshotSql = readFileSync(
