@@ -1,26 +1,26 @@
 # Seedance 2.5 全模态参考（omni reference）ratio 参数官方口径核验
 
-> 核验日期：2026-09-29  
-> 范围：火山方舟（Volcano Ark）Seedance 2.5（`doubao-seedance-2-5-260628`）在「全模态参考生视频」（官方现名，旧文档称「多模态参考」，本仓口径「全能参考 / omni reference」）及各任务类型下，`ratio` / `omni_reference_task_type` / `duration` 参数的官方取值与约束；并对照本仓能力目录配置（`backend/prisma/schema/002_seed.sql` 的 Seedance 2.5 行与 `backend/libs/contracts/capability-param-validation.ts` 的任务类型判定）评估一致性。  
+> 核验日期：2026-09-29
+> 范围：火山方舟（Volcano Ark）Seedance 2.5（`doubao-seedance-2-5-260628`）在「全模态参考生视频」（官方现名，旧文档称「多模态参考」，本仓口径「全能参考 / omni reference」）及各任务类型下，`ratio` / `omni_reference_task_type` / `duration` 参数的官方取值与约束；并对照本仓能力目录配置（`backend/prisma/schema/002_seed.sql` 的 Seedance 2.5 行与 `backend/libs/contracts/capability-param-validation.ts` 的任务类型判定）评估一致性。
 > 来源边界：只使用火山引擎官方文档站一手页面（三个页面最近更新时间分别为 2026.09.22、2026.09.23→09.29、2026.09.18）。因文档站为 JS 渲染，正文经只读代理抓取官方 URL 获得，内容以官方页面为准；未发起付费生成请求。
 
 ## 结论
 
-1. **Seedance 2.5 的 ratio 取值集合与本仓基础列表完全一致**：`16:9、4:3、1:1、3:4、9:16、21:9、adaptive` 共 7 个。官方三个页面（API 参考、教程、2.0 系列对比）口径统一。  
+1. **Seedance 2.5 的 ratio 取值集合与本仓基础列表完全一致**：`16:9、4:3、1:1、3:4、9:16、21:9、adaptive` 共 7 个。官方三个页面（API 参考、教程、2.0 系列对比）口径统一。
    来源：[创建视频生成任务 API—ratio 参数](https://www.volcengine.com/docs/82379/1520757)、[Doubao Seedance 2.5 教程—宽高比](https://www.volcengine.com/docs/ark/seedance-2-5)。
-2. **官方没有 `default` 这个 `omni_reference_task_type` 取值**。参数取值为 `auto`（默认）/ `reference` / `edit` / `extend`，模型支持仅 Seedance 2.5。本仓任务类型枚举 `default` 对应官方的 `reference`（普通参考生视频）；若后续要向上游显式传该参数，映射必须是 `default → reference`、`prolong → extend`。  
+2. **官方没有 `default` 这个 `omni_reference_task_type` 取值**。参数取值为 `auto`（默认）/ `reference` / `edit` / `extend`，模型支持仅 Seedance 2.5。本仓任务类型枚举 `default` 对应官方的 `reference`（普通参考生视频）；若后续要向上游显式传该参数，映射必须是 `default → reference`、`prolong → extend`。
    来源：[创建视频生成任务 API—omni_reference_task_type](https://www.volcengine.com/docs/82379/1520757)。
-3. **普通全模态参考（reference，即本仓 default）可以指定 9:16 等固定比例**，官方三处明文：参数说明「设置 reference 时，ratio 或 duration 无特殊限制」；取值限制表「参考生视频：支持在可选宽高比中自行设置……支持 adaptive 或指定宽高比」；官方 50 素材示例同时传 `omni_reference_task_type: "reference"` + `ratio: "16:9"` + `duration: 15`。提示词指南「无锁定」章节也说明参考类任务「用户可以指定输出视频的宽高/时长属性」。本仓 default 放开全部 7 种比例与官方一致。  
+3. **普通全模态参考（reference，即本仓 default）可以指定 9:16 等固定比例**，官方三处明文：参数说明「设置 reference 时，ratio 或 duration 无特殊限制」；取值限制表「参考生视频：支持在可选宽高比中自行设置……支持 adaptive 或指定宽高比」；官方 50 素材示例同时传 `omni_reference_task_type: "reference"` + `ratio: "16:9"` + `duration: 15`。提示词指南「无锁定」章节也说明参考类任务「用户可以指定输出视频的宽高/时长属性」。本仓 default 放开全部 7 种比例与官方一致。
    来源：[创建视频生成任务 API](https://www.volcengine.com/docs/82379/1520757)、[Seedance 2.5 教程—50 个全模态参考素材输入示例](https://www.volcengine.com/docs/ark/seedance-2-5)、[Seedance 2.5 提示词指南—任务使用说明](https://www.volcengine.com/docs/ark/seedance-2-5-prompt-guide)。
-4. **首帧/首尾帧：官方明文「ratio 必须为 adaptive」，且是「默认且仅支持 adaptive，不可指定具体宽高比」**——输出宽高比严格对齐 `first_frame` 首帧图；尾帧与首帧画幅不一致时「尾帧会被拉伸」。本仓仅允许 adaptive 的配置一致。  
+4. **首帧/首尾帧：官方明文「ratio 必须为 adaptive」，且是「默认且仅支持 adaptive，不可指定具体宽高比」**——输出宽高比严格对齐 `first_frame` 首帧图；尾帧与首帧画幅不一致时「尾帧会被拉伸」。本仓仅允许 adaptive 的配置一致。
    来源：[Seedance 2.5 教程—任务类型与限制](https://www.volcengine.com/docs/ark/seedance-2-5)、[创建视频生成任务 API—不同模型的取值限制表](https://www.volcengine.com/docs/82379/1520757)、[提示词指南—首帧/首尾帧](https://www.volcengine.com/docs/ark/seedance-2-5-prompt-guide)。
-5. **视频编辑（edit）：`ratio 必须为 adaptive`、`duration 必须为 -1`，二者都写在 API 文档 `omni_reference_task_type` 参数的 edit 取值说明下**（教程任务类型表同样写明）；且 edit 还要求「content 中必须至少包含一个 reference_video，且视频时长必须为 4–30 秒」。本仓 edit 仅允许 adaptive 一致。  
+5. **视频编辑（edit）：`ratio 必须为 adaptive`、`duration 必须为 -1`，二者都写在 API 文档 `omni_reference_task_type` 参数的 edit 取值说明下**（教程任务类型表同样写明）；且 edit 还要求「content 中必须至少包含一个 reference_video，且视频时长必须为 4–30 秒」。本仓 edit 仅允许 adaptive 一致。
    来源：[创建视频生成任务 API—omni_reference_task_type](https://www.volcengine.com/docs/82379/1520757)、[Seedance 2.5 教程—任务类型与限制](https://www.volcengine.com/docs/ark/seedance-2-5)。
-6. **视频延长（extend）：只锁比例不锁时长**——「设置 extend 时，content 中必须至少包含一个 reference_video；ratio 必须为 adaptive」，官方对 extend 的 duration 无 `-1` 要求（教程写 duration 支持配置为 [4, 30] 或 -1）。本仓 prolong 仅允许 adaptive 一致；但仓内能力目录未表达「prolong 的 duration 可自选、edit 的 duration 必须 -1」这一差异（见 §4）。  
+6. **视频延长（extend）：只锁比例不锁时长**——「设置 extend 时，content 中必须至少包含一个 reference_video；ratio 必须为 adaptive」，官方对 extend 的 duration 无 `-1` 要求（教程写 duration 支持配置为 [4, 30] 或 -1）。本仓 prolong 仅允许 adaptive 一致；但仓内能力目录未表达「prolong 的 duration 可自选、edit 的 duration 必须 -1」这一差异（见 §4）。
    来源：[创建视频生成任务 API—omni_reference_task_type](https://www.volcengine.com/docs/82379/1520757)、[Seedance 2.5 教程—使用示例-视频延长](https://www.volcengine.com/docs/ark/seedance-2-5)。
-7. **「不同模型的取值限制和 adaptive 适配规则」表核实为真**：视频编辑/视频延长一行，Seedance 2.0 系列 =「支持在可选宽高比中自行设置，或由模型根据待编辑视频或待延长视频在可选宽高比中自动选择（支持 adaptive 或指定宽高比）」，Seedance 2.5 =「自动保持输出视频宽高比和待编辑视频或待延长视频一致，不支持另行设置（默认且仅支持 adaptive）」。仓内注释「别把 2.5 的约束套推到 2.0」的依据成立。  
+7. **「不同模型的取值限制和 adaptive 适配规则」表核实为真**：视频编辑/视频延长一行，Seedance 2.0 系列 =「支持在可选宽高比中自行设置，或由模型根据待编辑视频或待延长视频在可选宽高比中自动选择（支持 adaptive 或指定宽高比）」，Seedance 2.5 =「自动保持输出视频宽高比和待编辑视频或待延长视频一致，不支持另行设置（默认且仅支持 adaptive）」。仓内注释「别把 2.5 的约束套推到 2.0」的依据成立。
    来源：[创建视频生成任务 API—不同模型的取值限制和 adaptive 适配规则](https://www.volcengine.com/docs/82379/1520757)。
-8. **关键词闭集核实为真**：编辑任务「提示词触发关键词，包含其一即可：编辑视频、增加/加上、删除/去掉、修改/替换/改成」；延长任务「包含其一即可：向前/向后延长、延续、续写」。与 `capability-param-validation.ts` 的 `EDIT_INTENT_KEYWORDS` / `PROLONG_INTENT_KEYWORDS` 逐字一致。  
+8. **关键词闭集核实为真**：编辑任务「提示词触发关键词，包含其一即可：编辑视频、增加/加上、删除/去掉、修改/替换/改成」；延长任务「包含其一即可：向前/向后延长、延续、续写」。与 `capability-param-validation.ts` 的 `EDIT_INTENT_KEYWORDS` / `PROLONG_INTENT_KEYWORDS` 逐字一致。
    来源：[Seedance 2.5 提示词指南—任务使用说明](https://www.volcengine.com/docs/ark/seedance-2-5-prompt-guide)。
 9. **多素材（图 + 视频混合）比例如何取舍，Seedance 2.5 当前官方文档没有明文规则**。adaptive 时参考生视频是「根据提示词选择可选宽高比中最合适的宽高比」（按提示词语义，不是按素材顺序）；编辑/延长在多个输入视频中「由模型根据提示词意图判定待编辑/待延长视频」。旧版 2.0 文档曾有「以传入的第一个媒体文件为准（优先性：视频＞图片）」的表述（2026-07-29 调研时页面存在），2026-09-22 更新后的当前版 API 文档已删除该句、改为按任务类型分列。此项对本仓无直接约束力，见 §4。
 
