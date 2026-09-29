@@ -98,9 +98,26 @@ branch_has_own_commit() {
   [ "$found_target" = 1 ]
 }
 
+# ── web 类型门禁（IKIZPZ 复盘）─────────────────────────────────────────────
+# vitest 走 esbuild 不查类型，类型错误曾一路绿着提交进集成分支（IKIZQE 的 9 个
+# tsc -b 错误到收口审查才暴露）。检查命令本身现成，这里只是接线：staged 含
+# web/ 路径就必须先证明类型干净；web 依赖未安装视同无法证明，同样拒绝。
+run_web_typecheck_gate() {
+  git -C "$ROOT" diff --cached --name-only | grep -q '^web/' || return 0
+  local tsc_bin="$ROOT/web/node_modules/.bin/tsc"
+  if [ ! -x "$tsc_bin" ]; then
+    fail "本次提交包含 web/ 改动，但 $tsc_bin 不存在（web 依赖未安装），无法核验类型。先在 web/ 安装依赖并跑通 ./node_modules/.bin/tsc -b 再提交。"
+  fi
+  echo "ℹ️ commit-task-for-review: web/ 改动 → 先过 tsc -b 类型检查 …"
+  if ! (cd "$ROOT/web" && ./node_modules/.bin/tsc -b); then
+    fail "web 类型检查未通过（tsc -b）。修复以上类型错误后重试提交。"
+  fi
+}
+
 if [ "$AMEND" = 1 ]; then
   branch_has_own_commit || fail "当前工单分支尚无自己的 commit，--amend 会改写 worktree 基线。请先用 -m \"<message>\" 提交。"
   git -C "$ROOT" add -A
+  run_web_typecheck_gate
   if [ -n "$MESSAGE" ]; then
     git -C "$ROOT" commit --amend -m "$MESSAGE"
   else
@@ -113,6 +130,7 @@ else
     fail "没有可提交的任务验收 diff。"
   fi
   git -C "$ROOT" add -A
+  run_web_typecheck_gate
   git -C "$ROOT" commit -m "$MESSAGE"
   commit_count="$(git -C "$ROOT" rev-list --count "$own_base_sha"..HEAD)"
   # ${} 包起来：紧跟其后的全角括号是多字节字符，裸 $branch 会被 bash 当成变量名的一部分。

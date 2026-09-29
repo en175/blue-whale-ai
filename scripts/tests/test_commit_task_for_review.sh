@@ -43,6 +43,9 @@ cp "$SOURCE_ROOT/scripts/lib/worktree-paths.sh" "$REPO/scripts/lib/worktree-path
 cp "$SOURCE_ROOT/scripts/lib/python3-command.sh" "$REPO/scripts/lib/python3-command.sh"
 cp "$SOURCE_ROOT/scripts/lib/task_metadata.py" "$REPO/scripts/lib/task_metadata.py"
 printf 'base\n' >"$REPO/shared.txt"
+# 真实仓库里 web/node_modules 永不入库；没有这份 ignore，探针 tsc 会被提交脚本的
+# add -A 扫进 staged，把「非 web 提交」场景误变成 web 提交。
+printf 'web/node_modules/\n' >"$REPO/.gitignore"
 git -C "$REPO" add -A
 git -C "$REPO" commit -q -m "base"
 BASE_SHA="$(git -C "$REPO" rev-parse HEAD)"
@@ -133,4 +136,74 @@ run_commit_in "$CHILD" --amend >/dev/null || fail "子票自有提交后 --amend
 git -C "$CHILD" merge-base --is-ancestor "$INHERITED_SHA" HEAD || fail "子票 amend 改写了继承提交"
 [ "$(git -C "$REPO" rev-parse HEAD)" = "$PARENT_SHA" ] || fail "子票提交影响了父分支"
 
-echo "PASS: commit-task-for-review.sh --amend 判据与多次提交"
+# ---- 4. 无 web/ 改动：类型门禁不触发（tsc 探针不得被调用） ----
+# 守门脚本 2026-09-29 接入 web 类型门禁（IKIZPZ 复盘：IKIZQE 的 9 个 tsc -b
+# 错误靠 vitest 全绿混进集成分支）。探针 tsc 写标记文件并按 FAKE_TSC_EXIT 退出：
+# 非提交不跑、类型红拒绝、类型绿放行、二进制缺失拒绝、--amend 同样受门禁。
+FAKE_TSC="$REPO/web/node_modules/.bin/tsc"
+TSC_MARKER="$TEST_ROOT/tsc-invoked"
+
+write_fake_tsc() {
+  mkdir -p "$(dirname "$FAKE_TSC")"
+  cat >"$FAKE_TSC" <<FAKE
+#!/usr/bin/env bash
+echo "probe" >>"\$TSC_MARKER"
+echo "fake-tsc: 探针类型错误 TS18048" >&2
+exit "\${FAKE_TSC_EXIT:-0}"
+FAKE
+  chmod +x "$FAKE_TSC"
+}
+
+rm -f "$TSC_MARKER"
+write_fake_tsc
+printf 'fourth\n' >>"$REPO/shared.txt"
+out="$(FAKE_TSC_EXIT=1 TSC_MARKER="$TSC_MARKER" run_commit -m "chore: 第四个子项（非 web）")" \
+  || fail "无 web/ 改动的提交应当成功，实际：$out"
+[ ! -e "$TSC_MARKER" ] || fail "无 web/ 改动时不应调用 tsc"
+COUNT_NOW="$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)"
+
+# ---- 5. web/ 改动但 tsc 缺失（依赖未安装）：拒绝并给出安装指引 ----
+rm -rf "$REPO/web/node_modules"
+mkdir -p "$REPO/web/src"
+printf 'export {}\n' >"$REPO/web/src/probe.ts"
+if out="$(run_commit -m "chore: 不应成功")"; then
+  fail "web 改动且 tsc 缺失时提交应当拒绝，却成功了"
+fi
+case "$out" in
+  *"不存在"*"tsc -b"*) ;;
+  *) fail "缺 tsc 的拒绝理由应指明依赖未安装与修复命令，实际：$out" ;;
+esac
+[ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "$COUNT_NOW" ] \
+  || fail "门禁拒绝时不该产生 commit"
+
+# ---- 6. web/ 改动且类型红（tsc 非零）：拒绝并透出错误输出 ----
+write_fake_tsc
+if out="$(FAKE_TSC_EXIT=1 TSC_MARKER="$TSC_MARKER" run_commit -m "chore: 不应成功")"; then
+  fail "web 类型红时提交应当拒绝，却成功了"
+fi
+case "$out" in
+  *"fake-tsc: 探针类型错误"*) ;;
+  *) fail "拒绝时应透出 tsc 的错误输出，实际：$out" ;;
+esac
+[ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "$COUNT_NOW" ] \
+  || fail "类型红拒绝时不该产生 commit"
+
+# ---- 7. web/ 改动且类型绿：放行，且 tsc 确实执行过 ----
+rm -f "$TSC_MARKER"
+out="$(FAKE_TSC_EXIT=0 TSC_MARKER="$TSC_MARKER" run_commit -m "chore: 第五个子项（web）")" \
+  || fail "web 类型绿时提交应当成功，实际：$out"
+[ -e "$TSC_MARKER" ] || fail "web 改动提交时 tsc 必须真的执行"
+[ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "$((COUNT_NOW + 1))" ] \
+  || fail "类型绿放行后应有 1 个新 commit"
+
+# ---- 8. --amend 路径同样受门禁：类型红时拒绝修订 ----
+printf 'revised-web\n' >"$REPO/web/src/probe.ts"
+if out="$(FAKE_TSC_EXIT=1 TSC_MARKER="$TSC_MARKER" run_commit --amend)"; then
+  fail "--amend 携带 web 改动且类型红时应当拒绝，却成功了"
+fi
+case "$out" in
+  *"类型检查未通过"*) ;;
+  *) fail "--amend 拒绝理由应指向类型检查，实际：$out" ;;
+esac
+
+echo "PASS: commit-task-for-review.sh --amend 判据、多次提交与 web 类型门禁"
