@@ -71,6 +71,16 @@ export async function getStartedRocketMqProducer(
   return rocketMqStartup;
 }
 
+/** IKJ80Q：判别「环境缺配」的入队错误（{@link getStartedRocketMqProducer} 在 endpoints 为空时抛）。
+ *  回退路径的 catch 用它区分缺配（任务仍会经 worker 恢复扫描捞起派发，只该 WARN）与真派发
+ *  失败（保持 ERROR）——判断收口在错误的产生地，各 catch 不重复比对 message 前缀。 */
+export function isRocketMqEndpointsMissingError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.startsWith("未配置 ROCKETMQ_ENDPOINTS")
+  );
+}
+
 /** 收口：关掉共享连接（未启动过则无事发生）。 */
 export async function closeRocketMqProducer(): Promise<void> {
   const startup = rocketMqStartup;

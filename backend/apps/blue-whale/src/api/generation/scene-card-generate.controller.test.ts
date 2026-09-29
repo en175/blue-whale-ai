@@ -39,6 +39,7 @@ const { handleStoryboardPreviewCreate } = await import(
 const { enqueueVideoGenerationJob, enqueueImageGenerationJob } = await import(
   "@lib/shared/generation/generation-queue.js"
 );
+const { logger } = await import("@lib/infra/logging/blue-whale-logger.js");
 const { SceneCardGenerateController } = await import(
   "./scene-card-generate.controller.js"
 );
@@ -68,6 +69,8 @@ beforeEach(() => {
   vi.mocked(handleStoryboardPreviewCreate).mockReset();
   vi.mocked(enqueueVideoGenerationJob).mockReset().mockResolvedValue(undefined);
   vi.mocked(enqueueImageGenerationJob).mockReset().mockResolvedValue(undefined);
+  vi.mocked(logger.error).mockClear();
+  vi.mocked(logger.warn).mockClear();
 });
 
 describe("SceneCardGenerateController.generate 响应写出（IKIQGQ）", () => {
@@ -128,6 +131,57 @@ describe("SceneCardGenerateController.generate 响应写出（IKIQGQ）", () => 
     expect(res.json).toHaveBeenCalledTimes(1);
     expect(res.json).toHaveBeenCalledWith(envelope);
   });
+
+  // IKJ80Q：回退路径（catch 后仅记日志，任务由 worker 恢复扫描捞起）的日志分级——
+  // 环境缺配 → WARN + 写明任务仍会派发；真派发失败 → ERROR。
+  it("环境缺配（未配置 ROCKETMQ_ENDPOINTS）→ enqueue 失败降 WARN 说明恢复扫描兜底，不打 ERROR，仍写 202（IKJ80Q）", async () => {
+    const { controller, res } = makeController();
+    const envelope = ok({
+      scene_card_id: "12",
+      generation_job_id: "402",
+      record_id: "7",
+      preset_version: 3,
+      cursor: "1",
+    });
+    vi.mocked(handleSceneCardGenerate).mockResolvedValue(envelope as never);
+    vi.mocked(enqueueVideoGenerationJob).mockRejectedValueOnce(
+      new Error(
+        "未配置 ROCKETMQ_ENDPOINTS（测试环境 gRPC 端点，如 115.190.244.91:8081）",
+      ),
+    );
+
+    await controller.generate(USER, "523", "12", {}, "idem-2", undefined, res);
+
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("恢复扫描"));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("jobId=402"));
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("真派发失败（其他错误）→ 保持 ERROR（IKJ80Q）", async () => {
+    const { controller, res } = makeController();
+    const envelope = ok({
+      scene_card_id: "12",
+      generation_job_id: "403",
+      record_id: "7",
+      preset_version: 3,
+      cursor: "1",
+    });
+    vi.mocked(handleSceneCardGenerate).mockResolvedValue(envelope as never);
+    vi.mocked(enqueueVideoGenerationJob).mockRejectedValueOnce(
+      new Error("gRPC 通道断开"),
+    );
+
+    await controller.generate(USER, "523", "12", {}, "idem-3", undefined, res);
+
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("enqueue video job failed"),
+    );
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
 });
 
 describe("SceneCardGenerateController.storyboardPreview 响应写出（IKIQGQ）", () => {
@@ -184,6 +238,33 @@ describe("SceneCardGenerateController.storyboardPreview 响应写出（IKIQGQ）
     expect(res.status).toHaveBeenCalledWith(202);
     expect(res.json).toHaveBeenCalledTimes(1);
     expect(res.json).toHaveBeenCalledWith(envelope);
+  });
+
+  // IKJ80Q：fire-and-forget 的 catch 分支同款分级——真派发失败保持 ERROR（缺配分支
+  // 已由 generate video 用例覆盖，判别函数共享同一处收口）。
+  it("真派发失败（其他错误）→ fire-and-forget catch 保持 ERROR（IKJ80Q）", async () => {
+    const { controller, res } = makeController();
+    const envelope = ok({
+      preview_id: "6",
+      scene_card_id: "12",
+      generation_job_id: "404",
+      cursor: "1",
+    });
+    vi.mocked(handleStoryboardPreviewCreate).mockResolvedValue(envelope as never);
+    vi.mocked(enqueueImageGenerationJob).mockRejectedValueOnce(
+      new Error("gRPC 通道断开"),
+    );
+
+    await controller.storyboardPreview(USER, "523", "12", {}, "idem-4", undefined, res);
+    // fire-and-forget：让出一个宏任务，等 .catch 回调落地。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("enqueue image job failed"),
+    );
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });
 

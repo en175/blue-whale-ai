@@ -138,6 +138,19 @@ cd backend && PORT=3100 \
 
 一个扣不了钱的进程不该开始接受请求，所以拦在启动而不是首次请求。
 
+⚠️ **`ROCKETMQ_ENDPOINTS`（生成任务 MQ）本地不配也能跑，但要知道行为**：
+
+- **不配不影响视频/图片生成**：任务落库后 enqueue 会打一条 WARN（「未经 MQ 派发（未配置
+  ROCKETMQ_ENDPOINTS），将由 worker 恢复扫描捞起消费」）——job 行已提交，worker-java
+  `RecoveryService` 的恢复扫描会把它捞起派发，只慢一个恢复周期。**这不是故障**，排查时
+  别被这条日志引向 RocketMQ（IKJ6DK 的教训）；2026-09-29 起它已从 ERROR 降为 WARN。
+- **要跑音频生成必须配**：audio / media-extract 任务 enqueue 失败是 fail-fast（任务直接置
+  failed，用户可见失败），本地验音频路径得给一个可达的 MQ。
+- **想走真实 MQ 即时派发**：本地 `bw-rmq-proxy` 起着的话给
+  `ROCKETMQ_ENDPOINTS=127.0.0.1:8081`（与上面 billing 服务同一个 proxy）；或用测试环境
+  gRPC 端点（如 `115.190.244.91:8081`，即 `backend/libs/infra/mq/rocketmq-producer.ts`
+  报错文案里那个示例值）。
+
 ## 另外三个变量（充值要用，**刻意不进启动硬门禁**）
 
 | 变量 | 干什么 | 缺了会怎样 |
