@@ -253,8 +253,9 @@ public class BillingApplicationService {
     /**
      * 装配本次计价的引擎：规则只认快照那一条。
      *
-     * <p>⚠️ 算法（{@link AbstractPricingCalculator}）是**注入的同一个实例**，不另造——
-     * 影子对账（拿 Quote 的结果比对上游实际扣费）要成立，报价与实扣就必须按同一套算法算。
+     * <p>⚠️ 算法是**注入的那个实例**，不另造——影子对账（拿 Quote 的结果比对上游实际扣费）
+     * 要成立，报价与预扣就必须走同一份算法代码。结算那条路为什么不共用这个实例，
+     * 见 {@code PricingConfig} 的 bean 注释。
      *
      * <p>快照那条 lookup 忽略 (modelId, taskType)：一次 Hold / Quote 只问一个 (model,
      * taskType)，而快照**就是**那一条规则的规则体——它没有携带自己的键
