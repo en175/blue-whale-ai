@@ -54,8 +54,12 @@ public final class GenerationError {
     /** 内容策略拒绝（copyright/sensitive 优先，§5）。 */
     public static final String ERROR_CONTENT_REJECTED = "content_rejected";
 
-    /** 参考内容版权拒绝（IKFL53：与输出审核 1018 分开，1038「参考内容可能涉及版权限制」）。 */
+    /** 参考内容版权拒绝（IKFL53：与输出审核 1018 分开；IKJ8J8 文案中性化为兜底口径）。 */
     public static final String ERROR_CONTENT_REJECTED_REFERENCE = "content_rejected_reference";
+
+    /** 输出侧音频版权拒绝（IKJ8J8：火山官方码 OutputAudioSensitiveContentDetected → 1059
+     *  「生成的音频可能涉及版权限制」，ADR-0119）。 */
+    public static final String ERROR_CONTENT_REJECTED_AUDIO = "content_rejected_audio";
 
     /** 供应商配置错误。 */
     public static final String ERROR_PROVIDER_CONFIG = "provider_config";

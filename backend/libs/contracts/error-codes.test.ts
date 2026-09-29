@@ -16,6 +16,7 @@ import {
   ERROR_CAPABILITY_UNSUPPORTED_DURATION,
   ERROR_INVALID_REFERENCE,
   ERROR_CONTENT_REJECTED_REFERENCE,
+  ERROR_CONTENT_REJECTED_AUDIO,
   ERROR_JOB_NOT_RETRYABLE_STATUS,
   ERROR_JOB_ALREADY_RETRIED,
   ACCOUNT_ERROR_PASSWORD_INCORRECT,
@@ -74,12 +75,22 @@ describe("单一码表（IKDZGM / ADR-0083）", () => {
     expect(ERROR_CODES[1034]).toBe("参考素材无效，请重新选择");
   });
 
-  it("IKFL53：content_rejected_reference 登记数值码 1038 且一码一文案", () => {
+  it("IKFL53/IKJ8J8：content_rejected_reference 登记数值码 1038，文案为中性兜底", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CONTENT_REJECTED_REFERENCE]).toBe(1038);
-    expect(ERROR_CODES[1038]).toBe("参考内容可能涉及版权限制");
+    // IKJ8J8：判定只按上游版权关键词、不区分参考/输出 → 中性兜底，不宣称「参考内容」
+    expect(ERROR_CODES[1038]).toBe("生成内容可能涉及版权限制，请调整提示词或素材后重试");
     // 落在 web 端生成域错误窗口（1000-1099，isGenerationDomainError）
     expect(1038).toBeGreaterThanOrEqual(1000);
     expect(1038).toBeLessThanOrEqual(1099);
+  });
+
+  it("IKJ8J8：content_rejected_audio 登记数值码 1059 且一码一文案", () => {
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CONTENT_REJECTED_AUDIO]).toBe(1059);
+    // 文案对齐火山官方对 OutputAudioSensitiveContentDetected 的释义
+    expect(ERROR_CODES[1059]).toBe("生成的音频可能涉及版权限制，请调整提示词后重试");
+    // 落在 web 端生成域错误窗口（1000-1099，isGenerationDomainError）
+    expect(1059).toBeGreaterThanOrEqual(1000);
+    expect(1059).toBeLessThanOrEqual(1099);
   });
 
   it("IKIPWU：重试不可重试两类专用码 1054/1055 且一码一文案", () => {
