@@ -17,3 +17,5 @@
 已发布的 PR 源分支若含合法子任务合回产生的 merge commit，仅在获得更新该 PR 的明确授权后，才允许标准入口受控线性化。入口先留恢复点，核对改写前后的文件树，重跑验证，再以远端 SHA 租约推送并回读 Gitee。任一检查失败就停止，不把此情形视为通过原有发布门禁。改写后须针对当前提交重新执行代码评审和发布核验，再将 PR 标记为可评审；旧提交的评审结论不能沿用。
 
 `implement-spec` 第 9 步仍在 PR 合入 release 前清理子任务 worktree。为此新增子任务专用清理入口。普通快进路径确认子任务提交已进入远端 PR 源分支。若父整合分支合回后因发布线前进而 rebase，须先发布当前 HEAD、完成 Gitee 回读和同步事务 finalize；首次创建 PR 后同样通过 `verify-pr-update.sh` 记录核验结果，已有 PR 继续更新原 PR。清理入口逐次核对原提交保留引用、无冲突合并文件树以及已核验的 PR 源提交，证明断链时保留子工作树。已发布 PR 经受控线性化后，原子任务 SHA 不再属于新历史，须等 Gitee 回读与事务 finalize 后，核对原子提交属于改写前 PR 源、改写前后文件树相同且新线性提交已进入远端 PR 源，再清理对应 worktree。现有 `cleanup-task-worktree.sh` 继续用于提交已进入远端 release 后的任务清理。
+
+2026-09-30 文档归属调整：`implement-spec` 技能正文还原为上游 1:1 原文，本决策定义的机制（集成分支开工与固定继承提交、merger 受控合回、PR 创建时机、受控线性化、子任务清理证明链）改由 [integration-branch-workflow.md](../agents/integration-branch-workflow.md) 承载，技能中 draft PR、implementer 自行合回、工单关闭三处通用指令按该文的执行映射覆盖。决策内容不变。

@@ -8,6 +8,7 @@
 | 代码理解（查结构 / 调用链 / 架构） | `agent-rules/code-discovery.md`（首次只读探索即生效；结构查询先 CBM，worktree 切换校验索引） |
 | 判断产品实现技术栈 / Python 工具是否需要处置 | [ADR-0068](docs/adr/0068-node-typescript-product-runtime-and-specialized-compute-boundary.md) + [ADR-0070](docs/adr/0070-product-runtime-stack-does-not-govern-engineering-control-plane.md) + [ADR-0074](docs/adr/0074-frontend-backend-separation-nestjs-product-api.md) + [ADR-0084](docs/adr/0084-generation-worker-java-runtime.md)；逐项结论见 [Python 存量处置清单](docs/specs/2026-08-09-ik7fi6-python-inventory-disposition.md) |
 | Gitee 工作流（提交/分支/PR/发布/worktree） | `docs/agents/git-workflow.md`（渐进式） |
+| 多分支并行实施（集成分支 + 并行子任务 worktree + merger 合回，implement-spec 等多工单单 PR 场景） | `docs/agents/integration-branch-workflow.md`（渐进式） |
 | Gitee Issue / 任何 `mcp__gitee-ent__*` 调用 | `docs/agents/issue-tracker.md`（渐进式，首次调用前 Must Read） |
 | 测试验证（完成/提交/PR/合并前） | `docs/agents/testing-strategy.md`（收口与 PR 阶段均按影响面分层；仅产品影响路径或显式高风险跑全量；同一 HEAD 复用凭证） |
 | 前端工作流（碰 `web/` 产品实现：页面、组件、API 客户端、TanStack Query） | `.claude/skills/frontend-delivery/SKILL.md`（缺陷走 `references/bugfix.md`；新服务端状态读写走 `references/request.md`） |
