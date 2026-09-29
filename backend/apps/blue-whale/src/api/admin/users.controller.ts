@@ -274,12 +274,18 @@ export class AdminUsersController {
  *
  * <p>⚠️ 两种情况都**不能**回落成「三列全 0」：那正是这次要消灭的症状 ——
  * 「计费挂了」与「这个用户真的没积分」在界面上长得一模一样，管理员没法分辨。
+ *
+ * <p>⚠️ **其余错误原样抛出去**，不要顺手翻成 502。这条路径上除了 billing 还有
+ * 「读我们自己的库」那一步（Prisma 校验、库连不上…）；把它们也报成「计费查询失败」，
+ * 值班的人会去查一个没坏的服务 —— 而 502/503 在本仓的全部含义就是「billing 那边的问题」。
+ * 非 billing 的失败走全局异常过滤器，与本次改动之前的行为一致。
  */
 function toUserListError(error: unknown): AdminException {
-  if (error instanceof AdminException) return error;
   if (error instanceof BillingAdminConfigError) {
     return new AdminException(503, `用户列表不可用：${error.message}`);
   }
-  const detail = error instanceof BillingAdminError ? error.message : "未知错误";
-  return new AdminException(502, `用户列表查询失败：${detail}`);
+  if (error instanceof BillingAdminError) {
+    return new AdminException(502, `用户列表查询失败：${error.message}`);
+  }
+  throw error;
 }

@@ -14,11 +14,11 @@ export interface AdminUserRow {
   userId: number;
   nickname: string;
   phone: string;
-  /** 当前积分余额 */
+  /** 当前**可用**积分（不含被在途任务冻结的部分）。整数积分，不是元 */
   balance: number;
-  /** 累计充值积分总额 */
+  /** 累计充值：**只算充值本金**（purchased 批次），不含充值赠送。整数积分 */
   totalRecharge: number;
-  /** 累计消费积分总额 */
+  /** 累计消费：**已结算**的实际消耗，不含在途任务的预扣。整数积分 */
   totalSpend: number;
   /** 角色：1 普通用户 / 10 管理员 / 100 root */
   role: number;
@@ -38,7 +38,7 @@ export interface AdminUserListData {
 }
 
 /**
- * GET /api/admin/users 用户列表（keyword 匹配昵称/手机号/用户ID；status active/disabled；pageSize 最大 100）；请求头 New-Api-User 携带当前管理员 userId
+ * GET /api/admin/users 用户列表（keyword 匹配昵称/手机号，**整串数字时另按用户 ID 精确匹配**；status active/disabled）；请求头 New-Api-User 携带当前管理员 userId
  *
  * <p>⚠️ 曾经支持过 `role` 入参，但服务端从不读它 —— 传了也只会拿到**未过滤**的列表。
  * IKJ69L 已把两边一并删掉；等真的做角色筛选 UI 时再连通，别提前留一个骗人的参数。

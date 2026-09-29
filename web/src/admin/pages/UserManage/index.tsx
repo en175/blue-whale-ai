@@ -97,6 +97,10 @@ const EMPTY_FILTERS: Filters = { keyword: '', status: '' };
 const RECHARGE_CALIBER = (
   <Hint label="累计充值的口径" title="累计充值怎么算">
     <div>
+      单位是<b>积分</b>，不是元 —— 两者按定价目录里的「1 元 = N 积分」换算。
+      拿这一列直接对营收会差一个换算率。
+    </div>
+    <div>
       <b>只算充值本金</b> —— 用户自己付钱买到的那部分积分。
     </div>
     <div>

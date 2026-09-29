@@ -79,7 +79,7 @@
 
     ⚠️ 只 IN 不给区间：列表页要的是**累计**（从注册至今），不是某一段时间。
 
-    ⚠️ 走 idx_reservation__user (user_id, gmt_create)（见 V7 迁移）：前导列等值 + IN
+    ⚠️ 走 idx_reservation__user_time (user_id, gmt_create)（见 V7 迁移）：前导列等值 + IN
        是索引区间扫描；GROUP BY user_id 与索引首列同序，不需要文件排序。
 
     ⚠️ **没有已结算预留的用户不会出现在结果里**（GROUP BY 的语义）。补零是调用方的事。

@@ -412,4 +412,24 @@ describe("AdminUsersController.list（余额三列来自 billing）", () => {
       message: expect.stringContaining("用户列表查询失败"),
     });
   });
+
+  /**
+   * ★ **不是 billing 的失败就不许冒充 billing 故障**。
+   *
+   * <p>这条路径上除了 billing 还有「读我们自己的库」那一步（Prisma 校验、库连不上…）。
+   * 把它们一并翻成 502「计费调用失败」，值班的人会去查一个**没坏的服务** —— 而
+   * 502/503 在本仓的全部含义就是「billing 那边的问题」。所以其余错误原样抛出，
+   * 交给全局异常过滤器（与本次改动之前的行为一致）。
+   */
+  it("库自己出错时原样抛出，不冒充 billing 故障", async () => {
+    const { controller } = createController({
+      listAdminUsers: vi.fn().mockRejectedValue(new Error("prisma 炸了")),
+    });
+
+    const error = await controller.list(USER, BEARER, {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("prisma 炸了");
+    // 没有被包装成 AdminException（那会带上一个指向 billing 的状态码）
+    expect((error as { status?: number }).status).toBeUndefined();
+  });
 });

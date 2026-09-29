@@ -1,7 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
 
+import { createLogger } from "@lib/core/logging";
 import { fetchAdminUserStats } from "@lib/shared/billing/billing-admin-client.js";
 import { roleRank } from "@lib/core/identity/roles.js";
+
+const log = createLogger("admin-user-query");
 
 /**
  * 管理端用户列表 —— **读我们自己的库**，不再转发给 new-api。
@@ -65,6 +68,21 @@ export interface AdminUserQuery {
  */
 const BASE_WHERE = { is_delete: false } as const;
 
+/** 真实用户 id 的最大位数。`bw_users.id` 是 BIGINT（19 位封顶），留一位余量。 */
+const MAX_USER_ID_DIGITS = 18;
+
+/**
+ * 这个关键词该不该当成用户 ID 去精确匹配。
+ *
+ * <p>整串是数字**且不超过 {@link MAX_USER_ID_DIGITS} 位**。长度那条不是洁癖：
+ * `BigInt()` 咽得下任意长的数字串，而这种关键词只会来自搜索框里粘错的东西，
+ * 真拿去查 BIGINT 列，要么驱动层报错、要么一条都查不到 —— 两种都不是
+ * 「没有这个用户」该有的表现。
+ */
+function isUserIdKeyword(keyword: string): boolean {
+  return keyword.length <= MAX_USER_ID_DIGITS && /^\d+$/.test(keyword);
+}
+
 export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
   return {
     async countAdminUsers() {
@@ -93,7 +111,12 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
                 //      （一张随注册量增长的表，为少数用法换全表扫描不划算）。
                 //      代价是搜「42」不再返回 142 —— 那是 IKJ5M7 之前前端本地
                 //      contains 的旧行为，这次一并改掉。
-                ...(/^\d+$/.test(keyword) ? [{ id: BigInt(keyword) }] : []),
+                //
+                //   ⚠️ 长度也要卡住：`BigInt()` 咽得下任意长的数字串，而这一列是
+                //      BIGINT（19 位封顶）。粘贴一串 30 位的东西进来，值本身就把
+                //      列的范围撑爆了 —— 表现是驱动层报错或者一条都查不到，两种都
+                //      不是「用户不存在」该有的样子。18 位足够装下任何真实用户 id。
+                ...(isUserIdKeyword(keyword) ? [{ id: BigInt(keyword) }] : []),
               ],
             }
           : {}),
@@ -143,20 +166,28 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
       // 跨进程往返。⚠️ 它抛错就整条列表失败，故意不兜成 0（见文件头那段）。
       const stats = await fetchAdminUserStats(rows.map((r) => Number(r.id)));
 
-      const items: AdminUserRow[] = rows.map((r) => ({
-        userId: Number(r.id),
-        nickname: r.username,
-        phone: r.phone ?? "",
-        // 三列都来自 billing（同一次批量调用）。取不到只可能是服务端换了实现 ——
-        // 它保证请求里的每个 id 都回一项；真取不到时兜 0 好过让整页炸在渲染上
-        balance: stats.get(Number(r.id))?.availableCredits ?? 0,
-        totalRecharge: stats.get(Number(r.id))?.totalRecharged ?? 0,
-        totalSpend: stats.get(Number(r.id))?.totalConsumed ?? 0,
-        role: roleRank(codesByUser.get(r.id.toString()) ?? []),
-        status: r.status === "NORMAL" ? "active" : "disabled",
-        createdAt: r.gmt_create.toISOString(),
-        updatedAt: r.gmt_modified.toISOString(),
-      }));
+      const items: AdminUserRow[] = rows.map((r) => {
+        const userId = Number(r.id);
+        const stat = stats.get(userId);
+        if (!stat) {
+          // ⚠️ 服务端保证「请求里的每个 id 都回一项」，所以走到这里说明**契约破了**。
+          //    兜 0 是为了不让整页炸在渲染上，但必须留一行证据 —— 静默的 0 正是
+          //    这单要消灭的那个症状（「计费没数据」与「真的没有积分」长得一样）。
+          log.warn(`计费未返回用户 ${userId} 的三列（契约：请求里的每个 id 都应有回项），按 0 渲染`);
+        }
+        return {
+          userId,
+          nickname: r.username,
+          phone: r.phone ?? "",
+          balance: stat?.availableCredits ?? 0,
+          totalRecharge: stat?.totalRecharged ?? 0,
+          totalSpend: stat?.totalConsumed ?? 0,
+          role: roleRank(codesByUser.get(r.id.toString()) ?? []),
+          status: r.status === "NORMAL" ? "active" : "disabled",
+          createdAt: r.gmt_create.toISOString(),
+          updatedAt: r.gmt_modified.toISOString(),
+        };
+      });
 
       return { items, total };
     },
