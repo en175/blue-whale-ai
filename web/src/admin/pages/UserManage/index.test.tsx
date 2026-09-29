@@ -138,6 +138,11 @@ describe('UserManage 用户 ID 展示', () => {
 describe('UserManage 发放积分', () => {
   async function openGrantModal() {
     await renderPage();
+    await clickGrantButton();
+  }
+
+  /** 只点按钮，不重新渲染页面 —— 用于「关掉再开」这种同一页内的往返。 */
+  async function clickGrantButton() {
     await act(async () => {
       document.querySelector<HTMLButtonElement>('button[aria-label="发放积分 Alice"]')?.click();
     });
@@ -205,8 +210,32 @@ describe('UserManage 发放积分', () => {
     expect(second).toBe(first);
   });
 
-  it('0 / 负数 / 小数都是非法值：按钮禁用，一笔都不提交', async () => {
-    for (const bad of ['0', '-5', '1.5']) {
+  it('关掉再开是一次**新意图**：换一把新钥匙（否则第二笔会被当成重试吞掉）', async () => {
+    await openGrantModal();
+    await fill('请输入积分数量', '10');
+    await fill('请输入原因（必填）', '补偿');
+    await act(async () => confirmButton().click());
+
+    // 发放成功后弹窗关闭；同一页内再点一次按钮 = 一次新的意图
+    await clickGrantButton();
+    await fill('请输入积分数量', '20');
+    await fill('请输入原因（必填）', '再发一笔');
+    await act(async () => confirmButton().click());
+
+    expect(adminApi.manageAdminUser).toHaveBeenCalledTimes(2);
+    const first = adminApi.manageAdminUser.mock.calls[0]?.[1]?.idempotencyKey;
+    const second = adminApi.manageAdminUser.mock.calls[1]?.[1]?.idempotencyKey;
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
+
+  it('0 / 负数 / 小数 / 超出安全整数范围都是非法值：按钮禁用，一笔都不提交', async () => {
+    for (const bad of ['0', '-5', '1.5', '1e21']) {
+      // 每一轮都要**换一张干净的页面**：afterEach 只在 it 之间跑，同一个 it 里
+      // 多次 openGrantModal 会叠出多个 root，querySelector 永远命中第一个。
+      if (root) await act(async () => root.unmount());
+      mountNode?.remove();
       vi.clearAllMocks();
       adminApi.fetchAdminUsers.mockResolvedValue({
         list: [
@@ -226,6 +255,8 @@ describe('UserManage 发放积分', () => {
         total: 1,
       });
       adminApi.fetchOperationLogs.mockResolvedValue([]);
+      adminApi.manageAdminUser.mockResolvedValue({ credits: 10, duplicated: false });
+
       await openGrantModal();
       await fill('请输入积分数量', bad);
       await fill('请输入原因（必填）', '补偿');

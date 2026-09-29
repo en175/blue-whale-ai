@@ -298,14 +298,17 @@ export interface GrantCreditsInput {
   /**
    * 这笔发放算哪一类业务（billing 的 `BizType` 字面值）。
    *
-   * <p>落 `billing_ledger_entries.biz_type`，而那一列是 `idx_ledger__biz` 的查询键 ——
-   * 事后按业务对账（「这批分是哪次动作发的」）全靠它。所以它**不是标签**：写错不会报错，
-   * 只会让按 biz 查账时少几行，而「少几行」在对账场景里看起来就像「本来就没有」。
+   * <p>落 **`billing_credit_lots.biz_type`**（`CreditLotRepository` 的 `setBizType`），
+   * 即「这个批次是哪类动作造出来的」，配合 `biz_id` 可反查。
+   *
+   * <p>⚠️ 它**不影响** `billing_ledger_entries.biz_type` —— 那条分录的类型由
+   * `CreditService.grant` 硬编码成 `BizType.GRANT`（发放恒走同一组分录），
+   * 本参数改不了它。别照着「改 biz_type 就能改账本分类」的直觉去动这里。
    *
    * <p>不传 = `recharge`：充值到账是这条通道最早的、也是调用量最大的使用者，
    * 缺省值与拆分之前逐字一致。**其它业务必须显式传**（运营发放传 `grant`）。
    *
-   * <p>⚠️ 别与 {@link GrantCreditsInput.source} 混为一谈：`source` 决定这批积分的
+   * <p>⚠️ 也别与 {@link GrantCreditsInput.source} 混为一谈：`source` 决定这批积分的
    * **性质**（扣减优先级 / 财报口径 / 默认有效期），`bizType` 只回答「哪类动作发的」。
    * 一笔人工发放可以是 `source=gift` + `bizType=grant`。
    */

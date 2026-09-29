@@ -119,7 +119,7 @@ export class AdminUsersController {
     let revokedSessions = 0;
     let revokeError: string | null = null;
     /** adjustBalance 的发放结果；freeze/unfreeze 保持 null。 */
-    let granted: { credits: number; duplicated: boolean } | null = null;
+    let granted: { credits: number | null; duplicated: boolean } | null = null;
 
     try {
       if (action === "freeze") {
@@ -158,7 +158,10 @@ export class AdminUsersController {
         //   `amount > 0`。要做得先定义「从哪一批扣、赠送的那批能不能扣、扣到欠费怎么算」，
         //   那是另一件事，本单明确排除。
         const value = body.value;
-        if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+        // ⚠️ 用 `isSafeInteger` 而不是 `isInteger`：后者放行 `1e21`，而比 2^53 大的整数
+        //   在 JS 里**早就被四舍五入过**了（`9007199254740993` 读进来就是 ...992）——
+        //   校验通过、账本落的是另一个数，全程不报错。
+        if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
           throw new AdminException(400, "value 须为正整数积分（本接口只加不减）");
         }
         // 幂等键**必填**。缺了它，「网络超时 → 管理员再点一次」就是发两笔，
@@ -166,6 +169,11 @@ export class AdminUsersController {
         // 铸造一把并在该次意图的重试路径上复用（`web/src/api/idempotencyKey.ts`）。
         const bizId = idempotencyKey?.trim();
         if (!bizId) throw new AdminException(400, "缺少 Idempotency-Key 请求头");
+        // billing 的库里没有用户表：给一个不存在的 id 它照样发放，造出谁都花不到的批次。
+        // 冻结/解冻自带这层校验（`setUserStatus` 返回 false），发放必须自己补上。
+        if (!(await this.identity.userExists(userId))) {
+          throw new AdminException(404, "用户不存在");
+        }
 
         try {
           const { duplicated } = await grantCredits({
@@ -175,11 +183,17 @@ export class AdminUsersController {
             // 不在这里传 expiresAt：有效期是**来源的属性**，各入口各传一份必然会漂。
             source: "gift",
             bizId,
-            // 人工发放不是充值。biz_type 落不到 `recharge`：那一列是 `idx_ledger__biz`
-            // 的查询键，写错不会报错，只会让按业务对账时这笔混进充值那堆。
+            // 人工发放不是充值。biz_type 落不到 `recharge`：那一列是分批查账的键
+            // （`billing_credit_lots.biz_type`，配合 biz_id 反查是哪次动作发的），
+            // 写错不会报错，只会让按业务对账时这笔混进充值那堆。
             bizType: "grant",
           });
-          granted = { credits: value, duplicated };
+          // ⚠️ 幂等命中时 `credits` 是 **null 而不是请求值**：这一笔什么都没发，
+          //    而请求值可能已经被管理员改过（改了数字再重试），回它等于让调用方
+          //    以为「发了 20」而账本里是 10。要回就得回得对，回不了就如实说没有。
+          granted = duplicated
+            ? { credits: null, duplicated: true }
+            : { credits: value, duplicated: false };
         } catch (error) {
           // 与积分记录页同一条口径（consumption-records.controller.ts 的 toConsumptionError）：
           // 配置错要人去改配置并重启（503），调用失败可能等 billing 恢复就好（502）。
@@ -190,13 +204,30 @@ export class AdminUsersController {
           if (error instanceof BillingAdminError) {
             throw new AdminException(502, `发放积分失败：${error.message}`);
           }
-          throw error;
+          // ⚠️ 连接被拒 / DNS 失败 / 10s 超时**不在上面两类里**：共享客户端的 `send()`
+          // 直接 return fetch(...)，网络层异常原样穿出。那恰恰是「billing 挂了」最常见
+          // 的一种，落到 toAdminError 会变成 500 —— 而这条 502 说的才是实话：
+          // 请求没能得出结果，等 billing 恢复可以重试（同一个幂等键，安全）。
+          throw new AdminException(
+            502,
+            `发放积分失败：计费服务不可达（${error instanceof Error ? error.message : "未知错误"}）`,
+          );
         }
       }
     } catch (error) {
       if (error instanceof AdminException) throw error;
       throw toAdminError(error);
     }
+
+    // 前端「调整记录」tab 读 `value` 渲染金额（UserManage 的 parseDetail）。
+    // ⚠️ **幂等命中时不写 value**：那一笔是上一次发的，本次一个字都没发；而 retry 时
+    //    管理员可能已经改过数字，写进去就等于让审计断言一笔账本里查不到的发放。
+    //    命中也照样留一行（记 `duplicated`），否则「点了一次没发出去」在界面上毫无痕迹。
+    const adjustAudit = granted
+      ? granted.duplicated
+        ? { duplicated: true }
+        : { value: granted.credits }
+      : {};
 
     try {
       await this.operationLog.create({
@@ -209,16 +240,19 @@ export class AdminUsersController {
           ...(action === "freeze"
             ? { revokedSessions, ...(revokeError ? { revokeError } : {}) }
             : {}),
-          // 前端「调整记录」tab 读 `value` 渲染金额与正负徽标（UserManage 的 parseDetail）。
-          // 不写进去，那一步发放在审计里只剩一行没有金额的记录。
-          ...(granted ? { value: granted.credits } : {}),
+          ...adjustAudit,
         }),
         operator: user.username,
         operatorId: user.userId,
         ipAddress: xForwardedFor?.split(",")[0]?.trim() ?? null,
       });
-    } catch {
-      // best-effort 审计，失败不阻断
+    } catch (error) {
+      // best-effort 审计，失败不阻断 —— 但必须留日志：发积分这一行的审计是管理端
+      // 「钱动过没有」的**唯一**界面证据（用户列表的余额列还没接上，见 IKJ5M7），
+      // 静默吞掉就是钱动了而任何地方都看不到。
+      this.logger.error(
+        `审计写入失败 ${action} user=${userId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     // freeze 返回吊销会话数；adjustBalance 返回本次发放结果（`duplicated` = 幂等命中，

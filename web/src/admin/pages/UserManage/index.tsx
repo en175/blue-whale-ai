@@ -484,8 +484,10 @@ function AdjustModal({
   // 重新打开弹窗 = 新意图 = 新钥匙，所以「有意再发一笔」不受影响。
   const [idempotencyKey] = useState(() => newIdempotencyKey());
   const amountNum = Number(amount);
+  // `isSafeInteger` 而不是 `isInteger`：后者放行 1e21，而超过 2^53 的整数在 JS 里
+  // 读进来就已经被四舍五入过 —— 界面看着是合法值，发出去的是另一个数。
   const valid =
-    Number.isInteger(amountNum) && amountNum > 0 && reason.trim().length > 0;
+    Number.isSafeInteger(amountNum) && amountNum > 0 && reason.trim().length > 0;
 
   const submit = async () => {
     if (!valid || saving) return;

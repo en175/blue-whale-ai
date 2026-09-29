@@ -26,12 +26,14 @@ function createController(overrides: {
   setUserStatus?: ReturnType<typeof vi.fn>;
   revokeAllForUser?: ReturnType<typeof vi.fn>;
   operationLogCreate?: ReturnType<typeof vi.fn>;
+  userExists?: ReturnType<typeof vi.fn>;
 } = {}) {
   const operationLog = { create: overrides.operationLogCreate ?? vi.fn().mockResolvedValue(undefined) };
   const sessions = { revokeAllForUser: overrides.revokeAllForUser ?? vi.fn().mockResolvedValue(0) };
   const identity = {
     listAdminUsers: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     setUserStatus: overrides.setUserStatus ?? vi.fn().mockResolvedValue(true),
+    userExists: overrides.userExists ?? vi.fn().mockResolvedValue(true),
   };
   const controller = new AdminUsersController(
     identity as never,
@@ -193,9 +195,9 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
   });
 
-  it("adjustBalance：幂等命中（409）如实回 duplicated，不谎报一次新的发放", async () => {
+  it("adjustBalance：幂等命中（409）时 credits 为 null、审计不写 value —— 不谎报一次发放", async () => {
     grantCredits.mockResolvedValue({ lotId: "", duplicated: true, existingBizId: "key-1" });
-    const { controller } = createController();
+    const { controller, operationLog } = createController();
 
     await expect(
       controller.manage(
@@ -206,7 +208,51 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         undefined,
         "key-1",
       ),
-    ).resolves.toEqual({ success: true, data: { credits: 10, duplicated: true } });
+    ).resolves.toEqual({ success: true, data: { credits: null, duplicated: true } });
+
+    // 那一笔是**上一次**发的，而且管理员可能改了数字再重试 —— 把本次请求值写进审计，
+    // 就等于让「调整记录」断言一笔账本里查不到的发放。
+    const detail = JSON.parse(
+      (operationLog.create.mock.calls[0]?.[0] as { detail: string }).detail,
+    ) as Record<string, unknown>;
+    expect(detail).toMatchObject({ duplicated: true });
+    expect(detail).not.toHaveProperty("value");
+  });
+
+  it("adjustBalance：用户不存在 → 404，一笔都不发（billing 没有用户表，没人兜底）", async () => {
+    const { controller } = createController({
+      userExists: vi.fn().mockResolvedValue(false),
+    });
+
+    await expect(
+      controller.manage(
+        ADMIN_CTX.user,
+        ADMIN_CTX.rawUserId,
+        { action: "adjustBalance", reason: "补偿", value: 10 },
+        ADMIN_CTX.authorization,
+        undefined,
+        "key-1",
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(grantCredits).not.toHaveBeenCalled();
+  });
+
+  it("adjustBalance：value 超过安全整数范围 → 400（JS 已经四舍五入过，放过去就是发错数）", async () => {
+    const { controller } = createController();
+
+    for (const value of [1e21, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(
+        controller.manage(
+          ADMIN_CTX.user,
+          ADMIN_CTX.rawUserId,
+          { action: "adjustBalance", reason: "补偿", value },
+          ADMIN_CTX.authorization,
+          undefined,
+          "key-1",
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(grantCredits).not.toHaveBeenCalled();
   });
 
   it("adjustBalance：审计 action 落 user.adjust_balance 且 detail 带 value", async () => {
@@ -299,6 +345,24 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         "key-1",
       ),
     ).rejects.toMatchObject({ status: 502, message: expect.stringContaining("发放积分失败") });
+  });
+
+  it("adjustBalance：网络层失败（连接被拒/超时）也是 502，不是 500", async () => {
+    // 共享客户端的 `send()` 直接 return fetch(...)，网络异常不包装成 BillingAdminError。
+    // 而那恰恰是「billing 挂了」最常见的一种 —— 落成 500 会让值班的人以为是代码问题。
+    grantCredits.mockRejectedValue(new TypeError("fetch failed"));
+    const { controller } = createController();
+
+    await expect(
+      controller.manage(
+        ADMIN_CTX.user,
+        ADMIN_CTX.rawUserId,
+        { action: "adjustBalance", reason: "补偿", value: 10 },
+        ADMIN_CTX.authorization,
+        undefined,
+        "key-1",
+      ),
+    ).rejects.toMatchObject({ status: 502, message: expect.stringContaining("不可达") });
   });
 
   it("userId 非正整数或 reason 缺失 → 400，不调任何写操作", async () => {

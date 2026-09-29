@@ -247,6 +247,18 @@ export class IdentityService {
     return this.roles.listRoleCodes(String(userId));
   }
 
+  /**
+   * 该用户是否存在（软删的不算）—— 供**下游不认识我们用户表**的写操作先做归属校验。
+   *
+   * <p>为什么需要单独一个：冻结/解冻自带这层保护（`setUserStatus` 找不到就返回 false），
+   * 因为它们写的就是 `bw_users` 自己。而发积分写的是 **billing 的库**，那边压根没有
+   * 用户表（只有批次 / 账本 / 预留三张）—— 给一个不存在的 userId 发放，它照样收下，
+   * 造出一个谁都花不到、也追不回的批次。打错一位 id 与「刻意发给某人」在那边长得一样。
+   */
+  async userExists(userId: string | number): Promise<boolean> {
+    return (await this.users.findById(String(userId))) !== null;
+  }
+
   /** 是否具备管理员权限（持有 admin / super_admin 中任意一个）。 */
   async isAdmin(userId: string | number): Promise<boolean> {
     return this.roles.isAdmin(String(userId));
