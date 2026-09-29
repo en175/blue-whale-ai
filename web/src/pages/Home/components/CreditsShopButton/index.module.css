@@ -1,0 +1,21 @@
+/* ---- 首页顶栏「积分超市」入口 ---- */
+/* 与左侧余额徽标同族：无边框、无底色，hover 才浮出一层极浅的中性底 */
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.button:hover {
+  color: #fff;
+  opacity: 0.85;
+}

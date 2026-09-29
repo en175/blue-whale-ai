@@ -6,32 +6,20 @@
   display: inline-flex;
 }
 
-/* ---- 触发按钮 ---- */
+/* ---- 触发按钮：仅头像，无外壳 ---- */
 .trigger {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 var(--spacing-sm) 0 4px;
-  border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--color-text-primary);
   cursor: pointer;
-  transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .trigger:hover {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.28);
-}
-
-.wrapper:has(.dropdown) .trigger {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.28);
+  opacity: 0.85;
 }
 
 .triggerAvatar {
@@ -46,25 +34,6 @@
   font-weight: 600;
   color: var(--color-text-primary);
   flex-shrink: 0;
-}
-
-.triggerName {
-  font-size: var(--font-size-lg);
-  font-weight: 500;
-  color: var(--color-text-primary);
-  line-height: 1;
-}
-
-.triggerArrow {
-  color: var(--color-text-secondary);
-  transition: transform var(--transition-fast);
-  display: flex;
-  align-items: center;
-  margin-top: 1px;
-}
-
-.arrowUp {
-  transform: rotate(180deg);
 }
 
 /* ---- 未登录登录按钮 ---- */
@@ -158,46 +127,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* ---- 积分余额 ---- */
-.pointsRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px var(--spacing-sm);
-  margin: 8px 0;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--radius-md);
-}
-
-.pointsLeft {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-}
-
-.pointsIcon {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  background-color: rgba(76, 110, 245, 0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-accent-primary);
-}
-
-.pointsLabel {
-  font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
-}
-
-.pointsValue {
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  color: var(--color-text-primary);
 }
 
 /* ---- 分隔线 ---- */

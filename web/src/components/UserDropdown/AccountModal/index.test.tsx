@@ -47,7 +47,6 @@ async function renderAccountModal(onClose = vi.fn()) {
         nickname: 'alice',
         balance: 0,
         onClose,
-        onOpenRecharge: vi.fn(),
       }),
     );
   });
@@ -64,6 +63,14 @@ afterEach(async () => {
 });
 
 describe('AccountModal', () => {
+  it('不再提供「去充值」入口，充值统一走顶栏积分超市', async () => {
+    await renderAccountModal();
+
+    const labels = [...document.body.querySelectorAll('button')].map((button) => button.textContent);
+    expect(labels).not.toContain('去充值');
+    expect(labels).toContain('账户记录');
+  });
+
   it('改密成功后关闭账号信息弹窗', async () => {
     const { onClose } = await renderAccountModal();
 
