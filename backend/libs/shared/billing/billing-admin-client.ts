@@ -296,6 +296,21 @@ export interface GrantCreditsInput {
    */
   source?: string;
   /**
+   * 这笔发放算哪一类业务（billing 的 `BizType` 字面值）。
+   *
+   * <p>落 `billing_ledger_entries.biz_type`，而那一列是 `idx_ledger__biz` 的查询键 ——
+   * 事后按业务对账（「这批分是哪次动作发的」）全靠它。所以它**不是标签**：写错不会报错，
+   * 只会让按 biz 查账时少几行，而「少几行」在对账场景里看起来就像「本来就没有」。
+   *
+   * <p>不传 = `recharge`：充值到账是这条通道最早的、也是调用量最大的使用者，
+   * 缺省值与拆分之前逐字一致。**其它业务必须显式传**（运营发放传 `grant`）。
+   *
+   * <p>⚠️ 别与 {@link GrantCreditsInput.source} 混为一谈：`source` 决定这批积分的
+   * **性质**（扣减优先级 / 财报口径 / 默认有效期），`bizType` 只回答「哪类动作发的」。
+   * 一笔人工发放可以是 `source=gift` + `bizType=grant`。
+   */
+  bizType?: "recharge" | "grant" | "adjust";
+  /**
    * 幂等键；不传 = billing 按 `source:bizId` 生成。
    *
    * <p>什么时候必须传：当「只能发一次」的判据**不是某一笔业务**，而是某个跨业务的
@@ -363,7 +378,7 @@ export async function grantCredits(
       source: input.source ?? "purchased",
       amount: input.credits,
       bizId: input.bizId,
-      bizType: "recharge",
+      bizType: input.bizType ?? "recharge",
       // 不传时这个键**整个不出现在报文里**（`undefined` 会被 JSON.stringify 丢掉），
       // billing 便按 `source:bizId` 生成默认键 —— 与改动前逐字一致。
       ...(input.grantKey ? { grantKey: input.grantKey } : {}),

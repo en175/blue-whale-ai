@@ -16,6 +16,7 @@ import {
 } from '@/api/adminUsers';
 import { operationLogsOptions, type OperationLog } from '@/api/adminOperationLogs';
 import { isApiError } from '@/api/http';
+import { newIdempotencyKey } from '@/api/idempotencyKey';
 import { formatLogIp } from '@/admin/formatLogIp';
 import { matchesAdminUserKeyword } from './userSearch';
 import {
@@ -125,8 +126,11 @@ export default function UserManage() {
 
   const findUser = (id: number | null) => users.find((u) => u.userId === id);
 
-  /** 用户管理操作：冻结/解冻/调整积分（POST /:userId/manage），成功后关弹窗并刷新列表 */
-  const doManage = async (userId: number, params: { action: UserManageAction; reason: string; value?: number }) => {
+  /** 用户管理操作：冻结/解冻/发放积分（POST /:userId/manage），成功后关弹窗并刷新列表 */
+  const doManage = async (
+    userId: number,
+    params: { action: UserManageAction; reason: string; value?: number; idempotencyKey?: string }
+  ) => {
     await manageAdminUser(userId, params);
     setAdjustId(null);
     setFreezeId(null);
@@ -238,8 +242,8 @@ export default function UserManage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    title="调整积分"
-                    aria-label={`调整积分 ${u.nickname}`}
+                    title="发放积分"
+                    aria-label={`发放积分 ${u.nickname}`}
                     icon={<Coins size={15} strokeWidth={2} />}
                     onClick={() => setAdjustId(u.userId)}
                   />
@@ -456,7 +460,7 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
   );
 }
 
-/* ============ 调整积分弹窗 ============ */
+/* ============ 发放积分弹窗 ============ */
 function AdjustModal({
   user,
   onClose,
@@ -464,23 +468,38 @@ function AdjustModal({
 }: {
   user: AdminUserRow;
   onClose: () => void;
-  onConfirm: (params: { action: UserManageAction; reason: string; value?: number }) => Promise<void>;
+  onConfirm: (params: {
+    action: UserManageAction;
+    reason: string;
+    value?: number;
+    idempotencyKey?: string;
+  }) => Promise<void>;
 }) {
-  const [amount, setAmount] = useState('0');
+  const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const amountNum = parseFloat(amount);
-  const valid = !Number.isNaN(amountNum) && amountNum !== 0 && reason.trim().length > 0;
+  // 幂等键**在弹窗打开那一刻**铸一把，整段填写与重试复用同一个 —— 服务端拿它当 billing
+  // 发放的幂等键。写在请求函数里现造等于没有幂等：双击/超时重发会各拿一把新钥匙，发两笔。
+  // 重新打开弹窗 = 新意图 = 新钥匙，所以「有意再发一笔」不受影响。
+  const [idempotencyKey] = useState(() => newIdempotencyKey());
+  const amountNum = Number(amount);
+  const valid =
+    Number.isInteger(amountNum) && amountNum > 0 && reason.trim().length > 0;
 
   const submit = async () => {
     if (!valid || saving) return;
     setSaving(true);
     setError('');
     try {
-      await onConfirm({ action: 'adjustBalance', reason: reason.trim(), value: amountNum });
+      await onConfirm({
+        action: 'adjustBalance',
+        reason: reason.trim(),
+        value: amountNum,
+        idempotencyKey,
+      });
     } catch (e) {
-      setError(isApiError(e) ? e.message : '调整失败，请稍后重试');
+      setError(isApiError(e) ? e.message : '发放失败，请稍后重试');
     } finally {
       setSaving(false);
     }
@@ -489,14 +508,14 @@ function AdjustModal({
   return (
     <Modal
       open
-      title="调整积分"
+      title="发放积分"
       width={560}
       onClose={onClose}
       footer={
         <>
           <Button onClick={onClose}>取消</Button>
-          <Button variant="danger" disabled={!valid || saving} onClick={submit}>
-            {saving ? '提交中…' : '确认调整'}
+          <Button disabled={!valid || saving} onClick={submit}>
+            {saving ? '提交中…' : '确认发放'}
           </Button>
         </>
       }
@@ -511,14 +530,17 @@ function AdjustModal({
       />
 
       {/* 表单标签只用一次性外边距，字号/颜色交给套件默认值 */}
-      <div style={{ margin: '16px 0 6px' }}>调整金额（正数增加，负数扣减）</div>
+      <div style={{ margin: '16px 0 6px' }}>发放积分（正整数）</div>
       <Input
         style={{ width: '100%' }}
         type="number"
+        min={1}
+        step={1}
+        placeholder="请输入积分数量"
         value={amount}
         onChange={(e) => setAmount(e.target.value)}
       />
-      <div style={{ margin: '16px 0 6px' }}>调整原因 *</div>
+      <div style={{ margin: '16px 0 6px' }}>发放原因 *</div>
       <Input
         style={{ width: '100%' }}
         placeholder="请输入原因（必填）"
