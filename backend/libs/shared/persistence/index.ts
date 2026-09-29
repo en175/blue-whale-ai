@@ -7,10 +7,6 @@ export {
   type MaterialAssetView,
 } from "./material-asset-repo.js";
 export {
-  createUserInfoRepo,
-  type UserInfoRepo,
-} from "./user-info-repo.js";
-export {
   createProjectRepo,
   type ProjectPage,
   type ProjectRepo,
