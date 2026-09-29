@@ -114,6 +114,10 @@ export class AdminConsumptionRecordsController {
               task_type: summary?.type ?? null,
               model_id: summary?.modelId ?? null,
               model_label: summary?.modelLabel ?? null,
+              // ponytail: 提示词**全文返回**（页面要开弹窗看真的全文，服务端悄悄截断会让
+              // 「全文」两个字变成假的）。天花板是「一页 100 行 × 单条提示词长度」——
+              // 内网管理页量级可控。真出现 MB 级单条时在这里加单值截断 + 前端标注「已截断」，
+              // 别改成「点开再按行拉」：那要新开一条路由，而这一整条链的设计就是不新增路由。
               prompt: summary?.prompt ?? null,
               status: item.status,
               created_at: item.createdAt,

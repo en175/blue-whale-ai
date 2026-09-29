@@ -313,9 +313,9 @@ export default function ConsumptionRecords() {
             items={[
               {
                 label: '任务类型',
-                // 走到这里 task_type 一定非空（按钮只在有 prompt 的行上渲染），
-                // 但仍按可空写：`task_type` 的类型就是可空的，写 `!` 是在骗编译器。
-                value: promptRow.task_type ? taskTypeLabel(promptRow.task_type) : '—',
+                // ⚠️ `== null` 而不是真值判断：本页其它新字段都是这个口径，
+                //    这里写 `? :` 会让后来者照抄出一个「空串也算有值」的分支。
+                value: promptRow.task_type == null ? '—' : taskTypeLabel(promptRow.task_type),
               },
               { label: '模型', value: modelText(promptRow) },
               { label: '提示词', value: <div style={PROMPT_TEXT}>{promptRow.prompt}</div> },
