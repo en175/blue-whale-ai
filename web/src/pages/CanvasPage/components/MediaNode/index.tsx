@@ -189,6 +189,15 @@ export interface MediaNodeData {
   };
   /** IKIZQE：样片卡标题行「生成 1080P 成片」点击派发（CanvasPage 承接提交链路） */
   onFinalizeSample?: (id: string) => void;
+  /** IKIZQG：重新生成样片入口（过期样片卡标题行 / 成片失败卡失败区）的渲染期派生状态
+   *  ——CanvasPage 注入，不持久化。phase：ready 可提交（credits 为新样片预计积分）；
+   *  loading 报价中；checking 上次提交结果不明核对中（禁止再次点击）；unavailable 无报价。 */
+  regenerateCta?: {
+    phase: 'ready' | 'loading' | 'checking' | 'unavailable';
+    credits?: number;
+  };
+  /** IKIZQG：「重新生成样片」点击派发（CanvasPage 承接报价门控提交链路，新建卡不覆盖旧结果） */
+  onRegenerateSample?: (id: string) => void;
   /** 高清身份标记（IKGM9F）：本卡由「高清放大」入口创建；「重新编辑」据此分流高清面板（IKGM9O） */
   imageEnhance?: ImageEnhanceIdentity;
   /** 视频 HD 高清身份标记（IKH3VG）：本卡由视频卡工具条「HD」入口创建；点卡与「重新编辑」
@@ -1109,6 +1118,35 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               重试
             </button>
           )}
+          {/* IKIZQG：成片失败卡的续作路径——「重新生成样片」（父规格用户故事 21：用原输入
+              新建样片，不复用未证实 Draft ID）。报价门控同 finalize：非 ready 禁用；
+              点击在入口卡邻近新建样片卡，本失败卡与费用状态保留。 */}
+          {data.videoStage === 'final' && data.regenerateCta && (() => {
+            const cta = data.regenerateCta;
+            const disabled = cta.phase !== 'ready';
+            return (
+              <button
+                type="button"
+                className={styles.genBtn}
+                data-testid="regenerate-cta"
+                disabled={disabled}
+                title={cta.phase === 'ready'
+                  ? `按原输入重新生成 480P 样片，预计消耗 ${cta.credits} 积分；后续成片另行计费；提交后创建新卡`
+                  : cta.phase === 'loading'
+                    ? '正在获取样片报价'
+                    : cta.phase === 'checking'
+                      ? '上次提交结果不明，正在核对，请勿重复提交'
+                      : '暂不能重新生成样片（无报价）'}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (disabled) return;
+                  data.onRegenerateSample?.(id);
+                }}
+              >
+                重新生成样片{typeof cta.credits === 'number' ? ` · ${cta.credits} 积分` : ''}
+              </button>
+            );
+          })()}
         </div>
       );
     }
@@ -1257,6 +1295,39 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               }}
             >
               {label}
+            </button>
+          );
+        })()}
+        {/* IKIZQG：过期/缺截止样片卡的「重新生成样片」（父规格用户故事 24：重新取得可用
+            期限）——与上方禁用的成片入口并存（过期只停止转成片，样片保留）。点击前展示
+            新样片费用；提交从原冻结输入新建任务与卡，不覆盖旧结果。 */}
+        {data.videoStage === 'sample' && data.regenerateCta && (() => {
+          const cta = data.regenerateCta;
+          const disabled = cta.phase !== 'ready';
+          return (
+            <button
+              type="button"
+              className={`nodrag nopan ${styles.finalizeCta}`}
+              data-testid="regenerate-cta"
+              disabled={disabled}
+              title={cta.phase === 'ready'
+                ? `按原输入重新生成 480P 样片，预计消耗 ${cta.credits} 积分；后续成片另行计费；提交后创建新卡，不覆盖旧结果`
+                : cta.phase === 'loading'
+                  ? '正在获取样片报价'
+                  : cta.phase === 'checking'
+                    ? '上次提交结果不明，正在核对，请勿重复提交'
+                    : '暂不能重新生成样片（无报价）'}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (disabled) return;
+                data.onRegenerateSample?.(id);
+              }}
+            >
+              {cta.phase === 'checking'
+                ? '状态核对中…'
+                : typeof cta.credits === 'number'
+                  ? `重新生成样片 · ${cta.credits} 积分`
+                  : '重新生成样片'}
             </button>
           );
         })()}

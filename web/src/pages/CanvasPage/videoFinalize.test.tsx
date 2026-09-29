@@ -126,6 +126,9 @@ vi.mock('@/api/jobs', () => ({
   fetchJobStatus: apiMocks.fetchJobStatus,
   quoteVideoFinalize: apiMocks.quoteVideoFinalize,
   finalizeVideoJob: apiMocks.finalizeVideoJob,
+  // IKIZQG：过期样片/失败成片入口会请求重新生成报价（本文件不覆盖重生成流，恒空报价禁用入口）
+  quoteSampleRegenerate: vi.fn(async () => ({ credits: null, quote_revision: null })),
+  regenerateSampleJob: vi.fn(),
   readJobFailText: apiMocks.readJobFailText,
 }));
 

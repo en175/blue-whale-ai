@@ -22,6 +22,8 @@ import {
   fetchJobStatus,
   isGenerationDomainError,
   readJobFailText,
+  quoteSampleRegenerate,
+  regenerateSampleJob,
 } from './jobs';
 import { audioMixJobsOptions } from './audioMixRecovery';
 
@@ -663,5 +665,46 @@ describe('建任务/重试的幂等头由调用方持有', () => {
     expect(init.method).toBe('POST');
     expect(new Headers(init.headers).get('Idempotency-Key')).toBe('retry-key-73');
     expect(init.body).toBeUndefined();
+  });
+});
+
+describe('IKIZQG 重新生成样片端点（regenerate-sample）', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const quoteView = () =>
+    vi.fn(async (_url: string, _init?: RequestInit) => new Response(
+      JSON.stringify({ code: 200, msg: 'ok', data: { credits: 40, quote_revision: 'rev-r1' } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+
+  it('quoteSampleRegenerate：POST 空 body 到独立报价端点，unwrap 出 StageQuoteView', async () => {
+    const fetchMock = quoteView();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(quoteSampleRegenerate('p1', 9001, { silent: true }))
+      .resolves.toEqual({ credits: 40, quote_revision: 'rev-r1' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/p1/generation-jobs/9001/regenerate-sample/quote');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({});
+  });
+
+  it('regenerateSampleJob：仅确认两字段进 body，幂等头由调用方持有原样透传', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(
+      JSON.stringify({ code: 200, msg: 'ok', data: { generation_job_id: '9100', cursor: 8 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      regenerateSampleJob('p1', '9001', { expected_credits: 40, quote_revision: 'rev-r1' }, 'regen-key-1', { silent: true }),
+    ).resolves.toEqual({ generation_job_id: '9100', cursor: 8 });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/p1/generation-jobs/9001/regenerate-sample');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ expected_credits: 40, quote_revision: 'rev-r1' });
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('regen-key-1');
   });
 });

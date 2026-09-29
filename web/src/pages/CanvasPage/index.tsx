@@ -359,6 +359,8 @@ import {
   fetchJobStatus,
   finalizeVideoJob,
   quoteVideoFinalize,
+  regenerateSampleJob,
+  quoteSampleRegenerate,
   createImageEnhancement,
   createImageErase,
   createImageCutout,
@@ -795,6 +797,17 @@ export default function CanvasPage() {
   const finalizeInflightRef = useRef(new Set<string>());
   const [finalizeUnknownSamples, setFinalizeUnknownSamples] = useState<ReadonlySet<string>>(() => new Set());
   const finalizeAttemptedJobIdsRef = useRef(new Set<string>());
+  /** IKIZQG 重新生成样片（regenerate-sample）链路的页面态：按**原样片任务 id**记报价与
+   *  已受理尝试（会话内）——过期样片卡与成片失败卡两个入口指向同一样片任务时共享一份。
+   *  口径同 finalize：报价 = 服务端唯一权威门（空报价双 null 即禁用），不持久化，刷新后重报价。 */
+  const [sampleRegenQuotes, setSampleRegenQuotes] = useState<
+    Record<string, { phase: 'loading' } | { phase: 'ready'; credits: number; revision: string } | { phase: 'empty' }>
+  >({});
+  const sampleRegenQuoteInflightRef = useRef(new Set<string>());
+  /** 提交窗口同步防重（按样片任务 id 归并：同一样片的两个入口并发点击至多一次提交） */
+  const sampleRegenInflightRef = useRef(new Set<string>());
+  const [sampleRegenUnknownSamples, setSampleRegenUnknownSamples] = useState<ReadonlySet<string>>(() => new Set());
+  const sampleRegenAttemptedJobIdsRef = useRef(new Set<string>());
   /** 创建已受理、但结果卡尚未随画布事务落盘的窗口。 */
   const audioMixUnpersistedCardsRef = useRef(new Set<string>());
   const audioMixFirstSaveRef = useRef(new Map<string, Promise<boolean>>());
@@ -7383,6 +7396,187 @@ export default function CanvasPage() {
     }
   }, [mediaNodes, currentId, finalizeQuotes, finalizeUnknownSamples]);
 
+  /** IKIZQG：重新生成入口身份解析——返回该卡指向的原样片任务 ID（null = 无入口）：
+   *  过期/缺可信截止的成功样片卡（标题行入口，父规格用户故事 24）与成片失败卡（失败区
+   *  入口，经 sourceSampleJobId 找回原样片，用户故事 21）。未过期样片的续作路径是
+   *  finalize 而非重新生成，故截止有效时不提供入口。 */
+  const regenEntrySampleJobIdOf = (d: Record<string, unknown>): string | null => {
+    if (d.draft === true) return null;
+    if (d.videoStage === 'sample' && d.jobId != null && d.genStatus == null) {
+      if (typeof d.finalizeDeadlineAt === 'string' && !sampleDeadlineExpired(d.finalizeDeadlineAt)) return null;
+      return String(d.jobId);
+    }
+    if (d.videoStage === 'final' && d.genStatus === 'failed' && d.sourceSampleJobId != null) {
+      return String(d.sourceSampleJobId);
+    }
+    return null;
+  };
+
+  /** ═══ IKIZQG 重新生成样片（regenerate-sample）提交链路 ═══
+   *  入口两处：过期样片卡标题行、成片失败卡失败区。报价就绪（服务端门——空报价双 null
+   *  即禁用）才可点；点击直接提交，服务端从原样片**冻结输入**派生新任务——**创建新卡不
+   *  覆盖旧结果**（旧样片/失败成片/费用记录只读不写）。提交即在入口卡正下方 +60px 建样片
+   *  占位卡（videoStage=sample；避开 finalize 在样片右侧 +60px 的落位），受理后回填 jobId
+   *  走既有轮询（sample 阶段投影由 applyJobTerminal 回填，新样片有自己的截止与成片入口）。
+   *  并发/重复防线：inflight ref 按**样片任务 id**归并（同一样片的两个入口并发点击至多一次）。
+   *  错误收敛（口径同 finalize）：1056 变价 → 重报价后再由用户点击（新报价 = 新签名换新幂等键，
+   *  不撞同键变价 100409）；1014 → 「状态核对中」禁点；传输结果不明（408/网络）→ 同幂等键
+   *  原样重发一次（服务端重放首次结果），仍不明 → 状态核对中。 */
+  const handleRegenerateSample = (entryNodeId: string): boolean => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法重新生成样片');
+      return false;
+    }
+    const origin = mediaNodesRef.current.find((n) => n.id === entryNodeId);
+    const originData = (origin?.data ?? {}) as Record<string, unknown>;
+    const sampleJobId = regenEntrySampleJobIdOf(originData);
+    if (origin == null || sampleJobId == null) return false;
+    if (sampleRegenUnknownSamples.has(sampleJobId)) return false;
+    if (sampleRegenAttemptedJobIdsRef.current.has(sampleJobId)) return false;
+    if (sampleRegenInflightRef.current.has(sampleJobId)) return false;
+    const quote = sampleRegenQuotes[sampleJobId];
+    if (quote?.phase !== 'ready') return false;
+    sampleRegenInflightRef.current.add(sampleJobId);
+    /** 占位样片卡：入口卡正下方 +60px，宽高比沿入口卡 */
+    const box = mediaContentBox({
+      mediaType: 'video',
+      width: typeof originData.width === 'number' ? originData.width : undefined,
+      height: typeof originData.height === 'number' ? originData.height : undefined,
+      ratio: typeof originData.targetRatio === 'string' ? originData.targetRatio : undefined,
+    });
+    const regenNodeId = newNodeId('media-gen');
+    const placeholder = attachCallbacks({
+      id: regenNodeId,
+      type: 'mediaNode' as const,
+      position: {
+        x: Math.round(origin.position.x),
+        y: Math.round(origin.position.y + box.height + 60),
+      },
+      data: {
+        src: '',
+        fileName: '样片生成中',
+        mediaType: 'video' as const,
+        genStatus: 'generating' as MediaGenStatus,
+        progress: 0,
+        videoStage: 'sample' as const,
+        targetRatio: typeof originData.targetRatio === 'string' ? originData.targetRatio : undefined,
+      },
+    } as Node);
+    mediaNodesRef.current = [...mediaNodesRef.current, placeholder];
+    setMediaNodes(mediaNodesRef.current);
+    if (currentId) void flushCanvasSave(currentId).catch(() => {});
+
+    const scope = `regen:${sampleJobId}`;
+    const signature = JSON.stringify({ expected_credits: quote.credits, quote_revision: quote.revision });
+    /** 一次用户意图一把（submitIntentKeys 台账）：响应丢失原样重发复用同键 → 服务端重放；
+     *  变价重报价后签名变化自然换新键（不撞同键变价 100409）。 */
+    const idempotencyKey = jobSubmitKeysRef.current.keyFor(scope, signature);
+    const send = () => regenerateSampleJob(
+      currentId,
+      sampleJobId,
+      { expected_credits: quote.credits, quote_revision: quote.revision },
+      idempotencyKey,
+      { silent: true },
+    );
+    const clearSubmitting = () => {
+      sampleRegenInflightRef.current.delete(sampleJobId);
+    };
+    const removePlaceholder = () => {
+      stopJobPolling(regenNodeId, jobTimersRef.current);
+      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== regenNodeId);
+      setMediaNodes(mediaNodesRef.current);
+      if (currentId) void flushCanvasSave(currentId).catch(() => {});
+    };
+    const markUnknown = () => {
+      setSampleRegenUnknownSamples((prev) => new Set(prev).add(sampleJobId));
+    };
+    /** 报价重取：删 entry 触发报价 effect 重查（1056 变价 → 新价可见后再由用户点击） */
+    const refreshQuote = () => {
+      setSampleRegenQuotes((prev) => {
+        if (!(sampleJobId in prev)) return prev;
+        const next = { ...prev };
+        delete next[sampleJobId];
+        return next;
+      });
+    };
+    send()
+      .then((created) => {
+        jobSubmitKeysRef.current.settle(scope);
+        sampleRegenAttemptedJobIdsRef.current.add(sampleJobId);
+        clearSubmitting();
+        if (!mediaNodesRef.current.some((n) => n.id === regenNodeId)) return; // 卡已被删：不复活
+        patchMediaNode(regenNodeId, { jobId: created.generation_job_id });
+        pollJob(regenNodeId, created.generation_job_id);
+        if (currentId) void flushCanvasSave(currentId).catch(() => {});
+        showToast('success', `已提交样片重新生成，预计消耗 ${quote.credits} 积分；已创建新卡，旧结果保留`);
+      })
+      .catch(async (e: unknown) => {
+        clearSubmitting();
+        if (isApiError(e) && e.status !== 408 && e.status !== 0) {
+          // 服务端已回答（信封错误）：占位卡撤回，入口状态交还报价推导
+          removePlaceholder();
+          if (Number(e.code) === 1014) {
+            markUnknown();
+            showToast('warn', e.message);
+            return;
+          }
+          showToast('error', e.message);
+          refreshQuote();
+          return;
+        }
+        // 传输结果不明（408 超时 / 网络失败）：同幂等键原样重发一次——服务端重放首次结果
+        //（只建一个 job、只扣一次钱）；重发受理/失败各自收敛，不再递归重试。
+        try {
+          const created = await send();
+          jobSubmitKeysRef.current.settle(scope);
+          sampleRegenAttemptedJobIdsRef.current.add(sampleJobId);
+          if (mediaNodesRef.current.some((n) => n.id === regenNodeId)) {
+            patchMediaNode(regenNodeId, { jobId: created.generation_job_id });
+            pollJob(regenNodeId, created.generation_job_id);
+            if (currentId) void flushCanvasSave(currentId).catch(() => {});
+          }
+          showToast('success', `已提交样片重新生成，预计消耗 ${quote.credits} 积分；已创建新卡，旧结果保留`);
+        } catch {
+          // 仍不明：占位卡撤回（无可核实任务），入口「状态核对中」禁点——刷新后以报价
+          // 重查恢复与服务端一致的状态。
+          removePlaceholder();
+          markUnknown();
+          showToast('warn', '无法确认重新生成任务是否已提交，状态核对中，请勿重复提交');
+        }
+      });
+    return true;
+  };
+
+  /** IKIZQG：重新生成报价获取——入口卡（过期/缺截止样片、成片失败）进 CTA 前先问价
+   *  （按样片任务归并：同一样片的两个入口共享一份报价）。空报价（双 null）= 服务端判
+   *  不可提交（非样片任务/模型未放行/算不出价），据此禁用按钮；报价失败同样折空报价。 */
+  useEffect(() => {
+    if (!currentId) return;
+    for (const n of mediaNodes) {
+      const sampleJobId = regenEntrySampleJobIdOf((n.data ?? {}) as Record<string, unknown>);
+      if (sampleJobId == null) continue;
+      if (sampleRegenAttemptedJobIdsRef.current.has(sampleJobId)) continue;
+      if (sampleRegenUnknownSamples.has(sampleJobId)) continue;
+      if (sampleRegenQuotes[sampleJobId] != null || sampleRegenQuoteInflightRef.current.has(sampleJobId)) continue;
+      sampleRegenQuoteInflightRef.current.add(sampleJobId);
+      quoteSampleRegenerate(currentId, sampleJobId, { silent: true })
+        .then((q) => {
+          setSampleRegenQuotes((prev) => ({
+            ...prev,
+            [sampleJobId]: q.credits != null && q.quote_revision != null
+              ? { phase: 'ready', credits: q.credits, revision: q.quote_revision }
+              : { phase: 'empty' },
+          }));
+        })
+        .catch(() => {
+          setSampleRegenQuotes((prev) => ({ ...prev, [sampleJobId]: { phase: 'empty' } }));
+        })
+        .finally(() => {
+          sampleRegenQuoteInflightRef.current.delete(sampleJobId);
+        });
+    }
+  }, [mediaNodes, currentId, sampleRegenQuotes, sampleRegenUnknownSamples]);
+
   /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询。
    *  mediaRefs 仅 image/video/audio：单数组 references（保序），与 input_asset_ids 等旧参考字段互斥。
    *  视频可含首尾帧角色；图片/音频 role 恒 reference。素材库引用（Asset- 前缀）走 material_id。
@@ -7430,8 +7624,13 @@ export default function CanvasPage() {
     const isSampleJob = (parameters as VideoJobParameters).sample_mode === true;
     if (targetNodeId && blockInvalidDraft(edgesRef.current.filter(e => e.target === targetNodeId).map(e => e.source))) return false;
     if (blockIfCreditsInsufficient()) return false;
-    // 原位模式（IKDMQQ 草稿 + IKDMQU 成品卡原卡重新生成）：目标节点原地承接任务，身份/位置/连线保持不变
-    const inPlaceNode = targetNodeId
+    // 原位模式（IKDMQQ 草稿 + IKDMQU 成品卡原卡重新生成）：目标节点原地承接任务，身份/位置/连线保持不变。
+    // IKIZQG：两阶段卡（样片/成片）重新编辑是原位重跑规则的**明确例外**（父规格「领域身份」：
+    // 用户故事 25——再次发送新建结果卡），旧卡的身份、截止与两卡关系不被覆盖。
+    const targetNode = targetNodeId ? mediaNodesRef.current.find((n) => n.id === targetNodeId) : undefined;
+    const targetData = (targetNode?.data ?? {}) as Record<string, unknown>;
+    const targetIsTwoStage = targetData.videoStage === 'sample' || targetData.videoStage === 'final';
+    const inPlaceNode = !targetIsTwoStage && targetNodeId
       ? mediaNodesRef.current.find((n) => n.id === targetNodeId && isInPlaceRegenTarget(n))
       : undefined;
     const inPlaceNodeId = inPlaceNode?.id;
@@ -7491,7 +7690,18 @@ export default function CanvasPage() {
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
-      position: spawnPosition(),
+      // IKIZQG：两阶段卡重新编辑发送的新建结果卡落在原卡正下方 +60px（旧结果与来源关系保留）
+      position: targetIsTwoStage && targetNode
+        ? (() => {
+          const box = mediaContentBox({
+            mediaType: 'video',
+            width: typeof targetData.width === 'number' ? targetData.width : undefined,
+            height: typeof targetData.height === 'number' ? targetData.height : undefined,
+            ratio: typeof targetData.targetRatio === 'string' ? targetData.targetRatio : undefined,
+          });
+          return { x: Math.round(targetNode.position.x), y: Math.round(targetNode.position.y + box.height + 60) };
+        })()
+        : spawnPosition(),
       data: {
         genStatus: 'generating',
         progress: 0,
@@ -13041,6 +13251,30 @@ export default function CanvasPage() {
     }
   }
 
+  /** IKIZQG：重新生成样片入口的渲染期派生状态（不持久化，口径同 finalizeCtaByNodeId）。
+   *  两处入口（身份解析见 regenEntrySampleJobIdOf）：过期/缺截止样片卡（标题行，与 finalize
+   *  的 expired 禁用态并存——过期只停止转成片，样片保留）与成片失败卡（失败区，经来源
+   *  关系指向原样片任务）。本会话已受理过重新生成的样片任务不再渲染（新样片卡有自己的
+   *  截止与成片入口）。 */
+  const regenerateCtaByNodeId = new Map<string, NonNullable<MediaNodeData['regenerateCta']>>();
+  if (currentId) {
+    for (const n of mediaNodes) {
+      const sampleJobId = regenEntrySampleJobIdOf((n.data ?? {}) as Record<string, unknown>);
+      if (sampleJobId == null) continue;
+      if (sampleRegenUnknownSamples.has(sampleJobId)) {
+        regenerateCtaByNodeId.set(n.id, { phase: 'checking' });
+        continue;
+      }
+      if (sampleRegenAttemptedJobIdsRef.current.has(sampleJobId)) continue;
+      const quote = sampleRegenQuotes[sampleJobId];
+      regenerateCtaByNodeId.set(n.id, quote == null
+        ? { phase: 'loading' }
+        : quote.phase === 'ready'
+          ? { phase: 'ready', credits: quote.credits }
+          : { phase: 'unavailable' });
+    }
+  }
+
   return (
     <div className={styles.canvasPage}>
       {/* 顶部工具栏 */}
@@ -13117,6 +13351,7 @@ export default function CanvasPage() {
               || smartMattingTargetNodeId || audioVideoMuxDraftId != null
               || audioVideoMuxInFlightSourceIds.size > 0
               || finalizeCtaByNodeId.size > 0
+              || regenerateCtaByNodeId.size > 0
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     n.id === eraseTargetNodeId
@@ -13138,6 +13373,7 @@ export default function CanvasPage() {
                     && !hideToolbar
                     && !audioVideoMuxInFlightSourceIds.has(n.id)
                     && !finalizeCtaByNodeId.has(n.id)
+                    && !regenerateCtaByNodeId.has(n.id)
                   ) return n;
                   const data: Record<string, unknown> = { ...n.data };
                   if (n.id === eraseTargetNodeId) {
@@ -13196,6 +13432,12 @@ export default function CanvasPage() {
                   if (finalizeCta) {
                     data.finalizeCta = finalizeCta;
                     data.onFinalizeSample = handleFinalizeSample;
+                  }
+                  // IKIZQG：重新生成样片入口派生状态注入（过期样片卡标题行 / 成片失败卡失败区，不持久化）
+                  const regenerateCta = regenerateCtaByNodeId.get(n.id);
+                  if (regenerateCta) {
+                    data.regenerateCta = regenerateCta;
+                    data.onRegenerateSample = handleRegenerateSample;
                   }
                   if (hideToolbar) data.soloToolbarHidden = true;
                   return { ...n, data };

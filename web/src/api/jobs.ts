@@ -20,7 +20,7 @@ import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
 import type { AudioVideoMuxCreate } from '@lib/contracts/audio-video-mux';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
-import type { StageQuoteView, VideoFinalizeCreateRequest } from '@lib/contracts/video-sample-mode';
+import type { StageQuoteView, SampleRegenerateRequest, VideoFinalizeCreateRequest } from '@lib/contracts/video-sample-mode';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
 import type {
@@ -860,6 +860,49 @@ export function finalizeVideoJob(
 ): Promise<JobCreatedData> {
   return apiRequest<JobCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${encodeURIComponent(String(jobId))}/finalize`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(payload),
+      ...silentInit(init),
+    },
+  );
+}
+
+/** POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample/quote（IKIZQF）。
+ *  重新生成样片报价（只读、fail open）：非样片任务 / 模型停用或未放行 / 算不出价 → 空报价
+ *  双 null（前端据此禁用重新生成按钮——无报价不提交）。过期与成片失败**不影响**报价。
+ *  `jobId` 是本仓原样片任务 ID；请求体恒为空对象（契约 §5，输入由服务端从冻结输入派生）。 */
+export function quoteSampleRegenerate(
+  projectId: string,
+  jobId: string | number,
+  init?: { silent?: boolean },
+): Promise<VideoFinalizeQuote> {
+  return apiRequest<VideoFinalizeQuote>(
+    `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${encodeURIComponent(String(jobId))}/regenerate-sample/quote`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+      ...silentInit(init),
+    },
+  );
+}
+
+/** POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample（IKIZQF）。
+ *  重新生成样片提交：从原样片**冻结输入**派生创建请求走创建管线，新建任务与结果卡
+ *  （不继承旧报价、旧截止或 Draft ID）。请求体仅报价确认两字段（契约
+ *  sampleRegenerateRequestSchema——浏览器不重传输入）。`idempotencyKey` 口径同
+ *  {@link createGenerationJob}：一次用户意图一把，报价变动即换新意图换新键（同键异载荷
+ *  服务端判幂等冲突 100409）。错误码：1056 变价重报价、1014 核对中拒再提交。 */
+export function regenerateSampleJob(
+  projectId: string,
+  jobId: string | number,
+  payload: SampleRegenerateRequest,
+  idempotencyKey: string,
+  init?: { silent?: boolean },
+): Promise<JobCreatedData> {
+  return apiRequest<JobCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${encodeURIComponent(String(jobId))}/regenerate-sample`,
     {
       method: 'POST',
       headers: { 'Idempotency-Key': idempotencyKey },
