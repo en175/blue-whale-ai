@@ -1038,11 +1038,12 @@ describe('MediaNode 去字幕编辑态框层（IKGZ83）', () => {
     expect(mountNode.querySelector('[data-testid="subtitle-erase-boxes-layer"]')).toBeNull();
   });
 
-  /** 会话锁定播放控件（IKH3NP 审查修订）：会话期 toolMode 恒 select，原生控件必须自己
+  /** 会话锁定播放控件（IKH3NP 审查修订）：会话期 toolMode 恒 select，播放控件必须自己
       关掉（智能模式不再注入框层，没有 inset:0 覆盖层替视频挡控件），指针一并交还画布；
-      两模式都停帧；无会话标记的选中态视频卡维持原生控件不动。!834 起锁定期卡内整个
+      两模式都停帧；无会话标记的选中态视频卡维持播放能力可达（IKI5YM 起为自绘控件）。
+      !834 起锁定期卡内整个
       不渲染 <video>（离屏解码 + 首帧画布占位），控件与指针随元素一起从卡内收回。 */
-  it('会话锁定期关原生播放控件与指针，智能与框选两模式都生效；无标记时保留 controls', async () => {
+  it('会话锁定期关播放控件与指针，智能与框选两模式都生效；无标记时播放能力可达', async () => {
     // 智能模式：只注入停帧标记（无框层），会话期 toolMode 仍为 select
     await renderNode('video', { data: { toolMode: 'select', subtitleErasePaused: true } });
     expect(mountNode.querySelector('video')).toBeNull();
@@ -1067,12 +1068,14 @@ describe('MediaNode 去字幕编辑态框层（IKGZ83）', () => {
     await renderNode('video', { data: { toolMode: 'select', subtitleEraseEditing: editing } });
     expect(mountNode.querySelector('video')).toBeNull();
     expect(mountNode.querySelector('[data-testid="subtitle-erase-boxes-layer"]')).toBeTruthy();
-    // 回归：无会话标记的选中态视频卡布防后保留原生控件且可交互
+    // 回归：无会话标记的选中态视频卡布防后播放能力可达（IKI5YM 起自绘控件替代原生
+    // controls），画面区不落 nodrag（可拖整卡）
     await renderNode('video', { data: { toolMode: 'select' } });
     await waitForVideoArm();
     const normalVideo = mountNode.querySelector('video')!;
-    expect(normalVideo.hasAttribute('controls')).toBe(true);
-    expect(normalVideo.style.pointerEvents).toBe('');
+    expect(normalVideo.hasAttribute('controls')).toBe(false);
+    expect(normalVideo.classList.contains('nodrag')).toBe(false);
+    expect(contentCard().querySelector('button[aria-label="播放"]')).toBeTruthy();
   });
 });
 
@@ -1096,6 +1099,109 @@ describe('MediaNode 音视频分离编辑态锁定层（IKH28U）', () => {
     // 未注入的正常视频卡不渲染锁定层
     await renderNode('video', { data: { toolMode: 'select' } });
     expect(mountNode.querySelector('[data-testid="split-lock-layer"]')).toBeNull();
+  });
+});
+
+describe('MediaNode 视频画面区拖拽与自绘控件（IKI5YM）', () => {
+  /** 选择模式下按住视频画面区拖动整卡：原生 controls + 整卡 nodrag 让画面区落入
+      「不可拖拽、原生控件接管指针」的互斥（对齐图片卡与 AudioPlayer 先例：画面区
+      裸给 React Flow，播放能力改由自绘控件承担，nodrag 只挂控件子元素）。 */
+  it('武装后画面区回归节点拖拽路径：树内 video 无 nodrag/nopan、无原生 controls、禁原生拖放', async () => {
+    await renderNode('video', { data: { toolMode: 'select' } });
+    await waitForVideoArm();
+    const video = mountNode.querySelector('video')!;
+    expect(video).toBeTruthy();
+    expect(video.classList.contains('nodrag')).toBe(false);
+    expect(video.classList.contains('nopan')).toBe(false);
+    expect(video.hasAttribute('controls')).toBe(false);
+    expect(video.draggable).toBe(false);
+    // 未选中路径：首帧海报 canvas 占位同样不落 nodrag（画面区可拖不因选中态而异）
+    await renderNode('video', { selected: false, data: { toolMode: 'select' } });
+    const poster = mountNode.querySelector('canvas')!;
+    expect(poster).toBeTruthy();
+    expect(poster.classList.contains('nodrag')).toBe(false);
+  });
+
+  it('自绘播放控件可达且不入拖拽路径：播放钮切换播放/暂停，进度轨点按与拖拽 seek', async () => {
+    await renderNode('video', { data: { toolMode: 'select', duration: 100 } });
+    await waitForVideoArm();
+    const video = mountNode.querySelector('video')!;
+    const playButton = contentCard().querySelector<HTMLButtonElement>('button[aria-label="播放"]')!;
+    expect(playButton).toBeTruthy();
+    expect(playButton.classList.contains('nodrag')).toBe(true);
+    expect(playButton.classList.contains('nopan')).toBe(true);
+    const play = vi.spyOn(video, 'play').mockImplementation(async () => {
+      Object.defineProperty(video, 'paused', { configurable: true, value: false });
+      video.dispatchEvent(new Event('play'));
+    });
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => {
+      Object.defineProperty(video, 'paused', { configurable: true, value: true });
+      video.dispatchEvent(new Event('pause'));
+    });
+    await act(async () => { playButton.click(); });
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(playButton.getAttribute('aria-label')).toBe('暂停');
+    await act(async () => { playButton.click(); });
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(playButton.getAttribute('aria-label')).toBe('播放');
+
+    // 进度轨负责 seek（服务端权威时长 100s）；操作区域同样排除节点拖动和画布平移
+    const track = contentCard().querySelector<HTMLElement>('[data-testid="video-seek-track"]')!;
+    expect(track).toBeTruthy();
+    expect(track.classList.contains('nodrag')).toBe(true);
+    expect(track.classList.contains('nopan')).toBe(true);
+    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 200 } as DOMRect);
+    await act(async () => {
+      track.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true, cancelable: true }));
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 150, bubbles: true }));
+      document.dispatchEvent(new MouseEvent('mouseup', { clientX: 150, bubbles: true }));
+    });
+    // 点按后焦点落在进度轨：保住「点按 seek + 方向键微调」的鼠标-键盘组合路径
+    expect(document.activeElement).toBe(track);
+    expect(video.currentTime).toBe(75);
+    expect(track.getAttribute('aria-valuenow')).toBe('75');
+    expect(track.parentElement!.textContent).toContain('1:15');
+    // 键盘可达（WAI-ARIA slider 契约）：方向键按总时长 5%（至少 1s）步进
+    await act(async () => {
+      track.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    });
+    expect(video.currentTime).toBe(80);
+    await act(async () => {
+      track.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+    });
+    expect(video.currentTime).toBe(75);
+  });
+
+  it('画面区点击切换播放/暂停；按住位移后松开（拖动整卡）不误触播放', async () => {
+    await renderNode('video', { data: { toolMode: 'select' } });
+    await waitForVideoArm();
+    const video = mountNode.querySelector('video')!;
+    const play = vi.spyOn(video, 'play').mockImplementation(async () => {
+      Object.defineProperty(video, 'paused', { configurable: true, value: false });
+      video.dispatchEvent(new Event('play'));
+    });
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => {
+      Object.defineProperty(video, 'paused', { configurable: true, value: true });
+      video.dispatchEvent(new Event('pause'));
+    });
+    // 拖动整卡：按下到松开位移超过阈值（6px），click 不切换播放
+    await act(async () => {
+      video.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10, bubbles: true }));
+      video.dispatchEvent(new MouseEvent('click', { clientX: 80, clientY: 40, bubbles: true }));
+    });
+    expect(play).not.toHaveBeenCalled();
+    // 原地点击：位移在阈值内，切换播放
+    await act(async () => {
+      video.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10, bubbles: true }));
+      video.dispatchEvent(new MouseEvent('click', { clientX: 12, clientY: 12, bubbles: true }));
+    });
+    expect(play).toHaveBeenCalledTimes(1);
+    // 播放中再原地点击：暂停
+    await act(async () => {
+      video.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10, bubbles: true }));
+      video.dispatchEvent(new MouseEvent('click', { clientX: 12, clientY: 12, bubbles: true }));
+    });
+    expect(pause).toHaveBeenCalledTimes(1);
   });
 });
 

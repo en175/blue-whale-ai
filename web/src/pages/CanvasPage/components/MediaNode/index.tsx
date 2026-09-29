@@ -24,6 +24,7 @@ import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
 import AudioTrimOverlay from './AudioTrimOverlay';
 import AudioPlayer, { useAudioTrimSeekBridge } from './AudioPlayer';
+import VideoPlayerControls, { toggleVideoPlayback } from './VideoPlayerControls';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
@@ -61,6 +62,9 @@ function HandlePlus() {
 /** 真实时长文案（秒取整）；未知或非正返回空串，标题右侧据此留空 */
 const durationLabel = (duration?: number) =>
   typeof duration === 'number' && duration > 0 ? `${Math.round(duration)}s` : '';
+
+/** 画面区点击判定位移阈值（像素）：按下到松开位移不超过它才算点击，超过视为拖动整卡 */
+const VIDEO_CLICK_SLOP_PX = 6;
 
 /** 正在等首帧 seeked 的 video，避免 loadedmetadata / loadeddata / effect 叠监听 */
 const pendingFirstFrameSeek = new WeakSet<HTMLVideoElement>();
@@ -415,8 +419,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
    *  subtitleErasePaused 注入）两模式都要停帧并关掉原生播放/进度条控件——智能模式不再
    *  注入框层，没有 inset:0 覆盖层替视频挡控件，controls 必须自己关；指针一并交还画布。 */
   const subtitleEraseLocked = data.subtitleEraseEditing != null || data.subtitleErasePaused === true;
-  /** 原生控件只给「当前选中」的视频卡。选择工具下所有卡都开 controls 时，
-   *  Chromium 视频 GPU 层会把工具栏/小地图的点击偷走：节点被选中且直接开播。 */
+  /** 树内 <video> + 自绘播放控件只给「当前选中」的视频卡（IKI5YM 起自绘控件替代原生
+   *  controls）。选择工具下所有卡都渲染可播 video 时，Chromium 视频 GPU 层会把工具栏/
+   *  小地图的点击偷走：节点被选中且直接开播。 */
   const videoInteractive = Boolean(selected) && isSelect && !subtitleEraseLocked;
   const [videoControlsArmed, setVideoControlsArmed] = useState(false);
   /** 悬停预览会话占屏中（IKJ7RS）：起播置 true，停止翻回；真值期树内布防延后——
@@ -966,6 +971,22 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     setVideoError({ code });
   }, []);
 
+  /** 画面区点击播放/暂停（IKI5YM）：自绘控件无原生画面点击行为，按下坐标供 click 判定
+   *  位移——拖动整卡松开时浏览器仍派发 click，位移超阈值不算点击，防误触播放 */
+  const videoPressRef = useRef<{ x: number; y: number } | null>(null);
+  const handleVideoPressDown = useCallback((event: React.MouseEvent<HTMLVideoElement>) => {
+    videoPressRef.current = { x: event.clientX, y: event.clientY };
+  }, []);
+  const handleVideoClick = useCallback((event: React.MouseEvent<HTMLVideoElement>) => {
+    const press = videoPressRef.current;
+    videoPressRef.current = null;
+    if (!press) return;
+    const dx = event.clientX - press.x;
+    const dy = event.clientY - press.y;
+    if (dx * dx + dy * dy > VIDEO_CLICK_SLOP_PX ** 2) return;
+    toggleVideoPlayback(videoRef.current);
+  }, []);
+
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
   const isDraft = data.genStatus === 'draft';
@@ -1423,26 +1444,35 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             ) : (
               /* 双源播放：主源编码未知不标 codecs，H.264 兜底标 avc1——主源解码失败
                  （如 H.265 遇无 HEVC 扩展的 Windows/Edge）浏览器自动落到次选 source。
-                 合成层放在包裹层：直接打在 <video> 上会穿透画布工具栏/小地图的命中。 */
+                 合成层放在包裹层：直接打在 <video> 上会穿透画布工具栏/小地图的命中。
+                 IKI5YM：video 不挂 nodrag（画面区回归节点拖拽路径，对齐图片卡）、
+                 去原生 controls（shadow DOM 无法只对画面区放行指针）；播放能力由
+                 VideoPlayerControls 自绘控件承担，其交互子元素自带 nodrag。 */
               <div className={styles.mediaVideoLayer}>
                 {videoControlsArmed ? (
-                  <video
-                    ref={videoRef}
-                    className={`${styles.mediaVideo} nodrag nopan`}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    disablePictureInPicture
-                    disableRemotePlayback
-                    controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
-                    onLoadedMetadata={handleVideoReady}
-                    onLoadedData={handleVideoReady}
-                    onError={handleVideoError}
-                  >
-                    {videoSourceList(data.src, data.srcH264).map((source) => (
-                      <source key={source.src} src={source.src} type={source.type} />
-                    ))}
-                  </video>
+                  <>
+                    <video
+                      ref={videoRef}
+                      className={styles.mediaVideo}
+                      playsInline
+                      preload="metadata"
+                      disablePictureInPicture
+                      draggable={false}
+                      onLoadedMetadata={handleVideoReady}
+                      onLoadedData={handleVideoReady}
+                      onError={handleVideoError}
+                      onMouseDown={handleVideoPressDown}
+                      onClick={handleVideoClick}
+                    >
+                      {videoSourceList(data.src, data.srcH264).map((source) => (
+                        <source key={source.src} src={source.src} type={source.type} />
+                      ))}
+                    </video>
+                    <VideoPlayerControls
+                      videoRef={videoRef}
+                      duration={typeof data.duration === 'number' ? data.duration : undefined}
+                    />
+                  </>
                 ) : (
                   <>
                     <canvas ref={videoPosterRef} className={styles.mediaVideoPoster} aria-hidden />

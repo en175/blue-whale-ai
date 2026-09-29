@@ -264,6 +264,62 @@
   display: none;
 }
 
+/* 自绘视频控制条（IKI5YM）：叠加画面底部，nodrag/nopan 由组件内交互子元素类承担；
+   z-index 低于编辑态锁定层（inline zIndex 5）——编辑期间控件不可达 */
+.videoControlsBar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 6px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+}
+
+.videoPlayBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background-color: rgba(46, 46, 46, 0.9);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.videoPlayBtn:hover {
+  background-color: #3a3a3a;
+}
+
+.videoTrack {
+  flex: 1;
+  position: relative;
+  height: 4px;
+  border-radius: 9999px;
+  background-color: rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+}
+
+.videoTrackFill {
+  height: 100%;
+  border-radius: 9999px;
+  background-color: #fff;
+}
+
+.videoTime {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
 /* 悬停预览播放层（IKJ7RS）：absolute 铺满 .mediaVideoLayer、盖在首帧画布上，空层零视觉；
    pointer-events:none 指针穿透（!832 合同：不抢节点点击/悬浮工具条/小地图命中），
    不打 transform 避免新增合成层化路径；移入的 video 无控件，与 .mediaVideo 同款

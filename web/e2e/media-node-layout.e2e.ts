@@ -435,7 +435,11 @@ test('视频：真实播放且控件可达', async ({ page }) => {  const tracki
   await page.goto('/canvas?project=project-1');
   const video = node(page, 'n-video').locator('video');
   await expect(video).toBeVisible();
-  expect(await video.getAttribute('controls')).not.toBeNull();
+  // IKI5YM：原生 controls 移除（画面区回归节点拖拽路径），播放能力由自绘控件承担
+  expect(await video.getAttribute('controls')).toBeNull();
+  const card = node(page, 'n-video');
+  await expect(card.locator('button[aria-label="播放"]')).toBeVisible();
+  await expect(card.locator('[data-testid="video-seek-track"]')).toBeVisible();
 
   await video.evaluate((v: HTMLVideoElement) => v.play());
   await page.waitForFunction(
