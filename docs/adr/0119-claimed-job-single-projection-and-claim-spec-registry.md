@@ -1,6 +1,6 @@
 # worker 领取：ClaimedJob 收敛为单一投影，领取差异收进 ClaimSpec 数据注册表，解散家族级转发门面
 
-worker-java 的领取组装层按家族复制：`JobClaimService` 986 行里 18 个 claim 方法体同构、15 个 `Claimed*JobDto` record 字段同形、14 份 `*_LEASE_SECONDS = 420` 常量带近同 javadoc；`JobStateMachineService` 另有 46 个家族级纯转发方法（段头自述「直通」，方法体为 `return x.y(input)`）。决定（2026-09-28 grilling 十节点拍板，基线 `release/2026.09.29`，工单 IKIWP8）：**ClaimedJob 收敛为一条 record，领取的全部差异收进 `ClaimSpec` 值对象，`JobClaimService` 收敛为对具体家族零知识的策略执行器，并解散转发到服务的家族级门面**。这是让代码向 `CONTEXT.md` 已有的领域定义靠拢，不是改定义。
+worker-java 的领取组装层按家族复制：`JobClaimService` 986 行里 18 个 claim 方法体同构、15 个 `Claimed*JobDto` record 字段同形、14 份 `*_LEASE_SECONDS = 420` 常量带近同 javadoc；`JobStateMachineService` 另有 27 个 publish/fail 家族级纯转发方法（段头自述「直通」，方法体为 `return x.y(input)`）。决定（2026-09-28 grilling 十节点拍板，基线 `release/2026.09.29`，工单 IKIWP8）：**ClaimedJob 收敛为一条 record，领取的全部差异收进 `ClaimSpec` 值对象，`JobClaimService` 收敛为对具体家族零知识的策略执行器，并解散转发到服务的家族级门面**。这是让代码向 `CONTEXT.md` 已有的领域定义靠拢，不是改定义。
 
 ## 决策
 
@@ -10,9 +10,9 @@ worker-java 的领取组装层按家族复制：`JobClaimService` 986 行里 18 
 
 **「不套 source 白名单」由类型表达，不再靠纪律**。4 个 type-only 专属候选查询的 SQL 逐字同形（仅 type 字面量不同），合并为 `findCandidateByTypeOnly`；`findVideoCandidate` 的「专属」实为硬编码 source 白名单，参数化查询本就能表达，退役。收敛后候选查询只剩 2 种形态，IKHPK9 那个「传空列表 → MyBatis 渲染出 `source IN AND is_delete` 坏 SQL → 任务永久卡 queued」的坑在类型上不再可能存在。
 
-**门面解散的边界是「转发目标」，不是「家族」**。转发给服务（`JobClaimService` / `JobFinalizer`）的 46 个全部解散，处理器直呼目标；转发给 mapper 的 cancel / renew / progress 保留——后者是 application 层对 infrastructure 的合理封装，散到处理器才是漏层。只解散 claim 那 18 个会留下「一半直连、一半走门面」的中间态，而中间态会被下一个家族照抄，正是 18 份复制当初的成因。
+**门面解散的边界是「转发目标」，不是「家族」**。转发给服务（`JobClaimService` / `JobFinalizer`）的 42 个全部解散（claim 15 + publish/fail 27），处理器直呼目标；转发给 mapper 的 cancel / renew / progress 保留——后者是 application 层对 infrastructure 的合理封装，散到处理器才是漏层。只解散 claim 那 15 个会留下「一半直连、一半走门面」的中间态，而中间态会被下一个家族照抄，正是 18 份复制当初的成因。（`JobClaimService` 原有的 18 个 claim 方法里，3 个第 1 类生成型 by-id 归 Q5 的第二步，不在本次解散范围。）
 
-**生成族（image / audio / video by-id）纳入同一概念，实施排第二步**。先收敛工具族 13 个，管道成熟后再接生成族——生成族跑的是 `ImageJobProcessor` 核心生成路径（`retry_count` 驱动的瞬态重试、`providerTaskId == null` 的分相判据），风险隔离。但**设计时以它为抽象验收样本**：管道若接不住生成族，说明抽象抽错了。
+**生成族（image / audio / video by-id）纳入同一概念，实施排第二步**。先收敛工具族 15 个（薄·免费工具 4 = image_enhance / image_erase / image_cutout / image_outpaint；富·轮询 11 = media_extract / audio_mix / audio_video_mux / audio_trim / audio_speed / video_subtitle_erase / video_enhance / vocal_split / video_scene_split / video_matting / video_frame_interpolation），管道成熟后再接生成族——生成族跑的是 `ImageJobProcessor` 核心生成路径（`retry_count` 驱动的瞬态重试、`providerTaskId == null` 的分相判据），风险隔离。但**设计时以它为抽象验收样本**：管道若接不住生成族，说明抽象抽错了。
 
 ## Considered Options
 
@@ -20,7 +20,7 @@ worker-java 的领取组装层按家族复制：`JobClaimService` 986 行里 18 
 - **`ClaimSpec` 放 `domain/contract/*Contract`**：保住了「家族契约集中一处」，但会让 `domain/` 层出现第一条 `infrastructure/` 依赖（全仓零先例），且静态常量无法持有实例方法引用——技术上也行不通。否决。
 - **两条 record（薄 / 富）**：字面满足工单原验收标准「不超过 2 种形态」，且免去宽 record 里恒空字段。但薄 / 富的分界线（有没有上游轮询）是实现细节、会随上游能力演化被跨越，固化它等于把偶然差异升成概念——正是 `CONTEXT.md` 的 `_Avoid_`。否决。
 - **sealed interface + 按族或按形态切变体实现**：按族切 = 15 个变体（现状换个名字，复制一个没消）；按形态切 = 上面那张正交特征表逼出中间类爆炸。否决。
-- **只解散 claim 那 18 个门面方法**：其余 28 个 publish/fail 转发留着。留下中间态，且下一个家族作者看到「claim 直连、publish 走门面」最省事的做法是照写。否决。
+- **只解散 claim 那 15 个门面方法**：其余 27 个 publish/fail 转发留着。留下中间态，且下一个家族作者看到「claim 直连、publish 走门面」最省事的做法是照写。否决。
 - **拆多个 PR 顺序合入**：中间态会进批次分支；且每个 PR 都要独立跑全量验证，成本不比一次跑省。改为一次 PR、三个 commit（mapper 收敛 → 管道 + DTO → 门面解散），review 一样能分段读。否决。
 - **只改签名让既有测试编过、不重构测试面**：`JobStateMachineServiceGoldenMirrorTest` 里 per-family claim 用例（`claimMediaExtract: no candidate → empty` 等）本身与被收敛的生产代码同构地复制，不动等于把复制留在测试里。否决。
 
