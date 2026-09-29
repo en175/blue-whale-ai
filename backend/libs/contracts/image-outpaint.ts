@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /* 智能扩图（image_outpaint）跨进程任务契约（IKGOQR，契约先行红线）：
    权威规格 = docs/specs/2026-09-18-image-outpaint-mediakit.md（Implementation Decisions）；
-   关键取舍见 docs/adr/0093-image-outpaint-mediakit-expand-canvas.md；术语见根 CONTEXT.md「画布图片扩图」。
+   关键取舍见 docs/adr/0093-image-outpaint-mediakit-expand-canvas.md；术语见根 GLOSSARY.md「画布图片扩图」。
    跨进程字段在本文件定死后双端实现：worker-java 侧同名常量类
    ImageOutpaintContract（domain/entity），防漂移断言见 image-outpaint.test.ts。
    后续票（创建入口 / worker 执行 / 前端）一律引用本文件，不得发明字段名。

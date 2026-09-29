@@ -6,7 +6,7 @@ import { z } from "zod";
    https://e.gitee.com/hangzhou-xuanfu_1/issues/IKHVYO
    （全曲变速、无格式下拉、0.05 步进、1.0 原速视觉中点、原速发送置灰）。
    原速省略 speed 是本契约 buildAudioSpeedInput 的防御性收口，非父单交互决策；
-   术语见根 CONTEXT.md「画布音频调速」节。一对一复刻 audio-trim 契约家族（audio-trim.ts）。
+   术语见根 GLOSSARY.md「画布音频调速」节。一对一复刻 audio-trim 契约家族（audio-trim.ts）。
    接口契约唯一权威 = 火山引擎 AI MediaKit adjust-audio-speed 官方 CLI 参考文档
    （volcengine/mediakit-cli 仓库 skills/byted-mediakit-editing/reference/adjust-audio-speed.md，
    Cloud 模式契约；对应 REST 上游 POST /api/v1/tools/adjust-audio-speed——**异步任务**：提交返

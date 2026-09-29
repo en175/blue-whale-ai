@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /* 音视频分离（media_extract，原「提取音频」）跨进程任务契约（IKH28T）：
    权威章节 = docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md §18（冻结增量）；
-   原始设计 = docs/specs/2026-08-25-ikardy-media-extract-design.md；术语见根 CONTEXT.md。
+   原始设计 = docs/specs/2026-08-25-ikardy-media-extract-design.md；术语见根 GLOSSARY.md。
    接口契约唯一权威 = 火山引擎 AI MediaKit「提交音频提取任务 API」官方 PDF
    POST https://mediakit.cn-beijing.volces.com/api/v1/tools/extract-audio（**异步任务**：
    提交返 task_id，轮询查询取 result.audio_url / result.duration——本仓经 new-api 网关调用；

@@ -8,7 +8,7 @@ import {
   isAudioVideoSplitFormat,
 } from './audioVideoSplit';
 
-describe('AUDIO_VIDEO_SPLIT_FORMATS（分离格式清单，CONTEXT.md「分离格式」词条）', () => {
+describe('AUDIO_VIDEO_SPLIT_FORMATS（分离格式清单，GLOSSARY.md「分离格式」词条）', () => {
   it('五值 m4a/mp3/ogg/flac/wav，默认 m4a', () => {
     expect([...AUDIO_VIDEO_SPLIT_FORMATS]).toEqual(['m4a', 'mp3', 'ogg', 'flac', 'wav']);
     expect(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT).toBe('m4a');
@@ -45,7 +45,7 @@ describe('audioVideoSplitGateReason（音视频分离门槛预检，IKH28U）', 
     expect(AUDIO_VIDEO_SPLIT_MISSING_ASSET_REASON).not.toContain('时长');
   });
 
-  it('入口效果边界 hint 常量（可用态悬停文案：仅音频产物，CONTEXT.md Avoid 词条）', () => {
+  it('入口效果边界 hint 常量（可用态悬停文案：仅音频产物，GLOSSARY.md Avoid 词条）', () => {
     expect(AUDIO_VIDEO_SPLIT_ENTRY_HINT).toContain('音轨');
     expect(AUDIO_VIDEO_SPLIT_ENTRY_HINT).toContain('仅音频');
   });

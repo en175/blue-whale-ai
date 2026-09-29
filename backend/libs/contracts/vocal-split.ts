@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /* 人声背景分离（vocal_split）跨进程任务契约（IKHA2C）：
-   术语见根 CONTEXT.md；接口契约唯一权威 = 火山引擎 AI MediaKit「人声背景音分离」官方
+   术语见根 GLOSSARY.md；接口契约唯一权威 = 火山引擎 AI MediaKit「人声背景音分离」官方
    PDF POST https://mediakit.cn-beijing.volces.com/api/v1/tools/separate-voice
    （**异步任务**：提交返 task_id，轮询查询按 scene 取 result 的 2/3 个音轨 URL 与
    duration——24 小时时效，worker 完成后须立即转存自家 TOS；本仓经 new-api 网关调用，

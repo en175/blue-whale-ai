@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /* 视频场景切分（video_scene_split，火山 MediaKit segment-scenes）跨进程任务契约（IKH8BH）：
    父规格 IKH86V（画布视频「场景切分」一对多逐段扇出，设计定案 ADR-0108）；术语见根
-   CONTEXT.md「画布视频场景切分」。接口契约唯一权威 = 火山引擎 AI MediaKit「提交场景切分
+   GLOSSARY.md「画布视频场景切分」。接口契约唯一权威 = 火山引擎 AI MediaKit「提交场景切分
    任务 API」官方 PDF POST https://mediakit.cn-beijing.volces.com/api/v1/tools/segment-scenes
    （**异步任务**：提交返 task_id，轮询查询取 result.duration + result.segments[]——本仓经
    new-api 网关调用；参数名以官方 PDF 为准，出处逐条标注在常量注释，禁止引用二手信息）。

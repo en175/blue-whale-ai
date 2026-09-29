@@ -1,6 +1,6 @@
 ---
 name: implement-spec
-description: "Implement a specification in code."
+description: "Implement the result of /to-spec and /to-tickets in code."
 disable-model-invocation: true
 ---
 
@@ -10,7 +10,7 @@ The tickets form a **task graph**. The **frontier** contains tickets whose prere
 
 Communicate through **context pointers** to the spec, tickets, research notes, and commits. Include the assignment, ownership, and missing context in each handoff, without copying material the recipient can read.
 
-This repository creates the PR after implementation and review. [ADR-0116](../../../docs/adr/0116-implement-spec-integration-workflow.md) records this adaptation of the [upstream workflow](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/skills/in-progress/implement-spec/SKILL.md). Invoking this skill authorizes implementation, not publication or PR merge.
+This repository creates the PR after implementation and review. [ADR-0116](../../../docs/adr/0116-implement-spec-integration-workflow.md) records this adaptation of the [upstream workflow](https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/skills/engineering/implement-spec/SKILL.md). Invoking this skill authorizes implementation, not publication or PR merge.
 
 ## Steps
 

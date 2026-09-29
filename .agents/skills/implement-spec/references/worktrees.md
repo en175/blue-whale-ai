@@ -32,7 +32,7 @@ scripts/start-task-worktree.sh --type <type> --issue <ticket-ident> --summary <c
 
 The entrypoint records a fixed inheritance commit from the integration branch. Enter the returned child worktree, confirm its metadata and CBM project, and perform the ticket's start transition. Prepare dependencies required by that ticket's tooling in this worktree.
 
-Implement and test the ticket against its acceptance criteria. Commit with:
+Implement and test the ticket against its acceptance criteria, driving `/tdd` for each red-green slice where the ticket admits a test-first loop. Commit with:
 
 ```bash
 scripts/commit-task-for-review.sh -m "<commit-message>"

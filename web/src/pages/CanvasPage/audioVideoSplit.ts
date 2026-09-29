@@ -3,7 +3,7 @@
  * 无 React 依赖，形状与判定口径对齐 videoSubtitleErase.ts 先例）。
  * 分离格式清单经 @lib/contracts/media-extract 与契约同源（整合缝合，数值不变仅换单源，
  * 对齐 videoSubtitleErase.ts 契约常量引用先例 IKGZ7V）；效果边界文案出处 =
- * CONTEXT.md「分离格式」词条与 ADR-0103 决策一。
+ * GLOSSARY.md「分离格式」词条与 ADR-0103 决策一。
  * ============================================ */
 
 import {
@@ -29,7 +29,7 @@ export function isAudioVideoSplitFormat(value: unknown): value is AudioVideoSpli
 
 /* ============ 门槛预检与文案 ============ */
 
-/** 入口可用态悬停说明（效果边界，CONTEXT.md Avoid 词条）：产物只有音频一侧。 */
+/** 入口可用态悬停说明（效果边界，GLOSSARY.md Avoid 词条）：产物只有音频一侧。 */
 export const AUDIO_VIDEO_SPLIT_ENTRY_HINT = '将视频完整音轨分离为音频卡片（仅音频，不产出去音轨的视频）';
 
 /** 唯一置灰原因（ADR-0103 决策四：分辨率与时长不做前置拦截，超限走任务失败口径） */
