@@ -1,70 +1,13 @@
 /* ============================================
- * ConfirmModal 样式：二次确认弹窗
+ * ConfirmModal 样式：只剩「警示图标 + 文案」这一块内容
+ *
+ * 遮罩 / 面板 / 头 / 关闭按钮 / 底部按钮都**不在这里**——那些是 ui/Modal 与 ui/Button
+ * 的职责。此前这里各存一份同义样式，结果是浅色化时两处各漏各的；删掉后口径回到套件单点。
  * ============================================ */
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 150;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(17 24 39 / 0.06);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  /* 与 ui/Modal 同一条纪律（完整理由写在那里）：**门户根声明前景色**。
-     本弹窗同样 portal 到 document.body，子元素「继承来」的文字色是前台的 #fff。
-     目前每个子元素都自带颜色，所以这里不是病；加这一行是让**下一个**往里加元素的人
-     不必先知道 portal 这回事。 */
-  color: var(--admin-text);
-}
-
-.modal {
-  width: 420px;
-  max-width: calc(100vw - 48px);
-  border: 1px solid var(--admin-divider);
-  border-radius: var(--admin-radius-pop);
-  background: #f3f4f6;
-  box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--admin-border);
-}
-
-.title {
-  margin: 0;
-  font-size: var(--admin-font-md);
-  font-weight: 700;
-  color: var(--admin-text);
-}
-
-.closeBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: var(--admin-radius-control);
-  background: transparent;
-  color: var(--admin-text-muted);
-  cursor: pointer;
-}
-
-.closeBtn:hover {
-  background: #f3f4f6;
-  color: var(--admin-text);
-}
-
 .body {
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  padding: 24px 22px;
 }
 
 .icon {
@@ -75,7 +18,7 @@
   width: 40px;
   height: 40px;
   border-radius: var(--admin-radius-pill);
-  background: rgba(239, 68, 68, 0.15);
+  background: var(--admin-danger-soft);
   color: var(--admin-danger);
 }
 
@@ -85,40 +28,4 @@
   font-size: var(--admin-font-sm);
   line-height: 1.7;
   color: var(--admin-text-muted);
-}
-
-.foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 0 22px 22px;
-}
-
-.cancelBtn {
-  padding: 10px 20px;
-  border: 1px solid var(--admin-border);
-  border-radius: var(--admin-radius-surface);
-  background: var(--admin-surface-sunken);
-  color: var(--admin-text-muted);
-  font-size: var(--admin-font-sm);
-  cursor: pointer;
-}
-
-.cancelBtn:hover {
-  background: #e5e7eb;
-}
-
-.confirmBtn {
-  padding: 10px 22px;
-  border: none;
-  border-radius: var(--admin-radius-surface);
-  background: var(--admin-danger);
-  color: #fff;
-  font-size: var(--admin-font-sm);
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.confirmBtn:hover {
-  background: #f26363;
 }
