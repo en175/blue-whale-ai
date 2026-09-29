@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /* 视频插帧（video_frame_interpolation，火山 MediaKit video-frame-interpolation）跨进程任务契约
-   （IKHLK3，父需求 IKHLES 画布视频插帧）：术语见根 CONTEXT.md「画布视频插帧」词条组，入口形态与
+   （IKHLK3，父需求 IKHLES 画布视频插帧）：术语见根 GLOSSARY.md「画布视频插帧」词条组，入口形态与
    帧率三档口径 = ADR-0113。接口契约唯一权威 = 火山引擎 AI MediaKit 参数级 API 参考页
    （**异步任务**：提交返 task_id，轮询查询取 result.video_url（24h 临时链接）/ duration /
    resolution / fps；本仓经 new-api 网关调用）。官方出处逐条标注在常量注释，禁止引用二手信息，

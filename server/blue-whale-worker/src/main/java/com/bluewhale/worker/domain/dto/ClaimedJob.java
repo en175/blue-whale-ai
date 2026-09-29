@@ -6,7 +6,7 @@ import java.util.Map;
 /**
  * 已领取任务（ClaimedJob）—— Worker 依租约接管一个 GenerationJob 执行责任的独享视图。
  * <p>
- * <b>单一概念、单一形态</b>（IKIWP8 / ADR-0119）：本 record 是 CONTEXT.md 所定义「公共核心
+ * <b>单一概念、单一形态</b>（IKIWP8 / ADR-0119）：本 record 是 GLOSSARY.md 所定义「公共核心
  * + 按类型的 payload 扩展」的唯一落地形态。此前 15 个 {@code Claimed*JobDto} 按家族各写一份，
  * 字段分布实测是正交特征表而非层次（「轮询」与「生成」不互斥、「取消」跨三类形态），单继承表达
  * 不了，故收敛为一条宽 record，不适用的字段留 {@code null} / {@code 0} / {@code false}。

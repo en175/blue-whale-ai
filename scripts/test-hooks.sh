@@ -2161,11 +2161,11 @@ mkdir -p "$DOCALLO_REPO/docs/adr" "$DOCALLO_REPO/docs/specs" "$DOCALLO_REPO/.cla
 SAVED_CLAUDE_PROJECT_DIR_DOCALLO="${CLAUDE_PROJECT_DIR:-}"
 export CLAUDE_PROJECT_DIR="$DOCALLO_REPO"
 
-# master 根 CONTEXT.md 被拦截
-run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_ctx","session_id":"s_doc","tool_input":{"file_path":"'"$DOCALLO_REPO"'/CONTEXT.md"}}'
-assert_exit 2 "doc-allowlist: master Edit 根 CONTEXT.md 拦截"
+# master 根 GLOSSARY.md 被拦截
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_ctx","session_id":"s_doc","tool_input":{"file_path":"'"$DOCALLO_REPO"'/GLOSSARY.md"}}'
+assert_exit 2 "doc-allowlist: master Edit 根 GLOSSARY.md 拦截"
 DOCALLO_LOG="$(audit_log_path "$DOCALLO_REPO" "$MASTER_EDIT_HOOK")"
-assert_audit_has_field "$DOCALLO_LOG" reason blocked-master "doc-allowlist: CONTEXT.md 拦截审计"
+assert_audit_has_field "$DOCALLO_LOG" reason blocked-master "doc-allowlist: GLOSSARY.md 拦截审计"
 
 # docs 任意层级 .md（含子目录、全新文件 Write）也不得直写 master
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/docs/adr/0001.md"}}'
@@ -2204,9 +2204,9 @@ commit_spec_setup() {
   git -C "$repo" add -A && git -C "$repo" commit -q -m "feat: baseline"
 }
 
-# 用例1：doc-only CONTEXT.md → 入口废止，拒绝且不落新 commit
+# 用例1：doc-only GLOSSARY.md → 入口废止，拒绝且不落新 commit
 SPEC1="$(mktemp -d)"; commit_spec_setup "$SPEC1"
-printf 'ctx\n' > "$SPEC1/CONTEXT.md"
+printf 'ctx\n' > "$SPEC1/GLOSSARY.md"
 ( cd "$SPEC1" && bash "$REPO_ROOT/scripts/commit-spec-on-master.sh" -m "补领域语言" ) >/dev/null 2>&1
 RUN_EXIT=$?
 assert_exit 1 "commit-spec: 入口已废止——doc-only 也拒（exit 1）"
@@ -2654,7 +2654,7 @@ assert_codex_hooks_valid "codex: hooks.json 与 Claude matcher 同步"
 for runtime_hook in .claude/hooks/*.sh .codex/hooks/*.sh .kimi-code/hooks/*.sh .claude/settings.json .codex/hooks.json .kimi-code/hooks.toml; do
   assert_file_not_matches "$runtime_hook" 'permissionDecision[^[:alnum:]]*[=:][^[:alnum:]]*ask' "hooks: $runtime_hook 不包含 ask 运行机制"
 done
-for active_doc in CLAUDE.md CONTEXT.md docs/agents/git-workflow.md docs/agents/commit-and-review.md docs/agents/worktree-workflow.md docs/agents/hooks/README.md; do
+for active_doc in CLAUDE.md GLOSSARY.md docs/agents/git-workflow.md docs/agents/commit-and-review.md docs/agents/worktree-workflow.md docs/agents/hooks/README.md; do
   assert_file_not_has_text "$active_doc" 'permissionDecision=ask' "docs: $active_doc 不再描述 ask 为活跃机制"
 done
 assert_git_not_ignored ".codex/hooks.json" "codex: hooks.json 可提交"

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /* 图片擦除（image_erase）跨进程任务契约（IKGOT3）：
    权威章节 = docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md §15（冻结增量）；
-   需求规格 = docs/specs/2026-09-18-image-erase-mediakit.md；术语见根 CONTEXT.md「画布图片擦除」。
+   需求规格 = docs/specs/2026-09-18-image-erase-mediakit.md；术语见根 GLOSSARY.md「画布图片擦除」。
    供应商接口 = 火山引擎 AI MediaKit「提交图像擦除修复任务 API」
    POST https://mediakit.cn-beijing.volces.com/api/v1/tools-sync/erase-image
    （本仓经 new-api 网关调用，路径模式同高清放大；参数名以官方 PDF 为准，出处逐条标注在常量注释）。

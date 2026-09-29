@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /* 视频 HD 高清（video_enhance，火山 MediaKit 画质增强大模型版）跨进程任务契约（IKH3VE）：
-   父规格 IKH3VB；术语见根 CONTEXT.md「画布视频 HD 高清」；面板极简骨架与参数裁剪口径 =
+   父规格 IKH3VB；术语见根 GLOSSARY.md「画布视频 HD 高清」；面板极简骨架与参数裁剪口径 =
    ADR-0105。接口契约唯一权威 = 火山引擎 AI MediaKit「提交画质增强（大模型版）任务 API」
    官方 PDF POST https://mediakit.cn-beijing.volces.com/api/v1/tools/enhance-video-generative
    （**异步任务**：提交返 task_id，轮询查询取 result.video_url（24h 临时链接）/ duration /

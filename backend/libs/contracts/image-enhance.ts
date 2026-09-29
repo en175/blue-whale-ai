@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /* 高清放大（image_enhance）跨进程任务契约（IKGM8U）：
    权威章节 = docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md §14（冻结增量）；
-   需求规格 = docs/specs/2026-09-17-image-upscale-mediakit.md；术语见根 CONTEXT.md「画布高清放大」。
+   需求规格 = docs/specs/2026-09-17-image-upscale-mediakit.md；术语见根 GLOSSARY.md「画布高清放大」。
    跨进程字段在本文件定死后双端实现（红线：契约先行）：worker-java 侧同名常量类
    ImageEnhanceContract（domain/entity），防漂移断言见 image-enhance.test.ts。
    结果回填约定（§14.5）：成功时 worker 下载结果图（火山 URL 仅 24h 有效）→ 落对象存储公开读

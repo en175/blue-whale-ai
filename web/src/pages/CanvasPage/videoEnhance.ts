@@ -2,7 +2,7 @@
  * 视频 HD 高清（IKH3VG）：视频卡工具条「HD」文字徽标入口的门槛预检、HD 卡身份标记
  * 与来源边常量。枚举、默认档与输入门槛常量复用 backend/libs/contracts/video-enhance.ts
  * （web 经 @lib/contracts 引入，先例见 imageEnhance.ts / videoSubtitleErase.ts 契约同源）；
- * 权威口径 = 根 CONTEXT.md「画布视频 HD 高清」三词条 + ADR-0105（面板极简骨架、
+ * 权威口径 = 根 GLOSSARY.md「画布视频 HD 高清」三词条 + ADR-0105（面板极简骨架、
  * 建卡与会话形态照抄图片高清放大、发送任务接通归下一票 IKH3VH）。
  * ============================================ */
 import {

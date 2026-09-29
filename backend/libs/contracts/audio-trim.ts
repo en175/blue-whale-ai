@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /* 音频截取（audio_trim，画布音频卡「截取」）跨进程任务契约（IKHB6F）：
    父单 IKHB08（遮罩选段+试听确认+火山 trim-audio 异步任务）；交互与参数口径 = ADR-0111
-   （格式默认跟随源音频、贴边省略提交、精度三级）；术语见根 CONTEXT.md。
+   （格式默认跟随源音频、贴边省略提交、精度三级）；术语见根 GLOSSARY.md。
    接口契约唯一权威 = 火山引擎 AI MediaKit「提交音频裁剪任务 API」官方 PDF
    POST https://mediakit.cn-beijing.volces.com/api/v1/tools/trim-audio（**异步任务**：
    提交返 task_id，轮询查询取 result.audio_url（24h 临时链接）/ result.duration——本仓经

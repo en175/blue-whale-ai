@@ -5,7 +5,7 @@ import { z } from "zod";
    Decisions）；接口契约唯一权威 = 火山引擎 AI MediaKit「提交图像背景移除任务 API」官方 PDF
    POST https://mediakit.cn-beijing.volces.com/api/v1/tools-sync/remove-image-background
    （同步接口；本仓经 new-api 网关调用，对客模型名 mediakit-remove-image-background；
-   参数名以官方 PDF 为准，出处逐条标注在常量注释）；术语见根 CONTEXT.md「画布图片抠图」。
+   参数名以官方 PDF 为准，出处逐条标注在常量注释）；术语见根 GLOSSARY.md「画布图片抠图」。
    跨进程字段在本文件定死后双端实现（红线：契约先行）：worker-java 侧同名常量类
    ImageCutoutContract（domain/entity），防漂移断言见 image-cutout.test.ts。
    结果回填约定（同擦除 §15.5 模式）：成功时 worker 在同步响应后立即下载结果图（火山 URL

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /* 视频智能去字幕（video_subtitle_erase）跨进程任务契约（IKGZ7Z）：
    权威章节 = docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md §17（冻结增量）；
-   需求规格 = docs/specs/2026-09-19-video-subtitle-erase-mediakit.md；术语见根 CONTEXT.md
+   需求规格 = docs/specs/2026-09-19-video-subtitle-erase-mediakit.md；术语见根 GLOSSARY.md
    「画布视频智能去字幕」。接口契约唯一权威 = 火山引擎 AI MediaKit「提交字幕擦除（精细化版）
    任务 API」官方 PDF POST https://mediakit.cn-beijing.volces.com/api/v1/tools/erase-video-subtitle-pro
    （**异步任务**：提交返 task_id，轮询查询取结果——家族内首个异步工具，区别于高清/擦除/抠图的
