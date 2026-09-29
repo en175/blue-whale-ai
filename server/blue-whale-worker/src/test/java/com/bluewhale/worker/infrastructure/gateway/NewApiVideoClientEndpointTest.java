@@ -1,6 +1,7 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
 import com.bluewhale.common.http.NewApiHttpSupport;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
@@ -364,6 +365,24 @@ class NewApiVideoClientEndpointTest {
                 (OkHttpClient) clientField.get(new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)));
         assertThat(submitClient.readTimeoutMillis()).isEqualTo(submitTimeoutMs);
         assertThat(submitClient.writeTimeoutMillis()).isEqualTo(submitTimeoutMs);
+    }
+
+    @Test
+    @DisplayName("IKJ80I: video 租约 > submit 三超时串行最坏耗时（防 recovery 重投双扣回归）")
+    void videoLeaseExceedsSubmitWorstCase() throws Exception {
+        Field leaseField = JobClaimService.class.getDeclaredField("VIDEO_LEASE_SECONDS");
+        leaseField.setAccessible(true);
+        int videoLeaseSeconds = leaseField.getInt(null);
+
+        // 三超时按 client 实际配置取值：connect + write + read 可串行叠加，见 JobClaimService 租约 javadoc
+        Field clientField = NewApiVideoClient.class.getDeclaredField("submitClient");
+        clientField.setAccessible(true);
+        OkHttpClient submitClient =
+                (OkHttpClient) clientField.get(new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)));
+        long submitWorstCaseMs = (long) submitClient.connectTimeoutMillis()
+                + submitClient.writeTimeoutMillis() + submitClient.readTimeoutMillis();
+
+        assertThat(videoLeaseSeconds * 1000L).isGreaterThan(submitWorstCaseMs);
     }
 
     @Test
