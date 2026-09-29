@@ -223,6 +223,10 @@ function sampleNode(): Node {
   return mediaNodes().find((n) => n.id === 's1')!;
 }
 
+function nodeData(id: string): Record<string, unknown> {
+  return (mediaNodes().find((n) => n.id === id)?.data ?? {}) as Record<string, unknown>;
+}
+
 function finalNodeOf(sampleJobId = '9001'): Node | undefined {
   return mediaNodes().find(
     (n) => n.data?.videoStage === 'final' && String(n.data?.sourceSampleJobId ?? '') === sampleJobId,
@@ -232,13 +236,14 @@ function finalNodeOf(sampleJobId = '9001'): Node | undefined {
 /** 等样片卡注入指定 phase 的成片按钮，并返回当时的注入态 */
 async function waitForCta(phase: string) {
   await vi.waitFor(() => {
-    expect(sampleNode().data?.finalizeCta?.phase).toBe(phase);
+    expect((nodeData('s1').finalizeCta as { phase?: string } | undefined)?.phase).toBe(phase);
   });
-  return sampleNode().data!.finalizeCta as { phase: string; credits?: number };
+  return nodeData('s1').finalizeCta as { phase: string; credits?: number };
 }
 
 async function clickFinalize() {
-  await act(async () => { sampleNode().data!.onFinalizeSample!('s1'); });
+  const fn = nodeData('s1').onFinalizeSample as (id: string) => void;
+  await act(async () => { fn('s1'); });
 }
 
 function defaultFinalDetail(overrides: Record<string, unknown> = {}) {
@@ -296,7 +301,7 @@ describe('IKIZQE 成片按钮（页面流）', () => {
 
     // 提交中：CTA 已派生为 running（生成中，禁用），成片占位卡已在样片卡右侧邻近落位并带两卡关系
     await vi.waitFor(() => expect(finalNodeOf()).toBeTruthy());
-    expect(sampleNode().data?.finalizeCta?.phase).toBe('running');
+    expect((nodeData('s1').finalizeCta as { phase?: string } | undefined)?.phase).toBe('running');
     const finalNode = finalNodeOf()!;
     expect(finalNode.data?.videoStage).toBe('final');
     expect(finalNode.data?.sourceSampleJobId).toBe('9001');
@@ -336,9 +341,10 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     await renderPage();
     await waitForCta('ready');
     await act(async () => {
-      sampleNode().data!.onFinalizeSample!('s1');
-      sampleNode().data!.onFinalizeSample!('s1');
-      sampleNode().data!.onFinalizeSample!('s1');
+      const fn = nodeData('s1').onFinalizeSample as (id: string) => void;
+      fn('s1');
+      fn('s1');
+      fn('s1');
     });
     expect(apiMocks.finalizeVideoJob).toHaveBeenCalledTimes(1);
     await act(async () => { resolveFinalize({ generation_job_id: '9002', cursor: 7 }); });

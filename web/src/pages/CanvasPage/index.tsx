@@ -7222,7 +7222,7 @@ export default function CanvasPage() {
     }
     const sample = mediaNodesRef.current.find((n) => n.id === sampleNodeId);
     const sampleData = (sample?.data ?? {}) as Record<string, unknown>;
-    if (sampleData.videoStage !== 'sample' || sampleData.jobId == null) return false;
+    if (sample == null || sampleData.videoStage !== 'sample' || sampleData.jobId == null) return false;
     const sampleJobId = String(sampleData.jobId);
     // 提交结果不明（核对中）：禁止再次点击——服务端 1014 同口径拒再提交
     if (finalizeUnknownSamples.has(sampleNodeId)) return false;

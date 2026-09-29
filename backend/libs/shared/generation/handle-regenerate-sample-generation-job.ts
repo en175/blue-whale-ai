@@ -59,8 +59,6 @@ export function sampleRegeneratePreconditionOf(sample: FinalizeSourceJob):
   return { ok: true };
 }
 
-/** 从样片冻结输入派生创建请求 body（type=video + 480p + sample_mode=true + 单输出）。
- *  量不出 model_id → null（数据异常：调用方按不可提交处置）。 */
 /** parameters 重建：正文/比例/模型原样，480p 与 sample_mode=true 由样片形态重立；
  *  duration / generate_audio 是用户选择，冻结过就原样带回。 */
 function sampleRegenerateParametersOf(
@@ -78,6 +76,8 @@ function sampleRegenerateParametersOf(
   };
 }
 
+/** 从样片冻结输入派生创建请求 body（type=video + 480p + sample_mode=true + 单输出）。
+ *  量不出 model_id → null（数据异常：调用方按不可提交处置）。 */
 export function deriveSampleRegenerateBody(
   sampleInput: Record<string, unknown>,
 ): CreateGenerationJobBody | null {
