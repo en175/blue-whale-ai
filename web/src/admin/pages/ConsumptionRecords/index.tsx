@@ -87,6 +87,8 @@ const modelText = (row: AdminConsumptionRecord) => row.model_label ?? row.model_
  * 同一套口径（`useQueryFilters` 里写了为什么不用 `'all'` 哨兵）。
  */
 const TYPE_OPTIONS = [
+  // ⚠️ 这里没有「退款」：退回不是一种流水类型，是那条 consume 行的「结算到 0」——
+  //    金额 0、预扣额走注解（见下面「积分」列）。留着这一档只会筛出一张永远空的页。
   { value: '', label: '全部类型' },
   { value: 'consume', label: '消费' },
   { value: 'recharge', label: '充值到账' },
@@ -97,7 +99,6 @@ const TYPE_OPTIONS = [
   { value: 'subscription', label: '会员赠送' },
   { value: 'gift', label: '运营赠送' },
   { value: 'compensation', label: '补偿 / 人工调账' },
-  { value: 'refund', label: '退款' },
   { value: 'expire', label: '积分过期' },
 ];
 
@@ -196,11 +197,16 @@ export default function ConsumptionRecords() {
       header: '积分',
       render: (row) => {
         const income = row.direction === 'in';
+        // 0 是「结算到 0」—— 失败单全额退回后就是这一行。它既不是进项也不是出项，
+        // 带上符号（`-0`）会让人以为发生过一笔资金流动 —— 而这个 0 要说的是
+        // 「冻过多少、全退回来了」，那件事由旁边的「预扣 N」注解承担。
+        const zero = row.credits === 0;
         return (
           <div style={AMOUNT_CELL}>
             {/* 金额恒正，正负由 direction 表达 —— 与账本口径一致 */}
-            <Badge tone={income ? 'success' : 'accent'}>
-              {income ? `+${fmt(row.credits)}` : `-${fmt(row.credits)}`}
+            <Badge tone={zero ? 'neutral' : income ? 'success' : 'accent'}>
+              {zero ? '' : income ? '+' : '-'}
+              {fmt(row.credits)}
             </Badge>
             {/* 预扣额：**只在两个数不一致时**才补这一句。
                 三个理由，缺一个都会让它变成噪音：
@@ -213,7 +219,7 @@ export default function ConsumptionRecords() {
                    （老构建压根没投影这一列）。漏掉后者，`undefined` 会被当成
                    「有值」进来渲染，`fmt` 一碰就 `toLocaleString` of undefined ——
                    整页白屏（2026-09-26 实测，见 adminConsumptionRecords.ts 的类型注释）。
-                也**不能**用真值判断：0 是「全额退回」，那恰恰是最该显示预扣的一行。 */}
+                也**不能**用真值判断：0 是「结算到 0」（失败单全额退回），那恰恰是最该显示预扣的一行。 */}
             {row.reserved_credits != null && row.reserved_credits !== row.credits && (
               <span style={SECONDARY_TEXT}>预扣 {fmt(row.reserved_credits)}</span>
             )}

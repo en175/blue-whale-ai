@@ -198,7 +198,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     expect(document.body.textContent).not.toContain('Unexpected Application Error');
   });
 
-  it('预扣为 0（结算时全额退回）仍要显示 —— 那正是最该解释的一行', async () => {
+  it('结算到 0（失败单全额退回）仍要显示 —— 那正是最该解释的一行', async () => {
     // 判空若写成 `if (row.reserved_credits)`，0 会被当成「没有预扣」而整行消失，
     // 恰好漏掉「冻了 12、最后全退回来」这种最需要交代的行
     api.fetchAdminConsumptionRecords.mockResolvedValue({
@@ -208,8 +208,15 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
 
     await renderPage();
 
-    expect(document.body.textContent).toContain('-0');
-    expect(document.body.textContent).toContain('预扣 12');
+    const cell = [...document.querySelectorAll('tbody tr td')].find((td) =>
+      td.textContent?.includes('预扣'),
+    );
+    expect(cell?.textContent).toContain('0');
+    expect(cell?.textContent).toContain('预扣 12');
+    // ★ 0 不带符号：`-0` 会让人以为发生过一笔资金流动，
+    //    而这个 0 要说的是「冻过多少、全退回来了」—— 那件事由旁边的预扣注解承担
+    expect(cell?.textContent).not.toContain('-0');
+    expect(cell?.textContent).not.toContain('+0');
   });
 
   it('预扣与金额在**同一个单元格**里 —— 并排，不另起一行、也不单开一列', async () => {

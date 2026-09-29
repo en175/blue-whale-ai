@@ -44,7 +44,14 @@ public enum TransactionType {
     /** 补偿（含人工调账）。 */
     COMPENSATION("compensation"),
 
-    /** 退款。 */
+    /**
+     * 退款。
+     *
+     * <p>⚠️ 目前**没有产生者**：任务退回是那条 consume 行的「结算到 0」，不是另一种类型
+     * （见 {@code TransactionMapper.xml} 的 ② 段）。这个词留着是因为它在契约里合法
+     * ——运营端传 {@code type=refund} 应当得到一张空页，而不是 INVALID_ARGUMENT；
+     * 将来充值退款一类的反向资金动作投影进用户流水时也用它。
+     */
     REFUND("refund"),
 
     /** 批次过期核销。 */
