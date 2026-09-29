@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * 端点：
  * <ul>
- *   <li>submit：POST /v1/video/generations（30s 超时，视频上游慢 :50-51）</li>
+ *   <li>submit：POST /v1/video/generations（120s 超时：带视频参考的提交网关实测 ~51s 同步返回，IKJ80M）</li>
  *   <li>poll：GET /v1/video/generations/{taskId}（10s 超时，默认值）</li>
  * </ul>
  * <p>
@@ -62,8 +62,11 @@ public class NewApiVideoClient {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
-    /** submit 超时 30s（new-api-video-task-provider.ts:50-51）。 */
-    private static final int SUBMIT_TIMEOUT_MS = 30_000;
+    /**
+     * submit 超时 120s（IKJ80M）：网关处理带 video_url 参考的提交实测 ~51s 才同步返回，
+     * 旧值 30s（new-api-video-task-provider.ts:50-51）会误杀视频参考任务；120s 留足余量。
+     */
+    private static final int SUBMIT_TIMEOUT_MS = 120_000;
     /** poll 超时 10s（默认）。 */
     private static final int POLL_TIMEOUT_MS = 10_000;
 
@@ -168,9 +171,11 @@ public class NewApiVideoClient {
         try {
             response = submitClient.newCall(request).execute();
         } catch (SocketTimeoutException e) {
-            // submit 超时 → provider_failed（runner catch 归类，video-job-runner.ts:357-375）
+            // submit 超时 → provider_failed（runner catch 归类，video-job-runner.ts:357-375）。
+            // IKJ80P：cause 必须带上——网关超时断开后仍可能完成建单（provider_task_id 无从取得），
+            // processor 据此把本 job 标记为「疑似上游已建单孤儿」落显式终态 + 告警。
             throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "new-api 视频提交超时");
+                    "new-api 视频提交超时", e);
         } catch (Exception e) {
             throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "new-api 视频提交失败: " + e.getMessage());

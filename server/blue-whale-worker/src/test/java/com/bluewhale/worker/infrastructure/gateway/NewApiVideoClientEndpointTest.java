@@ -1,6 +1,9 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.common.http.NewApiHttpSupport;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoSubmitInput;
@@ -8,6 +11,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoTaskOb
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,12 +23,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 视频提交出站协议钉桩测试（IKFFWH）。
@@ -340,5 +346,75 @@ class NewApiVideoClientEndpointTest {
         assertThat(observation.error()).isNotNull();
         // 合并信号里 copyright 优先于 quota → 1038
         assertThat(observation.error().code()).isEqualTo("content_rejected_reference");
+    }
+
+    @Test
+    @DisplayName("IKJ80M: submit 超时 ≥120s 且经 submitClient 配置生效（网关带视频参考提交实测 ~51s）")
+    void submitTimeoutAtLeast120sAppliedToClient() throws Exception {
+        Field timeoutField = NewApiVideoClient.class.getDeclaredField("SUBMIT_TIMEOUT_MS");
+        timeoutField.setAccessible(true);
+        int submitTimeoutMs = timeoutField.getInt(null);
+
+        // 旧值 30s 会误杀带视频参考的提交；120s 为实测 ~51s 留足余量
+        assertThat(submitTimeoutMs).isGreaterThanOrEqualTo(120_000);
+
+        // 常量必须真实落到 submitClient 的 read/write 超时（防构造函数改丢）
+        Field clientField = NewApiVideoClient.class.getDeclaredField("submitClient");
+        clientField.setAccessible(true);
+        OkHttpClient submitClient =
+                (OkHttpClient) clientField.get(new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)));
+        assertThat(submitClient.readTimeoutMillis()).isEqualTo(submitTimeoutMs);
+        assertThat(submitClient.writeTimeoutMillis()).isEqualTo(submitTimeoutMs);
+    }
+
+    @Test
+    @DisplayName("IKJ80I: video 租约 > submit 三超时串行最坏耗时（防 recovery 重投双扣回归）")
+    void videoLeaseExceedsSubmitWorstCase() throws Exception {
+        Field leaseField = JobClaimService.class.getDeclaredField("VIDEO_LEASE_SECONDS");
+        leaseField.setAccessible(true);
+        int videoLeaseSeconds = leaseField.getInt(null);
+
+        // 三超时按 client 实际配置取值：connect + write + read 可串行叠加，见 JobClaimService 租约 javadoc
+        Field clientField = NewApiVideoClient.class.getDeclaredField("submitClient");
+        clientField.setAccessible(true);
+        OkHttpClient submitClient =
+                (OkHttpClient) clientField.get(new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)));
+        long submitWorstCaseMs = (long) submitClient.connectTimeoutMillis()
+                + submitClient.writeTimeoutMillis() + submitClient.readTimeoutMillis();
+
+        assertThat(videoLeaseSeconds * 1000L).isGreaterThan(submitWorstCaseMs);
+    }
+
+    @Test
+    @DisplayName("IKJ80P: submit 读超时 → VideoProviderError 携带 SocketTimeoutException cause（孤儿判定信号）")
+    void submitReadTimeoutCarriesSocketTimeoutCause() throws Exception {
+        // 模拟「提交超时但网关随后成功」：响应延迟到客户端放弃之后才发出（网关侧建单仍完成）
+        server.createContext("/v1/video/generations", exchange -> {
+            try {
+                Thread.sleep(1_500);
+                byte[] resp = "{\"task_id\":\"task-late\",\"status\":\"queued\"}"
+                        .getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, resp.length);
+                try (OutputStream out = exchange.getResponseBody()) {
+                    out.write(resp);
+                }
+            } catch (Exception ignored) {
+                // 客户端已超时断开，写出失败是预期
+            }
+        });
+
+        NewApiVideoClient client = new NewApiVideoClient(new UpstreamBaseUrl(baseUrl));
+        // 测试时限内复现读超时：把 submitClient 换成 300ms 短超时实例（生产 120s 不动）
+        Field clientField = NewApiVideoClient.class.getDeclaredField("submitClient");
+        clientField.setAccessible(true);
+        clientField.set(client, NewApiHttpSupport.buildClient(1_000, 300, 300));
+
+        assertThatThrownBy(() -> client.submit("t", new VideoSubmitInput(
+                "seedance-2", "一只猫在跑步", 5.0, "720p", "16:9",
+                null, null, List.of(), null)))
+                .isInstanceOf(VideoProviderError.class)
+                .hasMessage("new-api 视频提交超时")
+                // IKJ80P：cause 链是 processor 侧「疑似上游已建单孤儿」的唯一机器可读信号
+                .hasCauseInstanceOf(java.net.SocketTimeoutException.class);
     }
 }

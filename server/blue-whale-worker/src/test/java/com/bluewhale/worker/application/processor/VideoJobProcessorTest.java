@@ -156,6 +156,92 @@ class VideoJobProcessorTest {
                 baseInput().get("prompt"), captor.getValue().prompt());
     }
 
+    // ========== IKJ80P：提交超时孤儿治理 ==========
+
+    @Test
+    @DisplayName("IKJ80P: submit 读超时 → 显式失败终态 + details.submit_timeout_orphan=true，不再重排")
+    void submitTimeoutMarksOrphanSuspectedTerminalFailure() {
+        ClaimedVideoJobDto claim = videoClaim("120", false, null, 0, 0, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("120"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "new-api 视频提交超时", new java.net.SocketTimeoutException("Read timed out")))
+                .when(videoClient).submit(anyString(), any(VideoSubmitInput.class));
+
+        processor.handle("120");
+
+        verify(finalizer).failVideoJob(eq("120"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                eq("new-api 视频提交超时"),
+                argThat(d -> Boolean.TRUE.equals(d.get(
+                        VideoJobProcessor.ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN))),
+                eq("video-worker"), eq(1L));
+        // 落终态而非续跑：不再提交、不落 provider_task_id、不排轮询
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Connect timed out", "connect timed out"})
+    @DisplayName("IKJ80I: submit connect 超时（请求未送达）→ 不打孤儿标记（JDK 17/8 两代 message 形态）")
+    void submitConnectTimeoutNotMarkedOrphan(String timeoutMessage) {
+        ClaimedVideoJobDto claim = videoClaim("123", false, null, 0, 0, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("123"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "new-api 视频提交超时", new java.net.SocketTimeoutException(timeoutMessage)))
+                .when(videoClient).submit(anyString(), any(VideoSubmitInput.class));
+
+        processor.handle("123");
+
+        // connect 超时请求未送达、网关不可能建单：不进孤儿对账清单，但仍落显式失败终态
+        verify(finalizer).failVideoJob(eq("123"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                anyString(),
+                argThat(d -> !d.containsKey(VideoJobProcessor.ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN)),
+                anyString(), anyLong());
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKJ80P: submit 非超时失败（无 SocketTimeoutException cause）→ 不打孤儿标记")
+    void submitFailureWithoutTimeoutCauseHasNoOrphanMarker() {
+        ClaimedVideoJobDto claim = videoClaim("121", false, null, 0, 0, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("121"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "new-api 视频提交失败: java.net.ConnectException: Connection refused"))
+                .when(videoClient).submit(anyString(), any(VideoSubmitInput.class));
+
+        processor.handle("121");
+
+        verify(finalizer).failVideoJob(eq("121"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                anyString(),
+                argThat(d -> !d.containsKey(VideoJobProcessor.ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN)),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKJ80P: poll 阶段错误即使带超时 cause 也不打孤儿标记（provider_task_id 已落库）")
+    void pollPhaseErrorNeverMarkedOrphan() {
+        ClaimedVideoJobDto claim = videoClaim("122", false, "task-789", 0, 0, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("122"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "new-api 视频轮询失败: 慢", new java.net.SocketTimeoutException()))
+                .when(videoClient).poll(anyString(), eq("task-789"));
+
+        processor.handle("122");
+
+        verify(finalizer).failVideoJob(eq("122"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                anyString(),
+                argThat(d -> !d.containsKey(VideoJobProcessor.ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN)),
+                anyString(), anyLong());
+    }
+
     // ========== IKFCXC：文本附件确定性组合（供应商边界，packages/core 契约移植）==========
 
     @Test
