@@ -323,21 +323,57 @@
   pointer-events: none;
 }
 
-/* ---- IKIZQB：样片卡徽标（标题行右侧；过期改警告色，不删除样片） ---- */
-.sampleBadge {
-  flex-shrink: 0;
-  padding: 1px 7px;
+/* ---- IKJ7UI（ADR-0119）：样片/成片角标（画面内右上角，v3 原型深色玻璃胶囊定稿）。
+   样式取自 v3 高保真原型 .sampleTag/.finalTag（web/prototypes/seedance-sample-card-v3
+   .prototype.html，一次性分支归档）：位置 top/right 8px、11px 字号、3px 10px 内边距、
+   9999px 圆角、rgba(0,0,0,.6) 深底 + 白 14% 描边。glass 边界：backdrop-filter 仅作角标
+   对底层视频画面的轻模糊，rgba(0,0,0,.6) 静态底色已独立保证对比度（不唯一依赖半透明）；
+   角标随卡片移动，非静止表面上的整层玻璃。pointer-events:none 同 transparentTag 先例。 */
+.stageTag {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 9999px;
-  background-color: rgba(52, 100, 217, 0.16);
-  color: #3464d9;
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  color: #ddd;
   font-size: 11px;
+  font-weight: 500;
   white-space: nowrap;
   pointer-events: none;
 }
 
-.sampleBadgeExpired {
-  background-color: rgba(200, 98, 32, 0.16);
-  color: #c86220;
+/* 样片成功态：「样片 480P」信息蓝点缀（截止时段为暗淡灰） */
+.stageTagAcc {
+  color: #8ec4f8;
+  font-weight: 600;
+}
+
+.stageTagDim {
+  color: #a0a0a0;
+  font-weight: 400;
+}
+
+/* 过期/缺可信截止：整条警告橙（次段 75% 透明度分层） */
+.stageTagExpired {
+  color: #f6c95c;
+}
+
+.stageTagExpired .stageTagDim {
+  color: rgba(246, 201, 92, 0.75);
+}
+
+/* 成片态：紫色文字点缀（ADR-0119「成片 1080P」定稿色） */
+.stageTagFinal {
+  color: #a5b6ff;
+  font-weight: 600;
 }
 
 /* ---- IKIZQE：样片卡标题行成片按钮（两阶段链式动作唯一入口，原型定稿 titleCta） ---- */
@@ -365,18 +401,6 @@
   background-color: #2a2a2a;
   color: #666;
   cursor: not-allowed;
-}
-
-/* ---- IKIZQE：成片卡身份角标（100% 普通卡，仅多此角标；对齐样片徽标形态） ---- */
-.finalBadge {
-  flex-shrink: 0;
-  padding: 1px 7px;
-  border-radius: 9999px;
-  background-color: rgba(125, 82, 217, 0.16);
-  color: #9d74e0;
-  font-size: 11px;
-  white-space: nowrap;
-  pointer-events: none;
 }
 
 /* ---- IKIZQE：提交结果不明「状态核对中」占位（IKIZQD checking 态卡片呈现） ---- */

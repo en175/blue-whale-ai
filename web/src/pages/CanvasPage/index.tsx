@@ -7061,7 +7061,8 @@ export default function CanvasPage() {
         // IKIZQB：阶段身份以服务端持久投影为准（父规格「投影与兼容」）——样片成功回填实际
         // 截止时间（finalize_deadline_at，缺可信时间时 null 但样片仍保留）；普通成功清样片标记。
         // IKIZQE：成片成功标 final 并按投影回填来源样片关系（本地建卡值仅兜底）；
-        // 两阶段卡另回填该阶段费用状态（settled + actual_credits → 角标「已用 N 积分」）。
+        // 两阶段卡另回填该阶段费用状态（settled + actual_credits；IKJ7UI 起不上画面内
+        // 角标，供历史记录与资产详情展示）。
         videoStage: detail.video_stage === 'sample' ? 'sample' : detail.video_stage === 'final' ? 'final' : undefined,
         finalizeDeadlineAt: detail.video_stage === 'sample' ? (detail.finalize_deadline_at ?? null) : undefined,
         ...(detail.video_stage === 'final' && detail.source_sample_job_id != null
@@ -7396,16 +7397,11 @@ export default function CanvasPage() {
     }
   }, [mediaNodes, currentId, finalizeQuotes, finalizeUnknownSamples]);
 
-  /** IKIZQG：重新生成入口身份解析——返回该卡指向的原样片任务 ID（null = 无入口）：
-   *  过期/缺可信截止的成功样片卡（标题行入口，父规格用户故事 24）与成片失败卡（失败区
-   *  入口，经 sourceSampleJobId 找回原样片，用户故事 21）。未过期样片的续作路径是
-   *  finalize 而非重新生成，故截止有效时不提供入口。 */
+  /** IKIZQG：重新生成入口身份解析——返回该卡指向的原样片任务 ID（null = 无入口）。
+   *  IKJ7UI（ADR-0119）起唯一入口是成片失败卡失败区（videoStage=final + failed +
+   *  sourceSampleJobId 找回原样片，用户故事 21：按原输入新建样片）；过期样片卡标题行
+   *  入口已随决策移除（过期信息由画面内角标表达，恢复靠重新编辑后从面板重发）。 */
   const regenEntrySampleJobIdOf = (d: Record<string, unknown>): string | null => {
-    if (d.draft === true) return null;
-    if (d.videoStage === 'sample' && d.jobId != null && d.genStatus == null) {
-      if (typeof d.finalizeDeadlineAt === 'string' && !sampleDeadlineExpired(d.finalizeDeadlineAt)) return null;
-      return String(d.jobId);
-    }
     if (d.videoStage === 'final' && d.genStatus === 'failed' && d.sourceSampleJobId != null) {
       return String(d.sourceSampleJobId);
     }
@@ -7413,15 +7409,15 @@ export default function CanvasPage() {
   };
 
   /** ═══ IKIZQG 重新生成样片（regenerate-sample）提交链路 ═══
-   *  入口两处：过期样片卡标题行、成片失败卡失败区。报价就绪（服务端门——空报价双 null
-   *  即禁用）才可点；点击直接提交，服务端从原样片**冻结输入**派生新任务——**创建新卡不
-   *  覆盖旧结果**（旧样片/失败成片/费用记录只读不写）。提交即在入口卡正下方 +60px 建样片
-   *  占位卡（videoStage=sample；避开 finalize 在样片右侧 +60px 的落位），受理后回填 jobId
-   *  走既有轮询（sample 阶段投影由 applyJobTerminal 回填，新样片有自己的截止与成片入口）。
-   *  并发/重复防线：inflight ref 按**样片任务 id**归并（同一样片的两个入口并发点击至多一次）。
-   *  错误收敛（口径同 finalize）：1056 变价 → 重报价后再由用户点击（新报价 = 新签名换新幂等键，
-   *  不撞同键变价 100409）；1014 → 「状态核对中」禁点；传输结果不明（408/网络）→ 同幂等键
-   *  原样重发一次（服务端重放首次结果），仍不明 → 状态核对中。 */
+   *  入口：成片失败卡失败区（IKJ7UI 起改形为同款「重试」按钮）。报价就绪（服务端门
+   *  ——空报价双 null 即禁用）才可点；点击直接提交，服务端从原样片**冻结输入**派生新
+   *  任务——**创建新卡不覆盖旧结果**（旧样片/失败成片/费用记录只读不写）。提交即在入口
+   *  卡正下方 +60px 建样片占位卡（videoStage=sample；避开 finalize 在样片右侧 +60px 的
+   *  落位），受理后回填 jobId 走既有轮询（sample 阶段投影由 applyJobTerminal 回填，新
+   *  样片有自己的截止与成片入口）。并发/重复防线：inflight ref 按**样片任务 id**归并。
+   *  错误收敛（口径同 finalize）：1056 变价 → 重报价后再由用户点击（新报价 = 新签名换新
+   *  幂等键，不撞同键变价 100409）；1014 → 「状态核对中」禁点；传输结果不明（408/网络）
+   *  → 同幂等键原样重发一次（服务端重放首次结果），仍不明 → 状态核对中。 */
   const handleRegenerateSample = (entryNodeId: string): boolean => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法重新生成样片');
@@ -7547,9 +7543,9 @@ export default function CanvasPage() {
     return true;
   };
 
-  /** IKIZQG：重新生成报价获取——入口卡（过期/缺截止样片、成片失败）进 CTA 前先问价
-   *  （按样片任务归并：同一样片的两个入口共享一份报价）。空报价（双 null）= 服务端判
-   *  不可提交（非样片任务/模型未放行/算不出价），据此禁用按钮；报价失败同样折空报价。 */
+  /** IKIZQG：重新生成报价获取——入口卡（成片失败卡，IKJ7UI 起）进 CTA 前先问价（按
+   *  样片任务归并）。空报价（双 null）= 服务端判不可提交（非样片任务/模型未放行/算不出
+   *  价），据此禁用按钮；报价失败同样折空报价。 */
   useEffect(() => {
     if (!currentId) return;
     for (const n of mediaNodes) {
@@ -13209,7 +13205,8 @@ export default function CanvasPage() {
    *  推导链（服务端报价 + 截止 + 两卡关系三重门）：成片卡在场且生成中/核对中 → 按钮禁用
    *  （成片生成中…/状态核对中…）；成片卡已终态（成功/失败/取消）或本会话已受理过 → 不再
    *  渲染（首版一张样片至多一条成片，服务端 1057/空报价兜底）；其余按报价/截止落
-   *  ready/loading/empty/expired/checking。 */
+   *  ready/loading/empty/expired/checking。IKJ7UI：expired（过期/缺可信截止）仅作派生
+   *  标记，MediaNode 对该 phase 整钮不渲染——过期信息由画面内角标表达（ADR-0119）。 */
   const finalizeCtaByNodeId = new Map<string, NonNullable<MediaNodeData['finalizeCta']>>();
   if (currentId) {
     for (const n of mediaNodes) {
@@ -13236,7 +13233,7 @@ export default function CanvasPage() {
         continue;
       }
       if (finalNode != null || finalizeAttemptedJobIdsRef.current.has(jobId)) {
-        continue; // 已有成片卡（终态）或本会话已受理过：不再渲染（重新生成归 IKIZQG）
+        continue; // 已有成片卡（终态）或本会话已受理过：不再渲染（首版一张样片至多一条成片）
       }
       if (typeof d.finalizeDeadlineAt !== 'string' || sampleDeadlineExpired(d.finalizeDeadlineAt)) {
         finalizeCtaByNodeId.set(n.id, { phase: 'expired' });
@@ -13252,10 +13249,9 @@ export default function CanvasPage() {
   }
 
   /** IKIZQG：重新生成样片入口的渲染期派生状态（不持久化，口径同 finalizeCtaByNodeId）。
-   *  两处入口（身份解析见 regenEntrySampleJobIdOf）：过期/缺截止样片卡（标题行，与 finalize
-   *  的 expired 禁用态并存——过期只停止转成片，样片保留）与成片失败卡（失败区，经来源
-   *  关系指向原样片任务）。本会话已受理过重新生成的样片任务不再渲染（新样片卡有自己的
-   *  截止与成片入口）。 */
+   *  IKJ7UI（ADR-0119）起唯一入口是成片失败卡失败区（身份解析见 regenEntrySampleJobIdOf；
+   *  过期样片卡标题行入口已移除）。本会话已受理过重新生成的样片任务不再渲染（新样片卡
+   *  有自己的截止与成片入口）。 */
   const regenerateCtaByNodeId = new Map<string, NonNullable<MediaNodeData['regenerateCta']>>();
   if (currentId) {
     for (const n of mediaNodes) {
@@ -13433,7 +13429,7 @@ export default function CanvasPage() {
                     data.finalizeCta = finalizeCta;
                     data.onFinalizeSample = handleFinalizeSample;
                   }
-                  // IKIZQG：重新生成样片入口派生状态注入（过期样片卡标题行 / 成片失败卡失败区，不持久化）
+                  // IKIZQG：重新生成样片入口派生状态注入（成片失败卡失败区，不持久化）
                   const regenerateCta = regenerateCtaByNodeId.get(n.id);
                   if (regenerateCta) {
                     data.regenerateCta = regenerateCta;

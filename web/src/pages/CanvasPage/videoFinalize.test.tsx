@@ -351,7 +351,7 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     await vi.waitFor(() => expect(finalNodeOf()!.data?.jobId).toBe('9002'));
   });
 
-  it('过期样片：CTA 禁用（expired）且不请求报价；缺可信截止时间（null）同禁用', async () => {
+  it('过期样片：finalizeCta 派生 expired（IKJ7UI：按钮整钮不渲染）且不请求报价；缺可信截止时间（null）同口径', async () => {
     seedDoc({ deadline: PAST });
     await renderPage();
     await waitForCta('expired');

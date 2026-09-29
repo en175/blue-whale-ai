@@ -9,9 +9,10 @@ import { ApiError } from '@/api/http';
 import CanvasPage from './index';
 
 /* IKIZQG 重新生成与卡片整理（页面流）：
-   过期样片卡标题行「重新生成样片」（报价门控 + 提交前新样片费用与成片另收费说明可见）、
-   成片失败卡失败区入口（经 sourceSampleJobId 用原输入新建样片）、提交创建新卡不覆盖旧结果、
-   两卡独立删除（不取消任务、不影响另一卡）、失败卡保留原因与费用状态。
+   成片失败卡失败区入口（经 sourceSampleJobId 用原输入新建样片；IKJ7UI 起改形为同款
+   「重试」按钮，过期样片卡标题行入口已随 ADR-0119 移除）、报价门控 + 提交前新样片费用、
+   提交创建新卡不覆盖旧结果、两卡独立删除（不取消任务、不影响另一卡）、失败卡保留原因
+   与费用状态。
    FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；API 层全 mock。 */
 
 vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
@@ -307,21 +308,19 @@ afterEach(async () => {
 });
 
 describe('IKIZQG 重新生成样片（页面流）', () => {
-  it('过期样片卡：入口就绪展示新样片费用；点击提交带确认两字段与幂等键，创建新卡不覆盖旧结果', async () => {
-    seedDoc({ sampleDeadline: PAST });
+  it('成片失败卡入口：报价就绪展示新样片费用；点击提交带确认两字段与幂等键，创建新卡不覆盖旧结果', async () => {
+    seedDoc({ sampleDeadline: PAST, final: 'failed' });
     let resolveRegen: (value: { generation_job_id: string; cursor: number }) => void = () => {};
     apiMocks.regenerateSampleJob.mockImplementation(
       () => new Promise((resolve) => { resolveRegen = resolve; }),
     );
     await renderPage();
-    const cta = await waitForRegenCta('s1', 'ready');
+    const cta = await waitForRegenCta('f1', 'ready');
     expect(cta.credits).toBe(40);
     expect(apiMocks.quoteSampleRegenerate).toHaveBeenCalledTimes(1);
     expect(apiMocks.quoteSampleRegenerate).toHaveBeenCalledWith('p1', '9001', { silent: true });
-    // 过期样片的成片入口同步渲染为禁用（expired）：过期只停止转成片，续作路径是重新生成
-    expect((nodeData('s1').finalizeCta as { phase?: string } | undefined)?.phase).toBe('expired');
 
-    await clickRegenerate('s1');
+    await clickRegenerate('f1');
     expect(apiMocks.regenerateSampleJob).toHaveBeenCalledTimes(1);
     const [projectId, jobId, payload, key] = apiMocks.regenerateSampleJob.mock.calls[0]!;
     expect(projectId).toBe('p1');
@@ -330,18 +329,22 @@ describe('IKIZQG 重新生成样片（页面流）', () => {
     expect(typeof key).toBe('string');
     expect(key.length).toBeGreaterThan(0);
 
-    // 新建样片占位卡：生成中、样片身份、落在过期样片卡正下方；旧卡身份/素材/截止原样保留（不覆盖旧结果）
+    // 新建样片占位卡：生成中、样片身份、落在入口失败卡正下方；旧卡（含过期样片与失败成片）
+    // 身份/素材/截止原样保留（不覆盖旧结果）
     await vi.waitFor(() => expect(regenNodeOf()).toBeTruthy());
     const regen = regenNodeOf()!;
     expect(regen.data?.videoStage).toBe('sample');
     expect(regen.data?.genStatus).toBe('generating');
-    expect(regen.position.y).toBeGreaterThan(nodeOf('s1')!.position.y);
-    expect(regen.position.x).toBe(nodeOf('s1')!.position.x);
+    expect(regen.position.y).toBeGreaterThan(nodeOf('f1')!.position.y);
+    expect(regen.position.x).toBe(nodeOf('f1')!.position.x);
     const oldSample = nodeOf('s1')!;
     expect(oldSample.data?.src).toBe('http://vid/sample.mp4');
     expect(oldSample.data?.assetId).toBe('as1');
     expect(oldSample.data?.jobId).toBe('9001');
     expect(oldSample.data?.videoStage).toBe('sample');
+    const failedFinal = nodeOf('f1')!;
+    expect(failedFinal.data?.genStatus).toBe('failed');
+    expect(failedFinal.data?.chargeState).toBe('released');
 
     // 受理 + 轮询成功：新卡回填自有素材与自身截止（新样片有自己的期限），旧卡仍在
     await act(async () => { resolveRegen({ generation_job_id: '9100', cursor: 8 }); });
@@ -350,8 +353,8 @@ describe('IKIZQG 重新生成样片（页面流）', () => {
     expect(done.data?.jobId).toBe('9100');
     expect(done.data?.finalizeDeadlineAt).toBe(FUTURE);
     expect(nodeOf('s1')!.data?.src).toBe('http://vid/sample.mp4');
-    // 本会话已受理过：过期样片卡不再渲染重新生成入口（新样片卡有自己的成片入口）
-    await vi.waitFor(() => expect(nodeOf('s1')!.data?.regenerateCta).toBeUndefined());
+    // 本会话已受理过：成片失败卡不再渲染重新生成入口（新样片卡有自己的成片入口）
+    await vi.waitFor(() => expect(nodeOf('f1')!.data?.regenerateCta).toBeUndefined());
   });
 
   it('成片失败卡：失败区入口经来源关系提交原样片任务；失败卡与费用状态保留', async () => {
@@ -379,44 +382,44 @@ describe('IKIZQG 重新生成样片（页面流）', () => {
   });
 
   it('空报价（双 null）：入口禁用（unavailable），不提交', async () => {
-    seedDoc({ sampleDeadline: PAST });
+    seedDoc({ final: 'failed' });
     apiMocks.quoteSampleRegenerate.mockImplementation(async () => ({ credits: null, quote_revision: null }));
     await renderPage();
-    await waitForRegenCta('s1', 'unavailable');
-    await clickRegenerate('s1');
+    await waitForRegenCta('f1', 'unavailable');
+    await clickRegenerate('f1');
     expect(apiMocks.regenerateSampleJob).not.toHaveBeenCalled();
   });
 
   it('并发点击：至多一次提交（第二次同步忽略）', async () => {
-    seedDoc({ sampleDeadline: PAST });
+    seedDoc({ final: 'failed' });
     await renderPage();
-    await waitForRegenCta('s1', 'ready');
-    const send = nodeData('s1').onRegenerateSample as (id: string) => void;
+    await waitForRegenCta('f1', 'ready');
+    const send = nodeData('f1').onRegenerateSample as (id: string) => void;
     await act(async () => {
-      send('s1');
-      send('s1');
-      send('s1');
+      send('f1');
+      send('f1');
+      send('f1');
     });
     expect(apiMocks.regenerateSampleJob).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(regenNodeOf()!.data?.jobId).toBe('9100'));
   });
 
   it('1056 变价：占位卡撤回、重报价后新价可见；新报价新签名换新幂等键（不撞同键变价 100409）', async () => {
-    seedDoc({ sampleDeadline: PAST });
+    seedDoc({ final: 'failed' });
     apiMocks.regenerateSampleJob.mockRejectedValueOnce(new ApiError(200, '价格已更新，请刷新后重新确认提交', 1056));
     // 首次报价 rev-r1；1056 后重报价返回 rev-r2（变价）
     apiMocks.quoteSampleRegenerate
       .mockImplementationOnce(async () => ({ credits: 40, quote_revision: 'rev-r1' }))
       .mockImplementationOnce(async () => ({ credits: 45, quote_revision: 'rev-r2' }));
     await renderPage();
-    await waitForRegenCta('s1', 'ready');
-    await clickRegenerate('s1');
+    await waitForRegenCta('f1', 'ready');
+    await clickRegenerate('f1');
     await vi.waitFor(() => expect(regenNodeOf()).toBeUndefined());
     // 报价重取：新价可见后再由用户点击确认（不按未确认金额自动重提）
-    const cta = await waitForRegenCta('s1', 'ready');
+    const cta = await waitForRegenCta('f1', 'ready');
     expect(cta.credits).toBe(45);
     expect(apiMocks.quoteSampleRegenerate).toHaveBeenCalledTimes(2);
-    await clickRegenerate('s1');
+    await clickRegenerate('f1');
     expect(apiMocks.regenerateSampleJob).toHaveBeenCalledTimes(2);
     const [ , , payload2, key2] = apiMocks.regenerateSampleJob.mock.calls[1]!;
     expect(payload2).toEqual({ expected_credits: 45, quote_revision: 'rev-r2' });
@@ -424,17 +427,17 @@ describe('IKIZQG 重新生成样片（页面流）', () => {
   });
 
   it('传输结果不明：同幂等键原样重发一次；仍失败 → 状态核对中且禁止再次点击、占位卡撤回', async () => {
-    seedDoc({ sampleDeadline: PAST });
+    seedDoc({ final: 'failed' });
     const networkError = new ApiError(0, '网络请求失败，请检查网络后重试', 0);
     apiMocks.regenerateSampleJob.mockRejectedValue(networkError);
     await renderPage();
-    await waitForRegenCta('s1', 'ready');
-    await clickRegenerate('s1');
+    await waitForRegenCta('f1', 'ready');
+    await clickRegenerate('f1');
     await vi.waitFor(() => expect(apiMocks.regenerateSampleJob).toHaveBeenCalledTimes(2));
     expect(apiMocks.regenerateSampleJob.mock.calls[0]![3]).toBe(apiMocks.regenerateSampleJob.mock.calls[1]![3]);
     await vi.waitFor(() => expect(regenNodeOf()).toBeUndefined());
-    await waitForRegenCta('s1', 'checking');
-    await clickRegenerate('s1');
+    await waitForRegenCta('f1', 'checking');
+    await clickRegenerate('f1');
     expect(apiMocks.regenerateSampleJob).toHaveBeenCalledTimes(2);
   });
 });
