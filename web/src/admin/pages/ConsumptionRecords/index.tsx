@@ -16,10 +16,12 @@
  *    就没有任何一处交代得了（冻 12、实扣 1 的行只会看到 -1）。
  *    所以这一列**只在两个数不一致时**补一行「预扣 N」——理由见下面的渲染注释。
  * ============================================ */
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import {
   adminConsumptionRecordsOptions,
+  type AdminConsumptionRecord,
   type AdminConsumptionRecordQuery,
 } from '@/api/adminConsumptionRecords';
 import AdminQueryTable, {
@@ -27,7 +29,8 @@ import AdminQueryTable, {
   type CursorPaginationState,
 } from '../../components/AdminQueryTable';
 import { useAppliedFilters, useCursorStack } from '../../components/AdminQueryTable/useQueryFilters';
-import { Badge, Button, Hint, Input, Select } from '../../ui';
+import { Badge, Button, Hint, Input, MetaRow, Modal, Select } from '../../ui';
+import { taskTypeLabel } from '../../taskTypeLabels';
 
 const PAGE_SIZE = 20;
 
@@ -56,6 +59,39 @@ const SECONDARY_TEXT = {
   fontSize: 'var(--admin-font-xs)',
   color: 'var(--admin-text-muted)',
 } as const;
+
+/**
+ * 任务格：类型 + 模型 + 「提示词」按钮**并排一行**。
+ *
+ * <p>与金额格同一个理由：类型与模型是同一件事的两半（「视频」+「Seedance 2.5」），
+ * 拆成两列后中间隔着一个「用户 ID」，读的时候还得把它们重新对起来。
+ *
+ * <p>`flexWrap` 是必要的：模型名可能很长，窄屏下让它换行而不是把表格撑破。
+ */
+const TASK_CELL = {
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: 'var(--admin-space-2)',
+} as const;
+
+/** 提示词正文：**保留换行**（提示词常是多行写的，折成一坨没法读）+ 长词强制断行。 */
+const PROMPT_TEXT = {
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'anywhere',
+} as const;
+
+/**
+ * 任务格与提示词弹窗共用的模型展示口径 —— 与 JobRecords 的 `modelText` 逐字相同。
+ *
+ * <p>「有展示名用展示名，没有就原样显示 model_id，都没有才是「—」」。
+ * **不要在前端拼模型名**：中文名维护在 `generation_model_capability.model_label`，
+ * 拼出来的名字与「模型列表」页对不上，运营会以为是两个模型。
+ *
+ * <p>`??` 一层层往下落，正是为了空值只有两种形态（`null` / 键不存在，都是 falsy 之外的空）——
+ * 三种「没有」在界面上是同一格「—」，不必分开。
+ */
+const modelText = (row: AdminConsumptionRecord) => row.model_label ?? row.model_id ?? '—';
 
 /**
  * 契约里的流水类型（billing 的 TransactionType）。**空串 = 全部** —— 与另外两张记录页
@@ -95,6 +131,9 @@ export default function ConsumptionRecords() {
   const filters = useAppliedFilters(EMPTY_FILTERS);
   const cursor = useCursorStack(filters.epoch);
   const { applied, draft, setDraft, apply, reset } = filters;
+  // 提示词弹窗要显示的那一行；null = 关着。存整行而不是只存字符串：
+  // 弹窗里连带显示任务类型与模型，省得读的人再回头去表格里对。
+  const [promptRow, setPromptRow] = useState<AdminConsumptionRecord | null>(null);
 
   const query: AdminConsumptionRecordQuery = {
     pageSize: PAGE_SIZE,
@@ -115,7 +154,35 @@ export default function ConsumptionRecords() {
       header: '类型',
       render: (row) => <Badge tone="neutral">{TYPE_LABELS[row.type] ?? row.type}</Badge>,
     },
-    { key: 'title', header: '说明', render: (row) => row.title },
+    {
+      key: 'task',
+      header: '任务',
+      render: (row) => {
+        // 任务语义来自**我们自己库**的 generation_jobs：BFF 拿 billing 给的 jobId
+        // 批量补上 type / model / prompt。账本本身答不出「这是什么任务」。
+        //
+        // ⚠️ 判空一律 `== null`（不能 `=== null`，更不能真值判断）：缺值有两种形态，
+        //    老后端压根没投影这几个键时整个键**不存在**。
+        if (row.task_type == null) {
+          // 非消费行（发放 / 账本），或后端是旧构建 —— 回到账本自带的 title。
+          // 这个回落不是兜底摆设：老后端 + 新前端时它是这一列**唯一**有的信息。
+          return row.title;
+        }
+        return (
+          <div style={TASK_CELL}>
+            {/* 类型走全管理端唯一那份中文名表，未收录的会原样显示 key（不显示空白） */}
+            <Badge tone="neutral">{taskTypeLabel(row.task_type)}</Badge>
+            <span>{modelText(row)}</span>
+            {/* 提示词不进表格（可能很长，一列几百字会把表撑散），只在弹窗里看全文 */}
+            {row.prompt != null && (
+              <Button variant="ghost" size="sm" onClick={() => setPromptRow(row)}>
+                提示词
+              </Button>
+            )}
+          </div>
+        );
+      },
+    },
     {
       key: 'credits',
       header: '积分',
@@ -174,69 +241,88 @@ export default function ConsumptionRecords() {
   };
 
   return (
-    <AdminQueryTable
-      title={
-        <>
-          积分记录{' '}
-          <Hint title="为什么有的行写着「预扣」">
-            {/* ⚠️ 每个 div 的文字写成**一整行**：JSX 把源码里的换行折成一个空格，
-                中文句子中途换行会在面板里留下一个「预扣额， 发放」那样的空档。 */}
-            <div>
-              <b>提交任务时先按预计用量冻结，结算时按实际用量扣费，差额自动退回余额。</b>
-              所以余额会先降后回。这一页记的是<b>结算后</b>的账：一行「-1」旁边若不补出「预扣 12」，那 12 冻过、11 退回来这件事就没有任何一处交代得了。
-            </div>
-            <div>
-              只有两个数不一致的行才补这一行；处理中的行显示的金额本身就是预扣额，发放与人工调账没有预扣。
-            </div>
-          </Hint>
-        </>
-      }
-      subtitle="全站积分流水（读 billing 账本，与用户端的「我的流水」同一个来源）"
-      hasFilters={filters.hasApplied}
-      filteredEmptyMessage="没有匹配的流水"
-      emptyMessage="暂无流水"
-      errorMessage="获取积分记录失败"
-      tableErrorMessage="积分记录加载失败"
-      columns={columns}
-      rows={rows}
-      rowKey={(row) => row.id}
-      status={list}
-      pagination={pagination}
-      filters={
-        <>
-          <Input
-            style={{ width: 180 }}
-            placeholder="用户 ID（留空 = 全站）"
-            value={draft.userId}
-            onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') apply();
-            }}
+    <>
+      <AdminQueryTable
+        title={
+          <>
+            积分记录{' '}
+            <Hint title="为什么有的行写着「预扣」">
+              {/* ⚠️ 每个 div 的文字写成**一整行**：JSX 把源码里的换行折成一个空格，
+                  中文句子中途换行会在面板里留下一个「预扣额， 发放」那样的空档。 */}
+              <div>
+                <b>提交任务时先按预计用量冻结，结算时按实际用量扣费，差额自动退回余额。</b>
+                所以余额会先降后回。这一页记的是<b>结算后</b>的账：一行「-1」旁边若不补出「预扣 12」，那 12 冻过、11 退回来这件事就没有任何一处交代得了。
+              </div>
+              <div>
+                只有两个数不一致的行才补这一行；处理中的行显示的金额本身就是预扣额，发放与人工调账没有预扣。
+              </div>
+            </Hint>
+          </>
+        }
+        subtitle="全站积分流水（读 billing 账本，与用户端的「我的流水」同一个来源）"
+        hasFilters={filters.hasApplied}
+        filteredEmptyMessage="没有匹配的流水"
+        emptyMessage="暂无流水"
+        errorMessage="获取积分记录失败"
+        tableErrorMessage="积分记录加载失败"
+        columns={columns}
+        rows={rows}
+        rowKey={(row) => row.id}
+        status={list}
+        pagination={pagination}
+        filters={
+          <>
+            <Input
+              style={{ width: 180 }}
+              placeholder="用户 ID（留空 = 全站）"
+              value={draft.userId}
+              onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') apply();
+              }}
+            />
+            <Select
+              aria-label="流水类型"
+              options={TYPE_OPTIONS}
+              value={draft.type}
+              onChange={(type) => setDraft((d) => ({ ...d, type }))}
+            />
+          </>
+        }
+        actions={
+          <>
+            <Button size="sm" onClick={reset} disabled={list.isFetching}>
+              重置
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Search size={15} strokeWidth={2} />}
+              onClick={apply}
+              disabled={list.isFetching}
+            >
+              查询
+            </Button>
+          </>
+        }
+      />
+
+      {promptRow && (
+        <Modal open title="提示词" width={720} onClose={() => setPromptRow(null)}>
+          <MetaRow
+            items={[
+              {
+                label: '任务类型',
+                // 走到这里 task_type 一定非空（按钮只在有 prompt 的行上渲染），
+                // 但仍按可空写：`task_type` 的类型就是可空的，写 `!` 是在骗编译器。
+                value: promptRow.task_type ? taskTypeLabel(promptRow.task_type) : '—',
+              },
+              { label: '模型', value: modelText(promptRow) },
+              { label: '提示词', value: <div style={PROMPT_TEXT}>{promptRow.prompt}</div> },
+            ]}
           />
-          <Select
-            aria-label="流水类型"
-            options={TYPE_OPTIONS}
-            value={draft.type}
-            onChange={(type) => setDraft((d) => ({ ...d, type }))}
-          />
-        </>
-      }
-      actions={
-        <>
-          <Button size="sm" onClick={reset} disabled={list.isFetching}>
-            重置
-          </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            icon={<Search size={15} strokeWidth={2} />}
-            onClick={apply}
-            disabled={list.isFetching}
-          >
-            查询
-          </Button>
-        </>
-      }
-    />
+        </Modal>
+      )}
+    </>
   );
 }

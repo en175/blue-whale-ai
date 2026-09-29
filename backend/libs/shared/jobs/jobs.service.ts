@@ -12,6 +12,7 @@ import {
   createJobRepo,
   type AdminJobListItem,
   type AdminJobListFilter,
+  type ChargeTaskSummary,
 } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -115,6 +116,28 @@ export class JobsService {
         error: projectPublicError(storedError ?? null, record.type),
       })),
     };
+  }
+
+  /**
+   * 一批 job id → 「这个任务是什么」（类型 / 模型 / 提示词）。
+   *
+   * <p>调用方是**积分记录页的 BFF**：那一页的行来自 billing 账本，而 billing 只存
+   * `generation_job_id`——任务的语义全在我们自己的库里（ADR-0114 不共享库，它读不到）。
+   * 所以由 BFF 收了 id 再回这里批量取，合并进同一个响应。
+   *
+   * <p>⚠️ **本层不设条数上限**：调用方一页最多 `MAX_PAGE_SIZE`(100) 行，条数天然被页大小
+   *    框住。在这里再截一刀只会**静默**少 enrich 几行——上限该由分页那条约束表达，
+   *    不该由这里暗中丢数据。
+   *
+   * <p>⚠️ 非法 id 与重复 id 在这里滤掉：前者会让 `BigInt()` 抛（一条脏 id 不该带塌整页），
+   *    后者是白白多查。全部滤空则**不发查询**。
+   */
+  async loadTaskSummaries(
+    jobIds: readonly string[],
+  ): Promise<Map<string, ChargeTaskSummary>> {
+    const ids = [...new Set(jobIds)].filter((id) => VALID_ID.test(id));
+    if (ids.length === 0) return new Map();
+    return this.repo.loadChargeTaskSummaries(ids);
   }
 
   async getStatus(userId: string, jobId: string) {

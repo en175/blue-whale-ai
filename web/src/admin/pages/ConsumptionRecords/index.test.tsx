@@ -34,6 +34,13 @@ const ITEM = {
   credits: 30,
   // 冻 100、实扣 30 —— 余额先降后回的那种行，预扣额必须出得来
   reserved_credits: 100,
+  // 任务的三个语义字段（BFF 按 billing 给的 jobId 回自己库批量补的）。
+  // ⚠️ 有这三个字段时「任务」列**不再**显示 title —— 两条断言才分得开：
+  //    这里是中文展示名「Seedance 2.5」，而 title 里是小写的 `seedance-2.5`。
+  task_type: 'video',
+  model_id: 'seedance-2.5',
+  model_label: 'Seedance 2.5',
+  prompt: '一只猫在草地上跑',
   status: 'done',
   created_at: '2026-09-25T10:00:00+08:00',
   settled_at: '2026-09-25T10:01:00+08:00',
@@ -119,11 +126,14 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     expect(api.fetchAdminConsumptionRecords.mock.calls[0]?.[0]).not.toHaveProperty('userId');
   });
 
-  it('渲染归属用户、说明与带方向的金额', async () => {
+  it('渲染归属用户、任务与带方向的金额', async () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('9001');
-    expect(document.body.textContent).toContain('视频生成 · seedance-2.5');
+    // 任务列显示的是**任务类型的中文名 + 模型的展示名**（不是账本自带的 title：
+    // 那条文案线上恒为空串，见 task 列的注释）
+    expect(document.body.textContent).toContain('视频');
+    expect(document.body.textContent).toContain('Seedance 2.5');
     expect(document.body.textContent).toContain('-30');
   });
 
@@ -286,5 +296,112 @@ describe('ConsumptionRecords — 哨兵口径', () => {
     expect(api.fetchAdminConsumptionRecords).toHaveBeenCalled();
     const first = api.fetchAdminConsumptionRecords.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(first).not.toHaveProperty('type');
+  });
+});
+
+describe('ConsumptionRecords — 任务列与提示词弹窗', () => {
+  /** 账本侧的真形状：这些行的文案由 billing 给，任务的三个字段一个都没有。 */
+  function ledgerRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'lot:12',
+      user_id: 9001,
+      type: 'recharge',
+      direction: 'in',
+      title: '充值到账',
+      credits: 500,
+      reserved_credits: null,
+      status: 'done',
+      created_at: '2026-09-25T10:00:00+08:00',
+      settled_at: '2026-09-25T10:00:00+08:00',
+      ...overrides,
+    };
+  }
+
+  function headers(): string[] {
+    return [...document.body.querySelectorAll('th')].map((th) => th.textContent?.trim() ?? '');
+  }
+
+  it('列头是「任务」——原来那一列叫「说明」', async () => {
+    await renderPage();
+
+    expect(headers()).toContain('任务');
+    expect(headers()).not.toContain('说明');
+  });
+
+  it('任务格由类型与模型组成，且落在**同一个单元格**里（不是各占一列）', async () => {
+    // 与预扣额那条同款：只断言「页面上有这几个字」的话，拆成两列照样全绿，
+    // 而那是被明确否掉的形态（类型与模型是同一件事的两半，中间隔着别的列就得重新对）。
+    await renderPage();
+
+    const cells = [...document.querySelectorAll('tbody tr td')].filter((td) =>
+      td.textContent?.includes('Seedance 2.5'),
+    );
+    expect(cells).toHaveLength(1);
+    expect(cells[0]?.textContent).toContain('视频');
+  });
+
+  it('没有任务的行（发放 / 账本 / 查不到任务）→ 回落账本自带的 title', async () => {
+    // 回落不是兜底摆设：老后端 + 新前端时 title 是这一列**唯一**有的信息
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [
+        ledgerRow({ task_type: null, model_id: null, model_label: null, prompt: null }),
+      ],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    expect(document.body.textContent).toContain('充值到账');
+  });
+
+  it('后端比前端旧、**整个键都不回**时回落 title，不崩', async () => {
+    // 与 reserved_credits 那条同一个坑：多一种空值形态，判空写错就是整页白屏
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [ledgerRow()],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    expect(document.body.textContent).toContain('充值到账');
+    expect(document.body.textContent).not.toContain('Unexpected Application Error');
+  });
+
+  it('提示词**不进表格**，点「提示词」在弹窗里看全文', async () => {
+    await renderPage();
+
+    // 一列几百字的提示词会把表撑散，所以列表里根本不出现它
+    expect(document.body.textContent).not.toContain('一只猫在草地上跑');
+
+    await click('提示词');
+
+    expect(document.body.textContent).toContain('一只猫在草地上跑');
+  });
+
+  it('没有提示词的行不出现「提示词」按钮（点开只会是空弹窗）', async () => {
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [{ ...ITEM, prompt: null }],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    const labels = [...document.body.querySelectorAll('button')].map((b) =>
+      b.textContent?.trim(),
+    );
+    expect(labels).not.toContain('提示词');
+  });
+
+  it('免费工具族没有模型 → 模型那一格显示「—」，类型照常显示', async () => {
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [{ ...ITEM, task_type: 'image_cutout', model_id: null, model_label: null }],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    // 未收录的类型原样显示 key（不好看，但比空白能排查）
+    expect(document.body.textContent).toContain('图片抠图');
+    expect(document.body.textContent).toContain('—');
   });
 });

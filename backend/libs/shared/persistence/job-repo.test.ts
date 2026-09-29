@@ -406,3 +406,160 @@ describe("createJobRepo.listForAdmin", () => {
     });
   });
 });
+
+/* ---------- 积分记录页：按 jobId 批量取「这个任务是什么」 ---------- */
+
+describe("createJobRepo.loadChargeTaskSummaries", () => {
+  /** 一条任务：input 里除了要抽的两个键，还有别的东西（那些都不该跟出去）。 */
+  const JOB = {
+    id: 7n,
+    type: "video",
+    input: {
+      model_id: "doubao-seedance-2-5-260628",
+      prompt: "一只猫在草地上跑",
+      parameters: { duration: 5 },
+      input_asset_ids: [1, 2],
+    },
+  };
+
+  function repoOf(
+    jobs: unknown[],
+    caps: unknown[] = [],
+  ): { repo: ReturnType<typeof createJobRepo>; jobsFindMany: ReturnType<typeof vi.fn>; capFindMany: ReturnType<typeof vi.fn> } {
+    const jobsFindMany = vi.fn().mockResolvedValue(jobs);
+    const capFindMany = vi.fn().mockResolvedValue(caps);
+    return {
+      repo: createJobRepo({
+        generation_jobs: { findMany: jobsFindMany },
+        generation_model_capability: { findMany: capFindMany },
+      } as never),
+      jobsFindMany,
+      capFindMany,
+    };
+  }
+
+  it("只抽 type / model_id / prompt 三个标量，input 其余字段不跟着出去", async () => {
+    const { repo } = repoOf([JOB], [{ model_id: JOB.input.model_id, model_label: "豆包 Seedance 2.5" }]);
+
+    const map = await repo.loadChargeTaskSummaries(["7"]);
+
+    expect(map.get("7")).toEqual({
+      type: "video",
+      modelId: "doubao-seedance-2-5-260628",
+      modelLabel: "豆包 Seedance 2.5",
+      prompt: "一只猫在草地上跑",
+    });
+    // 与任务记录列表同一条纪律：为了一列把整份 input 搬出去，接口体积会随结构一起长
+    expect(map.get("7")).not.toHaveProperty("input");
+  });
+
+  it("查不到的 id **键缺席**（不是塞一个空对象）——「没这个任务」与「有任务但没提示词」要能分开", async () => {
+    const { repo } = repoOf([]);
+
+    const map = await repo.loadChargeTaskSummaries(["7", "8"]);
+
+    expect(map.size).toBe(0);
+    expect(map.has("7")).toBe(false);
+  });
+
+  it("免费工具族没有 model_id → 两个模型字段为 null，但 prompt 仍在", async () => {
+    const { repo, capFindMany } = repoOf([
+      { id: 9n, type: "image_cutout", input: { prompt: "把背景抠掉" } },
+    ]);
+
+    const map = await repo.loadChargeTaskSummaries(["9"]);
+
+    expect(map.get("9")).toEqual({
+      type: "image_cutout",
+      modelId: null,
+      modelLabel: null,
+      prompt: "把背景抠掉",
+    });
+    // 一个 model_id 都没收到就不该去查能力表
+    expect(capFindMany).not.toHaveBeenCalled();
+  });
+
+  it("没有 prompt 的任务 → prompt 为 null，但类型与模型照常给", async () => {
+    const { repo } = repoOf([{ id: 7n, type: "video", input: { model_id: "m" } }]);
+
+    const map = await repo.loadChargeTaskSummaries(["7"]);
+
+    expect(map.get("7")).toMatchObject({ type: "video", modelId: "m", prompt: null });
+  });
+
+  it("**不过滤 is_delete、不加 user_id 作用域**：任务软删了，那笔消费仍然发生过", async () => {
+    const { repo, jobsFindMany } = repoOf([]);
+
+    await repo.loadChargeTaskSummaries(["7"]);
+
+    // 只按 id IN 查。加了 user_id 就会漏掉「全站流水」里别人的行；
+    // 加了 is_delete 就会让软删任务的历史消费那一格空白——两者都是管理端不能接受的
+    expect(jobsFindMany).toHaveBeenCalledWith({
+      where: { id: { in: [7n] } },
+      select: { id: true, type: true, input: true },
+    });
+  });
+
+  it("id 去重后一次批量查（同一 job 的多条流水不会重复查）", async () => {
+    const { repo, jobsFindMany } = repoOf([]);
+
+    await repo.loadChargeTaskSummaries(["7", "7", "8"]);
+
+    expect(jobsFindMany).toHaveBeenCalledTimes(1);
+    expect(jobsFindMany).toHaveBeenCalledWith({
+      where: { id: { in: [7n, 8n] } },
+      select: { id: true, type: true, input: true },
+    });
+  });
+
+  it("空列表直接返回空 Map，**不发查询**", async () => {
+    const { repo, jobsFindMany, capFindMany } = repoOf([]);
+
+    const map = await repo.loadChargeTaskSummaries([]);
+
+    expect(map.size).toBe(0);
+    expect(jobsFindMany).not.toHaveBeenCalled();
+    expect(capFindMany).not.toHaveBeenCalled();
+  });
+
+  it("一批模型名一次批量查（不是一行一次）", async () => {
+    const { repo, capFindMany } = repoOf([
+      { id: 1n, type: "video", input: { model_id: "a" } },
+      { id: 2n, type: "video", input: { model_id: "b" } },
+      { id: 3n, type: "video", input: { model_id: "a" } },
+    ]);
+
+    await repo.loadChargeTaskSummaries(["1", "2", "3"]);
+
+    expect(capFindMany).toHaveBeenCalledTimes(1);
+    // 去重后只查这两个
+    expect(capFindMany).toHaveBeenCalledWith({
+      where: { model_id: { in: ["a", "b"] } },
+      select: { model_id: true, model_label: true },
+      orderBy: { id: "asc" },
+    });
+  });
+
+  it("能力表查不到展示名 → model_label 为 null（由前端原样显示 model_id，不编名字）", async () => {
+    const { repo } = repoOf([{ id: 7n, type: "video", input: { model_id: "已下架的模型" } }], []);
+
+    const map = await repo.loadChargeTaskSummaries(["7"]);
+
+    expect(map.get("7")).toMatchObject({ modelId: "已下架的模型", modelLabel: null });
+  });
+
+  it("input 形状不认识（老任务 / 免费工具族的各种形态）→ 不抛，读不出的字段为 null", async () => {
+    const { repo } = repoOf([
+      { id: 1n, type: "video", input: null },
+      { id: 2n, type: "video", input: "不是对象" },
+      { id: 3n, type: "video", input: { prompt: "   " } },
+    ]);
+
+    const map = await repo.loadChargeTaskSummaries(["1", "2", "3"]);
+
+    // 空白串按「没有」处理：界面上「一行空白」与「没有提示词」没区别，不该多一态
+    expect(map.get("1")).toMatchObject({ prompt: null, modelId: null });
+    expect(map.get("2")).toMatchObject({ prompt: null, modelId: null });
+    expect(map.get("3")).toMatchObject({ prompt: null });
+  });
+});

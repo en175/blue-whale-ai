@@ -39,6 +39,7 @@ export {
   type AdminJobListItem,
   type AdminJobPage,
   type AdminJobListFilter,
+  type ChargeTaskSummary,
 } from "./job-repo.js";
 export {
   createSnapshotRepo,

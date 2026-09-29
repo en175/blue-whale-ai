@@ -2,6 +2,7 @@ import { Controller, Get, Query, UseGuards } from "@nestjs/common";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { BillingAdminConfigError, BillingAdminError, listAdminTransactions } from "@lib/shared/billing/billing-admin-client.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
+import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -34,10 +35,19 @@ function parsePageSize(raw: string | undefined): number {
  * <p>⚠️ **分页是游标、没有总数**（账本持续追加，要准确总数就得扫全表，而扫完那一刻
  *    它又变了）。所以这里**不返回 total**，前端也只能给「上一页/下一页」。
  *    这与充值记录页的 offset 分页形状不同——但前端用同一个翻页组件，观感一致。
+ *
+ * <p><b>消费行为什么还带任务的类型 / 模型 / 提示词</b>：那一行的 id 是 {@code res:7}，
+ * 钱的来源是 billing，但任务的语义全在我们自己库里——billing 只存得下
+ * {@code generation_job_id}（ADR-0114 不共享库，它读不到 `generation_jobs`）。
+ * 所以本控制器是**唯一同时够得着两边的地方**：从 billing 取这一页流水，收齐 job id，
+ * 回自己库批量查一次，合并进同一个响应。前端一次请求就能把一行讲清楚，
+ * 不必再发第二次、也不必自己做 join（那还会多出两次请求之间的竞态）。
  */
 @Controller("admin/consumption-records")
 @UseGuards(AdminGuard)
 export class AdminConsumptionRecordsController {
+  constructor(private readonly jobs: JobsService) {}
+
   /**
    * GET /api/admin/consumption-records?userId=&type=&pageSize=&pageToken=
    *
@@ -65,25 +75,51 @@ export class AdminConsumptionRecordsController {
         pageSize: parsePageSize(query.pageSize),
         pageToken: query.pageToken ?? "",
       });
+
+      // 只有消费行（billing 的 res: 行）带得回 generation_job_id；发放行 / 账本行是 null。
+      // 一页最多 100 行，所以这里天然是一次 bounded 的批量查——不设二次上限（见 JobsService）。
+      const summaries = await this.jobs.loadTaskSummaries(
+        page.items
+          .map((item) => item.generationJobId)
+          // ⚠️ `== null` 而不是 `=== null`：客户端会把 billing 的缺值收敛成 null，但这里是
+          //    对外那一层，按本仓规矩「旧构建回包整个键不存在」也要容得下（undefined）。
+          .filter((id): id is string => id != null),
+      );
+
       return {
         success: true,
         data: {
-          items: page.items.map((item) => ({
-            id: item.id,
-            user_id: item.userId,
-            type: item.type,
-            direction: item.direction,
-            title: item.title,
-            credits: item.amount,
-            // 该行当初冻了多少（**只有消费行有**；发放 / 账本行是 null）。
-            // ⚠️ 显式 `?? null` 而不是透传：billing 若哪天不回这个键，前端会拿到
-            //    `undefined`，而 `undefined == null` 为真、`undefined !== null` 也为真——
-            //    让契约里只有一种「没有」，界面才不需要判两种空。
-            reserved_credits: item.reservedCredits ?? null,
-            status: item.status,
-            created_at: item.createdAt,
-            settled_at: item.settledAt,
-          })),
+          items: page.items.map((item) => {
+            // 查不到任务（跨库历史、已清理）→ summary 为 undefined → 四字段全 null，
+            // 前端回落显示 title。**这不是错误**：那一笔钱确实发生过，只是任务查不到了。
+            // 反之 job 在、只是没有提示词（免费工具族）时，prompt 单独是 null——两者可分辨。
+            //
+            // ⚠️ 这里**不 try/catch**：真查不动自己的库时让它照常失败。悄悄把这些字段填成
+            //    null 会让页面显示成「这些行没有任务」——那是一句不报错的假话。
+            const summary =
+              item.generationJobId == null ? undefined : summaries.get(item.generationJobId);
+            return {
+              id: item.id,
+              user_id: item.userId,
+              type: item.type,
+              direction: item.direction,
+              title: item.title,
+              credits: item.amount,
+              // 该行当初冻了多少（**只有消费行有**；发放 / 账本行是 null）。
+              // ⚠️ 显式 `?? null` 而不是透传：billing 若哪天不回这个键，前端会拿到
+              //    `undefined`，而 `undefined == null` 为真、`undefined !== null` 也为真——
+              //    让契约里只有一种「没有」，界面才不需要判两种空。
+              reserved_credits: item.reservedCredits ?? null,
+              // 任务的三个语义字段（**只有消费行、且任务查得到时有**）。
+              task_type: summary?.type ?? null,
+              model_id: summary?.modelId ?? null,
+              model_label: summary?.modelLabel ?? null,
+              prompt: summary?.prompt ?? null,
+              status: item.status,
+              created_at: item.createdAt,
+              settled_at: item.settledAt,
+            };
+          }),
           next_page_token: page.nextPageToken,
         },
       };

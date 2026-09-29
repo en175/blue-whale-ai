@@ -86,6 +86,28 @@ export interface JobRepo {
   findByIdForUser(jobId: string, userId: string): Promise<JobStatusView | null>;
   /** 管理端列表（offset 分页，全站）。**不供用户端使用**——那条路是 listByUser。 */
   listForAdmin(filter: AdminJobListFilter): Promise<AdminJobPage>;
+  /**
+   * 按一批 job id 批量取「这个任务是什么」——任务类型 + 模型 + 提示词。
+   *
+   * <p>给**积分记录页**用：那一页的行来自 billing 账本（消费行的 id 形如 {@code res:7}），
+   * billing 只存 {@code generation_job_id}，任务的语义全在这儿。
+   *
+   * <p>键是 job id **字符串**；**查不到的 id 不会出现在 Map 里**（不是塞一个空对象）——
+   * 「没有这个任务」与「有任务但没提示词」是两回事，调用方要能分开处理。
+   */
+  loadChargeTaskSummaries(ids: readonly string[]): Promise<Map<string, ChargeTaskSummary>>;
+}
+
+/** {@link JobRepo.loadChargeTaskSummaries} 的一行。 */
+export interface ChargeTaskSummary {
+  /** `generation_jobs.type`（text2video / audio_mix / …）。自由文本，后端不写死白名单。 */
+  type: string;
+  /** `input.model_id`；免费工具族没有模型，为 `null`。 */
+  modelId: string | null;
+  /** 能力表的展示名；查不到为 `null`（**不要在这里编一个名字**，口径同 {@link AdminJobListItem.model_label}）。 */
+  modelLabel: string | null;
+  /** `input.prompt`；没有提示词的任务为 `null`。 */
+  prompt: string | null;
 }
 
 /**
@@ -180,6 +202,22 @@ function parseAssetIds(json: unknown): bigint[] {
 function modelIdOf(input: unknown): string | null {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
   const raw = (input as { model_id?: unknown }).model_id;
+  return typeof raw === "string" && raw.trim() ? raw : null;
+}
+
+/**
+ * 任务 input 里的提示词；没有就是 `null`。
+ *
+ * <p>与 {@link modelIdOf} 同一套宽容读取、同一个理由：任务类型五花八门，input 形态各异，
+ * 读不出来只该让**那一格**空着，不该整页报错。空白串按「没有」处理。
+ *
+ * <p>⚠️ **只取这一个键，不把整份 input 带出去**——与 {@link AdminJobListItem.model_id}
+ *    那条纪律同款：input 里还有素材 id、规格参数、逐类型的额外字段，整份带上列表，
+ *    接口体积就会随 input 的结构一起长。这里抽完两个标量就把 input 丢掉。
+ */
+function promptOf(input: unknown): string | null {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
+  const raw = (input as { prompt?: unknown }).prompt;
   return typeof raw === "string" && raw.trim() ? raw : null;
 }
 
@@ -327,6 +365,44 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         size: filter.size,
         current: filter.page,
       };
+    },
+
+    async loadChargeTaskSummaries(ids) {
+      const unique = [...new Set(ids)];
+      if (unique.length === 0) return new Map();
+
+      const rows = await prisma.generation_jobs.findMany({
+        // ⚠️ **不过滤 is_delete、也不加 user_id 作用域**：管理端看的是**已经发生过的事**——
+        //    任务被软删了，那笔消费仍然发生过，那一行仍然该答得出「这是什么任务」。
+        //    （与 loadModelLabels 的「不过滤 enabled / is_delete」是同一条立场。）
+        //    也因此**不能**复用 listByUser 的 ids 过滤：那条硬绑 user_id，是用户面的路，
+        //    而积分记录页默认是**全站**流水。
+        where: { id: { in: unique.map((id) => BigInt(id)) } },
+        // 只选这三列 —— input 抽完 model_id / prompt 两个标量就丢掉，不进返回值
+        select: { id: true, type: true, input: true },
+      });
+
+      // 与 listForAdmin 同款：先把这一批的 model_id 收齐，再一次性查展示名（不 N+1）
+      const modelIds = new Set<string>();
+      const parsed = rows.map((r) => {
+        const modelId = modelIdOf(r.input);
+        if (modelId !== null) modelIds.add(modelId);
+        return { id: r.id.toString(), type: r.type, modelId, prompt: promptOf(r.input) };
+      });
+      const labelByModel = await loadModelLabels(prisma, [...modelIds]);
+
+      // 查不到的 id 不在 Map 里 —— 「没有这个任务」与「有任务但没提示词」由调用方分开处理
+      return new Map(
+        parsed.map((p) => [
+          p.id,
+          {
+            type: p.type,
+            modelId: p.modelId,
+            modelLabel: p.modelId === null ? null : (labelByModel.get(p.modelId) ?? null),
+            prompt: p.prompt,
+          },
+        ]),
+      );
     },
 
     async findByIdForUser(jobId, userId) {

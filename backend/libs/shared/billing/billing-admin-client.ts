@@ -438,6 +438,17 @@ export interface AdminTransactionItem {
    * 用户界面不会因此多出第二个金额。
    */
   reservedCredits: number | null;
+  /**
+   * 该行关联的生成任务 id。**只有消费行有值**，发放行与账本行为 `null`。
+   *
+   * ⚠️ 与 `reservedCredits` 同一个 presence 口径：`null` 不是「任务 0」，是「没有任务这回事」。
+   *
+   * ⚠️ **是字符串不是 number**（proto 那边是 `optional int64` → bigint）。
+   *    这一列是 join key：拿它去 `generation_jobs` 查任务、取提示词。走 `Number()` 在
+   *    id 超过 2^53 时会**静默**丢精度——查不到还好，查到**另一个任务**就是拿错提示词给运营看。
+   *    本仓 job id 跨边界一律字符串（同 `AdminJobRecord.job_id`）。
+   */
+  generationJobId: string | null;
   status: string;
   createdAt: string;
   /** RFC3339；未结算为空串 */
@@ -507,6 +518,9 @@ export async function listAdminTransactions(
         //   于是「没有预扣」的行被当成「有值」送进渲染 —— 2026-09-26 积分记录页整页白屏
         //   就是这么来的（当时后端旧构建压根不投影这一列，键整个消失）。
         reservedCredits: item.reservedCredits === undefined ? null : Number(item.reservedCredits),
+        // ★ 同一个 presence → null 收敛，但**转字符串**：这是 join key，别过 Number（见接口注释）
+        generationJobId:
+          item.generationJobId === undefined ? null : String(item.generationJobId),
         status: item.status,
         createdAt: item.createdAt,
         settledAt: item.settledAt,

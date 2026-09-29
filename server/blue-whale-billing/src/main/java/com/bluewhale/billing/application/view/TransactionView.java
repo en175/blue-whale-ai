@@ -45,6 +45,10 @@ import java.util.List;
  * @param reservedCredits 该行预留当初冻了多少（整数积分，恒正）；**只有消费行有值**，
  *                  发放行与账本行为 {@code null}（不是 0——0 是「冻了 0 分」）。
  *                  只读不参与任何计算：它不改变 amount，也不参与结算
+ * @param generationJobId 该行关联的生成任务；**只有消费行有值**，发放行与账本行为 {@code null}。
+ *                  ⚠️ 它是给 backend 用的 join key，不是给人看的：任务的类型 / 模型 / 提示词
+ *                  都在 backend 自己的库（ADR-0114 不共享库），由管理面 BFF 拿这批 id
+ *                  回自己库批量查后合并。用户面适配器**不投影**它，与 userId / reservedCredits 同款
  * @param status    {@code pending} | {@code done}
  * @param createdAt 记账/提交时刻
  * @param settledAt 结算时刻；未结算（{@code pending}）为 null
@@ -57,6 +61,7 @@ public record TransactionView(
         String title,
         long amount,
         Long reservedCredits,
+        Long generationJobId,
         String status,
         Instant createdAt,
         Instant settledAt

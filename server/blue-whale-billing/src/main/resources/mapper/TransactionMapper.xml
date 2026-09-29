@@ -73,7 +73,7 @@
   -->
   <select id="selectPage" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.TransactionRow">
     SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
-           t.status, t.created_at, t.settled_at, t.kind, t.src_id
+           t.status, t.created_at, t.settled_at, t.generation_job_id, t.kind, t.src_id
     FROM (
 
       <!-- ① 发放 / 充值：批次表。金额是发放量，方向恒为 in，落地即完成。 -->
@@ -113,6 +113,8 @@
                   用 NULL 而不是 0 —— 0 是「冻了 0 分」，与「没有这个概念」是两回事，
                   界面上后者不该显示任何预扣文案。 -->
              NULL         AS reserved_credits,
+             <!-- 发放不是任务，没有 job 可关联（与上面 reserved_credits 同一种「不适用」） -->
+             NULL         AS generation_job_id,
              'done'       AS status,
              l.gmt_create AS created_at,
              l.gmt_create AS settled_at,
@@ -193,6 +195,11 @@
                      别把这里「化简」成「终态统一取 actual_credits」：那会让退回行显示 +0。 -->
              CASE WHEN r.status = 'settled' THEN r.actual_credits ELSE r.reserved_credits END AS amount,
              r.reserved_credits AS reserved_credits,
+             <!-- ★ 关联的生成任务。**这一列是给 backend 用的 join key，不是给人看的**：
+                  billing 只存 id，任务的类型 / 模型 / 提示词都在 backend 自己的库里
+                  （ADR-0114 不共享库），由调用方拿这批 id 回自己库批量查后合并。
+                  列在预留表上、NOT NULL，所以消费行「有就是有」——投影它不需要 join。 -->
+             r.generation_job_id AS generation_job_id,
              <!-- 两个终态（settled / released）都已落地，只有 held 还在处理中。
                   ⚠️ 判据写成「= held 的补集」而不是「= settled」：后者会把 released 漏成
                      pending。合法取值只有 Reservation.Status 那三个（库里没有 CHECK 约束），
@@ -245,6 +252,8 @@
              ABS(SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END)) AS amount,
              <!-- 账本动作（过期核销 / 人工调账）不经预留，同样没有预扣 -->
              NULL AS reserved_credits,
+             <!-- 账本动作（过期核销 / 人工调账）不是任务，没有 job 可关联 -->
+             NULL AS generation_job_id,
              'done' AS status,
              MIN(e.gmt_create) AS created_at,
              MIN(e.gmt_create) AS settled_at,

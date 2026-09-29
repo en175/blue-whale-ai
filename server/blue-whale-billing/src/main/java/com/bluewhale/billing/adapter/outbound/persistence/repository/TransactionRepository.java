@@ -82,6 +82,8 @@ public class TransactionRepository {
                 row.getAmount(),
                 // 管理面独用：用户面适配器不投影它。只有消费行有值，其余为 null
                 row.getReservedCredits(),
+                // 同上，管理面独用的 join key；BFF 拿它回自己库查任务语义
+                row.getGenerationJobId(),
                 row.getStatus(),
                 // 连接串钉了 forceConnectionTimeZoneToSession=Asia/Shanghai，
                 // 取出来的 LocalDateTime 已是北京时间；换算口径只有 DbTime 一处
