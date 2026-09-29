@@ -198,6 +198,14 @@ message UserTransaction {
   string id         = 1;
   string type       = 2; // consume | recharge | bonus | daily | invite | redeem
                          // | subscription | gift | compensation | refund | expire
+                         //
+                         // ⚠️ refund（任务失败全额退回 / 超时兜底释放）与 consume
+                         //    **互斥且共用同一个 id**：一个生成任务只有一条预扣预留，
+                         //    那行由 pending 的 consume 变成 done 的 refund ——
+                         //    不会同时出现「消费一行 + 退回一行」。方向恒为 in，
+                         //    金额是当初预扣的那个数（这笔钱从未真正被扣走）。
+                         //    与之相对，「多退少补」的差额**不单独出行**，
+                         //    它折进那条 consume 行的最终金额里。
   string direction  = 3; // in | out
   string title      = 4; // 「视频生成 · seedance-2.5 1080p 5s」
   int64  amount     = 5; // 整数积分，**最终值，唯一金额**

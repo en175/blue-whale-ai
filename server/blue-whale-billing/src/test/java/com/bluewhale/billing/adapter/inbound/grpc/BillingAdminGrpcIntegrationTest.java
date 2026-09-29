@@ -322,6 +322,26 @@ class BillingAdminGrpcIntegrationTest {
         assertThat(pending.getSettledAt()).isEmpty();
     }
 
+    @Test
+    void 任务退回的行_管理端也看得见() {
+        userFacing.hold(hold(USER, "adm-refund-1", 9_215L));
+        credits.refund(9_215L, "任务失败");
+
+        // 这条 SQL 用户面与管理面共用（user_id 为空 = 全站）。退回行从前在**两边**都不出现：
+        // 用户看到自己的余额扣了又不见，客服也答不了「这单到底扣没扣钱」。
+        List<AdminTransactionItem> refunds = adminListTyped(USER, "refund");
+        assertThat(refunds).hasSize(1);
+
+        AdminTransactionItem refund = refunds.get(0);
+        assertThat(refund.getUserId()).isEqualTo(USER);
+        assertThat(refund.getDirection()).isEqualTo("in");
+        assertThat(refund.getStatus()).isEqualTo("done");
+        // 退的就是当初冻的那个数；预扣额那一列（管理面独有）同样带得出来
+        assertThat(refund.getAmount()).isEqualTo(100);
+        assertThat(refund.getReservedCredits()).isEqualTo(100);
+        assertThat(refund.getSettledAt()).isNotEmpty();
+    }
+
     // ─────────────────────────────────────────────────────────────
     // 消耗合计：只算 settled
     // ─────────────────────────────────────────────────────────────
