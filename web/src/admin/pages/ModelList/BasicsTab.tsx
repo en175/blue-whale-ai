@@ -8,7 +8,7 @@
  *   · 「现在是什么」（这一行的身份、当前值）→ 可见的 `Alert`，藏起来等于把状态藏起来；
  *   · 「这是什么 / 为什么」→ 标签旁的 `?`（`Hint`），悬停才展开。
  * ============================================ */
-import type { AdminModel } from '@/api/admin';
+import type { AdminModel } from '@/api/adminModels';
 import { Checkbox, Field, Hint, Input, MetaRow, Select } from '../../ui';
 import { FULL, GRID2, GRID3, LABEL } from './formLayout';
 import {

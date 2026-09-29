@@ -9,7 +9,7 @@
  *    不是替代服务端。两处都校验，是因为谁都不想看到「点了保存、转一圈、
  *    报一个自己早就能看出来的错」。规则若改了，必须两边一起改。
  * ============================================ */
-import type { TopupTierPermission } from '@/api/admin';
+import type { TopupTierPermission } from '@/api/adminTopupTiers';
 import type {
   AdminRechargeCustomConfig,
   SaveRechargeCustomConfigParams,

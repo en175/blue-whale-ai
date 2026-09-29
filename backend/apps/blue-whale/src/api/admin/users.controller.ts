@@ -65,16 +65,15 @@ export class AdminUsersController {
 
     const keyword = query.keyword?.trim() || undefined;
     const statusParam = query.status;
-    const roleParam = query.role;
     const status =
       statusParam === "active" ? 1 : statusParam === "disabled" ? 0 : undefined;
-    const role =
-      roleParam && roleParam.trim() !== "" ? Number(roleParam) : undefined;
 
+    // ⚠️ 这里曾经解析 query.role 并塞进 options，但 listAdminUsers 从来不读它
+    //    （AdminUserListOptions 里根本没有 role）—— 参数被静默丢弃，谁以后加角色筛选
+    //    都会拿到**未过滤**的列表且没有任何报错。所以整条删掉，而不是留着占位。
     const options: {
       keyword?: string;
       status?: number;
-      role?: number;
       page?: number;
       pageSize?: number;
     } = {
@@ -83,7 +82,6 @@ export class AdminUsersController {
     };
     if (keyword) options.keyword = keyword;
     if (status !== undefined) options.status = status;
-    if (role !== undefined) options.role = role;
 
     // ★ 查我们自己的库，不再转发 new-api。
     //   原来那条链路有两个问题：new-api 独立后会断；且它要求调用者在 new-api 那边

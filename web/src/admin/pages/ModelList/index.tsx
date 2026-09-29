@@ -49,7 +49,8 @@ const defaultParams = (m: AdminModel) => {
 export default function ModelList() {
   const queryClient = useQueryClient();
   const list = useQuery(adminModelsOptions());
-  const models: AdminModel[] = list.data ?? [];
+  /** ⚠️ 必须记忆：`list.data ?? []` 每次渲染都是新数组，下面那个 `filtered` 的 useMemo 会因此每渲染都重算（IKJ69L）。 */
+  const models: AdminModel[] = useMemo(() => list.data ?? [], [list.data]);
   /** 缓存里的当前列表 —— 写入侧与读取侧都只认它一份，不另立 state。 */
   const writeModels = (
     next: AdminModel[] | ((prev: AdminModel[]) => AdminModel[]),

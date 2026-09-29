@@ -11,7 +11,7 @@ import {
   toSessionUser,
   type LoginData,
 } from '@/api/auth';
-import { fetchAdminSession } from '@/api/admin';
+import { fetchAdminSession } from '@/api/adminSession';
 import { isApiError } from '@/api/http';
 import Modal from '@/components/Modal';
 import { useAuthStore, type SessionUser } from '@/stores/auth';

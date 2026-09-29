@@ -14,7 +14,7 @@
  * ============================================ */
 import { useState } from 'react';
 import { toast } from 'sonner';
-import type { TopupTierPermission, TopupTierStatus } from '@/api/admin';
+import type { TopupTierPermission, TopupTierStatus } from '@/api/adminTopupTiers';
 import { isApiError } from '@/api/http';
 import {
   Button,

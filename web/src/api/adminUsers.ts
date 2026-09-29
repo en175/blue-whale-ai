@@ -37,14 +37,18 @@ export interface AdminUserListData {
   total: number;
 }
 
-/** GET /api/admin/users 用户列表（keyword 匹配昵称/手机号/用户ID；status active/disabled；pageSize 最大 100）；请求头 New-Api-User 携带当前管理员 userId */
+/**
+ * GET /api/admin/users 用户列表（keyword 匹配昵称/手机号/用户ID；status active/disabled；pageSize 最大 100）；请求头 New-Api-User 携带当前管理员 userId
+ *
+ * <p>⚠️ 曾经支持过 `role` 入参，但服务端从不读它 —— 传了也只会拿到**未过滤**的列表。
+ * IKJ69L 已把两边一并删掉；等真的做角色筛选 UI 时再连通，别提前留一个骗人的参数。
+ */
 export function fetchAdminUsers(
-  params: { keyword?: string; status?: string; role?: number; page?: number; pageSize?: number } = {}
+  params: { keyword?: string; status?: string; page?: number; pageSize?: number } = {}
 ) {
   const qs = new URLSearchParams();
   if (params.keyword) qs.set('keyword', params.keyword);
   if (params.status) qs.set('status', params.status);
-  if (params.role !== undefined) qs.set('role', String(params.role));
   qs.set('page', String(params.page ?? 1));
   qs.set('pageSize', String(params.pageSize ?? 20));
   const adminUserId = useAuthStore.getState().user?.userId;

@@ -100,7 +100,8 @@ export default function UserManage() {
    * 那是本工单验收第 2 条的内容，不在这一步。
    */
   const list = useQuery(adminUsersOptions({ page: 1, pageSize: 100 }));
-  const users: AdminUserRow[] = list.data?.list ?? [];
+  /** ⚠️ 必须记忆：`list.data?.list ?? []` 每次渲染都是新数组，下面那个筛选 useMemo 会因此每渲染都重算（IKJ69L）。 */
+  const users: AdminUserRow[] = useMemo(() => list.data?.list ?? [], [list.data]);
   const loading = list.isPending;
   const loadError = list.isError
     ? isApiError(list.error)

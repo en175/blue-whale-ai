@@ -37,7 +37,7 @@
  * 读不到 / 该模型没有能力行时，`capability` 是 `null`，调用方退回原来的自由键值编辑，
  * 并在界面上说明「候选集读不到」。**不猜**一份档位清单顶上去——那等于把漂移换个地方发生。
  * ============================================ */
-import type { AdminModel } from '@/api/admin';
+import type { AdminModel } from '@/api/adminModels';
 
 /** 能力行里的一个档位。除 id 外都是可选：历史行可能没有 api_value / 宽高。 */
 export interface CapabilitySize {
