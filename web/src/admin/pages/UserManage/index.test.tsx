@@ -267,3 +267,97 @@ describe('UserManage 发放积分', () => {
     }
   });
 });
+
+/**
+ * IKJ5M7：筛选与分页下沉到服务端。
+ *
+ * 这一组钉的是「**请求里真的带了什么**」。本地筛选改服务端之后，「界面上看着筛过了」
+ * 与「请求里带了条件」是两件事 —— 页面不再自己过滤，只有后者算数。
+ */
+describe('UserManage 服务端筛选与分页', () => {
+  const KEYWORD_PLACEHOLDER = '搜索昵称/手机号/用户ID...';
+
+  async function settle() {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  async function clickButton(text: string) {
+    await act(async () => {
+      [...document.querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent?.trim() === text)
+        ?.click();
+    });
+    await settle();
+  }
+
+  /** React 受控输入：直接改 `value` 不触发 onChange，得走原生 setter 再派发 input 事件。 */
+  async function fill(placeholder: string, value: string) {
+    const input = [...document.querySelectorAll<HTMLInputElement>('input')].find(
+      (i) => i.placeholder === placeholder,
+    );
+    if (!input) throw new Error(`没有找到输入框：${placeholder}`);
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  /** 最后一次发给服务端的查询参数。 */
+  function lastQuery() {
+    const calls = adminApi.fetchAdminUsers.mock.calls;
+    return calls[calls.length - 1]?.[0] as Record<string, unknown>;
+  }
+
+  it('首屏不带任何筛选：「空串 = 全部」不会把哨兵发给后端', async () => {
+    await renderPage();
+
+    // ⚠️ 这条不是废话：本仓真出过「`'all'` 被当成真值发下去、列表静默为空」的事
+    //    （见 `useQueryFilters` 的文件头）。断言的是**键不存在**而不是「值为空串」：
+    //    服务端拿到 `status=''` 会当成一个没见过的状态。
+    //    先确认真有一次请求（否则下面两条断言会在「没请求」时静默通过）。
+    expect(lastQuery()).toMatchObject({ page: 1, pageSize: 20 });
+    expect(lastQuery()).not.toHaveProperty('keyword');
+    expect(lastQuery()).not.toHaveProperty('status');
+  });
+
+  it('关键词下发到服务端，`#42` 这类写法先归一掉', async () => {
+    await renderPage();
+    await fill(KEYWORD_PLACEHOLDER, '#42');
+    await clickButton('查询');
+
+    expect(lastQuery()).toMatchObject({ keyword: '42', page: 1 });
+  });
+
+  it('翻页把页码发给服务端；换筛选条件后回到第 1 页', async () => {
+    // total > pageSize 才有下一页
+    adminApi.fetchAdminUsers.mockResolvedValue({ list: [], total: 41 });
+    await renderPage();
+
+    await clickButton('下一页');
+    expect(lastQuery()).toMatchObject({ page: 2 });
+
+    await fill(KEYWORD_PLACEHOLDER, 'ali');
+    await clickButton('查询');
+    // 换了条件还停在第 2 页，看到的会是一份**莫名其妙的空列表**（明明有匹配）
+    expect(lastQuery()).toMatchObject({ page: 1, keyword: 'ali' });
+  });
+
+  /**
+   * 累计充值的「？」说明（用户明确要的那一条）。
+   *
+   * <p>它解释的是「这一列算的是什么」——而这一列的数与运营脑子里的「充值」很可能
+   * 不是一个东西（赠送算不算、花掉的还算不算）。说明丢了不会有任何报错，
+   * 只会让下一个人按自己的理解读那个数。
+   */
+  it('累计充值列表头带口径说明', async () => {
+    await renderPage();
+
+    const th = [...document.querySelectorAll('th')].find((el) =>
+      el.textContent?.includes('累计充值'),
+    );
+    expect(th?.querySelector('button[aria-label="累计充值的口径"]')).not.toBeNull();
+  });
+});

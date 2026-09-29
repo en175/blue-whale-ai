@@ -84,6 +84,16 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
               OR: [
                 { username: { contains: keyword } },
                 { phone: { contains: keyword } },
+                // ★ 关键词**整串是数字**时再按用户 ID 精确匹配一次 —— 搜索框的
+                //   placeholder 承诺了「用户 ID」，少了这条那句承诺就是假的。
+                //
+                //   ⚠️ 这里用**等值**而不是 contains：敲一个数字，运营想要的是
+                //      「这个用户」，不是「ID 里带这个数字的所有人」；而
+                //      `CAST(id AS CHAR) LIKE '%42%'` 还会让 id 上的索引彻底失效
+                //      （一张随注册量增长的表，为少数用法换全表扫描不划算）。
+                //      代价是搜「42」不再返回 142 —— 那是 IKJ5M7 之前前端本地
+                //      contains 的旧行为，这次一并改掉。
+                ...(/^\d+$/.test(keyword) ? [{ id: BigInt(keyword) }] : []),
               ],
             }
           : {}),
