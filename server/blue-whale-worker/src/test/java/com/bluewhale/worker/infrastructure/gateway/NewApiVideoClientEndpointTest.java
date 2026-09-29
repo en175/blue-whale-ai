@@ -8,6 +8,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoTaskOb
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +20,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -340,5 +342,24 @@ class NewApiVideoClientEndpointTest {
         assertThat(observation.error()).isNotNull();
         // 合并信号里 copyright 优先于 quota → 1038
         assertThat(observation.error().code()).isEqualTo("content_rejected_reference");
+    }
+
+    @Test
+    @DisplayName("IKJ80M: submit 超时 ≥120s 且经 submitClient 配置生效（网关带视频参考提交实测 ~51s）")
+    void submitTimeoutAtLeast120sAppliedToClient() throws Exception {
+        Field timeoutField = NewApiVideoClient.class.getDeclaredField("SUBMIT_TIMEOUT_MS");
+        timeoutField.setAccessible(true);
+        int submitTimeoutMs = timeoutField.getInt(null);
+
+        // 旧值 30s 会误杀带视频参考的提交；120s 为实测 ~51s 留足余量
+        assertThat(submitTimeoutMs).isGreaterThanOrEqualTo(120_000);
+
+        // 常量必须真实落到 submitClient 的 read/write 超时（防构造函数改丢）
+        Field clientField = NewApiVideoClient.class.getDeclaredField("submitClient");
+        clientField.setAccessible(true);
+        OkHttpClient submitClient =
+                (OkHttpClient) clientField.get(new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)));
+        assertThat(submitClient.readTimeoutMillis()).isEqualTo(submitTimeoutMs);
+        assertThat(submitClient.writeTimeoutMillis()).isEqualTo(submitTimeoutMs);
     }
 }
