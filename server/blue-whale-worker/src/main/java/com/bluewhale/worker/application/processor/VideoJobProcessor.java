@@ -1043,15 +1043,30 @@ public class VideoJobProcessor implements JobProcessor {
     }
 
     /**
-     * IKJ80P：异常链上是否存在 {@link java.net.SocketTimeoutException}（自环防死循环，
-     * JobFinalizer.isRowLockConflict 同款遍历）。submit 阶段命中 = 读超时放弃，但网关
-     * 可能随后仍完成建单——孤儿疑似判定信号。
+     * IKJ80P：异常链上是否存在「请求已发出后」的 {@link java.net.SocketTimeoutException}
+     * （自环防死循环，JobFinalizer.isRowLockConflict 同款遍历）。submit 阶段命中 = 读超时
+     * 放弃，但网关可能随后仍完成建单——孤儿疑似判定信号。
+     * <p>
+     * IKJ80I review 修复：OkHttp 的 connect 超时同样抛 SocketTimeoutException
+     * （RealConnection.connectSocket 只包装 ConnectException，超时原样上抛），但请求根本
+     * 未送达、网关不可能建单，不得标孤儿。按 JDK 原始 message 收窄（实证 okhttp 4.12.0 +
+     * JDK 17，NioSocketImpl）：connect 超时 = "Connect timed out"（JDK 8 PlainSocketImpl
+     * 为小写 "connect timed out"，忽略大小写覆盖两代）；read 超时 = "Read timed out"。
+     * message 为 null / 未知形态保守视为非 connect（漏标真孤儿 = 已扣量追不回，代价大于
+     * 误标进对账清单的噪音）。
      */
     private static boolean hasSocketTimeoutCause(Throwable error) {
         for (Throwable t = error; t != null; t = t.getCause() == t ? null : t.getCause()) {
-            if (t instanceof java.net.SocketTimeoutException) return true;
+            if (t instanceof java.net.SocketTimeoutException && !isConnectTimeoutMessage(t.getMessage())) {
+                return true;
+            }
         }
         return false;
+    }
+
+    /** JDK connect 超时的原始 message 以 "connect" 开头（大小写跨 JDK 版本不一致，忽略之）。 */
+    private static boolean isConnectTimeoutMessage(String message) {
+        return message != null && message.toLowerCase().startsWith("connect");
     }
 
     // ========== videoDimensions / dimensionsFromSize ==========

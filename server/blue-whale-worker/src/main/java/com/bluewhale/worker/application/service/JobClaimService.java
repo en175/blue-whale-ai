@@ -43,11 +43,25 @@ public class JobClaimService {
 
     private static final Logger log = LoggerFactory.getLogger(JobClaimService.class);
 
-    /** 租约 120s（契约 §3.2 IMAGE_JOB_LEASE_SECONDS 默认；image 例外见下）。 */
+    /** audio 租约 120s（契约 §3.2 IMAGE_JOB_LEASE_SECONDS 默认；image/video 例外见下）。 */
     private static final int LEASE_SECONDS = 120;
 
     /** image 租约 420s（> NEW_API_IMAGE_TIMEOUT_MS 300s + 转存余量，防 recovery 孤儿重投双跑双扣）。 */
     private static final int IMAGE_LEASE_SECONDS = 420;
+
+    /**
+     * video 租约 300s（IKJ80I review 修复）：必须 > submit 最坏耗时 + 收尾余量。
+     * <p>
+     * 推导：NewApiVideoClient submit = connect 10s + read/write 120s（IKJ80M）≈130s 最坏；
+     * 租约持有窗口 = claim → submit 返回 → markProviderSubmitted/failVideo 落库（成功或失败
+     * 落库后租约即释放），旧值 120s 在 submit 进行中即过期 → RecoveryService（60s/轮，
+     * processing + 租约过期即重投）判孤儿重投，第二个 worker 对同一 job 再 submit = 上游
+     * 双跑双扣；且 fencing_token 已被新 claim 递增，原 worker 的终态与 IKJ80P 孤儿标记
+     * 落库被 CAS 拒绝、恰在此窗口丢失。300s ≈ 2.3x 最坏 submit，覆盖收尾落库与
+     * worker/DB 时钟偏差；同 image「租约 > 客户端超时 + 余量，防 recovery 孤儿重投双跑
+     * 双扣」不变量（420/300 先例）。
+     */
+    private static final int VIDEO_LEASE_SECONDS = 300;
 
     /** image claim 的 source 白名单（claim-ops.ts:339 CLAIMABLE_JOB_SOURCES）。 */
     private static final List<String> IMAGE_CLAIM_SOURCES =
@@ -231,7 +245,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_LEASE_SECONDS);
         int affected = jobMapper.claimVideoCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
