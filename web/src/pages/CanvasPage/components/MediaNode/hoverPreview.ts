@@ -1,6 +1,7 @@
-/** IKJ7RS 视频卡悬停自动播放预览：起播/续播排除态谓词与常量。
+/** IKJ7OS 视频卡悬停自动播放预览：起播/续播排除态谓词与常量。
  *  纯函数模块（家族先例 toolbarVisibility.ts / generationOverlay.ts），MediaNode 与测试共用。
- *  选中卡规则（尾播/让位/多选抑制等）与术语入库归 IKJ7S1，本模块只服务未选中卡基础链路。 */
+ *  IKJ7RS 交付未选中卡基础链路；IKJ7S1 翻转起播门（选中卡同样自动开播）并加入多选抑制，
+ *  选中卡尾播/让位的运行时状态机在 MediaNode/index.tsx。 */
 
 /** 悬停布防延时：进入内容区满此时长才开播；计时内划过不播，保持首帧海报无视觉变化 */
 export const HOVER_PREVIEW_DELAY_MS = 100;
@@ -25,10 +26,25 @@ export interface VideoHoverPreviewInput {
   subtitleEraseLocked?: boolean;
   /** 音视频分离/人声背景/场景切分/智能抠像会话锁定（CanvasPage 注入 splitEditing） */
   splitEditing?: boolean;
+  /** 画布处于多节点选中（框选 / Ctrl 加选 / Ctrl+A）：多选期间任何卡不自动播放（IKJ7S1） */
+  multiSelected?: boolean;
 }
 
-/** 会话排除态（不含「选中」翻转）：编辑会话锁定、生成流程卡、素材缺失、空壳、加载失败、
- *  抓手（拖动）工具模式。悬停会话进行中任一排除态出现即立即停播回首帧海报。 */
+/** 画布多选判定（useSoloNodeSelected 同款计数）：选中节点数 >1 即多选。
+ *  独立副本落在纯函数模块（不反向依赖 hooks 文件），MediaNode 以 useStore 选择器消费。 */
+export function isMultiNodeSelection(nodes: { selected?: boolean }[]): boolean {
+  let selectedCount = 0;
+  for (const node of nodes) {
+    if (!node.selected) continue;
+    selectedCount += 1;
+    if (selectedCount > 1) return true;
+  }
+  return false;
+}
+
+/** 会话排除态：编辑会话锁定、生成流程卡、素材缺失、空壳、加载失败、抓手（拖动）工具模式、
+ *  画布多选。悬停会话进行中任一排除态出现即立即停播。注意不含「选中」翻转——点选过渡
+ *  （悬停播放中点击选中）不能被选中本身停掉（IKJ7RS）。 */
 export function videoHoverPreviewBlocked(input: VideoHoverPreviewInput): boolean {
   if (input.mediaType !== 'video') return true;
   // 与 hasMediaSrc 同口径：blob 预览（上传中）不算可播素材
@@ -41,11 +57,13 @@ export function videoHoverPreviewBlocked(input: VideoHoverPreviewInput): boolean
   if (input.emptyShell === true) return true;
   if (input.subtitleEraseLocked === true) return true;
   if (input.splitEditing === true) return true;
+  if (input.multiSelected === true) return true;
   return false;
 }
 
-/** 悬停起播门：成品视频卡 + 选择工具 + 未选中 + 非任何排除态。
- *  选中卡不起点悬停播放（点选过渡靠会话续播衔接，选中卡规则归 IKJ7S1）。 */
+/** 悬停起播门：成品视频卡 + 选择工具 + 非任何排除态。
+ *  选中卡与未选中卡同门（IKJ7S1 翻转：选中卡悬停同样自动开播——已布防卡在原生控件
+ *  视频上就地开播，未布防卡走离屏元素路）。 */
 export function videoHoverPreviewEligible(input: VideoHoverPreviewInput): boolean {
-  return input.selected !== true && !videoHoverPreviewBlocked(input);
+  return !videoHoverPreviewBlocked(input);
 }

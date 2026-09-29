@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HOVER_PREVIEW_DELAY_MS, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
+import { HOVER_PREVIEW_DELAY_MS, isMultiNodeSelection, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
 
 /** 未选中成品视频卡基准样本：满足起播门的全部条件 */
 const eligibleBase = {
@@ -9,7 +9,7 @@ const eligibleBase = {
   selected: false,
 };
 
-describe('videoHoverPreviewEligible / videoHoverPreviewBlocked（IKJ7RS）', () => {
+describe('videoHoverPreviewEligible / videoHoverPreviewBlocked（IKJ7RS 建，IKJ7S1 翻转）', () => {
   it('布防延时为 100ms', () => {
     expect(HOVER_PREVIEW_DELAY_MS).toBe(100);
   });
@@ -19,9 +19,9 @@ describe('videoHoverPreviewEligible / videoHoverPreviewBlocked（IKJ7RS）', () 
     expect(videoHoverPreviewBlocked(eligibleBase)).toBe(false);
   });
 
-  it('选中卡不起播（选中卡规则归 IKJ7S1），但不算会话排除态（点选过渡续播不被停）', () => {
+  it('选中卡同样过起播门（IKJ7S1 翻转：选中卡悬停自动开播），且选中翻转不算会话排除态（点选过渡续播不被停）', () => {
     const input = { ...eligibleBase, selected: true };
-    expect(videoHoverPreviewEligible(input)).toBe(false);
+    expect(videoHoverPreviewEligible(input)).toBe(true);
     expect(videoHoverPreviewBlocked(input)).toBe(false);
   });
 
@@ -39,11 +39,26 @@ describe('videoHoverPreviewEligible / videoHoverPreviewBlocked（IKJ7RS）', () 
     ['空壳占位', { ...eligibleBase, emptyShell: true }],
     ['去字幕会话锁定', { ...eligibleBase, subtitleEraseLocked: true }],
     ['分离/场景切分/抠像会话锁定', { ...eligibleBase, splitEditing: true }],
+    ['画布多选（框选 / Ctrl 加选 / Ctrl+A）', { ...eligibleBase, multiSelected: true }],
     ['blob 上传预览 src', { ...eligibleBase, src: 'blob:preview' }],
     ['空 src', { ...eligibleBase, src: '' }],
     ['src 缺失', { ...eligibleBase, src: undefined }],
   ])('排除态：%s 不起播且命中会话排除', (_name, input) => {
     expect(videoHoverPreviewEligible(input)).toBe(false);
     expect(videoHoverPreviewBlocked(input)).toBe(true);
+  });
+});
+
+describe('isMultiNodeSelection（IKJ7S1，useSoloNodeSelected 同款计数）', () => {
+  it('无选中 / 单选中：非多选', () => {
+    expect(isMultiNodeSelection([])).toBe(false);
+    expect(isMultiNodeSelection([{ selected: false }, { selected: false }])).toBe(false);
+    expect(isMultiNodeSelection([{ selected: true }, { selected: false }])).toBe(false);
+  });
+
+  it('两个及以上选中即多选；selected 字段缺失视为未选中', () => {
+    expect(isMultiNodeSelection([{ selected: true }, { selected: true }])).toBe(true);
+    expect(isMultiNodeSelection([{ selected: true }, {}, { selected: true }])).toBe(true);
+    expect(isMultiNodeSelection([{}, {}])).toBe(false);
   });
 });
