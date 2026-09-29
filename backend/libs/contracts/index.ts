@@ -6,6 +6,7 @@ export {
   frozenVideoTaskTypeOf,
   TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
   FROZEN_VIDEO_TASK_TYPE_KEY,
+  hasTaskTypeConstraint,
   parseSpecKey,
   specKeyOf,
   normalizeSpecKey,

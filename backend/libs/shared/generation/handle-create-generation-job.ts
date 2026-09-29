@@ -28,6 +28,7 @@ import {
   taskTypeAllowedRatios,
   ERROR_TASK_TYPE_PARAM_CONSTRAINT,
   TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+  hasTaskTypeConstraint,
   resolveOutputPixels,
   type VideoTaskType,
   videoRefLabel,
@@ -857,6 +858,58 @@ const strategies: Record<GenerationType, GenerationTypeStrategy> = {
   video: videoStrategy,
   audio: audioStrategy,
 };
+
+/**
+ * IKJ797：编辑单的报价/预扣时长口径 —— **按源参考视频最长时长预估**（官方 edit 语义：
+ * 输出时长跟随参考视频，用户所选时长不生效）。延长单/参考单取用户所选，本函数不动它们。
+ *
+ * 堵的是 TEMP FIX 时代的透支漏洞：编辑 + 默认 4 秒档曾按 4 秒预估/冻结，而实际输出
+ * 跟随源视频出十几秒——预扣与结算的差额由平台垫且账面无信号。
+ *
+ * ⚠️ **两个前提闸**：
+ *   1. 能力行配了 `task_types.edit`（Seedance 2.5 配了、2.0 没配）——按模型分叉的
+ *      约束走能力行配置，与 `resolveVideoTaskType`「只回答类型、不管约束」的分工一致；
+ *   2. 现场用 {@link resolveVideoTaskType} 判定（报价发生在创建前、无快照可读；
+ *      预扣发生在创建中，与 IKJ795 冻结进快照的是同一个纯函数同一份输入）。
+ *
+ * 源时长取 `input.references` 里 type=video 条目的 **duration 最大值**（多路素材时官方
+ * 未写明跟随哪一路，父规格定为最长一路——保守方向是宁可多冻不少冻）。取整与
+ * `sumVideoInputSeconds` 同口径（floor）。**量不到（有视频参考但缺时长）→ 不改写**，
+ * 回落用户所选：报价侧等价于现状、预扣侧建任务链路已用 assets.duration 权威回填，
+ * 量不到仅剩素材库引用未带时长的边角——不按 0 估，也不拒单。
+ *
+ * 原地改写 `input.duration`（预扣路径因此连快照一起改——worker 对编辑单的出站时长
+ * 恒强制 -1、不读该字段；Java 结算 `specsOf` 读同一份快照，预扣与结算自动同口径）。
+ * @returns 是否已按源视频时长改写（报价响应据此携带「按源视频时长预估」标记）。
+ */
+export function applyEditSourceDurationBasis(
+  input: Record<string, unknown>,
+  prompt: string,
+  taskTypes: unknown,
+): boolean {
+  if (!hasTaskTypeConstraint(taskTypes, "edit")) return false;
+  // 两处调用点的 input.references 都出自 parseReferences（role/type 恒为字符串），可直接窄化。
+  const refs = Array.isArray(input.references)
+    ? (input.references as ReadonlyArray<{
+        role: string;
+        type: string;
+        duration?: unknown;
+      }>)
+    : [];
+  if (resolveVideoTaskType(refs, prompt) !== "edit") return false;
+  let maxSeconds: number | null = null;
+  for (const ref of refs) {
+    if (ref.type !== "video") continue;
+    const seconds = ref.duration;
+    if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+      return false; // 有视频参考却量不到时长：整个键量不到，不凑偏小的数（同 sumVideoInputSeconds 立场）
+    }
+    maxSeconds = Math.max(maxSeconds ?? 0, Math.floor(seconds));
+  }
+  if (maxSeconds === null) return false;
+  input.duration = maxSeconds;
+  return true;
+}
 
 /**
  * 报价（价格预览）用的规格投影 —— 喂给 billing 的 `Quote`，只算不扣。
@@ -2068,6 +2121,14 @@ export async function handleCreateGenerationJob(
     input.sample_mode = true;
   }
   // IKJ795：video_task_type 的冻结在 composeInput 内（与报价投影同源），此处不再补写。
+  // IKJ797：编辑单预扣时长口径——按源参考视频最长时长冻结，堵「按 4 秒预扣、实际出十几秒」
+  // 的透支。改写发生在快照落库之前：Java 结算 specsOf 读同一份快照 → 预扣与结算自动同口径；
+  // worker 对编辑单的出站时长恒强制 -1、不读该字段。量不到源时长时不改写（详见函数注释）。
+  applyEditSourceDurationBasis(
+    input,
+    typeof input.prompt === "string" ? input.prompt : "",
+    capability?.features?.task_types,
+  );
   // IKFM3S §4：文本输入签名冻结进快照——任务成功后前端轮询回写目标 usedInputSignature，
   // 重试随 input 原样复用；无文本输入（inputs 为空）不写，目标无文本边时提示本就不显示。
   if (textIndexRefs.value.index.inputs.length > 0) {

@@ -265,6 +265,17 @@ function taskTypeConstraint(
     : null;
 }
 
+/** IKJ797：能力行是否给该任务类型配了约束条目（`features.task_types[taskType]` 存在）。
+ *  报价/预扣用它判「该模型的 edit 是否锁跟随口径」：Seedance 2.5 配了 `task_types.edit`
+ *  （官方：edit 输出比例时长跟随参考视频），2.0 未配（编辑类提示词也可自选时长）——
+ *  按模型分叉的约束走能力行配置，与本文件其他读取器同一立场。 */
+export function hasTaskTypeConstraint(
+  taskTypes: unknown,
+  taskType: VideoTaskType,
+): boolean {
+  return taskTypeConstraint(taskTypes, taskType) !== null;
+}
+
 /** 提交侧待校验参数（Dock 视频/图片扁平字段，归一化由调用方完成）。 */
 export interface GenerationParamCheckInput {
   /** 视频分辨率档（如 1080p）或图片尺寸档（如 2k）——与能力行 supported_sizes 的 id/api_value 比对。 */
