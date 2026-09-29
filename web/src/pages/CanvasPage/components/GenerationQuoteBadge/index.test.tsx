@@ -23,6 +23,14 @@ function quoteResponse(credits: number | null) {
   });
 }
 
+/** IKJ797：编辑单报价响应携带 duration_basis 标记（其余单字段不出现） */
+function quoteResponseWithBasis(credits: number) {
+  return new Response(
+    JSON.stringify({ code: 200, msg: null, data: { credits, duration_basis: 'source_video' } }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+}
+
 function imageRef(assetId: string): GenerationRefItem {
   return { role: 'reference', type: 'image', asset_id: assetId };
 }
@@ -161,5 +169,28 @@ describe('GenerationQuoteBadge', () => {
     await renderBadge({ projectId: '' });
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('★ IKJ797 标记 duration_basis=source_video → 徽标旁标注「按源视频时长预估」', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(quoteResponseWithBasis(58)));
+
+    await renderBadge({});
+
+    await vi.waitFor(() =>
+      expect(container.textContent).toContain('本次预计消耗 58 积分'),
+    );
+    expect(container.querySelector('[data-testid="generation-quote-basis"]')?.textContent)
+      .toBe('按源视频时长预估');
+  });
+
+  it('★ 无标记（延长/参考单）→ 只显积分，不出现口径标注', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(quoteResponse(58)));
+
+    await renderBadge({});
+
+    await vi.waitFor(() =>
+      expect(container.textContent).toContain('本次预计消耗 58 积分'),
+    );
+    expect(container.textContent).not.toContain('按源视频时长预估');
   });
 });

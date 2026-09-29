@@ -10,3 +10,13 @@
   color: var(--color-text-tertiary);
   user-select: none;
 }
+
+/* IKJ797：编辑单时长口径标注——与积分同段弱化小字，中点分隔，不新增视觉层级 */
+.basisTag {
+  color: var(--color-text-tertiary);
+}
+.basisTag::before {
+  content: '·';
+  margin-right: var(--spacing-xs);
+}
+

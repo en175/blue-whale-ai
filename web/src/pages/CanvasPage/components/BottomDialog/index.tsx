@@ -318,7 +318,9 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     ...(duration ? { duration } : {}),
     generate_audio: generateAudio,
     ...(sampleMode ? { sample_mode: true as const } : {}),
-  }), [currentModel?.model_id, quoteResolution, selectedRatio, duration, generateAudio, sampleMode]);
+    // IKJ79D：防抖后的提示词（编辑单时长口径判定输入），空串不带键
+    ...(quotePrompt ? { prompt: quotePrompt } : {}),
+  }), [currentModel?.model_id, quoteResolution, selectedRatio, duration, generateAudio, sampleMode, quotePrompt]);
 
   /** 生成中只读（IKDMQS）：任务执行期间目标参数与输入冻结，保留查看与画布上的取消入口 */
   const readOnly = sending || videoDraftBinding.submitting || videoDraftBinding.status === 'generating';
@@ -495,6 +497,13 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   );
   /** 拍平镜像（IKFA1O/IKFA1P）：字数统计与发送门槛共用；失效标签 → 已失效：原N */
   const flatValue = useMemo(() => flattenPromptDocWith(promptDoc, (key) => refLabelOfStable.current(key)), [promptDoc, reconcileKey]);
+  /** 报价带提示词（IKJ79D）：后端据此判编辑单（时长口径标记输入）。防抖 600ms——报价查询键
+   *  含提示词，逐字直传会每敲一个字重新问价，停笔后才问一次。 */
+  const [quotePrompt, setQuotePrompt] = useState('');
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuotePrompt(flatValue), 600);
+    return () => window.clearTimeout(timer);
+  }, [flatValue]);
   /** 失效标签存在时阻止生成（模式不兼容或参考移除；点击替换/删除后可继续） */
   const hasInvalidRef = docHasInvalidRef(promptDoc);
 

@@ -63,6 +63,10 @@ function QuoteBadge({ projectId, type, parameters, references }: GenerationQuote
     <span className={styles.badge} data-testid="generation-quote">
       <Zap size={12} strokeWidth={2} />
       <span>本次预计消耗 {credits} 积分</span>
+      {/* IKJ797：编辑单预估按源参考视频最长时长计（用户所选时长不参与），标记旁注明口径 */}
+      {data?.duration_basis === 'source_video' && (
+        <span className={styles.basisTag} data-testid="generation-quote-basis">按源视频时长预估</span>
+      )}
     </span>
   );
 }

@@ -19,9 +19,9 @@ export type { GenerationJobType };
 /**
  * 报价（价格预览）用参数 —— 创建任务 `parameters` 里**参与定价**的那几个键。
  *
- * ⚠️ 提示词不在此列：它不是定价维度，后端也从规格里丢掉它。
- *    带上提示词还会让报价的查询键随每一次打字变化（每敲一个字重新报价）。
- *    （参考素材**是**定价维度，只是不走 `parameters` 而走下面的 `references`。）
+ * ⚠️ 参考素材**是**定价维度，只是不走 `parameters` 而走下面的 `references`。
+ * `prompt` 仅视频面板带（IKJ79D）：后端据此判定编辑单（按源视频时长预估的标记输入），
+ * 调用方需防抖后传，避免查询键随打字逐字变化每键重新问价；图片/音频不带。
  */
 export interface QuoteJobParameters {
   model_id: string;
@@ -37,6 +37,8 @@ export interface QuoteJobParameters {
   /** IKIZQB：样片模式（仅放行模型 + 480p 有意义；契约 sampleModeParametersSchema）。
    *  开启时报价按样片规格计价并返回 quote_revision（提交确认用）；未传沿用普通视频语义。 */
   sample_mode?: true;
+  /** 视频（IKJ79D）：提示词——编辑单时长口径判定输入，防抖后传 */
+  prompt?: string;
 }
 
 /** 报价请求体：与创建任务**同形**的定价部分（同一个 model、同一份规格、同一份参考、同一个输出数）。 */
@@ -63,8 +65,14 @@ export interface QuoteJobPayload {
 /** 报价结果 —— IKIZQB 起即契约 StageQuoteView（video-sample-mode.ts §2）：
  *  `credits` 是**整数积分**，null = 算不出价（**不要当 0 渲染**，0 会被读成免费，且禁提交）；
  *  `quote_revision` 是报价版本指纹 —— 样片提交须原样带回（expected_credits + quote_revision），
- *  服务端复算不一致即 quote_stale。无报价时两字段同时为 null（契约 superRefine）。 */
-export type GenerationQuote = StageQuoteView;
+ *  服务端复算不一致即 quote_stale。无报价时两字段同时为 null（契约 superRefine）。
+ *  IKJ797/IKJ79D 以交叉类型扩展 duration_basis（本进程 web 侧展示扩展，不进跨进程契约）。 */
+export type GenerationQuote = StageQuoteView & {
+  /** IKJ797/IKJ79D：`"source_video"` = 本次预估按**源参考视频最长时长**计（编辑单——官方
+   *  edit 语义输出时长跟随参考视频，用户所选时长不参与计价）。字段不出现 = 按用户所选
+   *  时长预估。前端据此在预估徽标旁标注「按源视频时长预估」。 */
+  duration_basis?: 'source_video';
+};
 
 /**
  * 价格预览 POST /api/projects/:id/generation-jobs/quote —— **只算不扣**。

@@ -8,3 +8,13 @@
 export const OMNI_REFERENCE_FOLLOW_HINT =
   '提示词若涉及修改、替换或延长原视频，输出比例与时长将自动跟随参考视频';
 
+/** IKJ6DK「编辑/延长任务比例约束」错误码（IKJ795 接纳侧 4xx / IKJ79A worker 归类上游
+ *  TaskTypeMismatch、TaskTypeConstraint 的异步失败，两种信封同码）：
+ *  信封数值码 1060（分支期取 1056，rebase 撞 IKIZQ5/IKJ8J8 已落号改取下一空号），
+ *  或 data.code 字符串 task_type_param_constraint。
+ *  失败卡片按码识别展示一键修复（IKJ79D），不做文案匹配。 */
+export function isTaskTypeParamConstraintCode(
+  code: number | string | null | undefined,
+): boolean {
+  return code === 1060 || code === 'task_type_param_constraint';
+}
