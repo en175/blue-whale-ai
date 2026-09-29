@@ -32,7 +32,7 @@ import { MaterialService } from "@lib/shared/material/material.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
-import { isRocketMqEndpointsMissingError } from "@lib/infra/mq/rocketmq-producer.js";
+import { enqueueFailureLog } from "@lib/infra/mq/rocketmq-producer.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 function bodyString(body: unknown): string {
@@ -204,17 +204,9 @@ export class GenerationJobsController {
       try {
         await enqueueVideoGenerationJob(jobId);
       } catch (error) {
-        if (isRocketMqEndpointsMissingError(error)) {
-          // IKJ80Q：缺配不是故障——任务行已落库，worker 恢复扫描会捞起派发（见上方幂等注释），
-          // ERROR 会把排查引向 RocketMQ（IKJ6DK 的教训），降 WARN。
-          logger.warn(
-            `[generation] video job 未经 MQ 派发（未配置 ROCKETMQ_ENDPOINTS），将由 worker 恢复扫描捞起消费: jobId=${jobId}`,
-          );
-        } else {
-          logger.error(
-            `[generation] enqueue video job failed: ${error instanceof Error ? error.message : "unknown"}`,
-          );
-        }
+        // IKJ80Q：缺配≠故障（恢复扫描兜底）降 WARN，真失败 ERROR——分级与文案收口在 enqueueFailureLog。
+        const log = enqueueFailureLog(error, { scope: "generation", kind: "video", jobId });
+        logger[log.level](log.message);
       }
     } else if (result.code === 200 && result.data && body.type === "image") {
       // IKBGKA：图片 job 走 RocketMQ（消费端 Semaphore 控并发，不再 API 进程内无上限 fire-and-forget）。
@@ -222,16 +214,9 @@ export class GenerationJobsController {
       try {
         await enqueueImageGenerationJob(jobId);
       } catch (error) {
-        if (isRocketMqEndpointsMissingError(error)) {
-          // IKJ80Q：缺配≠故障，恢复扫描兜底（同 video 分支），降 WARN。
-          logger.warn(
-            `[generation] image job 未经 MQ 派发（未配置 ROCKETMQ_ENDPOINTS），将由 worker 恢复扫描捞起消费: jobId=${jobId}`,
-          );
-        } else {
-          logger.error(
-            `[generation] enqueue image job failed: ${error instanceof Error ? error.message : "unknown"}`,
-          );
-        }
+        // IKJ80Q：缺配≠故障，恢复扫描兜底（同 video 分支）。
+        const log = enqueueFailureLog(error, { scope: "generation", kind: "image", jobId });
+        logger[log.level](log.message);
       }
     } else if (result.code === 200 && result.data && body.type === "audio") {
       // IKCR78：音频 job 走 RocketMQ（与图片同构；封死 API 进程内同步 processJob 后门）。
@@ -336,32 +321,18 @@ export class GenerationJobsController {
         try {
           await enqueueVideoGenerationJob(newJobId);
         } catch (error) {
-          if (isRocketMqEndpointsMissingError(error)) {
-            // IKJ80Q：缺配≠故障，恢复扫描兜底（同 create video 分支），降 WARN。
-            logger.warn(
-              `[generation] retry video job 未经 MQ 派发（未配置 ROCKETMQ_ENDPOINTS），将由 worker 恢复扫描捞起消费: jobId=${newJobId}`,
-            );
-          } else {
-            logger.error(
-              `[generation] enqueue retry video job failed: ${error instanceof Error ? error.message : "unknown"}`,
-            );
-          }
+          // IKJ80Q：缺配≠故障，恢复扫描兜底（同 create video 分支）。
+          const log = enqueueFailureLog(error, { scope: "generation", kind: "retry video", jobId: newJobId });
+          logger[log.level](log.message);
         }
       } else if (result.data.type === "image") {
         // IKBGKA：图片 retry 走 RocketMQ。
         try {
           await enqueueImageGenerationJob(newJobId);
         } catch (error) {
-          if (isRocketMqEndpointsMissingError(error)) {
-            // IKJ80Q：缺配≠故障，恢复扫描兜底（同 create video 分支），降 WARN。
-            logger.warn(
-              `[generation] retry image job 未经 MQ 派发（未配置 ROCKETMQ_ENDPOINTS），将由 worker 恢复扫描捞起消费: jobId=${newJobId}`,
-            );
-          } else {
-            logger.error(
-              `[generation] enqueue retry image job failed: ${error instanceof Error ? error.message : "unknown"}`,
-            );
-          }
+          // IKJ80Q：缺配≠故障，恢复扫描兜底（同 create video 分支）。
+          const log = enqueueFailureLog(error, { scope: "generation", kind: "retry image", jobId: newJobId });
+          logger[log.level](log.message);
         }
       } else if (result.data.type === "audio") {
         // IKCR78：音频 retry 走 RocketMQ（与 image 同构；enqueue 失败 fail-fast 置 failed）。

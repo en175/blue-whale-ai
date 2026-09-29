@@ -81,6 +81,27 @@ export function isRocketMqEndpointsMissingError(error: unknown): boolean {
   );
 }
 
+/** IKJ80I review：收敛 6 处「缺配降 WARN / 真失败 ERROR」同型 catch 的日志决策（IKJ80Q
+ *  分级口径唯一收口）。纯函数——只算 level 与文案；logger 调用留在控制器侧（控制器测试
+ *  mock 的是控制器 logger，移进来会逼着重写测试）。 */
+export function enqueueFailureLog(
+  error: unknown,
+  ctx: { scope: string; kind: string; jobId: string },
+): { level: "warn" | "error"; message: string } {
+  if (isRocketMqEndpointsMissingError(error)) {
+    // 缺配不是故障——任务行已落库，worker 恢复扫描会捞起派发，ERROR 会把排查引向
+    // RocketMQ（IKJ6DK 的教训），降 WARN。
+    return {
+      level: "warn",
+      message: `[${ctx.scope}] ${ctx.kind} job 未经 MQ 派发（未配置 ROCKETMQ_ENDPOINTS），将由 worker 恢复扫描捞起消费: jobId=${ctx.jobId}`,
+    };
+  }
+  return {
+    level: "error",
+    message: `[${ctx.scope}] enqueue ${ctx.kind} job failed: ${error instanceof Error ? error.message : "unknown"}`,
+  };
+}
+
 /** 收口：关掉共享连接（未启动过则无事发生）。 */
 export async function closeRocketMqProducer(): Promise<void> {
   const startup = rocketMqStartup;
