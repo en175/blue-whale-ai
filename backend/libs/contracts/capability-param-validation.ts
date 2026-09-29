@@ -7,7 +7,7 @@
 // 这里把 Dock 的扁平字段（resolution + aspect_ratio + duration）归一化后同源校验。
 // 后续可把 checkCapabilityLimit 迁到本文件共享（IKE7JP 下一步）。
 
-import { ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION, ERROR_CAPABILITY_UNSUPPORTED_RATIO, ERROR_CAPABILITY_UNSUPPORTED_DURATION } from "./error-codes.js";
+import { ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION, ERROR_CAPABILITY_UNSUPPORTED_RATIO, ERROR_CAPABILITY_UNSUPPORTED_DURATION, ERROR_TASK_TYPE_PARAM_CONSTRAINT } from "./error-codes.js";
 
 /** 提交侧能力目录行（handleCreateGenerationJob 已从 listEnabledByType 取回）。 */
 export interface CapabilityLimitInput {
@@ -107,6 +107,26 @@ export function resolveVideoTaskType(
   if (hasIntentKeyword(prompt, PROLONG_INTENT_KEYWORDS)) return "prolong";
   if (hasIntentKeyword(prompt, EDIT_INTENT_KEYWORDS)) return "edit";
   return "default";
+}
+
+/** IKJ795：编辑/延长 + 非 adaptive 比例拒单的用户向文案（结构化码 task_type_param_constraint 的话）。
+ *  ⚠️ 不出现 edit/adaptive 等内部词——用户不需要知道任务类型枚举；「自动」对应前端
+ *     adaptive 档的用户可见文案（IKJ794），一键修复动作 = 把比例切换为自动后重交。 */
+export const TASK_TYPE_PARAM_CONSTRAINT_MESSAGE =
+  "提示词包含修改、替换或延长原视频的意图，输出比例将自动跟随参考视频，请将比例切换为「自动」后重试";
+
+/** 快照上冻结任务类型的键名（GenerationJob.input.video_task_type）。 */
+export const FROZEN_VIDEO_TASK_TYPE_KEY = "video_task_type";
+
+/** IKJ795：读 GenerationJob 输入快照里**冻结**的视频任务类型。
+ *  消费侧（执行/报价/结算）只读这份判定结果，不现场重算；存量快照未携带该字段（或值非法）
+ *  按 default 处理，不回溯历史——旧任务的判定口径让它留在旧任务里。 */
+export function frozenVideoTaskTypeOf(input: unknown): VideoTaskType {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return "default";
+  const v = (input as Record<string, unknown>)[FROZEN_VIDEO_TASK_TYPE_KEY];
+  return v === "default" || v === "first_frame" || v === "first_last_frame" || v === "edit" || v === "prolong"
+    ? v
+    : "default";
 }
 
 function readStringArray(v: unknown): string[] | null {
@@ -331,6 +351,16 @@ export function checkGenerationParamLimit(
 
   const ratioList = taskRatios ?? ratios(capability);
   if (ratioList.length > 0 && !ratioList.includes(params.aspect_ratio)) {
+    // IKJ795：编辑/延长被任务类型锁定比例拒下时换专用码 + 用户向文案——前端按码识别
+    // 「一键改为跟随视频」场景，文案不出现 edit/adaptive 等内部词。其余任务类型与基础
+    // 比例越界维持 capability_unsupported_ratio（两码语义不混）。
+    if (params.task_type === "edit" || params.task_type === "prolong") {
+      return {
+        field: "aspect_ratio",
+        code: ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+        reason: TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+      };
+    }
     return {
       field: "aspect_ratio",
       code: ERROR_CAPABILITY_UNSUPPORTED_RATIO,

@@ -5,12 +5,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   checkGenerationParamLimit,
+  frozenVideoTaskTypeOf,
   parsePixels,
   normalizeSpecKey,
   parseSpecKey,
   resolveOutputPixels,
   resolveVideoTaskType,
   specKeyOf,
+  TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
   toGenerationParamCheckInput,
   type CapabilityLimitInput,
 } from "./capability-param-validation.js";
@@ -303,6 +305,84 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
         task_type: "edit",
       })?.field,
     ).toBe("duration");
+  });
+});
+
+describe("编辑/延长比例拒单换结构化码（IKJ795）", () => {
+  const taskCapability: CapabilityLimitInput = {
+    supported_sizes: [{ id: "1080p", api_value: "1080p" }],
+    supported_aspect_ratios: ["16:9", "9:16", "adaptive"],
+    supported_durations: { min: 4, max: 30, step: 1 },
+    task_types: {
+      default: { allowed_ratios: ["16:9", "9:16", "adaptive"] },
+      edit: { allowed_ratios: ["adaptive"] },
+      prolong: { allowed_ratios: ["adaptive"] },
+    },
+  };
+
+  it.each(["edit", "prolong"] as const)("%s + 非 adaptive 比例 → task_type_param_constraint + 用户向文案", (taskType) => {
+    const err = checkGenerationParamLimit(taskCapability, {
+      size: "1080p",
+      aspect_ratio: "9:16",
+      task_type: taskType,
+    });
+    expect(err?.code).toBe("task_type_param_constraint");
+    expect(err?.reason).toBe(TASK_TYPE_PARAM_CONSTRAINT_MESSAGE);
+    // 用户向文案不出现内部词（前端直接展示）
+    expect(err?.reason).not.toContain("edit");
+    expect(err?.reason).not.toContain("adaptive");
+  });
+
+  it("edit + adaptive 放行", () => {
+    expect(
+      checkGenerationParamLimit(taskCapability, {
+        size: "1080p",
+        aspect_ratio: "adaptive",
+        task_type: "edit",
+      }),
+    ).toBeNull();
+  });
+
+  it("非任务类型的比例越界仍走 capability_unsupported_ratio（两码语义不混）", () => {
+    const err = checkGenerationParamLimit(taskCapability, {
+      size: "1080p",
+      aspect_ratio: "21:9",
+    });
+    expect(err?.code).toBe("capability_unsupported_ratio");
+    expect(err?.reason).toContain("21:9");
+  });
+
+  it("2.0 形态（无 task_types）+ edit 判定 + 固定比例 → 不拒（官方允许 2.0 编辑任务指定比例）", () => {
+    const plain: CapabilityLimitInput = {
+      supported_sizes: [{ id: "1080p", api_value: "1080p" }],
+      supported_aspect_ratios: ["16:9", "9:16"],
+      supported_durations: { min: 4, max: 30, step: 1 },
+    };
+    expect(
+      checkGenerationParamLimit(plain, {
+        size: "1080p",
+        aspect_ratio: "9:16",
+        task_type: "edit",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("frozenVideoTaskTypeOf（IKJ795）", () => {
+  it("存量快照无该字段 → default（不重算历史）", () => {
+    expect(frozenVideoTaskTypeOf({ prompt: "旧任务", aspect_ratio: "9:16" })).toBe("default");
+  });
+
+  it("冻结值原样透出", () => {
+    expect(frozenVideoTaskTypeOf({ video_task_type: "edit" })).toBe("edit");
+    expect(frozenVideoTaskTypeOf({ video_task_type: "prolong" })).toBe("prolong");
+    expect(frozenVideoTaskTypeOf({ video_task_type: "first_last_frame" })).toBe("first_last_frame");
+  });
+
+  it("非法值 / 非对象 → default", () => {
+    expect(frozenVideoTaskTypeOf({ video_task_type: "nonsense" })).toBe("default");
+    expect(frozenVideoTaskTypeOf(null)).toBe("default");
+    expect(frozenVideoTaskTypeOf("edit")).toBe("default");
   });
 });
 

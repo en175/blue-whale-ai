@@ -26,6 +26,8 @@ import {
   toGenerationParamCheckInput,
   resolveVideoTaskType,
   taskTypeAllowedRatios,
+  ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+  TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
   resolveOutputPixels,
   type VideoTaskType,
   videoRefLabel,
@@ -686,6 +688,9 @@ interface ComposeInputContext {
   referenceAssetIds: Array<string | number>;
   /** IKG0LP：白名单解析后的能力行——视频用它判断 features.audio 是否允许带音频。 */
   capability?: ModelCapabilityView;
+  /** IKJ795：视频任务类型（调用方单次判定的结果）——冻结进 input 快照（video_task_type），
+   *  建任务与报价走同一 composeInput，两边的 specs 才不会漂（「预览价 = 实扣价」不变式）。 */
+  videoTaskType?: VideoTaskType;
 }
 
 interface GenerationTypeStrategy {
@@ -744,6 +749,7 @@ const videoStrategy: GenerationTypeStrategy = {
     textAttachments,
     referenceAssetIds,
     capability,
+    videoTaskType,
   }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
@@ -752,6 +758,10 @@ const videoStrategy: GenerationTypeStrategy = {
     };
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
+    // IKJ795：任务类型判定结果冻结进输入快照——执行层（worker 出站传参与强制）与报价链路
+    // 读这份字段，不再各自重算（两端不漂移）。存量快照无该字段由消费侧按 default 处理
+    // （frozenVideoTaskTypeOf），不重算历史。视频恒有判定结果（resolveVideoTaskType 至少回 default）。
+    if (videoTaskType !== undefined) input.video_task_type = videoTaskType;
     // IKG0LP：视频带音频——能力位允许时冻结用户选择（缺省 true，不支持则恒 false）；
     // 能力位不允许（false/未配）时不写该字段，worker 不下发，维持上游默认。
     // 契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md
@@ -887,6 +897,20 @@ export function projectQuoteInput(
     capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;
   const referenceAssets = resolveReferenceAssets(body, type, imageReferenceMax);
 
+  // IKJ795：视频报价与建任务同源判定任务类型（同函数同输入，结果一致），随 composeInput
+  // 冻结进投影——specs 与 Hold 同键，「预览价 = 实扣价」不变式不受快照新字段影响。
+  // 报价侧不做编辑/延长拒单（只算不扣，建任务入口自会 4xx）。
+  const quoteVideoTaskType =
+    type === "video"
+      ? resolveVideoTaskType(
+          (() => {
+            const parsed = parseReferences(body.references);
+            return parsed.kind === "ok" ? parsed.items : [];
+          })(),
+          isStr(params.prompt) ? params.prompt : "",
+        )
+      : undefined;
+
   const input = strategy.composeInput({
     body,
     params,
@@ -896,6 +920,7 @@ export function projectQuoteInput(
     textAttachments: [],
     referenceAssetIds: referenceAssets.ok ? referenceAssets.value.referenceAssetIds : [],
     ...(capability ? { capability } : {}),
+    ...(quoteVideoTaskType !== undefined ? { videoTaskType: quoteVideoTaskType } : {}),
   });
   delete input.prompt;
   // 与建任务同口径：输出数也是定价维度（多图按张计价），它在建任务那边同样冻在 input 上。
@@ -1729,28 +1754,33 @@ export async function handleCreateGenerationJob(
     return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "prompt 无效", {
       code: ERROR_INVALID_INPUT,
     });
+  // IKJ795：视频任务类型**只判一次**——接纳校验与快照冻结共用同一结果，下游（执行/报价）
+  // 读冻结字段、不现场重算。判定输入与 IKFPYX 起的现行口径一致：references + 主提示词
+  // （不含文本附件）。视频恒判定（不依赖 size/resolution/duration 携带）——编辑/延长 +
+  // 非 adaptive 比例的拒单不能因为没带分辨率档而漏网。
+  let videoTaskType: VideoTaskType | undefined;
+  if (type === "video") {
+    const parsedRefs = parseReferences(body.references);
+    videoTaskType = resolveVideoTaskType(
+      parsedRefs.kind === "ok" ? parsedRefs.items : [],
+      promptText,
+    );
+  }
   // IKE7JP：Dock 提交时前置校验 resolution/size/aspect_ratio/duration 对能力目录合法性——
   // 越界值在接纳当下 4xx 返回（capability_unsupported_* 细分码 + 可用值文案），不拖到 worker 执行期。
   // 仅视频校验时长；图片无时长。SceneCard 路径已有同源 checkCapabilityLimit（下一步迁移共享）。
   // 仅当请求明确携带尺寸/比例/时长时才校验（缺省由能力默认值兜底，见 checkCapabilityLimit 同源语义）；
   // 图片路径允许缺 size（能力行默认尺寸）。duration 单独存在也进入校验（review：防只带时长越界漏网）。
+  // IKJ795：视频恒进（aspect_ratio 由 validateCommon 必填）——编辑/延长 + 非 adaptive 的
+  // task_type_param_constraint 拒单对所有视频提交形态生效，不限带档位的请求。
   if (
     capability &&
-    type !== "audio" &&
-    (params.size !== undefined ||
-      params.resolution !== undefined ||
-      (type === "video" && params.duration !== undefined))
+    (type === "video" ||
+      (type !== "audio" &&
+        (params.size !== undefined || params.resolution !== undefined)))
   ) {
-    // IKFPYX：视频任务类型判定（首帧/首尾帧按 references 角色；edit/prolong 需参考视频 + 提示词意图）——
-    // 命中 features.task_types 时按其比例/时长约束校验（含 duration=-1 放行），否则回落基础能力行。
-    let videoTaskType: VideoTaskType | undefined;
-    if (type === "video") {
-      const parsedRefs = parseReferences(body.references);
-      videoTaskType = resolveVideoTaskType(
-        parsedRefs.kind === "ok" ? parsedRefs.items : [],
-        promptText,
-      );
-    }
+    // IKFPYX：命中 features.task_types 时按任务类型约束校验（含 duration=-1 放行），
+    // 否则回落基础能力行；任务类型读上面的单次判定结果（videoTaskType）。
     const checked = toGenerationParamCheckInput({
       resolution: params.resolution,
       size: params.size,
@@ -1772,6 +1802,22 @@ export async function handleCreateGenerationJob(
           code: limitErr.code,
         });
       }
+    }
+  }
+  // IKJ795：编辑/延长 + 非 adaptive 比例的结构化拒单（task_type_param_constraint，不扣费 4xx）。
+  // 独立于上面那段档位校验：视频可以只带比例不带档位（toGenerationParamCheckInput 对该形态
+  // 返回 null），而这道约束只关乎比例，不能因缺档位漏网。判定输入读上面冻结的 videoTaskType
+  // （不现场重算）；约束按能力行 task_types 配置——未配置该类型（2.0 形态）不拦，官方允许
+  // 2.0 编辑任务指定比例。首帧/首尾帧走 validateVideo 既有闸，不在此重复。
+  if (capability && type === "video" && (videoTaskType === "edit" || videoTaskType === "prolong")) {
+    const allowed = taskTypeAllowedRatios(capability.features?.task_types, videoTaskType);
+    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
+    if (allowed && !allowed.includes(ratio)) {
+      return fail(
+        errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT),
+        TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+        { code: ERROR_TASK_TYPE_PARAM_CONSTRAINT },
+      );
     }
   }
   // IKE7JP：图片 size×ratio 交叉格前置——GPT 交叉格未填 / banana 一维映射缺失的组合
@@ -2008,6 +2054,7 @@ export async function handleCreateGenerationJob(
     referenceAssetIds,
     // IKG0LP：exactOptionalPropertyTypes 下不能显式传 undefined，按本仓惯例条件展开
     ...(capability ? { capability } : {}),
+    ...(videoTaskType !== undefined ? { videoTaskType } : {}),
   });
   // 图片与视频一致：sk token 明文写进 job.input.provider_credential（修正四：凭证去密），处理时由 worker 直接取用。
   // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。
@@ -2020,6 +2067,7 @@ export async function handleCreateGenerationJob(
   if (sampleRuling.kind === "sample") {
     input.sample_mode = true;
   }
+  // IKJ795：video_task_type 的冻结在 composeInput 内（与报价投影同源），此处不再补写。
   // IKFM3S §4：文本输入签名冻结进快照——任务成功后前端轮询回写目标 usedInputSignature，
   // 重试随 input 原样复用；无文本输入（inputs 为空）不写，目标无文本边时提示本就不显示。
   if (textIndexRefs.value.index.inputs.length > 0) {
