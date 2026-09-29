@@ -54,6 +54,20 @@ describe("RechargeService — 下单", () => {
     vi.unstubAllGlobals();
   });
 
+  it("档位不存在 → 404（这条留在 service 侧，不在纯函数里）", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service } = await makeService();
+
+    // ⚠️ 它是 `buildTierOrderSpec` 里**唯一没被委托出去**的分支：纯函数收到的是一个
+    //    已经读到的档位，而「读不到」是 IO 的结果，所以这条判定留在这一侧。
+    //    正因为留在这一侧，它不在那条纯函数的单测覆盖里 —— 这条就是它的闸门。
+    await expect(service.createOrder({ userId: 9001, tierId: "999" })).rejects.toMatchObject({
+      status: 404,
+      message: "档位不存在",
+    });
+  });
+
   it("★ 积分冻结的是**档位配的基础积分**（配置值），不是「原价 × 换算率」", async () => {
     const http = makeHttp();
     grpcActiveCatalog();

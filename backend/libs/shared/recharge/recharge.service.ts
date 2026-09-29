@@ -112,6 +112,7 @@ import {
   createActiveOrderReuse,
 } from "./recharge-active-order.js";
 import { creditsExpireAt } from "./credits-validity.js";
+import { buildTierOrderPlan } from "./tier-order-spec.js";
 import {
   createGrantSweeper,
   GRANT_RETRY_WINDOW_MS_TOKEN,
@@ -283,7 +284,7 @@ export interface OrderSpec {
    *
    * <p>这一列现在的意义是「**记下判定发生在哪**」：判定确实在下单路径上发生过
    * （不是别处补写的），结果随这一单一起落库。将来真的出现可落库的第二种结果时，
-   * 要改的是这里与 `buildTierOrderSpec` 那一处，而不是把三元加回来。
+   * 要改的是这里与 `tier-order-spec.ts` 里那一处，而不是把三元加回来。
    */
   permissionResult?: string;
   /** 网关订单标题 / 内容 */
@@ -390,11 +391,14 @@ export class RechargeService {
         // 到账积分 = 档位自己配的**基础积分**（配置值）。这里**不许**乘换算率：
         // 充值的「元 → 积分」与消费锚点「1 元 = 15 积分」不是一回事（充值常有折扣），
         // ¥499 的档给 7,500 而不是 7,485 —— 那不是算错了，见文件头。
-        const amount = t.baseCredits;
+        // ⚠️ 局部名刻意不叫 `amount`：本仓 `amount` 在别处一律指**金额**（元或分），
+        //    而这个是积分数。DTO 上的字段名 `amount` 是管理端契约的一部分，不动 ——
+        //    所以这里用 `amount: grantedCredits` 显式对上。
+        const grantedCredits = t.baseCredits;
         return {
           id: t.id,
-          name: displayTierName(t.name, amount),
-          amount,
+          name: displayTierName(t.name, grantedCredits),
+          amount: grantedCredits,
           price: t.price,
           originalPrice: t.originalPrice,
           discount: t.discount,
@@ -438,8 +442,9 @@ export class RechargeService {
   /**
    * 档位单的「这一单是什么、收多少钱、发多少分」。
    *
-   * <p>⚠️ **到账积分 = 档位配的基础积分**（配置值），不是「原价 × 换算率」：
-   * 充值常有折扣，¥499 的档到账 7,500 积分（499×15=7,485）。原价与折扣只为展示划线价。
+   * <p>校验、算价、快照拼装全在 {@link buildTierOrderPlan}：那里的规则可以脱离 Prisma
+   * 与网关被**直接单测**（与自定义充值那侧同形）。这里只负责下单那一刻的两次读 ——
+   * 用户可能已经在页面上停留很久，期间档位可能下架、时间窗可能过期、权限名单可能改过。
    */
   private async buildTierOrderSpec(input: CreateTierOrderInput): Promise<OrderSpec> {
     // 换算率取自定价目录：它**不参与档位积分计算**，只作为「下单那一刻的口径」快照进订单行
@@ -449,80 +454,8 @@ export class RechargeService {
 
     const tier = await this.topupTier.getById(input.tierId);
     if (!tier) throw new NewApiError("档位不存在", 404);
-    // ⚠️ 草稿与下架都不可买，但话不能说成同一句（PRD §6.3 / §10.5）：
-    // 「已下架」说的是一个曾经卖过的东西，而草稿是**还没上过架** ——
-    // 对着一张运营刚建好、字段还没配齐的卡片说「已下架」，客服和用户都无从下手。
-    if (tier.status !== "active") {
-      throw new NewApiError(
-        tier.status === "draft" ? "该档位尚未上架" : "该档位已下架",
-        400,
-      );
-    }
-    const now = Date.now();
-    if (tier.startTime && new Date(tier.startTime).getTime() > now) {
-      throw new NewApiError("该档位尚未生效", 400);
-    }
-    if (tier.endTime && new Date(tier.endTime).getTime() < now) {
-      throw new NewApiError("该档位已过期", 400);
-    }
 
-    // ⚠️ **购买权限**（PRD §6.3 / §10.4）。这一列在管理端可编辑、有审计文案、
-    // 保存时校验得也很严 —— 但它此前**一次都没被读过**：运营配「仅限白名单」，
-    // 用户侧照样人人都能买，且没有任何报错。判定与自定义充值那条**同一个函数**，
-    // 同一批白名单用户在两条路上必须得到同一个答案。
-    const allowed = canPurchaseTier(tier, input.userId);
-    if (!allowed) {
-      // 403 不是 400：这不是「你填错了」，是「这个账号没有购买资格」（与自定义充值同口径）
-      throw new NewApiError(tierDeniedHint(tier), 403);
-    }
-
-    // ⚠️ **到账积分 = 档位配的基础积分**（配置值），不是「原价 × 换算率」：
-    //    充值常有折扣，¥499 的档到账 7,500 积分（499×15=7,485）。原价与折扣只为展示划线价。
-    const credits = tier.baseCredits;
-    const amountFen = Math.round(tier.price * 100);
-    if (credits <= 0 || amountFen <= 0) {
-      // 到账积分为 0 = 用户付钱拿不到东西。宁可下不了单，也不要产生这种订单
-      throw new NewApiError("该档位的金额或积分不合法，请联系客服", 500);
-    }
-
-    const tierId = Number(tier.id);
-    if (!Number.isSafeInteger(tierId)) {
-      throw new NewApiError("档位 ID 不合法", 500);
-    }
-
-    return {
-      tierId,
-      amountFen,
-      credits,
-      creditsPerYuan,
-      productType: "tier",
-      productName: displayTierName(tier.name, credits),
-      configVersion: tier.version,
-      // 首购加赠：配置快照随单落库，**发放在 fulfill**。
-      //
-      // 为什么下单只快照、不在下单时判定「是不是首购」：判据是「这个用户在这个档位上
-      // 有没有成功支付过」，而下单此刻可能已经有一笔同档位的未支付单——两笔都判「是首单」
-      // 是必然发生的。真正的闸放在发放那一步，用 billing 的唯一索引原子裁决
-      // （见 fulfill 里的 `bonus:tier:{userId}:{tierId}`）。
-      //
-      // ⚠️ 档位不参与首购时不写 bonusCredits（落到默认 0）：这一列在订单上表达的是
-      //    「本单挂着多少赠送」。不参与却写个非零值，会让对账以为欠用户一笔赠送。
-      firstPurchaseEligible: tier.firstPurchaseEligible ? 1 : 0,
-      ...(tier.firstPurchaseEligible && tier.bonusCredits > 0
-        ? { bonusCredits: tier.bonusCredits }
-        : {}),
-      // 有效期快照的是**月数**（运营在后台配的那个数），到期时刻发放那一刻按
-      // 支付成功时间折出来 —— 起算点见 `credits-validity.ts`
-      creditsValidMonths: tier.creditsValidMonths,
-      // ⚠️ **常量 `allowed`，不是三元**：上面判为假时已经抛了 403，被拒的用户
-      //    根本到不了这里 —— `denied` 分支是**不可达**的，留着一个走不到的三元
-      //    只会让下一个人以为这一列真的有两种取值。
-      //    这一列现在的意义是「**记下判定发生在哪**」：判定（上面那次 canPurchaseTier）
-      //    确实发生在这个下单路径上，结果随单落库，不是别处补写的。
-      permissionResult: "allowed",
-      subject: tier.name || "积分充值",
-      body: tier.name || `积分充值 ${credits} 积分`,
-    };
+    return buildTierOrderPlan(tier, creditsPerYuan, input.userId, Date.now());
   }
 
   /**

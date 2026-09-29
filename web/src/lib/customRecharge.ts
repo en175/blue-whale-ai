@@ -15,7 +15,7 @@ export type CustomCreditsRule = Pick<
 /**
  * 价格（单位**分**）= 积分数 × 100 ÷ 每元积分数，四舍五入到分。
  *
- * <p>⚠️ 必须与服务端 `customPriceFen`（`backend/libs/shared/recharge/custom/constants.ts`）
+ * <p>⚠️ 必须与服务端 `customPriceFen`（`backend/libs/shared/recharge-custom/constants.ts`）
  * **逐字同一个式子**，否则会出现「界面显示 ¥40.00、下单回来 ¥40.01」。
  * 服务端那份是权威（钱由它算），这份只用于下单前的实时展示。
  *

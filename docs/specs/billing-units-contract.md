@@ -21,7 +21,7 @@
 |---|---|---|
 | 网关 quota 美元锚点 | **500,000 quota = $1**（`QuotaPerUnit`） | 网关内部所有充值/扣费/结算公式的换算基准，**不动** |
 | Go 侧公式 | `getPayMoney` / `TopUp` 语义 / 充值回调公式 | 网关内部实现，**不动** |
-| ~~档位公式~~ | ~~amount = 原价 × 500,000~~ | **作废（2026-09-25）**：档位到账积分改为 `原价 × creditsPerYuan`（读 billing 定价目录，当前 15），走我们自己的账本；网关的 Go 档位同步已是 no-op。见 ADR-0114。 |
+| ~~档位公式~~ | ~~amount = 原价 × 500,000~~ | **作废（2026-09-25）**：档位到账积分改为 `原价 × creditsPerYuan`（读 billing 定价目录，当前 15），走我们自己的账本；网关的 Go 档位同步已是 no-op。见 ADR-0114。<br>**再作废（2026-09-27）**：到账积分改为读 `topup_tiers.base_credits` —— 那是**运营在后台直接填的配置值**（用户到手的那个数），与换算率**再无数学关系**：充值常有折扣，¥499 的档到账 7,500 而不是 7,485。`creditsPerYuan` 仍是定价目录字段，但只有**自定义充值**报价用它（`recharge-custom/constants.ts` 的 `customPriceFen`）。见 `backend/libs/shared/recharge/tier-order-spec.ts` 的 `buildTierOrderPlan`。 |
 | ~~Node 记账换算~~ | ~~`quotaToFen` = quota ÷ 500,000 × 7.3 × 100（→ 分）~~ | **作废（2026-09-25）**：`cost_reservations` 随 IKEF1K 退役，生成任务不再往它写金额（回到 `0 + 四版本 "dev"` 兜底），该函数已随之删除。见 ADR-0114。 |
 
 ## 蓝鲸展示（1 元 = 15 积分，**配置项而非硬编码**）
