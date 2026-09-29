@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 // ADR-0087 / IKF YHJ：素材校验状态镜像（material_assets）+ 网关执行凭证（user_info）。
 // 镜像 ikckow/ikeefv-parity 的双轨核对结构：schema 基线片段、prisma migration、docs/sql 快照三处同源。
+// user_info 已整表退役（ADR-0115 决策 1 / ADR-0117 决策 4，落于 20260929000000_drop_user_info）——
+// 下面仍保留对 025 历史建表的核对（025 三轨是冻结件），另起一段守「不许长回来」。
 
 const migrationSql = readFileSync(
   new URL(
@@ -30,7 +32,23 @@ const schemaPrisma = readFileSync(
   "utf8",
 );
 
-const NEW_TABLES = ["material_assets", "user_info"];
+const dropMigrationSql = readFileSync(
+  new URL(
+    "../../../prisma/migrations/20260929000000_drop_user_info/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const dropStandaloneSql = readFileSync(
+  new URL("../../../prisma/schema/055_drop_user_info.sql", import.meta.url),
+  "utf8",
+);
+const dropSnapshotSql = readFileSync(
+  new URL("../../../../docs/sql/20260929_drop_user_info.sql", import.meta.url),
+  "utf8",
+);
+
+const NEW_TABLES = ["material_assets"];
 
 /** 表定义块（CREATE TABLE `<name>` ... 到分号）。 */
 function tableBlock(sql: string, table: string): string | undefined {
@@ -42,7 +60,7 @@ function columnsIn(block: string): string[] {
   return [...block.matchAll(/^\s+`([a-z_]+)`\s/gm)].map((m) => m[1]).sort();
 }
 
-describe("IKFYHJ 双轨迁移（素材校验状态镜像 + 网关执行凭证）", () => {
+describe("IKFYHJ 双轨迁移（素材校验状态镜像）", () => {
   it.each(NEW_TABLES)("三处都建表 %s", (table) => {
     for (const sql of [migrationSql, standaloneSql, snapshotSql]) {
       expect(sql).toContain("CREATE TABLE `" + table + "`");
@@ -78,23 +96,31 @@ describe("IKFYHJ 双轨迁移（素材校验状态镜像 + 网关执行凭证）
     );
   });
 
-  it("schema.prisma 同步两个 model 与关键唯一键", () => {
+  it("schema.prisma 同步 model 与关键唯一键", () => {
     for (const table of NEW_TABLES) {
       expect(schemaPrisma).toContain("model " + table + " ");
     }
     expect(schemaPrisma).toContain('uk_material_assets_material');
-    expect(schemaPrisma).toContain('uk_user_info_user');
+  });
+});
+
+// ── user_info 退役（ADR-0115 决策 1 / ADR-0117 决策 4）──────────────────────────
+// 这三条守的是「不许长回来」：表由 DROP 迁移删掉、model 从 schema.prisma 摘掉，
+// 且新迁移至今保持三轨逐字同源（与 054 起的实践一致）。
+describe("user_info 退役（网关执行凭证镜像）", () => {
+  it("三轨都 DROP TABLE `user_info`", () => {
+    for (const sql of [dropMigrationSql, dropStandaloneSql, dropSnapshotSql]) {
+      expect(sql).toContain("DROP TABLE IF EXISTS `user_info`");
+      expect(sql).toContain("SET NAMES utf8mb4");
+    }
   });
 
-  it("user_info 只存凭证，不含任何用户资料列", () => {
-    const columns = columnsIn(tableBlock(migrationSql, "user_info")!);
-    expect(columns).toEqual([
-      "gmt_create",
-      "gmt_modified",
-      "id",
-      "provider_credential",
-      "user_id",
-      "version",
-    ]);
+  it("三轨逐字同源", () => {
+    expect(dropStandaloneSql).toBe(dropMigrationSql);
+    expect(dropSnapshotSql).toBe(dropMigrationSql);
+  });
+
+  it("schema.prisma 不再有 model user_info", () => {
+    expect(schemaPrisma).not.toContain("model user_info");
   });
 });
