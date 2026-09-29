@@ -16,7 +16,6 @@ import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
-import { videoRatioLabel } from '@/lib/video-aspect-ratio';
 import { type SkillRecord } from '@/api/skills';
 import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
@@ -1145,8 +1144,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                       onClick={() => setShowRatioDrop(!showRatioDrop)}
                     >
                       <RatioIcon ratio={aspectRatio} size={22} />
-                      {/* IKJ4W6：内部键 adaptive 展示为 auto；state/提交值仍是 adaptive。 */}
-                      <span>{videoRatioLabel(aspectRatio)}</span>
+                      <span>{aspectRatio}</span>
                       <ChevronDown size={12} strokeWidth={2} />
                     </button>
                     {showRatioDrop && (
@@ -1158,8 +1156,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                             onClick={() => { setAspectRatio(key); setShowRatioDrop(false); }}
                           >
                             <RatioIcon ratio={key} size={22} />
-                            {/* IKJ4W6：内部键 adaptive 展示为 auto；选中/提交值仍是 adaptive。 */}
-                            <span>{videoRatioLabel(key)}</span>
+                            <span>{key}</span>
                           </button>
                         ))}
                       </div>

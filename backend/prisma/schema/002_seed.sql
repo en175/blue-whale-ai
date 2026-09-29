@@ -114,8 +114,7 @@ INSERT INTO generation_model_capability (
     JSON_ARRAY('mp4', 'mov'),
     '720p',
     'mp4',
-    -- IKJ4W6：默认比例改为 adaptive（界面显示 auto），2.5 支持该档故默认选中「跟随输入」。
-    'adaptive',
+    '16:9',
     4,
     JSON_OBJECT(
       'reference_image', TRUE,
