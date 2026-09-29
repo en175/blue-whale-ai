@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  CreateTopupTierInput,
+  UpdateTopupTierInput,
+} from "@lib/shared/persistence/index.js";
+import {
+  makeTierView,
+  stubTierRepo,
+} from "@lib/shared/topup-tier/topup-tier.testlib.js";
 import { AdminTopupTiersController } from "./topup-tiers.controller.js";
 
 /**
@@ -18,37 +26,41 @@ import { AdminTopupTiersController } from "./topup-tiers.controller.js";
  */
 
 function createController() {
-  const topupTier = {
-    listAll: vi.fn().mockResolvedValue([]),
-    listActive: vi.fn().mockResolvedValue([]),
-    getById: vi.fn().mockResolvedValue({ id: "7" }),
-    create: vi.fn().mockImplementation(async (input: unknown) => input),
-    update: vi.fn().mockImplementation(async (_id: string, input: unknown) => input),
-    remove: vi.fn().mockResolvedValue(true),
-    updateSortOrder: vi.fn().mockResolvedValue(undefined),
+  // mock 句柄（读 `mock.calls` 用）与给 controller 的 repo 值分开持有：
+  // `stubTierRepo` 的返回类型是 `TopupTierRepo`，会把 `.mock` 那一面抹掉。
+  const repoMocks = {
+    listAll: vi.fn(async () => []),
+    listActive: vi.fn(async () => []),
+    // 用例只关心 `before` 存不存在（404 那条），给一份**完整**的视图即可 ——
+    // 此前是 `getById: async () => ({ id: "7" })` + `as never`，把「它其实不满足
+    // `TopupTierView`」这件事一并盖掉了
+    getById: vi.fn(async () => makeTierView({ id: "7" })),
+    // 返回值没被断言（用例断言的是**入参**），给一份完整视图而不是原样回传入参
+    create: vi.fn(async (_input: CreateTopupTierInput) => makeTierView()),
+    update: vi.fn(async (_id: string, _input: UpdateTopupTierInput) => makeTierView()),
+    remove: vi.fn(async () => true),
+    updateSortOrder: vi.fn(async () => undefined),
   };
+  const topupTier = stubTierRepo(repoMocks);
   const tierAudit = {
     logCreate: vi.fn().mockResolvedValue(undefined),
     logUpdate: vi.fn().mockResolvedValue(undefined),
     logDelete: vi.fn().mockResolvedValue(undefined),
   };
   return {
-    controller: new AdminTopupTiersController(
-      topupTier as never,
-      tierAudit as never,
-    ),
-    topupTier,
+    controller: new AdminTopupTiersController(topupTier, tierAudit as never),
+    topupTier: repoMocks,
     tierAudit,
   };
 }
 
 /** create 的调用入参（controller 把它原样交给 service）。 */
 function createInput(topupTier: { create: { mock: { calls: unknown[][] } } }) {
-  return topupTier.create.mock.calls[0][0] as Record<string, unknown>;
+  return topupTier.create.mock.calls[0]![0] as Record<string, unknown>;
 }
 
 function updateInput(topupTier: { update: { mock: { calls: unknown[][] } } }) {
-  return topupTier.update.mock.calls[0][1] as Record<string, unknown>;
+  return topupTier.update.mock.calls[0]![1] as Record<string, unknown>;
 }
 
 beforeEach(() => {
