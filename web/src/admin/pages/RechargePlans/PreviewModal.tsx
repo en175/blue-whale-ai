@@ -4,28 +4,23 @@
  * 只展示**已上架且未失效**的档位——服务端 listActive 过滤，草稿与下架都进不来，
  * 所以运营在这里看到的顺序就是用户在充值页看到的顺序。
  * ============================================ */
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Star } from 'lucide-react';
-import { fetchTopupTierPreview, type TopupTierPreview } from '@/api/admin';
+import { topupTierPreviewOptions, type TopupTierPreview } from '@/api/adminTopupTiers';
 import { isApiError } from '@/api/http';
 import { Badge, Button, Card, Empty, Hint, Modal, Stat } from '../../ui';
 import { discountLabel, fmtMoney, fmtPoints } from './plan';
 
 export default function PreviewModal({ onClose }: { onClose: () => void }) {
-  const [list, setList] = useState<TopupTierPreview[] | null>(null);
-  const [error, setError] = useState('');
-
-  /** 拉取当前已上架且未失效的档位（服务端过滤）；加载失败可重试 */
-  const load = useCallback(() => {
-    setError('');
-    setList(null);
-    fetchTopupTierPreview()
-      .then(setList)
-      .catch((e) => setError(isApiError(e) ? e.message : '获取预览数据失败'));
-  }, []);
-
-  // 打开时拉取
-  useEffect(() => load(), [load]);
+  // 打开时拉取（Query 的 key 固定一份，所以重开弹窗命中缓存；失败可重试）
+  const preview = useQuery(topupTierPreviewOptions());
+  const list: TopupTierPreview[] = preview.data ?? [];
+  const loading = preview.isPending;
+  const error = preview.isError
+    ? isApiError(preview.error)
+      ? preview.error.message
+      : '获取预览数据失败'
+    : '';
 
   return (
     <Modal
@@ -41,12 +36,12 @@ export default function PreviewModal({ onClose }: { onClose: () => void }) {
     >
       {error && (
         <div style={{ marginTop: 12 }}>
-          <Empty message={error} extra={<Button onClick={load}>重试</Button>} />
+          <Empty message={error} extra={<Button onClick={() => void preview.refetch()}>重试</Button>} />
         </div>
       )}
-      {!error && list === null && <Empty message="加载中…" />}
-      {!error && list !== null && list.length === 0 && <Empty message="暂无上架档位" />}
-      {!error && list !== null && list.length > 0 && (
+      {!error && loading && <Empty message="加载中…" />}
+      {!error && !loading && list.length === 0 && <Empty message="暂无上架档位" />}
+      {!error && !loading && list.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
           {list.map((p) => (
             <Card

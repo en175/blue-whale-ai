@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RechargePlans from './index';
 import { baseCreditsFormError, tierCardFormError, tierFormError } from './tierForm';
@@ -21,7 +22,19 @@ const toastApi = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
-vi.mock('@/api/admin', () => adminApi);
+// 页面走 Query（IKJ058），所以**工厂本身**也要桩：`vi.mock` 换的是模块导出的绑定，
+// 而 `topupTiersOptions` 内部引用的仍是模块自己的 `fetchTopupTiers` —— 只桩 fetch 不生效。
+vi.mock('@/api/adminTopupTiers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/adminTopupTiers')>();
+  return {
+    ...actual,
+    ...adminApi,
+    topupTiersOptions: () => ({
+      queryKey: actual.topupTierKeys.list(),
+      queryFn: () => adminApi.fetchTopupTiers(),
+    }),
+  };
+});
 vi.mock('sonner', () => ({
   toast: toastApi,
   Toaster: () => null,
@@ -36,11 +49,18 @@ function nativeInput(input: HTMLInputElement, next: string) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-async function renderPage() {  mountNode = document.createElement('div');
+async function renderPage() {
+  mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
+  // 页面走 Query（IKJ058），必须给一棵带 client 的树
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   await act(async () => {
-    root.render(createElement(RechargePlans));
+    root.render(
+      createElement(QueryClientProvider, { client }, createElement(RechargePlans)),
+    );
   });
   await act(async () => {
     await Promise.resolve();

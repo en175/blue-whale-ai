@@ -4,11 +4,20 @@
  *
  * 呈现层全部走 ../../ui 的组件，**本页与表单弹窗都没有自己的样式文件**——
  * ModelList 目录下已无任何 index.module.css。
+ *
+ * 取数走 TanStack Query（IKJ058）：`adminModelsOptions()` 来自 `@/api/adminModels`，
+ * 页面不再手写 `loading / loadError / finally`。
+ *
+ * ⚠️ 一处**有意的时序变化**：改完（增删改序）之后刷新列表，旧实现是「先置 loading、
+ *    表格闪一下「加载中…」再出新数据」；Query 的 `refetch` 会**保留旧数据**直到新数据到。
+ *    列表不闪了，这是改善；但确实与改前不同，写在这里备查。
  * ============================================ */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Power } from 'lucide-react';
 import {
-  fetchAdminModels,
+  adminModelKeys,
+  adminModelsOptions,
   createAdminModel,
   updateAdminModel,
   toggleAdminModel,
@@ -16,7 +25,7 @@ import {
   deleteAdminModel,
   type AdminModel,
   type CreateAdminModelParams,
-} from '@/api/admin';
+} from '@/api/adminModels';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import ModelFormModal from './ModelFormModal';
@@ -38,9 +47,18 @@ const defaultParams = (m: AdminModel) => {
 };
 
 export default function ModelList() {
-  const [models, setModels] = useState<AdminModel[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  const queryClient = useQueryClient();
+  const list = useQuery(adminModelsOptions());
+  const models: AdminModel[] = list.data ?? [];
+  /** 缓存里的当前列表 —— 写入侧与读取侧都只认它一份，不另立 state。 */
+  const writeModels = (
+    next: AdminModel[] | ((prev: AdminModel[]) => AdminModel[]),
+  ): void => {
+    queryClient.setQueryData(adminModelKeys.list(), (prev: AdminModel[] | undefined) =>
+      typeof next === 'function' ? next(prev ?? []) : next,
+    );
+  };
+
   const [activeTab, setActiveTab] = useState<ModelType>('image');
   const [form, setForm] = useState<{ id?: string } | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -55,16 +73,12 @@ export default function ModelList() {
     [models, activeTab],
   );
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setLoadError('');
-    fetchAdminModels()
-      .then(setModels)
-      .catch((e) => setLoadError(isApiError(e) ? e.message : '获取模型列表失败'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => load(), [load]);
+  const loading = list.isPending;
+  const loadError = list.isError
+    ? isApiError(list.error)
+      ? list.error.message
+      : '获取模型列表失败'
+    : '';
 
   const move = async (id: string, dir: -1 | 1) => {
     const i = filtered.findIndex((m) => m.id === id);
@@ -84,7 +98,7 @@ export default function ModelList() {
         updateAdminModel(a.id, { sort_order: b.sort_order }),
         updateAdminModel(b.id, { sort_order: a.sort_order }),
       ]);
-      load();
+      void list.refetch();
     } catch (e) {
       setActionError(isApiError(e) ? e.message : '排序失败，请稍后重试');
     }
@@ -109,7 +123,7 @@ export default function ModelList() {
     try {
       await updateAdminModel(id, { sort_order: value });
       setSortDrafts((prev) => ({ ...prev, [id]: String(value) }));
-      load();
+      void list.refetch();
     } catch (e) {
       // 写入失败 → 回显库里的值，别让输入框停在没生效的数字上
       setSortDrafts((prev) => ({ ...prev, [id]: current ? String(current.sort_order) : '' }));
@@ -126,7 +140,7 @@ export default function ModelList() {
   const makeDefault = async (id: string) => {
     setActionError('');
     try {
-      setModels(await setAdminModelDefault(id));
+      writeModels(await setAdminModelDefault(id));
     } catch (e) {
       setActionError(isApiError(e) ? e.message : '设为默认失败，请稍后重试');
     }
@@ -136,7 +150,7 @@ export default function ModelList() {
     setActionError('');
     try {
       const updated = await toggleAdminModel(id);
-      setModels((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
+      writeModels((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
     } catch (e) {
       setActionError(isApiError(e) ? e.message : '启停切换失败，请稍后重试');
     }
@@ -149,7 +163,7 @@ export default function ModelList() {
     try {
       await deleteAdminModel(deleteId);
       setDeleteId(null);
-      load();
+      void list.refetch();
     } catch (e) {
       setActionError(isApiError(e) ? e.message : '删除失败，请稍后重试');
     } finally {
@@ -165,7 +179,7 @@ export default function ModelList() {
       await createAdminModel(params as CreateAdminModelParams);
     }
     setForm(null);
-    load();
+    void list.refetch();
   };
 
   return (
@@ -213,7 +227,10 @@ export default function ModelList() {
           {!loading && loadError && (
             <tr>
               <td colSpan={9}>
-                <Empty message={loadError} extra={<Button onClick={load}>重试</Button>} />
+                <Empty
+                  message={loadError}
+                  extra={<Button onClick={() => void list.refetch()}>重试</Button>}
+                />
               </td>
             </tr>
           )}

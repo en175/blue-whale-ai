@@ -5,16 +5,16 @@
  * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**——
  * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
  * ============================================ */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Search, Coins, Lock, LockOpen } from 'lucide-react';
 import {
-  fetchAdminUsers,
+  adminUsersOptions,
   manageAdminUser,
-  fetchOperationLogs,
   type AdminUserRow,
-  type OperationLog,
   type UserManageAction,
-} from '@/api/admin';
+} from '@/api/adminUsers';
+import { operationLogsOptions, type OperationLog } from '@/api/adminOperationLogs';
 import { isApiError } from '@/api/http';
 import { formatLogIp } from '@/admin/formatLogIp';
 import { matchesAdminUserKeyword } from './userSearch';
@@ -82,9 +82,6 @@ const STATUS_OPTIONS = [
 const RANGE_SELECT_OPTIONS = RANGE_OPTIONS.map((r) => ({ value: r.key, label: r.label }));
 
 export default function UserManage() {
-  const [users, setUsers] = useState<AdminUserRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [rangeKey, setRangeKey] = useState('all');
@@ -94,17 +91,25 @@ export default function UserManage() {
   const [adjustId, setAdjustId] = useState<number | null>(null);
   const [freezeId, setFreezeId] = useState<number | null>(null);
 
-  /** 页面加载拉取前 100 条；搜索/状态/余额筛选均在本地进行 */
-  const load = useCallback(() => {
-    setLoading(true);
-    setLoadError('');
-    fetchAdminUsers({ page: 1, pageSize: 100 })
-      .then((d) => setUsers(d.list))
-      .catch((e) => setLoadError(isApiError(e) ? e.message : '获取用户列表失败'))
-      .finally(() => setLoading(false));
-  }, []);
+  /**
+   * 页面加载拉取前 100 条；搜索/状态/余额筛选均在本地进行。
+   *
+   * <p>⚠️ 「只拉前 100 条、其余筛选在本地」这条**口径本次不动**（IKJ058 只换取数方式）——
+   * 「第 101 名之后的用户搜不到」是另一件事，要把它下沉成服务端分页，
+   * 那是本工单验收第 2 条的内容，不在这一步。
+   */
+  const list = useQuery(adminUsersOptions({ page: 1, pageSize: 100 }));
+  const users: AdminUserRow[] = list.data?.list ?? [];
+  const loading = list.isPending;
+  const loadError = list.isError
+    ? isApiError(list.error)
+      ? list.error.message
+      : '获取用户列表失败'
+    : '';
 
-  useEffect(() => load(), [load]);
+  const load = useCallback(() => {
+    void list.refetch();
+  }, [list]);
 
   const filtered = useMemo(() => {
     const range = RANGE_OPTIONS.find((r) => r.key === rangeKey)!;
@@ -296,21 +301,18 @@ type DetailTab = (typeof DETAIL_TABS)[number]['key'];
 
 function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () => void }) {
   const [tab, setTab] = useState<DetailTab>('base');
-  const [logs, setLogs] = useState<OperationLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(true);
-  const [logsError, setLogsError] = useState('');
-
-  /** 打开时按类别 + 用户ID 拉取审计日志（抽成函数供失败重试复用） */
-  const loadLogs = useCallback(() => {
-    setLogsLoading(true);
-    setLogsError('');
-    fetchOperationLogs({ category: 'user', searchText: `user:${user.userId}` })
-      .then(setLogs)
-      .catch((e) => setLogsError(isApiError(e) ? e.message : '获取日志失败'))
-      .finally(() => setLogsLoading(false));
-  }, [user.userId]);
-
-  useEffect(() => loadLogs(), [loadLogs]);
+  // 按类别 + 用户 ID 拉审计日志，走 Query（IKJ058）—— 参数整份进 key，
+  // 所以换一个用户就是另一份数据，不会命中上一个人的缓存。
+  const logsQuery = useQuery(
+    operationLogsOptions({ category: 'user', searchText: `user:${user.userId}` }),
+  );
+  const logs: OperationLog[] = logsQuery.data ?? [];
+  const logsLoading = logsQuery.isPending;
+  const logsError = logsQuery.isError
+    ? isApiError(logsQuery.error)
+      ? logsQuery.error.message
+      : '获取日志失败'
+    : '';
 
   /** 调整记录 tab：仅 adjust_balance */
   const adjusts = logs.filter((l) => l.action === 'user.adjust_balance');
@@ -331,7 +333,7 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
             <Empty
               message={logsError}
               extra={
-                <Button size="sm" onClick={loadLogs}>
+                <Button size="sm" onClick={() => void logsQuery.refetch()}>
                   重试
                 </Button>
               }

@@ -3,7 +3,7 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AdminModel } from '@/api/admin';
+import type { AdminModel } from '@/api/adminModels';
 import ModelList from './index';
 
 const api = vi.hoisted(() => ({
@@ -15,8 +15,10 @@ const api = vi.hoisted(() => ({
   fetchBillingCatalog: vi.fn(),
 }));
 
-vi.mock('@/api/admin', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/admin')>();
+// 页面走 Query（IKJ058），所以**工厂本身**也要桩：`vi.mock` 换的是模块导出的绑定，
+// 而 `adminModelsOptions` 内部引用的仍是模块自己的 `fetchAdminModels` —— 只桩 fetch 不生效。
+vi.mock('@/api/adminModels', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/adminModels')>();
   return {
     ...actual,
     fetchAdminModels: api.fetchAdminModels,
@@ -24,6 +26,10 @@ vi.mock('@/api/admin', async (importOriginal) => {
     updateAdminModel: api.updateAdminModel,
     toggleAdminModel: api.toggleAdminModel,
     deleteAdminModel: api.deleteAdminModel,
+    adminModelsOptions: () => ({
+      queryKey: actual.adminModelKeys.list(),
+      queryFn: () => api.fetchAdminModels(),
+    }),
   };
 });
 

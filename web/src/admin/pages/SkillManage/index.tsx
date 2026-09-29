@@ -6,16 +6,16 @@
  * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
  * ============================================ */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Pencil, Trash2 } from 'lucide-react';
 import {
-  fetchAdminSkills,
-  fetchAdminSkillCategories,
+  adminSkillCategoriesOptions,
+  adminSkillsOptions,
   assignAdminSkillsCategory,
   renameAdminSkillCategory,
   deleteAdminSkillCategory,
   type AdminSkill,
-  type AdminSkillCategory,
-} from '@/api/admin';
+} from '@/api/adminSkills';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -41,10 +41,6 @@ const NEW_CAT = '__new__';
 const FILTER_NONE = '__none__';
 
 export default function SkillManage() {
-  const [skills, setSkills] = useState<AdminSkill[]>([]);
-  const [cats, setCats] = useState<AdminSkillCategory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
   /** 暂存改动：技能 id → 目标分类（NEW_CAT 表示新分类，名字见 newNames） */
@@ -60,19 +56,26 @@ export default function SkillManage() {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setLoadError('');
-    Promise.all([fetchAdminSkills(), fetchAdminSkillCategories()])
-      .then(([s, c]) => {
-        setSkills(s);
-        setCats(c);
-      })
-      .catch((e) => setLoadError(isApiError(e) ? e.message : '加载技能列表失败'))
-      .finally(() => setLoading(false));
-  }, []);
+  // 两个读各自成一个 Query：旧代码用 Promise.all 把它们绑成一次加载 + 一套三态。
+  const skillsQuery = useQuery(adminSkillsOptions());
+  const catsQuery = useQuery(adminSkillCategoriesOptions());
+  const skills: AdminSkill[] = skillsQuery.data ?? [];
+  const cats = catsQuery.data ?? [];
+  const loading = skillsQuery.isPending || catsQuery.isPending;
+  // 两份是并发读的，任意一份失败都算这次加载失败；报先出错那一份的原文。
+  const firstError = skillsQuery.error ?? catsQuery.error;
+  const loadError =
+    skillsQuery.isError || catsQuery.isError
+      ? isApiError(firstError)
+        ? firstError.message
+        : '加载技能列表失败'
+      : '';
 
-  useEffect(() => load(), [load]);
+  /** 改完之后重新读两份 —— 归类会同时改技能行与分类计数。 */
+  const load = useCallback(() => {
+    void skillsQuery.refetch();
+    void catsQuery.refetch();
+  }, [skillsQuery, catsQuery]);
 
   /** 行的生效目标分类（暂存优先） */
   const effectiveTarget = useCallback(
