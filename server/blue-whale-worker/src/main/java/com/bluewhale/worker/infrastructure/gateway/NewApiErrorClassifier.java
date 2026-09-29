@@ -17,9 +17,10 @@ public final class NewApiErrorClassifier {
     private NewApiErrorClassifier() {}
 
     /**
-     * 版权拒绝信号正则（IKFL53：copyright/版权 原因 → 1038「参考内容可能涉及版权限制」）。
-     * 用户口径：上游 copyright-restrictions 原因独立成「参考内容可能涉及版权限制」（对外文案如此），
-     * 与「生成内容未通过安全审核」（sensitive/敏感/审核 类 → 1018）按关键词分开。
+     * 版权拒绝信号正则（IKFL53：copyright/版权 原因 → 1038 版权类中性兜底）。
+     * 用户口径：上游 copyright-restrictions 原因独立于「生成内容未通过安全审核」
+     * （sensitive/敏感/审核 类 → 1018）按关键词分开；IKJ8J8 起对外文案中性化，
+     * 不再宣称「参考内容」（ADR-0119）。
      * 注意：本正则不要求出现"参考"字样——按关键词 copyright/版权 判定，非「参考 vs 输出」区分。
      */
     private static final Pattern COPYRIGHT_PATTERN = Pattern.compile(
@@ -43,6 +44,16 @@ public final class NewApiErrorClassifier {
      */
     private static final Pattern QUOTA_PATTERN = Pattern.compile(
             "预扣费额度失败|剩余额度|余额不足|额度不足|balance|payment_required",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    /**
+     * 输出侧音频版权确证信号（IKJ8J8 / ADR-0119）：官方错误码名
+     * OutputAudioSensitiveContentDetected 或 message 含 "output audio"（均大小写不敏感）。
+     * 归因只信官方错误码名——比版权关键词更确证，在视频网关 poll 终态分类里先于关键词判定。
+     */
+    private static final Pattern OUTPUT_AUDIO_COPYRIGHT_PATTERN = Pattern.compile(
+            "OutputAudioSensitiveContentDetected|output audio",
             Pattern.CASE_INSENSITIVE
     );
 
@@ -81,8 +92,8 @@ public final class NewApiErrorClassifier {
     }
 
     /**
-     * 版权拒绝信号（IKFL53）：copyright/版权 → 1038「参考内容可能涉及版权限制」。
-     * 对外文案用「参考内容」字样是产品口径，判定仅按 copyright/版权 关键词，不要求参考字样。
+     * 版权拒绝信号（IKFL53）：copyright/版权 → 1038 版权类中性兜底。
+     * 判定仅按 copyright/版权 关键词，不要求参考字样；对外文案不再宣称「参考内容」（IKJ8J8 / ADR-0119）。
      */
     public static boolean isCopyrightSignal(String text) {
         return text != null && COPYRIGHT_PATTERN.matcher(text).find();
@@ -94,5 +105,13 @@ public final class NewApiErrorClassifier {
 
     public static boolean isQuotaSignal(String text) {
         return text != null && QUOTA_PATTERN.matcher(text).find();
+    }
+
+    /**
+     * 输出侧音频版权确证信号（IKJ8J8）：官方错误码名或 message 含 "output audio"
+     * → 视频网关 poll 终态分类前置分支用（归类 content_rejected_audio / 1059）。
+     */
+    public static boolean isOutputAudioCopyrightSignal(String text) {
+        return text != null && OUTPUT_AUDIO_COPYRIGHT_PATTERN.matcher(text).find();
     }
 }

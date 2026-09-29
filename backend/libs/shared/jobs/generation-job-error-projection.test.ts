@@ -202,9 +202,10 @@ describe("projectPublicError", () => {
     expect(out!.message).toBe("参考素材无效，请重新选择");
   });
 
-  it("IKFL53: content_rejected_reference → 1038 + 文案「参考内容可能涉及版权限制」", () => {
+  it("IKFL53/IKJ8J8: content_rejected_reference → 1038 + 中性兜底文案", () => {
     // 版权拒绝任务 DB error.code=content_rejected_reference → 后端投影到 1038 + 中文文案，
     // 不返上游 copyright 英文原文（含 Request id）。
+    // IKJ8J8：文案中性化——判定只按上游版权关键词、不区分参考/输出，不再宣称「参考内容」。
     const out = projectPublicError(
       {
         code: "content_rejected_reference",
@@ -214,7 +215,22 @@ describe("projectPublicError", () => {
       "video",
     );
     expect(out!.code).toBe(1038);
-    expect(out!.message).toBe("参考内容可能涉及版权限制");
+    expect(out!.message).toBe("生成内容可能涉及版权限制，请调整提示词或素材后重试");
+  });
+
+  it("IKJ8J8: content_rejected_audio → 1059 + 音频版权精确文案", () => {
+    // 输出侧音频版权拒绝（火山官方码 OutputAudioSensitiveContentDetected，worker 前置分支归类）
+    // → 后端投影到 1059 + 对齐官方释义的文案，用户一眼知道是配乐的问题。
+    const out = projectPublicError(
+      {
+        code: "content_rejected_audio",
+        message:
+          "The generated audio may involve copyright restrictions. Please revise your input and retry.",
+      },
+      "video",
+    );
+    expect(out!.code).toBe(1059);
+    expect(out!.message).toBe("生成的音频可能涉及版权限制，请调整提示词后重试");
   });
 
   it("白名单外码 fallback 到类型兜底：码表文案（视频生成失败）", () => {

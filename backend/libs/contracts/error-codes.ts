@@ -55,8 +55,12 @@ export const ERROR_STORAGE_FAILED = "storage_failed";
 export const ERROR_ALL_OUTPUTS_FAILED = "all_outputs_failed";
 
 export const ERROR_CONTENT_REJECTED = "content_rejected";
-/** IKFL53：参考内容版权拒绝（与输出内容审核 1018 分开，用户可见「参考内容可能涉及版权限制」）。 */
+/** IKFL53：参考内容版权拒绝（与输出内容审核 1018 分开）。
+ *  IKJ8J8：文案中性化——判定只按上游版权关键词、不区分参考/输出，不再宣称「参考内容」（ADR-0119）。 */
 export const ERROR_CONTENT_REJECTED_REFERENCE = "content_rejected_reference";
+/** IKJ8J8：输出侧音频版权拒绝（火山官方码 OutputAudioSensitiveContentDetected → 1059，
+ *  文案对齐官方释义「生成的音频可能涉及版权限制，请您更换输入内容后重试」，ADR-0119）。 */
+export const ERROR_CONTENT_REJECTED_AUDIO = "content_rejected_audio";
 export const ERROR_CONTENT_REVIEW_UNAVAILABLE = "content_review_unavailable";
 
 export const ERROR_MEDIA_EXTRACT_FAILED = "media_extract_failed";
@@ -228,6 +232,9 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   // 重试接口「任务存在但不可重试」两类真实原因专用码取下一空号 1054/1055。
   [ERROR_JOB_NOT_RETRYABLE_STATUS]: 1054,
   [ERROR_JOB_ALREADY_RETRIED]: 1055,
+  // IKJ8J8 注：ADR-0119 钦定数值码 1059（落码前全仓 grep 1059 零命中，无并行分支撞号；
+  // 1056-1058 为空号未用——本码不按顺延取号，系规格指定）。
+  [ERROR_CONTENT_REJECTED_AUDIO]: 1059,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -484,7 +491,8 @@ export const ERROR_CODES: Record<number, string> = {
   1016: "生成结果存储失败",
   1017: "所有输出均生成失败",
   1018: "生成内容未通过安全审核",
-  1038: "参考内容可能涉及版权限制", // content_rejected_reference
+  // IKJ8J8：版权类中性兜底——判定只按上游版权关键词、不区分参考/输出，不宣称「参考内容」（ADR-0119）
+  1038: "生成内容可能涉及版权限制，请调整提示词或素材后重试", // content_rejected_reference
   1019: "内容审核不可用",
   1020: "音频提取失败",
   1021: "视频生成失败",
@@ -521,6 +529,7 @@ export const ERROR_CODES: Record<number, string> = {
   1053: "音视频合成失败，请重试", // audio_video_mux_failed（火山 MediaKit mux-audio-video）
   1054: "当前状态不允许重试，仅失败或部分成功的任务可重试", // job_not_retryable_status（IKIPWU 重试接口专用）
   1055: "该任务的失败项已全部重试，无需再次重试", // job_already_retried（IKIPWU 重试接口专用）
+  1059: "生成的音频可能涉及版权限制，请调整提示词后重试", // content_rejected_audio（IKJ8J8 输出侧音频版权精确码）
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",

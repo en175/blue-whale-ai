@@ -339,8 +339,12 @@ public class NewApiVideoClient {
                         + (failReason != null ? failReason : "") + " "
                         + (taskError != null && taskError.message() != null ? taskError.message() : "");
                 String code;
-                if (NewApiErrorClassifier.isCopyrightSignal(upstreamText)) {
-                    // IKFL53：版权拒绝 → 1038「参考内容可能涉及版权限制」（先于输出/敏感判定）。
+                if (NewApiErrorClassifier.isOutputAudioCopyrightSignal(upstreamText)) {
+                    // IKJ8J8：输出侧音频版权（官方码 OutputAudioSensitiveContentDetected）→ 1059
+                    // 精确码，先于版权关键词判定——官方错误码名比关键词更确证（ADR-0119）。
+                    code = GenerationError.ERROR_CONTENT_REJECTED_AUDIO;
+                } else if (NewApiErrorClassifier.isCopyrightSignal(upstreamText)) {
+                    // IKFL53：版权拒绝 → 1038 中性兜底（先于输出/敏感判定；IKJ8J8 起文案不再宣称「参考内容」）。
                     code = GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
                 } else if (NewApiErrorClassifier.isContentPolicySignal(upstreamText)) {
                     code = GenerationError.ERROR_CONTENT_REJECTED;

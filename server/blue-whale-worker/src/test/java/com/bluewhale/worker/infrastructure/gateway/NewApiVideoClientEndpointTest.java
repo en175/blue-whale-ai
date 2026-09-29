@@ -349,6 +349,56 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
+    @DisplayName("IKJ8J8: poll FAILURE + OutputAudioSensitiveContentDetected → content_rejected_audio（1059）")
+    void pollOutputAudioCodeMapsToContentRejectedAudio() throws Exception {
+        // 复刻样片 3239（2026-09-30，task_xIKnNyyQ…）真实上游响应：
+        // 文生视频无参考素材，上游判定生成音频涉版权拒绝整个任务。
+        server.createContext("/v1/video/generations/task-audio-copyright", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-audio-copyright\",\"status\":\"FAILURE\"," +
+                    "\"error\":{\"code\":\"OutputAudioSensitiveContentDetected.PolicyViolation\"," +
+                    "\"message\":\"The generated audio may involve copyright restrictions. Please revise your input and retry.\"}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-audio-copyright");
+        assertThat(observation.status()).isEqualTo("failed");
+        assertThat(observation.error()).isNotNull();
+        // 官方错误码名是最确证的信号 → 精确码 content_rejected_audio（1059），先于版权关键词 1038
+        assertThat(observation.error().code()).isEqualTo("content_rejected_audio");
+        // message 保留上游原文（details.raw 供排查）
+        assertThat(observation.error().message()).contains("copyright restrictions");
+    }
+
+    @Test
+    @DisplayName("IKJ8J8: poll 顶层 fail_reason 含 output audio 版权（data.error 缺 code）→ content_rejected_audio")
+    void pollTopLevelFailReasonOutputAudioMapsToContentRejectedAudio() throws Exception {
+        // 三路信号合并的鲁棒性：data.error 只有 message 不带 code，信号藏顶层 fail_reason。
+        server.createContext("/v1/video/generations/task-audio-failreason", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-audio-failreason\",\"status\":\"FAILURE\"," +
+                    "\"fail_reason\":\"The request failed because the output audio may be related to copyright restrictions. Request id: req-audio\"," +
+                    "\"error\":{\"message\":\"audio generation rejected\"}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-audio-failreason");
+        assertThat(observation.status()).isEqualTo("failed");
+        assertThat(observation.error()).isNotNull();
+        assertThat(observation.error().code()).isEqualTo("content_rejected_audio");
+    }
+
+    @Test
     @DisplayName("IKJ80M: submit 超时 ≥120s 且经 submitClient 配置生效（网关带视频参考提交实测 ~51s）")
     void submitTimeoutAtLeast120sAppliedToClient() throws Exception {
         Field timeoutField = NewApiVideoClient.class.getDeclaredField("SUBMIT_TIMEOUT_MS");
