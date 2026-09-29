@@ -58,6 +58,28 @@ export const EDIT_INTENT_KEYWORDS = [
  *     把参考生视频单误判成 prolong。导出理由同 {@link EDIT_INTENT_KEYWORDS}。 */
 export const PROLONG_INTENT_KEYWORDS = ["向前延长", "向后延长", "延续", "续写"] as const;
 
+/** IKJ78C：否定防护词表（六词闭集，扩词走评审）。
+ *
+ *  背景：裸子串匹配会把「禁止修改」「不要替换」这类**约束句**误判成编辑意图，
+ *  纯参考单被按 edit 的锁定比例 4xx 拒单。防护规则见 {@link hasIntentKeyword}。
+ *
+ *  ⚠️ **导出是为了跨语言对账**（`video-task-type-parity.test.ts` 拿它当期望值），
+ *     与 worker-java `VideoJobProcessor` 同名字段逐字对齐。 */
+export const NEGATION_KEYWORDS = ["禁止", "不得", "不要", "不能", "勿", "无需"] as const;
+
+/** IKJ78C：子句切分标点（中英闭集，规格口径）。 */
+const CLAUSE_SEPARATORS = /[，。；！？、,.;!?]/;
+
+/** IKJ78C：否定防护后的关键词扫描——先按标点切子句，否定词与关键词落在**同一子句**时
+ *  剔除该命中（含否定词的子句整体不参与扫描）；跨子句不剔除（混合句「禁止修改人物，
+ *  把背景替换成海边」按肯定判 edit）。任一非否定子句命中即算意图存在。 */
+function hasIntentKeyword(prompt: string, words: readonly string[]): boolean {
+  return prompt.split(CLAUSE_SEPARATORS).some(
+    (clause) =>
+      !NEGATION_KEYWORDS.some((n) => clause.includes(n)) && words.some((w) => clause.includes(w)),
+  );
+}
+
 /** IKFPYX：判定视频任务类型（纯函数，无 IO；backend 与 worker-java 同源口径）。
  *  优先级：首尾帧角色 > 单帧角色 > 参考视频 + 提示词意图（延长先于编辑，后者词面更宽）> default。
  *
@@ -82,8 +104,8 @@ export function resolveVideoTaskType(
   if (hasFirst || hasLast) return "first_frame";
   const hasVideoRef = references.some((r) => r.role === "reference" && r.type === "video");
   if (!hasVideoRef) return "default";
-  if (PROLONG_INTENT_KEYWORDS.some((w) => prompt.includes(w))) return "prolong";
-  if (EDIT_INTENT_KEYWORDS.some((w) => prompt.includes(w))) return "edit";
+  if (hasIntentKeyword(prompt, PROLONG_INTENT_KEYWORDS)) return "prolong";
+  if (hasIntentKeyword(prompt, EDIT_INTENT_KEYWORDS)) return "edit";
   return "default";
 }
 

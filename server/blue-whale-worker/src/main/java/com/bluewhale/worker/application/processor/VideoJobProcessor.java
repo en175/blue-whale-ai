@@ -1254,6 +1254,24 @@ public class VideoJobProcessor implements JobProcessor {
     private static final List<String> PROLONG_INTENT_KEYWORDS = List.of(
             "向前延长", "向后延长", "延续", "续写");
 
+    /** IKJ78C：否定防护词表（六词闭集，扩词走评审）。两端逐字相同，
+     *  理由见 backend `capability-param-validation.ts` 同名字段的注释。 */
+    private static final List<String> NEGATION_KEYWORDS = List.of(
+            "禁止", "不得", "不要", "不能", "勿", "无需");
+
+    /** IKJ78C：子句切分标点（中英闭集，规格口径），与 backend 同源。 */
+    private static final String CLAUSE_SEPARATORS = "[，。；！？、,.;!?]";
+
+    /** IKJ78C：否定防护后的关键词扫描——先按标点切子句，否定词与关键词落在同一子句时
+     *  剔除该命中（含否定词的子句整体不参与扫描）；跨子句不剔除（混合句按肯定判）。 */
+    private static boolean hasIntentKeyword(String prompt, List<String> words) {
+        for (String clause : prompt.split(CLAUSE_SEPARATORS)) {
+            if (NEGATION_KEYWORDS.stream().anyMatch(clause::contains)) continue;
+            if (words.stream().anyMatch(clause::contains)) return true;
+        }
+        return false;
+    }
+
     /** IKFPYX：判定视频任务类型（与 backend `contracts/capability-param-validation.ts`
      *  resolveVideoTaskType 同源口径，两端不得各自发明）。
      *  优先级：首尾帧角色 > 单帧角色 > 参考视频 + 提示词意图（延长先于编辑，后者词面更宽）> default。
@@ -1277,8 +1295,8 @@ public class VideoJobProcessor implements JobProcessor {
         if (hasFirst || hasLast) return "first_frame";
         if (!hasVideoRef) return "default";
         String p = prompt == null ? "" : prompt;
-        for (String w : PROLONG_INTENT_KEYWORDS) if (p.contains(w)) return "prolong";
-        for (String w : EDIT_INTENT_KEYWORDS) if (p.contains(w)) return "edit";
+        if (hasIntentKeyword(p, PROLONG_INTENT_KEYWORDS)) return "prolong";
+        if (hasIntentKeyword(p, EDIT_INTENT_KEYWORDS)) return "edit";
         return "default";
     }
 

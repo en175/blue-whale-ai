@@ -349,6 +349,28 @@ describe("resolveVideoTaskType（IKFPYX）", () => {
     // 官方的另外两个词仍然保留
     expect(resolveVideoTaskType([ref("reference", "video")], "续写这段")).toBe("prolong");
   });
+
+  /* IKJ78C：否定防护——裸子串匹配会把「禁止修改」这类约束句误判成编辑意图（default 即官方 reference）。 */
+
+  it("IKJ78C 否定约束句不判编辑（六词闭集逐一覆盖）", () => {
+    expect(resolveVideoTaskType([ref("reference", "video")], "禁止修改人物形象")).toBe("default");
+    expect(resolveVideoTaskType([ref("reference", "video")], "不得替换背景")).toBe("default");
+    expect(resolveVideoTaskType([ref("reference", "video")], "不要替换背景")).toBe("default");
+    expect(resolveVideoTaskType([ref("reference", "video")], "不能去掉人物")).toBe("default");
+    expect(resolveVideoTaskType([ref("reference", "video")], "请勿删除水印")).toBe("default");
+    expect(resolveVideoTaskType([ref("reference", "video")], "无需增加字幕")).toBe("default");
+  });
+
+  it("IKJ78C 混合句按肯定判：否定词与关键词跨子句不剔除（中英标点同权）", () => {
+    expect(resolveVideoTaskType([ref("reference", "video")], "禁止修改人物，把背景替换成海边"))
+      .toBe("edit");
+    expect(resolveVideoTaskType([ref("reference", "video")], "不要改人物,把背景替换成海边"))
+      .toBe("edit");
+  });
+
+  it("IKJ78C 否定延长词同样剔除", () => {
+    expect(resolveVideoTaskType([ref("reference", "video")], "不要延续这个故事")).toBe("default");
+  });
 });
 
 describe("task_types.default 约束生效（IKFPYX）", () => {
