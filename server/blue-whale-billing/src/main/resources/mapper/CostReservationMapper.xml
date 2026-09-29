@@ -70,6 +70,30 @@
   </select>
 
   <!--
+    ★ 批量版 sumSettledActualCredits：一次问一批用户的已结算消耗
+      （管理端用户列表的「累计消费」列）。
+
+    ⚠️ 口径与上面那条**逐字相同**（status = 'settled' + SUM(actual_credits)），
+       只把「时间区间」换成「user_id IN」—— 统计口径必须是同一个，否则列表页
+       按用户的合计与仪表盘的全站合计对不上，而两边都不报错。
+
+    ⚠️ 只 IN 不给区间：列表页要的是**累计**（从注册至今），不是某一段时间。
+
+    ⚠️ 走 idx_reservation__user_time (user_id, gmt_create)（见 V7 迁移）：前导列等值 + IN
+       是索引区间扫描；GROUP BY user_id 与索引首列同序，不需要文件排序。
+
+    ⚠️ **没有已结算预留的用户不会出现在结果里**（GROUP BY 的语义）。补零是调用方的事。
+  -->
+  <select id="sumSettledActualByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
+    SELECT user_id, COALESCE(SUM(actual_credits), 0) AS amount
+    FROM billing_cost_reservations
+    WHERE user_id IN
+      <foreach collection="userIds" item="uid" open="(" separator="," close=")">#{uid}</foreach>
+      AND status = 'settled'
+    GROUP BY user_id
+  </select>
+
+  <!--
     持有超时仍未终态的预留（《计费逻辑详细设计》§9 层次②）。
 
     三处细节各有理由：

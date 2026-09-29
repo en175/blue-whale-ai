@@ -90,8 +90,12 @@ export class DashboardService {
 
     // 三趟查询并发：彼此无依赖，串行只是白等。billing 那一趟在 allSettled 之外单独接，
     // 因为它的失败**不该**带走另外三个数（见 totalUsedCredits 的注释）。
-    const [users, jobTypeCounts, rechargeTotals] = await Promise.all([
-      this.identity.listAdminUsers({ page: 1, pageSize: 1 }),
+    //
+    // ⚠️ 用户总数走 countAdminUsers 而不是 listAdminUsers({pageSize:1})：后者会顺带
+    //    拉一页用户、跑角色查询，IKJ5M7 之后还会多一次计费调用 —— 于是计费不可达
+    //    会把「总用户数」一起带走，正好把上面那句话作废。
+    const [totalUsers, jobTypeCounts, rechargeTotals] = await Promise.all([
+      this.identity.countAdminUsers(),
       this.countJobsByType(window),
       this.sumPaidRecharges(window),
     ]);
@@ -99,7 +103,7 @@ export class DashboardService {
     return {
       from: range.from,
       to: range.to,
-      totalUsers: users.total,
+      totalUsers,
       // ⚠️ 总数由**分组结果求和**得出，而不是另发一条 count：两者分属两条语句时会因为
       //    两条之间新落库的任务而对不上（分母与分子取自两个瞬间），
       //    表现是占比加起来不是 100%，而没人会发现。同一份结果里取和就没有这个缝。

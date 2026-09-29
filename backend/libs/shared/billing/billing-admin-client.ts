@@ -21,6 +21,7 @@ import {
   AdminConsumedCreditsRequestSchema,
   AdminGetActiveCatalogRequestSchema,
   AdminListTransactionsRequestSchema,
+  AdminQueryUserStatsRequestSchema,
   BillingAdminService,
 } from "../../contracts/gen/billing/v1/billing_pb.js";
 import { BillingConfigError, billingEndpoint } from "./billing-client.js";
@@ -577,6 +578,63 @@ export async function fetchConsumedCredits(
     return Number(response.consumedCredits);
   } catch (error) {
     throw asAdminError("读消耗合计", error);
+  }
+}
+
+/** 一个用户的三列（管理端用户列表用）。 */
+export interface AdminUserStats {
+  /** 可用（不含冻结）。整数积分 */
+  availableCredits: number;
+  /** 累计充值：**只算充值本金**（purchased 批次），不含充值赠送。整数积分 */
+  totalRecharged: number;
+  /** 累计消费：**已结算**的实际消耗，不含冻结中的预扣。整数积分 */
+  totalConsumed: number;
+}
+
+/**
+ * 批量读一批用户的「可用 / 累计充值 / 累计消费」（`AdminQueryUserStats`）。
+ *
+ * <p>⚠️ **为什么不逐用户调 `QueryBalance`**：管理端用户列表一页最多 100 个用户，
+ * 逐个调就是 100 次跨进程往返、每次还要各算一遍批次。这条 rpc 就是为它开的。
+ *
+ * <p>⚠️ **查无此人不是错误**：账本上「没有这个人」与「余额为 0」无从区分，
+ * 服务端会为请求里的每个 id 回一项（查无则三列全 0）。所以下面按 id 取值时
+ * 可以放心 `?.` 兜 0 —— 拿不到只可能是服务端换了实现，不是「这个用户不存在」。
+ *
+ * <p>⚠️ **调用失败即抛，不回落成 0**（与 `fetchCreditsPerYuan` 同一条纪律）：
+ * 三列都是钱。billing 不可达时给 0，界面上与「这个用户真的没有积分」长得**一模一样**，
+ * 而「三列全是 0」恰恰是这次修复要消灭的那个症状 —— 回落等于把 bug 换了张脸。
+ * 宁可让列表报错（调用方按既有口径翻 502/503），也不要给一个看起来正常的错数。
+ *
+ * @param userIds 要问的用户 id（列表页当前页的那些）
+ */
+export async function fetchAdminUserStats(
+  userIds: number[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<Map<number, AdminUserStats>> {
+  if (userIds.length === 0) {
+    // 服务端也会早返回，但没必要为「这一页没人」发一次请求
+    return new Map();
+  }
+  try {
+    const response = await adminClient(env).adminQueryUserStats(
+      create(AdminQueryUserStatsRequestSchema, {
+        userIds: userIds.map((id) => BigInt(id)),
+      }),
+    );
+    // proto 的 map<int64, _>：键在 JS 侧是**字符串**（int64 超出 number 安全范围时
+    // 只有字符串能原样承载），值要自己搬成 number —— 本仓金额是整数积分，安全。
+    const result = new Map<number, AdminUserStats>();
+    for (const [userId, stats] of Object.entries(response.stats)) {
+      result.set(Number(userId), {
+        availableCredits: Number(stats.availableCredits),
+        totalRecharged: Number(stats.totalRecharged),
+        totalConsumed: Number(stats.totalConsumed),
+      });
+    }
+    return result;
+  } catch (error) {
+    throw asAdminError("读用户三列", error);
   }
 }
 

@@ -227,6 +227,18 @@ export class IdentityService {
   }
 
   /**
+   * 管理端用户**总数** —— 只数，不取列表、不碰计费。
+   *
+   * <p>给仪表盘用。原先它调 {@link #listAdminUsers} 再读 `total`：那会顺带跑整个列表
+   * 查询与角色批量查询，IKJ5M7 之后还会多一次计费调用 —— 于是**计费不可达会把
+   * 「总用户数」一起带走**，而 `DashboardService#stats` 的注释恰好写着计费那趟的失败
+   * 不该影响另外几个数。这条入口把那个耦合彻底断掉。
+   */
+  async countAdminUsers(): Promise<number> {
+    return this.adminUsers.countAdminUsers();
+  }
+
+  /**
    * 冻结 / 解冻账号 —— 写 `bw_users.status`。
    *
    * <p>原先这条和「加扣余额」挤在 new-api 的同一个 manage 接口里。new-api 独立后

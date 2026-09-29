@@ -4,11 +4,13 @@ import com.bluewhale.billing.domain.DbTime;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity;
 import com.bluewhale.billing.adapter.outbound.persistence.mapper.CreditLotMapper;
+import com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 积分批次的持久化（《计费逻辑详细设计》§7.2）。
@@ -102,6 +104,34 @@ public class CreditLotRepository {
     /** 可用余额 = Σ(remaining − frozen)，仅计未过期的批次。 */
     public long availableCredits(long userId) {
         return mapper.sumAvailable(userId);
+    }
+
+    /**
+     * **一批用户**的可用余额（管理端用户列表那一列）。
+     *
+     * <p>与 {@link #availableCredits} 是同一条 WHERE 的批量投影（只多一个 {@code user_id IN}）
+     * —— 列表页与详情页显示的必须是同一个数，理由见
+     * {@link CreditLotMapper#sumAvailableByUser}。
+     *
+     * @param userIds 非空。空集合会拼出 {@code IN ()} 语法错，本层不兜底
+     * @return 只含**确有批次**的用户；没有批次的用户不在表里（调用方按 0 处理）
+     */
+    public Map<Long, Long> availableCreditsOf(List<Long> userIds) {
+        return UserAmountRow.toMap(mapper.sumAvailableByUser(userIds));
+    }
+
+    /**
+     * **一批用户**的「某来源发放合计」（管理端用户列表的「累计充值」列）。
+     *
+     * <p>⚠️ 累计充值传 {@link CreditSource#PURCHASED}：**只算充值本金**，不含充值赠送
+     * （赠送是 {@code bonus} 批次）—— 这一列问的是用户自己充了多少钱，
+     * 把赠送折进去运营就拿这个数对不上营收了。理由见
+     * {@link CreditLotMapper#sumGrantedByUser}。
+     *
+     * @return 只含**该来源确有批次**的用户；其余用户不在表里（调用方按 0 处理）
+     */
+    public Map<Long, Long> grantedCreditsOf(List<Long> userIds, CreditSource source) {
+        return UserAmountRow.toMap(mapper.sumGrantedByUser(userIds, source.key()));
     }
 
     /**

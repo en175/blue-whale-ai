@@ -3,6 +3,7 @@ package com.bluewhale.billing.adapter.outbound.persistence.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.bluewhale.billing.adapter.outbound.persistence.entity.CostReservationEntity;
 import com.bluewhale.billing.adapter.outbound.persistence.row.StaleReservationRow;
+import com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -59,6 +60,24 @@ public interface CostReservationMapper extends BaseMapper<CostReservationEntity>
      */
     long sumSettledActualCredits(@Param("from") LocalDateTime from,
                                  @Param("to") LocalDateTime to);
+
+    /**
+     * 批量版的 {@link #sumSettledActualCredits}：一次问一批用户的已结算消耗
+     * （管理端用户列表的「累计消费」列）。
+     *
+     * <p>⚠️ 口径与上面那条**逐字相同**（{@code status = 'settled'} +
+     * {@code SUM(actual_credits)}），只把「时间区间」换成「{@code user_id IN}」——
+     * 统计口径必须是同一个，否则列表页按用户的合计与仪表盘的全站合计对不上，
+     * 而两边都不报错。
+     *
+     * <p>⚠️ 只 {@code IN} 不给区间：列表页要的是**累计**（从注册至今），不是某段时间。
+     * 走 {@code idx_reservation__user (user_id, gmt_create)}（见 V7 迁移），
+     * 前导列等值 + IN 是索引区间扫描。
+     *
+     * @param userIds 一批用户 id。**调用方须保证非空** —— 空集合会拼出 {@code IN ()}
+     *                这个语法错误；本层不兜底（理由同 {@code CreditLotMapper#sumAvailableByUser}）
+     */
+    List<UserAmountRow> sumSettledActualByUser(@Param("userIds") List<Long> userIds);
 
     /**
      * 扫出「持有超过 {@code seconds} 秒仍未终态」的预留，最早持有的在前

@@ -1,20 +1,13 @@
-import type { AdminUserRow } from '@/api/adminUsers';
-
-/** 去掉前后空白和前导 #，避免列表曾展示 #ID 时把井号一并搜进去 */
+/**
+ * 管理端用户列表**服务端搜索**的关键词归一（IKJ5M7）。
+ *
+ * ⚠️ 这里只剩「归一」，不再有「本地匹配」那一半：搜索已经下沉到服务端
+ * （`admin-user-query` 的 `keyword`）。前端再留一份匹配逻辑就是两个判据 ——
+ * 它们迟早会对不上，而对不上的表现是「界面上看着筛过了，其实没有」。
+ *
+ * 归一本身仍然要做：`#42` 是搜索框里常见的写法（列表早先显示过 `#ID`），
+ * 而服务端只认 `42`。不去掉前导井号，那个关键词会一条都匹配不到。
+ */
 export function normalizeAdminUserKeyword(keyword: string): string {
   return keyword.trim().toLowerCase().replace(/^#+/, '');
-}
-
-/** 本地筛选：昵称 / 手机号 / 用户 ID；用户 ID 按数字匹配，不把 # 算进关键词 */
-export function matchesAdminUserKeyword(
-  user: Pick<AdminUserRow, 'nickname' | 'phone' | 'userId'>,
-  keyword: string,
-): boolean {
-  const kw = normalizeAdminUserKeyword(keyword);
-  if (!kw) return true;
-  return (
-    user.nickname.toLowerCase().includes(kw) ||
-    user.phone.includes(kw) ||
-    String(user.userId).includes(kw)
-  );
 }
