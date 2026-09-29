@@ -197,15 +197,18 @@ message ListTransactionsResponse {
 message UserTransaction {
   string id         = 1;
   string type       = 2; // consume | recharge | bonus | daily | invite | redeem
-                         // | subscription | gift | compensation | refund | expire
+                         // | subscription | gift | compensation | expire | refund
                          //
-                         // ⚠️ refund（任务失败全额退回 / 超时兜底释放）与 consume
-                         //    **互斥且共用同一个 id**：一个生成任务只有一条预扣预留，
-                         //    那行由 pending 的 consume 变成 done 的 refund ——
-                         //    不会同时出现「消费一行 + 退回一行」。方向恒为 in，
-                         //    金额是当初预扣的那个数（这笔钱从未真正被扣走）。
-                         //    与之相对，「多退少补」的差额**不单独出行**，
-                         //    它折进那条 consume 行的最终金额里。
+                         // ⚠️ **退回不单独成一个类型** —— 它就是那条 consume 行的
+                         //    「结算到 0」，与「多退少补」同一条口径：行里永远取终态
+                         //    实际值（失败单 = 0），预扣额另走运营面的 reserved_credits。
+                         //    方向恒为 out，id 与当初那条 pending 行相同 ——
+                         //    既不会出现「消费一行 + 退回一行」，也不会出现「退款 +N」
+                         //    那种无对应支出的进账（流水要能自己加出余额变化）。
+                         //
+                         // ⚠️ refund 目前**没有产生者**（预留表不再产它）。保留这个词是为了
+                         //    充值退款一类的反向资金动作（账本侧 biz_type 已在用）；运营端的
+                         //    类型筛选不再列它，免得筛出一张永远空的页。
   string direction  = 3; // in | out
   string title      = 4; // 「视频生成 · seedance-2.5 1080p 5s」
   int64  amount     = 5; // 整数积分，**最终值，唯一金额**

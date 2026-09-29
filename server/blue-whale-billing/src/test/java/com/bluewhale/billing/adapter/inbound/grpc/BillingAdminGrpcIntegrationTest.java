@@ -329,17 +329,23 @@ class BillingAdminGrpcIntegrationTest {
 
         // 这条 SQL 用户面与管理面共用（user_id 为空 = 全站）。退回行从前在**两边**都不出现：
         // 用户看到自己的余额扣了又不见，客服也答不了「这单到底扣没扣钱」。
-        List<AdminTransactionItem> refunds = adminListTyped(USER, "refund");
-        assertThat(refunds).hasSize(1);
+        //
+        // ★ 退回是「结算到 0」，不是另一种类型：行仍是 consumer，金额取终态实际值 0。
+        //    管理端靠 reserved_credits 注解（下面那一列）把「冻过多少」补出来 ——
+        //    金额是 0 的时候，这一列是「扣了多少」唯一的答案。
+        List<AdminTransactionItem> consumes = adminListTyped(USER, "consume");
+        assertThat(consumes).hasSize(1);
 
-        AdminTransactionItem refund = refunds.get(0);
+        AdminTransactionItem refund = consumes.get(0);
         assertThat(refund.getUserId()).isEqualTo(USER);
-        assertThat(refund.getDirection()).isEqualTo("in");
+        assertThat(refund.getDirection()).isEqualTo("out");
         assertThat(refund.getStatus()).isEqualTo("done");
-        // 退的就是当初冻的那个数；预扣额那一列（管理面独有）同样带得出来
-        assertThat(refund.getAmount()).isEqualTo(100);
+        assertThat(refund.getAmount()).isEqualTo(0);
         assertThat(refund.getReservedCredits()).isEqualTo(100);
         assertThat(refund.getSettledAt()).isNotEmpty();
+
+        // refund 这条路径已经没有来源了（预留表不再产它），查它永远是空页
+        assertThat(adminListTyped(USER, "refund")).isEmpty();
     }
 
     // ─────────────────────────────────────────────────────────────

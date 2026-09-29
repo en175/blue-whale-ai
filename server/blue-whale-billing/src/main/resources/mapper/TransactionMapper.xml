@@ -127,13 +127,12 @@
       UNION ALL
 
       <!--
-        ② 消费 / 退回：预留表。**一个 job 恒一行**，行的形态随状态变。
+        ② 消费：预留表。**一个 job 恒一行**，行的形态随状态变。
 
         amount 随 status 取不同的列，是「一个金额」这条硬规则在 SQL 里的落点：
           held     → reserved_credits（预计消耗，用户提交时看到的那个数）
-          settled  → actual_credits  （最终值）
-          released → reserved_credits（全额退回：退的就是当初冻的那个数）
-        三个值不会同时出现——它们先后占同一列，所以界面上永远只有一个金额。
+          终态     → actual_credits  （settled = 结算定下的最终值；released = 0）
+        两个值不会同时出现——它们先后占同一列，所以界面上永远只有一个金额。
 
         reserved_credits 另出一列（**管理面独用**）：settled 之后 amount 已经换成实际值，
         「当初冻了多少」就再也无处可读了 —— 而用户余额先降后回的差额恰恰要靠它解释
@@ -143,10 +142,15 @@
            与 {@code TransactionView} 的说明——「用户界面永远只出现一个金额」不受影响。
         held 行的这两个数是同一个值（amount 就是预扣额），由调用方决定要不要重复展示。
 
-        ★ released（任务失败全额返，**或超时兜底释放**）**不消失，而是换一行**：
-        转为 type=refund / direction=in / status=done，金额仍是当初冻的那个数。
+        ★ **退回不是另一种流水，是「结算到 0」** —— 与「多退少补」同一条口径：
+        行里永远取终态实际值，预扣额另走 reserved_credits（管理面注解）。
+        全额退回只是「实际 = 0」这个极端，于是失败单在流水里读作「消费 0（预扣 N）」
+        而不是「退款 +N」：一行同时交代扣与退两腿，列表的入出净和也等于余额变化
+        （退回单贡献 0；出成 refund/in、金额取预扣额的话，列表会自己加不出余额 ——
+        流水里凭空多出一笔无对应支出的进账）。
 
-        从前那种「把 status = 'released' 的行直接滤掉」的写法有两个说不通的地方：
+        ★ released（任务失败全额返，**或超时兜底释放**）**不消失**：
+        曾经那种「把 status = 'released' 的行直接滤掉」的写法有两个说不通的地方：
           · 用户**已经看到过**那条 pending 行（可用余额也真的降过），随后它凭空消失。
             这不是「一笔从未发生的消费」，是流水在用户眼皮底下少了一行 ——
             与上面那条「冻 12、实扣 1，那 11 的来回无人交代」是同一个问题的更重版本
@@ -157,7 +161,7 @@
             却同样在用户流水里不留痕迹，比「任务失败退回」更该被看见。
 
         ⚠️ **不会出现两行**：同一 job 只有一条预留（uk_reservation__job 唯一），
-           而 tx_id 恒为 res:{预留 id} —— 一行从 pending「-12」变成 done「+12」，id 不变。
+           而 tx_id 恒为 res:{预留 id} —— 一行从 pending「-12」变成 done「0」，id 不变。
         ⚠️ kind 保持 'consume' 不动：它是游标排序三元组 (created_at, kind, src_id)
            的一员，改了会在同一秒内跳行，而排序键必须是不可变量。
            —— 也正因为这三个键在状态转换时都不变，客户端翻页途中那行换形态不会重复、
@@ -166,7 +170,8 @@
         ⚠️ **这一改会让存量数据「多出」行来**：已经 released 的历史预留，从上线那一刻起
            开始出现在用户（与管理端）流水里；它们的时间显示的是**预扣时刻**
            （created_at = gmt_create），不是退回时刻 —— 兜底释放那类两个时刻可能差几天。
-           它们落在用户早已翻过去的旧位置、不在顶部。这是预期效果（那些动作真实发生过），
+           它们落在用户早已翻过去的旧位置、不在顶部；形态是「消费 0 + 预扣注解」，
+           与今天的失败单一致。这是预期效果（那些动作真实发生过），
            但没有任何别的痕迹提示这件事，所以记在这里。
 
         ⚠️ V7__reservation_user_index.sql 的头部注释里还写着旧的谓词
@@ -175,11 +180,12 @@
            只会让优化器更自由，只是那段论证针对的语句已经不存在了。
       -->
       SELECT CONCAT('res:', r.id) AS tx_id,
-             <!-- 只有 released 走 refund；另两态都是消费 -->
-             CASE WHEN r.status = 'released' THEN 'refund' ELSE 'consume' END AS type,
-             CASE WHEN r.status = 'released' THEN 'in'     ELSE 'out'     END AS direction,
+             <!-- 退回不另立类型：一行永远是消费，金额才是「扣了多少」的答案（见上面 ★）。 -->
+             'consume' AS type,
+             'out'     AS direction,
              <!-- 提交方没给文案时兜一个通用词；空标题在下拉列表里是「一行空白」。
-                  退回行以预扣行的快照作前缀 —— 用户认得出是「哪一单」退回来的。
+                  退回行以预扣行的快照作前缀 + 「 · 退回」后缀 —— 金额是 0，
+                  得有一处说明这个 0 是怎么来的，用户也认得出是「哪一单」退回来的。
                   ⚠️ **不要拿 Reservation.releaseNote 来填**：那列可能装着
                      「超时兜底释放」这类内部话术，用户不该看到「兜底」「未收费」。 -->
              CASE WHEN r.status = 'released'
@@ -187,11 +193,13 @@
                             ELSE CONCAT(r.title, ' · 退回') END
                   ELSE CASE WHEN r.title = '' THEN '生成消费' ELSE r.title END
              END AS title,
-             <!-- 三个状态共用这一个金额列（「一个金额」那条硬规则）。
-                  ⚠️ released 落在 ELSE 上取 reserved_credits —— 不是「因为没结算」，
-                     而是因为 markReleased 把 actual_credits 写成了 0（CostReservationMapper）。
-                     别把这里「化简」成「终态统一取 actual_credits」：那会让退回行显示 +0。 -->
-             CASE WHEN r.status = 'settled' THEN r.actual_credits ELSE r.reserved_credits END AS amount,
+             <!-- 两个状态共用这一个金额列（「一个金额」那条硬规则）。
+                  ★ 终态统一取 actual_credits —— 退回是「结算到 0」，不是另一种形态。
+                     released 落在 ELSE 上是安全的：markReleased 恒把 actual_credits 写成 0
+                     （CostReservationMapper 的 update），不存在 NULL 或残值。
+                  ⚠️ 判据是「= held 的补集」：冒出第四个状态时它会静默按 actual_credits 出数，
+                     新增状态时这里必须表态。 -->
+             CASE WHEN r.status = 'held' THEN r.reserved_credits ELSE r.actual_credits END AS amount,
              r.reserved_credits AS reserved_credits,
              <!-- 两个终态（settled / released）都已落地，只有 held 还在处理中。
                   ⚠️ 判据写成「= held 的补集」而不是「= settled」：后者会把 released 漏成
