@@ -1,6 +1,8 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoSubmitInput;
@@ -27,6 +29,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 视频提交出站协议钉桩测试（IKFFWH）。
@@ -361,5 +364,38 @@ class NewApiVideoClientEndpointTest {
                 (OkHttpClient) clientField.get(new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)));
         assertThat(submitClient.readTimeoutMillis()).isEqualTo(submitTimeoutMs);
         assertThat(submitClient.writeTimeoutMillis()).isEqualTo(submitTimeoutMs);
+    }
+
+    @Test
+    @DisplayName("IKJ80P: submit 读超时 → VideoProviderError 携带 SocketTimeoutException cause（孤儿判定信号）")
+    void submitReadTimeoutCarriesSocketTimeoutCause() throws Exception {
+        // 模拟「提交超时但网关随后成功」：响应延迟到客户端放弃之后才发出（网关侧建单仍完成）
+        server.createContext("/v1/video/generations", exchange -> {
+            try {
+                Thread.sleep(1_500);
+                byte[] resp = "{\"task_id\":\"task-late\",\"status\":\"queued\"}"
+                        .getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, resp.length);
+                try (OutputStream out = exchange.getResponseBody()) {
+                    out.write(resp);
+                }
+            } catch (Exception ignored) {
+                // 客户端已超时断开，写出失败是预期
+            }
+        });
+
+        NewApiVideoClient client = new NewApiVideoClient(new UpstreamBaseUrl(baseUrl));
+        // 测试时限内复现读超时：把 submitClient 换成 300ms 短超时实例（生产 120s 不动）
+        Field clientField = NewApiVideoClient.class.getDeclaredField("submitClient");
+        clientField.setAccessible(true);
+        clientField.set(client, NewApiHttpSupport.buildClient(1_000, 300, 300));
+
+        assertThatThrownBy(() -> client.submit("t", new VideoSubmitInput(
+                "seedance-2", "一只猫在跑步", 5.0, "720p", "16:9",
+                null, null, List.of(), null)))
+                .isInstanceOf(VideoProviderError.class)
+                .hasMessage("new-api 视频提交超时")
+                // IKJ80P：cause 链是 processor 侧「疑似上游已建单孤儿」的唯一机器可读信号
+                .hasCauseInstanceOf(java.net.SocketTimeoutException.class);
     }
 }

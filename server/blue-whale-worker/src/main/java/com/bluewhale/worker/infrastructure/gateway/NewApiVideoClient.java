@@ -171,9 +171,11 @@ public class NewApiVideoClient {
         try {
             response = submitClient.newCall(request).execute();
         } catch (SocketTimeoutException e) {
-            // submit 超时 → provider_failed（runner catch 归类，video-job-runner.ts:357-375）
+            // submit 超时 → provider_failed（runner catch 归类，video-job-runner.ts:357-375）。
+            // IKJ80P：cause 必须带上——网关超时断开后仍可能完成建单（provider_task_id 无从取得），
+            // processor 据此把本 job 标记为「疑似上游已建单孤儿」落显式终态 + 告警。
             throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "new-api 视频提交超时");
+                    "new-api 视频提交超时", e);
         } catch (Exception e) {
             throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "new-api 视频提交失败: " + e.getMessage());

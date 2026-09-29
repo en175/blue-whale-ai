@@ -77,6 +77,26 @@ public class VideoJobProcessor implements JobProcessor {
     /** 视频轮询超限（video-job-runner.ts:38 MAX_VIDEO_POLLS = 720 ≈ 60 分钟）。 */
     public static final int MAX_VIDEO_POLLS = 720;
 
+    /**
+     * IKJ80P：submit 阶段超时落终态时写进 {@code error.details} 的孤儿标记键。
+     * <p>
+     * 场景：worker submit 读超时断开，但 new-api 网关/上游随后仍完成建单并扣量——
+     * {@code provider_task_id} 无从取得（网关无按条件查询已建任务的接口），本 job 只能落
+     * 显式失败终态，上游任务成为疑似孤儿。键落 {@code true} 供告警与对账；与
+     * {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不同，这是 worker 侧
+     * 单端运维键（backend 无消费方），故不放跨族契约类。
+     * <p>
+     * 可审计孤儿清单（对账入口）＝按本键查询：
+     * <pre>{@code
+     * SELECT id, user_id, project_id, gmt_create, error->>'$.message' AS msg
+     * FROM generation_jobs
+     * WHERE type = 'video' AND status = 'failed'
+     *   AND provider_task_id IS NULL
+     *   AND JSON_EXTRACT(error, '$.details.submit_timeout_orphan') = CAST('true' AS JSON);
+     * }</pre>
+     */
+    public static final String ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN = "submit_timeout_orphan";
+
     // ========== 参考视频校验常量（video-reference-validation.ts） ==========
     // 平台物理约束——**不是模型知识，能力行无对应字段**（运营改不了，也不会为它们新增配置列）：
     // 单视频字节 / 单边像素 / 总像素 / 宽高比 / 单视频最短时长 / mime 白名单。
@@ -301,8 +321,18 @@ public class VideoJobProcessor implements JobProcessor {
                 // 失败等纯排查文案无状态 cause（httpStatus=null），不受影响、永远保留字样
                 message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
             }
+            // IKJ80P：submit 阶段（providerTaskId 尚未取得）读超时 = 网关可能随后仍完成建单
+            // 扣量，但 task_id 无从取得（new-api 网关无按条件查询已建任务的接口）。重试 submit
+            // 会双扣（MediaKit 家族同款取舍「宁可不重试也不双跑」），故这里落显式失败终态并
+            // 打孤儿标记，供告警与对账清单（SQL 见 ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN）。
+            boolean submitTimeoutOrphan = claim.providerTaskId() == null
+                    && hasSocketTimeoutCause(error);
+            if (submitTimeoutOrphan) {
+                log.error("[video] 提交超时疑似孤儿任务 jobId={}：上游可能已建单扣量但拿不到 "
+                        + "provider_task_id，本 job 落显式失败终态待对账（IKJ80P）", claim.id());
+            }
             log.error("runVideoJobStep 异常 jobId={} code={}: {}", claim.id(), code, message, error);
-            failVideo(claim, code, message, httpStatus);
+            failVideo(claim, code, message, httpStatus, submitTimeoutOrphan);
         }
     }
 
@@ -541,11 +571,23 @@ public class VideoJobProcessor implements JobProcessor {
      *  失败（超时 / 连接失败 / 业务信封失败 / 结果下载失败）不写该键。submit 阶段网关
      *  !2xx 不带 cause 是已知现状，缺键语义 = 无非 HTTP 状态可读。 */
     private void failVideo(ClaimedVideoJobDto claim, String code, String message, Integer httpStatus) {
+        failVideo(claim, code, message, httpStatus, false);
+    }
+
+    /**
+     * IKJ80P 带孤儿标记的失败收口：submitTimeoutOrphan=true 时额外写
+     * {@link #ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN}（error.details 结构化键，SQL 可查）。
+     */
+    private void failVideo(ClaimedVideoJobDto claim, String code, String message, Integer httpStatus,
+                           boolean submitTimeoutOrphan) {
         log.warn("video job 失败 jobId={} code={} message={}", claim.id(), code, message);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
+        if (submitTimeoutOrphan) {
+            details.put(ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN, true);
         }
         // 修正一：releaseNote 整体省略（video-job-runner.ts:545 releaseNote 参数删除）
         finalizer.failVideoJob(claim.id(), code, message, details, claim.workerId(), claim.fencingToken());
@@ -997,6 +1039,18 @@ public class VideoJobProcessor implements JobProcessor {
             return false;
         }
 
+        return false;
+    }
+
+    /**
+     * IKJ80P：异常链上是否存在 {@link java.net.SocketTimeoutException}（自环防死循环，
+     * JobFinalizer.isRowLockConflict 同款遍历）。submit 阶段命中 = 读超时放弃，但网关
+     * 可能随后仍完成建单——孤儿疑似判定信号。
+     */
+    private static boolean hasSocketTimeoutCause(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof java.net.SocketTimeoutException) return true;
+        }
         return false;
     }
 
