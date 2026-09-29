@@ -74,6 +74,7 @@ class SubmissionCheckingMySqlIntegrationTest {
 
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService service;
+    static JobFinalizer finalizer;
     static JdbcTemplate jdbc;
 
     @Configuration
@@ -145,6 +146,20 @@ class SubmissionCheckingMySqlIntegrationTest {
             return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm);
         }
 
+        /** 真库 JobFinalizer（IKIWP8 ③ 终态收口直连）：装配对齐 JobStateMachineMySqlIntegrationTest 同名 bean。 */
+        @Bean
+        JobFinalizer finalizer(
+                GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
+                GenerationOutputSlotMapper sm, ProjectEventMapper pem,
+                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
+            ProjectEventPublisher events = new ProjectEventPublisher(pem);
+            return new JobFinalizer(jm, am, jlm, sm,
+                    new SceneCardGenerationRecordSync(sm, rm, events),
+                    new StoryboardPreviewSync(sm, pm, events),
+                    events,
+                    JobSettlementPublisher.noop());
+        }
+
         @SuppressWarnings({"unchecked", "rawtypes"})
         private static <T> MapperFactoryBean<T> factory(Class<T> mapperIf, SqlSessionFactory sf)
                 throws Exception {
@@ -159,6 +174,7 @@ class SubmissionCheckingMySqlIntegrationTest {
     static void boot() {
         ctx = new AnnotationConfigApplicationContext(TestConfig.class);
         service = ctx.getBean(JobStateMachineService.class);
+        finalizer = ctx.getBean(JobFinalizer.class);
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
     }
 
@@ -265,7 +281,7 @@ class SubmissionCheckingMySqlIntegrationTest {
         long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "held");
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId), "w1", 5L)).isTrue();
 
-        boolean failed = service.failVideoJob(String.valueOf(jobId), "quota_exhausted",
+        boolean failed = finalizer.failVideoJob(String.valueOf(jobId), "quota_exhausted",
                 "网关明确拒绝", null, "w1", 5L);
 
         assertThat(failed).isTrue();

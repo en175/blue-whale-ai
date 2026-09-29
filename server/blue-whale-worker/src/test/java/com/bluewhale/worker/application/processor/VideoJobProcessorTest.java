@@ -160,71 +160,9 @@ class VideoJobProcessorTest {
     }
 
     // ========== IKJ80P：提交超时孤儿治理 ==========
-
-    @Test
-    @DisplayName("IKJ80P: submit 读超时 → 显式失败终态 + details.submit_timeout_orphan=true，不再重排")
-    void submitTimeoutMarksOrphanSuspectedTerminalFailure() {
-        ClaimedVideoJobDto claim = videoClaim("120", false, null, 0, 0, null);
-        doReturn(Optional.of(claim)).when(stateMachine)
-                .claimVideoJobById(eq("120"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
-        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                "new-api 视频提交超时", new java.net.SocketTimeoutException("Read timed out")))
-                .when(videoClient).submit(anyString(), any(VideoSubmitInput.class));
-
-        processor.handle("120");
-
-        verify(finalizer).failVideoJob(eq("120"), eq(GenerationError.ERROR_PROVIDER_FAILED),
-                eq("new-api 视频提交超时"),
-                argThat(d -> Boolean.TRUE.equals(d.get(
-                        VideoJobProcessor.ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN))),
-                eq("video-worker"), eq(1L));
-        // 落终态而非续跑：不再提交、不落 provider_task_id、不排轮询
-        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
-        verify(producer, never()).enqueue(anyString(), anyLong());
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"Connect timed out", "connect timed out"})
-    @DisplayName("IKJ80I: submit connect 超时（请求未送达）→ 不打孤儿标记（JDK 17/8 两代 message 形态）")
-    void submitConnectTimeoutNotMarkedOrphan(String timeoutMessage) {
-        ClaimedVideoJobDto claim = videoClaim("123", false, null, 0, 0, null);
-        doReturn(Optional.of(claim)).when(stateMachine)
-                .claimVideoJobById(eq("123"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
-        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                "new-api 视频提交超时", new java.net.SocketTimeoutException(timeoutMessage)))
-                .when(videoClient).submit(anyString(), any(VideoSubmitInput.class));
-
-        processor.handle("123");
-
-        // connect 超时请求未送达、网关不可能建单：不进孤儿对账清单，但仍落显式失败终态
-        verify(finalizer).failVideoJob(eq("123"), eq(GenerationError.ERROR_PROVIDER_FAILED),
-                anyString(),
-                argThat(d -> !d.containsKey(VideoJobProcessor.ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN)),
-                anyString(), anyLong());
-        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
-        verify(producer, never()).enqueue(anyString(), anyLong());
-    }
-
-    @Test
-    @DisplayName("IKJ80P: submit 非超时失败（无 SocketTimeoutException cause）→ 不打孤儿标记")
-    void submitFailureWithoutTimeoutCauseHasNoOrphanMarker() {
-        ClaimedVideoJobDto claim = videoClaim("121", false, null, 0, 0, null);
-        doReturn(Optional.of(claim)).when(stateMachine)
-                .claimVideoJobById(eq("121"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
-        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                "new-api 视频提交失败: java.net.ConnectException: Connection refused"))
-                .when(videoClient).submit(anyString(), any(VideoSubmitInput.class));
-
-        processor.handle("121");
-
-        verify(finalizer).failVideoJob(eq("121"), eq(GenerationError.ERROR_PROVIDER_FAILED),
-                anyString(),
-                argThat(d -> !d.containsKey(VideoJobProcessor.ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN)),
-                anyString(), anyLong());
-    }
+    // IKIZQD 规则迁移：submit 阶段超时 / 响应丢失 / 非超时异常统一「留 checking 锁定」
+    // （dispatchSubmission 内消化，不上抛终态），IKJ80P 的 submit 孤儿终态断言由
+    // 「IKIZQD: 普通视频 submit 超时 → 同骨架留 checking」等用例接管（见 IKIZQD 分节）。
 
     @Test
     @DisplayName("IKJ80P: poll 阶段错误即使带超时 cause 也不打孤儿标记（provider_task_id 已落库）")
@@ -2022,7 +1960,7 @@ class VideoJobProcessorTest {
 
         verify(videoClient, never()).finalize(anyString(), anyString());
         verify(videoClient, never()).submit(anyString(), any());
-        verify(stateMachine).failVideoJob(eq("141"), eq(GenerationError.ERROR_INVALID_INPUT),
+        verify(finalizer).failVideoJob(eq("141"), eq(GenerationError.ERROR_INVALID_INPUT),
                 anyString(), any(), eq("video-worker"), eq(1L));
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
     }
@@ -2039,7 +1977,7 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("task-final-77"));
         doReturn(new StoredVideo("https://tos/final.mp4", "storage/final.mp4", "video/mp4", 5L, "md5f"))
                 .when(mediaRelay).persist(eq("http://provider-final.mp4"), eq("42"));
-        doReturn(true).when(stateMachine)
+        doReturn(true).when(finalizer)
                 .publishVideoResult(eq("142"), anyString(), anyString(), anyString(), anyLong(),
                         eq("https://tos/final.mp4"), eq("storage/final.mp4"), eq("video/mp4"),
                         eq(5L), eq("md5f"), anyInt(), anyInt(), anyDouble(),
@@ -2050,11 +1988,11 @@ class VideoJobProcessorTest {
         // ★ 成功终态：totalTokens=118000（成片阶段真实用量，Settle 权威输入）；
         //   upstream_created_at/finalize_deadline 传 null——那是样片阶段的语义，
         //   COALESCE 不覆盖样片已落的截止（两阶段费用与任务关系互不回滚，金标 G09）。
-        verify(stateMachine).publishVideoResult(eq("142"), anyString(), anyString(), anyString(),
+        verify(finalizer).publishVideoResult(eq("142"), anyString(), anyString(), anyString(),
                 anyLong(), eq("https://tos/final.mp4"), eq("storage/final.mp4"), eq("video/mp4"),
                 eq(5L), eq("md5f"), anyInt(), anyInt(), anyDouble(),
                 eq(118_000L), isNull(), isNull());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -2062,7 +2000,7 @@ class VideoJobProcessorTest {
     @DisplayName("IKIZQC G14: 成片转存不可用（无 TOS）→ 按本阶段失败，不以供应商 URL 充当成功")
     void finalRelayUnavailableFailsInsteadOfStoringProviderUrl() {
         VideoJobProcessor noRelayProcessor = new VideoJobProcessor(
-                stateMachine, assetSource, credentialService, videoClient, null, producer);
+                stateMachine, finalizer, assetSource, credentialService, videoClient, null, producer);
         ClaimedVideoJobDto claim = finalClaim("143", "task-final-8", "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("143"), anyString());
@@ -2073,10 +2011,10 @@ class VideoJobProcessorTest {
 
         noRelayProcessor.handle("143");
 
-        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
                 anyInt(), anyInt(), anyDouble(), any(), any(), any());
-        verify(stateMachine).failVideoJob(eq("143"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+        verify(finalizer).failVideoJob(eq("143"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                 anyString(), any(), eq("video-worker"), eq(1L));
     }
 
@@ -2093,9 +2031,9 @@ class VideoJobProcessorTest {
 
         processor.handle("144");
 
-        verify(stateMachine).failVideoJob(eq("144"), eq("InternalServiceError"),
+        verify(finalizer).failVideoJob(eq("144"), eq("InternalServiceError"),
                 anyString(), any(), eq("video-worker"), eq(1L));
-        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
                 anyInt(), anyInt(), anyDouble(), any(), any(), any());
     }
@@ -2119,7 +2057,7 @@ class VideoJobProcessorTest {
         //   （failVideoJob 零调用——它会把 charge_state 置 released）。
         verify(stateMachine).markSubmissionAttempt(eq("145"), anyString(), eq(1L));
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         verifyNoInteractions(producer);
         verify(stateMachine).appendLog(eq("145"), eq("submission_unknown"), eq("checking"),
                 anyString(), any());
@@ -2140,7 +2078,7 @@ class VideoJobProcessorTest {
 
         verify(videoClient, times(1)).finalize(eq("token"), eq("task-sample-9"));
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         verifyNoInteractions(producer);
     }
 
@@ -2160,7 +2098,7 @@ class VideoJobProcessorTest {
 
         // ★ 落库失败 = 网关已受理但句柄未落——结果不明：failVideo 守卫此刻能命中 checking 行，
         //   一旦放行就是「提前退款」，必须截在 processor 里。
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         verifyNoInteractions(producer);
         verify(stateMachine).appendLog(eq("147"), eq("submission_unknown"), eq("checking"),
                 anyString(), any());
@@ -2201,7 +2139,7 @@ class VideoJobProcessorTest {
 
         // ★ 网关已答复业务回绝 = 明确失败（未建任务）→ 顶层 catch → failVideoJob
         //   （failVideoGuard 已放宽到 checking，落 failed + charge released）。
-        verify(stateMachine).failVideoJob(eq("149"), eq(GenerationError.ERROR_QUOTA_EXHAUSTED),
+        verify(finalizer).failVideoJob(eq("149"), eq(GenerationError.ERROR_QUOTA_EXHAUSTED),
                 anyString(), any(), eq("video-worker"), eq(1L));
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
     }
@@ -2237,7 +2175,7 @@ class VideoJobProcessorTest {
         processor.handle("151");
 
         verify(stateMachine).markSubmissionAttempt(eq("151"), anyString(), eq(1L));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
         verifyNoInteractions(producer);
     }
@@ -2254,7 +2192,7 @@ class VideoJobProcessorTest {
 
         // ★ 仅本地前置校验且未发网关 → 直接失败释放，不进入 checking（不占尝试）。
         verify(stateMachine, never()).markSubmissionAttempt(anyString(), anyString(), anyLong());
-        verify(stateMachine).failVideoJob(eq("152"), eq(GenerationError.ERROR_INVALID_INPUT),
+        verify(finalizer).failVideoJob(eq("152"), eq(GenerationError.ERROR_INVALID_INPUT),
                 anyString(), any(), eq("video-worker"), eq(1L));
     }
 
