@@ -8,7 +8,11 @@ import { useQuery } from '@tanstack/react-query';
 import Skeleton from '@/components/Skeleton';
 import JobSourceModal, { type JobSourceTarget } from '@/components/JobSourceModal';
 import { chargeLabel, jobStatusLabel, stageBadgeLabel } from '@/components/JobSourceModal/labels';
-import { videoHistoryOptions, type HistoryJobEntry } from '@/api/generationHistory';
+import {
+  videoHistoryOptions,
+  HISTORY_JOBS_PER_PROJECT,
+  type HistoryJobEntry,
+} from '@/api/generationHistory';
 import { isApiError } from '@/api/http';
 import { readJobFailText } from '@/api/jobs';
 import styles from './index.module.css';
@@ -95,6 +99,12 @@ function HistoryRow({
 export default function History() {
   const [sourceTarget, setSourceTarget] = useState<JobSourceTarget | null>(null);
   const history = useQuery(videoHistoryOptions());
+  // 单项目拉满单页封顶（HISTORY_JOBS_PER_PROJECT）即可能被截断，列表末尾提示，避免「少了」被当成「没有」。
+  const perProjectCounts = new Map<string, number>();
+  (history.data ?? []).forEach((entry) => {
+    perProjectCounts.set(entry.projectId, (perProjectCounts.get(entry.projectId) ?? 0) + 1);
+  });
+  const truncated = [...perProjectCounts.values()].some((count) => count >= HISTORY_JOBS_PER_PROJECT);
 
   return (
     <div className={styles.page}>
@@ -126,6 +136,9 @@ export default function History() {
                 <HistoryRow key={String(entry.job.job_id)} entry={entry} onOpenSource={setSourceTarget} />
               ))}
             </ul>
+          )}
+          {history.data && history.data.length > 0 && truncated && (
+            <p className={styles.truncatedNotice}>仅显示最近 {HISTORY_JOBS_PER_PROJECT} 条</p>
           )}
         </div>
       </div>

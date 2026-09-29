@@ -340,4 +340,55 @@ describe('History 生成历史页（IKIZQI）', () => {
     expect(rowTexts()[0]).toContain('状态核对中');
     expect(rowTexts()[0]).toContain('费用：已预扣');
   });
+
+  it('单项目拉满 100 条封顶时列表末尾显示截断提示，不足 100 条不显示', async () => {
+    const jobsOfCount = (count: number) => ({
+      records: Array.from({ length: count }, (_, index) => ({
+        job_id: String(400 + index),
+        type: 'video',
+        status: 'succeeded',
+        progress: 100,
+        input: null,
+        created_at: '2026-09-29T00:00:00Z',
+        output_assets: [],
+        charge_state: 'settled',
+        actual_credits: 1,
+      })),
+      total: count,
+      size: 100,
+      current: 1,
+    });
+    const stubJobs = (count: number) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string | URL) => {
+          const href = String(url);
+          if (href === '/api/projects') return envelope([{ id: 55, name: '短片工坊' }]);
+          if (href.startsWith('/api/jobs?projectId=55')) return envelope(jobsOfCount(count));
+          throw new Error(`未预期的请求：${href}`);
+        }),
+      );
+    };
+    const remount = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+      mountNode.remove();
+      mountNode = document.createElement('div');
+      document.body.appendChild(mountNode);
+      root = createRoot(mountNode);
+      queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    };
+
+    stubJobs(100);
+    await renderPage();
+    await waitForRows('满 100 条渲染');
+    expect(pageText()).toContain('仅显示最近 100 条');
+
+    await remount();
+    stubJobs(99);
+    await renderPage();
+    await waitForRows('99 条渲染');
+    expect(pageText()).not.toContain('仅显示最近 100 条');
+  });
 });
