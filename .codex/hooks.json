@@ -137,6 +137,16 @@
             "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" cbm-session-reminder.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PLUGIN_DATA=\"$(git rev-parse --git-path ponytail-codex)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-activate.js\"",
+            "timeout": 5
+          }
+        ],
+        "matcher": "startup|resume|clear|compact"
       }
     ],
     "SubagentStart": [
@@ -146,6 +156,26 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" cbm-session-reminder.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PLUGIN_DATA=\"$(git rev-parse --git-path ponytail-codex)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-subagent.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PLUGIN_DATA=\"$(git rev-parse --git-path ponytail-codex)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-mode-tracker.js\"",
+            "timeout": 5
           }
         ]
       }
