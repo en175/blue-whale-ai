@@ -111,11 +111,11 @@ const TYPE_LABELS: Record<string, string> = Object.fromEntries(
 
 /** `type` 用 `type` 而不是 `interface`：见 JobRecords 里的同一条说明。 */
 type Filters = {
-  userId: string;
+  keyword: string;
   type: string;
 };
 
-const EMPTY_FILTERS: Filters = { userId: '', type: '' };
+const EMPTY_FILTERS: Filters = { keyword: '', type: '' };
 
 export default function ConsumptionRecords() {
   const filters = useAppliedFilters(EMPTY_FILTERS);
@@ -125,7 +125,7 @@ export default function ConsumptionRecords() {
   const query: AdminConsumptionRecordQuery = {
     pageSize: PAGE_SIZE,
     pageToken: cursor.pageToken,
-    ...(applied.userId ? { userId: applied.userId } : {}),
+    ...(applied.keyword ? { keyword: applied.keyword } : {}),
     ...(applied.type ? { type: applied.type } : {}),
   };
   const list = useQuery(adminConsumptionRecordsOptions(query));
@@ -135,7 +135,40 @@ export default function ConsumptionRecords() {
 
   const columns: Column<(typeof rows)[number]>[] = [
     { key: 'created_at', header: '时间', render: (row) => fmtTime(row.created_at) },
-    { key: 'user_id', header: '用户 ID', render: (row) => row.user_id },
+    {
+      key: 'nickname',
+      header: '昵称',
+      render: (row) => {
+        // 昵称 / 手机号来自**我们自己库**的 `bw_users`（不是 billing）：账本里只有 user_id，
+        // 认不出人。BFF 拿这一页的 user_id 批量查一次补回来——与「任务」列同一套做法。
+        //
+        // 用户 ID 收进这个悬停面板：运营在这一页是**找人**，常驻的是昵称和手机号；
+        // 那串数字只在排查时用得上，为一个偶发需求常驻一列不划算。
+        return (
+          <Tooltip
+            label="用户明细"
+            title="用户"
+            trigger={
+              <>
+                {row.nickname ?? '—'}
+                {/* 图标是「这里还有东西」的标记。不加它，一行纯文字看不出能悬停。
+                    尺寸跟 `ui/Tooltip` 默认的 `?` 图标一致（15）——同一种交互不该有第二种大小。 */}
+                <Eye size={15} strokeWidth={2} />
+              </>
+            }
+            content={<MetaRow items={[{ label: '用户 ID', value: row.user_id }]} />}
+          />
+        );
+      },
+    },
+    {
+      key: 'phone',
+      header: '手机号',
+      // ⚠️ `?? '—'` 而不是真值判断：后端把「查不到用户」与「用户没有手机号」都收敛成 `null`
+      //    （见 adminConsumptionRecords.ts 的类型注释）。存量用户没手机号是**常态**——
+      //    `bw_users.phone` 可空，老用户那一列本来就该是「—」，不是加载没完成。
+      render: (row) => row.phone ?? '—',
+    },
     {
       key: 'type',
       header: '类型',
@@ -286,10 +319,13 @@ export default function ConsumptionRecords() {
       filters={
         <>
           <Input
-            style={{ width: 180 }}
-            placeholder="用户 ID（留空 = 全站）"
-            value={draft.userId}
-            onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))}
+            style={{ width: 220 }}
+            // 「需完整」四个字不能省：用户管理页那个框是**模糊**匹配，这个框是**精确**匹配
+            // （账本按 user_id 过滤，服务端只收一个）。同一句 placeholder 放两页、行为不同，
+            // 运营会照着上一页的习惯输入半截。见 adminConsumptionRecords.ts 的类型注释。
+            placeholder="用户 ID / 手机号 / 昵称（需完整，留空 = 全站）"
+            value={draft.keyword}
+            onChange={(e) => setDraft((d) => ({ ...d, keyword: e.target.value }))}
             onKeyDown={(e) => {
               if (e.key === 'Enter') apply();
             }}

@@ -11,19 +11,25 @@ vi.mock("@lib/shared/billing/billing-admin-client.js", async (importOriginal) =>
 });
 
 import { BillingAdminConfigError, BillingAdminError } from "@lib/shared/billing/billing-admin-client.js";
+import type { IdentityService } from "@lib/shared/identity/identity.service.js";
 import type { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { AdminConsumptionRecordsController } from "./consumption-records.controller.js";
 
 // 积分记录读的是 billing 的账本（游标分页、无总数）。本测试钉住的是管理面**独有的那条自由度**：
-// userId 可以不传 = 全站流水——用户面的 ListTransactions 里它是必填的。
+// 关键词可以不传 = 全站流水——用户面的 ListTransactions 里 userId 是必填的。
 //
-// JobsService 用桩：这条端点该负责的是「把任务语义合并成什么形状」，不是「怎么查任务」——
-// 查询本身归 jobs.service / job-repo 的单测。这里只在边界上钉住合并行为。
+// JobsService / IdentityService 用桩：这条端点该负责的是「把两个来源合并成什么形状」，
+// 不是「怎么查任务 / 怎么查用户」——查询本身归各自的单测。这里只在边界上钉住合并行为。
 const { loadTaskSummaries } = vi.hoisted(() => ({ loadTaskSummaries: vi.fn() }));
+const { findAdminUserIdByKeyword, loadAdminUserIdentities } = vi.hoisted(() => ({
+  findAdminUserIdByKeyword: vi.fn(),
+  loadAdminUserIdentities: vi.fn(),
+}));
 
-const controller = new AdminConsumptionRecordsController({
-  loadTaskSummaries,
-} as unknown as JobsService);
+const controller = new AdminConsumptionRecordsController(
+  { loadTaskSummaries } as unknown as JobsService,
+  { findAdminUserIdByKeyword, loadAdminUserIdentities } as unknown as IdentityService,
+);
 
 function page(items: unknown[] = [], nextPageToken = "") {
   return { items, nextPageToken };
@@ -62,11 +68,15 @@ describe("AdminConsumptionRecordsController.list", () => {
   beforeEach(() => {
     listAdminTransactions.mockReset();
     loadTaskSummaries.mockReset();
+    findAdminUserIdByKeyword.mockReset();
+    loadAdminUserIdentities.mockReset();
     // 缺省：没有任务可补（发放行、当页无消费行）——多数用例不关心这条链路
     loadTaskSummaries.mockResolvedValue(new Map());
+    // 缺省：一个用户都查不到 —— 昵称手机号落成 null（跨库历史那种行）
+    loadAdminUserIdentities.mockResolvedValue(new Map());
   });
 
-  it("缺省：userId **不传** = 全站流水，pageToken 为空 = 首页", async () => {
+  it("缺省：关键词**不传** = 全站流水，pageToken 为空 = 首页", async () => {
     listAdminTransactions.mockResolvedValue(page());
 
     await controller.list({});
@@ -77,13 +87,19 @@ describe("AdminConsumptionRecordsController.list", () => {
       pageSize: 20,
       pageToken: "",
     });
+    // 没有关键词就不该去查人 —— 全站视图不需要知道「谁是谁」
+    expect(findAdminUserIdByKeyword).not.toHaveBeenCalled();
   });
 
-  it("userId 传入时转成数字，type 透传", async () => {
+  it("关键词命中一个用户 → 用它换来的 userId 去过滤 billing，type 透传", async () => {
     listAdminTransactions.mockResolvedValue(page());
+    findAdminUserIdByKeyword.mockResolvedValue(42);
 
-    await controller.list({ userId: "42", type: "consume", pageToken: "tok-1" });
+    await controller.list({ keyword: "13800008888", type: "consume", pageToken: "tok-1" });
 
+    // 关键词原样交给我们库去解（手机号 / 昵称 / 用户 ID 三选一都在那里判），
+    // 送给 billing 的**只有** userId —— 它的契约里没有手机号这一层
+    expect(findAdminUserIdByKeyword).toHaveBeenCalledWith("13800008888");
     expect(listAdminTransactions).toHaveBeenCalledWith({
       userId: 42,
       type: "consume",
@@ -92,7 +108,17 @@ describe("AdminConsumptionRecordsController.list", () => {
     });
   });
 
-  it("响应把 billing 的字段名映射成下划线口径，且带出 user_id 与任务的三个语义字段", async () => {
+  it("关键词查不到人 → 空页，**不问 billing**（账本按 user_id 过滤，认不出人就一条也对不上）", async () => {
+    findAdminUserIdByKeyword.mockResolvedValue(undefined);
+
+    await expect(controller.list({ keyword: "查无此人" })).resolves.toEqual({
+      success: true,
+      data: { items: [], next_page_token: "" },
+    });
+    expect(listAdminTransactions).not.toHaveBeenCalled();
+  });
+
+  it("响应把 billing 的字段名映射成下划线口径，且带出 user_id、任务的三个语义字段与展示身份", async () => {
     listAdminTransactions.mockResolvedValue(page([ITEM], "next-tok"));
     loadTaskSummaries.mockResolvedValue(
       new Map([
@@ -107,6 +133,9 @@ describe("AdminConsumptionRecordsController.list", () => {
         ],
       ]),
     );
+    loadAdminUserIdentities.mockResolvedValue(
+      new Map([[42, { nickname: "张小明", phone: "13800008888" }]]),
+    );
 
     await expect(controller.list({})).resolves.toEqual({
       success: true,
@@ -115,6 +144,8 @@ describe("AdminConsumptionRecordsController.list", () => {
           {
             id: "res:7",
             user_id: 42,
+            nickname: "张小明",
+            phone: "13800008888",
             type: "consume",
             direction: "out",
             title: "视频生成 · seedance-2.5",
@@ -132,6 +163,41 @@ describe("AdminConsumptionRecordsController.list", () => {
         next_page_token: "next-tok",
       },
     });
+
+    // 一页一次批量查：不是逐行查（100 行就是 100 次库往返）
+    expect(loadAdminUserIdentities).toHaveBeenCalledTimes(1);
+    expect(loadAdminUserIdentities).toHaveBeenCalledWith([42]);
+  });
+
+  it("用户没手机号（存量用户是常态）→ phone 收敛成 null，**不是空串**", async () => {
+    // 契约里只能有一种「没有」：空串与 null 并存的话前端要判两次，
+    // 而少判的那次会渲染成空白而不是「—」。`AdminUserIdentity.phone` 用空串，
+    // 落到对外契约里必须收敛掉。
+    listAdminTransactions.mockResolvedValue(page([ITEM]));
+    loadAdminUserIdentities.mockResolvedValue(
+      new Map([[42, { nickname: "老用户", phone: "" }]]),
+    );
+
+    await expect(controller.list({})).resolves.toMatchObject({
+      data: { items: [{ nickname: "老用户", phone: null }] },
+    });
+  });
+
+  it("用户查不到（跨库历史 / 被清理）→ 昵称手机号都是 null，行照常返回", async () => {
+    // Map 里没有 42 —— 键缺席就是「没这个用户」。这一笔钱确实发生过，只是人查不到了。
+    listAdminTransactions.mockResolvedValue(page([ITEM]));
+
+    await expect(controller.list({})).resolves.toMatchObject({
+      data: { items: [{ user_id: 42, nickname: null, phone: null }] },
+    });
+  });
+
+  it("当页没有任何行 → 仍然只调一次批量查（空数组），不做无谓查询", async () => {
+    listAdminTransactions.mockResolvedValue(page([]));
+
+    await controller.list({});
+
+    expect(loadAdminUserIdentities).toHaveBeenCalledWith([]);
   });
 
   it("只把消费行的 jobId 拿去批量查（发放行没有任务，不混进 IN 查询）", async () => {
@@ -234,11 +300,37 @@ describe("AdminConsumptionRecordsController.list", () => {
     expect(listAdminTransactions).toHaveBeenLastCalledWith({ pageSize: 20, pageToken: "" });
   });
 
-  it("userId 非正整数 → 400，且不调 billing", async () => {
-    for (const bad of ["abc", "-1", "0"]) {
-      await expect(controller.list({ userId: bad })).rejects.toMatchObject({ status: 400 });
-    }
-    expect(listAdminTransactions).not.toHaveBeenCalled();
+  it("关键词是空白 → 等同于不传（全站），不白跑一次查人", async () => {
+    // 关键词从「必须正整数」换成了自由文本：没有非法形态可报 400，但「一串空格」
+    // 不能变成一次筛选 —— 那会查到空页，而运营以为自己什么条件都没加。
+    listAdminTransactions.mockResolvedValue(page());
+
+    await controller.list({ keyword: "   " });
+
+    expect(findAdminUserIdByKeyword).not.toHaveBeenCalled();
+    expect(listAdminTransactions).toHaveBeenCalledWith({ pageSize: 20, pageToken: "" });
+  });
+
+  it("★ 还认着旧的 `userId` 参数 —— 不认它就是静默回一页全站流水", async () => {
+    // 前端与后端不是原子发版（本仓 2026-09-26 实测过：3100 上跑着 4 小时前的构建）。
+    // 一个还没刷新的管理页仍会发 `?userId=42`：不认它的后果不是报错，而是运营以为
+    // 筛了那个人，实际拿到的是所有人的账 —— 正是本文件反复反对的那类「不报错的假话」。
+    listAdminTransactions.mockResolvedValue(page());
+    findAdminUserIdByKeyword.mockResolvedValue(42);
+
+    await controller.list({ userId: "42" });
+
+    expect(findAdminUserIdByKeyword).toHaveBeenCalledWith("42");
+    expect(listAdminTransactions).toHaveBeenCalledWith({ userId: 42, pageSize: 20, pageToken: "" });
+  });
+
+  it("新参数优先：同时收到 keyword 与 userId 时用 keyword", async () => {
+    listAdminTransactions.mockResolvedValue(page());
+    findAdminUserIdByKeyword.mockResolvedValue(7);
+
+    await controller.list({ keyword: "13800008888", userId: "42" });
+
+    expect(findAdminUserIdByKeyword).toHaveBeenCalledWith("13800008888");
   });
 
   it("billing 管理端地址没配 → 503（重试不会好，要人去改配置）", async () => {
