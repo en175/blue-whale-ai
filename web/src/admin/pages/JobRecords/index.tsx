@@ -183,7 +183,7 @@ export default function JobRecords() {
             style={{ width: 220 }}
             // 「需完整」四个字不能省：用户管理页那个框是**模糊**匹配，这个框是**精确**匹配。
             // 同一句 placeholder 放两页、行为不同，运营会照着上一页的习惯输入半截。
-            placeholder="用户 ID / 手机号 / 用户名（需完整）"
+            placeholder="用户 ID / 手机号 / 用户名（需完整，留空 = 全站）"
             value={draft.keyword}
             onChange={(e) => setDraft((d) => ({ ...d, keyword: e.target.value }))}
             onKeyDown={(e) => {

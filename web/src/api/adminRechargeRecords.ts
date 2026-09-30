@@ -36,8 +36,9 @@ export interface AdminRechargeRecord {
    * 用户名。BFF 回我们自己的库按 `userId` 补的——`recharge_orders` 里只有 user_id，认不出人。
    *
    * ⚠️ 键名是 `nickname`，界面上叫「用户名」，值都是 `bw_users.username`。
-   *    键名沿用身份查询那层（`AdminUserIdentity.nickname`，与用户管理页、积分记录页共用一份），
-   *    在这里改键只会让三个页面的同一个字段叫两个名字。
+   *    键名沿用身份查询那层（`AdminUserIdentity.nickname`）——**三个记录页共用同一份投影**。
+   *    （用户管理页走的是另一份 `AdminUserRow`，值同样是 `username`，只是投影不同；
+   *    在这里改键只会让同一个值在几个页面叫两个名字。）
    *
    * ⚠️ 可选（`?`）不是多余：与积分记录页同一条规矩 —— **后端比前端旧**时这个键**整个不存在**，
    *    拿到的是 `undefined`。判空一律写 `?? '—'`，写 `=== null` 会漏掉一半。

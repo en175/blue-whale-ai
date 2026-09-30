@@ -84,7 +84,7 @@ describe("AdminRechargeRecordsController.list", () => {
     expect(list).not.toHaveBeenCalled();
   });
 
-  it("昵称 / 手机号按本页的 userId 集合一次批量回填；用户没手机号收敛成 null", async () => {
+  it("用户名 / 手机号按本页的 userId 集合一次批量回填；用户没手机号收敛成 null", async () => {
     const { controller, identity } = createController(
       vi.fn().mockResolvedValue({
         items: [{ tradeNo: "RC1", userId: "42" }],
@@ -102,7 +102,7 @@ describe("AdminRechargeRecordsController.list", () => {
     expect(identity.loadAdminUserIdentities).toHaveBeenCalledWith([42]);
   });
 
-  it("用户查不到（已被清理）→ 昵称手机号都是 null，行照常返回", async () => {
+  it("用户查不到（已被清理）→ 用户名手机号都是 null，行照常返回", async () => {
     const { controller } = createController(
       vi.fn().mockResolvedValue({ items: [{ tradeNo: "RC1", userId: "42" }], total: 1 }),
     );
@@ -128,6 +128,17 @@ describe("AdminRechargeRecordsController.list", () => {
     const { controller, list } = createController();
 
     await expect(controller.list({ status: "success" })).rejects.toMatchObject({ status: 400 });
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("★ 同时给了查不到人的关键词和非法 status → 仍然是 400，不是 200 空页", async () => {
+    // 校验必须排在查人之前。否则「另一个条件没命中」会把非法条件一起兜成 200 空列表——
+    // 而运营看到的是一句「暂无订单」，不是「你的条件写错了」。
+    const { controller, list } = createController();
+
+    await expect(
+      controller.list({ keyword: "查无此人", status: "success" }),
+    ).rejects.toMatchObject({ status: 400 });
     expect(list).not.toHaveBeenCalled();
   });
 

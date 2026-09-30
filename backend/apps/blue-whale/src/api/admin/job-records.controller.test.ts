@@ -110,7 +110,19 @@ describe("AdminJobRecordsController.list", () => {
     expect(listForAdmin).not.toHaveBeenCalled();
   });
 
-  it("★ 昵称 / 手机号按本页的 user_id 集合一次批量回填（不逐行查）", async () => {
+  it("★ 同时给了查不到人的关键词和非法 projectId → 仍然是 400，不是 200 空页", async () => {
+    // 校验必须排在查人之前。否则「另一个条件没命中」会把非法条件一起兜成 200 空列表——
+    // 而运营看到的是一句「没有匹配的任务」，不是「你的条件写错了」。
+    const { controller, findAdminUserIdByKeyword, listForAdmin } = createController();
+    findAdminUserIdByKeyword.mockResolvedValue(undefined);
+
+    await expect(
+      controller.list({ keyword: "查无此人", projectId: "abc" }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(listForAdmin).not.toHaveBeenCalled();
+  });
+
+  it("★ 用户名 / 手机号按本页的 user_id 集合一次批量回填（不逐行查）", async () => {
     const { controller, loadAdminUserIdentities } = createController(
       vi.fn().mockResolvedValue({ records: [RECORD], total: 1, size: 20, current: 1 }),
     );
@@ -138,7 +150,7 @@ describe("AdminJobRecordsController.list", () => {
     });
   });
 
-  it("用户查不到（已被清理）→ 昵称手机号都是 null，行照常返回", async () => {
+  it("用户查不到（已被清理）→ 用户名手机号都是 null，行照常返回", async () => {
     const { controller } = createController(
       vi.fn().mockResolvedValue({ records: [RECORD], total: 1, size: 20, current: 1 }),
     );

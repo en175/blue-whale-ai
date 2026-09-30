@@ -220,6 +220,33 @@ describe("admin-user-query 的精确查人（积分记录用）", () => {
     await expect(createAdminUserQuery(h.prisma).findUserIdByKeyword("admin")).resolves.toBe(8);
   });
 
+  it("★ 用户名与手机号撞在同一个关键词上 → **当作查不到**，不替运营挑一个", async () => {
+    // 手机号与用户名各自唯一，但两者可以撞在同一个串上（某人的用户名叫 13800008888，
+    // 另一个人拿它当手机号）。这时「要找的是谁」本来就无从判断——挑一行就是猜，
+    // 而这一页是用来对账的。软删用户也在这张表里，所以这不是理论情况。
+    const h = fakePrisma(ROWS);
+    h.findMany.mockResolvedValue([
+      { id: BigInt(7), username: "13800008888", phone: null },
+      { id: BigInt(9), username: "某人", phone: "13800008888" },
+    ]);
+
+    await expect(
+      createAdminUserQuery(h.prisma).findUserIdByKeyword("13800008888"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("同一行既是用户名命中又是手机号命中（只有一个人）→ 照常返回那个人", async () => {
+    // 「命中两行」才是不确定；同一行被两边同时命中仍然是唯一答案，不能一并当查不到。
+    const h = fakePrisma(ROWS);
+    h.findMany.mockResolvedValue([
+      { id: BigInt(7), username: "13800008888", phone: "13800008888" },
+    ]);
+
+    await expect(
+      createAdminUserQuery(h.prisma).findUserIdByKeyword("13800008888"),
+    ).resolves.toBe(7);
+  });
+
   it("只有用户 ID 命中时就用它（这是数字输入的常态）", async () => {
     const h = fakePrisma(ROWS);
     h.findMany.mockResolvedValue([{ id: BigInt(42), username: "某人", phone: null }]);

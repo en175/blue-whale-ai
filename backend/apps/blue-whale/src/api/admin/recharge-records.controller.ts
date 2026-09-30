@@ -45,7 +45,7 @@ export class AdminRechargeRecordsController {
   /**
    * GET /api/admin/recharge-records?page=&pageSize=&keyword=&status=&tradeNo=
    *
-   * <p>`keyword` 是用户 ID / 手机号 / 昵称，**都要完整**（精确匹配）。空 = 全部用户。
+   * <p>`keyword` 是用户 ID / 手机号 / 用户名，**都要完整**（精确匹配）。空 = 全部用户。
    *
    * <p>全部筛选条件可选：都不传 = 全站最近一批订单（运营进来第一眼看的正是这个）。
    */
@@ -62,6 +62,17 @@ export class AdminRechargeRecordsController {
       pageSize: parsePageSizeParam(query.pageSize),
     };
 
+    // ⚠️ 校验一律排在查人**之前**：查不到用户时下面会直接回空页，排在后面的话
+    //    `?keyword=查无此人&status=success` 会拿到 200 空列表，而不是 400 ——
+    //    而本文件开头就写着「非法筛选条件必须当场 400，静默空列表与『真的没有』长得一样」。
+    const status = query.status?.trim();
+    if (status) {
+      if (!STATUSES.includes(status as RechargeOrderStatus)) {
+        throw new AdminException(400, `status 须为 ${STATUSES.join("/")}`);
+      }
+      filter.status = status as RechargeOrderStatus;
+    }
+
     // ⚠️ 还认着旧的 `userId`。前端与后端不是原子发版（本仓 2026-09-26 实测过 3100 上
     //    跑着 4 小时前的构建），一个还没刷新的管理页仍会发 `?userId=42`。不认它的后果
     //    不是报错，而是**静默回一页全站订单**——运营以为筛了那个人，实际看到所有人的单，
@@ -76,14 +87,6 @@ export class AdminRechargeRecordsController {
       filter.userId = resolved;
     }
 
-    const status = query.status?.trim();
-    if (status) {
-      if (!STATUSES.includes(status as RechargeOrderStatus)) {
-        throw new AdminException(400, `status 须为 ${STATUSES.join("/")}`);
-      }
-      filter.status = status as RechargeOrderStatus;
-    }
-
     // 交易单号**精确**匹配：运营是拿单号来对账的，模糊匹配会带出无关行，
     // 而对账场景下「多给几行」比「少给几行」更难发现
     const tradeNo = query.tradeNo?.trim();
@@ -92,9 +95,11 @@ export class AdminRechargeRecordsController {
     try {
       const { items, total } = await this.recharge.listOrdersForAdmin(filter);
 
-      // 昵称 / 手机号：**一次 IN 查回来**，不逐行查（同积分记录与任务记录页）。
+      // 用户名 / 手机号：**一次 IN 查回来**，不逐行查（同积分记录与任务记录页）。
       // `recharge_orders` 里只有 user_id，认不出人。
       const identities = await this.identity.loadAdminUserIdentities(
+        // ponytail: `Number()` 在 2^53 以下无损；真实用户 id 远小于此。真涨到那个量级时
+        //   把 `loadUserIdentities` 的入参放宽成 `string | number`，别在这里默默丢精度。
         items.map((item) => Number(item.userId)),
       );
 

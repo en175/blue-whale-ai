@@ -22,7 +22,7 @@ const BIGINT_ID_RE = /^[1-9]\d{0,18}$/;
  *    账本里不会出现一行消费），也可能一个任务对应多次扣费。要看钱去积分记录页。
  *
  * <p><b>用户维度的筛选与展示</b>：`generation_jobs` 里只有 `user_id`，认不出人。所以
- * 「按手机号 / 昵称查」与列表上的昵称 / 手机号都走我们自己的 `bw_users`——
+ * 「按手机号 / 用户名查」与列表上的用户名 / 手机号都走我们自己的 `bw_users`——
  * 先精确解成一个 userId 再过滤，行上的身份按本页的 user_id 集合批量回填。
  * 与积分记录页同一套口径（那边受 billing 跨库限制，必须这么绕；这边是顺手对齐）。
  */
@@ -37,7 +37,7 @@ export class AdminJobRecordsController {
   /**
    * GET /api/admin/job-records?page=&pageSize=&keyword=&projectId=&type=&status=
    *
-   * @param keyword 用户 ID / 手机号 / 昵称，**都要完整**（精确匹配）。空 = 全部用户
+   * @param keyword 用户 ID / 手机号 / 用户名，**都要完整**（精确匹配）。空 = 全部用户
    *
    * <p>全部筛选条件可选：都不传 = 全站最近一批任务。
    */
@@ -55,21 +55,9 @@ export class AdminJobRecordsController {
       size: parsePageSizeParam(query.pageSize),
     };
 
-    // ⚠️ 还认着旧的 `userId`。前端与后端不是原子发版（本仓 2026-09-26 实测过 3100 上
-    //    跑着 4 小时前的构建），一个还没刷新的管理页仍会发 `?userId=42`。不认它的后果
-    //    不是报错，而是**静默回一页全站任务**——运营以为筛了那个人，实际看到所有人的任务。
-    const keyword = (query.keyword ?? query.userId ?? "").trim();
-    if (keyword) {
-      const resolved = await this.identity.findAdminUserIdByKeyword(keyword);
-      // 认不出这个人就回空页，不去查任务表：这一页的筛选语义是「找某个人」，
-      // 而「查无此人」与「这个人没有任务」在界面上同形，是**接受的**（空态文案保持中性）。
-      if (resolved === undefined) {
-        return { success: true, data: { list: [], total: 0 } };
-      }
-      // `listForAdmin` 的 user_id 走 bigint 字符串口径（超出 JS 安全整数也不丢精度）
-      filter.userId = String(resolved);
-    }
-
+    // ⚠️ 校验一律排在查人**之前**：查不到用户时下面会直接回空页，排在后面的话
+    //    `?keyword=查无此人&projectId=abc` 会拿到 200 空列表，而不是 400 ——
+    //    「非法条件当场拒绝」是这个管理端所有筛选接口的纪律，不能因为另一个条件没命中就漏掉。
     const projectId = query.projectId?.trim();
     if (projectId) {
       if (!BIGINT_ID_RE.test(projectId)) {
@@ -85,11 +73,28 @@ export class AdminJobRecordsController {
     const status = query.status?.trim();
     if (status) filter.status = status;
 
+    // ⚠️ 还认着旧的 `userId`。前端与后端不是原子发版（本仓 2026-09-26 实测过 3100 上
+    //    跑着 4 小时前的构建），一个还没刷新的管理页仍会发 `?userId=42`。不认它的后果
+    //    不是报错，而是**静默回一页全站任务**——运营以为筛了那个人，实际看到所有人的任务。
+    const keyword = (query.keyword ?? query.userId ?? "").trim();
+    if (keyword) {
+      const resolved = await this.identity.findAdminUserIdByKeyword(keyword);
+      // 认不出这个人就回空页，不去查任务表：这一页的筛选语义是「找某个人」，
+      // 而「查无此人」与「这个人没有任务」在界面上同形，是**接受的**（空态文案保持中性）。
+      if (resolved === undefined) {
+        return { success: true, data: { list: [], total: 0 } };
+      }
+      // `listForAdmin` 的 user_id 走 bigint 字符串口径（超出 JS 安全整数也不丢精度）
+      filter.userId = String(resolved);
+    }
+
     try {
       const page = await this.jobs.listForAdmin(filter);
 
-      // 昵称 / 手机号：**一次 IN 查回来**，不逐行查。与积分记录页同一个套路。
+      // 用户名 / 手机号：**一次 IN 查回来**，不逐行查。与积分记录页同一个套路。
       const identities = await this.identity.loadAdminUserIdentities(
+        // ponytail: `Number()` 在 2^53 以下无损；真实用户 id 远小于此。真涨到那个量级时
+        //   把 `loadUserIdentities` 的入参放宽成 `string | number`，别在这里默默丢精度。
         page.records.map((record) => Number(record.user_id)),
       );
 

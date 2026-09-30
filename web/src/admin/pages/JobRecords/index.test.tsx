@@ -159,7 +159,7 @@ describe('JobRecords 任务记录 · 模型列', () => {
     expect(document.body.textContent).toContain('暂无任务');
 
     const input = [...document.querySelectorAll('input')].find(
-      (el) => el.placeholder === '用户 ID / 手机号 / 用户名（需完整）',
+      (el) => el.placeholder === '用户 ID / 手机号 / 用户名（需完整，留空 = 全站）',
     ) as HTMLInputElement;
     await act(async () => {
       // React 受控输入：要绕过它自己的 value setter 才会触发 onChange
