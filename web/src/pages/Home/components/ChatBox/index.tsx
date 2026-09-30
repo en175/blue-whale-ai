@@ -16,6 +16,7 @@ import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
+import { pickDefaultVideoRatio, videoRatioLabel } from '@/lib/video-aspect-ratio';
 import { type SkillRecord } from '@/api/skills';
 import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
@@ -216,11 +217,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     if (isKeyframe && m.supported_aspect_ratios.includes('adaptive')) {
       setAspectRatio('adaptive');
     } else if (m.supported_aspect_ratios.length && !m.supported_aspect_ratios.includes(aspectRatio)) {
-      setAspectRatio(
-        m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
-          ? m.default_aspect_ratio
-          : m.supported_aspect_ratios[0],
-      );
+      setAspectRatio(pickDefaultVideoRatio(m.supported_aspect_ratios, m.default_aspect_ratio));
     }
     if (m.supported_sizes.length && !m.supported_sizes.some((s) => s.id === resolution)) {
       setResolution(
@@ -681,11 +678,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       // 离开首尾帧：adaptive 内置值若新模型比例列表不含，回落模型默认/首个比例。
       const m = videoModelList.find((x) => x.model_id === videoModel);
       if (aspectRatio === 'adaptive' && m && !m.supported_aspect_ratios.includes('adaptive')) {
-        setAspectRatio(
-          m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
-            ? m.default_aspect_ratio
-            : (m.supported_aspect_ratios[0] ?? ''),
-        );
+        setAspectRatio(pickDefaultVideoRatio(m.supported_aspect_ratios, m.default_aspect_ratio));
       }
     }
     setVideoMode(key);
@@ -1103,7 +1096,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                         <button
                           key={m.key}
                           className={`${styles.dropdownItem} ${videoModel === m.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setVideoModel(m.key); setShowVideoModelDrop(false); }}
+                          onClick={() => {
+                            setVideoModel(m.key);
+                            setShowVideoModelDrop(false);
+                            const full = videoModelList.find((x) => x.model_id === m.key);
+                            if (full) setAspectRatio(pickDefaultVideoRatio(full.supported_aspect_ratios, full.default_aspect_ratio));
+                          }}
                         >
                           {m.label}
                         </button>
@@ -1144,7 +1142,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                       onClick={() => setShowRatioDrop(!showRatioDrop)}
                     >
                       <RatioIcon ratio={aspectRatio} size={22} />
-                      <span>{aspectRatio}</span>
+                      {/* IKJ4W6：内部键 adaptive 展示为 auto；state/提交值仍是 adaptive。 */}
+                      <span>{videoRatioLabel(aspectRatio)}</span>
                       <ChevronDown size={12} strokeWidth={2} />
                     </button>
                     {showRatioDrop && (
@@ -1156,7 +1155,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                             onClick={() => { setAspectRatio(key); setShowRatioDrop(false); }}
                           >
                             <RatioIcon ratio={key} size={22} />
-                            <span>{key}</span>
+                            {/* IKJ4W6：内部键 adaptive 展示为 auto；选中/提交值仍是 adaptive。 */}
+                            <span>{videoRatioLabel(key)}</span>
                           </button>
                         ))}
                       </div>

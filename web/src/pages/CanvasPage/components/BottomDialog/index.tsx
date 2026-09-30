@@ -22,6 +22,7 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { pickDefaultVideoRatio, videoRatioLabel } from '@/lib/video-aspect-ratio';
 import RatioIcon from '@/components/RatioIcon';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildVideoJobReferences } from '../../videoJobReferences';
@@ -491,10 +492,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     }
     // 离开首尾帧：若当前是 adaptive（首尾帧内置值）且新模型比例列表不含 adaptive，回落到模型默认/首个比例。
     if (selectedRatio === 'adaptive' && currentModel && !currentModel.supported_aspect_ratios.includes('adaptive')) {
-      const fallbackRatio =
-        currentModel.default_aspect_ratio && currentModel.supported_aspect_ratios.includes(currentModel.default_aspect_ratio)
-          ? currentModel.default_aspect_ratio
-          : (currentModel.supported_aspect_ratios[0] ?? '');
+      const fallbackRatio = pickDefaultVideoRatio(currentModel.supported_aspect_ratios, currentModel.default_aspect_ratio);
       setSelectedRatio(fallbackRatio);
       syncDraftParams({ mode: key, ratio: fallbackRatio });
       return;
@@ -526,14 +524,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const applyModelDefaults = (m: GenerationModel) => {
     setSelectedModel(m.model_id);
     let nextRatio = selectedRatio;
-    if (isKeyframe && m.supported_aspect_ratios.includes('adaptive')) {
-      nextRatio = 'adaptive';
-      setSelectedRatio(nextRatio);
-    } else if (m.supported_aspect_ratios.length) {
-      nextRatio =
-        m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
-          ? m.default_aspect_ratio
-          : m.supported_aspect_ratios[0];
+    if (m.supported_aspect_ratios.length) {
+      nextRatio = pickDefaultVideoRatio(m.supported_aspect_ratios, m.default_aspect_ratio);
       setSelectedRatio(nextRatio);
     }
     let nextSize = selectedSize;
@@ -1038,7 +1030,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
                     }}
                   >
                     <RatioIcon ratio={r} />
-                    <span>{r}</span>
+                    {/* IKJ4W6：内部键 adaptive 展示为 auto；选中/提交值仍是 adaptive。 */}
+                    <span>{videoRatioLabel(r)}</span>
                   </button>
                 ))}
               </div>
@@ -1238,7 +1231,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             {!forceAdaptive && (
               <>
                 <span className={styles.barDivider}>|</span>
-                <span>{selectedRatio}</span>
+                {/* IKJ4W6：内部键 adaptive 展示为 auto；selectedRatio/提交值仍是 adaptive。 */}
+                <span>{videoRatioLabel(selectedRatio)}</span>
               </>
             )}
             <span className={styles.barDivider}>|</span>
