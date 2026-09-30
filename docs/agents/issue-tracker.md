@@ -1,6 +1,8 @@
 # Issue tracker: Gitee
 
-仓库 `git@gitee.com:hangzhou-xuanfu_1/blue-whale-ai.git`（网页 https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues）。优先 MCP 工具，不可用时回退网页。
+仓库 `git@gitee.com:hangzhou-xuanfu_1/blue-whale-ai.git`（网页 https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues）。优先 MCP 工具。
+
+`mcp__gitee-ent__*` 不在当前会话工具清单时（项目 `.mcp.json` 只被部分客户端加载，会话不重启不会挂载）：先向用户报告，给出「重启会话加载 MCP / REST 直连」两个选项，等选择后继续；回退路径由用户拍板，不自行选路，也不编写桥接代码（stdio 桥等）拉起服务。回退次序固定：MCP → REST（curl，token 取自项目 `.mcp.json`）→ 网页。REST 已知口径：更新工单用 PUT；打标签参数名 `label_ids`（数字 ID 逗号分隔），`labels` 参数会被接受但静默不生效。MCP 二进制已知缺陷：URL 路径含 8 位数字 ID 的调用（如 update/get 传 `issue_id`）会因 float64 科学计数法拼 URL 而 panic——遇此崩溃直接转 REST，不重试 MCP。
 
 ## ID 解析约定（通用，先于任何 `mcp__gitee-ent__*` 调用读）
 
