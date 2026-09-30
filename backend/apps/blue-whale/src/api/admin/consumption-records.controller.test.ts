@@ -31,8 +31,8 @@ const controller = new AdminConsumptionRecordsController(
   { findAdminUserIdByKeyword, loadAdminUserIdentities } as unknown as IdentityService,
 );
 
-/** 运营面 `total` 目前恒为 null（上游不统计）；要造「有值」的假数据由用例显式传。 */
-function page(items: unknown[] = [], total: number | null = null) {
+/** 运营面与用户面现在**都填** total（2026-09-30 改判）。 */
+function page(items: unknown[] = [], total = 0) {
   return { items, total };
 }
 

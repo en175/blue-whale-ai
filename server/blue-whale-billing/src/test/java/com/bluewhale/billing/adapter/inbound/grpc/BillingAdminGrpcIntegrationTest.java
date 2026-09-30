@@ -245,25 +245,25 @@ class BillingAdminGrpcIntegrationTest {
     }
 
     /**
-     * ⚠️ **运营面不填 {@code total}** —— 这不是漏了，是 2026-09-30 的决定。
+     * ★ 2026-09-30 **改判**：运营面也填 {@code total}。
      *
-     * <p>账本的 COUNT 成本随数据量线性上涨，而运营端这轮没有要求显示总条数。字段是
-     * proto3 的 {@code optional}：不设置 = 「未统计」，与「真的有 0 条」由 presence 区分。
+     * <p>原先这里是「运营面不填 total、留空表示未统计」的反向断言。改判的理由是分页换了
+     * offset：**「有页码、没总数」是前端翻页组件表达不了的形状** —— 要么编一个假的 total
+     * （本仓禁止），要么「下一页」永远灰着。实测就是后者（管理端积分记录页退化成只能看前 20 条）。
      *
-     * <p>⚠️ 这条用例的用处是把理由**钉在代码里**：将来有人顺手把 {@code total} 填上、
-     * 或误以为留空是 bug 而「修好」它，会先在这里看见为什么。要补是后续独立工单。
+     * <p>这条用例现在钉住的是「填了，而且填的是真数」。
      */
     @Test
-    void 运营面不填total_留空表示未统计() {
+    void 运营面填total_且与用户面同一口径() {
         userFacing.hold(hold(USER, "adm-total-1", 9_214L));
 
         AdminListTransactionsResponse response = admin.adminListTransactions(
                 AdminListTransactionsRequest.newBuilder()
                         .setUserId(USER).setPageSize(10).setPage(1).build());
         assertThat(response.getItemsList()).isNotEmpty();
-        assertThat(response.getPage().hasTotal())
-                .as("运营面本轮不统计总数；一旦填了，0 就会与「未统计」混成一种")
-                .isFalse();
+        assertThat(response.getPage().hasTotal()).isTrue();
+        // 该用户可以看见的**全部**行数，不是本页条数
+        assertThat(response.getPage().getTotal()).isEqualTo(response.getItemsList().size());
     }
 
     // ─────────────────────────────────────────────────────────────

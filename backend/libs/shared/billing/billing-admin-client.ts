@@ -459,14 +459,10 @@ export interface AdminTransactionItem {
 export interface AdminTransactionPage {
   items: AdminTransactionItem[];
   /**
-   * 总条数；`null` = **上游没统计**。
-   *
-   * <p>⚠️ 运营面本期**就是** `null`（2026-09-30 的决定）：账本的 COUNT 成本随数据量线性上涨，
-   * 而运营端这轮没要求显示总条数。契约里 `total` 是 proto3 `optional`，不设置即未统计 ——
-   * 这里把「未设置」收敛成 `null`，与「真的是 0 条」（拿得到 0）分开。
-   * 要补是后续独立工单，见前端对接文档 §6.2。
+   * 总条数。**运营面也填**（2026-09-30 改判，见 `BillingAdminGrpcService` 里那段注释）：
+   * 分页换成 offset 之后，「有页码、没总数」是前端翻页组件表达不了的形状。
    */
-  total: number | null;
+  total: number;
 }
 
 export interface AdminTransactionsQuery {
@@ -533,10 +529,9 @@ export async function listAdminTransactions(
         createdAt: item.createdAt,
         settledAt: item.settledAt,
       })),
-      // ★ presence → null 收敛：运营面 `total` 目前恒为「未统计」，但**不能**写成恒 null ——
-      //   上游哪天填上了，这里要如实透传，而不是把真值吃掉。判 undefined 而不是真值判断：
-      //   0 是「真的没有一行」，与「没统计」是两回事。
-      total: page.page?.total === undefined ? null : Number(page.page.total),
+      // presence → number：运营面与用户面现在**都填** total。仍判 undefined 而不是真值判断，
+      // 因为 0 是「真的没有一行」，与「契约被改坏、上游没回」是两回事
+      total: Number(page.page?.total ?? 0),
     };
   } catch (error) {
     throw asAdminError("读流水", error);

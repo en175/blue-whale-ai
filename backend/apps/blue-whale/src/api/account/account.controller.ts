@@ -28,6 +28,7 @@ import {
   buildExportWorkbook,
   exportFieldKeys,
   exportFileName,
+  type ExportRows,
   type ExportScope,
 } from "./account-export.js";
 
@@ -297,8 +298,8 @@ export class AccountController {
       throw new NewApiError(`未知导出字段：${unknown.join("/")}`, 400);
     }
 
-    const { rows, total } = await this.collectExportRows(scope, Number(user.userId), query);
-    const buffer = await buildExportWorkbook(scope, fields, rows, total);
+    const collected = await this.collectExportRows(scope, Number(user.userId), query);
+    const buffer = await buildExportWorkbook(collected, fields);
 
     // 文件名：`filename=` 给一个 ASCII 兜底，中文走 `filename*=UTF-8''…`（RFC 5987）。
     // 只给裸 `filename` 的话，Chrome 之外的浏览器会把中文名渲染成一串乱码
@@ -318,6 +319,12 @@ export class AccountController {
   /**
    * 按页签把**全部**记录拉下来（导出专用，不受页面分页影响）。
    *
+   * <p>⚠️ 每个分支都必须**显式投影**成导出行的形状。**不要**把 repo / billing 客户端的
+   * 返回值直接塞进 `rows`：那些是 camelCase 对象（`createdAt` / `amountFen`），
+   * 而导出的列定义读 snake_case（`created_at` / `amount_fen`）—— 键对不上时服务端一声不响，
+   * 用户下载下来才发现大半格子是空的。上一版就是这么错的，`ExportRows` 的判别联合现在
+   * 让这种错**编不过**。</p>
+   *
    * <p>⚠️ 到 {@link MAX_EXPORT_ROWS} 就停：无上限时一个重度用户（两年积累上万条流水）
    * 就能把这一条请求的内存撑爆。截断由 {@link buildExportWorkbook} 写进文件，
    * 不在这里吞掉。
@@ -326,51 +333,87 @@ export class AccountController {
     scope: ExportScope,
     userId: number,
     query: Record<string, string>,
-  ): Promise<{ rows: unknown[]; total: number }> {
-    const billing = sharedBillingClient();
-    const rows: unknown[] = [];
-    let total = 0;
+  ): Promise<ExportRows> {
+    if (scope === "orders") {
+      const status = (query.status ?? "").trim();
+      if (status && !STATUSES.includes(status as RechargeOrderStatus)) {
+        throw new NewApiError(`status 须为 ${STATUSES.join("/")}`, 400);
+      }
+      const { rows, total } = await this.paged(
+        (page) =>
+          this.recharge.listOrdersForAdmin({
+            page,
+            pageSize: EXPORT_PAGE_SIZE,
+            // ★ 归属只认会话，同 `orders`
+            userId,
+            ...(status ? { status: status as RechargeOrderStatus } : {}),
+          }),
+        (orders) =>
+          orders.map((order) => ({
+            trade_no: order.tradeNo,
+            product_name: order.productName,
+            amount_fen: order.amountFen,
+            credits: order.credits,
+            bonus_credits: order.bonusCredits,
+            status: order.status,
+            created_at: order.createdAt,
+            paid_at: order.paidAt,
+          })),
+      );
+      return { scope: "orders", rows, total };
+    }
 
-    for (let page = 1; rows.length < MAX_EXPORT_ROWS; page++) {
-      let chunk: { items: unknown[]; total: number };
+    if (scope === "gain") {
+      const { rows, total } = await this.paged(
+        (page) => sharedBillingClient().listCreditLots({ userId, page, pageSize: EXPORT_PAGE_SIZE }),
+        (lots) =>
+          lots.map((lot) => ({
+            lot_id: lot.lotId,
+            source: lot.source,
+            amount: lot.amount,
+            remaining: lot.remaining,
+            created_at: lot.createdAt,
+            expires_at: lot.expiresAt,
+            biz_type: lot.bizType,
+            biz_id: lot.bizId,
+          })),
+      );
+      return { scope: "gain", rows, total };
+    }
 
-      if (scope === "orders") {
-        const status = (query.status ?? "").trim();
-        if (status && !STATUSES.includes(status as RechargeOrderStatus)) {
-          throw new NewApiError(`status 须为 ${STATUSES.join("/")}`, 400);
-        }
-        const result = await this.recharge.listOrdersForAdmin({
-          page,
-          pageSize: EXPORT_PAGE_SIZE,
-          // ★ 归属只认会话，同 `orders`
-          userId,
-          ...(status ? { status: status as RechargeOrderStatus } : {}),
-        });
-        chunk = { items: result.items, total: result.total };
-      } else if (scope === "gain") {
-        const result = await billing.listCreditLots({
-          userId,
-          page,
-          pageSize: EXPORT_PAGE_SIZE,
-        });
-        chunk = { items: result.items, total: result.total };
-      } else {
-        const types = parseTypes(query.type);
-        const result = await billing.listTransactions({
+    const types = parseTypes(query.type);
+    const { rows, total } = await this.paged(
+      (page) =>
+        sharedBillingClient().listTransactions({
           userId,
           page,
           pageSize: EXPORT_PAGE_SIZE,
           ...(types.length ? { typeFilters: types } : {}),
-        });
-        // 与页面同一套合并，导出里的任务类型 / 模型 / 详情才会和列表一致
-        chunk = { items: await this.mergeTaskSummaries(result.items), total: result.total };
-      }
+        }),
+      // 与页面同一套合并（批量查任务，不是逐行），导出里的任务类型 / 模型 / 详情才会和列表一致
+      (items) => this.mergeTaskSummaries(items),
+    );
+    return { scope: "consume", rows, total };
+  }
 
+  /**
+   * 逐页拉到上限为止，每页整批交给 `project` 投影。
+   *
+   * <p>⚠️ `project` 收的是**一整批**而不是一行：任务语义那一步要批量查（一页 100 行
+   * 就是一次库往返），逐行映射会让它退化成 N 次查询。
+   */
+  private async paged<S, T>(
+    fetchPage: (page: number) => Promise<{ items: S[]; total: number }>,
+    project: (items: S[]) => Promise<T[]> | T[],
+  ): Promise<{ rows: T[]; total: number }> {
+    const rows: T[] = [];
+    let total = 0;
+    for (let page = 1; rows.length < MAX_EXPORT_ROWS; page++) {
+      const chunk = await fetchPage(page);
       total = chunk.total;
-      rows.push(...chunk.items);
+      rows.push(...(await project(chunk.items)));
       if (chunk.items.length < EXPORT_PAGE_SIZE) break;
     }
-
     return { rows: rows.slice(0, MAX_EXPORT_ROWS), total };
   }
 }

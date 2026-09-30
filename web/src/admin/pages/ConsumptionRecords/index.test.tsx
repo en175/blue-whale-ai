@@ -94,14 +94,14 @@ async function click(label: string) {
   await settle();
 }
 
-/** 第 n 次请求带的游标（第 1 次是首次加载）。 */
-function tokenOfCall(n: number): string {
-  return api.fetchAdminConsumptionRecords.mock.calls[n - 1]?.[0]?.pageToken ?? '<缺>';
+/** 第 n 次请求带的页码（第 1 次是首次加载）。 */
+function pageOfCall(n: number): number | string {
+  return api.fetchAdminConsumptionRecords.mock.calls[n - 1]?.[0]?.page ?? '<缺>';
 }
 
 beforeEach(() => {
   notifyManager.setScheduler((cb) => cb());
-  api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], next_page_token: '' });
+  api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], total: 0 });
 });
 
 afterEach(async () => {
@@ -121,11 +121,11 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     expect(document.body.textContent).toContain('积分记录');
   });
 
-  it('首次加载不带游标，且因为是全站视图所以 keyword 一个也不传', async () => {
+  it('首次加载落在第 1 页，且因为是全站视图所以 keyword 一个也不传', async () => {
     await renderPage();
 
     expect(api.fetchAdminConsumptionRecords).toHaveBeenCalledTimes(1);
-    expect(tokenOfCall(1)).toBe('');
+    expect(pageOfCall(1)).toBe(1);
     // keyword 不在参数里 —— 传 undefined 与「不过滤」在契约上是两回事
     expect(api.fetchAdminConsumptionRecords.mock.calls[0]?.[0]).not.toHaveProperty('keyword');
   });
@@ -151,7 +151,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
   it('两个数一致时**不**显示预扣 —— 写出来只是复读', async () => {
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, credits: 5, reserved_credits: 5 }],
-      next_page_token: '',
+      total: 0,
     });
 
     await renderPage();
@@ -164,7 +164,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     // null 不是 0：0 是「冻了 0 分」，null 是「这一行没有预扣这回事」
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, id: 'lot:12', type: 'recharge', direction: 'in', credits: 500, reserved_credits: null }],
-      next_page_token: '',
+      total: 0,
     });
 
     await renderPage();
@@ -193,7 +193,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     };
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [oldBackendRow],
-      next_page_token: '',
+      total: 0,
     });
 
     await renderPage();
@@ -209,7 +209,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     // 恰好漏掉「冻了 12、最后全退回来」这种最需要交代的行
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, credits: 0, reserved_credits: 12 }],
-      next_page_token: '',
+      total: 0,
     });
 
     await renderPage();
@@ -230,7 +230,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     //    把预扣挪到金额下方另起一行、或者单开一列，它们照样全绿。
     //    而这是用户明确提过的观感要求（「预扣不要换行」）——所以钉在 DOM 结构上：
     //    两段文本必须落在同一个 <td> 内。
-    api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], next_page_token: '' });
+    api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], total: 0 });
 
     await renderPage();
 
@@ -243,43 +243,43 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     expect(holdCells[0]?.textContent).toContain('预扣 100');
   });
 
-  it('点「下一页」把上一页给的游标原样带上；「上一页」回到**当初那一页的**游标', async () => {
-    api.fetchAdminConsumptionRecords
-      .mockResolvedValueOnce({ items: [ITEM], next_page_token: 'tok-1' })
-      .mockResolvedValueOnce({ items: [ITEM], next_page_token: 'tok-2' });
+  it('点「下一页」页码 +1；「上一页」回到上一页（offset 分页，没有游标要存）', async () => {
+    api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], total: 40 });
 
     await renderPage();
+    expect(pageOfCall(1)).toBe(1);
 
     await click('下一页');
-    expect(tokenOfCall(2)).toBe('tok-1');
+    expect(pageOfCall(2)).toBe(2);
 
     await click('上一页');
-    // 回到首页的游标是空串，不是把 tok-1 删掉就算完 —— 游标是单向的，
-    // 「上一页」只能靠自己存过的那个值
-    expect(tokenOfCall(3)).toBe('');
+    expect(pageOfCall(3)).toBe(1);
   });
 
   it('首页禁用「上一页」；没有下一页时禁用「下一页」', async () => {
+    // total = 0：一页都装不满，下一页必须灰着
     await renderPage();
 
     expect(button('上一页').disabled).toBe(true);
-    // next_page_token 为空 = 到底了。这里**不从总数推** —— 账本给不出总数
     expect(button('下一页').disabled).toBe(true);
   });
 
-  it('不在界面上编一个总数出来', async () => {
+  it('★ 总数来自服务端，不自己编', async () => {
+    // 40 条 / 每页 20 → 2 页。这一页以前是游标分页、**不显示总数**，
+    // 换成 offset 之后必须显示，否则「下一页」推不出来（当时就退化成了永久置灰）
+    api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], total: 40 });
     await renderPage();
 
     expect(document.body.textContent).toContain('第 1 页');
-    expect(document.body.textContent).not.toContain('共');
+    expect(document.body.textContent).toContain('共');
   });
 
-  it('翻到第 2 页后修改筛选条件，游标回到首页而不是停在第 2 页', async () => {
-    api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], next_page_token: 'tok-1' });
+  it('翻到第 2 页后修改筛选条件，页码回到第 1 页而不是停在第 2 页', async () => {
+    api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], total: 40 });
 
     await renderPage();
     await click('下一页');
-    expect(tokenOfCall(2)).toBe('tok-1');
+    expect(pageOfCall(2)).toBe(2);
 
     const userInput = document.body.querySelector<HTMLInputElement>(
       'input[placeholder="用户 ID / 手机号 / 用户名（需完整，留空 = 全站）"]',
@@ -292,8 +292,8 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     });
     await click('查询');
 
-    // 换了条件还停在原游标上，翻出来的页与看到的条件对不上
-    expect(tokenOfCall(3)).toBe('');
+    // 换了条件还停在第 2 页，翻出来的页与看到的条件对不上
+    expect(pageOfCall(3)).toBe(1);
     expect(api.fetchAdminConsumptionRecords.mock.calls[2]?.[0]?.keyword).toBe('13800008888');
   });
 });
@@ -380,7 +380,7 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
     // 空白读起来像「还在加载」，而这是查询已经答完的结论
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, prompt: null }],
-      next_page_token: '',
+      total: 0,
     });
     await renderPage();
 
@@ -397,7 +397,7 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
       items: [
         ledgerRow({ task_type: null, model_id: null, model_label: null, prompt: null }),
       ],
-      next_page_token: '',
+      total: 0,
     });
 
     await renderPage();
@@ -410,7 +410,7 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
     // 与 reserved_credits 那条同一个坑：多一种空值形态，判空写错就是整页白屏
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [ledgerRow()],
-      next_page_token: '',
+      total: 0,
     });
 
     await renderPage();
@@ -453,7 +453,7 @@ describe('ConsumptionRecords — 用户列', () => {
   it('查不到用户（用户名手机号都是 null）→ 显示「—」，不是空白也不是崩', async () => {
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, nickname: null, phone: null }],
-      next_page_token: '',
+      total: 0,
     });
 
     await renderPage();
@@ -476,7 +476,7 @@ describe('ConsumptionRecords — 用户列', () => {
     delete noIdentity.phone;
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [noIdentity],
-      next_page_token: '',
+      total: 0,
     });
 
     await renderPage();

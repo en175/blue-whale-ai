@@ -131,7 +131,12 @@ class ListLotsIntegrationTest {
         }
     }
 
-    /** 别人的批次不会串进来 —— 既有的 10000 起点在 setUp 里给了两个用户各一份。 */
+    /**
+     * 别人的批次不会串进来。
+     *
+     * <p>两个用户各发一批，只查自己的那个 —— 上游 SQL 是 {@code WHERE user_id = ?}，
+     * 但这条断言是**对外行为**上的保证：调用方永远只拿得到自己那份。
+     */
     @Test
     void 别人的批次不会串进来() {
         credits.grant(USER, CreditSource.PURCHASED, 600, null, "recharge", "BW-1", "lot-u");

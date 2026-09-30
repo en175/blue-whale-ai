@@ -92,8 +92,8 @@ export interface AdminConsumptionRecord {
 
 export interface AdminConsumptionRecordListData {
   items: AdminConsumptionRecord[];
-  /** 空串 = 没有下一页 */
-  next_page_token: string;
+  /** 满足同一组条件的**总条数**（不是本页条数） */
+  total: number;
 }
 
 export interface AdminConsumptionRecordQuery {
@@ -109,8 +109,8 @@ export interface AdminConsumptionRecordQuery {
   /** 单值（consume | recharge | ...）；空 = 全部。多值会被 billing 拒成 400 */
   type?: string;
   pageSize: number;
-  /** 上一页给的 next_page_token，原样回传；空 = 首页 */
-  pageToken: string;
+  /** 页码，从 1 起 */
+  page: number;
 }
 
 export const adminConsumptionRecordKeys = {
@@ -126,7 +126,7 @@ export function fetchAdminConsumptionRecords(
   qs.set('pageSize', String(query.pageSize));
   if (query.keyword) qs.set('keyword', query.keyword);
   if (query.type) qs.set('type', query.type);
-  if (query.pageToken) qs.set('pageToken', query.pageToken);
+  qs.set('page', String(query.page));
   return apiRequest<AdminConsumptionRecordListData>(
     `/api/admin/consumption-records?${qs.toString()}`,
     { silent: true },

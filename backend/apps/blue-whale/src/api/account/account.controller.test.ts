@@ -1,4 +1,14 @@
+import { StreamableFile } from "@nestjs/common";
+import ExcelJS from "exceljs";
+import type { Response } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+/** 导出的 xlsx 必须**真读回来**断言：写坏了服务端不报错，只有用户下载才发现。 */
+async function readBackWorkbook(buffer: Buffer): Promise<ExcelJS.Worksheet> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  return workbook.worksheets[0];
+}
 
 // 只替换 client 的来源，`toBillingError` 用真实现——错误映射是这条端点对外的一部分，
 // 换成假的就等于把「billing 挂了会回什么」这条断言删掉了。
@@ -383,5 +393,144 @@ describe("AccountController.orders（用户侧充值订单）", () => {
       paid_at: "2026-09-29T14:32:41+08:00",
       credits_valid_months: 24,
     });
+  });
+});
+
+/**
+ * 导出这一层**必须**有测试。
+ *
+ * <p>⚠️ 上一版这里一条都没有，于是漏掉了一整类事故：`collectExportRows` 把 repo 的
+ * camelCase 原始对象（`createdAt` / `amountFen`）直接塞给读 snake_case 的列定义，
+ * 键全对不上 —— 服务端一声不响，用户下载下来才发现大半格子是空的。
+ * 所以下面第一条用例**真的把 xlsx 读回来**，而不是断言中间产物。
+ */
+describe("AccountController.export（导出 xlsx）", () => {
+  /** `@Res({ passthrough: true })` 的最小替身：只记头。 */
+  function fakeRes() {
+    const headers: Record<string, string> = {};
+    return {
+      headers,
+      setHeader: (name: string, value: string) => {
+        headers[name] = value;
+      },
+    } as unknown as Response;
+  }
+
+  /** 把 StreamableFile 的流读成 Buffer —— 这样才能交给 exceljs 回读。 */
+  async function toBuffer(file: StreamableFile): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of file.getStream()) chunks.push(Buffer.from(chunk as Buffer));
+    return Buffer.concat(chunks);
+  }
+
+  beforeEach(() => {
+    listOrdersForAdmin.mockReset();
+    listCreditLots.mockReset();
+    listTransactions.mockReset();
+    loadTaskSummaries.mockReset();
+    loadTaskSummaries.mockResolvedValue(new Map());
+  });
+
+  it("★ orders：repo 的 camelCase 被投影成列定义的 snake_case（不是半张空表）", async () => {
+    listOrdersForAdmin.mockResolvedValue({
+      items: [
+        {
+          // 这是 `RechargeOrderView` 的真实形状 —— 键与导出的列定义**不同名**
+          tradeNo: "BW-1",
+          productName: "自定义充值 · 600 积分",
+          amountFen: 4000,
+          credits: 600,
+          bonusCredits: 0,
+          status: "paid",
+          createdAt: "2026-09-29T14:32:00+08:00",
+          paidAt: null,
+        },
+      ],
+      total: 1,
+    });
+
+    const file = await controller.export(USER, { scope: "orders" }, fakeRes());
+    const sheet = await readBackWorkbook(await toBuffer(file));
+
+    // 直接塞原始对象的话，这三格会是 undefined / NaN，而服务端不会报错
+    expect(sheet.getRow(2).getCell(1).value).toBe("2026-09-29T14:32:00+08:00");
+    expect(sheet.getRow(2).getCell(3).value).toBe("BW-1");
+    expect(sheet.getRow(2).getCell(4).value).toBe(40);
+  });
+
+  it("★ gain：批次行同样要投影，到期时间不能变成空白", async () => {
+    listCreditLots.mockResolvedValue({
+      items: [
+        {
+          lotId: "18401",
+          source: "purchased",
+          amount: 3000,
+          remaining: 1200,
+          createdAt: "2024-12-01T09:12:00+08:00",
+          expiresAt: "",
+          bizType: "recharge",
+          bizId: "BW20241201091200555",
+        },
+      ],
+      total: 1,
+    });
+
+    const file = await controller.export(USER, { scope: "gain" }, fakeRes());
+    const sheet = await readBackWorkbook(await toBuffer(file));
+
+    expect(sheet.getRow(2).getCell(1).value).toBe("2024-12-01T09:12:00+08:00");
+    // 空串 = 永久有效。投影漏了的话这里是空白，而 §3.3 明写**不要**渲染成空白
+    expect(sheet.getRow(2).getCell(4).value).toBe("永久有效");
+    expect(sheet.getRow(2).getCell(6).value).toBe(1200);
+  });
+
+  it("★ 用户 id 只来自会话：query 里的 user_id 不改变归属（三个 scope 都验）", async () => {
+    listOrdersForAdmin.mockResolvedValue({ items: [], total: 0 });
+    listCreditLots.mockResolvedValue({ items: [], total: 0 });
+    listTransactions.mockResolvedValue({ items: [], total: 0 });
+
+    await controller.export(USER, { scope: "orders", user_id: "999" }, fakeRes());
+    expect(listOrdersForAdmin).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: 42 }),
+    );
+
+    await controller.export(USER, { scope: "gain", user_id: "999" }, fakeRes());
+    expect(listCreditLots).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: 42 }),
+    );
+
+    await controller.export(USER, { scope: "consume", user_id: "999" }, fakeRes());
+    expect(listTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: 42 }),
+    );
+  });
+
+  it("scope 非法 → 400，不问任何数据源", async () => {
+    await expect(controller.export(USER, { scope: "orders2" }, fakeRes())).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(controller.export(USER, {}, fakeRes())).rejects.toMatchObject({ status: 400 });
+    expect(listOrdersForAdmin).not.toHaveBeenCalled();
+  });
+
+  it("fields 里有未知字段 → 400（静默忽略会导出一份少几列的文件）", async () => {
+    await expect(
+      controller.export(USER, { scope: "orders", fields: "trade_no,nope" }, fakeRes()),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(listOrdersForAdmin).not.toHaveBeenCalled();
+  });
+
+  it("响应头是 xlsx 二进制流，文件名走 RFC 5987 的 filename*", async () => {
+    listOrdersForAdmin.mockResolvedValue({ items: [], total: 0 });
+    const res = fakeRes();
+
+    await controller.export(USER, { scope: "orders" }, res);
+
+    expect(res.headers["Content-Type"]).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    // 中文文件名必须走 filename*，否则 Chrome 之外的浏览器会渲染成乱码
+    expect(res.headers["Content-Disposition"]).toContain("filename*=UTF-8''");
+    expect(res.headers["Content-Disposition"]).toContain(encodeURIComponent("订单记录"));
   });
 });

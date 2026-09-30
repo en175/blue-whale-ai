@@ -196,21 +196,42 @@ export function exportFieldKeys(scope: ExportScope): string[] {
 }
 
 /**
+ * 三个页签的**输入行**，按 scope 收成判别联合。
+ *
+ * <p>⚠️ 这不是美观问题，是**防一类真实事故**：上一版这里收的是 `unknown[]`，
+ * 于是调用方把 repo 的 camelCase 原始对象（`createdAt` / `amountFen`）直接塞进来，
+ * 而列定义读的是 snake_case（`created_at` / `amount_fen`）—— 键全对不上，服务端一声不响，
+ * 用户下载下来才发现大半格子是空的。收成联合类型后，**喂错形状就编不过**。
+ */
+export type ExportRows =
+  | { scope: "orders"; rows: ExportOrderRow[]; total: number }
+  | { scope: "gain"; rows: ExportLotRow[]; total: number }
+  | { scope: "consume"; rows: ExportConsumeRow[]; total: number };
+
+/**
  * 组装 xlsx。
  *
- * @param scope    页签
- * @param fields   要导出的字段名（来自 {@link exportFieldKeys}）；空 = 全字段
- * @param rows     全部记录（**不受分页限制**，由调用方拉全量后传来）
- * @param total    该查询条件下的真实总条数；`> rows.length` 说明发生了截断，
- *                 文件末尾会补一行说明
+ * @param input  页签 + 该页签的**已投影行**（不是 repo 的原始对象，见 {@link ExportRows}）
+ * @param fields 要导出的字段名（来自 {@link exportFieldKeys}）；空 = 全字段
+ * @param total  该查询条件下的真实总条数；`> rows.length` 说明发生了截断，文件末尾会补一行说明
  */
-export async function buildExportWorkbook<T>(
-  scope: ExportScope,
-  fields: string[],
+export async function buildExportWorkbook(input: ExportRows, fields: string[]): Promise<Buffer> {
+  switch (input.scope) {
+    case "orders":
+      return render(ORDERS, input.rows, fields, input.total);
+    case "gain":
+      return render(GAIN, input.rows, fields, input.total);
+    case "consume":
+      return render(CONSUME, input.rows, fields, input.total);
+  }
+}
+
+async function render<T>(
+  spec: ExportSpec<T>,
   rows: T[],
+  fields: string[],
   total: number,
 ): Promise<Buffer> {
-  const spec = SPECS[scope] as ExportSpec<T>;
   // 空 = 全字段（原型：「默认全字段」）。传了就用传的，顺序按定义来的顺序、不按传入顺序——
   // 表头顺序不该由查询串里逗号的先后决定
   const picked =

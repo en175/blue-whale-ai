@@ -108,11 +108,18 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
                     request.getPage());
 
             AdminListTransactionsResponse.Builder response = AdminListTransactionsResponse.newBuilder()
-                    // ⚠️ 运营面**不填 total**（2026-09-30 的决定，见前端对接文档 §6.2）：
-                    //    账本的 COUNT 成本随数据量线性上涨，而运营端这轮没有要显示总条数。
-                    //    **这不是漏了** —— 不设置 = 「未统计」，由 proto3 的 presence 与
-                    //    「真的有 0 条」区分开。要补是后续独立工单。
-                    .setPage(PageResponse.newBuilder());
+                    // ⚠️ 2026-09-30 **改判**：运营面**填** total。
+                    //
+                    //    原先定的是「运营面不填，账本 COUNT 太贵」——那个判断在改 offset 之前
+                    //    成立（游标翻页不需要总数）。改成 offset 之后它不成立了：
+                    //    「有页码、没总数」是前端的翻页组件**表达不了**的形状 ——
+                    //    要么编一个假的 total（本仓禁止），要么「下一页」永远灰着
+                    //    （实测：管理端积分记录页当时就退化成只能看前 20 条）。
+                    //    一次列表请求多一条 COUNT，换翻页能用，这个交换划算。
+                    //
+                    //    保留这行注释是因为：下一个读到 `PageResponse` 的人会看到它同时服务
+                    //    用户面与运营面，而两者现在**都填**。不要再把它改回留空。
+                    .setPage(PageResponse.newBuilder().setTotal(page.total()));
             for (TransactionView item : page.items()) {
                 response.addItems(toItem(item));
             }
