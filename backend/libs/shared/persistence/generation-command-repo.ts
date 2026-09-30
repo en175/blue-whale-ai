@@ -246,6 +246,12 @@ export async function createJobWithinTx(
   const now = new Date();
   const deadline = new Date(now.getTime() + 30 * 60 * 1000); // 30min 超时
   const frozenInput = await freezePlacementAnchor(tx, input);
+  // IKJCOE：输出数**冻进 input 快照**——主表 expected_output_count 列已删，Worker 侧
+  // （ImageJobProcessor）改从这里读「这次要出几个」。handle-create 那条路本来就写这个键
+  // （值同源），本行对它是幂等的；补上是为了 storyboard_preview（count 默认 4）——
+  // 它只把 count 当参数传进来、不写进 input 字面量，不补就会在 Worker 侧退化成 1，
+  // 出图数比槽位数少。
+  const jobInput = { ...frozenInput, expected_output_count: input.expectedOutputCount };
   const job = await tx.generation_jobs.create({
     data: {
       project_id: BigInt(input.projectId),
@@ -254,7 +260,7 @@ export async function createJobWithinTx(
       source: input.source ?? SOURCE_BOTTOM_DOCK,
       status: "queued",
       progress: 0,
-      input: frozenInput as never,
+      input: jobInput as never,
       execution_deadline_at: deadline,
       next_action_at: now,
       fencing_token: 0,
@@ -558,7 +564,11 @@ export function createGenerationCommandRepo(
         // 终态守卫按两阶段条件写 settled/released。
         const inheritedStage = extraString(originalExtras, "video_stage");
         await setJobExtras(tx, retry.id, {
-          strategy_version: strategyVersionOf(original.type),
+          // M2（评审）：策略版本沿用原行冻结的那份（原先就是 original.strategy_version ?? 兜底），
+          // 只有拿不到才按 type 重算——「值随发布变化」正是它要作 per-job 快照的理由。
+          strategy_version:
+            extraString(originalExtras, "strategy_version") ??
+            strategyVersionOf(original.type),
           ...(inheritedStage !== null ? { video_stage: inheritedStage } : {}),
         });
         // 为重试 job 补 cost_reservations 行：原 job 有行就逐列搬运（见 costReservationCreateData），

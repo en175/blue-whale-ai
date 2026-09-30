@@ -103,9 +103,13 @@ describe("generation command placement anchor", () => {
 
     expect(createJob).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        // IKJCOE：输出数冻进 input 快照（主表 expected_output_count 列已删，Worker 从
+        // 这里读「这次要出几个」）。storyboard_preview 只把 count 当参数传、不写 input 字面量，
+        // 少了这一条它会在 Worker 侧退化成 1 —— 出图数比槽位数少。
         input: {
           prompt: "whale",
           placement_anchor: { x: 100, y: 200, width: 400, height: 320 },
+          expected_output_count: 1,
         },
       }),
     });
@@ -162,6 +166,7 @@ describe("generation command placement anchor", () => {
         input: {
           prompt: "whale",
           placement_anchor: { x: 0, y: -1104, width: 400, height: 1080 },
+          expected_output_count: 1,
         },
       }),
     });
@@ -207,6 +212,7 @@ describe("generation command placement anchor", () => {
         input: {
           prompt: "whale",
           placement_anchor: { x: -424, y: -1104, width: 400, height: 1080 },
+          expected_output_count: 1,
         },
       }),
     });
@@ -232,7 +238,7 @@ describe("generation command repo retry", () => {
           status: "failed",
           input: {},
           // IKJCOE：expected_output_count / strategy_version 主表列已删
-          //（输出数以输出槽行为权威、策略版本按 type 重算）。
+          //（输出数以输出槽行为权威；策略版本改从扩展位继承，拿不到才按 type 重算）。
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,

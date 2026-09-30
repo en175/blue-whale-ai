@@ -130,14 +130,12 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
     },
   );
 
-  it.each([
-    ["audio", 2],
-    ["music", 2],
-    ["drama", 3],
-    ["narrate", 3],
-  ] as const)(
-    "freezes scene %s with expected_output_count %d (VOCAL_SPLIT_SCENE_TRACKS)",
-    async (scene, trackCount) => {
+  // IKJCOE：主表 expected_output_count 列已删，轨数不再落库——**权威是冻结的 input.scene**，
+  // Worker 按 VocalSplitContract.SCENE_TRACKS 自推 2/3 轨（VocalSplitJobProcessor:241）。
+  // 四场景的覆盖面保留，断言改成「这次跑的是哪个 scene」，那才是轨数的决定因素。
+  it.each(["audio", "music", "drama", "narrate"] as const)(
+    "freezes scene %s into input（轨数由 Worker 按 scene 自推）",
+    async (scene) => {
       const { service, create } = makeService();
       const result = await service.create("9", "55", {
         source_asset_id: "88",
@@ -146,7 +144,6 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
       expect(result.code).toBe(200);
       expect(create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          expected_output_count: trackCount,
           input: { source_asset_id: "88", scene, output_format: "aac" },
         }),
       });
@@ -171,7 +168,6 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
         progress: 0,
         user_id: 9n,
         project_id: 55n,
-        expected_output_count: 3,
         input: { source_asset_id: "88", scene: "drama", output_format: "flac" },
         next_action_at: expect.any(Date),
       }),

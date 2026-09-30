@@ -186,7 +186,6 @@ export class AudioVideoMuxesService {
       source: AUDIO_VIDEO_MUX_SOURCE,
       status: "queued",
       progress: 0,
-      expected_output_count: 1,
       input: {
         audio: audioSlot.frozen,
         video: videoSlot.frozen,

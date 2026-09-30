@@ -171,7 +171,6 @@ export class AudioMixesService {
       source: AUDIO_MIX_SOURCE,
       status: "queued",
       progress: 0,
-      expected_output_count: 1,
       input: {
         source_node_id: parsed.data.source_node_id,
         inputs: frozenInputs,

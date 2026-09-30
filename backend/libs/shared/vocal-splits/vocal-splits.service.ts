@@ -117,7 +117,8 @@ export class VocalSplitsService {
         status: "queued",
         progress: 0,
         // scene 决定轨数（audio/music→2、drama/narrate→3），契约 VOCAL_SPLIT_SCENE_TRACKS 单源。
-        expected_output_count: VOCAL_SPLIT_SCENE_TRACKS[input.scene].length,
+        // IKJCOE：轨数不再落主表 expected_output_count（列已删）——Worker 按 scene 自推轨序，
+        // 该值此前无任何读方（仅记录）。
         // 冻结三业务键 = 画布占位身份（前端 lastInput 数据源，重试原样沿用）；
         // provider_credential 是业务键之上的基础设施键（不进契约 zod——去字幕同构）。
         input: {

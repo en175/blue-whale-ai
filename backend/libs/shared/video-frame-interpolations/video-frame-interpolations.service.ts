@@ -108,7 +108,6 @@ export class VideoFrameInterpolationsService {
         source: VIDEO_FRAME_INTERPOLATION_SOURCE,
         status: "queued",
         progress: 0,
-        expected_output_count: 1,
         input: frozenInput,
         // 过去 60s：回拨口径同 media_extract / 去字幕 / HD 高清——DATETIME(0) 秒精度进位会让同秒
         // claim 的 lte now 判 false。

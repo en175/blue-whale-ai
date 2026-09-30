@@ -116,7 +116,6 @@ export class VideoSubtitleErasuresService {
         source: VIDEO_SUBTITLE_ERASE_SOURCE,
         status: "queued",
         progress: 0,
-        expected_output_count: 1,
         input: frozenInput,
         // 过去 60s：回拨口径同 media_extract——DATETIME(0) 秒精度进位会让同秒 claim 的 lte now 判 false。
         next_action_at: new Date(Date.now() - 60_000),

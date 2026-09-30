@@ -72,7 +72,7 @@ generation_job_extras(
 | `agent_run_id` | 全仓无调用方传 `agentRunId`（含测试）；0/142。计划通道已退役 |
 | `next_poll_at` + `idx_status_next_poll` | 只写不读：领取门是 `next_action_at`（`GenerationJobMapper` 的候选查询），它存在的唯一理由是撑那条索引 |
 | `action_identity` `project_action_identity` | 同值双份、零读；真实副本在 `cost_reservations.action_identity` 与 `command_idempotency.idempotency_key` |
-| `expected_output_count` | 恒 1（本地 142 行无例外）；权威在建行时冻结的 `input.expected_output_count`，槽位权威在 `generation_output_slots` 行数 |
+| `expected_output_count` | 恒 1（本地 142 行无例外）；权威在建行时的 `input.expected_output_count` 快照——`createJobWithinTx` 与 `handle-create-generation-job` 都写这个键（评审 I2/C2 后补全：`createJobWithinTx` 统一在落库前补齐，storyboard_preview 的 count 不再丢）；15 个工具族 service 走直连建行、本就是单输出，缺键即 1。槽位权威在 `generation_output_slots` 行数 |
 
 **搬进扩展位（8 列）**：`strategy_version` `canvas_card_state` `video_stage` `final_job_id`
 `upstream_created_at_ms` `finalize_deadline_ms` `charge_state` `actual_credits`。
@@ -130,9 +130,23 @@ generation_job_extras(
 - **成本**：读路径多一次 `generation_job_extras` 的批量查询（列表 20 行一次 `in` 查）；
   worker 终态多一次 SELECT（`isTwoPhaseVideo`）+ 至多 3 次 `upsert`；
   `canvas_card_state` 的 Prisma `where` 改成「先取 id 再 update」（单个项目的 audio_mix 任务量很小）。
-- **风险**：钱路径（`charge_state` 驱动 billing 结算）的原子性从「单条 SQL」变成「事务内两步」。
-  缓解：守卫与续写同 `@Transactional`、续写在 `affected==1` 之后、视频金标（G02/G06/G09/G11/G12/G14）
-  与真库集成测试全绿。**任何拆分这两个步骤的重构都视为回归。**
+- **风险**：两阶段视频终态的原子性从「单条 SQL」变成「事务内两步」。
+  ⚠️ **口径更正（评审 M1）**：`charge_state` **不驱动 billing 结算** —— billing 读自己的库
+  （`billing_cost_reservations`），对 `generation_jobs` 零引用；结算事件由终态路径直接
+  publish，不按 `charge_state` 分支。`charge_state` / `video_stage` 如今的读方只有三处：
+  契约 wire schema、API 投影（`job-repo` → 前端）、以及 `checking` 行的人工核对查询
+  （`VideoJobProcessor` 的 runbook，本单已改写为 join 扩展位）。
+  真正要守的是**状态与终态事件不发散**（守卫落 `succeeded` 却漏写阶段状态），
+  所以「守卫与续写同一事务、续写在 `affected==1` 之后」这条不变量照旧成立。
+  缓解：视频金标（G02/G06/G09/G11/G12/G14）与真库集成测试全绿。
+  **任何拆分这两个步骤的重构都视为回归。**
+- **本次改造暴露的盲区（写在这里，下次删列直接用）**：删列后「哪里还在写这个列」
+  **`tsc` 查不出来**——Prisma 7 的 `create<T extends XCreateArgs>(args: SelectSubset<T, …>)`
+  从字面量反推 `T`，未知名照样过；假 prisma 单测（手搭 `generation_jobs: { create }`）
+  更是照单全收。本单因此漏掉 15 个 service 的直连 `create`（评审 C1），
+  唯一能拦住它的是**门控真库集成测试**（如 `IKIHPL_TEST_DATABASE_URL` 那类）。
+  结论：**删列必须跑门控集成测试**，并把「哪些门变量没设」如实写进验证凭证，
+  不要把跳过折进「N skipped」了事。
 - **成立前提**：`value_type` 的编码约定在 TS 与 Java 两侧逐字对称；超过 2^53 的数值用 `string`
   （epoch 毫秒 1.7e12 安全）。EAV 天然不支持「按值范围查/排序」——**需要按某键筛选任务时，
   该键就不属于扩展位**，按上面第 2 条判据回到主表。
