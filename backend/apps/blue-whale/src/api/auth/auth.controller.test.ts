@@ -56,7 +56,6 @@ vi.mock("ioredis", () => ({
 
 import { Reflector } from "@nestjs/core";
 import { InvalidVerificationCodeError, NewApiError } from "@lib/core";
-import { afterEach, beforeEach } from "vitest";
 import { ACCOUNT_LOCKED, FAILURE_CODE } from "@lib/contracts";
 import type { Response } from "express";
 import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -94,7 +93,11 @@ function loginResult(): LocalLoginResult {
 function setup() {
   const limiter = new RateLimiter();
   const tracker = new LoginFailureTracker(limiter);
-  const sessions = { createSession: vi.fn(async () => "session-token") };
+  const sessions = {
+    // IKJAZL：签发与存储分了家——令牌由会话服务签（密钥收敛在它构造期），再由它存。
+    issueToken: vi.fn(async () => "jwt-token"),
+    createSession: vi.fn(async () => undefined),
+  };
   const prisma = { client: {} };
   // 登录日志同样走旁路（写失败不阻断登录），所以它必须是**可注入的 mock**——
   // 否则「日志到底写没写」这件事在测试里永远看不出来。
@@ -344,22 +347,35 @@ describe("AuthController 会话内容（凭证已移出会话）", () => {
 
     await controller.login(LOGIN_BODY, res);
 
-    expect(sessions.createSession).toHaveBeenCalledWith({
+    // IKJAZL：createSession 的入参现在是 (令牌, 载荷) —— 令牌由会话服务签发。
+    expect(sessions.createSession).toHaveBeenCalledWith("jwt-token", {
       userId: 42,
       username: "alice",
       role: 1,
       status: 1,
       email: null,
     });
-    // 断言的是「没有任何额外的密钥字段」：createSession 的入参就是上面那五个，
+    // 断言的是「没有任何额外的密钥字段」：载荷就是上面那五个，
     // 上游 key 由 AuthGuard 按当前配置回注（见 auth.guard.test.ts）。
-    expect(Object.keys(sessions.createSession.mock.calls[0]![0])).toEqual([
+    expect(Object.keys(sessions.createSession.mock.calls[0]![1])).toEqual([
       "userId",
       "username",
       "role",
       "status",
       "email",
     ]);
+  });
+
+  it("★ 令牌随响应体下发（IKJAZL：前端持有，不再只藏在 cookie 里）", async () => {
+    const { controller, identity, res } = setup();
+    identity.login.mockResolvedValue(loginResult());
+
+    const out = await controller.login(LOGIN_BODY, res);
+
+    expect(out).toMatchObject({ code: 200, data: { token: "jwt-token" } });
+    // 兼容期**仍然写一份 cookie**：老浏览器不该在上线那一刻被登出。
+    // 这条断言是那次迁移的护栏，cookie 通道下线时可以一并删掉。
+    expect(res.cookie).toHaveBeenCalled();
   });
 
   it("★ 登录**不依赖**上游配置 —— 否则「还没配 key」就把要进去配它的人挡在门外", async () => {

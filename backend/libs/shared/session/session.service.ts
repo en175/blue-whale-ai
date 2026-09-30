@@ -1,7 +1,9 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { Redis } from "ioredis";
+import { issueAccessToken, verifyAccessToken, type AccessTokenClaims } from "@lib/core";
 import { redisConnectionOptions } from "@lib/shared/rate-limit/redis-connection.js";
+import { sessionJwtSecret } from "./jwt-secret.js";
 
 /** 会话 7 天滑动过期（Redis TTL）。 */
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -41,9 +43,38 @@ type SessionPayload = {
 @Injectable()
 export class SessionService implements OnModuleDestroy {
   private readonly redis: Redis;
+  /**
+   * 登录凭证的签名密钥（IKJAZL）。
+   *
+   * <p>**在构造函数里读**：缺失即启动失败，而不是等到第一个人来登录才炸——
+   * 那时候它在日志里长得像「登录坏了」，排查要先绕一圈才想到是配置。
+   */
+  private readonly jwtSecret: string;
 
   constructor() {
     this.redis = new Redis(redisConnectionOptions());
+    this.jwtSecret = sessionJwtSecret();
+  }
+
+  /**
+   * 签发登录令牌（IKJAZL）。
+   *
+   * <p>为什么签发收在这里，而不是让调用方各自去调 `@lib/core` 的 JWT 工具：
+   * 密钥是**进程级配置**，散到多个调用方就意味着"各处自己读 env、各自处理缺失"，
+   * 最后总有一处忘了处理。收敛在一处，缺配置只会在启动时暴露一次。
+   */
+  async issueToken(userId: string): Promise<string> {
+    return issueAccessToken(userId, this.jwtSecret);
+  }
+
+  /**
+   * 校验登录令牌的签名与有效期。**不查 Redis** —— 那是 {@link resolveSession} 的事。
+   *
+   * <p>两步分开是刻意的：验签不需要网络（边缘节点也能做），查注销必须回源。
+   * 合在一起就会被迫每次都打 Redis。
+   */
+  async verifyToken(token: string): Promise<AccessTokenClaims> {
+    return verifyAccessToken(token, this.jwtSecret);
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -63,15 +94,23 @@ export class SessionService implements OnModuleDestroy {
     return `user_session:${userId}:${hash}`;
   }
 
-  /** 写会话，返回下发给浏览器的会话令牌。 */
-  async createSession(input: {
-    userId: number;
-    username: string;
-    role: number;
-    status: number;
-    email: string | null;
-  }): Promise<string> {
-    const token = `sess_${randomBytes(32).toString("base64url")}`;
+  /**
+   * 写会话。**令牌由调用方签发**（IKJAZL：登录凭证是 JWT，签发在 auth 控制器）。
+   *
+   * <p>⚠️ 这里**不再自己生成令牌**。令牌长什么样（不透明随机串 / JWT）是签发方的事；
+   * 会话存储只回答「这个令牌还有效吗、它对应谁」。两边各签一种的形态，正是这次改造
+   * 要收拾的东西——那意味着校验方得同时理解两种凭证。
+   */
+  async createSession(
+    token: string,
+    input: {
+      userId: number;
+      username: string;
+      role: number;
+      status: number;
+      email: string | null;
+    },
+  ): Promise<void> {
     const hash = this.hashOf(token);
     const payload: SessionPayload = {
       userId: input.userId,
@@ -92,7 +131,6 @@ export class SessionService implements OnModuleDestroy {
         SESSION_TTL_SECONDS,
       )
       .exec();
-    return token;
   }
 
   /** 校验并解析会话；不存在或已过期返回 null。每次访问滑动续期 7 天。 */

@@ -25,6 +25,7 @@ import {
   type LocalLoginResult,
 } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
+import { extractLoginToken } from "@lib/shared/session/login-token.js";
 import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
@@ -34,9 +35,12 @@ import type { LoginByCodeDto } from "./dto/login-by-code.dto.js";
 import type { LoginDto } from "./dto/login.dto.js";
 import type { RegisterDto } from "./dto/register.dto.js";
 
-function loginData(result: LocalLoginResult, isNewUser: boolean) {
+function loginData(result: LocalLoginResult, isNewUser: boolean, token: string) {
   return {
-    // 登录态走 HttpOnly 会话 cookie，响应不下发任何令牌给 JS。
+    // IKJAZL：登录凭证是签名 JWT，**随响应体下发**，由前端自己保管并在后续请求里
+    // 以 `Authorization: Bearer` 带回。它同时还会写一份 HttpOnly cookie ——
+    // 那是迁移期的兼容通道，让还没升级的客户端继续可用，不是给 JS 读的。
+    token,
     user_id: result.userId,
     username: result.username,
     email: result.email ?? null,
@@ -148,18 +152,24 @@ export class AuthController {
    * <p>⚠️ **过渡期的已知后果**：new-api 的 per-user 数据（消费流水、充值记录）
    * 返回的是**项目维度**的数。这不是 bug，是「上游不再认识我们的用户」的必然结果，
    * 也正是必须建自己计费体系的原因。计费域接过来之后，这些接口改走 billing。
+   *
+   * <p>IKJAZL：**签 JWT → 存进会话存储**。两道校验是刻意分工——**JWT 自证**
+   * （没被篡改、没过期），**Redis 记注销**（登出、改密踢设备、冻结）。只剩 JWT 的话，
+   * 登出之后它还能一路用到过期；只剩 Redis 的话，每个请求都得查一次库。
    */
-  private establishSession(result: LocalLoginResult): Promise<string> {
+  private async establishSession(result: LocalLoginResult): Promise<string> {
     if (result.userId == null || !result.username) {
       throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
     }
-    return this.sessions.createSession({
+    const token = await this.sessions.issueToken(String(result.userId));
+    await this.sessions.createSession(token, {
       userId: result.userId,
       username: result.username,
       role: result.role,
       status: result.status,
       email: result.email ?? null,
     });
+    return token;
   }
 
   @Public()
@@ -205,7 +215,7 @@ export class AuthController {
         userAgent,
         success: true,
       });
-      return ok(loginData(result, false));
+      return ok(loginData(result, false, sessionToken));
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
         // 与「上游业务失败」分开：这里根本没有上游。计数与留痕口径与旧路径一致，
@@ -340,7 +350,7 @@ export class AuthController {
       });
       const sessionToken = await this.establishSession(result);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-      return ok(loginData(result, true));
+      return ok(loginData(result, true, sessionToken));
     } catch (error) {
       // 用户名占用 / 口令超长：都是用户能自己改的输入问题，走 HTTP 400 + 原文案。
       // 用 400 而非 200，否则前端 code===200 会把 data:null 当成功读。
@@ -351,14 +361,22 @@ export class AuthController {
     }
   }
 
-  /** 登出：清 HttpOnly 会话 cookie + Redis 吊销（上游 sk- 不动，登出与轮换分离，ADR-0062 #10/#19）。 */
+  /**
+   * 登出（IKJAZL）：吊销 Redis 里的会话标记——**这是唯一能立即作废一个已签发 JWT 的手段**，
+   * 因为 JWT 在过期之前一直自证有效。（上游 sk- 不动：登出与凭证轮换是两件事，
+   * ADR-0062 #10/#19。）
+   *
+   * <p>令牌可能来自请求头（新）或 cookie（迁移期老客户端），**两处都要取**：只认一处的
+   * 话，另一处登出会「看起来成功、其实会话还活着」。
+   */
   @Public()
   @Post("logout")
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const token = req.cookies?.[SESSION_COOKIE_NAME];
+    const token = extractLoginToken(req);
     if (token) await this.sessions.revoke(token);
-    // 清 cookie 时必须去掉 maxAge：Express 会带上 maxAge，RFC 6265 下 Max-Age 优先于 Expires，
-    // 空 cookie 会残留到 maxAge 过期才真正删除
+    // 兼容期仍清 cookie：老的浏览器手里那份在这里一并作废，否则它能一路活到 7 天 TTL。
+    // 清 cookie 时必须去掉 maxAge：Express 会带上 maxAge，RFC 6265 下 Max-Age 优先于
+    // Expires，空 cookie 会残留到 maxAge 过期才真正删除。
     res.clearCookie(SESSION_COOKIE_NAME, {
       ...sessionCookieOptions(),
       maxAge: undefined,

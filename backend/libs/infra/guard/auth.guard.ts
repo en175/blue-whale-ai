@@ -5,6 +5,7 @@ import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import type { Request, Response } from "express";
 import { IdentityService } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
+import { extractLoginToken } from "@lib/shared/session/login-token.js";
 import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
@@ -50,9 +51,17 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     const response = context.switchToHttp().getResponse<Response>();
-    const token = request.cookies?.[SESSION_COOKIE_NAME];
+    const token = extractLoginToken(request);
     if (!token) {
       throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+    }
+
+    // 第一道：验签与有效期（IKJAZL）。篡改过 / 过期的令牌在**碰 Redis 之前**就被挡掉——
+    // 否则每一次伪造请求都要打一次 Redis，而鉴权是最容易被刷的那条路径。
+    try {
+      await this.sessions.verifyToken(token);
+    } catch {
+      throw new NewApiError("登录已过期，请重新登录", 401, "unauthorized");
     }
 
     let session;

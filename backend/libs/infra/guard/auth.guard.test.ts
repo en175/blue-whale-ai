@@ -24,6 +24,7 @@ const CURRENT_KEY = "sk-current-upstream";
 
 function makeGuard(opts: {
   isPublic?: boolean;
+  verifyToken?: (token: string) => Promise<unknown>;
   resolveSession?: (token: string) => Promise<unknown>;
   resolveAccessState?: () => Promise<unknown>;
   requireUpstreamKey?: () => Promise<string>;
@@ -32,6 +33,10 @@ function makeGuard(opts: {
     getAllAndOverride: () => opts.isPublic ?? false,
   };
   const sessions = {
+    // IKJAZL：第一道是验签（无网络）。默认放行，让各用例专注在它真正要验的那一段。
+    verifyToken:
+      opts.verifyToken ??
+      (async () => ({ userId: "8", jti: "jti-1", type: "access" })),
     resolveSession: opts.resolveSession ?? (async () => null),
     updateSessionIdentity: async () => undefined,
   };
@@ -117,6 +122,7 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
     const update = vi.fn();
     const reflector = { getAllAndOverride: () => false };
     const sessions = {
+      verifyToken: async () => ({ userId: "8", jti: "jti-1", type: "access" }),
       resolveSession: async () => ({
         ...VALID_SESSION,
         status: 1,
@@ -184,6 +190,52 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
     await expect(guard.canActivate(context as never)).resolves.toBe(true);
     expect((request.user as { isAdmin: boolean }).isAdmin).toBe(false);
     expect(request.headers.authorization).toBe(`Bearer ${CURRENT_KEY}`);
+  });
+  it("★ 令牌验签不通过（篡改/过期）→ 401，且**不碰 Redis**", async () => {
+    // 验签是**无网络**的那一道，放在查会话之前。反过来的话，每一次伪造请求都要打一次
+    // Redis——而鉴权正是最容易被刷的那条路径。
+    const resolveSession = vi.fn();
+    const guard = makeGuard({
+      verifyToken: async () => {
+        throw new Error("invalid signature");
+      },
+      resolveSession,
+    });
+    const { context } = makeContext("sess_tampered");
+
+    await expect(guard.canActivate(context as never)).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(resolveSession).not.toHaveBeenCalled();
+  });
+
+  it("★ 请求头优先于 cookie（IKJAZL 迁移期双读）", async () => {
+    // 迁移期两通道并存：新客户端把令牌放请求头，老浏览器还带着 cookie。
+    // 两者都在时**以请求头为准**——否则升级后的客户端会被一份陈旧的 cookie 顶掉。
+    const resolveSession = vi.fn(async (token: string) =>
+      token === "header-token" ? VALID_SESSION : null,
+    );
+    const guard = makeGuard({ resolveSession });
+    const { context, request, cookie } = makeContext("cookie-token");
+    request.headers.authorization = "Bearer header-token";
+
+    await expect(guard.canActivate(context as never)).resolves.toBe(true);
+    expect(resolveSession).toHaveBeenCalledWith("header-token");
+    expect(cookie).toHaveBeenCalledWith(
+      "bw_session",
+      "header-token",
+      expect.objectContaining({ httpOnly: true }),
+    );
+  });
+
+  it("请求头不是 Bearer 形态 → 回退读 cookie", async () => {
+    const resolveSession = vi.fn(async () => VALID_SESSION);
+    const guard = makeGuard({ resolveSession });
+    const { context, request } = makeContext("cookie-token");
+    request.headers.authorization = "Basic abc";
+
+    await expect(guard.canActivate(context as never)).resolves.toBe(true);
+    expect(resolveSession).toHaveBeenCalledWith("cookie-token");
   });
 });
 
