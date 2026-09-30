@@ -189,6 +189,20 @@ inherited_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field inher
   || fail_status 12 TASK_BASE_INVALID "任务继承提交元数据无效。"
 [ -z "$inherited_sha" ] || fail_status 12 INTEGRATION_CHILD_NO_PR "整包子票不能独立发布 PR；请由父整合分支统一发布。"
 
+if ! hooks_output="$("${PYTHON[@]}" - "$SCRIPT_ROOT/scripts/lib" "$ROOT" 2>&1 <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from release_line_sync import SyncError, configure_git_hooks
+try:
+    configure_git_hooks(sys.argv[2])
+except SyncError as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
+PY
+)"; then
+  fail_status 11 HOOKS_SETUP_FAILED "本地 Git Hook 自动启用失败，禁止推送。" detail "$hooks_output"
+fi
+
 if ! fetch_detail="$(git -C "$ROOT" fetch origin "$TARGET_BRANCH" 2>&1)"; then
   fail_status 7 REMOTE_READ_FAILED "无法读取 origin/${TARGET_BRANCH}；可按规则最多重试两次。" detail "$fetch_detail"
 fi
@@ -209,8 +223,14 @@ fi
 if ! git -C "$ROOT" merge-base --is-ancestor "$upstream_sha" "$head_sha"; then
   fail_status 10 NEEDS_SYNC "当前分支未包含 ${upstream_ref}。先运行 scripts/sync-task-from-origin.sh sync --target-branch ${TARGET_BRANCH} --json。" branch "$branch" target_branch "$TARGET_BRANCH" head "$head_sha" upstream_sha "$upstream_sha"
 fi
+if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" ensure --stage pr --json 2>&1)"; then
+  fail_status 11 VERIFICATION_FAILED "本地发布前检查未通过，禁止推送。修复后重新发布；基础设施重试仍须按测试策略显式执行。" detail "$verification_output" head "$head_sha"
+fi
 if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --stage pr --json 2>&1)"; then
   fail_status 11 VERIFICATION_REQUIRED "当前 HEAD 缺少覆盖发布要求的验证凭证。先运行 node scripts/verify-change-scope.mjs run --stage pr。" detail "$verification_output" head "$head_sha"
+fi
+if [ "$(git -C "$ROOT" rev-parse HEAD)" != "$head_sha" ]; then
+  fail_status 11 HEAD_CHANGED "本地检查期间 HEAD 已变化，禁止发布旧提交的审查标记。" head "$head_sha"
 fi
 
 remote_ref="refs/heads/$branch"
@@ -288,13 +308,15 @@ if [ "$MODE" = create ]; then
   if ! mark_recovery_state in_flight; then
     fail_status 9 PUSH_STATE_PERSIST_FAILED "无法在推送前持久化 fail-closed 状态。"
   fi
-  if ! git -C "$ROOT" push -u origin "HEAD:$remote_ref"; then
+  if ! git -C "$ROOT" push origin "$head_sha:$remote_ref"; then
     clear_push_state_only_if_remote_unchanged "$remote_sha"
     fail_status 1 PUSH_FAILED "首次发布推送失败。"
   fi
   if ! mark_recovery_state pushed; then
     fail_status 9 PUSH_STATE_PERSIST_FAILED "远端已推送，但本地状态确认写入失败；恢复点保持 fail closed，禁止 rollback。"
   fi
+  git -C "$ROOT" branch --set-upstream-to="origin/$branch" "$branch" >/dev/null \
+    || fail_status 9 UPSTREAM_SETUP_FAILED "远端已推送，但本地分支跟踪配置失败。"
   mkdir -p "$common"
   umask 077
   draft_marker=false
@@ -365,12 +387,14 @@ fi
 if ! mark_recovery_state in_flight; then
   fail_status 9 PUSH_STATE_PERSIST_FAILED "无法在推送前持久化 fail-closed 状态。"
 fi
-if ! git -C "$ROOT" push --force-with-lease="$remote_ref:$expected_remote_sha" -u origin "HEAD:$remote_ref"; then
+if ! git -C "$ROOT" push --force-with-lease="$remote_ref:$expected_remote_sha" origin "$head_sha:$remote_ref"; then
   clear_push_state_only_if_remote_unchanged "$expected_remote_sha"
   fail_status 5 REMOTE_LEASE_CHANGED "安全强推失败；远端可能已经变化。" expected_remote_sha "$expected_remote_sha" pull_request_id "$PR_IID"
 fi
 if ! mark_recovery_state pushed; then
   fail_status 9 PUSH_STATE_PERSIST_FAILED "远端已推送，但本地状态确认写入失败；恢复点保持 fail closed，禁止 rollback。"
 fi
+git -C "$ROOT" branch --set-upstream-to="origin/$branch" "$branch" >/dev/null \
+  || fail_status 9 UPSTREAM_SETUP_FAILED "远端已推送，但本地分支跟踪配置失败。"
 rm -f "$marker_path"
 emit_status PUSHED_UPDATE_PR branch "$branch" head "$head_sha" pull_request_id "$PR_IID" previous_remote_sha "$remote_sha" task_commit_count "$task_commit_count" merge_commit_count "$merge_commit_count" changed_files "$changed_files"

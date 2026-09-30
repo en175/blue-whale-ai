@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Blue-Whale — 一键初始化本地开发环境（git hooks + Claude guardrails）
-# clone 后跑一次：bash scripts/setup-hooks.sh
+# Agent 同步、开工和 PR 发布入口会自动启用 Git hooks；本脚本保留用于人工排障。
 # setup 脚本本身仅用 Bash；运行时 pre-push/Work Tree 入口需要 Python 3。
 # 支持 macOS/Linux，以及安装 Git for Windows 的 Git Bash。
 

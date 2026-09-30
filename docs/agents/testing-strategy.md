@@ -8,7 +8,7 @@
 2. 通过 `scripts/commit-task-for-review.sh` 形成干净 HEAD；运行 `node scripts/verify-change-scope.mjs plan` 检查自动分层。
 3. 运行 `node scripts/verify-change-scope.mjs run`（默认收口阶段）；代码失败则修复并 amend，基础设施或已知 flaky 才对同一 HEAD 显式重试。
 4. 报告完成前运行 `node scripts/verify-change-scope.mjs check --json`；`VERIFIED` 才算完成。
-5. 创建或更新 PR 前先运行 `scripts/sync-task-from-origin.sh sync --json`，再运行 `node scripts/verify-change-scope.mjs run --stage pr`；`plan/run --stage pr` 对尚未包含远端目标提交的 HEAD 返回 `PR_TARGET_NOT_SYNCED`，避免按旧任务起点误选大范围验证。发布门禁以 `check --stage pr` 硬校验，缺少覆盖 PR 阶段要求的凭证即阻断推送。
+5. 创建或更新 PR 前先运行 `scripts/sync-task-from-origin.sh sync --json`。发布入口在推送前自动执行 `ensure --stage pr`，有有效凭证则复用，否则按影响面补跑本地检查；Agent 也可提前运行 `run --stage pr`。`plan/run/ensure --stage pr` 对尚未包含远端目标提交的 HEAD 返回 `PR_TARGET_NOT_SYNCED`。发布门禁随后以 `check --stage pr` 硬校验，检查失败或凭证失效则阻断推送。
 
 完成标准：凭证状态为 `passed`，且 HEAD、合并基线、changed-files 哈希、输入指纹、验证层级、计划和通过结果均与当前状态一致。
 
@@ -67,7 +67,7 @@ Agent 可用 `--risk high` 主动升级为带验收的全量。选择器只接�
 - Node/平台/架构、缓存开关和外部输入摘要组成的输入指纹；
 - 重试类别、理由和两次尝试（若有）。
 
-同一 HEAD 且基线、影响面、输入指纹未变化时，完成、PR 更新和发布直接复用，不设置任意时间过期。任一绑定字段变化即失效。`scripts/publish-review-package.sh` 在网络推送前按 PR 阶段要求硬检查凭证：收口阶段凭证不满足代码类 PR 的发布要求，需先运行 `run --stage pr`。PR 阶段凭证落盘后覆盖同 HEAD 的收口凭证。验收相关的缓存指纹对 full 两档都采集，保证带验收凭证与不带验收要求的输入指纹可比。
+同一 HEAD 且基线、影响面、输入指纹未变化时，完成、PR 更新和发布直接复用，不设置任意时间过期。任一绑定字段变化即失效。`scripts/publish-review-package.sh` 在网络推送前调用 `ensure --stage pr` 自动复用或补跑验证，再硬检查凭证；收口凭证只有覆盖 PR 阶段实际计划时才可复用。当前范围已有失败凭证时，`ensure` 直接阻断，不自动覆盖失败记录或重试。PR 阶段凭证落盘后覆盖同 HEAD 的收口凭证。验收相关的缓存指纹对 full 两档都采集，保证带验收凭证与不带验收要求的输入指纹可比。
 
 PR「测试结果」运行 `node scripts/verify-change-scope.mjs summary` 生成并粘贴；不要粘贴本机绝对路径或整段测试日志。
 

@@ -73,6 +73,37 @@ class SyncReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertEqual(remote, self.head())
         self.assertEqual("remote\n", (self.repo / "remote.txt").read_text(encoding="utf-8"))
 
+    def test_new_clone_automatically_enables_hooks_without_manual_setup(self):
+        self.assertNotEqual(".githooks", run("git", "config", "--get", "core.hooksPath",
+                                            cwd=self.actor, check=False).stdout.strip())
+        hook = self.actor / ".githooks/pre-push"
+        hook.write_text("#!/bin/sh\necho automatic-hook-active >&2\nexit 1\n", encoding="utf-8")
+        hook.chmod(0o755)
+        self.commit(self.actor, ".githooks/pre-push", hook.read_text(encoding="utf-8"))
+        result = run(sys.executable, self.actor / "scripts/sync-release-line.py", "--json",
+                     cwd=self.actor, check=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(".githooks", json.loads(result.stdout)["hooks_path"])
+        blocked = run("git", "push", "origin", "HEAD:refs/heads/chore/自动启用验证",
+                      cwd=self.actor, check=False)
+        self.assertNotEqual(0, blocked.returncode)
+        self.assertIn("automatic-hook-active", blocked.stderr)
+        self.assertEqual("", run("git", "ls-remote", "--heads", "origin", "chore/自动启用验证",
+                                 cwd=self.actor).stdout.strip())
+
+    def test_existing_clone_and_worktree_override_are_repaired_idempotently(self):
+        run("git", "config", "core.hooksPath", "/dev/null", cwd=self.repo)
+        run("git", "config", "extensions.worktreeConfig", "true", cwd=self.repo)
+        run("git", "config", "--worktree", "core.hooksPath", "/dev/null", cwd=self.repo)
+        before = self.head()
+        for _ in range(2):
+            result = self.sync()
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(".githooks", run("git", "config", "--get", "core.hooksPath", cwd=self.repo).stdout.strip())
+            self.assertEqual(".githooks", run("git", "config", "--local", "--get", "core.hooksPath", cwd=self.repo).stdout.strip())
+            self.assertEqual([], json.loads(result.stdout)["dirty_paths"])
+            self.assertEqual(before, self.head())
+
     def test_diverged_histories_merge_and_keep_unrelated_dirty_file(self):
         local = self.commit(self.repo, "local.txt", "local\n")
         (self.repo / "notes.txt").write_text("draft\n", encoding="utf-8")
