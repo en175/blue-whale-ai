@@ -20,8 +20,9 @@ export interface AdminConsumptionRecord {
    * 用户名。BFF 回我们自己的库按 `user_id` 补的——billing 的账本认不出人。
    *
    * ⚠️ 键名是 `nickname`，界面上叫「用户名」，值都是 `bw_users.username`。
-   *    键名沿用身份查询那层（`AdminUserIdentity.nickname`，与用户管理页、两页记录页共用一份），
-   *    在这里改键只会让同一个字段在几个页面叫两个名字。
+   *    键名沿用身份查询那层（`AdminUserIdentity.nickname`）——**三个记录页共用同一份投影**。
+   *    （用户管理页走的是另一份 `AdminUserRow`，值同样是 `username`，只是投影不同；
+   *    在这里改键只会让同一个值在几个页面叫两个名字。）
    *
    * ⚠️ 可选（`?`）不是多余：与下面的 `reserved_credits` 同一条规矩 —— **后端比前端旧**时
    *    这个键**整个不存在**（老构建压根没投影它），拿到的是 `undefined`。本仓实测过一次
