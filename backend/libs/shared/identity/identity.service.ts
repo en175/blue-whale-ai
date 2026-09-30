@@ -268,6 +268,21 @@ export class IdentityService {
     // 而不是白烧一条短信——重发是要花钱的。
     await this.authCodes.markCodeUsed(record.id);
 
+    if (user.created) {
+      // 与 `register` 同一条口径：新建的用户**显式**授内置 `user` 角色。
+      // 不授也能用（`roleRank([])` 也是 1），但那样「这个用户有哪些角色」就有了两种
+      // 表示（`[]` 与 `['user']`），而角色列表是要拿来做权限判定的。
+      // 失败不阻断登录：角色行缺失只影响将来的扩展权限。
+      try {
+        await this.roles.grant(String(user.id), ROLE_USER, "phone-register");
+      } catch (error) {
+        this.logger.error(
+          `手机号建号后授予 ${ROLE_USER} 角色失败（用户 ${user.id}）：` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     const row = await this.users.findById(user.id);
     if (!row) {
       // `upsertUser` 按手机号找的是**含软删行**的（那边没过滤 is_delete），
@@ -346,11 +361,19 @@ export class IdentityService {
    */
   async changePassword(
     userId: string | number,
-    input: { oldPassword: string; newPassword: string },
+    input: { oldPassword?: string | undefined; newPassword: string },
   ): Promise<void> {
     const user = await this.users.findById(String(userId));
-    if (!user || !(await verifyPassword(input.oldPassword, user.password))) {
+    if (!user) {
       throw new InvalidCredentialsError();
+    }
+    // IKJA4R：**没有口令的账号走的是「设置密码」**——没有原口令可验，跳过这一道。
+    // 见 GLOSSARY「账号与密码」：设置与修改是同一条路径上的两个操作，区别只在
+    // 账号当下有没有口令。少了这个分支，手机号建号的用户永远设不上密码。
+    if (user.password !== null) {
+      if (!input.oldPassword || !(await verifyPassword(input.oldPassword, user.password))) {
+        throw new InvalidCredentialsError();
+      }
     }
     // hashPassword 内部做策略判定（超长即拒，不截断），失败时一个字节都不会落库。
     const passwordHash = await hashPassword(input.newPassword);

@@ -119,7 +119,8 @@ export class MeController {
   ) {
     const parsed = changePasswordRequestSchema.safeParse(body);
     if (!parsed.success) {
-      throw new NewApiError("原密码和新密码不能为空", 400, "invalid_params");
+      // ⚠️ 文案不提「原密码」：无口令的账号走的是**设置**密码，本来就没有原密码（IKJA4R）。
+      throw new NewApiError("新密码不能为空", 400, "invalid_params");
     }
     // 改密必须知道「改的是谁」。以前这件事由上游凭 sk- 回答，而现在的 sk- 是
     // **项目级统一 key**，答不出用户身份——拿不到本地身份就只能要求重新登录。
@@ -160,9 +161,10 @@ export class MeController {
       // 兜底：枚举吊销失败（SCAN+pipeline）时，至少直接吊销当前会话并清 cookie——
       // 保证当前浏览器改密后立即要求重新登录（其他设备会话靠 ≤5min 复核或后续枚举）。
       //
-      // ⚠️ 要吊销的是**会话 cookie 里的 sess_ 令牌**。请求头里的那个 Bearer 是
-      //    AuthGuard 回注的**上游 sk-**，拿它 revoke 等于删一个不存在的键。
-      const currentToken = req.cookies?.[SESSION_COOKIE_NAME];
+      // ⚠️ 令牌取 `req.loginToken`（**AuthGuard 存的那一份**）。不要读 cookie，也不要读
+      //    请求头：前者只是迁移期的过渡通道，只带请求头的客户端在这里会静默跳过吊销；
+      //    后者此刻已被回注成**上游 sk-**，拿它 revoke 等于删一个不存在的键。
+      const currentToken = (req as Request & { loginToken?: string }).loginToken;
       try {
         if (currentToken) await this.sessions.revoke(currentToken);
         res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());

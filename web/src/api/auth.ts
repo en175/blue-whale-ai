@@ -2,7 +2,7 @@
  * auth 接口：登录/退出/当前用户/积分配额，对接真实后端
  * ============================================ */
 import { apiRequest } from './http';
-import { clearSessionToken, setSessionToken } from './sessionToken';
+import { clearSessionToken, getSessionToken, setSessionToken } from './sessionToken';
 import type { SessionUser } from '@/utils/auth';
 
 /** POST /api/auth/login 返回 */
@@ -140,21 +140,35 @@ export function fetchCredits(options?: { fresh?: boolean }) {
   return apiRequest<UsageTokenData>(path);
 }
 
-/** 退出登录。**先清本地令牌**：接口这趟失败也不该把令牌留在浏览器里。 */
+/**
+ * 退出登录。
+ *
+ * ⚠️ **先把令牌取出来、再清**：服务端靠这个令牌才能在 Redis 里找到会话并吊销。
+ * 反过来写（先清再发）会让这趟请求不带 `Authorization`，只能退回靠 cookie ——
+ * 而没有 cookie 的客户端就变成「登出看起来成功、会话还活到 7 天后自然过期」。
+ */
 export async function logout() {
+  const token = getSessionToken();
   clearSessionToken();
-  return apiRequest<null>('/api/auth/logout', { method: 'POST' });
+  return apiRequest<null>('/api/auth/logout', {
+    method: 'POST',
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  });
 }
 
-/** 修改密码（IKBRCK：PUT /api/me/password） */
-export function changePassword(originalPassword: string, newPassword: string) {
+/**
+ * 修改 / 设置密码（IKBRCK / IKJA4R）。
+ *
+ * <p>`originalPassword` 传 `null` 表示这个账号**没有旧密码**——那一步叫「设置密码」，
+ * 请求体里就不带 `original_password`。后端按 `bw_users.password IS NULL` 自动分流。
+ */
+export function changePassword(originalPassword: string | null, newPassword: string) {
+  const body: Record<string, string> = { password: newPassword };
+  if (originalPassword !== null) body.original_password = originalPassword;
   return apiRequest<null>('/api/me/password', {
     method: 'PUT',
     silent: true,
-    body: JSON.stringify({
-      original_password: originalPassword,
-      password: newPassword,
-    }),
+    body: JSON.stringify(body),
   });
 }
 

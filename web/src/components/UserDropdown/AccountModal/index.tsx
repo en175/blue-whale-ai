@@ -8,10 +8,16 @@ import { X } from 'lucide-react';
 import styles from './index.module.css';
 import PasswordModal from '../PasswordModal';
 import AccountRecordsModal from '../AccountRecordsModal';
+import BindPhoneModal from '../BindPhoneModal';
+import { updateUser } from '@/utils/auth';
 
 interface AccountModalProps {
   userId: number;
   nickname: string;
+  /** 未绑定时为空串 */
+  phone: string;
+  /** 手机号验证码建出来的账号没有口令——决定这一行说「设置」还是「修改」 */
+  hasPassword: boolean;
   balance: number | null;
   onClose: () => void;
 }
@@ -19,11 +25,14 @@ interface AccountModalProps {
 export default function AccountModal({
   userId,
   nickname,
+  phone,
+  hasPassword,
   balance,
   onClose,
 }: AccountModalProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showRecords, setShowRecords] = useState(false);
+  const [showBindPhone, setShowBindPhone] = useState(false);
 
   return createPortal(
     <div className={styles.overlay} onClick={onClose}>
@@ -45,13 +54,31 @@ export default function AccountModal({
           <span className={styles.value}>{nickname}</span>
         </div>
 
-        {/* 密码 */}
+        {/* 手机号（IKJA4R）：未绑定时可点绑定；已绑定只读——本单不做换绑 */}
+        <div className={styles.row}>
+          <span className={styles.label}>手机号</span>
+          <div className={styles.rowRight}>
+            {phone ? (
+              <span className={styles.value}>{phone}</span>
+            ) : (
+              <>
+                <span className={styles.value}>未绑定</span>
+                <button className={styles.link} onClick={() => setShowBindPhone(true)}>
+                  绑定
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* 密码（IKJA4R）：**没有口令的账号说「设置」不说「修改」**——
+            他们从来没有过原密码，而修改那条路要求提供原密码，等于永远设不上 */}
         <div className={styles.row}>
           <span className={styles.label}>密码</span>
           <div className={styles.rowRight}>
-            <span className={styles.value}>已设置</span>
+            <span className={styles.value}>{hasPassword ? '已设置' : '未设置'}</span>
             <button className={styles.link} onClick={() => setShowPassword(true)}>
-              修改
+              {hasPassword ? '修改' : '设置'}
             </button>
           </div>
         </div>
@@ -73,12 +100,20 @@ export default function AccountModal({
       {/* 修改密码弹窗：成功后连同账号信息一起关掉 */}
       <PasswordModal
         open={showPassword}
+        hasPassword={hasPassword}
         onClose={() => setShowPassword(false)}
         onSuccess={() => {
           setShowPassword(false);
           onClose();
         }}
       />
+      {/* 绑定手机号（IKJA4R）：成功后回写本地用户信息，这一行立刻显示号码 */}
+      {showBindPhone && (
+        <BindPhoneModal
+          onClose={() => setShowBindPhone(false)}
+          onBound={(bound) => updateUser({ phone: bound })}
+        />
+      )}
       {/* 账户记录弹窗 */}
       {showRecords && <AccountRecordsModal onClose={() => setShowRecords(false)} />}
     </div>,

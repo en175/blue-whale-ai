@@ -19,7 +19,7 @@ import { parseCustomCredits } from "@lib/shared/recharge-custom/constants.js";
 import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
 import { RechargeService } from "@lib/shared/recharge/recharge.service.js";
 import { toRechargeError } from "@lib/shared/recharge/recharge-error.js";
-import { SESSION_COOKIE_NAME } from "@lib/shared/session/cookie.js";
+import { extractLoginToken } from "@lib/shared/session/login-token.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
@@ -235,8 +235,10 @@ export class RechargeController {
    * 那样登录用户拿到的权限判定会与游客一样是「未知」。
    */
   private async optionalUserId(req: Request): Promise<number | null> {
-    const token = req.cookies?.[SESSION_COOKIE_NAME];
-    if (typeof token !== "string" || !token) return null;
+    // IKJAZM：令牌可能来自请求头（新）或 cookie（迁移期）。只看 cookie 会让
+    // 只带请求头的已登录用户被判成游客——看到游客价、「登录后购买」。
+    const token = extractLoginToken(req);
+    if (!token) return null;
     try {
       const session = await this.sessions.resolveSession(token);
       return session ? Number(session.userId) : null;

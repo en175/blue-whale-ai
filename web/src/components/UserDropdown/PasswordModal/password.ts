@@ -16,12 +16,13 @@ export function isNewPasswordLengthValid(password: string): boolean {
 }
 
 export function canSubmitPasswordChange(input: {
-  oldPassword: string;
+  /** `null` = 这个账号**没有旧密码**（走的是「设置密码」），该项不参与判定 */
+  oldPassword: string | null;
   newPassword: string;
   confirmPassword: string;
 }): boolean {
   return (
-    input.oldPassword.trim().length > 0 &&
+    (input.oldPassword === null || input.oldPassword.trim().length > 0) &&
     isNewPasswordLengthValid(input.newPassword) &&
     input.confirmPassword === input.newPassword
   );
