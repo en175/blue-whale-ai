@@ -101,7 +101,8 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 | 错误码改码注释对账 | 🔴 硬挡 | pre-commit：staged 含 `backend/libs/contracts/error-codes.ts` 时，`scripts/check-error-code-drift.mjs` 对改码项（如让号 1051→1052）全仓 grep 旧数值在该错误域代码注释与测试名的残留，命中拦截；行内含新数值的迁移说明放行；无 node 环境跳过 |
 | 契约 breaking 检测 | 🔴 硬挡 | pre-commit：staged 含 `contracts/proto/` 时，`scripts/check-contract-breaking.sh` 以 buf 对照 `HEAD` 拦破坏性契约变更（字段号复用会让新旧两端读到的数据静默错位，且线上无法回滚）；退出码 1 拦提交，2（buf 未安装）软提醒放行。PR 门禁另跑 `bash scripts/check-contract-breaking.sh release/<批次分支>` 对照批次基线；字段只加不删、删字段走 `reserved`，规则见 [contracts/README.md](../../contracts/README.md) |
 | 禁直推 master/main | 🔴 硬挡 | pre-push：任何本地直推 `master`/`main` 一律拦，合并只在 Gitee 服务端走 PR |
-| PR 前目标基线校验 | 🔴 发布门禁 | 普通任务分支即使落后也允许日常 push；创建/更新 PR 前由 `publish-review-package.sh` 校验是否包含实际目标基线，未包含时要求先运行 `sync-task-from-origin.sh sync --target-branch <目标分支> --json`。Hook 不自动同步。 |
+| PR 前目标基线校验 | 🔴 发布门禁 | 创建/更新 PR 前由 `publish-review-package.sh` 校验是否包含实际目标基线，未包含时要求先运行 `sync-task-from-origin.sh sync --target-branch <目标分支> --json`。Hook 不自动同步。 |
+| 前端推送构建校验 | 🔴 硬挡 | pre-push 核验实际待推送提交的双模式构建凭证；缺失、失败或输入变化均阻断。Agent 先主动执行验证，详见 [前端推送构建门禁](../../agent-rules/frontend-build-push.md)。 |
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |
 | 本地任务提交与合入 | 🟢 放行 / 🔴 阻断 | ZCode / Claude Code / Codex / Kimi CLI `PreToolUse`（`confirm-release-action.sh`）：任务分支的普通 `git commit`（含 `--amend`）与普通 `git merge` 放行；`commit-task-for-review.sh` 是 review 检查点；旧 `merge-task-to-local-master.sh` 已废止并硬拦，普通任务经目标 release PR 合入。 |
 | 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支从元数据读取目标 release，对本机已抓取的 `origin/<目标>` 引用给软提醒；不执行 fetch，不拦 commit。PR 门禁会重新抓取远端。历史演进见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)。 |

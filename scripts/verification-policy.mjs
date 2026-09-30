@@ -5,6 +5,7 @@
 // 实际存在的形态（commands/ 直下单层 .md），出现子目录等新形态再放宽。
 const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|agent-rules\/.*\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/agents\/openai\.yaml|\.(?:agents|claude|superpowers|zcode|qoder)\/commands\/[^/]+\.md)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
+const FRONTEND_BUILD_FILE = /^(?:web\/|backend\/libs\/(?:contracts|core)\/|(?:backend\/)?(?:package\.json|tsconfig(?:\.[^.]+)?\.json)$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.dockerignore$)/;
 // `.json` 也算 web 源码：`web/src/api/agent-rest-routes.v1.json` 是 agent 路由清单的副本，
 // `web/src/api/agentRoutes.test.ts` 正在断言它——改了副本却不跑 web 测试，等于没有守卫。
 const WEB_SOURCE = /^web\/src\/.*\.(?:ts|tsx|css|json)$/;
@@ -82,6 +83,12 @@ function hasProductImpact(file, documentationOnlyFiles) {
   return PRODUCT_IMPACT_FILE.test(file) && !SKILL_PACKAGE_FILE.test(file) && !SKILL_DOCKERFILE.test(file) && !isTestFile(file) && !documentationOnlyFiles.has(file);
 }
 
+export function requiresFrontendBuild(files, documentationOnlyFiles = []) {
+  const documentation = new Set(documentationOnlyFiles);
+  return files.some((file) => FRONTEND_BUILD_FILE.test(file) &&
+    !isDocumentation(file, documentation) && !/\.mdx?$/i.test(file));
+}
+
 function sourceArea(file) {
   if (SKILL_ASSET_FILES.has(file)) return "skill-assets";
   if (BILLING_SOURCE.test(file)) return "billing-java";
@@ -89,7 +96,8 @@ function sourceArea(file) {
   if (NODE_SOURCE.test(file)) return "node";
   if (BACKEND_SOURCE.test(file) || BACKEND_TOOLING_FILE.test(file)) return "backend";
   if (JAVA_SOURCE.test(file)) return "worker-java";
-  if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) || WEB_E2E_FILE.test(file)) return "web";
+  if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) || WEB_E2E_FILE.test(file) ||
+      (file.startsWith("web/") && !EXECUTABLE_FILE.test(file) && requiresFrontendBuild([file]))) return "web";
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
   if (OPERATIONS_FILE.test(file)) return "operations";
   if (SKILL_SCRIPT_FILE.test(file)) return "operations";
@@ -100,6 +108,7 @@ function sourceArea(file) {
 
 function inferredAreas(files, documentationOnlyFiles) {
   const areas = new Set(files.map(sourceArea).filter(Boolean));
+  if (requiresFrontendBuild(files, documentationOnlyFiles)) areas.add("web");
   // server/blue-whale-common 与聚合 server/pom.xml 是 worker / billing 的**共同依赖**：
   // 任一变了，两个消费者都要重新验——只跑其中一个等于放另一个裸奔。
   if (files.some((file) => /^server\/(?:blue-whale-common\/|pom\.xml)/.test(file))) {
@@ -115,7 +124,8 @@ function inferredAreas(files, documentationOnlyFiles) {
 }
 
 function isDocumentation(file, documentationOnlyFiles) {
-  return DOCUMENTATION_FILE.test(file) || documentationOnlyFiles.has(file);
+  return DOCUMENTATION_FILE.test(file) || file === "GLOSSARY.md" ||
+    /^web\/.*\.mdx?$/i.test(file) || documentationOnlyFiles.has(file);
 }
 
 function classified(file, documentationOnlyFiles) {
@@ -123,7 +133,7 @@ function classified(file, documentationOnlyFiles) {
     isDocumentation(file, documentationOnlyFiles) ||
     GOVERNANCE_FILE.test(file) ||
     PRODUCT_IMPACT_FILE.test(file) ||
-    sourceArea(file) !== null
+    sourceArea(file) !== null || (!EXECUTABLE_FILE.test(file) && requiresFrontendBuild([file], documentationOnlyFiles))
   );
 }
 
@@ -214,7 +224,7 @@ function classifyAutomatically(files, stage, documentationOnlyFiles) {
   ) {
     return {
       tier: "scoped",
-      areas,
+      areas: inferredAreas(files, documentationOnlyFiles),
       reasons: ["known source paths changed"],
     };
   }
@@ -267,6 +277,8 @@ function appendAreaCommands(commands, areas, base) {
       // --passWithNoTests：web 变更常常只动 CSS 或页面壳，模块图上够不到任何测试；
       // 那种情况该放行，而不是把「没有相关测试」报成失败。
       ["npm", "--prefix", "web", "run", "test", "--", "--changed", base, "--passWithNoTests"],
+      ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "test"],
+      ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "release"],
     );
   }
   if (areas.includes("worker-java")) {

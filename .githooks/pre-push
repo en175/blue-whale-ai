@@ -4,7 +4,7 @@
 # 规则：
 #   - master/main 保护分支：**任何本地直推一律拦截**（合并只在 Gitee 服务端走 PR）。
 #   - 其他本地分支：分支名必须通过结构化中文命名校验。
-#   - 工单分支允许日常 push；创建/更新 PR 时由发布入口检查任务目标 release。
+#   - 影响前端的推送须有绑定待推送 HEAD 的双模式构建凭证。
 #
 # 退出码非 0 = 拦截 push。
 # 注意：rebase/merge 进行中时此 hook 不应误触发，但 pre-push 正常不会在 rebase 中触发。
@@ -71,6 +71,21 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         ;;
     esac
   fi
+
+  # 新发布线沿用远端生产版本；更新 release 或携带新代码仍执行构建门禁。
+  case "$remote_ref:$remote_sha" in
+    refs/heads/release/*:0000000000000000000000000000000000000000)
+      production_sha="$(git ls-remote --heads origin refs/heads/master | cut -f1)"
+      if [ -n "$production_sha" ] && [ "$local_sha" = "$production_sha" ]; then
+        continue
+      fi
+      ;;
+  esac
+
+  if ! node "$ROOT/scripts/verify-change-scope.mjs" check-push --head "$local_sha" </dev/null; then
+    blocked=1
+    reason="${reason}  ${branch}：前端构建凭证缺失、失败或已失效\\n"
+  fi
 done
 
 if [ "$blocked" -ne 0 ]; then
@@ -100,6 +115,8 @@ EOF
 
 完整规则见 docs/agents/branch-naming.md。
 EOF
+  else
+    printf 'pre-push: 推送验证未通过，已拦截。\n%b\n先运行 node scripts/verify-change-scope.mjs run --stage pr，再重新推送。\n' "$reason" >&2
   fi
   exit 1
 fi
