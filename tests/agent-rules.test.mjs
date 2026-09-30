@@ -163,8 +163,8 @@ test("typecheck generates the Prisma client before compiling a fresh worktree", 
 });
 
 test("CBM exploration has one policy before worktree creation", () => {
-  assert.match(read('CLAUDE.md'), /agent-rules\/code-discovery.md/);
-  assert.match(read('AGENTS.md'), /agent-rules\/code-discovery.md/);
+  assert.match(read('CLAUDE.md'), /代码理解.*agent-rules\/code-discovery\.md/);
+  assert.match(read('AGENTS.md'), /开始任务前.*CLAUDE\.md.*按其路由表/);
   for (const path of ['CLAUDE.md', 'AGENTS.md']) {
     assert.doesNotMatch(read(path), /first run `graphify/);
   }
