@@ -1,7 +1,10 @@
 /** IKJ7OS 视频卡悬停自动播放预览：起播/续播排除态谓词与常量。
  *  纯函数模块（家族先例 toolbarVisibility.ts / generationOverlay.ts），MediaNode 与测试共用。
  *  IKJ7RS 交付未选中卡基础链路；IKJ7S1 翻转起播门（选中卡同样自动开播）并加入多选抑制，
- *  选中卡尾播/让位的运行时状态机在 MediaNode/index.tsx。 */
+ *  选中卡尾播/让位的运行时状态机在 MediaNode/index.tsx。
+ *  IKJEI0 genStatus 改 type-only 引用 MediaGenStatus（先例 failHeadline.ts）：单一类型来源，
+ *  MediaGenStatus 增删态本文件自动跟随，不再手写并集（IKIZQB 漂移两次发作的收口）。 */
+import type { MediaGenStatus } from './index';
 
 /** 悬停布防延时：进入内容区满此时长才开播；计时内划过不播，保持首帧海报无视觉变化 */
 export const HOVER_PREVIEW_DELAY_MS = 100;
@@ -14,7 +17,7 @@ export interface VideoHoverPreviewInput {
   /** 视频加载失败兜底态（MediaNode 内即 videoError != null） */
   hasVideoError?: boolean;
   /** 生成状态：任一有值即生成流程卡（含重生成中成品卡、质检 checking） */
-  genStatus?: 'draft' | 'generating' | 'checking' | 'failed' | 'cancelled';
+  genStatus?: MediaGenStatus;
   /** 草稿身份标记 */
   draft?: boolean;
   /** 素材缺失（水合期派生） */

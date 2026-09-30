@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { HOVER_PREVIEW_DELAY_MS, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
+import type { VideoHoverPreviewInput } from './hoverPreview';
+import type { MediaGenStatus } from './index';
 import { isMultiNodeSelection } from '../../useSoloNodeSelected';
+
+/** IKJEI0 类型同源守卫：genStatus 与 MediaGenStatus 必须双向可赋值，
+ *  任一侧漂移（如手写并集漏跟新态，IKIZQB 发作模式）即本文件编译红 */
+const _genStatusCoversMediaGenStatus: VideoHoverPreviewInput['genStatus'] = undefined as MediaGenStatus | undefined;
+const _mediaGenStatusCoveredByGenStatus: MediaGenStatus | undefined = undefined as VideoHoverPreviewInput['genStatus'];
+void _genStatusCoversMediaGenStatus;
+void _mediaGenStatusCoveredByGenStatus;
 
 /** 未选中成品视频卡基准样本：满足起播门的全部条件 */
 const eligibleBase = {
@@ -25,6 +34,7 @@ describe('videoHoverPreviewEligible / videoHoverPreviewBlocked（IKJ7RS 建，IK
     ['抓手（拖动）工具模式', { ...eligibleBase, toolMode: 'drag' as const }],
     ['加载失败兜底', { ...eligibleBase, hasVideoError: true }],
     ['生成中（含重生成成品卡）', { ...eligibleBase, genStatus: 'generating' as const }],
+    ['质检核对锁定 checking', { ...eligibleBase, genStatus: 'checking' as const }],
     ['待生成草稿', { ...eligibleBase, genStatus: 'draft' as const }],
     ['生成失败', { ...eligibleBase, genStatus: 'failed' as const }],
     ['已取消', { ...eligibleBase, genStatus: 'cancelled' as const }],
