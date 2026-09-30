@@ -28,8 +28,7 @@ class CbmContextTests(unittest.TestCase):
         result = self.context()
         self.assertEqual(result['hookEventName'], 'SessionStart')
         self.assertIn(str(ROOT), result['additionalContext'])
-        self.assertIn('agent-rules/code-discovery.md', result['additionalContext'])
-        self.assertIn('search_graph', result['additionalContext'])
+        self.assertIn(str(ROOT / 'agent-rules/code-discovery.md'), result['additionalContext'])
 
     def test_global_plugin_does_not_suppress_repository_protocol(self):
         # The real home has the official plugin installed: local rules must still arrive.
@@ -78,8 +77,9 @@ class CbmContextTests(unittest.TestCase):
     def test_kimi_observation_events_are_silent(self):
         self.assertEqual(self.invoke('SessionStart', client_type='kimi_code_cli'), '')
 
-    def test_subagent_reminder_requires_explicit_handoff(self):
-        self.assertIn('子代理', self.context(event='SubagentStart')['additionalContext'])
+    def test_subagent_reminder_routes_to_protocol(self):
+        result = self.context(event='SubagentStart')
+        self.assertIn(str(ROOT / 'agent-rules/code-discovery.md'), result['additionalContext'])
 
     def test_five_platforms_install_repository_reminders(self):
         for filename, nested in [('.claude/settings.json', False),
