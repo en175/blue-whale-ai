@@ -14,6 +14,7 @@ import {
   BillingAdminConfigError,
   BillingAdminError,
 } from "@lib/shared/billing/billing-admin-client.js";
+import { PasswordPolicyError } from "@lib/shared/identity/index.js";
 import { AdminUsersController } from "./users.controller.js";
 
 // 冻结强制登出：freeze 在本地把 bw_users.status 置为 DISABLED 后 best-effort
@@ -28,6 +29,8 @@ function createController(overrides: {
   operationLogCreate?: ReturnType<typeof vi.fn>;
   userExists?: ReturnType<typeof vi.fn>;
   listAdminUsers?: ReturnType<typeof vi.fn>;
+  listRoleCodes?: ReturnType<typeof vi.fn>;
+  resetPassword?: ReturnType<typeof vi.fn>;
 } = {}) {
   const operationLog = { create: overrides.operationLogCreate ?? vi.fn().mockResolvedValue(undefined) };
   const sessions = { revokeAllForUser: overrides.revokeAllForUser ?? vi.fn().mockResolvedValue(0) };
@@ -35,6 +38,8 @@ function createController(overrides: {
     listAdminUsers: overrides.listAdminUsers ?? vi.fn().mockResolvedValue({ items: [], total: 0 }),
     setUserStatus: overrides.setUserStatus ?? vi.fn().mockResolvedValue(true),
     userExists: overrides.userExists ?? vi.fn().mockResolvedValue(true),
+    listRoleCodes: overrides.listRoleCodes ?? vi.fn().mockResolvedValue([]),
+    resetPassword: overrides.resetPassword ?? vi.fn().mockResolvedValue(undefined),
   };
   const controller = new AdminUsersController(
     identity as never,
@@ -380,6 +385,125 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
     }
     expect(identity.setUserStatus).not.toHaveBeenCalled();
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * IKJABH：管理员重置密码。
+ *
+ * <p>它与冻结的性质不同 —— 冻结是「让这个账号暂时不能用」，重置是**交出这个账号**：
+ * 管理员填的那个口令就是他登进这个账号的钥匙。所以除了「写库 + 踢会话 + 记审计」，
+ * 这里还有两条**权限边界**，一条少了就是一次越权：
+ * 不能重置自己（没意义且自锁），不能重置超管（否则任何 admin 一步接管超管）。
+ */
+describe("AdminUsersController.manage（IKJABH 重置密码）", () => {
+  beforeEach(() => {
+    grantCredits.mockReset();
+  });
+
+  const RESET = { action: "reset_password", reason: "用户报障", password: "TempPass123" };
+
+  function call(controller: AdminUsersController, body: unknown, rawUserId = "42") {
+    return controller.manage(USER, rawUserId, body as Record<string, unknown>, BEARER);
+  }
+
+  it("重置：写新口令（置强制改密）→ 踢该用户全部会话 → 审计 user.reset_password", async () => {
+    const { controller, identity, sessions, operationLog } = createController({
+      revokeAllForUser: vi.fn().mockResolvedValue(2),
+    });
+
+    const result = await call(controller, RESET);
+
+    // 哨兵：口令与「必须改密」是 repos 那一对的入参，这里只钉住「转交给了 identity」
+    expect(identity.resetPassword).toHaveBeenCalledWith(42, "TempPass123");
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
+    expect(result).toEqual({ success: true, data: { revokedSessions: 2 } });
+    expect(operationLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "user",
+        action: "user.reset_password",
+        target: "user:42",
+        targetUserId: "42",
+        detail: expect.stringContaining('"revokedSessions":2'),
+      }),
+    );
+  });
+
+  it("★ 不能重置自己 → 400，一个字都不写", async () => {
+    // 管理员是唯一能重置别人的人，误点一下自己就把自己锁在外面了；
+    // 而且「自己重置自己」本来就没有要解决的问题 —— 走自助改密即可。
+    const { controller, identity, sessions } = createController();
+
+    await expect(call(controller, RESET, "1")).rejects.toMatchObject({ status: 400 });
+
+    expect(identity.resetPassword).not.toHaveBeenCalled();
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it("★ 不能重置持有 super_admin 的账号 → 403，一个字都不写", async () => {
+    // 少了这一条，任何一个 admin 只要重置一次超管、拿自己填的口令登进去，
+    // 就等于一步接管了超管 —— 而「谁能进管理端」正是靠 super_admin 分的。
+    const { controller, identity, sessions } = createController({
+      listRoleCodes: vi.fn().mockResolvedValue(["user", "super_admin"]),
+    });
+
+    await expect(call(controller, RESET)).rejects.toMatchObject({ status: 403 });
+
+    expect(identity.resetPassword).not.toHaveBeenCalled();
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it("重置目标不存在 → 404（billing 那边没有用户表，没人兜底）", async () => {
+    const { controller, identity } = createController({
+      userExists: vi.fn().mockResolvedValue(false),
+    });
+
+    await expect(call(controller, RESET)).rejects.toMatchObject({ status: 404 });
+    expect(identity.resetPassword).not.toHaveBeenCalled();
+  });
+
+  it("口令不合规（PasswordPolicyError）→ 400 而不是 500", async () => {
+    // 它是**输入问题**，不是服务故障。不特判的话会走到 toAdminError 的兜底 500，
+    // 管理员只能靠自己猜「是不是密码太短了」。
+    const { controller, sessions } = createController({
+      resetPassword: vi
+        .fn()
+        .mockRejectedValue(new PasswordPolicyError("密码至少 8 位")),
+    });
+
+    await expect(call(controller, RESET)).rejects.toMatchObject({
+      status: 400,
+      message: "密码至少 8 位",
+    });
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it("password 缺失 / 非字符串 → 400，不写库", async () => {
+    const { controller, identity } = createController();
+
+    for (const password of [undefined, "", 12345678, null]) {
+      await expect(
+        call(controller, { ...RESET, password }),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(identity.resetPassword).not.toHaveBeenCalled();
+  });
+
+  it("会话踢出失败为 best-effort：仍成功，审计记 revokeError", async () => {
+    // 口令已经落库了，踢会话失败不该把这次重置整个回滚 —— 那会让管理员以为没重置成功、
+    // 再点一次。但失败必须落在审计里可见，否则「重置了但人还在线」永远查不出来。
+    const { controller, operationLog } = createController({
+      revokeAllForUser: vi.fn().mockRejectedValue(new Error("redis timeout")),
+    });
+
+    const result = await call(controller, RESET);
+
+    expect(result).toEqual({ success: true, data: { revokedSessions: 0 } });
+    expect(operationLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: expect.stringContaining('"revokeError":"redis timeout"'),
+      }),
+    );
   });
 });
 

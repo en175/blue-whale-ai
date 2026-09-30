@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
+import { isSuperAdmin } from "@lib/core/identity/roles.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import {
@@ -26,13 +27,19 @@ import {
 } from "@lib/shared/billing/billing-admin-client.js";
 import {
   IdentityService,
+  PasswordPolicyError,
   USER_STATUS_DISABLED,
   USER_STATUS_NORMAL,
 } from "@lib/shared/identity/index.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
-const USER_MANAGE_ACTIONS = new Set(["freeze", "unfreeze", "adjustBalance"]);
+const USER_MANAGE_ACTIONS = new Set([
+  "freeze",
+  "unfreeze",
+  "adjustBalance",
+  "reset_password",
+]);
 
 const ACTION_LOG_MAP: Record<string, string> = {
   freeze: "user.freeze",
@@ -41,6 +48,12 @@ const ACTION_LOG_MAP: Record<string, string> = {
   //    tab 过滤的是 `'user.adjust_balance'`（UserManage 的 adjusts），于是那一步的
   //    发放在界面上**永远看不见**。键名与前端常量是一对，改一处必须改另一处。
   adjustBalance: "user.adjust_balance",
+  // 同理：这条键在前端有**两个**配套落点，少一个这功能在界面上就是残的 ——
+  // 展示名映射 `ACTION_LABELS`（`web/src/admin/pages/UserManage/index.tsx:62`），
+  // 以及 `UserManageAction` 联合类型（`web/src/api/adminUsers.ts:62`）——
+  // 后者不含 `reset_password` 时，管理端**根本发不出**这个请求。
+  // 两处都在 IKJABI（前端子单），本单只保证后端这一侧的名字是对的。
+  reset_password: "user.reset_password",
 };
 
 @Controller("admin/users")
@@ -112,15 +125,18 @@ export class AdminUsersController {
     }
     const action = body.action;
     if (typeof action !== "string" || !USER_MANAGE_ACTIONS.has(action)) {
-      throw new AdminException(400, "action 须为 freeze/unfreeze/adjustBalance");
+      throw new AdminException(
+        400,
+        "action 须为 freeze/unfreeze/adjustBalance/reset_password",
+      );
     }
     const reason = typeof body.reason === "string" ? body.reason.trim() : "";
     if (!reason) throw new AdminException(400, "reason 必填");
 
-    // 冻结时吊销会话的统计（best-effort）：冻结成功后踢该用户全部登录会话，立即生效。
+    // 踢会话的统计（best-effort）：freeze 与 reset_password 都会踢该用户全部登录会话。
     let revokedSessions = 0;
     let revokeError: string | null = null;
-    /** adjustBalance 的发放结果；freeze/unfreeze 保持 null。 */
+    /** adjustBalance 的发放结果；其余 action 保持 null。 */
     let granted: { credits: number | null; duplicated: boolean } | null = null;
 
     try {
@@ -150,6 +166,51 @@ export class AdminUsersController {
           USER_STATUS_NORMAL,
         );
         if (!found) throw new AdminException(404, "用户不存在");
+      } else if (action === "reset_password") {
+        // ★ 管理员重置密码（IKJABH）—— 见 GLOSSARY「重置密码」。
+        //   这里代替原密码校验的是**管理员权限本身**，所以边界全在这一层：
+        //   越权判定与拒绝文案必须在一起，别挪进 IdentityService（那边收不到操作者）。
+        if (userId === Number(user.userId)) {
+          // 自己重置自己没有任何意义 —— 走自助改密即可，而且管理员是唯一
+          // 能重置别人的人，误点一下自己就把自己锁在外面的成本太高。
+          throw new AdminException(400, "不能重置自己的密码，请走「修改密码」");
+        }
+        if (!(await this.identity.userExists(userId))) {
+          throw new AdminException(404, "用户不存在");
+        }
+        // ⚠️ **禁止对持有 super_admin 的账号重置**：普通管理员重置一次，就能用
+        //    自己填的口令登进那个超管账号 —— 而「谁能进管理端」正是靠 super_admin
+        //    分的。少了这一条，任何一个 admin 都能一步接管超管。
+        //    （超管忘密码的兜底是直接改库，不做成产品功能。）
+        if (isSuperAdmin(await this.identity.listRoleCodes(userId))) {
+          throw new AdminException(403, "不能重置超级管理员的密码");
+        }
+        const newPassword = typeof body.password === "string" ? body.password : "";
+        if (!newPassword) throw new AdminException(400, "password 必填");
+        try {
+          await this.identity.resetPassword(userId, newPassword);
+        } catch (error) {
+          // 口令不合规（<8 位 / >72 字节）是**输入问题**，不是服务故障。
+          // 不特判的话它会走到下面 `toAdminError` 的兜底 —— 文案其实还在（那里原样透传
+          // `error.message`），错的是**状态码**：一个 400 被报成 500，告警与指标里多出
+          // 一次「服务异常」，值班的人会去翻后端日志找一次根本没发生的故障。
+          if (error instanceof PasswordPolicyError) {
+            throw new AdminException(400, error.message);
+          }
+          throw error;
+        }
+        // 重置后踢掉该用户全部会话：**重置之前**签发的令牌不该继续可用，
+        // 否则拿到旧口令的人（以及重置前就在线的那台设备）依然进得去。
+        // best-effort，与 freeze 同口径 —— 口令已落库，踢会话失败不阻断重置，
+        // 失败落在审计里可见（`revokeError`）。
+        try {
+          revokedSessions = await this.sessions.revokeAllForUser(userId);
+        } catch (error) {
+          revokeError = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `reset_password user=${userId} session revoke failed: ${revokeError}`,
+          );
+        }
       } else {
         // ★ 加积分 = 调 billing 的发放接口，**不写我们自己的库**。
         //   账本的权威在 billing（ADR-0114）：余额是各批次剩余之和，压根没有物化余额表，
@@ -239,7 +300,9 @@ export class AdminUsersController {
         targetUserId: String(userId),
         detail: JSON.stringify({
           reason,
-          ...(action === "freeze"
+          // 踢过会话的 action 都带上：审计要能回答「重置之后他到底被踢下线没有」，
+          // 而 `revokeError` 是这条 best-effort 唯一的可见出口。
+          ...(action === "freeze" || action === "reset_password"
             ? { revokedSessions, ...(revokeError ? { revokeError } : {}) }
             : {}),
           ...adjustAudit,
@@ -256,9 +319,12 @@ export class AdminUsersController {
       );
     }
 
-    // freeze 返回吊销会话数；adjustBalance 返回本次发放结果（`duplicated` = 幂等命中，
-    // 这笔之前就发过，本次没有重复发放）；unfreeze 维持 data: null。
-    if (action === "freeze") return { success: true, data: { revokedSessions } };
+    // freeze / reset_password 返回吊销会话数（前端据此说「已踢下线 N 台设备」）；
+    // adjustBalance 返回本次发放结果（`duplicated` = 幂等命中，这笔之前就发过，
+    // 本次没有重复发放）；unfreeze 维持 data: null。
+    if (action === "freeze" || action === "reset_password") {
+      return { success: true, data: { revokedSessions } };
+    }
     if (granted) return { success: true, data: granted };
     return { success: true, data: null };
   }

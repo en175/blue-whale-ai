@@ -50,6 +50,10 @@ function loginData(result: LocalLoginResult, isNewUser: boolean, token: string) 
     is_new_user: isNewUser,
     // 手机号验证码建出来的账号没有口令——前端据此决定个人设置里是「设置密码」还是「修改密码」。
     has_password: result.hasPassword,
+    // IKJABH：管理员重置过密码，前端登录后必须**强制**弹改密、且不给关闭入口。
+    // 带上它而不是只靠 /api/me：`is_new_user` 这些也是一次登录一个快照，
+    // 前端在登录那一刻就要决定跳不跳这个流程，不该多等一次往返。
+    must_change_password: result.mustChangePassword,
   };
 }
 

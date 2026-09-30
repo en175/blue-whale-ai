@@ -54,6 +54,13 @@ export interface LocalLoginResult {
    * 不需要、也提供不了原密码**。见 GLOSSARY「账号与密码」词条。
    */
   hasPassword: boolean;
+  /**
+   * 账号是否处于「下次登录必须改密」状态（IKJABH，管理员重置过密码）。
+   *
+   * <p>前端据此在登录成功后**强制**弹出改密窗口、且不给关闭入口——
+   * 少了这一步，管理员重置出来的临时口令就永久有效，而管理员是知道它的。
+   */
+  mustChangePassword: boolean;
   /** 由角色集合折算的数值档位（见 `roleRank`），只为兼容既有会话与前端口径 */
   role: number;
   /** 1 = 启用 / 0 = 停用，与 `auth.guard.ts` 的 ENABLED_STATUS 一致 */
@@ -64,6 +71,7 @@ export interface LocalLoginResult {
 export interface AccountFlags {
   phone: string | null;
   hasPassword: boolean;
+  mustChangePassword: boolean;
 }
 
 /**
@@ -147,6 +155,7 @@ export class IdentityService {
       email: user.email,
       phone: user.phone,
       hasPassword: user.password !== null,
+      mustChangePassword: user.mustChangePassword,
       role: roleRank(await this.roles.listRoleCodes(user.id)),
       status: user.status === USER_STATUS_NORMAL ? 1 : 0,
     };
@@ -340,7 +349,13 @@ export class IdentityService {
    */
   async resolveAccountFlags(userId: string | number): Promise<AccountFlags | null> {
     const user = await this.users.findById(String(userId));
-    return user ? { phone: user.phone, hasPassword: user.password !== null } : null;
+    return user
+      ? {
+          phone: user.phone,
+          hasPassword: user.password !== null,
+          mustChangePassword: user.mustChangePassword,
+        }
+      : null;
   }
 
   /**
@@ -356,13 +371,16 @@ export class IdentityService {
    * 调用方新口令合不合规）；以及原密码错误只报 {@link InvalidCredentialsError}——
    * 与 {@link login} 同口径，不区分「账号没设过口令」和「密码错」。
    *
-   * @throws InvalidCredentialsError 用户不存在 / 账号没有口令 / 原密码不匹配
-   * @throws PasswordPolicyError 新口令超过 bcrypt 的 72 字节上限
+   * @returns 本次是不是**强制改密**（进入时账号正被管理员重置过）。
+   *          调用方据此决定会话吊销范围：强制改密时当前会话必须**留下**，
+   *          否则用户刚登进来、被迫改完密码、立刻又被踢出去（IKJABH 任务 5）。
+   * @throws InvalidCredentialsError 用户不存在 / 账号有口令但原密码不匹配
+   * @throws PasswordPolicyError 新口令短于下限或超过 bcrypt 的 72 字节上限
    */
   async changePassword(
     userId: string | number,
     input: { oldPassword?: string | undefined; newPassword: string },
-  ): Promise<void> {
+  ): Promise<boolean> {
     const user = await this.users.findById(String(userId));
     if (!user) {
       throw new InvalidCredentialsError();
@@ -377,7 +395,36 @@ export class IdentityService {
     }
     // hashPassword 内部做策略判定（超长即拒，不截断），失败时一个字节都不会落库。
     const passwordHash = await hashPassword(input.newPassword);
-    await this.users.updatePassword(String(userId), passwordHash);
+    // 第三个参数 false = 清掉「下次登录必须改密」。这是这个标记**唯一的**清除点：
+    // 漏掉它，被重置过的账号每次登录都会被拦去改密，改完还拦。
+    await this.users.updatePassword(String(userId), passwordHash, false);
+    return user.mustChangePassword;
+  }
+
+  /**
+   * 管理员重置密码（IKJABH）—— **跳过原密码校验**，并置「下次登录必须改密」。
+   *
+   * <h2>为什么这个方法存在，而不是让管理端复用 {@link changePassword}</h2>
+   *
+   * `changePassword` 的定义性条件就是「以原密码换新密码」，而管理员**不知道**
+   * 用户的原密码——拿一个未定义的原密码去复用它，只会得到一条永远走不通的路径。
+   * 这里代替原密码校验的是**管理员权限本身**，那由调用方（管理端接口 + 它的 Guard）
+   * 保证；本方法只负责「写口令 + 置标记」这两件必然成对的事。
+   *
+   * <p>⚠️ **不在这一层做「禁止重置超管」「禁止重置自己」**——那两条是**权限边界**，
+   * 判据里有「谁在操作」，而这里根本收不到操作者。放在管理端接口那一层（唯一的
+   * 调用点上），判定与拒绝文案才在一处。
+   *
+   * @throws InvalidCredentialsError 目标用户不存在（或已软删）
+   * @throws PasswordPolicyError 新口令短于下限或超过 bcrypt 的 72 字节上限
+   */
+  async resetPassword(userId: string | number, newPassword: string): Promise<void> {
+    const user = await this.users.findById(String(userId));
+    if (!user) {
+      throw new InvalidCredentialsError();
+    }
+    const passwordHash = await hashPassword(newPassword);
+    await this.users.updatePassword(String(userId), passwordHash, true);
   }
 
   /**

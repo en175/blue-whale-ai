@@ -85,6 +85,7 @@ function loginResult(): LocalLoginResult {
     email: null,
     phone: null,
     hasPassword: true,
+    mustChangePassword: false,
     role: 1,
     status: 1,
   };
@@ -302,6 +303,22 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
       code: 200,
       data: { is_new_user: false, has_password: true },
     });
+    // IKJABH：登录响应带出「必须改密」，前端据此在登录那一刻就弹强制改密窗口
+    expect(out).toMatchObject({ data: { must_change_password: false } });
+  });
+
+  it("★ 被管理员重置过：登录响应带 must_change_password=true", async () => {
+    // 前端要在**登录那一刻**决定跳不跳强制改密流程，所以这个标记得跟响应一起回来，
+    // 而不是等前端再打一次 /api/me。
+    const { controller, identity, res } = setup();
+    identity.loginWithPhoneCode.mockResolvedValue({
+      result: phoneResult({ mustChangePassword: true }),
+      isNewUser: false,
+    });
+
+    const out = await controller.loginByCode(CODE_BODY, res);
+
+    expect(out).toMatchObject({ code: 200, data: { must_change_password: true } });
   });
 
   it("验证码错误 → 401，不签发会话，且留一条失败登录日志", async () => {
