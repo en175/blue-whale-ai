@@ -12,7 +12,18 @@ export interface AuthRepo {
     expiresAt: Date;
   }): Promise<unknown>;
   findValidCode(phone: string, code: string): Promise<{ id: string } | null>;
-  upsertUser(phone: string): Promise<{ id: string; username: string; phone: string }>;
+  /**
+   * 按手机号找用户，没有就建一个。
+   *
+   * <p>`created` 回答「本次是不是新建的」——它就是响应里的 `is_new_user`。
+   * 只回一个 id 的话，调用方只能再查一次，或者干脆把 `is_new_user` 写成常量。
+   */
+  upsertUser(phone: string): Promise<{
+    id: string;
+    username: string;
+    phone: string;
+    created: boolean;
+  }>;
   markCodeUsed(codeId: string): Promise<unknown>;
 }
 
@@ -74,7 +85,7 @@ export function createAuthRepo(prisma: PrismaClient): AuthRepo {
     async upsertUser(phone) {
       const existing = await prisma.bw_users.findFirst({ where: { phone } });
       if (existing) {
-        return { id: existing.id.toString(), username: existing.username, phone };
+        return { id: existing.id.toString(), username: existing.username, phone, created: false };
       }
 
       for (let attempt = 0; attempt < USERNAME_RETRIES; attempt++) {
@@ -82,7 +93,7 @@ export function createAuthRepo(prisma: PrismaClient): AuthRepo {
           const created = await prisma.bw_users.create({
             data: { phone, username: randomUsername(), status: "NORMAL" },
           });
-          return { id: created.id.toString(), username: created.username, phone };
+          return { id: created.id.toString(), username: created.username, phone, created: true };
         } catch (error) {
           // 只对用户名撞车重试。其他约束失败（例如 phone 重复说明并发建号）
           // 重试也解决不了，照常抛出——否则真正的错误会变成一次无关的超时。

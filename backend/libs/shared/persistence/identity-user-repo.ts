@@ -65,6 +65,13 @@ export interface IdentityUserRepo {
   /** 写入口令哈希（注册 / 改密）。 */
   updatePassword(id: string, passwordHash: string): Promise<void>;
   /**
+   * 绑定手机号（**首次绑定**，不做换绑）。
+   *
+   * @throws PhoneTakenError 该手机号已被别的账号占用。判定交给唯一索引，
+   *         不在这里先查一次再写——先查后写在并发下会两个都通过检查。
+   */
+  updatePhone(id: string, phone: string): Promise<void>;
+  /**
    * 写账号状态（管理端冻结 / 解冻）。
    *
    * @returns 目标行不存在时 false —— 让调用方能回 404，
@@ -78,6 +85,20 @@ export class UsernameTakenError extends Error {
   constructor(readonly username: string) {
     super("该用户名已被注册");
     this.name = "UsernameTakenError";
+  }
+}
+
+/**
+ * 手机号已被**别的**账号绑走（`bw_users.phone` 唯一索引）。
+ *
+ * <p>与 {@link UsernameTakenError} 同族：都是「唯一索引给出的精确答案」。
+ * 刻意不合并成「冲突」一个类——用户名冲突要用户换个名字，手机号冲突要用户确认
+ * 是不是自己已经有个号了，两者给用户指的下一步完全不同。
+ */
+export class PhoneTakenError extends Error {
+  constructor() {
+    super("该手机号已被绑定");
+    this.name = "PhoneTakenError";
   }
 }
 
@@ -154,6 +175,19 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
         where: { id: BigInt(id) },
         data: { password: passwordHash, gmt_modified: new Date() },
       });
+    },
+
+    async updatePhone(id, phone) {
+      try {
+        await prisma.bw_users.update({
+          where: { id: BigInt(id) },
+          data: { phone, gmt_modified: new Date() },
+        });
+      } catch (error) {
+        // phone 上没有别的约束，走到这个 catch 就说明冲突发生在 phone 上。
+        if (isUniqueViolation(error)) throw new PhoneTakenError();
+        throw error;
+      }
     },
 
     async updateStatus(id, status) {

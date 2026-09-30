@@ -256,4 +256,56 @@ describe("RateLimitGuard", () => {
     ).rejects.toMatchObject({ status: 429, code: RATE_LIMITED });
     expect(take).toHaveBeenCalledTimes(1);
   });
+
+  it("phone 维度的桶读 body.phone（发码路由），不读 body.username", async () => {
+    const take = vi.fn().mockResolvedValue({ allowed: true });
+    const options: RateLimitOptions = {
+      buckets: [
+        { scope: "send_code_phone_minute", key: "phone", limit: 1, windowMs: 60_000 },
+      ],
+    };
+    const guard = new RateLimitGuard(
+      { getAllAndOverride: () => options } as never,
+      { take } as never,
+      { isAllowed: () => false } as never,
+    );
+
+    await guard.canActivate(
+      makeContext({
+        headers: { "x-forwarded-for": "203.0.113.9" },
+        body: { phone: "13800001234" },
+      }) as never,
+    );
+
+    expect(take).toHaveBeenCalledWith({
+      scope: "send_code_phone_minute",
+      key: "13800001234",
+      limit: 1,
+      windowMs: 60_000,
+    });
+  });
+
+  it("★ 字段名对不上时桶**静默跳过**——这就是 phone 维度必须存在的原因", async () => {
+    // 钉住一个真实踩过的形状：`account` 维度写死读 `body.username`，
+    // 而发码路由的入参是 `body.phone`。把 phone 桶配成 account 不报任何错，
+    // 它只是永不计数——看着有防护，实际一条都没拦，而且没有任何信号。
+    const take = vi.fn();
+    const options: RateLimitOptions = {
+      buckets: [
+        { scope: "send_code_account", key: "account", limit: 1, windowMs: 60_000 },
+      ],
+    };
+    const guard = new RateLimitGuard(
+      { getAllAndOverride: () => options } as never,
+      { take } as never,
+      { isAllowed: () => false } as never,
+    );
+
+    await expect(
+      guard.canActivate(
+        makeContext({ headers: {}, body: { phone: "13800001234" } }) as never,
+      ),
+    ).resolves.toBe(true);
+    expect(take).not.toHaveBeenCalled();
+  });
 });

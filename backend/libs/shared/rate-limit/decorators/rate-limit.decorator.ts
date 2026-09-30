@@ -2,7 +2,7 @@ import { SetMetadata } from "@nestjs/common";
 
 export const RATE_LIMIT_KEY = "rateLimit";
 
-export type RateLimitKey = "ip" | "account" | "user";
+export type RateLimitKey = "ip" | "account" | "phone" | "user";
 
 export type RateLimitBucket = {
   scope: string;

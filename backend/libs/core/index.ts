@@ -71,6 +71,7 @@ export {
   type LoginResult,
   type AuthUser,
 } from "./auth/login-with-code.js";
+export { PHONE_RE, isValidPhone } from "./auth/phone.js";
 export { parseSkillMd, serializeSkillMd } from "./skills/skill-md.js";
 export {
   acceptConversationMessage,

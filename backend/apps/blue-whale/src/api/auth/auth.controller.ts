@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { NewApiError } from "@lib/core";
+import { InvalidVerificationCodeError, isValidPhone, NewApiError } from "@lib/core";
 import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@lib/contracts";
 import { createAuthRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
@@ -30,6 +30,7 @@ import {
   sessionCookieOptions,
 } from "@lib/shared/session/cookie.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import type { LoginByCodeDto } from "./dto/login-by-code.dto.js";
 import type { LoginDto } from "./dto/login.dto.js";
 import type { RegisterDto } from "./dto/register.dto.js";
 
@@ -39,16 +40,29 @@ function loginData(result: LocalLoginResult, isNewUser: boolean) {
     user_id: result.userId,
     username: result.username,
     email: result.email ?? null,
-    phone: "",
+    // 空串而非 null：前端 `LoginData.phone` 声明为 `string`，注释写着「手机号（可为空串）」。
+    // 存量用户（从 new-api 迁来的）一个手机号都没有，这里对他们就是空串。
+    phone: result.phone ?? "",
     is_new_user: isNewUser,
-    has_password: true,
+    // 手机号验证码建出来的账号没有口令——前端据此决定个人设置里是「设置密码」还是「修改密码」。
+    has_password: result.hasPassword,
   };
 }
 
 /** IKDR4J：IP 20 次/分拦单机批量撞库；账号 5 次/分拦多 IP 分散撞单账号。 */
 const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
 
-function authRateLimit(endpoint: "login" | "register") {
+/**
+ * 按「IP + 一个请求体里的标识」配两个桶。
+ *
+ * <p>⚠️ `accountKey` 必须与路由**实际读取的字段名**对得上：`account` 读 `body.username`，
+ * `phone` 读 `body.phone`。对不上时 `extractKey` 返回 null，那个桶会**静默跳过**
+ * ——配了、看着有防护，实际一条都没拦。
+ */
+function authRateLimit(
+  endpoint: "login" | "register" | "login_by_code",
+  accountKey: "account" | "phone" = "account",
+) {
   return RateLimit({
     buckets: [
       {
@@ -58,14 +72,31 @@ function authRateLimit(endpoint: "login" | "register") {
         windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
       },
       {
-        scope: `${endpoint}_account`,
-        key: "account" as const,
+        scope: `${endpoint}_${accountKey}`,
+        key: accountKey,
         limit: 5,
         windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
       },
     ],
   });
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 短信频控（IKJA4Q）—— 短信**按条计费**，这是成本闸，不是防刷的锦上添花。
+ *
+ * <p>四个桶缺一不可：只按 IP 挡不住换 IP 刷同一个号；只按号码挡不住换号刷爆账单。
+ * 日上限（号 10 条 / IP 50 条）就是真正兜住账单的那一条。
+ */
+const SMS_CODE_RATE_LIMIT = RateLimit({
+  buckets: [
+    { scope: "send_code_phone_minute", key: "phone" as const, limit: 1, windowMs: 60_000 },
+    { scope: "send_code_phone_day", key: "phone" as const, limit: 10, windowMs: DAY_MS },
+    { scope: "send_code_ip_minute", key: "ip" as const, limit: 5, windowMs: 60_000 },
+    { scope: "send_code_ip_day", key: "ip" as const, limit: 50, windowMs: DAY_MS },
+  ],
+});
 
 @Controller("auth")
 export class AuthController {
@@ -86,6 +117,7 @@ export class AuthController {
 
   @Public()
   @Post("send-code")
+  @SMS_CODE_RATE_LIMIT
   async sendCode(
     @Body() body: { phone?: unknown },
     @Headers("x-forwarded-for") forwardedFor?: string,
@@ -189,6 +221,61 @@ export class AuthController {
         await this.loginFailures.recordFailure(username);
         await this.recordLogin({ username, ip, userAgent, success: false, reason: "账密错误" });
         throw projected;
+      }
+      throw toAuthError(error);
+    }
+  }
+
+  /**
+   * 手机号验证码登录（IKJA4Q）—— 没绑过该手机号的账号**当场建一个**。
+   *
+   * <p>⚠️ **不要为了「复用现成代码」改回 `loginWithCode`**：那支用例最后一步签的是
+   * **JWT**（`libs/core/auth/login-with-code.ts`），而全站认证走的是 Redis 会话 +
+   * HttpOnly cookie `bw_session`。接错了会签出一个没人认的令牌，
+   * **用户点完登录立刻 401**——而且报错落在下一次请求上，排查时很难指向这里。
+   * 所以和口令登录一样走 {@link establishSession}。
+   */
+  @Public()
+  @Post("login-by-code")
+  @authRateLimit("login_by_code", "phone")
+  async loginByCode(
+    @Body() body: LoginByCodeDto,
+    @Res({ passthrough: true }) res: Response,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("user-agent") userAgent?: string,
+  ) {
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
+    const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
+
+    if (!isValidPhone(phone) || !code) {
+      return { code: FAILURE_CODE, msg: "手机号和验证码不能为空", data: null };
+    }
+
+    try {
+      const { result, isNewUser } = await this.identity.loginWithPhoneCode({ phone, code });
+      const sessionToken = await this.establishSession(result);
+      res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
+      await this.recordLogin({
+        userId: String(result.userId),
+        username: result.username,
+        ip,
+        userAgent,
+        success: true,
+      });
+      return ok(loginData(result, isNewUser));
+    } catch (error) {
+      if (error instanceof InvalidVerificationCodeError) {
+        // 留痕口径与账密失败一致：对撞码的人来说两条路径没有区别，防护也不该有区别。
+        // 失败时还不知道是谁，拿手机号占 username 这一列——登录日志只有这一个标识位。
+        await this.recordLogin({
+          username: phone,
+          ip,
+          userAgent,
+          success: false,
+          reason: "验证码错误",
+        });
+        throw new NewApiError(error.message, 401, "invalid_verification_code");
       }
       throw toAuthError(error);
     }

@@ -34,6 +34,8 @@ export { IdentityModule } from "./identity.module.js";
 export {
   IdentityService,
   InvalidCredentialsError,
+  PhoneAlreadyBoundError,
+  type AccountFlags,
   type LocalLoginResult,
 } from "./identity.service.js";
 /* 口令策略的失败原因。⚠️ `hashPassword` / `verifyPassword` / `burnVerificationTime`
@@ -49,6 +51,7 @@ export type { Tier } from "@lib/core/identity/tier.js";
  *    （见各方法 JSDoc 的 `@throws`）。它们不属于调用方，只是调用方必须能判别。 */
 export { UnknownRoleError } from "@lib/shared/persistence/identity-role-repo.js";
 export {
+  PhoneTakenError,
   UsernameTakenError,
   USER_STATUS_DISABLED,
   USER_STATUS_NORMAL,
