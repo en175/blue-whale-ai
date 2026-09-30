@@ -8,8 +8,8 @@ describe('USER_DROPDOWN_MENU_ITEMS', () => {
 
     expect(keys).not.toContain('profile');
     expect(labels).not.toContain('个人资料');
-    expect(keys).toEqual(expect.arrayContaining(['account']));
-    expect(labels).toEqual(expect.arrayContaining(['账号信息']));
+    expect(keys).toEqual(expect.arrayContaining(['account', 'credits']));
+    expect(labels).toEqual(expect.arrayContaining(['账号信息', '积分管理']));
     expect(keys).not.toContain('recharge');
     expect(labels).not.toContain('积分充值');
   });

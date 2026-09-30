@@ -27,6 +27,7 @@ describe('titleForPath', () => {
     ['/canvas', `画布 | ${SITE_NAME}`],
     ['/projects', `项目 | ${SITE_NAME}`],
     ['/library', `资产 | ${SITE_NAME}`],
+    ['/account/credits', `账户积分与订单 | ${SITE_NAME}`],
     ['/admin', `管理后台 | ${SITE_NAME}`],
     ['/admin/users', `管理后台 | ${SITE_NAME}`],
   ] as const)('%s → %s', (path, expected) => {

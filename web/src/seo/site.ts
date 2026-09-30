@@ -16,6 +16,7 @@ const ROUTE_PAGE_TITLES: Record<string, string> = {
   canvas: '画布',
   projects: '项目',
   library: '资产',
+  account: '账户积分与订单',
 };
 
 export const WEBSITE_JSON_LD = {
