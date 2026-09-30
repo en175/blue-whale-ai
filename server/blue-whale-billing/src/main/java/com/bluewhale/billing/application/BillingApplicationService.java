@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -407,29 +408,70 @@ public class BillingApplicationService {
     /**
      * 用户可见流水（**一个业务动作一行**，见 {@link TransactionView}）。
      *
-     * <p>只做两件应用层的事，其余在持久化层：
+     * <p>只做三件应用层的事，其余在持久化层：
      * <ol>
      *   <li><b>钳制页大小</b>——{@code page_size} 缺省 20、上限 100（服务端口径，
      *       proto 注释写明「上限由服务端钳制」）</li>
      *   <li><b>校验类型过滤</b>——未知类型当场拒绝。放它过去会返回空列表，
      *       而空列表与「真的没有」长得一模一样，调用方查的是 {@code "recharg"} 也发现不了</li>
+     *   <li><b>夹住页码</b>——{@code page < 1} 归一成 1</li>
      * </ol>
      *
      * @param userId     非空 = 只看该用户（用户面，{@code ListTransactions}）；{@code null} = 全站
      *                   （**管理面**，{@code BillingAdminService.AdminListTransactions}）
-     * @param typeFilter 空串/null = 全部；否则必须是 {@link TransactionType} 的合法值
-     * @param pageToken  上一页给的游标；空串/null = 首页
-     * @throws IllegalArgumentException 类型过滤非法或游标损坏（gRPC 映射成 INVALID_ARGUMENT）
+     * @param typeFilter 空/null = 全部；否则**每个元素**都必须是 {@link TransactionType} 的合法值。
+     *                   **可多值**：用户的「已消耗」页签要一次取 {@code consume} 与 {@code expire}
+     * @param page       页码，从 1 起（{@code < 1} 按 1 处理）
+     * @throws IllegalArgumentException 类型过滤里有非法值（gRPC 映射成 INVALID_ARGUMENT）
      */
-    public TransactionView.Page listTransactions(Long userId, String typeFilter,
-                                                 int pageSize, String pageToken) {
-        String filter = typeFilter == null ? "" : typeFilter.trim();
-        if (!filter.isEmpty()) {
-            // 校验并归一：of() 抛异常即未知类型（gRPC 映射成 INVALID_ARGUMENT）
-            filter = TransactionType.of(filter).key();
-        }
+    public TransactionView.Page listTransactions(Long userId, List<String> typeFilter,
+                                                 int pageSize, int page) {
         int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
-        return transactions.listPage(userId, filter, size, pageToken == null ? "" : pageToken);
+        return transactions.listPage(userId, normalizeTypes(typeFilter), size, page);
+    }
+
+    /**
+     * 校验并归一类型过滤。
+     *
+     * <p>逐个走 {@link TransactionType#of} —— 它抛异常即未知类型。**不能只校验第一个**：
+     * 多值过滤里漏校验的那几个只会返回空结果，而空结果不报错。
+     *
+     * @return 归一后的类型键；入参为空时返回 {@code null}（= 全部），
+     *         让持久化层只判一种「没有过滤」
+     */
+    private static List<String> normalizeTypes(List<String> typeFilter) {
+        if (typeFilter == null || typeFilter.isEmpty()) {
+            return null;
+        }
+        List<String> normalized = new ArrayList<>(typeFilter.size());
+        for (String raw : typeFilter) {
+            String trimmed = raw == null ? "" : raw.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            normalized.add(TransactionType.of(trimmed).key());
+        }
+        return normalized.isEmpty() ? null : List.copyOf(normalized);
+    }
+
+    /**
+     * 用户的**批次台账**（积分明细「已获取」页签）。
+     *
+     * <p>与 {@link #listTransactions} 是两个维度，不是重复：流水是「一个业务动作一行」，
+     * 批次是「一笔发放一行」。**到期明细只有批次给得出** —— 流水行没有 `expires_at`。
+     *
+     * <p>⚠️ **userId 必填、且只认调用方传进来的那一个**：这是用户侧取数，没有「全站」模式。
+     * billing 不会因为收到 0 就去查全表 —— 适配器对 `<= 0` 直接拒（见
+     * {@code BillingGrpcService#listLots}）。这条与运营面 `AdminListTransactions` 的
+     * 「userId = 0 表示全部用户」是两回事，不要照着那边抄。
+     *
+     * @param userId   归属用户，必须 &gt; 0
+     * @param pageSize 缺省 20、上限 100（与流水同一套钳制）
+     * @param page     页码，从 1 起
+     */
+    public CreditLotRepository.UserLotPage listCreditLots(long userId, int pageSize, int page) {
+        int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
+        return lots.listUserLots(userId, size, page);
     }
 
     /**

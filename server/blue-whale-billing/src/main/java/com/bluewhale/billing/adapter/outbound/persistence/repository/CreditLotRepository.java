@@ -161,6 +161,76 @@ public class CreditLotRepository {
     public record SourceAvailable(CreditSource source, long credits) {}
 
     /**
+     * 用户台账里的一行（积分明细「已获取」的展示模型）。
+     *
+     * <p>与 {@link Lot} 的区别：`Lot` 是**扣减用的**读模型（只有 id/source/额度/到期），
+     * 而这一行是**给人看的** —— 要带发放时刻（「获取时间」）、业务归属（「获取详情」里的
+     * 订单号），而且 `remaining` 的口径也不同（见下）。
+     *
+     * @param id        批次 id
+     * @param source    批次来源（**批次口径**：`purchased`，不是流水口径的 `recharge`）
+     * @param amount    发放时的原始积分
+     * @param remaining **可用量** = `remaining − frozen`，不是表里那个 `remaining`。
+     *                  冻结中的部分已经许给在途任务了，对用户来说「不能用」，不该算进
+     *                  「这笔还剩多少」。这与 `available_credits` / `by_source` 用同一个口径
+     *                  （那两处也是 `remaining − frozen`），三个数才能对得上。
+     * @param expiresAt 到期时刻；**null = 永久有效**（表里这一列可为空）
+     * @param bizType   业务类型（recharge / …）；无关联时为空串
+     * @param bizId     关联单号（充值批次 = 订单号）；无关联时为空串
+     */
+    public record UserLot(long id, CreditSource source, long amount, long remaining,
+                          Instant createdAt, Instant expiresAt,
+                          String bizType, String bizId) {}
+
+    /**
+     * 台账的一页。
+     *
+     * @param items 本页的行，按发放时间倒序
+     * @param total 该用户**全部**批次条数（不是本页条数）
+     */
+    public record UserLotPage(List<UserLot> items, long total) {
+        public UserLotPage {
+            items = List.copyOf(items);
+        }
+    }
+
+    /**
+     * 用户台账一页（积分明细「已获取」）。
+     *
+     * <p>⚠️ **列的是全部批次**，不筛有效期、不筛剩余量：用光了的、已过期的批次同样要出现。
+     * 少了它们，「我已获取」就成了一份会自己缩短的清单 —— 与流水里「released 行凭空消失」
+     * 是同一类问题（见 {@code TransactionMapper.xml} 里那段 ★）。
+     *
+     * @param userId 必填。这是用户侧取数，0 只会得到空页，不会得到别人的账
+     * @param size   本页条数（上限由应用层钳制）
+     * @param page   页码，从 1 起；{@code < 1} 夹到 1（负 OFFSET 会让 MySQL 语法错）
+     */
+    public UserLotPage listUserLots(long userId, int size, int page) {
+        long offset = (long) (Math.max(page, 1) - 1) * size;
+        List<UserLot> items = mapper.listUserLots(userId, offset, size).stream()
+                .map(CreditLotRepository::toUserLot)
+                .toList();
+        return new UserLotPage(items, mapper.countUserLots(userId));
+    }
+
+    private static UserLot toUserLot(CreditLotEntity entity) {
+        long remaining = entity.getRemaining() == null ? 0L : entity.getRemaining();
+        long frozen = entity.getFrozen() == null ? 0L : entity.getFrozen();
+        return new UserLot(
+                entity.getId(),
+                CreditSource.of(entity.getSource()),
+                entity.getAmount() == null ? 0L : entity.getAmount(),
+                // 可用量，不是表里那个 remaining —— 冻结部分对用户已经「不能用」了
+                remaining - frozen,
+                DbTime.fromDb(entity.getGmtCreate()),
+                DbTime.fromDb(entity.getExpiresAt()),
+                // NULL → 空串：proto3 的 string 没有 null，空串是唯一的「没有」。
+                // 在这里收敛成一种，上层就不必判两种空
+                entity.getBizType() == null ? "" : entity.getBizType(),
+                entity.getBizId() == null ? "" : entity.getBizId());
+    }
+
+    /**
      * 临期批次（按到期时间从近到远）。
      *
      * @param withinDays 只看这么多天内到期的

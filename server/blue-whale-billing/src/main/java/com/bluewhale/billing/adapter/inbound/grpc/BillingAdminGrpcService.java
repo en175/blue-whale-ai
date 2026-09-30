@@ -32,6 +32,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 
 /**
  * {@code billing.v1.BillingAdminService} 的 server 端实现（契约见
@@ -99,12 +100,19 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
 
             TransactionView.Page page = billing.listTransactions(
                     userId,
-                    request.getType(),
+                    // 运营面是**单值**过滤（它的字面量与用户面不是一套），这里聚成单元素集合；
+                    // 空串要变成「不过滤」而不是「一个叫空串的类型」—— 后者会被校验拒成
+                    // INVALID_ARGUMENT，界面上表现为「不加类型反而报错」。
+                    request.getType().isEmpty() ? null : List.of(request.getType()),
                     request.getPageSize(),
-                    request.getPageToken());
+                    request.getPage());
 
             AdminListTransactionsResponse.Builder response = AdminListTransactionsResponse.newBuilder()
-                    .setPage(PageResponse.newBuilder().setNextPageToken(page.nextPageToken()));
+                    // ⚠️ 运营面**不填 total**（2026-09-30 的决定，见前端对接文档 §6.2）：
+                    //    账本的 COUNT 成本随数据量线性上涨，而运营端这轮没有要显示总条数。
+                    //    **这不是漏了** —— 不设置 = 「未统计」，由 proto3 的 presence 与
+                    //    「真的有 0 条」区分开。要补是后续独立工单。
+                    .setPage(PageResponse.newBuilder());
             for (TransactionView item : page.items()) {
                 response.addItems(toItem(item));
             }

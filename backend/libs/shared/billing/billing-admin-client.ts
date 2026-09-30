@@ -458,8 +458,15 @@ export interface AdminTransactionItem {
 
 export interface AdminTransactionPage {
   items: AdminTransactionItem[];
-  /** 空串 = 没有下一页 */
-  nextPageToken: string;
+  /**
+   * 总条数；`null` = **上游没统计**。
+   *
+   * <p>⚠️ 运营面本期**就是** `null`（2026-09-30 的决定）：账本的 COUNT 成本随数据量线性上涨，
+   * 而运营端这轮没要求显示总条数。契约里 `total` 是 proto3 `optional`，不设置即未统计 ——
+   * 这里把「未设置」收敛成 `null`，与「真的是 0 条」（拿得到 0）分开。
+   * 要补是后续独立工单，见前端对接文档 §6.2。
+   */
+  total: number | null;
 }
 
 export interface AdminTransactionsQuery {
@@ -468,8 +475,8 @@ export interface AdminTransactionsQuery {
   /** 单值（consume | recharge | ...），空 = 全部。未知类型 billing 会返回 400 */
   type?: string;
   pageSize?: number;
-  /** 上一页给的 nextPageToken，原样回传；空 = 首页 */
-  pageToken?: string;
+  /** 页码，从 1 起；不传 = 首页 */
+  page?: number;
 }
 
 /**
@@ -484,9 +491,9 @@ export interface AdminTransactionsQuery {
  *    不是「用 gRPC」——独立服务同样满足它，还免掉两套协议。2026-09-26 迁到 gRPC 时
  *    把这段留在 proto 里，防止后来的人照着旧结论回滚。）
  *
- * <p>⚠️ 分页是**游标**、**没有总数**（账本持续追加，要准确总数就得扫全表，
- *    而扫完那一刻它又变了）。所以「上一页」得靠调用方自己存游标栈，
- *    不能像本地表那样算页码。
+ * <p>⚠️ 2026-09-30 分页由**游标**改为 **offset 页码**（与用户面同一次改动，理由见
+ *    `common/v1/types.proto`）。换来的代价在运营面同样存在：翻页途中新增的行会把后面的行
+ *    下移，可能看到重复行。**但 `total` 仍然不填** —— 那是另一回事（见 `AdminTransactionPage`）。
  */
 export async function listAdminTransactions(
   query: AdminTransactionsQuery = {},
@@ -501,7 +508,7 @@ export async function listAdminTransactions(
         type: query.type ?? "",
         // 0 = 服务端默认页大小
         pageSize: query.pageSize ?? 0,
-        pageToken: query.pageToken ?? "",
+        page: query.page ?? 0,
       }),
     );
 
@@ -526,7 +533,10 @@ export async function listAdminTransactions(
         createdAt: item.createdAt,
         settledAt: item.settledAt,
       })),
-      nextPageToken: page.page?.nextPageToken ?? "",
+      // ★ presence → null 收敛：运营面 `total` 目前恒为「未统计」，但**不能**写成恒 null ——
+      //   上游哪天填上了，这里要如实透传，而不是把真值吃掉。判 undefined 而不是真值判断：
+      //   0 是「真的没有一行」，与「没统计」是两回事。
+      total: page.page?.total === undefined ? null : Number(page.page.total),
     };
   } catch (error) {
     throw asAdminError("读流水", error);

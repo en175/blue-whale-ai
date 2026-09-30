@@ -18,6 +18,30 @@ function parsePageSize(raw: string | undefined): number {
     : DEFAULT_PAGE_SIZE;
 }
 
+/**
+ * 页码：缺省 / 非法 / 小于 1 一律当第一页。
+ *
+ * <p>不夹的话 `(page - 1) * size` 会算出负的 OFFSET，MySQL 直接语法错、整个请求 500 ——
+ * 而调用方只是传了个 `page=0`。客户端从 0 起算是很常见的写法，这里必须兜住。
+ */
+function parsePage(raw: string | undefined): number {
+  const page = Number(raw);
+  return Number.isInteger(page) && page > 0 ? page : 1;
+}
+
+/**
+ * 类型过滤：**逗号分隔的多值**。
+ *
+ * <p>空串、纯空白、多余分隔符都会滤掉，所以 `type=consume,,expire,` 等价于两个值。
+ * 校验在 billing 侧做（含未知值 → INVALID_ARGUMENT），这一层只负责拆分。
+ */
+function parseTypes(raw: string | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+}
+
 @Controller("account")
 export class AccountController {
   /**
@@ -26,26 +50,28 @@ export class AccountController {
    * <p>原先这条转发 new-api 的 `/api/log/self`，而 new-api 已降级成「带一把统一 key
    * 的上游供应商」：那把 key 是全项目共用的，问它「我的消费」只会拿到统一 key 属主的账。
    *
-   * <p>⚠️ **分页是游标，不是页码**。账本是持续追加的，offset 分页会在翻页途中漏行或
-   * 重复行，所以 billing 的契约里**没有总数**（要准确总数就得扫全表，而扫完那一刻它又变了）。
-   * 入参 `page_token` 原样回传上一页给的 `next_page_token`，空 = 首页。
+   * <p>⚠️ **分页是 offset 页码 + 总数**（2026-09-30 由游标改来，见契约的
+   * `common/v1/types.proto`）。入参 `page`（从 1 起，缺省 1）、`page_size`（缺省 20、上限 100）；
+   * 响应 `total` 是满足同一组条件的总条数。
    *
-   * <p>⚠️ `type` 是**单值**（consume | recharge | refund | bonus | ...），空 = 全部流水。
-   * 契约不容许一次要多个类型（逗号拼接会被 billing 拒成 INVALID_ARGUMENT）。所以这里
-   * 不再有「消耗 + 退款」的默认并集——默认给的是**全部**：多给几行是看得见的，
-   * 少给几行（退款拿不到时账单悄悄少一半）才是查不出来的错答案。
+   * <p>⚠️ 换 offset 的代价是真实的：账本持续追加，翻页途中新插入的行会把后面的行整体下移，
+   * 用户可能看到重复行。换的是列表上的「共 N 条」与页码，留痕见前端对接文档 §6.2。
+   *
+   * <p>⚠️ `type` 是**逗号分隔的多值**（consume | recharge | refund | expire | ...），空 = 全部。
+   * 用户的「已消耗」页签要一次取 `consume,expire`（过期核销并入消耗）。未知值由 billing
+   * 拒成 INVALID_ARGUMENT —— **每一个值都校验**，不是只看第一个。
    */
   @Get("consumptions")
   async consumptions(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: Record<string, string> = {},
   ) {
-    const typeFilter = query.type?.trim() ?? "";
+    const types = parseTypes(query.type);
     const request: BillingListTransactionsQuery = {
       userId: Number(user.userId),
       pageSize: parsePageSize(query.page_size),
-      pageToken: query.page_token ?? "",
-      ...(typeFilter ? { typeFilter } : {}),
+      page: parsePage(query.page),
+      ...(types.length ? { typeFilters: types } : {}),
     };
 
     try {
@@ -61,7 +87,7 @@ export class AccountController {
           created_at: item.createdAt,
           settled_at: item.settledAt,
         })),
-        next_page_token: page.nextPageToken,
+        total: page.total,
       });
     } catch (error) {
       throw toBillingError(error, "消费记录查询不可用");

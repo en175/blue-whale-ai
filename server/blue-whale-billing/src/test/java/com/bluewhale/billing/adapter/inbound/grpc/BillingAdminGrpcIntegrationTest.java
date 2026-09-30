@@ -223,46 +223,47 @@ class BillingAdminGrpcIntegrationTest {
     /**
      * 游标翻页：每页一条，两次翻完，不重不漏。
      *
-     * <p>游标是**不透明**的排序三元组（{@code TransactionRepository}），唯一能证明「翻页真的
-     * 接上了」的方式就是拿上一页给的 token 再查一次、并核对第二页不是第一页的重复。
-     * 一个写死的 offset 也能让「总数对」的断言全绿，却会在账本持续追加时漏行或重行
-     * ——而账本**一直在追加**，这正是这条接口的常态。
+     * <p>⚠️ 2026-09-30 分页由游标换成 offset（见 {@code common/v1/types.proto}），
+     * 所以「翻页真的接上了」不再靠不透明游标证明 —— offset 的页码本来就可预测。
+     * 这条用例因此改成钉最朴素的那件事：第二页不是第一页的重复。
      */
     @Test
-    void 游标翻页_不重不漏() {
+    void 偏移翻页_不重不漏() {
         userFacing.hold(hold(USER, "adm-page-1", 9_213L));
 
         AdminListTransactionsResponse first = admin.adminListTransactions(
-                AdminListTransactionsRequest.newBuilder().setUserId(USER).setPageSize(1).build());
+                AdminListTransactionsRequest.newBuilder()
+                        .setUserId(USER).setPageSize(1).setPage(1).build());
         assertThat(first.getItemsList()).hasSize(1);
         String firstId = first.getItems(0).getId();
-        String token = first.getPage().getNextPageToken();
-        // 后面还有行时游标必须给出，否则「下一页」按钮永远是灰的
-        assertThat(token).isNotEmpty();
 
         AdminListTransactionsResponse second = admin.adminListTransactions(
                 AdminListTransactionsRequest.newBuilder()
-                        .setUserId(USER).setPageSize(1).setPageToken(token).build());
+                        .setUserId(USER).setPageSize(1).setPage(2).build());
         assertThat(second.getItemsList()).hasSize(1);
         assertThat(second.getItems(0).getId()).isNotEqualTo(firstId);
-        // 最后一页的游标为空 = 没有下一页
-        assertThat(second.getPage().getNextPageToken()).isEmpty();
     }
 
     /**
-     * 坏游标报 INVALID_ARGUMENT，不能悄悄当成首页。
+     * ⚠️ **运营面不填 {@code total}** —— 这不是漏了，是 2026-09-30 的决定。
      *
-     * <p>「静默重来」在界面上表现为列表**自己跳回顶部**（用户以为翻页翻反了），
-     * 而服务端一个异常都不留——排查时无从下手。宁可报错让人看见。
+     * <p>账本的 COUNT 成本随数据量线性上涨，而运营端这轮没有要求显示总条数。字段是
+     * proto3 的 {@code optional}：不设置 = 「未统计」，与「真的有 0 条」由 presence 区分。
+     *
+     * <p>⚠️ 这条用例的用处是把理由**钉在代码里**：将来有人顺手把 {@code total} 填上、
+     * 或误以为留空是 bug 而「修好」它，会先在这里看见为什么。要补是后续独立工单。
      */
     @Test
-    void 坏游标_报INVALID_ARGUMENT而不是当首页() {
-        assertThatThrownBy(() -> admin.adminListTransactions(
+    void 运营面不填total_留空表示未统计() {
+        userFacing.hold(hold(USER, "adm-total-1", 9_214L));
+
+        AdminListTransactionsResponse response = admin.adminListTransactions(
                 AdminListTransactionsRequest.newBuilder()
-                        .setUserId(USER).setPageToken("not-a-cursor").build()))
-                .isInstanceOf(StatusRuntimeException.class)
-                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
-                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+                        .setUserId(USER).setPageSize(10).setPage(1).build());
+        assertThat(response.getItemsList()).isNotEmpty();
+        assertThat(response.getPage().hasTotal())
+                .as("运营面本轮不统计总数；一旦填了，0 就会与「未统计」混成一种")
+                .isFalse();
     }
 
     // ─────────────────────────────────────────────────────────────

@@ -34,6 +34,17 @@ service BillingService {
   // 用户可见流水（**一个业务动作一行**，见《计费逻辑详细设计》§2.3）。
   rpc ListTransactions(ListTransactionsRequest) returns (ListTransactionsResponse);
 
+  // 该用户的**批次台账**（积分明细「已获取」页签）。
+  //
+  // ⚠️ **与 ListTransactions 是两个维度，不是重复**：流水是「一个业务动作一行」，
+  //    批次是「一笔发放一行」。**到期明细只有批次给得出** —— 流水行没有 `expires_at`，
+  //    而 PRD §9.5 要求「用户侧可在积分记录中查看到期明细」。
+  //
+  // ⚠️ 加这条使**用户面 RPC 从 3 条变 4 条**，与 `contracts/README.md`「RPC 面很小」
+  //    的约定有出入：这一条是需求本身要求出来的（同一处需求见 PRD §9.5 与原型「已获取」页签），
+  //    该破就破。不要再顺手往这个面加第五条。
+  rpc ListLots(ListLotsRequest) returns (ListLotsResponse);
+
   // 计价 —— **只算不扣**。切换前的影子模式与前端价格预览用。
   //
   // ⚠️ **不复用 Hold**：Hold 会真的冻结积分。影子模式每天要算成千上万次，
@@ -181,7 +192,12 @@ message ExpiringLot {
 
 message ListTransactionsRequest {
   int64  user_id     = 1;
-  string type_filter = 2; // 可选：consume | recharge | daily | ... 空 = 全部
+  // 类型过滤。**可多值** —— 用户的「已消耗」页签要把 `consume` 与 `expire` 合成一张表
+  // （原型口径②：「已过期」并入「已消耗」，用标签区分）。送单值时行为与从前一致。
+  //
+  // ⚠️ 单值 → repeated 是**线上兼容**的：两者线格式相同，只是重复出现同一个字段号。
+  //    所以这里不需要 reserve，与 `PageRequest.page_token` 那处的情况不同。
+  repeated string type_filter = 2; // 空 = 全部；值域同 UserTransaction.type
   common.v1.PageRequest page = 3;
 }
 
@@ -215,6 +231,55 @@ message UserTransaction {
   string status     = 6; // pending | done
   string created_at = 7; // RFC3339
   string settled_at = 8; // RFC3339，仅 done 时非空
+
+  // 产生这条流水的生成任务 id（十进制字符串）；批次行、过期行等无任务的流水**未设置**。
+  //
+  // ⚠️ billing 只存 id、**查不到任务的语义字段**：`type` / `model_id` / `model_label` / `prompt`
+  //    都在 backend 自己的库里（ADR-0114 不共享库）。由 backend 收了 id 再走
+  //    `JobsService.loadTaskSummaries` 批量补——与运营面 `AdminTransactionItem.generation_job_id`
+  //    同一条链路，别在 billing 侧另起一套。
+  //
+  // ⚠️ 这里是 **id**，不是把四个字段投影进账本契约：账本不该长成一个任务表。
+  optional int64 generation_job_id = 9;
+}
+
+message ListLotsRequest {
+  // ⚠️ **必填，且没有「不限用户」这个模式**。这条是用户面取数：调用方（backend）**只能**
+  //    填会话解析出来的那个 id。与 `AdminListTransactionsRequest.user_id = 0 表示全站`
+  //    是**两回事** —— 那个口子只开在运营面，这里一个都不开。
+  //    billing 侧的适配器会对 `<= 0` 直接返回 INVALID_ARGUMENT，而不是「返回空页」：
+  //    传 0 要么是调用方写错了，要么是在试探越权，两种都该吵得响。
+  int64 user_id = 1;
+  common.v1.PageRequest page = 2;
+}
+
+message ListLotsResponse {
+  repeated UserCreditLot items = 1;
+  common.v1.PageResponse page = 2;
+}
+
+// ★ 用户可见批次。
+//
+// ⚠️ **不含预扣 / 冻结明细**：`remaining` 是该批次尚未消耗的**可用量**（冻结已从可用里减掉），
+//    冻结额只对运营面可见 —— 与 `UserTransaction` 不收 `reserved_amount` 是同一条硬规则
+//    （《计费逻辑详细设计》§2.3.1「任何用户可见界面永远只出现一个金额」）。
+//
+// ⚠️ 「获取时间」与「积分生效时间」**是同一个值**：批次一写入即生效，本项目不存在延时生效。
+//    原型画了两列，前端渲染同一个 `created_at` 即可 —— 这里**不给第二个字段**，
+//    真出现延时生效需求时再加，现在加就是一个恒等于 `created_at` 的空壳。
+message UserCreditLot {
+  string lot_id     = 1; // 批次 id（十进制字符串）。前端只拿它做列表 key，不解析成数字
+  string source     = 2; // **批次口径**：purchased | bonus | gift | daily | invite
+                         // | register | redeem | subscription | compensation
+                         //
+                         // ⚠️ 与流水口径**用词不同**：批次写 `purchased`，`UserTransaction.type`
+                         //    写 `recharge`。同一件事两个词，前端不要混用同一张文案表。
+  int64  amount     = 3; // 发放时的原始积分
+  int64  remaining  = 4; // 该批尚未消耗的可用量（≤ amount）
+  string created_at = 5; // RFC3339，发放时刻
+  string expires_at = 6; // RFC3339；**空串 = 永久有效**（proto3 无 null，空串是唯一的「没有」）
+  string biz_type   = 7; // 来源语义：recharge / …；无关联业务时为空串
+  string biz_id     = 8; // 关联单号（充值批次 = 订单号）；无关联时为空串
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -308,8 +373,14 @@ service BillingAdminService {
 message AdminListTransactionsRequest {
   int64  user_id    = 1; // 0 = 全部用户
   string type       = 2; // consume | grant | ledger；空 = 全部
+                         // ⚠️ 运营面这个字面量与用户面 `UserTransaction.type` **不是一套**
+                         //    （`grant`/`ledger` 是分区名，不是流水类型），所以它是单值、也不跟着改多值
   int32  page_size  = 3; // 0 = 默认页大小
-  string page_token = 4; // 空 = 第一页。游标分页：翻页期间新增的行不会挤掉已看过的行
+  reserved 4;
+  reserved "page_token";
+  // 页码，从 1 起。**offset 分页**：翻页期间新增的行会把后面的行整体下移，
+  // 运营可能看到重复行 —— 这是与用户面一起换掉的代价，见 `common/v1/types.proto`。
+  int32  page       = 5;
 }
 
 message AdminListTransactionsResponse {

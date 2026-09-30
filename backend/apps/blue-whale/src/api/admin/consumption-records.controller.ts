@@ -15,6 +15,12 @@ function parsePageSize(raw: string | undefined): number {
     : DEFAULT_PAGE_SIZE;
 }
 
+/** 页码：缺省 / 非法 / 小于 1 一律当第一页（负 OFFSET 会让 MySQL 直接语法错）。 */
+function parsePage(raw: string | undefined): number {
+  const page = Number(raw);
+  return Number.isInteger(page) && page > 0 ? page : 1;
+}
+
 /**
  * 积分记录（管理端）。
  *
@@ -33,8 +39,14 @@ function parsePageSize(raw: string | undefined): number {
  *    那条 rpc**，不是「用 gRPC」—— 独立服务同样满足它，还免掉两套协议。2026-09-26 迁到
  *    gRPC 时把这段留在 proto 与这里，防止后来的人照着旧结论回滚。）
  *
- * <p>⚠️ **分页是游标、没有总数**（账本持续追加，要准确总数就得扫全表，而扫完那一刻
- *    它又变了）。所以这里**不返回 total**，前端也只能给「上一页/下一页」。
+ * <p>⚠️ 2026-09-30 分页由**游标**改为 **offset 页码**（与用户面同一次改动，
+ *    见 `common/v1/types.proto`）。代价在运营面同样存在：翻页途中新增的行会把后面的行下移，
+ *    可能看到重复行。
+ *
+ * <p>⚠️ **本页仍然不返回 total 的真实值**：上游 `AdminListTransactions` 本轮不统计
+ *    （账本 COUNT 的成本随数据量线性上涨）。所以 `total` 在这一层**恒为 null**，
+ *    含义是「未统计」而不是「0 条」。要与「真的是 0 条」区分开 —— 后者是查得到 0 的
+ *    （关键词查不到人那条早退分支就是），两种在响应里长得不一样。要补是后续独立工单。
  *    这与充值记录页的 offset 分页形状不同——但前端用同一个翻页组件，观感一致。
  *
  * <p><b>消费行为什么还带任务的类型 / 模型 / 提示词</b>：那一行的 id 是 {@code res:7}，
@@ -58,11 +70,12 @@ export class AdminConsumptionRecordsController {
   ) {}
 
   /**
-   * GET /api/admin/consumption-records?keyword=&type=&pageSize=&pageToken=
+   * GET /api/admin/consumption-records?keyword=&type=&pageSize=&page=
    *
    * @param keyword 用户 ID / 手机号 / 昵称，**都要完整**（精确匹配）。空 = **全站**（管理端独有；
    *                用户面没有这个自由度）
    * @param type    单值（consume | recharge | ...），空 = 全部
+   * @param page    页码，从 1 起
    */
   @Get()
   async list(@Query() query: Record<string, string> = {}) {
@@ -91,7 +104,9 @@ export class AdminConsumptionRecordsController {
     if (keyword) {
       userId = await this.identity.findAdminUserIdByKeyword(keyword);
       if (userId === undefined) {
-        return { success: true, data: { items: [], next_page_token: "" } };
+        // 认不出这个人 = 他的流水恒为 0 条，所以 total 是 **0** 而不是 null：
+        // 这里真的数得出来，与上面「上游未统计」是两回事，别把两者混成一种「没有」。
+        return { success: true, data: { items: [], total: 0 } };
       }
     }
 
@@ -100,7 +115,7 @@ export class AdminConsumptionRecordsController {
         ...(userId !== undefined ? { userId } : {}),
         ...(typeFilter ? { type: typeFilter } : {}),
         pageSize: parsePageSize(query.pageSize),
-        pageToken: query.pageToken ?? "",
+        page: parsePage(query.page),
       });
 
       // 只有消费行（billing 的 res: 行）带得回 generation_job_id；发放行 / 账本行是 null。
@@ -164,7 +179,7 @@ export class AdminConsumptionRecordsController {
               settled_at: item.settledAt,
             };
           }),
-          next_page_token: page.nextPageToken,
+          total: page.total,
         },
       };
     } catch (error) {

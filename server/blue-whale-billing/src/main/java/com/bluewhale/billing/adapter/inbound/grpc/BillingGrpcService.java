@@ -1,6 +1,7 @@
 package com.bluewhale.billing.adapter.inbound.grpc;
 
 import com.bluewhale.billing.adapter.inbound.BillingErrorTaxonomy;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
 import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.command.HoldCommand;
@@ -15,6 +16,8 @@ import com.bluewhale.contracts.billing.v1.BillingServiceGrpc;
 import com.bluewhale.contracts.billing.v1.ExpiringLot;
 import com.bluewhale.contracts.billing.v1.HoldRequest;
 import com.bluewhale.contracts.billing.v1.HoldResponse;
+import com.bluewhale.contracts.billing.v1.ListLotsRequest;
+import com.bluewhale.contracts.billing.v1.ListLotsResponse;
 import com.bluewhale.contracts.billing.v1.ListTransactionsRequest;
 import com.bluewhale.contracts.billing.v1.ListTransactionsResponse;
 import com.bluewhale.contracts.billing.v1.QueryBalanceRequest;
@@ -22,6 +25,7 @@ import com.bluewhale.contracts.billing.v1.QueryBalanceResponse;
 import com.bluewhale.contracts.billing.v1.QuoteRequest;
 import com.bluewhale.contracts.billing.v1.QuoteResponse;
 import com.bluewhale.contracts.billing.v1.SourceCredits;
+import com.bluewhale.contracts.billing.v1.UserCreditLot;
 import com.bluewhale.contracts.billing.v1.UserTransaction;
 import com.bluewhale.contracts.common.v1.PageResponse;
 import io.grpc.Status;
@@ -146,6 +150,11 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
      * 「余额为什么先降后回」），但这里**一个字都不带**：用户面契约 {@code UserTransaction}
      * 里没有这个字段，加进去等于改一条冻结的契约，用户界面也会出现第二个金额。
      * 与 {@code userId} 同一种处理——上游读得到、这一层不投影。
+     *
+     * <p>⚠️ {@code generationJobId} 例外地**投影了**（2026-09-30）：它不是金额，而是个
+     * join key ——「已消耗」页签要显示任务类型 / 模型 / 提示词，而那些字段在 backend
+     * 自己的库里，billing 只能给 id。它与 {@code reservedCredits} 的区别正是这一条：
+     * 预扣额会让界面出现第二个金额，任务 id 不会。
      */
     @Override
     public void listTransactions(ListTransactionsRequest request,
@@ -153,14 +162,15 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
         try {
             TransactionView.Page page = billing.listTransactions(
                     request.getUserId(),
-                    request.getTypeFilter(),
+                    request.getTypeFilterList(),
                     request.getPage().getPageSize(),
-                    request.getPage().getPageToken());
+                    request.getPage().getPage());
 
             ListTransactionsResponse.Builder response = ListTransactionsResponse.newBuilder()
-                    .setPage(PageResponse.newBuilder().setNextPageToken(page.nextPageToken()));
+                    // 用户面**填 total**：列表要显示「共 N 条」与总页数。
+                    .setPage(PageResponse.newBuilder().setTotal(page.total()));
             for (TransactionView item : page.items()) {
-                response.addItems(UserTransaction.newBuilder()
+                UserTransaction.Builder row = UserTransaction.newBuilder()
                         .setId(item.id())
                         .setType(item.type())
                         .setDirection(item.direction())
@@ -172,8 +182,70 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                         // 契约：仅 done 时非空。未结算没有「结算时刻」这回事
                         .setSettledAt(item.settledAt() == null
                                 ? ""
-                                : RFC3339.format(item.settledAt().atZone(DbTime.ZONE)))
-                        .build());
+                                : RFC3339.format(item.settledAt().atZone(DbTime.ZONE)));
+                // 发放行、过期行没有任务。用 presence 表达「没有」——判空用 != null，
+                // 不是真值判断（id 理论上可以为 0，那与「没有任务」是两回事）。
+                if (item.generationJobId() != null) {
+                    row.setGenerationJobId(item.generationJobId());
+                }
+                response.addItems(row.build());
+            }
+            observer.onNext(response.build());
+            observer.onCompleted();
+        } catch (RuntimeException e) {
+            observer.onError(toStatus(e).asRuntimeException());
+        }
+    }
+
+    /**
+     * 用户的批次台账（积分明细「已获取」页签）。
+     *
+     * <p>与 {@code listTransactions} 是两个维度：流水「一个业务动作一行」，批次「一笔发放一行」。
+     * 到期明细只有这条给得出 —— 流水行没有 {@code expires_at}。
+     *
+     * <p>⚠️ <b>越权闸</b>：{@code user_id <= 0} 直接拒（INVALID_ARGUMENT），
+     * **不是**「返回空页」也不是「查全部」。
+     * <ul>
+     *   <li>与运营面 {@code AdminListTransactions} 的 {@code user_id = 0 表示全部用户}
+     *       <b>是两回事</b>：那个哨兵只开在运营面。用户面这条一个字都不开，
+     *       照着那边抄一个「0 = 全站」过来，等于给每个持 token 的调用者开了看全站台账的口子。</li>
+     *   <li>为什么是报错而不是空页：调用方（backend）只会填会话解析出来的 id，
+     *       那个值恒 &gt; 0。真收到 0 说明**上游写错了或者有人在试探**，
+     *       两种都该吵得响，而不是安静地回一页空数据让人以为「这个人没有批次」。</li>
+     * </ul>
+     */
+    @Override
+    public void listLots(ListLotsRequest request, StreamObserver<ListLotsResponse> observer) {
+        try {
+            long userId = request.getUserId();
+            if (userId <= 0) {
+                observer.onError(Status.INVALID_ARGUMENT
+                        .withDescription("user_id 必填且必须为正：用户面批次台账没有「不限用户」模式")
+                        .asRuntimeException());
+                return;
+            }
+
+            CreditLotRepository.UserLotPage page = billing.listCreditLots(
+                    userId,
+                    request.getPage().getPageSize(),
+                    request.getPage().getPage());
+
+            ListLotsResponse.Builder response = ListLotsResponse.newBuilder()
+                    .setPage(PageResponse.newBuilder().setTotal(page.total()));
+            for (CreditLotRepository.UserLot item : page.items()) {
+                UserCreditLot.Builder row = UserCreditLot.newBuilder()
+                        .setLotId(String.valueOf(item.id()))
+                        .setSource(item.source().key())
+                        .setAmount(item.amount())
+                        .setRemaining(item.remaining())
+                        .setCreatedAt(RFC3339.format(item.createdAt().atZone(DbTime.ZONE)))
+                        // 契约：空串 = 永久有效（proto3 的 string 没有 null）
+                        .setExpiresAt(item.expiresAt() == null
+                                ? ""
+                                : RFC3339.format(item.expiresAt().atZone(DbTime.ZONE)))
+                        .setBizType(item.bizType())
+                        .setBizId(item.bizId());
+                response.addItems(row.build());
             }
             observer.onNext(response.build());
             observer.onCompleted();

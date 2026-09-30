@@ -27,6 +27,7 @@ import {
 } from '@lib/contracts';
 import {
   BillingService,
+  ListLotsRequestSchema,
   ListTransactionsRequestSchema,
   QueryBalanceRequestSchema,
   QuoteRequestSchema,
@@ -143,33 +144,47 @@ export interface BillingTransaction {
   createdAt: string;
   /** RFC3339，仅 done 时非空 */
   settledAt: string;
+  /**
+   * 关联的生成任务 id；发放行 / 过期行没有任务，为 `null`。
+   *
+   * ⚠️ 它只是**一个 id**：任务的类型 / 模型 / 提示词在 backend 自己的库里（ADR-0114 不共享库，
+   * billing 读不到）。要显示那几列，调用方拿批 id 走 `JobsService.loadTaskSummaries` 补。
+   *
+   * ⚠️ 是 **string** 不是 number：id 在契约里是 int64，超过 `Number.MAX_SAFE_INTEGER` 时
+   * number 会静默取整成另一个 id。与 `billing-admin-client.ts` 同一口径（那边早就这么做了），
+   * 两处不一致会让同一个 id 在两条链路上长得不一样。
+   */
+  generationJobId: string | null;
 }
 
 /**
- * 流水分页 —— **游标，不是页码**。
+ * 流水分页 —— **offset 页码 + 总数**。
  *
- * <p>账本持续新增，offset 分页会漏行或重复行，所以契约里就没给总数：要准确总数就得扫全表，
- * 而扫完那一刻它又变了。调用方只应把 `nextPageToken` 原样回传（游标内容是排序键，是存储细节）。
+ * <p>⚠️ 2026-09-30 由游标改为 offset。此前这里写的是「账本持续新增，offset 会漏行，
+ * 所以契约里没给总数」。**代价仍然存在**：`total` 与 `items` 是分两次读的，翻页途中有人
+ * 充值就会出现「本页行数 < 总数」这类不同步。产品接受它，换的是列表上的「共 N 条」与页码。
+ * 留痕见《通用积分卡「账户积分与订单」页前端对接文档》§6.2。
  */
 export interface BillingTransactionPage {
   items: BillingTransaction[];
-  /** 空串 = 没有下一页 */
-  nextPageToken: string;
+  /** 满足同一组条件的总条数。**不要**拿它与 `items.length` 比对来推断有没有下一页 */
+  total: number;
 }
 
 export interface BillingListTransactionsQuery {
   userId: number;
   /**
-   * 单值类型过滤（consume | recharge | refund | ...），空串 = 全部。
+   * 类型过滤（consume | recharge | refund | expire | ...），空数组 = 全部。
    *
-   * ⚠️ 只能传**一个**类型。上游不认识逗号分隔，拼错一个字母会被 billing 拒成
-   * INVALID_ARGUMENT（而不是静默返回空列表）——刻意的，空列表与「真的没有」长得一样。
+   * ⚠️ **每一个值都会被校验**：未知类型会被 billing 拒成 INVALID_ARGUMENT
+   * （而不是静默返回空列表）——刻意的，空列表与「真的没有」长得一样。
+   * 多值用于用户的「已消耗」页签（一次取 `consume` 与 `expire`）。
    */
-  typeFilter?: string;
+  typeFilters?: string[];
   /** 上限由 billing 钳制 */
   pageSize?: number;
-  /** 上一页返回的游标；空 = 首页 */
-  pageToken?: string;
+  /** 页码，从 1 起；不传 = 首页 */
+  page?: number;
 }
 
 export interface BillingClient {
@@ -178,6 +193,62 @@ export interface BillingClient {
   quote(request: BillingQuoteRequest): Promise<BillingQuoteResult>;
   queryBalance(userId: number): Promise<BillingBalance>;
   listTransactions(query: BillingListTransactionsQuery): Promise<BillingTransactionPage>;
+  listCreditLots(query: BillingListLotsQuery): Promise<BillingCreditLotPage>;
+}
+
+/**
+ * 一个积分**批次**（积分明细「已获取」页签）。
+ *
+ * <p>与 {@link BillingTransaction} 是两个维度：流水「一个业务动作一行」，批次「一笔发放一行」。
+ * **到期明细只有批次给得出** —— 流水行没有 `expiresAt`。
+ */
+export interface BillingCreditLot {
+  lotId: string;
+  /**
+   * **批次口径**的来源：`purchased | bonus | gift | daily | invite | register | redeem |
+   * subscription | compensation`。
+   *
+   * ⚠️ 与流水口径**用词不同**：批次写 `purchased`，`BillingTransaction.type` 写 `recharge`。
+   * 同一件事两个词，前端不要拿同一张文案表去套。
+   */
+  source: string;
+  /** 发放时的原始积分 */
+  amount: number;
+  /**
+   * 该批尚未消耗的**可用量**（上游已按 `remaining − frozen` 算好）。
+   *
+   * ⚠️ 冻结中的部分**不在里面**：预扣已经把这笔钱许给在途任务了，对用户来说不能用。
+   */
+  remaining: number;
+  /** RFC3339，发放时刻 */
+  createdAt: string;
+  /** RFC3339；**空串 = 永久有效**（proto3 的 string 没有 null，空串是唯一的「没有」） */
+  expiresAt: string;
+  /** 业务类型（recharge / …）；无关联时为空串 */
+  bizType: string;
+  /** 关联单号（充值批次 = 订单号）；无关联时为空串 */
+  bizId: string;
+}
+
+/** 台账的一页。`total` 是该用户**全部**批次条数，不是本页条数。 */
+export interface BillingCreditLotPage {
+  items: BillingCreditLot[];
+  total: number;
+}
+
+export interface BillingListLotsQuery {
+  /**
+   * ⚠️ **必填，且只能填会话解析出来的那个 id**。
+   *
+   * <p>这条是用户面取数，**没有「不限用户」模式** —— 上游对 `<= 0` 直接返回
+   * INVALID_ARGUMENT，而不是「查全部」。与运营面 `listAdminTransactions` 的
+   * 「0 = 全站」是两回事，别照着那边抄。
+   */
+  userId: number;
+  /** 上限由 billing 钳制 */
+  pageSize?: number;
+  /** 页码，从 1 起；不传 = 首页 */
+  page?: number;
 }
 
 /** billing 的 gRPC 地址。 */
@@ -310,13 +381,13 @@ export function createBillingClient(baseUrl: string): BillingClient {
       const response = await client.listTransactions(
         create(ListTransactionsRequestSchema, {
           userId: BigInt(query.userId),
-          typeFilter: query.typeFilter ?? '',
-          ...(query.pageSize === undefined && query.pageToken === undefined
+          typeFilter: query.typeFilters ?? [],
+          ...(query.pageSize === undefined && query.page === undefined
             ? {}
             : {
                 page: {
                   pageSize: query.pageSize ?? 0,
-                  pageToken: query.pageToken ?? '',
+                  page: query.page ?? 0,
                 },
               }),
         }),
@@ -331,8 +402,43 @@ export function createBillingClient(baseUrl: string): BillingClient {
           status: item.status === 'done' ? 'done' : 'pending',
           createdAt: item.createdAt,
           settledAt: item.settledAt,
+          // proto3 optional：未设置 = 这一行没有任务（发放行 / 过期行）。判 undefined，
+          // 不是真值判断——`0n` 也是 falsy，那会把一个合法的 job 0 当成「没有」
+          generationJobId:
+            item.generationJobId === undefined ? null : String(item.generationJobId),
         })),
-        nextPageToken: response.page?.nextPageToken ?? '',
+        // 用户面 billing **一定**填 total（运营面才留空），所以这里给 number 而不是可空。
+        // 真出现 undefined 只可能是契约被改坏了，Number(undefined)=NaN 会立刻在断言里炸出来
+        total: Number(response.page?.total ?? 0),
+      };
+    },
+
+    async listCreditLots(query) {
+      const response = await client.listLots(
+        create(ListLotsRequestSchema, {
+          // ⚠️ 用户 id 只来自调用方（backend 从会话解析后传入）。这里**不兜底成 0** ——
+          //    上游对 <= 0 会拒，而「静默传一个 0 看看」正是不该在这里发生的事
+          userId: BigInt(query.userId),
+          page: {
+            pageSize: query.pageSize ?? 0,
+            page: query.page ?? 0,
+          },
+        }),
+      );
+      return {
+        items: response.items.map((item) => ({
+          lotId: item.lotId,
+          source: item.source,
+          amount: Number(item.amount),
+          remaining: Number(item.remaining),
+          createdAt: item.createdAt,
+          // 空串就是「永久有效」，**不转成 null**：proto3 的 string 只有这一种「没有」，
+          // 在这里再引入第二种只会让前端多判一次
+          expiresAt: item.expiresAt,
+          bizType: item.bizType,
+          bizId: item.bizId,
+        })),
+        total: Number(response.page?.total ?? 0),
       };
     },
   };

@@ -31,8 +31,9 @@ const controller = new AdminConsumptionRecordsController(
   { findAdminUserIdByKeyword, loadAdminUserIdentities } as unknown as IdentityService,
 );
 
-function page(items: unknown[] = [], nextPageToken = "") {
-  return { items, nextPageToken };
+/** 运营面 `total` 目前恒为 null（上游不统计）；要造「有值」的假数据由用例显式传。 */
+function page(items: unknown[] = [], total: number | null = null) {
+  return { items, total };
 }
 
 const ITEM = {
@@ -76,7 +77,7 @@ describe("AdminConsumptionRecordsController.list", () => {
     loadAdminUserIdentities.mockResolvedValue(new Map());
   });
 
-  it("缺省：关键词**不传** = 全站流水，pageToken 为空 = 首页", async () => {
+  it("缺省：关键词**不传** = 全站流水，页码落 1 = 首页", async () => {
     listAdminTransactions.mockResolvedValue(page());
 
     await controller.list({});
@@ -85,17 +86,17 @@ describe("AdminConsumptionRecordsController.list", () => {
     // 传 undefined 与「不传」是两回事，而这里的差别就是「全站」与「某个用户」。
     expect(listAdminTransactions).toHaveBeenCalledWith({
       pageSize: 20,
-      pageToken: "",
+      page: 1,
     });
     // 没有关键词就不该去查人 —— 全站视图不需要知道「谁是谁」
     expect(findAdminUserIdByKeyword).not.toHaveBeenCalled();
   });
 
-  it("关键词命中一个用户 → 用它换来的 userId 去过滤 billing，type 透传", async () => {
+  it("关键词命中一个用户 → 用它换来的 userId 去过滤 billing，type 与 page 透传", async () => {
     listAdminTransactions.mockResolvedValue(page());
     findAdminUserIdByKeyword.mockResolvedValue(42);
 
-    await controller.list({ keyword: "13800008888", type: "consume", pageToken: "tok-1" });
+    await controller.list({ keyword: "13800008888", type: "consume", page: "3" });
 
     // 关键词原样交给我们库去解（手机号 / 昵称 / 用户 ID 三选一都在那里判），
     // 送给 billing 的**只有** userId —— 它的契约里没有手机号这一层
@@ -104,7 +105,7 @@ describe("AdminConsumptionRecordsController.list", () => {
       userId: 42,
       type: "consume",
       pageSize: 20,
-      pageToken: "tok-1",
+      page: 3,
     });
   });
 
@@ -113,13 +114,15 @@ describe("AdminConsumptionRecordsController.list", () => {
 
     await expect(controller.list({ keyword: "查无此人" })).resolves.toEqual({
       success: true,
-      data: { items: [], next_page_token: "" },
+      // ⚠️ 这里是 **0**，不是 null：「认不出这个人」意味着他的流水恒为 0 条，
+      // 这个数是真数得出来的，与「上游本轮不统计」是两回事，别混成一种「没有」。
+      data: { items: [], total: 0 },
     });
     expect(listAdminTransactions).not.toHaveBeenCalled();
   });
 
   it("响应把 billing 的字段名映射成下划线口径，且带出 user_id、任务的三个语义字段与展示身份", async () => {
-    listAdminTransactions.mockResolvedValue(page([ITEM], "next-tok"));
+    listAdminTransactions.mockResolvedValue(page([ITEM], 4));
     loadTaskSummaries.mockResolvedValue(
       new Map([
         [
@@ -160,7 +163,9 @@ describe("AdminConsumptionRecordsController.list", () => {
             settled_at: "2026-09-25T10:01:00+08:00",
           },
         ],
-        next_page_token: "next-tok",
+        // 上游给了就照抄。今天运营面恒为 null，但这一层**不能**写成恒 null ——
+        // 上游哪天填上了要如实透传，而不是把真值吃掉。
+        total: 4,
       },
     });
 
@@ -294,10 +299,10 @@ describe("AdminConsumptionRecordsController.list", () => {
     listAdminTransactions.mockResolvedValue(page());
 
     await controller.list({ pageSize: "9999" });
-    expect(listAdminTransactions).toHaveBeenLastCalledWith({ pageSize: 100, pageToken: "" });
+    expect(listAdminTransactions).toHaveBeenLastCalledWith({ pageSize: 100, page: 1 });
 
     await controller.list({ pageSize: "abc" });
-    expect(listAdminTransactions).toHaveBeenLastCalledWith({ pageSize: 20, pageToken: "" });
+    expect(listAdminTransactions).toHaveBeenLastCalledWith({ pageSize: 20, page: 1 });
   });
 
   it("关键词是空白 → 等同于不传（全站），不白跑一次查人", async () => {
@@ -308,7 +313,7 @@ describe("AdminConsumptionRecordsController.list", () => {
     await controller.list({ keyword: "   " });
 
     expect(findAdminUserIdByKeyword).not.toHaveBeenCalled();
-    expect(listAdminTransactions).toHaveBeenCalledWith({ pageSize: 20, pageToken: "" });
+    expect(listAdminTransactions).toHaveBeenCalledWith({ pageSize: 20, page: 1 });
   });
 
   it("★ 还认着旧的 `userId` 参数 —— 不认它就是静默回一页全站流水", async () => {
@@ -321,7 +326,7 @@ describe("AdminConsumptionRecordsController.list", () => {
     await controller.list({ userId: "42" });
 
     expect(findAdminUserIdByKeyword).toHaveBeenCalledWith("42");
-    expect(listAdminTransactions).toHaveBeenCalledWith({ userId: 42, pageSize: 20, pageToken: "" });
+    expect(listAdminTransactions).toHaveBeenCalledWith({ userId: 42, pageSize: 20, page: 1 });
   });
 
   it("新参数优先：同时收到 keyword 与 userId 时用 keyword", async () => {
