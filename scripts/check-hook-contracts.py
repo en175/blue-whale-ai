@@ -188,7 +188,11 @@ def normalized_contracts(
                 # node 前缀命令形态非本脚本 gate 契约，与 SessionStart 注入同源，
                 # 同样排除于阻断等价比较。
                 if event in ("UserPromptSubmit", "SubagentStart") and command.startswith(
-                    'node "${CLAUDE_PROJECT_DIR}"/.claude/hooks/ponytail-'
+                    (
+                        'node "${CLAUDE_PROJECT_DIR}"/.claude/hooks/ponytail-',
+                        'PLUGIN_DATA="$(git rev-parse --git-path ponytail-codex)" '
+                        'node "$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-',
+                    )
                 ):
                     continue
                 gate = command_parser(command)
