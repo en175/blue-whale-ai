@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
@@ -138,22 +139,30 @@ class SubmissionCheckingMySqlIntegrationTest {
             return factory(StoryboardPreviewMapper.class, sf).getObject();
         }
 
+        /** IKJCOE：任务特有列的扩展位表 mapper（video_stage / charge_state 的读写落点）。 */
+        @Bean
+        GenerationJobExtraMapper extraMapper(SqlSessionFactory sf) throws Exception {
+            return factory(GenerationJobExtraMapper.class, sf).getObject();
+        }
+
         @Bean
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 ProjectEventMapper pem, GenerationOutputSlotMapper sm,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
-            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm);
+                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
+                GenerationJobExtraMapper em) {
+            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
         }
 
         /** 真库 JobFinalizer（IKIWP8 ③ 终态收口直连）：装配对齐 JobStateMachineMySqlIntegrationTest 同名 bean。 */
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                GenerationOutputSlotMapper sm, ProjectEventMapper pem,
+                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
+                ProjectEventMapper pem,
                 SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
             ProjectEventPublisher events = new ProjectEventPublisher(pem);
-            return new JobFinalizer(jm, am, jlm, sm,
+            return new JobFinalizer(jm, am, jlm, sm, em,
                     new SceneCardGenerationRecordSync(sm, rm, events),
                     new StoryboardPreviewSync(sm, pm, events),
                     events,
@@ -193,27 +202,52 @@ class SubmissionCheckingMySqlIntegrationTest {
         jdbc.execute("SET FOREIGN_KEY_CHECKS = 1");
     }
 
-    /** 已领取的提交相 job 行：processing + 租约 + fence，两阶段身份与预扣随行。 */
+    /** 已领取的提交相 job 行：processing + 租约 + fence；两阶段身份与预扣住在扩展位表（IKJCOE）。 */
     private long seedClaimedSubmitJob(String videoStage, String workerId, long token,
                                       Long sourceSampleJobId, String chargeState) {
         jdbc.update("""
                 INSERT INTO generation_jobs
                   (user_id, type, source, status, lease_owner, lease_expires_at,
-                   fencing_token, project_id, expected_output_count, input,
-                   video_stage, source_sample_job_id, charge_state,
+                   fencing_token, project_id, input, source_sample_job_id,
                    gmt_create, gmt_modified, version, is_delete)
-                VALUES (42, 'video', 'bottom_dock', 'processing', ?, ?, ?, 1, 1, '{}',
-                        ?, ?, ?, NOW(), NOW(), 0, false)
+                VALUES (42, 'video', 'bottom_dock', 'processing', ?, ?, ?, 1, '{}', ?,
+                        NOW(), NOW(), 0, false)
                 """,
-                workerId, WorkerClock.now().plusMinutes(10), token,
-                videoStage, sourceSampleJobId, chargeState);
+                workerId, WorkerClock.now().plusMinutes(10), token, sourceSampleJobId);
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        return id != null ? id : -1;
+        long jobId = id != null ? id : -1;
+        // IKJCOE：video_stage / charge_state 已搬进 generation_job_extras（缺键 = 缺省）。
+        if (videoStage != null) {
+            upsertExtra(jobId, "video_stage", "string", videoStage);
+        }
+        if (chargeState != null) {
+            upsertExtra(jobId, "charge_state", "string", chargeState);
+        }
+        return jobId;
+    }
+
+    /** 写一个扩展位（与 GenerationJobExtraMapper.upsert 同款唯一键语义）。 */
+    private void upsertExtra(long jobId, String extraKey, String valueType, String valueText) {
+        jdbc.update("""
+                INSERT INTO generation_job_extras
+                  (generation_job_id, extra_key, value_type, value_text, gmt_create, gmt_modified)
+                VALUES (?, ?, ?, ?, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE value_type = VALUES(value_type),
+                    value_text = VALUES(value_text), gmt_modified = NOW()
+                """, jobId, extraKey, valueType, valueText);
     }
 
     private Map<String, Object> row(long id) {
-        return jdbc.queryForMap("SELECT status, provider_task_id, charge_state, lease_owner "
-                + "FROM generation_jobs WHERE id = ?", id);
+        // IKJCOE：charge_state 已搬进 generation_job_extras——按同名字段拼回同一张视图，
+        // 断言口径（键名与存在性）保持不变。
+        Map<String, Object> out = new java.util.HashMap<>(jdbc.queryForMap(
+                "SELECT status, provider_task_id, lease_owner "
+                        + "FROM generation_jobs WHERE id = ?", id));
+        List<String> chargeStates = jdbc.queryForList(
+                "SELECT value_text FROM generation_job_extras "
+                        + "WHERE generation_job_id = ? AND extra_key = 'charge_state'", String.class, id);
+        out.put("charge_state", chargeStates.isEmpty() ? null : chargeStates.get(0));
+        return out;
     }
 
     @Test

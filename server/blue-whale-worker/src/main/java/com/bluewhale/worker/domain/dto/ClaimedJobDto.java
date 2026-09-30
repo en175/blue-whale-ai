@@ -19,8 +19,6 @@ public record ClaimedJobDto(
         String type,
         /** 创建时冻结参数 JSON（provider_credential / prompt / model_id / references…） */
         Map<String, Object> input,
-        /** 预期产物数（slot 聚合基准，缺省 1） */
-        int expected_output_count,
         /** image 瞬态重试次数（<3 才可回 queued） */
         int retry_count,
         /** 取消请求标记（cancel_requested_at != null → true） */

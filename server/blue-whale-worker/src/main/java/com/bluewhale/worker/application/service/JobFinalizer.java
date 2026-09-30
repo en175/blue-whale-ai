@@ -11,6 +11,8 @@ import com.bluewhale.worker.domain.dto.PublishImageEraseDto;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
+import com.bluewhale.worker.domain.entity.GenerationJobExtraEntity;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,6 +49,9 @@ public class JobFinalizer {
     private final AssetMapper assetMapper;
     private final GenerationJobLogMapper jobLogMapper;
     private final GenerationOutputSlotMapper slotMapper;
+
+    /** IKJCOE：任务特有字段（阶段身份 / 费用状态 / 转成片截止）住在扩展位表。 */
+    private final GenerationJobExtraMapper extraMapper;
     private final SceneCardGenerationRecordSync recordSync;
     private final StoryboardPreviewSync previewSync;
     private final ProjectEventPublisher eventPublisher;
@@ -57,6 +62,7 @@ public class JobFinalizer {
             AssetMapper assetMapper,
             GenerationJobLogMapper jobLogMapper,
             GenerationOutputSlotMapper slotMapper,
+            GenerationJobExtraMapper extraMapper,
             SceneCardGenerationRecordSync recordSync,
             StoryboardPreviewSync previewSync,
             ProjectEventPublisher eventPublisher,
@@ -66,6 +72,7 @@ public class JobFinalizer {
         this.assetMapper = assetMapper;
         this.jobLogMapper = jobLogMapper;
         this.slotMapper = slotMapper;
+        this.extraMapper = extraMapper;
         this.recordSync = recordSync;
         this.previewSync = previewSync;
         this.eventPublisher = eventPublisher;
@@ -229,8 +236,8 @@ public class JobFinalizer {
     }
 
     /**
-     * 失败 audio_trim 作业（IKHB6S；failMediaExtractJob 同款守卫——轮询型任务失败多清
-     * next_poll_at，details.raw 透传原始原因）。
+     * 失败 audio_trim 作业（IKHB6S；failMediaExtractJob 同款守卫，
+     * details.raw 透传原始原因）。
      */
     @Transactional
     public boolean failAudioTrimJob(
@@ -266,8 +273,8 @@ public class JobFinalizer {
     }
 
     /**
-     * 失败 audio_speed 作业（IKHW5A；failAudioTrimJob 同款守卫——轮询型任务失败多清
-     * next_poll_at，details.raw 透传原始原因）。
+     * 失败 audio_speed 作业（IKHW5A；failAudioTrimJob 同款守卫，
+     * details.raw 透传原始原因）。
      */
     @Transactional
     public boolean failAudioSpeedJob(
@@ -577,10 +584,33 @@ public class JobFinalizer {
                 null, null);
     }
 
+    /** IKJCOE：写一个扩展位（键名沿用被迁移列的原字段名）。 */
+    private void upsertExtra(Long jobId, String extraKey, String valueType, String valueText) {
+        extraMapper.upsert(jobId, extraKey, valueType, valueText);
+    }
+
     /**
-     * IKIZQ8：样片成功终态——可信上游 Draft created_at 与转成片截止（epoch 毫秒）随
-     * 守卫一并落列（COALESCE：null 不覆盖既有值，普通视频零影响）。截止由 processor
-     * 按契约公式算好传入（金标 G06 跨语言对账），本层不重复计算。
+     * IKJCOE：该任务是否为两阶段视频——判据是扩展位里有 {@code video_stage}。
+     * <p>
+     * 替代原先守卫 SQL 里的 {@code IF(video_stage IS NOT NULL, …)} 同表条件：列搬到
+     * 扩展位后，这条条件只能由应用层回答。终态路径每次多一次 SELECT，可接受。
+     */
+    private boolean isTwoPhaseVideo(Long jobId) {
+        for (GenerationJobExtraEntity row : extraMapper.findByJobId(jobId)) {
+            if ("video_stage".equals(row.getExtraKey()) && row.getValueText() != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * IKIZQ8：样片成功终态——可信上游 Draft created_at 与转成片截止（epoch 毫秒）落库。
+     * 截止由 processor 按契约公式算好传入（金标 G06 跨语言对账），本层不重复计算。
+     * <p>
+     * <b>IKJCOE</b>：这两列与 charge_state 已搬进 {@code generation_job_extras}——原先是
+     * 守卫同条 SQL 的 COALESCE / IF 表达式，现在改为「同一 {@code @Transactional} 内、
+     * 守卫返回 affected==1 之后」续写扩展位。原子性由事务保证：守卫 0 行则整体回滚。
      */
     @Transactional
     public boolean publishVideoResult(String jobId, String projectId, String userId,
@@ -591,12 +621,22 @@ public class JobFinalizer {
                                       Long upstreamCreatedAtMs, Long finalizeDeadlineMs) {
         Long jobIdLong = Long.parseLong(jobId);
 
-        int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken,
-                upstreamCreatedAtMs, finalizeDeadlineMs);
+        int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
         if (guardAffected != 1) {
             log.warn("[video] publishVideoResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
             return false;
+        }
+        // IKJCOE：阶段列续写（原守卫同条 SQL 的 COALESCE 两列 + charge_state）。
+        // 「非空才写」保住原 COALESCE 的「null 不覆盖既有值」语义——普通视频传 null 零影响。
+        if (upstreamCreatedAtMs != null) {
+            upsertExtra(jobIdLong, "upstream_created_at_ms", "number", upstreamCreatedAtMs.toString());
+        }
+        if (finalizeDeadlineMs != null) {
+            upsertExtra(jobIdLong, "finalize_deadline_ms", "number", finalizeDeadlineMs.toString());
+        }
+        if (isTwoPhaseVideo(jobIdLong)) {
+            upsertExtra(jobIdLong, "charge_state", "string", "settled");
         }
 
         AssetEntity asset = buildAsset(jobIdLong, projectId, userId, "video",
@@ -654,8 +694,11 @@ public class JobFinalizer {
 
     /**
      * 失败视频作业（video-ops.ts:200-303 failVideoJob 独立实现）。
-     * 与通用 failJob 的逐字差异：守卫多清 next_poll_at；pending 槽逐个带 record FK 回写 summary；
-     * 不调 storyboard 同步。
+     * 与通用 failJob 的差异：pending 槽逐个带 record FK 回写 summary；不调 storyboard 同步。
+     * <p>
+     * <b>IKIZQ8 / IKJCOE</b>：两阶段任务确认失败要退回**该阶段**的冻结积分——原守卫 SQL 里
+     * 的 {@code charge_state = IF(video_stage IS NOT NULL, 'released', …)} 改成守卫命中后
+     * 在这里写扩展位（判据同成功后置：扩展位里有 video_stage 即两阶段；普通视频不写）。
      */
     @Transactional
     public boolean failVideoJob(String jobId, String errorCode, String errorMessage,
@@ -669,6 +712,9 @@ public class JobFinalizer {
             errorObj.put("details", details);
         }
         int affected = jobMapper.failVideoGuard(jobIdLong, workerId, fencingToken, toJson(errorObj));
+        if (affected == 1 && isTwoPhaseVideo(jobIdLong)) {
+            upsertExtra(jobIdLong, "charge_state", "string", "released");
+        }
         if (affected != 1) {
             log.warn("[video] failVideoJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={} errorCode={}",
                     jobId, workerId, fencingToken, errorCode);
@@ -1143,7 +1189,7 @@ public class JobFinalizer {
     }
 
     /**
-     * 轮询型免费工具失败模板：failMediaExtractGuard（SET 清 next_action_at + next_poll_at）
+     * 轮询型免费工具失败模板：failMediaExtractGuard（SET 清 next_action_at）
      * → 终态日志 → project_id 守卫内单条 status_changed。无槽位语义、无摘要同步，
      * details.raw 透传原始原因。守卫 SQL 无 type 过滤，免费工具族跨家族复用。
      */

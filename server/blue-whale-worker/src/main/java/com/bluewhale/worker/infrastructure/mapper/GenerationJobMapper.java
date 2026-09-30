@@ -217,7 +217,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     /**
      * 发布 media_extract 结果：CAS 守卫（media-extract-ops.ts:47-63）。
      * <p>
-     * SET status='succeeded', progress=100, next_action_at=null, next_poll_at=null,
+     * SET status='succeeded', progress=100, next_action_at=null,
      *     lease_owner=null, lease_expires_at=null, version=version+1
      * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
      * <p>
@@ -235,7 +235,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SET status = 'succeeded',
                 progress = 100,
                 next_action_at = NULL,
-                next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
                 version = version + 1
@@ -266,7 +265,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     /**
      * 失败 media_extract 作业：CAS 守卫（media-extract-ops.ts:140-160）。
      * <p>
-     * SET status='failed', error=?, next_action_at=null, next_poll_at=null,
+     * SET status='failed', error=?, next_action_at=null,
      *     lease_owner=null, lease_expires_at=null, version=version+1
      * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
      */
@@ -275,7 +274,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SET status = 'failed',
                 error = #{errorJson},
                 next_action_at = NULL,
-                next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
                 version = version + 1
@@ -617,7 +615,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     /**
      * 标记生成任务已提交（generation-worker-video-ops.ts markProviderSubmitted 逐字）。
      * <p>
-     * 评审修复 C1：补 provider='new-api'、progress=1、next_poll_at；
+     * 评审修复 C1：补 provider='new-api'、progress=1；
      * **去掉 fencing_token+1**（TS 不 bump——fence 只在 claim/requeue 递增，契约 §3.1）。
      * 时刻值由 Java 计算传入（原 DATE_ADD ... MILLISECOND 为非法 MySQL 单位，潜伏语法炸点）。
      * 金标 G09 pin 全 SET 列。
@@ -633,8 +631,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 provider = 'new-api',
                 provider_task_id = #{providerTaskId},
                 progress = 1,
-                next_poll_at = #{nextPollAt},
-                next_action_at = #{nextPollAt},
+                next_action_at = #{nextActionAt},
                 lease_owner = NULL,
                 lease_expires_at = NULL,
                 version = version + 1
@@ -648,7 +645,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("workerId") String workerId,
             @Param("fencingToken") Long fencingToken,
             @Param("providerTaskId") String providerTaskId,
-            @Param("nextPollAt") java.time.LocalDateTime nextPollAt
+            @Param("nextActionAt") java.time.LocalDateTime nextActionAt
     );
 
     /**
@@ -689,7 +686,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * 重排生成任务轮询（generation-worker-video-ops.ts rescheduleProviderPoll 逐字）。
      * <p>
      * 评审修复 C2：progress 由 service 端钳制（Math.max(0,Math.min(99,round))）后传入；
-     * 补 last_polled_at、next_poll_at；**去掉 fencing_token+1**（TS 不 bump）。
+     * 补 last_polled_at、next_action_at；**去掉 fencing_token+1**（TS 不 bump）。
      * 时刻值 Java 计算（原 DATE_ADD MILLISECOND 非法语法一并消除）。金标 G10 pin 全列。
      */
     @Update("""
@@ -697,8 +694,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SET poll_count = COALESCE(poll_count, 0) + 1,
                 progress = #{progress},
                 last_polled_at = #{now},
-                next_poll_at = #{nextPollAt},
-                next_action_at = #{nextPollAt},
+                next_action_at = #{nextActionAt},
                 lease_owner = NULL,
                 lease_expires_at = NULL,
                 version = version + 1
@@ -713,7 +709,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken,
             @Param("progress") Integer progress,
             @Param("now") java.time.LocalDateTime now,
-            @Param("nextPollAt") java.time.LocalDateTime nextPollAt
+            @Param("nextActionAt") java.time.LocalDateTime nextActionAt
     );
 
     /**
@@ -725,21 +721,20 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * <p>
      * <b>修正一</b>：actual_amount_fen 不在范围（settle 段整体省略）。
      * <p>
-     * <b>IKIZQ8</b>：样片阶段列随守卫原子落库——① created_at/截止用 COALESCE（null 不
-     * 覆盖既有值，普通视频传 null 零影响）；② charge_state 只对两阶段任务
-     * （video_stage IS NOT NULL）置 'settled'，普通视频保持 NULL（按阶段结算语义）。
+     * <b>IKJCOE</b>：本守卫原来同条 SQL 里还写 upstream_created_at_ms /
+     * finalize_deadline_ms（COALESCE）与 charge_state（IF video_stage IS NOT NULL）——
+     * 这三列已搬进 {@code generation_job_extras}，改由调用方（{@code JobFinalizer}，
+     * 同一 {@code @Transactional} 内）在本守卫返回 affected==1 **之后**写扩展位。
+     * 原子性靠事务而非单条 SQL 保住：守卫 0 行则整个事务回滚，不会留下
+     * 「已 succeeded 但费用状态没落」的半成品。
      */
     @Update("""
             UPDATE generation_jobs
             SET status = 'succeeded',
                 progress = 100,
                 next_action_at = NULL,
-                next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
-                upstream_created_at_ms = COALESCE(#{upstreamCreatedAtMs}, upstream_created_at_ms),
-                finalize_deadline_ms = COALESCE(#{finalizeDeadlineMs}, finalize_deadline_ms),
-                charge_state = IF(video_stage IS NOT NULL, 'settled', charge_state),
                 version = version + 1
             WHERE id = #{jobId}
               AND status = 'processing'
@@ -749,19 +744,15 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     int publishVideoGuard(
             @Param("jobId") Long jobId,
             @Param("workerId") String workerId,
-            @Param("fencingToken") Long fencingToken,
-            @Param("upstreamCreatedAtMs") Long upstreamCreatedAtMs,
-            @Param("finalizeDeadlineMs") Long finalizeDeadlineMs
+            @Param("fencingToken") Long fencingToken
     );
 
     /**
      * 失败视频作业 CAS 守卫（video-ops.ts:209-221 failVideoJob 独立 SQL）。
-     * 与通用 failJobGuard 的差异（逐字核对后单独成条，评审修复）：
-     * 视频版多 `next_poll_at = NULL`（:217）。release_note/预留段按修正一省略。
      * <p>
-     * <b>IKIZQ8</b>：charge_state 只对两阶段任务（video_stage IS NOT NULL）置
-     * 'released'——确认失败退回**该阶段**冻结积分（结算事件由终态收口发 billing），
-     * 普通视频保持 NULL。
+     * <b>IKJCOE</b>：charge_state 的 'released' 原在守卫 SQL 里按
+     * （video_stage IS NOT NULL）条件写；两列都搬进 {@code generation_job_extras} 后，
+     * 该条件由调用方按两阶段标志决定要不要写扩展位（守卫本身不再碰费用状态）。
      * <p>
      * <b>IKIZQD</b>：守卫放宽到 checking——提交相已落「提交中」标记后收到网关**明确拒绝**
      * （带 HTTP 状态的业务回绝）按「明确失败释放本阶段预扣」落失败终态；仍持 owner+fence
@@ -773,10 +764,8 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SET status = 'failed',
                 error = #{errorJson},
                 next_action_at = NULL,
-                next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
-                charge_state = IF(video_stage IS NOT NULL, 'released', charge_state),
                 version = version + 1
             WHERE id = #{jobId}
               AND (status = 'processing' OR status = 'checking')
@@ -806,7 +795,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SET status = 'cancelled',
                 progress = 0,
                 next_action_at = NULL,
-                next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
                 version = version + 1
@@ -832,7 +820,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * （平台同款口径见 backend cancelImageJob 注释「已停止接纳本任务结果」；先生效的终态获胜）。
      * <p>
      * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
-     * SET status='cancelled', progress=0, next_action_at=null, next_poll_at=null,
+     * SET status='cancelled', progress=0, next_action_at=null,
      *     lease_owner=null, lease_expires_at=null, version+1
      */
     @Update("""
@@ -840,7 +828,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SET status = 'cancelled',
                 progress = 0,
                 next_action_at = NULL,
-                next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
                 version = version + 1
@@ -859,7 +846,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     @Update("""
             UPDATE generation_jobs
             SET status = 'cancelled', progress = 0,
-                next_action_at = NULL, next_poll_at = NULL,
+                next_action_at = NULL,
                 lease_owner = NULL, lease_expires_at = NULL,
                 version = version + 1
             WHERE id = #{jobId} AND type = 'audio_mix' AND source = 'dock'
@@ -875,7 +862,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     @Update("""
             UPDATE generation_jobs
             SET status = 'cancelled', progress = 0,
-                next_action_at = NULL, next_poll_at = NULL,
+                next_action_at = NULL,
                 lease_owner = NULL, lease_expires_at = NULL,
                 version = version + 1
             WHERE id = #{jobId} AND type = 'audio_video_mux' AND source = 'dock'

@@ -88,6 +88,10 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Mock
     private StoryboardPreviewMapper storyboardPreviewMapper;
 
+    /** IKJCOE：任务特有列搬进键值扩展表，claim / 终态写路径经此 mapper 读写。 */
+    @Mock
+    private GenerationJobExtraMapper extraMapper;
+
     private JobStateMachineService service;
 
     /**
@@ -103,15 +107,16 @@ class JobStateMachineServiceGoldenMirrorTest {
     @BeforeEach
     void setUp() {
         service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper,
-                projectEventMapper, slotMapper, sceneCardRecordMapper, storyboardPreviewMapper);
-        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper,
+                projectEventMapper, slotMapper, sceneCardRecordMapper, storyboardPreviewMapper,
+                extraMapper);
+        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
                 new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper,
                         new ProjectEventPublisher(projectEventMapper)),
                 new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,
                         new ProjectEventPublisher(projectEventMapper)),
                 new ProjectEventPublisher(projectEventMapper),
                 JobSettlementPublisher.noop());
-        claimService = new JobClaimService(jobMapper);
+        claimService = new JobClaimService(jobMapper, extraMapper);
     }
 
     @Test
@@ -621,7 +626,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setFencingToken(2L);
         candidate.setLeaseExpiresAt(WorkerClock.now().minusSeconds(10)); // 过期租约
         candidate.setInput("{\"prompt\":\"hello\",\"model_id\":\"seed-audio-1.0\"}");
-        candidate.setExpectedOutputCount(1);
         candidate.setRetryCount(0);
 
         when(jobMapper.findAudioCandidate(400L)).thenReturn(candidate);
@@ -807,7 +811,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setFencingToken(2L);
         candidate.setLeaseExpiresAt(WorkerClock.now().minusSeconds(10));
         candidate.setInput("{\"prompt\":\"hello\",\"model_id\":\"gpt-image-1\"}");
-        candidate.setExpectedOutputCount(4);
         candidate.setRetryCount(1);
         candidate.setSource("bottom_dock");
 
@@ -826,8 +829,14 @@ class JobStateMachineServiceGoldenMirrorTest {
         ClaimedJobDto claimed = result.get();
         assertThat(claimed.fencingToken()).isEqualTo(3L);
         assertThat(claimed.type()).isEqualTo("image");
-        assertThat(claimed.expected_output_count()).isEqualTo(4);
         assertThat(claimed.retry_count()).isEqualTo(1);
+        // IKJCOE：expected_output_count 主表列已删、claim 投影不再承载该字段（权威是建行时冻结的
+        // input.expected_output_count）。原「投影带出该列」的断言改为整体逐字段钉住投影本身，
+        // 覆盖不缩水：任何字段漏投影 / 多投影 / 取值错位都会红。
+        assertThat(claimed).isEqualTo(new ClaimedJobDto(
+                "500", "42", "9", "image",
+                Map.of("prompt", "hello", "model_id", "gpt-image-1"),
+                1, false, 3L));
     }
 
     @Test

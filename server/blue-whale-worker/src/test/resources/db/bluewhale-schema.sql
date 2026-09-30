@@ -121,10 +121,6 @@ CREATE TABLE `generation_jobs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NULL,
     `user_id` BIGINT NOT NULL,
-    `agent_run_id` BIGINT NULL,
-    `action_identity` VARCHAR(128) NULL,
-    `project_action_identity` VARCHAR(128) NULL,
-    `expected_output_count` INTEGER NOT NULL DEFAULT 1,
     `retry_of_job_id` BIGINT NULL,
     `type` VARCHAR(32) NOT NULL,
     `source` VARCHAR(32) NOT NULL DEFAULT 'dock',
@@ -134,43 +130,47 @@ CREATE TABLE `generation_jobs` (
     `provider` VARCHAR(64) NULL,
     `provider_task_id` VARCHAR(128) NULL,
     `poll_count` INTEGER NOT NULL DEFAULT 0,
-    `next_poll_at` DATETIME(0) NULL,
     `retry_count` INTEGER NOT NULL DEFAULT 0,
     `last_polled_at` DATETIME(0) NULL,
     `error` JSON NULL,
-    `stage_id` VARCHAR(64) NULL,
     `lease_owner` VARCHAR(128) NULL,
     `lease_expires_at` DATETIME(0) NULL,
     `fencing_token` BIGINT NOT NULL DEFAULT 0,
-    `strategy_version` VARCHAR(64) NULL,
     `execution_deadline_at` DATETIME(0) NULL,
-    `evidence_reconcile_until` DATETIME(0) NULL,
     `next_action_at` DATETIME(0) NULL,
     `cancel_requested_at` DATETIME(0) NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` BOOLEAN NOT NULL DEFAULT false,
-    `canvas_card_state` VARCHAR(16) NOT NULL DEFAULT 'pending',
     `input` JSON NULL,
-    -- 2026-09-29（IKIZQ8）手工追加两阶段视频阶段列——逐字取自
-    --   backend/prisma/migrations/20260929120000_generation_jobs_video_sample_stage/migration.sql。
-    `video_stage` VARCHAR(16) NULL,
     `source_sample_job_id` BIGINT NULL,
-    `final_job_id` BIGINT NULL,
-    `upstream_created_at_ms` BIGINT NULL,
-    `finalize_deadline_ms` BIGINT NULL,
-    `charge_state` VARCHAR(16) NULL,
-    `actual_credits` INTEGER NULL,
-    -- 2026-09-29（IKIZQC）手工追加成片来源唯一约束——逐字取自
+    -- 2026-09-29（IKIZQC）成片来源唯一约束——逐字取自
     --   backend/prisma/migrations/20260929130000_generation_jobs_finalize_source_unique/migration.sql。
+    -- ⚠️ 2026-09-30（IKJCOE）本表 DROP 了 15 列（7 死列 + 8 列搬进 generation_job_extras，
+    --   含 idx_status_next_poll 索引）；本副本必须与 backend/prisma/migrations/
+    --   20260930150000_generation_job_extras/migration.sql 的删列段保持一致。
     UNIQUE INDEX `uk_generation_jobs__source_sample_job_id`(`source_sample_job_id`),
 
     INDEX `idx_project_id`(`project_id`),
     INDEX `idx_provider_task_id`(`provider_task_id`),
-    INDEX `idx_status_next_poll`(`status`, `next_poll_at`),
     INDEX `idx_user_id`(`user_id`),
     INDEX `idx_generation_next_action`(`next_action_at`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- 2026-09-30（IKJCOE）任务特有字段的扩展位表——建表段逐字取自
+--   backend/prisma/migrations/20260930150000_generation_job_extras/migration.sql。
+CREATE TABLE `generation_job_extras` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `generation_job_id` BIGINT NOT NULL,
+    `extra_key` VARCHAR(64) NOT NULL,
+    `value_type` VARCHAR(16) NOT NULL,
+    `value_text` TEXT NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_generation_job_extras__job_key`(`generation_job_id`, `extra_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

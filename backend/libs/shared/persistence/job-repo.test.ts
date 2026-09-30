@@ -2,18 +2,35 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createJobRepo } from "./job-repo.js";
 
+/** 扩展位行（IKJCOE）：阶段身份 / 费用 / 卡片持久状态已从 generation_jobs 主表列搬进
+ *  generation_job_extras（extra_key 沿用原列名）。 */
+function extraRow(jobId: bigint, extra_key: string, value_type: string, value_text: string) {
+  return { generation_job_id: jobId, extra_key, value_type, value_text };
+}
+
+/** 扩展位假件：默认无键（缺键 = 缺省语义，如 canvas_card_state 缺键 = 'pending'）。 */
+function extrasDelegate(rows: ReturnType<typeof extraRow>[] = []) {
+  return {
+    findMany: vi.fn().mockResolvedValue(rows),
+    upsert: vi.fn().mockResolvedValue({}),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  };
+}
+
 describe("createJobRepo.listByUser", () => {
   it("只向音频混合列表投影卡片持久状态以区分未落盘与主动删除", async () => {
     const prisma = {
       generation_jobs: { count: vi.fn().mockResolvedValue(2), findMany: vi.fn().mockResolvedValue([
-        { id: 73n, type: "audio_mix", status: "failed", canvas_card_state: "removed",
+        { id: 73n, type: "audio_mix", status: "failed",
           progress: 0, input: { source_node_id: "source", provider_credential: "secret" },
           output_asset_ids: [], gmt_create: new Date("2026-09-23T00:00:00Z"), error: null },
-        { id: 72n, type: "audio_mix", status: "queued", canvas_card_state: "pending",
+        { id: 72n, type: "audio_mix", status: "queued",
           progress: 0, input: { source_node_id: "source" }, output_asset_ids: [],
           gmt_create: new Date("2026-09-23T00:00:00Z"), error: null },
       ]) },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
+      // 只有 73 的扩展位记着 removed；72 缺键 → 'pending'（列默认值搬到扩展位后由缺键表达）。
+      generation_job_extras: extrasDelegate([extraRow(73n, "canvas_card_state", "string", "removed")]),
     } as never;
     const page = await createJobRepo(prisma).listByUser("9", { projectId: "55", type: "audio_mix", page: 1, size: 100 });
     expect(page.records.map((job) => [job.job_id, job.canvas_card_state])).toEqual([
@@ -49,6 +66,7 @@ describe("createJobRepo.listByUser", () => {
     const prisma = {
       generation_jobs: { count, findMany },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: extrasDelegate(),
     } as never;
 
     const page = await createJobRepo(prisma).listByUser("9", {
@@ -85,7 +103,10 @@ describe("createJobRepo.findByIdForUser", () => {
     { id: 12n, url: "https://tos/seg-2.mp4", type: "video", width: 1920, height: 1080 },
   ];
 
-  function buildPrisma(overrides: Record<string, unknown> = {}) {
+  function buildPrisma(
+    overrides: Record<string, unknown> = {},
+    extrasRows: ReturnType<typeof extraRow>[] = [],
+  ) {
     return {
       generation_jobs: {
         findFirst: vi.fn().mockResolvedValue({
@@ -100,6 +121,7 @@ describe("createJobRepo.findByIdForUser", () => {
         }),
       },
       assets: { findMany: vi.fn().mockResolvedValue(assetRows) },
+      generation_job_extras: extrasDelegate(extrasRows),
       generation_job_logs: {
         findFirst: vi.fn().mockResolvedValue({
           payload: {
@@ -583,16 +605,19 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
           input: null,
           output_asset_ids: [],
           error: null,
-          video_stage: "sample",
+          // source_sample_job_id 仍留主表（它扛唯一索引）。
           source_sample_job_id: null,
-          final_job_id: 305n,
-          upstream_created_at_ms: 1790647200000n,
-          finalize_deadline_ms: BigInt(finalizeDeadlineMs),
-          charge_state: "settled",
-          actual_credits: 4,
         }),
       },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
+      // IKJCOE：阶段身份 / 互指 / 截止 / 费用读自扩展位（原主表列已删，wire 键名不变）。
+      generation_job_extras: extrasDelegate([
+        extraRow(302n, "video_stage", "string", "sample"),
+        extraRow(302n, "final_job_id", "number", "305"),
+        extraRow(302n, "finalize_deadline_ms", "number", String(finalizeDeadlineMs)),
+        extraRow(302n, "charge_state", "string", "settled"),
+        extraRow(302n, "actual_credits", "number", "4"),
+      ]),
     } as never;
 
     const view = await createJobRepo(prisma).findByIdForUser("302", "9");
@@ -620,6 +645,8 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
         }),
       },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
+      // 缺键 = 缺省语义：旧任务/普通视频在扩展表里没有任何阶段键。
+      generation_job_extras: extrasDelegate(),
     } as never;
 
     const view = await createJobRepo(prisma).findByIdForUser("5", "9");
@@ -646,17 +673,16 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
             output_asset_ids: [],
             gmt_create: new Date("2026-09-29T00:00:00Z"),
             error: null,
-            video_stage: "sample",
             source_sample_job_id: null,
-            final_job_id: null,
-            upstream_created_at_ms: null,
-            finalize_deadline_ms: null,
-            charge_state: "held",
-            actual_credits: null,
           },
         ]),
       },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
+      // 无 finalize_deadline_ms 键（上游可信时间缺失）→ 投影 deadline=null。
+      generation_job_extras: extrasDelegate([
+        extraRow(303n, "video_stage", "string", "sample"),
+        extraRow(303n, "charge_state", "string", "held"),
+      ]),
     } as never;
 
     const page = await createJobRepo(prisma).listByUser("9", { page: 1, size: 10 });
@@ -680,11 +706,8 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
           input: null,
           output_asset_ids: [88],
           error: null,
-          video_stage: "final",
+          // source_sample_job_id 仍留主表（扛唯一索引）。
           source_sample_job_id: 302n,
-          final_job_id: null,
-          charge_state: "settled",
-          actual_credits: 20,
         }),
       },
       assets: {
@@ -692,6 +715,12 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
           { id: 88n, url: "https://tos.test/88.mp4", type: "video", width: 1920, height: 1080 },
         ]),
       },
+      // 成片行的阶段身份与费用在扩展位。
+      generation_job_extras: extrasDelegate([
+        extraRow(305n, "video_stage", "string", "final"),
+        extraRow(305n, "charge_state", "string", "settled"),
+        extraRow(305n, "actual_credits", "number", "20"),
+      ]),
     } as never;
 
     const view = await createJobRepo(prisma).findByIdForUser("305", "9");
@@ -714,14 +743,15 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
           input: null,
           output_asset_ids: null,
           error: { code: "provider_upstream_error", message: "上游生成失败" },
-          video_stage: "final",
           source_sample_job_id: 302n,
-          final_job_id: null,
-          charge_state: "released",
-          actual_credits: null,
         }),
       },
       assets: { findMany: assetsFindMany },
+      // 失败成片行：阶段在扩展位，费用已释放（charge_state='released'）。
+      generation_job_extras: extrasDelegate([
+        extraRow(306n, "video_stage", "string", "final"),
+        extraRow(306n, "charge_state", "string", "released"),
+      ]),
     } as never;
 
     const view = await createJobRepo(prisma).findByIdForUser("306", "9");
@@ -749,12 +779,7 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
         output_asset_ids: [],
         gmt_create: new Date("2026-09-29T01:00:00Z"),
         error: null,
-        video_stage: "sample",
         source_sample_job_id: null,
-        final_job_id: null,
-        finalize_deadline_ms: null,
-        charge_state: "held",
-        actual_credits: null,
       },
       {
         id: 299n,
@@ -772,6 +797,11 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
     const prisma = {
       generation_jobs: { count, findMany },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
+      // 只有 301 有阶段键；299（旧任务）在扩展表里没有任何键 → 兜底 video。
+      generation_job_extras: extrasDelegate([
+        extraRow(301n, "video_stage", "string", "sample"),
+        extraRow(301n, "charge_state", "string", "held"),
+      ]),
     } as never;
 
     const page = await createJobRepo(prisma).listByUser("9", { page: 1, size: 20 });

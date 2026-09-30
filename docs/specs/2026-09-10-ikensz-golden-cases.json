@@ -60,7 +60,7 @@
   "contract_ref": "§3.2",
   "title_zh": "rescheduleProviderPoll happy：钳制+续租+释放",
   "given": "input progress=42; updateMany 返回 count=1",
-  "expect": "data.progress=42; data.poll_count={increment:1}; data.next_poll_at=now+5s; data.next_action_at=now+5s; data.lease_owner=null; data.lease_expires_at=null; data.version={increment:1}; 返回 true"
+  "expect": "data.progress=42; data.poll_count={increment:1}; data.next_action_at=now+5s;（IKJCOE 后 next_poll_at 列已删） data.lease_owner=null; data.lease_expires_at=null; data.version={increment:1}; 返回 true"
  },
  {
   "case_id": "G10",
@@ -143,8 +143,8 @@
   "case_id": "G21",
   "contract_ref": "§3.1/附录B",
   "title_zh": "音频 claim 投影 snake_case（ClaimedJobDto）",
-  "given": "候选行 type=audio, expected_output_count=1, retry_count=0, cancel_requested_at=null",
-  "expect": "投影字段 id/project_id/user_id/type/input/expected_output_count/retry_count/cancelRequested/fencingToken 完整"
+  "given": "候选行 type=audio, retry_count=0, cancel_requested_at=null",
+  "expect": "投影字段 id/project_id/user_id/type/input/retry_count/cancelRequested/fencingToken 完整（IKJCOE 后 expected_output_count 已从投影与主表移除）"
  },
  {
   "case_id": "G22",
@@ -345,7 +345,7 @@
  {
   "case_id": "G73",
   "contract_ref": "§3.3/评审I4",
-  "title_zh": "cancelVideoBeforeDispatch：成功路径零日志行（TS video-ops.ts:306-343 无 log）；SQL 含 next_poll_at=NULL",
+  "title_zh": "cancelVideoBeforeDispatch：成功路径零日志行（TS video-ops.ts:306-343 无 log）；SQL 含 next_action_at=NULL（IKJCOE 后 next_poll_at 列已删）",
   "given": "CAS count=1",
   "expect": "jobLogMapper 零交互"
  },

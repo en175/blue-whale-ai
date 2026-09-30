@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { PromptPreviewSource, PromptPreviewContent, PromptMaterial } from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { extraString, loadJobExtras, setJobExtras } from "./generation-jobs-extra-repo.js";
+
 /** Canvas db port（Prisma-backed），复用部署的 canvas 表（project_id 唯一 / viewport_json / nodes_json / edges_json）。
  *  对齐 Java CanvasDto：{id, project_id, viewport, nodes}——viewport/nodes 是 JSON 字符串（前端 JSON.parse）。
  *  edges（IKDLQF）同构：JSON 字符串，缺省 null 由调用侧视为空数组。
@@ -119,18 +121,39 @@ async function markAudioMixCards(
   const ids = audioMixCardIds(nodes);
   const scope = { project_id: projectId, user_id: BigInt(ownerId), type: "audio_mix", is_delete: false };
   if (ids.length > 0) {
-    await tx.generation_jobs.updateMany({
+    // IKJCOE：canvas_card_state 已搬进 generation_job_extras（原主表列已删）。
+    // ⚠️ 必须先过归属过滤再写：卡号来自请求体里的画布节点（node.id 与 node.data.jobId
+    // 都由客户端构造），直接按 id 写扩展位就成了跨用户写——旧实现是一条
+    // `updateMany({ where: { ...scope, id: { in: ids } } })`，作用域在 SQL 的 where 里，
+    // 下面这次 findMany 是它的等价物（作用域必须在写之前生效）。
+    const owned = await tx.generation_jobs.findMany({
       where: { ...scope, id: { in: ids } },
-      data: { canvas_card_state: "present" },
+      select: { id: true },
     });
+    for (const row of owned) {
+      await setJobExtras(tx, row.id, { canvas_card_state: "present" });
+    }
   }
-  const removable = { ...scope, canvas_card_state: "present", ...(ids.length > 0 ? { id: { notIn: ids } } : {}) };
-  const existing = await tx.generation_jobs.findFirst({ where: removable, select: { id: true } });
-  if (!existing) return;
-  await tx.generation_jobs.updateMany({
-    where: removable,
-    data: { canvas_card_state: "removed" },
+  // 本轮不在画布上的、此前被标 'present' 的任务要改回 'removed'。
+  // 原先是主表列上的 where（`canvas_card_state = 'present'`）；搬进扩展位后改成
+  // 「本项目的 audio_mix 任务 → 读各自的扩展位 → 内存筛」，两次查询变成三次，
+  // 但单个项目的 audio_mix 任务量很小（画布上的卡片数级）。缺键 = 'pending'，
+  // 不是 'present'，故从未上过卡的任务不会被这一轮扫到。
+  const candidates = await tx.generation_jobs.findMany({
+    where: ids.length > 0 ? { ...scope, id: { notIn: ids } } : scope,
+    select: { id: true },
   });
+  if (candidates.length === 0) return;
+  const extrasByJob = await loadJobExtras(
+    tx,
+    candidates.map((c) => c.id.toString()),
+  );
+  for (const candidate of candidates) {
+    const state = extraString(extrasByJob.get(candidate.id.toString()), "canvas_card_state");
+    if (state === "present") {
+      await setJobExtras(tx, candidate.id, { canvas_card_state: "removed" });
+    }
+  }
 }
 
 async function markOutputSlotsPlaced(

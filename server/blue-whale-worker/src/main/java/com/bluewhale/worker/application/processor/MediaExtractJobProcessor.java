@@ -492,7 +492,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
         return MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED;
     }
 
-    /** 失败处理（沿用既有 failMediaExtractJob 守卫：SET 清 next_action_at + next_poll_at，
+    /** 失败处理（沿用既有 failMediaExtractJob 守卫：SET 清 next_action_at，
      *  轮询型任务语义完备；details.raw 透传原始原因）。 */
     private void failMediaExtract(ClaimedJob claim, String code, String message) {
         failMediaExtract(claim, code, message, null);

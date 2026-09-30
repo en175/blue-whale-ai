@@ -56,10 +56,12 @@ class GenerationJobsFinalizeSourceUniqueMySqlIntegrationTest {
             .withStartupTimeout(Duration.ofMinutes(5))
             .withReuse(true);
 
+    // IKJCOE：video_stage / charge_state 已搬进 generation_job_extras，expected_output_count 列已删；
+    // 本用例唯一裁决点是 uk_generation_jobs__source_sample_job_id，扩展位不参与该约束。
     static final String INSERT_FINAL =
             "INSERT INTO generation_jobs (project_id, user_id, type, source, status, input, "
-                    + "expected_output_count, video_stage, source_sample_job_id, charge_state) "
-                    + "VALUES (1, 42, 'video', 'bottom_dock', 'queued', '{}', 1, 'final', ?, 'held')";
+                    + "source_sample_job_id) "
+                    + "VALUES (1, 42, 'video', 'bottom_dock', 'queued', '{}', ?)";
 
     static String url() {
         return mysql.getJdbcUrl();
@@ -67,14 +69,18 @@ class GenerationJobsFinalizeSourceUniqueMySqlIntegrationTest {
 
     @BeforeAll
     static void seedSampleRow() throws Exception {
-        // 来源样片任务行（video_stage='sample'、成功终态、source 为 NULL 不受唯一索引影响）。
+        // 来源样片任务行（成功终态、source 为 NULL 不受唯一索引影响）。
         try (Connection conn = DriverManager.getConnection(url(), "test", "test");
              Statement st = conn.createStatement()) {
             st.executeUpdate(
                     "INSERT INTO generation_jobs (id, project_id, user_id, type, source, status, input, "
-                            + "expected_output_count, video_stage, charge_state, output_asset_ids) "
-                            + "VALUES (302, 1, 42, 'video', 'bottom_dock', 'succeeded', '{}', 1, "
-                            + "'sample', 'settled', '[901]')");
+                            + "output_asset_ids) "
+                            + "VALUES (302, 1, 42, 'video', 'bottom_dock', 'succeeded', '{}', '[901]')");
+            st.executeUpdate(
+                    "INSERT INTO generation_job_extras "
+                            + "(generation_job_id, extra_key, value_type, value_text) "
+                            + "VALUES (302, 'video_stage', 'string', 'sample'), "
+                            + "(302, 'charge_state', 'string', 'settled')");
         }
     }
 
@@ -82,6 +88,7 @@ class GenerationJobsFinalizeSourceUniqueMySqlIntegrationTest {
     static void cleanup() throws Exception {
         try (Connection conn = DriverManager.getConnection(url(), "test", "test");
              Statement st = conn.createStatement()) {
+            st.executeUpdate("DELETE FROM generation_job_extras");
             st.executeUpdate("DELETE FROM generation_jobs");
         }
     }
@@ -130,14 +137,21 @@ class GenerationJobsFinalizeSourceUniqueMySqlIntegrationTest {
     @Test
     @DisplayName("G08: 失败成片行保留占位——其后的再次提交仍被唯一索引拒绝")
     void failedFinalRowKeepsSourceSlotOccupied() throws Exception {
-        // 先落一条失败占位行（真实链路 = 已发往上游后失败，charge_state=released）。
+        // 先落一条失败占位行（真实链路 = 已发往上游后失败，charge_state=released 在扩展位）。
         try (Connection conn = DriverManager.getConnection(url(), "test", "test");
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO generation_jobs (project_id, user_id, type, source, status, input, "
-                             + "expected_output_count, video_stage, source_sample_job_id, charge_state, error) "
-                             + "VALUES (1, 42, 'video', 'bottom_dock', 'failed', '{}', 1, 'final', 303, "
-                             + "'released', '{}')")) {
+                             + "source_sample_job_id, error) "
+                             + "VALUES (1, 42, 'video', 'bottom_dock', 'failed', '{}', 303, '{}')")) {
             ps.executeUpdate();
+        }
+        try (Connection conn = DriverManager.getConnection(url(), "test", "test");
+             Statement st = conn.createStatement()) {
+            st.executeUpdate(
+                    "INSERT INTO generation_job_extras "
+                            + "(generation_job_id, extra_key, value_type, value_text) "
+                            + "VALUES (303, 'video_stage', 'string', 'final'), "
+                            + "(303, 'charge_state', 'string', 'released')");
         }
         // 再次提交（新 Idempotency-Key 的另一条成片任务）→ 重复键被拒：首版不复用同 Draft ID 重试。
         try (Connection conn = DriverManager.getConnection(url(), "test", "test");
@@ -156,11 +170,18 @@ class GenerationJobsFinalizeSourceUniqueMySqlIntegrationTest {
         for (int i = 0; i < 3; i++) {
             try (Connection conn = DriverManager.getConnection(url(), "test", "test");
                  PreparedStatement ps = conn.prepareStatement(
-                         "INSERT INTO generation_jobs (project_id, user_id, type, source, status, input, "
-                                 + "expected_output_count, video_stage, charge_state) "
-                                 + "VALUES (1, 42, 'video', 'bottom_dock', 'queued', '{}', 1, ?, 'held')")) {
-                ps.setString(1, i == 0 ? null : "sample");
+                         "INSERT INTO generation_jobs (project_id, user_id, type, source, status, input) "
+                                 + "VALUES (1, 42, 'video', 'bottom_dock', 'queued', '{}')")) {
                 ps.executeUpdate();
+                // IKJCOE：样片身份在扩展位（i=0 为普通视频：缺键即缺省，与旧 NULL 列同义）。
+                if (i != 0) {
+                    try (PreparedStatement extra = conn.prepareStatement(
+                            "INSERT INTO generation_job_extras "
+                                    + "(generation_job_id, extra_key, value_type, value_text) "
+                                    + "VALUES (LAST_INSERT_ID(), 'video_stage', 'string', 'sample')")) {
+                        extra.executeUpdate();
+                    }
+                }
             }
         }
     }

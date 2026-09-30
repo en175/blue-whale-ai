@@ -14,6 +14,12 @@ import {
   type CreateJobResult,
 } from "./generation-job-idempotency.js";
 import { appendProjectEvent } from "./product-event-repo.js";
+import {
+  extraNumber,
+  extraString,
+  loadJobExtrasOne,
+  setJobExtras,
+} from "./generation-jobs-extra-repo.js";
 import type { PrismaClient } from "@prisma/client";
 
 /** IKIZQC：成片（finalize）命令 repo——从已成功交付的样片派生 1080p 成片任务。
@@ -85,34 +91,36 @@ export async function findFinalizeSourceJob(
       user_id: true,
       status: true,
       type: true,
-      video_stage: true,
-      final_job_id: true,
-      finalize_deadline_ms: true,
       output_asset_ids: true,
       input: true,
     },
   });
   if (!row) return null;
+  // IKJCOE：阶段身份与互指改从扩展位读（原主表 video_stage / final_job_id /
+  // finalize_deadline_ms 三列已删）。
+  const extras = await loadJobExtrasOne(prisma, row.id.toString());
+  const finalJobId = extraNumber(extras, "final_job_id");
   // IKIZQD：成片尝试在核对锁定（checking）期间，再次提交须按 1014 拒绝——这里顺带取
   // 该成片任务的当前状态（无尝试 / 行已删为 null）。
   let finalJobStatus: string | null = null;
-  if (row.final_job_id != null) {
+  if (finalJobId != null) {
     const finalRow = await prisma.generation_jobs.findUnique({
-      where: { id: row.final_job_id },
+      where: { id: BigInt(finalJobId) },
       select: { status: true },
     });
     finalJobStatus = finalRow?.status ?? null;
   }
+  const deadlineMs = extraNumber(extras, "finalize_deadline_ms");
   return {
     id: row.id.toString(),
     project_id: row.project_id?.toString() ?? "0",
     user_id: row.user_id.toString(),
     status: row.status,
     type: row.type,
-    video_stage: row.video_stage,
-    final_job_id: row.final_job_id?.toString() ?? null,
+    video_stage: extraString(extras, "video_stage"),
+    final_job_id: finalJobId != null ? String(finalJobId) : null,
     final_job_status: finalJobStatus,
-    finalize_deadline_ms: row.finalize_deadline_ms,
+    finalize_deadline_ms: deadlineMs != null ? BigInt(deadlineMs) : null,
     output_asset_ids: (row.output_asset_ids ?? null) as PrismaJsonArray | null,
     input: (row.input ?? {}) as Record<string, unknown>,
   };
@@ -178,18 +186,19 @@ async function createFinalizeJobWithinTx(
       status: "queued",
       progress: 0,
       input: input.input as never,
-      expected_output_count: 1,
-      action_identity: input.actionIdentity,
-      project_action_identity: input.actionIdentity,
-      strategy_version: VIDEO_STRATEGY_VERSION,
       execution_deadline_at: deadline,
       next_action_at: now,
       fencing_token: 0,
-      // 契约 §1/§6：成片阶段身份 + 来源指向 + 创建即预扣。唯一索引在这一刻裁决并发。
-      video_stage: "final",
+      // 契约 §1/§6：来源指向（唯一索引在这一刻裁决并发）。阶段身份与费用初始态
+      // 走扩展位，见下。
       source_sample_job_id: BigInt(input.sourceSampleJobId),
-      charge_state: "held",
     },
+  });
+  // IKJCOE：阶段身份 + 费用初始态进扩展位（原主表列已删）。
+  await setJobExtras(tx, job.id, {
+    strategy_version: VIDEO_STRATEGY_VERSION,
+    video_stage: "final",
+    charge_state: "held",
   });
   // ★ 预扣与 job 行同事务（job 行插入后、提交前）：来源唯一冲突在上一行就已回滚，
   //   走到这里的事务都是赢家；此后若事务失败，补偿把这笔冻结退掉（机制同建任务）。
@@ -221,12 +230,13 @@ async function createFinalizeJobWithinTx(
       cost_rule_version: "dev",
     },
   });
-  // 样片行回写 final_job_id（G11 投影互指；带 final_job_id IS NULL 守卫——非 NULL 说明
-  // 另一并发已回写，但那种情形下唯一索引早已拦下本事务，这里只是防御性幂等）。
-  await tx.generation_jobs.updateMany({
-    where: { id: BigInt(input.sourceSampleJobId), final_job_id: null },
-    data: { final_job_id: job.id },
-  });
+  // 样片行回写 final_job_id（G11 投影互指）。原列上的 `final_job_id IS NULL` 守卫在扩展位上
+  // 表达为「已有值就不覆盖」：并发至多一条成片行能进（source_sample_job_id 的唯一索引裁决），
+  // 所以这条守卫本就是防御性幂等，不是并发控制点。
+  const sampleExtras = await loadJobExtrasOne(tx, input.sourceSampleJobId);
+  if (extraNumber(sampleExtras, "final_job_id") == null) {
+    await setJobExtras(tx, BigInt(input.sourceSampleJobId), { final_job_id: Number(job.id) });
+  }
   await tx.generation_job_logs.create({
     data: {
       generation_job_id: job.id,

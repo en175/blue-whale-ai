@@ -7,6 +7,13 @@ import {
 } from "@lib/contracts";
 
 import { publicGenerationInput } from "./generation-input.js";
+import {
+  extraNumber,
+  extraString,
+  loadJobExtras,
+  loadJobExtrasOne,
+  type JobExtras,
+} from "./generation-jobs-extra-repo.js";
 
 /** GenerationJob 读路径的 db port（Prisma-backed），复用部署的 generation_jobs / assets 表。
  *  对齐 Java GenerationJobService：只读（列表分页 + 状态单查），写入仍由 Java 队列路径负责。
@@ -73,15 +80,15 @@ export interface JobStatusView {
 }
 
 /** IKIZQ8：generation_jobs 行 → 契约阶段投影（详情/列表共用）。
- *  缺列（旧任务/普通视频）按普通视频语义兜底：video_stage=video，其余 null。 */
-function videoStageProjection(row: {
-  video_stage: string | null;
-  source_sample_job_id: bigint | null;
-  final_job_id: bigint | null;
-  finalize_deadline_ms: bigint | null;
-  charge_state: string | null;
-  actual_credits: number | null;
-}): {
+ *  缺键（旧任务/普通视频）按普通视频语义兜底：video_stage=video，其余 null。
+ *
+ *  <p>IKJCOE：阶段字段已从主表列搬到 generation_job_extras，**wire 键名一个没变**
+ *  （video_stage / final_job_id / finalize_deadline_at / charge_state / actual_credits）
+ *  ——存储搬家不改变契约。source_sample_job_id 仍留在主表（它扛唯一索引）。 */
+function videoStageProjection(
+  row: { source_sample_job_id: bigint | null },
+  extras: JobExtras | undefined,
+): {
   video_stage: string;
   source_sample_job_id: string | null;
   final_job_id: string | null;
@@ -89,18 +96,17 @@ function videoStageProjection(row: {
   charge_state: string | null;
   actual_credits: number | null;
 } {
+  const deadlineMs = extraNumber(extras, "finalize_deadline_ms");
+  const finalJobId = extraNumber(extras, "final_job_id");
   return {
-    video_stage: row.video_stage ?? "video",
+    video_stage: extraString(extras, "video_stage") ?? "video",
     source_sample_job_id:
       row.source_sample_job_id != null ? row.source_sample_job_id.toString() : null,
-    final_job_id: row.final_job_id != null ? row.final_job_id.toString() : null,
+    final_job_id: finalJobId != null ? String(finalJobId) : null,
     // 契约：RFC3339 带时区字符串；存的是 epoch 毫秒（跨语言金标对账无时区漂移）。
-    finalize_deadline_at:
-      row.finalize_deadline_ms != null
-        ? new Date(Number(row.finalize_deadline_ms)).toISOString()
-        : null,
-    charge_state: row.charge_state ?? null,
-    actual_credits: row.actual_credits ?? null,
+    finalize_deadline_at: deadlineMs != null ? new Date(deadlineMs).toISOString() : null,
+    charge_state: extraString(extras, "charge_state"),
+    actual_credits: extraNumber(extras, "actual_credits"),
   };
 }
 
@@ -328,31 +334,42 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       // 一次性批量查产出 assets，避免 N+1（对齐 Java selectBatchIds）。
       const allIds = rows.flatMap((r) => parseAssetIds(r.output_asset_ids));
       const assetMap = await loadAssets([...new Set(allIds)]);
+      // 同上：本页的扩展位一次查完，不在 map 里逐行查（IKJCOE）。
+      const extrasByJob = await loadJobExtras(
+        prisma,
+        rows.map((r) => r.id.toString()),
+      );
 
-      const records: JobListItem[] = rows.map((r) => ({
-        job_id: r.id.toString(),
-        type: r.type,
-        status: r.status,
-        progress: r.progress,
-        input: publicGenerationInput(r.input ?? null),
-        ...(r.type === "audio_mix" ? { canvas_card_state: r.canvas_card_state } : {}),
-        created_at: r.gmt_create.toISOString(),
-        output_assets: parseAssetIds(r.output_asset_ids)
-          .map((id) => assetMap.get(id.toString()))
-          .filter((a): a is AssetRow => a !== undefined)
-          .map((a) => ({
-            id: a.id.toString(),
-            url: a.url,
-            type: a.type,
-            width: a.width,
-            height: a.height,
-          })),
-        stored_error:
-          r.error && typeof r.error === "object" && !Array.isArray(r.error)
-            ? (r.error as Record<string, unknown>)
-            : null,
-        ...videoStageProjection(r),
-      }));
+      const records: JobListItem[] = rows.map((r) => {
+        const extras = extrasByJob.get(r.id.toString());
+        return {
+          job_id: r.id.toString(),
+          type: r.type,
+          status: r.status,
+          progress: r.progress,
+          input: publicGenerationInput(r.input ?? null),
+          // canvas_card_state 缺键 = 'pending'（列默认值搬到扩展位后由缺键表达）。
+          ...(r.type === "audio_mix"
+            ? { canvas_card_state: extraString(extras, "canvas_card_state") ?? "pending" }
+            : {}),
+          created_at: r.gmt_create.toISOString(),
+          output_assets: parseAssetIds(r.output_asset_ids)
+            .map((id) => assetMap.get(id.toString()))
+            .filter((a): a is AssetRow => a !== undefined)
+            .map((a) => ({
+              id: a.id.toString(),
+              url: a.url,
+              type: a.type,
+              width: a.width,
+              height: a.height,
+            })),
+          stored_error:
+            r.error && typeof r.error === "object" && !Array.isArray(r.error)
+              ? (r.error as Record<string, unknown>)
+              : null,
+          ...videoStageProjection(r, extras),
+        };
+      });
 
       return { records, total, size: filter.size, current: filter.page };
     },
@@ -458,6 +475,8 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
       });
       if (!row) return null;
+      // IKJCOE：阶段/费用字段在扩展位（原主表列已删）。
+      const extras = await loadJobExtrasOne(prisma, row.id.toString());
 
       let outputAssets: JobOutputAsset[] = [];
       let audioMixDurationMs: number | null = null;
@@ -561,7 +580,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
                 return typeof signature === "string" ? signature : null;
               })()
             : null,
-        ...videoStageProjection(row),
+        ...videoStageProjection(row, extras),
       };
     },
   };

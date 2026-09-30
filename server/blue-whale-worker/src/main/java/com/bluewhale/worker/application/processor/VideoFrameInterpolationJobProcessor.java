@@ -549,7 +549,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
                 message, httpStatus);
     }
 
-    /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at；插帧无输出槽位，
+    /** 失败处理：走视频版 failVideoJob（插帧无输出槽位，
      *  槽位段天然空转；details.raw 透传原始原因）。守卫要求 status='processing'，故已取消 /
      *  已终态任务的失败写入同样不会生效（终态权威）。 */
     private void failClaimed(ClaimedJob claim, String code, String msg) {

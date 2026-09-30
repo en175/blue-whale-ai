@@ -11,7 +11,9 @@ const FROZEN_NOW = new Date("2026-09-10T12:00:00.000Z");
 // IMAGE_JOB_LEASE_SECONDS 默认 120s（internals.ts:118-121）。
 const LEASE_SECONDS = 120;
 
-/** 候选行工厂（图片 queued）。字段与 findFirst 返回对齐。 */
+/** 候选行工厂（图片 queued）。字段与 findFirst 返回对齐。
+ *  IKJCOE：expected_output_count 主表列已删（权威在 generation_output_slots 的行数），
+ *  候选行上不再有它。 */
 function imageQueuedRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 300n,
@@ -20,7 +22,6 @@ function imageQueuedRow(overrides: Partial<Record<string, unknown>> = {}) {
     type: "image",
     status: "queued",
     input: { prompt: "一只猫", model_id: "m", provider_credential: "sealed" },
-    expected_output_count: 1,
     retry_count: 0,
     cancel_requested_at: null,
     fencing_token: 0n,
@@ -28,7 +29,7 @@ function imageQueuedRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-/** 候选行工厂（视频 queued）。 */
+/** 候选行工厂（视频 queued）。IKJCOE：同上，不再有 expected_output_count。 */
 function videoQueuedRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 300n,
@@ -40,7 +41,6 @@ function videoQueuedRow(overrides: Partial<Record<string, unknown>> = {}) {
     provider_task_id: null,
     cancel_requested_at: null,
     retry_of_job_id: null,
-    expected_output_count: 1,
     poll_count: 0,
     progress: 0,
     fencing_token: 0n,
@@ -287,7 +287,7 @@ describe("§3.2 rescheduleProviderPoll", () => {
       data: {
         progress: 42,
         poll_count: { increment: 1 },
-        next_poll_at: expectedNext,
+        // IKJCOE：next_poll_at 主表列已删（下一轮的时间由 next_action_at 表达）。
         next_action_at: expectedNext,
         last_polled_at: FROZEN_NOW,
         lease_owner: null,

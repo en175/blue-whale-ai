@@ -270,7 +270,7 @@ export class AudioMixesService {
           where: { id: jid, status: "failed", fencing_token: job.fencing_token },
           data: {
             status: "queued", progress: 0, error: Prisma.DbNull, output_asset_ids: Prisma.DbNull,
-            provider_task_id: null, poll_count: 0, next_poll_at: null,
+            provider_task_id: null, poll_count: 0,
             next_action_at: new Date(Date.now() - 60_000),
             execution_deadline_at: audioMixDeadline(duration),
             lease_owner: null, lease_expires_at: null,

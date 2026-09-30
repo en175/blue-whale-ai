@@ -329,7 +329,12 @@ public class ImageJobProcessor implements JobProcessor {
         }
 
         // 7. 生成数量（generation-worker.ts:554）
-        int n = Math.max(1, Math.min(4, job.expected_output_count()));
+        // IKJCOE：主表 expected_output_count 列已删——权威是建行时冻结的 input 快照
+        // （handle-create-generation-job.ts 写 `input.expected_output_count`，它同时是定价维度）。
+        // 缺失/非法按单输出兜底，与旧列缺省 1 同义。
+        Object countRaw = job.input().get("expected_output_count");
+        int requested = countRaw instanceof Number num ? num.intValue() : 1;
+        int n = Math.max(1, Math.min(4, requested));
 
         // 8. 收集参考图 URL（generation-worker.ts:555-561）
         List<String> sourceImageUrls = new ArrayList<>();

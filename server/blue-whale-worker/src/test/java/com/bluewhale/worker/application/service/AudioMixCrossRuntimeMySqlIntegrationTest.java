@@ -7,6 +7,7 @@ import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
@@ -73,21 +74,23 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
         factory.setDataSource(dataSource);
         SqlSessionFactory session = factory.getObject();
         jobMapper = mapper(GenerationJobMapper.class, session);
-        claimService = new JobClaimService(jobMapper);
+        var extraMapper = mapper(GenerationJobExtraMapper.class, session);
+        claimService = new JobClaimService(jobMapper, extraMapper);
         service = new JobStateMachineService(jobMapper,
                 mapper(AssetMapper.class, session),
                 mapper(GenerationJobLogMapper.class, session),
                 mapper(ProjectEventMapper.class, session),
                 mapper(GenerationOutputSlotMapper.class, session),
                 mapper(SceneCardGenerationRecordMapper.class, session),
-                mapper(StoryboardPreviewMapper.class, session));
+                mapper(StoryboardPreviewMapper.class, session),
+                extraMapper);
 
         // IKIWP8 ③：终态收口直连 JobFinalizer（与 service 同库同 SqlSessionFactory）。
         var assetMapper = mapper(AssetMapper.class, session);
         var jobLogMapper = mapper(GenerationJobLogMapper.class, session);
         var slotMapper = mapper(GenerationOutputSlotMapper.class, session);
         var events = new ProjectEventPublisher(mapper(ProjectEventMapper.class, session));
-        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper,
+        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
                 new SceneCardGenerationRecordSync(slotMapper,
                         mapper(SceneCardGenerationRecordMapper.class, session), events),
                 new StoryboardPreviewSync(slotMapper,
