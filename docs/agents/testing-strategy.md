@@ -20,7 +20,7 @@
 | `scoped/node` | `apps/*/src`、`packages/*/src|test` | 增量 TypeScript build + Vitest `--changed` |
 | `scoped/backend` | `backend/apps/*`、`backend/libs/*` 下的 TypeScript（NestJS BFF） | backend typecheck（自带 tsconfig 与 `@lib/*` 别名）+ 根 Vitest 过滤 `backend` `--changed` |
 | `scoped/worker-java` | `server/blue-whale-worker/` 下的 Java 源码与构建配置（独立 Maven 工程，不在 pnpm workspace） | `mvn -f server/pom.xml -pl blue-whale-worker -am -q test` |
-| `scoped/web` | Web app/components/hooks/lib/workers、`web/src` 下的契约副本 JSON、`web/scripts` 工具脚本 | Web typecheck + Web lint + Web Vitest `--changed` |
+| `scoped/web` | 前端源码、静态资源、共享依赖和构建配置，具体范围由选择器判定 | 一次 Web typecheck + Web lint + Web Vitest `--changed` + test/release 两次 Vite 打包 |
 | `scoped/governance` | 本策略、选择器、发布门禁及关联技能 | 规则、选择器和发布门禁定向测试 |
 | `scoped/control-plane` | Hook、Git、worktree、PR、授权、审计和工程技能校验 | Hook 黑盒测试 + Git/PR/worktree 脚本单测 |
 | `scoped/operations` | 探针、隧道、一次性修复和维护工具 | `scripts/tests` 下的脚本单测 |
@@ -55,6 +55,8 @@ Git/Agent Hook 不属于产品影响路径，归 `scoped/control-plane`。本策
 Agent 可用 `--risk high` 主动升级为带验收的全量。选择器只接受 `auto` 或 `high`，禁止通过参数、改写凭证或删减命令降级。低层级凭证不得覆盖高层级要求；带验收的全量凭证可覆盖不带验收的全量要求，反之不成立。
 
 ## 凭证复用
+
+前端相关推送须通过 [前端推送构建门禁](../../agent-rules/frontend-build-push.md)。Agent 主动执行验证，Git pre-push 核验待推送提交，缺少、失败或失效的凭证阻断推送；本地提交不新增打包检查。
 
 `run` 将 JSON 凭证写到 Git common dir 下的 `blue-whale/verification/<HEAD>.json`，权限为仅当前用户可读写，不提交仓库。凭证记录：
 

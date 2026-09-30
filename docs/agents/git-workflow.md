@@ -49,7 +49,7 @@
 
 ## 分支命名
 
-- 前缀必须在白名单内（hook 强制）：`feature/` / `fix/` / `hotfix/` / `docs/` / `chore/`。不在白名单 → `--force-with-lease` 被拦；普通任务分支即使落后也允许 push，PR 前再同步。
+- 前缀必须在白名单内（hook 强制）：`feature/` / `fix/` / `hotfix/` / `docs/` / `chore/`。不在白名单 → `--force-with-lease` 被拦；前端相关推送须先按 [构建门禁](../../agent-rules/frontend-build-push.md) 取得有效凭证，其他推送维持原流程。
 - 完整规则：`docs/agents/branch-naming.md`，决策：`docs/adr/0004-branch-naming.md`
 
 ## Task Worktree
