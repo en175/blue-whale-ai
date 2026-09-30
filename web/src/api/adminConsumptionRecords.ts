@@ -17,7 +17,12 @@ export interface AdminConsumptionRecord {
   /** 归属用户。**管理面独有的列**——用户面契约里没有它 */
   user_id: number;
   /**
-   * 昵称。BFF 回我们自己的库按 `user_id` 补的——billing 的账本认不出人。
+   * 用户名。BFF 回我们自己的库按 `user_id` 补的——billing 的账本认不出人。
+   *
+   * ⚠️ 键名是 `nickname`，界面上叫「用户名」，值都是 `bw_users.username`。
+   *    键名沿用身份查询那层（`AdminUserIdentity.nickname`）——**三个记录页共用同一份投影**。
+   *    （用户管理页走的是另一份 `AdminUserRow`，值同样是 `username`，只是投影不同；
+   *    在这里改键只会让同一个值在几个页面叫两个名字。）
    *
    * ⚠️ 可选（`?`）不是多余：与下面的 `reserved_credits` 同一条规矩 —— **后端比前端旧**时
    *    这个键**整个不存在**（老构建压根没投影它），拿到的是 `undefined`。本仓实测过一次
@@ -93,7 +98,7 @@ export interface AdminConsumptionRecordListData {
 
 export interface AdminConsumptionRecordQuery {
   /**
-   * 用户 ID / 手机号 / 昵称，**都要完整**（服务端精确匹配，收敛到唯一一个人）。
+   * 用户 ID / 手机号 / 用户名，**都要完整**（服务端精确匹配，收敛到唯一一个人）。
    * 空 = **全站消费**。
    *
    * ⚠️ 与用户管理页那个 `keyword` 是**两种东西**：那边是模糊匹配（多命中几行没关系），

@@ -133,7 +133,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
   it('渲染归属用户、任务类别与带方向的金额', async () => {
     await renderPage();
 
-    // 归属用户现在显示的是**昵称与手机号**（用户 ID 收进了悬停面板，见下面「用户列」那个 describe）
+    // 归属用户现在显示的是**用户名与手机号**（用户 ID 不占列也不进悬停，见下面「用户列」那个 describe）
     expect(document.body.textContent).toContain('张小明');
     expect(document.body.textContent).toContain('13800008888');
     // 任务列只放**类别**（模型名与提示词都收在明细面板里，见下面那个 describe）
@@ -282,7 +282,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     expect(tokenOfCall(2)).toBe('tok-1');
 
     const userInput = document.body.querySelector<HTMLInputElement>(
-      'input[placeholder="用户 ID / 手机号 / 昵称（需完整，留空 = 全站）"]',
+      'input[placeholder="用户 ID / 手机号 / 用户名（需完整，留空 = 全站）"]',
     );
     if (!userInput) throw new Error('用户输入框未渲染');
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -316,7 +316,7 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
     return {
       id: 'lot:12',
       user_id: 9001,
-      // 查不到用户（跨库历史 / 被清理）——「没有昵称手机号」的唯一形态
+      // 查不到用户（跨库历史 / 被清理）——「没有用户名手机号」的唯一形态
       nickname: null,
       phone: null,
       type: 'recharge',
@@ -425,41 +425,32 @@ describe('ConsumptionRecords — 用户列', () => {
     return [...document.body.querySelectorAll('th')].map((th) => th.textContent?.trim() ?? '');
   }
 
-  /** 悬停昵称格的触发器（面板 portal 到 body，悬停后才出现）。 */
-  async function hoverUserDetail() {
-    const trigger = document.body.querySelector<HTMLButtonElement>('button[aria-label="用户明细"]');
-    if (!trigger) throw new Error('没有找到用户明细触发器');
-    await act(async () => {
-      trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    });
-    await settle();
-  }
-
-  it('列头是「昵称」「手机号」，不再有「用户 ID」列', async () => {
+  it('列头是「用户名」「手机号」，不再有「用户 ID」列', async () => {
     await renderPage();
 
-    expect(headers()).toContain('昵称');
+    expect(headers()).toContain('用户名');
     expect(headers()).toContain('手机号');
-    // 用户 ID 收进悬停面板 —— 常驻列的位置留给运营真正用来认人的两个字段
     expect(headers()).not.toContain('用户 ID');
   });
 
-  it('昵称与手机号来自 BFF 回填，直接渲染在行里', async () => {
+  it('用户名与手机号来自 BFF 回填，直接渲染在行里', async () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('张小明');
     expect(document.body.textContent).toContain('13800008888');
   });
 
-  it('用户 ID 收在悬停面板里', async () => {
+  it('★ 用户 ID 一个都不露 —— 既不在列里，也不藏在悬停 / 提示里', async () => {
+    // 运营在这一页认人靠用户名与手机号。那串数字是排查时才用的内部标识，
+    // 摆在表里或藏在浮层里都只是噪声。三个记录页同一口径。
     await renderPage();
 
-    await hoverUserDetail();
-
-    expect(document.body.textContent).toContain('9001');
+    expect(document.body.textContent).not.toContain('9001');
+    // 用户名格上不该再挂「还有东西可看」的图标
+    expect(document.body.querySelector('button[aria-label="用户明细"]')).toBeNull();
   });
 
-  it('查不到用户（昵称手机号都是 null）→ 显示「—」，不是空白也不是崩', async () => {
+  it('查不到用户（用户名手机号都是 null）→ 显示「—」，不是空白也不是崩', async () => {
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, nickname: null, phone: null }],
       next_page_token: '',
@@ -467,7 +458,7 @@ describe('ConsumptionRecords — 用户列', () => {
 
     await renderPage();
 
-    // 按列序取：时间(0) 昵称(1) 手机号(2) …
+    // 按列序取：时间(0) 用户名(1) 手机号(2) …
     const cells = [...document.querySelectorAll('tbody tr td')].map(
       (td) => td.textContent?.trim() ?? '',
     );
@@ -476,7 +467,7 @@ describe('ConsumptionRecords — 用户列', () => {
     expect(cells[2]).toBe('—');
   });
 
-  it('后端比前端旧、昵称手机号**整个键都不回**时同样显示「—」，不崩', async () => {
+  it('后端比前端旧、用户名手机号**整个键都不回**时同样显示「—」，不崩', async () => {
     // 与 reserved_credits 同一个坑：`undefined` 也是「没有」。这里渲染写的是 `?? '—'`，
     // 两种形态一起兜住 —— 用真值判断或 `=== null` 就会把它渲染成空白。
     // 类型上这俩字段是**可选**的，所以 `delete` 合法：这不是在骗类型，而是在造旧后端那种回包。

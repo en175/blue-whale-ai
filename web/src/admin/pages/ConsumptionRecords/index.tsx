@@ -137,29 +137,15 @@ export default function ConsumptionRecords() {
     { key: 'created_at', header: '时间', render: (row) => fmtTime(row.created_at) },
     {
       key: 'nickname',
-      header: '昵称',
-      render: (row) => {
-        // 昵称 / 手机号来自**我们自己库**的 `bw_users`（不是 billing）：账本里只有 user_id，
-        // 认不出人。BFF 拿这一页的 user_id 批量查一次补回来——与「任务」列同一套做法。
-        //
-        // 用户 ID 收进这个悬停面板：运营在这一页是**找人**，常驻的是昵称和手机号；
-        // 那串数字只在排查时用得上，为一个偶发需求常驻一列不划算。
-        return (
-          <Tooltip
-            label="用户明细"
-            title="用户"
-            trigger={
-              <>
-                {row.nickname ?? '—'}
-                {/* 图标是「这里还有东西」的标记。不加它，一行纯文字看不出能悬停。
-                    尺寸跟 `ui/Tooltip` 默认的 `?` 图标一致（15）——同一种交互不该有第二种大小。 */}
-                <Eye size={15} strokeWidth={2} />
-              </>
-            }
-            content={<MetaRow items={[{ label: '用户 ID', value: row.user_id }]} />}
-          />
-        );
-      },
+      header: '用户名',
+      // 用户名 / 手机号来自**我们自己库**的 `bw_users`（不是 billing）：账本里只有 user_id，
+      // 认不出人。BFF 拿这一页的 user_id 批量查一次补回来——与「任务」列同一套做法。
+      //
+      // ⚠️ 用户 ID **一处都不露**（不占列、也不进悬停）：运营在这一页认人靠用户名与手机号，
+      //    那串数字是排查时才用的内部标识，摆出来只是噪声。任务记录 / 充值记录两页同口径。
+      //
+      // ⚠️ 判空 `?? '—'`，不是真值判断：后端把「查不到用户」与「用户没有手机号」都收敛成 `null`。
+      render: (row) => row.nickname ?? '—',
     },
     {
       key: 'phone',
@@ -323,7 +309,7 @@ export default function ConsumptionRecords() {
             // 「需完整」四个字不能省：用户管理页那个框是**模糊**匹配，这个框是**精确**匹配
             // （账本按 user_id 过滤，服务端只收一个）。同一句 placeholder 放两页、行为不同，
             // 运营会照着上一页的习惯输入半截。见 adminConsumptionRecords.ts 的类型注释。
-            placeholder="用户 ID / 手机号 / 昵称（需完整，留空 = 全站）"
+            placeholder="用户 ID / 手机号 / 用户名（需完整，留空 = 全站）"
             value={draft.keyword}
             onChange={(e) => setDraft((d) => ({ ...d, keyword: e.target.value }))}
             onKeyDown={(e) => {
