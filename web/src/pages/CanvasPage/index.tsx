@@ -330,6 +330,7 @@ import type { AssetCardKind, AssetCardNodeData } from './components/AssetCardNod
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
 import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
+import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
@@ -1621,20 +1622,11 @@ export default function CanvasPage() {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  /** 输入 dock 等覆盖层不在 .react-flow 内：Ctrl/Cmd+滚轮会走浏览器整页缩放，
-   *  表现为 dock 跟着放大、缩小却不回（画布缩放与页面缩放脱节）。捕获阶段拦截。 */
-  useEffect(() => {
-    const el = canvasWrapperRef.current;
-    if (!el) return;
-    const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && !event.metaKey) return;
-      const target = event.target;
-      if (target instanceof Element && target.closest('.react-flow')) return;
-      event.preventDefault();
-    };
-    el.addEventListener('wheel', onWheel, { capture: true, passive: false });
-    return () => el.removeEventListener('wheel', onWheel, true);
-  }, []);
+  /** Dock 等浮层滚轮直通画布（IKIXDB）：光标落在生成面板/工具条等非 .react-flow
+   *  浮层上时 wheel 转发给 .react-flow__renderer（同 CropFrame 暗区直通），画布
+   *  平移不再被浮层截断；浮层内真实滚动区滚自身，ctrl/meta 仍拦浏览器整页缩放
+   *  （原行为：dock 跟着放大、缩小却不回的整页缩放）。捕获阶段监听。 */
+  useOverlayWheelPassthrough(canvasWrapperRef, { ignoreInsideReactFlow: true });
   /** FlowCanvas 注册的屏幕点→flow 坐标转换（无参默认取视口中心），注册前回退原点附近 */
   const spawnPosRef = useRef<(screenPt?: { x: number; y: number }) => { x: number; y: number }>(
     () => ({ x: 300, y: 200 }),

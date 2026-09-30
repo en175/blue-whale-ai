@@ -4,7 +4,7 @@
    （组件只订阅 nodeLookup/transform/width 与选中集合，不依赖真实 ReactFlow 测量），
    断言口径：锚点 = computeFollowAnchorAbove 手算值、根元素带 data-gen-panel-territory
    （IKFYH6 点外关闭豁免）、唯一选中门（useSoloNodeSelected）与调用方 show 条件。 */
-import { act, createElement, useEffect, type ReactNode } from 'react';
+import { act, createElement, useEffect, useRef, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
@@ -180,5 +180,97 @@ describe('IKGYYD NodeFollowToolbar（钉屏幕工具栏容器）', () => {
     const layers = [...mountNode.querySelectorAll('[data-gen-panel-territory]')];
     expect(layers).toHaveLength(1);
     expect(layers[0].textContent).toBe(TOOLBAR_TEXT);
+  });
+});
+
+describe('IKIXDB NodeFollowToolbar 浮层滚轮直通', () => {
+  let forwarded: WheelEvent[];
+
+  /** 模拟 ReactFlow children 的 DOM 语境：.react-flow 根 + renderer 桩（收集转发事件）。
+   *  真实结构中工具条渲染在 .react-flow 内、.react-flow__renderer 兄弟层（index.tsx）。 */
+  function FlowStub({ children }: { children: ReactNode }) {
+    const rendererRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+      const el = rendererRef.current;
+      if (!el) return;
+      const onWheel = (e: Event) => forwarded.push(e as WheelEvent);
+      el.addEventListener('wheel', onWheel);
+      return () => el.removeEventListener('wheel', onWheel);
+    }, []);
+    return createElement('div', { className: 'react-flow' },
+      createElement('div', { className: 'react-flow__renderer', ref: rendererRef }),
+      children,
+    );
+  }
+
+  async function dispatchWheel(target: EventTarget, init: WheelEventInit) {
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init });
+    await act(async () => { target.dispatchEvent(event); });
+    return event;
+  }
+
+  const soloState = flowState([{ id: 'n1', x: 100, y: 200, width: 400, height: 300, selected: true }]);
+
+  beforeEach(() => {
+    forwarded = [];
+  });
+
+  it('工具条上的滚轮转发 renderer 且字段保留、原事件拦默认', async () => {
+    await renderTree([createElement(StateInjector, { state: soloState }), createElement(FlowStub, null, toolbar('n1'))]);
+    const layer = mountNode.querySelector('[data-gen-panel-territory]') as HTMLElement;
+    const event = await dispatchWheel(layer, {
+      clientX: 30, clientY: 40, deltaX: 5, deltaY: 10,
+      ctrlKey: true, shiftKey: true, altKey: true, metaKey: true,
+    });
+    expect(forwarded).toHaveLength(1);
+    const received = forwarded[0];
+    expect(received.clientX).toBe(30);
+    expect(received.clientY).toBe(40);
+    expect(received.deltaX).toBe(5);
+    expect(received.deltaY).toBe(10);
+    expect(received.ctrlKey).toBe(true);
+    expect(received.shiftKey).toBe(true);
+    expect(received.altKey).toBe(true);
+    expect(received.metaKey).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('工具条内可滚动子区滚自身、不转发；ctrl 时拦整页缩放', async () => {
+    await renderTree([
+      createElement(StateInjector, { state: soloState }),
+      createElement(FlowStub, null,
+        <NodeFollowToolbar nodeId="n1">
+          <div data-testid="toolbar-scroll" style={{ overflowY: 'auto' }} />
+        </NodeFollowToolbar>,
+      ),
+    ]);
+    const stub = mountNode.querySelector<HTMLElement>('[data-testid="toolbar-scroll"]')!;
+    Object.defineProperty(stub, 'scrollHeight', { value: 500, configurable: true });
+    Object.defineProperty(stub, 'clientHeight', { value: 100, configurable: true });
+    const plain = await dispatchWheel(stub, { deltaY: 50 });
+    expect(forwarded).toHaveLength(0);
+    expect(plain.defaultPrevented).toBe(false);
+    const ctrl = await dispatchWheel(stub, { deltaY: 50, ctrlKey: true });
+    expect(forwarded).toHaveLength(0);
+    expect(ctrl.defaultPrevented).toBe(true);
+  });
+
+  it('工具条卸载后不再布防（条件渲染翻转不泄漏监听）', async () => {
+    await renderTree([
+      createElement(StateInjector, { state: soloState }),
+      createElement(FlowStub, null, toolbar('n1')),
+    ]);
+    const layer = mountNode.querySelector('[data-gen-panel-territory]') as HTMLElement;
+    expect(layer).toBeTruthy();
+    await act(async () => {
+      root.render(createElement(ReactFlowProvider, null, [
+        createElement(StateInjector, { state: soloState }),
+        createElement(FlowStub, null, toolbar('n1', false)),
+      ]));
+    });
+    expect(mountNode.querySelector('[data-gen-panel-territory]')).toBeNull();
+    // 卸载后的旧 layer 派发不再触达 renderer（监听已随布防元素拆除）
+    await dispatchWheel(layer, { deltaY: 10 });
+    expect(forwarded).toHaveLength(0);
   });
 });

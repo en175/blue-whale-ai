@@ -14,11 +14,12 @@
  * 根元素打 data-gen-panel-territory（IKFYH6 点外关闭豁免）：工具条迁出 .react-flow__node
  * 后点击它不得被判成画布外点击而误关生成面板。
  * ============================================ */
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { useStore } from '@xyflow/react';
 import { computeFollowAnchorAbove } from '../../followDialog';
 import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import { shouldSuppressCanvasSelection } from '../Canvas/chromeHitGuard';
+import { useOverlayWheelPassthrough } from '../Canvas/canvasWheelPassthrough';
 import styles from './index.module.css';
 
 export interface NodeFollowToolbarProps {
@@ -48,6 +49,10 @@ export default function NodeFollowToolbar({
   const transform = useStore((state) => state.transform);
   const containerWidth = useStore((state) => state.width);
   const soloSelected = useSoloNodeSelected(nodeSelected);
+  /** 工具条渲染在 .react-flow 根内、renderer 兄弟层，wheel 到不了 d3-zoom：
+   *  根层接管转发（IKIXDB），光标停在工具条上画布平移/缩放照常。 */
+  const layerRef = useRef<HTMLDivElement | null>(null);
+  useOverlayWheelPassthrough(layerRef);
 
   /** 绝对 flow 坐标（组内成员也正确；顶级节点上与 position 等价） */
   const position = node?.internals?.positionAbsolute;
@@ -69,6 +74,7 @@ export default function NodeFollowToolbar({
 
   return (
     <div
+      ref={layerRef}
       className={styles.toolbarLayer}
       data-canvas-chrome
       data-gen-panel-territory

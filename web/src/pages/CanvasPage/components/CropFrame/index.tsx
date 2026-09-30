@@ -10,6 +10,7 @@
  * ============================================ */
 import { useCallback, useEffect, useRef } from 'react';
 import { useReactFlow } from '@xyflow/react';
+import { findFlowRenderer, forwardWheelToRenderer } from '../Canvas/canvasWheelPassthrough';
 import {
   cropPresetRatio,
   dragCropCorner,
@@ -127,33 +128,15 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
   /* ---- 暗区手势直通（编辑期间画布缩放平移照常，规格故事 16） ----
    * 本覆盖层渲染在 ReactFlow children 区（.react-flow__renderer 的兄弟节点），
    * 命中元素上的原生 wheel / pointer 事件到不了 renderer 上挂的 d3-zoom：
-   * wheel 即时转发（本仓滚轮=平移 ADR-0081，ctrl+滚轮/触控板捏合=缩放）；
-   * 暗区按下后位移超 4px 视为平移手势，转发 mousedown 启动 d3 拖拽平移
-   * （后续帧由真实 window 事件驱动），位移以内视为点击 → onDarkAreaClick 退出。 */
+   * wheel 即时转发（IKIXDB 起走 Canvas/canvasWheelPassthrough 共享模块，同
+   * NodeFollowToolbar / canvasWrapper Dock 直通）；暗区按下后位移超 4px 视为平移
+   * 手势，转发 mousedown 启动 d3 拖拽平移（后续帧由真实 window 事件驱动），
+   * 位移以内视为点击 → onDarkAreaClick 退出。 */
   const layerRef = useRef<HTMLDivElement | null>(null);
-  const rendererEl = () =>
-    layerRef.current?.closest('.react-flow')?.querySelector('.react-flow__renderer') ?? null;
+  const rendererEl = () => (layerRef.current ? findFlowRenderer(layerRef.current) : null);
 
   const forwardWheel = (e: React.WheelEvent) => {
-    const target = rendererEl();
-    if (!target) return;
-    const native = e.nativeEvent;
-    target.dispatchEvent(
-      new WheelEvent('wheel', {
-        bubbles: false,
-        cancelable: true,
-        clientX: native.clientX,
-        clientY: native.clientY,
-        deltaX: native.deltaX,
-        deltaY: native.deltaY,
-        deltaZ: native.deltaZ,
-        deltaMode: native.deltaMode,
-        ctrlKey: native.ctrlKey,
-        shiftKey: native.shiftKey,
-        altKey: native.altKey,
-        metaKey: native.metaKey,
-      }),
-    );
+    forwardWheelToRenderer(e.nativeEvent);
   };
 
   const forwardPanStart = (clientX: number, clientY: number) => {
