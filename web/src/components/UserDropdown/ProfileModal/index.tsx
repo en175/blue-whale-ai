@@ -4,6 +4,8 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
+import BindPhoneModal from '@/components/UserDropdown/BindPhoneModal';
+import { updateUser } from '@/utils/auth';
 import styles from './index.module.css';
 
 interface ProfileModalProps {
@@ -18,6 +20,7 @@ interface ProfileModalProps {
 export default function ProfileModal({ nickname, phone, onClose, onSave, error, onErrorClear }: ProfileModalProps) {
   const [name, setName] = useState(nickname);
   const [saving, setSaving] = useState(false);
+  const [showBindPhone, setShowBindPhone] = useState(false);
 
   /** 昵称非空且与当前不同才允许保存 */
   const canSave = name.trim().length > 0 && name.trim() !== nickname;
@@ -60,15 +63,26 @@ export default function ProfileModal({ nickname, phone, onClose, onSave, error, 
           />
         </div>
 
-        {/* 手机号码（不可编辑） */}
+        {/* 手机号码（IKJA4R）：未绑定时可点绑定；已绑定只读——本单不做换绑 */}
         <div className={styles.field}>
           <span className={styles.label}>手机号码</span>
-          <input
-            className={`${styles.input} ${styles.inputDisabled}`}
-            value={phone}
-            disabled
-            title="手机号码不可修改"
-          />
+          {phone ? (
+            <input
+              className={`${styles.input} ${styles.inputDisabled}`}
+              value={phone}
+              disabled
+              title="已绑定的手机号暂不支持更换"
+            />
+          ) : (
+            <button
+              type="button"
+              className={styles.bindPhoneBtn}
+              onClick={() => setShowBindPhone(true)}
+              disabled={saving}
+            >
+              绑定手机号
+            </button>
+          )}
         </div>
 
         {/* 错误提示 */}
@@ -89,6 +103,14 @@ export default function ProfileModal({ nickname, phone, onClose, onSave, error, 
             {saving ? <><Loader2 size={14} className={styles.spinner} /> 保存中…</> : '保存'}
           </button>
         </div>
+
+        {/* 绑定手机号（IKJA4R）：成功后立刻回写本地用户信息，弹窗不用重开就能看到号码 */}
+        {showBindPhone && (
+          <BindPhoneModal
+            onClose={() => setShowBindPhone(false)}
+            onBound={(bound) => updateUser({ phone: bound })}
+          />
+        )}
       </div>
     </div>,
     document.body

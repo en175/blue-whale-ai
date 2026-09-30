@@ -1,13 +1,19 @@
 /* ============================================
- * LoginModal 登录弹窗：登录 / 注册双模式
- * 外壳走共用 Modal（Portal / 遮罩 / ESC / 关闭），表单与鉴权逻辑保持不变
+ * LoginModal 登录弹窗：**账号密码 / 手机号验证码 双态**（IKJA4R）
+ *
+ * 两个状态在同一个弹窗内原地切换，「其他登录方式」是唯一入口，按钮文案跟着当前态变
+ * （以后加微信 / 飞书就是那一排多一个入口，不动布局）。
+ *
+ * ⚠️ 没有「注册」态了：手机号验证码登录对没绑过的号**当场建号**，
+ * 新人点「手机号登录」就是注册，不需要再走一遍「创建账号」表单。
  * ============================================ */
-import { useState, type KeyboardEvent } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import {
-  loginWithPassword,
-  registerWithPassword,
   fetchMe,
+  loginWithCode,
+  loginWithPassword,
+  sendCode,
   toSessionUser,
   type LoginData,
 } from '@/api/auth';
@@ -21,17 +27,21 @@ import {
   PLATFORM_PRIVACY_POLICY_HREF,
   USER_SERVICES_AGREEMENT_HREF,
 } from './agreements';
-import { isRegisterPasswordValid } from './password';
 
 interface LoginModalProps {
   onClose: () => void;
-  /** 登录/注册成功后、关闭弹窗前调用（会话过期续接用） */
+  /** 登录成功后、关闭弹窗前调用（会话过期续接用） */
   onSuccess?: () => void;
-  /** 初始模式：'login' 登录 | 'register' 注册 */
-  initialMode?: 'login' | 'register';
+  /** 初始态：'password' 账号密码（默认）| 'phone' 手机号验证码 */
+  initialMode?: Mode;
 }
 
-type Mode = 'login' | 'register';
+type Mode = 'password' | 'phone';
+
+/** 与后端同一条口径（`libs/core/auth/phone.ts`）。 */
+const PHONE_RE = /^1[3-9]\d{9}$/;
+/** 发送成功后的冷却秒数。后端还有一层按号/按 IP 的频控，这里只是让按钮别被连点。 */
+const SEND_CODE_COOLDOWN_SECONDS = 60;
 
 function AgreementLinks() {
   return (
@@ -58,6 +68,27 @@ function AgreementLinks() {
   );
 }
 
+/** 协议勾选行。两个态共用——不勾选时两边的登录按钮都点不动。 */
+function AgreementRow({
+  agreed,
+  onChange,
+}: {
+  agreed: boolean;
+  onChange: (agreed: boolean) => void;
+}) {
+  return (
+    <label className={styles.agreeRow}>
+      <input
+        type="checkbox"
+        className={styles.checkbox}
+        checked={agreed}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <AgreementLinks />
+    </label>
+  );
+}
+
 interface PasswordFieldProps {
   placeholder: string;
   value: string;
@@ -67,8 +98,6 @@ interface PasswordFieldProps {
   showLabel?: string;
   hideLabel?: string;
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
-  ariaInvalid?: boolean;
-  ariaDescribedBy?: string;
 }
 
 function PasswordField({
@@ -80,8 +109,6 @@ function PasswordField({
   showLabel = '显示密码',
   hideLabel = '隐藏密码',
   onKeyDown,
-  ariaInvalid,
-  ariaDescribedBy,
 }: PasswordFieldProps) {
   return (
     <div className={styles.passwordField}>
@@ -92,8 +119,6 @@ function PasswordField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={onKeyDown}
-        aria-invalid={ariaInvalid}
-        aria-describedby={ariaDescribedBy}
       />
       <button
         type="button"
@@ -109,30 +134,36 @@ function PasswordField({
   );
 }
 
-export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }: LoginModalProps) {
+export default function LoginModal({
+  onClose,
+  onSuccess,
+  initialMode = 'password',
+}: LoginModalProps) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const [confirmPwd, setConfirmPwd] = useState('');
-  const [confirmPwdVisible, setConfirmPwdVisible] = useState(false);
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  const heading = mode === 'login' ? '登录' : '创建账号';
+  const [sendingCode, setSendingCode] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  /* ---------- 发送验证码冷却 ---------- */
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = window.setInterval(() => setCooldown((n) => Math.max(0, n - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [cooldown]);
 
   /* ---------- 表单校验 ---------- */
-  const loginValid = username.trim().length > 0 && password.length > 0 && agreed;
-  const passwordRuleError = mode === 'register' && password.length > 0 && !isRegisterPasswordValid(password);
-  const registerValid =
-    username.trim().length >= 3 &&
-    isRegisterPasswordValid(password) &&
-    password === confirmPwd &&
-    agreed;
+  const phoneValid = PHONE_RE.test(phone.trim());
+  const passwordValid = username.trim().length > 0 && password.length > 0 && agreed;
+  const phoneLoginValid = phoneValid && code.trim().length > 0 && agreed;
 
-  /* ---------- 登录/注册共用：登录态写入 ---------- */
+  /* ---------- 登录态写入（两个态共用） ---------- */
   const applyAuth = async (login: LoginData) => {
     const me = await fetchMe().catch(() => null);
     const user: SessionUser = me
@@ -153,14 +184,13 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
     onClose();
   };
 
-  /* ---------- 登录提交 ---------- */
-  const submitLogin = async () => {
-    if (!loginValid || loading) return;
+  /* ---------- 账号密码登录 ---------- */
+  const submitPasswordLogin = async () => {
+    if (!passwordValid || loading) return;
     setLoading(true);
     setError('');
     try {
-      const login = await loginWithPassword(username.trim(), password);
-      await applyAuth(login);
+      await applyAuth(await loginWithPassword(username.trim(), password));
     } catch (e) {
       setError(isApiError(e) ? e.message : '登录失败，请稍后重试');
     } finally {
@@ -168,31 +198,45 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
     }
   };
 
-  /* ---------- 注册提交 ---------- */
-  const submitRegister = async () => {
-    if (!registerValid || loading) return;
+  /* ---------- 发送验证码 ---------- */
+  const handleSendCode = async () => {
+    if (!phoneValid || cooldown > 0 || sendingCode) return;
+    setSendingCode(true);
+    setError('');
+    try {
+      await sendCode(phone.trim());
+      setCooldown(SEND_CODE_COOLDOWN_SECONDS);
+    } catch (e) {
+      setError(isApiError(e) ? e.message : '验证码发送失败，请稍后重试');
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  /* ---------- 手机号验证码登录 ---------- */
+  const submitPhoneLogin = async () => {
+    if (!phoneLoginValid || loading) return;
     setLoading(true);
     setError('');
-    setSuccess('');
     try {
-      const login = await registerWithPassword(username.trim(), password, email.trim() || undefined);
-      setSuccess('注册成功，正在登录…');
-      await applyAuth(login);
+      // 没绑过该手机号的账号在这一步当场建号（`is_new_user`）——**刻意不提示**，
+      // 对用户来说「填手机号 → 收码 → 进来」本来就只有一步。
+      await applyAuth(await loginWithCode(phone.trim(), code.trim()));
     } catch (e) {
-      setError(isApiError(e) ? e.message : '注册失败，请稍后重试');
+      setError(isApiError(e) ? e.message : '登录失败，请稍后重试');
     } finally {
       setLoading(false);
     }
   };
 
-  /* ---------- 切换模式时清空状态 ---------- */
+  /* ---------- 切换登录方式 ---------- */
   const switchMode = (target: Mode) => {
     setMode(target);
     setPasswordVisible(false);
-    setConfirmPwdVisible(false);
     setError('');
-    setSuccess('');
   };
+
+  const sendCodeLabel = cooldown > 0 ? `${cooldown} 秒后重发` : sendingCode ? '发送中…' : '发送验证码';
 
   return (
     <Modal
@@ -200,7 +244,7 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
       footer={null}
       onCancel={onClose}
       width="min(620px, calc(100vw - 48px))"
-      ariaLabel={heading}
+      ariaLabel="登录"
       classNames={{
         container: styles.modal,
         body: styles.body,
@@ -213,10 +257,10 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
         },
       }}
     >
-      <h2 className={styles.title}>{heading}</h2>
+      <h2 className={styles.title}>登录</h2>
 
-      {mode === 'login' ? (
-        /* ========== 登录表单 ========== */
+      {mode === 'password' ? (
+        /* ========== 账号密码 ========== */
         <>
           <input
             className={styles.input}
@@ -232,109 +276,77 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
             onChange={setPassword}
             onToggleVisible={() => setPasswordVisible((visible) => !visible)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') submitLogin();
+              if (event.key === 'Enter') submitPasswordLogin();
             }}
           />
 
           {error && <div className={styles.error}>{error}</div>}
 
-          <label className={styles.agreeRow}>
-            <input
-              type="checkbox"
-              className={styles.checkbox}
-              checked={agreed}
-              onChange={(e) => setAgreed(e.target.checked)}
-            />
-            <AgreementLinks />
-          </label>
+          <AgreementRow agreed={agreed} onChange={setAgreed} />
 
           <button
             className={styles.submitBtn}
-            disabled={!loginValid || loading}
-            onClick={submitLogin}
+            disabled={!passwordValid || loading}
+            onClick={submitPasswordLogin}
           >
             {loading ? '登录中…' : '登录'}
           </button>
-
-          {/* 创建账号（带灰色边框） */}
-          <button
-            className={styles.createBtn}
-            onClick={() => switchMode('register')}
-          >
-            创建账号
-          </button>
         </>
       ) : (
-        /* ========== 注册表单 ========== */
+        /* ========== 手机号验证码 ========== */
         <>
           <input
             className={styles.input}
-            placeholder="账号（至少3位）"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            placeholder="请输入手机号"
+            inputMode="numeric"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
             autoFocus
           />
-          <PasswordField
-            placeholder="密码（8 位以上）"
-            value={password}
-            visible={passwordVisible}
-            onChange={setPassword}
-            onToggleVisible={() => setPasswordVisible((visible) => !visible)}
-            ariaInvalid={passwordRuleError}
-            ariaDescribedBy={passwordRuleError ? 'register-password-error' : undefined}
-          />
-          {passwordRuleError && (
-            <div id="register-password-error" className={styles.error}>
-              密码至少 8 位（最长 72 字节，一个汉字算 3 字节）
-            </div>
-          )}
-          <PasswordField
-            placeholder="确认密码"
-            value={confirmPwd}
-            visible={confirmPwdVisible}
-            onChange={setConfirmPwd}
-            onToggleVisible={() => setConfirmPwdVisible((visible) => !visible)}
-            showLabel="显示确认密码"
-            hideLabel="隐藏确认密码"
-          />
-          <input
-            className={styles.input}
-            type="email"
-            placeholder="邮箱（选填）"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
+          <div className={styles.codeRow}>
+            <input
+              className={styles.input}
+              placeholder="请输入验证码"
+              inputMode="numeric"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') submitPhoneLogin();
+              }}
+            />
+            <button
+              type="button"
+              className={styles.sendCodeBtn}
+              disabled={!phoneValid || cooldown > 0 || sendingCode}
+              onClick={handleSendCode}
+            >
+              {sendCodeLabel}
+            </button>
+          </div>
 
           {error && <div className={styles.error}>{error}</div>}
-          {success && <div className={styles.success}>{success}</div>}
 
-          <label className={styles.agreeRow}>
-            <input
-              type="checkbox"
-              className={styles.checkbox}
-              checked={agreed}
-              onChange={(e) => setAgreed(e.target.checked)}
-            />
-            <AgreementLinks />
-          </label>
+          <AgreementRow agreed={agreed} onChange={setAgreed} />
 
           <button
             className={styles.submitBtn}
-            disabled={!registerValid || loading}
-            onClick={submitRegister}
+            disabled={!phoneLoginValid || loading}
+            onClick={submitPhoneLogin}
           >
-            {loading ? '注册中…' : '注册'}
-          </button>
-
-          {/* 返回登录 */}
-          <button
-            className={styles.createBtn}
-            onClick={() => switchMode('login')}
-          >
-            已有账号？返回登录
+            {loading ? '登录中…' : '登录'}
           </button>
         </>
       )}
+
+      {/* 其他登录方式：**唯一**的切换入口，按钮文案跟着当前态变。 */}
+      <div className={styles.divider}>其他登录方式</div>
+      <button
+        className={styles.createBtn}
+        onClick={() => switchMode(mode === 'password' ? 'phone' : 'password')}
+      >
+        {mode === 'password' ? '手机号登录' : '账号密码登录'}
+      </button>
     </Modal>
   );
 }

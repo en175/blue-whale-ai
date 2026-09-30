@@ -1,8 +1,9 @@
 /* ============================================
  * auth 会话门面：全局状态存储（zustand + persist）为唯一数据源
- * 登录态走 HttpOnly cookie（后端读取），本文件不再暴露任何令牌；
- * 登录是否成立只看 user 是否就位（/api/me 经 cookie 校验后回填）
+ * 登录凭证（JWT）由 `@/api/sessionToken` 保管，这里不碰它；
+ * 登录是否成立只看 user 是否就位（/api/me 校验后回填）
  * ============================================ */
+import { clearSessionToken } from '@/api/sessionToken';
 import { useAuthStore, type SessionUser } from '@/stores/auth';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 
@@ -40,8 +41,12 @@ export function setSession(user: SessionUser | null) {
 /**
  * 业务接口 401：本地仍有用户则弹登录并等续接，不立刻清会话（避免画布卸载丢动作）；
  * 从未登录（如 `/api/me` 探测）则静默清空，不弹窗。
+ *
+ * <p>IKJAZN：两种分支都**先丢掉本地令牌** —— 服务端已经明确拒了它，
+ * 留着只会在下一次请求里再被拒一次。
  */
 export function handleUnauthorized() {
+  clearSessionToken();
   if (useAuthStore.getState().user) {
     useAuthPromptStore.getState().notifyExpired();
     return;

@@ -273,7 +273,7 @@ export class AuthController {
         userAgent,
         success: true,
       });
-      return ok(loginData(result, isNewUser));
+      return ok(loginData(result, isNewUser, sessionToken));
     } catch (error) {
       if (error instanceof InvalidVerificationCodeError) {
         // 留痕口径与账密失败一致：对撞码的人来说两条路径没有区别，防护也不该有区别。

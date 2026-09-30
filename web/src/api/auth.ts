@@ -2,10 +2,16 @@
  * auth 接口：登录/退出/当前用户/积分配额，对接真实后端
  * ============================================ */
 import { apiRequest } from './http';
+import { clearSessionToken, setSessionToken } from './sessionToken';
 import type { SessionUser } from '@/utils/auth';
 
-/** POST /api/auth/login 返回（登录态走 HttpOnly 会话 cookie，响应不含任何令牌） */
+/** POST /api/auth/login 返回 */
 export interface LoginData {
+  /**
+   * 登录令牌（JWT，IKJAZL）。**由前端保管**，由 `api/http.ts` 统一以
+   * `Authorization: Bearer` 注入到后续请求——各调用点不该自己拼这个头。
+   */
+  token: string;
   user_id: number;
   username: string;
   email: string;
@@ -67,24 +73,60 @@ export const toSessionUser = (m: MeData): SessionUser => ({
   isAdmin: m.is_admin ?? false,
 });
 
-/** 账号密码登录 */
-export function loginWithPassword(username: string, password: string) {
-  return apiRequest<LoginData>('/api/auth/login', {
+/** 账号密码登录。令牌在**这里**落本地、不在调用点——否则迟早漏掉一处。 */
+export async function loginWithPassword(username: string, password: string) {
+  const data = await apiRequest<LoginData>('/api/auth/login', {
     method: 'POST',
     silent: true,
     body: JSON.stringify({ username, password }),
   });
+  setSessionToken(data.token);
+  return data;
 }
 
-/** 账号密码注册 */
-export function registerWithPassword(username: string, password: string, email?: string) {
+/** 发送短信验证码（登录与绑定手机号共用同一条发码接口，后端按手机号+IP 四道频控） */
+export function sendCode(phone: string) {
+  return apiRequest<null>('/api/auth/send-code', {
+    method: 'POST',
+    silent: true,
+    body: JSON.stringify({ phone }),
+  });
+}
+
+/**
+ * 手机号验证码登录。**没绑过该手机号的账号在这一步当场建号**——
+ * 响应里的 `is_new_user` 说的就是「本次是否建了号」，前端刻意不拿它做提示。
+ */
+export async function loginWithCode(phone: string, code: string) {
+  const data = await apiRequest<LoginData>('/api/auth/login-by-code', {
+    method: 'POST',
+    silent: true,
+    body: JSON.stringify({ phone, code }),
+  });
+  setSessionToken(data.token);
+  return data;
+}
+
+/** 绑定手机号（**首次绑定**，不做换绑；后端对已绑过的号明确拒绝）。 */
+export function bindPhone(phone: string, code: string) {
+  return apiRequest<null>('/api/me/phone', {
+    method: 'POST',
+    silent: true,
+    body: JSON.stringify({ phone, code }),
+  });
+}
+
+/** 账号密码注册（成功后同样直接登录，令牌口径与登录一致） */
+export async function registerWithPassword(username: string, password: string, email?: string) {
   const body: Record<string, string> = { username, password };
   if (email) body.email = email;
-  return apiRequest<LoginData>('/api/auth/register', {
+  const data = await apiRequest<LoginData>('/api/auth/register', {
     method: 'POST',
     silent: true,
     body: JSON.stringify(body),
   });
+  setSessionToken(data.token);
+  return data;
 }
 
 /** 获取当前登录用户信息 */
@@ -98,8 +140,9 @@ export function fetchCredits(options?: { fresh?: boolean }) {
   return apiRequest<UsageTokenData>(path);
 }
 
-/** 退出登录 */
-export function logout() {
+/** 退出登录。**先清本地令牌**：接口这趟失败也不该把令牌留在浏览器里。 */
+export async function logout() {
+  clearSessionToken();
   return apiRequest<null>('/api/auth/logout', { method: 'POST' });
 }
 
