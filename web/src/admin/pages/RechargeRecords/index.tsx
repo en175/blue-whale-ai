@@ -79,12 +79,12 @@ const STATUS_OPTIONS = [
 
 /** `type` 而不是 `interface`：见 JobRecords 里的同一条说明。 */
 type Filters = {
-  userId: string;
+  keyword: string;
   status: string;
   tradeNo: string;
 };
 
-const EMPTY_FILTERS: Filters = { userId: '', status: '', tradeNo: '' };
+const EMPTY_FILTERS: Filters = { keyword: '', status: '', tradeNo: '' };
 
 /**
  * 哪些状态的单值得给「重试发放」（E-1 的那条出口）。
@@ -155,7 +155,7 @@ export default function RechargeRecords() {
   const query: AdminRechargeRecordQuery = {
     page: paging.page,
     pageSize: PAGE_SIZE,
-    ...(applied.userId ? { userId: applied.userId } : {}),
+    ...(applied.keyword ? { keyword: applied.keyword } : {}),
     // Select 只提供上面那几个值，所以这里的收窄是安全的（不是任意字符串）
     ...(applied.status ? { status: applied.status as AdminRechargeStatus } : {}),
     ...(applied.tradeNo ? { tradeNo: applied.tradeNo } : {}),
@@ -164,7 +164,21 @@ export default function RechargeRecords() {
 
   const columns: Column<AdminRechargeRecord>[] = [
     { key: 'tradeNo', header: '交易单号', render: (row) => row.tradeNo },
-    { key: 'userId', header: '用户 ID', render: (row) => row.userId },
+    {
+      key: 'nickname',
+      header: '用户名',
+      // 用户名 / 手机号来自**我们自己库**的 `bw_users`：`recharge_orders` 里只有 user_id，
+      // 认不出人。BFF 拿这一页的 user_id 批量查一次补回来。
+      //
+      // ⚠️ 判空 `?? '—'`，不是真值判断：后端把「查不到用户」与「用户没有手机号」都收敛成 `null`。
+      render: (row) => row.nickname ?? '—',
+    },
+    {
+      key: 'phone',
+      header: '手机号',
+      // 存量用户没手机号是**常态**（`bw_users.phone` 可空），不是加载没完成
+      render: (row) => row.phone ?? '—',
+    },
     { key: 'amountFen', header: '支付金额', render: (row) => fmtYuan(row.amountFen) },
     { key: 'credits', header: '到账积分', render: (row) => fmt(row.credits) },
     {
@@ -284,10 +298,11 @@ export default function RechargeRecords() {
             }}
           />
           <Input
-            style={{ width: 160 }}
-            placeholder="用户 ID"
-            value={draft.userId}
-            onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))}
+            style={{ width: 220 }}
+            // 「需完整」四个字不能省：用户管理页那个框是**模糊**匹配，这个框是**精确**匹配。
+            placeholder="用户 ID / 手机号 / 用户名（需完整）"
+            value={draft.keyword}
+            onChange={(e) => setDraft((d) => ({ ...d, keyword: e.target.value }))}
             onKeyDown={(e) => {
               if (e.key === 'Enter') apply();
             }}

@@ -5,6 +5,7 @@ import {
   parsePageSizeParam,
 } from "@lib/shared/account/admin-paging.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import { RechargeService } from "@lib/shared/recharge/recharge.service.js";
 import {
@@ -38,10 +39,13 @@ export class AdminRechargeRecordsController {
   constructor(
     private readonly recharge: RechargeService,
     private readonly operationLog: OperationLogService,
+    private readonly identity: IdentityService,
   ) {}
 
   /**
-   * GET /api/admin/recharge-records?page=&pageSize=&userId=&status=&tradeNo=
+   * GET /api/admin/recharge-records?page=&pageSize=&keyword=&status=&tradeNo=
+   *
+   * <p>`keyword` 是用户 ID / 手机号 / 昵称，**都要完整**（精确匹配）。空 = 全部用户。
    *
    * <p>全部筛选条件可选：都不传 = 全站最近一批订单（运营进来第一眼看的正是这个）。
    */
@@ -58,13 +62,18 @@ export class AdminRechargeRecordsController {
       pageSize: parsePageSizeParam(query.pageSize),
     };
 
-    const userId = query.userId?.trim();
-    if (userId) {
-      const parsed = Number(userId);
-      if (!Number.isInteger(parsed) || parsed <= 0) {
-        throw new AdminException(400, "userId 须为正整数");
+    // ⚠️ 还认着旧的 `userId`。前端与后端不是原子发版（本仓 2026-09-26 实测过 3100 上
+    //    跑着 4 小时前的构建），一个还没刷新的管理页仍会发 `?userId=42`。不认它的后果
+    //    不是报错，而是**静默回一页全站订单**——运营以为筛了那个人，实际看到所有人的单，
+    //    而这一页是拿来对账的。
+    const keyword = (query.keyword ?? query.userId ?? "").trim();
+    if (keyword) {
+      const resolved = await this.identity.findAdminUserIdByKeyword(keyword);
+      // 认不出这个人就回空页。「查无此人」与「这个人没有订单」在界面上同形，是**接受的**。
+      if (resolved === undefined) {
+        return { success: true, data: { list: [], total: 0 } };
       }
-      filter.userId = parsed;
+      filter.userId = resolved;
     }
 
     const status = query.status?.trim();
@@ -82,7 +91,30 @@ export class AdminRechargeRecordsController {
 
     try {
       const { items, total } = await this.recharge.listOrdersForAdmin(filter);
-      return { success: true, data: { list: items, total } };
+
+      // 昵称 / 手机号：**一次 IN 查回来**，不逐行查（同积分记录与任务记录页）。
+      // `recharge_orders` 里只有 user_id，认不出人。
+      const identities = await this.identity.loadAdminUserIdentities(
+        items.map((item) => Number(item.userId)),
+      );
+
+      return {
+        success: true,
+        data: {
+          list: items.map((item) => {
+            // ⚠️ `|| null` 而不是 `?? null`：身份里用空串表示「没有」（存量用户没手机号是常态），
+            //    落到对外契约里收敛成**唯一的**一种「没有」。用户查不到时 identity 整个缺席，
+            //    同样落到 null。
+            const identity = identities.get(Number(item.userId));
+            return {
+              ...item,
+              nickname: identity?.nickname || null,
+              phone: identity?.phone || null,
+            };
+          }),
+          total,
+        },
+      };
     } catch (error) {
       throw toAdminError(error);
     }

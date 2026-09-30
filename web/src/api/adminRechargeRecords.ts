@@ -33,6 +33,22 @@ export interface AdminRechargeRecord {
   /** 用户 ID（bigint 字符串，超出 JS 安全整数范围也不丢精度） */
   userId: string;
   /**
+   * 用户名。BFF 回我们自己的库按 `userId` 补的——`recharge_orders` 里只有 user_id，认不出人。
+   *
+   * ⚠️ 键名是 `nickname`，界面上叫「用户名」，值都是 `bw_users.username`。
+   *    键名沿用身份查询那层（`AdminUserIdentity.nickname`，与用户管理页、积分记录页共用一份），
+   *    在这里改键只会让三个页面的同一个字段叫两个名字。
+   *
+   * ⚠️ 可选（`?`）不是多余：与积分记录页同一条规矩 —— **后端比前端旧**时这个键**整个不存在**，
+   *    拿到的是 `undefined`。判空一律写 `?? '—'`，写 `=== null` 会漏掉一半。
+   *
+   * `null` = 查不到这个用户（已被清理）**或**这个用户没有手机号 —— 后端已经把两种收敛成
+   * 同一种，**没有第二种「没有」**。
+   */
+  nickname?: string | null;
+  /** 手机号。可选性与 `null` 的含义与上面的 `nickname` 逐字相同 */
+  phone?: string | null;
+  /**
    * 档位 ID；**自定义充值（模块 B）为 null** —— 它没有档位。
    *
    * ⚠️ 判「是不是档位商品」看 `productType`，不看这一列：列的 null 只说明「这单没有档位」。
@@ -78,8 +94,13 @@ export interface AdminRechargeRecordListData {
 export interface AdminRechargeRecordQuery {
   page: number;
   pageSize: number;
-  /** 按用户过滤；空 = 全部用户 */
-  userId?: string;
+  /**
+   * 用户 ID / 手机号 / 用户名，**都要完整**（服务端精确匹配，收敛到唯一一个人）。空 = 全部用户。
+   *
+   * ⚠️ 与用户管理页那个 `keyword` 是**两种东西**：那边是模糊匹配，这边必须唯一命中。
+   *    同样的输入在两页行为不同，所以输入框的 placeholder 要写明「需完整」。
+   */
+  keyword?: string;
   /** 空 = 全部状态 */
   status?: AdminRechargeStatus;
   /** 交易单号**精确**匹配（后端也是精确的） */
@@ -98,7 +119,7 @@ export function fetchAdminRechargeRecords(
   const qs = new URLSearchParams();
   qs.set('page', String(query.page));
   qs.set('pageSize', String(query.pageSize));
-  if (query.userId) qs.set('userId', query.userId);
+  if (query.keyword) qs.set('keyword', query.keyword);
   if (query.status) qs.set('status', query.status);
   if (query.tradeNo) qs.set('tradeNo', query.tradeNo);
   return apiRequest<AdminRechargeRecordListData>(

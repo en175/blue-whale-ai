@@ -74,7 +74,7 @@ const TYPE_OPTIONS = TASK_TYPE_OPTIONS;
  * 而 `useAppliedFilters` 的约束是 `Record<string, string>`（它要靠 `Object.values` 判空）。
  */
 type Filters = {
-  userId: string;
+  keyword: string;
   projectId: string;
   type: string;
   status: string;
@@ -88,7 +88,7 @@ type Filters = {
  * `'all'` 是真值，于是每次查询都实打实带上 `status=all`，列表被过滤成空。
  * 现在判据与哨兵口径同源（见下面的 `hasFilters` 与查询对象），这类分歧不可能再只出现一半。
  */
-const EMPTY_FILTERS: Filters = { userId: '', projectId: '', type: '', status: '' };
+const EMPTY_FILTERS: Filters = { keyword: '', projectId: '', type: '', status: '' };
 
 const STATUS_OPTIONS = [
   { value: '', label: '全部状态' },
@@ -103,7 +103,7 @@ export default function JobRecords() {
   const query: AdminJobRecordQuery = {
     page: paging.page,
     pageSize: PAGE_SIZE,
-    ...(applied.userId ? { userId: applied.userId } : {}),
+    ...(applied.keyword ? { keyword: applied.keyword } : {}),
     ...(applied.projectId ? { projectId: applied.projectId } : {}),
     // 任务类型是自由文本：**后端**不写死白名单（类型在演进，写死会在新增类型时误伤），
     // 查不到就是空列表。这里给下拉只是「让运营好选」，它**不是**白名单——
@@ -116,7 +116,21 @@ export default function JobRecords() {
 
   const columns: Column<AdminJobRecord>[] = [
     { key: 'job_id', header: '任务 ID', render: (row) => row.job_id },
-    { key: 'user_id', header: '用户 ID', render: (row) => row.user_id },
+    {
+      key: 'nickname',
+      header: '用户名',
+      // 用户名 / 手机号来自**我们自己库**的 `bw_users`：`generation_jobs` 里只有 user_id，
+      // 认不出人。BFF 拿这一页的 user_id 批量查一次补回来。
+      //
+      // ⚠️ 判空 `?? '—'`，不是真值判断：后端把「查不到用户」与「用户没有手机号」都收敛成 `null`。
+      render: (row) => row.nickname ?? '—',
+    },
+    {
+      key: 'phone',
+      header: '手机号',
+      // 存量用户没手机号是**常态**（`bw_users.phone` 可空），不是加载没完成
+      render: (row) => row.phone ?? '—',
+    },
     { key: 'project_id', header: '项目 ID', render: (row) => row.project_id || '—' },
     {
       key: 'type',
@@ -166,10 +180,12 @@ export default function JobRecords() {
       filters={
         <>
           <Input
-            style={{ width: 160 }}
-            placeholder="用户 ID"
-            value={draft.userId}
-            onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))}
+            style={{ width: 220 }}
+            // 「需完整」四个字不能省：用户管理页那个框是**模糊**匹配，这个框是**精确**匹配。
+            // 同一句 placeholder 放两页、行为不同，运营会照着上一页的习惯输入半截。
+            placeholder="用户 ID / 手机号 / 用户名（需完整）"
+            value={draft.keyword}
+            onChange={(e) => setDraft((d) => ({ ...d, keyword: e.target.value }))}
             onKeyDown={(e) => {
               if (e.key === 'Enter') apply();
             }}

@@ -131,8 +131,8 @@ describe('JobRecords 任务记录 · 模型列', () => {
 
     expect(cells).toContain('—');
     expect(document.body.textContent).not.toContain('undefined');
-    // 模型列的位置：任务 ID / 用户 ID / 项目 ID / 类型 / 模型
-    expect(cells[4]).toBe('—');
+    // 模型列的位置：任务 ID / 用户名 / 手机号 / 项目 ID / 类型 / 模型
+    expect(cells[5]).toBe('—');
   });
 
   it('★ 首次查询**不带** status / type —— 哨兵漏下去会把列表静默过滤成空', async () => {
@@ -159,7 +159,7 @@ describe('JobRecords 任务记录 · 模型列', () => {
     expect(document.body.textContent).toContain('暂无任务');
 
     const input = [...document.querySelectorAll('input')].find(
-      (el) => el.placeholder === '用户 ID',
+      (el) => el.placeholder === '用户 ID / 手机号 / 用户名（需完整）',
     ) as HTMLInputElement;
     await act(async () => {
       // React 受控输入：要绕过它自己的 value setter 才会触发 onChange
@@ -176,5 +176,66 @@ describe('JobRecords 任务记录 · 模型列', () => {
 
     // 提交之后才改口径 —— 页面把 `hasFilters` 接到生效条件上，而不是草稿
     expect(document.body.textContent).toContain('没有匹配的任务');
+  });
+});
+
+describe('JobRecords — 用户列', () => {
+  it('列头是「用户名」「手机号」，不再有「用户 ID」列', async () => {
+    api.fetchAdminJobRecords.mockResolvedValue({ list: [record({})], total: 1 });
+    await renderPage();
+
+    expect(headers()).toContain('用户名');
+    expect(headers()).toContain('手机号');
+    expect(headers()).not.toContain('用户 ID');
+  });
+
+  it('用户名与手机号来自 BFF 回填，直接渲染在行里', async () => {
+    api.fetchAdminJobRecords.mockResolvedValue({
+      list: [record({ nickname: '张小明', phone: '13800008888' })],
+      total: 1,
+    });
+    await renderPage();
+
+    expect(document.body.textContent).toContain('张小明');
+    expect(document.body.textContent).toContain('13800008888');
+  });
+
+  it('★ 用户 ID 一个都不露 —— 既不在列里，也不藏在悬停 / 提示里', async () => {
+    // 运营在这一页认人靠用户名与手机号。那串数字是排查时才用的内部标识，
+    // 摆在表里或藏在浮层里都只是噪声。
+    api.fetchAdminJobRecords.mockResolvedValue({ list: [record({})], total: 1 });
+    await renderPage();
+
+    expect(document.body.textContent).not.toContain('9001');
+    // 用户名格上不该再挂「还有东西可看」的图标
+    expect(document.body.querySelector('button[aria-label="用户明细"]')).toBeNull();
+  });
+
+  it('查不到用户（两个字段都是 null）→ 显示「—」', async () => {
+    api.fetchAdminJobRecords.mockResolvedValue({
+      list: [record({ nickname: null, phone: null })],
+      total: 1,
+    });
+    await renderPage();
+
+    const cells = [...(document.body.querySelector('tbody tr')?.querySelectorAll('td') ?? [])].map(
+      (td) => td.textContent?.trim() ?? '',
+    );
+    // 用户名(1) / 手机号(2)：空白读起来像「还在加载」，而这是查询已经答完的结论
+    expect(cells[1]).toBe('—');
+    expect(cells[2]).toBe('—');
+  });
+
+  it('后端比前端旧、**整个键都不回**时同样显示「—」，不崩', async () => {
+    // `undefined` 也是「没有」。这里渲染写的是 `?? '—'`，两种形态一起兜住。
+    api.fetchAdminJobRecords.mockResolvedValue({ list: [record({})], total: 1 });
+    await renderPage();
+
+    const cells = [...(document.body.querySelector('tbody tr')?.querySelectorAll('td') ?? [])].map(
+      (td) => td.textContent?.trim() ?? '',
+    );
+    expect(cells[1]).toBe('—');
+    expect(cells[2]).toBe('—');
+    expect(document.body.textContent).not.toContain('Unexpected Application Error');
   });
 });

@@ -189,10 +189,10 @@ describe('充值记录页 — 赠送积分列', () => {
     expect(text).toContain('1,000 未发 · 该档位已用过');
     expect(text).toContain('1,000 未判定');
     // 「没有赠送」与「送 0 分」是两件事：两条都必须是「—」，不能写成 0。
-    // ⚠️ 按**列序号**取（赠送积分是第 5 列）：别的列（网关单号、支付时间）也用「—」，
+    // ⚠️ 按**列序号**取（赠送积分是第 6 列）：别的列（网关单号、支付时间）也用「—」，
     //    全表数「—」会连它们一起数进来。
     const bonusCells = [...document.body.querySelectorAll('tbody tr')].map(
-      (tr) => tr.querySelectorAll('td')[4]?.textContent ?? '',
+      (tr) => tr.querySelectorAll('td')[5]?.textContent ?? '',
     );
     expect(bonusCells.filter((text) => text === '—')).toHaveLength(2);
     // 没额度的单不许出现任何「已发」字样（把「没赠送」说成「发了 0 分」同样是撒谎）
@@ -273,5 +273,66 @@ describe('充值记录页 — 哨兵口径', () => {
     expect(api.fetchRecords).toHaveBeenCalled();
     const first = api.fetchRecords.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(first).not.toHaveProperty('status');
+  });
+});
+
+describe('充值记录页 — 用户列', () => {
+  function headers(): string[] {
+    return [...document.body.querySelectorAll('th')].map((th) => th.textContent?.trim() ?? '');
+  }
+
+  it('列头是「用户名」「手机号」，不再有「用户 ID」列', async () => {
+    await renderPage();
+
+    expect(headers()).toContain('用户名');
+    expect(headers()).toContain('手机号');
+    expect(headers()).not.toContain('用户 ID');
+  });
+
+  it('用户名与手机号来自 BFF 回填，直接渲染在行里', async () => {
+    api.fetchRecords.mockResolvedValue({
+      list: [{ ...ROWS[0]!, nickname: '张小明', phone: '13800008888' }],
+      total: 1,
+    });
+    await renderPage();
+
+    expect(document.body.textContent).toContain('张小明');
+    expect(document.body.textContent).toContain('13800008888');
+  });
+
+  it('★ 用户 ID 一个都不露 —— 既不在列里，也不藏在悬停 / 提示里', async () => {
+    // 运营在这一页认人靠用户名与手机号。那串数字是排查时才用的内部标识，
+    // 摆在表里或藏在浮层里都只是噪声。
+    await renderPage();
+
+    expect(document.body.textContent).not.toContain('9000');
+    expect(document.body.querySelector('button[aria-label="用户明细"]')).toBeNull();
+  });
+
+  it('查不到用户（两个字段都是 null）→ 显示「—」', async () => {
+    api.fetchRecords.mockResolvedValue({
+      list: [{ ...ROWS[0]!, nickname: null, phone: null }],
+      total: 1,
+    });
+    await renderPage();
+
+    const cells = [...(document.body.querySelector('tbody tr')?.querySelectorAll('td') ?? [])].map(
+      (td) => td.textContent?.trim() ?? '',
+    );
+    // 用户名(1) / 手机号(2)：空白读起来像「还在加载」，而这是查询已经答完的结论
+    expect(cells[1]).toBe('—');
+    expect(cells[2]).toBe('—');
+  });
+
+  it('后端比前端旧、**整个键都不回**时同样显示「—」，不崩', async () => {
+    // `undefined` 也是「没有」。这里渲染写的是 `?? '—'`，两种形态一起兜住。
+    await renderPage();
+
+    const cells = [...(document.body.querySelector('tbody tr')?.querySelectorAll('td') ?? [])].map(
+      (td) => td.textContent?.trim() ?? '',
+    );
+    expect(cells[1]).toBe('—');
+    expect(cells[2]).toBe('—');
+    expect(document.body.textContent).not.toContain('Unexpected Application Error');
   });
 });
