@@ -480,20 +480,6 @@ export default function GroupOverlay({
     };
   }, [hitGroupAt, startFrameDrag, screenToFlowPosition, setNodes]);
 
-  /** 悬停组内空白区 → pane 光标 grab（恢复组框下沉后丢失的可拖拽提示） */
-  useEffect(() => {
-    if (groups.length === 0) return;
-    const onMove = (e: PointerEvent) => {
-      if (draggingRef.current || !paneRef.current) return;
-      paneRef.current.style.cursor = hitGroupAt(e.clientX, e.clientY, e.target) ? 'grab' : '';
-    };
-    window.addEventListener('pointermove', onMove);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      if (paneRef.current) paneRef.current.style.cursor = '';
-    };
-  }, [groups.length, hitGroupAt]);
-
   /** 卸载时若在拖动中则清理监听（不触发结束回调，避免卸载期落库） */
   useEffect(
     () => () => {
