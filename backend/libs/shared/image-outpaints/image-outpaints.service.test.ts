@@ -334,7 +334,6 @@ describe("ImageOutpaintsService.create：落任务与免费口径", () => {
         status: "queued",
         user_id: 9n,
         project_id: 55n,
-        expected_output_count: 1,
         input: VALID_BODY,
         next_action_at: expect.any(Date),
       }),

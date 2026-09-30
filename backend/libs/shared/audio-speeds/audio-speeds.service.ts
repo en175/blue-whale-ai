@@ -80,7 +80,6 @@ export class AudioSpeedsService {
         source: AUDIO_SPEED_SOURCE,
         status: "queued",
         progress: 0,
-        expected_output_count: 1,
         input: {
           ...parsed.data,
           // provider_credential 是业务键之上的基础设施键（不进契约 zod——audio_trim 同构）：

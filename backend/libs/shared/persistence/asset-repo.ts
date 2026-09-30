@@ -1,6 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 import { IMAGE_ERASE_MASK_ASSET_SOURCE } from "@lib/contracts";
 
+import { extraNumber, extraString, loadJobExtras } from "./generation-jobs-extra-repo.js";
+
 /** Asset 读路径 repo（Prisma-backed），复用部署的 assets 表。
  *  对齐 Java AssetService.listAssets：只读分页列表。
  *  不含 storage_key 等内部字段（对齐 AssetResponse）。 */
@@ -395,19 +397,26 @@ async function resolveAssetJobMeta(
 
   const jobs = await prisma.generation_jobs.findMany({
     where: { id: { in: jobIds } },
-    select: { id: true, type: true, input: true, video_stage: true, source_sample_job_id: true, final_job_id: true },
+    select: { id: true, type: true, input: true, source_sample_job_id: true },
   });
+  // IKJCOE：阶段身份在扩展位（原主表 video_stage / final_job_id 两列已删），同批一次取回。
+  const extrasByJob = await loadJobExtras(
+    prisma,
+    jobs.map((job) => job.id.toString()),
+  );
   const modelIdByJob = new Map<string, string>();
   const modelIds = new Set<string>();
   for (const job of jobs) {
     nameByJobId.set(job.id.toString(), job.type === "audio_mix"
       ? `音频混合 ${job.id}` : `生成任务 ${job.id}`);
-    // IKIZQH：阶段与来源身份同批带回（零额外查询）；缺列按普通视频兜底（金标 G12）。
+    // IKIZQH：阶段与来源身份同批带回（零额外查询）；缺键按普通视频兜底（金标 G12）。
+    const extras = extrasByJob.get(job.id.toString());
+    const finalJobId = extraNumber(extras, "final_job_id");
     stageByJobId.set(job.id.toString(), {
-      video_stage: job.video_stage ?? "video",
+      video_stage: extraString(extras, "video_stage") ?? "video",
       source_sample_job_id:
         job.source_sample_job_id != null ? job.source_sample_job_id.toString() : null,
-      final_job_id: job.final_job_id != null ? job.final_job_id.toString() : null,
+      final_job_id: finalJobId != null ? String(finalJobId) : null,
     });
     const input = job.input as
       | { model_id?: string; parameters?: { model_id?: string }; prompt?: unknown }

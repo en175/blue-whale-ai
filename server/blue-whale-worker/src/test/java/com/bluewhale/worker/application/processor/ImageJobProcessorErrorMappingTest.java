@@ -246,7 +246,7 @@ class ImageJobProcessorErrorMappingTest {
                 "prompt", "hello", "model_id", "gpt-image-1",
                 "provider_credential", "sealed-token"));
         ClaimedJobDto job = new ClaimedJobDto(
-                "100", "1", "1", "image", input, 1, 0, false, 1L);
+                "100", "1", "1", "image", input, 0, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
 
@@ -282,7 +282,7 @@ class ImageJobProcessorErrorMappingTest {
                 "prompt", "hello", "model_id", "gpt-image-1",
                 "provider_credential", "sealed-token"));
         ClaimedJobDto job = new ClaimedJobDto(
-                "100", "1", "1", "image", input, 1, 1, false, 1L);
+                "100", "1", "1", "image", input, 1, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
 
@@ -313,7 +313,7 @@ class ImageJobProcessorErrorMappingTest {
                 "prompt", "hello", "model_id", "gpt-image-1",
                 "provider_credential", "sealed-token"));
         ClaimedJobDto job = new ClaimedJobDto(
-                "100", "1", "1", "image", input, 1, 2, false, 1L);
+                "100", "1", "1", "image", input, 2, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
 
@@ -344,7 +344,7 @@ class ImageJobProcessorErrorMappingTest {
                 "prompt", "hello", "model_id", "gpt-image-1",
                 "provider_credential", "sealed-token"));
         ClaimedJobDto job = new ClaimedJobDto(
-                "100", "1", "1", "image", input, 1, 3, false, 1L);
+                "100", "1", "1", "image", input, 3, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
 
@@ -371,7 +371,7 @@ class ImageJobProcessorErrorMappingTest {
                 "prompt", "hello", "model_id", "gpt-image-1",
                 "provider_credential", "sealed-token"));
         ClaimedJobDto job = new ClaimedJobDto(
-                "100", "1", "1", "image", input, 1, 0, false, 1L);
+                "100", "1", "1", "image", input, 0, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
 
@@ -417,7 +417,7 @@ class ImageJobProcessorErrorMappingTest {
 
     private void mockClaim(Map<String, Object> input) {
         ClaimedJobDto job = new ClaimedJobDto(
-                "100", "1", "1", "image", input, 1, 0, false, 1L);
+                "100", "1", "1", "image", input, 0, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
     }

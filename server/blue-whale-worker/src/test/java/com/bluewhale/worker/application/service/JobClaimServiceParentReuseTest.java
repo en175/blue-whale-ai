@@ -5,6 +5,7 @@ import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.contract.VideoMattingContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,10 @@ class JobClaimServiceParentReuseTest {
     @Mock
     private GenerationJobMapper jobMapper;
 
+    /** IKJCOE：claim 投影读扩展位表的依赖（工具族管道不读，占位即可）。 */
+    @Mock
+    private GenerationJobExtraMapper extraMapper;
+
     private JobClaimService service;
 
     private GenerationJobEntity candidate(String type, Long retryOfJobId) {
@@ -72,7 +77,7 @@ class JobClaimServiceParentReuseTest {
     @Test
     @DisplayName("media_extract：retry job claim 二次查父任务并投影 provider_task_id")
     void mediaExtractRetryJobProjectsParentProviderTaskId() {
-        service = new JobClaimService(jobMapper);
+        service = new JobClaimService(jobMapper, extraMapper);
         when(jobMapper.findCandidateByTypeOnly(100L, MediaExtractContract.TAG))
                 .thenReturn(candidate(MediaExtractContract.TAG, 999L));
         when(jobMapper.claimMediaExtractCas(eq(100L), anyString(), any(), anyLong(), anyString()))
@@ -90,7 +95,7 @@ class JobClaimServiceParentReuseTest {
     @Test
     @DisplayName("media_extract：非重试 job 不查父任务，投影恒 null")
     void mediaExtractNonRetryJobSkipsParentLookup() {
-        service = new JobClaimService(jobMapper);
+        service = new JobClaimService(jobMapper, extraMapper);
         when(jobMapper.findCandidateByTypeOnly(100L, MediaExtractContract.TAG))
                 .thenReturn(candidate(MediaExtractContract.TAG, null));
         when(jobMapper.claimMediaExtractCas(eq(100L), anyString(), any(), anyLong(), anyString()))
@@ -107,7 +112,7 @@ class JobClaimServiceParentReuseTest {
     @Test
     @DisplayName("video_matting：套白名单路径同样经过共享投影实现")
     void videoMattingRetryJobProjectsParentProviderTaskId() {
-        service = new JobClaimService(jobMapper);
+        service = new JobClaimService(jobMapper, extraMapper);
         when(jobMapper.findCandidateByTypeAndSources(
                 eq(100L), eq(VideoMattingContract.TAG), any()))
                 .thenReturn(candidate(VideoMattingContract.TAG, 777L));

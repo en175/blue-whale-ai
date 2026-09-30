@@ -11,6 +11,13 @@ import java.time.LocalDateTime;
  * 生成作业行（对应 Prisma model generation_jobs）。
  * <p>
  * 字段名与 schema.prisma 完全一致（snake_case），MyBatis-Plus 自动驼峰转换。
+ * <p>
+ * IKJCOE：任务特有字段已搬到 {@code generation_job_extras}（键值表，见
+ * {@link GenerationJobExtraEntity} 与 ADR-0120）。本实体只剩「所有 type 共用」的列与
+ * 「必须在领取/终态 CAS 的 SQL 里用」的列。原先落在这里的 video_stage / final_job_id /
+ * upstream_created_at_ms / finalize_deadline_ms / charge_state / actual_credits /
+ * strategy_version 已改为在 {@code JobClaimService} 投影时读扩展位、
+ * 由 {@code JobFinalizer} 在终态事务里写扩展位。
  */
 @TableName("generation_jobs")
 public class GenerationJobEntity {
@@ -25,22 +32,6 @@ public class GenerationJobEntity {
     @TableField("user_id")
     /** 归属用户 */
     private Long userId;
-
-    @TableField("agent_run_id")
-    /** 关联 agent run（提取链路不用） */
-    private Long agentRunId;
-
-    @TableField("action_identity")
-    /** 动作幂等标识 */
-    private String actionIdentity;
-
-    @TableField("project_action_identity")
-    /** 项目内动作幂等标识 */
-    private String projectActionIdentity;
-
-    @TableField("expected_output_count")
-    /** 预期产物数（slot 聚合基准，契约 §3.3） */
-    private Integer expectedOutputCount;
 
     @TableField("retry_of_job_id")
     /** 重试来源 job id（IKEA26 父任务复用依据） */
@@ -67,7 +58,7 @@ public class GenerationJobEntity {
     private String outputAssetIds; // JSON
 
     @TableField("provider")
-    /** 上游供应商标识 */
+    /** 上游供应商标识（写在 markProviderSubmitted 的守卫 UPDATE 里，故留在本行） */
     private String provider;
 
     @TableField("provider_task_id")
@@ -77,10 +68,6 @@ public class GenerationJobEntity {
     @TableField("poll_count")
     /** 轮询累计（上限 720→provider_timeout，契约 §3.2） */
     private Integer pollCount;
-
-    @TableField("next_poll_at")
-    /** 遗留列：领取路径实际用 nextActionAt（契约 §2 死列候选） */
-    private LocalDateTime nextPollAt;
 
     @TableField("retry_count")
     /** image 瞬态重试次数（<3 才可回 queued，契约 §6） */
@@ -94,10 +81,6 @@ public class GenerationJobEntity {
     /** 失败详情 JSON {code,message,details?}；details 禁展示用户（ADR-0078） */
     private String error; // JSON
 
-    @TableField("stage_id")
-    /** 阶段 id（生成流水线扩展位） */
-    private String stageId;
-
     @TableField("lease_owner")
     /** 当前租约持有者 workerId（写围栏三条件之一，契约 §3.1） */
     private String leaseOwner;
@@ -110,17 +93,11 @@ public class GenerationJobEntity {
     /** 单调递增围栏令牌：领取发放值，CAS 与一切写路径守卫（契约 §3.1） */
     private Long fencingToken;
 
-    @TableField("strategy_version")
-    /** 策略版本（扩展位） */
-    private String strategyVersion;
-
     @TableField("execution_deadline_at")
-    /** 死列：全仓无读写（契约 §2，不迁移） */
+    /** 执行截止：长任务（audio_mix / audio_video_mux）的超时预算输入，
+     *  由 {@code JobClaimService} 投影进 ClaimedJob —— **不是死列**（IKEL4A 契约文档
+     *  那份「死列」清单在这一点上已过期，见 ADR-0120）。 */
     private LocalDateTime executionDeadlineAt;
-
-    @TableField("evidence_reconcile_until")
-    /** 死列：全仓无读写（契约 §2，不迁移） */
-    private LocalDateTime evidenceReconcileUntil;
 
     @TableField("next_action_at")
     /** 下一次可执行时间：领取条件 & recovery 扫描依据（契约 §3/§7） */
@@ -139,7 +116,7 @@ public class GenerationJobEntity {
     private LocalDateTime gmtModified;
 
     @TableField("version")
-    /** 乐观锁版本（每次写 +1，契约 §3.1） */
+    /** 每次写 +1；**不是**并发控制（CAS 全走 fencing_token），只作事件 aggregate_version */
     private Integer version;
 
     @TableField("is_delete")
@@ -150,35 +127,11 @@ public class GenerationJobEntity {
     /** 创建时冻结参数 JSON（media_extract 含 source_asset_id） */
     private String input; // JSON
 
-    // ── IKIZQ8：两阶段视频阶段列（契约 video-sample-mode.ts；字段映射按 ADR-0084 与 TS schema 对账）──
-
-    @TableField("video_stage")
-    /** 视频阶段：sample=样片(480p Draft)、final=成片(后续票)；NULL=旧任务/普通视频 */
-    private String videoStage;
-
     @TableField("source_sample_job_id")
-    /** 成片指向来源样片任务（仅 final 非空；唯一约束随 finalize 票落地） */
+    /** 成片指向来源样片任务（仅 final 非空）。
+     *  ⚠️ **留在主表**：它扛着唯一索引 {@code uk_generation_jobs__source_sample_job_id}，
+     *  是并发裁决点；扩展表的唯一索引只能是 (generation_job_id, extra_key)（IKJCOE）。 */
     private Long sourceSampleJobId;
-
-    @TableField("final_job_id")
-    /** 样片指向其唯一成片任务（由 finalize 票回写） */
-    private Long finalJobId;
-
-    @TableField("upstream_created_at_ms")
-    /** 可信上游 Draft created_at（epoch 毫秒，网关轮询回传；NULL=缺可信时间→禁成片） */
-    private Long upstreamCreatedAtMs;
-
-    @TableField("finalize_deadline_ms")
-    /** 实际转成片截止（created_at+7天−1小时；与 TS 契约同一公式，金标 G06 对账） */
-    private Long finalizeDeadlineMs;
-
-    @TableField("charge_state")
-    /** 阶段费用状态 held/settled/released（创建 held、终态守卫条件写 settled/released）；旧任务 NULL */
-    private String chargeState;
-
-    @TableField("actual_credits")
-    /** 成功按真实用量结算后的整数积分（billing 异步回填）；结算前 NULL */
-    private Integer actualCredits;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -186,14 +139,6 @@ public class GenerationJobEntity {
     public void setProjectId(Long projectId) { this.projectId = projectId; }
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }
-    public Long getAgentRunId() { return agentRunId; }
-    public void setAgentRunId(Long agentRunId) { this.agentRunId = agentRunId; }
-    public String getActionIdentity() { return actionIdentity; }
-    public void setActionIdentity(String actionIdentity) { this.actionIdentity = actionIdentity; }
-    public String getProjectActionIdentity() { return projectActionIdentity; }
-    public void setProjectActionIdentity(String projectActionIdentity) { this.projectActionIdentity = projectActionIdentity; }
-    public Integer getExpectedOutputCount() { return expectedOutputCount; }
-    public void setExpectedOutputCount(Integer expectedOutputCount) { this.expectedOutputCount = expectedOutputCount; }
     public Long getRetryOfJobId() { return retryOfJobId; }
     public void setRetryOfJobId(Long retryOfJobId) { this.retryOfJobId = retryOfJobId; }
     public String getType() { return type; }
@@ -212,28 +157,20 @@ public class GenerationJobEntity {
     public void setProviderTaskId(String providerTaskId) { this.providerTaskId = providerTaskId; }
     public Integer getPollCount() { return pollCount; }
     public void setPollCount(Integer pollCount) { this.pollCount = pollCount; }
-    public LocalDateTime getNextPollAt() { return nextPollAt; }
-    public void setNextPollAt(LocalDateTime nextPollAt) { this.nextPollAt = nextPollAt; }
     public Integer getRetryCount() { return retryCount; }
     public void setRetryCount(Integer retryCount) { this.retryCount = retryCount; }
     public LocalDateTime getLastPolledAt() { return lastPolledAt; }
     public void setLastPolledAt(LocalDateTime lastPolledAt) { this.lastPolledAt = lastPolledAt; }
     public String getError() { return error; }
     public void setError(String error) { this.error = error; }
-    public String getStageId() { return stageId; }
-    public void setStageId(String stageId) { this.stageId = stageId; }
     public String getLeaseOwner() { return leaseOwner; }
     public void setLeaseOwner(String leaseOwner) { this.leaseOwner = leaseOwner; }
     public LocalDateTime getLeaseExpiresAt() { return leaseExpiresAt; }
     public void setLeaseExpiresAt(LocalDateTime leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
     public Long getFencingToken() { return fencingToken; }
     public void setFencingToken(Long fencingToken) { this.fencingToken = fencingToken; }
-    public String getStrategyVersion() { return strategyVersion; }
-    public void setStrategyVersion(String strategyVersion) { this.strategyVersion = strategyVersion; }
     public LocalDateTime getExecutionDeadlineAt() { return executionDeadlineAt; }
     public void setExecutionDeadlineAt(LocalDateTime executionDeadlineAt) { this.executionDeadlineAt = executionDeadlineAt; }
-    public LocalDateTime getEvidenceReconcileUntil() { return evidenceReconcileUntil; }
-    public void setEvidenceReconcileUntil(LocalDateTime evidenceReconcileUntil) { this.evidenceReconcileUntil = evidenceReconcileUntil; }
     public LocalDateTime getNextActionAt() { return nextActionAt; }
     public void setNextActionAt(LocalDateTime nextActionAt) { this.nextActionAt = nextActionAt; }
     public LocalDateTime getCancelRequestedAt() { return cancelRequestedAt; }
@@ -248,18 +185,6 @@ public class GenerationJobEntity {
     public void setIsDelete(Boolean isDelete) { this.isDelete = isDelete; }
     public String getInput() { return input; }
     public void setInput(String input) { this.input = input; }
-    public String getVideoStage() { return videoStage; }
-    public void setVideoStage(String videoStage) { this.videoStage = videoStage; }
     public Long getSourceSampleJobId() { return sourceSampleJobId; }
     public void setSourceSampleJobId(Long sourceSampleJobId) { this.sourceSampleJobId = sourceSampleJobId; }
-    public Long getFinalJobId() { return finalJobId; }
-    public void setFinalJobId(Long finalJobId) { this.finalJobId = finalJobId; }
-    public Long getUpstreamCreatedAtMs() { return upstreamCreatedAtMs; }
-    public void setUpstreamCreatedAtMs(Long upstreamCreatedAtMs) { this.upstreamCreatedAtMs = upstreamCreatedAtMs; }
-    public Long getFinalizeDeadlineMs() { return finalizeDeadlineMs; }
-    public void setFinalizeDeadlineMs(Long finalizeDeadlineMs) { this.finalizeDeadlineMs = finalizeDeadlineMs; }
-    public String getChargeState() { return chargeState; }
-    public void setChargeState(String chargeState) { this.chargeState = chargeState; }
-    public Integer getActualCredits() { return actualCredits; }
-    public void setActualCredits(Integer actualCredits) { this.actualCredits = actualCredits; }
 }

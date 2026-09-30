@@ -110,7 +110,6 @@ export class AudioTrimsService {
         source: AUDIO_TRIM_SOURCE,
         status: "queued",
         progress: 0,
-        expected_output_count: 1,
         input: {
           ...parsed.data,
           // provider_credential 是业务键之上的基础设施键（不进契约 zod——media_extract 同构）：

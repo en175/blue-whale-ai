@@ -186,7 +186,6 @@ export class AudioVideoMuxesService {
       source: AUDIO_VIDEO_MUX_SOURCE,
       status: "queued",
       progress: 0,
-      expected_output_count: 1,
       input: {
         audio: audioSlot.frozen,
         video: videoSlot.frozen,
@@ -304,7 +303,7 @@ export class AudioVideoMuxesService {
           where: { id: jid, status: "failed", fencing_token: job.fencing_token },
           data: {
             status: "queued", progress: 0, error: Prisma.DbNull, output_asset_ids: Prisma.DbNull,
-            provider_task_id: null, poll_count: 0, next_poll_at: null,
+            provider_task_id: null, poll_count: 0,
             next_action_at: new Date(Date.now() - 60_000),
             execution_deadline_at: audioVideoMuxDeadline(duration),
             lease_owner: null, lease_expires_at: null,

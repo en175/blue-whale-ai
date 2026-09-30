@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.service;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
@@ -42,6 +43,7 @@ class JobFinalizerCancellationTest {
             mock(AssetMapper.class),
             mock(GenerationJobLogMapper.class),
             mock(GenerationOutputSlotMapper.class),
+            mock(GenerationJobExtraMapper.class),
             mock(SceneCardGenerationRecordSync.class),
             mock(StoryboardPreviewSync.class),
             new ProjectEventPublisher(mock(ProjectEventMapper.class)),

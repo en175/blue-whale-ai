@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 
 import { assetDurationSeconds, createAssetRepo } from "./asset-repo";
 
+/** 扩展位行（IKJCOE）：阶段身份已从 generation_jobs 主表列搬进 generation_job_extras
+ *  （extra_key 沿用原列名，值见迁移的回填段）。 */
+function extraRow(jobId: bigint, extra_key: string, value_type: string, value_text: string) {
+  return { generation_job_id: jobId, extra_key, value_type, value_text };
+}
+
+/** 扩展位假件：默认无键（缺键 = 缺省语义 → 普通视频兜底）。 */
+function extrasDelegate(rows: ReturnType<typeof extraRow>[] = []) {
+  return {
+    findMany: vi.fn().mockResolvedValue(rows),
+    upsert: vi.fn().mockResolvedValue({}),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  };
+}
+
 describe("assetDurationSeconds", () => {
   it("从 duration_ms 换算秒；缺省（无毫秒数据）为 null", () => {
     expect(assetDurationSeconds(65_900)).toBe(65.9);
@@ -44,6 +59,7 @@ describe("createAssetRepo.listByUser", () => {
             { model_id: "seedance-2.0", model_label: "Seedance 2.0 标准版" },
           ]),
       },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -69,6 +85,7 @@ describe("createAssetRepo.listByUser", () => {
     const prisma = {
       assets: { count: vi.fn().mockResolvedValue(1), findMany: vi.fn().mockResolvedValue([row]) },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([{ id: 70n, type: "audio_mix", input: {} }]) },
+      generation_job_extras: extrasDelegate(),
     };
     const page = await createAssetRepo(prisma as never).listByUser("9", { page: 1, size: 24 });
     expect(page.records[0]?.name).toBe("音频混合 70");
@@ -176,6 +193,7 @@ describe("createAssetRepo.listByUser", () => {
       generation_model_capability: {
         findMany: vi.fn().mockResolvedValue([]),
       },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -240,6 +258,7 @@ describe("createAssetRepo.findOwnedById", () => {
             { model_id: "seedance-2.0", model_label: "Seedance 2.0 标准版" },
           ]),
       },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -332,6 +351,7 @@ describe("createAssetRepo.findOwnedById", () => {
         ]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -368,6 +388,7 @@ describe("createAssetRepo.findOwnedById", () => {
           .fn()
           .mockResolvedValue([{ model_id: "seedance-2.0", model_label: "Seedance 2.0" }]),
       },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -399,6 +420,7 @@ describe("createAssetRepo.findOwnedById", () => {
         findMany: vi.fn().mockResolvedValue([{ id: 1803n, input: { source_asset_id: "6018" } }]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -456,6 +478,7 @@ describe("createAssetRepo.findOwnedById", () => {
         findMany: vi.fn().mockResolvedValue([{ id: 11n, input: { prompt: "   " } }]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -496,6 +519,7 @@ describe("createAssetRepo.findOwnedById", () => {
         ]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -555,6 +579,7 @@ describe("createAssetRepo.findOwnedById", () => {
       assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([{ id: 13n, input: inputs[0] }]) },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -591,6 +616,7 @@ describe("IKFSSO：提示词只进详情，不进列表", () => {
         findMany: vi.fn().mockResolvedValue([{ id: 7n, input: { prompt: "海浪" } }]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -950,13 +976,13 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
             id: 305n,
             type: "video",
             input: { model_id: "seedance-2.5" },
-            video_stage: "final",
+            // source_sample_job_id 仍留主表（它扛唯一索引）；阶段身份在扩展位。
             source_sample_job_id: 302n,
-            final_job_id: null,
           },
         ]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: extrasDelegate([extraRow(305n, "video_stage", "string", "final")]),
     };
 
     const page = await createAssetRepo(prisma as never).listByUser("9", { page: 1, size: 24 });
@@ -978,13 +1004,16 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
             id: 302n,
             type: "video",
             input: { model_id: "seedance-2.5" },
-            video_stage: "sample",
             source_sample_job_id: null,
-            final_job_id: 305n,
           },
         ]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      // 互指 final_job_id 读自扩展位（原主表列已删）。
+      generation_job_extras: extrasDelegate([
+        extraRow(302n, "video_stage", "string", "sample"),
+        extraRow(302n, "final_job_id", "number", "305"),
+      ]),
     };
 
     const asset = await createAssetRepo(prisma as never).findOwnedById("61", "9");
@@ -1006,10 +1035,11 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
         findMany: vi.fn().mockResolvedValue([legacyRow, uploadedRow]),
       },
       generation_jobs: {
-        // 旧任务行没有 video_stage / 来源列（历史数据）。
+        // 旧任务行没有视频阶段键（历史数据；扩展表里也没有它的行）。
         findMany: vi.fn().mockResolvedValue([{ id: 7n, type: "video", input: {} }]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: extrasDelegate(),
     };
 
     const page = await createAssetRepo(prisma as never).listByUser("9", { page: 1, size: 24 });

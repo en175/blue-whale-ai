@@ -13,6 +13,7 @@ import com.bluewhale.worker.infrastructure.credential.GenerationCredentialServic
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
@@ -68,10 +69,11 @@ class PromptPlanVideoIntegrationTest {
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                GenerationOutputSlotMapper sm, ProjectEventMapper pem,
+                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
+                ProjectEventMapper pem,
                 SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
             ProjectEventPublisher events = new ProjectEventPublisher(pem);
-            return new JobFinalizer(jm, am, jlm, sm,
+            return new JobFinalizer(jm, am, jlm, sm, em,
                     new SceneCardGenerationRecordSync(sm, rm, events),
                     new StoryboardPreviewSync(sm, pm, events),
                     events,

@@ -14,6 +14,7 @@ import com.bluewhale.worker.infrastructure.credential.GenerationCredentialServic
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient.MuxAudioVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
@@ -181,12 +182,19 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
             return factory(StoryboardPreviewMapper.class, sf).getObject();
         }
 
+        /** IKJCOE：任务特有列的扩展位表 mapper。 */
+        @Bean
+        GenerationJobExtraMapper extraMapper(SqlSessionFactory sf) throws Exception {
+            return factory(GenerationJobExtraMapper.class, sf).getObject();
+        }
+
         @Bean
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 ProjectEventMapper pem, GenerationOutputSlotMapper sm,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
-            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm);
+                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
+                GenerationJobExtraMapper em) {
+            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
         }
 
         /**
@@ -196,10 +204,11 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                GenerationOutputSlotMapper sm, ProjectEventMapper pem,
+                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
+                ProjectEventMapper pem,
                 SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
             ProjectEventPublisher events = new ProjectEventPublisher(pem);
-            return new JobFinalizer(jm, am, jlm, sm,
+            return new JobFinalizer(jm, am, jlm, sm, em,
                     new SceneCardGenerationRecordSync(sm, rm, events),
                     new StoryboardPreviewSync(sm, pm, events),
                     events,
@@ -224,7 +233,7 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         realService = ctx.getBean(JobStateMachineService.class);
         realFinalizer = ctx.getBean(JobFinalizer.class);
         realJobMapper = ctx.getBean(GenerationJobMapper.class);
-        claimService = new JobClaimService(realJobMapper);
+        claimService = new JobClaimService(realJobMapper, ctx.getBean(GenerationJobExtraMapper.class));
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
     }
 
@@ -253,10 +262,10 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         jdbc.update("""
                 INSERT INTO generation_jobs
                   (user_id, project_id, type, source, status, fencing_token, next_action_at,
-                   provider_task_id, input, progress, expected_output_count,
+                   provider_task_id, input, progress,
                    gmt_create, gmt_modified, version, is_delete)
                 VALUES (9, 99, 'audio_video_mux', 'dock', 'queued', 0, ?,
-                        'mux-task-1', ?, 0, 1, NOW(), NOW(), 0, false)
+                        'mux-task-1', ?, 0, NOW(), NOW(), 0, false)
                 """,
                 WorkerClock.now().minusSeconds(30),
                 "{\"audio\":{\"assetId\":\"11\",\"nodeId\":\"source-node\",\"url\":\"https://tos/a.mp3\"},"

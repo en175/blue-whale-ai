@@ -792,7 +792,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
         return VideoMattingContract.ERROR_VIDEO_MATTING_FAILED;
     }
 
-    /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at，视频骨架语义对齐；
+    /** 失败处理：走视频版 failVideoJob（视频骨架语义对齐；
      *  智能抠像无输出槽位，槽位段天然空转；details.raw 透传原始原因）。 */
     private void failClaimed(ClaimedJob claim, String code, String msg) {
         failClaimed(claim, code, msg, null);

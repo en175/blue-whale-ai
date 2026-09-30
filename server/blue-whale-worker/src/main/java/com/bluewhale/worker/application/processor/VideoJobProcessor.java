@@ -433,11 +433,19 @@ public class VideoJobProcessor implements JobProcessor {
      * IKIZQD：结果不明留痕（best-effort）——checking 行 + charge_state='held' 是人工核对的
      * 主数据，这里补「为何不明」。日志落库失败不抛：任务仍处锁定，不能因记日志失败改道。
      *
-     * <p>人工核对入口（契约 §六）：checking 是一等 status，对账清单直接按状态查：
+     * <p>人工核对入口（契约 §六）：checking 是一等 status，对账清单直接按状态查。
+     * ⚠️ **IKJCOE**：`video_stage` / `charge_state` 已搬进 `generation_job_extras`
+     * （ADR-0120），不再是主表列——两列改从扩展位取，否则本查询会以 1054
+     * 「Unknown column」失败，恰在有人要解一笔卡单的时候：
      * <pre>{@code
-     * SELECT id, user_id, project_id, video_stage, charge_state, provider_task_id, gmt_create
-     * FROM generation_jobs
-     * WHERE type = 'video' AND status = 'checking';
+     * SELECT j.id, j.user_id, j.project_id, j.provider_task_id, j.gmt_create,
+     *        stage.value_text AS video_stage, charge.value_text AS charge_state
+     * FROM generation_jobs j
+     * LEFT JOIN generation_job_extras stage
+     *        ON stage.generation_job_id = j.id AND stage.extra_key = 'video_stage'
+     * LEFT JOIN generation_job_extras charge
+     *        ON charge.generation_job_id = j.id AND charge.extra_key = 'charge_state'
+     * WHERE j.type = 'video' AND j.status = 'checking';
      * }</pre>
      * 逐行核对本仓 input、网关任务、上游结果与账单四方后按契约三选一：明确成功恢复原
      * 任务，明确失败释放该阶段预扣，仍不明保持锁定。核对期间预扣持留、再次提交被

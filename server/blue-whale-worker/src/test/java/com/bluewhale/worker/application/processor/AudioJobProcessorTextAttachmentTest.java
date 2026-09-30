@@ -180,6 +180,6 @@ class AudioJobProcessorTextAttachmentTest {
 
     private ClaimedJobDto claimWithInput(Map<String, Object> input) {
         return new ClaimedJobDto(
-                "100", "42", "9", "audio", input, 1, 0, false, 5L);
+                "100", "42", "9", "audio", input, 0, false, 5L);
     }
 }

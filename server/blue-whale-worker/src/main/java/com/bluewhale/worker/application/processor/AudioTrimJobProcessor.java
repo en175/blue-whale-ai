@@ -492,7 +492,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
         return AudioTrimContract.ERROR_AUDIO_TRIM_FAILED;
     }
 
-    /** 失败处理（沿用家族 fail 守卫：SET 清 next_action_at + next_poll_at，轮询型任务
+    /** 失败处理（沿用家族 fail 守卫：SET 清 next_action_at，轮询型任务
      *  语义完备；details.raw 透传原始原因）。 */
     private void failAudioTrim(ClaimedJob claim, String code, String message) {
         failAudioTrim(claim, code, message, null);

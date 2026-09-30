@@ -85,7 +85,6 @@ export class MediaExtractionsService {
         source: MEDIA_EXTRACT_SOURCE,
         status: "queued",
         progress: 0,
-        expected_output_count: 1,
         input: {
           [MEDIA_EXTRACT_INPUT_KEYS.sourceAssetId]: sourceAssetId,
           [MEDIA_EXTRACT_INPUT_KEYS.outputFormat]: outputFormat,

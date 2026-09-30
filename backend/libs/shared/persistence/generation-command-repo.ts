@@ -19,6 +19,11 @@ import {
 } from "./generation-output-slot-repo.js";
 import { appendProjectEvent } from "./product-event-repo.js";
 import { cancelImageJob } from "./generation-image-cancel.js";
+import {
+  extraString,
+  loadJobExtrasOne,
+  setJobExtras,
+} from "./generation-jobs-extra-repo.js";
 
 /** 生成命令 repo（Prisma-backed）：创建/取消/重试生成任务 + 操作日志 + 点数预留。
  *  简化模型：一次任务一行（单输出语义，产出写 output_asset_ids JSON 数组）。
@@ -34,8 +39,6 @@ export interface CreateJobInput {
   actionType: string;
   /** 任务来源（generation_jobs.source）：默认 bottom_dock；视频计划应用走 plan，图片计划应用走 plan_apply。 */
   source?: string;
-  /** 关联 AgentRun（图片计划应用来自冻结的 plan_message.agent_run_id）。 */
-  agentRunId?: string;
   /** 关联 PlanMessage（计划应用追溯用，写入日志 payload）。 */
   planMessageId?: string;
   /** IK67HE/T14：关联 SceneCardGenerationRecord（视频路径）；输出槽会绑定此 record 用于聚合。
@@ -151,6 +154,25 @@ export const SOURCE_BOTTOM_DOCK = "bottom_dock";
  *  finalize-repo）三处同源，改视频策略版本只动这一个常量。 */
 export const VIDEO_STRATEGY_VERSION = "seedance-2.0-v1";
 
+/** 建行时冻结的策略版本（IKJCOE：原 strategy_version 主表列已删，值由 type 决定）。
+ *  视频/音频/图片各一个常量——所以重试路径**重算**而不是复制原行的值：
+ *  复制只会把旧发布的常量续到新行上，重试是新建行，用当前常量才对。 */
+export function strategyVersionOf(type: string): string {
+  return type === "video"
+    ? VIDEO_STRATEGY_VERSION
+    : type === "audio"
+      ? "audio-sync-v1"
+      : "image-sync-v1";
+}
+
+/** 从 input 快照取建行时的输出数（IKJCOE：主表 expected_output_count 列已删；
+ *  `input.expected_output_count` 建行时必写，是权威快照）。读不出来按 1 = 单输出兜底。 */
+export function readInputCount(input: Prisma.JsonValue | null): number {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return 1;
+  const n = Number((input as Record<string, unknown>).expected_output_count);
+  return Number.isInteger(n) && n > 0 ? n : 1;
+}
+
 
 /** cost_reservations 的行值：只有**重试**会从原 job 的行里原样搬运一次，其余一律兜底。
  *
@@ -224,33 +246,35 @@ export async function createJobWithinTx(
   const now = new Date();
   const deadline = new Date(now.getTime() + 30 * 60 * 1000); // 30min 超时
   const frozenInput = await freezePlacementAnchor(tx, input);
+  // IKJCOE：输出数**冻进 input 快照**——主表 expected_output_count 列已删，Worker 侧
+  // （ImageJobProcessor）改从这里读「这次要出几个」。handle-create 那条路本来就写这个键
+  // （值同源），本行对它是幂等的；补上是为了 storyboard_preview（count 默认 4）——
+  // 它只把 count 当参数传进来、不写进 input 字面量，不补就会在 Worker 侧退化成 1，
+  // 出图数比槽位数少。
+  const jobInput = { ...frozenInput, expected_output_count: input.expectedOutputCount };
   const job = await tx.generation_jobs.create({
     data: {
       project_id: BigInt(input.projectId),
       user_id: BigInt(input.userId),
       type: input.type,
       source: input.source ?? SOURCE_BOTTOM_DOCK,
-      ...(input.agentRunId ? { agent_run_id: BigInt(input.agentRunId) } : {}),
       status: "queued",
       progress: 0,
-      input: frozenInput as never,
-      expected_output_count: input.expectedOutputCount,
-      action_identity: input.actionIdentity,
-      project_action_identity: input.actionIdentity,
-      strategy_version:
-        input.type === "video"
-          ? VIDEO_STRATEGY_VERSION
-          : input.type === "audio"
-            ? "audio-sync-v1"
-            : "image-sync-v1",
+      input: jobInput as never,
       execution_deadline_at: deadline,
       next_action_at: now,
       fencing_token: 0,
-      // IKIZQ8：样片阶段身份与阶段费用初始态（held = 创建即预扣，见契约 §6）。
-      ...(input.videoStage !== undefined
-        ? { video_stage: input.videoStage, charge_state: "held" }
-        : {}),
     },
+  });
+  // IKJCOE：任务特有字段走扩展位（原主表列已删，见 ADR-0120）。
+  //  · strategy_version 是建行时的策略版本快照——值由 type 决定，重试路径直接重算，
+  //    不做「原样复制」（复制只会把旧发布的常量续到新行上）。
+  // IKIZQ8：样片阶段身份与阶段费用初始态（held = 创建即预扣，见契约 §6）。
+  await setJobExtras(tx, job.id, {
+    strategy_version: strategyVersionOf(input.type),
+    ...(input.videoStage !== undefined
+      ? { video_stage: input.videoStage, charge_state: "held" }
+      : {}),
   });
   // ★ 预扣：job 行已插入（id 已拿到），但事务未提交 —— 失败整体回滚，不留垃圾 job。
   //   若此后事务仍失败，由 createJob 的补偿把这一笔退掉（见那里的说明）。
@@ -404,11 +428,13 @@ export function createGenerationCommandRepo(
           },
         });
         if (!original) return null;
+        // IKJCOE：阶段身份在扩展位（原主表 video_stage 列已删）。整条重试路径共用这一次读。
+        const originalExtras = await loadJobExtrasOne(tx, original.id.toString());
         // IKIZQC（G08）：成片任务不做同输入重试——首版不复用同一 Draft ID（IKIZPO 未证实），
         // 失败的成片行保留占位（来源唯一约束已锁住该样片的尝试），继续创作走「重新生成样片」。
         // 不拦的话会建出 video_stage='final' 却没有 source_sample_job_id 的孤儿行（Worker
         // 无从取得样片上游任务），且重试路径不接 Hold、终态结算会对无预留的 job 发事件。
-        if (original.video_stage === "final") {
+        if (extraString(originalExtras, "video_stage") === "final") {
           return { kind: "finalize_retry_closed" } as const;
         }
         if (
@@ -497,10 +523,12 @@ export function createGenerationCommandRepo(
         if (originalSlotIds.size > 0 && failedSlots.length === 0) {
           return { kind: "already_retried" } as const;
         }
+        // IKJCOE：主表 expected_output_count 列已删——有槽位的按「要补几个失败槽」，
+        // 无槽位行的历史 job 回落 input 快照（建行时必写）。
         const retryCount =
           originalSlotIds.size > 0
             ? failedSlots.length
-            : (original.expected_output_count ?? 1);
+            : readInputCount(original.input);
 
         // IKF YHJ（ADR-0087 决策 7）：重试复用原 job 的参数快照，但那批素材的校验状态
         // 可能在首次生成之后变了（撤销/删除/失败）。采纳之前重过一道门，拒绝就不建行。
@@ -523,28 +551,25 @@ export function createGenerationCommandRepo(
             status: "queued",
             progress: 0,
             input: original.input as never,
-            expected_output_count: retryCount,
             retry_of_job_id: original.id,
-            action_identity: idempotencyKey || `retry:${originalJobId}`,
-            project_action_identity: idempotencyKey || `retry:${originalJobId}`,
-            strategy_version:
-              original.strategy_version ??
-              (original.type === "video"
-                ? VIDEO_STRATEGY_VERSION
-                : original.type === "audio"
-                  ? "audio-sync-v1"
-                  : "image-sync-v1"),
             execution_deadline_at: deadline,
             next_action_at: now,
             fencing_token: 0,
-            // IKIZQ8：样片重试继承阶段身份（input.sample_mode 已随快照复制，Worker 行为
-            // 按样片语义执行；阶段列不继承会让投影把样片重试显示成普通视频）。
-            // charge_state 不在此置 held：重试路径本就不接 Hold（既有口径，全类型一致），
-            // 终态守卫按 video_stage 条件写 settled/released。
-            ...(original.video_stage != null
-              ? { video_stage: original.video_stage }
-              : {}),
           },
+        });
+        // IKJCOE：任务特有字段进扩展位（原主表列已删）。
+        // IKIZQ8：样片重试继承阶段身份（input.sample_mode 已随快照复制，Worker 行为
+        // 按样片语义执行；阶段不继承会让投影把样片重试显示成普通视频）。
+        // charge_state 不在此置 held：重试路径本就不接 Hold（既有口径，全类型一致），
+        // 终态守卫按两阶段条件写 settled/released。
+        const inheritedStage = extraString(originalExtras, "video_stage");
+        await setJobExtras(tx, retry.id, {
+          // M2（评审）：策略版本沿用原行冻结的那份（原先就是 original.strategy_version ?? 兜底），
+          // 只有拿不到才按 type 重算——「值随发布变化」正是它要作 per-job 快照的理由。
+          strategy_version:
+            extraString(originalExtras, "strategy_version") ??
+            strategyVersionOf(original.type),
+          ...(inheritedStage !== null ? { video_stage: inheritedStage } : {}),
         });
         // 为重试 job 补 cost_reservations 行：原 job 有行就逐列搬运（见 costReservationCreateData），
         // 没有就与建任务同款兜底。这张退役表不参与本次的计费口径变更。

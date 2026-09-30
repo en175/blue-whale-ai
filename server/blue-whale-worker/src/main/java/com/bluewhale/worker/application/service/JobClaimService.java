@@ -5,6 +5,8 @@ import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
+import com.bluewhale.worker.domain.entity.GenerationJobExtraEntity;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -88,8 +91,27 @@ public class JobClaimService {
 
     private final GenerationJobMapper jobMapper;
 
-    public JobClaimService(GenerationJobMapper jobMapper) {
+    /** IKJCOE：任务特有字段（video_stage 等）住在扩展位表，claim 投影要读它。 */
+    private final GenerationJobExtraMapper extraMapper;
+
+    public JobClaimService(GenerationJobMapper jobMapper, GenerationJobExtraMapper extraMapper) {
         this.jobMapper = jobMapper;
+        this.extraMapper = extraMapper;
+    }
+
+    /**
+     * 读一个任务的扩展位：extra_key → value_text 原文（IKJCOE）。
+     * <p>
+     * 本类只消费 string 型的那些键（video_stage 这类枚举）；number / json 的读法见
+     * {@link GenerationJobExtraEntity} 的说明。没有扩展位的任务返回空 Map ——
+     * 缺键即缺省（普通视频、旧任务）。
+     */
+    private Map<String, String> loadExtraTexts(Long jobId) {
+        Map<String, String> out = new HashMap<>();
+        for (GenerationJobExtraEntity row : extraMapper.findByJobId(jobId)) {
+            out.put(row.getExtraKey(), row.getValueText());
+        }
+        return out;
     }
 
     // ========== 工具族领取管道（IKIWP8 / ADR-0119，单一） ==========
@@ -193,7 +215,6 @@ public class JobClaimService {
                 candidate.getUserId().toString(),
                 candidate.getType(),
                 input != null ? input : Map.of(),
-                candidate.getExpectedOutputCount() != null ? candidate.getExpectedOutputCount() : 1,
                 candidate.getRetryCount() != null ? candidate.getRetryCount() : 0,
                 candidate.getCancelRequestedAt() != null,
                 postIncrementToken));
@@ -230,7 +251,6 @@ public class JobClaimService {
                 candidate.getUserId().toString(),
                 candidate.getType(),
                 input != null ? input : Map.of(),
-                candidate.getExpectedOutputCount() != null ? candidate.getExpectedOutputCount() : 1,
                 candidate.getRetryCount() != null ? candidate.getRetryCount() : 0,
                 candidate.getCancelRequestedAt() != null,
                 postIncrementToken));
@@ -268,8 +288,10 @@ public class JobClaimService {
             parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
         }
 
+        // IKJCOE：阶段身份在扩展位（原主表 video_stage 列已删）。
+        String videoStage = loadExtraTexts(candidate.getId()).get("video_stage");
         String sourceSampleProviderTaskId = null;
-        if ("final".equals(candidate.getVideoStage()) && candidate.getSourceSampleJobId() != null) {
+        if ("final".equals(videoStage) && candidate.getSourceSampleJobId() != null) {
             sourceSampleProviderTaskId = jobMapper.findProviderTaskId(candidate.getSourceSampleJobId());
         }
 
@@ -285,7 +307,7 @@ public class JobClaimService {
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
                 candidate.getProgress() != null ? candidate.getProgress() : 0,
                 parentProviderTaskId,
-                candidate.getVideoStage(),
+                videoStage,
                 sourceSampleProviderTaskId));
     }
 

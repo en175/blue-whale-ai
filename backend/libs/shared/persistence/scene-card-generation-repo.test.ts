@@ -223,6 +223,13 @@ function buildTx(
         }),
       ...overrides.generation_jobs,
     },
+    // IKJCOE：任务特有字段（strategy_version 等）走扩展位（原主表列已删）；默认无键 = 缺省语义。
+    generation_job_extras: {
+      upsert: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      ...overrides.generation_job_extras,
+    },
     cost_reservations: {
       create: vi.fn().mockResolvedValue({}),
       ...overrides.cost_reservations,
@@ -303,13 +310,37 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
     expect(tx.generation_jobs.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        expected_output_count: 1,
         input: expect.objectContaining({
           placement_anchor: { x: 100, y: 200, width: 240, height: 135 },
         }),
       }),
     });
+    // IKJCOE：建行时的策略版本快照进扩展位（原主表 strategy_version 列已删）。
+    expect(tx.generation_job_extras.upsert).toHaveBeenCalledWith({
+      where: {
+        generation_job_id_extra_key: { generation_job_id: 9001n, extra_key: "strategy_version" },
+      },
+      create: {
+        generation_job_id: 9001n,
+        extra_key: "strategy_version",
+        value_type: "string",
+        value_text: "seedance-2.0-v1",
+      },
+      update: {
+        value_type: "string",
+        value_text: "seedance-2.0-v1",
+        gmt_modified: expect.any(Date),
+      },
+    });
+    // expectedOutputCount=1 → 恰好一个输出槽（原主表 expected_output_count 列的权威在槽行数上）。
     expect(tx.generation_output_slots.create).toHaveBeenCalledOnce();
+    expect(tx.generation_output_slots.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        generation_job_id: 9001n,
+        slot_index: 0,
+        status: "pending",
+      }),
+    });
     expect(tx.command_idempotency.create).toHaveBeenCalledOnce();
   });
 

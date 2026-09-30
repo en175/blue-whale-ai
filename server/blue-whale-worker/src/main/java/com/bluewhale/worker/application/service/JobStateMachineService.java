@@ -11,6 +11,7 @@ import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -72,11 +73,12 @@ public class JobStateMachineService {
             ProjectEventMapper projectEventMapper,
             GenerationOutputSlotMapper slotMapper,
             SceneCardGenerationRecordMapper sceneCardRecordMapper,
-            StoryboardPreviewMapper storyboardPreviewMapper
+            StoryboardPreviewMapper storyboardPreviewMapper,
+            GenerationJobExtraMapper extraMapper
     ) {
         this(jobMapper, jobLogMapper,
-                new JobClaimService(jobMapper),
-                new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper,
+                new JobClaimService(jobMapper, extraMapper),
+                new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
                         new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper,
                                 new ProjectEventPublisher(projectEventMapper)),
                         new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,

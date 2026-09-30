@@ -20,6 +20,7 @@ import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.bluewhale.worker.domain.entity.ProjectEventEntity;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
@@ -135,6 +136,8 @@ class JobStateMachineMySqlIntegrationTest {
     static GenerationJobLogMapper jobLogMapper;
     static ProjectEventMapper projectEventMapper;
     static GenerationOutputSlotMapper slotMapper;
+    /** IKJCOE：任务特有列的扩展位表 mapper（claim 投影 / 终态写路径读它）。 */
+    static GenerationJobExtraMapper extraMapper;
 
     /** 最小 Spring 上下文：不含 autoconfig / MQ / scheduled。 */
     @Configuration
@@ -204,12 +207,19 @@ class JobStateMachineMySqlIntegrationTest {
             return factory(StoryboardPreviewMapper.class, sf).getObject();
         }
 
+        /** IKJCOE：任务特有列的扩展位表 mapper。 */
+        @Bean
+        GenerationJobExtraMapper extraMapper(SqlSessionFactory sf) throws Exception {
+            return factory(GenerationJobExtraMapper.class, sf).getObject();
+        }
+
         @Bean
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 ProjectEventMapper pem, GenerationOutputSlotMapper sm,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
-            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm);
+                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
+                GenerationJobExtraMapper em) {
+            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
         }
 
         /**
@@ -219,10 +229,11 @@ class JobStateMachineMySqlIntegrationTest {
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                GenerationOutputSlotMapper sm, ProjectEventMapper pem,
+                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
+                ProjectEventMapper pem,
                 SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
             ProjectEventPublisher events = new ProjectEventPublisher(pem);
-            return new JobFinalizer(jm, am, jlm, sm,
+            return new JobFinalizer(jm, am, jlm, sm, em,
                     new SceneCardGenerationRecordSync(sm, rm, events),
                     new StoryboardPreviewSync(sm, pm, events),
                     events,
@@ -248,7 +259,8 @@ class JobStateMachineMySqlIntegrationTest {
         service = ctx.getBean(JobStateMachineService.class);
         finalizer = ctx.getBean(JobFinalizer.class);
         jobMapper = ctx.getBean(GenerationJobMapper.class);
-        claimService = new JobClaimService(jobMapper);
+        extraMapper = ctx.getBean(GenerationJobExtraMapper.class);
+        claimService = new JobClaimService(jobMapper, extraMapper);
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
         assetMapper = ctx.getBean(AssetMapper.class);
         jobLogMapper = ctx.getBean(GenerationJobLogMapper.class);
@@ -286,9 +298,9 @@ class JobStateMachineMySqlIntegrationTest {
         jdbc.update("""
                 INSERT INTO generation_jobs
                   (user_id, type, source, status, fencing_token, next_action_at,
-                   project_id, input, progress, expected_output_count,
+                   project_id, input, progress,
                    gmt_create, gmt_modified, version, is_delete)
-                VALUES (?,?,?,?,?,?,?,?,?,0,NOW(),NOW(),0,false)
+                VALUES (?,?,?,?,?,?,?,?,?,NOW(),NOW(),0,false)
                 """,
                 userId, type, source, status, fencingToken, nextActionAt,
                 projectId, inputJson, 0);
@@ -303,9 +315,9 @@ class JobStateMachineMySqlIntegrationTest {
         jdbc.update("""
                 INSERT INTO generation_jobs
                   (user_id, type, source, status, lease_owner, lease_expires_at,
-                   fencing_token, project_id, expected_output_count,
+                   fencing_token, project_id,
                    gmt_create, gmt_modified, version, is_delete)
-                VALUES (?,?,?,?,?,?,?,99,1,NOW(),NOW(),0,false)
+                VALUES (?,?,?,?,?,?,?,99,NOW(),NOW(),0,false)
                 """,
                 userId, type, source, "processing", workerId, future, token);
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
@@ -383,7 +395,10 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(dto.id()).isEqualTo(String.valueOf(id));
             assertThat(dto.type()).isEqualTo("image");
             assertThat(dto.retry_count()).isEqualTo(0);
-            assertThat(dto.expected_output_count()).isEqualTo(0); // 种子设的 0
+            // IKJCOE：expected_output_count 主表列已删、claim 投影不再承载该字段（权威是建行时冻结的
+            // input.expected_output_count）。原「投影带出该列」的断言改为整体逐字段钉住投影本身。
+            assertThat(dto).isEqualTo(new ClaimedJobDto(
+                    String.valueOf(id), "99", "7", "image", Map.of(), 0, false, 1L));
             GenerationJobEntity row = readJob(id);
             assertThat(row.getStatus()).isEqualTo("processing");
             assertThat(row.getLeaseOwner()).isEqualTo("worker-1");
@@ -1447,7 +1462,12 @@ class JobStateMachineMySqlIntegrationTest {
 
         GenerationJobEntity row = readJob(jobId);
         assertThat(row.getNextActionAt()).isBetween(before.plusSeconds(38), after.plusSeconds(42));
-        assertThat(row.getNextPollAt()).isEqualTo(row.getNextActionAt());
+        // IKJCOE：next_poll_at 列已删——轮询到期时刻只剩 next_action_at 一个落点，
+        // 「两列同值」的旧断言失去对象；改为在真库上钉住该列确实不存在（schema 回退即红）。
+        assertThat(jdbc.queryForList(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                        + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'generation_jobs' "
+                        + "AND COLUMN_NAME = 'next_poll_at'", String.class)).isEmpty();
         assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).doesNotContain(jobId);
         jdbc.update("UPDATE generation_jobs SET next_action_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
         assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).contains(jobId);
@@ -1708,7 +1728,7 @@ class JobStateMachineMySqlIntegrationTest {
             return candidate;
         }).when(competingMapper).findCandidateByTypeAndSources(
                 eq(jobId), eq(AudioMixContract.TAG), anyList());
-        var competingClaims = new JobClaimService(competingMapper);
+        var competingClaims = new JobClaimService(competingMapper, extraMapper);
         try (var pool = Executors.newFixedThreadPool(2)) {
             var first = pool.submit(() -> competingClaims.claim(
                     ClaimSpec.bySources(AudioMixContract.TAG, 420,

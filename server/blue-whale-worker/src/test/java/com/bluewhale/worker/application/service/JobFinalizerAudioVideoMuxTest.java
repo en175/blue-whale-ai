@@ -4,6 +4,7 @@ import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +31,8 @@ class JobFinalizerAudioVideoMuxTest {
     @Mock AssetMapper assetMapper;
     @Mock GenerationJobLogMapper jobLogMapper;
     @Mock GenerationOutputSlotMapper slotMapper;
+    /** IKJCOE：任务特有列搬进键值扩展表（本用例走的非视频路径不写扩展位）。 */
+    @Mock GenerationJobExtraMapper extraMapper;
     @Mock SceneCardGenerationRecordSync recordSync;
     @Mock StoryboardPreviewSync previewSync;
     @Mock ProjectEventPublisher eventPublisher;
@@ -40,7 +43,7 @@ class JobFinalizerAudioVideoMuxTest {
 
     @BeforeEach
     void setUp() {
-        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper,
+        finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
                 recordSync, previewSync, eventPublisher, settlementPublisher);
         // 模拟 MyBatis-Plus insert 回填自增 id（publishSingleAssetResult 用 id 拼 output_asset_ids）。
         lenient().when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {

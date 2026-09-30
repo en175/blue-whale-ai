@@ -138,10 +138,6 @@ model generation_jobs {
   id                       BigInt    @id @default(autoincrement())
   project_id               BigInt?
   user_id                  BigInt
-  agent_run_id             BigInt?
-  action_identity          String?   @db.VarChar(128)
-  project_action_identity  String?   @db.VarChar(128)
-  expected_output_count    Int       @default(1)
   retry_of_job_id          BigInt?
   type                     String    @db.VarChar(32)
   source                   String    @default("dock") @db.VarChar(32)
@@ -151,61 +147,65 @@ model generation_jobs {
   provider                 String?   @db.VarChar(64)
   provider_task_id         String?   @db.VarChar(128)
   poll_count               Int       @default(0)
-  next_poll_at             DateTime? @db.DateTime(0)
   retry_count              Int       @default(0)
   last_polled_at           DateTime? @db.DateTime(0)
   error                    Json?
-  stage_id                 String?   @db.VarChar(64)
   lease_owner              String?   @db.VarChar(128)
   lease_expires_at         DateTime? @db.DateTime(0)
   fencing_token            BigInt    @default(0)
-  strategy_version         String?   @db.VarChar(64)
   execution_deadline_at    DateTime? @db.DateTime(0)
-  evidence_reconcile_until DateTime? @db.DateTime(0)
   next_action_at           DateTime? @db.DateTime(0)
   cancel_requested_at      DateTime? @db.DateTime(0)
   gmt_create               DateTime  @default(now()) @db.DateTime(0)
   gmt_modified             DateTime  @default(now()) @db.DateTime(0)
   version                  Int       @default(0)
   is_delete                Boolean   @default(false)
-  canvas_card_state        String    @default("pending") @db.VarChar(16)
   input                    Json?
 
-  /// IKIZQ8（契约 video-sample-mode.ts §1/§4/§6）：两阶段视频的阶段身份。
-  /// NULL = 旧任务 / 普通视频（投影缺省 video）；'sample' = 样片（480p Draft）。
-  /// 'final'（成片）由后续 finalize 票写入——本票只落样片。
-  video_stage              String?   @db.VarChar(16)
-  /// 成片任务指向来源样片任务（仅 final 阶段非 null）。本票建列不写值；
-  /// 唯一约束（FINALIZE_SOURCE_UNIQUE_KEY）随 finalize 票落地。
+  /// IKIZQC：成片来源唯一约束（契约 FINALIZE_SOURCE_UNIQUE_KEY）——同一来源样片
+  /// 至多一条成片任务行；MySQL 唯一索引不去重 NULL，普通视频/样片行不受影响。
+  /// 成片任务指向来源样片任务（仅 final 阶段非 null）。
+  /// ⚠️ 本列**留在主表**：它扛着下面这条唯一索引，是并发裁决点。扩展表
+  /// generation_job_extras 的唯一索引只能是 (generation_job_id, extra_key)，
+  /// 改成按值唯一会让所有同 extra_key 的行互相撞（IKJCOE）。
   source_sample_job_id     BigInt?
-  /// 样片任务指向其唯一成片任务（仅 sample 阶段可非 null）。本票建列不写值。
-  final_job_id             BigInt?
-  /// 可信上游 Draft created_at（epoch 毫秒，网关轮询回传——不是网关 SubmitTime
-  /// 也不是本地建行时间，IKIZKG）。NULL = 缺可信时间 → finalize_deadline_ms 同为
-  /// NULL → 成片禁用，但样片保留可预览下载。
-  upstream_created_at_ms   BigInt?
-  /// 实际转成片截止 = upstream_created_at_ms + 7 天 − 1 小时安全余量（契约同一公式，
-  /// TS/Java 金标对账 G06）。Worker 在样片成功终态写入；普通视频恒 NULL。
-  finalize_deadline_ms     BigInt?
-  /// 阶段费用状态（契约 CHARGE_STATES）：held=创建预扣（本票写入）；
-  /// settled=成功结算 / released=失败释放（Worker 终态守卫按 video_stage 条件写入）。
-  /// 旧任务与非两阶段任务 NULL。
-  charge_state             String?   @db.VarChar(16)
-  /// 成功按真实用量结算后的整数积分（billing 结算回填，异步）；结算前 NULL。
-  /// 回填链路首版未闭合（全仓暂无写入点），由 IKJ8KK 承接；前端对 NULL 有兜底。
-  actual_credits           Int?
 
   @@index([project_id], map: "idx_project_id")
   @@index([provider_task_id], map: "idx_provider_task_id")
-  @@index([status, next_poll_at], map: "idx_status_next_poll")
   @@index([user_id], map: "idx_user_id")
   @@index([next_action_at], map: "idx_generation_next_action")
-  /// IKIZQC：成片来源唯一约束（契约 FINALIZE_SOURCE_UNIQUE_KEY）——同一来源样片
-  /// 至多一条成片任务行；MySQL 唯一索引不去重 NULL，普通视频/样片行不受影响。
   @@unique([source_sample_job_id], map: "uk_generation_jobs__source_sample_job_id")
   /// 仪表盘区间统计：WHERE is_delete = 0 AND gmt_create ∈ [from, to)。
   /// `is_delete` 在前做等值前缀、`gmt_create` 走区间 —— 反过来放会让等值条件退化成过滤。
   @@index([is_delete, gmt_create], map: "idx_generation_jobs__is_delete_gmt_create")
+}
+
+/// IKJCOE：generation_jobs 的任务特有扩展位（键值形态）。
+///
+/// 为什么是键值而不是继续加列：任务类型各异（image/video/audio/抠图/混音/…），每种只用
+/// 到少数几个扩展位。按列加会长成稀疏并集——每加一个类型的主表就多几列，而读路径
+/// （job-repo.ts）是 findMany 无 select，列表页为此多传一次。按行存则「多一种类型」
+/// 是加数据不是加列。
+///
+/// extra_key **沿用被迁移列的原字段名**（video_stage / charge_state / …），读方不用
+/// 维护一层新旧名字映射。value_type ∈ string/number/boolean/json；number 用十进制
+/// 字符串存 value_text（JS Number() / Java Long.parseLong 对称）。上限：超过 2^53 的
+/// 数值必须用 string。
+///
+/// 刻意不建 generation_job_id 单列索引（唯一索引最左前缀已覆盖）；不建 is_delete /
+/// version（追加型子表，跟随 generation_job_logs / generation_output_slots）；
+/// 不建外键关系（全仓 0 个 @relation，子表一律父表先查 + 子表二次查询 + 内存聚合）。
+model generation_job_extras {
+  id                BigInt   @id @default(autoincrement())
+  generation_job_id BigInt
+  extra_key         String   @db.VarChar(64)
+  value_type        String   @db.VarChar(16)
+  value_text        String   @db.Text
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime @default(now()) @db.DateTime(0)
+
+  /// 一个任务的一个扩展位只有一行；upsert 靠它判重，不靠应用层。
+  @@unique([generation_job_id, extra_key], map: "uk_generation_job_extras__job_key")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments

@@ -6,6 +6,16 @@ describe("canvas optimistic save", () => {
   it("首次保存规范混合结果卡记为 present，移除记 removed，撤销重加回 present", async () => {
     let version = 3;
     let cardState = "pending";
+    // IKJCOE：卡片持久状态住在 generation_job_extras（原主表列已删）——假件照新机制记账。
+    const upsertExtra = vi.fn(async ({ where, create }: {
+      where: { generation_job_id_extra_key: { generation_job_id: bigint } };
+      create: { extra_key: string; value_text: string };
+    }) => {
+      if (where.generation_job_id_extra_key.generation_job_id === 73n && create.extra_key === "canvas_card_state") {
+        cardState = create.value_text;
+      }
+      return {};
+    });
     const tx = {
       canvas: {
         updateMany: vi.fn(async ({ where }: { where: { version: number } }) => {
@@ -17,19 +27,26 @@ describe("canvas optimistic save", () => {
           viewport_json: null, nodes_json: [], edges_json: null })),
       },
       generation_output_slots: { updateMany: vi.fn() },
+      // 候选扫描：本轮不在画布上的 audio_mix 任务（作用域收在本项目 + 本人 + 未删）。
       generation_jobs: {
-        findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+          if (where.project_id !== 55n || where.user_id !== 9n || where.type !== "audio_mix" || where.is_delete !== false) return [];
           const excluded = (where.id as { notIn?: bigint[] } | undefined)?.notIn ?? [];
-          return cardState === "present" && !excluded.includes(73n) ? { id: 73n } : null;
+          return excluded.includes(73n) ? [] : [{ id: 73n }];
         }),
-        updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: { canvas_card_state: string } }) => {
-          if (where.project_id !== 55n || where.user_id !== 9n || where.type !== "audio_mix") return { count: 0 };
-          if (data.canvas_card_state === "present" && Array.isArray((where.id as { in?: bigint[] } | undefined)?.in)
-              && (where.id as { in: bigint[] }).in.includes(73n)) cardState = "present";
-          const excluded = (where.id as { notIn?: bigint[] } | undefined)?.notIn ?? [];
-          if (data.canvas_card_state === "removed" && cardState === "present" && !excluded.includes(73n)) cardState = "removed";
-          return { count: 1 };
+      },
+      generation_job_extras: {
+        upsert: upsertExtra,
+        // 缺键 = 'pending' 由调用侧兜底，这里原样报出当前值。
+        findMany: vi.fn(async ({ where }: { where: { generation_job_id: bigint | { in: bigint[] } } }) => {
+          const ids = typeof where.generation_job_id === "object" && "in" in where.generation_job_id
+            ? where.generation_job_id.in
+            : [where.generation_job_id];
+          return ids.includes(73n)
+            ? [{ generation_job_id: 73n, extra_key: "canvas_card_state", value_type: "string", value_text: cardState }]
+            : [];
         }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
     };
     const repo = createCanvasRepo({ $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as never);
@@ -42,43 +59,113 @@ describe("canvas optimistic save", () => {
     expect(cardState).toBe("present");
   });
 
+  it("IKJCOE：卡号不在本人本项目作用域内 → 一个扩展位都不写（跨用户写防护）", async () => {
+    // 卡号来自请求体里的画布节点（node.id 与 node.data.jobId 都是客户端可构造的），
+    // 所以「按 id 写扩展位」之前必须过一次归属过滤。这里用一个不属于本人的 jobId，
+    // 断言作用域查询被调用、且**没有任何** upsert 落到扩展位上。
+    const upsertExtra = vi.fn().mockResolvedValue({});
+    const tx = {
+      canvas: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findFirst: vi.fn(async () => ({
+          id: 1n, project_id: 55n, version: 3,
+          viewport_json: null, nodes_json: [], edges_json: null,
+        })),
+      },
+      generation_output_slots: { updateMany: vi.fn() },
+      generation_jobs: {
+        // 作用域过滤：只有属于 (55, 9, audio_mix, 未删) 的 id 才出现在结果里。
+        findMany: vi.fn(async ({ where }: { where: { id?: { in?: bigint[] } } }) =>
+          (where.id?.in ?? []).includes(73n) ? [{ id: 73n }] : [],
+        ),
+      },
+      generation_job_extras: {
+        upsert: upsertExtra,
+        findMany: vi.fn().mockResolvedValue([]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const repo = createCanvasRepo({
+      $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
+    } as never);
+    const foreignCard = JSON.stringify([
+      { id: "audio-mix-999", type: "mediaNode", data: { jobId: "999" } },
+    ]);
+    await repo.saveIfVersion("55", 3, null, foreignCard, null, { ownerId: "9", items: [] });
+
+    expect(tx.generation_jobs.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          project_id: 55n,
+          user_id: 9n,
+          type: "audio_mix",
+          is_delete: false,
+          id: { in: [999n] },
+        }),
+      }),
+    );
+    expect(upsertExtra).not.toHaveBeenCalled();
+  });
+
   it("无混音结果卡且无待移除状态时不执行混音任务更新", async () => {
-    const jobUpdate = vi.fn();
-    const jobFind = vi.fn().mockResolvedValue(null);
+    const jobScan = vi.fn().mockResolvedValue([]);
+    const jobUpsert = vi.fn();
     const tx = {
       canvas: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 1n, project_id: 55n, version: 4, viewport_json: null, nodes_json: [], edges_json: null }),
       },
-      generation_jobs: { findFirst: jobFind, updateMany: jobUpdate },
+      generation_jobs: { findMany: jobScan },
+      generation_job_extras: {
+        upsert: jobUpsert,
+        findMany: vi.fn().mockResolvedValue([]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       generation_output_slots: { updateMany: vi.fn() },
     };
     const repo = createCanvasRepo({ $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as never);
     await repo.saveIfVersion("55", 3, null, "[]", null, { ownerId: "9", items: [] });
-    expect(jobFind).toHaveBeenCalledOnce();
-    expect(jobUpdate).not.toHaveBeenCalled();
+    expect(jobScan).toHaveBeenCalledOnce();
+    expect(jobUpsert).not.toHaveBeenCalled();
   });
 
   it("Canvas 版本冲突及非规范结果卡不改变混合卡状态", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
-    const jobUpdate = vi.fn();
-    const tx = { canvas: { updateMany }, generation_jobs: { updateMany: jobUpdate } };
+    const jobUpsert = vi.fn();
+    const tx = {
+      canvas: { updateMany },
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_extras: {
+        upsert: jobUpsert,
+        findMany: vi.fn().mockResolvedValue([]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
     const repo = createCanvasRepo({ $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as never);
     const forged = JSON.stringify([{ id: "other-73", type: "mediaNode", data: { jobId: "73" } }]);
     await expect(repo.saveIfVersion("55", 3, null, forged, null, { ownerId: "9", items: [] })).resolves.toBeNull();
-    expect(jobUpdate).not.toHaveBeenCalled();
+    // 冲突（count=0）与非规范卡号都到不了写扩展位那一步。
+    expect(jobUpsert).not.toHaveBeenCalled();
   });
 
   it("IKIZQH：删画布卡（保存无卡节点集）不删任务或资产——任务只改 canvas_card_state 标记，assets 无写调用", async () => {
-    const jobFind = vi.fn().mockResolvedValue({ id: 73n });
-    const jobUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    const jobScan = vi.fn().mockResolvedValue([{ id: 73n }]);
+    const jobUpsert = vi.fn().mockResolvedValue({});
     const assetsWrite = vi.fn();
     const tx = {
       canvas: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 1n, project_id: 55n, version: 4, viewport_json: null, nodes_json: [], edges_json: null }),
       },
-      generation_jobs: { findFirst: jobFind, updateMany: jobUpdate },
+      generation_jobs: { findMany: jobScan },
+      generation_job_extras: {
+        upsert: jobUpsert,
+        // 该任务此前在画布上（扩展位记 present），这一轮不在节点集里 → 改 removed。
+        findMany: vi.fn().mockResolvedValue([
+          { generation_job_id: 73n, extra_key: "canvas_card_state", value_type: "string", value_text: "present" },
+        ]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       generation_output_slots: { updateMany: vi.fn() },
       assets: { updateMany: assetsWrite, update: assetsWrite, deleteMany: assetsWrite },
       project_asset: { upsert: vi.fn() },
@@ -88,10 +175,16 @@ describe("canvas optimistic save", () => {
     // 节点集里已没有 audio-mix-73 卡（用户在画布上删除了结果卡）。
     await repo.saveIfVersion("55", 3, null, "[]", null, { ownerId: "9", items: [] });
 
-    // 任务行仅收到 canvas_card_state 标记（软状态，is_delete 不动）；资产行零写调用。
-    expect(jobUpdate).toHaveBeenCalledTimes(1);
-    expect(Object.keys(jobUpdate.mock.calls[0][0].data)).toEqual(["canvas_card_state"]);
-    expect(jobUpdate.mock.calls[0][0].data).not.toHaveProperty("is_delete");
+    // 任务只在扩展位上收到 canvas_card_state='removed'（软状态，任务行的 is_delete 不动）；资产行零写调用。
+    expect(jobUpsert).toHaveBeenCalledTimes(1);
+    const upsertArg = jobUpsert.mock.calls[0]![0];
+    expect(upsertArg.create).toEqual({
+      generation_job_id: 73n,
+      extra_key: "canvas_card_state",
+      value_type: "string",
+      value_text: "removed",
+    });
+    expect(upsertArg.create).not.toHaveProperty("is_delete");
     expect(assetsWrite).not.toHaveBeenCalled();
   });
 

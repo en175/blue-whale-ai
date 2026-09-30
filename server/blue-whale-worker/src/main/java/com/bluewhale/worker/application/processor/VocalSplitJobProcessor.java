@@ -546,7 +546,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED;
     }
 
-    /** 失败处理（复用家族 failMediaExtractJob 守卫：SET 清 next_action_at + next_poll_at，
+    /** 失败处理（复用家族 failMediaExtractJob 守卫：SET 清 next_action_at，
      *  轮询型任务语义完备；details.raw 透传原始原因——跨工具复用同款守卫，video_enhance
      *  复用 failVideoJob 同例）。 */
     private void failVocalSplit(ClaimedJob claim, String code, String message) {

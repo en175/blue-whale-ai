@@ -210,7 +210,6 @@ export class VideoMattingsService {
           source: VIDEO_MATTING_SOURCE,
           status: "queued",
           progress: 0,
-          expected_output_count: 1,
           input: frozenInput,
           // 过去 60s：回拨口径同去字幕 / HD / 场景切分——DATETIME(0) 秒精度进位会让
           // 同秒 claim 的 lte now 判 false，任务悬挂。

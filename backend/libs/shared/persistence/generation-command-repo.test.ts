@@ -10,6 +10,48 @@ import {
   type CreateJobResult,
 } from "./generation-job-idempotency.js";
 
+/** 一次扩展位 upsert 的入参形状（与 setJobExtras 逐字对齐）。 */
+interface ExtraUpsertArg {
+  where: {
+    generation_job_id_extra_key: { generation_job_id: bigint; extra_key: string };
+  };
+  create: {
+    generation_job_id: bigint;
+    extra_key: string;
+    value_type: string;
+    value_text: string;
+  };
+  update: { value_type: string; value_text: string; gmt_modified: Date };
+}
+
+/** 扩展位假件（IKJCOE）：strategy_version / video_stage / charge_state 等任务特有字段
+ *  已从 generation_jobs 主表列搬进 generation_job_extras，建任务与重试路径改调它。
+ *  默认无键、不记账；写入断言直接读 calls。 */
+function extrasDelegate(rows: unknown[] = []) {
+  return {
+    upsert: vi.fn(async (_arg: ExtraUpsertArg) => ({})),
+    findMany: vi.fn(async (_arg: { where: Record<string, unknown> }) => rows),
+    deleteMany: vi.fn(async (_arg: { where: Record<string, unknown> }) => ({ count: 0 })),
+  };
+}
+
+/** 逐字钉住一次扩展位 upsert（where 复合键 / create / update 三段都断言）。 */
+function expectExtraWrite(
+  upsert: ReturnType<typeof vi.fn>,
+  jobId: bigint,
+  extra_key: string,
+  value_type: string,
+  value_text: string,
+): void {
+  expect(upsert).toHaveBeenCalledWith(
+    {
+      where: { generation_job_id_extra_key: { generation_job_id: jobId, extra_key } },
+      create: { generation_job_id: jobId, extra_key, value_type, value_text },
+      update: { value_type, value_text, gmt_modified: expect.any(Date) },
+    } satisfies ExtraUpsertArg,
+  );
+}
+
 describe("generation command placement anchor", () => {
   it("freezes the SceneCard output anchor in the job input", async () => {
     const createJob = vi.fn().mockResolvedValue({
@@ -36,6 +78,7 @@ describe("generation command placement anchor", () => {
         }),
       },
       generation_jobs: { create: createJob },
+      generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
@@ -60,9 +103,13 @@ describe("generation command placement anchor", () => {
 
     expect(createJob).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        // IKJCOE：输出数冻进 input 快照（主表 expected_output_count 列已删，Worker 从
+        // 这里读「这次要出几个」）。storyboard_preview 只把 count 当参数传、不写 input 字面量，
+        // 少了这一条它会在 Worker 侧退化成 1 —— 出图数比槽位数少。
         input: {
           prompt: "whale",
           placement_anchor: { x: 100, y: 200, width: 400, height: 320 },
+          expected_output_count: 1,
         },
       }),
     });
@@ -91,6 +138,7 @@ describe("generation command placement anchor", () => {
         }),
       },
       generation_jobs: { create: createJob },
+      generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
@@ -118,6 +166,7 @@ describe("generation command placement anchor", () => {
         input: {
           prompt: "whale",
           placement_anchor: { x: 0, y: -1104, width: 400, height: 1080 },
+          expected_output_count: 1,
         },
       }),
     });
@@ -135,6 +184,7 @@ describe("generation command placement anchor", () => {
     const tx = {
       canvas: { findFirst: vi.fn().mockResolvedValue(null) },
       generation_jobs: { create: createJob },
+      generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
@@ -162,6 +212,7 @@ describe("generation command placement anchor", () => {
         input: {
           prompt: "whale",
           placement_anchor: { x: -424, y: -1104, width: 400, height: 1080 },
+          expected_output_count: 1,
         },
       }),
     });
@@ -186,8 +237,8 @@ describe("generation command repo retry", () => {
           source: "scene_card",
           status: "failed",
           input: {},
-          expected_output_count: 4,
-          strategy_version: "seedance-2.0-v1",
+          // IKJCOE：expected_output_count / strategy_version 主表列已删
+          //（输出数以输出槽行为权威；策略版本改从扩展位继承，拿不到才按 type 重算）。
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
@@ -213,6 +264,8 @@ describe("generation command repo retry", () => {
         create: createSlot,
       },
       scene_card_generation_records: { update: updateRecord },
+      // IKJCOE：扩展位（重试路径读原 job 的阶段身份、写重试 job 的策略版本）。
+      generation_job_extras: extrasDelegate(),
       // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
       cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
@@ -332,8 +385,7 @@ describe("generation command repo retry", () => {
           source: "bottom_dock",
           status: "partially_succeeded",
           input: {},
-          expected_output_count: 2,
-          strategy_version: "image-sync-v1",
+          // IKJCOE：主表 expected_output_count / strategy_version 列已删。
         }),
         create: createJob,
       },
@@ -350,6 +402,7 @@ describe("generation command repo retry", () => {
         ),
         create: createSlot,
       },
+      generation_job_extras: extrasDelegate(),
       command_idempotency: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
@@ -383,8 +436,11 @@ describe("generation command repo retry", () => {
     await repo.retryJob("300", "55", "9", "retry-302", "hash-302");
 
     expect(createJob).toHaveBeenCalledWith({
-      data: expect.objectContaining({ expected_output_count: 1 }),
+      data: expect.objectContaining({ retry_of_job_id: 300n }),
     });
+    // IKJCOE：重试行的任务特有字段进扩展位（原主表 expected_output_count / strategy_version
+    // 列已删）。类型是 image → 策略版本按当前常量重算，不复制原行。
+    expectExtraWrite(tx.generation_job_extras.upsert, 302n, "strategy_version", "string", "image-sync-v1");
     expect(createSlot).toHaveBeenCalledTimes(1);
     expect(createSlot).toHaveBeenCalledWith({
       data: expect.objectContaining({ slot_index: 1, retry_of_slot_id: 79n }),
@@ -404,7 +460,7 @@ describe("generation command repo retry", () => {
           source: "bottom_dock",
           status: "failed",
           input: {},
-          expected_output_count: 1,
+          // IKJCOE：主表 expected_output_count 列已删（输出数以输出槽行为权威）。
         }),
         create: createJob,
       },
@@ -431,6 +487,7 @@ describe("generation command repo retry", () => {
         ]),
         create: createSlot,
       },
+      generation_job_extras: extrasDelegate(),
       // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
       cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
@@ -477,11 +534,12 @@ describe("generation command repo retry", () => {
           source: "bottom_dock",
           status: "succeeded",
           input: {},
-          expected_output_count: 1,
+          // IKJCOE：主表 expected_output_count 列已删。
         }),
         create: createJob,
       },
       generation_output_slots: { findMany: vi.fn(), create: vi.fn() },
+      generation_job_extras: extrasDelegate(),
       cost_reservations: { findFirst: vi.fn(), create: vi.fn() },
       command_idempotency: { findUnique: vi.fn(), create: vi.fn() },
     };
@@ -514,8 +572,7 @@ describe("generation command repo retry", () => {
       source: "scene_card",
       status: "failed",
       input: {},
-      expected_output_count: 1,
-      strategy_version: "seedance-2.0-v1",
+      // IKJCOE：expected_output_count / strategy_version 主表列已删。
     };
     const firstTx = {
       generation_jobs: {
@@ -533,6 +590,7 @@ describe("generation command repo retry", () => {
         findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn().mockResolvedValue({}),
       },
+      generation_job_extras: extrasDelegate(),
       // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
       cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
@@ -561,6 +619,7 @@ describe("generation command repo retry", () => {
     };
     const secondTx = {
       generation_jobs: { findFirst: vi.fn().mockResolvedValue(original) },
+      generation_job_extras: extrasDelegate(),
       cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
@@ -608,7 +667,7 @@ describe("generation command repo retry", () => {
 
   // IKF YHJ（ADR-0087 决策 7）：重试复用原 job 的参数快照，但素材校验状态可能在那之后变了。
   describe("retryJob 素材状态门（IKF YHJ）", () => {
-    /** 能走到 create 的最小事务形状：无输出槽 → retryCount 取 expected_output_count。 */
+    /** 能走到 create 的最小事务形状：无输出槽 → retryCount 取 input 快照里的 expected_output_count。 */
     function retryTx(original: Record<string, unknown>) {
       const createJob = vi.fn().mockResolvedValue({
         id: 302n,
@@ -623,6 +682,7 @@ describe("generation command repo retry", () => {
           findFirst: vi.fn().mockResolvedValue(original),
           create: createJob,
         },
+        generation_job_extras: extrasDelegate(),
         generation_output_slots: {
           findMany: vi.fn().mockResolvedValue([]),
           create: vi.fn().mockResolvedValue({}),
@@ -664,8 +724,9 @@ describe("generation command repo retry", () => {
       type: "video",
       source: "scene_card",
       status: "failed",
-      input: { references: [{ material_id: "asset-abc" }] },
-      expected_output_count: 1,
+      // IKJCOE：主表 expected_output_count 列已删——权威快照是 input 里的同名键
+      //（建行时必写；读不出来按 1 兜底，见 readInputCount）。
+      input: { references: [{ material_id: "asset-abc" }], expected_output_count: 1 },
       strategy_version: "seedance-2.0-v1",
     };
 
@@ -716,6 +777,7 @@ describe("generation command repo retry", () => {
           findFirst: vi.fn().mockResolvedValue(failedOriginal),
           create: vi.fn(),
         },
+        generation_job_extras: extrasDelegate(),
         cost_reservations: {
           findFirst: vi.fn().mockResolvedValue({
             reserved_amount_fen: 1234n,
@@ -802,6 +864,7 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
         }),
       },
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
+      generation_job_extras: extrasDelegate(),
       cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: {
         create: options.failAtLog
@@ -1003,6 +1066,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
             }),
           },
           generation_output_slots: { create: vi.fn(async () => ({})) },
+          generation_job_extras: extrasDelegate(),
           cost_reservations: { create: vi.fn(async () => ({})) },
           generation_job_logs: { create: vi.fn(async () => ({})) },
           project_events: {
@@ -1195,6 +1259,7 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
     return {
       canvas: { findFirst: vi.fn().mockResolvedValue(null) },
       generation_jobs: { create: createJob },
+      generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
@@ -1202,9 +1267,10 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
     };
   }
 
-  it("videoStage='sample' → 行值带 video_stage 与 charge_state='held'", async () => {
+  it("videoStage='sample' → 扩展位带 video_stage 与 charge_state='held'（原主表列已删）", async () => {
     const createJob = vi.fn().mockResolvedValue({ id: 300n, version: 1 });
-    await createJobWithinTx(plainTx(createJob) as never, {
+    const tx = plainTx(createJob);
+    await createJobWithinTx(tx as never, {
       projectId: "55",
       userId: "9",
       type: "video",
@@ -1214,17 +1280,25 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
       actionType: "generate_video",
       videoStage: "sample",
     });
-    expect(createJob).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        video_stage: "sample",
-        charge_state: "held",
-      }),
-    });
+    // 阶段身份与费用初始态不再进主表行。
+    const data = (createJob.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(data.video_stage).toBeUndefined();
+    expect(data.charge_state).toBeUndefined();
+    // 三个键逐字落在扩展位（写入顺序 = setJobExtras 的 Object.entries 顺序）。
+    expect(tx.generation_job_extras.upsert.mock.calls.map((call) => call[0].create.extra_key)).toEqual([
+      "strategy_version",
+      "video_stage",
+      "charge_state",
+    ]);
+    expectExtraWrite(tx.generation_job_extras.upsert, 300n, "strategy_version", "string", "seedance-2.0-v1");
+    expectExtraWrite(tx.generation_job_extras.upsert, 300n, "video_stage", "string", "sample");
+    expectExtraWrite(tx.generation_job_extras.upsert, 300n, "charge_state", "string", "held");
   });
 
-  it("未传 videoStage（普通视频/图片/音频）→ 行值不含两列（旧行为零变化）", async () => {
+  it("未传 videoStage（普通视频/图片/音频）→ 不写阶段两键（旧行为零变化）", async () => {
     const createJob = vi.fn().mockResolvedValue({ id: 301n, version: 1 });
-    await createJobWithinTx(plainTx(createJob) as never, {
+    const tx = plainTx(createJob);
+    await createJobWithinTx(tx as never, {
       projectId: "55",
       userId: "9",
       type: "video",
@@ -1233,8 +1307,12 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
       actionIdentity: "generate-301",
       actionType: "generate_video",
     });
-    const data = createJob.mock.calls[0]![0] as { data: Record<string, unknown> };
-    expect(data.data.video_stage).toBeUndefined();
-    expect(data.data.charge_state).toBeUndefined();
+    const data = (createJob.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(data.video_stage).toBeUndefined();
+    expect(data.charge_state).toBeUndefined();
+    // 扩展位只写策略版本快照（缺键 = 旧语义）。
+    expect(tx.generation_job_extras.upsert.mock.calls.map((call) => call[0].create.extra_key)).toEqual([
+      "strategy_version",
+    ]);
   });
 });

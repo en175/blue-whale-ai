@@ -28,6 +28,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSeparateVoiceCl
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSubtitleEraseClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitTrimAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationModelCapabilityMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
@@ -300,7 +301,7 @@ class ClaimSpecExclusivityTest {
                 .withUserConfiguration(ProcessorScanFixture.class)
                 // 通用依赖
                 .withBean(JobStateMachineService.class, () -> mock(JobStateMachineService.class))
-                .withBean(JobClaimService.class, () -> new JobClaimService(jobMapper))
+                .withBean(JobClaimService.class, () -> new JobClaimService(jobMapper, mock(GenerationJobExtraMapper.class)))
                 .withBean(JobFinalizer.class, () -> mock(JobFinalizer.class))
                 .withBean(GenerationJobMapper.class, () -> jobMapper)
                 .withBean(AssetSourceService.class, () -> mock(AssetSourceService.class))

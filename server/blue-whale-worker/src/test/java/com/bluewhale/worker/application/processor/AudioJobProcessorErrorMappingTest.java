@@ -167,7 +167,7 @@ class AudioJobProcessorErrorMappingTest {
                 "100", "42", "9", "audio",
                 Map.of("prompt", "hello", "model_id", "m",
                         "provider_credential", "v1.aaa.bbb.ccc"),
-                1, 0,
+                0,
                 true, // cancelRequested = true
                 5L
         );
@@ -183,6 +183,6 @@ class AudioJobProcessorErrorMappingTest {
 
     private ClaimedJobDto claimWithInput(Map<String, Object> input) {
         return new ClaimedJobDto(
-                "100", "42", "9", "audio", input, 1, 0, false, 5L);
+                "100", "42", "9", "audio", input, 0, false, 5L);
     }
 }

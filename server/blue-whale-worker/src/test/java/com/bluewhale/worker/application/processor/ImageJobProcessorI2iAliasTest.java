@@ -90,7 +90,7 @@ class ImageJobProcessorI2iAliasTest {
                 "provider_credential", "sealed-token"));
         if (!refs.isEmpty()) input.put("input_asset_ids", refs);
         ClaimedJobDto job = new ClaimedJobDto(
-                "100", "1", "1", "image", input, 1, 0, false, 1L);
+                "100", "1", "1", "image", input, 0, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
 

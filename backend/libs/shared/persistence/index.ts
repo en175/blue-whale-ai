@@ -42,6 +42,18 @@ export {
   type ChargeTaskSummary,
 } from "./job-repo.js";
 export {
+  decodeExtra,
+  encodeExtra,
+  extraNumber,
+  extraString,
+  loadJobExtras,
+  loadJobExtrasOne,
+  setJobExtras,
+  type ExtraEntries,
+  type ExtraType,
+  type JobExtras,
+} from "./generation-jobs-extra-repo.js";
+export {
   createSnapshotRepo,
   type SnapshotRepo,
   type SnapshotJobView,
