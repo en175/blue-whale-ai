@@ -42,10 +42,13 @@ export default function VideoPlayerControls({ videoRef, duration: authoritativeD
     return () => video.removeEventListener('loadedmetadata', onLoaded);
   }, [videoRef, authoritativeDuration]);
 
-  /** 播放状态与进度随 video 元素事件同步：画面点击/按钮/ended 全走同一条状态链 */
+  /** 播放状态与进度随 video 元素事件同步：画面点击/按钮/ended 全走同一条状态链。
+   *  挂载/ref 更换即对齐元素当前状态：收养会话（IKI5YM 审查修订）叠加控件时元素已在播，
+   *  只靠事件会把播放中的卡显示成「播放」钮；树内路元素新挂载恒暂停，读到同一初值。 */
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    setPlaying(!video.paused);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onTime = () => setCurrentTime(video.currentTime);

@@ -1377,7 +1377,7 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     expect(mountNode.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('点选过渡控件布防（故事16）：播放中点选 80ms 后原生控件开在同一元素上，声画不中断', async () => {
+  it('点选过渡收养（故事16；IKI5YM 审查修订）：不开原生控件、无 nodrag/nopan，自绘控件叠加同一会话元素，声画不中断', async () => {
     const { playSpy, pauseSpy } = stubHoverMedia();
     await renderHoverableVideo();
     const decoder = offscreenHostVideo();
@@ -1396,19 +1396,58 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     expect(playSpy).toHaveBeenCalledTimes(1);
     expect(pauseSpy).not.toHaveBeenCalled();
     expect(mountNode.querySelector('video[controls]')).toBeNull();
-    // 80ms 布防语义：控件出现在悬停会话元素上（不是新建树内元素）
-    await act(async () => { vi.advanceTimersByTime(79); });
+    // 80ms 布防窗口过后原生控件也不回归：收养不再开 controls（原生控件正是 IKI5YM
+    // 画面区拖不动的根因，自绘控件替代）
+    await act(async () => { vi.advanceTimersByTime(200); });
     expect(decoder.controls).toBe(false);
-    await act(async () => { vi.advanceTimersByTime(1); });
-    expect(decoder.controls).toBe(true);
-    expect(mountNode.querySelector('video[controls]')).toBe(decoder);
-    // 收养控件合同（IKJ7OS 评审收口）：元素自创建即带 nodrag/nopan——在控件上拖进度/音量
-    // 不连动节点拖动（React Flow 沿祖先链找 .nodrag 放行）；controlslist 同树内口径禁下载/倍速
-    expect(decoder.classList.contains('nodrag')).toBe(true);
-    expect(decoder.classList.contains('nopan')).toBe(true);
-    expect(decoder.getAttribute('controlslist')).toBe('nodownload noplaybackrate noremoteplayback nopictureinpicture');
+    expect(mountNode.querySelector('video[controls]')).toBeNull();
+    // 画面区回归拖拽路径：video 无 nodrag/nopan——该 class 当时的存在理由是收养期
+    // 原生控件防误拖，理由随原生控件移除而消失
+    expect(decoder.classList.contains('nodrag')).toBe(false);
+    expect(decoder.classList.contains('nopan')).toBe(false);
+    // 收养态恢复指针命中：层穿透合同（!832）只约束未选中悬停纯展示期，收养期画面可拖可点
+    expect(decoder.classList.contains(styles.adopted)).toBe(true);
+    // 自绘控件可达：与树内同款的播放钮 + 进度轨叠加在悬停会话上（非新建树内元素）
+    expect(contentCard().querySelector('button[aria-label="播放"]')).toBeTruthy();
+    expect(contentCard().querySelector('[data-testid="video-seek-track"]')).toBeTruthy();
+    // CSS 合同：收养态命中恢复规则在场；随原生控件死亡的 [controls] 选择器不复活
+    const css = readFileSync(fileURLToPath(new NodeURL('./index.module.css', import.meta.url)), 'utf8');
+    const adoptedRule = css.match(/\.mediaHoverPreviewLayer video\.adopted\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(adoptedRule).toContain('pointer-events: auto');
+    expect(css).not.toContain('[controls]');
     expect(playSpy).toHaveBeenCalledTimes(1);
     expect(pauseSpy).not.toHaveBeenCalled();
+  });
+
+  it('收养态画面区点击切换播放/暂停，拖动整卡松开不误触（IKI5YM 审查修订）', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    await act(async () => { vi.advanceTimersByTime(200); });
+    // 悬停起播后处于播放中（stub 不翻 paused，手动置播放态对齐真实浏览器）
+    Object.defineProperty(decoder, 'paused', { configurable: true, value: false });
+    // 拖动整卡：按下到松开位移超过阈值（6px），click 不切换播放
+    await act(async () => {
+      decoder.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10, bubbles: true }));
+      decoder.dispatchEvent(new MouseEvent('click', { clientX: 80, clientY: 40, bubbles: true }));
+    });
+    expect(pauseSpy).not.toHaveBeenCalled();
+    // 原地点击：播放中 → 暂停（对齐原生控件时代「点击画面即暂停」的手感）
+    await act(async () => {
+      decoder.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10, bubbles: true }));
+      decoder.dispatchEvent(new MouseEvent('click', { clientX: 12, clientY: 12, bubbles: true }));
+    });
+    expect(pauseSpy).toHaveBeenCalledTimes(1);
+    // 再原地点击：暂停中 → 恢复播放
+    Object.defineProperty(decoder, 'paused', { configurable: true, value: true });
+    await act(async () => {
+      decoder.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10, bubbles: true }));
+      decoder.dispatchEvent(new MouseEvent('click', { clientX: 12, clientY: 12, bubbles: true }));
+    });
+    expect(playSpy).toHaveBeenCalledTimes(2);
   });
 
   it('过渡定格保持挂载（决策8）：收养会话播完 ended 元素停末帧不重建；再次进入重播仍同元素从头', async () => {
@@ -1419,7 +1458,8 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
     await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
     await act(async () => { vi.advanceTimersByTime(80); });
-    expect(decoder.controls).toBe(true);
+    expect(decoder.controls).toBe(false);
+    expect(contentCard().querySelector('[data-testid="video-seek-track"]')).toBeTruthy();
     // 播到本轮结束：定格末帧——元素保持挂载、currentTime 不归零、无第二次 play
     decoder.currentTime = 7.7;
     await act(async () => { decoder.dispatchEvent(new Event('ended')); });
@@ -1437,7 +1477,8 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     expect(playSpy).toHaveBeenCalledTimes(2);
     expect(hoverPreviewVideo()).toBe(decoder);
     expect(decoder.currentTime).toBe(0);
-    expect(decoder.controls).toBe(true);
+    expect(decoder.controls).toBe(false);
+    expect(contentCard().querySelector('[data-testid="video-seek-track"]')).toBeTruthy();
   });
 
   it('过渡后手动暂停再移开：暂停帧保持挂载（keepFrame 占屏），不触发树内布防重建', async () => {
@@ -1448,8 +1489,9 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
     await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
     await act(async () => { vi.advanceTimersByTime(80); });
-    expect(decoder.controls).toBe(true);
-    // 用户点原生控件暂停（收养会话补挂的让位监听）→ 手动让位
+    expect(decoder.controls).toBe(false);
+    expect(contentCard().querySelector('[data-testid="video-seek-track"]')).toBeTruthy();
+    // 用户点自绘控件暂停（收养会话补挂的让位监听）→ 手动让位
     decoder.currentTime = 3.3;
     await act(async () => { decoder.dispatchEvent(new Event('pause')); });
     // 移开：不再开播、暂停帧保持挂载（元素留播放层、不归零）
@@ -1477,7 +1519,7 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
     await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
     await act(async () => { vi.advanceTimersByTime(80); });
-    expect(decoder.controls).toBe(true);
+    expect(decoder.controls).toBe(false);
     // 先手动暂停让位，再拖进度：seeked 解除让位、从拖动点续播（jsdom 恒 paused，play 必调）
     await act(async () => { decoder.dispatchEvent(new Event('pause')); });
     decoder.currentTime = 4.4;
