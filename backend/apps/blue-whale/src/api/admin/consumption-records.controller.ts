@@ -1,25 +1,10 @@
 import { Controller, Get, Query, UseGuards } from "@nestjs/common";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
+import { parsePageParam, parsePageSizeParam } from "@lib/shared/account/admin-paging.js";
 import { BillingAdminConfigError, BillingAdminError, listAdminTransactions } from "@lib/shared/billing/billing-admin-client.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
-
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
-
-function parsePageSize(raw: string | undefined): number {
-  const size = Number(raw);
-  return Number.isInteger(size) && size > 0
-    ? Math.min(MAX_PAGE_SIZE, size)
-    : DEFAULT_PAGE_SIZE;
-}
-
-/** 页码：缺省 / 非法 / 小于 1 一律当第一页（负 OFFSET 会让 MySQL 直接语法错）。 */
-function parsePage(raw: string | undefined): number {
-  const page = Number(raw);
-  return Number.isInteger(page) && page > 0 ? page : 1;
-}
 
 /**
  * 积分记录（管理端）。
@@ -95,7 +80,7 @@ export class AdminConsumptionRecordsController {
     //    打错一位数就得先分清是哪一种，而账本页要的是「输错了立刻看得出来」——
     //    所以页面的空态文案保持中性，不去断言「这个人没消费过」。
     //
-    // ⚠️ 这一步刻意留在 try **外面**（同 `parsePageSize`）：它查的是**我们自己的库**，
+    // ⚠️ 这一步刻意留在 try **外面**（同 `parsePageSizeParam`）：它查的是**我们自己的库**，
     //    失败是「我们的库挂了」，不是 `toConsumptionError` 那两种 billing 故障。
     //    塞进去会被兜成 502「积分记录查询失败：未知错误」，把值班的人指向 billing——
     //    而那边其实好好的。让它照常冒成 500。
@@ -103,8 +88,9 @@ export class AdminConsumptionRecordsController {
     if (keyword) {
       userId = await this.identity.findAdminUserIdByKeyword(keyword);
       if (userId === undefined) {
-        // 认不出这个人 = 他的流水恒为 0 条，所以 total 是 **0** 而不是 null：
-        // 这里真的数得出来，与上面「上游未统计」是两回事，别把两者混成一种「没有」。
+        // 认不出这个人 = 他的流水恒为 0 条，所以 total 是 **0**，与「这个用户确实没有流水」
+        // 是同一个答案：这里真的数得出来。别把它写成 null 去表达「不知道」——
+        // 前端的空态不分这两种，编出第三种「没有」只会多一个要判的分支。
         return { success: true, data: { items: [], total: 0 } };
       }
     }
@@ -113,8 +99,8 @@ export class AdminConsumptionRecordsController {
       const page = await listAdminTransactions({
         ...(userId !== undefined ? { userId } : {}),
         ...(typeFilter ? { type: typeFilter } : {}),
-        pageSize: parsePageSize(query.pageSize),
-        page: parsePage(query.page),
+        pageSize: parsePageSizeParam(query.pageSize),
+        page: parsePageParam(query.page),
       });
 
       // 只有消费行（billing 的 res: 行）带得回 generation_job_id；发放行 / 账本行是 null。
