@@ -3,7 +3,7 @@
  * 创建与重试需 Idempotency-Key（UUID）幂等头，**钥匙由调用方持有**（`./idempotencyKey` 铸造）：
  * 一次用户意图一把，重试复用同一把——否则服务端那套幂等（同键重放、只扣一次钱）形同虚设
  * ============================================ */
-import { apiRequest, isApiError, silentInit, type ApiError } from './http';
+import { apiRequest, envelopeErrorCode, isApiError, silentInit, type ApiError } from './http';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
@@ -57,7 +57,7 @@ export interface JobAsset {
 
 /**
  * 任务失败信息。
- * - 轮询 GET /api/jobs/:id：失败已升到顶层 `{ code: 数值, msg: 中文 }`，由 fetchJobStatus 收敛到此
+ * - 轮询 GET /api/jobs/:id：失败已升到顶层 `{ code: 数值或字符串（IKJFGQ：字符串码优先）, msg: 中文 }`，由 fetchJobStatus 收敛到此
  * - 快照 generation_jobs[].error：仍是挂在任务上的 `{ code: 数值, message: 中文 }`
  */
 export interface JobError {
@@ -925,7 +925,7 @@ export async function fetchJobStatus(jobId: number | string): Promise<JobDetail>
         status: 'failed',
         progress: 0,
         asset: null,
-        error: { code: e.code, msg: e.message },
+        error: { code: envelopeErrorCode(e), msg: e.message },
       };
     }
     throw e;

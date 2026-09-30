@@ -245,6 +245,19 @@ describe("projectPublicError", () => {
     expect(out!.message).toBe("视频插帧失败，请重试");
   });
 
+  it("IKJFGQ：reason 随投影外发 canonical 字符串码——数值码撞号重排时前端识别的稳定锚点", () => {
+    // worker 归类的比例约束失败（1060）是撞号重排已发生过一次的码：字符串码进信封 data.code，
+    // 前端识别优先读它。归一（旧码别名）与 fallback（白名单外兜底）同样带归一后的 canonical 串。
+    const out = projectPublicError(
+      { code: "task_type_param_constraint", message: "任意" },
+      "video",
+    );
+    expect(out!.code).toBe(1060);
+    expect(out!.reason).toBe("task_type_param_constraint");
+    expect(projectPublicError({ code: "invalid_video_inputs" }, "video")!.reason).toBe("invalid_reference");
+    expect(projectPublicError({ code: "some_new_code" }, "video")!.reason).toBe("video_generation_failed");
+  });
+
   it("null 输入返回 null", () => {
     expect(projectPublicError(null, "image")).toBeNull();
   });

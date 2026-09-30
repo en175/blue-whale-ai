@@ -156,6 +156,9 @@ export class JobsService {
       const code = projected?.code ?? errorCodeToNumeric(fallback);
       const msg = projected?.message ?? messageFor(fallback, job.type);
       return fail(code, msg, {
+        // IKJFGQ：失败信封 data 携带 canonical 字符串码（与创建侧 4xx 拒单的 data.code 同形）——
+        // 前端失败卡识别优先读它（撞号重排不失效），数值信封码留兜底。
+        code: projected?.reason ?? fallback,
         job_id: job.job_id,
         status: job.status,
         progress: job.progress,

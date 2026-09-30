@@ -49,6 +49,14 @@ export function isApiError(e: unknown): e is ApiError {
   return e instanceof ApiError;
 }
 
+/** IKJFGQ：失败信封 data 里的 canonical 字符串码（如 task_type_param_constraint）——数值码会因撞号
+ *  重排（1060 已改过一次），字符串码是稳定锚点，识别方优先取它，数值 e.code 留兜底。
+ *  创建 4xx 与异步任务详情失败信封两处 data.code 均携带字符串码。 */
+export function envelopeErrorCode(e: ApiError): number | string {
+  const c = (e.data as { code?: unknown } | null | undefined)?.code;
+  return typeof c === 'string' ? c : e.code;
+}
+
 /** 在标准 fetch init 上增加 silent：失败仍抛 ApiError，但不 toast（轮询/水合/登录探测）。 */
 export type ApiRequestInit = RequestInit & { silent?: boolean };
 

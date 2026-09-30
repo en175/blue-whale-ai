@@ -80,6 +80,7 @@ export function messageFor(code: string, type: string): string {
 /**
  * 把 DB 存储的原始 error 投影为对外错误对象（ADR-0078 二期）。
  * - code：canonical 字符串码归一 → 查数值映射表，输出每错一码的独立数值码（白名单外历史码按类型 fallback 后映射）；
+ * - reason：归一后的 canonical 字符串码（IKJFGQ）——数值码会因撞号重排，字符串码是前端识别的稳定锚点；
  * - message：一律 messageFor() 用户可读中文，不使用 DB 原文；
  * - retryable/params/details：不入对外契约——retryable 目前恒可重试（前端一律展示重试），
  *   details 存 DB 供排查，避免泄漏 provider 原文。
@@ -103,6 +104,7 @@ export function projectPublicError(
   if (tableMessage !== "未知错误") {
     return {
       code: errorCodeToNumeric(code),
+      reason: code,
       message: tableMessage,
     };
   }
@@ -114,6 +116,7 @@ export function projectPublicError(
       : null;
   return {
     code: errorCodeToNumeric(code),
+    reason: code,
     message: storedMessage ?? "生成失败",
   };
 }

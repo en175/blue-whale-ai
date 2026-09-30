@@ -1070,11 +1070,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     errorText: data.errorText,
     isMediaExtraction,
   });
-  /** 一键修复（IKJ79D）：视频失败卡 + 比例约束码 + 回调已注入三条件齐备才显示 */
+  /** 一键修复（IKJ79D）：视频失败卡 + 比例约束码 + 回调已注入三条件齐备才显示。
+   *  IKJFGQ：比例已是 adaptive(Auto) 时切换动作是无效重试（<4 秒源视频 TaskTypeConstraint、
+   *  prolong 已 adaptive 遇 TaskTypeMismatch），此时隐藏修复钮，降级为普通重试。 */
   const showFixFollowVideo =
     data.genStatus === 'failed'
     && data.mediaType === 'video'
     && isTaskTypeParamConstraintCode(data.errorCode)
+    && data.draftRatio !== 'adaptive'
     && data.onFixFollowVideo != null;
 
   const contentBox = mediaContentBox({

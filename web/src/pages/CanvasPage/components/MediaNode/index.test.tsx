@@ -448,6 +448,35 @@ describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配
     expect(overlay).toBeTruthy();
     expect(overlay!.textContent).toContain('改为跟随视频并重试');
   });
+
+  it('IKJFGQ 字符串码 + 手选比例（16:9）→ 修复钮显示（数值码撞号重排后字符串锚点仍工作）', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      selected: false,
+      data: { errorCode: 'task_type_param_constraint', draftRatio: '16:9', onFixFollowVideo: vi.fn() },
+    });
+    expect(labels()).toContain('改为跟随视频并重试');
+  });
+
+  it('IKJFGQ 比例已 adaptive + 数值码 1060 → 不显示修复钮，降级普通重试', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      selected: false,
+      data: { errorCode: 1060, draftRatio: 'adaptive', onFixFollowVideo: vi.fn() },
+    });
+    expect(labels()).not.toContain('改为跟随视频并重试');
+    expect(labels()).toContain('重试');
+  });
+
+  it('IKJFGQ 比例已 adaptive + 字符串码 → 同样降级普通重试', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      selected: false,
+      data: { errorCode: 'task_type_param_constraint', draftRatio: 'adaptive', onFixFollowVideo: vi.fn() },
+    });
+    expect(labels()).not.toContain('改为跟随视频并重试');
+    expect(labels()).toContain('重试');
+  });
 });
 
 describe('MediaNode 音频混合失败卡（IKI697）', () => {

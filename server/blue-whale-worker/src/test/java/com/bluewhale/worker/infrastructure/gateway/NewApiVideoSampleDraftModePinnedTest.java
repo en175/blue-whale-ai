@@ -36,8 +36,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code src/test/resources/video-sample-draft-pinned-cases.json}，断言四件事：
  * <ol>
  *   <li>Draft 请求：出站体与期望体逐字段一致（含顶层 {@code draft:true}、
- *       {@code metadata.resolution=480p}、content 的 role 映射；R3/R4/E/X 组还覆盖
- *       TEMP FIX 对带视频参考任务强制 {@code duration=-1}/{@code ratio=adaptive}）；</li>
+ *       {@code metadata.resolution=480p}、content 的 role 映射；R3/R4 组钉
+ *       {@code omni_reference_task_type=reference} 且用户比例/时长原样透传、E 组钉
+ *       {@code omni=edit} 并按任务类型约束强制 {@code ratio=adaptive}/{@code duration=-1}、
+ *       X 组钉 {@code omni=extend} 且时长透传用户所选——IKJ79A 删 TEMP FIX 后按任务类型分派）；</li>
  *   <li>成功终态：轮询观测 {@code succeeded}；</li>
  *   <li>480p 结果：出站体 resolution=480p，且钉桩响应内层上游回显 resolution=480p；</li>
  *   <li>费用投影：{@code usage.total_tokens} 被取出（结算的权威用量输入）。</li>

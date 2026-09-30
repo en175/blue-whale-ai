@@ -12,7 +12,10 @@ import CanvasPage from './index';
    点击后仅把比例改为 adaptive（Auto）重交——提示词/素材/时长原样，走 create 新任务
    （retry 沿用冻结快照改不了比例，不可用）；原卡原位承接。
    前端零关键词判定副本（识别只认码，不认文案）。FlowCanvas 等打桩透出 props；
-   视频模型 mock 带全比例 + 视频参考能力位。 */
+   视频模型 mock 带全比例 + 视频参考能力位。
+   IKJFGQ 降级项（draftRatio 已 adaptive 时隐藏修复钮）：本 harness 把 Canvas 打桩成 div、
+   不渲染 MediaNode 按钮，渲染断言不可观测（回调经 attachCallbacks 无条件注入），该项由
+   MediaNode/index.test.tsx「比例已 adaptive → 降级普通重试」两条单测覆盖。 */
 
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
