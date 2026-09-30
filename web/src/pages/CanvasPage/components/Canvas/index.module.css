@@ -85,3 +85,15 @@
 .dragMode :global(.react-flow__pane.dragging) {
   cursor: grabbing;
 }
+
+/* 选择模式：抓手光标只属于空格拖动模式。库样式给 .react-flow__node.draggable
+ * 挂 cursor:grab（悬停即抓手），此处覆盖恢复系统默认箭头；该特异性同时压过
+ * 库的 .react-flow__node.selectable { cursor: pointer } */
+.canvasContainer :global(.react-flow__node.draggable) {
+  cursor: default;
+}
+
+/* 按住卡片实际拖动中保留抓取反馈；显式写死，不依赖样式加载顺序 */
+.canvasContainer :global(.react-flow__node.draggable.dragging) {
+  cursor: grabbing;
+}
