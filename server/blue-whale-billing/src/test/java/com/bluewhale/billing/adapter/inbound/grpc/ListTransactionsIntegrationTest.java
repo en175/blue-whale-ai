@@ -604,7 +604,7 @@ class ListTransactionsIntegrationTest {
     private ListTransactionsResponse list(List<String> typeFilters, PageRequest page, long userId) {
         return stub.listTransactions(ListTransactionsRequest.newBuilder()
                 .setUserId(userId)
-                .addAllTypeFilter(typeFilters)
+                .addAllTypeFilters(typeFilters)
                 .setPage(page)
                 .build());
     }

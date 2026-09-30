@@ -160,9 +160,18 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
     public void listTransactions(ListTransactionsRequest request,
                                  StreamObserver<ListTransactionsResponse> observer) {
         try {
+            // ⚠️ 类型过滤有两个字段：新的多值 `type_filters` 与已废弃的单值 `type_filter`。
+            //    **两个都要读** —— 只留字段不读，等于把一个还能工作的旧调用方
+            //    悄悄变成「永远筛不到」；那正是本仓反复反对的那类不报错的退化。
+            //    新字段优先；只有它为空时才回落到旧的。
+            List<String> types = request.getTypeFiltersList();
+            if (types.isEmpty() && !request.getTypeFilter().isEmpty()) {
+                types = List.of(request.getTypeFilter());
+            }
+
             TransactionView.Page page = billing.listTransactions(
                     request.getUserId(),
-                    request.getTypeFilterList(),
+                    types,
                     request.getPage().getPageSize(),
                     request.getPage().getPage());
 

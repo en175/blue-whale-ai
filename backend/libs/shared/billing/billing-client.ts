@@ -381,7 +381,7 @@ export function createBillingClient(baseUrl: string): BillingClient {
       const response = await client.listTransactions(
         create(ListTransactionsRequestSchema, {
           userId: BigInt(query.userId),
-          typeFilter: query.typeFilters ?? [],
+          typeFilters: query.typeFilters ?? [],
           ...(query.pageSize === undefined && query.page === undefined
             ? {}
             : {
