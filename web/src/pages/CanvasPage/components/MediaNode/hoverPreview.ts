@@ -13,8 +13,8 @@ export interface VideoHoverPreviewInput {
   toolMode?: 'drag' | 'select';
   /** 视频加载失败兜底态（MediaNode 内即 videoError != null） */
   hasVideoError?: boolean;
-  /** 生成状态：draft/generating/failed/cancelled 任一有值即生成流程卡（含重生成中成品卡） */
-  genStatus?: 'draft' | 'generating' | 'failed' | 'cancelled';
+  /** 生成状态：任一有值即生成流程卡（含重生成中成品卡、质检 checking） */
+  genStatus?: 'draft' | 'generating' | 'checking' | 'failed' | 'cancelled';
   /** 草稿身份标记 */
   draft?: boolean;
   /** 素材缺失（水合期派生） */
