@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 
 import { InvalidVerificationCodeError } from "@lib/core";
@@ -31,14 +31,19 @@ function createController(overrides: {
     revoke: overrides.revoke ?? vi.fn().mockResolvedValue(undefined),
   };
   const identity = {
-    changePassword:
-      overrides.changePassword ?? vi.fn().mockResolvedValue(undefined),
+    // 返回「本次是不是强制改密」——IKJABH 加的那个返回值。**默认 false**：
+    // 绝大多数改密是用户自助的，落回 undefined 会让下面每条断言的参数形态失真。
+    changePassword: overrides.changePassword ?? vi.fn().mockResolvedValue(false),
     resolveTier: overrides.resolveTier ?? vi.fn().mockResolvedValue("free"),
     listRoleCodes: overrides.listRoleCodes ?? vi.fn().mockResolvedValue([]),
     isAdmin: overrides.isAdmin ?? vi.fn().mockResolvedValue(false),
     resolveAccountFlags:
       overrides.resolveAccountFlags ??
-      vi.fn().mockResolvedValue({ phone: null, hasPassword: true }),
+      vi.fn().mockResolvedValue({
+        phone: null,
+        hasPassword: true,
+        mustChangePassword: false,
+      }),
     bindPhone: overrides.bindPhone ?? vi.fn().mockResolvedValue(undefined),
   };
   const controller = new MeController(sessions as never, identity as never);
@@ -55,6 +60,12 @@ const REQ = { loginToken: "sess_current" } as unknown as Request;
 const RES = { clearCookie: vi.fn() } as unknown as Response;
 
 const BODY = { original_password: "OldPass123", password: "NewPass456" };
+
+// `RES` 是模块级的共享替身，调用记录会跨用例累积 —— 不清的话，
+// 「不该清 cookie」这类否定断言会被上一个用例的调用误伤成假红。
+beforeEach(() => {
+  RES.clearCookie.mockClear();
+});
 
 describe("MeController（IKBRCK 改密）", () => {
   it("解析不到本地登录身份就 401，不改密", async () => {
@@ -125,7 +136,8 @@ describe("MeController（IKBRCK 改密）", () => {
       oldPassword: "OldPass123",
       newPassword: "NewPass456",
     });
-    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
+    // 第二个参数是「要留下的会话」——自助改密一个不留，所以是 undefined。
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, undefined);
     // 枚举吊销成功路径：不触发兜底单删
     expect(sessions.revoke).not.toHaveBeenCalled();
   });
@@ -136,7 +148,7 @@ describe("MeController（IKBRCK 改密）", () => {
     });
     const result = await controller.changePassword(BODY, USER, REQ, RES);
     expect(result).toMatchObject({ code: 200, data: { revokedSessions: 0 } });
-    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, undefined);
     // 兜底：直接吊销当前会话 + 清 cookie，保证当前浏览器改密后立即要求重新登录
     expect(sessions.revoke).toHaveBeenCalledWith("sess_current");
     expect(RES.clearCookie).toHaveBeenCalled();
@@ -181,6 +193,55 @@ describe("MeController（IKBRCK 改密）", () => {
       data: null,
     });
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+});
+
+// IKJABH 任务 5：**强制改密不能让用户掉线**。
+//
+// 被管理员重置过密码的用户，登录后的第一件事就是被拦去改密。如果改密这一步
+// 顺手把他自己那条会话也吊销了，流程会变成「登进来 → 被拦 → 改完 → 立刻被踢回
+// 登录页 → 再登一次」，改密完成得毫无反馈。所以那一次要留下当前会话。
+describe("MeController（IKJABH 强制改密不掉线）", () => {
+  it("★ 强制改密：当前会话被豁免，其余会话照踢", async () => {
+    const { controller, sessions } = createController({
+      changePassword: vi.fn().mockResolvedValue(true), // 进入时账号正被重置过
+      revokeAllForUser: vi.fn().mockResolvedValue(2),
+    });
+
+    const result = await controller.changePassword(BODY, USER, REQ, RES);
+
+    expect(result).toMatchObject({ code: 200, data: { revokedSessions: 2 } });
+    // 当前令牌被排除在外，「已登出其他设备」照样统计
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, "sess_current");
+    // 豁免就不能顺手清 cookie —— 清了等于把当前浏览器登出
+    expect(RES.clearCookie).not.toHaveBeenCalled();
+  });
+
+  it("★ 强制改密且枚举失败：兜底整个跳过，不能把刚豁免的会话又吊销掉", async () => {
+    // 兜底的动作（吊销当前会话 + 清 cookie）正是上面刚豁免掉的那两件事。
+    // 跑下去等于把豁免原地撤销 —— 用户还是掉线，只是换了个地方掉。
+    const { controller, sessions } = createController({
+      changePassword: vi.fn().mockResolvedValue(true),
+      revokeAllForUser: vi.fn().mockRejectedValue(new Error("redis timeout")),
+    });
+
+    const result = await controller.changePassword(BODY, USER, REQ, RES);
+
+    expect(result).toMatchObject({ code: 200, data: { revokedSessions: 0 } });
+    expect(sessions.revoke).not.toHaveBeenCalled();
+    expect(RES.clearCookie).not.toHaveBeenCalled();
+  });
+
+  it("自助改密（非强制）行为不变：全部会话照旧吊销，含当前会话", async () => {
+    // 豁免只属于强制改密。自助改密改完重新登录是合理的，本单不动它。
+    const { controller, sessions } = createController({
+      changePassword: vi.fn().mockResolvedValue(false),
+      revokeAllForUser: vi.fn().mockResolvedValue(1),
+    });
+
+    await controller.changePassword(BODY, USER, REQ, RES);
+
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, undefined);
   });
 });
 
@@ -273,6 +334,31 @@ describe("MeController（IKJA4Q 手机号与口令标识）", () => {
     const result = await controller.me({ userId: "42", username: "alice" } as never);
 
     expect(result).toMatchObject({ data: { phone: "", has_password: false } });
+  });
+
+  it("★ must_change_password 来自 identity 现查（IKJABH）", async () => {
+    // 与 phone / has_password 同一条理由：用户改完密码之后，这个标记必须**立刻**
+    // 变成 false；吃会话快照的话它会一直停在登录那一刻（也就是 true），
+    // 用户改完密还会被反复拦去改密。
+    const resolveAccountFlags = vi
+      .fn()
+      .mockResolvedValue({ phone: null, hasPassword: true, mustChangePassword: true });
+    const { controller } = createController({ resolveAccountFlags });
+
+    const result = await controller.me({ userId: "42", username: "alice" } as never);
+
+    expect(result).toMatchObject({ data: { must_change_password: true } });
+    expect(resolveAccountFlags).toHaveBeenCalledWith("42");
+  });
+
+  it("查不到人时 must_change_password 回 false，不凭空拦人改密", async () => {
+    const { controller } = createController({
+      resolveAccountFlags: vi.fn().mockResolvedValue(null),
+    });
+
+    const result = await controller.me({ userId: "42", username: "alice" } as never);
+
+    expect(result).toMatchObject({ data: { must_change_password: false } });
   });
 
   it("绑定手机号：合法入参转交 identity，返回成功信封", async () => {

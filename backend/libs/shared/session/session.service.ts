@@ -206,8 +206,19 @@ export class SessionService implements OnModuleDestroy {
     }
   }
 
-  /** 踢单用户全部会话：按索引枚举并删除会话+索引键，返回枚举到的会话数（供冻结审计）。 */
-  async revokeAllForUser(userId: number): Promise<number> {
+  /**
+   * 踢单用户全部会话：按索引枚举并删除会话+索引键，返回**实际删掉的**会话数。
+   *
+   * <p>这个计数有三个消费点：冻结审计、重置密码审计（IKJABH），以及 `/me/password`
+   * 响应里那句「已登出其他设备」。
+   *
+   * @param exceptToken IKJABH：**留下这一个会话**。强制改密场景必须用它——
+   *        用户刚登进来、被迫改完密码，如果连当前这条会话一起吊销，他会立刻被踢回
+   *        登录页；而他要做的下一件事恰恰是「用新密码重新登录」。自助改密不需要它
+   *        （改完重新登录是合理的），所以是可选参数而不是默认行为。
+   */
+  async revokeAllForUser(userId: number, exceptToken?: string | undefined): Promise<number> {
+    const keepHash = exceptToken ? this.hashOf(exceptToken) : null;
     const prefix = `user_session:${userId}:`;
     let cursor = "0";
     const hashes = new Set<string>();
@@ -221,7 +232,10 @@ export class SessionService implements OnModuleDestroy {
       );
       cursor = next;
       for (const k of keys) {
-        if (k.startsWith(prefix)) hashes.add(k.slice(prefix.length));
+        if (k.startsWith(prefix)) {
+          const hash = k.slice(prefix.length);
+          if (hash !== keepHash) hashes.add(hash);
+        }
       }
     } while (cursor !== "0");
     if (hashes.size === 0) return 0;

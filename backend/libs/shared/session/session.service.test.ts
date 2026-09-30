@@ -256,6 +256,34 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     expect(redis.store.has(`user_session:99:${hash(other)}`)).toBe(true);
   });
 
+  // IKJABH：强制改密那一次必须留下当前会话（否则用户改完密立刻被自己的改密踢下线），
+  // 其余会话照踢 —— 那些才可能是拿到临时口令的人。
+  it("revokeAllForUser 传 exceptToken 时留下该会话，其余照删且不计入计数", async () => {
+    const keep = await makeSession();
+    const other = await makeSession();
+    const otherDevice = await makeSession();
+
+    const revoked = await service.revokeAllForUser(8, keep);
+
+    expect(revoked).toBe(2);
+    // 被豁免的那条**活着**，连同它的索引键
+    expect(await service.resolveSession(keep)).not.toBeNull();
+    expect(redis.store.has(`user_session:8:${hash(keep)}`)).toBe(true);
+    expect(await service.resolveSession(other)).toBeNull();
+    expect(await service.resolveSession(otherDevice)).toBeNull();
+  });
+
+  it("revokeAllForUser 的 exceptToken 不存在于该用户名下时等于不豁免（不误伤）", async () => {
+    const mine = await makeSession();
+    const theirs = await makeSession({ userId: 99, username: "bob" });
+
+    const revoked = await service.revokeAllForUser(8, theirs);
+
+    expect(revoked).toBe(1);
+    expect(await service.resolveSession(mine)).toBeNull();
+    expect(await service.resolveSession(theirs)).not.toBeNull();
+  });
+
   it("revokeAllForUser 对零会话用户返回 0", async () => {
     await makeSession();
     expect(await service.revokeAllForUser(12345)).toBe(0);

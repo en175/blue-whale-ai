@@ -22,6 +22,13 @@ export interface IdentityUserRow {
    * 「这个账号不能用口令登录」，而不是「任意口令都能登」。
    */
   password: string | null;
+  /**
+   * 账号是否处于「下次登录必须改密」状态（IKJABH）。
+   *
+   * ⚠️ **不是「密码被重置过」的永久历史**，是一个用完即清的当下状态：
+   * 管理员重置密码时置位，用户改完密码清零。
+   */
+  mustChangePassword: boolean;
 }
 
 /**
@@ -62,8 +69,21 @@ export interface IdentityUserRepo {
     passwordHash: string;
     email: string | null;
   }): Promise<IdentityUserRow>;
-  /** 写入口令哈希（注册 / 改密）。 */
-  updatePassword(id: string, passwordHash: string): Promise<void>;
+  /**
+   * 写入口令哈希，并**同时**设定「下次登录必须改密」标记（IKJABH）。
+   *
+   * <p>为什么两个字段一个方法：它们只在同一个动作里变，而且是**成对**的两种取值 ——
+   * 管理员重置 = 写临时口令 + 置位，用户自己改 = 写新口令 + 清零。拆成两个方法
+   * 就有「重置了但忘了置位」这种只在半个调用点上错的可能，而它的后果是
+   * **临时口令永久有效**，且没有任何报错。
+   *
+   * @param mustChangePassword 写完之后这个账号要不要强制改密
+   */
+  updatePassword(
+    id: string,
+    passwordHash: string,
+    mustChangePassword: boolean,
+  ): Promise<void>;
   /**
    * 绑定手机号（**首次绑定**，不做换绑）。
    *
@@ -109,6 +129,7 @@ const SELECT = {
   phone: true,
   status: true,
   password: true,
+  must_change_password: true,
 } as const;
 
 export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
@@ -119,6 +140,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
     phone: string | null;
     status: string;
     password: string | null;
+    must_change_password: boolean;
   }): IdentityUserRow {
     return {
       id: String(row.id),
@@ -127,6 +149,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
       phone: row.phone,
       status: row.status,
       password: row.password,
+      mustChangePassword: row.must_change_password,
     };
   }
 
@@ -170,10 +193,14 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
       }
     },
 
-    async updatePassword(id, passwordHash) {
+    async updatePassword(id, passwordHash, mustChangePassword) {
       await prisma.bw_users.update({
         where: { id: BigInt(id) },
-        data: { password: passwordHash, gmt_modified: new Date() },
+        data: {
+          password: passwordHash,
+          must_change_password: mustChangePassword,
+          gmt_modified: new Date(),
+        },
       });
     },
 

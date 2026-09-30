@@ -48,6 +48,9 @@ export class MeController {
       phone: flags?.phone ?? "",
       // 查不到人时回 false 而不是 true——**别替用户宣称他有口令**。
       has_password: flags?.hasPassword ?? false,
+      // IKJABH：管理员重置过密码 → 前端强制弹改密。与上面两个一样**现查**：
+      // 改密成功要立刻让这个标记消失，而这里没有「重新登录」来刷新会话。
+      must_change_password: flags?.mustChangePassword ?? false,
       is_admin: await this.identity.isAdmin(user.userId),
       // 会员等级：前端据此展示会员标识，**billing 侧据此算折扣**。
       // 每次现查而不是从会话快照取——会员到期没有「用户重新登录」这一步，
@@ -109,6 +112,8 @@ export class MeController {
    * 不再是网关的 8–20 位。
    *
    * <p>改密成功后吊销该用户全部会话（含当前窗口）；若枚举吊销失败，兜底至少清掉当前窗口。
+   * 唯一例外是**强制改密**（IKJABH）：那一次当前会话必须留下，否则用户改完立刻掉线。
+   * 返回 `revokedSessions` 供前端提示「已登出其他设备」。
    */
   @Put("me/password")
   async changePassword(
@@ -128,8 +133,13 @@ export class MeController {
     if (userId == null) {
       throw new NewApiError("缺少登录凭证", 401, "unauthorized");
     }
+    // ⚠️ 令牌取 `req.loginToken`（**AuthGuard 存的那一份**）。不要读 cookie，也不要读
+    //    请求头：前者只是迁移期的过渡通道，只带请求头的客户端在这里会静默跳过吊销；
+    //    后者此刻已被回注成**上游 sk-**，拿它 revoke 等于删一个不存在的键。
+    const currentToken = (req as Request & { loginToken?: string }).loginToken;
+    let wasForced = false;
     try {
-      await this.identity.changePassword(userId, {
+      wasForced = await this.identity.changePassword(userId, {
         oldPassword: parsed.data.original_password,
         newPassword: parsed.data.password,
       });
@@ -149,9 +159,17 @@ export class MeController {
     }
     // 改密成功后再踢会话（best-effort）：新口令已落库，会话吊销失败不阻断改密，
     // 避免旧会话残留。
+    //
+    // ⚠️ IKJABH：**强制改密时豁免当前会话**。不豁免的话，被管理员重置过的用户
+    //    会走进这个循环——登进来 → 被拦去改密 → 改完成功 → 立刻被自己的改密踢回
+    //    登录页 → 再登一次。自助改密不需要这个豁免（改完重新登录是合理的），
+    //    所以只在 `wasForced` 时传。其余设备照样被踢：那些才可能是拿到临时口令的人。
     let revokedSessions = 0;
     try {
-      revokedSessions = await this.sessions.revokeAllForUser(Number(userId));
+      revokedSessions = await this.sessions.revokeAllForUser(
+        Number(userId),
+        wasForced ? currentToken : undefined,
+      );
     } catch (error) {
       this.logger.error(
         `changePassword user=${userId} session revoke failed: ${
@@ -159,12 +177,18 @@ export class MeController {
         }`,
       );
       // 兜底：枚举吊销失败（SCAN+pipeline）时，至少直接吊销当前会话并清 cookie——
-      // 保证当前浏览器改密后立即要求重新登录（其他设备会话靠 ≤5min 复核或后续枚举）。
+      // 保证当前浏览器改密后立即要求重新登录（其他设备会话靠后续枚举或自然过期）。
       //
-      // ⚠️ 令牌取 `req.loginToken`（**AuthGuard 存的那一份**）。不要读 cookie，也不要读
-      //    请求头：前者只是迁移期的过渡通道，只带请求头的客户端在这里会静默跳过吊销；
-      //    后者此刻已被回注成**上游 sk-**，拿它 revoke 等于删一个不存在的键。
-      const currentToken = (req as Request & { loginToken?: string }).loginToken;
+      // ⚠️ IKJABH：**强制改密时这个兜底整个跳过**。它的动作（吊销当前会话 + 清
+      //    cookie）正是上面刚豁免掉的那两件事，跑下去等于把豁免撤销掉、用户立刻掉线。
+      //    代价是这一次枚举失败时其他设备的会话留到下回——但枚举失败本就意味着
+      //    Redis 出了问题，此时再补一刀只会砍在自己脚上。
+      if (wasForced) {
+        this.logger.error(
+          `changePassword user=${userId} 强制改密会话枚举失败，已保留当前会话（其余会话待后续吊销）`,
+        );
+        return ok({ revokedSessions });
+      }
       try {
         if (currentToken) await this.sessions.revoke(currentToken);
         res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
