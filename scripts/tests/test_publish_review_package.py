@@ -69,7 +69,11 @@ class PublishReviewPackageTest(unittest.TestCase):
         run("git", "init", str(self.main), cwd=self.root, check=True)
         self.configure(self.main)
         (self.main / "base.txt").write_text("base\n", encoding="utf-8")
-        self.git("add", "base.txt", cwd=self.main)
+        hooks = self.main / ".githooks"
+        hooks.mkdir()
+        (hooks / "pre-push").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (hooks / "pre-push").chmod(0o755)
+        self.git("add", "base.txt", ".githooks", cwd=self.main)
         self.git("commit", "-m", "chore: base", cwd=self.main)
         self.git("branch", "-M", "master", cwd=self.main)
         self.git("remote", "add", "origin", str(self.origin), cwd=self.main)
@@ -277,6 +281,58 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertEqual(
             self.git("ls-remote", "--heads", "origin", f"refs/heads/{BRANCH}"), ""
         )
+
+    def test_existing_worktree_hook_override_is_enabled_before_publication(self) -> None:
+        self.git("config", "extensions.worktreeConfig", "true")
+        self.git("config", "--worktree", "core.hooksPath", "/dev/null")
+        result = self.invoke("--user-authorized", "--create-pr", "--json")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(".githooks", self.git("config", "--get", "core.hooksPath"))
+        self.assertEqual(".githooks", self.git("config", "--local", "--get", "core.hooksPath"))
+        self.assertIn("ensure --stage pr --json", self.verification_log.read_text(encoding="utf-8"))
+
+    def test_head_changed_during_local_checks_is_not_pushed(self) -> None:
+        fake_node = self.fake_bin / "node"
+        fake_node.write_text(
+            "#!/bin/sh\n"
+            "case \"$1\" in\n"
+            "  */scripts/verify-change-scope.mjs)\n"
+            "    if [ \"$2\" = ensure ]; then git commit --allow-empty -m 'chore: concurrent local edit' >/dev/null; fi\n"
+            "    exit 0 ;;\n"
+            "esac\n"
+            "exec \"$REAL_NODE\" \"$@\"\n",
+            encoding="utf-8",
+        )
+        result = self.invoke("--user-authorized", "--create-pr", "--json")
+        self.assertEqual(11, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("HEAD_CHANGED", self.response(result)["status"])
+        self.assertEqual("", self.git("ls-remote", "--heads", "origin", f"refs/heads/{BRANCH}"))
+        self.assertFalse(self.publish_marker().exists())
+
+    def test_head_moving_after_the_gate_cannot_change_the_pushed_commit(self) -> None:
+        verified_head = self.git("rev-parse", "HEAD")
+        real_git = shutil.which("git")
+        moved = self.root / "head-moved"
+        fake_git = self.fake_bin / "git"
+        fake_git.write_text(
+            "#!/bin/sh\n"
+            f'case "$*" in *"ls-remote --heads origin refs/heads/{BRANCH}"*)\n'
+            '  if [ ! -f "$FIXTURE_HEAD_MOVED" ]; then\n'
+            '    "$REAL_GIT" commit --allow-empty -m "chore: concurrent edit after gate" >/dev/null\n'
+            '    touch "$FIXTURE_HEAD_MOVED"\n'
+            '  fi ;;\n'
+            "esac\n"
+            'exec "$REAL_GIT" "$@"\n',
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+        env = {**self.base_env, "REAL_GIT": real_git, "FIXTURE_HEAD_MOVED": str(moved)}
+        result = self.invoke("--user-authorized", "--create-pr", "--json", env=env)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotEqual(verified_head, self.git("rev-parse", "HEAD"))
+        self.assertEqual(verified_head, self.git("ls-remote", "--heads", "origin", f"refs/heads/{BRANCH}").split()[0])
+        self.assertIn(f"head={verified_head}\n", self.publish_marker().read_text(encoding="utf-8"))
+        self.assertEqual(f"refs/heads/{BRANCH}", self.git("config", f"branch.{BRANCH}.merge"))
 
     def test_create_mode_can_bind_an_explicit_draft_marker(self) -> None:
         result = self.invoke("--user-authorized", "--create-pr", "--draft-pr", "--json")

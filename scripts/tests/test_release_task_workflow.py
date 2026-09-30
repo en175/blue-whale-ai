@@ -47,6 +47,9 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
                 shutil.copy2(SOURCE / filename, main / filename)
             (main / ".gitee").mkdir()
             shutil.copy2(SOURCE / ".gitee/PULL_REQUEST_TEMPLATE.md", main / ".gitee/PULL_REQUEST_TEMPLATE.md")
+            (main / ".githooks").mkdir()
+            (main / ".githooks/pre-push").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            (main / ".githooks/pre-push").chmod(0o755)
             self.configure(main)
             command("git", "-C", main, "add", ".", cwd=root)
             command("git", "-C", main, "commit", "-m", "test: task workflow baseline", cwd=root)
@@ -68,6 +71,7 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
             command("git", "-C", actor, "push", "origin", line, cwd=root)
             synchronized = command(BASH, release / "scripts/sync-release-line.sh", "--json", cwd=release)
             self.assertEqual(json.loads(synchronized.stdout)["action"], "fast_forward")
+            self.assertEqual(json.loads(synchronized.stdout)["hooks_path"], ".githooks")
             self.assertEqual(command("git", "-C", release, "rev-parse", "HEAD", cwd=root).stdout.strip(), teammate_sha)
 
             # A local release commit is preserved as the task start, but blocks PR publication.
@@ -95,8 +99,6 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
             self.assertFalse(command("git", "-C", task, "ls-remote", "--heads", "origin", f"refs/heads/{task_branch}", cwd=root).stdout.strip())
 
             command("git", "-C", release, "push", "origin", line, cwd=root)
-            receipt = json.loads(command("node", task / "scripts/verify-change-scope.mjs", "run", "--stage", "pr", "--json", cwd=task).stdout)
-            self.assertEqual(receipt["status"], "VERIFIED", receipt)
             published = command(BASH, task / "scripts/publish-review-package.sh", "--user-authorized",
                                 "--create-pr", "--target-branch", line, "--draft-pr", "--json", cwd=task)
             self.assertEqual(json.loads(published.stdout.strip().splitlines()[-1])["status"], "PUSHED_CREATE_PR")
@@ -105,6 +107,9 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
                 common = (task / common).resolve()
             marker = common / ("agent-release-review-package-" + task_branch.replace("/", "%"))
             self.assertIn("draft=true", marker.read_text(encoding="utf-8"))
+            task_head = command("git", "-C", task, "rev-parse", "HEAD", cwd=root).stdout.strip()
+            receipt = json.loads((common / "blue-whale/verification" / f"{task_head}.json").read_text(encoding="utf-8"))
+            self.assertEqual("passed", receipt["status"])
 
             # Gitee merge is the external boundary: Git performs the same no-ff merge in actor.
             command("git", "-C", actor, "fetch", "origin", cwd=root)

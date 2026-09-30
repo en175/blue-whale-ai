@@ -29,6 +29,19 @@ def git_path(root, name):
     return value if value.is_absolute() else root / value
 
 
+def configure_git_hooks(root):
+    root = Path(root).resolve()
+    if not (root / ".githooks/pre-push").is_file():
+        raise SyncError("仓库缺少 .githooks/pre-push，无法启用本地推送门禁。")
+    # Set the clone-wide default and also replace a current worktree override.
+    git(root, "config", "--local", "--replace-all", "core.hooksPath", ".githooks")
+    if git(root, "config", "--bool", "--get", "extensions.worktreeConfig", check=False).stdout.strip() == "true":
+        git(root, "config", "--worktree", "--replace-all", "core.hooksPath", ".githooks")
+    if git(root, "config", "--get", "core.hooksPath").stdout.strip() != ".githooks":
+        raise SyncError("当前 Git 配置仍覆盖 core.hooksPath，禁止继续发布。")
+    return ".githooks"
+
+
 @contextmanager
 def release_line_lock(root):
     """Hold this lock through sync AND worktree creation when starting a task."""
@@ -129,7 +142,8 @@ def sync_current_release(root):
     final_sha = git(root, "rev-parse", "HEAD").stdout.strip()
     if not ancestor(root, before, final_sha) or not ancestor(root, remote_sha, final_sha):
         raise SyncError("同步后提交祖先关系不符合预期，请检查发布线历史。")
+    hooks_path = configure_git_hooks(root)
     return {"branch": branch, "sha": final_sha, "remote_sha": remote_sha,
             "state_sha": line["state_sha"], "action": action,
             "worktree_path": str(root), "cbm_root_path": str(root),
-            "cbm_check_required": True, "dirty_paths": status(root)}
+            "cbm_check_required": True, "hooks_path": hooks_path, "dirty_paths": status(root)}

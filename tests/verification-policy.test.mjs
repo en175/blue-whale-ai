@@ -60,6 +60,9 @@ function createRepository({ flakyRuleTest = false, localAhead = false } = {}) {
   git(directory, "config", "user.name", "Agent Test");
   mkdirSync(join(directory, "tests"));
   writeFileSync(join(directory, "README.md"), "baseline\n");
+  mkdirSync(join(directory, ".githooks"));
+  writeFileSync(join(directory, ".githooks", "pre-push"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(directory, ".githooks", "pre-push"), 0o755);
   writeFileSync(
     join(directory, "tests", "agent-rules.test.mjs"),
     flakyRuleTest
@@ -1387,6 +1390,56 @@ test("captures full verification stage timings in the receipt", () => {
   }
 });
 
+test("automatic publication preserves failed high-risk evidence despite classification changes", () => {
+  for (const productImpact of [false, true]) {
+    const repository = createRepository();
+    const fakeBin = mkdtempSync(join(tmpdir(), "blue-whale-failed-high-risk-"));
+    try {
+      if (productImpact) {
+        mkdirSync(join(repository, "deploy"));
+        writeFileSync(join(repository, "deploy", "example.txt"), "deployment input\n");
+        git(repository, "add", "deploy/example.txt");
+        git(repository, "commit", "-m", "chore: deployment input");
+      }
+      const callsPath = join(repository, ".git", "high-risk-calls.log");
+      writeFileSync(join(fakeBin, "pnpm"), '#!/usr/bin/env bash\nprintf "verify\\n" >> "$FIXTURE_VERIFY_CALLS"\nexit 1\n');
+      chmodSync(join(fakeBin, "pnpm"), 0o755);
+      installPnpmCmdShim(fakeBin);
+      const environment = { ...childEnvironment(), PATH: withFakePnpmOnPath(fakeBin), FIXTURE_VERIFY_CALLS: callsPath };
+      const high = spawnSync(process.execPath, [CLI, "run", "--stage", "pr", "--risk", "high", "--json"], {
+        cwd: repository, encoding: "utf8", env: environment,
+      });
+      assert.equal(high.status, 5, high.stderr);
+      const receiptPath = join(repository, ".git", "blue-whale", "verification", `${git(repository, "rev-parse", "HEAD")}.json`);
+      const failed = readFileSync(receiptPath, "utf8");
+      const previous = JSON.parse(failed);
+      assert.equal(previous.classification.tier, "full");
+      const plan = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
+        cwd: repository, encoding: "utf8", env: environment,
+      });
+      assert.equal(plan.status, 0, plan.stderr);
+      const current = JSON.parse(plan.stdout);
+      assert.equal(previous.inputHash, current.inputHash);
+      assert.notDeepEqual(previous.classification, current.classification);
+      if (productImpact) assert.deepEqual(previous.commands, current.commands);
+      const blocked = spawnSync(process.execPath, [CLI, "ensure", "--stage", "pr", "--json"], {
+        cwd: repository, encoding: "utf8", env: environment,
+      });
+      assert.equal(blocked.status, 5, blocked.stderr);
+      const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--json"], {
+        cwd: repository, encoding: "utf8", env: environment,
+      });
+      assert.equal(publish.status, 11, publish.stderr);
+      assert.equal(readFileSync(receiptPath, "utf8"), failed);
+      assert.equal(readFileSync(callsPath, "utf8"), "verify\n");
+      assert.equal(git(repository, "ls-remote", "--heads", "origin", "refs/heads/chore/test-verification"), "");
+    } finally {
+      rmSync(repository, { recursive: true, force: true });
+      rmSync(fakeBin, { recursive: true, force: true });
+    }
+  }
+});
+
 test("retries a declared infrastructure failure once and records both attempts", () => {
   const repository = createRepository({ flakyRuleTest: true });
   try {
@@ -1539,7 +1592,7 @@ test("rejects an unknown retry category", () => {
   }
 });
 
-test("blocks publishing when the current HEAD has no valid verification receipt", () => {
+test("publishing automatically verifies when the current HEAD has no receipt", () => {
   const repository = createRepository();
   const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
   try {
@@ -1550,8 +1603,9 @@ test("blocks publishing when the current HEAD has no valid verification receipt"
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
-    assert.equal(result.status, 11, result.stderr);
-    assert.equal(JSON.parse(result.stdout).status, "VERIFICATION_REQUIRED");
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout.trim().split("\n").at(-1)).status, "PUSHED_CREATE_PR");
+    assert.equal(git(repository, "config", "--get", "core.hooksPath"), ".githooks");
   } finally {
     rmSync(repository, { recursive: true, force: true });
     rmSync(remote, { recursive: true, force: true });
@@ -1725,9 +1779,17 @@ test('CBM client adapters select control-plane verification', () => {
   assert.deepEqual(result.areas, ['control-plane']);
 });
 
-function createFrontendRepository() {
+function createFrontendRepository({ localPublish = false } = {}) {
   const repository = createRepository();
   writeFileSync(join(repository, ".git", "info", "exclude"), "node_modules/\nscripts/\n.env.local\n.env.*.local\n");
+  if (localPublish) {
+    mkdirSync(join(repository, "scripts"));
+    for (const name of ["start-task-worktree.py", "verify-change-scope.mjs", "verification-policy.mjs"]) {
+      copyFileSync(join(ROOT, "scripts", name), join(repository, "scripts", name));
+    }
+    cpSync(join(ROOT, "scripts", "lib"), join(repository, "scripts", "lib"), { recursive: true });
+    copyFileSync(join(ROOT, ".githooks", "pre-push"), join(repository, ".githooks", "pre-push"));
+  }
   mkdirSync(join(repository, "web", "src"), { recursive: true });
   const calls = join(repository, ".git", "frontend-calls.jsonl");
   for (const [tool, file] of [
@@ -1750,11 +1812,12 @@ function createFrontendRepository() {
   }));
   writeFileSync(join(repository, "web", ".env.test"), "VITE_APP_ENV=test\n");
   writeFileSync(join(repository, "web", ".env.release"), "VITE_APP_ENV=release\n");
-  git(repository, "add", "web");
+  git(repository, "add", "web", ".githooks");
   git(repository, "commit", "-m", "test: frontend baseline");
   git(repository, "push", "origin", "HEAD:release/prod");
+  if (localPublish) git(repository, "branch", "-m", "chore/验证本地自动构建");
   writeFileSync(join(repository, ".git", "blue-whale", "task-base.json"), JSON.stringify({
-    version: 1, task_branch: "chore/test-verification", target_branch: "release/prod", start_sha: git(repository, "rev-parse", "HEAD"),
+    version: 1, task_branch: git(repository, "branch", "--show-current"), target_branch: "release/prod", start_sha: git(repository, "rev-parse", "HEAD"),
   }));
   writeFileSync(join(repository, "web", "src", "index.ts"), "export const value = 1;\n");
   git(repository, "add", "web/src/index.ts");
@@ -1767,6 +1830,77 @@ function frontendCli(repository, args, environment = {}) {
     cwd: repository, encoding: "utf8", env: { ...childEnvironment(), ...environment },
   });
 }
+
+test("local publication enables hooks, builds before push, and reuses the same result", () => {
+  const repository = createFrontendRepository({ localPublish: true });
+  try {
+    const publish = (environment = {}) => spawnSync("bash",
+      [PUBLISH, "--user-authorized", "--create-pr", "--json"], {
+        cwd: repository, encoding: "utf8", env: { ...childEnvironment(), ...environment },
+      });
+    const head = git(repository, "rev-parse", "HEAD");
+    const ref = "refs/heads/chore/验证本地自动构建";
+    assert.equal(git(repository, "ls-remote", "--heads", "origin", ref), "");
+    const first = publish();
+    assert.equal(first.status, 0, first.stderr + first.stdout);
+    assert.equal(git(repository, "config", "--get", "core.hooksPath"), ".githooks");
+    assert.equal(git(repository, "ls-remote", "--heads", "origin", ref).split(/\s/)[0], head);
+    const callsPath = join(repository, ".git", "frontend-calls.jsonl");
+    const calls = readFileSync(callsPath, "utf8");
+    const records = calls.trim().split("\n").map(JSON.parse);
+    assert.equal(records.filter(call => call.tool === "tsc").length, 1);
+    assert.deepEqual(records.filter(call => call.tool === "vite").map(call => call.mode), ["test", "release"]);
+    const receiptPath = join(repository, ".git", "blue-whale", "verification", `${head}.json`);
+    const receipt = readFileSync(receiptPath, "utf8");
+    const again = publish();
+    assert.equal(again.status, 0, again.stderr);
+    assert.equal(readFileSync(callsPath, "utf8"), calls);
+    assert.equal(readFileSync(receiptPath, "utf8"), receipt);
+    const changedInputs = frontendCli(repository, ["ensure", "--stage", "pr"], { VITE_APP_ENV: "changed" });
+    assert.equal(changedInputs.status, 0, changedInputs.stderr);
+    assert.notEqual(readFileSync(callsPath, "utf8"), calls);
+  } finally { rmSync(repository, { recursive: true, force: true }); }
+});
+
+test("typecheck and either build mode failure leave create and update remotes unchanged", () => {
+  for (const mode of ["create", "update"]) {
+    for (const failure of ["tsc", "test", "release"]) {
+      const repository = createFrontendRepository({ localPublish: true });
+      try {
+        const ref = "refs/heads/chore/验证本地自动构建";
+        let args = ["--create-pr"];
+        let before = "";
+        if (mode === "update") {
+          git(repository, "push", "origin", `HEAD:${ref}`);
+          before = git(repository, "rev-parse", "HEAD");
+          const snapshot = join(repository, ".git", "pr-snapshot.json");
+          writeFileSync(snapshot, JSON.stringify({
+            pull_request_id: 65, state: "opened", source_branch: "chore/验证本地自动构建",
+            target_branch: "release/prod", head_sha: before, conflict: false,
+            changed_files: ["web/src/index.ts"], fetched_at: Math.floor(Date.now() / 1000),
+          }));
+          writeFileSync(join(repository, "web", "src", "index.ts"), "export const value = 2;\n");
+          git(repository, "add", "web/src/index.ts");
+          git(repository, "commit", "-m", "fix: review change");
+          args = ["--update-pr", "65", "--pr-snapshot", snapshot];
+        }
+        const publish = () => spawnSync("bash", [PUBLISH, "--user-authorized", ...args, "--json"], {
+          cwd: repository, encoding: "utf8",
+          env: { ...childEnvironment(), FIXTURE_BUILD_FAILURE: failure },
+        });
+        const failed = publish();
+        assert.equal(failed.status, 11, `${mode}/${failure}: ${failed.stderr}${failed.stdout}`);
+        assert.equal(JSON.parse(failed.stdout.trim().split("\n").at(-1)).status, "VERIFICATION_FAILED");
+        assert.equal(git(repository, "ls-remote", "--heads", "origin", ref).split(/\s/)[0] || "", before);
+        const callsPath = join(repository, ".git", "frontend-calls.jsonl");
+        const calls = readFileSync(callsPath, "utf8");
+        assert.equal(publish().status, 11);
+        assert.equal(readFileSync(callsPath, "utf8"), calls);
+        assert.equal(git(repository, "ls-remote", "--heads", "origin", ref).split(/\s/)[0] || "", before);
+      } finally { rmSync(repository, { recursive: true, force: true }); }
+    }
+  }
+});
 
 test("frontend plans cover shared inputs and skip unrelated changes", async () => {
   const { requiresFrontendBuild, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");

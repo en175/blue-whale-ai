@@ -46,6 +46,10 @@ class ReleaseLineFixture:
         for name in ("python3-command.sh", "release-line-state.py", "release_line_sync.py", "task_metadata.py"):
             shutil.copy2(SCRIPTS / "lib" / name, self.repo / "scripts" / "lib" / name)
         (self.repo / "base.txt").write_text("base\n", encoding="utf-8")
+        hooks = self.repo / ".githooks"
+        hooks.mkdir()
+        (hooks / "pre-push").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (hooks / "pre-push").chmod(0o755)
         run("git", "add", ".", cwd=self.repo)
         run("git", "commit", "-m", "chore: test base", cwd=self.repo)
         run("git", "remote", "add", "origin", self.bare, cwd=self.repo)

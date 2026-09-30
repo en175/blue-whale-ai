@@ -23,6 +23,7 @@ def main():
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
     else:
         print(f"当前发布线：{result['branch']}；本地提交：{result['sha']}；同步结果：{result['action']}")
+        print(f"本地 Git Hook 已自动启用：{result['hooks_path']}")
         print(f"代码目录与 CBM 索引 root_path：{result['cbm_root_path']}；请按该目录核对索引状态。")
         if result["dirty_paths"]:
             print("本机未提交文件仅供本次分析参考：" + ", ".join(result["dirty_paths"]))

@@ -16,6 +16,8 @@
 
 写入任务随后运行 `scripts/start-task-worktree.sh`。入口在同一把锁下再次同步并从本地 release 的精确 SHA 建立独立任务区。它记录目标发布线和起点 SHA。验证、提交、PR 发布、清理均读取该元数据；缺失时显式修复，不回退到 master。普通任务不可直接在 master 或 release 工作树写入。
 
+发布线同步和任务开工入口在同步成功后自动启用本地 `.githooks`，新工作树继承配置。PR 发布入口也会自动补装已有任务工作树的配置，并在推送前复用或执行本地验证。成员同步更新后沿用团队流程即可，无需手动运行初始化或构建命令。具体构建时点与失败处理见 [前端推送构建门禁](../../agent-rules/frontend-build-push.md)。
+
 紧急生产 hotfix 是独立授权通道。负责人明确批准后才允许以生产基线和 master PR 处理；日常开工入口不会因任务类型 `hotfix` 自动改用 master。现有 release 入口不承担 hotfix 的生产审批。
 
 发布线合入 master 后，负责人用 `scripts/cleanup-release-branch.sh --user-authorized <branch>` 收尾。清理前核对该批次任务和 PR 的去向；不自动删除历史分支或本地文件。

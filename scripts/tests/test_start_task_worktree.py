@@ -157,6 +157,13 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertEqual(self.repo.parent.resolve(), task.parent.resolve())
         branch = run("git", "branch", "--show-current", cwd=task).stdout.strip()
         self.assertEqual("fix/IK094T-修复工作树写入护栏", branch)
+        self.assertEqual(".githooks", run("git", "config", "--get", "core.hooksPath", cwd=task).stdout.strip())
+        before = run("git", "rev-parse", "origin/master", cwd=task).stdout.strip()
+        self.commit(task, "task.txt", "new task commit\n", "chore: 自动启用验证")
+        blocked = run("git", "push", "origin", "HEAD:master", cwd=task, check=False)
+        self.assertNotEqual(0, blocked.returncode)
+        self.assertIn("master", blocked.stderr)
+        self.assertEqual(before, run("git", "ls-remote", "--heads", "origin", "master", cwd=task).stdout.split()[0])
 
     def test_shell_wrapper_only_forwards_structured_arguments(self):
         result = run(

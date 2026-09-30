@@ -268,25 +268,30 @@ function writeReceipt(path, receipt) {
   writeFileSync(path, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
 }
 
-function loadRetryableReceipt(scope) {
-  const path = receiptPath(scope.head);
-  if (!existsSync(path)) {
-    throw new Error("retry requires a failed receipt for the current scope");
-  }
-  const receipt = JSON.parse(readFileSync(path, "utf8"));
-  const sameScope =
-    receipt.version === 1 &&
-    receipt.status === "failed" &&
+function matchesReceiptInputs(receipt, scope) {
+  return receipt?.version === 1 &&
     receipt.head === scope.head &&
     receipt.base === scope.base &&
     receipt.startSha === scope.startSha &&
     receipt.targetBranch === scope.targetBranch &&
     receipt.targetSha === scope.targetSha &&
     receipt.changedFilesHash === scope.changedFilesHash &&
-    receipt.inputHash === scope.inputHash &&
+    receipt.inputHash === scope.inputHash;
+}
+
+function matchesReceiptScope(receipt, scope) {
+  return matchesReceiptInputs(receipt, scope) &&
     JSON.stringify(receipt.classification) === JSON.stringify(scope.classification) &&
     JSON.stringify(receipt.commands) === JSON.stringify(scope.commands);
-  if (!sameScope) {
+}
+
+function loadRetryableReceipt(scope) {
+  const path = receiptPath(scope.head);
+  if (!existsSync(path)) {
+    throw new Error("retry requires a failed receipt for the current scope");
+  }
+  const receipt = JSON.parse(readFileSync(path, "utf8"));
+  if (receipt.status !== "failed" || !matchesReceiptScope(receipt, scope)) {
     throw new Error("retry requires a failed receipt for the current scope");
   }
   if (receipt.retry) {
@@ -312,8 +317,8 @@ function main() {
   process.chdir(git("rev-parse", "--show-toplevel"));
   const args = process.argv.slice(2);
   const command = args[0];
-  if (!["plan", "run", "check", "check-push", "summary"].includes(command)) {
-    throw new Error("usage: verify-change-scope.mjs <plan|run|check|check-push|summary> [--head SHA] [--base REF] [--stage completion|pr] [--risk high] [--retry-kind KIND --retry-reason REASON] [--json]");
+  if (!["plan", "run", "ensure", "check", "check-push", "summary"].includes(command)) {
+    throw new Error("usage: verify-change-scope.mjs <plan|run|ensure|check|check-push|summary> [--head SHA] [--base REF] [--stage completion|pr] [--risk high] [--retry-kind KIND --retry-reason REASON] [--json]");
   }
   const baseRef = valueAfter(args, "--base", null);
   const risk = valueAfter(args, "--risk", "auto");
@@ -327,6 +332,9 @@ function main() {
     throw new Error("--retry-kind and --retry-reason must be provided together");
   }
   const retry = retryKind ? { kind: retryKind, reason: retryReason } : null;
+  if (command === "ensure" && retry) {
+    throw new Error("explicit verification retries must use run");
+  }
   const asJson = args.includes("--json");
   if (command === "check-push") {
     const pushedHead = valueAfter(args, "--head", null);
@@ -343,7 +351,7 @@ function main() {
     }
   }
   const scope = currentScope({ baseRef, risk, stage,
-    requireTargetSync: command === "plan" || command === "run" || command === "check-push",
+    requireTargetSync: ["plan", "run", "ensure", "check-push"].includes(command),
     frontendPushOnly: command === "check-push" });
   if (command === "check-push" && scope.frontendBuildRequired === false) {
     emit({ status: "BUILD_NOT_REQUIRED", reason: "本次推送不影响前端构建。" }, asJson);
@@ -366,7 +374,21 @@ function main() {
     return;
   }
 
-  if (command === "run") {
+  if (command === "ensure") {
+    const path = receiptPath(scope.head);
+    const receipt = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
+    if (validateReceipt(receipt, scope).valid) {
+      emit({ status: "VERIFIED", tier: receipt.classification.tier, receipt: path, reused: true }, asJson);
+      return;
+    }
+    if (receipt?.status === "failed" && matchesReceiptInputs(receipt, scope)) {
+      emit({ status: "VERIFICATION_FAILED", reason: "当前提交已有失败结果；修复后重新验证，或按测试策略显式重试。" }, asJson);
+      process.exitCode = 5;
+      return;
+    }
+  }
+
+  if (command === "run" || command === "ensure") {
     const retryState = retry ? loadRetryableReceipt(scope) : null;
     const startedAt = retryState?.receipt.startedAt ?? new Date().toISOString();
     const results = retryState
