@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 
+import { InvalidVerificationCodeError } from "@lib/core";
+import { FAILURE_CODE } from "@lib/contracts";
 import {
   InvalidCredentialsError,
   PasswordPolicyError,
+  PhoneAlreadyBoundError,
+  PhoneTakenError,
 } from "@lib/shared/identity/index.js";
 import { MeController } from "./me.controller.js";
 
@@ -19,6 +23,8 @@ function createController(overrides: {
   resolveTier?: ReturnType<typeof vi.fn>;
   listRoleCodes?: ReturnType<typeof vi.fn>;
   isAdmin?: ReturnType<typeof vi.fn>;
+  resolveAccountFlags?: ReturnType<typeof vi.fn>;
+  bindPhone?: ReturnType<typeof vi.fn>;
 } = {}) {
   const sessions = {
     revokeAllForUser: overrides.revokeAllForUser ?? vi.fn().mockResolvedValue(0),
@@ -30,14 +36,21 @@ function createController(overrides: {
     resolveTier: overrides.resolveTier ?? vi.fn().mockResolvedValue("free"),
     listRoleCodes: overrides.listRoleCodes ?? vi.fn().mockResolvedValue([]),
     isAdmin: overrides.isAdmin ?? vi.fn().mockResolvedValue(false),
+    resolveAccountFlags:
+      overrides.resolveAccountFlags ??
+      vi.fn().mockResolvedValue({ phone: null, hasPassword: true }),
+    bindPhone: overrides.bindPhone ?? vi.fn().mockResolvedValue(undefined),
   };
   const controller = new MeController(sessions as never, identity as never);
   return { controller, sessions, identity };
 }
 
 const USER = { userId: "42", username: "alice" } as never;
-/** 模拟 req：兜底吊销要的是**会话 cookie 里的 sess_ 令牌**，不是请求头上的上游 sk-。 */
-const REQ = { cookies: { bw_session: "sess_current" } } as unknown as Request;
+/**
+ * 模拟 req：兜底吊销取的是 **AuthGuard 存下的 `loginToken`**（IKJAZM）。
+ * 既不是 cookie（迁移期通道，迟早撤掉），也不是请求头（那一刻已被回注成上游 sk-）。
+ */
+const REQ = { loginToken: "sess_current" } as unknown as Request;
 /** 模拟 res：记录 clearCookie 调用（passthrough 响应，控制器不发送）。 */
 const RES = { clearCookie: vi.fn() } as unknown as Response;
 
@@ -52,7 +65,7 @@ describe("MeController（IKBRCK 改密）", () => {
     expect(identity.changePassword).not.toHaveBeenCalled();
   });
 
-  it("原密码或新密码缺失/为空就 400，不改密", async () => {
+  it("新密码缺失/为空就 400，不改密（原密码可缺——无口令账号走的是「设置密码」）", async () => {
     const { controller, identity } = createController();
     for (const body of [
       { original_password: "", password: "NewPass456" },
@@ -60,7 +73,6 @@ describe("MeController（IKBRCK 改密）", () => {
       { original_password: "OldPass123", password: "" },
       {},
       { original_password: "OldPass123" },
-      { password: "NewPass456" },
     ]) {
       await expect(
         controller.changePassword(body, USER, REQ, RES),
@@ -84,6 +96,23 @@ describe("MeController（IKBRCK 改密）", () => {
       ),
     ).rejects.toMatchObject({ status: 400 });
     expect(identity.changePassword).not.toHaveBeenCalled();
+  });
+
+  it("★ 无口令账号「设置密码」：不带原密码也能改（IKJA4R）", async () => {
+    // 手机号验证码建号出来的账号没有口令。前端在那种情况下不渲染原密码框，
+    // 请求体里就真的没有 original_password —— 契约必须允许，否则这一个分支永远走不通。
+    const { controller, identity } = createController();
+    const result = await controller.changePassword(
+      { password: "BrandNew456" },
+      USER,
+      REQ,
+      RES,
+    );
+    expect(result).toMatchObject({ code: 200 });
+    expect(identity.changePassword).toHaveBeenCalledWith("42", {
+      oldPassword: undefined,
+      newPassword: "BrandNew456",
+    });
   });
 
   it("合法入参：按本地 userId 改密（原密码 + 新密码），成功后吊销全部会话", async () => {
@@ -212,5 +241,101 @@ describe("MeController（GET /me 会员等级）", () => {
     } as never);
 
     expect(result).toMatchObject({ data: { is_admin: false } });
+  });
+});
+
+// IKJA4Q：手机号在 `bw_users` 上是**后加的、多数为 null** 的标识。这里钉住的是
+// 「它是查出来的真值，不是写死的空串」——写死的版本对每个用户都成立，也就等于没有。
+describe("MeController（IKJA4Q 手机号与口令标识）", () => {
+  it("phone / has_password 来自 identity 现查，不吃会话快照", async () => {
+    const resolveAccountFlags = vi
+      .fn()
+      .mockResolvedValue({ phone: "13800001234", hasPassword: false });
+    const { controller } = createController({ resolveAccountFlags });
+
+    const result = await controller.me({
+      userId: "42",
+      username: "alice",
+      phone: "19900000000", // 陈旧的会话快照
+    } as never);
+
+    expect(result).toMatchObject({
+      data: { phone: "13800001234", has_password: false },
+    });
+    expect(resolveAccountFlags).toHaveBeenCalledWith("42");
+  });
+
+  it("查不到人时回空串 + false——不替用户宣称他有口令", async () => {
+    const { controller } = createController({
+      resolveAccountFlags: vi.fn().mockResolvedValue(null),
+    });
+
+    const result = await controller.me({ userId: "42", username: "alice" } as never);
+
+    expect(result).toMatchObject({ data: { phone: "", has_password: false } });
+  });
+
+  it("绑定手机号：合法入参转交 identity，返回成功信封", async () => {
+    const bindPhone = vi.fn().mockResolvedValue(undefined);
+    const { controller } = createController({ bindPhone });
+
+    const result = await controller.bindPhone(
+      { phone: "13800001234", code: "123456" },
+      USER,
+    );
+
+    expect(result).toMatchObject({ code: 200 });
+    expect(bindPhone).toHaveBeenCalledWith("42", {
+      phone: "13800001234",
+      code: "123456",
+    });
+  });
+
+  it("绑定手机号：格式不对 / 验证码为空 → 失败信封，不碰 identity", async () => {
+    const bindPhone = vi.fn();
+    const { controller } = createController({ bindPhone });
+
+    for (const body of [
+      { phone: "12345", code: "123456" },
+      { phone: "13800001234", code: "" },
+      { phone: "", code: "123456" },
+      {},
+      { phone: 13800001234, code: "123456" },
+    ]) {
+      const result = await controller.bindPhone(body, USER);
+      expect(result).toMatchObject({ code: FAILURE_CODE });
+    }
+    expect(bindPhone).not.toHaveBeenCalled();
+  });
+
+  it("绑定手机号：码错 / 被别人占用 / 自己已绑过 → 三句不同的话", async () => {
+    // 三种失败给用户的下一步完全不同（重发码 / 找客服 / 知道自己是既有用户），
+    // 合并成一句「绑定失败」等于把三条岔路都堵死。
+    const cases = [
+      [new InvalidVerificationCodeError("验证码错误或已过期"), "验证码错误或已过期"],
+      [new PhoneTakenError(), "该手机号已被绑定"],
+      [new PhoneAlreadyBoundError(), "当前账号已绑定手机号，暂不支持换绑"],
+    ] as const;
+
+    for (const [error, msg] of cases) {
+      const { controller } = createController({
+        bindPhone: vi.fn().mockRejectedValue(error),
+      });
+      const result = await controller.bindPhone(
+        { phone: "13800001234", code: "123456" },
+        USER,
+      );
+      expect(result).toMatchObject({ code: FAILURE_CODE, msg, data: null });
+    }
+  });
+
+  it("绑定手机号：没有登录身份就 401，不碰 identity", async () => {
+    const bindPhone = vi.fn();
+    const { controller } = createController({ bindPhone });
+
+    await expect(
+      controller.bindPhone({ phone: "13800001234", code: "123456" }, undefined),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(bindPhone).not.toHaveBeenCalled();
   });
 });

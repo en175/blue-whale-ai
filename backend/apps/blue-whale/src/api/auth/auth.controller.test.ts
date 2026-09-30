@@ -55,9 +55,8 @@ vi.mock("ioredis", () => ({
 }));
 
 import { Reflector } from "@nestjs/core";
-import { NewApiError } from "@lib/core";
-import { afterEach, beforeEach } from "vitest";
-import { ACCOUNT_LOCKED } from "@lib/contracts";
+import { InvalidVerificationCodeError, NewApiError } from "@lib/core";
+import { ACCOUNT_LOCKED, FAILURE_CODE } from "@lib/contracts";
 import type { Response } from "express";
 import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { SessionService } from "@lib/shared/session/session.service.js";
@@ -84,6 +83,8 @@ function loginResult(): LocalLoginResult {
     userId: 42,
     username: "alice",
     email: null,
+    phone: null,
+    hasPassword: true,
     role: 1,
     status: 1,
   };
@@ -92,7 +93,11 @@ function loginResult(): LocalLoginResult {
 function setup() {
   const limiter = new RateLimiter();
   const tracker = new LoginFailureTracker(limiter);
-  const sessions = { createSession: vi.fn(async () => "session-token") };
+  const sessions = {
+    // IKJAZL：签发与存储分了家——令牌由会话服务签（密钥收敛在它构造期），再由它存。
+    issueToken: vi.fn(async () => "jwt-token"),
+    createSession: vi.fn(async () => undefined),
+  };
   const prisma = { client: {} };
   // 登录日志同样走旁路（写失败不阻断登录），所以它必须是**可注入的 mock**——
   // 否则「日志到底写没写」这件事在测试里永远看不出来。
@@ -101,6 +106,7 @@ function setup() {
     // ★ 口令校验现在在这里，不在 account 上
     login: vi.fn(),
     register: vi.fn(),
+    loginWithPhoneCode: vi.fn(),
   };
   const controller = new AuthController(
     prisma as unknown as PrismaService,
@@ -226,6 +232,112 @@ describe("AuthController 限流声明（IKDR4J）", () => {
       windowMs: 60_000,
     });
   });
+
+  it("★ login-by-code 的账号桶用 phone 维度，不是 account", () => {
+    // `account` 维度写死读 `body.username`，而这条路由的入参是 `body.phone`。
+    // 配成 account 不会报错，只会**静默跳过**——看着有撞码防护，实际为零。
+    const buckets = bucketsOf(
+      AuthController.prototype.loginByCode as (...args: never[]) => unknown,
+    );
+    expect(buckets.find((b) => b.key === "phone")).toMatchObject({
+      limit: 5,
+      windowMs: 60_000,
+    });
+    expect(buckets.some((b) => b.key === "account")).toBe(false);
+  });
+
+  it("send-code 声明短信四个桶：号/分、号/天、IP/分、IP/天", () => {
+    // 短信按条计费，四个桶缺一不可——只按 IP 挡不住换 IP 刷同一个号，
+    // 只按号码挡不住换号刷爆账单。日上限就是真正兜住账单的那两条。
+    const buckets = bucketsOf(
+      AuthController.prototype.sendCode as (...args: never[]) => unknown,
+    );
+    expect(buckets.filter((b) => b.key === "phone")).toHaveLength(2);
+    expect(buckets.filter((b) => b.key === "ip")).toHaveLength(2);
+    expect(Math.max(...buckets.map((b) => b.windowMs))).toBe(86_400_000);
+  });
+});
+
+describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
+  const CODE_BODY = { phone: "13800001234", code: "123456" };
+
+  function phoneResult(over: Partial<LocalLoginResult> = {}): LocalLoginResult {
+    return { ...loginResult(), phone: "13800001234", hasPassword: false, ...over };
+  }
+
+  it("没绑过的手机号：建号登录，is_new_user=true，phone/has_password 是真值", async () => {
+    const { controller, identity, sessions, res } = setup();
+    identity.loginWithPhoneCode.mockResolvedValue({
+      result: phoneResult(),
+      isNewUser: true,
+    });
+
+    const out = await controller.loginByCode(CODE_BODY, res);
+
+    expect(out).toMatchObject({
+      code: 200,
+      data: {
+        user_id: 42,
+        phone: "13800001234",
+        is_new_user: true,
+        has_password: false,
+      },
+    });
+    // ★ 走的是我们自己的会话签发（`sess_` + HttpOnly cookie），
+    //   不是 `loginWithCode` 那支没人认的 JWT——接错了用户点完登录立刻 401。
+    expect(sessions.createSession).toHaveBeenCalled();
+    expect(res.cookie).toHaveBeenCalled();
+  });
+
+  it("已存在的账号：is_new_user=false，has_password 跟着账号走", async () => {
+    const { controller, identity, res } = setup();
+    identity.loginWithPhoneCode.mockResolvedValue({
+      result: phoneResult({ hasPassword: true }),
+      isNewUser: false,
+    });
+
+    const out = await controller.loginByCode(CODE_BODY, res);
+
+    expect(out).toMatchObject({
+      code: 200,
+      data: { is_new_user: false, has_password: true },
+    });
+  });
+
+  it("验证码错误 → 401，不签发会话，且留一条失败登录日志", async () => {
+    const { controller, identity, sessions, res } = setup();
+    identity.loginWithPhoneCode.mockRejectedValue(
+      new InvalidVerificationCodeError("验证码错误或已过期"),
+    );
+
+    await expect(controller.loginByCode(CODE_BODY, res)).rejects.toMatchObject({
+      name: "NewApiError",
+      status: 401,
+    });
+    expect(sessions.createSession).not.toHaveBeenCalled();
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        reason: "验证码错误",
+        username: "13800001234",
+      }),
+    );
+  });
+
+  it("手机号格式不对 / 验证码为空 → 失败信封，不碰 identity", async () => {
+    const { controller, identity, res } = setup();
+    for (const body of [
+      { phone: "12345", code: "123456" },
+      { phone: "13800001234", code: "   " },
+      { phone: "", code: "" },
+      {},
+      { phone: 13800001234, code: "123456" },
+    ]) {
+      const out = await controller.loginByCode(body, res);
+      expect(out).toMatchObject({ code: FAILURE_CODE });
+    }
+    expect(identity.loginWithPhoneCode).not.toHaveBeenCalled();
+  });
 });
 
 describe("AuthController 会话内容（凭证已移出会话）", () => {
@@ -235,22 +347,35 @@ describe("AuthController 会话内容（凭证已移出会话）", () => {
 
     await controller.login(LOGIN_BODY, res);
 
-    expect(sessions.createSession).toHaveBeenCalledWith({
+    // IKJAZL：createSession 的入参现在是 (令牌, 载荷) —— 令牌由会话服务签发。
+    expect(sessions.createSession).toHaveBeenCalledWith("jwt-token", {
       userId: 42,
       username: "alice",
       role: 1,
       status: 1,
       email: null,
     });
-    // 断言的是「没有任何额外的密钥字段」：createSession 的入参就是上面那五个，
+    // 断言的是「没有任何额外的密钥字段」：载荷就是上面那五个，
     // 上游 key 由 AuthGuard 按当前配置回注（见 auth.guard.test.ts）。
-    expect(Object.keys(sessions.createSession.mock.calls[0]![0])).toEqual([
+    expect(Object.keys(sessions.createSession.mock.calls[0]![1])).toEqual([
       "userId",
       "username",
       "role",
       "status",
       "email",
     ]);
+  });
+
+  it("★ 令牌随响应体下发（IKJAZL：前端持有，不再只藏在 cookie 里）", async () => {
+    const { controller, identity, res } = setup();
+    identity.login.mockResolvedValue(loginResult());
+
+    const out = await controller.login(LOGIN_BODY, res);
+
+    expect(out).toMatchObject({ code: 200, data: { token: "jwt-token" } });
+    // 兼容期**仍然写一份 cookie**：老浏览器不该在上线那一刻被登出。
+    // 这条断言是那次迁移的护栏，cookie 通道下线时可以一并删掉。
+    expect(res.cookie).toHaveBeenCalled();
   });
 
   it("★ 登录**不依赖**上游配置 —— 否则「还没配 key」就把要进去配它的人挡在门外", async () => {

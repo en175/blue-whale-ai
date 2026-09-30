@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 
+import { InvalidVerificationCodeError } from "@lib/core";
 import type { Tier } from "@lib/core/identity/tier.js";
 import {
   LastSuperAdminError,
@@ -9,6 +10,7 @@ import {
   ROLE_USER,
 } from "@lib/core/identity/roles.js";
 import { createLogger } from "@lib/core/logging";
+import { createAuthRepo } from "@lib/shared/persistence/auth-repo.js";
 import { createIdentityLoginLogRepo } from "@lib/shared/persistence/identity-login-log-repo.js";
 import { createAdminUserQuery, type AdminUserListOptions } from "@lib/shared/persistence/admin-user-query.js";
 import { createIdentityMembershipRepo } from "@lib/shared/persistence/identity-membership-repo.js";
@@ -16,6 +18,7 @@ import { createIdentityRoleRepo } from "@lib/shared/persistence/identity-role-re
 import {
   createIdentityUserRepo,
   USER_STATUS_NORMAL,
+  type IdentityUserRow,
   type IdentityUserStatus,
 } from "@lib/shared/persistence/identity-user-repo.js";
 import {
@@ -37,10 +40,43 @@ export interface LocalLoginResult {
   userId: number;
   username: string;
   email: string | null;
+  /**
+   * `bw_users.phone` 的当前值。
+   *
+   * <p>⚠️ **多数账号为 null**：手机号是后来才加上的标识，存量用户（从 new-api 迁来的）
+   * 一个都没有；它是「渐进增强」，不是登录的必要条件。
+   */
+  phone: string | null;
+  /**
+   * 账号有没有设过口令 —— 即 `bw_users.password` 非空。
+   *
+   * <p>前端据此决定个人设置里显示「设置密码」还是「修改密码」：**没有口令的账号
+   * 不需要、也提供不了原密码**。见 GLOSSARY「账号与密码」词条。
+   */
+  hasPassword: boolean;
   /** 由角色集合折算的数值档位（见 `roleRank`），只为兼容既有会话与前端口径 */
   role: number;
   /** 1 = 启用 / 0 = 停用，与 `auth.guard.ts` 的 ENABLED_STATUS 一致 */
   status: number;
+}
+
+/** `GET /api/me` 需要的账号标识位；现查，不走会话快照。 */
+export interface AccountFlags {
+  phone: string | null;
+  hasPassword: boolean;
+}
+
+/**
+ * 当前账号**已经绑过**手机号，本单不做换绑。
+ *
+ * <p>与 {@link PhoneTakenError} 是两回事：那个说的是「这个号被**别人**占了」，
+ * 这个说的是「你自己已经有了」。两者给用户的下一步完全不同，不能合并成一句话。
+ */
+export class PhoneAlreadyBoundError extends Error {
+  constructor() {
+    super("当前账号已绑定手机号，暂不支持换绑");
+    this.name = "PhoneAlreadyBoundError";
+  }
 }
 
 /**
@@ -79,6 +115,14 @@ export class IdentityService {
   private readonly loginLogs;
   private readonly adminUsers;
   private readonly users;
+  /**
+   * 验证码的读写。
+   *
+   * <p>放在身份域而不是 HTTP 层：一条验证码证明的是「这个人拥有这个手机号」，
+   * 而手机号是**登录标识**——两个入口（验证码登录、绑定手机号）都要这份判定，
+   * 摊回 controller 就会各写一遍，且各写一遍的地方迟早只有一处会改。
+   */
+  private readonly authCodes;
 
   constructor(prisma: PrismaService) {
     this.memberships = createIdentityMembershipRepo(prisma.client);
@@ -86,6 +130,26 @@ export class IdentityService {
     this.loginLogs = createIdentityLoginLogRepo(prisma.client);
     this.adminUsers = createAdminUserQuery(prisma.client);
     this.users = createIdentityUserRepo(prisma.client);
+    this.authCodes = createAuthRepo(prisma.client);
+  }
+
+  /**
+   * 库里的行 → 会话要的登录结果。
+   *
+   * <p>三条登录路径（口令 / 注册 / 手机号验证码）共用同一份装配。分开写的时候
+   * `phone` 与 `hasPassword` 就是被写死成 `""` / `true` 的两个字段——
+   * 调用方各自硬编码一个常量，谁都没错，合起来就是假的。
+   */
+  private async toLoginResult(user: IdentityUserRow): Promise<LocalLoginResult> {
+    return {
+      userId: Number(user.id),
+      username: user.username,
+      email: user.email,
+      phone: user.phone,
+      hasPassword: user.password !== null,
+      role: roleRank(await this.roles.listRoleCodes(user.id)),
+      status: user.status === USER_STATUS_NORMAL ? 1 : 0,
+    };
   }
 
   /**
@@ -123,13 +187,7 @@ export class IdentityService {
       throw new InvalidCredentialsError();
     }
 
-    return {
-      userId: Number(user.id),
-      username: user.username,
-      email: user.email,
-      role: roleRank(await this.roles.listRoleCodes(user.id)),
-      status: user.status === "NORMAL" ? 1 : 0,
-    };
+    return this.toLoginResult(user);
   }
 
   /**
@@ -178,13 +236,111 @@ export class IdentityService {
       );
     }
 
-    return {
-      userId: Number(created.id),
-      username: created.username,
-      email: created.email,
-      role: roleRank(await this.roles.listRoleCodes(created.id)),
-      status: 1,
-    };
+    return this.toLoginResult(created);
+  }
+
+  /**
+   * 手机号验证码登录 —— 码有效就放行，**没绑过该手机号的账号当场建一个**。
+   *
+   * <h2>为什么建号与登录是同一个动作</h2>
+   *
+   * 「注册」这一步在手机号路径上不存在：验证码已经证明了这个号码属于操作者，
+   * 再让他填一遍用户名与口令，只是把我们自己的建表细节摊给用户看。
+   * 拿手机号进来的用户照旧可以事后**设置**口令（见 {@link changePassword}）。
+   *
+   * <p>⚠️ **建号也会撞**：`bw_users.username` 是唯一索引，而新建的随机用户名只有
+   * 一万个取值。重试在 `auth-repo` 的 `upsertUser` 里，别在这里再加一层。
+   *
+   * @returns `isNewUser` 即响应里的 `is_new_user`——**本次**是否建了号
+   * @throws InvalidVerificationCodeError 码不存在 / 已过期 / 已用过
+   */
+  async loginWithPhoneCode(input: {
+    phone: string;
+    code: string;
+  }): Promise<{ result: LocalLoginResult; isNewUser: boolean }> {
+    const record = await this.authCodes.findValidCode(input.phone, input.code);
+    if (!record) {
+      throw new InvalidVerificationCodeError("验证码错误或已过期");
+    }
+
+    const user = await this.authCodes.upsertUser(input.phone);
+    // 码在**这一步之后**才作废：upsert 抛错时用户还能拿同一个码重试，
+    // 而不是白烧一条短信——重发是要花钱的。
+    await this.authCodes.markCodeUsed(record.id);
+
+    if (user.created) {
+      // 与 `register` 同一条口径：新建的用户**显式**授内置 `user` 角色。
+      // 不授也能用（`roleRank([])` 也是 1），但那样「这个用户有哪些角色」就有了两种
+      // 表示（`[]` 与 `['user']`），而角色列表是要拿来做权限判定的。
+      // 失败不阻断登录：角色行缺失只影响将来的扩展权限。
+      try {
+        await this.roles.grant(String(user.id), ROLE_USER, "phone-register");
+      } catch (error) {
+        this.logger.error(
+          `手机号建号后授予 ${ROLE_USER} 角色失败（用户 ${user.id}）：` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    const row = await this.users.findById(user.id);
+    if (!row) {
+      // `upsertUser` 按手机号找的是**含软删行**的（那边没过滤 is_delete），
+      // 而 findById 过滤了——手机号被一个已删除的账号占着时会走到这里。
+      // 此时宁可登不上，也不能把一个已删除的账号放进来。
+      this.logger.error(
+        `手机号登录找到的账号不可用（userId=${user.id}）——该行可能已被软删，且手机号仍被它占用`,
+      );
+      throw new InvalidCredentialsError();
+    }
+
+    return { result: await this.toLoginResult(row), isNewUser: user.created };
+  }
+
+  /**
+   * 绑定手机号 —— **首次绑定**，不做换绑。
+   *
+   * <h2>为什么本单不做换绑</h2>
+   *
+   * 换绑要回答「旧手机号还作不作数」「换绑期间旧号能不能登」——那是一套独立的状态机，
+   * 不是这个动作的附加项。首次绑定没有这些分支：一个空位填上，完。
+   *
+   * <p>顺序刻意：**先判自己有没有、再验码、最后写库**。已经绑过的账号不该白烧一条
+   * 验证码；而「被别的账号占了」交给唯一索引在写入时报（P2002），不是先查一次再写
+   * ——先查后写在并发下会两个都通过检查。
+   *
+   * @throws InvalidCredentialsError 当前账号不存在
+   * @throws PhoneAlreadyBoundError 当前账号已经绑过手机号
+   * @throws InvalidVerificationCodeError 码不存在 / 已过期 / 已用过
+   * @throws PhoneTakenError 该手机号已被**别的**账号绑走
+   */
+  async bindPhone(
+    userId: string | number,
+    input: { phone: string; code: string },
+  ): Promise<void> {
+    const self = await this.users.findById(String(userId));
+    if (!self) throw new InvalidCredentialsError();
+    if (self.phone) throw new PhoneAlreadyBoundError();
+
+    const record = await this.authCodes.findValidCode(input.phone, input.code);
+    if (!record) throw new InvalidVerificationCodeError("验证码错误或已过期");
+
+    await this.users.updatePhone(String(userId), input.phone);
+    await this.authCodes.markCodeUsed(record.id);
+  }
+
+  /**
+   * 账号的**展示用标识位**（手机号 / 有没有口令）——取会话快照之外的真值。
+   *
+   * <p>为什么现查：会话是**登录那一刻**的快照。用户在个人设置里绑完手机号、
+   * 或第一次设好口令之后，`GET /api/me` 必须立刻反映出来——
+   * 这两件事都没有「重新登录」这一步来刷新它。（同 {@link resolveTier} 的理由。）
+   *
+   * @returns 用户不存在时 null；调用方按「没有这些标识」处理，**不要编一个 true 出来**
+   */
+  async resolveAccountFlags(userId: string | number): Promise<AccountFlags | null> {
+    const user = await this.users.findById(String(userId));
+    return user ? { phone: user.phone, hasPassword: user.password !== null } : null;
   }
 
   /**
@@ -205,11 +361,19 @@ export class IdentityService {
    */
   async changePassword(
     userId: string | number,
-    input: { oldPassword: string; newPassword: string },
+    input: { oldPassword?: string | undefined; newPassword: string },
   ): Promise<void> {
     const user = await this.users.findById(String(userId));
-    if (!user || !(await verifyPassword(input.oldPassword, user.password))) {
+    if (!user) {
       throw new InvalidCredentialsError();
+    }
+    // IKJA4R：**没有口令的账号走的是「设置密码」**——没有原口令可验，跳过这一道。
+    // 见 GLOSSARY「账号与密码」：设置与修改是同一条路径上的两个操作，区别只在
+    // 账号当下有没有口令。少了这个分支，手机号建号的用户永远设不上密码。
+    if (user.password !== null) {
+      if (!input.oldPassword || !(await verifyPassword(input.oldPassword, user.password))) {
+        throw new InvalidCredentialsError();
+      }
     }
     // hashPassword 内部做策略判定（超长即拒，不截断），失败时一个字节都不会落库。
     const passwordHash = await hashPassword(input.newPassword);

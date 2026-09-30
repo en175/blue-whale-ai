@@ -5,6 +5,7 @@ import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import type { Request, Response } from "express";
 import { IdentityService } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
+import { extractLoginToken } from "@lib/shared/session/login-token.js";
 import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
@@ -17,7 +18,18 @@ import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js"
 const ADMIN_ROLE_THRESHOLD = 10;
 const ENABLED_STATUS = 1;
 
-type RequestWithUser = Request & { user: AuthenticatedUser };
+type RequestWithUser = Request & {
+  user: AuthenticatedUser;
+  /**
+   * 本次请求用的**登录令牌**（IKJAZL）。
+   *
+   * <p>守卫存一份给下游：Guard 之后 `Authorization` 会被回注成**上游 sk-**，而 cookie
+   * 只是迁移期通道、迟早撤掉。需要「吊销当前会话」这类操作的处理器（如改密兜底）
+   * 必须能拿到真正的登录令牌——让它们各自去读 cookie 或请求头，迟早会漏掉一处。
+   * **要的话用这里这一份。**
+   */
+  loginToken?: string;
+};
 
 /**
  * 全局守卫（ADR-0062 #19 凭证分层）：浏览器登录态走 HttpOnly 会话 cookie
@@ -50,9 +62,20 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     const response = context.switchToHttp().getResponse<Response>();
-    const token = request.cookies?.[SESSION_COOKIE_NAME];
+    const token = extractLoginToken(request);
     if (!token) {
       throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+    }
+    // 存给下游用（见 `RequestWithUser.loginToken`）。**必须在下面的 sk- 回注之前**——
+    // 回注之后就再也读不到真正的登录令牌了。
+    (request as RequestWithUser).loginToken = token;
+
+    // 第一道：验签与有效期（IKJAZL）。篡改过 / 过期的令牌在**碰 Redis 之前**就被挡掉——
+    // 否则每一次伪造请求都要打一次 Redis，而鉴权是最容易被刷的那条路径。
+    try {
+      await this.sessions.verifyToken(token);
+    } catch {
+      throw new NewApiError("登录已过期，请重新登录", 401, "unauthorized");
     }
 
     let session;

@@ -36,7 +36,10 @@ vi.mock('../AccountRecordsModal', () => ({
 let root: Root;
 let mountNode: HTMLDivElement;
 
-async function renderAccountModal(onClose = vi.fn()) {
+async function renderAccountModal(
+  onClose = vi.fn(),
+  overrides: { phone?: string; hasPassword?: boolean } = {},
+) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
@@ -45,6 +48,8 @@ async function renderAccountModal(onClose = vi.fn()) {
       createElement(AccountModal, {
         userId: 1,
         nickname: 'alice',
+        phone: overrides.phone ?? '',
+        hasPassword: overrides.hasPassword ?? true,
         balance: 0,
         onClose,
       }),

@@ -2,8 +2,6 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionService } from "./session.service.js";
 
-const TTL_SECONDS = 7 * 24 * 60 * 60;
-
 /** 内存版 ioredis（按 key 存字符串，记录 expire/set 调用）。vi.hoisted 保证 mock 提升时可见。 */
 const { FakeRedis } = vi.hoisted(() => {
   class FakeRedis {
@@ -115,7 +113,22 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   let service: SessionService;
   let redis: FakeRedis;
 
+  /**
+   * IKJAZL：令牌由**调用方**签发，会话存储不再自己生成（`createSession(token, ...)`）。
+   * 要几个不同的会话就调几次。
+   */
+  let tokenSeq = 0;
+  async function makeSession(over: Partial<typeof BASE> = {}): Promise<string> {
+    tokenSeq += 1;
+    const token = `test-token-${tokenSeq}`;
+    await service.createSession(token, { ...BASE, ...over });
+    return token;
+  }
+
   beforeEach(() => {
+    // 签名密钥是**必填**的（无默认值），SessionService 在构造期就会读它——
+    // 缺失即启动失败，而不是等到第一个人来登录。
+    vi.stubEnv("SESSION_JWT_SECRET", "session-service-test-secret-key-32bytes!!");
     service = new SessionService();
     redis = (service as unknown as { redis: FakeRedis }).redis;
     redis.store.clear();
@@ -126,9 +139,9 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     vi.unstubAllEnvs();
   });
 
-  it("createSession 签发 sess_ 令牌，载荷里**没有**上游凭证", async () => {
-    const token = await service.createSession(BASE);
-    expect(token).toMatch(/^sess_[A-Za-z0-9_-]+$/);
+  it("createSession 只落身份：载荷里**没有**上游凭证，令牌由调用方提供", async () => {
+    const token = "caller-supplied-token";
+    await service.createSession(token, BASE);
     const raw = [...redis.store.values()][0];
     // 会话只记身份。它曾存过每个用户的 sk-，统一 key 之后变成「给每个用户存同一把 key」——
     // 一份 7 天不过期的密钥副本，且「管理端改了 key」对已登录用户不生效。
@@ -140,7 +153,7 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("resolveSession 解出身份（round-trip）", async () => {
-    const token = await service.createSession(BASE);
+    const token = await makeSession();
     const session = await service.resolveSession(token);
     expect(session).toMatchObject({
       userId: 8,
@@ -153,7 +166,7 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("★ 部署前的旧会话（载荷里还带 sk）照样可用 —— 退出登录时不该把在线用户全踢掉", async () => {
-    const token = await service.createSession(BASE);
+    const token = await makeSession();
     const key = `session:${hash(token)}`;
     const data = JSON.parse(redis.store.get(key)!);
     data.sk = "sk-legacy-upstream"; // 老版本写下的字段
@@ -169,7 +182,7 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("resolveSession 每次访问滑动续期（调用 EXPIRE）", async () => {
-    const token = await service.createSession(BASE);
+    const token = await makeSession();
     await service.resolveSession(token);
     expect(redis.expiredKeys).toContain(`session:${hash(token)}`);
     // 索引键同步续期（SET 覆盖，保持与会话同寿命）
@@ -177,8 +190,7 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("resolveSession 对部署前旧会话（无索引键）惰性补建索引", async () => {
-    const token = await service.createSession(BASE);
-    const sessionKey = `session:${hash(token)}`;
+    const token = await makeSession();
     // 模拟部署前旧会话：只有会话键、没有索引键
     redis.store.delete(`user_session:8:${hash(token)}`);
 
@@ -189,7 +201,7 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("verifiedAt 超时后 needsRecheck=true", async () => {
-    const token = await service.createSession(BASE);
+    const token = await makeSession();
     const key = `session:${hash(token)}`;
     const data = JSON.parse(redis.store.get(key)!);
     data.verifiedAt = Date.now() - 6 * 60 * 1000; // 超过 5 分钟
@@ -198,7 +210,7 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("updateSessionIdentity 回写 role/status 并重置 verifiedAt", async () => {
-    const token = await service.createSession(BASE);
+    const token = await makeSession();
     const key = `session:${hash(token)}`;
     const data = JSON.parse(redis.store.get(key)!);
     data.verifiedAt = Date.now() - 6 * 60 * 1000;
@@ -212,7 +224,7 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("载荷损坏 → 返回 null 并删会话（不 503）", async () => {
-    const token = await service.createSession(BASE);
+    const token = await makeSession();
     const key = `session:${hash(token)}`;
     redis.store.set(key, "{ 不是 JSON");
     expect(await service.resolveSession(token)).toBeNull();
@@ -220,7 +232,7 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("revoke 删除会话与索引（登出吊销）", async () => {
-    const token = await service.createSession(BASE);
+    const token = await makeSession();
     await service.revoke(token);
     expect(await service.resolveSession(token)).toBeNull();
     expect(redis.store.has(`session:${hash(token)}`)).toBe(false);
@@ -228,13 +240,9 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("revokeAllForUser 删除该用户全部会话并返回计数，不影响其他用户", async () => {
-    const a = await service.createSession(BASE);
-    const b = await service.createSession(BASE);
-    const other = await service.createSession({
-      ...BASE,
-      userId: 99,
-      username: "bob",
-    });
+    const a = await makeSession();
+    const b = await makeSession();
+    const other = await makeSession({ userId: 99, username: "bob" });
 
     const revoked = await service.revokeAllForUser(8);
     expect(revoked).toBe(2);
@@ -249,9 +257,9 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   it("revokeAllForUser 对零会话用户返回 0", async () => {
-    await service.createSession(BASE);
+    await makeSession();
     expect(await service.revokeAllForUser(12345)).toBe(0);
     // 不误删其他用户会话
-    expect(await service.resolveSession((await service.createSession(BASE)))).not.toBeNull();
+    expect(await service.resolveSession((await makeSession()))).not.toBeNull();
   });
 });

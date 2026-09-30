@@ -172,6 +172,61 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
+/* ---- 其他登录方式：分隔线 + 下面的切换按钮（按钮复用 createBtn） ---- */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 0;
+  font-size: 13px;
+  color: #8a8a96;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #3a3a44;
+}
+
+/* ---- 验证码行：输入框与「发送验证码」同一行 ---- */
+.codeRow {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.codeRow .input {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.sendCodeBtn {
+  flex: none;
+  width: 124px;
+  height: 54px;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  background: transparent;
+  color: #c9c9c9;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sendCodeBtn:hover:not(:disabled) {
+  color: #fff;
+  border-color: #6a6a6a;
+}
+
+.sendCodeBtn:disabled {
+  cursor: not-allowed;
+  color: #666673;
+  border-color: #3a3a44;
+}
+
 .notice {
   margin-top: 10px;
   text-align: center;

@@ -113,13 +113,25 @@ describe("auth-repo 自动注册的用户名撞车重试", () => {
     expect(createMock).toHaveBeenCalledTimes(1);
   });
 
-  it("手机号已存在时直接返回，不建号", async () => {
+  it("手机号已存在时直接返回，不建号，且 created=false", async () => {
     const { prisma, findFirst, createMock } = fakePrisma();
     findFirst.mockResolvedValue({ id: 7n, username: "老用户" });
 
     const user = await createAuthRepo(prisma).upsertUser("13800000004");
 
-    expect(user).toMatchObject({ id: "7", username: "老用户" });
+    expect(user).toMatchObject({ id: "7", username: "老用户", created: false });
     expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("新建号时 created=true —— 它就是响应里的 is_new_user", async () => {
+    // 少了这个标记，`is_new_user` 只能写死：写死 true 会让**每个老用户每次登录**
+    // 都被当成新注册（前端据此弹欢迎），写死 false 则新用户永远等不到引导。
+    const { prisma, findFirst, createMock } = fakePrisma();
+    findFirst.mockResolvedValue(null);
+    createMock.mockResolvedValue({ id: 8n, username: "用户0001" });
+
+    const user = await createAuthRepo(prisma).upsertUser("13800000005");
+
+    expect(user).toMatchObject({ id: "8", phone: "13800000005", created: true });
   });
 });

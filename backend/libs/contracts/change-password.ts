@@ -5,8 +5,16 @@ import { z } from "zod";
 // 前端文案/前端任务 IKBRCI 须与 8–20 对齐，不以工单初稿的 9–20 为准。
 export const changePasswordRequestSchema = z
   .object({
-    // 原密码 trim 后再判非空：纯空白原密码视为未提供（对齐旧 controller 的 trim 行为）。
-    original_password: z.string().trim().min(1),
+    /**
+     * 原密码。**可选**（IKJA4R）。
+     *
+     * <p>无口令的账号（手机号验证码建号）走的是「**设置**密码」，本来就没有原密码可给。
+     * 有口令的账号仍然必须提供——这一层只判「给没给」，「给的对不对」在身份域判
+     * （见 GLOSSARY「账号与密码」）。
+     *
+     * <p>trim 后再判非空：纯空白原密码视为未提供（对齐旧 controller 的 trim 行为）。
+     */
+    original_password: z.string().trim().min(1).optional(),
     // 新密码不 trim——密码可合法含首尾空格，只要求非空（长度口径 8–20 由网关兜底）。
     password: z.string().min(1),
   })

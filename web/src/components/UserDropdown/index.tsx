@@ -185,6 +185,8 @@ export default function UserDropdown() {
         <AccountModal
           userId={user.userId}
           nickname={user.username}
+          phone={user.phone ?? ''}
+          hasPassword={user.hasPassword}
           balance={credits}
           onClose={() => setShowAccount(false)}
         />

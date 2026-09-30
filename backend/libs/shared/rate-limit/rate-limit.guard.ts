@@ -95,9 +95,13 @@ export function extractKey(request: RequestWithUser, kind: RateLimitKey): string
     if (raw) return raw;
     return request.ip && request.ip.length > 0 ? request.ip : null;
   }
-  if (kind === "account") {
-    const username = (request.body as { username?: unknown } | undefined)?.username;
-    return typeof username === "string" && username.trim() ? username.trim() : null;
+  // account / phone 都取自请求体，只是字段名不同：登录用 `username`，发码用 `phone`。
+  // ⚠️ 少了 phone 这一支，发码的「同号 60 秒 1 条」桶会取不到键而**静默跳过**——
+  //    桶配了、看着有防护，实际一条都没拦。
+  if (kind === "account" || kind === "phone") {
+    const field = kind === "account" ? "username" : "phone";
+    const value = (request.body as Record<string, unknown> | undefined)?.[field];
+    return typeof value === "string" && value.trim() ? value.trim() : null;
   }
   const userId = request.user?.userId;
   return typeof userId === "string" && userId.length > 0 ? userId : null;

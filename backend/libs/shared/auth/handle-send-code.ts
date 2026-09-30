@@ -1,7 +1,5 @@
 import { FAILURE_CODE, fail, ok } from "@lib/contracts";
-import { type RequestSmsCodeDeps, requestSmsCode } from "@lib/core";
-
-const PHONE_RE = /^1[3-9]\d{9}$/;
+import { isValidPhone, type RequestSmsCodeDeps, requestSmsCode } from "@lib/core";
 
 export interface SendCodeInput {
   phone?: unknown;
@@ -13,8 +11,8 @@ export async function handleSendCode(
   input: SendCodeInput,
   deps: RequestSmsCodeDeps,
 ) {
-  const phone = typeof input.phone === "string" ? input.phone : "";
-  if (!PHONE_RE.test(phone)) {
+  const phone = input.phone;
+  if (!isValidPhone(phone)) {
     return fail(FAILURE_CODE, "手机号格式不正确");
   }
   try {

@@ -2,10 +2,12 @@
  * http 统一请求封装
  * - 产品：{code:200, data, msg}；code===200 解包 data，否则抛 ApiError（文案取 msg）并默认 toast
  * - 后台：{success:true, data} 仍兼容
- * - 登录态走 HttpOnly cookie；非 auth 接口 401：已登录则弹窗续接，未登录才清会话
+ * - 登录态：JWT 由前端保管，这里统一注入 `Authorization`（IKJAZN）；非 auth 接口 401：
+ *   已登录则弹窗续接，未登录才清会话
  * ============================================ */
 import { toast } from 'sonner';
 import { handleUnauthorized } from '@/utils/auth';
+import { getSessionToken } from '@/api/sessionToken';
 
 /** 接口路径前缀 */
 export const API_PREFIX = '/api';
@@ -96,7 +98,12 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 
   const headers = new Headers(init?.headers);
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  // 登录态走 HttpOnly 会话 cookie，浏览器自动携带，JS 不附加任何令牌头。
+  // 登录凭证：JWT 由前端保管，统一在这里注入（IKJAZN）。调用方显式传了就不覆盖。
+  // 迁移期后端**同时接受请求头与 cookie**，所以没有令牌时不必拦——老会话仍走得通。
+  const token = getSessionToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
 
   const timeoutController = new AbortController();
   let timedOut = false;
