@@ -40,15 +40,9 @@ def main() -> None:
                 return
         elif tool not in {'Grep', 'Glob'}:
             return
-        text = (f'[本仓 CBM] 当前目录 {root}。结构探索先 search_graph/trace_path；'
-                f'已有查询证据可复用，文本/日志/配置检索可继续。遵循 {RULE}，降级需说明依据。')
+        text = f'[本仓 CBM] 当前目录 {root}。结构探索前读取 {root / RULE}，按协议执行。'
     elif event in {'SessionStart', 'SubagentStart', 'UserPromptSubmit', 'CwdChanged'}:
-        text = (f'[本仓 CBM] 当前工作树 {root}。代码探索前必读 {root / RULE}：'
-                '先 list_projects/index_status 按 root_path 确认索引，缺索引先建立；'
-                '结构问题先 search_graph/trace_path，再精读与核验覆盖。'
-                '创建 worktree 只切换图谱，不是首次查询起点。'
-                '子代理须显式接收规则、目录与图谱证据，并确认 MCP 可用性；'
-                '收口说明查询支撑的结论或实际降级理由，建索引不算查询。')
+        text = f'[本仓 CBM] 当前工作树 {root}。代码探索或子代理交接前读取 {root / RULE}，按协议执行。'
     else:
         return
     if kimi:

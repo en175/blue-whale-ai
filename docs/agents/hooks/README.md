@@ -19,7 +19,7 @@
 | `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见；放行/阻断均审计，但不记企业、仓库、项目、Issue 等 MCP 参数值 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 | `remind-issue-state.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` | `PostToolUse` | **纯提醒型**，四端均挂载但始终 `exit 0`，不阻断、不审计、不自动改状态：worktree 入口带 `--issue` 成功后提醒置「进行中/修复中」；PR 创建后提醒打 `ready-for-review`；PR 合并后提醒置「已完成/已修复」（缺陷另打「修复待验证」）。状态机规则见 `docs/agents/issue-tracker.md`「任务状态机」 | CLAUDE.md「任务状态机」 |
 
-> ZCode / Claude Code 配置里有 1 条**纯提醒**型 hook（`Grep|Glob` → `cbm-discovery-gate.sh`，提示先查 CBM 图谱），不阻断执行、仅注入 context；Codex 无对应 CBM MCP，因此 `.codex/hooks.json` 不挂此 gate。`SessionStart` 同样显式排除：它只在会话启动/恢复时注入 context，不是工具调用 Gate，且各平台生命周期挂载不同。两者均不参与阻断等价比较。`remind-issue-state.sh` 也是纯提醒型（PostToolUse，恒 `exit 0`），但 gitee MCP 四端可用，故四端均挂载、参与 shape 等价比较。
+> CBM 纯提醒型 Hook 仅注入探索协议入口，始终放行。五端配置与上下文通道见 [CBM 五端探索提醒](#cbm-五端探索提醒)。探索提醒与会话上下文注入均不参与阻断契约的等价比较。`remind-issue-state.sh` 也是纯提醒型（PostToolUse，恒 `exit 0`），但 gitee MCP 四端可用，故四端均挂载、参与 shape 等价比较。
 
 ---
 
@@ -178,7 +178,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 夹具还校验 ZCode / Claude Code / Codex / Kimi CLI 挂载层：
 - `.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json`、`.kimi-code/hooks.toml` 必须存在。
 - 平台中立的**阻断型** `PreToolUse` / `PostToolUse` 事件、matcher、Hook 数量和权威 Gate 必须四端等价。
-- 提醒型 `Grep|Glob` 只注入 context、不阻断，且 Codex 无对应 CBM MCP；`SessionStart` 只注入会话启动/恢复 context、不是工具调用 Gate，且各平台生命周期挂载不同（Kimi 仅 `startup|resume`）。两者显式排除于阻断等价比较。
+- CBM 探索提醒与会话上下文注入按客户端实际能力挂载，不参与阻断契约的等价比较，配置见 [CBM 五端探索提醒](#cbm-五端探索提醒)。
 - 所有 Codex 脚本 command 必须通过 `.codex/hooks/run-claude-pretool.sh`，不得直接指向 `.claude/hooks/` 或复制出来的 `.codex/hooks/` 实现。
 - 每个 Codex 包装命令必须和同位置 ZCode / Claude Code Hook 挂载的脚本名一致。
 - 代表性 Codex 包装命令必须从 `.codex/hooks.json` 读取，并能从 repo root 调到权威脚本得到相同拦截/放行结果。
