@@ -24,6 +24,7 @@ import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
 import AudioTrimOverlay from './AudioTrimOverlay';
 import AudioPlayer, { useAudioTrimSeekBridge } from './AudioPlayer';
+import VideoPlayerControls, { toggleVideoPlayback } from './VideoPlayerControls';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
@@ -61,6 +62,17 @@ function HandlePlus() {
 /** 真实时长文案（秒取整）；未知或非正返回空串，标题右侧据此留空 */
 const durationLabel = (duration?: number) =>
   typeof duration === 'number' && duration > 0 ? `${Math.round(duration)}s` : '';
+
+/** 画面区点击判定位移阈值（像素）：按下到松开位移不超过它才算点击，超过视为拖动整卡 */
+const VIDEO_CLICK_SLOP_PX = 6;
+
+/** 画面区点击判定（IKI5YM）：按下坐标到松开坐标位移超阈值即拖动整卡，不算点击。
+ *  树内 video 走 React 合成事件、收养会话元素走命令式原生监听——两端共用同一条判定 */
+function isVideoClickSlop(press: { x: number; y: number }, clientX: number, clientY: number) {
+  const dx = clientX - press.x;
+  const dy = clientY - press.y;
+  return dx * dx + dy * dy > VIDEO_CLICK_SLOP_PX ** 2;
+}
 
 /** 正在等首帧 seeked 的 video，避免 loadedmetadata / loadeddata / effect 叠监听 */
 const pendingFirstFrameSeek = new WeakSet<HTMLVideoElement>();
@@ -415,8 +427,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
    *  subtitleErasePaused 注入）两模式都要停帧并关掉原生播放/进度条控件——智能模式不再
    *  注入框层，没有 inset:0 覆盖层替视频挡控件，controls 必须自己关；指针一并交还画布。 */
   const subtitleEraseLocked = data.subtitleEraseEditing != null || data.subtitleErasePaused === true;
-  /** 原生控件只给「当前选中」的视频卡。选择工具下所有卡都开 controls 时，
-   *  Chromium 视频 GPU 层会把工具栏/小地图的点击偷走：节点被选中且直接开播。 */
+  /** 树内 <video> + 自绘播放控件只给「当前选中」的视频卡（IKI5YM 起自绘控件替代原生
+   *  controls）。选择工具下所有卡都渲染可播 video 时，Chromium 视频 GPU 层会把工具栏/
+   *  小地图的点击偷走：节点被选中且直接开播。 */
   const videoInteractive = Boolean(selected) && isSelect && !subtitleEraseLocked;
   const [videoControlsArmed, setVideoControlsArmed] = useState(false);
   /** 悬停预览会话占屏中（IKJ7RS）：起播置 true，停止翻回；真值期树内布防延后——
@@ -425,6 +438,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
    *  IKJ7OS 评审收口（故事 16/决策 8）：收养（adopted）会话定格/让位后保持 true——
    *  占屏语义持续阻断树内布防，不重建元素，末帧定格保持挂载。 */
   const [hoverPlaying, setHoverPlaying] = useState(false);
+  /** 收养会话元素的稳定 ref（IKI5YM 审查修订）：悬停会话元素不在 React ref 里（命令式
+   *  移入播放层），收养时经 state 持有——引用跨渲染稳定，VideoPlayerControls 的事件监听
+   *  不因重渲染反复挂卸；完整收尾（非 keepFrame）即清空 */
+  const [adoptedVideoRef, setAdoptedVideoRef] = useState<React.RefObject<HTMLVideoElement | null> | null>(null);
+  /** 画面区按下坐标（IKI5YM）：树内 video 与收养会话元素共用——click 时判定位移，拖动松手不误触 */
+  const videoPressRef = useRef<{ x: number; y: number } | null>(null);
   /** 悬停预览播放层宿主：空层零视觉零命中；开播时把离屏解码 video 命令式移入本层 */
   const hoverPreviewHostRef = useRef<HTMLDivElement | null>(null);
   /** 悬停会话（元素 + 监听 + 原址）：IKJ7RS 未选中卡元素即离屏解码 videoRef.current，
@@ -437,7 +456,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     homeHost: Node | null;
     /** 选中卡树内控件会话：元素留在树内原位（无播放层迁移） */
     inTree: boolean;
-    /** 手动让位：用户经原生控件暂停过（play/seeked 重新接管即清除） */
+    /** 手动让位：用户经控件或画面点击暂停过（play/seeked 重新接管即清除） */
     yielded: boolean;
     /** 点选过渡收养（IKJ7OS 故事 16）：控件布防到本会话元素——收尾保持画面
      *  （定格末帧/让位暂停帧留播放层），不归位不清层不重建（决策 8） */
@@ -446,6 +465,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     onPause?: () => void;
     onPlay?: () => void;
     onSeeked?: () => void;
+    /** 收养会话画面区点击切换播放监听（IKI5YM 审查修订，命令式挂原生事件） */
+    onVideoMouseDown?: (event: MouseEvent) => void;
+    onVideoClick?: (event: MouseEvent) => void;
   } | null>(null);
   /** 100ms 布防计时器：计时内移开即取消（划过不播，保持首帧海报） */
   const hoverTimerRef = useRef<number | null>(null);
@@ -457,7 +479,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       return;
     }
     // 点选过渡（IKJ7RS 建；IKJ7OS 改收养布防）：悬停播放中的卡被点选，树内布防被会话占屏
-    // （hoverPlaying）阻断——控件由收养 effect 80ms 后开在同一会话元素上（故事 16），
+    // （hoverPlaying）阻断——自绘控件由收养逻辑叠加在同一会话元素上（IKI5YM 审查修订），
     // 不重建树内元素，声画不中断、定格保持挂载（决策 8）
     if (hoverPlaying) return;
     const timer = window.setTimeout(() => setVideoControlsArmed(true), 80);
@@ -613,7 +635,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   /** 悬停预览排除态与起播门（IKJ7RS 建链；IKJ7S1 翻转起播门）：blocked=会话排除态
    *  （会话中出现即停，含多选抑制），eligible=起播门（选中卡与未选中卡同门——选中已布防卡
    *  在树内控件视频上就地开播）。入参不含「选中」：选中本身不是排除态，点选过渡续播不被停，
-   *  过渡后控件布防由组件内收养逻辑承担（IKJ7OS 故事 16）。 */
+   *  过渡后自绘控件叠加由组件内收养逻辑承担（IKJ7OS 故事 16 建；IKI5YM 审查修订去原生控件）。 */
   const hoverPreviewInput = {
     mediaType: data.mediaType,
     src: data.src,
@@ -652,6 +674,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       if (session.onPause) session.video.removeEventListener('pause', session.onPause);
       if (session.onPlay) session.video.removeEventListener('play', session.onPlay);
       if (session.onSeeked) session.video.removeEventListener('seeked', session.onSeeked);
+      if (session.onVideoMouseDown) session.video.removeEventListener('mousedown', session.onVideoMouseDown);
+      if (session.onVideoClick) session.video.removeEventListener('click', session.onVideoClick);
+      // 收养态命中恢复随完整收尾撤销（归位即回未选中纯展示的层穿透口径）
+      session.video.classList.remove(styles.adopted);
       session.video.pause();
       if (!session.inTree) {
         try {
@@ -668,6 +694,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     }
     const host = hoverPreviewHostRef.current;
     while (host && host.firstChild) host.removeChild(host.firstChild);
+    setAdoptedVideoRef(null);
     setHoverPlaying(false);
   }, []);
 
@@ -699,30 +726,46 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     return { onPause, onPlay, onSeeked };
   }, []);
 
-  /** 收养离屏悬停会话为选中卡控件会话（IKJ7OS 故事 16/决策 8）：按 80ms 布防语义把
-   *  原生控件开在会话元素上（不重建树内元素，声画不中断），补挂让位/接管监听（树内
-   *  会话同款，手动暂停/拖进度的让位规则同样生效）。收养会话收尾保持画面（定格末帧/
-   *  让位暂停帧留播放层），重入经离屏路重播收养，全程不重建元素。两个入口：点选过渡
-   *  （选中翻转 effect）与选中态离屏开播（startHoverPlayback，重播轮）。 */
+  /** 收养离屏悬停会话为选中卡控件会话（IKJ7OS 故事 16 建；IKI5YM 审查修订去原生控件）：
+   *  不再对会话元素开原生 controls（原生控件正是画面区拖不动整卡的根因），改为把树内
+   *  同款自绘控件（VideoPlayerControls）经稳定 ref 叠加到会话元素上，补挂让位/接管监听
+   *  （树内会话同款，手动暂停/拖进度的让位规则同样生效）与画面区点击切换播放（6px
+   *  位移阈值，拖动整卡松手不误触）。收养期恢复指针命中（styles.adopted）：层穿透合同
+   *  （!832）只约束未选中悬停纯展示期。收养会话收尾保持画面（定格末帧/让位暂停帧留
+   *  播放层），重入经离屏路重播收养，全程不重建元素。两个入口：点选过渡（选中翻转
+   *  effect）与选中态离屏开播（startHoverPlayback，重播轮）。 */
   const adoptHoverSession = useCallback((session: { video: HTMLVideoElement; adopted?: boolean; onPause?: () => void; onPlay?: () => void; onSeeked?: () => void }) => {
     session.adopted = true;
     Object.assign(session, attachControlListeners(session.video));
-    window.setTimeout(() => {
-      if (hoverSessionRef.current === session) session.video.controls = true;
-    }, 80);
+    const onVideoMouseDown = (event: MouseEvent) => {
+      videoPressRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const onVideoClick = (event: MouseEvent) => {
+      const press = videoPressRef.current;
+      videoPressRef.current = null;
+      if (!press || isVideoClickSlop(press, event.clientX, event.clientY)) return;
+      toggleVideoPlayback(session.video);
+    };
+    session.video.addEventListener('mousedown', onVideoMouseDown);
+    session.video.addEventListener('click', onVideoClick);
+    Object.assign(session, { onVideoMouseDown, onVideoClick });
+    // 层穿透失效换收养态命中：画面可拖整卡、可点切换播放
+    session.video.classList.add(styles.adopted);
+    // 自绘控件叠加（state 持稳定 ref，引用不变则控件的事件监听不反复挂卸）
+    setAdoptedVideoRef((prev) => (prev?.current === session.video ? prev : { current: session.video }));
   }, [attachControlListeners]);
 
   /** 开播（IKJ7RS 建；IKJ7S1 分双路）。未选中卡：把离屏解码元素移入内容区播放层，同一元素
-   *  从头、有声开播。选中已布防卡：树内控件视频就地从头开播（原生控件保留，muted/volume
-   *  维持用户控件状态——元素存活期内有效，不做任何记忆）。两路 play() 被浏览器自动播放
-   *  策略拒绝时静默降级静音重试（catch 分支，无任何提示，不做预先探测）。 */
+   *  从头、有声开播。选中已布防卡：树内控件视频就地从头开播（IKI5YM 合并后无原生控件，
+   *  自绘控件承担暂停/进度，muted/volume 维持元素状态——元素存活期内有效，不做任何记忆）。
+   *  两路 play() 被浏览器自动播放策略拒绝时静默降级静音重试（catch 分支，无任何提示，不做预先探测）。 */
   const startHoverPlayback = useCallback(() => {
     const video = videoRef.current;
     if (!video || hoverSessionRef.current) return;
     const host = hoverPreviewHostRef.current;
     if (host == null) {
       // 选中卡树内控件路（IKJ7S1）：布防后播放层未渲染（host 为 null）即是本路。
-      // 已在播放（用户经原生控件手动开播）时不接管不归零，原生行为照旧。
+      // 已在播放（用户经自绘控件或画面点击手动开播）时不接管不归零，用户行为照旧。
       if (!video.paused) return;
       const onEnded = () => {
         // 本轮播完定格末帧（树内元素原位停住）；hoverPlaying 翻回不影响已完成的布防
@@ -757,9 +800,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     video.addEventListener('ended', onEnded);
     while (host.firstChild) host.removeChild(host.firstChild);
     host.appendChild(video);
-    // 开播即纯展示（!832 合同）：收养会话曾把 controls 开在本元素上，取消选中归位后
-    // 再次悬停开播须复位为无控件（收养布防的对称操作）
-    video.controls = false;
     try {
       video.currentTime = 0;
     } catch {
@@ -849,9 +889,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     hoverTimerRef.current = null;
   }, [selected]);
 
-  /** 点选过渡收养（IKJ7OS 故事 16）：点击正在悬停播放的未布防卡，收养悬停会话——控件
-   *  80ms 后开在同一元素上、让位监听补挂。即刻收养而非计时后：点选后 80ms 内播完的
-   *  竞态同样保持定格挂载（决策 8：定格=暂停在结尾、保持挂载，不重建树内元素回首帧）。 */
+  /** 点选过渡收养（IKJ7OS 故事 16；IKI5YM 审查修订去原生控件）：点击正在悬停播放的
+   *  未布防卡，收养悬停会话——自绘控件叠加在同一元素上、让位/点击监听补挂。即刻收养
+   *  而非计时后：点选后即刻播完的竞态同样保持定格挂载（决策 8：定格=暂停在结尾、
+   *  保持挂载，不重建树内元素回首帧）。 */
   useEffect(() => {
     if (!selected || !hoverPlaying) return;
     const session = hoverSessionRef.current;
@@ -922,13 +963,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     video.muted = true;
     video.playsInline = true;
     video.preload = 'auto';
-    video.controls = false;
-    video.disablePictureInPicture = true;
-    /* 收养布防（IKJ7OS 故事 16）把原生控件开在本元素上：nodrag/nopan 防在控件上拖进度/
-       音量连动节点拖动（React Flow 沿祖先链找 .nodrag 放行），controlsList 与树内元素
-       同口径禁下载/倍速/远程投放 */
-    video.className = 'nodrag nopan';
-    video.setAttribute('controlslist', 'nodownload noplaybackrate noremoteplayback nopictureinpicture');
+    /* 画面区裸给 React Flow（IKI5YM 审查修订）：nodrag/nopan 随收养期原生控件一并移除
+       ——该 class 当时的存在理由是收养布防的原生控件防误拖，理由消失即移除，画面区回归
+       节点拖拽路径；controlsList/禁画中画等只为原生控件服务的配置同批清理，播放控制由
+       收养自绘控件（adoptHoverSession 叠加）与画面区点击切换承担 */
     videoRef.current = video;
     for (const source of videoSourceList(data.src, data.srcH264)) {
       const el = document.createElement('source');
@@ -964,6 +1002,19 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     // code 1（MEDIA_ERR_ABORTED）多为换源主动中止，不算失败
     if (code === 1) return;
     setVideoError({ code });
+  }, []);
+
+  /** 画面区点击播放/暂停（IKI5YM）：自绘控件无原生画面点击行为，按下坐标供 click 判定
+   *  位移——拖动整卡松开时浏览器仍派发 click，位移超阈值不算点击，防误触播放。
+   *  收养会话元素走命令式监听（adoptHoverSession），与此处共用按下坐标与判定 */
+  const handleVideoPressDown = useCallback((event: React.MouseEvent<HTMLVideoElement>) => {
+    videoPressRef.current = { x: event.clientX, y: event.clientY };
+  }, []);
+  const handleVideoClick = useCallback((event: React.MouseEvent<HTMLVideoElement>) => {
+    const press = videoPressRef.current;
+    videoPressRef.current = null;
+    if (!press || isVideoClickSlop(press, event.clientX, event.clientY)) return;
+    toggleVideoPlayback(videoRef.current);
   }, []);
 
   const isAudio = data.mediaType === 'audio';
@@ -1423,26 +1474,35 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             ) : (
               /* 双源播放：主源编码未知不标 codecs，H.264 兜底标 avc1——主源解码失败
                  （如 H.265 遇无 HEVC 扩展的 Windows/Edge）浏览器自动落到次选 source。
-                 合成层放在包裹层：直接打在 <video> 上会穿透画布工具栏/小地图的命中。 */
+                 合成层放在包裹层：直接打在 <video> 上会穿透画布工具栏/小地图的命中。
+                 IKI5YM：video 不挂 nodrag（画面区回归节点拖拽路径，对齐图片卡）、
+                 去原生 controls（shadow DOM 无法只对画面区放行指针）；播放能力由
+                 VideoPlayerControls 自绘控件承担，其交互子元素自带 nodrag。 */
               <div className={styles.mediaVideoLayer}>
                 {videoControlsArmed ? (
-                  <video
-                    ref={videoRef}
-                    className={`${styles.mediaVideo} nodrag nopan`}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    disablePictureInPicture
-                    disableRemotePlayback
-                    controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
-                    onLoadedMetadata={handleVideoReady}
-                    onLoadedData={handleVideoReady}
-                    onError={handleVideoError}
-                  >
-                    {videoSourceList(data.src, data.srcH264).map((source) => (
-                      <source key={source.src} src={source.src} type={source.type} />
-                    ))}
-                  </video>
+                  <>
+                    <video
+                      ref={videoRef}
+                      className={styles.mediaVideo}
+                      playsInline
+                      preload="metadata"
+                      disablePictureInPicture
+                      draggable={false}
+                      onLoadedMetadata={handleVideoReady}
+                      onLoadedData={handleVideoReady}
+                      onError={handleVideoError}
+                      onMouseDown={handleVideoPressDown}
+                      onClick={handleVideoClick}
+                    >
+                      {videoSourceList(data.src, data.srcH264).map((source) => (
+                        <source key={source.src} src={source.src} type={source.type} />
+                      ))}
+                    </video>
+                    <VideoPlayerControls
+                      videoRef={videoRef}
+                      duration={typeof data.duration === 'number' ? data.duration : undefined}
+                    />
+                  </>
                 ) : (
                   <>
                     <canvas ref={videoPosterRef} className={styles.mediaVideoPoster} aria-hidden />
@@ -1455,6 +1515,16 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
                       aria-hidden
                       data-testid="video-hover-preview"
                     />
+                    {/* 收养会话自绘控件（IKI5YM 审查修订）：点选过渡后原生控件不再回归，
+                        树内同款控件经稳定 ref（adoptedVideoRef）叠加到悬停会话元素上——
+                        会话元素在播放层内、不在 React ref 里，hoverPlaying 占屏阻断树内布防
+                        （videoControlsArmed 恒 false），收养期即本分支唯一控件 */}
+                    {selected && hoverPlaying && adoptedVideoRef && (
+                      <VideoPlayerControls
+                        videoRef={adoptedVideoRef}
+                        duration={typeof data.duration === 'number' ? data.duration : undefined}
+                      />
+                    )}
                   </>
                 )}
               </div>

@@ -257,11 +257,60 @@
   background-color: #000;
 }
 
-/* 隐藏 Chromium/Edge 原生控件右下角三点溢出菜单（树内 .mediaVideo 与收养布防后的
-   悬停层 video 同口径） */
-.mediaVideo::-webkit-media-controls-overflow-button,
-.mediaHoverPreviewLayer video::-webkit-media-controls-overflow-button {
-  display: none;
+/* 自绘视频控制条（IKI5YM）：叠加画面底部，nodrag/nopan 由组件内交互子元素类承担；
+   z-index 低于编辑态锁定层（inline zIndex 5）——编辑期间控件不可达 */
+.videoControlsBar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 6px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+}
+
+.videoPlayBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background-color: rgba(46, 46, 46, 0.9);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.videoPlayBtn:hover {
+  background-color: #3a3a3a;
+}
+
+.videoTrack {
+  flex: 1;
+  position: relative;
+  height: 4px;
+  border-radius: 9999px;
+  background-color: rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+}
+
+.videoTrackFill {
+  height: 100%;
+  border-radius: 9999px;
+  background-color: #fff;
+}
+
+.videoTime {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 /* 悬停预览播放层（IKJ7RS）：absolute 铺满 .mediaVideoLayer、盖在首帧画布上，空层零视觉；
@@ -282,9 +331,11 @@
   background-color: #000;
 }
 
-/* 点选过渡收养控件（IKJ7OS 故事 16）：控件布防开在悬停会话元素上（不重建树内元素），
-   带 controls 属性即恢复指针命中让控件可点——层穿透合同（!832）只对无控件纯展示期生效 */
-.mediaHoverPreviewLayer video[controls] {
+/* 点选过渡收养（IKJ7OS 故事 16 建；IKI5YM 审查修订去原生控件改自绘控件）：收养会话的
+   画面区回归节点拖拽路径（video 不挂 nodrag），层穿透合同（!832）只约束未选中悬停纯
+   展示期——收养期由收养逻辑挂 styles.adopted 恢复命中：画面可拖整卡、可点切换播放；
+   自绘控件渲染在 React 树内（播放层之外），不受层穿透影响 */
+.mediaHoverPreviewLayer video.adopted {
   pointer-events: auto;
 }
 
