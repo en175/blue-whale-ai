@@ -7,6 +7,7 @@ import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText,
+  Wallet,
   Settings,
   LogOut,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ import { USER_DROPDOWN_MENU_ITEMS } from './menuItems';
 
 const menuIcons = {
   account: FileText,
+  credits: Wallet,
   settings: Settings,
 } as const;
 
@@ -148,6 +150,7 @@ export default function UserDropdown() {
                   onClick={() => {
                     setOpen(false);
                     if (item.key === 'account') setShowAccount(true);
+                    if (item.key === 'credits') window.open('/account/credits', '_blank', 'noopener,noreferrer');
                     if (item.key === 'settings') navigate('/admin');
                   }}
                 >
