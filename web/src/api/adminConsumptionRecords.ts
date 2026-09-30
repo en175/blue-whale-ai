@@ -16,6 +16,25 @@ export interface AdminConsumptionRecord {
   id: string;
   /** 归属用户。**管理面独有的列**——用户面契约里没有它 */
   user_id: number;
+  /**
+   * 昵称。BFF 回我们自己的库按 `user_id` 补的——billing 的账本认不出人。
+   *
+   * ⚠️ 可选（`?`）不是多余：与下面的 `reserved_credits` 同一条规矩 —— **后端比前端旧**时
+   *    这个键**整个不存在**（老构建压根没投影它），拿到的是 `undefined`。本仓实测过一次
+   *    这种半上线形态（2026-09-26）。所以判空只能写 `?? '—'` / `== null`，
+   *    写 `=== null` 会漏掉 `undefined` 那一半。
+   *
+   * `null` = 查不到这个用户（跨库历史、被清理）**或**这个用户没有手机号 —— 后端已经
+   * 把两种收敛成了同一种，**没有第二种「没有」**（见控制器里那句 `|| null`）。
+   */
+  nickname?: string | null;
+  /**
+   * 手机号。可选性与 `null` 的含义与上面的 `nickname` 逐字相同。
+   *
+   * 为什么 `null` 是常态而不是异常：`bw_users.phone` 可空，**存量用户没有它**（见
+   * `backend/prisma/schema.prisma` 里 `phone` 那段注释）——老用户那一列本来就该显示「—」。
+   */
+  phone?: string | null;
   type: string;
   /** in | out */
   direction: string;
@@ -73,8 +92,15 @@ export interface AdminConsumptionRecordListData {
 }
 
 export interface AdminConsumptionRecordQuery {
-  /** 空 = **全站消费** */
-  userId?: string;
+  /**
+   * 用户 ID / 手机号 / 昵称，**都要完整**（服务端精确匹配，收敛到唯一一个人）。
+   * 空 = **全站消费**。
+   *
+   * ⚠️ 与用户管理页那个 `keyword` 是**两种东西**：那边是模糊匹配（多命中几行没关系），
+   *    这边必须唯一命中——账本按 `user_id` 过滤，服务端也只收一个。同样的输入在两页
+   *    行为不同，所以这里的 placeholder 得写明「需完整」。
+   */
+  keyword?: string;
   /** 单值（consume | recharge | ...）；空 = 全部。多值会被 billing 拒成 400 */
   type?: string;
   pageSize: number;
@@ -93,7 +119,7 @@ export function fetchAdminConsumptionRecords(
 ): Promise<AdminConsumptionRecordListData> {
   const qs = new URLSearchParams();
   qs.set('pageSize', String(query.pageSize));
-  if (query.userId) qs.set('userId', query.userId);
+  if (query.keyword) qs.set('keyword', query.keyword);
   if (query.type) qs.set('type', query.type);
   if (query.pageToken) qs.set('pageToken', query.pageToken);
   return apiRequest<AdminConsumptionRecordListData>(

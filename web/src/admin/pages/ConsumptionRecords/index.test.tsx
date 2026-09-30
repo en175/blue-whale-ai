@@ -3,6 +3,7 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AdminConsumptionRecord } from '@/api/adminConsumptionRecords';
 import ConsumptionRecords from './index';
 
 const api = vi.hoisted(() => ({ fetchAdminConsumptionRecords: vi.fn() }));
@@ -28,6 +29,9 @@ let mountNode: HTMLDivElement;
 const ITEM = {
   id: 'res:7',
   user_id: 9001,
+  // BFF 回我们自己的库按 user_id 补的展示身份（billing 的账本认不出人）
+  nickname: '张小明',
+  phone: '13800008888',
   type: 'consume',
   direction: 'out',
   title: '视频生成 · seedance-2.5',
@@ -117,19 +121,21 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     expect(document.body.textContent).toContain('积分记录');
   });
 
-  it('首次加载不带游标，且因为是全站视图所以 userId 一个也不传', async () => {
+  it('首次加载不带游标，且因为是全站视图所以 keyword 一个也不传', async () => {
     await renderPage();
 
     expect(api.fetchAdminConsumptionRecords).toHaveBeenCalledTimes(1);
     expect(tokenOfCall(1)).toBe('');
-    // userId 不在参数里 —— 传 undefined 与「不过滤」在契约上是两回事
-    expect(api.fetchAdminConsumptionRecords.mock.calls[0]?.[0]).not.toHaveProperty('userId');
+    // keyword 不在参数里 —— 传 undefined 与「不过滤」在契约上是两回事
+    expect(api.fetchAdminConsumptionRecords.mock.calls[0]?.[0]).not.toHaveProperty('keyword');
   });
 
   it('渲染归属用户、任务类别与带方向的金额', async () => {
     await renderPage();
 
-    expect(document.body.textContent).toContain('9001');
+    // 归属用户现在显示的是**昵称与手机号**（用户 ID 收进了悬停面板，见下面「用户列」那个 describe）
+    expect(document.body.textContent).toContain('张小明');
+    expect(document.body.textContent).toContain('13800008888');
     // 任务列只放**类别**（模型名与提示词都收在明细面板里，见下面那个 describe）
     expect(document.body.textContent).toContain('视频');
     expect(document.body.textContent).toContain('-30');
@@ -276,19 +282,19 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     expect(tokenOfCall(2)).toBe('tok-1');
 
     const userInput = document.body.querySelector<HTMLInputElement>(
-      'input[placeholder="用户 ID（留空 = 全站）"]',
+      'input[placeholder="用户 ID / 手机号 / 昵称（需完整，留空 = 全站）"]',
     );
-    if (!userInput) throw new Error('用户 ID 输入框未渲染');
+    if (!userInput) throw new Error('用户输入框未渲染');
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     await act(async () => {
-      setter?.call(userInput, '9001');
+      setter?.call(userInput, '13800008888');
       userInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await click('查询');
 
     // 换了条件还停在原游标上，翻出来的页与看到的条件对不上
     expect(tokenOfCall(3)).toBe('');
-    expect(api.fetchAdminConsumptionRecords.mock.calls[2]?.[0]?.userId).toBe('9001');
+    expect(api.fetchAdminConsumptionRecords.mock.calls[2]?.[0]?.keyword).toBe('13800008888');
   });
 });
 
@@ -310,6 +316,9 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
     return {
       id: 'lot:12',
       user_id: 9001,
+      // 查不到用户（跨库历史 / 被清理）——「没有昵称手机号」的唯一形态
+      nickname: null,
+      phone: null,
       type: 'recharge',
       direction: 'in',
       title: '充值到账',
@@ -408,5 +417,83 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
 
     expect(document.body.textContent).toContain('充值到账');
     expect(document.body.textContent).not.toContain('Unexpected Application Error');
+  });
+});
+
+describe('ConsumptionRecords — 用户列', () => {
+  function headers(): string[] {
+    return [...document.body.querySelectorAll('th')].map((th) => th.textContent?.trim() ?? '');
+  }
+
+  /** 悬停昵称格的触发器（面板 portal 到 body，悬停后才出现）。 */
+  async function hoverUserDetail() {
+    const trigger = document.body.querySelector<HTMLButtonElement>('button[aria-label="用户明细"]');
+    if (!trigger) throw new Error('没有找到用户明细触发器');
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    await settle();
+  }
+
+  it('列头是「昵称」「手机号」，不再有「用户 ID」列', async () => {
+    await renderPage();
+
+    expect(headers()).toContain('昵称');
+    expect(headers()).toContain('手机号');
+    // 用户 ID 收进悬停面板 —— 常驻列的位置留给运营真正用来认人的两个字段
+    expect(headers()).not.toContain('用户 ID');
+  });
+
+  it('昵称与手机号来自 BFF 回填，直接渲染在行里', async () => {
+    await renderPage();
+
+    expect(document.body.textContent).toContain('张小明');
+    expect(document.body.textContent).toContain('13800008888');
+  });
+
+  it('用户 ID 收在悬停面板里', async () => {
+    await renderPage();
+
+    await hoverUserDetail();
+
+    expect(document.body.textContent).toContain('9001');
+  });
+
+  it('查不到用户（昵称手机号都是 null）→ 显示「—」，不是空白也不是崩', async () => {
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [{ ...ITEM, nickname: null, phone: null }],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    // 按列序取：时间(0) 昵称(1) 手机号(2) …
+    const cells = [...document.querySelectorAll('tbody tr td')].map(
+      (td) => td.textContent?.trim() ?? '',
+    );
+    // 两格都必须是「—」：空白读起来像「还在加载」，而这是查询已经答完的结论
+    expect(cells[1]).toBe('—');
+    expect(cells[2]).toBe('—');
+  });
+
+  it('后端比前端旧、昵称手机号**整个键都不回**时同样显示「—」，不崩', async () => {
+    // 与 reserved_credits 同一个坑：`undefined` 也是「没有」。这里渲染写的是 `?? '—'`，
+    // 两种形态一起兜住 —— 用真值判断或 `=== null` 就会把它渲染成空白。
+    // 类型上这俩字段是**可选**的，所以 `delete` 合法：这不是在骗类型，而是在造旧后端那种回包。
+    const noIdentity: AdminConsumptionRecord = { ...ITEM };
+    delete noIdentity.nickname;
+    delete noIdentity.phone;
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [noIdentity],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    const cells = [...document.querySelectorAll('tbody tr td')].map(
+      (td) => td.textContent?.trim() ?? '',
+    );
+    expect(cells[1]).toBe('—');
+    expect(cells[2]).toBe('—');
   });
 });

@@ -239,6 +239,22 @@ export class IdentityService {
   }
 
   /**
+   * 关键词 → 一个 userId（**精确**）。给积分记录页用：账本只认 `user_id`，
+   * 而运营手上只有手机号或昵称。
+   *
+   * <p>与 {@link #listAdminUsers} 的模糊关键词刻意分开：那边多命中几行是正常的，
+   * 这边必须是一个人或没有人——billing 那条 rpc 只收一个 `user_id`。
+   */
+  async findAdminUserIdByKeyword(keyword: string) {
+    return this.adminUsers.findUserIdByKeyword(keyword);
+  }
+
+  /** 按 userId 批量取昵称 / 手机号，给积分记录页回填展示用。 */
+  async loadAdminUserIdentities(userIds: readonly number[]) {
+    return this.adminUsers.loadUserIdentities(userIds);
+  }
+
+  /**
    * 冻结 / 解冻账号 —— 写 `bw_users.status`。
    *
    * <p>原先这条和「加扣余额」挤在 new-api 的同一个 manage 接口里。new-api 独立后

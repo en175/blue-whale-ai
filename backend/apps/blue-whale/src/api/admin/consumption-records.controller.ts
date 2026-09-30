@@ -2,6 +2,7 @@ import { Controller, Get, Query, UseGuards } from "@nestjs/common";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { BillingAdminConfigError, BillingAdminError, listAdminTransactions } from "@lib/shared/billing/billing-admin-client.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -42,30 +43,56 @@ function parsePageSize(raw: string | undefined): number {
  * 所以本控制器是**唯一同时够得着两边的地方**：从 billing 取这一页流水，收齐 job id，
  * 回自己库批量查一次，合并进同一个响应。前端一次请求就能把一行讲清楚，
  * 不必再发第二次、也不必自己做 join（那还会多出两次请求之间的竞态）。
+ *
+ * <p><b>昵称 / 手机号是同一个道理，第二份实例</b>：billing 的账本里只有 {@code user_id}，
+ * 认不出人（同样读不到 `bw_users`）。所以要「按手机号查」没法在 billing 侧做——先回自己库
+ * 把关键词**精确**解成一个 userId，再拿这个 id 走 billing 现成的那条 `user_id` 过滤；
+ * 列表上的昵称 / 手机号也是这一页的 user_id 集合批量查回来的。**billing 与 proto 一个字没动。**
  */
 @Controller("admin/consumption-records")
 @UseGuards(AdminGuard)
 export class AdminConsumptionRecordsController {
-  constructor(private readonly jobs: JobsService) {}
+  constructor(
+    private readonly jobs: JobsService,
+    private readonly identity: IdentityService,
+  ) {}
 
   /**
-   * GET /api/admin/consumption-records?userId=&type=&pageSize=&pageToken=
+   * GET /api/admin/consumption-records?keyword=&type=&pageSize=&pageToken=
    *
-   * @param userId 不传 = **全站消费**（管理端独有；用户面没有这个自由度）
-   * @param type   单值（consume | recharge | ...），空 = 全部
+   * @param keyword 用户 ID / 手机号 / 昵称，**都要完整**（精确匹配）。空 = **全站**（管理端独有；
+   *                用户面没有这个自由度）
+   * @param type    单值（consume | recharge | ...），空 = 全部
    */
   @Get()
   async list(@Query() query: Record<string, string> = {}) {
     const typeFilter = query.type?.trim() ?? "";
 
-    const rawUserId = query.userId?.trim();
+    // ⚠️ 还认着旧的 `userId`。前端与后端**不是原子发版**（本仓 2026-09-26 实测过一次：
+    //    3100 上跑着 4 小时前的构建），一个还没刷新的管理页仍会发 `?userId=42`。
+    //    不认它的后果不是报错，而是**静默回一页全站流水**——运营以为筛了那个人，
+    //    实际拿到的是所有人的账。这正是本文件反复反对的那类「不报错的假话」。
+    //    数字落进 findAdminUserIdByKeyword 会被当成用户 ID 解，语义与旧版一致。
+    const keyword = (query.keyword ?? query.userId ?? "").trim();
+
+    // 关键词在我们库里解成一个 userId：billing 不共享库（ADR-0114），`bw_users` 它读不到，
+    // 手机号这一层它永远答不出。**查不到人就回空页，不问 billing** —— 账本按 user_id 过滤，
+    // 这边都认不出这个人，那边一条也对不上。
+    //
+    // ⚠️ 空页与「查到了人但没有流水」在界面上同形，这是**接受的**：真报错的话，运营只是
+    //    打错一位数就得先分清是哪一种，而账本页要的是「输错了立刻看得出来」——
+    //    所以页面的空态文案保持中性，不去断言「这个人没消费过」。
+    //
+    // ⚠️ 这一步刻意留在 try **外面**（同 `parsePageSize`）：它查的是**我们自己的库**，
+    //    失败是「我们的库挂了」，不是 `toConsumptionError` 那两种 billing 故障。
+    //    塞进去会被兜成 502「积分记录查询失败：未知错误」，把值班的人指向 billing——
+    //    而那边其实好好的。让它照常冒成 500。
     let userId: number | undefined;
-    if (rawUserId) {
-      const parsed = Number(rawUserId);
-      if (!Number.isInteger(parsed) || parsed <= 0) {
-        throw new AdminException(400, "userId 须为正整数");
+    if (keyword) {
+      userId = await this.identity.findAdminUserIdByKeyword(keyword);
+      if (userId === undefined) {
+        return { success: true, data: { items: [], next_page_token: "" } };
       }
-      userId = parsed;
     }
 
     try {
@@ -86,6 +113,11 @@ export class AdminConsumptionRecordsController {
           .filter((id): id is string => id != null),
       );
 
+      // 昵称 / 手机号：**一次 IN 查回来**，不逐行查（就是上面任务那套的第二个实例）。
+      const identities = await this.identity.loadAdminUserIdentities(
+        page.items.map((item) => item.userId),
+      );
+
       return {
         success: true,
         data: {
@@ -101,6 +133,14 @@ export class AdminConsumptionRecordsController {
             return {
               id: item.id,
               user_id: item.userId,
+              // 展示身份，来自**我们库**（billing 的账本里只有 user_id）。
+              // ⚠️ `|| null` 而不是 `?? null`，两个字段同一条理由：`AdminUserIdentity` 用
+              //    **空串**表示「没有」（用户没手机号是常态、存量密码/名字也可能是空串），
+              //    落到对外契约里要收敛成**唯一的**一种「没有」——否则前端要判「空串」
+              //    「null」「键不存在」三次，而少判的那次会渲染成空白而不是「—」。
+              //    用户查不到（跨库历史 / 被清理）时整个 identity 缺席，同样落到 null。
+              nickname: identities.get(item.userId)?.nickname || null,
+              phone: identities.get(item.userId)?.phone || null,
               type: item.type,
               direction: item.direction,
               title: item.title,

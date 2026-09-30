@@ -48,8 +48,33 @@ export interface AdminUserListOptions {
   pageSize?: number;
 }
 
+/** 一个用户的**展示身份**：只有界面上用来认人的两样东西。 */
+export interface AdminUserIdentity {
+  /** 界面上的「昵称」——**就是 `bw_users.username`**，与 {@link AdminUserRow.nickname} 同一口径 */
+  nickname: string;
+  /** 空串 = 没有。存量用户没手机号（见 `schema.prisma` 里 `phone` 那段注释），这是常态不是异常 */
+  phone: string;
+}
+
 export interface AdminUserQuery {
   listAdminUsers(options: AdminUserListOptions): Promise<{ items: AdminUserRow[]; total: number }>;
+  /**
+   * 按关键词**精确定位一个用户**，返回其 userId；查不到返回 `undefined`。
+   *
+   * <p>与 {@link #listAdminUsers} 的 `keyword` 有两点不同，都是为了给**账本**用：
+   * 那边是模糊匹配（给运营翻列表，多命中几行没关系）；这里必须收敛到**唯一一个人**——
+   * 积分记录按 `user_id` 过滤，而 billing 那条 rpc 只收这一个参数，多命中就没法查。
+   */
+  findUserIdByKeyword(keyword: string): Promise<number | undefined>;
+  /**
+   * 按 userId **批量**取展示身份（昵称 / 手机号）。
+   *
+   * <p>查不到的 id **不出现在 Map 里**。这个形状保留了「这个用户查不到」与「他有用户、
+   * 只是没手机号」的分别（`AdminUserIdentity.phone` 用空串表示后者），是因为批量接口
+   * 不该替调用方决定怎么显示；**积分记录那个唯一的调用方把两者都渲染成同一格「—」**，
+   * 那是有意为之，不是把这里的分辨力浪费掉了。
+   */
+  loadUserIdentities(userIds: readonly number[]): Promise<Map<number, AdminUserIdentity>>;
   /**
    * **只数用户总数**，不取列表。
    *
@@ -190,6 +215,65 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
       });
 
       return { items, total };
+    },
+
+    async findUserIdByKeyword(rawKeyword) {
+      const keyword = rawKeyword.trim();
+      if (!keyword) return undefined;
+
+      const asId = isUserIdKeyword(keyword);
+
+      // **一次查询同时试三种解释**（用户 ID / 手机号 / 用户名）——这三样共用一个输入框
+      // （积分记录那个「用户 ID / 手机号 / 昵称」），光看输入分不出是哪一种。
+      //
+      // ⚠️ 但**挑哪一行必须有优先级**，少了它会**错人**：用户名的形状不受限（注册只要求
+      //    非空，new-api 时代的历史名字更是随便取），所以「一个叫 123456 的用户」是存在的。
+      //    没有优先级时，输 `123456` 只会拿到 id=123456 那个人的账——**错的人，还不报错**，
+      //    而这一页恰恰是用来对账的。`row[0]` 这种取法就是把优先级交给了数据库的返回顺序。
+      //
+      // ⚠️ 优先级 = 用户名 / 手机号的精确命中 > 「这串数字恰好等于某个用户 ID」。
+      //    两边同时命中的唯一可能是「某个用户的 id 恰好等于别人的用户名或手机号」，
+      //    这一层不报错：`take: 3` 之后按优先级挑，**挑不出来就当作查不到**
+      //    （宁可空页，不可错人）。
+      const rows = await prisma.bw_users.findMany({
+        where: {
+          OR: [
+            ...(asId ? [{ id: BigInt(keyword) }] : []),
+            { phone: keyword },
+            { username: keyword },
+          ],
+        },
+        // 手机号与用户名各自唯一、id 是主键 ⇒ 最多三行
+        take: 3,
+        select: { id: true, username: true, phone: true },
+      });
+
+      // 用户名用**不区分大小写**比较：库的排序规则是 `*_ci`，`Admin` 会匹配到 `admin`，
+      // 逐字比较会让这类命中落空、退回成 id 那一行——又回到错人。
+      const lower = keyword.toLowerCase();
+      const byName = rows.find(
+        (r) => r.phone === keyword || r.username.toLowerCase() === lower,
+      );
+      const byId = asId ? rows.find((r) => r.id === BigInt(keyword)) : undefined;
+
+      const row = byName ?? byId;
+      return row ? Number(row.id) : undefined;
+    },
+
+    async loadUserIdentities(userIds) {
+      const ids = [...new Set(userIds)];
+      if (ids.length === 0) return new Map();
+
+      // ⚠️ **不过滤 `is_delete`**（与上面的 {@link BASE_WHERE} 不同，是故意的）：积分记录是
+      //    账本，已软删用户的历史流水仍是账的一部分——全站模式下那些行照常列在表里。
+      //    这里过滤掉的话，同一页里它们的昵称会显示成「—」，反而自相矛盾。
+      const rows = await prisma.bw_users.findMany({
+        where: { id: { in: ids.map((id) => BigInt(id)) } },
+        select: { id: true, username: true, phone: true },
+      });
+      return new Map(
+        rows.map((r) => [Number(r.id), { nickname: r.username, phone: r.phone ?? "" }]),
+      );
     },
   };
 }
