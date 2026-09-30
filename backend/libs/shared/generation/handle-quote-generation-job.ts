@@ -20,6 +20,7 @@ import type {
 
 import type { BillingQuote } from "../billing/billing-quote.js";
 import {
+  applyEditSourceDurationBasis,
   canonicalJson,
   projectQuoteInput,
   ruleSampleMode,
@@ -48,6 +49,10 @@ export interface QuoteGenerationJobDeps {
 export interface QuoteGenerationJobData {
   credits: number | null;
   quote_revision: string | null;
+  /** IKJ797：`"source_video"` = 本次预估按**源参考视频最长时长**计（编辑单——官方 edit 语义
+   *  输出时长跟随参考视频，用户所选时长不参与计价）。前端据此在预估徽标旁标注「按源视频时长预估」。
+   *  字段不出现 = 按用户所选时长预估（延长单/参考单/量不到源时长的编辑单）。 */
+  duration_basis?: "source_video";
 }
 
 /** 空报价（双 null）：算不出价 / 门控未放行时不给出任何可提交金额。 */
@@ -123,6 +128,18 @@ export async function handleQuoteGenerationJob(
   const input = projectQuoteInput(type, body, capability);
   if (input === null) return ok(EMPTY_QUOTE);
 
+  // IKJ797：编辑单按源参考视频最长时长预估（现场判定——报价发生在创建前，无快照可读，
+  // 与预扣/快照冻结是同一个纯函数同一份输入）。提示词从请求体取：报价 payload 是创建任务的
+  // 同形定价部分，挂参考视频的 2.5 场景会带上（判定输入与创建时同一份）；未带则判不出 edit，
+  // 按用户所选预估（= 现行为），前端补带提示词属前端票范围。
+  const quoteParams = body.parameters as { prompt?: unknown } | undefined;
+  const prompt = typeof quoteParams?.prompt === "string" ? quoteParams.prompt : "";
+  const bySourceVideo = applyEditSourceDurationBasis(
+    input,
+    prompt,
+    capability?.features?.task_types,
+  );
+
   // 规则快照与 Hold 同源：预览与实扣必须取到**同一份**规则，
   // 否则用户看到的是「预览一个价、实扣另一个价」。序列化在 `handle-create-generation-job`
   // 的同名助手处，两边共用一条实现（那一个函数导出于此）。
@@ -143,5 +160,6 @@ export async function handleQuoteGenerationJob(
       tier: quote.tier,
       quoteInput: input,
     }),
+    ...(bySourceVideo ? { duration_basis: "source_video" as const } : {}),
   });
 }

@@ -23,6 +23,7 @@ const USER_ID = "42";
 const PROJECT_ID = "1";
 const MODEL_ID = "doubao-seedance-2-0-260128";
 const IMAGE_MODEL_ID = "doubao-seedream-5-0-pro-260628";
+const MODEL_25_ID = "doubao-seedance-2-5-260628";
 
 /** 图片请求体：参考图是**定价维度**（Pro 首张免费、第 2 张起 0.02 元/张）。
  *  ⚠️ 图片的参考图落在 `input.input_asset_ids`，报价侧必须按同一媒介分支投影进去 ——
@@ -76,13 +77,34 @@ const logger = { warn: vi.fn() };
 
 /** 能力行带 `features.audio` —— 与建任务同源：generate_audio 冻不冻由它决定。
  *  version=345：quote_revision 的能力行版本段（金标 G03 示例 `cap-345`）；
- *  videoRow 供样片用例覆盖能力行（如 features.sample_mode）。 */
+ *  videoRow 供样片用例覆盖能力行（如 features.sample_mode）。
+ *  IKJ797：加 Seedance 2.5 行（带 task_types.edit / prolong 约束与参考上限，
+ *  与 002_seed 的能力目录同构）——编辑单时长口径按它分叉。 */
 function modelWhitelist(videoRow: Record<string, unknown> = {}) {
   return vi
     .fn()
     .mockResolvedValue([
       { model_id: MODEL_ID, version: 345, features: { audio: true }, ...videoRow },
       { model_id: IMAGE_MODEL_ID, features: { image_reference_max: 10 } },
+      {
+        model_id: MODEL_25_ID,
+        features: {
+          audio: true,
+          video_reference: true,
+          video_reference_max: 10,
+          audio_reference: false,
+          audio_reference_max: 10,
+          image_reference_max: 30,
+          max_reference_duration_sec: 30,
+          task_types: {
+            default: { allowed_ratios: ["adaptive", "16:9"] },
+            first_frame: { allowed_ratios: ["adaptive"] },
+            first_last_frame: { allowed_ratios: ["adaptive"] },
+            edit: { allowed_ratios: ["adaptive"] },
+            prolong: { allowed_ratios: ["adaptive"] },
+          },
+        },
+      },
     ]);
 }
 
@@ -102,10 +124,12 @@ function previewDeps(
   } as unknown as QuoteGenerationJobDeps;
 }
 
-/** 创建侧依赖：真实 `createBillingHold` 装配 + 假 repo（createJob 内调 hold —— 与真 repo 同序）。 */
+/** 创建侧依赖：真实 `createBillingHold` 装配 + 假 repo（createJob 内调 hold —— 与真 repo 同序）。
+ *  IKJ797：`assetsOverride` 供带视频参考的用例注入 type=video 的素材解析（默认形态沿用图片）。 */
 function createDeps(
   client: BillingClient,
   resolveTier: (userId: string) => Promise<string>,
+  assetsOverride?: { resolveInputAssets: unknown },
 ) {
   const createJob = vi.fn(
     async (
@@ -120,11 +144,13 @@ function createDeps(
     projects: { findOwnedById: ownedProject() },
     models: { listEnabledByType: modelWhitelist() },
     command: { createJob },
-    assets: {
-      resolveInputAssets: vi.fn(async (ids: string[]) =>
-        ids.map((id) => ({ id, type: "image" })),
-      ),
-    },
+    assets:
+      assetsOverride ??
+      ({
+        resolveInputAssets: vi.fn(async (ids: string[]) =>
+          ids.map((id) => ({ id, type: "image" })),
+        ),
+      } as unknown),
     billing: {
       hold: createBillingHold({ client, resolveTier, logger }),
       release: vi.fn(async () => {}),
@@ -522,5 +548,155 @@ describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
     ).data?.quote_revision;
 
     expect(new Set([revA, revInput, revTier, revCap]).size).toBe(4);
+  });
+});
+
+describe("IKJ797 编辑/延长任务报价时长口径", () => {
+  /** Seedance 2.5 + 13 秒参考视频 + 用户所选 4 秒（默认档）——TEMP FIX 透支的标准场景：
+   *  编辑单实际输出跟随源视频出十几秒，按 4 秒预估 = 预扣与结算的差额平台垫付。 */
+  const video25Body = (prompt: string) => ({
+    type: "video" as const,
+    expected_output_count: 1,
+    references: [{ role: "reference", type: "video", asset_id: "5", duration: 13 }],
+    parameters: {
+      prompt,
+      model_id: MODEL_25_ID,
+      aspect_ratio: "adaptive",
+      resolution: "720p",
+      duration: 4,
+    },
+  });
+
+  it("★ 编辑单报价 duration 入参 = 源参考视频最长时长，响应带「按源视频时长预估」标记", async () => {
+    const { client, quote } = fakeBilling();
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      video25Body("把背景替换成海边"),
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    // 交给 billing 的时长是源视频的 13 秒，不是用户所选的 4 秒；输入时长那一项照旧叠加（官方公式两头都收）
+    expect(quoteArg.specs.duration).toBe("13");
+    expect(quoteArg.specs.video_input_seconds).toBe("13");
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String), duration_basis: "source_video" });
+  });
+
+  it("★ 编辑单预扣同口径 —— 默认 4 秒档不再按 4 秒冻结（透支漏洞堵住）", async () => {
+    const { client, hold } = fakeBilling();
+    const created = await handleCreateGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      video25Body("把背景替换成海边"),
+      null,
+      createDeps(client, vi.fn().mockResolvedValue("free"), {
+        resolveInputAssets: vi.fn(async (ids: string[]) =>
+          ids.map((id) => ({ id, type: "video", duration: 13 })),
+        ),
+      }),
+    );
+    expect(created.code).toBe(200);
+
+    const holdArg = hold.mock.calls[0]?.[0] as unknown as HoldArgs;
+    expect(holdArg.specs.duration).toBe("13");
+    expect(holdArg.specs.video_input_seconds).toBe("13");
+  });
+
+  it("★ 编辑单「预览价 = 实扣价」—— 同一请求体两路交给 billing 的规格逐字相等", async () => {
+    const { client, hold, quote } = fakeBilling();
+    const resolveTier = vi.fn().mockResolvedValue("pro");
+    const body = video25Body("把背景替换成海边");
+    const videoAssets = {
+      resolveInputAssets: vi.fn(async (ids: string[]) =>
+        ids.map((id) => ({ id, type: "video", duration: 13 })),
+      ),
+    };
+
+    await handleCreateGenerationJob(USER_ID, PROJECT_ID, body, null, createDeps(client, resolveTier, videoAssets));
+    await handleQuoteGenerationJob(USER_ID, PROJECT_ID, body, previewDeps(client, resolveTier));
+
+    const holdArg = hold.mock.calls[0]?.[0] as unknown as HoldArgs;
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs).toEqual(holdArg.specs);
+    expect(quoteArg.tier).toBe(holdArg.tier);
+  });
+
+  it("延长单取用户所选时长（官方 extend 允许时长自选），无标记", async () => {
+    const { client, quote } = fakeBilling();
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      video25Body("把这个视频向后延长"),
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
+  });
+
+  it("纯参考单取用户所选时长，无标记", async () => {
+    const { client, quote } = fakeBilling();
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      video25Body("参考这条视频里的运镜节奏"),
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
+  });
+
+  it("否定约束句（IKJ78C 衔接）不判编辑 → 取用户所选时长", async () => {
+    const { client, quote } = fakeBilling();
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      video25Body("禁止修改人物动作，保持原样"),
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
+  });
+
+  it("模型未配 task_types.edit（Seedance 2.0）→ 编辑类提示词仍按用户所选（按模型分叉走能力行）", async () => {
+    const { client, quote } = fakeBilling();
+    const body = {
+      ...video25Body("把背景替换成海边"),
+      parameters: { ...video25Body("把背景替换成海边").parameters, model_id: MODEL_ID },
+    };
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      body,
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
+  });
+
+  it("参考视频未带时长（量不到源时长）→ 回落用户所选，不按 0 估也不拒单", async () => {
+    const { client, quote } = fakeBilling();
+    const body = {
+      ...video25Body("把背景替换成海边"),
+      references: [{ role: "reference", type: "video", asset_id: "5" }],
+    };
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      body,
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
   });
 });

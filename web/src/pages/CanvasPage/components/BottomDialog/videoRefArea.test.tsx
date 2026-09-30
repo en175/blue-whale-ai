@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationModel } from '@/api/generation';
 import BottomDialog from './index';
+import styles from './index.module.css';
 import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 
@@ -85,6 +86,15 @@ const noFrameModel: GenerationModel = {
   model_id: 'm-noframe',
   model_label: '无帧模型',
   features: { ...baseFeatures, first_frame: false, last_frame: false, first_last_frame: false },
+};
+
+/* IKJ794：Seedance 2.5 = supported_aspect_ratios 含 adaptive（与组件 IKFQ5S 同锚），支持视频参考 */
+const adaptiveModel: GenerationModel = {
+  ...fullModel,
+  model_id: 'm-25',
+  model_label: 'Seedance 2.5',
+  supported_aspect_ratios: ['adaptive', '16:9', '9:16'],
+  features: { ...baseFeatures, video_reference: true, video_reference_max: 3 },
 };
 
 const ref = (id: string, mediaType: 'image' | 'video' | 'audio' = 'image'): VideoMediaRef => ({
@@ -357,5 +367,54 @@ describe('IKFCKQ 共享缩略图接入', () => {
     await act(async () => { removeBtn.click(); });
     expect(handlers.onRemoveVideoRef).not.toHaveBeenCalled();
     expect(handlers.onRemoveMaterialRef).toHaveBeenCalledWith('asset-x1');
+  });
+});
+
+/* IKJ794：全能参考被动提示行——显示条件 = 全能参考模式 + Seedance 2.5（supported_aspect_ratios
+   含 adaptive）+ 已挂 ≥1 参考视频；四条件组合逐一击破，与提示词内容无关（前端零关键词判定）。
+   同条件同文案也服务首页 ChatBox（见 Home/components/ChatBox/index.test.tsx）。 */
+describe('IKJ794 全能参考被动提示行', () => {
+  it('Seedance 2.5 + 全能参考 + 挂参考视频 → 显示提示', async () => {
+    fetchGenerationModels.mockResolvedValue([adaptiveModel]);
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('v1', 'video'), ref('m1')] } });
+    expect(mountNode.textContent).toContain('提示词若涉及修改、替换或延长原视频，输出比例与时长将自动跟随参考视频');
+  });
+
+  it('首尾帧模式 → 不显示', async () => {
+    fetchGenerationModels.mockResolvedValue([adaptiveModel]);
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
+    expect(mountNode.textContent).not.toContain('自动跟随参考视频');
+  });
+
+  it('Seedance 2.0 系列（比例表无 adaptive）→ 不显示', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('v1', 'video')] } });
+    expect(mountNode.textContent).not.toContain('自动跟随参考视频');
+  });
+
+  it('全能参考 + 2.5 但只挂图片（未挂视频）→ 不显示', async () => {
+    fetchGenerationModels.mockResolvedValue([adaptiveModel]);
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1'), ref('m2')] } });
+    expect(mountNode.textContent).not.toContain('自动跟随参考视频');
+  });
+
+  it('比例选项 adaptive 档显示 auto，选中后状态栏与提交取值不变（仍为 adaptive）', async () => {
+    fetchGenerationModels.mockResolvedValue([adaptiveModel]);
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [] } });
+    // 展开配置面板（状态栏按钮含当前选中档显示名；2.5 默认选中 adaptive，显示 auto）
+    const configBtn = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('auto'))!;
+    await act(async () => { configBtn.click(); });
+    const ratioBtns = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.ratioGroup} button`)];
+    expect(ratioBtns.some((b) => b.textContent === 'auto')).toBe(true);
+    expect(ratioBtns.some((b) => b.textContent === 'adaptive')).toBe(false);
+    // 选中 auto 档：状态栏显示 auto、无 adaptive 黑话；发送取值仍为 adaptive
+    await act(async () => {
+      ratioBtns.find((b) => b.textContent === 'auto')!.click();
+    });
+    expect(configBtn.textContent).toContain('auto');
+    expect(configBtn.textContent).not.toContain('adaptive');
+    await typePrompt('跟随参考视频生成');
+    await act(async () => { sendButton().click(); });
+    const [, opts] = handlers.onSend.mock.calls[0]!;
+    expect(opts.aspectRatio).toBe('adaptive');
   });
 });

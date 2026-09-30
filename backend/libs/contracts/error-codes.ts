@@ -30,6 +30,12 @@ export const ERROR_CAPABILITY_UNSUPPORTED_PARAM = "capability_unsupported_param"
 export const ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION = "capability_unsupported_resolution";
 /** IKE7JP：宽高比越界（细分码）。 */
 export const ERROR_CAPABILITY_UNSUPPORTED_RATIO = "capability_unsupported_ratio";
+/** IKJ795：编辑/延长任务 + 非 adaptive 比例的结构化拒单码（用户向文案 = 本文件 ERROR_CODES 表
+ *  的 1060 项（rebase 前取 1056，撞 IKIZQ5/IKJ8J8 已落号改取）；capability-param-validation.ts 的 TASK_TYPE_PARAM_CONSTRAINT_MESSAGE 查表引用之，
+ *  全仓只此一份字面量，勿在他处再抄）。
+ *  供前端按码识别「一键改为跟随视频」场景；与 capability_unsupported_ratio（非任务类型的
+ *  比例越界）语义不混。 */
+export const ERROR_TASK_TYPE_PARAM_CONSTRAINT = "task_type_param_constraint";
 /** IKE7JP：时长越界（细分码）。 */
 export const ERROR_CAPABILITY_UNSUPPORTED_DURATION = "capability_unsupported_duration";
 /** IKE7JP：参考素材结构/关系非法（引用无效、为空、混用、帧位约束）。 */
@@ -250,6 +256,9 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   // IKJ8J8 注：ADR-0119 钦定数值码 1059（落码前全仓 grep 1059 零命中，无并行分支撞号；
   // 本码不按顺延取号，系规格指定）。
   [ERROR_CONTENT_REJECTED_AUDIO]: 1059,
+  // IKJ795 注：编辑/延长比例拒单码。落分支时取 1056，rebase 撞 IKIZQ5/IKJ8J8 已落的 1056-1059，
+  // 改取下一空号 1060；消费方全走 errorCodeToNumeric 查表，无硬编码扩散。
+  [ERROR_TASK_TYPE_PARAM_CONSTRAINT]: 1060,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -548,6 +557,7 @@ export const ERROR_CODES: Record<number, string> = {
   1057: "该样片已有成片任务，请查看其成片结果", // finalize_already_attempted（IKIZQ5 来源唯一约束）
   1058: "已超过样片转成片的截止时间，可重新生成样片后再试", // finalize_deadline_exceeded（IKIZQ5 实际截止时间）
   1059: "生成的音频可能涉及版权限制，请调整提示词后重试", // content_rejected_audio（IKJ8J8 输出侧音频版权精确码）
+  1060: "提示词包含修改、替换或延长原视频的意图，输出比例将自动跟随参考视频，请将比例切换为「自动」后重试", // task_type_param_constraint（IKJ795）
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",

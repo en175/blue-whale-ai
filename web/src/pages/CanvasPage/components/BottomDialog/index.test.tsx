@@ -553,3 +553,83 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
+  function quoteResponse() {
+    return new Response(JSON.stringify({ code: 200, msg: null, data: { credits: 42 } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  async function renderDialogWithProject(initialText: string) {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+          createElement(BottomDialog, {
+            onClose: vi.fn(),
+            onSend: vi.fn(),
+            projectId: 'p1',
+            initialText,
+            videoMediaRefs: { reference: [] },
+            videoDraftBinding: { onParamsChange: vi.fn() },
+          }),
+        ),
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('初问无 prompt 键；停笔 600ms 后带 prompt 重问一次', async () => {
+    const quoteFetch = vi.fn().mockResolvedValue(quoteResponse());
+    vi.stubGlobal('fetch', quoteFetch);
+    await renderDialogWithProject('把背景替换成海边沙滩');
+
+    // 模型就位后首问：提示词防抖未到，不带 prompt 键
+    await vi.waitFor(() => expect(quoteFetch).toHaveBeenCalledTimes(1));
+    const firstBody = JSON.parse((quoteFetch.mock.calls[0]![1] as RequestInit).body as string);
+    expect(firstBody.parameters).not.toHaveProperty('prompt');
+    expect(String(quoteFetch.mock.calls[0]![0])).toBe('/api/projects/p1/generation-jobs/quote');
+
+    // 停笔 600ms：带提示词重问（编辑单判定输入）
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    });
+    await vi.waitFor(() => expect(quoteFetch).toHaveBeenCalledTimes(2));
+    const secondBody = JSON.parse((quoteFetch.mock.calls[1]![1] as RequestInit).body as string);
+    expect(secondBody.parameters.prompt).toBe('把背景替换成海边沙滩');
+
+    // 防抖收敛：不再继续问价
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(quoteFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('空提示词面板：报价请求恒不带 prompt 键', async () => {
+    const quoteFetch = vi.fn().mockResolvedValue(quoteResponse());
+    vi.stubGlobal('fetch', quoteFetch);
+    await renderDialogWithProject('');
+
+    await vi.waitFor(() => expect(quoteFetch).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    });
+    const bodies = quoteFetch.mock.calls.map(
+      (call) => JSON.parse((call[1] as RequestInit).body as string).parameters,
+    );
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).not.toHaveProperty('prompt');
+  });
+});

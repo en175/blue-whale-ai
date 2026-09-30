@@ -771,6 +771,13 @@
   line-height: 1.4;
 }
 
+/* IKJ794：全能参考被动提示行（Seedance 2.5 + 全能参考 + 已挂参考视频时显示；与首页 ChatBox 同文案） */
+.followHint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
 /* @ 菜单 dock（IKFA1O）：脱出 .dialog 滚动框，挂 .dialogWrap 层向上弹出（与 configPanel 同法） */
 .mentionDock {
   position: absolute;

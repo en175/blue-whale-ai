@@ -58,6 +58,16 @@ public final class NewApiErrorClassifier {
     );
 
     /**
+     * 任务类型错位信号（IKJ79A）：官方异步错误码 InvalidParameter.TaskTypeMismatch
+     * （模型语义判定的任务类型与指定类型不一致）/ InvalidParameter.TaskTypeConstraint
+     * （参数与任务类型不兼容）。归类 task_type_param_constraint（信封数值 1060）用户向文案，失败卡片复用一键修复入口。
+     */
+    private static final Pattern TASK_TYPE_PATTERN = Pattern.compile(
+            "TaskTypeMismatch|TaskTypeConstraint",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    /**
      * 非 2xx 错误分类（new-api-audio-provider.ts:119-130 + §5 IKDAJN）。
      * 优先级：版权 1038 > 输出/敏感 1018 > quota > provider_failed。
      */
@@ -113,5 +123,11 @@ public final class NewApiErrorClassifier {
      */
     public static boolean isOutputAudioCopyrightSignal(String text) {
         return text != null && OUTPUT_AUDIO_COPYRIGHT_PATTERN.matcher(text).find();
+    }
+
+    /** 任务类型错位信号（IKJ79A）：上游码或报错文本含 TaskTypeMismatch / TaskTypeConstraint。
+     *  输入是 code+fail_reason+message 的合并文本（调用方已拼好）。 */
+    public static boolean isTaskTypeSignal(String text) {
+        return text != null && TASK_TYPE_PATTERN.matcher(text).find();
     }
 }

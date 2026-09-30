@@ -69,4 +69,8 @@ public final class GenerationError {
 
     /** 参考素材超量（video-reference-validation.ts：图片 >9 / 视频 >3 / 音频 >3）。 */
     public static final String ERROR_REFERENCE_LIMIT_EXCEEDED = "reference_limit_exceeded";
+
+    /** 任务类型参数约束（IKJ795 契约新增；rebase 后数值码 1060（原 1056 撞 IKIZQ5 改取）；IKJ79A：上游 TaskTypeMismatch/TaskTypeConstraint
+     *  异步错误归类复用本码，失败卡片按码识别一键修复入口）。 */
+    public static final String ERROR_TASK_TYPE_PARAM_CONSTRAINT = "task_type_param_constraint";
 }

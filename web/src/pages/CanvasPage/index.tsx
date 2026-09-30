@@ -53,6 +53,7 @@ import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, compliancePatchFromMaterialStatus, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
+import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
 import { mediaContentBox, MEDIA_CONTENT_SHORT_SIDE, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
@@ -2460,6 +2461,7 @@ export default function CanvasPage() {
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
           onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+          onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -3584,6 +3586,8 @@ export default function CanvasPage() {
     openImageDialog: () => {},
     cancelJob: (_id: string) => {},
     retryJob: (_id: string) => {},
+    /** 一键修复「改为跟随视频并重试」（IKJ79D）：比例约束失败卡专用 */
+    fixFollowVideo: (_id: string) => {},
     removeMediaNode: (_id: string) => {},
     enhanceImage: (_id: string) => {},
     outpaintImage: (_id: string) => {},
@@ -5221,6 +5225,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
@@ -5274,6 +5279,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
@@ -5331,6 +5337,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
         onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
         onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
         onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -5846,6 +5853,7 @@ export default function CanvasPage() {
       onFillEmptyShell: (id: string, next: File) => actionsRef.current.fillEmptyShell(id, next),
       onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
       onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+      onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
       onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
       onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
       onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -7040,6 +7048,7 @@ export default function CanvasPage() {
         genStatus: undefined,
         progress: 100,
         errorText: undefined,
+        errorCode: undefined,
         src: detail.asset?.url ?? '',
         mediaType: (assetType === 'audio' || assetType === 'video' || assetType === 'image')
           ? assetType
@@ -7112,6 +7121,8 @@ export default function CanvasPage() {
           : {}),
         chargeState: detail.charge_state ?? undefined,
         actualCredits: detail.actual_credits ?? undefined,
+        // 失败码随文案同点落卡（IKJ79D）：worker 归类的比例约束失败供一键修复按码识别
+        errorCode: detail.error?.code,
       });
       return 'terminal';
     }
@@ -7643,6 +7654,7 @@ export default function CanvasPage() {
         genStatus: 'generating',
         progress: 0,
         errorText: undefined,
+        errorCode: undefined,
         // 草稿无素材可显示，改名提示生成内容（IKDMQQ）；已自定义名称的草稿不覆盖（IKFA8X）；
         // 成品卡保留原文件名——旧素材继续显示，生成中由状态角标标记（IKDMQU Q5）
         ...(isDraftTarget && !customNamed
@@ -7718,6 +7730,7 @@ export default function CanvasPage() {
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
@@ -7837,6 +7850,8 @@ export default function CanvasPage() {
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '创建任务失败',
+            // 接纳侧 4xx 的失败码（IKJ795 数值码随信封，如 1056 比例约束）落卡供一键修复识别
+            errorCode: isApiError(e) ? e.code : undefined,
           });
         });
       return true; // 创建请求已发出（IKFXZD 面板关闭判定点）；HTTP 层异步失败由上方 catch 收敛到卡片
@@ -7845,6 +7860,7 @@ export default function CanvasPage() {
       patchMediaNode(nodeId, {
         genStatus: 'failed',
         errorText: isApiError(e) ? e.message : '创建任务失败',
+        errorCode: isApiError(e) ? e.code : undefined,
       });
       return false;
     }
@@ -9082,7 +9098,7 @@ export default function CanvasPage() {
     // 防重入：首次点击已置 generating（重试按钮随失败占位消失，此处拦截双击与迟到回调交错）
     if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
     if (blockIfCreditsInsufficient()) return;
-    patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+    patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '', errorCode: undefined });
     // 登记发起重试时的任务为核对基准：retry 返回前若被新任务接管（面板重新提交），放弃本次结果不覆盖
     activeJobByNodeRef.current.set(nodeId, String(jobId));
     try {
@@ -9105,11 +9121,12 @@ export default function CanvasPage() {
             patchMediaNode(nodeId, {
               genStatus: 'failed',
               errorText: isApiError(e) ? e.message : '余额不足',
+              errorCode: isApiError(e) ? e.code : undefined,
             });
             return;
           }
           if (isApiError(e) && e.status === 401) {
-            patchMediaNode(nodeId, { genStatus: 'failed', errorText: '' });
+            patchMediaNode(nodeId, { genStatus: 'failed', errorText: '', errorCode: undefined });
             useAuthPromptStore.getState().addResume(() => {
               handleRetryJob(nodeId);
             });
@@ -9118,12 +9135,14 @@ export default function CanvasPage() {
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '重试失败',
+            errorCode: isApiError(e) ? e.code : undefined,
           });
         });
     } catch (e: unknown) {
       patchMediaNode(nodeId, {
         genStatus: 'failed',
         errorText: isApiError(e) ? e.message : '重试失败',
+        errorCode: isApiError(e) ? e.code : undefined,
       });
     }
   };
@@ -12861,8 +12880,10 @@ export default function CanvasPage() {
     }
   };
 
-  /** 「输入已更新 → 更新生成」：用节点已存参数 + 画布上最新文本输入，在当前卡原位重跑。 */
-  const handleUpdateGenerate = async (nodeId: string) => {
+  /** 「输入已更新 → 更新生成」：用节点已存参数 + 画布上最新文本输入，在当前卡原位重跑。
+   *  ratioOverride（IKJ79D）：一键修复传入 'adaptive' 覆盖卡上比例——仅换比例重交，
+   *  其余参数（提示词/分辨率/时长/带音频/参考）仍取卡上冻结值。 */
+  const handleUpdateGenerate = async (nodeId: string, opts?: { ratioOverride?: string }) => {
     if (applyingRef.current) return;
     if (saveBlocked || saveStatus === 'error') {
       showToast('warn', '保存失败，请重试');
@@ -12950,7 +12971,7 @@ export default function CanvasPage() {
     }
 
     if (mediaType === 'video') {
-      const aspectRatio = typeof data.draftRatio === 'string' ? data.draftRatio : '';
+      const aspectRatio = opts?.ratioOverride ?? (typeof data.draftRatio === 'string' ? data.draftRatio : '');
       const resolution = typeof data.draftSize === 'string' ? data.draftSize : '';
       const duration = typeof data.draftDuration === 'number' ? data.draftDuration : Number(data.draftDuration);
       if (!aspectRatio || !resolution || !Number.isFinite(duration) || duration <= 0) {
@@ -13093,6 +13114,21 @@ export default function CanvasPage() {
   updateGenerateRef.current = (nodeId) => {
     void handleUpdateGenerate(nodeId);
   };
+
+  /** 一键修复「改为跟随视频并重试」（IKJ79D）：task_type_param_constraint 失败卡的动作——
+   *  仅把比例改为 adaptive（Auto），提示词/素材/时长不动直接重交（编辑/延长同动作；编辑单
+   *  时长由 worker 按任务类型强制 -1，前端不改）。重交复用「更新生成」链路（同一套校验 +
+   *  原位承接，仅多传比例覆盖）；draftRatio 同步改 Auto 落卡，重开面板即显示修复后比例。 */
+  const handleFixFollowVideo = (nodeId: string) => {
+    const node = mediaNodesRef.current.find((item) => item.id === nodeId);
+    if (!node || node.type !== 'mediaNode') return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    if (data.genStatus !== 'failed' || data.mediaType !== 'video') return;
+    if (!isTaskTypeParamConstraintCode(data.errorCode as number | string | undefined)) return;
+    patchMediaNode(nodeId, { draftRatio: 'adaptive' });
+    void handleUpdateGenerate(nodeId, { ratioOverride: 'adaptive' });
+  };
+  actionsRef.current.fixFollowVideo = handleFixFollowVideo;
 
   /** 触发首页生成交接：创建生成任务落节点（等于底部对话框按下发送），幂等——触发后即清 pending */
   const firePendingGen = () => {

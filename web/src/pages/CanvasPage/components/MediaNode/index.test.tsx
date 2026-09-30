@@ -391,6 +391,65 @@ describe('MediaNode failed overlay', () => {
   });
 });
 
+describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配）', () => {
+  it('视频失败卡收到比例约束码（数值 1060）→ 显示「改为跟随视频并重试」并派发回调', async () => {
+    const onFixFollowVideo = vi.fn();
+    await renderNode('video', {
+      id: 'media-gen-31',
+      genStatus: 'failed',
+      errorText: '提示词包含修改、替换或延长原视频的意图，输出比例将自动跟随参考视频，请将比例切换为「自动」后重试',
+      selected: false,
+      data: { errorCode: 1060, onFixFollowVideo },
+    });
+    const fix = [...mountNode.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === '改为跟随视频并重试',
+    );
+    expect(fix).toBeTruthy();
+    await act(async () => fix!.click());
+    expect(onFixFollowVideo).toHaveBeenCalledWith('media-gen-31');
+  });
+
+  it('worker 归类信封（字符串 task_type_param_constraint）同码同显', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      selected: false,
+      data: { errorCode: 'task_type_param_constraint', onFixFollowVideo: vi.fn() },
+    });
+    expect(labels()).toContain('改为跟随视频并重试');
+  });
+
+  it('其他错误码（如 quota_exhausted=1001）→ 不显示一键修复，只有重试', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      errorText: '积分不足',
+      selected: false,
+      data: { errorCode: 1001, onFixFollowVideo: vi.fn() },
+    });
+    expect(labels()).not.toContain('改为跟随视频并重试');
+    expect(labels()).toContain('重试');
+  });
+
+  it('比例约束码但图片失败卡 → 不显示（一键修复仅视频）', async () => {
+    await renderNode('image', {
+      genStatus: 'failed',
+      selected: false,
+      data: { errorCode: 1060, onFixFollowVideo: vi.fn() },
+    });
+    expect(labels()).not.toContain('改为跟随视频并重试');
+  });
+
+  it('有旧素材的失败成品卡（fail-overlay 分支）同样按码显示一键修复', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      selected: false,
+      data: { src: 'http://img/old.mp4', errorCode: 1060, onFixFollowVideo: vi.fn() },
+    });
+    const overlay = mountNode.querySelector('[data-testid="fail-overlay"]');
+    expect(overlay).toBeTruthy();
+    expect(overlay!.textContent).toContain('改为跟随视频并重试');
+  });
+});
+
 describe('MediaNode 音频混合失败卡（IKI697）', () => {
   it('显示服务端原因与同卡重试入口，失败态不可播放', async () => {
     const onRetryJob = vi.fn();

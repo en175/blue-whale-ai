@@ -74,6 +74,7 @@ import {
   supportsVideoReferenceOf,
   checkReferenceLimits,
 } from '@/lib/model-reference-limits';
+import { OMNI_REFERENCE_FOLLOW_HINT } from '@/lib/video-reference-hints';
 import AtMentionMenu from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
 import {
@@ -308,6 +309,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         const size = currentModel?.supported_sizes.find((s) => s.id === selectedSize);
         return size ? (size.api_value ?? size.id) : undefined;
       })();
+  /** 报价带提示词（IKJ79D）：后端据此判编辑单（时长口径标记输入）。声明前移供 quoteParameters 引用（值防抖同步见下方 effect）。 */
+  const [quotePrompt, setQuotePrompt] = useState('');
   /** 报价定价维度（IKIZQB 起 sample_mode 也是定价输入之一）：徽标与面板内样片报价查询共用
    *  同一份参数对象 —— 同一个 queryKey 才会命中同一份缓存，两个 useQuery 只发一次请求。 */
   const quoteParameters = useMemo(() => ({
@@ -317,7 +320,9 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     ...(duration ? { duration } : {}),
     generate_audio: generateAudio,
     ...(sampleMode ? { sample_mode: true as const } : {}),
-  }), [currentModel?.model_id, quoteResolution, selectedRatio, duration, generateAudio, sampleMode]);
+    // IKJ79D：防抖后的提示词（编辑单时长口径判定输入），空串不带键
+    ...(quotePrompt ? { prompt: quotePrompt } : {}),
+  }), [currentModel?.model_id, quoteResolution, selectedRatio, duration, generateAudio, sampleMode, quotePrompt]);
 
   /** 生成中只读（IKDMQS）：任务执行期间目标参数与输入冻结，保留查看与画布上的取消入口 */
   const readOnly = sending || videoDraftBinding.submitting || videoDraftBinding.status === 'generating';
@@ -391,6 +396,11 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const isText2Video = selectedMode === 'text2video';
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
   const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
+  /** IKJ794：全能参考被动提示——全能参考模式 + 模型支持 adaptive（Seedance 2.5，与 IKFQ5S 同锚）
+   *  + 已挂 ≥1 参考视频；纯条件渲染（零关键词判定），首尾帧 / 2.0 系列 / 未挂视频均不显示。 */
+  const showOmniFollowHint = selectedMode === 'all'
+    && supportsAdaptiveRatio
+    && videoMediaRefs.reference.some((r) => r.mediaType === 'video');
 
   /** 生成中只读原因（IKGB1X 操作条悬停原因与下方只读提示条同一文案来源） */
   const readOnlyReason = sending || videoDraftBinding.submitting
@@ -489,6 +499,13 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   );
   /** 拍平镜像（IKFA1O/IKFA1P）：字数统计与发送门槛共用；失效标签 → 已失效：原N */
   const flatValue = useMemo(() => flattenPromptDocWith(promptDoc, (key) => refLabelOfStable.current(key)), [promptDoc, reconcileKey]);
+  /** 报价带提示词（IKJ79D）：后端据此判编辑单（时长口径标记输入）。防抖 600ms——报价查询键
+   *  含提示词，逐字直传会每敲一个字重新问价，停笔后才问一次。
+   *  （state 声明前移至 quoteParameters useMemo 之前，值由下方 effect 从 flatValue 防抖同步。） */
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuotePrompt(flatValue), 600);
+    return () => window.clearTimeout(timer);
+  }, [flatValue]);
   /** 失效标签存在时阻止生成（模式不兼容或参考移除；点击替换/删除后可继续） */
   const hasInvalidRef = docHasInvalidRef(promptDoc);
 
@@ -1280,6 +1297,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         {/* 组合冲突提示（IKDMQS）：明确说明不可提交的原因，不静默丢弃 */}
         {conflict && <div className={styles.refConflictHint} role="alert">{conflict}</div>}
         {readOnly && <div className={styles.readOnlyHint}>{readOnlyReason}</div>}
+        {/* IKJ794：全能参考被动提示（条件见 showOmniFollowHint，与首页 ChatBox 同条件同文案） */}
+        {showOmniFollowHint && <div className={styles.followHint}>{OMNI_REFERENCE_FOLLOW_HINT}</div>}
       </div>
       )}
 

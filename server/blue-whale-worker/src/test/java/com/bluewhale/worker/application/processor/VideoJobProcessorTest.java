@@ -1610,6 +1610,51 @@ class VideoJobProcessorTest {
                     .isEqualTo("prolong");
         }
 
+        // IKJ78C：否定防护——与 backend capability-param-validation.test.ts 逐条对应
+        //（default 即官方 reference）。
+
+        @Test
+        @DisplayName("IKJ78C 否定约束句不判编辑（六词闭集逐一覆盖）")
+        void negatedClausesNotEdit() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "禁止修改人物形象"))
+                    .isEqualTo("default");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "不得替换背景"))
+                    .isEqualTo("default");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "不要替换背景"))
+                    .isEqualTo("default");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "不能去掉人物"))
+                    .isEqualTo("default");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "请勿删除水印"))
+                    .isEqualTo("default");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "无需增加字幕"))
+                    .isEqualTo("default");
+        }
+
+        @Test
+        @DisplayName("IKJ78C 混合句按肯定判：否定词与关键词跨子句不剔除（中英标点同权）")
+        void mixedClauseResolvesEdit() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "禁止修改人物，把背景替换成海边"))
+                    .isEqualTo("edit");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "不要改人物,把背景替换成海边"))
+                    .isEqualTo("edit");
+        }
+
+        @Test
+        @DisplayName("IKJ78C 否定延长词同样剔除")
+        void negatedProlongKeyword() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "不要延续这个故事"))
+                    .isEqualTo("default");
+        }
+
         @Test
         @DisplayName("非 edit/prolong 任务传 duration=-1 → invalid_input（收窄后不再通用放行）")
         void autoDurationRejectedForNonEdit() {

@@ -25,6 +25,7 @@ import { classifyRefOverflow } from '@/utils/ref-overflow';
 import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supportsVideoReferenceOf, UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/lib/model-reference-limits';
 import { promptCharCountLabel, promptMaxLengthOf } from '@/lib/prompt-max-length';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
+import { OMNI_REFERENCE_FOLLOW_HINT } from '@/lib/video-reference-hints';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
@@ -645,6 +646,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
    *  不再 min 到旧写死 9）。 */
   const imageMaxImages = imageReferenceMaxOf(selectedImageModel?.features);
 
+  /** IKJ794：全能参考被动提示——与画布 BottomDialog 同条件同文案：
+   *  全能参考模式 + 模型支持 adaptive（Seedance 2.5，与 IKFQ5S 同锚）+ 已挂 ≥1 参考视频；
+   *  纯条件渲染（零关键词判定），首尾帧 / 2.0 系列 / 未挂视频均不显示。 */
+  const showOmniFollowHint = videoMode === 'omni'
+    && !!selectedVideoModel?.supported_aspect_ratios?.includes('adaptive')
+    && videoRefVideoCount > 0;
+
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
   /** 切换 AI视频模式（ADR-0086 对齐画布）：切首尾帧把普通参考里的图片转为首帧/尾帧槽，
    *  切回全能参考/图生视频把首尾帧槽转回普通参考——素材智能转换，不让用户手动搬。
@@ -1077,6 +1085,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               style={{ display: 'none' }}
               onChange={handleRefFiles}
             />
+
+            {/* IKJ794：全能参考被动提示（条件见 showOmniFollowHint，与画布 BottomDialog 同条件同文案） */}
+            {showOmniFollowHint && (
+              <div className={styles.followHint}>{OMNI_REFERENCE_FOLLOW_HINT}</div>
+            )}
 
             {/* 参数按钮行 */}
             <div className={styles.videoParamBar}>

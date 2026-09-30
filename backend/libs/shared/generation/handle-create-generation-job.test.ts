@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ERROR_MODEL_UNAVAILABLE } from "@lib/contracts";
+import { ERROR_MODEL_UNAVAILABLE, TASK_TYPE_PARAM_CONSTRAINT_MESSAGE } from "@lib/contracts";
 
 import {
   generationCreateRequestHash,
@@ -1293,6 +1293,116 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       );
       expect(result.code).toBe(1002);
       expect(result.msg).toBe("aspect_ratio 无效");
+      expect(createJob).not.toHaveBeenCalled();
+    });
+  });
+
+  // IKJ795：任务类型冻结进快照 + 编辑/延长比例结构化拒单（task_type_param_constraint）。
+  //
+  // 能力行是 Seedance 2.5 形态（task_types 配了 edit/prolong 锁 adaptive，default 放开全部比例）；
+  // 行为由配置驱动、与模型名无关——与上面首帧组同一口径。
+  describe("任务类型冻结与结构化拒单（IKJ795）", () => {
+    const SEEDANCE_2_5_ROW = {
+      supported_sizes: [{ id: "720p", api_value: "720p" }],
+      supported_aspect_ratios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+      supported_durations: { min: 4, max: 30, step: 1 },
+      features: {
+        video_reference: true,
+        task_types: {
+          default: { allowed_ratios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"] },
+          edit: { allowed_ratios: ["adaptive"] },
+          prolong: { allowed_ratios: ["adaptive"] },
+        },
+      },
+    };
+    const VIDEO_REF = [{ role: "reference" as const, material_id: "Asset-vid-1", type: "video" as const }];
+    const bodyOf = (prompt: string, aspect: string) => ({
+      ...VIDEO_BODY,
+      references: VIDEO_REF,
+      parameters: { ...VIDEO_BODY.parameters, prompt, aspect_ratio: aspect },
+    });
+
+    it("编辑 + 9:16 → 4xx task_type_param_constraint + 用户向文案，不建任务（不扣费）", async () => {
+      const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
+      const result = await handleCreateGenerationJob("u1", "p1", bodyOf("把背景替换成海边", "9:16"), null, deps);
+      expect(result.code).toBe(1060);
+      expect(result.data?.code).toBe("task_type_param_constraint");
+      expect(result.msg).toBe(TASK_TYPE_PARAM_CONSTRAINT_MESSAGE);
+      // 文案不出现内部词（用户直接可见）
+      expect(result.msg).not.toContain("edit");
+      expect(result.msg).not.toContain("adaptive");
+      expect(createJob).not.toHaveBeenCalled();
+    });
+
+    it("延长 + 固定比例（16:9）→ 同码 4xx", async () => {
+      const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
+      const result = await handleCreateGenerationJob("u1", "p1", bodyOf("向后延长这个视频", "16:9"), null, deps);
+      expect(result.code).toBe(1060);
+      expect(result.data?.code).toBe("task_type_param_constraint");
+      expect(createJob).not.toHaveBeenCalled();
+    });
+
+    it("编辑 + adaptive → 200，快照携带任务类型 edit", async () => {
+      const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
+      const result = await handleCreateGenerationJob("u1", "p1", bodyOf("把背景替换成海边", "adaptive"), null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.video_task_type).toBe("edit");
+    });
+
+    it("纯参考 + 9:16 → 放行且快照携带任务类型 default", async () => {
+      const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
+      const result = await handleCreateGenerationJob("u1", "p1", bodyOf("参考它的运镜风格", "9:16"), null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.video_task_type).toBe("default");
+    });
+
+    it("否定句（禁止修改）+ 9:16 → 放行（IKJ78C 否定防护在接纳链路整体成立）", async () => {
+      const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
+      const result = await handleCreateGenerationJob("u1", "p1", bodyOf("禁止修改人物形象", "9:16"), null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.video_task_type).toBe("default");
+    });
+
+    it("无任务类型视频（旧 body 无参考）→ 200，快照仍携带 default", async () => {
+      const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
+      const result = await handleCreateGenerationJob("u1", "p1", VIDEO_BODY, null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.video_task_type).toBe("default");
+    });
+
+    it("2.0 形态（无 task_types）+ 编辑句 + 9:16 → 放行（不把 2.5 的约束套到 2.0）", async () => {
+      const { deps } = buildVideoDeps({
+        supported_sizes: [{ id: "720p", api_value: "720p" }],
+        supported_aspect_ratios: ["16:9", "9:16"],
+      });
+      const result = await handleCreateGenerationJob("u1", "p1", bodyOf("把背景替换成海边", "9:16"), null, deps);
+      expect(result.code).toBe(200);
+    });
+
+    it("视频不带 resolution/duration（只有比例）→ 编辑 + 9:16 仍被拒（拒单不依赖档位字段）", async () => {
+      const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
+      const result = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        {
+          ...VIDEO_BODY,
+          references: VIDEO_REF,
+          parameters: {
+            ...VIDEO_BODY.parameters,
+            prompt: "把背景替换成海边",
+            aspect_ratio: "9:16",
+            resolution: undefined,
+            duration: undefined,
+          },
+        },
+        null,
+        deps,
+      );
+      expect(result.code).toBe(1060);
       expect(createJob).not.toHaveBeenCalled();
     });
   });

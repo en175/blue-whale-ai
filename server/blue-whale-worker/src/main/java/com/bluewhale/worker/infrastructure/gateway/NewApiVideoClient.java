@@ -71,7 +71,8 @@ public class NewApiVideoClient {
     /** poll 超时 10s（默认）。 */
     private static final int POLL_TIMEOUT_MS = 10_000;
 
-    /** TEMP FIX（2026-09-22）：doubao-seedance-2-5 系模型名前缀，仅用于下面的线上临时兜底。 */
+    /** IKJ79A：doubao-seedance-2-5 系模型名前缀——官方 omni_reference_task_type 仅 2.5 支持，
+     * 下发该参数（及对应的出站 ratio/duration 约束）以此前缀为门，2.0 系列行为不变。 */
     static final String SEEDANCE_25_MODEL_PREFIX = "doubao-seedance-2-5";
 
     private static final Map<String, Boolean> SUCCESS_STATUSES = Map.of(
@@ -124,23 +125,37 @@ public class NewApiVideoClient {
             content.add(buildContentItem(typeKey, ref.url(), role));
         }
 
-        // ===== TEMP FIX 线上临时兜底（2026-09-22，待正式方案落地后删除）=====
-        // 现象：doubao-seedance-2-5 系带参考视频时，上游按提示词把任务判为「视频编辑」，
-        // 出参比例/时长须跟随被编辑的输入视频，故强制要求 ratio=adaptive、duration=-1，
-        // 否则回 provider_failed（"`ratio` must be `adaptive` / `duration` must be -1"）。
-        // 上游按提示词分类，我们按关键词分类（resolveVideoTaskType），两者必然有错位；
-        // 这里对上游分类结果做事后追认。**正式方案**应在接纳侧冻结快照前按 taskType 决定
-        // 并落到能力行字段，届时删除本块。
-        boolean seedance25VideoEdit = input.model().startsWith(SEEDANCE_25_MODEL_PREFIX)
-                && hasVideoReference(input.references());
-        double effectiveDuration = seedance25VideoEdit ? -1 : input.duration();
-        String effectiveRatio = seedance25VideoEdit ? "adaptive" : input.ratio();
+        // ===== IKJ79A：Seedance 2.5 全能参考显式任务类型（替代 09-22 TEMP FIX 静默改写，已删）=====
+        // 按快照冻结的任务类型（接纳侧判定，执行层不重算）映射下发 omni_reference_task_type：
+        // default→reference、prolong→extend、edit→edit；仅 2.5 且带参考视频时下发；
+        // 首帧/首尾帧维持 content[].role 角色驱动、不下发。出站约束（官方口径）：
+        // edit 锁 ratio=adaptive + duration=-1（时长只能跟随）；prolong 仅锁 ratio=adaptive，
+        // duration 透传用户所选；reference 比例/时长原样透传——用户比例首次真正生效。
+        String omniTaskType = null;
+        double effectiveDuration = input.duration();
+        String effectiveRatio = input.ratio();
+        if (input.model().startsWith(SEEDANCE_25_MODEL_PREFIX) && hasVideoReference(input.references())) {
+            switch (input.videoTaskType() == null ? "default" : input.videoTaskType()) {
+                case "edit" -> {
+                    omniTaskType = "edit";
+                    effectiveRatio = "adaptive";
+                    effectiveDuration = -1;
+                }
+                case "prolong" -> {
+                    omniTaskType = "extend";
+                    effectiveRatio = "adaptive";
+                }
+                case "first_frame", "first_last_frame" -> { /* 角色驱动，不下发 */ }
+                default -> omniTaskType = "reference"; // default；快照缺字段/非法值同口径按 default
+            }
+        }
 
         // 构建 body（new-api-generation-ops.ts:229-240）
         ObjectNode metadata = JSON.createObjectNode();
         metadata.put("duration", effectiveDuration);
         if (input.resolution() != null) metadata.put("resolution", input.resolution());
         if (effectiveRatio != null) metadata.put("ratio", effectiveRatio);
+        if (omniTaskType != null) metadata.put("omni_reference_task_type", omniTaskType);
         // IKG0LP：用户选的「是否带音频」，缺省 true；仅能力位允许时接纳侧才会冻结进快照。
         // 契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md
         if (input.generateAudio() != null) metadata.put("generate_audio", input.generateAudio());
@@ -449,6 +464,10 @@ public class NewApiVideoClient {
                     code = GenerationError.ERROR_CONTENT_REJECTED;
                 } else if (NewApiErrorClassifier.isQuotaSignal(upstreamText)) {
                     code = GenerationError.ERROR_QUOTA_EXHAUSTED;
+                } else if (NewApiErrorClassifier.isTaskTypeSignal(upstreamText)) {
+                    // IKJ79A：上游二次判定错位（模型语义判定的任务类型与参数/指定类型不一致）→
+                    // 归类 task_type_param_constraint（信封数值 1060）用户向文案，失败卡片复用一键修复入口。
+                    code = GenerationError.ERROR_TASK_TYPE_PARAM_CONSTRAINT;
                 } else {
                     code = upstreamCode != null ? upstreamCode : GenerationError.ERROR_PROVIDER_FAILED;
                 }
@@ -553,7 +572,8 @@ public class NewApiVideoClient {
 
     // ========== 工具方法 ==========
 
-    /** TEMP FIX（2026-09-22）：references 中是否存在「参考视频」（首尾帧为 image，type 不混淆）。 */
+    /** IKJ79A：references 中是否存在「参考视频」（官方 omni_reference_task_type 的
+     * edit/extend 都要求 content 至少含一个 reference_video，无参考视频不下发该参数）。 */
     private static boolean hasVideoReference(List<VideoReference> references) {
         for (VideoReference ref : references) {
             if ("video".equals(ref.type())) return true;
@@ -664,15 +684,21 @@ public class NewApiVideoClient {
             List<VideoReference> references,
             /** IKG0LP：视频是否带音频。null = 不下发该字段（能力位不允许或旧快照），维持上游默认。 */
             Boolean generateAudio,
-            boolean draft
+            boolean draft,
+            /**
+             * IKJ79A：快照冻结的视频任务类型（GenerationJob.input.video_task_type，
+             * 接纳侧判定冻结，执行层不重算）。取值同 TS 契约 VideoTaskType；
+             * null / 非法值 = default（存量快照无字段口径，frozenVideoTaskTypeOf 同源）。
+             */
+            String videoTaskType
     ) {
-        /** 普通视频（非样片）的既有 9 参形态：draft 缺省 false，旧调用点零改动。 */
+        /** 普通视频（非样片）的既有 9 参形态：draft 缺省 false、videoTaskType 缺省 null（按 default 处理），旧调用点零改动。 */
         public VideoSubmitInput(
                 String model, String prompt, double duration, String resolution, String ratio,
                 String firstFrameImage, String lastFrameImage,
                 List<VideoReference> references, Boolean generateAudio) {
             this(model, prompt, duration, resolution, ratio, firstFrameImage, lastFrameImage,
-                    references, generateAudio, false);
+                    references, generateAudio, false, null);
         }
     }
 

@@ -7,7 +7,14 @@
 // 这里把 Dock 的扁平字段（resolution + aspect_ratio + duration）归一化后同源校验。
 // 后续可把 checkCapabilityLimit 迁到本文件共享（IKE7JP 下一步）。
 
-import { ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION, ERROR_CAPABILITY_UNSUPPORTED_RATIO, ERROR_CAPABILITY_UNSUPPORTED_DURATION } from "./error-codes.js";
+import {
+  ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION,
+  ERROR_CAPABILITY_UNSUPPORTED_RATIO,
+  ERROR_CAPABILITY_UNSUPPORTED_DURATION,
+  ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+  ERROR_CODES,
+  errorCodeToNumeric,
+} from "./error-codes.js";
 
 /** 提交侧能力目录行（handleCreateGenerationJob 已从 listEnabledByType 取回）。 */
 export interface CapabilityLimitInput {
@@ -58,6 +65,28 @@ export const EDIT_INTENT_KEYWORDS = [
  *     把参考生视频单误判成 prolong。导出理由同 {@link EDIT_INTENT_KEYWORDS}。 */
 export const PROLONG_INTENT_KEYWORDS = ["向前延长", "向后延长", "延续", "续写"] as const;
 
+/** IKJ78C：否定防护词表（六词闭集，扩词走评审）。
+ *
+ *  背景：裸子串匹配会把「禁止修改」「不要替换」这类**约束句**误判成编辑意图，
+ *  纯参考单被按 edit 的锁定比例 4xx 拒单。防护规则见 {@link hasIntentKeyword}。
+ *
+ *  ⚠️ **导出是为了跨语言对账**（`video-task-type-parity.test.ts` 拿它当期望值），
+ *     与 worker-java `VideoJobProcessor` 同名字段逐字对齐。 */
+export const NEGATION_KEYWORDS = ["禁止", "不得", "不要", "不能", "勿", "无需"] as const;
+
+/** IKJ78C：子句切分标点（中英闭集，规格口径）。 */
+const CLAUSE_SEPARATORS = /[，。；！？、,.;!?]/;
+
+/** IKJ78C：否定防护后的关键词扫描——先按标点切子句，否定词与关键词落在**同一子句**时
+ *  剔除该命中（含否定词的子句整体不参与扫描）；跨子句不剔除（混合句「禁止修改人物，
+ *  把背景替换成海边」按肯定判 edit）。任一非否定子句命中即算意图存在。 */
+function hasIntentKeyword(prompt: string, words: readonly string[]): boolean {
+  return prompt.split(CLAUSE_SEPARATORS).some(
+    (clause) =>
+      !NEGATION_KEYWORDS.some((n) => clause.includes(n)) && words.some((w) => clause.includes(w)),
+  );
+}
+
 /** IKFPYX：判定视频任务类型（纯函数，无 IO；backend 与 worker-java 同源口径）。
  *  优先级：首尾帧角色 > 单帧角色 > 参考视频 + 提示词意图（延长先于编辑，后者词面更宽）> default。
  *
@@ -82,9 +111,31 @@ export function resolveVideoTaskType(
   if (hasFirst || hasLast) return "first_frame";
   const hasVideoRef = references.some((r) => r.role === "reference" && r.type === "video");
   if (!hasVideoRef) return "default";
-  if (PROLONG_INTENT_KEYWORDS.some((w) => prompt.includes(w))) return "prolong";
-  if (EDIT_INTENT_KEYWORDS.some((w) => prompt.includes(w))) return "edit";
+  if (hasIntentKeyword(prompt, PROLONG_INTENT_KEYWORDS)) return "prolong";
+  if (hasIntentKeyword(prompt, EDIT_INTENT_KEYWORDS)) return "edit";
   return "default";
+}
+
+/** IKJ795：编辑/延长 + 非 adaptive 比例拒单的用户向文案（结构化码 task_type_param_constraint 的话）。
+ *  ⚠️ 不出现 edit/adaptive 等内部词——用户不需要知道任务类型枚举；「自动」对应前端
+ *     adaptive 档的用户可见文案（IKJ794），一键修复动作 = 把比例切换为自动后重交。
+ *  文案唯一来源 = error-codes.ts 的 ERROR_CODES 表（字符串码 → 数值码 → 文案查表取回），
+ *  不在本文件再抄第二份字面量——两份会静默漂移。 */
+export const TASK_TYPE_PARAM_CONSTRAINT_MESSAGE =
+  ERROR_CODES[errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT)]!;
+
+/** 快照上冻结任务类型的键名（GenerationJob.input.video_task_type）。 */
+export const FROZEN_VIDEO_TASK_TYPE_KEY = "video_task_type";
+
+/** IKJ795：读 GenerationJob 输入快照里**冻结**的视频任务类型。
+ *  消费侧（执行/报价/结算）只读这份判定结果，不现场重算；存量快照未携带该字段（或值非法）
+ *  按 default 处理，不回溯历史——旧任务的判定口径让它留在旧任务里。 */
+export function frozenVideoTaskTypeOf(input: unknown): VideoTaskType {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return "default";
+  const v = (input as Record<string, unknown>)[FROZEN_VIDEO_TASK_TYPE_KEY];
+  return v === "default" || v === "first_frame" || v === "first_last_frame" || v === "edit" || v === "prolong"
+    ? v
+    : "default";
 }
 
 function readStringArray(v: unknown): string[] | null {
@@ -223,6 +274,17 @@ function taskTypeConstraint(
     : null;
 }
 
+/** IKJ797：能力行是否给该任务类型配了约束条目（`features.task_types[taskType]` 存在）。
+ *  报价/预扣用它判「该模型的 edit 是否锁跟随口径」：Seedance 2.5 配了 `task_types.edit`
+ *  （官方：edit 输出比例时长跟随参考视频），2.0 未配（编辑类提示词也可自选时长）——
+ *  按模型分叉的约束走能力行配置，与本文件其他读取器同一立场。 */
+export function hasTaskTypeConstraint(
+  taskTypes: unknown,
+  taskType: VideoTaskType,
+): boolean {
+  return taskTypeConstraint(taskTypes, taskType) !== null;
+}
+
 /** 提交侧待校验参数（Dock 视频/图片扁平字段，归一化由调用方完成）。 */
 export interface GenerationParamCheckInput {
   /** 视频分辨率档（如 1080p）或图片尺寸档（如 2k）——与能力行 supported_sizes 的 id/api_value 比对。 */
@@ -309,6 +371,16 @@ export function checkGenerationParamLimit(
 
   const ratioList = taskRatios ?? ratios(capability);
   if (ratioList.length > 0 && !ratioList.includes(params.aspect_ratio)) {
+    // IKJ795：编辑/延长被任务类型锁定比例拒下时换专用码 + 用户向文案——前端按码识别
+    // 「一键改为跟随视频」场景，文案不出现 edit/adaptive 等内部词。其余任务类型与基础
+    // 比例越界维持 capability_unsupported_ratio（两码语义不混）。
+    if (params.task_type === "edit" || params.task_type === "prolong") {
+      return {
+        field: "aspect_ratio",
+        code: ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+        reason: TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+      };
+    }
     return {
       field: "aspect_ratio",
       code: ERROR_CAPABILITY_UNSUPPORTED_RATIO,

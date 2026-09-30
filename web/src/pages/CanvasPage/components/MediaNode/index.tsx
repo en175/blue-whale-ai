@@ -34,6 +34,7 @@ import { isMultiNodeSelection } from '../../useSoloNodeSelected';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
 import styles from './index.module.css';
 
 /** 连接点统一样式：透明背景（加号图标由 children 渲染） */
@@ -232,6 +233,9 @@ export interface MediaNodeData {
   progress?: number;
   /** 失败原因 */
   errorText?: string;
+  /** 失败码（IKJ79D）：信封形态 1060 或 task_type_param_constraint——按码识别一键修复，
+   *  不做文案匹配；与 errorText 同点同置（成功/生成中清除） */
+  errorCode?: number | string;
   /** 生成时的提示词（「重新编辑」带回图片对话框） */
   prompt?: string;
   /** 资产 ID（上传完成后存储） */
@@ -344,6 +348,9 @@ export interface MediaNodeData {
   onCancelJob?: (id: string) => void;
   /** 重试（失败节点） */
   onRetryJob?: (id: string) => void;
+  /** 一键修复「改为跟随视频并重试」（IKJ79D）：task_type_param_constraint 失败卡专用——
+   *  仅把比例改为 adaptive 重交，提示词/素材/时长不动 */
+  onFixFollowVideo?: (id: string) => void;
   /** 卡片改名（IKFA8X）：提交归一化后的新名称；自定义状态由父级置 data.customName */
   onTitleChange?: (id: string, name: string) => void;
   /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线（画质工具横排「高清」按钮派发，IKH3XZ） */
@@ -1063,6 +1070,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     errorText: data.errorText,
     isMediaExtraction,
   });
+  /** 一键修复（IKJ79D）：视频失败卡 + 比例约束码 + 回调已注入三条件齐备才显示 */
+  const showFixFollowVideo =
+    data.genStatus === 'failed'
+    && data.mediaType === 'video'
+    && isTaskTypeParamConstraintCode(data.errorCode)
+    && data.onFixFollowVideo != null;
 
   const contentBox = mediaContentBox({
     mediaType: data.mediaType,
@@ -1205,6 +1218,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               </button>
             );
           })()}
+
+          {showFixFollowVideo && (
+            <button className={styles.genBtn} onClick={() => data.onFixFollowVideo?.(id)}>
+              改为跟随视频并重试
+            </button>
+          )}
         </div>
       );
     }
@@ -1652,6 +1671,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               && frameInterpolationRetryable && (
               <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
                 重试
+              </button>
+            )}
+            {showFixFollowVideo && (
+              <button className={styles.regenCancel} onClick={() => data.onFixFollowVideo?.(id)}>
+                改为跟随视频并重试
               </button>
             )}
           </div>

@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   EDIT_INTENT_KEYWORDS,
+  NEGATION_KEYWORDS,
   PROLONG_INTENT_KEYWORDS,
 } from "./capability-param-validation.js";
 
@@ -52,6 +53,8 @@ describe("视频任务类型关键词：TS ↔ worker-java 对账", () => {
   const cases = [
     { field: "EDIT_INTENT_KEYWORDS", ts: EDIT_INTENT_KEYWORDS },
     { field: "PROLONG_INTENT_KEYWORDS", ts: PROLONG_INTENT_KEYWORDS },
+    // IKJ78C：否定防护词表同样两端各写一份，必须与关键词表同等级钉死。
+    { field: "NEGATION_KEYWORDS", ts: NEGATION_KEYWORDS },
   ] as const;
 
   it.each(cases.map((c) => [c.field, c] as const))(
@@ -83,5 +86,13 @@ describe("视频任务类型关键词：TS ↔ worker-java 对账", () => {
     expect(PROLONG_INTENT_KEYWORDS).not.toContain("向前");
     expect(PROLONG_INTENT_KEYWORDS).not.toContain("向后");
     expect(PROLONG_INTENT_KEYWORDS).not.toContain("延长");
+  });
+
+  /* IKJ78C：否定词表与官方关键词不同——它是本仓为「禁止修改」类约束句加的防护词，
+     六词闭集是评审定的口径（扩词走评审）。钉住闭集本身，防止一端悄悄加词/减词。 */
+  it("否定词表是 IKJ78C 评审定的六词闭集", () => {
+    expect([...NEGATION_KEYWORDS].sort()).toEqual(
+      ["不得", "不能", "不要", "勿", "无需", "禁止"],
+    );
   });
 });
