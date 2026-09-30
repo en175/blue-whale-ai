@@ -5,7 +5,7 @@ import type { MediaGenStatus } from './index';
 import { isMultiNodeSelection } from '../../useSoloNodeSelected';
 
 /** IKJEI0 类型同源守卫：genStatus 与 MediaGenStatus 必须双向可赋值，
- *  任一侧漂移（如手写并集漏跟新态，IKIZQB 发作模式）即本文件编译红 */
+ *  防字段被改回手写并集（漏跟新态，IKIZQB 发作模式）——回退即本文件编译红 */
 const _genStatusCoversMediaGenStatus: VideoHoverPreviewInput['genStatus'] = undefined as MediaGenStatus | undefined;
 const _mediaGenStatusCoveredByGenStatus: MediaGenStatus | undefined = undefined as VideoHoverPreviewInput['genStatus'];
 void _genStatusCoversMediaGenStatus;

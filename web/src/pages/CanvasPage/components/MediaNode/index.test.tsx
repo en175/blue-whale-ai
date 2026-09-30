@@ -1439,6 +1439,8 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     // 进度/时间与 currentTime 一致：收养叠加瞬间直接显示实际位置，不再从 0 起跳
     expect(track.getAttribute('aria-valuenow')).toBe('8');
     expect(track.parentElement!.textContent).toContain('0:07 / 0:40');
+    // 挂载即对齐播放态：收养叠加瞬间视频在播（paused=false），播放钮直接显示「暂停」
+    expect(contentCard().querySelector('button[aria-label="暂停"]')).toBeTruthy();
     // duration 兜底生效后进度轨 seek 不再静默 return：点按轨道中点 + 方向键步进
     vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 200 } as DOMRect);
     await act(async () => {
