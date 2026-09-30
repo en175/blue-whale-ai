@@ -250,4 +250,43 @@
     WHERE id = #{lotId}
   </update>
 
+  <!--
+    用户的**批次台账**（积分明细「已获取」页签，gRPC ListLots）。
+
+    ⚠️ 与 listExpiring 的三条过滤**刻意相反**，不要照抄过来：
+      · 不筛 expires_at    —— 用户要看到「这笔什么时候到期」；已到期的批次也是他的历史，
+                              抹掉它等于让一行从用户眼皮底下消失（同 v11「released 行不消失」）
+      · 不筛 remaining     —— 用光了的批次同样要出现在「已获取」里，理由同上
+      · 不筛 frozen        —— 没有「不值得展示」这回事，这是一份完整台账
+
+    一句话：`listExpiring` 问的是「该提醒我什么」，这条问的是「我拿到过什么」。
+
+    ⚠️ 这一条**不**做有效期的过滤，所以它不是「当前可用余额」的分解，别拿它去和
+       `sumAvailable` 对账 —— 那个数只算未过期批次，两者本来就不相等。
+
+    ORDER BY gmt_create DESC, id DESC：最新的在前，与流水同一取向。
+    次级键 id 不是可选项：DATETIME 只到秒，同一秒落两个批次是常态
+    （首购单的基础积分与赠送积分就是同一秒发的）。
+  -->
+  <select id="listUserLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
+    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at,
+           biz_type, biz_id, version, gmt_create
+    FROM billing_credit_lots
+    WHERE user_id = #{userId}
+    ORDER BY gmt_create DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <!--
+    台账总数（「共 N 条」）。
+
+    ⚠️ WHERE 必须与 listUserLots **逐字相同**：两处谓词分叉时，「共 N 条」与翻出来的行
+       会对不上，而且不报错 —— 界面只是显示一个错的数。
+  -->
+  <select id="countUserLots" resultType="long">
+    SELECT COUNT(*)
+    FROM billing_credit_lots
+    WHERE user_id = #{userId}
+  </select>
+
 </mapper>

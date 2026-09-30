@@ -54,16 +54,24 @@
 
   ORDER BY created_at DESC, kind ASC, src_id DESC —— 三级全用不可变量：
   created_at 是行的产生时刻（批次与凭证 append-only，预留也只有 gmt_create 不变），
-  kind + src_id 是同一个 action 的稳定身份。因为稳定，才能用「严格小于游标」
-  表达「下一页从哪开始」：新发生的行只会插在游标**之前**（时间更新），
-  翻页时不会漏掉旧行、也不会重复（common/v1/types.proto 的 PageRequest 注释说的就是这件事）。
-  次级键不是可选项：DATETIME 只到秒，同一秒内多行是常态（一次 hold 与一次 grant
-  常常落在同一秒），只按时间翻页会在秒边界丢行或重复行。
+  kind + src_id 是同一个 action 的稳定身份。
+
+  ⚠️ 2026-09-30 分页由**游标**改为 **offset**（`common/v1/types.proto` 的 PageRequest）。
+  「三级键都不可变」这条要求**没有变松，反而更硬**：offset 翻页途中若某行的排序键变了，
+  它会从原位消失、在别处重现 —— 第 2 页漏一行、第 3 页重复一行，而且不报错。
+  所以下面 ② 里「状态转换时 kind 不许改」那条依然必须守。
+
+  ⚠️ offset 的代价是明摆着的：翻页途中新插入的行会把后面的行整体下移，用户可能看到重复行。
+  这是「要总数与页码」换来的，留痕见前端对接文档 §6.2。原游标实现的理由是「账本持续新增，
+  offset 会漏行」—— **那条理由仍然成立**，只是被接受为交换，不是被证伪。
+
+  次级键仍然不是可选项：DATETIME 只到秒，同一秒内多行是常态（一次 hold 与一次 grant
+  常常落在同一秒），只按时间排序会让同秒内的顺序不稳定。
 -->
 <mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.TransactionMapper">
 
   <!--
-    ⚠️ `userId` 可空：**非空 = 用户面**（只看自己那份，游标分页，gRPC ListTransactions），
+    ⚠️ `userId` 可空：**非空 = 用户面**（只看自己那份，gRPC ListTransactions），
     **为 null = 管理面**（全站流水，billing 的 /admin/transactions）。
     两种调用共用这条语句，所以三个分支各自用 <if> 决定要不要过滤 user_id ——
     **过滤条件写在分支内部**（而不是提到 UNION 外面包一层），这样「给 userId」时
@@ -71,10 +79,14 @@
 
     ⚠️ `user_id` 进投影是为了管理面能回答「这行是谁的」；用户面不读它。
   -->
-  <select id="selectPage" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.TransactionRow">
-    SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
-           t.status, t.created_at, t.settled_at, t.generation_job_id, t.kind, t.src_id
-    FROM (
+  <!--
+    三路 UNION 的**唯一一份**：`selectPage` 与 `countPage` 都 include 它。
+
+    抽出来不是为了复用好看，是为了**总数与当页必须出自同一套谓词** ——
+    两个 select 各写一遍时，改了一边忘了另一边，「共 N 条」就会与翻出来的行数对不上，
+    而这种不一致不会报错。
+  -->
+  <sql id="transactionUnion">
 
       <!-- ① 发放 / 充值：批次表。金额是发放量，方向恒为 in，落地即完成。 -->
       SELECT CONCAT('lot:', l.id) AS tx_id,
@@ -164,10 +176,11 @@
 
         ⚠️ **不会出现两行**：同一 job 只有一条预留（uk_reservation__job 唯一），
            而 tx_id 恒为 res:{预留 id} —— 一行从 pending「-12」变成 done「0」，id 不变。
-        ⚠️ kind 保持 'consume' 不动：它是游标排序三元组 (created_at, kind, src_id)
-           的一员，改了会在同一秒内跳行，而排序键必须是不可变量。
+        ⚠️ kind 保持 'consume' 不动：它是 ORDER BY 三元组 (created_at, kind, src_id)
+           的一员，改了会让这行在翻页途中换位置，而排序键必须是不可变量
+           —— offset 分页下这条更硬，见文件头「排序键」。
            —— 也正因为这三个键在状态转换时都不变，客户端翻页途中那行换形态不会重复、
-           也不会被跳过（ListTransactionsIntegrationTest#游标翻页_跨状态转换不重不漏 钉住）。
+           也不会被跳过（ListTransactionsIntegrationTest 里跨状态转换那条用例钉住）。
 
         ⚠️ **这一改会让存量数据「多出」行来**：已经 released 的历史预留，从上线那一刻起
            开始出现在用户（与管理端）流水里；它们的时间显示的是**预扣时刻**
@@ -276,26 +289,53 @@
         <if test="userId != null">AND e.user_id = #{userId}</if>
       GROUP BY tx_id, e.biz_type
       HAVING SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END) != 0
+  </sql>
 
+  <!--
+    类型过滤。空集合 = 全部。
+
+    ⚠️ 它只能放在 UNION **外面**：`type` 是各分支里的 CASE 算出来的投影列，
+    UNION 内部那张表上还没有这个字段。
+
+    ⚠️ 用 IN 而不是 `=`：用户的「已消耗」页签要把 consume 与 expire 合成一张表
+    （原型口径②「已过期并入已消耗」）。单值调用方传一个元素的集合，行为与从前一致。
+  -->
+  <sql id="transactionTypeFilter">
+    <if test="typeFilter != null and typeFilter.size() > 0">
+      AND t.type IN
+      <foreach item="item" collection="typeFilter" open="(" separator="," close=")">#{item}</foreach>
+    </if>
+  </sql>
+
+  <select id="selectPage" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.TransactionRow">
+    SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
+           t.status, t.created_at, t.settled_at, t.generation_job_id, t.kind, t.src_id
+    FROM (
+      <include refid="transactionUnion"/>
     ) t
-
     <where>
-      <!-- 游标：严格排在 (created_at, kind, src_id) 之后的行。三段的比较方向必须与
-           下面的 ORDER BY 逐项对应，否则翻页会跳行。 -->
-      <if test="cursorTime != null">
-        (t.created_at &lt; #{cursorTime}
-          OR (t.created_at = #{cursorTime}
-              AND (t.kind &gt; #{cursorKind}
-                   OR (t.kind = #{cursorKind} AND t.src_id &lt; #{cursorId}))))
-      </if>
-      <!-- 类型过滤：null = 全部。在 LIMIT 之前生效，所以每一页都是「该类型的第 N 页」。 -->
-      <if test="typeFilter != null">
-        AND t.type = #{typeFilter}
-      </if>
+      <include refid="transactionTypeFilter"/>
     </where>
-
     ORDER BY t.created_at DESC, t.kind ASC, t.src_id DESC
-    LIMIT #{limit}
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <!--
+    总数。与 `selectPage` **共用同一份 UNION 与同一个类型过滤**（两个 include），
+    所以「共 N 条」与翻出来的行必然同源。
+
+    ⚠️ 代价：每次列表查询多扫一遍派生表。账本是全表增长最快的一张，
+       这条 COUNT 的成本随数据量线性上涨 —— 接受它是在「产品要总数」与
+       「列表不扫全表」之间做的交换，留痕见前端对接文档 §6.2。
+  -->
+  <select id="countPage" resultType="long">
+    SELECT COUNT(*)
+    FROM (
+      <include refid="transactionUnion"/>
+    ) t
+    <where>
+      <include refid="transactionTypeFilter"/>
+    </where>
   </select>
 
 </mapper>

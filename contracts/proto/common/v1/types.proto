@@ -19,12 +19,35 @@ message SpecAttrs {
   map<string, string> attrs = 1;
 }
 
-// 页游标。**不用 offset**——账本与流水持续新增，offset 分页会漏数据。
+// 分页请求（**offset 口径**）。
+//
+// ⚠️ 2026-09-30 由游标改为 offset。此前这里写的是「**不用 offset**——账本与流水持续新增，
+//    offset 分页会漏数据」。**那条理由仍然成立**，不是被证伪了：一边翻页一边进新行时，
+//    第 2 页确实可能漏掉（或重复）一行。改的原因是产品要列表出现「共 N 条」与页码，
+//    而游标给不出总数；在「一套分页词汇」与「账本不漏行」之间选了前者，代价被接受。
+//    依据与留痕见《通用积分卡「账户积分与订单」页前端对接文档》§6.2。
+//
+// ⚠️ 字段号 2 **保持 string**：曾打算把它原地换成 int32 的页码，那是同一字段号上的
+//    类型变更 —— 滚动发布期间 billing 与 backend 新旧并存，老的一侧会把它解成错误的页号。
+//    页码另开了字段号 3（`page`）。
+//
+// ⚠️ 旧的 `page_token` **删掉并 reserve**。防字段号复用靠的是 `reserved`，不是
+//    「一律不删」—— 一个已经没有读者的字段留着，只会被下一个人误以为是活契约。
+//    规则为什么这么定见 `contracts/buf.yaml` 的 breaking 说明。
 message PageRequest {
-  int32 page_size = 1;   // 上限由服务端钳制
-  string page_token = 2; // 空 = 首页
+  int32 page_size = 1; // 上限由服务端钳制
+  reserved 2;
+  reserved "page_token";
+  int32 page = 3;      // 页码，从 1 起；< 1 按 1 处理
 }
 
+// 分页响应。
+//
+// ⚠️ `total` 是 `optional`：proto3 的 presence 让「未设置」与「0」可分辨。
+//    两端都填（用户面与运营面，2026-09-30 改判 —— 「有页码、没总数」是前端翻页组件
+//    表达不了的形状）。若用 0 当哨兵，「真的一行都没有」与「这个调用点还没实现」会一模一样。
 message PageResponse {
-  string next_page_token = 1; // 空 = 没有下一页
+  reserved 1;
+  reserved "next_page_token";
+  optional int64 total = 2; // 满足该查询条件的总条数
 }

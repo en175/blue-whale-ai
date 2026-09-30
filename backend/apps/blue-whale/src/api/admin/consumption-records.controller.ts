@@ -1,19 +1,10 @@
 import { Controller, Get, Query, UseGuards } from "@nestjs/common";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
+import { parsePageParam, parsePageSizeParam } from "@lib/shared/account/admin-paging.js";
 import { BillingAdminConfigError, BillingAdminError, listAdminTransactions } from "@lib/shared/billing/billing-admin-client.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
-
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
-
-function parsePageSize(raw: string | undefined): number {
-  const size = Number(raw);
-  return Number.isInteger(size) && size > 0
-    ? Math.min(MAX_PAGE_SIZE, size)
-    : DEFAULT_PAGE_SIZE;
-}
 
 /**
  * 积分记录（管理端）。
@@ -33,9 +24,14 @@ function parsePageSize(raw: string | undefined): number {
  *    那条 rpc**，不是「用 gRPC」—— 独立服务同样满足它，还免掉两套协议。2026-09-26 迁到
  *    gRPC 时把这段留在 proto 与这里，防止后来的人照着旧结论回滚。）
  *
- * <p>⚠️ **分页是游标、没有总数**（账本持续追加，要准确总数就得扫全表，而扫完那一刻
- *    它又变了）。所以这里**不返回 total**，前端也只能给「上一页/下一页」。
- *    这与充值记录页的 offset 分页形状不同——但前端用同一个翻页组件，观感一致。
+ * <p>⚠️ 2026-09-30 分页由**游标**改为 **offset 页码**（与用户面同一次改动，
+ *    见 `common/v1/types.proto`）。代价在运营面同样存在：翻页途中新增的行会把后面的行下移，
+ *    可能看到重复行。
+ *
+ * <p>⚠️ **本页返回真实的 total**（2026-09-30 改判）：原先定的是「运营面不统计总数，COUNT 太贵」，
+ *    那个判断在分页还是游标时成立 —— 游标翻页不需要总数。换成 offset 之后就不成立了：
+ *    「有页码、没总数」是前端翻页组件**表达不了**的形状（实测：本页当时退化成只能看前 20 条、
+ *    「下一页」永久置灰）。一次列表多一条 COUNT，换翻页能用。
  *
  * <p><b>消费行为什么还带任务的类型 / 模型 / 提示词</b>：那一行的 id 是 {@code res:7}，
  * 钱的来源是 billing，但任务的语义全在我们自己库里——billing 只存得下
@@ -58,11 +54,12 @@ export class AdminConsumptionRecordsController {
   ) {}
 
   /**
-   * GET /api/admin/consumption-records?keyword=&type=&pageSize=&pageToken=
+   * GET /api/admin/consumption-records?keyword=&type=&pageSize=&page=
    *
    * @param keyword 用户 ID / 手机号 / 昵称，**都要完整**（精确匹配）。空 = **全站**（管理端独有；
    *                用户面没有这个自由度）
    * @param type    单值（consume | recharge | ...），空 = 全部
+   * @param page    页码，从 1 起
    */
   @Get()
   async list(@Query() query: Record<string, string> = {}) {
@@ -83,7 +80,7 @@ export class AdminConsumptionRecordsController {
     //    打错一位数就得先分清是哪一种，而账本页要的是「输错了立刻看得出来」——
     //    所以页面的空态文案保持中性，不去断言「这个人没消费过」。
     //
-    // ⚠️ 这一步刻意留在 try **外面**（同 `parsePageSize`）：它查的是**我们自己的库**，
+    // ⚠️ 这一步刻意留在 try **外面**（同 `parsePageSizeParam`）：它查的是**我们自己的库**，
     //    失败是「我们的库挂了」，不是 `toConsumptionError` 那两种 billing 故障。
     //    塞进去会被兜成 502「积分记录查询失败：未知错误」，把值班的人指向 billing——
     //    而那边其实好好的。让它照常冒成 500。
@@ -91,7 +88,10 @@ export class AdminConsumptionRecordsController {
     if (keyword) {
       userId = await this.identity.findAdminUserIdByKeyword(keyword);
       if (userId === undefined) {
-        return { success: true, data: { items: [], next_page_token: "" } };
+        // 认不出这个人 = 他的流水恒为 0 条，所以 total 是 **0**，与「这个用户确实没有流水」
+        // 是同一个答案：这里真的数得出来。别把它写成 null 去表达「不知道」——
+        // 前端的空态不分这两种，编出第三种「没有」只会多一个要判的分支。
+        return { success: true, data: { items: [], total: 0 } };
       }
     }
 
@@ -99,8 +99,8 @@ export class AdminConsumptionRecordsController {
       const page = await listAdminTransactions({
         ...(userId !== undefined ? { userId } : {}),
         ...(typeFilter ? { type: typeFilter } : {}),
-        pageSize: parsePageSize(query.pageSize),
-        pageToken: query.pageToken ?? "",
+        pageSize: parsePageSizeParam(query.pageSize),
+        page: parsePageParam(query.page),
       });
 
       // 只有消费行（billing 的 res: 行）带得回 generation_job_id；发放行 / 账本行是 null。
@@ -164,7 +164,7 @@ export class AdminConsumptionRecordsController {
               settled_at: item.settledAt,
             };
           }),
-          next_page_token: page.nextPageToken,
+          total: page.total,
         },
       };
     } catch (error) {

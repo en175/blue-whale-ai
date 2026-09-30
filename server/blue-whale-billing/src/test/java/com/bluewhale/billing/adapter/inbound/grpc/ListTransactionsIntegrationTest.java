@@ -28,11 +28,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,8 +53,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *   <li><b>永远只有一个金额</b>——{@code UserTransaction} 没有 reserved_amount 字段。
  *       未结算的行（pending）用**同一个 amount 字段**显示预计消耗，结算后变成实际消耗，
  *       见 {@link #未结算_显示预计消耗且没有结算时刻()}。</li>
- *   <li><b>游标分页</b>——{@code PageResponse} 只有 next_page_token（没有总数），
- *       且账本与流水持续新增，offset 会漏数据。见 {@link #游标翻页_跨三类来源不重不漏()}。</li>
+ *   <li><b>offset 分页 + 总数</b>——2026-09-30 由游标改来：{@code PageResponse} 带 {@code total}，
+ *       入参是页码。代价（翻页途中新增的行会把后面的行挤动）是被接受的，不是没想到，
+ *       留痕见前端对接文档 §6.2。见 {@link #偏移翻页_跨三类来源不重不漏()}。</li>
  *   <li><b>退回不新增一行、也不另立类型</b>——任务失败全额退回就是「结算到 0」，
  *       那条 pending 行原地变成 {@code amount=0} 的消费行（{@code id} 不变、方向恒 out），
  *       预扣额另走管理面的 {@code reserved_credits} 注解。不是「消费一行 + 退回一行」，
@@ -167,14 +166,16 @@ class ListTransactionsIntegrationTest {
     // ─────────────────────────────────────────────────────────────
 
     @Test
-    void 空流水_返回空页且不给下一页游标() {
+    void 空流水_返回空页且总数为零() {
         // 一个从没发生过任何动作的用户
-        ListTransactionsResponse response = list(newPageRequest(20, ""), 9_599L);
+        ListTransactionsResponse response = list(newPageRequest(20, 1), 9_599L);
 
         // 空 ≠ 未实现：这一页必须答得出来（曾经这里是 UNIMPLEMENTED，
         // 调用方只能把「还没做」显示成「暂无记录」）
         assertThat(response.getItemsList()).isEmpty();
-        assertThat(response.getPage().getNextPageToken()).isEmpty();
+        // 总数是 0 而不是「未设置」：用户面**必须**填 total（运营面才是留空的）
+        assertThat(response.getPage().hasTotal()).isTrue();
+        assertThat(response.getPage().getTotal()).isZero();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ class ListTransactionsIntegrationTest {
     void 发放与预扣_各出一行_字段齐备() {
         stub.hold(hold("cmd-1", 9_101L));
 
-        List<UserTransaction> items = list(newPageRequest(20, ""), USER).getItemsList();
+        List<UserTransaction> items = list(newPageRequest(20, 1), USER).getItemsList();
 
         // 两行：setUp 的发放 + 这次预扣产生的「处理中」消费行
         assertThat(items).hasSize(2);
@@ -215,7 +216,7 @@ class ListTransactionsIntegrationTest {
     void 未结算_显示预计消耗且没有结算时刻() {
         stub.hold(hold("cmd-2", 9_102L));
 
-        UserTransaction pending = rowOf(list(newPageRequest(20, ""), USER).getItemsList(), "consume");
+        UserTransaction pending = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "consume");
 
         // ★ 「任何用户可见界面永远只出现一个金额」：UserTransaction 里没有 reserved_amount，
         //    未结算行的金额就落在这唯一的 amount 字段上——它是预扣时按契约用量算出的
@@ -229,8 +230,8 @@ class ListTransactionsIntegrationTest {
     void 别人的流水不会串进来() {
         stub.hold(hold("cmd-3", 9_103L));
 
-        List<UserTransaction> mine = list(newPageRequest(20, ""), USER).getItemsList();
-        List<UserTransaction> theirs = list(newPageRequest(20, ""), OTHER_USER).getItemsList();
+        List<UserTransaction> mine = list(newPageRequest(20, 1), USER).getItemsList();
+        List<UserTransaction> theirs = list(newPageRequest(20, 1), OTHER_USER).getItemsList();
 
         // 每人各一行发放 + 只有我这个用户有消费
         assertThat(mine).hasSize(2);
@@ -247,7 +248,7 @@ class ListTransactionsIntegrationTest {
         stub.hold(hold("cmd-4", 9_104L));          // 预扣：借 wallet / 贷 frozen，2 腿
         credits.settle(9_104L, 30);                // 结算：解冻 100 + 消耗 30 + 退 70，3 腿
 
-        List<UserTransaction> items = list(newPageRequest(20, ""), USER).getItemsList();
+        List<UserTransaction> items = list(newPageRequest(20, 1), USER).getItemsList();
 
         // 本用户此刻只有两个业务动作：一次发放、一次消费。分录却有 5 条。
         assertThat(ledgerLegsOf("hold:cmd-4")).isEqualTo(2);
@@ -273,11 +274,11 @@ class ListTransactionsIntegrationTest {
         stub.hold(hold("cmd-5", 9_105L));
 
         // 先记下「处理中」那一刻的 id —— 结算到 0 之后这行必须**还是它**
-        String pendingId = rowOf(list(newPageRequest(20, ""), USER).getItemsList(), "consume").getId();
+        String pendingId = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "consume").getId();
 
         credits.refund(9_105L, "任务失败");
 
-        List<UserTransaction> items = list(newPageRequest(20, ""), USER).getItemsList();
+        List<UserTransaction> items = list(newPageRequest(20, 1), USER).getItemsList();
 
         // 两行：setUp 的发放 + 这条消费。**那行没有消失**。
         // 用户提交时已经看到过那条「-100 处理中」（可用余额也确实降过），
@@ -314,7 +315,7 @@ class ListTransactionsIntegrationTest {
     // ─────────────────────────────────────────────────────────────
 
     @Test
-    void 游标翻页_跨三类来源不重不漏() {
+    void 偏移翻页_跨三类来源不重不漏() {
         // 六条业务动作：一次发放（setUp）+ 四次发放 + 一次预扣。
         // 时间用 INTERVAL 拉开——DATETIME 只到秒，靠同一秒内的次级键排序是另一条测试的事。
         long a = credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "page-a");
@@ -331,27 +332,35 @@ class ListTransactionsIntegrationTest {
         jdbc.update("UPDATE billing_cost_reservations SET gmt_create = NOW() - INTERVAL 1 HOUR WHERE id = ?", res);
 
         List<String> seen = new ArrayList<>();
-        String token = "";
         int pages = 0;
-        do {
-            ListTransactionsResponse page = list(newPageRequest(2, token), USER);
-            assertThat(page.getItemsList()).hasSizeLessThanOrEqualTo(2);
-            page.getItemsList().forEach(item -> seen.add(item.getId()));
-            token = page.getPage().getNextPageToken();
+        for (int page = 1; page <= 3; page++) {
+            ListTransactionsResponse response = list(newPageRequest(2, page), USER);
+            assertThat(response.getItemsList()).hasSizeLessThanOrEqualTo(2);
+            // 每一页都报同一个总数 —— 总数是「这个查询条件下共几条」，不是「本页几条」
+            assertThat(response.getPage().getTotal()).isEqualTo(6);
+            response.getItemsList().forEach(item -> seen.add(item.getId()));
             pages++;
-        } while (!token.isEmpty() && pages < 10);
+        }
 
-        // 每页 2 行 → 3 页；6 条动作的 id 恰好各出现一次：
-        // 不漏（6 条都在）也不重（没有重复 id）——游标是「严格排在最后一条之后」，
-        // 而排序三元组全是不可变量，所以翻页途中新插入的行只会出现在更前面。
+        // 每页 2 行 → 3 页；6 条动作的 id 恰好各出现一次。
+        //
+        // ⚠️ 这里的「不重」靠的是**翻页期间库没有变动**。offset 分页在数据变动时
+        //    本来就会漏行 / 重行（那正是它换掉游标的代价，见前端对接文档 §6.2），
+        //    所以这条断言钉的是「排序稳定时 offset 切分正确」，**不是**「offset 不会漏行」。
         assertThat(seen).hasSize(6).doesNotHaveDuplicates();
         assertThat(seen).containsExactly(
                 "res:" + res, "lot:" + d, "lot:" + c, "lot:" + b, "lot:" + a, "lot:" + seed);
         assertThat(pages).isEqualTo(3);
+
+        // 越界页码：**空列表 + 总数照旧**，不报错。offset 页码没有「非法值」这回事，
+        // 与游标时代「坏游标必须报错」是两种不同的失败面（见下面那条用例）。
+        ListTransactionsResponse beyond = list(newPageRequest(2, 4), USER);
+        assertThat(beyond.getItemsList()).isEmpty();
+        assertThat(beyond.getPage().getTotal()).isEqualTo(6);
     }
 
     /**
-     * 翻页途中那行**原地转换**——排序三元组不变，所以既不重复也不漏。
+     * 翻页途中那行**原地转换**——排序三元组不变，所以分页切分不受影响。
      *
      * <p>这是本设计最依赖的一条不变量：预留行由 {@code held} 转 {@code settled} 或
      * {@code released} 时，{@code amount} 与 {@code status} 变
@@ -359,10 +368,14 @@ class ListTransactionsIntegrationTest {
      * 不另立形态），
      * 但 {@code created_at}（= {@code gmt_create}，DDL 上没有 ON UPDATE）、
      * {@code kind}（字面量）、{@code src_id}（= {@code id}）三个都不动。
-     * 客户端拿上一页的 token 接着翻时，那一行既不会被当成新行重新出现，也不会被跳过。
+     *
+     * <p>⚠️ 这条不变量在 **offset 分页下比游标时代更关键**：游标是「严格排在最后一条之后」，
+     * 那一行只要不越过分界点就不会串页；而 offset 是数位置——**排序键一变，行的序号就变**，
+     * 它会从第 1 页消失、出现在第 2 页，两次都被翻到。所以这里钉的是：
+     * 状态转换**不许**动那三列。
      */
     @Test
-    void 游标翻页_跨状态转换不重不漏() {
+    void 翻页_跨状态转换不重不漏() {
         long a = credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "tr-a");
         long b = credits.grant(USER, CreditSource.INVITE, 20, null, "grant", "i", "tr-b");
         long res = holdAndReturnReservationId("cmd-tr", 9_120L);
@@ -373,22 +386,23 @@ class ListTransactionsIntegrationTest {
         jdbc.update("UPDATE billing_cost_reservations SET gmt_create = NOW() - INTERVAL 1 HOUR WHERE id = ?", res);
 
         // 第一页（倒序取 2 行）= 最新的两行：预留 + b。预留那行此刻还是「处理中」
-        ListTransactionsResponse first = list(newPageRequest(2, ""), USER);
+        ListTransactionsResponse first = list(newPageRequest(2, 1), USER);
         assertThat(first.getItemsList()).extracting(UserTransaction::getId)
                 .containsExactly("res:" + res, "lot:" + b);
         assertThat(first.getItemsList().get(0).getType()).isEqualTo("consume");
         assertThat(first.getItemsList().get(0).getStatus()).isEqualTo("pending");
-        String token = first.getPage().getNextPageToken();
-        assertThat(token).as("后面还有行，游标必须给出").isNotEmpty();
+        assertThat(first.getPage().getTotal()).isEqualTo(4);
 
-        // ★ 拿到 token 之后、翻第二页之前，第一页那行**换了形态**
+        // ★ 翻第二页之前，第一页那行**换了形态**
         credits.refund(9_120L, "任务失败");
 
-        // 第二页照旧：不重复第一页的行，也没漏掉剩下的
-        ListTransactionsResponse second = list(newPageRequest(2, token), USER);
+        // 第二页照旧：不重复第一页的行，也没漏掉剩下的。
+        // 「照旧」成立的前提正是上面那条不变量 —— created_at/kind/src_id 没动，
+        // 所以行的序号没变，第 2 页要的还是那两条。
+        ListTransactionsResponse second = list(newPageRequest(2, 2), USER);
         assertThat(second.getItemsList()).extracting(UserTransaction::getId)
                 .containsExactly("lot:" + a, "lot:" + seed);
-        assertThat(second.getPage().getNextPageToken()).isEmpty();
+        assertThat(second.getPage().getTotal()).isEqualTo(4);
 
         // 四行、id 各一次；那行现在结算到 0（仍是 consume），而且**只出现一次**
         List<String> seen = new ArrayList<>();
@@ -399,23 +413,26 @@ class ListTransactionsIntegrationTest {
         assertThat(list("refund", USER).getItemsList()).isEmpty();
     }
 
+    /**
+     * 页码 {@code < 1} 夹到第一页。
+     *
+     * <p>⚠️ 这条用例**替换**了游标时代的 {@code 坏游标_映射成INVALID_ARGUMENT而不是当首页重来}。
+     * 那条守的性质（「解析不了就把请求打回去，别静默当首页」）在 offset 下**没有对应物**：
+     * 页码是个整数，没有「坏」这回事，只有「越界」。删掉它是因为它测的行为已经不存在了，
+     * 不是因为它错了 —— 而 {@code page <= 0} 是真实可达的（客户端从 0 起算很常见），
+     * 不夹的话 {@code (page-1)*size} 会算成负数，MySQL 的负 OFFSET 直接语法错、
+     * 整个请求 500，而不是「回到第一页」。
+     */
     @Test
-    void 坏游标_映射成INVALID_ARGUMENT而不是当首页重来() {
-        // 两种坏法：不是合法 base64，以及是合法 base64 但格式/版本不对
-        String notBase64 = "!!!!";
-        String wrongVersion = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString("2|1|grant|1".getBytes(StandardCharsets.UTF_8));
+    void 页码小于一_夹到第一页而不是报错() {
+        List<String> firstPage = idsOf(list(newPageRequest(20, 1), USER));
 
-        for (String token : List.of(notBase64, wrongVersion)) {
-            assertThatThrownBy(() -> list(newPageRequest(20, token), USER))
-                    .isInstanceOf(StatusRuntimeException.class)
-                    .satisfies(thrown -> {
-                        Status status = ((StatusRuntimeException) thrown).getStatus();
-                        // 静默当首页，界面会「翻着翻着自己跳回顶部」，而日志里什么都看不出来
-                        assertThat(status.getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT);
-                        assertThat(status.getDescription()).contains("游标");
-                    });
-        }
+        assertThat(idsOf(list(newPageRequest(20, 0), USER))).containsExactlyElementsOf(firstPage);
+        assertThat(idsOf(list(newPageRequest(20, -3), USER))).containsExactlyElementsOf(firstPage);
+    }
+
+    private static List<String> idsOf(ListTransactionsResponse response) {
+        return response.getItemsList().stream().map(UserTransaction::getId).toList();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -427,7 +444,7 @@ class ListTransactionsIntegrationTest {
         credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "filter-daily");
         stub.hold(hold("cmd-7", 9_107L));
 
-        List<String> types = list(newPageRequest(20, ""), USER).getItemsList().stream()
+        List<String> types = list(newPageRequest(20, 1), USER).getItemsList().stream()
                 .map(UserTransaction::getType)
                 .toList();
         assertThat(types).containsExactlyInAnyOrder("gift", "daily", "consume");
@@ -452,6 +469,30 @@ class ListTransactionsIntegrationTest {
 
         // 没有该类型的行 = 空页（与「类型非法」是两回事，后者见下一条）
         assertThat(list("refund", USER).getItemsList()).isEmpty();
+    }
+
+    /**
+     * 多值过滤：用户的「已消耗」页签要一次取 {@code consume} 与 {@code expire}
+     * （原型口径②「已过期并入已消耗」）。
+     */
+    @Test
+    void 类型过滤_可多值_一次取消耗与过期() {
+        credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "filter-multi");
+        stub.hold(hold("cmd-9", 9_109L));
+
+        List<String> types = list(List.of("consume", "expire"), newPageRequest(20, 1), USER)
+                .getItemsList().stream()
+                .map(UserTransaction::getType)
+                .toList();
+        assertThat(types).containsExactly("consume");
+
+        // ★ 多值里**每一个**都要校验。只校验第一个的话，"consume" + 未知类型 会静默
+        //   返回只剩 consume 的页（或空页），而调用方从结果里看不出自己传错了。
+        assertThatThrownBy(() -> list(List.of("consume", "bogus"), newPageRequest(20, 1), USER))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(
+                        ((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
     }
 
     @Test
@@ -482,7 +523,7 @@ class ListTransactionsIntegrationTest {
                     "grant", source.key(), "src-" + source.key());
         }
 
-        List<UserTransaction> items = list(newPageRequest(50, ""), USER).getItemsList();
+        List<UserTransaction> items = list(newPageRequest(50, 1), USER).getItemsList();
 
         for (CreditSource source : CreditSource.values()) {
             long amount = 1_000 + source.ordinal();
@@ -552,19 +593,24 @@ class ListTransactionsIntegrationTest {
 
     /** 带类型过滤的一页；空串 = 全部。 */
     private ListTransactionsResponse list(String typeFilter, long userId) {
-        return list(typeFilter, newPageRequest(20, ""), userId);
+        return list(typeFilter, newPageRequest(20, 1), userId);
     }
 
     private ListTransactionsResponse list(String typeFilter, PageRequest page, long userId) {
+        return list(typeFilter.isEmpty() ? List.of() : List.of(typeFilter), page, userId);
+    }
+
+    /** 多值类型过滤（用户「已消耗」页签要一次取 consume + expire）。 */
+    private ListTransactionsResponse list(List<String> typeFilters, PageRequest page, long userId) {
         return stub.listTransactions(ListTransactionsRequest.newBuilder()
                 .setUserId(userId)
-                .setTypeFilter(typeFilter)
+                .addAllTypeFilters(typeFilters)
                 .setPage(page)
                 .build());
     }
 
-    private static PageRequest newPageRequest(int size, String token) {
-        return PageRequest.newBuilder().setPageSize(size).setPageToken(token).build();
+    private static PageRequest newPageRequest(int size, int page) {
+        return PageRequest.newBuilder().setPageSize(size).setPage(page).build();
     }
 
     /** 取该类型的那一行；不唯一直接失败（断言意图就是「恰好一行」）。 */

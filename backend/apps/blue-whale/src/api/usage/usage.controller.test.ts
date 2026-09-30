@@ -26,7 +26,9 @@ describe("UsageController.token（billing 余额）", () => {
     queryBalance.mockResolvedValue({
       availableCredits: 120,
       frozenCredits: 30,
-      expiring: [],
+      expiring: [
+        { credits: 50, expiresAt: "2026-12-01T00:00:00+08:00", source: "purchased" },
+      ],
       bySource: [
         { source: "purchased", credits: 100 },
         { source: "bonus", credits: 20 },
@@ -44,8 +46,26 @@ describe("UsageController.token（billing 余额）", () => {
         { source: "purchased", credits: 100 },
         { source: "bonus", credits: 20 },
       ],
+      // 临期批次：账户积分页的「最近到期批次」用它。⚠️ 它是**子集**（不是全部批次），
+      // 也**不是第二个金额** —— 这些批次的钱已经算在 credits 里了
+      expiring: [
+        { credits: 50, expires_at: "2026-12-01T00:00:00+08:00", source: "purchased" },
+      ],
     });
     expect(queryBalance).toHaveBeenCalledWith(42);
+  });
+
+  it("没有临期批次时 expiring 是空数组，不是缺键", async () => {
+    queryBalance.mockResolvedValue({
+      availableCredits: 0,
+      frozenCredits: 0,
+      expiring: [],
+      bySource: [],
+    });
+
+    // 空数组与「字段不存在」在前端是两种分支：前者能安全 `.length`，
+    // 后者要判 undefined。对外只留一种
+    expect((await controller.token(USER)).data.expiring).toEqual([]);
   });
 
   it("billing 未配置 → 503，billing 报错 → 502（不回落成 0 或 null）", async () => {

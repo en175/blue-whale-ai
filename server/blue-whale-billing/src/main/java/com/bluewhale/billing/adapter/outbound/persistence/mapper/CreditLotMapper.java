@@ -136,6 +136,29 @@ public interface CreditLotMapper extends BaseMapper<CreditLotEntity> {
                                        @Param("withinDays") int withinDays,
                                        @Param("limit") int limit);
 
+    /**
+     * 用户的批次台账一页（积分明细「已获取」）。
+     *
+     * <p>⚠️ 与 {@link #listExpiring} **不是同一条**：那条筛掉已过期与已用光的批次，
+     * 这条一个都不筛 —— 用户要看的是一份完整台账，不是「该提醒我什么」。
+     * 理由写在 XML 里，改这条之前先读那段。
+     *
+     * <p>{@code userId} **必填**：这是用户侧取数，没有「不限用户」这个模式。
+     * 传 0 只会得到空页，不会得到别人的账。
+     *
+     * @param offset 跳过多少行（由应用层按页码换算）
+     * @param limit  本页条数
+     */
+    List<CreditLotEntity> listUserLots(@Param("userId") long userId,
+                                       @Param("offset") long offset,
+                                       @Param("limit") int limit);
+
+    /**
+     * 台账总数。WHERE 与 {@link #listUserLots} **逐字相同** ——
+     * 分叉时「共 N 条」会与翻出来的行对不上，且不报错。
+     */
+    long countUserLots(@Param("userId") long userId);
+
     /** 冻结：预扣用。**只动 frozen**，remaining 不动。 */
     int addFrozen(@Param("lotId") long lotId, @Param("amount") long amount);
 

@@ -19,6 +19,10 @@ import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js"
  * 两种投影保证）。前端「总积分 = 各类型之和」靠的就是这个等式；两边对不上是 bug，
  * 不是口径差异。`credits` 保留不动，是为了既有消费端（画布顶栏、额度闸、充值弹窗）
  * 不必跟着改。
+ *
+ * <p>`expiring` 是**临期批次**（账户积分与订单页的「最近到期批次」用它）。
+ * ⚠️ 它是**子集**，不是全部批次：上游只返回「最近会到期」的那几条。要完整的批次台账
+ * 走 `/api/account/credit-lots`。也**不是第二个金额** —— 这些批次的钱已经算在 `credits` 里了。
  */
 @Controller("usage")
 export class UsageController {
@@ -31,6 +35,14 @@ export class UsageController {
         by_source: balance.bySource.map((item) => ({
           source: item.source,
           credits: item.credits,
+        })),
+        // 上游早就返回了（gRPC QueryBalance.expiring + 客户端映射都在），此前只是这一层
+        // 没投影出来。契约里 `expires_at` 是 RFC3339，`source` 是**批次口径**
+        // （purchased | bonus | …），不是流水口径的 recharge
+        expiring: balance.expiring.map((lot) => ({
+          credits: lot.credits,
+          expires_at: lot.expiresAt,
+          source: lot.source,
         })),
       });
     } catch (error) {

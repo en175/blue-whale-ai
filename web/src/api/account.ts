@@ -32,16 +32,20 @@ export interface ConsumptionRecord {
 /**
  * 账户流水分页。
  *
- * ⚠️ 后端是**游标分页**（billing 账本持续追加，offset 会在翻页时漏行或重复行），
- * 所以没有 `total`：把上一页返回的 `next_page_token` 原样回传即可，空串 = 首页。
+ * ⚠️ 2026-09-30 后端由**游标**改成 **offset 页码 + 总数**（`common/v1/types.proto` 的
+ * PageRequest/PageResponse 同批改动）。原注释写的「账本持续追加，offset 会在翻页时漏行」
+ * **仍然成立**，是产品要「共 N 条」与页码换来的，见对接文档 §6.2。
  *
- * `type` 传**单个**类型（consume / recharge / refund / ...），不传 = 全部流水。
+ * ⚠️ 改了 offset 之后**没有游标可回传**：`page` 是从 1 起的页码，`total` 是总数。
+ *
+ * `type` 现在支持**逗号分隔的多值**（如 `consume,expire`），不传 = 全部流水。
+ *
+ * ⚠️ 调用方（账户记录弹窗）目前只用第一页；要用到翻页时请按 `page` / `total` 接。
  */
-export function fetchConsumptions(pageToken = '', pageSize = 20, type?: string) {
-  const qs = new URLSearchParams({ page_size: String(pageSize) });
-  if (pageToken) qs.set('page_token', pageToken);
+export function fetchConsumptions(page = 1, pageSize = 20, type?: string) {
+  const qs = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   if (type) qs.set('type', type);
-  return apiRequest<{ items: ConsumptionRecord[]; next_page_token: string }>(
+  return apiRequest<{ items: ConsumptionRecord[]; total: number }>(
     `/api/account/consumptions?${qs.toString()}`,
   );
 }

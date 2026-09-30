@@ -5,11 +5,13 @@
  * 骨架（筛选状态机 / 三态 / 分页接线）在 `../../components/AdminQueryTable`；
  * 本页只**声明**筛选、列与空态。
  *
- * ⚠️ 这一页与另外两张记录页的分页形状不同：billing 的账本是**游标分页、没有总数**
- *    （账本持续追加，要准确总数就得扫全表，而扫完那一刻它又变了）。所以：
- *    · 翻页状态由**游标栈**维护（`useCursorStack`），而不是一个页码数字
- *    · 不传 `total` 给 Pagination —— 界面不会显示「共 N 条」，因为没有这个数
- *    · 翻页控件仍是同一个组件，观感与 offset 那两页一致
+ * ⚠️ 2026-09-30 **分页形状改过**：billing 的账本从**游标**换成了 **offset + 总数**
+ *    （后端同批改动，`common/v1/types.proto` 的 PageRequest/PageResponse）。
+ *    所以这一页现在与另外两张记录页**同形**：页码 + 「共 N 条」。
+ *    改之前的理由是「账本持续追加，要准确总数就得扫全表，扫完那一刻它又变了」——
+ *    那条理由仍然成立，代价是产品要「共 N 条」与页码换来的，见对接文档 §6.2。
+ *    改完 offset 之后**必须**有 total：没有它翻页组件表达不了「还有没有下一页」
+ *    （当时这一页就退化成只能看前 20 条、「下一页」永久置灰）。
  *
  * ⚠️ **预扣额**（§「积分」列）：消费行在 billing 侧就是一条预留，预扣额与结算额都在
  *    同一行上。结算后 `credits` 已换成实际值，预扣额若不显示，用户余额「先降后回」
@@ -25,9 +27,9 @@ import {
 } from '@/api/adminConsumptionRecords';
 import AdminQueryTable, {
   type Column,
-  type CursorPaginationState,
+  type OffsetPaginationState,
 } from '../../components/AdminQueryTable';
-import { useAppliedFilters, useCursorStack } from '../../components/AdminQueryTable/useQueryFilters';
+import { useAppliedFilters, usePagedQuery } from '../../components/AdminQueryTable/useQueryFilters';
 import { Badge, Button, Hint, Input, MetaRow, Select, Tooltip } from '../../ui';
 import { taskTypeLabel } from '../../taskTypeLabels';
 
@@ -119,19 +121,18 @@ const EMPTY_FILTERS: Filters = { keyword: '', type: '' };
 
 export default function ConsumptionRecords() {
   const filters = useAppliedFilters(EMPTY_FILTERS);
-  const cursor = useCursorStack(filters.epoch);
+  const paging = usePagedQuery(filters.epoch);
   const { applied, draft, setDraft, apply, reset } = filters;
 
   const query: AdminConsumptionRecordQuery = {
     pageSize: PAGE_SIZE,
-    pageToken: cursor.pageToken,
+    page: paging.page,
     ...(applied.keyword ? { keyword: applied.keyword } : {}),
     ...(applied.type ? { type: applied.type } : {}),
   };
   const list = useQuery(adminConsumptionRecordsOptions(query));
 
   const rows = list.data?.items ?? [];
-  const nextToken = list.data?.next_page_token ?? '';
 
   const columns: Column<(typeof rows)[number]>[] = [
     { key: 'created_at', header: '时间', render: (row) => fmtTime(row.created_at) },
@@ -263,14 +264,13 @@ export default function ConsumptionRecords() {
     },
   ];
 
-  const pagination: CursorPaginationState = {
-    kind: 'cursor',
-    page: cursor.page,
+  const pagination: OffsetPaginationState = {
+    kind: 'offset',
+    page: paging.page,
     pageSize: PAGE_SIZE,
-    // 由服务端给的下一个游标回答；从 total 推会让下一页永远灰着（这里压根没有 total）
-    hasNext: nextToken !== '',
-    prev: cursor.prev,
-    next: () => cursor.next(nextToken),
+    total: list.data?.total ?? 0,
+    prev: paging.prev,
+    next: paging.next,
   };
 
   return (

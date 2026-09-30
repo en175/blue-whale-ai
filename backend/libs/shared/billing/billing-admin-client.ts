@@ -458,8 +458,11 @@ export interface AdminTransactionItem {
 
 export interface AdminTransactionPage {
   items: AdminTransactionItem[];
-  /** 空串 = 没有下一页 */
-  nextPageToken: string;
+  /**
+   * 总条数。**运营面也填**（2026-09-30 改判，见 `BillingAdminGrpcService` 里那段注释）：
+   * 分页换成 offset 之后，「有页码、没总数」是前端翻页组件表达不了的形状。
+   */
+  total: number;
 }
 
 export interface AdminTransactionsQuery {
@@ -468,8 +471,8 @@ export interface AdminTransactionsQuery {
   /** 单值（consume | recharge | ...），空 = 全部。未知类型 billing 会返回 400 */
   type?: string;
   pageSize?: number;
-  /** 上一页给的 nextPageToken，原样回传；空 = 首页 */
-  pageToken?: string;
+  /** 页码，从 1 起；不传 = 首页 */
+  page?: number;
 }
 
 /**
@@ -484,9 +487,9 @@ export interface AdminTransactionsQuery {
  *    不是「用 gRPC」——独立服务同样满足它，还免掉两套协议。2026-09-26 迁到 gRPC 时
  *    把这段留在 proto 里，防止后来的人照着旧结论回滚。）
  *
- * <p>⚠️ 分页是**游标**、**没有总数**（账本持续追加，要准确总数就得扫全表，
- *    而扫完那一刻它又变了）。所以「上一页」得靠调用方自己存游标栈，
- *    不能像本地表那样算页码。
+ * <p>⚠️ 2026-09-30 分页由**游标**改为 **offset 页码**（与用户面同一次改动，理由见
+ *    `common/v1/types.proto`）。换来的代价在运营面同样存在：翻页途中新增的行会把后面的行
+ *    下移，可能看到重复行。**但 `total` 仍然不填** —— 那是另一回事（见 `AdminTransactionPage`）。
  */
 export async function listAdminTransactions(
   query: AdminTransactionsQuery = {},
@@ -501,7 +504,7 @@ export async function listAdminTransactions(
         type: query.type ?? "",
         // 0 = 服务端默认页大小
         pageSize: query.pageSize ?? 0,
-        pageToken: query.pageToken ?? "",
+        page: query.page ?? 0,
       }),
     );
 
@@ -526,7 +529,9 @@ export async function listAdminTransactions(
         createdAt: item.createdAt,
         settledAt: item.settledAt,
       })),
-      nextPageToken: page.page?.nextPageToken ?? "",
+      // presence → number：运营面与用户面现在**都填** total。仍判 undefined 而不是真值判断，
+      // 因为 0 是「真的没有一行」，与「契约被改坏、上游没回」是两回事
+      total: Number(page.page?.total ?? 0),
     };
   } catch (error) {
     throw asAdminError("读流水", error);

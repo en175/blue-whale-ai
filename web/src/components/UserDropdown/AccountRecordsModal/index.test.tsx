@@ -83,7 +83,7 @@ describe('AccountRecordsModal', () => {
     //    测试跟着行为改，不是行为跟着测试改：这条现在断言「真的去查了充值流水」。
     await renderModal();
 
-    expect(accountApi.fetchConsumptions).toHaveBeenCalledWith('', 20, 'recharge');
+    expect(accountApi.fetchConsumptions).toHaveBeenCalledWith(1, 20, 'recharge');
     expect(document.body.textContent).not.toContain('暂未开放');
   });
 
@@ -92,7 +92,7 @@ describe('AccountRecordsModal', () => {
     await openConsumeTab();
 
     // 后端默认（不传 type）= 全部流水，会把充值/赠送混进来；标签叫消费就必须只查消费
-    expect(accountApi.fetchConsumptions).toHaveBeenCalledWith('', 20, 'consume');
+    expect(accountApi.fetchConsumptions).toHaveBeenCalledWith(1, 20, 'consume');
     expect(document.body.textContent).toContain('视频生成 · seedance-2.5 1080p 5s');
   });
 

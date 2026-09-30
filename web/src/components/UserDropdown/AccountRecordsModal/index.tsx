@@ -59,7 +59,7 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
     let alive = true;
     setLoading(true);
     setError('');
-    fetchConsumptions('', 20, typeFilter)
+    fetchConsumptions(1, 20, typeFilter)
       .then((d) => {
         if (alive) setRecords(d?.items ?? []);
       })

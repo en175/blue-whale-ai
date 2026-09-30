@@ -70,15 +70,18 @@ public record TransactionView(
     /**
      * 一页流水。
      *
-     * <p>游标分页而不是 offset：账本与流水持续新增，offset 分页会在翻页时漏掉
-     * 新插入的行、或重复已经看过的行（{@code common/v1/types.proto} 的 {@code PageRequest}
-     * 注释写了这条）。所以这里**没有总数**——总数与游标分页是矛盾的：
-     * 要给出准确总数就得扫全表，而扫完全表的那一刻它又变了。
+     * <p>⚠️ 2026-09-30 由游标改为 offset，并带上 {@code total}。此前这里写的是
+     * 「游标分页而不是 offset：账本持续新增，offset 会漏行；所以没有总数 ——
+     * 总数与游标分页是矛盾的」。**那段话仍然成立**：要给出准确总数就得扫全表，
+     * 而扫完全表的那一刻它又变了，所以 {@code total} 与当页的行**本来就可能不同步**
+     * （翻页途中有人充值，第 1 页的行数就会比总数少）。产品接受这个不一致，
+     * 换的是列表上的「共 N 条」与页码；留痕见前端对接文档 §6.2。
      *
-     * @param items         本页的行，按时间倒序
-     * @param nextPageToken 空 = 没有下一页；非空则原样回传给下一次请求
+     * @param items 本页的行，按时间倒序
+     * @param total 满足同一组条件的总条数。调用方用它算总页数，**不要**拿它与
+     *              {@code items.size()} 比对来推断「还有没有下一页」——两者不同步是正常的
      */
-    public record Page(List<TransactionView> items, String nextPageToken) {
+    public record Page(List<TransactionView> items, long total) {
 
         public Page {
             items = List.copyOf(items);
