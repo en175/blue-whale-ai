@@ -189,6 +189,12 @@ vi.mock('@/api/jobs', () => ({
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
   fetchJobStatus: apiMocks.fetchJobStatus,
+  // IKIZQE：样片成功卡会请求成片报价（本文件不覆盖成片流，恒空报价禁用入口）
+  quoteVideoFinalize: vi.fn(async () => ({ credits: null, quote_revision: null })),
+  finalizeVideoJob: vi.fn(),
+  // IKIZQG：过期样片/失败成片入口的重新生成报价（本文件恒空报价禁用入口，不覆盖重生成流）
+  quoteSampleRegenerate: vi.fn(async () => ({ credits: null, quote_revision: null })),
+  regenerateSampleJob: vi.fn(),
   createVideoEnhancement: apiMocks.createVideoEnhancement,
   createMediaExtraction: apiMocks.createMediaExtraction,
   createAudioTrim: apiMocks.createAudioTrim,
@@ -1253,5 +1259,346 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
 
     // 提交后 draftMode 被补写为按当前参考集合派生的默认（m1 图参考 → 'all'）
     await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
+  });
+});
+
+/* ============================================
+ * IKIZQB 样片模式（页面级）：开关门控渲染、480p 锁定提交与报价确认两字段、
+ * 成功回填阶段投影（video_stage / finalize_deadline_at）、样片卡重新编辑默认开启。
+ * 模型能力位经 mockResolvedValueOnce 覆盖（不影响其他用例的默认 fixture）；
+ * 报价走全局 fetch 桩（generationQuoteOptions → apiRequest）。
+ * ============================================ */
+
+/** 样片放行模型（Seedance 2.5 形态）：features.sample_mode + 480p 档。 */
+function sampleCapableModel() {
+  return {
+    model_id: 'seedance-2',
+    provider_id: 'prov',
+    model_label: '测试视频模型',
+    icon: null,
+    supported_sizes: [
+      { id: '480p', label: '480p', api_value: '480p' },
+      { id: '720p', label: '720p', api_value: '720p' },
+      { id: '1080p', label: '1080p', api_value: '1080p' },
+    ],
+    supported_aspect_ratios: ['16:9'],
+    supported_formats: [],
+    supported_durations: { min: 4, max: 12, step: 1 },
+    default_size: '1080p',
+    default_format: null,
+    default_aspect_ratio: '16:9',
+    default_duration: 5,
+    features: {
+      reference_image: true,
+      image_reference_max: 10,
+      watermark: false,
+      quantity_max: 1,
+      sequential_image_generation: false,
+      stream: false,
+      tools: false,
+      first_frame: true,
+      last_frame: true,
+      first_last_frame: true,
+      audio: false,
+      sample_mode: true,
+    },
+    version: 1,
+    digest: '',
+  };
+}
+
+function quoteResponse(data: { credits: number | null; quote_revision: string | null }) {
+  return new Response(JSON.stringify({ code: 200, msg: null, data }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+describe('IKIZQB 样片模式提交与样片卡', () => {
+  /** 保存 hoisted 默认模型实现：面板与页面可能各自拉一次能力列表（Once 会被首个调用
+      消耗导致后续回落无 sample_mode 的默认 fixture），用例内 override 后 afterEach 恢复。 */
+  let defaultModelsImpl = apiMocks.fetchGenerationModels.getMockImplementation()!;
+  beforeEach(() => {
+    defaultModelsImpl = apiMocks.fetchGenerationModels.getMockImplementation()!;
+  });
+  afterEach(() => {
+    apiMocks.fetchGenerationModels.mockImplementation(defaultModelsImpl);
+    vi.unstubAllGlobals();
+  });
+
+  it('能力位未放行（默认 fixture 无 sample_mode）→ 配置面板无样片开关', async () => {
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
+    await waitModelReady();
+    // 打开「模型与质量」配置面板
+    const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
+    await act(async () => { configBtn.click(); });
+    expect(container.textContent).toContain('模型与质量');
+    expect(container.querySelector('[data-testid="sample-mode-switch"]')).toBeNull();
+  });
+
+  it('开启样片发送：480p + sample_mode 参数与顶层报价确认两字段，生成中卡标样片', async () => {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+      Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' }))));
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
+    await waitModelReady();
+    await typePrompt('样片旅程');
+
+    const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
+    await act(async () => { configBtn.click(); });
+    const sw = container.querySelector<HTMLButtonElement>('[data-testid="sample-mode-switch"]')!;
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    await act(async () => { sw.click(); });
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    // 条款说明（成片另收费）
+    expect(container.textContent).toContain('成片另行计费');
+
+    // 报价落地后可发送
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect((payload.parameters as Record<string, unknown>).sample_mode).toBe(true);
+    expect((payload.parameters as Record<string, unknown>).resolution).toBe('480p');
+    // 提交确认两字段在请求顶层（契约 confirmedSubmitFields），值为报价响应原样
+    expect(payload.expected_credits).toBe(60);
+    expect(payload.quote_revision).toBe('rev-1');
+    // 生成中卡身份：样片标记 + 标题（验收「生成中标样片 480P」的 data 源）
+    const generating = flowProps.current.mediaNodes.find((n: Node) => n.data?.genStatus === 'generating')!;
+    expect(generating.data.videoStage).toBe('sample');
+    expect(generating.data.fileName).toBe('样片生成中');
+  });
+
+  it('样片成功：回填自有素材与实际截止时间（服务端阶段投影为准），重新编辑默认开启样片', async () => {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+      Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' }))));
+    apiMocks.fetchJobStatus.mockImplementation(async () => ({
+      job_id: 'j1',
+      status: 'succeeded',
+      progress: 100,
+      asset: { id: 'a2', url: 'http://vid/sample.mp4', type: 'video' },
+      video_stage: 'sample',
+      finalize_deadline_at: '2026-10-06T04:30:00.000Z',
+    }));
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
+    await waitModelReady();
+    await typePrompt('样片成功旅程');
+    const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
+    await act(async () => { configBtn.click(); });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="sample-mode-switch"]')!.click();
+    });
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    // 成功终态：阶段投影回填卡身份（videoStage + 实际截止），草稿转成品可预览下载
+    const targetId = (apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, unknown>).target_node_id as string;
+    await vi.waitFor(() => {
+      const done = flowProps.current.mediaNodes.find((n: Node) => n.id === targetId);
+      expect(done?.data?.genStatus).toBeUndefined();
+      expect(done?.data?.src).toBe('http://vid/sample.mp4');
+    });
+    const done = flowProps.current.mediaNodes.find((n: Node) => n.id === targetId)!;
+    expect(done.data.videoStage).toBe('sample');
+    expect(done.data.finalizeDeadlineAt).toBe('2026-10-06T04:30:00.000Z');
+
+    // 重新编辑样片卡：面板默认开启样片模式（父规格用户故事 7）——开关在配置面板内，先展开
+    await act(async () => { clickNode(done); });
+    const reopenConfigBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
+    await act(async () => { reopenConfigBtn.click(); });
+    expect(container.textContent).toContain('模型与质量');
+    await vi.waitFor(() =>
+      expect(container.querySelector('[data-testid="sample-mode-switch"]')?.getAttribute('aria-checked')).toBe('true'),
+    );
+    // 恢复默认轮询响应，避免本用例的样片投影残留到后续用例
+    apiMocks.fetchJobStatus.mockImplementation(async () => ({
+      job_id: 'j1',
+      status: 'succeeded',
+      progress: 100,
+      asset: { id: 'a2', url: 'http://vid/out.mp4', type: 'video' },
+    }));
+  });
+
+  it('普通视频成功（video_stage 缺省）→ 卡不残留样片标记', async () => {
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
+    await waitModelReady();
+    await typePrompt('普通视频');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const targetId = (apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, unknown>).target_node_id as string;
+    await vi.waitFor(() => {
+      const done = flowProps.current.mediaNodes.find((n: Node) => n.id === targetId);
+      expect(done?.data?.genStatus).toBeUndefined();
+    });
+    const done = flowProps.current.mediaNodes.find((n: Node) => n.id === targetId)!;
+    expect(done.data.videoStage).toBeUndefined();
+    expect(done.data.finalizeDeadlineAt).toBeUndefined();
+  });
+});
+
+/* ============================================
+ * IKIZQG 两阶段卡重新编辑（用户故事 7/25）：
+ * 样片卡重新编辑默认开启样片、成片卡默认关闭；两阶段卡再次发送是原位重跑规则的
+ * 明确例外——新建结果卡，旧结果与来源关系不被覆盖（成片卡由服务端冻结输入派生，
+ * 面板仅预填卡上配置）。
+ * ============================================ */
+describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
+  const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+
+  function seedTwoStageDoc() {
+    canvasDocMock.current = {
+      doc: {
+        id: 11,
+        version: 3,
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [
+          {
+            id: 's1',
+            type: 'mediaNode',
+            position: { x: 100, y: 100 },
+            data: {
+              src: 'http://vid/sample.mp4',
+              mediaType: 'video',
+              fileName: '样片',
+              assetId: 'as1',
+              jobId: '9001',
+              videoStage: 'sample',
+              finalizeDeadlineAt: future,
+              draftModelId: 'seedance-2',
+              draftRatio: '16:9',
+              draftSize: '1080p',
+              draftDuration: 5,
+              width: 854,
+              height: 480,
+            },
+          },
+          {
+            id: 'f1',
+            type: 'mediaNode',
+            position: { x: 1014, y: 100 },
+            data: {
+              src: 'http://vid/final.mp4',
+              mediaType: 'video',
+              fileName: '成片',
+              assetId: 'af1',
+              jobId: '9002',
+              videoStage: 'final',
+              sourceSampleJobId: '9001',
+              draftModelId: 'seedance-2',
+              draftRatio: '16:9',
+              draftSize: '1080p',
+              draftDuration: 5,
+              width: 1920,
+              height: 1080,
+            },
+          },
+        ],
+        edges: [],
+      },
+      assets: {
+        as1: { asset_id: 1, type: 'video', access_url: 'http://vid/sample.mp4', width: 854, height: 480 },
+        af1: { asset_id: 2, type: 'video', access_url: 'http://vid/final.mp4', width: 1920, height: 1080 },
+      },
+      refetch: () => Promise.resolve([]),
+      acceptDoc: vi.fn(),
+    };
+  }
+
+  async function openConfigPanel() {
+    const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
+    await act(async () => { configBtn.click(); });
+  }
+
+  it('样片卡重新编辑：默认开启样片；发送后新建样片结果卡，原卡身份/素材/截止保留', async () => {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+      Promise.resolve(quoteResponse({ credits: 30, quote_revision: 'rev-1' }))));
+    seedTwoStageDoc();
+    await renderPage();
+    await clickNode({ id: 's1', type: 'mediaNode' });
+    await waitModelReady();
+    await openConfigPanel();
+    await vi.waitFor(() =>
+      expect(container.querySelector('[data-testid="sample-mode-switch"]')?.getAttribute('aria-checked')).toBe('true'),
+    );
+    await typePrompt('样片重编再生成');
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    // 样片重提：sample_mode + 480p + 确认两字段，目标仍指向原卡（正文/参考推导同源）
+    const payload = apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, any>;
+    expect(payload.target_node_id).toBe('s1');
+    expect(payload.parameters.sample_mode).toBe(true);
+    expect(payload.parameters.resolution).toBe('480p');
+    expect(payload.expected_credits).toBe(30);
+    expect(payload.quote_revision).toBe('rev-1');
+
+    // 明确例外：新建样片结果卡（生成中、样片身份、落在原卡下方），原卡不被覆盖
+    await vi.waitFor(() => {
+      expect(flowProps.current.mediaNodes.filter((n: Node) => n.data?.videoStage === 'sample')).toHaveLength(2);
+    });
+    const s1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 's1')!;
+    const regen = flowProps.current.mediaNodes.find(
+      (n: Node) => n.data?.videoStage === 'sample' && n.id !== 's1',
+    )!;
+    expect(regen.data?.genStatus).toBe('generating');
+    expect(regen.position.y).toBeGreaterThan(s1.position.y);
+    expect(s1.data?.src).toBe('http://vid/sample.mp4');
+    expect(s1.data?.jobId).toBe('9001');
+    expect(s1.data?.finalizeDeadlineAt).toBe(future);
+    expect(s1.data?.genStatus).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
+  it('成片卡重新编辑：默认关闭样片；发送后新建普通视频结果卡，成片卡不被覆盖', async () => {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+      Promise.resolve(quoteResponse({ credits: 20, quote_revision: 'rev-2' }))));
+    seedTwoStageDoc();
+    await renderPage();
+    await clickNode({ id: 'f1', type: 'mediaNode' });
+    await waitModelReady();
+    await openConfigPanel();
+    await vi.waitFor(() =>
+      expect(container.querySelector('[data-testid="sample-mode-switch"]')?.getAttribute('aria-checked')).toBe('false'),
+    );
+    await typePrompt('成片重编为普通视频');
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    // 默认关闭：普通视频语义（无 sample_mode / 无确认两字段）
+    const payload = apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, any>;
+    expect(payload.target_node_id).toBe('f1');
+    expect(payload.parameters.sample_mode).toBeUndefined();
+    expect(payload.expected_credits).toBeUndefined();
+    expect(payload.quote_revision).toBeUndefined();
+
+    // 新建结果卡（普通视频、落在成片卡下方），成片卡身份/素材/来源关系保留
+    await vi.waitFor(() => {
+      expect(flowProps.current.mediaNodes.some(
+        (n: Node) => n.id !== 'f1' && n.data?.genStatus === 'generating',
+      )).toBe(true);
+    });
+    const f1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'f1')!;
+    const regen = flowProps.current.mediaNodes.find(
+      (n: Node) => n.id !== 'f1' && n.data?.genStatus === 'generating',
+    )!;
+    expect(regen.data?.videoStage).toBeUndefined();
+    expect(regen.position.y).toBeGreaterThan(f1.position.y);
+    expect(f1.data?.src).toBe('http://vid/final.mp4');
+    expect(f1.data?.jobId).toBe('9002');
+    expect(f1.data?.videoStage).toBe('final');
+    expect(f1.data?.sourceSampleJobId).toBe('9001');
+    expect(f1.data?.genStatus).toBeUndefined();
+    vi.unstubAllGlobals();
   });
 });

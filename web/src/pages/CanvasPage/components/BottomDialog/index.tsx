@@ -13,6 +13,7 @@ import PromptSyncActions from '../PromptSyncActions';
  * ============================================ */
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   ChevronDown,
   X,
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { pickDefaultVideoRatio, videoRatioLabel } from '@/lib/video-aspect-ratio';
+import { generationQuoteOptions } from '@/api/generationQuote';
 import RatioIcon from '@/components/RatioIcon';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildVideoJobReferences } from '../../videoJobReferences';
@@ -105,6 +107,13 @@ export interface VideoGenOptions {
   /** IKG0LP：是否带音频（用户选择，缺省 true）。仅模型能力位 features.audio 为 true 时才提供该选择，
    *  后端按能力位决定是否透传给上游。契约见 docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md */
   generateAudio: boolean;
+  /** IKIZQB：样片模式（仅 Seedance 2.5 放行 + 四模式统一入口）。true 时 resolution 固定 480p，
+   *  提交走样片规格并携带报价确认两字段（expectedCredits + quoteRevision）。 */
+  sampleMode: boolean;
+  /** 样片提交确认（契约 confirmedSubmitFields）：样片开启时必带——报价响应原样透传，
+   *  服务端复算不一致即拒（quote_stale），不按未知或未确认金额提交。 */
+  expectedCredits?: number;
+  quoteRevision?: string;
 }
 
 /** 视频草稿面板参数写回补丁（IKDMQS）：字段名对齐草稿节点 data 的持久化键 */
@@ -119,6 +128,8 @@ export interface VideoDraftParamsPatch {
   mode?: string;
   /** IKG0LP：是否带音频（随草稿持久化，重开面板恢复） */
   generateAudio?: boolean;
+  /** IKIZQB：样片开关（随草稿持久化，重开面板恢复；切模型自动关闭） */
+  sampleMode?: boolean;
 }
 
 interface BottomDialogProps extends RefStripOrderProps {
@@ -209,6 +220,8 @@ export interface VideoGenSeedParams {
   mode?: string;
   /** IKG0LP：是否带音频（首页带入，缺省 true） */
   generateAudio?: boolean;
+  /** IKIZQB：样片开关恢复（草稿记忆 / 样片卡重新编辑默认开启，父规格用户故事 6、7） */
+  sampleMode?: boolean;
 }
 
 export default function BottomDialog({ projectId, onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
@@ -252,6 +265,10 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const [duration, setDuration] = useState(0);
   /** IKG0LP：是否带音频（用户选择，缺省 true = 与上游默认及改动前行为一致） */
   const [generateAudio, setGenerateAudio] = useState(initialParams?.generateAudio ?? true);
+  /** IKIZQB：样片模式开关——默认关闭；切换模型即关闭，再选回不自动开启（父规格用户故事 2、3） */
+  const [sampleMode, setSampleMode] = useState(initialParams?.sampleMode === true);
+  /** 关闭样片时恢复的普通分辨率档位（开启那一刻记住；四模式共用一个开关，模式切换不影响） */
+  const normalSizeRef = useRef<string>('');
   const [modelOpen, setModelOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
@@ -270,6 +287,10 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const maxInput = promptMaxLengthOf(currentModel?.features?.max_prompt_length);
   /** IKG0LP：该模型是否允许生成带音频（能力位 features.audio）。不允许则不提供用户选择。 */
   const supportsAudio = currentModel?.features?.audio === true;
+  /** IKIZQB：样片放行能力位（features.sample_mode）+ 该模型存在 480p 档——两者齐备才渲染开关行；
+   *  能力未放行时用户入口完全不渲染（父规格「范围与门控」，服务端同步门控）。 */
+  const sampleSize480 = currentModel?.supported_sizes.find((s) => (s.api_value ?? s.id) === '480p');
+  const supportsSampleMode = currentModel?.features?.sample_mode === true && sampleSize480 != null;
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
   /** 能力选项全部取自接口（无本地写死兜底）：模型列表未加载完时为空 */
   const sizeOptions = currentModel?.supported_sizes?.length
@@ -280,11 +301,23 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const currentSizeLabel =
     sizeOptions.find((s) => s.key === selectedSize)?.label ?? selectedSize;
   /** 报价用的分辨率取值：与发送时**同一个**（`api_value ?? id`，见 handleSend）——
-   *  两处取不同的值就是「预览一个价、实扣另一个价」。 */
-  const quoteResolution = (() => {
-    const size = currentModel?.supported_sizes.find((s) => s.id === selectedSize);
-    return size ? (size.api_value ?? size.id) : undefined;
-  })();
+   *  两处取不同的值就是「预览一个价、实扣另一个价」。样片开启时固定 480p（契约锁档）。 */
+  const quoteResolution = sampleMode
+    ? '480p'
+    : (() => {
+        const size = currentModel?.supported_sizes.find((s) => s.id === selectedSize);
+        return size ? (size.api_value ?? size.id) : undefined;
+      })();
+  /** 报价定价维度（IKIZQB 起 sample_mode 也是定价输入之一）：徽标与面板内样片报价查询共用
+   *  同一份参数对象 —— 同一个 queryKey 才会命中同一份缓存，两个 useQuery 只发一次请求。 */
+  const quoteParameters = useMemo(() => ({
+    model_id: currentModel?.model_id ?? '',
+    ...(quoteResolution ? { resolution: quoteResolution } : {}),
+    ...(selectedRatio ? { aspect_ratio: selectedRatio } : {}),
+    ...(duration ? { duration } : {}),
+    generate_audio: generateAudio,
+    ...(sampleMode ? { sample_mode: true as const } : {}),
+  }), [currentModel?.model_id, quoteResolution, selectedRatio, duration, generateAudio, sampleMode]);
 
   /** 生成中只读（IKDMQS）：任务执行期间目标参数与输入冻结，保留查看与画布上的取消入口 */
   const readOnly = sending || videoDraftBinding.submitting || videoDraftBinding.status === 'generating';
@@ -388,6 +421,24 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
    *  参考视频的**时长**也是定价输入（token 公式在含视频输入时算进输入时长），所以整项带过去，
    *  不能只带个数（个数由后端按这份列表自己数）。 */
   const quoteReferences = useMemo(() => buildVideoJobReferences(videoMediaRefs), [videoMediaRefs]);
+
+  /** IKIZQB：样片报价（与报价徽标同一个 queryKey，共享缓存不重复请求）——提交确认两字段
+   *  与发送门控的唯一来源。报价不可用（credits null）或参数变化后查询进行中（data 暂空）
+   *  都视为「没有可提交的金额」：不按未知或未确认的金额提交（父规格用户故事 9）。 */
+  const sampleQuoteQuery = useQuery({
+    ...generationQuoteOptions(projectId ?? '', {
+      type: 'video',
+      parameters: quoteParameters,
+      expected_output_count: 1,
+      ...(quoteReferences.length > 0 ? { references: quoteReferences } : {}),
+    }),
+    enabled: sampleMode && !!projectId && quoteParameters.model_id !== '',
+  });
+  /** 样片报价就绪：有价且携带版本指纹才允许提交（契约：无报价时两字段同时 null）。 */
+  const sampleQuoteReady = !sampleMode
+    || (sampleQuoteQuery.data != null
+      && sampleQuoteQuery.data.credits != null
+      && sampleQuoteQuery.data.quote_revision != null);
 
   const mixedStrip = useMixedRefStrip(
     isKeyframe ? [] : videoMediaRefs.reference.map(r => videoRefStripKey(r).slice(6)),
@@ -509,8 +560,11 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       || (duration - durationRange.min) % durationRange.step !== 0)
       ? '原时长不兼容，请重新选择时长'
     : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
+    // IKIZQB：样片无有效报价（算不出价 / 报价刷新中）→ 禁止以未知或未确认的金额提交
+    : !sampleQuoteReady ? '样片价格确认中，稍候再提交'
     : null;
   const canSend = !readOnly && !pickLocked && !videoDraftBinding.saveFailed && !configurationError
+    && sampleQuoteReady
     && (flatValue.trim().length > 0 || hasAttachmentText);
 
   /** 时长刻度（min..max 逐 step；模型能力未加载时无刻度） */
@@ -520,9 +574,11 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   }
 
   /** 选中模型后应用其默认清晰度/宽高比/时长，返回实际应用值（供草稿参数同步）。
-   *  IKFQ5S：首尾帧仅在模型支持 adaptive 时内置固定该档（2.5）；2.0 走其固定比例档。 */
+   *  IKFQ5S：首尾帧仅在模型支持 adaptive 时内置固定该档（2.5）；2.0 走其固定比例档。
+   *  IKIZQB：切换模型即关闭样片模式（分辨率档位随新模型默认走；再选回不自动开启）。 */
   const applyModelDefaults = (m: GenerationModel) => {
     setSelectedModel(m.model_id);
+    setSampleMode(false);
     let nextRatio = selectedRatio;
     if (m.supported_aspect_ratios.length) {
       nextRatio = pickDefaultVideoRatio(m.supported_aspect_ratios, m.default_aspect_ratio);
@@ -543,7 +599,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       nextDuration = typeof m.default_duration === 'number' ? clamp(m.default_duration) : m.supported_durations.min;
       setDuration(nextDuration);
     }
-    return { modelId: m.model_id, ratio: nextRatio, size: nextSize, duration: nextDuration };
+    return { modelId: m.model_id, ratio: nextRatio, size: nextSize, duration: nextDuration, sampleMode: false };
   };
 
   // 初始自由文本（视频节点重新编辑带入原提示词）：initialDoc 优先（草稿恢复），纯文本兜底
@@ -562,8 +618,17 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           const restoredMode = initialParams?.mode ?? 'prompt';
           setSelectedModel(initialParams?.modelId ?? '');
           const model = list.find(m => m.model_id === initialParams?.modelId);
+          // IKIZQB：样片开关随草稿/样片卡恢复（父规格用户故事 6、7）；开启时分辨率锁 480p 档。
+          // 恢复也要过能力位（模型已不可放行时按普通视频处理，服务端同步门控兜底）。
+          const restoredSampleMode = initialParams?.sampleMode === true
+            && model?.features?.sample_mode === true
+            && model?.supported_sizes.some((s) => (s.api_value ?? s.id) === '480p');
+          setSampleMode(restoredSampleMode);
           const size = model?.supported_sizes.find(s => s.id === initialParams?.resolution || s.api_value === initialParams?.resolution);
-          setSelectedSize(size?.id ?? initialParams?.resolution ?? '');
+          const size480 = model?.supported_sizes.find(s => (s.api_value ?? s.id) === '480p');
+          setSelectedSize(restoredSampleMode ? (size480?.id ?? size?.id ?? initialParams?.resolution ?? '') : (size?.id ?? initialParams?.resolution ?? ''));
+          // 样片开启恢复时记住草稿原档位：关闭样片即恢复「原先选择的普通清晰度」（用户故事 4）
+          normalSizeRef.current = restoredSampleMode && size?.id ? size.id : '';
           // IKFQ5S：仅模型支持 adaptive 时才内置该档（恢复时模型可能未就绪，按 list 查）。
           const restoredSupportsAdaptive = !!model?.supported_aspect_ratios?.includes('adaptive');
           setSelectedRatio(
@@ -677,13 +742,24 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       console.warn('视频模型清晰度能力缺失，请稍后重试');
       return;
     }
+    // IKIZQB：样片提交携带报价确认两字段（canSend 已按报价就绪门控——此处必为有效值）；
+    // resolution 固定 480p（契约 sampleModeParametersSchema：sample_mode=true 时锁 480p）。
+    const sampleQuoteData = sampleMode ? sampleQuoteQuery.data : undefined;
+    if (sampleMode && (sampleQuoteData?.credits == null || sampleQuoteData?.quote_revision == null)) {
+      onToast?.('warn', '样片价格已变化，请确认新报价后再提交');
+      return;
+    }
     void submit(text, {
       modelId: currentModel.model_id,
       aspectRatio: selectedRatio,
-      resolution: size.api_value ?? size.id,
+      resolution: sampleMode ? '480p' : (size.api_value ?? size.id),
       duration,
       mode: selectedMode,
       generateAudio,
+      sampleMode,
+      ...(sampleMode && sampleQuoteData
+        ? { expectedCredits: sampleQuoteData.credits ?? undefined, quoteRevision: sampleQuoteData.quote_revision ?? undefined }
+        : {}),
     }, docHasAnyRef(promptDoc) ? promptDoc : null);
   };
 
@@ -950,7 +1026,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             <div className={styles.selectWrap} ref={sizeWrapRef}>
               <button
                 className={styles.selectBtn}
-                disabled={readOnly}
+                disabled={readOnly || sampleMode}
+                title={sampleMode ? '样片模式固定 480p，关闭样片后可调整清晰度' : undefined}
                 onClick={() => { setSizeOpen(!sizeOpen); setModelOpen(false); }}
               >
                 <span>{currentSizeLabel}</span>
@@ -979,6 +1056,56 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
               )}
             </div>
           </div>
+
+          {/* IKIZQB：样片模式开关——仅放行模型（features.sample_mode + 480p 档）渲染；四模式共用，
+              切换模型自动关闭、再选回不自动开启（父规格用户故事 2、3、5）。开关行结构对齐 IKG0LP 音频开关。 */}
+          {supportsSampleMode && (
+            <div className={styles.audioRow}>
+              <span className={styles.audioHint}>样片模式 · 先生成 480p 样片，成片另收费</span>
+              <button
+                type="button"
+                className={`${styles.audioSwitch} ${sampleMode ? styles.audioSwitchOn : ''}`}
+                role="switch"
+                aria-checked={sampleMode}
+                aria-label="样片模式"
+                data-testid="sample-mode-switch"
+                disabled={readOnly}
+                onClick={() => {
+                  const next = !sampleMode;
+                  setSampleMode(next);
+                  if (next) {
+                    // 开启：记住当前档位并锁定 480p（用户故事 4：关闭时恢复原普通分辨率）
+                    normalSizeRef.current = selectedSize;
+                    if (sampleSize480) {
+                      setSelectedSize(sampleSize480.id);
+                      syncDraftParams({ sampleMode: true, size: sampleSize480.id });
+                      return;
+                    }
+                    syncDraftParams({ sampleMode: true });
+                    return;
+                  }
+                  const restore = normalSizeRef.current
+                    && currentModel?.supported_sizes.some((s) => s.id === normalSizeRef.current)
+                    ? normalSizeRef.current
+                    : undefined;
+                  if (restore) {
+                    setSelectedSize(restore);
+                    syncDraftParams({ sampleMode: false, size: restore });
+                    return;
+                  }
+                  syncDraftParams({ sampleMode: false });
+                }}
+              >
+                <span className={styles.audioSwitchKnob} />
+              </button>
+            </div>
+          )}
+          {/* 样片条款说明（父规格「截止规则」用户文案，开启时显示） */}
+          {sampleMode && (
+            <p className={styles.sampleTerm} data-testid="sample-mode-term">
+              样片创建后最长 7 天内可发起成片生成，请以样片卡显示的实际截止时间为准；成片另行计费。
+            </p>
+          )}
 
           {/* 时长滑杆（模型能力未加载完时不渲染） */}
           {durationRange && (
@@ -1244,19 +1371,14 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
 
         {/* 右侧：发送 */}
         <div className={styles.barRight}>
-          {/* 价格预览（只算不扣）：与提交同源的定价维度 —— 模型 + 分辨率 + 比例 + 时长 + 带音频 + 参考。
-              没有项目上下文就不挂（徽标自己也不在无项目时挂内层）。 */}
+          {/* 价格预览（只算不扣）：与提交同源的定价维度 —— 模型 + 分辨率 + 比例 + 时长 + 带音频 + 参考
+              （IKIZQB 起样片开启时另带 sample_mode，按样片规格计价）。parameters 与面板内样片报价
+              查询共用同一对象（同 queryKey 共享缓存）。没有项目上下文就不挂。 */}
           {projectId ? (
             <GenerationQuoteBadge
               projectId={projectId}
               type="video"
-              parameters={{
-                model_id: currentModel?.model_id ?? '',
-                ...(quoteResolution ? { resolution: quoteResolution } : {}),
-                ...(selectedRatio ? { aspect_ratio: selectedRatio } : {}),
-                ...(duration ? { duration } : {}),
-                generate_audio: generateAudio,
-              }}
+              parameters={quoteParameters}
               references={quoteReferences}
             />
           ) : null}

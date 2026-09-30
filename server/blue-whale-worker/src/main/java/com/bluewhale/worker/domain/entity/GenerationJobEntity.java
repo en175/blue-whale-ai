@@ -150,6 +150,36 @@ public class GenerationJobEntity {
     /** 创建时冻结参数 JSON（media_extract 含 source_asset_id） */
     private String input; // JSON
 
+    // ── IKIZQ8：两阶段视频阶段列（契约 video-sample-mode.ts；字段映射按 ADR-0084 与 TS schema 对账）──
+
+    @TableField("video_stage")
+    /** 视频阶段：sample=样片(480p Draft)、final=成片(后续票)；NULL=旧任务/普通视频 */
+    private String videoStage;
+
+    @TableField("source_sample_job_id")
+    /** 成片指向来源样片任务（仅 final 非空；唯一约束随 finalize 票落地） */
+    private Long sourceSampleJobId;
+
+    @TableField("final_job_id")
+    /** 样片指向其唯一成片任务（由 finalize 票回写） */
+    private Long finalJobId;
+
+    @TableField("upstream_created_at_ms")
+    /** 可信上游 Draft created_at（epoch 毫秒，网关轮询回传；NULL=缺可信时间→禁成片） */
+    private Long upstreamCreatedAtMs;
+
+    @TableField("finalize_deadline_ms")
+    /** 实际转成片截止（created_at+7天−1小时；与 TS 契约同一公式，金标 G06 对账） */
+    private Long finalizeDeadlineMs;
+
+    @TableField("charge_state")
+    /** 阶段费用状态 held/settled/released（创建 held、终态守卫条件写 settled/released）；旧任务 NULL */
+    private String chargeState;
+
+    @TableField("actual_credits")
+    /** 成功按真实用量结算后的整数积分（billing 异步回填）；结算前 NULL */
+    private Integer actualCredits;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public Long getProjectId() { return projectId; }
@@ -218,4 +248,18 @@ public class GenerationJobEntity {
     public void setIsDelete(Boolean isDelete) { this.isDelete = isDelete; }
     public String getInput() { return input; }
     public void setInput(String input) { this.input = input; }
+    public String getVideoStage() { return videoStage; }
+    public void setVideoStage(String videoStage) { this.videoStage = videoStage; }
+    public Long getSourceSampleJobId() { return sourceSampleJobId; }
+    public void setSourceSampleJobId(Long sourceSampleJobId) { this.sourceSampleJobId = sourceSampleJobId; }
+    public Long getFinalJobId() { return finalJobId; }
+    public void setFinalJobId(Long finalJobId) { this.finalJobId = finalJobId; }
+    public Long getUpstreamCreatedAtMs() { return upstreamCreatedAtMs; }
+    public void setUpstreamCreatedAtMs(Long upstreamCreatedAtMs) { this.upstreamCreatedAtMs = upstreamCreatedAtMs; }
+    public Long getFinalizeDeadlineMs() { return finalizeDeadlineMs; }
+    public void setFinalizeDeadlineMs(Long finalizeDeadlineMs) { this.finalizeDeadlineMs = finalizeDeadlineMs; }
+    public String getChargeState() { return chargeState; }
+    public void setChargeState(String chargeState) { this.chargeState = chargeState; }
+    public Integer getActualCredits() { return actualCredits; }
+    public void setActualCredits(Integer actualCredits) { this.actualCredits = actualCredits; }
 }

@@ -572,9 +572,27 @@ public class JobFinalizer {
                                       String url, String storageKey, String mime, Long size, String md5,
                                       Integer width, Integer height, double duration,
                                       Long upstreamTotalTokens) {
+        return publishVideoResult(jobId, projectId, userId, workerId, fencingToken,
+                url, storageKey, mime, size, md5, width, height, duration, upstreamTotalTokens,
+                null, null);
+    }
+
+    /**
+     * IKIZQ8：样片成功终态——可信上游 Draft created_at 与转成片截止（epoch 毫秒）随
+     * 守卫一并落列（COALESCE：null 不覆盖既有值，普通视频零影响）。截止由 processor
+     * 按契约公式算好传入（金标 G06 跨语言对账），本层不重复计算。
+     */
+    @Transactional
+    public boolean publishVideoResult(String jobId, String projectId, String userId,
+                                      String workerId, long fencingToken,
+                                      String url, String storageKey, String mime, Long size, String md5,
+                                      Integer width, Integer height, double duration,
+                                      Long upstreamTotalTokens,
+                                      Long upstreamCreatedAtMs, Long finalizeDeadlineMs) {
         Long jobIdLong = Long.parseLong(jobId);
 
-        int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
+        int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken,
+                upstreamCreatedAtMs, finalizeDeadlineMs);
         if (guardAffected != 1) {
             log.warn("[video] publishVideoResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);

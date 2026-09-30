@@ -588,16 +588,49 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     );
 
     /**
+     * IKIZQD：调网关前持久「提交中」标记——status processing → checking（CAS）。
+     * <p>
+     * 契约 §六（video-sample-mode.ts JOB_STATUS_CHECKING）：Worker 在发出 submit / finalize
+     * 前先落此标记；调用超时、响应丢失、落库失败或失租时任务停留在 checking——
+     * 不按空 provider_task_id 重新提交、不自动退款，保持锁定供人工核对。
+     * 只有仍持租约与 fence 且未提交过（provider_task_id IS NULL）的 Worker 能落标记；
+     * 守卫未命中（失租 / 已终态 / 已提交）返回 0，调用方必须停止、不得发网关。
+     * checking 不被 {@link #findVideoCandidate} 与恢复扫描选中——这是「空
+     * provider_task_id 不触发自动重提」的 SQL 层保证。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'checking',
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+              AND provider_task_id IS NULL
+            """)
+    int markSubmissionAttempt(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken
+    );
+
+    /**
      * 标记生成任务已提交（generation-worker-video-ops.ts markProviderSubmitted 逐字）。
      * <p>
      * 评审修复 C1：补 provider='new-api'、progress=1、next_poll_at；
      * **去掉 fencing_token+1**（TS 不 bump——fence 只在 claim/requeue 递增，契约 §3.1）。
      * 时刻值由 Java 计算传入（原 DATE_ADD ... MILLISECOND 为非法 MySQL 单位，潜伏语法炸点）。
      * 金标 G09 pin 全 SET 列。
+     * <p>
+     * IKIZQD：守卫放宽到 checking 且 SET 补 {@code status='processing'}——提交相统一先落
+     * {@link #markSubmissionAttempt}（checking）再发网关，网关明确受理后由此从 checking
+     * 恢复 processing 并落轮询句柄（「明确成功恢复原任务」；不写回 status 会让任务卡在
+     * checking，轮询/终态守卫全部失明——真库验证发现，见 SubmissionCheckingMySqlIntegrationTest）。
      */
     @Update("""
             UPDATE generation_jobs
-            SET provider = 'new-api',
+            SET status = 'processing',
+                provider = 'new-api',
                 provider_task_id = #{providerTaskId},
                 progress = 1,
                 next_poll_at = #{nextPollAt},
@@ -606,7 +639,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 lease_expires_at = NULL,
                 version = version + 1
             WHERE id = #{jobId}
-              AND status = 'processing'
+              AND (status = 'processing' OR status = 'checking')
               AND lease_owner = #{workerId}
               AND fencing_token = #{fencingToken}
             """)
@@ -691,6 +724,10 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
      * <p>
      * <b>修正一</b>：actual_amount_fen 不在范围（settle 段整体省略）。
+     * <p>
+     * <b>IKIZQ8</b>：样片阶段列随守卫原子落库——① created_at/截止用 COALESCE（null 不
+     * 覆盖既有值，普通视频传 null 零影响）；② charge_state 只对两阶段任务
+     * （video_stage IS NOT NULL）置 'settled'，普通视频保持 NULL（按阶段结算语义）。
      */
     @Update("""
             UPDATE generation_jobs
@@ -700,6 +737,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
+                upstream_created_at_ms = COALESCE(#{upstreamCreatedAtMs}, upstream_created_at_ms),
+                finalize_deadline_ms = COALESCE(#{finalizeDeadlineMs}, finalize_deadline_ms),
+                charge_state = IF(video_stage IS NOT NULL, 'settled', charge_state),
                 version = version + 1
             WHERE id = #{jobId}
               AND status = 'processing'
@@ -709,20 +749,24 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     int publishVideoGuard(
             @Param("jobId") Long jobId,
             @Param("workerId") String workerId,
-            @Param("fencingToken") Long fencingToken
+            @Param("fencingToken") Long fencingToken,
+            @Param("upstreamCreatedAtMs") Long upstreamCreatedAtMs,
+            @Param("finalizeDeadlineMs") Long finalizeDeadlineMs
     );
 
-    /**
-     * 失败视频作业 CAS 守卫（video-ops.ts:200-260 failVideoJob）。
-     * <p>
-     * 与 failJobGuard 逐字一致（同 CAS 模式），视频复用通用 fail 守卫。
-     * <p>
-     * <b>修正一</b>：release_note 不在范围（release 段整体省略）。
-     */
     /**
      * 失败视频作业 CAS 守卫（video-ops.ts:209-221 failVideoJob 独立 SQL）。
      * 与通用 failJobGuard 的差异（逐字核对后单独成条，评审修复）：
      * 视频版多 `next_poll_at = NULL`（:217）。release_note/预留段按修正一省略。
+     * <p>
+     * <b>IKIZQ8</b>：charge_state 只对两阶段任务（video_stage IS NOT NULL）置
+     * 'released'——确认失败退回**该阶段**冻结积分（结算事件由终态收口发 billing），
+     * 普通视频保持 NULL。
+     * <p>
+     * <b>IKIZQD</b>：守卫放宽到 checking——提交相已落「提交中」标记后收到网关**明确拒绝**
+     * （带 HTTP 状态的业务回绝）按「明确失败释放本阶段预扣」落失败终态；仍持 owner+fence
+     * 的唯一写者仍是当前 Worker（checking 不可被领取，不存在并发改写）。结果不明路径
+     * （超时 / 响应丢失 / 落库失败）不经本守卫——任务留在 checking 锁定，不退款。
      */
     @Update("""
             UPDATE generation_jobs
@@ -732,9 +776,10 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
+                charge_state = IF(video_stage IS NOT NULL, 'released', charge_state),
                 version = version + 1
             WHERE id = #{jobId}
-              AND status = 'processing'
+              AND (status = 'processing' OR status = 'checking')
               AND lease_owner = #{workerId}
               AND fencing_token = #{fencingToken}
             """)

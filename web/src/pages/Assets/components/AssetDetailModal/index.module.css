@@ -121,6 +121,37 @@
   border: 1px solid var(--color-border-secondary);
 }
 
+/* 两阶段视频阶段徽标（IKIZQI）：样片/成片 */
+.stageBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  color: #93c5fd;
+  background-color: rgba(30, 58, 138, 0.35);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+}
+
+/* 「视频阶段」详情行的阶段文字 + 来源跳转按钮 */
+.stageText {
+  margin-right: 8px;
+}
+
+.sourceButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--font-size-xs);
+  color: #60a5fa;
+  cursor: pointer;
+}
+
+.sourceButton:hover {
+  text-decoration: underline;
+}
+
 .closeButton {
   display: inline-flex;
   flex: none;

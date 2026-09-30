@@ -19,6 +19,14 @@ import {
   type CreateGenerationJobBody,
 } from "@lib/shared/generation/handle-create-generation-job.js";
 import { handleQuoteGenerationJob } from "@lib/shared/generation/handle-quote-generation-job.js";
+import {
+  handleFinalizeGenerationJobCreate,
+  handleFinalizeGenerationJobQuote,
+} from "@lib/shared/generation/handle-finalize-generation-job.js";
+import {
+  handleRegenerateSampleCreate,
+  handleRegenerateSampleQuote,
+} from "@lib/shared/generation/handle-regenerate-sample-generation-job.js";
 import { handleCancelGenerationJob } from "@lib/shared/generation/handle-cancel-generation-job.js";
 import { handleRetryGenerationJob } from "@lib/shared/generation/handle-retry-generation-job.js";
 import {
@@ -186,6 +194,10 @@ export class GenerationJobsController {
         materialGate: this.buildMaterialGate(user.userId, authorization),
         // 预扣与补偿必然成对（见 billing 的说明），不再做条件展开
         billing,
+        // IKIZQ8：样片提交确认的复算（与 /quote 端点同一装配——预览价、核对价、实扣价
+        // 三者必须同源）。只在 parameters.sample_mode=true 的样片分支被读；计费地址
+        // 缺失时上面的 billing() 已经先抛，这里不会成为新的失败面。
+        quote: this.billingQuote(),
       },
       internal,
     );
@@ -267,13 +279,178 @@ export class GenerationJobsController {
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return ok({ credits: null });
+      // IKIZQ7：空报价双 null（契约 StageQuoteView：不存在「有版本无价格」）。
+      return ok({ credits: null, quote_revision: null });
     }
     return handleQuoteGenerationJob(user.userId, projectId, body, {
       projects: this.project,
       models: this.models,
       quote,
     });
+  }
+
+  /** POST /api/projects/:projectId/generation-jobs/:jobId/finalize/quote（IKIZQC）
+   *  成片报价（只读，fail open）：样片身份/成功/转存/截止/唯一尝试任一不满足或算不出价
+   *  → 空报价双 null。与 /quote 端点同一装配（预览价、核对价、实扣价三者同源）。 */
+  @Post(":jobId/finalize/quote")
+  @HttpCode(200)
+  async finalizeQuote(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Body() body: unknown,
+  ) {
+    let quote: BillingQuote;
+    try {
+      quote = this.billingQuote();
+    } catch (error) {
+      // 与 /quote 同款降级：计费地址缺失只是「这次没显示价格」，不把看价请求变 500。
+      logger.warn(
+        `[generation] 成片报价不可用，本次不显示价格：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return ok({ credits: null, quote_revision: null });
+    }
+    return handleFinalizeGenerationJobQuote(user.userId, projectId, jobId, body, {
+      projects: this.project,
+      models: this.models,
+      command: this.command.finalize,
+      quote,
+    });
+  }
+
+  /** POST /api/projects/:projectId/generation-jobs/:jobId/finalize（IKIZQC）
+   *  成片提交：请求体仅报价确认两字段（strict——浏览器不重放上游输入），Idempotency-Key
+   *  必带。服务端校验本人/原项目/样片成功已转存/可信截止/现价余额，从冻结输入派生 1080p
+   *  任务；来源唯一约束裁决双击与两页并发（至多一条成片任务与一笔预扣）。 */
+  @Post(":jobId/finalize")
+  async finalize(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("authorization") authorization?: string,
+  ) {
+    const billing = this.billing();
+    const result = await handleFinalizeGenerationJobCreate(
+      user.userId,
+      projectId,
+      jobId,
+      body,
+      idempotencyKey ?? null,
+      {
+        projects: this.project,
+        models: this.models,
+        command: this.command.finalize,
+        billing,
+        quote: this.billingQuote(),
+      },
+      sealProviderCredential(authorization),
+    );
+    // 与 create（IKG57P）同款口径：业务失败走 AllExceptionsFilter 统一投影，不让
+    // fail() 信封透传成 HTTP 201。
+    if (result.code !== 200) {
+      throw new DomainError(result.code, result.msg ?? undefined);
+    }
+    if (result.data) {
+      try {
+        await enqueueVideoGenerationJob(String(result.data.generation_job_id));
+      } catch (error) {
+        logger.error(
+          `[generation] enqueue finalize job failed: ${error instanceof Error ? error.message : "unknown"}`,
+        );
+      }
+    }
+    return result;
+  }
+
+  /** POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample/quote（IKIZQF）
+   *  重新生成样片报价（只读，fail open）：非样片任务 / 模型停用或未放行 / 算不出价
+   *  → 空报价双 null。过期与成片失败不影响报价（过期只阻止转成片）。 */
+  @Post(":jobId/regenerate-sample/quote")
+  @HttpCode(200)
+  async regenerateSampleQuote(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Body() body: unknown,
+  ) {
+    let quote: BillingQuote;
+    try {
+      quote = this.billingQuote();
+    } catch (error) {
+      // 与 /quote 同款降级：计费地址缺失只是「这次没显示价格」，不把看价请求变 500。
+      logger.warn(
+        `[generation] 重新生成样片报价不可用，本次不显示价格：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return ok({ credits: null, quote_revision: null });
+    }
+    return handleRegenerateSampleQuote(user.userId, projectId, jobId, body, {
+      projects: this.project,
+      models: this.models,
+      sampleSource: this.command.finalize,
+      quote,
+    });
+  }
+
+  /** POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample（IKIZQF）
+   *  重新生成样片提交：请求体仅报价确认两字段（strict——输入由服务端从原样片冻结快照
+   *  派生，浏览器不重传），派生创建请求后走 create 端点同一创建管线（幂等/门控/素材
+   *  复核/报价复算/预扣/video_stage='sample'）。旧样片、失败成片及其费用记录只读不写。 */
+  @Post(":jobId/regenerate-sample")
+  async regenerateSample(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("authorization") authorization?: string,
+  ) {
+    const billing = this.billing();
+    const result = await handleRegenerateSampleCreate(
+      user.userId,
+      projectId,
+      jobId,
+      body,
+      idempotencyKey ?? null,
+      {
+        projects: this.project,
+        models: this.models,
+        sampleSource: this.command.finalize,
+        // create 端点同一装配（ IKIZQ8：报价复算与 /quote 同源）。
+        create: {
+          projects: this.project,
+          command: this.command.repo,
+          models: this.models,
+          canvas: this.canvas,
+          assets: this.command.assets,
+          materialGate: this.buildMaterialGate(user.userId, authorization),
+          billing,
+          quote: this.billingQuote(),
+        },
+      },
+      sealProviderCredential(authorization),
+    );
+    // 与 create（IKG57P）同款口径：业务失败走 AllExceptionsFilter 统一投影。
+    if (result.code !== 200) {
+      throw new DomainError(result.code, result.msg ?? undefined);
+    }
+    if (result.data) {
+      try {
+        await enqueueVideoGenerationJob(String(result.data.generation_job_id));
+      } catch (error) {
+        logger.error(
+          `[generation] enqueue regenerate-sample job failed: ${
+            error instanceof Error ? error.message : "unknown"
+          }`,
+        );
+      }
+    }
+    return result;
   }
 
   @Post(":jobId/cancel")

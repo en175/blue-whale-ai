@@ -100,6 +100,10 @@ export interface ModelFeatures {
    *  ⚠️ 键格式与目录里原先那张 `tokenEstimate.dimensions` **逐字相同**，搬迁是逐字搬；
    *     `adaptive` 也照样是一个显式键，不在代码里做「取该档位的 16:9 格」这种推断。 */
   video_dimensions: Record<string, string> | null;
+  /** 样片模式放行位（IKIZQ7，契约 backend/libs/contracts/video-sample-mode.ts）。
+   *  **默认关闭**——仅运营在能力行显式声明 `sample_mode: true` 的视频模型（Seedance 2.5）
+   *  才能提交 `parameters.sample_mode=true` 的样片创建/报价；未声明一律拒绝。 */
+  sample_mode: boolean;
 }
 
 export interface ModelCapabilityView {
@@ -186,6 +190,8 @@ type FeaturesJson = {
   task_types?: unknown;
   videoDimensions?: unknown;
   video_dimensions?: unknown;
+  sampleMode?: boolean;
+  sample_mode?: boolean;
 };
 
 type DurationRangeJson = {
@@ -294,6 +300,8 @@ export function toFeatures(json: unknown, capabilityType?: string): ModelFeature
     ),
     task_types: pickTaskTypes(f.taskTypes ?? f.task_types),
     video_dimensions: pickDimensions(f.videoDimensions ?? f.video_dimensions),
+    // IKIZQ7：缺省即关闭——样片能力默认不向任何模型开放（放行 = 能力行显式声明）。
+    sample_mode: f.sampleMode === true || f.sample_mode === true,
   };
 }
 

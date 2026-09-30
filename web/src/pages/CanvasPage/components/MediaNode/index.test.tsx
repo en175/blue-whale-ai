@@ -1744,3 +1744,321 @@ describe('MediaNode 视频卡选中态悬停播放（IKJ7S1：尾播特权与手
     expect(rebuilt.volume).toBe(1);
   });
 });
+
+describe('MediaNode 样片/成片画面内角标（IKJ7UI）', () => {
+  /** ADR-0119 定稿：角标迁入视频画面内右上角（深色玻璃胶囊 .stageTag）；仅成功态显示
+      ——生成中/失败/草稿卡走占位分支到不了视频层；标题行不再挂卡外徽标。 */
+  it('生成中样片卡：不挂角标（生成中靠自动命名识别），标题行无卡外徽标', async () => {
+    await renderNode('video', { genStatus: 'generating', progress: 10, data: { videoStage: 'sample' } });
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')).toBeNull();
+    expect(titleRow().textContent).not.toContain('样片 480P');
+  });
+
+  it('失败样片卡：不挂角标（失败卡不挂）', async () => {
+    await renderNode('video', { genStatus: 'failed', errorText: '样片生成失败', data: { videoStage: 'sample', jobId: '9001' } });
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')).toBeNull();
+  });
+
+  it('成功样片卡：角标在视频画面内右上角（内容区内、标题行外），文案含「截止 MM-DD HH:mm」', async () => {
+    const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    await renderNode('video', { data: { videoStage: 'sample', finalizeDeadlineAt: future, src: 'http://vid/s.mp4' } });
+    const badge = mountNode.querySelector('[data-testid="video-sample-badge"]');
+    expect(badge).toBeTruthy();
+    // 画面内：挂在内容卡里，不在标题行
+    expect(contentCard().contains(badge!)).toBe(true);
+    expect(titleRow().contains(badge!)).toBe(false);
+    expect(badge!.className).toContain('stageTag');
+    expect(badge!.className).not.toContain('stageTagExpired');
+    expect(badge!.textContent).toContain('样片 480P');
+    // 本地时区 MM-DD HH:mm（分钟精度，IKJ7UI 对齐 v3 原型口径）
+    expect(badge!.textContent).toMatch(/截止 \d{2}-\d{2} \d{2}:\d{2}$/);
+    // 「已用 N 积分」不进角标
+    expect(badge!.textContent).not.toContain('积分');
+    // 样片素材照常渲染（可预览下载由既有视频卡承载）
+    expect(mountNode.querySelector('[data-testid="media-content"]')).toBeTruthy();
+  });
+
+  it('过期样片卡：角标转警告橙「已过期」，素材保留（不删除）', async () => {
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    await renderNode('video', { data: { videoStage: 'sample', finalizeDeadlineAt: past, src: 'http://vid/s.mp4' } });
+    const badge = mountNode.querySelector('[data-testid="video-sample-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.className).toContain('stageTagExpired');
+    expect(badge!.textContent).toContain('已过期');
+    expect(badge!.getAttribute('title')).toContain('期限已过');
+  });
+
+  it('普通视频卡：不渲染样片角标；缺可信截止（null）的样片卡视同过期（警告橙，不新增第三态）', async () => {
+    await renderNode('video', { data: { src: 'http://vid/n.mp4' } });
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')).toBeNull();
+    await renderNode('video', { data: { videoStage: 'sample', finalizeDeadlineAt: null, src: 'http://vid/s2.mp4' } });
+    const badge = mountNode.querySelector('[data-testid="video-sample-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.className).toContain('stageTagExpired');
+    expect(badge!.textContent).toContain('已过期');
+    expect(badge!.getAttribute('title')).toContain('缺少可信创建时间');
+  });
+
+  it('成功成片卡：画面内右上角「成片 1080P」角标（紫色点缀），已结算不拼积分', async () => {
+    await renderNode('video', {
+      data: {
+        videoStage: 'final', sourceSampleJobId: '9001', src: 'http://vid/f.mp4',
+        chargeState: 'settled', actualCredits: 80,
+      },
+    });
+    const badge = mountNode.querySelector('[data-testid="video-final-badge"]');
+    expect(badge).toBeTruthy();
+    expect(contentCard().contains(badge!)).toBe(true);
+    expect(titleRow().contains(badge!)).toBe(false);
+    expect(badge!.className).toContain('stageTagFinal');
+    expect(badge!.textContent).toBe('成片 1080P');
+    // 成片卡不渲染样片角标
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')).toBeNull();
+  });
+
+  it('成片生成中/失败卡：不挂角标（仅成功态显示）', async () => {
+    await renderNode('video', { genStatus: 'generating', progress: 5, data: { videoStage: 'final', sourceSampleJobId: '9001', jobId: '9002' } });
+    expect(mountNode.querySelector('[data-testid="video-final-badge"]')).toBeNull();
+    await renderNode('video', {
+      genStatus: 'failed',
+      data: { videoStage: 'final', sourceSampleJobId: '9001', jobId: '9002', errorText: '上游生成失败' },
+    });
+    expect(mountNode.querySelector('[data-testid="video-final-badge"]')).toBeNull();
+  });
+});
+
+describe('MediaNode 样片卡标题行成片按钮（IKIZQE）', () => {
+  function ctaButton(): HTMLButtonElement | null {
+    return mountNode.querySelector<HTMLButtonElement>('[data-testid="finalize-cta"]');
+  }
+
+  it('ready：按钮唯一渲染在标题行，展示成片预计积分，点击派发 onFinalizeSample', async () => {
+    const onFinalizeSample = vi.fn();
+    await renderNode('video', {
+      data: {
+        videoStage: 'sample', jobId: '9001', src: 'http://vid/s.mp4',
+        finalizeDeadlineAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        finalizeCta: { phase: 'ready', credits: 80 }, onFinalizeSample,
+      },
+    });
+    const btn = ctaButton();
+    expect(btn).toBeTruthy();
+    // 唯一入口：整卡只有一个成片按钮，且挂在标题行内
+    expect(mountNode.querySelectorAll('[data-testid="finalize-cta"]')).toHaveLength(1);
+    expect(titleRow().contains(btn!)).toBe(true);
+    expect(btn!.textContent).toBe('生成 1080P 成片 · 80 积分');
+    expect(btn!.disabled).toBe(false);
+    expect(btn!.title).toContain('预计消耗 80 积分');
+    await act(async () => { btn!.click(); });
+    expect(onFinalizeSample).toHaveBeenCalledTimes(1);
+    expect(onFinalizeSample).toHaveBeenCalledWith('video-node');
+  });
+
+  it('loading/submitting/running/checking/expired/unavailable：禁用且不派发，文案随态切换', async () => {
+    const onFinalizeSample = vi.fn();
+    const base = {
+      videoStage: 'sample' as const, jobId: '9001', src: 'http://vid/s.mp4',
+      finalizeDeadlineAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      onFinalizeSample,
+    };
+    await renderNode('video', { data: { ...base, finalizeCta: { phase: 'loading' } } });
+    expect(ctaButton()!.textContent).toBe('生成 1080P 成片');
+    expect(ctaButton()!.disabled).toBe(true);
+    expect(ctaButton()!.title).toContain('正在获取成片报价');
+
+    await rerenderNode('video', { data: { ...base, finalizeCta: { phase: 'running' } } });
+    expect(ctaButton()!.textContent).toBe('成片生成中…');
+
+    await rerenderNode('video', { data: { ...base, finalizeCta: { phase: 'checking' } } });
+    expect(ctaButton()!.textContent).toBe('状态核对中…');
+    expect(ctaButton()!.title).toContain('请勿重复提交');
+
+    await rerenderNode('video', { data: { ...base, finalizeCta: { phase: 'unavailable' } } });
+    expect(ctaButton()!.disabled).toBe(true);
+    expect(ctaButton()!.title).toContain('暂不能生成成片');
+
+    // 禁用态点击不派发（生成中/核对中禁止再次点击）
+    for (const phase of ['running', 'checking', 'unavailable'] as const) {
+      await rerenderNode('video', { data: { ...base, finalizeCta: { phase } } });
+      await act(async () => { ctaButton()!.click(); });
+    }
+    expect(onFinalizeSample).not.toHaveBeenCalled();
+  });
+
+  it('expired（过期/缺可信截止）：整钮不渲染（IKJ7UI——死按钮没有行动价值，过期信息由角标表达）', async () => {
+    const onFinalizeSample = vi.fn();
+    const base = {
+      videoStage: 'sample' as const, jobId: '9001', src: 'http://vid/s.mp4',
+      onFinalizeSample,
+    };
+    await renderNode('video', { data: { ...base, finalizeDeadlineAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), finalizeCta: { phase: 'expired' } } });
+    expect(ctaButton()).toBeNull();
+    // 缺可信截止时间（null）同口径不渲染
+    await renderNode('video', {
+      data: { ...base, finalizeDeadlineAt: null, finalizeCta: { phase: 'expired' } },
+    });
+    expect(ctaButton()).toBeNull();
+    // 恢复路径在卡外（重新编辑面板重发），卡上不派发任何成片动作
+    await act(async () => { titleRow().querySelectorAll('button').forEach((b) => b.click()); });
+    expect(onFinalizeSample).not.toHaveBeenCalled();
+  });
+
+  it('未注入 finalizeCta（普通卡/生成中样片）：不渲染成片按钮', async () => {
+    await renderNode('video', { data: { src: 'http://vid/n.mp4' } });
+    expect(ctaButton()).toBeNull();
+    await renderNode('video', { genStatus: 'generating', progress: 10, data: { videoStage: 'sample', jobId: '9001' } });
+    expect(ctaButton()).toBeNull();
+  });
+});
+
+describe('MediaNode 成片卡与两阶段状态呈现（IKIZQE）', () => {
+  it('成功成片卡：普通视频卡体验 + 画面内「成片 1080P」角标，不拼已用积分（IKJ7UI）', async () => {
+    await renderNode('video', {
+      data: {
+        videoStage: 'final', sourceSampleJobId: '9001', src: 'http://vid/f.mp4',
+        fileName: '成片', width: 1920, height: 1080, jobId: '9002',
+        chargeState: 'settled', actualCredits: 80,
+      },
+    });
+    const badge = mountNode.querySelector('[data-testid="video-final-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toBe('成片 1080P');
+    // 成片卡不渲染样片徽标，也不渲染成片按钮（100% 普通卡）
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')).toBeNull();
+    expect(mountNode.querySelector('[data-testid="finalize-cta"]')).toBeNull();
+  });
+
+  it('成片生成中/失败卡：不挂角标；失败显示原因与退费状态，未注入入口时无任何动作按钮', async () => {
+    await renderNode('video', { genStatus: 'generating', progress: 5, data: { videoStage: 'final', sourceSampleJobId: '9001', jobId: '9002' } });
+    expect(mountNode.querySelector('[data-testid="video-final-badge"]')).toBeNull();
+
+    await renderNode('video', {
+      genStatus: 'failed',
+      data: { videoStage: 'final', sourceSampleJobId: '9001', jobId: '9002', errorText: '上游生成失败', chargeState: 'released' },
+    });
+    expect(mountNode.textContent).toContain('上游生成失败');
+    expect(mountNode.querySelector('[data-testid="charge-refund-note"]')!.textContent).toContain('预扣已退回');
+    // canRetry 要求 videoStage !== 'final'：未注入续作入口的成片失败卡不提供任何重试
+    expect([...mountNode.querySelectorAll('button')].filter((b) => b.textContent === '重试')).toHaveLength(0);
+  });
+
+  it('样片失败卡：不挂角标（失败卡不挂）、显示退费状态，保留重试（普通失败卡形态不受本票影响）', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      data: { videoStage: 'sample', jobId: '9001', errorText: '样片生成失败', chargeState: 'released' },
+    });
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')).toBeNull();
+    expect(mountNode.querySelector('[data-testid="charge-refund-note"]')!.textContent).toContain('预扣已退回');
+    expect([...mountNode.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(true);
+  });
+
+  it('checking 态（提交结果不明）：占位显示「状态核对中」与勿重复提交说明，无取消按钮', async () => {
+    await renderNode('video', { genStatus: 'checking', data: { videoStage: 'final', sourceSampleJobId: '9001', jobId: '9002' } });
+    const box = mountNode.querySelector('[data-testid="job-checking-box"]');
+    expect(box).toBeTruthy();
+    expect(box!.textContent).toContain('状态核对中');
+    expect(box!.textContent).toContain('请勿重复提交');
+    expect([...mountNode.querySelectorAll('button')].some((b) => b.textContent === '取消生成')).toBe(false);
+  });
+
+  it('样片角标：已结算（settled）不拼「已用 N 积分」（费用展示归历史记录与详情）', async () => {
+    await renderNode('video', {
+      data: {
+        videoStage: 'sample', jobId: '9001', src: 'http://vid/s.mp4',
+        finalizeDeadlineAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        chargeState: 'settled', actualCredits: 20,
+      },
+    });
+    const badge = mountNode.querySelector('[data-testid="video-sample-badge"]')!;
+    expect(badge.textContent).toContain('样片 480P');
+    expect(badge.textContent).toContain('截止 ');
+    expect(badge.textContent).not.toContain('积分');
+  });
+});
+
+describe('MediaNode 重新生成样片入口（IKIZQG / IKJ7UI 形态）', () => {
+  const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  function regenButton(): HTMLButtonElement | null {
+    return mountNode.querySelector<HTMLButtonElement>('[data-testid="regenerate-cta"]');
+  }
+
+  it('过期样片卡：标题行无任何按钮（重新生成入口已随 ADR-0119 移除，即使误注入也不渲染）', async () => {
+    const onRegenerateSample = vi.fn();
+    await renderNode('video', {
+      data: {
+        videoStage: 'sample', jobId: '9001', src: 'http://vid/s.mp4', finalizeDeadlineAt: past,
+        regenerateCta: { phase: 'ready', credits: 40 }, onRegenerateSample,
+      },
+    });
+    expect(regenButton()).toBeNull();
+    // 零动作卡：标题行右侧没有任何按钮（恢复靠点卡重新编辑后从面板重发）
+    expect(titleRow().querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('成功样片卡：标题行只有「生成 1080P 成片」一个按钮（唯一链式动作）', async () => {
+    await renderNode('video', {
+      data: {
+        videoStage: 'sample', jobId: '9001', src: 'http://vid/s.mp4', finalizeDeadlineAt: future,
+        finalizeCta: { phase: 'ready', credits: 80 },
+      },
+    });
+    const rowButtons = [...titleRow().querySelectorAll('button')];
+    expect(rowButtons).toHaveLength(1);
+    expect(rowButtons[0]!.getAttribute('data-testid')).toBe('finalize-cta');
+    expect(regenButton()).toBeNull();
+  });
+
+  it('成片失败卡失败区：同形「重试」（不带积分），悬停给新样片报价与另行计费说明，点击派发 onRegenerateSample', async () => {
+    const onRegenerateSample = vi.fn();
+    await renderNode('video', {
+      genStatus: 'failed',
+      data: {
+        videoStage: 'final', sourceSampleJobId: '9001', jobId: '9002',
+        errorText: '上游成片失败', chargeState: 'released',
+        regenerateCta: { phase: 'ready', credits: 40 }, onRegenerateSample,
+      },
+    });
+    const btn = regenButton();
+    expect(btn).toBeTruthy();
+    // 与普通失败卡完全同形（genBtn）：文案「重试」，不带积分文字
+    expect(btn!.className).toContain('genBtn');
+    expect(btn!.textContent).toBe('重试');
+    expect(btn!.disabled).toBe(false);
+    expect(btn!.title).toContain('预计消耗 40 积分');
+    expect(btn!.title).toContain('样片完成后再单独发起成片（另行计费）');
+    // 失败原因与退费状态并存
+    expect(mountNode.textContent).toContain('上游成片失败');
+    expect(mountNode.querySelector('[data-testid="charge-refund-note"]')!.textContent).toContain('预扣已退回');
+    await act(async () => { btn!.click(); });
+    expect(onRegenerateSample).toHaveBeenCalledWith('video-node');
+  });
+
+  it('成片失败卡失败区：loading/checking/unavailable 禁用且不派发', async () => {
+    const onRegenerateSample = vi.fn();
+    const base = {
+      videoStage: 'final' as const, sourceSampleJobId: '9001', jobId: '9002',
+      errorText: '上游成片失败', chargeState: 'released' as const, onRegenerateSample,
+    };
+    await renderNode('video', { genStatus: 'failed', data: { ...base, regenerateCta: { phase: 'loading' } } });
+    expect(regenButton()!.disabled).toBe(true);
+    expect(regenButton()!.title).toContain('正在获取样片报价');
+    await rerenderNode('video', { genStatus: 'failed', data: { ...base, regenerateCta: { phase: 'checking' } } });
+    expect(regenButton()!.disabled).toBe(true);
+    expect(regenButton()!.title).toContain('请勿重复提交');
+    await rerenderNode('video', { genStatus: 'failed', data: { ...base, regenerateCta: { phase: 'unavailable' } } });
+    expect(regenButton()!.disabled).toBe(true);
+    await act(async () => { regenButton()!.click(); });
+    expect(onRegenerateSample).not.toHaveBeenCalled();
+  });
+
+  it('样片失败卡：失败区不渲染重新生成入口（同输入原卡重试沿用现有重试入口）', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      data: { videoStage: 'sample', jobId: '9001', errorText: '样片生成失败', chargeState: 'released' },
+    });
+    expect(regenButton()).toBeNull();
+    expect([...mountNode.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(true);
+  });
+});

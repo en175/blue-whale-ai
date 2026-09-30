@@ -524,6 +524,13 @@
   transform: translateX(16px);
 }
 
+/* ---- IKIZQB：样片模式条款说明（开启时显示，文案为父规格「截止规则」用户口径） ---- */
+.sampleTerm {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
 .configRow {
   display: flex;
   gap: var(--spacing-md);

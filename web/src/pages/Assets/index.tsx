@@ -14,6 +14,7 @@ import { isApiError } from '@/api/http';
 import { fileToAssetType } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import Skeleton from '@/components/Skeleton';
+import JobSourceModal, { type JobSourceTarget } from '@/components/JobSourceModal';
 import AssetDetailModal from './components/AssetDetailModal';
 import CharacterLibrary from './components/CharacterLibrary';
 import AssetMasonry, { type AssetGridItem } from './components/AssetMasonry';
@@ -51,6 +52,8 @@ export default function Assets() {
   const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
   /** 详情补拉（IKFTQW）：列表记录先渲染弹窗，详情回来后覆盖。见 usePreviewAsset。 */
   const previewAsset = usePreviewAsset(previewTarget);
+  /** IKIZQI：双向来源查看目标（样片 → 成片任务 / 成片 → 来源样片任务）。 */
+  const [sourceTarget, setSourceTarget] = useState<JobSourceTarget | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
   /** 素材库分组详情视图中当前分组 ID（null = 不在详情视图）；真人人像库用 */
@@ -374,7 +377,11 @@ export default function Assets() {
       <AssetDetailModal
         asset={previewAsset}
         onClose={() => setPreviewTarget(null)}
+        onOpenSource={setSourceTarget}
       />
+
+      {/* IKIZQI：来源任务弹层——按来源 ID 拉 GET /api/jobs/:id，双向查看另一阶段任务与产物 */}
+      <JobSourceModal target={sourceTarget} onClose={() => setSourceTarget(null)} />
 
       {/* 删除确认弹窗：引用数查询中显示加载提示，返回后展示关联项目数，失败兜底普通文案（IKCZAT） */}
       <ConfirmModal

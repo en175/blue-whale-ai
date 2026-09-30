@@ -160,6 +160,14 @@ export class JobsService {
         status: job.status,
         progress: job.progress,
         asset: job.asset,
+        // IKIZQ8：失败任务的阶段/来源/截止/费用投影（失败卡按阶段退回冻结积分，
+        // 用户要知道这是哪个阶段失败了）。
+        video_stage: job.video_stage,
+        source_sample_job_id: job.source_sample_job_id,
+        final_job_id: job.final_job_id,
+        finalize_deadline_at: job.finalize_deadline_at,
+        charge_state: job.charge_state,
+        actual_credits: job.actual_credits,
       });
     }
 
@@ -185,6 +193,14 @@ export class JobsService {
       // url / duration，轨序 = 契约 SCENE_TRACKS[scene]）；其他任务类型恒 null，asset 单对象
       // 投影不动（既有单 asset 消费者不受影响）。
       tracks: job.tracks,
+      // IKIZQ8：两阶段视频的阶段/来源/截止/费用投影（契约 videoStageJobProjectionSchema，
+      // 金标 G11——任务详情返回阶段、素材、费用和截止信息；旧任务按普通视频兜底）。
+      video_stage: job.video_stage,
+      source_sample_job_id: job.source_sample_job_id,
+      final_job_id: job.final_job_id,
+      finalize_deadline_at: job.finalize_deadline_at,
+      charge_state: job.charge_state,
+      actual_credits: job.actual_credits,
     });
   }
 }

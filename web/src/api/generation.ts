@@ -51,6 +51,9 @@ export interface ModelFeatures {
   max_reference_duration_sec?: number | null;
   /** ADR-0086：按任务类型的比例/时长约束（default/first_frame/first_last_frame/edit/prolong）。 */
   task_types?: Record<string, unknown> | null;
+  /** IKIZQ7：样片放行位（默认关闭）。仅运营显式声明的视频模型（Seedance 2.5）为 true；
+   *  未声明时前端不渲染样片开关，服务端同步拒绝 sample_mode 提交（父规格 IKIZPZ「范围与门控」）。 */
+  sample_mode?: boolean;
 }
 
 /** GET /api/generation/models 返回项 */

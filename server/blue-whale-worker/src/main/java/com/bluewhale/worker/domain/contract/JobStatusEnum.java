@@ -16,6 +16,13 @@ public enum JobStatusEnum {
     /** 已领取 / 执行中（持租约）。 */
     PROCESSING("processing"),
 
+    /**
+     * IKIZQD：提交结果不明锁定态（契约 §六 JOB_STATUS_CHECKING，视频 submit/finalize 提交相）。
+     * Worker 调网关前持久标记；超时 / 响应丢失 / 落库失败 / 失租停留于此——不可 claim、
+     * 不重提、不退款，交人工核对后定夺终态。非轮询状态机常规节点，聚合逻辑不经过它。
+     */
+    CHECKING("checking"),
+
     /** 全部 slot 成功。 */
     SUCCEEDED("succeeded"),
 

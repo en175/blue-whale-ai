@@ -7,6 +7,7 @@ import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
+import com.bluewhale.worker.domain.contract.VideoSampleContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
@@ -42,7 +43,9 @@ import java.util.regex.Pattern;
  *   <li>claimVideoJobById（富投影：pollCount/progress/providerTaskId/parentProviderTaskId）</li>
  *   <li>cancelRequested AND providerTaskId==null → cancelVideoBeforeDispatch</li>
  *   <li>providerTaskId==null → (a) parent-reuse 防双扣 → (b) buildSubmitRequest → submit →
- *       markProviderSubmitted → scheduleNext(5s)</li>
+ *       markProviderSubmitted → scheduleNext(5s)；IKIZQD：submit/finalize 前先落
+ *       markSubmissionAttempt（processing→checking「提交中」），结果不明留 checking 锁定
+ *       （不重提不退款），见 {@link #dispatchSubmission}</li>
  *   <li>providerTaskId!=null → poll → transient → rescheduleProviderPoll(5s)（与
  *       processing 共享 720 轮询预算，超限同归 provider_timeout）;
  *       pollCount>=720 → provider_timeout; succeeded+URL → relay → publishVideoResult;
@@ -321,10 +324,12 @@ public class VideoJobProcessor implements JobProcessor {
                 // 失败等纯排查文案无状态 cause（httpStatus=null），不受影响、永远保留字样
                 message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
             }
-            // IKJ80P：submit 阶段（providerTaskId 尚未取得）读超时 = 网关可能随后仍完成建单
-            // 扣量，但 task_id 无从取得（new-api 网关无按条件查询已建任务的接口）。重试 submit
-            // 会双扣（MediaKit 家族同款取舍「宁可不重试也不双跑」），故这里落显式失败终态并
-            // 打孤儿标记，供告警与对账清单（SQL 见 ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN）。
+            // IKJ80P 孤儿标记判定——IKIZQD 起不再命中：submit 阶段异常已由
+            // dispatchSubmission 消化（读超时/响应丢失留 checking 锁定，不重提不退款；
+            // 网关拒绝挂 HTTP cause 重抛，不命中 SocketTimeout 判定）；poll 阶段
+            // providerTaskId 必非 null。本布尔因此恒 false，孤儿标记不再新写——键名、
+            // 分支与对账 SQL（ERROR_DETAIL_SUBMIT_TIMEOUT_ORPHAN）仅为 IKJ80P 时代
+            // 写入的存量历史行保留。
             boolean submitTimeoutOrphan = claim.providerTaskId() == null
                     && hasSocketTimeoutCause(error);
             if (submitTimeoutOrphan) {
@@ -349,23 +354,128 @@ public class VideoJobProcessor implements JobProcessor {
                 if (settled) return;
             }
 
+            // IKIZQC：成片（video_stage='final'）提交相——不重建 Draft 输入，用样片保存的
+            // 网关公开 task ID 调 finalize（网关自行组装 draft_task 引用，私有上游 ID
+            // 不出网关）。返回的公开任务 ID 即成片轮询句柄，后续 pollPhase 与普通视频同构。
+            if ("final".equals(claim.videoStage())) {
+                submitFinalize(claim, providerToken);
+                return;
+            }
+
             // buildSubmitRequest（:236）
             VideoSubmitInput request = buildSubmitRequest(claim);
 
-            // submit（:237）
-            SubmitResult submitted = videoClient.submit(providerToken, request);
-            log.info("[video] 上游已提交 jobId={} providerTaskId={}", claim.id(), submitted.taskId());
-
-            // markProviderSubmitted（:238-242）
-            boolean updated = stateMachine.markProviderSubmitted(
-                    claim.id(), claim.workerId(), claim.fencingToken(), submitted.taskId());
-            if (updated) {
-                scheduleNext(claim.id(), VIDEO_POLL_INTERVAL_MS);
-            }
+            // submit（:237）——IKIZQD：先持久「提交中」标记再发网关（普通/样片同骨架）
+            dispatchSubmission(claim, () -> videoClient.submit(providerToken, request));
         } else {
             // ========== poll 阶段（video-job-runner.ts:246-355）==========
             pollPhase(claim, providerToken);
         }
+    }
+
+    /**
+     * IKIZQD 提交相公共骨架（契约 §六 JOB_STATUS_CHECKING）：普通 / 样片 submit 与成片
+     * finalize 共用——「Worker 调网关前持久标记提交中」。
+     * <ol>
+     *   <li>{@code markSubmissionAttempt} 先落 checking：守卫未命中 = 失租 / 已提交 / 已终态，
+     *       停止且**绝不发网关**（迟到 Worker 的 fence）；</li>
+     *   <li>调网关；</li>
+     *   <li>明确受理 → {@code markProviderSubmitted} 从 checking 恢复 processing 并落轮询句柄
+     *       （「明确成功恢复原任务」），后续 poll 与普通视频同构。</li>
+     * </ol>
+     * 结果分类（父规格 IKIZPZ「提交与恢复」）：
+     * <ul>
+     *   <li>带 HTTP 状态的拒绝（网关已答复业务回绝）= 明确失败 → 上抛顶层 catch 统一归类，
+     *       failVideoJob 从 checking 落失败终态并释放本阶段预扣；</li>
+     *   <li>超时、响应丢失、解析失败等**无可用响应**，以及 {@code markProviderSubmitted}
+     *       落库失败 = 结果不明 → 留在 checking 锁定：不按空 provider_task_id 重提、不自动
+     *       退款，记 submission_unknown 日志供人工核对。checking 不被 claim 候选与恢复扫描
+     *       选中，同键重放 / 并发 / 重启后至多一次已发上游的尝试与一笔预扣。</li>
+     * </ul>
+     * 恢复核对的数据面即本仓行（status=checking + charge_state='held' + input）与网关 /
+     * 上游后台账单；网关无「按样片查成片」契约（IKIZI7），首版不建自动对账，仍不明交人工。
+     */
+    private void dispatchSubmission(ClaimedVideoJobDto claim,
+                                    java.util.function.Supplier<SubmitResult> call) {
+        if (!stateMachine.markSubmissionAttempt(claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
+        SubmitResult submitted;
+        try {
+            submitted = call.get();
+        } catch (VideoProviderError error) {
+            if (NewApiHttpSupport.upstreamHttpStatus(error) != null) {
+                // 网关明确拒绝（有 HTTP 答复）：明确失败，走顶层 catch → failVideo（释放预扣）
+                throw error;
+            }
+            recordSubmissionUnknown(claim, error);
+            return;
+        } catch (Exception error) {
+            recordSubmissionUnknown(claim, error);
+            return;
+        }
+        boolean updated;
+        try {
+            updated = stateMachine.markProviderSubmitted(
+                    claim.id(), claim.workerId(), claim.fencingToken(), submitted.taskId());
+        } catch (Exception error) {
+            // 落库失败：网关已受理但轮询句柄未落——结果不明，留 checking（绝不能 failVideo：
+            // 守卫会命中 checking 行并把预扣退掉，那正是本票要关的提前退款窗口）
+            recordSubmissionUnknown(claim, error);
+            return;
+        }
+        if (updated) {
+            scheduleNext(claim.id(), VIDEO_POLL_INTERVAL_MS);
+        }
+    }
+
+    /**
+     * IKIZQD：结果不明留痕（best-effort）——checking 行 + charge_state='held' 是人工核对的
+     * 主数据，这里补「为何不明」。日志落库失败不抛：任务仍处锁定，不能因记日志失败改道。
+     *
+     * <p>人工核对入口（契约 §六）：checking 是一等 status，对账清单直接按状态查：
+     * <pre>{@code
+     * SELECT id, user_id, project_id, video_stage, charge_state, provider_task_id, gmt_create
+     * FROM generation_jobs
+     * WHERE type = 'video' AND status = 'checking';
+     * }</pre>
+     * 逐行核对本仓 input、网关任务、上游结果与账单四方后按契约三选一：明确成功恢复原
+     * 任务，明确失败释放该阶段预扣，仍不明保持锁定。核对期间预扣持留、再次提交被
+     * 1014 submission_unknown 拒绝；checking 行不被 claim 候选与恢复扫描选中，不会
+     * 被自动重提。
+     */
+    private void recordSubmissionUnknown(ClaimedVideoJobDto claim, Exception error) {
+        String message = error.getMessage() != null ? error.getMessage()
+                : error.getClass().getSimpleName();
+        log.error("[video] 提交结果不明，任务留在 checking 锁定（不重提不退款，交人工核对）jobId={} err={}",
+                claim.id(), message, error);
+        try {
+            String code = error instanceof VideoProviderError vpe ? vpe.getCode()
+                    : error.getClass().getSimpleName();
+            stateMachine.appendLog(claim.id(), "submission_unknown", "checking",
+                    "提交结果不明，任务锁定待核对: " + message, Map.of("code", code));
+        } catch (Exception logError) {
+            log.warn("[video] submission_unknown 日志落库失败（任务仍锁定）jobId={}: {}",
+                    claim.id(), logError.getMessage());
+        }
+    }
+
+    /**
+     * IKIZQC：成片提交相（金标 G02/G14）。缺来源样片上游任务 ID = 数据异常（成片行
+     * 必然带 source_sample_job_id，样片成功终态必然带 provider_task_id），按本阶段失败
+     * 处理——不猜、不回退成普通 submit（那会凭空建一条无 Draft 引用的上游任务）。
+     * 这是**本地前置校验且未发网关**的错误：不落「提交中」标记、不占上游尝试（IKIZQD），
+     * 直接 failVideoGuard 置 charge_state='released' 并发该阶段返还事件（样片阶段的结算
+     * 不受影响，金标 G09）。其余提交路径统一走 {@link #dispatchSubmission}（IKIZQD）。
+     */
+    private void submitFinalize(ClaimedVideoJobDto claim, String providerToken) {
+        String sampleTaskId = claim.sourceSampleProviderTaskId();
+        if (sampleTaskId == null || sampleTaskId.isEmpty()) {
+            log.error("[video] 成片缺少来源样片上游任务 ID，按本阶段失败处理 jobId={}", claim.id());
+            failVideo(claim, GenerationError.ERROR_INVALID_INPUT, "成片缺少来源样片的上游任务 ID");
+            return;
+        }
+        dispatchSubmission(claim, () -> videoClient.finalize(providerToken, sampleTaskId));
     }
 
     /**
@@ -517,14 +627,31 @@ public class VideoJobProcessor implements JobProcessor {
      * relay.persist → videoDimensions → publishVideoResult。
      * <p>
      * 修正一：quota/actualAmountFen 偏差告警段整体省略。
+     * <p>
+     * IKIZQ8 样片差异（金标 G14/G06）：① 样片**禁用**「TOS 未配置则直存供应商 URL」的
+     * 普通视频降级——24 小时/100 次的临时链接不构成自有素材交付，转存不可用即按本阶段
+     * 失败处理（预扣随终态守卫释放）；② 样片成功终态附带可信上游 created_at 与按契约
+     * 公式算出的转成片截止，缺可信时间时截止为 null（样片仍交付，成片禁用）。
+     * IKIZQC：G14 对**成片**同规（两阶段成功前必须转存自有 Asset）——禁降级判定从
+     * input.sample_mode 扩展为「样片或成片阶段」；成片独立转存、独立结算（本 job 的
+     * totalTokens 即成片阶段真实用量），来源样片不动。
      */
     private boolean publishVideo(ClaimedVideoJobDto claim, VideoTaskObservation observation) {
+        boolean sample = Boolean.TRUE.equals(
+                claim.input().get(VideoSampleContract.INPUT_SAMPLE_MODE));
+        boolean twoPhase = sample || "final".equals(claim.videoStage());
         // relay persist（:468）
         StoredVideo stored;
         if (mediaRelay != null) {
             stored = mediaRelay.persist(observation.url(), claim.user_id());
+        } else if (twoPhase) {
+            // G14：两阶段（样片/成片）禁用供应商 URL 直存降级——转存失败不能以临时链接充当成功结果。
+            log.error("[video] 两阶段结果转存不可用（TOS 未配置），按本阶段失败处理（不保存供应商 URL）jobId={}",
+                    claim.id());
+            failVideo(claim, GenerationError.ERROR_PROVIDER_FAILED, "视频结果转存不可用，已按失败处理");
+            return false;
         } else {
-            // TOS 未配置 → 降级直存 URL（与 image 同构）
+            // TOS 未配置 → 降级直存 URL（与 image 同构，普通视频既有语义不动）
             // IKGS73：这条路上我们**没有字节**（只有供应商 URL），所以 md5 传 null——
             // 这是本单显式接受的边界（工单「明确不做」里的 B 类）。要补它得把整段视频
             // 拉下来算哈希（上限 200MB），不在这单的取舍内。
@@ -542,6 +669,12 @@ public class VideoJobProcessor implements JobProcessor {
         // duration（:510）
         double duration = resolveDuration(claim.input());
 
+        // IKIZQ8：可信上游 created_at → 转成片截止（契约同一公式，金标 G06 跨语言对账）。
+        // 缺可信时间：两值都传 null——样片照常交付，deadline 列为 null（服务端据此禁成片）。
+        Long upstreamCreatedAtMs = sample ? observation.upstreamCreatedAtMs() : null;
+        Long finalizeDeadlineMs = sample && upstreamCreatedAtMs != null
+                ? VideoSampleContract.finalizeDeadlineMs(upstreamCreatedAtMs) : null;
+
         // publishVideoResult（:504-512）。
         // 上游真实 token 一并交给终态收口：它是**结算的权威用量**（按 token 计价的模型靠它），
         // 而这里正是**唯一**拿得到轮询结果的地方——终态事件由 finalizer 发出，晚了就没了。
@@ -549,10 +682,12 @@ public class VideoJobProcessor implements JobProcessor {
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
-                width, height, duration, observation.totalTokens());
+                width, height, duration, observation.totalTokens(),
+                upstreamCreatedAtMs, finalizeDeadlineMs);
         if (published) {
-            log.info("[video] 发布成功 jobId={} 上游token={}", claim.id(),
-                    observation.totalTokens() != null ? observation.totalTokens() : "未上报");
+            log.info("[video] 发布成功 jobId={} 上游token={} 样片截止={}", claim.id(),
+                    observation.totalTokens() != null ? observation.totalTokens() : "未上报",
+                    finalizeDeadlineMs != null ? finalizeDeadlineMs : "缺可信created_at(禁成片)");
         } else {
             log.warn("[video] 终态失败(publishVideoResult 守卫未命中) jobId={}", claim.id());
         }
@@ -618,6 +753,8 @@ public class VideoJobProcessor implements JobProcessor {
         Map<String, Object> input = claim.input();
         Map<String, Object> params = input.get("parameters") instanceof Map<?, ?> p
                 ? castMap(p) : null;
+        // IKIZQ8：样片标记（接纳侧冻结进 input.sample_mode）——提交体带 draft:true 走 480p Draft。
+        boolean sample = Boolean.TRUE.equals(input.get(VideoSampleContract.INPUT_SAMPLE_MODE));
 
         // prompt（:571-586）
         String basePrompt = strOrEmpty(input, "prompt");
@@ -676,7 +813,7 @@ public class VideoJobProcessor implements JobProcessor {
             }
             return new VideoSubmitInput(model, prompt, duration,
                     strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references,
-                    generateAudio);
+                    generateAudio, sample);
         }
 
         // 参考素材解析（video-job-runner.ts:608-650）
@@ -838,12 +975,12 @@ public class VideoJobProcessor implements JobProcessor {
             }
             merged.addAll(references);
             return new VideoSubmitInput(model, prompt, duration, resolution, ratio,
-                    null, null, merged, generateAudio);
+                    null, null, merged, generateAudio, sample);
         }
 
         return new VideoSubmitInput(
                 model, prompt, duration, resolution, ratio,
-                firstFrameImage, lastFrameImage, references, generateAudio
+                firstFrameImage, lastFrameImage, references, generateAudio, sample
         );
     }
 

@@ -42,5 +42,26 @@ public record ClaimedVideoJobDto(
          * IKEA26：父 job 的 provider_task_id（retry job 有 retry_of_job_id 时查）。
          * 第 3 层防双扣：retry job 先查上游旧 task 状态，SUCCESS → 复用结果不重新 submit。
          */
-        String parentProviderTaskId
-) {}
+        String parentProviderTaskId,
+        /**
+         * IKIZQC：两阶段视频阶段（generation_jobs.video_stage；null = 普通视频）。
+         * 'final' = 成片——提交相走网关 finalize（引用来源样片的公开任务 ID，不重建
+         * Draft 输入），成功前转存禁用供应商 URL 直存降级（金标 G14 两阶段同规）。
+         */
+        String videoStage,
+        /**
+         * IKIZQC：来源样片保存的**网关公开** task ID（video_stage='final' 且
+         * source_sample_job_id 非空时查；其余 null）。私有上游 Draft ID 不出网关
+         * （IKIZBR）——本仓从头到尾只持有公开 ID。
+         */
+        String sourceSampleProviderTaskId
+) {
+        /** 既有 11 参形态：普通视频（非两阶段），阶段两字段缺省 null，旧调用点零改动。 */
+        public ClaimedVideoJobDto(
+                String id, String project_id, String user_id, Map<String, Object> input,
+                String providerTaskId, boolean cancelRequested, String workerId,
+                long fencingToken, int pollCount, int progress, String parentProviderTaskId) {
+                this(id, project_id, user_id, input, providerTaskId, cancelRequested, workerId,
+                        fencingToken, pollCount, progress, parentProviderTaskId, null, null);
+        }
+}

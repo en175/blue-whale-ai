@@ -58,6 +58,22 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     expect(view.features.last_frame).toBe(false);
   });
 
+  // IKIZQ7：样片放行位缺省 false = 默认关闭；两键形显式 true 才放行（与 last_frame 同一条归一）。
+  it("sample_mode 缺省关闭；camelCase / snake_case 显式 true 才放行", async () => {
+    const { repo } = repoWith([
+      buildRow(),
+      buildRow({ features: { sampleMode: true } }),
+      buildRow({ features: { sample_mode: true } }),
+    ]);
+    const views = await repo.listEnabledByType("video");
+
+    expect(views.map((view) => view.features.sample_mode)).toEqual([
+      false,
+      true,
+      true,
+    ]);
+  });
+
   it("独立解析 camelCase 与 snake_case 的 last_frame 能力", async () => {
     const { repo } = repoWith([
       buildRow({ features: { first_frame: false, lastFrame: true } }),

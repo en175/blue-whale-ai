@@ -153,6 +153,18 @@ CREATE TABLE `generation_jobs` (
     `is_delete` BOOLEAN NOT NULL DEFAULT false,
     `canvas_card_state` VARCHAR(16) NOT NULL DEFAULT 'pending',
     `input` JSON NULL,
+    -- 2026-09-29（IKIZQ8）手工追加两阶段视频阶段列——逐字取自
+    --   backend/prisma/migrations/20260929120000_generation_jobs_video_sample_stage/migration.sql。
+    `video_stage` VARCHAR(16) NULL,
+    `source_sample_job_id` BIGINT NULL,
+    `final_job_id` BIGINT NULL,
+    `upstream_created_at_ms` BIGINT NULL,
+    `finalize_deadline_ms` BIGINT NULL,
+    `charge_state` VARCHAR(16) NULL,
+    `actual_credits` INTEGER NULL,
+    -- 2026-09-29（IKIZQC）手工追加成片来源唯一约束——逐字取自
+    --   backend/prisma/migrations/20260929130000_generation_jobs_finalize_source_unique/migration.sql。
+    UNIQUE INDEX `uk_generation_jobs__source_sample_job_id`(`source_sample_job_id`),
 
     INDEX `idx_project_id`(`project_id`),
     INDEX `idx_provider_task_id`(`provider_task_id`),

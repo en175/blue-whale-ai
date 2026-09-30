@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationModel } from '@/api/generation';
 import BottomDialog from './index';
 import styles from './index.module.css';
+import { typePromptRefText } from '../../testing/promptRefEditor';
 
 const { fetchGenerationModels } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
@@ -302,5 +303,253 @@ describe('IKJ4W6 画布比例显示 auto', () => {
     const patch = paramsSpy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
     expect(patch.ratio).toBe('adaptive');
     expect(mountNode.textContent).toContain('Seedance 2.5|auto|');
+  });
+});
+
+/* ============================================
+ * IKIZQB 样片模式开关：能力位门控 / 480p 锁定与恢复 / 切模型关闭 /
+ * 四模式共用 / 草稿恢复 / 报价门控与提交确认两字段。
+ * 报价走全局 fetch 桩（generationQuoteOptions → apiRequest）。
+ * ============================================ */
+
+/** Seedance 2.5：样片放行能力位 + 480p 档（IKIZQ7 后端透出的 features.sample_mode）。 */
+const seedance25: GenerationModel = {
+  ...seedance,
+  model_id: 'seedance-25',
+  model_label: 'Seedance 2.5',
+  supported_sizes: [
+    { id: '480p', label: '480p', api_value: '480p', width: null, height: null },
+    { id: '720p', label: '720p', api_value: '720p', width: null, height: null },
+    { id: '1080p', label: '1080p', api_value: '1080p', width: null, height: null },
+  ],
+  default_size: '1080p',
+  features: { ...seedance.features, sample_mode: true },
+};
+
+function quoteResponse(data: { credits: number | null; quote_revision: string | null }) {
+  return new Response(JSON.stringify({ code: 200, msg: null, data }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+interface SampleDialogProps {
+  projectId?: string;
+  initialParams?: { modelId?: string; resolution?: string; aspectRatio?: string; sampleMode?: boolean };
+  restoreExisting?: boolean;
+  onSend?: ReturnType<typeof vi.fn>;
+}
+
+/** 带样片场景 props 的渲染（projectId 传入才会挂报价查询与徽标）。 */
+async function renderSampleDialog(props: SampleDialogProps = {}) {
+  mountNode = document.createElement('div');
+  document.body.appendChild(mountNode);
+  root = createRoot(mountNode);
+  await act(async () => {
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+        createElement(BottomDialog, {
+          onClose: vi.fn(),
+          onSend: props.onSend ?? vi.fn(),
+          ...(props.projectId ? { projectId: props.projectId } : {}),
+          ...(props.initialParams ? { initialParams: props.initialParams } : {}),
+          videoMediaRefs: { reference: [] },
+          videoDraftBinding: {
+            ...(props.restoreExisting ? { restoreExisting: true } : {}),
+            onParamsChange: vi.fn(),
+          },
+        }),
+      ),
+    );
+  });
+  await act(async () => { await Promise.resolve(); });
+}
+
+/** 打开「模型与质量」配置面板（底部状态栏 SlidersHorizontal 配置按钮，含比例文案定位）。 */
+async function openSampleConfig() {
+  const configBtn = [...mountNode.querySelectorAll('button')].find((button) =>
+    button.textContent?.includes('16:9'),
+  );
+  expect(configBtn).toBeTruthy();
+  await act(async () => { configBtn?.click(); });
+  expect(mountNode.textContent).toContain('模型与质量');
+}
+
+function sampleSwitch(): HTMLButtonElement | null {
+  return mountNode.querySelector<HTMLButtonElement>('[data-testid="sample-mode-switch"]');
+}
+
+/** 当前生效清晰度按钮（configRow 第二个 selectBtn）与文案。 */
+function sizeButton(): HTMLButtonElement | undefined {
+  return [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectBtn}`)][1];
+}
+
+/** 正文输入走 PromptRefEditor 测试接缝（jsdom 无法驱动 contentEditable）。 */
+async function typePrompt(text: string) {
+  await typePromptRefText(mountNode, text);
+}
+
+function sendButton(): HTMLButtonElement {
+  return mountNode.querySelector<HTMLButtonElement>('[data-testid="video-send"]')!;
+}
+
+describe('BottomDialog 样片模式开关（IKIZQB）', () => {
+  it('能力位未放行（features.sample_mode 缺省）→ 开关完全不渲染', async () => {
+    fetchGenerationModels.mockResolvedValue([seedance, kling]);
+    await renderSampleDialog();
+    await openSampleConfig();
+    expect(sampleSwitch()).toBeNull();
+    expect(mountNode.textContent).not.toContain('样片模式');
+  });
+
+  it('放行模型默认关闭；开启锁 480p 并禁清晰度切换，关闭恢复原普通分辨率', async () => {
+    fetchGenerationModels.mockResolvedValue([seedance25, kling]);
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' })));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderSampleDialog({ projectId: 'p1' });
+    await openSampleConfig();
+
+    const sw = sampleSwitch();
+    expect(sw).toBeTruthy();
+    expect(sw!.getAttribute('aria-checked')).toBe('false');
+    // 默认档 1080p、清晰度可选
+    expect(sizeButton()!.textContent).toContain('1080p');
+    expect(sizeButton()!.disabled).toBe(false);
+
+    // 开启：锁 480p + 禁切换 + 条款说明 + 报价请求按样片规格（sample_mode + 480p）
+    await act(async () => { sw!.click(); });
+    expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('true');
+    expect(sizeButton()!.textContent).toContain('480p');
+    expect(sizeButton()!.disabled).toBe(true);
+    expect(mountNode.textContent).toContain('成片另行计费');
+    await vi.waitFor(() =>
+      expect(fetchMock.mock.calls.some(([ , req]) =>
+        (JSON.parse((req as RequestInit).body as string)).parameters?.sample_mode === true)).toBe(true));
+    const sampleReq = fetchMock.mock.calls
+      .map(([ , req]) => JSON.parse((req as RequestInit).body as string))
+      .find((body) => body.parameters?.sample_mode === true)!;
+    expect(sampleReq.parameters).toMatchObject({ sample_mode: true, resolution: '480p' });
+    expect(sampleReq.type).toBe('video');
+
+    // 关闭：恢复开启前的普通档位（1080p = 模型默认），清晰度重新可选
+    await act(async () => { sampleSwitch()!.click(); });
+    expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('false');
+    expect(sizeButton()!.textContent).toContain('1080p');
+    expect(sizeButton()!.disabled).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('切换模型即关闭；再选回放行模型也不自动开启（父规格用户故事 3）', async () => {
+    fetchGenerationModels.mockResolvedValue([seedance25, kling]);
+    await renderSampleDialog();
+    await openSampleConfig();
+
+    await act(async () => { sampleSwitch()!.click(); });
+    expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('true');
+
+    // 切到未放行模型：开关消失（模型下拉第一项 Kling）
+    const modelBtn = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectBtn}`)][0]!;
+    await act(async () => { modelBtn.click(); });
+    const klingOption = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectDropdown} button`)]
+      .find((b) => b.textContent?.includes('Kling'))!;
+    await act(async () => { klingOption.click(); });
+    expect(sampleSwitch()).toBeNull();
+
+    // 切回放行模型：开关回来但保持关闭
+    await act(async () => { modelBtn.click(); });
+    const backOption = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectDropdown} button`)]
+      .find((b) => b.textContent?.includes('Seedance 2.5'))!;
+    await act(async () => { backOption.click(); });
+    expect(sampleSwitch()).toBeTruthy();
+    expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('四种现有模式共用同一开关：切模式不关闭（父规格用户故事 5）', async () => {
+    fetchGenerationModels.mockResolvedValue([seedance25]);
+    await renderSampleDialog();
+    await openSampleConfig();
+    await act(async () => { sampleSwitch()!.click(); });
+
+    // 底部模式选择器依次切：全能参考 → 首尾帧 → 图生视频 → 文生视频
+    for (const label of ['全能参考', '首尾帧', '图生视频', '文生视频']) {
+      const modeBtn = [...mountNode.querySelectorAll('button')]
+        .find((b) => ['文生视频', '全能参考', '首尾帧', '图生视频'].includes(b.textContent ?? ''));
+      await act(async () => { modeBtn!.click(); });
+      const option = [...mountNode.querySelectorAll('button')].find((b) => b.textContent === label);
+      await act(async () => { option!.click(); });
+      expect(sampleSwitch()?.getAttribute('aria-checked')).toBe('true');
+    }
+  });
+
+  it('草稿/样片卡恢复（initialParams.sampleMode）→ 默认开启且分辨率锁 480p', async () => {
+    fetchGenerationModels.mockResolvedValue([seedance25]);
+    await renderSampleDialog({
+      initialParams: { modelId: 'seedance-25', resolution: '720p', aspectRatio: '16:9', sampleMode: true },
+      restoreExisting: true,
+    });
+    await openSampleConfig();
+    expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('true');
+    expect(sizeButton()!.textContent).toContain('480p');
+    expect(sizeButton()!.disabled).toBe(true);
+  });
+
+  it('样片无有效报价（credits null）→ 禁止提交并提示确认中（不按未知金额提交）', async () => {
+    fetchGenerationModels.mockResolvedValue([seedance25]);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+      Promise.resolve(quoteResponse({ credits: null, quote_revision: null }))));
+    await renderSampleDialog({ projectId: 'p1' });
+    await openSampleConfig();
+    await act(async () => { sampleSwitch()!.click(); });
+    await typePrompt('样片内容');
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(true));
+    expect(mountNode.textContent).toContain('样片价格确认中');
+    vi.unstubAllGlobals();
+  });
+
+  it('报价就绪 → 可发送，onSend 携带 480p 与提交确认两字段（expectedCredits/quoteRevision）', async () => {
+    fetchGenerationModels.mockResolvedValue([seedance25]);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+      Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' }))));
+    const onSend = vi.fn();
+    await renderSampleDialog({ projectId: 'p1', onSend });
+    await openSampleConfig();
+    await act(async () => { sampleSwitch()!.click(); });
+    await typePrompt('样片内容');
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    await act(async () => { sendButton().click(); });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    const [, opts] = onSend.mock.calls[0]! as [string, Record<string, unknown>];
+    expect(opts.sampleMode).toBe(true);
+    expect(opts.resolution).toBe('480p');
+    expect(opts.expectedCredits).toBe(60);
+    expect(opts.quoteRevision).toBe('rev-1');
+    vi.unstubAllGlobals();
+  });
+
+  it('报价刷新期间（参数变化后新报价未落地）→ 禁止以旧金额提交', async () => {
+    fetchGenerationModels.mockResolvedValue([seedance25]);
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' })));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderSampleDialog({ projectId: 'p1' });
+    await openSampleConfig();
+    await act(async () => { sampleSwitch()!.click(); });
+    await typePrompt('样片内容');
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+
+    // 目录/规格变化（时长变化改变定价输入）：新报价挂起未落地 → 旧金额不可再提交
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    const slider = mountNode.querySelector<HTMLInputElement>('input[type="range"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(slider, '8');
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(sendButton().disabled).toBe(true);
+    expect(mountNode.textContent).toContain('样片价格确认中');
+    vi.unstubAllGlobals();
   });
 });

@@ -20,6 +20,7 @@ import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
 import type { AudioVideoMuxCreate } from '@lib/contracts/audio-video-mux';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
+import type { StageQuoteView, SampleRegenerateRequest, VideoFinalizeCreateRequest } from '@lib/contracts/video-sample-mode';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
 import type {
@@ -35,8 +36,10 @@ export type GenerationJobType = 'image' | 'video' | 'audio';
  *  音频截取任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83 / IKHB7A）。 */
 export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim' | 'audio_mix' | 'audio_video_mux' | 'video_frame_interpolation';
 
-/** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
-export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
+/** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态；
+ *  checking = 提交结果不明时的锁定态（契约 JOB_STATUS_CHECKING，IKIZQ5/QD）——不重提、不自动退款，
+ *  轮询继续等核对定夺（明确成功恢复原任务 / 明确失败释放预扣）。 */
+export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled' | 'checking';
 
 /** 任务产物 */
 export interface JobAsset {
@@ -107,6 +110,9 @@ export interface VideoJobParameters {
    *  仅当模型能力位 features.audio 为 true 时前端才提供该选择；
    *  契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md */
   generate_audio?: boolean;
+  /** IKIZQB：样片模式（契约 video-sample-mode.ts §1——仅参数增量）。true 时 resolution
+   *  锁 480p、单输出，配套请求顶层携带 expected_credits + quote_revision（提交确认）。 */
+  sample_mode?: true;
 }
 
 /** 音频生成参数 */
@@ -143,6 +149,10 @@ export interface CreateJobPayload {
   references?: GenerationRefItem[];
   /** 生成目标画布节点 id（仅 image/video，IKDLQF/IKDLQG）：携带时服务端按最新画布推导连线文本附件并冻结进任务快照 */
   target_node_id?: string;
+  /** IKIZQB：样片提交确认两字段（契约 confirmedSubmitFieldsSchema，parameters.sample_mode=true
+   *  时必带）。取报价响应原样：服务端按同一规则复算，价格变化先刷新可见报价再由用户点击。 */
+  expected_credits?: number;
+  quote_revision?: string;
 }
 
 /** 生成任务参考项（图/视频/音频 references 契约） */
@@ -282,6 +292,20 @@ export interface JobDetail {
   result?: JobSceneSplitResult | null;
   /** 文本输入签名投影（IKFM3S）：succeeded 时前端回写目标节点 usedInputSignature；无则 null */
   text_input_signature?: string | null;
+  /** IKIZQB：两阶段视频投影增量（契约 videoStageJobProjectionSchema）。旧任务/普通视频
+   *  缺省按普通视频处理（video_stage=video、来源与截止 null）。 */
+  video_stage?: 'video' | 'sample' | 'final';
+  /** 成片任务指向来源样片任务（仅 final 阶段非 null；IKIZQ8/QH 投影）。 */
+  source_sample_job_id?: string | null;
+  /** 样片任务指向其唯一成片任务（仅 sample 阶段可非 null；IKIZQ8/QH 投影）。 */
+  final_job_id?: string | null;
+  /** 样片的实际转成片截止时间（RFC3339）；null = 缺可信上游 created_at（禁用成片，样片保留）。 */
+  finalize_deadline_at?: string | null;
+  /** 阶段费用状态（契约 chargeStateSchema，按阶段独立）：held 已预扣 / settled 已按真实用量结算 /
+   *  released 该阶段失败预扣已释放；旧任务/普通视频为 null。 */
+  charge_state?: 'held' | 'settled' | 'released' | null;
+  /** 按真实用量结算的实际积分（settled 后非 null）；旧任务/普通视频为 null。 */
+  actual_credits?: number | null;
   error?: JobError | null;
 }
 
@@ -296,6 +320,14 @@ export interface JobRecord {
   output_assets: JobAsset[];
   error?: JobError | null;
   canvas_card_state?: 'pending' | 'present' | 'removed';
+  /** IKIZQB：两阶段视频投影增量（同 JobDetail；列表投影契约同一 schema，IKIZQ8/QH 补齐
+   *  来源/费用字段——历史页据此显示阶段、来源与各阶段费用）。 */
+  video_stage?: 'video' | 'sample' | 'final';
+  source_sample_job_id?: string | null;
+  final_job_id?: string | null;
+  finalize_deadline_at?: string | null;
+  charge_state?: 'held' | 'settled' | 'released' | null;
+  actual_credits?: number | null;
 }
 
 /** GET /api/jobs 返回 */
@@ -787,6 +819,95 @@ export function retryGenerationJob(
     {
       method: 'POST',
       headers: { 'Idempotency-Key': idempotencyKey },
+    },
+  );
+}
+
+/** 成片报价视图：契约 StageQuoteView（jobs 模块内联重导出，避免调用方多引一个报价模块）。 */
+export type VideoFinalizeQuote = StageQuoteView;
+
+/** POST /api/projects/:projectId/generation-jobs/:jobId/finalize/quote（IKIZQC）。
+ *  只读、fail open：样片身份/成功/转存/截止/唯一尝试任一不满足或算不出价 → 空报价
+ *  双 null（前端据此禁用成片按钮——「无报价不提交」）。`jobId` 是本仓样片任务 ID，
+ *  请求体恒为空对象（契约 videoFinalizeQuoteRequestSchema）。 */
+export function quoteVideoFinalize(
+  projectId: string,
+  jobId: string | number,
+  init?: { silent?: boolean },
+): Promise<VideoFinalizeQuote> {
+  return apiRequest<VideoFinalizeQuote>(
+    `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${encodeURIComponent(String(jobId))}/finalize/quote`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+      ...silentInit(init),
+    },
+  );
+}
+
+/** POST /api/projects/:projectId/generation-jobs/:jobId/finalize（IKIZQC）。
+ *  成片提交：请求体仅报价确认两字段（契约 videoFinalizeCreateRequestSchema——浏览器不
+ *  重放上游输入，服务端从样片冻结输入派生 1080p 任务）。`idempotencyKey` 口径同
+ *  {@link createGenerationJob}：一次用户意图一把，响应丢失原样重发复用同键由服务端重放，
+ *  双击/两页并发由来源唯一约束兜底（1057 至多一条成片任务与一笔预扣）。错误码：
+ *  1056 变价重报价、1057 已有成片尝试、1058 过期或缺可信截止、1014 核对中拒再提交。 */
+export function finalizeVideoJob(
+  projectId: string,
+  jobId: string | number,
+  payload: VideoFinalizeCreateRequest,
+  idempotencyKey: string,
+  init?: { silent?: boolean },
+): Promise<JobCreatedData> {
+  return apiRequest<JobCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${encodeURIComponent(String(jobId))}/finalize`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(payload),
+      ...silentInit(init),
+    },
+  );
+}
+
+/** POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample/quote（IKIZQF）。
+ *  重新生成样片报价（只读、fail open）：非样片任务 / 模型停用或未放行 / 算不出价 → 空报价
+ *  双 null（前端据此禁用重新生成按钮——无报价不提交）。过期与成片失败**不影响**报价。
+ *  `jobId` 是本仓原样片任务 ID；请求体恒为空对象（契约 §5，输入由服务端从冻结输入派生）。 */
+export function quoteSampleRegenerate(
+  projectId: string,
+  jobId: string | number,
+  init?: { silent?: boolean },
+): Promise<VideoFinalizeQuote> {
+  return apiRequest<VideoFinalizeQuote>(
+    `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${encodeURIComponent(String(jobId))}/regenerate-sample/quote`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+      ...silentInit(init),
+    },
+  );
+}
+
+/** POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample（IKIZQF）。
+ *  重新生成样片提交：从原样片**冻结输入**派生创建请求走创建管线，新建任务与结果卡
+ *  （不继承旧报价、旧截止或 Draft ID）。请求体仅报价确认两字段（契约
+ *  sampleRegenerateRequestSchema——浏览器不重传输入）。`idempotencyKey` 口径同
+ *  {@link createGenerationJob}：一次用户意图一把，报价变动即换新意图换新键（同键异载荷
+ *  服务端判幂等冲突 100409）。错误码：1056 变价重报价、1014 核对中拒再提交。 */
+export function regenerateSampleJob(
+  projectId: string,
+  jobId: string | number,
+  payload: SampleRegenerateRequest,
+  idempotencyKey: string,
+  init?: { silent?: boolean },
+): Promise<JobCreatedData> {
+  return apiRequest<JobCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${encodeURIComponent(String(jobId))}/regenerate-sample`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }

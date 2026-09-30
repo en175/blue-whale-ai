@@ -5,7 +5,7 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown } from 'lucide-react';
+import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown, Clock, Film } from 'lucide-react';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
 import { isAudioTrimNodeId } from '../../audioTrim';
@@ -65,6 +65,23 @@ const durationLabel = (duration?: number) =>
 /** 正在等首帧 seeked 的 video，避免 loadedmetadata / loadeddata / effect 叠监听 */
 const pendingFirstFrameSeek = new WeakSet<HTMLVideoElement>();
 
+/** IKJ7UI：样片截止时间显示（本地时区，分钟精度，MM-DD HH:mm 对齐 v3 原型角标口径）；
+ *  无效/缺失返回空串（角标按「已过期」降级，见 ADR-0119「缺可信截止视同过期」）。 */
+function sampleDeadlineLabel(at?: string | null): string {
+  if (!at) return '';
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** IKIZQB：样片转成片是否已过期（按实际截止时间；无效时间不判过期）。 */
+export function sampleDeadlineExpired(at?: string | null): boolean {
+  if (!at) return false;
+  const d = new Date(at);
+  return !Number.isNaN(d.getTime()) && Date.now() > d.getTime();
+}
+
 /** 生成 MP4 常把 moov 放在文件尾，preload=metadata 只拿到时长，画面停在黑底。
  *  暂停时微调 currentTime 逼解码器吐出一帧；解码完成（seeked）再回调回填宽高。 */
 function paintVideoFirstFrame(
@@ -96,8 +113,10 @@ function paintVideoFirstFrame(
   }
 }
 
-/** 生成状态（IKDMQQ 起含 draft）：draft 待生成草稿；generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
-export type MediaGenStatus = 'draft' | 'generating' | 'failed' | 'cancelled';
+/** 生成状态（IKDMQQ 起含 draft；IKIZQE 增 checking）：draft 待生成草稿；generating 进度
+ *  展示；checking 提交结果不明核对锁定（IKIZQD——不重发不退款，等轮询定夺）；
+ *  failed/cancelled 错误展示；无值为普通媒体 */
+export type MediaGenStatus = 'draft' | 'generating' | 'checking' | 'failed' | 'cancelled';
 
 /** <video> 双源列表项：type 带 codecs 时浏览器才能精确判定解码能力 */
 export interface VideoSourceOption {
@@ -147,6 +166,42 @@ export interface MediaNodeData {
   draftModelId?: string;
   draftSize?: string;
   draftRatio?: string;
+  /** IKIZQB：视频阶段身份（契约 videoStageSchema 投影）。sample = 样片卡（成功态在视频
+   *  画面内右上角挂「样片 480P · 截止 MM-DD HH:mm」角标，过期/缺截止转警告橙——IKJ7UI
+   *  迁入画面内）；final = 成片卡（IKIZQE——100% 普通视频卡体验，仅画面内「成片 1080P」
+   *  角标）。 */
+  videoStage?: 'sample' | 'final';
+  /** 样片的实际转成片截止时间（RFC3339，服务端 finalize_deadline_at 投影回填）；
+   *  null = 缺可信上游 created_at（禁用成片，样片仍保留）。过期只改警告色，不删除样片。 */
+  finalizeDeadlineAt?: string | null;
+  /** IKIZQE：成片卡来源关系——指向来源样片任务 ID（建卡时本地写入，成功终态按服务端
+   *  source_sample_job_id 投影回填为权威）。样片卡据此找到自己的成片卡（两卡关系）。 */
+  sourceSampleJobId?: string;
+  /** IKIZQE：阶段费用状态（契约 chargeStateSchema 投影回填）——settled 配 actualCredits
+   *  在角标注明已用积分；released 在失败卡注明预扣已退回。 */
+  chargeState?: 'held' | 'settled' | 'released';
+  actualCredits?: number | null;
+  /** IKIZQE：样片卡标题行成片按钮（唯一链式入口）的渲染期派生状态——CanvasPage 注入，
+   *  不持久化。phase：ready 可提交（credits 为成片预计积分）；loading 报价中；running
+   *  成片生成中（占位卡受理前后同态）；checking 状态核对中（禁止再次点击）；expired
+   *  过期/缺可信截止（IKJ7UI：整钮不渲染，过期信息由画面内角标表达）；unavailable
+   *  无报价或已有成片尝试。 */
+  finalizeCta?: {
+    phase: 'ready' | 'loading' | 'running' | 'checking' | 'expired' | 'unavailable';
+    credits?: number;
+  };
+  /** IKIZQE：样片卡标题行「生成 1080P 成片」点击派发（CanvasPage 承接提交链路） */
+  onFinalizeSample?: (id: string) => void;
+  /** IKIZQG：重新生成样片入口（成片失败卡失败区，IKJ7UI 起改形为同款「重试」按钮；
+   *  过期样片卡标题行入口已随 ADR-0119 移除）的渲染期派生状态——CanvasPage 注入，
+   *  不持久化。phase：ready 可提交（credits 为新样片预计积分）；loading 报价中；
+   *  checking 上次提交结果不明核对中（禁止再次点击）；unavailable 无报价。 */
+  regenerateCta?: {
+    phase: 'ready' | 'loading' | 'checking' | 'unavailable';
+    credits?: number;
+  };
+  /** IKIZQG：「重新生成样片」点击派发（CanvasPage 承接报价门控提交链路，新建卡不覆盖旧结果） */
+  onRegenerateSample?: (id: string) => void;
   /** 高清身份标记（IKGM9F）：本卡由「高清放大」入口创建；「重新编辑」据此分流高清面板（IKGM9O） */
   imageEnhance?: ImageEnhanceIdentity;
   /** 视频 HD 高清身份标记（IKH3VG）：本卡由视频卡工具条「HD」入口创建；点卡与「重新编辑」
@@ -486,7 +541,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
    *  不按 isFirst 隐藏——首卡与其余卡同口径，否则草稿当画布第一张时无法被图片素材连入。 */
   const showTargetHandle = !isEmptyShell && isGenHost;
   const blockNodeMenu =
-    isEmptyShell || data.genStatus === 'generating';
+    isEmptyShell || data.genStatus === 'generating' || data.genStatus === 'checking';
 
   /** 右键菜单：空壳 / 生成中不弹；草稿可弹（仅创建副本 / 删除） */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -930,6 +985,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     updateNodeInternals(id);
   }, [updateNodeInternals, id, showTargetHandle, showSourceHandle]);
   const isGenerating = data.genStatus === 'generating';
+  const isChecking = data.genStatus === 'checking';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
   /** IKDMQU Q5：有旧素材（有效 http 素材 src）的生成中卡片继续显示素材，仅叠加状态角标；
    *  blob 预览（上传中/占位 fixture）不算旧素材，走占位 genBox */
@@ -1032,12 +1088,26 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         </div>
       );
     }
+    if (isChecking) {
+      /* IKIZQD/IKIZQE：提交结果不明核对锁定——任务已发往上游但结果未知，不重发、不退款，
+         轮询等核对定夺（明确成功恢复原任务/明确失败释放预扣）；期间禁止再次提交 */
+      return (
+        <div className={styles.genBox} data-testid="job-checking-box">
+          <div className={`${styles.genSpinner} ${styles.checkingSpinner}`} />
+          <span className={styles.checkingText}>状态核对中</span>
+          <span className={styles.genSub}>提交结果核对中，请勿重复提交</span>
+        </div>
+      );
+    }
     if (isGenDone) {
-      /* 失败/已取消：错误提示 + 重试（重试钮按身份分流：媒体提取卡带 mediaExtract 身份
+      /* 失败/已取消：错误提示 + 退费说明 + 重试（重试钮按身份分流：媒体提取卡带 mediaExtract 身份
           才可重试——IKH28X 编辑态发送的失败卡原参数重发；截取卡带 audioTrim 身份才可
           重试——IKHB7A lastInput 原参数重发；插帧卡带冻结源素材才可重试——IKHLKX 原 fps
-          重发创建接口；存量无身份失败卡不渲染） */
+          重发创建接口；存量无身份失败卡不渲染。IKIZQE：成片失败卡不提供同 Draft ID 重试
+          ——首版关闭（契约 FINALIZE_SOURCE_UNIQUE_KEY 语义）；IKJ7UI：其续作入口改形为
+          与普通失败卡同款的「重试」按钮（见下方失败区分支，行为仍为新建样片卡）。） */
       const canRetry = data.genStatus === 'failed'
+        && data.videoStage !== 'final'
         && (!isMediaExtraction || data.mediaExtract != null)
         && (!isAudioTrimCard || data.audioTrim != null)
         && (!isAudioMixCard || data.jobId != null)
@@ -1045,11 +1115,45 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       return (
         <div className={styles.genBox}>
           <span className={styles.genFailText}>{failHeadline}</span>
+          {data.chargeState === 'released' && (
+            <span className={styles.genSub} data-testid="charge-refund-note">本次未消耗积分，预扣已退回</span>
+          )}
           {canRetry && (
             <button className={styles.genBtn} onClick={() => data.onRetryJob?.(id)}>
               重试
             </button>
           )}
+          {/* IKJ7UI（ADR-0119）：成片失败卡的续作路径——与普通失败卡完全同形的「重试」
+              （不带积分文字，报价经悬停提示传达），但行为不是重发成片——同一张样片不可
+              再次发起成片（契约 FINALIZE_SOURCE_UNIQUE_KEY 语义，金标 G08），而是按原输入
+              新建样片卡（父规格用户故事 21，IKIZQG 链路）；点击在入口卡邻近新建样片卡，
+              本失败卡与费用状态保留，样片完成后再单独发起成片（另行计费）。 */}
+          {data.videoStage === 'final' && data.regenerateCta && (() => {
+            const cta = data.regenerateCta;
+            const disabled = cta.phase !== 'ready';
+            return (
+              <button
+                type="button"
+                className={styles.genBtn}
+                data-testid="regenerate-cta"
+                disabled={disabled}
+                title={cta.phase === 'ready'
+                  ? `按原输入新建 480P 样片，预计消耗 ${cta.credits} 积分；样片完成后再单独发起成片（另行计费）`
+                  : cta.phase === 'loading'
+                    ? '正在获取样片报价'
+                    : cta.phase === 'checking'
+                      ? '上次提交结果不明，正在核对，请勿重复提交'
+                      : '暂不能重新生成样片（无报价）'}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (disabled) return;
+                  data.onRegenerateSample?.(id);
+                }}
+              >
+                重试
+              </button>
+            );
+          })()}
         </div>
       );
     }
@@ -1126,7 +1230,50 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             </span>
           ) : null}
         </div>
+        {/* IKJ7UI：样片/成片身份角标已迁入视频画面内右上角（ADR-0119 定稿，v3 原型深色
+            玻璃胶囊），标题行不再挂卡外徽标；「已用 N 积分」不进角标（历史记录与详情已有）。 */}
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
+        {/* IKIZQE：样片卡标题行「生成 1080P 成片」——两阶段链式动作唯一入口（父规格「交互」）。
+            点击前展示成片预计积分，点击直接提交无二次确认；提交中/生成中/核对中/无报价均禁用。
+            IKJ7UI：expired（过期/缺可信截止）整钮不渲染——死按钮没有行动价值，过期信息由画面内
+            角标表达，恢复靠点卡重新编辑后从面板重发。由 CanvasPage 渲染期注入 finalizeCta
+            派生状态（不持久化）。 */}
+        {data.finalizeCta && data.finalizeCta.phase !== 'expired' && (() => {
+          const cta = data.finalizeCta;
+          const disabled = cta.phase !== 'ready';
+          const label = cta.phase === 'running'
+            ? '成片生成中…'
+            : cta.phase === 'checking'
+              ? '状态核对中…'
+              : typeof cta.credits === 'number'
+                ? `生成 1080P 成片 · ${cta.credits} 积分`
+                : '生成 1080P 成片';
+          const title = cta.phase === 'ready'
+            ? `生成 1080P 成片，预计消耗 ${cta.credits} 积分（成片另行计费）`
+            : cta.phase === 'loading'
+              ? '正在获取成片报价'
+              : cta.phase === 'running'
+                ? '成片生成中'
+                : cta.phase === 'checking'
+                  ? '上次提交结果不明，正在核对，请勿重复提交'
+                  : '暂不能生成成片（无报价或已有成片任务）';
+          return (
+            <button
+              type="button"
+              className={`nodrag nopan ${styles.finalizeCta}`}
+              data-testid="finalize-cta"
+              disabled={disabled}
+              title={title}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (disabled) return;
+                data.onFinalizeSample?.(id);
+              }}
+            >
+              {label}
+            </button>
+          );
+        })()}
       </div>
       {/* 「输入已更新」徽标：点击在下方弹出操作，默认「更新生成」原位重跑最新输入。
           放标题行外层避免 titleRow overflow 裁剪。 */}
@@ -1219,7 +1366,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               }}
             />
           </button>
-        ) : isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
+        ) : isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) || (isChecking && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
           <AudioPlayer
@@ -1318,6 +1465,43 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             {data.transparentOutput === true && (
               <span className={styles.transparentTag} data-testid="video-transparent-tag">
                 透明背景 · WEBM
+              </span>
+            )}
+            {/* IKJ7UI（ADR-0119）：样片/成片身份角标迁入画面内右上角（v3 原型深色玻璃胶囊
+                定稿）。仅成功态渲染（genStatus == null 且非 draft，口径同 CanvasPage 的
+                finalizeCtaByNodeId 派生门）——生成中靠自动命名「样片生成中」识别、失败卡
+                不挂角标；「已用 N 积分」不进角标（历史记录与详情已有）。样片角标成功态
+                「样片 480P · 截止 MM-DD HH:mm」（信息蓝点缀），过期/缺可信截止整条转警告橙
+                「样片 480P · 已过期」（缺截止视同过期，ADR-0119 不新增第三态）；成片角标
+                「成片 1080P」紫色文字点缀。位置/配色以 v3 原型 CSS 为准，pointer-events:none
+                同 transparentTag 先例——点击/播放操作仍落到视频本体。 */}
+            {data.videoStage === 'sample' && data.genStatus == null && data.draft !== true && (() => {
+              const label = sampleDeadlineLabel(data.finalizeDeadlineAt);
+              const expired = !label || sampleDeadlineExpired(data.finalizeDeadlineAt);
+              return (
+                <span
+                  className={expired ? `${styles.stageTag} ${styles.stageTagExpired}` : styles.stageTag}
+                  data-testid="video-sample-badge"
+                  title={expired
+                    ? (data.finalizeDeadlineAt == null
+                      ? '样片缺少可信创建时间，无法生成成片；样片仍可预览、下载'
+                      : '转成片期限已过，样片仍可预览、下载')
+                    : `转成片截止 ${label}；成片另行计费`}
+                >
+                  <Clock size={11} strokeWidth={2} aria-hidden />
+                  {expired ? '样片 480P' : <span className={styles.stageTagAcc}>样片 480P</span>}
+                  <span className={styles.stageTagDim}>{expired ? '· 已过期' : `· 截止 ${label}`}</span>
+                </span>
+              );
+            })()}
+            {data.videoStage === 'final' && data.genStatus == null && data.draft !== true && (
+              <span
+                className={`${styles.stageTag} ${styles.stageTagFinal}`}
+                data-testid="video-final-badge"
+                title="从样片生成的 1080P 成片"
+              >
+                <Film size={11} strokeWidth={2} aria-hidden />
+                成片 1080P
               </span>
             )}
             {/* 去字幕编辑态框层（IKGZ83）：半透明矩形描边渲染 + 拉框指针接管，

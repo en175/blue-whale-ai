@@ -563,3 +563,242 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
     expect(map.get("3")).toMatchObject({ prompt: null });
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// IKIZQ8：两阶段视频的阶段投影（契约 videoStageJobProjectionSchema，金标 G11/G12）。
+// 样片行投影阶段/来源/截止/费用；缺列旧行按普通视频兜底（video=video、其余 null）。
+// ═══════════════════════════════════════════════════════════════
+describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
+  it("★ G11：样片任务详情投影 video_stage/截止/费用，截止折 RFC3339（金标 G06 值）", async () => {
+    // upstream created_at=2026-09-29T02:00:00Z（金标 G06 输入）→ deadline=2026-10-06T01:00:00Z。
+    const finalizeDeadlineMs = 1790647200000 + 7 * 24 * 3600 * 1000 - 3600 * 1000;
+    const prisma = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 302n,
+          project_id: 7n,
+          type: "video",
+          status: "succeeded",
+          progress: 100,
+          input: null,
+          output_asset_ids: [],
+          error: null,
+          video_stage: "sample",
+          source_sample_job_id: null,
+          final_job_id: 305n,
+          upstream_created_at_ms: 1790647200000n,
+          finalize_deadline_ms: BigInt(finalizeDeadlineMs),
+          charge_state: "settled",
+          actual_credits: 4,
+        }),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never;
+
+    const view = await createJobRepo(prisma).findByIdForUser("302", "9");
+
+    expect(view?.video_stage).toBe("sample");
+    expect(view?.source_sample_job_id).toBeNull();
+    expect(view?.final_job_id).toBe("305");
+    expect(view?.finalize_deadline_at).toBe("2026-10-06T01:00:00.000Z");
+    expect(view?.charge_state).toBe("settled");
+    expect(view?.actual_credits).toBe(4);
+  });
+
+  it("★ G12：旧任务缺阶段列 → video_stage 兜底 video、来源/截止/费用全 null", async () => {
+    const prisma = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 5n,
+          project_id: 7n,
+          type: "video",
+          status: "succeeded",
+          progress: 100,
+          input: null,
+          output_asset_ids: [],
+          error: null,
+        }),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never;
+
+    const view = await createJobRepo(prisma).findByIdForUser("5", "9");
+
+    expect(view?.video_stage).toBe("video");
+    expect(view?.source_sample_job_id).toBeNull();
+    expect(view?.final_job_id).toBeNull();
+    expect(view?.finalize_deadline_at).toBeNull();
+    expect(view?.charge_state).toBeNull();
+    expect(view?.actual_credits).toBeNull();
+  });
+
+  it("列表投影同样携带阶段字段（缺可信时间的样片 deadline=null，禁成片不禁交付）", async () => {
+    const prisma = {
+      generation_jobs: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 303n,
+            type: "video",
+            status: "succeeded",
+            progress: 100,
+            input: null,
+            output_asset_ids: [],
+            gmt_create: new Date("2026-09-29T00:00:00Z"),
+            error: null,
+            video_stage: "sample",
+            source_sample_job_id: null,
+            final_job_id: null,
+            upstream_created_at_ms: null,
+            finalize_deadline_ms: null,
+            charge_state: "held",
+            actual_credits: null,
+          },
+        ]),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never;
+
+    const page = await createJobRepo(prisma).listByUser("9", { page: 1, size: 10 });
+
+    expect(page.records[0]?.video_stage).toBe("sample");
+    expect(page.records[0]?.finalize_deadline_at).toBeNull();
+    expect(page.records[0]?.charge_state).toBe("held");
+  });
+});
+
+describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
+  it("双向来源链路后半段：借样片资产的 final_job_id 查成片任务详情，拿到 source 指回 + 成片资产", async () => {
+    const prisma = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 305n,
+          project_id: 7n,
+          type: "video",
+          status: "succeeded",
+          progress: 100,
+          input: null,
+          output_asset_ids: [88],
+          error: null,
+          video_stage: "final",
+          source_sample_job_id: 302n,
+          final_job_id: null,
+          charge_state: "settled",
+          actual_credits: 20,
+        }),
+      },
+      assets: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 88n, url: "https://tos.test/88.mp4", type: "video", width: 1920, height: 1080 },
+        ]),
+      },
+    } as never;
+
+    const view = await createJobRepo(prisma).findByIdForUser("305", "9");
+
+    expect(view?.video_stage).toBe("final");
+    expect(view?.source_sample_job_id).toBe("302");
+    expect(view?.output_assets[0]).toMatchObject({ id: "88", type: "video" });
+  });
+
+  it("失败任务留历史不进成功资产：详情带阶段投影与原始错误，不查产出 assets", async () => {
+    const assetsFindMany = vi.fn();
+    const prisma = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 306n,
+          project_id: 7n,
+          type: "video",
+          status: "failed",
+          progress: 0,
+          input: null,
+          output_asset_ids: null,
+          error: { code: "provider_upstream_error", message: "上游生成失败" },
+          video_stage: "final",
+          source_sample_job_id: 302n,
+          final_job_id: null,
+          charge_state: "released",
+          actual_credits: null,
+        }),
+      },
+      assets: { findMany: assetsFindMany },
+    } as never;
+
+    const view = await createJobRepo(prisma).findByIdForUser("306", "9");
+
+    expect(view?.status).toBe("failed");
+    expect(view?.video_stage).toBe("final");
+    expect(view?.source_sample_job_id).toBe("302");
+    expect(view?.charge_state).toBe("released");
+    expect(view?.stored_error).toMatchObject({ code: "provider_upstream_error" });
+    expect(view?.asset).toBeNull();
+    // 失败任务没有成功产出：不产生资产查询，也就不存在成功资产。
+    expect(assetsFindMany).not.toHaveBeenCalled();
+  });
+
+  it("按本人跨项目汇总：不传 projectId 时 where 不含 project_id，跨项目两行都返回且失败行保留", async () => {
+    const count = vi.fn().mockResolvedValue(2);
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: 301n,
+        project_id: 55n,
+        type: "video",
+        status: "queued",
+        progress: 0,
+        input: null,
+        output_asset_ids: [],
+        gmt_create: new Date("2026-09-29T01:00:00Z"),
+        error: null,
+        video_stage: "sample",
+        source_sample_job_id: null,
+        final_job_id: null,
+        finalize_deadline_ms: null,
+        charge_state: "held",
+        actual_credits: null,
+      },
+      {
+        id: 299n,
+        project_id: 91n,
+        type: "video",
+        status: "failed",
+        progress: 0,
+        input: null,
+        output_asset_ids: [],
+        gmt_create: new Date("2026-09-28T00:00:00Z"),
+        error: { code: "provider_upstream_error", message: "上游生成失败" },
+        // 旧任务行：无任何阶段列（受理即入历史的存量侧兼容）。
+      },
+    ]);
+    const prisma = {
+      generation_jobs: { count, findMany },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never;
+
+    const page = await createJobRepo(prisma).listByUser("9", { page: 1, size: 20 });
+
+    // 汇总查询按用户过滤，不按项目收窄（跨项目历史）。
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      user_id: 9n,
+      is_delete: false,
+    });
+    expect(page.total).toBe(2);
+    // 跨项目两行（55 / 91）都在；受理（queued）与失败行都保留；失败行带可见错误与旧数据兜底。
+    expect(page.records.map((r) => r.job_id)).toEqual(["301", "299"]);
+    expect(page.records[0]).toMatchObject({ video_stage: "sample", charge_state: "held" });
+    expect(page.records[1]).toMatchObject({ video_stage: "video", source_sample_job_id: null });
+    expect(page.records[1]?.stored_error).toMatchObject({ code: "provider_upstream_error" });
+  });
+
+  it("他人借来源 ID 读取任务被拒：详情查询强制 user_id + is_delete 过滤，不命中即 null", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const prisma = { generation_jobs: { findFirst } } as never;
+
+    // 用户 8 拿用户 9 的样片任务 ID（或经 final_job_id 拿到的成片任务 ID）查详情。
+    const view = await createJobRepo(prisma).findByIdForUser("302", "8");
+
+    expect(view).toBeNull();
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: 302n, user_id: 8n, is_delete: false },
+    });
+  });
+});

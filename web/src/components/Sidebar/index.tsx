@@ -3,7 +3,7 @@
  * ============================================ */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, FolderOpen, Image, Layout } from 'lucide-react';
+import { Home, FolderOpen, Image, History as HistoryIcon, Layout } from 'lucide-react';
 import { useAppStore } from '@/stores';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import LoginModal from '@/components/LoginModal';
@@ -13,6 +13,7 @@ const menuItems = [
   { key: 'home', label: '首页', icon: Home, path: '/' },
   { key: 'projects', label: '项目', icon: FolderOpen, path: '/projects' },
   { key: 'assets', label: '资产', icon: Image, path: '/library' },
+  { key: 'history', label: '历史', icon: HistoryIcon, path: '/history' },
   { key: 'canvas', label: '画布', icon: Layout, path: '/canvas' },
 ];
 
@@ -57,7 +58,7 @@ export default function Sidebar() {
   const isActive = (item: (typeof menuItems)[0]) => {
     return location.pathname === item.path;
   };
-  const hasGlassBackground = ['/', '/projects', '/library'].includes(location.pathname);
+  const hasGlassBackground = ['/', '/projects', '/library', '/history'].includes(location.pathname);
 
   return (
     <aside className={`${styles.sidebar} ${hasGlassBackground ? styles.onGlass : ''}`}>

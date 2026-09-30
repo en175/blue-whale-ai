@@ -283,6 +283,26 @@ public class JobStateMachineService {
         return affected == 1;
     }
 
+    /**
+     * IKIZQD：调网关前持久「提交中」标记（processing → checking，CAS）。
+     * <p>
+     * 契约 §六（JOB_STATUS_CHECKING）：标记落库后 submit / finalize 的结果不再不明——
+     * 网关明确受理由 {@link #markProviderSubmitted} 从 checking 恢复 processing；
+     * 明确拒绝（带 HTTP 状态）走 failVideoJob 从 checking 落失败并释放本阶段预扣；
+     * 超时 / 响应丢失 / 落库失败 / 失租留在 checking 锁定，不重提、不退款、交人工核对。
+     * <p>
+     * 守卫未命中（失租 / 已终态 / 已提交过）返回 false——调用方必须停止，不得发网关。
+     */
+    public boolean markSubmissionAttempt(String jobId, String workerId, long fencingToken) {
+        Long jobIdLong = Long.parseLong(jobId);
+        int affected = jobMapper.markSubmissionAttempt(jobIdLong, workerId, fencingToken);
+        if (affected != 1) {
+            log.warn("[video] markSubmissionAttempt 守卫未命中(stale/租约失效/已提交) jobId={} workerId={} token={}，停止提交",
+                    jobId, workerId, fencingToken);
+        }
+        return affected == 1;
+    }
+
     /** 仅在重试收割回退提交前续租（IKIHKH：owner+fence 定执行权，租约过期不褫夺）；
      *  无法确认执行权时禁止产生新的上游任务。 */
     public boolean reserveParentReuseSubmit(String jobId, String workerId, long fencingToken) {

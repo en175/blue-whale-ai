@@ -176,10 +176,22 @@ export {
 // repo 只负责在正确的时点调用它。
 export {
   CREATE_GENERATION_JOB_OPERATION,
+  FINALIZE_GENERATION_JOB_OPERATION,
   readCreateIdempotency,
   type CreateJobIdempotency,
   type CreateJobResult,
 } from "./generation-job-idempotency.js";
+// IKIZQC：成片（finalize）命令 repo——来源样片读取、成片任务创建（来源唯一约束裁决并发）、
+// 成片幂等重放查询。
+export {
+  createFinalizeCommandRepo,
+  createFinalizeJob,
+  findFinalizeSourceJob,
+  type CreateFinalizeJobInput,
+  type FinalizeCommandRepo,
+  type FinalizeJobResult,
+  type FinalizeSourceJob,
+} from "./generation-finalize-repo.js";
 // 建 job 的计费依赖（预扣 + 失败补偿）：装配层（handler/controller）经这里取端口类型；
 // 补偿的执行与纯数据闸只在 persistence 内部用（generation-command-repo 直接相对导入）。
 export type { JobBilling } from "./job-billing.js";

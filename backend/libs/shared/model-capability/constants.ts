@@ -119,9 +119,9 @@ function featuresFieldErr(features: unknown): string | null {
     )
       return `提示词上限(max_prompt_length)须为 1–${MAX_PROMPT_LENGTH_LIMIT} 的整数或 null`;
   }
-  // ADR-0086 布尔能力位
-  for (const key of ["video_reference", "audio_reference"] as const) {
-    const v = features[key] ?? features[key === "video_reference" ? "videoReference" : "audioReference"];
+  // ADR-0086 布尔能力位；sample_mode 为 IKIZQ7 样片放行位（同一条布尔裁定）
+  for (const key of ["video_reference", "audio_reference", "sample_mode"] as const) {
+    const v = features[key] ?? features[key === "video_reference" ? "videoReference" : key === "audio_reference" ? "audioReference" : "sampleMode"];
     if (v !== undefined && v !== null && typeof v !== "boolean")
       return `${key}须为布尔值`;
   }

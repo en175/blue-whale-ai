@@ -43,6 +43,10 @@ export interface CreateJobInput {
   sceneCardGenerationRecordId?: string;
   /** SceneCard 来源身份；用于在 job 接纳时冻结实际 Canvas 位置与尺寸。 */
   sceneCardId?: string;
+  /** IKIZQ8：两阶段视频阶段（契约 video-sample-mode.ts）。'sample' = 样片任务——
+   *  落 video_stage 列并把 charge_state 置 'held'（创建即预扣）；缺省 = 普通视频，
+   *  两列均 NULL（旧任务/普通视频投影缺省 video、费用为 null）。 */
+  videoStage?: "sample";
 }
 
 /** createJob 的**调用参数**（区别于任务本身的数据）：事务复用与计费依赖。两者都是「每次
@@ -121,6 +125,7 @@ export interface GenerationCommandRepo {
     | { kind: "material_blocked"; reason: string }
     | { kind: "not_retryable_status" }
     | { kind: "already_retried" }
+    | { kind: "finalize_retry_closed" }
     | null
   >;
   appendLog(
@@ -140,7 +145,11 @@ export interface GenerationCommandRepo {
   ): Promise<void>;
 }
 
-const SOURCE_BOTTOM_DOCK = "bottom_dock";
+export const SOURCE_BOTTOM_DOCK = "bottom_dock";
+
+/** 视频任务的 strategy_version（video 分支兜底值）——建任务/重试/成片（IKIZQC
+ *  finalize-repo）三处同源，改视频策略版本只动这一个常量。 */
+export const VIDEO_STRATEGY_VERSION = "seedance-2.0-v1";
 
 
 /** cost_reservations 的行值：只有**重试**会从原 job 的行里原样搬运一次，其余一律兜底。
@@ -230,13 +239,17 @@ export async function createJobWithinTx(
       project_action_identity: input.actionIdentity,
       strategy_version:
         input.type === "video"
-          ? "seedance-2.0-v1"
+          ? VIDEO_STRATEGY_VERSION
           : input.type === "audio"
             ? "audio-sync-v1"
             : "image-sync-v1",
       execution_deadline_at: deadline,
       next_action_at: now,
       fencing_token: 0,
+      // IKIZQ8：样片阶段身份与阶段费用初始态（held = 创建即预扣，见契约 §6）。
+      ...(input.videoStage !== undefined
+        ? { video_stage: input.videoStage, charge_state: "held" }
+        : {}),
     },
   });
   // ★ 预扣：job 行已插入（id 已拿到），但事务未提交 —— 失败整体回滚，不留垃圾 job。
@@ -391,6 +404,13 @@ export function createGenerationCommandRepo(
           },
         });
         if (!original) return null;
+        // IKIZQC（G08）：成片任务不做同输入重试——首版不复用同一 Draft ID（IKIZPO 未证实），
+        // 失败的成片行保留占位（来源唯一约束已锁住该样片的尝试），继续创作走「重新生成样片」。
+        // 不拦的话会建出 video_stage='final' 却没有 source_sample_job_id 的孤儿行（Worker
+        // 无从取得样片上游任务），且重试路径不接 Hold、终态结算会对无预留的 job 发事件。
+        if (original.video_stage === "final") {
+          return { kind: "finalize_retry_closed" } as const;
+        }
         if (
           original.status !== "failed" &&
           original.status !== "partially_succeeded"
@@ -510,13 +530,20 @@ export function createGenerationCommandRepo(
             strategy_version:
               original.strategy_version ??
               (original.type === "video"
-                ? "seedance-2.0-v1"
+                ? VIDEO_STRATEGY_VERSION
                 : original.type === "audio"
                   ? "audio-sync-v1"
                   : "image-sync-v1"),
             execution_deadline_at: deadline,
             next_action_at: now,
             fencing_token: 0,
+            // IKIZQ8：样片重试继承阶段身份（input.sample_mode 已随快照复制，Worker 行为
+            // 按样片语义执行；阶段列不继承会让投影把样片重试显示成普通视频）。
+            // charge_state 不在此置 held：重试路径本就不接 Hold（既有口径，全类型一致），
+            // 终态守卫按 video_stage 条件写 settled/released。
+            ...(original.video_stage != null
+              ? { video_stage: original.video_stage }
+              : {}),
           },
         });
         // 为重试 job 补 cost_reservations 行：原 job 有行就逐列搬运（见 costReservationCreateData），

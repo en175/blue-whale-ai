@@ -21,6 +21,10 @@ import type { CreatedJob } from "./generation-command-repo.js";
 /** 建任务的幂等域（command_idempotency.operation）。已建库里的行也写这个值，不可改。 */
 export const CREATE_GENERATION_JOB_OPERATION = "generation.create";
 
+/** IKIZQC：成片提交的幂等域。与建任务分域——同一把钥匙在两个入口各有一条幂等行，
+ *  互不重放（成片提交的载荷与结果语义都不同于建任务，跨域重放会把两个动作并成一个）。 */
+export const FINALIZE_GENERATION_JOB_OPERATION = "generation.finalize";
+
 /** 建任务的幂等凭据。两者必须一起给：只有 key 能防重复建行，只有摘要能判「同键异载荷」。 */
 export interface CreateJobIdempotency {
   key: string;
@@ -41,17 +45,19 @@ interface CreateIdempotencyWrite {
 
 /** 写幂等行。**必须与 job 行同一个事务**：要么一起在，要么一起不在——重放要拿到的是同一个
  *  job_id，行在而 job 不在就无从重放。它同时是并发同键的唯一闸：唯一索引
- *  uk_command_idempotency 只放一个事务进，输家整体回滚（预扣由调用方的补偿退掉）。 */
+ *  uk_command_idempotency 只放一个事务进，输家整体回滚（预扣由调用方的补偿退掉）。
+ *  IKIZQC：operation 参数化（成片提交走 generation.finalize 分域），缺省仍是建任务域。 */
 export async function writeCreateIdempotency(
   tx: Prisma.TransactionClient,
   write: CreateIdempotencyWrite,
   idempotency: CreateJobIdempotency | undefined,
+  operation: string = CREATE_GENERATION_JOB_OPERATION,
 ): Promise<void> {
   if (!idempotency) return;
   await tx.command_idempotency.create({
     data: {
       project_id: BigInt(write.projectId),
-      operation: CREATE_GENERATION_JOB_OPERATION,
+      operation,
       idempotency_key: idempotency.key,
       request_hash: idempotency.requestHash,
       generation_job_id: write.jobId,
@@ -65,12 +71,13 @@ export async function readCreateIdempotency(
   prisma: PrismaClient,
   projectId: string,
   idempotency: CreateJobIdempotency,
+  operation: string = CREATE_GENERATION_JOB_OPERATION,
 ): Promise<CreateJobResult | null> {
   const row = await prisma.command_idempotency.findUnique({
     where: {
       project_id_operation_idempotency_key: {
         project_id: BigInt(projectId),
-        operation: CREATE_GENERATION_JOB_OPERATION,
+        operation,
         idempotency_key: idempotency.key,
       },
     },
@@ -88,7 +95,7 @@ export async function readCreateIdempotency(
     // 不变式：这行与 job 行同事务写入，提交了就必然带着 job id（回放靠它）。
     // 真撞上说明数据被外部改过，宁可报错也不要回一个不知指向哪里的成功。
     throw new Error(
-      `幂等行缺少 generation_job_id：project=${projectId} operation=${CREATE_GENERATION_JOB_OPERATION}`,
+      `幂等行缺少 generation_job_id：project=${projectId} operation=${operation}`,
     );
   }
   return {
@@ -116,14 +123,15 @@ export async function runWithCreateIdempotency(
   projectId: string,
   idempotency: CreateJobIdempotency | undefined,
   run: () => Promise<CreateJobResult>,
+  operation: string = CREATE_GENERATION_JOB_OPERATION,
 ): Promise<CreateJobResult> {
   if (!idempotency) return run();
-  const replayed = await readCreateIdempotency(prisma, projectId, idempotency);
+  const replayed = await readCreateIdempotency(prisma, projectId, idempotency, operation);
   if (replayed) return replayed;
   try {
     return await run();
   } catch (error) {
-    const winner = await readCreateIdempotency(prisma, projectId, idempotency);
+    const winner = await readCreateIdempotency(prisma, projectId, idempotency, operation);
     if (winner) return winner;
     throw error;
   }

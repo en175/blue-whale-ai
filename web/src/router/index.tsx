@@ -8,6 +8,7 @@ import CanvasPage from '@/pages/CanvasPage';
 import Projects from '@/pages/Projects';
 import Assets from '@/pages/Assets';
 import AccountCredits from '@/pages/AccountCredits';
+import History from '@/pages/History';
 import AuthSuccess from '@/pages/AuthSuccess';
 import { adminRoutes } from '@/admin/router';
 import { RequireAuth } from '@/router/guards';
@@ -52,6 +53,10 @@ const router = createBrowserRouter([
           {
             path: 'library',
             element: <Assets />,
+          },
+          {
+            path: 'history',
+            element: <History />,
           },
         ],
       },

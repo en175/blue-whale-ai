@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import type { AssetRecord } from '@/api/assets';
+import type { JobSourceTarget } from '@/components/JobSourceModal';
 import Modal from '@/components/Modal';
 import Skeleton from '@/components/Skeleton';
 import { formatFileSize } from '@/utils/format-file-size';
@@ -19,6 +20,8 @@ interface AssetDetailModalProps {
   asset: AssetRecord | null;
   loading?: boolean;
   onClose: () => void;
+  /** IKIZQI：双向来源查看（样片 ↔ 成片）。点击后由页面打开 JobSourceModal 拉任务详情。 */
+  onOpenSource?: (target: JobSourceTarget) => void;
 }
 
 function DetailValue({ loading, children }: { loading: boolean; children: ReactNode }) {
@@ -89,7 +92,7 @@ function AssetPreview({ asset }: { asset: AssetRecord }) {
   );
 }
 
-export default function AssetDetailModal({ asset, loading = false, onClose }: AssetDetailModalProps) {
+export default function AssetDetailModal({ asset, loading = false, onClose, onOpenSource }: AssetDetailModalProps) {
   return (
     <Modal
       open={asset !== null}
@@ -116,6 +119,12 @@ export default function AssetDetailModal({ asset, loading = false, onClose }: As
               <span className={styles.typeBadge}>
                 {asset.type === 'image' ? '图片' : asset.type === 'video' ? '视频' : asset.type === 'audio' ? '音频' : '虚拟人像'}
               </span>
+              {/* IKIZQI：两阶段视频资产标注（样片/成片）；旧普通视频不渲染。 */}
+              {asset.type === 'video' && asset.video_stage && asset.video_stage !== 'video' && (
+                <span className={styles.stageBadge}>
+                  {asset.video_stage === 'sample' ? '样片 480P' : '成片 1080P'}
+                </span>
+              )}
               <button className={styles.closeButton} type="button" onClick={onClose} aria-label="关闭">
                 <X size={18} strokeWidth={2} />
               </button>
@@ -125,6 +134,42 @@ export default function AssetDetailModal({ asset, loading = false, onClose }: As
                 <dt>来源</dt>
                 <DetailValue loading={loading}>{formatAssetSource(asset.source)}</DetailValue>
               </div>
+              {/* IKIZQI：双向来源身份——样片的成片任务 / 成片的来源样片任务（契约
+                  videoStageAssetProjectionSchema；无来源链路不渲染整行）。 */}
+              {asset.type === 'video' && asset.video_stage === 'final' && asset.source_sample_job_id && (
+                <div className={styles.detailItem}>
+                  <dt>视频阶段</dt>
+                  <DetailValue loading={loading}>
+                    <span className={styles.stageText}>成片</span>
+                    {onOpenSource && (
+                      <button
+                        type="button"
+                        className={styles.sourceButton}
+                        onClick={() => onOpenSource({ jobId: asset.source_sample_job_id!, title: '来源样片任务' })}
+                      >
+                        查看来源样片
+                      </button>
+                    )}
+                  </DetailValue>
+                </div>
+              )}
+              {asset.type === 'video' && asset.video_stage === 'sample' && (
+                <div className={styles.detailItem}>
+                  <dt>视频阶段</dt>
+                  <DetailValue loading={loading}>
+                    <span className={styles.stageText}>样片</span>
+                    {asset.final_job_id && onOpenSource && (
+                      <button
+                        type="button"
+                        className={styles.sourceButton}
+                        onClick={() => onOpenSource({ jobId: asset.final_job_id!, title: '成片任务' })}
+                      >
+                        查看成片任务
+                      </button>
+                    )}
+                  </DetailValue>
+                </div>
+              )}
               <div className={styles.detailItem}>
                 <dt>创建时间</dt>
                 <DetailValue loading={loading}>{formatAssetCreatedAt(asset.created_at)}</DetailValue>
