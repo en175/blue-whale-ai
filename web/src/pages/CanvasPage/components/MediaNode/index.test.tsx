@@ -1419,6 +1419,41 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     expect(pauseSpy).not.toHaveBeenCalled();
   });
 
+  it('收养路径时长/进度兜底（IKJEHZ）：data.duration 缺失且 loadedmetadata 不重放，控件挂载即对齐实测 duration 与 currentTime，seek 可用', async () => {
+    stubHoverMedia();
+    await renderHoverableVideo(); // data 无 duration：服务端权威时长缺失的极端窗口
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(hoverPreviewVideo()).toBe(decoder);
+    // 收养前元素已播到 7.5s、实测时长 40s；真实浏览器 loadedmetadata 在悬停起播前
+    // 已派发、控件挂载后不会重放——此后也不派发，兜底只能来自挂载即读
+    Object.defineProperty(decoder, 'duration', { configurable: true, value: 40 });
+    Object.defineProperty(decoder, 'paused', { configurable: true, value: false });
+    decoder.currentTime = 7.5;
+    await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    const track = contentCard().querySelector<HTMLElement>('[data-testid="video-seek-track"]')!;
+    expect(track).toBeTruthy();
+    // 挂载即对齐：aria-valuemax 立即等于实测时长（不依赖 loadedmetadata 重放）
+    expect(track.getAttribute('aria-valuemax')).toBe('40');
+    // 进度/时间与 currentTime 一致：收养叠加瞬间直接显示实际位置，不再从 0 起跳
+    expect(track.getAttribute('aria-valuenow')).toBe('8');
+    expect(track.parentElement!.textContent).toContain('0:07 / 0:40');
+    // 挂载即对齐播放态：收养叠加瞬间视频在播（paused=false），播放钮直接显示「暂停」
+    expect(contentCard().querySelector('button[aria-label="暂停"]')).toBeTruthy();
+    // duration 兜底生效后进度轨 seek 不再静默 return：点按轨道中点 + 方向键步进
+    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 200 } as DOMRect);
+    await act(async () => {
+      track.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true, cancelable: true }));
+      document.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, bubbles: true }));
+    });
+    expect(decoder.currentTime).toBe(20);
+    await act(async () => {
+      track.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    });
+    expect(decoder.currentTime).toBe(22); // 20 + max(1, 40×5%) = 22
+  });
+
   it('收养态画面区点击切换播放/暂停，拖动整卡松开不误触（IKI5YM 审查修订）', async () => {
     const { playSpy, pauseSpy } = stubHoverMedia();
     await renderHoverableVideo();
