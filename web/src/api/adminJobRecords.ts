@@ -13,6 +13,23 @@ export interface AdminJobRecord {
   job_id: string;
   /** 归属用户（bigint 字符串，超出 JS 安全整数范围也不丢精度） */
   user_id: string;
+  /**
+   * 用户名。BFF 回我们自己的库按 `user_id` 补的——`generation_jobs` 里只有 user_id，认不出人。
+   *
+   * ⚠️ 键名是 `nickname`，界面上叫「用户名」，值都是 `bw_users.username`。
+   *    键名沿用身份查询那层（`AdminUserIdentity.nickname`）——**三个记录页共用同一份投影**。
+   *    （用户管理页走的是另一份 `AdminUserRow`，值同样是 `username`，只是投影不同；
+   *    在这里改键只会让同一个值在几个页面叫两个名字。）
+   *
+   * ⚠️ 可选（`?`）不是多余：与积分记录页同一条规矩 —— **后端比前端旧**时这个键**整个不存在**，
+   *    拿到的是 `undefined`。判空一律写 `?? '—'`，写 `=== null` 会漏掉一半。
+   *
+   * `null` = 查不到这个用户（已被清理）**或**这个用户没有手机号 —— 后端已经把两种收敛成
+   * 同一种，**没有第二种「没有」**。
+   */
+  nickname?: string | null;
+  /** 手机号。可选性与 `null` 的含义与上面的 `nickname` 逐字相同 */
+  phone?: string | null;
   /** 画布项目 id；不在项目里的任务为空串 */
   project_id: string;
   /** 任务类型（text2video / audio_mix / …）。自由文本——后端不写死白名单，新类型不会被误伤 */
@@ -50,8 +67,13 @@ export interface AdminJobRecordListData {
 export interface AdminJobRecordQuery {
   page: number;
   pageSize: number;
-  /** 空 = 全部用户 */
-  userId?: string;
+  /**
+   * 用户 ID / 手机号 / 用户名，**都要完整**（服务端精确匹配，收敛到唯一一个人）。空 = 全部用户。
+   *
+   * ⚠️ 与用户管理页那个 `keyword` 是**两种东西**：那边是模糊匹配，这边必须唯一命中。
+   *    同样的输入在两页行为不同，所以输入框的 placeholder 要写明「需完整」。
+   */
+  keyword?: string;
   projectId?: string;
   /** 空 = 全部类型 */
   type?: string;
@@ -70,7 +92,7 @@ export function fetchAdminJobRecords(
   const qs = new URLSearchParams();
   qs.set('page', String(query.page));
   qs.set('pageSize', String(query.pageSize));
-  if (query.userId) qs.set('userId', query.userId);
+  if (query.keyword) qs.set('keyword', query.keyword);
   if (query.projectId) qs.set('projectId', query.projectId);
   if (query.type) qs.set('type', query.type);
   if (query.status) qs.set('status', query.status);

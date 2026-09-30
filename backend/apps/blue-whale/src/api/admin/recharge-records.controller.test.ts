@@ -7,13 +7,27 @@ import { AdminRechargeRecordsController } from "./recharge-records.controller.js
 // 本测试钉住的是**入参解析**：非法筛选条件必须当场 400，而不是静默当成「没有」——
 // 后者在运营拿单号对账时表现为「这单不存在」，是一句查不出来的假话。
 
+/** 用户维度走 bw_users，用桩：本文件管的是入参解析，不管「怎么查用户」。 */
+function identityStub() {
+  return {
+    findAdminUserIdByKeyword: vi.fn().mockResolvedValue(undefined),
+    loadAdminUserIdentities: vi.fn().mockResolvedValue(new Map()),
+  };
+}
+
 function createController(list = vi.fn().mockResolvedValue({ items: [], total: 0 })) {
   const recharge = { listOrdersForAdmin: list };
   const operationLog = { create: vi.fn().mockResolvedValue(undefined) };
+  const identity = identityStub();
   return {
-    controller: new AdminRechargeRecordsController(recharge as never, operationLog as never),
+    controller: new AdminRechargeRecordsController(
+      recharge as never,
+      operationLog as never,
+      identity as never,
+    ),
     list,
     operationLog,
+    identity,
   };
 }
 
@@ -36,12 +50,66 @@ describe("AdminRechargeRecordsController.list", () => {
     expect(list).toHaveBeenCalledWith({ page: 1, pageSize: 100 });
   });
 
-  it("userId 与 status 传入时按原值过滤", async () => {
+  it("关键词命中一个用户 → 用它换来的 userId 过滤，status 透传", async () => {
+    const { controller, list, identity } = createController();
+    identity.findAdminUserIdByKeyword.mockResolvedValue(42);
+
+    await controller.list({ keyword: " 13800008888 ", status: "paid" });
+
+    expect(identity.findAdminUserIdByKeyword).toHaveBeenCalledWith("13800008888");
+    // 送给仓储的是**解析出来的数字**，不是关键词——它那层不认识手机号
+    expect(list).toHaveBeenCalledWith({ page: 1, pageSize: 20, userId: 42, status: "paid" });
+  });
+
+  it("★ 还认着旧的 `userId` 参数 —— 不认它就是静默回一页全站订单", async () => {
+    // 前端与后端不是原子发版（本仓 2026-09-26 实测过：3100 上跑着 4 小时前的构建）。
+    // 一个还没刷新的管理页仍会发 `?userId=42`：不认它的后果不是报错，而是运营以为
+    // 筛了那个人、实际看到所有人的单，而这一页是拿来对账的。
+    const { controller, list, identity } = createController();
+    identity.findAdminUserIdByKeyword.mockResolvedValue(42);
+
+    await controller.list({ userId: "42" });
+
+    expect(identity.findAdminUserIdByKeyword).toHaveBeenCalledWith("42");
+    expect(list).toHaveBeenCalledWith({ page: 1, pageSize: 20, userId: 42 });
+  });
+
+  it("关键词查不到人 → 空页，**不查订单表**", async () => {
     const { controller, list } = createController();
 
-    await controller.list({ userId: " 42 ", status: "paid" });
+    await expect(controller.list({ keyword: "查无此人" })).resolves.toEqual({
+      success: true,
+      data: { list: [], total: 0 },
+    });
+    expect(list).not.toHaveBeenCalled();
+  });
 
-    expect(list).toHaveBeenCalledWith({ page: 1, pageSize: 20, userId: 42, status: "paid" });
+  it("用户名 / 手机号按本页的 userId 集合一次批量回填；用户没手机号收敛成 null", async () => {
+    const { controller, identity } = createController(
+      vi.fn().mockResolvedValue({
+        items: [{ tradeNo: "RC1", userId: "42" }],
+        total: 1,
+      }),
+    );
+    identity.loadAdminUserIdentities.mockResolvedValue(
+      new Map([[42, { nickname: "张小明", phone: "" }]]),
+    );
+
+    await expect(controller.list({})).resolves.toMatchObject({
+      data: { list: [{ tradeNo: "RC1", nickname: "张小明", phone: null }], total: 1 },
+    });
+    expect(identity.loadAdminUserIdentities).toHaveBeenCalledTimes(1);
+    expect(identity.loadAdminUserIdentities).toHaveBeenCalledWith([42]);
+  });
+
+  it("用户查不到（已被清理）→ 用户名手机号都是 null，行照常返回", async () => {
+    const { controller } = createController(
+      vi.fn().mockResolvedValue({ items: [{ tradeNo: "RC1", userId: "42" }], total: 1 }),
+    );
+
+    await expect(controller.list({})).resolves.toMatchObject({
+      data: { list: [{ tradeNo: "RC1", nickname: null, phone: null }] },
+    });
   });
 
   it("交易单号是精确匹配 —— 运营拿单号对账，模糊匹配会带出无关行", async () => {
@@ -56,19 +124,21 @@ describe("AdminRechargeRecordsController.list", () => {
     });
   });
 
-  it("userId 非正整数 → 400，且不查库", async () => {
-    const { controller, list } = createController();
-
-    for (const bad of ["abc", "-1", "0", "1.5"]) {
-      await expect(controller.list({ userId: bad })).rejects.toMatchObject({ status: 400 });
-    }
-    expect(list).not.toHaveBeenCalled();
-  });
-
   it("status 不在白名单 → 400，且不查库（静默空列表与「真的没有」长得一样）", async () => {
     const { controller, list } = createController();
 
     await expect(controller.list({ status: "success" })).rejects.toMatchObject({ status: 400 });
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("★ 同时给了查不到人的关键词和非法 status → 仍然是 400，不是 200 空页", async () => {
+    // 校验必须排在查人之前。否则「另一个条件没命中」会把非法条件一起兜成 200 空列表——
+    // 而运营看到的是一句「暂无订单」，不是「你的条件写错了」。
+    const { controller, list } = createController();
+
+    await expect(
+      controller.list({ keyword: "查无此人", status: "success" }),
+    ).rejects.toMatchObject({ status: 400 });
     expect(list).not.toHaveBeenCalled();
   });
 
@@ -89,6 +159,7 @@ describe("AdminRechargeRecordsController.retryGrant — 人工补发（E-1 的�
       controller: new AdminRechargeRecordsController(
         recharge as never,
         operationLog as never,
+        identityStub() as never,
       ),
       operationLog,
     };
@@ -143,6 +214,7 @@ describe("AdminRechargeRecordsController.retryGrant — 人工补发（E-1 的�
     const c = new AdminRechargeRecordsController(
       { retryGrantForAdmin: vi.fn().mockResolvedValue({ tradeNo: "RC3", status: "paid" }) } as never,
       operationLog as never,
+      identityStub() as never,
     );
 
     await expect(c.retryGrant("RC3")).resolves.toEqual({

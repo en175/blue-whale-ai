@@ -224,17 +224,15 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
       const asId = isUserIdKeyword(keyword);
 
       // **一次查询同时试三种解释**（用户 ID / 手机号 / 用户名）——这三样共用一个输入框
-      // （积分记录那个「用户 ID / 手机号 / 昵称」），光看输入分不出是哪一种。
+      // （三个记录页那个「用户 ID / 手机号 / 用户名」），光看输入分不出是哪一种。
       //
       // ⚠️ 但**挑哪一行必须有优先级**，少了它会**错人**：用户名的形状不受限（注册只要求
       //    非空，new-api 时代的历史名字更是随便取），所以「一个叫 123456 的用户」是存在的。
       //    没有优先级时，输 `123456` 只会拿到 id=123456 那个人的账——**错的人，还不报错**，
-      //    而这一页恰恰是用来对账的。`row[0]` 这种取法就是把优先级交给了数据库的返回顺序。
+      //    而这一页恰恰是用来对账的。`rows[0]` 这种取法就是把优先级交给了数据库的返回顺序。
       //
       // ⚠️ 优先级 = 用户名 / 手机号的精确命中 > 「这串数字恰好等于某个用户 ID」。
-      //    两边同时命中的唯一可能是「某个用户的 id 恰好等于别人的用户名或手机号」，
-      //    这一层不报错：`take: 3` 之后按优先级挑，**挑不出来就当作查不到**
-      //    （宁可空页，不可错人）。
+      //    两个**不同的人**同时命中（A 的用户名 = B 的手机号）时更要小心，见下面那段。
       const rows = await prisma.bw_users.findMany({
         where: {
           OR: [
@@ -251,12 +249,20 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
       // 用户名用**不区分大小写**比较：库的排序规则是 `*_ci`，`Admin` 会匹配到 `admin`，
       // 逐字比较会让这类命中落空、退回成 id 那一行——又回到错人。
       const lower = keyword.toLowerCase();
-      const byName = rows.find(
+      const named = rows.filter(
         (r) => r.phone === keyword || r.username.toLowerCase() === lower,
       );
+
+      // ⚠️ 手机号与用户名各自唯一，但**两者可以撞在同一个关键词上**（某人的用户名叫
+      //    `13800008888`，另一个人拿它当手机号）。这时「运营要找的是谁」本来就无从判断，
+      //    挑一行就是替他猜——而这一页是用来对账的。**当作查不到**（宁可空页，不可错人）。
+      //    软删用户也在这张表里（下面 loadUserIdentities 说明过为什么不过滤 is_delete），
+      //    所以这种撞车不是理论上的。
+      if (named.length > 1) return undefined;
+
       const byId = asId ? rows.find((r) => r.id === BigInt(keyword)) : undefined;
 
-      const row = byName ?? byId;
+      const row = named[0] ?? byId;
       return row ? Number(row.id) : undefined;
     },
 
@@ -266,7 +272,7 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
 
       // ⚠️ **不过滤 `is_delete`**（与上面的 {@link BASE_WHERE} 不同，是故意的）：积分记录是
       //    账本，已软删用户的历史流水仍是账的一部分——全站模式下那些行照常列在表里。
-      //    这里过滤掉的话，同一页里它们的昵称会显示成「—」，反而自相矛盾。
+      //    这里过滤掉的话，同一页里它们的用户名会显示成「—」，反而自相矛盾。
       const rows = await prisma.bw_users.findMany({
         where: { id: { in: ids.map((id) => BigInt(id)) } },
         select: { id: true, username: true, phone: true },
