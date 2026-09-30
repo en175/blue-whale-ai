@@ -192,17 +192,17 @@ message ExpiringLot {
 
 message ListTransactionsRequest {
   int64  user_id     = 1;
-  // 已废弃（单值版）。改用 {@link type_filters}。
+  // 旧的单值过滤。**删掉并 reserve**：新调用方一律用 `type_filters`，
+  //    留一个没有读者的字段只会被误当成活契约（见 `common/v1/types.proto` 同款处理）。
   //
-  // ⚠️ **保留不删**：契约硬规则「字段只加不删」（`buf breaking` 在 PR 门禁里拦，
-  //    无跳过开关）。曾把它原地改成 `repeated`，被门禁判为 cardinality 变更而拦下。
-  //
-  // ⚠️ 服务端**仍然读它**（见 BillingApplicationService#normalizeTypes）：旧调用方还在发，
-  //    读了才是真的向后兼容 —— 只留字段不读，等于把一个能工作的调用方变成永远第 1 页。
-  string type_filter = 2 [deprecated = true]; // 空 = 全部
+  // ⚠️ 它原来是 `string`，新字段是 `repeated`。**不能原地改** —— 那是同一字段号上的
+  //    cardinality 变更，`buf breaking` 会拦；而且这个方向的兼容性靠不住：
+  //    旧端发一个值、新端当多值读是安全的，反过来旧端把多值读成单值就会**静默少给行**。
+  reserved 2;
+  reserved "type_filter";
   common.v1.PageRequest page = 3;
-  // 多值类型过滤。空 = 全部。**新的调用方一律用它**。
-  // 与 `type_filter` 同时给时以本字段为准（两个都空 = 全部）。
+  // 多值类型过滤。空 = 全部。用户的「已消耗」页签要一次取 `consume` 与 `expire`
+  // （原型口径②「已过期并入已消耗」）。
   repeated string type_filters = 4;
 }
 
@@ -381,9 +381,9 @@ message AdminListTransactionsRequest {
                          // ⚠️ 运营面这个字面量与用户面 `UserTransaction.type` **不是一套**
                          //    （`grant`/`ledger` 是分区名，不是流水类型），所以它是单值、也不跟着改多值
   int32  page_size  = 3; // 0 = 默认页大小
-  // 已废弃（原游标）。**保留不删**（契约硬规则，同 `PageRequest.page_token`）；
-  // 服务端不再读它，发过来只会被忽略。
-  string page_token = 4 [deprecated = true];
+  // 旧的游标。**删掉并 reserve**（同 `PageRequest.page_token`）。
+  reserved 4;
+  reserved "page_token";
   // 页码，从 1 起。**offset 分页**：翻页期间新增的行会把后面的行整体下移，
   // 运营可能看到重复行 —— 这是与用户面一起换掉的代价，见 `common/v1/types.proto`。
   int32  page       = 5;

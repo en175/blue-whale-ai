@@ -18,7 +18,21 @@ lint:
     - STANDARD
 
 breaking:
-  # FILE 粒度：任何破坏性字段变更都要被 CI 拦下。
   # 对照基线在 CI 里指定（`--against '.git#branch=release/2026.09.29'`）。
+  #
+  # ⚠️ 2026-09-30 由 **FILE 改为 WIRE**。FILE 里含**无条件**的 `FIELD_NO_DELETE`，
+  #    意思是「字段一个都不许删」——于是删一个已经没有读者的字段，也得 reserve 之后
+  #    原地留成 `deprecated` 死字段；契约里堆起来之后，下一个人分不清哪个是活契约。
+  #
+  #    **要防的是字段号复用，不是删除本身。** WIRE 里的
+  #    `FIELD_NO_DELETE_UNLESS_NUMBER_RESERVED` / `..._UNLESS_NAME_RESERVED` 正是这道闸：
+  #    删字段可以，但**必须同时 reserve 号与名**，否则 CI 照样拦。本次四个删除
+  #    （`PageRequest.page_token`、`PageResponse.next_page_token`、
+  #    `ListTransactionsRequest.type_filter`、`AdminListTransactionsRequest.page_token`）
+  #    全部照此 reserve。
+  #
+  #    代价：WIRE 不含 WIRE_JSON，所以 `json_name` / 大小写那类**只影响 JSON 序列化**的
+  #    变更不再被拦。本仓两端都不依赖 proto 的 JSON 映射（TS 用 protobuf-es 走二进制，
+  #    Java 走 protoc；对外的 JSON 是 backend 手写的投影），所以这条代价是空的。
   use:
-    - FILE
+    - WIRE

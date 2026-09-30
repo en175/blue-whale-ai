@@ -71,9 +71,10 @@ buf generate          # 需先装 buf：brew install bufbuild/buf/buf
 
 | 规则 | 原因 |
 |---|---|
-| 字段**只加不删** | proto3 天然向前兼容 |
-| 删字段用 `reserved` | 防字段号复用 |
-| **CI 强制 breaking 检测** | `buf breaking --against '.git#branch=release/2026.09.29'` |
+| 删字段**必须 `reserved` 号与名** | 防字段号复用 —— 那才是真正的危险（新旧两端静默读错位） |
+| 没用了的字段**删掉**，不要留成 `deprecated` 死字段 | 一个没有读者的字段留在契约里，下一个人会把它当活契约用 |
+| 不能原地改类型 / 改字段号 | 同一号码上换类型，滚动发布期间老的一侧会解出错值。要改就换新号 |
+| **CI 强制 breaking 检测** | `buf breaking --against '.git#branch=release/2026.09.29'`，规则集 `WIRE`（见 `buf.yaml` 里为什么由 `FILE` 改过来） |
 | **服务端先行** | 新字段服务端先支持，客户端再消费 |
 
 ## 关联文档
