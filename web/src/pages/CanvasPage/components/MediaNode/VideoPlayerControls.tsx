@@ -30,14 +30,18 @@ export default function VideoPlayerControls({ videoRef, duration: authoritativeD
   const [currentTime, setCurrentTime] = useState(0);
   const trackRef = useRef<HTMLDivElement>(null);
 
-  /** 服务端权威时长优先；缺失时浏览器实测兜底（metadata 常晚于控件挂载，事件监听补齐） */
+  /** 服务端权威时长优先；缺失时挂载即读浏览器实测兜底——收养会话（IKI5YM 审查修订）
+   *  叠加控件前 loadedmetadata 已派发、不会重放，只等事件会让收养路径时长停在 0；
+   *  metadata 晚于控件挂载的树内路径仍由事件监听补齐 */
   useEffect(() => {
     setDuration(authoritativeDuration ?? 0);
+    if (authoritativeDuration != null) return;
     const video = videoRef.current;
-    if (!video || authoritativeDuration != null) return;
+    if (!video) return;
     const onLoaded = () => {
       if (Number.isFinite(video.duration) && video.duration > 0) setDuration(video.duration);
     };
+    onLoaded();
     video.addEventListener('loadedmetadata', onLoaded);
     return () => video.removeEventListener('loadedmetadata', onLoaded);
   }, [videoRef, authoritativeDuration]);
@@ -49,6 +53,7 @@ export default function VideoPlayerControls({ videoRef, duration: authoritativeD
     const video = videoRef.current;
     if (!video) return;
     setPlaying(!video.paused);
+    setCurrentTime(video.currentTime); // 与上一行对称：收养叠加瞬间进度/时间直接显示实际位置
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onTime = () => setCurrentTime(video.currentTime);
