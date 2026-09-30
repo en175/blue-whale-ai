@@ -7123,7 +7123,6 @@ export default function CanvasPage() {
         actualCredits: detail.actual_credits ?? undefined,
         // 失败码随文案同点落卡（IKJ79D）：worker 归类的比例约束失败供一键修复按码识别
         errorCode: detail.error?.code,
->>>>>>> 7e8044102 (fix(IKJ79D): 失败卡片「改为跟随视频并重试」一键修复 + 报价口径标记)
       });
       return 'terminal';
     }

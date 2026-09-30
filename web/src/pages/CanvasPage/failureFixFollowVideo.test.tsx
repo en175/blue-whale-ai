@@ -8,7 +8,7 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 
 /* IKJ79D 失败卡片「改为跟随视频并重试」一键修复（父单 IKJ6DK）：
-   画布视频失败卡按 task_type_param_constraint 错误码（数值 1056 / 字符串信封同码）识别，
+   画布视频失败卡按 task_type_param_constraint 错误码（数值 1060 / 字符串信封同码）识别，
    点击后仅把比例改为 adaptive（Auto）重交——提示词/素材/时长原样，走 create 新任务
    （retry 沿用冻结快照改不了比例，不可用）；原卡原位承接。
    前端零关键词判定副本（识别只认码，不认文案）。FlowCanvas 等打桩透出 props；
@@ -150,7 +150,7 @@ vi.mock('./hooks/useCanvasDoc', () => ({
 
 /** 默认画布：失败视频草稿卡 v1（编辑意图 + 手选 9:16 被比例约束码拒单，参数与参考保留）
  *  + 9:16 参考视频卡 ref1（经 reference 边连入）+ 普通素材卡 ref2（图片参考）。
- *  errorCode 走数值信封 1056；字符串信封形态由用例覆盖。 */
+ *  errorCode 走数值信封 1060（rebase 前为 1056，撞 IKIZQ5/IKJ8J8 已落号改取）；字符串信封形态由用例覆盖。 */
 function seedFixDoc(errorCode: number | string) {
   canvasDocMock.current = {
     doc: {
@@ -252,7 +252,7 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   sessionStorage.clear();
-  seedFixDoc(1056);
+  seedFixDoc(1060);
 });
 
 afterEach(async () => {
@@ -262,7 +262,7 @@ afterEach(async () => {
 });
 
 describe('IKJ79D 一键修复：按码识别 + 仅改比例重交', () => {
-  it('数值码 1056 → 点按钮走 create 新任务：比例=adaptive，提示词/分辨率/时长/带音频/参考原样', async () => {
+  it('数值码 1060 → 点按钮走 create 新任务：比例=adaptive，提示词/分辨率/时长/带音频/参考原样', async () => {
     await renderPage();
 
     await clickFixFollow('v1');

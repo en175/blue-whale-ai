@@ -397,16 +397,16 @@ describe('IKJ794 全能参考被动提示行', () => {
     expect(mountNode.textContent).not.toContain('自动跟随参考视频');
   });
 
-  it('比例选项 adaptive 档显示「Auto」，选中后状态栏与提交取值不变（仍为 adaptive）', async () => {
+  it('比例选项 adaptive 档显示 auto，选中后状态栏与提交取值不变（仍为 adaptive）', async () => {
     fetchGenerationModels.mockResolvedValue([adaptiveModel]);
     await renderDialog({ mode: 'all', mediaRefs: { reference: [] } });
-    // 展开配置面板（状态栏按钮含当前选中比例 16:9）
-    const configBtn = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
+    // 展开配置面板（状态栏按钮含当前选中档显示名；2.5 默认选中 adaptive，显示 auto）
+    const configBtn = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('auto'))!;
     await act(async () => { configBtn.click(); });
     const ratioBtns = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.ratioGroup} button`)];
     expect(ratioBtns.some((b) => b.textContent === 'auto')).toBe(true);
     expect(ratioBtns.some((b) => b.textContent === 'adaptive')).toBe(false);
-    // 选中 Auto 档：状态栏显示 Auto、无 adaptive 黑话；发送取值仍为 adaptive
+    // 选中 auto 档：状态栏显示 auto、无 adaptive 黑话；发送取值仍为 adaptive
     await act(async () => {
       ratioBtns.find((b) => b.textContent === 'auto')!.click();
     });

@@ -309,6 +309,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         const size = currentModel?.supported_sizes.find((s) => s.id === selectedSize);
         return size ? (size.api_value ?? size.id) : undefined;
       })();
+  /** 报价带提示词（IKJ79D）：后端据此判编辑单（时长口径标记输入）。声明前移供 quoteParameters 引用（值防抖同步见下方 effect）。 */
+  const [quotePrompt, setQuotePrompt] = useState('');
   /** 报价定价维度（IKIZQB 起 sample_mode 也是定价输入之一）：徽标与面板内样片报价查询共用
    *  同一份参数对象 —— 同一个 queryKey 才会命中同一份缓存，两个 useQuery 只发一次请求。 */
   const quoteParameters = useMemo(() => ({
@@ -498,8 +500,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   /** 拍平镜像（IKFA1O/IKFA1P）：字数统计与发送门槛共用；失效标签 → 已失效：原N */
   const flatValue = useMemo(() => flattenPromptDocWith(promptDoc, (key) => refLabelOfStable.current(key)), [promptDoc, reconcileKey]);
   /** 报价带提示词（IKJ79D）：后端据此判编辑单（时长口径标记输入）。防抖 600ms——报价查询键
-   *  含提示词，逐字直传会每敲一个字重新问价，停笔后才问一次。 */
-  const [quotePrompt, setQuotePrompt] = useState('');
+   *  含提示词，逐字直传会每敲一个字重新问价，停笔后才问一次。
+   *  （state 声明前移至 quoteParameters useMemo 之前，值由下方 effect 从 flatValue 防抖同步。） */
   useEffect(() => {
     const timer = window.setTimeout(() => setQuotePrompt(flatValue), 600);
     return () => window.clearTimeout(timer);

@@ -180,9 +180,10 @@ describe('IKJ794 adaptive 档文案（ChatBox，沿用上游 IKJ4W6 auto 显示�
   it('比例下拉 adaptive 档显示 auto 且无 adaptive 黑话，选中后按钮同文案（取值与图标不变）', async () => {
     await renderChatBox();
     await act(async () => { buttonByLabel('AI 视频').click(); });
-    // 比例按钮显示当前选中档（默认 16:9）；RatioIcon 渲染为 span，不影响文案断言
+    // 比例按钮显示当前选中档；2.5 模型默认选中 adaptive（上游 IKJ4W6 pickDefaultVideoRatio），
+    // 界面显示 auto——RatioIcon 渲染为 span，不影响文案断言
     const ratioBtn = [...mountNode.querySelectorAll<HTMLButtonElement>('button')]
-      .find((b) => b.textContent === '16:9')!;
+      .find((b) => b.textContent === 'auto')!;
     expect(ratioBtn).toBeTruthy();
     await act(async () => { ratioBtn.click(); });
     const optionAuto = [...mountNode.querySelectorAll<HTMLButtonElement>('button')]

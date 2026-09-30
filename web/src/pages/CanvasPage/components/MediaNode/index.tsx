@@ -233,7 +233,7 @@ export interface MediaNodeData {
   progress?: number;
   /** 失败原因 */
   errorText?: string;
-  /** 失败码（IKJ79D）：信封形态 1056 或 task_type_param_constraint——按码识别一键修复，
+  /** 失败码（IKJ79D）：信封形态 1060 或 task_type_param_constraint——按码识别一键修复，
    *  不做文案匹配；与 errorText 同点同置（成功/生成中清除） */
   errorCode?: number | string;
   /** 生成时的提示词（「重新编辑」带回图片对话框） */

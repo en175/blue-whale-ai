@@ -580,7 +580,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
     // 交给 billing 的时长是源视频的 13 秒，不是用户所选的 4 秒；输入时长那一项照旧叠加（官方公式两头都收）
     expect(quoteArg.specs.duration).toBe("13");
     expect(quoteArg.specs.video_input_seconds).toBe("13");
-    expect(result.data).toEqual({ credits: 42, duration_basis: "source_video" });
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String), duration_basis: "source_video" });
   });
 
   it("★ 编辑单预扣同口径 —— 默认 4 秒档不再按 4 秒冻结（透支漏洞堵住）", async () => {
@@ -633,7 +633,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("4");
-    expect(result.data).toEqual({ credits: 42 });
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
   });
 
   it("纯参考单取用户所选时长，无标记", async () => {
@@ -647,7 +647,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("4");
-    expect(result.data).toEqual({ credits: 42 });
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
   });
 
   it("否定约束句（IKJ78C 衔接）不判编辑 → 取用户所选时长", async () => {
@@ -661,7 +661,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("4");
-    expect(result.data).toEqual({ credits: 42 });
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
   });
 
   it("模型未配 task_types.edit（Seedance 2.0）→ 编辑类提示词仍按用户所选（按模型分叉走能力行）", async () => {
@@ -679,7 +679,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("4");
-    expect(result.data).toEqual({ credits: 42 });
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
   });
 
   it("参考视频未带时长（量不到源时长）→ 回落用户所选，不按 0 估也不拒单", async () => {
@@ -697,6 +697,6 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("4");
-    expect(result.data).toEqual({ credits: 42 });
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
   });
 });

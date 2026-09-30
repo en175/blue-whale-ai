@@ -466,7 +466,7 @@ public class NewApiVideoClient {
                     code = GenerationError.ERROR_QUOTA_EXHAUSTED;
                 } else if (NewApiErrorClassifier.isTaskTypeSignal(upstreamText)) {
                     // IKJ79A：上游二次判定错位（模型语义判定的任务类型与参数/指定类型不一致）→
-                    // 归类 1056 用户向文案，失败卡片复用一键修复入口。
+                    // 归类 task_type_param_constraint（信封数值 1060）用户向文案，失败卡片复用一键修复入口。
                     code = GenerationError.ERROR_TASK_TYPE_PARAM_CONSTRAINT;
                 } else {
                     code = upstreamCode != null ? upstreamCode : GenerationError.ERROR_PROVIDER_FAILED;

@@ -392,14 +392,14 @@ describe('MediaNode failed overlay', () => {
 });
 
 describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配）', () => {
-  it('视频失败卡收到比例约束码（数值 1056）→ 显示「改为跟随视频并重试」并派发回调', async () => {
+  it('视频失败卡收到比例约束码（数值 1060）→ 显示「改为跟随视频并重试」并派发回调', async () => {
     const onFixFollowVideo = vi.fn();
     await renderNode('video', {
       id: 'media-gen-31',
       genStatus: 'failed',
       errorText: '提示词包含修改、替换或延长原视频的意图，输出比例将自动跟随参考视频，请将比例切换为「自动」后重试',
       selected: false,
-      data: { errorCode: 1056, onFixFollowVideo },
+      data: { errorCode: 1060, onFixFollowVideo },
     });
     const fix = [...mountNode.querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === '改为跟随视频并重试',
@@ -433,7 +433,7 @@ describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配
     await renderNode('image', {
       genStatus: 'failed',
       selected: false,
-      data: { errorCode: 1056, onFixFollowVideo: vi.fn() },
+      data: { errorCode: 1060, onFixFollowVideo: vi.fn() },
     });
     expect(labels()).not.toContain('改为跟随视频并重试');
   });
@@ -442,7 +442,7 @@ describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配
     await renderNode('video', {
       genStatus: 'failed',
       selected: false,
-      data: { src: 'http://img/old.mp4', errorCode: 1056, onFixFollowVideo: vi.fn() },
+      data: { src: 'http://img/old.mp4', errorCode: 1060, onFixFollowVideo: vi.fn() },
     });
     const overlay = mountNode.querySelector('[data-testid="fail-overlay"]');
     expect(overlay).toBeTruthy();

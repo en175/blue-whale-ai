@@ -31,7 +31,7 @@ export const ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION = "capability_unsupported_r
 /** IKE7JP：宽高比越界（细分码）。 */
 export const ERROR_CAPABILITY_UNSUPPORTED_RATIO = "capability_unsupported_ratio";
 /** IKJ795：编辑/延长任务 + 非 adaptive 比例的结构化拒单码（用户向文案 = 本文件 ERROR_CODES 表
- *  的 1056 项；capability-param-validation.ts 的 TASK_TYPE_PARAM_CONSTRAINT_MESSAGE 查表引用之，
+ *  的 1060 项（rebase 前取 1056，撞 IKIZQ5/IKJ8J8 已落号改取）；capability-param-validation.ts 的 TASK_TYPE_PARAM_CONSTRAINT_MESSAGE 查表引用之，
  *  全仓只此一份字面量，勿在他处再抄）。
  *  供前端按码识别「一键改为跟随视频」场景；与 capability_unsupported_ratio（非任务类型的
  *  比例越界）语义不混。 */

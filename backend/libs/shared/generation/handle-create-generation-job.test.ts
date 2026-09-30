@@ -1325,7 +1325,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     it("编辑 + 9:16 → 4xx task_type_param_constraint + 用户向文案，不建任务（不扣费）", async () => {
       const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
       const result = await handleCreateGenerationJob("u1", "p1", bodyOf("把背景替换成海边", "9:16"), null, deps);
-      expect(result.code).toBe(1056);
+      expect(result.code).toBe(1060);
       expect(result.data?.code).toBe("task_type_param_constraint");
       expect(result.msg).toBe(TASK_TYPE_PARAM_CONSTRAINT_MESSAGE);
       // 文案不出现内部词（用户直接可见）
@@ -1337,7 +1337,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     it("延长 + 固定比例（16:9）→ 同码 4xx", async () => {
       const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
       const result = await handleCreateGenerationJob("u1", "p1", bodyOf("向后延长这个视频", "16:9"), null, deps);
-      expect(result.code).toBe(1056);
+      expect(result.code).toBe(1060);
       expect(result.data?.code).toBe("task_type_param_constraint");
       expect(createJob).not.toHaveBeenCalled();
     });
@@ -1402,7 +1402,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
         null,
         deps,
       );
-      expect(result.code).toBe(1056);
+      expect(result.code).toBe(1060);
       expect(createJob).not.toHaveBeenCalled();
     });
   });

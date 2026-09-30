@@ -120,12 +120,12 @@ class NewApiVideoSampleDraftModePinnedTest {
                 textOrNull(input, "last_frame"),
                 referencesOf(input.get("references")),
                 null,
-                true);
+                true, textOrNull(input, "video_task_type"));
         SubmitResult submit = new NewApiVideoClient(new UpstreamBaseUrl(baseUrl))
                 .submit("t", submitInput);
         assertThat(submit.taskId()).isEqualTo(taskId);
 
-        // 1) Draft 请求体整体比对（含 draft:true、resolution 480p、role 映射、TEMP FIX 改写）。
+        // 1) Draft 请求体整体比对（含 draft:true、resolution 480p、role 映射、按任务类型的出站约束）。
         JsonNode actualBody = JSON.readTree(lastBody.get());
         assertThat(actualBody)
                 .as("组 %s（%s）Draft 出站请求体", caseId, testCase.get("mode_zh").asText())

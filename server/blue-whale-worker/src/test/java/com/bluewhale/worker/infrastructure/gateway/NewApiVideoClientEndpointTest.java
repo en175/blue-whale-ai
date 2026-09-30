@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *   <li>旧字段路径：独立首尾帧字段照旧转 first_frame/last_frame（回归不动）。</li>
  *   <li>IKJ79A：Seedance 2.5 全能参考显式任务类型——按快照任务类型下发
  *       omni_reference_task_type 与出站 ratio/duration 约束（09-22 TEMP FIX 已删）；
- *       上游 TaskTypeMismatch/TaskTypeConstraint 异步错误归类 1056。</li>
+ *       上游 TaskTypeMismatch/TaskTypeConstraint 异步错误归类 task_type_param_constraint。</li>
  * </ul>
  */
 class NewApiVideoClientEndpointTest {
@@ -144,7 +144,7 @@ class NewApiVideoClientEndpointTest {
         VideoSubmitInput input = new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null, "edit");
+                null, false, "edit");
 
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
 
@@ -164,7 +164,7 @@ class NewApiVideoClientEndpointTest {
         VideoSubmitInput input = new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "把视频向后延长", 12.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null, "prolong");
+                null, false, "prolong");
 
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
 
@@ -183,7 +183,7 @@ class NewApiVideoClientEndpointTest {
                 "doubao-seedance-2-5-260628", "一只猫在海边跑步", 8.0, "720p", "9:16", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null),
                         new VideoReference("image", "https://tos.test/a.png", null)),
-                null, "default");
+                null, false, "default");
 
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
 
@@ -215,7 +215,7 @@ class NewApiVideoClientEndpointTest {
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null, "banana"));
+                null, false, "banana"));
         assertThat(JSON.readTree(lastBody.get()).get("metadata").get("omni_reference_task_type").asText())
                 .isEqualTo("reference");
     }
@@ -227,7 +227,7 @@ class NewApiVideoClientEndpointTest {
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-0-260128", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null, "edit"));
+                null, false, "edit"));
         JsonNode seedance20 = JSON.readTree(lastBody.get());
         assertThat(seedance20.get("metadata").has("omni_reference_task_type")).isFalse();
         assertThat(seedance20.get("duration").asDouble()).isEqualTo(5.0);
@@ -237,7 +237,7 @@ class NewApiVideoClientEndpointTest {
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "adaptive",
                 "https://tos.test/first.png", "https://tos.test/last.png",
-                List.of(), null, "first_last_frame"));
+                List.of(), null, false, "first_last_frame"));
         JsonNode firstLast = JSON.readTree(lastBody.get());
         assertThat(firstLast.get("metadata").has("omni_reference_task_type")).isFalse();
         assertThat(firstLast.get("duration").asDouble()).isEqualTo(5.0);
@@ -246,14 +246,14 @@ class NewApiVideoClientEndpointTest {
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("image", "https://tos.test/a.png", null)),
-                null, "edit"));
+                null, false, "edit"));
         JsonNode imageOnly = JSON.readTree(lastBody.get());
         assertThat(imageOnly.get("metadata").has("omni_reference_task_type")).isFalse();
         assertThat(imageOnly.get("metadata").get("ratio").asText()).isEqualTo("16:9");
     }
 
     @Test
-    @DisplayName("IKJ79A: poll 异步 TaskTypeMismatch/TaskTypeConstraint → task_type_param_constraint(1056)")
+    @DisplayName("IKJ79A: poll 异步 TaskTypeMismatch/TaskTypeConstraint → task_type_param_constraint")
     void pollTaskTypeMismatchMapsToUserFacingConstraintCode() throws Exception {
         // 上游二次判定错位：模型语义判定的任务类型与指定类型不一致（data.error.code 携带官方码）
         server.createContext("/v1/video/generations/task-mismatch", exchange -> {
@@ -588,7 +588,7 @@ class NewApiVideoClientEndpointTest {
     void draftSubmitCarriesTopLevelFlag() throws Exception {
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "480p", "16:9",
-                null, null, List.of(), null, true));
+                null, null, List.of(), null, true, null));
         JsonNode draftBody = JSON.readTree(lastBody.get());
         assertThat(draftBody.get("draft").asBoolean()).isTrue();
         assertThat(draftBody.get("metadata").get("resolution").asText()).isEqualTo("480p");
