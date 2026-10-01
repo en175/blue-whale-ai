@@ -13790,6 +13790,7 @@ export default function CanvasPage() {
             initialDoc={videoSeed?.doc ?? null}
             initialParams={videoSeed?.params}
             attachments={videoDraftAttachments}
+            targetNodeId={videoSeed?.targetNodeId ?? undefined}
             onReorderAttachments={
               videoSeed?.targetNodeId
                 ? (ids) => handleReorderAttachments(videoSeed.targetNodeId!, ids)

@@ -39,6 +39,7 @@ interface BadgeProps {
   projectId?: string;
   modelId?: string;
   references?: GenerationRefItem[];
+  targetNodeId?: string;
 }
 
 function element(props: BadgeProps) {
@@ -54,6 +55,7 @@ function element(props: BadgeProps) {
         aspect_ratio: '1:1',
       },
       ...(props.references ? { references: props.references } : {}),
+      ...(props.targetNodeId ? { targetNodeId: props.targetNodeId } : {}),
     }),
   );
 }
@@ -181,6 +183,20 @@ describe('GenerationQuoteBadge', () => {
     );
     expect(container.querySelector('[data-testid="generation-quote-basis"]')?.textContent)
       .toBe('按源视频时长预估');
+  });
+
+  it('★ IKJGE6 草稿目标 → 请求体带 target_node_id（后端据此做画布文本带入合并）；换目标重新报价', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(quoteResponse(42));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await renderBadge({ targetNodeId: 'media-1' });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string).target_node_id).toBe('media-1');
+
+    // 换了目标卡：文本带入参考随目标变，价必须重查（键含 target_node_id）
+    await renderBadge({ targetNodeId: 'media-9' });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse((fetchMock.mock.calls[1]![1] as RequestInit).body as string).target_node_id).toBe('media-9');
   });
 
   it('★ 无标记（延长/参考单）→ 只显积分，不出现口径标注', async () => {

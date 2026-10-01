@@ -285,6 +285,10 @@ export class GenerationJobsController {
     return handleQuoteGenerationJob(user.userId, projectId, body, {
       projects: this.project,
       models: this.models,
+      // IKJGE6：与建任务同一份画布/素材依赖——视频草稿目标的文本带入参考做同一合并、
+      // 时长同一权威回填，预览价与实扣价才出自同一个数。
+      canvas: this.canvas,
+      assets: this.command.assets,
       quote,
     });
   }
@@ -392,6 +396,9 @@ export class GenerationJobsController {
     return handleRegenerateSampleQuote(user.userId, projectId, jobId, body, {
       projects: this.project,
       models: this.models,
+      // IKJGE6：报价入口统一依赖面（派生 body 已剥 target_node_id，此处合并不触发）。
+      canvas: this.canvas,
+      assets: this.command.assets,
       sampleSource: this.command.finalize,
       quote,
     });
@@ -420,6 +427,9 @@ export class GenerationJobsController {
       {
         projects: this.project,
         models: this.models,
+        // IKJGE6：报价入口统一依赖面（派生 body 已剥 target_node_id，此处合并不触发）。
+        canvas: this.canvas,
+        assets: this.command.assets,
         sampleSource: this.command.finalize,
         // create 端点同一装配（ IKIZQ8：报价复算与 /quote 同源）。
         create: {

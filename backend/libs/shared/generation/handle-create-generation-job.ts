@@ -911,6 +911,23 @@ export function applyEditSourceDurationBasis(
   return true;
 }
 
+/** IKJGE6：视频参考时长的权威补齐（建任务与报价共用）。缺 `duration` 的本地视频引用按
+ *  查得的素材时长（assets.duration，`resolveInputAssets` 顺带查出）回填；查不到或非正数
+ *  保持原样——计价侧按「量不到源时长」回落（applyEditSourceDurationBasis 的既有立场）。
+ *  素材库引用（material_id，本地零表）只能靠调用方带，不在本函数职责内。 */
+export function withVideoReferenceDurations(
+  references: ReadonlyArray<ReferenceItemInput>,
+  secondsByAssetId: ReadonlyMap<string, number | null>,
+): ReferenceItemInput[] {
+  return references.map((item) => {
+    if (item.type !== "video" || item.duration !== undefined || item.asset_id === undefined) {
+      return item;
+    }
+    const seconds = secondsByAssetId.get(String(item.asset_id));
+    return typeof seconds === "number" && seconds > 0 ? { ...item, duration: seconds } : item;
+  });
+}
+
 /**
  * 报价（价格预览）用的规格投影 —— 喂给 billing 的 `Quote`，只算不扣。
  *
@@ -1113,12 +1130,13 @@ function textAttachmentsFromCanvas(
  *  ——失效索引、不支持的媒体类型、帧互斥（视频）、合并后超限在接纳当下 400（不静默丢素材）；
  *  后端权威并入：图片把 body 缺失项按推导序追加 input_asset_ids 尾部，视频以合并后的单数组
  *  references 返回（调用方以此替代 body.references 供 composeInput 与正文标签复核统一消费）。
- *  非图片/视频/音频或无目标时零影响（返回原直接参考，不读画布）。 */
-async function resolveTextIndexReferences(args: {
+ *  非图片/视频/音频或无目标时零影响（返回原直接参考，不读画布）。
+ *  IKJGE6：导出供报价端点做同一合并——报价判定输入与建任务合并后引用集合同源。 */
+export async function resolveTextIndexReferences(args: {
   type: GenerationType;
   body: CreateGenerationJobBody;
   projectId: string;
-  deps: Pick<GenerationDeps, "canvas">;
+  deps: { canvas: Pick<CanvasRepo, "getByProject"> };
   directReferenceAssetIds: Array<string | number>;
   imageReferenceMax: number;
   /** IKFM3W/IKFM41：视频/音频目标的能力行（视频接受类型按 features 位；容量走 checkReferenceLimits） */
@@ -1726,61 +1744,6 @@ export async function handleCreateGenerationJob(
       code: sampleRuling.code,
     });
   }
-  // IKIZQ8：样片提交确认（契约 §2，金标 G03/G04）——fail closed，位于建任务/预扣之前：
-  // 变价（quote_revision 失效）、算不出价、缺确认字段都零创建、零扣费。
-  //
-  // 复算走**报价入口同一套**：projectQuoteInput（原始 body，与 handleQuoteGenerationJob
-  // 同参）+ deps.quote（同一 createBillingQuote 装配）+ quoteRevisionOf（同一指纹函数）——
-  // 三处任何一处分叉，用户看到的报价与服务端核对的就会是两个数。
-  if (sampleRuling.kind === "sample") {
-    const credits = body.expected_credits;
-    const revision = body.quote_revision;
-    if (
-      typeof credits !== "number" || !Number.isInteger(credits) || credits <= 0 ||
-      typeof revision !== "string" || revision === ""
-    ) {
-      return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "样片提交须携带 expected_credits 与 quote_revision", {
-        code: ERROR_INVALID_INPUT,
-      });
-    }
-    const quoteDep = deps.quote;
-    if (quoteDep === undefined) {
-      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
-        code: ERROR_QUOTE_STALE,
-      });
-    }
-    // 与报价入口同参（原始 body；effectiveBody 的画布合并不进定价规格）。
-    const quoteInput = projectQuoteInput(type, body, capability);
-    const ruleSnapshot = serializePricingRule(capability);
-    const quote =
-      quoteInput !== null
-        ? await quoteDep({
-            userId,
-            modelId: resolvedModelId,
-            taskType: type,
-            input: quoteInput,
-            ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
-          })
-        : null;
-    const currentRevision =
-      quote !== null && quoteInput !== null
-        ? quoteRevisionOf({
-            catalogVersion: quote.catalogVersion,
-            capabilityVersion: capability?.version,
-            tier: quote.tier,
-            quoteInput,
-          })
-        : null;
-    if (
-      quote === null ||
-      Number(quote.credits) !== credits ||
-      currentRevision !== revision
-    ) {
-      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
-        code: ERROR_QUOTE_STALE,
-      });
-    }
-  }
   const imageReferenceMax =
     capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;
   // ADR-0086 / IKHBDO：视频/音频参考限制**只认能力行 features**。上方 strategy.validate 的预检
@@ -2057,15 +2020,75 @@ export async function handleCreateGenerationJob(
         );
         effectiveBody = {
           ...effectiveBody,
-          references: textRefItems.map((item) => {
-            if (item.type !== "video" || item.duration !== undefined || item.asset_id === undefined) {
-              return item;
-            }
-            const seconds = secondsByAssetId.get(String(item.asset_id));
-            return typeof seconds === "number" && seconds > 0 ? { ...item, duration: seconds } : item;
-          }),
+          references: withVideoReferenceDurations(textRefItems, secondsByAssetId),
         };
       }
+    }
+  }
+  // IKIZQ8：样片提交确认（契约 §2，金标 G03/G04）——fail closed，位于建任务/预扣之前：
+  // 变价（quote_revision 失效）、算不出价、缺确认字段都零创建、零扣费。
+  //
+  // 复算走**报价入口同一套**：projectQuoteInput（effectiveBody，与 handleQuoteGenerationJob
+  // 同参——IKJGE6 起报价端点也做文本带入合并，两处必须同一份判定输入）+ applyEditSourceDurationBasis
+  // （同一改写，编辑单按源时长复算）+ deps.quote（同一 createBillingQuote 装配）+ quoteRevisionOf
+  // （同一指纹函数）。任何一处分叉，用户看到的报价与服务端核对的就会是两个数。
+  // 位置在文本带入合并与时长回填**之后**：复算与冻结读同一次画布合并结果，不存在两次读画布
+  // 之间的 TOCTOU；被合并/复核段先拒掉的请求（失效索引、素材缺失）本就到不了扣费。
+  if (sampleRuling.kind === "sample") {
+    const credits = body.expected_credits;
+    const revision = body.quote_revision;
+    if (
+      typeof credits !== "number" || !Number.isInteger(credits) || credits <= 0 ||
+      typeof revision !== "string" || revision === ""
+    ) {
+      return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "样片提交须携带 expected_credits 与 quote_revision", {
+        code: ERROR_INVALID_INPUT,
+      });
+    }
+    const quoteDep = deps.quote;
+    if (quoteDep === undefined) {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
+        code: ERROR_QUOTE_STALE,
+      });
+    }
+    // 与报价入口同参（effectiveBody + 编辑口径改写，提示词同取原始 parameters.prompt——
+    // 报价端点判定的就是这份；标记转移不改变意图判定，见 IKJFGQ 段注释）。
+    const quoteInput = projectQuoteInput(type, effectiveBody, capability);
+    if (quoteInput !== null) {
+      applyEditSourceDurationBasis(
+        quoteInput,
+        isStr(params.prompt) ? params.prompt : "",
+        capability?.features?.task_types,
+      );
+    }
+    const ruleSnapshot = serializePricingRule(capability);
+    const quote =
+      quoteInput !== null
+        ? await quoteDep({
+            userId,
+            modelId: resolvedModelId,
+            taskType: type,
+            input: quoteInput,
+            ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
+          })
+        : null;
+    const currentRevision =
+      quote !== null && quoteInput !== null
+        ? quoteRevisionOf({
+            catalogVersion: quote.catalogVersion,
+            capabilityVersion: capability?.version,
+            tier: quote.tier,
+            quoteInput,
+          })
+        : null;
+    if (
+      quote === null ||
+      Number(quote.credits) !== credits ||
+      currentRevision !== revision
+    ) {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
+        code: ERROR_QUOTE_STALE,
+      });
     }
   }
   // IKG6EK / ADR-0088：`parameters.prompt` **一律权威**，doc 的正文编译与身份校验都不再需要。

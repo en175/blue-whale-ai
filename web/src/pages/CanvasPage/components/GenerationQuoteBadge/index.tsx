@@ -30,6 +30,9 @@ interface GenerationQuoteBadgeProps {
    *  张数交后端 `resolveReferenceAssets` 去重后自己数，前端只负责如实带上「哪些参考」。
    *  缺省 = 这次没有参考（价格同旧口径）。 */
   references?: GenerationRefItem[];
+  /** IKJGE6：视频草稿目标节点 id——后端报价据此做画布文本带入合并（编辑单按源视频时长
+   *  预估的判定输入）。仅草稿绑定模式传；不传则报价不读画布，行为同旧。 */
+  targetNodeId?: string;
 }
 
 export default function GenerationQuoteBadge(props: GenerationQuoteBadgeProps) {
@@ -40,7 +43,7 @@ export default function GenerationQuoteBadge(props: GenerationQuoteBadgeProps) {
   return <QuoteBadge {...props} />;
 }
 
-function QuoteBadge({ projectId, type, parameters, references }: GenerationQuoteBadgeProps) {
+function QuoteBadge({ projectId, type, parameters, references, targetNodeId }: GenerationQuoteBadgeProps) {
   const { data } = useQuery({
     ...generationQuoteOptions(projectId, {
       type,
@@ -51,6 +54,8 @@ function QuoteBadge({ projectId, type, parameters, references }: GenerationQuote
       // 空列表视为「没有参考」：与创建任务同口径（那边也是 length > 0 才带这个键），
       // 免得报价请求带上一个后端不认的参考字段。
       ...(references && references.length > 0 ? { references } : {}),
+      // IKJGE6：草稿目标带上，后端才能把画布文本带入的参考算进报价（与提交时同一合并）。
+      ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
     }),
     // 模型还没定下来之前不问价：它是定价的输入之一，缺了问不出有意义的结果
     enabled: parameters.model_id !== '',

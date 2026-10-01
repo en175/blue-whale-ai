@@ -13,9 +13,12 @@
 import { createHash } from "node:crypto";
 
 import { RESOURCE_NOT_FOUND_CODE, fail, ok, type ResultEnvelope } from "@lib/contracts";
-import type {
-  ModelCapabilityRepo,
-  ProjectRepo,
+import {
+  DEFAULT_IMAGE_REFERENCE_MAX,
+  type AssetOwnershipOps,
+  type CanvasRepo,
+  type ModelCapabilityRepo,
+  type ProjectRepo,
 } from "@lib/shared/persistence/index.js";
 
 import type { BillingQuote } from "../billing/billing-quote.js";
@@ -23,9 +26,12 @@ import {
   applyEditSourceDurationBasis,
   canonicalJson,
   projectQuoteInput,
+  resolveTextIndexReferences,
   ruleSampleMode,
+  withVideoReferenceDurations,
   type CreateGenerationJobBody,
   type GenerationType,
+  type ReferenceItemInput,
   serializePricingRule,
 } from "./handle-create-generation-job.js";
 
@@ -33,6 +39,12 @@ export interface QuoteGenerationJobDeps {
   projects: Pick<ProjectRepo, "findOwnedById">;
   /** 能力目录白名单：报价要按**同一份**能力行冻结规格（如 features.audio ⇒ generate_audio）。 */
   models: Pick<ModelCapabilityRepo, "listEnabledByType">;
+  /** IKJGE6：视频草稿目标的画布读取——文本带入参考做与建任务同一套服务端合并
+   *  （画布文本提及的视频参考只在建任务侧合并，是预览价 ≠ 实扣价的分叉源）。 */
+  canvas: Pick<CanvasRepo, "getByProject">;
+  /** IKJGE6：合并后视频参考的时长权威回填（与建任务同一 resolveInputAssets——预览与
+   *  实扣的时长必须出自同一个数，不能用前端自带值）。 */
+  assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
   /** 报价函数（`billing-quote.ts` 装配：同一套规格归一 + 同一个 resolveTier；
    *  结果附报价侧实际生效的 tier —— quote_revision 要用同一份等级）。 */
   quote: BillingQuote;
@@ -125,14 +137,66 @@ export async function handleQuoteGenerationJob(
   });
   if (ruling.kind === "rejected") return ok(EMPTY_QUOTE);
 
-  const input = projectQuoteInput(type, body, capability);
+  // IKJGE6：报价判定输入与建任务同源——视频草稿目标（target_node_id）的画布文本带入参考
+  // 在服务端做与建任务同一套合并 + 时长权威回填。此前报价按原始请求体投影，画布文本带入的
+  // 视频参考进不了判定输入：编辑单被误判 default，按用户所选时长出价，而实扣按合并后的
+  // 源视频时长冻结——「预览价 = 实扣价」在该场景断开。合并校验失败（失效索引/帧互斥/超限
+  // ——建任务侧会 400）回空报价：不给一个提交不了的价格。仅视频需要；图片/音频面板报价
+  // 不带 target_node_id，行为不变。
+  let effectiveBody: CreateGenerationJobBody = body;
+  const targetNodeId =
+    typeof body.target_node_id === "string" && body.target_node_id.trim() !== ""
+      ? body.target_node_id
+      : null;
+  if (type === "video" && targetNodeId !== null) {
+    const textIndexRefs = await resolveTextIndexReferences({
+      type,
+      body,
+      projectId,
+      deps: { canvas: deps.canvas },
+      directReferenceAssetIds: [],
+      imageReferenceMax:
+        capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX,
+      ...(capability ? { capability } : {}),
+    });
+    if (!textIndexRefs.ok) return ok(EMPTY_QUOTE);
+    if (textIndexRefs.value.videoReferences) {
+      let merged: ReferenceItemInput[] = textIndexRefs.value.videoReferences;
+      // 时长回填与建任务同源（assets.duration 权威，文本带入项不带时长）：量不到就保持
+      // 原样，编辑口径按「量不到源时长」回落用户所选（applyEditSourceDurationBasis 立场）。
+      const idsNeedingDuration = [
+        ...new Set(
+          merged
+            .filter(
+              (item) =>
+                item.type === "video" && item.asset_id !== undefined && item.duration === undefined,
+            )
+            .map((item) => String(item.asset_id)),
+        ),
+      ];
+      if (idsNeedingDuration.length > 0) {
+        const resolved = await deps.assets.resolveInputAssets(idsNeedingDuration, userId, projectId);
+        // 数不齐（素材缺失/无权——建任务侧会 400）不按残缺映射猜：整个不回填，回落旧口径。
+        if (resolved.length === idsNeedingDuration.length) {
+          const secondsByAssetId = new Map(
+            idsNeedingDuration.map((id, i) => [id, resolved[i]!.duration]),
+          );
+          merged = withVideoReferenceDurations(merged, secondsByAssetId);
+        }
+      }
+      effectiveBody = { ...body, references: merged };
+    }
+  }
+
+  const input = projectQuoteInput(type, effectiveBody, capability);
   if (input === null) return ok(EMPTY_QUOTE);
 
   // IKJ797：编辑单按源参考视频最长时长预估（现场判定——报价发生在创建前，无快照可读，
   // 与预扣/快照冻结是同一个纯函数同一份输入）。提示词从请求体取：报价 payload 是创建任务的
   // 同形定价部分，挂参考视频的 2.5 场景会带上（判定输入与创建时同一份）；未带则判不出 edit，
-  // 按用户所选预估（= 现行为），前端补带提示词属前端票范围。
-  const quoteParams = body.parameters as { prompt?: unknown } | undefined;
+  // 按用户所选预估（= 现行为），前端补带提示词属前端票范围。IKJGE6 起 input 的参考集合已含
+  // 文本带入合并项（上方 effectiveBody），编辑判定与建任务冻结真正同源。
+  const quoteParams = effectiveBody.parameters as { prompt?: unknown } | undefined;
   const prompt = typeof quoteParams?.prompt === "string" ? quoteParams.prompt : "";
   const bySourceVideo = applyEditSourceDurationBasis(
     input,
