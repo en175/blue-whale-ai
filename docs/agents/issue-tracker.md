@@ -2,7 +2,7 @@
 
 仓库 `git@gitee.com:hangzhou-xuanfu_1/blue-whale-ai.git`（网页 https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues）。优先 MCP 工具。
 
-`mcp__gitee-ent__*` 不在当前会话工具清单时（项目 `.mcp.json` 只被部分客户端加载，会话不重启不会挂载）：先向用户报告，给出「重启会话加载 MCP / REST 直连」两个选项，等选择后继续；回退路径由用户拍板，不自行选路，也不编写桥接代码（stdio 桥等）拉起服务。回退次序固定：MCP → REST（curl，token 取自项目 `.mcp.json`）→ 网页。REST 已知口径：更新工单用 PUT；打标签参数名 `label_ids`（数字 ID 逗号分隔），`labels` 参数会被接受但静默不生效。MCP 二进制已知缺陷：URL 路径含 8 位数字 ID 的调用（如 update/get 传 `issue_id`）会因 float64 科学计数法拼 URL 而 panic——遇此崩溃直接转 REST，不重试 MCP。
+`mcp__gitee-ent__*` 不在当前会话工具清单时（项目 `.mcp.json` 只被部分客户端加载，会话不重启不会挂载）：先向用户报告，给出「重启会话加载 MCP / REST 直连」两个选项，等选择后继续；回退路径由用户拍板，不自行选路，也不编写桥接代码（stdio 桥等）拉起服务。回退次序固定：MCP → REST（curl，token 取自项目 `.mcp.json`）→ 网页。REST 已知口径：更新工单用 PUT；打标签参数名 `label_ids`（数字 ID 逗号分隔），`labels` 参数会被接受但静默不生效。企业 token 打普通版 v5 仓库 API（`api.gitee.com/api/v5`）一律 401 wrong token type——REST 回退只覆盖工单更新，PR 创建/合并无 REST 等价路径，只能走 MCP。MCP 二进制已知缺陷：URL 路径含 8 位数字 ID 的调用（如 update/get 传 `issue_id`）会因 float64 科学计数法拼 URL 而 panic——遇此崩溃直接转 REST，不重试 MCP。
 
 ## ID 解析约定（通用，先于任何 `mcp__gitee-ent__*` 调用读）
 
@@ -45,7 +45,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 ## 操作约定
 
 - **创建**：`create_enterprise_issue(enterprise_id, title, description, project_id=..., program_id=...)`。根 issue 的 `project_id`（仓库）和 `program_id`（项目）都**必传**且非 0，缺任一则 hook 拦截（见上「定位」）。企业私有仓库会静默忽略 create 时传入的 `labels`，紧跟一次 `update_enterprise_issue(label_ids=...)` 补上。入参名以工具 schema 为准，不凭印象。
-- **创建后核验**：用 `get_enterprise_issue_detail(new_ident)` 核对 `description` 非空、`project_id` 和 `program_id` 均与请求值一致；子 issue 还要核对 `parent_id` 与父项 `id` 一致。再用 `list_enterprise_issues(project_id=<请求的仓库 ID>, search=new_ident)` 反查，确认目标仓库可见。字段不符或反查不到时，先修正并再次核验，全部通过后才交付。错名参数（如把描述传到 `body`）会被静默忽略，已踩坑建成空描述工单（IK5THP）；PR / Release 创建后也须回读关键字段。
+- **创建后核验**：用 `get_enterprise_issue_detail(new_ident)` 核对 `description` 非空、`project_id` 和 `program_id` 均与请求值一致；子 issue 还要核对 `parent_id` 与父项 `id` 一致。再用 `list_enterprise_issues(project_id=<请求的仓库 ID>, search=new_ident)` 反查，确认目标仓库可见。字段不符或反查不到时，先修正并再次核验，全部通过后才交付。错名参数（如把描述传到 `body`）会被静默忽略，已踩坑建成空描述工单（IK5THP）；PR / Release 创建后也须回读关键字段。查询/回读一律用 get/list 类工具，**禁止为「确认结果」重放 create 类调用**——Gitee 对同名 PR 去重才未产生第二张（!964 实证），属侥幸不构成保证。
 - **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`，但 `issue_type_id` **一律用「任务」(1292680)**。子工单一律任务型，不继承父需求型（2026-08-25 定规）。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`），`前端|后端` 标明改动归属端。跨端改动拆成前端/后端两个子任务，不建「子需求」。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再按「创建后核验」检查父子关系、归属和仓库可见性；查不到则不交 Agent。
   - **子任务，不是子需求**（2026-08-25 定规）：技术侧在产品建的需求工单下记录自己的工作时，只能建**任务**（`issue_type_id=1292680`），绝不能建「需求」型子项。需求（含技术维护母工单 IKAZIG 这类需求型父项）由产品/人关闭，Agent **只完成自己的子任务**，不得把父需求置为已完成/关闭。
   - **父工单正文的标题前缀（如「改造/维护/优化/修复」）不覆盖本条**：若父项要求分类前缀，仍以「端」为标题前缀（`【前端】/【后端】`），分类写进 body；不要为了迁就父项格式把 `issue_type` 改成需求型。
@@ -55,7 +55,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 - **评论**：`comment_enterprise_issue(enterprise_id, issue_id, body)`。
 - **标签**：`update_enterprise_issue(label_ids=...)`，数字 ID。Triage 五标签：needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix，详见 `docs/agents/triage-labels.md`。
 - **创建 PR**：`create_enterprise_repo_pull` **必传数字 `project_id`**——工具描述写「Project ID or PathWithNamespace」，**实际传 PathWithNamespace（如 `hangzhou-xuanfu_1/blue-whale-ai`）会 404「仓库不存在」**，勿被误导。
-- **合并 PR**：`merge_enterprise_pull` 传 `merge_method=merge`（或不传）；工具**无 `prune_source_branch` 参数**，Gitee merge 默认不删源分支，事后跑 `scripts/cleanup-task-worktree.sh`。
+- **合并 PR**：`merge_enterprise_pull` 的 PR 编号参数名是 `pull_request_id`（无 `pull_number` 入参，传错报「pull_request_id required」）；传 `merge_method=merge`（或不传）；工具**无 `prune_source_branch` 参数**，Gitee merge 默认不删源分支，事后跑 `scripts/cleanup-task-worktree.sh`。
 - **关闭**：`update_enterprise_issue(issue_state_id=...)`，**非 `state`**（工具无此入参）。状态枚举随工作项类型变——先 `list_issue_type_states(enterprise_id, issue_type_id)` 查（本仓「需求」= 意向/进行中/已完成/已拒绝，无 closed/open），完成传「已完成」id；完成后 `state` 字段变 `"closed"`。
 
 ## 任务状态机（Agent 全自动流转）
