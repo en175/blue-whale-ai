@@ -17,8 +17,26 @@ function node() {
   return container.querySelector<HTMLElement>('.react-flow__node')!;
 }
 
+function nodeById(id: string) {
+  return container.querySelector<HTMLElement>(`[data-id="${id}"]`)!;
+}
+
 function pane() {
   return container.querySelector<HTMLElement>('.react-flow__pane')!;
+}
+
+/** React Flow 框选走 pointer 事件；真实浏览器一次按下同时派发 pointer 与 mouse 序列。 */
+async function pointer(type: 'pointerdown' | 'pointermove' | 'pointerup', target: EventTarget, x: number, y: number) {
+  await act(async () => {
+    const event = new MouseEvent(type, {
+      bubbles: true, cancelable: true, button: 0, buttons: type === 'pointerup' ? 0 : 1,
+      clientX: x, clientY: y,
+    });
+    Object.defineProperty(event, 'view', { value: window });
+    Object.defineProperty(event, 'isPrimary', { value: true });
+    Object.defineProperty(event, 'pointerId', { value: 1 });
+    target.dispatchEvent(event);
+  });
 }
 
 async function key(type: 'keydown' | 'keyup', target: EventTarget = document.body) {
@@ -197,6 +215,54 @@ describe('Canvas space pan', () => {
     await key('keydown');
     await key('keyup');
     expect(node().classList.contains('draggable')).toBe(false);
+  });
+
+  /** IKJFH1：布置「已选中卡远离、未选中卡压住穿透落点」的两卡场景，做完整穿透平移手势。
+   *  pointer 序列武装框选、mouse 序列驱动平移——真实浏览器一次按下两类事件同发，
+   *  既有用例只发 mouse 序列，从未武装框选，因此长期漏掉选中泄漏。
+   *  groups: [] 模拟真实无组画布：GroupOverlay 仍挂载，其穿透补选中在抓手态误伤选中集合。
+   *  jsdom 下 ResizeObserver 被 stub，节点 measured 无值；显式 width/height 供
+   *  contentNodeAtFlowPoint 几何命中（与真实浏览器 measured 同口径）。 */
+  async function panGestureOverUnselectedCard() {
+    props = {
+      ...props,
+      groups: [],
+      mediaNodes: [
+        { ...props.mediaNodes[0], position: { x: 400, y: 300 }, width: 200, height: 150, selected: true },
+        {
+          id: 'image-2', type: 'mediaNode', position: { x: 50, y: 60 },
+          initialWidth: 200, initialHeight: 150, width: 200, height: 150, selected: false,
+          data: { mediaType: 'image', src: 'blob:test2', fileName: 'test2', toolMode: 'select' },
+        },
+      ],
+    };
+    await act(async () => { root.render(createElement(FlowCanvas, props)); });
+    vi.mocked(props.onViewportChange!).mockClear();
+    // 落点 (100,100) 在未选中卡几何范围内：浏览器穿透卡片命中 pane，jsdom 直接派发在 pane 上
+    await pointer('pointerdown', pane(), 100, 100);
+    await mouse('mousedown', pane(), 100, 100);
+    await pointer('pointermove', pane(), 104, 103);
+    await pointer('pointermove', pane(), 160, 140);
+    await mouse('mousemove', window, 160, 140);
+    await pointer('pointerup', pane(), 160, 140);
+    await finishGesture();
+  }
+
+  it('leaves the selection untouched when a Space pan passes over an unselected card', async () => {
+    await key('keydown');
+    await panGestureOverUnselectedCard();
+    // React Flow 对启用了滚轮平移的视口结束事件有 150ms 防抖。
+    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
+    expect(nodeById('image-2').classList.contains('selected')).toBe(false);
+    expect(nodeById('image-1').classList.contains('selected')).toBe(true);
+  });
+
+  it('leaves the selection untouched when panning over an unselected card in toolbar drag mode', async () => {
+    props = { ...props, toolMode: 'drag' };
+    await panGestureOverUnselectedCard();
+    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
+    expect(nodeById('image-2').classList.contains('selected')).toBe(false);
+    expect(nodeById('image-1').classList.contains('selected')).toBe(true);
   });
 });
 

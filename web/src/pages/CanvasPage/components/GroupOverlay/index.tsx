@@ -73,6 +73,10 @@ interface GroupOverlayProps {
   onConnectSourceToGroup?: (sourceId: string, memberIds: string[]) => void;
   /** 节点拖拽中：拖动节点时隐藏框选悬浮条（成组/下载标签只在静止框选时出现） */
   isDraggingNode?: boolean;
+  /** 抓手态（空格按住或工具栏拖动模式）：内容区 pointerdown/双击整体让位给平移——
+   *  不补选中、不拖组、不进编辑，事件穿透到 pane 由平移接管（IKJFH1）。
+   *  徽标/操作条/连线把手等控件层不受它影响。 */
+  isPanning?: boolean;
 }
 
 interface FrameInfo {
@@ -107,6 +111,7 @@ export default function GroupOverlay({
   onConnectGroupToTarget,
   onConnectGroupDrop,
   isDraggingNode,
+  isPanning,
 }: GroupOverlayProps) {
   const { flowToScreenPosition, screenToFlowPosition } = useReactFlow();
   const { zoom } = useViewport();
@@ -198,6 +203,9 @@ export default function GroupOverlay({
   /** 组内编辑态镜像（window 捕获监听器读取，避免随状态反复重挂） */
   const editGroupIdRef = useRef(editGroupId);
   editGroupIdRef.current = editGroupId ?? null;
+  /** 抓手态镜像（同理：window 捕获监听器读取最新值，不随抓手态反复重挂） */
+  const isPanningRef = useRef(isPanning);
+  isPanningRef.current = isPanning ?? false;
   /** pane DOM（承载光标反馈）：组框在节点层之下无法自己显示 cursor，改由 pane 内联光标表达 */
   const paneRef = useRef<HTMLElement | null>(null);
   /** 拖组结束后需吞掉一次 click（避免冒泡到 pane 触发 onPaneClick 清空选中） */
@@ -398,6 +406,8 @@ export default function GroupOverlay({
    *  不会被触发。 */
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
+      // 抓手态：内容区按下整体让位给平移——不补选中、不拦框选、不拖组（IKJFH1）
+      if (isPanningRef.current) return;
       if (e.button !== 0 || !e.isPrimary || draggingRef.current) return;
       // 扩图框 / 裁切框 / 钉屏幕浮层都压在内容卡盒上，target 却不在 .react-flow__node 内。
       // 不放行会被当成「组框穿透到 pane」：拦传播并程序化选中下方节点（IKGOQ0 / IKH1WJ / IKHCUA）。
@@ -451,6 +461,8 @@ export default function GroupOverlay({
     };
     // 双击组空白 = 进入组内编辑（TC_CX_210），拦截 d3-zoom 的双击缩放避免视口跳动
     const onDblClick = (e: MouseEvent) => {
+      // 抓手态：双击同样让位，不拦截、不触发任何内容区语义（IKJFH1）
+      if (isPanningRef.current) return;
       if (isPassthroughOverlayTarget(e.target)) return;
       const flowPoint = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const content = contentNodeAtFlowPoint(nodesRef.current, flowPoint);
