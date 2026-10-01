@@ -350,7 +350,7 @@ import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUploa
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
 import { referencePromptPlan, applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, readCanvasConflictVersion, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
-import { isApiError } from '@/api/http';
+import { envelopeErrorCode, isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/utils/creditsGate';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
@@ -7842,8 +7842,9 @@ export default function CanvasPage() {
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '创建任务失败',
-            // 接纳侧 4xx 的失败码（IKJ795 数值码随信封，如 1056 比例约束）落卡供一键修复识别
-            errorCode: isApiError(e) ? e.code : undefined,
+            // 接纳侧 4xx 的失败码（IKJ795 比例约束等）落卡供一键修复识别——IKJFGQ 起优先
+            // 取信封 data.code 字符串码（撞号重排不失效），数值码兜底
+            errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
           });
         });
       return true; // 创建请求已发出（IKFXZD 面板关闭判定点）；HTTP 层异步失败由上方 catch 收敛到卡片
@@ -7852,7 +7853,7 @@ export default function CanvasPage() {
       patchMediaNode(nodeId, {
         genStatus: 'failed',
         errorText: isApiError(e) ? e.message : '创建任务失败',
-        errorCode: isApiError(e) ? e.code : undefined,
+        errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
       });
       return false;
     }
@@ -9113,7 +9114,7 @@ export default function CanvasPage() {
             patchMediaNode(nodeId, {
               genStatus: 'failed',
               errorText: isApiError(e) ? e.message : '余额不足',
-              errorCode: isApiError(e) ? e.code : undefined,
+              errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
             });
             return;
           }
@@ -9127,14 +9128,14 @@ export default function CanvasPage() {
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '重试失败',
-            errorCode: isApiError(e) ? e.code : undefined,
+            errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
           });
         });
     } catch (e: unknown) {
       patchMediaNode(nodeId, {
         genStatus: 'failed',
         errorText: isApiError(e) ? e.message : '重试失败',
-        errorCode: isApiError(e) ? e.code : undefined,
+        errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
       });
     }
   };

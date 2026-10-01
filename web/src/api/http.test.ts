@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
-import { API_REQUEST_TIMEOUT_MS, apiRequest, readApiErrorMessage } from './http';
+import { API_REQUEST_TIMEOUT_MS, ApiError, apiRequest, envelopeErrorCode, readApiErrorMessage } from './http';
 import { useAuthStore } from '@/stores/auth';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 
@@ -29,6 +29,20 @@ describe('readApiErrorMessage', () => {
   it('空文案回退状态码', () => {
     expect(readApiErrorMessage({ error: '  ' }, 400)).toBe('请求失败（400）');
     expect(readApiErrorMessage(undefined, 500)).toBe('请求失败（500）');
+  });
+});
+
+describe('envelopeErrorCode（IKJFGQ：信封 data 字符串码优先，数值兜底）', () => {
+  it('data.code 为字符串码时优先返回（稳定锚点，数值码撞号重排不影响识别）', () => {
+    expect(
+      envelopeErrorCode(new ApiError(400, '比例约束', 1060, { code: 'task_type_param_constraint' })),
+    ).toBe('task_type_param_constraint');
+  });
+
+  it('data 无 code / code 非字符串时回落信封数值码', () => {
+    expect(envelopeErrorCode(new ApiError(400, '比例约束', 1060, null))).toBe(1060);
+    expect(envelopeErrorCode(new ApiError(400, '比例约束', 1060, { version: 3 }))).toBe(1060);
+    expect(envelopeErrorCode(new ApiError(400, '比例约束', 1060, { code: 1060 }))).toBe(1060);
   });
 });
 

@@ -1407,6 +1407,103 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     });
   });
 
+  // IKJFGQ：视频任务类型判定输入统一到文本带入合并后的引用集合——冻结值与报价口径
+  // （applyEditSourceDurationBasis 对合并后集合现场重判）同请求一致；编辑/延长比例闸对
+  // 「视频参考仅来自画布文本带入」的提交同样生效（原先读合并前 body.references 时冻结值是
+  // default，比例不拦、计价却按编辑口径改写时长，两处分叉）。
+  describe("视频任务类型判定输入统一（IKJFGQ）", () => {
+    const SEEDANCE_2_5_TEXT_REF_ROW = {
+      supported_sizes: [{ id: "720p", api_value: "720p" }],
+      supported_aspect_ratios: ["16:9", "9:16", "adaptive"],
+      supported_durations: { min: 4, max: 30, step: 1 },
+      features: {
+        video_reference: true,
+        task_types: {
+          default: { allowed_ratios: ["16:9", "9:16", "adaptive"] },
+          edit: { allowed_ratios: ["adaptive"] },
+          prolong: { allowed_ratios: ["adaptive"] },
+        },
+      },
+    };
+    // 画布：目标视频卡 media-1 ← 文本卡 text-a（正文提及 media-2 的视频素材，mediaMentions/
+    // mediaRefs 快照齐备）+ 关系线 media-2 → text-a（textIndex 标记）——文本带入参考由此派生。
+    const TEXT_REF_CANVAS = {
+      nodes: JSON.stringify([
+        { id: "media-1", type: "mediaNode", data: { mediaType: "video" } },
+        {
+          id: "text-a",
+          type: "textNode",
+          data: {
+            text: "参考这段素材",
+            mediaMentions: [{ start: 0, end: 2, nodeId: "media-2", assetId: "2" }],
+            mediaRefs: [
+              { nodeId: "media-2", assetId: "2", mediaType: "video", name: "源视频", url: "http://v/2.mp4" },
+            ],
+          },
+        },
+        { id: "media-2", type: "mediaNode", data: { mediaType: "video" } },
+      ]),
+      edges: JSON.stringify([
+        { id: "e-attach", source: "text-a", target: "media-1" },
+        { id: "e-index", source: "media-2", target: "text-a", data: { textIndex: true } },
+      ]),
+    };
+    function buildTextRefDeps() {
+      const base = buildVideoDeps(SEEDANCE_2_5_TEXT_REF_ROW);
+      const deps = {
+        ...base.deps,
+        canvas: {
+          getByProject: vi.fn().mockResolvedValue({
+            id: "9",
+            project_id: "1",
+            version: 3,
+            viewport: null,
+            nodes: TEXT_REF_CANVAS.nodes,
+            edges: TEXT_REF_CANVAS.edges,
+          }),
+        },
+        // 文本带入的本地 asset（id=2）按声明返回 video + 权威时长 7s（时长冻结与编辑计价都吃它）
+        assets: {
+          resolveInputAssets: vi.fn(async (ids: string[]) =>
+            ids.map((id) => ({ id, type: "video", duration: 7 }))),
+        },
+      } as unknown as HandlerDeps;
+      return { deps, createJob: base.createJob };
+    }
+    const textRefBodyOf = (prompt: string, aspect: string) => ({
+      ...VIDEO_BODY,
+      target_node_id: "media-1",
+      parameters: { ...VIDEO_BODY.parameters, prompt, aspect_ratio: aspect },
+    });
+
+    it("编辑意图 + 文本带入视频参考 + 9:16 → 1060（统一前判定是 default 会放行，统一后按 edit 拦）", async () => {
+      const { deps, createJob } = buildTextRefDeps();
+      const result = await handleCreateGenerationJob("u1", "p1", textRefBodyOf("把背景替换成海边", "9:16"), null, deps);
+      expect(result.code).toBe(1060);
+      expect(result.data?.code).toBe("task_type_param_constraint");
+      expect(createJob).not.toHaveBeenCalled();
+    });
+
+    it("编辑意图 + 文本带入视频参考 + adaptive → 200，冻结 edit 且计价按源视频时长改写（同一请求两判定一致）", async () => {
+      const { deps, createJob } = buildTextRefDeps();
+      const result = await handleCreateGenerationJob("u1", "p1", textRefBodyOf("把背景替换成海边", "adaptive"), null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.video_task_type).toBe("edit");
+      // applyEditSourceDurationBasis 按源视频时长（7s）改写——与冻结值同一请求同口径
+      expect(cmdArg.input.duration).toBe(7);
+    });
+
+    it("纯参考意图 + 文本带入视频参考 + 9:16 → 200 冻结 default，时长不改写（不误伤参考单）", async () => {
+      const { deps, createJob } = buildTextRefDeps();
+      const result = await handleCreateGenerationJob("u1", "p1", textRefBodyOf("参考它的运镜风格", "9:16"), null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.video_task_type).toBe("default");
+      expect(cmdArg.input.duration).toBe(VIDEO_BODY.parameters.duration);
+    });
+  });
+
   it("references 项既无 asset_id 也无 material_id → 400 参考素材引用无效", async () => {
     const { deps, createJob } = buildVideoDeps();
     const result = await handleCreateGenerationJob(

@@ -8,7 +8,9 @@
 //   1xxx      —— 领域错误码，每错一码（生成域 1001-1030；账号域 1100+）
 //   1xxxx     —— 全局业务码（Java SystemCode 系，如 100301 资源不存在）
 //
-// 对外契约：错误响应统一 { code: 数值码, message: 中文 }（见 result.ts ResultEnvelope）。
+// 对外契约：错误响应统一 { code: 数值码, message: 中文 }（见 result.ts ResultEnvelope）；
+// IKJFGQ 起失败投影另携 canonical 字符串码（PublicGenerationError.reason / 任务失败信封 data.code）
+// ——数值码会因撞号重排，字符串码是前端按码识别的稳定锚点。
 // 前端按数值 code 分支（如 web/src/api/jobs.ts isGenerationDomainError 用 1000-1099）。
 //
 // 职责边界：本文件是错误码 & 文案的唯一来源 + provider 错误信号识别；
@@ -628,6 +630,10 @@ export function isQuotaSignal(text: string, status?: number): boolean {
 // ═══════════════════════════════════════════════════════════════
 export interface PublicGenerationError {
   code: number;
+  /** IKJFGQ：canonical 字符串码（如 task_type_param_constraint）。数值码会因撞号重排
+   *  （1060 已在 !960 分支期改过一次），字符串码是稳定锚点——任务失败信封把它带进
+   *  data.code 供前端按码识别（字符串优先，数值留兜底）。 */
+  reason?: string;
   message: string;
 }
 

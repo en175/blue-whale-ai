@@ -1807,38 +1807,24 @@ export async function handleCreateGenerationJob(
     return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "prompt 无效", {
       code: ERROR_INVALID_INPUT,
     });
-  // IKJ795：视频任务类型**只判一次**——接纳校验与快照冻结共用同一结果，下游（执行/报价）
-  // 读冻结字段、不现场重算。判定输入与 IKFPYX 起的现行口径一致：references + 主提示词
-  // （不含文本附件）。视频恒判定（不依赖 size/resolution/duration 携带）——编辑/延长 +
-  // 非 adaptive 比例的拒单不能因为没带分辨率档而漏网。
-  let videoTaskType: VideoTaskType | undefined;
-  if (type === "video") {
-    const parsedRefs = parseReferences(body.references);
-    videoTaskType = resolveVideoTaskType(
-      parsedRefs.kind === "ok" ? parsedRefs.items : [],
-      promptText,
-    );
-  }
   // IKE7JP：Dock 提交时前置校验 resolution/size/aspect_ratio/duration 对能力目录合法性——
   // 越界值在接纳当下 4xx 返回（capability_unsupported_* 细分码 + 可用值文案），不拖到 worker 执行期。
   // 仅视频校验时长；图片无时长。SceneCard 路径已有同源 checkCapabilityLimit（下一步迁移共享）。
   // 仅当请求明确携带尺寸/比例/时长时才校验（缺省由能力默认值兜底，见 checkCapabilityLimit 同源语义）；
   // 图片路径允许缺 size（能力行默认尺寸）。duration 单独存在也进入校验（review：防只带时长越界漏网）。
-  // IKJ795：视频恒进（aspect_ratio 由 validateCommon 必填）——编辑/延长 + 非 adaptive 的
-  // task_type_param_constraint 拒单对所有视频提交形态生效，不限带档位的请求。
+  // IKJFGQ：视频段的档位校验随任务类型判定整体移到文本带入合并之后（见 effectiveBody 段注释）——
+  // 判定输入已统一为合并后的引用集合，此处只留图片路径。
   if (
     capability &&
-    (type === "video" ||
-      (type !== "audio" &&
-        (params.size !== undefined || params.resolution !== undefined)))
+    type !== "video" &&
+    type !== "audio" &&
+    (params.size !== undefined || params.resolution !== undefined)
   ) {
-    // IKFPYX：命中 features.task_types 时按任务类型约束校验（含 duration=-1 放行），
-    // 否则回落基础能力行；任务类型读上面的单次判定结果（videoTaskType）。
     const checked = toGenerationParamCheckInput({
       resolution: params.resolution,
       size: params.size,
       aspect_ratio: params.aspect_ratio,
-      duration: type === "video" ? params.duration : undefined,
+      duration: undefined,
     });
     if (checked) {
       const limitErr = checkGenerationParamLimit(
@@ -1848,29 +1834,13 @@ export async function handleCreateGenerationJob(
           supported_durations: capability.supported_durations,
           task_types: capability.features?.task_types,
         },
-        videoTaskType ? { ...checked, task_type: videoTaskType } : checked,
+        checked,
       );
       if (limitErr) {
         return fail(errorCodeToNumeric(limitErr.code), limitErr.reason, {
           code: limitErr.code,
         });
       }
-    }
-  }
-  // IKJ795：编辑/延长 + 非 adaptive 比例的结构化拒单（task_type_param_constraint，不扣费 4xx）。
-  // 独立于上面那段档位校验：视频可以只带比例不带档位（toGenerationParamCheckInput 对该形态
-  // 返回 null），而这道约束只关乎比例，不能因缺档位漏网。判定输入读上面冻结的 videoTaskType
-  // （不现场重算）；约束按能力行 task_types 配置——未配置该类型（2.0 形态）不拦，官方允许
-  // 2.0 编辑任务指定比例。首帧/首尾帧走 validateVideo 既有闸，不在此重复。
-  if (capability && type === "video" && (videoTaskType === "edit" || videoTaskType === "prolong")) {
-    const allowed = taskTypeAllowedRatios(capability.features?.task_types, videoTaskType);
-    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
-    if (allowed && !allowed.includes(ratio)) {
-      return fail(
-        errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT),
-        TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
-        { code: ERROR_TASK_TYPE_PARAM_CONSTRAINT },
-      );
     }
   }
   // IKE7JP：图片 size×ratio 交叉格前置——GPT 交叉格未填 / banana 一维映射缺失的组合
@@ -1942,6 +1912,66 @@ export async function handleCreateGenerationJob(
   let effectiveBody: CreateGenerationJobBody = textIndexRefs.value.videoReferences
     ? { ...body, references: textIndexRefs.value.videoReferences }
     : body;
+  // IKJ795 / IKJFGQ：视频任务类型**只判一次**——接纳校验与快照冻结共用同一结果，下游（执行/报价）
+  // 读冻结字段、不现场重算。IKJFGQ 起判定输入统一为**文本带入合并后**的引用集合（effectiveBody）：
+  // 报价侧 applyEditSourceDurationBasis 对合并后的 input.references 现场重判，冻结值若读合并前的
+  // 原始 body.references，「视频参考仅来自画布文本带入 + 提示词带编辑意图」会让两处分叉（冻结值
+  // default 不拦比例、计价按编辑口径改写时长）。判定用主提示词（不含文本附件）；标记转移只把
+  // &身份& 换成 @图片N 一类标签（不含意图关键词），转移前后对判定等价。视频恒判定（不依赖
+  // size/resolution/duration 携带）——编辑/延长 + 非 adaptive 比例的拒单不能因为没带分辨率档而漏网。
+  let videoTaskType: VideoTaskType | undefined;
+  if (type === "video") {
+    const parsedRefs = parseReferences(effectiveBody.references);
+    videoTaskType = resolveVideoTaskType(
+      parsedRefs.kind === "ok" ? parsedRefs.items : [],
+      promptText,
+    );
+  }
+  // IKE7JP（视频段，随判定迁移到合并后）：仅当请求明确携带尺寸/比例/时长时才校验（缺省由能力
+  // 默认值兜底）；视频恒进（aspect_ratio 由 validateCommon 必填）——编辑/延长 + 非 adaptive 的
+  // task_type_param_constraint 拒单对所有视频提交形态生效，不限带档位的请求。
+  // IKFPYX：命中 features.task_types 时按任务类型约束校验（含 duration=-1 放行），
+  // 否则回落基础能力行；任务类型读上面的单次判定结果（videoTaskType）。
+  if (capability && type === "video") {
+    const checked = toGenerationParamCheckInput({
+      resolution: params.resolution,
+      size: params.size,
+      aspect_ratio: params.aspect_ratio,
+      duration: params.duration,
+    });
+    if (checked) {
+      const limitErr = checkGenerationParamLimit(
+        {
+          supported_sizes: capability.supported_sizes,
+          supported_aspect_ratios: capability.supported_aspect_ratios,
+          supported_durations: capability.supported_durations,
+          task_types: capability.features?.task_types,
+        },
+        videoTaskType ? { ...checked, task_type: videoTaskType } : checked,
+      );
+      if (limitErr) {
+        return fail(errorCodeToNumeric(limitErr.code), limitErr.reason, {
+          code: limitErr.code,
+        });
+      }
+    }
+  }
+  // IKJ795：编辑/延长 + 非 adaptive 比例的结构化拒单（task_type_param_constraint，不扣费 4xx）。
+  // 独立于上面那段档位校验：视频可以只带比例不带档位（toGenerationParamCheckInput 对该形态
+  // 返回 null），而这道约束只关乎比例，不能因缺档位漏网。判定输入读上面冻结的 videoTaskType
+  // （不现场重算）；约束按能力行 task_types 配置——未配置该类型（2.0 形态）不拦，官方允许
+  // 2.0 编辑任务指定比例。首帧/首尾帧走 validateVideo 既有闸，不在此重复。
+  if (capability && type === "video" && (videoTaskType === "edit" || videoTaskType === "prolong")) {
+    const allowed = taskTypeAllowedRatios(capability.features?.task_types, videoTaskType);
+    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
+    if (allowed && !allowed.includes(ratio)) {
+      return fail(
+        errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT),
+        TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+        { code: ERROR_TASK_TYPE_PARAM_CONSTRAINT },
+      );
+    }
+  }
   // IKE7JP：提交时前置查参考素材存在性/类型——复用 worker resolveInputAssets（归属逻辑单份：
   // 项目直属 ∪ 全局 ∪ project_asset 关联）。缺失/无权访问在接纳当下 400，不拖到 worker 执行期。
   // 仅本地 Asset 引用需要查存在性；素材库引用（asset:// 载体）由上游强校验，格式已在前置校验。
