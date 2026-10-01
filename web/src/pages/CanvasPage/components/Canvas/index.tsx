@@ -939,8 +939,9 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         panOnScroll
         zoomOnScroll={false}
         panActivationKeyCode={null}
-        // IKFR4X 参考选取会话：框选隔离；整组拖动期间同样关掉框选，避免选框扫到组外节点
-        selectionOnDrag={!refPickActive && frameDragMemberIds.size === 0}
+        // IKFR4X 参考选取会话：框选隔离；整组拖动期间同样关掉框选，避免选框扫到组外节点；
+        // IKJFH1 抓手态（空格/工具栏拖动）同门关闭：穿透 pane 的拖动一律是平移，不武装框选
+        selectionOnDrag={!refPickActive && !isDrag && frameDragMemberIds.size === 0}
         selectionMode={SelectionMode.Partial}
         zoomOnDoubleClick={!isDrag}
         nodesDraggable={!isDrag && !refPickActive}
@@ -1013,6 +1014,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             onConnectGroupDrop={onConnectGroupDrop}
             onConnectSourceToGroup={onConnectSourceToGroup ?? (() => {})}
             isDraggingNode={isDraggingNode}
+            isPanning={isDrag}
           />
         )}
         {/* 裁切框覆盖层（IKGW1N）：同 GroupOverlay 须作为 ReactFlow children 渲染拿
