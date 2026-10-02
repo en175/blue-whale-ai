@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { canvasBindingSchema } from "./canvas-recovery.js";
 
 /** IKIHPJ（父规格 IKIHMX）: 业务 API、持久化快照与 Worker 共用的音视频合成字段（迁移契约 §21）。
  * 冻结快照对象内用 `assetId`/`nodeId`（camel，规格 JSON 字面），顶层 `is_audio_reserve`/`sync`；
@@ -41,6 +42,9 @@ export const audioVideoMuxCreateSchema = z.object({
   is_audio_reserve: z.boolean().default(true),
   /** 时长对齐单字段：none=保持原长，video=裁到视频长，audio=裁到音频长；全为裁剪语义。 */
   sync: z.enum(AUDIO_VIDEO_MUX_SYNC_MODES).default("none"),
+  // IKJJQZ（IKIXK9-SPEC-20261002 B.3）：恢复契约 v1 绑定（可选；未携带走历史路径零变化）。
+  // 冻结进 job.input 的字段不含它——请求摘要（JSON.stringify(parsed)）自动覆盖。
+  canvas_binding: canvasBindingSchema.optional(),
 }).strict();
 
 export type AudioVideoMuxCreate = z.infer<typeof audioVideoMuxCreateSchema>;
