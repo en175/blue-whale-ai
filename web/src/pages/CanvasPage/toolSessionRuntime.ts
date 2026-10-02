@@ -22,6 +22,8 @@ export interface ToolSubmissionContext {
 export interface ToolSessionDefinition<State, Entry, Input, Request = void> {
   kind: ToolSessionKind;
   initialize(entry: Entry, previous?: State): State | null;
+  /** 门槛通过并完成互斥后，执行工具专属的进入动作。 */
+  opened?(state: State): State;
   target(state: State): string | null;
   capture(state: State, request?: Request): Input | null;
   submit(input: Input, context: ToolSubmissionContext): Promise<void>;
@@ -120,7 +122,7 @@ export function createToolSessionRuntime() {
           if (state === null) return false;
           enterLegacy(definition.kind, deps, () => {
             if (snapshot.state !== null) definition.cleanup?.(snapshot.state);
-            snapshot = { state, submitting: false };
+            snapshot = { state: definition.opened?.(state) ?? state, submitting: false };
             changed();
           });
           return true;

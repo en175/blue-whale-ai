@@ -147,3 +147,26 @@ it.each([false, true])('发送即退出仍保留当前失败反馈；后来会�
   expect(errors).toEqual(newSession ? [] : ['创建失败']);
   expect(tool.getSnapshot().state).toEqual(newSession ? { nodeId: 'v1', format: 'm4a' } : null);
 });
+
+it('草稿工具门槛失败保留旧会话；成功先退出旧工具和关闭生成面板，再建卡与来源边', () => {
+  const runtime = createToolSessionRuntime();
+  const existing = runtime.register(definition);
+  existing.open('v1', legacyDeps());
+  const events: string[] = [];
+  const draft = runtime.register({
+    ...definition, kind: 'audioVideoMux',
+    initialize: (id: string) => id === 'invalid' ? null : { nodeId: id, format: 'mp4' },
+    opened: (state: { nodeId: string; format: string }) => {
+      expect(existing.getSnapshot().state).toBeNull();
+      events.push('create-card', 'audio-edge');
+      return { ...state, nodeId: 'draft1' };
+    },
+  });
+  const entryDeps = { ...legacyDeps(), dismissGenPanels: () => { events.push('close-panel'); } };
+  expect(draft.open('invalid', entryDeps)).toBe(false);
+  expect(existing.getSnapshot().state?.nodeId).toBe('v1');
+  expect(events).toEqual([]);
+  expect(draft.open('a1', entryDeps)).toBe(true);
+  expect(events).toEqual(['close-panel', 'create-card', 'audio-edge']);
+  expect(draft.getSnapshot().state?.nodeId).toBe('draft1');
+});
