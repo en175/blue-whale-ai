@@ -1,3 +1,9 @@
+// IKJIVA：视频参考时长回填（withVideoReferenceDurations）与「筛选+resolve+比对」合并管线
+// 迁至 resolve-reference-durations.ts（与报价端点单份共享），此处仅按需导入使用。
+import {
+  localAssetReferenceIds,
+  resolveReferenceDurations,
+} from "./resolve-reference-durations.js";
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
 import { freezeReferenceLimits } from "../generation-runtime/video-reference-validation.js";
@@ -911,22 +917,8 @@ export function applyEditSourceDurationBasis(
   return true;
 }
 
-/** IKJGE6：视频参考时长的权威补齐（建任务与报价共用）。缺 `duration` 的本地视频引用按
- *  查得的素材时长（assets.duration，`resolveInputAssets` 顺带查出）回填；查不到或非正数
- *  保持原样——计价侧按「量不到源时长」回落（applyEditSourceDurationBasis 的既有立场）。
- *  素材库引用（material_id，本地零表）只能靠调用方带，不在本函数职责内。 */
-export function withVideoReferenceDurations(
-  references: ReadonlyArray<ReferenceItemInput>,
-  secondsByAssetId: ReadonlyMap<string, number | null>,
-): ReferenceItemInput[] {
-  return references.map((item) => {
-    if (item.type !== "video" || item.duration !== undefined || item.asset_id === undefined) {
-      return item;
-    }
-    const seconds = secondsByAssetId.get(String(item.asset_id));
-    return typeof seconds === "number" && seconds > 0 ? { ...item, duration: seconds } : item;
-  });
-}
+/** IKJGE6：视频参考时长的权威补齐 —— IKJIVA 起与「筛选+resolve+比对」整段合并管线
+ *  （resolveReferenceDurations）一起单份落位在 resolve-reference-durations.ts。 */
 
 /**
  * 报价（价格预览）用的规格投影 —— 喂给 billing 的 `Quote`，只算不扣。
@@ -1983,46 +1975,46 @@ export async function handleCreateGenerationJob(
   }
   // IKG6EK / ADR-0088：视频/音频的 references 参考素材复核。原先这段只在携带 prompt_doc 时补齐，
   // doc 退役后无条件执行——三端统一 references，越权/缺失/类型不符一律在接纳当下 400。
+  // IKJIVA：筛选/resolve/数量比对/时长回填走 resolve-reference-durations 共享管线（与报价端点
+  // 单份同源——两侧各自手工维护是 PR !968 审查 Important 1 的转票点）；本侧差异只有：
+  // 筛选面=全量本地引用（存在性/类型复核面）、shortfall → 400、audio 只复核不回填。
   if (type === "video" || type === "audio") {
     const parsedTextRefs = parseReferences(effectiveBody.references);
     const textRefItems = parsedTextRefs.kind === "ok" ? parsedTextRefs.items : [];
-    // references 单数组不走 reference_asset_ids 既有存在性复核，在此补齐：本地 asset 必须存在/有权，
-    // 且声明 type 与素材实际类型一致（编号由 type 派生，谎报 type 会错编 图片N/视频N/音频N）。
-    const localIds = textRefItems.filter((item) => item.asset_id !== undefined).map((item) => String(item.asset_id));
-    if (localIds.length > 0) {
-      const resolvedRefs = await deps.assets.resolveInputAssets(localIds, userId, projectId);
-      if (resolvedRefs.length !== localIds.length) {
-        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), "参考素材不存在或无权访问", {
-          code: ERROR_INVALID_REFERENCE,
-        });
-      }
-      const resolvedTypes = new Map(localIds.map((id, i) => [id, resolvedRefs[i]!.type]));
-      const mismatch = textRefItems.some(
-        (item) => item.asset_id !== undefined && resolvedTypes.get(String(item.asset_id)) !== item.type,
-      );
-      if (mismatch) {
-        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE), "参考素材类型与声明不符", {
-          code: ERROR_INVALID_REFERENCE_TYPE,
-        });
-      }
-      // ⚠️ 输入视频的**时长**冻结进快照 —— 火山按 token 计价的公式在含视频输入时要把
-      //    「输入时长」加进 token 估算（(输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024），
-      //    而时长是 references **元素上**的标量、数组本身进不了规格。所以在这里写进元素，
-      //    由 billing 侧（billing-specs.ts 预扣 / SettlementUsageLines 结算）折算成标量键。
-      //
-      //    来源优先级：调用方带的 duration → 本地素材的 assets.duration（**权威**，
-      //    由 resolveInputAssets 一并查出，省一次查询）。两者都没有就**不写这个字段**——
-      //    宁可让 billing 判「含视频输入却量不到输入时长」而拒绝，也不按 0 估（少冻＝平台垫钱）。
-      //    素材库引用（material_id，本地零表）只能靠调用方带；画布提交时会带。
-      if (type === "video" && parsedTextRefs.kind === "ok") {
-        const secondsByAssetId = new Map(
-          localIds.map((id, i) => [id, resolvedRefs[i]!.duration]),
-        );
-        effectiveBody = {
-          ...effectiveBody,
-          references: withVideoReferenceDurations(textRefItems, secondsByAssetId),
-        };
-      }
+    const ruling = await resolveReferenceDurations({
+      references: textRefItems,
+      assetIdsOf: localAssetReferenceIds,
+      userId,
+      projectId,
+      assets: deps.assets,
+    });
+    if (ruling.kind === "shortfall") {
+      return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), "参考素材不存在或无权访问", {
+        code: ERROR_INVALID_REFERENCE,
+      });
+    }
+    // references 单数组不走 reference_asset_ids 既有存在性复核，在共享管线上补齐类型一道：
+    // 声明 type 必须与素材实际类型一致（编号由 type 派生，谎报 type 会错编 图片N/视频N/音频N）。
+    const mismatch = textRefItems.some(
+      (item) =>
+        item.asset_id !== undefined &&
+        ruling.assetsById.get(String(item.asset_id))?.type !== item.type,
+    );
+    if (mismatch) {
+      return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE), "参考素材类型与声明不符", {
+        code: ERROR_INVALID_REFERENCE_TYPE,
+      });
+    }
+    // ⚠️ 输入视频的**时长**冻结进快照 —— 火山按 token 计价的公式在含视频输入时要把
+    //    「输入时长」加进 token 估算（(输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024），
+    //    而时长是 references **元素上**的标量、数组本身进不了规格。所以由共享管线写进元素，
+    //    由 billing 侧（billing-specs.ts 预扣 / SettlementUsageLines 结算）折算成标量键。
+    //    来源优先级：调用方带的 duration → 本地素材的 assets.duration（**权威**）；两者都
+    //    没有（共享管线不回填 null/非正数）就不写这个字段——宁可让 billing 判「含视频输入却
+    //    量不到输入时长」而拒绝，也不按 0 估（少冻＝平台垫钱）。素材库引用（material_id，
+    //    本地零表）只能靠调用方带；画布提交时会带。
+    if (type === "video" && parsedTextRefs.kind === "ok") {
+      effectiveBody = { ...effectiveBody, references: ruling.references };
     }
   }
   // IKIZQ8：样片提交确认（契约 §2，金标 G03/G04）——fail closed，位于建任务/预扣之前：
