@@ -46,6 +46,9 @@ class ReleaseLineFixture:
         for name in ("python3-command.sh", "release-line-state.py", "release_line_sync.py", "task_metadata.py"):
             shutil.copy2(SCRIPTS / "lib" / name, self.repo / "scripts" / "lib" / name)
         (self.repo / "base.txt").write_text("base\n", encoding="utf-8")
+        # 夹具与真实仓库同款忽略规则：sync 脚本 import scripts/lib 会生成
+        # __pycache__，缺失忽略会让 dirty_paths 断言误报夹具污染。
+        (self.repo / ".gitignore").write_text("__pycache__/\n*.pyc\n", encoding="utf-8")
         hooks = self.repo / ".githooks"
         hooks.mkdir()
         (hooks / "pre-push").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
