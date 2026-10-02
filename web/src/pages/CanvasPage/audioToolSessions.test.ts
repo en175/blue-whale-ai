@@ -1,14 +1,14 @@
+import { openOtherTool } from './testing/openOtherTool';
 import { expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { createAudioTrimSession, createAudioSpeedSession, createVocalSplitSession, type VocalSplitPayload, type AudioToolSessionHost, type AudioToolSubmission } from './audioToolSessions';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import { createToolSessionRuntime } from './toolSessionRuntime';
-import { TOOL_SESSION_KINDS, type ToolSessionDeps } from './toolSessionCoordinator';
+import { type ToolSessionDeps } from './toolSessionCoordinator';
 
 const deps: ToolSessionDeps = {
-  activity: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, null])) as ToolSessionDeps['activity'],
-  exits: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, () => {}])) as ToolSessionDeps['exits'],
+
   dismissGenPanels() {}, selectNode() {},
 };
 const source = (): Node => ({
@@ -132,7 +132,7 @@ it.each(['audioTrim', 'audioSpeed', 'vocalSplit'] as const)('%s：关闭、重�
     for (const outcome of ['success', 'failure']) {
       const { runtime, tool, pending, edit, errors, tasks } = delayedSession(kind);
       tool.open('a1', deps); edit(); tool.send();
-      if (change === 'switch') runtime.enterLegacy('erase', deps, () => {});
+      if (change === 'switch') openOtherTool(runtime, deps);
       else if (change === 'project') runtime.setProject('p2');
       else tool.close();
       if (change !== 'close') {
@@ -182,21 +182,4 @@ it.each(['audioTrim', 'audioSpeed', 'vocalSplit'] as const)('%s：素材身份�
   expect(warnings).toEqual([kind === 'audioTrim' ? '当前音频尚未关联资产，无法截取' : kind === 'audioSpeed' ? '当前音频尚未关联资产，无法调速' : '当前视频尚未关联资产，无法人声背景分离']);
 });
 
-it.each(['audioTrim', 'audioSpeed', 'vocalSplit'] as const)('%s 与所有其余编辑工具双向切换：旧工具退出，生成面板关闭', (kind) => {
-  for (const other of TOOL_SESSION_KINDS.filter((candidate) => candidate !== kind)) {
-    const { runtime, tool } = delayedSession(kind);
-    const legacy = {
-      ...deps, activity: { ...deps.activity, [other]: 'legacy-source' }, exits: { ...deps.exits },
-    };
-    let panelOpen = true;
-    legacy.exits[other] = () => { legacy.activity[other] = null; };
-    legacy.dismissGenPanels = () => { panelOpen = false; };
-    tool.open('a1', legacy);
-    expect(legacy.activity[other]).toBeNull();
-    expect(panelOpen).toBe(false);
-    expect(tool.getSnapshot().state?.nodeId).toBe('a1');
-    runtime.enterLegacy(other, legacy, () => { legacy.activity[other] = 'legacy-source'; });
-    expect(tool.getSnapshot()).toEqual({ state: null, submitting: false });
-    expect(legacy.activity[other]).toBe('legacy-source');
-  }
-});
+// 与全部真实编辑工具的双向切换由 canvasToolSessions.test.tsx 的156组公开注册矩阵覆盖。

@@ -1,14 +1,14 @@
+import { openOtherTool } from './testing/openOtherTool';
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { UploadCompleteData } from '@/api/assets';
 import { createToolSessionRuntime } from './toolSessionRuntime';
-import { TOOL_SESSION_KINDS, type ToolSessionDeps } from './toolSessionCoordinator';
+import { type ToolSessionDeps } from './toolSessionCoordinator';
 import { createCropSession, applyCropPreset } from './cropSession';
 
 const deps: ToolSessionDeps = {
-  activity: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, null])) as ToolSessionDeps['activity'],
-  exits: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, () => {}])) as ToolSessionDeps['exits'],
+
   dismissGenPanels() {}, selectNode() {},
 };
 const source: Node = { id: 'i1', type: 'mediaNode', position: { x: 400, y: 0 }, data: { assetId: '5', src: 'http://img/i1.png', width: 1600, height: 900, mime: 'image/png' } };
@@ -134,7 +134,7 @@ it.each(['close', 'switch', 'project', 'delete'] as const)('%s 后旧上传成�
     tool.open('i1', deps); tool.send();
     await new Promise((resolve) => setTimeout(resolve, 0));
     if (change === 'close') tool.close();
-    if (change === 'switch') runtime.enterLegacy('audioTrim', deps, () => {});
+    if (change === 'switch') openOtherTool(runtime, deps, false);
     if (change === 'delete') runtime.reconcileSources(new Set());
     if (change === 'project') { projectId = 'p2'; runtime.setProject('p2'); tool.open('i1', deps); }
     const laterView = tool.getSnapshot();

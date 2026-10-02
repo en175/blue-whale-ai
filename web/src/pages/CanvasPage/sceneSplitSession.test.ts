@@ -4,7 +4,7 @@ import { createSceneSplitSession, type SceneSplitSubmission } from './sceneSplit
 import { createToolSessionRuntime } from './toolSessionRuntime';
 import { createAudioVideoSplitSession } from './audioVideoSplitSession';
 
-const deps = { activity: {}, exits: {}, dismissGenPanels() {}, selectNode() {} };
+const deps = { dismissGenPanels() {}, selectNode() {} };
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('场景切分工具定义契约', () => {

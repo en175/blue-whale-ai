@@ -11,7 +11,7 @@ import ImageEraseDialog from './index';
 import { rasterizeMaskToPngFile } from '../../imageErase';
 import { createImageEraseSession } from '../../maskToolSessions';
 import { createToolSessionRuntime } from '../../toolSessionRuntime';
-import { TOOL_SESSION_KINDS, type ToolSessionDeps } from '../../toolSessionCoordinator';
+import { type ToolSessionDeps } from '../../toolSessionCoordinator';
 import type { MaskOp } from '../../eraseMask';
 
 let root: Root | null = null;
@@ -38,8 +38,7 @@ function eraseRuntime(missingAsset = false) {
     createTask: async () => ({ job_id: 'j1' }), handoff: async () => {}, warn() {}, error() {},
   })));
   const deps: ToolSessionDeps = {
-    activity: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, null])) as ToolSessionDeps['activity'],
-    exits: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, () => {}])) as ToolSessionDeps['exits'],
+
     dismissGenPanels() {}, selectNode() {},
   };
   tool.open('i1', deps);

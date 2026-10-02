@@ -2,11 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { createAudioVideoSplitSession, type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import { createToolSessionRuntime } from './toolSessionRuntime';
-import { TOOL_SESSION_KINDS, type ToolSessionDeps } from './toolSessionCoordinator';
+import { type ToolSessionDeps } from './toolSessionCoordinator';
 
 const deps: ToolSessionDeps = {
-  activity: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, null])) as ToolSessionDeps['activity'],
-  exits: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, () => {}])) as ToolSessionDeps['exits'],
+
   dismissGenPanels() {}, selectNode() {},
 };
 

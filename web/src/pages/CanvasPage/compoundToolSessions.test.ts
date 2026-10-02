@@ -1,11 +1,12 @@
+import { openOtherTool } from './testing/openOtherTool';
 import { expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { createToolSessionRuntime } from './toolSessionRuntime';
 import { audioVideoMuxIdentityOf } from './audioVideoMux';
 import { createAudioMixSession, addAudioMixInput, createAudioVideoMuxSession, type AudioMixHost, type AudioMixSubmission, type AudioVideoMuxHost, type AudioVideoMuxSubmission } from './compoundToolSessions';
-import type { LegacyToolSessionDeps } from './toolSessionRuntime';
+import type { ToolSessionDeps } from './toolSessionCoordinator';
 
-const deps: LegacyToolSessionDeps = { activity: {}, exits: {}, dismissGenPanels() {}, selectNode() {} };
+const deps: ToolSessionDeps = { dismissGenPanels() {}, selectNode() {} };
 const audio = (id = 'a1', assetId = '8'): Node => ({ id, type: 'mediaNode', position: { x: 20, y: 30 }, data: { mediaType: 'audio', assetId, src: `https://assets/${id}.mp3`, fileName: '原音频.mp3' } });
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -132,7 +133,7 @@ it.each(['audioMix', 'audioVideoMux'] as const)('%s 旧成功仍交付，旧失�
     for (const result of ['success', 'failure']) {
       const test = compoundHarness(kind);
       test.open(); test.edit(); test.tool.send(); await settle();
-      if (change === 'switch') test.runtime.enterLegacy('crop', deps, () => {});
+      if (change === 'switch') openOtherTool(test.runtime, deps);
       else if (change === 'project') test.runtime.setProject('p2');
       else test.tool.close();
       if (change === 'reopen' || change === 'project') { test.open(); test.edit(); }

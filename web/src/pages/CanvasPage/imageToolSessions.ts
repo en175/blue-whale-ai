@@ -34,7 +34,7 @@ export interface CutoutHost {
 
 export function createCutoutSession(getHost: () => CutoutHost): ToolSessionDefinition<CutoutState, string, CutoutSubmission> {
   return {
-    kind: 'cutout',
+    kind: 'cutout', nodeClick: 'consume', escape: 'dedicated',
     initialize(nodeId) {
       if (getHost().getSourceNode(nodeId)?.type !== 'mediaNode') return null;
       return { nodeId, scene: 'general', needContour: false, contourSize: IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT, needCropBackground: false };
@@ -101,7 +101,7 @@ export function applyOutpaintPreset(state: OutpaintState, node: Node, preset: Ou
 
 export function createOutpaintSession(getHost: () => OutpaintHost): ToolSessionDefinition<OutpaintState, string, OutpaintTaskSubmission> {
   return {
-    kind: 'outpaint',
+    kind: 'outpaint', nodeClick: 'consume', escape: 'dedicated',
     initialize(nodeId) {
       const host = getHost();
       const node = host.getSourceNode(nodeId);

@@ -1,12 +1,12 @@
+import { openOtherTool } from './testing/openOtherTool';
 import { expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { createToolSessionRuntime } from './toolSessionRuntime';
-import { TOOL_SESSION_KINDS, type ToolSessionDeps } from './toolSessionCoordinator';
+import { type ToolSessionDeps } from './toolSessionCoordinator';
 import { createCutoutSession, createOutpaintSession, type OutpaintFrozenInput, type CutoutSubmission } from './imageToolSessions';
 
 const deps: ToolSessionDeps = {
-  activity: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, null])) as ToolSessionDeps['activity'],
-  exits: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, () => {}])) as ToolSessionDeps['exits'],
+
   dismissGenPanels() {}, selectNode() {},
 };
 const source: Node = { id: 'i1', type: 'mediaNode', position: { x: 400, y: 0 }, data: { assetId: '5', mediaType: 'image', width: 600, height: 600 } };
@@ -102,7 +102,7 @@ it.each([
   const acceptFirst = accept;
   const rejectFirst = reject;
   if (later === 'project') { projectId = 'p2'; runtime.setProject('p2'); }
-  if (later === 'other-tool') runtime.enterLegacy('crop', deps, () => {});
+  if (later === 'other-tool') openOtherTool(runtime, deps);
   if (later === 'reopen') {
     tool.open('i1', deps);
     tool.edit((state) => ({ ...state, contourSize: 30 }));
@@ -144,7 +144,7 @@ it.each(['project', 'other-tool'] as const)('扩图发送即退后 %s 使旧失�
   tool.send();
   expect(tool.getSnapshot().state).toBeNull();
   if (later === 'project') { projectId = 'p2'; runtime.setProject('p2'); }
-  else runtime.enterLegacy('crop', deps, () => {});
+  else openOtherTool(runtime, deps);
   reject(new Error('旧扩图失败'));
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(errors).toEqual([]);

@@ -3,12 +3,11 @@ import type { Node } from '@xyflow/react';
 import type { VideoSubtitleEraseInput } from './videoSubtitleErase';
 import type { MaskOp } from './eraseMask';
 import { createToolSessionRuntime } from './toolSessionRuntime';
-import { TOOL_SESSION_KINDS, type ToolSessionDeps } from './toolSessionCoordinator';
+import { type ToolSessionDeps } from './toolSessionCoordinator';
 import { createImageEraseSession, createSubtitleEraseSession, beginSubtitleBox, moveSubtitleBox, endSubtitleBox, beginEraseStroke, moveEraseStroke, endEraseStroke, type ImageEraseTaskSubmission, type ImageEraseHost } from './maskToolSessions';
 
 const deps: ToolSessionDeps = {
-  activity: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, null])) as ToolSessionDeps['activity'],
-  exits: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, () => {}])) as ToolSessionDeps['exits'],
+
   dismissGenPanels() {}, selectNode() {},
 };
 const source: Node = { id: 'img', type: 'mediaNode', position: { x: 100, y: 200 }, data: { assetId: '5', width: 600, height: 600 } };

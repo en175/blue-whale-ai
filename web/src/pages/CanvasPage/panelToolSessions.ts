@@ -5,7 +5,9 @@ import { buildVideoEnhanceInput, restoreVideoEnhanceResolution, type VideoEnhanc
 import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';
 import { buildFrameInterpolationInput, restoreFrameInterpolationFps, type FrameInterpolationIdentity, type FrameInterpolationFps } from './frameInterpolation';
 import { readAssetId } from './mediaRefs';
-import type { ToolPanelKind, ToolSessionDefinition } from './toolSessionRuntime';
+import type { ToolSessionDefinition } from './toolSessionRuntime';
+
+import type { CanvasToolKind } from './canvasToolSessions';
 
 interface PanelSubmission<Payload, Identity> { projectId: string; nodeId: string; payload: Payload; identity: Identity }
 export type ImageEnhanceSubmission = PanelSubmission<NonNullable<ReturnType<typeof buildImageEnhanceInput>>, ImageEnhanceIdentity>;
@@ -17,7 +19,7 @@ export interface PanelToolHost {
   getNodes(): Node[];
   canOpen(nodeId: string): boolean;
   activate(nodeId: string, toolbar: boolean): void;
-  isValidTarget(nodeId: string, kind: ToolPanelKind): boolean;
+  isValidTarget(nodeId: string, kind: CanvasToolKind): boolean;
   isFrameInFlight(nodeId: string): boolean;
   startImage(input: ImageEnhanceSubmission): Promise<void>;
   startVideo(input: VideoEnhanceSubmission): Promise<void>;

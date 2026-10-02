@@ -1,5 +1,4 @@
 import {
-  TOOL_SESSION_KINDS,
   createToolSessionEpoch,
   enterToolSession,
   escDefersToToolSessionHandler,
@@ -9,12 +8,9 @@ import {
   handleToolSessionPaneClick,
   handleToolSessionSelectionChange,
   type ToolSessionDeps,
-  type ToolSessionKind,
+  hasEscExitSession,
+  type CoordinatedTool,
 } from './toolSessionCoordinator';
-
-export const TOOL_PANEL_KINDS = ['imageEnhance', 'videoEnhance', 'frameInterpolation'] as const;
-export type ToolPanelKind = (typeof TOOL_PANEL_KINDS)[number];
-type RuntimeToolKind = ToolSessionKind | ToolPanelKind;
 
 export interface ToolSubmissionContext {
   isCurrent(): boolean;
@@ -24,7 +20,9 @@ export interface ToolSubmissionContext {
 }
 
 export interface ToolSessionDefinition<State, Entry, Input, Request = void> {
-  kind: RuntimeToolKind;
+  kind: string;
+  nodeClick?: 'consume';
+  escape?: 'dedicated';
   /** 高清/HD 可见同卡重入保留内容；插帧每次重算 seed 与按卡在途状态。 */
   panel?: 'preserve' | 'reinitialize';
   initialize(entry: Entry, previous?: State): State | null;
@@ -47,14 +45,9 @@ export interface ToolSessionSnapshot<State> {
   hidden?: boolean;
 }
 
-export type LegacyToolSessionDeps = Omit<ToolSessionDeps, 'activity' | 'exits'> & {
-  activity: Partial<ToolSessionDeps['activity']>;
-  exits: Partial<ToolSessionDeps['exits']>;
-};
-
 export interface ToolSessionHandle<State, Entry, Request = void> {
   getSnapshot(): ToolSessionSnapshot<State>;
-  open(entry: Entry, deps: LegacyToolSessionDeps): boolean;
+  open(entry: Entry, deps: ToolSessionDeps): boolean;
   edit(update: (state: State) => State): void;
   close(): void;
   send(request?: Request): boolean;
@@ -62,8 +55,8 @@ export interface ToolSessionHandle<State, Entry, Request = void> {
 
 /** 注册工具的编辑状态与纪元由此持有；节点、连线和任务处理仍由宿主提供。 */
 export function createToolSessionRuntime() {
-  const epoch = createToolSessionEpoch<RuntimeToolKind>([...TOOL_SESSION_KINDS, ...TOOL_PANEL_KINDS]);
-  const tools = new Map<RuntimeToolKind, { panel: boolean; target(): string | null; close(): void; reset(): void; reconcile(): void; select(selection: { soloId: string | null; multiSelect: boolean }): void }>();
+  const epoch = createToolSessionEpoch();
+  const tools = new Map<string, CoordinatedTool & { reset(): void; reconcile(): void; select(selection: { soloId: string | null; multiSelect: boolean }): void }>();
   const listeners = new Set<() => void>();
   let version = 0;
   let projectId: string | null | undefined;
@@ -71,55 +64,26 @@ export function createToolSessionRuntime() {
     version += 1;
     if (notify) listeners.forEach((listener) => listener());
   }
-  function coordinate(deps: LegacyToolSessionDeps): ToolSessionDeps {
-    const activity = Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, deps.activity[kind] ?? null])) as ToolSessionDeps['activity'];
-    const exits = Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, deps.exits[kind] ?? (() => {})])) as ToolSessionDeps['exits'];
-    for (const [kind, tool] of tools) {
-      if (tool.panel) continue;
-      activity[kind as ToolSessionKind] = tool.target();
-      exits[kind as ToolSessionKind] = tool.close;
-    }
-    return { ...deps, activity, exits };
-  }
-  function enterLegacy(kind: ToolSessionKind, deps: LegacyToolSessionDeps, init: () => void) {
-    epoch.advanceAll();
-    epoch.enter(kind);
-    closePanels();
-    enterToolSession(kind, coordinate(deps), init);
-  }
-  function closePanels(except?: RuntimeToolKind) {
+  function closePanels(except?: string) {
     for (const [kind, tool] of tools) if (tool.panel && kind !== except) tool.close();
   }
   return {
-    /** 仅供尚未迁移的工具共用同一纪元；迁移完毕后删除该过渡接口。 */
-    epoch,
-    coordinate,
-    enterLegacy,
     closePanels,
-    onPaneClick(deps: LegacyToolSessionDeps) {
-      const disposition = handleToolSessionPaneClick(coordinate(deps));
-      const hasPanel = [...tools.values()].some((tool) => tool.panel && tool.target() !== null);
-      closePanels();
-      return hasPanel ? 'consumed' : disposition;
-    },
-    onNodeClick: (nodeId: string, deps: LegacyToolSessionDeps) => handleToolSessionNodeClick(nodeId, coordinate(deps)),
-    onSelectionChange(selection: { soloId: string | null; multiSelect: boolean }, deps: LegacyToolSessionDeps) {
-      const freeze = handleToolSessionSelectionChange(selection, coordinate(deps));
+    hasEditSession: () => [...tools.values()].some((tool) => !tool.panel && tool.target() !== null),
+    hasEscExitSession: () => hasEscExitSession(tools.values()),
+    escDefersToToolSessionHandler: () => escDefersToToolSessionHandler(tools.values()),
+    onPaneClick(_deps: ToolSessionDeps) { return handleToolSessionPaneClick(tools.values()); },
+    onNodeClick: (nodeId: string, deps: ToolSessionDeps) => handleToolSessionNodeClick(nodeId, tools.values(), deps),
+    onSelectionChange(selection: { soloId: string | null; multiSelect: boolean }, _deps: ToolSessionDeps) {
+      const freeze = handleToolSessionSelectionChange(selection, tools.values());
       if (!freeze) for (const tool of tools.values()) if (tool.panel) tool.select(selection);
       return freeze;
     },
-    onEscape(deps: LegacyToolSessionDeps) {
-      const current = coordinate(deps);
-      if (escDefersToToolSessionHandler(current)) return false;
-      if (exitToolSessionOnEsc(current)) return true;
-      const hasPanel = [...tools.values()].some((tool) => tool.panel && tool.target() !== null);
-      if (hasPanel) closePanels();
-      return hasPanel;
+    onEscape(_deps: ToolSessionDeps) {
+      if (escDefersToToolSessionHandler(tools.values())) return false;
+      return exitToolSessionOnEsc(tools.values());
     },
-    beforeGenPanel(deps: LegacyToolSessionDeps) {
-      exitAllToolSessions(coordinate(deps));
-      closePanels();
-    },
+    beforeGenPanel(_deps: ToolSessionDeps) { exitAllToolSessions(tools.values()); },
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
@@ -148,7 +112,7 @@ export function createToolSessionRuntime() {
       };
       const tool = {
         getSnapshot: () => snapshot,
-        open(entry: Entry, deps: LegacyToolSessionDeps) {
+        open(entry: Entry, deps: ToolSessionDeps) {
           const previous = definition.panel === 'preserve' && !snapshot.visible ? undefined : snapshot.state ?? undefined;
           const state = definition.initialize(entry, previous);
           if (state === null) return false;
@@ -158,14 +122,9 @@ export function createToolSessionRuntime() {
             snapshot = { state: definition.opened?.(state) ?? state, submitting: false, ...(definition.panel ? { visible: true, hidden: false } : {}) };
             changed();
           };
-          if (definition.panel) {
-            epoch.advanceAll();
-            epoch.enter(definition.kind);
-            exitAllToolSessions(coordinate(deps));
-            closePanels(definition.kind);
-            deps.dismissGenPanels();
-            initialize();
-          } else enterLegacy(definition.kind as ToolSessionKind, deps, initialize);
+          epoch.advanceAll();
+          epoch.enter(definition.kind);
+          enterToolSession(definition.kind, tools.values(), deps, initialize);
           return true;
         },
         edit(update: (state: State) => State) {
@@ -205,7 +164,9 @@ export function createToolSessionRuntime() {
           return true;
         },
       };
+      epoch.capture(definition.kind);
       tools.set(definition.kind, {
+        kind: definition.kind, nodeClick: definition.nodeClick, escape: definition.escape,
         panel: Boolean(definition.panel),
         target: () => snapshot.state === null ? null : definition.target(snapshot.state),
         close: () => close(),

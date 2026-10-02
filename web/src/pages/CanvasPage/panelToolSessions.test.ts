@@ -1,10 +1,12 @@
+import { openOtherTool } from './testing/openOtherTool';
 import type { Node } from '@xyflow/react';
 import { ApiError } from '@/api/http';
 import { describe, expect, it } from 'vitest';
-import { createToolSessionRuntime, type LegacyToolSessionDeps } from './toolSessionRuntime';
+import { createToolSessionRuntime } from './toolSessionRuntime';
+import type { ToolSessionDeps } from './toolSessionCoordinator';
 import { createImageEnhanceSession, createFrameInterpolationSession, createVideoEnhanceSession, type PanelToolHost, type VideoEnhanceSubmission } from './panelToolSessions';
 
-const deps: LegacyToolSessionDeps = { activity: {}, exits: {}, dismissGenPanels() {}, selectNode() {} };
+const deps: ToolSessionDeps = { dismissGenPanels() {}, selectNode() {} };
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function setup() {
@@ -66,7 +68,7 @@ describe('HD 面板通过运行时的提交契约', () => {
       const { runtime, video, pending, errors, setProject } = setup();
       video.open('a', deps); video.send('2k');
       if (change === 'project') setProject('p2');
-      else if (change === 'switch') runtime.enterLegacy('audioMix', deps, () => {});
+      else if (change === 'switch') openOtherTool(runtime, deps);
       else video.close();
       if (change !== 'close') { video.open('a', deps); video.send('4k'); }
       if (success) pending[0]!.resolve(); else pending[0]!.reject(new Error('old'));
@@ -169,7 +171,7 @@ it.each(['close', 'reopen', 'switch', 'project'] as const)('插帧 %s 后旧成�
     };
     const frame = runtime.register(createFrameInterpolationSession(() => host));
     frame.open('a', deps); frame.send(60);
-    if (change === 'switch') runtime.enterLegacy('audioMix', deps, () => {});
+    if (change === 'switch') openOtherTool(runtime, deps);
     else if (change === 'project') setProject('p2');
     else frame.close();
     expect(inFlight.has('a')).toBe(true);

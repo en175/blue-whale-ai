@@ -1,11 +1,10 @@
+import { openOtherTool } from './testing/openOtherTool';
 import { describe, expect, it } from 'vitest';
 import { createToolSessionRuntime, type ToolSessionDefinition } from './toolSessionRuntime';
-import { TOOL_SESSION_KINDS, type ToolSessionDeps } from './toolSessionCoordinator';
+import { type ToolSessionDeps } from './toolSessionCoordinator';
 
-function legacyDeps(): ToolSessionDeps {
+function sessionDeps(): ToolSessionDeps {
   return {
-    activity: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, null])) as ToolSessionDeps['activity'],
-    exits: Object.fromEntries(TOOL_SESSION_KINDS.map((kind) => [kind, () => {}])) as ToolSessionDeps['exits'],
     dismissGenPanels() {}, selectNode() {},
   };
 }
@@ -25,23 +24,23 @@ it('面板选择隐藏保留绑定；空通知不退出，显式关闭后不由�
   const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve',
     initialize: (nodeId: string, previous?: { nodeId: string; format: string }) => previous?.nodeId === nodeId ? previous : { nodeId, format: `seed-${++seed}` },
   });
-  panel.open('v1', legacyDeps());
+  panel.open('v1', sessionDeps());
   panel.edit((state) => ({ ...state, format: '4k' }));
-  panel.open('v1', legacyDeps());
+  panel.open('v1', sessionDeps());
   expect(panel.getSnapshot().state?.format).toBe('4k');
   expect(panel.getSnapshot().visible).toBe(true);
-  runtime.onSelectionChange({ soloId: null, multiSelect: false }, legacyDeps());
+  runtime.onSelectionChange({ soloId: null, multiSelect: false }, sessionDeps());
   expect(panel.getSnapshot().visible).toBe(true);
-  runtime.onSelectionChange({ soloId: 'v2', multiSelect: false }, legacyDeps());
+  runtime.onSelectionChange({ soloId: 'v2', multiSelect: false }, sessionDeps());
   expect(panel.getSnapshot().visible).toBe(false);
   expect(panel.getSnapshot().state?.nodeId).toBe('v1');
-  runtime.onSelectionChange({ soloId: 'v1', multiSelect: false }, legacyDeps());
+  runtime.onSelectionChange({ soloId: 'v1', multiSelect: false }, sessionDeps());
   expect(panel.getSnapshot().visible).toBe(true);
   panel.close();
-  runtime.onSelectionChange({ soloId: 'v1', multiSelect: false }, legacyDeps());
+  runtime.onSelectionChange({ soloId: 'v1', multiSelect: false }, sessionDeps());
   expect(panel.getSnapshot().state).toBeNull();
   expect(panel.getSnapshot().hidden).toBe(true);
-  panel.open('v1', legacyDeps());
+  panel.open('v1', sessionDeps());
   expect(panel.getSnapshot().state?.format).toBe('seed-2');
 });
 
@@ -50,21 +49,21 @@ it.each(['close', 'escape', 'pane', 'generation', 'editor'] as const)('面板 %s
   const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'reinitialize' });
   const frame = runtime.register({ ...definition, kind: 'frameInterpolation', panel: 'reinitialize' });
   const split = runtime.register(definition);
-  split.open('source', legacyDeps());
-  panel.open('a', legacyDeps());
+  split.open('source', sessionDeps());
+  panel.open('a', sessionDeps());
   expect(split.getSnapshot().state).toBeNull();
-  frame.open('b', legacyDeps());
+  frame.open('b', sessionDeps());
   expect(panel.getSnapshot().state).toBeNull();
   expect(frame.getSnapshot().visible).toBe(true);
-  runtime.onSelectionChange({ soloId: null, multiSelect: false }, legacyDeps());
+  runtime.onSelectionChange({ soloId: null, multiSelect: false }, sessionDeps());
   expect(frame.getSnapshot().visible).toBe(true);
   if (route === 'close') frame.close();
-  if (route === 'escape') expect(runtime.onEscape(legacyDeps())).toBe(true);
-  if (route === 'pane') expect(runtime.onPaneClick(legacyDeps())).toBe('consumed');
-  if (route === 'generation') runtime.beforeGenPanel(legacyDeps());
-  if (route === 'editor') split.open('source', legacyDeps());
+  if (route === 'escape') expect(runtime.onEscape(sessionDeps())).toBe(true);
+  if (route === 'pane') expect(runtime.onPaneClick(sessionDeps())).toBe('consumed');
+  if (route === 'generation') runtime.beforeGenPanel(sessionDeps());
+  if (route === 'editor') split.open('source', sessionDeps());
   expect(frame.getSnapshot().state).toBeNull();
-  runtime.onSelectionChange({ soloId: 'b', multiSelect: false }, legacyDeps());
+  runtime.onSelectionChange({ soloId: 'b', multiSelect: false }, sessionDeps());
   expect(frame.getSnapshot().visible).toBe(false);
 });
 
@@ -72,12 +71,12 @@ describe('工具会话运行时公开接口', () => {
   it('进入、参数编辑、退出和同卡重开：状态只有运行时拥有，重开恢复默认参数', () => {
     const runtime = createToolSessionRuntime();
     const split = runtime.register(definition);
-    split.open('v1', legacyDeps());
+    split.open('v1', sessionDeps());
     split.edit((state) => ({ ...state, format: 'wav' }));
     expect(split.getSnapshot()).toEqual({ state: { nodeId: 'v1', format: 'wav' }, submitting: false });
     split.close();
     expect(split.getSnapshot()).toEqual({ state: null, submitting: false });
-    split.open('v1', legacyDeps());
+    split.open('v1', sessionDeps());
     expect(split.getSnapshot()).toEqual({ state: { nodeId: 'v1', format: 'm4a' }, submitting: false });
   });
   it('发送同步锁住当前界面，失败后可调整参数再次发送', async () => {
@@ -89,7 +88,7 @@ describe('工具会话运行时公开接口', () => {
       submit: (input: string) => { inputs.push(input); return new Promise<void>((_, fail) => { reject = fail; }); },
       onError: () => { errors.push('创建失败'); },
     });
-    split.open('v1', legacyDeps());
+    split.open('v1', sessionDeps());
     expect(split.send()).toBe(true);
     expect(split.send()).toBe(false);
     expect(split.getSnapshot().submitting).toBe(true);
@@ -118,13 +117,13 @@ describe('工具会话运行时公开接口', () => {
         },
         onError: () => { errors.push('旧错误'); },
       });
-      split.open('v1', legacyDeps());
+      split.open('v1', sessionDeps());
       split.send();
-      if (change === 'switch') runtime.enterLegacy('audioTrim', legacyDeps(), () => {});
+      if (change === 'switch') openOtherTool(runtime, sessionDeps());
       else if (change === 'project') runtime.setProject('p2');
       else split.close();
       if (change !== 'close') {
-        split.open('v1', legacyDeps());
+        split.open('v1', sessionDeps());
         split.edit((state) => ({ ...state, format: 'wav' }));
       }
       if (outcome === 'success') finish(); else fail(new Error('network'));
@@ -140,7 +139,7 @@ describe('工具会话运行时公开接口', () => {
   it('源卡删除清除已注册状态与参数，不把空选中当作删除', () => {
     const runtime = createToolSessionRuntime();
     const split = runtime.register(definition);
-    split.open('v1', legacyDeps());
+    split.open('v1', sessionDeps());
     runtime.reconcileSources(new Set(['v1']));
     expect(split.getSnapshot().state?.nodeId).toBe('v1');
     runtime.reconcileSources(new Set(['v2']));
@@ -152,14 +151,14 @@ describe('工具会话运行时公开接口', () => {
 it.each(['close', 'escape', 'selection', 'pane', 'generation'] as const)('公开接口 %s 退出丢弃编辑态，空选中保留会话', (route) => {
   const runtime = createToolSessionRuntime();
   const split = runtime.register(definition);
-  split.open('v1', legacyDeps());
-  runtime.onSelectionChange({ soloId: null, multiSelect: false }, legacyDeps());
+  split.open('v1', sessionDeps());
+  runtime.onSelectionChange({ soloId: null, multiSelect: false }, sessionDeps());
   expect(split.getSnapshot().state?.nodeId).toBe('v1');
   if (route === 'close') split.close();
-  if (route === 'escape') expect(runtime.onEscape(legacyDeps())).toBe(true);
-  if (route === 'selection') runtime.onSelectionChange({ soloId: 'v2', multiSelect: false }, legacyDeps());
-  if (route === 'pane') expect(runtime.onPaneClick(legacyDeps())).toBe('consumed');
-  if (route === 'generation') runtime.beforeGenPanel(legacyDeps());
+  if (route === 'escape') expect(runtime.onEscape(sessionDeps())).toBe(true);
+  if (route === 'selection') runtime.onSelectionChange({ soloId: 'v2', multiSelect: false }, sessionDeps());
+  if (route === 'pane') expect(runtime.onPaneClick(sessionDeps())).toBe('consumed');
+  if (route === 'generation') runtime.beforeGenPanel(sessionDeps());
   expect(split.getSnapshot()).toEqual({ state: null, submitting: false });
 });
 
@@ -170,7 +169,7 @@ it('工具的两种类型明确发送操作都在执行前同步锁住界面', (
     capture: (_state: { nodeId: string; format: string }, request?: 'mask' | 'text') => request ?? null,
     submit: async (input: string) => { inputs.push(input); await new Promise(() => {}); },
   });
-  tool.open('v1', legacyDeps());
+  tool.open('v1', sessionDeps());
   expect(tool.send('mask')).toBe(true);
   expect(tool.send('text')).toBe(false);
   expect(tool.getSnapshot().submitting).toBe(true);
@@ -188,9 +187,9 @@ it.each([false, true])('发送即退出仍保留当前失败反馈；后来会�
     },
     onError: () => { errors.push('创建失败'); },
   });
-  tool.open('v1', legacyDeps()); tool.send();
+  tool.open('v1', sessionDeps()); tool.send();
   expect(tool.getSnapshot()).toEqual({ state: null, submitting: false });
-  if (newSession) tool.open('v1', legacyDeps());
+  if (newSession) tool.open('v1', sessionDeps());
   reject(new Error('network'));
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(errors).toEqual(newSession ? [] : ['创建失败']);
@@ -200,7 +199,7 @@ it.each([false, true])('发送即退出仍保留当前失败反馈；后来会�
 it('草稿工具门槛失败保留旧会话；成功先退出旧工具和关闭生成面板，再建卡与来源边', () => {
   const runtime = createToolSessionRuntime();
   const existing = runtime.register(definition);
-  existing.open('v1', legacyDeps());
+  existing.open('v1', sessionDeps());
   const events: string[] = [];
   const draft = runtime.register({
     ...definition, kind: 'audioVideoMux',
@@ -211,7 +210,7 @@ it('草稿工具门槛失败保留旧会话；成功先退出旧工具和关闭�
       return { ...state, nodeId: 'draft1' };
     },
   });
-  const entryDeps = { ...legacyDeps(), dismissGenPanels: () => { events.push('close-panel'); } };
+  const entryDeps = { ...sessionDeps(), dismissGenPanels: () => { events.push('close-panel'); } };
   expect(draft.open('invalid', entryDeps)).toBe(false);
   expect(existing.getSnapshot().state?.nodeId).toBe('v1');
   expect(events).toEqual([]);
