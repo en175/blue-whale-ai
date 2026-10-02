@@ -123,4 +123,4 @@
 - Codex 统一经 `.codex/hooks/run-claude-pretool.sh` 复用 `.claude/hooks/` 权威 Gate；其 `Edit|Write` matcher 收到的实际输入是 `tool_name=apply_patch`、`tool_input.command=<patch>`，wrapper 只做目标路径适配，不复制分支或工作树策略。
 - 涉及一次性凭证消费时，ZCode / Claude Code / Codex 的 `PostToolUse` matcher 也必须同步；Pre 按 `tool_use_id` 原子占用但不消费，只有 `tool_response.isError=false` 的明确成功结果才消费，失败或畸形结果释放占用并保留凭证。
 - 两类事件显式排除于阻断等价比较：提醒型 `Grep|Glob` 只注入代码发现 context、不阻断，按客户端实际事件与能力适配；`SessionStart` 只负责会话启动/恢复时注入 context，不是工具调用 Gate，各平台生命周期挂载也不同。
-- 机制兜底：`python3 scripts/check-hook-contracts.py` 校验三端静态契约，`bash scripts/probe-codex-write-hook.sh` 探测 Codex 写入运行时链路，`bash scripts/test-hooks.sh` 运行完整黑盒夹具。深读见 `docs/agents/hooks/README.md`「变更检查清单」。
+- 机制兜底：`python3 scripts/check-hook-contracts.py` 校验四端静态契约并拦截 ZCode 白名单外事件，`bash scripts/probe-codex-write-hook.sh` 探测 Codex 写入运行时链路，`bash scripts/probe-zcode-write-hook.sh` 探测 ZCode 写入运行时链路，`bash scripts/test-hooks.sh` 运行完整黑盒夹具。深读见 `docs/agents/hooks/README.md`「变更检查清单」。

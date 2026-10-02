@@ -80,6 +80,18 @@ GATE_NAME = re.compile(r"[A-Za-z0-9._-]+\.sh")
 CLAUDE_HOOK_PATH = re.compile(r".*/\.claude/hooks/([A-Za-z0-9._-]+\.sh)")
 CODEX_WRAPPER = "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh"
 KIMI_SHIM = "$HOME/.kimi-code/hooks/blue-whale-hook.sh"
+# ZCode hooks.events 的严格 schema 只认七个事件；平台差异见 docs/agents/hooks/README.md。
+ZCODE_SUPPORTED_EVENTS = frozenset(
+    {
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "Stop",
+    }
+)
 
 
 def claude_gate(command: str) -> str | None:
@@ -275,6 +287,23 @@ def main() -> int:
         try:
             # 显式 UTF-8：Windows 默认 cp936 解码 UTF-8 配置会抛 UnicodeDecodeError
             config = json.loads(path.read_text(encoding="utf-8"))
+            if platform == "ZCode":
+                events = config.get("hooks", {}).get("events")
+                if isinstance(events, dict):
+                    # ZCode 对 hooks.events 做严格 schema 校验：出现白名单外事件名
+                    # （如 Claude Code/Codex 支持的 SubagentStart）会让整个配置文件
+                    # 加载失败（config.file.invalid），该文件声明的全部 Hook——含
+                    # 阻断 Gate——随之静默失效（IKJGD5）。契约等价比较无法发现，
+                    # 必须在平台白名单层面拦截。
+                    unsupported = sorted(set(events) - ZCODE_SUPPORTED_EVENTS)
+                    if unsupported:
+                        print(
+                            f"ZCode: hooks.events 含不受支持的事件 {unsupported}，"
+                            "整个配置文件会被 ZCode 拒绝加载，全部 Hook 失效",
+                            file=sys.stderr,
+                        )
+                        failed = True
+                        continue
             actual = normalized_contracts(config, hook_keys, command_parser)
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as error:
             print(f"{platform}: 无法解析 Hook 配置 {path}: {error}", file=sys.stderr)
