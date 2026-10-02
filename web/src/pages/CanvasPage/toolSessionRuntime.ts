@@ -15,13 +15,15 @@ import {
 export interface ToolSubmissionContext {
   isCurrent(): boolean;
   close(): void;
+  /** 发送即退出：保留本次失败反馈身份，后来会话或项目切换使其失效。 */
+  exitForSubmission(): void;
 }
 
-export interface ToolSessionDefinition<State, Entry, Input> {
+export interface ToolSessionDefinition<State, Entry, Input, Request = void> {
   kind: ToolSessionKind;
-  initialize(entry: Entry): State | null;
+  initialize(entry: Entry, previous?: State): State | null;
   target(state: State): string | null;
-  capture(state: State): Input | null;
+  capture(state: State, request?: Request): Input | null;
   submit(input: Input, context: ToolSubmissionContext): Promise<void>;
   onError(error: unknown, input: Input): void;
   cleanup?(state: State): void;
@@ -37,12 +39,12 @@ export type LegacyToolSessionDeps = Omit<ToolSessionDeps, 'activity' | 'exits'> 
   exits: Partial<ToolSessionDeps['exits']>;
 };
 
-export interface ToolSessionHandle<State, Entry> {
+export interface ToolSessionHandle<State, Entry, Request = void> {
   getSnapshot(): ToolSessionSnapshot<State>;
   open(entry: Entry, deps: LegacyToolSessionDeps): boolean;
   edit(update: (state: State) => State): void;
   close(): void;
-  send(): boolean;
+  send(request?: Request): boolean;
 }
 
 /** 注册工具的编辑状态与纪元由此持有；节点、连线和任务处理仍由宿主提供。 */
@@ -100,7 +102,7 @@ export function createToolSessionRuntime() {
         if (target !== null && !nodeIds.has(target)) tool.close();
       }
     },
-    register<State, Entry, Input>(definition: ToolSessionDefinition<State, Entry, Input>): ToolSessionHandle<State, Entry> {
+    register<State, Entry, Input, Request = void>(definition: ToolSessionDefinition<State, Entry, Input, Request>): ToolSessionHandle<State, Entry, Request> {
       let snapshot: ToolSessionSnapshot<State> = { state: null, submitting: false };
       const close = (notify = true) => {
         epoch.exit(definition.kind);
@@ -111,7 +113,7 @@ export function createToolSessionRuntime() {
       const tool = {
         getSnapshot: () => snapshot,
         open(entry: Entry, deps: LegacyToolSessionDeps) {
-          const state = definition.initialize(entry);
+          const state = definition.initialize(entry, snapshot.state ?? undefined);
           if (state === null) return false;
           enterLegacy(definition.kind, deps, () => {
             if (snapshot.state !== null) definition.cleanup?.(snapshot.state);
@@ -126,21 +128,29 @@ export function createToolSessionRuntime() {
           changed();
         },
         close: () => close(),
-        send() {
+        send(request?: Request) {
           if (snapshot.state === null || snapshot.submitting) return false;
-          const input = definition.capture(snapshot.state);
+          const input = definition.capture(snapshot.state, request);
           if (input === null) return false;
-          const captured = epoch.capture(definition.kind);
+          let captured = epoch.capture(definition.kind);
           const isCurrent = () => epoch.isCurrent(definition.kind, captured);
           snapshot = { ...snapshot, submitting: true };
           changed();
           void (async () => {
             try {
-              await definition.submit(input, { isCurrent, close: () => { if (isCurrent()) close(); } });
+              await definition.submit(input, {
+                isCurrent,
+                close: () => { if (isCurrent()) close(); },
+                exitForSubmission: () => {
+                  if (!isCurrent()) return;
+                  close();
+                  captured = epoch.capture(definition.kind);
+                },
+              });
             } catch (error: unknown) {
               if (isCurrent()) definition.onError(error, input);
             } finally {
-              if (isCurrent()) {
+              if (isCurrent() && snapshot.state !== null) {
                 snapshot = { ...snapshot, submitting: false };
                 changed();
               }

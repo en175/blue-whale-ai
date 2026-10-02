@@ -6,6 +6,7 @@ import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-
 import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import { replaceImageMentionsWithAssetTokens, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
+import { toast as globalToast } from 'sonner';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -54,7 +55,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, compliancePatchFromMaterialStatus, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
-import { mediaContentBox, MEDIA_CONTENT_SHORT_SIDE, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
+import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
 import { sampleDeadlineExpired } from './components/MediaNode';
@@ -166,11 +167,8 @@ import {
   SMART_MATTING_DEFAULT_BACKGROUND_COLOR,
   SMART_MATTING_DEFAULT_FORMAT,
   SMART_MATTING_EDGE_ORIGIN,
-  buildSmartMattingInput,
   buildSmartMattingPlaceholderNode,
   smartMattingErrorText,
-  type SmartMattingBackgroundColor,
-  type SmartMattingFormat,
   type SmartMattingIdentity,
   type SmartMattingMode,
 } from './smartMatting';
@@ -208,29 +206,22 @@ import {
 import {
   IMAGE_ERASE_EDGE_ORIGIN,
   maskHasPaintArea,
-  type EraseMaskSendSession,
   type ImageEraseIdentity,
-  type ImageEraseInput,
 } from './imageErase';
 import {
-  buildVideoSubtitleEraseInput,
   type VideoSubtitleEraseIdentity,
-  type VideoSubtitleEraseInput,
   type VideoSubtitleEraseMode,
 } from './videoSubtitleErase';
 import { VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN } from '@lib/contracts/video-subtitle-erase';
 import {
-  applySubtitleBox,
-  canAddSubtitleBox,
   canRedoSubtitleBoxEdit,
   canResetSubtitleBoxEdit,
   canUndoSubtitleBoxEdit,
   EMPTY_SUBTITLE_BOX_EDIT,
+  canAddSubtitleBox,
   redoSubtitleBoxEdit,
   resetSubtitleBoxEdit,
   undoSubtitleBoxEdit,
-  type SubtitleBoxEditState,
-  type SubtitleBoxOp,
   type SubtitleBoxPoint,
 } from './subtitleEraseBoxes';
 import {
@@ -243,15 +234,12 @@ import {
 } from './imageCutout';
 import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
 import {
-  applyMaskOp,
   canRedoMaskEdit,
   canUndoMaskEdit,
   EMPTY_MASK_EDIT,
   redoMaskEdit,
   undoMaskEdit,
   type MaskCoordinateSpace,
-  type MaskEditState,
-  type MaskOp,
   type MaskPoint,
 } from './eraseMask';
 import {
@@ -270,7 +258,14 @@ import {
 import ImageEnhanceDialog from './components/ImageEnhanceDialog';
 import VideoEnhanceDialog from './components/VideoEnhanceDialog';
 import FrameInterpolationDialog from './components/FrameInterpolationDialog';
-import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog';
+import ImageEraseDialog from './components/ImageEraseDialog';
+import { createSmartMattingSession, type SmartMattingHost, type SmartMattingSubmission } from './smartMattingSession';
+import {
+  createImageEraseSession, createSubtitleEraseSession,
+  beginSubtitleBox, moveSubtitleBox, endSubtitleBox, beginEraseStroke, moveEraseStroke, endEraseStroke,
+  type SubtitleEraseHost, type SubtitleEraseTaskSubmission, type ImageEraseHost, type ImageEraseTaskSubmission,
+} from './maskToolSessions';
+import { rasterizeMaskToPngFile } from './imageErase';
 import VideoSubtitleEraseDialog from './components/VideoSubtitleEraseDialog';
 import VideoAudioSplitDialog from './components/VideoAudioSplitDialog';
 import VocalSplitDialog from './components/VocalSplitDialog';
@@ -712,51 +707,40 @@ export default function CanvasPage() {
   const frameInterpolationBoundRef = useRef<string | null>(null);
   /** 当前已打开 HD 面板绑定的卡 id（同步写，口径同 enhanceBoundRef） */
   const videoEnhanceBoundRef = useRef<string | null>(null);
-  /** 擦除编辑态（IKGOT7 开关 / IKGOTB 完整交互）：处于擦除编辑的源图卡 node id，null=未进入。
-   *  编辑态的其余状态（工具/笔刷/遮罩 ops/活笔/发送中）提升在本页——源图卡内的
-   *  EraseMaskLayer 与浮出的工具条/发送条共享同一份；未发送退出（X/Esc/点其他卡/点空白）全部丢弃。 */
-  const [eraseTargetNodeId, setEraseTargetNodeId] = useState<string | null>(null);
-  const [eraseTool, setEraseTool] = useState<EraseTool>('brush');
-  const [eraseBrushRadius, setEraseBrushRadius] = useState(20);
-  const [eraseMaskState, setEraseMaskState] = useState<MaskEditState>(EMPTY_MASK_EDIT);
-  /** 拖拽进行中的活笔（显示坐标，pointerup 才经 applyMaskOp 固化；null=无拖拽） */
-  const [eraseLiveOp, setEraseLiveOp] = useState<MaskOp | null>(null);
-  /** 活笔最新值（pointerup 回调读，避免闭包陈旧） */
-  const eraseLiveOpRef = useRef<MaskOp | null>(null);
-  /** 拖拽收集的折线点（画笔/橡皮共用） */
-  const eraseStrokePointsRef = useRef<MaskPoint[]>([]);
-  /** 擦除发送中（遮罩上传+创建请求期间，工具条/发送条只读防重复提交） */
-  const [eraseSubmitting, setEraseSubmitting] = useState(false);
-  /** 去字幕会话（IKGZ83，IKH3OU 模式前置）：处于去字幕会话的源视频卡 node id，null=未进入。
-   *  会话模式（smart/box）与之同进同退——由入口下拉菜单项决定，会话内不互切；
-   *  其余状态（框集合/活框/发送中）提升在本页——源视频卡内的 SubtitleEraseBoxesLayer 与
-   *  浮出的单条共享同一份；未发送退出（X/Esc/点其他卡/点空白）框状态全部丢弃，不建卡不提交。 */
-  const [subtitleEraseTargetNodeId, setSubtitleEraseTargetNodeId] = useState<string | null>(null);
-  /** 会话模式（进入时与目标 id 同时设置，退出时一并复位到默认 smart） */
-  const [subtitleEraseMode, setSubtitleEraseMode] = useState<VideoSubtitleEraseMode>('smart');
-  /** 框集合（归一化前的显示坐标图元 + 撤销重做小栈，纯逻辑 subtitleEraseBoxes） */
-  const [subtitleEraseBoxes, setSubtitleEraseBoxes] = useState<SubtitleBoxEditState>(EMPTY_SUBTITLE_BOX_EDIT);
-  /** 拖拽进行中的活框预览（显示坐标，pointerup 才经 applySubtitleBox 固化；null=无拖拽） */
-  const [subtitleEraseLiveBox, setSubtitleEraseLiveBox] = useState<SubtitleBoxOp | null>(null);
-  /** 活框最新值（pointerup 回调读，避免闭包陈旧；对齐 eraseLiveOpRef 先例） */
-  const subtitleEraseLiveBoxRef = useRef<SubtitleBoxOp | null>(null);
-  /** 去字幕发送中（创建请求飞行期防重复提交，口径同 eraseSubmitting） */
-  const [subtitleEraseSubmitting, setSubtitleEraseSubmitting] = useState(false);
+  const smartMattingHostRef = useRef<SmartMattingHost | null>(null);
+  const imageEraseHostRef = useRef<ImageEraseHost | null>(null);
+  const subtitleEraseHostRef = useRef<SubtitleEraseHost | null>(null);
   const vocalSplitHostRef = useRef<AudioToolSessionHost<VocalSplitPayload> | null>(null);
   const audioSpeedHostRef = useRef<AudioSpeedSessionHost | null>(null);
   const audioTrimHostRef = useRef<AudioToolSessionHost<AudioTrimInput> | null>(null);
   const audioVideoSplitHostRef = useRef<AudioVideoSplitHost | null>(null);
-  const [{ toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession }] = useState(() => {
+  const [{ toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession }] = useState(() => {
     const toolRuntime = createToolSessionRuntime();
     const audioVideoSplitSession = toolRuntime.register(createAudioVideoSplitSession(() => audioVideoSplitHostRef.current!));
     const audioTrimSession = toolRuntime.register(createAudioTrimSession(() => audioTrimHostRef.current!));
     const audioSpeedSession = toolRuntime.register(createAudioSpeedSession(() => audioSpeedHostRef.current!));
     const vocalSplitSession = toolRuntime.register(createVocalSplitSession(() => vocalSplitHostRef.current!));
-    return { toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession };
+    const imageEraseSession = toolRuntime.register(createImageEraseSession(() => imageEraseHostRef.current!));
+    const subtitleEraseSession = toolRuntime.register(createSubtitleEraseSession(() => subtitleEraseHostRef.current!));
+    const smartMattingSession = toolRuntime.register(createSmartMattingSession(() => smartMattingHostRef.current!));
+    return { toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession };
   });
   // 项目首帧先使旧响应失效，随后从运行时读取唯一状态。
   toolRuntime.setProject(currentId);
   useSyncExternalStore(toolRuntime.subscribe, toolRuntime.getVersion);
+  const eraseView = imageEraseSession.getSnapshot();
+  const eraseTargetNodeId = eraseView.state?.nodeId ?? null;
+  const eraseTool = eraseView.state?.tool ?? 'brush';
+  const eraseBrushRadius = eraseView.state?.brushRadius ?? 20;
+  const eraseMaskState = eraseView.state?.mask ?? EMPTY_MASK_EDIT;
+  const eraseLiveOp = eraseView.state?.liveOp ?? null;
+  const eraseSubmitting = eraseView.submitting;
+  const subtitleEraseView = subtitleEraseSession.getSnapshot();
+  const subtitleEraseTargetNodeId = subtitleEraseView.state?.nodeId ?? null;
+  const subtitleEraseMode = subtitleEraseView.state?.mode ?? 'smart';
+  const subtitleEraseBoxes = subtitleEraseView.state?.boxes ?? EMPTY_SUBTITLE_BOX_EDIT;
+  const subtitleEraseLiveBox = subtitleEraseView.state?.liveBox ?? null;
+  const subtitleEraseSubmitting = subtitleEraseView.submitting;
   const audioVideoSplitView = audioVideoSplitSession.getSnapshot();
   const audioVideoSplitTargetNodeId = audioVideoSplitView.state?.nodeId ?? null;
   const audioVideoSplitFormat = audioVideoSplitView.state?.format ?? AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT;
@@ -850,25 +834,13 @@ export default function CanvasPage() {
   /** 发送同步锁（IKH8BR）：发送先退会话（条随即卸载），submitting 状态防不住同一事件
    *  循环内的双击——ref 锁按 cropSubmittingRef 先例兜底（连点只发一次请求）。 */
   const sceneSplitSendingRef = useRef(false);
-  /** 智能抠像编辑会话（IKHK9N，第八视频工具会话，ADR-0112）：处于抠像编辑的源视频卡
-   *  node id，null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
-   *  卡下方浮出单条（X/模式标题/格式下拉/背景色分段（仅 MP4）/⚡0/发送，SmartMattingDialog）；
-   *  发送先退会话再建任务占位卡；未发送退出（X/Esc/点其他卡/点画布空白）不建任务不建卡。 */
-  const [smartMattingTargetNodeId, setSmartMattingTargetNodeId] = useState<string | null>(null);
-  /** 抠像模式（IKHK9N，会话期交互态）：入口下拉直选传入（portrait/greenscreen），决定单条
-   *  标题与提交端点；单条内无模式切换控件——换模式 = 退出后从入口菜单重选（ADR-0112）。 */
-  const [smartMattingMode, setSmartMattingMode] = useState<SmartMattingMode>('portrait');
-  /** 输出格式（IKHK9N，会话期交互态）：两档 WEBM 透明默认 / MP4 纯色。格式不跨会话记忆
-   *  ——每次进入编辑态重置 WEBM、退出复位（exitSmartMattingEditing）；发送时随任务冻结进
-   *  占位卡身份（smartMatting.lastInput），失败重试按冻结参数原样重发。 */
-  const [smartMattingFormat, setSmartMattingFormat] = useState<SmartMattingFormat>(SMART_MATTING_DEFAULT_FORMAT);
-  /** 背景色（IKHK9N，会话期交互态）：白色默认/黑色/绿色，仅 format=MP4 时显示与生效
-   *  （WEBM 透明不接受背景色，契约 strict）。不跨会话记忆，进入重置 white、退出复位。 */
-  const [smartMattingBackgroundColor, setSmartMattingBackgroundColor] = useState<SmartMattingBackgroundColor>(SMART_MATTING_DEFAULT_BACKGROUND_COLOR);
-  /** 智能抠像发送中（创建请求飞行期防重复提交，口径同 sceneSplitSubmitting） */
-  const [smartMattingSubmitting, setSmartMattingSubmitting] = useState(false);
-  /** 发送同步锁（IKHK9N，口径同 sceneSplitSendingRef）：发送先退会话（条随即卸载），
-   *  submitting 状态防不住同一事件循环内的双击，ref 锁兜底（连点只发一次请求）。 */
+  const smartMattingView = smartMattingSession.getSnapshot();
+  const smartMattingTargetNodeId = smartMattingView.state?.nodeId ?? null;
+  const smartMattingMode = smartMattingView.state?.mode ?? 'portrait';
+  const smartMattingFormat = smartMattingView.state?.format ?? SMART_MATTING_DEFAULT_FORMAT;
+  const smartMattingBackgroundColor = smartMattingView.state?.backgroundColor ?? SMART_MATTING_DEFAULT_BACKGROUND_COLOR;
+  const smartMattingSubmitting = smartMattingView.submitting;
+  /** 任务在途锁独立于会话，界面退出不得释放。 */
   const smartMattingSendingRef = useRef(false);
   /** HD 面板发送中（IKH3VH）：创建往返期间面板只读防重复提交（口径同 audioVideoSplitSubmitting），
    *  创建失败复位（面板保留可调档重发） */
@@ -1902,15 +1874,7 @@ export default function CanvasPage() {
   /** 去字幕框坐标系（显示尺寸，与 MediaNode 内容区同源 mediaContentBox）：框图元记录
    *  显示坐标，发送时按显示尺寸换算归一化四键（subtitleEraseBoxes.displayBoxToNormalized）；
    *  宽高缺失时回退 280×280（mediaContentBox 缺省，归一化换算按实际渲染尺寸归一）。 */
-  const subtitleEraseDisplayBox = (() => {
-    if (!subtitleEraseSourceNode) return null;
-    const d = (subtitleEraseSourceNode.data ?? {}) as Record<string, unknown>;
-    return mediaContentBox({
-      mediaType: 'video',
-      width: typeof d.width === 'number' ? d.width : undefined,
-      height: typeof d.height === 'number' ? d.height : undefined,
-    });
-  })();
+
   /** 框选模式必框（IKH3OV，ADR-0104 故事 18）：无检测框即拦发送——发送钮据此置灰并把原因
    *  作 title，handleSubtitleEraseSend 据此守卫生效（组件置灰 + 处理器守卫双层，防其他路径绕过）；
    *  智能模式恒 null（无框直发，不回落框选语义）。 */
@@ -2110,10 +2074,10 @@ export default function CanvasPage() {
   };
   /** 智能抠像创建（审查修复 S1）：新增服务端写入按请求治理规则承载 mutation
    *  （frontend-delivery/references/request.md「Mutations」）；家族既有工具是历史形态，
-   *  不随本单迁移。失败提示单源 = HTTP 层默认 toast，页面只落占位卡失败态，不再二次提示。 */
+   *  不随本单迁移。编辑提交用 silent 传输并由运行时反馈；失败卡重试保留 HTTP 默认提示。 */
   const createVideoMattingMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: CreateVideoMattingPayload }) =>
-      createVideoMatting(vars.projectId, vars.payload),
+    mutationFn: (vars: { projectId: string; payload: CreateVideoMattingPayload; silent?: boolean }) =>
+      createVideoMatting(vars.projectId, vars.payload, { silent: vars.silent }),
   });
   const quoteMutation = useMutation({ mutationFn: createConversationQuote });
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
@@ -4195,25 +4159,19 @@ export default function CanvasPage() {
    *  框外暗区/专属 Esc 等定向入口不经本装配，直调各工具完整退出函数。 */
   const buildToolSessionDeps = (): ToolSessionDeps => toolRuntime.coordinate({
     activity: {
-      erase: eraseTargetNodeId,
       cutout: cutoutNodeId,
       crop: cropTargetNodeId,
       outpaint: outpaintNodeId,
-      subtitleErase: subtitleEraseTargetNodeId,
       audioMix: audioMixSourceNodeId,
       sceneSplit: sceneSplitTargetNodeId,
-      smartMatting: smartMattingTargetNodeId,
       audioVideoMux: audioVideoMuxDraftId,
     },
     exits: {
-      erase: exitEraseEditing,
       cutout: exitCutoutSession,
       crop: exitCropMode,
       outpaint: endOutpaintSession,
-      subtitleErase: exitSubtitleEraseEditing,
       audioMix: exitAudioMixEditing,
       sceneSplit: exitSceneSplitEditing,
-      smartMatting: exitSmartMattingEditing,
       audioVideoMux: exitAudioVideoMuxEditing,
     },
     dismissGenPanels: dismissAllGenPanels,
@@ -4894,21 +4852,11 @@ export default function CanvasPage() {
   }, [frameInterpolationDraftId, mediaNodes]);
 
   /** 擦除编辑态绑定清理（IKGOT7/IKGOTB）：目标源图卡被删除时退出编辑态并丢弃遮罩，防工具条悬挂 */
-  useEffect(() => {
-    if (!eraseTargetNodeId) return;
-    if (!mediaNodes.some((n) => n.id === eraseTargetNodeId)) exitEraseEditing();
-    // exitEraseEditing 仅引用稳定的 setState，不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eraseTargetNodeId, mediaNodes]);
+
 
   /** 去字幕编辑态绑定清理（IKGZ83）：目标源视频卡被删除时退出编辑态并丢弃框与开关状态，
    *  防工具条/发送条悬挂（口径同擦除绑定清理） */
-  useEffect(() => {
-    if (!subtitleEraseTargetNodeId) return;
-    if (!mediaNodes.some((n) => n.id === subtitleEraseTargetNodeId)) exitSubtitleEraseEditing();
-    // exitSubtitleEraseEditing 仅引用稳定的 setState，不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subtitleEraseTargetNodeId, mediaNodes]);
+
 
   useEffect(() => {
     toolRuntime.reconcileSources(new Set(mediaNodes.map((node) => node.id)));
@@ -4937,12 +4885,7 @@ export default function CanvasPage() {
   }, [sceneSplitTargetNodeId, mediaNodes]);
   /** 智能抠像编辑态绑定清理（IKHK9N）：目标源视频卡被删除时退出编辑态，防浮条悬挂
    *  （口径同场景切分绑定清理） */
-  useEffect(() => {
-    if (!smartMattingTargetNodeId) return;
-    if (!mediaNodes.some((n) => n.id === smartMattingTargetNodeId)) exitSmartMattingEditing();
-    // exitSmartMattingEditing 仅引用稳定的 setState，不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [smartMattingTargetNodeId, mediaNodes]);
+
 
   /** 裁切编辑态绑定清理（IKGW1H）：目标源图卡被删除时退出裁切模式，防状态悬挂 */
   useEffect(() => {
@@ -7929,155 +7872,84 @@ export default function CanvasPage() {
 
   /* ===== 擦除发送链路（IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
 
-  /** 擦除任务发送核心：组装好的契约 input 直接 POST image-erasures；创建成功后
-   *  在源卡右侧建擦除结果卡（node id = input.target_node_id，发送前已生成冻结进任务）、
-   *  拉纯视觉来源线（origin=image-erase，参考推导跳过）、启动轮询（applyJobTerminal 回填成品/失败）。
-   *  创建失败（门槛拒/网络）不建卡不退出编辑态；入队失败创建响应仍 200，任务经轮询呈现 enqueue_failed。
-   *  免费口径同 image_enhance：无幂等头、无积分预估、不走余额拦截门。
-   *  会话纪元（IKI61O）：settle 时纪元已推进（退出/重进/切项目）即迟到响应——仍建卡收尾，
-   *  但不退用户当前会话、建卡不抢选中、不向它弹旧失败提示。 */
-  const startImageEraseJob = async (
-    sourceNodeId: string,
-    input: ImageEraseInput,
-    sessionEpoch: number,
-  ): Promise<boolean> => {
-    // 前置校验也要纪元值守：涂抹发送路的会话快照在遮罩编码前捕获（IKI8L7），但走到这里
-    // 已过编码与上传两次 await，期间会话可能已退出/重进（纪元失效时输入用快照、不读当前会话）
-    if (!currentId) {
-      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
-      showToast('warn', '未选中项目，无法发起图片擦除');
-      return false;
-    }
-    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
-    if (!node) {
-      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
-      showToast('warn', '源图卡不存在，无法发起图片擦除');
-      return false;
-    }
+  /** 擦除受理后的结果卡、来源边与轮询仍由画布宿主接管。 */
+  const handoffImageEraseTask = async (
+    submission: ImageEraseTaskSubmission,
+    created: { job_id: string },
+    skipSelect: boolean,
+  ): Promise<void> => {
+    const { source: node, payload: input } = submission;
+    const sourceNodeId = node.id;
     const targetNodeId = input.target_node_id;
-    try {
-      const created = await createImageErase(currentId, input, { silent: true });
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
-      // 纪元失效（迟到响应）则不退用户当前会话，建卡也不抢选中（skipSelect）
-      const sessionCurrent = toolSessionEpochRef.current.isCurrent('erase', sessionEpoch);
-      if (sessionCurrent) exitEraseEditing();
-      const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-        fileName: '擦除',
-        nodeId: targetNodeId,
-        skipSelect: !sessionCurrent,
-        data: {
-          imageErase: { sourceAssetId: input.source_asset_id, lastInput: input },
-          genStatus: 'generating',
-          progress: 0,
-        },
-      });
-      addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_ERASE_EDGE_ORIGIN });
-      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEnhanceJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(draftId, activeAtCreate);
-      patchMediaNode(draftId, { jobId: created.job_id });
-      pollJob(draftId, created.job_id);
-      return true;
-    } catch (e: unknown) {
-      // 迟到失败不打扰用户当前会话（IKI61O）
-      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
-      showToast('error', isApiError(e) ? e.message : '创建擦除任务失败，请重试');
-      return false;
-    }
+    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+      fileName: '擦除',
+      nodeId: targetNodeId,
+      skipSelect,
+      data: {
+        imageErase: { sourceAssetId: input.source_asset_id, lastInput: input },
+        genStatus: 'generating',
+        progress: 0,
+      },
+    });
+    addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_ERASE_EDGE_ORIGIN });
+    // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEnhanceJob）
+    const activeAtCreate = newNodeId('pending-generation');
+    activeJobByNodeRef.current.set(draftId, activeAtCreate);
+    patchMediaNode(draftId, { jobId: created.job_id });
+    pollJob(draftId, created.job_id);
+  };
+  imageEraseHostRef.current = {
+    getProjectId: () => currentId,
+    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+    newTargetId: () => newNodeId('media-draft'),
+    encodeMask: rasterizeMaskToPngFile,
+    uploadMask: (file, projectId) => uploadAssetFile(file, { projectId, assetSource: 'mask_erase', silent: true }),
+    createTask: ({ projectId, payload }) => createImageErase(projectId, payload, { silent: true }),
+    handoff: handoffImageEraseTask,
+    warn: (message) => showToast('warn', message),
+    error: (message) => showToast('error', message),
   };
 
   /* ===== 去字幕发送链路（IKGZ83，镜像擦除 IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
 
-  /** 去字幕任务发送核心：组装好的契约 input 直接 POST video-subtitle-erasures；创建成功后
-   *  先退编辑态再在源卡右侧建去字幕结果卡（node id = input.target_node_id，发送前已生成
-   *  冻结进任务；结果卡是视频占位卡——mediaType 覆盖为 video、带源卡分辨率撑出同比例内容区，
-   *  带 videoSubtitleErase 身份标记——lastInput 供失败重试原样重发）、拉纯视觉来源线
-   *  （origin=video-subtitle-erase，参考推导跳过，源视频不占参考位不参与 @ 编号）、
-   *  启动轮询（applyJobTerminal 回填成品/失败；成品是普通视频素材卡可再次去字幕）。
-   *  创建失败（门槛拒/网络）不建卡不退出编辑态（用户参数留在编辑态可调后重发，规格故事 21
-   *  「立即退出」指成功路径）；入队失败创建响应仍 200，任务经轮询呈现 enqueue_failed。
-   *  免费口径同 image_enhance / image_erase：无幂等头、无积分预估、不走余额拦截门。 */
-  const startVideoSubtitleEraseJob = async (
-    sourceNodeId: string,
-    input: VideoSubtitleEraseInput,
-    sessionEpoch: number,
-  ): Promise<boolean> => {
-    if (!currentId) {
-      showToast('warn', '未选中项目，无法发起视频去字幕');
-      return false;
-    }
-    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
-    if (!node) {
-      showToast('warn', '源视频卡不存在，无法发起视频去字幕');
-      return false;
-    }
+  /** 去字幕受理后的任务卡接线，专属会话反馈归运行时。 */
+  const handoffSubtitleEraseTask = async (
+    submission: SubtitleEraseTaskSubmission,
+    created: { job_id: string },
+    skipSelect: boolean,
+  ): Promise<void> => {
+    const { source: node, payload: input } = submission;
+    const sourceNodeId = node.id;
     const targetNodeId = input.target_node_id;
-    const sourceData = (node.data ?? {}) as Record<string, unknown>;
-    try {
-      const created = await createVideoSubtitleErase(currentId, input, { silent: true });
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
-      // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，建卡也不抢选中（skipSelect）
-      const sessionCurrent = toolSessionEpochRef.current.isCurrent('subtitleErase', sessionEpoch);
-      if (sessionCurrent) exitSubtitleEraseEditing();
-      const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-        fileName: '去字幕',
-        nodeId: targetNodeId,
-        skipSelect: !sessionCurrent,
-        data: {
-          mediaType: 'video',
-          ...(typeof sourceData.width === 'number' ? { width: sourceData.width } : {}),
-          ...(typeof sourceData.height === 'number' ? { height: sourceData.height } : {}),
-          videoSubtitleErase: { sourceAssetId: input.source_asset_id, lastInput: input },
-          genStatus: 'generating',
-          progress: 0,
-        },
-      });
-      addCanvasEdge(sourceNodeId, draftId, undefined, { origin: VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN });
-      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEraseJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(draftId, activeAtCreate);
-      patchMediaNode(draftId, { jobId: created.job_id });
-      pollJob(draftId, created.job_id);
-      return true;
-    } catch (e: unknown) {
-      // 迟到失败不打扰用户当前会话（IKI61O）
-      if (!toolSessionEpochRef.current.isCurrent('subtitleErase', sessionEpoch)) return false;
-      showToast('error', isApiError(e) ? e.message : '创建去字幕任务失败，请重试');
-      return false;
-    }
+    const sourceData = node.data;
+    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+      fileName: '去字幕',
+      nodeId: targetNodeId,
+      skipSelect,
+      data: {
+        mediaType: 'video',
+        ...(typeof sourceData.width === 'number' ? { width: sourceData.width } : {}),
+        ...(typeof sourceData.height === 'number' ? { height: sourceData.height } : {}),
+        videoSubtitleErase: { sourceAssetId: input.source_asset_id, lastInput: input },
+        genStatus: 'generating',
+        progress: 0,
+      },
+    });
+    addCanvasEdge(sourceNodeId, draftId, undefined, { origin: VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN });
+    // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEraseJob）
+    const activeAtCreate = newNodeId('pending-generation');
+    activeJobByNodeRef.current.set(draftId, activeAtCreate);
+    patchMediaNode(draftId, { jobId: created.job_id });
+    pollJob(draftId, created.job_id);
   };
-
-  /** 去字幕发送（单条发送钮）：源素材身份 → 按框集合推导契约四键
-   *  （buildVideoSubtitleEraseInput：detect_mode 两模式恒 subtitle_smart、erase_boxes 由
-   *  框集合推导——智能模式入口零框选工具故恒空数组）→ 发任务。请求发出即返回；会话退出与
-   *  建卡在创建成功后由 startVideoSubtitleEraseJob 承担，失败停留会话（可重发）。
-   *  框选模式必框守卫（IKH3OV）：无框时不提交、不建卡、不回落智能语义（组件侧同条件置灰）。
-   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
-  const handleSubtitleEraseSend = (): boolean => {
-    const nodeId = subtitleEraseTargetNodeId;
-    if (!nodeId) return false;
-    if (subtitleEraseSendBlockedReason) return false;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
-    if (!node || !sourceAssetId) {
-      showToast('warn', '源素材身份缺失，无法发起视频去字幕');
-      return false;
-    }
-    const displayBox = subtitleEraseDisplayBox;
-    const input = buildVideoSubtitleEraseInput({
-      sourceAssetId,
-      targetNodeId: newNodeId('media-draft'),
-      boxes: subtitleEraseBoxes.boxes,
-      displayWidth: displayBox?.width ?? MEDIA_CONTENT_SHORT_SIDE,
-      displayHeight: displayBox?.height ?? MEDIA_CONTENT_SHORT_SIDE,
-    });
-    const sessionEpoch = toolSessionEpochRef.current.capture('subtitleErase');
-    setSubtitleEraseSubmitting(true);
-    void startVideoSubtitleEraseJob(nodeId, input, sessionEpoch).finally(() => {
-      if (!toolSessionEpochRef.current.isCurrent('subtitleErase', sessionEpoch)) return;
-      setSubtitleEraseSubmitting(false);
-    });
-    return true;
+  subtitleEraseHostRef.current = {
+    getProjectId: () => currentId,
+    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+    newTargetId: () => newNodeId('media-draft'),
+    createTask: ({ projectId, payload }) => createVideoSubtitleErase(projectId, payload, { silent: true }),
+    handoff: handoffSubtitleEraseTask,
+    warn: (message) => showToast('warn', message),
+    error: (message) => showToast('error', message),
   };
 
   /* ===== 抠图发送链路（IKGXMT，镜像擦除 IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
@@ -8171,90 +8043,6 @@ export default function CanvasPage() {
     void startImageCutoutJob(nodeId, input, sessionEpoch).finally(() => {
       if (!toolSessionEpochRef.current.isCurrent('cutout', sessionEpoch)) return;
       setCutoutSubmitting(false);
-    });
-    return true;
-  };
-
-  /** 涂抹发送第一步（组件点发送瞬间同步回调，先于遮罩栅格化——IKI8L7）：捕获会话身份
-   *  与发送输入快照——目标卡 nodeId、源资产 assetId、会话纪元。栅格化（canvas.toBlob）、
-   *  上传、创建任务全程只用这份快照：旧编码回调返回后不重新捕获当前会话、不读取新会话
-   *  输入——旧任务按原输入收尾（!838 统一纪元：不关新会话、不动其提交状态、不弹旧错误）。 */
-  const handleEraseDialogCaptureMaskSession = (): EraseMaskSendSession | null => {
-    const nodeId = eraseTargetNodeId;
-    if (!nodeId) return null;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
-    if (!node || !sourceAssetId) {
-      showToast('warn', '源素材身份缺失，无法发起图片擦除');
-      return null;
-    }
-    return { nodeId, sourceAssetId, sessionEpoch: toolSessionEpochRef.current.capture('erase') };
-  };
-
-  /** 涂抹发送（工具条发送钮）：遮罩 PNG 已在组件内栅格化，此处用发送时刻捕获的会话快照
-   *  （非当前会话状态）上传（source=mask_erase，中间素材不进用户资产列表可见内容）→
-   *  组装 selected_area_erase 四键 → 发任务。
-   *  会话纪元（IKI61O/IKI8L7）：纪元与输入在栅格化之前捕获；编码在途退出/重开即迟到——
-   *  任务仍按原输入创建收尾，但提交锁、提示与退出仅作用于发送时的会话。 */
-  const handleEraseDialogSendMask = async (
-    session: EraseMaskSendSession,
-    file: File | null,
-  ): Promise<boolean> => {
-    const { nodeId, sourceAssetId, sessionEpoch } = session;
-    if (!nodeId) return false;
-    if (!file) {
-      // 栅格化失败/无产物也经异步回调返回，会话可能已退出/重开（IKI8L7）：旧失败不向新会话提示
-      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
-      showToast('error', '遮罩生成失败，请重试');
-      return false;
-    }
-    // 迟到回调（会话已换）继续按原输入上传收尾，但不把新会话设为提交中
-    if (toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) setEraseSubmitting(true);
-    try {
-      const uploaded = await uploadAssetFile(file, {
-        projectId: currentId ?? undefined,
-        assetSource: 'mask_erase',
-        silent: true,
-      });
-      const input: ImageEraseInput = {
-        source_asset_id: sourceAssetId,
-        target_node_id: newNodeId('media-draft'),
-        erase_scene: 'selected_area_erase',
-        mask_asset_id: uploaded.asset_id,
-      };
-      return await startImageEraseJob(nodeId, input, sessionEpoch);
-    } catch (e: unknown) {
-      // 迟到失败不打扰用户当前会话（IKI61O/IKI8L7）
-      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
-      showToast('error', isApiError(e) ? e.message : '遮罩上传失败，请重试');
-      return false;
-    } finally {
-      if (toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) setEraseSubmitting(false);
-    }
-  };
-
-  /** 清除文字一键直发（不经遮罩）：full_screen_text_erase 三键直接发任务，
-   *  与涂抹发送共用同一条结果链路（规格故事 20）；请求发出即返回 true（编辑态随之退出）。
-   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
-  const handleEraseDialogSendText = (): boolean => {
-    const nodeId = eraseTargetNodeId;
-    if (!nodeId) return false;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
-    if (!node || !sourceAssetId) {
-      showToast('warn', '源素材身份缺失，无法发起图片擦除');
-      return false;
-    }
-    const input: ImageEraseInput = {
-      source_asset_id: sourceAssetId,
-      target_node_id: newNodeId('media-draft'),
-      erase_scene: 'full_screen_text_erase',
-    };
-    const sessionEpoch = toolSessionEpochRef.current.capture('erase');
-    setEraseSubmitting(true);
-    void startImageEraseJob(nodeId, input, sessionEpoch).finally(() => {
-      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return;
-      setEraseSubmitting(false);
     });
     return true;
   };
@@ -9912,29 +9700,12 @@ export default function CanvasPage() {
 
   /** 退出擦除编辑态（IKGOTB 四退出共用）：未发送的遮罩全部丢弃（无卡、无边、无任务），
    *  工具/活笔/发送中标记一并复位。IKI61O：退出即推进纪元，在途响应 settle 失效。 */
-  const exitEraseEditing = () => {
-    toolSessionEpochRef.current.exit('erase');
-    setEraseTargetNodeId(null);
-    setEraseMaskState(EMPTY_MASK_EDIT);
-    setEraseLiveOp(null);
-    eraseLiveOpRef.current = null;
-    eraseStrokePointsRef.current = [];
-    setEraseTool('brush');
-    setEraseSubmitting(false);
-  };
+  const exitEraseEditing = imageEraseSession.close;
 
   /** 退出去字幕会话（IKGZ83 四退出共用，IKH3OU 起含模式复位）：未发送的框状态全部丢弃
    *  （无卡、无边、无任务），活框与发送中标记一并复位，模式回默认 smart
    *  （规格故事 22「退出后不留痕迹」）。IKI61O：退出即推进纪元。 */
-  const exitSubtitleEraseEditing = () => {
-    toolSessionEpochRef.current.exit('subtitleErase');
-    setSubtitleEraseTargetNodeId(null);
-    setSubtitleEraseMode('smart');
-    setSubtitleEraseBoxes(EMPTY_SUBTITLE_BOX_EDIT);
-    setSubtitleEraseLiveBox(null);
-    subtitleEraseLiveBoxRef.current = null;
-    setSubtitleEraseSubmitting(false);
-  };
+  const exitSubtitleEraseEditing = subtitleEraseSession.close;
 
   /** 退出音视频分离编辑态（IKH28U 四退出共用）：会话参数（分离格式）与发送中复位——
    *  格式不跨会话记忆，未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
@@ -9992,14 +9763,7 @@ export default function CanvasPage() {
    *  （模式/输出格式/背景色）与发送中复位——参数不跨会话记忆（每次进入重置
    *  WEBM + 白色），未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
    *  自动恢复（MediaNode 承担）。IKI61O：退出即推进纪元。 */
-  const exitSmartMattingEditing = () => {
-    toolSessionEpochRef.current.exit('smartMatting');
-    setSmartMattingTargetNodeId(null);
-    setSmartMattingMode('portrait');
-    setSmartMattingFormat(SMART_MATTING_DEFAULT_FORMAT);
-    setSmartMattingBackgroundColor(SMART_MATTING_DEFAULT_BACKGROUND_COLOR);
-    setSmartMattingSubmitting(false);
-  };
+  const exitSmartMattingEditing = smartMattingSession.close;
 
   /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
    *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。
@@ -10015,16 +9779,7 @@ export default function CanvasPage() {
    *  门槛预检（超尺寸/超大小/webp/gif）已在菜单项置灰层完成，此处只管进入；
    *  其余编辑会话退出与生成面板关闭经 toolSessionCoordinator（编辑态是独立模式，规格故事 7）。 */
   const handleNodeEraseImage = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    runToolSessionEntry('erase', () => {
-      setEraseTargetNodeId(id);
-      setEraseMaskState(EMPTY_MASK_EDIT);
-      setEraseLiveOp(null);
-      eraseLiveOpRef.current = null;
-      eraseStrokePointsRef.current = [];
-      setEraseTool('brush');
-    });
+    imageEraseSession.open(id, buildToolSessionDeps());
   };
 
   /** 抠图（IKGXLT 入口 / IKGXMT 会话）：把目标图片卡置为抠图会话（源图卡下方浮出横条工具栏），
@@ -10066,15 +9821,7 @@ export default function CanvasPage() {
    *  此处只管进入；其余编辑会话退出与生成面板关闭经 toolSessionCoordinator（会话是独立
    *  模式）、不动视角；视频随会话态注入在当前帧暂停（MediaNode 承担）。 */
   const handleNodeVideoSubtitleErase = (id: string, mode: VideoSubtitleEraseMode) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    runToolSessionEntry('subtitleErase', () => {
-      setSubtitleEraseTargetNodeId(id);
-      setSubtitleEraseMode(mode);
-      setSubtitleEraseBoxes(EMPTY_SUBTITLE_BOX_EDIT);
-      setSubtitleEraseLiveBox(null);
-      subtitleEraseLiveBoxRef.current = null;
-    });
+    subtitleEraseSession.open({ nodeId: id, mode }, buildToolSessionDeps());
   };
 
   /** 音视频分离（IKH28U 入口 / IKH28X 格式状态）：把目标视频卡置为音视频分离编辑态
@@ -10334,14 +10081,7 @@ export default function CanvasPage() {
    *  toolSessionCoordinator（第十会话，口径对齐 handleNodeSceneSplit）、不动视角；
    *  视频随会话态注入在当前帧暂停并锁定播放控制（MediaNode splitEditing 承担）。 */
   const handleNodeSmartMatting = (id: string, mode: SmartMattingMode) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    runToolSessionEntry('smartMatting', () => {
-      setSmartMattingMode(mode);
-      setSmartMattingFormat(SMART_MATTING_DEFAULT_FORMAT);
-      setSmartMattingBackgroundColor(SMART_MATTING_DEFAULT_BACKGROUND_COLOR);
-      setSmartMattingTargetNodeId(id);
-    });
+    smartMattingSession.open({ nodeId: id, mode }, buildToolSessionDeps());
   };
 
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
@@ -10435,50 +10175,11 @@ export default function CanvasPage() {
 
   /* ===== 擦除遮罩指针交互（IKGOTB）：EraseMaskLayer 上抛显示坐标点，此处按当前工具落 op ===== */
 
-  const handleEraseStrokeStart = (point: MaskPoint) => {
-    if (eraseTool === 'rect') {
-      const op: MaskOp = { kind: 'rect', erase: false, from: point, to: point };
-      eraseLiveOpRef.current = op;
-      setEraseLiveOp(op);
-      return;
-    }
-    eraseStrokePointsRef.current = [point];
-    const op: MaskOp = {
-      kind: 'stroke',
-      erase: eraseTool === 'eraser',
-      points: [point],
-      radius: eraseBrushRadius,
-    };
-    eraseLiveOpRef.current = op;
-    setEraseLiveOp(op);
-  };
-
-  const handleEraseStrokeMove = (point: MaskPoint) => {
-    const live = eraseLiveOpRef.current;
-    if (!live) return;
-    if (live.kind === 'rect') {
-      const next: MaskOp = { ...live, to: point };
-      eraseLiveOpRef.current = next;
-      setEraseLiveOp(next);
-      return;
-    }
-    eraseStrokePointsRef.current = [...eraseStrokePointsRef.current, point];
-    const next: MaskOp = { ...live, points: eraseStrokePointsRef.current };
-    eraseLiveOpRef.current = next;
-    setEraseLiveOp(next);
-  };
-
-  const handleEraseStrokeEnd = () => {
-    const live = eraseLiveOpRef.current;
-    eraseLiveOpRef.current = null;
-    setEraseLiveOp(null);
-    eraseStrokePointsRef.current = [];
-    if (!live) return;
-    setEraseMaskState((state) => applyMaskOp(state, live));
-  };
-
-  const handleEraseUndo = () => setEraseMaskState((state) => undoMaskEdit(state));
-  const handleEraseRedo = () => setEraseMaskState((state) => redoMaskEdit(state));
+  const handleEraseStrokeStart = (point: MaskPoint) => imageEraseSession.edit((state) => beginEraseStroke(state, point));
+  const handleEraseStrokeMove = (point: MaskPoint) => imageEraseSession.edit((state) => moveEraseStroke(state, point));
+  const handleEraseStrokeEnd = () => imageEraseSession.edit(endEraseStroke);
+  const handleEraseUndo = () => imageEraseSession.edit((state) => ({ ...state, mask: undoMaskEdit(state.mask) }));
+  const handleEraseRedo = () => imageEraseSession.edit((state) => ({ ...state, mask: redoMaskEdit(state.mask) }));
   eraseHistoryRef.current = {
     active: eraseTargetNodeId != null,
     undo: handleEraseUndo,
@@ -10488,36 +10189,12 @@ export default function CanvasPage() {
   /* ===== 去字幕框指针交互（IKGZ83）：SubtitleEraseBoxesLayer 上抛显示坐标点，
    *  此处经 subtitleEraseBoxes 纯逻辑落框；拉满 20 个上限时 toast 提示（规格故事 9） ===== */
 
-  const handleSubtitleBoxStart = (point: SubtitleBoxPoint) => {
-    if (!canAddSubtitleBox(subtitleEraseBoxes)) {
-      showToast('warn', '检测框最多 20 个，请先撤销后重试');
-      return;
-    }
-    const op: SubtitleBoxOp = { kind: 'box', from: point, to: point };
-    subtitleEraseLiveBoxRef.current = op;
-    setSubtitleEraseLiveBox(op);
-  };
-
-  const handleSubtitleBoxMove = (point: SubtitleBoxPoint) => {
-    const live = subtitleEraseLiveBoxRef.current;
-    if (!live) return;
-    const next: SubtitleBoxOp = { kind: 'box', from: live.from, to: point };
-    subtitleEraseLiveBoxRef.current = next;
-    setSubtitleEraseLiveBox(next);
-  };
-
-  const handleSubtitleBoxEnd = () => {
-    const live = subtitleEraseLiveBoxRef.current;
-    subtitleEraseLiveBoxRef.current = null;
-    setSubtitleEraseLiveBox(null);
-    if (!live) return;
-    setSubtitleEraseBoxes((state) => applySubtitleBox(state, live));
-  };
-
-  const handleSubtitleBoxUndo = () => setSubtitleEraseBoxes((state) => undoSubtitleBoxEdit(state));
-  const handleSubtitleBoxRedo = () => setSubtitleEraseBoxes((state) => redoSubtitleBoxEdit(state));
-  /** 重置（IKH3OV）：一键清空全部框，作为一步可撤销操作进 undo 栈（撤销整批还原） */
-  const handleSubtitleBoxReset = () => setSubtitleEraseBoxes((state) => resetSubtitleBoxEdit(state));
+  const handleSubtitleBoxStart = (point: SubtitleBoxPoint) => subtitleEraseSession.edit((state) => beginSubtitleBox(state, point, () => showToast('warn', '检测框最多 20 个，请先撤销后重试')));
+  const handleSubtitleBoxMove = (point: SubtitleBoxPoint) => subtitleEraseSession.edit((state) => moveSubtitleBox(state, point));
+  const handleSubtitleBoxEnd = () => subtitleEraseSession.edit(endSubtitleBox);
+  const handleSubtitleBoxUndo = () => subtitleEraseSession.edit((state) => ({ ...state, boxes: undoSubtitleBoxEdit(state.boxes) }));
+  const handleSubtitleBoxRedo = () => subtitleEraseSession.edit((state) => ({ ...state, boxes: redoSubtitleBoxEdit(state.boxes) }));
+  const handleSubtitleBoxReset = () => subtitleEraseSession.edit((state) => ({ ...state, boxes: resetSubtitleBoxEdit(state.boxes) }));
 
   /* ===== 音视频分离发送链路（IKH28X）：发送才建任务 + 音频占位卡 + 来源边 + 终态回填 ===== */
 
@@ -10929,65 +10606,33 @@ export default function CanvasPage() {
   /* ===== 智能抠像发送链路（IKHK9N，镜像场景切分/去字幕家族）：先退会话 → 本地建任务
      占位卡（target_node_id 取该卡）→ POST video-mattings → job_id 回写占位卡 → 轮询终态 ===== */
 
-  /** 智能抠像任务发送核心：按所选模式/格式/背景色 POST video-mattings（client_token 每次
-   *  新生成——同 token 只会重放旧任务，重试亦复用本函数口径）。BO 定死流程顺序：**先退会话**
-   *  再本地在源视频右侧建任务占位卡（node id 本地生成，target_node_id 发送时取它——先建卡
-   *  后发请求，IKH8BO 契约；展示名标注模式「人像抠像/绿幕抠像」、生成中骨架、smartMatting
-   *  身份——lastInput 供失败重试原参数重发）、拉来源边（origin=smart-matting，参考推导
-   *  跳过）、创建成功回写 job_id 并启动轮询（applyJobTerminal 通用终态分支收敛；成本票
-   *  IKHK9N 只做到此，成品卡棋盘格与结果卡语义归 IKHKAC）、立刻落盘（best-effort，防刚
-   *  建任务就关页丢卡）。创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态
-   *  （文案可读、卡上重试按原参数重发——不静默删卡，用户重试不必重新进会话配置）。
-   *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
-   *  无积分预估、不走余额拦截门。 */
-  const startSmartMattingJob = async (
-    sourceNodeId: string,
-    args: {
-      sourceAssetId: string;
-      mode: SmartMattingMode;
-      format: SmartMattingFormat;
-      backgroundColor: SmartMattingBackgroundColor;
-    },
-  ): Promise<boolean> => {
-    if (!currentId) {
-      showToast('warn', '未选中项目，无法智能抠像');
-      return false;
-    }
-    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
-    if (!node) {
-      showToast('warn', '源视频卡不存在，无法智能抠像');
-      return false;
-    }
-    // 发送即退会话（BO 定死顺序：先退再建卡——占位卡节点 id 要作为 target_node_id 发送）
-    exitSmartMattingEditing();
-    const placeholderId = newNodeId('smart-matting');
-    const lastInput = buildSmartMattingInput({
-      sourceAssetId: args.sourceAssetId,
-      targetNodeId: placeholderId,
-      mode: args.mode,
-      format: args.format,
-      backgroundColor: args.backgroundColor,
-    });
-    const placeholder = attachCallbacks(
-      buildSmartMattingPlaceholderNode({
-        nodeId: placeholderId,
-        mode: args.mode,
-        sourceAssetId: args.sourceAssetId,
-        lastInput,
-        source: node,
-      }) as Node,
-    );
-    // 先同步写 ref 再 setState：后续连线端点与轮询 guard 都要求节点已在（无 pendingNodeIdsRef
-    // 登记：占位卡身份以 smartMatting 身份标记为准，失败由卡上重试收敛）
-    const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SMART_MATTING_EDGE_ORIGIN });
+  /** 抠像的预建卡、请求、轮询与任务在途锁由既有画布宿主负责。 */
+  const runSmartMattingTask = async (input: SmartMattingSubmission): Promise<void> => {
+    smartMattingSendingRef.current = true;
+    const { projectId, source: node, payload: lastInput, clientToken } = input;
+    const sourceNodeId = node.id;
+    const placeholderId = lastInput.target_node_id;
     try {
+      const placeholder = attachCallbacks(
+        buildSmartMattingPlaceholderNode({
+          nodeId: placeholderId,
+          mode: lastInput.mode,
+          sourceAssetId: lastInput.source_asset_id,
+          lastInput,
+          source: node,
+        }) as Node,
+      );
+      // 先同步写 ref 再 setState：后续连线端点与轮询 guard 都要求节点已在（无 pendingNodeIdsRef
+      // 登记：占位卡身份以 smartMatting 身份标记为准，失败由卡上重试收敛）
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SMART_MATTING_EDGE_ORIGIN });
       const created = await createVideoMattingMutation.mutateAsync({
-        projectId: currentId,
-        payload: { ...lastInput, client_token: newIdempotencyKey() },
+        projectId,
+        payload: { ...lastInput, client_token: clientToken },
+        silent: true,
       });
       // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startSceneSplitJob）
       const activeAtCreate = newNodeId('pending-generation');
@@ -10996,43 +10641,23 @@ export default function CanvasPage() {
       patchMediaNode(placeholderId, { jobId: created.job_id });
       pollJob(placeholderId, created.job_id);
       // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢卡
-      await flushCanvasSave(currentId).catch(() => {});
-      return true;
-    } catch (e: unknown) {
-      // 创建失败：占位卡转失败态（卡上重试原参数重发，client_token 重试时另生成）。
-      // 提示单源 = HTTP 层默认 toast——页面不再二次提示（审查修复 S1，原为全局+画布双提示）
-      patchMediaNode(placeholderId, {
-        genStatus: 'failed',
-        errorText: isApiError(e) ? e.message : '智能抠像任务创建失败，请重试',
-      });
-      return false;
+      await flushCanvasSave(projectId).catch(() => {});
+    } catch (error: unknown) {
+      patchMediaNode(placeholderId, { genStatus: 'failed', errorText: isApiError(error) ? error.message : '智能抠像任务创建失败，请重试' });
+      throw error;
+    } finally {
+      smartMattingSendingRef.current = false;
     }
   };
-
-  /** 智能抠像发送（单条发送钮）：源素材身份 + 当前模式/输出格式/背景色 → 先退会话再建
-   *  占位卡发任务。请求发出即返回（飞行期 submitting 防重复提交）；创建往返与轮询收敛
-   *  由 startSmartMattingJob 承担。 */
-  const handleSmartMattingSend = (): boolean => {
-    const nodeId = smartMattingTargetNodeId;
-    if (!nodeId || smartMattingSubmitting || smartMattingSendingRef.current) return false;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
-    if (!node || !sourceAssetId) {
-      showToast('warn', '当前视频尚未关联资产，无法智能抠像');
-      return false;
-    }
-    smartMattingSendingRef.current = true;
-    setSmartMattingSubmitting(true);
-    void startSmartMattingJob(nodeId, {
-      sourceAssetId: String(sourceAssetId),
-      mode: smartMattingMode,
-      format: smartMattingFormat,
-      backgroundColor: smartMattingBackgroundColor,
-    }).finally(() => {
-      smartMattingSendingRef.current = false;
-      setSmartMattingSubmitting(false);
-    });
-    return true;
+  smartMattingHostRef.current = {
+    getProjectId: () => currentId,
+    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+    newTargetId: () => newNodeId('smart-matting'),
+    newClientToken: newIdempotencyKey,
+    isSending: () => smartMattingSendingRef.current,
+    runTask: runSmartMattingTask,
+    warn: (message) => showToast('warn', message),
+    error: (message) => globalToast.error(message),
   };
 
   /** 自由图片面板的文本附件按节点身份刷新标题与正文（IKFCX4）：来源改名/改文后再次预览即用当前值；
@@ -13706,20 +13331,18 @@ export default function CanvasPage() {
         {eraseTargetNodeId && (
           <ImageEraseDialog
             onClose={exitEraseEditing}
-            onSendTextErase={handleEraseDialogSendText}
-            onCaptureSendSession={handleEraseDialogCaptureMaskSession}
-            onSendMask={handleEraseDialogSendMask}
+            onSendTextErase={() => imageEraseSession.send('text')}
+            onSendMask={() => imageEraseSession.send('mask')}
             tool={eraseTool}
-            onToolChange={setEraseTool}
+            onToolChange={(tool) => imageEraseSession.edit((state) => ({ ...state, tool }))}
             brushRadius={eraseBrushRadius}
-            onBrushRadiusChange={setEraseBrushRadius}
+            onBrushRadiusChange={(brushRadius) => imageEraseSession.edit((state) => ({ ...state, brushRadius }))}
             canUndo={canUndoMaskEdit(eraseMaskState)}
             canRedo={canRedoMaskEdit(eraseMaskState)}
             onUndo={handleEraseUndo}
             onRedo={handleEraseRedo}
             hasPaint={eraseHasPaint}
             maskSpace={eraseMaskSpace}
-            ops={eraseMaskState.ops}
             submitting={eraseSubmitting}
             toolbarAnchor={eraseToolbarAnchor}
             sendBarAnchor={eraseSendBarAnchor}
@@ -13734,7 +13357,7 @@ export default function CanvasPage() {
           <VideoSubtitleEraseDialog
             mode={subtitleEraseMode}
             onClose={exitSubtitleEraseEditing}
-            onSend={handleSubtitleEraseSend}
+            onSend={subtitleEraseSession.send}
             canUndo={canUndoSubtitleBoxEdit(subtitleEraseBoxes)}
             canRedo={canRedoSubtitleBoxEdit(subtitleEraseBoxes)}
             canReset={canResetSubtitleBoxEdit(subtitleEraseBoxes)}
@@ -13881,10 +13504,10 @@ export default function CanvasPage() {
             onClose={exitSmartMattingEditing}
             mode={smartMattingMode}
             format={smartMattingFormat}
-            onFormatChange={setSmartMattingFormat}
+            onFormatChange={(format) => smartMattingSession.edit((state) => ({ ...state, format }))}
             backgroundColor={smartMattingBackgroundColor}
-            onBackgroundColorChange={setSmartMattingBackgroundColor}
-            onSend={handleSmartMattingSend}
+            onBackgroundColorChange={(backgroundColor) => smartMattingSession.edit((state) => ({ ...state, backgroundColor }))}
+            onSend={smartMattingSession.send}
             submitting={smartMattingSubmitting}
             sendBarAnchor={smartMattingSendBarAnchor}
           />

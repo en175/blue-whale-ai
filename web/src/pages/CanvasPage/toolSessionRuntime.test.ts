@@ -113,3 +113,37 @@ it.each(['close', 'escape', 'selection', 'pane', 'generation'] as const)('公开
   if (route === 'generation') runtime.beforeGenPanel(legacyDeps());
   expect(split.getSnapshot()).toEqual({ state: null, submitting: false });
 });
+
+it('工具的两种类型明确发送操作都在执行前同步锁住界面', () => {
+  const runtime = createToolSessionRuntime();
+  const inputs: string[] = [];
+  const tool = runtime.register({ ...definition,
+    capture: (_state: { nodeId: string; format: string }, request?: 'mask' | 'text') => request ?? null,
+    submit: async (input: string) => { inputs.push(input); await new Promise(() => {}); },
+  });
+  tool.open('v1', legacyDeps());
+  expect(tool.send('mask')).toBe(true);
+  expect(tool.send('text')).toBe(false);
+  expect(tool.getSnapshot().submitting).toBe(true);
+  expect(inputs).toEqual(['mask']);
+});
+
+it.each([false, true])('发送即退出仍保留当前失败反馈；后来会话=%s 时旧失败静默', async (newSession) => {
+  const runtime = createToolSessionRuntime();
+  const errors: string[] = [];
+  let reject!: (error: Error) => void;
+  const tool = runtime.register({ ...definition,
+    submit: async (_input, context) => {
+      context.exitForSubmission();
+      await new Promise<void>((_resolve, fail) => { reject = fail; });
+    },
+    onError: () => { errors.push('创建失败'); },
+  });
+  tool.open('v1', legacyDeps()); tool.send();
+  expect(tool.getSnapshot()).toEqual({ state: null, submitting: false });
+  if (newSession) tool.open('v1', legacyDeps());
+  reject(new Error('network'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(errors).toEqual(newSession ? [] : ['创建失败']);
+  expect(tool.getSnapshot().state).toEqual(newSession ? { nodeId: 'v1', format: 'm4a' } : null);
+});

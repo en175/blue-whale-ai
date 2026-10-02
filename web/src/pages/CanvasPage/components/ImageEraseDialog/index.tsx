@@ -2,17 +2,15 @@
  * ImageEraseDialog 擦除编辑态工具条与发送条（IKGOTB，IKGOSZ 波3）：
  * 源图卡上方浮出工具条（清除文字一键直发 / 画笔 / 框选 / 橡皮擦 / 笔刷大小 / 撤销重做 / X），
  * 下方浮出窄发送条（本期免费 + 发送）。
- * 编辑状态（工具/笔刷/遮罩 ops）提升在 CanvasPage（源图卡内的 EraseMaskLayer 共用），本组件受控。
- * 涂抹发送在组件内栅格化遮罩 PNG（rasterizeMaskToPngFile）后交父级上传建任务；
- * 会话身份与输入在栅格化之前经 onCaptureSendSession 同步捕获、随结果回传（IKI8L7）；
+ * 编辑状态由工具会话运行时持有（源图卡内的 EraseMaskLayer 共用），本组件受控。
+ * 涂抹发送交运行时先冻结输入并锁住编码窗口，再栅格化、上传与创建任务；
  * 「清除文字」不经遮罩直接上抛（规格：两条发送路径共用同一条任务链路）。
  * data-gen-panel-territory 豁免点外关闭误杀；Esc/X/点其他卡/点空白退出由 CanvasPage 承载。
  * ============================================ */
 import { useRef } from 'react';
 import { Brush, Eraser, Square, TypeOutline, Undo2, Redo2, X, ArrowUp } from 'lucide-react';
 import type { FollowDialogAnchor } from '../../followDialog';
-import type { MaskCoordinateSpace, MaskOp } from '../../eraseMask';
-import { rasterizeMaskToPngFile, type EraseMaskSendSession } from '../../imageErase';
+import type { MaskCoordinateSpace } from '../../eraseMask';
 import styles from './index.module.css';
 
 /** 擦除编辑工具（三选一互斥）：画笔涂抹 / 矩形框选 / 橡皮擦（从并集减去） */
@@ -50,14 +48,8 @@ interface ImageEraseDialogProps {
   onClose: () => void;
   /** 「清除文字」一键直发：返回 true 表示创建请求已发出；创建成功后父级自行退出编辑态（失败停留编辑态） */
   onSendTextErase: () => boolean;
-  /** 涂抹发送第一步（IKI8L7）：点发送瞬间同步执行、先于遮罩栅格化——捕获发送会话身份与
-   *  输入快照（目标卡 nodeId、源资产 assetId、会话纪元）；返回 null 表示校验未过（父级已
-   *  提示），不进入栅格化与发送。 */
-  onCaptureSendSession: () => EraseMaskSendSession | null;
-  /** 涂抹发送：组件栅格化 ops 成黑白遮罩 PNG 后，连同捕获时刻的会话快照一起上抛
-   *  （File 为 null 表示栅格化失败）；resolve true 表示创建请求已发出，创建成功后父级
-   *  自行退出编辑态（失败停留编辑态）。父级只用快照判定会话归属，不重读当前会话。 */
-  onSendMask: (session: EraseMaskSendSession, file: File | null) => Promise<boolean>;
+  /** 涂抹发送由运行时冻结输入、编码并交给既有上传/任务能力。 */
+  onSendMask: () => boolean;
   tool: EraseTool;
   onToolChange: (tool: EraseTool) => void;
   brushRadius: number;
@@ -70,8 +62,6 @@ interface ImageEraseDialogProps {
   hasPaint: boolean;
   /** 坐标空间（显示尺寸×源图自然分辨率）；null=源图自然分辨率缺失，涂抹发送禁用 */
   maskSpace: MaskCoordinateSpace | null;
-  /** 已固化图元（栅格化输入；活笔不参与发送，pointerup 已并入） */
-  ops: readonly MaskOp[];
   /** 发送中（遮罩上传/创建请求期间只读防重复提交） */
   submitting?: boolean;
   toolbarAnchor: FollowDialogAnchor | null;
@@ -87,7 +77,6 @@ const TOOL_ITEMS: Array<{ id: EraseTool; label: string; icon: typeof Brush; test
 export default function ImageEraseDialog({
   onClose,
   onSendTextErase,
-  onCaptureSendSession,
   onSendMask,
   tool,
   onToolChange,
@@ -99,7 +88,6 @@ export default function ImageEraseDialog({
   onRedo,
   hasPaint,
   maskSpace,
-  ops,
   submitting,
   toolbarAnchor,
   sendBarAnchor,
@@ -132,14 +120,9 @@ export default function ImageEraseDialog({
     dispatch();
   };
 
-  const handleSendMask = async () => {
+  const handleSendMask = () => {
     if (!canSendMask || !maskSpace) return;
-    // 会话身份与发送输入在首个异步步骤（遮罩栅格化 canvas.toBlob）之前同步捕获（IKI8L7）：
-    // 编码在途回调返回后不再读取当前会话——旧编码结果不冒领重开会话的身份
-    const session = onCaptureSendSession();
-    if (!session) return;
-    const file = await rasterizeMaskToPngFile(ops, maskSpace);
-    await onSendMask(session, file);
+    onSendMask();
   };
 
   const anchorStyle = (anchor: FollowDialogAnchor | null) =>
