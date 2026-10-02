@@ -10,7 +10,7 @@
 
 1. 确认实际 Git 根目录。通过 `list_projects` 按 `root_path` 精确选择当前 checkout 的 project；结果分页直到找到，不能按名称相似或默认 project 猜测。
 2. 用 `index_status(project)` 确认就绪；未索引时对该根目录 `index_repository`，再确认状态。已有有效索引不重复全量构建。按问题选索引模式；例如 fast 排除脚本/测试时，补覆盖或有依据地精读，不能把空结果当作不存在。
-3. 用 `search_graph` 找符号，`trace_path` 查相关调用方向，`get_code_snippet` 精读，复杂关系用 `query_graph`，文本定位可用 `search_code`。调用须回答当前问题；`index_repository` 不计为查询，禁止为凑次数执行无关查询。
+3. 用 `search_graph` 找符号，`trace_path` 查相关调用方向，`get_code_snippet` 精读，diff 影响面用 `detect_changes`，模块全貌用 `get_architecture`，复杂关系用 `query_graph`，文本定位可用 `search_code`。调用须回答当前问题；`index_repository` 不计为查询，禁止为凑次数执行无关查询。
 4. 候选文件确定后批量 `check_index_coverage`；否定或完整性结论还要检查相关 scope。缺失、排除、过期和部分解析范围必须源码验证；无记录缺口不证明完整。只翻与结论有关的结果页，不无目的拉全图。
 5. 切换 worktree 或恢复/压缩会话后重新核对目录、project 与证据新鲜度。可复用同一目录和有效版本的已有查询；不可用主 checkout 的图谱代替 task worktree。
 
