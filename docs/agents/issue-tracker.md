@@ -56,7 +56,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 - **标签**：`update_enterprise_issue(label_ids=...)`，数字 ID。Triage 五标签：needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix，详见 `docs/agents/triage-labels.md`。
 - **创建 PR**：`create_enterprise_repo_pull` **必传数字 `project_id`**——工具描述写「Project ID or PathWithNamespace」，**实际传 PathWithNamespace（如 `hangzhou-xuanfu_1/blue-whale-ai`）会 404「仓库不存在」**，勿被误导。
 - **合并 PR**：`merge_enterprise_pull` 的 PR 编号参数名是 `pull_request_id`（无 `pull_number` 入参，传错报「pull_request_id required」）；传 `merge_method=merge`（或不传）；工具**无 `prune_source_branch` 参数**，Gitee merge 默认不删源分支，事后跑 `scripts/cleanup-task-worktree.sh`。
-- **关闭**：`update_enterprise_issue(issue_state_id=...)`，**非 `state`**（工具无此入参）。状态枚举随工作项类型变——先 `list_issue_type_states(enterprise_id, issue_type_id)` 查（本仓「需求」= 意向/进行中/已完成/已拒绝，无 closed/open），完成传「已完成」id；完成后 `state` 字段变 `"closed"`。
+- **关闭**：`update_enterprise_issue(issue_state_id=...)`，**非 `state`**（工具无此入参）。状态枚举随工作项类型变——先 `list_issue_type_states(enterprise_id, issue_type_id)` 查，目标状态 id 按下「任务状态机」白名单表取；置终态后 `state` 字段变 `"closed"`。
 
 ## 任务状态机（Agent 全自动流转）
 
@@ -66,23 +66,29 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
 | 触发点 | 类型 | 流转 |
 | --- | --- | --- |
-| worktree 入口成功且带 `--issue` | 需求 | 意向(4336301) → 进行中(4336298) |
-| 同上 | 任务 | 待办的(4336297) → 进行中(4336298) |
-| 同上 | 缺陷 | 待确认(4336303)/已确认(4336304) → 修复中(4336305) |
+| worktree 入口成功且带 `--issue` | 需求 | 待评审(4336301)/待排期(4336297) → 开发中(4336298) |
+| 同上 | 任务 | 待排期(4336297) → 开发中(4336298) |
+| 同上 | 缺陷 | 待确认(4336303) → 修复中(4336305) |
+| 收口验证通过、交付汇报时（push/建 PR 前） | 任务 | 开发中 → 已完成(4501158) |
+| 同上 | 需求 | 开发中 → 待发布(4336304) |
+| 同上 | 缺陷 | 修复中 → 已修复(4336306) |
 | PR 创建成功 | 全部 | 打 `ready-for-review` 标签(id 344268623) |
-| PR 合并成功 | 需求/任务 | → 已完成(4336299) |
-| PR 合并成功 | 缺陷 | → 已修复(4336306)，另打 `修复待验证` 标签(id 344168629) |
+| PR 合并成功 | 需求/任务 | → 已上线(4336299) |
+| PR 合并成功 | 缺陷 | → 待发布(4336304)，另打 `修复待验证` 标签(id 344168629) |
 
-- **禁止 Agent 设置**：已验收(4336307)、已拒绝(4336302)、已取消(4336300) —— 归人操作。
+- **两步语义，按类型对号入座**：「分支开发完成」任务=已完成、需求=待发布、缺陷=已修复；「PR 已合并」需求/任务=已上线、缺陷=待发布（缺陷无已上线态；同名「待发布」在需求=开发完成、在缺陷=已合并）。「已完成」不再是终态。
+- **禁止 Agent 设置**：已验收(4336307)、已拒绝(4336302)、已关闭(4336300) —— 归人操作。
 - 只读任务（调研/答疑/评审，不建 worktree）不触发状态流转；`--no-issue` 任务无状态可改。
 
 ### 开工流转（worktree 入口成功后立即执行）
 
 1. `get_enterprise_issue_detail` 查当前状态与负责人。
 2. 前置状态判定：
-   - 预期起点（需求=意向、任务=待办的、缺陷=待确认/已确认）→ 调 `update_enterprise_issue` 一次合并传 `issue_state_id=<目标>` + `assignee_id`（+ `collaborator_ids`）流转，负责人认领规则见下节。缺陷在「待确认」也直接跳「修复中」（认领即确认），不走「已确认」中间步。
-   - 已是「进行中」→ **停止**，向用户报告并等待指示（可能他人/另一会话在做）。
-   - 已是终态（已完成/已取消/已拒绝）→ **停止**，向用户报告并等待指示（防重复做已完成任务）。
+   - 预期起点（需求=待评审/待排期、任务=待排期、缺陷=待确认）→ 调 `update_enterprise_issue` 一次合并传 `issue_state_id=<目标>` + `assignee_id`（+ `collaborator_ids`）流转，负责人认领规则见下节。缺陷从「待确认」直接跳「修复中」（认领即确认）。
+   - 已在「开发中/修复中」→ **停止**，向用户报告并等待指示（可能他人/另一会话在做）。
+   - 已在开发完成态（任务=已完成、需求=待发布、缺陷=已修复）→ 视为新一轮开工：转回「开发中/修复中」并继续，不视为前置错位。
+   - 已是终态（已上线/已关闭/已拒绝/已验收）→ **停止**，向用户报告并等待指示。
+   - 其余状态（如需求=测试中）→ **停止**，向用户报告并等待指示。
 3. 状态 id 疑似失效（报错）时按 `list_issue_type_states(enterprise_id, issue_type_id)` 重查，不得凭本表死磕。
 
 #### 负责人认领（随开工流转同步执行）
@@ -91,11 +97,21 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
 - `assignee_id` = 执行人 id。
 - `collaborator_ids`（整体写回语义）：原负责人存在且 ≠ 执行人 → 重置为仅原负责人一人，既有其他协作者移除；原负责人为空、或原负责人即执行人 → 不传该参数，协作者维持现状。
-- 前置错位被拦下时不执行认领；完成流转（PR 合并）不再重复设置。
+- 前置错位被拦下时不执行认领；开发完成流转与上线流转不再重复设置。
 
-### 完成流转（PR 合并成功后执行）
+### 开发完成流转（收口验证通过、交付汇报时执行）
 
-- 按白名单表置完成态；缺陷另打 `修复待验证`。
+- 触发点在 push/建 PR 之前：收口验证通过、向用户交付汇报即置开发完成态（任务=已完成、需求=待发布、缺陷=已修复），看板在评审等待期即反映真实进度。
+- 幂等：已在目标态视为成功，直接跳过。
+
+### 返工回滚（开发完成态被打回时）
+
+- 评审打回或用户要求修改，Agent 继续返工：先回滚——任务 已完成→开发中、需求 待发布→开发中、缺陷 已修复→修复中；再次收口时重新置开发完成态。
+- 回滚只覆盖合并前的开发完成态；已上线与缺陷的合并态「待发布」不回滚，有问题向用户报告。
+
+### 上线流转（PR 合并成功后执行）
+
+- 按白名单表置合并态：需求/任务 → 已上线；缺陷 → 待发布，另打 `修复待验证`。
 - 补标签时 `label_ids` 是整体语义：先 `get_enterprise_issue_detail` 取现有标签，合并后整体写回，不得只传新标签覆盖掉旧标签。
 
 ### 失败处理
@@ -129,4 +145,4 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 - **Blocking**：Gitee MCP 无 native dependencies——`create_enterprise_issue` 的 `link_issue_id`（创建时传入，无 update 对等项）只建弱关联（UI 可见，非阻塞）。回退 body 约定：ticket body 顶部写 `Blocked by: <标题> (<ident>)`，每行一个。unblocked 当且仅当每个 blocker `state == "closed"`（逐个 `get_enterprise_issue_detail` 查）。`link_issue_id` 可选辅助：创建子 ticket 时传 `link_issue_id=<blocker ident>`。
 - **Frontier query**：按父查子（查询姿势见「操作约定·查子工单」），剔除有 `assignee`（已认领）+ body 含未闭环 `Blocked by:` 的；按创建顺序取首个。
 - **Claim**：`update_enterprise_issue(issue_id=<ticket>, assignee_id=<自己 user id>)`。user id 用 `list_enterprise_members` 查。开放未分配 = 未认领。**实质工作前先 claim**，避并发抢同一 ticket。
-- **Resolve**：① `comment_enterprise_issue(issue_id=<ticket>, body=<answer>)` 发结论；② `update_enterprise_issue(issue_id=<ticket>, issue_state_id=<「已完成」id>)` 关闭（枚举见上「关闭」）；③ 往 map body 的 `## Decisions so far` 追加 `- [<标题>](<url>) — <gist>`——`description` **整体替换非 append**，先 `get_enterprise_issue_detail(map)` 取 body，拼接，整体写回。
+- **Resolve**：① `comment_enterprise_issue(issue_id=<ticket>, body=<answer>)` 发结论；② `update_enterprise_issue(issue_id=<ticket>, issue_state_id=4501158)` 置「已完成」（child 皆任务型；枚举见上「关闭」）；③ 往 map body 的 `## Decisions so far` 追加 `- [<标题>](<url>) — <gist>`——`description` **整体替换非 append**，先 `get_enterprise_issue_detail(map)` 取 body，拼接，整体写回。
