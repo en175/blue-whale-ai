@@ -47,7 +47,7 @@ describe("VideoEnhancementsController.create", () => {
       resolution: "1080p",
     }, {
       providerCredential: "sk-live-token",
-    });
+    }, undefined);
   });
 
   it("enqueues the created job and returns the result unchanged", async () => {

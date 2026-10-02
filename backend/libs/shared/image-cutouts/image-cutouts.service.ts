@@ -3,9 +3,12 @@
 // → 插 generation_jobs(type=image_cutout)。
 // 免费口径（同 image-erasures / image-enhancements）：不写成本预留、不接成本估算、不走余额拦截门。
 // 不写画布——抠图结果卡由前端发送任务时本地插入，产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。
+// IKJJQW（B.3）：创建入口接入恢复协议 v1——canvas_binding 随 body 提交（剥离后不进业务 zod），
+// Idempotency-Key 头承载 submission_id；受理走共享受理段（media-tool-recovery）。
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
+  IDEMPOTENCY_CONFLICT_CODE,
   IMAGE_CUTOUT_INPUT_FORMATS,
   IMAGE_CUTOUT_INPUT_KEYS,
   IMAGE_CUTOUT_JOB_TYPE,
@@ -13,6 +16,7 @@ import {
   IMAGE_CUTOUT_SCENE_SIZE_LIMITS,
   IMAGE_CUTOUT_SOURCE,
   PARAM_MISSING_CODE,
+  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   fail,
   imageCutoutInputSchema,
@@ -20,9 +24,19 @@ import {
   type ImageCutoutInput,
 } from "@lib/contracts";
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import {
+  createMediaToolJobWithRecovery,
+  mediaToolRequestHash,
+  takeCanvasBinding,
+  type MediaToolRecovery,
+} from "@lib/shared/generation/media-tool-recovery.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+
+/** IKJJQW：恢复协议受理的幂等域（先例命名「领域.动作」）。 */
+const IDEMPOTENCY_OPERATION = "image_cutout.create";
+const REQUEST_PATH = "/image-cutouts";
 
 /** zod 校验失败 → 人能读懂的原因（按首个出错键名映射；前端置灰只是体验层，这里返回可读文案）。 */
 const PARSE_ERROR_MESSAGES: Record<string, string> = {
@@ -92,9 +106,23 @@ export class ImageCutoutsService {
     body: Record<string, unknown>,
     // 与图片生成同构（handle-create-generation-job.ts 的 internal 形参）：请求方 sk- 凭证冻结进 job。
     internal: { providerCredential?: string } = {},
+    // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
+    idempotencyKey?: string,
   ) {
+    // IKJJQW：canvas_binding 是业务键之上的基础设施键（同 client_token 口径）：先行剥离再过
+    // 契约 schema；携带但非法 / 与 Idempotency-Key 承载不一致 → 400 invalid_recovery_payload。
+    const { binding, rest, invalid } = takeCanvasBinding(body ?? {});
+    if (invalid) {
+      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+    }
+    if (binding && (idempotencyKey ?? "").trim() !== binding.submission_id) {
+      return fail(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", {
+        reason: RECOVERY_REASONS.invalidPayload,
+      });
+    }
+
     // 契约 schema 复核（按场景 strict 分支）：场景枚举、通用场景禁带 / 人像商品必带增强四键在此拦截。
-    const parsed = imageCutoutInputSchema.safeParse(body ?? {});
+    const parsed = imageCutoutInputSchema.safeParse(rest);
     if (!parsed.success) {
       return fail(PARAM_MISSING_CODE, readableParseError(parsed.error.issues));
     }
@@ -155,22 +183,46 @@ export class ImageCutoutsService {
         : {}),
     };
 
-    const job = await this.prisma.client.generation_jobs.create({
-      data: {
-        user_id: BigInt(userId),
-        project_id: BigInt(projectId),
-        type: IMAGE_CUTOUT_JOB_TYPE,
-        source: IMAGE_CUTOUT_SOURCE,
-        status: "queued",
-        progress: 0,
-        input: frozenInput,
-        // 过去 60s：回拨口径同 media_extract——DATETIME(0) 秒精度进位会让同秒 claim 的 lte now 判 false。
-        next_action_at: new Date(Date.now() - 60_000),
+    // IKJJQW：受理主体走共享段（B.3）——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 →
+    // 幂等行」一个事务；无 canvas_binding 时建行路径与接入前一致。
+    const recovery: MediaToolRecovery | null = binding
+      ? {
+          projectId,
+          userId,
+          taskType: IMAGE_CUTOUT_JOB_TYPE,
+          operation: IDEMPOTENCY_OPERATION,
+          requestHash: mediaToolRequestHash(IDEMPOTENCY_OPERATION, projectId, REQUEST_PATH, body ?? {}),
+          binding,
+        }
+      : null;
+    const outcome = await createMediaToolJobWithRecovery(
+      this.prisma.client,
+      recovery,
+      async (db) => {
+        const job = await db.generation_jobs.create({
+          data: {
+            user_id: BigInt(userId),
+            project_id: BigInt(projectId),
+            type: IMAGE_CUTOUT_JOB_TYPE,
+            source: IMAGE_CUTOUT_SOURCE,
+            status: "queued",
+            progress: 0,
+            input: frozenInput,
+            // 过去 60s：回拨口径同 media_extract——DATETIME(0) 秒精度进位会让同秒 claim 的 lte now 判 false。
+            next_action_at: new Date(Date.now() - 60_000),
+          },
+        });
+        return { jobId: job.id.toString(), status: "queued" };
       },
-    });
+    );
+    if (outcome.kind === "envelope") return outcome.envelope;
+    if (outcome.kind === "idempotency_conflict") {
+      return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
+    }
     return ok({
-      job_id: job.id.toString(),
-      status: "queued",
+      job_id: outcome.jobId,
+      status: outcome.status,
+      ...(outcome.bindingView ? { canvas_binding: outcome.bindingView } : {}),
     });
   }
 

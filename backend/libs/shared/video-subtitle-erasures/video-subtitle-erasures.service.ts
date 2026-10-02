@@ -6,7 +6,9 @@
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
+  IDEMPOTENCY_CONFLICT_CODE,
   PARAM_MISSING_CODE,
+  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_SUBTITLE_ERASE_INPUT_KEYS,
   VIDEO_SUBTITLE_ERASE_JOB_TYPE,
@@ -21,9 +23,19 @@ import {
   type VideoSubtitleEraseInput,
 } from "@lib/contracts";
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import {
+  createMediaToolJobWithRecovery,
+  mediaToolRequestHash,
+  takeCanvasBinding,
+  type MediaToolRecovery,
+} from "@lib/shared/generation/media-tool-recovery.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+
+/** IKJJQW：恢复协议受理的幂等域（先例命名「领域.动作」）。 */
+const IDEMPOTENCY_OPERATION = "video_subtitle_erase.create";
+const REQUEST_PATH = "/video-subtitle-erasures";
 
 /** zod 校验失败 → 人能读懂的原因（按首个出错键名映射；前端置灰只是体验层，这里返回可读文案）。 */
 const PARSE_ERROR_MESSAGES: Record<string, string> = {
@@ -56,9 +68,23 @@ export class VideoSubtitleErasuresService {
     body: Record<string, unknown>,
     // 与图片生成同构（handle-create-generation-job.ts 的 internal 形参）：请求方 sk- 凭证冻结进 job。
     internal: { providerCredential?: string } = {},
+    // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
+    idempotencyKey?: string,
   ) {
+    // IKJJQW：canvas_binding 是业务键之上的基础设施键（同 client_token 口径）：先行剥离再过
+    // 契约 schema；携带但非法 / 与 Idempotency-Key 承载不一致 → 400 invalid_recovery_payload。
+    const { binding, rest, invalid } = takeCanvasBinding(body ?? {});
+    if (invalid) {
+      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+    }
+    if (binding && (idempotencyKey ?? "").trim() !== binding.submission_id) {
+      return fail(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", {
+        reason: RECOVERY_REASONS.invalidPayload,
+      });
+    }
+
     // 契约 schema 复核（strict 四键）：检测模式枚举、框列表 ≤20 与 [0,1] 坐标在此拦截。
-    const parsed = videoSubtitleEraseInputSchema.safeParse(body ?? {});
+    const parsed = videoSubtitleEraseInputSchema.safeParse(rest);
     if (!parsed.success) {
       return fail(PARAM_MISSING_CODE, readableParseError(parsed.error.issues));
     }
@@ -108,22 +134,46 @@ export class VideoSubtitleErasuresService {
         : {}),
     };
 
-    const job = await this.prisma.client.generation_jobs.create({
-      data: {
-        user_id: BigInt(userId),
-        project_id: BigInt(projectId),
-        type: VIDEO_SUBTITLE_ERASE_JOB_TYPE,
-        source: VIDEO_SUBTITLE_ERASE_SOURCE,
-        status: "queued",
-        progress: 0,
-        input: frozenInput,
-        // 过去 60s：回拨口径同 media_extract——DATETIME(0) 秒精度进位会让同秒 claim 的 lte now 判 false。
-        next_action_at: new Date(Date.now() - 60_000),
+    // IKJJQW：受理主体走共享段（B.3）——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 →
+    // 幂等行」一个事务；无 canvas_binding 时建行路径与接入前一致。
+    const recovery: MediaToolRecovery | null = binding
+      ? {
+          projectId,
+          userId,
+          taskType: VIDEO_SUBTITLE_ERASE_JOB_TYPE,
+          operation: IDEMPOTENCY_OPERATION,
+          requestHash: mediaToolRequestHash(IDEMPOTENCY_OPERATION, projectId, REQUEST_PATH, body ?? {}),
+          binding,
+        }
+      : null;
+    const outcome = await createMediaToolJobWithRecovery(
+      this.prisma.client,
+      recovery,
+      async (db) => {
+        const job = await db.generation_jobs.create({
+          data: {
+            user_id: BigInt(userId),
+            project_id: BigInt(projectId),
+            type: VIDEO_SUBTITLE_ERASE_JOB_TYPE,
+            source: VIDEO_SUBTITLE_ERASE_SOURCE,
+            status: "queued",
+            progress: 0,
+            input: frozenInput,
+            // 过去 60s：回拨口径同 media_extract——DATETIME(0) 秒精度进位会让同秒 claim 的 lte now 判 false。
+            next_action_at: new Date(Date.now() - 60_000),
+          },
+        });
+        return { jobId: job.id.toString(), status: "queued" };
       },
-    });
+    );
+    if (outcome.kind === "envelope") return outcome.envelope;
+    if (outcome.kind === "idempotency_conflict") {
+      return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
+    }
     return ok({
-      job_id: job.id.toString(),
-      status: "queued",
+      job_id: outcome.jobId,
+      status: outcome.status,
+      ...(outcome.bindingView ? { canvas_binding: outcome.bindingView } : {}),
     });
   }
 

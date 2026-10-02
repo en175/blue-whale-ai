@@ -3,10 +3,40 @@
 // 只测外部可见行为：拒绝原因可读、mode/format/background_color 组合矩阵（含缺省补默认）、
 // client_token 幂等三态（重放/冲突/新建）、任务行与幂等行同事务原子落库、落库参数冻结
 // （补齐后的 format / background_color 原样冻结）、免费口径无成本预留、凭证冻结。
+// IKJJQW：追加恢复协议 v1 接入分支（client_token==submission_id 承载 / 受理事务 / 受控错误）。
 import { createHash } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VideoMattingsService } from "./video-mattings.service.js";
+import { RecoveryContractError } from "@lib/shared/persistence/index.js";
+
+const { lockMock, bindingViewMock } = vi.hoisted(() => ({
+  lockMock: vi.fn(),
+  bindingViewMock: vi.fn(),
+}));
+
+vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/persistence/index.js")>();
+  return {
+    ...actual,
+    lockCanvasRecoveryForAcceptance: lockMock,
+    canvasBindingView: bindingViewMock,
+    writeCanvasRecoveryRows: vi.fn(),
+  };
+});
+
+const SUBMISSION_ID = "0a1b2c3d-0000-4000-8000-00000000b002";
+
+const CANVAS_BINDING = {
+  protocol_version: 1,
+  submission_id: SUBMISSION_ID,
+  target_node_id: "node-1",
+  expected_binding_revision: 0,
+  recovery_seed: {
+    target: { role: "result-placeholder", x: 0, y: 0, width: 100, height: 100, name: "" },
+    sources: [],
+  },
+};
 
 const VALID_BODY = {
   source_asset_id: "88",
@@ -56,7 +86,14 @@ function makeService(overrides: {
     // 免费口径哨兵：任何成本预留写入都会在这里暴露。
     cost_reservations: { create: vi.fn() },
   };
-  const client = { $transaction: vi.fn(async (operation: (t: unknown) => Promise<unknown>) => operation(tx)) };
+  // IKJJQW：受理主体（media-tool-recovery）的锁外幂等回读与状态现查直接走 prisma client，
+  // 事务体经 $transaction 拿 tx——两处必须是同一套 mock（同键重放在锁外命中）。
+  const client = {
+    command_idempotency: tx.command_idempotency,
+    generation_jobs: tx.generation_jobs,
+    cost_reservations: tx.cost_reservations,
+    $transaction: vi.fn(async (operation: (t: unknown) => Promise<unknown>) => operation(tx)),
+  };
   const prisma = { client };
   return {
     service: new VideoMattingsService(prisma as never, project as never, assets as never),
@@ -432,6 +469,76 @@ describe("VideoMattingsService.create：请求方凭证冻结（断链防护）"
       mode: "portrait",
       format: "WEBM",
     });
+  });
+});
+
+describe("VideoMattingsService.create：恢复协议 v1 接入（IKJJQW）", () => {
+  beforeEach(() => {
+    lockMock.mockReset().mockImplementation(async (_tx: unknown, acceptance: { binding: unknown }) => ({
+      kind: "plan",
+      plan: { acceptance, bindingRevision: 1, previousTargetSnapshot: null, supersededSubmissionId: null },
+    }));
+    bindingViewMock.mockReset().mockResolvedValue({
+      protocol_version: 1,
+      submission_id: SUBMISSION_ID,
+      target_node_id: "node-1",
+      binding_revision: 1,
+      job_id: "400",
+      is_current: true,
+    });
+  });
+
+  it("accepts a canvas_binding submission when client_token equals submission_id", async () => {
+    const { service, tx } = makeService();
+    const result = await service.create("9", "55", {
+      ...VALID_BODY,
+      client_token: SUBMISSION_ID,
+      canvas_binding: CANVAS_BINDING,
+    });
+    expect(result.code).toBe(200);
+    expect(result.data).toMatchObject({
+      job_id: "400",
+      status: "queued",
+      canvas_binding: { submission_id: SUBMISSION_ID, binding_revision: 1, is_current: true },
+    });
+    // canvas_binding 剥离后不进冻结 input；幂等行 key=submission_id。
+    expect(tx.generation_jobs.create.mock.calls[0][0].data.input).toEqual({
+      source_asset_id: "88",
+      target_node_id: "node-1",
+      mode: "portrait",
+      format: "WEBM",
+    });
+    expect(lockMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a canvas_binding whose submission_id differs from client_token", async () => {
+    const { service, tx } = makeService();
+    const result = await service.create("9", "55", {
+      ...VALID_BODY,
+      canvas_binding: CANVAS_BINDING,
+    });
+    expect(result.code).toBe(400);
+    expect(result.data).toMatchObject({ reason: "invalid_recovery_payload" });
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+  });
+
+  it("returns the controlled conflict envelope without creating a job row", async () => {
+    const { service, tx } = makeService();
+    lockMock.mockRejectedValue(
+      new RecoveryContractError({
+        code: 409,
+        msg: "目标节点承接版本已变化，请刷新后重试",
+        data: { reason: "canvas_binding_conflict", currentBindingRevision: 2 },
+      }),
+    );
+    const result = await service.create("9", "55", {
+      ...VALID_BODY,
+      client_token: SUBMISSION_ID,
+      canvas_binding: CANVAS_BINDING,
+    });
+    expect(result.code).toBe(409);
+    expect(result.data).toMatchObject({ reason: "canvas_binding_conflict", currentBindingRevision: 2 });
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
 });
 

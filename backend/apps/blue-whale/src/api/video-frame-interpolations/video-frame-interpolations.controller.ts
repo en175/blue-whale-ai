@@ -10,7 +10,9 @@ import {
   Param,
   Post,
   Query,
+  Res,
 } from "@nestjs/common";
+import type { Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { enqueueVideoFrameInterpolationJob } from "@lib/shared/generation/generation-queue.js";
@@ -22,6 +24,7 @@ import {
   VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT,
 } from "@lib/contracts";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { isRecoveryControlledEnvelope, writeRecoveryControlled } from "../recovery-envelope.js";
 
 @Controller("projects/:projectId/video-frame-interpolations")
 export class VideoFrameInterpolationsController {
@@ -32,8 +35,11 @@ export class VideoFrameInterpolationsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
     @Body() body: Record<string, unknown>,
-    // 免费口径（ADR-0113 同 HD 高清 / 去字幕）：**没有 Idempotency-Key 头**、不走积分预估与余额拦截门。
+    // 免费口径（ADR-0113 同 HD 高清 / 去字幕）：不走积分预估与余额拦截门。
+    // IKJJQW（B.3）：新协议请求带 Idempotency-Key（= canvas_binding.submission_id）；老请求不带不受影响。
     @Headers("authorization") authorization?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     // 与 HD 高清 / 去字幕同构：从请求 Authorization 头取请求方 sk-，冻结进 job input.provider_credential，
     // worker（IKHLKJ 注册的处理器）处理时直接取用（未携带/非 sk- 为空对象）。
@@ -43,7 +49,13 @@ export class VideoFrameInterpolationsController {
       projectId,
       body ?? {},
       internal,
+      idempotencyKey,
     );
+    // IKJJQW（B.8 局部适配器）：新协议受控错误信封直写 HTTP 状态与 data.reason。
+    if (isRecoveryControlledEnvelope(result)) {
+      writeRecoveryControlled(result, res);
+      return;
+    }
     if (result.code !== 200 || !result.data) return result;
     const jobId = String(result.data.job_id);
     try {
