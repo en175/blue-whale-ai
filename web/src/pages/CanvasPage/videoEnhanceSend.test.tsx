@@ -4,7 +4,8 @@
    创建失败面板保留可重发（卡保持草稿）、轮询 mock 终态收敛（succeeded 回填 URL/mediaType/
    宽高/时长、failed 走 1045 家族文案映射）、失败 onRetryJob 原 lastParams 重发（不经通用
    retry）、生成中取消回草稿与只读重开、链式联动（2K/4K 结果卡置灰不建卡、1080P 可再发起）、
-   持久化恢复（生成中水合即恢复轮询并收敛成品、结果卡保持）。渲染模式沿用
+   持久化恢复（生成中水合即恢复轮询并收敛成品、结果卡保持）、发送在途显式关闭重开可重发
+   （新会话再次受理，区别于选中隐藏回看的在途只读）。渲染模式沿用
    videoEnhancePanel.test.tsx（FlowCanvas 打桩透出 props），轮询 mock 终态模式对齐
    audioVideoSplitEdit.test.tsx（IKH28X 先例）。 */
 import { act, createElement } from 'react';
@@ -252,6 +253,7 @@ const mediaNodes = () => flowProps.current.mediaNodes as Node[];
 const mediaNode = (id: string) => mediaNodes().find((n) => n.id === id)!;
 const hdDraft = () => mediaNodes().find((n: Node) => n.id !== 'v1' && n.id !== 'r1080' && n.id !== 'r4k');
 const panelSend = () => document.body.querySelector<HTMLButtonElement>('[data-testid="video-enhance-send-btn"]');
+const panelClose = () => document.body.querySelector<HTMLButtonElement>('[data-testid="video-enhance-close-btn"]');
 const panelResolution = (value: string) =>
   document.body.querySelector<HTMLButtonElement>(`[data-testid="video-enhance-resolution-${value}"]`);
 const identityOf = (node: Node | undefined) =>
@@ -369,7 +371,7 @@ describe('HD 面板迟到请求与新会话', () => {
     const draftId = hdDraft()!.id;
     await clickPanelResolution('2k');
     await act(async () => { panelSend()!.click(); });
-    await act(async () => { document.body.querySelector<HTMLButtonElement>('[data-testid="video-enhance-close-btn"]')!.click(); });
+    await act(async () => { panelClose()!.click(); });
     await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
     await clickPanelResolution('4k');
     await act(async () => { panelSend()!.click(); });
@@ -395,6 +397,32 @@ describe('HD 面板迟到请求与新会话', () => {
     expect(flowProps.current.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'v1', target: draftId, data: { origin: VIDEO_ENHANCE_EDGE_ORIGIN } }),
     ]));
+  });
+
+  it('发送在途显式关闭（X）再重开：新会话可再次发送，创建接口再次受理', async () => {
+    seedDoc();
+    apiMocks.createVideoEnhancement.mockImplementation(() => new Promise(() => {}));
+    await renderPage();
+    await videoEnhance();
+    const draftId = hdDraft()!.id;
+    await clickPanelResolution('2k');
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+    // 显式关闭（X）：面板关、草稿卡保留（创建仍在途不落地）
+    await act(async () => { panelClose()!.click(); });
+    expect(panelSend()).toBeNull();
+
+    // 重开（点 HD 草稿卡）：显式关闭即新会话，发送钮可点（对比选中隐藏回看的在途只读口径）
+    await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
+    expect(panelSend()).toBeTruthy();
+    expect(panelSend()!.disabled).toBe(false);
+    await act(async () => { panelSend()!.click(); });
+
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+    expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+      source_asset_id: '5', target_node_id: draftId, resolution: '2k',
+    }, { silent: true });
   });
 
   it('发送在途选中其它卡再选回本卡：面板重现仍在途只读，同卡不重复受理', async () => {

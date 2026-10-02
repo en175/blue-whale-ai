@@ -66,17 +66,19 @@ describe('HD 面板通过运行时的提交契约', () => {
   });
   it.each(['close', 'reopen', 'switch', 'project'] as const)('%s 后旧成功/失败不关闭新界面、不解新锁、不弹旧错误', async (change) => {
     for (const success of [true, false]) {
-      const { runtime, video, pending, errors, setProject } = setup();
+      const { runtime, video, inputs, pending, errors, setProject } = setup();
       video.open('a', deps); video.send('2k');
       if (change === 'project') setProject('p2');
       else if (change === 'switch') openOtherTool(runtime, deps);
       else video.close();
-      if (change !== 'close') { video.open('a', deps); video.send('4k'); }
+      if (change !== 'close') { video.open('a', deps); expect(video.send('4k')).toBe(true); }
       if (success) pending[0]!.resolve(); else pending[0]!.reject(new Error('old'));
       await flush();
       expect(errors).toEqual([]);
       expect(video.getSnapshot().visible).toBe(change !== 'close');
       expect(video.getSnapshot().submitting).toBe(change !== 'close');
+      // 受理输入序列直接证明重发被受理（close 分支无第二次受理）
+      expect(inputs.map((input) => input.payload.resolution)).toEqual(change === 'close' ? ['2k'] : ['2k', '4k']);
     }
   });
   it('选中隐藏再选回：在途同卡重发被拒、面板重现仍只读，原任务落地后解锁', async () => {
