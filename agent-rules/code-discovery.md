@@ -4,13 +4,13 @@
 
 本协议由根 CLAUDE.md 授权，是本仓 CBM 探索行为的唯一详细规则；覆盖 Codex、Claude Code、ZCode、Kimi Code CLI、Qoder CLI 及其子代理，含本仓所有 worktree。只读研究、设计、缺陷诊断、实施和审查均适用。
 
-开始结构探索前读取本文件。无需先创建分支；创建 worktree 是写入隔离步骤，不是 CBM 启用条件。纯配置、日志、文档和字面量检索可直接用文本工具；已定位文件允许 Read，编辑前仍须读源码。
+开始结构探索前读取本文件。无需先创建分支；创建 worktree 是写入隔离步骤，不是 CBM 启用条件。纯配置、日志、文档和字面量检索可直接用文本工具；已定位文件允许 Read，编辑前仍须读源码。graphify 用于按需可视化、跨文档导航，不抢占结构探索第一站。
 
 ## 首次探索与目录切换
 
 1. 确认实际 Git 根目录。通过 `list_projects` 按 `root_path` 精确选择当前 checkout 的 project；结果分页直到找到，不能按名称相似或默认 project 猜测。
 2. 用 `index_status(project)` 确认就绪；未索引时对该根目录 `index_repository`，再确认状态。已有有效索引不重复全量构建。按问题选索引模式；例如 fast 排除脚本/测试时，补覆盖或有依据地精读，不能把空结果当作不存在。
-3. 用 `search_graph` 找符号，`trace_path` 查相关调用方向，`get_code_snippet` 精读，复杂关系用 `query_graph`，文本定位可用 `search_code`。调用须回答当前问题；`index_repository` 不计为查询，禁止为凑次数执行无关查询。
+3. 用 `search_graph` 找符号，`trace_path` 查相关调用方向，`get_code_snippet` 精读，diff 影响面用 `detect_changes`，模块全貌用 `get_architecture`，复杂关系用 `query_graph`，文本定位可用 `search_code`。调用须回答当前问题；`index_repository` 不计为查询，禁止为凑次数执行无关查询。
 4. 候选文件确定后批量 `check_index_coverage`；否定或完整性结论还要检查相关 scope。缺失、排除、过期和部分解析范围必须源码验证；无记录缺口不证明完整。只翻与结论有关的结果页，不无目的拉全图。
 5. 切换 worktree 或恢复/压缩会话后重新核对目录、project 与证据新鲜度。可复用同一目录和有效版本的已有查询；不可用主 checkout 的图谱代替 task worktree。
 
@@ -27,14 +27,8 @@
 - 结果不足：检查名称、分页、project 和覆盖；确认缺口后补源码，零命中不等于实现不存在。
 - 图谱不足以支撑重要结论时，明确标注未证实部分。
 
-## 提醒与证据
-
-Hook 仅提醒，恒放行，不安装 Read/Bash 全面阻断，不替 Agent 自动建索引，不按调用次数验收。项目提醒不因用户级官方 Hook 文件存在而静默让位；适配器只负责客户端格式和仓库范围，不复制整套政策。graphify 用于按需可视化、跨文档导航，不抢占结构探索第一站。
+## 证据
 
 代码任务收口/审查时附一条简要证据：`目录/project；相关查询→支撑结论；coverage/源码补查；降级理由（如有）`。复用已有证据时指出来源，不重复查询凑数。正式验收回读工具调用与结果，不能把配置已安装、脚本 exit 0、建索引成功或 Agent 自述当作真实查询证明。
 
-## 五端验收
-
-每端分别记录配置检查、上下文实际注入、Agent 实际查询三层结果。覆盖：首次只读探索、worktree 切换、子代理能力/交接、失败或覆盖不足降级、无关仓库静默。普通 Read/编辑/日志检索不应被阻断。客户端不存在、未认证或不支持事件时标注具体未验证项，禁止记为通过。
-
-配置与运行方法见 [Hook 文档](../docs/agents/hooks/README.md)。工具速查见 [代码理解工具](../docs/agents/code-intelligence.md)。
+Hook 行为边界、配置与五端验收见 [Hook 文档](../docs/agents/hooks/README.md)。工具速查见 [代码理解工具](../docs/agents/code-intelligence.md)。
