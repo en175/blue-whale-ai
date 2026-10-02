@@ -1,0 +1,161 @@
+/* ============================================
+ * 普通生成类型定义契约测试（IKJJR1）：身份识别（排除工具家族）、创建/重试/取消协议、
+ * 输出槽投影与恢复落卡规划。「新增类型 = 一份类型定义」的接入基准。
+ * ============================================ */
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+
+const apiMocks = vi.hoisted(() => ({
+  createGenerationJob: vi.fn(async () => ({ generation_job_id: 'j1', cursor: 1 })),
+  retryGenerationJob: vi.fn(async () => ({ generation_job_id: 'j2', cursor: 2 })),
+  cancelGenerationJob: vi.fn(async () => null),
+}));
+
+vi.mock('@/api/jobs', () => ({
+  createGenerationJob: apiMocks.createGenerationJob,
+  retryGenerationJob: apiMocks.retryGenerationJob,
+  cancelGenerationJob: apiMocks.cancelGenerationJob,
+}));
+
+import {
+  normalGenerationTask, isNormalGenerationCard, buildRecoveryTargetNode, mediaTypeOfTask,
+} from './normalGeneration';
+import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import type { GenerationRuntimeHost } from './types';
+
+const BINDING = {
+  protocol_version: 1 as const,
+  submission_id: '11111111-1111-4111-8111-111111111111',
+  target_node_id: 'n1',
+  expected_binding_revision: 2,
+  recovery_seed: {
+    target: { role: 'result-placeholder' as const, x: 1, y: 2, width: 320, height: 320, name: '卡' },
+    sources: [],
+  },
+};
+
+describe('普通生成类型定义：身份识别', () => {
+  it('媒体卡 + jobId + 无工具身份 → 本类型', () => {
+    expect(isNormalGenerationCard('n1', { jobId: 'j1', genStatus: 'failed' })).toBe(true);
+    expect(isNormalGenerationCard('n1', { jobId: 'j1', mediaType: 'image' })).toBe(true);
+  });
+
+  it('工具家族身份键或节点 id 前缀 → 排除（归各自家族）', () => {
+    for (const key of ['imageEnhance', 'videoEnhance', 'frameInterpolation', 'imageErase', 'videoSubtitleErase',
+      'imageCutout', 'imageOutpaint', 'vocalSplit', 'sceneSplit', 'smartMatting', 'mediaExtract',
+      'audioTrim', 'audioSpeed', 'audioVideoMux']) {
+      expect(isNormalGenerationCard('n1', { jobId: 'j1', [key]: { last: true } })).toBe(false);
+    }
+    expect(isNormalGenerationCard('audio-mix-9', { jobId: '9' })).toBe(false);
+    expect(isNormalGenerationCard('media-extract-9', { jobId: '9' })).toBe(false);
+    expect(isNormalGenerationCard('audio-trim-9', { jobId: '9' })).toBe(false);
+    expect(isNormalGenerationCard('audio-speed-9', { jobId: '9' })).toBe(false);
+    expect(isNormalGenerationCard('vocal-split-9', { jobId: '9' })).toBe(false);
+    // 人声轨卡（vocal-track-*）无家族身份键，基线即走通用重试——同样归本类型承接
+    expect(isNormalGenerationCard('vocal-track-9-voice', { jobId: '9' })).toBe(true);
+  });
+
+  it('无 jobId 的卡（未受理/纯素材）不归本类型', () => {
+    expect(isNormalGenerationCard('n1', { genStatus: 'failed' })).toBe(false);
+    expect(isNormalGenerationCard('n1', {})).toBe(false);
+  });
+
+  it('task_type → 媒体类型映射（恢复补卡形态）', () => {
+    expect(mediaTypeOfTask('image')).toBe('image');
+    expect(mediaTypeOfTask('video')).toBe('video');
+    expect(mediaTypeOfTask('audio')).toBe('audio');
+  });
+});
+
+describe('普通生成类型定义：创建/重试/取消协议', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('创建：canvas_binding 注入业务载荷，Idempotency-Key = submission_id，回执视图透传', async () => {
+    apiMocks.createGenerationJob.mockResolvedValueOnce({
+      generation_job_id: 'j1',
+      cursor: 1,
+      canvas_binding: { protocol_version: 1, submission_id: BINDING.submission_id, target_node_id: 'n1', binding_revision: 3, job_id: 'j1', is_current: true },
+    } as never);
+    const outcome = await normalGenerationTask.create('p1', { payload: { type: 'image', expected_output_count: 1 } as never, target: undefined }, BINDING, 'key-1');
+    expect(apiMocks.createGenerationJob).toHaveBeenCalledWith(
+      'p1',
+      { type: 'image', expected_output_count: 1, canvas_binding: BINDING },
+      'key-1',
+    );
+    expect(outcome).toMatchObject({ jobId: 'j1', canvasBinding: { binding_revision: 3, is_current: true } });
+  });
+
+  it('重试：无 canvas_binding 走历史兼容三参调用；携带时第四参为 binding', async () => {
+    await normalGenerationTask.retry!('p1', 'j9', {}, null, 'k-legacy');
+    expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j9', 'k-legacy');
+    await normalGenerationTask.retry!('p1', 'j9', {}, BINDING, BINDING.submission_id);
+    expect(apiMocks.retryGenerationJob).toHaveBeenLastCalledWith('p1', 'j9', BINDING.submission_id, BINDING);
+  });
+
+  it('取消：走 generation-jobs cancel 端点', async () => {
+    await normalGenerationTask.cancel!('p1', 'j9');
+    expect(apiMocks.cancelGenerationJob).toHaveBeenCalledWith('p1', 'j9');
+  });
+
+  it('冻结输入：服务端持有（retry 端点按原任务读取），类型不实现 frozenInput', () => {
+    expect(normalGenerationTask.frozenInput).toBeUndefined();
+  });
+});
+
+describe('普通生成类型定义：恢复规划与输出槽', () => {
+  const hostOf = (ids: string[]): GenerationRuntimeHost => ({
+    findNode: (id: string) => (ids.includes(id) ? { id, type: 'mediaNode', position: { x: 0, y: 0 }, data: {} } : null),
+  } as unknown as GenerationRuntimeHost);
+
+  const record = (overrides: Partial<GenerationRecoveryRecord> = {}): GenerationRecoveryRecord => ({
+    submission_id: 'sub-1', target_node_id: 'n1', job_id: 'j1', task_type: 'image',
+    binding_revision: 1, is_current: true,
+    job: { job_id: 'j1', type: 'image', status: 'processing', progress: 10, output_asset_ids: [], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+    recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 300, height: 200, name: '图片生成中' }, sources: [] },
+    previous_target_snapshot: null,
+    items: [{ recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null }],
+    ...overrides,
+  });
+
+  it('进行中且卡在 → 续轮询；卡缺失 → 按恢复种子补卡', () => {
+    expect(normalGenerationTask.planRecovery!(record(), hostOf(['n1']))).toEqual({ kind: 'resume-polling' });
+    const plan = normalGenerationTask.planRecovery!(record(), hostOf([]));
+    expect(plan.kind).toBe('restore-target');
+    if (plan.kind !== 'restore-target') return;
+    expect(plan.node).toMatchObject({ id: 'n1', type: 'mediaNode', position: { x: 5, y: 6 } });
+    expect(plan.node.data).toMatchObject({ genStatus: 'generating', jobId: 'j1', mediaType: 'image' });
+  });
+
+  it('succeeded 且有未应用输出（slot: 输出槽）→ 多结果投影（node_id 用服务端规范身份）', () => {
+    const plan = normalGenerationTask.planRecovery!(record({
+      job: { job_id: 'j1', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['11', '12'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+      items: [
+        { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+        { recovery_item_id: 'gcr:sub-1:slot:77', output_key: 'slot:77', node_id: 'generation-output:77', state: 'pending', revision: 0, node_binding_revision: 0, asset_id: '11', slot_id: '77' },
+      ],
+    }), hostOf(['n1']));
+    expect(plan).toMatchObject({ kind: 'apply-outputs' });
+    if (plan.kind !== 'apply-outputs') return;
+    expect(plan.projection.outputs).toEqual([
+      { outputKey: 'slot:77', nodeId: 'generation-output:77', assetId: '11', url: '', mediaType: 'image' },
+    ]);
+  });
+
+  it('已失败且卡缺失 → 补失败卡（保留重试入口）；removed/transferred 输出不投影', () => {
+    const plan = normalGenerationTask.planRecovery!(record({
+      task_type: 'video',
+      job: { job_id: 'j1', type: 'video', status: 'failed', progress: 0, output_asset_ids: [], stored_error: { code: 1, msg: '上游失败' }, created_at: '2026-10-01T00:00:00Z' },
+    }), hostOf([]));
+    expect(plan.kind).toBe('restore-target');
+    if (plan.kind !== 'restore-target') return;
+    expect(plan.node.data).toMatchObject({ genStatus: 'failed', errorText: '上游失败', mediaType: 'video' });
+  });
+
+  it('恢复种子缺失时回落原目标快照位置；无快照回落原点', () => {
+    const node = buildRecoveryTargetNode(record({
+      recovery_seed: null,
+      previous_target_snapshot: { id: 'n1', type: 'mediaNode', position: { x: 42, y: 24 } },
+    }));
+    expect(node.position).toEqual({ x: 42, y: 24 });
+    expect(buildRecoveryTargetNode(record({ recovery_seed: null, previous_target_snapshot: null })).position).toEqual({ x: 0, y: 0 });
+  });
+});

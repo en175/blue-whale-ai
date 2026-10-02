@@ -25,6 +25,13 @@ import { useAuthPromptStore } from '@/stores/authPrompt';
 /* ---------- 打桩：组件（同 harness 口径，Canvas 透出 props） ---------- */
 
 export const flowProps: { current: Record<string, any> } = { current: {} };
+// IKJJR1：水合后恢复扫描 GET /generation-recovery——本文件用例按序消费全局 fetch once 队列，
+// 扫描请求须 mock 掉（空恢复页），否则会抢先消费各用例排队中的首个 fetch。
+vi.mock('@/api/canvasRecovery', () => ({
+  fetchGenerationRecoveryPage: vi.fn(async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null })),
+  resolveGenerationRecovery: vi.fn(async () => ({ protocol_version: 1, records: [] })),
+}));
+
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
     flowProps.current = props;

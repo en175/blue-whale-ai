@@ -208,7 +208,6 @@ import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/utils/creditsGate';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
 import {
-  createGenerationJob,
   cancelGenerationJob,
   retryGenerationJob,
   fetchJobStatus,
@@ -243,7 +242,7 @@ import {
   type VideoJobParameters,
   type AudioJobParameters,
   type GenerationRefItem,
-} from '@/api/jobs';
+ } from '@/api/jobs';
 import { removeCancelledGenerationNode, stopJobPolling } from './generationPolling';
 import { createSubmitIntentKeys } from './submitIntentKeys';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
@@ -273,6 +272,10 @@ import ConnectTypeMenu from './components/ConnectTypeMenu';
 import { checkFileBeforeUpload, isFileRejected } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
+import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
+import { normalGenerationTask, isNormalGenerationCard } from './generationRuntime/normalGeneration';
+import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
+import { putCanvasDocWithRecovery, type CanvasRecoverySaveData } from '@/api/canvasRecovery';
 import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
@@ -1962,6 +1965,9 @@ export default function CanvasPage() {
    *  生效期间本会话一切整文档 PUT 均被阻断，入口统一提示刷新复核（重发必再拒且会覆盖另一
    *  会话刚保存的布局）；解除点同 emptyClearConflictRef。 */
   const emptyOverwriteRejectedRef = useRef(false);
+  /** IKJJR1：新协议恢复保存冲突（412/409/428 带 reason）——同两款待复核闸门口径：
+   *  生效期间阻断整文档保存（本地内容保留，不换版本重发），重新水合后解除。 */
+  const recoverySaveConflictRef = useRef(false);
   /** 调速重试属于发起项目；页面内切项目时保留受理结果，回到原项目再接续原卡。 */
   const audioSpeedRetriesRef = useRef(new Map<string, { patch: Record<string, unknown> }>());
   /** 首次调速提交的迟到受理结果归原项目；回到原项目后补建卡并落盘。 */
@@ -1989,10 +1995,10 @@ export default function CanvasPage() {
       confirmedNonEmptyRef.current = false;
       emptyClearConflictRef.current = false; // IKILUE：项目卸载/切换重置，清空待复核闸门一并复位
       emptyOverwriteRejectedRef.current = false; // IKILTB：422 阻断标记同步复位
+      recoverySaveConflictRef.current = false; // IKJJR1：项目卸载/切换重置恢复保存冲突闸门
       setSaveStatus('idle');
       return;
-    }
-    const docChanged = hydratedDocRef.current !== doc;
+    }    const docChanged = hydratedDocRef.current !== doc;
     hydratedDocRef.current = doc;
     if (!docChanged) {
       // 仅资产字典变化：刷新节点 URL / 缺失标记，保留当前编辑与保存接口已确认的 version
@@ -2007,11 +2013,16 @@ export default function CanvasPage() {
     }
     hydratedProjectRef.current = canvasLoadFailed ? null : currentId;
     confirmedNonEmptyRef.current = doc.nodes.length > 0;
+    // IKJJR1（A.8/A.9）：新文档水合 = 新加载身份。旧执行链（轮询/受理/保存确认）按身份
+    // 自行消亡，运行时在途/台账/意图整体重置，由恢复扫描按服务端事实重建。
+    docLoadEpochRef.current = {};
+    generationRuntimeRef.current?.reset();
     // IKIN23：仅成功重新水合才解除整文档待复核——加载失败的兜底空文档不算
     //（否则一次失败的刷新会被误判为「已看到服务端最新布局」）
     if (!canvasLoadFailed) {
       emptyClearConflictRef.current = false; // IKILUE：重新水合即解除清空待复核（confirmEmpty 按新基线重新授予）
       emptyOverwriteRejectedRef.current = false; // IKILTB：重新水合解除 422 阻断（空覆盖按新基线重新判定）
+      recoverySaveConflictRef.current = false; // IKJJR1：重新水合解除恢复保存冲突闸门（按新基线重新对账）
     }
     const t: Node[] = [];
     const m: Node[] = [];
@@ -2128,6 +2139,7 @@ export default function CanvasPage() {
     // 水合恢复：「生成中」媒体节点恢复任务轮询。
     // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
     // IKIZQE：checking（提交结果不明核对锁定）同样恢复轮询——核对定夺后终态照常收敛。
+    // IKJJR1：普通生成家族归统一任务运行时（即时续轮询，恢复扫描随后对账防双链）。
     m
       .filter(
         (n) =>
@@ -2136,7 +2148,12 @@ export default function CanvasPage() {
           (typeof n.data.jobId === 'number' || typeof n.data.jobId === 'string') &&
           !settledExtractNodesRef.current.has(n.id),
       )
-      .forEach((n) => pollJobRef.current(n.id, n.data.jobId as number | string));
+      .forEach((n) => {
+        const nodeData = (n.data ?? {}) as Record<string, unknown>;
+        const runtime = generationRuntimeRef.current;
+        if (runtime?.claims(n.id, nodeData)) runtime.resumeFromHydration(n.id, String(n.data.jobId), nodeData);
+        else pollJobRef.current(n.id, n.data.jobId as number | string);
+      });
     // 插帧卡统一核对服务端当前关联：重发受理后关页时，持久化可能仍带上一次任务的 jobId。
     m
       .filter(
@@ -2144,6 +2161,8 @@ export default function CanvasPage() {
           ((n.data ?? {}) as Record<string, unknown>).frameInterpolation != null,
       )
       .forEach((n) => recoverFrameInterpolationRef.current(n.id, n.data.jobId));
+    // IKJJR1：恢复扫描（B.5 分页对账）——受理回执丢失补卡、完成未落盘投影、归属版本台账。
+    if (currentId && !canvasLoadFailed) void generationRuntimeRef.current?.recover(currentId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, snapshotAssets]);
 
@@ -2317,6 +2336,13 @@ export default function CanvasPage() {
     return true;
   };
 
+  /** IKJJR1：新协议受控错误 reason 读取（B.8；普通 ApiError 无 reason 返回 null）。 */
+  const readRecoveryErrorReason = (e: unknown): string | null => {
+    if (!isApiError(e)) return null;
+    const reason = (e.data as { reason?: unknown } | null | undefined)?.reason;
+    return typeof reason === 'string' ? reason : null;
+  };
+
   /** 登记在途保存：期间自动保存的 800ms 防抖会因在途守卫跳过，flush 也会排在它后面——
    *  同一时刻只有一个 PUT，不会两次请求共用同一个 If-Match（IKFS5W）。
    *  只有仍是「最新那个」时才清空，避免先完成的一方把后登记的那次抹掉。 */
@@ -2344,7 +2370,7 @@ export default function CanvasPage() {
       if (sig === lastSavedRef.current) return;
       // IKIN23：整文档待复核（清空 412 / 空覆盖 422）期间阻断一切整文档保存——无论待发
       // 节点数多少，本会话旧工作副本都不得覆盖另一会话刚保存的布局；保留本地编辑等待刷新复核
-      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current) return;
+      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return;
       if (import.meta.env.DEV) {
         console.info(`[canvas] 自动保存：${nodes.length} 个节点 / ${edges.length} 条连线（version=${versionRef.current}）`);
       }
@@ -2355,8 +2381,21 @@ export default function CanvasPage() {
       const confirmEmpty = shouldConfirmEmptyClear(nodes);
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
+      // IKJJR1：恢复保存（有显式待确认状态时）与新协议字段同笔提交；回执回填台账。
+      const recoveryFields = generationRuntimeRef.current?.composeSaveFields() ?? null;
       trackCanvasSave(
-        saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
+        (recoveryFields
+          ? putCanvasDocWithRecovery(
+            currentId,
+            { viewport, nodes, edges, confirmEmpty },
+            versionRef.current,
+            { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
+          )
+          : saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
+        ).then((saved) => {
+          if (recoveryFields) generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
+          return saved;
+        })
           .then((saved) => {
             versionRef.current = saved.version;
             // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）
@@ -2371,6 +2410,33 @@ export default function CanvasPage() {
             // 释放签名，允许下次变更或「重试保存」用已对齐的 version 再写
             lastSavedRef.current = '';
             const hadPendingAdds = pendingSnapshot.size > 0;
+            // IKJJR1（验收 8）：新协议保存冲突（受控错误带 data.reason）保留本地内容并提示，
+            // 不采纳服务端版本重发旧全文；登记恢复冲突闸门，直至重新水合。
+            const recoveryReason = readRecoveryErrorReason(e);
+            if (recoveryFields && recoveryReason === 'recovery_item_conflict') {
+              // 项状态被他处推进：定向 resolve 读回服务端现状进台账（本地内容保留），下次保存重推导
+              void generationRuntimeRef.current?.reconcileConflictItems(currentId);
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              showToast('warn', '任务状态已被其他操作更新，已同步最新状态，请重试保存');
+              return;
+            }
+            if (recoveryFields && recoveryReason != null) {
+              recoverySaveConflictRef.current = true;
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              showToast('warn', '画布保存冲突，当前内容已保留，请刷新后复核');
+              return;
+            }
+            // 普通保存撞「受保护卡缺席未带变更」（428）：恢复台账可能滞后（水合后扫描未完），
+            // 触发对账刷新台账后引导重试，不阻断编辑。
+            if (!recoveryFields && readRecoveryErrorReason(e) === 'recovery_protocol_required') {
+              void generationRuntimeRef.current?.recover(currentId);
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              showToast('warn', '画布包含任务恢复保护内容，正在同步状态，请稍后重试保存');
+              return;
+            }
             const aligned = adoptCanvasConflictVersion(e);
             if (aligned) {
               // IKILUE：带 confirmEmpty 的清空保存被 412 拒绝——另一会话已改写画布，重发旧空文档
@@ -2460,6 +2526,8 @@ export default function CanvasPage() {
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
       const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
+      // IKJJR1（B.4）：复制剥离生命周期标记——复制卡不是原任务的第二个承接目标
+      delete (copy.data as Record<string, unknown>).generationRecovery;
       pendingNodeIdsRef.current.add(copy.id);
       historyRef.current?.pushAddNodes([copy.id]);
       setMediaNodes((prev) => [...prev, copy]);
@@ -2523,6 +2591,8 @@ export default function CanvasPage() {
         y: Math.round(anchor.y + (s.position.y - minY)),
       };
       const data = JSON.parse(JSON.stringify(s.data)) as Record<string, unknown>;
+      // IKJJR1（B.4）：粘贴副本剥离生命周期标记（同立即复制口径）
+      delete data.generationRecovery;
       if (s.kind === 'text') {
         // 会话性提示词来源字段不随副本（对齐 handleDuplicateNode 的字段清理）
         delete data.promptSource;
@@ -5299,6 +5369,12 @@ export default function CanvasPage() {
    *  迟到旧任务响应（创建/重试后仍在飞行的旧 promise）直接丢弃，不覆盖当前任务状态或结果。
    *  用同步 ref 而非节点 data：patch jobId 经 React 提交有延迟，首个响应可能先于提交到达。 */
   const activeJobByNodeRef = useRef<Map<string, string>>(new Map());
+  /** 生成任务运行时（IKJJR1）：普通生成家族经其 submit/retry/cancel/remove/recover 统一处理。
+   *  宿主实现每渲染重建（闭包读最新画布状态），运行时本体只建一次并经转发宿主调用。 */
+  const generationRuntimeHostRef = useRef<GenerationRuntimeHost | null>(null);
+  const generationRuntimeRef = useRef<GenerationRuntime | null>(null);
+  /** 文档加载身份（A.8）：每次成功水合（doc 更替）推进；普通重渲染/节点移动/正常保存不变。 */
+  const docLoadEpochRef = useRef<object>({});
 
   // 卸载时清理全部轮询
   useEffect(() => {
@@ -5308,6 +5384,7 @@ export default function CanvasPage() {
       timers.forEach((t) => window.clearTimeout(t));
       timers.clear();
       activeJobs.clear();
+      generationRuntimeRef.current?.reset(); // IKJJR1：运行时轮询/台账/在途一并清理
     };
   }, []);
 
@@ -6324,6 +6401,18 @@ export default function CanvasPage() {
       });
     }
     const nodeId = inPlaceNodeId ?? newNodeId('media-gen');
+    // IKIZQG：两阶段卡重新编辑发送的新建结果卡落在原卡正下方 +60px（旧结果与来源关系保留）
+    const placeholderPosition = targetIsTwoStage && targetNode
+      ? (() => {
+        const box = mediaContentBox({
+          mediaType: 'video',
+          width: typeof targetData.width === 'number' ? targetData.width : undefined,
+          height: typeof targetData.height === 'number' ? targetData.height : undefined,
+          ratio: typeof targetData.targetRatio === 'string' ? targetData.targetRatio : undefined,
+        });
+        return { x: Math.round(targetNode.position.x), y: Math.round(targetNode.position.y + box.height + 60) };
+      })()
+      : spawnPosition();
     if (!inPlaceNodeId) {
     const referenceNodes: Node[] = [];
     for (const ref of initialDraft?.references ?? []) {
@@ -6351,18 +6440,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
-      // IKIZQG：两阶段卡重新编辑发送的新建结果卡落在原卡正下方 +60px（旧结果与来源关系保留）
-      position: targetIsTwoStage && targetNode
-        ? (() => {
-          const box = mediaContentBox({
-            mediaType: 'video',
-            width: typeof targetData.width === 'number' ? targetData.width : undefined,
-            height: typeof targetData.height === 'number' ? targetData.height : undefined,
-            ratio: typeof targetData.targetRatio === 'string' ? targetData.targetRatio : undefined,
-          });
-          return { x: Math.round(targetNode.position.x), y: Math.round(targetNode.position.y + box.height + 60) };
-        })()
-        : spawnPosition(),
+      position: placeholderPosition,
       data: {
         genStatus: 'generating',
         progress: 0,
@@ -6397,8 +6475,8 @@ export default function CanvasPage() {
     setMediaNodes((prev) => [...prev, ...referenceNodes, node]);
     }
     // 提交立即接管节点，防止 create 返回前旧取消/轮询响应解除本次生成状态。
-    const activeAtCreate = newNodeId('pending-generation');
-    activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+    // IKJJR1：普通生成家族的创建/受理/轮询/终态/保存确认统一交生成任务运行时
+    //（含 canvas_binding 受理、submission_id 幂等键与恢复台账）。
     stopJobPolling(nodeId, jobTimersRef.current);
     const jobRefs = videoRefs?.references;
     const sendPrompt = promptDoc ? flattenPromptDocForSend(promptDoc) : parameters.prompt;
@@ -6436,72 +6514,109 @@ export default function CanvasPage() {
           ? { expected_credits: initialDraft.expectedCredits, quote_revision: initialDraft.quoteRevision }
           : {}),
       };
-      /** 幂等键：本次提交的**当前速度**取一把，双击/401 续跑/失败后原样重发都拿到它；
-       *  载荷一改（用户改了参数再点）就是新意图，换新钥匙——复用会撞服务端同键异载荷 409。 */
-      const submitScope = targetNodeId ?? '';
-      const submitSignature = JSON.stringify(payload);
-      createGenerationJob(
-        currentId,
-        payload,
-        jobSubmitKeysRef.current.keyFor(submitScope, submitSignature),
-      )
-        .then((created) => {
-          // 任务已受理：这次意图到此为止，之后再提交要另起一把钥匙（否则重放旧任务，拿不到新作品）
-          jobSubmitKeysRef.current.settle(submitScope);
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.generation_job_id });
-          pollJob(nodeId, created.generation_job_id);
-        })
-        .catch((e) => {
-          /** 原位目标回退：草稿回待生成保留参数（IKDMQQ/IKDMQS/IKDMQT）；
-           *  成品卡恢复成品态保留旧素材与最新编辑（IKDMQU Q5，同取消恢复） */
-          const rollbackInPlace = () => {
-            const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-            if (!node) return;
-            if (((node.data ?? {}) as Record<string, unknown>).draft === true) {
-              patchMediaNode(nodeId, {
-                genStatus: 'draft',
-                progress: undefined,
-                // 已自定义名称的草稿回退时保留名称（IKFA8X）
-                ...(hasCustomName(node) ? {} : { fileName: draftFileNameOf(type) }),
-              });
-            } else {
-              patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
-            }
+      /** IKJJR1 恢复种子（B.3）：发送时目标/来源快照。目标 = 结果承接卡（原位卡或新建占位卡，
+       *  注意与业务字段 target_node_id（面板来源目标）区分）；草稿/既有素材角色由运行时先落盘再提交。 */
+      let seedTarget: RecoverySeedTarget;
+      if (inPlaceNode) {
+        const d = (inPlaceNode.data ?? {}) as Record<string, unknown>;
+        seedTarget = {
+          role: d.draft === true
+            ? 'draft'
+            : typeof d.assetId === 'string' && d.assetId.length > 0
+              ? 'existing-media'
+              : 'result-placeholder',
+          x: Math.round(inPlaceNode.position.x),
+          y: Math.round(inPlaceNode.position.y),
+          width: typeof d.width === 'number' && d.width > 0 ? d.width : 320,
+          height: typeof d.height === 'number' && d.height > 0 ? d.height : 320,
+          name: typeof d.fileName === 'string' ? d.fileName : '',
+        };
+      } else {
+        const box = mediaContentBox({
+          mediaType: type,
+          ratio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
+        });
+        seedTarget = {
+          role: 'result-placeholder',
+          x: placeholderPosition.x,
+          y: placeholderPosition.y,
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          name: type === 'video' ? (isSampleJob ? '样片生成中' : '视频生成中') : type === 'audio' ? '音频生成中' : '图片生成中',
+        };
+      }
+      const seedSources: RecoverySeedSource[] = edgesRef.current
+        .filter((edge) => edge.target === nodeId)
+        .map((edge) => mediaNodesRef.current.find((n) => n.id === edge.source))
+        .filter((n): n is Node => n != null)
+        .map((n) => {
+          const d = (n.data ?? {}) as Record<string, unknown>;
+          return {
+            node_id: n.id,
+            x: Math.round(n.position.x),
+            y: Math.round(n.position.y),
+            width: typeof d.width === 'number' && d.width > 0 ? d.width : 320,
+            height: typeof d.height === 'number' && d.height > 0 ? d.height : 320,
+            name: typeof d.fileName === 'string' ? d.fileName : '',
           };
-          const takenOver = () => activeJobByNodeRef.current.get(nodeId) !== activeAtCreate;
-          if (openRechargeForCreditsError(e)) {
-            if (takenOver()) return; // 已被其他提交接管：回退不得覆盖新任务状态
-            if (inPlaceNodeId) rollbackInPlace();
-            else {
+        });
+      const runtime = generationRuntimeRef.current;
+      if (!runtime) {
+        console.warn('[canvas] 生成任务运行时未就绪，提交被拒绝');
+        return false;
+      }
+      return runtime.submit(
+        normalGenerationTask,
+        {
+          payload,
+          target: {
+            targetNodeId: nodeId,
+            seedTarget,
+            seedSources,
+            expectedBindingRevision: runtime.bindingRevisionOf(nodeId),
+          },
+        },
+        {
+          onCreateFailure: (e: unknown) => {
+            /** 原位目标回退：草稿回待生成保留参数（IKDMQQ/IKDMQS/IKDMQT）；
+             *  成品卡恢复成品态保留旧素材与最新编辑（IKDMQU Q5，同取消恢复）。
+             *  归属核对（接管保护）由运行时 owns() 先行完成，此处不再重复判。 */
+            const rollbackInPlace = () => {
+              const rollbackNode = mediaNodesRef.current.find((n) => n.id === nodeId);
+              if (!rollbackNode) return;
+              if (((rollbackNode.data ?? {}) as Record<string, unknown>).draft === true) {
+                patchMediaNode(nodeId, {
+                  genStatus: 'draft',
+                  progress: undefined,
+                  // 已自定义名称的草稿回退时保留名称（IKFA8X）
+                  ...(hasCustomName(rollbackNode) ? {} : { fileName: draftFileNameOf(type) }),
+                });
+              } else {
+                patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
+              }
+            };
+            const removePlaceholder = () => {
               setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
               setEdges(prev => prev.filter(edge => edge.target !== nodeId));
-            }
-            return;
-          }
-          if (isApiError(e) && e.status === 401) {
-            if (!takenOver()) {
+            };
+            if (openRechargeForCreditsError(e)) {
               if (inPlaceNodeId) rollbackInPlace();
-              else {
-                setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
-                setEdges(prev => prev.filter(edge => edge.target !== nodeId));
-              }
+              else removePlaceholder();
+              return true;
             }
-            useAuthPromptStore.getState().addResume(() => {
-              startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft);
-            });
-            return;
-          }
-          if (takenOver()) return; // 已被接管：失败态不得覆盖新任务的执行状态
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '创建任务失败',
-            // 接纳侧 4xx 的失败码（IKJ795 比例约束等）落卡供一键修复识别——IKJFGQ 起优先
-            // 取信封 data.code 字符串码（撞号重排不失效），数值码兜底
-            errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
-          });
-        });
-      return true; // 创建请求已发出（IKFXZD 面板关闭判定点）；HTTP 层异步失败由上方 catch 收敛到卡片
+            if (isApiError(e) && e.status === 401) {
+              if (inPlaceNodeId) rollbackInPlace();
+              else removePlaceholder();
+              useAuthPromptStore.getState().addResume(() => {
+                startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft);
+              });
+              return true;
+            }
+            return false; // 通用失败：运行时落失败卡（errorText/errorCode 同原口径）
+          },
+        },
+      );
+      // 创建请求已发出（IKFXZD 面板关闭判定点）；HTTP 层异步失败由运行时收敛到卡片
     } catch (e: unknown) {
       // 同步异常兜底（如 crypto.randomUUID 在 HTTP 下不可用）
       patchMediaNode(nodeId, {
@@ -6741,6 +6856,11 @@ export default function CanvasPage() {
   /** 取消接口仅登记意图；权威终态确认前保留生成中状态及轮询，避免编辑/删除绕过在途保护。 */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    // IKJJR1：普通生成家族取消归统一任务运行时（权威终态收敛 + 取消保留卡的 settleTarget 确认）
+    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
+      generationRuntimeRef.current.cancel(nodeId);
+      return;
+    }
     const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || jobId == null) return;
     void cancelGenerationJob(currentId, jobId)
@@ -6807,6 +6927,11 @@ export default function CanvasPage() {
    *  取消失败：保留卡片提示原因（任务仍可查看/轮询收敛），用户需要时再操作一次。 */
   const deleteGeneratingNode = async (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    // IKJJR1：普通生成家族删除归统一任务运行时（取消确权 + remove($target) 显式确认）
+    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
+      generationRuntimeRef.current.remove(nodeId);
+      return;
+    }
     const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || jobId == null) {
       // 无任务可取消（异常态）：退回直接移除，避免删除入口卡死
@@ -7506,6 +7631,17 @@ export default function CanvasPage() {
           patchMediaNode(nodeId, retry.patch);
           showToast('error', isApiError(e) ? e.message : '音频调速任务创建失败，请重试');
         });
+      return;
+    }
+    // IKJJR1：普通生成失败卡归统一任务运行时（服务端冻结输入重试 + canvas_binding 独立提交身份）。
+    // 防重入/余额门与通用分支同口径；归属检查、幂等键与受理台账在运行时。
+    if (node && isNormalGenerationCard(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法重试');
+        return;
+      }
+      if (blockIfCreditsInsufficient()) return;
+      generationRuntimeRef.current?.retry(nodeId);
       return;
     }
     if (!currentId || !jobId) return;
@@ -8964,6 +9100,10 @@ export default function CanvasPage() {
       showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
       return true;
     }
+    if (recoverySaveConflictRef.current) {
+      showToast('warn', '画布保存冲突，当前内容已保留，请刷新后复核');
+      return true;
+    }
     return false;
   };
 
@@ -9005,15 +9145,25 @@ export default function CanvasPage() {
       // IKIN23：整文档待复核期间一律静默返回 false 不发请求——无论待发节点数；排队中的
       // flush 在实际执行时同样走到此复查（flush 多为后台链路 .catch(()=>{})，用户可见提示
       // 由重试保存/项目切换入口给出）
-      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current) return false;
+      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return false;
       const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
       if (signature !== lastSavedRef.current) {
         // IKILUE：空文档保存的显式确认标记（授予口径见 shouldConfirmEmptyClear），
         // 412 后据此登记清空待复核闸门
         // IKILTB：提到 try 外——catch 登记 412 闸门时同口径复用，不再重写同义表达式（与自动保存路径一致）
         const confirmEmpty = shouldConfirmEmptyClear(nodes);
+        // IKJJR1：恢复保存（有显式待确认状态时）走新协议原子保存；回执回填台账
+        const recoveryFields = generationRuntimeRef.current?.composeSaveFields() ?? null;
         try {
-          const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty }, versionRef.current);
+          const saved = recoveryFields
+            ? await putCanvasDocWithRecovery(
+              projectId,
+              { viewport, nodes, edges: edgesRef.current, confirmEmpty },
+              versionRef.current,
+              { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
+            )
+            : await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty }, versionRef.current);
+          if (recoveryFields) generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
           if (activeProjectRef.current !== projectId) {
             // 旧项目的保存结束后重启当前项目的自动保存防抖。
             setSaveEpoch((value) => value + 1);
@@ -9028,6 +9178,24 @@ export default function CanvasPage() {
           if (activeProjectRef.current !== projectId) {
             setSaveEpoch((value) => value + 1);
             throw error;
+          }
+          // IKJJR1（验收 8）：新协议保存冲突保留本地内容，不采纳版本重发；闸门至重新水合。
+          //  项冲突（409 recovery_item_conflict）例外：resolve 定向对账后由下次保存重推导。
+          const flushRecoveryReason = readRecoveryErrorReason(error);
+          if (recoveryFields && flushRecoveryReason === 'recovery_item_conflict') {
+            void generationRuntimeRef.current?.reconcileConflictItems(projectId);
+            setSaveBlocked(true);
+            setSaveStatus('error');
+            throw error;
+          }
+          if (recoveryFields && flushRecoveryReason != null) {
+            recoverySaveConflictRef.current = true;
+            setSaveBlocked(true);
+            setSaveStatus('error');
+            throw error;
+          }
+          if (!recoveryFields && readRecoveryErrorReason(error) === 'recovery_protocol_required') {
+            void generationRuntimeRef.current?.recover(projectId);
           }
           const aligned = adoptCanvasConflictVersion(error);
           // IKILUE：带 confirmEmpty 的清空保存 412——登记闸门；flush 链路不 toast（后台调用方多），
@@ -9056,6 +9224,78 @@ export default function CanvasPage() {
     trackCanvasSave(queued.then(() => undefined, () => undefined));
     return queued;
   };
+
+  /* ═══ IKJJR1 生成任务运行时宿主与实例 ═══
+   * 每渲染重建宿主实现（闭包读最新画布状态/保存函数），运行时本体只建一次：
+   * 内部所有异步经归属检查（项目/加载身份/承接轮次/删除登记）后才会经宿主写画布。 */
+  generationRuntimeHostRef.current = ({
+    getProjectId: () => activeProjectRef.current,
+    getLoadEpoch: () => docLoadEpochRef.current,
+    getMediaNodes: () => mediaNodesRef.current as unknown as RuntimeNodeView[],
+    findNode: (nodeId) => {
+      const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+      return node ? (node as unknown as RuntimeNodeView) : null;
+    },
+    patchNode: patchMediaNode,
+    insertMediaNode: (node) => {
+      const built = attachCallbacks({
+        id: node.id,
+        type: 'mediaNode',
+        position: node.position,
+        data: {
+          ...node.data,
+          onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
+          onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
+          onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+          onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
+          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+          onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
+          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+          onDownload: (id: string) => actionsRef.current.download(id),
+          onShowDetails: (id: string) => actionsRef.current.showDetails(id),
+          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+          onMediaDims: handleMediaDims,
+        },
+      } as Node);
+      mediaNodesRef.current = [...mediaNodesRef.current, built];
+      setMediaNodes(mediaNodesRef.current);
+    },
+    removeMediaNode: (nodeId) => {
+      setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+      setEdges((prev) => prev.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
+    },
+    getEdges: () => edgesRef.current.map((edge) => ({ source: edge.source, target: edge.target })),
+    addEdge: (source, target, role, marker) => { addCanvasEdge(source, target, role as VideoRefRole, marker); },
+    getActiveJob: (nodeId) => activeJobByNodeRef.current.get(nodeId),
+    setActiveJob: (nodeId, token) => { activeJobByNodeRef.current.set(nodeId, token); },
+    clearActiveJob: (nodeId) => { activeJobByNodeRef.current.delete(nodeId); },
+    stopLegacyPolling: (nodeId) => { stopJobPolling(nodeId, jobTimersRef.current); },
+    isLocallyRemoved: (nodeId) => locallyRemovedGenerationNodesRef.current.has(nodeId),
+    markLocallyRemoved: (nodeId) => { locallyRemovedGenerationNodesRef.current.add(nodeId); },
+    registerPendingDelete: (nodeId) => { pendingDeleteJobNodesRef.current.add(nodeId); },
+    isPendingDelete: (nodeId) => pendingDeleteJobNodesRef.current.has(nodeId),
+    applyTerminal: (nodeId, jobId, detail) => applyJobTerminal(nodeId, jobId, detail),
+    settleCancelled: settleCancelledNode,
+    saveCanvas: (projectId) => flushCanvasSave(projectId),
+    toast: (kind, message) => showToast(kind, message),
+    openRechargeForCreditsError,
+    addAuthResume: (fn) => { useAuthPromptStore.getState().addResume(fn); },
+    rememberAsset: rememberGeneratedAsset,
+  } satisfies GenerationRuntimeHost);
+  if (generationRuntimeRef.current == null) {
+    const hostRef = generationRuntimeHostRef;
+    // 转发宿主：每次调用读最新实现（宿主闭包每渲染重建，运行时只持转发层）
+    const forwardHost = new Proxy({} as GenerationRuntimeHost, {
+      get(_target, prop: string) {
+        const impl = hostRef.current as unknown as Record<string, unknown>;
+        const value = impl[prop];
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(impl) : value;
+      },
+    });
+    const runtime = createGenerationRuntime(forwardHost);
+    runtime.register(normalGenerationTask);
+    generationRuntimeRef.current = runtime;
+  }
 
   /** 返回发起项目时立即保存补建的调速卡；保存成功后才移除待恢复记录。 */
   useEffect(() => {

@@ -153,6 +153,9 @@ export interface CreateJobPayload {
    *  时必带）。取报价响应原样：服务端按同一规则复算，价格变化先刷新可见报价再由用户点击。 */
   expected_credits?: number;
   quote_revision?: string;
+  /** IKJJR1（恢复契约 v1 B.3）：画布承接绑定（submission_id = Idempotency-Key）。
+   *  由生成任务运行时铸造注入；不携带 = 历史兼容路径。形状见 @/api/canvasRecovery 的 CanvasBinding。 */
+  canvas_binding?: unknown;
 }
 
 /** 生成任务参考项（图/视频/音频 references 契约） */
@@ -815,17 +818,21 @@ export function cancelGenerationJob(projectId: string, jobId: number | string) {
 
 /** 重试终态失败任务：为缺失/失败输出创建新任务。
  *  `idempotencyKey` 由调用方持有，口径同 {@link createGenerationJob}——「重试」是同一张卡
- *  上的同一次意图（响应丢了再点一次不该变成两笔钱），受理成功后才作废这把钥匙。 */
+ *  上的同一次意图（响应丢了再点一次不该变成两笔钱），受理成功后才作废这把钥匙。
+ *  IKJJR1（恢复契约 v1）：携带 canvas_binding 时为新 submission_id 独立提交身份
+ *  （Idempotency-Key 必须等于 submission_id，由生成任务运行时保证）；无则走历史兼容路径。 */
 export function retryGenerationJob(
   projectId: string,
   jobId: number | string,
   idempotencyKey: string,
+  canvasBinding?: unknown,
 ): Promise<JobCreatedData> {
   return apiRequest<JobCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${jobId}/retry`,
     {
       method: 'POST',
       headers: { 'Idempotency-Key': idempotencyKey },
+      ...(canvasBinding ? { body: JSON.stringify({ canvas_binding: canvasBinding }) } : {}),
     },
   );
 }
