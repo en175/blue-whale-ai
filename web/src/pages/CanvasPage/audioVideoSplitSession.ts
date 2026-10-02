@@ -1,6 +1,5 @@
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
-import { readAssetId } from './mediaRefs';
+import { apiErrorMessage, captureMediaSource } from './toolSessionCapture';
 import {
   AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT,
   AUDIO_VIDEO_SPLIT_MISSING_ASSET_REASON,
@@ -40,22 +39,12 @@ export function createAudioVideoSplitSession(
     },
     target: (state) => state.nodeId,
     capture(state) {
-      const host = getHost();
-      const node = host.getSourceNode(state.nodeId);
-      const sourceAssetId = readAssetId(node?.data ?? {});
-      if (!node || !sourceAssetId) {
-        host.warn(AUDIO_VIDEO_SPLIT_MISSING_ASSET_REASON);
-        return null;
-      }
-      const projectId = host.getProjectId();
-      if (!projectId) {
-        host.warn('未选中项目，无法音视频分离');
-        return null;
-      }
+      const captured = captureMediaSource(getHost(), state.nodeId, AUDIO_VIDEO_SPLIT_MISSING_ASSET_REASON, '未选中项目，无法音视频分离');
+      if (!captured) return null;
       return {
-        projectId,
-        source: { ...node, position: { ...node.position }, data: { ...node.data } },
-        payload: { source_asset_id: String(sourceAssetId), output_format: state.format },
+        projectId: captured.projectId,
+        source: captured.source,
+        payload: { source_asset_id: captured.sourceAssetId, output_format: state.format },
       };
     },
     async submit(input, context) {
@@ -65,7 +54,7 @@ export function createAudioVideoSplitSession(
       await host.handoff(input, task);
     },
     onError(error) {
-      getHost().error(isApiError(error) ? error.message : '音视频分离任务创建失败，请重试');
+      getHost().error(apiErrorMessage(error, '音视频分离任务创建失败，请重试'));
     },
   };
 }

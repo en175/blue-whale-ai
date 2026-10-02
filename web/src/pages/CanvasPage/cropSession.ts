@@ -1,7 +1,7 @@
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
 import { resolveMediaSrc } from '@/utils/remoteImageCors';
 import type { UploadCompleteData } from '@/api/assets';
+import { apiErrorMessage, cloneSourceNode } from './toolSessionCapture';
 import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { fullCropRect, cropPresetRatio, inscribeCropRect, clampCropRect, minCropSideDisplay, cropOutputFormat, cropRectToNatural, type CropNaturalRect, type CropOutputFormat, type CropCoordinateSpace, type CropRect, type CropPresetKey } from './imageCrop';
 import type { ToolSessionDefinition } from './toolSessionRuntime';
@@ -113,7 +113,7 @@ export function createCropSession(getHost: () => CropHost): ToolSessionDefinitio
       if (!src || src.startsWith('blob:')) { host.warn('源图不可用，无法裁切'); return null; }
       return {
         projectId: host.getProjectId() ?? undefined,
-        source: { ...node, position: { ...node.position }, data: { ...node.data } },
+        source: cloneSourceNode(node),
         src, natural: cropRectToNatural(state.rect, bounds, space),
         format: cropOutputFormat({ mime: typeof node.data.mime === 'string' ? node.data.mime : undefined, src, fileName: typeof node.data.fileName === 'string' ? node.data.fileName : undefined }),
       };
@@ -127,7 +127,7 @@ export function createCropSession(getHost: () => CropHost): ToolSessionDefinitio
       host.handoff(input, uploaded);
     },
     onError(error) {
-      getHost().error(isApiError(error) || error instanceof CropEncodingError ? error.message : '裁切上传失败，请重试');
+      getHost().error(apiErrorMessage(error, '裁切上传失败，请重试', CropEncodingError));
     },
   };
 }

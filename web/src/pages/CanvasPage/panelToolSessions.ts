@@ -5,6 +5,7 @@ import { buildVideoEnhanceInput, restoreVideoEnhanceResolution, type VideoEnhanc
 import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';
 import { buildFrameInterpolationInput, restoreFrameInterpolationFps, type FrameInterpolationIdentity, type FrameInterpolationFps } from './frameInterpolation';
 import { readAssetId } from './mediaRefs';
+import { apiErrorMessage, capturePanelIdentity, isSilentAuthError } from './toolSessionCapture';
 import type { ToolSessionDefinition } from './toolSessionRuntime';
 
 import type { CanvasToolKind } from './canvasToolSessions';
@@ -34,32 +35,26 @@ export interface VideoEnhanceState { nodeId: string; seed: { ts: number; initial
 export interface FrameInterpolationState { nodeId: string; seed: { ts: number; initialFps: FrameInterpolationFps }; inFlight: boolean }
 
 export function captureImageEnhance(host: PanelToolHost, nodeId: string, params: ImageEnhancePanelParams): ImageEnhanceSubmission | null {
-  const projectId = host.getProjectId();
-  if (!projectId) { host.warn('未选中项目，无法发起高清放大'); return null; }
-  const identity = host.getNode(nodeId)?.data.imageEnhance as ImageEnhanceIdentity | undefined;
-  if (!identity?.sourceAssetId) { host.warn('源素材身份缺失，无法发起高清放大'); return null; }
-  const payload = buildImageEnhanceInput(identity.sourceAssetId, nodeId, params);
+  const captured = capturePanelIdentity<ImageEnhanceIdentity>(host, nodeId, 'imageEnhance', '高清放大');
+  if (!captured) return null;
+  const payload = buildImageEnhanceInput(captured.identity.sourceAssetId, nodeId, params);
   if (!payload) { host.warn('高清放大参数不合法，请调整后重试'); return null; }
-  return { projectId, nodeId, payload, identity: { ...identity } };
+  return { projectId: captured.projectId, nodeId, payload, identity: captured.identity };
 }
 export function captureVideoEnhance(host: PanelToolHost, nodeId: string, resolution: VideoEnhanceResolution): VideoEnhanceSubmission | null {
-  const projectId = host.getProjectId();
-  if (!projectId) { host.warn('未选中项目，无法发起 HD 高清'); return null; }
-  const identity = host.getNode(nodeId)?.data.videoEnhance as VideoEnhanceIdentity | undefined;
-  if (!identity?.sourceAssetId) { host.warn('源素材身份缺失，无法发起 HD 高清'); return null; }
-  const payload = buildVideoEnhanceInput(String(identity.sourceAssetId), nodeId, resolution);
+  const captured = capturePanelIdentity<VideoEnhanceIdentity>(host, nodeId, 'videoEnhance', 'HD 高清');
+  if (!captured) return null;
+  const payload = buildVideoEnhanceInput(String(captured.identity.sourceAssetId), nodeId, resolution);
   if (!payload) { host.warn('HD 高清参数不合法，请调整后重试'); return null; }
-  return { projectId, nodeId, payload, identity: { ...identity } };
+  return { projectId: captured.projectId, nodeId, payload, identity: captured.identity };
 }
 export function captureFrameInterpolation(host: PanelToolHost, nodeId: string, fps: FrameInterpolationFps): FrameInterpolationSubmission | null {
-  const projectId = host.getProjectId();
-  if (!projectId) { host.warn('未选中项目，无法发起插帧'); return null; }
-  const identity = host.getNode(nodeId)?.data.frameInterpolation as FrameInterpolationIdentity | undefined;
-  if (!identity?.sourceAssetId) { host.warn('源素材身份缺失，无法发起插帧'); return null; }
-  const payload = buildFrameInterpolationInput(String(identity.sourceAssetId), nodeId, fps);
+  const captured = capturePanelIdentity<FrameInterpolationIdentity>(host, nodeId, 'frameInterpolation', '插帧');
+  if (!captured) return null;
+  const payload = buildFrameInterpolationInput(String(captured.identity.sourceAssetId), nodeId, fps);
   if (!payload) { host.warn('插帧参数不合法，请调整后重试'); return null; }
   if (host.isFrameInFlight(nodeId)) return null;
-  return { projectId, nodeId, payload, identity: { ...identity } };
+  return { projectId: captured.projectId, nodeId, payload, identity: captured.identity };
 }
 
 export function createVideoEnhanceSession(getHost: () => PanelToolHost): ToolSessionDefinition<VideoEnhanceState, string, VideoEnhanceSubmission, VideoEnhanceResolution> {
@@ -78,10 +73,10 @@ export function createVideoEnhanceSession(getHost: () => PanelToolHost): ToolSes
     /** 提交锁的宿主在途判定：选中隐藏再选回时运行时以其重算上锁（显式关闭重开即新会话，允许重发）。 */
     inFlight: (state) => getHost().isVideoEnhanceInFlight(state.nodeId),
     onError(error) {
-      if (isApiError(error) && error.status === 401) return;
+      if (isSilentAuthError(error)) return;
       // 静默传输只把 HTTP 提示归属移到有效会话；保留原 HD 两路反馈。
       if (isApiError(error)) getHost().httpError(error.message);
-      getHost().error(isApiError(error) ? error.message : 'HD 高清任务创建失败，请重试');
+      getHost().error(apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
     },
     reconcile: (state) => getHost().isValidTarget(state.nodeId, 'videoEnhance') ? state : null,
   };
@@ -112,8 +107,8 @@ export function createImageEnhanceSession(getHost: () => PanelToolHost): ToolSes
       await task;
     },
     onError(error) {
-      if (isApiError(error) && error.status === 401) return;
-      getHost().httpError(isApiError(error) ? error.message : '创建任务失败');
+      if (isSilentAuthError(error)) return;
+      getHost().httpError(apiErrorMessage(error, '创建任务失败'));
     },
     reconcile: (state) => getHost().isValidTarget(state.nodeId, 'imageEnhance') ? state : null,
   };
@@ -135,8 +130,8 @@ export function createFrameInterpolationSession(getHost: () => PanelToolHost): T
     capture: (state, fps) => fps ? captureFrameInterpolation(getHost(), state.nodeId, fps) : null,
     async submit(input, context) { if (await getHost().startFrame(input)) context.close(); },
     onError(error) {
-      if (isApiError(error) && error.status === 401) return;
-      getHost().error(isApiError(error) || error instanceof FrameInterpolationSaveError ? error.message : '插帧任务创建失败，请重试');
+      if (isSilentAuthError(error)) return;
+      getHost().error(apiErrorMessage(error, '插帧任务创建失败，请重试', FrameInterpolationSaveError));
     },
     reconcile(state) {
       const host = getHost();

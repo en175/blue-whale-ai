@@ -3,6 +3,7 @@ import { isApiError } from '@/api/http';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
 import { audioMixCandidate, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from './audioMix';
 import { readAssetId, cardNameOfNode } from './mediaRefs';
+import { apiErrorMessage, cloneSourceNode } from './toolSessionCapture';
 import type { CreateAudioVideoMuxPayload } from '@/api/jobs';
 import { audioVideoMuxIdentityOf, audioVideoMuxSourceError, audioVideoMuxVideoError, isAudioVideoMuxDraftNode, type AudioVideoMuxIdentity, type AudioVideoMuxBoundVideo, type AudioVideoMuxSync } from './audioVideoMux';
 import type { ToolSessionDefinition, ToolSubmissionContext } from './toolSessionRuntime';
@@ -67,7 +68,7 @@ export function createAudioMixSession(getHost: () => AudioMixHost): ToolSessionD
         host.warn('所选音频不可用，请重新选择'); return null;
       }
       return {
-        projectId, source: { ...source, position: { ...source.position }, data: { ...source.data } },
+        projectId, source: cloneSourceNode(source),
         payload: {
           source_node_id: source.id,
           inputs: [{ asset_id: readAssetId(source.data)!, node_id: source.id }, ...selected.map((input) => ({ asset_id: input.assetId, ...(input.nodeId ? { node_id: input.nodeId } : {}) }))],
@@ -89,7 +90,7 @@ export function createAudioMixSession(getHost: () => AudioMixHost): ToolSessionD
       } finally { host.setInFlight(false); }
     },
     onError(error) {
-      getHost().error(error instanceof AudioMixLinkError || isApiError(error) ? error.message : '音频混合任务创建失败，请重试');
+      getHost().error(apiErrorMessage(error, '音频混合任务创建失败，请重试', AudioMixLinkError));
     },
   };
 }
@@ -212,6 +213,6 @@ export function createAudioVideoMuxSession(getHost: () => AudioVideoMuxHost): To
         await host.handoff(input, task);
       } finally { host.setInFlight(false); }
     },
-    onError(error) { getHost().error(isApiError(error) ? error.message : '音视频合成任务创建失败，请重试'); },
+    onError(error) { getHost().error(apiErrorMessage(error, '音视频合成任务创建失败，请重试')); },
   };
 }

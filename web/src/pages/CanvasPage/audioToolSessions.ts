@@ -1,11 +1,10 @@
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
 import { buildAudioTrimInput, defaultAudioTrimOutputFormat, type AudioTrimInput } from '@lib/contracts/audio-trim';
 import { buildAudioSpeedInput, type AudioSpeedInput } from '@lib/contracts/audio-speed';
 import type { AudioTrimFormat } from './audioTrim';
 import type { AudioTrimSelection } from './audioTrimGeometry';
 import { VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_DEFAULT_SESSION_SCENE, type VocalSplitFormat, type VocalSplitScene } from './vocalSplit';
-import { readAssetId } from './mediaRefs';
+import { apiErrorMessage, captureMediaSource, captureSourceAsset, cloneSourceNode, requireProjectId } from './toolSessionCapture';
 import type { ToolSessionDefinition } from './toolSessionRuntime';
 
 export interface AudioToolSubmission<Payload> {
@@ -46,27 +45,20 @@ export function createAudioTrimSession(
     target: (state) => state.nodeId,
     capture(state) {
       const host = getHost();
-      const node = host.getSourceNode(state.nodeId);
-      const sourceAssetId = readAssetId(node?.data ?? {});
-      if (!node || !sourceAssetId) {
-        host.warn('当前音频尚未关联资产，无法截取');
-        return null;
-      }
-      const sourceDuration = typeof node.data.duration === 'number' ? node.data.duration : 0;
+      const asset = captureSourceAsset(host, state.nodeId, '当前音频尚未关联资产，无法截取');
+      if (!asset) return null;
+      const sourceDuration = typeof asset.node.data.duration === 'number' ? asset.node.data.duration : 0;
       if (!(sourceDuration > 0)) {
         host.warn('音频时长缺失，无法截取');
         return null;
       }
-      const projectId = host.getProjectId();
-      if (!projectId) {
-        host.warn('未选中项目，无法截取');
-        return null;
-      }
+      const projectId = requireProjectId(host, '未选中项目，无法截取');
+      if (!projectId) return null;
       return {
         projectId,
-        source: { ...node, position: { ...node.position }, data: { ...node.data } },
+        source: cloneSourceNode(asset.node),
         payload: buildAudioTrimInput({
-          sourceAssetId: String(sourceAssetId),
+          sourceAssetId: asset.sourceAssetId,
           timeRange: { ...state.selection, sourceDuration },
           outputFormat: state.format,
         }),
@@ -79,7 +71,7 @@ export function createAudioTrimSession(
       await host.handoff(input, task);
     },
     onError(error) {
-      getHost().error(isApiError(error) ? error.message : '音频截取任务创建失败，请重试');
+      getHost().error(apiErrorMessage(error, '音频截取任务创建失败，请重试'));
     },
   };
 }
@@ -105,22 +97,15 @@ export function createAudioSpeedSession(
     target: (state) => state.nodeId,
     capture(state) {
       const host = getHost();
-      const node = host.getSourceNode(state.nodeId);
-      const sourceAssetId = readAssetId(node?.data ?? {});
-      if (!node || !sourceAssetId) {
-        host.warn('当前音频尚未关联资产，无法调速');
-        return null;
-      }
+      const asset = captureSourceAsset(host, state.nodeId, '当前音频尚未关联资产，无法调速');
+      if (!asset) return null;
       if (state.speed === 1) return null;
-      const projectId = host.getProjectId();
-      if (!projectId) {
-        host.warn('未选中项目，无法调速');
-        return null;
-      }
+      const projectId = requireProjectId(host, '未选中项目，无法调速');
+      if (!projectId) return null;
       return {
         projectId,
-        source: { ...node, position: { ...node.position }, data: { ...node.data } },
-        payload: buildAudioSpeedInput({ sourceAssetId: String(sourceAssetId), speed: state.speed }),
+        source: cloneSourceNode(asset.node),
+        payload: buildAudioSpeedInput({ sourceAssetId: asset.sourceAssetId, speed: state.speed }),
       };
     },
     async submit(input, context) {
@@ -130,7 +115,7 @@ export function createAudioSpeedSession(
       await host.handoff(input, task, context.close);
     },
     onError(error) {
-      getHost().error(isApiError(error) ? error.message : '音频调速任务创建失败，请重试');
+      getHost().error(apiErrorMessage(error, '音频调速任务创建失败，请重试'));
     },
   };
 }
@@ -158,22 +143,12 @@ export function createVocalSplitSession(
     },
     target: (state) => state.nodeId,
     capture(state) {
-      const host = getHost();
-      const node = host.getSourceNode(state.nodeId);
-      const sourceAssetId = readAssetId(node?.data ?? {});
-      if (!node || !sourceAssetId) {
-        host.warn('当前视频尚未关联资产，无法人声背景分离');
-        return null;
-      }
-      const projectId = host.getProjectId();
-      if (!projectId) {
-        host.warn('未选中项目，无法人声背景分离');
-        return null;
-      }
+      const captured = captureMediaSource(getHost(), state.nodeId, '当前视频尚未关联资产，无法人声背景分离', '未选中项目，无法人声背景分离');
+      if (!captured) return null;
       return {
-        projectId,
-        source: { ...node, position: { ...node.position }, data: { ...node.data } },
-        payload: { source_asset_id: String(sourceAssetId), scene: state.scene, output_format: state.format },
+        projectId: captured.projectId,
+        source: captured.source,
+        payload: { source_asset_id: captured.sourceAssetId, scene: state.scene, output_format: state.format },
       };
     },
     async submit(input, context) {
@@ -183,7 +158,7 @@ export function createVocalSplitSession(
       await host.handoff(input, task);
     },
     onError(error) {
-      getHost().error(isApiError(error) ? error.message : '人声背景分离任务创建失败，请重试');
+      getHost().error(apiErrorMessage(error, '人声背景分离任务创建失败，请重试'));
     },
   };
 }

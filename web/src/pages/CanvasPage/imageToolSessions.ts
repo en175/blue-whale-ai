@@ -1,6 +1,5 @@
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
-import { readAssetId } from './mediaRefs';
+import { apiErrorMessage, captureMediaSource, captureSourceAsset, cloneSourceNode, isSilentAuthError, requireProjectId } from './toolSessionCapture';
 import {
   IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT, buildImageCutoutRequest, imageCutoutSceneGateReason,
   type ImageCutoutRequest, type ImageCutoutScene,
@@ -42,16 +41,15 @@ export function createCutoutSession(getHost: () => CutoutHost): ToolSessionDefin
     target: (state) => state.nodeId,
     capture(state) {
       const host = getHost();
-      const node = host.getSourceNode(state.nodeId);
-      const sourceAssetId = readAssetId(node?.data ?? {});
-      if (!node || !sourceAssetId) { host.warn('源素材身份缺失，无法发起图片抠图'); return null; }
-      const reason = imageCutoutSceneGateReason(node.data, state.scene);
+      const asset = captureSourceAsset(host, state.nodeId, '源素材身份缺失，无法发起图片抠图');
+      if (!asset) return null;
+      const reason = imageCutoutSceneGateReason(asset.node.data, state.scene);
       if (reason) { host.warn(reason); return null; }
-      const projectId = host.getProjectId();
-      if (!projectId) { host.warn('未选中项目，无法发起图片抠图'); return null; }
+      const projectId = requireProjectId(host, '未选中项目，无法发起图片抠图');
+      if (!projectId) return null;
       return {
-        projectId, source: { ...node, position: { ...node.position }, data: { ...node.data } },
-        payload: buildImageCutoutRequest({ sourceAssetId, targetNodeId: host.newTargetId(), scene: state.scene, needContour: state.needContour, contourSize: state.contourSize, needCropBackground: state.needCropBackground }),
+        projectId, source: cloneSourceNode(asset.node),
+        payload: buildImageCutoutRequest({ sourceAssetId: asset.sourceAssetId, targetNodeId: host.newTargetId(), scene: state.scene, needContour: state.needContour, contourSize: state.contourSize, needCropBackground: state.needCropBackground }),
       };
     },
     async submit(input, context) {
@@ -61,7 +59,7 @@ export function createCutoutSession(getHost: () => CutoutHost): ToolSessionDefin
       context.close();
       await host.handoff(input, task, !current);
     },
-    onError(error) { getHost().error(isApiError(error) ? error.message : '创建抠图任务失败，请重试'); },
+    onError(error) { getHost().error(apiErrorMessage(error, '创建抠图任务失败，请重试')); },
   };
 }
 
@@ -116,12 +114,9 @@ export function createOutpaintSession(getHost: () => OutpaintHost): ToolSessionD
     capture(state) {
       if (state.expands.top <= 0 && state.expands.right <= 0 && state.expands.bottom <= 0 && state.expands.left <= 0) return null;
       const host = getHost();
-      const node = host.getSourceNode(state.nodeId);
-      const sourceAssetId = readAssetId(node?.data ?? {});
-      if (!node || !sourceAssetId) { host.warn('源素材身份缺失，无法发起扩图'); return null; }
-      const projectId = host.getProjectId();
-      if (!projectId) { host.warn('未选中项目，无法发起扩图'); return null; }
-      return host.prepareTask({ projectId, source: { ...node, position: { ...node.position }, data: { ...node.data } }, sourceAssetId: String(sourceAssetId), ratios: expandRatiosOf(state.expands, outpaintBox(node)) });
+      const captured = captureMediaSource(host, state.nodeId, '源素材身份缺失，无法发起扩图', '未选中项目，无法发起扩图');
+      if (!captured) return null;
+      return host.prepareTask({ projectId: captured.projectId, source: captured.source, sourceAssetId: captured.sourceAssetId, ratios: expandRatiosOf(state.expands, outpaintBox(captured.source)) });
     },
     async submit(input, context) {
       const pending = getHost().startTask(input);
@@ -129,8 +124,8 @@ export function createOutpaintSession(getHost: () => OutpaintHost): ToolSessionD
       await pending;
     },
     onError(error) {
-      if (isApiError(error) && error.status === 401) return;
-      getHost().error(isApiError(error) ? error.message : '创建任务失败');
+      if (isSilentAuthError(error)) return;
+      getHost().error(apiErrorMessage(error, '创建任务失败'));
     },
   };
 }

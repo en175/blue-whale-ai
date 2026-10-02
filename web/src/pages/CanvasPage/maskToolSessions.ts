@@ -1,5 +1,4 @@
-import { isApiError } from '@/api/http';
-import { readAssetId } from './mediaRefs';
+import { apiErrorMessage, captureMediaSource } from './toolSessionCapture';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import type { Node } from '@xyflow/react';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
@@ -74,26 +73,17 @@ export function createImageEraseSession(
     capture(state, request) {
       if (!request) return null;
       const host = getHost();
-      const node = host.getSourceNode(state.nodeId);
-      const sourceAssetId = readAssetId(node?.data ?? {});
-      if (!node || !sourceAssetId) {
-        host.warn('源素材身份缺失，无法发起图片擦除');
-        return null;
-      }
-      const projectId = host.getProjectId();
-      if (!projectId) {
-        host.warn('未选中项目，无法发起图片擦除');
-        return null;
-      }
+      const captured = captureMediaSource(host, state.nodeId, '源素材身份缺失，无法发起图片擦除', '未选中项目，无法发起图片擦除');
+      if (!captured) return null;
       let mask: ImageEraseSendInput['mask'] = null;
       if (request === 'mask') {
-        const { width, height } = node.data;
+        const { width, height } = captured.source.data;
         if (typeof width !== 'number' || typeof height !== 'number') return null;
         const display = mediaContentBox({ mediaType: 'image', width, height });
         if (!maskHasPaintArea(state.mask.ops, display.width, display.height)) return null;
         mask = { ops: structuredClone(state.mask.ops), space: { displayWidth: display.width, displayHeight: display.height, naturalWidth: width, naturalHeight: height } };
       }
-      return { projectId, source: { ...node, position: { ...node.position }, data: { ...node.data } }, sourceAssetId: String(sourceAssetId), targetNodeId: host.newTargetId(), mask };
+      return { projectId: captured.projectId, source: captured.source, sourceAssetId: captured.sourceAssetId, targetNodeId: host.newTargetId(), mask };
     },
     async submit(input, context) {
       const host = getHost();
@@ -103,7 +93,7 @@ export function createImageEraseSession(
         if (!file) throw new EraseMaskError('遮罩生成失败，请重试');
         let uploaded: { asset_id: string };
         try { uploaded = await host.uploadMask(file, input.projectId); }
-        catch (error: unknown) { throw new EraseMaskError(isApiError(error) ? error.message : '遮罩上传失败，请重试'); }
+        catch (error: unknown) { throw new EraseMaskError(apiErrorMessage(error, '遮罩上传失败，请重试')); }
         payload = { source_asset_id: input.sourceAssetId, target_node_id: input.targetNodeId, erase_scene: 'selected_area_erase', mask_asset_id: uploaded.asset_id };
       } else {
         payload = { source_asset_id: input.sourceAssetId, target_node_id: input.targetNodeId, erase_scene: 'full_screen_text_erase' };
@@ -115,7 +105,7 @@ export function createImageEraseSession(
       await host.handoff(submission, task, !current);
     },
     onError(error) {
-      getHost().error(error instanceof EraseMaskError || isApiError(error) ? error.message : '创建擦除任务失败，请重试');
+      getHost().error(apiErrorMessage(error, '创建擦除任务失败，请重试', EraseMaskError));
     },
   };
 }
@@ -163,16 +153,12 @@ export function createSubtitleEraseSession(
     target: (state) => state.nodeId,
     capture(state) {
       if (state.mode === 'box' && state.boxes.boxes.length === 0) return null;
-      const host = getHost();
-      const node = host.getSourceNode(state.nodeId);
-      const sourceAssetId = readAssetId(node?.data ?? {});
-      if (!node || !sourceAssetId) { host.warn('源素材身份缺失，无法发起视频去字幕'); return null; }
-      const projectId = host.getProjectId();
-      if (!projectId) { host.warn('未选中项目，无法发起视频去字幕'); return null; }
-      const display = mediaContentBox({ mediaType: 'video', width: typeof node.data.width === 'number' ? node.data.width : undefined, height: typeof node.data.height === 'number' ? node.data.height : undefined });
+      const captured = captureMediaSource(getHost(), state.nodeId, '源素材身份缺失，无法发起视频去字幕', '未选中项目，无法发起视频去字幕');
+      if (!captured) return null;
+      const display = mediaContentBox({ mediaType: 'video', width: typeof captured.source.data.width === 'number' ? captured.source.data.width : undefined, height: typeof captured.source.data.height === 'number' ? captured.source.data.height : undefined });
       return {
-        projectId, source: { ...node, position: { ...node.position }, data: { ...node.data } },
-        payload: buildVideoSubtitleEraseInput({ sourceAssetId, targetNodeId: host.newTargetId(), boxes: state.boxes.boxes, displayWidth: display.width, displayHeight: display.height }),
+        projectId: captured.projectId, source: captured.source,
+        payload: buildVideoSubtitleEraseInput({ sourceAssetId: captured.sourceAssetId, targetNodeId: getHost().newTargetId(), boxes: state.boxes.boxes, displayWidth: display.width, displayHeight: display.height }),
       };
     },
     async submit(input, context) {
@@ -182,6 +168,6 @@ export function createSubtitleEraseSession(
       context.close();
       await host.handoff(input, task, !current);
     },
-    onError(error) { getHost().error(isApiError(error) ? error.message : '创建去字幕任务失败，请重试'); },
+    onError(error) { getHost().error(apiErrorMessage(error, '创建去字幕任务失败，请重试')); },
   };
 }

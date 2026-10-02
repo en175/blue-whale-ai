@@ -69,6 +69,7 @@ import {
 
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
 import { captureImageEnhance, captureVideoEnhance, captureFrameInterpolation, FrameInterpolationSaveError, type ImageEnhanceSubmission, type VideoEnhanceSubmission, type FrameInterpolationSubmission } from './panelToolSessions';
+import { apiErrorMessage, isSilentAuthError } from './toolSessionCapture';
 import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import {
   AUDIO_TRIM_EDGE_ORIGIN,
@@ -7148,7 +7149,7 @@ export default function CanvasPage() {
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
       const input = captureVideoEnhance(toolHostsRef.current.panels!, nodeId, restoreVideoEnhanceResolution(videoEnhanceIdentity.lastParams));
       if (input) void startVideoEnhanceJob(input).catch((error: unknown) => {
-        if (!isApiError(error) || error.status !== 401) showToast('error', isApiError(error) ? error.message : 'HD 高清任务创建失败，请重试');
+        if (!isSilentAuthError(error)) showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
       });
       return;
     }
@@ -7168,7 +7169,7 @@ export default function CanvasPage() {
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
       const input = captureFrameInterpolation(toolHostsRef.current.panels!, nodeId, restoreFrameInterpolationRetryFps(frameInterpolationIdentity));
       if (input) void startFrameInterpolationJob(input).catch((error: unknown) => {
-        if (!isApiError(error) || error.status !== 401) showToast('error', isApiError(error) || error instanceof FrameInterpolationSaveError ? error.message : '插帧任务创建失败，请重试');
+        if (!isSilentAuthError(error)) showToast('error', apiErrorMessage(error, '插帧任务创建失败，请重试', FrameInterpolationSaveError));
       });
       return;
     }

@@ -1,6 +1,5 @@
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
-import { readAssetId } from './mediaRefs';
+import { apiErrorMessage, captureMediaSource, isSilentAuthError } from './toolSessionCapture';
 import {
   SMART_MATTING_DEFAULT_BACKGROUND_COLOR, SMART_MATTING_DEFAULT_FORMAT, buildSmartMattingInput,
   type SmartMattingMode, type SmartMattingFormat, type SmartMattingBackgroundColor, type SmartMattingParams,
@@ -43,14 +42,12 @@ export function createSmartMattingSession(
     capture(state) {
       const host = getHost();
       if (host.isSending()) return null;
-      const node = host.getSourceNode(state.nodeId);
-      const sourceAssetId = readAssetId(node?.data ?? {});
-      if (!node || !sourceAssetId) { host.warn('当前视频尚未关联资产，无法智能抠像'); return null; }
-      const projectId = host.getProjectId();
-      if (!projectId) { host.warn('未选中项目，无法智能抠像'); return null; }
+      const captured = captureMediaSource(host, state.nodeId, '当前视频尚未关联资产，无法智能抠像', '未选中项目，无法智能抠像');
+      if (!captured) return null;
+      const clientToken = host.newClientToken();
       return {
-        projectId, source: { ...node, position: { ...node.position }, data: { ...node.data } }, clientToken: host.newClientToken(),
-        payload: buildSmartMattingInput({ sourceAssetId: String(sourceAssetId), targetNodeId: host.newTargetId(), mode: state.mode, format: state.format, backgroundColor: state.backgroundColor }),
+        projectId: captured.projectId, source: captured.source, clientToken,
+        payload: buildSmartMattingInput({ sourceAssetId: captured.sourceAssetId, targetNodeId: host.newTargetId(), mode: state.mode, format: state.format, backgroundColor: state.backgroundColor }),
       };
     },
     async submit(input, context) {
@@ -59,8 +56,8 @@ export function createSmartMattingSession(
       await host.runTask(input);
     },
     onError(error) {
-      if (isApiError(error) && error.status === 401) return;
-      getHost().error(isApiError(error) ? error.message : '智能抠像任务创建失败，请重试');
+      if (isSilentAuthError(error)) return;
+      getHost().error(apiErrorMessage(error, '智能抠像任务创建失败，请重试'));
     },
   };
 }
