@@ -375,12 +375,86 @@ model command_idempotency {
   generation_job_id BigInt?
   resource_id       BigInt?
   accepted_cursor   BigInt
+  /// IKJJQU：新协议紧凑保存成功回执（SAVE_CANVAS_RECOVERY_V1）。可空——既有操作不写；
+  /// 只存紧凑回执，不存画布全文。
+  result_payload    Json?
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
   version           Int      @default(0)
   is_delete         Int      @default(0) @db.TinyInt
 
   @@unique([project_id, operation, idempotency_key], map: "uk_command_idempotency")
+}
+
+/// IKJJQU（IKIXK9-SPEC-20261002 B.2）：生成任务恢复契约 v1 —— 提交意图关联表。
+/// 一次用户提交或失败卡重试是一行；同次网络重放复用身份（uk uk_...__submission 幂等回读），
+/// 用户再次发起重试用新身份。当前承接以 generation_canvas_node_owners 为准，
+/// 历史提交不可用较晚时间戳夺回归属。
+model generation_canvas_submissions {
+  id                       BigInt   @id @default(autoincrement())
+  project_id               BigInt
+  user_id                  BigInt
+  protocol_version         Int
+  /// 提交意图身份：小写标准 UUID。
+  submission_id            String   @db.VarChar(36)
+  /// 原业务操作命名空间（generation.create / generation.retry）。
+  operation                String   @db.VarChar(64)
+  /// 规范化请求摘要（覆盖原业务参数与完整 canvas_binding）。
+  request_hash             String   @db.VarChar(64)
+  generation_job_id        BigInt
+  task_type                String   @db.VarChar(32)
+  target_node_id           String   @db.VarChar(128)
+  binding_revision         Int
+  /// 白名单恢复种子（target + sources），发送时快照。
+  recovery_seed            Json?
+  /// 服务端从已保存画布捕获的原目标快照，可空（result-placeholder 无原作品）。
+  previous_target_snapshot Json?
+  /// pending / present / replaced / removed / transferred（目标项状态）。
+  target_state             String   @db.VarChar(16)
+  /// 目标项状态版本；持久目标项从 1 开始。
+  target_revision          Int
+  gmt_create               DateTime @default(now()) @db.DateTime(0)
+  gmt_modified             DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, submission_id], map: "uk_generation_canvas_submissions__submission")
+  @@unique([project_id, target_node_id, binding_revision], map: "uk_generation_canvas_submissions__binding")
+  @@index([project_id, id], map: "idx_generation_canvas_submissions__project")
+  @@index([generation_job_id], map: "idx_generation_canvas_submissions__job")
+}
+
+/// IKJJQU（B.2）：逐输出记录表。$target 项不建行（状态在 submissions 行上）；
+/// 无行代表 pending、revision=0。首次成功保存 apply/remove 时才插入输出记录。
+model generation_canvas_outputs {
+  id                             BigInt   @id @default(autoincrement())
+  generation_canvas_submission_id BigInt
+  /// 稳定输出键（primary / slot:<slot_id> / segment:<n> / track:<type>）。
+  output_key                     String   @db.VarChar(128)
+  node_id                        String   @db.VarChar(128)
+  asset_id                       BigInt?
+  slot_id                        BigInt?
+  /// present / removed / transferred。
+  state                          String   @db.VarChar(16)
+  revision                       Int
+  gmt_create                     DateTime @default(now()) @db.DateTime(0)
+  gmt_modified                   DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([generation_canvas_submission_id, output_key], map: "uk_generation_canvas_outputs__key")
+  @@unique([generation_canvas_submission_id, node_id], map: "uk_generation_canvas_outputs__node")
+}
+
+/// IKJJQU（B.2）：节点唯一归属表。同项目同节点唯一有效承接者，独立于原始占位卡是哪一张。
+/// 新提交接管节点时在受理事务中核对并推进版本；删除保留归属行和版本。
+model generation_canvas_node_owners {
+  id                             BigInt   @id @default(autoincrement())
+  project_id                     BigInt
+  node_id                        String   @db.VarChar(128)
+  generation_canvas_submission_id BigInt
+  output_key                     String   @db.VarChar(128)
+  binding_revision               Int
+  gmt_create                     DateTime @default(now()) @db.DateTime(0)
+  gmt_modified                   DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, node_id], map: "uk_generation_canvas_node_owners__node")
 }
 
 model project_event_stream {
