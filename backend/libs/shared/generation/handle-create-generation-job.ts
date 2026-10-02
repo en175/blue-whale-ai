@@ -4,6 +4,7 @@ import {
   localAssetReferenceIds,
   resolveReferenceDurations,
 } from "./resolve-reference-durations.js";
+import type { ReferenceItemInput } from "./reference-item-input.js";
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
 import { freezeReferenceLimits } from "../generation-runtime/video-reference-validation.js";
@@ -161,17 +162,6 @@ export interface CreateGenerationJobBody {
    *  未开样片的请求不读这两个字段——普通视频创建语义零变化。 */
   expected_credits?: unknown;
   quote_revision?: unknown;
-}
-
-/** IKDJNZ：单数组 references 元素（保序）。asset_id（本地）与 material_id（素材库）二选一。 */
-export interface ReferenceItemInput {
-  role: "first_frame" | "last_frame" | "reference";
-  asset_id?: string;
-  material_id?: string;
-  /** IKDJNZ：图片/视频参考 + 参考音频（role 仅 reference）。 */
-  type: "image" | "video" | "audio";
-  /** ADR-0086：来源素材时长（秒，可选）——总时长限制校验用。 */
-  duration?: number;
 }
 
 /** 素材库引用（MaterialReference）：仅格式校验（Asset- 前缀），存在性/状态由上游强校验。 */

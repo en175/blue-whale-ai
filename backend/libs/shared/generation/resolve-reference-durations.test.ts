@@ -9,7 +9,7 @@
  * ============================================ */
 import { describe, expect, it, vi } from "vitest";
 
-import type { ReferenceItemInput } from "./handle-create-generation-job.js";
+import type { ReferenceItemInput } from "./reference-item-input.js";
 import {
   localAssetReferenceIds,
   resolveReferenceDurations,
