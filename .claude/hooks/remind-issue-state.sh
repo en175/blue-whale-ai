@@ -8,11 +8,11 @@
 #
 # 触发（均 PostToolUse）：
 #   1. Bash 成功执行 start-task-worktree 且带 --issue <ident>
-#      → 提醒把 <ident> 置为进行中（缺陷置修复中）；前置状态异常停下问人。
+#      → 提醒把 <ident> 置为开发中（缺陷置修复中）；前置状态异常停下问人。
 #   2. mcp__gitee-ent__create_enterprise_repo_pull 成功
 #      → 提醒给关联工单打 ready-for-review 标签。
 #   3. mcp__gitee-ent__merge_enterprise_pull 成功
-#      → 提醒把关联工单置已完成/已修复（缺陷另打 修复待验证）。
+#      → 提醒把关联工单置已上线（缺陷置待发布，另打 修复待验证）。
 #
 # 成功判定：kimi 的 PostToolUse 仅在工具成功时触发（失败走 PostToolUseFailure）；
 # Claude/Codex 的 Post 对失败也可能触发，但提醒是纯提示，误提醒无害（Agent 会
@@ -71,9 +71,10 @@ case "$TOOL_NAME" in
 📋 工单状态提醒：worktree 入口已带 --issue ${ISSUE}。
 下一步（规则见 docs/agents/issue-tracker.md「任务状态机」）：
 1. get_enterprise_issue_detail 查 ${ISSUE} 当前状态。
-2. 预期起点（需求=意向 / 任务=待办的 / 缺陷=待确认或已确认）→
-   update_enterprise_issue 置「进行中」（缺陷置「修复中」）。
-3. 已在「进行中」或已是终态（已完成/已取消/已拒绝）→ 停止，向用户报告并等指示。
+2. 预期起点（需求=待评审/待排期 / 任务=待排期 / 缺陷=待确认）→
+   update_enterprise_issue 置「开发中」（缺陷置「修复中」）。
+3. 已在开发完成态（任务=已完成 / 需求=待发布 / 缺陷=已修复）→ 转回开发中/修复中继续。
+4. 已在「开发中/修复中」或已是终态（已上线/已关闭/已拒绝/已验收）→ 停止，向用户报告并等指示。
 EOF
 )"
     ;;
@@ -87,9 +88,9 @@ EOF
   mcp__gitee-ent__merge_enterprise_pull)
     emit "$(cat <<'EOF'
 📋 工单状态提醒：PR 已合并。若本 PR 关联工单，按「任务状态机」收尾：
-- 需求/任务 → update_enterprise_issue 置「已完成」
-- 缺陷 → 置「已修复」，另打「修复待验证」标签
-- 已验收/已拒绝/已取消归人操作，Agent 不得设置。
+- 需求/任务 → update_enterprise_issue 置「已上线」
+- 缺陷 → 置「待发布」，另打「修复待验证」标签
+- 已验收/已拒绝/已关闭归人操作，Agent 不得设置。
 EOF
 )"
     ;;
