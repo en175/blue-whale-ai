@@ -58,9 +58,10 @@ chmod +x .claude/hooks/<name>.sh
 
 要点：
 - **`$CLAUDE_PROJECT_DIR`** 必须用，路径才在不同项目根下都对。
+- **ZCode 事件白名单**：`.zcode/config.json` 的 `hooks.events` 只认 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PermissionRequest`、`PostToolUse`、`PostToolUseFailure`、`Stop` 七个事件，且是严格 schema——出现白名单外事件名（如 Claude Code/Codex 支持的 `SubagentStart`）会让**整个配置文件**加载失败，该文件声明的全部 Hook 静默失效（IKJGD5）。五端复制配置时必须按端核对事件清单。
 - **matcher 精确**：要拦某个 MCP 工具就写完整 `mcp__server__tool_name`，别偷懒写 `mcp__*`（通配不一定生效）。
 - **同 matcher 多 hook 用数组**：可以挂多条，独立 exit code（一条拦了不影响另一条放行）。
-- 同名、同输入结构的工具可直接复用；输入结构不同时只允许在平台薄适配层做格式转换，不得复制 Gate 策略。Codex 的官方写入工具名是 `apply_patch`，补丁固定读取 `tool_input.command`，由 `Edit|Write` matcher 对应的 wrapper 适配后复用 `block-master-edit.sh`。
+- 同名、同输入结构的工具可直接复用；输入结构不同时只允许在平台薄适配层做格式转换，不得复制 Gate 策略。Codex 的官方写入工具名是 `apply_patch`，补丁固定读取 `tool_input.command`，由 `Edit|Write` matcher 对应的 wrapper 适配后复用 `block-master-edit.sh`。ZCode 的写入工具名就是 `Edit`/`Write`、路径在 `tool_input.file_path`，与 Claude Code 同构，直接挂权威 Gate 无需适配层。
 
 Codex 挂载点写在 `.codex/hooks.json`，但**不要复制脚本实现到 `.codex/hooks/`**。Codex command 统一通过薄 wrapper 定位 `.claude/hooks`：
 
@@ -132,7 +133,7 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 2. **检查四端配置映射**：运行 `python3 scripts/check-hook-contracts.py`。它从 ZCode、Claude Code、Codex、Kimi CLI 的实际项目配置解析 matcher、执行入口与权威 Gate；失败信息会指出平台、事件、matcher 和 Gate。
 3. **执行配置链闭环**：运行 `python3 scripts/check-hook-closed-loop.py`。它逐端执行 master 与 Agent 任务区的创建/修改场景，并按唯一会话标识和工具调用标识核对阻断/放行结果与审计记录。
 4. **按关联标识定位记录**：使用下节的 `python3 scripts/query-hook-audit.py` 查询。master 和 release 直写应为 exit 2，Agent 任务区等价写入应为 exit 0，且每个工具调用标识只对应一条记录。
-5. **最后检查外部客户端**：若真实 ZCode、Claude Code、Codex 或 Kimi CLI 操作没有关联记录，再检查该客户端的 Hook 信任状态、配置加载结果和自身日志。仓库查询只能定位调用是否进入 Gate，不能解释外部 harness 的内部根因。
+5. **最后检查外部客户端**：若真实 ZCode、Claude Code、Codex 或 Kimi CLI 操作没有关联记录，再检查该客户端的 Hook 信任状态、配置加载结果和自身日志（ZCode 日志在 `~/.zcode/cli/log/zcode-<日期>.jsonl`：配置整体被拒记 `config.file.invalid`——例如 `hooks.events` 出现白名单外事件名；Hook 执行失败记 `hook.run.failed`）。仓库查询只能定位调用是否进入 Gate，不能解释外部 harness 的内部根因。
 
 这条路径保持“文档驱动、Hook 兜底”：第 1 步是 Agent 正常执行机制，第 2–4 步验证仓库兜底与审计，第 5 步才进入外部客户端取证。
 
@@ -141,7 +142,7 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 | 等级 | 证明范围 | 对应入口 |
 |---|---|---|
 | 直接 Gate 黑盒 | 直接向权威 Gate 输入 JSON，验证 exit code、stdout/stderr 与审计副作用；不证明平台实际加载了配置 | `bash scripts/test-hooks.sh` 中各 Gate 黑盒用例 |
-| 配置链集成 | 从仓库实际配置解析 matcher 和 command，再执行到共享 Gate 并关联审计；`probe-codex-write-hook.sh` 也属于此等级 | `python3 scripts/check-hook-closed-loop.py`、`bash scripts/probe-codex-write-hook.sh` |
+| 配置链集成 | 从仓库实际配置解析 matcher 和 command，再执行到共享 Gate 并关联审计；`probe-codex-write-hook.sh` / `probe-zcode-write-hook.sh` 也属于此等级（后者先校验 ZCode 事件白名单） | `python3 scripts/check-hook-closed-loop.py`、`bash scripts/probe-codex-write-hook.sh`、`bash scripts/probe-zcode-write-hook.sh` |
 | 外部客户端实机探针 | 在真实 ZCode、Claude Code 或 Codex 客户端触发调用，并以客户端提供的关联标识查到仓库审计 | 需在对应客户端环境单独取证，仓库自动化不能替代 |
 
 测试报告必须标明等级。直接 Gate 黑盒或配置链集成通过，不能表述为外部客户端实机探针已通过。
@@ -183,6 +184,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 - 每个 Codex 包装命令必须和同位置 ZCode / Claude Code Hook 挂载的脚本名一致。
 - 代表性 Codex 包装命令必须从 `.codex/hooks.json` 读取，并能从 repo root 调到权威脚本得到相同拦截/放行结果。
 - `bash scripts/probe-codex-write-hook.sh` 必须读取真实 `.codex/hooks.json`，以官方 `apply_patch` 形状探测真实 wrapper → 共享 Gate，证明 master 与 release 创建/修改阻断、任务区创建/修改放行且不实际执行补丁。
+- `bash scripts/probe-zcode-write-hook.sh` 必须读取真实 `.zcode/config.json`，先证明 `hooks.events` 全部事件落在 ZCode 七事件白名单内（白名单外事件会让整个配置文件被拒载、全部 Hook 静默失效），再以 `Edit`/`Write` + `tool_input.file_path` 形状直探共享 Gate，证明 master 与 release 检出区创建/修改阻断、任务区创建/修改放行且不实际写文件。
 - Kimi CLI shim 在参数异常、非 git 目录、无 `.kimi-code/hooks.toml` opt-in 标记、Gate 缺失时一律静默放行；标记与 Gate 齐备时 stdin 与 exit code/stderr 原样透传（Slice 7）。
 - 可执行 Hook、wrapper 和活跃规则禁止返回 ASK 决策；标准授权路径必须在 ZCode / Claude Code / Codex / Kimi CLI 均无交互放行。
 - `.gitignore` 必须忽略根 `CLAUDE.local.md`；`.codex/` 只放行 `.codex/hooks.json` 和 `.codex/hooks/run-claude-pretool.sh`，`.codex/config.toml`、其它 `.codex/*`、其它 `.codex/hooks/*` 均保持忽略。`.kimi-code/hooks.toml` 与 `.kimi-code/hooks/` 可提交，`.kimi-code/local.toml` 保持忽略。
@@ -207,6 +209,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 | stderr 有报错但工具仍执行 | exit code 不是 0/2 | 在脚本末尾加 `echo "DEBUG exit=$?" >&2` |
 | 提醒型 hook 不响应 | 激活条件不满足（如 `graphify-out/graph.json` 缺失） | `[ -f graphify-out/graph.json ] && echo OK` |
 | Codex hook 不响应 | `.codex/hooks.json` 未被信任 | 在 Codex 里运行 `/hooks`，review 并 trust 项目 hook |
+| ZCode hook 全部不响应 | `.zcode/config.json` 的 `hooks.events` 含白名单外事件（如 `SubagentStart`），整个文件加载失败 | `grep config.file.invalid ~/.zcode/cli/log/zcode-$(date +%F).jsonl` 看诊断信息；删除白名单外事件后重开会话 |
 | Kimi CLI hook 不响应 | 未安装用户级 shim/配置，或会话未重载 | 运行 `scripts/install-kimi-hooks.sh`，然后 `kimi doctor` 校验并重开会话（或 `/reload`） |
 
 ---
@@ -220,7 +223,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 - [ ] 提醒型 `Grep|Glob` 或 `SessionStart` 未同步时，排除理由仍分别满足“非阻断且按客户端实际事件适配”与“会话 context 注入而非工具 Gate”
 - [ ] 至少 1 个**应当被拦**的测试用例 + 1 个**应当放行**的测试用例跑过
 - [ ] **输入 JSON 字段类型以 MCP `tools/list` schema 为准**（不要凭直觉只写字符串值——`project_id` / `program_id` / `parent_id` 在 schema 里是 number，PR #11 / IJZ5WA 复现过 string-only 正则漏 number 形态的假绿）
-- [ ] 跑 `python3 scripts/check-hook-contracts.py`、`bash scripts/probe-codex-write-hook.sh`、`bash scripts/test-hooks.sh`，全部退出 0 才提交
+- [ ] 跑 `python3 scripts/check-hook-contracts.py`、`bash scripts/probe-codex-write-hook.sh`、`bash scripts/probe-zcode-write-hook.sh`、`bash scripts/test-hooks.sh`，全部退出 0 才提交
 - [ ] 本文档表格里的「现有拦截器清单」同步更新
 
 ---
@@ -282,7 +285,7 @@ scripts/cleanup-task-worktree.sh
 | --- | --- | --- |
 | Claude Code | `.claude/settings.json` | SessionStart、SubagentStart、PreToolUse；JSON additionalContext |
 | Codex | `.codex/hooks.json` | 同上，通过现有 wrapper；仍须客户端信任项目 Hook |
-| ZCode | `.zcode/config.json` | 同上，严格 JSON；Bash 搜索纳入 matcher |
+| ZCode | `.zcode/config.json` | 无 SubagentStart：`hooks.events` 严格 schema 只认七事件（SessionStart/UserPromptSubmit/PreToolUse/PermissionRequest/PostToolUse/PostToolUseFailure/Stop），白名单外事件使整个配置文件被拒载（IKJGD5），子代理注入通道平台不支持；严格 JSON；Bash 搜索纳入 matcher |
 | Kimi Code CLI | `.kimi-code/hooks.toml` 经既有安装器挂载 | UserPromptSubmit 返回文本；SessionStart/SubagentStart 是观察事件，不作注入通道 |
 | Qoder CLI | `.qoder/settings.json` | 项目级 SessionStart、SubagentStart、PreToolUse；JSON additionalContext |
 

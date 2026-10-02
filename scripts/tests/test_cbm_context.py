@@ -82,17 +82,21 @@ class CbmContextTests(unittest.TestCase):
         self.assertIn(str(ROOT / 'agent-rules/code-discovery.md'), result['additionalContext'])
 
     def test_five_platforms_install_repository_reminders(self):
-        for filename, nested in [('.claude/settings.json', False),
-                                 ('.codex/hooks.json', False),
-                                 ('.zcode/config.json', True),
-                                 ('.qoder/settings.json', False)]:
+        # ZCode 的 hooks.events 严格 schema 只认七个事件（无 SubagentStart）：
+        # 白名单外事件会让整个配置文件被拒载、全部 Hook 静默失效（IKJGD5），
+        # 因此 ZCode 端只断言 SessionStart / PreToolUse 两个注入通道。
+        for filename, nested, events in [
+                ('.claude/settings.json', False, ('SessionStart', 'SubagentStart', 'PreToolUse')),
+                ('.codex/hooks.json', False, ('SessionStart', 'SubagentStart', 'PreToolUse')),
+                ('.zcode/config.json', True, ('SessionStart', 'PreToolUse')),
+                ('.qoder/settings.json', False, ('SessionStart', 'SubagentStart', 'PreToolUse'))]:
             with self.subTest(platform=filename):
                 path = ROOT / filename
                 self.assertTrue(path.exists(), filename)
                 hooks = json.loads(path.read_text())['hooks']
                 if nested:
                     hooks = hooks['events']
-                for event in ('SessionStart', 'SubagentStart', 'PreToolUse'):
+                for event in events:
                     matches = [h for group in hooks.get(event, [])
                                for h in group['hooks'] if 'cbm-' in h.get('command', '')]
                     self.assertEqual(len(matches), 1, (filename, event))
