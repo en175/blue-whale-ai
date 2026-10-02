@@ -1,6 +1,9 @@
 import { useEffect, type ComponentProps } from 'react';
 import type { Node, Viewport } from '@xyflow/react';
-import { createToolSessionRuntime } from './toolSessionRuntime';
+import {
+  createToolSessionRuntime,
+  type ToolSessionHandle,
+} from './toolSessionRuntime';
 import type { ToolSessionDeps } from './toolSessionCoordinator';
 import { assembleCanvasTools, registerCanvasTool } from './canvasToolRegistry';
 import {
@@ -156,6 +159,11 @@ export interface CanvasToolView {
   ): void;
 }
 
+/** 面板装配所需的最小句柄面：草稿卡可见性与悬浮工具条节点只读快照并按 nodeId 开会话。 */
+type PanelAssemblyHandle = Pick<
+  ToolSessionHandle<{ nodeId: string }, string>,
+  'getSnapshot' | 'open'
+>;
 /** 唯一工具注册入口。状态、提交定义、专属 UI 和原节点回调在同一注册项内绑定。 */
 export function createCanvasToolSessions(
   getHosts: () => Partial<CanvasToolHosts>,
@@ -215,6 +223,30 @@ export function createCanvasToolSessions(
       dialogWidth: 320,
     });
   }
+  /** 高清/HD 面板共享装配：草稿卡可见性与悬浮工具条节点，差异仅素材身份属性（插帧为重开重建模式，不并入）。 */
+  const enhancePanelDraft = (
+    identityKey: 'imageEnhance' | 'videoEnhance',
+    h: PanelAssemblyHandle,
+    node: Node,
+  ) => {
+    const v = h.getSnapshot();
+    return node.type === 'mediaNode' && node.data[identityKey]
+      ? {
+          hidden: v.hidden === true,
+          visible: v.visible === true && v.state?.nodeId === node.id,
+          open: () => {
+            h.open(node.id, getDeps());
+          },
+        }
+      : null;
+  };
+  const enhancePanelToolbarNode = (h: PanelAssemblyHandle): Node | null => {
+    const v = h.getSnapshot();
+    const node = v.state && nodeOf(v.state.nodeId);
+    return v.visible && node && mediaCardToolbarVisible(node.data)
+      ? node
+      : null;
+  };
   const mark = (
     node: Node,
     target: string | undefined,
@@ -883,25 +915,8 @@ export function createCanvasToolSessions(
       runtime,
       createImageEnhanceSession(() => getHosts().panels!),
       {
-        draft: (h, node) =>
-          node.type === 'mediaNode' && node.data.imageEnhance
-            ? {
-                hidden: h.getSnapshot().hidden === true,
-                visible:
-                  h.getSnapshot().visible === true &&
-                  h.getSnapshot().state?.nodeId === node.id,
-                open: () => {
-                  h.open(node.id, getDeps());
-                },
-              }
-            : null,
-        toolbarNode: (h) => {
-          const v = h.getSnapshot();
-          const node = v.state && nodeOf(v.state.nodeId);
-          return v.visible && node && mediaCardToolbarVisible(node.data)
-            ? node
-            : null;
-        },
+        draft: (h, node) => enhancePanelDraft('imageEnhance', h, node),
+        toolbarNode: (h) => enhancePanelToolbarNode(h),
         callbacks: (h) => ({
           onEnhanceImage: (id) => {
             const draftId = getView().createEnhanceDraft(id);
@@ -930,25 +945,8 @@ export function createCanvasToolSessions(
       runtime,
       createVideoEnhanceSession(() => getHosts().panels!),
       {
-        draft: (h, node) =>
-          node.type === 'mediaNode' && node.data.videoEnhance
-            ? {
-                hidden: h.getSnapshot().hidden === true,
-                visible:
-                  h.getSnapshot().visible === true &&
-                  h.getSnapshot().state?.nodeId === node.id,
-                open: () => {
-                  h.open(node.id, getDeps());
-                },
-              }
-            : null,
-        toolbarNode: (h) => {
-          const v = h.getSnapshot();
-          const node = v.state && nodeOf(v.state.nodeId);
-          return v.visible && node && mediaCardToolbarVisible(node.data)
-            ? node
-            : null;
-        },
+        draft: (h, node) => enhancePanelDraft('videoEnhance', h, node),
+        toolbarNode: (h) => enhancePanelToolbarNode(h),
         callbacks: (h) => ({
           onVideoEnhance: (id) => {
             const draftId = getView().createVideoEnhanceDraft(id);
