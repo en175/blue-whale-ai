@@ -40,9 +40,12 @@ def main() -> None:
                 return
         elif tool not in {'Grep', 'Glob'}:
             return
-        text = f'[本仓 CBM] 当前目录 {root}。结构探索前读取 {root / RULE}，按协议执行。'
+        text = (f'[本仓 CBM] 当前目录 {root}。结构查询先 search_graph/trace_path，精读用 get_code_snippet；'
+                f'文本/日志/配置检索可继续。协议 {root / RULE}，降级需说明依据。')
     elif event in {'SessionStart', 'SubagentStart', 'UserPromptSubmit', 'CwdChanged'}:
-        text = f'[本仓 CBM] 当前工作树 {root}。代码探索或子代理交接前读取 {root / RULE}，按协议执行。'
+        text = (f'[本仓 CBM] 当前工作树 {root}。结构查询先 CBM：list_projects/index_status 核对索引，'
+                'search_graph/trace_path 查符号与调用，get_code_snippet 精读；'
+                f'子代理交接传递图谱证据。协议 {root / RULE}，降级需说明依据。')
     else:
         return
     if kimi:

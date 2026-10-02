@@ -38,7 +38,7 @@ scripts/start-task-worktree.sh --type <类型> --issue <子工单号> --summary 
 
 ## implementer 派发与实施
 
-每个 implementer 子代理独占一张工单、其声明文件和一个子任务 worktree。派发时给出：工单与规格指针、验收标准、声明的文件范围、集成 worktree 路径、所需依赖提交、代码探索证据与工具能力核对（按 `agent-rules/code-discovery.md`），并明确告知有其他代理并行工作、须保留他人改动、超出自身范围的修改只报告不动手。
+每个 implementer 子代理独占一张工单、其声明文件和一个子任务 worktree。派发前父级先走 CBM 结构查询定位工单涉及的符号与路径（`search_graph` → `trace_path`，按 `agent-rules/code-discovery.md`），把符号/路径与覆盖结论写进派单——子代理会话无 CBM 注入，缺 MCP 工具时只能消费父级证据定向精读。派发时给出：工单与规格指针、验收标准、声明的文件范围、集成 worktree 路径、所需依赖提交、上述代码探索证据与工具能力核对，并明确告知有其他代理并行工作、须保留他人改动、超出自身范围的修改只报告不动手。
 
 实施按工单验收标准进行，凡可先写测试的切片用 `/tdd` 驱动红绿循环。提交只走：
 
