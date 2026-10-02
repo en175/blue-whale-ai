@@ -134,6 +134,18 @@ vi.mock('@/api/jobs', () => ({
   readJobFailText: apiMocks.readJobFailText,
 }));
 
+// IKJJR6：重生样片经运行时携 canvas_binding 受理——恢复扫描/保护性保存 mock 掉
+//（空恢复页 + 保存回执），页面流断言不依赖恢复网络。
+vi.mock('@/api/canvasRecovery', () => ({
+  fetchGenerationRecoveryPage: vi.fn(async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null })),
+  resolveGenerationRecovery: vi.fn(async () => ({ protocol_version: 1, records: [] })),
+  putCanvasDocWithRecovery: vi.fn(async () => ({
+    project_id: '11',
+    version: 5,
+    recoveryReceipt: { commandId: 'cmd-test', replayed: false, changes: [] },
+  })),
+}));
+
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
 vi.mock('@/api/generation', () => ({
@@ -325,7 +337,11 @@ describe('IKIZQG 重新生成样片（页面流）', () => {
     const [projectId, jobId, payload, key] = apiMocks.regenerateSampleJob.mock.calls[0]!;
     expect(projectId).toBe('p1');
     expect(jobId).toBe('9001');
-    expect(payload).toEqual({ expected_credits: 40, quote_revision: 'rev-r1' });
+    // IKJJR6：经运行时受理——业务载荷仍仅确认两字段，另携 canvas_binding（新样片独立承接目标），
+    // Idempotency-Key = canvas_binding.submission_id（同意图重放复用同一身份）
+    expect(payload).toMatchObject({ expected_credits: 40, quote_revision: 'rev-r1' });
+    expect(payload.canvas_binding).toMatchObject({ protocol_version: 1, target_node_id: expect.any(String), expected_binding_revision: 0 });
+    expect(payload.canvas_binding.submission_id).toBe(key);
     expect(typeof key).toBe('string');
     expect(key.length).toBeGreaterThan(0);
 
@@ -366,7 +382,7 @@ describe('IKIZQG 重新生成样片（页面流）', () => {
     const [projectId, jobId, payload] = apiMocks.regenerateSampleJob.mock.calls[0]!;
     expect(projectId).toBe('p1');
     expect(jobId).toBe('9001');
-    expect(payload).toEqual({ expected_credits: 40, quote_revision: 'rev-r1' });
+    expect(payload).toMatchObject({ expected_credits: 40, quote_revision: 'rev-r1', canvas_binding: { protocol_version: 1 } });
 
     await vi.waitFor(() => expect(regenNodeOf()).toBeTruthy());
     const regen = regenNodeOf()!;
@@ -388,6 +404,22 @@ describe('IKIZQG 重新生成样片（页面流）', () => {
     await waitForRegenCta('f1', 'unavailable');
     await clickRegenerate('f1');
     expect(apiMocks.regenerateSampleJob).not.toHaveBeenCalled();
+  });
+
+  it('缺输入阻断：无来源样片关系的成片失败卡不渲染入口（原输入不可信还原 → 保留失败卡，不猜参数提交）', async () => {
+    seedDoc({ final: 'failed' });
+    // 抹掉 sourceSampleJobId：入口身份解析失败 → 无 CTA、不问价、不提交
+    const base = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
+    base.nodes = base.nodes.map((n) =>
+      n.id === 'f1' ? { ...n, data: { ...(n.data as Record<string, unknown>), sourceSampleJobId: undefined } } : n,
+    );
+    await renderPage();
+    await act(async () => {});
+    expect(nodeData('f1').regenerateCta).toBeUndefined();
+    expect(nodeData('f1').onRegenerateSample).toBeUndefined();
+    expect(apiMocks.quoteSampleRegenerate).not.toHaveBeenCalled();
+    // 失败卡原样保留（不因缺入口被改写）
+    expect(nodeData('f1')).toMatchObject({ videoStage: 'final', genStatus: 'failed', chargeState: 'released' });
   });
 
   it('并发点击：至多一次提交（第二次同步忽略）', async () => {
@@ -422,7 +454,7 @@ describe('IKIZQG 重新生成样片（页面流）', () => {
     await clickRegenerate('f1');
     expect(apiMocks.regenerateSampleJob).toHaveBeenCalledTimes(2);
     const [ , , payload2, key2] = apiMocks.regenerateSampleJob.mock.calls[1]!;
-    expect(payload2).toEqual({ expected_credits: 45, quote_revision: 'rev-r2' });
+    expect(payload2).toMatchObject({ expected_credits: 45, quote_revision: 'rev-r2', canvas_binding: { protocol_version: 1 } });
     expect(key2).not.toBe(apiMocks.regenerateSampleJob.mock.calls[0]![3]);
   });
 

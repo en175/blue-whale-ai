@@ -211,9 +211,7 @@ import {
   cancelGenerationJob,
   retryGenerationJob,
   fetchJobStatus,
-  finalizeVideoJob,
   quoteVideoFinalize,
-  regenerateSampleJob,
   quoteSampleRegenerate,
   createImageEnhancement,
   createImageErase,
@@ -274,6 +272,7 @@ import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
 import { normalGenerationTask, isNormalGenerationCard } from './generationRuntime/normalGeneration';
+import { storyboardTask, type StoryboardPayload } from './generationRuntime/storyboardTasks';
 import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
 import { putCanvasDocWithRecovery, type CanvasRecoverySaveData } from '@/api/canvasRecovery';
 import { defaultProjectName } from '@/lib/projectName';
@@ -503,9 +502,6 @@ export default function CanvasPage() {
   const audioMixCreateAttemptRef = useRef<{ projectId: string; payload: string; key: string } | null>(null);
   const audioMixRetryInFlightRef = useRef(new Set<string>());
   const audioMixRetryKeysRef = useRef(new Map<string, string>());
-  /** 建任务的幂等键台账（见 submitIntentKeys）：scope 是提交位——原位重跑取目标卡 id，
-   *  自由生成（无目标卡）取空串这一个共享位；签名是本次载荷，载荷变了即换新钥匙。 */
-  const jobSubmitKeysRef = useRef(createSubmitIntentKeys());
   /** 失败重试（retry 接口）的幂等键台账：scope 取卡片 id，签名取被重试的那个任务 id——
    *  同一张失败卡上「响应丢了再点一次」复用同一把；受理成功后换新任务 id，天然另起一把。 */
   const jobRetryKeysRef = useRef(createSubmitIntentKeys());
@@ -5948,15 +5944,78 @@ export default function CanvasPage() {
     tick();
   };
 
-  /** ═══ IKIZQE 成片（finalize）提交链路 ═══
+  /** ═══ IKJJR6 成片/重生样片迁入统一任务运行时：共享提交助手 ═══
+   *  两入口错误收敛同口径（IKIZQE/IKIZQG 原链路语义保持）：服务端已回答（信封错误）→
+   *  撤占位卡，1014 置「状态核对中」禁点，其余 toast + 删报价 entry 触发重报价；
+   *  传输结果不明（408/网络）→ 同意图（同 submission_id，运行时提交窗口）原样重发一次
+   *  ——服务端重放首次结果（只建一个 job、只扣一次钱）；仍不明 → 撤卡 + 核对中禁点
+   *  （刷新后以报价端点恢复一致状态；重生样片另经恢复扫描对账补卡）。
+   *  提交/受理/轮询/终态的归属检查、幂等键（submission_id）与台账在运行时。 */
+  const submitStoryboardTask = (
+    payload: StoryboardPayload,
+    target: { targetNodeId: string; seedTarget: RecoverySeedTarget },
+    ui: {
+      removePlaceholder: () => void;
+      markUnknown: () => void;
+      refreshQuote: () => void;
+      unknownToast: string;
+      /** 本次意图失败收敛（受理前置失败，含将重发）：释放页面同步提交窗口 */
+      onFailure: () => void;
+    },
+  ): boolean => {
+    const runtime = generationRuntimeRef.current;
+    if (!runtime) return false;
+    const dispatch = (retryUnknown: boolean): boolean => runtime.submit(
+      storyboardTask,
+      {
+        payload,
+        target: {
+          targetNodeId: target.targetNodeId,
+          seedTarget: target.seedTarget,
+          seedSources: [],
+          expectedBindingRevision: runtime.bindingRevisionOf(target.targetNodeId),
+        },
+      },
+      {
+        onCreateFailure: (e: unknown): boolean => {
+          ui.onFailure();
+          if (isApiError(e) && e.status !== 408 && e.status !== 0) {
+            // 服务端已回答（信封错误）：占位卡撤回，按钮状态交还报价/截止推导
+            ui.removePlaceholder();
+            if (Number(e.code) === 1014) {
+              // 上次提交结果不明、核对锁定期间——保持禁点（状态核对中）
+              ui.markUnknown();
+              showToast('warn', e.message);
+              return true;
+            }
+            showToast('error', e.message);
+            ui.refreshQuote();
+            return true;
+          }
+          if (retryUnknown) {
+            // 传输结果不明（408 超时/网络失败）：同意图原样重发一次（受理/失败各自收敛，
+            // 不再递归重试）
+            window.setTimeout(() => dispatch(false), 0);
+            return true;
+          }
+          // 仍不明：占位卡撤回（无可核实任务），入口「状态核对中」禁点
+          ui.removePlaceholder();
+          ui.markUnknown();
+          showToast('warn', ui.unknownToast);
+          return true;
+        },
+      },
+    );
+    return dispatch(true);
+  };
+
+  /** ═══ IKIZQE 成片（finalize）提交链路（IKJJR6 迁入统一任务运行时） ═══
    *  唯一入口 = 样片卡标题行「生成 1080P 成片」：报价就绪（服务端门——空报价双 null 即
    *  禁用）+ 截止有效才可点；点击直接提交无二次确认。提交即在样片卡右侧 +60px 建关联
-   *  成片占位卡（videoStage=final + sourceSampleJobId 两卡关系），受理后回填 jobId 走
-   *  既有轮询（final 阶段投影由 applyJobTerminal 回填）。
-   *  并发/重复防线：inflight ref 同步挡住双击与两页并发（服务端来源唯一约束 1057 兜底）。
-   *  错误收敛（silent 传输、本处统一提示一次）：1056 变价 → 重报价后再由用户点击；
-   *  1057/1058 → 重报价折空报价禁用；1014 → 「状态核对中」禁点；传输结果不明（408/网络）
-   *  → 同幂等键原样重发一次（服务端重放首次结果，不双扣），仍不明 → 状态核对中禁点。 */
+   *  成片占位卡（videoStage=final + sourceSampleJobId 两卡关系），runtime.submit 受理后
+   *  回填 jobId 并接管轮询/终态（final 阶段投影由 applyJobTerminal 回填）。成片端点契约
+   *  不收 canvas_binding——按历史兼容任务追踪（水合 jobId 续轮询）。
+   *  并发/重复防线：inflight ref 同步挡住双击与两页并发（服务端来源唯一约束 1057 兜底）。 */
   const handleFinalizeSample = (sampleNodeId: string): boolean => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法生成成片');
@@ -6013,22 +6072,10 @@ export default function CanvasPage() {
     setMediaNodes(mediaNodesRef.current);
     if (currentId) void flushCanvasSave(currentId).catch(() => {});
 
-    const scope = `finalize:${sampleJobId}`;
-    const signature = JSON.stringify({ expected_credits: quote.credits, quote_revision: quote.revision });
-    /** 一次用户意图一把（submitIntentKeys 台账）：响应丢失原样重发复用同键 → 服务端重放 */
-    const idempotencyKey = jobSubmitKeysRef.current.keyFor(scope, signature);
-    const send = () => finalizeVideoJob(
-      currentId,
-      sampleJobId,
-      { expected_credits: quote.credits, quote_revision: quote.revision },
-      idempotencyKey,
-      { silent: true },
-    );
     const clearSubmitting = () => {
       finalizeInflightRef.current.delete(sampleNodeId);
     };
     const removePlaceholder = () => {
-      stopJobPolling(finalNodeId, jobTimersRef.current);
       mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== finalNodeId);
       setMediaNodes(mediaNodesRef.current);
       if (currentId) void flushCanvasSave(currentId).catch(() => {});
@@ -6045,54 +6092,49 @@ export default function CanvasPage() {
         return next;
       });
     };
-    send()
-      .then((created) => {
-        // 任务已受理：这次意图到此为止，之后要再提交需另起一把钥匙
-        jobSubmitKeysRef.current.settle(scope);
-        finalizeAttemptedJobIdsRef.current.add(sampleJobId);
-        clearSubmitting();
-        if (!mediaNodesRef.current.some((n) => n.id === finalNodeId)) return; // 卡已被删：不复活
-        patchMediaNode(finalNodeId, { jobId: created.generation_job_id });
-        pollJob(finalNodeId, created.generation_job_id);
-        if (currentId) void flushCanvasSave(currentId).catch(() => {});
-        showToast('success', `已提交成片生成，预计消耗 ${quote.credits} 积分`);
-      })
-      .catch(async (e: unknown) => {
-        clearSubmitting();
-        if (isApiError(e) && e.status !== 408 && e.status !== 0) {
-          // 服务端已回答（信封错误）：占位卡撤回，按钮状态交还报价/截止推导
-          removePlaceholder();
-          if (Number(e.code) === 1014) {
-            // 上次提交结果不明、核对锁定期间——保持禁点（状态核对中）
-            markUnknown();
-            showToast('warn', e.message);
-            return;
-          }
-          showToast('error', e.message);
-          refreshQuote();
-          return;
-        }
-        // 传输结果不明（408 超时 / 网络失败）：同幂等键原样重发一次——服务端重放首次
-        // 结果（只建一个 job、只扣一次钱）；重发受理/失败各自收敛，不再递归重试。
-        try {
-          const created = await send();
-          jobSubmitKeysRef.current.settle(scope);
+    const dispatched = submitStoryboardTask(
+      {
+        kind: 'finalize',
+        sampleJobId,
+        expectedCredits: quote.credits,
+        quoteRevision: quote.revision,
+        // 受理成功收敛（runtime 在 create resolve 内回调，先于 jobId 回填）：
+        // 登记本会话已受理 + 受理后立即落盘 jobId（宏任务排在 patch 之后）+ 成功提示
+        onAccepted: () => {
           finalizeAttemptedJobIdsRef.current.add(sampleJobId);
-          if (mediaNodesRef.current.some((n) => n.id === finalNodeId)) {
-            patchMediaNode(finalNodeId, { jobId: created.generation_job_id });
-            pollJob(finalNodeId, created.generation_job_id);
+          clearSubmitting();
+          window.setTimeout(() => {
             if (currentId) void flushCanvasSave(currentId).catch(() => {});
-          }
+          }, 0);
           showToast('success', `已提交成片生成，预计消耗 ${quote.credits} 积分`);
-        } catch {
-          // 仍不明：占位卡撤回（无可核实任务），样片按钮「状态核对中」禁点——刷新后以
-          // 报价端点（已尝试 → 空报价禁用）恢复与服务端一致的状态。
-          removePlaceholder();
-          markUnknown();
-          showToast('warn', '无法确认成片任务是否已提交，状态核对中，请勿重复提交');
-        }
-      });
-    return true;
+        },
+      },
+      {
+        targetNodeId: finalNodeId,
+        seedTarget: {
+          role: 'result-placeholder',
+          x: Math.round(sample.position.x + box.width + 60),
+          y: Math.round(sample.position.y),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          name: '成片生成中',
+        },
+      },
+      {
+        removePlaceholder,
+        markUnknown,
+        refreshQuote,
+        unknownToast: '无法确认成片任务是否已提交，状态核对中，请勿重复提交',
+        onFailure: clearSubmitting,
+      },
+    );
+    if (!dispatched) {
+      // 运行时未发出（未就绪/防重入）：撤占位卡并释放提交窗口，状态交还报价推导
+      clearSubmitting();
+      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== finalNodeId);
+      setMediaNodes(mediaNodesRef.current);
+    }
+    return dispatched;
   };
 
   /** IKIZQE：成片报价获取——成功样片卡（无成片卡在场、截止有效、未受理过）进 CTA 前先问价。
@@ -6149,16 +6191,15 @@ export default function CanvasPage() {
     return null;
   };
 
-  /** ═══ IKIZQG 重新生成样片（regenerate-sample）提交链路 ═══
+  /** ═══ IKIZQG 重新生成样片（regenerate-sample）提交链路（IKJJR6 迁入统一任务运行时） ═══
    *  入口：成片失败卡失败区（IKJ7UI 起改形为同款「重试」按钮）。报价就绪（服务端门
    *  ——空报价双 null 即禁用）才可点；点击直接提交，服务端从原样片**冻结输入**派生新
    *  任务——**创建新卡不覆盖旧结果**（旧样片/失败成片/费用记录只读不写）。提交即在入口
    *  卡正下方 +60px 建样片占位卡（videoStage=sample；避开 finalize 在样片右侧 +60px 的
-   *  落位），受理后回填 jobId 走既有轮询（sample 阶段投影由 applyJobTerminal 回填，新
-   *  样片有自己的截止与成片入口）。并发/重复防线：inflight ref 按**样片任务 id**归并。
-   *  错误收敛（口径同 finalize）：1056 变价 → 重报价后再由用户点击（新报价 = 新签名换新
-   *  幂等键，不撞同键变价 100409）；1014 → 「状态核对中」禁点；传输结果不明（408/网络）
-   *  → 同幂等键原样重发一次（服务端重放首次结果），仍不明 → 状态核对中。 */
+   *  落位），runtime.submit 以新占位卡为承接目标携 canvas_binding 受理（Idempotency-Key =
+   *  submission_id），受理后回填 jobId 并接管轮询/终态（sample 阶段投影由 applyJobTerminal
+   *  回填，新样片有自己的截止与成片入口）；受理回执丢失经恢复扫描对账补卡。
+   *  并发/重复防线：inflight ref 按**样片任务 id** 归并。 */
   const handleRegenerateSample = (entryNodeId: string): boolean => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法重新生成样片');
@@ -6203,23 +6244,10 @@ export default function CanvasPage() {
     setMediaNodes(mediaNodesRef.current);
     if (currentId) void flushCanvasSave(currentId).catch(() => {});
 
-    const scope = `regen:${sampleJobId}`;
-    const signature = JSON.stringify({ expected_credits: quote.credits, quote_revision: quote.revision });
-    /** 一次用户意图一把（submitIntentKeys 台账）：响应丢失原样重发复用同键 → 服务端重放；
-     *  变价重报价后签名变化自然换新键（不撞同键变价 100409）。 */
-    const idempotencyKey = jobSubmitKeysRef.current.keyFor(scope, signature);
-    const send = () => regenerateSampleJob(
-      currentId,
-      sampleJobId,
-      { expected_credits: quote.credits, quote_revision: quote.revision },
-      idempotencyKey,
-      { silent: true },
-    );
     const clearSubmitting = () => {
       sampleRegenInflightRef.current.delete(sampleJobId);
     };
     const removePlaceholder = () => {
-      stopJobPolling(regenNodeId, jobTimersRef.current);
       mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== regenNodeId);
       setMediaNodes(mediaNodesRef.current);
       if (currentId) void flushCanvasSave(currentId).catch(() => {});
@@ -6227,7 +6255,8 @@ export default function CanvasPage() {
     const markUnknown = () => {
       setSampleRegenUnknownSamples((prev) => new Set(prev).add(sampleJobId));
     };
-    /** 报价重取：删 entry 触发报价 effect 重查（1056 变价 → 新价可见后再由用户点击） */
+    /** 报价重取：删 entry 触发报价 effect 重查（1056 变价 → 新价可见后再由用户点击；
+     *  新报价 = 新签名换新 submission_id，不撞同键变价 100409） */
     const refreshQuote = () => {
       setSampleRegenQuotes((prev) => {
         if (!(sampleJobId in prev)) return prev;
@@ -6236,52 +6265,49 @@ export default function CanvasPage() {
         return next;
       });
     };
-    send()
-      .then((created) => {
-        jobSubmitKeysRef.current.settle(scope);
-        sampleRegenAttemptedJobIdsRef.current.add(sampleJobId);
-        clearSubmitting();
-        if (!mediaNodesRef.current.some((n) => n.id === regenNodeId)) return; // 卡已被删：不复活
-        patchMediaNode(regenNodeId, { jobId: created.generation_job_id });
-        pollJob(regenNodeId, created.generation_job_id);
-        if (currentId) void flushCanvasSave(currentId).catch(() => {});
-        showToast('success', `已提交样片重新生成，预计消耗 ${quote.credits} 积分；已创建新卡，旧结果保留`);
-      })
-      .catch(async (e: unknown) => {
-        clearSubmitting();
-        if (isApiError(e) && e.status !== 408 && e.status !== 0) {
-          // 服务端已回答（信封错误）：占位卡撤回，入口状态交还报价推导
-          removePlaceholder();
-          if (Number(e.code) === 1014) {
-            markUnknown();
-            showToast('warn', e.message);
-            return;
-          }
-          showToast('error', e.message);
-          refreshQuote();
-          return;
-        }
-        // 传输结果不明（408 超时 / 网络失败）：同幂等键原样重发一次——服务端重放首次结果
-        //（只建一个 job、只扣一次钱）；重发受理/失败各自收敛，不再递归重试。
-        try {
-          const created = await send();
-          jobSubmitKeysRef.current.settle(scope);
+    const dispatched = submitStoryboardTask(
+      {
+        kind: 'regenerate-sample',
+        sampleJobId,
+        expectedCredits: quote.credits,
+        quoteRevision: quote.revision,
+        // 受理成功收敛（runtime 在 create resolve 内回调，先于 jobId 回填）：
+        // 登记本会话已受理 + 受理后立即落盘 jobId（宏任务排在 patch 之后）+ 成功提示
+        onAccepted: () => {
           sampleRegenAttemptedJobIdsRef.current.add(sampleJobId);
-          if (mediaNodesRef.current.some((n) => n.id === regenNodeId)) {
-            patchMediaNode(regenNodeId, { jobId: created.generation_job_id });
-            pollJob(regenNodeId, created.generation_job_id);
+          clearSubmitting();
+          window.setTimeout(() => {
             if (currentId) void flushCanvasSave(currentId).catch(() => {});
-          }
+          }, 0);
           showToast('success', `已提交样片重新生成，预计消耗 ${quote.credits} 积分；已创建新卡，旧结果保留`);
-        } catch {
-          // 仍不明：占位卡撤回（无可核实任务），入口「状态核对中」禁点——刷新后以报价
-          // 重查恢复与服务端一致的状态。
-          removePlaceholder();
-          markUnknown();
-          showToast('warn', '无法确认重新生成任务是否已提交，状态核对中，请勿重复提交');
-        }
-      });
-    return true;
+        },
+      },
+      {
+        targetNodeId: regenNodeId,
+        seedTarget: {
+          role: 'result-placeholder',
+          x: Math.round(origin.position.x),
+          y: Math.round(origin.position.y + box.height + 60),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          name: '样片生成中',
+        },
+      },
+      {
+        removePlaceholder,
+        markUnknown,
+        refreshQuote,
+        unknownToast: '无法确认重新生成任务是否已提交，状态核对中，请勿重复提交',
+        onFailure: clearSubmitting,
+      },
+    );
+    if (!dispatched) {
+      // 运行时未发出（未就绪/防重入）：撤占位卡并释放提交窗口，状态交还报价推导
+      clearSubmitting();
+      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== regenNodeId);
+      setMediaNodes(mediaNodesRef.current);
+    }
+    return dispatched;
   };
 
   /** IKIZQG：重新生成报价获取——入口卡（成片失败卡，IKJ7UI 起）进 CTA 前先问价（按
@@ -9294,6 +9320,7 @@ export default function CanvasPage() {
     });
     const runtime = createGenerationRuntime(forwardHost);
     runtime.register(normalGenerationTask);
+    runtime.register(storyboardTask); // IKJJR6：成片/重生样片提交差异定义（卡片生命周期归 normalGeneration）
     generationRuntimeRef.current = runtime;
   }
 
