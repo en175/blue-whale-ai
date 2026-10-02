@@ -293,6 +293,10 @@ Kimi 运行 `scripts/install-kimi-hooks.sh` 幂等更新已有 managed block；�
 
 子代理工具与上下文继承必须实际确认；不能查询的子代理由父代理传入规则及证据。恢复或切换目录后按协议重新核验 project，不假定客户端会触发 CwdChanged。
 
+### 五端验收
+
+每端分别记录配置检查、上下文实际注入、Agent 实际查询三层结果。覆盖：首次只读探索、worktree 切换、子代理能力/交接、失败或覆盖不足降级、无关仓库静默。普通 Read/编辑/日志检索不应被阻断。客户端不存在、未认证或不支持事件时标注具体未验证项，禁止记为通过。
+
 自动验证：`python3 -m unittest scripts.tests.test_cbm_context`、`python3 scripts/check-hook-contracts.py`（完整 TOML 检查需 Python 3.11+）。测试验证提醒载荷、隔离与不阻断；客户端验收另需真实会话的输入和调用记录，不能以测试通过代替。
 
 官方参考：[Kimi Hooks](https://moonshotai.github.io/kimi-code/en/customization/hooks)、[Qoder Hooks](https://docs.qoder.com/cli/hooks)、[CBM](https://github.com/DeusData/codebase-memory-mcp)。版本差异以本机实测为准。
