@@ -23,15 +23,17 @@ import {
 
 import type { BillingQuote } from "../billing/billing-quote.js";
 import {
+  resolveReferenceDurations,
+  videoAssetIdsNeedingDuration,
+} from "./resolve-reference-durations.js";
+import {
   applyEditSourceDurationBasis,
   canonicalJson,
   projectQuoteInput,
   resolveTextIndexReferences,
   ruleSampleMode,
-  withVideoReferenceDurations,
   type CreateGenerationJobBody,
   type GenerationType,
-  type ReferenceItemInput,
   serializePricingRule,
 } from "./handle-create-generation-job.js";
 
@@ -163,30 +165,21 @@ export async function handleQuoteGenerationJob(
     });
     if (!textIndexRefs.ok) return ok(EMPTY_QUOTE);
     if (textIndexRefs.value.videoReferences) {
-      let merged: ReferenceItemInput[] = textIndexRefs.value.videoReferences;
-      // 时长回填与建任务同源（assets.duration 权威，文本带入项不带时长）：量不到就保持
-      // 原样，编辑口径按「量不到源时长」回落用户所选（applyEditSourceDurationBasis 立场）。
-      const idsNeedingDuration = [
-        ...new Set(
-          merged
-            .filter(
-              (item) =>
-                item.type === "video" && item.asset_id !== undefined && item.duration === undefined,
-            )
-            .map((item) => String(item.asset_id)),
-        ),
-      ];
-      if (idsNeedingDuration.length > 0) {
-        const resolved = await deps.assets.resolveInputAssets(idsNeedingDuration, userId, projectId);
-        // 数不齐（素材缺失/无权——建任务侧会 400）不按残缺映射猜：整个不回填，回落旧口径。
-        if (resolved.length === idsNeedingDuration.length) {
-          const secondsByAssetId = new Map(
-            idsNeedingDuration.map((id, i) => [id, resolved[i]!.duration]),
-          );
-          merged = withVideoReferenceDurations(merged, secondsByAssetId);
-        }
-      }
-      effectiveBody = { ...body, references: merged };
+      // IKJIVA：时长回填管线与建任务单份同源（resolve-reference-durations）；本侧差异只有：
+      // 筛选面=缺时长视频（最小查询谓词）、shortfall 不回填——用合并后原样 references 出价
+      // （合并不丢），编辑口径按「量不到源时长」回落用户所选（applyEditSourceDurationBasis 立场）。
+      const merged = textIndexRefs.value.videoReferences;
+      const ruling = await resolveReferenceDurations({
+        references: merged,
+        assetIdsOf: videoAssetIdsNeedingDuration,
+        userId,
+        projectId,
+        assets: deps.assets,
+      });
+      effectiveBody = {
+        ...body,
+        references: ruling.kind === "resolved" ? ruling.references : merged,
+      };
     }
   }
 

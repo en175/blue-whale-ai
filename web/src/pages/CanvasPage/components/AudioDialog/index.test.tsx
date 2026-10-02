@@ -64,6 +64,7 @@ interface MountProps {
   onRemoveAttachment?: ReturnType<typeof vi.fn>;
   onMentionCanvas?: ReturnType<typeof vi.fn>;
   readOnly?: boolean;
+  projectId?: string;
 }
 
 async function renderDialog(props: MountProps = {}) {
@@ -81,6 +82,7 @@ async function renderDialog(props: MountProps = {}) {
                     onSend: () => {},
                     canvasMedia: [],
                     externalPick: { ts: 1, item: CANVAS_REF },
+                    ...(props.projectId ? { projectId: props.projectId } : {}),
                     attachments: props.attachments,
                     onRemoveAttachment: props.onRemoveAttachment,
                     mentionItems: props.onMentionCanvas ? ([] as AtMentionItem[]) : undefined,
@@ -514,5 +516,25 @@ describe('IKFR51 音频文本参考', () => {
     await clickLabel('严格模型');
     await clickLabel('测试音频模型');
     expect(send.disabled).toBe(false);
+  });
+});
+
+/* IKJIVN：音频面板报价请求不携带 target_node_id——草稿目标合并是视频端契约
+ * （IKJGE6），非视频端不进入该逻辑，报价行为同旧（面板不传目标，Badge 不带键）。 */
+describe('IKJIVN 音频面板报价不带 target_node_id', () => {
+  it('报价请求体为音频定价维度，且无 target_node_id 键', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: 200, msg: null, data: { credits: 3 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await renderDialog({ projectId: 'p1' });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.type).toBe('audio');
+    expect(body).not.toHaveProperty('target_node_id');
+    vi.unstubAllGlobals();
   });
 });
