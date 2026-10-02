@@ -82,13 +82,14 @@ import {
   audioTrimTerminalPatch,
   buildAudioTrimPlaceholderNode,
   isAudioTrimNodeId,
-  type AudioTrimFormat,
   type AudioTrimIdentity,
 } from './audioTrim';
 import type { AudioTrimSelection } from './audioTrimGeometry';
 import {
-  buildAudioTrimInput,
-  defaultAudioTrimOutputFormat,
+  createAudioTrimSession, createAudioSpeedSession, createVocalSplitSession,
+  type VocalSplitPayload, type AudioSpeedSessionHost, type AudioToolSessionHost, type AudioToolSubmission,
+} from './audioToolSessions';
+import {
   type AudioTrimInput,
 } from '@lib/contracts/audio-trim';
 import AudioTrimBar from './components/AudioTrimBar';
@@ -116,7 +117,7 @@ import {
   isAudioSpeedNodeId,
   type AudioSpeedIdentity,
 } from './audioSpeed';
-import { buildAudioSpeedInput, type AudioSpeedInput } from '@lib/contracts/audio-speed';
+import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import AudioSpeedBar from './components/AudioSpeedBar';
 import {
   AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON,
@@ -147,9 +148,7 @@ import {
   vocalSplitNodeId,
   vocalSplitSourceName,
   vocalSplitTerminalPatch,
-  type VocalSplitFormat,
   type VocalSplitIdentity,
-  type VocalSplitScene,
 } from './vocalSplit';
 import {
   SCENE_SPLIT_DEFAULT_GRANULARITY,
@@ -743,11 +742,17 @@ export default function CanvasPage() {
   const subtitleEraseLiveBoxRef = useRef<SubtitleBoxOp | null>(null);
   /** 去字幕发送中（创建请求飞行期防重复提交，口径同 eraseSubmitting） */
   const [subtitleEraseSubmitting, setSubtitleEraseSubmitting] = useState(false);
+  const vocalSplitHostRef = useRef<AudioToolSessionHost<VocalSplitPayload> | null>(null);
+  const audioSpeedHostRef = useRef<AudioSpeedSessionHost | null>(null);
+  const audioTrimHostRef = useRef<AudioToolSessionHost<AudioTrimInput> | null>(null);
   const audioVideoSplitHostRef = useRef<AudioVideoSplitHost | null>(null);
-  const [{ toolRuntime, audioVideoSplitSession }] = useState(() => {
+  const [{ toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession }] = useState(() => {
     const toolRuntime = createToolSessionRuntime();
     const audioVideoSplitSession = toolRuntime.register(createAudioVideoSplitSession(() => audioVideoSplitHostRef.current!));
-    return { toolRuntime, audioVideoSplitSession };
+    const audioTrimSession = toolRuntime.register(createAudioTrimSession(() => audioTrimHostRef.current!));
+    const audioSpeedSession = toolRuntime.register(createAudioSpeedSession(() => audioSpeedHostRef.current!));
+    const vocalSplitSession = toolRuntime.register(createVocalSplitSession(() => vocalSplitHostRef.current!));
+    return { toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession };
   });
   // 项目首帧先使旧响应失效，随后从运行时读取唯一状态。
   toolRuntime.setProject(currentId);
@@ -756,20 +761,11 @@ export default function CanvasPage() {
   const audioVideoSplitTargetNodeId = audioVideoSplitView.state?.nodeId ?? null;
   const audioVideoSplitFormat = audioVideoSplitView.state?.format ?? AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT;
   const audioVideoSplitSubmitting = audioVideoSplitView.submitting;
-  /** 音频截取编辑态（IKHB7A，父单 IKHB08）：处于截取会话的源音频卡 node id，null=未进入。
-   *  进入即暂停+播放头归零+默认全选（MediaNode trimEditing 注入承担暂停/归零，波形区叠加
-   *  截取遮罩四件套）；下方发送条（AudioTrimBar）实时联动选区时间范围。未发送退出
-   *  （X/Esc/点其他卡/点画布空白）不建任务不建卡。 */
-  const [audioTrimTargetNodeId, setAudioTrimTargetNodeId] = useState<string | null>(null);
-  /** 截取选区（秒，内部全精度；遮罩几何与发送参数唯一数据源）：默认全选 0 到全长，
-   *  抓手拖拽实时更新（audioTrimGeometry 钳制在遮罩层完成后再上抛）。 */
-  const [audioTrimSelection, setAudioTrimSelection] = useState<AudioTrimSelection | null>(null);
-  /** 截取输出格式（会话期交互态）：默认跟随源音频格式（契约 defaultAudioTrimOutputFormat，
-   *  源格式不在枚举回退 m4a），进入编辑态每次重置、不跨会话记忆；发送时随任务冻结进
-   *  占位卡身份（audioTrim.lastInput），失败重试按冻结参数原样重发。 */
-  const [audioTrimFormat, setAudioTrimFormat] = useState<AudioTrimFormat>('m4a');
-  /** 截取发送中（创建请求飞行期防重复提交，口径同 audioVideoSplitSubmitting） */
-  const [audioTrimSubmitting, setAudioTrimSubmitting] = useState(false);
+  const audioTrimView = audioTrimSession.getSnapshot();
+  const audioTrimTargetNodeId = audioTrimView.state?.nodeId ?? null;
+  const audioTrimSelection = audioTrimView.state?.selection ?? null;
+  const audioTrimFormat = audioTrimView.state?.format ?? 'm4a';
+  const audioTrimSubmitting = audioTrimView.submitting;
   const [audioMixSourceNodeId, setAudioMixSourceNodeId] = useState<string | null>(null);
   const [audioMixSelectedInputs, setAudioMixSelectedInputs] = useState<AudioMixInputSelection[]>([]);
   const [audioMixFormat, setAudioMixFormat] = useState<AudioMixFormat>('mp3');
@@ -810,17 +806,10 @@ export default function CanvasPage() {
   const audioMixUnpersistedCardsRef = useRef(new Set<string>());
   const audioMixFirstSaveRef = useRef(new Map<string, Promise<boolean>>());
   const audioMixDeleteWaitingRef = useRef(new Set<string>());
-  /** 音频调速编辑态（IKHW5C 骨架 / IKHW5S 闭环，父单 IKHVYO）：处于调速会话的源音频卡
-   *  node id，null=未进入。进入即暂停+播放头归零（speedEditing 注入由 AudioPlayer 承担），
-   *  源卡悬浮工具条随会话模态（editSessionActive）隐藏；四路退出（X/Esc/点其他卡/
-   *  点画布空白）不建任务不建卡，退出标记移除音频恢复 1.0 倍速与源时长显示。 */
-  const [audioSpeedTargetNodeId, setAudioSpeedTargetNodeId] = useState<string | null>(null);
-  /** 调速倍速（会话期交互态，滑杆受控值）：进入编辑态每次重置 1.0（无跨会话记忆，
-   *  用户故事 16），滑杆拖动实时回写（试听 playbackRate 与时间行折算联动）；发送时随
-   *  任务冻结进占位卡身份（audioSpeed.lastInput），失败重试按冻结参数原样重发。 */
-  const [audioSpeedSpeed, setAudioSpeedSpeed] = useState(1);
-  /** 调速发送中（创建请求飞行期防重复提交，口径同 audioTrimSubmitting） */
-  const [audioSpeedSubmitting, setAudioSpeedSubmitting] = useState(false);
+  const audioSpeedView = audioSpeedSession.getSnapshot();
+  const audioSpeedTargetNodeId = audioSpeedView.state?.nodeId ?? null;
+  const audioSpeedSpeed = audioSpeedView.state?.speed ?? 1;
+  const audioSpeedSubmitting = audioSpeedView.submitting;
   /** 音视频合成会话（IKIHPK，父规格 IKIHMX / ADR-0115）：处于会话的合成草稿卡 node id，
    *  null=未进入。点工具条「音视频合成」即建卡进入（草稿卡从创建起即视频型并标注
    *  「音视频合成」，与源音频卡默认连 origin=audio-video-mux 音频输入线），面板跟随
@@ -840,27 +829,13 @@ export default function CanvasPage() {
   const audioVideoMuxRetryKeysRef = useRef(new Map<string, string>());
   /** 尚未迁移的工具借用运行时的唯一纪元实例。 */
   const toolSessionEpochRef = useRef(toolRuntime.epoch);
-  useEffect(() => {
-    setAudioSpeedTargetNodeId(null);
-    setAudioSpeedSpeed(1);
-    setAudioSpeedSubmitting(false);
-  }, [currentId]);
 
-  /** 人声背景分离编辑态（IKHA2W，会话口径同音视频分离）：处于人声背景分离编辑的源视频卡
-   *  node id，null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
-   *  卡下方浮出单条（X/场景下拉/格式下拉/本期免费/发送钮，VocalSplitDialog，单条化对齐抠图/去字幕先例）。
-   *  发送按所选场景与格式建任务与音频占位卡；未发送退出（X/Esc/点其他卡/点画布空白）
-   *  不建任务不建卡。 */
-  const [vocalSplitTargetNodeId, setVocalSplitTargetNodeId] = useState<string | null>(null);
-  /** 分离场景（IKHA2W，会话期交互态）：发送条下拉选择，通用（audio）默认。场景不跨会话
-   *  记忆——进入编辑态重置、退出复位（exitVocalSplitEditing）；发送时随任务冻结进占位卡
-   *  身份（vocalSplit.lastInput），失败重试按冻结参数原样重发。 */
-  const [vocalSplitScene, setVocalSplitScene] = useState<VocalSplitScene>(VOCAL_SPLIT_DEFAULT_SESSION_SCENE);
-  /** 分离格式（IKHA2W，会话期交互态）：发送条下拉选择，aac 默认（契约默认值）。格式不跨
-   *  会话记忆——进入编辑态重置、退出复位；发送时随任务冻结进占位卡身份。 */
-  const [vocalSplitFormat, setVocalSplitFormat] = useState<VocalSplitFormat>(VOCAL_SPLIT_DEFAULT_FORMAT);
-  /** 人声背景分离发送中（创建请求飞行期防重复提交，口径同 audioVideoSplitSubmitting） */
-  const [vocalSplitSubmitting, setVocalSplitSubmitting] = useState(false);
+
+  const vocalSplitView = vocalSplitSession.getSnapshot();
+  const vocalSplitTargetNodeId = vocalSplitView.state?.nodeId ?? null;
+  const vocalSplitScene = vocalSplitView.state?.scene ?? VOCAL_SPLIT_DEFAULT_SESSION_SCENE;
+  const vocalSplitFormat = vocalSplitView.state?.format ?? VOCAL_SPLIT_DEFAULT_FORMAT;
+  const vocalSplitSubmitting = vocalSplitView.submitting;
   /** 场景切分编辑会话（IKH8BR，第七工具会话）：处于场景切分编辑的源视频卡 node id，
    *  null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
    *  卡下方浮出单条（X/标题/粒度三档/⚡0/发送，SceneSplitDialog）；发送先退会话再建
@@ -4225,10 +4200,7 @@ export default function CanvasPage() {
       crop: cropTargetNodeId,
       outpaint: outpaintNodeId,
       subtitleErase: subtitleEraseTargetNodeId,
-      audioTrim: audioTrimTargetNodeId,
       audioMix: audioMixSourceNodeId,
-      audioSpeed: audioSpeedTargetNodeId,
-      vocalSplit: vocalSplitTargetNodeId,
       sceneSplit: sceneSplitTargetNodeId,
       smartMatting: smartMattingTargetNodeId,
       audioVideoMux: audioVideoMuxDraftId,
@@ -4239,10 +4211,7 @@ export default function CanvasPage() {
       crop: exitCropMode,
       outpaint: endOutpaintSession,
       subtitleErase: exitSubtitleEraseEditing,
-      audioTrim: exitAudioTrimEditing,
       audioMix: exitAudioMixEditing,
-      audioSpeed: exitAudioSpeedEditing,
-      vocalSplit: exitVocalSplitEditing,
       sceneSplit: exitSceneSplitEditing,
       smartMatting: exitSmartMattingEditing,
       audioVideoMux: exitAudioVideoMuxEditing,
@@ -4945,27 +4914,11 @@ export default function CanvasPage() {
     toolRuntime.reconcileSources(new Set(mediaNodes.map((node) => node.id)));
   }, [toolRuntime, mediaNodes]);
 
-  /** 截取编辑态绑定清理（IKHB7A）：源音频卡被删除时退出截取会话（防遮罩与发送条悬挂），
-   *  未发送选区一并丢弃 */
-  useEffect(() => {
-    if (!audioTrimTargetNodeId) return;
-    if (!mediaNodes.some((n) => n.id === audioTrimTargetNodeId)) exitAudioTrimEditing();
-    // exitAudioTrimEditing 仅引用稳定的 setState，不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioTrimTargetNodeId, mediaNodes]);
   useEffect(() => {
     if (!audioMixSourceNodeId) return;
     if (!mediaNodes.some((node) => node.id === audioMixSourceNodeId)) exitAudioMixEditing();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioMixSourceNodeId, mediaNodes]);
-  /** 调速编辑态绑定清理（IKHW5C）：源音频卡被删除时退出调速会话（防编辑态标记悬挂，
-   *  口径同截取绑定清理） */
-  useEffect(() => {
-    if (!audioSpeedTargetNodeId) return;
-    if (!mediaNodes.some((n) => n.id === audioSpeedTargetNodeId)) exitAudioSpeedEditing();
-    // exitAudioSpeedEditing 仅引用稳定的 setState，不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioSpeedTargetNodeId, mediaNodes]);
   /** 合成会话绑定清理（IKIHPK）：合成草稿卡被删除时退出会话（面板关闭；草稿卡是本会话
    *  的载体，删除即解除固定音频输入线，口径同截取/调速绑定清理） */
   useEffect(() => {
@@ -4974,14 +4927,6 @@ export default function CanvasPage() {
     // exitAudioVideoMuxEditing 仅引用稳定的 setState，不随渲染变化
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioVideoMuxDraftId, mediaNodes]);
-  /** 人声背景分离编辑态绑定清理（IKHA2W）：目标源视频卡被删除时退出编辑态，防浮条悬挂
-   *  （口径同音视频分离绑定清理） */
-  useEffect(() => {
-    if (!vocalSplitTargetNodeId) return;
-    if (!mediaNodes.some((n) => n.id === vocalSplitTargetNodeId)) exitVocalSplitEditing();
-    // exitVocalSplitEditing 仅引用稳定的 setState，不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vocalSplitTargetNodeId, mediaNodes]);
   /** 场景切分编辑会话绑定清理（IKH8BR）：目标源视频卡被删除时退出会话，防浮条悬挂
    *  （口径同去字幕/分离绑定清理） */
   useEffect(() => {
@@ -9999,12 +9944,7 @@ export default function CanvasPage() {
   /** 退出截取编辑态（IKHB7A 四退出共用：发送条 X/Esc/点其他卡/点画布空白）：未发送的
    *  选区全部丢弃（无卡、无边、无任务），会话身份与发送中复位；音频暂停与编辑态标记
    *  随 trimEditing 注入移除自动恢复（MediaNode 承担）。IKI61O：退出即推进纪元。 */
-  const exitAudioTrimEditing = () => {
-    toolSessionEpochRef.current.exit('audioTrim');
-    setAudioTrimTargetNodeId(null);
-    setAudioTrimSelection(null);
-    setAudioTrimSubmitting(false);
-  };
+  const exitAudioTrimEditing = audioTrimSession.close;
 
   /** 退出音频混合会话（四路共用：发送条 X/Esc 公共链/点选其他卡/源卡删除绑定清理）：
    *  未发送的所选输入与格式全部丢弃（无卡、无边、无任务），提交 state 复位——
@@ -10022,12 +9962,7 @@ export default function CanvasPage() {
    *  倍速选择全部丢弃（无卡、无边、无任务），会话身份、倍速（复位 1.0，不跨会话记忆）
    *  与发送中复位；speedEditing 注入移除后 playbackRate 经 AudioPlayer 倍速 effect 恢复
    *  1.0、时间行恢复源时长显示。IKI61O：退出即推进纪元（取代 IKI6EB 专属 ref）。 */
-  const exitAudioSpeedEditing = () => {
-    toolSessionEpochRef.current.exit('audioSpeed');
-    setAudioSpeedTargetNodeId(null);
-    setAudioSpeedSpeed(1);
-    setAudioSpeedSubmitting(false);
-  };
+  const exitAudioSpeedEditing = audioSpeedSession.close;
   /** 退出音视频合成会话（IKIHPK 四退出共用：面板 X/Esc 公共链/点其他卡/点画布空白）：
    *  未发送的草稿卡与两条语义边保留（HD/插帧草稿卡口径——草稿卡是持久工作对象，
    *  不自动清理，可手动删除）；已绑定视频与两组参数随卡持久化，重开面板即恢复。
@@ -10041,13 +9976,7 @@ export default function CanvasPage() {
   /** 退出人声背景分离编辑态（IKHA2W 四退出共用）：会话参数（场景/格式）与发送中复位——
    *  参数不跨会话记忆，未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
    *  自动恢复（MediaNode 承担）。IKI61O：退出即推进纪元。 */
-  const exitVocalSplitEditing = () => {
-    toolSessionEpochRef.current.exit('vocalSplit');
-    setVocalSplitTargetNodeId(null);
-    setVocalSplitScene(VOCAL_SPLIT_DEFAULT_SESSION_SCENE);
-    setVocalSplitFormat(VOCAL_SPLIT_DEFAULT_FORMAT);
-    setVocalSplitSubmitting(false);
-  };
+  const exitVocalSplitEditing = vocalSplitSession.close;
 
   /** 退出场景切分编辑会话（IKH8BR 四退出共用）：会话参数（切分粒度）与发送中复位——
    *  粒度不跨会话记忆（每次进入重置 standard），未发送退出无卡无边无任务；播放控制随
@@ -10164,17 +10093,7 @@ export default function CanvasPage() {
    *  默认全选 0 到全长（trimEditing 注入由 MediaNode 承担暂停/归零）；格式默认跟随
    *  源音频格式（源格式不在枚举回退 m4a），每次进入重置、不跨会话记忆。 */
   const handleNodeTrimAudio = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const duration = typeof data.duration === 'number' ? data.duration : 0;
-    runToolSessionEntry('audioTrim', () => {
-      setAudioTrimSelection({ start: 0, end: duration });
-      setAudioTrimFormat(
-        defaultAudioTrimOutputFormat(typeof data.fileName === 'string' ? data.fileName : ''),
-      );
-      setAudioTrimTargetNodeId(id);
-    });
+    audioTrimSession.open(id, buildToolSessionDeps());
   };
 
   const handleNodeMixAudio = (id: string) => {
@@ -10194,12 +10113,7 @@ export default function CanvasPage() {
    *  播放头归零由 speedEditing 注入承担（AudioPlayer），工具条随会话模态隐藏；倍速
    *  每次进入重置 1.0（发送守卫由发送条 speed===1 置灰承担，不跨会话记忆）。 */
   const handleNodeAudioSpeed = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    runToolSessionEntry('audioSpeed', () => {
-      setAudioSpeedSpeed(1);
-      setAudioSpeedTargetNodeId(id);
-    });
+    audioSpeedSession.open(id, buildToolSessionDeps());
   };
 
   /* ============ 音视频合成（IKIHPK，父规格 IKIHMX / ADR-0115） ============
@@ -10396,13 +10310,7 @@ export default function CanvasPage() {
    *  场景/格式重置默认（通用/aac，不跨会话记忆）；视频随编辑态注入暂停并锁定播放控制
    *  （MediaNode 承担）。 */
   const handleNodeVocalBackgroundSplit = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    runToolSessionEntry('vocalSplit', () => {
-      setVocalSplitScene(VOCAL_SPLIT_DEFAULT_SESSION_SCENE);
-      setVocalSplitFormat(VOCAL_SPLIT_DEFAULT_FORMAT);
-      setVocalSplitTargetNodeId(id);
-    });
+    vocalSplitSession.open(id, buildToolSessionDeps());
   };
 
   /** 场景切分（IKH8BJ 入口 / IKH8BR 编辑会话）：把目标视频卡置为场景切分编辑会话并重置
@@ -10646,190 +10554,126 @@ export default function CanvasPage() {
     error: (message) => showToast('error', message),
   };
 
-  /** 截取任务发送核心（先例 startAudioVideoSplitJob 同构）：按当前选区与所选格式 POST
-   *  audio-trims（payload 形态 = 契约 AudioTrimInput，由契约构造 buildAudioTrimInput 收口
-   *  贴边省略与两位小数）；创建成功后先退
-   *  编辑态再在源音频卡右侧 +60px 建截取占位卡（node id = audio-trim-{job_id}，展示名
-   *  「源名(截取).{格式}」；带 audioTrim 身份——lastInput 供失败重试原样重发）、拉来源边
-   *  （origin=audio-trim，参考推导跳过，源音频不占参考位防参考污染）、启动轮询
-   *  （applyJobTerminal 的截取分支回填成品/失败，时长以火山返回为权威值）、立刻落盘。
- *  创建失败（网络）不建卡不退编辑态（用户可调格式后重发，分离同口径）。
- *  会话纪元（IKI61O）：settle 时纪元已推进（退出/重进/切项目）即迟到响应——仍建卡收尾，
- *  但不退用户当前会话、不向它弹旧失败提示。
- *  错误提示单源（IKI8L4）：创建走 silent 传输（http 层不 toast），失败由本 catch 按
- *  纪元归属提示恰一次——迟到失败全链路静默，当前会话失败恰一条且可重试。 */
-  const startAudioTrimJob = async (
-    sourceNodeId: string,
-    payload: AudioTrimInput,
-    sessionEpoch: number,
-  ): Promise<boolean> => {
-    if (!currentId) {
-      showToast('warn', '未选中项目，无法截取');
-      return false;
-    }
-    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
-    if (!node) {
-      showToast('warn', '源音频卡不存在，无法截取');
-      return false;
-    }
-    try {
-      const created = await createAudioTrim(currentId, payload, { silent: true });
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
-      // 纪元失效（迟到响应）则不退用户当前会话，只收尾建卡
-      if (toolSessionEpochRef.current.isCurrent('audioTrim', sessionEpoch)) exitAudioTrimEditing();
-      const nodeId = audioTrimNodeId(created.job_id);
-      const placeholder = attachCallbacks(
-        buildAudioTrimPlaceholderNode({
-          jobId: created.job_id,
-          outputFormat: payload.output_format,
-          timeParams: { start_time: payload.start_time, end_time: payload.end_time },
-          sourceAssetId: payload.source_asset_id,
-          source: node,
-        }) as Node,
-      );
-      const current = mediaNodesRef.current;
-      const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
-      mediaNodesRef.current = next;
-      setMediaNodes(next);
-      // 连一条源音频 → 截取卡的**来源边**（带 origin 标记）：参考推导跳过，
-      // 避免截取产物再次编辑时把源音频误当参考输入（防参考污染）
-      addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_TRIM_EDGE_ORIGIN });
-      pollJob(nodeId, created.job_id);
-      await flushCanvasSave(currentId).catch(() => {});
-      return true;
-    } catch (e: unknown) {
-      // 迟到失败不打扰用户当前会话（无旧错误提示、不动其提交锁）
-      if (!toolSessionEpochRef.current.isCurrent('audioTrim', sessionEpoch)) return false;
-      showToast('error', isApiError(e) ? e.message : '音频截取任务创建失败，请重试');
-      return false;
-    }
+  /** 截取任务受理后的既有画布交接。 */
+  const handoffAudioTrimTask = async (
+    input: AudioToolSubmission<AudioTrimInput>,
+    created: { job_id: string },
+  ): Promise<void> => {
+    const { projectId, source: node, payload } = input;
+    const sourceNodeId = node.id;
+    const nodeId = audioTrimNodeId(created.job_id);
+    const placeholder = attachCallbacks(
+      buildAudioTrimPlaceholderNode({
+        jobId: created.job_id,
+        outputFormat: payload.output_format,
+        timeParams: { start_time: payload.start_time, end_time: payload.end_time },
+        sourceAssetId: payload.source_asset_id,
+        source: node,
+      }) as Node,
+    );
+    const current = mediaNodesRef.current;
+    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    // 连一条源音频 → 截取卡的**来源边**（带 origin 标记）：参考推导跳过，
+    // 避免截取产物再次编辑时把源音频误当参考输入（防参考污染）
+    addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_TRIM_EDGE_ORIGIN });
+    pollJob(nodeId, created.job_id);
+    await flushCanvasSave(projectId).catch(() => {});
+  };
+  audioTrimHostRef.current = {
+    getProjectId: () => currentId,
+    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+    createTask: ({ projectId, payload }) => createAudioTrim(projectId, payload, { silent: true }),
+    handoff: handoffAudioTrimTask,
+    warn: (message) => showToast('warn', message),
+    error: (message) => showToast('error', message),
   };
 
-  /** 调速任务发送核心（先例 startAudioTrimJob 同构）：按当前倍速 POST audio-speeds
-   *  （payload 形态 = 契约 AudioSpeedInput，由契约构造 buildAudioSpeedInput 收口贴原速
-   *  省略与两位小数，web 不各自拼键）；创建成功后先退编辑态再在源音频卡右侧 +60px 建
-   *  调速占位卡（node id = audio-speed-{job_id}，展示名「源名(调速{值}x).m4a」；带
-   *  audioSpeed 身份——lastInput 供失败重试原样重发）、拉来源边（origin=audio-speed，
-   *  参考推导跳过，源音频不占参考位防参考污染）、启动轮询（applyJobTerminal 的调速
-   *  分支回填成品/失败，时长以火山返回为权威值）、立刻落盘。创建失败（网络）不建卡
-   *  不退编辑态（用户可调倍速后重发，截取同口径）。免费口径同截取：无幂等头、
-   *  无积分预估、不走余额拦截门。
-   *  项目隔离（IKI4LX）：发送时捕获 projectId，创建响应 settle 时核对 activeProjectRef——
-   *  等待期间用户已切走项目的，成功受理结果暂存到原项目，回去后建卡与落盘；
-   *  不退新项目的调速会话、不在新项目建卡/连线/轮询/落盘，失败也不弹原项目的
-   *  错误提示（口径同 startFrameInterpolationJob 的 flush 收尾双检，IKHSFF）。
-   *  请求错误只提示一次：创建走 silent 传输（http 层不 toast），catch 统一提示。 */
-  const startAudioSpeedJob = async (
-    sourceNodeId: string,
-    payload: AudioSpeedInput,
-    sessionEpoch: number,
-  ): Promise<boolean> => {
-    if (!currentId) {
-      showToast('warn', '未选中项目，无法调速');
-      return false;
+  /** 调速任务项目暂存、建卡及落盘保持既有宿主实现。 */
+  const handoffAudioSpeedTask = async (
+    input: AudioToolSubmission<AudioSpeedInput>,
+    created: { job_id: string },
+    beforeApply: () => void,
+  ): Promise<void> => {
+    const { projectId, source: node, payload } = input;
+    const sourceNodeId = node.id;
+    // 迟到响应留给发起项目；当前项目的画布与编辑会话均不触碰。
+    if (activeProjectRef.current !== projectId || hydratedProjectRef.current !== projectId) {
+      audioSpeedPendingSubmissionsRef.current.set(`${projectId}:${audioSpeedNodeId(created.job_id)}`, {
+        projectId, sourceNodeId, jobId: created.job_id, payload, source: node,
+      });
+      return;
     }
-    const projectId = currentId;
-    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
-    if (!node) {
-      showToast('warn', '源音频卡不存在，无法调速');
-      return false;
+    // 只退出本次发送的会话；旧会话成功仍建自己的任务卡，不触碰后来开启的编辑态。
+    beforeApply();
+    const nodeId = audioSpeedNodeId(created.job_id);
+    const placeholder = attachCallbacks(
+      buildAudioSpeedPlaceholderNode({
+        jobId: created.job_id,
+        speed: payload.speed ?? 1,
+        sourceAssetId: payload.source_asset_id,
+        source: node,
+      }) as Node,
+    );
+    const current = mediaNodesRef.current;
+    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    // 连一条源音频 → 调速卡的**来源边**（带 origin 标记）：参考推导跳过，
+    // 避免调速产物再次编辑时把源音频误当参考输入（防参考污染）
+    if (mediaNodesRef.current.some((item) => item.id === sourceNodeId)) {
+      addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
     }
-    try {
-      const created = await createAudioSpeedMutation.mutateAsync({ projectId, payload });
-      // 迟到响应留给发起项目；当前项目的画布与编辑会话均不触碰。
-      if (activeProjectRef.current !== projectId || hydratedProjectRef.current !== projectId) {
-        audioSpeedPendingSubmissionsRef.current.set(`${projectId}:${audioSpeedNodeId(created.job_id)}`, {
-          projectId, sourceNodeId, jobId: created.job_id, payload, source: node,
-        });
-        return true;
-      }
-      // 只退出本次发送的会话；旧会话成功仍建自己的任务卡，不触碰后来开启的编辑态。
-      if (toolSessionEpochRef.current.isCurrent('audioSpeed', sessionEpoch)) exitAudioSpeedEditing();
-      const nodeId = audioSpeedNodeId(created.job_id);
-      const placeholder = attachCallbacks(
-        buildAudioSpeedPlaceholderNode({
-          jobId: created.job_id,
-          speed: payload.speed ?? 1,
-          sourceAssetId: payload.source_asset_id,
-          source: node,
-        }) as Node,
-      );
-      const current = mediaNodesRef.current;
-      const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
-      mediaNodesRef.current = next;
-      setMediaNodes(next);
-      // 连一条源音频 → 调速卡的**来源边**（带 origin 标记）：参考推导跳过，
-      // 避免调速产物再次编辑时把源音频误当参考输入（防参考污染）
-      if (mediaNodesRef.current.some((item) => item.id === sourceNodeId)) {
-        addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
-      }
-      pollJob(nodeId, created.job_id);
-      await flushCanvasSave(projectId).catch(() => {});
-      return true;
-    } catch (e: unknown) {
-      // 失败提示也归发送时的会话，不能打扰同项目或往返项目后新开的编辑态。
-      if (activeProjectRef.current !== projectId || !toolSessionEpochRef.current.isCurrent('audioSpeed', sessionEpoch)) return false;
-      showToast('error', isApiError(e) ? e.message : '音频调速任务创建失败，请重试');
-      return false;
-    }
+    pollJob(nodeId, created.job_id);
+    await flushCanvasSave(projectId).catch(() => {});
+  };
+  audioSpeedHostRef.current = {
+    getProjectId: () => currentId,
+    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+    createTask: ({ projectId, payload }) => createAudioSpeedMutation.mutateAsync({ projectId, payload }),
+    handoff: handoffAudioSpeedTask,
+    warn: (message) => showToast('warn', message),
+    error: (message) => showToast('error', message),
   };
 
-  /** 人声背景分离任务发送核心：按所选场景与格式 POST vocal-splits；创建成功后先退编辑态
-   *  再在源视频右侧建音频占位卡（node id = vocal-split-{job_id}，展示名 = 源名(人声背景分离)；
-   *  带 vocalSplit 身份——lastInput 三键供失败重试原样重发）、拉来源边（origin=vocal-split，
-   *  参考推导跳过，源视频不占参考位不参与 @ 编号）、启动轮询（applyJobTerminal 的人声分离
-   *  分支收敛终态：失败可读文案，成功移除占位卡按 tracks 扇出轨卡（fanOutVocalSplitTracks））、
-   *  立刻落盘（best-effort，防刚建任务就关页丢节点）。创建失败（网络）不建卡不退编辑态
-   *  （用户可调参数后重发）；入队失败创建响应仍 200，任务经轮询呈现 enqueue_failed。
-   *  免费口径同 media_extract：无幂等头、无积分预估、不走余额拦截门。 */
-  const startVocalSplitJob = async (
-    sourceNodeId: string,
-    payload: { source_asset_id: string; scene: VocalSplitScene; output_format: VocalSplitFormat },
-    sessionEpoch: number,
-  ): Promise<boolean> => {
-    if (!currentId) {
-      showToast('warn', '未选中项目，无法人声背景分离');
-      return false;
-    }
-    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
-    if (!node) {
-      showToast('warn', '源视频卡不存在，无法人声背景分离');
-      return false;
-    }
-    try {
-      const created = await createVocalSplit(currentId, payload, { silent: true });
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
-      // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，只收尾建卡
-      if (toolSessionEpochRef.current.isCurrent('vocalSplit', sessionEpoch)) exitVocalSplitEditing();
-      const nodeId = vocalSplitNodeId(created.job_id);
-      const placeholder = attachCallbacks(
-        buildVocalSplitPlaceholderNode({
-          jobId: created.job_id,
-          scene: payload.scene,
-          outputFormat: payload.output_format,
-          sourceAssetId: payload.source_asset_id,
-          source: node,
-        }) as Node,
-      );
-      // 先同步写 ref 再 setState：本轮 flush 落库要用它，且下方连线端点必须已在本次保存的节点里
-      // （不登记 pendingNodeIdsRef：占位节点身份以任务为准，失败由终态补丁收敛，不需要添加失败回滚）
-      const current = mediaNodesRef.current;
-      const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
-      mediaNodesRef.current = next;
-      setMediaNodes(next);
-      // 连一条视频 → 占位卡的**来源边**（带 origin 标记）：说明音频轨是从这段视频分离来的；
-      // 参考推导会跳过它，避免把这个视频当成音频生成参考而卡住发送
-      addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN });
-      pollJob(nodeId, created.job_id);
-      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
-      await flushCanvasSave(currentId).catch(() => {});
-      return true;
-    } catch (e: unknown) {
-      // 迟到失败不打扰用户当前会话（IKI61O）
-      if (!toolSessionEpochRef.current.isCurrent('vocalSplit', sessionEpoch)) return false;
-      showToast('error', isApiError(e) ? e.message : '人声背景分离任务创建失败，请重试');
-      return false;
-    }
+  /** 人声分离的占位卡与多轨回填继续使用既有任务链路。 */
+  const handoffVocalSplitTask = async (
+    input: AudioToolSubmission<VocalSplitPayload>,
+    created: { job_id: string },
+  ): Promise<void> => {
+    const { projectId, source: node, payload } = input;
+    const sourceNodeId = node.id;
+    const nodeId = vocalSplitNodeId(created.job_id);
+    const placeholder = attachCallbacks(
+      buildVocalSplitPlaceholderNode({
+        jobId: created.job_id,
+        scene: payload.scene,
+        outputFormat: payload.output_format,
+        sourceAssetId: payload.source_asset_id,
+        source: node,
+      }) as Node,
+    );
+    // 先同步写 ref 再 setState：本轮 flush 落库要用它，且下方连线端点必须已在本次保存的节点里
+    // （不登记 pendingNodeIdsRef：占位节点身份以任务为准，失败由终态补丁收敛，不需要添加失败回滚）
+    const current = mediaNodesRef.current;
+    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    // 连一条视频 → 占位卡的**来源边**（带 origin 标记）：说明音频轨是从这段视频分离来的；
+    // 参考推导会跳过它，避免把这个视频当成音频生成参考而卡住发送
+    addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN });
+    pollJob(nodeId, created.job_id);
+    // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
+    await flushCanvasSave(projectId).catch(() => {});
+  };
+  vocalSplitHostRef.current = {
+    getProjectId: () => currentId,
+    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+    createTask: ({ projectId, payload }) => createVocalSplit(projectId, payload, { silent: true }),
+    handoff: handoffVocalSplitTask,
+    warn: (message) => showToast('warn', message),
+    error: (message) => showToast('error', message),
   };
 
   /* ===== 场景切分发送链路（IKH8BR，镜像去字幕/HD 家族）：先退会话 → 本地建任务占位卡
@@ -10910,44 +10754,7 @@ export default function CanvasPage() {
     }
   };
 
-  /** 截取发送（发送条发送钮）：源素材身份 + 当前选区（贴边省略/两位小数收口）+ 当前
-   *  所选格式 → 建任务。请求发出即返回；编辑态退出与建卡在创建成功后由
-   *  startAudioTrimJob 承担，失败停留编辑态（选区/格式可调后重发）。
-   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
-  const handleAudioTrimSend = (): boolean => {
-    const nodeId = audioTrimTargetNodeId;
-    const selection = audioTrimSelection;
-    if (!nodeId || !selection) return false;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
-    if (!node || !sourceAssetId) {
-      showToast('warn', '当前音频尚未关联资产，无法截取');
-      return false;
-    }
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const sourceDuration = typeof data.duration === 'number' ? data.duration : 0;
-    if (!(sourceDuration > 0)) {
-      showToast('warn', '音频时长缺失，无法截取');
-      return false;
-    }
-    const sessionEpoch = toolSessionEpochRef.current.capture('audioTrim');
-    setAudioTrimSubmitting(true);
-    // 贴边省略与两位小数在契约构造内收口（buildAudioTrimTimeParams 口径只此一份）：
-    // 判定在全精度、量化在判定后
-    void startAudioTrimJob(
-      nodeId,
-      buildAudioTrimInput({
-        sourceAssetId: String(sourceAssetId),
-        timeRange: { start: selection.start, end: selection.end, sourceDuration },
-        outputFormat: audioTrimFormat,
-      }),
-      sessionEpoch,
-    ).finally(() => {
-      if (!toolSessionEpochRef.current.isCurrent('audioTrim', sessionEpoch)) return;
-      setAudioTrimSubmitting(false);
-    });
-    return true;
-  };
+
 
   const handleAudioMixAdd = (input: AudioMixInputSelection): void => {
     const source = mediaNodesRef.current.find((node) => node.id === audioMixSourceNodeId);
@@ -11090,59 +10897,9 @@ export default function CanvasPage() {
     })();
   };
 
-  /** 调速发送（发送条发送钮）：源素材身份 + 当前倍速（贴原速省略/两位小数收口）→
-   *  建任务。发送守卫（1.00x 置灰）由发送条承担，此处兜底拦截原速无意义任务。
-   *  请求发出即返回；编辑态退出与建卡在创建成功后由 startAudioSpeedJob 承担，
-   *  失败停留编辑态（倍速可调后重发）。
-   *  提交会话隔离（IKI61O 统一纪元，承 IKI6EB）：退出/重进/切换项目都会推进会话纪元；
-   *  迟到响应仍可收敛原项目任务卡，但退出编辑态、提示与 finally 释放锁仅作用于发送时的会话。 */
-  const handleAudioSpeedSend = (): boolean => {
-    const nodeId = audioSpeedTargetNodeId;
-    if (!nodeId || audioSpeedSubmitting) return false;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
-    if (!node || !sourceAssetId) {
-      showToast('warn', '当前音频尚未关联资产，无法调速');
-      return false;
-    }
-    const speed = audioSpeedSpeed;
-    if (speed === 1) return false;
-    const sessionEpoch = toolSessionEpochRef.current.capture('audioSpeed');
-    setAudioSpeedSubmitting(true);
-    // 贴原速省略与两位小数在契约构造内收口（buildAudioSpeedInput 口径只此一份）
-    void startAudioSpeedJob(nodeId, buildAudioSpeedInput({ sourceAssetId: String(sourceAssetId), speed }), sessionEpoch)
-      .finally(() => {
-        if (!toolSessionEpochRef.current.isCurrent('audioSpeed', sessionEpoch)) return;
-        setAudioSpeedSubmitting(false);
-      });
-    return true;
-  };
 
-  /** 人声背景分离发送（发送条发送钮）：源素材身份 + 当前所选场景与格式 → 建任务。
-   *  请求发出即返回；编辑态退出与建卡在创建成功后由 startVocalSplitJob 承担，
-   *  失败停留编辑态（参数可调后重发）。
-   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
-  const handleVocalSplitSend = (): boolean => {
-    const nodeId = vocalSplitTargetNodeId;
-    if (!nodeId) return false;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
-    if (!node || !sourceAssetId) {
-      showToast('warn', '当前视频尚未关联资产，无法人声背景分离');
-      return false;
-    }
-    const sessionEpoch = toolSessionEpochRef.current.capture('vocalSplit');
-    setVocalSplitSubmitting(true);
-    void startVocalSplitJob(nodeId, {
-      source_asset_id: String(sourceAssetId),
-      scene: vocalSplitScene,
-      output_format: vocalSplitFormat,
-    }, sessionEpoch).finally(() => {
-      if (!toolSessionEpochRef.current.isCurrent('vocalSplit', sessionEpoch)) return;
-      setVocalSplitSubmitting(false);
-    });
-    return true;
-  };
+
+
 
   /** 场景切分发送（单条发送钮）：源素材身份 + 当前所选粒度 → 先退会话再建占位卡发任务。
    *  请求发出即返回（飞行期 submitting 防重复提交）；创建往返与轮询收敛由
@@ -13355,7 +13112,7 @@ export default function CanvasPage() {
                       duration: typeof (n.data as Record<string, unknown>).duration === 'number'
                         ? ((n.data as Record<string, unknown>).duration as number)
                         : 0,
-                      onSelectionChange: setAudioTrimSelection,
+                      onSelectionChange: (selection: AudioTrimSelection) => audioTrimSession.edit((state) => ({ ...state, selection })),
                     };
                   }
                   if (n.id === vocalSplitTargetNodeId) data.splitEditing = true;
@@ -14018,8 +13775,8 @@ export default function CanvasPage() {
             start={audioTrimSelection.start}
             end={audioTrimSelection.end}
             format={audioTrimFormat}
-            onFormatChange={setAudioTrimFormat}
-            onSend={handleAudioTrimSend}
+            onFormatChange={(format) => audioTrimSession.edit((state) => ({ ...state, format }))}
+            onSend={audioTrimSession.send}
             submitting={audioTrimSubmitting}
             anchor={audioTrimSendBarAnchor}
           />
@@ -14051,8 +13808,8 @@ export default function CanvasPage() {
           <AudioSpeedBar
             onClose={exitAudioSpeedEditing}
             speed={audioSpeedSpeed}
-            onSpeedChange={setAudioSpeedSpeed}
-            onSend={handleAudioSpeedSend}
+            onSpeedChange={(speed) => audioSpeedSession.edit((state) => ({ ...state, speed }))}
+            onSend={audioSpeedSession.send}
             submitting={audioSpeedSubmitting}
             anchor={audioSpeedSendBarAnchor}
           />
@@ -14088,10 +13845,10 @@ export default function CanvasPage() {
           <VocalSplitDialog
             onClose={exitVocalSplitEditing}
             scene={vocalSplitScene}
-            onSceneChange={setVocalSplitScene}
+            onSceneChange={(scene) => vocalSplitSession.edit((state) => ({ ...state, scene }))}
             format={vocalSplitFormat}
-            onFormatChange={setVocalSplitFormat}
-            onSend={handleVocalSplitSend}
+            onFormatChange={(format) => vocalSplitSession.edit((state) => ({ ...state, format }))}
+            onSend={vocalSplitSession.send}
             submitting={vocalSplitSubmitting}
             sendBarAnchor={vocalSplitSendBarAnchor}
           />

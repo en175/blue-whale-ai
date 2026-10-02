@@ -541,3 +541,34 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     expect(settled.data.assetId).toBeUndefined();
   });
 });
+
+it.each(['success', 'failure'] as const)('同卡关闭重开后的旧 %s 不改变新场景、格式和界面锁', async (outcome) => {
+  let acceptOld!: (value: { job_id: string; status: string }) => void;
+  let rejectOld!: (error: Error) => void;
+  let acceptNew!: (value: { job_id: string; status: string }) => void;
+  apiMocks.createVocalSplit.mockImplementationOnce(() => new Promise((resolve, reject) => { acceptOld = resolve; rejectOld = reject; }));
+  apiMocks.createVocalSplit.mockImplementationOnce(() => new Promise((resolve) => { acceptNew = resolve; }));
+  apiMocks.fetchJobStatus.mockResolvedValue({ status: 'processing', progress: 1, asset: null });
+  await renderPage();
+  await enterVocal();
+  await click('vocal-split-send-btn');
+  await click('vocal-split-close');
+  await enterVocal();
+  await selectScene('drama'); await selectFormat('flac');
+  await click('vocal-split-send-btn');
+  await act(async () => {
+    if (outcome === 'success') acceptOld({ job_id: 'old', status: 'queued' });
+    else rejectOld(new Error('old request failure'));
+  });
+  expect(toolbar()).not.toBeNull();
+  expect(bodyBtn('vocal-split-send-btn').disabled).toBe(true);
+  expect(bodyBtn('vocal-split-scene-trigger').textContent).toBe('短剧');
+  expect(bodyBtn('vocal-split-format-trigger').textContent).toBe('FLAC');
+  expect(document.body.textContent).not.toContain('人声背景分离任务创建失败');
+  if (outcome === 'success') expect(nodeById('vocal-split-old')).toBeTruthy();
+  await act(async () => { acceptNew({ job_id: 'new', status: 'queued' }); });
+  expect(toolbar()).toBeNull();
+  expect(nodeById('vocal-split-new')!.data.vocalSplit).toEqual({
+    sourceAssetId: '5', lastInput: { source_asset_id: '5', scene: 'drama', output_format: 'flac' },
+  });
+});
