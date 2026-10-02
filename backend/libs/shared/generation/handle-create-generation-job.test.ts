@@ -1504,6 +1504,98 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     });
   });
 
+  // IKJIVB：图片端「预览价 = 实扣价」同构回归。参考图张数是定价维度（Seedream 按张计价），
+  // 后端会把画布文本带入的参考追加进实扣集合（body 缺失项追加 input_asset_ids 尾部）；
+  // 前端 ImageDialog 的报价 references 与提交 references 在草稿绑定模式共用同一份
+  // mergedImageRefsOf 推导（直接参考在前、文本带入追加、同 assetId 去重）——所以两端张数
+  // 必须一致。用例 1 复刻产品真实提交形态断言「报价张数 = 实扣冻结张数」；用例 2 是反事实
+  // 对照（references 漏带文本带入），证明若前端口径漂移，后端不会替报价兜底——分叉会真实发生。
+  describe("图片端预览价与实扣价同构（IKJIVB）", () => {
+    // 画布：图片草稿 media-1 ← 文本卡 text-a（正文提及 media-2 的图片素材，mediaMentions/
+    // mediaRefs 快照齐备）+ 关系线 media-2 → text-a（textIndex 标记）+ 直接参考 media-4。
+    // 前端 mergedImageRefsOf 在等价画布上输出 assetId ["4", "2"]（见 textIndexSync.test.ts
+    // 「直接参考在前、文本带入追加」用例），即报价与提交共用的那份数组。
+    const IMAGE_TEXT_REF_CANVAS = {
+      nodes: JSON.stringify([
+        { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
+        {
+          id: "text-a",
+          type: "textNode",
+          data: {
+            text: "参考这张图",
+            mediaMentions: [{ start: 0, end: 2, nodeId: "media-2", assetId: "2" }],
+            mediaRefs: [
+              { nodeId: "media-2", assetId: "2", mediaType: "image", name: "源图", url: "http://v/2.png" },
+            ],
+          },
+        },
+        { id: "media-2", type: "mediaNode", data: { mediaType: "image" } },
+        { id: "media-4", type: "mediaNode", data: { mediaType: "image" } },
+      ]),
+      edges: JSON.stringify([
+        { id: "e-attach", source: "text-a", target: "media-1" },
+        { id: "e-index", source: "media-2", target: "text-a", data: { textIndex: true } },
+        { id: "e-direct", source: "media-4", target: "media-1" },
+      ]),
+    };
+    function buildImageTextRefDeps() {
+      const base = buildImageDeps(10);
+      const deps = {
+        ...base.deps,
+        canvas: {
+          getByProject: vi.fn().mockResolvedValue({
+            id: "9",
+            project_id: "1",
+            version: 3,
+            viewport: null,
+            nodes: IMAGE_TEXT_REF_CANVAS.nodes,
+            edges: IMAGE_TEXT_REF_CANVAS.edges,
+          }),
+        },
+      } as unknown as HandlerDeps;
+      return { deps, createJob: base.createJob };
+    }
+    // 与前端 buildImageJobReferences 同形状（role=reference / type=image / asset_id）
+    const imageTextRefBody = (ids: string[]) => ({
+      type: "image",
+      expected_output_count: 1,
+      parameters: { prompt: "海边日落", model_id: "seedream-5.0", aspect_ratio: "1:1" },
+      references: ids.map((id) => ({ role: "reference" as const, asset_id: id, type: "image" as const })),
+      target_node_id: "media-1",
+    });
+
+    it("前端同源提交（references 已含文本带入）→ 冻结原样、报价张数 = 实扣张数", async () => {
+      const { deps, createJob } = buildImageTextRefDeps();
+      // 前端 mergedImageRefsOf 输出：直接参考 ["4"] + 文本带入 ["2"]
+      const submitted = imageTextRefBody(["4", "2"]);
+      const result = await handleCreateGenerationJob("u1", "p1", submitted, null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+      // body 已含全部画布参考 → 后端权威追加为空，冻结与提交同序同张
+      expect(cmdArg.input.input_asset_ids).toEqual(["4", "2"]);
+      // 报价投影（同 body 两路）：参考张数一致 —— 「预览价 = 实扣价」的张数前提
+      const quote = projectQuoteInput("image", submitted);
+      expect((quote?.input_asset_ids as string[]).length).toBe(
+        (cmdArg.input.input_asset_ids as string[]).length,
+      );
+    });
+
+    it("对照组：references 漏带文本带入 → 后端追加实扣参考，报价张数 < 实扣张数（前端口径漂移时无兜底）", async () => {
+      const { deps, createJob } = buildImageTextRefDeps();
+      // 反事实：模拟「报价/提交只按面板直接参考，未含画布文本提及素材」
+      const submitted = imageTextRefBody(["4"]);
+      const result = await handleCreateGenerationJob("u1", "p1", submitted, null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+      // 实扣侧后端权威追加 body 缺失的文本带入项
+      expect(cmdArg.input.input_asset_ids).toEqual(["4", "2"]);
+      const quote = projectQuoteInput("image", submitted);
+      // 报价只按请求携带的 references 数张 → 1 < 2：分叉机制真实存在，唯有前端同源可消除
+      expect((quote?.input_asset_ids as string[]).length).toBe(1);
+      expect((cmdArg.input.input_asset_ids as string[]).length).toBe(2);
+    });
+  });
+
   it("references 项既无 asset_id 也无 material_id → 400 参考素材引用无效", async () => {
     const { deps, createJob } = buildVideoDeps();
     const result = await handleCreateGenerationJob(
