@@ -5,13 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import { RECOVERY_REASONS, recoveryItemId, TARGET_OUTPUT_KEY } from "@lib/contracts";
 
-import {
-  RecoveryContractError,
-  canvasRecoverySaveRequestHash,
-  decodeRecoveryCursor,
-  encodeRecoveryCursor,
-  guardLegacyCanvasWrite,
-} from "./generation-canvas-recovery-repo.js";
+import { RecoveryContractError, decodeRecoveryCursor, encodeRecoveryCursor } from "./generation-canvas-recovery-repo.js";
+import { canvasRecoverySaveRequestHash, guardLegacyCanvasWrite } from "./canvas-recovery-save.js";
 
 const MARKER = { protocolVersion: 1, submissionId: "0a1b2c3d-0000-4000-8000-000000000000", outputKey: TARGET_OUTPUT_KEY };
 

@@ -199,21 +199,24 @@ export {
   canvasBindingView,
   decodeRecoveryCursor,
   encodeRecoveryCursor,
-  guardLegacyCanvasWrite,
   listCanvasRecoveryPage,
   lockCanvasRecoveryForAcceptance,
   projectHasRecoverySubmissions,
   resolveCanvasRecoveryItems,
-  saveCanvasWithRecovery,
   writeCanvasRecoveryRows,
   type CanvasRecoveryAcceptance,
   type CanvasRecoveryPlan,
-  type CanvasRecoveryReceiptChange,
-  type CanvasRecoverySaveInput,
-  type CanvasRecoverySaveResult,
   type RecoveryItemView,
   type RecoveryRecordView,
 } from "./generation-canvas-recovery-repo.js";
+export {
+  canvasRecoverySaveRequestHash,
+  guardLegacyCanvasWrite,
+  saveCanvasWithRecovery,
+  type CanvasRecoveryReceiptChange,
+  type CanvasRecoverySaveInput,
+  type CanvasRecoverySaveResult,
+} from "./canvas-recovery-save.js";
 // IKIZQC：成片（finalize）命令 repo——来源样片读取、成片任务创建（来源唯一约束裁决并发）、
 // 成片幂等重放查询。
 export {

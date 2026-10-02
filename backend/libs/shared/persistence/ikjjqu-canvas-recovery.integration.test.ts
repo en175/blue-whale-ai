@@ -38,10 +38,10 @@ import {
   listCanvasRecoveryPage,
   lockCanvasRecoveryForAcceptance,
   resolveCanvasRecoveryItems,
-  saveCanvasWithRecovery,
   writeCanvasRecoveryRows,
   type CanvasRecoveryAcceptance,
 } from "./generation-canvas-recovery-repo.js";
+import { saveCanvasWithRecovery } from "./canvas-recovery-save.js";
 import { createJobWithinTx } from "./generation-command-repo.js";
 import type { PrismaClient } from "@prisma/client";
 

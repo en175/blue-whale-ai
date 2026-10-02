@@ -5,8 +5,10 @@ import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
 import { planLegacyCardMigration, type CanvasNodeLike } from "./legacy-card-migration.js";
 import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, RECOVERY_PAGE_LIMIT_DEFAULT, RECOVERY_PAGE_LIMIT_MAX, RECOVERY_PAGE_LIMIT_MIN, RECOVERY_REASONS, RECOVERY_RESOLVE_IDS_MAX, recoverySaveFieldsSchema, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@lib/contracts";
-import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import {
+  createCanvasRepo,
+  createConversationQuoteRepo,
+  createLegacyCardHistoryRepo,
   RecoveryContractError,
   decodeRecoveryCursor,
   guardLegacyCanvasWrite,
@@ -14,8 +16,12 @@ import {
   projectHasRecoverySubmissions,
   resolveCanvasRecoveryItems,
   saveCanvasWithRecovery,
+  type CanvasView,
+  type ConversationQuoteRow,
+  type LegacyCardHistoryRow,
   type RecoveryRecordView,
-} from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
+} from "@lib/shared/persistence/index.js";
+
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
