@@ -338,6 +338,8 @@ interface SampleDialogProps {
   initialParams?: { modelId?: string; resolution?: string; aspectRatio?: string; sampleMode?: boolean };
   restoreExisting?: boolean;
   onSend?: ReturnType<typeof vi.fn>;
+  /** IKJIVN：草稿绑定模式由父级传入当前绑定节点 id；自由模式不传（行为同旧） */
+  targetNodeId?: string;
 }
 
 /** 带样片场景 props 的渲染（projectId 传入才会挂报价查询与徽标）。 */
@@ -355,6 +357,7 @@ async function renderSampleDialog(props: SampleDialogProps = {}) {
           onSend: props.onSend ?? vi.fn(),
           ...(props.projectId ? { projectId: props.projectId } : {}),
           ...(props.initialParams ? { initialParams: props.initialParams } : {}),
+          ...(props.targetNodeId ? { targetNodeId: props.targetNodeId } : {}),
           videoMediaRefs: { reference: [] },
           videoDraftBinding: {
             ...(props.restoreExisting ? { restoreExisting: true } : {}),
@@ -631,5 +634,91 @@ describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
     );
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).not.toHaveProperty('prompt');
+  });
+});
+
+/* ============================================
+ * IKJIVN：样片报价查询 payload 携带 target_node_id（PR !968 / IKJGE6 契约面）。
+ * 提交侧草稿绑定模式按 target_node_id 做画布文本带入合并（服务端复算 quote_stale 的
+ * 判定输入），报价与提交不同源就会被误拒——样片报价查询必须与提交同源带上该键；
+ * 自由模式（无绑定节点）不带，行为同旧。
+ * ============================================ */
+describe('IKJIVN 样片报价 payload 携带 target_node_id', () => {
+  function quoteResponseReady() {
+    return new Response(
+      JSON.stringify({ code: 200, msg: null, data: { credits: 60, quote_revision: 'rev-1' } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
+  /** 开启样片并等样片规格报价请求落地，返回全部报价请求体。 */
+  async function openSampleAndCollectQuoteBodies(fetchMock: ReturnType<typeof vi.fn>) {
+    fetchGenerationModels.mockResolvedValue([seedance25]);
+    await renderSampleDialog({ projectId: 'p1' });
+    await openSampleConfig();
+    await act(async () => { sampleSwitch()!.click(); });
+    // 先确保样片规格请求真的发出（负向断言的前提：请求存在才谈得上「不带某键」）
+    await vi.waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, req]) =>
+        (JSON.parse((req as RequestInit).body as string)).parameters?.sample_mode === true)).toBe(true));
+    return fetchMock.mock.calls.map(([, req]) => JSON.parse((req as RequestInit).body as string));
+  }
+
+  it('草稿绑定模式：样片报价查询 payload 的 target_node_id = 当前绑定节点 id（与提交同源）', async () => {
+    fetchGenerationModels.mockResolvedValue([seedance25]);
+    const fetchMock = vi.fn().mockResolvedValue(quoteResponseReady());
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 草稿绑定模式：父级传入当前绑定节点 id
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+          createElement(BottomDialog, {
+            onClose: vi.fn(),
+            onSend: vi.fn(),
+            projectId: 'p1',
+            targetNodeId: 'media-draft-9',
+            videoMediaRefs: { reference: [] },
+            videoDraftBinding: { onParamsChange: vi.fn() },
+          }),
+        ),
+      );
+    });
+    await act(async () => { await Promise.resolve(); });
+    await openSampleConfig();
+    await act(async () => { sampleSwitch()!.click(); });
+    await vi.waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, req]) =>
+        (JSON.parse((req as RequestInit).body as string)).parameters?.sample_mode === true)).toBe(true));
+
+    const bodies = fetchMock.mock.calls.map(([, req]) => JSON.parse((req as RequestInit).body as string));
+    // 样片报价查询（提交门控的唯一金额来源）必须带同一目标。正常路径徽标与样片查询共用
+    // 同一 queryKey 只发一次；若两出口任一漏带 target_node_id，键分叉会发出多份样片规格
+    // 请求且漏带的那份在此现形——所以断言「每一份」而不是「找到一份」。
+    const sampleBodies = bodies.filter((body) => body.parameters?.sample_mode === true);
+    expect(sampleBodies.length).toBeGreaterThanOrEqual(1);
+    for (const body of sampleBodies) {
+      expect(body.target_node_id).toBe('media-draft-9');
+    }
+    // 报价徽标（预览价）与样片查询共用提交同源口径，同样带目标节点
+    const previewBody = bodies.find((body) => body.parameters?.sample_mode !== true)!;
+    expect(previewBody.target_node_id).toBe('media-draft-9');
+    vi.unstubAllGlobals();
+  });
+
+  it('自由模式（无绑定节点）：报价请求不携带 target_node_id（行为同旧）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(quoteResponseReady());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bodies = await openSampleAndCollectQuoteBodies(fetchMock);
+    for (const body of bodies) {
+      expect(body).not.toHaveProperty('target_node_id');
+    }
+    vi.unstubAllGlobals();
   });
 });
