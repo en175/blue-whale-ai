@@ -24,6 +24,7 @@ import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
 import type { CreatedJob } from "./generation-command-repo.js";
+import { projectVirtualOutputs } from "./canvas-recovery-multi-output.js";
 
 /** 新协议受控错误：带完整信封（code=HTTP 状态，data.reason 稳定值）。
  *  在事务内抛出 → Prisma 自动回滚 → 上层捕获并按信封直写响应（B.8 局部适配器）。 */
@@ -363,15 +364,26 @@ function jobDetailView(row: {
 }
 
 /** 从任务可信终态数据计算尚未应用的虚拟输出项（pending/0，不写库；B.5）。
- *  单结果：job 有成功输出槽时计算 primary 项（输出槽/资产身份来自任务行，不按数组偶然顺序）。 */
-function computeVirtualOutputItems(
-  job: { status: string; output_asset_ids: unknown } | null,
-  targetNodeId: string,
-): Array<{ outputKey: string; nodeId: string; assetId: string | null }> {
-  if (!job || job.status !== "succeeded") return [];
-  const assets = Array.isArray(job.output_asset_ids) ? (job.output_asset_ids as unknown[]) : [];
-  if (assets.length === 0) return [];
-  return [{ outputKey: PRIMARY_OUTPUT_KEY, nodeId: targetNodeId, assetId: null }];
+ *  IKJJQY：多结果家族（输出槽/场景切分/人声分离）走 canvas-recovery-multi-output 投影；
+ *  投影歧义（重复键/缺产物/归属无法证明）时该记录不投影输出项——保留 $target 占位，
+ *  不重发任务（B.8 recovery_projection_invalid 的查询侧落法：坏一条记录不毁整页）。 */
+async function computeVirtualOutputItems(
+  tx: Prisma.TransactionClient,
+  submission: { submission_id: string; target_node_id: string },
+  job: { id: bigint; type: string; status: string; output_asset_ids: unknown; input: unknown } | null,
+): Promise<Array<{ outputKey: string; nodeId: string; assetId: string | null; slotId: string | null }>> {
+  const projection = await projectVirtualOutputs(tx, {
+    submissionId: submission.submission_id,
+    targetNodeId: submission.target_node_id,
+    job,
+  });
+  if (projection.kind === "invalid") return [];
+  return projection.items.map(item => ({
+    outputKey: item.outputKey,
+    nodeId: item.nodeId,
+    assetId: item.assetId,
+    slotId: item.slotId,
+  }));
 }
 
 interface RecoveryRecordRow {
@@ -392,13 +404,14 @@ function ownerRevisionByNode(rows: Array<{ node_id: string; binding_revision: nu
 }
 
 /** 单条 submission 行 → 公开 record（含 items）。currentOwnerNodes 为 owner 表当前指向本提交的 node 集。 */
-function toRecoveryRecord(
+async function toRecoveryRecord(
+  tx: Prisma.TransactionClient,
   submission: RecoveryRecordRow,
-  job: { status: string; output_asset_ids: unknown } | null,
+  job: { id: bigint; type: string; status: string; output_asset_ids: unknown; input: unknown } | null,
   isCurrent: boolean,
   outputs: Array<{ output_key: string; node_id: string; asset_id: bigint | null; slot_id: bigint | null; state: string; revision: number }>,
   ownerRevisions: Map<string, number>,
-): RecoveryRecordView {
+): Promise<RecoveryRecordView> {
   const items: RecoveryItemView[] = [{
     recovery_item_id: recoveryItemId(submission.submission_id, TARGET_OUTPUT_KEY),
     output_key: TARGET_OUTPUT_KEY,
@@ -422,7 +435,7 @@ function toRecoveryRecord(
     });
   }
   if (outputs.length === 0) {
-    for (const virtual of computeVirtualOutputItems(job, submission.target_node_id)) {
+    for (const virtual of await computeVirtualOutputItems(tx, submission, job)) {
       items.push({
         recovery_item_id: recoveryItemId(submission.submission_id, virtual.outputKey),
         output_key: virtual.outputKey,
@@ -431,7 +444,7 @@ function toRecoveryRecord(
         revision: 0,
         node_binding_revision: 0,
         asset_id: virtual.assetId,
-        slot_id: null,
+        slot_id: virtual.slotId,
       });
     }
   }
@@ -487,27 +500,29 @@ export async function listCanvasRecoveryPage(
     const jobIds = [...new Set(page.map(row => row.generation_job_id))];
     const jobs = await tx.generation_jobs.findMany({
       where: { id: { in: jobIds } },
-      select: { id: true, type: true, status: true, progress: true, output_asset_ids: true, error: true, gmt_create: true },
+      select: { id: true, type: true, status: true, progress: true, output_asset_ids: true, error: true, gmt_create: true, input: true },
     });
     const jobsById = new Map(jobs.map(job => [job.id, job]));
-    const records = page
-      .map(submission => {
-        const owner = ownerByNode.get(submission.target_node_id);
-        const isCurrent = owner !== undefined
-          && owner.generation_canvas_submission_id === submission.id
-          && owner.output_key === TARGET_OUTPUT_KEY;
-        const job = jobsById.get(submission.generation_job_id) ?? null;
-        return toRecoveryRecord(
-          submission, job, isCurrent,
-          outputsBySubmission.get(submission.id) ?? [],
-          ownerRevisionByNode(owners.map(o => ({ node_id: o.node_id, binding_revision: o.binding_revision }))),
-        );
-      })
+    const ownerRevisions = ownerRevisionByNode(owners.map(o => ({ node_id: o.node_id, binding_revision: o.binding_revision })));
+    const records: RecoveryRecordView[] = [];
+    for (const submission of page) {
+      const owner = ownerByNode.get(submission.target_node_id);
+      const isCurrent = owner !== undefined
+        && owner.generation_canvas_submission_id === submission.id
+        && owner.output_key === TARGET_OUTPUT_KEY;
+      const job = jobsById.get(submission.generation_job_id) ?? null;
+      records.push(await toRecoveryRecord(
+        tx, submission, job, isCurrent,
+        outputsBySubmission.get(submission.id) ?? [],
+        ownerRevisions,
+      ));
+    }
+    const visible = records
       // 查询返回拥有当前目标或仍拥有已持久结果节点的关联（B.5）。
       .filter(record => record.is_current || record.items.some(item => item.state !== "pending" && item.node_binding_revision > 0 && item.output_key !== TARGET_OUTPUT_KEY));
     const lastScanned = page[page.length - 1]!.id;
     const nextCursor = hasMore ? encodeRecoveryCursor({ v: CANVAS_RECOVERY_PROTOCOL_VERSION, projectId, maxId, lastId: Number(lastScanned) }) : null;
-    return { records, nextCursor, canvasVersion: canvasRows?.version ?? null };
+    return { records: visible, nextCursor, canvasVersion: canvasRows?.version ?? null };
   });
 }
 
@@ -551,23 +566,25 @@ export async function resolveCanvasRecoveryItems(
     const jobIds = [...new Set(submissions.map(row => row.generation_job_id))];
     const jobs = await tx.generation_jobs.findMany({
       where: { id: { in: jobIds } },
-      select: { id: true, type: true, status: true, progress: true, output_asset_ids: true, error: true, gmt_create: true },
+      select: { id: true, type: true, status: true, progress: true, output_asset_ids: true, error: true, gmt_create: true, input: true },
     });
     const jobsById = new Map(jobs.map(job => [job.id, job]));
     const ownerRevisions = ownerRevisionByNode(owners.map(o => ({ node_id: o.node_id, binding_revision: o.binding_revision })));
-    return submissions.map(submission => {
+    const resolved: RecoveryRecordView[] = [];
+    for (const submission of submissions) {
       const owner = ownerByNode.get(submission.target_node_id);
       const isCurrent = owner !== undefined
         && owner.generation_canvas_submission_id === submission.id
         && owner.output_key === TARGET_OUTPUT_KEY;
-      const record = toRecoveryRecord(
-        submission, jobsById.get(submission.generation_job_id) ?? null, isCurrent,
+      const record = await toRecoveryRecord(
+        tx, submission, jobsById.get(submission.generation_job_id) ?? null, isCurrent,
         outputsBySubmission.get(submission.id) ?? [], ownerRevisions,
       );
       // 仅包含请求项及所属关联（B.5）。
       record.items = record.items.filter(item => wanted.has(item.recovery_item_id));
-      return record;
-    });
+      resolved.push(record);
+    }
+    return resolved;
   });
 }
 

@@ -47,7 +47,7 @@ describe("VocalSplitsController.create", () => {
       output_format: "mp3",
     }, {
       providerCredential: "sk-live-token",
-    });
+    }, undefined);
   });
 
   it("passes an empty credential object when the requester carries no sk- token", async () => {
@@ -59,7 +59,7 @@ describe("VocalSplitsController.create", () => {
       "Bearer not-an-sk-token",
     );
     expect(result.code).toBe(200);
-    expect(service.create).toHaveBeenCalledWith("9", "55", { source_asset_id: "88" }, {});
+    expect(service.create).toHaveBeenCalledWith("9", "55", { source_asset_id: "88" }, {}, undefined);
   });
 
   it("enqueues the created job and returns the result unchanged", async () => {

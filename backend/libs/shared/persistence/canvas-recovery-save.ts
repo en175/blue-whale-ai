@@ -17,6 +17,13 @@ import type { PrismaClient } from "@prisma/client";
 
 import { linkPromptMaterials, markAudioMixCards, markOutputSlotsPlaced } from "./canvas-repo.js";
 import { RecoveryContractError } from "./generation-canvas-recovery-repo.js";
+import {
+  isMultiResultOutputKey,
+  outputNodeIdForKey,
+  projectVirtualOutputs,
+  type VirtualOutputItem,
+  type VirtualOutputProjection,
+} from "./canvas-recovery-multi-output.js";
 
 /* ============================================
  * 保护性保存（B.6）：画布、恢复项、素材关联、槽位首次放置与紧凑回执同事务提交。
@@ -85,13 +92,16 @@ function markerMatches(marker: Record<string, unknown> | null, submissionId: str
     && marker.outputKey === outputKey;
 }
 
-/** 单个恢复项的当前状态（$target 读 submission 行，其余读 outputs 行；无行=pending/0）。 */
+/** 单个恢复项的当前状态（$target 读 submission 行，其余读 outputs 行；无行=pending/0）。
+ *  IKJJQY：nodeId 为该项的规范节点身份——持久输出读行、虚拟输出按 output_key 推导
+ *  （$target/primary=目标节点；slot:<id>=generation-output:<id>；segment/track=generation-result 形态）。 */
 interface ItemState {
   submissionRow: { id: bigint; submission_id: string; target_node_id: string; generation_job_id: bigint; target_state: string; target_revision: number; recovery_seed: unknown };
   outputKey: string;
   state: string;
   revision: number;
   outputRowId: bigint | null;
+  nodeId: string;
 }
 
 /**
@@ -165,9 +175,11 @@ export async function saveCanvasWithRecovery(
       let state: string;
       let revision: number;
       let outputRowId: bigint | null = null;
+      let nodeId: string;
       if (outputKey === TARGET_OUTPUT_KEY) {
         state = submissionRow.target_state;
         revision = Number(submissionRow.target_revision);
+        nodeId = submissionRow.target_node_id;
       } else {
         const output = await tx.generation_canvas_outputs.findUnique({
           where: { generation_canvas_submission_id_output_key: { generation_canvas_submission_id: submissionRow.id, output_key: outputKey } },
@@ -175,13 +187,19 @@ export async function saveCanvasWithRecovery(
         state = output ? output.state : "pending";
         revision = output ? Number(output.revision) : 0;
         outputRowId = output?.id ?? null;
+        // 持久行读行上的 node_id（首次落行写入后不再变）；虚拟输出按规范推导（计算恒等，B.4）。
+        nodeId = output ? output.node_id : outputNodeIdForKey(outputKey, {
+          submissionId: submissionRow.submission_id,
+          targetNodeId: submissionRow.target_node_id,
+        });
       }
-      itemStates.push({ submissionRow, outputKey, state, revision, outputRowId });
+      itemStates.push({ submissionRow, outputKey, state, revision, outputRowId, nodeId });
     }
     // 锁定读取当前关联（B.6 步骤 2-3）：节点归属行按 node_id 排序 FOR UPDATE——
     // restore/settleTarget/replaceTarget 的「归属未交给另一项」判定必须在锁内成立，
-    // 否则并发接管会让校验基于过期快照通过。
-    const involvedNodes = [...new Set(itemStates.map(item => item.submissionRow.target_node_id))].sort();
+    // 否则并发接管会让校验基于过期快照通过。IKJJQY：锁集扩展到全部涉及项的规范节点
+    // （多结果输出的 apply/remove 首次建立 owner 也要在锁内判占用）。
+    const involvedNodes = [...new Set(itemStates.map(item => item.nodeId))].sort();
     const ownerRows = await tx.$queryRaw<
       Array<{ node_id: string; generation_canvas_submission_id: bigint; output_key: string; binding_revision: number }>
     >`SELECT node_id, generation_canvas_submission_id, output_key, binding_revision
@@ -189,6 +207,40 @@ export async function saveCanvasWithRecovery(
       AND node_id IN (${Prisma.join(involvedNodes)}) FOR UPDATE`;
     const ownerByNode = new Map(ownerRows.map(owner => [owner.node_id, owner]));
     const changes: CanvasRecoveryReceiptChange[] = [];
+    // IKJJQY：可信终态投影缓存（同提交多次动作/扇出校验只查一次；锁内读，无 TOCTOU）。
+    const projectionCache = new Map<string, VirtualOutputProjection>();
+    const projectionOf = async (submissionRow: NonNullable<ItemState["submissionRow"]>): Promise<VirtualOutputProjection> => {
+      const cached = projectionCache.get(submissionRow.submission_id);
+      if (cached) return cached;
+      const job = await tx.generation_jobs.findUnique({
+        where: { id: submissionRow.generation_job_id },
+        select: { id: true, type: true, status: true, output_asset_ids: true, input: true },
+      });
+      const projection = await projectVirtualOutputs(tx, {
+        submissionId: submissionRow.submission_id,
+        targetNodeId: submissionRow.target_node_id,
+        job,
+      });
+      projectionCache.set(submissionRow.submission_id, projection);
+      return projection;
+    };
+    /** 虚拟输出（无行）的 apply/remove：键必须在投影集内（防伪造键/漏投影；B.4 规范身份）。 */
+    const assertVirtualKeyProjected = async (item: ItemState): Promise<VirtualOutputItem | null> => {
+      if (item.outputRowId !== null) return null;
+      const projection = await projectionOf(item.submissionRow);
+      if (projection.kind === "invalid") {
+        throw new RecoveryContractError(
+          recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),
+        );
+      }
+      const virtual = projection.items.find(candidate => candidate.outputKey === item.outputKey) ?? null;
+      if (virtual === null) {
+        throw new RecoveryContractError(
+          recoveryError(422, "恢复动作与画布文档不一致", RECOVERY_REASONS.documentMismatch),
+        );
+      }
+      return virtual;
+    };
     // 逐动作校验 + 生成写入计划（写入延后到画布写成功之后，整笔原子）。
     interface PlannedWrite {
       kind: "targetState" | "outputUpsert" | "ownerSwitch";
@@ -197,15 +249,22 @@ export async function saveCanvasWithRecovery(
       nextState: string;
       nextRevision: number;
       outputRowId: bigint | null;
+      /** 该项的规范节点（target 或输出身份；落行 node_id / owner 建立 / 回执用）。 */
+      nodeId: string;
+      /** 虚拟多结果输出首次落行时携带的投影槽位引用（slot: 家族；其余 null）。 */
+      slotId: string | null;
+      /** 首次建立节点归属（虚拟输出 apply/remove）：写入段建 owner 行，回执版本为 1。 */
+      createOwner: boolean;
     }
     const planned: PlannedWrite[] = [];
     for (let index = 0; index < input.changes.length; index += 1) {
       const change = input.changes[index]!;
       const item = itemStates[index]!;
-      const node = incomingByNode.get(item.submissionRow.target_node_id);
+      const node = incomingByNode.get(item.nodeId);
       const marker = markerOf(node);
-      const owner = ownerByNode.get(item.submissionRow.target_node_id);
-      const owned = owner !== undefined && owner.generation_canvas_submission_id === item.submissionRow.id;
+      const owner = ownerByNode.get(item.nodeId);
+      const owned = owner !== undefined && owner.generation_canvas_submission_id === item.submissionRow.id
+        && owner.output_key === item.outputKey;
       const conflict = (currentState: string, currentRevision: number) =>
         new RecoveryContractError(
           recoveryError(409, "恢复项状态已变化，请刷新后重试", RECOVERY_REASONS.itemConflict, {
@@ -218,6 +277,9 @@ export async function saveCanvasWithRecovery(
         submissionRow: item.submissionRow, outputKey, nextState,
         nextRevision: item.revision + 1,
         outputRowId: item.outputRowId,
+        nodeId: item.nodeId,
+        slotId: null,
+        createOwner: false,
       });
       switch (change.action) {
         case "apply": {
@@ -227,9 +289,27 @@ export async function saveCanvasWithRecovery(
               recoveryError(422, "恢复动作与画布文档不一致", RECOVERY_REASONS.documentMismatch),
             );
           }
+          // 虚拟输出首次 apply：键必须在投影集内；节点未被其他提交占用（不静默覆盖）。
+          let slotId: string | null = null;
+          if (item.outputRowId === null && item.outputKey !== TARGET_OUTPUT_KEY) {
+            const virtual = await assertVirtualKeyProjected(item);
+            slotId = virtual?.slotId ?? null;
+            if (isMultiResultOutputKey(item.outputKey) && owner !== undefined && !owned) {
+              throw new RecoveryContractError(
+                recoveryError(422, "结果节点已被其他提交占用", RECOVERY_REASONS.documentMismatch),
+              );
+            }
+          }
           // 同状态且身份一致的重复 apply 是无副作用成功，不增加 revision（B.6）。
-          if (item.state === "present") planned.push({ ...plan("present"), nextRevision: item.revision });
-          else planned.push(plan("present"));
+          if (item.state === "present") planned.push({ ...plan("present"), nextRevision: item.revision, slotId });
+          else {
+            const write = plan("present");
+            planned.push({
+              ...write, slotId,
+              // 多结果虚拟输出首次 apply 建立节点归属（owner 行随本保存事务创建，B.6）。
+              createOwner: item.outputRowId === null && isMultiResultOutputKey(item.outputKey),
+            });
+          }
           break;
         }
         case "remove": {
@@ -241,14 +321,27 @@ export async function saveCanvasWithRecovery(
             );
           }
           if (item.outputKey !== TARGET_OUTPUT_KEY && item.outputRowId === null) {
-            // 虚拟输出首次 remove：一对一 primary 必须与 replaceTarget 配套（B.6）。
-            const paired = input.changes.some(other =>
-              other.action === "replaceTarget"
-              && /^gcr:([0-9a-f-]{36}):(.+)$/.exec(other.recoveryItemId)?.[1] === item.submissionRow.submission_id);
-            if (!paired) {
-              throw new RecoveryContractError(
-                recoveryError(422, "恢复动作与画布文档不一致", RECOVERY_REASONS.documentMismatch),
-              );
+            if (item.outputKey === PRIMARY_OUTPUT_KEY) {
+              // 一对一 primary 首次 remove 必须与 replaceTarget 配套（B.6：owner 从 $target 交给 primary）。
+              const paired = input.changes.some(other =>
+                other.action === "replaceTarget"
+                && /^gcr:([0-9a-f-]{36}):(.+)$/.exec(other.recoveryItemId)?.[1] === item.submissionRow.submission_id);
+              if (!paired) {
+                throw new RecoveryContractError(
+                  recoveryError(422, "恢复动作与画布文档不一致", RECOVERY_REASONS.documentMismatch),
+                );
+              }
+            } else {
+              // 多结果虚拟输出首次 remove：独立合法（看到结果后、首次保存前明确删掉某项），
+              // 键必须在投影集内；同事务建输出删除记录 + 节点 owner（B.6，不留下无 owner 记录）。
+              await assertVirtualKeyProjected(item);
+              if (owner !== undefined && !owned) {
+                throw new RecoveryContractError(
+                  recoveryError(422, "结果节点已被其他提交占用", RECOVERY_REASONS.documentMismatch),
+                );
+              }
+              planned.push({ ...plan("removed"), createOwner: true });
+              break;
             }
           }
           planned.push(plan("removed"));
@@ -277,6 +370,34 @@ export async function saveCanvasWithRecovery(
             throw new RecoveryContractError(
               recoveryError(422, "任务尚未成功产出，不能转换目标", RECOVERY_REASONS.documentMismatch),
             );
+          }
+          // IKJJQY（B.6）：占位转换与全部未决输出同一笔保存完成——不能只删占位遗漏结果。
+          // 投影歧义（重复键/缺产物/归属无法证明）拒绝转换，保留占位，不重发（B.8）。
+          const projection = await projectionOf(item.submissionRow);
+          if (projection.kind === "invalid") {
+            throw new RecoveryContractError(
+              recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),
+            );
+          }
+          const persistedKeys = new Set(
+            (await tx.generation_canvas_outputs.findMany({
+              where: { generation_canvas_submission_id: item.submissionRow.id },
+              select: { output_key: true },
+            })).map(output => output.output_key),
+          );
+          for (const virtual of projection.items) {
+            if (persistedKeys.has(virtual.outputKey)) continue;
+            const handled = input.changes.some(other => {
+              const ids = /^gcr:([0-9a-f-]{36}):(.+)$/.exec(other.recoveryItemId);
+              return ids?.[1] === item.submissionRow.submission_id
+                && ids[2] === virtual.outputKey
+                && (other.action === "apply" || other.action === "remove");
+            });
+            if (!handled) {
+              throw new RecoveryContractError(
+                recoveryError(422, "占位转换必须与全部结果同笔保存，不能只删占位遗漏结果", RECOVERY_REASONS.documentMismatch),
+              );
+            }
           }
           planned.push(plan("replaced"));
           break;
@@ -340,13 +461,15 @@ export async function saveCanvasWithRecovery(
         });
       } else {
         // 虚拟输出首次落行（apply/remove 都在此建行；remove 时直接 removed/1）。
+        // IKJJQY：node_id 用该项规范身份（多结果输出不再挂目标节点），slot 家族带槽位引用。
         await tx.generation_canvas_outputs.create({
           data: {
             generation_canvas_submission_id: write.submissionRow.id,
             output_key: write.outputKey,
-            node_id: write.submissionRow.target_node_id,
+            node_id: write.nodeId,
             state: write.nextState,
             revision: Math.max(1, write.nextRevision),
+            ...(write.slotId !== null ? { slot_id: BigInt(write.slotId) } : {}),
           },
         });
       }
@@ -357,15 +480,29 @@ export async function saveCanvasWithRecovery(
           data: { output_key: PRIMARY_OUTPUT_KEY, gmt_modified: new Date() },
         });
       }
+      // IKJJQY：虚拟多结果输出首次 apply/remove 同事务建立节点归属（版本从 1 起且继续保留，
+      // 供显式撤销核对；不留下无 owner 的删除记录）。并发抢占由 (project_id, node_id) 唯一约束兜底回滚。
+      if (write.createOwner) {
+        await tx.generation_canvas_node_owners.create({
+          data: {
+            project_id: pid,
+            node_id: write.nodeId,
+            generation_canvas_submission_id: write.submissionRow.id,
+            output_key: write.outputKey,
+            binding_revision: 1,
+          },
+        });
+      }
     }
     // ── 紧凑回执 ──
     for (let index = 0; index < input.changes.length; index += 1) {
       const write = planned[index]!;
-      const owner = ownerByNode.get(write.submissionRow.target_node_id);
+      const owner = ownerByNode.get(write.nodeId);
       changes.push({
         recoveryItemId: input.changes[index]!.recoveryItemId,
         revision: write.nextRevision,
-        nodeBindingRevision: owner ? Number(owner.binding_revision) : 0,
+        // 首次建立的归属行版本为 1；owner 从 $target 切到 primary 不推进版本（沿用现值）。
+        nodeBindingRevision: owner ? Number(owner.binding_revision) : write.createOwner ? 1 : 0,
         state: write.nextState,
       });
     }
