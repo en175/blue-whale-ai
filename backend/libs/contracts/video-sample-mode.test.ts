@@ -112,6 +112,33 @@ describe("成片请求：浏览器只带提交确认，不重放输入", () => {
       }),
     ).toThrow();
   });
+
+  it("★ IKJJR0：重新生成样片可携带可选 canvas_binding（合法绑定通过，非法载荷拒绝）", () => {
+    const binding = {
+      protocol_version: 1,
+      submission_id: "0a1b2c3d-0000-4000-8000-000000000021",
+      target_node_id: "video-node-regen-1",
+      expected_binding_revision: 0,
+      recovery_seed: {
+        target: { role: "result-placeholder", x: 0, y: 0, width: 320, height: 180, name: "" },
+        sources: [],
+      },
+    };
+    expect(
+      sampleRegenerateRequestSchema.parse({
+        expected_credits: 4,
+        quote_revision: "r2",
+        canvas_binding: binding,
+      }),
+    ).toEqual({ expected_credits: 4, quote_revision: "r2", canvas_binding: binding });
+    expect(() =>
+      sampleRegenerateRequestSchema.parse({
+        expected_credits: 4,
+        quote_revision: "r2",
+        canvas_binding: { ...binding, submission_id: "not-uuid" },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("stageQuoteViewSchema：无报价双 null，有报价双非空", () => {
@@ -195,9 +222,15 @@ describe("枚举值冻结（跨语言对账锚点）", () => {
     expect(VIDEO_STAGES).toEqual(["video", "sample", "final"]);
     expect(CHARGE_STATES).toEqual(["held", "settled", "released"]);
     expect(JOB_STATUS_CHECKING).toBe("checking");
-    // confirmedSubmitFieldsSchema 是三类提交共用增量（成片 / 重新生成同源）
+    // confirmedSubmitFieldsSchema 仍是成片提交的完整形态（三类提交共用增量）。
     expect(videoFinalizeCreateRequestSchema).toBe(confirmedSubmitFieldsSchema);
-    expect(sampleRegenerateRequestSchema).toBe(confirmedSubmitFieldsSchema);
+    // IKJJR0：重新生成在其上扩展可选 canvas_binding（统一关联受理），仍 strict。
+    expect(sampleRegenerateRequestSchema.shape.canvas_binding).toBeDefined();
+    expect(Object.keys(sampleRegenerateRequestSchema.shape)).toEqual([
+      "expected_credits",
+      "quote_revision",
+      "canvas_binding",
+    ]);
   });
 });
 

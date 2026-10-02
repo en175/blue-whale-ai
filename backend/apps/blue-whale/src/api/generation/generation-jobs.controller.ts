@@ -433,6 +433,7 @@ export class GenerationJobsController {
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("authorization") authorization?: string,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     const billing = this.billing();
     const result = await handleRegenerateSampleCreate(
@@ -462,6 +463,12 @@ export class GenerationJobsController {
       },
       sealProviderCredential(authorization),
     );
+    // IKJJR0（B.8 局部适配器）：新协议受控错误（canvas_binding 载荷无效/受理冲突等）信封
+    // 直写 HTTP 状态与 data.reason，不经 AllExceptionsFilter（它会置空 data）。
+    if (isRecoveryControlled(result)) {
+      res?.status(result.code).json(result);
+      return;
+    }
     // 与 create（IKG57P）同款口径：业务失败走 AllExceptionsFilter 统一投影。
     if (result.code !== 200) {
       throw new DomainError(result.code, result.msg ?? undefined);

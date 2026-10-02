@@ -10,6 +10,8 @@
 //   · 截止边界（IKIZKG）：网关 SubmitTime 晚于上游 created_at，不能当 7 天起算点。
 import { z } from "zod";
 
+import { canvasBindingSchema } from "./canvas-recovery.js";
+
 /** 十进制字符串 ID（BigInt 序列化后的浏览器形态；工单红线：契约 ID 一律字符串）。 */
 const decimalIdSchema = z.string().regex(/^[1-9][0-9]*$/);
 
@@ -145,8 +147,13 @@ export function finalizeDeadlineFromUpstreamCreatedAt(
 /** 重新生成样片请求体（`POST .../generation-jobs/:jobId/regenerate-sample`，
  *  `jobId` = 原样片任务 ID）：从原样片**冻结输入**新建任务与结果卡，重新校验
  *  素材与现价（提交确认两字段必带，报价独立入口返回）。不继承旧报价、旧截止、
- *  旧 Draft ID——新样片有自己的上游任务与期限。 */
-export const sampleRegenerateRequestSchema = confirmedSubmitFieldsSchema;
+ *  旧 Draft ID——新样片有自己的上游任务与期限。
+ *  canvas_binding（IKJJR0，IKIXK9-SPEC-20261002 B.3）：新协议恢复绑定，可选；携带时
+ *  Idempotency-Key 必须等于 submission_id。新样片属独立新承接目标（新 target_node_id），
+ *  随创建管线统一关联受理（幂等回读先于报价/素材复算）。 */
+export const sampleRegenerateRequestSchema = confirmedSubmitFieldsSchema.extend({
+  canvas_binding: canvasBindingSchema.optional(),
+});
 export type SampleRegenerateRequest = z.infer<typeof sampleRegenerateRequestSchema>;
 
 // ═══════════════════════════════════════════════════════════════
