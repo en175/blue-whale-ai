@@ -196,6 +196,9 @@ interface BottomDialogProps extends RefStripOrderProps {
   onReorderMediaRefs?: (orderedKeys: string[]) => void;
   /** Toast 提示（上传超限/首尾帧校验等场景，由父级注入全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  /** IKJGE6：视频草稿目标节点 id（与提交时 target_node_id 同源）——报价与样片报价带上它，
+   *  后端才做画布文本带入合并（编辑单按源视频时长预估的判定输入）；自由模式不传，行为同旧 */
+  targetNodeId?: string;
   /** 画布 @ 引用候选 */
   mentionItems?: AtMentionItem[];
   /** 选中 @ 素材后写入参考区 */
@@ -225,7 +228,7 @@ export interface VideoGenSeedParams {
   sampleMode?: boolean;
 }
 
-export default function BottomDialog({ projectId, onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ projectId, onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes, targetNodeId }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -441,6 +444,9 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       parameters: quoteParameters,
       expected_output_count: 1,
       ...(quoteReferences.length > 0 ? { references: quoteReferences } : {}),
+      // IKJGE6：草稿目标与提交同源带上——服务端复算读的是提交侧合并结果，
+      // 报价不带同一合并会被判 quote_stale 误拒。
+      ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
     }),
     enabled: sampleMode && !!projectId && quoteParameters.model_id !== '',
   });
@@ -1399,6 +1405,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
               type="video"
               parameters={quoteParameters}
               references={quoteReferences}
+              targetNodeId={targetNodeId}
             />
           ) : null}
           {/* 字数统计 */}

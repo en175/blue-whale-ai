@@ -60,6 +60,12 @@ export interface QuoteJobPayload {
    * （`GenerationRefItem.duration`），漏了它报价会按「无视频输入」估。
    */
   references?: GenerationRefItem[];
+  /**
+   * IKJGE6：视频草稿目标节点 id——带它后端报价才做与建任务同一套画布文本带入合并
+   * （文本卡提及的视频参考只在服务端合并，不带此字段预览价会与实扣分叉）。仅草稿绑定
+   * 模式传；自由模式（无目标卡）与图片/音频面板不传，行为同旧。
+   */
+  target_node_id?: string;
 }
 
 /** 报价结果 —— IKIZQB 起即契约 StageQuoteView（video-sample-mode.ts §2）：

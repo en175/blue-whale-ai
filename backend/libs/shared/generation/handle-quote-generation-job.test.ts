@@ -700,3 +700,241 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
     expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// IKJGE6：画布文本带入合并的报价口径——「参考视频仅来自画布文本带入 + 编辑意图提示词」
+// 时，报价判定输入与建任务合并后引用集合同源：预览计价时长 = 源视频时长（edit 口径），
+// 样片提交确认复算不误拒。此前报价按原始请求体投影，画布文本带入的视频参考进不了
+// 判定输入，编辑单被误判 default 按用户所选时长出价，实扣却按源视频时长冻结。
+// ═══════════════════════════════════════════════════════════════
+describe("IKJGE6 画布文本带入合并报价口径", () => {
+  // 画布：目标视频卡 media-1 ← 文本卡 text-a（正文提及 media-2 的视频素材，快照齐备）
+  // + 索引线 media-2 → text-a——文本带入参考由此派生（与建任务测试的 TEXT_REF_CANVAS 同构）。
+  const CANVAS = {
+    nodes: JSON.stringify([
+      { id: "media-1", type: "mediaNode", data: { mediaType: "video" } },
+      {
+        id: "text-a",
+        type: "textNode",
+        data: {
+          text: "参考这段素材",
+          mediaMentions: [{ start: 0, end: 2, nodeId: "media-2", assetId: "2" }],
+          mediaRefs: [
+            { nodeId: "media-2", assetId: "2", mediaType: "video", name: "源视频", url: "http://v/2.mp4" },
+          ],
+        },
+      },
+      { id: "media-2", type: "mediaNode", data: { mediaType: "video" } },
+    ]),
+    edges: JSON.stringify([
+      { id: "e-attach", source: "text-a", target: "media-1" },
+      { id: "e-index", source: "media-2", target: "text-a", data: { textIndex: true } },
+    ]),
+  };
+
+  /** Seedance 2.5 能力行（edit 约束 + 参考位 + 样片开关；supported_* 供建任务档位校验）。 */
+  const TEXT_REF_ROW = {
+    model_id: MODEL_25_ID,
+    version: 345,
+    supported_sizes: [{ id: "480p", api_value: "480p" }, { id: "720p", api_value: "720p" }],
+    supported_aspect_ratios: ["16:9", "9:16", "adaptive"],
+    supported_durations: { min: 4, max: 30, step: 1 },
+    features: {
+      audio: true,
+      sample_mode: true,
+      video_reference: true,
+      video_reference_max: 10,
+      audio_reference: false,
+      audio_reference_max: 10,
+      image_reference_max: 30,
+      max_reference_duration_sec: 30,
+      task_types: {
+        default: { allowed_ratios: ["16:9", "9:16", "adaptive"] },
+        edit: { allowed_ratios: ["adaptive"] },
+        prolong: { allowed_ratios: ["adaptive"] },
+      },
+    },
+  };
+
+  /** 触发场景请求体：references 里没有视频——它只来自画布文本带入（触发条件 1）；
+   *  提示词带编辑意图（条件 2）；用户所选 4 秒（源视频 13 秒长于它 → 修复前预览少算）。 */
+  const TEXT_REF_BODY = {
+    type: "video",
+    expected_output_count: 1,
+    target_node_id: "media-1",
+    parameters: {
+      prompt: "把背景替换成海边",
+      model_id: MODEL_25_ID,
+      aspect_ratio: "adaptive",
+      resolution: "720p",
+      duration: 4,
+    },
+  };
+
+  /** 同一套画布/素材/能力行喂两侧：报价与建任务取到同一个数，才谈得上同源。 */
+  function textRefHarness(
+    client: BillingClient,
+    resolveTier: (userId: string) => Promise<string>,
+    assetDuration: number | null = 13,
+  ) {
+    const getByProject = vi.fn().mockResolvedValue({
+      id: "9", project_id: "1", version: 3, viewport: null, nodes: CANVAS.nodes, edges: CANVAS.edges,
+    });
+    const resolveInputAssets = vi.fn(async (ids: string[]) =>
+      ids.map((id) => ({ id, type: "video" as const, duration: assetDuration })));
+    const models = vi.fn().mockResolvedValue([TEXT_REF_ROW]);
+    const quoteDeps = {
+      projects: { findOwnedById: ownedProject() },
+      models: { listEnabledByType: models },
+      canvas: { getByProject },
+      assets: { resolveInputAssets },
+      quote: createBillingQuote({ client, resolveTier, logger }),
+    } as unknown as QuoteGenerationJobDeps;
+    const createJob = vi.fn(
+      async (
+        _input: unknown,
+        options?: { billing?: { hold: (jobId: number) => Promise<void> } },
+      ) => {
+        await options?.billing?.hold(1);
+        return { generation_job_id: "1", cursor: 1 };
+      },
+    );
+    const createDeps = {
+      projects: { findOwnedById: ownedProject() },
+      models: { listEnabledByType: models },
+      command: { createJob },
+      canvas: { getByProject },
+      assets: { resolveInputAssets },
+      billing: {
+        hold: createBillingHold({ client, resolveTier, logger }),
+        release: vi.fn(async () => {}),
+      },
+      quote: createBillingQuote({ client, resolveTier, logger }),
+    } as unknown as Parameters<typeof handleCreateGenerationJob>[4];
+    return { quoteDeps, createDeps, createJob, getByProject, resolveInputAssets };
+  }
+
+  it("★ 触发场景：预览计价时长 = 源视频时长（edit 口径），报价与 Hold specs 同口径、带源时长标记", async () => {
+    const { client, hold, quote } = fakeBilling();
+    const resolveTier = vi.fn().mockResolvedValue("pro");
+    const h = textRefHarness(client, resolveTier);
+
+    const created = await handleCreateGenerationJob(USER_ID, PROJECT_ID, TEXT_REF_BODY, null, h.createDeps);
+    expect(created.code).toBe(200);
+    const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, TEXT_REF_BODY, h.quoteDeps);
+
+    const holdArg = hold.mock.calls[0]?.[0] as unknown as HoldArgs;
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    // 交给 billing 的时长是回填后的源视频 13 秒（不是用户所选的 4 秒）；输入时长同样吃到
+    expect(quoteArg.specs.duration).toBe("13");
+    expect(quoteArg.specs.video_input_seconds).toBe("13");
+    expect(holdArg.specs.duration).toBe("13");
+    // 除建任务侧的非定价标量（prompt 惯例剥除 + target_node_id/text_input_signature 快照键）外
+    // 逐字相等——「预览价 = 实扣价」的规格级证明。
+    const {
+      prompt: _prompt,
+      target_node_id: _target,
+      text_input_signature: _signature,
+      ...holdPricingSpecs
+    } = holdArg.specs;
+    expect(quoteArg.specs).toEqual(holdPricingSpecs);
+    expect(result.data).toEqual({
+      credits: 42,
+      quote_revision: expect.any(String),
+      duration_basis: "source_video",
+    });
+  });
+
+  it("★ 样片提交确认同源：报价端点给出的 credits/quote_revision → 建任务复算不误拒", async () => {
+    const { client } = fakeBilling();
+    const resolveTier = vi.fn().mockResolvedValue("free");
+    const h = textRefHarness(client, resolveTier);
+    const body = {
+      ...TEXT_REF_BODY,
+      parameters: { ...TEXT_REF_BODY.parameters, resolution: "480p", sample_mode: true },
+    };
+
+    // 1) 用户在面板看到的报价（合并后 edit 口径 + 源时长标记）
+    const quoted = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, body, h.quoteDeps);
+    expect(quoted.data?.duration_basis).toBe("source_video");
+
+    // 2) 携带确认两字段提交：复算必须重走同一合并 + 同一编辑口径改写，否则 quote_stale 误拒
+    const result = await handleCreateGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      {
+        ...body,
+        expected_credits: quoted.data?.credits ?? 0,
+        quote_revision: quoted.data?.quote_revision ?? "",
+      },
+      null,
+      h.createDeps,
+    );
+    expect(result.code).toBe(200);
+    expect(result.data?.generation_job_id).toBe("1");
+  });
+
+  it("无 target_node_id → 不读画布，报价行为同旧（时长 = 用户所选，无源时长标记）", async () => {
+    const { client, quote } = fakeBilling();
+    const h = textRefHarness(client, vi.fn().mockResolvedValue("free"));
+    const { target_node_id: _dropped, ...body } = TEXT_REF_BODY;
+
+    const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, body, h.quoteDeps);
+
+    expect(h.getByProject).not.toHaveBeenCalled();
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data?.duration_basis).toBeUndefined();
+  });
+
+  it("合并校验失败（首尾帧与文本带入互斥——建任务会 400）→ 空报价，不给出可提交金额", async () => {
+    const { client, quote } = fakeBilling();
+    const h = textRefHarness(client, vi.fn().mockResolvedValue("free"));
+    const body = {
+      ...TEXT_REF_BODY,
+      references: [{ role: "first_frame", asset_id: "3", type: "image" }],
+    };
+
+    const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, body, h.quoteDeps);
+
+    expect(result.data).toEqual({ credits: null, quote_revision: null });
+    expect(quote).not.toHaveBeenCalled();
+  });
+
+  it("量不到源时长（素材无 duration）→ 回落用户所选时长，不按 0 估也不拒单", async () => {
+    const { client, quote } = fakeBilling();
+    const h = textRefHarness(client, vi.fn().mockResolvedValue("free"), null);
+
+    const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, TEXT_REF_BODY, h.quoteDeps);
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data?.duration_basis).toBeUndefined();
+  });
+
+  it("素材数不齐（resolveInputAssets 短回——建任务侧会 400）→ 整个不回填，回落旧口径", async () => {
+    const { client, quote } = fakeBilling();
+    const h = textRefHarness(client, vi.fn().mockResolvedValue("free"), 13);
+    // 短回：请求 N 个 id，只返回 N-1 个——报价侧约定「不按残缺映射猜」，整个不回填。
+    h.resolveInputAssets.mockImplementation(async (ids: string[]) =>
+      ids.slice(1).map((id) => ({ id, type: "video" as const, duration: 13 })),
+    );
+
+    const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, TEXT_REF_BODY, h.quoteDeps);
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data?.duration_basis).toBeUndefined();
+  });
+
+  it.each([0, -5])("源时长为 %d 秒（非正数）→ 双闸拦下，回落用户所选", async (badDuration) => {
+    const { client, quote } = fakeBilling();
+    const h = textRefHarness(client, vi.fn().mockResolvedValue("free"), badDuration);
+
+    const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, TEXT_REF_BODY, h.quoteDeps);
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data?.duration_basis).toBeUndefined();
+  });
+});

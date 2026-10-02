@@ -106,6 +106,10 @@ export function deriveSampleRegenerateBody(
 export interface RegenerateSampleQuoteDeps {
   projects: Parameters<typeof handleQuoteGenerationJob>[3]["projects"];
   models: Parameters<typeof handleQuoteGenerationJob>[3]["models"];
+  /** IKJGE6：报价入口的画布/素材依赖透传（派生 body 已剥 target_node_id，合并不触发；
+   *  仍按同一接口传递，避免两个报价入口出现「一个能合并一个不能」的暗分叉）。 */
+  canvas: Parameters<typeof handleQuoteGenerationJob>[3]["canvas"];
+  assets: Parameters<typeof handleQuoteGenerationJob>[3]["assets"];
   /** 原样片读取（复用 IKIZQC 的来源样片投影：input/video_stage 全在里面）。 */
   sampleSource: { findFinalizeSourceJob(args: {
     projectId: string;
@@ -155,6 +159,8 @@ export async function handleRegenerateSampleQuote(
   return handleQuoteGenerationJob(userId, projectId, derived, {
     projects: deps.projects,
     models: deps.models,
+    canvas: deps.canvas,
+    assets: deps.assets,
     quote: deps.quote,
   });
 }
