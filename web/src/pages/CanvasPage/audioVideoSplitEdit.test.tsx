@@ -467,3 +467,52 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     expect(retried.data.src).toBe('http://tos/y.m4a');
   });
 });
+
+it('同卡直接重入产生新会话：旧受理只收尾任务，不关闭新会话或继承旧界面锁', async () => {
+  let accept!: (value: { job_id: string; status: string }) => void;
+  apiMocks.createMediaExtraction.mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; }));
+  apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'old', status: 'processing', progress: 1, asset: null });
+  await renderPage();
+  await enterSplit();
+  await click('audio-video-split-send-btn');
+  expect(bodyBtn('audio-video-split-send-btn').disabled).toBe(true);
+  await enterSplit();
+  expect(bodyBtn('audio-video-split-send-btn').disabled).toBe(false);
+  await selectFormat('wav');
+  await act(async () => { accept({ job_id: 'old', status: 'queued' }); });
+  expect(toolbar()).not.toBeNull();
+  expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('WAV');
+  expect(nodeById('media-extract-old')!.data.mediaExtract).toEqual({
+    sourceAssetId: '5', lastInput: { source_asset_id: '5', output_format: 'm4a' },
+  });
+});
+
+it.each(['success', 'failure'] as const)('关闭后同卡重开：旧 %s 不关闭新会话、复位新锁或提示旧错误', async (outcome) => {
+  let acceptOld!: (value: { job_id: string; status: string }) => void;
+  let rejectOld!: (error: Error) => void;
+  let acceptNew!: (value: { job_id: string; status: string }) => void;
+  apiMocks.createMediaExtraction.mockImplementationOnce(() => new Promise((resolve, reject) => { acceptOld = resolve; rejectOld = reject; }));
+  apiMocks.createMediaExtraction.mockImplementationOnce(() => new Promise((resolve) => { acceptNew = resolve; }));
+  apiMocks.fetchJobStatus.mockResolvedValue({ status: 'processing', progress: 1, asset: null });
+  await renderPage();
+  await enterSplit();
+  await click('audio-video-split-send-btn');
+  await click('audio-video-split-close');
+  await enterSplit();
+  await selectFormat('wav');
+  await click('audio-video-split-send-btn');
+  await act(async () => {
+    if (outcome === 'success') acceptOld({ job_id: 'old', status: 'queued' });
+    else rejectOld(new Error('旧请求失败'));
+  });
+  expect(toolbar()).not.toBeNull();
+  expect(bodyBtn('audio-video-split-send-btn').disabled).toBe(true);
+  expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('WAV');
+  expect(document.body.textContent).not.toContain('音视频分离任务创建失败');
+  if (outcome === 'success') expect(nodeById('media-extract-old')).toBeTruthy();
+  await act(async () => { acceptNew({ job_id: 'new', status: 'queued' }); });
+  expect(toolbar()).toBeNull();
+  expect(nodeById('media-extract-new')!.data.mediaExtract).toEqual({
+    sourceAssetId: '5', lastInput: { source_asset_id: '5', output_format: 'wav' },
+  });
+});
