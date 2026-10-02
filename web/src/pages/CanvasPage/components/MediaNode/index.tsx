@@ -620,7 +620,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   /* 依赖只列实际消费的字段（IKJIU7）：整个 data 进依赖时，渲染期等值 data 注入
      （成组/解组、stale 徽标派生）会沿 syncVideoDims→hydratePausedVideo 拆掉离屏
-     解码器重建 <video>，已解码画面与播放态随之丢失 */
+     解码器重建 <video>，已解码画面与播放态随之丢失。前提：data.onMediaDims 引用
+     跨渲染稳定（上游仅在水合/建卡时注入）；若改为渲染期逐帧注入，须同步收紧此处 */
   const syncVideoDims = useCallback((video: HTMLVideoElement) => {
     const { videoWidth: w, videoHeight: h, duration } = video;
     const dims: MediaDims = {};

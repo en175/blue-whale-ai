@@ -48,6 +48,8 @@ async function render() {
   await act(async () => { root.render(createElement(FlowCanvas, props)); });
 }
 
+// 驱动成组/解组的渲染期后果（groups prop + 等值新 data 注入），不经 onCreateGroup 交互本身；
+// 缺陷就在渲染层依赖链，若未来成组链路不再重建 data，本用例仍绿属预期
 it('视频成组与解组后保持已经解码的画面和有效播放源', async () => {
   await render();
   const videos = [...document.body.querySelectorAll<HTMLVideoElement>('div[aria-hidden="true"] > video')];
