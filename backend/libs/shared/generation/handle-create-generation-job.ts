@@ -917,8 +917,9 @@ export function applyEditSourceDurationBasis(
   return true;
 }
 
-/** IKJGE6：视频参考时长的权威补齐 —— IKJIVA 起与「筛选+resolve+比对」整段合并管线
- *  （resolveReferenceDurations）一起单份落位在 resolve-reference-durations.ts。 */
+// IKJGE6：视频参考时长的权威补齐（withVideoReferenceDurations）—— IKJIVA 起与
+// 「筛选+resolve+比对」整段合并管线（resolveReferenceDurations）一起单份落位在
+// resolve-reference-durations.ts。
 
 /**
  * 报价（价格预览）用的规格投影 —— 喂给 billing 的 `Quote`，只算不扣。
@@ -1981,6 +1982,12 @@ export async function handleCreateGenerationJob(
   if (type === "video" || type === "audio") {
     const parsedTextRefs = parseReferences(effectiveBody.references);
     const textRefItems = parsedTextRefs.kind === "ok" ? parsedTextRefs.items : [];
+    // IKJIV8：references 全为素材库引用（material_id，本地零表）时筛选为空——共享管线虽按
+    // resolved 返回，但那是 parseReferences 的规范化副本（丢未知键/剥非法 duration），拿它覆盖
+    // effectiveBody.references 属重构引入的行为漂移。恢复旧语义：筛选为空（无本地 asset）时
+    // 服务端没做任何回填，就不改写调用方请求体。报价侧筛选面不同（videoAssetIdsNeedingDuration）
+    // 且 references 一律出自画布合并产物，不受本条件影响。
+    const hasLocalAssetRefs = localAssetReferenceIds(textRefItems).length > 0;
     const ruling = await resolveReferenceDurations({
       references: textRefItems,
       assetIdsOf: localAssetReferenceIds,
@@ -2013,7 +2020,9 @@ export async function handleCreateGenerationJob(
     //    没有（共享管线不回填 null/非正数）就不写这个字段——宁可让 billing 判「含视频输入却
     //    量不到输入时长」而拒绝，也不按 0 估（少冻＝平台垫钱）。素材库引用（material_id，
     //    本地零表）只能靠调用方带；画布提交时会带。
-    if (type === "video" && parsedTextRefs.kind === "ok") {
+    // IKJIV8：hasLocalAssetRefs 为真蕴含 parseReferences 已 ok（非 ok 时 textRefItems 恒为
+    // 空数组、筛选为空），故此处不再重复判 ok；空筛选不覆盖（见上方条件注释，旧语义）。
+    if (type === "video" && hasLocalAssetRefs) {
       effectiveBody = { ...effectiveBody, references: ruling.references };
     }
   }

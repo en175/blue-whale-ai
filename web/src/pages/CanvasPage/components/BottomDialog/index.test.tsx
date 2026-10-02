@@ -651,10 +651,13 @@ describe('IKJIVN 样片报价 payload 携带 target_node_id', () => {
     );
   }
 
-  /** 开启样片并等样片规格报价请求落地，返回全部报价请求体。 */
-  async function openSampleAndCollectQuoteBodies(fetchMock: ReturnType<typeof vi.fn>) {
+  /** 开启样片并等样片规格报价请求落地，返回全部报价请求体（props 透传 renderSampleDialog）。 */
+  async function openSampleAndCollectQuoteBodies(
+    fetchMock: ReturnType<typeof vi.fn>,
+    props: SampleDialogProps = {},
+  ) {
     fetchGenerationModels.mockResolvedValue([seedance25]);
-    await renderSampleDialog({ projectId: 'p1' });
+    await renderSampleDialog({ projectId: 'p1', ...props });
     await openSampleConfig();
     await act(async () => { sampleSwitch()!.click(); });
     // 先确保样片规格请求真的发出（负向断言的前提：请求存在才谈得上「不带某键」）
@@ -665,38 +668,11 @@ describe('IKJIVN 样片报价 payload 携带 target_node_id', () => {
   }
 
   it('草稿绑定模式：样片报价查询 payload 的 target_node_id = 当前绑定节点 id（与提交同源）', async () => {
-    fetchGenerationModels.mockResolvedValue([seedance25]);
     const fetchMock = vi.fn().mockResolvedValue(quoteResponseReady());
     vi.stubGlobal('fetch', fetchMock);
 
-    // 草稿绑定模式：父级传入当前绑定节点 id
-    mountNode = document.createElement('div');
-    document.body.appendChild(mountNode);
-    root = createRoot(mountNode);
-    await act(async () => {
-      root.render(
-        createElement(
-          QueryClientProvider,
-          { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-          createElement(BottomDialog, {
-            onClose: vi.fn(),
-            onSend: vi.fn(),
-            projectId: 'p1',
-            targetNodeId: 'media-draft-9',
-            videoMediaRefs: { reference: [] },
-            videoDraftBinding: { onParamsChange: vi.fn() },
-          }),
-        ),
-      );
-    });
-    await act(async () => { await Promise.resolve(); });
-    await openSampleConfig();
-    await act(async () => { sampleSwitch()!.click(); });
-    await vi.waitFor(() =>
-      expect(fetchMock.mock.calls.some(([, req]) =>
-        (JSON.parse((req as RequestInit).body as string)).parameters?.sample_mode === true)).toBe(true));
-
-    const bodies = fetchMock.mock.calls.map(([, req]) => JSON.parse((req as RequestInit).body as string));
+    // 草稿绑定模式：父级传入当前绑定节点 id（经 helper 透传 renderSampleDialog）
+    const bodies = await openSampleAndCollectQuoteBodies(fetchMock, { targetNodeId: 'media-draft-9' });
     // 样片报价查询（提交门控的唯一金额来源）必须带同一目标。正常路径徽标与样片查询共用
     // 同一 queryKey 只发一次；若两出口任一漏带 target_node_id，键分叉会发出多份样片规格
     // 请求且漏带的那份在此现形——所以断言「每一份」而不是「找到一份」。

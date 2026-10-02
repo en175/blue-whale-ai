@@ -3237,6 +3237,31 @@ describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）",
       { role: "reference", type: "image", asset_id: "12" },
     ]);
   });
+
+  // IKJIV8：references 全为素材库引用（material_id，本地零表）时共享管线筛选为空——
+  // 服务端没做任何回填，不改写 effectiveBody.references（IKJIVA 重构曾以 parsed 副本
+  // 覆盖，属行为漂移）。钉住旧语义：零本地资产查询、调用方带的时长原样冻结。
+  it("素材库-only 引用（无本地 asset）：不查本地资产，调用方带的时长原样冻结", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", material_id: "Asset-mat-1", type: "video", duration: 6 }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(deps.assets.resolveInputAssets).not.toHaveBeenCalled();
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", type: "video", material_id: "Asset-mat-1", duration: 6 },
+    ]);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
