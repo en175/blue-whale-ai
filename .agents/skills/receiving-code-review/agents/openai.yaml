@@ -1,0 +1,5 @@
+interface:
+  display_name: "Receiving Code Review"
+  short_description: "Handle review feedback with verification"
+policy:
+  allow_implicit_invocation: false
