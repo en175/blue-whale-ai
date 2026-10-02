@@ -252,8 +252,11 @@ function sendBar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="audio-mix-send-bar"]');
 }
 
-function nodeById(id: string): Node | undefined {
-  return (flowProps.current.mediaNodes as Node[]).find((n) => n.id === id);
+/** IKJJR4：混合占位卡节点 id 预分配（非 jobId 派生），按 jobId 定位。 */
+function mixCardByJobId(jobId: string): Node | undefined {
+  return (flowProps.current.mediaNodes as Node[]).find(
+    (n) => n.id.startsWith('audio-mix-') && String(n.data?.jobId) === jobId,
+  );
 }
 
 beforeEach(() => {
@@ -278,43 +281,23 @@ afterEach(async () => {
 });
 
 describe('IKI8L8 音频混合会话纪元：Esc 在途退出重开后旧响应不打扰新会话', () => {
-  it('当前混合任务创建成功但首保存失败：提示用户重试保存，任务仍建卡轮询', async () => {
+  it('当前混合任务受理后建卡并轮询；首保存骨架移除后落盘失败不阻断任务追踪', async () => {
     apiMocks.createAudioMix.mockResolvedValue({ job_id: 'j1', status: 'queued' });
     await renderPage();
     await enterMix();
     await armSession('mp3');
-    apiMocks.saveCanvasDoc.mockRejectedValueOnce(new Error('save failed'));
 
     await sendMix();
     await flush();
 
-    expect(nodeById('audio-mix-j1')).toBeTruthy();
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
-    expect(document.body.textContent).toContain('混合任务已创建，但画布保存失败，请重试保存');
+    // IKJJR4：受理即回填 jobId 并开始轮询；卡片落盘走防抖自动保存，
+    // 保存失败不再需要会话期 toast——受理回执丢失由恢复扫描兜底（mixMuxTasks.test 覆盖）
+    expect(mixCardByJobId('j1')).toBeTruthy();
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
   });
 
-  it('首保存在途时重开混合：旧保存失败不向新会话提示，WAV 参数保留', async () => {
-    let rejectSave!: (error: Error) => void;
-    apiMocks.createAudioMix.mockResolvedValue({ job_id: 'j1', status: 'queued' });
-    await renderPage();
-    await enterMix();
-    await armSession('mp3');
-    apiMocks.saveCanvasDoc.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
-
-    await sendMix();
-    expect(sendBar()).toBeNull();
-    await enterMix();
-    await armSession('wav');
-    await act(async () => { rejectSave(new Error('旧画布保存失败')); });
-    await flush();
-
-    expect(document.body.textContent).not.toContain('混合任务已创建，但画布保存失败，请重试保存');
-    expect(sendBar()).not.toBeNull();
-    expect(bodyBtn('audio-mix-format-trigger').textContent).toContain('wav');
-    expect(nodeById('audio-mix-j1')).toBeTruthy();
-    expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
-  });
+  // IKJJR4：首保存反馈骨架（首保存 toast / 首保存在途隔离）随专属恢复骨架一并移除——
+  // 落盘统一走防抖保存 + 恢复扫描，会话不再持有保存反馈职责（原用例随之删除）。
 
   it('旧成功迟到：新会话仍开、WAV 保留；旧任务照常建卡连线首保存轮询；锁释放后可再发送', async () => {
     let resolveOld!: (value: { job_id: string; status: string }) => void;
@@ -341,16 +324,15 @@ describe('IKI8L8 音频混合会话纪元：Esc 在途退出重开后旧响应�
     expect(sendBar()).not.toBeNull();
     expect(bodyBtn('audio-mix-format-trigger').textContent).toContain('wav');
     // 旧任务已受理：结果占位卡（冻结的 WAV 参数）照常建立
-    const placeholder = nodeById('audio-mix-j1')!;
+    const placeholder = mixCardByJobId('j1')!;
     expect(placeholder).toBeTruthy();
-    expect(placeholder.data).toMatchObject({ fileName: '混合结果.wav', genStatus: 'generating' });
+    expect(placeholder.data).toMatchObject({ fileName: '混合结果.wav', genStatus: 'generating', jobId: 'j1' });
     // 来源边照常（a1/a2 → 占位卡，带 origin 标记）
     const lines = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
-      .filter((edge) => edge.target === 'audio-mix-j1');
+      .filter((edge) => edge.target === placeholder.id);
     expect(lines.map((edge) => [edge.source, edge.data?.origin]))
       .toEqual([['a1', AUDIO_MIX_EDGE_ORIGIN], ['a2', AUDIO_MIX_EDGE_ORIGIN]]);
-    // 首保存与轮询照常启动（会话失效不跳过任务收尾）
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+    // 轮询照常启动（会话失效不跳过任务收尾；落盘走防抖自动保存）
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
     // 旧请求结束只释放自己持有的任务在途锁：新会话可继续发送并正常闭环
     expect(bodyBtn('audio-mix-send').disabled).toBe(false);
@@ -359,7 +341,7 @@ describe('IKI8L8 音频混合会话纪元：Esc 在途退出重开后旧响应�
     expect(apiMocks.createAudioMix).toHaveBeenLastCalledWith('p1', expect.objectContaining({ output_format: 'wav' }), expect.objectContaining({ silent: true }));
     // 新会话自己的成功闭环不受会话保护影响（发送条正常退出、j2 建卡）
     expect(sendBar()).toBeNull();
-    expect(nodeById('audio-mix-j2')).toBeTruthy();
+    expect(mixCardByJobId('j2')).toBeTruthy();
   });
 
   it('旧失败迟到：新会话状态参数不变、无旧错误提示、无占位卡；锁释放后可再发送', async () => {
@@ -384,14 +366,13 @@ describe('IKI8L8 音频混合会话纪元：Esc 在途退出重开后旧响应�
     // 无旧错误提示（修订前：页面 catch 无纪元比对，旧错误弹给新会话）
     expect(document.body.textContent).not.toContain('旧会话时代的创建失败');
     expect(document.body.textContent).not.toContain('音频混合任务创建失败');
-    // 任务未创建：无占位卡、无来源边、无首保存
+    // 任务未创建：占位卡与来源线已随未受理回执撤回
     expect((flowProps.current.mediaNodes as Node[]).filter((node) => node.id.startsWith('audio-mix-'))).toEqual([]);
     expect(flowProps.current.edges).toEqual([]);
-    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
     // 旧请求结束后锁释放：新会话发送可用且正常成功
     await sendMix();
     expect(apiMocks.createAudioMix).toHaveBeenCalledTimes(2);
-    expect(nodeById('audio-mix-j2')).toBeTruthy();
+    expect(mixCardByJobId('j2')).toBeTruthy();
     expect(sendBar()).toBeNull();
   });
 });

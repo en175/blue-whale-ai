@@ -455,17 +455,39 @@ export function createAudioMix(
   );
 }
 
-/** 使用服务端冻结输入重试同一音频混合任务；调用方为一次重试尝试保留同一个幂等键。 */
+/** 专属重试成功 data：job_id 复用（同 jobId ≠ 同提交意图）；
+ *  IKJJR4（恢复契约 v1）：携 canvas_binding 受理时追加绑定视图（is_current 现查 owner）。 */
+export interface DedicatedRetryCreatedData {
+  job_id: string;
+  status: JobStatus;
+  replayed: boolean;
+  canvas_binding?: {
+    protocol_version: number;
+    submission_id: string;
+    target_node_id: string;
+    binding_revision: number;
+    job_id: string;
+    is_current: boolean;
+  };
+}
+
+/** 使用服务端冻结输入重试同一音频混合任务；调用方为一次重试尝试保留同一个幂等键。
+ *  IKJJR4：canvasBinding 非空时随 body 携带（Idempotency-Key 必须等于 submission_id，
+ *  由生成任务运行时保证）；不携带走历史路径零变化。 */
 export function retryAudioMix(
   projectId: string,
   jobId: string | number,
   idempotencyKey: string,
   init?: { silent?: boolean },
-): Promise<{ job_id: string; status: JobStatus; replayed: boolean }> {
-  return apiRequest(
+  canvasBinding?: unknown,
+): Promise<DedicatedRetryCreatedData> {
+  return apiRequest<DedicatedRetryCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes/${encodeURIComponent(String(jobId))}/retry`,
-    { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
-      ...silentInit(init) },
+    {
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
+      ...(canvasBinding ? { body: JSON.stringify({ canvas_binding: canvasBinding }) } : {}),
+      ...silentInit(init),
+    },
   );
 }
 
@@ -500,17 +522,23 @@ export function createAudioVideoMux(
 
 /** 使用服务端冻结输入重试同一音视频合成任务（IKIHPL `:jobId/retry`）；必带 Idempotency-Key
  *  （1–128 可打印非空白，服务端 PARAM_MISSING 拒绝空键），调用方为一次重试尝试保留同一个
- *  幂等键——双击/状态未知后重发沿用同键，服务端按 command_idempotency 重放。 */
+ *  幂等键——双击/状态未知后重发沿用同键，服务端按 command_idempotency 重放。
+ *  IKJJR4：canvasBinding 非空时随 body 携带（Idempotency-Key 必须等于 submission_id，
+ *  由生成任务运行时保证）；不携带走历史路径零变化。 */
 export function retryAudioVideoMux(
   projectId: string,
   jobId: string | number,
   idempotencyKey: string,
   init?: { silent?: boolean },
-): Promise<{ job_id: string; status: JobStatus; replayed: boolean }> {
-  return apiRequest(
+  canvasBinding?: unknown,
+): Promise<DedicatedRetryCreatedData> {
+  return apiRequest<DedicatedRetryCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-video-muxes/${encodeURIComponent(String(jobId))}/retry`,
-    { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
-      ...silentInit(init) },
+    {
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
+      ...(canvasBinding ? { body: JSON.stringify({ canvas_binding: canvasBinding }) } : {}),
+      ...silentInit(init),
+    },
   );
 }
 
