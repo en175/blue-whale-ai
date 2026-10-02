@@ -23,7 +23,8 @@ import {
   type CanvasBinding,
   type RecoveryErrorEnvelope,
 } from "@lib/contracts";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
 import { linkPromptMaterials, markAudioMixCards, markOutputSlotsPlaced } from "./canvas-repo.js";
 import type { CreatedJob } from "./generation-command-repo.js";
@@ -737,8 +738,16 @@ export async function saveCanvasWithRecovery(
       }
       itemStates.push({ submissionRow, outputKey, state, revision, outputRowId });
     }
-    const owners = await tx.generation_canvas_node_owners.findMany({ where: { project_id: pid } });
-    const ownerByNode = new Map(owners.map(owner => [owner.node_id, owner]));
+    // 锁定读取当前关联（B.6 步骤 2-3）：节点归属行按 node_id 排序 FOR UPDATE——
+    // restore/settleTarget/replaceTarget 的「归属未交给另一项」判定必须在锁内成立，
+    // 否则并发接管会让校验基于过期快照通过。
+    const involvedNodes = [...new Set(itemStates.map(item => item.submissionRow.target_node_id))].sort();
+    const ownerRows = await tx.$queryRaw<
+      Array<{ node_id: string; generation_canvas_submission_id: bigint; output_key: string; binding_revision: number }>
+    >`SELECT node_id, generation_canvas_submission_id, output_key, binding_revision
+      FROM generation_canvas_node_owners WHERE project_id = ${pid}
+      AND node_id IN (${Prisma.join(involvedNodes)}) FOR UPDATE`;
+    const ownerByNode = new Map(ownerRows.map(owner => [owner.node_id, owner]));
     const changes: CanvasRecoveryReceiptChange[] = [];
     // 逐动作校验 + 生成写入计划（写入延后到画布写成功之后，整笔原子）。
     interface PlannedWrite {
