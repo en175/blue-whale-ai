@@ -225,12 +225,9 @@ import {
   type SubtitleBoxPoint,
 } from './subtitleEraseBoxes';
 import {
-  buildImageCutoutRequest,
   imageCutoutSceneGateReason,
   IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT,
   type ImageCutoutIdentity,
-  type ImageCutoutRequest,
-  type ImageCutoutScene,
 } from './imageCutout';
 import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
 import {
@@ -246,10 +243,6 @@ import {
   IMAGE_OUTPAINT_EDGE_ORIGIN,
   ZERO_EXPANDS,
   buildImageOutpaintInput,
-  expandRatiosOf,
-  maxExpandPerSide,
-  outpaintGateReason,
-  presetExpands,
   type ExpandSides,
   type ImageOutpaintIdentity,
   type OutpaintPresetKey,
@@ -259,6 +252,7 @@ import ImageEnhanceDialog from './components/ImageEnhanceDialog';
 import VideoEnhanceDialog from './components/VideoEnhanceDialog';
 import FrameInterpolationDialog from './components/FrameInterpolationDialog';
 import ImageEraseDialog from './components/ImageEraseDialog';
+import { createCutoutSession, createOutpaintSession, applyOutpaintPreset, type OutpaintHost, type OutpaintFrozenInput, type OutpaintTaskSubmission, type CutoutHost, type CutoutSubmission } from './imageToolSessions';
 import { createSmartMattingSession, type SmartMattingHost, type SmartMattingSubmission } from './smartMattingSession';
 import {
   createImageEraseSession, createSubtitleEraseSession,
@@ -707,6 +701,8 @@ export default function CanvasPage() {
   const frameInterpolationBoundRef = useRef<string | null>(null);
   /** 当前已打开 HD 面板绑定的卡 id（同步写，口径同 enhanceBoundRef） */
   const videoEnhanceBoundRef = useRef<string | null>(null);
+  const outpaintHostRef = useRef<OutpaintHost | null>(null);
+  const cutoutHostRef = useRef<CutoutHost | null>(null);
   const smartMattingHostRef = useRef<SmartMattingHost | null>(null);
   const imageEraseHostRef = useRef<ImageEraseHost | null>(null);
   const subtitleEraseHostRef = useRef<SubtitleEraseHost | null>(null);
@@ -714,7 +710,7 @@ export default function CanvasPage() {
   const audioSpeedHostRef = useRef<AudioSpeedSessionHost | null>(null);
   const audioTrimHostRef = useRef<AudioToolSessionHost<AudioTrimInput> | null>(null);
   const audioVideoSplitHostRef = useRef<AudioVideoSplitHost | null>(null);
-  const [{ toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession }] = useState(() => {
+  const [{ toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession, cutoutSession, outpaintSession }] = useState(() => {
     const toolRuntime = createToolSessionRuntime();
     const audioVideoSplitSession = toolRuntime.register(createAudioVideoSplitSession(() => audioVideoSplitHostRef.current!));
     const audioTrimSession = toolRuntime.register(createAudioTrimSession(() => audioTrimHostRef.current!));
@@ -723,7 +719,9 @@ export default function CanvasPage() {
     const imageEraseSession = toolRuntime.register(createImageEraseSession(() => imageEraseHostRef.current!));
     const subtitleEraseSession = toolRuntime.register(createSubtitleEraseSession(() => subtitleEraseHostRef.current!));
     const smartMattingSession = toolRuntime.register(createSmartMattingSession(() => smartMattingHostRef.current!));
-    return { toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession };
+    const cutoutSession = toolRuntime.register(createCutoutSession(() => cutoutHostRef.current!));
+    const outpaintSession = toolRuntime.register(createOutpaintSession(() => outpaintHostRef.current!));
+    return { toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession, cutoutSession, outpaintSession };
   });
   // 项目首帧先使旧响应失效，随后从运行时读取唯一状态。
   toolRuntime.setProject(currentId);
@@ -845,38 +843,14 @@ export default function CanvasPage() {
   /** HD 面板发送中（IKH3VH）：创建往返期间面板只读防重复提交（口径同 audioVideoSplitSubmitting），
    *  创建失败复位（面板保留可调档重发） */
   const [videoEnhanceSubmitting, setVideoEnhanceSubmitting] = useState(false);
-  /** 抠图会话（IKGXMT，镜像扩图 outpaintNodeId 模式）：处于抠图工具栏会话的源图卡 node id，
-   *  null=未进入。工具栏参数（场景/描边/透明裁剪）为会话期交互态——提升在本页、不落节点 data、
-   *  不持久化，四路退出（X/Esc/点其他卡/点画布空白）全部丢弃；发送成功才经 buildImageCutoutRequest
-   *  冻结进结果卡 imageCutout.lastInput。 */
-  const [cutoutNodeId, setCutoutNodeId] = useState<string | null>(null);
-  /** 抠图场景（默认 general，规格故事 8：不主动切场景直接发送即合理结果） */
-  const [cutoutScene, setCutoutScene] = useState<ImageCutoutScene>('general');
-  /** 主体描边开关 + 宽度 px（1~50 默认 10，仅人像/商品场景携带出站；颜色固定白色不进 UI） */
-  const [cutoutNeedContour, setCutoutNeedContour] = useState(false);
-  const [cutoutContourSize, setCutoutContourSize] = useState<number>(IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT);
-  /** 透明背景裁剪开关（仅人像/商品场景携带出站） */
-  const [cutoutNeedCropBackground, setCutoutNeedCropBackground] = useState(false);
-  /** 抠图发送中（创建请求飞行期防重复提交，口径同 eraseSubmitting） */
-  const [cutoutSubmitting, setCutoutSubmitting] = useState(false);
-  /** 抠图会话参数默认值（进入/退出重置共用同一份，保证四路退出后重进无残留） */
-  const cutoutDefaultParams = {
-    scene: 'general' as ImageCutoutScene,
-    needContour: false,
-    contourSize: IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT,
-    needCropBackground: false,
-  };
-  /** 退出抠图会话（IKGXMT 四退出共用）：未发送的参数全部丢弃（无卡、无边、无任务），
-   *  会话身份与提交中标记一并复位。IKI61O：退出即推进纪元。 */
-  const exitCutoutSession = useCallback(() => {
-    toolSessionEpochRef.current.exit('cutout');
-    setCutoutNodeId(null);
-    setCutoutScene(cutoutDefaultParams.scene);
-    setCutoutNeedContour(cutoutDefaultParams.needContour);
-    setCutoutContourSize(cutoutDefaultParams.contourSize);
-    setCutoutNeedCropBackground(cutoutDefaultParams.needCropBackground);
-    setCutoutSubmitting(false);
-  }, []);
+  const cutoutView = cutoutSession.getSnapshot();
+  const cutoutNodeId = cutoutView.state?.nodeId ?? null;
+  const cutoutScene = cutoutView.state?.scene ?? 'general';
+  const cutoutNeedContour = cutoutView.state?.needContour ?? false;
+  const cutoutContourSize = cutoutView.state?.contourSize ?? IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT;
+  const cutoutNeedCropBackground = cutoutView.state?.needCropBackground ?? false;
+  const cutoutSubmitting = cutoutView.submitting;
+  const exitCutoutSession = cutoutSession.close;
 
   /** 裁切编辑态（IKGW1H 模式进出骨架）：处于裁切编辑的源图卡 node id，null=未进入。
    *  单值 state 即单目标约束（同一时刻仅一张卡处于裁切模式）；裁切框与比例（IKGW1N）
@@ -891,21 +865,11 @@ export default function CanvasPage() {
   /** 裁切执行中（IKGW1S：编码+上传期间）：重复点确认直接忽略（面板无 submitting 只读态，
    *  本页侧防双卡；成功即退出模式，失败复位留在模式） */
   const cropSubmittingRef = useRef(false);
-  /* ---------- 扩图模式会话（IKGOQX）：管理模式参考持续选取会话 ----------
-   * 会话 = 源图卡 id + 四方向扩展量；纯界面交互态不持久化（刷新即退出，无残留）。
-   * 四种退出（面板 X / Esc / 点其他卡 / 点画布空白）共用统一退出函数，均不留痕迹
-   * （不建卡、不连线、不产生任务）；再次进入从零开始（框与原图重合、默认原图比例）。 */
-  const [outpaintNodeId, setOutpaintNodeId] = useState<string | null>(null);
-  /** 四方向扩展量（画布 flow 单位）：扩图面板与扩展框共享的唯一状态源 */
-  const [outpaintExpands, setOutpaintExpands] = useState<ExpandSides>(ZERO_EXPANDS);
-  /** 扩图模式进行中（派生布尔，会话身份单点收敛） */
+  const outpaintView = outpaintSession.getSnapshot();
+  const outpaintNodeId = outpaintView.state?.nodeId ?? null;
+  const outpaintExpands = outpaintView.state?.expands ?? ZERO_EXPANDS;
   const outpaintSessionActive = outpaintNodeId != null;
-  /** 结束扩图模式：清会话与扩展量（不留痕迹；再次进入从零开始）。IKI61O：退出即推进纪元。 */
-  const endOutpaintSession = useCallback(() => {
-    toolSessionEpochRef.current.exit('outpaint');
-    setOutpaintNodeId(null);
-    setOutpaintExpands(ZERO_EXPANDS);
-  }, []);
+  const endOutpaintSession = outpaintSession.close;
   const [showEdges, setShowEdges] = useState(true);
   /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
@@ -2042,15 +2006,11 @@ export default function CanvasPage() {
     : null;
   const assetToolbarNode = hoverAssetToolbarNode ?? soloAssetToolbarNode;
   /** 点比例预设：以原图中心为锚外扩到该比例最小包含框（不可达预设已在面板置灰，此处防御返回） */
-  const handleOutpaintPresetSelect = useCallback(
-    (key: OutpaintPresetKey) => {
-      if (!outpaintRect) return;
-      const next = presetExpands(outpaintRect, key, maxExpandPerSide(outpaintRect));
-      if (!next) return;
-      setOutpaintExpands(next);
-    },
-    [outpaintRect],
-  );
+  const handleOutpaintPresetSelect = (preset: OutpaintPresetKey) => {
+    const state = outpaintSession.getSnapshot().state;
+    const node = state ? mediaNodesRef.current.find((item) => item.id === state.nodeId) : undefined;
+    if (node) outpaintSession.edit((current) => applyOutpaintPreset(current, node, preset));
+  };
   /** 草稿卡出生位（IKDMQQ）：视口中心附近空位，避开底部 Dock 预留区与既有节点 */
   const spawnDraftPosition = () => {
     const center = spawnPosRef.current();
@@ -4159,17 +4119,13 @@ export default function CanvasPage() {
    *  框外暗区/专属 Esc 等定向入口不经本装配，直调各工具完整退出函数。 */
   const buildToolSessionDeps = (): ToolSessionDeps => toolRuntime.coordinate({
     activity: {
-      cutout: cutoutNodeId,
       crop: cropTargetNodeId,
-      outpaint: outpaintNodeId,
       audioMix: audioMixSourceNodeId,
       sceneSplit: sceneSplitTargetNodeId,
       audioVideoMux: audioVideoMuxDraftId,
     },
     exits: {
-      cutout: exitCutoutSession,
       crop: exitCropMode,
-      outpaint: endOutpaintSession,
       audioMix: exitAudioMixEditing,
       sceneSplit: exitSceneSplitEditing,
       audioVideoMux: exitAudioVideoMuxEditing,
@@ -4432,14 +4388,6 @@ export default function CanvasPage() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [cutoutNodeId, exitCutoutSession]);
-
-  /** 抠图会话绑定清理（IKGXMT）：源图卡被删除时结束会话（防工具栏悬挂），参数一并丢弃 */
-  useEffect(() => {
-    if (!cutoutNodeId) return;
-    if (!mediaNodes.some((n) => n.id === cutoutNodeId)) exitCutoutSession();
-    // exitCutoutSession 仅引用稳定的 setState，不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cutoutNodeId, mediaNodes]);
 
   /** 节点拖拽结束：同步本次全部拖动节点的新坐标到父组件 state，触发自动保存。
    *  多选整组拖拽时 React Flow 第三参含同组全部节点；只回写被抓取节点会让父层坐标过期，
@@ -4977,10 +4925,7 @@ export default function CanvasPage() {
   }, [outpaintSessionActive, endOutpaintSession]);
 
   /** IKGOQX 扩图会话绑定清理：源图卡被删除时结束会话（其余退出路径见统一退出函数） */
-  useEffect(() => {
-    if (!outpaintNodeId) return;
-    if (!mediaNodes.some((n) => n.id === outpaintNodeId)) endOutpaintSession();
-  }, [outpaintNodeId, mediaNodes, endOutpaintSession]);
+
 
   useEffect(() => {
     if (!textGenDraftId) return;
@@ -7793,11 +7738,16 @@ export default function CanvasPage() {
   /** 创建智能扩图任务（IKGOR6）：扩图结果卡原地承接（草稿转生成中 / 失败卡重试重新生成，不新建卡）。
    *  六键 input 已由发送侧组好并过契约 zod 校验（buildImageOutpaintInput）；lastParams 随提交
    *  立即写入节点（失败重试原样重发共用）。免费口径（规格）：不走余额拦截门。
-   *  返回 true 表示创建请求已发出；HTTP 层异步失败由 catch 收敛到卡片失败态（同 startImageEnhanceJob）。 */
-  const startImageOutpaintJob = (nodeId: string, input: ImageOutpaintInput): boolean => {
-    if (!currentId) {
+   *  失败保留结果卡并向提交方返回错误，由当次编辑会话或重试的 HTTP 提示能力反馈。 */
+  const startImageOutpaintJob = async (
+    nodeId: string,
+    input: ImageOutpaintInput,
+    opts?: { projectId?: string; silent?: boolean },
+  ): Promise<void> => {
+    const projectId = opts?.projectId ?? currentId;
+    if (!projectId) {
       showToast('warn', '未选中项目，无法发起扩图');
-      return false;
+      return;
     }
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const identity = ((node?.data ?? {}) as Record<string, unknown>).imageOutpaint as ImageOutpaintIdentity | undefined;
@@ -7814,45 +7764,21 @@ export default function CanvasPage() {
     const activeAtCreate = newNodeId('pending-generation');
     activeJobByNodeRef.current.set(nodeId, activeAtCreate);
     stopJobPolling(nodeId, jobTimersRef.current);
-    createImageOutpaint(currentId, input)
-      .then((created) => {
-        if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-        patchMediaNode(nodeId, { jobId: created.job_id });
-        pollJob(nodeId, created.job_id);
-      })
-      .catch((e: unknown) => {
-        if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-        patchMediaNode(nodeId, {
-          genStatus: 'failed',
-          errorText: isApiError(e) ? e.message : '创建任务失败',
-        });
-      });
-    return true;
+    try {
+      const created = await createImageOutpaint(projectId, input, { silent: opts?.silent });
+      if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+      patchMediaNode(nodeId, { jobId: created.job_id });
+      pollJob(nodeId, created.job_id);
+    } catch (error: unknown) {
+      if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+      patchMediaNode(nodeId, { genStatus: 'failed', errorText: isApiError(error) ? error.message : '创建任务失败' });
+      throw error;
+    }
   };
 
-  /** 扩图面板发送（IKGOR6 发送闭环）：点发送才建结果卡（进入模式不建卡不连线，规格故事 24）——
-   *  源卡右侧建「扩图」草稿卡 + 纯视觉来源线（origin 标记，不占参考位、不参与 @ 编号）；
-   *  四个扩展比例取自扩展框换算（相对原图短边，提交参数唯一来源），过契约 zod 校验后调创建入口；
-   *  创建请求发出即退出扩图模式（规格故事 39），源卡全程不动（规格故事 41）。
-   *  防御：契约校验不过撤卡撤线留在模式内提示（如源素材非数字资产 id）。 */
-  const handleOutpaintDialogSend = (): boolean => {
-    const sourceNode = outpaintSourceNode;
-    const rect = outpaintRect;
-    if (!sourceNode || !rect) return false;
-    // 零扩展（框与原图重合）不发送：发送钮已置灰，守卫兜底（契约 refine 同口径）
-    if (
-      outpaintExpands.top <= 0 && outpaintExpands.right <= 0 &&
-      outpaintExpands.bottom <= 0 && outpaintExpands.left <= 0
-    ) {
-      return false;
-    }
-    const sourceData = (sourceNode.data ?? {}) as Record<string, unknown>;
-    const sourceAssetId = readAssetId(sourceData);
-    if (!sourceAssetId) {
-      showToast('warn', '源素材身份缺失，无法发起扩图');
-      return false;
-    }
-    const ratios = expandRatiosOf(outpaintExpands, rect);
+  /** 扩图的预建卡、来源关系与参数校验保留在宿主，失败撤销本次草稿。 */
+  const prepareOutpaintTask = (frozen: OutpaintFrozenInput): OutpaintTaskSubmission | null => {
+    const { projectId, source: sourceNode, sourceAssetId, ratios } = frozen;
     const draftId = createImageDraftCard(imageEnhanceDraftPosition(sourceNode), {
       fileName: '扩图',
       data: { imageOutpaint: { sourceAssetId } },
@@ -7862,13 +7788,26 @@ export default function CanvasPage() {
     if (!input) {
       removeCanvasNodes([draftId]);
       showToast('warn', '扩图参数不合法，请调整后重试');
-      return false;
+      return null;
     }
-    const issued = startImageOutpaintJob(draftId, input);
-    if (issued) endOutpaintSession();
-    return issued;
+    return { projectId, source: sourceNode, targetNodeId: draftId, payload: input };
   };
-
+  outpaintHostRef.current = {
+    getProjectId: () => currentId,
+    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+    clearPickState: () => {
+      if (imagePickSessionActive) endImagePickSession();
+      if (videoPickSessionActive) endVideoPickSession();
+      if (audioPickSessionActive) endAudioPickSession();
+      if (pickMode || pickTarget) {
+        setPickMode(null); setPickTarget(null); setPickRefRole(null); setPickProductId(null); setPickAssetId(null);
+      }
+    },
+    prepareTask: prepareOutpaintTask,
+    startTask: ({ projectId, targetNodeId, payload }) => startImageOutpaintJob(targetNodeId, payload, { projectId, silent: true }),
+    warn: (message) => showToast('warn', message),
+    error: (message) => globalToast.error(message),
+  };
 
   /* ===== 擦除发送链路（IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
 
@@ -7954,97 +7893,40 @@ export default function CanvasPage() {
 
   /* ===== 抠图发送链路（IKGXMT，镜像擦除 IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
 
-  /** 抠图任务发送核心：组装好的契约 input 直接 POST image-cutouts；创建成功后先退会话再在
-   *  源卡右侧建抠图结果卡（node id = input.target_node_id，发送前已生成冻结进任务；结果卡
-   *  带 imageCutout 身份标记——透明 png 内容区垫棋盘格底纹 + 失败重试 lastInput 同源）、
-   *  拉纯视觉来源线（origin=image-cutout，参考推导跳过）、启动轮询（applyJobTerminal 回填成品/失败）。
-   *  创建失败（门槛拒/网络）不建卡不退会话（擦除同口径：用户参数留在工具栏可调后重发，
-   *  规格故事 18「立即退出」指成功路径）。免费口径同 image_enhance / image_erase：
-   *  无幂等头、无积分预估、不走余额拦截门。
-   *  会话纪元（IKI61O）：settle 时纪元已推进（退出/重进/切项目）即迟到响应——仍建卡收尾，
-   *  但不退用户当前会话、建卡不抢选中、不向它弹旧失败提示。 */
-  const startImageCutoutJob = async (
-    sourceNodeId: string,
-    input: ImageCutoutRequest,
-    sessionEpoch: number,
-  ): Promise<boolean> => {
-    if (!currentId) {
-      showToast('warn', '未选中项目，无法发起图片抠图');
-      return false;
-    }
-    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
-    if (!node) {
-      showToast('warn', '源图卡不存在，无法发起图片抠图');
-      return false;
-    }
+  /** 抠图受理后的建卡、来源边与轮询沿用画布宿主能力。 */
+  const handoffCutoutTask = async (
+    submission: CutoutSubmission,
+    created: { job_id: string },
+    skipSelect: boolean,
+  ): Promise<void> => {
+    const { source: node, payload: input } = submission;
+    const sourceNodeId = node.id;
     const targetNodeId = input.target_node_id;
-    try {
-      const created = await createImageCutout(currentId, input, { silent: true });
-      // 发送即退会话（先退再建卡：建卡的程序化选中不触发会话的「点其他卡退出」误判，口径同擦除）；
-      // 纪元失效（迟到响应）则不退用户当前会话，建卡也不抢选中（skipSelect）
-      const sessionCurrent = toolSessionEpochRef.current.isCurrent('cutout', sessionEpoch);
-      if (sessionCurrent) exitCutoutSession();
-      const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-        fileName: '抠图',
-        nodeId: targetNodeId,
-        skipSelect: !sessionCurrent,
-        data: {
-          imageCutout: { sourceAssetId: input.source_asset_id, lastInput: input },
-          genStatus: 'generating',
-          progress: 0,
-        },
-      });
-      addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_CUTOUT_EDGE_ORIGIN });
-      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEraseJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(draftId, activeAtCreate);
-      patchMediaNode(draftId, { jobId: created.job_id });
-      pollJob(draftId, created.job_id);
-      return true;
-    } catch (e: unknown) {
-      // 迟到失败不打扰用户当前会话（IKI61O）
-      if (!toolSessionEpochRef.current.isCurrent('cutout', sessionEpoch)) return false;
-      showToast('error', isApiError(e) ? e.message : '创建抠图任务失败，请重试');
-      return false;
-    }
+    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+      fileName: '抠图',
+      nodeId: targetNodeId,
+      skipSelect,
+      data: {
+        imageCutout: { sourceAssetId: input.source_asset_id, lastInput: input },
+        genStatus: 'generating',
+        progress: 0,
+      },
+    });
+    addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_CUTOUT_EDGE_ORIGIN });
+    // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEraseJob）
+    const activeAtCreate = newNodeId('pending-generation');
+    activeJobByNodeRef.current.set(draftId, activeAtCreate);
+    patchMediaNode(draftId, { jobId: created.job_id });
+    pollJob(draftId, created.job_id);
   };
-
-  /** 抠图工具栏发送（横条圆形发送钮）：源素材身份 → 场景档精校兜底（发送钮置灰已拦，
-   *  实测尺寸回填竞态下再守一次）→ 组装契约 input（target_node_id 此刻生成冻结）→ 发任务。
-   *  请求发出即返回 true；会话退出与建卡在创建成功后由 startImageCutoutJob 承担。
-   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
-  const handleCutoutToolbarSend = (): boolean => {
-    const nodeId = cutoutNodeId;
-    if (!nodeId) return false;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
-    if (!node || !sourceAssetId) {
-      showToast('warn', '源素材身份缺失，无法发起图片抠图');
-      return false;
-    }
-    const sceneReason = imageCutoutSceneGateReason(
-      (node.data ?? {}) as Record<string, unknown>,
-      cutoutScene,
-    );
-    if (sceneReason) {
-      showToast('warn', sceneReason);
-      return false;
-    }
-    const input = buildImageCutoutRequest({
-      sourceAssetId,
-      targetNodeId: newNodeId('media-draft'),
-      scene: cutoutScene,
-      needContour: cutoutNeedContour,
-      contourSize: cutoutContourSize,
-      needCropBackground: cutoutNeedCropBackground,
-    });
-    const sessionEpoch = toolSessionEpochRef.current.capture('cutout');
-    setCutoutSubmitting(true);
-    void startImageCutoutJob(nodeId, input, sessionEpoch).finally(() => {
-      if (!toolSessionEpochRef.current.isCurrent('cutout', sessionEpoch)) return;
-      setCutoutSubmitting(false);
-    });
-    return true;
+  cutoutHostRef.current = {
+    getProjectId: () => currentId,
+    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+    newTargetId: () => newNodeId('media-draft'),
+    createTask: ({ projectId, payload }) => createImageCutout(projectId, payload, { silent: true }),
+    handoff: handoffCutoutTask,
+    warn: (message) => showToast('warn', message),
+    error: (message) => showToast('error', message),
   };
 
   /** 取消接口仅登记意图；权威终态确认前保留生成中状态及轮询，避免编辑/删除绕过在途保护。 */
@@ -8592,7 +8474,7 @@ export default function CanvasPage() {
     if (outpaintIdentity?.lastParams) {
       // 防重入：生成中不重复发起（口径同通用重试）
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      startImageOutpaintJob(nodeId, outpaintIdentity.lastParams);
+      void startImageOutpaintJob(nodeId, outpaintIdentity.lastParams).catch(() => {});
       return;
     }
     const vocalSplitIdentity = ((node?.data ?? {}) as Record<string, unknown>).vocalSplit as
@@ -9670,32 +9552,7 @@ export default function CanvasPage() {
    *  扩展量从零开始；进入时经 toolSessionCoordinator 退出其余编辑会话与生成面板、并清理残留
    *  选取态（仅本入口），模式期间禁用框选与他卡拖动（Canvas refPickActive） */
   const handleNodeOutpaintImage = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const d = (node.data ?? {}) as Record<string, unknown>;
-    const gate = outpaintGateReason(
-      typeof d.width === 'number' ? d.width : undefined,
-      typeof d.height === 'number' ? d.height : undefined,
-      typeof d.size === 'number' ? d.size : undefined,
-    );
-    if (gate) {
-      showToast('warn', gate);
-      return;
-    }
-    if (imagePickSessionActive) endImagePickSession();
-    if (videoPickSessionActive) endVideoPickSession();
-    if (audioPickSessionActive) endAudioPickSession();
-    if (pickMode || pickTarget) {
-      setPickMode(null);
-      setPickTarget(null);
-      setPickRefRole(null);
-      setPickProductId(null);
-      setPickAssetId(null);
-    }
-    runToolSessionEntry('outpaint', () => {
-      setOutpaintExpands(ZERO_EXPANDS);
-      setOutpaintNodeId(id);
-    });
+    outpaintSession.open(id, buildToolSessionDeps());
   };
 
   /** 退出擦除编辑态（IKGOTB 四退出共用）：未发送的遮罩全部丢弃（无卡、无边、无任务），
@@ -9787,15 +9644,7 @@ export default function CanvasPage() {
    *  门槛预检（格式/通用档尺寸/大小）已在菜单项置灰层完成，此处只管进入；
    *  其余编辑会话退出与生成面板关闭经 toolSessionCoordinator（会话是独立模式）、不动视角（规格故事 13）。 */
   const handleNodeCutoutImage = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    runToolSessionEntry('cutout', () => {
-      setCutoutNodeId(id);
-      setCutoutScene(cutoutDefaultParams.scene);
-      setCutoutNeedContour(cutoutDefaultParams.needContour);
-      setCutoutContourSize(cutoutDefaultParams.contourSize);
-      setCutoutNeedCropBackground(cutoutDefaultParams.needCropBackground);
-    });
+    cutoutSession.open(id, buildToolSessionDeps());
   };
 
   /** 裁切（IKGW1H 入口 / IKGW1N 补全默认态）：把目标图片卡置为裁切编辑态。无门槛预检
@@ -12864,7 +12713,7 @@ export default function CanvasPage() {
           refPickActive={imagePickSessionActive || videoPickSessionActive || audioPickSessionActive || outpaintSessionActive}
           outpaintFrame={
             outpaintSessionActive && outpaintRect
-              ? { rect: outpaintRect, expands: outpaintExpands, onExpandChange: setOutpaintExpands }
+              ? { rect: outpaintRect, expands: outpaintExpands, onExpandChange: (expands: ExpandSides) => outpaintSession.edit((state) => ({ ...state, expands })) }
               : null
           }
           refPickMarkedIds={
@@ -13258,7 +13107,7 @@ export default function CanvasPage() {
             sourceSize={{ width: outpaintRect.width, height: outpaintRect.height }}
             expands={outpaintExpands}
             onPresetSelect={handleOutpaintPresetSelect}
-            onSend={handleOutpaintDialogSend}
+            onSend={outpaintSession.send}
             followAnchor={outpaintFollowAnchor}
           />
         )}
@@ -13520,16 +13369,16 @@ export default function CanvasPage() {
           <CutoutToolbar
             onClose={exitCutoutSession}
             scene={cutoutScene}
-            onSceneChange={setCutoutScene}
+            onSceneChange={(scene) => cutoutSession.edit((state) => ({ ...state, scene }))}
             needContour={cutoutNeedContour}
-            onNeedContourChange={setCutoutNeedContour}
+            onNeedContourChange={(needContour) => cutoutSession.edit((state) => ({ ...state, needContour }))}
             contourSize={cutoutContourSize}
-            onContourSizeChange={setCutoutContourSize}
+            onContourSizeChange={(contourSize) => cutoutSession.edit((state) => ({ ...state, contourSize }))}
             needCropBackground={cutoutNeedCropBackground}
-            onNeedCropBackgroundChange={setCutoutNeedCropBackground}
+            onNeedCropBackgroundChange={(needCropBackground) => cutoutSession.edit((state) => ({ ...state, needCropBackground }))}
             sendDisabledReason={cutoutSendDisabledReason}
             submitting={cutoutSubmitting}
-            onSend={handleCutoutToolbarSend}
+            onSend={cutoutSession.send}
             followAnchor={cutoutToolbarAnchor}
           />
         )}

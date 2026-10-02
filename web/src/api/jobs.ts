@@ -585,10 +585,12 @@ export function createImageCutout(
 export function createImageOutpaint(
   projectId: string,
   payload: CreateImageOutpaintPayload,
+  opts?: { silent?: boolean },
 ): Promise<ImageOutpaintCreatedData> {
   return apiRequest<ImageOutpaintCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-outpaints`,
     {
+      silent: opts?.silent,
       method: 'POST',
       body: JSON.stringify(payload),
     },
