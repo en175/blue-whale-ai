@@ -1,7 +1,7 @@
 import { openOtherTool } from './testing/openOtherTool';
 import { expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
-import { createAudioTrimSession, createAudioSpeedSession, createVocalSplitSession, type VocalSplitPayload, type AudioToolSessionHost, type AudioToolSubmission } from './audioToolSessions';
+import { createAudioTrimSession, createAudioSpeedSession, createVocalSplitSession, type VocalSplitPayload, type VocalSplitSessionHost, type AudioToolSessionHost, type AudioToolSubmission } from './audioToolSessions';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import { createToolSessionRuntime } from './toolSessionRuntime';
@@ -74,14 +74,18 @@ it('调速契约：原速不发送；改速冻结输入，只有宿主允许落�
   expect(speed.getSnapshot().state).toBeNull();
 });
 
-it('人声分离契约：通用/aac 默认，冻结所选场景与格式，受理后退出并保留任务交接', async () => {
+it('人声分离契约：通用/aac 默认，冻结所选场景与格式，发送即退出并保留任务交接', async () => {
   const node = source(); node.data.mediaType = 'video';
   const inputs: AudioToolSubmission<VocalSplitPayload>[] = [];
   const runtime = createToolSessionRuntime();
   const vocal = runtime.register(createVocalSplitSession(() => ({
-    ...host<VocalSplitPayload>(node),
-    createTask: async (input) => { inputs.push(input); return { job_id: 'vocal1' }; },
-    handoff: async () => { expect(vocal.getSnapshot().state).toBeNull(); },
+    getProjectId: () => 'p1', getSourceNode: () => node,
+    // IKJJR5：发送即退会话，任务链路（预建卡 + runtime.submit）整体归宿主 runTask
+    runTask: async (input) => {
+      expect(vocal.getSnapshot().state).toBeNull();
+      inputs.push(input);
+    },
+    warn() {}, error() {},
   })));
   vocal.open('a1', deps);
   expect(vocal.getSnapshot().state).toEqual({ nodeId: 'a1', scene: 'audio', format: 'aac' });
@@ -121,7 +125,19 @@ function delayedSession(kind: 'audioTrim' | 'audioSpeed' | 'vocalSplit') {
       edit: () => tool.edit((state) => ({ ...state, speed: 1.35 })),
     };
   }
-  const tool = runtime.register(createVocalSplitSession(() => boundary));
+  // IKJJR5：人声分离会话为 runTask 型（发送即退会话，任务链路归宿主）——迟到/失败
+  // 语义与 createTask+handoff 桩同构：runTask 的 pending promise 由测试手动定夺。
+  const vocalBoundary: VocalSplitSessionHost = {
+    getProjectId: () => 'p1', getSourceNode: () => node,
+    runTask: () => new Promise<void>((resolve, reject) => {
+      pending.push({
+        accept: (task) => { tasks.push(task?.job_id ?? 'vocal-task'); resolve(); },
+        reject,
+      });
+    }),
+    error: (message) => { errors.push(message); }, warn: (message) => { warnings.push(message); },
+  };
+  const tool = runtime.register(createVocalSplitSession(() => vocalBoundary));
   return { runtime, tool, node, pending, errors, warnings, tasks,
     edit: () => tool.edit((state) => ({ ...state, scene: 'drama', format: 'flac' })),
   };
@@ -154,7 +170,7 @@ it.each(['audioTrim', 'audioSpeed', 'vocalSplit'] as const)('%s：关闭、重�
   }
 });
 
-it.each(['audioTrim', 'audioSpeed', 'vocalSplit'] as const)('%s：当前失败提示一次并保留参数，允许再次发送；源卡删除完整退出', async (kind) => {
+it.each(['audioTrim', 'audioSpeed'] as const)('%s：当前失败提示一次并保留参数，允许再次发送；源卡删除完整退出', async (kind) => {
   const { runtime, tool, pending, edit, errors } = delayedSession(kind);
   tool.open('a1', deps); edit();
   const params = tool.getSnapshot().state;
@@ -163,12 +179,25 @@ it.each(['audioTrim', 'audioSpeed', 'vocalSplit'] as const)('%s：当前失败�
   pending[0].reject(new Error('network'));
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(tool.getSnapshot()).toEqual({ state: params, submitting: false });
-  expect(errors).toEqual([kind === 'audioTrim' ? '音频截取任务创建失败，请重试' : kind === 'audioSpeed' ? '音频调速任务创建失败，请重试' : '人声背景分离任务创建失败，请重试']);
+  expect(errors).toEqual([kind === 'audioTrim' ? '音频截取任务创建失败，请重试' : '音频调速任务创建失败，请重试']);
   expect(tool.send()).toBe(true);
   runtime.reconcileSources(new Set());
   pending[1].reject(new Error('late after deletion'));
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(tool.getSnapshot()).toEqual({ state: null, submitting: false });
+  expect(errors).toHaveLength(1);
+});
+
+it('vocalSplit（IKJJR5 发送即退会话）：失败提示一次、会话已退出（重试入口在占位失败卡，归运行时）；迟到拒绝不扰', async () => {
+  const { tool, pending, edit, errors } = delayedSession('vocalSplit');
+  tool.open('a1', deps); edit();
+  expect(tool.send()).toBe(true);
+  pending[0].reject(new Error('network'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(tool.getSnapshot()).toEqual({ state: null, submitting: false });
+  expect(errors).toEqual(['人声背景分离任务创建失败，请重试']);
+  pending[1]?.reject(new Error('late'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
   expect(errors).toHaveLength(1);
 });
 

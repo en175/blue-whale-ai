@@ -55,10 +55,11 @@ describe('占位卡命名与 node id', () => {
 describe('buildVocalSplitPlaceholderNode', () => {
   it('生成中占位卡：mediaType audio、源卡右侧按内容宽让开一格、带 vocalSplit 身份（lastInput 三键）', () => {
     const node = buildVocalSplitPlaceholderNode({
-      jobId: '701',
+      nodeId: 'vocal-split-701',
       scene: 'drama',
       outputFormat: 'flac',
       sourceAssetId: '5',
+      jobId: '701',
       source: {
         position: { x: 100, y: 220 },
         data: { fileName: '测试视频.mp4', mediaType: 'video', width: 1920, height: 1080 },
@@ -69,15 +70,29 @@ describe('buildVocalSplitPlaceholderNode', () => {
     expect(node.data.genStatus).toBe('generating');
     expect(node.data.mediaType).toBe('audio');
     expect(node.data.fileName).toBe('测试视频(人声背景分离)');
+    expect(node.data.jobId).toBe('701');
     expect(node.data.vocalSplit).toEqual({
       sourceAssetId: '5',
       lastInput: { source_asset_id: '5', scene: 'drama', output_format: 'flac' },
     });
   });
 
+  it('IKJJR5 预分配 nodeId：受理前预建不写 jobId（受理后由运行时回写），前缀判定成立', () => {
+    const node = buildVocalSplitPlaceholderNode({
+      nodeId: 'vocal-split-1770000000-1',
+      scene: 'audio',
+      outputFormat: 'aac',
+      sourceAssetId: '5',
+      source: { position: { x: 0, y: 0 }, data: { mediaType: 'video' } },
+    });
+    expect(node.id).toBe('vocal-split-1770000000-1');
+    expect(isVocalSplitNodeId(node.id)).toBe(true);
+    expect(node.data.jobId).toBeUndefined();
+  });
+
   it('源 assetId 未知时不带身份（无身份失败卡不渲染重试，口径同家族）', () => {
     const node = buildVocalSplitPlaceholderNode({
-      jobId: '702',
+      nodeId: 'vocal-split-702',
       scene: 'audio',
       outputFormat: 'aac',
       source: { position: { x: 0, y: 0 }, data: { mediaType: 'video' } },

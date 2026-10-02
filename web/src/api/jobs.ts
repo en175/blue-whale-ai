@@ -204,6 +204,9 @@ export interface CreateVocalSplitPayload {
   source_asset_id: string | number;
   scene?: VocalSplitInput['scene'];
   output_format?: VocalSplitInput['output_format'];
+  /** IKJJR5（恢复契约 v1 B.3）：画布承接绑定（Idempotency-Key = submission_id）。
+   *  由生成任务运行时铸造注入；不携带 = 历史兼容路径。先例：CreateJobPayload.canvas_binding。 */
+  canvas_binding?: unknown;
 }
 
 /** 创建人声背景分离任务返回（IKHA2W）；同音视频分离：入队失败创建响应仍 200、
@@ -213,17 +216,20 @@ export interface VocalSplitCreatedData {
   status: 'queued';
 }
 
-/** 创建人声背景分离任务（IKHA2W）；免费口径同 media_extract——不带幂等头、无积分预估、
- *  不走余额拦截门。占位卡由前端在创建成功后本地插入，多轨产物扇出归 IKHA30。 */
+/** 创建人声背景分离任务（IKHA2W）；免费口径同 media_extract——无积分预估、不走余额拦截门。
+ *  占位卡由前端在创建成功后本地插入，多轨产物扇出归 IKHA30。
+ *  IKJJR5（恢复契约 v1 B.3）：新协议 canvas_binding 的幂等承载 = Idempotency-Key 头
+ *  （须等于 submission_id）；历史兼容提交不带（无幂等头，行为零变化）。 */
 export function createVocalSplit(
   projectId: string,
   payload: CreateVocalSplitPayload,
-  init?: { silent?: boolean },
+  init?: { silent?: boolean; idempotencyKey?: string },
 ): Promise<VocalSplitCreatedData> {
   return apiRequest<VocalSplitCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/vocal-splits`,
     {
       method: 'POST',
+      ...(init?.idempotencyKey ? { headers: { 'Idempotency-Key': init.idempotencyKey } } : {}),
       body: JSON.stringify(payload),
       ...silentInit(init),
     },
@@ -810,6 +816,9 @@ export interface CreateVideoSceneSplitPayload {
   target_node_id: string;
   granularity: VideoSceneSplitGranularity;
   client_token: string;
+  /** IKJJR5（恢复契约 v1 B.3）：画布承接绑定（client_token = submission_id）。
+   *  由生成任务运行时铸造注入；不携带 = 历史兼容路径。 */
+  canvas_binding?: unknown;
 }
 
 /** 创建视频场景切分任务返回（IKH8BR）；同家族：入队失败创建响应仍 200、

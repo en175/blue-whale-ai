@@ -86,16 +86,19 @@ export function vocalSplitDisplayName(videoFileName: unknown): string {
   return `${name.replace(/\.[^./]+$/, '')}(人声背景分离)`;
 }
 
-/** 人声背景分离占位节点（IKHA2W，形态照 buildMediaExtractPlaceholderNode）：发送后本地插入
- *  源视频节点右侧，genStatus=generating + jobId + mediaType audio + vocalSplit 身份（失败重试
+/** 人声背景分离占位节点（IKHA2W，形态照 buildMediaExtractPlaceholderNode）：本地插入
+ *  源视频节点右侧，genStatus=generating + mediaType audio + vocalSplit 身份（失败重试
  *  按 lastInput 原样重发），后续由轮询终态收敛、自动保存落盘——成功扇出（移除占位卡建轨卡）
  *  见本文件 buildVocalSplitTrackNodes（IKHA30）。横向位置按源节点实际内容宽 + 家族间距 60
- *  让开一格（扇出锚点继承本位置）。 */
+ *  让开一格（扇出锚点继承本位置）。
+ *  IKJJR5：node.id 预分配（占位卡先于创建请求本地预建——发送时冻结 canvas_binding 的
+ *  target_node_id）；jobId 受理后由运行时回写 data.jobId，可选参数缺失时不写。 */
 export function buildVocalSplitPlaceholderNode(input: {
-  jobId: string | number;
+  nodeId: string;
   scene: VocalSplitScene;
   outputFormat: VocalSplitFormat;
   sourceAssetId?: string | number | null;
+  jobId?: string | number | null;
   source?: { position?: { x?: number; y?: number }; data?: Record<string, unknown> } | null;
 }): {
   id: string;
@@ -117,7 +120,7 @@ export function buildVocalSplitPlaceholderNode(input: {
   const left = Number.isFinite(x) ? x : 0;
   const top = Number.isFinite(y) ? y : 0;
   return {
-    id: vocalSplitNodeId(input.jobId),
+    id: input.nodeId,
     type: 'mediaNode',
     position: {
       x: Math.round(left + box.width + VOCAL_SPLIT_NODE_GAP),
@@ -129,7 +132,7 @@ export function buildVocalSplitPlaceholderNode(input: {
       mediaType: 'audio',
       genStatus: 'generating',
       progress: 0,
-      jobId: input.jobId,
+      ...(input.jobId != null ? { jobId: input.jobId } : {}),
       toolMode: 'select',
       // 身份标记：仅 sourceAssetId 已知时携带（失败重试按 lastInput 原样重发；形态同家族 lastInput 先例）
       ...(sourceAssetId

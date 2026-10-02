@@ -28,6 +28,9 @@ const TOOL_IDENTITY_KEYS = [
 /** 普通生成身份：媒体卡 + 关联任务 + 无任何工具家族身份（含节点 id 前缀家族）。 */
 export function isNormalGenerationCard(nodeId: string, nodeData: Record<string, unknown>): boolean {
   if (nodeData.jobId == null) return false;
+  // IKJJR5：规范结果卡（generation-result: 前缀 + marker）归各自多结果家族——
+  // segment:/track: 段卡轨卡带 jobId 但承载恢复标记，不走本类型通用重试/取消。
+  if (nodeId.startsWith('generation-result:') && nodeData.generationRecovery != null) return false;
   if (isAudioMixNodeId(nodeId) || isMediaExtractNodeId(nodeId) || isAudioTrimNodeId(nodeId)
     || isAudioSpeedNodeId(nodeId) || isVocalSplitNodeId(nodeId)) return false;
   if (audioVideoMuxIdentityOf({ data: nodeData } as Node) != null) return false;

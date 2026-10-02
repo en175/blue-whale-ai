@@ -12,8 +12,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
-import { VOCAL_SPLIT_EDGE_ORIGIN } from './vocalSplit';
+import { VOCAL_SPLIT_EDGE_ORIGIN, isVocalSplitNodeId } from './vocalSplit';
 import type { GenerationModel } from '@/api/generation';
+import type { GenerationRecoveryPage } from '@/api/canvasRecovery';
 
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
@@ -118,6 +119,80 @@ vi.mock('@/api/jobs', () => ({
 }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 vi.mock('@/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
+
+/** IKJJR5：运行时扇出经恢复页投影取规范 track node_id；保存走新协议原子保存。
+ *  回执按动作映射状态（replaceTarget→replaced、其余→present），供运行时台账确认。 */
+const recoveryMocks = vi.hoisted(() => ({
+  fetchGenerationRecoveryPage: vi.fn(async (): Promise<GenerationRecoveryPage> => ({
+    protocol_version: 1, canvas_version: null, records: [], next_cursor: null,
+  })),
+  resolveGenerationRecovery: vi.fn(async () => ({ protocol_version: 1 as const, records: [] })),
+  putCanvasDocWithRecovery: vi.fn(async (
+    _projectId: string,
+    _payload: { nodes: Array<{ id: string }> },
+    _version: unknown,
+    recovery: { commandId: string; recoveryChanges: Array<{ recoveryItemId: string; action: string; expectedRevision: number }> },
+  ) => ({
+    project_id: 'p1', version: 5,
+    recoveryReceipt: {
+      commandId: recovery.commandId, replayed: false,
+      changes: recovery.recoveryChanges.map((change) => ({
+        recoveryItemId: change.recoveryItemId,
+        revision: change.expectedRevision + 1,
+        nodeBindingRevision: 1,
+        state: change.action === 'replaceTarget' ? 'replaced' as const : 'present' as const,
+      })),
+    },
+  })),
+}));
+vi.mock('@/api/canvasRecovery', () => ({
+  fetchGenerationRecoveryPage: recoveryMocks.fetchGenerationRecoveryPage,
+  resolveGenerationRecovery: recoveryMocks.resolveGenerationRecovery,
+  putCanvasDocWithRecovery: recoveryMocks.putCanvasDocWithRecovery,
+}));
+
+/** 受理回执视图（submission_id 固定，扇出投影按它构造规范 node_id）。 */
+const VOCAL_SUBMISSION = 'vocal-sub-1';
+const bindingView = (jobId: string, targetNodeId: string) => ({
+  protocol_version: 1,
+  submission_id: VOCAL_SUBMISSION,
+  target_node_id: targetNodeId,
+  binding_revision: 1,
+  job_id: jobId,
+  is_current: true,
+});
+
+/** 恢复页投影（B.4/B.5）：track:<type> → generation-result:<submission_id>:track:<type>。 */
+function projectionPage(
+  jobId: string,
+  tracks: ReadonlyArray<{ track_type: string; asset_id: string }>,
+): GenerationRecoveryPage {
+  return {
+    protocol_version: 1, canvas_version: null, next_cursor: null,
+    records: [{
+      submission_id: VOCAL_SUBMISSION, target_node_id: 'vocal-split-ph', job_id: jobId, task_type: 'vocal_split',
+      binding_revision: 1, is_current: true, job: null, recovery_seed: null, previous_target_snapshot: null,
+      items: [
+        { recovery_item_id: `gcr:${VOCAL_SUBMISSION}:$target`, output_key: '$target', node_id: 'vocal-split-ph', state: 'pending' as const, revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+        ...tracks.map((track) => ({
+          recovery_item_id: `gcr:${VOCAL_SUBMISSION}:track:${track.track_type}`,
+          output_key: `track:${track.track_type}`,
+          node_id: `generation-result:${VOCAL_SUBMISSION}:track:${track.track_type}`,
+          state: 'pending' as const, revision: 0, node_binding_revision: 0,
+          asset_id: track.asset_id, slot_id: null,
+        })),
+      ],
+    }],
+  };
+}
+
+/** 创建受理 mock（回执 canvas_binding；target_node_id 回显请求绑定）。 */
+function mockCreateAccepted(jobId: string) {
+  apiMocks.createVocalSplit.mockImplementation(async (_projectId: string, payload: { canvas_binding?: { target_node_id?: string } }) => ({
+    job_id: jobId, status: 'queued',
+    canvas_binding: bindingView(jobId, payload.canvas_binding?.target_node_id ?? 'vocal-split-ph'),
+  }));
+}
 
 const canvasDocMock = vi.hoisted(() => ({
   current: {
@@ -265,12 +340,12 @@ function edges(): Array<{ source: string; target: string; data?: Record<string, 
   return flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>;
 }
 
-/** 落库调用中含轨卡的那一次（扇出 flush；与发送建占位卡的 flush 区分） */
+/** 落库调用中含轨卡的那一次（IKJJR5：扇出走新协议原子保存 putCanvasDocWithRecovery）。 */
 type SavePayload = { nodes: Array<{ id: string }>; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }> };
 function fanoutSaveCall(): SavePayload | undefined {
-  return (apiMocks.saveCanvasDoc.mock.calls as unknown as Array<[string, SavePayload, unknown]>)
+  return (recoveryMocks.putCanvasDocWithRecovery.mock.calls as unknown as Array<[string, SavePayload, unknown, unknown]>)
     .map((call) => call[1])
-    .find((payload) => payload.nodes.some((n) => n.id.startsWith('vocal-track-')));
+    .find((payload) => payload.nodes.some((n) => n.id.startsWith('generation-result:')));
 }
 
 beforeEach(() => {
@@ -280,6 +355,9 @@ beforeEach(() => {
   seedDoc();
   apiMocks.createVocalSplit.mockReset();
   apiMocks.createMediaExtraction.mockReset();
+  recoveryMocks.fetchGenerationRecoveryPage.mockReset();
+  recoveryMocks.fetchGenerationRecoveryPage.mockResolvedValue({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null });
+  recoveryMocks.putCanvasDocWithRecovery.mockClear();
 });
 
 afterEach(async () => {
@@ -290,25 +368,33 @@ afterEach(async () => {
 });
 
 describe('IKHA30 成功扇出（发送→成功终态）', () => {
-  it('两轨场景（通用/aac）：移除占位卡，扇出 源名(人声|背景音).aac 两张普通音频卡，各拉来源边，落库同一次 PUT', async () => {
-    apiMocks.createVocalSplit.mockResolvedValue({ job_id: 'j701', status: 'queued' });
+  it('两轨场景（通用/aac）：移除占位卡，按投影规范 node_id 扇出 源名(人声|背景音).aac 两张，各拉来源边，一笔原子保存', async () => {
+    mockCreateAccepted('j701');
     // 首轮 tick 返回进行中：真实轮询建卡与成功扇出相隔数秒、分属两轮提交——拆开批次
     // 才能让占位卡先进级联清理登记，「占位卡来源边随移除被清理」按既有机制真实发生
     apiMocks.fetchJobStatus.mockResolvedValueOnce({ job_id: 'j701', status: 'processing', progress: 1, asset: null });
     await renderPage();
     await enterVocal();
     await sendVocal();
-    expect(nodeById('vocal-split-j701')).toBeTruthy();
+    // IKJJR5：占位卡预分配 id（vocal-split- 前缀 + 随机后缀），按前缀断言在场
+    expect((flowProps.current.mediaNodes as Node[]).some((n) => isVocalSplitNodeId(n.id) && n.id !== 'v1')).toBe(true);
     apiMocks.fetchJobStatus.mockResolvedValue({
       job_id: 'j701', status: 'succeeded', progress: 100, asset: null, tracks: twoTracksOf('j701'),
+      output_assets: twoTracksOf('j701').map((track) => ({
+        id: track.asset_id, url: track.url, type: 'audio' as const, duration: track.duration,
+      })),
     });
+    recoveryMocks.fetchGenerationRecoveryPage.mockResolvedValue(projectionPage('j701', [
+      { track_type: 'voice', asset_id: 't-j701-voice' },
+      { track_type: 'background', asset_id: 't-j701-bg' },
+    ]));
     await terminalTick();
-
-    // 占位卡移除，无残留
-    expect(nodeById('vocal-split-j701')).toBeUndefined();
-    // 两张轨卡：普通音频成品卡形态（src/assetId/duration 回填，无 genStatus——水合不再为其开轮询）
-    const voice = nodeById('vocal-track-j701-voice')!;
-    const bg = nodeById('vocal-track-j701-background')!;
+    // 占位卡移除，无残留（占位卡 id 预分配随机，按前缀查）
+    expect((flowProps.current.mediaNodes as Node[]).some((n) => isVocalSplitNodeId(n.id) && n.id !== 'v1')).toBe(false);
+    // 两张轨卡：规范 node_id（generation-result:<submission_id>:track:<type>，B.4）+
+    // marker + 普通音频成品卡形态（src/assetId/duration 回填，无 genStatus——水合不再为其开轮询）
+    const voice = nodeById(`generation-result:${VOCAL_SUBMISSION}:track:voice`)!;
+    const bg = nodeById(`generation-result:${VOCAL_SUBMISSION}:track:background`)!;
     expect(voice.data.fileName).toBe('素材视频(人声).aac');
     expect(bg.data.fileName).toBe('素材视频(背景音).aac');
     for (const card of [voice, bg]) {
@@ -320,30 +406,39 @@ describe('IKHA30 成功扇出（发送→成功终态）', () => {
     expect(voice.data.src).toBe('http://tos/j701-voice.aac');
     expect(voice.data.assetId).toBe('t-j701-voice');
     expect(voice.data.duration).toBe(15.5);
+    expect(voice.data.generationRecovery).toEqual({ protocolVersion: 1, submissionId: VOCAL_SUBMISSION, outputKey: 'track:voice' });
     // 轨序：voice 首轨在上，纵向步长 = 内容区高 240 + 间距 60；横向顶替占位卡列位（958）
     expect(voice.position).toEqual({ x: 958, y: 0 });
     expect(bg.position).toEqual({ x: 958, y: 300 });
     // 各拉来源边（origin=vocal-split，参考推导跳过）
-    const trackEdges = edges().filter((e) => e.target.startsWith('vocal-track-'));
+    const trackEdges = edges().filter((e) => e.target.startsWith('generation-result:'));
     expect(trackEdges.map((e) => `${e.source}->${e.target}`)).toEqual([
-      'v1->vocal-track-j701-voice',
-      'v1->vocal-track-j701-background',
+      `v1->generation-result:${VOCAL_SUBMISSION}:track:voice`,
+      `v1->generation-result:${VOCAL_SUBMISSION}:track:background`,
     ]);
     for (const edge of trackEdges) expect(edge.data).toEqual({ origin: VOCAL_SPLIT_EDGE_ORIGIN });
     // 占位卡旧来源边随占位卡移除级联清理
     expect(edges().some((e) => e.target === 'vocal-split-j701')).toBe(false);
-    // 扇出立刻落库：占位移除 + 轨卡 + 来源边同一次 PUT
+    // 扇出一笔原子保存（B.6）：目标与全部未决输出同笔处理——replaceTarget($target) +
+    // 逐轨 apply；占位移除 + 轨卡 + 来源边同一次 PUT
     const saved = fanoutSaveCall()!;
     expect(saved.nodes.map((n) => n.id)).toEqual(
-      expect.arrayContaining(['v1', 'vocal-track-j701-voice', 'vocal-track-j701-background']),
+      expect.arrayContaining([`generation-result:${VOCAL_SUBMISSION}:track:voice`, `generation-result:${VOCAL_SUBMISSION}:track:background`]),
     );
-    expect(saved.nodes.some((n) => n.id === 'vocal-split-j701')).toBe(false);
-    expect(saved.edges.some((e) => e.target === 'vocal-track-j701-voice')).toBe(true);
-    expect(saved.edges.some((e) => e.target === 'vocal-track-j701-background')).toBe(true);
+    expect(saved.edges.some((e) => e.target === `generation-result:${VOCAL_SUBMISSION}:track:voice`)).toBe(true);
+    expect(saved.edges.some((e) => e.target === `generation-result:${VOCAL_SUBMISSION}:track:background`)).toBe(true);
+    const saveCall = (recoveryMocks.putCanvasDocWithRecovery.mock.calls as unknown as Array<[string, unknown, unknown, { recoveryChanges: Array<{ recoveryItemId: string; action: string }> }]>)
+      .find(([ , payload ]) => (payload as { nodes: Array<{ id: string }> }).nodes.some((n) => n.id.startsWith('generation-result:')))!;
+    const actions = saveCall[3].recoveryChanges.map((change) => `${change.action}:${change.recoveryItemId}`).sort();
+    expect(actions).toEqual([
+      `apply:gcr:${VOCAL_SUBMISSION}:track:background`,
+      `apply:gcr:${VOCAL_SUBMISSION}:track:voice`,
+      `replaceTarget:gcr:${VOCAL_SUBMISSION}:$target`,
+    ]);
   }, 20000);
 
   it('三轨场景（短剧/flac）：扇出 人声/音乐/音效 三张，命名括号词随轨类型、后缀随格式', async () => {
-    apiMocks.createVocalSplit.mockResolvedValue({ job_id: 'j702', status: 'queued' });
+    mockCreateAccepted('j702');
     apiMocks.fetchJobStatus.mockResolvedValueOnce({ job_id: 'j702', status: 'processing', progress: 1, asset: null });
     await renderPage();
     await enterVocal();
@@ -362,13 +457,23 @@ describe('IKHA30 成功扇出（发送→成功终态）', () => {
         { track_type: 'music', asset_id: 't-j702-music', url: 'http://tos/j702-music.flac', duration: 8 },
         { track_type: 'sfx', asset_id: 't-j702-sfx', url: 'http://tos/j702-sfx.flac', duration: null },
       ],
+      output_assets: [
+        { id: 't-j702-voice', url: 'http://tos/j702-voice.flac', type: 'audio' as const, duration: 8 },
+        { id: 't-j702-music', url: 'http://tos/j702-music.flac', type: 'audio' as const, duration: 8 },
+        { id: 't-j702-sfx', url: 'http://tos/j702-sfx.flac', type: 'audio' as const, duration: null },
+      ],
     });
+    recoveryMocks.fetchGenerationRecoveryPage.mockResolvedValue(projectionPage('j702', [
+      { track_type: 'voice', asset_id: 't-j702-voice' },
+      { track_type: 'music', asset_id: 't-j702-music' },
+      { track_type: 'sfx', asset_id: 't-j702-sfx' },
+    ]));
     await terminalTick();
 
-    expect(nodeById('vocal-split-j702')).toBeUndefined();
-    const voice = nodeById('vocal-track-j702-voice')!;
-    const music = nodeById('vocal-track-j702-music')!;
-    const sfx = nodeById('vocal-track-j702-sfx')!;
+    expect((flowProps.current.mediaNodes as Node[]).some((n) => isVocalSplitNodeId(n.id) && n.id !== 'v1')).toBe(false);
+    const voice = nodeById(`generation-result:${VOCAL_SUBMISSION}:track:voice`)!;
+    const music = nodeById(`generation-result:${VOCAL_SUBMISSION}:track:music`)!;
+    const sfx = nodeById(`generation-result:${VOCAL_SUBMISSION}:track:sfx`)!;
     expect(voice.data.fileName).toBe('素材视频(人声).flac');
     expect(music.data.fileName).toBe('素材视频(音乐).flac');
     expect(sfx.data.fileName).toBe('素材视频(音效).flac');
@@ -379,23 +484,24 @@ describe('IKHA30 成功扇出（发送→成功终态）', () => {
     expect('duration' in sfx.data).toBe(false);
     expect(music.data.src).toBe('http://tos/j702-music.flac');
     // 三条来源边
-    expect(edges().filter((e) => e.target.startsWith('vocal-track-j702-')).length).toBe(3);
+    expect(edges().filter((e) => e.target.startsWith('generation-result:')).length).toBe(3);
   }, 20000);
 
-  it('成功但无 tracks（契约上线前完成的旧任务）：占位卡保留停生成中，不扇出不丢卡', async () => {
-    apiMocks.createVocalSplit.mockResolvedValue({ job_id: 'j703', status: 'queued' });
+  it('成功但投影缺失（契约上线前完成的旧任务/服务端歧义拒绝）：占位卡保留停成功态，不扇出不丢卡', async () => {
+    mockCreateAccepted('j703');
     apiMocks.fetchJobStatus.mockResolvedValueOnce({ job_id: 'j703', status: 'processing', progress: 1, asset: null });
     await renderPage();
     await enterVocal();
     await sendVocal();
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j703', status: 'succeeded', progress: 100, asset: null });
+    // 恢复页无该提交的输出投影（beforeEach 默认 records: []）
     await terminalTick();
-    const stale = nodeById('vocal-split-j703')!;
+    const stale = (flowProps.current.mediaNodes as Node[]).find((n) => isVocalSplitNodeId(n.id) && n.id !== 'v1')!;
     expect(stale).toBeTruthy();
     expect(stale.data.genStatus).toBeUndefined();
     expect(stale.data.progress).toBe(100);
-    expect(nodeById('vocal-track-j703-voice')).toBeUndefined();
-    expect(edges().some((e) => e.target.startsWith('vocal-track-'))).toBe(false);
+    expect((flowProps.current.mediaNodes as Node[]).some((n) => n.id.startsWith('generation-result:'))).toBe(false);
+    expect(edges().some((e) => e.target.startsWith('generation-result:'))).toBe(false);
   }, 20000);
 });
 

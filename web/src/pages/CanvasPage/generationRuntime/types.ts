@@ -130,6 +130,46 @@ export interface GenerationTaskDefinition<TPayload = unknown> {
    *  运行时负责判重、轮询续链与保存，不重复建卡。
    */
   planRecovery?(record: GenerationRecoveryRecord, host: GenerationRuntimeHost): RecoveryCardPlan;
+  /**
+   * 成功终态的多结果判定（可选；缺省 output_assets.length > 1）。多结果家族按可信终态
+   * 数据判定：场景切分 1 段仍为 segment:1 多结果路径，不落入一对一 primary 转换。
+   */
+  isMultiOutputSuccess?(detail: JobDetail): boolean;
+  /**
+   * 多结果扇出落卡定制（可选；缺省横排 320 + 「生成-<jobId>-N」无来源线）。返回按输出
+   * 的 position 与 data 基座 + 来源线；运行时强制覆盖 src/assetId/generationRecovery
+   * marker（协议权威字段），并按规范 node_id 判重防重复建卡。
+   */
+  planFanoutCards?(ctx: FanoutContext): FanoutCardPlan;
+}
+
+/** 扇出落卡上下文（planFanoutCards 输入）：投影输出（产物已按可信 asset_id 匹配）+ 锚点。 */
+export interface FanoutContext {
+  jobId: string;
+  submissionId: string;
+  /** 扇出锚点 = 占位卡（扇出后移除）；位置/几何/入边（来源线反查）读取用。 */
+  anchor: RuntimeNodeView | null;
+  host: GenerationRuntimeHost;
+  outputs: FanoutOutputView[];
+  detail: JobDetail;
+}
+
+/** 扇出输出视图：恢复页投影项 + 任务详情产物（url 按可信 asset_id 匹配，缺失回落数组序）。 */
+export interface FanoutOutputView {
+  outputKey: string;
+  nodeId: string;
+  assetId: string | null;
+  url: string;
+  mediaType: 'image' | 'video' | 'audio';
+  width?: number | null;
+  height?: number | null;
+  duration?: number | null;
+}
+
+/** 扇出落卡计划：节点 data 基座（家族命名/尺寸/形态）+ 来源线（origin 标记）。 */
+export interface FanoutCardPlan {
+  nodes: Array<{ id: string; position: { x: number; y: number }; data: Record<string, unknown> }>;
+  edges: Array<{ source: string; target: string; origin?: string }>;
 }
 
 /** 恢复规划：缺卡补卡 / 成功输出落卡 / 续轮询，由类型定义决定落卡策略。 */

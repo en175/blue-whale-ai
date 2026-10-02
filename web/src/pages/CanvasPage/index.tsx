@@ -100,7 +100,7 @@ import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import { AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON, AUDIO_VIDEO_MUX_EDGE_ORIGIN, AUDIO_VIDEO_MUX_TITLE, audioVideoMuxErrorText, audioVideoMuxIdentityOf, audioVideoMuxResultName, audioVideoMuxVideoError, buildAudioVideoMuxIdentity, isAudioVideoMuxAudioEdge, isAudioVideoMuxBindEdge, isAudioVideoMuxDraftNode } from './audioVideoMux';
 
 
-import { VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_EDGE_ORIGIN, VOCAL_SPLIT_NODE_PREFIX, buildVocalSplitPlaceholderNode, buildVocalSplitTrackNodes, isVocalSplitNodeId, vocalSplitNodeId, vocalSplitSourceName, vocalSplitTerminalPatch, type VocalSplitIdentity } from './vocalSplit';
+import { VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_EDGE_ORIGIN, VOCAL_SPLIT_NODE_PREFIX, buildVocalSplitPlaceholderNode, buildVocalSplitTrackNodes, isVocalSplitNodeId, vocalSplitSourceName, vocalSplitTerminalPatch, type VocalSplitIdentity } from './vocalSplit';
 import { SCENE_SPLIT_EDGE_ORIGIN, SCENE_SPLIT_NODE_GAP, buildSceneSplitPlaceholderNode, sceneSplitErrorText, sceneSplitFanoutLayout, sceneSplitSegmentBox, sceneSplitSegmentLabel, type SceneSplitIdentity } from './sceneSplit';
 import { type SceneSplitSubmission } from './sceneSplitSession';
 import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode, smartMattingErrorText, type SmartMattingIdentity } from './smartMatting';
@@ -212,8 +212,6 @@ import {
   createMediaExtraction,
   createAudioTrim,
   createAudioSpeed,
-  createVocalSplit,
-  createVideoSceneSplit,
   createVideoMatting,
   readJobFailText,
   type CreateVideoMattingPayload,
@@ -259,6 +257,7 @@ import { normalGenerationTask, isNormalGenerationCard } from './generationRuntim
 import { storyboardTask, type StoryboardPayload } from './generationRuntime/storyboardTasks';
 import { createImageToolsTask, isImageToolsCard, imageToolsRetryPayloadOf, type ImageToolsPayload } from './generationRuntime/imageTools';
 import { audioMixTask, audioVideoMuxTask, watchMixSubmit } from './generationRuntime/mixMuxTasks';
+import { sceneSplitTask, vocalSplitTask, isSceneSplitCard, isVocalSplitCard } from './generationRuntime/multiOutputTasks';
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
 import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
 import { putCanvasDocWithRecovery, type CanvasRecoverySaveData } from '@/api/canvasRecovery';
@@ -5500,10 +5499,15 @@ export default function CanvasPage() {
     };
     if (((node.data ?? {}) as Record<string, unknown>).sceneSplit != null) {
       // 场景切分占位卡分流（IKH8BR 建卡/失败，IKH8C1 完成扇出）：按任务类型收敛终态。
+      // IKJJR5：新协议任务（运行时在途且有 submission 关联）的成功扇出归运行时（规范
+      // segment:<n> node_id + 网格排列 + 原子保存）；此分支仅承接历史兼容任务（无关联，
+      // 旧随机 id 段卡口径不变）。
       if (detail.status === 'succeeded') {
         // 停轮询后扇出：移除占位卡、按返回顺序建 N 张段卡拉来源连线（1 段不特判）
-        stopJobPolling(nodeId, jobTimersRef.current);
-        fanOutSceneSplitSegments(nodeId, jobId, detail);
+        if (generationRuntimeRef.current?.statusOf(nodeId)?.submissionId == null) {
+          stopJobPolling(nodeId, jobTimersRef.current);
+          fanOutSceneSplitSegments(nodeId, jobId, detail);
+        }
         return 'terminal';
       }
       if (detail.status === 'failed') {
@@ -5625,11 +5629,15 @@ export default function CanvasPage() {
     // 人声背景分离占位卡（IKHA2W 建、IKHA30 收敛）：succeeded 移除占位卡按 tracks 扇出
     // 轨卡（一对多骨架首例，见 fanOutVocalSplitTracks）；failed 落失败态 + 可读文案（重试按
     // lastInput 原样重发）；cancelled 落已取消。
+    // IKJJR5：新协议任务（运行时在途且有 submission 关联）的轨卡扇出归运行时（规范
+    // track:<type> node_id + 纵向轨列 + 原子保存）；此分支仅承接历史兼容任务。
     if (isVocalSplitNodeId(nodeId)) {
       if (detail.status === 'succeeded') {
-        stopJobPolling(nodeId, jobTimersRef.current);
-        settledExtractNodesRef.current.add(nodeId);
-        fanOutVocalSplitTracks(nodeId, detail);
+        if (generationRuntimeRef.current?.statusOf(nodeId)?.submissionId == null) {
+          stopJobPolling(nodeId, jobTimersRef.current);
+          settledExtractNodesRef.current.add(nodeId);
+          fanOutVocalSplitTracks(nodeId, detail);
+        }
         return 'terminal';
       }
       const vocalPatch = vocalSplitTerminalPatch(detail);
@@ -7274,67 +7282,18 @@ export default function CanvasPage() {
         });
       return;
     }
-    const vocalSplitIdentity = ((node?.data ?? {}) as Record<string, unknown>).vocalSplit as
-      | VocalSplitIdentity
-      | undefined;
-    if (vocalSplitIdentity?.lastInput) {
-      // 人声背景分离卡分流（IKHA2W，镜像音视频分离）：契约无 retry 端点，重试 = 冻结 input
-      // 原样重发创建接口（源素材/场景/格式三键随 lastInput 冻结，不从零再选）。
+    // IKJJR5：场景切分/人声分离失败卡归统一任务运行时（冻结 lastInput 原参数重发创建 +
+    // canvas_binding 独立提交身份；恢复补出的失败卡无业务参数时运行时提示重新编辑）。
+    if (
+      node &&
+      (isSceneSplitCard(nodeId, (node.data ?? {}) as Record<string, unknown>)
+        || isVocalSplitCard(nodeId, (node.data ?? {}) as Record<string, unknown>))
+    ) {
       if (!currentId) {
-        showToast('warn', '未选中项目，无法人声背景分离');
+        showToast('warn', '未选中项目，无法重试');
         return;
       }
-      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图/音视频分离分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createVocalSplit(currentId, vocalSplitIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
-      return;
-    }
-    const sceneSplitIdentity = ((node?.data ?? {}) as Record<string, unknown>).sceneSplit as
-      | SceneSplitIdentity
-      | undefined;
-    if (sceneSplitIdentity?.lastInput) {
-      // 场景切分卡分流（IKH8BR，镜像去字幕/分离）：契约无 retry 端点，重试 = 冻结业务参数
-      // 原样重发创建接口（源素材/占位卡绑定/粒度随 lastInput 冻结）；client_token 每次重试
-      // 都新生成（同 token 只会重放旧任务），原地承接本占位卡（target_node_id=本卡 id）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法场景切分');
-        return;
-      }
-      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoSceneSplit(currentId, { ...sceneSplitIdentity.lastInput, client_token: newIdempotencyKey() }, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
+      generationRuntimeRef.current?.retry(nodeId);
       return;
     }
     const smartMattingIdentity = ((node?.data ?? {}) as Record<string, unknown>).smartMatting as
@@ -8516,41 +8475,61 @@ export default function CanvasPage() {
     error: (message) => showToast('error', message),
   };
 
-  /** 人声分离的占位卡与多轨回填继续使用既有任务链路。 */
-  const handoffVocalSplitTask = async (
-    input: AudioToolSubmission<VocalSplitPayload>,
-    created: { job_id: string },
-  ): Promise<void> => {
-    const { projectId, source: node, payload } = input;
+  /** 人声分离任务发送核心（IKJJR5 迁入统一任务运行时，形态对齐场景切分）：退会话后本地
+   *  预建占位卡（node id 预分配，vocal-split- 前缀保持家族判定；受理前不伪造恢复标记）+
+   *  拉来源边（origin=vocal-split），runtime.submit 接管创建（Idempotency-Key =
+   *  submission_id + canvas_binding）、轮询、终态收敛与多轨扇出（规范 track:<type> node_id
+   *  + 纵向轨列 + 一笔原子保存）。创建失败：占位卡转失败态（卡上重试按 lastInput 原样重发，
+   *  归 runtime.retry）。占位卡不落盘由恢复协议兜底（result-placeholder 角色，受理回执
+   *  丢失走恢复扫描补卡）。 */
+  const runVocalSplitTask = async (input: AudioToolSubmission<VocalSplitPayload>): Promise<void> => {
+    const { source: node, payload } = input;
     const sourceNodeId = node.id;
-    const nodeId = vocalSplitNodeId(created.job_id);
+    const placeholderId = newNodeId('vocal-split');
     const placeholder = attachCallbacks(
       buildVocalSplitPlaceholderNode({
-        jobId: created.job_id,
+        nodeId: placeholderId,
         scene: payload.scene,
         outputFormat: payload.output_format,
         sourceAssetId: payload.source_asset_id,
         source: node,
       }) as Node,
     );
-    // 先同步写 ref 再 setState：本轮 flush 落库要用它，且下方连线端点必须已在本次保存的节点里
-    // （不登记 pendingNodeIdsRef：占位节点身份以任务为准，失败由终态补丁收敛，不需要添加失败回滚）
     const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
+    const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
     mediaNodesRef.current = next;
     setMediaNodes(next);
-    // 连一条视频 → 占位卡的**来源边**（带 origin 标记）：说明音频轨是从这段视频分离来的；
-    // 参考推导会跳过它，避免把这个视频当成音频生成参考而卡住发送
-    addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN });
-    pollJob(nodeId, created.job_id);
-    // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
-    await flushCanvasSave(projectId).catch(() => {});
+    addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN });
+    const runtime = generationRuntimeRef.current;
+    const placeholderView = mediaNodesRef.current.find((item) => item.id === placeholderId);
+    if (!runtime || !placeholderView) throw new Error('生成任务运行时未就绪');
+    const dispatched = runtime.submit(
+      vocalSplitTask,
+      {
+        payload: { source_asset_id: payload.source_asset_id, scene: payload.scene, output_format: payload.output_format },
+        target: {
+          targetNodeId: placeholderId,
+          seedTarget: seedTargetOfNode(placeholderView as unknown as RuntimeNodeView),
+          seedSources: seedSourcesOfNode(placeholderId, generationRuntimeHostRef.current!),
+          expectedBindingRevision: runtime.bindingRevisionOf(placeholderId),
+        },
+      },
+      {
+        onCreateFailure: (e: unknown) => {
+          patchMediaNode(placeholderId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '人声背景分离任务创建失败，请重试',
+          });
+          return true;
+        },
+      },
+    );
+    if (!dispatched) throw new Error('人声背景分离任务提交被拒绝（无项目或在途防重入），请重试');
   };
   toolHostsRef.current.vocalSplit = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    createTask: ({ projectId, payload }) => createVocalSplit(projectId, payload, { silent: true }),
-    handoff: handoffVocalSplitTask,
+    runTask: runVocalSplitTask,
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
@@ -8558,20 +8537,15 @@ export default function CanvasPage() {
   /* ===== 场景切分发送链路（IKH8BR，镜像去字幕/HD 家族）：先退会话 → 本地建任务占位卡
      （target_node_id 取该卡）→ POST video-scene-splits → job_id 回写占位卡 → 轮询终态 ===== */
 
-  /** 场景切分任务发送核心：按所选粒度 POST video-scene-splits（client_token 每次新生成
-   *  ——同 token 只会重放旧任务，重试亦复用本函数口径）。BO 定死流程顺序：**先退会话**
-   *  再本地在源视频右侧建任务占位卡（node id 本地生成，target_node_id 发送时取它——
-   *  先建卡后发请求，IKH8BO 契约；展示名标注粒度档、生成中骨架、sceneSplit 身份
-   *  ——lastInput 供失败重试原参数原粒度重发）、拉来源边（origin=scene-split，参考推导
-   *  跳过）、创建成功回写 job_id 并启动轮询（applyJobTerminal 场景切分分支收敛终态；
-   *  completed 分支的段卡扇出归 IKH8C1）、立刻落盘（best-effort，防刚建任务就关页丢卡）。
- *  创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态（文案可读、卡上重试
- *  按原参数原粒度重发——不静默删卡，用户重试不必重新进会话配置）。
- *  错误提示单源（IKI8L4）：创建走 silent 传输，失败卡由宿主保留，反馈归属由运行时判断。
- *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
- *  无积分预估、不走余额拦截门。 */
+  /** 场景切分任务发送核心（IKJJR5 迁入统一任务运行时）：保留 IKH8BO 顺序——先退会话，
+   *  再本地预建任务占位卡（target_node_id = 该卡节点 id，受理前不伪造恢复标记）、拉来源边
+   *  （origin=scene-split，参考推导跳过），随后 runtime.submit 接管：canvas_binding 组装
+   *  （client_token = submission_id）、受理台账、轮询、终态收敛与多结果扇出（规范
+   *  segment:<n> node_id + 网格排列 + 一笔原子保存 replaceTarget/apply）均在运行时。
+   *  创建失败（门槛拒/网络）：占位卡转失败态（卡上重试按 lastInput 原参数原粒度重发，
+   *  归 runtime.retry）；不静默删卡。免费口径不变：无积分预估、不走余额拦截门。 */
   const runSceneSplitTask = async (input: SceneSplitSubmission): Promise<void> => {
-    const { projectId, source: node, payload } = input;
+    const { source: node, payload } = input;
     const sourceNodeId = node.id;
     sceneSplitSendingRef.current = true;
     const placeholderId = payload.target_node_id;
@@ -8583,33 +8557,38 @@ export default function CanvasPage() {
         source: node,
       }) as Node,
     );
-    // 先同步写 ref 再 setState：后续连线端点与轮询 guard 都要求节点已在（无 pendingNodeIdsRef
-    // 登记：占位卡身份以 sceneSplit 身份标记为准，失败由卡上重试收敛）
+    // 先同步写 ref 再 setState：后续连线端点与运行时宿主读卡都要求节点已在
     const current = mediaNodesRef.current;
     const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
     mediaNodesRef.current = next;
     setMediaNodes(next);
     addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SCENE_SPLIT_EDGE_ORIGIN });
     try {
-      const created = await createVideoSceneSplit(projectId, {
-        ...payload,
-        client_token: newIdempotencyKey(),
-      }, { silent: true });
-      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startVideoSubtitleEraseJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(placeholderId, activeAtCreate);
-      stopJobPolling(placeholderId, jobTimersRef.current);
-      patchMediaNode(placeholderId, { jobId: created.job_id });
-      pollJob(placeholderId, created.job_id);
-      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢卡
-      await flushCanvasSave(projectId).catch(() => {});
-    } catch (e: unknown) {
-      // 创建失败：占位卡转失败态（卡上重试原参数原粒度重发，client_token 重试时另生成）
-      patchMediaNode(placeholderId, {
-        genStatus: 'failed',
-        errorText: isApiError(e) ? e.message : '场景切分任务创建失败，请重试',
-      });
-      throw e;
+      const runtime = generationRuntimeRef.current;
+      const placeholderView = mediaNodesRef.current.find((item) => item.id === placeholderId);
+      if (!runtime || !placeholderView) throw new Error('生成任务运行时未就绪');
+      const dispatched = runtime.submit(
+        sceneSplitTask,
+        {
+          payload: { source_asset_id: payload.source_asset_id, target_node_id: placeholderId, granularity: payload.granularity },
+          target: {
+            targetNodeId: placeholderId,
+            seedTarget: seedTargetOfNode(placeholderView as unknown as RuntimeNodeView),
+            seedSources: seedSourcesOfNode(placeholderId, generationRuntimeHostRef.current!),
+            expectedBindingRevision: runtime.bindingRevisionOf(placeholderId),
+          },
+        },
+        {
+          onCreateFailure: (e: unknown) => {
+            patchMediaNode(placeholderId, {
+              genStatus: 'failed',
+              errorText: isApiError(e) ? e.message : '场景切分任务创建失败，请重试',
+            });
+            return true; // 失败收敛归占位卡（可重试），不落通用失败卡
+          },
+        },
+      );
+      if (!dispatched) throw new Error('场景切分任务提交被拒绝（无项目或在途防重入），请重试');
     } finally {
       sceneSplitSendingRef.current = false;
     }
@@ -9165,8 +9144,14 @@ export default function CanvasPage() {
       setMediaNodes(mediaNodesRef.current);
     },
     removeMediaNode: (nodeId) => {
-      setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
-      setEdges((prev) => prev.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
+      // 同步写 ref + setState（页面惯例）：紧随其后的 insertMediaNode/拉来源边读 ref，
+      // 函数式 setState 异步生效会把刚移除的占位卡带回（IKJJR5 扇出交错修复）
+      const next = mediaNodesRef.current.filter((n) => n.id !== nodeId);
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      const nextEdges = edgesRef.current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
+      edgesRef.current = nextEdges;
+      setEdges(nextEdges);
     },
     getEdges: () => edgesRef.current.map((edge) => ({ source: edge.source, target: edge.target })),
     addEdge: (source, target, role, marker) => { addCanvasEdge(source, target, role as VideoRefRole, marker); },
@@ -9204,6 +9189,8 @@ export default function CanvasPage() {
     // 专属创建/重试协议与恢复落卡规划；retry/cancel/remove/水合经 claims 分派到此处。
     runtime.register(audioMixTask);
     runtime.register(audioVideoMuxTask);
+    runtime.register(sceneSplitTask); // IKJJR5：多结果家族（场景切分/人声分离）
+    runtime.register(vocalSplitTask);
     generationRuntimeRef.current = runtime;
   }
 

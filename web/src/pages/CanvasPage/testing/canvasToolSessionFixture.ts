@@ -90,7 +90,8 @@ export function canvasToolSessionFixture() {
         await handoff();
       },
     },
-    vocalSplit: { ...common, createTask, handoff },
+    // IKJJR5：人声分离发送即退会话、任务链路归宿主 runTask（pending promise 模式同 task）
+    vocalSplit: { ...common, runTask: task },
     sceneSplit: { ...common, isSending: () => false, runTask: task },
     smartMatting: {
       ...common,

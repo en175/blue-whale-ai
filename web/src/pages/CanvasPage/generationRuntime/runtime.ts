@@ -205,9 +205,11 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     const submissionId = execution.submissionId ?? readMarker(host.findNode(nodeId)!.data)?.submissionId ?? null;
     if (submissionId == null) { finishExecution(); return; } // 历史兼容任务：无受理关联，不写 marker/不确认
     const outputs = detail.output_assets ?? [];
-    if (outputs.length > 1) {
+    // 多结果判定先问类型定义（多结果家族按可信终态数据：场景切分 1 段仍为 segment 路径）
+    const multi = execution.def?.isMultiOutputSuccess?.(detail) ?? outputs.length > 1;
+    if (multi) {
       // 多结果扇出的首个 await 后仍需通过归属检查：在途登记保留至扇出收尾
-      void fanOutOutputs(execution, submissionId, jobId).finally(finishExecution);
+      void fanOutOutputs(execution, submissionId, jobId, detail).finally(finishExecution);
       return;
     }
     // 一对一：结果落目标卡，marker 切 $target → primary；保存带 replaceTarget + apply(primary)。
@@ -221,8 +223,10 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     });
   };
 
-  /** 多结果扇出（输出槽家族）：输出键经恢复页投影取规范 node_id（B.4/B.5），再建卡落 apply。 */
-  const fanOutOutputs = async (execution: ActiveExecution, submissionId: string, jobId: string) => {
+  /** 多结果扇出（输出槽/场景切分/人声分离家族）：输出键经恢复页投影取规范 node_id（B.4/B.5），
+   *  再建卡落 apply。落卡细节（排列/命名/来源线）可由类型定义 planFanoutCards 定制；运行时
+   *  强制写协议权威字段（src/assetId/marker）并按规范 node_id 判重——重复返回/重复扫描不重复建卡。 */
+  const fanOutOutputs = async (execution: ActiveExecution, submissionId: string, jobId: string, knownDetail?: JobDetail) => {
     const nodeId = execution.nodeId;
     try {
       const page = await doFetchRecoveryPage(execution.projectId, {});
@@ -231,36 +235,72 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       const outputs = record?.items.filter((item) => item.output_key !== TARGET_OUTPUT_KEY
         && item.state !== 'removed' && item.state !== 'transferred') ?? [];
       if (outputs.length === 0) {
-        // 投影缺失（服务端歧义拒绝）：保留目标卡为成功占位（无 marker），不扇出不丢卡
+        // 投影缺失（服务端歧义拒绝 recovery_projection_invalid）：保留目标卡为成功占位（无 marker），不扇出不丢卡
         host.patchNode(nodeId, { genStatus: undefined, progress: 100 });
         return;
       }
-      const assets = (await doFetchJobStatus(jobId).catch(() => null))?.output_assets ?? [];
+      const detail = knownDetail ?? await doFetchJobStatus(jobId).catch(() => null);
+      const assets = detail?.output_assets ?? [];
+      // 产物匹配按可信 asset_id（投影权威），缺失回落数组序（B.4：不按偶然顺序重新编号）
+      const views = outputs.map((item, index) => {
+        const asset = item.asset_id != null
+          ? assets.find((a) => String(a.id) === String(item.asset_id))
+          : undefined;
+        const fallback = assets[index];
+        const mediaType = (asset?.type === 'video' || asset?.type === 'audio' || asset?.type === 'image' ? asset.type : undefined)
+          ?? (fallback?.type === 'video' || fallback?.type === 'audio' || fallback?.type === 'image' ? fallback.type : 'image');
+        return {
+          outputKey: item.output_key,
+          nodeId: item.node_id,
+          assetId: item.asset_id,
+          url: asset?.url ?? fallback?.url ?? '',
+          mediaType,
+          ...(asset?.width != null ? { width: asset.width } : {}),
+          ...(asset?.height != null ? { height: asset.height } : {}),
+          ...(asset?.duration != null ? { duration: asset.duration } : {}),
+        };
+      });
       const anchor = host.findNode(nodeId);
       const anchorPos = anchor?.position ?? { x: 0, y: 0 };
+      const def = execution.def;
+      const plan = def?.planFanoutCards
+        ? def.planFanoutCards({ jobId, submissionId, anchor, host, outputs: views, detail: detail ?? ({} as JobDetail) })
+        : {
+          nodes: views.map((item, index) => ({
+            id: item.nodeId,
+            position: { x: Math.round(anchorPos.x + index * 320), y: Math.round(anchorPos.y + 260) },
+            data: { fileName: `生成-${jobId}-${index + 1}`, mediaType: item.mediaType, jobId },
+          })),
+          edges: [],
+        };
+      const cardByNodeId = new Map(plan.nodes.map((card) => [card.id, card]));
       host.markLocallyRemoved(nodeId);
       host.removeMediaNode(nodeId);
-      outputs.forEach((item, index) => {
-        const asset = assets[index];
-        host.insertMediaNode({
-          id: item.node_id,
-          type: 'mediaNode',
-          position: { x: Math.round(anchorPos.x + index * 320), y: Math.round(anchorPos.y + 260) },
-          data: {
-            src: asset?.url ?? '',
-            ...(item.asset_id != null ? { assetId: item.asset_id } : asset ? { assetId: String(asset.id) } : {}),
-            mediaType: asset?.type === 'video' || asset?.type === 'audio' ? asset.type : 'image',
-            fileName: `生成-${jobId}-${index + 1}`,
-            jobId,
-            generationRecovery: { protocolVersion: 1, submissionId, outputKey: item.output_key },
-          },
-        });
+      outputs.forEach((item) => {
+        const card = cardByNodeId.get(item.node_id);
+        if (card == null) return; // 定制未覆盖该输出（防御）：不建卡，台账仍登记
+        if (host.findNode(item.node_id) == null) { // 判重：规范 node_id 确定性 = 扇出幂等
+          host.insertMediaNode({
+            id: item.node_id,
+            type: 'mediaNode',
+            position: card.position,
+            data: {
+              ...card.data,
+              src: views.find((view) => view.nodeId === item.node_id)?.url ?? '',
+              ...(item.asset_id != null ? { assetId: item.asset_id } : {}),
+              generationRecovery: { protocolVersion: 1, submissionId, outputKey: item.output_key },
+            },
+          });
+        }
         setLedger({
           recoveryItemId: item.recovery_item_id,
           submissionId, outputKey: item.output_key, nodeId: item.node_id,
           state: 'pending', revision: item.revision,
         });
       });
+      for (const edge of plan.edges) {
+        host.addEdge(edge.source, edge.target, undefined, edge.origin != null ? { origin: edge.origin } : undefined);
+      }
       intents.set(submissionId, { kind: 'convert' });
       const fanOutProject = host.getProjectId() ?? execution.projectId;
       if (fanOutProject) void host.saveCanvas(fanOutProject).catch(() => {}); // 扇出同笔落盘（家族先例：防刷新占位卡复活）
@@ -282,7 +322,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     host.stopLegacyPolling(nodeId);
     const execution: ActiveExecution = {
       round: nextRound(), projectId, loadEpoch: host.getLoadEpoch(), nodeId,
-      phase: 'submitting', targetRole: target.seedTarget.role,
+      phase: 'submitting', targetRole: target.seedTarget.role, def,
     };
     host.setActiveJob(nodeId, execution.round);
     active.set(nodeId, execution);
@@ -470,6 +510,8 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   const cancel = (nodeId: string): boolean => {
     const claimed = defForNode(nodeId);
     if (!claimed) return false;
+    const cancelMarker = readMarker(claimed.node.data);
+    if (cancelMarker != null && cancelMarker.outputKey !== TARGET_OUTPUT_KEY) return true; // 结果成品卡无可取消任务
     const jobIdRaw = claimed.node.data?.jobId;
     if (jobIdRaw == null || !host.getProjectId() || !claimed.def.cancel) return true;
     const projectId = host.getProjectId()!;
@@ -501,6 +543,13 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   const remove = (nodeId: string): boolean => {
     const claimed = defForNode(nodeId);
     if (!claimed) return false;
+    const claimedMarker = readMarker(claimed.node.data);
+    if (claimedMarker != null && claimedMarker.outputKey !== TARGET_OUTPUT_KEY) {
+      // 成功转换后的结果卡（marker 非 $target）：任务已终态，不走取消确认流——直接移除，
+      // 保存差分按台账发 remove（B.6 逐项删除；含首次保存前删除的虚拟输出）。
+      host.removeMediaNode(nodeId);
+      return true;
+    }
     const jobIdRaw = claimed.node.data?.jobId;
     if (jobIdRaw == null || !host.getProjectId() || !claimed.def.cancel) {
       host.removeMediaNode(nodeId); // 无任务可取消（异常态）：退回直接移除，避免删除入口卡死

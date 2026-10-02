@@ -481,11 +481,9 @@ describe('IKI8L4 发送即同步退出（场景切分真实链）：失败提示
     await clickSend(sceneSendBtn());
     expect(sceneSendBar()).toBeNull();
     await flush();
-    // 有效失败不被纪元变化吞掉：页面提示恰一次
-    expect(document.body.textContent).toContain('分段服务暂不可用');
-    // HTTP 层不叠加第二条（修订前 sonner 与页面双弹）
+    // IKJJR5（对齐 IKI8L8L4 单源口径）：创建失败反馈由占位失败卡承载（可读文案 + 卡上
+    // 重试），页面与 HTTP 层均不再 toast——失败提示不因迁入运行而被吞（卡面可见）
     expect(toast.error).not.toHaveBeenCalled();
-    // 任务卡失败状态保留（可读文案 + 卡上重试）
     const failed = mediaNodes().find((n) => ((n.data ?? {}) as Record<string, unknown>).genStatus === 'failed');
     expect(failed).toBeTruthy();
     expect(String((failed!.data as Record<string, unknown>).errorText)).toContain('分段服务暂不可用');

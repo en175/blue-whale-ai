@@ -11,8 +11,8 @@ import {
   createAudioSpeedSession,
   createVocalSplitSession,
   type AudioToolSessionHost,
+  type VocalSplitSessionHost,
   type AudioSpeedSessionHost,
-  type VocalSplitPayload,
 } from './audioToolSessions';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import {
@@ -123,7 +123,7 @@ export interface CanvasToolHosts {
   audioVideoSplit: AudioVideoSplitHost;
   audioTrim: AudioToolSessionHost<AudioTrimInput>;
   audioSpeed: AudioSpeedSessionHost;
-  vocalSplit: AudioToolSessionHost<VocalSplitPayload>;
+  vocalSplit: VocalSplitSessionHost;
   sceneSplit: SceneSplitHost;
   smartMatting: SmartMattingHost;
   cutout: CutoutHost;
