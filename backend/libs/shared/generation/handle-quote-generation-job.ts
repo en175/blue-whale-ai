@@ -154,6 +154,8 @@ export async function handleQuoteGenerationJob(
       body,
       projectId,
       deps: { canvas: deps.canvas },
+      // 视频分支 merged 恒等于 directReferenceAssetIds 原样返回，报价只消费 videoReferences、
+      // 不读 merged——传空数组无害，建任务侧才需要传真实直接参考 ids 供 merged 回填。
       directReferenceAssetIds: [],
       imageReferenceMax:
         capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX,

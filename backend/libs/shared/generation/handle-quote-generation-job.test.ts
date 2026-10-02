@@ -811,7 +811,7 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
       },
       quote: createBillingQuote({ client, resolveTier, logger }),
     } as unknown as Parameters<typeof handleCreateGenerationJob>[4];
-    return { quoteDeps, createDeps, createJob, getByProject };
+    return { quoteDeps, createDeps, createJob, getByProject, resolveInputAssets };
   }
 
   it("★ 触发场景：预览计价时长 = 源视频时长（edit 口径），报价与 Hold specs 同口径、带源时长标记", async () => {
@@ -904,6 +904,32 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
   it("量不到源时长（素材无 duration）→ 回落用户所选时长，不按 0 估也不拒单", async () => {
     const { client, quote } = fakeBilling();
     const h = textRefHarness(client, vi.fn().mockResolvedValue("free"), null);
+
+    const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, TEXT_REF_BODY, h.quoteDeps);
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data?.duration_basis).toBeUndefined();
+  });
+
+  it("素材数不齐（resolveInputAssets 短回——建任务侧会 400）→ 整个不回填，回落旧口径", async () => {
+    const { client, quote } = fakeBilling();
+    const h = textRefHarness(client, vi.fn().mockResolvedValue("free"), 13);
+    // 短回：请求 N 个 id，只返回 N-1 个——报价侧约定「不按残缺映射猜」，整个不回填。
+    h.resolveInputAssets.mockImplementation(async (ids: string[]) =>
+      ids.slice(1).map((id) => ({ id, type: "video" as const, duration: 13 })),
+    );
+
+    const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, TEXT_REF_BODY, h.quoteDeps);
+
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.duration).toBe("4");
+    expect(result.data?.duration_basis).toBeUndefined();
+  });
+
+  it.each([0, -5])("源时长为 %d 秒（非正数）→ 双闸拦下，回落用户所选", async (badDuration) => {
+    const { client, quote } = fakeBilling();
+    const h = textRefHarness(client, vi.fn().mockResolvedValue("free"), badDuration);
 
     const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, TEXT_REF_BODY, h.quoteDeps);
 
