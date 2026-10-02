@@ -307,12 +307,6 @@ const SESSION_UI_TESTID: Record<Kind, string> = {
 const sessionUi = (kind: Kind) =>
   document.body.querySelector(`[data-testid="${SESSION_UI_TESTID[kind]}"]`);
 
-/** 42 组有向切换对：七工具 × 其余六工具 */
-const KINDS: Kind[] = ['erase', 'cutout', 'crop', 'outpaint', 'subtitleErase', 'audioVideoSplit', 'audioTrim'];
-const PAIRS = KINDS.flatMap((from) =>
-  KINDS.filter((to) => to !== from).map((to) => [from, to] as const),
-);
-
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
@@ -327,29 +321,8 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-describe('IKH3ZH 七工具两两有向切换：旧会话退出、新会话进入、无新增卡/边/任务', () => {
-  it.each(PAIRS)('%s → %s', async (from, to) => {
-    await renderPage();
-    await enterSession(from);
-    expect(sessionUi(from), `进入 ${from} 后其工具 UI 应出现`).toBeTruthy();
-    await enterSession(to);
-    // 旧会话已退出（工具 UI 消失）、新会话已进入（工具 UI 出现）
-    expect(sessionUi(from), `切到 ${to} 后 ${from} 的工具 UI 应消失`).toBeNull();
-    expect(sessionUi(to), `切到 ${to} 后其工具 UI 应出现`).toBeTruthy();
-    // 未发送切换不留痕迹：无新增卡、无新增连线
-    expect(flowProps.current.mediaNodes as Node[]).toHaveLength(3);
-    expect(flowProps.current.edges as unknown[]).toEqual([]);
-    // 不发起任何创建请求（无新增任务）
-    expect(apiMocks.createImageErase).not.toHaveBeenCalled();
-    expect(apiMocks.createImageCutout).not.toHaveBeenCalled();
-    expect(apiMocks.createVideoSubtitleErase).not.toHaveBeenCalled();
-    expect(apiMocks.createMediaExtraction).not.toHaveBeenCalled();
-    expect(apiMocks.createAudioTrim).not.toHaveBeenCalled();
-    expect(apiMocks.createVideoEnhancement).not.toHaveBeenCalled();
-    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-  });
-});
-
+// 纯切换42组已由 canvasToolSessions.test.tsx 的真实13编辑工具156组矩阵替代。
+// 下方继续守护真实页面通知顺序、事件消费与普通面板接线。
 describe('IKH3ZI 四路退出与画布事件消费（规则集中在 toolSessionCoordinator）', () => {
   /** 图片生成面板打开的外部可见信号（PromptRefEditor 打桩元素，仅面板渲染时存在） */
   const genPanelOpen = () => container.querySelector('[data-testid="chip-editor"]') !== null;

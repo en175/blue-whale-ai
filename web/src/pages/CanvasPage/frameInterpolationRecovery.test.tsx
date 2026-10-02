@@ -171,7 +171,7 @@ describe('IKHSFF 发送前保存失败拦截', () => {
     expect(dataOf(draftId).jobId).toBe('j2');
   });
 
-  it('等待保存期间项目切换：保存成功返回后也不发起创建请求，面板保留', async () => {
+  it('等待保存期间项目切换：旧面板退出，保存成功返回后仍不发起创建请求', async () => {
     seedDoc();
     // 保存请求挂起：构造「往返在途」窗口，等项目切换完成后再放行
     const saved = { id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' };
@@ -197,7 +197,7 @@ describe('IKHSFF 发送前保存失败拦截', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
-    expect(panelOpen()).toBe(true);
+    expect(panelOpen()).toBe(false);
     expect(dataOf(draftId).genStatus).toBe('draft');
     expect(dataOf(draftId).jobId).toBeUndefined();
   });

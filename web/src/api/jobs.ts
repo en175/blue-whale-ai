@@ -512,12 +512,14 @@ export function createAudioSpeed(
 export function createImageEnhancement(
   projectId: string,
   payload: CreateImageEnhancementPayload,
+  init?: { silent?: boolean },
 ): Promise<ImageEnhancementCreatedData> {
   return apiRequest<ImageEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-enhancements`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -585,10 +587,12 @@ export function createImageCutout(
 export function createImageOutpaint(
   projectId: string,
   payload: CreateImageOutpaintPayload,
+  init?: { silent?: boolean },
 ): Promise<ImageOutpaintCreatedData> {
   return apiRequest<ImageOutpaintCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-outpaints`,
     {
+      silent: init?.silent,
       method: 'POST',
       body: JSON.stringify(payload),
     },
@@ -644,12 +648,14 @@ export interface VideoEnhancementCreatedData {
 export function createVideoEnhancement(
   projectId: string,
   payload: CreateVideoEnhancementPayload,
+  init?: { silent?: boolean },
 ): Promise<VideoEnhancementCreatedData> {
   return apiRequest<VideoEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-enhancements`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -783,15 +789,16 @@ export interface VideoMattingCreatedData {
  *  ——不带幂等头（幂等走 body 内 client_token）、无积分预估、不走余额拦截门。任务占位卡
  *  由前端在发送前本地建好（target_node_id 指向它），job_id 回写占位卡后经 GET /api/jobs/:id
  *  轮询至终态（succeeded 成品卡回填归 IKHKAC，failed 占位卡按冻结 input 原参数重试）。
- *  错误面单源（审查修复 S1）：**不传 silent**——失败由 HTTP 层默认 toast 提示一次，调用方
- *  （画布页）只落占位卡失败态，不得再 showToast 二次提示（request.md「Do not toast again」）。 */
+ *  编辑提交传 silent，由工具会话运行时按归属反馈；失败卡重试默认由 HTTP 层提示一次。 */
 export function createVideoMatting(
   projectId: string,
   payload: CreateVideoMattingPayload,
+  init?: { silent?: boolean },
 ): Promise<VideoMattingCreatedData> {
   return apiRequest<VideoMattingCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-mattings`,
     {
+      silent: init?.silent,
       method: 'POST',
       body: JSON.stringify(payload),
     },

@@ -1,3 +1,4 @@
+import { canvasToolSessionFixture } from './testing/canvasToolSessionFixture';
 /* IKI61O 会话纪元机制单测（toolSessionCoordinator.createToolSessionEpoch）：
    覆盖全部会话种类的进入/退出/项目切换推进与 capture/isCurrent 比对语义——
    迟到响应「只做任务收尾、不碰当前会话」的判定只活在这一个机制里，各家族不各自发明。
@@ -7,14 +8,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   createToolSessionEpoch,
-  TOOL_SESSION_KINDS,
 } from './toolSessionCoordinator';
 
-const ALL_KINDS = TOOL_SESSION_KINDS;
+const ALL_KINDS = canvasToolSessionFixture().tools.kinds;
 
 describe('IKI61O createToolSessionEpoch', () => {
   it('初始纪元为 0，capture 不推进纪元', () => {
-    const epoch = createToolSessionEpoch();
+    const epoch = createToolSessionEpoch(ALL_KINDS);
     for (const kind of ALL_KINDS) {
       expect(epoch.capture(kind)).toBe(0);
       expect(epoch.isCurrent(kind, 0)).toBe(true);
@@ -22,7 +22,7 @@ describe('IKI61O createToolSessionEpoch', () => {
   });
 
   it('进入推进纪元：发送后退出再重进，旧捕获失效、新会话捕获有效', () => {
-    const epoch = createToolSessionEpoch();
+    const epoch = createToolSessionEpoch(ALL_KINDS);
     epoch.enter('audioTrim');
     const sentAt = epoch.capture('audioTrim');
     epoch.exit('audioTrim');
@@ -34,7 +34,7 @@ describe('IKI61O createToolSessionEpoch', () => {
   });
 
   it('同工具换卡重进不触发出，enter 推进仍区分前后两次会话身份', () => {
-    const epoch = createToolSessionEpoch();
+    const epoch = createToolSessionEpoch(ALL_KINDS);
     epoch.enter('erase');
     const firstSend = epoch.capture('erase');
     epoch.enter('erase');
@@ -43,7 +43,7 @@ describe('IKI61O createToolSessionEpoch', () => {
   });
 
   it('退出推进纪元：发送在途退出（未重进），迟到响应失效', () => {
-    const epoch = createToolSessionEpoch();
+    const epoch = createToolSessionEpoch(ALL_KINDS);
     epoch.enter('audioSpeed');
     const sentAt = epoch.capture('audioSpeed');
     epoch.exit('audioSpeed');
@@ -51,7 +51,7 @@ describe('IKI61O createToolSessionEpoch', () => {
   });
 
   it('音频混合（IKI8L8）：进入/退出/重开均推进纪元，旧捕获在重开后失效、新捕获有效', () => {
-    const epoch = createToolSessionEpoch();
+    const epoch = createToolSessionEpoch(ALL_KINDS);
     epoch.enter('audioMix');
     const sentAt = epoch.capture('audioMix');
     expect(epoch.isCurrent('audioMix', sentAt)).toBe(true);
@@ -64,7 +64,7 @@ describe('IKI61O createToolSessionEpoch', () => {
   });
 
   it('项目切换 advanceAll：全部会话种类的旧捕获一并失效', () => {
-    const epoch = createToolSessionEpoch();
+    const epoch = createToolSessionEpoch(ALL_KINDS);
     const captured = ALL_KINDS.map((kind) => {
       epoch.enter(kind);
       return epoch.capture(kind);
@@ -76,7 +76,7 @@ describe('IKI61O createToolSessionEpoch', () => {
   });
 
   it('各种类纪元互相隔离：推进一种不影响其余种类的判定', () => {
-    const epoch = createToolSessionEpoch();
+    const epoch = createToolSessionEpoch(ALL_KINDS);
     epoch.enter('audioTrim');
     const trimSentAt = epoch.capture('audioTrim');
     epoch.enter('vocalSplit');
@@ -86,7 +86,7 @@ describe('IKI61O createToolSessionEpoch', () => {
   });
 
   it('全种类进出循环后捕获与判定一致（无种类串扰）', () => {
-    const epoch = createToolSessionEpoch();
+    const epoch = createToolSessionEpoch(ALL_KINDS);
     for (const kind of ALL_KINDS) {
       epoch.enter(kind);
       const sentAt = epoch.capture(kind);

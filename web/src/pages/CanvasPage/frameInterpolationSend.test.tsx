@@ -731,6 +731,45 @@ describe('IKHSFH 编辑参数与受理冻结输入分离', () => {
 });
 
 describe('IKHSFH 同步防重（保存至创建返回窗口）与失败解锁', () => {
+  it('失败卡面板已打开时重试：保存与创建期间立即只读，失败后恢复且可再次重试', async () => {
+    seedDoc('failed');
+    let resolveSave!: () => void;
+    let rejectCreate!: (error: unknown) => void;
+    apiMocks.saveCanvasDoc.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSave = () => resolve({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' });
+    }));
+    apiMocks.createFrameInterpolation
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectCreate = reject; }))
+      .mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j2', status: 'processing', progress: 0, asset: null });
+    await renderPage();
+    await clickCard('i1');
+    expect(panelFps(120)!.disabled).toBe(false);
+    expect(panelSend()!.disabled).toBe(false);
+    await click(panelFps(120));
+    await act(async () => { (dataOf('i1').onRetryJob as (nodeId: string) => void)('i1'); });
+    // 任务锁从首保存开始持有，已经打开的面板也须同步派生只读。
+    expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
+    expect(panelFps(30)!.disabled).toBe(true);
+    expect(panelSend()!.disabled).toBe(true);
+    await act(async () => { resolveSave(); });
+    await flush();
+    expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
+    expect(panelFps(30)!.disabled).toBe(true);
+    expect(panelSend()!.disabled).toBe(true);
+    await act(async () => { rejectCreate(new Error('network')); });
+    await flush();
+    expect(panelOpen()).toBe(true);
+    expect(dataOf('i1').genStatus).toBe('failed');
+    expect(panelFps(30)!.disabled).toBe(false);
+    expect(panelSend()!.disabled).toBe(false);
+    await act(async () => { (dataOf('i1').onRetryJob as (nodeId: string) => void)('i1'); });
+    await flush();
+    expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(2);
+    expect(dataOf('i1').jobId).toBe('j2');
+    expect(dataOf('i1').genStatus).toBe('generating');
+  });
+
   it('慢网连点面板发送：保存与创建均在途时同卡只受理一次（同一渲染帧连点，React state 守卫失效由在途集合同步兜底）', async () => {
     seedDoc();
     let resolveSave: () => void = () => {};
@@ -820,6 +859,61 @@ describe('IKHSFH 同步防重（保存至创建返回窗口）与失败解锁', 
 });
 
 describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
+  it('插帧发送在途经多选隐藏再由选中恢复：同卡仍只读，不丢按卡在途状态', async () => {
+    seedDoc();
+    apiMocks.createFrameInterpolation.mockImplementation(() => new Promise(() => {}));
+    await renderPage();
+    await frameInterpolation();
+    const target = draftNodes()[0]!;
+    await act(async () => { panelSend()!.click(); });
+    await flush();
+    expect(panelFps(120)!.disabled).toBe(true);
+    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1'), mediaNode(target.id)] }); });
+    expect(panelOpen()).toBe(false);
+    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode(target.id)] }); });
+    expect(panelOpen()).toBe(true);
+    expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
+    expect(panelFps(120)!.disabled).toBe(true);
+    expect(panelSend()!.disabled).toBe(true);
+  });
+
+  it('失败卡 A 重试在途后开 B：B 可编辑；A 受理及 finally 不关闭 B 或解 B 自己的提交锁', async () => {
+    seedDoc('failed');
+    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
+    let resolveB!: (value: { job_id: string; status: 'queued' }) => void;
+    apiMocks.createFrameInterpolation
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveA = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveB = resolve; }));
+    apiMocks.fetchJobStatus.mockImplementation(async (jobId: string) => ({ job_id: jobId, status: 'processing', progress: 0, asset: null }));
+    await renderPage();
+    await clickCard('i1');
+    await act(async () => { (dataOf('i1').onRetryJob as (nodeId: string) => void)('i1'); });
+    await flush();
+    expect(panelSend()!.disabled).toBe(true);
+    await click(panelClose());
+    await frameInterpolation();
+    const cardB = draftNodes()[0]!.id;
+    expect(panelFps(120)!.disabled).toBe(false);
+    expect(panelSend()!.disabled).toBe(false);
+    await click(panelFps(120));
+    await act(async () => { panelSend()!.click(); });
+    await flush();
+    expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(2);
+    expect(panelSend()!.title).toBe('正在保存并提交，参数只读');
+    await act(async () => { resolveA({ job_id: 'jA', status: 'queued' }); });
+    await flush();
+    expect(dataOf('i1').jobId).toBe('jA');
+    expect(panelOpen()).toBe(true);
+    expect(panelSend()!.disabled).toBe(true);
+    expect(panelSend()!.title).toBe('正在保存并提交，参数只读');
+    expect(panelFps(30)!.disabled).toBe(true);
+    await act(async () => { resolveB({ job_id: 'jB', status: 'queued' }); });
+    await flush();
+    expect(panelOpen()).toBe(false);
+    expect(dataOf(cardB).jobId).toBe('jB');
+    expect(dataOf('i1').jobId).toBe('jA');
+  });
+
   it('A 提交未返回时关闭 A 打开 B：A 成功回调只转 A 卡生成中，不关闭 B 面板；B 随后各自提交成功不串卡', async () => {
     seedDoc();
     let resolveA: (value: { job_id: string; status: 'queued' }) => void = () => {};
@@ -862,7 +956,7 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     expect(dataOf(cardA).jobId).toBe('jA');
   });
 
-  it('A 在途时打开 B：B 面板可编辑可发送（不被 A 冻结）；A 失败回调只 toast 一次，不关闭、不重置、不错误冻结 B', async () => {
+  it('A 在途时打开 B：B 面板可编辑可发送；A 旧失败不提示、不关闭或错误冻结 B', async () => {
     seedDoc();
     let rejectA: (reason?: unknown) => void = () => {};
     apiMocks.createFrameInterpolation
@@ -885,10 +979,10 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     expect(panelSend()!.disabled).toBe(false);
     expect(panelFps(120)!.disabled).toBe(false);
 
-    // A 失败回调返回：错误提示出现，A 卡保持草稿未受理；B 面板仍开、仍可编辑
+    // 新会话使 A 的错误反馈失效；原卡仍未受理，B 保持可编辑。
     await act(async () => { rejectA(new Error('network down')); });
     await flush();
-    expect(document.body.textContent).toContain('插帧任务创建失败，请重试');
+    expect(document.body.textContent).not.toContain('插帧任务创建失败，请重试');
     expect(dataOf(cardA).genStatus).toBe('draft');
     expect(dataOf(cardA).jobId).toBeUndefined();
     expect(panelOpen()).toBe(true);
@@ -903,7 +997,7 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     expect(panelOpen()).toBe(false);
   });
 
-  it('提交在途期间重开本卡面板：显示提交中只读；成功返回后按本会话关闭面板并转生成中', async () => {
+  it('提交在途期间重开本卡面板：显示提交中只读；旧成功保留新面板并转原卡生成中', async () => {
     seedDoc();
     let resolveCreate: (value: { job_id: string; status: 'queued' }) => void = () => {};
     apiMocks.createFrameInterpolation.mockImplementation(
@@ -925,10 +1019,10 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     expect(panelFps(120)!.disabled).toBe(true);
     expect(panelSend()!.disabled).toBe(true);
 
-    // 创建返回成功：面板仍绑定本卡，按本会话关闭并转生成中
+    // 同卡重开也是新会话；旧受理继续转原卡生成中，保留新面板。
     await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
     await flush();
-    expect(panelOpen()).toBe(false);
+    expect(panelOpen()).toBe(true);
     expect(dataOf(draftId).genStatus).toBe('generating');
   });
 });

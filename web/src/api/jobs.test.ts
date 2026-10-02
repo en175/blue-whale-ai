@@ -14,6 +14,7 @@ import {
   createMediaExtraction,
   createVocalSplit,
   createVideoEnhancement,
+  createImageEnhancement,
   createVideoMatting,
   createImageErase,
   createImageCutout,
@@ -250,6 +251,28 @@ describe('createVideoEnhancement', () => {
       target_node_id: 'media-draft-1',
       resolution: '2k',
     });
+  });
+});
+
+describe('增强面板会话专属静默请求', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each(['image', 'video'] as const)('%s 会话可静默且失败卡重试保留默认提示；401 不提示', async (kind) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 500, msg: '创建失败', data: null }), { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const request = (silent?: boolean) => kind === 'video'
+      ? createVideoEnhancement('p1', { source_asset_id: '5', target_node_id: 'a', resolution: '2k' }, { silent })
+      : createImageEnhancement('p1', { source_asset_id: '5', target_node_id: 'a', version_tier: 'pro', multiple: 2, generative_enhance_mode: 'generative_first', enable_correct_color: false }, { silent });
+    vi.mocked(toast.error).mockClear();
+    await expect(request(true)).rejects.toBeInstanceOf(ApiError);
+    expect(toast.error).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: 500, msg: '创建失败', data: null }), { status: 500 }));
+    await expect(request()).rejects.toBeInstanceOf(ApiError);
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('创建失败');
+    vi.mocked(toast.error).mockClear();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: 401, msg: '未登录', data: null }), { status: 401 }));
+    await expect(request()).rejects.toBeInstanceOf(ApiError);
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });
 

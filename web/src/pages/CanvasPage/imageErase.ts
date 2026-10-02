@@ -144,19 +144,6 @@ export function maskHasPaintArea(
   return grid.some((v) => v === 1);
 }
 
-/** 涂抹发送会话快照（IKI8L7）：点发送瞬间（遮罩栅格化之前）同步捕获的发送身份与输入——
- *  目标卡 nodeId、源资产 assetId（按 id 表达身份，不按名称/位置识别）、擦除会话纪元。
- *  栅格化、上传、创建任务全程只用这份快照：编码（canvas.toBlob）在途回调返回后不重新
- *  捕获当前会话、不读取新会话输入——旧编码结果不冒领重开会话的身份。 */
-export interface EraseMaskSendSession {
-  /** 发送时的目标源图卡 id */
-  nodeId: string;
-  /** 发送时源图卡承载的资产 id */
-  sourceAssetId: string;
-  /** 发送时捕获的擦除会话纪元（toolSessionCoordinator createToolSessionEpoch） */
-  sessionEpoch: number;
-}
-
 /** 把图元序列栅格化成黑白遮罩 PNG File（发送链路用）：
  *  eraseMask.rasterizeMask → 离屏 canvas（尺寸=源图自然分辨率）→ toBlob('image/png')。
  *  返回 null 表示 canvas 不可用或编码失败（调用方按发送失败处理，不提交任务）。 */

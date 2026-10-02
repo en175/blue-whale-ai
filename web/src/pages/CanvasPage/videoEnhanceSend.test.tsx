@@ -301,7 +301,7 @@ describe('IKH3VH 发送创建任务闭环', () => {
       source_asset_id: '5',
       target_node_id: draftId,
       resolution: '2k',
-    });
+    }, { silent: true });
     // 创建成功面板自动关闭（发送钮不在文档）
     expect(panelSend()).toBeNull();
     // 原地转生成中：lastParams 随提交写卡、jobId 登记并启动轮询（首 tick 已发起）
@@ -352,6 +352,68 @@ describe('IKH3VH 发送创建任务闭环', () => {
     expect(panelSend()).toBeTruthy();
     expect(document.body.textContent).toContain('生成中，参数只读');
     expect(panelSend()!.disabled).toBe(true);
+  });
+});
+
+describe('HD 面板迟到请求与新会话', () => {
+  it.each(['success', 'failure'] as const)('关闭同卡重开再提交后，旧%s保留当前面板；合法受理仍转原卡', async (outcome) => {
+    seedDoc();
+    let resolveOld!: (value: { job_id: string; status: 'queued' }) => void;
+    let rejectOld!: (error: unknown) => void;
+    apiMocks.createVideoEnhancement
+      .mockImplementationOnce(() => new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject; }))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j-old', status: 'processing', progress: 0, asset: null });
+    await renderPage();
+    await videoEnhance();
+    const draftId = hdDraft()!.id;
+    await clickPanelResolution('2k');
+    await act(async () => { panelSend()!.click(); });
+    await act(async () => { document.body.querySelector<HTMLButtonElement>('[data-testid="video-enhance-close-btn"]')!.click(); });
+    await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
+    await clickPanelResolution('4k');
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+      source_asset_id: '5', target_node_id: draftId, resolution: '4k',
+    }, { silent: true });
+    await act(async () => {
+      if (outcome === 'success') resolveOld({ job_id: 'j-old', status: 'queued' });
+      else rejectOld(new Error('old network'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(panelSend()).not.toBeNull();
+    expect(panelSend()!.disabled).toBe(true);
+    expect(panelResolution('4k')!.className).toContain('resolutionBtnActive');
+    expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
+    if (outcome === 'success') {
+      expect(mediaNode(draftId).data.jobId).toBe('j-old');
+      expect(mediaNode(draftId).data.genStatus).toBe('generating');
+    } else {
+      expect(panelSend()!.title).toBe('正在保存并提交，参数只读');
+      expect(mediaNode(draftId).data.genStatus).toBe('draft');
+    }
+    expect(flowProps.current.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'v1', target: draftId, data: { origin: VIDEO_ENHANCE_EDGE_ORIGIN } }),
+    ]));
+  });
+
+  it('发送在途选中其它卡再选回本卡：面板重现仍在途只读，同卡不重复受理', async () => {
+    seedDoc();
+    apiMocks.createVideoEnhancement.mockImplementation(() => new Promise(() => {}));
+    await renderPage();
+    await videoEnhance();
+    const draftId = hdDraft()!.id;
+    await clickPanelResolution('2k');
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    // 选中其它卡：面板隐藏（运行时 submitting 被复位，防线只剩按卡在途集合）
+    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')] }); });
+    expect(panelSend()).toBeNull();
+    // 选回本卡：面板重现且在途只读，发送钮禁用，不重复受理
+    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode(draftId)] }); });
+    expect(panelSend()).toBeTruthy();
+    expect(panelSend()!.disabled).toBe(true);
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -328,7 +328,7 @@ describe('IKH8BR 编辑态呈现（进入不建任务）', () => {
   });
 });
 
-describe('IKH8BR 四路退出：未发送退出画布无痕迹', () => {
+describe('IKH8BR 退出的页面事件与播放标记接线', () => {
   it('X 退出：无卡、无边、无任务、编辑标记移除（播放控制恢复）', async () => {
     await renderPage();
     await enterSceneSplit();
@@ -341,17 +341,6 @@ describe('IKH8BR 四路退出：未发送退出画布无痕迹', () => {
     expect(apiMocks.createVideoSceneSplit).not.toHaveBeenCalled();
   });
 
-  it('Esc 退出：同口径无痕迹', async () => {
-    await renderPage();
-    await enterSceneSplit();
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    });
-    expect(sendBar()).toBeNull();
-    expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
-    expect(flowProps.current.edges).toEqual([]);
-  });
-
   it('点其他卡退出（单选非目标）：退出且同次通知不自动开该卡面板（旧会话活跃门）', async () => {
     await renderPage();
     await enterSceneSplit();
@@ -362,16 +351,6 @@ describe('IKH8BR 四路退出：未发送退出画布无痕迹', () => {
     expect(v1Data().splitEditing).toBeUndefined();
   });
 
-  it('点画布空白退出（PaneClick）', async () => {
-    await renderPage();
-    await enterSceneSplit();
-    await act(async () => {
-      flowProps.current.onPaneClick();
-    });
-    expect(sendBar()).toBeNull();
-    expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
-    expect(flowProps.current.edges).toEqual([]);
-  });
 });
 
 describe('IKH8BR 与既有六会话互斥（集中协调器口径）', () => {
@@ -497,6 +476,13 @@ describe('IKH8BR 发送闭环（先退会话 → 占位卡 → job_id → 轮询
       bodyBtn('scene-split-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
       bodyBtn('scene-split-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
+    // POST 尚未受理时，发送条已经退出，冻结目标卡及来源边已经存在。
+    expect(sendBar()).toBeNull();
+    const pendingPayload = apiMocks.createVideoSceneSplit.mock.calls[0]![1];
+    expect(placeholderNode()!.id).toBe(pendingPayload.target_node_id);
+    expect(placeholderNode()!.data.genStatus).toBe('generating');
+    expect(placeholderNode()!.data.jobId).toBeUndefined();
+    expect((flowProps.current.edges as Array<{ source: string; target: string }>)).toContainEqual(expect.objectContaining({ source: 'v1', target: pendingPayload.target_node_id }));
     resolveCreate({ job_id: 'j1', status: 'queued' });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));

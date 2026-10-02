@@ -544,3 +544,19 @@ describe('IKI8L7 一键清除文字（无编码步骤路）：发送瞬间身份
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j77');
   });
 });
+
+it('遮罩编码窗口同步防重：同帧双击只编码一次，输入未上传时界面已锁住', async () => {
+  const encode = stubControlledToBlob();
+  await renderPage(); await eraseImage(); await paintStroke();
+  await act(async () => {
+    bodyBtn('erase-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    bodyBtn('erase-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  expect(encode.pendingCount()).toBe(1);
+  expect(bodyBtn('erase-send-btn').disabled).toBe(true);
+  expect(apiMocks.uploadAssetFile).not.toHaveBeenCalled();
+  await act(async () => { encode.release(new Blob(['mask'], { type: 'image/png' })); });
+  await flush();
+  expect(apiMocks.createImageErase).toHaveBeenCalledTimes(1);
+  expect(toolbar()).toBeNull();
+});

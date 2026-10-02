@@ -523,3 +523,123 @@ describe('IKI8L4 发送即同步退出（场景切分真实链）：失败提示
     expect(String((failed?.data ?? {}).errorText)).toContain('旧场景切分失败');
   });
 });
+
+async function enterMatting() {
+  await act(async () => {
+    (dataOf('v1').onSmartMatting as (id: string, mode: 'portrait') => void)('v1', 'portrait');
+  });
+}
+const mattingSend = () => document.body.querySelector<HTMLButtonElement>('[data-testid="smart-matting-send-btn"]');
+const mattingBar = () => document.body.querySelector('[data-testid="smart-matting-send-bar"]');
+const mattingCard = () => mediaNodes().find((node) => node.id.startsWith('smart-matting-'))!;
+
+describe('抠像真实HTTP链：沿用全局提示呈现，运行时判断反馈归属', () => {
+  it.each(['business', 'network'] as const)('当前发送退出后的 %s 失败恰一次，失败占位卡保留', async (failure) => {
+    fetchMock.mockImplementationOnce(async () => {
+      if (failure === 'network') throw new TypeError('Failed to fetch');
+      return jsonFail('抠像业务失败');
+    });
+    await renderPage(); await enterMatting(); await clickSend(mattingSend()); await flush();
+    expect(mattingBar()).toBeNull();
+    expect(mattingCard().data.genStatus).toBe('failed');
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith(failure === 'network' ? '网络请求失败，请检查网络后重试' : '抠像业务失败');
+    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+  });
+
+  it.each(['business', 'network'] as const)('同卡重开后旧 %s 失败全链路静默，任务失败仍落卡', async (failure) => {
+    let resolve!: (value: Response) => void;
+    let reject!: (error: Error) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((accept, fail) => { resolve = accept; reject = fail; }));
+    await renderPage(); await enterMatting(); await clickSend(mattingSend());
+    await enterMatting();
+    await act(async () => {
+      if (failure === 'network') reject(new TypeError('Failed to fetch'));
+      else resolve(jsonFail('旧抠像错误'));
+    });
+    await flush();
+    expect(mattingBar()).not.toBeNull();
+    expect(mattingSend()!.disabled).toBe(false);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(mattingCard().data.genStatus).toBe('failed');
+  });
+
+  it('失败卡重试保留既有HTTP反馈，不被编辑会话silent选项吞掉', async () => {
+    fetchMock.mockImplementationOnce(async () => jsonFail('第一次失败'));
+    await renderPage(); await enterMatting(); await clickSend(mattingSend()); await flush();
+    vi.mocked(toast.error).mockClear();
+    fetchMock.mockImplementationOnce(async () => jsonFail('重试抠像拒绝'));
+    const failed = mattingCard();
+    await act(async () => { (failed.data.onRetryJob as (id: string) => void)(failed.id); });
+    await flush();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('重试抠像拒绝');
+    expect(mattingCard().data.errorText).toBe('重试抠像拒绝');
+    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+  });
+
+  it('401继续走登录续接，不新增错误提示', async () => {
+    fetchMock.mockImplementationOnce(async () => jsonFail('请重新登录', 401));
+    await renderPage(); await enterMatting(); await clickSend(mattingSend()); await flush();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+  });
+});
+
+function addOutpaintSource() {
+  const doc = canvasDocMock.current.doc as { nodes: Node[] };
+  doc.nodes.push({ id: 'i1', type: 'mediaNode', position: { x: 400, y: 0 }, data: { assetId: '5', src: 'http://img/i1.png', fileName: '原图.png', mediaType: 'image', width: 600, height: 600, mime: 'image/png', size: 1000 } });
+  canvasDocMock.current.assets['5'] = { asset_id: 5, type: 'image', access_url: 'http://img/i1.png', width: 600, height: 600 };
+}
+async function armOutpaint(right = 70) {
+  await act(async () => { (dataOf('i1').onOutpaintImage as (id: string) => void)('i1'); });
+  await act(async () => { flowProps.current.outpaintFrame.onExpandChange({ top: 0, right, bottom: 0, left: 0 }); });
+}
+const outpaintSend = () => document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-send-btn"]');
+const outpaintCard = () => mediaNodes().find((node) => node.data.imageOutpaint)!;
+
+describe('扩图真实HTTP链：有效反馈沿用sonner，旧失败不打扰新会话', () => {
+  it('当前发送即退出的失败提示一次并保留可重试结果卡', async () => {
+    addOutpaintSource(); fetchMock.mockImplementationOnce(async () => jsonFail('扩图业务失败'));
+    await renderPage(); await armOutpaint(); await clickSend(outpaintSend()); await flush();
+    expect(outpaintCard().data.genStatus).toBe('failed');
+    expect(outpaintCard().data.errorText).toBe('扩图业务失败');
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('扩图业务失败');
+    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+  });
+
+  it.each(['business', 'network'] as const)('同卡重开后旧 %s 失败全链路静默，新扩展参数保留', async (failure) => {
+    addOutpaintSource();
+    let resolve!: (value: Response) => void;
+    let reject!: (error: Error) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((accept, fail) => { resolve = accept; reject = fail; }));
+    await renderPage(); await armOutpaint(); await clickSend(outpaintSend());
+    await armOutpaint(100);
+    await act(async () => {
+      if (failure === 'network') reject(new TypeError('Failed to fetch'));
+      else resolve(jsonFail('旧扩图失败'));
+    });
+    await flush();
+    expect(flowProps.current.outpaintFrame.expands.right).toBe(100);
+    expect(outpaintSend()!.disabled).toBe(false);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(outpaintCard().data.genStatus).toBe('failed');
+  });
+
+  it('失败卡重试保留原HTTP默认提示并使用冻结扩展参数', async () => {
+    addOutpaintSource(); fetchMock.mockImplementationOnce(async () => jsonFail('首次失败'));
+    await renderPage(); await armOutpaint(); await clickSend(outpaintSend()); await flush();
+    const failed = outpaintCard();
+    const input = (failed.data.imageOutpaint as { lastParams: unknown }).lastParams;
+    vi.mocked(toast.error).mockClear();
+    fetchMock.mockImplementationOnce(async () => jsonFail('扩图重试失败'));
+    await act(async () => { (failed.data.onRetryJob as (id: string) => void)(failed.id); });
+    await flush();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('扩图重试失败');
+    expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body)).toEqual(input);
+  });
+});

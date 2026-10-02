@@ -431,3 +431,42 @@ describe('IKIHPM 终态回填：原地变视频成品卡', () => {
     ]);
   });
 });
+
+describe('IKJIQ6 合成在途关闭与同卡重开', () => {
+  it.each(['success', 'failure'] as const)('旧请求 %s 保留新面板与参数，在途重复发送仍受任务锁保护', async (outcome) => {
+    seedDoc({ withDraft: true, withBound: true });
+    let accept!: (value: { job_id: string; status: 'queued'; enqueue_required: boolean }) => void;
+    let reject!: (error: Error) => void;
+    apiMocks.createAudioVideoMux.mockImplementationOnce(() => new Promise((resolve, fail) => { accept = resolve; reject = fail; }));
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '91', status: 'queued', progress: 0, asset: null });
+    await renderPage();
+    await act(async () => { flowProps.current.onNodeClick(mediaNode('m1')); });
+    await click(sendBtn());
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(panel()).toBeNull();
+    await act(async () => { flowProps.current.onNodeClick(mediaNode('m1')); });
+    await click(document.body.querySelector('[data-testid="audio-video-mux-reserve-true"]'));
+    await click(sendBtn());
+    expect(apiMocks.createAudioVideoMux).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      if (outcome === 'success') accept({ job_id: '91', status: 'queued', enqueue_required: true });
+      else reject(new Error('旧合成请求失败'));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(panel()).toBeTruthy();
+    expect(dataOf('m1').audioVideoMux).toMatchObject({ reserveAudio: true, sync: 'video' });
+    expect(mediaNodes()).toHaveLength(3);
+    expect(edges()).toHaveLength(2);
+    expect(apiMocks.createAudioVideoMux.mock.calls[0]?.[1]).toMatchObject({ is_audio_reserve: false, sync: 'video' });
+    if (outcome === 'success') {
+      expect(dataOf('m1')).toMatchObject({ genStatus: 'generating', jobId: '91' });
+      expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('91');
+    } else {
+      expect(dataOf('m1').genStatus).toBe('draft');
+      apiMocks.createAudioVideoMux.mockResolvedValueOnce({ job_id: '92', status: 'queued', enqueue_required: true });
+      await click(sendBtn()); await flush();
+      expect(apiMocks.createAudioVideoMux).toHaveBeenCalledTimes(2);
+      expect(apiMocks.createAudioVideoMux.mock.calls[1]?.[1]).toMatchObject({ is_audio_reserve: true });
+    }
+  });
+});
