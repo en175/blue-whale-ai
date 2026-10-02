@@ -587,12 +587,12 @@ export function createImageCutout(
 export function createImageOutpaint(
   projectId: string,
   payload: CreateImageOutpaintPayload,
-  opts?: { silent?: boolean },
+  init?: { silent?: boolean },
 ): Promise<ImageOutpaintCreatedData> {
   return apiRequest<ImageOutpaintCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-outpaints`,
     {
-      silent: opts?.silent,
+      silent: init?.silent,
       method: 'POST',
       body: JSON.stringify(payload),
     },
@@ -793,12 +793,12 @@ export interface VideoMattingCreatedData {
 export function createVideoMatting(
   projectId: string,
   payload: CreateVideoMattingPayload,
-  opts?: { silent?: boolean },
+  init?: { silent?: boolean },
 ): Promise<VideoMattingCreatedData> {
   return apiRequest<VideoMattingCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-mattings`,
     {
-      silent: opts?.silent,
+      silent: init?.silent,
       method: 'POST',
       body: JSON.stringify(payload),
     },
