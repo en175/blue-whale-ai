@@ -44,7 +44,9 @@ export class PromptMaterialUnavailableError extends Error {
   constructor(readonly assetId: string) { super("Prompt material unavailable"); }
 }
 
-async function linkPromptMaterials(tx: Prisma.TransactionClient, projectId: bigint, context?: { ownerId: string; items: PromptMaterial[] }) {
+/** IKJJQU：画布保存事务的既有素材关联副作用（项目素材行 upsert）。
+ *  原为模块私有；新协议原子保存（generation-canvas-recovery-repo）与画布同一事务复用。 */
+export async function linkPromptMaterials(tx: Prisma.TransactionClient, projectId: bigint, context?: { ownerId: string; items: PromptMaterial[] }) {
   if (!context) return;
   for (const material of [...context.items].sort((a, b) => a.assetId.localeCompare(b.assetId))) {
     const rows = await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM assets WHERE id = ${BigInt(material.assetId)} AND user_id = ${BigInt(context.ownerId)} AND is_delete = false AND status = 'normal' AND type = ${material.mediaType} FOR UPDATE`;
@@ -111,7 +113,8 @@ function audioMixCardIds(nodes: unknown): bigint[] {
   return [...ids];
 }
 
-async function markAudioMixCards(
+/** IKJJQU：画布保存事务的既有 audio_mix 卡状态副作用（导出原因同 linkPromptMaterials）。 */
+export async function markAudioMixCards(
   tx: Prisma.TransactionClient,
   projectId: bigint,
   nodes: unknown,
@@ -156,7 +159,8 @@ async function markAudioMixCards(
   }
 }
 
-async function markOutputSlotsPlaced(
+/** IKJJQU：画布保存事务的既有输出槽首次放置副作用（导出原因同 linkPromptMaterials）。 */
+export async function markOutputSlotsPlaced(
   tx: Prisma.TransactionClient,
   projectId: bigint,
   nodes: unknown,

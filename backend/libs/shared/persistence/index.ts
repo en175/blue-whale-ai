@@ -193,6 +193,27 @@ export {
   type CreateJobIdempotency,
   type CreateJobResult,
 } from "./generation-job-idempotency.js";
+// IKJJQU：生成任务恢复契约 v1 repo——受理锁序、恢复查询、保护性保存与旧客户端守护。
+export {
+  RecoveryContractError,
+  canvasBindingView,
+  decodeRecoveryCursor,
+  encodeRecoveryCursor,
+  guardLegacyCanvasWrite,
+  listCanvasRecoveryPage,
+  lockCanvasRecoveryForAcceptance,
+  projectHasRecoverySubmissions,
+  resolveCanvasRecoveryItems,
+  saveCanvasWithRecovery,
+  writeCanvasRecoveryRows,
+  type CanvasRecoveryAcceptance,
+  type CanvasRecoveryPlan,
+  type CanvasRecoveryReceiptChange,
+  type CanvasRecoverySaveInput,
+  type CanvasRecoverySaveResult,
+  type RecoveryItemView,
+  type RecoveryRecordView,
+} from "./generation-canvas-recovery-repo.js";
 // IKIZQC：成片（finalize）命令 repo——来源样片读取、成片任务创建（来源唯一约束裁决并发）、
 // 成片幂等重放查询。
 export {

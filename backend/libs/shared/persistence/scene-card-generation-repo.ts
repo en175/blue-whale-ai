@@ -647,6 +647,8 @@ async function regenerateSceneCardInTransaction(
         : {}),
     },
   });
+  // IKJJQU：该路径不携带 canvasRecovery，返回值恒为 CreatedJob；窄化仅为类型收束。
+  if ("kind" in createdJob) throw new Error("unreachable: scene_card job creation never conflicts idempotency");
   let cursor = createdJob.cursor;
 
   // 9. INSERT scene_card_generation_records（新记录，summary_status=generating）。

@@ -223,6 +223,8 @@ async function createStoryboardPreviewInTransaction(
       scene_card_id: sceneCardId.toString(),
     },
   });
+  // IKJJQU：该路径不携带 canvasRecovery，返回值恒为 CreatedJob；窄化仅为类型收束。
+  if ("kind" in createdJob) throw new Error("unreachable: storyboard job creation never conflicts idempotency");
 
   // 8. INSERT storyboard_previews（聚合根 + SceneCard 绑定；summary_status=generating）。
   const preview = await tx.storyboard_previews.create({

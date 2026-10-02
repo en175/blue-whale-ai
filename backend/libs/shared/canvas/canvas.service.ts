@@ -4,8 +4,18 @@ import { BadRequestException, ConflictException, Injectable } from "@nestjs/comm
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
 import { planLegacyCardMigration, type CanvasNodeLike } from "./legacy-card-migration.js";
-import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@lib/contracts";
+import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, RECOVERY_PAGE_LIMIT_DEFAULT, RECOVERY_PAGE_LIMIT_MAX, RECOVERY_PAGE_LIMIT_MIN, RECOVERY_REASONS, RECOVERY_RESOLVE_IDS_MAX, recoverySaveFieldsSchema, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@lib/contracts";
 import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
+import {
+  RecoveryContractError,
+  decodeRecoveryCursor,
+  guardLegacyCanvasWrite,
+  listCanvasRecoveryPage,
+  projectHasRecoverySubmissions,
+  resolveCanvasRecoveryItems,
+  saveCanvasWithRecovery,
+  type RecoveryRecordView,
+} from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
@@ -59,9 +69,11 @@ function canvasVersionConflict(version: number | null) {
 }
 
 /** save() 可能返回的冲突信封码（412 版本冲突 / 422 空覆盖防护 IKIIWN / 428 确认清空缺
- *  If-Match IKIMQJ）：canvases.controller 把命中本集合的信封按自身 code 透传 HTTP 状态码
- *  而非回落 200，此处是「哪些信封码需透传」的单一权威源——save() 新增冲突信封时在此登记。 */
-export const CANVAS_SAVE_CONFLICT_CODES: ReadonlySet<number> = new Set([412, 422, 428]);
+ *  If-Match IKIMQJ / IKJJQU 恢复域 400·404·409）：canvases.controller 把命中本集合的信封按
+ *  自身 code 透传 HTTP 状态码而非回落 200，此处是「哪些信封码需透传」的单一权威源——
+ *  save() 新增冲突信封时在此登记。IKJJQU 的恢复受控信封（data.reason 为字符串）额外
+ *  由控制器按 reason 存在性判定，旧 422/428 空 data 信封不受影响。 */
+export const CANVAS_SAVE_CONFLICT_CODES: ReadonlySet<number> = new Set([400, 404, 409, 412, 422, 428]);
 
 @Injectable()
 export class CanvasService {
@@ -246,6 +258,9 @@ export class CanvasService {
       const existingEdges = JSON.parse(canvas.edges ?? "[]") as CanvasEdge[];
       const serializedEdges = JSON.stringify([...existingEdges, ...newEdges]);
       const serialized = JSON.stringify([...nodes, ...additions, node]);
+      // IKJJQU（B.7）：方案应用是画布写入口之一——受保护标记/承接/资产不可经此绕过。
+      // 本写保留全部既有节点（只追加），守护是防御未来演化破坏该不变式。
+      guardLegacyCanvasWrite(nodes as Array<Record<string, unknown>>, [...nodes, ...additions, node] as Array<Record<string, unknown>>);
       if (Buffer.byteLength(serialized, "utf8") > limits.canvasBytes) throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
       try {
         const saved = await this.repo.saveIfVersion(projectId, canvas.version, canvas.viewport, serialized, serializedEdges, { ownerId, items: content.promptMaterials ?? [] });
@@ -271,6 +286,10 @@ export class CanvasService {
       expectedVersion?: number | null;
       /** IKIIWN：非空画布 → 空文档的破坏性收缩须显式确认（契约 §9） */
       confirmEmpty?: unknown;
+      /** IKJJQU（B.6）：新协议显式恢复保存字段。携带时走原子保存事务。 */
+      recoveryProtocolVersion?: unknown;
+      commandId?: unknown;
+      recoveryChanges?: unknown;
     },
   ) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
@@ -280,6 +299,11 @@ export class CanvasService {
     // 而 skill 域的 SKILL_NOT_FOUND 已把 100100 登记为 404，故此处不必（也不能）在
     // GLOBAL_CODE_HTTP_STATUS 再补一条（补了也不会生效，那条分支轮不到）。
     if (!owned) throw new DomainError(DATA_NOT_EXIST_CODE, "项目不存在");
+    // IKJJQU：新协议显式恢复保存（recoveryProtocolVersion=1）走独立原子事务——
+    // 画布、恢复项、素材关联、槽位首次放置与紧凑回执同事务提交。
+    if (body.recoveryProtocolVersion !== undefined) {
+      return this.saveWithRecovery(ownerId, projectId, body);
+    }
     const viewport = typeof body.viewport === "string" ? body.viewport : null;
     const nodes = typeof body.nodes === "string" ? body.nodes : null;
     // IKDLQF：edges 省略时保留既有连线（旧客户端保存不得清边）；携带时按下文校验后覆盖。
@@ -342,6 +366,24 @@ export class CanvasService {
     const editedMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
     const current = await this.repo.getByProject(projectId);
     const previous = JSON.parse(current.nodes ?? "[]") as typeof incoming;
+    // IKJJQU（B.7 已批准的旧客户端边界）：存在新协议关联的项目，所有整文档写入必须提供
+    // 客户端实际读到的版本——缺 If-Match 不以服务端当前版本替代（428 canvas_version_required）。
+    // 带版本的旧请求可普通编辑，但不能改动承接、受保护标记或结果资产，也不能使受保护卡缺席
+    //（guardLegacyCanvasWrite 抛 RecoveryContractError，由下方 catch 转信封）。
+    if (await projectHasRecoverySubmissions(this.prisma.client, projectId)
+      && body.expectedVersion === undefined) {
+      return {
+        code: 428,
+        msg: "该项目已启用任务恢复保护，保存必须携带 If-Match 版本",
+        data: { reason: RECOVERY_REASONS.versionRequired },
+      } as const;
+    }
+    try {
+      guardLegacyCanvasWrite(previous, incoming);
+    } catch (error) {
+      if (error instanceof RecoveryContractError) return error.envelope;
+      throw error;
+    }
     // IKIIWN（契约 §9）：非空画布被单次保存替换为空节点文档是破坏性收缩，仅显式确认放行；
     // 读与写的竞态由下方 saveIfVersion 的版本条件闭环——本检查看到的行与被覆盖的行共用同一 expectedVersion 闸门。
     if (previous.length > 0 && incoming.length === 0) {
@@ -466,5 +508,128 @@ export class CanvasService {
       return canvasVersionConflict(latest.version);
     }
     return ok(saved);
+  }
+
+  /** IKJJQU（B.5）：恢复页查询。游标由服务端编码校验，跨项目或非法返回 400。 */
+  async listGenerationRecovery(ownerId: string, projectId: string, limitParam: string, cursorParam: string) {
+    if (!await this.project.findOwnedById(projectId, ownerId)) {
+      return { code: 404, msg: "项目不存在", data: { reason: RECOVERY_REASONS.resourceNotFound } } as const;
+    }
+    let limit = RECOVERY_PAGE_LIMIT_DEFAULT;
+    if (limitParam !== "") {
+      limit = Number(limitParam);
+      if (!Number.isInteger(limit) || limit < RECOVERY_PAGE_LIMIT_MIN || limit > RECOVERY_PAGE_LIMIT_MAX) {
+        return { code: 400, msg: "limit 超出范围", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
+      }
+    }
+    let cursor: { maxId: number; lastId: number } | null = null;
+    if (cursorParam !== "") {
+      const decoded = decodeRecoveryCursor(cursorParam);
+      if (!decoded || decoded.projectId !== projectId) {
+        return { code: 400, msg: "游标非法", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
+      }
+      cursor = { maxId: decoded.maxId, lastId: decoded.lastId };
+    }
+    const page = await listCanvasRecoveryPage(this.prisma.client, projectId, limit, cursor);
+    return ok({
+      protocol_version: 1,
+      canvas_version: page.canvasVersion,
+      records: page.records,
+      next_cursor: page.nextCursor,
+    });
+  }
+
+  /** IKJJQU（B.5）：resolve 定向读取（只读、可重复、不修改状态；查不到整体 404）。 */
+  async resolveGenerationRecovery(ownerId: string, projectId: string, body: unknown) {
+    if (!await this.project.findOwnedById(projectId, ownerId)) {
+      return { code: 404, msg: "项目不存在", data: { reason: RECOVERY_REASONS.resourceNotFound } } as const;
+    }
+    const ids = (body as { recovery_item_ids?: unknown } | null)?.recovery_item_ids;
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > RECOVERY_RESOLVE_IDS_MAX
+      || ids.some(id => typeof id !== "string" || id.length === 0)) {
+      return { code: 400, msg: "recovery_item_ids 无效", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
+    }
+    let records: RecoveryRecordView[];
+    try {
+      records = await resolveCanvasRecoveryItems(this.prisma.client, projectId, ids as string[]);
+    } catch (error) {
+      if (error instanceof RecoveryContractError) return error.envelope;
+      throw error;
+    }
+    return ok({ protocol_version: 1, records });
+  }
+
+  /** IKJJQU（B.6）：新协议显式恢复保存——画布、恢复项、素材关联、槽位首次放置与
+   *  紧凑回执同事务提交；幂等（SAVE_CANVAS_RECOVERY_V1）先于 If-Match 检查。 */
+  private async saveWithRecovery(
+    ownerId: string,
+    projectId: string,
+    body: {
+      viewport?: unknown;
+      nodes?: unknown;
+      edges?: unknown;
+      expectedVersion?: number | null;
+      confirmEmpty?: unknown;
+      recoveryProtocolVersion?: unknown;
+      commandId?: unknown;
+      recoveryChanges?: unknown;
+    },
+  ) {
+    const parsedFields = recoverySaveFieldsSchema.safeParse({
+      recoveryProtocolVersion: body.recoveryProtocolVersion,
+      commandId: body.commandId,
+      recoveryChanges: body.recoveryChanges,
+    });
+    if (!parsedFields.success) {
+      return { code: 400, msg: "恢复保存字段无效", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
+    }
+    // 同请求的恢复项不得重复（B.6）。
+    const itemIds = new Set(parsedFields.data.recoveryChanges.map(change => change.recoveryItemId));
+    if (itemIds.size !== parsedFields.data.recoveryChanges.length) {
+      return { code: 400, msg: "同请求的恢复项不得重复", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
+    }
+    // 三个文档字段必须显式提交（B.6）。
+    if (typeof body.viewport !== "string" || typeof body.nodes !== "string" || typeof body.edges !== "string") {
+      return { code: 400, msg: "新协议保存必须显式提交 viewport/nodes/edges", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
+    }
+    const viewport = body.viewport;
+    const nodes = body.nodes;
+    const edges = body.edges;
+    let incoming: Array<{ id: string; type: string; data?: Record<string, unknown> }>;
+    try {
+      incoming = JSON.parse(nodes);
+      if (!Array.isArray(incoming) || incoming.some(node => !node || typeof node.id !== "string")) throw new Error();
+      JSON.parse(edges);
+    } catch {
+      return { code: 400, msg: "画布文档格式无效", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
+    }
+    if (Buffer.byteLength(nodes, "utf8") > limits.canvasBytes
+      || Buffer.byteLength(edges, "utf8") > CANVAS_EDGE_LIMITS.edgesBytes) {
+      return { code: 400, msg: "画布内容超限", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
+    }
+    // 破坏性收缩仍需 confirmEmpty（B.7）。
+    const current = await this.repo.getByProject(projectId);
+    const previousNodes = JSON.parse(current.nodes ?? "[]") as typeof incoming;
+    if (previousNodes.length > 0 && incoming.length === 0 && body.confirmEmpty !== true) {
+      return { code: 422, msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty", data: { reason: RECOVERY_REASONS.documentMismatch } } as const;
+    }
+    try {
+      const saved = await saveCanvasWithRecovery(this.prisma.client, {
+        ownerId,
+        projectId,
+        expectedVersion: body.expectedVersion === undefined ? null : body.expectedVersion,
+        viewport,
+        nodes,
+        edges,
+        confirmEmpty: body.confirmEmpty === true,
+        commandId: parsedFields.data.commandId,
+        changes: parsedFields.data.recoveryChanges,
+      });
+      return ok(saved);
+    } catch (error) {
+      // B.8：受控错误信封返回（412/409/404/422/428/400），整笔回滚由事务保证。
+      if (error instanceof RecoveryContractError) return error.envelope;
+      throw error;
+    }
   }
 }

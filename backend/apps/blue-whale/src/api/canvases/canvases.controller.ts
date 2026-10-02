@@ -1,9 +1,17 @@
-import { Body, Controller, Get, Headers, Param, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, Param, Post, Put, Query, Res } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CANVAS_SAVE_CONFLICT_CODES, CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import type { Response } from "express";
+
+/** IKJJQU（B.8）：新协议受控错误码集合（含恢复保存的 400/404/409/412/422/428）。
+ *  canvases 域的两个新恢复路由也用它透传状态码。 */
+function isRecoveryControlled(result: { code: number; data: unknown }): boolean {
+  return CANVAS_SAVE_CONFLICT_CODES.has(result.code)
+    && typeof result.data === "object" && result.data !== null
+    && typeof (result.data as { reason?: unknown }).reason === "string";
+}
 
 @Controller("canvases")
 export class CanvasesController {
@@ -52,11 +60,47 @@ export class CanvasesController {
     return this.canvas.get(user.userId, projectId ?? "");
   }
 
+  /** IKJJQU（B.5）：恢复页查询（分页游标）。受控错误按 code 透传 HTTP 状态。 */
+  @Get(":projectId/generation-recovery")
+  async listGenerationRecovery(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Res() res: Response,
+    @Query("limit") limit?: string,
+    @Query("cursor") cursor?: string,
+  ) {
+    const result = await this.canvas.listGenerationRecovery(
+      user.userId, projectId, limit ?? "", cursor ?? "",
+    );
+    if (isRecoveryControlled(result)) {
+      res.status(result.code).json(result);
+      return;
+    }
+    res.status(200).json(result);
+  }
+
+  /** IKJJQU（B.5）：resolve 定向读取（只读，可重复）。 */
+  @Post(":projectId/generation-recovery/resolve")
+  @HttpCode(200)
+  async resolveGenerationRecovery(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Res() res: Response,
+  ) {
+    const result = await this.canvas.resolveGenerationRecovery(user.userId, projectId, body);
+    if (isRecoveryControlled(result)) {
+      res.status(result.code).json(result);
+      return;
+    }
+    res.status(200).json(result);
+  }
+
   @Put(":projectId")
   async save(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
-    @Body() body: { viewport?: unknown; nodes?: unknown; edges?: unknown; confirmEmpty?: unknown },
+    @Body() body: { viewport?: unknown; nodes?: unknown; edges?: unknown; confirmEmpty?: unknown; recoveryProtocolVersion?: unknown; commandId?: unknown; recoveryChanges?: unknown },
     @Headers("if-match") ifMatch: string | undefined,
     @Res() res: Response,
   ) {

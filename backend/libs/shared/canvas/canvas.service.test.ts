@@ -36,6 +36,8 @@ function buildService(current: CanvasRow | null = null) {
   };
   const client = {
     canvas: { findFirst: vi.fn().mockResolvedValue(current) },
+    // IKJJQU：save() 的 B.7 守护读恢复关联表（默认无关联 → 旧行为）。
+    generation_canvas_submissions: { findFirst: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn(
       async (callback: (client: typeof tx) => Promise<unknown>) =>
         callback(tx),
