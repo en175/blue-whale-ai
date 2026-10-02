@@ -466,6 +466,10 @@ export default function CanvasPage() {
    *  state 的 submitting 是渲染期快照，慢网连点/同帧连点会读到旧值，防重以本集合为准）；
    *  失败解锁（finally 移除）后允许再试。 */
   const frameInterpolationInFlightRef = useRef<Set<string>>(new Set());
+  /** HD 创建在途计数（口径同插帧 IKHSFH）：nodeId 维度，从受理至创建返回期间持有——
+   *  显式关闭重开的重发是既定行为，同卡可并发在途，故计数而非布尔；面板选中隐藏再选回
+   *  时运行时以此重算提交锁；每次完成/失败各减一，归零才视为不在途。 */
+  const videoEnhanceInFlightRef = useRef<Map<string, number>>(new Map());
   /** 权威恢复未完成或失败时，禁止把编辑值当作受理参数重试。面板主动发送新配置不受影响。 */
   const frameInterpolationRecoveryBlockedRef = useRef<Set<string>>(new Set());
   const toolHostsRef = useRef<Partial<CanvasToolHosts>>({});
@@ -8219,20 +8223,33 @@ export default function CanvasPage() {
   const startVideoEnhanceJob = async (submission: VideoEnhanceSubmission, silent = false): Promise<void> => {
     const { projectId, nodeId, payload: input, identity } = submission;
     const resolution = input.resolution;
-    const created = await (silent ? createVideoEnhancement(projectId, input, { silent: true }) : createVideoEnhancement(projectId, input));
-    // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startImageEnhanceJob）
-    const activeAtCreate = newNodeId('pending-generation');
-    activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-    stopJobPolling(nodeId, jobTimersRef.current);
-    patchMediaNode(nodeId, {
-      genStatus: 'generating',
-      progress: 0,
-      errorText: undefined,
-      jobId: created.job_id,
-      // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
-      videoEnhance: { ...identity, lastParams: { resolution } },
-    });
-    pollJob(nodeId, created.job_id);
+    // 在途登记（口径同插帧 IKHSFH）：面板在途只读与选中隐藏再选回的 reconcile 数据源；
+    // 不拦截受理——显式关闭重开的重发是既定行为，同帧连点由运行时 submitting 同步挡
+    videoEnhanceInFlightRef.current.set(nodeId, (videoEnhanceInFlightRef.current.get(nodeId) ?? 0) + 1);
+    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
+    try {
+      const created = await (silent ? createVideoEnhancement(projectId, input, { silent: true }) : createVideoEnhancement(projectId, input));
+      // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startImageEnhanceJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      patchMediaNode(nodeId, {
+        genStatus: 'generating',
+        progress: 0,
+        errorText: undefined,
+        jobId: created.job_id,
+        // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
+        videoEnhance: { ...identity, lastParams: { resolution } },
+      });
+      pollJob(nodeId, created.job_id);
+    } finally {
+      // 每次受理各自减一（同卡并发在途计数），归零才解锁；解锁后 reconcile 让在途
+      // 面板恢复可编辑（口径同插帧）
+      const count = (videoEnhanceInFlightRef.current.get(nodeId) ?? 1) - 1;
+      if (count <= 0) videoEnhanceInFlightRef.current.delete(nodeId);
+      else videoEnhanceInFlightRef.current.set(nodeId, count);
+      toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
+    }
   };
 
   toolHostsRef.current.panels = {
@@ -8253,6 +8270,7 @@ export default function CanvasPage() {
       return Boolean(node && (node.data.draft === true || hasGenerationRecord(node)) && node.data[kind]);
     },
     isFrameInFlight: (nodeId) => frameInterpolationInFlightRef.current.has(nodeId),
+    isVideoEnhanceInFlight: (nodeId) => (videoEnhanceInFlightRef.current.get(nodeId) ?? 0) > 0,
     startImage: (input) => startImageEnhanceJob(input, true),
     startVideo: (input) => startVideoEnhanceJob(input, true),
     startFrame: startFrameInterpolationJob,

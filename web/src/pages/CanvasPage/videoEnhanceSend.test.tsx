@@ -396,6 +396,25 @@ describe('HD 面板迟到请求与新会话', () => {
       expect.objectContaining({ source: 'v1', target: draftId, data: { origin: VIDEO_ENHANCE_EDGE_ORIGIN } }),
     ]));
   });
+
+  it('发送在途选中其它卡再选回本卡：面板重现仍在途只读，同卡不重复受理', async () => {
+    seedDoc();
+    apiMocks.createVideoEnhancement.mockImplementation(() => new Promise(() => {}));
+    await renderPage();
+    await videoEnhance();
+    const draftId = hdDraft()!.id;
+    await clickPanelResolution('2k');
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    // 选中其它卡：面板隐藏（运行时 submitting 被复位，防线只剩按卡在途集合）
+    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')] }); });
+    expect(panelSend()).toBeNull();
+    // 选回本卡：面板重现且在途只读，发送钮禁用，不重复受理
+    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode(draftId)] }); });
+    expect(panelSend()).toBeTruthy();
+    expect(panelSend()!.disabled).toBe(true);
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('IKH3VH 轮询终态回填', () => {

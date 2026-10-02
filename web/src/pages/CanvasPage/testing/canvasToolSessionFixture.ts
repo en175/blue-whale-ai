@@ -184,6 +184,7 @@ export function canvasToolSessionFixture() {
       activate() {},
       isValidTarget: (id, kind) => Boolean(getNode(id)?.data[kind]),
       isFrameInFlight: () => false,
+      isVideoEnhanceInFlight: () => false,
       startImage: task,
       startVideo: task,
       startFrame: async () => {

@@ -21,6 +21,7 @@ export interface PanelToolHost {
   activate(nodeId: string, toolbar: boolean): void;
   isValidTarget(nodeId: string, kind: CanvasToolKind): boolean;
   isFrameInFlight(nodeId: string): boolean;
+  isVideoEnhanceInFlight(nodeId: string): boolean;
   startImage(input: ImageEnhanceSubmission): Promise<void>;
   startVideo(input: VideoEnhanceSubmission): Promise<void>;
   startFrame(input: FrameInterpolationSubmission): Promise<boolean>;
@@ -74,6 +75,8 @@ export function createVideoEnhanceSession(getHost: () => PanelToolHost): ToolSes
     target: (state) => state.nodeId,
     capture: (state, resolution) => resolution ? captureVideoEnhance(getHost(), state.nodeId, resolution) : null,
     async submit(input, context) { await getHost().startVideo(input); context.close(); },
+    /** 提交锁的宿主在途判定：选中隐藏再选回时运行时以其重算上锁（显式关闭重开即新会话，允许重发）。 */
+    inFlight: (state) => getHost().isVideoEnhanceInFlight(state.nodeId),
     onError(error) {
       if (isApiError(error) && error.status === 401) return;
       // 静默传输只把 HTTP 提示归属移到有效会话；保留原 HD 两路反馈。

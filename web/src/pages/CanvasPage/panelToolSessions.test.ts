@@ -18,6 +18,7 @@ function setup() {
   const host: PanelToolHost = {
     getProjectId: () => projectId, getNode: (id) => nodes.find((node) => node.id === id), getNodes: () => nodes,
     canOpen: () => true, activate() {}, isValidTarget: () => true, isFrameInFlight: () => false,
+    isVideoEnhanceInFlight: () => false,
     warn: (message) => errors.push(message), error: (message) => errors.push(message), httpError: (message) => errors.push(message),
     startImage: async () => {}, startFrame: async () => true,
     startVideo: (input) => { inputs.push(input); return new Promise<void>((resolve, reject) => pending.push({ resolve, reject })); },
@@ -77,6 +78,36 @@ describe('HD 面板通过运行时的提交契约', () => {
       expect(video.getSnapshot().visible).toBe(change !== 'close');
       expect(video.getSnapshot().submitting).toBe(change !== 'close');
     }
+  });
+  it('选中隐藏再选回：在途同卡重发被拒、面板重现仍只读，原任务落地后解锁', async () => {
+    const { runtime, video, host } = setup();
+    const inFlight = new Set<string>();
+    host.isVideoEnhanceInFlight = (id) => inFlight.has(id);
+    let settle!: () => void;
+    host.startVideo = async (input) => {
+      inFlight.add(input.nodeId);
+      runtime.reconcileSources(new Set(['a']));
+      await new Promise<void>((done) => { settle = done; });
+      inFlight.delete(input.nodeId);
+      runtime.reconcileSources(new Set(['a']));
+    };
+    video.open('a', deps);
+    expect(video.send('2k')).toBe(true);
+    // 选中其它卡：面板隐藏、submitting 被 select 复位（回归路径），宿主在途不受影响
+    runtime.onSelectionChange({ soloId: 'b', multiSelect: false });
+    expect(video.getSnapshot().visible).toBe(false);
+    expect(video.getSnapshot().submitting).toBe(false);
+    // 选回同卡：面板重现，提交锁以宿主在途重算上锁，重发被拒、不重复受理
+    runtime.onSelectionChange({ soloId: 'a', multiSelect: false });
+    expect(video.getSnapshot().visible).toBe(true);
+    expect(video.getSnapshot().submitting).toBe(true);
+    expect(video.send('4k')).toBe(false);
+    expect(inFlight.size).toBe(1);
+    // 原任务落地：旧响应不关新界面（纪元已失效），reconcile 随在途落地解锁后可再发
+    settle(); await flush();
+    expect(video.getSnapshot().visible).toBe(true);
+    expect(video.getSnapshot().submitting).toBe(false);
+    expect(video.send('4k')).toBe(true);
   });
 });
 

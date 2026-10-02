@@ -35,6 +35,9 @@ export interface ToolSessionDefinition<State, Entry, Input, Request = void> {
   cleanup?(state: State): void;
   /** 源卡旁路变更后校准专属编辑状态；无变化时返回原对象。 */
   reconcile?(state: State): State | null;
+  /** 提交锁的宿主在途判定。提供后：选中隐藏再选回时以其重算上锁（防在途重发），
+   *  旁路 reconcile 时以其解锁（在途落地后恢复可编辑）；显式关闭重开即新会话，不受影响。 */
+  inFlight?(state: State): boolean;
 }
 
 export interface ToolSessionSnapshot<State> {
@@ -179,15 +182,20 @@ export function createToolSessionRuntime() {
           const visible = soloId === definition.target(snapshot.state) && !multiSelect;
           if (snapshot.visible === visible) return;
           epoch.exit(definition.kind);
-          snapshot = { ...snapshot, visible, submitting: false };
+          // 选回时提交锁以宿主在途为准重算上锁（隐藏期间纪元已失效，旧 finally 不再复位）；
+          // 隐藏时复位——无 inFlight 判定的工具保持原语义（一律复位）
+          const submitting = visible && definition.inFlight?.(snapshot.state) === true;
+          snapshot = { ...snapshot, visible, submitting };
           changed();
         },
         reconcile() {
           if (snapshot.state === null || !definition.reconcile) return;
           const state = definition.reconcile(snapshot.state);
           if (state === null) { close(); return; }
-          if (state === snapshot.state) return;
-          snapshot = { ...snapshot, state };
+          // 提交锁只随宿主在途落地解锁，不因旁路变更上锁——显式关闭重开的新会话允许重发
+          const submitting = snapshot.submitting && definition.inFlight ? definition.inFlight(state) : snapshot.submitting;
+          if (state === snapshot.state && submitting === snapshot.submitting) return;
+          snapshot = { ...snapshot, state, submitting };
           changed();
         },
       });
