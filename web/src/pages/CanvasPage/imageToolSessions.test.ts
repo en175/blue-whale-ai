@@ -70,10 +70,10 @@ it.each(['cutout', 'outpaint'] as const)('%s 公共事件：源卡点击保留�
   tool.open('i1', currentDeps);
   expect(runtime.onNodeClick('i1', currentDeps)).toBe('consumed');
   expect(tool.getSnapshot().state?.nodeId).toBe('i1');
-  expect(runtime.onSelectionChange({ soloId: null, multiSelect: false }, currentDeps)).toBe(true);
-  expect(runtime.onSelectionChange({ soloId: 'other', multiSelect: true }, currentDeps)).toBe(true);
+  expect(runtime.onSelectionChange({ soloId: null, multiSelect: false })).toBe(true);
+  expect(runtime.onSelectionChange({ soloId: 'other', multiSelect: true })).toBe(true);
   expect(tool.getSnapshot().state?.nodeId).toBe('i1');
-  expect(runtime.onEscape(currentDeps)).toBe(false);
+  expect(runtime.onEscape()).toBe(false);
   expect(runtime.onNodeClick('other', currentDeps)).toBe('consumed');
   expect(tool.getSnapshot().state).toBeNull();
   expect(selected).toEqual(['other']);

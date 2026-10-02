@@ -3313,7 +3313,7 @@ export default function CanvasPage() {
    *  编辑会话（四路退出口径，未发送参数全部丢弃），面板随后放行打开；无会话时为幂等
    *  空操作。「哪些会话活跃、逐个怎么退」的判断只在 toolSessionCoordinator。 */
   const exitEditSessionForGenPanel = () => {
-    toolRuntime.beforeGenPanel(buildToolSessionDeps());
+    toolRuntime.beforeGenPanel();
   };
 
   /** 画布空白处单击（React Flow PaneClick，拖拽平移后天然不触发——任何拖拽平移都不会误关）：
@@ -3324,7 +3324,7 @@ export default function CanvasPage() {
     cancelAgentCandidate();
     // 六会话四退出之「点画布空白」：任一会话活跃即退出并消费本次点击（丢弃未发送参数），
     // 规则集中在 toolSessionCoordinator——不落入选取会话/选取模式/面板关闭链
-    if (toolRuntime.onPaneClick(buildToolSessionDeps()) === 'consumed') return;
+    if (toolRuntime.onPaneClick() === 'consumed') return;
     if (imagePickSessionActive) { endImagePickSession(); return; }
     if (videoPickSessionActive) { endVideoPickSession(); return; }
     if (audioPickSessionActive) { endAudioPickSession(); return; }
@@ -3366,7 +3366,6 @@ export default function CanvasPage() {
     // editSessionActive」门挡住——IKFOHK 同一手势多次通知无重复副作用的既有机制）
     if (toolRuntime.onSelectionChange(
       { soloId, multiSelect: candidates.length > 1 },
-      buildToolSessionDeps(),
     )) return;
     // IKFOHK：单选草稿/成品生成卡时原子切换到对应对话框。选中变化经 React Flow
     // useEffect 到达，可能早于或代替 onNodeClick（nodeDragThreshold=1 时轻微位移会吞掉 click）。
@@ -3504,7 +3503,7 @@ export default function CanvasPage() {
         return;
       }
       // 擦除→去字幕→音视频分离→裁切顺序退出首个活跃会话（顺序在 module）；交还则关五面板
-      if (toolRuntime.onEscape(buildToolSessionDeps())) return;
+      if (toolRuntime.onEscape()) return;
       dismissAllGenPanels();
     };
     window.addEventListener('keydown', onKeydown);

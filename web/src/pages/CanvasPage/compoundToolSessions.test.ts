@@ -115,9 +115,9 @@ it.each(['audioMix', 'audioVideoMux'] as const)('%s 通过公开运行时退出�
     const test = compoundHarness(kind);
     test.open(); test.edit();
     if (exit === 'close') test.tool.close();
-    else if (exit === 'escape') test.runtime.onEscape(deps);
-    else if (exit === 'other') test.runtime.onSelectionChange({ soloId: 'other', multiSelect: false }, deps);
-    else if (exit === 'pane') test.runtime.onPaneClick(deps);
+    else if (exit === 'escape') test.runtime.onEscape();
+    else if (exit === 'other') test.runtime.onSelectionChange({ soloId: 'other', multiSelect: false });
+    else if (exit === 'pane') test.runtime.onPaneClick();
     else test.runtime.reconcileSources(new Set(['other']));
     expect(test.tool.getSnapshot()).toEqual({ state: null, submitting: false });
     expect(test.nodes[2].data.audioVideoMux).toMatchObject({ sourceNodeId: 'a1', video: { assetId: '5' } });

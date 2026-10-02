@@ -44,6 +44,6 @@ it('新工具一次注册即接入入口、渲染、节点装饰与共同退出�
   await Promise.resolve();
   expect(entry.handle.getSnapshot().state).toBeNull();
   tools.callbacks.onCropImage?.('card');
-  runtime.beforeGenPanel(deps);
+  runtime.beforeGenPanel();
   expect(renderToStaticMarkup(<>{tools.render()}</>)).toBe('');
 });

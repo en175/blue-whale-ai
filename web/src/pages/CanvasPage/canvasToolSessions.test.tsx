@@ -64,22 +64,20 @@ it.each(
   const old = f.tools.entries[kind].handle.getSnapshot().state;
   f.tools.runtime.onSelectionChange(
     { soloId: null, multiSelect: false },
-    f.deps,
   );
   expect(f.tools.entries[kind].handle.getSnapshot().state).toBe(old);
   if (route === 'close') f.tools.entries[kind].handle.close();
   if (route === 'escape') {
     if (kind === 'cutout' || kind === 'outpaint') {
-      expect(f.tools.runtime.onEscape(f.deps)).toBe(false);
+      expect(f.tools.runtime.onEscape()).toBe(false);
       f.tools.dedicatedEscape();
-    } else expect(f.tools.runtime.onEscape(f.deps)).toBe(true);
+    } else expect(f.tools.runtime.onEscape()).toBe(true);
   }
   if (route === 'selection') {
     if (kind === 'cutout' || kind === 'outpaint') {
       expect(
         f.tools.runtime.onSelectionChange(
           { soloId: 'other', multiSelect: false },
-          f.deps,
         ),
       ).toBe(true);
       expect(f.tools.runtime.onNodeClick('other', f.deps)).toBe('consumed');
@@ -87,12 +85,11 @@ it.each(
     } else
       f.tools.runtime.onSelectionChange(
         { soloId: 'other', multiSelect: false },
-        f.deps,
       );
   }
   if (route === 'pane')
-    expect(f.tools.runtime.onPaneClick(f.deps)).toBe('consumed');
-  if (route === 'generation') f.tools.runtime.beforeGenPanel(f.deps);
+    expect(f.tools.runtime.onPaneClick()).toBe('consumed');
+  if (route === 'generation') f.tools.runtime.beforeGenPanel();
   if (route === 'delete') f.tools.runtime.reconcileSources(new Set());
   expect(f.tools.entries[kind].handle.getSnapshot()).toEqual({
     state: null,
@@ -232,7 +229,7 @@ it.each(['imageEnhance', 'videoEnhance', 'frameInterpolation'] as const)('%s 仅
   const f = canvasToolSessionFixture();
   f.open[kind]();
   expect(f.tools.runtime.hasEscExitSession()).toBe(false);
-  f.tools.runtime.onSelectionChange({ soloId: 'other', multiSelect: false }, f.deps);
+  f.tools.runtime.onSelectionChange({ soloId: 'other', multiSelect: false });
   expect(f.tools.hasPanel()).toBe(false);
   expect(f.tools.entries[kind].handle.getSnapshot().state).not.toBeNull();
   expect(f.tools.runtime.hasEscExitSession()).toBe(false);

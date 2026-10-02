@@ -64,26 +64,26 @@ export function createToolSessionRuntime() {
     version += 1;
     if (notify) listeners.forEach((listener) => listener());
   }
-  function closePanels(except?: string) {
-    for (const [kind, tool] of tools) if (tool.panel && kind !== except) tool.close();
+  function closePanels() {
+    for (const tool of tools.values()) if (tool.panel) tool.close();
   }
   return {
     closePanels,
     hasEditSession: () => [...tools.values()].some((tool) => !tool.panel && tool.target() !== null),
     hasEscExitSession: () => hasEscExitSession(tools.values()),
     escDefersToToolSessionHandler: () => escDefersToToolSessionHandler(tools.values()),
-    onPaneClick(_deps: ToolSessionDeps) { return handleToolSessionPaneClick(tools.values()); },
+    onPaneClick() { return handleToolSessionPaneClick(tools.values()); },
     onNodeClick: (nodeId: string, deps: ToolSessionDeps) => handleToolSessionNodeClick(nodeId, tools.values(), deps),
-    onSelectionChange(selection: { soloId: string | null; multiSelect: boolean }, _deps: ToolSessionDeps) {
+    onSelectionChange(selection: { soloId: string | null; multiSelect: boolean }) {
       const freeze = handleToolSessionSelectionChange(selection, tools.values());
       if (!freeze) for (const tool of tools.values()) if (tool.panel) tool.select(selection);
       return freeze;
     },
-    onEscape(_deps: ToolSessionDeps) {
+    onEscape() {
       if (escDefersToToolSessionHandler(tools.values())) return false;
       return exitToolSessionOnEsc(tools.values());
     },
-    beforeGenPanel(_deps: ToolSessionDeps) { exitAllToolSessions(tools.values()); },
+    beforeGenPanel() { exitAllToolSessions(tools.values()); },
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
