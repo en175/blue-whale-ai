@@ -47,7 +47,10 @@ export function cropSpaceOf(node: Node, bounds: CropRect): CropCoordinateSpace |
 
 export function applyCropPreset(state: CropState, node: Node, preset: CropPresetKey): CropState {
   const ratio = cropPresetRatio(preset);
-  return { ...state, preset, rect: ratio === null ? state.rect : inscribeCropRect(cropBoundsOf(node), ratio) };
+  const bounds = cropBoundsOf(node);
+  const space = cropSpaceOf(node, bounds);
+  const rect = ratio === null ? state.rect : inscribeCropRect(bounds, ratio);
+  return { ...state, preset, rect: clampCropRect(rect, bounds, space ? minCropSideDisplay(space) : 0) };
 }
 
 function cropImageToFile(

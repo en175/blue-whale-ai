@@ -51,6 +51,22 @@ it('统一源卡核对钳制旁路移动后的裁切框，删除源卡完整清�
   expect(tool.getSnapshot()).toEqual({ state: null, submitting: false });
 });
 
+it('100×100 源图选 9:16 仍保持自然短边 64 像素下限，解除比例保留合法框', () => {
+  const smallSource = { ...source, data: { ...source.data, width: 100, height: 100 } };
+  const runtime = createToolSessionRuntime();
+  const tool = runtime.register(createCropSession(() => ({
+    getProjectId: () => 'p1', getSourceNode: () => smallSource,
+    uploadFile: async () => uploaded, handoff() {}, warn() {}, error() {},
+  })));
+  tool.open('i1', deps);
+  tool.edit((state) => applyCropPreset(state, smallSource, '9:16'));
+  const rect = tool.getSnapshot().state?.rect;
+  expect(rect?.width).toBeCloseTo(179.2);
+  expect(rect?.height).toBe(280);
+  tool.edit((state) => applyCropPreset(state, smallSource, 'free'));
+  expect(tool.getSnapshot().state?.rect).toEqual(rect);
+});
+
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 

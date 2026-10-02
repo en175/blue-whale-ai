@@ -379,6 +379,21 @@ describe('IKGW1S 确认裁切：执行链路（离屏 canvas → 普通上传）
     expect(canvasCalls[0]!.drawImage[0]!.slice(1)).toEqual([200, 0, 1200, 900, 0, 0, 1200, 900]);
   });
 
+  it('100×100 源图选 9:16 后确认：输出短边仍为 64 像素', async () => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes[0]!.data.width = 100;
+    doc.nodes[0]!.data.height = 100;
+    canvasDocMock.current.assets['5'] = { asset_id: 5, type: 'image', access_url: 'http://img/i1.png', width: 100, height: 100 };
+    await renderPage();
+    await cropImage('i1');
+    await clickBody('crop-preset-9-16');
+    await clickBody('crop-confirm');
+
+    expect(canvasCalls[0]!.canvas.width).toBe(64);
+    expect(canvasCalls[0]!.canvas.height).toBe(100);
+    expect(apiMocks.uploadAssetFile).toHaveBeenCalledTimes(1);
+  });
+
   it('JPEG 源：产出跟随源图，toBlob 收到 image/jpeg + 0.92 质量，File 名 crop.jpg', async () => {
     seedDoc(true, true);
     await renderPage();
