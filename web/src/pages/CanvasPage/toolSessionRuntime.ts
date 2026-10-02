@@ -27,6 +27,8 @@ export interface ToolSessionDefinition<State, Entry, Input, Request = void> {
   submit(input: Input, context: ToolSubmissionContext): Promise<void>;
   onError(error: unknown, input: Input): void;
   cleanup?(state: State): void;
+  /** 源卡旁路变更后校准专属编辑状态；无变化时返回原对象。 */
+  reconcile?(state: State): State;
 }
 
 export interface ToolSessionSnapshot<State> {
@@ -50,7 +52,7 @@ export interface ToolSessionHandle<State, Entry, Request = void> {
 /** 注册工具的编辑状态与纪元由此持有；节点、连线和任务处理仍由宿主提供。 */
 export function createToolSessionRuntime() {
   const epoch = createToolSessionEpoch();
-  const tools = new Map<ToolSessionKind, { target(): string | null; close(): void; reset(): void }>();
+  const tools = new Map<ToolSessionKind, { target(): string | null; close(): void; reset(): void; reconcile(): void }>();
   const listeners = new Set<() => void>();
   let version = 0;
   let projectId: string | null | undefined;
@@ -100,6 +102,7 @@ export function createToolSessionRuntime() {
       for (const tool of tools.values()) {
         const target = tool.target();
         if (target !== null && !nodeIds.has(target)) tool.close();
+        else tool.reconcile();
       }
     },
     register<State, Entry, Input, Request = void>(definition: ToolSessionDefinition<State, Entry, Input, Request>): ToolSessionHandle<State, Entry, Request> {
@@ -159,7 +162,17 @@ export function createToolSessionRuntime() {
           return true;
         },
       };
-      tools.set(definition.kind, { target: () => snapshot.state === null ? null : definition.target(snapshot.state), close: () => close(), reset: () => close(false) });
+      tools.set(definition.kind, {
+        target: () => snapshot.state === null ? null : definition.target(snapshot.state),
+        close: () => close(), reset: () => close(false),
+        reconcile() {
+          if (snapshot.state === null || !definition.reconcile) return;
+          const state = definition.reconcile(snapshot.state);
+          if (state === snapshot.state) return;
+          snapshot = { ...snapshot, state };
+          changed();
+        },
+      });
       return tool;
     },
   };

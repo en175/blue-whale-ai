@@ -576,3 +576,57 @@ describe('IKH1WI 裁切面板中心点跟随锚', () => {
     expect(panel.style.left).toBe('498px');
   });
 });
+
+
+describe('IKJIQ3 裁切运行时接线：编码窗口与迟到上传', () => {
+  it('编码窗口内同帧连点只有一个编码和普通上传，不进入后台任务链', async () => {
+    let encoded!: (blob: Blob | null) => void;
+    const encode = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => { encoded = callback; });
+    await renderPage(); await cropImage('i1');
+    const confirm = document.body.querySelector<HTMLButtonElement>('[data-testid="crop-confirm"]')!;
+    await act(async () => { confirm.click(); confirm.click(); });
+    expect(encode).toHaveBeenCalledTimes(1);
+    expect(apiMocks.uploadAssetFile).not.toHaveBeenCalled();
+    await act(async () => { encoded(new Blob(['crop'], { type: 'image/png' })); });
+    expect(apiMocks.uploadAssetFile).toHaveBeenCalledTimes(1);
+    expect(apiMocks.uploadAssetFile.mock.calls[0][1]).toEqual({ projectId: 'p1', silent: true });
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    expect(apiMocks.createMediaExtraction).not.toHaveBeenCalled();
+    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
+    expect(cropEditing('i1')).toBe(false);
+  });
+
+  it('本地编码失败保持框与比例，释放当前锁后可再次确认', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementationOnce((callback) => callback(null));
+    await renderPage(); await cropImage('i1'); await clickBody('crop-preset-4-3');
+    await clickBody('crop-confirm');
+    expect(cropFrameProp()?.preset).toBe('4:3');
+    expect(container.textContent).toContain('裁切生成失败');
+    expect(apiMocks.uploadAssetFile).not.toHaveBeenCalled();
+    await clickBody('crop-confirm');
+    expect(apiMocks.uploadAssetFile).toHaveBeenCalledTimes(1);
+    expect(cropEditing('i1')).toBe(false);
+  });
+
+  it.each(['success', 'failure'] as const)('同卡关闭重开并发送后旧上传 %s 不关新框、不清新锁，合法成品继续落卡', async (outcome) => {
+    let accept!: (uploaded: Record<string, unknown>) => void;
+    let reject!: (error: Error) => void;
+    apiMocks.uploadAssetFile.mockReturnValueOnce(new Promise((resolve, fail) => { accept = resolve; reject = fail; }));
+    apiMocks.uploadAssetFile.mockReturnValue(new Promise(() => {}));
+    await renderPage(); await cropImage('i1'); await clickBody('crop-confirm');
+    await clickBody('crop-cancel'); await cropImage('i1'); await clickBody('crop-preset-1-1');
+    await clickBody('crop-confirm');
+    expect(apiMocks.uploadAssetFile).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      if (outcome === 'success') accept({ asset_id: '901', url: 'http://img/crop.png', width: 1600, height: 900, mime: 'image/png', size: 100 });
+      else reject(new Error('旧上传失败'));
+    });
+    expect(cropEditing('i1')).toBe(true);
+    expect(cropFrameProp()?.preset).toBe('1:1');
+    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    await clickBody('crop-confirm');
+    expect(apiMocks.uploadAssetFile).toHaveBeenCalledTimes(2);
+    expect(mediaNodes()).toHaveLength(outcome === 'success' ? 3 : 2);
+    if (outcome === 'success') expect(mediaNodes().find((node) => node.id !== 'i1' && node.id !== 'i2')?.selected).not.toBe(true);
+  });
+});

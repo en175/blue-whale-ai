@@ -266,18 +266,10 @@ import VocalSplitDialog from './components/VocalSplitDialog';
 import SceneSplitDialog from './components/SceneSplitDialog';
 import SmartMattingDialog from './components/SmartMattingDialog';
 import CropDialog from './components/CropDialog';
+import { createCropSession, cropBoundsOf, cropSpaceOf, applyCropPreset, type CropHost } from './cropSession';
 import {
-  clampCropRect,
-  cropOutputFormat,
-  cropPresetRatio,
-  cropRectToNatural,
-  fullCropRect,
   IMAGE_CROP_EDGE_ORIGIN,
-  inscribeCropRect,
   minCropSideDisplay,
-  type CropCoordinateSpace,
-  type CropNaturalRect,
-  type CropOutputFormat,
   type CropPresetKey,
   type CropRect,
   type ImageCropIdentity,
@@ -300,7 +292,6 @@ import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-m
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import TextGenDialog from './components/TextGenDialog';
 import { flattenPromptDocForSend, restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
-import { resolveMediaSrc } from '@/utils/remoteImageCors';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -457,76 +448,10 @@ function hasCustomName(node: Node | undefined): boolean {
   return ((node?.data ?? {}) as Record<string, unknown>).customName === true;
 }
 
-/** 裁切执行（IKGW1S）：加载源图 → 离屏 canvas（尺寸=裁切结果自然分辨率）drawImage 框内画面
- *  → toBlob 重编码（格式与质量由调用方按 cropOutputFormat 决定）为 File。
- *  返回 null 表示源图加载或编码失败（调用方 toast 后留在裁切模式；jsdom 无 canvas 编码与
- *  图加载，页面测试打桩 getContext/toBlob/Image，真实编码由人工回归覆盖，规格 Testing Decisions）。 */
-function cropImageToFile(
-  src: string,
-  natural: CropNaturalRect,
-  format: CropOutputFormat,
-): Promise<File | null> {
-  return new Promise((resolve) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = natural.width;
-    canvas.height = natural.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      resolve(null);
-      return;
-    }
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        ctx.drawImage(img, natural.x, natural.y, natural.width, natural.height, 0, 0, natural.width, natural.height);
-        canvas.toBlob(
-          (blob) => resolve(blob ? new File([blob], `crop.${format.ext}`, { type: blob.type || format.mime }) : null),
-          format.mime,
-          format.quality,
-        );
-      } catch {
-        resolve(null);
-      }
-    };
-    img.onerror = () => resolve(null);
-    img.src = resolveMediaSrc(src);
-  });
-}
-
-/** 裁切内容区矩形（IKGW1N）：源图卡内容盒（mediaContentBox 保持源图宽高比，宽高缺失时
- *  兜底默认尺寸）置于卡片位置 + 22.5 标题偏移；进入裁切（默认全幅框）与渲染期派生共用。 */
-function cropBoundsOf(node: Node): CropRect {
-  const d = (node.data ?? {}) as Record<string, unknown>;
-  const box = mediaContentBox({
-    mediaType: 'image',
-    width: typeof d.width === 'number' ? d.width : undefined,
-    height: typeof d.height === 'number' ? d.height : undefined,
-  });
-  return {
-    x: node.position.x,
-    y: node.position.y + MEDIA_CONTENT_TOP_OFFSET,
-    width: box.width,
-    height: box.height,
-  };
-}
-
 /** 当前方案绑定是否已被边上的确认记录覆盖：只少不少（删标签）视为已同步。 */
 function planBindingsCoveredBy(current: PromptBinding[], confirmed: PromptBinding[]): boolean {
   const confirmedKeys = new Set(confirmed.map(binding => `${binding.index}\0${binding.assetId}`));
   return current.every(binding => confirmedKeys.has(`${binding.index}\0${binding.assetId}`));
-}
-
-/** 裁切坐标空间（显示尺寸 × 源图自然分辨率）：自然分辨率缺失（存量图未实测）时为 null。 */
-function cropSpaceOf(node: Node, bounds: CropRect): CropCoordinateSpace | null {
-  const d = (node.data ?? {}) as Record<string, unknown>;
-  if (typeof d.width !== 'number' || typeof d.height !== 'number') return null;
-  return {
-    displayWidth: bounds.width,
-    displayHeight: bounds.height,
-    naturalWidth: d.width,
-    naturalHeight: d.height,
-  };
 }
 
 /** IKILUE：带 confirmEmpty 的清空保存被 412 拒绝后的复核指引——另一会话已改写画布，
@@ -701,6 +626,7 @@ export default function CanvasPage() {
   const frameInterpolationBoundRef = useRef<string | null>(null);
   /** 当前已打开 HD 面板绑定的卡 id（同步写，口径同 enhanceBoundRef） */
   const videoEnhanceBoundRef = useRef<string | null>(null);
+  const cropHostRef = useRef<CropHost | null>(null);
   const outpaintHostRef = useRef<OutpaintHost | null>(null);
   const cutoutHostRef = useRef<CutoutHost | null>(null);
   const smartMattingHostRef = useRef<SmartMattingHost | null>(null);
@@ -710,7 +636,7 @@ export default function CanvasPage() {
   const audioSpeedHostRef = useRef<AudioSpeedSessionHost | null>(null);
   const audioTrimHostRef = useRef<AudioToolSessionHost<AudioTrimInput> | null>(null);
   const audioVideoSplitHostRef = useRef<AudioVideoSplitHost | null>(null);
-  const [{ toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession, cutoutSession, outpaintSession }] = useState(() => {
+  const [{ toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession, cutoutSession, outpaintSession, cropSession }] = useState(() => {
     const toolRuntime = createToolSessionRuntime();
     const audioVideoSplitSession = toolRuntime.register(createAudioVideoSplitSession(() => audioVideoSplitHostRef.current!));
     const audioTrimSession = toolRuntime.register(createAudioTrimSession(() => audioTrimHostRef.current!));
@@ -719,9 +645,10 @@ export default function CanvasPage() {
     const imageEraseSession = toolRuntime.register(createImageEraseSession(() => imageEraseHostRef.current!));
     const subtitleEraseSession = toolRuntime.register(createSubtitleEraseSession(() => subtitleEraseHostRef.current!));
     const smartMattingSession = toolRuntime.register(createSmartMattingSession(() => smartMattingHostRef.current!));
+    const cropSession = toolRuntime.register(createCropSession(() => cropHostRef.current!));
     const cutoutSession = toolRuntime.register(createCutoutSession(() => cutoutHostRef.current!));
     const outpaintSession = toolRuntime.register(createOutpaintSession(() => outpaintHostRef.current!));
-    return { toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession, cutoutSession, outpaintSession };
+    return { toolRuntime, audioVideoSplitSession, audioTrimSession, audioSpeedSession, vocalSplitSession, imageEraseSession, subtitleEraseSession, smartMattingSession, cutoutSession, outpaintSession, cropSession };
   });
   // 项目首帧先使旧响应失效，随后从运行时读取唯一状态。
   toolRuntime.setProject(currentId);
@@ -830,7 +757,7 @@ export default function CanvasPage() {
   /** 场景切分发送中（创建请求飞行期防重复提交，口径同 audioVideoSplitSubmitting） */
   const [sceneSplitSubmitting, setSceneSplitSubmitting] = useState(false);
   /** 发送同步锁（IKH8BR）：发送先退会话（条随即卸载），submitting 状态防不住同一事件
-   *  循环内的双击——ref 锁按 cropSubmittingRef 先例兜底（连点只发一次请求）。 */
+   *  循环内的双击——同步锁兜底（连点只发一次请求）。 */
   const sceneSplitSendingRef = useRef(false);
   const smartMattingView = smartMattingSession.getSnapshot();
   const smartMattingTargetNodeId = smartMattingView.state?.nodeId ?? null;
@@ -852,19 +779,11 @@ export default function CanvasPage() {
   const cutoutSubmitting = cutoutView.submitting;
   const exitCutoutSession = cutoutSession.close;
 
-  /** 裁切编辑态（IKGW1H 模式进出骨架）：处于裁切编辑的源图卡 node id，null=未进入。
-   *  单值 state 即单目标约束（同一时刻仅一张卡处于裁切模式）；裁切框与比例（IKGW1N）
-   *  状态提升在本页（cropRect/cropPreset，同擦除编辑态口径），确认建卡（IKGW1S）经
-   *  exitCropMode/onCropConfirm 接入。 */
-  const [cropTargetNodeId, setCropTargetNodeId] = useState<string | null>(null);
-  /** 裁切比例模式（IKGW1N）：free=自由；预设=锁比例（边手柄禁用、角手柄等比缩放） */
-  const [cropPreset, setCropPreset] = useState<CropPresetKey>('free');
-  /** 当前裁切框（IKGW1N，flow 坐标、与内容区 bounds 同系）：null=未在编辑；
-   *  进入默认自由比例全幅（fullCropRect），确认时 IKGW1S 读取本框换算自然分辨率裁切 */
-  const [cropRect, setCropRect] = useState<CropRect | null>(null);
-  /** 裁切执行中（IKGW1S：编码+上传期间）：重复点确认直接忽略（面板无 submitting 只读态，
-   *  本页侧防双卡；成功即退出模式，失败复位留在模式） */
-  const cropSubmittingRef = useRef(false);
+  const cropView = cropSession.getSnapshot();
+  const cropTargetNodeId = cropView.state?.nodeId ?? null;
+  const cropPreset = cropView.state?.preset ?? 'free';
+  const cropRect = cropView.state?.rect ?? null;
+  const exitCropMode = cropSession.close;
   const outpaintView = outpaintSession.getSnapshot();
   const outpaintNodeId = outpaintView.state?.nodeId ?? null;
   const outpaintExpands = outpaintView.state?.expands ?? ZERO_EXPANDS;
@@ -4119,13 +4038,11 @@ export default function CanvasPage() {
    *  框外暗区/专属 Esc 等定向入口不经本装配，直调各工具完整退出函数。 */
   const buildToolSessionDeps = (): ToolSessionDeps => toolRuntime.coordinate({
     activity: {
-      crop: cropTargetNodeId,
       audioMix: audioMixSourceNodeId,
       sceneSplit: sceneSplitTargetNodeId,
       audioVideoMux: audioVideoMuxDraftId,
     },
     exits: {
-      crop: exitCropMode,
       audioMix: exitAudioMixEditing,
       sceneSplit: exitSceneSplitEditing,
       audioVideoMux: exitAudioVideoMuxEditing,
@@ -4834,29 +4751,6 @@ export default function CanvasPage() {
   /** 智能抠像编辑态绑定清理（IKHK9N）：目标源视频卡被删除时退出编辑态，防浮条悬挂
    *  （口径同场景切分绑定清理） */
 
-
-  /** 裁切编辑态绑定清理（IKGW1H）：目标源图卡被删除时退出裁切模式，防状态悬挂 */
-  useEffect(() => {
-    if (!cropTargetNodeId) return;
-    if (!mediaNodes.some((n) => n.id === cropTargetNodeId)) exitCropMode();
-    // exitCropMode 仅引用稳定的 setState，不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cropTargetNodeId, mediaNodes]);
-
-  /** 裁切框随内容区钳制（IKGW1N，规格故事 14）：源图卡被移动/缩放（撤销等旁路改坐标）时
-   *  框保持完整落在内容区内（正常路径由纯函数钳制保证，本 effect 只兜底旁路变更）。
-   *  cropBounds/cropRect 每次渲染都是新对象，仅在数值变化时才 setState，无循环。 */
-  useEffect(() => {
-    if (!cropBounds || !cropRect) return;
-    const next = clampCropRect(cropRect, cropBounds, cropMinSide);
-    if (
-      next.x !== cropRect.x || next.y !== cropRect.y ||
-      next.width !== cropRect.width || next.height !== cropRect.height
-    ) {
-      setCropRect(next);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cropBounds?.x, cropBounds?.y, cropBounds?.width, cropBounds?.height, cropRect, cropMinSide]);
 
   /** IKFR4X：Esc 结束图片持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
   useEffect(() => {
@@ -9622,16 +9516,6 @@ export default function CanvasPage() {
    *  自动恢复（MediaNode 承担）。IKI61O：退出即推进纪元。 */
   const exitSmartMattingEditing = smartMattingSession.close;
 
-  /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
-   *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。
-   *  IKI61O：退出即推进纪元。 */
-  const exitCropMode = () => {
-    toolSessionEpochRef.current.exit('crop');
-    setCropTargetNodeId(null);
-    setCropRect(null);
-    setCropPreset('free');
-  };
-
   /** 擦除（IKGOT7 入口 / IKGOTB 编辑态）：把目标图片卡置为擦除编辑态并重置遮罩编辑。
    *  门槛预检（超尺寸/超大小/webp/gif）已在菜单项置灰层完成，此处只管进入；
    *  其余编辑会话退出与生成面板关闭经 toolSessionCoordinator（编辑态是独立模式，规格故事 7）。 */
@@ -9652,16 +9536,7 @@ export default function CanvasPage() {
    *  默认自由比例、框为全幅（fullCropRect，干净起点不记忆上次状态）；单值 cropTargetNodeId
    *  即单目标——换目标卡自然替换。 */
   const handleNodeCropImage = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    runToolSessionEntry('crop', () => {
-      const bounds = cropBoundsOf(node);
-      // IKI61O：新会话锁重新计时——旧会话在途请求的 finally 按纪元跳过复位，锁在此归位
-      cropSubmittingRef.current = false;
-      setCropPreset('free');
-      setCropRect(fullCropRect(bounds));
-      setCropTargetNodeId(id);
-    });
+    cropSession.open(id, buildToolSessionDeps());
   };
 
   /** 智能去字幕（IKGZ82 入口 / IKGZ83 会话 / IKH3OU 模式前置）：把目标视频卡置为去字幕会话
@@ -9935,91 +9810,41 @@ export default function CanvasPage() {
 
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
    *  自由 → 框保持不变（只是解除比例锁定）。 */
-  const handleCropPresetChange = (key: CropPresetKey) => {
-    setCropPreset(key);
-    const ratio = cropPresetRatio(key);
-    if (ratio != null && cropBounds) setCropRect(inscribeCropRect(cropBounds, ratio));
+  const handleCropPresetChange = (preset: CropPresetKey) => {
+    const state = cropSession.getSnapshot().state;
+    const node = state ? mediaNodesRef.current.find((item) => item.id === state.nodeId) : undefined;
+    if (node) cropSession.edit((current) => applyCropPreset(current, node, preset));
   };
 
-  /** 裁切确认（IKGW1N 渲染在位、点击派发；IKGW1S 执行链路）：离屏 canvas 按源图自然分辨率
-   *  裁出框内画面（cropRectToNatural）→ toBlob 重编码（cropOutputFormat 跟随源图：JPEG 约
-   *  0.92、PNG、判不出 PNG 兜底）→ new File → 既有资产上传链路（普通上传不带 assetSource，
-   *  裁切产物是用户成品）→ 源卡右侧紧邻新建「裁切」成品卡（fileName 先例同高清；无草稿、
-   *  无生成中过渡，直接显示结果；skipSelect 不抢选中）+ 纯视觉来源连线
-   *  （origin=IMAGE_CROP_EDGE_ORIGIN，参考推导跳过）→ exitCropMode（确认即退出）。
-   *  源图自然分辨率缺失（cropSpace null，存量老图）或加载/编码/上传失败：toast 报错、
-   *  留在裁切模式，不建卡不退态（无半成品；对齐擦除「上传失败留在编辑态」口径）。 */
-  const handleCropConfirm = () => {
-    const sourceNodeId = cropTargetNodeId;
-    const node = sourceNodeId ? mediaNodesRef.current.find((n) => n.id === sourceNodeId) : undefined;
-    const data = (node?.data ?? {}) as Record<string, unknown>;
-    const rect = cropRect;
-    const bounds = cropBounds;
-    const space = cropSpace;
-    if (!sourceNodeId || !node || !rect || !bounds || !space) {
-      showToast('warn', '源图分辨率未知，无法裁切');
-      return;
-    }
-    if (cropSubmittingRef.current) return;
-    const src = typeof data.src === 'string' ? data.src : '';
-    if (!src || src.startsWith('blob:')) {
-      showToast('warn', '源图不可用，无法裁切');
-      return;
-    }
-    cropSubmittingRef.current = true;
-    const sessionEpoch = toolSessionEpochRef.current.capture('crop');
-    const natural = cropRectToNatural(rect, bounds, space);
-    const format = cropOutputFormat({
-      mime: typeof data.mime === 'string' ? data.mime : undefined,
-      src,
-      fileName: typeof data.fileName === 'string' ? data.fileName : undefined,
+  /** 上传成品后的落卡与来源边沿用画布宿主，裁切不进入后台任务链。 */
+  const handoffCropResult: CropHost['handoff'] = ({ source }, uploaded) => {
+    const draftId = createImageDraftCard(imageEnhanceDraftPosition(source), {
+      fileName: '裁切',
+      skipSelect: true,
+      data: {
+        src: uploaded.url,
+        assetId: uploaded.asset_id,
+        width: uploaded.width,
+        height: uploaded.height,
+        mime: uploaded.mime,
+        size: uploaded.size,
+        // 裁切是客户端即时成品（无服务端任务/jobId）：清掉草稿态占位，成品图片正常展示；
+        // 同时挂 imageCrop 身份标记——MediaNode 据此渲染左侧 target Handle 接收来源连线
+        // （裁切无 jobId 走不通 jobId 通道，靠身份标记让成品态仍被识别为生成宿主）。
+        genStatus: undefined,
+        draft: undefined,
+        imageCrop: { sourceAssetId: String(uploaded.asset_id) } satisfies ImageCropIdentity,
+      },
     });
-    void (async () => {
-      try {
-        const file = await cropImageToFile(src, natural, format);
-        if (!file) {
-          // 迟到失败不打扰用户当前会话（IKI61O）
-          if (toolSessionEpochRef.current.isCurrent('crop', sessionEpoch)) {
-            showToast('error', '裁切生成失败，请重试');
-          }
-          return;
-        }
-        const uploaded = await uploadAssetFile(file, { projectId: currentId ?? undefined, silent: true });
-        // 发送即退出模式（先退再建卡，对齐擦除链路顺序；skipSelect 下无选中误判）；
-        // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，只收尾建卡
-        if (toolSessionEpochRef.current.isCurrent('crop', sessionEpoch)) exitCropMode();
-        const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-          fileName: '裁切',
-          skipSelect: true,
-          data: {
-            src: uploaded.url,
-            assetId: uploaded.asset_id,
-            width: uploaded.width,
-            height: uploaded.height,
-            mime: uploaded.mime,
-            size: uploaded.size,
-            // 裁切是客户端即时成品（无服务端任务/jobId）：清掉草稿态占位，成品图片正常展示；
-            // 同时挂 imageCrop 身份标记——MediaNode 据此渲染左侧 target Handle 接收来源连线
-            // （裁切无 jobId 走不通 jobId 通道，靠身份标记让成品态仍被识别为生成宿主）。
-            genStatus: undefined,
-            draft: undefined,
-            imageCrop: { sourceAssetId: String(uploaded.asset_id) } satisfies ImageCropIdentity,
-          },
-        });
-        addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_CROP_EDGE_ORIGIN });
-      } catch (e: unknown) {
-        // 迟到失败不打扰用户当前会话（IKI61O）
-        if (toolSessionEpochRef.current.isCurrent('crop', sessionEpoch)) {
-          showToast('error', isApiError(e) ? e.message : '裁切上传失败，请重试');
-        }
-      } finally {
-        // 锁复位三态：失败留态时复位本会话锁（参数可调后重发）；成功时 exit 已推进纪元、
-        // 本分支跳过，锁由下次进入会话时复位兜底；迟到响应跳过——不动新会话的锁
-        if (toolSessionEpochRef.current.isCurrent('crop', sessionEpoch)) {
-          cropSubmittingRef.current = false;
-        }
-      }
-    })();
+    addCanvasEdge(source.id, draftId, undefined, { origin: IMAGE_CROP_EDGE_ORIGIN });
+  };
+  cropHostRef.current = {
+    getProjectId: () => currentId,
+    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+    uploadFile: (file, projectId) => uploadAssetFile(file, { projectId, silent: true }),
+    handoff: handoffCropResult,
+    warn: (message) => showToast('warn', message),
+    error: (message) => showToast('error', message),
   };
 
   /* ===== 擦除遮罩指针交互（IKGOTB）：EraseMaskLayer 上抛显示坐标点，此处按当前工具落 op ===== */
@@ -12676,14 +12501,14 @@ export default function CanvasPage() {
           }
           cropFrame={
             // 裁切框覆盖层（IKGW1N）：编辑态挂载，屏幕空间覆盖层随内容区渲染期换算；
-            // 框/比例状态提升在本页，拖拽经 CropFrame 走 imageCrop 纯函数回写
+            // 框/比例由运行时持有，拖拽经 CropFrame 走 imageCrop 纯函数回写
             cropTargetNodeId && cropBounds && cropRect
               ? {
                   bounds: cropBounds,
                   rect: cropRect,
                   preset: cropPreset,
                   minSide: cropMinSide,
-                  onRectChange: setCropRect,
+                  onRectChange: (rect: CropRect) => cropSession.edit((state) => ({ ...state, rect })),
                   onDarkAreaClick: exitCropMode,
                 }
               : null
@@ -13385,13 +13210,13 @@ export default function CanvasPage() {
 
         {/* 裁切面板（IKGW1N）：随 cropTargetNodeId 条件渲染（编辑态面板，不进 dismissAllGenPanels
             名单，根元素打 data-gen-panel-territory）；取消直调 exitCropMode 定向退出（四退出
-            之一，会话完整清理函数）；确认绑 handleCropConfirm
+            之一，会话完整清理函数）；确认交运行时编排
             （IKGW1S：裁切执行→上传→建卡闭环） */}
         {cropTargetNodeId && (
           <CropDialog
             preset={cropPreset}
             onPresetChange={handleCropPresetChange}
-            onConfirm={handleCropConfirm}
+            onConfirm={cropSession.send}
             onClose={exitCropMode}
             followAnchor={cropPanelAnchor}
           />
