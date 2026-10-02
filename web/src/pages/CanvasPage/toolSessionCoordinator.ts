@@ -207,24 +207,26 @@ export function exitToolSessionOnEsc(deps: ToolSessionDeps): boolean {
  *  - 项目切换或进入任一新会话经 advanceAll 推进——旧身份不再代表当前会话；
  *  - 发送时 capture 捕获当前纪元；settle 时 isCurrent 比对——false 即迟到响应，
  *    只做任务收尾（建卡/连线/轮询/落盘），不退当前会话、不复位其提交锁、不弹旧错误。 */
-export interface ToolSessionEpoch {
+export interface ToolSessionEpoch<Kind extends string = ToolSessionKind> {
   /** 进入会话：推进该会话纪元（新会话身份生效） */
-  enter(kind: ToolSessionKind): void;
+  enter(kind: Kind): void;
   /** 退出会话：推进该会话纪元（在途响应随之失效） */
-  exit(kind: ToolSessionKind): void;
+  exit(kind: Kind): void;
   /** 项目切换或进入任一新会话：推进全部会话纪元 */
   advanceAll(): void;
   /** 发送时捕获该会话当前纪元 */
-  capture(kind: ToolSessionKind): number;
+  capture(kind: Kind): number;
   /** settle 比对：捕获纪元仍代表当前会话（期间无退出/重进/切项目） */
-  isCurrent(kind: ToolSessionKind, captured: number): boolean;
+  isCurrent(kind: Kind, captured: number): boolean;
 }
 
 /** 创建会话纪元追踪器（每页面实例一份）。各会话种类独立计数、互不影响。 */
-export function createToolSessionEpoch(): ToolSessionEpoch {
+export function createToolSessionEpoch(): ToolSessionEpoch;
+export function createToolSessionEpoch<Kind extends string>(kinds: readonly Kind[]): ToolSessionEpoch<Kind>;
+export function createToolSessionEpoch(kinds: readonly string[] = TOOL_SESSION_KINDS): ToolSessionEpoch<string> {
   const epochs = Object.fromEntries(
-    TOOL_SESSION_KINDS.map((kind) => [kind, 0]),
-  ) as Record<ToolSessionKind, number>;
+    kinds.map((kind) => [kind, 0]),
+  ) as Record<string, number>;
   return {
     enter(kind) {
       epochs[kind] += 1;
@@ -233,7 +235,7 @@ export function createToolSessionEpoch(): ToolSessionEpoch {
       epochs[kind] += 1;
     },
     advanceAll() {
-      for (const kind of TOOL_SESSION_KINDS) epochs[kind] += 1;
+      for (const kind of kinds) epochs[kind] += 1;
     },
     capture(kind) {
       return epochs[kind];

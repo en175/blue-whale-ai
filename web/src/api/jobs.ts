@@ -512,12 +512,14 @@ export function createAudioSpeed(
 export function createImageEnhancement(
   projectId: string,
   payload: CreateImageEnhancementPayload,
+  init?: { silent?: boolean },
 ): Promise<ImageEnhancementCreatedData> {
   return apiRequest<ImageEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-enhancements`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -646,12 +648,14 @@ export interface VideoEnhancementCreatedData {
 export function createVideoEnhancement(
   projectId: string,
   payload: CreateVideoEnhancementPayload,
+  init?: { silent?: boolean },
 ): Promise<VideoEnhancementCreatedData> {
   return apiRequest<VideoEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-enhancements`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }

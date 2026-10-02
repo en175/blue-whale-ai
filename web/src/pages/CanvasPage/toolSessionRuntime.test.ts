@@ -19,6 +19,55 @@ const definition: ToolSessionDefinition<{ nodeId: string; format: string }, stri
   onError() {},
 };
 
+it('面板选择隐藏保留绑定；空通知不退出，显式关闭后不由选中回弹，同卡可见重入保留内容', () => {
+  const runtime = createToolSessionRuntime();
+  let seed = 0;
+  const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve',
+    initialize: (nodeId: string, previous?: { nodeId: string; format: string }) => previous?.nodeId === nodeId ? previous : { nodeId, format: `seed-${++seed}` },
+  });
+  panel.open('v1', legacyDeps());
+  panel.edit((state) => ({ ...state, format: '4k' }));
+  panel.open('v1', legacyDeps());
+  expect(panel.getSnapshot().state?.format).toBe('4k');
+  expect(panel.getSnapshot().visible).toBe(true);
+  runtime.onSelectionChange({ soloId: null, multiSelect: false }, legacyDeps());
+  expect(panel.getSnapshot().visible).toBe(true);
+  runtime.onSelectionChange({ soloId: 'v2', multiSelect: false }, legacyDeps());
+  expect(panel.getSnapshot().visible).toBe(false);
+  expect(panel.getSnapshot().state?.nodeId).toBe('v1');
+  runtime.onSelectionChange({ soloId: 'v1', multiSelect: false }, legacyDeps());
+  expect(panel.getSnapshot().visible).toBe(true);
+  panel.close();
+  runtime.onSelectionChange({ soloId: 'v1', multiSelect: false }, legacyDeps());
+  expect(panel.getSnapshot().state).toBeNull();
+  expect(panel.getSnapshot().hidden).toBe(true);
+  panel.open('v1', legacyDeps());
+  expect(panel.getSnapshot().state?.format).toBe('seed-2');
+});
+
+it.each(['close', 'escape', 'pane', 'generation', 'editor'] as const)('面板 %s 退出由运行时处理，与编辑会话和其他面板互斥', (route) => {
+  const runtime = createToolSessionRuntime();
+  const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'reinitialize' });
+  const frame = runtime.register({ ...definition, kind: 'frameInterpolation', panel: 'reinitialize' });
+  const split = runtime.register(definition);
+  split.open('source', legacyDeps());
+  panel.open('a', legacyDeps());
+  expect(split.getSnapshot().state).toBeNull();
+  frame.open('b', legacyDeps());
+  expect(panel.getSnapshot().state).toBeNull();
+  expect(frame.getSnapshot().visible).toBe(true);
+  runtime.onSelectionChange({ soloId: null, multiSelect: false }, legacyDeps());
+  expect(frame.getSnapshot().visible).toBe(true);
+  if (route === 'close') frame.close();
+  if (route === 'escape') expect(runtime.onEscape(legacyDeps())).toBe(true);
+  if (route === 'pane') expect(runtime.onPaneClick(legacyDeps())).toBe('consumed');
+  if (route === 'generation') runtime.beforeGenPanel(legacyDeps());
+  if (route === 'editor') split.open('source', legacyDeps());
+  expect(frame.getSnapshot().state).toBeNull();
+  runtime.onSelectionChange({ soloId: 'b', multiSelect: false }, legacyDeps());
+  expect(frame.getSnapshot().visible).toBe(false);
+});
+
 describe('工具会话运行时公开接口', () => {
   it('进入、参数编辑、退出和同卡重开：状态只有运行时拥有，重开恢复默认参数', () => {
     const runtime = createToolSessionRuntime();
