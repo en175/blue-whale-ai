@@ -636,7 +636,7 @@ describe('扩图真实HTTP链：有效反馈沿用sonner，旧失败不打扰新
     expect(outpaintCard().data.genStatus).toBe('failed');
   });
 
-  it('失败卡重试保留原HTTP默认提示并使用冻结扩展参数', async () => {
+  it('失败卡重试使用冻结扩展参数原样重发；重试失败经运行时落失败卡（HTTP 层静默，IKJJR2）', async () => {
     addOutpaintSource(); fetchMock.mockImplementationOnce(async () => jsonFail('首次失败'));
     await renderPage(); await armOutpaint(); await clickSend(outpaintSend()); await flush();
     const failed = outpaintCard();
@@ -645,8 +645,14 @@ describe('扩图真实HTTP链：有效反馈沿用sonner，旧失败不打扰新
     fetchMock.mockImplementationOnce(async () => jsonFail('扩图重试失败'));
     await act(async () => { (failed.data.onRetryJob as (id: string) => void)(failed.id); });
     await flush();
-    expect(toast.error).toHaveBeenCalledTimes(1);
-    expect(toast.error).toHaveBeenCalledWith('扩图重试失败');
-    expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body)).toEqual(input);
+    // IKJJR2：重试归统一任务运行时——失败收敛到失败卡 errorText，不再双提示（toast 0 次）
+    expect(toast.error).not.toHaveBeenCalled();
+    expect((outpaintCard().data as Record<string, unknown>).errorText).toBe('扩图重试失败');
+    expect((outpaintCard().data as Record<string, unknown>).genStatus).toBe('failed');
+    // 重发 body = 冻结扩展参数原样 + canvas_binding（新协议重试也是独立提交意图）
+    const retryBody = JSON.parse(fetchMock.mock.calls.at(-1)![1].body) as Record<string, unknown>;
+    expect(retryBody).toMatchObject(input as Record<string, unknown>);
+    expect(retryBody.canvas_binding).toMatchObject({ protocol_version: 1 });
+    expect(new Headers(fetchMock.mock.calls.at(-1)![1].headers).get('Idempotency-Key')).toEqual((retryBody.canvas_binding as { submission_id: string }).submission_id);
   });
 });

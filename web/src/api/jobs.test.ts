@@ -18,6 +18,7 @@ import {
   createVideoMatting,
   createImageErase,
   createImageCutout,
+  createImageOutpaint,
   createVideoSubtitleErase,
   createVideoSceneSplit,
   fetchJobStatus,
@@ -688,6 +689,60 @@ describe('建任务/重试的幂等头由调用方持有', () => {
     expect(init.method).toBe('POST');
     expect(new Headers(init.headers).get('Idempotency-Key')).toBe('retry-key-73');
     expect(init.body).toBeUndefined();
+  });
+});
+
+describe('IKJJR2 图像工具创建端点的恢复协议 v1 承载（canvas_binding + Idempotency-Key = submission_id）', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const BINDING = {
+    protocol_version: 1 as const,
+    submission_id: '33333333-3333-4333-8333-333333333333',
+    target_node_id: 'media-draft-7',
+    expected_binding_revision: 0,
+    recovery_seed: { target: { role: 'result-placeholder' as const, x: 1, y: 2, width: 320, height: 320, name: '擦除' }, sources: [] },
+  };
+  const bindingView = {
+    protocol_version: 1, submission_id: BINDING.submission_id, target_node_id: 'media-draft-7',
+    binding_revision: 1, job_id: '9', is_current: true,
+  };
+  const okToolCreated = () =>
+    vi.fn(async (_url: string, _init?: RequestInit) => new Response(
+      JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '9', status: 'queued', canvas_binding: bindingView } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+
+  it.each([
+    ['createImageEnhancement', '/api/projects/p1/image-enhancements', (init: object) => createImageEnhancement('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', version_tier: 'pro', multiple: 2, generative_enhance_mode: 'generative_first', enable_correct_color: false,
+    }, init)],
+    ['createImageErase', '/api/projects/p1/image-erasures', (init: object) => createImageErase('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', erase_scene: 'full_screen_text_erase',
+    }, init)],
+    ['createImageCutout', '/api/projects/p1/image-cutouts', (init: object) => createImageCutout('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', cutout_scene: 'general',
+    }, init)],
+    ['createImageOutpaint', '/api/projects/p1/image-outpaints', (init: object) => createImageOutpaint('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', expand_top: 0.1, expand_right: 0, expand_bottom: 0, expand_left: 0,
+    }, init)],
+  ] as const)('%s：携绑定时 canvas_binding 进 body、幂等头 = submission_id、回执透传；缺省 init 保持接入前形态', async (_name, endpoint, invoke) => {
+    const fetchMock = okToolCreated();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(invoke({ silent: true, canvasBinding: BINDING, idempotencyKey: BINDING.submission_id }))
+      .resolves.toEqual({ job_id: '9', status: 'queued', canvas_binding: bindingView });
+
+    let [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe(endpoint);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toMatchObject({ source_asset_id: '3985', canvas_binding: BINDING });
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe(BINDING.submission_id);
+
+    // 历史兼容（无绑定）：body 不带 canvas_binding、无幂等头（请求形态与接入前一致）
+    await expect(invoke({ silent: true })).resolves.toEqual({ job_id: '9', status: 'queued', canvas_binding: bindingView });
+    [url, init] = fetchMock.mock.calls[1]! as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).not.toHaveProperty('canvas_binding');
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBeNull();
   });
 });
 

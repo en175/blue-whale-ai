@@ -260,6 +260,8 @@ beforeEach(() => {
   seedDoc();
   apiMocks.createImageCutout.mockReset();
   apiMocks.fetchJobStatus.mockReset();
+  // IKJJR2：受理后统一运行时立即开始轮询——reset 后需有默认进行中实现（防 undefined.then）
+  apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j88', status: 'processing', progress: 0, asset: null });
   apiMocks.createImageCutout.mockResolvedValue({ job_id: 'j88', status: 'queued' });
 });
 

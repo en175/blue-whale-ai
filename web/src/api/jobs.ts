@@ -4,6 +4,7 @@
  * 一次用户意图一把，重试复用同一把——否则服务端那套幂等（同键重放、只扣一次钱）形同虚设
  * ============================================ */
 import { apiRequest, envelopeErrorCode, isApiError, silentInit, type ApiError } from './http';
+import type { CanvasBinding } from './canvasRecovery';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
@@ -233,10 +234,42 @@ export function createVocalSplit(
  *  IKGM9O 高清放大面板提交；版本档能力矩阵与源图尺寸门槛由服务端权威复核，前端预检只是体验层。 */
 export type CreateImageEnhancementPayload = ImageEnhanceInput;
 
+/** 新协议受理回执（IKJJR2，恢复契约 v1 B.3）：携带 canvas_binding 提交时由服务端返回；
+ *  历史兼容提交（无绑定）不返回。四个图像工具创建端点同形。 */
+export interface ImageToolBindingView {
+  protocol_version: 1;
+  submission_id: string;
+  target_node_id: string;
+  binding_revision: number;
+  job_id: string;
+  is_current: boolean;
+}
+
+/** 图像工具创建 init（IKJJR2）：canvasBinding 非空时 Idempotency-Key 头必须等于
+ *  binding.submission_id（后端 IKJJQW 受理段硬校验），body 附 canvas_binding。 */
+export interface ImageToolCreateInit {
+  silent?: boolean;
+  canvasBinding?: CanvasBinding | null;
+  idempotencyKey?: string;
+}
+
+/** 图像工具创建请求公共段（IKJJR2）：canvas_binding 是业务键之上的基础设施键，
+ *  附在 body 顶层；无绑定时请求形态与接入前一致。 */
+function imageToolRequestBody(payload: Record<string, unknown>, init?: ImageToolCreateInit) {
+  return JSON.stringify(init?.canvasBinding ? { ...payload, canvas_binding: init.canvasBinding } : payload);
+}
+
+/** 图像工具创建请求头（IKJJR2）：仅携带绑定时带 Idempotency-Key（= submission_id）。 */
+function imageToolRequestHeaders(init?: ImageToolCreateInit): Record<string, string> | undefined {
+  return init?.canvasBinding && init.idempotencyKey ? { 'Idempotency-Key': init.idempotencyKey } : undefined;
+}
+
 /** 创建高清放大任务返回。 */
 export interface ImageEnhancementCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR2：新协议受理回执（无绑定的历史兼容提交不返回） */
+  canvas_binding?: ImageToolBindingView;
 }
 
 /** POST /api/projects/:id/image-outpaints 请求体（六键，键名与 backend/libs/contracts/image-outpaint.ts 契约恒等）。
@@ -247,6 +280,8 @@ export type CreateImageOutpaintPayload = ImageOutpaintInput;
 export interface ImageOutpaintCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR2：新协议受理回执（无绑定的历史兼容提交不返回） */
+  canvas_binding?: ImageToolBindingView;
 }
 
 /** 人声背景分离单轨结果投影（IKHA2J 定死的多轨形状，轨类型枚举与契约同源）；
@@ -510,18 +545,20 @@ export function createAudioSpeed(
   );
 }
 
-/** 创建图片高清放大任务（IKGM9O）；免费口径同 media_extract——不带幂等头、无积分预估、不走余额拦截门。
- *  高清草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。 */
+/** 创建图片高清放大任务（IKGM9O）；免费口径——不走积分预估、不走余额拦截门。
+ *  高清草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。
+ *  IKJJR2（恢复契约 v1 B.3）：canvasBinding + idempotencyKey 由生成任务运行时注入。 */
 export function createImageEnhancement(
   projectId: string,
   payload: CreateImageEnhancementPayload,
-  init?: { silent?: boolean },
+  init?: ImageToolCreateInit,
 ): Promise<ImageEnhancementCreatedData> {
   return apiRequest<ImageEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-enhancements`,
     {
       method: 'POST',
-      body: JSON.stringify(payload),
+      headers: imageToolRequestHeaders(init),
+      body: imageToolRequestBody(payload, init),
       ...silentInit(init),
     },
   );
@@ -536,21 +573,25 @@ export type CreateImageErasePayload = ImageEraseInput;
 export interface ImageEraseCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR2：新协议受理回执（无绑定的历史兼容提交不返回） */
+  canvas_binding?: ImageToolBindingView;
 }
 
-/** 创建图片擦除任务（IKGOTB）；免费口径同 image_enhance——不带幂等头、无积分预估、不走余额拦截门。
- *  擦除结果卡由前端在创建成功后本地插入（发送时才建卡，target_node_id 发送时生成传入），
- *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。 */
+/** 创建图片擦除任务（IKGOTB）；免费口径同 image_enhance——不走积分预估、不走余额拦截门。
+ *  擦除结果卡由前端在受理后本地插入（发送时才建卡，target_node_id 发送时生成传入），
+ *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。
+ *  IKJJR2（恢复契约 v1 B.3）：canvasBinding + idempotencyKey 由生成任务运行时注入。 */
 export function createImageErase(
   projectId: string,
   payload: CreateImageErasePayload,
-  init?: { silent?: boolean },
+  init?: ImageToolCreateInit,
 ): Promise<ImageEraseCreatedData> {
   return apiRequest<ImageEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-erasures`,
     {
       method: 'POST',
-      body: JSON.stringify(payload),
+      headers: imageToolRequestHeaders(init),
+      body: imageToolRequestBody(payload, init),
       ...silentInit(init),
     },
   );
@@ -564,40 +605,46 @@ export type CreateImageCutoutPayload = ImageCutoutInput;
 export interface ImageCutoutCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR2：新协议受理回执（无绑定的历史兼容提交不返回） */
+  canvas_binding?: ImageToolBindingView;
 }
 
-/** 创建图片抠图任务（IKGXLS）；免费口径同 image_enhance / image_erase——不带幂等头、无积分预估、不走余额拦截门。
- *  抠图结果卡由前端在创建成功后本地插入（发送时才建卡，target_node_id 发送时生成传入），
- *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。 */
+/** 创建图片抠图任务（IKGXLS）；免费口径同 image_enhance / image_erase——不走积分预估、不走余额拦截门。
+ *  抠图结果卡由前端在受理后本地插入（发送时才建卡，target_node_id 发送时生成传入），
+ *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。
+ *  IKJJR2（恢复契约 v1 B.3）：canvasBinding + idempotencyKey 由生成任务运行时注入。 */
 export function createImageCutout(
   projectId: string,
   payload: CreateImageCutoutPayload,
-  init?: { silent?: boolean },
+  init?: ImageToolCreateInit,
 ): Promise<ImageCutoutCreatedData> {
   return apiRequest<ImageCutoutCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-cutouts`,
     {
       method: 'POST',
-      body: JSON.stringify(payload),
+      headers: imageToolRequestHeaders(init),
+      body: imageToolRequestBody(payload, init),
       ...silentInit(init),
     },
   );
 }
 
-/** 创建智能扩图任务（IKGOR6）；免费口径同 media_extract / image_enhance——不带幂等头、
- *  无积分预估、不走余额拦截门。扩图结果卡已由前端本地建好（target_node_id 指向它），
- *  产物经 GET /api/jobs/:id 的 asset 回填（新分辨率随 asset 宽高回填结果卡）。 */
+/** 创建智能扩图任务（IKGOR6）；免费口径同 media_extract / image_enhance——不走积分预估、
+ *  不走余额拦截门。扩图结果卡已由前端本地建好（target_node_id 指向它），
+ *  产物经 GET /api/jobs/:id 的 asset 回填（新分辨率随 asset 宽高回填结果卡）。
+ *  IKJJR2（恢复契约 v1 B.3）：canvasBinding + idempotencyKey 由生成任务运行时注入。 */
 export function createImageOutpaint(
   projectId: string,
   payload: CreateImageOutpaintPayload,
-  init?: { silent?: boolean },
+  init?: ImageToolCreateInit,
 ): Promise<ImageOutpaintCreatedData> {
   return apiRequest<ImageOutpaintCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-outpaints`,
     {
       silent: init?.silent,
       method: 'POST',
-      body: JSON.stringify(payload),
+      headers: imageToolRequestHeaders(init),
+      body: imageToolRequestBody(payload, init),
     },
   );
 }
