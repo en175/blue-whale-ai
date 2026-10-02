@@ -12,13 +12,13 @@
  * ============================================ */
 import type { AssetOwnershipOps, WorkerInputAsset } from "@lib/shared/persistence/index.js";
 
-import type { ReferenceItemInput } from "./handle-create-generation-job.js";
+import type { ReferenceItemInput } from "./reference-item-input.js";
 
 /** IKJGE6：视频参考时长的权威补齐（建任务与报价共用）。缺 `duration` 的本地视频引用按
  *  查得的素材时长（assets.duration，`resolveInputAssets` 顺带查出）回填；查不到或非正数
  *  保持原样——计价侧按「量不到源时长」回落（applyEditSourceDurationBasis 的既有立场）。
  *  素材库引用（material_id，本地零表）只能靠调用方带，不在本函数职责内。 */
-export function withVideoReferenceDurations(
+function withVideoReferenceDurations(
   references: ReadonlyArray<ReferenceItemInput>,
   secondsByAssetId: ReadonlyMap<string, number | null>,
 ): ReferenceItemInput[] {
