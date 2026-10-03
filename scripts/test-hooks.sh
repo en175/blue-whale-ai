@@ -1783,21 +1783,30 @@ run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":"0"}}'
 assert_exit 2 "issue: project_id=string \"0\" 拦截"
 
 # project_id + program_id 都是 number 合法值 + description → 放行（schema 原生形态，回归基线核心）
-run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":48854568,"program_id":883843,"description":"正文"}}'
+run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":48854568,"program_id":883843,"description":"正文","assignee_id":17267642}}'
 assert_exit 0 "issue: project_id/program_id=number 放行"
 
 # project_id + program_id 都是 string 合法值 + description → 放行
-run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":"48854568","program_id":"883843","description":"正文"}}'
+run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":"48854568","program_id":"883843","description":"正文","assignee_id":17267642}}'
 assert_exit 0 "issue: project_id/program_id=string 放行"
 
 # create 缺 description → 拦（错名参数静默忽略防空工单，IK5THP）
-run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"project_id":48854568,"program_id":883843,"title":"t"}}'
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"project_id":48854568,"program_id":883843,"title":"t","assignee_id":17267642}}'
 assert_exit 2 "issue: create 缺 description 拦截"
 assert_stderr_has "description 缺失或为空" "issue: create 缺 description 提示"
 
 # create 误传 body（正确参数名是 description）→ 拦
-run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"project_id":48854568,"program_id":883843,"title":"t","body":"x"}}'
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"project_id":48854568,"program_id":883843,"title":"t","body":"x","assignee_id":17267642}}'
 assert_exit 2 "issue: create 误传 body 拦截"
+
+# create 缺 assignee_id → 拦（工单必须标注负责人，IKJKWK）
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"project_id":48854568,"program_id":883843,"title":"t","description":"正文"}}'
+assert_exit 2 "issue: create 缺 assignee_id 拦截"
+assert_stderr_has "缺少 assignee_id" "issue: create 缺 assignee_id 提示"
+
+# create assignee_id=0 → 拦
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"project_id":48854568,"program_id":883843,"title":"t","description":"正文","assignee_id":0}}'
+assert_exit 2 "issue: create assignee_id=0 拦截"
 
 # 根 issue program_id=number 0（project_id 合法）→ 拦
 run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":48854568,"program_id":0}}'
@@ -1818,7 +1827,7 @@ assert_exit 2 "issue: 子 issue 缺 program_id 拦截"
 assert_stderr_has "子 issue 缺少 program_id" "issue: 子 issue 缺 program_id 提示"
 
 # 子 issue 同时继承 parent_id/project_id/program_id → 放行
-run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"parent_id":33553306,"project_id":48854568,"program_id":883843,"description":"子项正文"}}'
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"parent_id":33553306,"project_id":48854568,"program_id":883843,"description":"子项正文","assignee_id":17267642}}'
 assert_exit 0 "issue: 子 issue 继承父项归属放行"
 
 # update 只改状态/标签，不要求重复传 project_id → 放行
@@ -1997,7 +2006,7 @@ assert_stdout_empty "audit-all: issue 阻断 stdout 为空"
 assert_stderr_has "project_id" "audit-all: issue 阻断信息保留"
 assert_audit_record_field "$ISSUE_AUDIT_LOG" tu_issue_block operation issue-create "audit-all: issue 阻断操作类别"
 assert_audit_record_field "$ISSUE_AUDIT_LOG" tu_issue_block exit_code 2 "audit-all: issue 阻断记录"
-run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_use_id":"tu_issue_allow","session_id":"s_ik10dr","tool_input":{"project_id":987654321,"program_id":123456789,"title":"SECRET_ISSUE_ALLOW","description":"SECRET_ISSUE_ALLOW_DESC"}}'
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_use_id":"tu_issue_allow","session_id":"s_ik10dr","tool_input":{"project_id":987654321,"program_id":123456789,"title":"SECRET_ISSUE_ALLOW","description":"SECRET_ISSUE_ALLOW_DESC","assignee_id":17267642}}'
 assert_exit 0 "audit-all: issue 放行 exit 0 不变"
 assert_stdout_empty "audit-all: issue 放行 stdout 为空"
 assert_audit_record_field "$ISSUE_AUDIT_LOG" tu_issue_allow operation issue-create "audit-all: issue 放行操作类别"
