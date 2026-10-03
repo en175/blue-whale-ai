@@ -3,6 +3,7 @@
  * 从 generation-canvas-recovery-repo 拆出（800 行硬线）——受理/查询留在原文件。
  * ============================================ */
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   CANVAS_RECOVERY_PROTOCOL_VERSION,
@@ -140,8 +141,8 @@ export async function saveCanvasWithRecovery(
     // 锁序与受理一致：项目 → 画布 → 节点归属行（按 node_id 排序）。
     await tx.$queryRaw`SELECT id FROM project WHERE id = ${pid} FOR UPDATE`;
     const canvasRows = await tx.$queryRaw<
-      Array<{ id: bigint; version: number; nodes_json: unknown }>
-    >`SELECT id, version, nodes_json FROM canvas WHERE project_id = ${pid} FOR UPDATE`;
+      Array<{ id: bigint; version: number; viewport_json: unknown; nodes_json: unknown; edges_json: unknown }>
+    >`SELECT id, version, viewport_json, nodes_json, edges_json FROM canvas WHERE project_id = ${pid} FOR UPDATE`;
     const canvasRow = canvasRows[0] ?? null;
     // 幂等先于版本检查：同身份同摘要 → 回放原紧凑结果（replayed=true，不写库不递增版本）。
     const receiptRow = await tx.command_idempotency.findUnique({
@@ -346,6 +347,20 @@ export async function saveCanvasWithRecovery(
             throw new RecoveryContractError(
               recoveryError(422, "结果节点已被其他提交占用", RECOVERY_REASONS.documentMismatch),
             );
+          }
+          // IKJLXE：虚拟 primary 首次落行必须与同提交目标转换配套；已 present 的重复 apply 保留。
+          if (item.outputKey === PRIMARY_OUTPUT_KEY && item.outputRowId === null) {
+            const paired = input.changes.some(other => {
+              const ids = parseRecoveryItemId(other.recoveryItemId);
+              return other.action === "replaceTarget"
+                && ids?.submissionId === item.submissionRow.submission_id
+                && ids.outputKey === TARGET_OUTPUT_KEY;
+            });
+            if (!paired) {
+              throw new RecoveryContractError(
+                recoveryError(422, "恢复动作与画布文档不一致", RECOVERY_REASONS.documentMismatch),
+              );
+            }
           }
           // 虚拟输出首次 apply：键必须在投影集内；节点未被其他提交占用（不静默覆盖）。
           let slotId: string | null = null;
@@ -575,15 +590,30 @@ export async function saveCanvasWithRecovery(
       nodes_json: JSON.parse(input.nodes),
       edges_json: JSON.parse(input.edges),
     };
-    const saved = canvasRow === null
+    // IKJLXE：同文档、同归属的已 present primary 重复 apply 只记新命令回执，不重写业务行。
+    const unchangedPrimaryApply = canvasRow !== null && input.materials === undefined
+      && input.changes.length > 0 && input.changes.every((change, index) => {
+        const item = itemStates[index]!;
+        const owner = ownerByNode.get(item.nodeId);
+        return change.action === "apply" && item.outputKey === PRIMARY_OUTPUT_KEY && item.state === "present"
+          && owner?.generation_canvas_submission_id === item.submissionRow.id && owner.output_key === PRIMARY_OUTPUT_KEY;
+      }) && isDeepStrictEqual(
+        [canvasRow.viewport_json, canvasRow.nodes_json, canvasRow.edges_json]
+          .map(value => typeof value === "string" ? JSON.parse(value) : value),
+        [data.viewport_json, data.nodes_json, data.edges_json],
+      );
+    const saved = unchangedPrimaryApply ? canvasRow : canvasRow === null
       ? await tx.canvas.create({ data: { project_id: pid, ...data } })
       : await tx.canvas.update({ where: { id: canvasRow.id }, data: { ...data, version: { increment: 1 } } });
     // ── 既有素材关联 / 槽位首次放置 / audio_mix 卡副作用（与 saveIfVersion 同口径）──
-    if (input.materials) await linkPromptMaterials(tx, pid, input.materials as never);
-    await markOutputSlotsPlaced(tx, pid, data.nodes_json);
-    await markAudioMixCards(tx, pid, data.nodes_json, input.ownerId);
+    if (!unchangedPrimaryApply) {
+      if (input.materials) await linkPromptMaterials(tx, pid, input.materials as never);
+      await markOutputSlotsPlaced(tx, pid, data.nodes_json);
+      await markAudioMixCards(tx, pid, data.nodes_json, input.ownerId);
+    }
     // ── 恢复状态写入 ──
     for (const write of planned) {
+      if (unchangedPrimaryApply) continue;
       if (write.kind === "targetState" || write.outputKey === TARGET_OUTPUT_KEY) {
         await tx.generation_canvas_submissions.update({
           where: { id: write.submissionRow.id },
