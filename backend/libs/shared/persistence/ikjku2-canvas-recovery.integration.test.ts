@@ -18,9 +18,14 @@
 //   3. 清空（未带 confirmEmpty）与多选删除绕过 → 422
 //   4. removed 终态：显式 remove 后缺席合法；restore 恢复后缺席再次受守护
 //   5. 合法路径回归：普通编辑、重复 apply 不省略、未入库 pending 占位省略（受理后未保存）
+//   6. 方案应用绕过（PR981 复审 F3）：真实 applyPreview 入口只追加不省略受保护卡；
+//      其落库前置守护（guardLegacyCanvasWrite，与旧协议整文档写共用）对省略受保护卡的
+//      写拒绝 428 recovery_protocol_required，零写入（applyPreview 落库不经
+//      saveCanvasWithRecovery，走 repo.saveIfVersion，守护在 canvas.service.ts 同源调用）
 
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
+import { createHash } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildPoolConfig, getPrismaClient } from "./db.js";
 import {
@@ -40,6 +45,7 @@ import {
 } from "./generation-canvas-recovery-repo.js";
 import { saveCanvasWithRecovery } from "./canvas-recovery-save.js";
 import { createJobWithinTx } from "./generation-command-repo.js";
+import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import type { PrismaClient } from "@prisma/client";
 
 const databaseUrl = process.env.IKJKU2_DATABASE_URL;
@@ -239,6 +245,7 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
     await prisma.generation_job_logs.deleteMany({});
     await prisma.cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.prompt_preview_snapshots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 
   it("★ 1. 合法 apply B 同时省略 present A → 422，整笔回滚且恢复查询与文档一致", async () => {
@@ -378,5 +385,58 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
       changes: [],
     });
     expect(withoutPlaceholder.version).toBe(reapplied.version + 1);
+  });
+
+  it("★ 6. 方案应用绕过：真实 applyPreview 只追加不省略受保护卡；其写守护拒绝省略（428 零写入）", async () => {
+    const { fanned } = await seedTwoPresentCards();
+    // 预种方案快照：applyPreview 命中 getPromptSnapshot 即不外呼 agent 服务。
+    const source = { sessionId: "ikjku2-session-1", revisionId: "rev-1", shotNo: 1 };
+    await prisma.prompt_preview_snapshots.create({
+      data: {
+        project_id: BigInt(PROJECT_ID),
+        source_key: createHash("sha256")
+          .update(JSON.stringify([source.sessionId, source.revisionId, source.shotNo]))
+          .digest("hex"),
+        source_json: source,
+        title: "夜色街角",
+        text: "夜色中的街角",
+        content_json: { title: "夜色街角", text: "夜色中的街角", promptMentions: [], promptMaterials: [] },
+      },
+    });
+    const canvasService = new CanvasService(
+      { client: prisma } as never,
+      { findOwnedById: async () => ({}) } as never,
+    );
+    // 真实方案应用入口：受理成功、版本正常递增，受保护卡 A/B 原样保留（不被应用省略）。
+    const applied = await canvasService.applyPreview(USER_ID, PROJECT_ID, {
+      source, position: { x: 50, y: 60 },
+    }) as { code: number; data?: { canvas?: { version?: number } } };
+    expect(applied.code).toBe(200);
+    const row = await canvasRow();
+    expect(row?.version).toBe(fanned.version + 1);
+    const nodes = (row?.nodes_json ?? []) as Array<{ id: string; type: string; data: Record<string, unknown> }>;
+    expect(nodes).toHaveLength(3); // A、B + 新方案卡
+    for (const id of [NODE_A, NODE_B]) {
+      const node = nodes.find(item => item.id === id)!;
+      expect(node.type).toBe("mediaNode");
+      expect(node.data.generationRecovery).toBeDefined();
+      expect(node.data.assetId).toBe("7");
+    }
+    expect(await outputState(UUID_A, PRIMARY_OUTPUT_KEY)).toEqual({ state: "present", revision: 1 });
+    expect(await outputState(UUID_B, PRIMARY_OUTPUT_KEY)).toEqual({ state: "present", revision: 1 });
+    // 方案应用落库前置的同一守护（guardLegacyCanvasWrite）：省略受保护卡的写 → 428 拒绝。
+    // 与既有省略场景（★1）同款断言面：零写入（版本不递增、文档不变、A 状态不变）。
+    const version = row!.version;
+    const guarded = await canvasService.save(USER_ID, PROJECT_ID, {
+      viewport: "{}",
+      nodes: JSON.stringify([markerNode(NODE_B, UUID_B, PRIMARY_OUTPUT_KEY)]), // 省略 A
+      edges: "[]",
+      expectedVersion: version,
+    }) as { code: number; data: { reason: string } };
+    expect(guarded.code).toBe(428);
+    expect(guarded.data.reason).toBe(RECOVERY_REASONS.protocolRequired);
+    expect((await canvasRow())?.version).toBe(version);
+    expect(await canvasNodeIds()).toHaveLength(3);
+    expect(await outputState(UUID_A, PRIMARY_OUTPUT_KEY)).toEqual({ state: "present", revision: 1 });
   });
 });
