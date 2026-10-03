@@ -1198,6 +1198,118 @@ describe('生成任务运行时：一对一原位写回原卡（IKJKU3）', () =
   });
 });
 
+/* ============================================
+ * IKJLTQ（PR981-REVIEW2-20261003-R1）：恢复同步真实产物身份。真实服务端一对一
+ * primary 投影的资产引用为空（asset_id: null）；原位写回只补了 URL（IKJKU3），
+ * assetId 仍沿用旧素材——URL 与 assetId 不一致。本块锁死：投影 asset_id 缺失时
+ * 产物身份（URL 与 assetId 同源）从可信任务结果 output_assets 取得；草稿卡同样
+ * 取得产物身份；保存确认后刷新重扫身份稳定、零写入零差分。
+ * ============================================ */
+describe('生成任务运行时：恢复同步真实产物身份（IKJLTQ）', () => {
+  /** 真实协议投影：一对一 primary 项 asset_id 为空（服务端一对一投影不填资产引用）。 */
+  const nullAssetRecord = (role: 'draft' | 'existing-media' | 'result-placeholder'): GenerationRecoveryRecord => ({
+    submission_id: 'sub-1', target_node_id: 'n1', job_id: '501', task_type: 'image',
+    binding_revision: 1, is_current: true,
+    job: { job_id: '501', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['11'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+    recovery_seed: { target: { role, x: 5, y: 6, width: 320, height: 320, name: '原卡' }, sources: [] },
+    previous_target_snapshot: null,
+    items: [
+      { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+      { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'pending', revision: 0, node_binding_revision: 1, asset_id: null, slot_id: null },
+    ],
+  } as GenerationRecoveryRecord);
+
+  /** 可信任务结果：产物 11（output_assets 权威来源）。 */
+  const nullAssetDetail = {
+    status: 'succeeded', progress: 100,
+    asset: { id: '11', url: 'https://a/11.png', type: 'image' },
+    output_assets: [{ id: '11', url: 'https://a/11.png', type: 'image' }],
+  };
+
+  /** 原卡在场 + 一次恢复扫描（公开 recover 接口 + 实际任务定义 planRecovery）。 */
+  const recoverNullAsset = async (nodeData: Record<string, unknown>, record: GenerationRecoveryRecord) => {
+    const { fake, runtime, page } = setup({ script: [nullAssetDetail] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 42, y: 24 }, data: nodeData });
+    page.mockImplementation(async () => ({
+      protocol_version: 1, canvas_version: 1, next_cursor: null, records: [record],
+    }) as never);
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    return { fake, runtime, page };
+  };
+
+  it('投影 asset_id 为空（existing-media 原卡在场）：URL 与 assetId 同源取产物身份，名称/位置/尺寸保留', async () => {
+    const { fake } = await recoverNullAsset(
+      { fileName: '用户素材改名', src: 'https://old/5.png', assetId: '5', mediaType: 'image', width: 640, height: 480 },
+      nullAssetRecord('existing-media'),
+    );
+    expect(fake.inserts).toHaveLength(0); // 不重建卡
+    expect(fake.data('n1')).toMatchObject({
+      src: 'https://a/11.png', // 产物 11
+      assetId: '11', // R1：不再沿用旧素材 5
+      jobId: '501',
+      fileName: '用户素材改名', // 普通编辑保留
+      width: 640, height: 480,
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    });
+    expect(fake.nodes.get('n1')?.position).toEqual({ x: 42, y: 24 });
+  });
+
+  it('投影 asset_id 为空（draft 草稿卡在场）：取得产物身份（src/assetId），不重建卡', async () => {
+    const { fake } = await recoverNullAsset(
+      { fileName: '用户草稿改名', draft: true, mediaType: 'image' }, // 无 src/assetId
+      nullAssetRecord('draft'),
+    );
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.data('n1')).toMatchObject({
+      src: 'https://a/11.png',
+      assetId: '11', // 草稿卡同样取得新产物身份
+      jobId: '501',
+      fileName: '用户草稿改名',
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    });
+  });
+
+  it('保存确认后刷新重扫（记录推进 replaced/present）：产物身份稳定保留、零写入零差分', async () => {
+    const { fake, runtime, page } = await recoverNullAsset(
+      { fileName: '用户素材改名', src: 'https://old/5.png', assetId: '5', mediaType: 'image', width: 640, height: 480 },
+      nullAssetRecord('existing-media'),
+    );
+    // 保存：同笔 replaceTarget + apply，回执确认（$target replaced / primary present）
+    const fields = runtime.composeSaveFields();
+    expect(fields?.recoveryChanges).toEqual([
+      { recoveryItemId: 'gcr:sub-1:$target', expectedRevision: 1, action: 'replaceTarget' },
+      { recoveryItemId: 'gcr:sub-1:primary', expectedRevision: 0, action: 'apply' },
+    ]);
+    runtime.onSaveReceipt({ commandId: fields!.commandId, replayed: false, changes: [
+      { recoveryItemId: 'gcr:sub-1:$target', revision: 2, nodeBindingRevision: 1, state: 'replaced' },
+      { recoveryItemId: 'gcr:sub-1:primary', revision: 1, nodeBindingRevision: 1, state: 'present' },
+    ] });
+    expect(runtime.composeSaveFields()).toBeNull();
+    // 刷新：重载（台账清空）+ 重扫到服务端已推进的记录
+    runtime.reset();
+    const advanced = nullAssetRecord('existing-media');
+    advanced.items[0] = { ...advanced.items[0]!, state: 'replaced', revision: 2 };
+    advanced.items[1] = { ...advanced.items[1]!, state: 'present', revision: 1 };
+    page.mockImplementation(async () => ({
+      protocol_version: 1, canvas_version: 1, next_cursor: null, records: [advanced],
+    }) as never);
+    const patchesBefore = fake.patches.length;
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    // 已应用成品卡零破坏：无新写入、无建卡删卡、无待确认差分，身份稳定
+    expect(fake.patches.length).toBe(patchesBefore);
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.data('n1')).toMatchObject({
+      src: 'https://a/11.png', assetId: '11', fileName: '用户素材改名', width: 640, height: 480,
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    });
+    expect(runtime.composeSaveFields()).toBeNull();
+  });
+});
+
 describe('生成任务运行时：resolve 定向对账', () => {
   it('reconcileConflictItems 按台账项定向 resolve，读回服务端现状（后续差分用新 revision）', async () => {
     const { fake, runtime, kit } = setup({ script: [

@@ -269,7 +269,9 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         return {
           outputKey: item.output_key,
           nodeId: item.node_id,
-          assetId: item.asset_id,
+          // IKJLTQ（R1）：投影 asset_id 缺失（真实一对一 primary 投影不填资产引用）时
+          // 与 URL 同源回退到可信任务结果产物身份——assetId 不得沿用目标卡旧素材（B.6）
+          assetId: item.asset_id ?? fallback?.id ?? null,
           url: asset?.url ?? fallback?.url ?? '',
           mediaType,
           ...(asset?.width != null ? { width: asset.width } : {}),
@@ -314,7 +316,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
             data: {
               ...card.data,
               src: view?.url ?? '',
-              ...(item.asset_id != null ? { assetId: item.asset_id } : {}),
+              ...(view?.assetId != null ? { assetId: view.assetId } : {}),
               generationRecovery: { protocolVersion: 1, submissionId, outputKey: item.output_key },
             },
           });
@@ -324,7 +326,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
           // （B.3/B.6 普通编辑优先），转换以同笔 replaceTarget/apply 保存确认。
           host.patchNode(item.node_id, {
             src: view?.url ?? '',
-            ...(item.asset_id != null ? { assetId: item.asset_id } : {}),
+            ...(view?.assetId != null ? { assetId: view.assetId } : {}),
             jobId,
             ...(view?.mediaType != null ? { mediaType: view.mediaType } : {}),
             ...(view?.duration != null ? { duration: view.duration } : {}),
