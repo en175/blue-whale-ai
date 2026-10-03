@@ -1435,28 +1435,20 @@ describe('生成任务运行时：恢复扇出详情间隙归属复核（IKJKU0�
     ],
   });
 
-  /** 驱动恢复扇出停在任务详情间隙：投影已返回（首个归属检查通过），详情请求在途。 */
+  /** 驱动恢复扇出停在任务详情间隙：恢复扫描直供已核验记录（IKJKU4），扇出不再
+   *  重拉投影页，直接发出详情请求（挂起点）后等待释放。 */
   async function suspendAtFanOutDetail() {
     const { fake, runtime, status, page, kit } = setup({ script: [succeededDetail()] });
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
-    const projectionPage = (): GenerationRecoveryPage => ({
+    page.mockImplementation(async () => ({
       protocol_version: 1, canvas_version: 1, next_cursor: null, records: [fanOutDetailRecord()],
-    });
-    let pageCalls = 0;
-    let releaseProjection!: (page: GenerationRecoveryPage) => void;
-    page.mockImplementation(() => {
-      pageCalls += 1;
-      if (pageCalls === 2) return new Promise((resolve) => { releaseProjection = resolve; }); // 扇出投影挂起
-      return Promise.resolve(projectionPage());
-    });
+    }) as never);
     status.fn.mockImplementation((jobId: unknown) => {
       if (String(jobId) === '501') return new Promise((resolve) => { detailRelease = resolve; });
       return Promise.resolve({ status: 'processing', progress: 5, asset: null });
     });
     let detailRelease!: (detail: Record<string, unknown>) => void;
-    await runtime.recover('p1'); // 恢复分页（page 第 1 次）→ 扇出投影挂起（page 第 2 次）
-    await flushMicrotasks();
-    releaseProjection(projectionPage()); // 归属有效：通过投影后检查，发出详情请求
+    await runtime.recover('p1'); // 恢复扫描（page 第 1 次）→ 扇出直供记录 → 停在详情间隙
     await flushMicrotasks();
     expect(status.fn.mock.calls.filter(([id]) => String(id) === '501')).toHaveLength(1); // 已停在详情间隙
     return { fake, runtime, kit, releaseDetail: (detail: Record<string, unknown>) => detailRelease(detail) };
@@ -1526,24 +1518,180 @@ describe('生成任务运行时：恢复扇出详情间隙归属复核（IKJKU0�
   });
 
   it('投影请求失败且归属已过期：catch 分支不向当前画布 patch', async () => {
-    const { fake, runtime, page } = setup();
-    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
-    let pageCalls = 0;
+    // 轮询终态扇出（无已核验记录 → 扇出自查恢复页）：按提交找回请求在途期间归属失效
+    const { fake, runtime, kit, page } = setup({ script: [
+      { status: 'succeeded', progress: 100, asset: null, output_assets: [
+        { id: '11', url: 'https://a/11.png', type: 'image' },
+        { id: '12', url: 'https://a/12.png', type: 'image' },
+      ] },
+    ] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
+    kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
     let rejectProjection!: (reason: Error) => void;
-    page.mockImplementation(() => {
-      pageCalls += 1;
-      if (pageCalls === 1) {
-        return Promise.resolve({ protocol_version: 1, canvas_version: 1, next_cursor: null, records: [fanOutDetailRecord()] } as never);
-      }
-      if (pageCalls === 2) return new Promise((_resolve, reject) => { rejectProjection = reject; }); // 扇出投影挂起
-      return Promise.resolve({ protocol_version: 1, canvas_version: 1, records: [], next_cursor: null } as never);
-    });
-    await runtime.recover('p1');
+    page.mockImplementation(() => new Promise((_resolve, reject) => { rejectProjection = reject; })); // 扇出找回请求挂起
+    runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
     await flushMicrotasks();
     const base = writeBaseline(fake);
     fake.switchProject('p2'); // 投影等待期间归属失效
     rejectProjection(new Error('network'));
     await flushMicrotasks(20);
     expect(fake.patches).toHaveLength(base.patches); // 异常路径不 patch 当前画布
+  });
+});
+
+/* ============================================
+ * IKJKU4 后续恢复页结果正常落卡（PR981 审查 F5）：目标提交不在恢复页首屏时，
+ * 结果应用不再把首屏查询当成按提交查询——恢复扫描直供已核验记录；轮询终态
+ * 扇出按游标遍历后续页找回该提交。恢复页排序与游标编码是契约行为，不改。
+ * ============================================ */
+describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
+  /** 契约忠实分页替身：无 cursor = 首页，按 next_cursor 取后续页（后端提交内部 id
+   *  升序游标 + B.5 可见性过滤；旧扇出以空参数重拉首页即本 bug 的复现基础）。 */
+  const cursorPages = (pages: GenerationRecoveryPage[]) => {
+    const byCursor = new Map<string | null, GenerationRecoveryPage>();
+    let key: string | null = null;
+    for (const page of pages) {
+      byCursor.set(key, page);
+      if (page.next_cursor == null) break;
+      key = page.next_cursor;
+    }
+    return vi.fn(async (_projectId: string, options: { cursor?: string | null } = {}) =>
+      byCursor.get(options.cursor ?? null) ?? byCursor.get(null)!);
+  };
+
+  const pageOf = (records: GenerationRecoveryRecord[], nextCursor: string | null): GenerationRecoveryPage => ({
+    protocol_version: 1, canvas_version: 1, records, next_cursor: nextCursor,
+  });
+
+  /** 第二页目标提交：双输出待应用，slot:79 已删除（不落卡不差分动作）。 */
+  const lateRecord = (submissionId: string, nodeId: string): GenerationRecoveryRecord => ({
+    submission_id: submissionId, target_node_id: nodeId, job_id: '501', task_type: 'image',
+    binding_revision: 1, is_current: true,
+    job: { job_id: '501', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['11', '12'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+    recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 320, height: 320, name: '图片生成中' }, sources: [] },
+    previous_target_snapshot: null,
+    items: [
+      { recovery_item_id: `gcr:${submissionId}:$target`, output_key: '$target', node_id: nodeId, state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+      { recovery_item_id: `gcr:${submissionId}:slot:77`, output_key: 'slot:77', node_id: 'generation-output:77', state: 'pending', revision: 0, node_binding_revision: 0, asset_id: '11', slot_id: '77' },
+      { recovery_item_id: `gcr:${submissionId}:slot:78`, output_key: 'slot:78', node_id: 'generation-output:78', state: 'pending', revision: 0, node_binding_revision: 0, asset_id: '12', slot_id: '78' },
+      { recovery_item_id: `gcr:${submissionId}:slot:79`, output_key: 'slot:79', node_id: 'generation-output:79', state: 'removed', revision: 3, node_binding_revision: 1, asset_id: null, slot_id: '79' },
+    ],
+  } as GenerationRecoveryRecord);
+
+  /** 首屏填充记录（历史关联 is_current=false，扫描对账无画布动作）。 */
+  const fillerRecord = (i: number): GenerationRecoveryRecord => ({
+    submission_id: `sub-old-${i}`, target_node_id: `old-${i}`, job_id: String(9100 + i), task_type: 'image',
+    binding_revision: 1, is_current: false, job: null, recovery_seed: null, previous_target_snapshot: null,
+    items: [{ recovery_item_id: `gcr:sub-old-${i}:$target`, output_key: '$target', node_id: `old-${i}`, state: 'replaced', revision: 2, node_binding_revision: 1, asset_id: null, slot_id: null }],
+  } as GenerationRecoveryRecord);
+
+  const succeededMulti = {
+    status: 'succeeded', progress: 100, asset: null,
+    output_assets: [
+      { id: '11', url: 'https://a/11.png', type: 'image' },
+      { id: '12', url: 'https://a/12.png', type: 'image' },
+    ],
+  };
+
+  it('恢复扫描：目标提交在第二页（首屏 50 条已满）→ 直供已核验记录落卡，扇出不重拉首页', async () => {
+    const { fake, runtime, status, page } = setup({ script: [succeededMulti] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
+    const pages = cursorPages([
+      pageOf(Array.from({ length: 50 }, (_, i) => fillerRecord(i)), 'c2'), // 首屏满页无目标，游标前进
+      pageOf([lateRecord('sub-late', 'n1')], null),
+    ]);
+    page.mockImplementation(pages as never);
+    await runtime.recover('p1');
+    await flushMicrotasks(30);
+    expect(pages.mock.calls).toHaveLength(2); // 仅恢复扫描两页：扇出不再重拉首页
+    expect(fake.removes).toContain('n1'); // 占位扇出移除
+    // 第二页结果的规范身份：node_id 判重建卡、marker/assetId 协议权威字段
+    expect(fake.data('generation-output:77')).toMatchObject({
+      assetId: '11', src: 'https://a/11.png',
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-late', outputKey: 'slot:77' },
+    });
+    expect(fake.data('generation-output:78')).toMatchObject({ assetId: '12', src: 'https://a/12.png' });
+    expect(fake.nodes.has('generation-output:79')).toBe(false); // removed 项不落卡
+    // 保存动作按已核验记录的 recovery_item_id 与 revision
+    const fields = runtime.composeSaveFields();
+    expect(fields!.recoveryChanges.map((c) => `${c.action}:${c.recoveryItemId}:${c.expectedRevision}`).sort()).toEqual([
+      'apply:gcr:sub-late:slot:77:0',
+      'apply:gcr:sub-late:slot:78:0',
+      'replaceTarget:gcr:sub-late:$target:1',
+    ]);
+    expect(status.calls).toContain('501'); // 详情取产物 URL 照常
+  });
+
+  it('轮询终态：首屏过滤后为空但游标仍前进 → 按游标找回提交并落卡', async () => {
+    const { fake, runtime, kit, page } = setup({ script: [succeededMulti] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
+    kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
+    const pages = cursorPages([
+      pageOf([], 'c2'), // 首屏可见记录为空但 next_cursor 非空（B.5 可见性过滤）
+      pageOf([lateRecord('uuid-0001', 'n1')], null),
+    ]);
+    page.mockImplementation(pages as never);
+    runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
+    await flushMicrotasks(30);
+    expect(pages.mock.calls).toHaveLength(2); // {cursor:null} → {cursor:'c2'}：追游标而非止步首屏
+    expect(fake.removes).toContain('n1');
+    expect(fake.data('generation-output:77')).toMatchObject({
+      generationRecovery: { protocolVersion: 1, submissionId: 'uuid-0001', outputKey: 'slot:77' },
+    });
+    expect(runtime.composeSaveFields()!.recoveryChanges.map((c) => c.action).sort()).toEqual(['apply', 'apply', 'replaceTarget']);
+  });
+
+  it('轮询终态：目标提交被后续提交挤出首屏（首屏非空）→ 遍历后续页落卡', async () => {
+    const { fake, runtime, kit, page } = setup({ script: [succeededMulti] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
+    kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
+    const pages = cursorPages([
+      pageOf([fillerRecord(0), fillerRecord(1)], 'c2'), // 首屏有他人记录但无本提交
+      pageOf([lateRecord('uuid-0001', 'n1')], null),
+    ]);
+    page.mockImplementation(pages as never);
+    runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
+    await flushMicrotasks(30);
+    expect(fake.removes).toContain('n1');
+    expect(fake.nodes.has('generation-output:77')).toBe(true);
+    expect(fake.nodes.has('generation-output:78')).toBe(true);
+    expect(runtime.statusOf('n1')).toBeNull(); // 扇出收尾后清理在途
+  });
+
+  it('真投影缺失（遍历完毕仍无该提交）：占位卡保留不丢卡，不建结果卡不写 marker', async () => {
+    const { fake, runtime, kit, page } = setup({ script: [succeededMulti] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
+    kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
+    const pages = cursorPages([pageOf([fillerRecord(0), fillerRecord(1)], null)]); // 无该提交且无后续页
+    page.mockImplementation(pages as never);
+    runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
+    await flushMicrotasks(30);
+    expect(fake.nodes.has('n1')).toBe(true); // 占位卡保留（不丢卡）
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.inserts).toHaveLength(0); // 不建结果卡
+    expect(fake.data('n1').progress).toBe(100); // 成功占位收敛
+    expect(fake.data('n1').generationRecovery).toBeUndefined(); // 不写恢复 marker
+    expect(runtime.composeSaveFields()).toBeNull(); // 无输出台账：无待确认动作
+  });
+
+  it('重复恢复（重载后）：第二页结果卡已应用 → 幂等零重建，无双卡无双链', async () => {
+    const { fake, runtime, page } = setup({ script: [succeededMulti] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
+    const pages = cursorPages([
+      pageOf(Array.from({ length: 50 }, (_, i) => fillerRecord(i)), 'c2'),
+      pageOf([lateRecord('sub-late', 'n1')], null),
+    ]);
+    page.mockImplementation(pages as never);
+    await runtime.recover('p1');
+    await flushMicrotasks(30);
+    const firstRound = [...fake.nodes.keys()].filter((id) => id.startsWith('generation-output:')).sort();
+    expect(firstRound).toEqual(['generation-output:77', 'generation-output:78']);
+    runtime.reset(); // 重载：在途清空（下一轮扫描按服务端事实重新对账）
+    await runtime.recover('p1');
+    await flushMicrotasks(30);
+    const secondRound = [...fake.nodes.keys()].filter((id) => id.startsWith('generation-output:')).sort();
+    expect(secondRound).toEqual(firstRound); // 无双卡：已应用成品卡零写入
+    expect(fake.nodes.has('n1')).toBe(false); // 占位不复活
+    expect(fake.edges).toHaveLength(0); // 无双链
   });
 });

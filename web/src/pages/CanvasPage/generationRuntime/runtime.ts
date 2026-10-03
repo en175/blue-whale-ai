@@ -230,13 +230,24 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
 
   /** 多结果扇出（输出槽/场景切分/人声分离家族）：输出键经恢复页投影取规范 node_id（B.4/B.5），
    *  再建卡落 apply。落卡细节（排列/命名/来源线）可由类型定义 planFanoutCards 定制；运行时
-   *  强制写协议权威字段（src/assetId/marker）并按规范 node_id 判重——重复返回/重复扫描不重复建卡。 */
-  const fanOutOutputs = async (execution: ActiveExecution, submissionId: string, jobId: string, knownDetail?: JobDetail) => {
+   *  强制写协议权威字段（src/assetId/marker）并按规范 node_id 判重——重复返回/重复扫描不重复建卡。
+   *  IKJKU4（F5）：knownRecord 为已核验恢复记录（恢复扫描直供），扇出不再重拉恢复页；
+   *  无已知记录（轮询终态）时按游标遍历后续页找回该提交——不把首屏查询当成按提交查询
+   *  （恢复页排序与游标编码是契约行为，遍历整本的页数成本与恢复扫描同阶）。 */
+  const fanOutOutputs = async (execution: ActiveExecution, submissionId: string, jobId: string, knownDetail?: JobDetail, knownRecord?: GenerationRecoveryRecord) => {
     const nodeId = execution.nodeId;
     try {
-      const page = await doFetchRecoveryPage(execution.projectId, {});
-      if (!owns(execution, jobId)) return;
-      const record = page.records.find((item) => item.submission_id === submissionId);
+      if (!owns(execution, jobId)) return; // 过期执行零请求零写入（含降级占位 patch）
+      let record = knownRecord ?? null;
+      if (record == null) {
+        let cursor: string | null = null;
+        do {
+          const page = await doFetchRecoveryPage(execution.projectId, { cursor });
+          if (!owns(execution, jobId)) return; // 翻页间隙归属过期：零写入
+          record = page.records.find((item) => item.submission_id === submissionId) ?? null;
+          cursor = page.next_cursor;
+        } while (record == null && cursor != null);
+      }
       const outputs = record?.items.filter((item) => item.output_key !== TARGET_OUTPUT_KEY
         && item.state !== 'removed' && item.state !== 'transferred') ?? [];
       if (outputs.length === 0) {
@@ -729,7 +740,8 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         const plan = def?.planRecovery?.(record, host);
         if (plan?.kind === 'restore-target') host.insertMediaNode(plan.node);
       }
-      await fanOutOutputs(execution, record.submission_id, record.job_id);
+      // IKJKU4（F5）：直供扫描已核验记录——目标提交在任一页（含被挤出首屏）都正常落卡
+      await fanOutOutputs(execution, record.submission_id, record.job_id, undefined, record);
     } catch (e) {
       console.warn('[generation-runtime] 恢复输出应用失败:', e);
     }
