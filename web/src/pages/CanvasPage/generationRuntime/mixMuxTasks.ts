@@ -28,8 +28,8 @@ const TARGET_OUTPUT_KEY = '$target';
  * 受理成功才退会话、失败留在面板按原参数重发（规格 A.3「创建失败后的编辑界面
  * 再次发送归会话层」）。runtime.submit 是同步受理发出（fire-and-forget），故由
  * def.create 在受理/失败时各回调一次。key = 目标节点 id。
- * ponytail: 409 canvas_binding_conflict 触发的运行时内部同意图重发会先桥一次
- * failed——跨标签页竞态下会话可能多提示一次错误，任务本身由运行时照常收敛。 */
+ * 409 canvas_binding_conflict 与其他创建失败同路径桥一次 failed（IKJKU1：运行时
+ * 不自动重发），会话留在面板由用户复核后再发（新意图 = 新 submission_id）。 */
 type MixSubmitWatcher = { accepted(jobId: string): void; failed(error: unknown): void };
 const submitWatchers = new Map<string, MixSubmitWatcher>();
 

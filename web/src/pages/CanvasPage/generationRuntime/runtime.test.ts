@@ -251,24 +251,37 @@ describe('生成任务运行时：submit', () => {
     expect(kit.calls.create).toHaveLength(1);
   });
 
-  it('受理撞归属冲突（409 canvas_binding_conflict）：采纳服务端版本，同意图（同 submission_id）重发一次', async () => {
-    const { fake, runtime, kit } = setup();
-    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
+  it('受理撞归属冲突（409 canvas_binding_conflict）：不自动重发，落「归属已变化」失败卡，内容保留', async () => {
+    const { fake, runtime, kit, clock } = setup();
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating', fileName: '用户输入' } });
     const conflictError = new ApiError(409, '目标节点承接版本已变化', 409, {
       reason: 'canvas_binding_conflict', currentBindingRevision: 4,
     });
-    let first = true;
-    kit.respond.create(async () => {
-      if (first) { first = false; throw conflictError; }
-      return { jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501', 5) };
-    });
-    runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
+    kit.respond.create(async () => { throw conflictError; });
+    const onCreateFailure = vi.fn(() => false);
+    runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') }, { onCreateFailure });
     await flushMicrotasks(20);
+    expect(kit.calls.create).toHaveLength(1); // 一次用户操作只发一次创建请求，无自动重发
+    expect(onCreateFailure).toHaveBeenCalledTimes(1); // 按创建失败收敛
+    expect(fake.data('n1')).toMatchObject({ genStatus: 'failed', errorText: '卡片归属已变化，请复核后再发送' });
+    expect(fake.data('n1').jobId).toBeUndefined(); // 无受理回执
+    expect(fake.data('n1').fileName).toBe('用户输入'); // 用户输入与画布内容保留
+    expect(fake.removes).toHaveLength(0);
+    expect(clock.pendingCount()).toBe(0); // 不接续轮询
+    expect(runtime.bindingRevisionOf('n1')).toBe(4); // 服务端版本进台账：复核后重试从服务端版本起步
+  });
+
+  it('非冲突失败后同载荷重发复用同 submission_id（网络重试幂等重放不受影响）', async () => {
+    const { fake, runtime, kit } = setup();
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: {} });
+    kit.respond.create(async () => { throw new Error('网络中断'); });
+    runtime.submit(kit.def, { payload: { type: 'image' }, target: targetFacts('n1') });
+    await flushMicrotasks();
+    kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
+    runtime.submit(kit.def, { payload: { type: 'image' }, target: targetFacts('n1') });
+    await flushMicrotasks();
     expect(kit.calls.create).toHaveLength(2);
-    expect(kit.calls.create[1]!.binding).toMatchObject({ expected_binding_revision: 4, submission_id: kit.calls.create[0]!.key });
-    expect(kit.calls.create[1]!.key).toBe(kit.calls.create[0]!.key); // 同意图同一把
-    expect(fake.data('n1').jobId).toBe('501');
-    expect(runtime.bindingRevisionOf('n1')).toBe(5);
+    expect(kit.calls.create[1]!.key).toBe(kit.calls.create[0]!.key); // 同意图同一把（幂等重放）
   });
 
   it('创建失败落失败卡，不启动轮询', async () => {
@@ -919,29 +932,35 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     expect(replaced.map((c) => c.recoveryItemId).sort()).toEqual(['gcr:sub-1:$target', 'gcr:sub-m:$target']);
   });
 
-  it('双标签页冲突 × 跨家族节点版本：B 家族提交撞 409 后采纳服务端版本同意图重发受理', async () => {
+  it('双标签页冲突 × 跨家族节点版本：撞 409 后仅一次创建、失败卡保留，复核后新意图用新 submission_id', async () => {
     const { fake, runtime, familyB, clock } = setupCrossFamily({ script: [{ status: 'processing', progress: 1, asset: null }] });
     fake.nodes.set('node-x', { id: 'node-x', type: 'mediaNode', position: { x: 0, y: 0 }, data: { kindB: {} } });
     // 另一标签页（家族 A）已把 node-x 归属推进到 revision 3；本端仍按 0 提交
     let createCalls = 0;
     familyB.respond.create(async () => {
       createCalls += 1;
-      if (createCalls === 1) {
-        throw new ApiError(409, '目标节点承接版本已变化', 409, { reason: 'canvas_binding_conflict', currentBindingRevision: 3 });
-      }
-      return { jobId: '801', canvasBinding: BINDING_VIEW('xuuid-0002', 'node-x', '801', 3) };
+      throw new ApiError(409, '目标节点承接版本已变化', 409, { reason: 'canvas_binding_conflict', currentBindingRevision: 3 });
     });
     const issued = runtime.submit(familyB.def, { payload: { b: 1 }, target: { ...targetFacts('node-x'), expectedBindingRevision: 0 } });
     expect(issued).toBe(true);
     await flushMicrotasks(20);
-    // 同意图（同 submission_id）重发一次并受理成功；卡片回填 jobId 并进入轮询
-    expect(createCalls).toBe(2);
-    expect(familyB.calls.create[1].binding).toMatchObject({ expected_binding_revision: 3, submission_id: familyB.calls.create[0]!.key });
+    // 竞争失败方：一次用户操作只发一次创建请求——无自动重发、无受理接续、无轮询
+    expect(createCalls).toBe(1);
+    expect(runtime.statusOf('node-x')).toBeNull();
+    expect(clock.pendingCount()).toBe(0);
+    expect(fake.data('node-x')).toMatchObject({ genStatus: 'failed', errorText: '卡片归属已变化，请复核后再发送' });
+    expect(fake.data('node-x').jobId).toBeUndefined();
+    expect(fake.nodes.has('node-x')).toBe(true); // 画布内容保留
+    // 服务端归属版本（3）进台账：复核后的新提交按服务端版本携带，且为独立意图（新 submission_id）
+    expect(runtime.bindingRevisionOf('node-x')).toBe(3);
+    familyB.respond.create(async () => ({ jobId: '801', canvasBinding: BINDING_VIEW('xuuid-0002', 'node-x', '801', 3) }));
+    runtime.submit(familyB.def, { payload: { b: 1 }, target: { ...targetFacts('node-x'), expectedBindingRevision: 3 } });
+    await flushMicrotasks(20);
+    expect(familyB.calls.create).toHaveLength(2);
+    expect(familyB.calls.create[1].binding).toMatchObject({ expected_binding_revision: 3 });
+    expect(familyB.calls.create[1]!.key).not.toBe(familyB.calls.create[0]!.key); // 新意图 = 新 submission_id
     expect(fake.data('node-x').jobId).toBe('801');
     expect(runtime.statusOf('node-x')?.phase).toBe('generating');
-    expect(clock.pendingCount()).toBe(1);
-    // 后续该节点的新提交按台账版本（3）携带 expected_binding_revision
-    expect(runtime.bindingRevisionOf('node-x')).toBe(3);
   });
 
   it('同 jobId 专属重试 × 独立提交身份：旧意图被他端替代（is_current=false）不接旧 jobId 新状态', async () => {

@@ -389,34 +389,19 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         options?.onAccepted?.({ nodeId, jobId: String(created.jobId), submissionId: execution.submissionId ?? null });
         poll(execution, String(created.jobId));
       })
-      .catch(async (e: unknown) => {
-        // 受理冲突（他端先一步推进归属）：采纳服务端版本，同意图（同 submission_id）重发一次
-        if (isApiError(e) && e.status === 409 && recoveryReason(e) === 'canvas_binding_conflict') {
+      .catch((e: unknown) => {
+        // 受理冲突（他端先一步推进归属，IKJKU1）：不采纳服务端版本重发——保留用户输入
+        // 与画布内容按创建失败收敛；服务端版本进归属台账，复核后的新意图用新 submission_id。
+        const bindingConflict = isApiError(e) && e.status === 409 && recoveryReason(e) === 'canvas_binding_conflict';
+        if (bindingConflict) {
           const current = (e.data as { currentBindingRevision?: unknown }).currentBindingRevision;
           if (typeof current === 'number' && current > target.expectedBindingRevision) {
             nodeBindings.set(nodeId, current);
-            try {
-              const retried = await sendOnce(buildBinding(current));
-              if (retried !== null && owns(execution)) {
-                const view = retried.canvasBinding ?? null;
-                if (view && view.is_current === false) { active.delete(nodeId); host.clearActiveJob(nodeId); submitAttempts.delete(nodeId); return; }
-                if (view) { execution.submissionId = view.submission_id; adoptBindingView(view); }
-                submitAttempts.delete(nodeId);
-                execution.jobId = String(retried.jobId);
-                execution.phase = 'generating';
-                host.patchNode(nodeId, { jobId: retried.jobId });
-                options?.onAccepted?.({ nodeId, jobId: String(retried.jobId), submissionId: execution.submissionId ?? null });
-                poll(execution, String(retried.jobId));
-                return;
-              }
-              if (retried !== null) return; // 已被接管：放弃
-            } catch (retryError) {
-              e = retryError; // 重发仍失败：按通用失败收敛
-            }
           }
         }
         if (!owns(execution)) return; // 已被接管：失败态不得覆盖新任务的执行状态
         active.delete(nodeId);
+        if (bindingConflict) submitAttempts.delete(nodeId); // 意图已被服务端拒绝：复核后再发是独立新意图
         if ((e as { _skipped?: boolean })._skipped) {
           host.toast('error', '画布保存失败，生成任务未提交，请重试保存后再发送');
           options?.onCreateFailure?.(e, { nodeId, target });
@@ -427,7 +412,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         if (host.findNode(nodeId) == null) return;
         host.patchNode(nodeId, {
           genStatus: 'failed',
-          errorText: isApiError(e) ? e.message : '创建任务失败',
+          errorText: bindingConflict ? '卡片归属已变化，请复核后再发送' : (isApiError(e) ? e.message : '创建任务失败'),
           errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
         });
       });
