@@ -242,7 +242,7 @@ import { sceneSplitTask, vocalSplitTask } from './generationRuntime/multiOutputT
 import { videoToolsTask, videoToolFrozenPayload, type VideoToolPayload } from './generationRuntime/videoTools';
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
 import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
-import { putCanvasDocWithRecovery, type CanvasRecoverySaveData } from '@/api/canvasRecovery';
+import { putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
 import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
@@ -1300,6 +1300,18 @@ export default function CanvasPage() {
   const versionRef = useRef<number | null>(null);
   /** 最近一次加载/保存成功的内容签名，避免重复保存 */
   const lastSavedRef = useRef('');
+  /** IKJKU8（用户故事 38）：在途恢复保存命令保留——回执丢失（断连/响应丢失）后命令身份、
+   *  完整载荷与实际 If-Match 保留至结果落定；完全相同的重试（画布签名与版本未变）复用
+   *  原命令重发，命中服务端幂等回读取回原回执（replayed=true），不因旧 If-Match 被迫
+   *  冲突复核。签名或版本一变即作废：新编辑/新保存意图必须换新命令，旧回执不覆盖新文档。 */
+  const retainedRecoverySaveRef = useRef<{
+    projectId: string;
+    commandId: string;
+    recoveryChanges: RecoveryChange[];
+    payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean };
+    version: number | null;
+    signature: string;
+  } | null>(null);
   /** 尚未被服务端确认保存的新增节点 ID——「添加失败」回滚用。
    *  自动保存发起时对当前集合做快照：成功清快照、失败只回滚快照，
    *  请求飞行中新增的节点留给下一轮保存处理，不会被误判为添加失败。 */
@@ -2123,6 +2135,43 @@ export default function CanvasPage() {
     return promise;
   };
 
+  /** IKJKU8：恢复保存结果落定——成功回执或服务端明确拒绝（受控 4xx）即释放保留命令；
+   *  响应丢失（网络错误/5xx，结果不明确）保留，供完全相同重试幂等重放。重发在任何结果
+   *  下都安全：已保存则命中服务端幂等回读回放原回执，未保存则按原 If-Match 正常首次保存。 */
+  const settleRetainedRecoverySave = (projectId: string, commandId: string, failure?: unknown): void => {
+    const retained = retainedRecoverySaveRef.current;
+    if (!retained || retained.projectId !== projectId || retained.commandId !== commandId) return;
+    const definitiveRejection = failure !== undefined
+      && isApiError(failure) && failure.status >= 400 && failure.status < 500;
+    if (failure === undefined || definitiveRejection) retainedRecoverySaveRef.current = null;
+  };
+
+  /** IKJKU8：本次保存的恢复命令计划——完全相同的重试（签名与版本未变）复用保留命令的
+   *  身份与完整载荷（If-Match 即保留版本）；否则组新命令并保留至结果落定。载荷或版本已变
+   *  时旧命令就地作废，不得冒用（服务端对同身份不同摘要按 commandReused 409 拒绝）。 */
+  const planRecoverySave = (
+    projectId: string,
+    signature: string,
+    payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean },
+  ): { recoveryFields: { commandId: string; recoveryChanges: RecoveryChange[] } | null; payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean } } => {
+    const retained = retainedRecoverySaveRef.current;
+    const replay = retained != null && retained.projectId === projectId
+      && retained.signature === signature && retained.version === versionRef.current
+      ? retained : null;
+    if (retained != null && replay == null) retainedRecoverySaveRef.current = null;
+    if (replay != null) {
+      return { recoveryFields: { commandId: replay.commandId, recoveryChanges: replay.recoveryChanges }, payload: replay.payload };
+    }
+    const recoveryFields = generationRuntimeRef.current?.composeSaveFields() ?? null;
+    if (recoveryFields != null) {
+      retainedRecoverySaveRef.current = {
+        projectId, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges,
+        payload, version: versionRef.current, signature,
+      };
+    }
+    return { recoveryFields, payload };
+  };
+
   /** 画布变更后 800ms 防抖自动保存：PUT /api/canvases/:projectId（If-Match 乐观锁） */
   useEffect(() => {
     if (!currentId || !doc || applyingRef.current) return;
@@ -2150,18 +2199,24 @@ export default function CanvasPage() {
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
       // IKJJR1：恢复保存（有显式待确认状态时）与新协议字段同笔提交；回执回填台账。
-      const recoveryFields = generationRuntimeRef.current?.composeSaveFields() ?? null;
+      // IKJKU8：回执丢失后的完全相同重试复用保留命令原载荷与 If-Match 重发（幂等回放）。
+      const { recoveryFields, payload: recoveryPayload } = planRecoverySave(
+        currentId, sig, { viewport, nodes, edges, confirmEmpty },
+      );
       trackCanvasSave(
         (recoveryFields
           ? putCanvasDocWithRecovery(
             currentId,
-            { viewport, nodes, edges, confirmEmpty },
+            recoveryPayload,
             versionRef.current,
             { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
           )
           : saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
         ).then((saved) => {
-          if (recoveryFields) generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
+          if (recoveryFields) {
+            generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
+            settleRetainedRecoverySave(currentId, recoveryFields.commandId);
+          }
           return saved;
         })
           .then((saved) => {
@@ -2177,6 +2232,8 @@ export default function CanvasPage() {
           .catch((e) => {
             // 释放签名，允许下次变更或「重试保存」用已对齐的 version 再写
             lastSavedRef.current = '';
+            // IKJKU8：结果落定——明确拒绝（4xx）释放保留命令，响应丢失保留供重放
+            if (recoveryFields) settleRetainedRecoverySave(currentId, recoveryFields.commandId, e);
             const hadPendingAdds = pendingSnapshot.size > 0;
             // IKJJR1（验收 8）：新协议保存冲突（受控错误带 data.reason）保留本地内容并提示，
             // 不采纳服务端版本重发旧全文；登记恢复冲突闸门，直至重新水合。
@@ -8469,18 +8526,24 @@ export default function CanvasPage() {
         // 412 后据此登记清空待复核闸门
         // IKILTB：提到 try 外——catch 登记 412 闸门时同口径复用，不再重写同义表达式（与自动保存路径一致）
         const confirmEmpty = shouldConfirmEmptyClear(nodes);
-        // IKJJR1：恢复保存（有显式待确认状态时）走新协议原子保存；回执回填台账
-        const recoveryFields = generationRuntimeRef.current?.composeSaveFields() ?? null;
+        // IKJJR1：恢复保存（有显式待确认状态时）走新协议原子保存；回执回填台账。
+        // IKJKU8：回执丢失后的完全相同重试复用保留命令原载荷与 If-Match 重发（幂等回放）。
+        const { recoveryFields, payload: recoveryPayload } = planRecoverySave(
+          projectId, signature, { viewport, nodes, edges: edgesRef.current, confirmEmpty },
+        );
         try {
           const saved = recoveryFields
             ? await putCanvasDocWithRecovery(
               projectId,
-              { viewport, nodes, edges: edgesRef.current, confirmEmpty },
+              recoveryPayload,
               versionRef.current,
               { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
             )
             : await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty }, versionRef.current);
-          if (recoveryFields) generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
+          if (recoveryFields) {
+            generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
+            settleRetainedRecoverySave(projectId, recoveryFields.commandId);
+          }
           if (activeProjectRef.current !== projectId) {
             // 旧项目的保存结束后重启当前项目的自动保存防抖。
             setSaveEpoch((value) => value + 1);
@@ -8496,6 +8559,8 @@ export default function CanvasPage() {
             setSaveEpoch((value) => value + 1);
             throw error;
           }
+          // IKJKU8：结果落定——明确拒绝（4xx）释放保留命令，响应丢失保留供重放
+          if (recoveryFields) settleRetainedRecoverySave(projectId, recoveryFields.commandId, error);
           // IKJJR1（验收 8）：新协议保存冲突保留本地内容，不采纳版本重发；闸门至重新水合。
           //  项冲突（409 recovery_item_conflict）例外：resolve 定向对账后由下次保存重推导。
           const flushRecoveryReason = readRecoveryErrorReason(error);
