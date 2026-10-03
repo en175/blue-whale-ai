@@ -335,6 +335,9 @@ CREATE TABLE `command_idempotency` (
     `agent_run_id` BIGINT NULL,
     `generation_job_id` BIGINT NULL,
     `resource_id` BIGINT NULL,
+    -- 2026-10-03（IKJJQU）新协议保存（SAVE_CANVAS_RECOVERY_V1）的紧凑回执列——
+    --   逐字取自 backend/prisma/migrations/20261003000000_ikjjqu_canvas_recovery_v1/migration.sql 的增列段。
+    `result_payload` JSON NULL,
     `accepted_cursor` BIGINT NOT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
@@ -810,5 +813,64 @@ CREATE TABLE `material_assets` (
     INDEX `idx_material_assets_poll`(`status`, `gmt_create`),
     INDEX `idx_material_assets_group`(`material_group_id`),
     UNIQUE INDEX `uk_material_assets_material`(`material_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- 2026-10-03（IKJJQU）生成任务恢复契约 v1 的三张关系表——建表段逐字取自
+--   backend/prisma/migrations/20261003000000_ikjjqu_canvas_recovery_v1/migration.sql。
+CREATE TABLE `generation_canvas_submissions` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `project_id` BIGINT NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `protocol_version` INTEGER NOT NULL,
+    `submission_id` VARCHAR(36) NOT NULL,
+    `operation` VARCHAR(64) NOT NULL,
+    `request_hash` VARCHAR(64) NOT NULL,
+    `generation_job_id` BIGINT NOT NULL,
+    `task_type` VARCHAR(32) NOT NULL,
+    `target_node_id` VARCHAR(128) NOT NULL,
+    `binding_revision` INTEGER NOT NULL,
+    `recovery_seed` JSON NULL,
+    `previous_target_snapshot` JSON NULL,
+    `target_state` VARCHAR(16) NOT NULL,
+    `target_revision` INTEGER NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_generation_canvas_submissions__submission`(`project_id`, `submission_id`),
+    UNIQUE INDEX `uk_generation_canvas_submissions__binding`(`project_id`, `target_node_id`, `binding_revision`),
+    INDEX `idx_generation_canvas_submissions__project`(`project_id`, `id`),
+    INDEX `idx_generation_canvas_submissions__job`(`generation_job_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `generation_canvas_outputs` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `generation_canvas_submission_id` BIGINT NOT NULL,
+    `output_key` VARCHAR(128) NOT NULL,
+    `node_id` VARCHAR(128) NOT NULL,
+    `asset_id` BIGINT NULL,
+    `slot_id` BIGINT NULL,
+    `state` VARCHAR(16) NOT NULL,
+    `revision` INTEGER NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_generation_canvas_outputs__key`(`generation_canvas_submission_id`, `output_key`),
+    UNIQUE INDEX `uk_generation_canvas_outputs__node`(`generation_canvas_submission_id`, `node_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `generation_canvas_node_owners` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `project_id` BIGINT NOT NULL,
+    `node_id` VARCHAR(128) NOT NULL,
+    `generation_canvas_submission_id` BIGINT NOT NULL,
+    `output_key` VARCHAR(128) NOT NULL,
+    `binding_revision` INTEGER NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_generation_canvas_node_owners__node`(`project_id`, `node_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
