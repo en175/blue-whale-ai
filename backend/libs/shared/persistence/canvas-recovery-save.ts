@@ -237,15 +237,20 @@ export async function saveCanvasWithRecovery(
       projectionCache.set(submissionRow.submission_id, entry);
       return entry;
     };
-    /** 虚拟输出（无行）的 apply/remove：键必须在投影集内（防伪造键/漏投影；B.4 规范身份）。 */
-    const assertVirtualKeyProjected = async (item: ItemState): Promise<VirtualOutputItem | null> => {
-      if (item.outputRowId !== null) return null;
-      const { projection } = await projectionOf(item.submissionRow);
+    /** 投影歧义（重复键/缺产物/归属无法证明）统一 422 拒绝（B.8 projection_invalid；
+     *  PR981-REVIEW2-Standards 2：trustedAssetOf / assertVirtualKeyProjected / replaceTarget 三处共用）。 */
+    const projectionOrThrow = (projection: VirtualOutputProjection): void => {
       if (projection.kind === "invalid") {
         throw new RecoveryContractError(
           recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),
         );
       }
+    };
+    /** 虚拟输出（无行）的 apply/remove：键必须在投影集内（防伪造键/漏投影；B.4 规范身份）。 */
+    const assertVirtualKeyProjected = async (item: ItemState): Promise<VirtualOutputItem | null> => {
+      if (item.outputRowId !== null) return null;
+      const { projection } = await projectionOf(item.submissionRow);
+      projectionOrThrow(projection);
       const virtual = projection.items.find(candidate => candidate.outputKey === item.outputKey) ?? null;
       if (virtual === null) {
         throw new RecoveryContractError(
@@ -258,11 +263,7 @@ export async function saveCanvasWithRecovery(
      *  （QU 一对一），多结果取投影项资产；无法证明来源返回 null（调用方拒绝）。 */
     const trustedAssetOf = async (item: ItemState): Promise<string | null> => {
       const { projection, job } = await projectionOf(item.submissionRow);
-      if (projection.kind === "invalid") {
-        throw new RecoveryContractError(
-          recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),
-        );
-      }
+      projectionOrThrow(projection);
       if (item.outputKey === PRIMARY_OUTPUT_KEY) {
         const assets = parseAssetIds(job?.output_asset_ids);
         return assets !== null && assets.length === 1 ? assets[0]! : null;
@@ -446,11 +447,7 @@ export async function saveCanvasWithRecovery(
           // IKJJQY（B.6）：占位转换与全部未决输出同一笔保存完成——不能只删占位遗漏结果。
           // 投影歧义（重复键/缺产物/归属无法证明）拒绝转换，保留占位，不重发（B.8）。
           const { projection } = await projectionOf(item.submissionRow);
-          if (projection.kind === "invalid") {
-            throw new RecoveryContractError(
-              recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),
-            );
-          }
+          projectionOrThrow(projection);
           const persistedKeys = new Set(
             (await tx.generation_canvas_outputs.findMany({
               where: { generation_canvas_submission_id: item.submissionRow.id },
