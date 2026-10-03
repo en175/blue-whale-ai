@@ -2239,15 +2239,10 @@ export default function CanvasPage() {
         })
           .then((saved) => {
             versionRef.current = saved.version;
-            // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）；
-            //  以实际落盘载荷为准（确认笔落盘的是原载荷而非本次新编辑）
-            registerConfirmedNonEmpty(recoveryPayload.nodes);
+            // IKIMQK / IKJLTY：成功落账三件套见 settleSavedCanvas——仅本次新编辑真正落盘
+            //  （非确认笔）才核销新增节点快照，实际落盘签名对齐驱动下轮防抖补存新内容
+            settleSavedCanvas(plan, sig, () => pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id)));
             setSaveBlocked(false);
-            // IKJLTY：仅本次新编辑真正落盘（非确认笔）才核销新增节点快照——确认笔未携带它们
-            if (plan.sentSignature === sig) pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
-            // 对齐实际落盘内容签名：确认笔落盘的是原载荷——新编辑签名仍未保存，
-            //  与 lastSavedRef 的差量驱动下一轮防抖以确认后版本保存新内容
-            lastSavedRef.current = plan.sentSignature;
             setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
             setSaveEpoch(value => value + 1);
             setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
@@ -8527,6 +8522,26 @@ export default function CanvasPage() {
     if (nodes.length > 0) confirmedNonEmptyRef.current = true;
   };
 
+  /** IKIMQK / IKJLTY（PR981-REVIEW2-Standards 3）：保存成功落账三件套（防抖自动保存 .then 与
+   *  flush 循环体原为两处平行复制）——以实际落盘载荷登记确认清空资格（确认笔落盘的是原载荷
+   *  而非当前编辑）、对齐实际落盘内容签名（与 lastSavedRef 的差量驱动下一轮防抖/flush 以确认
+   *  后版本补存新内容），并仅当本次新编辑真正落盘（sentSignature 与当前签名一致，非确认笔）
+   *  时核销未保存新增节点（核销口径由调用方给出：防抖删本次快照成员保留飞行中新增，flush 全清）。
+   *  返回是否新内容笔（flush 据此决定收束或继续补存）。 */
+  const settleSavedCanvas = (
+    plan: ReturnType<typeof planRecoverySave>,
+    signature: string,
+    settlePendingNodes: () => void,
+  ): boolean => {
+    registerConfirmedNonEmpty(plan.payload.nodes);
+    lastSavedRef.current = plan.sentSignature;
+    if (plan.sentSignature === signature) {
+      settlePendingNodes();
+      return true;
+    }
+    return false;
+  };
+
   /** 等待在途保存完成并立即落盘当前画布编辑（IKDLQE 应用预览的保存串行化模式；IKDLQF 目标生图提交复用）。
    *  返回 false 表示等待期间项目已切换，调用方应中止后续动作。
    *  IKFS5W：自身也登记进 savePromiseRef，与 800ms 防抖自动保存互斥——同一时刻只有一个 PUT、
@@ -8581,15 +8596,10 @@ export default function CanvasPage() {
             return false;
           }
           versionRef.current = saved.version;
-          // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）；
-          //  以实际落盘载荷为准（确认笔落盘的是原载荷而非当前内容）
-          registerConfirmedNonEmpty(recoveryPayload.nodes);
-          lastSavedRef.current = plan.sentSignature;
-          // IKJLTY：仅确认笔（落盘的是原载荷）才继续循环补存当前内容——正常笔成功即收束，
-          //  不把 flush 期间并发的新状态变化提前吃进本次 flush（留给下轮防抖/flush，既有口径）；
-          //  新增节点快照同理只在当前内容真正落盘的那一笔核销
-          if (plan.sentSignature !== signature) continue;
-          pendingNodeIdsRef.current.clear();
+          // IKIMQK / IKJLTY：成功落账三件套见 settleSavedCanvas；仅确认笔（落盘的是原载荷）
+          //  才继续循环补存当前内容——正常笔成功即收束，不把 flush 期间并发的新状态变化提前
+          //  吃进本次 flush（留给下轮防抖/flush，既有口径）
+          if (!settleSavedCanvas(plan, signature, () => { pendingNodeIdsRef.current.clear(); })) continue;
         } catch (error) {
           if (activeProjectRef.current !== projectId) {
             setSaveEpoch((value) => value + 1);
