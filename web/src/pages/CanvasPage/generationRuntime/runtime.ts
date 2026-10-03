@@ -511,7 +511,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     const marker = readMarker(data);
     const canBind = marker != null || (jobId !== '' && boundJobIds.has(jobId));
     const targetEntry = marker != null ? ledger.get(recoveryItemIdOf(marker.submissionId, TARGET_OUTPUT_KEY)) : undefined;
-    const expectedRevision = targetEntry?.nodeBindingRevision ?? nodeBindings.get(nodeId) ?? 0;
+    const expectedRevision = nodeBindings.get(nodeId) ?? targetEntry?.nodeBindingRevision ?? 0;
     const previous = retryAttempts.get(nodeId);
     const key = previous && previous.jobId === jobId && previous.bound === canBind ? previous.key : newId();
     retryAttempts.set(nodeId, { jobId, key, bound: canBind });

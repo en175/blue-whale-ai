@@ -126,6 +126,28 @@ describe('同 jobId 重试后的提交承接保护（IKJLXD）', () => {
     });
   });
 
+  it('B 已失败且旧 A 对账迟到后，再次重试 C 携带当前已确认版本 2', async () => {
+    const ctx = setup('failed');
+    await ctx.runtime.recover('1');
+    const reconcile = ctx.runtime.reconcileConflictItems('1');
+    expect(ctx.runtime.retry(NODE_ID)).toBe(true);
+    await flush();
+    expect(ctx.runtime.statusOf(NODE_ID)).toBeNull();
+    expect(ctx.runtime.bindingRevisionOf(NODE_ID)).toBe(2);
+    ctx.release([oldRecord()]);
+    await reconcile;
+    ctx.nextSubmission();
+    vi.mocked(retryAudioMix).mockResolvedValueOnce({
+      job_id: '501', status: 'queued', replayed: false, canvas_binding: bindingView(SID_C, '501', 3),
+    });
+    expect(ctx.runtime.retry(NODE_ID)).toBe(true);
+    await flush();
+    expect(canvasBindingSchema.parse(vi.mocked(retryAudioMix).mock.calls[1]![4])).toMatchObject({
+      submission_id: SID_C, expected_binding_revision: 2,
+    });
+    expect(ctx.runtime.bindingRevisionOf(NODE_ID)).toBe(3);
+  });
+
   it('B 等待受理时，旧 A 的恢复扫描不能重新登记 A 或续接轮询', async () => {
     const ctx = setup();
     await ctx.runtime.recover('1');
