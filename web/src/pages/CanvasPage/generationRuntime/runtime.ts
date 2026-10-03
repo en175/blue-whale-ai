@@ -324,7 +324,6 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     const nodeId = target.targetNodeId;
     const existing = active.get(nodeId);
     if (existing && existing.phase === 'submitting') return false; // 创建窗口防重入（重复点击）
-    host.stopLegacyPolling(nodeId);
     const execution: ActiveExecution = {
       round: nextRound(), projectId, loadEpoch: host.getLoadEpoch(), nodeId,
       phase: 'submitting', targetRole: target.seedTarget.role, def,

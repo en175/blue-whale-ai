@@ -227,7 +227,6 @@ describe('图像工具类型定义：与运行时组合冒烟（真实 def 接 r
       getActiveJob: () => undefined,
       setActiveJob: () => {},
       clearActiveJob: () => {},
-      stopLegacyPolling: () => {},
       isLocallyRemoved: () => false,
       markLocallyRemoved: () => {},
       registerPendingDelete: () => {},

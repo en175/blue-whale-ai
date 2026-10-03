@@ -293,7 +293,6 @@ function createFakeHost(): FakeHost {
     getActiveJob: () => undefined,
     setActiveJob: () => {},
     clearActiveJob: () => {},
-    stopLegacyPolling: () => {},
     isLocallyRemoved: () => false,
     markLocallyRemoved: () => {},
     registerPendingDelete: () => {},

@@ -83,7 +83,6 @@ function createFakeHost() {
     getActiveJob: (nodeId) => activeTokens.get(nodeId),
     setActiveJob: (nodeId, token) => { activeTokens.set(nodeId, token); },
     clearActiveJob: (nodeId) => { activeTokens.delete(nodeId); },
-    stopLegacyPolling: () => {},
     isLocallyRemoved: () => false,
     markLocallyRemoved: () => {},
     registerPendingDelete: () => {},

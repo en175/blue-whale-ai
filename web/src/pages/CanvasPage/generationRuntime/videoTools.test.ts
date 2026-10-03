@@ -189,7 +189,6 @@ describe('视频处理家族：恢复落卡规划（受理回执丢失补卡 + �
       getActiveJob: () => undefined,
       setActiveJob: () => {},
       clearActiveJob: () => {},
-      stopLegacyPolling: () => {},
       isLocallyRemoved: () => false,
       markLocallyRemoved: () => {},
       registerPendingDelete: () => {},

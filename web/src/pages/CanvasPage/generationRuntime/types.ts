@@ -204,7 +204,6 @@ export interface GenerationRuntimeHost {
   getActiveJob(nodeId: string): string | undefined;
   setActiveJob(nodeId: string, token: string): void;
   clearActiveJob(nodeId: string): void;
-  stopLegacyPolling(nodeId: string): void;
   // ── 迟到防线与删除意图（页面共享集合） ──
   isLocallyRemoved(nodeId: string): boolean;
   markLocallyRemoved(nodeId: string): void;
