@@ -113,6 +113,19 @@ interface ItemState {
   nodeId: string;
 }
 
+/** 投影歧义（重复键/缺产物/归属无法证明）统一 422 拒绝（B.8 projection_invalid；
+ *  PR981-REVIEW2-Standards 2：trustedAssetOf / assertVirtualKeyProjected / replaceTarget 三处共用）。
+ *  asserts 谓词保留调用方对 projection.items 的窄化（与原内联 throw 等价）。 */
+function projectionOrThrow(
+  projection: VirtualOutputProjection,
+): asserts projection is Extract<VirtualOutputProjection, { kind: "ok" }> {
+  if (projection.kind === "invalid") {
+    throw new RecoveryContractError(
+      recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),
+    );
+  }
+}
+
 /**
  * 新协议原子保存。失败全部回滚（412 不确认展示或删除）；受控错误以
  * RecoveryContractError 冒泡（信封直写响应，不经全局过滤器）。
@@ -236,15 +249,6 @@ export async function saveCanvasWithRecovery(
       const entry = { projection, job };
       projectionCache.set(submissionRow.submission_id, entry);
       return entry;
-    };
-    /** 投影歧义（重复键/缺产物/归属无法证明）统一 422 拒绝（B.8 projection_invalid；
-     *  PR981-REVIEW2-Standards 2：trustedAssetOf / assertVirtualKeyProjected / replaceTarget 三处共用）。 */
-    const projectionOrThrow = (projection: VirtualOutputProjection): void => {
-      if (projection.kind === "invalid") {
-        throw new RecoveryContractError(
-          recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),
-        );
-      }
     };
     /** 虚拟输出（无行）的 apply/remove：键必须在投影集内（防伪造键/漏投影；B.4 规范身份）。 */
     const assertVirtualKeyProjected = async (item: ItemState): Promise<VirtualOutputItem | null> => {
