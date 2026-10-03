@@ -1303,7 +1303,9 @@ export default function CanvasPage() {
   /** IKJKU8（用户故事 38）：在途恢复保存命令保留——回执丢失（断连/响应丢失）后命令身份、
    *  完整载荷与实际 If-Match 保留至结果落定；完全相同的重试（画布签名与版本未变）复用
    *  原命令重发，命中服务端幂等回读取回原回执（replayed=true），不因旧 If-Match 被迫
-   *  冲突复核。签名或版本一变即作废：新编辑/新保存意图必须换新命令，旧回执不覆盖新文档。 */
+   *  冲突复核。IKJLTY（R6）：结果未明确前不因本地新编辑（签名/版本变化）丢弃未决命令——
+   *  新保存意图到来先原样重放确认原命令结果（版本随之对齐），再以确认版本为基组新命令；
+   *  旧回执只确认原保存与合法版本，不覆盖新编辑。仅结果落定（成功/受控 4xx）或跨项目才释放。 */
   const retainedRecoverySaveRef = useRef<{
     projectId: string;
     commandId: string;
@@ -2147,21 +2149,34 @@ export default function CanvasPage() {
   };
 
   /** IKJKU8：本次保存的恢复命令计划——完全相同的重试（签名与版本未变）复用保留命令的
-   *  身份与完整载荷（If-Match 即保留版本）；否则组新命令并保留至结果落定。载荷或版本已变
-   *  时旧命令就地作废，不得冒用（服务端对同身份不同摘要按 commandReused 409 拒绝）。 */
+   *  身份与完整载荷；否则组新命令并保留至结果落定。
+   *  IKJLTY（R6）：同项目存在结果未明确的保留命令时，无论本次签名/版本是否已变，一律先按
+   *  原 commandId/完整载荷/原 If-Match 重放确认（服务端幂等先于版本检查：已落库命中回读
+   *  返回 replayed 回执与确认版本；未落库按原 If-Match 首存）——新保存意图在确认之后再处理，
+   *  不得因本地新编辑直接丢弃未决命令（丢失重放入口后新命令仍携旧版本必吃受控 412）。
+   *  服务端请求摘要含 expectedVersion，重放的 If-Match 必须是命令原版本（retained.version）。
+   *  ifMatch/sentSignature 供调用方对齐实际落盘内容：确认笔落盘的是原载荷而非本次新编辑。 */
   const planRecoverySave = (
     projectId: string,
     signature: string,
     payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean },
-  ): { recoveryFields: { commandId: string; recoveryChanges: RecoveryChange[] } | null; payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean } } => {
+  ): {
+    recoveryFields: { commandId: string; recoveryChanges: RecoveryChange[] } | null;
+    payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean };
+    ifMatch: number | null;
+    sentSignature: string;
+  } => {
     const retained = retainedRecoverySaveRef.current;
-    const replay = retained != null && retained.projectId === projectId
-      && retained.signature === signature && retained.version === versionRef.current
-      ? retained : null;
-    if (retained != null && replay == null) retainedRecoverySaveRef.current = null;
-    if (replay != null) {
-      return { recoveryFields: { commandId: replay.commandId, recoveryChanges: replay.recoveryChanges }, payload: replay.payload };
+    if (retained != null && retained.projectId === projectId) {
+      return {
+        recoveryFields: { commandId: retained.commandId, recoveryChanges: retained.recoveryChanges },
+        payload: retained.payload,
+        ifMatch: retained.version,
+        sentSignature: retained.signature,
+      };
     }
+    // 跨项目保留命令就地作废（既有口径）：新项目的保存不得冒用旧项目命令身份
+    if (retained != null) retainedRecoverySaveRef.current = null;
     const recoveryFields = generationRuntimeRef.current?.composeSaveFields() ?? null;
     if (recoveryFields != null) {
       retainedRecoverySaveRef.current = {
@@ -2169,7 +2184,7 @@ export default function CanvasPage() {
         payload, version: versionRef.current, signature,
       };
     }
-    return { recoveryFields, payload };
+    return { recoveryFields, payload, ifMatch: versionRef.current, sentSignature: signature };
   };
 
   /** 画布变更后 800ms 防抖自动保存：PUT /api/canvases/:projectId（If-Match 乐观锁） */
@@ -2200,15 +2215,18 @@ export default function CanvasPage() {
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
       // IKJJR1：恢复保存（有显式待确认状态时）与新协议字段同笔提交；回执回填台账。
       // IKJKU8：回执丢失后的完全相同重试复用保留命令原载荷与 If-Match 重发（幂等回放）。
-      const { recoveryFields, payload: recoveryPayload } = planRecoverySave(
+      // IKJLTY（R6）：有未决命令时本笔先为确认笔（原载荷/原 If-Match 重放）；sentSignature
+      //  记录实际落盘内容签名——确认笔成功后新编辑签名未对齐，saveEpoch 推进触发下轮再存。
+      const plan = planRecoverySave(
         currentId, sig, { viewport, nodes, edges, confirmEmpty },
       );
+      const { recoveryFields, payload: recoveryPayload } = plan;
       trackCanvasSave(
         (recoveryFields
           ? putCanvasDocWithRecovery(
             currentId,
             recoveryPayload,
-            versionRef.current,
+            plan.ifMatch,
             { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
           )
           : saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
@@ -2221,10 +2239,15 @@ export default function CanvasPage() {
         })
           .then((saved) => {
             versionRef.current = saved.version;
-            // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）
-            registerConfirmedNonEmpty(nodes);
+            // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）；
+            //  以实际落盘载荷为准（确认笔落盘的是原载荷而非本次新编辑）
+            registerConfirmedNonEmpty(recoveryPayload.nodes);
             setSaveBlocked(false);
-            pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
+            // IKJLTY：仅本次新编辑真正落盘（非确认笔）才核销新增节点快照——确认笔未携带它们
+            if (plan.sentSignature === sig) pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
+            // 对齐实际落盘内容签名：确认笔落盘的是原载荷——新编辑签名仍未保存，
+            //  与 lastSavedRef 的差量驱动下一轮防抖以确认后版本保存新内容
+            lastSavedRef.current = plan.sentSignature;
             setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
             setSaveEpoch(value => value + 1);
             setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
@@ -2234,7 +2257,8 @@ export default function CanvasPage() {
             lastSavedRef.current = '';
             // IKJKU8：结果落定——明确拒绝（4xx）释放保留命令，响应丢失保留供重放
             if (recoveryFields) settleRetainedRecoverySave(currentId, recoveryFields.commandId, e);
-            const hadPendingAdds = pendingSnapshot.size > 0;
+            // IKJLTY：确认笔未携带本次新增节点——其失败不得回滚用户新编辑
+            const hadPendingAdds = pendingSnapshot.size > 0 && plan.sentSignature === sig;
             // IKJJR1（验收 8）：新协议保存冲突（受控错误带 data.reason）保留本地内容并提示，
             // 不采纳服务端版本重发旧全文；登记恢复冲突闸门，直至重新水合。
             const recoveryReason = readRecoveryErrorReason(e);
@@ -8506,37 +8530,44 @@ export default function CanvasPage() {
   /** 等待在途保存完成并立即落盘当前画布编辑（IKDLQE 应用预览的保存串行化模式；IKDLQF 目标生图提交复用）。
    *  返回 false 表示等待期间项目已切换，调用方应中止后续动作。
    *  IKFS5W：自身也登记进 savePromiseRef，与 800ms 防抖自动保存互斥——同一时刻只有一个 PUT、
-   *  不会两次请求共用同一个 If-Match（调用方持 applyingRef 仍是推荐做法，但不再是正确性前提）。 */
+   *  不会两次请求共用同一个 If-Match（调用方持 applyingRef 仍是推荐做法，但不再是正确性前提）。
+   *  IKJLTY（R6）：存在结果未明确的保留命令时，本次 flush 先原样重放确认原命令（确认笔，
+   *  版本随之对齐），随即以确认后版本保存当前内容（新内容笔）——循环至多两笔，确认笔落定
+   *  后保留命令已释放，第二轮必走新命令或发现签名已对齐而收束。 */
   const flushCanvasSave = (projectId: string): Promise<boolean> => {
     const runFlush = async (): Promise<boolean> => {
       if (activeProjectRef.current !== projectId) return false;
       // IKIIWN：未成功水合（加载失败/切换中，ref 被置 null）不保存——返回 false 语义同项目切换，调用方中止后续动作
       if (hydratedProjectRef.current === null) return false;
       if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
-      const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
-      // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
-      const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
-      // IKIN23：整文档待复核期间一律静默返回 false 不发请求——无论待发节点数；排队中的
-      // flush 在实际执行时同样走到此复查（flush 多为后台链路 .catch(()=>{})，用户可见提示
-      // 由重试保存/项目切换入口给出）
-      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return false;
-      const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
-      if (signature !== lastSavedRef.current) {
+      for (;;) {
+        const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+        // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
+        const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
+        // IKIN23：整文档待复核期间一律静默返回 false 不发请求——无论待发节点数；排队中的
+        // flush 在实际执行时同样走到此复查（flush 多为后台链路 .catch(()=>{})，用户可见提示
+        // 由重试保存/项目切换入口给出）
+        if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return false;
+        const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
+        // IKJLTY：签名已对齐但仍有未决命令（确认笔成功、新内容笔丢响应后用户撤回编辑等窗口）
+        //  也不得直接报 saved——先把未决命令重放落定
+        if (signature === lastSavedRef.current && retainedRecoverySaveRef.current?.projectId !== projectId) break;
         // IKILUE：空文档保存的显式确认标记（授予口径见 shouldConfirmEmptyClear），
         // 412 后据此登记清空待复核闸门
         // IKILTB：提到 try 外——catch 登记 412 闸门时同口径复用，不再重写同义表达式（与自动保存路径一致）
         const confirmEmpty = shouldConfirmEmptyClear(nodes);
         // IKJJR1：恢复保存（有显式待确认状态时）走新协议原子保存；回执回填台账。
         // IKJKU8：回执丢失后的完全相同重试复用保留命令原载荷与 If-Match 重发（幂等回放）。
-        const { recoveryFields, payload: recoveryPayload } = planRecoverySave(
+        const plan = planRecoverySave(
           projectId, signature, { viewport, nodes, edges: edgesRef.current, confirmEmpty },
         );
+        const { recoveryFields, payload: recoveryPayload } = plan;
         try {
           const saved = recoveryFields
             ? await putCanvasDocWithRecovery(
               projectId,
               recoveryPayload,
-              versionRef.current,
+              plan.ifMatch,
               { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
             )
             : await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty }, versionRef.current);
@@ -8550,9 +8581,14 @@ export default function CanvasPage() {
             return false;
           }
           versionRef.current = saved.version;
-          // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）
-          registerConfirmedNonEmpty(nodes);
-          lastSavedRef.current = signature;
+          // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）；
+          //  以实际落盘载荷为准（确认笔落盘的是原载荷而非当前内容）
+          registerConfirmedNonEmpty(recoveryPayload.nodes);
+          lastSavedRef.current = plan.sentSignature;
+          // IKJLTY：仅确认笔（落盘的是原载荷）才继续循环补存当前内容——正常笔成功即收束，
+          //  不把 flush 期间并发的新状态变化提前吃进本次 flush（留给下轮防抖/flush，既有口径）；
+          //  新增节点快照同理只在当前内容真正落盘的那一笔核销
+          if (plan.sentSignature !== signature) continue;
           pendingNodeIdsRef.current.clear();
         } catch (error) {
           if (activeProjectRef.current !== projectId) {
@@ -8593,6 +8629,8 @@ export default function CanvasPage() {
           setSaveStatus('error');
           throw error;
         }
+        // 正常笔（含同签名重放笔）成功：当前内容已落盘，收束；确认笔已在上面 continue
+        break;
       }
       setSaveBlocked(false);
       setSaveStatus('saved');

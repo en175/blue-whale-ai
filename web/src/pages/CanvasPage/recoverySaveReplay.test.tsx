@@ -4,7 +4,13 @@
    原样重试 = 新 commandId + 旧 If-Match → 服务端幂等回读永不命中 → 必 412 进冲突复核。
    本文件锁死发送侧：完全相同的重试（画布签名与版本未变）复用保留的命令身份/完整载荷/
    If-Match 重发；新增编辑或版本推进必须换新命令；412 与 409 对账路径行为不变。
-   运行时 mock 只为可控 composeSaveFields（命令保留本身在页面保存接缝，见 index.tsx）。 */
+   运行时 mock 只为可控 composeSaveFields（命令保留本身在页面保存接缝，见 index.tsx）。
+
+   IKJLTY（PR981-REVIEW2-20261003-R6）：回执丢失后「继续编辑」窗口修复——签名/版本变化
+   不再丢弃未决命令；新保存意图到来时先按原 commandId/完整载荷/原 If-Match 重放确认原
+   命令结果（服务端幂等先于版本检查：已落库命中回读返回 replayed 回执与确认版本），
+   确认后新内容再以确认版本为基换新命令保存。旧回执只确认原保存与合法版本、只进台账，
+   不回写旧全文覆盖新编辑；确认笔撞其他客户端真实更新的受控 412 仍走既有冲突闸门。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -279,16 +285,6 @@ function stageResponseLostReplay() {
   });
 }
 
-/** 传输层编排：第 1 次 PUT 丢响应，第 2 次起正常成功（新命令首次保存形态） */
-function stageResponseLostThenFreshSave(version = 4) {
-  let attempts = 0;
-  recoveryApi.putCanvasDocWithRecovery.mockImplementation(async (_p: string, _pl: SavePayload, _v: number | null, recovery: RecoverySaveFields) => {
-    attempts += 1;
-    if (attempts === 1) throw new TypeError('network down');
-    return savedReceipt(recovery.commandId, version);
-  });
-}
-
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
@@ -362,25 +358,163 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
     );
   }, 20000);
 
-  it('新增编辑后不冒用旧命令：换新 commandId 与新载荷，If-Match 跟随当前版本', async () => {
-    stageResponseLostThenFreshSave();
+  it('IKJLTY：丢回执后继续改名——原命令先原样重放确认（版本对齐 4），新内容再以版本 4 为基换新命令保存', async () => {
+    // 已提交丢响应：第 1 笔服务端已落库（版本 3→4）但响应丢失；第 2 笔（原命令重放）
+    // 命中服务端幂等回读返回 replayed 回执（版本 4）；第 3 笔（新内容新命令）If-Match 4 首存成功
+    let attempts = 0;
+    recoveryApi.putCanvasDocWithRecovery.mockImplementation(async (_p: string, _pl: SavePayload, _v: number | null, recovery: RecoverySaveFields) => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError('network down');
+      if (attempts === 2) {
+        const receipt = savedReceipt(recovery.commandId, 4);
+        return { ...receipt, recoveryReceipt: { ...receipt.recoveryReceipt, replayed: true } };
+      }
+      return savedReceipt(recovery.commandId, 5);
+    });
 
     await renderPage();
     await renameNode('改名A');
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(1);
     const [first] = putCalls();
-    const composed = runtimeMock.runtime.composeSaveFields.mock.calls.length;
+    expect(first[2]).toBe(3); // If-Match = 水合版本
+    const composedAfterFirst = runtimeMock.runtime.composeSaveFields.mock.calls.length;
 
-    // 用户新增编辑（内容真实变化）→ 不得重放旧命令
+    // 回执丢失后继续改名（签名变化）——不得丢弃未决命令：先按原 commandId/完整载荷/原 If-Match 重放确认
     await renameNode('改名B');
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
-    const [, second] = putCalls();
-    expect(second[3].commandId).not.toBe(first[3].commandId); // 新命令身份
-    expect((second[1].nodes as Node[]).find((n) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
-    expect(second[2]).toBe(3);
-    expect(runtimeMock.runtime.composeSaveFields.mock.calls.length).toBe(composed + 1); // 重新推导
+    const [, confirmReplay] = putCalls();
+    expect(confirmReplay[3].commandId).toBe(first[3].commandId); // 原命令身份保留（重放入口不失）
+    expect(confirmReplay[1]).toEqual(first[1]); // 完整原载荷（改名A，不掺入新编辑）
+    expect(confirmReplay[2]).toBe(3); // 原 If-Match（命令实际版本，服务端摘要含版本必须原样）
+    expect(runtimeMock.runtime.composeSaveFields.mock.calls.length).toBe(composedAfterFirst); // 确认笔不组新命令
+    // 旧回执只确认原保存与合法版本：replayed 回执按既有语义回填台账，不触碰画布新编辑
+    expect(runtimeMock.runtime.onSaveReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({ commandId: first[3].commandId, replayed: true }),
+    );
+    expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
+
+    // 原命令确认后：新编辑内容以确认版本 4 为基、换新命令保存
+    await waitDebounce();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(3);
+    const [, , freshSave] = putCalls();
+    expect(freshSave[3].commandId).not.toBe(first[3].commandId);
+    expect((freshSave[1].nodes as Node[]).find((n) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
+    expect(freshSave[2]).toBe(4); // 确认版本为基——修复前此笔仍携版本 3 必吃受控 412
+    expect(runtimeMock.runtime.composeSaveFields.mock.calls.length).toBe(composedAfterFirst + 1);
+
+    // 新内容保存成功后签名对齐：同名改写不再发 PUT
+    await renameNode('改名B');
+    await waitDebounce();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(3);
+  }, 20000);
+
+  it('IKJLTY：未提交丢响应（原命令未落库）继续改名——重放按原 If-Match 首存成功，新内容再以确认版本为基', async () => {
+    // 第 1 笔响应丢失且服务端未落库；第 2 笔（原命令重放）按原 If-Match 3 首存成功
+    // （replayed=false，版本 4）；第 3 笔（新内容新命令）If-Match 4 首存成功（版本 5）
+    let attempts = 0;
+    recoveryApi.putCanvasDocWithRecovery.mockImplementation(async (_p: string, _pl: SavePayload, _v: number | null, recovery: RecoverySaveFields) => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError('network down');
+      return savedReceipt(recovery.commandId, attempts === 2 ? 4 : 5);
+    });
+
+    await renderPage();
+    await renameNode('改名A');
+    await waitDebounce();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(1);
+    const [first] = putCalls();
+
+    await renameNode('改名B');
+    await waitDebounce();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
+    const [, confirmReplay] = putCalls();
+    expect(confirmReplay[3].commandId).toBe(first[3].commandId);
+    expect(confirmReplay[1]).toEqual(first[1]);
+    expect(confirmReplay[2]).toBe(3);
+    // 未落库的重放 = 按原 If-Match 的正常首存：回执 replayed=false，同样只确认版本与台账
+    expect(runtimeMock.runtime.onSaveReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({ commandId: first[3].commandId, replayed: false }),
+    );
+
+    await waitDebounce();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(3);
+    const [, , freshSave] = putCalls();
+    expect(freshSave[3].commandId).not.toBe(first[3].commandId);
+    expect((freshSave[1].nodes as Node[]).find((n) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
+    expect(freshSave[2]).toBe(4);
+  }, 20000);
+
+  it('IKJLTY：flush 链路（重试保存按钮）——丢回执后继续改名，一次 flush 连续完成确认笔与新内容笔', async () => {
+    // 已提交丢响应：第 1 笔落库（版本 4）丢响应；flush 第 1 轮重放原命令确认（replayed 回执），
+    // 第 2 轮以确认版本 4 为基保存当前内容（版本 5）
+    let attempts = 0;
+    recoveryApi.putCanvasDocWithRecovery.mockImplementation(async (_p: string, _pl: SavePayload, _v: number | null, recovery: RecoverySaveFields) => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError('network down');
+      if (attempts === 2) {
+        const receipt = savedReceipt(recovery.commandId, 4);
+        return { ...receipt, recoveryReceipt: { ...receipt.recoveryReceipt, replayed: true } };
+      }
+      return savedReceipt(recovery.commandId, 5);
+    });
+
+    await renderPage();
+    await renameNode('改名A');
+    await waitDebounce();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(1);
+    const [first] = putCalls();
+    const composedAfterFirst = runtimeMock.runtime.composeSaveFields.mock.calls.length;
+
+    // 回执丢失后继续改名（签名变化），再点「重试保存」——flush 不得丢弃未决命令直接组新命令
+    await renameNode('改名B');
+    await clickRetrySave();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(3);
+    const [, confirmReplay, freshSave] = putCalls();
+    expect(confirmReplay[3].commandId).toBe(first[3].commandId); // 确认笔：原命令原载荷原 If-Match
+    expect(confirmReplay[1]).toEqual(first[1]);
+    expect(confirmReplay[2]).toBe(3);
+    expect(freshSave[3].commandId).not.toBe(first[3].commandId); // 新内容笔：新命令 + 确认版本为基
+    expect((freshSave[1].nodes as Node[]).find((n) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
+    expect(freshSave[2]).toBe(4);
+    expect(runtimeMock.runtime.composeSaveFields.mock.calls.length).toBe(composedAfterFirst + 1);
+    expect(runtimeMock.runtime.onSaveReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({ commandId: first[3].commandId, replayed: true }),
+    );
+  }, 20000);
+
+  it('IKJLTY：确认笔撞其他客户端真实更新的受控 412——保留本地新编辑并登记复核闸门，重试被拦截', async () => {
+    // 第 1 笔响应丢失且服务端未落库；期间其他客户端把版本推到 4——第 2 笔（原命令重放）
+    // 携原 If-Match 3 收到受控 412（canvas_version_conflict）：原命令结果落定（未保存），
+    // 本地新编辑保留，登记恢复冲突闸门引导刷新复核（既有口径，不因重放路径旁路）
+    let attempts = 0;
+    recoveryApi.putCanvasDocWithRecovery.mockImplementation(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError('network down');
+      throw new ApiError(412, 'Canvas 版本冲突', '', { reason: 'canvas_version_conflict', version: 4 });
+    });
+
+    await renderPage();
+    await renameNode('改名A');
+    await waitDebounce();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(1);
+    const [first] = putCalls();
+
+    await renameNode('改名B');
+    await waitDebounce();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
+    const [, confirmReplay] = putCalls();
+    expect(confirmReplay[3].commandId).toBe(first[3].commandId); // 仍是原命令重放
+    expect(confirmReplay[2]).toBe(3);
+    // 本地新编辑保留（不被旧回执/旧全文覆盖）
+    expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
+
+    // 复核闸门已登记：「重试保存」入口拦截，不再发请求
+    await clickRetrySave();
+    expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
+    // 本地内容仍未被覆盖
+    expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
   }, 20000);
 
   it('412 版本冲突路径行为不变：保留命令作废，后续保存按对齐版本走新命令', async () => {
