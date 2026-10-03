@@ -21,8 +21,8 @@ export interface AudioVideoSplitSubmission {
 export interface AudioVideoSplitHost {
   getProjectId(): string | null;
   getSourceNode(nodeId: string): Node | undefined;
-  createTask(input: AudioVideoSplitSubmission): Promise<{ job_id: string }>;
-  handoff(input: AudioVideoSplitSubmission, task: { job_id: string }): Promise<void>;
+  /** IKJJR3：建音频占位卡 + 来源边后交生成任务运行时受理；返回 false = 未发出。 */
+  startTask(input: AudioVideoSplitSubmission): boolean;
   warn(message: string): void;
   error(message: string): void;
 }
@@ -48,10 +48,12 @@ export function createAudioVideoSplitSession(
       };
     },
     async submit(input, context) {
+      // IKJJR3：提交点先退出会话再交运行时受理（受理失败归失败卡，冻结输入重试走运行时）。
       const host = getHost();
-      const task = await host.createTask(input);
       context.close();
-      await host.handoff(input, task);
+      if (!host.startTask(input)) {
+        host.warn('音视频分离任务未发出，请重试');
+      }
     },
     onError(error) {
       getHost().error(apiErrorMessage(error, '音视频分离任务创建失败，请重试'));

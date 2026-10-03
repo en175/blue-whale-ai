@@ -17,7 +17,7 @@ it.each([false, true])('抠像发送先退出；在途任务锁不随界面关�
   const tool = runtime.register(createSmartMattingSession(() => ({
     getProjectId: () => 'p1',
     getSourceNode: () => ({ id: 'v1', type: 'mediaNode', position: { x: 400, y: 0 }, data: { assetId: '5' } }),
-    newTargetId: () => 'matting1', newClientToken: () => 'token1', isSending: () => sending,
+    newTargetId: () => 'matting1', isSending: () => sending,
     runTask: async (input) => {
       expect(tool.getSnapshot().state).toBeNull();
       inputs.push(input); sending = true;
@@ -37,7 +37,6 @@ it.each([false, true])('抠像发送先退出；在途任务锁不随界面关�
   fail(new Error('network'));
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(inputs[0].payload).toEqual({ source_asset_id: '5', target_node_id: 'matting1', mode: 'greenscreen', format: 'MP4', background_color: 'black' });
-  expect(inputs[0].clientToken).toBe('token1');
   expect(errors).toEqual(reopen ? [] : ['智能抠像任务创建失败，请重试']);
   expect(sending).toBe(false);
   expect(tool.getSnapshot().state).toEqual(reopen ? { nodeId: 'v1', mode: 'portrait', format: 'WEBM', backgroundColor: 'white' } : null);

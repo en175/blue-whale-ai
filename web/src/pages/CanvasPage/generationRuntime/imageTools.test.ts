@@ -122,7 +122,7 @@ describe('图像工具类型定义：创建/重试/取消协议', () => {
 
   it('重试 = 冻结输入原样重发创建端点（四工具契约无 retry 端点），不走通用重试', async () => {
     const lastInput = { source_asset_id: '5', target_node_id: 'n1', erase_scene: 'selected_area_erase', mask_asset_id: '9' };
-    await def.retry!('p1', 'j401', { imageErase: { lastInput } }, BINDING, BINDING.submission_id);
+    await def.retry!('p1', 'j401', { nodeId: 'n1', nodeData: { imageErase: { lastInput } } }, BINDING, BINDING.submission_id);
     expect(apiMocks.createImageErase).toHaveBeenCalledWith('p1', lastInput, { silent: true, canvasBinding: BINDING, idempotencyKey: BINDING.submission_id });
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
   });

@@ -257,6 +257,8 @@ beforeEach(() => {
   apiMocks.createVideoSubtitleErase.mockReset();
   apiMocks.fetchJobStatus.mockReset();
   apiMocks.createVideoSubtitleErase.mockResolvedValue({ job_id: 'j88', status: 'queued' });
+  // IKJJR3：运行时轮询首拍立即执行——默认进行中（终态用例自行覆盖）
+  apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j88', status: 'processing', progress: 10 });
 });
 
 afterEach(async () => {
@@ -528,14 +530,20 @@ describe('IKH3OU 发送与结果闭环', () => {
     expect(box.detect_mode).toBe(smart.detect_mode);
   });
 
-  it('发送前不建卡：未发送退出无卡；创建请求失败留在会话不建卡', async () => {
+  it('发送前不建卡：未发送退出无卡；创建请求失败落失败卡可重试（提交点即交接运行时）', async () => {
     apiMocks.createVideoSubtitleErase.mockRejectedValue(Object.assign(new Error('视频长边超过 2560 或短边超过 1440 像素上限（2K），无法去字幕'), { status: 400 }));
     await renderPage();
     await enterErase('smart');
     await click('subtitle-erase-send-btn');
-    expect(sendBar()).not.toBeNull();
-    expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
-    expect(flowProps.current.edges).toEqual([]);
+    await act(async () => {});
+    // IKJJR3：提交点先退会话再交运行时受理；受理失败归失败卡（冻结输入可重试）
+    expect(sendBar()).toBeNull();
+    const nodes = flowProps.current.mediaNodes as Node[];
+    expect(nodes.length).toBe(2);
+    const result = nodes.find((n) => n.id !== 'v1')!;
+    expect((result.data as Record<string, unknown>).genStatus).toBe('failed');
+    expect(typeof (result.data as Record<string, unknown>).errorText).toBe('string');
+    expect((flowProps.current.edges as unknown[]).length).toBe(1);
   });
 
   it('生成中→succeeded 回填：成品是普通视频素材卡（可再次去字幕），源卡不动', async () => {

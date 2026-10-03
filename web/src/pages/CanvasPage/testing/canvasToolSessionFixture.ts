@@ -71,6 +71,15 @@ export function canvasToolSessionFixture() {
   const handoff = async () => {
     handedOff.push('job');
   };
+  // IKJJR3：四类家族（去字幕/分离/截取/调速）会话提交 = 同步 startTask（受理归运行时，
+  // 页面层无在途窗口）；fixture 保留一个挂起受理事实（pending）供矩阵用例驱动旧响应落定，
+  // 语义对齐「受理在途=运行时执行链」。人声分离（IKJJR5）为 runTask 形态，见下方 hosts。
+  const startTask = () => {
+    taskCount += 1;
+    void task();
+    handedOff.push('job');
+    return true;
+  };
   const hosts: CanvasToolHosts = {
     erase: {
       ...common,
@@ -79,23 +88,15 @@ export function canvasToolSessionFixture() {
       createTask,
       handoff,
     },
-    subtitleErase: { ...common, createTask, handoff },
-    audioVideoSplit: { ...common, createTask, handoff },
-    audioTrim: { ...common, createTask, handoff },
-    audioSpeed: {
-      ...common,
-      createTask,
-      handoff: async (_, __, beforeApply) => {
-        beforeApply();
-        await handoff();
-      },
-    },
+    subtitleErase: { ...common, startTask },
+    audioVideoSplit: { ...common, startTask },
+    audioTrim: { ...common, startTask },
+    audioSpeed: { ...common, startTask },
     // IKJJR5：人声分离发送即退会话、任务链路归宿主 runTask（pending promise 模式同 task）
     vocalSplit: { ...common, runTask: task },
     sceneSplit: { ...common, isSending: () => false, runTask: task },
     smartMatting: {
       ...common,
-      newClientToken: () => 'token',
       isSending: () => false,
       runTask: task,
     },

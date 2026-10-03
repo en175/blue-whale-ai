@@ -537,7 +537,9 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
       .find((e) => e.target === targetNodeId)!;
     expect(edge.source).toBe('v1');
     expect(edge.data).toEqual({ origin: SMART_MATTING_EDGE_ORIGIN });
-    // 发送即落盘（best-effort flush，防刚建任务就关页丢卡）
+    // IKJJR3：受理后经 800ms 防抖自动保存落盘（原受理后立即 flush 已由运行时统一）；
+    // 关页窗口的丢卡防护由统一恢复（canvas_binding 服务端关联）兜底
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
   });
 
@@ -584,8 +586,8 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     expect(sendBar()).toBeNull();
     const placeholder = placeholderNode()!;
     expect(placeholder.data.genStatus).toBe('failed');
-    // 非 ApiError 的网络异常走家族兜底文案（卡态承载可读原因，不再 toast 二次提示）
-    expect(placeholder.data.errorText).toBe('智能抠像任务创建失败，请重试');
+    // IKJJR3：受理失败收敛走运行时通用文案（非 ApiError 网络异常 →「创建任务失败」），
+    // 卡态承载可读原因（ApiError 家族文案映射不变），保留供原参数重试
     // 提示单源（审查修复 S1）：一次请求失败只有一个提示入口——全局提示归 HTTP 层
     // （jobs.test 锁「恰好一次」），画布不再叠一层 toast；卡态不是 toast，保留供原参数重试
     expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();

@@ -85,9 +85,10 @@ describe('普通生成类型定义：创建/重试/取消协议', () => {
   });
 
   it('重试：无 canvas_binding 走历史兼容三参调用；携带时第四参为 binding', async () => {
-    await normalGenerationTask.retry!('p1', 'j9', {}, null, 'k-legacy');
+    // IKJJR3：第三参为重试上下文（nodeId + nodeData），服务端冻结输入的类型忽略 nodeId
+    await normalGenerationTask.retry!('p1', 'j9', { nodeId: 'n9', nodeData: {} }, null, 'k-legacy');
     expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j9', 'k-legacy');
-    await normalGenerationTask.retry!('p1', 'j9', {}, BINDING, BINDING.submission_id);
+    await normalGenerationTask.retry!('p1', 'j9', { nodeId: 'n9', nodeData: {} }, BINDING, BINDING.submission_id);
     expect(apiMocks.retryGenerationJob).toHaveBeenLastCalledWith('p1', 'j9', BINDING.submission_id, BINDING);
   });
 

@@ -101,6 +101,7 @@ async function click(node: Element | null) {
 }
 
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+const clickCard = (id: string) => act(async () => { flowProps.current.onNodeClick(mediaNode(id)); });
 
 /** 点面板发送（含创建往返的微任务冲刷；创建挂起场景下仅完成发送前冲刷） */
 async function sendPanel() {
@@ -134,16 +135,18 @@ describe('IKHSFF 发送前保存失败拦截', () => {
     await click(panelFps(120));
     await sendPanel();
 
-    // 保存失败不被吞掉当成功：创建请求一次都不发
+    // 保存失败不被吞掉当成功：创建请求一次都不发（运行时保存闸门）
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
     expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
-    // 面板保留、发送钮复位（可重发），卡留在可恢复的配置草稿态
-    expect(panelOpen()).toBe(true);
-    expect(panelSend()!.disabled).toBe(false);
+    // IKJJR3：提交点即交接（面板关）；卡回可恢复的配置草稿态（点卡重开可重发）
+    expect(panelOpen()).toBe(false);
     expect(dataOf(draftId).genStatus).toBe('draft');
     expect(dataOf(draftId).jobId).toBeUndefined();
     // 失败对用户可见（toast 文案），不静默
     expect(document.body.textContent).toContain('画布保存失败');
+    await clickCard(draftId);
+    expect(panelOpen()).toBe(true);
+    expect(panelSend()!.disabled).toBe(false);
   });
 
   it('保存失败后重试：保存恢复成功即按原配置发出创建请求并转生成中（闭环可恢复）', async () => {
@@ -158,14 +161,15 @@ describe('IKHSFF 发送前保存失败拦截', () => {
     await sendPanel();
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
 
-    // 保存链路恢复（默认桩成功）后原参数重发：创建受理、面板关闭、卡转生成中
+    // 保存链路恢复（默认桩成功）后原参数重发：创建受理、面板已交接关闭、卡转生成中
+    await clickCard(draftId);
     await sendPanel();
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledWith('p1', {
       source_asset_id: '5',
       target_node_id: draftId,
       fps: 120,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     expect(panelOpen()).toBe(false);
     expect(dataOf(draftId).genStatus).toBe('generating');
     expect(dataOf(draftId).jobId).toBe('j2');
@@ -191,14 +195,14 @@ describe('IKHSFF 发送前保存失败拦截', () => {
       navigateRef!('/canvas?project=p2');
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    // 保存随后成功返回：起始检查已过，收尾双检必须中止创建
+    // 保存返回 false（flush 的项目守卫：activeProjectRef 已切到 p2）→ 运行时保存闸门
+    // 中止创建（不吞失败当成功）；本地卡不落 jobId（任务未受理，无假象）
     await act(async () => {
       resolveSave(saved);
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
     expect(panelOpen()).toBe(false);
-    expect(dataOf(draftId).genStatus).toBe('draft');
     expect(dataOf(draftId).jobId).toBeUndefined();
   });
 });
@@ -214,10 +218,14 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await sendPanel();
     await flush();
     expect(dataOf(draftId).genStatus).toBe('failed');
+    // IKJJR3：受理/终态回填后靠 800ms 防抖自动保存落盘（原受理后立即 flush 已由运行时统一）
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
 
     apiMocks.createFrameInterpolation.mockImplementation(() => new Promise(() => {}));
     await act(async () => { (dataOf(draftId).onRetryJob as (id: string) => void)(draftId); });
     await flush();
+    // IKJJR3：重试不前置保存（IKDMQV「不读画布不落盘」）——持久化仍停留在终态保存
+    //（jobId=j1），重进后由插帧 current 查询按服务端当前关联纠偏到新任务
     await unmountPage();
     const persisted = reseedFromPersisted();
     expect((persisted.nodes.find((n) => n.id === draftId)!.data as Record<string, unknown>).jobId).toBe('j1');
@@ -384,7 +392,7 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await flush();
     expect(apiMocks.createFrameInterpolation).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: draftId, fps: 120,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     expect(identityOf(draftId)?.lastParams).toEqual({ fps: 60 });
   });
 
@@ -395,6 +403,8 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     reseedFromPersisted();
     apiMocks.fetchFrameInterpolationCurrent.mockResolvedValue({ job_id: 'j1', status: 'failed', progress: 0, created_at: '2026-09-22T05:00:00.000Z' });
     apiMocks.fetchJobs.mockRejectedValue(new Error('network down'));
+    // 终态核对走通（failed 权威终态），不落入「详情查询失败回退生成中」兜底
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'failed', progress: 0, asset: null, error: { code: 1049 } });
     apiMocks.createFrameInterpolation.mockClear();
     await renderPage();
     await flush();
@@ -403,7 +413,8 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await act(async () => { (dataOf(draftId).onRetryJob as (id: string) => void)(draftId); });
     await flush();
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('插帧任务参数尚未恢复');
+    // IKJJR3：阻断提示走运行时统一口径（A.6：保留失败卡并提示重新编辑，不猜参数）
+    expect(document.body.textContent).toContain('原任务输入已不可信');
     expect(identityOf(draftId)?.frozenParams).toBeUndefined();
   });
 

@@ -120,9 +120,11 @@ export interface GenerationTaskDefinition<TPayload = unknown> {
   create(projectId: string, input: TaskSubmissionInput<TPayload>, binding: CanvasBinding | null, key: string): Promise<CreateJobOutcome>;
   /**
    * 失败卡重试请求：新 submission_id（独立提交身份），可复用 jobId（专属重试）或新建。
-   * 不提供 = 该类型失败卡不支持服务端重试（运行时保留卡片并提示重新编辑）。
+   *  不提供 = 该类型失败卡不支持服务端重试（运行时保留卡片并提示重新编辑）。
+   *  IKJJR3：第三参为重试上下文（nodeData + 本卡 nodeId——客户端组冻结输入的工具
+   *  （HD/插帧）需要以本卡 id 作为重发 target_node_id；服务端冻结输入的类型忽略 nodeId）。
    */
-  retry?(projectId: string, jobId: string, nodeData: Record<string, unknown>, binding: CanvasBinding | null, key: string): Promise<CreateJobOutcome>;
+  retry?(projectId: string, jobId: string, ctx: { nodeId: string; nodeData: Record<string, unknown> }, binding: CanvasBinding | null, key: string): Promise<CreateJobOutcome>;
   /** 取消能力；无取消端点的类型不提供（remove 退化为直接移除）。 */
   cancel?(projectId: string, jobId: string): Promise<unknown>;
   /**
@@ -248,8 +250,10 @@ export interface GenerationRuntime {
   claims(nodeId: string, nodeData: Record<string, unknown>): boolean;
   /** 五动作。submit 返回 false = 未发出（无项目/无承接目标/防重入）。 */
   submit<TPayload>(def: GenerationTaskDefinition<TPayload>, input: TaskSubmissionInput<TPayload>, options?: SubmitOptions): boolean;
-  /** 返回 false = 卡不归运行时（调用方走原路径）；true = 已处理。 */
-  retry(nodeId: string): boolean;
+  /** 返回 false = 卡不归运行时（调用方走原路径）；true = 已处理。
+   *  IKJJR3：可选 options 与 submit 同形——重试受理成功的页面挂点（受理值写卡，如插帧
+   *  frozenParams 的「受理即冻结」语义对重试路径同样成立）。 */
+  retry(nodeId: string, options?: SubmitOptions): boolean;
   cancel(nodeId: string): boolean;
   remove(nodeId: string): boolean;
   /** 水合后恢复扫描（分页对账 v1；重复扫描不双轮询/不重复建卡）。 */
@@ -276,4 +280,7 @@ export interface SubmitOptions {
   /** 创建失败（受理前）页面特有收敛（余额不足/401 续跑/原位回退）。
    *  返回 true = 已处理，运行时跳过通用失败落卡。 */
   onCreateFailure?(e: unknown, ctx: { nodeId: string; target?: BindingTargetFacts }): boolean;
+  /** IKJJR3：受理成功（POST 200、轮询启动前）页面挂点——受理值写卡（如插帧 frozenParams、
+   *  HD lastParams 的「受理即冻结」语义）。运行时已 patchNode(jobId)，回调只补家族字段。 */
+  onAccepted?(ctx: { nodeId: string; jobId: string; submissionId: string | null }): void;
 }

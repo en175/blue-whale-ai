@@ -61,6 +61,9 @@ export interface FrameInterpolationIdentity {
    *  的权威来源：60fps 任务失败后面板改 120fps，重试仍按这里的 60fps 原样重发；
    *  面板主动发送新配置成功受理后才更新（IKHSFH）。旧持久化卡无此键，回落 lastParams */
   frozenParams?: Record<string, unknown>;
+  /** IKJJR3：恢复查询失败标记（历史可信关联恢复的网络失败窗口）——冻结输入未能
+   *  回填时阻止把面板编辑值当作受理参数重试（A.6 不猜参数）；查询成功/重进后清除。 */
+  recoveryBlocked?: boolean;
 }
 
 /** 门槛判定输入：与 MediaNode data 字段同名（assetId 视频关联资产 id）。 */

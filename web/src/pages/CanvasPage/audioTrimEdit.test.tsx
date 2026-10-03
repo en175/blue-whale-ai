@@ -244,8 +244,9 @@ async function sendTrim() {
   });
 }
 
-function nodeById(id: string): Node | undefined {
-  return (flowProps.current.mediaNodes as Node[]).find((n) => n.id === id);
+/** IKJJR3：占位卡 id 预分配（audio-trim-{uuid}），不再按受理 jobId 命名——按家族卡查找 */
+function trimCard(): Node | undefined {
+  return (flowProps.current.mediaNodes as Node[]).find((n) => n.id !== 'a1' && n.id.startsWith('audio-trim-'));
 }
 
 beforeEach(() => {
@@ -398,12 +399,12 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
       start_time: 2.4,
       end_time: 13,
       output_format: 'mp3',
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     // 先退编辑态再建卡：发送条卸载、trimEditing 移除、占位卡已上画布（源卡右侧 +60px）
     expect(sendBar()).toBeNull();
     expect(a1Data().trimEditing).toBeUndefined();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(3);
-    const placeholder = nodeById('audio-trim-j1')!;
+    const placeholder = trimCard()!;
     expect(placeholder.data.fileName).toBe('播客片头(截取).mp3');
     expect(placeholder.data.mediaType).toBe('audio');
     expect(placeholder.data.genStatus).toBe('generating');
@@ -415,7 +416,7 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
     });
     // 来源边：参考推导跳过口径（origin 标记）
     const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
-      .find((e) => e.target === 'audio-trim-j1')!;
+      .find((e) => e.target === placeholder.id)!;
     expect(edge.source).toBe('a1');
     expect(edge.data).toEqual({ origin: AUDIO_TRIM_EDGE_ORIGIN });
   });
@@ -431,21 +432,22 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
     expect(apiMocks.createAudioTrim).toHaveBeenCalledWith('p1', {
       source_asset_id: '8',
       output_format: 'flac',
-    }, { silent: true });
-    expect(nodeById('audio-trim-j1')!.data.fileName).toBe('播客片头(截取).flac');
+    }, expect.objectContaining({ silent: true }));
+    expect(trimCard()!.data.fileName).toBe('播客片头(截取).flac');
   });
 
-  it('创建失败（网络）：不建卡不退编辑态，停留可调后重发', async () => {
+  it('创建失败（网络）：失败卡可重试（IKJJR3 提交点即交接，会话已退）', async () => {
     apiMocks.createAudioTrim.mockRejectedValue(new Error('network down'));
     await renderPage();
     await enterTrim();
     await sendTrim();
+    await act(async () => {});
     expect(apiMocks.createAudioTrim).toHaveBeenCalledTimes(1);
-    expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
-    expect(flowProps.current.edges).toEqual([]);
-    // 编辑态保留（发送条仍在），submitting 已复位（发送钮可再点）
-    expect(sendBar()).not.toBeNull();
-    expect(bodyBtn('audio-trim-send-btn').disabled).toBe(false);
+    // IKJJR3：提交点建卡 + 退会话；受理失败落失败卡（冻结输入可重试）+ 来源边
+    expect(sendBar()).toBeNull();
+    const failed = trimCard()!;
+    expect(failed.data.genStatus).toBe('failed');
+    expect((flowProps.current.edges as unknown[]).length).toBe(1);
   });
 
   it('轮询终态 succeeded：占位卡收敛为成品音频卡（src/assetId/火山权威时长回填、展示名保留）', async () => {
@@ -457,7 +459,7 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
     await renderPage();
     await enterTrim();
     await sendTrim();
-    const done = nodeById('audio-trim-j1')!;
+    const done = trimCard()!;
     expect(done.data.genStatus).toBeUndefined();
     expect(done.data.progress).toBe(100);
     expect(done.data.src).toBe('http://tos/x.mp3');
@@ -480,7 +482,7 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
       (a1Data().trimEditing as { onSelectionChange: (s: { start: number; end: number }) => void }).onSelectionChange({ start: 2.4, end: 13 });
     });
     await sendTrim();
-    const failed = nodeById('audio-trim-j1')!;
+    const failed = trimCard()!;
     expect(failed.data.genStatus).toBe('failed');
     expect(failed.data.errorText).toBe('音频截取失败，请重试');
 
@@ -491,7 +493,7 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
       asset: { id: 'a89', url: 'http://tos/y.mp3', type: 'audio', duration: 10.6 },
     });
     await act(async () => {
-      (failed.data.onRetryJob as (id: string) => void)('audio-trim-j1');
+      (failed.data.onRetryJob as (id: string) => void)(failed.id);
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -501,8 +503,8 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
       start_time: 2.4,
       end_time: 13,
       output_format: 'mp3',
-    }, { silent: true });
-    const retried = nodeById('audio-trim-j1')!;
+    }, expect.objectContaining({ silent: true }));
+    const retried = trimCard()!;
     expect(retried.data.jobId).toBe('j2');
     expect(retried.data.genStatus).toBeUndefined();
     expect(retried.data.src).toBe('http://tos/y.mp3');

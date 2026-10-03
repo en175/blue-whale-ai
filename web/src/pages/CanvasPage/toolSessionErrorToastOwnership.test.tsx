@@ -355,16 +355,14 @@ describe('IKI8L4 截取（真实 API/HTTP 链）：错误提示归属发送时�
     await renderPage();
     await enterTrim('a1');
     await clickSend(trimSendBtn());
-    // X 关旧会话 → 同项目另一张卡开新会话（不发送，只占住新会话身份）
-    await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="audio-trim-close"]')!.click(); });
+    // IKJJR3：提交点即交接（旧会话已退）→ 同项目另一张卡开新会话（不发送，只占住新会话身份）
     await enterTrim('b1');
     // 旧请求以业务失败（HTTP 500 + msg）迟到返回
     await act(async () => { settleA(jsonFail('服务器开小差了')); });
     await flush();
-    // HTTP 层（sonner）不得在会话判断之前抢先提示——修订前此处弹旧错误，即缺口本体
+    // HTTP 层（sonner）不得抢先提示；旧错误收敛到旧占位卡（不弹新会话）
     expect(toast.error).not.toHaveBeenCalled();
-    // 页面层旧错误同样静默（!838 已修，此处为全链路双守）
-    expect(document.body.textContent).not.toContain('服务器开小差了');
+    expect(mediaNodes().find((n) => n.id.startsWith('audio-trim-'))!.data.genStatus).toBe('failed');
     // 新会话不受旧失败打扰
     expect(trimSendBar()).not.toBeNull();
   });
@@ -375,12 +373,13 @@ describe('IKI8L4 截取（真实 API/HTTP 链）：错误提示归属发送时�
     await renderPage();
     await enterTrim('a1');
     await clickSend(trimSendBtn());
-    await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="audio-trim-close"]')!.click(); });
+    // IKJJR3：提交点即交接（旧会话已退）→ 同项目另一张卡开新会话
     await enterTrim('b1');
     await act(async () => { rejectA(new TypeError('Failed to fetch')); });
     await flush();
     expect(toast.error).not.toHaveBeenCalled();
-    expect(document.body.textContent).not.toContain('网络请求失败');
+    // 旧失败静默收敛到旧占位卡（可读失败态），新会话不受打扰
+    expect(mediaNodes().find((n) => n.id.startsWith('audio-trim-'))!.data.genStatus).toBe('failed');
     expect(trimSendBar()).not.toBeNull();
   });
 
@@ -390,13 +389,11 @@ describe('IKI8L4 截取（真实 API/HTTP 链）：错误提示归属发送时�
     await enterTrim('a1');
     await clickSend(trimSendBtn());
     await flush();
-    // 单源提示：页面 showToast 弹 msg（持有发送身份的调用方）
-    expect(document.body.textContent).toContain('服务器开小差了');
-    // HTTP 层不再叠加第二条（修订前双弹：sonner + 页面）
+    // IKJJR3：受理失败收敛到失败卡（ApiError msg 可读；可原参数重试）
     expect(toast.error).not.toHaveBeenCalled();
-    // 提交状态可恢复：发送钮复位、停留编辑态
-    expect(trimSendBar()).not.toBeNull();
-    expect(trimSendBtn()!.disabled).toBe(false);
+    const card = mediaNodes().find((n) => n.id.startsWith('audio-trim-'))!;
+    expect(card.data.genStatus).toBe('failed');
+    expect(card.data.errorText).toBe('服务器开小差了');
   });
 
   it('当前有效会话网络失败：页面以网络文案提示一次，可重试', async () => {
@@ -405,9 +402,10 @@ describe('IKI8L4 截取（真实 API/HTTP 链）：错误提示归属发送时�
     await enterTrim('a1');
     await clickSend(trimSendBtn());
     await flush();
-    expect(document.body.textContent).toContain('网络请求失败');
+    // IKJJR3：网络失败收敛到失败卡（非 ApiError 走通用文案），可原参数重试
     expect(toast.error).not.toHaveBeenCalled();
-    expect(trimSendBtn()!.disabled).toBe(false);
+    const card = mediaNodes().find((n) => n.id.startsWith('audio-trim-'))!;
+    expect(card.data.genStatus).toBe('failed');
   });
 
   it('401 保持既有行为：不 toast、已登录走登录续接门（对照，不因会话提示治理回退）', async () => {
@@ -547,8 +545,9 @@ describe('抠像真实HTTP链：沿用全局提示呈现，运行时判断反馈
     await renderPage(); await enterMatting(); await clickSend(mattingSend()); await flush();
     expect(mattingBar()).toBeNull();
     expect(mattingCard().data.genStatus).toBe('failed');
-    expect(toast.error).toHaveBeenCalledTimes(1);
-    expect(toast.error).toHaveBeenCalledWith(failure === 'network' ? '网络请求失败，请检查网络后重试' : '抠像业务失败');
+    // IKJJR3：创建走 silent（HTTP 层不弹）；失败收敛到卡（ApiError msg 可读 / 网络走通用文案）
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(String(mattingCard().data.errorText)).toContain(failure === 'network' ? '网络请求失败' : '抠像业务失败');
     expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
   });
 
@@ -578,8 +577,8 @@ describe('抠像真实HTTP链：沿用全局提示呈现，运行时判断反馈
     const failed = mattingCard();
     await act(async () => { (failed.data.onRetryJob as (id: string) => void)(failed.id); });
     await flush();
-    expect(toast.error).toHaveBeenCalledTimes(1);
-    expect(toast.error).toHaveBeenCalledWith('重试抠像拒绝');
+    // IKJJR3：重试走运行时（silent 传输）；失败收敛到卡（msg 可读可再重试）
+    expect(toast.error).not.toHaveBeenCalled();
     expect(mattingCard().data.errorText).toBe('重试抠像拒绝');
     expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
   });

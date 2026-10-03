@@ -36,8 +36,7 @@ export function openOtherTool(
     .register(
       createAudioTrimSession(() => ({
         ...host,
-        createTask: async () => ({ job_id: 'unused' }),
-        handoff: async () => {},
+        startTask: () => true,
       })),
     )
     .open('other', deps);

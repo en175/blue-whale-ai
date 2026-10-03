@@ -58,25 +58,24 @@ import { mediaCardToolbarVisible } from './components/MediaNode/toolbarVisibilit
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
   MEDIA_EXTRACT_EDGE_ORIGIN,
+  MEDIA_EXTRACT_NODE_PREFIX,
   buildMediaExtractPlaceholderNode,
   isMediaExtractNodeId,
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
-  type MediaExtractIdentity,
 } from './mediaExtract';
 
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
-import { captureVideoEnhance, captureFrameInterpolation, FrameInterpolationSaveError, type ImageEnhanceSubmission, type VideoEnhanceSubmission, type FrameInterpolationSubmission } from './panelToolSessions';
-import { apiErrorMessage, isSilentAuthError } from './toolSessionCapture';
+import { type ImageEnhanceSubmission, type VideoEnhanceSubmission, type FrameInterpolationSubmission } from './panelToolSessions';
+import { isSilentAuthError } from './toolSessionCapture';
 import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import {
   AUDIO_TRIM_EDGE_ORIGIN,
-  audioTrimErrorText,
+  AUDIO_TRIM_NODE_PREFIX,
   audioTrimNodeId,
   audioTrimTerminalPatch,
   buildAudioTrimPlaceholderNode,
   isAudioTrimNodeId,
-  type AudioTrimIdentity,
 } from './audioTrim';
 
 import { type VocalSplitPayload, type AudioToolSubmission } from './audioToolSessions';
@@ -88,12 +87,11 @@ import { AUDIO_MIX_EDGE_ORIGIN, audioMixTerminalPatch, buildAudioMixPlaceholderN
 
 import {
   AUDIO_SPEED_EDGE_ORIGIN,
-  audioSpeedErrorText,
+  AUDIO_SPEED_NODE_PREFIX,
   audioSpeedNodeId,
   audioSpeedTerminalPatch,
   buildAudioSpeedPlaceholderNode,
   isAudioSpeedNodeId,
-  type AudioSpeedIdentity,
 } from './audioSpeed';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 
@@ -110,7 +108,6 @@ import {
 } from './imageEnhance';
 import {
   VIDEO_ENHANCE_EDGE_ORIGIN,
-  restoreVideoEnhanceResolution,
   videoEnhanceDraftPosition,
   videoEnhanceErrorText,
   videoEnhanceGateReason,
@@ -124,12 +121,10 @@ import {
   frameInterpolationDraftPosition,
   frameInterpolationErrorText,
   frameInterpolationGateReason,
-  restoreFrameInterpolationRetryFps,
   type FrameInterpolationFps,
   type FrameInterpolationIdentity,
 } from './frameInterpolation';
 import { IMAGE_ERASE_EDGE_ORIGIN } from './imageErase';
-import { type VideoSubtitleEraseIdentity } from './videoSubtitleErase';
 import { VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN } from '@lib/contracts/video-subtitle-erase';
 
 import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
@@ -206,17 +201,7 @@ import {
   fetchJobStatus,
   quoteVideoFinalize,
   quoteSampleRegenerate,
-  createVideoSubtitleErase,
-  createVideoEnhancement,
-  createFrameInterpolation,
-  createMediaExtraction,
-  createAudioTrim,
-  createAudioSpeed,
-  createVideoMatting,
   readJobFailText,
-  type CreateVideoMattingPayload,
-  type CreateFrameInterpolationPayload,
-  type CreateAudioSpeedPayload,
   type CreateJobPayload,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -258,6 +243,7 @@ import { storyboardTask, type StoryboardPayload } from './generationRuntime/stor
 import { createImageToolsTask, isImageToolsCard, imageToolsRetryPayloadOf, type ImageToolsPayload } from './generationRuntime/imageTools';
 import { audioMixTask, audioVideoMuxTask, watchMixSubmit } from './generationRuntime/mixMuxTasks';
 import { sceneSplitTask, vocalSplitTask, isSceneSplitCard, isVocalSplitCard } from './generationRuntime/multiOutputTasks';
+import { videoToolsTask, videoToolFrozenPayload, type VideoToolPayload } from './generationRuntime/videoTools';
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
 import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
 import { putCanvasDocWithRecovery, type CanvasRecoverySaveData } from '@/api/canvasRecovery';
@@ -458,19 +444,9 @@ export default function CanvasPage() {
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
-  /** 插帧创建在途集合（IKHSFH 同步防重）：nodeId 维度，从开始保存（flushCanvasSave）至
-   *  创建返回期间持有——同卡在该窗口内只受理一次提交，面板发送与失败重试共用（React
-   *  state 的 submitting 是渲染期快照，慢网连点/同帧连点会读到旧值，防重以本集合为准）；
-   *  失败解锁（finally 移除）后允许再试。 */
-  const frameInterpolationInFlightRef = useRef<Set<string>>(new Set());
-  /** HD 创建在途计数（口径同插帧 IKHSFH）：nodeId 维度，从受理至创建返回期间持有——
-   *  显式关闭重开的重发是既定行为，同卡可并发在途，故计数而非布尔；面板选中隐藏再选回
-   *  时运行时以此重算提交锁；每次完成/失败各减一，归零才视为不在途。 */
-  const videoEnhanceInFlightRef = useRef<Map<string, number>>(new Map());
-  /** 同卡 HD 创建在途判定（IKJP8Q）：面板在途只读 reconcile、重试准入与旧响应提示守卫共用 */
-  const isVideoEnhanceCardInFlight = (id: string) => (videoEnhanceInFlightRef.current.get(id) ?? 0) > 0;
-  /** 权威恢复未完成或失败时，禁止把编辑值当作受理参数重试。面板主动发送新配置不受影响。 */
-  const frameInterpolationRecoveryBlockedRef = useRef<Set<string>>(new Set());
+  /* IKJJR3：插帧/HD 创建在途与插帧恢复阻断的原 ref 集合已随家族迁入生成任务运行时——
+   * 在途窗口 = 运行时 submitting 阶段（statusOf），面板提交锁据此重算；恢复参数可信度
+   * 由 frozenParams ?? lastParams 的冻结输入判定承担（A.6 阻止不可信重试）。 */
   const toolHostsRef = useRef<Partial<CanvasToolHosts>>({});
   const toolViewRef = useRef<CanvasToolView | null>(null);
   const toolDepsRef = useRef<ToolSessionDeps | null>(null);
@@ -1299,25 +1275,11 @@ export default function CanvasPage() {
     showToast('warn', `文本节点 ${id}：${draftErrorsRef.current.get(id)}，请修正后继续`);
     return true;
   };
-  /** 智能抠像创建（审查修复 S1）：新增服务端写入按请求治理规则承载 mutation
-   *  （frontend-delivery/references/request.md「Mutations」）；家族既有工具是历史形态，
-   *  不随本单迁移。编辑提交用 silent 传输并由运行时反馈；失败卡重试保留 HTTP 默认提示。 */
-  const createVideoMattingMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: CreateVideoMattingPayload; silent?: boolean }) =>
-      createVideoMatting(vars.projectId, vars.payload, { silent: vars.silent }),
-  });
+  /* IKJJR3：抠像/插帧/调速的创建 mutation 已随家族迁入生成任务运行时（家族定义内直接
+   * 调对应 API 客户端并携带 canvas_binding；同卡防重 = 运行时 submitting 窗口）。 */
   const quoteMutation = useMutation({ mutationFn: createConversationQuote });
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
   const referencePlanMutation = useMutation({ mutationFn: (input: Parameters<typeof referencePromptPlan>[0]) => referencePromptPlan(input) });
-  /** 插帧创建写请求（IKHSFH）：useMutation 承载 POST video-frame-interpolations——silent
-   *  传输（http 层不 toast）+ 调用方 catch 统一提示一次（先例 createConversationQuote）。
-   *  提交与请求归属按节点划分：mutateAsync 每次独立在途（不同卡可各自提交、乱序完成），
-   *  同卡防重由 startFrameInterpolationJob 的在途集合、界面反馈归属由运行时纪元承载，
-   *  不把使用 useMutation 本身当作竞态已解决。 */
-  const createFrameInterpolationMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: CreateFrameInterpolationPayload }) =>
-      createFrameInterpolation(vars.projectId, vars.payload, { silent: true }),
-  });
   const linkAudioMixAssetsMutation = useMutation({
     mutationFn: (vars: { projectId: string; assetIds: string[] }) =>
       Promise.all(vars.assetIds.map((assetId) => linkAssetToProject(vars.projectId, assetId, { silent: true }))),
@@ -1325,14 +1287,6 @@ export default function CanvasPage() {
   // IKJJR4：混合/合成的创建与专属重试请求由生成任务运行时经 mixMuxTasks 定义直连
   //（幂等键 = submission_id、canvas_binding 受理），不再经 useMutation 页面台账。
 
-  /** 调速创建写请求（IKI4LX）：useMutation 承载 POST audio-speeds（首次提交与失败重试共用）——
-   *  silent 传输（http 层不 toast）+ 调用方 catch 统一提示一次（先例
-   *  createFrameInterpolationMutation，IKHSFH）。项目归属不由 Mutation 承载：提交与重试的
-   *  跨项目隔离由调用侧 activeProjectRef 双检显式保证（迟到响应丢弃本地写入）。 */
-  const createAudioSpeedMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: CreateAudioSpeedPayload }) =>
-      createAudioSpeed(vars.projectId, vars.payload, { silent: true }),
-  });
   const applyingRef = useRef(false);
   const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
   const onUpdateGenerate = useCallback((nodeId: string) => {
@@ -1922,16 +1876,9 @@ export default function CanvasPage() {
   /** IKJJR1：新协议恢复保存冲突（412/409/428 带 reason）——同两款待复核闸门口径：
    *  生效期间阻断整文档保存（本地内容保留，不换版本重发），重新水合后解除。 */
   const recoverySaveConflictRef = useRef(false);
-  /** 调速重试属于发起项目；页面内切项目时保留受理结果，回到原项目再接续原卡。 */
-  const audioSpeedRetriesRef = useRef(new Map<string, { patch: Record<string, unknown> }>());
-  /** 首次调速提交的迟到受理结果归原项目；回到原项目后补建卡并落盘。 */
-  const audioSpeedPendingSubmissionsRef = useRef(new Map<string, {
-    projectId: string;
-    sourceNodeId: string;
-    jobId: string | number;
-    payload: AudioSpeedInput;
-    source: Node;
-  }>());
+  /* IKJJR3：调速跨项目接续（重试补丁回放/迟到受理暂存）的原页面机制已随家族迁入
+   * 生成任务运行时——迟到受理由归属检查丢弃、回原项目水合时由统一恢复按服务端关联
+   * 补卡续轮询（新协议由统一恢复负责）。 */
 
   /** 画布文档加载完成：按类型分发节点并注入回调；切换项目时先清空 */
   useEffect(() => {
@@ -2002,37 +1949,6 @@ export default function CanvasPage() {
         }
       }
     });
-    let restoredAudioSpeedRetry = false;
-    m.forEach((node) => {
-      const retryKey = `${currentId}:${node.id}`;
-      const retry = audioSpeedRetriesRef.current.get(retryKey);
-      if (!retry) return;
-      // 快照已接住本次终态：交还持久化数据，保留后续改名等用户编辑。
-      if (retry.patch.genStatus !== 'generating'
-        && node.data.jobId === retry.patch.jobId
-        && node.data.genStatus === retry.patch.genStatus) {
-        audioSpeedRetriesRef.current.delete(retryKey);
-        return;
-      }
-      node.data = { ...node.data, ...retry.patch };
-      restoredAudioSpeedRetry = true;
-    });
-    let restoredAudioSpeedSubmission = false;
-    if (!canvasLoadFailed) audioSpeedPendingSubmissionsRef.current.forEach((pending, key) => {
-      if (pending.projectId !== currentId) return;
-      if (m.some((node) => node.id === audioSpeedNodeId(pending.jobId))) {
-        audioSpeedPendingSubmissionsRef.current.delete(key);
-        return;
-      }
-      const source = m.find((node) => node.id === pending.sourceNodeId) ?? pending.source;
-      m.push(attachCallbacks(buildAudioSpeedPlaceholderNode({
-        jobId: pending.jobId,
-        speed: pending.payload.speed ?? 1,
-        sourceAssetId: pending.payload.source_asset_id,
-        source,
-      }) as Node));
-      restoredAudioSpeedSubmission = true;
-    });
     // 商品序号从已加载节点数接续，避免新建重名
     productSeq.current = p.length;
     if (import.meta.env.DEV) {
@@ -2060,21 +1976,6 @@ export default function CanvasPage() {
         style: { stroke: '#444' },
         ...(e.data ? { data: e.data } : {}),
       }));
-    if (!canvasLoadFailed) audioSpeedPendingSubmissionsRef.current.forEach((pending) => {
-      if (pending.projectId !== currentId || !hydratedIds.has(pending.sourceNodeId)) return;
-      const target = audioSpeedNodeId(pending.jobId);
-      if (hydratedEdges.some((edge) => edge.source === pending.sourceNodeId && edge.target === target)) return;
-      hydratedEdges.push({
-        id: `e-${pending.sourceNodeId}-${target}`,
-        source: pending.sourceNodeId,
-        target,
-        sourceHandle: null,
-        targetHandle: null,
-        type: 'custom',
-        style: { stroke: '#444' },
-        data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
-      });
-    });
     setEdges(hydratedEdges);
     // 同步乐观锁版本/视口，并记录内容签名避免加载后立即重复保存
     // （签名口径与自动保存一致：含组伪节点，否则组数据会导致加载后立即误判变更）
@@ -2085,7 +1986,7 @@ export default function CanvasPage() {
     const upgradedTextNodes = contentNodes.some(
       (node) => node.type === 'textNode' && typeof (node.data as Record<string, unknown> | undefined)?.html === 'string',
     );
-    lastSavedRef.current = upgradedTextNodes || restoredAudioSpeedRetry || restoredAudioSpeedSubmission
+    lastSavedRef.current = upgradedTextNodes
       ? ''
       : JSON.stringify(doc.viewport) +
         serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
@@ -2093,7 +1994,9 @@ export default function CanvasPage() {
     // 水合恢复：「生成中」媒体节点恢复任务轮询。
     // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
     // IKIZQE：checking（提交结果不明核对锁定）同样恢复轮询——核对定夺后终态照常收敛。
-    // IKJJR1：普通生成家族归统一任务运行时（即时续轮询，恢复扫描随后对账防双链）。
+    // IKJJR1/IKJJR3：普通生成与视频处理六类家族归统一任务运行时（即时续轮询，恢复扫描
+    // 随后对账防双链）；插帧生成中卡例外——由下方专属 current 查询驱动（回填受理冻结输入
+    // frozenParams 后经 resumeFromHydration 进运行时轮询，工单「插帧历史可信关联恢复保持可用」）。
     m
       .filter(
         (n) =>
@@ -2108,7 +2011,10 @@ export default function CanvasPage() {
         if (runtime?.claims(n.id, nodeData)) runtime.resumeFromHydration(n.id, String(n.data.jobId), nodeData);
         else pollJobRef.current(n.id, n.data.jobId as number | string);
       });
-    // 插帧卡统一核对服务端当前关联：重发受理后关页时，持久化可能仍带上一次任务的 jobId。
+    // 插帧卡统一核对服务端当前关联（IKHSFE 可信关联恢复，IKJJR3 保留为插帧专属路径）：
+    // 重发受理后关页时持久化可能仍带上一次任务的 jobId（以服务端当前关联为准），同时回填
+    // 该任务的冻结输入 frozenParams（失败重试权威来源）。续轮询经 resumeFromHydration 进
+    // 统一运行时（恢复扫描按在途判重，不双链——新协议由统一恢复负责对账）。
     m
       .filter(
         (n) =>
@@ -5612,7 +5518,7 @@ export default function CanvasPage() {
     if (isAudioSpeedNodeId(nodeId)) {
       // 调速占位卡终态收敛（IKHW5S）：成功原地补丁调速成品卡（src/assetId/duration，
       // 时长以火山返回为权威值，命名保留占位名不抢选中），失败转失败态（audioSpeed
-      // 身份卡可按 lastInput 原参数重试）
+      // 身份卡可按 lastInput 原参数重试——IKJJR3 起归运行时冻结输入重发）
       const speedPatch = audioSpeedTerminalPatch(
         detail,
         typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
@@ -5620,8 +5526,6 @@ export default function CanvasPage() {
       if (speedPatch) {
         stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
-        const retry = audioSpeedRetriesRef.current.get(`${currentId}:${nodeId}`);
-        if (retry) retry.patch = { ...retry.patch, ...speedPatch };
         patchMediaNode(nodeId, speedPatch);
         return 'terminal';
       }
@@ -6745,44 +6649,60 @@ export default function CanvasPage() {
     error: (message) => showToast('error', message),
   };
 
-  /* ===== 去字幕发送链路（IKGZ83，镜像擦除 IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
+  /* ===== 去字幕发送链路（IKGZ83 建/来源线差异保留；IKJJR3 受理与后续生命周期归运行时） ===== */
 
-  /** 去字幕受理后的任务卡接线，专属会话反馈归运行时。 */
-  const handoffSubtitleEraseTask = async (
-    submission: SubtitleEraseTaskSubmission,
-    created: { job_id: string },
-    skipSelect: boolean,
-  ): Promise<void> => {
-    const { source: node, payload: input } = submission;
-    const sourceNodeId = node.id;
-    const targetNodeId = input.target_node_id;
-    const sourceData = node.data;
-    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-      fileName: '去字幕',
-      nodeId: targetNodeId,
-      skipSelect,
-      data: {
-        mediaType: 'video',
-        ...(typeof sourceData.width === 'number' ? { width: sourceData.width } : {}),
-        ...(typeof sourceData.height === 'number' ? { height: sourceData.height } : {}),
-        videoSubtitleErase: { sourceAssetId: input.source_asset_id, lastInput: input },
-        genStatus: 'generating',
-        progress: 0,
+  /** IKJJR3：视频处理家族提交共用段——建卡后由运行时注入 canvas_binding 发起受理，
+   *  轮询/归属检查/保存确认/恢复统一在运行时；target facts 为发送时快照。 */
+  const submitVideoToolTask = (
+    payload: VideoToolPayload,
+    targetNodeId: string,
+    options?: Parameters<GenerationRuntime['submit']>[2],
+  ): boolean => {
+    const runtime = generationRuntimeRef.current;
+    const host = generationRuntimeHostRef.current;
+    const node = mediaNodesRef.current.find((n) => n.id === targetNodeId);
+    if (!runtime || !host || !node) return false;
+    return runtime.submit(
+      videoToolsTask,
+      {
+        payload,
+        target: {
+          targetNodeId,
+          seedTarget: seedTargetOfNode(node as unknown as RuntimeNodeView),
+          seedSources: seedSourcesOfNode(targetNodeId, host),
+          expectedBindingRevision: runtime.bindingRevisionOf(targetNodeId),
+        },
       },
-    });
-    addCanvasEdge(sourceNodeId, draftId, undefined, { origin: VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN });
-    // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEraseJob）
-    const activeAtCreate = newNodeId('pending-generation');
-    activeJobByNodeRef.current.set(draftId, activeAtCreate);
-    patchMediaNode(draftId, { jobId: created.job_id });
-    pollJob(draftId, created.job_id);
+      options,
+    );
   };
+
   toolHostsRef.current.subtitleErase = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
     newTargetId: () => newNodeId('media-draft'),
-    createTask: ({ projectId, payload }) => createVideoSubtitleErase(projectId, payload, { silent: true }),
-    handoff: handoffSubtitleEraseTask,
+    // IKJJR3：先建结果卡（继承源宽高 + 身份冻结 lastInput）拉来源边，再交运行时受理。
+    // 建卡差异（位置/命名/身份/来源边 origin）与 IKGZ83 先例一致；受理失败落失败卡可重试。
+    startTask: (input: SubtitleEraseTaskSubmission, skipSelect: boolean): boolean => {
+      const { source: node, payload } = input;
+      const targetNodeId = payload.target_node_id;
+      const sourceData = node.data;
+      createImageDraftCard(imageEnhanceDraftPosition(node), {
+        fileName: '去字幕',
+        nodeId: targetNodeId,
+        skipSelect,
+        data: {
+          mediaType: 'video',
+          ...(typeof sourceData.width === 'number' ? { width: sourceData.width } : {}),
+          ...(typeof sourceData.height === 'number' ? { height: sourceData.height } : {}),
+          videoSubtitleErase: { sourceAssetId: payload.source_asset_id, lastInput: payload },
+          genStatus: 'generating',
+          progress: 0,
+        },
+      });
+      addCanvasEdge(node.id, targetNodeId, undefined, { origin: VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN });
+      return submitVideoToolTask({ kind: 'subtitleErase', input: payload }, targetNodeId);
+    },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
@@ -7198,88 +7118,32 @@ export default function CanvasPage() {
       dispatchImageToolTask(payload, target).catch(() => {}); // 重试失败由运行时落失败卡（无等待方，吞 reject）
       return;
     }
-    const videoEnhanceIdentity = ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as
-      | VideoEnhanceIdentity
-      | undefined;
-    if (videoEnhanceIdentity?.lastParams) {
-      // HD 卡分流（IKH3VH，镜像高清放大）：契约无 retry 端点，重试 = lastParams 原样重发
-      // 创建接口（源素材与分辨率档随 lastParams 冻结，原参数重试）。
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      // IKJP8Q 共享提交准入：同卡已有创建在途（面板发送或先前重试）时静默拒绝——不发
-      // 请求、不改卡片与既有参数、不额外弹提示；检查与 startVideoEnhanceJob 的登记均在
-      // 首个异步等待前完成，无交错窗口
-      if (isVideoEnhanceCardInFlight(nodeId)) return;
-      const input = captureVideoEnhance(toolHostsRef.current.panels!, nodeId, restoreVideoEnhanceResolution(videoEnhanceIdentity.lastParams));
-      if (input) {
-        // IKJPM7 会话归属捕获：受理时的会话身份——此后同卡显式关闭重开（无论新会话
-        // 是否发送）或项目切换即新会话，旧响应不向其提示旧错误；恢复原会话、他工具
-        // 开关与纯关闭未重开均保持归属（当前有效请求的失败提示保留）
-        const ownsSession = toolRuntime.captureSessionOwnership('videoEnhance');
-        void startVideoEnhanceJob(input).catch((error: unknown) => {
-          if (isSilentAuthError(error)) return;
-          // IKJPM7 静默传输（决策 7，口径同面板发送）：HTTP 层默认 toast 不再先于会话
-          // 归属判断触发；有效会话的失败由本回调补回两路反馈（HTTP 路 + 页面路，与
-          // 面板 onError 同构，提示次数与原默认提示一致）
-          if (!ownsSession()) return;
-          // 旧重试返回时同卡已有新提交在途：不提示旧错误（会话归属仍由上面归属探针守卫）
-          if (isVideoEnhanceCardInFlight(nodeId)) return;
-          const nodeNow = mediaNodesRef.current.find((item) => item.id === nodeId);
-          if ((nodeNow?.data as Record<string, unknown> | undefined)?.genStatus !== 'failed') return;
-          if (isApiError(error)) globalToast.error(error.message);
-          showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
-        });
-      }
-      return;
-    }
-    const frameInterpolationIdentity = ((node?.data ?? {}) as Record<string, unknown>).frameInterpolation as
-      | FrameInterpolationIdentity
-      | undefined;
-    if (frameInterpolationIdentity != null) {
-      if (frameInterpolationRecoveryBlockedRef.current.has(nodeId)) {
-        showToast('warn', '插帧任务参数尚未恢复，请刷新后重试');
-        return;
-      }
-      // 插帧卡分流（IKHLKX，镜像 HD 高清）：契约无 retry 端点，重试 = 受理冻结输入原样重发
-      // 创建接口——源素材取自插帧身份 sourceAssetId（不回读源卡当前配置），fps 取自受理时
-      // 随卡冻结的 frozenParams（IKHSFH：60fps 任务失败后面板改 120fps，重试仍发 60fps；
-      // 旧持久化卡回落 lastParams），每次重试都是全新创建请求（免费口径无幂等头 / 无
-      // client_token，不存在复用旧 token 重放旧任务的问题）。
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      const input = captureFrameInterpolation(toolHostsRef.current.panels!, nodeId, restoreFrameInterpolationRetryFps(frameInterpolationIdentity));
-      if (input) void startFrameInterpolationJob(input).catch((error: unknown) => {
-        if (!isSilentAuthError(error)) showToast('error', apiErrorMessage(error, '插帧任务创建失败，请重试', FrameInterpolationSaveError));
-      });
-      return;
-    }
-    const subtitleEraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).videoSubtitleErase as
-      | VideoSubtitleEraseIdentity
-      | undefined;
-    if (subtitleEraseIdentity?.lastInput) {
-      // 去字幕卡分流（IKGZ83，镜像擦除/抠图）：契约无 retry 端点，重试 = 冻结 input 原样重发
-      // 创建接口（检测模式与框集合随 lastInput 冻结，不从零再框）。
+    // IKJJR3：视频处理七类家族（去字幕/分离/截取/调速/抠像/HD/插帧）失败卡归统一任务
+    // 运行时——重试用可信冻结输入（identity.lastInput / lastParams / frozenParams）原样
+    // 重发创建端点，canvas_binding 为新 submission_id 独立提交身份；缺冻结输入保留失败卡
+    // 并提示重新编辑（A.6 不猜参数）；免费口径不走余额拦截门。
+    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
       if (!currentId) {
-        showToast('warn', '未选中项目，无法发起视频去字幕');
+        showToast('warn', '未选中项目，无法重试');
         return;
       }
-      // 防重入：生成中不重复发起（口径同高清/擦除/抠图分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoSubtitleErase(currentId, subtitleEraseIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
+      generationRuntimeRef.current.retry(nodeId, {
+        // 受理即冻结对重试路径同样成立（IKHSFH）：重试受理后 frozenParams/lastParams 写卡
+        //（旧持久化卡由此补齐权威冻结来源），面板后来的编辑只改 lastParams 不改它。
+        onAccepted: () => {
+          const identityData = (mediaNodesRef.current.find((n) => n.id === nodeId)?.data ?? {}) as Record<string, unknown>;
+          const frozen = videoToolFrozenPayload(nodeId, identityData);
+          const frameIdentity = identityData.frameInterpolation as FrameInterpolationIdentity | undefined;
+          if (frameIdentity != null && frozen?.kind === 'frameInterpolation') {
+            patchMediaNode(nodeId, { frameInterpolation: { ...frameIdentity, frozenParams: { fps: frozen.input.fps } } });
+            return;
+          }
+          const hdIdentity = identityData.videoEnhance as VideoEnhanceIdentity | undefined;
+          if (hdIdentity != null && frozen?.kind === 'videoEnhance') {
+            patchMediaNode(nodeId, { videoEnhance: { ...hdIdentity, lastParams: { resolution: frozen.input.resolution } } });
+          }
+        },
+      });
       return;
     }
     // IKJJR5：场景切分/人声分离失败卡归统一任务运行时（冻结 lastInput 原参数重发创建 +
@@ -7294,145 +7158,6 @@ export default function CanvasPage() {
         return;
       }
       generationRuntimeRef.current?.retry(nodeId);
-      return;
-    }
-    const smartMattingIdentity = ((node?.data ?? {}) as Record<string, unknown>).smartMatting as
-      | SmartMattingIdentity
-      | undefined;
-    if (smartMattingIdentity?.lastInput) {
-      // 智能抠像卡分流（IKHK9N，镜像场景切分/分离）：契约无 retry 端点，重试 = 冻结业务参数
-      // 原样重发创建接口（源素材/占位卡绑定/模式/格式/背景色随 lastInput 冻结）；client_token
-      // 每次重试都新生成（同 token 只会重放旧任务），原地承接本占位卡（target_node_id=本卡 id）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法智能抠像');
-        return;
-      }
-      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/场景切分分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoMattingMutation
-        .mutateAsync({
-          projectId: currentId,
-          payload: { ...smartMattingIdentity.lastInput, client_token: newIdempotencyKey() },
-        })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
-      return;
-    }
-    const mediaExtractIdentity = ((node?.data ?? {}) as Record<string, unknown>).mediaExtract as
-      | MediaExtractIdentity
-      | undefined;
-    if (mediaExtractIdentity?.lastInput) {
-      // 音视频分离卡分流（IKH28X，镜像去字幕/擦除）：契约无 retry 端点，重试 = 冻结 input
-      // 原样重发创建接口（源素材与格式随 lastInput 冻结，不从零再选）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法音视频分离');
-        return;
-      }
-      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createMediaExtraction(currentId, mediaExtractIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
-      return;
-    }
-    const audioTrimIdentity = ((node?.data ?? {}) as Record<string, unknown>).audioTrim as
-      | AudioTrimIdentity
-      | undefined;
-    if (audioTrimIdentity?.lastInput) {
-      // 截取卡分流（IKHB7A，镜像分离）：契约无 retry 端点，重试 = 冻结 input（源素材+
-      // 起止+格式，贴边省略形态原样保留）重发创建接口，不从零再选。
-      // 重试创建同走 silent 传输（IKI8L4）：失败收敛到本卡失败态（errorText 可读可再重试），
-      // http 层不叠弹——迟到失败同样不打扰用户后来开启的编辑会话（口径同调速重试）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法截取');
-        return;
-      }
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createAudioTrim(currentId, audioTrimIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : audioTrimErrorText(null),
-          });
-        });
-      return;
-    }
-    const audioSpeedIdentity = ((node?.data ?? {}) as Record<string, unknown>).audioSpeed as
-      | AudioSpeedIdentity
-      | undefined;
-    if (audioSpeedIdentity?.lastInput) {
-      // 重试使用冻结输入；在途与终态按项目保留，水合时只恢复原卡。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法调速');
-        return;
-      }
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      const projectIdAtRetry = currentId;
-      const retryKey = `${projectIdAtRetry}:${nodeId}`;
-      const retry: { patch: Record<string, unknown> } = {
-        patch: { genStatus: 'generating', progress: 0, errorText: '', jobId: undefined },
-      };
-      audioSpeedRetriesRef.current.set(retryKey, retry);
-      settledExtractNodesRef.current.delete(nodeId);
-      patchMediaNode(nodeId, retry.patch);
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createAudioSpeedMutation.mutateAsync({ projectId: currentId, payload: audioSpeedIdentity.lastInput })
-        .then((created) => {
-          if (audioSpeedRetriesRef.current.get(retryKey) !== retry) return;
-          retry.patch = { ...retry.patch, jobId: created.job_id };
-          if (activeProjectRef.current !== projectIdAtRetry) return;
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, retry.patch);
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (audioSpeedRetriesRef.current.get(retryKey) !== retry) return;
-          retry.patch = { ...retry.patch, genStatus: 'failed', errorText: isApiError(e) ? e.message : audioSpeedErrorText(null) };
-          if (activeProjectRef.current !== projectIdAtRetry) return;
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, retry.patch);
-          showToast('error', isApiError(e) ? e.message : '音频调速任务创建失败，请重试');
-        });
       return;
     }
     // IKJJR1：普通生成失败卡归统一任务运行时（服务端冻结输入重试 + canvas_binding 独立提交身份）。
@@ -8057,81 +7782,61 @@ export default function CanvasPage() {
     });
   };
 
-  /** 插帧任务继续先保存后创建、原卡受理及 frozenParams 回填。
-   *  保存失败/false/等待期间切项目都不 POST；错误交回有效会话或既有失败卡重试。
-   *  按卡任务锁从首保存至创建返回持有，界面关闭不能释放它。 */
+  /** 插帧任务先落盘后创建（draft 角色由运行时先 flushCanvasSave 再 POST，票面 IKHSFF 验收 1）、
+   *  原卡受理及 frozenParams 回填。按卡任务锁（submitting 窗口）与轮询归运行时，界面关闭
+   *  不能释放它；受理失败/等待期间切项目由运行时归属检查与统一恢复接续。 */
   const startFrameInterpolationJob = async (submission: FrameInterpolationSubmission): Promise<boolean> => {
-    const { projectId, nodeId, payload: input, identity } = submission;
+    const { nodeId, payload: input, identity } = submission;
     const fps = input.fps;
-    // 同步防重（IKHSFH）：检查与登记在同一同步段完成（置于首个 await 前），React 渲染
-    // 周期外连点也只受理一次；面板发送与失败重试都经过本函数，两条路径同款保证
-    if (frameInterpolationInFlightRef.current.has(nodeId)) return false;
-    frameInterpolationInFlightRef.current.add(nodeId);
     toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    try {
-      // 票面 IKHSFF 验收 1：受理后立即关页也不丢卡/结果——草稿卡与来源边先落盘再 POST
-      // （插帧卡由入口建卡、本函数只发送，故冲刷在 POST 之前；发送与失败重试共用本函数，
-      //  两条路径同款保证）。保存结果三态处置（不吞失败当成功）：
-      //  · 抛错（网络 / 412 乐观锁冲突，flushCanvasSave 已置保存状态条为 error）→ 不发起
-      //    创建请求，卡留在可恢复的配置草稿态，面板保留可重发（保存重试成功后原参数重发）；
-      //  · 返回 false（无效草稿不可继续 / 等待期间项目已切换的起始检查）→ 同样中止；
-      //  · 等待期间项目切换的收尾双检（口径同家族提交链路：flush 返回后再核对 activeProjectRef）。
-      let flushed: boolean;
-      try {
-        flushed = await flushCanvasSave(projectId);
-      } catch {
-        throw new FrameInterpolationSaveError('画布保存失败，未发起插帧，请重试');
-      }
-      if (!flushed) return false;
-      if (activeProjectRef.current !== projectId) return false;
-      const created = await createFrameInterpolationMutation.mutateAsync({ projectId, payload: input });
-      frameInterpolationRecoveryBlockedRef.current.delete(nodeId);
-      // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startVideoEnhanceJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      patchMediaNode(nodeId, {
-        genStatus: 'generating',
-        progress: 0,
-        errorText: undefined,
-        jobId: created.job_id,
-        // 受理即冻结（IKHSFH）：frozenParams = 最后受理任务的输入（失败重试原样重发的
-        // 权威来源，面板主动发送新配置成功受理后才更新）；lastParams 保留面板编辑值不回写
-        frameInterpolation: {
-          ...identity,
-          lastParams: (mediaNodesRef.current.find((node) => node.id === nodeId)?.data.frameInterpolation as FrameInterpolationIdentity | undefined)?.lastParams,
-          frozenParams: { fps },
-        },
-      });
-      pollJob(nodeId, created.job_id);
-      return true;
-    } finally {
-      // 失败/完成即解锁（允许再试）；在途期间 genStatus 未变（仍 draft/failed），防重
-      // 只靠本集合——解锁必须先于任何下一次提交的检查
-      frameInterpolationInFlightRef.current.delete(nodeId);
-      toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    }
+    // 插帧草稿卡转生成中（受理/轮询归运行时，draft 角色由运行时先落盘再 POST）
+    patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
+    // IKJJR3：受理即冻结（IKHSFH）：frozenParams = 最后受理任务的输入（失败重试原样重发的
+    // 权威来源，面板主动发送新配置成功受理后才更新）；lastParams 保留面板编辑值不回写
+    const sent = submitVideoToolTask({ kind: 'frameInterpolation', input }, nodeId, {
+      onAccepted: () => {
+        const current = (mediaNodesRef.current.find((node) => node.id === nodeId)?.data.frameInterpolation as FrameInterpolationIdentity | undefined);
+        patchMediaNode(nodeId, {
+          frameInterpolation: { ...identity, lastParams: current?.lastParams, frozenParams: { fps } },
+        });
+      },
+      onCreateFailure: (e: unknown) => {
+        // 受理失败：插帧草稿卡回配置态（参数保留在 lastParams），面板可重发；不落通用失败卡。
+        // 保存失败（_skipped）运行时已统一提示「画布保存失败，生成任务未提交」。
+        const rollback = mediaNodesRef.current.find((n) => n.id === nodeId);
+        const isDraft = ((rollback?.data ?? {}) as Record<string, unknown>).draft === true;
+        patchMediaNode(nodeId, { genStatus: isDraft ? 'draft' : undefined, progress: undefined, errorText: undefined });
+        if (!(e as { _skipped?: boolean })._skipped) {
+          showToast('error', isApiError(e) ? e.message : '插帧任务创建失败，请重试');
+        }
+        return true;
+      },
+    });
+    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
+    return sent;
   };
 
-  /** 水合后核对最新关联（含已保存的旧 jobId），同时恢复该任务的冻结输入。
-   *  Query 按项目/节点去重，现有终态与轮询负责结果；恢复失败时保留卡片并阻止错误参数重试。 */
+  /** 水合后核对最新关联（含已保存的旧 jobId），同时恢复该任务的冻结输入（IKHSFE 历史可信
+   *  关联恢复，IKJJR3 后仅服务历史插帧卡与「受理回执未到就关页」的草稿卡——新协议卡的恢复
+   *  主路径是统一运行时，本查询续轮询同样经运行时登记，恢复扫描按 active 判重防双链）。
+   *  Query 按项目/节点去重，现有终态与轮询负责结果；恢复失败时保留卡片（冻结输入缺失的
+   *  重试由运行时按不可信冻结输入阻止并提示重新编辑，A.6）。 */
   const recoverFrameInterpolation = (nodeId: string, savedJobId?: unknown) => {
     const projectId = activeProjectRef.current;
     if (!projectId) return;
     const activeAtStart = activeJobByNodeRef.current.get(nodeId);
-    frameInterpolationRecoveryBlockedRef.current.add(nodeId);
     queryClient.fetchQuery(frameInterpolationRecoveryOptions(projectId, nodeId))
       .then(({ current, input }) => {
         if (activeProjectRef.current !== projectId) return;
         const node = mediaNodesRef.current.find((n) => n.id === nodeId);
         if (!node) return;
         const data = (node.data ?? {}) as Record<string, unknown>;
-        // 核对水合时的身份；查询期间的新提交、取消和删除优先于恢复结果。
+        // 核对水合时的身份；查询期间的新提交、取消和删除优先于恢复结果（提交窗口 =
+        //  运行时 submitting 阶段）。
         if (data.jobId !== savedJobId ||
           activeJobByNodeRef.current.get(nodeId) !== activeAtStart ||
-          frameInterpolationInFlightRef.current.has(nodeId) ||
+          generationRuntimeRef.current?.statusOf(nodeId)?.phase === 'submitting' ||
           locallyRemovedGenerationNodesRef.current.has(nodeId) || !data.frameInterpolation) return;
-        frameInterpolationRecoveryBlockedRef.current.delete(nodeId);
         if (!current) return;
         if (current.status === 'cancelled') {
           stopJobPolling(nodeId, jobTimersRef.current);
@@ -8141,8 +7846,12 @@ export default function CanvasPage() {
         }
         const identity = data.frameInterpolation as FrameInterpolationIdentity;
         if (input) patchMediaNode(nodeId, {
-          frameInterpolation: { ...identity, sourceAssetId: input.source_asset_id, frozenParams: { fps: input.fps } },
+          frameInterpolation: { ...identity, sourceAssetId: input.source_asset_id, frozenParams: { fps: input.fps }, recoveryBlocked: undefined },
         });
+        else if (identity.recoveryBlocked) {
+          // 查询成功但无 input（旧任务无投影）：解除阻断，回落 lastParams 兼容
+          patchMediaNode(nodeId, { frameInterpolation: { ...identity, recoveryBlocked: undefined } });
+        }
         if (current.status === 'queued' || current.status === 'processing') {
           stopJobPolling(nodeId, jobTimersRef.current);
           patchMediaNode(nodeId, {
@@ -8151,7 +7860,8 @@ export default function CanvasPage() {
             errorText: undefined,
             jobId: current.job_id,
           });
-          pollJob(nodeId, current.job_id);
+          // IKJJR3：续轮询经统一运行时登记（恢复扫描按在途判重，不双链）
+          generationRuntimeRef.current?.resumeFromHydration(nodeId, String(current.job_id), (node.data ?? {}) as Record<string, unknown>);
           return;
         }
         // 终态：登记活跃任务（迟到响应防线）+ 写回 jobId（成品卡 jobId≠null 是来源连线
@@ -8168,7 +7878,7 @@ export default function CanvasPage() {
                 progress: detail.progress,
                 errorText: undefined,
               });
-              pollJob(nodeId, current.job_id);
+              generationRuntimeRef.current?.resumeFromHydration(nodeId, String(current.job_id), (node.data ?? {}) as Record<string, unknown>);
             }
           })
           .catch(() => {
@@ -8178,52 +7888,49 @@ export default function CanvasPage() {
               progress: current.progress,
               errorText: undefined,
             });
-            pollJob(nodeId, current.job_id);
+            generationRuntimeRef.current?.resumeFromHydration(nodeId, String(current.job_id), (node.data ?? {}) as Record<string, unknown>);
           });
       })
       .catch((e: unknown) => {
-        // 保留原卡；失败重试保持阻断，刷新可重新读取，面板仍可主动发送新配置。
+        // 保留原卡；查询失败标记 recoveryBlocked——冻结输入未回填前重试按不可信输入阻止
+        //（A.6 不按面板值猜参数），刷新可重新读取，面板仍可主动发送新配置。
         console.warn('[frame-interpolation] 恢复查询失败:', e);
+        const failedNode = mediaNodesRef.current.find((n) => n.id === nodeId);
+        const failedData = (failedNode?.data ?? {}) as Record<string, unknown>;
+        const failedIdentity = failedData.frameInterpolation as FrameInterpolationIdentity | undefined;
+        if (failedIdentity != null && !failedIdentity.recoveryBlocked) {
+          patchMediaNode(nodeId, { frameInterpolation: { ...failedIdentity, recoveryBlocked: true } });
+        }
       });
   };
   recoverFrameInterpolationRef.current = recoverFrameInterpolation;
 
-  /** HD 任务受理后继续原卡生成、lastParams 落盘与轮询，失败保持原卡。
-   *  固定静默传输（IKJPM7，两入口一致）：HTTP 默认提示关闭，反馈由持有会话身份的
-   *  调用方回调统一给出。 */
+  /** HD 任务提交（IKJJR3）：原卡转生成中后交运行时受理（draft 角色先落盘再 POST，B.3）；
+   *  受理即写 lastParams（失败重试原样重发、重新编辑回填共用）；受理失败草稿回配置态，
+   *  轮询/归属/保存确认归运行时。 */
   const startVideoEnhanceJob = async (submission: VideoEnhanceSubmission): Promise<void> => {
-    const { projectId, nodeId, payload: input, identity } = submission;
-    const resolution = input.resolution;
-    // 在途登记（口径同插帧 IKHSFH）：面板在途只读与选中隐藏再选回的 reconcile 数据源；
-    // 不拦截受理——显式关闭重开的重发是既定行为，同帧连点由运行时 submitting 同步挡
-    videoEnhanceInFlightRef.current.set(nodeId, (videoEnhanceInFlightRef.current.get(nodeId) ?? 0) + 1);
-    // IKJP8Q 共享提交准入：登记在途即令同卡已打开面板提交中只读（失败卡重试与面板发送
-    // 共用）；显式关闭重开的新会话无会话状态不受影响，面板自身发送已持锁处幂等
-    toolRuntime.notifyInFlight('videoEnhance', nodeId);
+    const { nodeId, payload: input, identity } = submission;
+    // 面板在途只读与选中隐藏再选回的 reconcile 数据源（提交锁由运行时 submitting 承载）；
+    // 不拦截受理——显式关闭重开的重发是既定行为
     toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    try {
-      const created = await createVideoEnhancement(projectId, input, { silent: true });
-      // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startImageEnhanceJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      patchMediaNode(nodeId, {
-        genStatus: 'generating',
-        progress: 0,
-        errorText: undefined,
-        jobId: created.job_id,
+    patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
+    submitVideoToolTask({ kind: 'videoEnhance', input }, nodeId, {
+      onAccepted: () => {
         // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
-        videoEnhance: { ...identity, lastParams: { resolution } },
-      });
-      pollJob(nodeId, created.job_id);
-    } finally {
-      // 每次受理各自减一（同卡并发在途计数），归零才解锁；解锁后 reconcile 让在途
-      // 面板恢复可编辑（口径同插帧）
-      const count = (videoEnhanceInFlightRef.current.get(nodeId) ?? 1) - 1;
-      if (count <= 0) videoEnhanceInFlightRef.current.delete(nodeId);
-      else videoEnhanceInFlightRef.current.set(nodeId, count);
-      toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    }
+        patchMediaNode(nodeId, { videoEnhance: { ...identity, lastParams: { resolution: input.resolution } } });
+      },
+      onCreateFailure: (e: unknown) => {
+        // 受理失败：HD 草稿卡回配置态（保留分辨率参数），面板可重发；不落通用失败卡
+        const rollback = mediaNodesRef.current.find((n) => n.id === nodeId);
+        const isDraft = ((rollback?.data ?? {}) as Record<string, unknown>).draft === true;
+        patchMediaNode(nodeId, { genStatus: isDraft ? 'draft' : undefined, progress: undefined, errorText: undefined });
+        if (!(e as { _skipped?: boolean })._skipped) {
+          showToast('error', isApiError(e) ? e.message : 'HD 高清任务创建失败，请重试');
+        }
+        return true;
+      },
+    });
+    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
   };
 
   toolHostsRef.current.panels = {
@@ -8243,8 +7950,10 @@ export default function CanvasPage() {
       const node = mediaNodesRef.current.find((node) => node.id === nodeId);
       return Boolean(node && (node.data.draft === true || hasGenerationRecord(node)) && node.data[kind]);
     },
-    isFrameInFlight: (nodeId) => frameInterpolationInFlightRef.current.has(nodeId),
-    isVideoEnhanceInFlight: isVideoEnhanceCardInFlight,
+    // IKJJR3：插帧/HD 面板提交锁 = 运行时 submitting 阶段（保存+创建受理窗口）；
+    // 受理完成即解锁（显式关闭重开的重发是既定行为），被接管/丢弃时随之清空。
+    isFrameInFlight: (nodeId) => generationRuntimeRef.current?.statusOf(nodeId)?.phase === 'submitting',
+    isVideoEnhanceInFlight: (nodeId) => generationRuntimeRef.current?.statusOf(nodeId)?.phase === 'submitting',
     startImage: (input) => startImageEnhanceJob(input, true),
     startVideo: (input) => startVideoEnhanceJob(input),
     startFrame: startFrameInterpolationJob,
@@ -8357,120 +8066,88 @@ export default function CanvasPage() {
     error: (message) => showToast('error', message),
   };
 
-  /* ===== 音视频分离发送链路（IKH28X）：发送才建任务 + 音频占位卡 + 来源边 + 终态回填 ===== */
+  /* ===== 音视频分离/截取/调速发送链路（IKH28X/IKHB7A/IKHW5S 建卡与来源线差异保留；
+     IKJJR3 受理与后续生命周期归运行时：canvas_binding 先受理，受理回执丢失由统一恢复兜底） ===== */
 
-  /** 任务受理后的既有交接：建卡、来源边、轮询和落盘仍由画布宿主负责。 */
-  const handoffAudioVideoSplitTask = async (
-    input: AudioVideoSplitSubmission,
-    created: { job_id: string },
-  ): Promise<void> => {
-    const { projectId, source: node, payload } = input;
-    const nodeId = mediaExtractNodeId(created.job_id);
-    const placeholder = attachCallbacks(
-      buildMediaExtractPlaceholderNode({
-        jobId: created.job_id,
-        outputFormat: payload.output_format,
-        sourceAssetId: payload.source_asset_id,
-        source: node,
-      }) as Node,
-    );
-    // 同步写 ref，保证本次落库包含节点与来源边。
-    const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    addCanvasEdge(node.id, nodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
-    pollJob(nodeId, created.job_id);
-    await flushCanvasSave(projectId).catch(() => {});
-  };
   toolHostsRef.current.audioVideoSplit = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    createTask: ({ projectId, payload }) => createMediaExtraction(projectId, payload, { silent: true }),
-    handoff: handoffAudioVideoSplitTask,
+    // IKJJR3：预分配占位卡 id（media-extract-{uuid}，前缀家族判定兼容）；受理后 jobId 由运行时回写
+    startTask: (input: AudioVideoSplitSubmission): boolean => {
+      const { source: node, payload } = input;
+      const targetNodeId = mediaExtractNodeId(newIdempotencyKey());
+      const placeholder = attachCallbacks(
+        buildMediaExtractPlaceholderNode({
+          jobId: targetNodeId.slice(MEDIA_EXTRACT_NODE_PREFIX.length),
+          outputFormat: payload.output_format,
+          sourceAssetId: payload.source_asset_id,
+          source: node,
+        }) as Node,
+      );
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === targetNodeId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      addCanvasEdge(node.id, targetNodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
+      return submitVideoToolTask({ kind: 'mediaExtract', input: payload }, targetNodeId);
+    },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
 
-  /** 截取任务受理后的既有画布交接。 */
-  const handoffAudioTrimTask = async (
-    input: AudioToolSubmission<AudioTrimInput>,
-    created: { job_id: string },
-  ): Promise<void> => {
-    const { projectId, source: node, payload } = input;
-    const sourceNodeId = node.id;
-    const nodeId = audioTrimNodeId(created.job_id);
-    const placeholder = attachCallbacks(
-      buildAudioTrimPlaceholderNode({
-        jobId: created.job_id,
-        outputFormat: payload.output_format,
-        timeParams: { start_time: payload.start_time, end_time: payload.end_time },
-        sourceAssetId: payload.source_asset_id,
-        source: node,
-      }) as Node,
-    );
-    const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    // 连一条源音频 → 截取卡的**来源边**（带 origin 标记）：参考推导跳过，
-    // 避免截取产物再次编辑时把源音频误当参考输入（防参考污染）
-    addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_TRIM_EDGE_ORIGIN });
-    pollJob(nodeId, created.job_id);
-    await flushCanvasSave(projectId).catch(() => {});
-  };
   toolHostsRef.current.audioTrim = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    createTask: ({ projectId, payload }) => createAudioTrim(projectId, payload, { silent: true }),
-    handoff: handoffAudioTrimTask,
+    // IKJJR3：预分配占位卡 id（audio-trim-{uuid}）；贴边省略的可选键随冻结 input 原样进占位身份
+    startTask: (input: AudioToolSubmission<AudioTrimInput>): boolean => {
+      const { source: node, payload } = input;
+      const targetNodeId = audioTrimNodeId(newIdempotencyKey());
+      const placeholder = attachCallbacks(
+        buildAudioTrimPlaceholderNode({
+          jobId: targetNodeId.slice(AUDIO_TRIM_NODE_PREFIX.length),
+          outputFormat: payload.output_format,
+          timeParams: { start_time: payload.start_time, end_time: payload.end_time },
+          sourceAssetId: payload.source_asset_id,
+          source: node,
+        }) as Node,
+      );
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === targetNodeId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      // 连一条源音频 → 截取卡的**来源边**（带 origin 标记）：参考推导跳过，
+      // 避免截取产物再次编辑时把源音频误当参考输入（防参考污染）
+      addCanvasEdge(node.id, targetNodeId, undefined, { origin: AUDIO_TRIM_EDGE_ORIGIN });
+      return submitVideoToolTask({ kind: 'audioTrim', input: payload }, targetNodeId);
+    },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
 
-  /** 调速任务项目暂存、建卡及落盘保持既有宿主实现。 */
-  const handoffAudioSpeedTask = async (
-    input: AudioToolSubmission<AudioSpeedInput>,
-    created: { job_id: string },
-    beforeApply: () => void,
-  ): Promise<void> => {
-    const { projectId, source: node, payload } = input;
-    const sourceNodeId = node.id;
-    // 迟到响应留给发起项目；当前项目的画布与编辑会话均不触碰。
-    if (activeProjectRef.current !== projectId || hydratedProjectRef.current !== projectId) {
-      audioSpeedPendingSubmissionsRef.current.set(`${projectId}:${audioSpeedNodeId(created.job_id)}`, {
-        projectId, sourceNodeId, jobId: created.job_id, payload, source: node,
-      });
-      return;
-    }
-    // 只退出本次发送的会话；旧会话成功仍建自己的任务卡，不触碰后来开启的编辑态。
-    beforeApply();
-    const nodeId = audioSpeedNodeId(created.job_id);
-    const placeholder = attachCallbacks(
-      buildAudioSpeedPlaceholderNode({
-        jobId: created.job_id,
-        speed: payload.speed ?? 1,
-        sourceAssetId: payload.source_asset_id,
-        source: node,
-      }) as Node,
-    );
-    const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    // 连一条源音频 → 调速卡的**来源边**（带 origin 标记）：参考推导跳过，
-    // 避免调速产物再次编辑时把源音频误当参考输入（防参考污染）
-    if (mediaNodesRef.current.some((item) => item.id === sourceNodeId)) {
-      addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
-    }
-    pollJob(nodeId, created.job_id);
-    await flushCanvasSave(projectId).catch(() => {});
-  };
   toolHostsRef.current.audioSpeed = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    createTask: ({ projectId, payload }) => createAudioSpeedMutation.mutateAsync({ projectId, payload }),
-    handoff: handoffAudioSpeedTask,
+    // IKJJR3：预分配占位卡 id（audio-speed-{uuid}）。跨项目接续由运行时归属检查与统一恢复
+    // 接管（迟到受理归发起项目，回原项目水合时按服务端关联补卡续轮询），原页面暂存机制删除。
+    startTask: (input: AudioToolSubmission<AudioSpeedInput>): boolean => {
+      const { source: node, payload } = input;
+      const targetNodeId = audioSpeedNodeId(newIdempotencyKey());
+      const placeholder = attachCallbacks(
+        buildAudioSpeedPlaceholderNode({
+          jobId: targetNodeId.slice(AUDIO_SPEED_NODE_PREFIX.length),
+          speed: payload.speed ?? 1,
+          sourceAssetId: payload.source_asset_id,
+          source: node,
+        }) as Node,
+      );
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === targetNodeId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      // 连一条源音频 → 调速卡的**来源边**（带 origin 标记）：参考推导跳过（防参考污染）
+      addCanvasEdge(node.id, targetNodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
+      return submitVideoToolTask({ kind: 'audioSpeed', input: payload }, targetNodeId);
+    },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
@@ -8706,13 +8383,13 @@ export default function CanvasPage() {
    *  请求发出即返回（飞行期 submitting 防重复提交）；创建往返与轮询收敛由
    *  runSceneSplitTask 承担。 */
 
-  /* ===== 智能抠像发送链路（IKHK9N，镜像场景切分/去字幕家族）：先退会话 → 本地建任务
-     占位卡（target_node_id 取该卡）→ POST video-mattings → job_id 回写占位卡 → 轮询终态 ===== */
+  /* ===== 智能抠像发送链路（IKHK9N，先建占位卡再受理；IKJJR3 受理与后续生命周期归运行时） ===== */
 
-  /** 抠像的预建卡、请求、轮询与任务在途锁由既有画布宿主负责。 */
+  /** 抠像的预建卡保留宿主实现；受理/轮询/归属/保存确认交运行时（client_token = submission_id，
+   *  B.3「工具原 client_token」口径，由家族定义在创建请求内携带）。 */
   const runSmartMattingTask = async (input: SmartMattingSubmission): Promise<void> => {
     smartMattingSendingRef.current = true;
-    const { projectId, source: node, payload: lastInput, clientToken } = input;
+    const { source: node, payload: lastInput } = input;
     const sourceNodeId = node.id;
     const placeholderId = lastInput.target_node_id;
     try {
@@ -8732,22 +8409,10 @@ export default function CanvasPage() {
       mediaNodesRef.current = next;
       setMediaNodes(next);
       addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SMART_MATTING_EDGE_ORIGIN });
-      const created = await createVideoMattingMutation.mutateAsync({
-        projectId,
-        payload: { ...lastInput, client_token: clientToken },
-        silent: true,
-      });
-      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startSceneSplitJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(placeholderId, activeAtCreate);
-      stopJobPolling(placeholderId, jobTimersRef.current);
-      patchMediaNode(placeholderId, { jobId: created.job_id });
-      pollJob(placeholderId, created.job_id);
-      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢卡
-      await flushCanvasSave(projectId).catch(() => {});
-    } catch (error: unknown) {
-      patchMediaNode(placeholderId, { genStatus: 'failed', errorText: isApiError(error) ? error.message : '智能抠像任务创建失败，请重试' });
-      throw error;
+      // IKJJR3：运行时受理失败落失败卡（异步），同步 false 仅发生在无项目/防重入窗口
+      if (!submitVideoToolTask({ kind: 'smartMatting', input: lastInput }, placeholderId)) {
+        patchMediaNode(placeholderId, { genStatus: 'failed', errorText: '智能抠像任务未发出，请重试' });
+      }
     } finally {
       smartMattingSendingRef.current = false;
     }
@@ -8756,7 +8421,6 @@ export default function CanvasPage() {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
     newTargetId: () => newNodeId('smart-matting'),
-    newClientToken: newIdempotencyKey,
     isSending: () => smartMattingSendingRef.current,
     runTask: runSmartMattingTask,
     warn: (message) => showToast('warn', message),
@@ -9191,25 +8855,11 @@ export default function CanvasPage() {
     runtime.register(audioVideoMuxTask);
     runtime.register(sceneSplitTask); // IKJJR5：多结果家族（场景切分/人声分离）
     runtime.register(vocalSplitTask);
+    runtime.register(videoToolsTask); // IKJJR3：视频处理七类家族（去字幕/分离/截取/调速/抠像/HD/插帧）
     generationRuntimeRef.current = runtime;
   }
-
-  /** 返回发起项目时立即保存补建的调速卡；保存成功后才移除待恢复记录。 */
-  useEffect(() => {
-    if (!currentId || !doc || canvasLoadFailed) return;
-    const pending = [...audioSpeedPendingSubmissionsRef.current.entries()].filter(([, item]) =>
-      item.projectId === currentId &&
-      mediaNodes.some((node) => node.id === audioSpeedNodeId(item.jobId)) &&
-      (!mediaNodes.some((node) => node.id === item.sourceNodeId) ||
-        edges.some((edge) => edge.source === item.sourceNodeId && edge.target === audioSpeedNodeId(item.jobId))),
-    );
-    if (pending.length === 0) return;
-    const projectId = currentId;
-    void flushCanvasSave(projectId).then((saved) => {
-      if (saved) pending.forEach(([key]) => audioSpeedPendingSubmissionsRef.current.delete(key));
-    }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId, doc, canvasLoadFailed, mediaNodes, edges]);
+  /* IKJJR3：调速「返回发起项目补建卡立即保存」effect 已随跨项目接续机制删除——补卡与
+   * 落盘现由统一恢复扫描在恢复页对账时完成（restore-target 分支自带补卡落盘）。 */
 
   const handleRetryCanvasSave = async () => {
     if (!currentId || applyingRef.current) return;

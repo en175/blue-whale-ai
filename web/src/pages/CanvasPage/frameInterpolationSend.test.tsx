@@ -196,7 +196,7 @@ describe('IKHLKX 发送创建闭环', () => {
       source_asset_id: '5',
       target_node_id: draftId,
       fps: 120,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     // 创建成功才关面板（发送钮不在文档）
     expect(panelOpen()).toBe(false);
     expect(panelSend()).toBeNull();
@@ -252,7 +252,7 @@ describe('IKHLKX 发送创建闭环', () => {
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
   });
 
-  it('提交往返期间：面板保留、参数只读、发送置灰防重（重复点击只发一次创建请求）', async () => {
+  it('提交往返期间：提交点即交接（面板关闭、卡转生成中），submitting 窗口统一防重不重复受理', async () => {
     seedDoc();
     let resolveCreate: (value: { job_id: string; status: 'queued' }) => void = () => {};
     apiMocks.createFrameInterpolation.mockImplementation(
@@ -266,24 +266,23 @@ describe('IKHLKX 发送创建闭环', () => {
       panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    // 提交中：面板保留（未受理成功不关面板）、参数与发送钮只读置灰
-    expect(panelOpen()).toBe(true);
-    expect(document.body.textContent).toContain('正在保存并提交，参数只读');
-    expect(panelSend()!.disabled).toBe(true);
-    expect(panelFps(30)!.disabled).toBe(true);
-    expect(panelFps(120)!.disabled).toBe(true);
-    // 置灰态重复点击不产生第二次创建请求
-    await click(panelSend());
-    expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
-
-    // 创建返回成功：面板关闭、卡转生成中
-    await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
-    await flush();
+    // IKJJR3：提交点即交接运行时——面板关闭（保存+受理窗口由 submitting 统一防重，
+    // 用户故事 5）、卡原地转生成中
     expect(panelOpen()).toBe(false);
     expect(dataOf(draftNodes()[0]!.id).genStatus).toBe('generating');
+    // 在途重开面板：生成中只读（发送置灰），不产生第二次创建请求
+    await act(async () => { flowProps.current.onNodeClick(mediaNode(draftNodes()[0]!.id)); });
+    expect(panelOpen()).toBe(true);
+    expect(panelSend()!.disabled).toBe(true);
+    expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
+
+    // 创建返回成功：jobId 登记续轮询
+    await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
+    await flush();
+    expect(dataOf(draftNodes()[0]!.id).jobId).toBe('j1');
   });
 
-  it('创建失败（网络）：面板与所选档保留可重发、卡保持草稿不写 jobId；重发成功才关面板转生成中', async () => {
+  it('创建失败（网络）：面板已交接关闭、卡回草稿保留档位不写 jobId；重开重发成功转生成中', async () => {
     seedDoc();
     apiMocks.createFrameInterpolation
       .mockRejectedValueOnce(new Error('network down'))
@@ -295,25 +294,29 @@ describe('IKHLKX 发送创建闭环', () => {
 
     await click(panelFps(120));
     await sendPanel();
+    await flush();
 
-    // 创建失败：面板保留、配置（120fps）保留、发送钮复位可重发
+    // IKJJR3：提交点即交接（面板关）；受理失败草稿回配置态（120fps 保留在 lastParams）、
+    // 无 jobId、未启动轮询（不制造受理假象）
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
-    expect(panelOpen()).toBe(true);
-    expect(panelSend()!.disabled).toBe(false);
-    expect(panelFps(120)!.className).toMatch(/Active/);
-    // 卡保持草稿原状：未转生成中、无 jobId、未启动轮询（不制造受理假象）
+    expect(panelOpen()).toBe(false);
     expect(dataOf(draftId).genStatus).toBe('draft');
     expect(dataOf(draftId).jobId).toBeUndefined();
     expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
 
-    // 原配置直接重发：创建成功才关面板并转生成中，payload 仍是保留的 120fps
+    // 点卡重开面板：原配置（120fps）保留、发送钮复位可重发
+    await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
+    expect(panelOpen()).toBe(true);
+    expect(panelSend()!.disabled).toBe(false);
+    expect(panelFps(120)!.className).toMatch(/Active/);
+    // 原配置直接重发：受理成功转生成中，payload 仍是保留的 120fps
     await sendPanel();
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(2);
     expect(apiMocks.createFrameInterpolation).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5',
       target_node_id: draftId,
       fps: 120,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     expect(panelOpen()).toBe(false);
     expect(dataOf(draftId).genStatus).toBe('generating');
     expect(dataOf(draftId).jobId).toBe('j1');
@@ -422,7 +425,7 @@ describe('IKHLKX 失败重试（冻结输入）', () => {
       source_asset_id: '5',
       target_node_id: 'i1',
       fps: 30,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     // 契约无 retry 端点：重试不走通用 retry 接口
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
     // 第一次重试失败：仍可再次重试
@@ -440,7 +443,7 @@ describe('IKHLKX 失败重试（冻结输入）', () => {
       source_asset_id: '5',
       target_node_id: 'i1',
       fps: 30,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     // 收敛成品并清插帧身份
     expect(dataOf('i1').genStatus).toBeUndefined();
     expect(dataOf('i1').src).toBe('http://tos/fi2.mp4');
@@ -519,10 +522,10 @@ describe('IKHLKX 并行任务隔离', () => {
 
     expect(apiMocks.createFrameInterpolation).toHaveBeenNthCalledWith(1, 'p1', {
       source_asset_id: '5', target_node_id: cardA, fps: 30,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     expect(apiMocks.createFrameInterpolation).toHaveBeenNthCalledWith(2, 'p1', {
       source_asset_id: '5', target_node_id: cardB, fps: 120,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     expect(dataOf(cardA).jobId).toBe('jA');
     expect(dataOf(cardB).jobId).toBe('jB');
     expect(mediaNodes().length).toBe(3); // 源卡 + 两张插帧卡
@@ -560,7 +563,7 @@ describe('IKHLKX 并行任务隔离', () => {
     });
     expect(apiMocks.createFrameInterpolation).toHaveBeenNthCalledWith(3, 'p1', {
       source_asset_id: '5', target_node_id: cardB, fps: 120,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     await act(async () => {
       resolvers.get('jC')!({
         job_id: 'jC', status: 'succeeded', progress: 100,
@@ -652,7 +655,7 @@ describe('IKHSFH 编辑参数与受理冻结输入分离', () => {
       source_asset_id: '5',
       target_node_id: draftId,
       fps: 60,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     expect(dataOf(draftId).genStatus).toBe('failed');
     expect(identityOf(mediaNode(draftId))).toEqual({ sourceAssetId: '5', lastParams: { fps: 60 }, frozenParams: { fps: 60 } });
 
@@ -671,7 +674,7 @@ describe('IKHSFH 编辑参数与受理冻结输入分离', () => {
       source_asset_id: '5',
       target_node_id: draftId,
       fps: 60,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
 
     // 重试受理成功：frozenParams 保持 60（原样重发未改输入），lastParams 保持面板编辑值 120（不随受理回写）
     expect(dataOf(draftId).genStatus).toBe('generating');
@@ -704,7 +707,7 @@ describe('IKHSFH 编辑参数与受理冻结输入分离', () => {
       source_asset_id: '5',
       target_node_id: draftId,
       fps: 120,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     expect(dataOf(draftId).genStatus).toBe('generating');
     expect(identityOf(mediaNode(draftId))).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 }, frozenParams: { fps: 120 } });
   });
@@ -724,7 +727,7 @@ describe('IKHSFH 编辑参数与受理冻结输入分离', () => {
       source_asset_id: '5',
       target_node_id: 'i1',
       fps: 30,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     // 受理后写入 frozenParams（后续重试有权威冻结来源）
     expect(identityOf(mediaNode('i1'))).toEqual({ sourceAssetId: '5', lastParams: { fps: 30 }, frozenParams: { fps: 30 } });
   });
@@ -733,11 +736,7 @@ describe('IKHSFH 编辑参数与受理冻结输入分离', () => {
 describe('IKHSFH 同步防重（保存至创建返回窗口）与失败解锁', () => {
   it('失败卡面板已打开时重试：保存与创建期间立即只读，失败后恢复且可再次重试', async () => {
     seedDoc('failed');
-    let resolveSave!: () => void;
     let rejectCreate!: (error: unknown) => void;
-    apiMocks.saveCanvasDoc.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveSave = () => resolve({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' });
-    }));
     apiMocks.createFrameInterpolation
       .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectCreate = reject; }))
       .mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
@@ -748,12 +747,8 @@ describe('IKHSFH 同步防重（保存至创建返回窗口）与失败解锁', 
     expect(panelSend()!.disabled).toBe(false);
     await click(panelFps(120));
     await act(async () => { (dataOf('i1').onRetryJob as (nodeId: string) => void)('i1'); });
-    // 任务锁从首保存开始持有，已经打开的面板也须同步派生只读。
-    expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
-    expect(panelFps(30)!.disabled).toBe(true);
-    expect(panelSend()!.disabled).toBe(true);
-    await act(async () => { resolveSave(); });
-    await flush();
+    // IKJJR3/IKDMQV：重试走运行时且不前置保存（不读画布不落盘）——即发创建请求；
+    // 已经打开的面板随卡转生成中同步派生只读（submitting 在途窗口）。
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
     expect(panelFps(30)!.disabled).toBe(true);
     expect(panelSend()!.disabled).toBe(true);
@@ -844,8 +839,7 @@ describe('IKHSFH 同步防重（保存至创建返回窗口）与失败解锁', 
     // 失败保持失败态：未转生成中、jobId 未被覆盖（不制造受理假象）
     expect(dataOf('i1').genStatus).toBe('failed');
     expect(dataOf('i1').jobId).toBe('j1');
-    // 错误提示出现（一次）
-    expect(document.body.textContent).toContain('插帧任务创建失败，请重试');
+    // IKJJR3：重试失败由运行时收敛到卡上（可读失败态），不再弹会话层 toast
 
     // 解锁后允许再试：第二次重试成功受理
     await act(async () => {
@@ -867,10 +861,10 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     const target = draftNodes()[0]!;
     await act(async () => { panelSend()!.click(); });
     await flush();
-    expect(panelFps(120)!.disabled).toBe(true);
-    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1'), mediaNode(target.id)] }); });
+    // IKJJR3：提交点即交接（面板关、卡转生成中）；多选/单选切换后点卡重开面板只读
     expect(panelOpen()).toBe(false);
-    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode(target.id)] }); });
+    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1'), mediaNode(target.id)] }); });
+    await act(async () => { flowProps.current.onNodeClick(mediaNode(target.id)); });
     expect(panelOpen()).toBe(true);
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
     expect(panelFps(120)!.disabled).toBe(true);
@@ -899,14 +893,13 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     await act(async () => { panelSend()!.click(); });
     await flush();
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(2);
-    expect(panelSend()!.title).toBe('正在保存并提交，参数只读');
+    // IKJJR3：B 提交点即交接（面板关、卡转生成中）；A 受理只回写 A 卡，不串 B
+    expect(panelOpen()).toBe(false);
+    expect(dataOf(cardB).genStatus).toBe('generating');
     await act(async () => { resolveA({ job_id: 'jA', status: 'queued' }); });
     await flush();
     expect(dataOf('i1').jobId).toBe('jA');
-    expect(panelOpen()).toBe(true);
-    expect(panelSend()!.disabled).toBe(true);
-    expect(panelSend()!.title).toBe('正在保存并提交，参数只读');
-    expect(panelFps(30)!.disabled).toBe(true);
+    expect(dataOf(cardB).genStatus).toBe('generating'); // A 受理不干扰 B 在途
     await act(async () => { resolveB({ job_id: 'jB', status: 'queued' }); });
     await flush();
     expect(panelOpen()).toBe(false);
@@ -928,8 +921,7 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     await act(async () => {
       panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    // A 在途（创建挂起）：关 A 面板、从源卡再建 B 并打开其面板
-    await click(panelClose());
+    // A 在途（提交点即交接，面板已关）：从源卡再建 B 并打开其面板
     await frameInterpolation();
     const cardB = draftNodes().find((n) => n.id !== cardA)!.id;
     expect(panelOpen()).toBe(true);
@@ -950,7 +942,7 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
       source_asset_id: '5',
       target_node_id: cardB,
       fps: 120,
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     expect(dataOf(cardB).genStatus).toBe('generating');
     expect(dataOf(cardB).jobId).toBe('jB');
     expect(dataOf(cardA).jobId).toBe('jA');
@@ -970,7 +962,7 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     await act(async () => {
       panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    await click(panelClose());
+    // A 在途（提交点即交接，面板已关）：从源卡再建 B 并打开其面板
     await frameInterpolation();
     const cardB = draftNodes().find((n) => n.id !== cardA)!.id;
 
@@ -979,10 +971,10 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     expect(panelSend()!.disabled).toBe(false);
     expect(panelFps(120)!.disabled).toBe(false);
 
-    // 新会话使 A 的错误反馈失效；原卡仍未受理，B 保持可编辑。
+    // IKJJR3：A 旧失败收敛到 A 卡（回配置态、无受理假象）；错误提示在提交时单源提示一次
+    //（不再按会话纪元压制——失败反馈已收敛到卡，重开面板可重发）。B 保持可编辑。
     await act(async () => { rejectA(new Error('network down')); });
     await flush();
-    expect(document.body.textContent).not.toContain('插帧任务创建失败，请重试');
     expect(dataOf(cardA).genStatus).toBe('draft');
     expect(dataOf(cardA).jobId).toBeUndefined();
     expect(panelOpen()).toBe(true);
@@ -1011,11 +1003,11 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     await act(async () => {
       panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    // 在途关闭面板后重开本卡面板：重开即提交中只读（submitting 按在途集合重算）
-    await click(panelClose());
+    // IKJJR3：提交点即交接（面板已关、卡转生成中）；重开本卡面板为生成中只读
+    //（受理在途由 submitting 防重保护，重开不重复受理）
     await clickCard(draftId);
     expect(panelOpen()).toBe(true);
-    expect(document.body.textContent).toContain('正在保存并提交，参数只读');
+    expect(document.body.textContent).toContain('参数只读');
     expect(panelFps(120)!.disabled).toBe(true);
     expect(panelSend()!.disabled).toBe(true);
 

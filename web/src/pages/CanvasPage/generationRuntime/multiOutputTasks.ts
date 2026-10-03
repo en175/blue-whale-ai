@@ -109,8 +109,8 @@ export const sceneSplitTask: GenerationTaskDefinition<SceneSplitTaskPayload> = {
     };
   },
 
-  async retry(projectId, _jobId, nodeData, binding, key) {
-    const identity = nodeData.sceneSplit as SceneSplitIdentity | undefined;
+  async retry(projectId, _jobId, ctx, binding, key) {
+    const identity = ctx.nodeData.sceneSplit as SceneSplitIdentity | undefined;
     if (!identity?.lastInput) throw new Error('场景切分原任务输入不可信，无法重试');
     return sceneSplitTask.create(projectId, { payload: identity.lastInput as SceneSplitTaskPayload }, binding, key);
   },
@@ -157,8 +157,8 @@ export const vocalSplitTask: GenerationTaskDefinition<VocalSplitTaskPayload> = {
     };
   },
 
-  async retry(projectId, _jobId, nodeData, binding, key) {
-    const identity = nodeData.vocalSplit as VocalSplitIdentity | undefined;
+  async retry(projectId, _jobId, ctx, binding, key) {
+    const identity = ctx.nodeData.vocalSplit as VocalSplitIdentity | undefined;
     if (!identity?.lastInput) throw new Error('人声分离原任务输入不可信，无法重试');
     return vocalSplitTask.create(projectId, { payload: identity.lastInput as VocalSplitTaskPayload }, binding, key);
   },

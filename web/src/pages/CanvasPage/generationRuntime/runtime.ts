@@ -79,6 +79,8 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   const deleting = new Set<string>();
   /** 重试意图窗口：nodeId → 未受理重试（幂等键 = submission_id）。 */
   const retryAttempts = new Map<string, { jobId: string; key: string; bound: boolean }>();
+  /** 重试在途同步防重（IKJJR3）：React state 异步窗口内的连点兜底，受理/失败收敛即解锁。 */
+  const retryInFlight = new Set<string>();
   /** 提交意图窗口：nodeId → 未受理提交（同载荷签名复用同一把 submission_id——双击/401 续跑/
    *  响应丢失原样重发；载荷一改即换新，受理即作废。口径同页面旧 jobSubmitKeys 台账）。 */
   const submitAttempts = new Map<string, { signature: string; key: string }>();
@@ -202,6 +204,9 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       host.clearActiveJob(nodeId);
     };
     if (host.findNode(nodeId) == null) { finishExecution(); return; } // 终态前卡已被删（删除意图接管）
+    // IKJJR3：成功终态回写 jobId——水合/恢复接续的执行链（卡上仍是持久化的旧任务 id）
+    // 由本行收敛为当前任务；提交/重试路径已写同值，幂等。
+    if (detail.status === 'succeeded') host.patchNode(nodeId, { jobId });
     const submissionId = execution.submissionId ?? readMarker(host.findNode(nodeId)!.data)?.submissionId ?? null;
     if (submissionId == null) { finishExecution(); return; } // 历史兼容任务：无受理关联，不写 marker/不确认
     const outputs = detail.output_assets ?? [];
@@ -374,6 +379,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         execution.jobId = String(created.jobId);
         execution.phase = 'generating';
         host.patchNode(nodeId, { jobId: created.jobId });
+        options?.onAccepted?.({ nodeId, jobId: String(created.jobId), submissionId: execution.submissionId ?? null });
         poll(execution, String(created.jobId));
       })
       .catch(async (e: unknown) => {
@@ -392,6 +398,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
                 execution.jobId = String(retried.jobId);
                 execution.phase = 'generating';
                 host.patchNode(nodeId, { jobId: retried.jobId });
+                options?.onAccepted?.({ nodeId, jobId: String(retried.jobId), submissionId: execution.submissionId ?? null });
                 poll(execution, String(retried.jobId));
                 return;
               }
@@ -420,17 +427,23 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     return true;
   };
 
-  const retry = (nodeId: string): boolean => {
+  const retry = (nodeId: string, options?: SubmitOptions): boolean => {
     const claimed = defForNode(nodeId);
     if (!claimed) return false;
     const { def, node } = claimed;
     const data = node.data ?? {};
     if (data.genStatus === 'generating' || data.genStatus === 'checking') return true; // 防重入
+    // IKJJR3：同步防重（用户故事 5 同款保护覆盖重试路径）——patchNode 经 React state 异步
+    // 生效，同一事件循环内的连点（React 18 批处理窗口）读不到新 genStatus，需同步登记兜底。
+    if (retryInFlight.has(nodeId)) return true;
+    retryInFlight.add(nodeId);
+    // IKJJR3：jobId 可缺——冻结输入重发家族（视频处理七类）重试 = 原样重发创建端点，
+    // 不依赖原任务 id（草稿/受理回执丢失形态的失败卡）；服务端冻结输入的类型（普通生成）
+    // 卡必有 jobId（identify 前提），不受影响。
     const jobIdRaw = data.jobId;
     const projectId = host.getProjectId();
-    if (jobIdRaw == null) return true;
     if (!projectId) { host.toast('warn', '未选中项目，无法重试'); return true; }
-    const jobId = String(jobIdRaw);
+    const jobId = jobIdRaw == null ? '' : String(jobIdRaw);
     const frozen = def.frozenInput?.(nodeId, data);
     if (frozen === null) {
       // 不可信冻结输入（A.6）：保留失败卡并提示重新编辑，不猜参数
@@ -442,7 +455,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       return true;
     }
     const marker = readMarker(data);
-    const canBind = marker != null || boundJobIds.has(jobId);
+    const canBind = marker != null || (jobId !== '' && boundJobIds.has(jobId));
     const targetEntry = marker != null ? ledger.get(recoveryItemIdOf(marker.submissionId, TARGET_OUTPUT_KEY)) : undefined;
     const expectedRevision = targetEntry?.nodeBindingRevision ?? nodeBindings.get(nodeId) ?? 0;
     const previous = retryAttempts.get(nodeId);
@@ -469,8 +482,9 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     host.patchNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '', errorCode: undefined });
 
     // 重试不前置保存（IKDMQV 契约「不读画布不落盘」）：目标卡在提交时已按角色落盘或经水合在服务端。
-    def.retry!(projectId, jobId, data, binding, key)
+    def.retry!(projectId, jobId, { nodeId, nodeData: data }, binding, key)
       .then((created) => {
+        retryInFlight.delete(nodeId);
         if (!owns(execution)) return;
         retryAttempts.delete(nodeId);
         const view = created.canvasBinding ?? null;
@@ -479,9 +493,11 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         execution.jobId = String(created.jobId);
         execution.phase = 'generating';
         host.patchNode(nodeId, { jobId: created.jobId });
+        options?.onAccepted?.({ nodeId, jobId: String(created.jobId), submissionId: execution.submissionId ?? null });
         poll(execution, String(created.jobId));
       })
       .catch((e: unknown) => {
+        retryInFlight.delete(nodeId);
         if (!owns(execution)) return;
         active.delete(nodeId);
         if (host.openRechargeForCreditsError(e)) {
@@ -809,6 +825,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     reconciledSubmissions.clear();
     deleting.clear();
     retryAttempts.clear();
+    retryInFlight.clear();
     submitAttempts.clear();
   };
 

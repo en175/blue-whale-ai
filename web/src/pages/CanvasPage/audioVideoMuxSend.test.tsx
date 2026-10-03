@@ -444,7 +444,7 @@ describe('IKIHPM 终态回填：原地变视频成品卡', () => {
     expect(dataOf('m1').errorText).toBe('重试失败');
     await act(async () => { retry('m1'); await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(apiMocks.retryAudioVideoMux.mock.calls.map((call) => call.slice(0, 3))).toEqual([
-      ['p1', '80', 'test-retry-key'], ['p1', '80', 'test-retry-key'],
+      ['p1', '80', expect.stringMatching(/^test-retry-key-\d+$/)], ['p1', '80', expect.stringMatching(/^test-retry-key-\d+$/)],
     ]);
   });
 });

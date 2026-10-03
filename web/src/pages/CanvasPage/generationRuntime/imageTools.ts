@@ -132,10 +132,10 @@ export function createImageToolsTask(notifyAccepted?: ImageToolsAcceptanceNotifi
       }
     },
 
-    async retry(projectId, _jobId, nodeData, binding, key) {
+    async retry(projectId, _jobId, ctx, binding, key) {
       // 四工具契约无 retry 端点（A.5 工具重新提交保持原协议）：冻结输入原样重发创建端点。
       // runtime 已保证 frozenInput 非 null（可信）才进到这里；此处再读一次原文。
-      const frozen = readFrozenInput(nodeData);
+      const frozen = readFrozenInput(ctx.nodeData);
       if (frozen == null) throw new Error('原任务输入已不可信');
       const created = await createByKind(frozen.kind, projectId, frozen.input, binding, key);
       notifyAccepted?.(frozen.input.target_node_id as string, { jobId: created.jobId });

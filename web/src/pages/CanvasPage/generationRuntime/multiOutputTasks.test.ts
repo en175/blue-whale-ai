@@ -115,7 +115,7 @@ describe('多结果家族：创建/重试/冻结输入', () => {
 
   it('失败卡重试按 identity.lastInput 原参数重发；无身份（恢复补卡）不可信返回 null', async () => {
     const lastInput = { source_asset_id: '5', target_node_id: 'ph-1', granularity: 'coarse' as const };
-    await sceneSplitTask.retry!('p1', 'sj1', { sceneSplit: { sourceAssetId: '5', lastInput } }, BINDING, SUBMISSION);
+    await sceneSplitTask.retry!('p1', 'sj1', { nodeId: 'ph-1', nodeData: { sceneSplit: { sourceAssetId: '5', lastInput } } }, BINDING, SUBMISSION);
     expect(apiMocks.createVideoSceneSplit).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: 'ph-1', granularity: 'coarse',
       client_token: SUBMISSION, canvas_binding: BINDING,
