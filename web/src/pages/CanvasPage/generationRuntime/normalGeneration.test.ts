@@ -8,19 +8,22 @@ const apiMocks = vi.hoisted(() => ({
   createGenerationJob: vi.fn(async () => ({ generation_job_id: 'j1', cursor: 1 })),
   retryGenerationJob: vi.fn(async () => ({ generation_job_id: 'j2', cursor: 2 })),
   cancelGenerationJob: vi.fn(async () => null),
+  fetchJobStatus: vi.fn(),
 }));
 
 vi.mock('@/api/jobs', () => ({
   createGenerationJob: apiMocks.createGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
   cancelGenerationJob: apiMocks.cancelGenerationJob,
+  fetchJobStatus: apiMocks.fetchJobStatus,
 }));
 
 import {
   normalGenerationTask, isNormalGenerationCard, buildRecoveryTargetNode, mediaTypeOfTask,
 } from './normalGeneration';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
-import type { GenerationRuntimeHost } from './types';
+import { createGenerationRuntime } from './runtime';
+import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
+import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/api/canvasRecovery';
 
 const BINDING = {
   protocol_version: 1 as const,
@@ -197,5 +200,80 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
       ],
     }), hostOf([]));
     expect(restore.kind).toBe('apply-outputs');
+  });
+});
+
+// ── IKJKU6 不回归网：普通单结果重试保留 def 后仍走一对一 primary 转换 ──────────────
+
+describe('普通生成类型定义：重试运行时回归', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('普通单结果重试成功：仍走一对一 primary 转换（目标卡保留、差分 replaceTarget+apply）', async () => {
+    const nodes = new Map<string, RuntimeNodeView>();
+    nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: 'j1', genStatus: 'failed' } });
+    const loadEpoch = {}; // 稳定加载身份（重渲染不推进）
+    const host: GenerationRuntimeHost = {
+      getProjectId: () => 'p1',
+      getLoadEpoch: () => loadEpoch,
+      getMediaNodes: () => [...nodes.values()],
+      findNode: (id) => nodes.get(id) ?? null,
+      patchNode: (nodeId, patch) => {
+        const node = nodes.get(nodeId);
+        if (node) nodes.set(nodeId, { ...node, data: { ...node.data, ...patch } });
+      },
+      insertMediaNode: (node) => { nodes.set(node.id, node); },
+      removeMediaNode: (nodeId) => { nodes.delete(nodeId); },
+      getEdges: () => [],
+      addEdge: () => {},
+      getActiveJob: () => undefined,
+      setActiveJob: () => {},
+      clearActiveJob: () => {},
+      isLocallyRemoved: () => false,
+      markLocallyRemoved: () => {},
+      registerPendingDelete: () => {},
+      isPendingDelete: () => false,
+      applyTerminal: (nodeId, _jobId, detail) => {
+        if (detail.status === 'succeeded') {
+          const node = nodes.get(nodeId);
+          if (node) nodes.set(nodeId, { ...node, data: { ...node.data, genStatus: undefined, src: detail.asset?.url ?? '' } });
+        }
+        return 'terminal';
+      },
+      settleCancelled: () => {},
+      saveCanvas: async () => true,
+      toast: () => {},
+      openRechargeForCreditsError: () => false,
+      addAuthResume: () => {},
+      rememberAsset: () => {},
+    };
+    const emptyPage: GenerationRecoveryPage = { protocol_version: 1, canvas_version: 1, records: [], next_cursor: null };
+    const runtime = createGenerationRuntime(host, {
+      fetchJobStatus: (async () => ({
+        status: 'succeeded', progress: 100,
+        asset: { id: '9', url: 'https://a/9.png', type: 'image' },
+        output_assets: [{ id: '9', url: 'https://a/9.png', type: 'image' }],
+      })) as never,
+      fetchRecoveryPage: (async () => JSON.parse(JSON.stringify(emptyPage))) as never,
+      setTimeout: (() => 0) as never,
+      clearTimeout: () => {},
+      newId: () => 'sub-retry-1',
+    });
+    runtime.register(normalGenerationTask);
+    apiMocks.retryGenerationJob.mockResolvedValueOnce({
+      generation_job_id: 'j2', cursor: 2,
+      canvas_binding: { protocol_version: 1, submission_id: 'sub-retry-1', target_node_id: 'n1', binding_revision: 1, job_id: 'j2', is_current: true },
+    } as never);
+
+    expect(runtime.retry('n1')).toBe(true);
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+
+    const data = nodes.get('n1')!.data;
+    expect(data.jobId).toBe('j2');
+    expect(data.generationRecovery).toEqual({ protocolVersion: 1, submissionId: 'sub-retry-1', outputKey: 'primary' });
+    expect(runtime.composeSaveFields()!.recoveryChanges.map((change) => `${change.action}:${change.recoveryItemId}`).sort()).toEqual([
+      'apply:gcr:sub-retry-1:primary',
+      'replaceTarget:gcr:sub-retry-1:$target',
+    ]);
+    expect(nodes.has('n1')).toBe(true); // 一对一：目标卡保留为结果卡（不扇出移除）
   });
 });

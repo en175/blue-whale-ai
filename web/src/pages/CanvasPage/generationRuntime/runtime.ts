@@ -467,7 +467,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       : null;
     const execution: ActiveExecution = {
       round: nextRound(), projectId, loadEpoch: host.getLoadEpoch(), nodeId,
-      phase: 'submitting', targetRole: seedTarget.role,
+      phase: 'submitting', targetRole: seedTarget.role, def,
     };
     host.setActiveJob(nodeId, execution.round);
     active.set(nodeId, execution);
@@ -605,7 +605,11 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   /** 取消/删除时复用在途登记；无在途（水合竞态）则即时登记。 */
   const ensureExecution = (nodeId: string, def: GenerationTaskDefinition, jobId: string): ActiveExecution => {
     const existing = active.get(nodeId);
-    if (existing) return existing;
+    if (existing) {
+      // 缺 def 的在途登记（历史重试路径创建）：复用时回填，终态分发不退化为输出数量判断
+      if (existing.def == null) existing.def = def;
+      return existing;
+    }
     const execution: ActiveExecution = {
       round: nextRound(),
       projectId: host.getProjectId()!,

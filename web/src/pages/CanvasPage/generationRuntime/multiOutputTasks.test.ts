@@ -455,4 +455,138 @@ describe('多结果家族：运行时集成', () => {
     expect(fake.nodes.get(segmentId)).toBeTruthy(); // 作品保留（扇出成功）
     expect(fake.removes).not.toContain(segmentId);
   });
+
+  // ── IKJKU6：失败重试保留任务类型定义——重试成功终态经 isMultiOutputSuccess / planFanoutCards 分发 ──
+
+  /** 场景切分失败卡（marker 受理关联 + identity.lastInput 冻结输入）。 */
+  const sceneSplitFailedCard = () => ({
+    id: 'ph-1', type: 'mediaNode' as const, position: { x: 958, y: 0 },
+    data: {
+      jobId: 'sj0', genStatus: 'failed' as const,
+      sceneSplit: { sourceAssetId: '5', lastInput: { source_asset_id: '5', target_node_id: 'ph-1', granularity: 'standard' as const } },
+      generationRecovery: { protocolVersion: 1 as const, submissionId: SUBMISSION, outputKey: '$target' },
+    },
+  });
+
+  const twoSegmentDetail = () => ({
+    job_id: 'sj1', status: 'succeeded', progress: 100, asset: null,
+    output_assets: [
+      { id: 'a1', url: 'http://t/1.mp4', type: 'video' },
+      { id: 'a2', url: 'http://t/2.mp4', type: 'video' },
+    ],
+    result: { duration: 30, segments: [
+      { segment_index: 1, start_time: 0, end_time: 15, segment_asset_id: 'a1' },
+      { segment_index: 2, start_time: 15, end_time: 30, segment_asset_id: 'a2' },
+    ] },
+  });
+
+  const twoSegmentPage = (): GenerationRecoveryPage => ({
+    protocol_version: 1, canvas_version: 1, next_cursor: null,
+    records: [{
+      submission_id: SUBMISSION, target_node_id: 'ph-1', job_id: 'sj1', task_type: 'video_scene_split',
+      binding_revision: 1, is_current: true,
+      job: { job_id: 'sj1', type: 'video_scene_split', status: 'succeeded', progress: 100, output_asset_ids: ['a1', 'a2'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+      recovery_seed: { target: { role: 'result-placeholder', x: 958, y: 0, width: 320, height: 320, name: '场景切分 · 标准' }, sources: [] },
+      previous_target_snapshot: null,
+      items: [
+        { recovery_item_id: `gcr:${SUBMISSION}:$target`, output_key: '$target', node_id: 'ph-1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+        { recovery_item_id: `gcr:${SUBMISSION}:segment:1`, output_key: 'segment:1', node_id: `generation-result:${SUBMISSION}:segment:1`, state: 'pending', revision: 0, node_binding_revision: 0, asset_id: 'a1', slot_id: null },
+        { recovery_item_id: `gcr:${SUBMISSION}:segment:2`, output_key: 'segment:2', node_id: `generation-result:${SUBMISSION}:segment:2`, state: 'pending', revision: 0, node_binding_revision: 0, asset_id: 'a2', slot_id: null },
+      ],
+    }],
+  });
+
+  it('重试成功仅 1 段：扇出 1 张规范段卡（marker segment:1），不落 primary', async () => {
+    const fake = createFakeHost();
+    fake.nodes.set('ph-1', sceneSplitFailedCard());
+    apiMocks.createVideoSceneSplit.mockResolvedValueOnce({ job_id: 'sj1', status: 'queued', canvas_binding: BINDING_VIEW });
+    const runtime = setupRuntime(fake, [oneSegmentDetail()], oneSegmentPage());
+
+    expect(runtime.retry('ph-1')).toBe(true);
+    await flushMicrotasks(20);
+
+    const segmentId = `generation-result:${SUBMISSION}:segment:1`;
+    expect(fake.removes).toContain('ph-1'); // 占位卡扇出移除——非一对一 primary 转换
+    expect(fake.nodes.get(segmentId)!.data).toMatchObject({
+      fileName: '第 1 段 00:00-00:10',
+      generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'segment:1' },
+    });
+    expect(runtime.composeSaveFields()!.recoveryChanges.map((change) => `${change.action}:${change.recoveryItemId}`).sort()).toEqual([
+      `apply:gcr:${SUBMISSION}:segment:1`,
+      `replaceTarget:gcr:${SUBMISSION}:$target`,
+    ]);
+  });
+
+  it('重试成功多段：段命名与网格布局（planFanoutCards）生效', async () => {
+    const fake = createFakeHost();
+    fake.nodes.set('ph-1', sceneSplitFailedCard());
+    apiMocks.createVideoSceneSplit.mockResolvedValueOnce({ job_id: 'sj1', status: 'queued', canvas_binding: BINDING_VIEW });
+    const runtime = setupRuntime(fake, [twoSegmentDetail()], twoSegmentPage());
+
+    expect(runtime.retry('ph-1')).toBe(true);
+    await flushMicrotasks(20);
+
+    const first = fake.nodes.get(`generation-result:${SUBMISSION}:segment:1`);
+    const second = fake.nodes.get(`generation-result:${SUBMISSION}:segment:2`);
+    expect(first!.data).toMatchObject({ fileName: '第 1 段 00:00-00:15', generationRecovery: { outputKey: 'segment:1' } });
+    expect(second!.data).toMatchObject({ fileName: '第 2 段 00:15-00:30', generationRecovery: { outputKey: 'segment:2' } });
+    expect(second!.position.x).toBeGreaterThan(first!.position.x); // 网格布局（默认横排 320 之外的家族排列）
+    expect(runtime.composeSaveFields()!.recoveryChanges.map((change) => `${change.action}:${change.recoveryItemId}`).sort()).toEqual([
+      `apply:gcr:${SUBMISSION}:segment:1`,
+      `apply:gcr:${SUBMISSION}:segment:2`,
+      `replaceTarget:gcr:${SUBMISSION}:$target`,
+    ]);
+  });
+
+  it('人声分离重试成功：轨卡「源名(轨词).格式」命名与纵向轨列（planFanoutCards）生效', async () => {
+    const fake = createFakeHost();
+    fake.nodes.set('vs-1', {
+      id: 'vs-1', type: 'mediaNode', position: { x: 958, y: 0 },
+      data: {
+        jobId: 'vj0', genStatus: 'failed', fileName: '素材视频(人声背景分离)',
+        vocalSplit: { sourceAssetId: '5', lastInput: { source_asset_id: '5', scene: 'drama', output_format: 'flac' } },
+        generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: '$target' },
+      },
+    });
+    apiMocks.createVocalSplit.mockResolvedValueOnce({ job_id: 'vj1', status: 'queued', canvas_binding: { ...BINDING_VIEW, target_node_id: 'vs-1', job_id: 'vj1' } });
+    const detail = {
+      job_id: 'vj1', status: 'succeeded', progress: 100, asset: null,
+      output_assets: [
+        { id: 't1', url: 'http://t/v.flac', type: 'audio' },
+        { id: 't2', url: 'http://t/m.flac', type: 'audio' },
+      ],
+      tracks: [
+        { track_type: 'voice', asset_id: 't1', url: 'http://t/v.flac', duration: 8 },
+        { track_type: 'music', asset_id: 't2', url: 'http://t/m.flac', duration: 8 },
+      ],
+    };
+    const page: GenerationRecoveryPage = {
+      protocol_version: 1, canvas_version: 1, next_cursor: null,
+      records: [{
+        submission_id: SUBMISSION, target_node_id: 'vs-1', job_id: 'vj1', task_type: 'vocal_split',
+        binding_revision: 1, is_current: true,
+        job: { job_id: 'vj1', type: 'vocal_split', status: 'succeeded', progress: 100, output_asset_ids: ['t1', 't2'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+        recovery_seed: { target: { role: 'result-placeholder', x: 958, y: 0, width: 320, height: 320, name: '素材视频(人声背景分离)' }, sources: [] },
+        previous_target_snapshot: null,
+        items: [
+          { recovery_item_id: `gcr:${SUBMISSION}:$target`, output_key: '$target', node_id: 'vs-1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+          { recovery_item_id: `gcr:${SUBMISSION}:track:voice`, output_key: 'track:voice', node_id: `generation-result:${SUBMISSION}:track:voice`, state: 'pending', revision: 0, node_binding_revision: 0, asset_id: 't1', slot_id: null },
+          { recovery_item_id: `gcr:${SUBMISSION}:track:music`, output_key: 'track:music', node_id: `generation-result:${SUBMISSION}:track:music`, state: 'pending', revision: 0, node_binding_revision: 0, asset_id: 't2', slot_id: null },
+        ],
+      }],
+    };
+    const runtime = setupRuntime(fake, [detail], page);
+
+    expect(runtime.retry('vs-1')).toBe(true);
+    await flushMicrotasks(20);
+
+    const voice = fake.nodes.get(`generation-result:${SUBMISSION}:track:voice`);
+    const music = fake.nodes.get(`generation-result:${SUBMISSION}:track:music`);
+    expect(voice!.data).toMatchObject({ fileName: '素材视频(人声).flac', generationRecovery: { outputKey: 'track:voice' } });
+    expect(music!.data).toMatchObject({ fileName: '素材视频(音乐).flac' });
+    expect('jobId' in voice!.data).toBe(false); // 轨卡不带 jobId（家族口径，默认布局会写）
+    expect(voice!.position).toEqual({ x: 958, y: 0 }); // 纵向轨列（默认横排 320 之外的家族排列）
+    expect(music!.position).toEqual({ x: 958, y: 300 });
+    expect(fake.removes).toContain('vs-1');
+  });
 });

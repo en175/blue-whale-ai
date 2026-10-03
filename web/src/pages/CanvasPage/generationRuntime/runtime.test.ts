@@ -157,6 +157,8 @@ function createFakeDef() {
         return cancelResponse();
       },
       planRecovery: normalGenerationTask.planRecovery,
+      /** 重试登记保留 def 回归用（IKJKU6）：用例按需注入类型特有的多结果判定。 */
+      isMultiOutputSuccess: undefined as undefined | ((detail: unknown) => boolean),
     } as unknown as GenerationTaskDefinition,
   };
 }
@@ -418,6 +420,57 @@ describe('生成任务运行时：retry', () => {
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '401', genStatus: 'generating' } });
     expect(runtime.retry('n1')).toBe(true);
     expect(kit.calls.retry).toHaveLength(0);
+  });
+
+  // IKJKU6：重试登记保留任务类型定义——多结果家族重试成功终态经 isMultiOutputSuccess 分发
+  const retryFanoutSetup = (script: Array<Record<string, unknown>> = [
+    { status: 'succeeded', progress: 100, asset: null, output_assets: [{ id: '31', url: 'https://a/31.png', type: 'image' }] },
+  ]) => {
+    const { fake, runtime, kit, page } = setup({ script });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '401', genStatus: 'failed' } });
+    kit.def.isMultiOutputSuccess = () => true; // 类型特有判定：单输出仍为多结果（场景切分 1 段同款）
+    kit.respond.retry(async () => ({ jobId: '402', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '402') }));
+    page.mockImplementation(async () => ({
+      protocol_version: 1, canvas_version: 1, next_cursor: null,
+      records: [{
+        submission_id: 'uuid-0001', target_node_id: 'n1', job_id: '402', task_type: 'image',
+        binding_revision: 1, is_current: true, job: null, recovery_seed: null, previous_target_snapshot: null,
+        items: [
+          { recovery_item_id: 'gcr:uuid-0001:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+          { recovery_item_id: 'gcr:uuid-0001:seg:1', output_key: 'seg:1', node_id: 'generation-output:31', state: 'pending', revision: 0, node_binding_revision: 0, asset_id: '31', slot_id: null },
+        ],
+      }],
+    }) as never);
+    return { fake, runtime, kit };
+  };
+
+  it('重试成功仅 1 输出仍按类型定义扇出（不退化为输出数量判断、不落 primary）', async () => {
+    const { fake, runtime } = retryFanoutSetup();
+    expect(runtime.retry('n1')).toBe(true);
+    await flushMicrotasks(30);
+    expect(fake.removes).toContain('n1'); // 占位卡扇出移除（非一对一保留）
+    expect(fake.data('generation-output:31').generationRecovery).toEqual({
+      protocolVersion: 1, submissionId: 'uuid-0001', outputKey: 'seg:1',
+    });
+    const fields = runtime.composeSaveFields();
+    expect(fields!.recoveryChanges.map((change) => `${change.action}:${change.recoveryItemId}`).sort()).toEqual([
+      'apply:gcr:uuid-0001:seg:1',
+      'replaceTarget:gcr:uuid-0001:$target',
+    ]);
+  });
+
+  it('重试在途执行被取消复用：def.cancel 可用，抢先成功 1 输出仍经类型定义扇出', async () => {
+    const { fake, runtime, kit } = retryFanoutSetup([
+      { status: 'processing', progress: 10, asset: null }, // retry 首轮轮询：续链
+      { status: 'succeeded', progress: 100, asset: null, output_assets: [{ id: '31', url: 'https://a/31.png', type: 'image' }] }, // cancel 后权威状态抢先成功
+    ]);
+    expect(runtime.retry('n1')).toBe(true);
+    await flushMicrotasks(); // 受理 + 首轮 processing（轮询在途）
+    expect(runtime.cancel('n1')).toBe(true);
+    await flushMicrotasks(30);
+    expect(kit.calls.cancel).toHaveLength(1); // 取消差异（def.cancel）在重试后的执行上可用
+    expect(fake.removes).toContain('n1'); // 抢先成功 1 输出：仍按类型定义扇出（非 primary 保留）
+    expect(fake.settles).toHaveLength(0); // 成功抢先：不回退卡
   });
 });
 
