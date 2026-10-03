@@ -106,8 +106,10 @@ describe('普通生成类型定义：创建/重试/取消协议', () => {
 });
 
 describe('普通生成类型定义：恢复规划与输出槽', () => {
-  const hostOf = (ids: string[]): GenerationRuntimeHost => ({
-    findNode: (id: string) => (ids.includes(id) ? { id, type: 'mediaNode', position: { x: 0, y: 0 }, data: {} } : null),
+  const hostOf = (ids: string[], dataById: Record<string, Record<string, unknown>> = {}): GenerationRuntimeHost => ({
+    findNode: (id: string) => (ids.includes(id)
+      ? { id, type: 'mediaNode', position: { x: 0, y: 0 }, data: dataById[id] ?? {} }
+      : null),
   } as unknown as GenerationRuntimeHost);
 
   const record = (overrides: Partial<GenerationRecoveryRecord> = {}): GenerationRecoveryRecord => ({
@@ -189,7 +191,7 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
         { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
         { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'present', revision: 1, node_binding_revision: 1, asset_id: '9', slot_id: null },
       ],
-    }), hostOf(['n1']));
+    }), hostOf(['n1'], { n1: { generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' } } }));
     expect(plan).toEqual({ kind: 'none' });
     // 同项卡缺席（误删/丢失）→ 仍按投影补出
     const restore = normalGenerationTask.planRecovery!(record({
@@ -200,6 +202,23 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
       ],
     }), hostOf([]));
     expect(restore.kind).toBe('apply-outputs');
+  });
+
+  it('IKJKU3 pending 判定区分「已应用成品在场」与「待转换原卡在场」：present 且卡在场看 marker', () => {
+    const succeededJob = { job_id: 'j1', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' };
+    const items = [
+      { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending' as const, revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+      { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'present' as const, revision: 1, node_binding_revision: 1, asset_id: '9', slot_id: null },
+    ];
+    // 待转换原卡在场（无 marker——受理回执丢失后的空卡）→ 仍 apply-outputs 原位写入
+    const plainHost = hostOf(['n1'], { n1: { fileName: '原卡' } });
+    expect(normalGenerationTask.planRecovery!(record({ job: succeededJob, items }), plainHost).kind).toBe('apply-outputs');
+    // marker 属他提交（旧任务转换过的卡）→ 不算本输出已应用
+    const staleHost = hostOf(['n1'], { n1: { generationRecovery: { protocolVersion: 1, submissionId: 'sub-other', outputKey: 'primary' } } });
+    expect(normalGenerationTask.planRecovery!(record({ job: succeededJob, items }), staleHost).kind).toBe('apply-outputs');
+    // pending 一律待应用（原卡在场不豁免）
+    const pendingItems = [items[0]!, { ...items[1]!, state: 'pending' as const }];
+    expect(normalGenerationTask.planRecovery!(record({ job: succeededJob, items: pendingItems }), plainHost).kind).toBe('apply-outputs');
   });
 });
 

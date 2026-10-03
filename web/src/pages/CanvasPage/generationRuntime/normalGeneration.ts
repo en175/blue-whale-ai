@@ -86,11 +86,21 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
   planRecovery(record: GenerationRecoveryRecord, host: GenerationRuntimeHost): RecoveryCardPlan {
     const targetExists = host.findNode(record.target_node_id) != null;
     const jobStatus = record.job?.status;
-    // present 且卡仍在画布 = 已应用且在场（已保存编辑）：不再扇出（B.3 一对一成品卡保护）；
-    // present 而卡缺席（误删/丢失）仍补出。pending 一律待应用。
+    // present 且卡仍在画布且卡带匹配 marker = 已应用成品在场（已保存编辑）：不再扇出
+    // （B.3 一对一成品卡保护）；present 而卡缺席（误删/丢失）仍补出；present 而卡在场
+    // 但无本输出 marker（IKJKU3：受理回执丢失的空原卡/卡数据丢失）= 待转换原卡，仍待
+    // 应用——由扇出原位写回，防止服务端状态先行推进造成永久跳过。pending 一律待应用。
+    const appliedOnCanvas = (item: GenerationRecoveryRecord['items'][number]) => {
+      const node = host.findNode(item.node_id);
+      if (node == null) return false;
+      const marker = node.data?.generationRecovery;
+      if (marker == null || typeof marker !== 'object') return false;
+      const { protocolVersion, submissionId, outputKey } = marker as Record<string, unknown>;
+      return protocolVersion === 1 && submissionId === record.submission_id && outputKey === item.output_key;
+    };
     const pendingOutputs = record.items.filter(
       (item) => item.output_key !== TARGET_OUTPUT_KEY
-        && (item.state === 'pending' || (item.state === 'present' && host.findNode(item.node_id) == null)),
+        && (item.state === 'pending' || (item.state === 'present' && !appliedOnCanvas(item))),
     );
     if (jobStatus === 'succeeded' && pendingOutputs.length > 0) {
       return {

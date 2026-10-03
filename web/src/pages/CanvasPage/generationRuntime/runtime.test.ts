@@ -770,6 +770,142 @@ describe('生成任务运行时：保存差分与撤销', () => {
   });
 });
 
+/* ============================================
+ * IKJKU3 一对一结果原位写回原卡：受理回执丢失、原卡已在服务端保存的一对一
+ * 普通生成任务成功后，恢复扇出对「卡在场且未应用」的原卡原位写入可信素材
+ * （src/assetId）、任务身份（jobId）与 primary 标记——不重建卡、不覆盖用户已
+ * 保存的名称/位置/尺寸（B.3/B.6 普通编辑优先），转换以同笔 replaceTarget/apply
+ * 保存确认完成。
+ * ============================================ */
+describe('生成任务运行时：一对一原位写回原卡（IKJKU3）', () => {
+  /** 一对一 succeeded 恢复记录：$target pending + primary pending（受理回执丢失形态）。 */
+  const oneToOneRecord = (role: 'draft' | 'existing-media' | 'result-placeholder'): GenerationRecoveryRecord => ({
+    submission_id: 'sub-1', target_node_id: 'n1', job_id: '501', task_type: 'image',
+    binding_revision: 1, is_current: true,
+    job: { job_id: '501', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+    recovery_seed: { target: { role, x: 5, y: 6, width: 320, height: 320, name: '原卡' }, sources: [] },
+    previous_target_snapshot: null,
+    items: [
+      { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+      { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'pending', revision: 0, node_binding_revision: 1, asset_id: '9', slot_id: null },
+    ],
+  } as GenerationRecoveryRecord);
+
+  const succeededDetail = {
+    status: 'succeeded', progress: 100,
+    asset: { id: '9', url: 'https://a/9.png', type: 'image' },
+    output_assets: [{ id: '9', url: 'https://a/9.png', type: 'image' }],
+  };
+
+  /** 原卡在场（受理回执丢失：无 jobId/marker）+ 一次恢复扫描（含扇出收尾）。 */
+  const recoverWithCard = async (nodeData: Record<string, unknown>, record: GenerationRecoveryRecord) => {
+    const { fake, runtime, page } = setup({ script: [succeededDetail] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 42, y: 24 }, data: nodeData });
+    page.mockImplementation(async () => ({
+      protocol_version: 1, canvas_version: 1, next_cursor: null, records: [record],
+    }) as never);
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    return { fake, runtime };
+  };
+
+  it('受理回执丢失（draft 原卡在场）：原位写入素材/任务身份/primary 标记，不重建卡、编辑保留，差分 replaceTarget+apply', async () => {
+    const { fake, runtime } = await recoverWithCard(
+      { fileName: '用户草稿改名', draft: true, mediaType: 'image' }, // src 空、无 jobId/marker
+      oneToOneRecord('draft'),
+    );
+    expect(fake.inserts).toHaveLength(0); // 不重建卡
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.data('n1')).toMatchObject({
+      src: 'https://a/9.png', // 修复前保持空（F4 核心）
+      assetId: '9',
+      jobId: '501',
+      fileName: '用户草稿改名', // B.3/B.6：普通编辑保留
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    });
+    expect(fake.data('n1').genStatus).toBeUndefined(); // 成功占位清理
+    expect(fake.nodes.get('n1')?.position).toEqual({ x: 42, y: 24 }); // 位置保留
+    expect(fake.saves).toContain('p1'); // 扇出同笔落盘
+    const fields = runtime.composeSaveFields();
+    expect(fields?.recoveryChanges).toEqual([
+      { recoveryItemId: 'gcr:sub-1:$target', expectedRevision: 1, action: 'replaceTarget' },
+      { recoveryItemId: 'gcr:sub-1:primary', expectedRevision: 0, action: 'apply' },
+    ]);
+    // 保存回执确认（$target replaced + primary present）后：转换完成，无待确认动作
+    runtime.onSaveReceipt({ commandId: fields!.commandId, replayed: false, changes: [
+      { recoveryItemId: 'gcr:sub-1:$target', revision: 2, nodeBindingRevision: 1, state: 'replaced' },
+      { recoveryItemId: 'gcr:sub-1:primary', revision: 1, nodeBindingRevision: 1, state: 'present' },
+    ] });
+    expect(runtime.composeSaveFields()).toBeNull();
+  });
+
+  it('受理回执丢失（existing-media 原卡在场）：src 替换为新产物，用户尺寸保留', async () => {
+    const { fake } = await recoverWithCard(
+      { fileName: '用户素材改名', src: 'https://old/original.png', mediaType: 'image', width: 640, height: 480 },
+      oneToOneRecord('existing-media'),
+    );
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.data('n1')).toMatchObject({
+      src: 'https://a/9.png', // 原素材 → 新产物
+      assetId: '9',
+      jobId: '501',
+      fileName: '用户素材改名',
+      width: 640, height: 480, // 用户尺寸保留
+    });
+  });
+
+  it('受理回执丢失（占位卡已随画布保存在场）：原位写入素材并清生成中占位态', async () => {
+    const { fake } = await recoverWithCard(
+      { fileName: '图片生成中', genStatus: 'generating', progress: 40, mediaType: 'image' },
+      oneToOneRecord('result-placeholder'),
+    );
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.data('n1')).toMatchObject({
+      src: 'https://a/9.png', assetId: '9', jobId: '501',
+      genStatus: undefined, progress: 100,
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    });
+  });
+
+  it('present 先行而卡数据丢失（卡在场无 marker）：仍原位补写素材与标记，差分仅 replaceTarget 不重复 apply', async () => {
+    const record = oneToOneRecord('draft');
+    record.items[1] = { ...record.items[1]!, state: 'present', revision: 1 };
+    const { fake, runtime } = await recoverWithCard({ fileName: '原卡', mediaType: 'image' }, record);
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.data('n1')).toMatchObject({
+      src: 'https://a/9.png', assetId: '9',
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    });
+    // present 项已确认在场：无重复 apply，仅 $target 转换
+    expect(runtime.composeSaveFields()?.recoveryChanges).toEqual([
+      { recoveryItemId: 'gcr:sub-1:$target', expectedRevision: 1, action: 'replaceTarget' },
+    ]);
+  });
+
+  it('重复恢复幂等：已写入 marker 的原卡零破坏，不重复建卡、不覆盖普通编辑', async () => {
+    const { fake, runtime } = await recoverWithCard(
+      { fileName: '用户草稿改名', draft: true, mediaType: 'image' },
+      oneToOneRecord('draft'),
+    );
+    // 保存差分未确认（项仍 pending）窗口内：用户再改名 + 重载（active 清空）
+    fake.host.patchNode('n1', { fileName: '再次改名' });
+    runtime.reset();
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    expect(fake.inserts).toHaveLength(0); // 不重复建卡
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.data('n1')).toMatchObject({
+      fileName: '再次改名', // 已应用的 primary 成品卡零破坏：不覆盖普通编辑
+      src: 'https://a/9.png', assetId: '9',
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    });
+    // 转换仍未确认（$target pending）：差分继续出 replaceTarget+apply 直到保存确认
+    const fields = runtime.composeSaveFields();
+    expect(fields?.recoveryChanges.map((c) => c.action)).toEqual(['replaceTarget', 'apply']);
+  });
+});
+
 describe('生成任务运行时：resolve 定向对账', () => {
   it('reconcileConflictItems 按台账项定向 resolve，读回服务端现状（后续差分用新 revision）', async () => {
     const { fake, runtime, kit } = setup({ script: [

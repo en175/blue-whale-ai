@@ -290,19 +290,39 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       outputs.forEach((item) => {
         const card = cardByNodeId.get(item.node_id);
         if (card == null) return; // 定制未覆盖该输出（防御）：不建卡，台账仍登记
-        if (host.findNode(item.node_id) == null) { // 判重：规范 node_id 确定性 = 扇出幂等
+        const view = views.find((candidate) => candidate.nodeId === item.node_id);
+        const existing = host.findNode(item.node_id);
+        const existingMarker = readMarker(existing?.data);
+        const applied = existing != null && existingMarker != null
+          && existingMarker.submissionId === submissionId && existingMarker.outputKey === item.output_key;
+        if (existing == null) { // 判重：规范 node_id 确定性 = 扇出幂等
           host.insertMediaNode({
             id: item.node_id,
             type: 'mediaNode',
             position: card.position,
             data: {
               ...card.data,
-              src: views.find((view) => view.nodeId === item.node_id)?.url ?? '',
+              src: view?.url ?? '',
               ...(item.asset_id != null ? { assetId: item.asset_id } : {}),
               generationRecovery: { protocolVersion: 1, submissionId, outputKey: item.output_key },
             },
           });
+        } else if (!applied) {
+          // IKJKU3 原位写入已有卡（一对一原卡在场、受理回执丢失）：写可信素材（src/assetId）、
+          // 任务身份（jobId）与 primary 标记；不重建卡、不覆盖用户已保存的名称/位置/尺寸
+          // （B.3/B.6 普通编辑优先），转换以同笔 replaceTarget/apply 保存确认。
+          host.patchNode(item.node_id, {
+            src: view?.url ?? '',
+            ...(item.asset_id != null ? { assetId: item.asset_id } : {}),
+            jobId,
+            ...(view?.mediaType != null ? { mediaType: view.mediaType } : {}),
+            ...(view?.duration != null ? { duration: view.duration } : {}),
+            generationRecovery: { protocolVersion: 1, submissionId, outputKey: item.output_key },
+            genStatus: undefined,
+            progress: 100,
+          });
         }
+        // applied：已应用成品卡零写入（重复恢复/他端已扇出，幂等）
         setLedger({
           recoveryItemId: item.recovery_item_id,
           submissionId, outputKey: item.output_key, nodeId: item.node_id,
