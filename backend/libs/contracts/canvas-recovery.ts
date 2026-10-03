@@ -64,6 +64,12 @@ export function recoveryItemId(submissionId: string, outputKey: string): string 
   return `gcr:${submissionId}:${outputKey}`;
 }
 
+/** 恢复项身份解析（recoveryItemId 的逆；submission_id 固定 36 字符 UUID 形态）。 */
+export function parseRecoveryItemId(itemId: string): { submissionId: string; outputKey: string } | null {
+  const match = /^gcr:([0-9a-f-]{36}):(.+)$/.exec(itemId);
+  return match ? { submissionId: match[1]!, outputKey: match[2]! } : null;
+}
+
 /** 目标项输出键（B.4）。 */
 export const TARGET_OUTPUT_KEY = "$target";
 /** 一对一产物输出键（B.4）。 */

@@ -17,6 +17,7 @@ import {
   TARGET_OUTPUT_KEY,
   recoveryError,
   recoveryItemId,
+  parseRecoveryItemId,
   type CanvasBinding,
   type RecoveryErrorEnvelope,
 } from "@lib/contracts";
@@ -538,10 +539,9 @@ export async function resolveCanvasRecoveryItems(
     const submissionIds = new Set<string>();
     const wanted = new Set(itemIds);
     for (const itemId of itemIds) {
-      // gcr:<submission_id>:<output_key>；submission_id 固定 36 字符 UUID。
-      const match = /^gcr:([0-9a-f-]{36}):(.+)$/.exec(itemId);
-      if (!match) throw new RecoveryContractError(recoveryError(404, "恢复项不存在", RECOVERY_REASONS.resourceNotFound));
-      submissionIds.add(match[1]!);
+      const parsed = parseRecoveryItemId(itemId);
+      if (!parsed) throw new RecoveryContractError(recoveryError(404, "恢复项不存在", RECOVERY_REASONS.resourceNotFound));
+      submissionIds.add(parsed.submissionId);
     }
     const submissions = await tx.generation_canvas_submissions.findMany({
       where: { project_id: pid, submission_id: { in: [...submissionIds] } },

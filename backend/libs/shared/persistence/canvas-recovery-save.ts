@@ -10,6 +10,7 @@ import {
   RECOVERY_REASONS,
   SAVE_CANVAS_RECOVERY_OPERATION,
   TARGET_OUTPUT_KEY,
+  parseRecoveryItemId,
   recoveryError,
 } from "@lib/contracts";
 import { Prisma } from "@prisma/client";
@@ -157,12 +158,12 @@ export async function saveCanvasWithRecovery(
     const submissionsById = new Map<string, NonNullable<ItemState["submissionRow"]>>();
     const itemStates: ItemState[] = [];
     for (const change of input.changes) {
-      const match = /^gcr:([0-9a-f-]{36}):(.+)$/.exec(change.recoveryItemId);
-      if (!match) {
+      const parsed = parseRecoveryItemId(change.recoveryItemId);
+      if (!parsed) {
         throw new RecoveryContractError(recoveryError(400, "恢复项身份无效", RECOVERY_REASONS.invalidPayload));
       }
-      const submissionId = match[1]!;
-      const outputKey = match[2]!;
+      const submissionId = parsed.submissionId;
+      const outputKey = parsed.outputKey;
       let submissionRow = submissionsById.get(submissionId) ?? null;
       if (!submissionRow) {
         const row = await tx.generation_canvas_submissions.findUnique({
@@ -320,12 +321,27 @@ export async function saveCanvasWithRecovery(
               recoveryError(422, "恢复动作与画布文档不一致", RECOVERY_REASONS.documentMismatch),
             );
           }
+          if (item.outputKey === TARGET_OUTPUT_KEY) {
+            // B.6：运行中目标不能绕过取消被删（占位删除须以取消确认为前提）；
+            // 抢先成功仍停止删除——成功产物的收口走 replaceTarget 转换，不删目标。
+            const job = await tx.generation_jobs.findUnique({
+              where: { id: item.submissionRow.generation_job_id },
+              select: { status: true },
+            });
+            if (!job || (job.status !== "cancelled" && job.status !== "failed")) {
+              throw new RecoveryContractError(
+                recoveryError(409, "任务尚未取消，不能删除目标", RECOVERY_REASONS.itemConflict, {
+                  currentRevision: item.revision, currentState: item.state,
+                }),
+              );
+            }
+          }
           if (item.outputKey !== TARGET_OUTPUT_KEY && item.outputRowId === null) {
             if (item.outputKey === PRIMARY_OUTPUT_KEY) {
               // 一对一 primary 首次 remove 必须与 replaceTarget 配套（B.6：owner 从 $target 交给 primary）。
               const paired = input.changes.some(other =>
                 other.action === "replaceTarget"
-                && /^gcr:([0-9a-f-]{36}):(.+)$/.exec(other.recoveryItemId)?.[1] === item.submissionRow.submission_id);
+                && parseRecoveryItemId(other.recoveryItemId)?.submissionId === item.submissionRow.submission_id);
               if (!paired) {
                 throw new RecoveryContractError(
                   recoveryError(422, "恢复动作与画布文档不一致", RECOVERY_REASONS.documentMismatch),
@@ -388,9 +404,9 @@ export async function saveCanvasWithRecovery(
           for (const virtual of projection.items) {
             if (persistedKeys.has(virtual.outputKey)) continue;
             const handled = input.changes.some(other => {
-              const ids = /^gcr:([0-9a-f-]{36}):(.+)$/.exec(other.recoveryItemId);
-              return ids?.[1] === item.submissionRow.submission_id
-                && ids[2] === virtual.outputKey
+              const ids = parseRecoveryItemId(other.recoveryItemId);
+              return ids?.submissionId === item.submissionRow.submission_id
+                && ids.outputKey === virtual.outputKey
                 && (other.action === "apply" || other.action === "remove");
             });
             if (!handled) {

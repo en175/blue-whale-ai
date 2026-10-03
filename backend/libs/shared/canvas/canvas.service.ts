@@ -4,7 +4,7 @@ import { BadRequestException, ConflictException, Injectable } from "@nestjs/comm
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
 import { planLegacyCardMigration, type CanvasNodeLike } from "./legacy-card-migration.js";
-import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, RECOVERY_PAGE_LIMIT_DEFAULT, RECOVERY_PAGE_LIMIT_MAX, RECOVERY_PAGE_LIMIT_MIN, RECOVERY_REASONS, RECOVERY_RESOLVE_IDS_MAX, recoverySaveFieldsSchema, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@lib/contracts";
+import { CANVAS_EDGE_LIMITS, CANVAS_RECOVERY_PROTOCOL_VERSION, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, RECOVERY_PAGE_LIMIT_DEFAULT, RECOVERY_PAGE_LIMIT_MAX, RECOVERY_PAGE_LIMIT_MIN, RECOVERY_REASONS, RECOVERY_RESOLVE_IDS_MAX, recoverySaveFieldsSchema, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@lib/contracts";
 import {
   createCanvasRepo,
   createConversationQuoteRepo,
@@ -538,7 +538,7 @@ export class CanvasService {
     }
     const page = await listCanvasRecoveryPage(this.prisma.client, projectId, limit, cursor);
     return ok({
-      protocol_version: 1,
+      protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION,
       canvas_version: page.canvasVersion,
       records: page.records,
       next_cursor: page.nextCursor,
@@ -562,7 +562,7 @@ export class CanvasService {
       if (error instanceof RecoveryContractError) return error.envelope;
       throw error;
     }
-    return ok({ protocol_version: 1, records });
+    return ok({ protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION, records });
   }
 
   /** IKJJQU（B.6）：新协议显式恢复保存——画布、恢复项、素材关联、槽位首次放置与

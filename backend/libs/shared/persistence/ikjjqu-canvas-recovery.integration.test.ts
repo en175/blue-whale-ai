@@ -314,7 +314,9 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
 
   it("★ 9五动作. remove/restore 与 replaceTarget+primary 及 settleTarget", async () => {
     // — remove：空占位移除（文档不含标记）→ removed；restore 恢复为 present —
-    await accept(acceptance(UUID_A, "node-actions", 0));
+    const createdActions = await accept(acceptance(UUID_A, "node-actions", 0));
+    // B.6 remove 守护：目标删除只在任务终态（取消/失败）后放行——先置失败再删。
+    await raw.query("UPDATE generation_jobs SET status='failed' WHERE id = ?", [Number(createdActions.generation_job_id)]);
     const empty = JSON.stringify([]);
     let version = await saveCanvasWithRecovery(prisma, baseSave(UUID_D, null, empty, [
       { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "remove" },
@@ -384,6 +386,35 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-settle" } },
     });
     expect(ownerAfter?.output_key).toBe(TARGET_OUTPUT_KEY);
+  });
+
+  it("★ B.6 remove 守护：运行中/抢先成功的目标拒绝删除（409 带现状），取消终态后放行", async () => {
+    const created = await accept(acceptance(UUID_A, "node-guard", 0));
+    const removeChange = [{ id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "remove" }];
+    // 运行中（受理即 queued）：$target 占位不能绕过取消被删 → 409 recovery_item_conflict（现状随错误返回）
+    const running = await saveCanvasWithRecovery(prisma, baseSave(UUID_B, null, JSON.stringify([]), removeChange))
+      .catch(e => e as RecoveryContractError);
+    expect(running).toBeInstanceOf(RecoveryContractError);
+    expect(running.envelope).toMatchObject({
+      code: 409,
+      data: { reason: RECOVERY_REASONS.itemConflict, currentState: "pending", currentRevision: 1 },
+    });
+    // 抢先成功：仍停止删除（成功产物的收口走 replaceTarget 转换，不删目标）
+    await raw.query("UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST('[\"12\"]' AS JSON) WHERE id = ?", [Number(created.generation_job_id)]);
+    const succeeded = await saveCanvasWithRecovery(prisma, baseSave(UUID_C, null, JSON.stringify([]), removeChange))
+      .catch(e => e as RecoveryContractError);
+    expect(succeeded.envelope).toMatchObject({ code: 409, data: { reason: RECOVERY_REASONS.itemConflict } });
+    // 两轮拒绝均零写入：目标项保持受理态、画布未建、无回执
+    const submission = await prisma.generation_canvas_submissions.findUnique({
+      where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_A } },
+    });
+    expect(submission?.target_state).toBe("pending");
+    expect(Number(submission?.target_revision)).toBe(1);
+    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    // 取消终态：放行删除
+    await raw.query("UPDATE generation_jobs SET status='cancelled' WHERE id = ?", [Number(created.generation_job_id)]);
+    const removed = await saveCanvasWithRecovery(prisma, baseSave(UUID_D, null, JSON.stringify([]), removeChange));
+    expect(removed.recoveryReceipt.changes[0]).toMatchObject({ state: "removed", revision: 2 });
   });
 
   it("★ 同 jobId 重试迁移边界：历史任务无可信关联 → 拒绝迁移（422）", async () => {
