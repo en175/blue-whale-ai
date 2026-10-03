@@ -279,8 +279,13 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
           edges: [],
         };
       const cardByNodeId = new Map(plan.nodes.map((card) => [card.id, card]));
-      host.markLocallyRemoved(nodeId);
-      host.removeMediaNode(nodeId);
+      // 一对一家族 primary 复用 target node_id：占位卡即结果卡，跳过移除重建
+      //（恢复扫描扇出时保住已成功保存的卡与用户编辑，R7/B.3）。
+      const reusesTarget = outputs.some((item) => item.node_id === nodeId);
+      if (!reusesTarget) {
+        host.markLocallyRemoved(nodeId);
+        host.removeMediaNode(nodeId);
+      }
       outputs.forEach((item) => {
         const card = cardByNodeId.get(item.node_id);
         if (card == null) return; // 定制未覆盖该输出（防御）：不建卡，台账仍登记
@@ -300,7 +305,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         setLedger({
           recoveryItemId: item.recovery_item_id,
           submissionId, outputKey: item.output_key, nodeId: item.node_id,
-          state: 'pending', revision: item.revision,
+          state: item.state, revision: item.revision, // 已 present 的项保持原状态（不置回 pending 重复 apply）
         });
       });
       for (const edge of plan.edges) {
@@ -365,6 +370,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         if (view && view.is_current === false) {
           // 意图已被替代（他端接管）：不用同 jobId 状态更新旧意图，卡由新承接收敛
           active.delete(nodeId);
+          host.clearActiveJob(nodeId);
           submitAttempts.delete(nodeId);
           return;
         }
@@ -391,7 +397,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
               const retried = await sendOnce(buildBinding(current));
               if (retried !== null && owns(execution)) {
                 const view = retried.canvasBinding ?? null;
-                if (view && view.is_current === false) { active.delete(nodeId); submitAttempts.delete(nodeId); return; }
+                if (view && view.is_current === false) { active.delete(nodeId); host.clearActiveJob(nodeId); submitAttempts.delete(nodeId); return; }
                 if (view) { execution.submissionId = view.submission_id; adoptBindingView(view); }
                 submitAttempts.delete(nodeId);
                 execution.jobId = String(retried.jobId);
@@ -487,7 +493,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         if (!owns(execution)) return;
         retryAttempts.delete(nodeId);
         const view = created.canvasBinding ?? null;
-        if (view && view.is_current === false) { active.delete(nodeId); return; }
+        if (view && view.is_current === false) { active.delete(nodeId); host.clearActiveJob(nodeId); return; }
         if (view) { execution.submissionId = view.submission_id; adoptBindingView(view); }
         execution.jobId = String(created.jobId);
         execution.phase = 'generating';

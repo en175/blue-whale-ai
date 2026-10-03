@@ -61,12 +61,12 @@ function dedicatedRetryOutcome(retried: DedicatedRetryCreatedData, jobId: string
 
 /* ── 恢复落卡规划（B.4/B.5）────────────────────────── */
 
-/** 恢复种子/原目标快照 → 目标位置。 */
-function seedPosition(record: GenerationRecoveryRecord): { x: number; y: number } {
-  const seed = record.recovery_seed?.target;
-  if (seed) return { x: seed.x, y: seed.y };
+/** 恢复落卡位置：服务端原目标快照（已保存编辑，B.3）优先；恢复种子仅无快照时回退。 */
+function recoveryPosition(record: GenerationRecoveryRecord): { x: number; y: number } {
   const pos = record.previous_target_snapshot?.position as { x?: unknown; y?: unknown } | undefined;
   if (pos != null && typeof pos.x === 'number' && typeof pos.y === 'number') return { x: pos.x, y: pos.y };
+  const seed = record.recovery_seed?.target;
+  if (seed) return { x: seed.x, y: seed.y };
   return { x: 0, y: 0 };
 }
 
@@ -96,8 +96,10 @@ function planMixMuxRecovery(
 ): RecoveryCardPlan {
   const targetExists = host.findNode(record.target_node_id) != null;
   const jobStatus = record.job?.status;
+  // present 且卡仍在画布 = 已应用在场（B.3 一对一成品卡保护）：不扇出；pending 一律待应用。
   const pendingOutputs = record.items.filter(
-    (item) => item.output_key !== TARGET_OUTPUT_KEY && (item.state === 'pending' || item.state === 'present'),
+    (item) => item.output_key !== TARGET_OUTPUT_KEY
+      && (item.state === 'pending' || (item.state === 'present' && host.findNode(item.node_id) == null)),
   );
   if (jobStatus === 'succeeded' && pendingOutputs.length > 0) {
     return {
@@ -176,7 +178,7 @@ export const audioMixTask: GenerationTaskDefinition<AudioMixCreate> = {
       const node = buildAudioMixPlaceholderNode(
         rec.target_node_id,
         mixFormatOf(seed?.name),
-        seedPosition(rec),
+        recoveryPosition(rec),
       );
       return {
         id: node.id,
@@ -246,7 +248,7 @@ export const audioVideoMuxTask: GenerationTaskDefinition<CreateAudioVideoMuxPayl
       if (identity == null) return null; // 身份不可信不猜卡（A.6 口径）
       const failed = rec.job?.status === 'failed';
       const failText = failTextOf(rec);
-      const node = buildAudioVideoMuxPlaceholderNode(rec.target_node_id, identity, rec.job_id, seedPosition(rec));
+      const node = buildAudioVideoMuxPlaceholderNode(rec.target_node_id, identity, rec.job_id, recoveryPosition(rec));
       return {
         id: node.id,
         type: 'mediaNode',

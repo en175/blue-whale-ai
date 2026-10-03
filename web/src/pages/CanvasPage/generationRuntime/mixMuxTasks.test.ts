@@ -405,6 +405,28 @@ describe('恢复落卡规划（planRecovery）', () => {
     expect(audioMixTask.planRecovery!(record(), freshHost)).toEqual({ kind: 'resume-polling' });
   });
 
+  it('B.3 优先级：恢复位置取原目标快照（已保存编辑）优先，种子仅无快照时回退', () => {
+    const plan = audioMixTask.planRecovery!(record({
+      previous_target_snapshot: { id: 'audio-mix-1', type: 'mediaNode', position: { x: 999, y: 77 } },
+    }), createFakeHost().host);
+    expect(plan).toMatchObject({ kind: 'restore-target' });
+    if (plan.kind !== 'restore-target') return;
+    expect(plan.node.position).toEqual({ x: 999, y: 77 }); // 快照位置覆盖种子 (600, 20)
+  });
+
+  it('succeeded 且 primary present 而卡在画布 → none（一对一已保存成品卡不被扇出重建）', () => {
+    const host = createFakeHost().host;
+    host.insertMediaNode({
+      id: 'audio-mix-1', type: 'mediaNode', position: { x: 600, y: 20 },
+      data: { fileName: '用户改名', generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' } },
+    });
+    const plan = audioMixTask.planRecovery!(record({
+      job: { job_id: '73', type: 'audio_mix', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+      items: [{ recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'audio-mix-1', state: 'present', revision: 1, node_binding_revision: 1, asset_id: '9', slot_id: null }],
+    }), host);
+    expect(plan).toEqual({ kind: 'none' });
+  });
+
   it('失败且卡不在画布：补失败卡保留重试入口（errorText 透传）', () => {
     const plan = audioMixTask.planRecovery!(record({
       job: { job_id: '73', type: 'audio_mix', status: 'failed', progress: 0, output_asset_ids: null, stored_error: { msg: '供应商超时' }, created_at: '2026-10-01T00:00:00Z' },

@@ -159,4 +159,43 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
     expect(node.position).toEqual({ x: 42, y: 24 });
     expect(buildRecoveryTargetNode(record({ recovery_seed: null, previous_target_snapshot: null })).position).toEqual({ x: 0, y: 0 });
   });
+
+  it('B.3 优先级：已保存快照的位置/名称/尺寸优先于种子；快照缺字段时种子回退', () => {
+    const node = buildRecoveryTargetNode(record({
+      recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 300, height: 200, name: '种子名' }, sources: [] },
+      previous_target_snapshot: {
+        id: 'n1', type: 'mediaNode', position: { x: 42, y: 24 }, width: 640, height: 480,
+        data: { fileName: '用户改名.png' },
+      },
+    }));
+    expect(node.position).toEqual({ x: 42, y: 24 });
+    expect(node.data).toMatchObject({ fileName: '用户改名.png', width: 640, height: 480 });
+    // 快照无位置/尺寸/名称 → 种子回退（发送时形态）
+    const fallback = buildRecoveryTargetNode(record({
+      recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 300, height: 200, name: '种子名' }, sources: [] },
+      previous_target_snapshot: { id: 'n1', type: 'mediaNode', data: {} },
+    }));
+    expect(fallback.position).toEqual({ x: 5, y: 6 });
+    expect(fallback.data).toMatchObject({ fileName: '种子名', width: 300, height: 200 });
+  });
+
+  it('succeeded 且输出 present 而卡仍在画布 → none（一对一已保存成品卡不被扇出重建）', () => {
+    const plan = normalGenerationTask.planRecovery!(record({
+      job: { job_id: 'j1', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+      items: [
+        { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+        { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'present', revision: 1, node_binding_revision: 1, asset_id: '9', slot_id: null },
+      ],
+    }), hostOf(['n1']));
+    expect(plan).toEqual({ kind: 'none' });
+    // 同项卡缺席（误删/丢失）→ 仍按投影补出
+    const restore = normalGenerationTask.planRecovery!(record({
+      job: { job_id: 'j1', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+      items: [
+        { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+        { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'present', revision: 1, node_binding_revision: 1, asset_id: '9', slot_id: null },
+      ],
+    }), hostOf([]));
+    expect(restore.kind).toBe('apply-outputs');
+  });
 });

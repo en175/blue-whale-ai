@@ -585,6 +585,68 @@ describe('生成任务运行时：recover', () => {
     expect(runtime.statusOf('n1')).toBeNull(); // 扇出收尾后清理在途
   });
 
+  it('一对一已保存成品卡（primary present 且卡在）：恢复零动作，不移除不重建不重复确认', async () => {
+    const { fake, runtime, status, page } = setup({ script: [
+      { status: 'succeeded', progress: 100, asset: { id: '9', url: 'https://a/9.png', type: 'image' } },
+    ] });
+    // 已保存的一对一成品卡（marker 已切 primary，用户已改名）——恢复扫描不得扇出移除重建
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 30, y: 40 }, data: {
+      jobId: '501', fileName: '用户改名', assetId: '9',
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    } });
+    page.mockImplementation(async () => ({
+      protocol_version: 1, canvas_version: 1, next_cursor: null,
+      records: [record({
+        job: { job_id: '501', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+        items: [
+          { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+          { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'present', revision: 1, node_binding_revision: 1, asset_id: '9', slot_id: null },
+        ],
+      })],
+    }) as never);
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.data('n1').fileName).toBe('用户改名'); // 用户编辑保留
+    expect(runtime.composeSaveFields()).toBeNull(); // 全部确认态：无待确认动作
+    expect(status.calls).toHaveLength(0); // 不拉详情不扇出
+  });
+
+  it('一对一恢复扇出：primary pending 复用目标 node_id → 不移除卡，差分 replaceTarget+apply', async () => {
+    const { fake, runtime, status, page } = setup({ script: [
+      { status: 'succeeded', progress: 100, asset: { id: '9', url: 'https://a/9.png', type: 'image' } },
+    ] });
+    // converge 已写 primary marker 但保存差分未确认（刷新窗口）——卡在场、项仍 pending
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 30, y: 40 }, data: {
+      jobId: '501', fileName: '用户改名',
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    } });
+    page.mockImplementation(async () => ({
+      protocol_version: 1, canvas_version: 1, next_cursor: null,
+      records: [record({
+        job: { job_id: '501', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+        items: [
+          { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+          { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'pending', revision: 0, node_binding_revision: 1, asset_id: '9', slot_id: null },
+        ],
+      })],
+    }) as never);
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    // 扇出判定 primary node_id = 目标卡：不 removeMediaNode、不 insertMediaNode，编辑保留
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.data('n1').fileName).toBe('用户改名');
+    expect(fake.data('n1').generationRecovery).toEqual({ protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' });
+    const fields = runtime.composeSaveFields();
+    expect(fields!.recoveryChanges).toEqual([
+      { recoveryItemId: 'gcr:sub-1:$target', expectedRevision: 1, action: 'replaceTarget' },
+      { recoveryItemId: 'gcr:sub-1:primary', expectedRevision: 0, action: 'apply' },
+    ]);
+    expect(status.calls).toContain('501'); // 拉详情补产物 URL
+  });
+
   it('A→B→A：扫描期间项目切换即中止分页', async () => {
     const { fake, runtime, page, status } = setup();
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
@@ -848,10 +910,9 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     expect(fake.data('generation-output:11').fileName).toBe('用户改名');
     const fields = runtime.composeSaveFields();
     const applied = fields?.recoveryChanges.filter((c) => c.action === 'apply') ?? [];
-    // 扇出路径把台账置回 pending：pending 项（slot:12/primary）差分 apply；present 项
-    //（slot:11）同状态幂等 apply（B.6「重复 apply 无副作用成功」），不增 revision
-    expect(applied.map((c) => c.recoveryItemId).sort()).toEqual(['gcr:sub-1:primary', 'gcr:sub-m:slot:11', 'gcr:sub-m:slot:12']);
-    expect(applied.find((c) => c.recoveryItemId === 'gcr:sub-m:slot:11')?.expectedRevision).toBe(2);
+    // 扇出保持台账项的服务端状态：pending 项（slot:12/primary）差分 apply；
+    // present 项（slot:11）已确认在场，无重复 apply（B.6）
+    expect(applied.map((c) => c.recoveryItemId).sort()).toEqual(['gcr:sub-1:primary', 'gcr:sub-m:slot:12']);
     const replaced = fields?.recoveryChanges.filter((c) => c.action === 'replaceTarget') ?? [];
     expect(replaced.map((c) => c.recoveryItemId).sort()).toEqual(['gcr:sub-1:$target', 'gcr:sub-m:$target']);
   });

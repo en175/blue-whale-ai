@@ -86,8 +86,11 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
   planRecovery(record: GenerationRecoveryRecord, host: GenerationRuntimeHost): RecoveryCardPlan {
     const targetExists = host.findNode(record.target_node_id) != null;
     const jobStatus = record.job?.status;
+    // present 且卡仍在画布 = 已应用且在场（已保存编辑）：不再扇出（B.3 一对一成品卡保护）；
+    // present 而卡缺席（误删/丢失）仍补出。pending 一律待应用。
     const pendingOutputs = record.items.filter(
-      (item) => item.output_key !== TARGET_OUTPUT_KEY && (item.state === 'pending' || item.state === 'present'),
+      (item) => item.output_key !== TARGET_OUTPUT_KEY
+        && (item.state === 'pending' || (item.state === 'present' && host.findNode(item.node_id) == null)),
     );
     if (jobStatus === 'succeeded' && pendingOutputs.length > 0) {
       return {
@@ -130,14 +133,16 @@ export function buildRecoveryTargetNode(record: GenerationRecoveryRecord): {
   const mediaType = mediaTypeOfTask(record.task_type);
   const seed = record.recovery_seed?.target;
   const snapshot = record.previous_target_snapshot;
-  const position = seed
-    ? { x: seed.x, y: seed.y }
-    : readSnapshotPosition(snapshot) ?? { x: 0, y: 0 };
+  // B.3：服务端已保存编辑（原目标快照）优先；恢复种子仅描述发送时形态，无快照时回退。
+  const position = readSnapshotPosition(snapshot)
+    ?? (seed ? { x: seed.x, y: seed.y } : { x: 0, y: 0 });
   const label = mediaType === 'video' ? '视频' : mediaType === 'audio' ? '音频' : '图片';
-  const fileName = seed?.name
-    || (typeof snapshot?.data === 'object' && snapshot.data !== null
-      ? String((snapshot.data as Record<string, unknown>).fileName ?? '') : '')
+  const fileName = (typeof snapshot?.data === 'object' && snapshot.data !== null
+    ? String((snapshot.data as Record<string, unknown>).fileName ?? '') : '')
+    || seed?.name
     || `${label}生成中`;
+  const size = readSnapshotSize(snapshot)
+    ?? (seed && seed.width > 0 && seed.height > 0 ? { width: seed.width, height: seed.height } : null);
   const failed = record.job?.status === 'failed';
   const storedError = record.job?.stored_error;
   const failText = typeof storedError === 'object' && storedError != null
@@ -154,7 +159,7 @@ export function buildRecoveryTargetNode(record: GenerationRecoveryRecord): {
       fileName,
       jobId: record.job_id,
       ...(failed && failText ? { errorText: failText } : {}),
-      ...(seed && seed.width > 0 && seed.height > 0 ? { width: seed.width, height: seed.height } : {}),
+      ...(size ? size : {}),
     },
   };
 }
@@ -167,3 +172,11 @@ function readSnapshotPosition(snapshot: Record<string, unknown> | null): { x: nu
   return null;
 }
 
+function readSnapshotSize(snapshot: Record<string, unknown> | null): { width: number; height: number } | null {
+  const width = snapshot?.width;
+  const height = snapshot?.height;
+  if (typeof width === 'number' && width > 0 && typeof height === 'number' && height > 0) {
+    return { width, height };
+  }
+  return null;
+}
