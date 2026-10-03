@@ -447,7 +447,8 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     };
   }
 
+  // IKJLTS：补 assetId（apply(primary) 场景产物清单为 ["12"]，需与可信产物一致）。
   function markerNode(id: string, submissionId: string, outputKey: string) {
-    return { id, type: "mediaNode", position: { x: 0, y: 0 }, data: { generationRecovery: { protocolVersion: 1, submissionId, outputKey }, mediaType: "image" } };
+    return { id, type: "mediaNode", position: { x: 0, y: 0 }, data: { generationRecovery: { protocolVersion: 1, submissionId, outputKey }, mediaType: "image", assetId: "12" } };
   }
 });

@@ -21,6 +21,7 @@ import { RecoveryContractError } from "./generation-canvas-recovery-repo.js";
 import {
   isMultiResultOutputKey,
   outputNodeIdForKey,
+  parseAssetIds,
   projectVirtualOutputs,
   type VirtualOutputItem,
   type VirtualOutputProjection,
@@ -218,8 +219,9 @@ export async function saveCanvasWithRecovery(
     const ownerByNode = new Map(ownerRows.map(owner => [owner.node_id, owner]));
     const changes: CanvasRecoveryReceiptChange[] = [];
     // IKJJQY：可信终态投影缓存（同提交多次动作/扇出校验只查一次；锁内读，无 TOCTOU）。
-    const projectionCache = new Map<string, VirtualOutputProjection>();
-    const projectionOf = async (submissionRow: NonNullable<ItemState["submissionRow"]>): Promise<VirtualOutputProjection> => {
+    // IKJLTS：连同 job 行一并缓存——primary 的可信产物资产取任务产物清单（output_asset_ids）。
+    const projectionCache = new Map<string, { projection: VirtualOutputProjection; job: { output_asset_ids: unknown } | null }>();
+    const projectionOf = async (submissionRow: NonNullable<ItemState["submissionRow"]>): Promise<{ projection: VirtualOutputProjection; job: { output_asset_ids: unknown } | null }> => {
       const cached = projectionCache.get(submissionRow.submission_id);
       if (cached) return cached;
       const job = await tx.generation_jobs.findUnique({
@@ -231,13 +233,14 @@ export async function saveCanvasWithRecovery(
         targetNodeId: submissionRow.target_node_id,
         job,
       });
-      projectionCache.set(submissionRow.submission_id, projection);
-      return projection;
+      const entry = { projection, job };
+      projectionCache.set(submissionRow.submission_id, entry);
+      return entry;
     };
     /** 虚拟输出（无行）的 apply/remove：键必须在投影集内（防伪造键/漏投影；B.4 规范身份）。 */
     const assertVirtualKeyProjected = async (item: ItemState): Promise<VirtualOutputItem | null> => {
       if (item.outputRowId !== null) return null;
-      const projection = await projectionOf(item.submissionRow);
+      const { projection } = await projectionOf(item.submissionRow);
       if (projection.kind === "invalid") {
         throw new RecoveryContractError(
           recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),
@@ -250,6 +253,33 @@ export async function saveCanvasWithRecovery(
         );
       }
       return virtual;
+    };
+    /** IKJLTS（PR981-REVIEW2-R2）：输出项的可信产物资产——primary 取任务产物清单唯一资产
+     *  （QU 一对一），多结果取投影项资产；无法证明来源返回 null（调用方拒绝）。 */
+    const trustedAssetOf = async (item: ItemState): Promise<string | null> => {
+      const { projection, job } = await projectionOf(item.submissionRow);
+      if (projection.kind === "invalid") {
+        throw new RecoveryContractError(
+          recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),
+        );
+      }
+      if (item.outputKey === PRIMARY_OUTPUT_KEY) {
+        const assets = parseAssetIds(job?.output_asset_ids);
+        return assets !== null && assets.length === 1 ? assets[0]! : null;
+      }
+      return projection.items.find(candidate => candidate.outputKey === item.outputKey)?.assetId ?? null;
+    };
+    /** IKJLTS（PR981-REVIEW2-R2 / B.2/B.6）：显式 apply/restore 的结果卡资产必须等于该项
+     *  可信产物——客户端自报的 assetId 不得记成生成结果；不同资产、缺资产或来源无法
+     *  证明时 422 整笔拒绝（画布/恢复项/归属/回执零部分写入）。$target 占位无产物，豁免。 */
+    const assertTrustedResultAsset = async (item: ItemState, node: Record<string, unknown> | undefined): Promise<void> => {
+      const trusted = await trustedAssetOf(item);
+      const declared = (node?.data as Record<string, unknown> | undefined)?.assetId ?? null;
+      if (trusted === null || declared === null || String(declared) !== trusted) {
+        throw new RecoveryContractError(
+          recoveryError(422, "结果资产与任务可信产物不一致", RECOVERY_REASONS.documentMismatch),
+        );
+      }
     };
     // 逐动作校验 + 生成写入计划（写入延后到画布写成功之后，整笔原子）。
     interface PlannedWrite {
@@ -298,6 +328,10 @@ export async function saveCanvasWithRecovery(
             throw new RecoveryContractError(
               recoveryError(422, "恢复动作与画布文档不一致", RECOVERY_REASONS.documentMismatch),
             );
+          }
+          // IKJLTS：显式 apply 的结果卡资产核对（虚拟与已持久输出一致；$target 占位豁免）。
+          if (item.outputKey !== TARGET_OUTPUT_KEY) {
+            await assertTrustedResultAsset(item, node);
           }
           // 虚拟输出首次 apply：键必须在投影集内；节点未被其他提交占用（不静默覆盖）。
           let slotId: string | null = null;
@@ -380,6 +414,10 @@ export async function saveCanvasWithRecovery(
               recoveryError(422, "恢复动作与画布文档不一致", RECOVERY_REASONS.documentMismatch),
             );
           }
+          // IKJLTS：restore 回到画布的结果卡同样核对可信产物（$target 占位豁免）。
+          if (item.outputKey !== TARGET_OUTPUT_KEY) {
+            await assertTrustedResultAsset(item, node);
+          }
           planned.push(plan("present"));
           break;
         }
@@ -398,7 +436,7 @@ export async function saveCanvasWithRecovery(
           }
           // IKJJQY（B.6）：占位转换与全部未决输出同一笔保存完成——不能只删占位遗漏结果。
           // 投影歧义（重复键/缺产物/归属无法证明）拒绝转换，保留占位，不重发（B.8）。
-          const projection = await projectionOf(item.submissionRow);
+          const { projection } = await projectionOf(item.submissionRow);
           if (projection.kind === "invalid") {
             throw new RecoveryContractError(
               recoveryError(422, "服务端无法得到无歧义输出映射", RECOVERY_REASONS.projectionInvalid),

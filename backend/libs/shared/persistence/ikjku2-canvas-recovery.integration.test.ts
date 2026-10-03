@@ -193,12 +193,13 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
     return output ? { state: output.state, revision: Number(output.revision) } : null;
   }
 
-  /** 前置：受理 A、B 并双扇出为 present（画布两卡、previous 有两张标记卡）。 */
+  /** 前置：受理 A、B 并双扇出为 present（画布两卡、previous 有两张标记卡）。
+   *  IKJLTS：产物清单与 markerNode 默认 assetId 对齐（apply 需核对可信产物）。 */
   async function seedTwoPresentCards() {
     const jobA = await accept(acceptance(UUID_A, NODE_A));
     const jobB = await accept(acceptance(UUID_B, NODE_B));
-    await succeedJob(jobA.generation_job_id, "\"11\"");
-    await succeedJob(jobB.generation_job_id, "\"22\"");
+    await succeedJob(jobA.generation_job_id, "\"7\"");
+    await succeedJob(jobB.generation_job_id, "\"7\"");
     // 首次保存：双占位入库（无动作普通保存）。
     const base = await save({
       commandId: CMD("00001"),

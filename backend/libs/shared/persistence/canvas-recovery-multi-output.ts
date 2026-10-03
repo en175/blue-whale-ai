@@ -90,7 +90,9 @@ export interface ProjectableJob {
   input: unknown;
 }
 
-function parseAssetIds(value: unknown): string[] | null {
+/** 解析任务产物清单列（output_asset_ids）：正整数字符串/安全整数数组，形态不可信返回 null。
+ *  IKJLTS：导出供保存侧核对 primary 可信产物资产。 */
+export function parseAssetIds(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const ids: string[] = [];
   for (const item of value) {

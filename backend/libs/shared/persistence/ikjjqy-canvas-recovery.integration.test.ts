@@ -136,14 +136,15 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     });
   }
 
-  function markerNode(id: string, submissionId: string, outputKey: string) {
+  /** IKJLTS：assetId 须与该输出项可信产物一致（apply/restore 会核对，默认 7 仅占位形态）。 */
+  function markerNode(id: string, submissionId: string, outputKey: string, assetId = "7") {
     return {
       id,
       type: "mediaNode",
       position: { x: 1, y: 2 },
       data: {
         generationRecovery: { protocolVersion: 1, submissionId, outputKey },
-        assetId: "7",
+        assetId,
       },
     };
   }
@@ -363,7 +364,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     // 完整扇出：占位移除 + 两段卡落位，一笔保存。
     const saved = await save({
       commandId: UUID_D, version: null,
-      nodes: [markerNode(seg1, UUID_A, "segment:1"), markerNode(seg2, UUID_A, "segment:2")],
+      nodes: [markerNode(seg1, UUID_A, "segment:1", "701"), markerNode(seg2, UUID_A, "segment:2", "702")],
       changes: [
         { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
         { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
@@ -428,7 +429,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const seg1 = multiResultNodeId(UUID_A, "segment:1");
     const saved = await save({
       commandId: UUID_D, version: null,
-      nodes: [markerNode(seg1, UUID_A, "segment:1")], // 用户删掉第 2 段卡
+      nodes: [markerNode(seg1, UUID_A, "segment:1", "701")], // 用户删掉第 2 段卡
       changes: [
         { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
         { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
@@ -459,7 +460,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const seg1 = multiResultNodeId(UUID_A, "segment:1");
     // 首次保存前直接删一项（无 replaceTarget 配套——多结果虚拟输出独立合法）。
     let version = await save({
-      commandId: UUID_D, version: null, nodes: [markerNode(seg1, UUID_A, "segment:1")],
+      commandId: UUID_D, version: null, nodes: [markerNode(seg1, UUID_A, "segment:1", "701")],
       changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 0, action: "remove" }],
     });
     expect(version.recoveryReceipt.changes[0]).toMatchObject({ state: "removed", revision: 1, nodeBindingRevision: 1 });
@@ -471,7 +472,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     // 显式 restore：恢复为 present，revision 推进；归属仍在本项。
     version = await save({
       commandId: UUID_E, version: version.version,
-      nodes: [markerNode(seg1, UUID_A, "segment:1"), markerNode(multiResultNodeId(UUID_A, "segment:2"), UUID_A, "segment:2")],
+      nodes: [markerNode(seg1, UUID_A, "segment:1", "701"), markerNode(multiResultNodeId(UUID_A, "segment:2"), UUID_A, "segment:2", "702")],
       changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 1, action: "restore" }],
     });
     expect(version.recoveryReceipt.changes[0]).toMatchObject({ state: "present", revision: 2, nodeBindingRevision: 1 });
@@ -479,7 +480,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     await expectRejection(
       save({
         commandId: UUID_F, version: version.version,
-        nodes: [markerNode(seg1, UUID_A, "segment:1")],
+        nodes: [markerNode(seg1, UUID_A, "segment:1", "701")],
         changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 1, action: "remove" }],
       }) as never,
       409, RECOVERY_REASONS.itemConflict,
@@ -512,7 +513,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const seg1 = multiResultNodeId(UUID_A, "segment:1");
     await save({
       commandId: UUID_D, version: null,
-      nodes: [markerNode(seg1, UUID_A, "segment:1"), markerNode(multiResultNodeId(UUID_A, "segment:2"), UUID_A, "segment:2")],
+      nodes: [markerNode(seg1, UUID_A, "segment:1", "701"), markerNode(multiResultNodeId(UUID_A, "segment:2"), UUID_A, "segment:2", "702")],
       changes: [
         { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
         { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
@@ -540,7 +541,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const version = await prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
     await save({
       commandId: UUID_E, version: version!.version,
-      nodes: [markerNode(seg1, UUID_A, "segment:1")],
+      nodes: [markerNode(seg1, UUID_A, "segment:1", "701")],
       changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 1, action: "remove" }],
     });
     // replaced/transferred 目标项不能 remove 复活。
@@ -591,7 +592,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     await expectRejection(
       save({
         commandId: UUID_D, version: null,
-        nodes: [markerNode(multiResultNodeId(UUID_A, "segment:1"), UUID_A, "segment:1")],
+        nodes: [markerNode(multiResultNodeId(UUID_A, "segment:1"), UUID_A, "segment:1", "701")],
         changes: [
           { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
           { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },

@@ -160,12 +160,13 @@ describe.skipIf(!databaseUrl)("恢复保存回执丢失可安全重放（IKJKU8�
     return prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } });
   }
 
-  /** 前置：受理 A 并成功扇出——被丢失回执的那笔恢复保存命令（cmd-lost）已完成但客户端未收到。 */
+  /** 前置：受理 A 并成功扇出——被丢失回执的那笔恢复保存命令（cmd-lost）已完成但客户端未收到。
+   *  IKJLTS：产物清单与 markerNode assetId 对齐（apply 需核对可信产物）。 */
   async function seedLostReceiptSave() {
     const job = await accept(acceptance(UUID_A, NODE_A));
     await raw.query(
       "UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST(? AS JSON) WHERE id = ?",
-      ['["11"]', Number(job.generation_job_id)],
+      ['["7"]', Number(job.generation_job_id)],
     );
     const base = await save({
       commandId: CMD("00001"),
