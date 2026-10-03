@@ -148,7 +148,7 @@ export async function readAcceptedMediaToolReplay(
   lookup: MediaToolRecovery | MediaToolLegacyIdempotency,
 ): Promise<MediaToolReplayOutcome | null> {
   const binding = "binding" in lookup ? lookup.binding : null;
-  const key = binding ? binding.submission_id : (lookup as MediaToolLegacyIdempotency).key;
+  const key = "binding" in lookup ? lookup.binding.submission_id : lookup.key;
   const replayed = await readCreateIdempotency(
     prisma,
     lookup.projectId,
@@ -183,6 +183,49 @@ export function renderMediaToolReplay(
     status: replay.status,
     ...(replay.bindingView ? { canvas_binding: replay.bindingView } : {}),
   });
+}
+
+/** PR981 第二轮评审（Standards 1）：10 个单结果媒体工具创建入口的「前置回读门」单源——
+ *  「构造 recovery 身份（binding 缺席为 null）→ readAcceptedMediaToolReplay → 命中即
+ *  renderMediaToolReplay」，此前在各服务逐字重复约 15 行（仅 taskType/requestHash 来源不同）。
+ *  返回 recovery 供调用方续传 createMediaToolJobWithRecovery；replayed 非 null 时直接 return。
+ *  video-mattings 的 client_token legacy 分支（自定冲突码文案）形态不同，不纳入。 */
+export async function replayAcceptedMediaTool(
+  prisma: PrismaClient,
+  identity: {
+    projectId: string;
+    userId: string;
+    binding: CanvasBinding | null;
+    taskType: string;
+    operation: string;
+    requestPath: string;
+    /** 摘要覆盖的原请求 body（含 canvas_binding；各服务传 body ?? {}，口径不变）。 */
+    body: Record<string, unknown>;
+  },
+): Promise<{
+  recovery: MediaToolRecovery | null;
+  /** 前置回读命中的重放响应；null 表示未受理过，调用方继续既有校验与建行流程。 */
+  replayed: ReturnType<typeof renderMediaToolReplay> | null;
+}> {
+  const recovery: MediaToolRecovery | null = identity.binding
+    ? {
+        projectId: identity.projectId,
+        userId: identity.userId,
+        taskType: identity.taskType,
+        operation: identity.operation,
+        requestHash: mediaToolRequestHash(
+          identity.operation,
+          identity.projectId,
+          identity.requestPath,
+          identity.body,
+        ),
+        binding: identity.binding,
+      }
+    : null;
+  const replay = recovery
+    ? await readAcceptedMediaToolReplay(prisma, recovery)
+    : null;
+  return { recovery, replayed: replay ? renderMediaToolReplay(replay) : null };
 }
 
 /**
