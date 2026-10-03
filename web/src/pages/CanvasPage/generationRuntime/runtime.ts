@@ -71,6 +71,8 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   const ledger = new Map<string, LedgerEntry>();
   /** 已完成对账的提交（删除差分只对已对账条目发出，防扫描窗口误删补卡）。 */
   const reconciledSubmissions = new Set<string>();
+  /** 产物不可用而未落卡的项，不得将素材缺失推断为用户删除。 */
+  const unavailableOutputItems = new Set<string>();
   const intents = new Map<string, ExplicitIntent>();
   /** 已知节点归属版本（nodeId → binding_revision）。 */
   const nodeBindings = new Map<string, number>();
@@ -257,28 +259,55 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       }
       const detail = knownDetail ?? await doFetchJobStatus(jobId).catch(() => null);
       if (!owns(execution, jobId)) return; // 详情返回（成功/失败均含）复核：过期执行零宿主写入（A.8）
-      const assets = detail?.output_assets ?? [];
-      // 产物匹配按可信 asset_id（投影权威），缺失回落数组序（B.4：不按偶然顺序重新编号）
-      const views = outputs.map((item, index) => {
+      const assets = detail?.output_assets ?? (detail?.asset ? [detail.asset] : []);
+      // 非空资产引用严格匹配；只有无引用的一对一 primary 允许同源结果回退。
+      const views = outputs.flatMap((item) => {
         const asset = item.asset_id != null
           ? assets.find((a) => String(a.id) === String(item.asset_id))
-          : undefined;
-        const fallback = assets[index];
-        const mediaType = (asset?.type === 'video' || asset?.type === 'audio' || asset?.type === 'image' ? asset.type : undefined)
-          ?? (fallback?.type === 'video' || fallback?.type === 'audio' || fallback?.type === 'image' ? fallback.type : 'image');
-        return {
+          : outputs.length === 1 && item.output_key === PRIMARY_OUTPUT_KEY && item.node_id === nodeId && assets.length === 1
+            ? assets[0] : undefined;
+        if (asset == null || !asset.id || typeof asset.url !== 'string' || !asset.url.trim()
+          || (asset.type !== 'video' && asset.type !== 'audio' && asset.type !== 'image')) return [];
+        return [{
           outputKey: item.output_key,
           nodeId: item.node_id,
-          // IKJLTQ（R1）：投影 asset_id 缺失（真实一对一 primary 投影不填资产引用）时
-          // 与 URL 同源回退到可信任务结果产物身份——assetId 不得沿用目标卡旧素材（B.6）
-          assetId: item.asset_id ?? fallback?.id ?? null,
-          url: asset?.url ?? fallback?.url ?? '',
-          mediaType,
-          ...(asset?.width != null ? { width: asset.width } : {}),
-          ...(asset?.height != null ? { height: asset.height } : {}),
-          ...(asset?.duration != null ? { duration: asset.duration } : {}),
-        };
+          assetId: asset.id,
+          url: asset.url,
+          mediaType: asset.type,
+          ...(asset.width != null ? { width: asset.width } : {}),
+          ...(asset.height != null ? { height: asset.height } : {}),
+          ...(asset.duration != null ? { duration: asset.duration } : {}),
+        }];
       });
+      if (views.length !== outputs.length) {
+        for (const item of outputs) unavailableOutputItems.add(item.recovery_item_id);
+        if (host.findNode(nodeId) == null) {
+          const seed = record?.recovery_seed?.target;
+          const snapshot = record?.previous_target_snapshot as Partial<RuntimeNodeView> | null;
+          host.insertMediaNode({
+            id: nodeId, type: 'mediaNode',
+            position: snapshot?.position ?? { x: seed?.x ?? 0, y: seed?.y ?? 0 },
+            data: {
+              fileName: seed?.name || '生成结果',
+              mediaType: record?.task_type === 'video_scene_split' || record?.task_type === 'video' ? 'video'
+                : record?.task_type === 'vocal_split' || record?.task_type === 'audio' ? 'audio' : 'image',
+              ...(seed ? { width: seed.width, height: seed.height } : {}),
+              ...(snapshot?.width != null ? { width: snapshot.width } : {}),
+              ...(snapshot?.height != null ? { height: snapshot.height } : {}),
+              ...snapshot?.data, jobId,
+            },
+          });
+          for (const source of record?.recovery_seed?.sources ?? []) {
+            if (host.findNode(source.node_id) != null) host.addEdge(source.node_id, nodeId);
+          }
+        }
+        host.patchNode(nodeId, { genStatus: undefined, progress: 100 });
+        host.toast('warn', '生成结果当前不可用，原卡已保留，请核对素材');
+        active.delete(nodeId);
+        host.clearActiveJob(nodeId);
+        return; // 整批零转换，不将其余产物作为全部完成。
+      }
+      for (const item of outputs) unavailableOutputItems.delete(item.recovery_item_id);
       const anchor = host.findNode(nodeId);
       const anchorPos = anchor?.position ?? { x: 0, y: 0 };
       const def = execution.def;
@@ -588,6 +617,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     if (claimedMarker != null && claimedMarker.outputKey !== TARGET_OUTPUT_KEY) {
       // 成功转换后的结果卡（marker 非 $target）：任务已终态，不走取消确认流——直接移除，
       // 保存差分按台账发 remove（B.6 逐项删除；含首次保存前删除的虚拟输出）。
+      host.markLocallyRemoved(nodeId);
       host.removeMediaNode(nodeId);
       return true;
     }
@@ -802,6 +832,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       }
       if (matches) {
         if (entry.state === 'pending') {
+          if (unavailableOutputItems.has(entry.recoveryItemId)) continue;
           changes.push({ recoveryItemId: entry.recoveryItemId, expectedRevision: entry.revision, action: 'apply' });
         } else if (entry.state === 'removed') {
           changes.push({ recoveryItemId: entry.recoveryItemId, expectedRevision: entry.revision, action: 'restore' }); // 显式撤销恢复同一结果
@@ -812,6 +843,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
           changes.push({ recoveryItemId: entry.recoveryItemId, expectedRevision: entry.revision, action: 'replaceTarget' });
           // 配套 apply(primary/逐输出) 由各自 marker 在场差分同笔补齐（原子保存）
         } else if (node == null) {
+          if (unavailableOutputItems.has(entry.recoveryItemId) && !host.isLocallyRemoved(entry.nodeId)) continue;
           // 仅节点缺席（用户删除/扇出移除）才显式 remove；节点在场而无 marker（生成中占位卡
           // 本不带标记，B.3「受理前不伪造恢复项标记」）不算删除，保持 pending 等终态收敛。
           changes.push({ recoveryItemId: entry.recoveryItemId, expectedRevision: entry.revision, action: 'remove' });
@@ -870,6 +902,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     nodeBindings.clear();
     boundJobIds.clear();
     reconciledSubmissions.clear();
+    unavailableOutputItems.clear();
     deleting.clear();
     retryAttempts.clear();
     retryInFlight.clear();
