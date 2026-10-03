@@ -8,8 +8,12 @@ import { createHash } from "node:crypto";
 
 import {
   canvasBindingSchema,
+  IDEMPOTENCY_CONFLICT_CODE,
   type CanvasBinding,
   type RecoveryErrorEnvelope,
+  type ResultEnvelope,
+  fail,
+  ok,
 } from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
@@ -82,6 +86,9 @@ export type MediaToolCreateOutcome =
   | { kind: "idempotency_conflict" }
   | { kind: "envelope"; envelope: RecoveryErrorEnvelope };
 
+/** IKJLTX（R5）：锁外前置幂等回读的产出——受理段之外命中重放时可直接渲染给客户端。 */
+export type MediaToolReplayOutcome = Exclude<MediaToolCreateOutcome, { kind: "envelope" }>;
+
 /** 重放/建行后的任务当前状态（B.3：原 API 可继续返回实时任务状态）。 */
 async function currentJobStatus(db: PrismaClient | Prisma.TransactionClient, jobId: string): Promise<string> {
   const row = await db.generation_jobs.findUnique({
@@ -93,6 +100,60 @@ async function currentJobStatus(db: PrismaClient | Prisma.TransactionClient, job
     throw new Error(`恢复重放的任务行不存在：jobId=${jobId}`);
   }
   return row.status;
+}
+
+/** IKJLTX（R5）：同身份同载荷的原意图锁外回读（B.3 受理事务顺序第 1 步的独立形态）。
+ *  供各工具 service 在素材/模型/报价等**可变状态**校验之前调用：命中则返回原 job（现查状态）
+ *  与原关联（binding 形态回填 canvas_binding 视图），同键异载荷判冲突；未受理过返回 null，
+ *  调用方继续既有校验与建行流程。摘要只依赖请求载荷与 canvas_binding，与可变状态无关。 */
+export async function readAcceptedMediaToolReplay(
+  prisma: PrismaClient,
+  recovery: MediaToolRecovery,
+): Promise<MediaToolReplayOutcome | null>;
+export async function readAcceptedMediaToolReplay(
+  prisma: PrismaClient,
+  legacy: MediaToolLegacyIdempotency,
+): Promise<MediaToolReplayOutcome | null>;
+export async function readAcceptedMediaToolReplay(
+  prisma: PrismaClient,
+  lookup: MediaToolRecovery | MediaToolLegacyIdempotency,
+): Promise<MediaToolReplayOutcome | null> {
+  const binding = "binding" in lookup ? lookup.binding : null;
+  const key = binding ? binding.submission_id : (lookup as MediaToolLegacyIdempotency).key;
+  const replayed = await readCreateIdempotency(
+    prisma,
+    lookup.projectId,
+    { key, requestHash: lookup.requestHash },
+    lookup.operation,
+  );
+  if (!replayed) return null;
+  if ("kind" in replayed) return { kind: "idempotency_conflict" };
+  return {
+    kind: "ok",
+    jobId: replayed.generation_job_id,
+    status: await currentJobStatus(prisma, replayed.generation_job_id),
+    bindingView: binding
+      ? await canvasBindingView(prisma, lookup.projectId, binding.submission_id)
+      : null,
+  };
+}
+
+/** IKJLTX（R5）：前置回读命中的统一响应渲染（与各服务建行成功/冲突的响应口径一致）。
+ *  legacyConflict 仅 video-mattings 无 canvas_binding 老路径使用（client_token 既有码与文案）。
+ *  返回类型省略注解由 fail/ok 重载推断——保持 data 的窄类型，controller 侧 result.data.job_id
+ *  照常窄化。 */
+export function renderMediaToolReplay(
+  replay: MediaToolReplayOutcome,
+  legacyConflict?: () => ResultEnvelope<never>,
+) {
+  if (replay.kind === "idempotency_conflict") {
+    return legacyConflict ? legacyConflict() : fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
+  }
+  return ok({
+    job_id: replay.jobId,
+    status: replay.status,
+    ...(replay.bindingView ? { canvas_binding: replay.bindingView } : {}),
+  });
 }
 
 /**
@@ -126,23 +187,16 @@ export async function createMediaToolJobWithRecovery(
   const projectId = recovery ? recovery.projectId : legacy!.projectId;
   // B.3 第 1 步：锁外幂等回读（快路径；媒体工具无预扣，重放零副作用）。
   // 同身份同载荷重放原 job（现查状态，不重做当前状态校验）；同键异载荷判冲突。
-  const replayed = await readCreateIdempotency(
-    prisma,
-    projectId,
-    { key, requestHash },
-    operation,
-  );
-  if (replayed) {
-    if ("kind" in replayed) return { kind: "idempotency_conflict" };
-    return {
-      kind: "ok",
-      jobId: replayed.generation_job_id,
-      status: await currentJobStatus(prisma, replayed.generation_job_id),
-      bindingView: recovery
-        ? await canvasBindingView(prisma, projectId, recovery.binding.submission_id)
-        : null,
-    };
-  }
+  // IKJLTX：回读逻辑与各 service 的前置回读（readAcceptedMediaToolReplay）单源。
+  const replayed = recovery
+    ? await readAcceptedMediaToolReplay(prisma, recovery)
+    : await readAcceptedMediaToolReplay(prisma, {
+        projectId,
+        operation,
+        requestHash,
+        key,
+      });
+  if (replayed) return replayed;
   // 事务体：锁内回读兜底（并发赢家在锁外 miss 与事务开始之间提交的情形）。
   const runTx = () =>
     transactionWithUniqueRetry(prisma, async (tx) => {

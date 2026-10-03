@@ -33,6 +33,8 @@ vi.mock("@lib/shared/persistence/generation-job-idempotency.js", async (importOr
 import {
   createMediaToolJobWithRecovery,
   mediaToolRequestHash,
+  readAcceptedMediaToolReplay,
+  renderMediaToolReplay,
   takeCanvasBinding,
   type MediaToolRecovery,
 } from "./media-tool-recovery.js";
@@ -221,5 +223,69 @@ describe("createMediaToolJobWithRecovery：受理主体编排", () => {
       { key: "token-1", requestHash: "hash-vm" },
       "video_matting.create",
     );
+  });
+});
+
+describe("readAcceptedMediaToolReplay / renderMediaToolReplay：前置幂等回读（IKJLTX）", () => {
+  it("replays the original job with the binding view on a hit", async () => {
+    const prisma = makePrisma("processing");
+    readIdemMock.mockResolvedValue({ generation_job_id: "400", cursor: 0 });
+    bindingViewMock.mockResolvedValue({
+      protocol_version: 1,
+      submission_id: BINDING.submission_id,
+      target_node_id: "node-1",
+      binding_revision: 1,
+      job_id: "400",
+      is_current: true,
+    });
+    const replay = await readAcceptedMediaToolReplay(prisma, RECOVERY);
+    expect(replay).toEqual({
+      kind: "ok",
+      jobId: "400",
+      status: "processing",
+      bindingView: expect.objectContaining({ job_id: "400", is_current: true }),
+    });
+    // 渲染与各服务建行成功响应同口径（job_id / status / canvas_binding）。
+    const rendered = renderMediaToolReplay(replay!);
+    expect(rendered.code).toBe(200);
+    expect(rendered.data).toMatchObject({
+      job_id: "400",
+      status: "processing",
+      canvas_binding: { job_id: "400", is_current: true },
+    });
+  });
+
+  it("returns null on a miss so the caller keeps its mutable-state checks", async () => {
+    const prisma = makePrisma();
+    readIdemMock.mockResolvedValue(null);
+    expect(await readAcceptedMediaToolReplay(prisma, RECOVERY)).toBeNull();
+  });
+
+  it("reports a same-key different-hash conflict without touching the binding view", async () => {
+    const prisma = makePrisma();
+    readIdemMock.mockResolvedValue({ kind: "idempotency_conflict" });
+    const replay = await readAcceptedMediaToolReplay(prisma, RECOVERY);
+    expect(replay).toEqual({ kind: "idempotency_conflict" });
+    expect(bindingViewMock).not.toHaveBeenCalled();
+    expect(renderMediaToolReplay(replay!).code).toBe(100409);
+  });
+
+  it("covers the legacy client_token lookup shape without a binding view", async () => {
+    const prisma = makePrisma();
+    readIdemMock.mockResolvedValue({ generation_job_id: "401", cursor: 0 });
+    const replay = await readAcceptedMediaToolReplay(prisma, {
+      projectId: "55",
+      operation: "video_matting.create",
+      requestHash: "hash-vm",
+      key: "token-1",
+    });
+    expect(replay).toEqual({ kind: "ok", jobId: "401", status: "queued", bindingView: null });
+    // legacy 冲突口径：video-mattings 传入既有码与文案的 fail 工厂。
+    const conflict = renderMediaToolReplay({ kind: "idempotency_conflict" }, () => ({
+      code: 100302,
+      msg: "client_token 已被使用（同 token 仅可重放相同参数）",
+      data: null,
+    }));
+    expect(conflict.code).toBe(100302);
   });
 });

@@ -41,6 +41,8 @@ import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import {
   createMediaToolJobWithRecovery,
   mediaToolRequestHash,
+  readAcceptedMediaToolReplay,
+  renderMediaToolReplay,
   takeCanvasBinding,
   type MediaToolRecovery,
 } from "@lib/shared/generation/media-tool-recovery.js";
@@ -162,9 +164,42 @@ export class VideoMattingsService {
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
+    // IKJLTX（R5，B.3 受理事务顺序）：同身份同载荷的原意图幂等回读先于素材/门槛等可变状态
+    // 校验——已受理重放返回原 job（binding 形态另回原关联），不因此刻素材已删除/门槛不过而
+    // 重新拒绝或重复受理。摘要只依赖请求载荷与 canvas_binding，与可变状态无关；legacy
+    // client_token 形态的冲突沿用本入口既有码与文案（IDEMPOTENCY_KEY_REUSED_CODE）。
+    const recovery: MediaToolRecovery | null = binding
+      ? {
+          projectId,
+          userId,
+          taskType: VIDEO_MATTING_JOB_TYPE,
+          operation: IDEMPOTENCY_OPERATION,
+          requestHash,
+          binding,
+        }
+      : null;
+    const replay = recovery
+      ? await readAcceptedMediaToolReplay(this.prisma.client, recovery)
+      : await readAcceptedMediaToolReplay(this.prisma.client, {
+          projectId,
+          operation: IDEMPOTENCY_OPERATION,
+          requestHash,
+          key: clientToken,
+        });
+    if (replay) {
+      // 冲突口径与结尾渲染同款区分：binding 形态走 IDEMPOTENCY_CONFLICT_CODE，
+      // legacy client_token 形态沿用本入口既有码与文案（IDEMPOTENCY_KEY_REUSED_CODE）。
+      return renderMediaToolReplay(
+        replay,
+        binding
+          ? undefined
+          : () => fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）"),
+      );
+    }
+
     // IKJJQW：资产复核与输入门槛在事务外（B.3「锁不跨前置素材查询」——canvas_binding 受理的
-    // 恢复锁序对项目/画布行 FOR UPDATE，素材复核必须在进锁前完成）。幂等回读在 helper 的锁外
-    // 快路径（先于本段之后的建行），重放仍是既有结果、不被此刻的素材状态改写。
+    // 恢复锁序对项目/画布行 FOR UPDATE，素材复核必须在进锁前完成）。IKJLTX 后重放的回读先于
+    // 本段（素材状态不再改写已受理意图的结果），锁外快路径与锁内兜底在 helper 内。
     // findOwnedSource 按 user_id 归属过滤（status=normal 且未删除）：非本人素材一律 404，
     // 不泄露存在性。
     const asset = await this.assets.findOwnedSource(
@@ -198,16 +233,7 @@ export class VideoMattingsService {
 
     // IKJJQW：受理主体走共享段——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 → 幂等行」
     // 一个事务；无 canvas_binding 时保持既有 client_token 幂等事务（回读 → 建行 → 幂等行）。
-    const recovery: MediaToolRecovery | null = binding
-      ? {
-          projectId,
-          userId,
-          taskType: VIDEO_MATTING_JOB_TYPE,
-          operation: IDEMPOTENCY_OPERATION,
-          requestHash,
-          binding,
-        }
-      : null;
+    // IKJLTX 后前置回读已在上游，此处事务内仍有锁内回读兜底。
     const outcome = await createMediaToolJobWithRecovery(
       this.prisma.client,
       recovery,
