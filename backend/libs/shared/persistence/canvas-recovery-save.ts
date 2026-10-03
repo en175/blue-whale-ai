@@ -86,6 +86,13 @@ function markerOf(node: Record<string, unknown> | undefined): Record<string, unk
   return marker && typeof marker === "object" && !Array.isArray(marker) ? marker as Record<string, unknown> : null;
 }
 
+/** 事务锁内读到的画布 previous 文档（Json 列兼容解析；无画布/空文档返回空数组）。 */
+function parsePreviousNodes(raw: unknown): Array<Record<string, unknown>> {
+  if (raw === null || raw === undefined) return [];
+  const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  return Array.isArray(parsed) ? parsed as Array<Record<string, unknown>> : [];
+}
+
 function markerMatches(marker: Record<string, unknown> | null, submissionId: string, outputKey: string): boolean {
   return marker !== null
     && marker.protocolVersion === CANVAS_RECOVERY_PROTOCOL_VERSION
@@ -201,11 +208,13 @@ export async function saveCanvasWithRecovery(
     // 否则并发接管会让校验基于过期快照通过。IKJJQY：锁集扩展到全部涉及项的规范节点
     // （多结果输出的 apply/remove 首次建立 owner 也要在锁内判占用）。
     const involvedNodes = [...new Set(itemStates.map(item => item.nodeId))].sort();
-    const ownerRows = await tx.$queryRaw<
-      Array<{ node_id: string; generation_canvas_submission_id: bigint; output_key: string; binding_revision: number }>
-    >`SELECT node_id, generation_canvas_submission_id, output_key, binding_revision
+    const ownerRows = involvedNodes.length > 0
+      ? await tx.$queryRaw<
+        Array<{ node_id: string; generation_canvas_submission_id: bigint; output_key: string; binding_revision: number }>
+      >`SELECT node_id, generation_canvas_submission_id, output_key, binding_revision
       FROM generation_canvas_node_owners WHERE project_id = ${pid}
-      AND node_id IN (${Prisma.join(involvedNodes)}) FOR UPDATE`;
+      AND node_id IN (${Prisma.join(involvedNodes)}) FOR UPDATE`
+      : [];
     const ownerByNode = new Map(ownerRows.map(owner => [owner.node_id, owner]));
     const changes: CanvasRecoveryReceiptChange[] = [];
     // IKJJQY：可信终态投影缓存（同提交多次动作/扇出校验只查一次；锁内读，无 TOCTOU）。
@@ -448,6 +457,68 @@ export async function saveCanvasWithRecovery(
         }
         default:
           throw new RecoveryContractError(recoveryError(400, "未知恢复动作", RECOVERY_REASONS.invalidPayload));
+      }
+    }
+    // ── IKJKU2（PR981-REVIEW-20261003-F3）：未声明受保护项核对 ──
+    // 逐动作校验只覆盖显式声明项；此前「合法变更 B 的保存顺带省略/剥除/改绑已入库的
+    // 受保护卡 A」会静默覆盖全文落库，恢复状态与文档脱节（违反 B.6/B.7）。基准与
+    // guardLegacyCanvasWrite 同款：previous 文档中带标记的卡必须在提交文档中原样保持
+    // （在场、标记身份、承接类型、结果资产），叠加两项豁免——已声明显式动作的项交由
+    // 逐动作校验；服务端已 removed 的项文档缺席是合法终态。
+    const declaredKeys = new Set(itemStates.map(item => `${item.submissionRow.submission_id}:${item.outputKey}`));
+    const previousNodes = parsePreviousNodes(canvasRow?.nodes_json);
+    const undeclaredAbsent: Array<{ submissionId: string; outputKey: string }> = [];
+    for (const previousNode of previousNodes) {
+      const marker = markerOf(previousNode);
+      if (!marker) continue;
+      const submissionId = String(marker.submissionId);
+      const outputKey = String(marker.outputKey);
+      if (declaredKeys.has(`${submissionId}:${outputKey}`)) continue;
+      const node = incomingByNode.get(String(previousNode.id));
+      if (node === undefined) {
+        undeclaredAbsent.push({ submissionId, outputKey });
+        continue;
+      }
+      const tampered = () => new RecoveryContractError(
+        recoveryError(422, "未声明的受保护项被改动，须以显式恢复动作变更", RECOVERY_REASONS.documentMismatch),
+      );
+      if (!markerMatches(markerOf(node), submissionId, outputKey)) throw tampered();
+      if ((previousNode.type ?? null) !== (node.type ?? null)) throw tampered();
+      const previousAsset = (previousNode.data as Record<string, unknown> | undefined)?.assetId ?? null;
+      const nextAsset = (node.data as Record<string, unknown> | undefined)?.assetId ?? null;
+      if (previousAsset !== null && previousAsset !== nextAsset) throw tampered();
+    }
+    // 未声明缺席项以服务端可信状态联判（提交/输出记录，不信客户端自报）：仅服务端已
+    // removed 的缺席合法；提交记录不存在也不豁免。canvas 行锁内普通读即可——所有写
+    // 这些行的路径（受理/本保存）锁序均为 project → canvas → 归属行。
+    if (undeclaredAbsent.length > 0) {
+      const absentMismatch = () => new RecoveryContractError(
+        recoveryError(422, "未声明的受保护项从画布缺席，删除须以显式 remove 动作声明", RECOVERY_REASONS.documentMismatch),
+      );
+      const submissionIds = [...new Set(undeclaredAbsent.map(item => item.submissionId))];
+      const submissionRows = await tx.generation_canvas_submissions.findMany({
+        where: { project_id: pid, submission_id: { in: submissionIds } },
+      });
+      const rowBySubmissionId = new Map(submissionRows.map(row => [row.submission_id, row]));
+      const outputKeys = [...new Set(undeclaredAbsent
+        .filter(item => item.outputKey !== TARGET_OUTPUT_KEY)
+        .map(item => item.outputKey))];
+      const outputRows = outputKeys.length > 0 && submissionRows.length > 0
+        ? await tx.generation_canvas_outputs.findMany({
+            where: {
+              generation_canvas_submission_id: { in: submissionRows.map(row => row.id) },
+              output_key: { in: outputKeys },
+            },
+          })
+        : [];
+      const outputStateByKey = new Map(outputRows.map(row => [`${row.generation_canvas_submission_id}:${row.output_key}`, row.state]));
+      for (const item of undeclaredAbsent) {
+        const row = rowBySubmissionId.get(item.submissionId);
+        if (!row) throw absentMismatch();
+        const state = item.outputKey === TARGET_OUTPUT_KEY
+          ? row.target_state
+          : outputStateByKey.get(`${row.id}:${item.outputKey}`) ?? "pending";
+        if (state !== "removed") throw absentMismatch();
       }
     }
     // ── 写画布（先写文档，失败整体回滚）──
