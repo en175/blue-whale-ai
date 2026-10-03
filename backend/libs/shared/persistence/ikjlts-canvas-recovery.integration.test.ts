@@ -18,6 +18,9 @@
 //   5. ★ restore 恢复卡资产伪造 → 422；合法 → 200
 //   6. ★ 公开保存入口 CanvasService.save（recoveryProtocolVersion）伪造 → code 422；
 //      合法 → code 200 落库可恢复
+//   7. ★ 一对一 primary restore 伪造：文档资产 999（任务产物清单 ["11"]）→ 422 整笔
+//      拒绝零部分写入（画布版本/输出行/回执不动）
+//   8. ★ 一对一 primary restore 合法：资产=产物 11 → 200 present，文档卡回归
 
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
@@ -460,5 +463,67 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     const page = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
     const record = page.records.find(item => item.submission_id === UUID_A)!;
     expect(record.items.find(item => item.output_key === PRIMARY_OUTPUT_KEY)?.state).toBe("present");
+  });
+
+  /** 一对一 primary 已移除种子（PR981-REVIEW2-Spec a3）：受理产物 ["11"] → 占位入库 →
+   *  replaceTarget+apply(11)（primary 落行 present/1，owner 切 primary）→ remove（文档撤卡）。
+   *  primary 输出行 removed/2，owner 保持本提交 primary 供 restore。 */
+  async function seedOneToOneRemoved() {
+    const { base } = await seedOneToOne();
+    const applied = await save({
+      commandId: CMD("70001"),
+      version: base.version,
+      nodes: [markerNode("ikjlts-node-a", UUID_A, PRIMARY_OUTPUT_KEY, "11")],
+      changes: [
+        { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
+        { id: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), rev: 0, action: "apply" },
+      ],
+    });
+    const removed = await save({
+      commandId: CMD("70002"),
+      version: applied.version,
+      nodes: [],
+      changes: [{ id: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), rev: 1, action: "remove" }],
+    });
+    expect(removed.recoveryReceipt.changes[0]).toMatchObject({ state: "removed", revision: 2 });
+    return { removed };
+  }
+
+  it("★ 7. 一对一 primary restore 伪造：文档资产 999 → 422 整笔回滚零部分写入", async () => {
+    const { removed } = await seedOneToOneRemoved();
+    // primary 的可信产物取任务产物清单（["11"]），restore 回卡资产伪造 999 → 拒绝。
+    await expectRejection(save({
+      commandId: CMD("70003"),
+      version: removed.version,
+      nodes: [markerNode("ikjlts-node-a", UUID_A, PRIMARY_OUTPUT_KEY, "999")],
+      changes: [{ id: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), rev: 2, action: "restore" }],
+    }));
+    // 整笔回滚：输出行仍 removed/2、画布版本不递增、文档仍空、无回执行。
+    expect(await outputRow(UUID_A, PRIMARY_OUTPUT_KEY)).toMatchObject({ state: "removed", revision: 2 });
+    expect((await canvasRow())?.version).toBe(removed.version);
+    expect(((await canvasRow())?.nodes_json ?? []) as unknown[]).toHaveLength(0);
+    expect(await prisma.command_idempotency.count({
+      where: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1", idempotency_key: CMD("70003") },
+    })).toBe(0);
+  });
+
+  it("★ 8. 一对一 primary restore 合法：资产=产物 11 → 200 present 文档卡回归", async () => {
+    const { removed } = await seedOneToOneRemoved();
+    const restored = await save({
+      commandId: CMD("70004"),
+      version: removed.version,
+      nodes: [markerNode("ikjlts-node-a", UUID_A, PRIMARY_OUTPUT_KEY, "11")],
+      changes: [{ id: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), rev: 2, action: "restore" }],
+    });
+    expect(restored.version).toBe(removed.version + 1);
+    expect(restored.recoveryReceipt.changes[0]).toMatchObject({ state: "present", revision: 3, nodeBindingRevision: 1 });
+    expect(await outputRow(UUID_A, PRIMARY_OUTPUT_KEY)).toMatchObject({ state: "present", revision: 3 });
+    const nodes = ((await canvasRow())?.nodes_json ?? []) as Array<{ data: Record<string, unknown> }>;
+    expect(nodes[0]!.data.assetId).toBe("11");
+    // restore 不改归属：owner 仍是本提交 primary。
+    const owner = await prisma.generation_canvas_node_owners.findUnique({
+      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "ikjlts-node-a" } },
+    });
+    expect(owner?.output_key).toBe(PRIMARY_OUTPUT_KEY);
   });
 });
