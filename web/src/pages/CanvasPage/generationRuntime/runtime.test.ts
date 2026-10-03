@@ -728,6 +728,152 @@ describe('生成任务运行时：recover', () => {
   });
 });
 
+/* ============================================
+ * IKJKU7 恢复扫描互斥按加载身份隔离：实例跨项目切换存活，新加载（项目切换/
+ * 同项目重载，loadEpoch 推进）不被旧在途扫描的互斥状态挡住；旧扫描晚到的
+ * 收尾不清新扫描的锁、不写入新画布；同一加载内重复扫描仍不重入。
+ * ============================================ */
+describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJKU7）', () => {
+  /** 受理回执丢失形态：job processing、卡不在场 → 扫描对账后补一张目标卡。 */
+  const lostReceiptRecord = (): GenerationRecoveryRecord => ({
+    submission_id: 'sub-1', target_node_id: 'n1', job_id: '501', task_type: 'image',
+    binding_revision: 1, is_current: true,
+    job: { job_id: '501', type: 'image', status: 'processing', progress: 20, output_asset_ids: [], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+    recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 320, height: 320, name: '图片生成中' }, sources: [] },
+    previous_target_snapshot: null,
+    items: [{ recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null }],
+  } as GenerationRecoveryRecord);
+
+  const emptyPage = (): GenerationRecoveryPage => ({ protocol_version: 1, canvas_version: 1, records: [], next_cursor: null });
+
+  it('A→B：A 扫描在途时切 B，B 的恢复查询实际发出；A 迟到响应不产生任何 B 的写入', async () => {
+    const { fake, runtime, page } = setup();
+    let releaseA!: (page: GenerationRecoveryPage) => void;
+    let pageCalls = 0;
+    page.mockImplementation(() => {
+      pageCalls += 1;
+      if (pageCalls === 1) return new Promise((resolve) => { releaseA = resolve; }); // A 的分页挂起
+      return Promise.resolve(emptyPage());
+    });
+    const requestedProjects = () => page.mock.calls.map((call) => (call as unknown as [string])[0]);
+    const pendingA = runtime.recover('p1'); // 项目 A 恢复扫描在途
+    fake.switchProject('p2'); // 宿主切 B（页面完整序列含 reset）
+    runtime.reset();
+    await runtime.recover('p2'); // B 的恢复扫描——不得被 A 的在途互斥挡住
+    expect(requestedProjects()).toEqual(['p1', 'p2']); // 对账请求序列包含 B
+    releaseA({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null }); // A 的迟到响应（补卡形态）
+    await pendingA;
+    await flushMicrotasks(20);
+    expect(fake.inserts).toHaveLength(0); // A 的迟到响应零 B 画布写入
+    expect(fake.saves).toHaveLength(0);
+  });
+
+  it('A→B→A：B 扫描仍在途时切回 A，最新加载的 A 扫描不被跳过', async () => {
+    const { fake, runtime, page } = setup();
+    const deferred: Array<(page: GenerationRecoveryPage) => void> = [];
+    let pageCalls = 0;
+    page.mockImplementation(() => {
+      pageCalls += 1;
+      if (pageCalls <= 2) return new Promise((resolve) => { deferred.push(resolve); }); // A1、B 分页挂起
+      return Promise.resolve(emptyPage());
+    });
+    const requestedProjects = () => page.mock.calls.map((call) => (call as unknown as [string])[0]);
+    const pendingA1 = runtime.recover('p1'); // A 首次加载扫描在途
+    fake.switchProject('p2');
+    runtime.reset();
+    const pendingB = runtime.recover('p2'); // B 扫描在途
+    fake.switchProject('p1'); // 两次切换后回到 A（加载身份再推进）
+    runtime.reset();
+    await runtime.recover('p1'); // 最新加载的 A 扫描：不被 A1/B 在途挡住
+    expect(requestedProjects()).toEqual(['p1', 'p2', 'p1']);
+    deferred[0]!({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null }); // A1 迟到响应
+    deferred[1]!(emptyPage()); // B 迟到响应
+    await Promise.all([pendingA1, pendingB]);
+    await flushMicrotasks(20);
+    expect(fake.inserts).toHaveLength(0); // 两条迟到链零写入
+    expect(fake.saves).toHaveLength(0);
+  });
+
+  it('同项目重载（loadEpoch 变化）：新扫描立即发出并补卡，旧扫描晚到收尾不清新锁、无双补卡、锁不卡死', async () => {
+    const { fake, runtime, page } = setup();
+    let releaseOld!: (page: GenerationRecoveryPage) => void;
+    let pageCalls = 0;
+    page.mockImplementation(() => {
+      pageCalls += 1;
+      if (pageCalls === 1) return new Promise((resolve) => { releaseOld = resolve; }); // 旧加载分页挂起
+      if (pageCalls === 2) {
+        return Promise.resolve({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null });
+      }
+      return Promise.resolve(emptyPage());
+    });
+    const pendingOld = runtime.recover('p1'); // 旧加载扫描在途
+    fake.advanceEpoch(); // 同项目重载（loadEpoch 推进）
+    runtime.reset();
+    await runtime.recover('p1'); // 新加载扫描：同项目但不继承旧加载的互斥状态
+    expect(pageCalls).toBe(2);
+    expect(fake.inserts).toHaveLength(1); // 受理回执丢失任务在新加载中补卡
+    releaseOld({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null }); // 旧扫描迟到响应（同为补卡形态）
+    await pendingOld;
+    await flushMicrotasks(20);
+    expect(fake.inserts).toHaveLength(1); // 旧扫描收尾零写入：无双补卡
+    await runtime.recover('p1'); // 旧收尾后再扫：锁未被晚到的 finally 卡死或污染
+    expect(pageCalls).toBe(3);
+  });
+
+  it('旧扫描失败（请求 reject）：锁正确释放，新加载扫描可发出且回执丢失任务仍可补卡', async () => {
+    const { fake, runtime, page } = setup();
+    let rejectA!: (reason: Error) => void;
+    let pageCalls = 0;
+    page.mockImplementation(() => {
+      pageCalls += 1;
+      if (pageCalls === 1) return new Promise((_resolve, reject) => { rejectA = reject; }); // A 的请求将失败
+      if (pageCalls === 2) {
+        return Promise.resolve({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null });
+      }
+      return Promise.resolve(emptyPage());
+    });
+    const pendingA = runtime.recover('p1'); // A 扫描在途
+    fake.switchProject('p2');
+    runtime.reset();
+    rejectA(new Error('network')); // A 的请求失败（收尾尚未发生）
+    await runtime.recover('p2'); // B 不等 A 收尾即发出，受理回执丢失任务补卡
+    expect(fake.inserts).toHaveLength(1);
+    await pendingA;
+    await flushMicrotasks(20);
+    expect(fake.inserts).toHaveLength(1); // A 失败收尾不影响新加载补卡成果
+    await runtime.recover('p2'); // 失败收尾后同加载下一轮对账可再发出（锁未卡死/未污染）
+    expect(pageCalls).toBe(3);
+  });
+
+  it('同一加载内并发重复 recover 仍不重入；完成后重新对账不双链', async () => {
+    const { fake, runtime, page, status } = setup();
+    // 卡在场的进行中记录：扫描对账走续轮询路径（防双轮询观察点）
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
+    const lostReceiptPage = (): GenerationRecoveryPage => ({
+      protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null,
+    });
+    let releaseFirst!: (page: GenerationRecoveryPage) => void;
+    let pageCalls = 0;
+    page.mockImplementation(() => {
+      pageCalls += 1;
+      if (pageCalls === 1) return new Promise((resolve) => { releaseFirst = resolve; });
+      return Promise.resolve(lostReceiptPage());
+    });
+    const first = runtime.recover('p1');
+    const second = runtime.recover('p1'); // 同一加载内并发重复：直接返回，不重入
+    await flushMicrotasks();
+    expect(pageCalls).toBe(1); // 未发出第二次分页
+    releaseFirst(lostReceiptPage());
+    await Promise.all([first, second]);
+    await flushMicrotasks(20);
+    expect(status.calls).toHaveLength(1); // 一条轮询链（无双轮询）
+    await runtime.recover('p1'); // 扫描完成后（锁已释放）重新对账：正常发出，在途判重仍不双链
+    await flushMicrotasks(20);
+    expect(pageCalls).toBe(2);
+    expect(status.calls).toHaveLength(1);
+  });
+});
+
 describe('生成任务运行时：保存差分与撤销', () => {
   it('已确认 remove 的卡经撤销回画布（marker 回来）→ 差分 restore', async () => {
     const { fake, runtime, kit } = setup({ script: [

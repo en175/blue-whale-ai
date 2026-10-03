@@ -643,11 +643,14 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   };
 
   // ── 恢复扫描 ──
-  let scanning = false;
+  /** 扫描互斥按加载身份隔离（IKJKU7）：持有者为在扫的 loadEpoch。运行时实例跨项目
+   *  切换存活——新加载（epoch 推进）不继承旧加载的互斥状态，可立即发起自己的扫描；
+   *  旧扫描晚到的收尾只在仍持有锁时释放，不清新扫描的锁（无双扫描写入/无锁卡死）。 */
+  let scanningEpoch: object | null = null;
   const recover = async (projectId: string): Promise<void> => {
-    if (scanning) return; // 重复扫描仅对账：不重入（无双轮询/重复卡）
-    scanning = true;
     const loadEpoch = host.getLoadEpoch();
+    if (scanningEpoch === loadEpoch) return; // 同一加载内重复扫描不重入（无双轮询/重复卡）
+    scanningEpoch = loadEpoch; // 新加载立即接管：旧加载在途扫描不再持有互斥资格
     try {
       let cursor: string | null = null;
       do {
@@ -659,7 +662,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     } catch (e) {
       console.warn('[generation-runtime] 恢复扫描失败（下轮水合重试）:', e);
     } finally {
-      scanning = false;
+      if (scanningEpoch === loadEpoch) scanningEpoch = null; // 仍持有才释放（晚到旧收尾不清新扫描的锁）
     }
   };
 
