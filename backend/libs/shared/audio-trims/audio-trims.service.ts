@@ -15,7 +15,6 @@ import {
   FAILURE_CODE,
   IDEMPOTENCY_CONFLICT_CODE,
   PARAM_MISSING_CODE,
-  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   audioTrimInputSchema,
   defaultAudioTrimOutputFormat,
@@ -29,7 +28,7 @@ import {
   mediaToolRequestHash,
   readAcceptedMediaToolReplay,
   renderMediaToolReplay,
-  takeCanvasBinding,
+  stripCanvasBinding,
   type MediaToolRecovery,
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -71,16 +70,15 @@ export class AudioTrimsService {
     // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
     idempotencyKey?: string,
   ) {
-    // IKJJQW：canvas_binding 剥离与承载一致性校验（B.8 invalid_recovery_payload）。
-    const { binding, rest, invalid } = takeCanvasBinding(body ?? ({} as Record<string, unknown>));
-    if (invalid) {
-      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
-    }
-    if (binding && (idempotencyKey ?? "").trim() !== binding.submission_id) {
-      return fail(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", {
-        reason: RECOVERY_REASONS.invalidPayload,
-      });
-    }
+    // IKJJQW：canvas_binding 剥离与承载一致性校验（B.8 invalid_recovery_payload）
+    // （IKJLTZ：收敛至 stripCanvasBinding，头承载的 trim 口径留在调用方）。
+    const gate = stripCanvasBinding(
+      body ?? ({} as Record<string, unknown>),
+      "Idempotency-Key",
+      (idempotencyKey ?? "").trim(),
+    );
+    if (gate.error) return gate.error;
+    const { binding, rest } = gate;
     const sourceAssetId =
       typeof rest.source_asset_id === "number" ||
       typeof rest.source_asset_id === "string"

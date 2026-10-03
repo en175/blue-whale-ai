@@ -14,7 +14,6 @@ import {
   IMAGE_ENHANCE_SOURCE,
   IMAGE_ENHANCE_TIER_CAPABILITY,
   PARAM_MISSING_CODE,
-  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   fail,
   imageEnhanceInputSchema,
@@ -28,7 +27,7 @@ import {
   mediaToolRequestHash,
   readAcceptedMediaToolReplay,
   renderMediaToolReplay,
-  takeCanvasBinding,
+  stripCanvasBinding,
   type MediaToolRecovery,
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -77,16 +76,11 @@ export class ImageEnhancementsService {
     idempotencyKey?: string,
   ) {
     // IKJJQW：canvas_binding 是业务键之上的基础设施键（同 client_token 口径）：先行剥离再过
-    // 契约 schema；携带但非法 / 与 Idempotency-Key 承载不一致 → 400 invalid_recovery_payload。
-    const { binding, rest, invalid } = takeCanvasBinding(body ?? {});
-    if (invalid) {
-      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
-    }
-    if (binding && (idempotencyKey ?? "").trim() !== binding.submission_id) {
-      return fail(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", {
-        reason: RECOVERY_REASONS.invalidPayload,
-      });
-    }
+    // 契约 schema；携带但非法 / 与 Idempotency-Key 承载不一致 → 400 invalid_recovery_payload
+    // （IKJLTZ：三段校验收敛至 stripCanvasBinding，头承载的 trim 口径留在调用方）。
+    const gate = stripCanvasBinding(body ?? {}, "Idempotency-Key", (idempotencyKey ?? "").trim());
+    if (gate.error) return gate.error;
+    const { binding, rest } = gate;
 
     // 契约 schema 复核（六键 strict）：版本档枚举、倍数 ∈ 2/4/6 等结构合法性在此拦截。
     const parsed = imageEnhanceInputSchema.safeParse(rest);

@@ -23,7 +23,6 @@ import {
   IDEMPOTENCY_CONFLICT_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
-  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_MATTING_CLIENT_TOKEN_PATTERN,
   VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR,
@@ -43,7 +42,7 @@ import {
   mediaToolRequestHash,
   readAcceptedMediaToolReplay,
   renderMediaToolReplay,
-  takeCanvasBinding,
+  stripCanvasBinding,
   type MediaToolRecovery,
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -121,16 +120,11 @@ export class VideoMattingsService {
       return fail(PARAM_MISSING_CODE, "缺少或非法的 client_token（幂等键，≤64 位可打印 ASCII、大小写敏感）");
     }
     // IKJJQW（B.3）：canvas_binding 剥离；本入口的幂等承载是 client_token，携带 canvas_binding
-    // 时必须等于 submission_id（B.3「工具原 client_token 承载」口径）。
-    const { binding, rest, invalid } = takeCanvasBinding(withoutToken);
-    if (invalid) {
-      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
-    }
-    if (binding && clientToken !== binding.submission_id) {
-      return fail(400, "client_token 必须等于 canvas_binding.submission_id", {
-        reason: RECOVERY_REASONS.invalidPayload,
-      });
-    }
+    // 时必须等于 submission_id（B.3「工具原 client_token 承载」口径）。IKJLTZ：收敛至
+    // stripCanvasBinding，client_token 严格原值比较——pattern 允许空白，不随头形态 trim。
+    const gate = stripCanvasBinding(withoutToken, "client_token", clientToken);
+    if (gate.error) return gate.error;
+    const { binding, rest } = gate;
 
     // 契约口径（vocal_split 缺省补默认同款）：format 缺省补 WEBM、background_color 仅
     // format=MP4 时缺省补 white 后再过 schema（冻结后形态）；非法值（null / 枚举外 / 非

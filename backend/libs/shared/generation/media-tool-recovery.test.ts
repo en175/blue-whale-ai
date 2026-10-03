@@ -35,6 +35,7 @@ import {
   mediaToolRequestHash,
   readAcceptedMediaToolReplay,
   renderMediaToolReplay,
+  stripCanvasBinding,
   takeCanvasBinding,
   type MediaToolRecovery,
 } from "./media-tool-recovery.js";
@@ -92,6 +93,56 @@ describe("takeCanvasBinding：canvas_binding 剥离与纯载荷校验", () => {
     expect(out.binding).toBeNull();
     expect(out.invalid).toBe(true);
     expect(out.rest.source_asset_id).toBe("88");
+  });
+});
+
+describe("stripCanvasBinding：三段校验收敛（IKJLTZ）", () => {
+  it("passes and strips when the carrier key equals submission_id", () => {
+    const gate = stripCanvasBinding(
+      { source_asset_id: "88", canvas_binding: BINDING },
+      "Idempotency-Key",
+      BINDING.submission_id,
+    );
+    expect(gate.error).toBeNull();
+    expect(gate.binding).toEqual(BINDING);
+    expect(gate.rest).toEqual({ source_asset_id: "88" });
+  });
+
+  it("returns the fixed 400 envelope for an invalid canvas_binding", () => {
+    const gate = stripCanvasBinding(
+      { canvas_binding: { protocol_version: 2 } },
+      "Idempotency-Key",
+      BINDING.submission_id,
+    );
+    expect(gate.error).toMatchObject({
+      code: 400,
+      msg: "canvas_binding 载荷无效",
+      data: { reason: "invalid_recovery_payload" },
+    });
+  });
+
+  it("returns a 400 envelope naming the carrier label on mismatch", () => {
+    const gate = stripCanvasBinding(
+      { canvas_binding: BINDING },
+      "client_token",
+      "not-the-submission-id",
+    );
+    expect(gate.error).toMatchObject({
+      code: 400,
+      msg: "client_token 必须等于 canvas_binding.submission_id",
+      data: { reason: "invalid_recovery_payload" },
+    });
+  });
+
+  it("compares the carrier value strictly without trimming", () => {
+    // 防抹平契约：trim 口径归调用方（头形态 trim / client_token 严格原值——其 pattern 允许
+    // 空白），helper 内统一 trim 会放行带空白 client_token，行为变化。
+    const gate = stripCanvasBinding(
+      { canvas_binding: BINDING },
+      "client_token",
+      ` ${BINDING.submission_id} `,
+    );
+    expect(gate.error?.msg).toContain("必须等于 canvas_binding.submission_id");
   });
 });
 

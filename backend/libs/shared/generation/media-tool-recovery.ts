@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import {
   canvasBindingSchema,
   IDEMPOTENCY_CONFLICT_CODE,
+  RECOVERY_REASONS,
   type CanvasBinding,
   type RecoveryErrorEnvelope,
   type ResultEnvelope,
@@ -45,6 +46,34 @@ export function takeCanvasBinding(
   }
   const { canvas_binding: _stripped, ...rest } = body;
   return { binding: parsed.data, rest, invalid: false };
+}
+
+/** IKJLTZ（PR981 第二轮审查 S1）：11 个媒体工具创建入口同构校验段的单源收敛——
+ *  「canvas_binding 剥离 + 携带但非法 400 + 承载键一致性 400」（B.8 invalid_recovery_payload）。
+ *  承载键的真实差异由调用方给出：标签（Idempotency-Key 头 / video-mattings 的 client_token）
+ *  与按各口径规范化的值——头形态 trim 后传入；client_token 严格原值（其 pattern 允许空白，
+ *  统一 trim 会放行带空白 token，行为不抹平）。错误信封在此产出，调用方直接 return。 */
+export function stripCanvasBinding(
+  body: Record<string, unknown>,
+  carrierLabel: string,
+  carrierValue: string,
+):
+  | { error: ResultEnvelope<never> }
+  | { error: null; binding: CanvasBinding | null; rest: Record<string, unknown> } {
+  const { binding, rest, invalid } = takeCanvasBinding(body);
+  if (invalid) {
+    return {
+      error: fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload }),
+    };
+  }
+  if (binding && carrierValue !== binding.submission_id) {
+    return {
+      error: fail(400, `${carrierLabel} 必须等于 canvas_binding.submission_id`, {
+        reason: RECOVERY_REASONS.invalidPayload,
+      }),
+    };
+  }
+  return { error: null, binding, rest };
 }
 
 /** 建任务请求摘要（与 generationCreateRequestHash 同口径 method:operation:path:canonicalJson）。
