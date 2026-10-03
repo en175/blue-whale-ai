@@ -45,7 +45,11 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 ## 操作约定
 
 - **创建**：`create_enterprise_issue(enterprise_id, title, description, project_id=..., program_id=...)`。根 issue 的 `project_id`（仓库）和 `program_id`（项目）都**必传**且非 0，缺任一则 hook 拦截（见上「定位」）。企业私有仓库会静默忽略 create 时传入的 `labels`，紧跟一次 `update_enterprise_issue(label_ids=...)` 补上。入参名以工具 schema 为准，不凭印象。
-- **创建后核验**：用 `get_enterprise_issue_detail(new_ident)` 核对 `description` 非空、`project_id` 和 `program_id` 均与请求值一致；子 issue 还要核对 `parent_id` 与父项 `id` 一致。再用 `list_enterprise_issues(project_id=<请求的仓库 ID>, search=new_ident)` 反查，确认目标仓库可见。字段不符或反查不到时，先修正并再次核验，全部通过后才交付。错名参数（如把描述传到 `body`）会被静默忽略，已踩坑建成空描述工单（IK5THP）；PR / Release 创建后也须回读关键字段。查询/回读一律用 get/list 类工具，**禁止为「确认结果」重放 create 类调用**——Gitee 对同名 PR 去重才未产生第二张（!964 实证），属侥幸不构成保证。
+- **创建归属标注**（2026-10-03 定规）：`assignee_id` **必传**，缺则 hook 拦截。根工单与子工单同一套规则；创建人身份一律取 `get_user_info` 返回的当前 token 用户 id，不硬编码。
+  - 发单时**点名了负责人** → `list_enterprise_members(search=<名字>)` 解析成 id 作 `assignee_id`，创建人并入 `collaborator_ids`；解析不到或多人同名 → **停下问发单人**，不静默兜底。
+  - **未点名** → 创建人即负责人（`assignee_id`=创建人 id），`collaborator_ids` 可空。
+  - 点名负责人**且另有协作者** → 创建人也必须并入 `collaborator_ids`（Gitee 支持多协作者）。
+- **创建后核验**：用 `get_enterprise_issue_detail(new_ident)` 核对 `description` 非空、`project_id` 和 `program_id` 均与请求值一致、`assignee`/`collaborators` 与「创建归属标注」判定一致；子 issue 还要核对 `parent_id` 与父项 `id` 一致。再用 `list_enterprise_issues(project_id=<请求的仓库 ID>, search=new_ident)` 反查，确认目标仓库可见。字段不符或反查不到时，先修正并再次核验，全部通过后才交付。错名参数（如把描述传到 `body`）会被静默忽略，已踩坑建成空描述工单（IK5THP）；PR / Release 创建后也须回读关键字段。查询/回读一律用 get/list 类工具，**禁止为「确认结果」重放 create 类调用**——Gitee 对同名 PR 去重才未产生第二张（!964 实证），属侥幸不构成保证。
 - **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`，但 `issue_type_id` **一律用「任务」(1292680)**。子工单一律任务型，不继承父需求型（2026-08-25 定规）。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`），`前端|后端` 标明改动归属端。跨端改动拆成前端/后端两个子任务，不建「子需求」。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再按「创建后核验」检查父子关系、归属和仓库可见性；查不到则不交 Agent。
   - **子任务，不是子需求**（2026-08-25 定规）：技术侧在产品建的需求工单下记录自己的工作时，只能建**任务**（`issue_type_id=1292680`），绝不能建「需求」型子项。需求（含技术维护母工单 IKAZIG 这类需求型父项）由产品/人关闭，Agent **只完成自己的子任务**，不得把父需求置为已完成/关闭。
   - **父工单正文的标题前缀（如「改造/维护/优化/修复」）不覆盖本条**：若父项要求分类前缀，仍以「端」为标题前缀（`【前端】/【后端】`），分类写进 body；不要为了迁就父项格式把 `issue_type` 改成需求型。
@@ -96,7 +100,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 谁执行谁负责：负责人设为己方执行人，身份取 `get_user_info` 返回的当前 token 用户 id，直接作 `assignee_id`；无条件覆盖原负责人。与状态流转同一次 `update_enterprise_issue` 调用完成：
 
 - `assignee_id` = 执行人 id。
-- `collaborator_ids`（整体写回语义）：原负责人存在且 ≠ 执行人 → 重置为仅原负责人一人，既有其他协作者移除；原负责人为空、或原负责人即执行人 → 不传该参数，协作者维持现状。
+- `collaborator_ids`（整体写回语义，2026-10-03 改规）：新协作者 = 既有协作者 ∪ {原负责人} − {执行人}。不再清空既有协作者（创建归属标注写入的协作者保留）；原负责人存在且 ≠ 执行人 → 追加原负责人；执行人从协作者中剔除（负责人与协作者不同人）。计算结果与现状一致则不传该参数。
 - 前置错位被拦下时不执行认领；开发完成流转与上线流转不再重复设置。
 
 ### 开发完成流转（收口验证通过、交付汇报时执行）
