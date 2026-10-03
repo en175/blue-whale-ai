@@ -4,14 +4,9 @@ import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CANVAS_SAVE_CONFLICT_CODES, CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import type { Response } from "express";
-
-/** IKJJQU（B.8）：新协议受控错误码集合（含恢复保存的 400/404/409/412/422/428）。
- *  canvases 域的两个新恢复路由也用它透传状态码。 */
-function isRecoveryControlled(result: { code: number; data: unknown }): boolean {
-  return CANVAS_SAVE_CONFLICT_CODES.has(result.code)
-    && typeof result.data === "object" && result.data !== null
-    && typeof (result.data as { reason?: unknown }).reason === "string";
-}
+// IKJKUA：受控错误判定收敛到共享适配器；canvases 域按画布保存冲突白名单集合判定
+// （IKJJQU B.8：code 即 HTTP 状态且 data.reason 为稳定字符串，信封直写状态码）。
+import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
 @Controller("canvases")
 export class CanvasesController {
@@ -72,7 +67,7 @@ export class CanvasesController {
     const result = await this.canvas.listGenerationRecovery(
       user.userId, projectId, limit ?? "", cursor ?? "",
     );
-    if (isRecoveryControlled(result)) {
+    if (isRecoveryControlledEnvelope(result, CANVAS_SAVE_CONFLICT_CODES)) {
       res.status(result.code).json(result);
       return;
     }
@@ -89,7 +84,7 @@ export class CanvasesController {
     @Res() res: Response,
   ) {
     const result = await this.canvas.resolveGenerationRecovery(user.userId, projectId, body);
-    if (isRecoveryControlled(result)) {
+    if (isRecoveryControlledEnvelope(result, CANVAS_SAVE_CONFLICT_CODES)) {
       res.status(result.code).json(result);
       return;
     }

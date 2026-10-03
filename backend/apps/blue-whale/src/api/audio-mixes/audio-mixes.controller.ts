@@ -2,19 +2,13 @@ import { Body, Controller, Headers, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
-import { DomainError, ERROR_ENQUEUE_FAILED, FAILURE_CODE, RECOVERY_HTTP_STATUSES } from "@lib/contracts";
+import { DomainError, ERROR_ENQUEUE_FAILED, FAILURE_CODE } from "@lib/contracts";
 import { enqueueAudioMixJob } from "@lib/shared/generation/generation-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import { AudioMixesService } from "@lib/shared/audio-mixes/audio-mixes.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
-
-/** IKJJQZ（B.8 局部适配器）：新协议受控错误判定——code 即 HTTP 状态且 data.reason 为
- *  稳定字符串。这些信封直写状态码（AllExceptionsFilter 会置空 data）。 */
-function isRecoveryControlled(result: { code: number; data: unknown }): boolean {
-  return RECOVERY_HTTP_STATUSES.has(result.code)
-    && typeof result.data === "object" && result.data !== null
-    && typeof (result.data as { reason?: unknown }).reason === "string";
-}
+// IKJKUA：受控错误判定收敛到共享适配器（原 IKJJQZ B.8 本地同款副本已删）。
+import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
 @Controller("projects/:projectId/audio-mixes")
 export class AudioMixesController {
@@ -35,7 +29,7 @@ export class AudioMixesController {
       body ?? {},
       { ...sealProviderCredential(authorization), idempotencyKey: idempotencyKey ?? "" },
     );
-    if (isRecoveryControlled(result)) {
+    if (isRecoveryControlledEnvelope(result)) {
       res?.status(result.code).json(result);
       return;
     }
@@ -73,7 +67,7 @@ export class AudioMixesController {
       sealProviderCredential(authorization).providerCredential,
       canvasBindingBody,
     );
-    if (isRecoveryControlled(result)) {
+    if (isRecoveryControlledEnvelope(result)) {
       res?.status(result.code).json(result);
       return;
     }

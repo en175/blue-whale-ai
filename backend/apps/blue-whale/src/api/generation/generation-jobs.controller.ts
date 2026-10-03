@@ -9,7 +9,7 @@ import { createBillingQuote, type BillingQuote } from "@lib/shared/billing/billi
 import { IdentityService } from "@lib/shared/identity/index.js";
 import { Body, Controller, Headers, HttpCode, Param, Post, Res } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
-import { DomainError, ok, RECOVERY_HTTP_STATUSES } from "@lib/contracts";
+import { DomainError, ok } from "@lib/contracts";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
@@ -43,17 +43,11 @@ import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js"
 import { enqueueFailureLog } from "@lib/infra/mq/rocketmq-producer.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import type { Response } from "express";
+// IKJKUA：受控错误判定收敛到共享适配器（原 IKJJQU B.8 本地同款副本已删）。
+import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
 function bodyString(body: unknown): string {
   return typeof body === "string" ? body : JSON.stringify(body ?? "");
-}
-
-/** IKJJQU（B.8）：新协议受控错误判定——code 即 HTTP 状态且 data.reason 为稳定字符串。
- *  这些信封必须由局部响应适配器直写状态码（AllExceptionsFilter 会置空 data）。 */
-function isRecoveryControlled(result: { code: number; data: unknown }): boolean {
-  return RECOVERY_HTTP_STATUSES.has(result.code)
-    && typeof result.data === "object" && result.data !== null
-    && typeof (result.data as { reason?: unknown }).reason === "string";
 }
 
 @Controller("projects/:projectId/generation-jobs")
@@ -214,7 +208,7 @@ export class GenerationJobsController {
 
     // IKJJQU（B.8 局部适配器）：新协议受控错误（canvas_binding_conflict 等）信封直写
     // HTTP 状态与 data.reason，不经 AllExceptionsFilter（它会置空 data）。
-    if (isRecoveryControlled(result)) {
+    if (isRecoveryControlledEnvelope(result)) {
       res?.status(result.code).json(result);
       return;
     }
@@ -465,7 +459,7 @@ export class GenerationJobsController {
     );
     // IKJJR0（B.8 局部适配器）：新协议受控错误（canvas_binding 载荷无效/受理冲突等）信封
     // 直写 HTTP 状态与 data.reason，不经 AllExceptionsFilter（它会置空 data）。
-    if (isRecoveryControlled(result)) {
+    if (isRecoveryControlledEnvelope(result)) {
       res?.status(result.code).json(result);
       return;
     }
@@ -533,7 +527,7 @@ export class GenerationJobsController {
       canvasBindingBody,
     );
     // IKJJQU（B.8 局部适配器）：新协议受控错误信封直写 HTTP 状态与 data.reason。
-    if (isRecoveryControlled(result)) {
+    if (isRecoveryControlledEnvelope(result)) {
       res?.status(result.code).json(result);
       return;
     }

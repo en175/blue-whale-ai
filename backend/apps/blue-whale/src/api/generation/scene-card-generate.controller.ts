@@ -12,7 +12,6 @@ import {
   DomainError,
   fail,
   ok,
-  RECOVERY_HTTP_STATUSES,
   RESOURCE_NOT_FOUND_CODE,
   type ResultEnvelope,
 } from "@lib/contracts";
@@ -34,17 +33,11 @@ import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { enqueueFailureLog } from "@lib/infra/mq/rocketmq-producer.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
+// IKJKUA：受控错误判定收敛到共享适配器（原 IKJJR0 B.8 本地同款副本已删）。
+import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
 function bodyString(body: unknown): string {
   return typeof body === "string" ? body : JSON.stringify(body ?? "");
-}
-
-/** IKJJR0（B.8）：新协议受控错误判定——code 即 HTTP 状态且 data.reason 为稳定字符串。
- *  与 generation-jobs 控制器同款局部适配器（AllExceptionsFilter 会置空 data，reason 不可读）。 */
-function isRecoveryControlled(result: { code: number; data: unknown }): boolean {
-  return RECOVERY_HTTP_STATUSES.has(result.code)
-    && typeof result.data === "object" && result.data !== null
-    && typeof (result.data as { reason?: unknown }).reason === "string";
 }
 
 @Controller("projects/:projectId/scene-cards/:sceneCardId")
@@ -219,7 +212,7 @@ export class SceneCardGenerateController {
 
     // IKJJR0（B.8 局部适配器）：新协议受控错误（canvas_binding_conflict 等）信封直写
     // HTTP 状态与 data.reason，不经 AllExceptionsFilter（它会置空 data）。
-    if (isRecoveryControlled(result)) {
+    if (isRecoveryControlledEnvelope(result)) {
       res.status(result.code).json(result);
       return;
     }

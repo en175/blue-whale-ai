@@ -1,17 +1,18 @@
 // IKJJQW（B.8 局部适配器）：新协议受控错误判定——code 即 HTTP 状态且 data.reason 为稳定字符串。
 // 这些信封必须由局部响应适配器直写状态码（AllExceptionsFilter 会置空 data）。
-// 与 generation-jobs / canvases controller 内的 IKJJQU 同款判定同实现，供本票接入的
-// 11 个媒体工具 controller 共用（QU 交付文件不动，本文件是新接入方的单一份额）。
+// IKJKUA：全仓唯一一份判定实现。原 generation-jobs / canvases / scene-card-generate /
+// audio-mixes / audio-video-muxes 内的 5 份本地同款副本已收敛到此处；canvases 域传入
+// CANVAS_SAVE_CONFLICT_CODES（画布保存冲突白名单，与默认集合语义独立演进、不合并）。
 import type { Response } from "express";
 
 import { RECOVERY_HTTP_STATUSES } from "@lib/contracts";
 
-export function isRecoveryControlledEnvelope(result: {
-  code: number;
-  data: unknown;
-}): boolean {
+export function isRecoveryControlledEnvelope(
+  result: { code: number; data: unknown },
+  statuses: ReadonlySet<number> = RECOVERY_HTTP_STATUSES,
+): boolean {
   return (
-    RECOVERY_HTTP_STATUSES.has(result.code) &&
+    statuses.has(result.code) &&
     typeof result.data === "object" &&
     result.data !== null &&
     typeof (result.data as { reason?: unknown }).reason === "string"
