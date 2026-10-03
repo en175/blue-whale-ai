@@ -245,6 +245,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         return;
       }
       const detail = knownDetail ?? await doFetchJobStatus(jobId).catch(() => null);
+      if (!owns(execution, jobId)) return; // 详情返回（成功/失败均含）复核：过期执行零宿主写入（A.8）
       const assets = detail?.output_assets ?? [];
       // 产物匹配按可信 asset_id（投影权威），缺失回落数组序（B.4：不按偶然顺序重新编号）
       const views = outputs.map((item, index) => {
@@ -316,6 +317,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       if (fanOutProject) void host.saveCanvas(fanOutProject).catch(() => {}); // 扇出同笔落盘（家族先例：防刷新占位卡复活）
     } catch (e) {
       console.warn('[generation-runtime] 多结果投影失败，占位卡保留:', e);
+      if (!owns(execution, jobId)) return; // 异常路径同守卫：过期执行不 patch 当前画布
       host.patchNode(nodeId, { genStatus: undefined, progress: 100 });
     }
   };

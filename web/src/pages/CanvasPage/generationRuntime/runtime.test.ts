@@ -48,6 +48,7 @@ interface FakeHost {
   patches: Array<{ nodeId: string; patch: Record<string, unknown> }>;
   inserts: RuntimeNodeView[];
   removes: string[];
+  saves: string[];
   toasts: Array<{ kind: string; message: string }>;
   activeTokens: Map<string, string>;
   locallyRemoved: Set<string>;
@@ -65,6 +66,7 @@ function createFakeHost(): FakeHost {
   const patches: FakeHost['patches'] = [];
   const inserts: RuntimeNodeView[] = [];
   const removes: string[] = [];
+  const saves: string[] = [];
   const toasts: FakeHost['toasts'] = [];
   const activeTokens = new Map<string, string>();
   const locallyRemoved = new Set<string>();
@@ -107,14 +109,14 @@ function createFakeHost(): FakeHost {
       return 'terminal';
     },
     settleCancelled: (nodeId) => { settles.push(nodeId); },
-    saveCanvas: async () => true,
+    saveCanvas: async (projectId: string) => { saves.push(projectId); return true; },
     toast: (kind, message) => { toasts.push({ kind, message }); },
     openRechargeForCreditsError: () => false,
     addAuthResume: () => {},
     rememberAsset: () => {},
   };
   return {
-    host, nodes, edges, patches, inserts, removes, toasts, activeTokens, locallyRemoved,
+    host, nodes, edges, patches, inserts, removes, saves, toasts, activeTokens, locallyRemoved,
     pendingDeletes, terminalResults, settles,
     switchProject: (next) => { project = next; epoch = {}; nodes.clear(); edges.length = 0; },
     advanceEpoch: () => { epoch = {}; },
@@ -1049,5 +1051,145 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     expect(fake.patches.filter((p) => p.patch.genStatus === 'failed')).toHaveLength(0);
     expect(clock.pendingCount()).toBe(1);
     expect(fake.patches.length).toBeGreaterThan(patchesBefore); // B 的 tick 照常写进度（续链健康）
+  });
+});
+
+/* ============================================
+ * IKJKU0 恢复扇出详情间隙归属复核：任务详情请求（fanOutOutputs 第二个 await）
+ * 返回前后归属可能过期（切项目/重载/删除/新任务接管），迟到结果零宿主写入。
+ * ============================================ */
+describe('生成任务运行时：恢复扇出详情间隙归属复核（IKJKU0）', () => {
+  /** succeeded 多输出恢复记录：恢复扇出走详情请求路径（无 knownDetail）。 */
+  const fanOutDetailRecord = (): GenerationRecoveryRecord => ({
+    submission_id: 'sub-1', target_node_id: 'n1', job_id: '501', task_type: 'image',
+    binding_revision: 1, is_current: true,
+    job: { job_id: '501', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['11', '12'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+    recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 320, height: 320, name: '图片生成中' }, sources: [] },
+    previous_target_snapshot: null,
+    items: [
+      { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+      { recovery_item_id: 'gcr:sub-1:slot:77', output_key: 'slot:77', node_id: 'generation-output:77', state: 'pending', revision: 0, node_binding_revision: 0, asset_id: '11', slot_id: '77' },
+      { recovery_item_id: 'gcr:sub-1:slot:78', output_key: 'slot:78', node_id: 'generation-output:78', state: 'pending', revision: 0, node_binding_revision: 0, asset_id: '12', slot_id: '78' },
+    ],
+  } as GenerationRecoveryRecord);
+
+  const succeededDetail = () => ({
+    status: 'succeeded', progress: 100, asset: null,
+    output_assets: [
+      { id: '11', url: 'https://a/11.png', type: 'image' },
+      { id: '12', url: 'https://a/12.png', type: 'image' },
+    ],
+  });
+
+  /** 驱动恢复扇出停在任务详情间隙：投影已返回（首个归属检查通过），详情请求在途。 */
+  async function suspendAtFanOutDetail() {
+    const { fake, runtime, status, page, kit } = setup({ script: [succeededDetail()] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
+    const projectionPage = (): GenerationRecoveryPage => ({
+      protocol_version: 1, canvas_version: 1, next_cursor: null, records: [fanOutDetailRecord()],
+    });
+    let pageCalls = 0;
+    let releaseProjection!: (page: GenerationRecoveryPage) => void;
+    page.mockImplementation(() => {
+      pageCalls += 1;
+      if (pageCalls === 2) return new Promise((resolve) => { releaseProjection = resolve; }); // 扇出投影挂起
+      return Promise.resolve(projectionPage());
+    });
+    status.fn.mockImplementation((jobId: unknown) => {
+      if (String(jobId) === '501') return new Promise((resolve) => { detailRelease = resolve; });
+      return Promise.resolve({ status: 'processing', progress: 5, asset: null });
+    });
+    let detailRelease!: (detail: Record<string, unknown>) => void;
+    await runtime.recover('p1'); // 恢复分页（page 第 1 次）→ 扇出投影挂起（page 第 2 次）
+    await flushMicrotasks();
+    releaseProjection(projectionPage()); // 归属有效：通过投影后检查，发出详情请求
+    await flushMicrotasks();
+    expect(status.fn.mock.calls.filter(([id]) => String(id) === '501')).toHaveLength(1); // 已停在详情间隙
+    return { fake, runtime, kit, releaseDetail: (detail: Record<string, unknown>) => detailRelease(detail) };
+  }
+
+  const writeBaseline = (fake: FakeHost) => ({
+    inserts: fake.inserts.length, removes: fake.removes.length,
+    patches: fake.patches.length, saves: fake.saves.length,
+  });
+  const expectZeroHostWrites = (fake: FakeHost, base: ReturnType<typeof writeBaseline>) => {
+    expect(fake.inserts).toHaveLength(base.inserts);
+    expect(fake.removes).toHaveLength(base.removes);
+    expect(fake.patches).toHaveLength(base.patches);
+    expect(fake.saves).toHaveLength(base.saves);
+  };
+
+  it('A→B：详情等待期间切项目，迟到详情零宿主写入（不插卡不删卡不保存）', async () => {
+    const ctx = await suspendAtFanOutDetail();
+    const base = writeBaseline(ctx.fake);
+    ctx.fake.switchProject('p2');
+    ctx.releaseDetail(succeededDetail());
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base); // 旧项目结果不进新画布、不触发 p2 保存
+  });
+
+  it('A→B→A：切回同项目也不得写入——加载身份兜底拦截', async () => {
+    const ctx = await suspendAtFanOutDetail();
+    const base = writeBaseline(ctx.fake);
+    ctx.fake.switchProject('p2');
+    ctx.fake.switchProject('p1'); // 项目 id 回到原值，但加载身份已推进
+    ctx.releaseDetail(succeededDetail());
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base);
+  });
+
+  it('同项目重载（loadEpoch 推进）：迟到详情零宿主写入', async () => {
+    const ctx = await suspendAtFanOutDetail();
+    const base = writeBaseline(ctx.fake);
+    ctx.fake.advanceEpoch();
+    ctx.releaseDetail(succeededDetail());
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base);
+  });
+
+  it('详情等待期间目标卡被删除：迟到详情不清画布、不插结果卡、不保存', async () => {
+    const ctx = await suspendAtFanOutDetail();
+    const base = writeBaseline(ctx.fake);
+    ctx.fake.locallyRemoved.add('n1');
+    ctx.releaseDetail(succeededDetail());
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base);
+  });
+
+  it('详情等待期间同卡新任务接管：旧执行不清新执行资源', async () => {
+    const ctx = await suspendAtFanOutDetail();
+    ctx.kit.respond.create(async () => ({ jobId: '502', canvasBinding: BINDING_VIEW('uuid-0002', 'n1', '502', 2) }));
+    expect(ctx.runtime.submit(ctx.kit.def, { payload: {}, target: targetFacts('n1') })).toBe(true);
+    await flushMicrotasks();
+    expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' });
+    const base = writeBaseline(ctx.fake);
+    const tokenOfNew = ctx.fake.host.getActiveJob('n1');
+    ctx.releaseDetail(succeededDetail()); // 旧执行（501）的迟到详情
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base); // 不移除新执行占用的目标卡、不插旧结果卡、不保存
+    expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' }); // 新执行不受影响
+    expect(ctx.fake.host.getActiveJob('n1')).toBe(tokenOfNew); // 新执行的锁不被清
+  });
+
+  it('投影请求失败且归属已过期：catch 分支不向当前画布 patch', async () => {
+    const { fake, runtime, page } = setup();
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
+    let pageCalls = 0;
+    let rejectProjection!: (reason: Error) => void;
+    page.mockImplementation(() => {
+      pageCalls += 1;
+      if (pageCalls === 1) {
+        return Promise.resolve({ protocol_version: 1, canvas_version: 1, next_cursor: null, records: [fanOutDetailRecord()] } as never);
+      }
+      if (pageCalls === 2) return new Promise((_resolve, reject) => { rejectProjection = reject; }); // 扇出投影挂起
+      return Promise.resolve({ protocol_version: 1, canvas_version: 1, records: [], next_cursor: null } as never);
+    });
+    await runtime.recover('p1');
+    await flushMicrotasks();
+    const base = writeBaseline(fake);
+    fake.switchProject('p2'); // 投影等待期间归属失效
+    rejectProjection(new Error('network'));
+    await flushMicrotasks(20);
+    expect(fake.patches).toHaveLength(base.patches); // 异常路径不 patch 当前画布
   });
 });
