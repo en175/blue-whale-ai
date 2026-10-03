@@ -304,6 +304,7 @@ function createFakeHost(): FakeHost {
     openRechargeForCreditsError: () => false,
     addAuthResume: () => {},
     rememberAsset: () => {},
+    fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
   };
   return { host, nodes, edges, inserts, removes, get saves() { return counters.saves; } };
 }
@@ -336,6 +337,7 @@ const oneSegmentPage = (): GenerationRecoveryPage => ({
 
 function setupRuntime(fake: FakeHost, statusScript: Array<Record<string, unknown>>, page: GenerationRecoveryPage) {
   let statusIndex = 0;
+  fake.host.fetchRecoveryPage = vi.fn(async () => JSON.parse(JSON.stringify(page))) as never; // 扫描取页走宿主接缝（IKJKU9）
   const runtime = createGenerationRuntime(fake.host, {
     fetchJobStatus: (vi.fn(async () => {
       const item = statusScript[Math.min(statusIndex, statusScript.length - 1)];

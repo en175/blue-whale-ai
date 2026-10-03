@@ -3,11 +3,12 @@
  * 注入可控 API 响应、手动时钟与画布宿主；不断言私有变量/Hook 顺序。
  * ============================================ */
 import { describe, expect, it, vi } from 'vitest';
+import { QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/api/http';
 import { createGenerationRuntime, type GenerationRuntimeDeps } from './runtime';
 import { normalGenerationTask } from './normalGeneration';
 import type { GenerationRuntimeHost, GenerationTaskDefinition, RuntimeNodeView } from './types';
-import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import { generationRecoveryKeys, generationRecoveryPageOptions, type GenerationRecoveryPage, type GenerationRecoveryRecord } from '@/api/canvasRecovery';
 
 /** 手动时钟：轮询续链只在 flush 时推进。 */
 class ManualClock {
@@ -60,7 +61,7 @@ interface FakeHost {
   data: (nodeId: string) => Record<string, unknown>;
 }
 
-function createFakeHost(): FakeHost {
+function createFakeHost(scanPage?: GenerationRuntimeHost['fetchRecoveryPage']): FakeHost {
   const nodes = new Map<string, RuntimeNodeView>();
   const edges: Array<{ source: string; target: string }> = [];
   const patches: FakeHost['patches'] = [];
@@ -114,6 +115,7 @@ function createFakeHost(): FakeHost {
     openRechargeForCreditsError: () => false,
     addAuthResume: () => {},
     rememberAsset: () => {},
+    fetchRecoveryPage: scanPage ?? (async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null })),
   };
   return {
     host, nodes, edges, patches, inserts, removes, saves, toasts, activeTokens, locallyRemoved,
@@ -178,7 +180,7 @@ function statusScript(script: Array<Record<string, unknown>>) {
 
 function pageScript(pages: GenerationRecoveryPage[]) {
   let index = 0;
-  return vi.fn(async () => {
+  return vi.fn(async (_projectId: string, _options?: { limit?: number; cursor?: string | null }) => {
     const page = pages[Math.min(index, pages.length - 1)];
     index += 1;
     return JSON.parse(JSON.stringify(page));
@@ -202,10 +204,10 @@ const targetFacts = (nodeId: string, role: 'draft' | 'existing-media' | 'result-
 });
 
 function setup(overrides: { script?: Array<Record<string, unknown>> } = {}) {
-  const fake = createFakeHost();
+  const page = pageScript([{ protocol_version: 1, canvas_version: 3, records: [], next_cursor: null }]);
+  const fake = createFakeHost((projectId, options) => page(projectId, options));
   const clock = new ManualClock();
   const status = statusScript(overrides.script ?? [{ status: 'processing', progress: 10, asset: null }]);
-  const page = pageScript([{ protocol_version: 1, canvas_version: 3, records: [], next_cursor: null }]);
   const deps: GenerationRuntimeDeps = {
     fetchJobStatus: status.fn as never,
     fetchRecoveryPage: page as never,
@@ -399,6 +401,7 @@ describe('生成任务运行时：retry', () => {
       previous_target_snapshot: null,
       items: [{ recovery_item_id: 'gcr:sub-old:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 3, asset_id: null, slot_id: null }],
     }], next_cursor: null }]);
+    fake.host.fetchRecoveryPage = page as never; // 扫描取页走宿主接缝（IKJKU9）
     const rt2 = createGenerationRuntime(fake.host, {
       fetchRecoveryPage: page as never,
       newId: () => 'uuid-7777',
@@ -726,6 +729,21 @@ describe('生成任务运行时：recover', () => {
     await pending;
     expect(status.calls).toHaveLength(0);
   });
+
+  it('扫描取页走宿主接缝（IKJKU9：数据源 Query 化），不经 deps 传输层注入', async () => {
+    const scanPage = vi.fn(async (_projectId: string, options: { cursor?: string | null }) => ({
+      protocol_version: 1, canvas_version: 1, records: [record()], next_cursor: options.cursor ?? null,
+    }) as GenerationRecoveryPage);
+    const neverTransport = vi.fn(async () => { throw new Error('扫描不得走 deps 直连'); });
+    const fake = createFakeHost(scanPage as never);
+    const deps: GenerationRuntimeDeps = { fetchRecoveryPage: neverTransport as never };
+    const runtime = createGenerationRuntime(fake.host, deps);
+    runtime.register(createFakeDef().def);
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
+    await runtime.recover('p1');
+    expect(scanPage).toHaveBeenCalledWith('p1', { cursor: null });
+    expect(neverTransport).not.toHaveBeenCalled();
+  });
 });
 
 /* ============================================
@@ -871,6 +889,134 @@ describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJK
     await flushMicrotasks(20);
     expect(pageCalls).toBe(2);
     expect(status.calls).toHaveLength(1);
+  });
+});
+
+/* ============================================
+ * IKJKU9 恢复扫描数据源 Query 化：宿主接缝以独立 QueryClient（queries.retry: false）
+ * + generationRecoveryPageOptions 实现（queryFn 以脚本覆写，key/缓存/去重走真实
+ * Query 生命周期），证明互斥/判重/项目与 loadEpoch 隔离/游标对账在 Query 驱动下不变。
+ * ============================================ */
+describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => {
+  /** 受理回执丢失形态（restore-target 补卡）：job processing、目标卡不在场。 */
+  const lostReceipt = (nodeId: string, submissionId: string): GenerationRecoveryRecord => ({
+    submission_id: submissionId, target_node_id: nodeId, job_id: `j-${nodeId}`, task_type: 'image',
+    binding_revision: 1, is_current: true,
+    job: { job_id: `j-${nodeId}`, type: 'image', status: 'processing', progress: 20, output_asset_ids: [], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+    recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 320, height: 320, name: '图片生成中' }, sources: [] },
+    previous_target_snapshot: null,
+    items: [{ recovery_item_id: `gcr:${submissionId}:$target`, output_key: '$target', node_id: nodeId, state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null }],
+  } as GenerationRecoveryRecord);
+
+  const emptyPage = (): GenerationRecoveryPage => ({ protocol_version: 1, canvas_version: 1, records: [], next_cursor: null });
+
+  /** 独立 QueryClient（retry: false）驱动的宿主接缝：queryFn 按脚本覆写，其余走
+   *  generationRecoveryPageOptions 的真实 key/缓存行为。fetches 记录 (项目, 游标)。 */
+  const wireQueryHost = (
+    fake: ReturnType<typeof createFakeHost>,
+    script: (projectId: string, cursor: string | null) => Promise<GenerationRecoveryPage>,
+  ) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const fetches: Array<[string, string | null]> = [];
+    fake.host.fetchRecoveryPage = (projectId, options) => client.fetchQuery({
+      ...generationRecoveryPageOptions(projectId, options),
+      queryFn: () => {
+        const cursor = options.cursor ?? null;
+        fetches.push([projectId, cursor]);
+        return script(projectId, cursor);
+      },
+    });
+    return { client, fetches };
+  };
+
+  it('游标分页经 Query 生命周期：多页记录全部对账补卡，页按项目+游标独立缓存', async () => {
+    const fake = createFakeHost();
+    const pageOne: GenerationRecoveryPage = {
+      protocol_version: 1, canvas_version: 1, next_cursor: 'c2',
+      records: [lostReceipt('qa-1', 'sub-qa1')],
+    };
+    const pageTwo: GenerationRecoveryPage = { protocol_version: 1, canvas_version: 1, next_cursor: null, records: [lostReceipt('qa-2', 'sub-qa2')] };
+    const { client, fetches } = wireQueryHost(fake, async (_projectId, cursor) =>
+      (cursor === 'c2' ? pageTwo : pageOne));
+    const runtime = createGenerationRuntime(fake.host, {});
+    runtime.register(normalGenerationTask);
+    await runtime.recover('p1');
+    expect(fetches).toEqual([['p1', null], ['p1', 'c2']]); // 游标推进整本对账
+    expect(fake.inserts.map((node) => node.id).sort()).toEqual(['qa-1', 'qa-2']);
+    expect(client.getQueryData(generationRecoveryKeys.page('p1'))).toEqual(pageOne);
+    expect(client.getQueryData(generationRecoveryKeys.page('p1', { cursor: 'c2' }))).toEqual(pageTwo);
+    client.clear();
+  });
+
+  it('同一加载在途扫描不重入：并发 recover 不经 Query 发第二次页请求；重复扫描判重不双补卡', async () => {
+    const fake = createFakeHost();
+    let releaseFirst!: (page: GenerationRecoveryPage) => void;
+    const lostPage = (): GenerationRecoveryPage => ({
+      protocol_version: 1, canvas_version: 1, next_cursor: null, records: [lostReceipt('qa-1', 'sub-qa1')],
+    });
+    let calls = 0;
+    const { client, fetches } = wireQueryHost(fake, async (_projectId, _cursor) => {
+      calls += 1;
+      if (calls === 1) return new Promise((resolve) => { releaseFirst = resolve; }); // 首轮在途挂起
+      return lostPage();
+    });
+    const runtime = createGenerationRuntime(fake.host, {});
+    runtime.register(normalGenerationTask);
+    const first = runtime.recover('p1');
+    const second = runtime.recover('p1'); // 同一加载并发重入：被互斥挡住
+    await flushMicrotasks();
+    expect(fetches).toEqual([['p1', null]]); // 未发出第二次分页
+    releaseFirst(lostPage());
+    await Promise.all([first, second]);
+    await flushMicrotasks(20);
+    expect(fake.inserts).toHaveLength(1);
+    await runtime.recover('p1'); // 扫描完成后重新对账：staleTime 0 重新取页，判重不双补卡
+    await flushMicrotasks(20);
+    expect(fetches).toEqual([['p1', null], ['p1', null]]);
+    expect(fake.inserts).toHaveLength(1);
+    client.clear();
+  });
+
+  it('A→B：B 的扫描经 Query 立即发出；A 迟到响应零 B 写入', async () => {
+    const fake = createFakeHost();
+    let releaseA!: (page: GenerationRecoveryPage) => void;
+    const { client, fetches } = wireQueryHost(fake, (projectId, cursor) => {
+      if (projectId === 'p2') return Promise.resolve(cursor == null ? emptyPage() : emptyPage());
+      return cursor === 'c2'
+        ? Promise.resolve(emptyPage())
+        : new Promise((resolve) => { releaseA = resolve; });
+    });
+    const runtime = createGenerationRuntime(fake.host, {});
+    runtime.register(normalGenerationTask);
+    const pendingA = runtime.recover('p1'); // A 扫描在途
+    fake.switchProject('p2');
+    runtime.reset();
+    await runtime.recover('p2'); // B 不被 A 的在途互斥挡住
+    expect(fetches).toEqual([['p1', null], ['p2', null]]); // 请求序列包含 B（不同 key 不串页）
+    releaseA({ protocol_version: 1, canvas_version: 1, next_cursor: null, records: [lostReceipt('qa-1', 'sub-qa1')] });
+    await pendingA;
+    await flushMicrotasks(20);
+    expect(fake.inserts).toHaveLength(0); // A 迟到响应零 B 画布写入
+    expect(fake.saves).toHaveLength(0);
+    client.clear();
+  });
+
+  it('查询失败（retry: false 一次即抛）：无 toast 单一呈现，锁释放后下轮扫描可补卡', async () => {
+    const fake = createFakeHost();
+    let failFirst = true;
+    const { client } = wireQueryHost(fake, async () => {
+      if (failFirst) { failFirst = false; throw new Error('network'); }
+      return { protocol_version: 1, canvas_version: 1, next_cursor: null, records: [lostReceipt('qa-1', 'sub-qa1')] };
+    });
+    const runtime = createGenerationRuntime(fake.host, {});
+    runtime.register(normalGenerationTask);
+    await runtime.recover('p1'); // 查询错误不外抛（等下轮水合重试）
+    expect(fake.toasts).toHaveLength(0); // 错误单一呈现：无第二处错误面
+    expect(fake.inserts).toHaveLength(0);
+    await runtime.recover('p1'); // 锁已释放：下轮扫描正常补卡
+    await flushMicrotasks(20);
+    expect(fake.inserts).toHaveLength(1);
+    client.clear();
   });
 });
 
@@ -1146,10 +1292,10 @@ function createFamilyBDef() {
 }
 
 function setupCrossFamily(overrides: { script?: Array<Record<string, unknown>>; pages?: GenerationRecoveryPage[] } = {}) {
-  const fake = createFakeHost();
+  const page = pageScript(overrides.pages ?? [{ protocol_version: 1, canvas_version: 3, records: [], next_cursor: null }]);
+  const fake = createFakeHost((projectId, options) => page(projectId, options));
   const clock = new ManualClock();
   const status = statusScript(overrides.script ?? [{ status: 'processing', progress: 10, asset: null }]);
-  const page = pageScript(overrides.pages ?? [{ protocol_version: 1, canvas_version: 3, records: [], next_cursor: null }]);
   const deps: GenerationRuntimeDeps = {
     fetchJobStatus: status.fn as never,
     fetchRecoveryPage: page as never,

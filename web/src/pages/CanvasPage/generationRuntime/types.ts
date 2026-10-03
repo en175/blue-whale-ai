@@ -10,7 +10,9 @@
  *    定义文件并注册，不改运行时。
  *  - 会话状态/纪元/界面提交锁归 IKIXK8 工具会话运行时，本模块不重复管理。
  * ============================================ */
-import type { CanvasBinding, GenerationRecoveryItem, GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import type {
+  CanvasBinding, GenerationRecoveryItem, GenerationRecoveryPage, GenerationRecoveryRecord,
+} from '@/api/canvasRecovery';
 import type { JobDetail } from '@/api/jobs';
 
 /** 画布节点在运行时眼中的形状（宿主裁剪投影；position/尺寸为发送时快照来源）。 */
@@ -214,6 +216,14 @@ export interface GenerationRuntimeHost {
   settleCancelled(nodeId: string): void;
   // ── 保存 ──
   saveCanvas(projectId: string): Promise<boolean>;
+  // ── 恢复扫描取页（IKJKU9：扫描数据源 Query 化）──
+  /** 恢复页读取经 Query 生命周期（资源旁 generationRecoveryPageOptions，按项目+游标
+   *  key 隔离）：页面实现为 QueryClient.fetchQuery，再由运行时扫描编排对账推进游标。
+   *  运行时内部定向读取（扇出投影/resolve）不经此，保持注入 Promise。 */
+  fetchRecoveryPage(
+    projectId: string,
+    options: { limit?: number; cursor?: string | null },
+  ): Promise<GenerationRecoveryPage>;
   // ── 反馈与账号 ──
   toast(kind: 'success' | 'warn' | 'error', message: string): void;
   openRechargeForCreditsError(e: unknown): boolean;

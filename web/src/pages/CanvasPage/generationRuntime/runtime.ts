@@ -656,7 +656,10 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   // ── 恢复扫描 ──
   /** 扫描互斥按加载身份隔离（IKJKU7）：持有者为在扫的 loadEpoch。运行时实例跨项目
    *  切换存活——新加载（epoch 推进）不继承旧加载的互斥状态，可立即发起自己的扫描；
-   *  旧扫描晚到的收尾只在仍持有锁时释放，不清新扫描的锁（无双扫描写入/无锁卡死）。 */
+   *  旧扫描晚到的收尾只在仍持有锁时释放，不清新扫描的锁（无双扫描写入/无锁卡死）。
+   *  IKJKU9：扫描数据源 Query 化——取页经宿主接缝（QueryClient.fetchQuery +
+   *  generationRecoveryPageOptions，按项目+游标 key 隔离），运行时只保留游标推进
+   *  与对账编排；扇出投影等定向读取不经宿主，保持注入 Promise（deps）。 */
   let scanningEpoch: object | null = null;
   const recover = async (projectId: string): Promise<void> => {
     const loadEpoch = host.getLoadEpoch();
@@ -665,7 +668,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     try {
       let cursor: string | null = null;
       do {
-        const page = await doFetchRecoveryPage(projectId, { cursor });
+        const page = await host.fetchRecoveryPage(projectId, { cursor });
         if (host.getProjectId() !== projectId || host.getLoadEpoch() !== loadEpoch) return; // A→B→A
         for (const record of page.records) reconcileRecord(record);
         cursor = page.next_cursor;

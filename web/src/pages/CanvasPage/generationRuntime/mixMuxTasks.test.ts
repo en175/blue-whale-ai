@@ -104,6 +104,7 @@ function createFakeHost() {
     openRechargeForCreditsError: () => false,
     addAuthResume: () => {},
     rememberAsset: () => {},
+    fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
   };
   return {
     host, nodes, edges, patches, inserts, removes, toasts, activeTokens, settles,

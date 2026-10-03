@@ -4,9 +4,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiMocks, canvasDocMock, enableReactActEnvironment, flowProps, mediaNodes, navigateRef, renderPage, unmountPage } from './testing/canvasPageTestHarness';
 /** IKJJR3：恢复扫描页/定向读取（默认空 records——跨项目接续用例按需回放记录）。
  *  文件级 mock（同 audioMixRecovery 先例）：整模块 mock 不进 harness，避免后注册
- *  覆盖其他测试文件自带的 canvasRecovery mock。 */
+ *  覆盖其他测试文件自带的 canvasRecovery mock。IKJKU9：扫描经 Query 生命周期取页——
+ *  补 generationRecoveryPageOptions（key 形态同资源模块真实工厂，queryFn 走 mock 页）。 */
 const recoveryApi = vi.hoisted(() => ({
-  fetchGenerationRecoveryPage: vi.fn(async (): Promise<{ protocol_version: number; canvas_version: number | null; records: Array<Record<string, unknown>>; next_cursor: string | null }> => ({ protocol_version: 1, canvas_version: 3, records: [], next_cursor: null })),
+  fetchGenerationRecoveryPage: vi.fn(async (_projectId?: string, _options?: { cursor?: string | null }): Promise<{ protocol_version: number; canvas_version: number | null; records: Array<Record<string, unknown>>; next_cursor: string | null }> => ({ protocol_version: 1, canvas_version: 3, records: [], next_cursor: null })),
+  generationRecoveryPageOptions: (projectId: string, options: { cursor?: string | null } = {}) => ({
+    queryKey: ['canvases', 'generation-recovery', projectId, { cursor: options.cursor ?? null }],
+    queryFn: () => recoveryApi.fetchGenerationRecoveryPage(projectId, options),
+    staleTime: 0,
+    retry: false as const,
+  }),
   resolveGenerationRecovery: vi.fn(async (): Promise<{ protocol_version: number; records: Array<Record<string, unknown>> }> => ({ protocol_version: 1, records: [] })),
   putCanvasDocWithRecovery: vi.fn(async () => ({ project_id: '1', version: 4, recoveryReceipt: { commandId: 'cmd', replayed: false, changes: [] } })),
 }));

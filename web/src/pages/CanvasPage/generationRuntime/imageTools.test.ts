@@ -244,6 +244,7 @@ describe('图像工具类型定义：与运行时组合冒烟（真实 def 接 r
       openRechargeForCreditsError: () => false,
       addAuthResume: () => {},
       rememberAsset: () => {},
+      fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
     };
     const clock = new ManualClock();
     let pollCount = 0;

@@ -107,6 +107,7 @@ function createFakeHost(): FakeHost {
     openRechargeForCreditsError: () => false,
     addAuthResume: () => {},
     rememberAsset: () => {},
+    fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
   };
   return { host, nodes, patches, inserts, removes, toasts, terminalResults, data: (id) => nodes.get(id)?.data ?? {} };
 }
@@ -331,11 +332,11 @@ describe('成片/重生样片：断连恢复', () => {
         items: [{ recovery_item_id: 'gcr:sub-regen:$target', output_key: '$target', node_id: 's2', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null }],
       }],
     };
+    fake.host.fetchRecoveryPage = (async () => JSON.parse(JSON.stringify(page))) as never; // 扫描取页走宿主接缝（IKJKU9）
     const runtime = createGenerationRuntime(fake.host, {
       fetchJobStatus: apiMocks.fetchJobStatus as never,
       fetchRecoveryPage: (async () => JSON.parse(JSON.stringify(page))) as never,
-      setTimeout: clock.setTimeout as never,
-      clearTimeout: clock.clearTimeout as never,
+      setTimeout: clock.setTimeout as never,      clearTimeout: clock.clearTimeout as never,
       newId: () => 'uuid-recover',
     });
     runtime.register(normalGenerationTask);

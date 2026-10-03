@@ -264,6 +264,7 @@ describe('普通生成类型定义：重试运行时回归', () => {
       openRechargeForCreditsError: () => false,
       addAuthResume: () => {},
       rememberAsset: () => {},
+      fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
     };
     const emptyPage: GenerationRecoveryPage = { protocol_version: 1, canvas_version: 1, records: [], next_cursor: null };
     const runtime = createGenerationRuntime(host, {

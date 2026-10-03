@@ -200,6 +200,7 @@ describe('视频处理家族：恢复落卡规划（受理回执丢失补卡 + �
       openRechargeForCreditsError: () => false,
       addAuthResume: () => {},
       rememberAsset: () => {},
+      fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
       inserted, edges,
     };
   };

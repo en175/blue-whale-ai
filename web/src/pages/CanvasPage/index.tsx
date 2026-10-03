@@ -242,7 +242,7 @@ import { sceneSplitTask, vocalSplitTask } from './generationRuntime/multiOutputT
 import { videoToolsTask, videoToolFrozenPayload, type VideoToolPayload } from './generationRuntime/videoTools';
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
 import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
-import { putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
+import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
 import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
@@ -8664,6 +8664,10 @@ export default function CanvasPage() {
     applyTerminal: (nodeId, jobId, detail) => applyJobTerminal(nodeId, jobId, detail),
     settleCancelled: settleCancelledNode,
     saveCanvas: (projectId) => flushCanvasSave(projectId),
+    // IKJKU9：恢复扫描取页经 Query 生命周期（资源旁 generationRecoveryPageOptions，
+    // 按项目+游标 key 隔离、staleTime 0 每轮重扫、retry false 错误单一呈现），
+    // 由运行时扫描编排对账推进游标；错误经运行时 console.warn 等下轮水合重试。
+    fetchRecoveryPage: (projectId, options) => queryClient.fetchQuery(generationRecoveryPageOptions(projectId, options)),
     toast: (kind, message) => showToast(kind, message),
     openRechargeForCreditsError,
     addAuthResume: (fn) => { useAuthPromptStore.getState().addResume(fn); },

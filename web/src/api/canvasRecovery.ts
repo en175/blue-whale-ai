@@ -6,6 +6,7 @@
  * 形状与 backend/libs/contracts/canvas-recovery.ts 同源；客户端只做类型引用与
  * 常量复制（RECOVERY 页限制），不做 zod 运行时校验——服务端是权威。
  * ============================================ */
+import { queryOptions } from '@tanstack/react-query';
 import { apiRequest } from './http';
 import type { CanvasBinding, RecoveryChange } from '@lib/contracts/canvas-recovery';
 import type { Edge, Node, Viewport } from '@xyflow/react';
@@ -74,6 +75,31 @@ export function fetchGenerationRecoveryPage(
     `/api/canvases/${encodeURIComponent(projectId)}/generation-recovery${suffix ? `?${suffix}` : ''}`,
     { silent: true },
   );
+}
+
+/** 恢复页 query keys 工厂（IKJKU9）：按项目隔离，游标/limit 归一进 key。 */
+export const generationRecoveryKeys = {
+  all: ['canvases', 'generation-recovery'] as const,
+  page: (projectId: string, options: { cursor?: string | null; limit?: number } = {}) => [
+    ...generationRecoveryKeys.all,
+    projectId,
+    { cursor: options.cursor ?? null, ...(options.limit != null ? { limit: options.limit } : {}) },
+  ] as const,
+};
+
+/** 恢复页的 Query 定义（资源旁 queryOptions，形态同 frameInterpolationRecoveryOptions）：
+ *  宿主/测试经 QueryClient.fetchQuery 消费游标分页。staleTime 0 = 每次扫描重新对账
+ *  服务端事实；retry false + 传输层 silent = 查询错误单一呈现，失败等下轮水合重试。 */
+export function generationRecoveryPageOptions(
+  projectId: string,
+  options: { limit?: number; cursor?: string | null } = {},
+) {
+  return queryOptions({
+    queryKey: generationRecoveryKeys.page(projectId, options),
+    queryFn: () => fetchGenerationRecoveryPage(projectId, options),
+    staleTime: 0,
+    retry: false,
+  });
 }
 
 /** POST resolve：按已保存节点标记定向回读旧输出 revision（只读、可重复、不修改状态）。 */
