@@ -682,8 +682,15 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     }
   };
 
-  /** ledgerOnly（迟到对账遇删除/新执行接管）：只回台账逐项状态，不动归属登记与画布动作。 */
-  const reconcileRecord = (record: GenerationRecoveryRecord, ledgerOnly = false) => {
+  /** 旧对账仍更新自身台账；目标已删除、被新意图接管或版本落后时，不动当前承接与画布。 */
+  const reconcileRecord = (record: GenerationRecoveryRecord) => {
+    const claiming = active.get(record.target_node_id);
+    const targetItem = record.items.find((item) => item.output_key === TARGET_OUTPUT_KEY);
+    const ledgerOnly = host.isLocallyRemoved(record.target_node_id)
+      || (claiming != null && (claiming.jobId !== record.job_id
+        || (claiming.submissionId != null && claiming.submissionId !== record.submission_id)))
+      || (nodeBindings.get(record.target_node_id) ?? 0)
+        > (targetItem?.node_binding_revision ?? record.binding_revision);
     // 台账对账（含 !is_current：旧输出节点独立可编辑，版本进台账供差分/撤销）
     for (const item of record.items) {
       setLedger({
@@ -698,7 +705,6 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     }
     boundJobIds.add(record.job_id);
     reconciledSubmissions.add(record.submission_id);
-    const targetItem = record.items.find((item) => item.output_key === TARGET_OUTPUT_KEY);
     if (targetItem && !ledgerOnly) nodeBindings.set(targetItem.node_id, targetItem.node_binding_revision);
     if (!record.is_current || ledgerOnly) return; // 历史仅按可靠关联恢复：不猜卡、无画布动作
     const def = defForRecord(record);
@@ -849,13 +855,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     try {
       const resolved = await doResolveItems(projectId, ids);
       if (host.getProjectId() !== projectId || host.getLoadEpoch() !== loadEpoch) return; // 迟到响应：旧对账失效
-      for (const record of resolved.records) {
-        // 同项目迟到：目标卡已本地删除或已被新执行接管——只回台账逐项状态（保存差分按新
-        // revision 推导），不动归属登记与画布（不补卡、不续旧轮询、不清新承接资源）
-        const claiming = active.get(record.target_node_id);
-        reconcileRecord(record, host.isLocallyRemoved(record.target_node_id)
-          || (claiming != null && claiming.jobId !== record.job_id));
-      }
+      for (const record of resolved.records) reconcileRecord(record);
     } catch {
       // 对账失败保持现状（本地内容不受影响）
     }
