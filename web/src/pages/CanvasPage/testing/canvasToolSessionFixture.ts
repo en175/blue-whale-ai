@@ -51,9 +51,13 @@ export function canvasToolSessionFixture() {
     });
   const task = () => {
     taskCount += 1;
-    return new Promise<void>((resolve, reject) =>
+    const created = new Promise<void>((resolve, reject) =>
       pending.push({ resolve, reject }),
     );
+    // 矩阵用例驱动旧请求 reject 时会话层不消费 rejection（页面层职责）——预挂哨兵
+    // catch 消掉 vitest 的 unhandled 上报，不影响被测代码对同一 promise 的后续消费。
+    created.catch(() => {});
+    return created;
   };
   const getNode = (id: string) => nodes.find((node) => node.id === id);
   const common = {
