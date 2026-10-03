@@ -5,13 +5,16 @@
 # 拦截：
 #   - create_enterprise_issue 根 issue 的 project_id 或 program_id 缺失 / 为空 / = 0
 #   - create_enterprise_issue 的 description 缺失 / 为空（防错名参数被静默忽略建成空工单）
+#   - create_enterprise_issue 的 assignee_id 缺失 / 为空（工单必须标注负责人，见
+#     docs/agents/issue-tracker.md「创建归属标注」；collaborator_ids 允许为空）
 #   - create_enterprise_issue / update_enterprise_issue 带 parent_id，
 #     但 project_id 或 program_id 缺失 / 为空 / = 0
 #   - update_enterprise_issue 显式 project_id=0 或 program_id=0
 # 放行：
 #   - 根 issue 创建时 project_id 与 program_id 均非空且非 0
-#   - 普通 update 不要求重复传 project_id/program_id
+#   - 普通 update 不要求重复传 project_id/program_id/assignee_id
 #   - 不校验 project_id/program_id 是否等于具体仓库/项目 ID（见 ADR-0007 D3、ADR-0014）
+#   - 不校验 assignee_id 语义（是否解析对人）；只验参数存在
 #
 # 为什么：project_id / program_id 在 MCP schema 里是 number；Gitee 用 0 表示「无关联」。
 # 不关联仓库的 issue（project_id=0）只出现在企业工作项列表，仓库 Issues 页看不到（见 ADR-0007）。
@@ -22,7 +25,8 @@
 # 配套：settings.json PreToolUse matcher = mcp__gitee-ent__create_enterprise_issue /
 #      mcp__gitee-ent__update_enterprise_issue。
 # 退出码 2 = 阻断 Claude 执行该工具调用。
-# 同步：.qoder/hooks/ 有本文件的手动同步副本，任何改动必须双份同改。
+# 多端挂载：ZCode / Claude Code 直接挂本脚本；Codex 经 .codex/hooks/run-claude-pretool.sh
+# 转发；Kimi CLI 经用户级 shim 路由回本脚本（见 docs/agents/hooks/README.md）。
 
 INPUT=$(cat)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -42,6 +46,7 @@ TOOL_NAME=$(extract_json_value "tool_name")
 PROJECT_ID=$(extract_json_value "project_id")
 PROGRAM_ID=$(extract_json_value "program_id")
 PARENT_ID=$(extract_json_value "parent_id")
+ASSIGNEE_ID=$(extract_json_value "assignee_id")
 
 IS_UPDATE=0
 [ "$TOOL_NAME" = "mcp__gitee-ent__update_enterprise_issue" ] && IS_UPDATE=1
@@ -136,6 +141,37 @@ fi
 if [ "$IS_UPDATE" -eq 0 ] && [ "$HAS_PARENT" -eq 0 ]; then
   if [ -z "$PROGRAM_ID" ] || [ "$PROGRAM_ID" = "0" ]; then
     block "创建根 issue 未归属项目（program_id 缺失或为 0）。"
+  fi
+fi
+
+block_missing_assignee() {
+  printf '%s' "$INPUT" | python3 "$AUDIT" \
+    --project-dir "$PROJECT_DIR" \
+    --hook "$HOOK_NAME" \
+    --operation "$AUDIT_OPERATION" \
+    --exit-code 2 \
+    --reason "blocked-no-assignee" >/dev/null || true
+  cat >&2 <<'EOF'
+BLOCKED: create_enterprise_issue 缺少 assignee_id（负责人）。
+
+本项目所有工单创建时必须标注负责人（2026-10-03 定规，IKJKWK）：
+- 未点名负责人 → 创建人即负责人：get_user_info 取当前 token 用户 id 作 assignee_id，
+  collaborator_ids 可空
+- 点名了负责人 → list_enterprise_members(search=<名字>) 解析 id 作 assignee_id，
+  创建人并入 collaborator_ids；解析不到或多人同名时停下问发单人，不静默兜底
+- 点名负责人且另有协作者 → 创建人也必须并入 collaborator_ids
+
+详见 docs/agents/issue-tracker.md「创建归属标注」。
+EOF
+  exit 2
+}
+
+# create：assignee_id 缺失 / 为空 / = 0 → 拦截。工单必须有负责人（规则见
+# docs/agents/issue-tracker.md「创建归属标注」）；collaborator_ids 允许为空，不拦。
+# update 常只改状态/标签，不要求 assignee_id。放在归属校验之后、description 之前。
+if [ "$IS_UPDATE" -eq 0 ]; then
+  if [ -z "$ASSIGNEE_ID" ] || [ "$ASSIGNEE_ID" = "0" ]; then
+    block_missing_assignee
   fi
 fi
 
