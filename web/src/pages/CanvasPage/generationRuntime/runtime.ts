@@ -682,7 +682,8 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     }
   };
 
-  const reconcileRecord = (record: GenerationRecoveryRecord) => {
+  /** ledgerOnly（迟到对账遇删除/新执行接管）：只回台账逐项状态，不动归属登记与画布动作。 */
+  const reconcileRecord = (record: GenerationRecoveryRecord, ledgerOnly = false) => {
     // 台账对账（含 !is_current：旧输出节点独立可编辑，版本进台账供差分/撤销）
     for (const item of record.items) {
       setLedger({
@@ -698,8 +699,8 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     boundJobIds.add(record.job_id);
     reconciledSubmissions.add(record.submission_id);
     const targetItem = record.items.find((item) => item.output_key === TARGET_OUTPUT_KEY);
-    if (targetItem) nodeBindings.set(targetItem.node_id, targetItem.node_binding_revision);
-    if (!record.is_current) return; // 历史仅按可靠关联恢复：不猜卡、无画布动作
+    if (targetItem && !ledgerOnly) nodeBindings.set(targetItem.node_id, targetItem.node_binding_revision);
+    if (!record.is_current || ledgerOnly) return; // 历史仅按可靠关联恢复：不猜卡、无画布动作
     const def = defForRecord(record);
     const plan = def?.planRecovery?.(record, host) ?? { kind: 'none' as const };
     switch (plan.kind) {
@@ -834,8 +835,11 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   };
 
   /** 保存撞 409 项冲突后的对账（B.5 resolve：只读、可重复）：按当前台账项定向读回
-   *  服务端可见状态进台账；本地内容保留，由用户决定后续（不自动重发）。 */
+   *  服务端可见状态进台账；本地内容保留，由用户决定后续（不自动重发）。
+   *  IKJLTU（A.8）：发起时固定项目与加载身份，响应返回时已失效（切项目/重载——页面
+   *  reset 序列必伴随加载身份推进）整体丢弃，不改新加载的卡片/台账/归属登记/保存状态。 */
   const reconcileConflictItems = async (projectId: string): Promise<void> => {
+    const loadEpoch = host.getLoadEpoch();
     const ids = [...ledger.keys()].filter((recoveryItemId) => {
       const entry = ledger.get(recoveryItemId);
       return entry && reconciledSubmissions.has(entry.submissionId)
@@ -844,7 +848,14 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     if (ids.length === 0) return;
     try {
       const resolved = await doResolveItems(projectId, ids);
-      for (const record of resolved.records) reconcileRecord(record);
+      if (host.getProjectId() !== projectId || host.getLoadEpoch() !== loadEpoch) return; // 迟到响应：旧对账失效
+      for (const record of resolved.records) {
+        // 同项目迟到：目标卡已本地删除或已被新执行接管——只回台账逐项状态（保存差分按新
+        // revision 推导），不动归属登记与画布（不补卡、不续旧轮询、不清新承接资源）
+        const claiming = active.get(record.target_node_id);
+        reconcileRecord(record, host.isLocallyRemoved(record.target_node_id)
+          || (claiming != null && claiming.jobId !== record.job_id));
+      }
     } catch {
       // 对账失败保持现状（本地内容不受影响）
     }

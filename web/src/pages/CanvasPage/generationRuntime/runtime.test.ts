@@ -1953,3 +1953,162 @@ describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
     expect(fake.edges).toHaveLength(0); // 无双链
   });
 });
+
+/* ============================================
+ * IKJLTU（PR981 审查 R4）：保存冲突定向对账（resolve）的迟到响应隔离。
+ * 对账发起时固定项目与加载身份；响应返回时身份失效（切项目/A→B→A/重载——页面
+ * reset 序列必伴随加载身份推进，index.tsx 水合点先推进 epoch 再 reset）整体丢弃，
+ * 不改新加载的卡片/台账/归属登记/保存状态。同项目内目标卡已删除或已被新执行接管：
+ * 只回台账逐项状态（保存差分按新 revision 推导），不补卡、不续旧轮询、不清新资源。
+ * 测试接缝 = 公开 reconcileConflictItems + 实际任务定义 + 受控宿主/延迟响应
+ * （与 IKJKU0 扇出详情间隙保护同模式）。
+ * ============================================ */
+describe('生成任务运行时：冲突对账隔离迟到响应（IKJLTU）', () => {
+  /** 工单复现形态：旧失败记录（job failed + is_current）——目标缺席时 restore-target 补卡并触发保存。 */
+  const failedRecord = (): GenerationRecoveryRecord => ({
+    submission_id: 'sub-a', target_node_id: 'n1', job_id: '501', task_type: 'image',
+    binding_revision: 1, is_current: true,
+    job: { job_id: '501', type: 'image', status: 'failed', progress: 0, output_asset_ids: [], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+    recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 320, height: 320, name: '图片生成中' }, sources: [] },
+    previous_target_snapshot: null,
+    items: [{ recovery_item_id: 'gcr:sub-a:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 3, node_binding_revision: 1, asset_id: null, slot_id: null }],
+  } as GenerationRecoveryRecord);
+
+  /** 旧任务仍在 processing：plan = resume-polling——迟到处理会劫持同卡新执行的在途登记。 */
+  const processingRecord = (): GenerationRecoveryRecord => ({
+    ...failedRecord(),
+    job: { job_id: '501', type: 'image', status: 'processing', progress: 40, output_asset_ids: [], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+  } as GenerationRecoveryRecord);
+
+  /** 驱动对账停在 resolve 响应间隙：提交受理（台账 $target pending）→ 发起对账挂起。 */
+  async function suspendAtResolve() {
+    const page = pageScript([{ protocol_version: 1, canvas_version: 3, records: [], next_cursor: null }]);
+    const fake = createFakeHost((projectId, options) => page(projectId, options));
+    const clock = new ManualClock();
+    const status = statusScript([{ status: 'processing', progress: 10, asset: null }]);
+    let release!: (records: GenerationRecoveryRecord[]) => void;
+    let reject!: (e: Error) => void;
+    const resolveFn = vi.fn((_projectId: string, _ids: string[]) =>
+      new Promise((resolvePromise, rejectPromise) => {
+        release = (records) => resolvePromise({ protocol_version: 1, records });
+        reject = rejectPromise;
+      }));
+    const runtime = createGenerationRuntime(fake.host, {
+      fetchJobStatus: status.fn as never,
+      fetchRecoveryPage: page as never,
+      resolveItems: resolveFn as never,
+      setTimeout: clock.setTimeout as never,
+      clearTimeout: clock.clearTimeout as never,
+      newId: (() => { let n = 0; return () => `ruuid-${String(++n).padStart(4, '0')}`; })(),
+    });
+    const kit = createFakeDef();
+    runtime.register(kit.def);
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
+    kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('sub-a', 'n1', '501') }));
+    runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
+    await flushMicrotasks();
+    void runtime.reconcileConflictItems('p1'); // 保存撞 409 后的定向对账：停在响应间隙
+    await flushMicrotasks();
+    expect(resolveFn).toHaveBeenCalledWith('p1', ['gcr:sub-a:$target']); // 定向 ids = 当前台账未终置项
+    return { fake, runtime, clock, status, kit, release, reject };
+  }
+
+  const writeBaseline = (fake: FakeHost) => ({
+    inserts: fake.inserts.length, removes: fake.removes.length,
+    patches: fake.patches.length, saves: fake.saves.length,
+  });
+  const expectZeroHostWrites = (fake: FakeHost, base: ReturnType<typeof writeBaseline>) => {
+    expect(fake.inserts).toHaveLength(base.inserts);
+    expect(fake.removes).toHaveLength(base.removes);
+    expect(fake.patches).toHaveLength(base.patches);
+    expect(fake.saves).toHaveLength(base.saves);
+  };
+
+  it('A→B：响应等待期间切项目并 reset，迟到失败记录不补卡、不保存 B、不污染新台账与归属登记', async () => {
+    const ctx = await suspendAtResolve();
+    ctx.fake.switchProject('p2'); // 页面切项目序列：宿主切 B（epoch 推进）+ 运行时 reset
+    ctx.runtime.reset();
+    const base = writeBaseline(ctx.fake);
+    ctx.release([failedRecord()]);
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base); // A 卡不补入 B、不触发 p2 保存
+    expect(ctx.runtime.composeSaveFields()).toBeNull(); // 旧对账不污染新台账（B 保存不携带 A 的差分）
+    expect(ctx.runtime.bindingRevisionOf('n1')).toBe(0); // 归属登记不回填
+  });
+
+  it('A→B→A：切回同项目也不得写入——加载身份兜底拦截', async () => {
+    const ctx = await suspendAtResolve();
+    ctx.fake.switchProject('p2');
+    ctx.fake.switchProject('p1'); // 项目 id 回到原值，但加载身份已推进
+    ctx.runtime.reset();
+    const base = writeBaseline(ctx.fake);
+    ctx.release([failedRecord()]);
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base);
+    expect(ctx.runtime.composeSaveFields()).toBeNull();
+    expect(ctx.runtime.bindingRevisionOf('n1')).toBe(0);
+  });
+
+  it('同项目重载（epoch 推进 + reset）：迟到失败记录零写入、不污染台账与归属登记', async () => {
+    const ctx = await suspendAtResolve();
+    ctx.fake.advanceEpoch(); // 重载：加载身份推进（页面序列：epoch 推进 → reset → 重新水合）
+    ctx.runtime.reset();
+    ctx.fake.nodes.clear(); // 重新水合前的空画布：旧对账若生效会把 A 卡补回并触发保存
+    const base = writeBaseline(ctx.fake);
+    ctx.release([failedRecord()]);
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base);
+    expect(ctx.runtime.composeSaveFields()).toBeNull();
+    expect(ctx.runtime.bindingRevisionOf('n1')).toBe(0);
+  });
+
+  it('响应等待期间归属失效后异常返回：catch 不向新加载写入', async () => {
+    const ctx = await suspendAtResolve();
+    ctx.fake.switchProject('p2');
+    ctx.runtime.reset();
+    const base = writeBaseline(ctx.fake);
+    ctx.reject(new Error('network'));
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base);
+    expect(ctx.runtime.composeSaveFields()).toBeNull();
+  });
+
+  it('响应等待期间目标卡被删除：迟到记录只回台账不补卡不保存，差分按新 revision 发 remove', async () => {
+    const ctx = await suspendAtResolve();
+    ctx.fake.host.markLocallyRemoved('n1'); // 用户删除（页面删除序列：登记本地移除 + 撤卡）
+    ctx.fake.host.removeMediaNode('n1');
+    const base = writeBaseline(ctx.fake);
+    ctx.release([failedRecord()]);
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base); // 不复活已删卡、不触发保存
+    // 台账照回（revision 推进到服务端现状）：删除差分按新 revision 推导，不再撞旧冲突
+    expect(ctx.runtime.composeSaveFields()?.recoveryChanges).toEqual([
+      { recoveryItemId: 'gcr:sub-a:$target', expectedRevision: 3, action: 'remove' },
+    ]);
+  });
+
+  it('响应等待期间同卡新任务接管：旧记录不劫持在途登记、不续旧任务轮询、零宿主写入', async () => {
+    const ctx = await suspendAtResolve();
+    ctx.kit.respond.create(async () => ({ jobId: '502', canvasBinding: BINDING_VIEW('sub-b', 'n1', '502', 2) }));
+    expect(ctx.runtime.submit(ctx.kit.def, { payload: { v: 2 }, target: targetFacts('n1') })).toBe(true);
+    await flushMicrotasks();
+    expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' });
+    const tokenOfNew = ctx.fake.host.getActiveJob('n1');
+    const base = writeBaseline(ctx.fake);
+    ctx.release([processingRecord()]); // 旧任务 processing：plan = resume-polling（修复前劫持同卡新执行）
+    await flushMicrotasks(20);
+    expectZeroHostWrites(ctx.fake, base);
+    expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' }); // 新执行登记不被旧记录覆盖
+    expect(ctx.fake.host.getActiveJob('n1')).toBe(tokenOfNew); // 新执行的在途锁不被抢
+    expect(ctx.runtime.bindingRevisionOf('n1')).toBe(2); // 新承接的归属登记不被旧记录回写
+  });
+
+  it('同项目正常对账不被隔离误伤：目标卡非本地删除的缺席仍补失败卡并落盘', async () => {
+    const ctx = await suspendAtResolve();
+    ctx.fake.nodes.delete('n1'); // 卡缺席但非本地删除（如他端删除/水合丢失）
+    ctx.release([failedRecord()]);
+    await flushMicrotasks(20);
+    expect(ctx.fake.inserts.map((node) => node.id)).toContain('n1'); // 补回失败卡（重试入口）
+    expect(ctx.fake.saves).toContain('p1'); // 补卡落盘（恢复场景本因卡不在服务端）
+  });
+});
