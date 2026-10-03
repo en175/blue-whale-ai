@@ -333,6 +333,15 @@ export async function saveCanvasWithRecovery(
           if (item.outputKey !== TARGET_OUTPUT_KEY) {
             await assertTrustedResultAsset(item, node);
           }
+          // IKJLTT（PR981-REVIEW2-R3 / B.2）：一对一 primary 的 apply（首次与重复）要求目标
+          // 节点归属仍在本提交——被接管（target 已 transferred / owner 指向新提交）的旧提交
+          // 迟到结果不得触碰新受理的归属：首次 apply 会切走 owner，重复 apply 曾污染归属字段。
+          if (item.outputKey === PRIMARY_OUTPUT_KEY
+            && (owner === undefined || owner.generation_canvas_submission_id !== item.submissionRow.id)) {
+            throw new RecoveryContractError(
+              recoveryError(422, "结果节点已被其他提交占用", RECOVERY_REASONS.documentMismatch),
+            );
+          }
           // 虚拟输出首次 apply：键必须在投影集内；节点未被其他提交占用（不静默覆盖）。
           let slotId: string | null = null;
           if (item.outputRowId === null && item.outputKey !== TARGET_OUTPUT_KEY) {
@@ -599,9 +608,15 @@ export async function saveCanvasWithRecovery(
         });
       }
       // 一对一转换（同提交 replaceTarget+primary 动作）：owner 从 $target 切到 primary，不推进版本。
+      // IKJLTT（R3）：切换限定归属仍在本提交（条件不匹配即零行）——旧提交的迟到写入
+      // （apply/remove 等一切 primary 写入路径）不得改动新受理的归属字段。
       if (write.outputKey === PRIMARY_OUTPUT_KEY) {
-        await tx.generation_canvas_node_owners.update({
-          where: { project_id_node_id: { project_id: pid, node_id: write.submissionRow.target_node_id } },
+        await tx.generation_canvas_node_owners.updateMany({
+          where: {
+            project_id: pid,
+            node_id: write.submissionRow.target_node_id,
+            generation_canvas_submission_id: write.submissionRow.id,
+          },
           data: { output_key: PRIMARY_OUTPUT_KEY, gmt_modified: new Date() },
         });
       }
