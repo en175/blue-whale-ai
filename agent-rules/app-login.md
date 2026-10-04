@@ -1,6 +1,6 @@
-# 浏览器自动化测试站登录
+# Blue-Whale 页面登录
 
-浏览器自动化（web-gui-tester、control-browser 等 GUI 验证）访问需要登录的 Blue-Whale 页面时，按本文件登录。本地联调的端口与后端形态见 `.claude/skills/start-local-services/SKILL.md`。
+凡需要账号密码登录 Blue-Whale——浏览器自动化 GUI 验证（web-gui-tester、control-browser）、本地起服务后的登录确认、直连测试站的验证——按本文件登录。本地联调的端口与后端形态见 `.claude/skills/start-local-services/SKILL.md`。
 
 ## 登录步骤
 
@@ -26,5 +26,6 @@ chmod 600 ~/.bw-test-login.env
 
 ## 边界
 
+- 该账号存在于测试站库：测试站直连与本地服务形态 B（远程测试站库）直接可用；形态 A（本地库）没有团队账号，登录失败先跑 `bash .claude/skills/start-local-services/scripts/check-local-services.sh` 确认后端指向，再走「兜底」问用户。
 - 写操作落在测试站真实库（同事可见）；消耗积分的操作（提交生成、充值）先向用户告知再执行。
 - 登录态过期即从步骤 1 重走；验证码登录态留给真人操作，Agent 只走账号密码态。
