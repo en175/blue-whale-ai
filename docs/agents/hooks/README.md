@@ -300,3 +300,23 @@ Kimi 运行 `scripts/install-kimi-hooks.sh` 幂等更新已有 managed block；�
 自动验证：`python3 -m unittest scripts.tests.test_cbm_context`、`python3 scripts/check-hook-contracts.py`（完整 TOML 检查需 Python 3.11+）。测试验证提醒载荷、隔离与不阻断；客户端验收另需真实会话的输入和调用记录，不能以测试通过代替。
 
 官方参考：[Kimi Hooks](https://moonshotai.github.io/kimi-code/en/customization/hooks)、[Qoder Hooks](https://docs.qoder.com/cli/hooks)、[CBM](https://github.com/DeusData/codebase-memory-mcp)。版本差异以本机实测为准。
+
+## Gitee 渠道门禁
+
+操作规则唯一来源为 [Gitee MCP 操作渠道](../../../agent-rules/gitee-mcp-only.md)。共享 shell Gate 调用 `lib/gitee_channel.py`，五端以 `PreToolUse` 的全工具 matcher 挂载；四端旧契约检查器继续检查 Claude Code、Codex、ZCode、Kimi，新增专项测试检查 Qoder 的门禁配置。
+
+Gate 对 Gitee MCP 放行，拒绝可见的 Gitee HTTP 请求、直接调用的替代脚本、Gitee 浏览器页面和目标不明的浏览器调用。已选标签页的无 URL 操作不会因缺少 Gitee 字符串而自动放行。携带明确非 Gitee URL 的浏览器调用及普通本地产品测试命令可放行；浏览器 JavaScript 只做有限的 URL 模式识别，不证明整段程序、已有 tab、重定向或 cookie 上下文安全。需要连续 GUI 操作却无法携带目标的客户端仍可能被保守阻断，应报告该能力边界。
+
+审计沿用 `lib/hook_audit.py`，只记录工具名、关联 ID、判定和稳定原因，不记录命令、代码、URL、请求参数或凭据。仓库范围以 Gate 所在 checkout 与事件 cwd 的 Git common directory 判定，同仓 worktree 适用，无关仓库静默放行。
+
+验收分三层：共享 Gate 黑盒测试、配置到 Gate 的调用链、真实客户端工具调用与审计关联。专项命令为 `python3.12 -m unittest scripts.tests.test_gitee_channel`；旧契约继续运行 `python3.12 scripts/check-hook-contracts.py` 与 `bash scripts/test-hooks.sh`。不能用前两层通过替代第三层。
+
+| 客户端 | 配置及调用链 | 真实客户端覆盖 |
+| --- | --- | --- |
+| Claude Code | 项目配置调用共享 Gate | 待实际会话验证 |
+| Codex | 项目配置经现有 wrapper 调用共享 Gate | CLI 探针启动被既有 model catalog 配置错误阻断，未验证；新 Hook 需客户端信任 |
+| ZCode | 七事件白名单内增加 PreToolUse Gate | 待实际会话验证 |
+| Kimi Code | opt-in shim 路由共享 Gate | 安装器更新后新会话或 reload；待真实调用验证 |
+| Qoder | 项目配置调用共享 Gate | 待实际会话验证 |
+
+Codex 嵌套工具调用按官方 Hook 路径仍可接受 PreToolUse 检查，须用当前客户端实测。`write_stdin` 不再次触发 PreToolUse；hosted 工具和部分 specialized 路径可能不触发 Hook。任意间接脚本、编码地址、代理和网络重定向不在静态检查的完整证明范围。未加载/未信任 Hook、Kimi 异常 fail-open 等属于已知边界，不得报告所有替代入口已经硬封禁。

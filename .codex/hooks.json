@@ -80,6 +80,15 @@
             "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" cbm-discovery-gate.sh"
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" block-gitee-alternative-channel.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [

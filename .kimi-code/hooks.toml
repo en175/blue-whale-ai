@@ -95,3 +95,8 @@ command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" remind-issue-state.s
 event = "PostToolUse"
 matcher = "mcp__gitee-ent__merge_enterprise_pull"
 command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" remind-issue-state.sh'
+
+[[hooks]]
+event = "PreToolUse"
+matcher = ".*"
+command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" block-gitee-alternative-channel.sh'
