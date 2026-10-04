@@ -25,7 +25,7 @@ test("routes verification work to the progressive testing strategy", () => {
   const rootRules = read("CLAUDE.md");
 
   assert.match(rootRules, /测试验证.*docs\/agents\/testing-strategy\.md/);
-  assert.match(rootRules, /同一 HEAD.*复用/);
+  assert.match(read("docs/agents/testing-strategy.md"), /同一 HEAD.*复用/);
 });
 
 test("documents every required branch of the testing strategy", () => {
