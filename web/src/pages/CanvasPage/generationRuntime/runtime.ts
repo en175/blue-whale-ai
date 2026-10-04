@@ -284,13 +284,16 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         if (host.findNode(nodeId) == null) {
           const seed = record?.recovery_seed?.target;
           const snapshot = record?.previous_target_snapshot as Partial<RuntimeNodeView> | null;
+          const plan = record && execution.def?.planRecovery?.(record, host);
+          const plannedTarget = plan?.kind === 'apply-outputs' ? plan.unavailableTarget : undefined;
           host.insertMediaNode({
             id: nodeId, type: 'mediaNode',
-            position: snapshot?.position ?? { x: seed?.x ?? 0, y: seed?.y ?? 0 },
+            position: snapshot?.position ?? plannedTarget?.position ?? { x: seed?.x ?? 0, y: seed?.y ?? 0 },
             data: {
-              fileName: seed?.name || '生成结果',
-              mediaType: record?.task_type === 'video_scene_split' || record?.task_type === 'video' ? 'video'
-                : record?.task_type === 'vocal_split' || record?.task_type === 'audio' ? 'audio' : 'image',
+              ...plannedTarget?.data,
+              fileName: seed?.name || plannedTarget?.data.fileName || '生成结果',
+              mediaType: plannedTarget?.data.mediaType ?? (record?.task_type === 'video_scene_split' || record?.task_type === 'video' ? 'video'
+                : record?.task_type === 'vocal_split' || record?.task_type === 'audio' ? 'audio' : 'image'),
               ...(seed ? { width: seed.width, height: seed.height } : {}),
               ...(snapshot?.width != null ? { width: snapshot.width } : {}),
               ...(snapshot?.height != null ? { height: snapshot.height } : {}),

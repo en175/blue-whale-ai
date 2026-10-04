@@ -104,6 +104,7 @@ function planMixMuxRecovery(
   if (jobStatus === 'succeeded' && pendingOutputs.length > 0) {
     return {
       kind: 'apply-outputs',
+      ...(!targetExists ? { unavailableTarget: buildRestore(record) ?? undefined } : {}),
       projection: {
         kind: 'multi-output',
         outputs: pendingOutputs.map((item) => ({

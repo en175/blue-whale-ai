@@ -181,7 +181,7 @@ export type RecoveryCardPlan =
   /** 目标卡缺失 → 按恢复种子/原目标快照补一张卡（受理回执丢失场景）。 */
   | { kind: 'restore-target'; node: RuntimeNodeView; edges?: Array<{ source: string; target: string }> }
   /** 成功且有未应用输出 → 按投影落卡（运行时拉详情取产物 URL 后扇出并带 apply 保存）。 */
-  | { kind: 'apply-outputs'; projection: Extract<SuccessProjection, { kind: 'multi-output' }> }
+  | { kind: 'apply-outputs'; projection: Extract<SuccessProjection, { kind: 'multi-output' }>; unavailableTarget?: RuntimeNodeView }
   /** 进行中 → 续轮询（卡已在或刚补）。 */
   | { kind: 'resume-polling' }
   /** 无画布动作（终态已收敛/被接管/历史关联）。 */

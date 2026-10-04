@@ -442,8 +442,12 @@ describe('恢复落卡规划（planRecovery）', () => {
       job: { job_id: '73', type: 'audio_mix', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
       items: [{ recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'audio-mix-1', state: 'pending', revision: 0, node_binding_revision: 1, asset_id: '9', slot_id: null }],
     }), createFakeHost().host);
-    expect(plan).toEqual({
+    expect(plan).toMatchObject({
       kind: 'apply-outputs',
+      unavailableTarget: {
+        id: 'audio-mix-1', position: { x: 600, y: 20 },
+        data: { mediaType: 'audio', audioMix: { format: 'flac' } },
+      },
       projection: {
         kind: 'multi-output',
         outputs: [{ outputKey: 'primary', nodeId: 'audio-mix-1', assetId: '9', url: '', mediaType: 'audio' }],
