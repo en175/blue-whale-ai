@@ -11,7 +11,7 @@
 | 多分支并行实施（集成分支 + 并行子任务 worktree + merger 合回，implement-spec 等多工单单 PR 场景） | `docs/agents/integration-branch-workflow.md`（渐进式） |
 | Gitee Issue / 任何 `mcp__gitee-ent__*` 调用 | `docs/agents/issue-tracker.md`（渐进式，首次调用前 Must Read） |
 | 测试验证（完成/提交/PR/合并前） | `docs/agents/testing-strategy.md`（收口与 PR 阶段均按影响面分层；仅产品影响路径或显式高风险跑全量；同一 HEAD 复用凭证） |
-| 浏览器自动化需要测试站登录（GUI 验证遇登录弹窗/账号密码） | `agent-rules/browser-testsite-login.md`（凭据读 `~/.bw-test-login.env` 个人文件，明文只进浏览器输入框；缺失/失效即停问用户；[ADR-0122](docs/adr/0122-browser-testsite-login-credentials.md)） |
+| Blue-Whale 登录（任何场景遇账号密码登录：浏览器自动化、本地服务登录确认、测试站直连） | `agent-rules/app-login.md`（凭据读 `~/.bw-test-login.env` 个人文件，明文只进浏览器输入框；缺失/失效即停问用户；[ADR-0122](docs/adr/0122-browser-testsite-login-credentials.md)） |
 | 前端工作流（碰 `web/` 产品实现：页面、组件、API 客户端、TanStack Query） | `.claude/skills/frontend-delivery/SKILL.md`（缺陷走 `references/bugfix.md`；新服务端状态读写走 `references/request.md`） |
 | PR 模板 / Hook 兜底清单 / 低频细节 | `docs/agents/commit-and-review.md` |
 | 当前发布线开工、换期和遗留分支清点 | `docs/agents/git-workflow.md` + [ADR-0115](docs/adr/0115-local-release-code-baseline.md) |
