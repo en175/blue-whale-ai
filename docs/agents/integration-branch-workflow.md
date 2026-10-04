@@ -24,7 +24,7 @@
 scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary <6–15字中文简述>
 ```
 
-进入返回的 worktree，用 `python3 scripts/lib/task_metadata.py read --json` 核对记录的 `target_branch` 与 `start_sha`，后续同步、验证、发布、清理全程使用该记录。核对目录 CBM 项目后，按 issue-tracker.md 对父工单做起始流转——建 worktree 不代替该 API 调用。协调笔记（任务图、工单状态、依赖证据、派发归属、worktree、已验收 HEAD）由协调方自行保存，无需入库。
+进入返回的 worktree，用 `python3 scripts/lib/task_metadata.py read --json` 核对记录的 `target_branch` 与 `start_sha`，后续同步、验证、发布、清理全程使用该记录。核对目录 CBM 项目后，按 issue-tracker.md 对父工单做起始流转，建 worktree 不代替该 API 调用。
 
 **子任务 worktree**同样从当前本地 release 工作树建立，必须带 `--integration-worktree` 指向集成 worktree 的绝对路径：
 
@@ -106,9 +106,9 @@ scripts/sync-task-from-origin.sh linearize --user-authorized --update-pr <PR编�
 远端 PR 内容核验通过后，先取新鲜 Gitee PR 快照，从各子任务 worktree 执行：
 
 ```bash
-python3 scripts/cleanup-implement-spec-child.py --pr-snapshot <快照JSON> --json
+python3 scripts/cleanup-implement-spec-child.py --pr-snapshot - --json
 ```
 
-入口核对远端 PR 源已包含该子任务的工作。普通快进路径要求子任务 HEAD 是远端 PR 源 HEAD 的祖先；集成分支合回后因发布线前进而 rebase 的，须先更新同一 PR、完成 Gitee 回读与同步事务 finalize，清理入口核对旧子提交、每次同步保留的原提交及合并文件树证明；已发布 PR 经 linearize 后，清理入口核对旧子提交属于改写前历史、改写前后文件树相同、新线性提交是远端 PR 源 HEAD 的祖先。入口删除前复核远端源 HEAD 未变化；任一证明断链时保留该子 worktree。报告删除了哪些子 worktree、保留了哪些及原因。
+将规范化快照通过标准输入传入，或继续使用 JSON 文件路径。入口核对远端 PR 源已包含该子任务的工作。普通快进路径要求子任务 HEAD 是远端 PR 源 HEAD 的祖先；集成分支合回后因发布线前进而 rebase 的，须先更新同一 PR、完成 Gitee 回读与同步事务 finalize，清理入口核对旧子提交、每次同步保留的原提交及合并文件树证明；已发布 PR 经 linearize 后，清理入口核对旧子提交属于改写前历史、改写前后文件树相同、新线性提交是远端 PR 源 HEAD 的祖先。入口删除前复核远端源 HEAD 未变化；任一证明断链时保留该子 worktree。报告删除了哪些子 worktree、保留了哪些及原因。
 
 集成 worktree 保留到 PR 合入目标 release 并核验之后（供评审期间的修订使用），再按通用入口 `scripts/cleanup-task-worktree.sh` 清理。

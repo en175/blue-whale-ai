@@ -126,12 +126,8 @@ test("Claude and Agent skill paths read the same package", () => {
   }
 });
 
-test("PR template requests the readable verification receipt summary", () => {
-  const template = read(".gitee/PULL_REQUEST_TEMPLATE.md");
-
-  for (const field of ["验证层级", "验证 HEAD", "验证结果", "总耗时", "验证命令"]) {
-    assert.match(template, new RegExp(field));
-  }
+test("testing strategy requests the readable verification receipt summary", () => {
+  assert.match(read("docs/agents/testing-strategy.md"), /verify-change-scope\.mjs summary/);
 });
 
 test("pr skill keeps its template scaffolding in Chinese while guidance stays upstream English", () => {
@@ -157,10 +153,10 @@ test("pr skill keeps its template scaffolding in Chinese while guidance stays up
   assert.doesNotMatch(workflow, /Summary 图示|Merge Danger/);
 });
 
-test("commit review rules link to the PR template instead of duplicating it", () => {
+test("commit review rules link to the pr skill instead of duplicating its template", () => {
   const reviewRules = read("docs/agents/commit-and-review.md");
 
-  assert.match(reviewRules, /权威模板.*\.gitee\/PULL_REQUEST_TEMPLATE\.md/);
+  assert.match(reviewRules, /唯一权威.*\.agents\/skills\/pr\/SKILL\.md/);
   assert.doesNotMatch(reviewRules, /```markdown[\s\S]*## 对应开发分支/);
 });
 

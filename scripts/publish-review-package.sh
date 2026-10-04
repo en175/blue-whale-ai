@@ -80,7 +80,7 @@ usage() {
 
 --create-pr         首次推送并生成创建 PR 的短期发布标记
 --update-pr <IID>   安全更新已有 PR 的远端源分支，不生成创建标记
---pr-snapshot FILE  Agent 通过 Gitee MCP 刚读取并规范化的 PR 快照；update 必填
+--pr-snapshot FILE  Gitee MCP 新鲜快照；- 从标准输入读取，入口退出时清理临时文件
 --target-branch NAME 创建 PR 的目标分支；默认任务记录的 release/*
 --draft-pr          创建草稿 PR；标记会绑定 draft=true，供 Gitee Hook 核对
 --allow-scope-file  明确允许本轮审查修订新增到冻结范围的文件；可重复
@@ -150,6 +150,11 @@ if [ "$MODE" = update ]; then
   esac
   [ -n "$PR_SNAPSHOT" ] || fail_status 2 PR_SNAPSHOT_REQUIRED "更新已有 PR 前必须通过 Gitee MCP 读取快照并传入 --pr-snapshot。"
   [ "$TARGET_BRANCH_EXPLICIT" = 0 ] || fail_status 2 INVALID_TARGET_BRANCH "更新 PR 的目标分支由快照决定，请勿传 --target-branch。"
+  if [ "$PR_SNAPSHOT" = "-" ]; then
+    PR_SNAPSHOT="$(mktemp "${TMPDIR:-/tmp}/blue-whale-pr-snapshot.XXXXXX")"
+    trap 'rm -f -- "$PR_SNAPSHOT"' EXIT
+    cat > "$PR_SNAPSHOT"
+  fi
   [ -f "$PR_SNAPSHOT" ] || fail_status 8 PR_EVIDENCE_INVALID "PR 快照文件不存在：$PR_SNAPSHOT"
   [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "读取 PR 快照需要可用的 Python 3。"
   TARGET_BRANCH="$("${PYTHON[@]}" - "$PR_SNAPSHOT" <<'PY'
@@ -397,4 +402,5 @@ fi
 git -C "$ROOT" branch --set-upstream-to="origin/$branch" "$branch" >/dev/null \
   || fail_status 9 UPSTREAM_SETUP_FAILED "远端已推送，但本地分支跟踪配置失败。"
 rm -f "$marker_path"
-emit_status PUSHED_UPDATE_PR branch "$branch" head "$head_sha" pull_request_id "$PR_IID" previous_remote_sha "$remote_sha" task_commit_count "$task_commit_count" merge_commit_count "$merge_commit_count" changed_files "$changed_files"
+changed_files_count="$(printf '%s' "$changed_files" | awk 'END { print NR }')"
+emit_status PUSHED_UPDATE_PR branch "$branch" head "$head_sha" pull_request_id "$PR_IID" previous_remote_sha "$remote_sha" task_commit_count "$task_commit_count" merge_commit_count "$merge_commit_count" changed_files_count "$changed_files_count"

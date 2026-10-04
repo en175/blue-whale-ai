@@ -477,12 +477,82 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertEqual(payload["pull_request_id"], 65)
         self.assertEqual(payload["head"], expected_head)
         self.assertEqual(payload["merge_commit_count"], 0)
-        self.assertIn("task.txt", payload["changed_files"])
+        self.assertEqual(payload["changed_files_count"], 1)
         self.assertEqual(
             self.git("ls-remote", "--heads", "origin", "refs/heads/{}".format(BRANCH)).split()[0],
             expected_head,
         )
         self.assertFalse(self.publish_marker().exists())
+
+    def test_normalize_mcp_evidence_uses_immutable_diff_refs(self) -> None:
+        head = self.git("rev-parse", "HEAD")
+        detail = {
+            "iid": 65, "state": "opened", "conflict": False,
+            "source_branch": {"branch": BRANCH},
+            "target_branch": {"branch": "release/prod"},
+        }
+        evidence = {
+            "detail": detail,
+            "diff": {**detail, "diff_refs": {
+                "base_sha": self.git("rev-parse", "origin/release/prod"), "head_sha": head,
+            }},
+            "fetched_at": int(time.time()),
+        }
+        args = [sys.executable, str(REPO_ROOT / "scripts/pr-update-evidence.py"),
+                "normalize", "--update-pr", "65", "--json"]
+        normalized = subprocess.run(args, cwd=self.worktree, input=json.dumps(evidence),
+                                    text=True, encoding="utf-8", capture_output=True)
+        self.assertEqual(normalized.returncode, 0, normalized.stderr)
+        snapshot = json.loads(normalized.stdout)
+        self.assertEqual(snapshot["changed_files"], ["task.txt"])
+        self.assertEqual(snapshot["head_sha"], head)
+        self.assertEqual(snapshot["fetched_at"], evidence["fetched_at"])
+
+        evidence["diff"]["iid"] = 66
+        rejected = subprocess.run(args, cwd=self.worktree, input=json.dumps(evidence),
+                                  text=True, encoding="utf-8", capture_output=True)
+        self.assertEqual(rejected.returncode, 8)
+
+    def test_stdin_snapshot_is_cleaned_after_rejection_and_success(self) -> None:
+        remote_head = self.git("rev-parse", "HEAD")
+        self.git("push", "-u", "origin", "HEAD")
+        head = self.commit_followup("stdin review fix")
+        snapshot = json.loads(self.pr_snapshot().read_text(encoding="utf-8"))
+        temporary = self.root / "temporary-snapshots"
+        temporary.mkdir()
+        env = {**self.base_env, "TMPDIR": temporary.as_posix()}
+        args = [BASH, str(PUBLISH_SCRIPT), "--user-authorized", "--update-pr", "65",
+                "--pr-snapshot", "-", "--json"]
+        rejected = subprocess.run(args, cwd=self.worktree,
+                                  input=json.dumps({**snapshot, "state": "closed"}),
+                                  text=True, encoding="utf-8", capture_output=True, env=env)
+        self.assertEqual(rejected.returncode, 8, rejected.stderr)
+        self.assertEqual(list(temporary.iterdir()), [])
+        self.assertEqual(self.git("ls-remote", "origin", f"refs/heads/{BRANCH}").split()[0], remote_head)
+
+        published = subprocess.run(args, cwd=self.worktree, input=json.dumps(snapshot),
+                                   text=True, encoding="utf-8", capture_output=True, env=env)
+        self.assertEqual(published.returncode, 0, published.stderr)
+        self.assertEqual(list(temporary.iterdir()), [])
+        self.assertEqual(self.response(published)["head"], head)
+        self.assertEqual(self.response(published)["changed_files_count"], 1)
+        self.assertNotIn("changed_files", self.response(published))
+
+    def test_stdin_verification_keeps_existing_evidence_checks(self) -> None:
+        snapshot = json.loads(self.pr_snapshot(head_sha=self.git("rev-parse", "HEAD"))
+                              .read_text(encoding="utf-8"))
+        args = [BASH, str(VERIFY_SCRIPT), "--update-pr", "65", "--pr-snapshot", "-", "--json"]
+        verified = subprocess.run(args, cwd=self.worktree, input=json.dumps(snapshot),
+                                  text=True, encoding="utf-8", capture_output=True)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        self.assertEqual(self.response(verified)["changed_files_count"], 1)
+        for invalid in ({"conflict": True}, {"fetched_at": int(time.time()) - 301},
+                        {"changed_files": ["other.txt"]}, {"head_sha": "a" * 40}):
+            with self.subTest(invalid=invalid):
+                result = subprocess.run(args, cwd=self.worktree,
+                                        input=json.dumps({**snapshot, **invalid}),
+                                        text=True, encoding="utf-8", capture_output=True)
+                self.assertEqual(result.returncode, 8, result.stderr)
 
     def test_update_mode_rejects_task_branch_merge_commits(self) -> None:
         remote_head = self.git("rev-parse", "HEAD")

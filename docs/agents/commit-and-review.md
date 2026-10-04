@@ -87,7 +87,7 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 
 ## PR 模板
 
-开 PR 前必须先获得用户发布审查包授权。权威模板是 `.gitee/PULL_REQUEST_TEMPLATE.md`，Agent 直接读取并填写；本文不复制字段，避免双份规则漂移。
+开 PR 前必须先获得用户发布审查包授权。PR 正文的唯一权威是 [pr 技能](../../.agents/skills/pr/SKILL.md)，写正文前读取该技能。
 
 ---
 

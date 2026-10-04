@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -37,16 +38,20 @@ def git(root: Path, *args: str) -> str:
 
 
 def load_snapshot(path: Path) -> dict[str, object]:
-    if os.name != "nt":
+    if path != Path("-") and os.name != "nt":
         try:
             if path.stat().st_mode & 0o077:
                 raise EvidenceError("PR 快照权限过宽；临时文件必须 chmod 600。")
         except OSError as exc:
             raise EvidenceError("PR 快照无法检查：{}".format(exc)) from exc
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(sys.stdin.buffer.read() if path == Path("-") else path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise EvidenceError("PR 快照无法读取：{}".format(exc)) from exc
+    return validate_snapshot(data)
+
+
+def validate_snapshot(data: object) -> dict[str, object]:
     if not isinstance(data, dict):
         raise EvidenceError("PR 快照必须是 JSON object。")
     required = {
@@ -73,6 +78,38 @@ def load_snapshot(path: Path) -> dict[str, object]:
     if age < -30 or age > MAX_EVIDENCE_AGE_SECONDS:
         raise EvidenceError("PR 快照已过期或时间异常；请通过 Gitee MCP 重新读取。")
     return data
+
+
+def normalize_snapshot(root: Path, iid: int) -> dict[str, object]:
+    evidence = json.load(sys.stdin.buffer)
+    detail, diff = evidence["detail"], evidence["diff"]
+    if not all(isinstance(item["conflict"], bool) for item in (detail, diff)):
+        raise EvidenceError("Gitee conflict 必须是 JSON 布尔值。")
+    for field in ("iid", "state", "source_branch", "target_branch", "conflict"):
+        left = detail[field]
+        right = diff[field]
+        if field in ("source_branch", "target_branch"):
+            left, right = left["branch"], right["branch"]
+        if left != right:
+            raise EvidenceError("Gitee detail 与 diff 的 {} 不一致，请重新读取。".format(field))
+    if detail["iid"] != iid:
+        raise EvidenceError("Gitee PR IID 与 --update-pr 不匹配。")
+    refs = diff["diff_refs"]
+    base, head = refs["base_sha"], refs["head_sha"]
+    if not all(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) for sha in (base, head)):
+        raise EvidenceError("Gitee diff_refs 必须包含完整的 base_sha 和 head_sha。")
+    files = git(root, "diff", "--name-only", "{}...{}".format(base, head))
+    return validate_snapshot({
+        "pull_request_id": iid,
+        "state": detail["state"],
+        "source_branch": detail["source_branch"]["branch"],
+        "target_branch": detail["target_branch"]["branch"],
+        "head_sha": head,
+        "conflict": detail["conflict"],
+        "changed_files": files.splitlines() if files else [],
+        "fetched_at": evidence["fetched_at"],
+        "changed_files_provenance": "git_diff_refs",
+    })
 
 
 def validate_identity(
@@ -127,7 +164,7 @@ def preflight(args: argparse.Namespace, root: Path, data: dict[str, object]) -> 
         pull_request_id=args.iid,
         branch=branch,
         remote_sha=args.remote_sha,
-        changed_files=local_files,
+        changed_files_count=len(local_files),
     )
     return 0
 
@@ -155,20 +192,23 @@ def verify(args: argparse.Namespace, root: Path, data: dict[str, object]) -> int
         pull_request_id=args.iid,
         branch=branch,
         head=head,
-        changed_files=local_files,
+        changed_files_count=len(local_files),
     )
     return 0
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preflight", "verify"))
+    parser.add_argument("action", choices=("normalize", "preflight", "verify"))
     parser.add_argument("--update-pr", type=int, required=True, dest="iid")
-    parser.add_argument("--pr-snapshot", type=Path, required=True)
+    parser.add_argument("--pr-snapshot", type=Path, help="JSON 文件，或 - 从标准输入读取")
     parser.add_argument("--remote-sha", default="")
     parser.add_argument("--allow-scope-file", action="append", default=[])
     parser.add_argument("--json", action="store_true", dest="as_json")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.action != "normalize" and args.pr_snapshot is None:
+        parser.error("preflight/verify 必须传 --pr-snapshot")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,13 +222,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     try:
         root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel")).resolve()
+        if args.action == "normalize":
+            print(json.dumps(normalize_snapshot(root, args.iid), ensure_ascii=False, sort_keys=True))
+            return 0
         data = load_snapshot(args.pr_snapshot)
         if args.action == "preflight":
             if not args.remote_sha:
                 raise EvidenceError("preflight 缺少 --remote-sha。")
             return preflight(args, root, data)
         return verify(args, root, data)
-    except (EvidenceError, TypeError, ValueError) as exc:
+    except (EvidenceError, KeyError, TypeError, ValueError) as exc:
         emit(args.as_json, "PR_EVIDENCE_INVALID", detail=str(exc))
         return 8
 

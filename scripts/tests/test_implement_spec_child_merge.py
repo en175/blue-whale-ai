@@ -187,7 +187,11 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         self.assertEqual((self.integration / "two.txt").read_text(), "two\n")
 
         self.git(self.integration, "push", "origin", INTEGRATION)
-        cleaned = self.cleanup(self.snapshot(source_head))
+        snapshot = self.snapshot(source_head).read_text(encoding="utf-8")
+        cleaned = subprocess.run(
+            [sys.executable, str(CLEANUP_SCRIPT), "--pr-snapshot", "-", "--json"],
+            cwd=self.child_one, input=snapshot, text=True, encoding="utf-8", capture_output=True,
+        )
         self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
         self.assertFalse(self.child_one.exists())
 
