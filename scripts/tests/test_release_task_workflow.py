@@ -45,8 +45,6 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
             (main / ".claude/skills").symlink_to("../.agents/skills", target_is_directory=True)
             for filename in ("CLAUDE.md", "AGENTS.md", "package.json"):
                 shutil.copy2(SOURCE / filename, main / filename)
-            (main / ".gitee").mkdir()
-            shutil.copy2(SOURCE / ".gitee/PULL_REQUEST_TEMPLATE.md", main / ".gitee/PULL_REQUEST_TEMPLATE.md")
             (main / ".githooks").mkdir()
             (main / ".githooks/pre-push").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             (main / ".githooks/pre-push").chmod(0o755)
