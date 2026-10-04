@@ -416,7 +416,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       expected_binding_revision: expectedRevision,
       recovery_seed: { target: target.seedTarget, sources: target.seedSources },
     });
-    nodeBindings.set(nodeId, target.expectedBindingRevision);
+    nodeBindings.set(nodeId, Math.max(nodeBindings.get(nodeId) ?? 0, target.expectedBindingRevision));
 
     /** 恢复种子角色为 draft/existing-media：目标必须已在服务端画布（B.3），先落盘再提交。 */
     const sendOnce = async (binding: ReturnType<typeof buildBinding> | null) => {
@@ -455,16 +455,16 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         poll(execution, String(created.jobId));
       })
       .catch((e: unknown) => {
+        if (!owns(execution)) return; // 旧执行不得改当前归属版本或画布
         // 受理冲突（他端先一步推进归属，IKJKU1）：不采纳服务端版本重发——保留用户输入
         // 与画布内容按创建失败收敛；服务端版本进归属台账，复核后的新意图用新 submission_id。
         const bindingConflict = isApiError(e) && e.status === 409 && recoveryReason(e) === 'canvas_binding_conflict';
         if (bindingConflict) {
           const current = (e.data as { currentBindingRevision?: unknown }).currentBindingRevision;
-          if (typeof current === 'number' && current > target.expectedBindingRevision) {
+          if (typeof current === 'number' && current > (nodeBindings.get(nodeId) ?? 0)) {
             nodeBindings.set(nodeId, current);
           }
         }
-        if (!owns(execution)) return; // 已被接管：失败态不得覆盖新任务的执行状态
         active.delete(nodeId);
         if (bindingConflict) submitAttempts.delete(nodeId); // 意图已被服务端拒绝：复核后再发是独立新意图
         if ((e as { _skipped?: boolean })._skipped) {
@@ -541,8 +541,8 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     // 重试不前置保存（IKDMQV 契约「不读画布不落盘」）：目标卡在提交时已按角色落盘或经水合在服务端。
     def.retry!(projectId, jobId, { nodeId, nodeData: data }, binding, key)
       .then((created) => {
-        retryInFlight.delete(nodeId);
         if (!owns(execution)) return;
+        retryInFlight.delete(nodeId);
         retryAttempts.delete(nodeId);
         const view = created.canvasBinding ?? null;
         if (view && view.is_current === false) { active.delete(nodeId); host.clearActiveJob(nodeId); return; }
@@ -554,8 +554,8 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         poll(execution, String(created.jobId));
       })
       .catch((e: unknown) => {
-        retryInFlight.delete(nodeId);
         if (!owns(execution)) return;
+        retryInFlight.delete(nodeId);
         active.delete(nodeId);
         if (host.openRechargeForCreditsError(e)) {
           host.patchNode(nodeId, {

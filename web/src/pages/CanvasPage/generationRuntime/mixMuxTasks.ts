@@ -39,13 +39,13 @@ export function watchMixSubmit(nodeId: string, watcher: MixSubmitWatcher): () =>
   return () => { if (submitWatchers.get(nodeId) === watcher) submitWatchers.delete(nodeId); };
 }
 
-function signalAccepted(nodeId: string, jobId: string): void {
-  const watcher = submitWatchers.get(nodeId);
+function signalAccepted(nodeId: string, jobId: string, watcher: MixSubmitWatcher | undefined): void {
+  if (submitWatchers.get(nodeId) !== watcher) return;
   submitWatchers.delete(nodeId);
   watcher?.accepted(jobId);
 }
-function signalFailed(nodeId: string, error: unknown): void {
-  const watcher = submitWatchers.get(nodeId);
+function signalFailed(nodeId: string, error: unknown, watcher: MixSubmitWatcher | undefined): void {
+  if (submitWatchers.get(nodeId) !== watcher) return;
   submitWatchers.delete(nodeId);
   watcher?.failed(error);
 }
@@ -143,19 +143,20 @@ export const audioMixTask: GenerationTaskDefinition<AudioMixCreate> = {
 
   async create(projectId, input: TaskSubmissionInput<AudioMixCreate>, binding, key) {
     const nodeId = input.target!.targetNodeId;
+    const watcher = submitWatchers.get(nodeId);
     try {
       const created = await createAudioMix(
         projectId,
         binding ? { ...input.payload, canvas_binding: binding } : input.payload,
         { silent: true, idempotencyKey: key },
       );
-      signalAccepted(nodeId, created.job_id);
+      signalAccepted(nodeId, created.job_id, watcher);
       return {
         jobId: created.job_id,
         canvasBinding: (created as { canvas_binding?: CreateJobOutcome['canvasBinding'] }).canvas_binding ?? null,
       };
     } catch (e) {
-      signalFailed(nodeId, e);
+      signalFailed(nodeId, e, watcher);
       throw e;
     }
   },
@@ -209,19 +210,20 @@ export const audioVideoMuxTask: GenerationTaskDefinition<CreateAudioVideoMuxPayl
 
   async create(projectId, input: TaskSubmissionInput<CreateAudioVideoMuxPayload>, binding, key) {
     const nodeId = input.target!.targetNodeId;
+    const watcher = submitWatchers.get(nodeId);
     try {
       const created = await createAudioVideoMux(
         projectId,
         binding ? { ...input.payload, canvas_binding: binding } : input.payload,
         { silent: true, idempotencyKey: key },
       );
-      signalAccepted(nodeId, created.job_id);
+      signalAccepted(nodeId, created.job_id, watcher);
       return {
         jobId: created.job_id,
         canvasBinding: (created as { canvas_binding?: CreateJobOutcome['canvasBinding'] }).canvas_binding ?? null,
       };
     } catch (e) {
-      signalFailed(nodeId, e);
+      signalFailed(nodeId, e, watcher);
       throw e;
     }
   },
