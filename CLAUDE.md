@@ -9,13 +9,15 @@
 | 判断产品实现技术栈 / Python 工具是否需要处置 | [ADR-0068](docs/adr/0068-node-typescript-product-runtime-and-specialized-compute-boundary.md) + [ADR-0070](docs/adr/0070-product-runtime-stack-does-not-govern-engineering-control-plane.md) + [ADR-0074](docs/adr/0074-frontend-backend-separation-nestjs-product-api.md) + [ADR-0084](docs/adr/0084-generation-worker-java-runtime.md)；逐项结论见 [Python 存量处置清单](docs/specs/2026-08-09-ik7fi6-python-inventory-disposition.md) |
 | Gitee 工作流（提交/分支/PR/发布/worktree） | `docs/agents/git-workflow.md`（渐进式） |
 | 多分支并行实施（集成分支 + 并行子任务 worktree + merger 合回，implement-spec 等多工单单 PR 场景） | `docs/agents/integration-branch-workflow.md`（渐进式） |
-| Gitee Issue / 任何 `mcp__gitee-ent__*` 调用 | `docs/agents/issue-tracker.md`（渐进式，首次调用前 Must Read） |
+| Gitee 工单 / PR 读写、回读或 MCP 故障 | `docs/agents/issue-tracker.md`（渐进式，首次调用前 Must Read） |
 | 测试验证（完成/提交/PR/合并前） | `docs/agents/testing-strategy.md`（收口与 PR 阶段均按影响面分层；仅产品影响路径或显式高风险跑全量；同一 HEAD 复用凭证） |
 | Blue-Whale 登录（任何场景遇账号密码登录：浏览器自动化、本地服务登录确认、测试站直连） | `agent-rules/app-login.md`（凭据读 `~/.bw-test-login.env` 个人文件，明文只进浏览器输入框；缺失/失效即停问用户；[ADR-0122](docs/adr/0122-browser-testsite-login-credentials.md)） |
 | 前端工作流（碰 `web/` 产品实现：页面、组件、API 客户端、TanStack Query） | `.claude/skills/frontend-delivery/SKILL.md`（缺陷走 `references/bugfix.md`；新服务端状态读写走 `references/request.md`） |
 | PR 模板 / Hook 兜底清单 / 低频细节 | `docs/agents/commit-and-review.md` |
 | 当前发布线开工、换期和遗留分支清点 | `docs/agents/git-workflow.md` + [ADR-0115](docs/adr/0115-local-release-code-baseline.md) |
 | 产品文档/技能资产归位（docs/projects、docs/skills） | `docs/README.md`（渐进式，新建产品文档前读） |
+
+本仓库工单与 PR 全部读写仅使用 Gitee MCP；操作前读取 [渠道规则](agent-rules/gitee-mcp-only.md)。
 
 ## Gitee ID 兜底常量
 
@@ -60,7 +62,7 @@
 - **返工回滚**：开发完成态被打回 → 自动回 开发中/修复中，再次收口时重新置态；已上线不回滚。
 - **禁设状态**：已验收 / 已拒绝 / 已关闭 —— 归人。
 - **前置错位**：工单已在开发中/修复中或已是终态（已上线/已关闭/已拒绝/已验收）→ 停止，问人，等指示；在开发完成态开工视为新一轮，转回 开发中/修复中。
-- 变更失败重试一次；仍失败继续主线但汇报置顶标红。`--no-issue` 与只读任务不适用。
+- 工单变更失败按渠道规则处理；仍失败可继续不依赖该变更的本地工作，但不得推进依赖该变更的 Gitee 写入，汇报置顶标红。`--no-issue` 与只读任务不适用。
 
 ## 写入前自检（每次写操作前强制执行）
 

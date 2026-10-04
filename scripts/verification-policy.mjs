@@ -317,6 +317,7 @@ function appendAreaCommands(commands, areas, base) {
         "-m",
         "unittest",
         "scripts.tests.test_cbm_context",
+        "scripts.tests.test_gitee_channel",
         "scripts.tests.test_publish_review_package",
         "scripts.tests.test_start_task_worktree",
         "scripts.tests.test_sync_task_from_origin",

@@ -1,8 +1,6 @@
 # Issue tracker: Gitee
 
-仓库 `git@gitee.com:hangzhou-xuanfu_1/blue-whale-ai.git`（网页 https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues）。优先 MCP 工具。
-
-`mcp__gitee-ent__*` 不在当前会话工具清单时（项目 `.mcp.json` 只被部分客户端加载，会话不重启不会挂载）：先向用户报告，给出「重启会话加载 MCP / REST 直连」两个选项，等选择后继续；回退路径由用户拍板，不自行选路，也不编写桥接代码（stdio 桥等）拉起服务。回退次序固定：MCP → REST（curl，token 取自项目 `.mcp.json`）→ 网页。REST 已知口径：更新工单用 PUT；打标签参数名 `label_ids`（数字 ID 逗号分隔），`labels` 参数会被接受但静默不生效。企业 token 打普通版 v5 仓库 API（`api.gitee.com/api/v5`）一律 401 wrong token type——REST 回退只覆盖工单更新，PR 创建/合并无 REST 等价路径，只能走 MCP。MCP 二进制已知缺陷：URL 路径含 8 位数字 ID 的调用（如 update/get 传 `issue_id`）会因 float64 科学计数法拼 URL 而 panic——遇此崩溃直接转 REST，不重试 MCP。
+仓库 `git@gitee.com:hangzhou-xuanfu_1/blue-whale-ai.git`。工单和 PR 的操作渠道、故障与重试流程统一见 [Gitee MCP 渠道规则](../../agent-rules/gitee-mcp-only.md)，调用前必读。本文只定义工具参数、归属和状态流转。
 
 ## ID 解析约定（通用，先于任何 `mcp__gitee-ent__*` 调用读）
 
@@ -120,8 +118,8 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
 ### 失败处理
 
-- 状态/标签变更失败：重试一次。
-- 仍失败：继续主线工作不阻塞，但最终汇报必须置顶标红「⚠️ 工单状态未同步」，附手动指引（工单号 + 目标状态名 + 状态 id；开工流转另附执行人 id）。
+- 状态/标签变更失败：按 [渠道规则](../../agent-rules/gitee-mcp-only.md) 先核验执行结果，不能无条件重试。
+- 仍失败：只继续不依赖该变更的本地工作，停止依赖该结果的 Gitee 写入，但最终汇报必须置顶标红「⚠️ 工单状态未同步」，附手动指引（工单号 + 目标状态名 + 状态 id；开工流转另附执行人 id）。
 - 幂等：工单已在目标状态视为成功，直接跳过。
 
 ## 术语映射

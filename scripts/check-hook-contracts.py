@@ -17,6 +17,7 @@ Contract = tuple[str, str, str]
 CommandParser = Callable[[str], Optional[str]]
 
 EXPECTED_CONTRACTS: tuple[Contract, ...] = (
+    ("PreToolUse", ".*", "block-gitee-alternative-channel.sh"),
     ("PreToolUse", "Edit|Write", "block-master-edit.sh"),
     ("PreToolUse", "Bash", "block-dangerous-git.sh"),
     ("PreToolUse", "Bash", "block-push-to-master.sh"),

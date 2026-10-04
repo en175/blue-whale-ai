@@ -6,6 +6,17 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
+test("Gitee work uses one MCP-only channel rule and preserves unknown-outcome handling", () => {
+  const policy = read("agent-rules/gitee-mcp-only.md");
+  assert.match(read("CLAUDE.md"), /工单与 PR 全部读写仅使用 Gitee MCP/);
+  assert.match(read("docs/agents/issue-tracker.md"), /agent-rules\/gitee-mcp-only\.md/);
+  assert.doesNotMatch(read("docs/agents/issue-tracker.md"), /MCP → REST|直接转 REST|回退次序固定/);
+  assert.match(policy, /结果未知/);
+  assert.match(policy, /明确未执行的临时失败最多重试一次/);
+  assert.match(policy, /禁止重放 create、merge 或评论/);
+  assert.match(policy, /历史记忆.*不能覆盖本规则/);
+});
+
 function read(path) {
   return readFileSync(join(ROOT, path), "utf8");
 }

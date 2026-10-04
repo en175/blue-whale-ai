@@ -35,7 +35,7 @@
 - “发布完成”覆盖任务提交、合入本地 master、推送和创建 PR，不覆盖合并 PR 或创建 release。
 - 合并 PR / 创建 release 须另获明确授权；Agent 随后自动运行 `scripts/manage-agent-authorization.sh grant --user-authorized ...` 生成绑定企业、仓库和具体 PR/tag 的 900s 一次性凭证。
 - 人类撤销或缩小授权时，Agent 立即运行对应 `revoke` 或 `revoke --all`；旧凭证不得继续重试。
-- Hook 命中且现有授权覆盖操作时，Agent 自动改走标准入口并只纠偏重试一次；网络/服务端临时失败最多重试两次，之后停止并汇报。
+- Hook 命中且现有授权覆盖操作时，Agent 自动改走标准入口并只纠偏重试一次；Gitee 调用失败按 [渠道规则](../../agent-rules/gitee-mcp-only.md) 核验执行结果后决定重试，不能套用 Git 网络重试。
 - PR 创建后停下来交给开发者审查，不自作主张合并。
 
 ## 禁直推 master（最高红线）
