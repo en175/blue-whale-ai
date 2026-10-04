@@ -8,7 +8,7 @@ import { fetchJobStatus, type JobDetail } from '@/api/jobs';
 import { isApiError, envelopeErrorCode } from '@/api/http';
 import {
   fetchGenerationRecoveryPage, resolveGenerationRecovery,
-  type GenerationRecoveryRecord, type RecoveryChange,
+  type CanvasBinding, type GenerationRecoveryRecord, type RecoveryChange,
 } from '@/api/canvasRecovery';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import type {
@@ -83,9 +83,9 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   const retryAttempts = new Map<string, { jobId: string; key: string; bound: boolean }>();
   /** 重试在途同步防重（IKJJR3）：React state 异步窗口内的连点兜底，受理/失败收敛即解锁。 */
   const retryInFlight = new Set<string>();
-  /** 提交意图窗口：nodeId → 未受理提交（同载荷签名复用同一把 submission_id——双击/401 续跑/
+  /** 提交意图窗口：nodeId → 未受理提交（同载荷签名复用 submission_id 与完整绑定——双击/401 续跑/
    *  响应丢失原样重发；载荷一改即换新，受理即作废。口径同页面旧 jobSubmitKeys 台账）。 */
-  const submitAttempts = new Map<string, { signature: string; key: string }>();
+  const submitAttempts = new Map<string, { signature: string; binding: CanvasBinding }>();
   let roundCounter = 0;
   const nextRound = () => `grt-${++roundCounter}-${newId().slice(0, 8)}`;
 
@@ -405,28 +405,29 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
 
     const signature = JSON.stringify(input.payload);
     const previousAttempt = submitAttempts.get(nodeId);
-    const key = previousAttempt && previousAttempt.signature === signature
-      ? previousAttempt.key
-      : newId(); // submission_id = Idempotency-Key（新协议承载一致性）
-    submitAttempts.set(nodeId, { signature, key });
-    const buildBinding = (expectedRevision: number) => ({
-      protocol_version: 1 as const,
-      submission_id: key,
-      target_node_id: target.targetNodeId,
-      expected_binding_revision: expectedRevision,
-      recovery_seed: { target: target.seedTarget, sources: target.seedSources },
-    });
+    const binding: CanvasBinding = previousAttempt && previousAttempt.signature === signature
+      ? previousAttempt.binding
+      : {
+        protocol_version: 1,
+        submission_id: newId(),
+        target_node_id: target.targetNodeId,
+        expected_binding_revision: Math.max(nodeBindings.get(nodeId) ?? 0, target.expectedBindingRevision),
+        recovery_seed: structuredClone({ target: target.seedTarget, sources: target.seedSources }),
+      };
+    const key = binding.submission_id; // submission_id = Idempotency-Key（新协议承载一致性）
+    submitAttempts.set(nodeId, { signature, binding });
+    execution.targetRole = binding.recovery_seed.target.role;
     nodeBindings.set(nodeId, Math.max(nodeBindings.get(nodeId) ?? 0, target.expectedBindingRevision));
 
     /** 恢复种子角色为 draft/existing-media：目标必须已在服务端画布（B.3），先落盘再提交。 */
-    const sendOnce = async (binding: ReturnType<typeof buildBinding> | null) => {
+    const sendOnce = async (binding: CanvasBinding | null) => {
       if (binding && binding.recovery_seed.target.role !== 'result-placeholder') {
         const saved = await host.saveCanvas(projectId).catch(() => false);
         if (!saved) return null; // 保存失败不发：防服务端按未保存目标 400 拒绝（下轮水合/用户重试接续）
       }
       return def.create(projectId, input, binding, key);
     };
-    const send = (): Promise<CreateJobOutcome | null> => sendOnce(buildBinding(target.expectedBindingRevision));
+    const send = (): Promise<CreateJobOutcome | null> => sendOnce(binding);
     send()
       .then(async (created) => {
         if (created === null) {

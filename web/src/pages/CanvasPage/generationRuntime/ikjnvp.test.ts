@@ -19,6 +19,7 @@ const NODE_ID = 'audio-mix-501';
 const SID_A = '12345678-0000-4000-8000-000000000001';
 const SID_B = '12345678-0000-4000-8000-000000000002';
 const SID_C = '12345678-0000-4000-8000-000000000003';
+const SID_D = '12345678-0000-4000-8000-000000000004';
 const TARGET_SEED = { role: 'result-placeholder' as const, x: 5, y: 6, width: 320, height: 320, name: '混合结果.mp3' };
 const payload = audioMixCreateSchema.parse({
   source_node_id: 'audio-source-1',
@@ -111,6 +112,61 @@ const createRequest = (index: number) => {
 beforeEach(() => { vi.resetAllMocks(); });
 
 describe('迟到创建与重试响应的承接保护（IKJNVP）', () => {
+  it.each([1, 4])('已确认版本 4 时，目标快照 %s 的新意图首请求使用版本 4', async (targetRevision) => {
+    const ctx = setup();
+    ctx.load('1', 4);
+    await ctx.runtime.recover('1');
+    expect(ctx.submit(targetRevision)).toBe(true);
+    await flush();
+    expect(createRequest(0)).toMatchObject({ projectId: '1', submission_id: SID_B, expected_binding_revision: 4 });
+    expect(vi.mocked(createAudioMix).mock.calls).toHaveLength(1);
+  });
+
+  it('丢回执后的同意图重放保留完整绑定，新业务意图使用最新版本与发送快照', async () => {
+    const ctx = setup();
+    ctx.load('1', 4);
+    await ctx.runtime.recover('1');
+    const input = {
+      payload: structuredClone(payload),
+      target: { targetNodeId: NODE_ID, expectedBindingRevision: 1, seedTarget: { ...TARGET_SEED },
+        seedSources: [{ node_id: 'audio-source-1', x: 20, y: 30, width: 320, height: 320, name: '原来源.mp3' }] },
+    };
+    vi.mocked(createAudioMix).mockRejectedValueOnce(new Error('受理回执丢失')).mockRejectedValueOnce(new Error('重放回执丢失'));
+    expect(ctx.runtime.submit(audioMixTask, input)).toBe(true);
+    await flush();
+    const originalBody = audioMixCreateSchema.parse(vi.mocked(createAudioMix).mock.calls[0]![1]);
+    expect(createRequest(0)).toMatchObject({ submission_id: SID_B, expected_binding_revision: 4 });
+
+    const newerRecord = recoveryRecord(6, '503');
+    newerRecord.submission_id = SID_D;
+    newerRecord.items[0]!.recovery_item_id = `gcr:${SID_D}:$target`;
+    ctx.host.fetchRecoveryPage = async () => ({ protocol_version: 1, canvas_version: 6, records: [newerRecord], next_cursor: null });
+    await ctx.runtime.recover('1');
+    expect(ctx.runtime.bindingRevisionOf(NODE_ID)).toBe(6);
+    input.target.expectedBindingRevision = 6;
+    input.target.seedTarget.x = 200;
+    input.target.seedTarget.width = 640;
+    input.target.seedTarget.name = '用户新名称.mp3';
+    input.target.seedSources[0]!.name = '来源新名称.mp3';
+    input.target.seedSources.push({ node_id: 'audio-source-2', x: 40, y: 50, width: 320, height: 320, name: '另一来源.mp3' });
+    ctx.nextSubmission();
+    expect(ctx.runtime.submit(audioMixTask, input)).toBe(true);
+    await flush();
+    expect(createRequest(1)).toMatchObject({ projectId: '1', submission_id: SID_B, expected_binding_revision: 4 });
+    expect(audioMixCreateSchema.parse(vi.mocked(createAudioMix).mock.calls[1]![1])).toEqual(originalBody);
+    expect(ctx.runtime.bindingRevisionOf(NODE_ID)).toBe(6);
+
+    expect(ctx.runtime.submit(audioMixTask, {
+      payload: audioMixCreateSchema.parse({ ...payload, output_format: 'wav' }),
+      target: { ...input.target, expectedBindingRevision: 1 },
+    })).toBe(true);
+    await flush();
+    expect(createRequest(2)).toMatchObject({ projectId: '1', submission_id: SID_C, expected_binding_revision: 6,
+      recovery_seed: { target: { x: 200, width: 640, name: '用户新名称.mp3' },
+        sources: [{ name: '来源新名称.mp3' }, { name: '另一来源.mp3' }] } });
+    expect(vi.mocked(createAudioMix).mock.calls).toHaveLength(3);
+  });
+
   it.each([
     { name: '同项目重载', project: '1', fresh: 4, late: 3, jobId: '501' },
     { name: '跨项目切换', project: '2', fresh: 2, late: 9, jobId: '503' },
