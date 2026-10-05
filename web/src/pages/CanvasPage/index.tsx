@@ -237,7 +237,7 @@ import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntime
 import { normalGenerationTask } from './generationRuntime/normalGeneration';
 import { storyboardTask, type StoryboardPayload } from './generationRuntime/storyboardTasks';
 import { createImageToolsTask, isImageToolsCard, imageToolsRetryPayloadOf, type ImageToolsPayload } from './generationRuntime/imageTools';
-import { audioMixTask, audioVideoMuxTask, watchMixSubmit } from './generationRuntime/mixMuxTasks';
+import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from './generationRuntime/mixMuxTasks';
 import { sceneSplitTask, vocalSplitTask } from './generationRuntime/multiOutputTasks';
 import { videoToolsTask, videoToolFrozenPayload, type VideoToolPayload } from './generationRuntime/videoTools';
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
@@ -7861,6 +7861,9 @@ export default function CanvasPage() {
               });
               return true;
             },
+            // IKJP8B：提交不会受理到底（失效/被替代/保存失败未发出）——收尾旧等待并释放
+            // 会话锁，失效链不交接、不改写当前草稿
+            onStale: () => { unwatch(); reject(staleMixSubmitError()); },
           },
         );
         if (!issued) {
@@ -8207,6 +8210,8 @@ export default function CanvasPage() {
           {
             // 未受理：撤回刚建的占位卡与来源线，错误提示归会话 onError（留在面板重发）
             onCreateFailure: () => { rollbackPlaceholder(); return true; },
+            // IKJP8B：提交不会受理到底——收尾旧等待、撤回占位并释放会话锁
+            onStale: () => { unwatch(); rollbackPlaceholder(); reject(staleMixSubmitError()); },
           },
         );
         if (!issued) {

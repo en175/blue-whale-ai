@@ -29,9 +29,17 @@ const TARGET_OUTPUT_KEY = '$target';
  * 再次发送归会话层」）。runtime.submit 是同步受理发出（fire-and-forget），故由
  * def.create 在受理/失败时各回调一次。key = 目标节点 id。
  * 409 canvas_binding_conflict 与其他创建失败同路径桥一次 failed（IKJKU1：运行时
- * 不自动重发），会话留在面板由用户复核后再发（新意图 = 新 submission_id）。 */
+ * 不自动重发），会话留在面板由用户复核后再发（新意图 = 新 submission_id）。
+ * IKJP8B：创建响应返回时执行已失效（ownsExecution 判定）或回执被替代
+ * （is_current=false）不得以 accepted 唤醒旧会话——受理身份不交给失效意图，
+ * 旧等待以失效失败 settle，会话 finally 释放自己的锁。 */
 type MixSubmitWatcher = { accepted(jobId: string): void; failed(error: unknown): void };
 const submitWatchers = new Map<string, MixSubmitWatcher>();
+
+/** 提交意图已失效（重载/切换/被替代）：会话等待者以失败收尾，不携带受理身份。 */
+export function staleMixSubmitError(): Error {
+  return new Error('画布已重新加载，任务未提交，请重试');
+}
 
 /** 页面宿主提交前登记；返回解除函数（未发出/已结算时收尾）。 */
 export function watchMixSubmit(nodeId: string, watcher: MixSubmitWatcher): () => void {
@@ -48,6 +56,26 @@ function signalFailed(nodeId: string, error: unknown, watcher: MixSubmitWatcher 
   if (submitWatchers.get(nodeId) !== watcher) return;
   submitWatchers.delete(nodeId);
   watcher?.failed(error);
+}
+
+/** 创建回执到达时的会话通知（IKJP8B 门控）：受理身份只在执行仍归属且意图未被替代时
+ *  交给等待者；否则以失效失败 settle（旧会话收尾等待，新会话的通知互不消费）。 */
+function signalCreateOutcome(
+  nodeId: string,
+  jobId: string,
+  watcher: MixSubmitWatcher | undefined,
+  ownsExecution: (() => boolean) | undefined,
+  view: { is_current: boolean } | null,
+): void {
+  if (view && view.is_current === false) {
+    signalFailed(nodeId, staleMixSubmitError(), watcher); // 意图被替代：受理身份归新承接
+    return;
+  }
+  if (ownsExecution !== undefined && !ownsExecution()) {
+    signalFailed(nodeId, staleMixSubmitError(), watcher); // 执行已失效：不唤醒旧会话交接
+    return;
+  }
+  signalAccepted(nodeId, jobId, watcher);
 }
 
 /** 专属重试响应 → CreateJobOutcome（jobId 复用；绑定视图随受理返回，可空 = 历史路径）。 */
@@ -141,7 +169,7 @@ export const audioMixTask: GenerationTaskDefinition<AudioMixCreate> = {
     return isAudioMixNodeId(nodeId) && nodeData.jobId != null;
   },
 
-  async create(projectId, input: TaskSubmissionInput<AudioMixCreate>, binding, key) {
+  async create(projectId, input: TaskSubmissionInput<AudioMixCreate>, binding, key, ownsExecution) {
     const nodeId = input.target!.targetNodeId;
     const watcher = submitWatchers.get(nodeId);
     try {
@@ -150,11 +178,9 @@ export const audioMixTask: GenerationTaskDefinition<AudioMixCreate> = {
         binding ? { ...input.payload, canvas_binding: binding } : input.payload,
         { silent: true, idempotencyKey: key },
       );
-      signalAccepted(nodeId, created.job_id, watcher);
-      return {
-        jobId: created.job_id,
-        canvasBinding: (created as { canvas_binding?: CreateJobOutcome['canvasBinding'] }).canvas_binding ?? null,
-      };
+      const view = (created as { canvas_binding?: CreateJobOutcome['canvasBinding'] }).canvas_binding ?? null;
+      signalCreateOutcome(nodeId, created.job_id, watcher, ownsExecution, view);
+      return { jobId: created.job_id, canvasBinding: view };
     } catch (e) {
       signalFailed(nodeId, e, watcher);
       throw e;
@@ -208,7 +234,7 @@ export const audioVideoMuxTask: GenerationTaskDefinition<CreateAudioVideoMuxPayl
     return audioVideoMuxIdentityOf({ id: nodeId, type: 'mediaNode', data: nodeData } as Node) != null;
   },
 
-  async create(projectId, input: TaskSubmissionInput<CreateAudioVideoMuxPayload>, binding, key) {
+  async create(projectId, input: TaskSubmissionInput<CreateAudioVideoMuxPayload>, binding, key, ownsExecution) {
     const nodeId = input.target!.targetNodeId;
     const watcher = submitWatchers.get(nodeId);
     try {
@@ -217,11 +243,9 @@ export const audioVideoMuxTask: GenerationTaskDefinition<CreateAudioVideoMuxPayl
         binding ? { ...input.payload, canvas_binding: binding } : input.payload,
         { silent: true, idempotencyKey: key },
       );
-      signalAccepted(nodeId, created.job_id, watcher);
-      return {
-        jobId: created.job_id,
-        canvasBinding: (created as { canvas_binding?: CreateJobOutcome['canvasBinding'] }).canvas_binding ?? null,
-      };
+      const view = (created as { canvas_binding?: CreateJobOutcome['canvasBinding'] }).canvas_binding ?? null;
+      signalCreateOutcome(nodeId, created.job_id, watcher, ownsExecution, view);
+      return { jobId: created.job_id, canvasBinding: view };
     } catch (e) {
       signalFailed(nodeId, e, watcher);
       throw e;

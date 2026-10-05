@@ -24,6 +24,8 @@ const POLL_INTERVAL_MS = 2500;
 const POLL_ERROR_INTERVAL_MS = 5000;
 const TARGET_OUTPUT_KEY = '$target';
 const PRIMARY_OUTPUT_KEY = 'primary';
+/** IKJP8B：预保存返回时执行已失效的哨兵——创建请求不发出，只做旧等待收尾。 */
+const STALE = Symbol('generation-submit-stale');
 
 /** 运行时可注入依赖（测试接缝：可控 API 响应与时钟）。 */
 export interface GenerationRuntimeDeps {
@@ -419,27 +421,32 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     execution.targetRole = binding.recovery_seed.target.role;
     nodeBindings.set(nodeId, Math.max(nodeBindings.get(nodeId) ?? 0, target.expectedBindingRevision));
 
-    /** 恢复种子角色为 draft/existing-media：目标必须已在服务端画布（B.3），先落盘再提交。 */
-    const sendOnce = async (binding: CanvasBinding | null) => {
+    /** 恢复种子角色为 draft/existing-media：目标必须已在服务端画布（B.3），先落盘再提交。
+     *  IKJP8B：预保存返回后核对归属——失效（重载/切换/reset/删除/被替代）不再创建，
+     *  经 onStale 让等待受理的会话收尾（Promise settle + 释放自己的锁），不留永不结算的等待。 */
+    const sendOnce = async (binding: CanvasBinding | null): Promise<CreateJobOutcome | null | typeof STALE> => {
       if (binding && binding.recovery_seed.target.role !== 'result-placeholder') {
         const saved = await host.saveCanvas(projectId).catch(() => false);
         if (!saved) return null; // 保存失败不发：防服务端按未保存目标 400 拒绝（下轮水合/用户重试接续）
+        if (!owns(execution)) return STALE; // 失效预保存续链：创建请求不发出
       }
-      return def.create(projectId, input, binding, key);
+      return def.create(projectId, input, binding, key, () => owns(execution));
     };
-    const send = (): Promise<CreateJobOutcome | null> => sendOnce(binding);
+    const send = (): Promise<CreateJobOutcome | null | typeof STALE> => sendOnce(binding);
     send()
       .then(async (created) => {
+        if (created === STALE) { options?.onStale?.({ nodeId }); return; } // 创建前已失效：仅收尾旧等待
         if (created === null) {
           throw Object.assign(new Error('画布保存失败，未提交生成任务'), { _skipped: true });
         }
-        if (!owns(execution)) return;
+        if (!owns(execution)) { options?.onStale?.({ nodeId }); return; } // 创建迟到失效：不落账，旧等待收尾
         const view = created.canvasBinding ?? null;
         if (view && view.is_current === false) {
           // 意图已被替代（他端接管）：不用同 jobId 状态更新旧意图，卡由新承接收敛
           active.delete(nodeId);
           host.clearActiveJob(nodeId);
           submitAttempts.delete(nodeId);
+          options?.onStale?.({ nodeId });
           return;
         }
         if (view) {
@@ -456,7 +463,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         poll(execution, String(created.jobId));
       })
       .catch((e: unknown) => {
-        if (!owns(execution)) return; // 旧执行不得改当前归属版本或画布
+        if (!owns(execution)) { options?.onStale?.({ nodeId }); return; } // 旧执行不得改当前归属版本或画布，旧等待收尾
         // 受理冲突（他端先一步推进归属，IKJKU1）：不采纳服务端版本重发——保留用户输入
         // 与画布内容按创建失败收敛；服务端版本进归属台账，复核后的新意图用新 submission_id。
         const bindingConflict = isApiError(e) && e.status === 409 && recoveryReason(e) === 'canvas_binding_conflict';
@@ -471,6 +478,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         if ((e as { _skipped?: boolean })._skipped) {
           host.toast('error', '画布保存失败，生成任务未提交，请重试保存后再发送');
           options?.onCreateFailure?.(e, { nodeId, target });
+          options?.onStale?.({ nodeId }); // 创建未发出：等待受理的会话收尾等待并释放锁（IKJP8B）
           return;
         }
         const handled = options?.onCreateFailure?.(e, { nodeId, target });

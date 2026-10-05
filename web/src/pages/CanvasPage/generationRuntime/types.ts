@@ -118,8 +118,11 @@ export interface GenerationTaskDefinition<TPayload = unknown> {
   /**
    * 创建请求。canvas_binding 非空时运行时已保证：Idempotency-Key = submission_id。
    * 返回新协议回执（canvasBinding 字段）供台账登记。
+   * IKJP8B：ownsExecution 由运行时传入的归属判定（项目/加载身份/当前执行/删除状态）；
+   * 创建响应返回时已失效，或回执 is_current=false（意图被替代），定义方不得以 accepted
+   * 唤醒会话等待者——受理身份不交给失效意图，等待者以失效失败收尾。
    */
-  create(projectId: string, input: TaskSubmissionInput<TPayload>, binding: CanvasBinding | null, key: string): Promise<CreateJobOutcome>;
+  create(projectId: string, input: TaskSubmissionInput<TPayload>, binding: CanvasBinding | null, key: string, ownsExecution?: () => boolean): Promise<CreateJobOutcome>;
   /**
    * 失败卡重试请求：新 submission_id（独立提交身份），可复用 jobId（专属重试）或新建。
    *  不提供 = 该类型失败卡不支持服务端重试（运行时保留卡片并提示重新编辑）。
@@ -292,4 +295,9 @@ export interface SubmitOptions {
   /** IKJJR3：受理成功（POST 200、轮询启动前）页面挂点——受理值写卡（如插帧 frozenParams、
    *  HD lastParams 的「受理即冻结」语义）。运行时已 patchNode(jobId)，回调只补家族字段。 */
   onAccepted?(ctx: { nodeId: string; jobId: string; submissionId: string | null }): void;
+  /** IKJP8B：本次提交不会受理到底——预保存返回时执行已失效（重载/切换/reset/删除）、
+   *  回执被替代（is_current=false）、创建未发出（保存失败）或创建迟到失效。
+   *  等待受理结果的会话必须在此收尾自己的等待与锁（旧 watcher Promise settle），
+   *  不落任何画布状态。 */
+  onStale?(ctx: { nodeId: string }): void;
 }
