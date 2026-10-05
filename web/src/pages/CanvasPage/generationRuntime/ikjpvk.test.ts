@@ -13,18 +13,10 @@
  * 卡片、连线、公开任务状态与后续操作，不依赖私有 Map/setter 次数。
  * ============================================ */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Node } from '@xyflow/react';
 import { createAudioMix, retryAudioMix, type JobDetail } from '@/api/jobs';
 import { audioMixCreateSchema } from '@lib/contracts/audio-mix';
 import type { CanvasBinding, GenerationRecoveryRecord } from '@/api/canvasRecovery';
-import { createGenerationRuntime } from './runtime';
-import { audioMixTask, watchMixSubmit } from './mixMuxTasks';
-import { seedSourcesOfNode } from './seedFacts';
-import { createAudioMixSession, type AudioMixHost } from '../compoundToolSessions';
-import { createToolSessionRuntime } from '../toolSessionRuntime';
-import type { ToolSessionDeps } from '../toolSessionCoordinator';
-import { buildAudioMixPlaceholderNode, findAudioMixPosition } from '../audioMix';
-import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
+import { flush, deferred, setupAudioMixRecovery, type MixCreateResult } from './audioMixRecoveryTestKit';
 
 vi.mock('@/api/jobs', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/api/jobs')>(),
@@ -32,33 +24,6 @@ vi.mock('@/api/jobs', async (importOriginal) => ({
   retryAudioMix: vi.fn(),
   cancelGenerationJob: vi.fn(),
 }));
-
-const DEPS: ToolSessionDeps = { dismissGenPanels() {}, selectNode() {} };
-const flush = async (rounds = 30) => { for (let i = 0; i < rounds; i += 1) await Promise.resolve(); };
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
-  return { promise, resolve, reject };
-}
-
-const bindingView = (submissionId: string, nodeId: string, jobId: string, revision = 1, isCurrent = true) => ({
-  protocol_version: 1 as const, submission_id: submissionId, target_node_id: nodeId,
-  binding_revision: revision, job_id: jobId, is_current: isCurrent,
-});
-type MixCreateResult = Awaited<ReturnType<typeof createAudioMix>>;
-const mixCreated = (jobId: string, view: ReturnType<typeof bindingView>): MixCreateResult =>
-  ({ job_id: jobId, status: 'queued', canvas_binding: view });
-
-/** 受理回执前的真实请求读取：真实 Schema 校验 + 幂等键 = submission_id 口径核对。 */
-const createRequest = (index: number) => {
-  const [projectId, body, options] = vi.mocked(createAudioMix).mock.calls[index]!;
-  const parsed = audioMixCreateSchema.parse(body);
-  const binding = parsed.canvas_binding!;
-  expect(options?.idempotencyKey).toBe(binding.submission_id);
-  return { projectId, payload: parsed, binding };
-};
 
 /** 服务端已受理的恢复记录（受控服务端事实：回显真实请求的提交身份与恢复种子）。 */
 const acceptedRecord = (
@@ -80,144 +45,22 @@ const acceptedRecord = (
   }],
 });
 
-type FakeEdge = { id: string; source: string; target: string; data?: Record<string, unknown> };
-
-/** 画布 + 双层宿主（生成运行时宿主 + 会话宿主共享节点/连线表），桥复刻 CanvasPage（同 ikjpm4）。 */
 function setup() {
-  const nodes = new Map<string, Node>([
-    ['audio-a', {
-      id: 'audio-a', type: 'mediaNode', position: { x: 0, y: 0 },
-      data: { mediaType: 'audio', assetId: '11', src: 'https://assets/a.mp3', fileName: '原音频A.mp3' },
-    }],
-    ['audio-b', {
-      id: 'audio-b', type: 'mediaNode', position: { x: 0, y: 400 },
-      data: { mediaType: 'audio', assetId: '22', src: 'https://assets/b.mp3', fileName: '原音频B.mp3' },
-    }],
-  ]);
-  let edges: FakeEdge[] = [];
-  let project: string | null = 'p1';
-  let epoch = {};
-  let inFlight = false;
-  let idSeq = 0;
-  let nodeSeq = 0;
-  const owners = new Map<string, string>();
-  const removed = new Set<string>();
-  const errors: string[] = [];
-  const warnings: string[] = [];
-  const recoveryRecords: GenerationRecoveryRecord[] = [];
-  const patch = (id: string, data: Record<string, unknown>) => {
-    const node = nodes.get(id);
-    if (node) nodes.set(id, { ...node, data: { ...node.data, ...data } });
-  };
-  /** 轮询终态经页面共享收敛器落卡（audioMixTerminalPatch 同款失败口径）。 */
-  let jobStatusScript: JobDetail = { job_id: '', status: 'processing', progress: 40, asset: null };
-  const genHost: GenerationRuntimeHost = {
-    getProjectId: () => project, getLoadEpoch: () => epoch,
-    getMediaNodes: () => [...nodes.values()] as unknown as RuntimeNodeView[],
-    findNode: (id) => (nodes.get(id) as unknown as RuntimeNodeView | undefined) ?? null,
-    patchNode: (id, data) => patch(id, data),
-    insertMediaNode: (node) => { nodes.set(node.id, node as unknown as Node); },
-    removeMediaNode: (id) => { nodes.delete(id); },
-    getEdges: () => edges.map((edge) => ({ source: edge.source, target: edge.target })),
-    addEdge: (source, target) => { edges = [...edges, { id: `e-${source}-${target}`, source, target }]; },
-    getActiveJob: (id) => owners.get(id), setActiveJob: (id, token) => { owners.set(id, token); },
-    clearActiveJob: (id) => { owners.delete(id); },
-    isLocallyRemoved: (id) => removed.has(id), markLocallyRemoved: (id) => { removed.add(id); },
-    registerPendingDelete: () => {}, isPendingDelete: () => false,
-    applyTerminal: (id, _jobId, detail) => {
-      patch(id, {
-        genStatus: detail.status,
-        ...(detail.status === 'failed' && detail.error?.msg != null ? { errorText: detail.error.msg } : {}),
-      });
-      return 'terminal';
-    },
-    settleCancelled: () => {},
-    saveCanvas: async () => true,
-    fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: 2, records: recoveryRecords, next_cursor: null }),
-    toast: () => {},
-    openRechargeForCreditsError: () => false, addAuthResume: () => {}, rememberAsset: () => {},
-  };
-  const fetchJobStatus = vi.fn(async (jobId: string | number): Promise<JobDetail> =>
-    ({ ...jobStatusScript, job_id: String(jobId) }));
-  const runtime = createGenerationRuntime(genHost, {
-    fetchJobStatus,
-    newId: () => `12345678-0000-4000-8000-${String(++idSeq).padStart(12, '0')}`,
-    setTimeout: () => 1, clearTimeout: () => {},
+  const ctx = setupAudioMixRecovery({
+    reuseUnacceptedCard: false,
+    rollbackOnFailure: false,
+    terminalPatch: (detail) => ({
+      genStatus: detail.status,
+      ...(detail.status === 'failed' && detail.error?.msg != null ? { errorText: detail.error.msg } : {}),
+    }),
   });
-  runtime.register(audioMixTask);
-
-  // 页面桥同款（index.tsx audioMix.createTask/handoff）：占位卡预建 + 来源线 +
-  // watcher 桥 + runtime.submit（同 ikjpm4 先例）。
-  const mixHost: AudioMixHost = {
-    getProjectId: () => project,
-    getNode: (id) => nodes.get(id),
-    isInFlight: () => inFlight, setInFlight: (value) => { inFlight = value; },
-    canApply: (projectId) => project === projectId,
-    linkAssets: async () => {},
-    createTask: async ({ payload, source }) => {
-      const nodeId = `audio-mix-t${++nodeSeq}`;
-      const position = findAudioMixPosition(source, [...nodes.values()]);
-      if (!nodes.has(nodeId)) nodes.set(nodeId, buildAudioMixPlaceholderNode(nodeId, payload.output_format, position));
-      for (const input of payload.inputs) {
-        if (input.node_id && input.node_id !== nodeId && nodes.has(input.node_id)
-          && !edges.some((edge) => edge.source === input.node_id && edge.target === nodeId)) {
-          edges = [...edges, { id: `e-${input.node_id}-${nodeId}`, source: input.node_id, target: nodeId }];
-        }
-      }
-      return await new Promise<{ job_id: string }>((resolve, reject) => {
-        const unwatch = watchMixSubmit(nodeId, {
-          accepted: (jobId) => { unwatch(); resolve({ job_id: jobId }); },
-          failed: (error) => { unwatch(); reject(error); },
-        });
-        const issued = runtime.submit(
-          audioMixTask,
-          {
-            payload,
-            target: {
-              targetNodeId: nodeId,
-              seedTarget: {
-                role: 'result-placeholder', x: position.x, y: position.y,
-                width: 480, height: 284, name: `混合结果.${payload.output_format}`,
-              },
-              seedSources: seedSourcesOfNode(nodeId, genHost),
-              expectedBindingRevision: runtime.bindingRevisionOf(nodeId),
-            },
-          },
-          {
-            onCreateFailure: () => true,
-            onStale: () => { unwatch(); reject(new Error('画布已重新加载，任务未提交，请重试')); },
-          },
-        );
-        if (!issued) { unwatch(); reject(new Error('音频混合任务未受理，请重试')); }
-      });
-    },
-    handoff: async (_input, _task, context) => { context.exitForSubmission(); },
-    warn: (message) => { warnings.push(message); },
-    error: (message) => { errors.push(message); },
-  };
-  const sessionRuntime = createToolSessionRuntime();
-  const mix = sessionRuntime.register(createAudioMixSession(() => mixHost));
-  const openWithInput = () => {
-    expect(mix.open('audio-a', DEPS)).toBe(true);
-    mix.edit((state) => ({ ...state, selectedInputs: [{ assetId: '22', nodeId: 'audio-b', name: '原音频B.mp3' }] }));
-  };
   return {
-    runtime, mix, nodes, errors, warnings, recoveryRecords, fetchJobStatus, openWithInput, mixCreated, bindingView,
-    edges: () => edges,
-    inFlight: () => inFlight,
-    /** 服务端任务状态脚本（轮询与恢复接续读到同一服务端事实）。 */
+    ...ctx,
     setJobStatus: (status: 'processing' | 'failed', progress = 40) => {
-      jobStatusScript = {
-        job_id: '', status, progress, asset: null,
+      ctx.fetchJobStatus.mockImplementation(async (jobId: string | number): Promise<JobDetail> => ({
+        job_id: String(jobId), status, progress, asset: null,
         ...(status === 'failed' ? { error: { code: 1046, msg: '供应商超时' } } : {}),
-      } as JobDetail;
-    },
-    /** 同项目文档重载：加载身份推进 + 运行时重置；画布内容由水合结果决定。 */
-    reload: () => { epoch = {}; runtime.reset(); },
-    /** 水合结果无此卡（占位未随保存落盘）：连同其连线一并缺席。 */
-    dropFromHydration: (nodeId: string) => {
-      nodes.delete(nodeId);
-      edges = edges.filter((edge) => edge.target !== nodeId && edge.source !== nodeId);
+      }));
     },
   };
 }
@@ -228,6 +71,59 @@ beforeEach(() => {
 });
 
 describe('接续可靠受理恢复任务（IKJPVK）', () => {
+  it('独立宿主的编辑、恢复记录、响应、等待与锁不互相污染', async () => {
+    const first = setup();
+    first.setJobStatus('failed');
+    const waiting = deferred<MixCreateResult>();
+    vi.mocked(createAudioMix).mockImplementationOnce(() => waiting.promise);
+    first.openWithInput();
+    expect(first.mix.send()).toBe(true);
+    await flush();
+    const firstRequest = first.createRequest(0);
+    const firstNodeId = firstRequest.binding.target_node_id;
+    first.nodes.set('audio-a', {
+      ...first.nodes.get('audio-a')!,
+      data: { ...first.nodes.get('audio-a')!.data, fileName: '第一实例的编辑.mp3' },
+    });
+    first.drawEdge('audio-a', 'audio-b');
+    first.recoveryRecords.push(acceptedRecord(
+      firstRequest.binding.submission_id, firstNodeId, firstRequest.binding.recovery_seed, '901', 'failed',
+    ));
+
+    const second = setup();
+    second.openWithInput();
+    await second.runtime.recover('p1');
+    expect(first.inFlight()).toBe(true);
+    expect(second.inFlight()).toBe(false);
+    expect(second.nodes.get('audio-a')?.data.fileName).toBe('原音频A.mp3');
+    expect(second.nodes.has(firstNodeId)).toBe(false);
+    expect(second.edges()).toEqual([]);
+    expect(second.runtime.statusOf(firstNodeId)).toBeNull();
+
+    waiting.resolve(first.mixCreated('901', first.bindingView(
+      firstRequest.binding.submission_id, firstNodeId, '901', 1,
+    )));
+    await flush();
+    expect(first.nodes.get(firstNodeId)?.data).toMatchObject({ genStatus: 'failed', errorText: '供应商超时' });
+    expect(first.inFlight()).toBe(false);
+    expect(second.mix.getSnapshot().state).not.toBeNull();
+    expect(second.errors).toEqual([]);
+
+    vi.mocked(createAudioMix).mockImplementationOnce(async (_project, body) => {
+      const binding = audioMixCreateSchema.parse(body).canvas_binding!;
+      return second.mixCreated('902', second.bindingView(binding.submission_id, binding.target_node_id, '902', 1));
+    });
+    expect(second.mix.send()).toBe(true);
+    await flush();
+    const secondNodeId = second.createRequest(0).binding.target_node_id;
+    expect(second.nodes.get(secondNodeId)?.data).toMatchObject({ jobId: '902', genStatus: 'generating', progress: 40 });
+    expect(second.runtime.statusOf(secondNodeId)).toMatchObject({ jobId: '902', phase: 'generating' });
+    expect(second.edges()).toHaveLength(2);
+    expect(second.inFlight()).toBe(false);
+    expect(first.nodes.get(firstNodeId)?.data.genStatus).toBe('failed');
+    expect(first.edges()).toHaveLength(3);
+  });
+
   it('反例一：缺卡的进行中任务在首次公开 recover 内补卡并自动接续轮询（不依赖再次加载或重复扫描）', async () => {
     const ctx = setup();
     const oldCreate = deferred<MixCreateResult>();
@@ -235,7 +131,7 @@ describe('接续可靠受理恢复任务（IKJPVK）', () => {
     ctx.openWithInput();
     expect(ctx.mix.send()).toBe(true); // 会话 A：实际请求发出（result-placeholder 无预保存）
     await flush();
-    const first = createRequest(0); // 真实 Schema 校验 + 幂等键核对
+    const first = ctx.createRequest(0); // 真实 Schema 校验 + 幂等键核对
     const nodeId = first.binding.target_node_id;
 
     ctx.reload(); // 同项目文档重载：受理回执未保存
@@ -267,7 +163,7 @@ describe('接续可靠受理恢复任务（IKJPVK）', () => {
     ctx.openWithInput();
     expect(ctx.mix.send()).toBe(true);
     await flush();
-    const first = createRequest(0);
+    const first = ctx.createRequest(0);
     const nodeId = first.binding.target_node_id;
 
     ctx.reload(); // 占位与来源线已随保存落盘：水合原样带回（无 jobId 的未受理占位）
@@ -311,7 +207,7 @@ describe('接续可靠受理恢复任务（IKJPVK）', () => {
     ctx.openWithInput();
     expect(ctx.mix.send()).toBe(true);
     await flush();
-    const first = createRequest(0);
+    const first = ctx.createRequest(0);
     const nodeId = first.binding.target_node_id;
 
     ctx.reload(); // 占位已落盘：水合带回（无 jobId）
@@ -356,7 +252,7 @@ describe('接续可靠受理恢复任务（IKJPVK）', () => {
     ctx.openWithInput();
     expect(ctx.mix.send()).toBe(true);
     await flush();
-    const first = createRequest(0);
+    const first = ctx.createRequest(0);
     const nodeId = first.binding.target_node_id;
     expect(ctx.nodes.get(nodeId)?.data).toMatchObject({ jobId: '901', genStatus: 'generating' });
     expect(ctx.edges().filter((edge) => edge.target === nodeId)).toHaveLength(2);
