@@ -774,6 +774,14 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         for (const edge of plan.edges ?? []) host.addEdge(edge.source, edge.target);
         const restoreProject = host.getProjectId();
         if (restoreProject) void host.saveCanvas(restoreProject).catch(() => {}); // 补卡落盘：恢复场景本因卡不在服务端
+        // IKJPVK：进行中任务补卡即接续——同一次加载内建立执行并启动轮询，不依赖
+        // 用户再刷新或第二次扫描（普通保存/重渲染不保证触发第二次恢复）。
+        const jobStatus = record.job?.status;
+        if (def && (jobStatus === 'queued' || jobStatus === 'processing' || jobStatus === 'checking')) {
+          resumeFromHydration(record.target_node_id, record.job_id, undefined, {
+            def, submissionId: record.submission_id,
+          });
+        }
         break;
       }
       case 'apply-outputs': {
@@ -783,7 +791,11 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         break;
       }
       case 'resume-polling': {
-        resumeFromHydration(record.target_node_id, record.job_id);
+        // IKJPVK：def 与提交身份按可靠记录直供——卡上缺 jobId 的已保存占位（identify
+        // 口径认不出）同样接续，并以记录回填受理身份。
+        resumeFromHydration(record.target_node_id, record.job_id, undefined, {
+          def, submissionId: record.submission_id,
+        });
         break;
       }
       case 'none':
@@ -819,11 +831,20 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
 
   /** 水合即时续轮询（扫描前乐观恢复；恢复扫描按 active 判重不双链）。
    *  nodeData 由水合调用方直供——水合 effect 执行期 mediaNodesRef 尚未与 setState 同步，
-   *  不能在此刻经宿主反查节点。 */
-  const resumeFromHydration = (nodeId: string, jobId: string, nodeData?: Record<string, unknown>) => {
-    const def = nodeData
+   *  不能在此刻经宿主反查节点。
+   *  IKJPVK：恢复扫描经 known 直供可靠记录的 def（按 task_type 分派，不依赖卡上
+   *  受理身份——identify 口径要求 jobId 在场，会漏掉已保存但缺 jobId 的占位）与
+   *  提交身份；卡上缺 jobId 的未确认占位以可靠记录回填受理身份（不动名称/位置/尺寸，
+   *  已有同值幂等）。 */
+  const resumeFromHydration = (
+    nodeId: string,
+    jobId: string,
+    nodeData?: Record<string, unknown>,
+    known?: { def?: GenerationTaskDefinition; submissionId?: string },
+  ) => {
+    const def = known?.def ?? (nodeData
       ? defs.find((candidate) => candidate.identify(nodeId, nodeData))
-      : defForNode(nodeId)?.def;
+      : defForNode(nodeId)?.def);
     if (!def) return;
     const entry = active.get(nodeId);
     if (entry && entry.jobId === jobId) return;
@@ -831,8 +852,12 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     const execution: ActiveExecution = {
       round: nextRound(), projectId: host.getProjectId() ?? '', loadEpoch: host.getLoadEpoch(), nodeId,
       def, phase: 'generating', jobId,
-      submissionId: readMarker(nodeData)?.submissionId ?? readMarker(host.findNode(nodeId)?.data)?.submissionId,
+      submissionId: readMarker(nodeData)?.submissionId
+        ?? readMarker(host.findNode(nodeId)?.data)?.submissionId
+        ?? known?.submissionId,
     };
+    const node = host.findNode(nodeId);
+    if (node != null && node.data?.jobId == null) host.patchNode(nodeId, { jobId }); // 受理身份回填
     host.setActiveJob(nodeId, execution.round);
     active.set(nodeId, execution);
     poll(execution, jobId);

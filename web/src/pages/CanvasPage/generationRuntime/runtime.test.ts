@@ -1460,18 +1460,20 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     expect([...fake.nodes.keys()].sort()).toEqual(['node-a', 'node-b']);
     expect(fake.data('node-a').jobId).toBe('601');
     expect(fake.data('node-b').jobId).toBe('602');
-    // 补卡轮不双开轮询（restore-target 只补卡落盘）；两家族创建请求不被触发（恢复不重发）
-    expect(runtime.statusOf('node-a')).toBeNull();
-    expect(clock.pendingCount()).toBe(0);
-    expect(familyA.calls.create).toHaveLength(0);
-    expect(familyB.calls.create).toHaveLength(0);
-    // 第二轮扫描对账：卡已在（水合同款）→ 按家族身份各续一条轮询链
-    await runtime.recover('p1');
-    await flushMicrotasks();
+    // IKJPVK：补卡即接续——首轮恢复各建立一条轮询链（无需第二次扫描）；
+    // 两家族创建请求不被触发（恢复不重发）
     expect(runtime.statusOf('node-a')?.jobId).toBe('601');
     expect(runtime.statusOf('node-b')?.jobId).toBe('602');
     expect(fake.host.getActiveJob('node-a')).toBeTruthy();
     expect(fake.host.getActiveJob('node-b')).toBeTruthy();
+    expect(clock.pendingCount()).toBe(2);
+    expect(familyA.calls.create).toHaveLength(0);
+    expect(familyB.calls.create).toHaveLength(0);
+    // 第二轮扫描对账：在途判重不双链
+    await runtime.recover('p1');
+    await flushMicrotasks();
+    expect(runtime.statusOf('node-a')?.jobId).toBe('601');
+    expect(runtime.statusOf('node-b')?.jobId).toBe('602');
     expect(clock.pendingCount()).toBe(2);
     // 第三轮扫描按在途判重：不双链
     await runtime.recover('p1');

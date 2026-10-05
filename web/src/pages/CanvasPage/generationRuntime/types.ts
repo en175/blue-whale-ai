@@ -271,8 +271,13 @@ export interface GenerationRuntime {
   /** 水合后恢复扫描（分页对账 v1；重复扫描不双轮询/不重复建卡）。 */
   recover(projectId: string): Promise<void>;
   /** 水合即时续轮询（扫描前乐观恢复，避免扫描延迟期间卡停摆）。
-   *  nodeData 由水合调用方直供（水合 effect 期宿主 ref 尚未同步，不能反查节点）。 */
-  resumeFromHydration(nodeId: string, jobId: string, nodeData?: Record<string, unknown>): void;
+   *  nodeData 由水合调用方直供（水合 effect 期宿主 ref 尚未同步，不能反查节点）。
+   *  known 由恢复扫描直供（IKJPVK）：可靠记录的 def（按 task_type 分派，不依赖卡上
+   *  受理身份）与提交身份；卡上缺 jobId 的未确认占位在此回填受理身份。 */
+  resumeFromHydration(
+    nodeId: string, jobId: string, nodeData?: Record<string, unknown>,
+    known?: { def?: GenerationTaskDefinition; submissionId?: string },
+  ): void;
   /** 按卡只读在途状态。 */
   statusOf(nodeId: string): InFlightTaskState | null;
   /** 节点当前已知归属版本（提交 target facts 的 expected_binding_revision 来源；未知 0）。 */

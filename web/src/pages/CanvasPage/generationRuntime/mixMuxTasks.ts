@@ -152,9 +152,17 @@ function planMixMuxRecovery(
     }
     return { kind: 'resume-polling' };
   }
-  if (jobStatus === 'failed' && !targetExists) {
-    const node = buildRestore(record);
-    if (node) return { kind: 'restore-target', node };
+  if (jobStatus === 'failed') {
+    if (!targetExists) {
+      const node = buildRestore(record);
+      if (node) return { kind: 'restore-target', node };
+    }
+    // 在场卡已呈现失败 = 终态已收敛（历史失败卡），无画布动作；未确认占位（生成中/
+    // 缺 jobId）由运行时以可靠记录接续，首次轮询拉权威终态经 converge/applyTerminal
+    // 收敛为可重试失败卡（IKJPVK）——不读取新编辑会话、不补猜原输入，重试按服务端
+    // 冻结输入复用 jobId。
+    if (host.findNode(record.target_node_id)?.data?.genStatus === 'failed') return { kind: 'none' };
+    return { kind: 'resume-polling' };
   }
   return { kind: 'none' };
 }

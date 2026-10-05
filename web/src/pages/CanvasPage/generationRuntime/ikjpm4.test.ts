@@ -286,15 +286,16 @@ describe('保护音频混合恢复卡与连线（IKJPM4）', () => {
     ctx.openWithInput(); // 会话 B：旧会话关闭重开（推进会话纪元）
     expect(ctx.mix.send()).toBe(false); // 真实重开 send 被在途锁阻止（A 的锁未释放）
 
-    // 公开恢复接续原任务：进行中缺卡补占位（恢复卡带受理身份），再次扫描在卡续轮询
+    // 公开恢复接续原任务：进行中缺卡补占位（恢复卡带受理身份）；IKJPVK 起补卡即
+    // 接续——首次恢复建立执行并启动轮询，无需第二次扫描
     ctx.recoveryRecords.push(acceptedProcessingRecord(first.binding.submission_id, nodeId, first.binding.recovery_seed));
     await ctx.runtime.recover('p1');
     expect(ctx.nodes.get(nodeId)?.data).toMatchObject({ jobId: '901', genStatus: 'generating', fileName: '混合结果.mp3' });
-    expect(ctx.runtime.statusOf(nodeId)).toBeNull(); // 恢复补卡本身不登记执行
-    await ctx.runtime.recover('p1'); // 在卡续轮询（卡已有受理身份）
+    expect(ctx.runtime.statusOf(nodeId)).toMatchObject({ phase: 'generating', jobId: '901' });
+    await ctx.runtime.recover('p1'); // 重复 recover：在途判重——不重复卡、不双轮询
     expect(ctx.runtime.statusOf(nodeId)).toMatchObject({ phase: 'generating', jobId: '901' });
     expect(ctx.fetchJobStatus.mock.calls.filter(([jobId]) => String(jobId) === '901')).toHaveLength(1);
-    await ctx.runtime.recover('p1'); // 重复 recover：不重复卡、不双轮询
+    await ctx.runtime.recover('p1'); // 再次重复 recover：仍不重复卡、不双轮询
     expect([...ctx.nodes.keys()].filter(isAudioMixNodeId)).toHaveLength(1);
     expect(ctx.fetchJobStatus.mock.calls.filter(([jobId]) => String(jobId) === '901')).toHaveLength(1);
 
@@ -348,14 +349,17 @@ describe('保护音频混合恢复卡与连线（IKJPM4）', () => {
     ctxB.mix.close();
     expect(ctxB.mix.open('audio-a', DEPS)).toBe(true);
     ctxB.recoveryRecords.push(acceptedProcessingRecord(firstB.binding.submission_id, nodeIdB, firstB.binding.recovery_seed));
-    await ctxB.runtime.recover('p1'); // 在卡续轮询规划：卡无受理身份（identify 口径）不登记执行——现状口径
-    expect(ctxB.runtime.statusOf(nodeIdB)).toBeNull();
+    await ctxB.runtime.recover('p1'); // IKJPVK：卡无受理身份（identify 口径认不出）也由
+    // 可靠记录直供 def 接续——恢复可信任务身份（jobId 回填）并续轮询，无需卡先有 jobId
+    expect(ctxB.runtime.statusOf(nodeIdB)).toMatchObject({ phase: 'generating', jobId: '901' });
+    expect(ctxB.nodes.get(nodeIdB)?.data.jobId).toBe('901'); // 受理身份以可靠记录恢复
     const hydrated = ctxB.nodes.get(nodeIdB)!;
     ctxB.nodes.set(nodeIdB, { ...hydrated, data: { ...hydrated.data, fileName: '待确认混音.mp3' } }); // 新加载后的用户改名
     oldCreateB.resolve(mixCreated('901', bindingView(firstB.binding.submission_id, nodeIdB, '901', 1, true)));
     await flush();
     expect(ctxB.nodes.get(nodeIdB)?.data).toMatchObject({ fileName: '待确认混音.mp3', genStatus: 'generating' }); // 新加载卡不被旧收尾删除
-    expect(ctxB.nodes.get(nodeIdB)?.data.jobId).toBeUndefined(); // 旧受理身份不回填给失效意图
+    expect(ctxB.nodes.get(nodeIdB)?.data.jobId).toBe('901'); // 身份是恢复记录回填的，非旧回执路径
+    expect(ctxB.runtime.statusOf(nodeIdB)).toMatchObject({ phase: 'generating', jobId: '901' }); // 接续执行不被旧收尾释放
     expect(ctxB.edges().filter((edge) => edge.target === nodeIdB)).toHaveLength(2); // 来源连线保留
     expect(ctxB.inFlight()).toBe(false);
     expect(ctxB.errors).toEqual([]);
