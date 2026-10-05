@@ -22,6 +22,7 @@ import { isAudioTrimNodeId } from '../audioTrim';
 import { isMediaExtractNodeId } from '../mediaExtract';
 import { buildFrameInterpolationInput, restoreFrameInterpolationRetryFps } from '../frameInterpolation';
 import { buildVideoEnhanceInput, restoreVideoEnhanceResolution } from '../videoEnhance';
+import { isRecoveryTargetSettled } from './types';
 import type {
   GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
 } from './types';
@@ -222,10 +223,7 @@ export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
       if (status === 'failed') {
         if (!record.is_current) return { kind: 'none' };
         if (target != null) {
-          const marker = target.data?.generationRecovery as Record<string, unknown> | undefined;
-          if (marker?.protocolVersion === 1 && marker.submissionId === record.submission_id
-            && ((typeof marker.outputKey === 'string' && marker.outputKey !== TARGET_OUTPUT_KEY)
-              || (target.data?.genStatus === 'failed' && String(target.data?.jobId) === record.job_id))) return { kind: 'none' };
+          if (isRecoveryTargetSettled(target, record)) return { kind: 'none' };
           // 可靠当前记录已通过运行时归属守卫；不覆盖现有家族冻结输入与卡片编辑。
           host.patchNode(record.target_node_id, {
             jobId: record.job_id,

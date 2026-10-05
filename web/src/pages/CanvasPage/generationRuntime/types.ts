@@ -30,6 +30,14 @@ export function isJobInFlight(status: string | null | undefined): boolean {
   return status === 'queued' || status === 'processing' || status === 'checking';
 }
 
+/** 当前提交已收敛的成品或失败目标，重复恢复保留当前卡。 */
+export function isRecoveryTargetSettled(target: RuntimeNodeView, record: GenerationRecoveryRecord): boolean {
+  const marker = target.data?.generationRecovery as Record<string, unknown> | undefined;
+  return marker?.protocolVersion === 1 && marker.submissionId === record.submission_id
+    && ((typeof marker.outputKey === 'string' && marker.outputKey !== '$target')
+      || (target.data?.genStatus === 'failed' && String(target.data?.jobId) === record.job_id));
+}
+
 /** 受保护节点标记（B.4）：data.generationRecovery。 */
 export interface GenerationRecoveryMarker {
   protocolVersion: 1;

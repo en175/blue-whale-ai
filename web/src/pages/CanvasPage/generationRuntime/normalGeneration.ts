@@ -12,7 +12,7 @@ import { isMediaExtractNodeId } from '../mediaExtract';
 import { isVocalSplitNodeId } from '../vocalSplit';
 import { audioVideoMuxIdentityOf } from '../audioVideoMux';
 import type { Node } from '@xyflow/react';
-import { isJobInFlight } from './types';
+import { isJobInFlight, isRecoveryTargetSettled } from './types';
 import type {
   CreateJobOutcome, GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
 } from './types';
@@ -125,10 +125,7 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
     }
     if (jobStatus === 'failed' && record.is_current) {
       if (target == null) return { kind: 'restore-target', node: buildRecoveryTargetNode(record) };
-      const marker = target.data?.generationRecovery as Record<string, unknown> | undefined;
-      if (marker?.protocolVersion === 1 && marker.submissionId === record.submission_id
-        && ((typeof marker.outputKey === 'string' && marker.outputKey !== TARGET_OUTPUT_KEY)
-          || (target.data?.genStatus === 'failed' && String(target.data?.jobId) === record.job_id))) return { kind: 'none' };
+      if (isRecoveryTargetSettled(target, record)) return { kind: 'none' };
       // 可靠当前记录已通过运行时归属守卫；已有未确认占位只回填身份，再沿权威终态收敛。
       host.patchNode(record.target_node_id, {
         jobId: record.job_id,

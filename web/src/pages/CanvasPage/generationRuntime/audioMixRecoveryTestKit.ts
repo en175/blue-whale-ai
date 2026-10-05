@@ -35,8 +35,7 @@ export const mixCreated = (jobId: string, view: ReturnType<typeof bindingView>):
   ({ job_id: jobId, status: 'queued', canvas_binding: view });
 
 /** 受理回执前的真实请求读取：真实 Schema 校验 + 幂等键 = submission_id 口径核对。 */
-const readCreateRequest = (index: number) => {
-  const [projectId, body, options] = vi.mocked(createAudioMix).mock.calls[index]!;
+const readCreateRequest = ([projectId, body, options]: Parameters<typeof createAudioMix>) => {
   const parsed = audioMixCreateSchema.parse(body);
   const binding = parsed.canvas_binding!;
   expect(options?.idempotencyKey).toBe(binding.submission_id);
@@ -52,7 +51,8 @@ export function setupAudioMixRecovery(options: {
   rollbackOnFailure: boolean;
   terminalPatch: (detail: JobDetail) => Record<string, unknown> | null;
 }) {
-  const requestOffset = vi.mocked(createAudioMix).mock.calls.length;
+  const nodeNamespace = crypto.randomUUID();
+  const requestNodeIds = new Set<string>();
   const nodes = new Map<string, Node>([
     ['audio-a', {
       id: 'audio-a', type: 'mediaNode', position: { x: 0, y: 0 },
@@ -67,7 +67,6 @@ export function setupAudioMixRecovery(options: {
   let project: string | null = 'p1';
   let epoch = {};
   let inFlight = false;
-  let idSeq = 0;
   let nodeSeq = 0;
   /** audioMixSubmitCardRef：页面 ref，同项目文档重载（存活页面）后仍存活。 */
   let submitCard: { projectId: string; payload: string; nodeId: string; accepted: boolean } | null = null;
@@ -113,7 +112,7 @@ export function setupAudioMixRecovery(options: {
   let timerSeq = 0;
   const runtime = createGenerationRuntime(genHost, {
     fetchJobStatus,
-    newId: () => `12345678-0000-4000-8000-${String(++idSeq).padStart(12, '0')}`,
+    newId: () => crypto.randomUUID(),
     setTimeout: (callback) => { const id = ++timerSeq; timers.set(id, callback); return id; },
     clearTimeout: (id) => { if (typeof id === 'number') timers.delete(id); },
   });
@@ -134,7 +133,8 @@ export function setupAudioMixRecovery(options: {
       const nodeId = options.reuseUnacceptedCard && previousCard && previousCard.projectId === projectId
         && previousCard.payload === payloadText && !previousCard.accepted
         ? previousCard.nodeId
-        : `audio-mix-t${++nodeSeq}`;
+        : `audio-mix-${nodeNamespace}-${++nodeSeq}`;
+      requestNodeIds.add(nodeId);
       submitCard = { projectId, payload: payloadText, nodeId, accepted: false };
       const position = findAudioMixPosition(source, [...nodes.values()]);
       if (!nodes.has(nodeId)) nodes.set(nodeId, buildAudioMixPlaceholderNode(nodeId, payload.output_format, position));
@@ -206,7 +206,8 @@ export function setupAudioMixRecovery(options: {
     runtime, mix, nodes, errors, warnings, toasts, recoveryRecords, fetchJobStatus, openWithInput, mixCreated, bindingView,
     host: genHost,
     advancePolling: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((callback) => callback()); },
-    createRequest: (index: number) => readCreateRequest(requestOffset + index),
+    createRequest: (index: number) => readCreateRequest(vi.mocked(createAudioMix).mock.calls
+      .filter(([, body]) => requestNodeIds.has(body.canvas_binding?.target_node_id ?? ''))[index]!),
     edges: () => edges,
     inFlight: () => inFlight,
     /** 用户拖线建的可靠来源边（无提交标记）。 */

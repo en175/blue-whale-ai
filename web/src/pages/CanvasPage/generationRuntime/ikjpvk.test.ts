@@ -71,6 +71,56 @@ beforeEach(() => {
 });
 
 describe('接续可靠受理恢复任务（IKJPVK）', () => {
+  it('同生存期两宿主交错发送时，实际请求、受理等待与锁各自独立', async () => {
+    const first = setup();
+    const second = setup();
+    const firstReceipt = deferred<MixCreateResult>();
+    const secondReceipt = deferred<MixCreateResult>();
+    vi.mocked(createAudioMix).mockImplementationOnce(() => secondReceipt.promise)
+      .mockImplementationOnce(() => firstReceipt.promise);
+    first.openWithInput();
+    second.openWithInput();
+    second.mix.edit((state) => ({ ...state, format: 'wav' }));
+    expect(second.mix.send()).toBe(true);
+    expect(first.mix.send()).toBe(true);
+    await flush();
+    const firstRequest = first.createRequest(0);
+    const secondRequest = second.createRequest(0);
+    expect(firstRequest.payload.output_format).toBe('mp3');
+    expect(secondRequest.payload.output_format).toBe('wav');
+    expect(firstRequest.binding.target_node_id).not.toBe(secondRequest.binding.target_node_id);
+    expect(firstRequest.binding.submission_id).not.toBe(secondRequest.binding.submission_id);
+    expect(first.inFlight()).toBe(true);
+    expect(second.inFlight()).toBe(true);
+
+    firstReceipt.resolve(first.mixCreated('501', first.bindingView(
+      firstRequest.binding.submission_id, firstRequest.binding.target_node_id, '501', 1,
+    )));
+    await flush();
+    expect(first.nodes.get(firstRequest.binding.target_node_id)?.data.jobId).toBe('501');
+    expect(first.runtime.statusOf(firstRequest.binding.target_node_id)).toMatchObject({ phase: 'generating', jobId: '501' });
+    expect(first.mix.getSnapshot().state).toBeNull();
+    expect(first.inFlight()).toBe(false);
+    expect(second.inFlight()).toBe(true);
+    expect(second.mix.getSnapshot().state).not.toBeNull();
+    expect(second.nodes.get(secondRequest.binding.target_node_id)?.data.jobId).toBeUndefined();
+
+    secondReceipt.resolve(second.mixCreated('502', second.bindingView(
+      secondRequest.binding.submission_id, secondRequest.binding.target_node_id, '502', 1,
+    )));
+    await flush();
+    expect(second.nodes.get(secondRequest.binding.target_node_id)?.data.jobId).toBe('502');
+    expect(second.runtime.statusOf(secondRequest.binding.target_node_id)).toMatchObject({ phase: 'generating', jobId: '502' });
+    expect(second.mix.getSnapshot().state).toBeNull();
+    expect(first.inFlight()).toBe(false);
+    expect(second.inFlight()).toBe(false);
+    expect(first.nodes.has(secondRequest.binding.target_node_id)).toBe(false);
+    expect(second.nodes.has(firstRequest.binding.target_node_id)).toBe(false);
+    expect(first.nodes.get(firstRequest.binding.target_node_id)?.data.jobId).toBe('501');
+    expect(first.createRequest(0).payload.output_format).toBe('mp3');
+    expect(second.createRequest(0).payload.output_format).toBe('wav');
+  });
+
   it('独立宿主的编辑、恢复记录、响应、等待与锁不互相污染', async () => {
     const first = setup();
     first.setJobStatus('failed');
