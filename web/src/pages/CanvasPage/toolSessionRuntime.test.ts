@@ -244,6 +244,29 @@ describe('工具会话运行时公开接口', () => {
     expect(panel.getSnapshot().submitting).toBe(false);
   });
 
+  /* IKJPM7 旁路受理（失败卡重试）的会话归属捕获：受理后该工具会话被显式关闭重开
+     （无论新会话是否发送）或切换，探针即失效——旧响应不向后来会话提示；
+     无后来会话时保持有效（当前有效请求的失败提示保留）。 */
+  it('captureSessionOwnership：无后来会话保持有效；受理后打开面板或显式关闭重开即失效', () => {
+    const runtime = createToolSessionRuntime();
+    const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve' });
+
+    // 面板未打开时旁路受理（重试可发生于面板未开）：探针捕获受理时的会话身份
+    const ownsFromClosed = runtime.captureSessionOwnership('videoEnhance');
+    expect(ownsFromClosed()).toBe(true);
+    // 受理后同卡打开面板 = 后来会话：探针失效（旧错误不向新会话提示）
+    panel.open('v1', sessionDeps());
+    expect(ownsFromClosed()).toBe(false);
+
+    // 面板打开时旁路受理：无后来会话保持有效
+    const owns = runtime.captureSessionOwnership('videoEnhance');
+    expect(owns()).toBe(true);
+    // 显式关闭重开（未发送）即新会话：探针失效
+    panel.close();
+    panel.open('v1', sessionDeps());
+    expect(owns()).toBe(false);
+  });
+
 });
 
 it.each(['close', 'escape', 'selection', 'pane', 'generation'] as const)('公开接口 %s 退出丢弃编辑态，空选中保留会话', (route) => {

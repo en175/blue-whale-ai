@@ -17,7 +17,23 @@ import { ReactFlowProvider, type Node } from '@xyflow/react';
 import CanvasPage from './index';
 import MediaNode from './components/MediaNode';
 import { VIDEO_ENHANCE_EDGE_ORIGIN } from './videoEnhance';
+import { toast } from 'sonner';
 import type { GenerationModel } from '@/api/generation';
+
+/* sonner 替身：IKJPM7 真实链用例的 HTTP 层默认 toast 观测点（IKI8L4 先例）。
+   页面本地 showToast 为独立 state 渲染，不受影响。 */
+vi.mock('sonner', () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+    message: vi.fn(),
+    loading: vi.fn(),
+    dismiss: vi.fn(),
+  },
+  Toaster: () => null,
+}));
 
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
@@ -114,7 +130,13 @@ vi.mock('@/api/canvas', () => ({
     JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target }))),
   ),
 }));
-vi.mock('@/api/jobs', () => ({
+/* importOriginal 部分真实（IKI8L4 先例）：列出键走 mock（既有用例接缝不变），
+   其余键保持真实实现——IKJPM7 真实链用例把 createVideoEnhancement 动态转发回真实
+   实现（真实 http.ts 默认 toast 逻辑保留），受控响应仅在 fetch 边界注入。 */
+vi.mock('@/api/jobs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/jobs')>()),
+  // 水合/轮询等旁路查询固定空结果，避免 importOriginal 后真实外呼（harness 同口径）
+  fetchJobs: vi.fn(async (): Promise<{ records: never[]; total: number; size: number; current: number }> => ({ records: [], total: 0, size: 20, current: 1 })),
   createGenerationJob: apiMocks.createGenerationJob,
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
@@ -518,7 +540,7 @@ describe('IKH3VH 轮询终态回填', () => {
       source_asset_id: '5',
       target_node_id: draftId,
       resolution: '2k',
-    });
+    }, { silent: true });
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
     const retried = mediaNode(draftId).data as Record<string, unknown>;
     expect(retried.jobId).toBe('j2');
@@ -675,11 +697,11 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await mountCard('h1');
     expect(retryButton()).toBeTruthy();
     await clickCardRetry();
-    // 重试已受理：lastParams（4k）原样重发创建接口，不经通用 retry
+    // 重试已受理：lastParams（4k）原样重发创建接口（IKJPM7 静默传输，反馈走页面回调），不经通用 retry
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: 'h1', resolution: '4k',
-    });
+    }, { silent: true });
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
 
     // 重试登记在途 → 面板立即提交中只读（发送钮与分辨率参数均按既有只读规则禁用）；
@@ -1053,5 +1075,117 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: 'h1', resolution: '2k',
     }, { silent: true });
+  });
+
+  /* IKJPM7 旧重试失败提示按有效会话归属：同卡显式关闭重开（即使未再发送）即新会话，
+     旧重试 A 的失败（网络或 HTTP 422）不向其提示——页面与 HTTP 层默认 toast 都不弹，
+     也不先于会话归属判断触发；当前有效请求失败保留原有提示与 401 静默。接缝对齐
+     toolSessionErrorToastOwnership.test.tsx（IKI8L4）：createVideoEnhancement 转发真实
+     实现（真实 http.ts 默认 toast 保留），受控响应仅在 fetch 边界注入。 */
+  describe('IKJPM7 旧重试失败按有效会话归属（真实创建客户端与 HTTP 链）', () => {
+    const fetchMock = vi.fn();
+    const jsonEnvelope = (code: number, msg: string, status: number, data: unknown = null) =>
+      new Response(JSON.stringify({ code, msg, data }), { status, headers: { 'Content-Type': 'application/json' } });
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+    beforeEach(async () => {
+      const actual = await vi.importActual<typeof import('@/api/jobs')>('@/api/jobs');
+      apiMocks.createVideoEnhancement.mockImplementation(actual.createVideoEnhancement);
+      fetchMock.mockReset();
+      // 默认兜底：页面意外真实 fetch 一律成功空信封，不外呼不干扰受控用例
+      fetchMock.mockImplementation(async () => jsonEnvelope(200, 'ok', 200));
+      vi.stubGlobal('fetch', fetchMock);
+    });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('A 重试后显式关闭重开（未再发送）：A 网络失败全链路无旧错误，新面板与参数保留', async () => {
+      seedDoc('failed');
+      let rejectA!: (error: unknown) => void;
+      fetchMock.mockImplementationOnce(() => new Promise<Response>((_, reject) => { rejectA = reject; }));
+      await renderPage();
+      await openHdPanel();
+      await mountCard('h1');
+      await clickCardRetry();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // 显式关闭重开 = 新会话（未发送）：旧 A 的失败不属于它
+      await act(async () => { panelClose()!.click(); });
+      await openHdPanel();
+      await act(async () => { rejectA(new TypeError('Failed to fetch')); });
+      await settle();
+
+      // 旧错误全链路静默：HTTP 层默认 toast（sonner）与页面 toast 都不出现
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(document.body.textContent).not.toContain('网络请求失败');
+      expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
+      // 新面板保留且可用、原参数（lastParams 4k）保留，未被旧失败关闭或重置
+      expect(panelSend()).toBeTruthy();
+      expect(panelSend()!.disabled).toBe(false);
+      expect(panelResolution('4k')!.className).toContain('resolutionBtnActive');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('新会话 B 等待中旧 A 的 HTTP 422：不触发 HTTP 默认提示，也不解 B 的锁，参数保留', async () => {
+      seedDoc('failed');
+      let resolveA!: (value: Response) => void;
+      fetchMock
+        .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveA = resolve; }))
+        .mockImplementationOnce(() => new Promise<Response>(() => {}));   // B 永挂
+      await renderPage();
+      await openHdPanel();
+      await mountCard('h1');
+      await clickCardRetry();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => { panelClose()!.click(); });
+      await openHdPanel();
+      await clickPanelResolution('2k');
+      await act(async () => { panelSend()!.click(); });   // B 受理（fetch#2 挂起）
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(panelSend()!.disabled).toBe(true);           // B 在途只读
+
+      // 旧 A 以 HTTP 422 迟到：默认 toast 不得先于会话归属判断触发
+      await act(async () => { resolveA(jsonEnvelope(422, '分辨率档不可用', 422)); });
+      await settle();
+
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(document.body.textContent).not.toContain('分辨率档不可用');
+      expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
+      // B 的锁不被旧收尾解除：仍只读、再点不产生 C
+      expect(panelSend()!.disabled).toBe(true);
+      await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
+    });
+
+    it('对照：当前有效重试 HTTP 422 保留原有提示（sonner 一条 + 页面文案），无重复', async () => {
+      seedDoc('failed');
+      fetchMock.mockImplementationOnce(async () => jsonEnvelope(422, '分辨率档不可用', 422));
+      await renderPage();
+      await openHdPanel();
+      await mountCard('h1');
+      await clickCardRetry();
+      await settle();
+
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledWith('分辨率档不可用');
+      expect(document.body.textContent).toContain('分辨率档不可用');
+      // 创建失败限制解除（IKJP8Q 既有），面板恢复可操作
+      expect(panelSend()!.disabled).toBe(false);
+    });
+
+    it('对照：当前有效重试 401 保持原有静默，不新增提示', async () => {
+      seedDoc('failed');
+      fetchMock.mockImplementationOnce(async () => jsonEnvelope(401, '请重新登录', 401));
+      await renderPage();
+      await openHdPanel();
+      await mountCard('h1');
+      await clickCardRetry();
+      await settle();
+
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(document.body.textContent).not.toContain('请重新登录');
+      expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
+    });
   });
 });

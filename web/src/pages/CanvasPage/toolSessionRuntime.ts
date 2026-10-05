@@ -112,6 +112,13 @@ export function createToolSessionRuntime() {
     notifyInFlight(kind: string, targetId: string) {
       tools.get(kind)?.lockForInFlight(targetId);
     },
+    /** IKJPM7 旁路受理（失败卡重试）的会话归属捕获：返回探针，受理时的会话身份此后
+     *  被显式关闭重开（无论新会话是否发送）或切换推进纪元即失效——旧响应据此不向
+     *  后来会话提示；无后来会话时保持有效（当前有效请求的失败提示保留）。 */
+    captureSessionOwnership(kind: string): () => boolean {
+      const captured = epoch.capture(kind);
+      return () => epoch.isCurrent(kind, captured);
+    },
     register<State, Entry, Input, Request = void>(definition: ToolSessionDefinition<State, Entry, Input, Request>): ToolSessionHandle<State, Entry, Request> {
       let snapshot: ToolSessionSnapshot<State> = { state: null, submitting: false, ...(definition.panel ? { visible: false, hidden: false } : {}) };
       const close = (notify = true) => {

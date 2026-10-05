@@ -7154,13 +7154,20 @@ export default function CanvasPage() {
       // 首个异步等待前完成，无交错窗口
       if (isVideoEnhanceCardInFlight(nodeId)) return;
       const input = captureVideoEnhance(toolHostsRef.current.panels!, nodeId, restoreVideoEnhanceResolution(videoEnhanceIdentity.lastParams));
-      if (input) void startVideoEnhanceJob(input).catch((error: unknown) => {
+      // IKJPM7 会话归属捕获：受理时同卡面板的会话身份——显式关闭重开（无论新会话
+      // 是否发送）即新会话，旧响应不向其提示旧错误
+      const ownsSession = toolRuntime.captureSessionOwnership('videoEnhance');
+      if (input) void startVideoEnhanceJob(input, true).catch((error: unknown) => {
         if (isSilentAuthError(error)) return;
-        // 旧重试返回时同卡已有新提交在途或卡已被新请求接管：不提示旧错误（会话
-        // 归属仍由面板侧纪元守卫，此处只挡重试路径的兜底提示）
+        // IKJPM7 静默传输（决策 7，口径同面板发送）：HTTP 层默认 toast 不再先于会话
+        // 归属判断触发；有效会话的失败由本回调补回两路反馈（HTTP 路 + 页面路，与
+        // 面板 onError 同构，提示次数与原默认提示一致）
+        if (!ownsSession()) return;
+        // 旧重试返回时同卡已有新提交在途：不提示旧错误（会话归属仍由上面纪元探针守卫）
         if (isVideoEnhanceCardInFlight(nodeId)) return;
         const nodeNow = mediaNodesRef.current.find((item) => item.id === nodeId);
         if ((nodeNow?.data as Record<string, unknown> | undefined)?.genStatus !== 'failed') return;
+        if (isApiError(error)) globalToast.error(error.message);
         showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
       });
       return;
@@ -8232,7 +8239,7 @@ export default function CanvasPage() {
   recoverFrameInterpolationRef.current = recoverFrameInterpolation;
 
   /** HD 任务受理后继续原卡生成、lastParams 落盘与轮询，失败保持原卡。
-   *  面板提交用静默请求交运行时反馈；失败卡重试保持默认 HTTP 提示。 */
+   *  两入口均静默传输（IKJPM7）：反馈由持有会话身份的调用方回调统一提示。 */
   const startVideoEnhanceJob = async (submission: VideoEnhanceSubmission, silent = false): Promise<void> => {
     const { projectId, nodeId, payload: input, identity } = submission;
     const resolution = input.resolution;
