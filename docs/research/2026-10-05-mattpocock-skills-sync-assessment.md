@@ -4,7 +4,7 @@
 
 ## 上游最新更新了什么
 
-核验日期为 2026-10-05，日期与时间均按北京时间。最新正式版本是 **v1.3.1**，对应提交 `24fe0ef7737efae15c87225755e9f6f5965e4888`，于 10 月 4 日 20:48 合入。核验时 `main` 已推进至 `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d`，提交时间为 10 月 5 日 19:17。本次将正式补丁与随后主分支的文档、实验内容分开评估。
+核验日期为 2026-10-05，正文日期与时间按北京时间；历史凭证的 UTC 筛选口径在下方耗时证据中单列。最新正式版本是 **v1.3.1**，对应提交 `24fe0ef7737efae15c87225755e9f6f5965e4888`，于 10 月 4 日 20:48 合入。核验时 `main` 已推进至 `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d`，提交时间为 10 月 5 日 19:17。本次将正式补丁与随后主分支的文档、实验内容分开评估。
 
 | 更新 | 优化或收敛 | 对本仓的影响 |
 | --- | --- | --- |
@@ -80,7 +80,74 @@ Gitee 模板是本地文件，上游本次没有修改。下表所列本地兼�
 
 用户同时批准固定高风险条件：鉴权与权限、计费与额度、数据库迁移、跨服务契约、队列重试与幂等。Agent 从实际影响面选择对应集成或兼容接缝，必验行为未覆盖时报告未完成。相关必验项被跳过则阻断完成，明确无关的跳过项记录原因。权威内容在 [测试策略](../agents/testing-strategy.md)，不写入产品术语表，也不增加新的常驻根规则。
 
-时间成本评估读取了 10 月 1 至 5 日历史通过凭证，并在产品文件与发布线一致的任务区补测完整前端单测：41.6 秒，4,400 项通过、2 项跳过。已安装依赖，关闭 Vitest 缓存；不包含安装、构建或端到端验收。历史后端完整测试阶段中位数 11.9 秒，现有前端分层整套中位数 56.3 秒；不同样本不能作为严格 A/B 对照。成本控制采用范围界定和证据复用，不以耗时为由跳过必验行为。
+时间成本采用以下三组证据。历史样本只保留当次取样时 `status=passed` 的凭证，按 `startedAt` 的 UTC 日期筛选 2026-10-01 至 2026-10-05。各组计时范围不同，不能作严格 A/B 对照，也没有测量缺陷发现率或货币成本。
+
+| 样本 | 次数 | 耗时 | 计时范围与条件 |
+| --- | --- | --- | --- |
+| 历史 `scoped/web` | 34 | 中位数 56.32 秒 | `areas` 仅为 `web`；凭证中所有已执行命令的 `durationMs` 之和，包含当时计划的类型检查、lint、测试和构建 |
+| 历史 backend 完整测试阶段 | 8 | 中位数 11.903 秒 | `pnpm verify` 成功尝试中 `test` 阶段的 `durationMs`；不含类型检查和构建 |
+| 本次完整 Web Vitest 补测 | 1 | 41.555 秒 | 产品文件与发布线 `f9d1610e` 一致；依赖已安装，关闭 Vitest 缓存；不含安装、类型检查、构建和端到端验收 |
+
+前端补测共 4,402 项，其中 4,400 项通过、2 项 pending、0 项失败。pending 不计为通过，本次仅将该运行用于耗时评估，不作为产品行为验收完成的证明。成本控制采用范围界定和证据复用，不以耗时为由跳过必验行为。
+
+<details>
+<summary>复核命令、取数位置与脱敏样本</summary>
+
+前端补测在任务区 `web/` 目录运行以下命令。输出文件写入已创建的私有临时目录。复核前确认产品提交、依赖与生成物条件；新运行可能产生不同耗时。
+
+```bash
+node node_modules/vitest/vitest.mjs run --no-cache --reporter=json \
+  --outputFile="<私有临时目录>/results.json" --silent
+```
+
+历史凭证位于取样 checkout 的 Git common dir 下 `blue-whale/verification/<HEAD>.json`，不随仓库提交。下表保留已取出的数值，供团队重算中位数；不包含本机绝对路径、环境指纹或日志。原始凭证仍需从保留它们的 checkout 取得，表中提交 ID 不保证远端保留对应提交。Web 取数为 `results[].durationMs` 求和，backend 取数为 `results[]` 中 `command=["pnpm","verify"]` 的成功 `attempts[].stages[]` 下 `name="test"` 的 `durationMs`，均换算为秒。
+
+| 样本组 | 凭证 HEAD | 耗时，秒 |
+| --- | --- | --- |
+| scoped/web | `0559a18414065908d43f237657d985f5f0e39914` | 58.375 |
+| scoped/web | `0b2230df174177cadfca4a8858b5d1bb6939d3fb` | 54.969 |
+| scoped/web | `0ca904e9d3300de5325195a205e607c0f8e6c708` | 56.682 |
+| scoped/web | `0cceb6861fca4e155c8ff654ff2426144252656e` | 55.483 |
+| scoped/web | `12b33b5b86513ab7762dac3331c7f565a0fa5fbe` | 18.681 |
+| scoped/web | `1314ab57c3d7bafe9e194de5180d05b3ac500c7c` | 55.435 |
+| scoped/web | `1381966ea192f76ade25bdb482868129b6f407e4` | 57.794 |
+| scoped/web | `14b61d4f91670ab431c82af4100cf82fa5e5c7dc` | 57.339 |
+| scoped/web | `2197800f24560c0b346fc5ac58ba583c1a152d1a` | 56.186 |
+| scoped/web | `244e500aba9ea561467f4d11044a79d82863d11f` | 57.868 |
+| scoped/web | `43ea7010e0c707e93d190ae10066fb5942e4ecfb` | 56.447 |
+| scoped/web | `4515cb36f3a4948aae2a202136f2bd52f2d49370` | 56.947 |
+| scoped/web | `4b18f352e68899fd797f96451d01963209202110` | 58.418 |
+| scoped/web | `52b91aab27493a7e86f1b8d3889b216d3a2b3b3c` | 57.111 |
+| scoped/web | `530c239f7b967712755941a455b9074e4053419d` | 55.482 |
+| scoped/web | `599983318c87c49cd4404b52317e6c3098519ed6` | 58.149 |
+| scoped/web | `5b1ecc040eadcc696e1a09100ae88f2d85b1cd4a` | 57.113 |
+| scoped/web | `62b2151a52bbc376c0867a5a696b26a4a761434a` | 56.802 |
+| scoped/web | `73511fc1e9c0e5ba9ee51d3a5a54ed8bb8a7c228` | 18.452 |
+| scoped/web | `79811b0f941bfcb8be0fcbb9303abe00a693adc7` | 54.239 |
+| scoped/web | `7e280653a3b55ec9740bcd89ad4e2a4d715627ea` | 55.265 |
+| scoped/web | `819194c41b9aa3d9819d6be72ba6d469732a8e05` | 57.459 |
+| scoped/web | `8d70d62461919bbe28d29bdf8ba09ee8eed06259` | 56.905 |
+| scoped/web | `95c414e0cc4d5993dfaa0f3f90af0337d1604694` | 55.530 |
+| scoped/web | `a211ae6a3b9d5a419bc3b89c66d9061ff83ced10` | 55.236 |
+| scoped/web | `ac00d07ad6774fcecaa92d24b0f8000c02cd4f33` | 57.446 |
+| scoped/web | `b137263315ea8fe6351920515f33e11d7e5b7876` | 54.468 |
+| scoped/web | `c2beb8288fd04ea6428bff78e8d068fd6e51dc0f` | 55.601 |
+| scoped/web | `c54d8b7df14ee41d4e70e004f24b3ea20a0ad3f8` | 55.302 |
+| scoped/web | `c81767709fdf6d2304e491bcb4d45d7c32ccc348` | 54.541 |
+| scoped/web | `c90f38f060d6e535bb6278772ed20b96ba187df4` | 54.848 |
+| scoped/web | `d5a8accc3ca91e5473f70006413abf7c92b87891` | 57.043 |
+| scoped/web | `d89ab98ed2071c7aab5832d49749d5a74fffa8a2` | 55.954 |
+| scoped/web | `fffb6437a42eecef51bd58763edba92dc10cee53` | 57.325 |
+| backend test | `5e59498c5521854a28ee2fbdd1c85d26871d27f5` | 11.316 |
+| backend test | `5ecb7295eb93dddf10bb702926b270751caacd8c` | 11.767 |
+| backend test | `79fe90e006f84e6dd36353fc116b75e129af5460` | 12.039 |
+| backend test | `cd04290c66000118052763080bb3411c8437f052` | 12.888 |
+| backend test | `ce3eae9efd5468a20536fde711cba20a4d41bd3f` | 11.453 |
+| backend test | `d1933c64d9bec40cf312bc6837228852b24dc401` | 11.378 |
+| backend test | `df2a2f2c17c0df78daff63774cabc75d0f0946c3` | 21.395 |
+| backend test | `df2d77e05e1aa6ea21732e460f1891235b6af702` | 14.072 |
+
+</details>
 
 独立只读子代理从 `AGENTS.md → CLAUDE.md` 实际发现了测试、提交与代码探索规则，能解释必验跳过的报告要求。这验证规则发现链路，不代表五个客户端运行时已全面验收。
 
@@ -150,4 +217,4 @@ Gitee 模板是本地文件，上游本次没有修改。下表所列本地兼�
 
 累计改动包括 `ask-matt` 一行、`handoff` 恢复与独立 `handoff-start`、Gitee setup 模板和保留配置指令、旧冲突技能移除，`implement` 官方恢复、测试策略与选择器更新，以及本评估报告。更新在 `chore/同步上游技能补丁` 的独立任务区，起点为 `f9d1610e3e8020caca723623042aa75d92c6def4`，目标发布线为 `release/2026.09.29`。没有写入原 release 检出区，团队发布线尚未收到本次补丁。
 
-三项测试与技能归位决策已经确认并落地。其余上游架构与工程方法保持同步，本地流程适配保留；`chief-of-staff` 继续不安装。发布或创建 PR 尚未获得本轮授权。
+三项测试与技能归位决策已经确认并落地。文档审查后补齐高风险参数贯穿、Gitee 创建完成检查、交接决策字段和耗时复核样本，并归并测试策略的重复定义。其余上游架构与工程方法保持同步，本地流程适配保留；`chief-of-staff` 继续不安装。发布或创建 PR 尚未获得本轮授权。
