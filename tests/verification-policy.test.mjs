@@ -108,6 +108,49 @@ function createRepository({ flakyRuleTest = false, localAhead = false } = {}) {
   return directory;
 }
 
+test("completion plans run complete application suites without changed or empty-suite exemptions", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+  const plan = buildVerificationPlan(classifyChanges([
+    "backend/libs/shared/result.ts", "web/src/pages/Home/index.tsx",
+  ]), { base: "base" });
+  assert.ok(plan.some((command) => JSON.stringify(command) === JSON.stringify(["pnpm", "exec", "vitest", "run", "backend"])));
+  assert.ok(plan.some((command) => JSON.stringify(command) === JSON.stringify(["npm", "--prefix", "web", "run", "test"])));
+  assert.ok(plan.every((command) => !command.includes("--changed") && !command.includes("--passWithNoTests")));
+});
+
+test("database-only completion verifies backend before a task can be reported complete", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+  for (const file of ["backend/prisma/schema.prisma", "backend/prisma/schema/001_baseline.sql", "backend/prisma/migrations/example/migration.sql"]) {
+    const classification = classifyChanges([file]);
+    assert.equal(classification.tier, "full", file);
+    assert.ok(classification.areas.includes("backend"), file);
+    assert.ok(buildVerificationPlan(classification, { base: "base" }).some((command) => command.join(" ") === "pnpm verify"), file);
+  }
+});
+
+test("full backend verification executes its complete test suite only once", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+  const plan = buildVerificationPlan(classifyChanges(["backend/libs/shared/result.ts"], { risk: "high" }), { base: "base" });
+  const backendRuns = plan.filter((command) => command.join(" ") === "pnpm verify" ||
+    command.includes("vitest") && command.includes("backend"));
+  assert.equal(backendRuns.length, 1);
+});
+
+test("previous changed-only receipts cannot satisfy complete application verification", async () => {
+  const { buildVerificationPlan, validateReceipt } = await import("../scripts/verification-policy.mjs");
+  const classification = classifyChanges(["backend/libs/shared/result.ts"]);
+  const binding = { head: "head", base: "base", changedFilesHash: "scope" };
+  const commands = buildVerificationPlan(classification, { base: "base" });
+  const previousCommands = [
+    ["git", "diff", "--check", "base...HEAD"],
+    ["pnpm", "exec", "tsc", "-p", "backend/tsconfig.json", "--noEmit", "--pretty", "false"],
+    ["pnpm", "exec", "vitest", "run", "backend", "--changed", "base"],
+  ];
+  const receipt = { version: 1, status: "passed", ...binding, classification, commands: previousCommands,
+    results: previousCommands.map((command) => ({ command, exitCode: 0, attempts: [{ exitCode: 0 }] })) };
+  assert.equal(validateReceipt(receipt, { ...binding, classification, commands }).valid, false);
+});
+
 test("classifies backend BFF sources as scoped/backend", async () => {
   // 整棵 backend/ 树此前没有任何归类规则：NODE_SOURCE 只认 `^(?:apps|packages)/`，
   // 于是改 BFF 的 controller 落进「未归类」，门禁一条 backend 的 typecheck 或测试都不跑。
@@ -142,7 +185,7 @@ test("classifies the Java worker as its own area and actually runs Maven", async
     "server/blue-whale-worker/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java",
     "server/blue-whale-worker/pom.xml",
   ]);
-  assert.equal(classification.tier, "scoped");
+  assert.equal(classification.tier, "full");
   assert.deepEqual(classification.areas, ["worker-java"]);
 
   const flattened = buildVerificationPlan(classification, { base: "BASE" }).map((command) =>
@@ -234,7 +277,7 @@ test("classifies documentation assets without treating contracts as prose", asyn
   );
   assert.deepEqual(classifyChanges(["docs/specs/runtime.schema.json"], { stage: "pr" }), {
     tier: "full",
-    reasons: ["unclassified PR scope requires full verification"],
+    reasons: ["unclassified scope requires full verification"],
   });
 });
 
@@ -351,7 +394,7 @@ test("allows an explicit high-risk escalation to full verification", async () =>
   );
 });
 
-test("keeps high-impact infrastructure scoped at completion but full at PR stage", async () => {
+test("verifies high-impact infrastructure fully at completion and PR stages", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
   const files = [
     "pnpm-lock.yaml",
@@ -359,16 +402,13 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
     "backend/prisma/schema/001_baseline.sql",
   ];
 
-  assert.deepEqual(classifyChanges(files), {
-    tier: "scoped",
-    areas: ["web"],
-    reasons: ["product-impact infrastructure changed"],
-  });
-  assert.deepEqual(classifyChanges(files, { stage: "pr" }), {
-    tier: "full",
-    areas: ["web"],
-    reasons: ["publishing product-impact changes requires full verification"],
-  });
+  for (const stage of ["completion", "pr"]) {
+    assert.deepEqual(classifyChanges(files, { stage }), {
+      tier: "full",
+      areas: ["backend", "web"],
+      reasons: ["product-impact changes require full verification"],
+    });
+  }
 });
 
 test("treats skill agents metadata as documentation at both stages", async () => {
@@ -393,7 +433,7 @@ test("treats comment-only Dockerfile edits as documentation without weakening re
   );
   assert.deepEqual(classifyChanges([file], { stage: "pr" }), {
     tier: "full",
-    reasons: ["publishing product-impact changes requires full verification"],
+    reasons: ["product-impact changes require full verification"],
   });
 });
 
@@ -471,7 +511,7 @@ test("rejects unknown executable paths instead of escalating to full", async () 
 // 却分不了类，`--stage pr` 必抛 UNCLASSIFIED_PATH。补分类而不是放宽那条规矩——「归不了类就停下」
 // 本身是对的，缺的是这一条归属。
 // IKDIDO：web/e2e 的 Playwright 规格与 fixture 此前没有归类规则，提交后 PR 阶段必被兜底升级为
-// full（`unclassified PR scope requires full verification`）。补分类而不是接受升级——它们的题材是
+// full（`unclassified scope requires full verification`）。补分类而不是接受升级——它们的题材是
 // web 产品行为，定向验证就是 web 那套（typecheck + lint + vitest）。
 test("classifies web e2e specs and fixtures as web", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
@@ -540,9 +580,9 @@ test("keeps governance checks when a governance change also hits high-impact pat
   ];
 
   assert.deepEqual(classifyChanges(files), {
-    tier: "scoped",
+    tier: "full",
     areas: ["control-plane", "governance"],
-    reasons: ["product-impact infrastructure changed"],
+    reasons: ["product-impact changes require full verification"],
   });
   assert.deepEqual(buildVerificationPlan(classifyChanges(files), { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
@@ -564,13 +604,14 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_project_skills",
       "scripts.tests.test_release_task_workflow",
     ],
+    ["pnpm", "verify"],
   ]);
 
   const prClassification = classifyChanges(files, { stage: "pr" });
   assert.deepEqual(prClassification, {
     tier: "full",
     areas: ["control-plane", "governance"],
-    reasons: ["publishing product-impact changes requires full verification"],
+    reasons: ["product-impact changes require full verification"],
   });
   assert.deepEqual(buildVerificationPlan(prClassification, { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
@@ -670,7 +711,7 @@ test("builds web typecheck, lint and vitest checks for web verification", async 
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
       ["npm", "--prefix", "web", "run", "lint"],
-      ["npm", "--prefix", "web", "run", "test", "--", "--changed", "origin/master", "--passWithNoTests"],
+      ["npm", "--prefix", "web", "run", "test"],
       ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "test"],
       ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "release"],
     ],
@@ -692,7 +733,7 @@ test("builds affected Node checks for scoped verification", async () => {
     [
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
-      ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", "origin/master"],
+      ["pnpm", "exec", "vitest", "run", "packages", "apps"],
     ],
   );
 });
@@ -782,7 +823,7 @@ test("builds the repository full verification command for full scope", async () 
     [
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
-      ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", "origin/master"],
+      ["pnpm", "exec", "vitest", "run", "packages", "apps"],
       ["pnpm", "verify"],
     ],
   );
@@ -803,7 +844,7 @@ test("keeps ordinary source changes scoped at PR stage", async () => {
   assert.deepEqual(buildVerificationPlan(classification, { base: "origin/master" }), [
     ["git", "diff", "--check", "origin/master...HEAD"],
     ["pnpm", "exec", "tsc", "-p", "backend/tsconfig.json", "--noEmit", "--pretty", "false"],
-    ["pnpm", "exec", "vitest", "run", "backend", "--changed", "origin/master"],
+    ["pnpm", "exec", "vitest", "run", "backend"],
   ]);
 });
 

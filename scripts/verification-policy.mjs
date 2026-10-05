@@ -42,7 +42,7 @@ const WEB_TOOLING_FILE = /^web\/scripts\/.*\.(?:mjs|cjs|js)$/;
 const WEB_E2E_FILE = /^web\/e2e\/.*\.(?:ts|json)$/;
 const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.claude\/skills$|\.claude\/settings\.json|\.codex\/hooks\.json|\.qoder\/settings\.json|\.kimi-code\/(?:hooks\.toml|hooks\/)|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-contract-breaking|check-error-code-drift|check-hook-closed-loop|check-hook-contracts|check-project-skills|cleanup-implement-spec-child|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|manage-release-branch|merge-implement-spec-child|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|probe-zcode-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-implement-spec-skill|sync-release-line|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|compress-gallery-images|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|fix-ikij40-canvas-309-mojibake|reconcile-cost-reservations|run-ik50gb-c-testsite-probe|run-real-canary|run-testsite-sql|tunnel-testsite-db)\./;
-const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|contracts\/|backend\/libs\/contracts\/|backend\/prisma\/(?:prisma\/migrations|schema)\/|server\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
+const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|contracts\/|backend\/libs\/contracts\/|backend\/prisma\/|server\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
 // 跨进程契约源（顶层 contracts/）。**此前整棵树没有归类规则**：改 .proto 在收口阶段
 // 落进「未归类」→ 一条命令都不跑（`.proto` 不在 EXECUTABLE_FILE 里，连 UNCLASSIFIED_PATH 都不报）；
 // 在 PR 阶段才被兜底升为 full——方向对了但代价是满量。与 backend / worker-java 那几个洞同形：
@@ -94,7 +94,7 @@ function sourceArea(file) {
   if (BILLING_SOURCE.test(file)) return "billing-java";
   if (CONTRACTS_SOURCE.test(file)) return "contracts";
   if (NODE_SOURCE.test(file)) return "node";
-  if (BACKEND_SOURCE.test(file) || BACKEND_TOOLING_FILE.test(file)) return "backend";
+  if (BACKEND_SOURCE.test(file) || BACKEND_TOOLING_FILE.test(file) || /^backend\/prisma\//.test(file)) return "backend";
   if (JAVA_SOURCE.test(file)) return "worker-java";
   if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) || WEB_E2E_FILE.test(file) ||
       (file.startsWith("web/") && !EXECUTABLE_FILE.test(file) && requiresFrontendBuild([file]))) return "web";
@@ -155,7 +155,7 @@ function fullClassification(files, reason, documentationOnlyFiles) {
   };
 }
 
-function classifyAutomatically(files, stage, documentationOnlyFiles) {
+function classifyAutomatically(files, documentationOnlyFiles) {
   const unknownExecutable = files.filter(
     (file) => EXECUTABLE_FILE.test(file) && !classified(file, documentationOnlyFiles),
   );
@@ -181,17 +181,11 @@ function classifyAutomatically(files, stage, documentationOnlyFiles) {
     };
   }
 
-  if (stage === "pr") {
-    if (files.some((file) => hasProductImpact(file, documentationOnlyFiles))) {
-      return fullClassification(
-        files,
-        "publishing product-impact changes requires full verification",
-        documentationOnlyFiles,
-      );
-    }
-    if (files.some((file) => !classified(file, documentationOnlyFiles))) {
-      return fullClassification(files, "unclassified PR scope requires full verification", documentationOnlyFiles);
-    }
+  if (files.some((file) => hasProductImpact(file, documentationOnlyFiles))) {
+    return fullClassification(files, "product-impact changes require full verification", documentationOnlyFiles);
+  }
+  if (files.some((file) => !classified(file, documentationOnlyFiles))) {
+    return fullClassification(files, "unclassified scope requires full verification", documentationOnlyFiles);
   }
 
   const areas = [...new Set(files.map(sourceArea).filter(Boolean))].sort();
@@ -229,10 +223,6 @@ function classifyAutomatically(files, stage, documentationOnlyFiles) {
     };
   }
 
-  if (files.some((file) => hasProductImpact(file, documentationOnlyFiles))) {
-    return scopedClassification(files, "product-impact infrastructure changed", documentationOnlyFiles);
-  }
-
   return scopedClassification(files, "change scope is not classified", documentationOnlyFiles);
 }
 
@@ -244,20 +234,20 @@ export function classifyChanges(files, { risk = "auto", stage = "completion", do
     throw new Error("stage must be completion or pr");
   }
   const documentationOnlySet = new Set(documentationOnlyFiles);
-  const automatic = classifyAutomatically(files, stage, documentationOnlySet);
+  const automatic = classifyAutomatically(files, documentationOnlySet);
   if (risk === "auto") return automatic;
 
   return fullClassification(files, "risk explicitly escalated to high", documentationOnlySet);
 }
 
-function appendAreaCommands(commands, areas, base) {
+function appendAreaCommands(commands, areas, base, full) {
   if (areas.includes("docs") && !areas.includes("governance")) {
     commands.push(["node", "--test", "tests/agent-rules.test.mjs"]);
   }
   if (areas.includes("node")) {
     commands.push(
       ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
-      ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", base],
+      ["pnpm", "exec", "vitest", "run", "packages", "apps"],
     );
   }
   if (areas.includes("backend")) {
@@ -265,18 +255,15 @@ function appendAreaCommands(commands, areas, base) {
     // 根 vitest 的 include 里有 `backend/**/*.test.ts`，所以测试用根 runner 加路径过滤。
     commands.push(
       ["pnpm", "exec", "tsc", "-p", "backend/tsconfig.json", "--noEmit", "--pretty", "false"],
-      ["pnpm", "exec", "vitest", "run", "backend", "--changed", base],
     );
+    // pnpm verify already runs the complete backend suite.
+    if (!full) commands.push(["pnpm", "exec", "vitest", "run", "backend"]);
   }
   if (areas.includes("web")) {
     commands.push(
       ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
       ["npm", "--prefix", "web", "run", "lint"],
-      // docs/agents/testing-strategy.md 的 scoped/web 一行写的是「Web typecheck + Web Vitest --changed」，
-      // 这一条此前缺失，web 下的单测从来没有被门禁执行过。
-      // --passWithNoTests：web 变更常常只动 CSS 或页面壳，模块图上够不到任何测试；
-      // 那种情况该放行，而不是把「没有相关测试」报成失败。
-      ["npm", "--prefix", "web", "run", "test", "--", "--changed", base, "--passWithNoTests"],
+      ["npm", "--prefix", "web", "run", "test"],
       ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "test"],
       ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "release"],
     );
@@ -346,7 +333,7 @@ function appendAreaCommands(commands, areas, base) {
 export function buildVerificationPlan(classification, { base, pythonCommand = ["python3"] }) {
   const commands = [["git", "diff", "--check", `${base}...HEAD`]];
   const areas = classification.tier === "docs" ? ["docs"] : classification.areas ?? [];
-  appendAreaCommands(commands, areas, base);
+  appendAreaCommands(commands, areas, base, classification.tier === "full");
   if (classification.tier === "full") {
     commands.push(["pnpm", "verify"]);
   }
