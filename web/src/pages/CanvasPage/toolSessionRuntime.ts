@@ -165,8 +165,13 @@ export function createToolSessionRuntime() {
               if (isCurrent()) definition.onError(error, input);
             } finally {
               if (isCurrent() && snapshot.state !== null) {
-                snapshot = { ...snapshot, submitting: false };
-                changed();
+                // 各请求独立收尾（IKJPM3）：有宿主在途判定时随其校准——自己已结束但
+                // 同卡其他创建请求仍在途时保持只读；无判定工具保持原语义（无条件复位）
+                const submitting = definition.inFlight ? definition.inFlight(snapshot.state) : false;
+                if (submitting !== snapshot.submitting) {
+                  snapshot = { ...snapshot, submitting };
+                  changed();
+                }
               }
             }
           })();

@@ -172,6 +172,35 @@ describe('工具会话运行时公开接口', () => {
     expect(panel.getSnapshot().submitting).toBe(false);
   });
 
+  /* IKJPM3 乱序收尾：面板自身发送的收尾不得无条件清零提交锁——有宿主在途判定时
+     以其校准，自己的请求已结束但同卡其他在途仍在时保持只读，全部归零才复位。 */
+  it('发送收尾按宿主在途校准提交锁：自己失败而他在途保持只读，宿主归零才复位', async () => {
+    const runtime = createToolSessionRuntime();
+    let inFlight = true;
+    let reject!: (error: Error) => void;
+    const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve',
+      inFlight: () => inFlight,
+      reconcile: (state) => state,
+      submit: () => new Promise<void>((_, fail) => { reject = fail; }),
+      onError() {},
+    });
+    panel.open('v1', sessionDeps());
+    panel.send();
+    expect(panel.getSnapshot().submitting).toBe(true);
+
+    // 自己的请求失败，但宿主在途（旁路重试等）未归零：锁保持，再次发送被拒
+    reject(new Error('network'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(panel.getSnapshot().submitting).toBe(true);
+    expect(panel.send()).toBe(false);
+
+    // 宿主在途归零后解锁，可再次发送
+    inFlight = false;
+    runtime.reconcileSources(new Set(['v1']));
+    expect(panel.getSnapshot().submitting).toBe(false);
+    expect(panel.send()).toBe(true);
+  });
+
 });
 
 it.each(['close', 'escape', 'selection', 'pane', 'generation'] as const)('公开接口 %s 退出丢弃编辑态，空选中保留会话', (route) => {

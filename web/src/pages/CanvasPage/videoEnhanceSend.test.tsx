@@ -863,4 +863,123 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(data.jobId).toBe('j2');
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j2');
   });
+
+  /* IKJPM3：合法多请求乱序收尾的提交锁校准——新会话发送（B）先失败而旧重试（A）仍
+     等待时，B 的收尾只释放自己的占用，面板继续在途只读、不产生 C；旧重试（A）先返回
+     而 B 仍等待时，A 的收尾不解除新会话自身的提交锁。全部创建请求收尾后按既有卡态恢复。 */
+  it.each(['success', 'failure'] as const)('新会话发送先失败而旧重试仍等待：面板保持只读不产生 C（共 2 次），旧重试%s收尾后各自释放', async (outcome) => {
+    seedDoc('failed');
+    let settleOld!: (value: { job_id: string; status: 'queued' }) => void;
+    let rejectOld!: (error: unknown) => void;
+    let rejectNew!: (error: unknown) => void;
+    apiMocks.createVideoEnhancement
+      .mockImplementationOnce(() => new Promise((resolve, reject) => { settleOld = resolve; rejectOld = reject; }))
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectNew = reject; }))
+      .mockImplementation(pendingCreate);
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j-old', status: 'processing', progress: 10, asset: null });
+    await renderPage();
+    await openHdPanel();
+    await mountCard('h1');
+    await clickCardRetry();
+    // 显式关闭重开 = 新会话：旧重试在途仍可再发送一次（B，共 2 次受理）
+    await act(async () => { panelClose()!.click(); });
+    await openHdPanel();
+    await clickPanelResolution('2k');
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+
+    // B 先失败而 A 仍等待：当前有效失败保留原有提示，但面板继续只读（发送钮与分辨率
+    // 参数），再点发送（含强制派发）不产生 C
+    await act(async () => {
+      rejectNew(new Error('new network'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+    expect(panelSend()!.disabled).toBe(true);
+    expect(panelResolution('2k')!.disabled).toBe(true);
+    await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+
+    // A 最后收尾：成功则原卡转生成中（轮询接线）；失败则限制解除、面板恢复可再操作
+    await act(async () => {
+      if (outcome === 'success') settleOld({ job_id: 'j-old', status: 'queued' });
+      else rejectOld(new Error('old network'));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    const data = mediaNode('h1').data as Record<string, unknown>;
+    if (outcome === 'success') {
+      expect(data.genStatus).toBe('generating');
+      expect(data.jobId).toBe('j-old');
+      expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j-old');
+    } else {
+      expect(data.genStatus).toBe('failed');
+      expect(panelSend()!.disabled).toBe(false);
+      await act(async () => { panelSend()!.click(); });
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(3);
+    }
+  });
+
+  it.each(['success', 'failure'] as const)('旧重试先%s返回而新会话发送仍等待：新会话锁不被旧收尾复位，再点不受理', async (outcome) => {
+    seedDoc('failed');
+    let settleOld!: (value: { job_id: string; status: 'queued' }) => void;
+    let rejectOld!: (error: unknown) => void;
+    apiMocks.createVideoEnhancement
+      .mockImplementationOnce(() => new Promise((resolve, reject) => { settleOld = resolve; rejectOld = reject; }))
+      .mockImplementation(pendingCreate);
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j-old', status: 'processing', progress: 10, asset: null });
+    await renderPage();
+    await openHdPanel();
+    await mountCard('h1');
+    await clickCardRetry();
+    await act(async () => { panelClose()!.click(); });
+    await openHdPanel();
+    await clickPanelResolution('2k');
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+
+    // 旧重试先返回（成功或失败）：新会话仍在途，锁与只读保持
+    await act(async () => {
+      if (outcome === 'success') settleOld({ job_id: 'j-old', status: 'queued' });
+      else rejectOld(new Error('old network'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(panelSend()!.disabled).toBe(true);
+    expect(panelResolution('2k')!.disabled).toBe(true);
+    await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+    if (outcome === 'success') {
+      const data = mediaNode('h1').data as Record<string, unknown>;
+      expect(data.genStatus).toBe('generating');
+      expect(data.jobId).toBe('j-old');
+    }
+  });
+
+  it('新会话发送失败而旧重试仍等待时，再次显式关闭重开仍可按新会话例外主动发送', async () => {
+    seedDoc('failed');
+    apiMocks.createVideoEnhancement
+      .mockImplementationOnce(pendingCreate)
+      .mockImplementationOnce(() => Promise.reject(new Error('new network')))
+      .mockImplementation(pendingCreate);
+    await renderPage();
+    await openHdPanel();
+    await mountCard('h1');
+    await clickCardRetry();
+    await act(async () => { panelClose()!.click(); });
+    await openHdPanel();
+    await clickPanelResolution('2k');
+    await act(async () => { panelSend()!.click(); });   // B 立即失败
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+    expect(panelSend()!.disabled).toBe(true);           // 旧重试仍等待：面板继续只读
+
+    // 再次显式关闭重开 = 又一新会话：例外保留，仍可主动发送一次
+    await act(async () => { panelClose()!.click(); });
+    await openHdPanel();
+    expect(panelSend()!.disabled).toBe(false);
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(3);
+    expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+      source_asset_id: '5', target_node_id: 'h1', resolution: '2k',
+    }, { silent: true });
+  });
 });
