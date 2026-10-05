@@ -8147,6 +8147,8 @@ export default function CanvasPage() {
     createTask: async ({ projectId, payload, source }) => {
       const runtime = generationRuntimeRef.current;
       if (!runtime) throw new Error('生成任务运行时未就绪，请刷新后重试');
+      // IKJPM4：提交时加载身份——迟到收尾撤回占位前的归属核对要素之一
+      const submitEpoch = docLoadEpochRef.current;
       // 未受理窗口内同载荷重发沿用同一占位卡身份：运行时按（节点 × 载荷签名）复用
       // submission_id，回执丢失的原样重发不重复建任务；受理或改参即换新卡新意图。
       const payloadText = JSON.stringify(payload);
@@ -8174,10 +8176,22 @@ export default function CanvasPage() {
         }
       }
       const rollbackPlaceholder = () => {
+        // IKJPM4（F1）：撤回前核对占位仍属本次未受理提交——发起项目未切换、加载身份未更替
+        // （同项目文档重载/切换后同 id 卡属新加载资源）、卡仍在场且仍是未受理占位形态
+        // （受理/恢复会回填 jobId）、公开运行时尚无执行接管（恢复接续/新提交）。核对失败
+        // 只结算旧等待与锁：当前恢复卡、用户编辑与来源连线全部保留，不复活删除目标。
+        // 撤回时连线只删本次提交经 AUDIO_MIX_EDGE_ORIGIN 建的来源边，不动恢复/水合文档里
+        // 的可靠来源关系（含用户拖线）。
+        if (activeProjectRef.current !== projectId) return;
+        if (docLoadEpochRef.current !== submitEpoch) return;
+        const currentNode = mediaNodesRef.current.find((node) => node.id === nodeId);
+        if (!currentNode || currentNode.data?.jobId != null) return;
+        if (generationRuntimeRef.current?.statusOf(nodeId) != null) return;
+        const keepEdge = (edge: Edge) => !(edge.target === nodeId && edge.data?.origin === AUDIO_MIX_EDGE_ORIGIN);
         mediaNodesRef.current = mediaNodesRef.current.filter((node) => node.id !== nodeId);
-        edgesRef.current = edgesRef.current.filter((edge) => edge.target !== nodeId);
+        edgesRef.current = edgesRef.current.filter(keepEdge);
         setMediaNodes((prev) => prev.filter((node) => node.id !== nodeId));
-        setEdges((prev) => prev.filter((edge) => edge.target !== nodeId));
+        setEdges((prev) => prev.filter(keepEdge));
       };
       return await new Promise<{ job_id: string }>((resolve, reject) => {
         const unwatch = watchMixSubmit(nodeId, {
