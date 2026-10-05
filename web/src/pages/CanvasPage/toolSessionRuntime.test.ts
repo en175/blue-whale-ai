@@ -309,6 +309,22 @@ describe('工具会话运行时公开接口', () => {
     expect(owns()).toBe(false);
   });
 
+  /* IKJPXN（决策 5）：同种工具换目标 open 即新会话归属——不能仅凭旧状态存在判为原会话
+     恢复；旧卡受理探针失效，新会话提交锁不按旧在途恢复（重发例外同显式关闭重开）。
+     同目标恢复保持归属与在途上锁见上方既有用例。 */
+  it('captureSessionOwnership：换目标 open 即新会话，探针失效且不按旧在途上锁', () => {
+    const runtime = createToolSessionRuntime();
+    const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve',
+      inFlight: () => true,
+    });
+    panel.open('h1', sessionDeps());
+    const owns = runtime.captureSessionOwnership('videoEnhance');
+    panel.open('h2', sessionDeps());
+    expect(panel.getSnapshot().state?.nodeId).toBe('h2');
+    expect(owns()).toBe(false);
+    expect(panel.getSnapshot().submitting).toBe(false);
+  });
+
 });
 
 it.each(['close', 'escape', 'selection', 'pane', 'generation'] as const)('公开接口 %s 退出丢弃编辑态，空选中保留会话', (route) => {

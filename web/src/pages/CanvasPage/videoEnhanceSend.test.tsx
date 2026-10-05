@@ -183,10 +183,10 @@ function finishedHdNode(id: string, assetId: string, width: number, height: numb
 }
 
 /** 画布：一个就绪视频节点 v1（assetId '5'，1280×720 达标）+ 可选附加节点。
- *  mode：'draft' 仅源卡；'failed' 带 4K 失败成品卡（重试链路）；'chain' 带 1080P 与 4K
- *  成品结果卡（链式联动）；'generating' 带生成中 HD 卡（持久化恢复）；'done' 带已完成
- *  1080P 结果卡（结果持久保持） */
-function seedDoc(mode: 'draft' | 'failed' | 'chain' | 'generating' | 'done' = 'draft') {
+ *  mode：'draft' 仅源卡；'failed' 带 4K 失败成品卡（重试链路）；'twoFailed' 带 h1 4K 与
+ *  h2 2K 两张失败成品卡（IKJPXN 换目标链路）；'chain' 带 1080P 与 4K 成品结果卡（链式联动）；
+ *  'generating' 带生成中 HD 卡（持久化恢复）；'done' 带已完成 1080P 结果卡（结果持久保持） */
+function seedDoc(mode: 'draft' | 'failed' | 'twoFailed' | 'chain' | 'generating' | 'done' = 'draft') {
   const nodes: Array<Record<string, unknown>> = [
     {
       id: 'v1',
@@ -206,6 +206,20 @@ function seedDoc(mode: 'draft' | 'failed' | 'chain' | 'generating' | 'done' = 'd
     nodes.push(card);
     edges.push({ id: 'e1', source: 'v1', target: 'h1', data: { origin: VIDEO_ENHANCE_EDGE_ORIGIN } });
     assets[9] = { asset_id: 9, type: 'video', access_url: 'http://vid/h1.mp4', width: 3840, height: 2160 };
+  }
+  if (mode === 'twoFailed') {
+    // IKJPXN 换目标场景：h1（4K）与 h2（2K）两张失败 HD 卡，各自 lastParams 与来源边
+    const first = finishedHdNode('h1', '9', 3840, 2160, '4k');
+    ((first.data as Record<string, unknown>).genStatus) = 'failed';
+    ((first.data as Record<string, unknown>).errorText) = '视频画质增强失败，请重试';
+    const second = { ...finishedHdNode('h2', '10', 1920, 1080, '2k'), position: { x: 1516, y: 0 } };
+    ((second.data as Record<string, unknown>).genStatus) = 'failed';
+    ((second.data as Record<string, unknown>).errorText) = '视频画质增强失败，请重试';
+    nodes.push(first, second);
+    edges.push({ id: 'e1', source: 'v1', target: 'h1', data: { origin: VIDEO_ENHANCE_EDGE_ORIGIN } });
+    edges.push({ id: 'e2', source: 'v1', target: 'h2', data: { origin: VIDEO_ENHANCE_EDGE_ORIGIN } });
+    assets[9] = { asset_id: 9, type: 'video', access_url: 'http://vid/h1.mp4', width: 3840, height: 2160 };
+    assets[10] = { asset_id: 10, type: 'video', access_url: 'http://vid/h2.mp4', width: 1920, height: 1080 };
   }
   if (mode === 'chain') {
     nodes.push(finishedHdNode('r1080', '9', 1920, 1080, '1080p'));
@@ -1263,6 +1277,94 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       });
       expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /* IKJPXN 换目标会话隔离（决策 5、Testing 4）：同种 HD 工具从 h1 直接切到 h2 即新会话
+     归属——旧 h1 重试 A 的失败（网络错误 / HTTP 422）不向 h2 新 HD 会话提示，h2 面板、
+     参数与自身提交锁保持，请求次数不增加。接缝同 IKJPM7：真实创建客户端与 HTTP 错误
+     处理保留，受控外部响应仅在 fetch 边界注入。 */
+  describe('IKJPXN 换目标会话隔离旧重试失败提示（真实创建客户端与 HTTP 链）', () => {
+    const fetchMock = vi.fn();
+    const jsonEnvelope = (code: number, msg: string, status: number, data: unknown = null) =>
+      new Response(JSON.stringify({ code, msg, data }), { status, headers: { 'Content-Type': 'application/json' } });
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+    beforeEach(async () => {
+      const actual = await vi.importActual<typeof import('@/api/jobs')>('@/api/jobs');
+      apiMocks.createVideoEnhancement.mockImplementation(actual.createVideoEnhancement);
+      fetchMock.mockReset();
+      // 默认兜底：页面意外真实 fetch 一律成功空信封，不外呼不干扰受控用例
+      fetchMock.mockImplementation(async () => jsonEnvelope(200, 'ok', 200));
+      vi.stubGlobal('fetch', fetchMock);
+    });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('h1 重试 A 等待时直接打开 h2：A 网络失败不提示到新 HD 会话，h2 面板与参数保持', async () => {
+      seedDoc('twoFailed');
+      let rejectA!: (error: unknown) => void;
+      fetchMock.mockImplementationOnce(() => new Promise<Response>((_, reject) => { rejectA = reject; }));
+      await renderPage();
+      await openHdPanel('h1');
+      await mountCard('h1');
+      await clickCardRetry();
+      expect(fetchMock).toHaveBeenCalledTimes(1);   // A 受理：h1 lastParams（4k）原样重发
+
+      // 同种 HD 工具直接换目标：h1 面板切到 h2 = 新会话（未发送）
+      await openHdPanel('h2');
+      expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
+      expect(panelSend()!.disabled).toBe(false);
+
+      await act(async () => { rejectA(new TypeError('Failed to fetch')); });
+      await settle();
+
+      // 旧 A 网络失败全链路静默：HTTP 层默认 toast（sonner）与页面 toast 都不出现
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(document.body.textContent).not.toContain('网络请求失败');
+      expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
+      // h2 新会话面板与参数保持、未被旧失败关闭或重置；h1 卡与参数不被旧失败改动；不新增请求
+      expect(panelSend()).toBeTruthy();
+      expect(panelSend()!.disabled).toBe(false);
+      expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
+      expect((mediaNode('h1').data as Record<string, unknown>).genStatus).toBe('failed');
+      expect(identityOf(mediaNode('h1'))).toEqual({ sourceAssetId: '5', lastParams: { resolution: '4k' } });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('h2 已发送 B 仍等待时旧 A 以 HTTP 422 返回：不触发 HTTP 默认提示，h2 锁与请求次数保持', async () => {
+      seedDoc('twoFailed');
+      let resolveA!: (value: Response) => void;
+      fetchMock
+        .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveA = resolve; }))
+        .mockImplementationOnce(() => new Promise<Response>(() => {}));   // B 永挂
+      await renderPage();
+      await openHdPanel('h1');
+      await mountCard('h1');
+      await clickCardRetry();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // 换目标打开 h2 并发送 B（fetch#2 挂起）：h2 自身提交锁生效
+      await openHdPanel('h2');
+      await act(async () => { panelSend()!.click(); });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      // B 的创建输入按 h2 冻结（源素材与目标卡、分辨率档 2k）
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+        source_asset_id: '5', target_node_id: 'h2', resolution: '2k',
+      });
+      expect(panelSend()!.disabled).toBe(true);
+
+      // 旧 A 以 HTTP 422 迟到：默认 toast 不得先于会话归属判断触发
+      await act(async () => { resolveA(jsonEnvelope(422, '分辨率档不可用', 422)); });
+      await settle();
+
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(document.body.textContent).not.toContain('分辨率档不可用');
+      expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
+      // B 的锁不被旧收尾解除：仍只读、再点不产生第三次请求；h2 参数保持
+      expect(panelSend()!.disabled).toBe(true);
+      await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
     });
   });
 

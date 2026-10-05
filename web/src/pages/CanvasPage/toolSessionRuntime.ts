@@ -138,25 +138,25 @@ export function createToolSessionRuntime() {
           const state = definition.initialize(entry, previous);
           if (state === null) return false;
           if (definition.panel === 'preserve' && snapshot.visible && state === snapshot.state) return true;
+          // 同目标会话恢复：state 保留、非显式关闭（IKJPM5 hidden 区分）且新旧状态同目标
+          //（IKJPXN 换目标即新会话，不能仅凭旧状态存在判为恢复原会话）。恢复路径提交锁按
+          // 宿主在途重算上锁（同 select 选回规则）、受理归属探针保持；换目标与显式关闭重开
+          // 都是新会话：探针推进失效、提交锁不按旧在途恢复（重发例外）
+          const sameTarget = snapshot.state !== null && !snapshot.hidden
+            && definition.target(snapshot.state) === definition.target(state);
           const initialize = () => {
             if (snapshot.state !== null) definition.cleanup?.(snapshot.state);
-            // IKJPM5 选择隐藏（state 保留、hidden 未置）≠ 显式关闭（hidden=true、state 已 null）：
-            // 恢复路径提交锁按宿主在途重算上锁（同 select 选回规则），节点点击先于选择通知也不洗锁；
-            // 显式关闭重开的新会话不受旧在途约束（重发例外）
-            const resume = snapshot.state !== null && !snapshot.hidden;
+            const resume = sameTarget;
             if (!resume) ownershipGeneration += 1;
             const submitting = resume && definition.inFlight ? definition.inFlight(state) : false;
             snapshot = { state: definition.opened?.(state) ?? state, submitting, ...(definition.panel ? { visible: true, hidden: false } : {}) };
             changed();
           };
-          // IKJPXM 同目标会话恢复（preserve 面板：同卡、非显式关闭重开）不推进本 kind
-          // 纪元：在途请求的 isCurrent 身份保留，有效失败反馈不被重入吞掉；参数刷新与
-          // 在途只读重算照旧由 initialize 闭包完成。换目标不算恢复（同目标条件是
-          // IKJPXN 归属隔离的接缝）：仍按新会话推进纪元；重入即新身份的工具
-          //（reinitialize 面板与非面板编辑会话）与发送即退出的重开同样不受影响。
-          const sameTargetResume = definition.panel === 'preserve'
-            && snapshot.state !== null && !snapshot.hidden
-            && definition.target(snapshot.state) === definition.target(state);
+          // IKJPXM 同目标会话恢复（preserve 面板）不推进本 kind 纪元：在途请求的 isCurrent
+          // 身份保留，有效失败反馈不被重入吞掉；参数刷新与在途只读重算照旧由 initialize
+          // 闭包完成。换目标、显式关闭重开、reinitialize 面板与非面板编辑会话的重入仍按
+          // 新会话推进纪元。
+          const sameTargetResume = definition.panel === 'preserve' && sameTarget;
           if (!sameTargetResume) {
             epoch.advanceAll();
             epoch.enter(definition.kind);
