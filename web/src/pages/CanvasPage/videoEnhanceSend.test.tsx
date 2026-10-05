@@ -364,7 +364,7 @@ describe('IKH3VH 发送创建任务闭环', () => {
     expect((mediaNode('v1').data as Record<string, unknown>).src).toBe('http://vid/v1.mp4');
   });
 
-  it('创建失败（网络）：面板已交接关闭、卡回草稿不写 jobId，点卡可重开面板重发', async () => {
+  it('创建失败（网络）：面板保留可重发、卡保持草稿不写 jobId、submitting 复位后发送钮可再点', async () => {
     seedDoc();
     apiMocks.createVideoEnhancement.mockRejectedValue(new Error('network down'));
     await renderPage();
@@ -372,19 +372,15 @@ describe('IKH3VH 发送创建任务闭环', () => {
     const draftId = hdDraft()!.id;
 
     await sendHd();
-    await act(async () => {});
 
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
-    // IKJJR3：提交点即交接运行时（面板关闭）；受理失败草稿回配置态（不转生成中、无 jobId）
-    expect(panelSend()).toBeNull();
+    // 面板保留（发送钮仍在）且提交中已复位（可再点）；卡保持草稿原状（未转生成中、无 jobId）
+    expect(panelSend()).toBeTruthy();
+    expect(panelSend()!.disabled).toBe(false);
     const data = mediaNode(draftId).data as Record<string, unknown>;
     expect(data.genStatus).toBe('draft');
     expect(data.jobId).toBeUndefined();
     expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
-    // 点卡重开面板可再次发送（重发新提交）
-    await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
-    expect(panelSend()).toBeTruthy();
-    expect(panelSend()!.disabled).toBe(false);
   });
 
   it('生成中点卡重开面板：参数只读冻结（发送钮禁用）', async () => {
@@ -407,48 +403,51 @@ describe('IKH3VH 发送创建任务闭环', () => {
 });
 
 describe('HD 面板迟到请求与新会话', () => {
-  it.each(['success', 'failure'] as const)('提交在途关闭重开：面板只读防重复受理，旧%s落定后照常收敛原卡', async (outcome) => {
+  it.each(['success', 'failure'] as const)('关闭同卡重开再提交后，旧%s不回写原卡或续链，新面板与锁保留', async (outcome) => {
     seedDoc();
     let resolveOld!: (value: { job_id: string; status: 'queued' }) => void;
     let rejectOld!: (error: unknown) => void;
     apiMocks.createVideoEnhancement
-      .mockImplementationOnce(() => new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject; }));
+      .mockImplementationOnce(() => new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject; }))
+      .mockImplementationOnce(() => new Promise(() => {}));
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j-old', status: 'processing', progress: 0, asset: null });
     await renderPage();
     await videoEnhance();
     const draftId = hdDraft()!.id;
     await clickPanelResolution('2k');
     await act(async () => { panelSend()!.click(); });
-    // IKJJR3：提交点即交接运行时（面板关、卡转生成中、submitting 窗口统一防重——
-    // 用户故事 5；受理窗口内的显式重发不再受理，等落定后可再发）
-    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    await act(async () => { panelClose()!.click(); });
     await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
-    expect(document.body.textContent).toContain('生成中，参数只读');
+    await clickPanelResolution('4k');
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+      source_asset_id: '5', target_node_id: draftId, resolution: '4k',
+    }, expect.objectContaining({ silent: true, canvasBinding: expect.anything(), idempotencyKey: expect.any(String) }));
     await act(async () => {
       if (outcome === 'success') resolveOld({ job_id: 'j-old', status: 'queued' });
       else rejectOld(new Error('old network'));
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1); // 防重窗口内不重复受理
+    expect(panelSend()).not.toBeNull();
+    expect(panelSend()!.disabled).toBe(true);
+    expect(panelResolution('4k')!.className).toContain('resolutionBtnActive');
+    expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
     if (outcome === 'success') {
-      expect(mediaNode(draftId).data.jobId).toBe('j-old');
-      expect(mediaNode(draftId).data.genStatus).toBe('generating');
-    } else {
-      // 受理失败：草稿回配置态（可重开重发），失败反馈只在发送时提示一次（会话已交接）
-      expect(mediaNode(draftId).data.genStatus).toBe('draft');
       expect(mediaNode(draftId).data.jobId).toBeUndefined();
+      expect(mediaNode(draftId).data.genStatus).toBe('draft');
+      expect(apiMocks.fetchJobStatus).not.toHaveBeenCalledWith('j-old');
+    } else {
+      expect(panelSend()!.title).toBe('正在保存并提交，参数只读');
+      expect(mediaNode(draftId).data.genStatus).toBe('draft');
     }
     expect(flowProps.current.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'v1', target: draftId, data: { origin: VIDEO_ENHANCE_EDGE_ORIGIN } }),
     ]));
   });
 
-  it('发送在途显式关闭（X）再重开：在途只读防重复受理，受理失败解锁后可再次发送', async () => {
-    let rejectFirst!: (error: unknown) => void;
+  it('发送在途显式关闭（X）再重开：新会话可再次发送，创建接口再次受理', async () => {
     seedDoc();
-    apiMocks.createVideoEnhancement
-      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }))
-      .mockImplementationOnce(() => new Promise(() => {}));
+    apiMocks.createVideoEnhancement.mockImplementation(() => new Promise(() => {}));
     await renderPage();
     await videoEnhance();
     const draftId = hdDraft()!.id;
@@ -456,22 +455,20 @@ describe('HD 面板迟到请求与新会话', () => {
     await act(async () => { panelSend()!.click(); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-    // IKJJR3：提交点即交接（面板同步关闭、卡转生成中）；在途重开面板只读，submitting
-    // 窗口统一防重（用户故事 5）——受理落定失败后草稿回配置态，可再次发送
+    // 显式关闭（X）：面板关、草稿卡保留（创建仍在途不落地）
+    await act(async () => { panelClose()!.click(); });
     expect(panelSend()).toBeNull();
+
+    // 重开（点 HD 草稿卡）：显式关闭即新会话，发送钮可点（对比选中隐藏回看的在途只读口径）
     await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
-    expect(document.body.textContent).toContain('生成中，参数只读');
-    await act(async () => {
-      rejectFirst(new Error('network'));
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    });
-    expect(mediaNode(draftId).data.genStatus).toBe('draft');
+    expect(panelSend()).toBeTruthy();
+    expect(panelSend()!.disabled).toBe(false);
     await act(async () => { panelSend()!.click(); });
 
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: draftId, resolution: '2k',
-    }, { silent: true, canvasBinding: expect.anything(), idempotencyKey: expect.any(String) });
+    }, expect.objectContaining({ silent: true, canvasBinding: expect.anything(), idempotencyKey: expect.any(String) }));
   });
 
   it('发送在途选中其它卡再选回本卡：面板重现仍在途只读，同卡不重复受理', async () => {
@@ -962,23 +959,19 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
 
-    // A 最后收尾：成功则原卡转生成中（轮询接线）；失败则限制解除、面板恢复可再操作
+    // A 已被新 B 接管：迟到成功与失败都不回写原卡，仅结算自己的在途资源。
     await act(async () => {
       if (outcome === 'success') settleOld({ job_id: 'j-old', status: 'queued' });
       else rejectOld(new Error('old network'));
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     const data = mediaNode('h1').data as Record<string, unknown>;
-    if (outcome === 'success') {
-      expect(data.genStatus).toBe('generating');
-      expect(data.jobId).toBe('j-old');
-      expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j-old');
-    } else {
-      expect(data.genStatus).toBe('failed');
-      expect(panelSend()!.disabled).toBe(false);
-      await act(async () => { panelSend()!.click(); });
-      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(3);
-    }
+    expect(data.genStatus).toBe('failed');
+    expect(data.jobId).toBe('88');
+    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalledWith('j-old');
+    expect(panelSend()!.disabled).toBe(false);
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(3);
   });
 
   it.each(['success', 'failure'] as const)('旧重试先%s返回而新会话发送仍等待：新会话锁不被旧收尾复位，再点不受理', async (outcome) => {
@@ -1009,11 +1002,10 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(panelResolution('2k')!.disabled).toBe(true);
     await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
-    if (outcome === 'success') {
-      const data = mediaNode('h1').data as Record<string, unknown>;
-      expect(data.genStatus).toBe('generating');
-      expect(data.jobId).toBe('j-old');
-    }
+    const data = mediaNode('h1').data as Record<string, unknown>;
+    expect(data.genStatus).toBe('failed');
+    expect(data.jobId).toBe('88');
+    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalledWith('j-old');
   });
 
   /* IKJPM5：选择隐藏 ≠ 显式关闭——A 重试等待时点击其他卡隐藏面板，再真实点击原卡返回

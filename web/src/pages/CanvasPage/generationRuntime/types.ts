@@ -306,6 +306,10 @@ export interface GenerationRuntime {
 
 /** submit 选项（页面保留的提交时机差异）。 */
 export interface SubmitOptions {
+  /** HD 显式关闭重开的新会话可替代仍在创建中的旧意图；普通提交保持防重。 */
+  replaceSubmitting?: boolean;
+  /** HD 创建返回前保留卡片原态，由同步在途登记承担面板与重试防重。 */
+  deferGeneratingUntilAccepted?: boolean;
   /** 创建失败（受理前）页面特有收敛（余额不足/401 续跑/原位回退）。
    *  返回 true = 已处理，运行时跳过通用失败落卡。 */
   onCreateFailure?(e: unknown, ctx: { nodeId: string; target?: BindingTargetFacts }): boolean;

@@ -67,7 +67,7 @@ import {
 
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
 import { type ImageEnhanceSubmission, type VideoEnhanceSubmission, type FrameInterpolationSubmission } from './panelToolSessions';
-import { isSilentAuthError } from './toolSessionCapture';
+import { apiErrorMessage, isSilentAuthError } from './toolSessionCapture';
 import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import {
   AUDIO_TRIM_EDGE_ORIGIN,
@@ -440,9 +440,11 @@ export default function CanvasPage() {
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
-  /* IKJJR3：插帧/HD 创建在途与插帧恢复阻断的原 ref 集合已随家族迁入生成任务运行时——
-   * 在途窗口 = 运行时 submitting 阶段（statusOf），面板提交锁据此重算；恢复参数可信度
-   * 由 frozenParams ?? lastParams 的冻结输入判定承担（A.6 阻止不可信重试）。 */
+  /** HD 合法多请求各自结算；旧执行失效后，物理创建请求仍属于同卡在途窗口。 */
+  const videoEnhanceInFlightRef = useRef(new Map<string, Set<{ projectId: string | null; loadEpoch: object }>>());
+  const isVideoEnhanceCardInFlight = (nodeId: string) =>
+    [...(videoEnhanceInFlightRef.current.get(nodeId) ?? [])].some((request) =>
+      request.projectId === activeProjectRef.current && request.loadEpoch === docLoadEpochRef.current);
   const toolHostsRef = useRef<Partial<CanvasToolHosts>>({});
   const toolViewRef = useRef<CanvasToolView | null>(null);
   const toolDepsRef = useRef<ToolSessionDeps | null>(null);
@@ -7053,10 +7055,25 @@ export default function CanvasPage() {
         showToast('warn', '未选中项目，无法重试');
         return;
       }
+      const hdRetry = videoToolFrozenPayload(nodeId, (node.data ?? {}) as Record<string, unknown>)?.kind === 'videoEnhance';
+      if (hdRetry && (isVideoEnhanceCardInFlight(nodeId) || node.data.genStatus === 'generating' || node.data.genStatus === 'checking')) return;
+      const ownsHdSession = hdRetry ? toolRuntime.captureSessionOwnership('videoEnhance') : null;
+      const finishHd = hdRetry ? beginVideoEnhanceSubmission(nodeId) : null;
       generationRuntimeRef.current.retry(nodeId, {
+        deferGeneratingUntilAccepted: hdRetry,
+        onStale: () => finishHd?.(),
+        onCreateFailure: hdRetry ? (error: unknown) => {
+          finishHd?.();
+          if (!isSilentAuthError(error) && ownsHdSession?.() && !isVideoEnhanceCardInFlight(nodeId)) {
+            if (isApiError(error)) globalToast.error(error.message);
+            showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
+          }
+          return false;
+        } : undefined,
         // 受理即冻结对重试路径同样成立（IKHSFH）：重试受理后 frozenParams/lastParams 写卡
         //（旧持久化卡由此补齐权威冻结来源），面板后来的编辑只改 lastParams 不改它。
         onAccepted: () => {
+          finishHd?.();
           const identityData = (mediaNodesRef.current.find((n) => n.id === nodeId)?.data ?? {}) as Record<string, unknown>;
           const frozen = videoToolFrozenPayload(nodeId, identityData);
           const frameIdentity = identityData.frameInterpolation as FrameInterpolationIdentity | undefined;
@@ -7751,32 +7768,45 @@ export default function CanvasPage() {
   };
   recoverFrameInterpolationRef.current = recoverFrameInterpolation;
 
-  /** HD 任务提交（IKJJR3）：原卡转生成中后交运行时受理（draft 角色先落盘再 POST，B.3）；
+  const beginVideoEnhanceSubmission = (nodeId: string) => {
+    const pending = videoEnhanceInFlightRef.current.get(nodeId) ?? new Set<{ projectId: string | null; loadEpoch: object }>();
+    const request = { projectId: activeProjectRef.current, loadEpoch: docLoadEpochRef.current };
+    pending.add(request);
+    videoEnhanceInFlightRef.current.set(nodeId, pending);
+    toolRuntime.notifyInFlight('videoEnhance', nodeId);
+    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
+    return () => {
+      if (!pending.delete(request)) return;
+      if (pending.size === 0) videoEnhanceInFlightRef.current.delete(nodeId);
+      toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
+    };
+  };
+
+  /** HD 任务提交（IKJJR3）：交运行时受理（draft 角色先落盘再 POST，B.3）；
    *  受理即写 lastParams（失败重试原样重发、重新编辑回填共用）；受理失败草稿回配置态，
    *  轮询/归属/保存确认归运行时。 */
   const startVideoEnhanceJob = async (submission: VideoEnhanceSubmission): Promise<void> => {
     const { nodeId, payload: input, identity } = submission;
-    // 面板在途只读与选中隐藏再选回的 reconcile 数据源（提交锁由运行时 submitting 承载）；
-    // 不拦截受理——显式关闭重开的重发是既定行为
-    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
-    submitVideoToolTask({ kind: 'videoEnhance', input }, nodeId, {
-      onAccepted: () => {
-        // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
-        patchMediaNode(nodeId, { videoEnhance: { ...identity, lastParams: { resolution: input.resolution } } });
-      },
-      onCreateFailure: (e: unknown) => {
-        // 受理失败：HD 草稿卡回配置态（保留分辨率参数），面板可重发；不落通用失败卡
-        const rollback = mediaNodesRef.current.find((n) => n.id === nodeId);
-        const isDraft = ((rollback?.data ?? {}) as Record<string, unknown>).draft === true;
-        patchMediaNode(nodeId, { genStatus: isDraft ? 'draft' : undefined, progress: undefined, errorText: undefined });
-        if (!(e as { _skipped?: boolean })._skipped) {
-          showToast('error', isApiError(e) ? e.message : 'HD 高清任务创建失败，请重试');
-        }
-        return true;
-      },
+    const finish = beginVideoEnhanceSubmission(nodeId);
+    return new Promise<void>((resolve, reject) => {
+      const submitted = submitVideoToolTask({ kind: 'videoEnhance', input }, nodeId, {
+        replaceSubmitting: true,
+        onAccepted: () => {
+          finish();
+          patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
+          // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
+          patchMediaNode(nodeId, { videoEnhance: { ...identity, lastParams: { resolution: input.resolution } } });
+          resolve();
+        },
+        onCreateFailure: (e: unknown) => {
+          finish();
+          reject(e);
+          return true;
+        },
+        onStale: () => { finish(); resolve(); },
+      });
+      if (!submitted) { finish(); resolve(); }
     });
-    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
   };
 
   toolHostsRef.current.panels = {
@@ -7796,10 +7826,9 @@ export default function CanvasPage() {
       const node = mediaNodesRef.current.find((node) => node.id === nodeId);
       return Boolean(node && (node.data.draft === true || hasGenerationRecord(node)) && node.data[kind]);
     },
-    // IKJJR3：插帧/HD 面板提交锁 = 运行时 submitting 阶段（保存+创建受理窗口）；
-    // 受理完成即解锁（显式关闭重开的重发是既定行为），被接管/丢弃时随之清空。
+    // 插帧按运行时阶段重算；HD 按同卡所有物理创建请求重算，旧请求不清新请求的锁。
     isFrameInFlight: (nodeId) => generationRuntimeRef.current?.statusOf(nodeId)?.phase === 'submitting',
-    isVideoEnhanceInFlight: (nodeId) => generationRuntimeRef.current?.statusOf(nodeId)?.phase === 'submitting',
+    isVideoEnhanceInFlight: isVideoEnhanceCardInFlight,
     startImage: (input) => startImageEnhanceJob(input, true),
     startVideo: (input) => startVideoEnhanceJob(input),
     startFrame: startFrameInterpolationJob,

@@ -412,7 +412,13 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     if (!target) return false; // 本运行时承载画布承接型任务；无目标提交保持原路径
     const nodeId = target.targetNodeId;
     const existing = active.get(nodeId);
-    if (existing && existing.phase === 'submitting') return false; // 创建窗口防重入（重复点击）
+    if (existing && existing.phase === 'submitting') {
+      if (!options?.replaceSubmitting) return false; // 创建窗口防重入（重复点击）
+      // 显式新会话另起意图，旧执行永久失效，结果未知也不回退到旧执行。
+      submitAttempts.delete(nodeId);
+      retryAttempts.delete(nodeId);
+      retryInFlight.delete(nodeId);
+    }
     const execution: ActiveExecution = {
       round: nextRound(), projectId, loadEpoch: host.getLoadEpoch(), nodeId,
       phase: 'submitting', targetRole: target.seedTarget.role, def,
@@ -558,27 +564,42 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     };
     host.setActiveJob(nodeId, execution.round);
     active.set(nodeId, execution);
-    host.patchNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '', errorCode: undefined });
+    if (!options?.deferGeneratingUntilAccepted) {
+      host.patchNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '', errorCode: undefined });
+    }
 
     // 重试不前置保存（IKDMQV 契约「不读画布不落盘」）：目标卡在提交时已按角色落盘或经水合在服务端。
     def.retry!(projectId, jobId, { nodeId, nodeData: data }, binding, key)
       .then((created) => {
-        if (!owns(execution)) return;
+        if (!owns(execution)) { options?.onStale?.({ nodeId }); return; }
         retryInFlight.delete(nodeId);
         retryAttempts.delete(nodeId);
         const view = created.canvasBinding ?? null;
-        if (view && view.is_current === false) { active.delete(nodeId); host.clearActiveJob(nodeId); return; }
+        if (view && view.is_current === false) {
+          active.delete(nodeId);
+          host.clearActiveJob(nodeId);
+          options?.onStale?.({ nodeId });
+          return;
+        }
         if (view) { execution.submissionId = view.submission_id; adoptBindingView(view); }
         execution.jobId = String(created.jobId);
         execution.phase = 'generating';
-        host.patchNode(nodeId, { jobId: created.jobId });
+        host.patchNode(nodeId, {
+          jobId: created.jobId,
+          ...(options?.deferGeneratingUntilAccepted ? { genStatus: 'generating', progress: 0, errorText: '', errorCode: undefined } : {}),
+        });
         options?.onAccepted?.({ nodeId, jobId: String(created.jobId), submissionId: execution.submissionId ?? null });
         poll(execution, String(created.jobId));
       })
       .catch((e: unknown) => {
-        if (!owns(execution)) return;
+        if (!owns(execution)) { options?.onStale?.({ nodeId }); return; }
         retryInFlight.delete(nodeId);
         active.delete(nodeId);
+        // 受理冲突作废被拒意图；结果未知保留重放身份。页面回调结算本次等待。
+        const bindingConflict = adoptConflictBindingRevision(nodeId, e);
+        if (bindingConflict) retryAttempts.delete(nodeId);
+        const handled = options?.onCreateFailure?.(e, { nodeId });
+        if (handled) return;
         if (host.openRechargeForCreditsError(e)) {
           host.patchNode(nodeId, {
             genStatus: 'failed',
@@ -592,11 +613,6 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
           host.addAuthResume(() => { runtime.retry(nodeId); });
           return;
         }
-        // 受理冲突（对齐 submit，IKJP8A）：采纳服务端版本，并作废被拒绝的重试意图——
-        // 复核后再次点击是独立新意图（新 submission_id/幂等键 + 采纳后的版本）。
-        // 其他失败（网络超时等结果未知）不删 retryAttempts：同一意图重放保持原身份。
-        const bindingConflict = adoptConflictBindingRevision(nodeId, e);
-        if (bindingConflict) retryAttempts.delete(nodeId); // 意图已被服务端拒绝：不作为下次重试的身份
         if (host.findNode(nodeId) == null) return;
         host.patchNode(nodeId, {
           genStatus: 'failed',
