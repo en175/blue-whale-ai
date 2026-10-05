@@ -1,0 +1,6 @@
+interface:
+  display_name: "handoff start"
+  short_description: "整理会话摘要并启动接手任务，核验工作目录、任务标识和实际运行状态"
+  default_prompt: "使用 $handoff-start 启动一个接手当前工作的任务。"
+policy:
+  allow_implicit_invocation: false
