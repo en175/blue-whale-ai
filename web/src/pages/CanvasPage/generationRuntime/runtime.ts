@@ -147,6 +147,17 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     if (!isApiError(e) || typeof (e.data as { reason?: unknown } | null)?.reason !== 'string') return null;
     return (e.data as { reason: string }).reason;
   };
+  /** 受理冲突（他端先一步推进归属，IKJKU1/IKJP8A）：判定 409 归属冲突并采纳服务端版本进
+   *  归属台账（只前进不回退）；返回是否冲突。意图作废与失败文案由调用方各自处理。 */
+  const adoptConflictBindingRevision = (nodeId: string, e: unknown): boolean => {
+    const bindingConflict = isApiError(e) && e.status === 409 && recoveryReason(e) === 'canvas_binding_conflict';
+    if (!bindingConflict) return false;
+    const current = (e.data as { currentBindingRevision?: unknown }).currentBindingRevision;
+    if (typeof current === 'number' && current > (nodeBindings.get(nodeId) ?? 0)) {
+      nodeBindings.set(nodeId, current);
+    }
+    return true;
+  };
 
   /** 取消保留卡（草稿/既有素材角色）的回退意图：下次保存以 settleTarget 显式确认。 */
   const queueSettleIntent = (execution: ActiveExecution) => {
@@ -464,15 +475,9 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       })
       .catch((e: unknown) => {
         if (!owns(execution)) { options?.onStale?.({ nodeId }); return; } // 旧执行不得改当前归属版本或画布，旧等待收尾
-        // 受理冲突（他端先一步推进归属，IKJKU1）：不采纳服务端版本重发——保留用户输入
-        // 与画布内容按创建失败收敛；服务端版本进归属台账，复核后的新意图用新 submission_id。
-        const bindingConflict = isApiError(e) && e.status === 409 && recoveryReason(e) === 'canvas_binding_conflict';
-        if (bindingConflict) {
-          const current = (e.data as { currentBindingRevision?: unknown }).currentBindingRevision;
-          if (typeof current === 'number' && current > (nodeBindings.get(nodeId) ?? 0)) {
-            nodeBindings.set(nodeId, current);
-          }
-        }
+        // 受理冲突：不采纳服务端版本重发——保留用户输入与画布内容按创建失败收敛；
+        // 服务端版本进归属台账，复核后的新意图用新 submission_id。
+        const bindingConflict = adoptConflictBindingRevision(nodeId, e);
         active.delete(nodeId);
         if (bindingConflict) submitAttempts.delete(nodeId); // 意图已被服务端拒绝：复核后再发是独立新意图
         if ((e as { _skipped?: boolean })._skipped) {
@@ -579,17 +584,11 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
           host.addAuthResume(() => { runtime.retry(nodeId); });
           return;
         }
-        // 受理冲突（对齐 submit，IKJP8A）：采纳服务端版本（只前进不回退），并作废被拒绝的
-        // 重试意图——复核后再次点击是独立新意图（新 submission_id/幂等键 + 采纳后的版本）。
+        // 受理冲突（对齐 submit，IKJP8A）：采纳服务端版本，并作废被拒绝的重试意图——
+        // 复核后再次点击是独立新意图（新 submission_id/幂等键 + 采纳后的版本）。
         // 其他失败（网络超时等结果未知）不删 retryAttempts：同一意图重放保持原身份。
-        const bindingConflict = isApiError(e) && e.status === 409 && recoveryReason(e) === 'canvas_binding_conflict';
-        if (bindingConflict) {
-          const current = (e.data as { currentBindingRevision?: unknown }).currentBindingRevision;
-          if (typeof current === 'number' && current > (nodeBindings.get(nodeId) ?? 0)) {
-            nodeBindings.set(nodeId, current);
-          }
-          retryAttempts.delete(nodeId); // 意图已被服务端拒绝：不作为下次重试的身份
-        }
+        const bindingConflict = adoptConflictBindingRevision(nodeId, e);
+        if (bindingConflict) retryAttempts.delete(nodeId); // 意图已被服务端拒绝：不作为下次重试的身份
         if (host.findNode(nodeId) == null) return;
         host.patchNode(nodeId, {
           genStatus: 'failed',
