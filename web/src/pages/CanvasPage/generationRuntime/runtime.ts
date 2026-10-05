@@ -571,10 +571,21 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
           host.addAuthResume(() => { runtime.retry(nodeId); });
           return;
         }
+        // 受理冲突（对齐 submit，IKJP8A）：采纳服务端版本（只前进不回退），并作废被拒绝的
+        // 重试意图——复核后再次点击是独立新意图（新 submission_id/幂等键 + 采纳后的版本）。
+        // 其他失败（网络超时等结果未知）不删 retryAttempts：同一意图重放保持原身份。
+        const bindingConflict = isApiError(e) && e.status === 409 && recoveryReason(e) === 'canvas_binding_conflict';
+        if (bindingConflict) {
+          const current = (e.data as { currentBindingRevision?: unknown }).currentBindingRevision;
+          if (typeof current === 'number' && current > (nodeBindings.get(nodeId) ?? 0)) {
+            nodeBindings.set(nodeId, current);
+          }
+          retryAttempts.delete(nodeId); // 意图已被服务端拒绝：不作为下次重试的身份
+        }
         if (host.findNode(nodeId) == null) return;
         host.patchNode(nodeId, {
           genStatus: 'failed',
-          errorText: isApiError(e) ? e.message : '重试失败',
+          errorText: bindingConflict ? '卡片归属已变化，请复核后再发送' : (isApiError(e) ? e.message : '重试失败'),
           errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
         });
       });
