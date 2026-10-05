@@ -7159,7 +7159,7 @@ export default function CanvasPage() {
         // 是否发送）或项目切换即新会话，旧响应不向其提示旧错误；恢复原会话、他工具
         // 开关与纯关闭未重开均保持归属（当前有效请求的失败提示保留）
         const ownsSession = toolRuntime.captureSessionOwnership('videoEnhance');
-        void startVideoEnhanceJob(input, true).catch((error: unknown) => {
+        void startVideoEnhanceJob(input).catch((error: unknown) => {
           if (isSilentAuthError(error)) return;
           // IKJPM7 静默传输（决策 7，口径同面板发送）：HTTP 层默认 toast 不再先于会话
           // 归属判断触发；有效会话的失败由本回调补回两路反馈（HTTP 路 + 页面路，与
@@ -8242,8 +8242,9 @@ export default function CanvasPage() {
   recoverFrameInterpolationRef.current = recoverFrameInterpolation;
 
   /** HD 任务受理后继续原卡生成、lastParams 落盘与轮询，失败保持原卡。
-   *  两入口均静默传输（IKJPM7）：反馈由持有会话身份的调用方回调统一提示。 */
-  const startVideoEnhanceJob = async (submission: VideoEnhanceSubmission, silent = false): Promise<void> => {
+   *  固定静默传输（IKJPM7，两入口一致）：HTTP 默认提示关闭，反馈由持有会话身份的
+   *  调用方回调统一给出。 */
+  const startVideoEnhanceJob = async (submission: VideoEnhanceSubmission): Promise<void> => {
     const { projectId, nodeId, payload: input, identity } = submission;
     const resolution = input.resolution;
     // 在途登记（口径同插帧 IKHSFH）：面板在途只读与选中隐藏再选回的 reconcile 数据源；
@@ -8254,7 +8255,7 @@ export default function CanvasPage() {
     toolRuntime.notifyInFlight('videoEnhance', nodeId);
     toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
     try {
-      const created = await (silent ? createVideoEnhancement(projectId, input, { silent: true }) : createVideoEnhancement(projectId, input));
+      const created = await createVideoEnhancement(projectId, input, { silent: true });
       // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startImageEnhanceJob）
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
@@ -8298,7 +8299,7 @@ export default function CanvasPage() {
     isFrameInFlight: (nodeId) => frameInterpolationInFlightRef.current.has(nodeId),
     isVideoEnhanceInFlight: isVideoEnhanceCardInFlight,
     startImage: (input) => startImageEnhanceJob(input, true),
-    startVideo: (input) => startVideoEnhanceJob(input, true),
+    startVideo: (input) => startVideoEnhanceJob(input),
     startFrame: startFrameInterpolationJob,
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
