@@ -13,8 +13,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Node } from '@xyflow/react';
+import { ReactFlowProvider, type Node } from '@xyflow/react';
 import CanvasPage from './index';
+import MediaNode from './components/MediaNode';
 import { VIDEO_ENHANCE_EDGE_ORIGIN } from './videoEnhance';
 import type { GenerationModel } from '@/api/generation';
 
@@ -225,6 +226,9 @@ function seedDoc(mode: 'draft' | 'failed' | 'chain' | 'generating' | 'done' = 'd
 
 let root: Root;
 let container: HTMLDivElement;
+/** 真实 MediaNode 挂载点（IKJP8Q：失败卡重试按钮真实渲染与点击，不以直接调回调为唯一证明） */
+let cardRoot: Root | null = null;
+let cardHost: HTMLDivElement | null = null;
 
 async function renderPage() {
   container = document.createElement('div');
@@ -280,6 +284,10 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  if (cardRoot) await act(async () => cardRoot!.unmount());
+  cardHost?.remove();
+  cardRoot = null;
+  cardHost = null;
   if (root) await act(async () => root.unmount());
   container?.remove();
   vi.clearAllMocks();
@@ -609,5 +617,250 @@ describe('IKH3VH 持久化恢复', () => {
     expect(data.width).toBe(1920);
     expect(data.height).toBe(1080);
     expect(data.jobId).toBe('88');
+  });
+});
+
+/* IKJP8Q：HD 失败卡重试与面板发送共用同卡同步提交准入。面板保持打开时两种顺序都只受理
+   一次；重试登记在途后已打开面板立即提交中只读；显式关闭重开仍是新会话例外（可再受理一次）；
+   合法多在途各自收尾，旧响应不关闭新面板、不解除新会话锁。重试经真实 MediaNode「重试」按钮
+   点击触发（挂载页面注入的最新节点数据，onRetryJob 仍路由页面 handler），面板用页面真实按钮。 */
+describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
+  /** 挂起的创建响应（在途窗口可控） */
+  const pendingCreate = () => new Promise<{ job_id: string; status: 'queued' }>(() => {});
+
+  /** 以页面当前节点数据真实渲染 MediaNode（ReactFlowProvider 上下文，同 cardHtml 先例）。
+   *  宿主带 .react-flow 类：模拟卡片真实所在的画布区域，命中 IKFYH6「画布外点击关面板」豁免。 */
+  async function mountCard(id: string) {
+    if (cardRoot) { await act(async () => cardRoot!.unmount()); cardRoot = null; }
+    cardHost?.remove();
+    const node = mediaNode(id);
+    cardHost = document.createElement('div');
+    cardHost.className = 'react-flow';
+    document.body.appendChild(cardHost);
+    cardRoot = createRoot(cardHost);
+    await act(async () => {
+      cardRoot!.render(
+        createElement(ReactFlowProvider, null, createElement(MediaNode, {
+          ...node, selected: false, dragging: false, zIndex: 1, selectable: true, deletable: true,
+          draggable: true, isConnectable: true, positionAbsoluteX: 0, positionAbsoluteY: 0,
+        } as never)),
+      );
+    });
+  }
+
+  const retryButton = () =>
+    [...(cardHost?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '重试');
+
+  /** 真实失败卡「重试」按钮点击（数据快照里的 onRetryJob 路由页面最新 handler） */
+  async function clickCardRetry() {
+    await act(async () => {
+      retryButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+  }
+
+  /** 打开失败卡 HD 面板（点卡重开，同「生成中点卡重开面板」路径） */
+  async function openHdPanel(id = 'h1') {
+    await act(async () => {
+      flowProps.current.onNodeClick(mediaNode(id));
+    });
+  }
+
+  it('先重试再发送：重试登记后已打开面板立即只读，面板发送不再受理（创建仅一次）', async () => {
+    seedDoc('failed');
+    apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+    await renderPage();
+    await openHdPanel();
+    expect(panelSend()!.disabled).toBe(false);
+
+    await mountCard('h1');
+    expect(retryButton()).toBeTruthy();
+    await clickCardRetry();
+    // 重试已受理：lastParams（4k）原样重发创建接口，不经通用 retry
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+      source_asset_id: '5', target_node_id: 'h1', resolution: '4k',
+    });
+    expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
+
+    // 重试登记在途 → 面板立即提交中只读（发送钮与分辨率参数均按既有只读规则禁用）；
+    // 再点发送（含强制派发）不重复受理
+    expect(panelSend()!.disabled).toBe(true);
+    expect(panelResolution('4k')!.disabled).toBe(true);
+    await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+  });
+
+  it('先发送再重试：面板受理在途后同卡重试被拒（创建仅一次），卡与参数不变、无额外提示', async () => {
+    seedDoc('failed');
+    apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+    await renderPage();
+    await openHdPanel();
+    await clickPanelResolution('2k');
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+      source_asset_id: '5', target_node_id: 'h1', resolution: '2k',
+    }, { silent: true });
+
+    await mountCard('h1');
+    await clickCardRetry();
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    // 防重拒绝不发请求、不改卡片结果或既有参数（lastParams 保持面板编辑写回的 2k）
+    const data = mediaNode('h1').data as Record<string, unknown>;
+    expect(data.genStatus).toBe('failed');
+    expect(identityOf(mediaNode('h1'))).toEqual({ sourceAssetId: '5', lastParams: { resolution: '2k' } });
+    expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
+  });
+
+  it('对照：面板内快速连点发送仍只受理一次（既有防重不削弱）', async () => {
+    seedDoc('failed');
+    apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+    await renderPage();
+    await openHdPanel();
+    await act(async () => {
+      panelSend()!.click();
+      panelSend()!.click();
+    });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+  });
+
+  it('对照：重试在途显式关闭面板重开属新会话，可主动再发送一次（创建共两次）', async () => {
+    seedDoc('failed');
+    apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+    await renderPage();
+    await openHdPanel();
+    await mountCard('h1');
+    await clickCardRetry();
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+    // 显式关闭（X）→ 重开 = 新会话：发送钮可用，可再受理一次
+    await act(async () => { panelClose()!.click(); });
+    expect(panelSend()).toBeNull();
+    await openHdPanel();
+    expect(panelSend()!.disabled).toBe(false);
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+  });
+
+  it('重试在途点卡冒泡重入当前可见面板：参数与提交中只读保留，不产生新提交机会', async () => {
+    seedDoc('failed');
+    apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+    await renderPage();
+    await openHdPanel();
+    await clickPanelResolution('2k');
+    await mountCard('h1');
+    await clickCardRetry();
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+    // 重试按钮点击冒泡到节点 onClick：可见同卡重入保留面板内容与提交状态
+    await openHdPanel();
+    expect(panelSend()!.disabled).toBe(true);
+    expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
+    await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+  });
+
+  it('重试创建失败后同卡限制解除：面板恢复可发送，再次操作正常受理', async () => {
+    seedDoc('failed');
+    apiMocks.createVideoEnhancement
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockImplementation(pendingCreate);
+    await renderPage();
+    await openHdPanel();
+    await mountCard('h1');
+    await clickCardRetry();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+    // 创建失败 → 面板恢复可操作（发送钮可用），再次发送受理第二次
+    expect(panelSend()!.disabled).toBe(false);
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+    expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+      source_asset_id: '5', target_node_id: 'h1', resolution: '4k',
+    }, { silent: true });
+  });
+
+  it('不同卡互不锁定：h1 重试在途时，源卡新发起的 HD 面板可正常发送', async () => {
+    seedDoc('failed');
+    apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j2', status: 'processing', progress: 10, asset: null });
+    await renderPage();
+    await openHdPanel();
+    await mountCard('h1');
+    await clickCardRetry();
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+    // 对源卡 v1 发起 HD：新建草稿卡并把面板切到它（h1 在途不波及）
+    await videoEnhance('v1');
+    const draft = mediaNodes().find((n) => n.id !== 'v1' && n.id !== 'h1')!;
+    expect(panelSend()!.disabled).toBe(false);
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+    expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+      source_asset_id: '5', target_node_id: draft.id, resolution: '1080p',
+    }, { silent: true });
+  });
+
+  it('重试在途选中其它卡再选回本卡：面板重现仍在途只读，不重复受理', async () => {
+    seedDoc('failed');
+    apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+    await renderPage();
+    await openHdPanel();
+    await mountCard('h1');
+    await clickCardRetry();
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')] }); });
+    expect(panelSend()).toBeNull();
+    await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('h1')] }); });
+    expect(panelSend()!.disabled).toBe(true);
+    await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+  });
+
+  it('合法多在途乱序收尾：旧重试失败返回不关闭新面板、不解除新会话锁，新请求仍可落卡', async () => {
+    seedDoc('failed');
+    let rejectOld!: (error: unknown) => void;
+    let resolveNew!: (value: { job_id: string; status: 'queued' }) => void;
+    apiMocks.createVideoEnhancement
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveNew = resolve; }));
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j2', status: 'processing', progress: 30, asset: null });
+    await renderPage();
+    await openHdPanel();
+    await mountCard('h1');
+    await clickCardRetry();
+
+    // 显式关闭重开 = 新会话，旧重试在途仍可再发送一次（共两次受理）
+    await act(async () => { panelClose()!.click(); });
+    await openHdPanel();
+    await clickPanelResolution('2k');
+    await act(async () => { panelSend()!.click(); });
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+
+    // 旧重试先返回（失败）：新面板不关闭、新会话提交锁不解除、卡不被旧请求改动
+    await act(async () => {
+      rejectOld(new Error('old network'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(panelSend()).toBeTruthy();
+    expect(panelSend()!.disabled).toBe(true);
+    expect((mediaNode('h1').data as Record<string, unknown>).genStatus).toBe('failed');
+
+    // 新会话自己的发送在途时，同卡失败重试同样被拒（US12 新会话互斥）
+    await mountCard('h1');
+    await clickCardRetry();
+    expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
+
+    // 新会话请求随后成功：卡原地转生成中并轮询（各自收尾互不提前释放）
+    await act(async () => {
+      resolveNew({ job_id: 'j2', status: 'queued' });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    const data = mediaNode('h1').data as Record<string, unknown>;
+    expect(data.genStatus).toBe('generating');
+    expect(data.jobId).toBe('j2');
+    expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j2');
   });
 });

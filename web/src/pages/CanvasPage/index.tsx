@@ -471,6 +471,8 @@ export default function CanvasPage() {
    *  显式关闭重开的重发是既定行为，同卡可并发在途，故计数而非布尔；面板选中隐藏再选回
    *  时运行时以此重算提交锁；每次完成/失败各减一，归零才视为不在途。 */
   const videoEnhanceInFlightRef = useRef<Map<string, number>>(new Map());
+  /** 同卡 HD 创建在途判定（IKJP8Q）：面板在途只读 reconcile、重试准入与旧响应提示守卫共用 */
+  const isVideoEnhanceCardInFlight = (id: string) => (videoEnhanceInFlightRef.current.get(id) ?? 0) > 0;
   /** 权威恢复未完成或失败时，禁止把编辑值当作受理参数重试。面板主动发送新配置不受影响。 */
   const frameInterpolationRecoveryBlockedRef = useRef<Set<string>>(new Set());
   const toolHostsRef = useRef<Partial<CanvasToolHosts>>({});
@@ -7147,9 +7149,19 @@ export default function CanvasPage() {
       // HD 卡分流（IKH3VH，镜像高清放大）：契约无 retry 端点，重试 = lastParams 原样重发
       // 创建接口（源素材与分辨率档随 lastParams 冻结，原参数重试）。
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      // IKJP8Q 共享提交准入：同卡已有创建在途（面板发送或先前重试）时静默拒绝——不发
+      // 请求、不改卡片与既有参数、不额外弹提示；检查与 startVideoEnhanceJob 的登记均在
+      // 首个异步等待前完成，无交错窗口
+      if (isVideoEnhanceCardInFlight(nodeId)) return;
       const input = captureVideoEnhance(toolHostsRef.current.panels!, nodeId, restoreVideoEnhanceResolution(videoEnhanceIdentity.lastParams));
       if (input) void startVideoEnhanceJob(input).catch((error: unknown) => {
-        if (!isSilentAuthError(error)) showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
+        if (isSilentAuthError(error)) return;
+        // 旧重试返回时同卡已有新提交在途或卡已被新请求接管：不提示旧错误（会话
+        // 归属仍由面板侧纪元守卫，此处只挡重试路径的兜底提示）
+        if (isVideoEnhanceCardInFlight(nodeId)) return;
+        const nodeNow = mediaNodesRef.current.find((item) => item.id === nodeId);
+        if ((nodeNow?.data as Record<string, unknown> | undefined)?.genStatus !== 'failed') return;
+        showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
       });
       return;
     }
@@ -8227,6 +8239,9 @@ export default function CanvasPage() {
     // 在途登记（口径同插帧 IKHSFH）：面板在途只读与选中隐藏再选回的 reconcile 数据源；
     // 不拦截受理——显式关闭重开的重发是既定行为，同帧连点由运行时 submitting 同步挡
     videoEnhanceInFlightRef.current.set(nodeId, (videoEnhanceInFlightRef.current.get(nodeId) ?? 0) + 1);
+    // IKJP8Q 共享提交准入：登记在途即令同卡已打开面板提交中只读（失败卡重试与面板发送
+    // 共用）；显式关闭重开的新会话无会话状态不受影响，面板自身发送已持锁处幂等
+    toolRuntime.notifyInFlight('videoEnhance', nodeId);
     toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
     try {
       const created = await (silent ? createVideoEnhancement(projectId, input, { silent: true }) : createVideoEnhancement(projectId, input));
@@ -8271,7 +8286,7 @@ export default function CanvasPage() {
       return Boolean(node && (node.data.draft === true || hasGenerationRecord(node)) && node.data[kind]);
     },
     isFrameInFlight: (nodeId) => frameInterpolationInFlightRef.current.has(nodeId),
-    isVideoEnhanceInFlight: (nodeId) => (videoEnhanceInFlightRef.current.get(nodeId) ?? 0) > 0,
+    isVideoEnhanceInFlight: isVideoEnhanceCardInFlight,
     startImage: (input) => startImageEnhanceJob(input, true),
     startVideo: (input) => startVideoEnhanceJob(input, true),
     startFrame: startFrameInterpolationJob,

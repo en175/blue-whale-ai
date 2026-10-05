@@ -146,6 +146,32 @@ describe('工具会话运行时公开接口', () => {
     expect(split.getSnapshot()).toEqual({ state: null, submitting: false });
   });
 
+  /* IKJP8Q 旁路在途登记（失败卡重试 → 已打开面板提交中只读）：页面测试无法观测
+     「面板从未打开时点重试」分支，此处接口级补齐。 */
+  it('旁路在途登记 notifyInFlight：未打开无副作用、他卡不上锁、同卡上锁幂等、宿主归零 reconcile 解锁', () => {
+    const runtime = createToolSessionRuntime();
+    let inFlight = true;
+    const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve',
+      inFlight: () => inFlight,
+      reconcile: (state) => state,
+    });
+    // 从未打开（无会话状态）：登记无副作用——显式关闭重开的新会话例外不受影响
+    runtime.notifyInFlight('videoEnhance', 'v1');
+    expect(panel.getSnapshot()).toEqual({ state: null, submitting: false, visible: false, hidden: false });
+
+    panel.open('v1', sessionDeps());
+    // 他卡目标不匹配不上锁；同卡登记上锁且重复登记幂等
+    runtime.notifyInFlight('videoEnhance', 'v2');
+    expect(panel.getSnapshot().submitting).toBe(false);
+    runtime.notifyInFlight('videoEnhance', 'v1');
+    runtime.notifyInFlight('videoEnhance', 'v1');
+    expect(panel.getSnapshot().submitting).toBe(true);
+    // 宿主在途归零后 reconcile 解锁（创建失败恢复可操作）
+    inFlight = false;
+    runtime.reconcileSources(new Set(['v1']));
+    expect(panel.getSnapshot().submitting).toBe(false);
+  });
+
 });
 
 it.each(['close', 'escape', 'selection', 'pane', 'generation'] as const)('公开接口 %s 退出丢弃编辑态，空选中保留会话', (route) => {

@@ -59,7 +59,7 @@ export interface ToolSessionHandle<State, Entry, Request = void> {
 /** 注册工具的编辑状态与纪元由此持有；节点、连线和任务处理仍由宿主提供。 */
 export function createToolSessionRuntime() {
   const epoch = createToolSessionEpoch();
-  const tools = new Map<string, CoordinatedTool & { reset(): void; reconcile(): void; select(selection: { soloId: string | null; multiSelect: boolean }): void }>();
+  const tools = new Map<string, CoordinatedTool & { reset(): void; reconcile(): void; select(selection: { soloId: string | null; multiSelect: boolean }): void; lockForInFlight(targetId: string): void }>();
   const listeners = new Set<() => void>();
   let version = 0;
   let projectId: string | null | undefined;
@@ -104,6 +104,12 @@ export function createToolSessionRuntime() {
         if (target !== null && !nodeIds.has(target)) tool.close();
         else tool.reconcile();
       }
+    },
+    /** 旁路受理登记（如失败卡重试）：给当前打开且目标同卡的会话上提交锁，面板立即
+     *  提交中只读。从未打开或已显式关闭的面板无会话状态，不受影响——显式关闭重开的
+     *  新会话保留重发例外；面板自身发送已持锁，重复登记幂等。 */
+    notifyInFlight(kind: string, targetId: string) {
+      tools.get(kind)?.lockForInFlight(targetId);
     },
     register<State, Entry, Input, Request = void>(definition: ToolSessionDefinition<State, Entry, Input, Request>): ToolSessionHandle<State, Entry, Request> {
       let snapshot: ToolSessionSnapshot<State> = { state: null, submitting: false, ...(definition.panel ? { visible: false, hidden: false } : {}) };
@@ -173,6 +179,12 @@ export function createToolSessionRuntime() {
         panel: Boolean(definition.panel),
         target: () => snapshot.state === null ? null : definition.target(snapshot.state),
         close: () => close(),
+        lockForInFlight(targetId: string) {
+          if (snapshot.state === null || snapshot.submitting || snapshot.visible === false) return;
+          if (definition.target(snapshot.state) !== targetId) return;
+          snapshot = { ...snapshot, submitting: true };
+          changed();
+        },
         reset() {
           close(false);
           if (definition.panel) snapshot = { ...snapshot, hidden: false };
