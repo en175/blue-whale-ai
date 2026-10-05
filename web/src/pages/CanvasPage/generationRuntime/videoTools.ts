@@ -166,6 +166,7 @@ export function buildVideoToolRecoveryNode(
       mediaType: spec.mediaType,
       fileName: seed?.name || spec.recoveryName,
       jobId: record.job_id,
+      ...(failed ? { generationRecovery: { protocolVersion: 1, submissionId: record.submission_id, outputKey: TARGET_OUTPUT_KEY } } : {}),
       ...(failed ? { errorText: readJobFailText(record.job?.stored_error as { code?: string | number; message?: string; msg?: string } | null) || `${spec.recoveryName}失败，请重试` } : {}),
       ...(seed && seed.width > 0 && seed.height > 0 ? { width: seed.width, height: seed.height } : {}),
       [spec.identityKey]: {},
@@ -210,6 +211,7 @@ export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
     const spec = SPEC_BY_TASK_TYPE.get(record.task_type);
     if (spec == null) return { kind: 'none' };
     const status = record.job?.status;
+    const target = host.findNode(record.target_node_id);
     // 已取消：不猜卡（草稿回退/空占位移除已按服务端状态收敛）
     if (status !== 'queued' && status !== 'processing' && status !== 'checking'
       && status !== 'succeeded' && status !== 'failed') return { kind: 'none' };
@@ -217,11 +219,24 @@ export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
     if (status === 'succeeded' || status === 'failed') {
       const primary = record.items.find((item) => item.output_key !== TARGET_OUTPUT_KEY);
       if (status === 'succeeded' && (primary == null || primary.state !== 'pending')) return { kind: 'none' };
-      if (status === 'failed' && host.findNode(record.target_node_id) != null) return { kind: 'none' };
+      if (status === 'failed') {
+        if (!record.is_current) return { kind: 'none' };
+        if (target != null) {
+          const marker = target.data?.generationRecovery as Record<string, unknown> | undefined;
+          if (marker?.protocolVersion === 1 && marker.submissionId === record.submission_id
+            && ((typeof marker.outputKey === 'string' && marker.outputKey !== TARGET_OUTPUT_KEY)
+              || (target.data?.genStatus === 'failed' && String(target.data?.jobId) === record.job_id))) return { kind: 'none' };
+          // 可靠当前记录已通过运行时归属守卫；不覆盖现有家族冻结输入与卡片编辑。
+          host.patchNode(record.target_node_id, {
+            jobId: record.job_id,
+            generationRecovery: { protocolVersion: 1, submissionId: record.submission_id, outputKey: TARGET_OUTPUT_KEY },
+            [spec.identityKey]: target.data?.[spec.identityKey] ?? {},
+          });
+        }
+      }
     }
     // 目标卡缺失（受理回执丢失）：先按恢复种子补卡 + 来源线（仅实际画布节点，不伪造），
     // 续轮询由恢复扫描接管（一对一转换复用本卡）
-    const target = host.findNode(record.target_node_id);
     if (target == null) {
       host.insertMediaNode(buildVideoToolRecoveryNode(record, spec));
       for (const source of record.recovery_seed?.sources ?? []) {

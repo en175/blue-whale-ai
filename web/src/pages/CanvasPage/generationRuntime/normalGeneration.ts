@@ -85,7 +85,8 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
   },
 
   planRecovery(record: GenerationRecoveryRecord, host: GenerationRuntimeHost): RecoveryCardPlan {
-    const targetExists = host.findNode(record.target_node_id) != null;
+    const target = host.findNode(record.target_node_id);
+    const targetExists = target != null;
     const jobStatus = record.job?.status;
     // present 且卡仍在画布且卡带匹配 marker = 已应用成品在场（已保存编辑）：不再扇出
     // （B.3 一对一成品卡保护）；present 而卡缺席（误删/丢失）仍补出；present 而卡在场
@@ -122,9 +123,18 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
       if (!targetExists) return { kind: 'restore-target', node: buildRecoveryTargetNode(record) };
       return { kind: 'resume-polling' };
     }
-    if (jobStatus === 'failed' && !targetExists) {
-      // 受理回执丢失 + 已失败：补失败卡（可按服务端冻结输入重试），不静默吞掉入口
-      return { kind: 'restore-target', node: buildRecoveryTargetNode(record) };
+    if (jobStatus === 'failed' && record.is_current) {
+      if (target == null) return { kind: 'restore-target', node: buildRecoveryTargetNode(record) };
+      const marker = target.data?.generationRecovery as Record<string, unknown> | undefined;
+      if (marker?.protocolVersion === 1 && marker.submissionId === record.submission_id
+        && ((typeof marker.outputKey === 'string' && marker.outputKey !== TARGET_OUTPUT_KEY)
+          || (target.data?.genStatus === 'failed' && String(target.data?.jobId) === record.job_id))) return { kind: 'none' };
+      // 可靠当前记录已通过运行时归属守卫；已有未确认占位只回填身份，再沿权威终态收敛。
+      host.patchNode(record.target_node_id, {
+        jobId: record.job_id,
+        generationRecovery: { protocolVersion: 1, submissionId: record.submission_id, outputKey: TARGET_OUTPUT_KEY },
+      });
+      return { kind: 'resume-polling' };
     }
     return { kind: 'none' };
   },
@@ -169,6 +179,7 @@ export function buildRecoveryTargetNode(record: GenerationRecoveryRecord): {
       mediaType,
       fileName,
       jobId: record.job_id,
+      ...(failed ? { generationRecovery: { protocolVersion: 1, submissionId: record.submission_id, outputKey: TARGET_OUTPUT_KEY } } : {}),
       ...(failed && failText ? { errorText: failText } : {}),
       ...(size ? size : {}),
     },
