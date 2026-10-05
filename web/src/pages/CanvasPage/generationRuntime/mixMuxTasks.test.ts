@@ -437,6 +437,26 @@ describe('恢复落卡规划（planRecovery）', () => {
     expect(plan.node.data).toMatchObject({ genStatus: 'failed', errorText: '供应商超时', jobId: '73' });
   });
 
+  it('失败记录：缺卡身份不可信无画布动作；在场已收敛终态不重轮询；仅未确认占位接续', () => {
+    const failedRecord = record({
+      target_node_id: 'm1', job_id: '79', task_type: 'audio_video_mux',
+      job: { job_id: '79', type: 'audio_video_mux', status: 'failed', progress: 0, output_asset_ids: null, stored_error: { msg: '供应商超时' }, created_at: '2026-10-01T00:00:00Z' },
+      recovery_seed: { target: { role: 'draft', x: 1040, y: 0, width: 320, height: 320, name: '音视频合成' }, sources: [] },
+      previous_target_snapshot: { data: {} }, // 快照无身份：buildRestore 不可信
+    });
+    // 缺卡且身份不可信：不为不存在节点建执行/起轮询（IKJPVK 收回，旧行为 none）
+    expect(audioVideoMuxTask.planRecovery!(failedRecord, createFakeHost().host)).toEqual({ kind: 'none' });
+    // 在场已收敛终态（历史失败卡，有受理身份）：不重轮询，防权威失败覆盖既有终态
+    const settled = createFakeHost().host;
+    settled.insertMediaNode(muxDraftNode('m1', 'failed'));
+    expect(audioVideoMuxTask.planRecovery!(failedRecord, settled)).toEqual({ kind: 'none' });
+    // 在场未确认占位（生成中/缺 jobId）：接续，首次轮询收敛为可重试失败卡（IKJPVK）
+    const placeholder = createFakeHost().host;
+    const generating = muxDraftNode('m1', 'generating');
+    placeholder.insertMediaNode({ ...generating, data: { ...generating.data, jobId: undefined } });
+    expect(audioVideoMuxTask.planRecovery!(failedRecord, placeholder)).toEqual({ kind: 'resume-polling' });
+  });
+
   it('成功且有未应用输出：走扇出投影（mediaType 按家族）', () => {
     const plan = audioMixTask.planRecovery!(record({
       job: { job_id: '73', type: 'audio_mix', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },

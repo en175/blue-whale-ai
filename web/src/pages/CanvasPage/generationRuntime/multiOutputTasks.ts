@@ -26,6 +26,7 @@ import {
 } from '../vocalSplit';
 import type { VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import { mediaContentBox } from '../components/MediaNode/mediaContentSize';
+import { isJobInFlight } from './types';
 import type {
   CreateJobOutcome, FanoutCardPlan, FanoutContext, GenerationRuntimeHost,
   GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
@@ -214,7 +215,7 @@ function multiResultPlanRecovery(
       },
     };
   }
-  if (jobStatus === 'queued' || jobStatus === 'processing' || jobStatus === 'checking') {
+  if (isJobInFlight(jobStatus)) {
     if (!targetExists) return { kind: 'restore-target', node: buildMultiResultTargetNode(record, options), edges: recoverySourceEdges(record, host, options.edgeOrigin) };
     return { kind: 'resume-polling' };
   }

@@ -11,9 +11,11 @@ import {
   type CanvasBinding, type GenerationRecoveryRecord, type RecoveryChange,
 } from '@/api/canvasRecovery';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
+import { isJobInFlight } from './types';
 import type {
   GenerationRuntime, GenerationRuntimeHost, GenerationTaskDefinition, InFlightTaskState,
   LedgerEntry, SubmitOptions, TaskSubmissionInput, RuntimeNodeView, CreateJobOutcome,
+  RecoveryRecordFacts,
 } from './types';
 import { seedTargetOfNode, seedSourcesOfNode } from './seedFacts';
 
@@ -740,6 +742,14 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     }
   };
 
+  /** 以可靠记录接续（IKJPVK）：def 与提交身份直供，接续不依赖卡上受理身份（identify
+   *  口径认不出缺 jobId 的已保存占位），受理身份缺失时由 resumeFromHydration 回填。 */
+  const resumeFromRecord = (record: GenerationRecoveryRecord, def?: GenerationTaskDefinition) => {
+    resumeFromHydration(record.target_node_id, record.job_id, undefined, {
+      def, submissionId: record.submission_id,
+    });
+  };
+
   /** 旧对账仍更新自身台账；目标已删除、被新意图接管或版本落后时，不动当前承接与画布。 */
   const reconcileRecord = (record: GenerationRecoveryRecord) => {
     const claiming = active.get(record.target_node_id);
@@ -776,12 +786,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
         if (restoreProject) void host.saveCanvas(restoreProject).catch(() => {}); // 补卡落盘：恢复场景本因卡不在服务端
         // IKJPVK：进行中任务补卡即接续——同一次加载内建立执行并启动轮询，不依赖
         // 用户再刷新或第二次扫描（普通保存/重渲染不保证触发第二次恢复）。
-        const jobStatus = record.job?.status;
-        if (def && (jobStatus === 'queued' || jobStatus === 'processing' || jobStatus === 'checking')) {
-          resumeFromHydration(record.target_node_id, record.job_id, undefined, {
-            def, submissionId: record.submission_id,
-          });
-        }
+        if (def && isJobInFlight(record.job?.status)) resumeFromRecord(record, def);
         break;
       }
       case 'apply-outputs': {
@@ -793,9 +798,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       case 'resume-polling': {
         // IKJPVK：def 与提交身份按可靠记录直供——卡上缺 jobId 的已保存占位（identify
         // 口径认不出）同样接续，并以记录回填受理身份。
-        resumeFromHydration(record.target_node_id, record.job_id, undefined, {
-          def, submissionId: record.submission_id,
-        });
+        resumeFromRecord(record, def);
         break;
       }
       case 'none':
@@ -840,7 +843,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     nodeId: string,
     jobId: string,
     nodeData?: Record<string, unknown>,
-    known?: { def?: GenerationTaskDefinition; submissionId?: string },
+    known?: RecoveryRecordFacts,
   ) => {
     const def = known?.def ?? (nodeData
       ? defs.find((candidate) => candidate.identify(nodeId, nodeData))

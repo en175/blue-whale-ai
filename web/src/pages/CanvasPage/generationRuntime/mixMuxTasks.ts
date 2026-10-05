@@ -16,6 +16,7 @@ import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
 import { isAudioMixNodeId, buildAudioMixPlaceholderNode, AUDIO_MIX_FORMATS, type AudioMixFormat } from '../audioMix';
 import { audioVideoMuxIdentityOf, buildAudioVideoMuxPlaceholderNode } from '../audioVideoMux';
 import type { Node } from '@xyflow/react';
+import { isJobInFlight } from './types';
 import type {
   CreateJobOutcome, GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan,
   RuntimeNodeView, TaskSubmissionInput,
@@ -122,7 +123,8 @@ function planMixMuxRecovery(
   mediaType: 'audio' | 'video',
   buildRestore: (record: GenerationRecoveryRecord) => RuntimeNodeView | null,
 ): RecoveryCardPlan {
-  const targetExists = host.findNode(record.target_node_id) != null;
+  const target = host.findNode(record.target_node_id);
+  const targetExists = target != null;
   const jobStatus = record.job?.status;
   // present 且卡仍在画布 = 已应用在场（B.3 一对一成品卡保护）：不扇出；pending 一律待应用。
   const pendingOutputs = record.items.filter(
@@ -145,7 +147,7 @@ function planMixMuxRecovery(
       },
     };
   }
-  if (jobStatus === 'queued' || jobStatus === 'processing' || jobStatus === 'checking') {
+  if (isJobInFlight(jobStatus)) {
     if (!targetExists) {
       const node = buildRestore(record);
       if (node) return { kind: 'restore-target', node };
@@ -156,13 +158,17 @@ function planMixMuxRecovery(
     if (!targetExists) {
       const node = buildRestore(record);
       if (node) return { kind: 'restore-target', node };
+      return { kind: 'none' }; // 缺卡且身份不可信（mux 无可信快照，A.6）：不猜卡、不为不存在节点建执行
     }
-    // 在场卡已呈现失败 = 终态已收敛（历史失败卡），无画布动作；未确认占位（生成中/
-    // 缺 jobId）由运行时以可靠记录接续，首次轮询拉权威终态经 converge/applyTerminal
-    // 收敛为可重试失败卡（IKJPVK）——不读取新编辑会话、不补猜原输入，重试按服务端
-    // 冻结输入复用 jobId。
-    if (host.findNode(record.target_node_id)?.data?.genStatus === 'failed') return { kind: 'none' };
-    return { kind: 'resume-polling' };
+    // 仅在场未确认占位（生成中/缺 jobId）接续：首次轮询拉权威终态经 converge/applyTerminal
+    // 收敛为可重试失败卡（IKJPVK）——不读取新编辑会话、不补猜原输入，重试按服务端冻结
+    // 输入复用 jobId；已收敛终态的在场卡（历史失败卡/成品卡）无画布动作，防权威失败
+    // 覆盖既有终态。
+    const data = target?.data;
+    if (data?.genStatus === 'generating' || data?.genStatus === 'checking' || data?.jobId == null) {
+      return { kind: 'resume-polling' };
+    }
+    return { kind: 'none' };
   }
   return { kind: 'none' };
 }

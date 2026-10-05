@@ -25,6 +25,11 @@ export interface RuntimeNodeView {
   data: Record<string, unknown>;
 }
 
+/** 任务在途（恢复规划/接续判定的共享口径）：queued/processing/checking。 */
+export function isJobInFlight(status: string | null | undefined): boolean {
+  return status === 'queued' || status === 'processing' || status === 'checking';
+}
+
 /** 受保护节点标记（B.4）：data.generationRecovery。 */
 export interface GenerationRecoveryMarker {
   protocolVersion: 1;
@@ -255,6 +260,13 @@ export interface LedgerEntry {
   nodeBindingRevision?: number;
 }
 
+/** 恢复扫描直供的可靠记录事实（IKJPVK）：任务定义（按 task_type 分派）与提交身份
+ *  ——来自恢复页而非卡上受理身份，卡上缺 jobId 的已保存占位同样可接续。 */
+export interface RecoveryRecordFacts {
+  def?: GenerationTaskDefinition;
+  submissionId?: string;
+}
+
 /** 运行时公开接口（测试接缝 = 这里；不测私有变量/Hook 顺序）。 */
 export interface GenerationRuntime {
   register(def: GenerationTaskDefinition): void;
@@ -276,7 +288,7 @@ export interface GenerationRuntime {
    *  受理身份）与提交身份；卡上缺 jobId 的未确认占位在此回填受理身份。 */
   resumeFromHydration(
     nodeId: string, jobId: string, nodeData?: Record<string, unknown>,
-    known?: { def?: GenerationTaskDefinition; submissionId?: string },
+    known?: RecoveryRecordFacts,
   ): void;
   /** 按卡只读在途状态。 */
   statusOf(nodeId: string): InFlightTaskState | null;

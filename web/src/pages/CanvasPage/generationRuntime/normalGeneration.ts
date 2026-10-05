@@ -12,6 +12,7 @@ import { isMediaExtractNodeId } from '../mediaExtract';
 import { isVocalSplitNodeId } from '../vocalSplit';
 import { audioVideoMuxIdentityOf } from '../audioVideoMux';
 import type { Node } from '@xyflow/react';
+import { isJobInFlight } from './types';
 import type {
   CreateJobOutcome, GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
 } from './types';
@@ -117,7 +118,7 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
         },
       };
     }
-    if (jobStatus === 'queued' || jobStatus === 'processing' || jobStatus === 'checking') {
+    if (isJobInFlight(jobStatus)) {
       if (!targetExists) return { kind: 'restore-target', node: buildRecoveryTargetNode(record) };
       return { kind: 'resume-polling' };
     }
