@@ -149,8 +149,18 @@ export function createToolSessionRuntime() {
             snapshot = { state: definition.opened?.(state) ?? state, submitting, ...(definition.panel ? { visible: true, hidden: false } : {}) };
             changed();
           };
-          epoch.advanceAll();
-          epoch.enter(definition.kind);
+          // IKJPXM 同目标会话恢复（preserve 面板：同卡、非显式关闭重开）不推进本 kind
+          // 纪元：在途请求的 isCurrent 身份保留，有效失败反馈不被重入吞掉；参数刷新与
+          // 在途只读重算照旧由 initialize 闭包完成。换目标不算恢复（同目标条件是
+          // IKJPXN 归属隔离的接缝）：仍按新会话推进纪元；重入即新身份的工具
+          //（reinitialize 面板与非面板编辑会话）与发送即退出的重开同样不受影响。
+          const sameTargetResume = definition.panel === 'preserve'
+            && snapshot.state !== null && !snapshot.hidden
+            && definition.target(snapshot.state) === definition.target(state);
+          if (!sameTargetResume) {
+            epoch.advanceAll();
+            epoch.enter(definition.kind);
+          }
           enterToolSession(definition.kind, tools.values(), deps, initialize);
           return true;
         },

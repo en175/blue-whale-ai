@@ -8,12 +8,12 @@
    （新会话再次受理，区别于选中隐藏回看的在途只读）。渲染模式沿用
    videoEnhancePanel.test.tsx（FlowCanvas 打桩透出 props），轮询 mock 终态模式对齐
    audioVideoSplitEdit.test.tsx（IKH28X 先例）。 */
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ReactFlowProvider, type Node } from '@xyflow/react';
+import { ReactFlow, ReactFlowProvider, applyNodeChanges, type Node } from '@xyflow/react';
 import CanvasPage from './index';
 import MediaNode from './components/MediaNode';
 import { VIDEO_ENHANCE_EDGE_ORIGIN } from './videoEnhance';
@@ -1262,6 +1262,181 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
       expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /* IKJPXM：可见同卡重入保留当前有效失败反馈（决策 3、Testing 2/3/6）。真实链：
+     页面 FlowCanvas 仍为打桩透出，另挂真实 ReactFlow 实例——MediaNode 经真实
+     NodeWrapper 渲染，点击与选择通知按 ReactFlow 自有顺序转发回页面回调，不以自造
+     监听串联替代。jsdom 不起布局：节点测量用既定桩（textNodeCard.test.tsx 同款）。 */
+  describe('IKJPXM 可见同卡重入保留失败反馈（真实 NodeWrapper 事件链）', () => {
+    let realFlowRoot: Root | null = null;
+    let realFlowHost: HTMLDivElement | null = null;
+    let syncRealFlow: (() => void) | null = null;
+    let measureSpies: Array<{ mockRestore(): void }> = [];
+    const realFlowNodeTypes = { mediaNode: MediaNode };
+
+    function RealFlowBridge() {
+      const [nodes, setNodes] = useState<Node[]>(() => flowProps.current.mediaNodes);
+      syncRealFlow = () => setNodes([...mediaNodes()]);
+      return createElement(ReactFlow, {
+        nodes,
+        edges: [],
+        nodeTypes: realFlowNodeTypes,
+        onNodesChange: (changes: Parameters<typeof applyNodeChanges>[0]) =>
+          setNodes((current) => applyNodeChanges(changes, current)),
+        onNodeClick: (_event: unknown, node: Node) => {
+          flowProps.current.onNodeClick(mediaNodes().find((n) => n.id === node.id) ?? node);
+        },
+        onSelectionChange: ({ nodes: selected }: { nodes: Node[] }) => {
+          flowProps.current.onSelectionChange({
+            nodes: selected.map((s) => mediaNodes().find((n) => n.id === s.id) ?? s),
+          });
+        },
+      });
+    }
+
+    async function mountRealFlow() {
+      realFlowHost = document.createElement('div');
+      document.body.appendChild(realFlowHost);
+      realFlowRoot = createRoot(realFlowHost);
+      await act(async () => { realFlowRoot!.render(createElement(RealFlowBridge)); });
+    }
+
+    /** 真实 NodeWrapper 点击：先把页面最新节点数据同步进真实画布，再派发真实 click */
+    async function realClickNode(id: string) {
+      await act(async () => { syncRealFlow?.(); });
+      const el = realFlowHost!.querySelector(`.react-flow__node[data-id="${id}"]`);
+      expect(el).toBeTruthy();
+      await act(async () => {
+        el!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      });
+    }
+
+    beforeEach(() => {
+      // jsdom 无这些浏览器测量 API；React Flow 真实实现靠它们初始化与测量节点
+      vi.stubGlobal('ResizeObserver', class {
+        callback: ResizeObserverCallback;
+        constructor(cb: ResizeObserverCallback) { this.callback = cb; }
+        observe(target: Element) {
+          this.callback(
+            [{ target, contentRect: { width: 1000, height: 800 } } as ResizeObserverEntry],
+            this as unknown as ResizeObserver,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+      });
+      vi.stubGlobal('DOMMatrixReadOnly', class {
+        m22: number;
+        constructor(transform?: string) {
+          const scale = transform?.match(/scale\(([1-9.])\)/)?.[1];
+          this.m22 = scale !== undefined ? +scale : 1;
+        }
+      });
+      measureSpies = [
+        vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1000),
+        vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(800),
+      ];
+    });
+
+    afterEach(async () => {
+      if (realFlowRoot) await act(async () => realFlowRoot!.unmount());
+      realFlowHost?.remove();
+      realFlowRoot = null;
+      realFlowHost = null;
+      syncRealFlow = null;
+      measureSpies.forEach((spy) => spy.mockRestore());
+      measureSpies = [];
+      vi.unstubAllGlobals();
+    });
+
+    it('初值 4K 改 2K 发送 B 等待，真实点击当前可见同卡：B 失败仍显示原有原因，参数保留、创建仅一次、失败后恢复操作', async () => {
+      seedDoc('failed');
+      let rejectB!: (error: unknown) => void;
+      apiMocks.createVideoEnhancement.mockImplementationOnce(
+        () => new Promise<{ job_id: string; status: 'queued' }>((_, reject) => { rejectB = reject; }),
+      );
+      await renderPage();
+      await openHdPanel();
+      expect(panelResolution('4k')!.className).toContain('resolutionBtnActive');
+      await clickPanelResolution('2k');
+      await act(async () => { panelSend()!.click(); });
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+      expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+        source_asset_id: '5', target_node_id: 'h1', resolution: '2k',
+      }, { silent: true });
+
+      // B 等待期间真实 NodeWrapper 点击当前可见同卡：面板保留、2K 参数保留、在途只读、不新增创建
+      await mountRealFlow();
+      await realClickNode('h1');
+      expect(panelSend()).toBeTruthy();
+      expect(panelSend()!.disabled).toBe(true);
+      expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+      // B 失败：原有失败原因仍显示；随后恢复可操作
+      await act(async () => {
+        rejectB(new Error('network down'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(panelSend()!.disabled).toBe(false);
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    });
+
+    it('对照：未改参数时可见同卡多次真实重入，当前有效失败提示同样保留', async () => {
+      seedDoc('failed');
+      let rejectB!: (error: unknown) => void;
+      apiMocks.createVideoEnhancement.mockImplementationOnce(
+        () => new Promise<{ job_id: string; status: 'queued' }>((_, reject) => { rejectB = reject; }),
+      );
+      await renderPage();
+      await openHdPanel();
+      await act(async () => { panelSend()!.click(); });   // 按初值 4K 直接发送
+      expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
+        source_asset_id: '5', target_node_id: 'h1', resolution: '4k',
+      }, { silent: true });
+
+      await mountRealFlow();
+      await realClickNode('h1');
+      await realClickNode('h1');
+      expect(panelSend()!.disabled).toBe(true);
+      expect(panelResolution('4k')!.className).toContain('resolutionBtnActive');
+
+      await act(async () => {
+        rejectB(new Error('network down'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(panelSend()!.disabled).toBe(false);
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    });
+
+    it('选择隐藏（含空选中过渡）后真实点回原卡：最新参数与在途只读保留，不产生额外创建', async () => {
+      seedDoc('failed');
+      apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+      await renderPage();
+      await openHdPanel();
+      await clickPanelResolution('2k');
+      await mountCard('h1');
+      await clickCardRetry();
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+      // 选中其他卡隐藏面板；空选中过渡不当显式关闭
+      await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')] }); });
+      expect(panelSend()).toBeNull();
+      await act(async () => { flowProps.current.onSelectionChange({ nodes: [] }); });
+
+      // 真实 NodeWrapper 点回原卡：恢复同一会话
+      await mountRealFlow();
+      await realClickNode('h1');
+      expect(panelSend()).toBeTruthy();
+      expect(panelSend()!.disabled).toBe(true);
+      expect(panelResolution('2k')!.disabled).toBe(true);
+      expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
+      await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
   });
