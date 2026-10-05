@@ -293,6 +293,7 @@ const mediaNodes = () => flowProps.current.mediaNodes as Node[];
 const mediaNode = (id: string) => mediaNodes().find((n) => n.id === id)!;
 const hdDraft = () => mediaNodes().find((n: Node) => n.id !== 'v1' && n.id !== 'r1080' && n.id !== 'r4k');
 const panelSend = () => document.body.querySelector<HTMLButtonElement>('[data-testid="video-enhance-send-btn"]');
+const panelClose = () => document.body.querySelector<HTMLButtonElement>('[data-testid="video-enhance-close-btn"]');
 const panelResolution = (value: string) =>
   document.body.querySelector<HTMLButtonElement>(`[data-testid="video-enhance-resolution-${value}"]`);
 const identityOf = (node: Node | undefined) =>
@@ -316,6 +317,7 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   sessionStorage.clear();
+  apiMocks.createVideoEnhancement.mockReset();
 });
 
 afterEach(async () => {
@@ -739,7 +741,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: 'h1', resolution: '4k',
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
 
     // 重试登记在途 → 面板立即提交中只读（发送钮与分辨率参数均按既有只读规则禁用）；
@@ -760,7 +762,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: 'h1', resolution: '2k',
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
 
     await mountCard('h1');
     await clickCardRetry();
@@ -838,7 +840,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: 'h1', resolution: '4k',
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
   });
 
   it('不同卡互不锁定：h1 重试在途时，源卡新发起的 HD 面板可正常发送', async () => {
@@ -859,7 +861,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: draft.id, resolution: '1080p',
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
   });
 
   it('重试在途选中其它卡再选回本卡：面板重现仍在途只读，不重复受理', async () => {
@@ -1138,7 +1140,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(3);
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: 'h1', resolution: '2k',
-    }, { silent: true });
+    }, expect.objectContaining({ silent: true }));
   });
 
   /* IKJPM7 旧重试失败提示按有效会话归属：同卡显式关闭重开（即使未再发送）即新会话，
@@ -1348,6 +1350,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       // B 的创建输入按 h2 冻结（源素材与目标卡、分辨率档 2k）
       expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
         source_asset_id: '5', target_node_id: 'h2', resolution: '2k',
+        canvas_binding: expect.objectContaining({ protocol_version: 1, target_node_id: 'h2', submission_id: expect.any(String) }),
       });
       expect(panelSend()!.disabled).toBe(true);
 
@@ -1466,7 +1469,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
       expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
         source_asset_id: '5', target_node_id: 'h1', resolution: '2k',
-      }, { silent: true });
+      }, expect.objectContaining({ silent: true }));
 
       // B 等待期间真实 NodeWrapper 点击当前可见同卡：面板保留、2K 参数保留、在途只读、不新增创建
       await mountRealFlow();
@@ -1497,7 +1500,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await act(async () => { panelSend()!.click(); });   // 按初值 4K 直接发送
       expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
         source_asset_id: '5', target_node_id: 'h1', resolution: '4k',
-      }, { silent: true });
+      }, expect.objectContaining({ silent: true }));
 
       await mountRealFlow();
       await realClickNode('h1');
