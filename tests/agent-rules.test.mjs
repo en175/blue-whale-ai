@@ -44,16 +44,21 @@ test("documents every required branch of the testing strategy", () => {
   assert.doesNotMatch(strategy, /--retry-infrastructure/);
 });
 
-test("project skills delegate final verification to the repository strategy", () => {
-  const skillPaths = [
-    ".claude/skills/implement/SKILL.md",
-  ];
-
-  for (const path of skillPaths) {
-    const content = read(path);
-    assert.doesNotMatch(content, /full (?:test )?suite|project's test suite/i, path);
-    assert.match(content, /repository-selected verification|repository testing strategy/i, path);
+test("official implement keeps complete final testing while repository rules define its scope", () => {
+  const content = read(".agents/skills/implement/SKILL.md");
+  assert.match(content, /full test suite once at the end/);
+  assert.match(content, /pre-agreed seams/);
+  assert.doesNotMatch(content, /repository-selected verification|Repository code discovery/);
+  assert.match(read("CLAUDE.md"), /测试验证.*docs\/agents\/testing-strategy\.md/);
+  assert.match(read("AGENTS.md"), /开始任务前完整读取根目录.*CLAUDE\.md/);
+  const strategy = read("docs/agents/testing-strategy.md");
+  assert.match(strategy, /受影响应用.*完整测试集/);
+  for (const condition of ["鉴权与权限", "计费与额度", "数据库迁移", "跨服务契约", "队列重试与幂等"]) {
+    assert.ok(strategy.includes(condition), condition);
   }
+  assert.match(strategy, /相关必验项.*跳过.*未完成/);
+  assert.match(strategy, /无关.*跳过.*原因/);
+  assert.match(strategy, /VERIFIED.*命令/);
 });
 
 test("frontend Bugfix workflow extracts sparse Issue details instead of gating on a template", () => {

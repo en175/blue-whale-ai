@@ -104,6 +104,8 @@ Include the `### Triage labels` sub-block, and write `docs/agents/triage-labels.
 
 Then write the docs files using the seed templates in this skill folder as a starting point:
 
+For an existing Gitee configuration, read its current tracker document and the repository rules it points to before editing. Keep its channel restrictions, creation fields, ownership rules, verification steps, and state machine. Use the Gitee seed only to fill missing configuration; retain the existing authoritative sections instead of replacing them with generic defaults.
+
 - [issue-tracker-github.md](./issue-tracker-github.md): GitHub issue tracker
 - [issue-tracker-gitlab.md](./issue-tracker-gitlab.md): GitLab issue tracker
 - [issue-tracker-gitee.md](./issue-tracker-gitee.md): Gitee issue tracker
