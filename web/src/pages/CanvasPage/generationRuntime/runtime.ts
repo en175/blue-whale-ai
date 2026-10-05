@@ -81,8 +81,10 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   /** 已知「有受理关联」的 jobId（重试是否可携 canvas_binding 的判据）。 */
   const boundJobIds = new Set<string>();
   const deleting = new Set<string>();
-  /** 重试意图窗口：nodeId → 未受理重试（幂等键 = submission_id）。 */
-  const retryAttempts = new Map<string, { jobId: string; key: string; bound: boolean }>();
+  /** 重试意图窗口：nodeId → 未受理重试（幂等键 = submission_id；binding 为意图首次发送时
+   *  冻结的完整请求快照——同一意图结果未知后的重放逐项复用，不从当前卡重建；受理或归属
+   *  冲突作废即删除。冻结口径对齐 submitAttempts 先例，IKJPM6）。 */
+  const retryAttempts = new Map<string, { jobId: string; key: string; bound: boolean; binding: CanvasBinding | null }>();
   /** 重试在途同步防重（IKJJR3）：React state 异步窗口内的连点兜底，受理/失败收敛即解锁。 */
   const retryInFlight = new Set<string>();
   /** 提交意图窗口：nodeId → 未受理提交（同载荷签名复用 submission_id 与完整绑定——双击/401 续跑/
@@ -530,20 +532,24 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     const targetEntry = marker != null ? ledger.get(recoveryItemIdOf(marker.submissionId, TARGET_OUTPUT_KEY)) : undefined;
     const expectedRevision = nodeBindings.get(nodeId) ?? targetEntry?.nodeBindingRevision ?? 0;
     const previous = retryAttempts.get(nodeId);
-    const key = previous && previous.jobId === jobId && previous.bound === canBind ? previous.key : newId();
-    retryAttempts.set(nodeId, { jobId, key, bound: canBind });
-
+    const sameIntent = previous != null && previous.jobId === jobId && previous.bound === canBind;
+    const key = sameIntent ? previous.key : newId();
     const seedTarget = seedTargetOfNode(node);
-    const seedSources = seedSourcesOfNode(nodeId, host);
+    // IKJPM6：同一重试意图的完整请求快照（预期归属版本 + 完整恢复种子）在首次发送时冻结；
+    // 结果未知（网络超时/丢回执）后的重放逐项复用冻结快照，不从当前卡重建——两次发送间
+    // 用户对卡片的合法编辑（移动/改名/尺寸/来源）保留在画布，不进旧意图载荷，快照也不
+    // 回滚画布。明确归属冲突 409 仍作废意图删快照（catch 侧），复核后再发按当前卡另起
+    // 新意图（先例对齐 submit 的 submitAttempts 冻结重放）。
     const binding = canBind
-      ? {
+      ? (sameIntent && previous.binding != null ? previous.binding : {
         protocol_version: 1 as const,
         submission_id: key,
         target_node_id: nodeId,
         expected_binding_revision: expectedRevision,
-        recovery_seed: { target: seedTarget, sources: seedSources },
-      }
+        recovery_seed: { target: seedTarget, sources: seedSourcesOfNode(nodeId, host) },
+      })
       : null;
+    retryAttempts.set(nodeId, { jobId, key, bound: canBind, binding });
     const execution: ActiveExecution = {
       round: nextRound(), projectId, loadEpoch: host.getLoadEpoch(), nodeId,
       phase: 'submitting', targetRole: seedTarget.role, def,
