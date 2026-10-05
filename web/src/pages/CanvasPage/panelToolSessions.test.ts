@@ -130,6 +130,31 @@ it('高清发送即退出仍接收有效失败；同卡重开后旧失败不提�
   }
 });
 
+/* IKJPM5 open 隐藏返回传 previous 的 15 工具核对钉住（imageEnhance）：面板无参数编辑
+   写卡（VideoEnhanceDialog 有 onParamsChange 即时写卡、ImageEnhanceDialog 无）、
+   lastParams 仅发送成功更新且成功即关面板——会话期间快照数据源不可变，previous 与
+   实时重读等值，隐藏返回恢复原会话不回退（与改前重读行为一致）。 */
+it('imageEnhance 选择隐藏返回恢复原会话：seed 与 initialParams 保持打开时恢复值', () => {
+  const { runtime, host, nodes } = setup();
+  nodes[0]!.data.imageEnhance = {
+    sourceAssetId: '5',
+    lastParams: { version_tier: 'pro', multiple: 4, generative_enhance_mode: 'generative_first', enable_correct_color: false },
+  };
+  const image = runtime.register(createImageEnhanceSession(() => host));
+  expect(image.open('a', deps)).toBe(true);
+  const seed = image.getSnapshot().state!.seed;
+  expect(seed.initialParams).toEqual({ version_tier: 'pro', multiple: 4, generative_enhance_mode: 'generative_first', enable_correct_color: false });
+
+  runtime.onSelectionChange({ soloId: 'b', multiSelect: false });
+  expect(image.getSnapshot().visible).toBe(false);
+  expect(image.getSnapshot().state).not.toBeNull();
+
+  // 真实点回原卡（open resume 路径）：恢复原会话，seed 引用不变（面板 key 稳定）
+  expect(image.open('a', deps)).toBe(true);
+  expect(image.getSnapshot().visible).toBe(true);
+  expect(image.getSnapshot().state!.seed).toBe(seed);
+});
+
 it('插帧每次重入新身份、按卡重算在途；旧成功保留新面板，合法任务释放自己的在途锁', async () => {
   const { runtime, host, nodes } = setup();
   const inFlight = new Set<string>();
