@@ -267,6 +267,48 @@ describe('工具会话运行时公开接口', () => {
     expect(owns()).toBe(false);
   });
 
+  /* IKJPM7 修订：探针失效只随同 kind 后来新会话（显式关闭/排他退出后重开，或受理于
+     面板未开后的首开）或项目切换推进。选择隐藏后真实点回原卡是恢复原会话（resume，
+     IKJPM5 语义）保持归属；纯显式关闭未重开无后来会话，同样保持有效。 */
+  it('captureSessionOwnership：选择隐藏后 resume 恢复原会话保持归属；纯关闭未重开保持有效；项目切换失效', () => {
+    const runtime = createToolSessionRuntime();
+    const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve' });
+
+    panel.open('v1', sessionDeps());
+    const owns = runtime.captureSessionOwnership('videoEnhance');
+    // 场景 i：选择隐藏（原纪元 exit 不再是失效信号）→ 真实点回原卡 = resume 恢复原会话
+    runtime.onSelectionChange({ soloId: 'v2', multiSelect: false });
+    expect(panel.getSnapshot().visible).toBe(false);
+    panel.open('v1', sessionDeps());
+    expect(panel.getSnapshot().state?.nodeId).toBe('v1');
+    expect(owns()).toBe(true);
+
+    // 边界（父级裁定）：纯显式关闭、未重开——无后来会话，按当前有效请求保留提示
+    panel.close();
+    expect(owns()).toBe(true);
+    // 项目切换（setProject reset）自然失效保持
+    runtime.setProject('p2');
+    expect(owns()).toBe(false);
+  });
+
+  /* IKJPM7 修订（场景 ii）：他卡任何工具的会话开关（open 的 advanceAll）不是本工具
+     归属失效信号——A 仍是当前有效请求，提示不被越权屏蔽。 */
+  it('captureSessionOwnership：打开另一工具面板（他卡）不失效本工具归属', () => {
+    const runtime = createToolSessionRuntime();
+    const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve' });
+    const other = runtime.register({ ...definition, kind: 'imageEnhance', panel: 'preserve' });
+
+    panel.open('v1', sessionDeps());
+    const owns = runtime.captureSessionOwnership('videoEnhance');
+    // 打开另一张卡的另一工具面板（videoEnhance 被排他关闭但无后来会话）
+    other.open('o1', sessionDeps());
+    expect(panel.getSnapshot().state).toBeNull();
+    expect(owns()).toBe(true);
+    // 同 kind 后来新会话建立（显式关闭重开）仍失效
+    panel.open('v1', sessionDeps());
+    expect(owns()).toBe(false);
+  });
+
 });
 
 it.each(['close', 'escape', 'selection', 'pane', 'generation'] as const)('公开接口 %s 退出丢弃编辑态，空选中保留会话', (route) => {

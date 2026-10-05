@@ -60,7 +60,7 @@ export interface ToolSessionHandle<State, Entry, Request = void> {
 /** 注册工具的编辑状态与纪元由此持有；节点、连线和任务处理仍由宿主提供。 */
 export function createToolSessionRuntime() {
   const epoch = createToolSessionEpoch();
-  const tools = new Map<string, CoordinatedTool & { reset(): void; reconcile(): void; select(selection: { soloId: string | null; multiSelect: boolean }): void; lockForInFlight(targetId: string): void }>();
+  const tools = new Map<string, CoordinatedTool & { reset(): void; reconcile(): void; select(selection: { soloId: string | null; multiSelect: boolean }): void; lockForInFlight(targetId: string): void; captureOwnership(): (() => boolean) }>();
   const listeners = new Set<() => void>();
   let version = 0;
   let projectId: string | null | undefined;
@@ -113,14 +113,18 @@ export function createToolSessionRuntime() {
       tools.get(kind)?.lockForInFlight(targetId);
     },
     /** IKJPM7 旁路受理（失败卡重试）的会话归属捕获：返回探针，受理时的会话身份此后
-     *  被显式关闭重开（无论新会话是否发送）或切换推进纪元即失效——旧响应据此不向
-     *  后来会话提示；无后来会话时保持有效（当前有效请求的失败提示保留）。 */
+     *  被同 kind 后来新会话取代（显式关闭/排他退出后重开，无论新会话是否发送）或项目
+     *  切换即失效——旧响应据此不向后来会话提示；恢复原会话（选择隐藏后返回）、他工具
+     *  会话开关与纯关闭未重开均保持有效（当前有效请求的失败提示保留，US18/US19）。 */
     captureSessionOwnership(kind: string): () => boolean {
-      const captured = epoch.capture(kind);
-      return () => epoch.isCurrent(kind, captured);
+      const tool = tools.get(kind);
+      return tool ? tool.captureOwnership() : () => true;
     },
     register<State, Entry, Input, Request = void>(definition: ToolSessionDefinition<State, Entry, Input, Request>): ToolSessionHandle<State, Entry, Request> {
       let snapshot: ToolSessionSnapshot<State> = { state: null, submitting: false, ...(definition.panel ? { visible: false, hidden: false } : {}) };
+      /* 会话代数（IKJPM7 探针支撑）：只在非恢复路径的新会话建立与项目 reset 时推进——
+         选择隐藏的 exit、他工具 open 的 advanceAll 都不再吞掉受理时的归属 */
+      let ownershipGeneration = 0;
       const close = (notify = true) => {
         epoch.exit(definition.kind);
         if (snapshot.state !== null) definition.cleanup?.(snapshot.state);
@@ -140,6 +144,7 @@ export function createToolSessionRuntime() {
             // 恢复路径提交锁按宿主在途重算上锁（同 select 选回规则），节点点击先于选择通知也不洗锁；
             // 显式关闭重开的新会话不受旧在途约束（重发例外）
             const resume = snapshot.state !== null && !snapshot.hidden;
+            if (!resume) ownershipGeneration += 1;
             const submitting = resume && definition.inFlight ? definition.inFlight(state) : false;
             snapshot = { state: definition.opened?.(state) ?? state, submitting, ...(definition.panel ? { visible: true, hidden: false } : {}) };
             changed();
@@ -204,8 +209,13 @@ export function createToolSessionRuntime() {
           changed();
         },
         reset() {
+          ownershipGeneration += 1;
           close(false);
           if (definition.panel) snapshot = { ...snapshot, hidden: false };
+        },
+        captureOwnership(): (() => boolean) {
+          const captured = ownershipGeneration;
+          return () => ownershipGeneration === captured;
         },
         select({ soloId, multiSelect }) {
           if (snapshot.state === null || snapshot.hidden || (!soloId && !multiSelect)) return;

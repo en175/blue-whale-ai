@@ -7154,22 +7154,25 @@ export default function CanvasPage() {
       // 首个异步等待前完成，无交错窗口
       if (isVideoEnhanceCardInFlight(nodeId)) return;
       const input = captureVideoEnhance(toolHostsRef.current.panels!, nodeId, restoreVideoEnhanceResolution(videoEnhanceIdentity.lastParams));
-      // IKJPM7 会话归属捕获：受理时同卡面板的会话身份——显式关闭重开（无论新会话
-      // 是否发送）即新会话，旧响应不向其提示旧错误
-      const ownsSession = toolRuntime.captureSessionOwnership('videoEnhance');
-      if (input) void startVideoEnhanceJob(input, true).catch((error: unknown) => {
-        if (isSilentAuthError(error)) return;
-        // IKJPM7 静默传输（决策 7，口径同面板发送）：HTTP 层默认 toast 不再先于会话
-        // 归属判断触发；有效会话的失败由本回调补回两路反馈（HTTP 路 + 页面路，与
-        // 面板 onError 同构，提示次数与原默认提示一致）
-        if (!ownsSession()) return;
-        // 旧重试返回时同卡已有新提交在途：不提示旧错误（会话归属仍由上面纪元探针守卫）
-        if (isVideoEnhanceCardInFlight(nodeId)) return;
-        const nodeNow = mediaNodesRef.current.find((item) => item.id === nodeId);
-        if ((nodeNow?.data as Record<string, unknown> | undefined)?.genStatus !== 'failed') return;
-        if (isApiError(error)) globalToast.error(error.message);
-        showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
-      });
+      if (input) {
+        // IKJPM7 会话归属捕获：受理时的会话身份——此后同卡显式关闭重开（无论新会话
+        // 是否发送）或项目切换即新会话，旧响应不向其提示旧错误；恢复原会话、他工具
+        // 开关与纯关闭未重开均保持归属（当前有效请求的失败提示保留）
+        const ownsSession = toolRuntime.captureSessionOwnership('videoEnhance');
+        void startVideoEnhanceJob(input, true).catch((error: unknown) => {
+          if (isSilentAuthError(error)) return;
+          // IKJPM7 静默传输（决策 7，口径同面板发送）：HTTP 层默认 toast 不再先于会话
+          // 归属判断触发；有效会话的失败由本回调补回两路反馈（HTTP 路 + 页面路，与
+          // 面板 onError 同构，提示次数与原默认提示一致）
+          if (!ownsSession()) return;
+          // 旧重试返回时同卡已有新提交在途：不提示旧错误（会话归属仍由上面归属探针守卫）
+          if (isVideoEnhanceCardInFlight(nodeId)) return;
+          const nodeNow = mediaNodesRef.current.find((item) => item.id === nodeId);
+          if ((nodeNow?.data as Record<string, unknown> | undefined)?.genStatus !== 'failed') return;
+          if (isApiError(error)) globalToast.error(error.message);
+          showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
+        });
+      }
       return;
     }
     const frameInterpolationIdentity = ((node?.data ?? {}) as Record<string, unknown>).frameInterpolation as

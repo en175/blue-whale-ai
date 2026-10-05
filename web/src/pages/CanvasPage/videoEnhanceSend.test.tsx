@@ -1046,6 +1046,32 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
+
+    /* IKJPM7 修订（场景 i，违反 US19/IKJPM5 语义）：resume 恢复的是同一会话，A 是该
+       会话当前有效请求——失败提示必须保留，不得因选择隐藏的纪元变化被吞。 */
+    it('A 重试等待→点其他卡→真实点回原卡（resume 恢复同会话）：A 失败提示保留，创建总数 1', async () => {
+      seedDoc('failed');
+      let rejectA!: (error: unknown) => void;
+      apiMocks.createVideoEnhancement.mockImplementationOnce(() => new Promise<never>((_, reject) => { rejectA = reject; }));
+      await renderPage();
+      await openHdPanel();
+      await mountCard('h1');
+      await clickCardRetry();
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+      await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')] }); });
+      expect(panelSend()).toBeNull();
+      await clickCardBack('h1', 'node-first');
+
+      await act(async () => {
+        rejectA(new Error('network down'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      // US19：A 是恢复会话的当前有效请求，失败保留原有页面提示
+      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+      // 会话仍在途约束随 A 收尾解除：恢复的会话可继续操作
+      expect(panelSend()!.disabled).toBe(false);
+    });
   });
 
   it('新会话发送失败而旧重试仍等待时，再次显式关闭重开仍可按新会话例外主动发送', async () => {
@@ -1186,6 +1212,57 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       expect(toast.error).not.toHaveBeenCalled();
       expect(document.body.textContent).not.toContain('请重新登录');
       expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
+    });
+  });
+
+  /* IKJPM7 修订：会话归属探针语义补齐——探针失效只随同卡显式关闭重开（后来新会话）或
+     项目切换；他卡另一工具面板的打开（场景 ii，违反决策 6/US18）与纯显式关闭未重开
+     （父级裁定边界）都不得吞掉当前有效请求 A 的失败提示。 */
+  describe('IKJPM7 修订：探针不过度失效（他工具打开与纯关闭）', () => {
+    it('场景ii：A 重试等待时打开另一张卡的另一工具面板（插帧）：A 失败提示保留，创建总数 1', async () => {
+      seedDoc('failed');
+      let rejectA!: (error: unknown) => void;
+      apiMocks.createVideoEnhancement.mockImplementationOnce(() => new Promise<never>((_, reject) => { rejectA = reject; }));
+      await renderPage();
+      await openHdPanel();
+      await mountCard('h1');
+      await clickCardRetry();
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+      // 另一张卡（源卡 v1）的另一工具（插帧）面板打开：HD 面板被排他关闭，同卡无后来会话
+      await act(async () => {
+        ((mediaNode('v1').data as Record<string, unknown>).onFrameInterpolation as (id: string) => void)('v1');
+      });
+      expect(panelSend()).toBeNull();
+
+      await act(async () => {
+        rejectA(new Error('network down'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    });
+
+    it('边界（父级裁定）：A 重试等待→纯显式关闭未重开：A 失败仍按当前有效请求保留提示', async () => {
+      seedDoc('failed');
+      let rejectA!: (error: unknown) => void;
+      apiMocks.createVideoEnhancement.mockImplementationOnce(() => new Promise<never>((_, reject) => { rejectA = reject; }));
+      await renderPage();
+      await openHdPanel();
+      await mountCard('h1');
+      await clickCardRetry();
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+      // 纯显式关闭（X）、不重开：无后来会话，A 仍是当前有效请求
+      await act(async () => { panelClose()!.click(); });
+      expect(panelSend()).toBeNull();
+
+      await act(async () => {
+        rejectA(new Error('network down'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
   });
 });
