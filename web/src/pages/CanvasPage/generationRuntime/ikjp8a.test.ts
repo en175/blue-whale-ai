@@ -1,13 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { canvasBindingSchema } from '@lib/contracts/canvas-recovery';
 import { ApiError } from '@/api/http';
+import { retryAudioMix, retryAudioVideoMux } from '@/api/jobs';
 import {
-  retryAudioMix, retryAudioVideoMux, type JobDetail,
-} from '@/api/jobs';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
-import { createGenerationRuntime } from './runtime';
-import { audioMixTask, audioVideoMuxTask } from './mixMuxTasks';
-import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
+  NODE_ID, MUX_NODE_ID, SID_A, SID_B, SID_C,
+  flush, conflict, bindingView, setupRecoveryScenario,
+} from './recoveryTestKit';
 
 vi.mock('@/api/jobs', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/api/jobs')>(),
@@ -18,23 +15,6 @@ vi.mock('@/api/jobs', async (importOriginal) => ({
   cancelGenerationJob: vi.fn(),
 }));
 
-const NODE_ID = 'audio-mix-501';
-const MUX_NODE_ID = 'mux-node-601';
-const SID_A = '12345678-0000-4000-8000-000000000001';
-const SID_M = '12345678-0000-4000-8000-00000000000a';
-const SID_B = '12345678-0000-4000-8000-000000000002';
-const SID_C = '12345678-0000-4000-8000-000000000003';
-const MIX_SEED = { role: 'result-placeholder' as const, x: 5, y: 6, width: 320, height: 320, name: '混合结果.mp3' };
-const MUX_SEED = { role: 'draft' as const, x: 15, y: 16, width: 320, height: 320, name: '合成结果.mp4' };
-const flush = async () => { for (let i = 0; i < 20; i += 1) await Promise.resolve(); };
-const conflict = (revision: number) => new ApiError(409, '归属已变化', 409, {
-  reason: 'canvas_binding_conflict', currentBindingRevision: revision,
-});
-const bindingView = (submissionId: string, nodeId: string, jobId: string, revision: number) => ({
-  protocol_version: 1 as const, submission_id: submissionId, target_node_id: nodeId,
-  binding_revision: revision, job_id: jobId, is_current: true,
-});
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -42,79 +22,11 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-const mixRecord = (revision = 1): GenerationRecoveryRecord => ({
-  submission_id: SID_A, target_node_id: NODE_ID, job_id: '501', task_type: 'audio_mix',
-  binding_revision: revision, is_current: true,
-  job: { job_id: '501', type: 'audio_mix', status: 'failed', progress: 0, output_asset_ids: [], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
-  recovery_seed: { target: MIX_SEED, sources: [] }, previous_target_snapshot: null,
-  items: [{ recovery_item_id: `gcr:${SID_A}:$target`, output_key: '$target', node_id: NODE_ID,
-    state: 'pending', revision: 1, node_binding_revision: revision, asset_id: null, slot_id: null }],
-});
-
-const muxRecord = (revision = 1): GenerationRecoveryRecord => ({
-  submission_id: SID_M, target_node_id: MUX_NODE_ID, job_id: '601', task_type: 'audio_video_mux',
-  binding_revision: revision, is_current: true,
-  job: { job_id: '601', type: 'audio_video_mux', status: 'failed', progress: 0, output_asset_ids: [], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
-  recovery_seed: { target: MUX_SEED, sources: [] }, previous_target_snapshot: null,
-  items: [{ recovery_item_id: `gcr:${SID_M}:$target`, output_key: '$target', node_id: MUX_NODE_ID,
-    state: 'pending', revision: 1, node_binding_revision: revision, asset_id: null, slot_id: null }],
-});
-
-/** 已确认接缝（同 ikjnvp/ikjlxd）：公开运行时 + 实际任务定义；API、时钟、画布宿主受控。 */
-function setup(revision = 1) {
-  const nodes = new Map<string, RuntimeNodeView>([
-    [NODE_ID, { id: NODE_ID, type: 'mediaNode', position: { x: 5, y: 6 },
-      data: { jobId: '501', mediaType: 'audio', genStatus: 'failed', fileName: '用户改名.mp3',
-        generationRecovery: { protocolVersion: 1, submissionId: SID_A, outputKey: '$target' } } }],
-    [MUX_NODE_ID, { id: MUX_NODE_ID, type: 'mediaNode', position: { x: 15, y: 16 },
-      data: { jobId: '601', mediaType: 'video', genStatus: 'failed', fileName: '合成草稿.mp4',
-        audioVideoMux: { sourceNodeId: 'audio-source-1', sourceAssetId: '111', reserveAudio: true, sync: 'none' },
-        generationRecovery: { protocolVersion: 1, submissionId: SID_M, outputKey: '$target' } } }],
-  ]);
-  const owners = new Map<string, string>();
-  const removed = new Set<string>();
-  const authResume: Array<() => void> = [];
-  let epoch = {};
-  const host: GenerationRuntimeHost = {
-    getProjectId: () => '1', getLoadEpoch: () => epoch,
-    getMediaNodes: () => [...nodes.values()], findNode: (id) => nodes.get(id) ?? null,
-    patchNode: (id, patch) => { const node = nodes.get(id); if (node) nodes.set(id, { ...node, data: { ...node.data, ...patch } }); },
-    insertMediaNode: (node) => { nodes.set(node.id, node); }, removeMediaNode: (id) => { nodes.delete(id); },
-    getEdges: () => [], addEdge: () => {},
-    getActiveJob: (id) => owners.get(id), setActiveJob: (id, token) => { owners.set(id, token); }, clearActiveJob: (id) => { owners.delete(id); },
-    isLocallyRemoved: (id) => removed.has(id), markLocallyRemoved: (id) => { removed.add(id); },
-    registerPendingDelete: () => {}, isPendingDelete: () => false,
-    applyTerminal: (id, _jobId, detail) => { host.patchNode(id, { genStatus: detail.status }); return 'terminal'; },
-    settleCancelled: () => {}, saveCanvas: async () => true,
-    fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: 3, records: [mixRecord(revision), muxRecord(revision)], next_cursor: null }),
-    toast: () => {}, openRechargeForCreditsError: () => false,
-    addAuthResume: (resume) => { authResume.push(resume); }, rememberAsset: () => {},
-  };
-  const fetchJobStatus = vi.fn(async (jobId: string | number): Promise<JobDetail> => ({ job_id: String(jobId), status: 'processing', progress: 1, asset: null }));
-  let nextId = SID_B;
-  const runtime = createGenerationRuntime(host, { fetchJobStatus, newId: () => nextId, setTimeout: () => 1, clearTimeout: () => {} });
-  runtime.register(audioMixTask);
-  runtime.register(audioVideoMuxTask);
-  return {
-    runtime, host, nodes, owners, authResume, fetchJobStatus,
-    reload: () => { epoch = {}; },
-    nextSubmission: () => { nextId = SID_C; },
-    retryCall: (index: number) => {
-      const [projectId, jobId, key, , binding] = vi.mocked(retryAudioMix).mock.calls[index]!;
-      return { projectId, jobId, key, binding: canvasBindingSchema.parse(binding) };
-    },
-    muxRetryCall: (index: number) => {
-      const [projectId, jobId, key, , binding] = vi.mocked(retryAudioVideoMux).mock.calls[index]!;
-      return { projectId, jobId, key, binding: canvasBindingSchema.parse(binding) };
-    },
-  };
-}
-
 beforeEach(() => { vi.resetAllMocks(); });
 
 describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
   it('已确认版本 1 的重试遭遇 409：不自动重发，失败卡与原输入保留，版本前进到服务端值', async () => {
-    const ctx = setup();
+    const ctx = setupRecoveryScenario();
     await ctx.runtime.recover('1');
     vi.mocked(retryAudioMix).mockRejectedValueOnce(conflict(3));
     expect(ctx.runtime.retry(NODE_ID)).toBe(true);
@@ -131,7 +43,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
   });
 
   it('复核后再次点击：新 submission_id 且幂等键一致，携带采纳后的版本 3，受理后卡片与运行时身份一致', async () => {
-    const ctx = setup();
+    const ctx = setupRecoveryScenario();
     await ctx.runtime.recover('1');
     vi.mocked(retryAudioMix).mockRejectedValueOnce(conflict(3));
     expect(ctx.runtime.retry(NODE_ID)).toBe(true);
@@ -156,7 +68,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
   });
 
   it('结果未知的网络失败重试：同意图重放保留原 submission_id 与完整绑定，幂等受理不形成重复任务', async () => {
-    const ctx = setup();
+    const ctx = setupRecoveryScenario();
     await ctx.runtime.recover('1');
     vi.mocked(retryAudioMix).mockRejectedValueOnce(new Error('网络超时，结果未知'));
     expect(ctx.runtime.retry(NODE_ID)).toBe(true);
@@ -177,7 +89,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
   });
 
   it('较旧合法 409 反馈不回退已确认版本', async () => {
-    const ctx = setup(4);
+    const ctx = setupRecoveryScenario({ revision: 4 });
     await ctx.runtime.recover('1');
     expect(ctx.runtime.bindingRevisionOf(NODE_ID)).toBe(4);
     vi.mocked(retryAudioMix).mockRejectedValueOnce(conflict(3));
@@ -191,7 +103,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
   });
 
   it.each(['项目切换', '加载身份更替'] as const)('%s 后，旧重试的 409 迟到不写当前卡、不推进版本', async (window) => {
-    const ctx = setup();
+    const ctx = setupRecoveryScenario();
     await ctx.runtime.recover('1');
     const oldRetry = deferred<Awaited<ReturnType<typeof retryAudioMix>>>();
     vi.mocked(retryAudioMix).mockImplementationOnce(() => oldRetry.promise);
@@ -210,7 +122,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
   });
 
   it('音视频合成专属重试同款 409 治理：新 submission_id、携带版本 3，jobId 语义不变', async () => {
-    const ctx = setup();
+    const ctx = setupRecoveryScenario();
     await ctx.runtime.recover('1');
     vi.mocked(retryAudioVideoMux).mockRejectedValueOnce(conflict(3));
     expect(ctx.runtime.retry(MUX_NODE_ID)).toBe(true);
@@ -231,7 +143,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
   });
 
   it('重试在途时重复点击不重复发请求', async () => {
-    const ctx = setup();
+    const ctx = setupRecoveryScenario();
     await ctx.runtime.recover('1');
     const pending = deferred<Awaited<ReturnType<typeof retryAudioMix>>>();
     vi.mocked(retryAudioMix).mockImplementation(() => pending.promise);
@@ -242,7 +154,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
   });
 
   it('401 接续保留：失败卡无错误文案，续跑回调按同一意图重发', async () => {
-    const ctx = setup();
+    const ctx = setupRecoveryScenario();
     await ctx.runtime.recover('1');
     vi.mocked(retryAudioMix).mockRejectedValueOnce(new ApiError(401, '未登录', 401));
     expect(ctx.runtime.retry(NODE_ID)).toBe(true);
