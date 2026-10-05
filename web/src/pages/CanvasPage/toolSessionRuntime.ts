@@ -35,8 +35,9 @@ export interface ToolSessionDefinition<State, Entry, Input, Request = void> {
   cleanup?(state: State): void;
   /** 源卡旁路变更后校准专属编辑状态；无变化时返回原对象。 */
   reconcile?(state: State): State | null;
-  /** 提交锁的宿主在途判定。提供后：选中隐藏再选回时以其重算上锁（防在途重发），
-   *  旁路 reconcile 时以其解锁（在途落地后恢复可编辑）；显式关闭重开即新会话，不受影响。 */
+  /** 提交锁的宿主在途判定。提供后：选中隐藏后再返回（选回通知或真实点卡恢复会话）时以其
+   *  重算上锁（防在途重发），旁路 reconcile 时以其解锁（在途落地后恢复可编辑）；显式关闭
+   *  重开即新会话，不受影响。 */
   inFlight?(state: State): boolean;
 }
 
@@ -122,13 +123,18 @@ export function createToolSessionRuntime() {
       const tool = {
         getSnapshot: () => snapshot,
         open(entry: Entry, deps: ToolSessionDeps) {
-          const previous = definition.panel === 'preserve' && !snapshot.visible ? undefined : snapshot.state ?? undefined;
+          const previous = snapshot.state ?? undefined;
           const state = definition.initialize(entry, previous);
           if (state === null) return false;
           if (definition.panel === 'preserve' && snapshot.visible && state === snapshot.state) return true;
           const initialize = () => {
             if (snapshot.state !== null) definition.cleanup?.(snapshot.state);
-            snapshot = { state: definition.opened?.(state) ?? state, submitting: false, ...(definition.panel ? { visible: true, hidden: false } : {}) };
+            // IKJPM5 选择隐藏（state 保留、hidden 未置）≠ 显式关闭（hidden=true、state 已 null）：
+            // 恢复路径提交锁按宿主在途重算上锁（同 select 选回规则），节点点击先于选择通知也不洗锁；
+            // 显式关闭重开的新会话不受旧在途约束（重发例外）
+            const resume = snapshot.state !== null && !snapshot.hidden;
+            const submitting = resume && definition.inFlight ? definition.inFlight(state) : false;
+            snapshot = { state: definition.opened?.(state) ?? state, submitting, ...(definition.panel ? { visible: true, hidden: false } : {}) };
             changed();
           };
           epoch.advanceAll();

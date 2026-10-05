@@ -954,6 +954,78 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     }
   });
 
+  /* IKJPM5：选择隐藏 ≠ 显式关闭——A 重试等待时点击其他卡隐藏面板，再真实点击原卡返回
+     属恢复原会话：面板继续在途只读（发送钮与分辨率参数），不产生第二次创建。真实点击链
+     保留 NodeWrapper 的节点点击与选择通知先后顺序（order 区分真实手势主路径与 useEffect
+     早于/代替 onNodeClick 的窗口），空选中过渡不当显式关闭。对照：显式关闭重开仍为新
+     会话可再发一次（上方 IKJP8Q 既有对照用例）。 */
+  describe('IKJPM5 选择隐藏返回在途只读', () => {
+    /** 真实点击 HD 卡返回：MediaNode 真实渲染于带 click 监听的宿主，父级监听模拟 React Flow
+     *  NodeWrapper 的 onClick（onSelectNodeHandler），随后按真实顺序派发选择通知。
+     *  order='node-first' 为真实手势主路径（onNodeClick 先到、选择通知随后）；
+     *  'selection-first' 对应选中变化经 useEffect 早于或代替 onNodeClick 到达。 */
+    async function clickCardBack(id: string, order: 'node-first' | 'selection-first' = 'node-first') {
+      const nodeClick = () => flowProps.current.onNodeClick(mediaNode(id));
+      const selection = () => flowProps.current.onSelectionChange({ nodes: [mediaNode(id)] });
+      const chain = order === 'node-first' ? [nodeClick, selection] : [selection, nodeClick];
+      await act(async () => {
+        const listener = () => chain.forEach((call) => call());
+        cardHost!.addEventListener('click', listener);
+        try {
+          // 点卡片主体（非重试按钮区域），冒泡到 NodeWrapper 层（cardHost 监听）
+          const cardBody = cardHost!.querySelector('span') ?? cardHost!;
+          cardBody.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        } finally {
+          cardHost!.removeEventListener('click', listener);
+        }
+      });
+    }
+
+    /** A 重试受理并等待，面板随选择其他卡隐藏 */
+    async function setupRetryHiddenPanel() {
+      seedDoc('failed');
+      apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+      await renderPage();
+      await openHdPanel();
+      await clickPanelResolution('2k');
+      await mountCard('h1');
+      await clickCardRetry();
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+      await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')] }); });
+      expect(panelSend()).toBeNull();
+    }
+
+    it('A 重试等待→点其他卡→真实点原卡返回（节点点击先于选择通知）：仍只读、参数保留，创建总数 1', async () => {
+      await setupRetryHiddenPanel();
+      await clickCardBack('h1', 'node-first');
+      expect(panelSend()!.disabled).toBe(true);
+      expect(panelResolution('2k')!.disabled).toBe(true);
+      expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
+      await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    });
+
+    it('先选择再显示路径同规则：选择通知先恢复（只读），真实点卡重入不洗锁、不重复受理', async () => {
+      await setupRetryHiddenPanel();
+      await clickCardBack('h1', 'selection-first');
+      expect(panelSend()!.disabled).toBe(true);
+      expect(panelResolution('2k')!.disabled).toBe(true);
+      await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    });
+
+    it('选择隐藏期间的空选中过渡不当显式关闭：点回原卡仍恢复只读会话，创建总数 1', async () => {
+      await setupRetryHiddenPanel();
+      await act(async () => { flowProps.current.onSelectionChange({ nodes: [] }); });
+      await clickCardBack('h1');
+      expect(panelSend()!.disabled).toBe(true);
+      expect(panelResolution('2k')!.disabled).toBe(true);
+      expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
+      await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('新会话发送失败而旧重试仍等待时，再次显式关闭重开仍可按新会话例外主动发送', async () => {
     seedDoc('failed');
     apiMocks.createVideoEnhancement

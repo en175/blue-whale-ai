@@ -201,6 +201,49 @@ describe('工具会话运行时公开接口', () => {
     expect(panel.send()).toBe(true);
   });
 
+  /* IKJPM5 选择隐藏返回=恢复原会话：open 不因「不可见」洗掉原会话与提交锁——initialize
+     沿用 previous（同卡恢复）时提交锁按宿主在途重算上锁（同 select 选回规则），随后到达
+     的选择通知不重置；显式关闭重开与隐藏后换卡仍是新会话（submitting 复位，重发例外保留）。 */
+  it('选择隐藏后 open 同卡恢复原会话并按宿主在途上锁；显式关闭重开与换卡为新会话', () => {
+    const runtime = createToolSessionRuntime();
+    let inFlight = false;
+    let seed = 0;
+    const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve',
+      initialize: (nodeId: string, previous?: { nodeId: string; format: string }) => previous?.nodeId === nodeId ? previous : { nodeId, format: `seed-${++seed}` },
+      inFlight: () => inFlight,
+      reconcile: (state) => state,
+    });
+    panel.open('v1', sessionDeps());
+    panel.edit((state) => ({ ...state, format: '2k' }));
+    runtime.onSelectionChange({ soloId: 'v2', multiSelect: false });
+    expect(panel.getSnapshot().visible).toBe(false);
+
+    // 选择隐藏后同卡 open = 恢复原会话：内容保留 + 提交锁按宿主在途重算上锁
+    inFlight = true;
+    panel.open('v1', sessionDeps());
+    expect(panel.getSnapshot().state?.format).toBe('2k');
+    expect(panel.getSnapshot().visible).toBe(true);
+    expect(panel.getSnapshot().submitting).toBe(true);
+    // 节点点击先到后选择通知随后到达：visible 已同不重置（两顺序同一在途规则）
+    runtime.onSelectionChange({ soloId: 'v1', multiSelect: false });
+    expect(panel.getSnapshot().submitting).toBe(true);
+    // 宿主在途归零后 reconcile 解锁（面板恢复可编辑）
+    inFlight = false;
+    runtime.reconcileSources(new Set(['v1']));
+    expect(panel.getSnapshot().submitting).toBe(false);
+
+    // 隐藏后换卡 open = 新会话：内容重算、submitting 复位（不同卡互不锁定）
+    runtime.onSelectionChange({ soloId: 'v2', multiSelect: false });
+    panel.open('v9', sessionDeps());
+    expect(panel.getSnapshot().state).toEqual({ nodeId: 'v9', format: 'seed-2' });
+    expect(panel.getSnapshot().submitting).toBe(false);
+    // 显式关闭重开 = 新会话：重发例外保留
+    panel.close();
+    panel.open('v9', sessionDeps());
+    expect(panel.getSnapshot().state).toEqual({ nodeId: 'v9', format: 'seed-3' });
+    expect(panel.getSnapshot().submitting).toBe(false);
+  });
+
 });
 
 it.each(['close', 'escape', 'selection', 'pane', 'generation'] as const)('公开接口 %s 退出丢弃编辑态，空选中保留会话', (route) => {

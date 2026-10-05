@@ -62,9 +62,16 @@ export function createVideoEnhanceSession(getHost: () => PanelToolHost): ToolSes
     kind: 'videoEnhance', panel: 'preserve',
     initialize(nodeId, previous) {
       if (!getHost().canOpen(nodeId)) return null;
-      if (previous?.nodeId === nodeId) return previous;
       const identity = getHost().getNode(nodeId)?.data.videoEnhance as VideoEnhanceIdentity | undefined;
-      return { nodeId, seed: { ts: Date.now(), initialResolution: restoreVideoEnhanceResolution(identity?.lastParams) } };
+      const initialResolution = restoreVideoEnhanceResolution(identity?.lastParams);
+      if (previous?.nodeId === nodeId) {
+        // IKJPM5 选择隐藏返回=恢复原会话（提交锁语义由运行时保留）：面板隐藏即卸载，重挂初值
+        // 从最新 lastParams 刷新（编辑即时写卡，切走再切回不回退打开时的旧快照）
+        return initialResolution === previous.seed.initialResolution
+          ? previous
+          : { ...previous, seed: { ...previous.seed, initialResolution } };
+      }
+      return { nodeId, seed: { ts: Date.now(), initialResolution } };
     },
     opened(state) { getHost().activate(state.nodeId, true); return state; },
     target: (state) => state.nodeId,
