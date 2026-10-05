@@ -701,6 +701,26 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     });
   }
 
+  /** 真实创建客户端与 HTTP 链脚手架（IKJPM7/IKJPXN 共用）：createVideoEnhancement 转发真实
+   *  实现（真实 http.ts 默认 toast 保留），受控响应仅在 fetch 边界注入；默认兜底成功空信封，
+   *  页面意外真实 fetch 不外呼不干扰受控用例。hooks 随调用处 describe 注册，作用域不变。 */
+  function setupRealCreateClient() {
+    const fetchMock = vi.fn();
+    const jsonEnvelope = (code: number, msg: string, status: number, data: unknown = null) =>
+      new Response(JSON.stringify({ code, msg, data }), { status, headers: { 'Content-Type': 'application/json' } });
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+    beforeEach(async () => {
+      const actual = await vi.importActual<typeof import('@/api/jobs')>('@/api/jobs');
+      apiMocks.createVideoEnhancement.mockImplementation(actual.createVideoEnhancement);
+      fetchMock.mockReset();
+      fetchMock.mockImplementation(async () => jsonEnvelope(200, 'ok', 200));
+      vi.stubGlobal('fetch', fetchMock);
+    });
+    afterEach(() => { vi.unstubAllGlobals(); });
+    return { fetchMock, jsonEnvelope, settle };
+  }
+
   it('先重试再发送：重试登记后已打开面板立即只读，面板发送不再受理（创建仅一次）', async () => {
     seedDoc('failed');
     apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
@@ -1123,20 +1143,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
      toolSessionErrorToastOwnership.test.tsx（IKI8L4）：createVideoEnhancement 转发真实
      实现（真实 http.ts 默认 toast 保留），受控响应仅在 fetch 边界注入。 */
   describe('IKJPM7 旧重试失败按有效会话归属（真实创建客户端与 HTTP 链）', () => {
-    const fetchMock = vi.fn();
-    const jsonEnvelope = (code: number, msg: string, status: number, data: unknown = null) =>
-      new Response(JSON.stringify({ code, msg, data }), { status, headers: { 'Content-Type': 'application/json' } });
-    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
-
-    beforeEach(async () => {
-      const actual = await vi.importActual<typeof import('@/api/jobs')>('@/api/jobs');
-      apiMocks.createVideoEnhancement.mockImplementation(actual.createVideoEnhancement);
-      fetchMock.mockReset();
-      // 默认兜底：页面意外真实 fetch 一律成功空信封，不外呼不干扰受控用例
-      fetchMock.mockImplementation(async () => jsonEnvelope(200, 'ok', 200));
-      vi.stubGlobal('fetch', fetchMock);
-    });
-    afterEach(() => { vi.unstubAllGlobals(); });
+    const { fetchMock, jsonEnvelope, settle } = setupRealCreateClient();
 
     it('A 重试后显式关闭重开（未再发送）：A 网络失败全链路无旧错误，新面板与参数保留', async () => {
       seedDoc('failed');
@@ -1285,20 +1292,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
      参数与自身提交锁保持，请求次数不增加。接缝同 IKJPM7：真实创建客户端与 HTTP 错误
      处理保留，受控外部响应仅在 fetch 边界注入。 */
   describe('IKJPXN 换目标会话隔离旧重试失败提示（真实创建客户端与 HTTP 链）', () => {
-    const fetchMock = vi.fn();
-    const jsonEnvelope = (code: number, msg: string, status: number, data: unknown = null) =>
-      new Response(JSON.stringify({ code, msg, data }), { status, headers: { 'Content-Type': 'application/json' } });
-    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
-
-    beforeEach(async () => {
-      const actual = await vi.importActual<typeof import('@/api/jobs')>('@/api/jobs');
-      apiMocks.createVideoEnhancement.mockImplementation(actual.createVideoEnhancement);
-      fetchMock.mockReset();
-      // 默认兜底：页面意外真实 fetch 一律成功空信封，不外呼不干扰受控用例
-      fetchMock.mockImplementation(async () => jsonEnvelope(200, 'ok', 200));
-      vi.stubGlobal('fetch', fetchMock);
-    });
-    afterEach(() => { vi.unstubAllGlobals(); });
+    const { fetchMock, jsonEnvelope, settle } = setupRealCreateClient();
 
     it('h1 重试 A 等待时直接打开 h2：A 网络失败不提示到新 HD 会话，h2 面板与参数保持', async () => {
       seedDoc('twoFailed');
@@ -1516,9 +1510,15 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
 
-    it('选择隐藏（含空选中过渡）后真实点回原卡：最新参数与在途只读保留，不产生额外创建', async () => {
+    /* IKJPXF 评审修订（Testing 决策 6）：点其他卡与点回原卡都走真实 NodeWrapper——
+       真实桥挂载含 v1 的全部节点，点击经 ReactFlow 自有事件顺序转发回页面回调，
+       不以直接调 onSelectionChange 替代真实手势。 */
+    it('选择隐藏（含空选中过渡）：真实点击其他卡隐藏面板、真实点回原卡恢复——参数与在途只读保留、无额外创建，A 失败反馈仍保留', async () => {
       seedDoc('failed');
-      apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
+      let rejectA!: (error: unknown) => void;
+      apiMocks.createVideoEnhancement.mockImplementationOnce(
+        () => new Promise<{ job_id: string; status: 'queued' }>((_, reject) => { rejectA = reject; }),
+      );
       await renderPage();
       await openHdPanel();
       await clickPanelResolution('2k');
@@ -1526,19 +1526,29 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await clickCardRetry();
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-      // 选中其他卡隐藏面板；空选中过渡不当显式关闭
-      await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')] }); });
+      // 真实 NodeWrapper 点击其他卡（v1）：真实画布确含 v1 卡，选择切换经真实桥隐藏面板
+      await mountRealFlow();
+      expect(realFlowHost!.textContent).toContain('素材视频');
+      await realClickNode('v1');
       expect(panelSend()).toBeNull();
+      // 空选中过渡不当显式关闭
       await act(async () => { flowProps.current.onSelectionChange({ nodes: [] }); });
 
-      // 真实 NodeWrapper 点回原卡：恢复同一会话
-      await mountRealFlow();
+      // 真实 NodeWrapper 点回原卡：恢复同一会话，最新参数与按宿主在途只读保留
       await realClickNode('h1');
       expect(panelSend()).toBeTruthy();
       expect(panelSend()!.disabled).toBe(true);
       expect(panelResolution('2k')!.disabled).toBe(true);
       expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
       await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
+
+      // A 是恢复会话的当前有效请求（US19）：其失败反馈保留，创建总数不变
+      await act(async () => {
+        rejectA(new Error('network down'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
   });
