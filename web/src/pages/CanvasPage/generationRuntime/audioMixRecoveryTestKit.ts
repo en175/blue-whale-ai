@@ -109,10 +109,13 @@ export function setupAudioMixRecovery(options: {
   };
   const fetchJobStatus = vi.fn(async (jobId: string | number): Promise<JobDetail> =>
     ({ job_id: String(jobId), status: 'processing', progress: 40, asset: null }));
+  const timers = new Map<number, () => void>();
+  let timerSeq = 0;
   const runtime = createGenerationRuntime(genHost, {
     fetchJobStatus,
     newId: () => `12345678-0000-4000-8000-${String(++idSeq).padStart(12, '0')}`,
-    setTimeout: () => 1, clearTimeout: () => {},
+    setTimeout: (callback) => { const id = ++timerSeq; timers.set(id, callback); return id; },
+    clearTimeout: (id) => { if (typeof id === 'number') timers.delete(id); },
   });
   runtime.register(audioMixTask);
 
@@ -201,6 +204,8 @@ export function setupAudioMixRecovery(options: {
   };
   return {
     runtime, mix, nodes, errors, warnings, toasts, recoveryRecords, fetchJobStatus, openWithInput, mixCreated, bindingView,
+    host: genHost,
+    advancePolling: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((callback) => callback()); },
     createRequest: (index: number) => readCreateRequest(requestOffset + index),
     edges: () => edges,
     inFlight: () => inFlight,

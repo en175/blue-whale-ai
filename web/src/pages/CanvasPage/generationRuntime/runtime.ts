@@ -48,6 +48,8 @@ interface ActiveExecution {
   phase: 'submitting' | 'generating' | 'checking';
   jobId?: string;
   submissionId?: string;
+  /** 扫描前按旧文档乐观接续，可靠当前记录可纠正；本地新意图不属于此类。 */
+  optimisticHydration?: boolean;
   /** 提交目标角色（取消回退 settleTarget 判定用）。 */
   targetRole?: 'draft' | 'existing-media' | 'result-placeholder';
   /** 分派来源类型（ensureExecution/水合恢复登记用）。 */
@@ -769,10 +771,13 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
   /** 旧对账仍更新自身台账；目标已删除、被新意图接管或版本落后时，不动当前承接与画布。 */
   const reconcileRecord = (record: GenerationRecoveryRecord) => {
     const claiming = active.get(record.target_node_id);
+    const currentRound = host.getActiveJob(record.target_node_id);
     const targetItem = record.items.find((item) => item.output_key === TARGET_OUTPUT_KEY);
     const ledgerOnly = host.isLocallyRemoved(record.target_node_id)
-      || (claiming != null && (claiming.jobId !== record.job_id
-        || (claiming.submissionId != null && claiming.submissionId !== record.submission_id)))
+      || (claiming != null && currentRound != null && currentRound !== claiming.round)
+      || (claiming != null && (!owns(claiming)
+        || (!claiming.optimisticHydration && (claiming.jobId !== record.job_id
+          || (claiming.submissionId != null && claiming.submissionId !== record.submission_id)))))
       || (nodeBindings.get(record.target_node_id) ?? 0)
         > (targetItem?.node_binding_revision ?? record.binding_revision);
     // 台账对账（含 !is_current：旧输出节点独立可编辑，版本进台账供差分/撤销）
@@ -807,7 +812,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       }
       case 'apply-outputs': {
         const entry = active.get(record.target_node_id);
-        if (entry && entry.jobId === record.job_id) break; // 已在途：不双链
+        if (entry && entry.jobId === record.job_id && entry.submissionId === record.submission_id) break; // 同提交已在途：不双链
         void applyRecoveredOutputs(record);
         break;
       }
@@ -828,6 +833,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     const projectId = host.getProjectId();
     if (!projectId) return;
     try {
+      clearTimer(record.target_node_id);
       const execution: ActiveExecution = {
         round: nextRound(), projectId, loadEpoch: host.getLoadEpoch(),
         nodeId: record.target_node_id, def: defForRecord(record)!, phase: 'generating',
@@ -866,14 +872,22 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       : defForNode(nodeId)?.def);
     if (!def) return;
     const entry = active.get(nodeId);
-    if (entry && entry.jobId === jobId) return;
+    if (entry) {
+      // 页面水合快照不抢当前轮次；未携快照的历史调用仍可按宿主当前卡接管不同 jobId。
+      if (known == null && (nodeData != null || entry.jobId === jobId)) return;
+      if (known != null && !entry.optimisticHydration) return;
+      if (known != null && entry.jobId === jobId && entry.submissionId === known.submissionId) {
+        entry.optimisticHydration = false;
+        return;
+      }
+    }
     // projectId 空串 = 只以加载身份守卫（水合 effect 期路由参数可能尚未解析，doc 本身已锚定项目）
     const execution: ActiveExecution = {
       round: nextRound(), projectId: host.getProjectId() ?? '', loadEpoch: host.getLoadEpoch(), nodeId,
-      def, phase: 'generating', jobId,
-      submissionId: readMarker(nodeData)?.submissionId
-        ?? readMarker(host.findNode(nodeId)?.data)?.submissionId
-        ?? known?.submissionId,
+      def, phase: 'generating', jobId, optimisticHydration: known == null,
+      submissionId: known?.submissionId
+        ?? readMarker(nodeData)?.submissionId
+        ?? readMarker(host.findNode(nodeId)?.data)?.submissionId,
     };
     const node = host.findNode(nodeId);
     if (node != null && node.data?.jobId == null) host.patchNode(nodeId, { jobId }); // 受理身份回填
