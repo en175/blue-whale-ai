@@ -131,6 +131,30 @@ describe('IKGOQX 扩展框渲染', () => {
     document.body.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
   });
+
+  it('IKJR9J 拖拽隐藏：dragHidden 时根层 visibility 隐藏（不卸载），取消即恢复', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const renderWith = (dragHidden: boolean) =>
+      createElement(
+        ReactFlowProvider,
+        null,
+        createElement(OutpaintFrame, {
+          rect: { ...RECT },
+          expands: { top: 0, right: 0, bottom: 0, left: 0 },
+          onExpandChange: () => {},
+          dragHidden,
+        }),
+      );
+    await act(async () => { root.render(renderWith(true)); });
+    const layer = container.querySelector('[data-testid="outpaint-frame"]') as HTMLElement;
+    expect(layer.style.visibility).toBe('hidden');
+    // 隐藏不卸载：手柄仍在文档中
+    expect(container.querySelector('[data-testid="outpaint-handle-nw"]')).toBeTruthy();
+    await act(async () => { root.render(renderWith(false)); });
+    expect(layer.style.visibility).toBe('');
+  });
 });
 
 describe('IKGOQX 扩展框拖拽换算接线', () => {

@@ -383,9 +383,9 @@ export default function CanvasPage() {
    *  清空，与坐标回写同批渲染——浮层在新锚点重现，不闪旧位置、无过渡动画。 */
   const [anchoredOverlayHiddenIds, setAnchoredOverlayHiddenIds] = useState<Set<string> | null>(null);
   /** IKJR9J 拖拽隐藏命中判定：仅浮层锚定卡在被拖集合中才隐藏（拖别的卡原地不动），
-   *  与 canvasToolSessions.dragHiddenOf 同口径；falsy 即不隐藏，无需 ?? false。 */
+   *  与 canvasToolSessions.dragHiddenOf 同口径：显式收敛 boolean。 */
   const isAnchoredOverlayDragHidden = (id: string | null | undefined) =>
-    id != null && anchoredOverlayHiddenIds?.has(id);
+    id != null && (anchoredOverlayHiddenIds?.has(id) ?? false);
   const skipTextGenOpenRef = useRef(false);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });

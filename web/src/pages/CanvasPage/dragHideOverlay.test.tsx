@@ -184,6 +184,16 @@ vi.mock('@/api/jobs', () => ({
 
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
+/** 价格预览不发真实请求；credits:null 是「算不出价不显示价格」的合法降级形状。
+ *  mock 工厂本身（queryFn 闭包在模块内部引用真实 quoteGenerationJob，单独 mock 导出拦不住）。 */
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    queryFn: async () => ({ credits: null }),
+  })),
+}));
+
 vi.mock('@/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
