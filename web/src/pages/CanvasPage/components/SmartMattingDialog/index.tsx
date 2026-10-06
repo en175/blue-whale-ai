@@ -16,7 +16,7 @@
  * ============================================ */
 import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X, Zap } from 'lucide-react';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import {
   SMART_MATTING_BACKGROUND_COLORS,
@@ -46,6 +46,8 @@ interface SmartMattingDialogProps {
   /** 发送中（创建请求飞行期防重复提交） */
   submitting?: boolean;
   sendBarAnchor: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 export default function SmartMattingDialog({
@@ -57,7 +59,7 @@ export default function SmartMattingDialog({
   onBackgroundColorChange,
   onSend,
   submitting,
-  sendBarAnchor,
+  sendBarAnchor, dragHidden,
 }: SmartMattingDialogProps) {
   const readOnly = submitting === true;
 
@@ -74,14 +76,11 @@ export default function SmartMattingDialog({
     dispatch();
   };
 
-  const anchorStyle = (anchor: FollowDialogAnchor | null) =>
-    anchor ? { left: anchor.left, top: anchor.top } : undefined;
-
   return (
     /* 源视频卡下方单条（跟随锚定时 inline left/top 生效，需解除默认 bottom 定位） */
     <div
       className={`${styles.sendBar} ${sendBarAnchor ? styles.sendBarFollow : ''}`}
-      style={anchorStyle(sendBarAnchor)}
+      style={anchoredOverlayStyle(sendBarAnchor, dragHidden)}
       data-gen-panel-territory
       data-testid="smart-matting-send-bar"
     >

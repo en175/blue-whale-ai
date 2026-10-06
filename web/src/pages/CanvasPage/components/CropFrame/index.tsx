@@ -33,6 +33,8 @@ export interface CropFrameProps {
   /** 显示系短边下限（64 自然像素经 minCropSideDisplay 换算；0=无下限，源图分辨率缺失兜底） */
   minSide: number;
   onRectChange: (rect: CropRect) => void;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
   /** 点框外暗区退出（四退出之一，CanvasPage 绑 exitCropMode） */
   onDarkAreaClick: () => void;
 }
@@ -50,7 +52,7 @@ type DragSession = DragTarget & {
   startPointer: { x: number; y: number };
 };
 
-export default function CropFrame({ bounds, rect, preset, minSide, onRectChange, onDarkAreaClick }: CropFrameProps) {
+export default function CropFrame({ bounds, rect, preset, minSide, onRectChange, onDarkAreaClick, dragHidden }: CropFrameProps) {
   const { screenToFlowPosition, flowToScreenPosition } = useReactFlow();
 
   const dragRef = useRef<DragSession | null>(null);
@@ -211,7 +213,7 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
     `nodrag nopan ${styles.edgeHit} ${extra}${locked ? ` ${styles.edgeHandleDisabled}` : ''}`;
 
   return (
-    <div className={styles.frameLayer} data-testid="crop-frame" data-crop-frame="" ref={layerRef}>
+    <div className={styles.frameLayer} data-testid="crop-frame" data-crop-frame="" ref={layerRef} style={{ visibility: dragHidden ? 'hidden' : undefined }}>
       {/* 框外暗区 4 带：视觉遮罩 + 点击退出；手势（wheel/拖拽平移）经转发直通画布 */}
       <div
         {...darkBandProps}

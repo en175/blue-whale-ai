@@ -10,7 +10,7 @@
  * 圆角（对齐去字幕家族形态，overlayContainer.test.ts 白名单锁定）。
  * ============================================ */
 import { ArrowUp, X, Zap } from 'lucide-react';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import {
   SCENE_SPLIT_GRANULARITIES,
   SCENE_SPLIT_GRANULARITY_LABELS,
@@ -29,6 +29,8 @@ interface SceneSplitDialogProps {
   /** 发送中（创建请求飞行期防重复提交） */
   submitting?: boolean;
   sendBarAnchor: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 export default function SceneSplitDialog({
@@ -37,7 +39,7 @@ export default function SceneSplitDialog({
   onGranularityChange,
   onSend,
   submitting,
-  sendBarAnchor,
+  sendBarAnchor, dragHidden,
 }: SceneSplitDialogProps) {
   const readOnly = submitting === true;
 
@@ -47,14 +49,11 @@ export default function SceneSplitDialog({
     dispatch();
   };
 
-  const anchorStyle = (anchor: FollowDialogAnchor | null) =>
-    anchor ? { left: anchor.left, top: anchor.top } : undefined;
-
   return (
     /* 源视频卡下方单条（跟随锚定时 inline left/top 生效，需解除默认 bottom 定位） */
     <div
       className={`${styles.sendBar} ${sendBarAnchor ? styles.sendBarFollow : ''}`}
-      style={anchorStyle(sendBarAnchor)}
+      style={anchoredOverlayStyle(sendBarAnchor, dragHidden)}
       data-gen-panel-territory
       data-testid="scene-split-send-bar"
     >

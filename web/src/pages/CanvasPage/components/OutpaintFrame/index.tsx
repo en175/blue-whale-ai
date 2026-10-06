@@ -23,13 +23,15 @@ interface OutpaintFrameProps {
   rect: SourceRect;
   expands: ExpandSides;
   onExpandChange: (expands: ExpandSides) => void;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 /** 手柄类型：4 边（单边调整）+ 4 角（自由改比例，Shift 锁比例） */
 type EdgeHandle = 'top' | 'right' | 'bottom' | 'left';
 type CornerHandle = 'nw' | 'ne' | 'sw' | 'se';
 
-export default function OutpaintFrame({ rect, expands, onExpandChange }: OutpaintFrameProps) {
+export default function OutpaintFrame({ rect, expands, onExpandChange, dragHidden }: OutpaintFrameProps) {
   const { screenToFlowPosition, flowToScreenPosition } = useReactFlow();
 
   /** 拖拽会话：手柄类型 + 按下那一刻的扩展快照（Shift 锁比例基准） */
@@ -107,7 +109,7 @@ export default function OutpaintFrame({ rect, expands, onExpandChange }: Outpain
   const boxH = br.y - tl.y;
 
   return (
-    <div className={styles.frameLayer} data-testid="outpaint-frame" data-outpaint-frame>
+    <div className={styles.frameLayer} data-testid="outpaint-frame" data-outpaint-frame style={{ visibility: dragHidden ? 'hidden' : undefined }}>
       {/* 框本体：纯视觉（边线 + 扩展区微填充），不拦截交互 */}
       <div
         className={styles.frameBox}

@@ -14,7 +14,7 @@
  * overlayContainer.test.ts 白名单锁定）。
  * ============================================ */
 import { ArrowUp, HelpCircle, Redo2, RotateCcw, Square, Undo2, X, Zap } from 'lucide-react';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
 import styles from './index.module.css';
 
@@ -41,6 +41,8 @@ interface VideoSubtitleEraseDialogProps {
    *  智能模式恒 null（无框直发） */
   sendBlockedReason: string | null;
   sendBarAnchor: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 export default function VideoSubtitleEraseDialog({
@@ -56,7 +58,7 @@ export default function VideoSubtitleEraseDialog({
   boxLimitReached,
   submitting,
   sendBlockedReason,
-  sendBarAnchor,
+  sendBarAnchor, dragHidden,
 }: VideoSubtitleEraseDialogProps) {
   const readOnly = submitting === true;
   const boxMode = mode === 'box';
@@ -67,8 +69,6 @@ export default function VideoSubtitleEraseDialog({
     dispatch();
   };
 
-  const anchorStyle = (anchor: FollowDialogAnchor | null) =>
-    anchor ? { left: anchor.left, top: anchor.top } : undefined;
 
   /** 发送置灰两个来源：请求飞行中或父级判定不可发（框选模式无框）；可发态 title 带输出规格 */
   const sendDisabled = readOnly || sendBlockedReason != null;
@@ -85,7 +85,7 @@ export default function VideoSubtitleEraseDialog({
        ？帮助与框选/撤销/重做/重置四控件（IKH3OV）。 */
     <div
       className={`${styles.sendBar} ${sendBarAnchor ? styles.sendBarFollow : ''}`}
-      style={anchorStyle(sendBarAnchor)}
+      style={anchoredOverlayStyle(sendBarAnchor, dragHidden)}
       data-gen-panel-territory
       data-testid="subtitle-erase-send-bar"
     >

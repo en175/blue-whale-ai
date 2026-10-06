@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { X, ArrowUp } from 'lucide-react';
 import { VIDEO_ENHANCE_RESOLUTIONS, type VideoEnhanceResolution } from '@lib/contracts/video-enhance';
 import { VIDEO_ENHANCE_RESOLUTION_LABELS } from '../../videoEnhance';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import styles from './index.module.css';
 
 interface VideoEnhanceDialogProps {
@@ -28,6 +28,8 @@ interface VideoEnhanceDialogProps {
   submitting?: boolean;
   /** 绑定 HD 卡时悬浮跟随其下方；缺省锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 export default function VideoEnhanceDialog({
@@ -37,7 +39,7 @@ export default function VideoEnhanceDialog({
   initialResolution,
   generating,
   submitting,
-  followAnchor,
+  followAnchor, dragHidden,
 }: VideoEnhanceDialogProps) {
   const [resolution, setResolution] = useState<VideoEnhanceResolution>(
     () => initialResolution ?? VIDEO_ENHANCE_RESOLUTIONS[0],
@@ -68,7 +70,7 @@ export default function VideoEnhanceDialog({
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor ?? null, dragHidden)}
       data-gen-panel-territory
       data-testid="video-enhance-dialog"
     >

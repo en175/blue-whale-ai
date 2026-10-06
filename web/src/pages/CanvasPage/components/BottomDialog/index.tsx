@@ -78,6 +78,7 @@ import { OMNI_REFERENCE_FOLLOW_HINT } from '@/lib/video-reference-hints';
 import AtMentionMenu from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
 import {
+  anchoredOverlayStyle,
   VIDEO_FOLLOW_MODE_LABEL,
   VIDEO_FOLLOW_MODE_ORDER,
   firstEnabledVideoMode,
@@ -205,6 +206,8 @@ interface BottomDialogProps extends RefStripOrderProps {
   onMentionCanvas?: (item: AtMentionItem) => void;
   /** 绑定生成节点时悬浮跟随；缺省仍锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
   /** 跟随节点时按已连素材给出可高亮模式；缺省不限制 */
   enabledModes?: VideoFollowMode[];
 }
@@ -228,7 +231,7 @@ export interface VideoGenSeedParams {
   sampleMode?: boolean;
 }
 
-export default function BottomDialog({ projectId, onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes, targetNodeId }: BottomDialogProps) {
+export default function BottomDialog({ projectId, onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, dragHidden, enabledModes, targetNodeId }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -947,7 +950,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor ?? null, dragHidden)}
       data-gen-panel-territory
     >
       {/* @ 菜单（IKFA1O）：挂 .dialogWrap 层向上弹出（.dialog 滚动框会裁剪浮层）；

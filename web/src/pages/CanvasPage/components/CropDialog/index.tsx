@@ -12,7 +12,7 @@
  * ============================================ */
 import { ArrowUp } from 'lucide-react';
 import RatioIcon from '@/components/RatioIcon';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { CROP_PRESET_LABELS, CROP_PRESET_ORDER, type CropPresetKey } from '../../imageCrop';
 import styles from './index.module.css';
 
@@ -27,13 +27,15 @@ interface CropDialogProps {
   onClose: () => void;
   /** 绑定源图卡时悬浮跟随其下方；缺省锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
-export default function CropDialog({ preset, onPresetChange, onConfirm, onClose, followAnchor }: CropDialogProps) {
+export default function CropDialog({ preset, onPresetChange, onConfirm, onClose, followAnchor, dragHidden }: CropDialogProps) {
   return (
     <div
       className={`${styles.panel} ${followAnchor ? styles.panelFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor ?? null, dragHidden)}
       data-gen-panel-territory
       data-testid="crop-dialog"
     >

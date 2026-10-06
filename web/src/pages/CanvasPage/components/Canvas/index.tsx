@@ -51,7 +51,7 @@ import ConnectionPreview from './ConnectionPreview';
 import SnapGuides from './SnapGuides';
 import OutpaintFrame from '../OutpaintFrame';
 import type { ExpandSides, SourceRect } from '../../imageOutpaint';
-import { EMPTY_SNAP_GUIDES, snapDragChanges } from '../../snapDragChanges';
+import { EMPTY_SNAP_GUIDES, isPositionChangeWithPosition, snapDragChanges } from '../../snapDragChanges';
 import type { SnapGuide, SnapNodeLike } from '../../snapAlignment';
 import {
   MIN_GROUP_MEMBERS,
@@ -152,6 +152,8 @@ interface FlowCanvasProps {
     rect: SourceRect;
     expands: ExpandSides;
     onExpandChange: (expands: ExpandSides) => void;
+    /** IKJR9J 拖拽隐藏（锚定卡在被拖集合时 visibility 隐藏，不卸载） */
+    dragHidden?: boolean;
   } | null;
   /** IKFR4X 会话勾选标识：已并入当前选取目标的来源节点 id（渲染期注入角标，不持久化） */
   refPickMarkedIds?: string[];
@@ -167,11 +169,14 @@ interface FlowCanvasProps {
    *  同 GroupOverlay/CropFrame 先例）——层内组件 useStore 订阅节点位置/视口，拖动与
    *  平移缩放实时跟随；悬浮工具条屏幕尺寸在任何缩放级别恒定 */
   followToolbarLayer?: ReactNode;
+  /** IKJR9J 锚定浮层拖拽隐藏：首帧真实位移起上抛被拖卡 id 集合（父层按锚定卡命中
+   *  visibility 隐藏对应浮层），dragStop/组框落定同事件批上抛 null 取消 */
+  onAnchoredOverlayDragHideChange?: (ids: Set<string> | null) => void;
   /** 「输入已更新」菜单：在当前节点用最新文本输入原位重新生成 */
   onUpdateGenerate?: (nodeId: string) => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onUpdateGenerate }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const nodesRef = useRef<Node[]>([]);
   /** 点在工具栏/小地图上：本轮手势里丢掉 React Flow 的 select，避免视频 GPU 穿透后把卡选中 */
@@ -553,10 +558,29 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const [frameDragOffset, setFrameDragOffset] = useState<{ id: string; x: number; y: number } | null>(null);
   /** 同步标记：拖组途中立刻挡住框选/选中变更，不等 state 提交 */
   const frameDraggingRef = useRef(false);
+  /** IKJR9J 锚定浮层拖拽隐藏信号：被拖卡 id 集合只经 ref 上抛（本组件不消费，
+   *  免每帧重渲染）。首帧真实位移才置位——RF 路径以带坐标的 position change 为准
+   * （snapDragChanges 同口径），组框路径以非零 offset 为准；单击零位移不触发。 */
+  const dragHideIdsRef = useRef<Set<string> | null>(null);
+  const frameDragIdsRef = useRef<Set<string>>(new Set());
+  const onAnchoredOverlayDragHideChangeRef = useRef(onAnchoredOverlayDragHideChange);
+  onAnchoredOverlayDragHideChangeRef.current = onAnchoredOverlayDragHideChange;
+  const emitDragHide = useCallback((ids: Set<string> | null) => {
+    if (dragHideIdsRef.current === ids) return; // 同一冻结集合引用不逐帧重复上抛
+    dragHideIdsRef.current = ids;
+    onAnchoredOverlayDragHideChangeRef.current?.(ids);
+  }, []);
   const handleFrameDragMembersChange = useCallback((ids: Set<string>) => {
     frameDraggingRef.current = ids.size > 0;
+    frameDragIdsRef.current = ids;
     setFrameDragMemberIds(ids);
-  }, []);
+    // 组框落定（空集合）取消隐藏；按下时的非空集合等首帧非零 offset 再隐藏
+    if (ids.size === 0) emitDragHide(null);
+  }, [emitDragHide]);
+  const handleFrameDragOffsetChange = useCallback((offset: { id: string; x: number; y: number } | null) => {
+    setFrameDragOffset(offset);
+    if (offset && (offset.x !== 0 || offset.y !== 0)) emitDragHide(frameDragIdsRef.current);
+  }, [emitDragHide]);
   /* ---------- 拖拽对齐吸附（IKGGCT T2）：决策在 snapDragChanges 纯函数，此处只接线 ---------- */
   /** 本次节点拖拽的吸附上下文：主拖卡 id + 拖起时冻结的被拖集合（onNodeDragStart 快照）。
    *  组框把手拖整组不经 React Flow 节点拖拽（GroupOverlay 直接 setNodes），不会写入此 ref。 */
@@ -602,6 +626,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       }
       const drag = snapDragRef.current;
       if (drag) {
+        // IKJR9J：首帧带坐标的 position change（真实位移帧）上抛被拖集合
+        if (changes.some(isPositionChangeWithPosition)) emitDragHide(drag.draggingIds);
         // 组框尺寸在 groups[].box，转换成 collectSnapTargets 认的伪节点形状（不改 snapAlignment.ts）
         const groupFrames: SnapNodeLike[] = groupsRef.current.map((g) => ({
           id: g.id,
@@ -624,7 +650,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       }
       onNodesChange(changes);
     },
-    [onNodesChange],
+    [onNodesChange, emitDragHide],
   );
   /** 父层刚插入节点+连线时，内部 nodes 还要等 useEffect 才同步。React Flow 会把
    *  「目标尚未进内部图」的新边当成孤儿发出 remove。裁切等即时成品卡没有 generating
@@ -778,6 +804,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       setIsDraggingNode(false);
       snapDragRef.current = null;
       setSnapGuides(EMPTY_SNAP_GUIDES);
+      // IKJR9J：落定同事件批取消隐藏——与下方父层坐标回写同批渲染，浮层直接在新位置重现
+      emitDragHide(null);
       // React Flow v12 的 dragStop 回调参数 position 取自内部 dragItems（每帧按鼠标位移
       // 推算的原始位置，不含吸附修正），而画布 state 里已是吸附后位置：松手落库必须与
       // 画布所见一致，用 nodesRef 的实时坐标覆盖回传参数（最后一帧已提交，二者同源）。
@@ -788,7 +816,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       };
       onNodeDragStopRef.current?.(withSnappedPosition(node), draggedNodes.map(withSnappedPosition));
     },
-    [],
+    [emitDragHide],
   );
 
   /** Delete/Backspace 删除选中节点；Enter 继续拦截（输入框/编辑器内保持原语义）。
@@ -974,6 +1002,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             rect={outpaintFrame.rect}
             expands={outpaintFrame.expands}
             onExpandChange={outpaintFrame.onExpandChange}
+            dragHidden={outpaintFrame.dragHidden}
           />
         )}
         {showMiniMap && (
@@ -1005,7 +1034,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             setNodes={setNodes}
             onGroupFrameDragStop={onGroupFrameDragStopRef.current}
             onFrameDragMembersChange={handleFrameDragMembersChange}
-            onFrameDragOffsetChange={setFrameDragOffset}
+            onFrameDragOffsetChange={handleFrameDragOffsetChange}
             onBringGroupToFront={onBringGroupToFront}
             onGroupClick={onGroupClick}
             onGroupClickSuppress={onGroupClickSuppress}
@@ -1027,6 +1056,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             minSide={cropFrame.minSide}
             onRectChange={cropFrame.onRectChange}
             onDarkAreaClick={cropFrame.onDarkAreaClick}
+            dragHidden={cropFrame.dragHidden}
           />
         )}
         {/* 钉屏幕工具栏层（IKGYYD）：viewport transform 层外的跟随层（同上方覆盖层先例），
@@ -1038,7 +1068,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onUpdateGenerate }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -1091,6 +1121,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         snapAlignmentEnabled={snapAlignmentEnabled}
         cropFrame={cropFrame}
         followToolbarLayer={followToolbarLayer}
+        onAnchoredOverlayDragHideChange={onAnchoredOverlayDragHideChange}
         onUpdateGenerate={onUpdateGenerate}
       />
     </ReactFlowProvider>

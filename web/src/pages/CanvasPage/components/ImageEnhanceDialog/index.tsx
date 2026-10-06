@@ -21,7 +21,7 @@ import {
   pickImageEnhanceTier,
   type ImageEnhancePanelParams,
 } from '../../imageEnhance';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import ProviderModelSelect from './ProviderModelSelect';
 import styles from './index.module.css';
 
@@ -39,6 +39,8 @@ interface ImageEnhanceDialogProps {
   submitting?: boolean;
   /** 绑定高清卡时悬浮跟随其下方；缺省锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 /** 两级下拉静态配置：供应商级当前仅 MediaKit（规格 Out of Scope：Topazlabs 等第二供应商后续接入） */
@@ -60,7 +62,7 @@ export default function ImageEnhanceDialog({
   initialParams,
   generating,
   submitting,
-  followAnchor,
+  followAnchor, dragHidden,
 }: ImageEnhanceDialogProps) {
   /** 打开面板时对源图尺寸预检一次（快照）；默认档不可用自动落到第一个可用档 */
   const [versionTier, setVersionTier] = useState<ImageEnhanceVersionTier>(() => {
@@ -123,7 +125,7 @@ export default function ImageEnhanceDialog({
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor ?? null, dragHidden)}
       data-gen-panel-territory
     >
       <div className={styles.dialog}>

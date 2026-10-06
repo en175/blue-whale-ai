@@ -378,6 +378,14 @@ export default function CanvasPage() {
   const [showImageDialog, setShowImageDialog] = useState(false);
   const [showTextGenDialog, setShowTextGenDialog] = useState(false);
   const [textGenDraftId, setTextGenDraftId] = useState<string | null>(null);
+  /** IKJR9J 画布锚定浮层拖拽隐藏：Canvas 上抛的被拖卡 id 集合（null=无拖拽）。
+   *  浮层锚定卡命中集合即 visibility 级隐藏（不卸载）；dragStop/组框落定同事件批
+   *  清空，与坐标回写同批渲染——浮层在新锚点重现，不闪旧位置、无过渡动画。 */
+  const [anchoredOverlayHiddenIds, setAnchoredOverlayHiddenIds] = useState<Set<string> | null>(null);
+  /** IKJR9J 拖拽隐藏命中判定：仅浮层锚定卡在被拖集合中才隐藏（拖别的卡原地不动），
+   *  与 canvasToolSessions.dragHiddenOf 同口径；falsy 即不隐藏，无需 ?? false。 */
+  const isAnchoredOverlayDragHidden = (id: string | null | undefined) =>
+    id != null && anchoredOverlayHiddenIds?.has(id);
   const skipTextGenOpenRef = useRef(false);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
@@ -1260,6 +1268,7 @@ export default function CanvasPage() {
   toolViewRef.current = {
     nodes: mediaNodes, viewport: liveViewport, size: wrapperSize, nodeBox: nodeBoxOf,
     projectId: currentId, submittingNodeId,
+    dragHiddenIds: anchoredOverlayHiddenIds,
     createEnhanceDraft: (id) => handleNodeEnhanceImage(id),
     createVideoEnhanceDraft: (id) => handleNodeVideoEnhance(id),
     createFrameInterpolationDraft: (id) => handleNodeFrameInterpolation(id),
@@ -10809,6 +10818,7 @@ export default function CanvasPage() {
           onConnectGroupDrop={handleConnectGroupDrop}
           onConnectSourceToGroup={handleConnectSourceToGroup}
           onPaneContextMenu={(pt) => setPaneMenu({ x: pt.clientX, y: pt.clientY })}
+          onAnchoredOverlayDragHideChange={setAnchoredOverlayHiddenIds}
           onUpdateGenerate={onUpdateGenerate}
         />
       </AssetImageRefLimitProvider>
@@ -11044,6 +11054,7 @@ export default function CanvasPage() {
             })}
             onMentionCanvas={handleVideoAtMention}
             followAnchor={videoDraftId ? followAnchor : null}
+            dragHidden={isAnchoredOverlayDragHidden(videoDraftId)}
             enabledModes={videoFollowModes}
           />
         )}
@@ -11104,6 +11115,7 @@ export default function CanvasPage() {
             onMentionCanvas={handleImageAtMention}
             currentNodes={mediaNodes}
             followAnchor={imageDraftId ? followAnchor : null}
+            dragHidden={isAnchoredOverlayDragHidden(imageDraftId)}
           />
         )}
         {toolSessions.render()}
@@ -11115,6 +11127,7 @@ export default function CanvasPage() {
               : ''}
             attachments={textAttachmentsOf(textGenDraftId)}
             followAnchor={followAnchor}
+            dragHidden={isAnchoredOverlayDragHidden(textGenDraftId)}
             onClose={closeTextGenDialog}
             onSend={handleTextGenSend}
             onParamsChange={(patch) => {
@@ -11217,6 +11230,7 @@ export default function CanvasPage() {
             mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
             onMentionCanvas={handleAudioAtMention}
             followAnchor={audioDraftId ? followAnchor : null}
+            dragHidden={isAnchoredOverlayDragHidden(audioDraftId)}
             attachments={audioDraftAttachments}
             onRemoveAttachment={(id) => removePlanAttachment(audioDraftId ?? undefined, id)}
             onReorderAttachments={

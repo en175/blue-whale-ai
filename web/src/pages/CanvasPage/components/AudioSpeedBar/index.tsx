@@ -23,7 +23,7 @@ import {
   roundAudioSpeed,
   speedToPos,
 } from '@lib/contracts/audio-speed';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { audioSpeedLabel } from '../../audioSpeed';
 import styles from './index.module.css';
 
@@ -38,6 +38,8 @@ interface AudioSpeedBarProps {
   /** 发送中（创建请求飞行期防重复提交；滑杆/发送一并只读） */
   submitting?: boolean;
   anchor: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 /** 刻度行（位置一律经契约 speedToPos 换算成 0~100% left，不硬编码百分比） */
@@ -55,7 +57,7 @@ export default function AudioSpeedBar({
   onSpeedChange,
   onSend,
   submitting,
-  anchor,
+  anchor, dragHidden,
 }: AudioSpeedBarProps) {
   const readOnly = submitting === true;
 
@@ -101,7 +103,7 @@ export default function AudioSpeedBar({
   return (
     <div
       className={`${styles.sendBar} ${anchor ? styles.sendBarFollow : ''}`}
-      style={anchor ? { left: anchor.left, top: anchor.top } : undefined}
+      style={anchoredOverlayStyle(anchor, dragHidden)}
       data-gen-panel-territory
       data-testid="audio-speed-send-bar"
     >

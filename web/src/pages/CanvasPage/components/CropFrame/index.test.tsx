@@ -125,6 +125,33 @@ describe('IKGW1N 裁切框渲染', () => {
     expect(box.style.height).toBe('300px');
   });
 
+  it('IKJR9J 拖拽隐藏：dragHidden 时根层 visibility 隐藏（不卸载），取消即恢复', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const renderWith = (dragHidden: boolean) =>
+      createElement(
+        ReactFlowProvider,
+        null,
+        createElement(CropFrame, {
+          bounds: { ...BOUNDS },
+          rect: fullCropRect(BOUNDS),
+          preset: 'free',
+          minSide: MIN_SIDE,
+          onRectChange: () => {},
+          onDarkAreaClick: () => {},
+          dragHidden,
+        }),
+      );
+    await act(async () => { root.render(renderWith(true)); });
+    const layer = container.querySelector('[data-testid="crop-frame"]') as HTMLElement;
+    expect(layer.style.visibility).toBe('hidden');
+    // 隐藏不卸载：手柄与暗区仍在文档中
+    expect(container.querySelector('[data-testid="crop-handle-nw"]')).toBeTruthy();
+    await act(async () => { root.render(renderWith(false)); });
+    expect(layer.style.visibility).toBe('');
+  });
+
   it('收窄后框与手柄跟随新矩形（渲染期 flow→屏幕换算）', async () => {
     await renderFrame({ x: 1100, y: 560, width: 200, height: 150 });
     const box = container.querySelector('[data-testid="crop-frame-box"]') as HTMLElement;

@@ -15,7 +15,7 @@ import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { AtMentionItem } from '../../atMention';
 import { docHasAnyRef, docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEditor';
@@ -123,6 +123,8 @@ export interface AudioDialogProps extends RefStripOrderProps {
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 绑定草稿卡时悬浮跟随；缺省仍锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 export default function AudioDialog({
@@ -155,7 +157,7 @@ export default function AudioDialog({
   onReorderAttachments,
   stripOrder,
   onStripOrderChange,
-  followAnchor,
+  followAnchor, dragHidden,
 }: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
   const editorRef = useRef<AudioPromptEditorHandle>(null);
@@ -434,7 +436,7 @@ export default function AudioDialog({
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor ?? null, dragHidden)}
       data-gen-panel-territory
     >
       <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>

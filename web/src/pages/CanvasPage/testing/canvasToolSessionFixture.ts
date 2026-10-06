@@ -207,6 +207,7 @@ export function canvasToolSessionFixture() {
     nodeBox: () => ({ width: 280, height: 324 }),
     projectId,
     submittingNodeId: null,
+    dragHiddenIds: null,
     createEnhanceDraft: (id) => id,
     createVideoEnhanceDraft: (id) => id,
     createFrameInterpolationDraft: (id) => id,

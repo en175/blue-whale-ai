@@ -10,7 +10,7 @@
  * ============================================ */
 import { useState } from 'react';
 import { X, ArrowUp } from 'lucide-react';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import {
   FRAME_INTERPOLATION_DEFAULT_FPS,
   FRAME_INTERPOLATION_FPS_VALUES,
@@ -34,6 +34,8 @@ interface FrameInterpolationDialogProps {
   submitting?: boolean;
   /** 绑定插帧卡时悬浮跟随其下方；缺省锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 export default function FrameInterpolationDialog({
@@ -43,7 +45,7 @@ export default function FrameInterpolationDialog({
   initialFps,
   generating,
   submitting,
-  followAnchor,
+  followAnchor, dragHidden,
 }: FrameInterpolationDialogProps) {
   const [fps, setFps] = useState<FrameInterpolationFps>(
     () => initialFps ?? FRAME_INTERPOLATION_DEFAULT_FPS,
@@ -74,7 +76,7 @@ export default function FrameInterpolationDialog({
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor ?? null, dragHidden)}
       data-gen-panel-territory
       data-testid="frame-interpolation-dialog"
     >
