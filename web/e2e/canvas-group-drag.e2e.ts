@@ -137,6 +137,9 @@ test('整组移动后取消选中，再拖单卡：原组卡片不得跳变', as
   expect(deltaA.x, '整组拖拽后 A 应发生位移').toBeGreaterThan(50);
   expect(deltaA.y, '整组拖拽后 A 应发生位移').toBeGreaterThan(40);
   expect(deltaB, '整组拖拽后 B 应与 A 等量跟随').toEqual(deltaA);
+  // IKJR9T：松手后选中必须保持（穿透误判曾把多选塌缩成单卡拖拽）
+  await expect(node(page, 'm-a'), '松手后 A 应保持选中').toHaveClass(/selected/);
+  await expect(node(page, 'm-b'), '松手后 B 应保持选中').toHaveClass(/selected/);
 
   // 单击空白取消选中
   await page.mouse.click(start.x, start.y);
