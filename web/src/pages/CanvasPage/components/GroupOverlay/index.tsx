@@ -29,12 +29,14 @@ import styles from './index.module.css';
 
 /** 捕获阶段须放行的覆盖层：目标在这些子树上时，不按「组框穿透到 pane / 内容卡盒」拦截。
  *  扩图框、裁切框手柄压在源卡盒边界上（IKGOQ0 / IKH1WJ）；
- *  钉屏幕工具条 / 二级菜单 / 跟随对话框迁出 .react-flow__node 后同样压在卡盒上（IKHCUA）。 */
+ *  钉屏幕工具条 / 二级菜单 / 跟随对话框迁出 .react-flow__node 后同样压在卡盒上（IKHCUA）；
+ *  多选选区遮罩盖住整个选中区域，按住它拖动即库原生整组拖拽，拦下会把多选塌缩成单卡（IKJR9T）。 */
 function isPassthroughOverlayTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(
     target.closest('[data-outpaint-frame]')
     || target.closest('[data-crop-frame]')
-    || target.closest('[data-gen-panel-territory]'),
+    || target.closest('[data-gen-panel-territory]')
+    || target.closest('.react-flow__nodesselection-rect'),
   );
 }
 

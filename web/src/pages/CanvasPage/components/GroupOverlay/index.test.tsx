@@ -120,6 +120,22 @@ describe('GroupOverlay 捕获拦截的覆盖层放行', () => {
     overlay.remove();
   });
 
+  it('按下目标是 React Flow 多选选区遮罩：放行且不塌缩选中（IKJR9T）', async () => {
+    const setNodes = vi.fn();
+    await mountOverlay({ setNodes });
+    const selectionRect = document.createElement('div');
+    selectionRect.className = 'react-flow__nodesselection-rect';
+    document.body.appendChild(selectionRect);
+    let reached = false;
+    selectionRect.addEventListener('pointerdown', () => { reached = true; });
+    // 多选时库渲染透明遮罩盖住选中区域，按在选中卡上 target 即此遮罩：
+    // 误判成穿透会 stopPropagation 并把选中塌缩成单卡，整组拖拽随之失效
+    selectionRect.dispatchEvent(pointerDown(150, 150));
+    expect(reached).toBe(true);
+    expect(setNodes).not.toHaveBeenCalled();
+    selectionRect.remove();
+  });
+
   it('对照：非豁免目标同位置按下仍被拦死（防穿透框选语义不变）', async () => {
     await mountOverlay();
     const plain = document.createElement('div');
