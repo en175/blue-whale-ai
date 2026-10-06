@@ -70,11 +70,14 @@
 }
 
 /* 独立圆角内容主体：弱化边框，尺寸由 mediaContentBox 显式给定
- * 不用 overflow:hidden（会裁掉探出边缘的连接点并吃掉其命中），圆角改由内容元素自身承担 */
+ * 不用 overflow:hidden（会裁掉探出边缘的连接点并吃掉其命中），圆角改由内容元素自身承担。
+ * 内容元素圆角必须与卡片圆角同心（卡片半径 − 1px 边框）：半径偏小会让子元素角圆
+ * 在对角线处鼓出卡片外圆角，不透明底色盖住边框弧段（audioCard 16px 配 11px 曾四角弧段全缺） */
 .contentCard {
+  --card-radius: 12px;
   position: relative;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   background-color: #111;
   transition: border-color 0.2s ease;
 }
@@ -84,15 +87,16 @@
 .contentCard .mediaVideoLayer,
 .contentCard .audioBox,
 .contentCard .genBox,
-.contentCard .missingBox {
-  border-radius: 11px;
+.contentCard .missingBox,
+.contentCard .emptyShell {
+  border-radius: calc(var(--card-radius) - 1px);
 }
 
 /* 音频节点深灰卡片：贴合设计稿（ charcoal #1a1a1a + 浅灰边框） */
 .contentCard.audioCard {
+  --card-radius: 16px;
   background-color: #1a1a1a;
   border-color: rgba(255, 255, 255, 0.18);
-  border-radius: 16px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -217,7 +221,7 @@
   position: absolute;
   inset: 0;
   z-index: 0;
-  border-radius: 11px;
+  border-radius: calc(var(--card-radius) - 1px);
   background-image:
     repeating-conic-gradient(#3a3a3a 0% 25%, #2c2c2c 0% 50%);
   background-size: 16px 16px;
