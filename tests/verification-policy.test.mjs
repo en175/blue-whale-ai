@@ -603,6 +603,7 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_implement_spec_child_merge",
       "scripts.tests.test_project_skills",
       "scripts.tests.test_release_task_workflow",
+      "scripts.tests.test_code_comments",
     ],
     ["pnpm", "verify"],
   ]);
@@ -632,6 +633,7 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_implement_spec_child_merge",
       "scripts.tests.test_project_skills",
       "scripts.tests.test_release_task_workflow",
+      "scripts.tests.test_code_comments",
     ],
     ["pnpm", "verify"],
   ]);
@@ -788,6 +790,7 @@ test("builds targeted hook and workflow tests for control-plane changes", async 
         "scripts.tests.test_implement_spec_child_merge",
         "scripts.tests.test_project_skills",
         "scripts.tests.test_release_task_workflow",
+        "scripts.tests.test_code_comments",
       ],
     ],
   );

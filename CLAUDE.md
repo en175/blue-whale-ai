@@ -26,6 +26,7 @@
 6. 同一契约章节的基础设施工单先合入目标 release，功能工单再开工；跨进程字段先在契约文档确定。
 7. 产品采用 TypeScript、Next.js Web、NestJS API 与 Node.js LTS；已批准的两个 Java 服务和专用计算边界见技术栈规则。工程工具不受产品语言禁令，无关 Python 存量不阻塞功能任务。
 8. 收口与发布前按测试策略取得当前有效凭证；带工单任务主动按 issue-tracker 状态机流转。
+9. Agent 在编程实施过程中禁止新增普通代码注释；仅保留必要的工具指令和许可证声明。编程或审查前读取 [注释规则](agent-rules/code-comments.md)。
 
 ## Gitee ID 兜底常量
 
