@@ -565,6 +565,10 @@ _Avoid_: 画布（口语可用，文档中用 Canvas）、编辑器（指代不�
 画布节点卡上方悬浮的操作工具条家族（媒体卡工具条、资产卡顶部操作条等），由钉屏幕容器（NodeFollowToolbar）渲染在画布缩放层之外：锚定于目标卡片上方居中，尺寸在任何缩放级别恒为屏幕像素（不随画布缩放），拖动卡片、平移缩放画布实时跟随；不占卡片文档流空间。显示时机：唯一选中目标卡片（画布无多选）或悬停目标卡片。
 _Avoid_: 悬浮工具条、格式工具栏、操作条、顶部操作条（对本家族的历史混用叫法，统一称卡片工具栏；擦除工具条、扩图工具栏等特定工具条专有词条不受影响）、随画布缩放的工具条、占卡片文档流空间的内嵌工具条
 
+**媒体卡 CSS 结构（MediaNode card CSS）**:
+画布图片/视频/音频媒体节点卡的样式骨架，实现在 `web/src/pages/CanvasPage/components/MediaNode/index.module.css`：`.contentCard` 是卡片外壳（1px 边框 + `--card-radius` 圆角变量，普通卡 12px，音频卡 `.audioCard` 只覆盖变量为 16px），全幅内容子元素（mediaImage / mediaVideo / mediaVideoLayer / audioBox / genBox / missingBox / emptyShell）统一 `border-radius: calc(var(--card-radius) - 1px)` 与外壳同心。子元素圆角不满足「外壳半径 − 1px 边框」时会在对角线处鼓出外弧、不透明底色盖住边框弧段（四角边框缺口，PR !989 已修复并释义于 `.contentCard` 注释）；同心不变量的机械门禁是同目录 `cardConcentricRadius.test.ts`。
+_Avoid_: 给内容子元素硬编码像素圆角、把 11px 当作全卡通用值（它只是 12px 普通卡的派生值）、把棋盘格垫底层（cutoutCheckerboard）排除在同心规则外
+
 **AgentChatPanel**:
 Canvas 右侧的 Agent 对话面板（右侧对话区）。它只有一种需求对齐与创作策划模式，承载多轮澄清、
 方案迭代以及 PlanMessage 的生成与修改，不提供图片或视频生成能力，也不直接创建 SceneCard。
