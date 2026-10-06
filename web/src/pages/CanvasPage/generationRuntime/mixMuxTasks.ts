@@ -13,7 +13,7 @@ import {
 } from '@/api/jobs';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
 import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
-import { isAudioMixNodeId, buildAudioMixPlaceholderNode, AUDIO_MIX_FORMATS, type AudioMixFormat } from '../audioMix';
+import { isAudioMixNodeId, buildAudioMixPlaceholderNode, audioMixSourceError, AUDIO_MIX_EDGE_ORIGIN, AUDIO_MIX_FORMATS, type AudioMixFormat } from '../audioMix';
 import { audioVideoMuxIdentityOf, buildAudioVideoMuxPlaceholderNode } from '../audioVideoMux';
 import type { Node } from '@xyflow/react';
 import { isJobInFlight } from './types';
@@ -213,7 +213,7 @@ export const audioMixTask: GenerationTaskDefinition<AudioMixCreate> = {
   },
 
   planRecovery(record, host) {
-    return planMixMuxRecovery(record, host, 'audio', (rec) => {
+    const plan = planMixMuxRecovery(record, host, 'audio', (rec) => {
       const seed = rec.recovery_seed?.target;
       const failed = rec.job?.status === 'failed';
       const failText = failTextOf(rec);
@@ -233,6 +233,18 @@ export const audioMixTask: GenerationTaskDefinition<AudioMixCreate> = {
         },
       };
     });
+    if (plan.kind !== 'restore-target' || record.job?.status !== 'failed') return plan;
+    // 仅缺卡失败恢复补来源线；已有卡及专属重试保留用户当前连线编辑。
+    const sources = [...new Set((record.recovery_seed?.sources ?? []).map((source) => source.node_id))];
+    return {
+      ...plan,
+      edges: sources.filter((sourceId) => {
+        if (sourceId === record.target_node_id || host.isLocallyRemoved(sourceId)) return false;
+        const source = host.findNode(sourceId);
+        return source != null && audioMixSourceError(source as Node) == null
+          && !host.getEdges().some((edge) => edge.source === sourceId && edge.target === record.target_node_id);
+      }).map((source) => ({ source, target: record.target_node_id, origin: AUDIO_MIX_EDGE_ORIGIN })),
+    };
   },
 };
 

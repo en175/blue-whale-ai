@@ -802,7 +802,9 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
       case 'restore-target': {
         if (host.findNode(record.target_node_id) != null) break; // 判重：重复扫描不重复建卡
         host.insertMediaNode(plan.node);
-        for (const edge of plan.edges ?? []) host.addEdge(edge.source, edge.target);
+        for (const edge of plan.edges ?? []) {
+          host.addEdge(edge.source, edge.target, undefined, edge.origin ? { origin: edge.origin } : undefined);
+        }
         const restoreProject = host.getProjectId();
         if (restoreProject) void host.saveCanvas(restoreProject).catch(() => {}); // 补卡落盘：恢复场景本因卡不在服务端
         // IKJPVK：进行中任务补卡即接续——同一次加载内建立执行并启动轮询，不依赖
