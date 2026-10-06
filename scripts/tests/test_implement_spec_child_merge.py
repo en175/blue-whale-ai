@@ -305,6 +305,42 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
                 self.assertEqual(self.git(self.integration, "for-each-ref", "--format=%(refname)",
                                           "refs/agent-implement-spec-backups/"), "")
 
+    def test_later_release_sync_unreadable_recovery_stops_with_json(self):
+        self.synced_inherited_child_with_added_file(later_release=True)
+        recovery = Path(self.git(self.integration, "rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        original = json.loads(recovery.read_text())
+        parent_head = self.git(self.integration, "rev-parse", "HEAD")
+        child_head = self.git(self.child_one, "rev-parse", "HEAD")
+        corruptions = (
+            ("非法 JSON", "{ not json"),
+            ("缺 original_head 键", json.dumps(
+                {k: v for k, v in original.items() if k != "original_head"}, ensure_ascii=False)),
+        )
+        for name, content in corruptions:
+            with self.subTest(corruption=name):
+                recovery.write_text(content, encoding="utf-8")
+                stopped = self.invoke(self.child_one)
+                self.assertNotEqual(stopped.returncode, 0, stopped.stdout + stopped.stderr)
+                detail = json.loads(stopped.stdout)
+                self.assertEqual(detail["status"], "MERGE_STOPPED")
+                self.assertIn("无法读取", detail["detail"])
+                self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"), parent_head)
+                self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), child_head)
+                self.assertEqual(self.git(self.integration, "for-each-ref", "--format=%(refname)",
+                                          "refs/agent-implement-spec-backups/"), "")
+
+    def test_later_release_sync_legacy_polluted_branch_still_merges(self):
+        self.synced_inherited_child_with_added_file(later_release=True)
+        recovery = Path(self.git(self.integration, "rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        original = json.loads(recovery.read_text())
+        polluted = original["branch"].encode("utf-8").decode("gbk")
+        recovery.write_text(json.dumps({**original, "branch": polluted}, ensure_ascii=False),
+                            encoding="utf-8")
+        merged = self.invoke(self.child_one)
+        self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+        self.assertEqual((self.integration / "validation.md").read_text(), "parent\nchild\n")
+        self.assertEqual((self.integration / "later-release.txt").read_text(), "later release\n")
+
     def test_later_release_sync_real_content_conflict_keeps_both_branches(self):
         self.synced_inherited_child_with_added_file(later_release=True)
         parent_head = self.commit(self.integration, "validation.md", "parent\nother child\n")

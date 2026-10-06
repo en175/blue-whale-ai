@@ -81,13 +81,20 @@ def rebind_inherited_child(child: Path, metadata: dict[str, object], integration
 
 def synced_parent_proves(root: Path, integration: dict[str, object],
                          old_head: str, current_head: str) -> bool:
+    """三态判定父分支同步证明：False=无本分支证明，走默认冲突预检；
+    True=证明有效，改用继承提交作 merge-base 预检；抛 MergeError=恢复点
+    损坏或证明无效，硬停合回，防止把故障静默降级成默认路径误报。"""
     sync = runpy.run_path(str(Path(__file__).with_name("sync-task-from-origin.py")))
     recovery_path = Path(output(root, "rev-parse", "--absolute-git-dir")) / sync["RECOVERY_FILE"]
     if not recovery_path.is_file():
         return False
-    recovery = sync["load_recovery"](recovery_path)
-    proof = sync["current_rebase_proof"](recovery)
-    if (recovery.get("branch") != integration["task_branch"]
+    try:
+        recovery = sync["load_recovery"](recovery_path)
+        proof = sync["current_rebase_proof"](recovery)
+    except (sync["RecoveryError"], KeyError) as exc:
+        raise MergeError("父整合同步恢复点无法读取，未改写分支：" + str(exc)) from exc
+    if (not sync["_legacy_polluted_branch"](str(recovery.get("branch", "")),
+                                            str(integration["task_branch"]))
             or recovery.get("target_branch") != integration["target_branch"]
             or not proof or not proof.get("input_ref")
             or git(root, "merge-base", "--is-ancestor", old_head,
