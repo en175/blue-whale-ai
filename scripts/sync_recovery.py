@@ -55,7 +55,7 @@ def _restrict_to_owner(path: Path) -> None:
 def load_recovery(path: Path) -> dict[str, object]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise RecoveryError("同步恢复点无法读取：{}".format(exc)) from exc
     if not isinstance(data, dict):
         raise RecoveryError("同步恢复点必须是 JSON object。")

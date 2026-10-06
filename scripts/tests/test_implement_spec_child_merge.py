@@ -315,10 +315,14 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
             ("非法 JSON", "{ not json"),
             ("缺 original_head 键", json.dumps(
                 {k: v for k, v in original.items() if k != "original_head"}, ensure_ascii=False)),
+            ("非法 UTF-8 字节", b'{"head": "\xff\xfe\x80"}'),
         )
         for name, content in corruptions:
             with self.subTest(corruption=name):
-                recovery.write_text(content, encoding="utf-8")
+                if isinstance(content, bytes):
+                    recovery.write_bytes(content)
+                else:
+                    recovery.write_text(content, encoding="utf-8")
                 stopped = self.invoke(self.child_one)
                 self.assertNotEqual(stopped.returncode, 0, stopped.stdout + stopped.stderr)
                 detail = json.loads(stopped.stdout)
