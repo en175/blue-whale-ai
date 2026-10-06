@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -78,6 +79,27 @@ def rebind_inherited_child(child: Path, metadata: dict[str, object], integration
         raise MergeError("更新子任务继承记录失败；保留恢复引用：" + str(exc)) from exc
 
 
+def synced_parent_proves(root: Path, integration: dict[str, object],
+                         old_head: str, current_head: str) -> bool:
+    sync = runpy.run_path(str(Path(__file__).with_name("sync-task-from-origin.py")))
+    recovery_path = Path(output(root, "rev-parse", "--absolute-git-dir")) / sync["RECOVERY_FILE"]
+    if not recovery_path.is_file():
+        return False
+    recovery = sync["load_recovery"](recovery_path)
+    proof = sync["current_rebase_proof"](recovery)
+    if (recovery.get("branch") != integration["task_branch"]
+            or recovery.get("target_branch") != integration["target_branch"]
+            or not proof or not proof.get("input_ref")
+            or git(root, "merge-base", "--is-ancestor", old_head,
+                   str(proof["original_head"]), check=False).returncode):
+        return False
+    try:
+        sync["verify_rebase_proof"](root, proof, current_head)
+    except sync["WorkflowError"] as exc:
+        raise MergeError("父整合同步证明无效，未改写分支：" + str(exc)) from exc
+    return True
+
+
 def merge(root: Path, child: Path) -> dict[str, object]:
     integration = ensure_task_worktree(root)
     child_metadata = ensure_task_worktree(child)
@@ -136,6 +158,11 @@ def merge(root: Path, child: Path) -> dict[str, object]:
                 and inherited_tree_lines[0] in first_parent_trees):
             expected = git(root, "merge-tree", "--write-tree",
                            f"--merge-base={old_integration_sha}", integration_sha, child_sha,
+                           check=False)
+        elif (inherited_tree.returncode == 0
+              and synced_parent_proves(root, integration, old_integration_sha, integration_sha)):
+            expected = git(root, "merge-tree", "--write-tree",
+                           f"--merge-base={inherited_sha}", integration_sha, child_sha,
                            check=False)
     if expected.returncode:
         raise MergeError("子任务与当前集成提交存在合并冲突，未改写分支：" + expected.stdout.strip())

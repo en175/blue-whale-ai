@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "merge-implement-spec-child.py"
+SYNC_SCRIPT = Path(__file__).resolve().parents[1] / "sync-task-from-origin.py"
 CLEANUP_SCRIPT = Path(__file__).resolve().parents[1] / "cleanup-implement-spec-child.py"
 INTEGRATION = "docs/IKIOS6-整包集成验证"
 CHILD_ONE = "fix/IKIOS6-第一子任务验证"
@@ -116,7 +117,8 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
                 )
             metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
-    def synced_inherited_child_with_added_file(self, release_shared=False, child_shared=False):
+    def synced_inherited_child_with_added_file(self, release_shared=False, child_shared=False,
+                                             later_release=False):
         parent = self.commit(self.integration, "validation.md", "parent\n")
         self.git(self.main, "switch", "release/test")
         release = self.commit(self.main, "shared.txt" if release_shared else "release.txt",
@@ -135,7 +137,12 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         self.commit(self.child_one, "validation.md", "parent\nchild\n")
         if child_shared:
             self.commit(self.child_one, "shared.txt", "child\n")
-        self.git(self.integration, "rebase", release)
+        if later_release:
+            self.commit(self.main, "later-release.txt", "later release\n")
+            self.git(self.main, "push", "origin", "release/test")
+            run(sys.executable, SYNC_SCRIPT, "sync", "--json", cwd=self.integration)
+        else:
+            self.git(self.integration, "rebase", release)
 
     def test_two_children_from_different_integration_commits_fast_forward_with_correct_tree(self):
         self.commit(self.integration, "integration.txt", "integration\n")
@@ -259,6 +266,55 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         self.assertEqual((self.integration / "validation.md").read_text(), "parent\nchild\n")
         self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"),
                          self.git(self.child_one, "rev-parse", "HEAD"))
+
+    def test_inherited_child_merges_after_parent_sync_to_later_release(self):
+        self.synced_inherited_child_with_added_file(later_release=True)
+        merged = self.invoke(self.child_one)
+        self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+        self.assertEqual((self.integration / "validation.md").read_text(), "parent\nchild\n")
+        self.assertEqual((self.integration / "later-release.txt").read_text(), "later release\n")
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"),
+                         self.git(self.child_one, "rev-parse", "HEAD"))
+
+    def test_later_release_sync_missing_proof_keeps_both_branches(self):
+        self.synced_inherited_child_with_added_file(later_release=True)
+        recovery = Path(self.git(self.integration, "rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        recovery.unlink()
+        parent_head = self.git(self.integration, "rev-parse", "HEAD")
+        child_head = self.git(self.child_one, "rev-parse", "HEAD")
+        stopped = self.invoke(self.child_one)
+        self.assertNotEqual(stopped.returncode, 0)
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"), parent_head)
+        self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), child_head)
+
+    def test_later_release_sync_invalid_proof_keeps_both_branches(self):
+        self.synced_inherited_child_with_added_file(later_release=True)
+        recovery = Path(self.git(self.integration, "rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        original = json.loads(recovery.read_text())
+        parent_head = self.git(self.integration, "rev-parse", "HEAD")
+        child_head = self.git(self.child_one, "rev-parse", "HEAD")
+        for key, value in (("branch", CHILD_TWO), ("target_branch", "release/other"),
+                           ("rebase_input_ref", ""), ("rebase_input_head", self.base),
+                           ("rebase_tree", "0" * 40), ("rebase_synced_head", self.base)):
+            with self.subTest(field=key):
+                recovery.write_text(json.dumps({**original, key: value}))
+                stopped = self.invoke(self.child_one)
+                self.assertNotEqual(stopped.returncode, 0, stopped.stdout)
+                self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"), parent_head)
+                self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), child_head)
+                self.assertEqual(self.git(self.integration, "for-each-ref", "--format=%(refname)",
+                                          "refs/agent-implement-spec-backups/"), "")
+
+    def test_later_release_sync_real_content_conflict_keeps_both_branches(self):
+        self.synced_inherited_child_with_added_file(later_release=True)
+        parent_head = self.commit(self.integration, "validation.md", "parent\nother child\n")
+        child_head = self.git(self.child_one, "rev-parse", "HEAD")
+        stopped = self.invoke(self.child_one)
+        self.assertNotEqual(stopped.returncode, 0)
+        self.assertIn("合并冲突", stopped.stdout)
+        self.assertIn("validation.md", stopped.stdout)
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"), parent_head)
+        self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), child_head)
 
     def test_inherited_child_merges_after_release_sync_and_local_fix(self):
         self.synced_inherited_child_with_added_file()
