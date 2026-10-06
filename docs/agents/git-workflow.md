@@ -114,7 +114,7 @@
 
 - **任何数据库 DDL 变更，必须在 `docs/sql/` 落一份带日期的 SQL 快照**，命名 `YYYYMMDD_<worktree标识>_<变更简述>.sql`（例 `20260902_ikcnlp_project_asset.sql`）。
 - `docs/sql/` 是**历史快照 / 可读性变更记录**，与 `backend/prisma/schema/`（Prisma 双轨权威）+ `backend/prisma/migrations/` 共存——后者仍是迁移权威，`docs/sql/` 不替代它。
-- 快照内容 = 本次库变更的具体 DDL（`CREATE TABLE` / `ALTER` 等），文件头注释标明工单号、日期、变更简述。
+- 快照内容 = 本次库变更的具体 DDL（`CREATE TABLE` / `ALTER` 等）；工单号、日期、变更简述记录在工单与提交说明中，遵循 [注释规则](../../agent-rules/code-comments.md)。
 - 目的：让库变更历史集中在 `docs/sql/`，便于回溯「某次变更加了什么表 / 列」，不依赖翻 migration 目录。
 
 ## Hook 改动同步检查
