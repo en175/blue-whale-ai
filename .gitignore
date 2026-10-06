@@ -118,3 +118,6 @@ server/libs/target/generated-sources/proto/
 
 # Playwright MCP 的产物（截图/控制台日志/快照）：调试痕迹，不进仓
 .playwright-mcp/
+
+# GUI 走查截图证据（frontend-dev 等视觉验收子代理的取证产物，不进仓）
+gui-test-screenshots/
