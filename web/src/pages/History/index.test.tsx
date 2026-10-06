@@ -19,6 +19,9 @@ const projectRecords: Array<{ id: number; name: string }> = [
   { id: 91, name: '旧画布项目' },
 ];
 
+/** 未过期样片的转成片期限：必须相对当前时间——硬编码绝对日期到期后整用例变红（'2026-10-06T07:00:00Z' 已于当日炸过）。 */
+const FUTURE_FINALIZE_DEADLINE = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+
 /** 项目 55：样片（带成片来源）+ 成片（指回样片）+ 失败成片；项目 91：旧普通视频（无阶段字段）。 */
 function jobsFor(projectId: string) {
   if (projectId === '55') {
@@ -54,7 +57,7 @@ function jobsFor(projectId: string) {
           video_stage: 'sample',
           source_sample_job_id: null,
           final_job_id: '305',
-          finalize_deadline_at: '2026-10-06T07:00:00Z',
+          finalize_deadline_at: FUTURE_FINALIZE_DEADLINE,
           charge_state: 'settled',
           actual_credits: 6,
         },
@@ -129,7 +132,7 @@ function jobDetailFor(jobId: string) {
         { id: '77', url: 'https://tos.test/77.mp4', type: 'video', width: 864, height: 480 },
       ],
       video_stage: 'sample',
-      finalize_deadline_at: '2026-10-06T07:00:00Z',
+      finalize_deadline_at: FUTURE_FINALIZE_DEADLINE,
       charge_state: 'settled',
       actual_credits: 6,
     };
