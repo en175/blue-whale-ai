@@ -21,10 +21,13 @@ This workflow applies only to a Gitee Issue-driven frontend defect repair. It su
 1. Use the Issue's confirmed facts plus clearly labelled inferences from its wording and inspected frontend behavior to scope the repair. Do not operate the user's desktop or invoke Computer Use, Playwright, browser automation, screenshots, or browser smoke checks.
 2. Add or update a focused Vitest regression test when the defect can be covered without a browser (for example, a pure function, state transition, API client, or request payload). For visual, route, login, or cross-component defects that need a browser, leave browser regression to the human manual test.
 3. Do not request login credentials, assume an identity, create seed data, or block because the Issue omits identity or prerequisite data. If the Issue voluntarily supplies this context, include it only as optional guidance for the human tester; do not use it for automated testing.
+4. This workflow itself captures no browser evidence. When a supervising session separately dispatches a visual-verification subagent for a UI defect (for example under `diagnosing-bugs`), the dispatch prompt should instruct screenshot economy: crop every capture to the smallest region that carries the defect signal, take at most one full-page shot for layout context, and attach no image the verdict does not need. Repeated full-page screenshots dominate subagent context cost.
 
 ## 2. Local verification contract
 
 Run commands from `web/`. Run `npm ci` before first use or after dependency changes. Missing dependencies mean unverified, never passed.
+
+A fresh task worktree also needs backend dependencies before Vite or Vitest will resolve: `web/vite.config.ts` aliases `@lib/*` to `../backend/libs` source, whose contracts import `zod`. Run `pnpm install` at the repository root (backend is the pnpm workspace member). The symptom when it is missing: Vite fails to resolve `zod` imported from `backend/libs/contracts`. Do not hand-install individual packages into `backend/` with `npm install --no-save`; that bypasses the root lockfile and leaves a state the next agent cannot reproduce.
 
 1. `npm run verify:bugfix` runs lint, the complete Vitest suite, and `build:release` in sequence. Stop delivery on any failure.
 2. Do not run `npm run smoke:bugfix`, install Chromium, invoke Playwright, or collect browser screenshots/evidence. These all use automated browser execution and are intentionally outside this workflow.
