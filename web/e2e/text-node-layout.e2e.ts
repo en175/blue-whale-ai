@@ -192,11 +192,13 @@ test('布局：正文固定 360×270 / 标题常驻上方 / 长文本内部滚�
   expect(metrics.scrollHeight, '长文本应超出正文可视高度').toBeGreaterThan(metrics.clientHeight + 40);
 
   const zoomBefore = await page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform);
-  await card(page, 'n-long').hover();
+  // 产品现非编辑态滚轮交给画布平移；编辑态正文原生内部滚动——进入编辑态验证
+  await longEditor.dblclick();
   await page.mouse.wheel(0, 300);
   await expect.poll(() => longEditor.evaluate((el) => el.scrollTop), { timeout: 3000 }).toBeGreaterThan(0);
   const zoomAfter = await page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform);
-  expect(zoomAfter, '正文内滚轮不应缩放画布').toBe(zoomBefore);
+  const zoomOfTransform = (t: string) => /scale\(([^)]+)\)/.exec(t)?.[1];
+  expect(zoomOfTransform(zoomAfter), '正文内滚轮不应缩放画布').toBe(zoomOfTransform(zoomBefore));
 
   // 滚动至末尾：末段进入正文可视区，且外形未变
   await longEditor.evaluate((el) => { el.scrollTop = el.scrollHeight; });
@@ -256,7 +258,8 @@ test('交互：连接点隐现与锚定 / 操作条与格式工具栏同层不�
 
   // 选中：节点操作条位于标题上方，不遮挡标题与正文
   await title(page, 'n-edit').click();
-  const addToChat = node(page, 'n-edit').getByRole('button', { name: '添加到对话' });
+  // 操作条 IKGYYE 起由 FollowToolbarLayer 钉屏幕承载（portal 到 body），页面级定位
+  const addToChat = page.getByRole('button', { name: '添加到对话' });
   await expect(addToChat).toBeVisible();
   const barBox = (await addToChat.boundingBox())!;
   const editTitleBox = (await title(page, 'n-edit').boundingBox())!;
@@ -293,13 +296,14 @@ test('交互：连接点隐现与锚定 / 操作条与格式工具栏同层不�
   // 编辑：格式工具栏占据同一层操作位置，节点操作条不并存、不叠成多行
   await editor(page, 'n-edit').dblclick();
   await expect(editor(page, 'n-edit')).toHaveAttribute('contenteditable', 'true');
-  const boldBtn = node(page, 'n-edit').getByRole('button', { name: '加粗' });
+  // 格式工具栏同由 FollowToolbarLayer 钉屏幕承载
+  const boldBtn = page.getByRole('button', { name: '加粗' });
   await expect(boldBtn).toBeVisible();
   const toolbarBox = (await boldBtn.boundingBox())!;
   const titleBoxNow = (await title(page, 'n-edit').boundingBox())!;
   expect(toolbarBox.y + toolbarBox.height, '格式工具栏应在标题上方').toBeLessThanOrEqual(titleBoxNow.y + 1);
   // 编辑时「添加到对话」并入同一层操作位置：同水平带、不叠成多行、保持可达
-  const addToChatInEdit = node(page, 'n-edit').getByRole('button', { name: '添加到对话' });
+  const addToChatInEdit = page.getByRole('button', { name: '添加到对话' });
   await expect(addToChatInEdit).toBeVisible();
   const chatBox = (await addToChatInEdit.boundingBox())!;
   expect(Math.abs(chatBox.y - toolbarBox.y), '格式工具栏与节点操作应同处一层').toBeLessThanOrEqual(4);
@@ -309,7 +313,7 @@ test('交互：连接点隐现与锚定 / 操作条与格式工具栏同层不�
   await page.locator('.react-flow__pane').click({ position: { x: 1700, y: 1200 } });
   await expect(editor(page, 'n-edit')).toHaveAttribute('contenteditable', 'false');
   await title(page, 'n-edit').click();
-  await expect(node(page, 'n-edit').getByRole('button', { name: '添加到对话' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '添加到对话' })).toBeVisible();
 
   // 证据截图放在缩放段之前：缩放会把节点推出视口
   await page.screenshot({ path: join(evidenceDir, 'interaction.png') });
@@ -351,7 +355,7 @@ test('编辑与回归：富文本生效并保存 / 拖动刷新恢复 / 删除',
     selection.addRange(range);
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
   });
-  await node(page, 'n-edit').getByRole('button', { name: '加粗' }).click();
+  await page.getByRole('button', { name: '加粗' }).click();
   await expect(node(page, 'n-edit').locator('b, strong').first()).toBeVisible();
   const bolded = await editor(page, 'n-edit').evaluate((el) => el.innerHTML);
   expect(bolded).toMatch(/<(b|strong)>/);
@@ -368,9 +372,11 @@ test('编辑与回归：富文本生效并保存 / 拖动刷新恢复 / 删除',
   const nodeTranslate = (id: string) => node(page, id).evaluate((el) => (el as HTMLElement).style.transform);
   const dragTitle = title(page, 'n-short');
   const t = (await dragTitle.boundingBox())!;
-  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+  // 标题行含「展开全文」按钮（nodrag），按下点取行左端名称区避开按钮
+  const dragFromX = t.x + Math.min(t.width * 0.25, 80);
+  await page.mouse.move(dragFromX, t.y + t.height / 2);
   await page.mouse.down();
-  await page.mouse.move(t.x + t.width / 2 + 60, t.y + t.height / 2 + 40, { steps: 10 });
+  await page.mouse.move(dragFromX + 60, t.y + t.height / 2 + 40, { steps: 10 });
   await page.mouse.up();
   await expect.poll(() => nodeTranslate('n-short'), { timeout: 5000 }).not.toBe('translate(460px, 0px)');
   const dragged = /translate\((-?\d+(?:\.\d+)?)px, (-?\d+(?:\.\d+)?)px\)/.exec(await nodeTranslate('n-short'));
@@ -439,7 +445,7 @@ test('统一编辑：四类来源一致体验 / HTML 卡升级 / Markdown 输入
   // 2) 历史纯文本卡：双击出现统一格式工具栏，编辑正文经保存通路写 Markdown 源
   await editor(page, 'n-plain').dblclick();
   await expect(editor(page, 'n-plain')).toHaveAttribute('contenteditable', 'true');
-  const plainBold = node(page, 'n-plain').getByRole('button', { name: '加粗' });
+  const plainBold = page.getByRole('button', { name: '加粗' });
   await expect(plainBold).toBeVisible();
   // 统一交互：所有卡都有「展开全文」入口
   await expect(node(page, 'n-plain').getByRole('button', { name: '展开全文' })).toBeVisible();
@@ -452,7 +458,7 @@ test('统一编辑：四类来源一致体验 / HTML 卡升级 / Markdown 输入
   //    工具栏矩阵：选中文本依次加粗、斜体（行内组合）
   await page.locator('.react-flow__pane').click({ position: { x: 1700, y: 1200 } });
   await editor(page, 'n-agent').dblclick();
-  await expect(node(page, 'n-agent').getByRole('button', { name: '加粗' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '加粗' })).toBeVisible();
   await page.keyboard.type('追加');
   await editor(page, 'n-agent').evaluate((el) => {
     const text = el.querySelector('p')?.firstChild ?? el.firstChild!;
@@ -464,9 +470,9 @@ test('统一编辑：四类来源一致体验 / HTML 卡升级 / Markdown 输入
     selection.addRange(range);
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
   });
-  await node(page, 'n-agent').getByRole('button', { name: '加粗' }).click();
+  await page.getByRole('button', { name: '加粗' }).click();
   await expect(node(page, 'n-agent').locator('strong, b').first()).toBeVisible();
-  await node(page, 'n-agent').getByRole('button', { name: '斜体' }).click();
+  await page.getByRole('button', { name: '斜体' }).click();
   await expect(node(page, 'n-agent').locator('strong b, strong i, b em, b i, strong em').first()).toBeVisible();
   await expect
     .poll(

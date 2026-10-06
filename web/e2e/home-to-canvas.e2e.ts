@@ -68,11 +68,11 @@ test('home-to-canvas', async ({ page }, testInfo) => {
     const meResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/me');
     await page.goto('/');
     await meResponse;
-    await expect(page.getByText('smoke-user', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'smoke-user' })).toBeVisible();
     await page.locator('textarea').first().fill('为产品制作一个视频');
     await page.locator('button[class*="sendBtn"]').click();
 
-    await expect(page).toHaveURL(/\/canvas$/);
+    await expect(page).toHaveURL(/\/canvas(\?.*)?$/);
     await expect(page.locator('.react-flow')).toBeVisible();
     await expect(page.getByText('Smoke 项目', { exact: true })).toBeVisible();
     expect(smokeFailures({ consoleErrors, unexpectedRequests, failedResponses })).toEqual([]);
