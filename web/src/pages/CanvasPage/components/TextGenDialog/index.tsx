@@ -4,7 +4,7 @@ import { ArrowUp, ChevronDown, SlidersHorizontal, X } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { promptMaxLengthOf } from '@/lib/prompt-max-length';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
 
@@ -14,6 +14,8 @@ interface TextGenDialogProps {
   initialText?: string;
   attachments?: ImageTextAttachment[];
   followAnchor?: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
   onParamsChange?: (patch: { prompt?: string; modelId?: string }) => void;
 }
 
@@ -22,7 +24,7 @@ export default function TextGenDialog({
   onSend,
   initialText,
   attachments,
-  followAnchor,
+  followAnchor, dragHidden,
   onParamsChange,
 }: TextGenDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
@@ -59,7 +61,7 @@ export default function TextGenDialog({
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor ?? null, dragHidden)}
       data-gen-panel-territory
     >
       <div className={styles.dialog}>

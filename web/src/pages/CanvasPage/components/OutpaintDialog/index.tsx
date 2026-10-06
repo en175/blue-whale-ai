@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, ArrowUp, ChevronDown } from 'lucide-react';
 import RatioIcon from '@/components/RatioIcon';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import {
   OUTPAINT_PRESET_LABELS,
   OUTPAINT_PRESET_ORDER,
@@ -36,6 +36,8 @@ interface OutpaintDialogProps {
   onSend: () => boolean;
   /** 绑定源图卡时悬浮跟随其下方；缺省锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 /** 菜单图标比例：命中预设用该预设（original 用源图比例），自定义用当前框实际比例 */
@@ -59,7 +61,7 @@ export default function OutpaintDialog({
   expands,
   onPresetSelect,
   onSend,
-  followAnchor,
+  followAnchor, dragHidden,
 }: OutpaintDialogProps) {
   const availability = outpaintPresetAvailability(sourceSize, maxExpandPerSide(sourceSize));
   const matched = matchOutpaintPreset(expands, sourceSize);
@@ -94,7 +96,7 @@ export default function OutpaintDialog({
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor ?? null, dragHidden)}
       data-gen-panel-territory
     >
       <div className={styles.toolbar} data-testid="outpaint-dialog">

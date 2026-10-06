@@ -10,7 +10,7 @@
  * ============================================ */
 import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X, Zap } from 'lucide-react';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { AUDIO_TRIM_FORMATS, type AudioTrimFormat } from '../../audioTrim';
 import { audioTrimRangeLabel } from '../../audioTrimGeometry';
@@ -30,6 +30,8 @@ interface AudioTrimBarProps {
   /** 发送中（创建请求飞行期防重复提交） */
   submitting?: boolean;
   anchor: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 export default function AudioTrimBar({
@@ -40,7 +42,7 @@ export default function AudioTrimBar({
   onFormatChange,
   onSend,
   submitting,
-  anchor,
+  anchor, dragHidden,
 }: AudioTrimBarProps) {
   const readOnly = submitting === true;
 
@@ -60,7 +62,7 @@ export default function AudioTrimBar({
   return (
     <div
       className={`${styles.sendBar} ${anchor ? styles.sendBarFollow : ''}`}
-      style={anchor ? { left: anchor.left, top: anchor.top } : undefined}
+      style={anchoredOverlayStyle(anchor, dragHidden)}
       data-gen-panel-territory
       data-testid="audio-trim-send-bar"
     >

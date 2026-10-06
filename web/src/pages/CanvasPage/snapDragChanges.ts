@@ -38,12 +38,13 @@ export interface SnapDragChangesResult {
 export const EMPTY_SNAP_GUIDES: SnapGuide[] = [];
 
 /** 本帧带坐标的 position change（dragging 收尾帧同样带 position，照常参与改写保证落点一致）。
- *  NodePositionChange.position 是可选字段，类型谓词同时收窄联合与收窄非空坐标。 */
+ *  NodePositionChange.position 是可选字段，类型谓词同时收窄联合与收窄非空坐标。
+ *  IKJR9J 复用为「首帧真实位移」同口径判定（锚定浮层拖拽隐藏的触发帧）。 */
 type PositionedNodeChange = Extract<NodeChange, { type: 'position' }> & {
   position: { x: number; y: number };
 };
 
-function isPositionChangeWithPosition(change: NodeChange): change is PositionedNodeChange {
+export function isPositionChangeWithPosition(change: NodeChange): change is PositionedNodeChange {
   return change.type === 'position' && change.position != null;
 }
 

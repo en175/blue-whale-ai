@@ -5,7 +5,7 @@ import type { Node } from '@xyflow/react';
 import { assetPageQueryOptions } from '@/api/assets';
 import { isApiError } from '@/api/http';
 import { uploadAssetFile } from '@/utils/upload';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { AUDIO_MIX_FORMATS, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from '../../audioMix';
 import { cardNameOfNode, readAssetId } from '../../mediaRefs';
@@ -25,6 +25,8 @@ interface AudioMixBarProps {
   onClose: () => void;
   submitting: boolean;
   anchor: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 type SourceTab = 'canvas' | 'library' | 'upload';
@@ -59,7 +61,7 @@ function AudioMixLibrary({ selectedIds, full, submitting, onAdd }: {
 
 export default function AudioMixBar({
   source, candidates, selected, onAdd, onRemove, projectId, format, onFormatChange,
-  onSend, onClose, submitting, anchor,
+  onSend, onClose, submitting, anchor, dragHidden,
 }: AudioMixBarProps) {
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [formatMenuOpen, setFormatMenuOpen] = useState(false);
@@ -116,7 +118,7 @@ export default function AudioMixBar({
   return (
     <div
       className={`${bar.sendBar} ${anchor ? bar.sendBarFollow : ''} ${styles.sendBar}`}
-      style={anchor ? { left: anchor.left, top: anchor.top } : undefined}
+      style={anchoredOverlayStyle(anchor, dragHidden)}
       data-gen-panel-territory
       data-testid="audio-mix-send-bar"
     >

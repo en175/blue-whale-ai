@@ -9,7 +9,7 @@
  * ============================================ */
 import { useRef } from 'react';
 import { Brush, Eraser, Square, TypeOutline, Undo2, Redo2, X, ArrowUp } from 'lucide-react';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { MaskCoordinateSpace } from '../../eraseMask';
 import styles from './index.module.css';
 
@@ -66,6 +66,8 @@ interface ImageEraseDialogProps {
   submitting?: boolean;
   toolbarAnchor: FollowDialogAnchor | null;
   sendBarAnchor: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 const TOOL_ITEMS: Array<{ id: EraseTool; label: string; icon: typeof Brush; testId: string }> = [
@@ -90,7 +92,7 @@ export default function ImageEraseDialog({
   maskSpace,
   submitting,
   toolbarAnchor,
-  sendBarAnchor,
+  sendBarAnchor, dragHidden,
 }: ImageEraseDialogProps) {
   const readOnly = submitting === true;
   const canSendMask = !readOnly && hasPaint && maskSpace !== null;
@@ -125,15 +127,12 @@ export default function ImageEraseDialog({
     onSendMask();
   };
 
-  const anchorStyle = (anchor: FollowDialogAnchor | null) =>
-    anchor ? { left: anchor.left, top: anchor.top } : undefined;
-
   return (
     <>
       {/* 源图卡上方工具条（跟随锚定时 inline left/top 覆盖默认位，translateX 保持以锚点居中） */}
       <div
         className={styles.toolbar}
-        style={anchorStyle(toolbarAnchor)}
+        style={anchoredOverlayStyle(toolbarAnchor, dragHidden)}
         data-gen-panel-territory
         data-testid="erase-toolbar"
       >
@@ -275,7 +274,7 @@ export default function ImageEraseDialog({
           真居中；sendBarFollow 解除默认 bottom 定位避免 top/bottom 双侧拉伸） */}
       <div
         className={`${styles.sendBar} ${sendBarAnchor ? styles.sendBarFollow : ''}`}
-        style={anchorStyle(sendBarAnchor)}
+        style={anchoredOverlayStyle(sendBarAnchor, dragHidden)}
         data-gen-panel-territory
         data-testid="erase-send-bar"
       >

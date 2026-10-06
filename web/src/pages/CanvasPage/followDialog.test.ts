@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeFollowAnchorAbove, enabledVideoFollowModes, firstEnabledVideoMode } from './followDialog';
+import { anchoredOverlayStyle, computeFollowAnchorAbove, enabledVideoFollowModes, firstEnabledVideoMode } from './followDialog';
 import type { VideoMediaRef, VideoMediaRefs } from './videoMediaRefs';
 
 /* IKFC1T 文生视频门控：判定输入为「实际成为当前目标参考」的媒体集合
@@ -146,5 +146,30 @@ describe('IKGYYD computeFollowAnchorAbove（卡片上方居中锚定）', () => 
     // 节点中心贴近左缘，验证缺省钳制按 341 而非 IKHLKR 的 288（双下拉并存工具条贴屏幕边缘不被裁）
     expect(computeFollowAnchorAbove({ ...noHalfWidth, nodeX: -600 })).toEqual({ left: 12 + 341, top: 148 });
     expect(computeFollowAnchorAbove({ ...noHalfWidth, nodeX: 1000 })).toEqual({ left: 1200 - 341 - 12, top: 148 });
+  });
+});
+
+/* IKJR9J 锚定浮层根样式统一入口：定位与拖拽隐藏（visibility 级，组件不卸载、布局不改）合并
+   到同一个 style 对象——隐藏期保留草稿/焦点，落定取消隐藏即在新锚点重现，无过渡动画。 */
+
+describe('IKJR9J anchoredOverlayStyle（锚定浮层根样式）', () => {
+  const anchor = { left: 120, top: 340 };
+
+  it('无锚点且不隐藏：返回 undefined（沿用原行为，不落 style 对象）', () => {
+    expect(anchoredOverlayStyle(null)).toBeUndefined();
+    expect(anchoredOverlayStyle(null, false)).toBeUndefined();
+  });
+
+  it('有锚点不隐藏：仅定位，不带 visibility', () => {
+    expect(anchoredOverlayStyle(anchor)).toEqual({ left: 120, top: 340 });
+    expect(anchoredOverlayStyle(anchor, false)).toEqual({ left: 120, top: 340 });
+  });
+
+  it('有锚点且拖拽隐藏：定位保留 + visibility:hidden（不卸载、不改布局）', () => {
+    expect(anchoredOverlayStyle(anchor, true)).toEqual({ left: 120, top: 340, visibility: 'hidden' });
+  });
+
+  it('无锚点但拖拽隐藏：仍输出 visibility:hidden（锚点暂缺时不错过隐藏帧）', () => {
+    expect(anchoredOverlayStyle(null, true)).toEqual({ visibility: 'hidden' });
   });
 });

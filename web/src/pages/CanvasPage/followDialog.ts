@@ -1,5 +1,6 @@
 /* 跟随输入框定位，以及视频生成节点四模式判定 */
 
+import type { CSSProperties } from 'react';
 import { hasAnyMediaRef, type VideoMediaRefs } from './videoMediaRefs';
 
 export interface FollowDialogAnchor {
@@ -10,6 +11,20 @@ export interface FollowDialogAnchor {
 export const FOLLOW_DIALOG_WIDTH = 740;
 export const FOLLOW_GAP = 16;
 export const FOLLOW_PAD = 12;
+
+/** IKJR9J 锚定浮层根样式统一入口：定位与拖拽隐藏合并到同一个 style 对象。
+ *  隐藏走 visibility 级（组件不卸载、布局不改——草稿、参数与焦点保留；无过渡动画），
+ *  dragStop 取消隐藏时锚点已是新坐标，浮层直接在新位置重现。
+ *  anchor 为 null 且不隐藏时返回 undefined（沿用调用方原行为，不落 style 对象）。 */
+export function anchoredOverlayStyle(
+  anchor: FollowDialogAnchor | null,
+  dragHidden?: boolean,
+): CSSProperties | undefined {
+  if (!anchor) return dragHidden ? { visibility: 'hidden' } : undefined;
+  return dragHidden
+    ? { left: anchor.left, top: anchor.top, visibility: 'hidden' }
+    : { left: anchor.left, top: anchor.top };
+}
 
 /** 将节点 flow 坐标换算为画布容器内的对话框左上角，始终落在节点下方 */
 export function computeFollowAnchor(opts: {

@@ -14,7 +14,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { ArrowUp, Film, Video, X, Zap } from 'lucide-react';
 import { assetPageQueryOptions } from '@/api/assets';
 import { resolveMediaSrc } from '@/utils/remoteImageCors';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import {
   AUDIO_VIDEO_MUX_RESERVE_OPTIONS,
@@ -45,6 +45,8 @@ interface AudioVideoMuxPanelProps {
   onSend: () => void;
   /** 绑定草稿卡时跟随其下方；缺省锚定底部 */
   followAnchor: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 /** 时长文案（秒取整，与卡面元信息同口径；未知不展示） */
@@ -116,7 +118,7 @@ export default function AudioVideoMuxPanel({
   onUnbind,
   wireBinding,
   onSend,
-  followAnchor,
+  followAnchor, dragHidden,
 }: AudioVideoMuxPanelProps) {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const slotWrapRef = useRef<HTMLDivElement>(null);
@@ -147,7 +149,7 @@ export default function AudioVideoMuxPanel({
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor, dragHidden)}
       data-gen-panel-territory
       data-testid="audio-video-mux-panel"
     >

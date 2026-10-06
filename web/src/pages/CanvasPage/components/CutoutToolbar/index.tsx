@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { X, ArrowUp, ChevronDown, Scan, User, Package, CircleDot, Crop } from 'lucide-react';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import {
   IMAGE_CUTOUT_CONTOUR_SIZE_MIN,
   IMAGE_CUTOUT_CONTOUR_SLIDER_MAX,
@@ -44,6 +44,8 @@ interface CutoutToolbarProps {
   onSend: () => boolean;
   /** 绑定源图卡时悬浮跟随其下方（left=源卡中心 x，自身 translateX(-50%) 居中）；缺省锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 /** 场景选项（三选一 + 悬停说明，文案出处规格故事 7） */
@@ -71,7 +73,7 @@ export default function CutoutToolbar({
   sendDisabledReason,
   submitting,
   onSend,
-  followAnchor,
+  followAnchor, dragHidden,
 }: CutoutToolbarProps) {
   const [sceneMenuOpen, setSceneMenuOpen] = useState(false);
   const [contourMenuOpen, setContourMenuOpen] = useState(false);
@@ -120,7 +122,7 @@ export default function CutoutToolbar({
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      style={anchoredOverlayStyle(followAnchor ?? null, dragHidden)}
       data-gen-panel-territory
     >
       <div className={styles.toolbar} data-testid="cutout-toolbar">

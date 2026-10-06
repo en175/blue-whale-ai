@@ -15,7 +15,7 @@
  * ============================================ */
 import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
-import type { FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { AUDIO_VIDEO_SPLIT_FORMATS, type AudioVideoSplitFormat } from '../../audioVideoSplit';
 import styles from './index.module.css';
@@ -32,6 +32,8 @@ interface VideoAudioSplitDialogProps {
   submitting?: boolean;
   /** 源视频卡下方单条跟随锚（IKH25A 中心点锚：left=源卡中心 x，缺省锚定底部） */
   sendBarAnchor: FollowDialogAnchor | null;
+  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
+  dragHidden?: boolean;
 }
 
 export default function VideoAudioSplitDialog({
@@ -40,7 +42,7 @@ export default function VideoAudioSplitDialog({
   onFormatChange,
   onSend,
   submitting,
-  sendBarAnchor,
+  sendBarAnchor, dragHidden,
 }: VideoAudioSplitDialogProps) {
   const readOnly = submitting === true;
 
@@ -57,15 +59,12 @@ export default function VideoAudioSplitDialog({
     dispatch();
   };
 
-  const anchorStyle = (anchor: FollowDialogAnchor | null) =>
-    anchor ? { left: anchor.left, top: anchor.top } : undefined;
-
   return (
     /* 源视频卡下方单条（跟随锚定时 inline left/top 生效，需解除默认 bottom 定位）。
        X 关闭在最左（对齐抠图/去字幕单条先例），后接分隔线与格式下拉三要素。 */
     <div
       className={`${styles.sendBar} ${sendBarAnchor ? styles.sendBarFollow : ''}`}
-      style={anchorStyle(sendBarAnchor)}
+      style={anchoredOverlayStyle(sendBarAnchor, dragHidden)}
       data-gen-panel-territory
       data-testid="audio-video-split-send-bar"
     >

@@ -140,6 +140,8 @@ export interface CanvasToolView {
   nodeBox(node: Node): { width: number; height: number };
   projectId: string | null;
   submittingNodeId: string | null;
+  /** IKJR9J：当前被拖卡 id 集合（null=无拖拽），锚定卡命中即拖拽隐藏其浮层 */
+  dragHiddenIds: Set<string> | null;
   createEnhanceDraft(id: string): string | undefined;
   createVideoEnhanceDraft(id: string): string | undefined;
   createFrameInterpolationDraft(id: string): string | undefined;
@@ -223,6 +225,9 @@ export function createCanvasToolSessions(
       dialogWidth: 320,
     });
   }
+  /** IKJR9J 拖拽隐藏命中判定：仅浮层锚定卡在被拖集合中才隐藏（拖别的卡原地不动） */
+  const dragHiddenOf = (id: string | undefined | null) =>
+    id != null && (getView().dragHiddenIds?.has(id) ?? false);
   /** 高清/HD 面板共享装配：草稿卡可见性与悬浮工具条节点，差异仅素材身份属性（插帧为重开重建模式，不并入）。 */
   const enhancePanelDraft = (
     identityKey: 'imageEnhance' | 'videoEnhance',
@@ -336,6 +341,7 @@ export function createCanvasToolSessions(
               submitting={submitting}
               toolbarAnchor={centerAnchor(node, 60, true, true)}
               sendBarAnchor={centerAnchor(node, 120)}
+              dragHidden={dragHiddenOf(s.nodeId)}
             />
           );
         },
@@ -382,6 +388,7 @@ export function createCanvasToolSessions(
               submitting={submitting}
               onSend={h.send}
               followAnchor={centerAnchor(node, 60, false, true)}
+              dragHidden={dragHiddenOf(s.nodeId)}
             />
           );
         },
@@ -405,6 +412,7 @@ export function createCanvasToolSessions(
               minSide: space ? minCropSideDisplay(space) : 0,
               onRectChange: (rect) => h.edit((state) => ({ ...state, rect })),
               onDarkAreaClick: h.close,
+              dragHidden: dragHiddenOf(s.nodeId),
             },
           };
         },
@@ -429,6 +437,7 @@ export function createCanvasToolSessions(
               onConfirm={h.send}
               onClose={h.close}
               followAnchor={centerAnchor(node, 190)}
+              dragHidden={dragHiddenOf(s.nodeId)}
             />
           );
         },
@@ -450,6 +459,7 @@ export function createCanvasToolSessions(
                     expands: s.expands,
                     onExpandChange: (expands) =>
                       h.edit((state) => ({ ...state, expands })),
+                    dragHidden: dragHiddenOf(s.nodeId),
                   }
                 : null,
           };
@@ -504,6 +514,7 @@ export function createCanvasToolSessions(
               }
               onSend={h.send}
               followAnchor={anchor}
+              dragHidden={dragHiddenOf(s.nodeId)}
             />
           );
         },
@@ -582,6 +593,7 @@ export function createCanvasToolSessions(
                   : null
               }
               sendBarAnchor={centerAnchor(nodeOf(s.nodeId), 130)}
+              dragHidden={dragHiddenOf(s.nodeId)}
             />
           );
         },
@@ -611,6 +623,7 @@ export function createCanvasToolSessions(
                 onSend={h.send}
                 submitting={submitting}
                 sendBarAnchor={centerAnchor(nodeOf(s.nodeId), 130)}
+                dragHidden={dragHiddenOf(s.nodeId)}
               />
             )
           );
@@ -654,6 +667,7 @@ export function createCanvasToolSessions(
                 onSend={h.send}
                 submitting={submitting}
                 anchor={centerAnchor(nodeOf(s.nodeId), 130)}
+                dragHidden={dragHiddenOf(s.nodeId)}
               />
             )
           );
@@ -705,6 +719,7 @@ export function createCanvasToolSessions(
               onClose={h.close}
               submitting={submitting}
               anchor={centerAnchor(node, 170)}
+              dragHidden={dragHiddenOf(s.sourceNodeId)}
             />
           );
         },
@@ -736,6 +751,7 @@ export function createCanvasToolSessions(
                 onSend={h.send}
                 submitting={submitting}
                 anchor={centerAnchor(nodeOf(s.nodeId), 130)}
+                dragHidden={dragHiddenOf(s.nodeId)}
               />
             )
           );
@@ -766,6 +782,7 @@ export function createCanvasToolSessions(
                 onSend={h.send}
                 submitting={submitting}
                 sendBarAnchor={centerAnchor(nodeOf(s.nodeId), 130)}
+                dragHidden={dragHiddenOf(s.nodeId)}
               />
             )
           );
@@ -800,6 +817,7 @@ export function createCanvasToolSessions(
                 onSend={h.send}
                 submitting={submitting}
                 sendBarAnchor={centerAnchor(nodeOf(s.nodeId), 130)}
+                dragHidden={dragHiddenOf(s.nodeId)}
               />
             )
           );
@@ -835,6 +853,7 @@ export function createCanvasToolSessions(
                 onSend={h.send}
                 submitting={submitting}
                 sendBarAnchor={centerAnchor(nodeOf(s.nodeId), 170)}
+                dragHidden={dragHiddenOf(s.nodeId)}
               />
             )
           );
@@ -906,6 +925,7 @@ export function createCanvasToolSessions(
               wireBinding={s.wireDragging}
               onSend={h.send}
               followAnchor={panelAnchor(node)}
+              dragHidden={dragHiddenOf(s.draftId)}
             />
           );
         },
@@ -936,6 +956,7 @@ export function createCanvasToolSessions(
               generating={nodeOf(s.nodeId)?.data.genStatus === 'generating'}
               submitting={submitting || getView().submittingNodeId === s.nodeId}
               followAnchor={panelAnchor(nodeOf(s.nodeId))}
+              dragHidden={dragHiddenOf(s.nodeId)}
             />
           );
         },
@@ -968,6 +989,7 @@ export function createCanvasToolSessions(
               generating={nodeOf(s.nodeId)?.data.genStatus === 'generating'}
               submitting={submitting}
               followAnchor={panelAnchor(nodeOf(s.nodeId))}
+              dragHidden={dragHiddenOf(s.nodeId)}
             />
           );
         },
@@ -1015,6 +1037,7 @@ export function createCanvasToolSessions(
               generating={nodeOf(s.nodeId)?.data.genStatus === 'generating'}
               submitting={submitting || s.inFlight}
               followAnchor={panelAnchor(nodeOf(s.nodeId))}
+              dragHidden={dragHiddenOf(s.nodeId)}
             />
           );
         },
