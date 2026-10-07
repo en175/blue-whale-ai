@@ -494,8 +494,8 @@ describe('恢复落卡规划（planRecovery）', () => {
     });
     // 快照无身份：不猜卡（A.6）
     const untrusted = audioVideoMuxTask.planRecovery!({ ...muxRecord, previous_target_snapshot: { data: {} } }, createFakeHost().host);
-    expect(untrusted).toEqual({ kind: 'resume-polling' }); // 身份不可信不猜卡：退化为续轮询由运行时按在场判定
+    expect(untrusted).toEqual({ kind: 'none' });
     const noSnapshot = audioVideoMuxTask.planRecovery!({ ...muxRecord, previous_target_snapshot: null, recovery_seed: { target: { role: 'result-placeholder', x: 0, y: 0, width: 1, height: 1, name: '' }, sources: [] } }, createFakeHost().host);
-    expect(noSnapshot).toEqual({ kind: 'resume-polling' });
+    expect(noSnapshot).toEqual({ kind: 'none' });
   });
 });
