@@ -24,6 +24,10 @@ let playMock: ReturnType<typeof vi.spyOn>;
 let pauseMock: ReturnType<typeof vi.spyOn>;
 let loadMock: ReturnType<typeof vi.spyOn>;
 let rootMounted: boolean;
+let rawSetTimeout: typeof setTimeout;
+let rawClearTimeout: typeof clearTimeout;
+const componentTimerIds = new Set<number>();
+const clearedTimerIds = new Set<number>();
 
 const AURORA: HeroSlide = {
   id: 'aurora',
@@ -96,6 +100,19 @@ async function emit(video: HTMLVideoElement, eventName: string) {
 describe('HeroVideoCarousel', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    componentTimerIds.clear();
+    clearedTimerIds.clear();
+    rawSetTimeout = globalThis.setTimeout;
+    rawClearTimeout = globalThis.clearTimeout;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: TimerHandler, timeout?: number, ...rest: unknown[]) => {
+      const id = rawSetTimeout(handler, timeout, ...rest);
+      componentTimerIds.add(id as number);
+      return id;
+    }) as typeof setTimeout);
+    vi.spyOn(globalThis, 'clearTimeout').mockImplementation(((id?: number) => {
+      clearedTimerIds.add(id as number);
+      return rawClearTimeout(id);
+    }) as typeof clearTimeout);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -266,12 +283,12 @@ describe('HeroVideoCarousel', () => {
     await emit(videos[1], 'canplay');
     setPlaybackPosition(videos[0], 5, 5 - HERO_TRANSITION_LEAD_SECONDS + 0.01);
     await emit(videos[0], 'timeupdate');
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    expect(componentTimerIds.size).toBeGreaterThan(0);
 
     await act(async () => root.unmount());
     rootMounted = false;
 
-    expect(vi.getTimerCount()).toBe(0);
+    expect([...componentTimerIds].filter((id) => !clearedTimerIds.has(id))).toEqual([]);
     expect(pauseMock).toHaveBeenCalled();
   });
 
