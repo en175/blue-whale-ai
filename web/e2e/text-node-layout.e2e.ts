@@ -191,14 +191,15 @@ test('布局：正文固定 360×270 / 标题常驻上方 / 长文本内部滚�
   (measurements['n-long-scroll'] as Record<string, unknown>) = metrics;
   expect(metrics.scrollHeight, '长文本应超出正文可视高度').toBeGreaterThan(metrics.clientHeight + 40);
 
-  const zoomBefore = await page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform);
+  const transformBefore = await page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform);
   // 产品现非编辑态滚轮交给画布平移；编辑态正文原生内部滚动——进入编辑态验证
   await longEditor.dblclick();
   await page.mouse.wheel(0, 300);
   await expect.poll(() => longEditor.evaluate((el) => el.scrollTop), { timeout: 3000 }).toBeGreaterThan(0);
-  const zoomAfter = await page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform);
-  const zoomOfTransform = (t: string) => /scale\(([^)]+)\)/.exec(t)?.[1];
-  expect(zoomOfTransform(zoomAfter), '正文内滚轮不应缩放画布').toBe(zoomOfTransform(zoomBefore));
+  expect(
+    await page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform),
+    '编辑态滚轮不应缩放或平移画布',
+  ).toBe(transformBefore);
 
   // 滚动至末尾：末段进入正文可视区，且外形未变
   await longEditor.evaluate((el) => { el.scrollTop = el.scrollHeight; });
