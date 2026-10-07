@@ -406,9 +406,7 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
     expect(refImages()).toEqual([]);
   });
 
-  // 1f2f498d 起面板经工具栏入口进入即绑定草稿卡，本地注入路径（含去重与 9 张上限保护）不再触发；
-  // 逻辑仍保留在 ImageDialog 消费路径中，待产品决策绑定模式下的资产注入方案后恢复验证
-  it.skip('批量选择保持既有去重与 9 张上限规则', async () => {
+  it('绑定图片草稿批量资产选择保持去重与模型 9 张上限', async () => {
     const asset = (id: number): AssetRecord => ({
       id, type: 'image', url: `http://img/asset${id}.png`, width: 100, height: 100, duration: null, source: null, model: null, created_at: null,
     });
