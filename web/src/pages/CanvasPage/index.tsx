@@ -158,7 +158,6 @@ import { composeImageSendPrompt } from './components/ImageDialog/composeImageSen
 import ImageGenerationDockPanel from './imageGenerationDockPanel';
 import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-max-length';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
-import TextGenDialog from './components/TextGenDialog';
 import { flattenPromptDocForSend, restorePromptDoc, type PromptDoc } from '@/lib/prompt-doc';
 import { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -286,6 +285,8 @@ import { createVideoGenerationDock, type VideoGenerationDockHost } from './video
 import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from './audioMusicGenerationDock';
 import AudioGenerationDockPanel from './audioGenerationDockPanel';
 import MusicGenerationDockPanel from './musicGenerationDockPanel';
+import { createTextGenerationDock, type TextGenerationDockHost } from './textGenerationDock';
+import TextGenerationDockPanel from './textGenerationDockPanel';
 import VideoGenerationDockPanel from './videoGenerationDockPanel';
 import styles from './index.module.css';
 
@@ -336,8 +337,6 @@ export default function CanvasPage() {
   const connectingSourceRef = useRef<string | null>(null);
   const paneUploadRef = useRef<HTMLInputElement>(null);
   const paneUploadPosRef = useRef<{ x: number; y: number } | null>(null);
-  const [showTextGenDialog, setShowTextGenDialog] = useState(false);
-  const [textGenDraftId, setTextGenDraftId] = useState<string | null>(null);
   /** IKJR9J 画布锚定浮层拖拽隐藏：Canvas 上抛的被拖卡 id 集合（null=无拖拽）。
    *  浮层锚定卡命中集合即 visibility 级隐藏（不卸载）；dragStop/组框落定同事件批
    *  清空，与坐标回写同批渲染——浮层在新锚点重现，不闪旧位置、无过渡动画。 */
@@ -346,7 +345,6 @@ export default function CanvasPage() {
    *  与 canvasToolSessions.dragHiddenOf 同口径：显式收敛 boolean。 */
   const isAnchoredOverlayDragHidden = (id: string | null | undefined) =>
     id != null && (anchoredOverlayHiddenIds?.has(id) ?? false);
-  const skipTextGenOpenRef = useRef(false);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
   const [liveViewport, setLiveViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
@@ -973,12 +971,14 @@ export default function CanvasPage() {
   const audioDockHostRef = useRef<AudioGenerationDockHost | null>(null);
   const musicDockHostRef = useRef<MusicGenerationDockHost | null>(null);
   const [audioMusicDock] = useState(() => createAudioMusicGenerationDocks(() => audioDockHostRef.current!, () => musicDockHostRef.current!));
-  const compatibilityDockHostRef = useRef<Record< 'text' | 'imageEnhance' | 'videoEnhance' | 'frameInterpolation', CompatibilityDockHost> | null>(null);
+  const textDockHostRef = useRef<TextGenerationDockHost | null>(null);
+  const [textDock] = useState(() => createTextGenerationDock(() => textDockHostRef.current!));
+  const compatibilityDockHostRef = useRef<Record< 'imageEnhance' | 'videoEnhance' | 'frameInterpolation', CompatibilityDockHost> | null>(null);
   const [generationDock] = useState(() => createGenerationDockCoordinator({
     image: imageDock,
     video: videoDock,
     audio: audioMusicDock.audio,
-    text: createCompatibilityDock(() => compatibilityDockHostRef.current!.text),
+    text: textDock,
     music: audioMusicDock.music,
     imageEnhance: createCompatibilityDock(() => compatibilityDockHostRef.current!.imageEnhance, true),
     videoEnhance: createCompatibilityDock(() => compatibilityDockHostRef.current!.videoEnhance, true),
@@ -1002,6 +1002,7 @@ export default function CanvasPage() {
   const editingTargetRef = useRef<string | null>(null);
   const { visible: showAudioDialog, boundId: audioDraftId, seed: audioSeed } = generationDock.panel('audio');
   const { visible: showMusicDialog } = generationDock.panel('music');
+  const { visible: showTextGenDialog, boundId: textGenDraftId } = generationDock.panel('text');
   /** 侧栏新建草稿的显式选中请求（IKDMQV）：新卡自动选中并取消其余。
    *  经 Canvas 内部 setNodes 应用——直接经 nodes selected 字段传播会因 React Flow
    *  selection store 的时序差报双选中，把自动打开的绑定面板当多选误关 */
@@ -1457,8 +1458,7 @@ export default function CanvasPage() {
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
           onWriteSelf: () => {
-            skipTextGenOpenRef.current = true;
-            setShowTextGenDialog(false);
+            generationDock.writeSelf('text');
           },
         };
         break;
@@ -2700,11 +2700,7 @@ export default function CanvasPage() {
       } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
         openAudioDraftDialog(node.id);
       } else if (node.type === 'textNode' && data.textGen === true) {
-        if (skipTextGenOpenRef.current) {
-          skipTextGenOpenRef.current = false;
-          return;
-        }
-        openTextGenDialog(node.id);
+        openTextGenDialog(node.id, 'nodeClick');
       } else if (node.type === 'mediaNode' && hasGenerationRecord(node)) {
         // IKDMQU P1：单选有生成记录的成品卡自动打开对应生成面板（编辑写回原卡，发送后原卡重新生成）；
         // 上传素材卡无生成记录，不自动打开（Q4）；重新生成中/失败态的卡 jobId 仍在，可打开查看或调整重发
@@ -2844,7 +2840,7 @@ export default function CanvasPage() {
   };
   const closeVideoDialog = () => generationDock.close('video');
   const closeAudioDialog = () => generationDock.close('audio');
-  const closeTextGenDialog = () => setShowTextGenDialog(false);
+  const closeTextGenDialog = () => generationDock.close('text');
   const closeMusicDialog = () => generationDock.close('music');
   const dismissGenPanels = () => generationDock.dismissAll('ordinary');
   const dismissAllGenPanels = () => generationDock.dismissAll();
@@ -2946,10 +2942,6 @@ export default function CanvasPage() {
       }
     }
     generationDock.selection({ soloId, multiSelect: candidates.length > 1, editing: editSessionActive, submittingNodeId });
-    // 文本生成面板恒绑定文生文卡：命中绑定卡保持，其余单选/多选关闭（无 hiddenRef 语义，重开只经点卡）
-    if (showTextGenDialog && textGenDraftId && ((soloId && soloId !== textGenDraftId) || candidates.length > 1)) {
-      setShowTextGenDialog(false);
-    }
   };
 
   /** IKIJ60：下传 FlowCanvas 的选中处理函数同步稳定化——页面每轮渲染重建
@@ -3272,15 +3264,7 @@ export default function CanvasPage() {
   /** IKGOQX 扩图会话绑定清理：源图卡被删除时结束会话（其余退出路径见统一退出函数） */
 
 
-  useEffect(() => {
-    if (!textGenDraftId) return;
-    const node = textNodes.find((n) => n.id === textGenDraftId);
-    const d = (node?.data ?? {}) as Record<string, unknown>;
-    if (!node || d.textGen !== true) {
-      setTextGenDraftId(null);
-      setShowTextGenDialog(false);
-    }
-  }, [textGenDraftId, textNodes]);
+  useEffect(() => { generationDock.reconcile(); }, [generationDock, textGenDraftId, textNodes]);
 
   const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => generationDock.open('video', { nodeId, preset });
 
@@ -3478,8 +3462,7 @@ export default function CanvasPage() {
         onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
         onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
         onWriteSelf: () => {
-          skipTextGenOpenRef.current = true;
-          setShowTextGenDialog(false);
+          generationDock.writeSelf('text');
         },
       },
     };
@@ -3494,30 +3477,7 @@ export default function CanvasPage() {
     return nodeId;
   };
 
-  const openTextGenDialog = (nodeId: string) => generationDock.open('text', { nodeId });
-  const openLegacyTextGenDialog = (nodeId: string) => {
-    skipTextGenOpenRef.current = false;
-    setTextGenDraftId(nodeId);
-    exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
-    setShowTextGenDialog(true);
-  };
-
-  const handleTextGenSend = (text: string, modelId: string) => {
-    if (!textGenDraftId) return;
-    const nodeId = textGenDraftId;
-    const attachments = textAttachmentsOf(nodeId);
-    const body = [attachments.map((item) => item.text).filter(Boolean).join('\n\n'), text]
-      .filter(Boolean)
-      .join('\n\n');
-    setTextNodes((prev) =>
-      prev.map((n) =>
-        n.id === nodeId
-          ? { ...n, data: { ...n.data, text: body, prompt: text, draftModelId: modelId } }
-          : n,
-      ),
-    );
-    setShowTextGenDialog(false);
-  };
+  const openTextGenDialog = (nodeId: string, intent?: 'nodeClick') => generationDock.open('text', { nodeId, intent });
 
   const openConnectTypeMenu = (sourceIds: string[], clientX: number, clientY: number) => {
     const sources = sourceIds.map(findCanvasNode).filter((n): n is Node => isConnectableSource(n));
@@ -9056,14 +9016,19 @@ export default function CanvasPage() {
       resources={{ canvasMedia, mentionItems: atMentionItems, onMentionCanvas: handleMusicAtMention, externalPick: musicPickResult }}
     />,
   };
+  textDockHostRef.current = {
+    getNodes: () => textNodesRef.current,
+    getEdges: () => edgesRef.current,
+    attachmentsOf: textAttachmentsOf,
+    beginEdit: exitEditSessionForGenPanel,
+    patchNode: (id, data) => setTextNodes(previous => previous.map(node => node.id === id ? { ...node, data: { ...node.data, ...data } } : node)),
+    render: () => <TextGenerationDockPanel
+      view={generationDock.panel('text')}
+      actions={{ close: closeTextGenDialog, updateDraft: patch => generationDock.updateDraft('text', patch), submit: input => generationDock.submit('text', input) }}
+      resources={{ followAnchor, dragHidden: isAnchoredOverlayDragHidden(textGenDraftId) }}
+    />,
+  };
   compatibilityDockHostRef.current = {
-    text: {
-      view: () => ({ visible: showTextGenDialog }),
-      beforeOpen: exitEditSessionForGenPanel,
-      open: input => openLegacyTextGenDialog(input.nodeId!),
-      hide: () => setShowTextGenDialog(false),
-      close: closeTextGenDialog,
-    },
     imageEnhance: {
       view: () => ({ visible: toolSessions.entries.imageEnhance.handle.getSnapshot().visible === true }),
       canOpen: input => canOpenEditor(input.nodeId),
@@ -9848,35 +9813,7 @@ export default function CanvasPage() {
         {/* 底部图片对话框 */}
         {generationDock.render('image')}
         {toolSessions.render()}
-        {showTextGenDialog && textGenDraftId && (
-          <TextGenDialog
-            key={textGenDraftId}
-            initialText={typeof (textNodes.find((n) => n.id === textGenDraftId)?.data as Record<string, unknown> | undefined)?.prompt === 'string'
-              ? String((textNodes.find((n) => n.id === textGenDraftId)?.data as Record<string, unknown> | undefined)?.prompt)
-              : ''}
-            attachments={textAttachmentsOf(textGenDraftId)}
-            followAnchor={followAnchor}
-            dragHidden={isAnchoredOverlayDragHidden(textGenDraftId)}
-            onClose={closeTextGenDialog}
-            onSend={handleTextGenSend}
-            onParamsChange={(patch) => {
-              setTextNodes((prev) =>
-                prev.map((n) =>
-                  n.id === textGenDraftId
-                    ? {
-                        ...n,
-                        data: {
-                          ...n.data,
-                          ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
-                          ...(patch.modelId !== undefined ? { draftModelId: patch.modelId } : {}),
-                        },
-                      }
-                    : n,
-                ),
-              );
-            }}
-          />
-        )}
+        {generationDock.render('text')}
 
         {/* 节点选取模式提示条（IKFE8U：视频面板与图片面板统一「从节点添加素材」文案；
             IKFR4X 图片持续会话：文案改为持续语义并提供「完成选取」退出入口；

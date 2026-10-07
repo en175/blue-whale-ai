@@ -20,6 +20,7 @@ export interface GenerationDockDefinition {
   tool?: boolean;
   referencePicked?(): void;
   submitted?(nodeId: string): void;
+  writeSelf?(): void;
   subscribe?(listener: () => void): () => void;
   getVersion?(): number;
 }
@@ -59,6 +60,7 @@ export function createGenerationDockCoordinator<R extends Record<string, Generat
     selection(input: DockSelection) { entries.forEach(([, definition]) => definition.selection?.(input)); },
     referencePicked<K extends keyof R>(kind: K) { registry[kind].referencePicked?.(); },
     submitted<K extends keyof R>(kind: K, nodeId: string) { registry[kind].submitted?.(nodeId); },
+    writeSelf<K extends keyof R>(kind: K) { registry[kind].writeSelf?.(); },
     reconcile() { entries.forEach(([, definition]) => definition.reconcile?.()); },
     render<K extends keyof R>(kind: K) { return registry[kind].render?.(); },
   };
