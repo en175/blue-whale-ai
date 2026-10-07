@@ -516,6 +516,34 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
         self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
 
+    def test_sync_unreadable_recovery_returns_structured_error(self) -> None:
+        original_head = self.commit_task_change()
+        self.advance_release()
+        first = self.invoke("sync", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        synced_head = self.git("rev-parse", "HEAD")
+        self.assertNotEqual(synced_head, original_head)
+        recovery = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        self.assertTrue(recovery.exists())
+        corruptions = (
+            ("非法 JSON", "{ not json"),
+            ("非 JSON object", json.dumps(["corrupted"], ensure_ascii=False)),
+            ("非法 UTF-8 字节", b'{"head": "\xff\xfe\x80"}'),
+        )
+        for name, content in corruptions:
+            with self.subTest(corruption=name):
+                if isinstance(content, bytes):
+                    recovery.write_bytes(content)
+                else:
+                    recovery.write_text(content, encoding="utf-8")
+                result = self.invoke("sync", "--json")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                payload = self.response(result)
+                self.assertEqual(payload["status"], "ERROR")
+                self.assertIn("无法读取", str(payload["detail"]))
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(self.git("rev-parse", "HEAD"), synced_head)
+
     def test_repeated_sync_preserves_the_original_transaction_recovery_head(self) -> None:
         original_head = self.commit_task_change()
         self.advance_release("upstream-one.txt", "one\n")
