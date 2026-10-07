@@ -675,7 +675,6 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
         <div
           className={styles.previewText}
           // 统一正文契约 v1：统一入口取正文（存量 html 快照升级），渲染白名单 HTML
-          // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{ __html: markdownToSanitizedHtml(unifiedTextNodeText(snap)) }}
         />
       );

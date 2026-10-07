@@ -39,7 +39,7 @@ describe('IKGZ83 框集合：增删与撤销重做小栈', () => {
   });
 
   it('撤销弹栈压重做栈；重做弹重做栈压撤销栈；空栈原样返回不崩', () => {
-    let state = applySubtitleBox(EMPTY_SUBTITLE_BOX_EDIT, box(1, 1, 2, 2));
+    const state = applySubtitleBox(EMPTY_SUBTITLE_BOX_EDIT, box(1, 1, 2, 2));
     const undone = undoSubtitleBoxEdit(state);
     expect(undone.boxes).toEqual([]);
     expect(undone.redoStack.length).toBe(1);
