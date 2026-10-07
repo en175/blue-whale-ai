@@ -1034,7 +1034,6 @@ export default function CanvasPage() {
   };
   const editingTargetRef = useRef<string | null>(null);
   const { visible: showAudioDialog, boundId: audioDraftId, seed: audioSeed } = generationDock.panel('audio');
-  const { visible: showMusicDialog } = generationDock.panel('music');
   const { visible: showTextGenDialog, boundId: textGenDraftId } = generationDock.panel('text');
   /** 侧栏新建草稿的显式选中请求（IKDMQV）：新卡自动选中并取消其余。
    *  经 Canvas 内部 setNodes 应用——直接经 nodes selected 字段传播会因 React Flow
@@ -2994,8 +2993,7 @@ export default function CanvasPage() {
    *  豁免：「面板领土」（五面板根 + @菜单/资产弹窗等 portal 浮层，data-gen-panel-territory 标记）、
    *  画布区域（.react-flow，空白归 PaneClick、节点归 selection sync）；右键/中键不关（button!==0）。
    *  用 click 不用 mousedown，并校验按下与抬起位移：拖拽平移/框选拖出画布边缘产生的 click 不算原地点击。 */
-  const anyGenPanelOpen =
-    showBottomDialog || showImageDialog || showAudioDialog || showTextGenDialog || showMusicDialog || toolSessions.hasPanel();
+  const anyGenPanelOpen = generationDock.view.activePanel !== null;
   useEffect(() => {
     if (!anyGenPanelOpen) return;
     /** 原地点击与拖拽的分界：按下与抬起的像素位移超过该值即视为拖拽（平移/框选拖出画布边缘） */

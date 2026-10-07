@@ -708,15 +708,9 @@ _Avoid_: 弹窗、对话框（口语可用，文档用底部面板）；把模�
 _Avoid_: 下拉框、弹出框
 
 **BottomDock**（底部生成 Dock）:
-Canvas 底部的生成工具面板，共六块：视频（BottomDialog）、图片（ImageDialog）、音频（AudioDialog）、
-音乐（MusicDialog）、文生文（TextGenDialog）与高清放大（ImageEnhanceDialog），实现位于
-`web/src/pages/CanvasPage/components/` 下各同名组件目录，由 CanvasPage 的六个 `showXxxDialog`
-布尔态互斥驱动；左侧工具栏（CanvasToolbar）经 `onToggleVideoDialog` / `onToggleImageDialog` /
-`onToggleAudioDialog` 回调打开视频/图片/音频三路，文生文、音乐与高清经卡上入口（点成品卡、
-点草稿卡、点「高清」按钮）与音频/音乐面板互切打开。它是**纯生成工具**：手填参数（模型、比例、
-分辨率、时长、数量、联网搜索等；参数随 GenerationJob 提交真实生效）做确定式生成，不涉及对话流。
-工具会话期间按模态隐藏 chrome 口径不可见不可开（见「工具会话」词条与
-[ADR-0101](docs/adr/0101-quality-tool-family-interaction-alignment.md)）。
+Canvas 底部通过显式参数发起生成与媒体处理的八类面板：视频、图片、音频、音乐、文生文、高清、视频 HD、视频插帧。
+它是参数驱动的创作入口，与通过对话组织创作的 AgentChatPanel 职责不同。
+_Avoid_: 把 BottomDock 与 AgentChatPanel 混称；把它泛指所有底部面板或编辑会话
 
 **生图入口（职责边界不同，非同一功能）**:
 - **BottomDock**：纯生成工具，参数驱动，不暴露对话上下文。
