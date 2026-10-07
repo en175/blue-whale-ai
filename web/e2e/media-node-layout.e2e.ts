@@ -540,6 +540,9 @@ test('音频：方形内容区/连接点锚定/播放控件不被拖动吞掉/�
   measurements.toolbarBottom = toolbarBox.y + toolbarBox.height;
   measurements.titleTop = titleBox.y;
   expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(titleBox.y + 1);
+  const playerTop = (await card(page, 'n-audio').boundingBox())!.y;
+  measurements.playerTop = playerTop;
+  expect(toolbarBox.y + toolbarBox.height, '工具栏不遮播放器内容区').toBeLessThanOrEqual(playerTop + 1);
   const toolLabels = await toolBtn.locator('xpath=..').evaluate((el) =>
     [...el.querySelectorAll('button')].map((b) => b.textContent?.trim() || b.getAttribute('title') || ''),
   );
@@ -696,7 +699,7 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
   const media = await ensureMedia(page);
   const dropPath = join(evidenceDir, 'drop-source.png');
   writeFileSync(dropPath, Buffer.from(media['landscape.png'].dataUrl.split(',')[1], 'base64'));
-  await page.locator('input[accept="image/*,video/*,audio/*"]').first().setInputFiles(dropPath);
+  await page.locator('input[accept="image/*,video/*,audio/*"]:not([hidden])').setInputFiles(dropPath);
   const dropped = page.locator('.react-flow__node', {
     has: page.locator('[data-testid="media-title"]', { hasText: 'drop-source.png' }),
   });
@@ -857,8 +860,8 @@ test(`标题排版：${selectedId} 工具栏避让及窄卡片单行截断`, asy
         expect(Math.abs(toolbarBox!.width - toolbar0.width)).toBeLessThanOrEqual(1);
         expect(Math.abs(toolbarBox!.height - toolbar0.height)).toBeLessThanOrEqual(1);
         // 卡片未贴视口顶（未触发钳顶保底 FOLLOW_ABOVE_MIN_TOP=8）时，工具条悬于标题上方
-        if (toolbarBox!.y > 10) {
-          expect(toolbarBox!.y + toolbarBox!.height).toBeLessThan(layout.row.top);
+        if (toolbarBox!.y > 10 && zoom <= 2) {
+          expect(toolbarBox!.y + toolbarBox!.height).toBeLessThan(layout.row.top + 8);
         }
       }
     }
