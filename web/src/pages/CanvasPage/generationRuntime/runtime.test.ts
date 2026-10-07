@@ -402,7 +402,9 @@ describe('生成任务运行时：retry', () => {
       items: [{ recovery_item_id: 'gcr:sub-old:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 3, asset_id: null, slot_id: null }],
     }], next_cursor: null }]);
     fake.host.fetchRecoveryPage = page as never; // 扫描取页走宿主接缝（IKJKU9）
+    const rt2Status = statusScript([{ status: 'failed', progress: 0, asset: null }]);
     const rt2 = createGenerationRuntime(fake.host, {
+      fetchJobStatus: rt2Status.fn as never,
       fetchRecoveryPage: page as never,
       newId: () => 'uuid-7777',
     });
@@ -416,6 +418,8 @@ describe('生成任务运行时：retry', () => {
     });
     expect(kit.calls.retry[0]!.key).toBe('uuid-7777');
     expect(rt2.bindingRevisionOf('n1')).toBe(4);
+    expect(rt2Status.calls).toEqual(['402']);
+    expect(fake.data('n1').genStatus).toBe('failed');
   });
 
   it('生成中卡片重试被防重入拦截', async () => {
@@ -736,7 +740,8 @@ describe('生成任务运行时：recover', () => {
     }) as GenerationRecoveryPage);
     const neverTransport = vi.fn(async () => { throw new Error('扫描不得走 deps 直连'); });
     const fake = createFakeHost(scanPage as never);
-    const deps: GenerationRuntimeDeps = { fetchRecoveryPage: neverTransport as never };
+    const status = statusScript([{ status: 'failed', progress: 0, asset: null }]);
+    const deps: GenerationRuntimeDeps = { fetchJobStatus: status.fn as never, fetchRecoveryPage: neverTransport as never };
     const runtime = createGenerationRuntime(fake.host, deps);
     runtime.register(createFakeDef().def);
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
@@ -938,7 +943,8 @@ describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => 
     const pageTwo: GenerationRecoveryPage = { protocol_version: 1, canvas_version: 1, next_cursor: null, records: [lostReceipt('qa-2', 'sub-qa2')] };
     const { client, fetches } = wireQueryHost(fake, async (_projectId, cursor) =>
       (cursor === 'c2' ? pageTwo : pageOne));
-    const runtime = createGenerationRuntime(fake.host, {});
+    const queryStatus = statusScript([{ status: 'failed', progress: 0, asset: null }]);
+    const runtime = createGenerationRuntime(fake.host, { fetchJobStatus: queryStatus.fn as never });
     runtime.register(normalGenerationTask);
     await runtime.recover('p1');
     expect(fetches).toEqual([['p1', null], ['p1', 'c2']]); // 游标推进整本对账
@@ -960,7 +966,8 @@ describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => 
       if (calls === 1) return new Promise((resolve) => { releaseFirst = resolve; }); // 首轮在途挂起
       return lostPage();
     });
-    const runtime = createGenerationRuntime(fake.host, {});
+    const queryStatus = statusScript([{ status: 'failed', progress: 0, asset: null }]);
+    const runtime = createGenerationRuntime(fake.host, { fetchJobStatus: queryStatus.fn as never });
     runtime.register(normalGenerationTask);
     const first = runtime.recover('p1');
     const second = runtime.recover('p1'); // 同一加载并发重入：被互斥挡住
@@ -986,7 +993,8 @@ describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => 
         ? Promise.resolve(emptyPage())
         : new Promise((resolve) => { releaseA = resolve; });
     });
-    const runtime = createGenerationRuntime(fake.host, {});
+    const queryStatus = statusScript([{ status: 'failed', progress: 0, asset: null }]);
+    const runtime = createGenerationRuntime(fake.host, { fetchJobStatus: queryStatus.fn as never });
     runtime.register(normalGenerationTask);
     const pendingA = runtime.recover('p1'); // A 扫描在途
     fake.switchProject('p2');
@@ -1008,7 +1016,8 @@ describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => 
       if (failFirst) { failFirst = false; throw new Error('network'); }
       return { protocol_version: 1, canvas_version: 1, next_cursor: null, records: [lostReceipt('qa-1', 'sub-qa1')] };
     });
-    const runtime = createGenerationRuntime(fake.host, {});
+    const queryStatus = statusScript([{ status: 'failed', progress: 0, asset: null }]);
+    const runtime = createGenerationRuntime(fake.host, { fetchJobStatus: queryStatus.fn as never });
     runtime.register(normalGenerationTask);
     await runtime.recover('p1'); // 查询错误不外抛（等下轮水合重试）
     expect(fake.toasts).toHaveLength(0); // 错误单一呈现：无第二处错误面
