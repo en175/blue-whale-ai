@@ -3,7 +3,7 @@ import type { Edge, Node } from '@xyflow/react';
 import { restorePromptDoc } from '@/lib/prompt-doc';
 import { draftSeedEquals, type VideoDraftSeed } from './draftSeed';
 import { hasGenerationRecord } from './mediaReEdit';
-import { holdGenerationDockSubmission, reportGenerationDockSubmissionError, runSynchronousGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from './generationDockCoordinator';
+import { mediaDockSelectionVisibility, holdGenerationDockSubmission, reportGenerationDockSubmissionError, runSynchronousGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from './generationDockCoordinator';
 import type { PromptDoc } from '@/lib/prompt-doc';
 import type { GenerationRefItem, VideoJobParameters } from '@/api/jobs';
 import { composedPromptLimitError } from '@/lib/prompt-max-length';
@@ -127,13 +127,9 @@ export function createVideoGenerationDock(getHost: () => VideoGenerationDockHost
     close,
     referencePicked() { change({ selectionExempt: true }); },
     submitted(_nodeId: string) { change({ visible: false, selectionExempt: true }); },
-    selection({ soloId, multiSelect, editing, submittingNodeId }: DockSelection) {
-      if (state.selectionExempt) return;
-      if (state.boundId) {
-        if (submittingNodeId && state.boundId !== submittingNodeId) return;
-        if (soloId === state.boundId) { if (!editing) change({ visible: true }); }
-        else if (soloId || multiSelect) change({ visible: false });
-      } else if (state.visible && (soloId || multiSelect)) change({ visible: false });
+    selection(input: DockSelection) {
+      const visible = mediaDockSelectionVisibility(state, input);
+      if (visible !== undefined) change({ visible });
     },
     updateDraft(patch: VideoDockPatch) {
       const ref = patch.freeReference;

@@ -11,7 +11,7 @@ import { imageRefSourceError } from './mediaRefs';
 import { extractTextNodeText } from './quoteConversation';
 import { draftSeedEquals, type ImageDraftSeed } from './draftSeed';
 import { hasGenerationRecord } from './mediaReEdit';
-import { captureGenerationDockSubmission, runGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from './generationDockCoordinator';
+import { mediaDockSelectionVisibility, captureGenerationDockSubmission, runGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from './generationDockCoordinator';
 import type { MediaGenStatus } from './components/MediaNode';
 
 export interface ImageDockEntry { nodeId?: string; seed?: ImageDraftSeed | null; intent?: 'manual' | 'selection' }
@@ -143,13 +143,9 @@ export function createImageGenerationDock(getHost: () => ImageGenerationDockHost
     },
     referencePicked() { change({ selectionExempt: true }); },
     submitted(_nodeId: string) { change({ visible: false, selectionExempt: true }); },
-    selection({ soloId, multiSelect, editing, submittingNodeId }: DockSelection) {
-      if (state.selectionExempt) return;
-      if (state.boundId) {
-        if (submittingNodeId && state.boundId !== submittingNodeId) return;
-        if (soloId === state.boundId) { if (!editing) change({ visible: true }); }
-        else if (soloId || multiSelect) change({ visible: false });
-      } else if (state.visible && (soloId || multiSelect)) change({ visible: false });
+    selection(input: DockSelection) {
+      const visible = mediaDockSelectionVisibility(state, input);
+      if (visible !== undefined) change({ visible });
     },
     updateDraft(patch: ImageDockPatch) {
       if (patch.attachments) {

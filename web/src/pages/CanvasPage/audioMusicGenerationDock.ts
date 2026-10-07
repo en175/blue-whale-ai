@@ -9,7 +9,7 @@ import { hasGenerationRecord } from './mediaReEdit';
 import type { MediaGenStatus } from './components/MediaNode';
 import { mergedAudioRefsWithTextIndex, audioTextIndexSendError } from './textIndexSync';
 import type { DockSelection } from './generationDockCoordinator';
-import { captureGenerationDockSubmission, holdGenerationDockSubmission, reportGenerationDockSubmissionError, type GenerationDockSubmissionHost } from './generationDockCoordinator';
+import { mediaDockSelectionVisibility, captureGenerationDockSubmission, holdGenerationDockSubmission, reportGenerationDockSubmissionError, type GenerationDockSubmissionHost } from './generationDockCoordinator';
 import { composeImageSendPrompt } from './components/ImageDialog/composeImageSendPrompt';
 import { composedPromptLimitError } from '@/lib/prompt-max-length';
 import { audioRefItemMediaTypeOf } from './audioMediaRefs';
@@ -114,13 +114,9 @@ export function createAudioMusicGenerationDocks(getAudioHost: () => AudioGenerat
     close, updateDraft,
     referencePicked() { change({ selectionExempt: true }); },
     submitted(_id: string) { change({ visible: false, selectionExempt: true }); },
-    selection({ soloId, multiSelect, editing, submittingNodeId }: DockSelection) {
-      if (state.selectionExempt) return;
-      if (state.boundId) {
-        if (submittingNodeId && state.boundId !== submittingNodeId) return;
-        if (soloId === state.boundId) { if (!editing) change({ visible: true }); }
-        else if (soloId || multiSelect) change({ visible: false });
-      } else if (state.visible && (soloId || multiSelect)) change({ visible: false });
+    selection(input: DockSelection) {
+      const visible = mediaDockSelectionVisibility(state, input);
+      if (visible !== undefined) change({ visible });
     },
     reconcile() {
       if (!state.boundId) return;

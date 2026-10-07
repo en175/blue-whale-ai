@@ -6,6 +6,18 @@ export interface DockSelection {
   submittingNodeId: string | null;
 }
 
+export function mediaDockSelectionVisibility(
+  state: { visible: boolean; boundId: string | null; selectionExempt: boolean },
+  { soloId, multiSelect, editing, submittingNodeId }: DockSelection,
+): boolean | undefined {
+  if (state.selectionExempt) return;
+  if (state.boundId) {
+    if (submittingNodeId && state.boundId !== submittingNodeId) return;
+    if (soloId === state.boundId) return editing ? undefined : true;
+  } else if (!state.visible) return;
+  if (soloId || multiSelect) return false;
+}
+
 export interface GenerationDockDefinition {
   view(): { readonly visible: boolean };
   canOpen?(input: never): boolean;

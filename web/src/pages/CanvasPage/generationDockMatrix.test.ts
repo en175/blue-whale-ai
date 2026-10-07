@@ -133,6 +133,25 @@ describe('八真实定义跨类型公开矩阵', () => {
     f.open(kind); expect(f.dock.panel(kind).visible).toBe(true);
     expect(f.dock.panel(kind).seed).toBe(seed);
   });
+  it.each(mediaKinds)('选择保护 %s 编辑中不恢复、别卡提交不改变显隐，自由面板只隐藏不开启', kind => {
+    const f = fixture();
+    f.open(kind); f.select('source');
+    f.dock.selection({ soloId: kind, multiSelect: false, editing: true, submittingNodeId: null });
+    expect(f.dock.panel(kind).visible).toBe(false);
+    f.dock.selection({ soloId: kind, multiSelect: false, editing: false, submittingNodeId: 'other' });
+    expect(f.dock.panel(kind).visible).toBe(false);
+    f.dock.selection({ soloId: kind, multiSelect: false, editing: false, submittingNodeId: kind });
+    expect(f.dock.panel(kind).visible).toBe(true);
+    f.dock.selection({ soloId: 'source', multiSelect: false, editing: false, submittingNodeId: 'other' });
+    expect(f.dock.panel(kind).visible).toBe(true);
+    f.select(null); expect(f.dock.panel(kind).visible).toBe(true);
+    f.select(null, true); expect(f.dock.panel(kind).visible).toBe(false);
+    const free = fixture();
+    free.dock.open(kind, {});
+    free.select(null); expect(free.dock.panel(kind).visible).toBe(true);
+    free.select('source'); expect(free.dock.panel(kind).visible).toBe(false);
+    free.select(kind); expect(free.dock.panel(kind).visible).toBe(false);
+  });
   it.each(toolKinds)('选择/关闭 %s 按真实owner隐藏与恢复，显式关闭清会话', kind => {
     const f = fixture(); f.open(kind);
     f.select(null); expect(f.dock.panel(kind).visible).toBe(true);
