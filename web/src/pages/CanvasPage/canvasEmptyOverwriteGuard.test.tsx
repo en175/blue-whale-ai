@@ -13,6 +13,24 @@ import {
   unmountPage,
 } from './testing/canvasPageTestHarness';
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
+
 /* IKIIWN 画布空覆盖防护页面级链路：自动保存只在「本会话成功水合（非 loadFailed）」后发起；
    空保存的 confirmEmpty 只授予水合基线非空的会话（用户显式删光场景）。
    服务端 422 兜底（水合进来即为空的空提交不带标记被拒）由 canvas.service / canvas.test 覆盖。

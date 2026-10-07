@@ -9,6 +9,23 @@ import headerStyles from './components/CanvasHeader/index.module.css';
 
 /* 本测试只验证 CanvasPage 的接线：showAgent 同时驱动面板与 CanvasHeader 入口显隐。
    被测协作方是真实 CanvasHeader；面板本身的抽屉行为由 AgentPanel 自己的测试覆盖，这里打桩。 */
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
 vi.mock('./components/AgentPanel', () => ({
   default: ({ onClose, open }: { onClose: () => void; open: boolean }) =>
     !open ? null : createElement(

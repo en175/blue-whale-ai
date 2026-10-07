@@ -13,6 +13,14 @@ import {
 /** 恢复扫描页（B.5）：按用例注入 records；默认空页。IKJKU9：扫描经 Query 生命周期
  *  取页——mock 提供点换到 queryOptions 的 queryFn（保留真实 key 工厂行为）。 */
 const recoveryPageMock = vi.hoisted(() => ({ current: null as null | { records: unknown[] } }));
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
 vi.mock('@/api/canvasRecovery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/canvasRecovery')>();
   const fetchPage = vi.fn(async (_projectId: string, _options?: { limit?: number; cursor?: string | null }) => recoveryPageMock.current ?? {

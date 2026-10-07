@@ -16,6 +16,14 @@ const recoveryApi = vi.hoisted(() => ({
   page: { current: null as null | { records: unknown[] } },
   putWithRecovery: vi.fn(),
 }));
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
 vi.mock('@/api/canvasRecovery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/canvasRecovery')>();
   const fetchPage = vi.fn(async (_projectId: string, _options?: { limit?: number; cursor?: string | null }) => recoveryApi.page.current ?? {

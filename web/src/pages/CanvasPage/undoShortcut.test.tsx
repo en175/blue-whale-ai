@@ -11,6 +11,24 @@ import {
   unmountPage,
 } from './testing/canvasPageTestHarness';
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
+
 /* IKGBPC 撤销快捷键页面级链路：Ctrl/Cmd+Z 回退删除（卡与悬空连线一并恢复）、
    栈走空静默、Shift+Z 走既有重做而非撤销、编辑器/@ 菜单内让位、右键菜单
    撤销/重做项保留且灰态正确。共享夹具见 canvasPageTestHarness（FlowCanvas 等

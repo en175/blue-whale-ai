@@ -19,6 +19,24 @@ import {
   unmountPage,
 } from './testing/canvasPageTestHarness';
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
+
 /** 画布：一个就绪视频节点 v1（assetId '5'）——首轮进入后经入口建插帧草稿卡并真实发送，
  *  卸载前的最后一次保存请求 payload 即「服务端实际持久化的画布」，重进时原样水合。 */
 function seedDoc() {

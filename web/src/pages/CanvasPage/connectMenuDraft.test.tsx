@@ -13,6 +13,24 @@ import {
   unmountPage,
 } from './testing/canvasPageTestHarness';
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
+
 /* IKH3WE 拖线落空白 → 类型菜单 → 新建草稿卡链路（页面级集成）：
    工具条「重新编辑」「生成图片」「生成视频」按钮撤除后，派生新卡唯一路径 = 从媒体卡
    拖线、松手落空白弹类型菜单、选类型——断言新建对应草稿卡、自动建立来源卡→新卡参考边、

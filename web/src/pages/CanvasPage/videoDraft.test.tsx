@@ -13,6 +13,31 @@ import CanvasPage from './index';
 
 // IKFJJT 合并 0915 适配：视频提交前会对参考图做合规入库（ensureVideoImageRefsCompliance →
 // depositCanvasAssetToCharacterLibrary）。测试环境固定返回 materialId，避免真实调素材入库 API。
+const quoteMock = vi.hoisted(() => ({
+  current: null as { credits: number; quote_revision: string } | null,
+}));
+
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => {
+      if (quoteMock.current == null) throw new Error('quote unavailable (mock)');
+      return { ...quoteMock.current };
+    },
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => { throw new Error('recovery unavailable (mock)'); },
+  })),
+}));
+
 vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
   depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
@@ -1300,13 +1325,6 @@ function sampleCapableModel() {
   };
 }
 
-function quoteResponse(data: { credits: number | null; quote_revision: string | null }) {
-  return new Response(JSON.stringify({ code: 200, msg: null, data }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
 describe('IKIZQB 样片模式提交与样片卡', () => {
   /** 保存 hoisted 默认模型实现：面板与页面可能各自拉一次能力列表（Once 会被首个调用
       消耗导致后续回落无 sample_mode 的默认 fixture），用例内 override 后 afterEach 恢复。 */
@@ -1317,6 +1335,7 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
   afterEach(() => {
     apiMocks.fetchGenerationModels.mockImplementation(defaultModelsImpl);
     vi.unstubAllGlobals();
+    quoteMock.current = null;
   });
 
   it('能力位未放行（默认 fixture 无 sample_mode）→ 配置面板无样片开关', async () => {
@@ -1332,8 +1351,7 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
 
   it('开启样片发送：480p + sample_mode 参数与顶层报价确认两字段，生成中卡标样片', async () => {
     apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
-      Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' }))));
+    quoteMock.current = { credits: 60, quote_revision: 'rev-1' };
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     await waitModelReady();
@@ -1367,8 +1385,7 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
 
   it('样片成功：回填自有素材与实际截止时间（服务端阶段投影为准），重新编辑默认开启样片', async () => {
     apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
-      Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' }))));
+    quoteMock.current = { credits: 60, quote_revision: 'rev-1' };
     apiMocks.fetchJobStatus.mockImplementation(async () => ({
       job_id: 'j1',
       status: 'succeeded',
@@ -1513,8 +1530,7 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     let finishStatus!: () => void;
     apiMocks.fetchJobStatus.mockImplementationOnce(() => new Promise(resolve => { finishStatus = () => resolve({ job_id: 'j1', status: 'succeeded', progress: 100, asset: { id: 'a2', url: 'http://vid/out.mp4', type: 'video' } }); }));
     apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
-      Promise.resolve(quoteResponse({ credits: 30, quote_revision: 'rev-1' }))));
+    quoteMock.current = { credits: 30, quote_revision: 'rev-1' };
     seedTwoStageDoc();
     await renderPage();
     await clickNode({ id: 's1', type: 'mediaNode' });
@@ -1560,8 +1576,7 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     let finishStatus!: () => void;
     apiMocks.fetchJobStatus.mockImplementationOnce(() => new Promise(resolve => { finishStatus = () => resolve({ job_id: 'j1', status: 'succeeded', progress: 100, asset: { id: 'a2', url: 'http://vid/out.mp4', type: 'video' } }); }));
     apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
-      Promise.resolve(quoteResponse({ credits: 20, quote_revision: 'rev-2' }))));
+    quoteMock.current = { credits: 20, quote_revision: 'rev-2' };
     seedTwoStageDoc();
     await renderPage();
     await clickNode({ id: 'f1', type: 'mediaNode' });

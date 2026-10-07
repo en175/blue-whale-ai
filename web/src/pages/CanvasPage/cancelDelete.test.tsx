@@ -15,6 +15,23 @@ import CanvasPage from './index';
    才移除；取消失败保留卡片并提示原因；删除过程中任务抢先成功保留作品提示「任务已完成」。
    迟到轮询/取消响应不得复活已删除节点。FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props。 */
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));

@@ -15,6 +15,14 @@ import CanvasPage from './index';
    与费用状态。
    FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；API 层全 mock。 */
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
 vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
   depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),

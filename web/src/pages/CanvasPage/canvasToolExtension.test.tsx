@@ -5,6 +5,23 @@ import type { MediaNodeData } from './components/MediaNode';
 import { canvasDocMock, enableReactActEnvironment, mediaNodes, renderPage, unmountPage, flowProps } from './testing/canvasPageTestHarness';
 
 // 使用真实注册接口扩展真实Page实例，不给Page加入口、装饰或JSX分支。
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
 vi.mock('./canvasToolSessions', async (importOriginal) => {
   const original = await importOriginal<typeof import('./canvasToolSessions')>();
   const { assembleCanvasTools, registerCanvasTool } = await import('./canvasToolRegistry');
