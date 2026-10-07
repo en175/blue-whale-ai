@@ -109,16 +109,29 @@ export async function runGenerationDockSubmission<Prepared>(
   handoff: (prepared: Prepared) => void,
   errorMessage: string,
 ): Promise<void> {
-  host.setApplying(true);
-  host.setSubmittingNode(targetNodeId ?? null);
+  const release = holdGenerationDockSubmission(host, targetNodeId ?? null);
   try {
     const prepared = await prepare();
     if (prepared !== undefined) handoff(prepared);
   } catch (error) {
-    host.toast('error', errorMessage);
-    host.reportError(error);
+    reportGenerationDockSubmissionError(host, errorMessage, error);
   } finally {
-    host.setApplying(false);
-    host.setSubmittingNode(null);
+    release();
   }
+}
+
+export function holdGenerationDockSubmission(host: Pick<GenerationDockSubmissionHost, 'setApplying' | 'setSubmittingNode'>, targetNodeId: string | null | undefined) {
+  host.setApplying(true);
+  if (targetNodeId !== undefined) host.setSubmittingNode(targetNodeId);
+  return () => { host.setApplying(false); host.setSubmittingNode(null); };
+}
+
+export function runSynchronousGenerationDockSubmission(host: Pick<GenerationDockSubmissionHost, 'setApplying' | 'setSubmittingNode'>, targetNodeId: string | undefined, handoff: () => void): void {
+  const release = holdGenerationDockSubmission(host, targetNodeId);
+  try { handoff(); } finally { release(); }
+}
+
+export function reportGenerationDockSubmissionError(host: Pick<GenerationDockSubmissionHost, 'toast' | 'reportError'>, message: string, error: unknown): void {
+  host.toast('error', message);
+  host.reportError(error);
 }
