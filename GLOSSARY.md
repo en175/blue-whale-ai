@@ -148,6 +148,10 @@ _Avoid_: 弹窗、模态框、把悬浮工具条算入锚定浮层
 锚定卡进入真实位移拖拽时其锚定浮层暂时隐藏、落定同帧在新位置重现的统一交互；隐藏不卸载组件，草稿、参数与焦点保留，单击零位移不触发，拖别的卡不影响，拖组框整组同样生效。画布父层坐标仅落定回写是设计前提，故锚定浮层不做拖拽中实时跟随。
 _Avoid_: 拖拽中实时跟随面板、落定后才跳转位置、隐藏即卸载重建
 
+**dragHidden 接线（dragHidden wiring）**:
+锚定浮层接入拖拽隐藏的唯一通道：工具会话对话框与画布层框在 `createCanvasToolSessions` 注册处按锚定卡 id 经 `dragHiddenOf` 传值。`CanvasToolKind` 由注册表 entries 派生，dragHideSessions.test.tsx 以 `Record<CanvasToolKind, …>` 锚定卡表配 `it.each` 强制覆盖每个 kind——新增会话忘接线即测试红（IKJTVE 落档）。不经会话注册的锚定浮层（四类生成面板、BottomDialog 等页面级浮层）不在该类型链内，新增时须在 dragHideSessions.test.tsx 或对应页面级测试补 dragHidden 用例。
+_Avoid_: 绕开会话注册另渲染锚定浮层、认为穷举类型能拦住页面级浮层漏接线、只改实现不补用例
+
 ### 画布高清放大（IKGLZV 已实现）
 
 
