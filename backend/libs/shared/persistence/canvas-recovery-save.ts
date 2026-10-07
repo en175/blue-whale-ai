@@ -584,6 +584,53 @@ export async function saveCanvasWithRecovery(
         if (state !== "removed") throw absentMismatch();
       }
     }
+    const keptMarkerKeys = new Set<string>();
+    for (const previousNode of previousNodes) {
+      const previousMarker = markerOf(previousNode);
+      if (previousMarker) {
+        keptMarkerKeys.add(`${String(previousNode.id)}:${String(previousMarker.submissionId)}:${String(previousMarker.outputKey)}`);
+      }
+    }
+    const forgedMarker = () => new RecoveryContractError(
+      recoveryError(422, "画布文档包含未经显式恢复动作的受保护标记", RECOVERY_REASONS.documentMismatch),
+    );
+    const declaredNodeIdByKey = new Map(
+      itemStates.map(item => [`${item.submissionRow.submission_id}:${item.outputKey}`, item.nodeId]),
+    );
+    const submissionRowOf = async (submissionId: string) => {
+      const cached = submissionsById.get(submissionId);
+      if (cached) return cached;
+      const row = await tx.generation_canvas_submissions.findUnique({
+        where: { project_id_submission_id: { project_id: pid, submission_id: submissionId } },
+      });
+      if (!row) throw forgedMarker();
+      submissionsById.set(submissionId, row);
+      return row;
+    };
+    for (const node of incomingNodes) {
+      const marker = markerOf(node);
+      if (!marker) continue;
+      const submissionId = String(marker.submissionId);
+      const outputKey = String(marker.outputKey);
+      const declaredNodeId = declaredNodeIdByKey.get(`${submissionId}:${outputKey}`);
+      if (declaredNodeId !== undefined) {
+        if (String(node.id) !== declaredNodeId) throw forgedMarker();
+        continue;
+      }
+      if (keptMarkerKeys.has(`${String(node.id)}:${submissionId}:${outputKey}`)) continue;
+      const submissionRow = await submissionRowOf(submissionId);
+      if (outputKey === TARGET_OUTPUT_KEY) {
+        if (submissionRow.target_state !== "pending" && submissionRow.target_state !== "present") throw forgedMarker();
+        continue;
+      }
+      const { projection } = await projectionOf(submissionRow);
+      projectionOrThrow(projection);
+      if (!projection.items.some(item => item.outputKey === outputKey)) throw forgedMarker();
+      const outputRow = await tx.generation_canvas_outputs.findUnique({
+        where: { generation_canvas_submission_id_output_key: { generation_canvas_submission_id: submissionRow.id, output_key: outputKey } },
+      });
+      if (outputRow !== null) throw forgedMarker();
+    }
     // ── 写画布（先写文档，失败整体回滚）──
     const data = {
       viewport_json: input.viewport ? JSON.parse(input.viewport) : null,
