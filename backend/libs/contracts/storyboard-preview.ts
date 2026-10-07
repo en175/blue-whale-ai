@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { canvasBindingSchema } from "./canvas-recovery.js";
 import {
   capabilitySnapshotVersionSchema,
 } from "./plan-message.js";
@@ -29,6 +30,8 @@ export const storyboardPreviewParametersSchema = z
  *  - base_scene_card_version：触发时读取的 SceneCard 版本，服务端 CAS 比对，不一致零写入返回 version_conflict；
  *  - parameters：本次画格参数快照（model_id 必须与 capability_snapshot_version.model_id 一致）；
  *  - capability_snapshot_version：冻结时所用 image 能力行版本 + digest，应用前检测能力漂移。
+ *  - canvas_binding（IKJJR0，IKIXK9-SPEC-20261002 B.3）：新协议恢复绑定，可选；携带时
+ *    Idempotency-Key 必须等于 submission_id，统一关联受理（请求摘要自动覆盖——摘要吃原始 body）。
  *  Idempotency-Key header 携带 CommandId；同 Key 重放返回首次结果，不同内容 100302（idempotency_conflict）。 */
 export const storyboardPreviewCreateRequestSchema = z
   .object({
@@ -36,6 +39,7 @@ export const storyboardPreviewCreateRequestSchema = z
     base_scene_card_version: z.number().int().positive(),
     parameters: storyboardPreviewParametersSchema,
     capability_snapshot_version: capabilitySnapshotVersionSchema,
+    canvas_binding: canvasBindingSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

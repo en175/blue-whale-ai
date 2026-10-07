@@ -4,6 +4,7 @@
  * 一次用户意图一把，重试复用同一把——否则服务端那套幂等（同键重放、只扣一次钱）形同虚设
  * ============================================ */
 import { apiRequest, envelopeErrorCode, isApiError, silentInit, type ApiError } from './http';
+import type { CanvasBinding } from './canvasRecovery';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
@@ -153,6 +154,9 @@ export interface CreateJobPayload {
    *  时必带）。取报价响应原样：服务端按同一规则复算，价格变化先刷新可见报价再由用户点击。 */
   expected_credits?: number;
   quote_revision?: string;
+  /** IKJJR1（恢复契约 v1 B.3）：画布承接绑定（submission_id = Idempotency-Key）。
+   *  由生成任务运行时铸造注入；不携带 = 历史兼容路径。形状见 @/api/canvasRecovery 的 CanvasBinding。 */
+  canvas_binding?: unknown;
 }
 
 /** 生成任务参考项（图/视频/音频 references 契约） */
@@ -191,6 +195,8 @@ export interface CreateMediaExtractionPayload {
 export interface MediaExtractionCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR3：新协议受理回执视图（携带 canvas_binding 提交时返回）。 */
+  canvas_binding?: MediaToolCanvasBindingView;
 }
 
 /** POST /api/projects/:id/vocal-splits 请求体（键名与 backend/libs/contracts/vocal-split.ts
@@ -200,6 +206,9 @@ export interface CreateVocalSplitPayload {
   source_asset_id: string | number;
   scene?: VocalSplitInput['scene'];
   output_format?: VocalSplitInput['output_format'];
+  /** IKJJR5（恢复契约 v1 B.3）：画布承接绑定（Idempotency-Key = submission_id）。
+   *  由生成任务运行时铸造注入；不携带 = 历史兼容路径。先例：CreateJobPayload.canvas_binding。 */
+  canvas_binding?: unknown;
 }
 
 /** 创建人声背景分离任务返回（IKHA2W）；同音视频分离：入队失败创建响应仍 200、
@@ -209,17 +218,20 @@ export interface VocalSplitCreatedData {
   status: 'queued';
 }
 
-/** 创建人声背景分离任务（IKHA2W）；免费口径同 media_extract——不带幂等头、无积分预估、
- *  不走余额拦截门。占位卡由前端在创建成功后本地插入，多轨产物扇出归 IKHA30。 */
+/** 创建人声背景分离任务（IKHA2W）；免费口径同 media_extract——无积分预估、不走余额拦截门。
+ *  占位卡由前端在创建成功后本地插入，多轨产物扇出归 IKHA30。
+ *  IKJJR5（恢复契约 v1 B.3）：新协议 canvas_binding 的幂等承载 = Idempotency-Key 头
+ *  （须等于 submission_id）；历史兼容提交不带（无幂等头，行为零变化）。 */
 export function createVocalSplit(
   projectId: string,
   payload: CreateVocalSplitPayload,
-  init?: { silent?: boolean },
+  init?: { silent?: boolean; idempotencyKey?: string },
 ): Promise<VocalSplitCreatedData> {
   return apiRequest<VocalSplitCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/vocal-splits`,
     {
       method: 'POST',
+      ...(init?.idempotencyKey ? { headers: { 'Idempotency-Key': init.idempotencyKey } } : {}),
       body: JSON.stringify(payload),
       ...silentInit(init),
     },
@@ -230,10 +242,42 @@ export function createVocalSplit(
  *  IKGM9O 高清放大面板提交；版本档能力矩阵与源图尺寸门槛由服务端权威复核，前端预检只是体验层。 */
 export type CreateImageEnhancementPayload = ImageEnhanceInput;
 
+/** 新协议受理回执（IKJJR2，恢复契约 v1 B.3）：携带 canvas_binding 提交时由服务端返回；
+ *  历史兼容提交（无绑定）不返回。四个图像工具创建端点同形。 */
+export interface ImageToolBindingView {
+  protocol_version: 1;
+  submission_id: string;
+  target_node_id: string;
+  binding_revision: number;
+  job_id: string;
+  is_current: boolean;
+}
+
+/** 图像工具创建 init（IKJJR2）：canvasBinding 非空时 Idempotency-Key 头必须等于
+ *  binding.submission_id（后端 IKJJQW 受理段硬校验），body 附 canvas_binding。 */
+export interface ImageToolCreateInit {
+  silent?: boolean;
+  canvasBinding?: CanvasBinding | null;
+  idempotencyKey?: string;
+}
+
+/** 图像工具创建请求公共段（IKJJR2）：canvas_binding 是业务键之上的基础设施键，
+ *  附在 body 顶层；无绑定时请求形态与接入前一致。 */
+function imageToolRequestBody(payload: Record<string, unknown>, init?: ImageToolCreateInit) {
+  return JSON.stringify(init?.canvasBinding ? { ...payload, canvas_binding: init.canvasBinding } : payload);
+}
+
+/** 图像工具创建请求头（IKJJR2）：仅携带绑定时带 Idempotency-Key（= submission_id）。 */
+function imageToolRequestHeaders(init?: ImageToolCreateInit): Record<string, string> | undefined {
+  return init?.canvasBinding && init.idempotencyKey ? { 'Idempotency-Key': init.idempotencyKey } : undefined;
+}
+
 /** 创建高清放大任务返回。 */
 export interface ImageEnhancementCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR2：新协议受理回执（无绑定的历史兼容提交不返回） */
+  canvas_binding?: ImageToolBindingView;
 }
 
 /** POST /api/projects/:id/image-outpaints 请求体（六键，键名与 backend/libs/contracts/image-outpaint.ts 契约恒等）。
@@ -244,6 +288,8 @@ export type CreateImageOutpaintPayload = ImageOutpaintInput;
 export interface ImageOutpaintCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR2：新协议受理回执（无绑定的历史兼容提交不返回） */
+  canvas_binding?: ImageToolBindingView;
 }
 
 /** 人声背景分离单轨结果投影（IKHA2J 定死的多轨形状，轨类型枚举与契约同源）；
@@ -338,6 +384,37 @@ export interface JobListData {
   current: number;
 }
 
+/** IKJJR3（恢复契约 v1 B.3）：媒体工具创建入口的新协议受理回执视图（generation 任务运行时
+ *  台账登记用；无 canvas_binding 的历史兼容请求无此字段）。形状同 CreateJobOutcome.canvasBinding。 */
+export interface MediaToolCanvasBindingView {
+  protocol_version: number;
+  submission_id: string;
+  target_node_id: string;
+  binding_revision: number;
+  job_id: string;
+  is_current: boolean;
+}
+
+/** IKJJR3：媒体工具创建请求的恢复协议扩展——canvas_binding 进 body（服务端剥离后再业务
+ *  校验）；除抠像（幂等承载为 body 内 client_token = submission_id）外十入口走
+ *  Idempotency-Key 头。不携带 = 历史兼容路径。 */
+interface MediaToolCreateRecoveryInit {
+  silent?: boolean;
+  canvasBinding?: unknown;
+  idempotencyKey?: string;
+}
+
+function withRecoveryBinding(
+  payload: unknown,
+  init?: { canvasBinding?: unknown; idempotencyKey?: string },
+): { method: 'POST'; headers?: Record<string, string>; body: string } {
+  return {
+    method: 'POST',
+    ...(init?.idempotencyKey ? { headers: { 'Idempotency-Key': init.idempotencyKey } } : {}),
+    body: JSON.stringify(init?.canvasBinding != null ? { ...(payload as object), canvas_binding: init.canvasBinding } : payload),
+  };
+}
+
 /** 创建生成任务。`idempotencyKey` 由**调用方**在发起那一刻造好并持有（`./idempotencyKey`）：
  *  同一次用户意图（双击、响应丢了原样重发、401 登录后续跑）必须复用同一把，服务端才
  *  会重放首次结果——只建一个 job、只扣一次钱；同键异载荷服务端判 409。 */
@@ -361,13 +438,12 @@ export function createGenerationJob(
 export function createMediaExtraction(
   projectId: string,
   payload: CreateMediaExtractionPayload,
-  init?: { silent?: boolean },
+  init?: MediaToolCreateRecoveryInit,
 ): Promise<MediaExtractionCreatedData> {
   return apiRequest<MediaExtractionCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/media-extractions`,
     {
-      method: 'POST',
-      body: JSON.stringify(payload),
+      ...withRecoveryBinding(payload, init),
       ...silentInit(init),
     },
   );
@@ -384,6 +460,8 @@ export type CreateAudioTrimPayload = AudioTrimInput;
 export interface AudioTrimCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR3：新协议受理回执视图（携带 canvas_binding 提交时返回）。 */
+  canvas_binding?: MediaToolCanvasBindingView;
 }
 
 /** 创建音频截取任务（IKHB7A，编辑态发送闭环）。
@@ -392,13 +470,12 @@ export interface AudioTrimCreatedData {
 export function createAudioTrim(
   projectId: string,
   payload: CreateAudioTrimPayload,
-  init?: { silent?: boolean },
+  init?: MediaToolCreateRecoveryInit,
 ): Promise<AudioTrimCreatedData> {
   return apiRequest<AudioTrimCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-trims`,
     {
-      method: 'POST',
-      body: JSON.stringify(payload),
+      ...withRecoveryBinding(payload, init),
       ...silentInit(init),
     },
   );
@@ -417,17 +494,39 @@ export function createAudioMix(
   );
 }
 
-/** 使用服务端冻结输入重试同一音频混合任务；调用方为一次重试尝试保留同一个幂等键。 */
+/** 专属重试成功 data：job_id 复用（同 jobId ≠ 同提交意图）；
+ *  IKJJR4（恢复契约 v1）：携 canvas_binding 受理时追加绑定视图（is_current 现查 owner）。 */
+export interface DedicatedRetryCreatedData {
+  job_id: string;
+  status: JobStatus;
+  replayed: boolean;
+  canvas_binding?: {
+    protocol_version: number;
+    submission_id: string;
+    target_node_id: string;
+    binding_revision: number;
+    job_id: string;
+    is_current: boolean;
+  };
+}
+
+/** 使用服务端冻结输入重试同一音频混合任务；调用方为一次重试尝试保留同一个幂等键。
+ *  IKJJR4：canvasBinding 非空时随 body 携带（Idempotency-Key 必须等于 submission_id，
+ *  由生成任务运行时保证）；不携带走历史路径零变化。 */
 export function retryAudioMix(
   projectId: string,
   jobId: string | number,
   idempotencyKey: string,
   init?: { silent?: boolean },
-): Promise<{ job_id: string; status: JobStatus; replayed: boolean }> {
-  return apiRequest(
+  canvasBinding?: unknown,
+): Promise<DedicatedRetryCreatedData> {
+  return apiRequest<DedicatedRetryCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes/${encodeURIComponent(String(jobId))}/retry`,
-    { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
-      ...silentInit(init) },
+    {
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
+      ...(canvasBinding ? { body: JSON.stringify({ canvas_binding: canvasBinding }) } : {}),
+      ...silentInit(init),
+    },
   );
 }
 
@@ -462,17 +561,23 @@ export function createAudioVideoMux(
 
 /** 使用服务端冻结输入重试同一音视频合成任务（IKIHPL `:jobId/retry`）；必带 Idempotency-Key
  *  （1–128 可打印非空白，服务端 PARAM_MISSING 拒绝空键），调用方为一次重试尝试保留同一个
- *  幂等键——双击/状态未知后重发沿用同键，服务端按 command_idempotency 重放。 */
+ *  幂等键——双击/状态未知后重发沿用同键，服务端按 command_idempotency 重放。
+ *  IKJJR4：canvasBinding 非空时随 body 携带（Idempotency-Key 必须等于 submission_id，
+ *  由生成任务运行时保证）；不携带走历史路径零变化。 */
 export function retryAudioVideoMux(
   projectId: string,
   jobId: string | number,
   idempotencyKey: string,
   init?: { silent?: boolean },
-): Promise<{ job_id: string; status: JobStatus; replayed: boolean }> {
-  return apiRequest(
+  canvasBinding?: unknown,
+): Promise<DedicatedRetryCreatedData> {
+  return apiRequest<DedicatedRetryCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-video-muxes/${encodeURIComponent(String(jobId))}/retry`,
-    { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
-      ...silentInit(init) },
+    {
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
+      ...(canvasBinding ? { body: JSON.stringify({ canvas_binding: canvasBinding }) } : {}),
+      ...silentInit(init),
+    },
   );
 }
 
@@ -487,6 +592,8 @@ export type CreateAudioSpeedPayload = AudioSpeedInput;
 export interface AudioSpeedCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR3：新协议受理回执视图（携带 canvas_binding 提交时返回）。 */
+  canvas_binding?: MediaToolCanvasBindingView;
 }
 
 /** 创建音频调速任务（IKHW5S，编辑态发送闭环）。
@@ -495,30 +602,31 @@ export interface AudioSpeedCreatedData {
 export function createAudioSpeed(
   projectId: string,
   payload: CreateAudioSpeedPayload,
-  init?: { silent?: boolean },
+  init?: MediaToolCreateRecoveryInit,
 ): Promise<AudioSpeedCreatedData> {
   return apiRequest<AudioSpeedCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-speeds`,
     {
-      method: 'POST',
-      body: JSON.stringify(payload),
+      ...withRecoveryBinding(payload, init),
       ...silentInit(init),
     },
   );
 }
 
-/** 创建图片高清放大任务（IKGM9O）；免费口径同 media_extract——不带幂等头、无积分预估、不走余额拦截门。
- *  高清草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。 */
+/** 创建图片高清放大任务（IKGM9O）；免费口径——不走积分预估、不走余额拦截门。
+ *  高清草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。
+ *  IKJJR2（恢复契约 v1 B.3）：canvasBinding + idempotencyKey 由生成任务运行时注入。 */
 export function createImageEnhancement(
   projectId: string,
   payload: CreateImageEnhancementPayload,
-  init?: { silent?: boolean },
+  init?: ImageToolCreateInit,
 ): Promise<ImageEnhancementCreatedData> {
   return apiRequest<ImageEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-enhancements`,
     {
       method: 'POST',
-      body: JSON.stringify(payload),
+      headers: imageToolRequestHeaders(init),
+      body: imageToolRequestBody(payload, init),
       ...silentInit(init),
     },
   );
@@ -533,21 +641,25 @@ export type CreateImageErasePayload = ImageEraseInput;
 export interface ImageEraseCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR2：新协议受理回执（无绑定的历史兼容提交不返回） */
+  canvas_binding?: ImageToolBindingView;
 }
 
-/** 创建图片擦除任务（IKGOTB）；免费口径同 image_enhance——不带幂等头、无积分预估、不走余额拦截门。
- *  擦除结果卡由前端在创建成功后本地插入（发送时才建卡，target_node_id 发送时生成传入），
- *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。 */
+/** 创建图片擦除任务（IKGOTB）；免费口径同 image_enhance——不走积分预估、不走余额拦截门。
+ *  擦除结果卡由前端在受理后本地插入（发送时才建卡，target_node_id 发送时生成传入），
+ *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。
+ *  IKJJR2（恢复契约 v1 B.3）：canvasBinding + idempotencyKey 由生成任务运行时注入。 */
 export function createImageErase(
   projectId: string,
   payload: CreateImageErasePayload,
-  init?: { silent?: boolean },
+  init?: ImageToolCreateInit,
 ): Promise<ImageEraseCreatedData> {
   return apiRequest<ImageEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-erasures`,
     {
       method: 'POST',
-      body: JSON.stringify(payload),
+      headers: imageToolRequestHeaders(init),
+      body: imageToolRequestBody(payload, init),
       ...silentInit(init),
     },
   );
@@ -561,40 +673,46 @@ export type CreateImageCutoutPayload = ImageCutoutInput;
 export interface ImageCutoutCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR2：新协议受理回执（无绑定的历史兼容提交不返回） */
+  canvas_binding?: ImageToolBindingView;
 }
 
-/** 创建图片抠图任务（IKGXLS）；免费口径同 image_enhance / image_erase——不带幂等头、无积分预估、不走余额拦截门。
- *  抠图结果卡由前端在创建成功后本地插入（发送时才建卡，target_node_id 发送时生成传入），
- *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。 */
+/** 创建图片抠图任务（IKGXLS）；免费口径同 image_enhance / image_erase——不走积分预估、不走余额拦截门。
+ *  抠图结果卡由前端在受理后本地插入（发送时才建卡，target_node_id 发送时生成传入），
+ *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。
+ *  IKJJR2（恢复契约 v1 B.3）：canvasBinding + idempotencyKey 由生成任务运行时注入。 */
 export function createImageCutout(
   projectId: string,
   payload: CreateImageCutoutPayload,
-  init?: { silent?: boolean },
+  init?: ImageToolCreateInit,
 ): Promise<ImageCutoutCreatedData> {
   return apiRequest<ImageCutoutCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-cutouts`,
     {
       method: 'POST',
-      body: JSON.stringify(payload),
+      headers: imageToolRequestHeaders(init),
+      body: imageToolRequestBody(payload, init),
       ...silentInit(init),
     },
   );
 }
 
-/** 创建智能扩图任务（IKGOR6）；免费口径同 media_extract / image_enhance——不带幂等头、
- *  无积分预估、不走余额拦截门。扩图结果卡已由前端本地建好（target_node_id 指向它），
- *  产物经 GET /api/jobs/:id 的 asset 回填（新分辨率随 asset 宽高回填结果卡）。 */
+/** 创建智能扩图任务（IKGOR6）；免费口径同 media_extract / image_enhance——不走积分预估、
+ *  不走余额拦截门。扩图结果卡已由前端本地建好（target_node_id 指向它），
+ *  产物经 GET /api/jobs/:id 的 asset 回填（新分辨率随 asset 宽高回填结果卡）。
+ *  IKJJR2（恢复契约 v1 B.3）：canvasBinding + idempotencyKey 由生成任务运行时注入。 */
 export function createImageOutpaint(
   projectId: string,
   payload: CreateImageOutpaintPayload,
-  init?: { silent?: boolean },
+  init?: ImageToolCreateInit,
 ): Promise<ImageOutpaintCreatedData> {
   return apiRequest<ImageOutpaintCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-outpaints`,
     {
       silent: init?.silent,
       method: 'POST',
-      body: JSON.stringify(payload),
+      headers: imageToolRequestHeaders(init),
+      body: imageToolRequestBody(payload, init),
     },
   );
 }
@@ -609,6 +727,8 @@ export type CreateVideoSubtitleErasePayload = VideoSubtitleEraseInput;
 export interface VideoSubtitleEraseCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR3：新协议受理回执视图（携带 canvas_binding 提交时返回）。 */
+  canvas_binding?: MediaToolCanvasBindingView;
 }
 
 /** 创建视频智能去字幕任务（IKGZ83）；免费口径同 image_enhance / image_erase / image_cutout
@@ -618,13 +738,12 @@ export interface VideoSubtitleEraseCreatedData {
 export function createVideoSubtitleErase(
   projectId: string,
   payload: CreateVideoSubtitleErasePayload,
-  init?: { silent?: boolean },
+  init?: MediaToolCreateRecoveryInit,
 ): Promise<VideoSubtitleEraseCreatedData> {
   return apiRequest<VideoSubtitleEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-subtitle-erasures`,
     {
-      method: 'POST',
-      body: JSON.stringify(payload),
+      ...withRecoveryBinding(payload, init),
       ...silentInit(init),
     },
   );
@@ -640,6 +759,8 @@ export type CreateVideoEnhancementPayload = VideoEnhanceInput;
 export interface VideoEnhancementCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR3：新协议受理回执视图（携带 canvas_binding 提交时返回）。 */
+  canvas_binding?: MediaToolCanvasBindingView;
 }
 
 /** 创建视频 HD 高清任务（IKH3VH）；免费口径同 image_enhance / media_extract——不带幂等头、
@@ -648,13 +769,12 @@ export interface VideoEnhancementCreatedData {
 export function createVideoEnhancement(
   projectId: string,
   payload: CreateVideoEnhancementPayload,
-  init?: { silent?: boolean },
+  init?: MediaToolCreateRecoveryInit,
 ): Promise<VideoEnhancementCreatedData> {
   return apiRequest<VideoEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-enhancements`,
     {
-      method: 'POST',
-      body: JSON.stringify(payload),
+      ...withRecoveryBinding(payload, init),
       ...silentInit(init),
     },
   );
@@ -670,6 +790,8 @@ export type CreateFrameInterpolationPayload = VideoFrameInterpolationInput;
 export interface FrameInterpolationCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR3：新协议受理回执视图（携带 canvas_binding 提交时返回）。 */
+  canvas_binding?: MediaToolCanvasBindingView;
 }
 
 /** 创建视频插帧任务（IKHLK3 端点；免费口径同 HD 高清 / 去字幕——不带幂等头、
@@ -680,13 +802,12 @@ export interface FrameInterpolationCreatedData {
 export function createFrameInterpolation(
   projectId: string,
   payload: CreateFrameInterpolationPayload,
-  init?: { silent?: boolean },
+  init?: MediaToolCreateRecoveryInit,
 ): Promise<FrameInterpolationCreatedData> {
   return apiRequest<FrameInterpolationCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-frame-interpolations`,
     {
-      method: 'POST',
-      body: JSON.stringify(payload),
+      ...withRecoveryBinding(payload, init),
       ...silentInit(init),
     },
   );
@@ -732,6 +853,9 @@ export interface CreateVideoSceneSplitPayload {
   target_node_id: string;
   granularity: VideoSceneSplitGranularity;
   client_token: string;
+  /** IKJJR5（恢复契约 v1 B.3）：画布承接绑定（client_token = submission_id）。
+   *  由生成任务运行时铸造注入；不携带 = 历史兼容路径。 */
+  canvas_binding?: unknown;
 }
 
 /** 创建视频场景切分任务返回（IKH8BR）；同家族：入队失败创建响应仍 200、
@@ -783,24 +907,27 @@ export interface CreateVideoMattingPayload {
 export interface VideoMattingCreatedData {
   job_id: string;
   status: 'queued';
+  /** IKJJR3：新协议受理回执视图（携带 canvas_binding 提交时返回）。 */
+  canvas_binding?: MediaToolCanvasBindingView;
 }
 
 /** 创建视频智能抠像任务（IKHK9N）；免费口径同 image_enhance / media_extract / 场景切分
- *  ——不带幂等头（幂等走 body 内 client_token）、无积分预估、不走余额拦截门。任务占位卡
- *  由前端在发送前本地建好（target_node_id 指向它），job_id 回写占位卡后经 GET /api/jobs/:id
- *  轮询至终态（succeeded 成品卡回填归 IKHKAC，failed 占位卡按冻结 input 原参数重试）。
- *  编辑提交传 silent，由工具会话运行时按归属反馈；失败卡重试默认由 HTTP 层提示一次。 */
+ *  ——不带幂等头（幂等走 body 内 client_token，IKJJR3 新协议下 client_token 必须等于
+ *  canvas_binding.submission_id，由生成任务运行时保证）、无积分预估、不走余额拦截门。
+ *  任务占位卡由前端在发送前本地建好（target_node_id 指向它），job_id 回写占位卡后经
+ *  GET /api/jobs/:id 轮询至终态（succeeded 成品卡回填归 IKHKAC，failed 占位卡按冻结
+ *  input 原参数重试）。编辑提交传 silent，由工具会话运行时按归属反馈；失败卡重试默认
+ *  由 HTTP 层提示一次。 */
 export function createVideoMatting(
   projectId: string,
   payload: CreateVideoMattingPayload,
-  init?: { silent?: boolean },
+  init?: MediaToolCreateRecoveryInit,
 ): Promise<VideoMattingCreatedData> {
   return apiRequest<VideoMattingCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-mattings`,
     {
+      ...withRecoveryBinding(payload, init), // 本入口幂等承载是 body 的 client_token，无 Idempotency-Key 头
       silent: init?.silent,
-      method: 'POST',
-      body: JSON.stringify(payload),
     },
   );
 }
@@ -815,17 +942,21 @@ export function cancelGenerationJob(projectId: string, jobId: number | string) {
 
 /** 重试终态失败任务：为缺失/失败输出创建新任务。
  *  `idempotencyKey` 由调用方持有，口径同 {@link createGenerationJob}——「重试」是同一张卡
- *  上的同一次意图（响应丢了再点一次不该变成两笔钱），受理成功后才作废这把钥匙。 */
+ *  上的同一次意图（响应丢了再点一次不该变成两笔钱），受理成功后才作废这把钥匙。
+ *  IKJJR1（恢复契约 v1）：携带 canvas_binding 时为新 submission_id 独立提交身份
+ *  （Idempotency-Key 必须等于 submission_id，由生成任务运行时保证）；无则走历史兼容路径。 */
 export function retryGenerationJob(
   projectId: string,
   jobId: number | string,
   idempotencyKey: string,
+  canvasBinding?: unknown,
 ): Promise<JobCreatedData> {
   return apiRequest<JobCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${jobId}/retry`,
     {
       method: 'POST',
       headers: { 'Idempotency-Key': idempotencyKey },
+      ...(canvasBinding ? { body: JSON.stringify({ canvas_binding: canvasBinding }) } : {}),
     },
   );
 }

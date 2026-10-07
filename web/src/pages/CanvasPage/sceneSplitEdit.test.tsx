@@ -449,8 +449,9 @@ describe('IKH8BR 发送闭环（先退会话 → 占位卡 → job_id → 轮询
       .find((e) => e.target === targetNodeId)!;
     expect(edge.source).toBe('v1');
     expect(edge.data).toEqual({ origin: SCENE_SPLIT_EDGE_ORIGIN });
-    // 发送即落盘（best-effort flush，防刚建任务就关页丢卡）
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+    // IKJJR5：result-placeholder 占位卡受理前不落盘（B.3 不伪造恢复标记；关页由恢复
+    // 协议按 canvas_binding 种子补卡），发送不再触发即时 flush
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
   });
 
   it('选粗档后发送：任务参数与占位卡标注跟随所选粒度（所见即所得）', async () => {

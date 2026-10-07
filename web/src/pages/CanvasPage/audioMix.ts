@@ -1,5 +1,4 @@
-import type { Edge, Node } from '@xyflow/react';
-import type { JobRecord } from '@/api/jobs';
+import type { Node } from '@xyflow/react';
 import { AUDIO_MIX_OUTPUT_FORMATS, type AudioMixCreate } from '@lib/contracts/audio-mix';
 import { baseSourceError, readAssetId } from './mediaRefs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
@@ -67,13 +66,14 @@ export function isAudioMixNodeId(id: string): boolean {
   return id.startsWith('audio-mix-');
 }
 
+/** 结果占位卡（IKJJR4：节点 id 预分配——target_node_id 在提交前即确定，jobId 受理后回填）。 */
 export function buildAudioMixPlaceholderNode(
-  jobId: string | number,
+  nodeId: string,
   format: AudioMixFormat,
   position: { x: number; y: number },
 ): Node {
   return {
-    id: audioMixNodeId(jobId),
+    id: nodeId,
     type: 'mediaNode',
     position,
     data: {
@@ -82,62 +82,10 @@ export function buildAudioMixPlaceholderNode(
       mediaType: 'audio',
       genStatus: 'generating',
       progress: 0,
-      jobId,
       toolMode: 'select',
       audioMix: { format },
     },
   };
-}
-
-/** 以服务端任务为准恢复画布；仅 pending 且尚未落盘的任务可补卡。 */
-export function planAudioMixRecovery(
-  nodes: Node[],
-  edges: Edge[],
-  jobs: JobRecord[],
-  occupied: Node[] = nodes,
-): { nodes: Node[]; edges: Edge[]; pollJobIds: string[] } {
-  let nextNodes = nodes;
-  let nextEdges = edges;
-  const pollJobIds: string[] = [];
-  for (const job of jobs) {
-    if (job.type !== 'audio_mix' || !/^[1-9][0-9]*$/.test(String(job.job_id))) continue;
-    const frozen = job.input as { source_node_id?: unknown; inputs?: unknown; output_format?: unknown } | null;
-    if (!frozen || typeof frozen.source_node_id !== 'string' || !Array.isArray(frozen.inputs)
-      || !AUDIO_MIX_FORMATS.includes(frozen.output_format as AudioMixFormat)) continue;
-    const jobId = String(job.job_id);
-    const nodeId = audioMixNodeId(jobId);
-    let card = nextNodes.find((node) => node.id === nodeId);
-    if (!card && job.canvas_card_state === 'pending') {
-      const source = nextNodes.find((node) => node.id === frozen.source_node_id);
-      const anchor = source ?? nextNodes[0];
-      const position = anchor ? findAudioMixPosition(anchor, [...occupied, ...nextNodes]) : { x: 0, y: 0 };
-      card = buildAudioMixPlaceholderNode(jobId, frozen.output_format as AudioMixFormat, position);
-      nextNodes = [...nextNodes, card];
-      pollJobIds.push(jobId);
-    }
-    if (!card) continue;
-    if ((job.status === 'queued' || job.status === 'processing') && card.data.genStatus !== 'generating') {
-      nextNodes = nextNodes.map((node) => node.id === nodeId
-        ? { ...node, data: { ...node.data, genStatus: 'generating', progress: job.progress, errorText: undefined } }
-        : node);
-      pollJobIds.push(jobId);
-    } else if ((job.status === 'failed' && card.data.genStatus !== 'failed')
-      || (job.status === 'succeeded' && card.data.genStatus != null)) {
-      pollJobIds.push(jobId);
-    }
-    const liveIds = new Set(nextNodes.map((node) => node.id));
-    for (const input of frozen.inputs) {
-      const sourceId = (input as { node_id?: unknown } | null)?.node_id;
-      if (typeof sourceId !== 'string' || !liveIds.has(sourceId) || sourceId === nodeId) continue;
-      if (nextEdges.some((edge) => edge.source === sourceId && edge.target === nodeId)) continue;
-      nextEdges = [...nextEdges, {
-        id: `audio-mix-edge-${sourceId}-${jobId}`,
-        source: sourceId, target: nodeId, type: 'custom',
-        style: { stroke: '#444' }, data: { origin: AUDIO_MIX_EDGE_ORIGIN },
-      }];
-    }
-  }
-  return { nodes: nextNodes, edges: nextEdges, pollJobIds: [...new Set(pollJobIds)] };
 }
 
 export function audioMixTerminalPatch(detail: {

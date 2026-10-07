@@ -7,7 +7,7 @@ import {
 } from "@lib/shared/billing/billing-release.js";
 import { createBillingQuote, type BillingQuote } from "@lib/shared/billing/billing-quote.js";
 import { IdentityService } from "@lib/shared/identity/index.js";
-import { Body, Controller, Headers, HttpCode, Param, Post } from "@nestjs/common";
+import { Body, Controller, Headers, HttpCode, Param, Post, Res } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { DomainError, ok } from "@lib/contracts";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -42,6 +42,9 @@ import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { enqueueFailureLog } from "@lib/infra/mq/rocketmq-producer.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
+import type { Response } from "express";
+// IKJKUA：受控错误判定收敛到共享适配器（原 IKJJQU B.8 本地同款副本已删）。
+import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
 function bodyString(body: unknown): string {
   return typeof body === "string" ? body : JSON.stringify(body ?? "");
@@ -169,6 +172,7 @@ export class GenerationJobsController {
     @Body() body: CreateGenerationJobBody,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("authorization") authorization?: string,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     const internal = sealProviderCredential(authorization);
     const billing = this.billing();
@@ -195,12 +199,19 @@ export class GenerationJobsController {
         // 预扣与补偿必然成对（见 billing 的说明），不再做条件展开
         billing,
         // IKIZQ8：样片提交确认的复算（与 /quote 端点同一装配——预览价、核对价、实扣价
-        // 三者必须同源）。只在 parameters.sample_mode=true 的样片分支被读；计费地址
+        // 三者必须同源）。只在 parameters.sample_mode=true 的样片分支被读；计价地址
         // 缺失时上面的 billing() 已经先抛，这里不会成为新的失败面。
         quote: this.billingQuote(),
       },
       internal,
     );
+
+    // IKJJQU（B.8 局部适配器）：新协议受控错误（canvas_binding_conflict 等）信封直写
+    // HTTP 状态与 data.reason，不经 AllExceptionsFilter（它会置空 data）。
+    if (isRecoveryControlledEnvelope(result)) {
+      res?.status(result.code).json(result);
+      return;
+    }
 
     // IKG57P：拒单信封与 HTTP 状态行一致。fail() 信封被 TransformInterceptor 透传时无人写
     // 状态码，Nest 按 @Post 默认回 201，只看状态码的客户端会把拒绝当成受理成功（ADR-0083）。
@@ -416,6 +427,7 @@ export class GenerationJobsController {
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("authorization") authorization?: string,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     const billing = this.billing();
     const result = await handleRegenerateSampleCreate(
@@ -445,6 +457,12 @@ export class GenerationJobsController {
       },
       sealProviderCredential(authorization),
     );
+    // IKJJR0（B.8 局部适配器）：新协议受控错误（canvas_binding 载荷无效/受理冲突等）信封
+    // 直写 HTTP 状态与 data.reason，不经 AllExceptionsFilter（它会置空 data）。
+    if (isRecoveryControlledEnvelope(result)) {
+      res?.status(result.code).json(result);
+      return;
+    }
     // 与 create（IKG57P）同款口径：业务失败走 AllExceptionsFilter 统一投影。
     if (result.code !== 200) {
       throw new DomainError(result.code, result.msg ?? undefined);
@@ -489,7 +507,12 @@ export class GenerationJobsController {
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("authorization") authorization?: string,
+    @Res({ passthrough: true }) res?: Response,
   ) {
+    // IKJJQU：通用重试可携带 canvas_binding（body 为对象时取其 canvas_binding 字段）。
+    const canvasBindingBody = typeof body === "object" && body !== null
+      ? (body as { canvas_binding?: unknown }).canvas_binding
+      : undefined;
     const result = await handleRetryGenerationJob(
       user.userId,
       projectId,
@@ -501,7 +524,13 @@ export class GenerationJobsController {
         command: this.command.repo,
         materialGate: this.buildMaterialGate(user.userId, authorization),
       },
+      canvasBindingBody,
     );
+    // IKJJQU（B.8 局部适配器）：新协议受控错误信封直写 HTTP 状态与 data.reason。
+    if (isRecoveryControlledEnvelope(result)) {
+      res?.status(result.code).json(result);
+      return;
+    }
     if (result.code === 200 && result.data) {
       const newJobId = String(result.data.generation_job_id);
       if (result.data.type === "video") {

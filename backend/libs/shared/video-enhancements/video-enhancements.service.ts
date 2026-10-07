@@ -7,6 +7,7 @@
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
+  IDEMPOTENCY_CONFLICT_CODE,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_ENHANCE_INPUT_KEYS,
@@ -21,9 +22,18 @@ import {
   type VideoEnhanceInput,
 } from "@lib/contracts";
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import {
+  createMediaToolJobWithRecovery,
+  replayAcceptedMediaTool,
+  stripCanvasBinding,
+} from "@lib/shared/generation/media-tool-recovery.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+
+/** IKJJQW：恢复协议受理的幂等域（先例命名「领域.动作」）。 */
+const IDEMPOTENCY_OPERATION = "video_enhance.create";
+const REQUEST_PATH = "/video-enhancements";
 
 /** zod 校验失败 → 人能读懂的原因（按首个出错键名映射；前端置灰只是体验层，这里返回可读文案）。 */
 const PARSE_ERROR_MESSAGES: Record<string, string> = {
@@ -56,9 +66,18 @@ export class VideoEnhancementsService {
     body: Record<string, unknown>,
     // 与去字幕同构（video-subtitle-erasures.service.ts 的 internal 形参）：请求方 sk- 凭证冻结进 job。
     internal: { providerCredential?: string } = {},
+    // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
+    idempotencyKey?: string,
   ) {
+    // IKJJQW：canvas_binding 是业务键之上的基础设施键（同 client_token 口径）：先行剥离再过
+    // 契约 schema；携带但非法 / 与 Idempotency-Key 承载不一致 → 400 invalid_recovery_payload
+    // （IKJLTZ：三段校验收敛至 stripCanvasBinding，头承载的 trim 口径留在调用方）。
+    const gate = stripCanvasBinding(body ?? {}, "Idempotency-Key", (idempotencyKey ?? "").trim());
+    if (gate.error) return gate.error;
+    const { binding, rest } = gate;
+
     // 契约 schema 复核（strict 三键）：resolution 枚举（720p 已被产品裁掉）在此拦截。
-    const parsed = videoEnhanceInputSchema.safeParse(body ?? {});
+    const parsed = videoEnhanceInputSchema.safeParse(rest);
     if (!parsed.success) {
       return fail(PARAM_MISSING_CODE, readableParseError(parsed.error.issues));
     }
@@ -66,6 +85,21 @@ export class VideoEnhancementsService {
 
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+
+    // IKJLTX（R5，B.3 受理事务顺序）：同身份同载荷的原意图幂等回读先于素材/门槛等可变状态
+    // 校验——已受理重放返回原 job 与原关联，不因此刻素材已删除/门槛不过而重新拒绝或重复受理。
+    // 摘要只依赖请求载荷与 canvas_binding，与可变状态无关（门本体见 replayAcceptedMediaTool）。
+    const { recovery, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
+      projectId,
+      userId,
+      binding,
+      taskType: VIDEO_ENHANCE_JOB_TYPE,
+      operation: IDEMPOTENCY_OPERATION,
+      requestPath: REQUEST_PATH,
+      body: body ?? {},
+    });
+    if (replayed) return replayed;
+
     // findOwnedSource 按 user_id 归属过滤（status=normal 且未删除）：非本人素材一律 404，不泄露存在性。
     const asset = await this.assets.findOwnedSource(
       input[VIDEO_ENHANCE_INPUT_KEYS.sourceAssetId],
@@ -107,23 +141,38 @@ export class VideoEnhancementsService {
         : {}),
     };
 
-    const job = await this.prisma.client.generation_jobs.create({
-      data: {
-        user_id: BigInt(userId),
-        project_id: BigInt(projectId),
-        type: VIDEO_ENHANCE_JOB_TYPE,
-        source: VIDEO_ENHANCE_SOURCE,
-        status: "queued",
-        progress: 0,
-        input: frozenInput,
-        // 过去 60s：回拨口径同 media_extract / 去字幕——DATETIME(0) 秒精度进位会让同秒
-        // claim 的 lte now 判 false。
-        next_action_at: new Date(Date.now() - 60_000),
+    // IKJJQW：受理主体走共享段（B.3）——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 →
+    // 幂等行」一个事务；无 canvas_binding 时建行路径与接入前一致。前置回读 miss 后此处
+    // 事务内仍有锁内回读兜底（并发赢家在锁外 miss 与事务开始之间提交的情形）。
+    const outcome = await createMediaToolJobWithRecovery(
+      this.prisma.client,
+      recovery,
+      async (db) => {
+        const job = await db.generation_jobs.create({
+          data: {
+            user_id: BigInt(userId),
+            project_id: BigInt(projectId),
+            type: VIDEO_ENHANCE_JOB_TYPE,
+            source: VIDEO_ENHANCE_SOURCE,
+            status: "queued",
+            progress: 0,
+            input: frozenInput,
+            // 过去 60s：回拨口径同 media_extract / 去字幕——DATETIME(0) 秒精度进位会让同秒
+            // claim 的 lte now 判 false。
+            next_action_at: new Date(Date.now() - 60_000),
+          },
+        });
+        return { jobId: job.id.toString(), status: "queued" };
       },
-    });
+    );
+    if (outcome.kind === "envelope") return outcome.envelope;
+    if (outcome.kind === "idempotency_conflict") {
+      return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
+    }
     return ok({
-      job_id: job.id.toString(),
-      status: "queued",
+      job_id: outcome.jobId,
+      status: outcome.status,
+      ...(outcome.bindingView ? { canvas_binding: outcome.bindingView } : {}),
     });
   }
 

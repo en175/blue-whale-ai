@@ -11,8 +11,6 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
-import { audioMixJobsOptions } from '@/api/audioMixRecovery';
-import { audioVideoMuxJobsOptions } from '@/api/audioVideoMuxRecovery';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
@@ -60,25 +58,24 @@ import { mediaCardToolbarVisible } from './components/MediaNode/toolbarVisibilit
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
   MEDIA_EXTRACT_EDGE_ORIGIN,
+  MEDIA_EXTRACT_NODE_PREFIX,
   buildMediaExtractPlaceholderNode,
   isMediaExtractNodeId,
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
-  type MediaExtractIdentity,
 } from './mediaExtract';
 
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
-import { captureImageEnhance, captureVideoEnhance, captureFrameInterpolation, FrameInterpolationSaveError, type ImageEnhanceSubmission, type VideoEnhanceSubmission, type FrameInterpolationSubmission } from './panelToolSessions';
+import { type ImageEnhanceSubmission, type VideoEnhanceSubmission, type FrameInterpolationSubmission } from './panelToolSessions';
 import { apiErrorMessage, isSilentAuthError } from './toolSessionCapture';
 import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import {
   AUDIO_TRIM_EDGE_ORIGIN,
-  audioTrimErrorText,
+  AUDIO_TRIM_NODE_PREFIX,
   audioTrimNodeId,
   audioTrimTerminalPatch,
   buildAudioTrimPlaceholderNode,
   isAudioTrimNodeId,
-  type AudioTrimIdentity,
 } from './audioTrim';
 
 import { type VocalSplitPayload, type AudioToolSubmission } from './audioToolSessions';
@@ -86,37 +83,31 @@ import {
   type AudioTrimInput,
 } from '@lib/contracts/audio-trim';
 
-import { AUDIO_MIX_EDGE_ORIGIN, audioMixNodeId, audioMixTerminalPatch, buildAudioMixPlaceholderNode, findAudioMixPosition, isAudioMixNodeId, planAudioMixRecovery } from './audioMix';
-
-import type { AudioMixCreate } from '@lib/contracts/audio-mix';
+import { AUDIO_MIX_EDGE_ORIGIN, audioMixTerminalPatch, buildAudioMixPlaceholderNode, findAudioMixPosition, isAudioMixNodeId } from './audioMix';
 
 import {
   AUDIO_SPEED_EDGE_ORIGIN,
-  audioSpeedErrorText,
+  AUDIO_SPEED_NODE_PREFIX,
   audioSpeedNodeId,
   audioSpeedTerminalPatch,
   buildAudioSpeedPlaceholderNode,
   isAudioSpeedNodeId,
-  type AudioSpeedIdentity,
 } from './audioSpeed';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 
-import { AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON, AUDIO_VIDEO_MUX_EDGE_ORIGIN, AUDIO_VIDEO_MUX_TITLE, audioVideoMuxErrorText, audioVideoMuxIdentityOf, audioVideoMuxResultName, audioVideoMuxVideoError, buildAudioVideoMuxIdentity, isAudioVideoMuxAudioEdge, isAudioVideoMuxBindEdge, isAudioVideoMuxDraftNode, planAudioVideoMuxRecovery } from './audioVideoMux';
+import { AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON, AUDIO_VIDEO_MUX_EDGE_ORIGIN, AUDIO_VIDEO_MUX_TITLE, audioVideoMuxErrorText, audioVideoMuxIdentityOf, audioVideoMuxResultName, audioVideoMuxVideoError, buildAudioVideoMuxIdentity, isAudioVideoMuxAudioEdge, isAudioVideoMuxBindEdge, isAudioVideoMuxDraftNode } from './audioVideoMux';
 
 
-import { VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_EDGE_ORIGIN, VOCAL_SPLIT_NODE_PREFIX, buildVocalSplitPlaceholderNode, buildVocalSplitTrackNodes, isVocalSplitNodeId, vocalSplitNodeId, vocalSplitSourceName, vocalSplitTerminalPatch, type VocalSplitIdentity } from './vocalSplit';
+import { VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_EDGE_ORIGIN, VOCAL_SPLIT_NODE_PREFIX, buildVocalSplitPlaceholderNode, buildVocalSplitTrackNodes, isVocalSplitNodeId, vocalSplitSourceName, vocalSplitTerminalPatch, type VocalSplitIdentity } from './vocalSplit';
 import { SCENE_SPLIT_EDGE_ORIGIN, SCENE_SPLIT_NODE_GAP, buildSceneSplitPlaceholderNode, sceneSplitErrorText, sceneSplitFanoutLayout, sceneSplitSegmentBox, sceneSplitSegmentLabel, type SceneSplitIdentity } from './sceneSplit';
 import { type SceneSplitSubmission } from './sceneSplitSession';
 import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode, smartMattingErrorText, type SmartMattingIdentity } from './smartMatting';
 import {
   IMAGE_ENHANCE_EDGE_ORIGIN,
   imageEnhanceDraftPosition,
-  restoreImageEnhanceParams,
-  type ImageEnhanceIdentity,
 } from './imageEnhance';
 import {
   VIDEO_ENHANCE_EDGE_ORIGIN,
-  restoreVideoEnhanceResolution,
   videoEnhanceDraftPosition,
   videoEnhanceErrorText,
   videoEnhanceGateReason,
@@ -130,15 +121,12 @@ import {
   frameInterpolationDraftPosition,
   frameInterpolationErrorText,
   frameInterpolationGateReason,
-  restoreFrameInterpolationRetryFps,
   type FrameInterpolationFps,
   type FrameInterpolationIdentity,
 } from './frameInterpolation';
-import { IMAGE_ERASE_EDGE_ORIGIN, type ImageEraseIdentity } from './imageErase';
-import { type VideoSubtitleEraseIdentity } from './videoSubtitleErase';
+import { IMAGE_ERASE_EDGE_ORIGIN } from './imageErase';
 import { VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN } from '@lib/contracts/video-subtitle-erase';
 
-import { type ImageCutoutIdentity } from './imageCutout';
 import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
 
 import { IMAGE_OUTPAINT_EDGE_ORIGIN, buildImageOutpaintInput, type ImageOutpaintIdentity } from './imageOutpaint';
@@ -208,44 +196,16 @@ import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/utils/creditsGate';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
 import {
-  createGenerationJob,
-  cancelGenerationJob,
-  retryGenerationJob,
   fetchJobStatus,
-  finalizeVideoJob,
   quoteVideoFinalize,
-  regenerateSampleJob,
   quoteSampleRegenerate,
-  createImageEnhancement,
-  createImageErase,
-  createImageCutout,
-  createImageOutpaint,
-  createVideoSubtitleErase,
-  createVideoEnhancement,
-  createFrameInterpolation,
-  createMediaExtraction,
-  createAudioTrim,
-  createAudioMix,
-  retryAudioMix,
-  createAudioVideoMux,
-  retryAudioVideoMux,
-  createAudioSpeed,
-  createVocalSplit,
-  createVideoSceneSplit,
-  createVideoMatting,
   readJobFailText,
-  type CreateVideoMattingPayload,
-  type CreateFrameInterpolationPayload,
-  type CreateAudioSpeedPayload,
   type CreateJobPayload,
-  type CreateAudioVideoMuxPayload,
   type ImageJobParameters,
   type VideoJobParameters,
   type AudioJobParameters,
   type GenerationRefItem,
-} from '@/api/jobs';
-import { removeCancelledGenerationNode, stopJobPolling } from './generationPolling';
-import { createSubmitIntentKeys } from './submitIntentKeys';
+ } from '@/api/jobs';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import {
   saveSharedAsset,
@@ -273,6 +233,16 @@ import ConnectTypeMenu from './components/ConnectTypeMenu';
 import { checkFileBeforeUpload, isFileRejected } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
+import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
+import { normalGenerationTask } from './generationRuntime/normalGeneration';
+import { storyboardTask, type StoryboardPayload } from './generationRuntime/storyboardTasks';
+import { createImageToolsTask, isImageToolsCard, imageToolsRetryPayloadOf, type ImageToolsPayload } from './generationRuntime/imageTools';
+import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from './generationRuntime/mixMuxTasks';
+import { sceneSplitTask, vocalSplitTask } from './generationRuntime/multiOutputTasks';
+import { videoToolsTask, videoToolFrozenPayload, type VideoToolPayload } from './generationRuntime/videoTools';
+import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
+import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
+import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
 import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
@@ -470,19 +440,11 @@ export default function CanvasPage() {
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
-  /** 插帧创建在途集合（IKHSFH 同步防重）：nodeId 维度，从开始保存（flushCanvasSave）至
-   *  创建返回期间持有——同卡在该窗口内只受理一次提交，面板发送与失败重试共用（React
-   *  state 的 submitting 是渲染期快照，慢网连点/同帧连点会读到旧值，防重以本集合为准）；
-   *  失败解锁（finally 移除）后允许再试。 */
-  const frameInterpolationInFlightRef = useRef<Set<string>>(new Set());
-  /** HD 创建在途计数（口径同插帧 IKHSFH）：nodeId 维度，从受理至创建返回期间持有——
-   *  显式关闭重开的重发是既定行为，同卡可并发在途，故计数而非布尔；面板选中隐藏再选回
-   *  时运行时以此重算提交锁；每次完成/失败各减一，归零才视为不在途。 */
-  const videoEnhanceInFlightRef = useRef<Map<string, number>>(new Map());
-  /** 同卡 HD 创建在途判定（IKJP8Q）：面板在途只读 reconcile、重试准入与旧响应提示守卫共用 */
-  const isVideoEnhanceCardInFlight = (id: string) => (videoEnhanceInFlightRef.current.get(id) ?? 0) > 0;
-  /** 权威恢复未完成或失败时，禁止把编辑值当作受理参数重试。面板主动发送新配置不受影响。 */
-  const frameInterpolationRecoveryBlockedRef = useRef<Set<string>>(new Set());
+  /** HD 合法多请求各自结算；旧执行失效后，物理创建请求仍属于同卡在途窗口。 */
+  const videoEnhanceInFlightRef = useRef(new Map<string, Set<{ projectId: string | null; loadEpoch: object }>>());
+  const isVideoEnhanceCardInFlight = (nodeId: string) =>
+    [...(videoEnhanceInFlightRef.current.get(nodeId) ?? [])].some((request) =>
+      request.projectId === activeProjectRef.current && request.loadEpoch === docLoadEpochRef.current);
   const toolHostsRef = useRef<Partial<CanvasToolHosts>>({});
   const toolViewRef = useRef<CanvasToolView | null>(null);
   const toolDepsRef = useRef<ToolSessionDeps | null>(null);
@@ -497,15 +459,6 @@ export default function CanvasPage() {
   toolRuntime.setProject(currentId);
   useSyncExternalStore(toolRuntime.subscribe, toolRuntime.getVersion);
   const audioMixInFlightRef = useRef(false);
-  const audioMixCreateAttemptRef = useRef<{ projectId: string; payload: string; key: string } | null>(null);
-  const audioMixRetryInFlightRef = useRef(new Set<string>());
-  const audioMixRetryKeysRef = useRef(new Map<string, string>());
-  /** 建任务的幂等键台账（见 submitIntentKeys）：scope 是提交位——原位重跑取目标卡 id，
-   *  自由生成（无目标卡）取空串这一个共享位；签名是本次载荷，载荷变了即换新钥匙。 */
-  const jobSubmitKeysRef = useRef(createSubmitIntentKeys());
-  /** 失败重试（retry 接口）的幂等键台账：scope 取卡片 id，签名取被重试的那个任务 id——
-   *  同一张失败卡上「响应丢了再点一次」复用同一把；受理成功后换新任务 id，天然另起一把。 */
-  const jobRetryKeysRef = useRef(createSubmitIntentKeys());
   /** IKIZQE 成片（finalize）链路的页面态：按样片卡 node id 记报价，按样片任务 id 记
    *  已受理尝试（会话内）；「提交中/结果不明」是渲染期派生 CTA 状态的数据源。
    *  报价 = 服务端唯一权威门（空报价双 null 即禁用），不随画布持久化——刷新后重新报价。 */
@@ -528,18 +481,13 @@ export default function CanvasPage() {
   const sampleRegenInflightRef = useRef(new Set<string>());
   const [sampleRegenUnknownSamples, setSampleRegenUnknownSamples] = useState<ReadonlySet<string>>(() => new Set());
   const sampleRegenAttemptedJobIdsRef = useRef(new Set<string>());
-  /** 创建已受理、但结果卡尚未随画布事务落盘的窗口。 */
-  const audioMixUnpersistedCardsRef = useRef(new Set<string>());
-  const audioMixFirstSaveRef = useRef(new Map<string, Promise<boolean>>());
-  const audioMixDeleteWaitingRef = useRef(new Set<string>());
-  /** 合成提交双锁（IKIHPM，同 audioMix 口径）：InFlightRef 是任务在途锁——在途时后来的
-   *  发送被守卫挡回（连点不重复建任务），finally 无条件释放；CreateAttemptRef 按
-   *  (项目, 载荷) 记幂等键：同一份载荷的重发沿用同键，成功后清（改参数即新键新尝试）。 */
+  /** 合成提交任务在途锁（IKIHPM，同 audioMix 口径）：在途时后来的发送被守卫挡回
+   *  （连点不重复建任务），finally 无条件释放。受理/幂等/轮询归生成任务运行时（IKJJR4）。 */
   const audioVideoMuxInFlightRef = useRef(false);
-  const audioVideoMuxCreateAttemptRef = useRef<{ projectId: string; payload: string; key: string } | null>(null);
-  /** 重试在途锁与同键复用（同 audioMixRetryKeysRef 口径）：同卡连点只发一次重试。 */
-  const audioVideoMuxRetryInFlightRef = useRef(new Set<string>());
-  const audioVideoMuxRetryKeysRef = useRef(new Map<string, string>());
+  /** 混合未受理提交的占位卡身份台账（IKJJR4）：同项目同载荷未受理重发沿用同一节点 id，
+   *  使运行时按（节点 × 载荷签名）复用同一 submission_id——回执丢失原样重发不重复建任务；
+   *  受理即作废（之后的提交是另一次意图）。 */
+  const audioMixSubmitCardRef = useRef<{ projectId: string; payload: string; nodeId: string; accepted: boolean } | null>(null);
   /** 任务在途锁持续到创建与首保存结束，不随编辑会话退出或重开释放。 */
   const sceneSplitSendingRef = useRef(false);
   /** 任务在途锁独立于会话，界面退出不得释放。 */
@@ -1322,58 +1270,18 @@ export default function CanvasPage() {
     showToast('warn', `文本节点 ${id}：${draftErrorsRef.current.get(id)}，请修正后继续`);
     return true;
   };
-  /** 智能抠像创建（审查修复 S1）：新增服务端写入按请求治理规则承载 mutation
-   *  （frontend-delivery/references/request.md「Mutations」）；家族既有工具是历史形态，
-   *  不随本单迁移。编辑提交用 silent 传输并由运行时反馈；失败卡重试保留 HTTP 默认提示。 */
-  const createVideoMattingMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: CreateVideoMattingPayload; silent?: boolean }) =>
-      createVideoMatting(vars.projectId, vars.payload, { silent: vars.silent }),
-  });
+  /* IKJJR3：抠像/插帧/调速的创建 mutation 已随家族迁入生成任务运行时（家族定义内直接
+   * 调对应 API 客户端并携带 canvas_binding；同卡防重 = 运行时 submitting 窗口）。 */
   const quoteMutation = useMutation({ mutationFn: createConversationQuote });
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
   const referencePlanMutation = useMutation({ mutationFn: (input: Parameters<typeof referencePromptPlan>[0]) => referencePromptPlan(input) });
-  /** 插帧创建写请求（IKHSFH）：useMutation 承载 POST video-frame-interpolations——silent
-   *  传输（http 层不 toast）+ 调用方 catch 统一提示一次（先例 createConversationQuote）。
-   *  提交与请求归属按节点划分：mutateAsync 每次独立在途（不同卡可各自提交、乱序完成），
-   *  同卡防重由 startFrameInterpolationJob 的在途集合、界面反馈归属由运行时纪元承载，
-   *  不把使用 useMutation 本身当作竞态已解决。 */
-  const createFrameInterpolationMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: CreateFrameInterpolationPayload }) =>
-      createFrameInterpolation(vars.projectId, vars.payload, { silent: true }),
-  });
-  const createAudioMixMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: AudioMixCreate; key: string }) =>
-      createAudioMix(vars.projectId, vars.payload, { silent: true, idempotencyKey: vars.key }),
-  });
   const linkAudioMixAssetsMutation = useMutation({
     mutationFn: (vars: { projectId: string; assetIds: string[] }) =>
       Promise.all(vars.assetIds.map((assetId) => linkAssetToProject(vars.projectId, assetId, { silent: true }))),
   });
-  const retryAudioMixMutation = useMutation({
-    mutationFn: (vars: { projectId: string; jobId: string; key: string }) =>
-      retryAudioMix(vars.projectId, vars.jobId, vars.key, { silent: true }),
-  });
-  /** 音视频合成创建/重试写请求（IKIHPM）：useMutation 承载 POST audio-video-muxes 与其
-   *  :jobId/retry——silent 传输（http 层不 toast）+ 调用方 catch 统一提示一次（同
-   *  createAudioMix 口径）。重试必带 Idempotency-Key（服务端空键 422/PARAM_MISSING），
-   *  同一次重试尝试沿用同键由调用方持有。 */
-  const createAudioVideoMuxMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: CreateAudioVideoMuxPayload; key: string }) =>
-      createAudioVideoMux(vars.projectId, vars.payload, { silent: true, idempotencyKey: vars.key }),
-  });
-  const retryAudioVideoMuxMutation = useMutation({
-    mutationFn: (vars: { projectId: string; jobId: string; key: string }) =>
-      retryAudioVideoMux(vars.projectId, vars.jobId, vars.key, { silent: true }),
-  });
+  // IKJJR4：混合/合成的创建与专属重试请求由生成任务运行时经 mixMuxTasks 定义直连
+  //（幂等键 = submission_id、canvas_binding 受理），不再经 useMutation 页面台账。
 
-  /** 调速创建写请求（IKI4LX）：useMutation 承载 POST audio-speeds（首次提交与失败重试共用）——
-   *  silent 传输（http 层不 toast）+ 调用方 catch 统一提示一次（先例
-   *  createFrameInterpolationMutation，IKHSFH）。项目归属不由 Mutation 承载：提交与重试的
-   *  跨项目隔离由调用侧 activeProjectRef 双检显式保证（迟到响应丢弃本地写入）。 */
-  const createAudioSpeedMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: CreateAudioSpeedPayload }) =>
-      createAudioSpeed(vars.projectId, vars.payload, { silent: true }),
-  });
   const applyingRef = useRef(false);
   const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
   const onUpdateGenerate = useCallback((nodeId: string) => {
@@ -1394,6 +1302,20 @@ export default function CanvasPage() {
   const versionRef = useRef<number | null>(null);
   /** 最近一次加载/保存成功的内容签名，避免重复保存 */
   const lastSavedRef = useRef('');
+  /** IKJKU8（用户故事 38）：在途恢复保存命令保留——回执丢失（断连/响应丢失）后命令身份、
+   *  完整载荷与实际 If-Match 保留至结果落定；完全相同的重试（画布签名与版本未变）复用
+   *  原命令重发，命中服务端幂等回读取回原回执（replayed=true），不因旧 If-Match 被迫
+   *  冲突复核。IKJLTY（R6）：结果未明确前不因本地新编辑（签名/版本变化）丢弃未决命令——
+   *  新保存意图到来先原样重放确认原命令结果（版本随之对齐），再以确认版本为基组新命令；
+   *  旧回执只确认原保存与合法版本，不覆盖新编辑。仅结果落定（成功/受控 4xx）或跨项目才释放。 */
+  const retainedRecoverySaveRef = useRef<{
+    projectId: string;
+    commandId: string;
+    recoveryChanges: RecoveryChange[];
+    payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean };
+    version: number | null;
+    signature: string;
+  } | null>(null);
   /** 尚未被服务端确认保存的新增节点 ID——「添加失败」回滚用。
    *  自动保存发起时对当前集合做快照：成功清快照、失败只回滚快照，
    *  请求飞行中新增的节点留给下一轮保存处理，不会被误判为添加失败。 */
@@ -1548,10 +1470,8 @@ export default function CanvasPage() {
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
   const { doc, assets: snapshotAssets, loadFailed: canvasLoadFailed, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
-  const audioMixJobsQuery = useQuery({ ...audioMixJobsOptions(currentId), enabled: Boolean(doc && currentId) });
-  /** 音视频合成恢复查询（IKIHPM，同 audioMixJobsQuery 口径）：按项目拉全部合成任务，
-   *  进行中补占位卡、终态补轮询、来源边按冻结输入补画。 */
-  const audioVideoMuxJobsQuery = useQuery({ ...audioVideoMuxJobsOptions(currentId), enabled: Boolean(doc && currentId) });
+  // IKJJR4：混合/合成的刷新恢复归生成任务运行时（恢复扫描 B.5 + 水合即时续轮询），
+  // 旧的「按任务列表补卡」专属查询骨架移除；历史在卡任务仍经水合续轮询。
   const snapshotAssetsRef = useRef(snapshotAssets);
   snapshotAssetsRef.current = snapshotAssets;
 
@@ -1962,16 +1882,12 @@ export default function CanvasPage() {
    *  生效期间本会话一切整文档 PUT 均被阻断，入口统一提示刷新复核（重发必再拒且会覆盖另一
    *  会话刚保存的布局）；解除点同 emptyClearConflictRef。 */
   const emptyOverwriteRejectedRef = useRef(false);
-  /** 调速重试属于发起项目；页面内切项目时保留受理结果，回到原项目再接续原卡。 */
-  const audioSpeedRetriesRef = useRef(new Map<string, { patch: Record<string, unknown> }>());
-  /** 首次调速提交的迟到受理结果归原项目；回到原项目后补建卡并落盘。 */
-  const audioSpeedPendingSubmissionsRef = useRef(new Map<string, {
-    projectId: string;
-    sourceNodeId: string;
-    jobId: string | number;
-    payload: AudioSpeedInput;
-    source: Node;
-  }>());
+  /** IKJJR1：新协议恢复保存冲突（412/409/428 带 reason）——同两款待复核闸门口径：
+   *  生效期间阻断整文档保存（本地内容保留，不换版本重发），重新水合后解除。 */
+  const recoverySaveConflictRef = useRef(false);
+  /* IKJJR3：调速跨项目接续（重试补丁回放/迟到受理暂存）的原页面机制已随家族迁入
+   * 生成任务运行时——迟到受理由归属检查丢弃、回原项目水合时由统一恢复按服务端关联
+   * 补卡续轮询（新协议由统一恢复负责）。 */
 
   /** 画布文档加载完成：按类型分发节点并注入回调；切换项目时先清空 */
   useEffect(() => {
@@ -1989,10 +1905,10 @@ export default function CanvasPage() {
       confirmedNonEmptyRef.current = false;
       emptyClearConflictRef.current = false; // IKILUE：项目卸载/切换重置，清空待复核闸门一并复位
       emptyOverwriteRejectedRef.current = false; // IKILTB：422 阻断标记同步复位
+      recoverySaveConflictRef.current = false; // IKJJR1：项目卸载/切换重置恢复保存冲突闸门
       setSaveStatus('idle');
       return;
-    }
-    const docChanged = hydratedDocRef.current !== doc;
+    }    const docChanged = hydratedDocRef.current !== doc;
     hydratedDocRef.current = doc;
     if (!docChanged) {
       // 仅资产字典变化：刷新节点 URL / 缺失标记，保留当前编辑与保存接口已确认的 version
@@ -2007,11 +1923,16 @@ export default function CanvasPage() {
     }
     hydratedProjectRef.current = canvasLoadFailed ? null : currentId;
     confirmedNonEmptyRef.current = doc.nodes.length > 0;
+    // IKJJR1（A.8/A.9）：新文档水合 = 新加载身份。旧执行链（轮询/受理/保存确认）按身份
+    // 自行消亡，运行时在途/台账/意图整体重置，由恢复扫描按服务端事实重建。
+    docLoadEpochRef.current = {};
+    generationRuntimeRef.current?.reset();
     // IKIN23：仅成功重新水合才解除整文档待复核——加载失败的兜底空文档不算
     //（否则一次失败的刷新会被误判为「已看到服务端最新布局」）
     if (!canvasLoadFailed) {
       emptyClearConflictRef.current = false; // IKILUE：重新水合即解除清空待复核（confirmEmpty 按新基线重新授予）
       emptyOverwriteRejectedRef.current = false; // IKILTB：重新水合解除 422 阻断（空覆盖按新基线重新判定）
+      recoverySaveConflictRef.current = false; // IKJJR1：重新水合解除恢复保存冲突闸门（按新基线重新对账）
     }
     const t: Node[] = [];
     const m: Node[] = [];
@@ -2036,37 +1957,6 @@ export default function CanvasPage() {
           console.warn('[canvas] 无法映射的后端节点:', JSON.stringify(node).slice(0, 800));
         }
       }
-    });
-    let restoredAudioSpeedRetry = false;
-    m.forEach((node) => {
-      const retryKey = `${currentId}:${node.id}`;
-      const retry = audioSpeedRetriesRef.current.get(retryKey);
-      if (!retry) return;
-      // 快照已接住本次终态：交还持久化数据，保留后续改名等用户编辑。
-      if (retry.patch.genStatus !== 'generating'
-        && node.data.jobId === retry.patch.jobId
-        && node.data.genStatus === retry.patch.genStatus) {
-        audioSpeedRetriesRef.current.delete(retryKey);
-        return;
-      }
-      node.data = { ...node.data, ...retry.patch };
-      restoredAudioSpeedRetry = true;
-    });
-    let restoredAudioSpeedSubmission = false;
-    if (!canvasLoadFailed) audioSpeedPendingSubmissionsRef.current.forEach((pending, key) => {
-      if (pending.projectId !== currentId) return;
-      if (m.some((node) => node.id === audioSpeedNodeId(pending.jobId))) {
-        audioSpeedPendingSubmissionsRef.current.delete(key);
-        return;
-      }
-      const source = m.find((node) => node.id === pending.sourceNodeId) ?? pending.source;
-      m.push(attachCallbacks(buildAudioSpeedPlaceholderNode({
-        jobId: pending.jobId,
-        speed: pending.payload.speed ?? 1,
-        sourceAssetId: pending.payload.source_asset_id,
-        source,
-      }) as Node));
-      restoredAudioSpeedSubmission = true;
     });
     // 商品序号从已加载节点数接续，避免新建重名
     productSeq.current = p.length;
@@ -2095,21 +1985,6 @@ export default function CanvasPage() {
         style: { stroke: '#444' },
         ...(e.data ? { data: e.data } : {}),
       }));
-    if (!canvasLoadFailed) audioSpeedPendingSubmissionsRef.current.forEach((pending) => {
-      if (pending.projectId !== currentId || !hydratedIds.has(pending.sourceNodeId)) return;
-      const target = audioSpeedNodeId(pending.jobId);
-      if (hydratedEdges.some((edge) => edge.source === pending.sourceNodeId && edge.target === target)) return;
-      hydratedEdges.push({
-        id: `e-${pending.sourceNodeId}-${target}`,
-        source: pending.sourceNodeId,
-        target,
-        sourceHandle: null,
-        targetHandle: null,
-        type: 'custom',
-        style: { stroke: '#444' },
-        data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
-      });
-    });
     setEdges(hydratedEdges);
     // 同步乐观锁版本/视口，并记录内容签名避免加载后立即重复保存
     // （签名口径与自动保存一致：含组伪节点，否则组数据会导致加载后立即误判变更）
@@ -2120,7 +1995,7 @@ export default function CanvasPage() {
     const upgradedTextNodes = contentNodes.some(
       (node) => node.type === 'textNode' && typeof (node.data as Record<string, unknown> | undefined)?.html === 'string',
     );
-    lastSavedRef.current = upgradedTextNodes || restoredAudioSpeedRetry || restoredAudioSpeedSubmission
+    lastSavedRef.current = upgradedTextNodes
       ? ''
       : JSON.stringify(doc.viewport) +
         serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
@@ -2128,6 +2003,11 @@ export default function CanvasPage() {
     // 水合恢复：「生成中」媒体节点恢复任务轮询。
     // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
     // IKIZQE：checking（提交结果不明核对锁定）同样恢复轮询——核对定夺后终态照常收敛。
+    // IKJJR1/IKJJR3/IKJJR7：全部生成中卡（普通生成 + 全部工具家族）归统一任务运行时——
+    // claims 全覆盖「生成中 + jobId」形态，水合即时续轮询（恢复扫描随后对账防双链），
+    // 页面 else 兜底浅层轮询已随旧骨架删除；插帧生成中卡例外——由下方专属 current 查询
+    // 驱动（回填受理冻结输入 frozenParams 后经 resumeFromHydration 进运行时轮询，
+    // 工单「插帧历史可信关联恢复保持可用」）。
     m
       .filter(
         (n) =>
@@ -2136,100 +2016,23 @@ export default function CanvasPage() {
           (typeof n.data.jobId === 'number' || typeof n.data.jobId === 'string') &&
           !settledExtractNodesRef.current.has(n.id),
       )
-      .forEach((n) => pollJobRef.current(n.id, n.data.jobId as number | string));
-    // 插帧卡统一核对服务端当前关联：重发受理后关页时，持久化可能仍带上一次任务的 jobId。
+      .forEach((n) => {
+        generationRuntimeRef.current?.resumeFromHydration(n.id, String(n.data.jobId), (n.data ?? {}) as Record<string, unknown>);
+      });
+    // 插帧卡统一核对服务端当前关联（IKHSFE 可信关联恢复，IKJJR3 保留为插帧专属路径）：
+    // 重发受理后关页时持久化可能仍带上一次任务的 jobId（以服务端当前关联为准），同时回填
+    // 该任务的冻结输入 frozenParams（失败重试权威来源）。续轮询经 resumeFromHydration 进
+    // 统一运行时（恢复扫描按在途判重，不双链——新协议由统一恢复负责对账）。
     m
       .filter(
         (n) =>
           ((n.data ?? {}) as Record<string, unknown>).frameInterpolation != null,
       )
       .forEach((n) => recoverFrameInterpolationRef.current(n.id, n.data.jobId));
+    // IKJJR1：恢复扫描（B.5 分页对账）——受理回执丢失补卡、完成未落盘投影、归属版本台账。
+    if (currentId && !canvasLoadFailed) void generationRuntimeRef.current?.recover(currentId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, snapshotAssets]);
-
-  /** 已受理但关页前未保存的任务，按服务端 pending 标记补卡；已主动移除的不复活。 */
-  useEffect(() => {
-    if (!doc || !audioMixJobsQuery.data || !currentId) return;
-    const projectId = currentId;
-    const timer = window.setTimeout(() => {
-      if (activeProjectRef.current !== projectId || hydratedDocRef.current !== doc) return;
-      const currentNodes = mediaNodesRef.current;
-      const currentEdges = edgesRef.current;
-      const recovered = planAudioMixRecovery(
-        currentNodes, currentEdges, audioMixJobsQuery.data!,
-        [...currentNodes, ...textNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current],
-      );
-      if (recovered.nodes !== currentNodes) {
-        const existingIds = new Set(currentNodes.map((node) => node.id));
-        const freshMixIds: string[] = [];
-        recovered.nodes.forEach((node) => {
-          if (!existingIds.has(node.id) && isAudioMixNodeId(node.id)) {
-            audioMixUnpersistedCardsRef.current.add(node.id);
-            freshMixIds.push(node.id);
-          }
-        });
-        const next = recovered.nodes.map((node) => existingIds.has(node.id) ? node : attachCallbacks(node));
-        mediaNodesRef.current = next;
-        setMediaNodes(next);
-        if (freshMixIds.length > 0) {
-          // 来源线先写入 ref，再开始首个含卡保存；删除操作只等待这一笔的结果。
-          if (recovered.edges !== currentEdges) edgesRef.current = recovered.edges;
-          const firstSave = flushCanvasSave(projectId);
-          freshMixIds.forEach((id) => audioMixFirstSaveRef.current.set(id, firstSave));
-          void firstSave.then((saved) => {
-            if (saved) freshMixIds.forEach((id) => audioMixUnpersistedCardsRef.current.delete(id));
-          }).catch(() => {}).finally(() => {
-            freshMixIds.forEach((id) => {
-              if (audioMixFirstSaveRef.current.get(id) === firstSave) audioMixFirstSaveRef.current.delete(id);
-            });
-          });
-        }
-      }
-      if (recovered.edges !== currentEdges) {
-        edgesRef.current = recovered.edges;
-        setEdges(recovered.edges);
-      }
-      recovered.pollJobIds.forEach((jobId) => pollJobRef.current(audioMixNodeId(jobId), jobId));
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // 任务列表或画布快照变更时重算一次；节点/边变更由规划函数保证幂等，不触发查询循环。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, currentId, audioMixJobsQuery.data]);
-
-  /** 音视频合成恢复（IKIHPM，同 planAudioMixRecovery 同构）：进行中而卡不在画布上的任务
-   *  补视频型占位卡（保存一条含卡快照，刷新后不再补）、卡在画布上的任务按任务态续轮询、
-   *  来源线按冻结输入补画（已删输入卡不复活、不建悬空线）。轮询按规划返回的「任务 →
-   *  承接卡」配对挂到真实卡 id（IKILVG）：已持久化的失败草稿卡在原卡原地显示生成中与
-   *  终态回填，不改用任务号构造的虚拟卡 id。 */
-  useEffect(() => {
-    if (!doc || !audioVideoMuxJobsQuery.data || !currentId) return;
-    const projectId = currentId;
-    const timer = window.setTimeout(() => {
-      if (activeProjectRef.current !== projectId || hydratedDocRef.current !== doc) return;
-      const currentNodes = mediaNodesRef.current;
-      const currentEdges = edgesRef.current;
-      const recovered = planAudioVideoMuxRecovery(
-        currentNodes, currentEdges, audioVideoMuxJobsQuery.data!,
-        [...currentNodes, ...textNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current],
-      );
-      if (recovered.nodes !== currentNodes) {
-        const existingIds = new Set(currentNodes.map((node) => node.id));
-        const next = recovered.nodes.map((node) => existingIds.has(node.id) ? node : attachCallbacks(node));
-        mediaNodesRef.current = next;
-        setMediaNodes(next);
-        // 来源线先写入 ref 再落盘，保证补的卡与来源边同一笔快照
-        if (recovered.edges !== currentEdges) edgesRef.current = recovered.edges;
-        void flushCanvasSave(projectId).catch(() => {});
-      }
-      if (recovered.edges !== currentEdges) {
-        edgesRef.current = recovered.edges;
-        setEdges(recovered.edges);
-      }
-      recovered.polls.forEach(({ cardId, jobId }) => pollJobRef.current(cardId, jobId));
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, currentId, audioVideoMuxJobsQuery.data]);
 
   /** 连线端点级联删除（IKDLQF）：仅当节点真实离开画布时清理其连线，覆盖键盘删除/工具条删除/回滚等全部删除路径。
    *  不按「当前存在的节点」反查：挂载首批 effect 的节点列表尚在水合前，会把刚恢复的连线误清。 */
@@ -2317,6 +2120,13 @@ export default function CanvasPage() {
     return true;
   };
 
+  /** IKJJR1：新协议受控错误 reason 读取（B.8；普通 ApiError 无 reason 返回 null）。 */
+  const readRecoveryErrorReason = (e: unknown): string | null => {
+    if (!isApiError(e)) return null;
+    const reason = (e.data as { reason?: unknown } | null | undefined)?.reason;
+    return typeof reason === 'string' ? reason : null;
+  };
+
   /** 登记在途保存：期间自动保存的 800ms 防抖会因在途守卫跳过，flush 也会排在它后面——
    *  同一时刻只有一个 PUT，不会两次请求共用同一个 If-Match（IKFS5W）。
    *  只有仍是「最新那个」时才清空，避免先完成的一方把后登记的那次抹掉。 */
@@ -2327,6 +2137,56 @@ export default function CanvasPage() {
     };
     promise.then(release, release);
     return promise;
+  };
+
+  /** IKJKU8：恢复保存结果落定——成功回执或服务端明确拒绝（受控 4xx）即释放保留命令；
+   *  响应丢失（网络错误/5xx，结果不明确）保留，供完全相同重试幂等重放。重发在任何结果
+   *  下都安全：已保存则命中服务端幂等回读回放原回执，未保存则按原 If-Match 正常首次保存。 */
+  const settleRetainedRecoverySave = (projectId: string, commandId: string, failure?: unknown): void => {
+    const retained = retainedRecoverySaveRef.current;
+    if (!retained || retained.projectId !== projectId || retained.commandId !== commandId) return;
+    const definitiveRejection = failure !== undefined
+      && isApiError(failure) && failure.status >= 400 && failure.status < 500;
+    if (failure === undefined || definitiveRejection) retainedRecoverySaveRef.current = null;
+  };
+
+  /** IKJKU8：本次保存的恢复命令计划——完全相同的重试（签名与版本未变）复用保留命令的
+   *  身份与完整载荷；否则组新命令并保留至结果落定。
+   *  IKJLTY（R6）：同项目存在结果未明确的保留命令时，无论本次签名/版本是否已变，一律先按
+   *  原 commandId/完整载荷/原 If-Match 重放确认（服务端幂等先于版本检查：已落库命中回读
+   *  返回 replayed 回执与确认版本；未落库按原 If-Match 首存）——新保存意图在确认之后再处理，
+   *  不得因本地新编辑直接丢弃未决命令（丢失重放入口后新命令仍携旧版本必吃受控 412）。
+   *  服务端请求摘要含 expectedVersion，重放的 If-Match 必须是命令原版本（retained.version）。
+   *  ifMatch/sentSignature 供调用方对齐实际落盘内容：确认笔落盘的是原载荷而非本次新编辑。 */
+  const planRecoverySave = (
+    projectId: string,
+    signature: string,
+    payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean },
+  ): {
+    recoveryFields: { commandId: string; recoveryChanges: RecoveryChange[] } | null;
+    payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean };
+    ifMatch: number | null;
+    sentSignature: string;
+  } => {
+    const retained = retainedRecoverySaveRef.current;
+    if (retained != null && retained.projectId === projectId) {
+      return {
+        recoveryFields: { commandId: retained.commandId, recoveryChanges: retained.recoveryChanges },
+        payload: retained.payload,
+        ifMatch: retained.version,
+        sentSignature: retained.signature,
+      };
+    }
+    // 跨项目保留命令就地作废（既有口径）：新项目的保存不得冒用旧项目命令身份
+    if (retained != null) retainedRecoverySaveRef.current = null;
+    const recoveryFields = generationRuntimeRef.current?.composeSaveFields() ?? null;
+    if (recoveryFields != null) {
+      retainedRecoverySaveRef.current = {
+        projectId, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges,
+        payload, version: versionRef.current, signature,
+      };
+    }
+    return { recoveryFields, payload, ifMatch: versionRef.current, sentSignature: signature };
   };
 
   /** 画布变更后 800ms 防抖自动保存：PUT /api/canvases/:projectId（If-Match 乐观锁） */
@@ -2344,7 +2204,7 @@ export default function CanvasPage() {
       if (sig === lastSavedRef.current) return;
       // IKIN23：整文档待复核（清空 412 / 空覆盖 422）期间阻断一切整文档保存——无论待发
       // 节点数多少，本会话旧工作副本都不得覆盖另一会话刚保存的布局；保留本地编辑等待刷新复核
-      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current) return;
+      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return;
       if (import.meta.env.DEV) {
         console.info(`[canvas] 自动保存：${nodes.length} 个节点 / ${edges.length} 条连线（version=${versionRef.current}）`);
       }
@@ -2355,14 +2215,36 @@ export default function CanvasPage() {
       const confirmEmpty = shouldConfirmEmptyClear(nodes);
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
+      // IKJJR1：恢复保存（有显式待确认状态时）与新协议字段同笔提交；回执回填台账。
+      // IKJKU8：回执丢失后的完全相同重试复用保留命令原载荷与 If-Match 重发（幂等回放）。
+      // IKJLTY（R6）：有未决命令时本笔先为确认笔（原载荷/原 If-Match 重放）；sentSignature
+      //  记录实际落盘内容签名——确认笔成功后新编辑签名未对齐，saveEpoch 推进触发下轮再存。
+      const plan = planRecoverySave(
+        currentId, sig, { viewport, nodes, edges, confirmEmpty },
+      );
+      const { recoveryFields, payload: recoveryPayload } = plan;
       trackCanvasSave(
-        saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
+        (recoveryFields
+          ? putCanvasDocWithRecovery(
+            currentId,
+            recoveryPayload,
+            plan.ifMatch,
+            { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
+          )
+          : saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
+        ).then((saved) => {
+          if (recoveryFields) {
+            generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
+            settleRetainedRecoverySave(currentId, recoveryFields.commandId);
+          }
+          return saved;
+        })
           .then((saved) => {
             versionRef.current = saved.version;
-            // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）
-            registerConfirmedNonEmpty(nodes);
+            // IKIMQK / IKJLTY：成功落账三件套见 settleSavedCanvas——仅本次新编辑真正落盘
+            //  （非确认笔）才核销新增节点快照，实际落盘签名对齐驱动下轮防抖补存新内容
+            settleSavedCanvas(plan, sig, () => pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id)));
             setSaveBlocked(false);
-            pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
             setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
             setSaveEpoch(value => value + 1);
             setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
@@ -2370,7 +2252,37 @@ export default function CanvasPage() {
           .catch((e) => {
             // 释放签名，允许下次变更或「重试保存」用已对齐的 version 再写
             lastSavedRef.current = '';
-            const hadPendingAdds = pendingSnapshot.size > 0;
+            // IKJKU8：结果落定——明确拒绝（4xx）释放保留命令，响应丢失保留供重放
+            if (recoveryFields) settleRetainedRecoverySave(currentId, recoveryFields.commandId, e);
+            // IKJLTY：确认笔未携带本次新增节点——其失败不得回滚用户新编辑
+            const hadPendingAdds = pendingSnapshot.size > 0 && plan.sentSignature === sig;
+            // IKJJR1（验收 8）：新协议保存冲突（受控错误带 data.reason）保留本地内容并提示，
+            // 不采纳服务端版本重发旧全文；登记恢复冲突闸门，直至重新水合。
+            const recoveryReason = readRecoveryErrorReason(e);
+            if (recoveryFields && recoveryReason === 'recovery_item_conflict') {
+              // 项状态被他处推进：定向 resolve 读回服务端现状进台账（本地内容保留），下次保存重推导
+              void generationRuntimeRef.current?.reconcileConflictItems(currentId);
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              showToast('warn', '任务状态已被其他操作更新，已同步最新状态，请重试保存');
+              return;
+            }
+            if (recoveryFields && recoveryReason != null) {
+              recoverySaveConflictRef.current = true;
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              showToast('warn', '画布保存冲突，当前内容已保留，请刷新后复核');
+              return;
+            }
+            // 普通保存撞「受保护卡缺席未带变更」（428）：恢复台账可能滞后（水合后扫描未完），
+            // 触发对账刷新台账后引导重试，不阻断编辑。
+            if (!recoveryFields && readRecoveryErrorReason(e) === 'recovery_protocol_required') {
+              void generationRuntimeRef.current?.recover(currentId);
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              showToast('warn', '画布包含任务恢复保护内容，正在同步状态，请稍后重试保存');
+              return;
+            }
             const aligned = adoptCanvasConflictVersion(e);
             if (aligned) {
               // IKILUE：带 confirmEmpty 的清空保存被 412 拒绝——另一会话已改写画布，重发旧空文档
@@ -2460,6 +2372,8 @@ export default function CanvasPage() {
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
       const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
+      // IKJJR1（B.4）：复制剥离生命周期标记——复制卡不是原任务的第二个承接目标
+      delete (copy.data as Record<string, unknown>).generationRecovery;
       pendingNodeIdsRef.current.add(copy.id);
       historyRef.current?.pushAddNodes([copy.id]);
       setMediaNodes((prev) => [...prev, copy]);
@@ -2523,6 +2437,8 @@ export default function CanvasPage() {
         y: Math.round(anchor.y + (s.position.y - minY)),
       };
       const data = JSON.parse(JSON.stringify(s.data)) as Record<string, unknown>;
+      // IKJJR1（B.4）：粘贴副本剥离生命周期标记（同立即复制口径）
+      delete data.generationRecovery;
       if (s.kind === 'text') {
         // 会话性提示词来源字段不随副本（对齐 handleDuplicateNode 的字段清理）
         delete data.promptSource;
@@ -5289,8 +5205,6 @@ export default function CanvasPage() {
     // undo/redo 为 hook 内稳定 useCallback
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasHistory.undo, canvasHistory.redo]);
-  /** 生成节点轮询定时器（节点 id → timer） */
-  const jobTimersRef = useRef<Map<string, number>>(new Map<string, number>());
   /** 取消接口已确认成功的节点：忽略仍在飞行中的旧轮询响应。 */
   const locallyRemovedGenerationNodesRef = useRef<Set<string>>(new Set());
   /** 已本地收敛的提取节点：快照若仍停留在 generating，水合不得再开轮询。 */
@@ -5299,15 +5213,31 @@ export default function CanvasPage() {
    *  迟到旧任务响应（创建/重试后仍在飞行的旧 promise）直接丢弃，不覆盖当前任务状态或结果。
    *  用同步 ref 而非节点 data：patch jobId 经 React 提交有延迟，首个响应可能先于提交到达。 */
   const activeJobByNodeRef = useRef<Map<string, string>>(new Map());
+  /** 生成任务运行时（IKJJR1）：普通生成家族经其 submit/retry/cancel/remove/recover 统一处理。
+   *  宿主实现每渲染重建（闭包读最新画布状态），运行时本体只建一次并经转发宿主调用。 */
+  const generationRuntimeHostRef = useRef<GenerationRuntimeHost | null>(null);
+  const generationRuntimeRef = useRef<GenerationRuntime | null>(null);
+  /** 文档加载身份（A.8）：每次成功水合（doc 更替）推进；普通重渲染/节点移动/正常保存不变。 */
+  const docLoadEpochRef = useRef<object>({});
+  /** 图像工具家族受理等待（IKJJR2）：擦除/抠图的 createTask 与高清/扩图的 startTask 靠它
+   *  等待受理 settle——保持会话层失败反馈（IKIXK8「创建失败由编辑界面再次发送」边界）
+   *  与受理后建卡时机；受理后轮询/终态/重试/恢复归统一任务运行时。 */
+  const imageToolsAcceptanceRef = useRef(new Map<string, { resolve: (jobId: string) => void; reject: (e: unknown) => void }>());
+  const imageToolsTask = useMemo(() => createImageToolsTask((nodeId, settled) => {
+    const pending = imageToolsAcceptanceRef.current.get(nodeId);
+    if (!pending) return;
+    imageToolsAcceptanceRef.current.delete(nodeId);
+    if ('jobId' in settled) pending.resolve(settled.jobId);
+    else pending.reject(settled.error);
+    // ponytail: 连续两轮 409 归属冲突时 runtime 放弃重发、pending 不 settle（promise 泄漏，无 UI 影响）
+  }), []);
 
-  // 卸载时清理全部轮询
+  // 卸载时清理全部在途登记与运行时
   useEffect(() => {
-    const timers = jobTimersRef.current;
     const activeJobs = activeJobByNodeRef.current;
     return () => {
-      timers.forEach((t) => window.clearTimeout(t));
-      timers.clear();
       activeJobs.clear();
+      generationRuntimeRef.current?.reset(); // IKJJR1：运行时轮询/台账/在途一并清理
     };
   }, []);
 
@@ -5531,7 +5461,6 @@ export default function CanvasPage() {
     const removeWithPendingDelete = () => {
       pendingDeleteJobNodesRef.current.delete(nodeId);
       locallyRemovedGenerationNodesRef.current.add(nodeId);
-      stopJobPolling(nodeId, jobTimersRef.current);
       if (isAudioMixNodeId(nodeId)) {
         removeAudioMixCardNow(nodeId);
         return;
@@ -5540,14 +5469,17 @@ export default function CanvasPage() {
     };
     if (((node.data ?? {}) as Record<string, unknown>).sceneSplit != null) {
       // 场景切分占位卡分流（IKH8BR 建卡/失败，IKH8C1 完成扇出）：按任务类型收敛终态。
+      // IKJJR5：新协议任务（运行时在途且有 submission 关联）的成功扇出归运行时（规范
+      // segment:<n> node_id + 网格排列 + 原子保存）；此分支仅承接历史兼容任务（无关联，
+      // 旧随机 id 段卡口径不变）。
       if (detail.status === 'succeeded') {
         // 停轮询后扇出：移除占位卡、按返回顺序建 N 张段卡拉来源连线（1 段不特判）
-        stopJobPolling(nodeId, jobTimersRef.current);
-        fanOutSceneSplitSegments(nodeId, jobId, detail);
+        if (generationRuntimeRef.current?.statusOf(nodeId)?.submissionId == null) {
+          fanOutSceneSplitSegments(nodeId, jobId, detail);
+        }
         return 'terminal';
       }
       if (detail.status === 'failed') {
-        stopJobPolling(nodeId, jobTimersRef.current);
         patchMediaNode(nodeId, {
           genStatus: 'failed',
           // 失败文案走场景切分家族映射（1046 兜底「场景切分失败，请重试」）
@@ -5569,7 +5501,6 @@ export default function CanvasPage() {
           | SmartMattingIdentity
           | undefined;
         const transparent = mattingIdentity?.lastInput?.format === 'WEBM';
-        stopJobPolling(nodeId, jobTimersRef.current);
         rememberGeneratedAsset(detail.asset, 'video');
         patchMediaNode(nodeId, {
           genStatus: undefined,
@@ -5587,7 +5518,6 @@ export default function CanvasPage() {
         return 'terminal';
       }
       if (detail.status === 'failed') {
-        stopJobPolling(nodeId, jobTimersRef.current);
         patchMediaNode(nodeId, {
           genStatus: 'failed',
           // 失败文案走智能抠像家族映射（1050 兜底「智能抠像失败，请重试」）
@@ -5603,7 +5533,6 @@ export default function CanvasPage() {
         typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
       );
       if (extractPatch) {
-        stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
         if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
         patchMediaNode(nodeId, extractPatch);
@@ -5618,7 +5547,6 @@ export default function CanvasPage() {
         typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
       );
       if (trimPatch) {
-        stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
         if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
         patchMediaNode(nodeId, trimPatch);
@@ -5638,7 +5566,6 @@ export default function CanvasPage() {
             showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
           }
         }
-        stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
         if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
         patchMediaNode(nodeId, { ...mixPatch, audioMixCancelPending: undefined });
@@ -5648,16 +5575,13 @@ export default function CanvasPage() {
     if (isAudioSpeedNodeId(nodeId)) {
       // 调速占位卡终态收敛（IKHW5S）：成功原地补丁调速成品卡（src/assetId/duration，
       // 时长以火山返回为权威值，命名保留占位名不抢选中），失败转失败态（audioSpeed
-      // 身份卡可按 lastInput 原参数重试）
+      // 身份卡可按 lastInput 原参数重试——IKJJR3 起归运行时冻结输入重发）
       const speedPatch = audioSpeedTerminalPatch(
         detail,
         typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
       );
       if (speedPatch) {
-        stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
-        const retry = audioSpeedRetriesRef.current.get(`${currentId}:${nodeId}`);
-        if (retry) retry.patch = { ...retry.patch, ...speedPatch };
         patchMediaNode(nodeId, speedPatch);
         return 'terminal';
       }
@@ -5665,23 +5589,24 @@ export default function CanvasPage() {
     // 人声背景分离占位卡（IKHA2W 建、IKHA30 收敛）：succeeded 移除占位卡按 tracks 扇出
     // 轨卡（一对多骨架首例，见 fanOutVocalSplitTracks）；failed 落失败态 + 可读文案（重试按
     // lastInput 原样重发）；cancelled 落已取消。
+    // IKJJR5：新协议任务（运行时在途且有 submission 关联）的轨卡扇出归运行时（规范
+    // track:<type> node_id + 纵向轨列 + 原子保存）；此分支仅承接历史兼容任务。
     if (isVocalSplitNodeId(nodeId)) {
       if (detail.status === 'succeeded') {
-        stopJobPolling(nodeId, jobTimersRef.current);
-        settledExtractNodesRef.current.add(nodeId);
-        fanOutVocalSplitTracks(nodeId, detail);
+        if (generationRuntimeRef.current?.statusOf(nodeId)?.submissionId == null) {
+          settledExtractNodesRef.current.add(nodeId);
+          fanOutVocalSplitTracks(nodeId, detail);
+        }
         return 'terminal';
       }
       const vocalPatch = vocalSplitTerminalPatch(detail);
       if (vocalPatch) {
-        stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
         patchMediaNode(nodeId, vocalPatch);
         return 'terminal';
       }
     }
     if (detail.status === 'succeeded') {
-      stopJobPolling(nodeId, jobTimersRef.current);
       const originalType = node.data?.mediaType;
       const assetType = detail.asset?.type;
       /** 插帧草稿卡（IKHLKX）：本品成功即身份结束——清除 frameInterpolation 身份（选中进入
@@ -5745,7 +5670,6 @@ export default function CanvasPage() {
       return 'terminal';
     }
     if (detail.status === 'failed') {
-      stopJobPolling(nodeId, jobTimersRef.current);
       if (pendingDeleteJobNodesRef.current.has(nodeId)) {
         removeWithPendingDelete();
         return 'terminal';
@@ -5787,7 +5711,6 @@ export default function CanvasPage() {
       return 'processing';
     }
     if (detail.status === 'cancelled') {
-      stopJobPolling(nodeId, jobTimersRef.current);
       settleCancelledNode(nodeId);
       return 'terminal';
     }
@@ -5807,11 +5730,7 @@ export default function CanvasPage() {
         removeAudioMixCardNow(nodeId);
         return;
       }
-      removeCancelledGenerationNode(
-        nodeId,
-        jobTimersRef.current,
-        (id) => setMediaNodes((prev) => prev.filter((n) => n.id !== id)),
-      );
+      setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
       return;
     }
     const action = cancelledTerminalAction(node);
@@ -5830,56 +5749,89 @@ export default function CanvasPage() {
       return;
     }
     locallyRemovedGenerationNodesRef.current.add(nodeId);
-    removeCancelledGenerationNode(
-      nodeId,
-      jobTimersRef.current,
-      (id) => setMediaNodes((prev) => prev.filter((n) => n.id !== id)),
-    );
+    setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
   };
 
-  /** 轮询函数引用（供水合恢复调用，避免声明顺序依赖） */
-  const pollJobRef = useRef<(nodeId: string, jobId: number | string) => void>(() => {});
-  /** 插帧关页恢复函数引用（IKHSFF，同 pollJobRef 模式：水合 effect 声明在前） */
+  /** 插帧关页恢复函数引用（IKHSFF，水合 effect 声明在前） */
   const recoverFrameInterpolationRef = useRef<(nodeId: string, savedJobId?: unknown) => void>(() => {});
 
-  /** 轮询任务状态直至终态：succeeded 挂载产物 / failed 展示错误 / cancelled 收敛。
-   *  启动即登记本任务为节点活跃任务（IKDMQV）：后启动的轮询覆盖登记，
-   *  旧任务迟到的飞行中响应因登记不匹配被丢弃，不得覆盖当前任务。 */
-  const pollJob = (nodeId: string, jobId: number | string) => {
-    const existing = jobTimersRef.current.get(nodeId);
-    if (existing) window.clearTimeout(existing);
-    activeJobByNodeRef.current.set(nodeId, String(jobId));
-    const tick = () => {
-      fetchJobStatus(jobId)
-        .then((detail) => {
-          if (!mediaNodesRef.current.find((n) => n.id === nodeId)) return; // 节点已删除
-          if (activeJobByNodeRef.current.get(nodeId) !== String(jobId)) return; // 迟到旧任务响应——节点已承接新任务，丢弃且不续链
-          if (locallyRemovedGenerationNodesRef.current.has(nodeId)) {
-            jobTimersRef.current.delete(nodeId);
-            return;
+  /** IKJJR7：页面级浅层轮询（pollJob + jobTimersRef 定时器链）已删除——16+ 家族全部
+   *  经 GenerationTaskDefinition 接入统一运行时（runtime 内部调度轮询/归属检查/终态收敛），
+   *  claims 覆盖全部「生成中 + jobId」卡形态；历史兼容任务由运行时按无 submission 关联
+   *  口径追踪（不写 marker/不确认）。 */
+
+  /** ═══ IKJJR6 成片/重生样片迁入统一任务运行时：共享提交助手 ═══
+   *  两入口错误收敛同口径（IKIZQE/IKIZQG 原链路语义保持）：服务端已回答（信封错误）→
+   *  撤占位卡，1014 置「状态核对中」禁点，其余 toast + 删报价 entry 触发重报价；
+   *  传输结果不明（408/网络）→ 同意图（同 submission_id，运行时提交窗口）原样重发一次
+   *  ——服务端重放首次结果（只建一个 job、只扣一次钱）；仍不明 → 撤卡 + 核对中禁点
+   *  （刷新后以报价端点恢复一致状态；重生样片另经恢复扫描对账补卡）。
+   *  提交/受理/轮询/终态的归属检查、幂等键（submission_id）与台账在运行时。 */
+  const submitStoryboardTask = (
+    payload: StoryboardPayload,
+    target: { targetNodeId: string; seedTarget: RecoverySeedTarget },
+    ui: {
+      removePlaceholder: () => void;
+      markUnknown: () => void;
+      refreshQuote: () => void;
+      unknownToast: string;
+      /** 本次意图失败收敛（受理前置失败，含将重发）：释放页面同步提交窗口 */
+      onFailure: () => void;
+    },
+  ): boolean => {
+    const runtime = generationRuntimeRef.current;
+    if (!runtime) return false;
+    const dispatch = (retryUnknown: boolean): boolean => runtime.submit(
+      storyboardTask,
+      {
+        payload,
+        target: {
+          targetNodeId: target.targetNodeId,
+          seedTarget: target.seedTarget,
+          seedSources: [],
+          expectedBindingRevision: runtime.bindingRevisionOf(target.targetNodeId),
+        },
+      },
+      {
+        onCreateFailure: (e: unknown): boolean => {
+          ui.onFailure();
+          if (isApiError(e) && e.status !== 408 && e.status !== 0) {
+            // 服务端已回答（信封错误）：占位卡撤回，按钮状态交还报价/截止推导
+            ui.removePlaceholder();
+            if (Number(e.code) === 1014) {
+              // 上次提交结果不明、核对锁定期间——保持禁点（状态核对中）
+              ui.markUnknown();
+              showToast('warn', e.message);
+              return true;
+            }
+            showToast('error', e.message);
+            ui.refreshQuote();
+            return true;
           }
-          const outcome = applyJobTerminal(nodeId, jobId, detail);
-          if (outcome === 'terminal') return;
-          patchMediaNode(nodeId, { progress: detail.progress });
-          jobTimersRef.current.set(nodeId, window.setTimeout(tick, 2500));
-        })
-        .catch((e) => {
-          console.warn('任务轮询失败，稍后重试:', e);
-          jobTimersRef.current.set(nodeId, window.setTimeout(tick, 5000));
-        });
-    };
-    tick();
+          if (retryUnknown) {
+            // 传输结果不明（408 超时/网络失败）：同意图原样重发一次（受理/失败各自收敛，
+            // 不再递归重试）
+            window.setTimeout(() => dispatch(false), 0);
+            return true;
+          }
+          // 仍不明：占位卡撤回（无可核实任务），入口「状态核对中」禁点
+          ui.removePlaceholder();
+          ui.markUnknown();
+          showToast('warn', ui.unknownToast);
+          return true;
+        },
+      },
+    );
+    return dispatch(true);
   };
 
-  /** ═══ IKIZQE 成片（finalize）提交链路 ═══
+  /** ═══ IKIZQE 成片（finalize）提交链路（IKJJR6 迁入统一任务运行时） ═══
    *  唯一入口 = 样片卡标题行「生成 1080P 成片」：报价就绪（服务端门——空报价双 null 即
    *  禁用）+ 截止有效才可点；点击直接提交无二次确认。提交即在样片卡右侧 +60px 建关联
-   *  成片占位卡（videoStage=final + sourceSampleJobId 两卡关系），受理后回填 jobId 走
-   *  既有轮询（final 阶段投影由 applyJobTerminal 回填）。
-   *  并发/重复防线：inflight ref 同步挡住双击与两页并发（服务端来源唯一约束 1057 兜底）。
-   *  错误收敛（silent 传输、本处统一提示一次）：1056 变价 → 重报价后再由用户点击；
-   *  1057/1058 → 重报价折空报价禁用；1014 → 「状态核对中」禁点；传输结果不明（408/网络）
-   *  → 同幂等键原样重发一次（服务端重放首次结果，不双扣），仍不明 → 状态核对中禁点。 */
+   *  成片占位卡（videoStage=final + sourceSampleJobId 两卡关系），runtime.submit 受理后
+   *  回填 jobId 并接管轮询/终态（final 阶段投影由 applyJobTerminal 回填）。成片端点契约
+   *  不收 canvas_binding——按历史兼容任务追踪（水合 jobId 续轮询）。
+   *  并发/重复防线：inflight ref 同步挡住双击与两页并发（服务端来源唯一约束 1057 兜底）。 */
   const handleFinalizeSample = (sampleNodeId: string): boolean => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法生成成片');
@@ -5936,22 +5888,10 @@ export default function CanvasPage() {
     setMediaNodes(mediaNodesRef.current);
     if (currentId) void flushCanvasSave(currentId).catch(() => {});
 
-    const scope = `finalize:${sampleJobId}`;
-    const signature = JSON.stringify({ expected_credits: quote.credits, quote_revision: quote.revision });
-    /** 一次用户意图一把（submitIntentKeys 台账）：响应丢失原样重发复用同键 → 服务端重放 */
-    const idempotencyKey = jobSubmitKeysRef.current.keyFor(scope, signature);
-    const send = () => finalizeVideoJob(
-      currentId,
-      sampleJobId,
-      { expected_credits: quote.credits, quote_revision: quote.revision },
-      idempotencyKey,
-      { silent: true },
-    );
     const clearSubmitting = () => {
       finalizeInflightRef.current.delete(sampleNodeId);
     };
     const removePlaceholder = () => {
-      stopJobPolling(finalNodeId, jobTimersRef.current);
       mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== finalNodeId);
       setMediaNodes(mediaNodesRef.current);
       if (currentId) void flushCanvasSave(currentId).catch(() => {});
@@ -5968,54 +5908,49 @@ export default function CanvasPage() {
         return next;
       });
     };
-    send()
-      .then((created) => {
-        // 任务已受理：这次意图到此为止，之后要再提交需另起一把钥匙
-        jobSubmitKeysRef.current.settle(scope);
-        finalizeAttemptedJobIdsRef.current.add(sampleJobId);
-        clearSubmitting();
-        if (!mediaNodesRef.current.some((n) => n.id === finalNodeId)) return; // 卡已被删：不复活
-        patchMediaNode(finalNodeId, { jobId: created.generation_job_id });
-        pollJob(finalNodeId, created.generation_job_id);
-        if (currentId) void flushCanvasSave(currentId).catch(() => {});
-        showToast('success', `已提交成片生成，预计消耗 ${quote.credits} 积分`);
-      })
-      .catch(async (e: unknown) => {
-        clearSubmitting();
-        if (isApiError(e) && e.status !== 408 && e.status !== 0) {
-          // 服务端已回答（信封错误）：占位卡撤回，按钮状态交还报价/截止推导
-          removePlaceholder();
-          if (Number(e.code) === 1014) {
-            // 上次提交结果不明、核对锁定期间——保持禁点（状态核对中）
-            markUnknown();
-            showToast('warn', e.message);
-            return;
-          }
-          showToast('error', e.message);
-          refreshQuote();
-          return;
-        }
-        // 传输结果不明（408 超时 / 网络失败）：同幂等键原样重发一次——服务端重放首次
-        // 结果（只建一个 job、只扣一次钱）；重发受理/失败各自收敛，不再递归重试。
-        try {
-          const created = await send();
-          jobSubmitKeysRef.current.settle(scope);
+    const dispatched = submitStoryboardTask(
+      {
+        kind: 'finalize',
+        sampleJobId,
+        expectedCredits: quote.credits,
+        quoteRevision: quote.revision,
+        // 受理成功收敛（runtime 在 create resolve 内回调，先于 jobId 回填）：
+        // 登记本会话已受理 + 受理后立即落盘 jobId（宏任务排在 patch 之后）+ 成功提示
+        onAccepted: () => {
           finalizeAttemptedJobIdsRef.current.add(sampleJobId);
-          if (mediaNodesRef.current.some((n) => n.id === finalNodeId)) {
-            patchMediaNode(finalNodeId, { jobId: created.generation_job_id });
-            pollJob(finalNodeId, created.generation_job_id);
+          clearSubmitting();
+          window.setTimeout(() => {
             if (currentId) void flushCanvasSave(currentId).catch(() => {});
-          }
+          }, 0);
           showToast('success', `已提交成片生成，预计消耗 ${quote.credits} 积分`);
-        } catch {
-          // 仍不明：占位卡撤回（无可核实任务），样片按钮「状态核对中」禁点——刷新后以
-          // 报价端点（已尝试 → 空报价禁用）恢复与服务端一致的状态。
-          removePlaceholder();
-          markUnknown();
-          showToast('warn', '无法确认成片任务是否已提交，状态核对中，请勿重复提交');
-        }
-      });
-    return true;
+        },
+      },
+      {
+        targetNodeId: finalNodeId,
+        seedTarget: {
+          role: 'result-placeholder',
+          x: Math.round(sample.position.x + box.width + 60),
+          y: Math.round(sample.position.y),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          name: '成片生成中',
+        },
+      },
+      {
+        removePlaceholder,
+        markUnknown,
+        refreshQuote,
+        unknownToast: '无法确认成片任务是否已提交，状态核对中，请勿重复提交',
+        onFailure: clearSubmitting,
+      },
+    );
+    if (!dispatched) {
+      // 运行时未发出（未就绪/防重入）：撤占位卡并释放提交窗口，状态交还报价推导
+      clearSubmitting();
+      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== finalNodeId);
+      setMediaNodes(mediaNodesRef.current);
+    }
+    return dispatched;
   };
 
   /** IKIZQE：成片报价获取——成功样片卡（无成片卡在场、截止有效、未受理过）进 CTA 前先问价。
@@ -6072,16 +6007,15 @@ export default function CanvasPage() {
     return null;
   };
 
-  /** ═══ IKIZQG 重新生成样片（regenerate-sample）提交链路 ═══
+  /** ═══ IKIZQG 重新生成样片（regenerate-sample）提交链路（IKJJR6 迁入统一任务运行时） ═══
    *  入口：成片失败卡失败区（IKJ7UI 起改形为同款「重试」按钮）。报价就绪（服务端门
    *  ——空报价双 null 即禁用）才可点；点击直接提交，服务端从原样片**冻结输入**派生新
    *  任务——**创建新卡不覆盖旧结果**（旧样片/失败成片/费用记录只读不写）。提交即在入口
    *  卡正下方 +60px 建样片占位卡（videoStage=sample；避开 finalize 在样片右侧 +60px 的
-   *  落位），受理后回填 jobId 走既有轮询（sample 阶段投影由 applyJobTerminal 回填，新
-   *  样片有自己的截止与成片入口）。并发/重复防线：inflight ref 按**样片任务 id**归并。
-   *  错误收敛（口径同 finalize）：1056 变价 → 重报价后再由用户点击（新报价 = 新签名换新
-   *  幂等键，不撞同键变价 100409）；1014 → 「状态核对中」禁点；传输结果不明（408/网络）
-   *  → 同幂等键原样重发一次（服务端重放首次结果），仍不明 → 状态核对中。 */
+   *  落位），runtime.submit 以新占位卡为承接目标携 canvas_binding 受理（Idempotency-Key =
+   *  submission_id），受理后回填 jobId 并接管轮询/终态（sample 阶段投影由 applyJobTerminal
+   *  回填，新样片有自己的截止与成片入口）；受理回执丢失经恢复扫描对账补卡。
+   *  并发/重复防线：inflight ref 按**样片任务 id** 归并。 */
   const handleRegenerateSample = (entryNodeId: string): boolean => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法重新生成样片');
@@ -6126,23 +6060,10 @@ export default function CanvasPage() {
     setMediaNodes(mediaNodesRef.current);
     if (currentId) void flushCanvasSave(currentId).catch(() => {});
 
-    const scope = `regen:${sampleJobId}`;
-    const signature = JSON.stringify({ expected_credits: quote.credits, quote_revision: quote.revision });
-    /** 一次用户意图一把（submitIntentKeys 台账）：响应丢失原样重发复用同键 → 服务端重放；
-     *  变价重报价后签名变化自然换新键（不撞同键变价 100409）。 */
-    const idempotencyKey = jobSubmitKeysRef.current.keyFor(scope, signature);
-    const send = () => regenerateSampleJob(
-      currentId,
-      sampleJobId,
-      { expected_credits: quote.credits, quote_revision: quote.revision },
-      idempotencyKey,
-      { silent: true },
-    );
     const clearSubmitting = () => {
       sampleRegenInflightRef.current.delete(sampleJobId);
     };
     const removePlaceholder = () => {
-      stopJobPolling(regenNodeId, jobTimersRef.current);
       mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== regenNodeId);
       setMediaNodes(mediaNodesRef.current);
       if (currentId) void flushCanvasSave(currentId).catch(() => {});
@@ -6150,7 +6071,8 @@ export default function CanvasPage() {
     const markUnknown = () => {
       setSampleRegenUnknownSamples((prev) => new Set(prev).add(sampleJobId));
     };
-    /** 报价重取：删 entry 触发报价 effect 重查（1056 变价 → 新价可见后再由用户点击） */
+    /** 报价重取：删 entry 触发报价 effect 重查（1056 变价 → 新价可见后再由用户点击；
+     *  新报价 = 新签名换新 submission_id，不撞同键变价 100409） */
     const refreshQuote = () => {
       setSampleRegenQuotes((prev) => {
         if (!(sampleJobId in prev)) return prev;
@@ -6159,52 +6081,49 @@ export default function CanvasPage() {
         return next;
       });
     };
-    send()
-      .then((created) => {
-        jobSubmitKeysRef.current.settle(scope);
-        sampleRegenAttemptedJobIdsRef.current.add(sampleJobId);
-        clearSubmitting();
-        if (!mediaNodesRef.current.some((n) => n.id === regenNodeId)) return; // 卡已被删：不复活
-        patchMediaNode(regenNodeId, { jobId: created.generation_job_id });
-        pollJob(regenNodeId, created.generation_job_id);
-        if (currentId) void flushCanvasSave(currentId).catch(() => {});
-        showToast('success', `已提交样片重新生成，预计消耗 ${quote.credits} 积分；已创建新卡，旧结果保留`);
-      })
-      .catch(async (e: unknown) => {
-        clearSubmitting();
-        if (isApiError(e) && e.status !== 408 && e.status !== 0) {
-          // 服务端已回答（信封错误）：占位卡撤回，入口状态交还报价推导
-          removePlaceholder();
-          if (Number(e.code) === 1014) {
-            markUnknown();
-            showToast('warn', e.message);
-            return;
-          }
-          showToast('error', e.message);
-          refreshQuote();
-          return;
-        }
-        // 传输结果不明（408 超时 / 网络失败）：同幂等键原样重发一次——服务端重放首次结果
-        //（只建一个 job、只扣一次钱）；重发受理/失败各自收敛，不再递归重试。
-        try {
-          const created = await send();
-          jobSubmitKeysRef.current.settle(scope);
+    const dispatched = submitStoryboardTask(
+      {
+        kind: 'regenerate-sample',
+        sampleJobId,
+        expectedCredits: quote.credits,
+        quoteRevision: quote.revision,
+        // 受理成功收敛（runtime 在 create resolve 内回调，先于 jobId 回填）：
+        // 登记本会话已受理 + 受理后立即落盘 jobId（宏任务排在 patch 之后）+ 成功提示
+        onAccepted: () => {
           sampleRegenAttemptedJobIdsRef.current.add(sampleJobId);
-          if (mediaNodesRef.current.some((n) => n.id === regenNodeId)) {
-            patchMediaNode(regenNodeId, { jobId: created.generation_job_id });
-            pollJob(regenNodeId, created.generation_job_id);
+          clearSubmitting();
+          window.setTimeout(() => {
             if (currentId) void flushCanvasSave(currentId).catch(() => {});
-          }
+          }, 0);
           showToast('success', `已提交样片重新生成，预计消耗 ${quote.credits} 积分；已创建新卡，旧结果保留`);
-        } catch {
-          // 仍不明：占位卡撤回（无可核实任务），入口「状态核对中」禁点——刷新后以报价
-          // 重查恢复与服务端一致的状态。
-          removePlaceholder();
-          markUnknown();
-          showToast('warn', '无法确认重新生成任务是否已提交，状态核对中，请勿重复提交');
-        }
-      });
-    return true;
+        },
+      },
+      {
+        targetNodeId: regenNodeId,
+        seedTarget: {
+          role: 'result-placeholder',
+          x: Math.round(origin.position.x),
+          y: Math.round(origin.position.y + box.height + 60),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          name: '样片生成中',
+        },
+      },
+      {
+        removePlaceholder,
+        markUnknown,
+        refreshQuote,
+        unknownToast: '无法确认重新生成任务是否已提交，状态核对中，请勿重复提交',
+        onFailure: clearSubmitting,
+      },
+    );
+    if (!dispatched) {
+      // 运行时未发出（未就绪/防重入）：撤占位卡并释放提交窗口，状态交还报价推导
+      clearSubmitting();
+      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== regenNodeId);
+      setMediaNodes(mediaNodesRef.current);
+    }
+    return dispatched;
   };
 
   /** IKIZQG：重新生成报价获取——入口卡（成片失败卡，IKJ7UI 起）进 CTA 前先问价（按
@@ -6324,6 +6243,18 @@ export default function CanvasPage() {
       });
     }
     const nodeId = inPlaceNodeId ?? newNodeId('media-gen');
+    // IKIZQG：两阶段卡重新编辑发送的新建结果卡落在原卡正下方 +60px（旧结果与来源关系保留）
+    const placeholderPosition = targetIsTwoStage && targetNode
+      ? (() => {
+        const box = mediaContentBox({
+          mediaType: 'video',
+          width: typeof targetData.width === 'number' ? targetData.width : undefined,
+          height: typeof targetData.height === 'number' ? targetData.height : undefined,
+          ratio: typeof targetData.targetRatio === 'string' ? targetData.targetRatio : undefined,
+        });
+        return { x: Math.round(targetNode.position.x), y: Math.round(targetNode.position.y + box.height + 60) };
+      })()
+      : spawnPosition();
     if (!inPlaceNodeId) {
     const referenceNodes: Node[] = [];
     for (const ref of initialDraft?.references ?? []) {
@@ -6351,18 +6282,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
-      // IKIZQG：两阶段卡重新编辑发送的新建结果卡落在原卡正下方 +60px（旧结果与来源关系保留）
-      position: targetIsTwoStage && targetNode
-        ? (() => {
-          const box = mediaContentBox({
-            mediaType: 'video',
-            width: typeof targetData.width === 'number' ? targetData.width : undefined,
-            height: typeof targetData.height === 'number' ? targetData.height : undefined,
-            ratio: typeof targetData.targetRatio === 'string' ? targetData.targetRatio : undefined,
-          });
-          return { x: Math.round(targetNode.position.x), y: Math.round(targetNode.position.y + box.height + 60) };
-        })()
-        : spawnPosition(),
+      position: placeholderPosition,
       data: {
         genStatus: 'generating',
         progress: 0,
@@ -6397,9 +6317,8 @@ export default function CanvasPage() {
     setMediaNodes((prev) => [...prev, ...referenceNodes, node]);
     }
     // 提交立即接管节点，防止 create 返回前旧取消/轮询响应解除本次生成状态。
-    const activeAtCreate = newNodeId('pending-generation');
-    activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-    stopJobPolling(nodeId, jobTimersRef.current);
+    // IKJJR1：普通生成家族的创建/受理/轮询/终态/保存确认统一交生成任务运行时
+    //（含 canvas_binding 受理、submission_id 幂等键与恢复台账）。
     const jobRefs = videoRefs?.references;
     const sendPrompt = promptDoc ? flattenPromptDocForSend(promptDoc) : parameters.prompt;
     const sendAttachments = targetNodeId ? textAttachmentsForSend(targetNodeId) : undefined;
@@ -6436,72 +6355,109 @@ export default function CanvasPage() {
           ? { expected_credits: initialDraft.expectedCredits, quote_revision: initialDraft.quoteRevision }
           : {}),
       };
-      /** 幂等键：本次提交的**当前速度**取一把，双击/401 续跑/失败后原样重发都拿到它；
-       *  载荷一改（用户改了参数再点）就是新意图，换新钥匙——复用会撞服务端同键异载荷 409。 */
-      const submitScope = targetNodeId ?? '';
-      const submitSignature = JSON.stringify(payload);
-      createGenerationJob(
-        currentId,
-        payload,
-        jobSubmitKeysRef.current.keyFor(submitScope, submitSignature),
-      )
-        .then((created) => {
-          // 任务已受理：这次意图到此为止，之后再提交要另起一把钥匙（否则重放旧任务，拿不到新作品）
-          jobSubmitKeysRef.current.settle(submitScope);
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.generation_job_id });
-          pollJob(nodeId, created.generation_job_id);
-        })
-        .catch((e) => {
-          /** 原位目标回退：草稿回待生成保留参数（IKDMQQ/IKDMQS/IKDMQT）；
-           *  成品卡恢复成品态保留旧素材与最新编辑（IKDMQU Q5，同取消恢复） */
-          const rollbackInPlace = () => {
-            const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-            if (!node) return;
-            if (((node.data ?? {}) as Record<string, unknown>).draft === true) {
-              patchMediaNode(nodeId, {
-                genStatus: 'draft',
-                progress: undefined,
-                // 已自定义名称的草稿回退时保留名称（IKFA8X）
-                ...(hasCustomName(node) ? {} : { fileName: draftFileNameOf(type) }),
-              });
-            } else {
-              patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
-            }
+      /** IKJJR1 恢复种子（B.3）：发送时目标/来源快照。目标 = 结果承接卡（原位卡或新建占位卡，
+       *  注意与业务字段 target_node_id（面板来源目标）区分）；草稿/既有素材角色由运行时先落盘再提交。 */
+      let seedTarget: RecoverySeedTarget;
+      if (inPlaceNode) {
+        const d = (inPlaceNode.data ?? {}) as Record<string, unknown>;
+        seedTarget = {
+          role: d.draft === true
+            ? 'draft'
+            : typeof d.assetId === 'string' && d.assetId.length > 0
+              ? 'existing-media'
+              : 'result-placeholder',
+          x: Math.round(inPlaceNode.position.x),
+          y: Math.round(inPlaceNode.position.y),
+          width: typeof d.width === 'number' && d.width > 0 ? d.width : 320,
+          height: typeof d.height === 'number' && d.height > 0 ? d.height : 320,
+          name: typeof d.fileName === 'string' ? d.fileName : '',
+        };
+      } else {
+        const box = mediaContentBox({
+          mediaType: type,
+          ratio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
+        });
+        seedTarget = {
+          role: 'result-placeholder',
+          x: placeholderPosition.x,
+          y: placeholderPosition.y,
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          name: type === 'video' ? (isSampleJob ? '样片生成中' : '视频生成中') : type === 'audio' ? '音频生成中' : '图片生成中',
+        };
+      }
+      const seedSources: RecoverySeedSource[] = edgesRef.current
+        .filter((edge) => edge.target === nodeId)
+        .map((edge) => mediaNodesRef.current.find((n) => n.id === edge.source))
+        .filter((n): n is Node => n != null)
+        .map((n) => {
+          const d = (n.data ?? {}) as Record<string, unknown>;
+          return {
+            node_id: n.id,
+            x: Math.round(n.position.x),
+            y: Math.round(n.position.y),
+            width: typeof d.width === 'number' && d.width > 0 ? d.width : 320,
+            height: typeof d.height === 'number' && d.height > 0 ? d.height : 320,
+            name: typeof d.fileName === 'string' ? d.fileName : '',
           };
-          const takenOver = () => activeJobByNodeRef.current.get(nodeId) !== activeAtCreate;
-          if (openRechargeForCreditsError(e)) {
-            if (takenOver()) return; // 已被其他提交接管：回退不得覆盖新任务状态
-            if (inPlaceNodeId) rollbackInPlace();
-            else {
+        });
+      const runtime = generationRuntimeRef.current;
+      if (!runtime) {
+        console.warn('[canvas] 生成任务运行时未就绪，提交被拒绝');
+        return false;
+      }
+      return runtime.submit(
+        normalGenerationTask,
+        {
+          payload,
+          target: {
+            targetNodeId: nodeId,
+            seedTarget,
+            seedSources,
+            expectedBindingRevision: runtime.bindingRevisionOf(nodeId),
+          },
+        },
+        {
+          onCreateFailure: (e: unknown) => {
+            /** 原位目标回退：草稿回待生成保留参数（IKDMQQ/IKDMQS/IKDMQT）；
+             *  成品卡恢复成品态保留旧素材与最新编辑（IKDMQU Q5，同取消恢复）。
+             *  归属核对（接管保护）由运行时 owns() 先行完成，此处不再重复判。 */
+            const rollbackInPlace = () => {
+              const rollbackNode = mediaNodesRef.current.find((n) => n.id === nodeId);
+              if (!rollbackNode) return;
+              if (((rollbackNode.data ?? {}) as Record<string, unknown>).draft === true) {
+                patchMediaNode(nodeId, {
+                  genStatus: 'draft',
+                  progress: undefined,
+                  // 已自定义名称的草稿回退时保留名称（IKFA8X）
+                  ...(hasCustomName(rollbackNode) ? {} : { fileName: draftFileNameOf(type) }),
+                });
+              } else {
+                patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
+              }
+            };
+            const removePlaceholder = () => {
               setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
               setEdges(prev => prev.filter(edge => edge.target !== nodeId));
-            }
-            return;
-          }
-          if (isApiError(e) && e.status === 401) {
-            if (!takenOver()) {
+            };
+            if (openRechargeForCreditsError(e)) {
               if (inPlaceNodeId) rollbackInPlace();
-              else {
-                setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
-                setEdges(prev => prev.filter(edge => edge.target !== nodeId));
-              }
+              else removePlaceholder();
+              return true;
             }
-            useAuthPromptStore.getState().addResume(() => {
-              startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft);
-            });
-            return;
-          }
-          if (takenOver()) return; // 已被接管：失败态不得覆盖新任务的执行状态
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '创建任务失败',
-            // 接纳侧 4xx 的失败码（IKJ795 比例约束等）落卡供一键修复识别——IKJFGQ 起优先
-            // 取信封 data.code 字符串码（撞号重排不失效），数值码兜底
-            errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
-          });
-        });
-      return true; // 创建请求已发出（IKFXZD 面板关闭判定点）；HTTP 层异步失败由上方 catch 收敛到卡片
+            if (isApiError(e) && e.status === 401) {
+              if (inPlaceNodeId) rollbackInPlace();
+              else removePlaceholder();
+              useAuthPromptStore.getState().addResume(() => {
+                startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft);
+              });
+              return true;
+            }
+            return false; // 通用失败：运行时落失败卡（errorText/errorCode 同原口径）
+          },
+        },
+      );
+      // 创建请求已发出（IKFXZD 面板关闭判定点）；HTTP 层异步失败由运行时收敛到卡片
     } catch (e: unknown) {
       // 同步异常兜底（如 crypto.randomUUID 在 HTTP 下不可用）
       patchMediaNode(nodeId, {
@@ -6513,10 +6469,75 @@ export default function CanvasPage() {
     }
   };
 
-  /** 高清任务继续原卡接管、pending token、失败落卡与轮询；输入已在发送时冻结。
-   *  面板发送使用静默传输，由运行时守卫有效反馈；失败卡重试保留 HTTP 默认提示。 */
+  /* ===== 图像工具家族运行时派发（IKJJR2）：擦除/抠图/扩图/高清统一经 runtime.submit ===== */
+
+  /** 承接卡已在画布（高清/扩图草稿）的恢复种子：目标/来源从画布现状快照（B.3 发送时事实）。 */
+  const imageToolTargetOfNode = (nodeId: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    if (!node) return null;
+    const host = generationRuntimeHostRef.current;
+    return {
+      targetNodeId: nodeId,
+      seedTarget: seedTargetOfNode(node as unknown as RuntimeNodeView),
+      seedSources: host ? seedSourcesOfNode(nodeId, host) : [],
+    };
+  };
+
+  /** 受理后才建卡（擦除/抠图）的恢复种子：目标 = 按源卡推导的占位几何（role=result-placeholder，
+   *  B.3 允许受理后建可见卡）；来源 = 源节点快照（画布连线受理后才建，不读边）。 */
+  const imageToolTargetBesideSource = (source: Node, fileName: string, targetNodeId: string) => {
+    const position = imageEnhanceDraftPosition(source);
+    const d = (source.data ?? {}) as Record<string, unknown>;
+    const width = typeof d.width === 'number' && d.width > 0 ? Math.round(d.width) : 320;
+    const height = typeof d.height === 'number' && d.height > 0 ? Math.round(d.height) : 320;
+    return {
+      targetNodeId,
+      seedTarget: { role: 'result-placeholder' as const, x: position.x, y: position.y, width, height, name: fileName },
+      seedSources: [{
+        node_id: source.id,
+        x: Math.round(source.position.x),
+        y: Math.round(source.position.y),
+        width,
+        height,
+        name: typeof d.fileName === 'string' ? d.fileName : '',
+      }],
+    };
+  };
+
+  /** 图像工具提交派发：受理 settle 才 resolve/reject（createTask/startTask 等待口径）；
+   *  提交/轮询/终态/台账/恢复归运行时；失败卡按卡在场差分（高清/扩图落失败卡、
+   *  擦除/抠图受理前无卡不落——与迁移前两族行为一致）。 */
+  const dispatchImageToolTask = (
+    payload: ImageToolsPayload,
+    target: { targetNodeId: string; seedTarget: RecoverySeedTarget; seedSources: RecoverySeedSource[] },
+  ): Promise<string> => {
+    const runtime = generationRuntimeRef.current;
+    if (!runtime) return Promise.reject(new Error('生成任务运行时未就绪'));
+    return new Promise<string>((resolve, reject) => {
+      imageToolsAcceptanceRef.current.set(target.targetNodeId, { resolve, reject });
+      const dispatched = runtime.submit(
+        imageToolsTask,
+        {
+          payload,
+          target: { ...target, expectedBindingRevision: runtime.bindingRevisionOf(target.targetNodeId) },
+        },
+        {
+          // 前置保存失败（_skipped）时 create 未发出、家族无 notify——这里补通知等待方
+          onCreateFailure: (e: unknown) => { reject(e); return false; },
+        },
+      );
+      if (!dispatched) {
+        imageToolsAcceptanceRef.current.delete(target.targetNodeId);
+        reject(new Error('任务提交中，请勿重复发送'));
+      }
+    });
+  };
+
+  /** 高清任务（IKJJR2 迁入运行时）：草稿卡由入口预建；lastParams（契约六键）随提交冻结写入卡，
+   *  失败卡重试经 runtime 按冻结输入原样重发创建端点。受理 settle 前会话不关——创建失败
+   *  由编辑界面再次发送（IKIXK8 边界）；失败卡/轮询/取消/删除/恢复归运行时。 */
   const startImageEnhanceJob = async (submission: ImageEnhanceSubmission, silent = false): Promise<void> => {
-    const { projectId, nodeId, payload: input, identity } = submission;
+    const { nodeId, payload: input, identity } = submission; // 项目由运行时从宿主取（与画布当前项目一致）
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const isDraftTarget = ((node?.data ?? {}) as Record<string, unknown>).draft === true;
     patchMediaNode(nodeId, {
@@ -6527,27 +6548,20 @@ export default function CanvasPage() {
       // 提交即写 lastParams（契约六键形态）：失败重试原样重发、重新编辑回填共用
       imageEnhance: { ...identity, lastParams: input },
     });
-    // 提交立即接管节点，防止 create 返回前旧取消/轮询响应解除本次生成状态（同 startGenerationJob）
-    const activeAtCreate = newNodeId('pending-generation');
-    activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-    stopJobPolling(nodeId, jobTimersRef.current);
+    const target = imageToolTargetOfNode(nodeId);
+    if (!target) throw new Error('高清目标卡不存在');
     try {
-      const created = await (silent ? createImageEnhancement(projectId, input, { silent: true }) : createImageEnhancement(projectId, input));
-      if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-      patchMediaNode(nodeId, { jobId: created.job_id });
-      pollJob(nodeId, created.job_id);
-    } catch (error: unknown) {
-      if (activeJobByNodeRef.current.get(nodeId) === activeAtCreate) {
-        patchMediaNode(nodeId, { genStatus: 'failed', errorText: isApiError(error) ? error.message : '创建任务失败' });
-      }
-      throw error;
+      await dispatchImageToolTask({ kind: 'imageEnhance', input }, target);
+    } catch (error) {
+      // silent=false（历史重试入口）保留 HTTP 提示口径；面板静默传输的失败只由运行时落失败卡
+      if (!silent || !isSilentAuthError(error)) throw error;
     }
   };
 
-  /** 创建智能扩图任务（IKGOR6）：扩图结果卡原地承接（草稿转生成中 / 失败卡重试重新生成，不新建卡）。
+  /** 创建智能扩图任务（IKGOR6）：扩图结果卡原地承接（草稿转生成中，不新建卡）。
    *  六键 input 已由发送侧组好并过契约 zod 校验（buildImageOutpaintInput）；lastParams 随提交
    *  立即写入节点（失败重试原样重发共用）。免费口径（规格）：不走余额拦截门。
-   *  失败保留结果卡并向提交方返回错误，由当次编辑会话或重试的 HTTP 提示能力反馈。 */
+   *  IKJJR2 迁入运行时：受理 settle 才返回（会话失败反馈保持），失败落卡/轮询/取消/删除/恢复归运行时。 */
   const startImageOutpaintJob = async (
     nodeId: string,
     input: ImageOutpaintInput,
@@ -6569,19 +6583,12 @@ export default function CanvasPage() {
       // 提交即写 lastParams（契约六键形态）：失败重试原样重发共用
       imageOutpaint: { ...identity, lastParams: input },
     });
-    // 提交立即接管节点，防止 create 返回前旧取消/轮询响应解除本次生成状态（同 startImageEnhanceJob）
-    const activeAtCreate = newNodeId('pending-generation');
-    activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-    stopJobPolling(nodeId, jobTimersRef.current);
+    const target = imageToolTargetOfNode(nodeId);
+    if (!target) throw new Error('扩图目标卡不存在');
     try {
-      const created = await createImageOutpaint(projectId, input, { silent: opts?.silent });
-      if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-      patchMediaNode(nodeId, { jobId: created.job_id });
-      pollJob(nodeId, created.job_id);
-    } catch (error: unknown) {
-      if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-      patchMediaNode(nodeId, { genStatus: 'failed', errorText: isApiError(error) ? error.message : '创建任务失败' });
-      throw error;
+      await dispatchImageToolTask({ kind: 'imageOutpaint', input }, target);
+    } catch (error) {
+      if (!opts?.silent || !isSilentAuthError(error)) throw error;
     }
   };
 
@@ -6620,31 +6627,26 @@ export default function CanvasPage() {
 
   /* ===== 擦除发送链路（IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
 
-  /** 擦除受理后的结果卡、来源边与轮询仍由画布宿主接管。 */
+  /** 擦除受理后的结果卡与来源边仍由画布宿主建立（建卡时机保持「受理后」）；在途锁、
+   *  jobId 回填与轮询已由统一任务运行时接管（IKJJR2）。 */
   const handoffImageEraseTask = async (
     submission: ImageEraseTaskSubmission,
     created: { job_id: string },
     skipSelect: boolean,
   ): Promise<void> => {
     const { source: node, payload: input } = submission;
-    const sourceNodeId = node.id;
-    const targetNodeId = input.target_node_id;
     const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
       fileName: '擦除',
-      nodeId: targetNodeId,
+      nodeId: input.target_node_id,
       skipSelect,
       data: {
         imageErase: { sourceAssetId: input.source_asset_id, lastInput: input },
         genStatus: 'generating',
         progress: 0,
+        jobId: created.job_id,
       },
     });
-    addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_ERASE_EDGE_ORIGIN });
-    // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEnhanceJob）
-    const activeAtCreate = newNodeId('pending-generation');
-    activeJobByNodeRef.current.set(draftId, activeAtCreate);
-    patchMediaNode(draftId, { jobId: created.job_id });
-    pollJob(draftId, created.job_id);
+    addCanvasEdge(node.id, draftId, undefined, { origin: IMAGE_ERASE_EDGE_ORIGIN });
   };
   toolHostsRef.current.erase = {
     getProjectId: () => currentId,
@@ -6652,87 +6654,107 @@ export default function CanvasPage() {
     newTargetId: () => newNodeId('media-draft'),
     encodeMask: rasterizeMaskToPngFile,
     uploadMask: (file, projectId) => uploadAssetFile(file, { projectId, assetSource: 'mask_erase', silent: true }),
-    createTask: ({ projectId, payload }) => createImageErase(projectId, payload, { silent: true }),
+    // IKJJR2：提交经统一运行时（canvas_binding + 受理台账 + 恢复）；受理 settle 才返回——
+    // 保持「创建失败由编辑界面再次发送」与受理后建卡（IKIXK8 边界）。
+    createTask: ({ source, payload }) => {
+      const target = imageToolTargetBesideSource(source, '擦除', payload.target_node_id);
+      return dispatchImageToolTask({ kind: 'imageErase', input: payload }, target).then((job_id) => ({ job_id }));
+    },
     handoff: handoffImageEraseTask,
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
 
-  /* ===== 去字幕发送链路（IKGZ83，镜像擦除 IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
+  /* ===== 去字幕发送链路（IKGZ83 建/来源线差异保留；IKJJR3 受理与后续生命周期归运行时） ===== */
 
-  /** 去字幕受理后的任务卡接线，专属会话反馈归运行时。 */
-  const handoffSubtitleEraseTask = async (
-    submission: SubtitleEraseTaskSubmission,
-    created: { job_id: string },
-    skipSelect: boolean,
-  ): Promise<void> => {
-    const { source: node, payload: input } = submission;
-    const sourceNodeId = node.id;
-    const targetNodeId = input.target_node_id;
-    const sourceData = node.data;
-    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-      fileName: '去字幕',
-      nodeId: targetNodeId,
-      skipSelect,
-      data: {
-        mediaType: 'video',
-        ...(typeof sourceData.width === 'number' ? { width: sourceData.width } : {}),
-        ...(typeof sourceData.height === 'number' ? { height: sourceData.height } : {}),
-        videoSubtitleErase: { sourceAssetId: input.source_asset_id, lastInput: input },
-        genStatus: 'generating',
-        progress: 0,
+  /** IKJJR3：视频处理家族提交共用段——建卡后由运行时注入 canvas_binding 发起受理，
+   *  轮询/归属检查/保存确认/恢复统一在运行时；target facts 为发送时快照。 */
+  const submitVideoToolTask = (
+    payload: VideoToolPayload,
+    targetNodeId: string,
+    options?: Parameters<GenerationRuntime['submit']>[2],
+  ): boolean => {
+    const runtime = generationRuntimeRef.current;
+    const host = generationRuntimeHostRef.current;
+    const node = mediaNodesRef.current.find((n) => n.id === targetNodeId);
+    if (!runtime || !host || !node) return false;
+    return runtime.submit(
+      videoToolsTask,
+      {
+        payload,
+        target: {
+          targetNodeId,
+          seedTarget: seedTargetOfNode(node as unknown as RuntimeNodeView),
+          seedSources: seedSourcesOfNode(targetNodeId, host),
+          expectedBindingRevision: runtime.bindingRevisionOf(targetNodeId),
+        },
       },
-    });
-    addCanvasEdge(sourceNodeId, draftId, undefined, { origin: VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN });
-    // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEraseJob）
-    const activeAtCreate = newNodeId('pending-generation');
-    activeJobByNodeRef.current.set(draftId, activeAtCreate);
-    patchMediaNode(draftId, { jobId: created.job_id });
-    pollJob(draftId, created.job_id);
+      options,
+    );
   };
+
   toolHostsRef.current.subtitleErase = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
     newTargetId: () => newNodeId('media-draft'),
-    createTask: ({ projectId, payload }) => createVideoSubtitleErase(projectId, payload, { silent: true }),
-    handoff: handoffSubtitleEraseTask,
+    // IKJJR3：先建结果卡（继承源宽高 + 身份冻结 lastInput）拉来源边，再交运行时受理。
+    // 建卡差异（位置/命名/身份/来源边 origin）与 IKGZ83 先例一致；受理失败落失败卡可重试。
+    startTask: (input: SubtitleEraseTaskSubmission, skipSelect: boolean): boolean => {
+      const { source: node, payload } = input;
+      const targetNodeId = payload.target_node_id;
+      const sourceData = node.data;
+      createImageDraftCard(imageEnhanceDraftPosition(node), {
+        fileName: '去字幕',
+        nodeId: targetNodeId,
+        skipSelect,
+        data: {
+          mediaType: 'video',
+          ...(typeof sourceData.width === 'number' ? { width: sourceData.width } : {}),
+          ...(typeof sourceData.height === 'number' ? { height: sourceData.height } : {}),
+          videoSubtitleErase: { sourceAssetId: payload.source_asset_id, lastInput: payload },
+          genStatus: 'generating',
+          progress: 0,
+        },
+      });
+      addCanvasEdge(node.id, targetNodeId, undefined, { origin: VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN });
+      return submitVideoToolTask({ kind: 'subtitleErase', input: payload }, targetNodeId);
+    },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
 
   /* ===== 抠图发送链路（IKGXMT，镜像擦除 IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
 
-  /** 抠图受理后的建卡、来源边与轮询沿用画布宿主能力。 */
+  /** 抠图受理后的建卡与来源边沿用画布宿主（建卡时机保持「受理后」）；在途锁、jobId
+   *  回填与轮询已由统一任务运行时接管（IKJJR2）。 */
   const handoffCutoutTask = async (
     submission: CutoutSubmission,
     created: { job_id: string },
     skipSelect: boolean,
   ): Promise<void> => {
     const { source: node, payload: input } = submission;
-    const sourceNodeId = node.id;
-    const targetNodeId = input.target_node_id;
     const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
       fileName: '抠图',
-      nodeId: targetNodeId,
+      nodeId: input.target_node_id,
       skipSelect,
       data: {
         imageCutout: { sourceAssetId: input.source_asset_id, lastInput: input },
         genStatus: 'generating',
         progress: 0,
+        jobId: created.job_id,
       },
     });
-    addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_CUTOUT_EDGE_ORIGIN });
-    // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEraseJob）
-    const activeAtCreate = newNodeId('pending-generation');
-    activeJobByNodeRef.current.set(draftId, activeAtCreate);
-    patchMediaNode(draftId, { jobId: created.job_id });
-    pollJob(draftId, created.job_id);
+    addCanvasEdge(node.id, draftId, undefined, { origin: IMAGE_CUTOUT_EDGE_ORIGIN });
   };
   toolHostsRef.current.cutout = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
     newTargetId: () => newNodeId('media-draft'),
-    createTask: ({ projectId, payload }) => createImageCutout(projectId, payload, { silent: true }),
+    // IKJJR2：提交经统一运行时；受理 settle 才返回（镜像擦除 host）。
+    createTask: ({ source, payload }) => {
+      const target = imageToolTargetBesideSource(source, '抠图', payload.target_node_id);
+      return dispatchImageToolTask({ kind: 'imageCutout', input: payload }, target).then((job_id) => ({ job_id }));
+    },
     handoff: handoffCutoutTask,
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
@@ -6741,36 +6763,13 @@ export default function CanvasPage() {
   /** 取消接口仅登记意图；权威终态确认前保留生成中状态及轮询，避免编辑/删除绕过在途保护。 */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const jobId = node?.data?.jobId as number | string | undefined;
-    if (!currentId || jobId == null) return;
-    void cancelGenerationJob(currentId, jobId)
-      .then(() => fetchJobStatus(jobId).catch(() => null))
-      .then((detail) => {
-        if (!jobResponseGuarded(nodeId, jobId)) return; // 迟到响应：已删除/已被新任务接管
-        if (detail && (detail.status === 'succeeded' || detail.status === 'failed')) {
-          // 权威终态优先于取消确认：抢先成功挂载作品，失败展示原因
-          applyJobTerminal(nodeId, jobId, detail);
-          return;
-        }
-        if (detail?.status === 'cancelled') {
-          stopJobPolling(nodeId, jobTimersRef.current);
-          // 取消已获权威终态（IKHLKX）：注销本任务的活跃登记——用户点「取消生成」前已发出、
-          // 取消确认后才回来的那次迟到轮询响应（即使载荷是 succeeded）不得再回填成品
-          //（终态权威；重发新任务时 startXxxJob 会重新登记接管，不受影响）
-          activeJobByNodeRef.current.delete(nodeId);
-          settleCancelledNode(nodeId);
-          return;
-        }
-        showToast('warn', '取消已请求，正在等待任务停止');
-      })
-      .catch((e) => {
-        console.warn('取消生成失败:', e);
-        showToast('error', isApiError(e) ? `取消失败：${e.message}` : '取消失败，请稍后重试');
-      });
+    // IKJJR7：全部生成中卡归运行时 claims 分派（权威终态收敛 + 取消保留卡 settleTarget 确认），
+    // 页面无 claims 的取消-核对兜底骨架删除。
+    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
+      generationRuntimeRef.current.cancel(nodeId);
+      return;
+    }
   };
-
-  /** 删除在途登记：同一卡片的删除流程在取消确认往返期间只发起一次 */
-  const deletingJobNodesRef = useRef<Set<string>>(new Set());
 
   /** 删除意图登记（IKDMQW）：取消已登记但任务未终态（worker 未停）时，删除流程不移除卡片、
    *  只记录意图；轮询拿到权威终态后由 applyJobTerminal 接管——cancelled/failed 移除，
@@ -6795,8 +6794,6 @@ export default function CanvasPage() {
     edgesRef.current = nextEdges;
     setMediaNodes(nextNodes);
     setEdges(nextEdges);
-    audioMixRetryKeysRef.current.delete(nodeId);
-    stopJobPolling(nodeId, jobTimersRef.current);
     activeJobByNodeRef.current.delete(nodeId);
     if (currentId) void flushCanvasSave(currentId).catch(() => {});
   };
@@ -6804,97 +6801,22 @@ export default function CanvasPage() {
   /** 删除生成中卡片（IKDMQW）：先请求取消；任务权威终态非 succeeded 才移除——
    *  cancelled/failed 终态确认后立即移除；仍 processing（软取消已登记、worker 未停）时不
    *  抢先移除，登记删除意图由轮询终态驱动（succeeded 竞态保留作品并提示「任务已完成」）。
-   *  取消失败：保留卡片提示原因（任务仍可查看/轮询收敛），用户需要时再操作一次。 */
-  const deleteGeneratingNode = async (nodeId: string) => {
+   *  取消失败：保留卡片提示原因（任务仍可查看/轮询收敛），用户需要时再操作一次。
+   *  IKJJR7：全部生成中卡归运行时 claims 分派（runtime.remove 承接取消确权与 remove($target)
+   *  显式确认），页面无 claims 的取消-核对-移除兜底骨架删除。 */
+  const deleteGeneratingNode = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const jobId = node?.data?.jobId as number | string | undefined;
-    if (!currentId || jobId == null) {
-      // 无任务可取消（异常态）：退回直接移除，避免删除入口卡死
-      removeMediaNodeNow(nodeId);
+    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
+      generationRuntimeRef.current.remove(nodeId);
       return;
     }
-    if (deletingJobNodesRef.current.has(nodeId)) return;
-    deletingJobNodesRef.current.add(nodeId);
-    const finish = () => { deletingJobNodesRef.current.delete(nodeId); };
-    const stopWithCompleted = (detail: Awaited<ReturnType<typeof fetchJobStatus>>) => {
-      // 任务抢先成功：停止自动删除，挂载作品并提示；如需删除用户再操作一次
-      applyJobTerminal(nodeId, jobId, detail);
-      showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
-      finish();
-    };
-    try {
-      await cancelGenerationJob(currentId, jobId);
-    } catch (e) {
-      // 取消失败（多为任务已终态 100301）：核对权威状态，succeeded 视为抢先成功
-      const detail = await fetchJobStatus(jobId).catch(() => null);
-      if (detail?.status === 'succeeded' && jobResponseGuarded(nodeId, jobId)) {
-        stopWithCompleted(detail);
-        return;
-      }
-      console.warn('删除生成中卡片：取消任务失败:', e);
-      showToast('error', isApiError(e) ? `取消失败，卡片已保留：${e.message}` : '取消失败，卡片已保留，请稍后重试');
-      finish();
-      return;
-    }
-    // 取消登记成功 ≠ 任务已停：核对权威状态，succeeded 竞态保护（worker 抢先完成）
-    const detail = await fetchJobStatus(jobId).catch(() => null);
-    if (!jobResponseGuarded(nodeId, jobId)) { // 防御：往返期间被新任务接管/已删除则放弃
-      finish();
-      return;
-    }
-    if (detail?.status === 'succeeded') {
-      stopWithCompleted(detail);
-      return;
-    }
-    if (detail?.status === 'cancelled' || detail?.status === 'failed') {
-      // 任务已终态：确认移除，登记防迟到响应复活
-      locallyRemovedGenerationNodesRef.current.add(nodeId);
-      if (isAudioMixNodeId(nodeId)) {
-        removeAudioMixCardNow(nodeId);
-        finish();
-        return;
-      }
-      removeCancelledGenerationNode(
-        nodeId,
-        jobTimersRef.current,
-        (id) => setMediaNodes((prev) => prev.filter((n) => n.id !== id)),
-      );
-      finish();
-      return;
-    }
-    // 仍 queued/processing（软取消已登记）或状态不可得：不抢先移除（worker 竞态完成的作品
-    // 不得失去入口）——登记删除意图，轮询终态驱动移除/挂载
-    pendingDeleteJobNodesRef.current.add(nodeId);
-    if (isAudioMixNodeId(nodeId)) {
-      const nextNodes = mediaNodesRef.current.map((item) => item.id === nodeId
-        ? { ...item, data: { ...item.data, audioMixCancelPending: true } }
-        : item);
-      mediaNodesRef.current = nextNodes;
-      setMediaNodes(nextNodes);
-      void flushCanvasSave(currentId).catch(() => {});
-    }
-    finish();
+    // 无任务身份的生成中卡（创建窗口被删等异常态）：直接移除，避免删除入口卡死
+    removeMediaNodeNow(nodeId);
   };
 
   /** 画布删除统一入口（IKD0JT 撤销接入）：右键/键盘/节点回调删除收口——
    *  撤销栈登记 + 悬空边清理 + blob 释放；生成中媒体卡片转取消任务流程（不可回退，PRD §7.2 R2）。 */
   const removeCanvasNodes = (ids: string[]) => {
-    if (ids.length === 0) return;
-    const waiting = ids.filter((id) => isAudioMixNodeId(id) && audioMixUnpersistedCardsRef.current.has(id));
-    waiting.forEach((id) => {
-      if (!currentId || audioMixDeleteWaitingRef.current.has(id)) return;
-      const projectId = currentId;
-      audioMixDeleteWaitingRef.current.add(id);
-      const firstSave = audioMixFirstSaveRef.current.get(id) ?? flushCanvasSave(projectId);
-      void firstSave.then((saved) => {
-        if (!saved || activeProjectRef.current !== projectId) return;
-        audioMixUnpersistedCardsRef.current.delete(id);
-        removeCanvasNodes([id]);
-      }).catch(() => {
-        showToast('error', '画布保存失败，结果卡已保留，请重试删除');
-      }).finally(() => audioMixDeleteWaitingRef.current.delete(id));
-    });
-    ids = ids.filter((id) => !waiting.includes(id));
     if (ids.length === 0) return;
     // 生成中媒体卡片：先取消任务，终态驱动移除（不进撤销栈）
     const generating = ids.filter((id) => mediaNodesRef.current.some((n) => n.id === id) && isGeneratingNode(id));
@@ -7088,482 +7010,88 @@ export default function CanvasPage() {
   const handleRetryJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
-    if (isAudioMixNodeId(nodeId)) {
-      if (!currentId || !jobId || node?.data.genStatus !== 'failed'
-        || audioMixRetryInFlightRef.current.has(nodeId)) return;
-      const projectId = currentId;
-      const key = audioMixRetryKeysRef.current.get(nodeId) ?? newIdempotencyKey();
-      audioMixRetryKeysRef.current.set(nodeId, key);
-      audioMixRetryInFlightRef.current.add(nodeId);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
-      void retryAudioMixMutation.mutateAsync({ projectId, jobId: String(jobId), key })
-        .then((retried) => {
-          if (activeProjectRef.current !== projectId || !mediaNodesRef.current.some((item) => item.id === nodeId)) return;
-          if (String(retried.job_id) !== String(jobId)) throw new Error('重试任务身份不一致');
-          audioMixRetryKeysRef.current.delete(nodeId);
-          pollJob(nodeId, jobId);
-        })
-        .catch((error: unknown) => {
-          if (activeProjectRef.current !== projectId || !mediaNodesRef.current.some((item) => item.id === nodeId)) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed', errorText: isApiError(error) ? error.message : '音频混合重试失败，请重试',
-          });
-        })
-        .finally(() => audioMixRetryInFlightRef.current.delete(nodeId));
-      return;
-    }
-    // 音视频合成失败卡（IKIHPM）：重试走 :jobId/retry + Idempotency-Key，服务端按冻结快照
-    // 重放（音频/视频/参数/画布来源全部沿用首次提交），在**原卡**重新进入生成中——
-    // 不复制结果卡、不复制来源线；同键复用 + 在途锁保证连点只发一次。
-    if (audioVideoMuxIdentityOf(node)) {
-      if (!currentId || !jobId || node?.data.genStatus !== 'failed'
-        || audioVideoMuxRetryInFlightRef.current.has(nodeId)) return;
-      const projectId = currentId;
-      const key = audioVideoMuxRetryKeysRef.current.get(nodeId) ?? newIdempotencyKey();
-      audioVideoMuxRetryKeysRef.current.set(nodeId, key);
-      audioVideoMuxRetryInFlightRef.current.add(nodeId);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
-      void retryAudioVideoMuxMutation.mutateAsync({ projectId, jobId: String(jobId), key })
-        .then((retried) => {
-          if (activeProjectRef.current !== projectId || !mediaNodesRef.current.some((item) => item.id === nodeId)) return;
-          if (String(retried.job_id) !== String(jobId)) throw new Error('重试任务身份不一致');
-          audioVideoMuxRetryKeysRef.current.delete(nodeId);
-          pollJob(nodeId, jobId);
-        })
-        .catch((error: unknown) => {
-          if (activeProjectRef.current !== projectId || !mediaNodesRef.current.some((item) => item.id === nodeId)) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed', errorText: isApiError(error) ? error.message : '音视频合成重试失败，请重试',
-          });
-        })
-        .finally(() => audioVideoMuxRetryInFlightRef.current.delete(nodeId));
-      return;
-    }
-    const enhanceIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageEnhance as
-      | ImageEnhanceIdentity
-      | undefined;
-    if (enhanceIdentity?.lastParams) {
-      // 防重入：生成中不重复发起（口径同通用重试）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      const input = captureImageEnhance(toolHostsRef.current.panels!, nodeId, restoreImageEnhanceParams(enhanceIdentity.lastParams));
-      if (input) void startImageEnhanceJob(input).catch(() => {});
-      return;
-    }
-    const videoEnhanceIdentity = ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as
-      | VideoEnhanceIdentity
-      | undefined;
-    if (videoEnhanceIdentity?.lastParams) {
-      // HD 卡分流（IKH3VH，镜像高清放大）：契约无 retry 端点，重试 = lastParams 原样重发
-      // 创建接口（源素材与分辨率档随 lastParams 冻结，原参数重试）。
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      // IKJP8Q 共享提交准入：同卡已有创建在途（面板发送或先前重试）时静默拒绝——不发
-      // 请求、不改卡片与既有参数、不额外弹提示；检查与 startVideoEnhanceJob 的登记均在
-      // 首个异步等待前完成，无交错窗口
-      if (isVideoEnhanceCardInFlight(nodeId)) return;
-      const input = captureVideoEnhance(toolHostsRef.current.panels!, nodeId, restoreVideoEnhanceResolution(videoEnhanceIdentity.lastParams));
-      if (input) {
-        // IKJPM7 会话归属捕获：受理时的会话身份——此后同卡显式关闭重开（无论新会话
-        // 是否发送）或项目切换即新会话，旧响应不向其提示旧错误；恢复原会话、他工具
-        // 开关与纯关闭未重开均保持归属（当前有效请求的失败提示保留）
-        const ownsSession = toolRuntime.captureSessionOwnership('videoEnhance');
-        void startVideoEnhanceJob(input).catch((error: unknown) => {
-          if (isSilentAuthError(error)) return;
-          // IKJPM7 静默传输（决策 7，口径同面板发送）：HTTP 层默认 toast 不再先于会话
-          // 归属判断触发；有效会话的失败由本回调补回两路反馈（HTTP 路 + 页面路，与
-          // 面板 onError 同构，提示次数与原默认提示一致）
-          if (!ownsSession()) return;
-          // 旧重试返回时同卡已有新提交在途：不提示旧错误（会话归属仍由上面归属探针守卫）
-          if (isVideoEnhanceCardInFlight(nodeId)) return;
-          const nodeNow = mediaNodesRef.current.find((item) => item.id === nodeId);
-          if ((nodeNow?.data as Record<string, unknown> | undefined)?.genStatus !== 'failed') return;
-          if (isApiError(error)) globalToast.error(error.message);
-          showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
-        });
-      }
-      return;
-    }
-    const frameInterpolationIdentity = ((node?.data ?? {}) as Record<string, unknown>).frameInterpolation as
-      | FrameInterpolationIdentity
-      | undefined;
-    if (frameInterpolationIdentity != null) {
-      if (frameInterpolationRecoveryBlockedRef.current.has(nodeId)) {
-        showToast('warn', '插帧任务参数尚未恢复，请刷新后重试');
-        return;
-      }
-      // 插帧卡分流（IKHLKX，镜像 HD 高清）：契约无 retry 端点，重试 = 受理冻结输入原样重发
-      // 创建接口——源素材取自插帧身份 sourceAssetId（不回读源卡当前配置），fps 取自受理时
-      // 随卡冻结的 frozenParams（IKHSFH：60fps 任务失败后面板改 120fps，重试仍发 60fps；
-      // 旧持久化卡回落 lastParams），每次重试都是全新创建请求（免费口径无幂等头 / 无
-      // client_token，不存在复用旧 token 重放旧任务的问题）。
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      const input = captureFrameInterpolation(toolHostsRef.current.panels!, nodeId, restoreFrameInterpolationRetryFps(frameInterpolationIdentity));
-      if (input) void startFrameInterpolationJob(input).catch((error: unknown) => {
-        if (!isSilentAuthError(error)) showToast('error', apiErrorMessage(error, '插帧任务创建失败，请重试', FrameInterpolationSaveError));
-      });
-      return;
-    }
-    const eraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageErase as
-      | ImageEraseIdentity
-      | undefined;
-    if (eraseIdentity?.lastInput) {
-      // 擦除卡分流（IKGOTB）：契约无 retry 端点，重试 = 冻结 input 原样重发创建接口
-      //（遮罩资产未删除，selected_area_erase 的 mask_asset_id 仍可被创建入口与 worker 解析）。
+    // IKJJR4：混合/合成失败卡归统一任务运行时——原有专属重试协议（POST
+    // /audio-mixes/:jobId/retry、/audio-video-muxes/:jobId/retry 复用同 jobId）由
+    // mixMuxTasks 定义承载；携可信关联时新 submission_id 独立提交身份隔离前端操作轮次，
+    // 历史卡（无受理关联）不带绑定走原路径。防重入/同键复用/归属检查在运行时；
+    // statusOf 为同步读（patchMediaNode 不落 ref，同帧双击不能依赖卡片态）。
+    if (node && (isAudioMixNodeId(nodeId) || audioVideoMuxIdentityOf(node) != null)) {
       if (!currentId) {
-        showToast('warn', '未选中项目，无法发起图片擦除');
+        showToast('warn', '未选中项目，无法重试');
         return;
       }
-      // 防重入：生成中不重复发起（口径同高清分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createImageErase(currentId, eraseIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
+      const inFlight = generationRuntimeRef.current?.statusOf(nodeId);
+      if (inFlight && (inFlight.phase === 'submitting' || inFlight.phase === 'generating')) return;
+      generationRuntimeRef.current?.retry(nodeId);
       return;
     }
-    const subtitleEraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).videoSubtitleErase as
-      | VideoSubtitleEraseIdentity
-      | undefined;
-    if (subtitleEraseIdentity?.lastInput) {
-      // 去字幕卡分流（IKGZ83，镜像擦除/抠图）：契约无 retry 端点，重试 = 冻结 input 原样重发
-      // 创建接口（检测模式与框集合随 lastInput 冻结，不从零再框）。
+    // IKJJR2：图像工具家族失败卡归统一任务运行时——冻结输入（lastInput/lastParams）原样
+    // 重发创建端点（四工具契约无 retry 端点），携可信关联 canvas_binding（独立提交身份）；
+    // 冻结输入缺失时保留失败卡并提示重新编辑（A.6，不补猜测默认值）。
+    if (node && isImageToolsCard(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
+      if (jobId != null) {
+        // 服务端已受理（任务失败）：runtime.retry 携可信关联重发
+        generationRuntimeRef.current?.retry(nodeId);
+        return;
+      }
+      // 首次创建即失败（无任务身份）：按可信冻结输入经 runtime.submit 重发——同载荷
+      // 复用同一把 submission_id（服务端重放，不重复建任务）；失败照旧落失败卡。
+      const payload = imageToolsRetryPayloadOf(nodeId, (node.data ?? {}) as Record<string, unknown>);
+      if (!payload) {
+        showToast('warn', '原任务输入已不可信，请重新编辑后再发送');
+        return;
+      }
+      const target = imageToolTargetOfNode(nodeId);
+      if (!target) return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '', errorCode: undefined });
+      dispatchImageToolTask(payload, target).catch(() => {}); // 重试失败由运行时落失败卡（无等待方，吞 reject）
+      return;
+    }
+    // IKJJR7：claims 分派已覆盖全部后台任务家族（普通生成/图像/视频/混合合成/多结果），
+    // 场景切分/人声分离/普通生成的旧独立分支与无 claims 兜底轮询重试骨架随之删除——
+    // IKJJR1 起各家族定义承载重试协议（服务端冻结输入/客户端冻结重发/专属同 jobId）。
+    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
       if (!currentId) {
-        showToast('warn', '未选中项目，无法发起视频去字幕');
+        showToast('warn', '未选中项目，无法重试');
         return;
       }
-      // 防重入：生成中不重复发起（口径同高清/擦除/抠图分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoSubtitleErase(currentId, subtitleEraseIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
-      return;
-    }
-    const cutoutIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageCutout as
-      | ImageCutoutIdentity
-      | undefined;
-    if (cutoutIdentity?.lastInput) {
-      // 抠图卡分流（IKGXMT，镜像擦除）：契约无 retry 端点，重试 = 冻结 input 原样重发创建接口
-      //（场景/描边/透明裁剪参数随 lastInput 冻结，规格故事 22 不从零再配）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法发起图片抠图');
-        return;
-      }
-      // 防重入：生成中不重复发起（口径同高清/擦除分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createImageCutout(currentId, cutoutIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
-      return;
-    }
-    const outpaintIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageOutpaint as
-      | ImageOutpaintIdentity
-      | undefined;
-    if (outpaintIdentity?.lastParams) {
-      // 防重入：生成中不重复发起（口径同通用重试）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      void startImageOutpaintJob(nodeId, outpaintIdentity.lastParams).catch(() => {});
-      return;
-    }
-    const vocalSplitIdentity = ((node?.data ?? {}) as Record<string, unknown>).vocalSplit as
-      | VocalSplitIdentity
-      | undefined;
-    if (vocalSplitIdentity?.lastInput) {
-      // 人声背景分离卡分流（IKHA2W，镜像音视频分离）：契约无 retry 端点，重试 = 冻结 input
-      // 原样重发创建接口（源素材/场景/格式三键随 lastInput 冻结，不从零再选）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法人声背景分离');
-        return;
-      }
-      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图/音视频分离分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createVocalSplit(currentId, vocalSplitIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
-      return;
-    }
-    const sceneSplitIdentity = ((node?.data ?? {}) as Record<string, unknown>).sceneSplit as
-      | SceneSplitIdentity
-      | undefined;
-    if (sceneSplitIdentity?.lastInput) {
-      // 场景切分卡分流（IKH8BR，镜像去字幕/分离）：契约无 retry 端点，重试 = 冻结业务参数
-      // 原样重发创建接口（源素材/占位卡绑定/粒度随 lastInput 冻结）；client_token 每次重试
-      // 都新生成（同 token 只会重放旧任务），原地承接本占位卡（target_node_id=本卡 id）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法场景切分');
-        return;
-      }
-      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoSceneSplit(currentId, { ...sceneSplitIdentity.lastInput, client_token: newIdempotencyKey() }, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
-      return;
-    }
-    const smartMattingIdentity = ((node?.data ?? {}) as Record<string, unknown>).smartMatting as
-      | SmartMattingIdentity
-      | undefined;
-    if (smartMattingIdentity?.lastInput) {
-      // 智能抠像卡分流（IKHK9N，镜像场景切分/分离）：契约无 retry 端点，重试 = 冻结业务参数
-      // 原样重发创建接口（源素材/占位卡绑定/模式/格式/背景色随 lastInput 冻结）；client_token
-      // 每次重试都新生成（同 token 只会重放旧任务），原地承接本占位卡（target_node_id=本卡 id）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法智能抠像');
-        return;
-      }
-      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/场景切分分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoMattingMutation
-        .mutateAsync({
-          projectId: currentId,
-          payload: { ...smartMattingIdentity.lastInput, client_token: newIdempotencyKey() },
-        })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
-      return;
-    }
-    const mediaExtractIdentity = ((node?.data ?? {}) as Record<string, unknown>).mediaExtract as
-      | MediaExtractIdentity
-      | undefined;
-    if (mediaExtractIdentity?.lastInput) {
-      // 音视频分离卡分流（IKH28X，镜像去字幕/擦除）：契约无 retry 端点，重试 = 冻结 input
-      // 原样重发创建接口（源素材与格式随 lastInput 冻结，不从零再选）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法音视频分离');
-        return;
-      }
-      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图分流）
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createMediaExtraction(currentId, mediaExtractIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-          });
-        });
-      return;
-    }
-    const audioTrimIdentity = ((node?.data ?? {}) as Record<string, unknown>).audioTrim as
-      | AudioTrimIdentity
-      | undefined;
-    if (audioTrimIdentity?.lastInput) {
-      // 截取卡分流（IKHB7A，镜像分离）：契约无 retry 端点，重试 = 冻结 input（源素材+
-      // 起止+格式，贴边省略形态原样保留）重发创建接口，不从零再选。
-      // 重试创建同走 silent 传输（IKI8L4）：失败收敛到本卡失败态（errorText 可读可再重试），
-      // http 层不叠弹——迟到失败同样不打扰用户后来开启的编辑会话（口径同调速重试）。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法截取');
-        return;
-      }
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createAudioTrim(currentId, audioTrimIdentity.lastInput, { silent: true })
-        .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : audioTrimErrorText(null),
-          });
-        });
-      return;
-    }
-    const audioSpeedIdentity = ((node?.data ?? {}) as Record<string, unknown>).audioSpeed as
-      | AudioSpeedIdentity
-      | undefined;
-    if (audioSpeedIdentity?.lastInput) {
-      // 重试使用冻结输入；在途与终态按项目保留，水合时只恢复原卡。
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法调速');
-        return;
-      }
-      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      const projectIdAtRetry = currentId;
-      const retryKey = `${projectIdAtRetry}:${nodeId}`;
-      const retry: { patch: Record<string, unknown> } = {
-        patch: { genStatus: 'generating', progress: 0, errorText: '', jobId: undefined },
-      };
-      audioSpeedRetriesRef.current.set(retryKey, retry);
-      settledExtractNodesRef.current.delete(nodeId);
-      patchMediaNode(nodeId, retry.patch);
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      createAudioSpeedMutation.mutateAsync({ projectId: currentId, payload: audioSpeedIdentity.lastInput })
-        .then((created) => {
-          if (audioSpeedRetriesRef.current.get(retryKey) !== retry) return;
-          retry.patch = { ...retry.patch, jobId: created.job_id };
-          if (activeProjectRef.current !== projectIdAtRetry) return;
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, retry.patch);
-          pollJob(nodeId, created.job_id);
-        })
-        .catch((e: unknown) => {
-          if (audioSpeedRetriesRef.current.get(retryKey) !== retry) return;
-          retry.patch = { ...retry.patch, genStatus: 'failed', errorText: isApiError(e) ? e.message : audioSpeedErrorText(null) };
-          if (activeProjectRef.current !== projectIdAtRetry) return;
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          patchMediaNode(nodeId, retry.patch);
-          showToast('error', isApiError(e) ? e.message : '音频调速任务创建失败，请重试');
-        });
-      return;
-    }
-    if (!currentId || !jobId) return;
-    // 防重入：首次点击已置 generating（重试按钮随失败占位消失，此处拦截双击与迟到回调交错）
-    if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-    if (blockIfCreditsInsufficient()) return;
-    patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '', errorCode: undefined });
-    // 登记发起重试时的任务为核对基准：retry 返回前若被新任务接管（面板重新提交），放弃本次结果不覆盖
-    activeJobByNodeRef.current.set(nodeId, String(jobId));
-    try {
-      // 幂等键按「这张卡 × 被重试的这个任务」持有：响应丢了再点重试、401 登录后续跑都复用
-      // 同一把（服务端重放，不会多建一个 job 多扣一笔）；受理成功后钥匙作废。
-      retryGenerationJob(
-        currentId,
-        jobId,
-        jobRetryKeysRef.current.keyFor(nodeId, String(jobId)),
-      )
-        .then((created) => {
-          jobRetryKeysRef.current.settle(nodeId);
-          if (activeJobByNodeRef.current.get(nodeId) !== String(jobId)) return;
-          patchMediaNode(nodeId, { jobId: created.generation_job_id });
-          pollJob(nodeId, created.generation_job_id);
-        })
-        .catch((e) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== String(jobId)) return;
-          if (openRechargeForCreditsError(e)) {
-            patchMediaNode(nodeId, {
-              genStatus: 'failed',
-              errorText: isApiError(e) ? e.message : '余额不足',
-              errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
-            });
+      const hdRetry = videoToolFrozenPayload(nodeId, (node.data ?? {}) as Record<string, unknown>)?.kind === 'videoEnhance';
+      if (hdRetry && (isVideoEnhanceCardInFlight(nodeId) || node.data.genStatus === 'generating' || node.data.genStatus === 'checking')) return;
+      const ownsHdSession = hdRetry ? toolRuntime.captureSessionOwnership('videoEnhance') : null;
+      const finishHd = hdRetry ? beginVideoEnhanceSubmission(nodeId) : null;
+      generationRuntimeRef.current.retry(nodeId, {
+        deferGeneratingUntilAccepted: hdRetry,
+        onStale: () => finishHd?.(),
+        onCreateFailure: hdRetry ? (error: unknown) => {
+          finishHd?.();
+          if (!isSilentAuthError(error) && ownsHdSession?.() && !isVideoEnhanceCardInFlight(nodeId)) {
+            if (isApiError(error)) globalToast.error(error.message);
+            showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
+          }
+          return false;
+        } : undefined,
+        // 受理即冻结对重试路径同样成立（IKHSFH）：重试受理后 frozenParams/lastParams 写卡
+        //（旧持久化卡由此补齐权威冻结来源），面板后来的编辑只改 lastParams 不改它。
+        onAccepted: () => {
+          finishHd?.();
+          const identityData = (mediaNodesRef.current.find((n) => n.id === nodeId)?.data ?? {}) as Record<string, unknown>;
+          const frozen = videoToolFrozenPayload(nodeId, identityData);
+          const frameIdentity = identityData.frameInterpolation as FrameInterpolationIdentity | undefined;
+          if (frameIdentity != null && frozen?.kind === 'frameInterpolation') {
+            patchMediaNode(nodeId, { frameInterpolation: { ...frameIdentity, frozenParams: { fps: frozen.input.fps } } });
             return;
           }
-          if (isApiError(e) && e.status === 401) {
-            patchMediaNode(nodeId, { genStatus: 'failed', errorText: '', errorCode: undefined });
-            useAuthPromptStore.getState().addResume(() => {
-              handleRetryJob(nodeId);
-            });
-            return;
+          const hdIdentity = identityData.videoEnhance as VideoEnhanceIdentity | undefined;
+          if (hdIdentity != null && frozen?.kind === 'videoEnhance') {
+            patchMediaNode(nodeId, { videoEnhance: { ...hdIdentity, lastParams: { resolution: frozen.input.resolution } } });
           }
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '重试失败',
-            errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
-          });
-        });
-    } catch (e: unknown) {
-      patchMediaNode(nodeId, {
-        genStatus: 'failed',
-        errorText: isApiError(e) ? e.message : '重试失败',
-        errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
+        },
       });
     }
   };
   actionsRef.current.cancelJob = handleCancelJob;
   actionsRef.current.retryJob = handleRetryJob;
   actionsRef.current.removeMediaNode = handleRemoveMediaNode;
-  pollJobRef.current = pollJob;
 
   /* ============ 节点动作实现：点卡片开面板/画质横排按钮/详情下载（工具条生成类
      按钮已撤，IKH3WE：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片） ============ */
@@ -8119,101 +7647,84 @@ export default function CanvasPage() {
     });
   };
 
-  /** 插帧任务继续先保存后创建、原卡受理及 frozenParams 回填。
-   *  保存失败/false/等待期间切项目都不 POST；错误交回有效会话或既有失败卡重试。
-   *  按卡任务锁从首保存至创建返回持有，界面关闭不能释放它。 */
+  /** 插帧任务先落盘后创建（draft 角色由运行时先 flushCanvasSave 再 POST，票面 IKHSFF 验收 1）、
+   *  原卡受理及 frozenParams 回填。按卡任务锁（submitting 窗口）与轮询归运行时，界面关闭
+   *  不能释放它；受理失败/等待期间切项目由运行时归属检查与统一恢复接续。 */
   const startFrameInterpolationJob = async (submission: FrameInterpolationSubmission): Promise<boolean> => {
-    const { projectId, nodeId, payload: input, identity } = submission;
+    const { nodeId, payload: input, identity } = submission;
     const fps = input.fps;
-    // 同步防重（IKHSFH）：检查与登记在同一同步段完成（置于首个 await 前），React 渲染
-    // 周期外连点也只受理一次；面板发送与失败重试都经过本函数，两条路径同款保证
-    if (frameInterpolationInFlightRef.current.has(nodeId)) return false;
-    frameInterpolationInFlightRef.current.add(nodeId);
     toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    try {
-      // 票面 IKHSFF 验收 1：受理后立即关页也不丢卡/结果——草稿卡与来源边先落盘再 POST
-      // （插帧卡由入口建卡、本函数只发送，故冲刷在 POST 之前；发送与失败重试共用本函数，
-      //  两条路径同款保证）。保存结果三态处置（不吞失败当成功）：
-      //  · 抛错（网络 / 412 乐观锁冲突，flushCanvasSave 已置保存状态条为 error）→ 不发起
-      //    创建请求，卡留在可恢复的配置草稿态，面板保留可重发（保存重试成功后原参数重发）；
-      //  · 返回 false（无效草稿不可继续 / 等待期间项目已切换的起始检查）→ 同样中止；
-      //  · 等待期间项目切换的收尾双检（口径同家族提交链路：flush 返回后再核对 activeProjectRef）。
-      let flushed: boolean;
-      try {
-        flushed = await flushCanvasSave(projectId);
-      } catch {
-        throw new FrameInterpolationSaveError('画布保存失败，未发起插帧，请重试');
-      }
-      if (!flushed) return false;
-      if (activeProjectRef.current !== projectId) return false;
-      const created = await createFrameInterpolationMutation.mutateAsync({ projectId, payload: input });
-      frameInterpolationRecoveryBlockedRef.current.delete(nodeId);
-      // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startVideoEnhanceJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      patchMediaNode(nodeId, {
-        genStatus: 'generating',
-        progress: 0,
-        errorText: undefined,
-        jobId: created.job_id,
-        // 受理即冻结（IKHSFH）：frozenParams = 最后受理任务的输入（失败重试原样重发的
-        // 权威来源，面板主动发送新配置成功受理后才更新）；lastParams 保留面板编辑值不回写
-        frameInterpolation: {
-          ...identity,
-          lastParams: (mediaNodesRef.current.find((node) => node.id === nodeId)?.data.frameInterpolation as FrameInterpolationIdentity | undefined)?.lastParams,
-          frozenParams: { fps },
-        },
-      });
-      pollJob(nodeId, created.job_id);
-      return true;
-    } finally {
-      // 失败/完成即解锁（允许再试）；在途期间 genStatus 未变（仍 draft/failed），防重
-      // 只靠本集合——解锁必须先于任何下一次提交的检查
-      frameInterpolationInFlightRef.current.delete(nodeId);
-      toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    }
+    // 插帧草稿卡转生成中（受理/轮询归运行时，draft 角色由运行时先落盘再 POST）
+    patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
+    // IKJJR3：受理即冻结（IKHSFH）：frozenParams = 最后受理任务的输入（失败重试原样重发的
+    // 权威来源，面板主动发送新配置成功受理后才更新）；lastParams 保留面板编辑值不回写
+    const sent = submitVideoToolTask({ kind: 'frameInterpolation', input }, nodeId, {
+      onAccepted: () => {
+        const current = (mediaNodesRef.current.find((node) => node.id === nodeId)?.data.frameInterpolation as FrameInterpolationIdentity | undefined);
+        patchMediaNode(nodeId, {
+          frameInterpolation: { ...identity, lastParams: current?.lastParams, frozenParams: { fps } },
+        });
+      },
+      onCreateFailure: (e: unknown) => {
+        // 受理失败：插帧草稿卡回配置态（参数保留在 lastParams），面板可重发；不落通用失败卡。
+        // 保存失败（_skipped）运行时已统一提示「画布保存失败，生成任务未提交」。
+        const rollback = mediaNodesRef.current.find((n) => n.id === nodeId);
+        const isDraft = ((rollback?.data ?? {}) as Record<string, unknown>).draft === true;
+        patchMediaNode(nodeId, { genStatus: isDraft ? 'draft' : undefined, progress: undefined, errorText: undefined });
+        if (!(e as { _skipped?: boolean })._skipped) {
+          showToast('error', isApiError(e) ? e.message : '插帧任务创建失败，请重试');
+        }
+        return true;
+      },
+    });
+    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
+    return sent;
   };
 
-  /** 水合后核对最新关联（含已保存的旧 jobId），同时恢复该任务的冻结输入。
-   *  Query 按项目/节点去重，现有终态与轮询负责结果；恢复失败时保留卡片并阻止错误参数重试。 */
+  /** 水合后核对最新关联（含已保存的旧 jobId），同时恢复该任务的冻结输入（IKHSFE 历史可信
+   *  关联恢复，IKJJR3 后仅服务历史插帧卡与「受理回执未到就关页」的草稿卡——新协议卡的恢复
+   *  主路径是统一运行时，本查询续轮询同样经运行时登记，恢复扫描按 active 判重防双链）。
+   *  Query 按项目/节点去重，现有终态与轮询负责结果；恢复失败时保留卡片（冻结输入缺失的
+   *  重试由运行时按不可信冻结输入阻止并提示重新编辑，A.6）。 */
   const recoverFrameInterpolation = (nodeId: string, savedJobId?: unknown) => {
     const projectId = activeProjectRef.current;
     if (!projectId) return;
     const activeAtStart = activeJobByNodeRef.current.get(nodeId);
-    frameInterpolationRecoveryBlockedRef.current.add(nodeId);
     queryClient.fetchQuery(frameInterpolationRecoveryOptions(projectId, nodeId))
       .then(({ current, input }) => {
         if (activeProjectRef.current !== projectId) return;
         const node = mediaNodesRef.current.find((n) => n.id === nodeId);
         if (!node) return;
         const data = (node.data ?? {}) as Record<string, unknown>;
-        // 核对水合时的身份；查询期间的新提交、取消和删除优先于恢复结果。
+        // 核对水合时的身份；查询期间的新提交、取消和删除优先于恢复结果（提交窗口 =
+        //  运行时 submitting 阶段）。
         if (data.jobId !== savedJobId ||
           activeJobByNodeRef.current.get(nodeId) !== activeAtStart ||
-          frameInterpolationInFlightRef.current.has(nodeId) ||
+          generationRuntimeRef.current?.statusOf(nodeId)?.phase === 'submitting' ||
           locallyRemovedGenerationNodesRef.current.has(nodeId) || !data.frameInterpolation) return;
-        frameInterpolationRecoveryBlockedRef.current.delete(nodeId);
         if (!current) return;
         if (current.status === 'cancelled') {
-          stopJobPolling(nodeId, jobTimersRef.current);
           activeJobByNodeRef.current.delete(nodeId);
           settleCancelledNode(nodeId);
           return;
         }
         const identity = data.frameInterpolation as FrameInterpolationIdentity;
         if (input) patchMediaNode(nodeId, {
-          frameInterpolation: { ...identity, sourceAssetId: input.source_asset_id, frozenParams: { fps: input.fps } },
+          frameInterpolation: { ...identity, sourceAssetId: input.source_asset_id, frozenParams: { fps: input.fps }, recoveryBlocked: undefined },
         });
+        else if (identity.recoveryBlocked) {
+          // 查询成功但无 input（旧任务无投影）：解除阻断，回落 lastParams 兼容
+          patchMediaNode(nodeId, { frameInterpolation: { ...identity, recoveryBlocked: undefined } });
+        }
         if (current.status === 'queued' || current.status === 'processing') {
-          stopJobPolling(nodeId, jobTimersRef.current);
           patchMediaNode(nodeId, {
             genStatus: 'generating',
             progress: current.progress,
             errorText: undefined,
             jobId: current.job_id,
           });
-          pollJob(nodeId, current.job_id);
+          // IKJJR3：续轮询经统一运行时登记（恢复扫描按在途判重，不双链）
+          generationRuntimeRef.current?.resumeFromHydration(nodeId, String(current.job_id), (node.data ?? {}) as Record<string, unknown>);
           return;
         }
         // 终态：登记活跃任务（迟到响应防线）+ 写回 jobId（成品卡 jobId≠null 是来源连线
@@ -8230,7 +7741,7 @@ export default function CanvasPage() {
                 progress: detail.progress,
                 errorText: undefined,
               });
-              pollJob(nodeId, current.job_id);
+              generationRuntimeRef.current?.resumeFromHydration(nodeId, String(current.job_id), (node.data ?? {}) as Record<string, unknown>);
             }
           })
           .catch(() => {
@@ -8240,52 +7751,62 @@ export default function CanvasPage() {
               progress: current.progress,
               errorText: undefined,
             });
-            pollJob(nodeId, current.job_id);
+            generationRuntimeRef.current?.resumeFromHydration(nodeId, String(current.job_id), (node.data ?? {}) as Record<string, unknown>);
           });
       })
       .catch((e: unknown) => {
-        // 保留原卡；失败重试保持阻断，刷新可重新读取，面板仍可主动发送新配置。
+        // 保留原卡；查询失败标记 recoveryBlocked——冻结输入未回填前重试按不可信输入阻止
+        //（A.6 不按面板值猜参数），刷新可重新读取，面板仍可主动发送新配置。
         console.warn('[frame-interpolation] 恢复查询失败:', e);
+        const failedNode = mediaNodesRef.current.find((n) => n.id === nodeId);
+        const failedData = (failedNode?.data ?? {}) as Record<string, unknown>;
+        const failedIdentity = failedData.frameInterpolation as FrameInterpolationIdentity | undefined;
+        if (failedIdentity != null && !failedIdentity.recoveryBlocked) {
+          patchMediaNode(nodeId, { frameInterpolation: { ...failedIdentity, recoveryBlocked: true } });
+        }
       });
   };
   recoverFrameInterpolationRef.current = recoverFrameInterpolation;
 
-  /** HD 任务受理后继续原卡生成、lastParams 落盘与轮询，失败保持原卡。
-   *  固定静默传输（IKJPM7，两入口一致）：HTTP 默认提示关闭，反馈由持有会话身份的
-   *  调用方回调统一给出。 */
-  const startVideoEnhanceJob = async (submission: VideoEnhanceSubmission): Promise<void> => {
-    const { projectId, nodeId, payload: input, identity } = submission;
-    const resolution = input.resolution;
-    // 在途登记（口径同插帧 IKHSFH）：面板在途只读与选中隐藏再选回的 reconcile 数据源；
-    // 不拦截受理——显式关闭重开的重发是既定行为，同帧连点由运行时 submitting 同步挡
-    videoEnhanceInFlightRef.current.set(nodeId, (videoEnhanceInFlightRef.current.get(nodeId) ?? 0) + 1);
-    // IKJP8Q 共享提交准入：登记在途即令同卡已打开面板提交中只读（失败卡重试与面板发送
-    // 共用）；显式关闭重开的新会话无会话状态不受影响，面板自身发送已持锁处幂等
+  const beginVideoEnhanceSubmission = (nodeId: string) => {
+    const pending = videoEnhanceInFlightRef.current.get(nodeId) ?? new Set<{ projectId: string | null; loadEpoch: object }>();
+    const request = { projectId: activeProjectRef.current, loadEpoch: docLoadEpochRef.current };
+    pending.add(request);
+    videoEnhanceInFlightRef.current.set(nodeId, pending);
     toolRuntime.notifyInFlight('videoEnhance', nodeId);
     toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    try {
-      const created = await createVideoEnhancement(projectId, input, { silent: true });
-      // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startImageEnhanceJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
-      stopJobPolling(nodeId, jobTimersRef.current);
-      patchMediaNode(nodeId, {
-        genStatus: 'generating',
-        progress: 0,
-        errorText: undefined,
-        jobId: created.job_id,
-        // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
-        videoEnhance: { ...identity, lastParams: { resolution } },
-      });
-      pollJob(nodeId, created.job_id);
-    } finally {
-      // 每次受理各自减一（同卡并发在途计数），归零才解锁；解锁后 reconcile 让在途
-      // 面板恢复可编辑（口径同插帧）
-      const count = (videoEnhanceInFlightRef.current.get(nodeId) ?? 1) - 1;
-      if (count <= 0) videoEnhanceInFlightRef.current.delete(nodeId);
-      else videoEnhanceInFlightRef.current.set(nodeId, count);
+    return () => {
+      if (!pending.delete(request)) return;
+      if (pending.size === 0) videoEnhanceInFlightRef.current.delete(nodeId);
       toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    }
+    };
+  };
+
+  /** HD 任务提交（IKJJR3）：交运行时受理（draft 角色先落盘再 POST，B.3）；
+   *  受理即写 lastParams（失败重试原样重发、重新编辑回填共用）；受理失败草稿回配置态，
+   *  轮询/归属/保存确认归运行时。 */
+  const startVideoEnhanceJob = async (submission: VideoEnhanceSubmission): Promise<void> => {
+    const { nodeId, payload: input, identity } = submission;
+    const finish = beginVideoEnhanceSubmission(nodeId);
+    return new Promise<void>((resolve, reject) => {
+      const submitted = submitVideoToolTask({ kind: 'videoEnhance', input }, nodeId, {
+        replaceSubmitting: true,
+        onAccepted: () => {
+          finish();
+          patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
+          // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
+          patchMediaNode(nodeId, { videoEnhance: { ...identity, lastParams: { resolution: input.resolution } } });
+          resolve();
+        },
+        onCreateFailure: (e: unknown) => {
+          finish();
+          reject(e);
+          return true;
+        },
+        onStale: () => { finish(); resolve(); },
+      });
+      if (!submitted) { finish(); resolve(); }
+    });
   };
 
   toolHostsRef.current.panels = {
@@ -8305,7 +7826,8 @@ export default function CanvasPage() {
       const node = mediaNodesRef.current.find((node) => node.id === nodeId);
       return Boolean(node && (node.data.draft === true || hasGenerationRecord(node)) && node.data[kind]);
     },
-    isFrameInFlight: (nodeId) => frameInterpolationInFlightRef.current.has(nodeId),
+    // 插帧按运行时阶段重算；HD 按同卡所有物理创建请求重算，旧请求不清新请求的锁。
+    isFrameInFlight: (nodeId) => generationRuntimeRef.current?.statusOf(nodeId)?.phase === 'submitting',
     isVideoEnhanceInFlight: isVideoEnhanceCardInFlight,
     startImage: (input) => startImageEnhanceJob(input, true),
     startVideo: (input) => startVideoEnhanceJob(input),
@@ -8335,22 +7857,57 @@ export default function CanvasPage() {
     isInFlight: () => audioVideoMuxInFlightRef.current,
     setInFlight: (value) => { audioVideoMuxInFlightRef.current = value; },
     canApply: (projectId) => activeProjectRef.current === projectId,
-    createTask: async ({ projectId, payload }) => {
-      const payloadText = JSON.stringify(payload);
-      const previous = audioVideoMuxCreateAttemptRef.current;
-      const key = previous?.projectId === projectId && previous.payload === payloadText ? previous.key : newIdempotencyKey();
-      audioVideoMuxCreateAttemptRef.current = { projectId, payload: payloadText, key };
-      const task = await createAudioVideoMuxMutation.mutateAsync({ projectId, payload, key });
-      if (audioVideoMuxCreateAttemptRef.current?.key === key) audioVideoMuxCreateAttemptRef.current = null;
-      return task;
+    // IKJJR4：提交交生成任务运行时（mixMuxTasks 定义）。目标 = 原草稿卡（角色 draft，
+    // 运行时先落盘再提交 B.3）；受理回执、幂等键（submission_id）、轮询与保存确认归运行时。
+    createTask: async ({ payload, draftId }) => {
+      const runtime = generationRuntimeRef.current;
+      if (!runtime) throw new Error('生成任务运行时未就绪，请刷新后重试');
+      const draft = mediaNodesRef.current.find((node) => node.id === draftId);
+      if (!draft) throw new Error('合成草稿卡不在画布上，无法发送');
+      const seedTarget = seedTargetOfNode(draft as unknown as RuntimeNodeView);
+      return await new Promise<{ job_id: string }>((resolve, reject) => {
+        const unwatch = watchMixSubmit(draftId, {
+          accepted: (jobId) => { unwatch(); resolve({ job_id: jobId }); },
+          failed: (error) => { unwatch(); reject(error); },
+        });
+        const issued = runtime.submit(
+          audioVideoMuxTask,
+          {
+            payload,
+            target: {
+              targetNodeId: draftId,
+              seedTarget,
+              seedSources: seedSourcesOfNode(draftId, generationRuntimeHostRef.current!),
+              expectedBindingRevision: runtime.bindingRevisionOf(draftId),
+            },
+          },
+          {
+            // 未受理：草稿卡回待生成（保留参数与绑定，留在面板改正后重发），提示归会话 onError
+            onCreateFailure: () => {
+              patchMediaNode(draftId, {
+                genStatus: 'draft', progress: undefined, errorText: undefined,
+                jobId: undefined, generationRecovery: undefined,
+              });
+              return true;
+            },
+            // IKJP8B：提交不会受理到底（失效/被替代/保存失败未发出）——收尾旧等待并释放
+            // 会话锁，失效链不交接、不改写当前草稿
+            onStale: () => { unwatch(); reject(staleMixSubmitError()); },
+          },
+        );
+        if (!issued) {
+          unwatch();
+          reject(new Error('音视频合成任务未受理，请重试'));
+        }
+      });
     },
-    handoff: async ({ projectId, draftId }, created) => {
-      // 合成使用原草稿卡与持久身份；会话失效不丢弃已受理任务。
+    handoff: async ({ projectId, draftId }) => {
+      // 合成使用原草稿卡与持久身份；会话失效不丢弃已受理任务。受理后原卡原地转生成中
+      //（jobId 已由运行时回填），保存与轮询归运行时。
       if (mediaNodesRef.current.some((node) => node.id === draftId)) {
-        patchMediaNode(draftId, { genStatus: 'generating', progress: 0, errorText: undefined, jobId: created.job_id });
+        patchMediaNode(draftId, { genStatus: 'generating', progress: 0, errorText: undefined });
       }
       void flushCanvasSave(projectId).catch(() => {});
-      pollJob(draftId, created.job_id);
     },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
@@ -8387,159 +7944,147 @@ export default function CanvasPage() {
     error: (message) => showToast('error', message),
   };
 
-  /* ===== 音视频分离发送链路（IKH28X）：发送才建任务 + 音频占位卡 + 来源边 + 终态回填 ===== */
+  /* ===== 音视频分离/截取/调速发送链路（IKH28X/IKHB7A/IKHW5S 建卡与来源线差异保留；
+     IKJJR3 受理与后续生命周期归运行时：canvas_binding 先受理，受理回执丢失由统一恢复兜底） ===== */
 
-  /** 任务受理后的既有交接：建卡、来源边、轮询和落盘仍由画布宿主负责。 */
-  const handoffAudioVideoSplitTask = async (
-    input: AudioVideoSplitSubmission,
-    created: { job_id: string },
-  ): Promise<void> => {
-    const { projectId, source: node, payload } = input;
-    const nodeId = mediaExtractNodeId(created.job_id);
-    const placeholder = attachCallbacks(
-      buildMediaExtractPlaceholderNode({
-        jobId: created.job_id,
-        outputFormat: payload.output_format,
-        sourceAssetId: payload.source_asset_id,
-        source: node,
-      }) as Node,
-    );
-    // 同步写 ref，保证本次落库包含节点与来源边。
-    const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    addCanvasEdge(node.id, nodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
-    pollJob(nodeId, created.job_id);
-    await flushCanvasSave(projectId).catch(() => {});
-  };
   toolHostsRef.current.audioVideoSplit = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    createTask: ({ projectId, payload }) => createMediaExtraction(projectId, payload, { silent: true }),
-    handoff: handoffAudioVideoSplitTask,
+    // IKJJR3：预分配占位卡 id（media-extract-{uuid}，前缀家族判定兼容）；受理后 jobId 由运行时回写
+    startTask: (input: AudioVideoSplitSubmission): boolean => {
+      const { source: node, payload } = input;
+      const targetNodeId = mediaExtractNodeId(newIdempotencyKey());
+      const placeholder = attachCallbacks(
+        buildMediaExtractPlaceholderNode({
+          jobId: targetNodeId.slice(MEDIA_EXTRACT_NODE_PREFIX.length),
+          outputFormat: payload.output_format,
+          sourceAssetId: payload.source_asset_id,
+          source: node,
+        }) as Node,
+      );
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === targetNodeId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      addCanvasEdge(node.id, targetNodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
+      return submitVideoToolTask({ kind: 'mediaExtract', input: payload }, targetNodeId);
+    },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
 
-  /** 截取任务受理后的既有画布交接。 */
-  const handoffAudioTrimTask = async (
-    input: AudioToolSubmission<AudioTrimInput>,
-    created: { job_id: string },
-  ): Promise<void> => {
-    const { projectId, source: node, payload } = input;
-    const sourceNodeId = node.id;
-    const nodeId = audioTrimNodeId(created.job_id);
-    const placeholder = attachCallbacks(
-      buildAudioTrimPlaceholderNode({
-        jobId: created.job_id,
-        outputFormat: payload.output_format,
-        timeParams: { start_time: payload.start_time, end_time: payload.end_time },
-        sourceAssetId: payload.source_asset_id,
-        source: node,
-      }) as Node,
-    );
-    const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    // 连一条源音频 → 截取卡的**来源边**（带 origin 标记）：参考推导跳过，
-    // 避免截取产物再次编辑时把源音频误当参考输入（防参考污染）
-    addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_TRIM_EDGE_ORIGIN });
-    pollJob(nodeId, created.job_id);
-    await flushCanvasSave(projectId).catch(() => {});
-  };
   toolHostsRef.current.audioTrim = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    createTask: ({ projectId, payload }) => createAudioTrim(projectId, payload, { silent: true }),
-    handoff: handoffAudioTrimTask,
+    // IKJJR3：预分配占位卡 id（audio-trim-{uuid}）；贴边省略的可选键随冻结 input 原样进占位身份
+    startTask: (input: AudioToolSubmission<AudioTrimInput>): boolean => {
+      const { source: node, payload } = input;
+      const targetNodeId = audioTrimNodeId(newIdempotencyKey());
+      const placeholder = attachCallbacks(
+        buildAudioTrimPlaceholderNode({
+          jobId: targetNodeId.slice(AUDIO_TRIM_NODE_PREFIX.length),
+          outputFormat: payload.output_format,
+          timeParams: { start_time: payload.start_time, end_time: payload.end_time },
+          sourceAssetId: payload.source_asset_id,
+          source: node,
+        }) as Node,
+      );
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === targetNodeId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      // 连一条源音频 → 截取卡的**来源边**（带 origin 标记）：参考推导跳过，
+      // 避免截取产物再次编辑时把源音频误当参考输入（防参考污染）
+      addCanvasEdge(node.id, targetNodeId, undefined, { origin: AUDIO_TRIM_EDGE_ORIGIN });
+      return submitVideoToolTask({ kind: 'audioTrim', input: payload }, targetNodeId);
+    },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
 
-  /** 调速任务项目暂存、建卡及落盘保持既有宿主实现。 */
-  const handoffAudioSpeedTask = async (
-    input: AudioToolSubmission<AudioSpeedInput>,
-    created: { job_id: string },
-    beforeApply: () => void,
-  ): Promise<void> => {
-    const { projectId, source: node, payload } = input;
-    const sourceNodeId = node.id;
-    // 迟到响应留给发起项目；当前项目的画布与编辑会话均不触碰。
-    if (activeProjectRef.current !== projectId || hydratedProjectRef.current !== projectId) {
-      audioSpeedPendingSubmissionsRef.current.set(`${projectId}:${audioSpeedNodeId(created.job_id)}`, {
-        projectId, sourceNodeId, jobId: created.job_id, payload, source: node,
-      });
-      return;
-    }
-    // 只退出本次发送的会话；旧会话成功仍建自己的任务卡，不触碰后来开启的编辑态。
-    beforeApply();
-    const nodeId = audioSpeedNodeId(created.job_id);
-    const placeholder = attachCallbacks(
-      buildAudioSpeedPlaceholderNode({
-        jobId: created.job_id,
-        speed: payload.speed ?? 1,
-        sourceAssetId: payload.source_asset_id,
-        source: node,
-      }) as Node,
-    );
-    const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    // 连一条源音频 → 调速卡的**来源边**（带 origin 标记）：参考推导跳过，
-    // 避免调速产物再次编辑时把源音频误当参考输入（防参考污染）
-    if (mediaNodesRef.current.some((item) => item.id === sourceNodeId)) {
-      addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
-    }
-    pollJob(nodeId, created.job_id);
-    await flushCanvasSave(projectId).catch(() => {});
-  };
   toolHostsRef.current.audioSpeed = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    createTask: ({ projectId, payload }) => createAudioSpeedMutation.mutateAsync({ projectId, payload }),
-    handoff: handoffAudioSpeedTask,
+    // IKJJR3：预分配占位卡 id（audio-speed-{uuid}）。跨项目接续由运行时归属检查与统一恢复
+    // 接管（迟到受理归发起项目，回原项目水合时按服务端关联补卡续轮询），原页面暂存机制删除。
+    startTask: (input: AudioToolSubmission<AudioSpeedInput>): boolean => {
+      const { source: node, payload } = input;
+      const targetNodeId = audioSpeedNodeId(newIdempotencyKey());
+      const placeholder = attachCallbacks(
+        buildAudioSpeedPlaceholderNode({
+          jobId: targetNodeId.slice(AUDIO_SPEED_NODE_PREFIX.length),
+          speed: payload.speed ?? 1,
+          sourceAssetId: payload.source_asset_id,
+          source: node,
+        }) as Node,
+      );
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === targetNodeId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      // 连一条源音频 → 调速卡的**来源边**（带 origin 标记）：参考推导跳过（防参考污染）
+      addCanvasEdge(node.id, targetNodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
+      return submitVideoToolTask({ kind: 'audioSpeed', input: payload }, targetNodeId);
+    },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
 
-  /** 人声分离的占位卡与多轨回填继续使用既有任务链路。 */
-  const handoffVocalSplitTask = async (
-    input: AudioToolSubmission<VocalSplitPayload>,
-    created: { job_id: string },
-  ): Promise<void> => {
-    const { projectId, source: node, payload } = input;
+  /** 人声分离任务发送核心（IKJJR5 迁入统一任务运行时，形态对齐场景切分）：退会话后本地
+   *  预建占位卡（node id 预分配，vocal-split- 前缀保持家族判定；受理前不伪造恢复标记）+
+   *  拉来源边（origin=vocal-split），runtime.submit 接管创建（Idempotency-Key =
+   *  submission_id + canvas_binding）、轮询、终态收敛与多轨扇出（规范 track:<type> node_id
+   *  + 纵向轨列 + 一笔原子保存）。创建失败：占位卡转失败态（卡上重试按 lastInput 原样重发，
+   *  归 runtime.retry）。占位卡不落盘由恢复协议兜底（result-placeholder 角色，受理回执
+   *  丢失走恢复扫描补卡）。 */
+  const runVocalSplitTask = async (input: AudioToolSubmission<VocalSplitPayload>): Promise<void> => {
+    const { source: node, payload } = input;
     const sourceNodeId = node.id;
-    const nodeId = vocalSplitNodeId(created.job_id);
+    const placeholderId = newNodeId('vocal-split');
     const placeholder = attachCallbacks(
       buildVocalSplitPlaceholderNode({
-        jobId: created.job_id,
+        nodeId: placeholderId,
         scene: payload.scene,
         outputFormat: payload.output_format,
         sourceAssetId: payload.source_asset_id,
         source: node,
       }) as Node,
     );
-    // 先同步写 ref 再 setState：本轮 flush 落库要用它，且下方连线端点必须已在本次保存的节点里
-    // （不登记 pendingNodeIdsRef：占位节点身份以任务为准，失败由终态补丁收敛，不需要添加失败回滚）
     const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
+    const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
     mediaNodesRef.current = next;
     setMediaNodes(next);
-    // 连一条视频 → 占位卡的**来源边**（带 origin 标记）：说明音频轨是从这段视频分离来的；
-    // 参考推导会跳过它，避免把这个视频当成音频生成参考而卡住发送
-    addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN });
-    pollJob(nodeId, created.job_id);
-    // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
-    await flushCanvasSave(projectId).catch(() => {});
+    addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN });
+    const runtime = generationRuntimeRef.current;
+    const placeholderView = mediaNodesRef.current.find((item) => item.id === placeholderId);
+    if (!runtime || !placeholderView) throw new Error('生成任务运行时未就绪');
+    const dispatched = runtime.submit(
+      vocalSplitTask,
+      {
+        payload: { source_asset_id: payload.source_asset_id, scene: payload.scene, output_format: payload.output_format },
+        target: {
+          targetNodeId: placeholderId,
+          seedTarget: seedTargetOfNode(placeholderView as unknown as RuntimeNodeView),
+          seedSources: seedSourcesOfNode(placeholderId, generationRuntimeHostRef.current!),
+          expectedBindingRevision: runtime.bindingRevisionOf(placeholderId),
+        },
+      },
+      {
+        onCreateFailure: (e: unknown) => {
+          patchMediaNode(placeholderId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '人声背景分离任务创建失败，请重试',
+          });
+          return true;
+        },
+      },
+    );
+    if (!dispatched) throw new Error('人声背景分离任务提交被拒绝（无项目或在途防重入），请重试');
   };
   toolHostsRef.current.vocalSplit = {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    createTask: ({ projectId, payload }) => createVocalSplit(projectId, payload, { silent: true }),
-    handoff: handoffVocalSplitTask,
+    runTask: runVocalSplitTask,
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
   };
@@ -8547,20 +8092,15 @@ export default function CanvasPage() {
   /* ===== 场景切分发送链路（IKH8BR，镜像去字幕/HD 家族）：先退会话 → 本地建任务占位卡
      （target_node_id 取该卡）→ POST video-scene-splits → job_id 回写占位卡 → 轮询终态 ===== */
 
-  /** 场景切分任务发送核心：按所选粒度 POST video-scene-splits（client_token 每次新生成
-   *  ——同 token 只会重放旧任务，重试亦复用本函数口径）。BO 定死流程顺序：**先退会话**
-   *  再本地在源视频右侧建任务占位卡（node id 本地生成，target_node_id 发送时取它——
-   *  先建卡后发请求，IKH8BO 契约；展示名标注粒度档、生成中骨架、sceneSplit 身份
-   *  ——lastInput 供失败重试原参数原粒度重发）、拉来源边（origin=scene-split，参考推导
-   *  跳过）、创建成功回写 job_id 并启动轮询（applyJobTerminal 场景切分分支收敛终态；
-   *  completed 分支的段卡扇出归 IKH8C1）、立刻落盘（best-effort，防刚建任务就关页丢卡）。
- *  创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态（文案可读、卡上重试
- *  按原参数原粒度重发——不静默删卡，用户重试不必重新进会话配置）。
- *  错误提示单源（IKI8L4）：创建走 silent 传输，失败卡由宿主保留，反馈归属由运行时判断。
- *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
- *  无积分预估、不走余额拦截门。 */
+  /** 场景切分任务发送核心（IKJJR5 迁入统一任务运行时）：保留 IKH8BO 顺序——先退会话，
+   *  再本地预建任务占位卡（target_node_id = 该卡节点 id，受理前不伪造恢复标记）、拉来源边
+   *  （origin=scene-split，参考推导跳过），随后 runtime.submit 接管：canvas_binding 组装
+   *  （client_token = submission_id）、受理台账、轮询、终态收敛与多结果扇出（规范
+   *  segment:<n> node_id + 网格排列 + 一笔原子保存 replaceTarget/apply）均在运行时。
+   *  创建失败（门槛拒/网络）：占位卡转失败态（卡上重试按 lastInput 原参数原粒度重发，
+   *  归 runtime.retry）；不静默删卡。免费口径不变：无积分预估、不走余额拦截门。 */
   const runSceneSplitTask = async (input: SceneSplitSubmission): Promise<void> => {
-    const { projectId, source: node, payload } = input;
+    const { source: node, payload } = input;
     const sourceNodeId = node.id;
     sceneSplitSendingRef.current = true;
     const placeholderId = payload.target_node_id;
@@ -8572,33 +8112,38 @@ export default function CanvasPage() {
         source: node,
       }) as Node,
     );
-    // 先同步写 ref 再 setState：后续连线端点与轮询 guard 都要求节点已在（无 pendingNodeIdsRef
-    // 登记：占位卡身份以 sceneSplit 身份标记为准，失败由卡上重试收敛）
+    // 先同步写 ref 再 setState：后续连线端点与运行时宿主读卡都要求节点已在
     const current = mediaNodesRef.current;
     const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
     mediaNodesRef.current = next;
     setMediaNodes(next);
     addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SCENE_SPLIT_EDGE_ORIGIN });
     try {
-      const created = await createVideoSceneSplit(projectId, {
-        ...payload,
-        client_token: newIdempotencyKey(),
-      }, { silent: true });
-      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startVideoSubtitleEraseJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(placeholderId, activeAtCreate);
-      stopJobPolling(placeholderId, jobTimersRef.current);
-      patchMediaNode(placeholderId, { jobId: created.job_id });
-      pollJob(placeholderId, created.job_id);
-      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢卡
-      await flushCanvasSave(projectId).catch(() => {});
-    } catch (e: unknown) {
-      // 创建失败：占位卡转失败态（卡上重试原参数原粒度重发，client_token 重试时另生成）
-      patchMediaNode(placeholderId, {
-        genStatus: 'failed',
-        errorText: isApiError(e) ? e.message : '场景切分任务创建失败，请重试',
-      });
-      throw e;
+      const runtime = generationRuntimeRef.current;
+      const placeholderView = mediaNodesRef.current.find((item) => item.id === placeholderId);
+      if (!runtime || !placeholderView) throw new Error('生成任务运行时未就绪');
+      const dispatched = runtime.submit(
+        sceneSplitTask,
+        {
+          payload: { source_asset_id: payload.source_asset_id, target_node_id: placeholderId, granularity: payload.granularity },
+          target: {
+            targetNodeId: placeholderId,
+            seedTarget: seedTargetOfNode(placeholderView as unknown as RuntimeNodeView),
+            seedSources: seedSourcesOfNode(placeholderId, generationRuntimeHostRef.current!),
+            expectedBindingRevision: runtime.bindingRevisionOf(placeholderId),
+          },
+        },
+        {
+          onCreateFailure: (e: unknown) => {
+            patchMediaNode(placeholderId, {
+              genStatus: 'failed',
+              errorText: isApiError(e) ? e.message : '场景切分任务创建失败，请重试',
+            });
+            return true; // 失败收敛归占位卡（可重试），不落通用失败卡
+          },
+        },
+      );
+      if (!dispatched) throw new Error('场景切分任务提交被拒绝（无项目或在途防重入），请重试');
     } finally {
       sceneSplitSendingRef.current = false;
     }
@@ -8625,59 +8170,104 @@ export default function CanvasPage() {
     linkAssets: async (input) => {
       await linkAudioMixAssetsMutation.mutateAsync({ projectId: input.projectId, assetIds: input.libraryAssetIds });
     },
-    createTask: async ({ projectId, payload }) => {
+    // IKJJR4：提交交生成任务运行时（mixMuxTasks 定义）。占位卡预建（节点 id 预分配 =
+    // canvas_binding.target_node_id，jobId 受理后由运行时回填）+ 来源线先行，失败未受理
+    // 即撤回；受理回执、幂等键（submission_id）、轮询与保存确认归运行时。
+    createTask: async ({ projectId, payload, source }) => {
+      const runtime = generationRuntimeRef.current;
+      if (!runtime) throw new Error('生成任务运行时未就绪，请刷新后重试');
+      // IKJPM4：提交时加载身份——迟到收尾撤回占位前的归属核对要素之一
+      const submitEpoch = docLoadEpochRef.current;
+      // 未受理窗口内同载荷重发沿用同一占位卡身份：运行时按（节点 × 载荷签名）复用
+      // submission_id，回执丢失的原样重发不重复建任务；受理或改参即换新卡新意图。
       const payloadText = JSON.stringify(payload);
-      const previous = audioMixCreateAttemptRef.current;
-      const key = previous?.projectId === projectId && previous.payload === payloadText ? previous.key : newIdempotencyKey();
-      audioMixCreateAttemptRef.current = { projectId, payload: payloadText, key };
-      const task = await createAudioMixMutation.mutateAsync({ projectId, payload, key });
-      if (audioMixCreateAttemptRef.current?.key === key) audioMixCreateAttemptRef.current = null;
-      return task;
-    },
-    handoff: async ({ projectId, payload, source }, created, context) => {
-      // 首保存反馈可以跟随本次发送退出，后来会话使其失效；合法任务照常交付。
-      const saveFeedback = context.isCurrent();
-      context.exitForSubmission();
-      const nodeId = audioMixNodeId(created.job_id);
+      const previousCard = audioMixSubmitCardRef.current;
+      const nodeId = previousCard && previousCard.projectId === projectId
+        && previousCard.payload === payloadText && !previousCard.accepted
+        ? previousCard.nodeId
+        : newNodeId('audio-mix');
+      audioMixSubmitCardRef.current = { projectId, payload: payloadText, nodeId, accepted: false };
       const occupied = [
         ...mediaNodesRef.current,
         ...textNodesRef.current,
         ...productNodesRef.current,
         ...assetNodesRef.current,
       ];
-      const placeholder = attachCallbacks(buildAudioMixPlaceholderNode(
-        created.job_id, payload.output_format, findAudioMixPosition(source, occupied),
-      ));
+      const position = findAudioMixPosition(source, occupied);
+      const placeholder = attachCallbacks(buildAudioMixPlaceholderNode(nodeId, payload.output_format, position));
       const current = mediaNodesRef.current;
-      const next = current.some((node) => node.id === nodeId) ? current : [...current, placeholder];
-      audioMixUnpersistedCardsRef.current.add(nodeId);
-      mediaNodesRef.current = next;
-      setMediaNodes(next);
+      mediaNodesRef.current = current.some((node) => node.id === nodeId) ? current : [...current, placeholder];
+      setMediaNodes(mediaNodesRef.current);
       const liveNodeIds = new Set(current.map((node) => node.id));
       for (const input of payload.inputs) {
         if (input.node_id && liveNodeIds.has(input.node_id)) {
           addCanvasEdge(input.node_id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
         }
       }
-      const firstSave = flushCanvasSave(projectId);
-      audioMixFirstSaveRef.current.set(nodeId, firstSave);
-      try {
-        if (!(await firstSave)) {
-          // 正常发送退出后若没有后来会话，仍提示保存失败；簿记清理不受影响
-          if (saveFeedback && context.isCurrent()) {
-            showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
-          }
-        } else {
-          audioMixUnpersistedCardsRef.current.delete(nodeId);
+      const rollbackPlaceholder = () => {
+        // IKJPM4（F1）：撤回前核对占位仍属本次未受理提交——发起项目未切换、加载身份未更替
+        // （同项目文档重载/切换后同 id 卡属新加载资源）、卡仍在场且仍是未受理占位形态
+        // （受理/恢复会回填 jobId）、公开运行时尚无执行接管（恢复接续/新提交）。核对失败
+        // 只结算旧等待与锁：当前恢复卡、用户编辑与来源连线全部保留，不复活删除目标。
+        // 撤回时连线只删本次提交经 AUDIO_MIX_EDGE_ORIGIN 建的来源边，不动恢复/水合文档里
+        // 的可靠来源关系（含用户拖线）。
+        if (activeProjectRef.current !== projectId) return;
+        if (docLoadEpochRef.current !== submitEpoch) return;
+        const currentNode = mediaNodesRef.current.find((node) => node.id === nodeId);
+        if (!currentNode || currentNode.data?.jobId != null) return;
+        if (generationRuntimeRef.current?.statusOf(nodeId) != null) return;
+        const keepEdge = (edge: Edge) => !(edge.target === nodeId && edge.data?.origin === AUDIO_MIX_EDGE_ORIGIN);
+        mediaNodesRef.current = mediaNodesRef.current.filter((node) => node.id !== nodeId);
+        edgesRef.current = edgesRef.current.filter(keepEdge);
+        setMediaNodes((prev) => prev.filter((node) => node.id !== nodeId));
+        setEdges((prev) => prev.filter(keepEdge));
+      };
+      return await new Promise<{ job_id: string }>((resolve, reject) => {
+        const unwatch = watchMixSubmit(nodeId, {
+          accepted: (jobId) => {
+            const entry = audioMixSubmitCardRef.current;
+            if (entry?.nodeId === nodeId) audioMixSubmitCardRef.current = { ...entry, accepted: true };
+            unwatch();
+            resolve({ job_id: jobId });
+          },
+          failed: (error) => { unwatch(); reject(error); },
+        });
+        const issued = runtime.submit(
+          audioMixTask,
+          {
+            payload,
+            target: {
+              targetNodeId: nodeId,
+              seedTarget: {
+                role: 'result-placeholder',
+                x: position.x,
+                y: position.y,
+                width: 480,
+                height: 284,
+                name: `混合结果.${payload.output_format}`,
+              },
+              seedSources: seedSourcesOfNode(nodeId, generationRuntimeHostRef.current!),
+              expectedBindingRevision: runtime.bindingRevisionOf(nodeId),
+            },
+          },
+          {
+            // 未受理：撤回刚建的占位卡与来源线，错误提示归会话 onError（留在面板重发）
+            onCreateFailure: () => { rollbackPlaceholder(); return true; },
+            // IKJP8B：提交不会受理到底——收尾旧等待、撤回占位并释放会话锁
+            onStale: () => { unwatch(); rollbackPlaceholder(); reject(staleMixSubmitError()); },
+          },
+        );
+        if (!issued) {
+          unwatch();
+          rollbackPlaceholder();
+          reject(new Error('音频混合任务未受理，请重试'));
         }
-      } catch {
-        if (saveFeedback && context.isCurrent()) {
-          showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
-        }
-      } finally {
-        if (audioMixFirstSaveRef.current.get(nodeId) === firstSave) audioMixFirstSaveRef.current.delete(nodeId);
-      }
-      pollJob(nodeId, created.job_id);
+      });
+    },
+    handoff: async (_input, _task, context) => {
+      // 建卡/连线已在 createTask 完成，受理/轮询/落盘确认归运行时；会话仍按原时机退出
+      //（首保存反馈跟随会话时效的旧骨架已由恢复扫描保障替代）。
+      context.exitForSubmission();
     },
     warn: (message) => showToast('warn', message),
     error: (message) => showToast('error', message),
@@ -8687,13 +8277,13 @@ export default function CanvasPage() {
    *  请求发出即返回（飞行期 submitting 防重复提交）；创建往返与轮询收敛由
    *  runSceneSplitTask 承担。 */
 
-  /* ===== 智能抠像发送链路（IKHK9N，镜像场景切分/去字幕家族）：先退会话 → 本地建任务
-     占位卡（target_node_id 取该卡）→ POST video-mattings → job_id 回写占位卡 → 轮询终态 ===== */
+  /* ===== 智能抠像发送链路（IKHK9N，先建占位卡再受理；IKJJR3 受理与后续生命周期归运行时） ===== */
 
-  /** 抠像的预建卡、请求、轮询与任务在途锁由既有画布宿主负责。 */
+  /** 抠像的预建卡保留宿主实现；受理/轮询/归属/保存确认交运行时（client_token = submission_id，
+   *  B.3「工具原 client_token」口径，由家族定义在创建请求内携带）。 */
   const runSmartMattingTask = async (input: SmartMattingSubmission): Promise<void> => {
     smartMattingSendingRef.current = true;
-    const { projectId, source: node, payload: lastInput, clientToken } = input;
+    const { source: node, payload: lastInput } = input;
     const sourceNodeId = node.id;
     const placeholderId = lastInput.target_node_id;
     try {
@@ -8713,22 +8303,10 @@ export default function CanvasPage() {
       mediaNodesRef.current = next;
       setMediaNodes(next);
       addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SMART_MATTING_EDGE_ORIGIN });
-      const created = await createVideoMattingMutation.mutateAsync({
-        projectId,
-        payload: { ...lastInput, client_token: clientToken },
-        silent: true,
-      });
-      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startSceneSplitJob）
-      const activeAtCreate = newNodeId('pending-generation');
-      activeJobByNodeRef.current.set(placeholderId, activeAtCreate);
-      stopJobPolling(placeholderId, jobTimersRef.current);
-      patchMediaNode(placeholderId, { jobId: created.job_id });
-      pollJob(placeholderId, created.job_id);
-      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢卡
-      await flushCanvasSave(projectId).catch(() => {});
-    } catch (error: unknown) {
-      patchMediaNode(placeholderId, { genStatus: 'failed', errorText: isApiError(error) ? error.message : '智能抠像任务创建失败，请重试' });
-      throw error;
+      // IKJJR3：运行时受理失败落失败卡（异步），同步 false 仅发生在无项目/防重入窗口
+      if (!submitVideoToolTask({ kind: 'smartMatting', input: lastInput }, placeholderId)) {
+        patchMediaNode(placeholderId, { genStatus: 'failed', errorText: '智能抠像任务未发出，请重试' });
+      }
     } finally {
       smartMattingSendingRef.current = false;
     }
@@ -8737,7 +8315,6 @@ export default function CanvasPage() {
     getProjectId: () => currentId,
     getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
     newTargetId: () => newNodeId('smart-matting'),
-    newClientToken: newIdempotencyKey,
     isSending: () => smartMattingSendingRef.current,
     runTask: runSmartMattingTask,
     warn: (message) => showToast('warn', message),
@@ -8964,6 +8541,10 @@ export default function CanvasPage() {
       showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
       return true;
     }
+    if (recoverySaveConflictRef.current) {
+      showToast('warn', '画布保存冲突，当前内容已保留，请刷新后复核');
+      return true;
+    }
     return false;
   };
 
@@ -8989,45 +8570,108 @@ export default function CanvasPage() {
     if (nodes.length > 0) confirmedNonEmptyRef.current = true;
   };
 
+  /** IKIMQK / IKJLTY（PR981-REVIEW2-Standards 3）：保存成功落账三件套（防抖自动保存 .then 与
+   *  flush 循环体原为两处平行复制）——以实际落盘载荷登记确认清空资格（确认笔落盘的是原载荷
+   *  而非当前编辑）、对齐实际落盘内容签名（与 lastSavedRef 的差量驱动下一轮防抖/flush 以确认
+   *  后版本补存新内容），并仅当本次新编辑真正落盘（sentSignature 与当前签名一致，非确认笔）
+   *  时核销未保存新增节点（核销口径由调用方给出：防抖删本次快照成员保留飞行中新增，flush 全清）。
+   *  返回是否新内容笔（flush 据此决定收束或继续补存）。 */
+  const settleSavedCanvas = (
+    plan: ReturnType<typeof planRecoverySave>,
+    signature: string,
+    settlePendingNodes: () => void,
+  ): boolean => {
+    registerConfirmedNonEmpty(plan.payload.nodes);
+    lastSavedRef.current = plan.sentSignature;
+    if (plan.sentSignature === signature) {
+      settlePendingNodes();
+      return true;
+    }
+    return false;
+  };
+
   /** 等待在途保存完成并立即落盘当前画布编辑（IKDLQE 应用预览的保存串行化模式；IKDLQF 目标生图提交复用）。
    *  返回 false 表示等待期间项目已切换，调用方应中止后续动作。
    *  IKFS5W：自身也登记进 savePromiseRef，与 800ms 防抖自动保存互斥——同一时刻只有一个 PUT、
-   *  不会两次请求共用同一个 If-Match（调用方持 applyingRef 仍是推荐做法，但不再是正确性前提）。 */
+   *  不会两次请求共用同一个 If-Match（调用方持 applyingRef 仍是推荐做法，但不再是正确性前提）。
+   *  IKJLTY（R6）：存在结果未明确的保留命令时，本次 flush 先原样重放确认原命令（确认笔，
+   *  版本随之对齐），随即以确认后版本保存当前内容（新内容笔）——循环至多两笔，确认笔落定
+   *  后保留命令已释放，第二轮必走新命令或发现签名已对齐而收束。 */
   const flushCanvasSave = (projectId: string): Promise<boolean> => {
     const runFlush = async (): Promise<boolean> => {
       if (activeProjectRef.current !== projectId) return false;
       // IKIIWN：未成功水合（加载失败/切换中，ref 被置 null）不保存——返回 false 语义同项目切换，调用方中止后续动作
       if (hydratedProjectRef.current === null) return false;
       if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
-      const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
-      // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
-      const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
-      // IKIN23：整文档待复核期间一律静默返回 false 不发请求——无论待发节点数；排队中的
-      // flush 在实际执行时同样走到此复查（flush 多为后台链路 .catch(()=>{})，用户可见提示
-      // 由重试保存/项目切换入口给出）
-      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current) return false;
-      const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
-      if (signature !== lastSavedRef.current) {
+      for (;;) {
+        const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+        // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
+        const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
+        // IKIN23：整文档待复核期间一律静默返回 false 不发请求——无论待发节点数；排队中的
+        // flush 在实际执行时同样走到此复查（flush 多为后台链路 .catch(()=>{})，用户可见提示
+        // 由重试保存/项目切换入口给出）
+        if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return false;
+        const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
+        // IKJLTY：签名已对齐但仍有未决命令（确认笔成功、新内容笔丢响应后用户撤回编辑等窗口）
+        //  也不得直接报 saved——先把未决命令重放落定
+        if (signature === lastSavedRef.current && retainedRecoverySaveRef.current?.projectId !== projectId) break;
         // IKILUE：空文档保存的显式确认标记（授予口径见 shouldConfirmEmptyClear），
         // 412 后据此登记清空待复核闸门
         // IKILTB：提到 try 外——catch 登记 412 闸门时同口径复用，不再重写同义表达式（与自动保存路径一致）
         const confirmEmpty = shouldConfirmEmptyClear(nodes);
+        // IKJJR1：恢复保存（有显式待确认状态时）走新协议原子保存；回执回填台账。
+        // IKJKU8：回执丢失后的完全相同重试复用保留命令原载荷与 If-Match 重发（幂等回放）。
+        const plan = planRecoverySave(
+          projectId, signature, { viewport, nodes, edges: edgesRef.current, confirmEmpty },
+        );
+        const { recoveryFields, payload: recoveryPayload } = plan;
         try {
-          const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty }, versionRef.current);
+          const saved = recoveryFields
+            ? await putCanvasDocWithRecovery(
+              projectId,
+              recoveryPayload,
+              plan.ifMatch,
+              { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
+            )
+            : await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty }, versionRef.current);
+          if (recoveryFields) {
+            generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
+            settleRetainedRecoverySave(projectId, recoveryFields.commandId);
+          }
           if (activeProjectRef.current !== projectId) {
             // 旧项目的保存结束后重启当前项目的自动保存防抖。
             setSaveEpoch((value) => value + 1);
             return false;
           }
           versionRef.current = saved.version;
-          // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）
-          registerConfirmedNonEmpty(nodes);
-          lastSavedRef.current = signature;
-          pendingNodeIdsRef.current.clear();
+          // IKIMQK / IKJLTY：成功落账三件套见 settleSavedCanvas；仅确认笔（落盘的是原载荷）
+          //  才继续循环补存当前内容——正常笔成功即收束，不把 flush 期间并发的新状态变化提前
+          //  吃进本次 flush（留给下轮防抖/flush，既有口径）
+          if (!settleSavedCanvas(plan, signature, () => { pendingNodeIdsRef.current.clear(); })) continue;
         } catch (error) {
           if (activeProjectRef.current !== projectId) {
             setSaveEpoch((value) => value + 1);
             throw error;
+          }
+          // IKJKU8：结果落定——明确拒绝（4xx）释放保留命令，响应丢失保留供重放
+          if (recoveryFields) settleRetainedRecoverySave(projectId, recoveryFields.commandId, error);
+          // IKJJR1（验收 8）：新协议保存冲突保留本地内容，不采纳版本重发；闸门至重新水合。
+          //  项冲突（409 recovery_item_conflict）例外：resolve 定向对账后由下次保存重推导。
+          const flushRecoveryReason = readRecoveryErrorReason(error);
+          if (recoveryFields && flushRecoveryReason === 'recovery_item_conflict') {
+            void generationRuntimeRef.current?.reconcileConflictItems(projectId);
+            setSaveBlocked(true);
+            setSaveStatus('error');
+            throw error;
+          }
+          if (recoveryFields && flushRecoveryReason != null) {
+            recoverySaveConflictRef.current = true;
+            setSaveBlocked(true);
+            setSaveStatus('error');
+            throw error;
+          }
+          if (!recoveryFields && readRecoveryErrorReason(error) === 'recovery_protocol_required') {
+            void generationRuntimeRef.current?.recover(projectId);
           }
           const aligned = adoptCanvasConflictVersion(error);
           // IKILUE：带 confirmEmpty 的清空保存 412——登记闸门；flush 链路不 toast（后台调用方多），
@@ -9043,6 +8687,8 @@ export default function CanvasPage() {
           setSaveStatus('error');
           throw error;
         }
+        // 正常笔（含同签名重放笔）成功：当前内容已落盘，收束；确认笔已在上面 continue
+        break;
       }
       setSaveBlocked(false);
       setSaveStatus('saved');
@@ -9057,22 +8703,97 @@ export default function CanvasPage() {
     return queued;
   };
 
-  /** 返回发起项目时立即保存补建的调速卡；保存成功后才移除待恢复记录。 */
-  useEffect(() => {
-    if (!currentId || !doc || canvasLoadFailed) return;
-    const pending = [...audioSpeedPendingSubmissionsRef.current.entries()].filter(([, item]) =>
-      item.projectId === currentId &&
-      mediaNodes.some((node) => node.id === audioSpeedNodeId(item.jobId)) &&
-      (!mediaNodes.some((node) => node.id === item.sourceNodeId) ||
-        edges.some((edge) => edge.source === item.sourceNodeId && edge.target === audioSpeedNodeId(item.jobId))),
-    );
-    if (pending.length === 0) return;
-    const projectId = currentId;
-    void flushCanvasSave(projectId).then((saved) => {
-      if (saved) pending.forEach(([key]) => audioSpeedPendingSubmissionsRef.current.delete(key));
-    }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId, doc, canvasLoadFailed, mediaNodes, edges]);
+  /* ═══ IKJJR1 生成任务运行时宿主与实例 ═══
+   * 每渲染重建宿主实现（闭包读最新画布状态/保存函数），运行时本体只建一次：
+   * 内部所有异步经归属检查（项目/加载身份/承接轮次/删除登记）后才会经宿主写画布。 */
+  generationRuntimeHostRef.current = ({
+    getProjectId: () => activeProjectRef.current,
+    getLoadEpoch: () => docLoadEpochRef.current,
+    getMediaNodes: () => mediaNodesRef.current as unknown as RuntimeNodeView[],
+    findNode: (nodeId) => {
+      const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+      return node ? (node as unknown as RuntimeNodeView) : null;
+    },
+    patchNode: patchMediaNode,
+    insertMediaNode: (node) => {
+      const built = attachCallbacks({
+        id: node.id,
+        type: 'mediaNode',
+        position: node.position,
+        data: {
+          ...node.data,
+          onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
+          onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
+          onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+          onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
+          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+          onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
+          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+          onDownload: (id: string) => actionsRef.current.download(id),
+          onShowDetails: (id: string) => actionsRef.current.showDetails(id),
+          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+          onMediaDims: handleMediaDims,
+        },
+      } as Node);
+      mediaNodesRef.current = [...mediaNodesRef.current, built];
+      setMediaNodes(mediaNodesRef.current);
+    },
+    removeMediaNode: (nodeId) => {
+      // 同步写 ref + setState（页面惯例）：紧随其后的 insertMediaNode/拉来源边读 ref，
+      // 函数式 setState 异步生效会把刚移除的占位卡带回（IKJJR5 扇出交错修复）
+      const next = mediaNodesRef.current.filter((n) => n.id !== nodeId);
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      const nextEdges = edgesRef.current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
+      edgesRef.current = nextEdges;
+      setEdges(nextEdges);
+    },
+    getEdges: () => edgesRef.current.map((edge) => ({ source: edge.source, target: edge.target })),
+    addEdge: (source, target, role, marker) => { addCanvasEdge(source, target, role as VideoRefRole, marker); },
+    getActiveJob: (nodeId) => activeJobByNodeRef.current.get(nodeId),
+    setActiveJob: (nodeId, token) => { activeJobByNodeRef.current.set(nodeId, token); },
+    clearActiveJob: (nodeId) => { activeJobByNodeRef.current.delete(nodeId); },
+    isLocallyRemoved: (nodeId) => locallyRemovedGenerationNodesRef.current.has(nodeId),
+    markLocallyRemoved: (nodeId) => { locallyRemovedGenerationNodesRef.current.add(nodeId); },
+    registerPendingDelete: (nodeId) => { pendingDeleteJobNodesRef.current.add(nodeId); },
+    isPendingDelete: (nodeId) => pendingDeleteJobNodesRef.current.has(nodeId),
+    applyTerminal: (nodeId, jobId, detail) => applyJobTerminal(nodeId, jobId, detail),
+    settleCancelled: settleCancelledNode,
+    saveCanvas: (projectId) => flushCanvasSave(projectId),
+    // IKJKU9：恢复扫描取页经 Query 生命周期（资源旁 generationRecoveryPageOptions，
+    // 按项目+游标 key 隔离、staleTime 0 每轮重扫、retry false 错误单一呈现），
+    // 由运行时扫描编排对账推进游标；错误经运行时 console.warn 等下轮水合重试。
+    fetchRecoveryPage: (projectId, options) => queryClient.fetchQuery(generationRecoveryPageOptions(projectId, options)),
+    toast: (kind, message) => showToast(kind, message),
+    openRechargeForCreditsError,
+    addAuthResume: (fn) => { useAuthPromptStore.getState().addResume(fn); },
+    rememberAsset: rememberGeneratedAsset,
+  } satisfies GenerationRuntimeHost);
+  if (generationRuntimeRef.current == null) {
+    const hostRef = generationRuntimeHostRef;
+    // 转发宿主：每次调用读最新实现（宿主闭包每渲染重建，运行时只持转发层）
+    const forwardHost = new Proxy({} as GenerationRuntimeHost, {
+      get(_target, prop: string) {
+        const impl = hostRef.current as unknown as Record<string, unknown>;
+        const value = impl[prop];
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(impl) : value;
+      },
+    });
+    const runtime = createGenerationRuntime(forwardHost);
+    runtime.register(normalGenerationTask);
+    runtime.register(storyboardTask); // IKJJR6：成片/重生样片提交差异定义（卡片生命周期归 normalGeneration）
+    runtime.register(imageToolsTask);
+    // IKJJR4：混合（audio_mix）/合成（audio_video_mux）家族接入——各自类型定义承载
+    // 专属创建/重试协议与恢复落卡规划；retry/cancel/remove/水合经 claims 分派到此处。
+    runtime.register(audioMixTask);
+    runtime.register(audioVideoMuxTask);
+    runtime.register(sceneSplitTask); // IKJJR5：多结果家族（场景切分/人声分离）
+    runtime.register(vocalSplitTask);
+    runtime.register(videoToolsTask); // IKJJR3：视频处理七类家族（去字幕/分离/截取/调速/抠像/HD/插帧）
+    generationRuntimeRef.current = runtime;
+  }
+  /* IKJJR3：调速「返回发起项目补建卡立即保存」effect 已随跨项目接续机制删除——补卡与
+   * 落盘现由统一恢复扫描在恢复页对账时完成（restore-target 分支自带补卡落盘）。 */
 
   const handleRetryCanvasSave = async () => {
     if (!currentId || applyingRef.current) return;

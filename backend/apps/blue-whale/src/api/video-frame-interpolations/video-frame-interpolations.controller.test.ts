@@ -49,7 +49,7 @@ describe("VideoFrameInterpolationsController.create", () => {
       fps: 60,
     }, {
       providerCredential: "sk-live-token",
-    });
+    }, undefined);
   });
 
   it("enqueues the created job and returns the result unchanged", async () => {

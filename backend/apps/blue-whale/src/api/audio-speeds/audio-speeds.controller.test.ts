@@ -44,7 +44,7 @@ describe("AudioSpeedsController.create", () => {
     expect(result.code).toBe(200);
     expect(service.create).toHaveBeenCalledWith("9", "55", { source_asset_id: "88", speed: 1.35 }, {
       providerCredential: "sk-live-token",
-    });
+    }, undefined);
   });
 
   it("enqueues the created job (tag=type 由 enqueueAudioSpeedJob 常量保证) and returns the result unchanged", async () => {

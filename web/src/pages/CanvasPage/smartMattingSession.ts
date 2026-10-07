@@ -16,13 +16,11 @@ export interface SmartMattingSubmission {
   projectId: string;
   source: Node;
   payload: SmartMattingParams;
-  clientToken: string;
 }
 export interface SmartMattingHost {
   getProjectId(): string | null;
   getSourceNode(nodeId: string): Node | undefined;
   newTargetId(): string;
-  newClientToken(): string;
   isSending(): boolean;
   runTask(input: SmartMattingSubmission): Promise<void>;
   warn(message: string): void;
@@ -44,9 +42,10 @@ export function createSmartMattingSession(
       if (host.isSending()) return null;
       const captured = captureMediaSource(host, state.nodeId, '当前视频尚未关联资产，无法智能抠像', '未选中项目，无法智能抠像');
       if (!captured) return null;
-      const clientToken = host.newClientToken();
+      // IKJJR3：client_token 不再由会话生成——新协议下由生成任务运行时以 submission_id
+      // 作为 client_token 携带（B.3「工具原 client_token = submission_id」口径）。
       return {
-        projectId: captured.projectId, source: captured.source, clientToken,
+        projectId: captured.projectId, source: captured.source,
         payload: buildSmartMattingInput({ sourceAssetId: captured.sourceAssetId, targetNodeId: host.newTargetId(), mode: state.mode, format: state.format, backgroundColor: state.backgroundColor }),
       };
     },

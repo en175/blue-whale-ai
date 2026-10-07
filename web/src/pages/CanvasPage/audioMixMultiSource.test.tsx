@@ -283,6 +283,8 @@ describe('IKI68X 三来源与多段提交', () => {
     await sendMix();
     expect(apiMocks.linkAssetToProject).toHaveBeenCalledWith('p1', '7', { silent: true });
     expect(apiMocks.linkAssetToProject).toHaveBeenCalledWith('p1', '9', { silent: true });
+    // IKJJR4：创建经生成任务运行时——载荷合并 canvas_binding（submission_id = 幂等键，
+    // 目标 = 预分配占位卡节点 id），业务字段原样冻结
     expect(apiMocks.createAudioMix).toHaveBeenCalledWith('p1', {
       source_node_id: 'a1',
       inputs: [
@@ -292,12 +294,28 @@ describe('IKI68X 三来源与多段提交', () => {
         { asset_id: '9' },
       ],
       output_format: 'wav',
+      canvas_binding: {
+        protocol_version: 1,
+        submission_id: expect.any(String),
+        target_node_id: expect.stringMatching(/^audio-mix-/),
+        expected_binding_revision: 0,
+        recovery_seed: {
+          target: { role: 'result-placeholder', x: expect.any(Number), y: expect.any(Number), width: 480, height: 284, name: '混合结果.wav' },
+          sources: [
+            { node_id: 'a1', x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number), name: '播客片头.mp3' },
+            { node_id: 'a2', x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number), name: '背景乐.mp3' },
+          ],
+        },
+      },
     }, { silent: true, idempotencyKey: expect.any(String) });
-    expect(flowProps.current.edges.filter((edge) => edge.target === 'audio-mix-j1')
+    // 结果卡与来源线：预分配 id 承接（jobId 受理后回填），只连接被选中的画布卡
+    const mixCard = flowProps.current.mediaNodes.find((node) => /^audio-mix-/.test(node.id) && node.id !== 'audio-mix-a1');
+    expect(mixCard?.data).toMatchObject({ jobId: 'j1', genStatus: 'generating', mediaType: 'audio' });
+    expect(flowProps.current.edges.filter((edge) => edge.target === mixCard!.id)
       .map((edge) => [edge.source, edge.data?.origin])).toEqual([
         ['a1', AUDIO_MIX_EDGE_ORIGIN], ['a2', AUDIO_MIX_EDGE_ORIGIN],
       ]);
-    expect(flowProps.current.mediaNodes.map((node) => node.id).sort()).toEqual(['a1', 'a2', 'audio-mix-j1']);
+    expect(flowProps.current.mediaNodes.map((node) => node.id).sort()).toEqual(['a1', 'a2', mixCard!.id].sort());
   });
 
   it('服务端拒绝新增资产时保留三来源选择和格式，可直接重发', async () => {

@@ -240,6 +240,27 @@ function nodeById(id: string): Node | undefined {
   return (flowProps.current.mediaNodes as Node[]).find((n) => n.id === id);
 }
 
+/** IKJJR4：混合占位卡节点 id 预分配（非 jobId 派生），按前缀/jobId 定位。 */
+function mixCardByJobId(jobId: string): Node | undefined {
+  return (flowProps.current.mediaNodes as Node[]).find(
+    (n) => n.id.startsWith('audio-mix-') && String(n.data?.jobId) === jobId,
+  );
+}
+
+/** 断言用创建载荷匹配（业务字段 + canvas_binding 形状）。 */
+function mixCreatePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    canvas_binding: expect.objectContaining({
+      protocol_version: 1,
+      submission_id: expect.any(String),
+      target_node_id: expect.stringMatching(/^audio-mix-/),
+      expected_binding_revision: 0,
+      recovery_seed: expect.anything(),
+    }),
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
@@ -291,17 +312,18 @@ describe('IKI68W 画布双音频混合', () => {
     await click('audio-mix-candidate-a2');
     expect(bodyBtn('audio-mix-send').disabled).toBe(false);
     await sendMix();
-    expect(apiMocks.createAudioMix).toHaveBeenCalledWith('p1', {
+    expect(apiMocks.createAudioMix).toHaveBeenCalledWith('p1', mixCreatePayload({
       source_node_id: 'a1',
       inputs: [{ asset_id: '8', node_id: 'a1' }, { asset_id: '6', node_id: 'a2' }],
       output_format: 'mp3',
-    }, { silent: true, idempotencyKey: expect.any(String) });
-    const placeholder = nodeById('audio-mix-j1')!;
+    }), { silent: true, idempotencyKey: expect.any(String) });
+    const placeholder = mixCardByJobId('j1')!;
     expect(placeholder.data).toMatchObject({ fileName: '混合结果.mp3', genStatus: 'generating', src: '' });
     expect(placeholder.position.y).toBeGreaterThan(0);
     const lines = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>).filter(e => e.target === placeholder.id);
     expect(lines.map(e => [e.source, e.data?.origin])).toEqual([['a1', AUDIO_MIX_EDGE_ORIGIN], ['a2', AUDIO_MIX_EDGE_ORIGIN]]);
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+    // IKJJR4：无首保存骨架——占位卡经防抖自动保存落盘、受理回执丢失由恢复扫描兜底
+    expect((flowProps.current.mediaNodes as Node[]).filter((n) => n.id.startsWith('audio-mix-'))).toHaveLength(1);
   });
 
   it('创建拒绝保持编辑和选择，不留下卡与来源线', async () => {
@@ -313,7 +335,7 @@ describe('IKI68W 画布双音频混合', () => {
     await sendMix();
     expect(sendBar()).not.toBeNull();
     expect(bodyBtn('audio-mix-send').disabled).toBe(false);
-    expect(nodeById('audio-mix-j1')).toBeUndefined();
+    expect((flowProps.current.mediaNodes as Node[]).filter((n) => n.id.startsWith('audio-mix-'))).toEqual([]);
     expect(flowProps.current.edges).toEqual([]);
   });
 
@@ -334,7 +356,7 @@ describe('IKI68W 画布双音频混合', () => {
     expect(attempts[0]?.[2].idempotencyKey).toMatch(/^[!-~]{1,128}$/);
     expect(attempts[1]?.[2].idempotencyKey).toBe(attempts[0]?.[2].idempotencyKey);
     expect(attempts[2]?.[2].idempotencyKey).not.toBe(attempts[0]?.[2].idempotencyKey);
-    expect(nodeById('audio-mix-j1')).toBeUndefined();
+    expect((flowProps.current.mediaNodes as Node[]).filter((n) => n.id.startsWith('audio-mix-'))).toEqual([]);
   });
 
   it('上一次创建已受理后，相同选择可发起新的混合任务', async () => {
@@ -353,9 +375,10 @@ describe('IKI68W 画布双音频混合', () => {
     }
     const attempts = apiMocks.createAudioMix.mock.calls as Array<[string, unknown, { idempotencyKey: string }]>;
     expect(attempts).toHaveLength(2);
+    // 受理即作废提交意图：第二次发送是新 submission_id（新卡新意图）
     expect(attempts[1]?.[2].idempotencyKey).not.toBe(attempts[0]?.[2].idempotencyKey);
-    expect(nodeById('audio-mix-j1')).toBeDefined();
-    expect(nodeById('audio-mix-j2')).toBeDefined();
+    expect(mixCardByJobId('j1')).toBeDefined();
+    expect(mixCardByJobId('j2')).toBeDefined();
   });
 
   it('创建请求及结果卡落盘期间禁止切换项目', async () => {
@@ -371,7 +394,7 @@ describe('IKI68W 画布双音频混合', () => {
     expect(bodyBtn('switch-p2').textContent).toBe('p1');
     expect(apiMocks.createAudioMix).toHaveBeenCalledTimes(1);
     await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
-    expect(nodeById('audio-mix-j1')).toBeDefined();
+    expect(mixCardByJobId('j1')).toBeDefined();
     expect(bodyBtn('switch-p2').textContent).toBe('p1');
   });
 
@@ -386,7 +409,7 @@ describe('IKI68W 画布双音频混合', () => {
     apiMocks.saveCanvasDoc.mockImplementation(() => new Promise((resolve) => { resolveSave = resolve; }));
     await click('audio-mix-send');
     await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled());
-    expect(nodeById('audio-mix-j1')).toBeDefined();
+    expect(mixCardByJobId('j1')).toBeDefined();
     await click('switch-p2');
     expect(bodyBtn('switch-p2').textContent).toBe('p1');
     await act(async () => { resolveSave({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }); });
@@ -411,11 +434,11 @@ describe('IKI68W 画布双音频混合', () => {
     await act(async () => { resolveSwitchSave({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }); });
     expect(bodyBtn('switch-p2').textContent).toBe('p1');
     await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
-    expect(nodeById('audio-mix-j1')).toBeDefined();
+    expect(mixCardByJobId('j1')).toBeDefined();
     expect(bodyBtn('switch-p2').textContent).toBe('p1');
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
+    // IKJJR4：无首保存骨架——仅切换闸门这一笔保存；结果卡经防抖自动保存与恢复扫描兜底
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     expect(apiMocks.saveCanvasDoc).toHaveBeenNthCalledWith(1, 'p1', expect.anything(), expect.anything());
-    expect(apiMocks.saveCanvasDoc).toHaveBeenNthCalledWith(2, 'p1', expect.anything(), expect.anything());
   });
 
   it('请求期间地址栏跳到另一项目也不把结果卡写进另一画布', async () => {
@@ -430,7 +453,7 @@ describe('IKI68W 画布双音频混合', () => {
     await act(async () => { navigateTo('/canvas?project=p2'); });
     expect(bodyBtn('switch-p2').textContent).toBe('p1');
     await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
-    expect(nodeById('audio-mix-j1')).toBeDefined();
+    expect(mixCardByJobId('j1')).toBeDefined();
     expect(bodyBtn('switch-p2').textContent).toBe('p1');
   });
 
@@ -449,8 +472,8 @@ describe('IKI68W 画布双音频混合', () => {
     expect(apiMocks.createAudioMix).toHaveBeenCalledWith('p1', expect.objectContaining({
       inputs: [{ asset_id: '8', node_id: 'a1' }, { asset_id: '6', node_id: 'a2' }],
     }), { silent: true, idempotencyKey: expect.any(String) });
-    expect(nodeById('audio-mix-j1')).toBeDefined();
-    expect(flowProps.current.edges.filter((edge) => edge.target === 'audio-mix-j1').map((edge) => edge.source)).toEqual(['a1']);
+    expect(mixCardByJobId('j1')).toBeDefined();
+    expect(flowProps.current.edges.filter((edge) => edge.target === mixCardByJobId('j1')!.id).map((edge) => edge.source)).toEqual(['a1']);
   });
 
   it('成功沿用同卡并回填服务端权威时长', async () => {
@@ -464,7 +487,7 @@ describe('IKI68W 画布双音频混合', () => {
     await click('audio-mix-add');
     await click('audio-mix-candidate-a2');
     await sendMix();
-    expect(nodeById('audio-mix-j1')?.data).toMatchObject({
+    expect(mixCardByJobId('j1')?.data).toMatchObject({
       fileName: '混合结果.mp3', src: 'http://tos/mixed.mp3', assetId: 'a88', duration: 42.75,
     });
     expect(nodeById('a1')?.data.assetId).toBe('8');

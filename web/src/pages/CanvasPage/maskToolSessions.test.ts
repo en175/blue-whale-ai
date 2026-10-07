@@ -68,8 +68,9 @@ it('去字幕框选必框、smart保持零框语义；发送冻结归一化框�
   const inputs: VideoSubtitleEraseInput[] = [];
   const tool = runtime.register(createSubtitleEraseSession(() => ({
     getProjectId: () => 'p1', getSourceNode: () => source, newTargetId: () => 'subtitle1',
-    createTask: async ({ payload }) => { inputs.push(payload); return { job_id: 'j1' }; },
-    handoff: async () => { expect(tool.getSnapshot().state).toBeNull(); }, warn() {}, error() {},
+    // IKJJR3：提交点同步 startTask（受理归生成任务运行时）
+    startTask: ({ payload }) => { inputs.push(payload); expect(tool.getSnapshot().state).toBeNull(); return true; },
+    warn() {}, error() {},
   })));
   tool.open({ nodeId: 'img', mode: 'box' }, deps);
   expect(tool.send()).toBe(false);

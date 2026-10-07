@@ -15,7 +15,7 @@ import {
   renderPage,
   unmountPage,
 } from './testing/canvasPageTestHarness';
-import { AUDIO_TRIM_EDGE_ORIGIN, audioTrimNodeId } from './audioTrim';
+import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
 
 /** 项目一画布：两张就绪音频卡 a1（assetId '8'，15 秒 mp3）与 b1（assetId '9'，20 秒） */
 function seedProjectA() {
@@ -116,26 +116,31 @@ describe('IKI61O 截取会话纪元（迟到响应不误关同项目新会话）
       await renderPage();
       await enterTrim('a1');
       await clickSend();
-      // X 关旧会话 → 同项目另一张卡开新会话
-      await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="audio-trim-close"]')!.click(); });
+      // IKJJR3：提交点即交接（旧会话已退）→ 同项目另一张卡开新会话
       await enterTrim('b1');
-      if (bSubmitting) await clickSend();
-      const rangeBefore = rangeText();
+      if (bSubmitting) {
+        await clickSend();
+        // b 提交点即交接（b 会话退、占位卡上画布）；a 的迟到响应不动 b
+        expect(sendBar()).toBeNull();
+      }
+      const rangeBefore = bSubmitting ? undefined : rangeText();
       await act(async () => {
         if (outcome === 'success') resolveA({ job_id: 'old-a', status: 'queued' });
         else rejectA(new Error('old request failed'));
       });
       await flush();
       // 新会话不被旧响应关闭、参数不被复位、提交锁不被释放
-      expect(sendBar()).not.toBeNull();
-      expect(sendBtn()!.disabled).toBe(bSubmitting);
-      expect(rangeText()).toBe(rangeBefore);
+      if (!bSubmitting) {
+        expect(sendBar()).not.toBeNull();
+        expect(sendBtn()!.disabled).toBe(false);
+        expect(rangeText()).toBe(rangeBefore);
+      }
       expect(document.body.textContent).not.toContain('音频截取任务创建失败');
       if (outcome === 'success') {
-        // 旧任务照常收尾：占位卡 + 来源边 + 轮询
-        const oldCard = mediaNode(audioTrimNodeId('old-a'));
-        expect(oldCard.data.jobId).toBe('old-a');
-        expect(edges().some((edge) => edge.source === 'a1' && edge.target === audioTrimNodeId('old-a')
+        // 旧任务照常收尾：占位卡（预分配 id）+ 来源边 + 轮询
+        const oldCard = mediaNodes().find((n) => n.id.startsWith('audio-trim-') && n.data.jobId === 'old-a')!;
+        expect(oldCard).toBeTruthy();
+        expect(edges().some((edge) => edge.source === 'a1' && edge.target === oldCard.id
           && edge.data?.origin === AUDIO_TRIM_EDGE_ORIGIN)).toBe(true);
       }
       // 新会话自身的发送闭环不受旧响应影响
@@ -143,7 +148,7 @@ describe('IKI61O 截取会话纪元（迟到响应不误关同项目新会话）
       await act(async () => { resolveB({ job_id: 'new-b', status: 'queued' }); });
       await flush();
       expect(sendBar()).toBeNull();
-      expect(mediaNode(audioTrimNodeId('new-b')).data.jobId).toBe('new-b');
+      expect(mediaNodes().find((n) => n.id.startsWith('audio-trim-') && n.data.jobId === 'new-b')).toBeTruthy();
     },
   );
 
@@ -154,19 +159,19 @@ describe('IKI61O 截取会话纪元（迟到响应不误关同项目新会话）
     await clickSend();
     await flush();
     expect(sendBar()).toBeNull();
-    const card = mediaNode(audioTrimNodeId('j-ok'));
+    const card = mediaNodes().find((n) => n.id.startsWith('audio-trim-'))!;
     expect(card.data.jobId).toBe('j-ok');
-    expect(edges().some((edge) => edge.source === 'a1' && edge.target === audioTrimNodeId('j-ok'))).toBe(true);
+    expect(edges().some((edge) => edge.source === 'a1' && edge.target === card.id)).toBe(true);
   });
 
-  it('未动会话场景：发送失败停留编辑态并提示（与现状一致）', async () => {
+  it('未动会话场景：发送失败落失败卡可重试（IKJJR3 提交点即交接）', async () => {
     apiMocks.createAudioTrim.mockImplementationOnce(async () => { throw new Error('boom'); });
     await renderPage();
     await enterTrim('a1');
     await clickSend();
     await flush();
-    expect(sendBar()).not.toBeNull();
-    expect(sendBtn()!.disabled).toBe(false);
-    expect(document.body.textContent).toContain('音频截取任务创建失败');
+    expect(sendBar()).toBeNull();
+    const card = mediaNodes().find((n) => n.id.startsWith('audio-trim-'))!;
+    expect(card.data.genStatus).toBe('failed');
   });
 });

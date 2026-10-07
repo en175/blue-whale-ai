@@ -42,7 +42,7 @@ describe("ImageCutoutsController.create", () => {
     expect(result.code).toBe(200);
     expect(service.create).toHaveBeenCalledWith("9", "55", { source_asset_id: "88" }, {
       providerCredential: "sk-live-token",
-    });
+    }, undefined);
   });
 
   it("enqueues the created job and returns the result unchanged", async () => {

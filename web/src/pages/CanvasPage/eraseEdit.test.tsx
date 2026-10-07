@@ -261,6 +261,8 @@ beforeEach(() => {
   apiMocks.uploadAssetFile.mockReset();
   apiMocks.createImageErase.mockReset();
   apiMocks.fetchJobStatus.mockReset();
+  // IKJJR2：受理后统一运行时立即开始轮询——reset 后需有默认进行中实现（防 undefined.then）
+  apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j77', status: 'processing', progress: 0, asset: null });
   apiMocks.uploadAssetFile.mockResolvedValue({
     asset_id: '901',
     status: 'ready',

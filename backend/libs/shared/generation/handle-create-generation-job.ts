@@ -17,6 +17,9 @@ import { createHash } from "node:crypto";
 import {
   resolvePromptMaxLength,
   IDEMPOTENCY_CONFLICT_CODE,
+  RECOVERY_REASONS,
+  canvasBindingSchema,
+  type CanvasBinding,
   ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
   ERROR_INVALID_REFERENCE_TYPE,
@@ -73,6 +76,8 @@ import {
 import {
   DEFAULT_IMAGE_REFERENCE_MAX,
   CREATE_GENERATION_JOB_OPERATION,
+  RecoveryContractError,
+  type CanvasRecoveryAcceptance,
   type CanvasRepo,
   type CreateJobIdempotency,
   type CreateJobInput,
@@ -162,6 +167,10 @@ export interface CreateGenerationJobBody {
    *  未开样片的请求不读这两个字段——普通视频创建语义零变化。 */
   expected_credits?: unknown;
   quote_revision?: unknown;
+  /** IKJJQU（IKIXK9-SPEC-20261002 B.3）：恢复契约 v1 绑定。携带时新协议受理：
+   *  幂等回读先于可变业务校验；绑定版本核对在受理事务锁内；冲突在任务写入与
+   *  billing.hold 前拒绝。请求摘要自动覆盖（canonicalJson 处理整个 body）。 */
+  canvas_binding?: unknown;
 }
 
 /** 素材库引用（MaterialReference）：仅格式校验（Asset- 前缀），存在性/状态由上游强校验。 */
@@ -1628,11 +1637,22 @@ export function generationCreateRequestHash(
  *  「同键异载荷」（同一把钥匙配了不同的载荷）判**冲突并报错**，不静默返回首次结果：
  *  静默重放会把「用户改了参数再提交」悄悄变成「又拿到那个旧任务」——他以为提交的是新参数，
  *  拿到的却是另一个任务，这比报错难查得多。同键同载荷的重放走 `ok(result)`，
- *  响应体与第一次完全一致（含 `generation_job_id`）。与重试端点同码同文案。 */
-function createJobEnvelope(result: CreateJobResult) {
-  return "kind" in result
-    ? fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷")
-    : ok(result);
+ *  响应体与第一次完全一致（含 `generation_job_id`）。与重试端点同码同文案。
+ *  IKJJQU：携带 canvas_binding 的请求在成功 data 上追加 canvas_binding 字段
+ *  （protocol_version/submission_id/target_node_id/binding_revision/job_id/is_current）。 */
+function createJobEnvelope(
+  result: CreateJobResult,
+  bindingView?: {
+    protocol_version: number;
+    submission_id: string;
+    target_node_id: string;
+    binding_revision: number;
+    job_id: string;
+    is_current: boolean;
+  } | null,
+) {
+  if ("kind" in result) return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
+  return ok(bindingView ? { ...result, canvas_binding: bindingView } : result);
 }
 
 /** POST /api/projects/{projectId}/generation-jobs：创建生成任务（queued）+ 预留点数 + 日志。
@@ -1653,6 +1673,27 @@ export async function handleCreateGenerationJob(
   const owned = await deps.projects.findOwnedById(projectId, userId);
   if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
+  // 1.5 IKJJQU：canvas_binding 纯载荷校验（请求结构与幂等承载一致性）。
+  //   位置在幂等回读与可变业务校验之前（B.3 受理事务顺序第 1 步）：
+  //   Idempotency-Key 必须等于 submission_id，两者并存时不一致即 400。
+  const normalizedKey = (idempotencyKey ?? "").trim();
+  if (normalizedKey.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+    return fail(PARAM_MISSING_CODE, `Idempotency-Key 过长（上限 ${IDEMPOTENCY_KEY_MAX_LENGTH} 字符）`);
+  }
+  let canvasBinding: CanvasBinding | null = null;
+  if (body.canvas_binding !== undefined) {
+    const parsedBinding = canvasBindingSchema.safeParse(body.canvas_binding);
+    if (!parsedBinding.success) {
+      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+    }
+    canvasBinding = parsedBinding.data;
+    if (normalizedKey !== canvasBinding.submission_id) {
+      return fail(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", {
+        reason: RECOVERY_REASONS.invalidPayload,
+      });
+    }
+  }
+
   // 2. 幂等（command_idempotency，operation=generation.create）。
   //
   // ⚠️ 位置在**任何依赖当前状态的校验之前**：模型白名单、素材状态门、画布目标快照都可能
@@ -1661,10 +1702,8 @@ export async function handleCreateGenerationJob(
   //
   // 客户端没带（或只发了空白）Idempotency-Key → 完全不接幂等，行为与加幂等表之前一致：
   // 每次提交都是新任务，不强制要求这个头（老客户端不受影响）。
-  const normalizedKey = (idempotencyKey ?? "").trim();
-  if (normalizedKey.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
-    return fail(PARAM_MISSING_CODE, `Idempotency-Key 过长（上限 ${IDEMPOTENCY_KEY_MAX_LENGTH} 字符）`);
-  }
+  // IKJJQU：同意图同载荷重放返回原关联（含 canvas_binding 视图，is_current 现查、
+  // 不将旧关联重新设为当前），不因素材删除/模型停用/报价变化重做当前状态校验。
   const idempotency: CreateJobIdempotency | null =
     normalizedKey === ""
       ? null
@@ -1677,7 +1716,7 @@ export async function handleCreateGenerationJob(
       projectId,
       idempotency,
     );
-    if (replayed) return createJobEnvelope(replayed);
+    if (replayed) return createJobEnvelope(replayed, canvasBinding ? await deps.command.canvasBindingView(projectId, canvasBinding.submission_id) : undefined);
   }
 
   // 3. 类型分派 + 校验（ADR-0086：视频/音频参考限制校验读能力行 features，先于模型白名单解析前
@@ -2254,12 +2293,37 @@ export async function handleCreateGenerationJob(
           billingDep.release({ userId: String(userId), jobId, reason }),
       }
     : undefined;
-  const created = await deps.command.createJob(cmdInput, {
-    ...(billing ? { billing } : {}),
-    ...(idempotency ? { idempotency } : {}),
-  });
+  // IKJJQU：新协议受理数据（纯数据，进事务后由 createJobWithinTx 在锁内核对归属版本）。
+  const canvasRecovery: CanvasRecoveryAcceptance | undefined = canvasBinding
+    ? {
+        projectId,
+        userId,
+        binding: canvasBinding,
+        operation: CREATE_GENERATION_JOB_OPERATION,
+        requestHash: idempotency!.requestHash,
+        idempotencyKey: idempotency!.key,
+        taskType: type,
+      }
+    : undefined;
+  let created: CreateJobResult;
+  try {
+    created = await deps.command.createJob(
+      { ...cmdInput, ...(canvasRecovery ? { canvasRecovery } : {}) },
+      {
+        ...(billing ? { billing } : {}),
+        ...(idempotency ? { idempotency } : {}),
+      },
+    );
+  } catch (error) {
+    // B.8：新协议受控错误信封直写（code=HTTP 状态），不经 AllExceptionsFilter（会置空 data）。
+    if (error instanceof RecoveryContractError) return error.envelope;
+    throw error;
+  }
   // 并发同键（两个请求同时过了第 2 步的快路径）：唯一索引只放一个事务进，我们这侧的事务
   // 连同那笔预扣已整体回滚（billing 补偿已把钱退掉），repo 回读到赢家那一行就交回这里。
   // 于是两个请求拿到**同一个** generation_job_id，只留一笔预扣。
-  return createJobEnvelope(created);
+  return createJobEnvelope(
+    created,
+    canvasBinding ? await deps.command.canvasBindingView(projectId, canvasBinding.submission_id) : undefined,
+  );
 }

@@ -7,13 +7,17 @@ import {
   ERROR_JOB_NOT_RETRYABLE_STATUS,
   IDEMPOTENCY_CONFLICT_CODE,
   PARAM_MISSING_CODE,
+  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
+  canvasBindingSchema,
   errorCodeToNumeric,
   fail,
   messageOf,
   ok,
+  type CanvasBinding,
 } from "@lib/contracts";
 import type {
+  CanvasRecoveryAcceptance,
   GenerationCommandRepo,
   ProjectRepo,
 } from "@lib/shared/persistence/index.js";
@@ -26,7 +30,11 @@ import type { MaterialGate } from "./handle-create-generation-job.js";
  *  路由拿到 type 后按 image（RocketMQ）/ video（RocketMQ）/ audio（RocketMQ）重新入队。
  *
  *  IKF YHJ（ADR-0087 决策 7）：原 job 的参数快照照搬，但快照里那批素材的校验状态可能
- *  在首次生成之后变了。重过同一道素材状态门（`materialGate`），不通过则不建重试行。 */
+ *  在首次生成之后变了。重过同一道素材状态门（`materialGate`），不通过则不建重试行。
+ *
+ *  IKJJQU（B.3）：通用重试可携带 canvas_binding（新 submission_id 独立提交身份）。
+ *  原 job 无可信受理关联或目标不一致时拒绝迁移（不建行）；绑定版本核对在重试事务
+ *  锁内，冲突在重试行写入前拒绝。 */
 export async function handleRetryGenerationJob(
   userId: string,
   projectId: string,
@@ -35,18 +43,45 @@ export async function handleRetryGenerationJob(
   body: string,
   deps: {
     projects: Pick<ProjectRepo, "findOwnedById">;
-    command: Pick<GenerationCommandRepo, "retryJob">;
+    command: Pick<GenerationCommandRepo, "retryJob" | "canvasBindingView">;
     /** 缺省则不做素材校验（接线方未提供——调用方必须显式知道这个取舍）。 */
     materialGate?: MaterialGate;
   },
+  canvasBindingBody?: unknown,
 ) {
   const owned = await deps.projects.findOwnedById(projectId, userId);
   if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   if (idempotencyKey.trim() === "") {
     return fail(PARAM_MISSING_CODE, "Idempotency-Key 不能为空");
   }
+  // IKJJQU：canvas_binding 纯载荷校验（Idempotency-Key 必须等于 submission_id）。
+  let canvasBinding: CanvasBinding | null = null;
+  if (canvasBindingBody !== undefined && canvasBindingBody !== null) {
+    const parsed = canvasBindingSchema.safeParse(canvasBindingBody);
+    if (!parsed.success) {
+      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+    }
+    canvasBinding = parsed.data;
+    if (idempotencyKey.trim() !== canvasBinding.submission_id) {
+      return fail(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", {
+        reason: RECOVERY_REASONS.invalidPayload,
+      });
+    }
+  }
   const requestHash = generationRetryRequestHash(projectId, jobId, body);
   const gate = deps.materialGate;
+  // canvas_binding 的请求摘要与幂等 body 摘要同源（body 序列化已覆盖 canvas_binding 字段）。
+  const canvasRecovery: CanvasRecoveryAcceptance | undefined = canvasBinding
+    ? {
+        projectId,
+        userId,
+        binding: canvasBinding,
+        operation: "generation.retry",
+        requestHash,
+        idempotencyKey: canvasBinding.submission_id,
+        taskType: "",
+      }
+    : undefined;
   const retry = await deps.command.retryJob(
     jobId,
     projectId,
@@ -57,10 +92,18 @@ export async function handleRetryGenerationJob(
       ? (input, jobType) =>
           gate.assertInputUsable({ userId, jobInput: input, jobType })
       : undefined,
+    canvasRecovery,
   );
   if (!retry) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   if ("generation_job_id" in retry) {
-    return ok(retry);
+    // IKJJQU：携带 canvas_binding 时在成功 data 上追加 canvas_binding 字段（受理与重放同形）。
+    if (!canvasBinding) return ok(retry);
+    const bindingView = await deps.command.canvasBindingView(projectId, canvasBinding.submission_id);
+    return ok(bindingView ? { ...retry, canvas_binding: bindingView } : retry);
+  }
+  if (retry.kind === "recovery_contract_error") {
+    // B.8：新协议受控错误信封直写（code=HTTP 状态）。
+    return retry.envelope;
   }
   if (retry.kind === "finalize_retry_closed") {
     // IKIZQC（G08）：首版关闭同 Draft ID 成片重试——失败成片保留占位，继续创作走

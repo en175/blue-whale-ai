@@ -36,6 +36,8 @@ function buildService(current: CanvasRow | null = null) {
   };
   const client = {
     canvas: { findFirst: vi.fn().mockResolvedValue(current) },
+    // IKJJQU：save() 的 B.7 守护读恢复关联表（默认无关联 → 旧行为）。
+    generation_canvas_submissions: { findFirst: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn(
       async (callback: (client: typeof tx) => Promise<unknown>) =>
         callback(tx),
@@ -46,6 +48,13 @@ function buildService(current: CanvasRow | null = null) {
     { findOwnedById: vi.fn().mockResolvedValue({ id: "1" }) } as never,
   );
   return { service, client, tx };
+}
+
+/** IKJJQU：B.7 旧客户端边界——存在新协议关联的项目缺 If-Match → 428 canvas_version_required。 */
+function buildProtectedService(current: CanvasRow | null = null) {
+  const built = buildService(current);
+  built.client.generation_canvas_submissions.findFirst.mockResolvedValue({ id: 1n });
+  return built;
 }
 
 const NODES = JSON.stringify([
@@ -455,5 +464,38 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
 
     expect(result.code).toBe(200);
     expect(tx.canvas.create).toHaveBeenCalled();
+  });
+});
+
+// IKJJQU（B.7 已批准的旧客户端边界）：存在新协议关联的项目，整文档写必须带实际版本。
+describe("CanvasService.save 受保护项目版本要求（IKJJQU B.7）", () => {
+  const nonEmptyRow = {
+    id: 1n,
+    project_id: 1n,
+    version: 3,
+    viewport_json: {},
+    nodes_json: JSON.parse(NODES),
+    edges_json: [],
+  };
+  it("项目存在新协议关联且缺 If-Match → 428 canvas_version_required，零写入", async () => {
+    const { service, tx } = buildProtectedService(null);
+
+    const result = await service.save("u1", "1", saveBody([]));
+
+    expect(result).toMatchObject({
+      code: 428,
+      data: { reason: "canvas_version_required" },
+    });
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("带版本旧请求普通编辑仍可用（无受保护标记节点时不拦）", async () => {
+    const { service, tx } = buildProtectedService({ ...nonEmptyRow });
+
+    const result = await service.save("u1", "1", saveBody([{ id: "text-1", source: "text-1", target: "media-1" }], 3));
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.updateMany).toHaveBeenCalled();
   });
 });

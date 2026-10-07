@@ -151,3 +151,30 @@ describe("CanvasesController.save 响应写出", () => {
     expect(res.json).not.toHaveBeenCalled();
   });
 });
+
+// IKJKUA：受控错误判定已收敛到共享适配器（canvases 域传入画布保存冲突白名单集合）。
+// 本用例锚住收敛后的直写行为：code 即 HTTP 状态、信封（含 data.reason）原样写出。
+describe("CanvasesController.listGenerationRecovery 受控信封直写（IKJKUA）", () => {
+  it("受控错误（409 + data.reason）→ 按信封 code 直写状态码，信封原样透传", async () => {
+    const envelope = {
+      code: 409,
+      msg: "画布存在未收口的恢复冲突",
+      data: { reason: "canvas_recovery_conflict" },
+    };
+    const canvas = {
+      listGenerationRecovery: vi.fn().mockResolvedValue(envelope),
+    } as unknown as CanvasService;
+    const controller = new CanvasesController(canvas);
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    } as unknown as Response & { status: ReturnType<typeof vi.fn>; json: ReturnType<typeof vi.fn> };
+
+    await controller.listGenerationRecovery(USER, "523", res, undefined, undefined);
+
+    expect(res.status).toHaveBeenCalledTimes(1);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledTimes(1);
+    expect(res.json).toHaveBeenCalledWith(envelope);
+  });
+});

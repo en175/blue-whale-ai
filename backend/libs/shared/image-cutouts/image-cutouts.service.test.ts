@@ -1,8 +1,40 @@
 // IKGXM1：抠图创建入口复核矩阵与免费口径单测（先例：image-erasures.service.test.ts）。
 // 只测外部可见行为：拒绝原因可读、落库参数冻结、免费口径无成本预留、凭证冻结、按场景两档上限。
-import { describe, expect, it, vi } from "vitest";
+// IKJLTX：追加已受理意图重放先于素材等可变状态的顺序分支（B.3 受理事务顺序）。
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImageCutoutsService } from "./image-cutouts.service.js";
+
+const { lockMock, bindingViewMock, readIdemMock, writeRowsMock, writeIdemMock } = vi.hoisted(() => ({
+  lockMock: vi.fn(),
+  bindingViewMock: vi.fn(),
+  readIdemMock: vi.fn(),
+  writeRowsMock: vi.fn(),
+  writeIdemMock: vi.fn(),
+}));
+
+vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/persistence/index.js")>();
+  return {
+    ...actual,
+    lockCanvasRecoveryForAcceptance: lockMock,
+    canvasBindingView: bindingViewMock,
+    readCreateIdempotency: readIdemMock,
+    writeCanvasRecoveryRows: writeRowsMock,
+    transactionWithUniqueRetry: (_prisma: unknown, fn: (tx: unknown) => Promise<unknown>) =>
+      fn(_prisma),
+  };
+});
+
+vi.mock("@lib/shared/persistence/generation-job-idempotency.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@lib/shared/persistence/generation-job-idempotency.js")>();
+  return { ...actual, writeCreateIdempotency: writeIdemMock };
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 const VALID_GENERAL_BODY = {
   source_asset_id: "88",
@@ -59,7 +91,11 @@ function makeService(overrides: {
   const costCreate = vi.fn();
   const prisma = {
     client: {
-      generation_jobs: { create },
+      // findUnique：重放时 currentJobStatus 现查任务状态（工单场景原任务 501 已 processing）。
+      generation_jobs: {
+        create,
+        findUnique: vi.fn().mockResolvedValue({ status: "processing" }),
+      },
       // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
@@ -398,5 +434,148 @@ describe("ImageCutoutsService.create：请求方凭证冻结（断链防护）",
     const result = await service.create("9", "55", VALID_HUMAN_BODY);
     expect(result.code).toBe(200);
     expect(create.mock.calls[0][0].data.input).toEqual(VALID_HUMAN_BODY);
+  });
+});
+
+describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理事务顺序）", () => {
+  const SUBMISSION_ID = "0a1b2c3d-0000-4000-8000-00000000a001";
+
+  const CANVAS_BINDING = {
+    protocol_version: 1,
+    submission_id: SUBMISSION_ID,
+    target_node_id: "node-1",
+    expected_binding_revision: 0,
+    recovery_seed: {
+      target: { role: "result-placeholder", x: 0, y: 0, width: 100, height: 100, name: "" },
+      sources: [],
+    },
+  };
+
+  /** 首次受理的共享段 stub 链：幂等 miss → 锁通过（版本 0→1）→ 建行 400。 */
+  function stubFreshAcceptance() {
+    readIdemMock.mockResolvedValue(null);
+    lockMock.mockResolvedValue({
+      kind: "plan",
+      plan: { acceptance: {}, bindingRevision: 1, previousTargetSnapshot: null, supersededSubmissionId: null },
+    });
+    bindingViewMock.mockResolvedValue(null);
+  }
+
+  it("素材删除后同载荷重放返回原任务 501 与原关联，不重新拒绝、不重复受理", async () => {
+    stubFreshAcceptance();
+    // 第一次查到素材（受理成功），第二次模拟素材已删除（findOwnedSource → null）。
+    const findOwnedSource = vi
+      .fn()
+      .mockResolvedValueOnce(makeImageAsset())
+      .mockResolvedValueOnce(null);
+    const { service, create, costCreate } = makeService({
+      assets: { findOwnedSource },
+    });
+
+    const first = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(first.code).toBe(200);
+    expect(first.data).toMatchObject({ job_id: "400", status: "queued" });
+
+    // 已受理意图重放：受控幂等读取命中原任务 501（现查状态 processing）与原关联。
+    readIdemMock.mockResolvedValue({ generation_job_id: "501", cursor: 0 });
+    bindingViewMock.mockResolvedValue({
+      protocol_version: 1,
+      submission_id: SUBMISSION_ID,
+      target_node_id: "node-1",
+      binding_revision: 1,
+      job_id: "501",
+      is_current: true,
+    });
+    const replay = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(replay.code).toBe(200);
+    expect(replay.data).toMatchObject({
+      job_id: "501",
+      status: "processing",
+      canvas_binding: { submission_id: SUBMISSION_ID, job_id: "501", is_current: true },
+    });
+    // 回读先于素材查询：重放没有再碰素材（第二次 null 若被读取即 404 拒绝）。
+    expect(findOwnedSource).toHaveBeenCalledTimes(1);
+    // 零新增任务、零重复副作用（无预扣口径：成本预留恒零写）。
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(costCreate).not.toHaveBeenCalled();
+    expect(writeRowsMock).toHaveBeenCalledTimes(1);
+    expect(writeIdemMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("同键异载荷重放仍判幂等冲突，不落任何新行", async () => {
+    stubFreshAcceptance();
+    const { service, create } = makeService();
+    const first = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(first.code).toBe(200);
+
+    readIdemMock.mockResolvedValue({ kind: "idempotency_conflict" });
+    const replay = await service.create(
+      "9",
+      "55",
+      { ...VALID_HUMAN_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(replay.code).toBe(100409);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("未受理过的非法输入仍走既有校验拒绝，不因回读前置放宽", async () => {
+    // 幂等 miss + 素材已删：未受理过的请求依旧被素材归属校验拒绝（100301）。
+    readIdemMock.mockResolvedValue(null);
+    const { service, create } = makeService({
+      assets: { findOwnedSource: vi.fn().mockResolvedValue(null) },
+    });
+    const result = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(result.code).toBe(100301);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("跨项目/无权限请求仍先被项目归属校验拒绝，不读幂等", async () => {
+    const { service } = makeService({
+      project: { findOwnedById: vi.fn().mockResolvedValue(null) },
+    });
+    const result = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(result.code).toBe(100301);
+    expect(readIdemMock).not.toHaveBeenCalled();
+  });
+
+  it("无 canvas_binding 的历史请求不前置读幂等，保持原建行路径", async () => {
+    const { service, create } = makeService();
+    const result = await service.create("9", "55", VALID_GENERAL_BODY);
+    expect(result.code).toBe(200);
+    expect(readIdemMock).not.toHaveBeenCalled();
+    expect(lockMock).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

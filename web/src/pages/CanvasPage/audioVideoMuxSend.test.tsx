@@ -183,11 +183,26 @@ describe('IKIHPM 提交：载荷契约、占位卡与面板关闭', () => {
 
     expect(apiMocks.createAudioVideoMux).toHaveBeenCalledTimes(1);
     expect(apiMocks.createAudioVideoMux.mock.calls[0]?.[0]).toBe('p1');
+    // IKJJR4：载荷业务字段原样冻结，另携 canvas_binding（submission_id = 幂等键、
+    // 目标 = 原草稿卡、角色 draft、来源线快照为固定音频 + 绑定视频）
     expect(apiMocks.createAudioVideoMux.mock.calls[0]?.[1]).toEqual({
       audio: { assetId: '8', nodeId: 'a1' },
       video: { assetId: '5', nodeId: 'v1' },
       is_audio_reserve: true,
       sync: 'none',
+      canvas_binding: {
+        protocol_version: 1,
+        submission_id: expect.any(String),
+        target_node_id: draftId,
+        expected_binding_revision: 0,
+        recovery_seed: {
+          target: { role: 'draft', x: expect.any(Number), y: expect.any(Number), width: 320, height: 320, name: AUDIO_VIDEO_MUX_TITLE },
+          sources: [
+            { node_id: 'a1', x: 0, y: 0, width: 320, height: 320, name: '海浪环境音.mp3' },
+            { node_id: 'v1', x: 400, y: 0, width: 1280, height: 720, name: '城市夜景.mp4' },
+          ],
+        },
+      },
     });
     expect(apiMocks.createAudioVideoMux.mock.calls[0]?.[2]).toMatchObject({ silent: true });
 
@@ -227,11 +242,12 @@ describe('IKIHPM 提交：载荷契约、占位卡与面板关闭', () => {
     await click(sendBtn());
     await flush();
 
-    expect(apiMocks.createAudioVideoMux.mock.calls[0]?.[1]).toEqual({
+    expect(apiMocks.createAudioVideoMux.mock.calls[0]?.[1]).toMatchObject({
       audio: { assetId: '8', nodeId: 'a1' },
       video: { assetId: '5', nodeId: 'v1' },
       is_audio_reserve: false,
       sync: 'video',
+      canvas_binding: expect.objectContaining({ target_node_id: 'm1' }),
     });
   });
 
@@ -424,10 +440,11 @@ describe('IKIHPM 终态回填：原地变视频成品卡', () => {
     const retry = dataOf('m1').onRetryJob as (id: string) => void;
     await act(async () => { retry('m1'); await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(dataOf('m1').genStatus).toBe('failed');
-    expect(dataOf('m1').errorText).toBe('音视频合成重试失败，请重试');
+    // IKJJR4：重试失败文案归运行时统一口径（非 ApiError 兜底「重试失败」）
+    expect(dataOf('m1').errorText).toBe('重试失败');
     await act(async () => { retry('m1'); await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(apiMocks.retryAudioVideoMux.mock.calls.map((call) => call.slice(0, 3))).toEqual([
-      ['p1', '80', 'test-retry-key'], ['p1', '80', 'test-retry-key'],
+      ['p1', '80', expect.stringMatching(/^test-retry-key-\d+$/)], ['p1', '80', expect.stringMatching(/^test-retry-key-\d+$/)],
     ]);
   });
 });

@@ -1,8 +1,49 @@
 // IKGOT4：擦除创建入口复核矩阵与免费口径单测（先例：image-enhancements.service.test.ts）。
 // 只测外部可见行为：拒绝原因可读、落库参数冻结、免费口径无成本预留、凭证冻结。
-import { describe, expect, it, vi } from "vitest";
+// IKJJQW：追加恢复协议 v1 接入分支（canvas_binding 剥离/承载一致性/受理事务/受控错误）。
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImageErasuresService } from "./image-erasures.service.js";
+import { RecoveryContractError } from "@lib/shared/persistence/index.js";
+
+const { lockMock, bindingViewMock, readIdemMock, writeRowsMock, writeIdemMock } = vi.hoisted(() => ({
+  lockMock: vi.fn(),
+  bindingViewMock: vi.fn(),
+  readIdemMock: vi.fn(),
+  writeRowsMock: vi.fn(),
+  writeIdemMock: vi.fn(),
+}));
+
+vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/persistence/index.js")>();
+  return {
+    ...actual,
+    lockCanvasRecoveryForAcceptance: lockMock,
+    canvasBindingView: bindingViewMock,
+    readCreateIdempotency: readIdemMock,
+    writeCanvasRecoveryRows: writeRowsMock,
+    transactionWithUniqueRetry: (_prisma: unknown, fn: (tx: unknown) => Promise<unknown>) =>
+      fn(_prisma),
+  };
+});
+
+vi.mock("@lib/shared/persistence/generation-job-idempotency.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@lib/shared/persistence/generation-job-idempotency.js")>();
+  return { ...actual, writeCreateIdempotency: writeIdemMock };
+});
+const SUBMISSION_ID = "0a1b2c3d-0000-4000-8000-00000000a001";
+
+const CANVAS_BINDING = {
+  protocol_version: 1,
+  submission_id: SUBMISSION_ID,
+  target_node_id: "node-1",
+  expected_binding_revision: 0,
+  recovery_seed: {
+    target: { role: "result-placeholder", x: 0, y: 0, width: 100, height: 100, name: "" },
+    sources: [],
+  },
+};
 
 const VALID_TEXT_BODY = {
   source_asset_id: "88",
@@ -48,7 +89,7 @@ function makeService(overrides: {
   const costCreate = vi.fn();
   const prisma = {
     client: {
-      generation_jobs: { create },
+      generation_jobs: { create, findUnique: vi.fn().mockResolvedValue({ status: "queued" }) },
       // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
@@ -349,5 +390,108 @@ describe("ImageErasuresService.create：请求方凭证冻结（断链防护）"
     const result = await service.create("9", "55", VALID_AREA_BODY);
     expect(result.code).toBe(200);
     expect(create.mock.calls[0][0].data.input).toEqual(VALID_AREA_BODY);
+  });
+});
+
+describe("ImageErasuresService.create：恢复协议 v1 接入（IKJJQW）", () => {
+  beforeEach(() => {
+    readIdemMock.mockReset().mockResolvedValue(null);
+    lockMock.mockReset().mockImplementation(async (_tx: unknown, acceptance: { binding: unknown }) => ({
+      kind: "plan",
+      plan: { acceptance, bindingRevision: 1, previousTargetSnapshot: null, supersededSubmissionId: null },
+    }));
+    bindingViewMock.mockReset().mockResolvedValue({
+      protocol_version: 1,
+      submission_id: SUBMISSION_ID,
+      target_node_id: "node-1",
+      binding_revision: 1,
+      job_id: "400",
+      is_current: true,
+    });
+  });
+
+  it("accepts a canvas_binding submission and echoes the binding view", async () => {
+    const { service, create } = makeService();
+    const result = await service.create(
+      "9",
+      "55",
+      { ...VALID_TEXT_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(result.code).toBe(200);
+    expect(result.data).toMatchObject({
+      job_id: "400",
+      status: "queued",
+      canvas_binding: { submission_id: SUBMISSION_ID, binding_revision: 1, is_current: true },
+    });
+    // 业务键照旧冻结（canvas_binding 剥离后不进 input）。
+    expect(create.mock.calls[0][0].data.input).toEqual(VALID_TEXT_BODY);
+    expect(lockMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a canvas_binding whose submission_id differs from Idempotency-Key", async () => {
+    const { service, create } = makeService();
+    const result = await service.create(
+      "9",
+      "55",
+      { ...VALID_TEXT_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      "11111111-2222-4333-8444-555555555555",
+    );
+    expect(result.code).toBe(400);
+    expect(result.data).toMatchObject({ reason: "invalid_recovery_payload" });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a structurally invalid canvas_binding", async () => {
+    const { service, create } = makeService();
+    const result = await service.create(
+      "9",
+      "55",
+      { ...VALID_TEXT_BODY, canvas_binding: { protocol_version: 9 } },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data).toMatchObject({ reason: "invalid_recovery_payload" });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("returns the controlled conflict envelope without creating a job row", async () => {
+    const { service, create } = makeService();
+    lockMock.mockRejectedValue(
+      new RecoveryContractError({
+        code: 409,
+        msg: "目标节点承接版本已变化，请刷新后重试",
+        data: { reason: "canvas_binding_conflict", currentBindingRevision: 7 },
+      }),
+    );
+    const result = await service.create(
+      "9",
+      "55",
+      { ...VALID_TEXT_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(result.code).toBe(409);
+    expect(result.data).toMatchObject({ reason: "canvas_binding_conflict", currentBindingRevision: 7 });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("replays the original job for a same-key same-hash retry (回执丢失后重放)", async () => {
+    const { service, create } = makeService();
+    readIdemMock.mockResolvedValue({ generation_job_id: "400", cursor: 0 });
+    bindingViewMock.mockResolvedValue(null);
+    const result = await service.create(
+      "9",
+      "55",
+      { ...VALID_TEXT_BODY, canvas_binding: CANVAS_BINDING },
+      {},
+      SUBMISSION_ID,
+    );
+    expect(result.code).toBe(200);
+    expect(result.data).toMatchObject({ job_id: "400", status: "queued" });
+    expect(create).not.toHaveBeenCalled();
   });
 });

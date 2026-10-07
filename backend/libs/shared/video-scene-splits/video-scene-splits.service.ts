@@ -15,20 +15,32 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import {
+  CANVAS_RECOVERY_PROTOCOL_VERSION,
   FAILURE_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
+  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_SCENE_SPLIT_INPUT_KEYS,
   VIDEO_SCENE_SPLIT_JOB_TYPE,
   VIDEO_SCENE_SPLIT_MAX_DURATION_MS,
   VIDEO_SCENE_SPLIT_SOURCE,
+  canvasBindingSchema,
   fail,
   ok,
   videoSceneSplitInputSchema,
+  type CanvasBinding,
   type VideoSceneSplitInput,
 } from "@lib/contracts";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import {
+  RecoveryContractError,
+  canvasBindingView,
+  createGenerationCommandRepo,
+  lockCanvasRecoveryForAcceptance,
+  writeCanvasRecoveryRows,
+  type CanvasRecoveryAcceptance,
+  type CanvasRecoveryPlan,
+} from "@lib/shared/persistence/index.js";
 import { transactionWithUniqueRetry } from "@lib/shared/persistence/conversation-repo.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
@@ -60,14 +72,17 @@ function readableParseError(
 }
 
 /** 同 token 重放冲突判定用的请求摘要（sha256）：显式定序拼接三业务键，规避 JSON 键序漂移
- *  （先例 scene-cards.controller 的 method:path:content 口径）。 */
-function requestHashOf(projectId: string, input: VideoSceneSplitInput): string {
+ *  （先例 scene-cards.controller 的 method:path:content 口径）。
+ *  IKJJQY（B.3）：携带 canvas_binding 时摘要覆盖完整绑定（请求摘要覆盖原业务参数与
+ *  完整 canvas_binding，不含认证 token）。 */
+function requestHashOf(projectId: string, input: VideoSceneSplitInput, canvasBinding?: CanvasBinding | null): string {
   return createHash("sha256")
     .update(
       `POST:/api/projects/${projectId}/video-scene-splits` +
         `:${input[VIDEO_SCENE_SPLIT_INPUT_KEYS.sourceAssetId]}` +
         `\0${input[VIDEO_SCENE_SPLIT_INPUT_KEYS.targetNodeId]}` +
-        `\0${input[VIDEO_SCENE_SPLIT_INPUT_KEYS.granularity]}`,
+        `\0${input[VIDEO_SCENE_SPLIT_INPUT_KEYS.granularity]}` +
+        (canvasBinding ? `\0${JSON.stringify(canvasBinding)}` : ""),
     )
     .digest("hex");
 }
@@ -90,9 +105,26 @@ export class VideoSceneSplitsService {
   ) {
     // client_token 是业务键之上的基础设施键（不进契约 zod——它校验业务 payload；token 的
     // 消费方是 command_idempotency 表，不冻结进 job input）：先行剥离再过契约 schema。
-    const { client_token: clientToken, ...businessBody } = body ?? {};
+    // IKJJQY：canvas_binding 同为业务键之上的协议字段，一并剥离（strict schema 不认）。
+    const { client_token: clientToken, canvas_binding: canvasBindingBody, ...businessBody } = body ?? {};
     if (typeof clientToken !== "string" || !CLIENT_TOKEN_PATTERN.test(clientToken)) {
       return fail(PARAM_MISSING_CODE, "缺少或非法的 client_token（幂等键，≤64 位可打印 ASCII、大小写敏感）");
+    }
+
+    // IKJJQY（B.3）：canvas_binding 纯载荷校验——client_token 必须等于 submission_id
+    // （「工具原 client_token 必须等于 submission_id」由本入口现有承载方式承担）。
+    let canvasBinding: CanvasBinding | null = null;
+    if (canvasBindingBody !== undefined && canvasBindingBody !== null) {
+      const parsedBinding = canvasBindingSchema.safeParse(canvasBindingBody);
+      if (!parsedBinding.success) {
+        return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+      }
+      canvasBinding = parsedBinding.data;
+      if (clientToken !== canvasBinding.submission_id) {
+        return fail(400, "client_token 必须等于 canvas_binding.submission_id", {
+          reason: RECOVERY_REASONS.invalidPayload,
+        });
+      }
     }
 
     // 契约 schema 复核（strict 三键）：粒度档枚举（fine / standard / coarse）在此拦截，
@@ -103,7 +135,7 @@ export class VideoSceneSplitsService {
       return fail(PARAM_MISSING_CODE, readableParseError(parsed.error.issues));
     }
     const input: VideoSceneSplitInput = parsed.data;
-    const requestHash = requestHashOf(projectId, input);
+    const requestHash = requestHashOf(projectId, input, canvasBinding);
 
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
@@ -112,36 +144,71 @@ export class VideoSceneSplitsService {
     // 与两行写入（generation_jobs + command_idempotency）同一事务——重放是既有结果，不被此刻
     // 的素材状态改写（generation-command-repo guardInput 同口径）；同 token 并发竞态由
     // (project_id, operation, idempotency_key) 唯一键 + transactionWithUniqueRetry 收敛。
-    return transactionWithUniqueRetry(this.prisma.client, async (tx) => {
-      const existing = await tx.command_idempotency.findUnique({
-        where: {
-          project_id_operation_idempotency_key: {
-            project_id: BigInt(projectId),
-            operation: IDEMPOTENCY_OPERATION,
-            idempotency_key: clientToken,
+    // IKJJQY：携带 canvas_binding 时走恢复受理锁内核（项目→画布→锁内幂等回读→owner 版本
+    // 核对；冲突在任务写入前零副作用拒绝），成功后随事务写 submission/owner 关联行。
+    try {
+      return await transactionWithUniqueRetry(this.prisma.client, async (tx) => {
+      let recoveryPlan: CanvasRecoveryPlan | null = null;
+      if (canvasBinding) {
+        const acceptance: CanvasRecoveryAcceptance = {
+          projectId,
+          userId,
+          binding: canvasBinding,
+          operation: IDEMPOTENCY_OPERATION,
+          requestHash,
+          idempotencyKey: clientToken,
+          taskType: VIDEO_SCENE_SPLIT_JOB_TYPE,
+        };
+        const locked = await lockCanvasRecoveryForAcceptance(tx, acceptance);
+        if (locked.kind === "replay") {
+          const replayed = await tx.generation_jobs.findUnique({
+            where: { id: BigInt(locked.result.generation_job_id) },
+            select: { status: true },
+          });
+          // 同 token 重放不重复建任务：返回原 job 与其当前状态 + 原关联视图（is_current 现查）。
+          return ok({
+            job_id: locked.result.generation_job_id,
+            status: replayed?.status ?? "queued",
+            canvas_binding: await canvasBindingView(
+              this.prisma.client, projectId, canvasBinding.submission_id,
+            ),
+          });
+        }
+        if (locked.kind === "idempotency_conflict") {
+          return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
+        }
+        recoveryPlan = locked.plan;
+      } else {
+        const existing = await tx.command_idempotency.findUnique({
+          where: {
+            project_id_operation_idempotency_key: {
+              project_id: BigInt(projectId),
+              operation: IDEMPOTENCY_OPERATION,
+              idempotency_key: clientToken,
+            },
           },
-        },
-        select: { request_hash: true, generation_job_id: true },
-      });
-      if (existing) {
-        if (existing.request_hash !== requestHash) {
-          return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-        }
-        if (existing.generation_job_id === null) {
-          return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-        }
-        const replayed = await tx.generation_jobs.findUnique({
-          where: { id: existing.generation_job_id },
-          select: { status: true },
+          select: { request_hash: true, generation_job_id: true },
         });
-        if (!replayed) {
-          return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
+        if (existing) {
+          if (existing.request_hash !== requestHash) {
+            return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
+          }
+          if (existing.generation_job_id === null) {
+            return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
+          }
+          const replayed = await tx.generation_jobs.findUnique({
+            where: { id: existing.generation_job_id },
+            select: { status: true },
+          });
+          if (!replayed) {
+            return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
+          }
+          // 同 token 重放不重复建任务：返回首次 job_id 与其当前状态（前端照常轮询）。
+          return ok({
+            job_id: existing.generation_job_id.toString(),
+            status: replayed.status,
+          });
         }
-        // 同 token 重放不重复建任务：返回首次 job_id 与其当前状态（前端照常轮询）。
-        return ok({
-          job_id: existing.generation_job_id.toString(),
-          status: replayed.status,
-        });
       }
 
       // findOwnedSource 按 user_id 归属过滤（status=normal 且未删除）：非本人素材一律 404，
@@ -198,11 +265,34 @@ export class VideoSceneSplitsService {
           accepted_cursor: 0n,
         },
       });
+      // IKJJQY：恢复关联行（submission + owner）与任务同事务（B.3 步骤 3）。
+      if (recoveryPlan && canvasBinding) {
+        await writeCanvasRecoveryRows(tx, recoveryPlan, job.id);
+        return ok({
+          job_id: job.id.toString(),
+          status: "queued",
+          // 受理视图（B.3 成功 data 新增字段）：刚受理必然拥有目标承接，is_current=true；
+          // 事务内构造，不经 prisma.client 二次读（未提交数据不可见）。
+          canvas_binding: {
+            protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION,
+            submission_id: canvasBinding.submission_id,
+            target_node_id: canvasBinding.target_node_id,
+            binding_revision: recoveryPlan.bindingRevision,
+            job_id: job.id.toString(),
+            is_current: true,
+          },
+        });
+      }
       return ok({
         job_id: job.id.toString(),
         status: "queued",
       });
-    });
+      });
+    } catch (error) {
+      // B.8：新协议受控错误信封直写（code=HTTP 状态），事务已随异常回滚。
+      if (error instanceof RecoveryContractError) return error.envelope;
+      throw error;
+    }
   }
 
   /** 入队失败兜底：queued 任务直接置 failed，避免场景切分任务在 worker 领取前静默悬挂。

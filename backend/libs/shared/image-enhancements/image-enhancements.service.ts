@@ -2,9 +2,12 @@
 // 校验源图片资产归属与参数合法性 → 复核版本档能力矩阵与源图尺寸门槛 → 插 generation_jobs(type=image_enhance)。
 // 免费口径（§14.1）：不写成本预留、不接成本估算、不走余额拦截门、不走素材库合规门。
 // 不写画布——高清卡由前端建任务前本地插入，产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。
+// IKJJQW（B.3）：创建入口接入恢复协议 v1——canvas_binding 随 body 提交（剥离后不进业务 zod），
+// Idempotency-Key 头承载 submission_id；受理走共享受理段（media-tool-recovery）。
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
+  IDEMPOTENCY_CONFLICT_CODE,
   IMAGE_ENHANCE_DEFAULTS,
   IMAGE_ENHANCE_INPUT_KEYS,
   IMAGE_ENHANCE_JOB_TYPE,
@@ -19,9 +22,18 @@ import {
   type ImageEnhanceInput,
 } from "@lib/contracts";
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import {
+  createMediaToolJobWithRecovery,
+  replayAcceptedMediaTool,
+  stripCanvasBinding,
+} from "@lib/shared/generation/media-tool-recovery.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+
+/** IKJJQW：恢复协议受理的幂等域（先例命名「领域.动作」）。 */
+const IDEMPOTENCY_OPERATION = "image_enhance.create";
+const REQUEST_PATH = "/image-enhancements";
 
 /** zod 校验失败 → 人能读懂的原因（按首个出错键名映射；前端预检只是体验层，这里返回可读文案）。 */
 const PARSE_ERROR_MESSAGES: Record<string, string> = {
@@ -57,9 +69,18 @@ export class ImageEnhancementsService {
     body: Record<string, unknown>,
     // 与图片生成同构（handle-create-generation-job.ts 的 internal 形参）：请求方 sk- 凭证冻结进 job。
     internal: { providerCredential?: string } = {},
+    // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
+    idempotencyKey?: string,
   ) {
+    // IKJJQW：canvas_binding 是业务键之上的基础设施键（同 client_token 口径）：先行剥离再过
+    // 契约 schema；携带但非法 / 与 Idempotency-Key 承载不一致 → 400 invalid_recovery_payload
+    // （IKJLTZ：三段校验收敛至 stripCanvasBinding，头承载的 trim 口径留在调用方）。
+    const gate = stripCanvasBinding(body ?? {}, "Idempotency-Key", (idempotencyKey ?? "").trim());
+    if (gate.error) return gate.error;
+    const { binding, rest } = gate;
+
     // 契约 schema 复核（六键 strict）：版本档枚举、倍数 ∈ 2/4/6 等结构合法性在此拦截。
-    const parsed = imageEnhanceInputSchema.safeParse(body ?? {});
+    const parsed = imageEnhanceInputSchema.safeParse(rest);
     if (!parsed.success) {
       return fail(PARAM_MISSING_CODE, readableParseError(parsed.error.issues));
     }
@@ -67,6 +88,21 @@ export class ImageEnhancementsService {
 
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+
+    // IKJLTX（R5，B.3 受理事务顺序）：同身份同载荷的原意图幂等回读先于素材/门槛等可变状态
+    // 校验——已受理重放返回原 job 与原关联，不因此刻素材已删除/门槛不过而重新拒绝或重复受理。
+    // 摘要只依赖请求载荷与 canvas_binding，与可变状态无关（门本体见 replayAcceptedMediaTool）。
+    const { recovery, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
+      projectId,
+      userId,
+      binding,
+      taskType: IMAGE_ENHANCE_JOB_TYPE,
+      operation: IDEMPOTENCY_OPERATION,
+      requestPath: REQUEST_PATH,
+      body: body ?? {},
+    });
+    if (replayed) return replayed;
+
     // findOwnedSource 按 user_id 归属过滤（status=normal 且未删除）：非本人素材一律 404，不泄露存在性。
     const asset = await this.assets.findOwnedSource(
       input[IMAGE_ENHANCE_INPUT_KEYS.sourceAssetId],
@@ -115,22 +151,37 @@ export class ImageEnhancementsService {
         : {}),
     };
 
-    const job = await this.prisma.client.generation_jobs.create({
-      data: {
-        user_id: BigInt(userId),
-        project_id: BigInt(projectId),
-        type: IMAGE_ENHANCE_JOB_TYPE,
-        source: IMAGE_ENHANCE_SOURCE,
-        status: "queued",
-        progress: 0,
-        input: frozenInput,
-        // 过去 60s：回拨口径同 media_extract——DATETIME(0) 秒精度进位会让同秒 claim 的 lte now 判 false。
-        next_action_at: new Date(Date.now() - 60_000),
+    // IKJJQW：受理主体走共享段（B.3）——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 →
+    // 幂等行」一个事务；无 canvas_binding 时建行路径与接入前一致。前置回读 miss 后此处
+    // 事务内仍有锁内回读兜底（并发赢家在锁外 miss 与事务开始之间提交的情形）。
+    const outcome = await createMediaToolJobWithRecovery(
+      this.prisma.client,
+      recovery,
+      async (db) => {
+        const job = await db.generation_jobs.create({
+          data: {
+            user_id: BigInt(userId),
+            project_id: BigInt(projectId),
+            type: IMAGE_ENHANCE_JOB_TYPE,
+            source: IMAGE_ENHANCE_SOURCE,
+            status: "queued",
+            progress: 0,
+            input: frozenInput,
+            // 过去 60s：回拨口径同 media_extract——DATETIME(0) 秒精度进位会让同秒 claim 的 lte now 判 false。
+            next_action_at: new Date(Date.now() - 60_000),
+          },
+        });
+        return { jobId: job.id.toString(), status: "queued" };
       },
-    });
+    );
+    if (outcome.kind === "envelope") return outcome.envelope;
+    if (outcome.kind === "idempotency_conflict") {
+      return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
+    }
     return ok({
-      job_id: job.id.toString(),
-      status: "queued",
+      job_id: outcome.jobId,
+      status: outcome.status,
+      ...(outcome.bindingView ? { canvas_binding: outcome.bindingView } : {}),
     });
   }
 

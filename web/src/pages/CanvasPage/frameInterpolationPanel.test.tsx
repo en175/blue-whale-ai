@@ -254,17 +254,21 @@ describe('IKHLKR 切档即时改名与持久化', () => {
     expect(identityOf(mediaNode(draftId))).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 } });
   });
 
-  it('发送钮点击（IKHLKX 已接线）：创建失败时面板与草稿原状保留——不制造受理假象', async () => {
+  it('发送钮点击（IKJJR3 提交点即交接）：创建失败草稿回配置态不写 jobId——不制造受理假象', async () => {
     seedDoc();
     apiMocks.createFrameInterpolation.mockRejectedValueOnce(new Error('network down'));
     await renderPage();
     await frameInterpolation();
     const draftId = draftNode()!.id;
     await click(panelSend());
+    await act(async () => {});
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
-    expect(panelSend()).toBeTruthy();
+    // 提交点即交接（面板关）；受理失败草稿回配置态、无 jobId（点卡可重开重发）
+    expect(panelSend()).toBeNull();
     expect((mediaNode(draftId).data as Record<string, unknown>).genStatus).toBe('draft');
     expect((mediaNode(draftId).data as Record<string, unknown>).jobId).toBeUndefined();
+    await clickCard(draftId);
+    expect(panelSend()).toBeTruthy();
   });
 });
 

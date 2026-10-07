@@ -38,11 +38,11 @@ describe('场景切分工具定义契约', () => {
     const errors: string[] = [];
     const failedCards: string[] = [];
     let reject!: (error: Error) => void;
-    let acceptOther!: (task: { job_id: string }) => void;
     const other = runtime.register(createAudioVideoSplitSession(() => ({
       getProjectId: () => 'p1', getSourceNode: () => ({ id: 'v1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { assetId: '6' } }),
-      createTask: () => new Promise((resolve) => { acceptOther = resolve; }),
-      handoff: async () => {}, warn() {}, error() {},
+      // IKJJR3：分离会话提交 = 同步 startTask（受理归运行时）
+      startTask: () => true,
+      warn() {}, error() {},
     })));
     const split = runtime.register(createSceneSplitSession(() => ({
       getProjectId: () => 'p1', getSourceNode: () => ({ id: 'v1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { assetId: '6' } }),
@@ -63,8 +63,7 @@ describe('场景切分工具定义契约', () => {
     expect(errors).toEqual(route === 'normal' ? ['场景切分任务创建失败，请重试'] : []);
     expect(split.getSnapshot()).toEqual({ state: route === 'reopen' ? { nodeId: 'v1', granularity: 'fine' } : null, submitting: false });
     if (route === 'switch') {
-      expect(other.getSnapshot().submitting).toBe(true);
-      acceptOther({ job_id: 'other' }); await flush();
+      expect(other.getSnapshot()).toEqual({ state: null, submitting: false }); // 同步交接完成
     }
   });
 

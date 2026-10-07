@@ -56,7 +56,8 @@ const apiMocks = vi.hoisted(() => ({
     }),
   ),
   createGenerationJob: vi.fn(),
-  fetchJobStatus: vi.fn(),
+  // IKJJR2：受理后统一运行时立即开始轮询——需默认进行中实现（防 undefined.then）
+  fetchJobStatus: vi.fn(async () => ({ job_id: '88', status: 'processing', progress: 0, asset: null })),
   cancelGenerationJob: vi.fn(),
   retryGenerationJob: vi.fn(),
   createVideoEnhancement: vi.fn(),

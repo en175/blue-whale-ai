@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // IKI6EB：真实页面中的编辑会话与在途任务归属分别隔离。
 import { act } from 'react';
+import type { Node as FlowNode } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   apiMocks,
@@ -135,6 +136,13 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+/** IKJJR3：占位卡 id 预分配（audio-speed-{uuid}）——按冻结源资产找家族卡 */
+function speedCardBySource(assetId: string): FlowNode {
+  return mediaNodes().find((n) =>
+    n.id.startsWith('audio-speed-') &&
+    (n.data.audioSpeed as { sourceAssetId?: string } | undefined)?.sourceAssetId === assetId)!;
+}
+
 describe('IKI6EB 调速会话响应归属', () => {
   it.each([['success', true], ['failure', true], ['success', false], ['failure', false]] as const)(
     'a 迟到 %s、b 提交=%s：会话和倍速独立，任务正常收敛', async (outcome, bSubmitting) => {
@@ -154,33 +162,44 @@ describe('IKI6EB 调速会话响应归属', () => {
       await enterSpeed('a1');
       await dragSliderTo(558);
       await clickSend();
-      await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="audio-speed-close"]')!.click(); });
+      // IKJJR3：提交点即交接（a 会话已退）；开 b 会话（倍速独立编辑）
       await enterSpeed('b1');
       await dragSliderTo(600);
-      if (bSubmitting) await clickSend();
-      const sliderBefore = document.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!.value;
+      if (bSubmitting) {
+        await clickSend();
+        // IKJJR3：b 提交点即交接（b 会话退、b 占位卡上画布）；a 的迟到响应不动 b 会话
+        expect(sendBar()).toBeNull();
+      }
+      const sliderBefore = document.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')?.value;
       await act(async () => {
         if (outcome === 'success') resolveA({ job_id: 'old-a', status: 'queued' });
         else rejectA(new Error('old request failed'));
       });
       await flush();
-      expect(sendBar()).not.toBeNull();
-      expect(sendBtn()!.disabled).toBe(bSubmitting);
-      expect(document.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!.value).toBe(sliderBefore);
+      if (!bSubmitting) {
+        // b 未提交：会话保留、滑杆值不被 a 的迟到响应复位、无旧错误弹窗
+        expect(sendBar()).not.toBeNull();
+        expect(sendBtn()!.disabled).toBe(false);
+        expect(document.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!.value).toBe(sliderBefore);
+      }
       expect(document.body.textContent).not.toContain('音频调速任务创建失败');
       if (outcome === 'success') {
-        expect(mediaNode('audio-speed-old-a').data.jobId).toBe('old-a');
-        expect(mediaNode('audio-speed-old-a').data.src).toBe('http://aud/old-a.m4a');
-        expect(mediaNode('audio-speed-old-a').data.genStatus).toBeUndefined();
-        expect(edges().some((edge) => edge.source === 'a1' && edge.target === 'audio-speed-old-a')).toBe(true);
+        const cardA = speedCardBySource('8');
+        expect(cardA).toBeTruthy();
+        expect(cardA.data.jobId).toBe('old-a');
+        expect(cardA.data.src).toBe('http://aud/old-a.m4a');
+        expect(cardA.data.genStatus).toBeUndefined();
+        expect(edges().some((edge) => edge.source === 'a1' && edge.target === cardA.id)).toBe(true);
       }
       if (!bSubmitting) await clickSend();
       await act(async () => { resolveB({ job_id: 'new-b', status: 'queued' }); });
       await flush();
       expect(sendBar()).toBeNull();
-      expect(mediaNode('audio-speed-new-b').data.jobId).toBe('new-b');
-      expect(mediaNode('audio-speed-new-b').data.src).toBe('http://aud/new-b.m4a');
-      expect(mediaNode('audio-speed-new-b').data.genStatus).toBeUndefined();
+      const cardB = speedCardBySource('9');
+      expect(cardB).toBeTruthy();
+      expect(cardB.data.jobId).toBe('new-b');
+      expect(cardB.data.src).toBe('http://aud/new-b.m4a');
+      expect(cardB.data.genStatus).toBeUndefined();
     },
   );
 
@@ -202,9 +221,11 @@ describe('IKI6EB 调速会话响应归属', () => {
     await dragSliderTo(600);
     await act(async () => { resolveOld({ job_id: 'old-a', status: 'queued' }); });
     await flush();
+    // IKJJR3：重新水合后旧执行链按加载身份消亡——迟到受理不写入新画布（无卡）；
+    // 新会话照常可用（服务端关联的找回归统一恢复，见 audioSpeedRetryRecovery）
     expect(sendBar()).not.toBeNull();
     expect(sendBtn()!.disabled).toBe(false);
-    expect(mediaNode('audio-speed-old-a').data.jobId).toBe('old-a');
+    expect(mediaNodes().some((n) => n.id.startsWith('audio-speed-'))).toBe(false);
   });
 
   // IKI61O：工单背景的字面场景——同项目同卡「发送在途 → X 关旧会话 → 同卡重开新会话」
@@ -217,8 +238,7 @@ describe('IKI6EB 调速会话响应归属', () => {
     await enterSpeed('a1');
     await dragSliderTo(558);
     await clickSend();
-    await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="audio-speed-close"]')!.click(); });
-    // 同一张卡重开新会话并调到另一倍速
+    // IKJJR3：提交点即交接（旧会话已退）；同一张卡重开新会话并调到另一倍速
     await enterSpeed('a1');
     await dragSliderTo(600);
     await act(async () => { resolveOld({ job_id: 'old-a', status: 'queued' }); });
@@ -227,14 +247,16 @@ describe('IKI6EB 调速会话响应归属', () => {
     expect(sendBar()).not.toBeNull();
     expect(sendBtn()!.disabled).toBe(false);
     expect(document.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!.value).toBe('600');
-    expect(mediaNode('audio-speed-old-a').data.jobId).toBe('old-a');
-    expect(edges().some((edge) => edge.source === 'a1' && edge.target === 'audio-speed-old-a')).toBe(true);
-    // 新会话自身发送闭环不受影响
+    const oldCard = mediaNodes().find((n) => n.id.startsWith('audio-speed-') && n.data.jobId === 'old-a')!;
+    expect(oldCard).toBeTruthy();
+    expect(edges().some((edge) => edge.source === 'a1' && edge.target === oldCard.id)).toBe(true);
+    // 新会话自身发送闭环不受影响（新占位卡承接新任务）
     await clickSend();
     await act(async () => { resolveNew({ job_id: 'new-a', status: 'queued' }); });
     await flush();
     expect(sendBar()).toBeNull();
-    expect(mediaNode('audio-speed-new-a').data.jobId).toBe('new-a');
+    const newCard = mediaNodes().find((n) => n.id.startsWith('audio-speed-') && n.data.jobId === 'new-a')!;
+    expect(newCard).toBeTruthy();
   });
 
   it('同卡重开：迟到失败不向新会话弹旧错误、不动新会话提交锁', async () => {
@@ -244,13 +266,14 @@ describe('IKI6EB 调速会话响应归属', () => {
     await enterSpeed('a1');
     await dragSliderTo(558);
     await clickSend();
-    await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="audio-speed-close"]')!.click(); });
+    // IKJJR3：提交点即交接（旧会话已退）；同卡重开新会话
     await enterSpeed('a1');
     await dragSliderTo(600);
     await act(async () => { rejectOld(new Error('old request failed')); });
     await flush();
+    // 旧受理失败收敛到旧占位卡（不弹会话错误、不动新会话提交锁）
     expect(sendBar()).not.toBeNull();
     expect(sendBtn()!.disabled).toBe(false);
-    expect(document.body.textContent).not.toContain('音频调速任务创建失败');
+    expect(mediaNodes().find((n) => n.id.startsWith('audio-speed-'))!.data.genStatus).toBe('failed');
   });
 });

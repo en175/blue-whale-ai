@@ -8,6 +8,14 @@ import type {
 } from "@lib/contracts";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
+import {
+  canvasBindingView,
+  lockCanvasRecoveryForAcceptance,
+  writeCanvasRecoveryRows,
+  type CanvasBindingView,
+  type CanvasRecoveryAcceptance,
+  type CanvasRecoveryPlan,
+} from "./generation-canvas-recovery-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 import { appendProjectEvent } from "./product-event-repo.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
@@ -16,7 +24,9 @@ const OPERATION = "scene_card.storyboard_preview";
 
 /** StoryboardPreview 创建入参（CONTEXT L43-47）：User 从 SceneCard 显式触发的旁路操作。
  *  idempotencyKey 即 CommandId（Idempotency-Key header）；requestHash 由 handler 按 method/path/body 计算。
- *  base_scene_card_version 用于乐观并发；parameters 为本次画格参数快照。 */
+ *  base_scene_card_version 用于乐观并发；parameters 为本次画格参数快照。
+ *  canvasRecovery（IKJJR0，B.3）：携带 canvas_binding 时由 handler 组装；受理锁序与
+ *  关联行写入随本事务执行（锁在业务校验之后、job 写入之前——冲突零写入零预扣）。 */
 export interface CreateStoryboardPreviewInput {
   userId: string;
   projectId: string;
@@ -30,6 +40,8 @@ export interface CreateStoryboardPreviewInput {
   provider_credential?: string;
   /** 余额预检回调（与 plan apply 图片分支一致）；缺失视为不检查。 */
   quotaCheck?: () => Promise<{ sufficient: boolean }>;
+  /** IKJJR0：新协议恢复绑定（operation=scene_card.storyboard_preview，与幂等行同一键）。 */
+  canvasRecovery?: CanvasRecoveryAcceptance;
 }
 
 export type CreateStoryboardPreviewResult =
@@ -193,6 +205,39 @@ async function createStoryboardPreviewInTransaction(
     if (!quota.sufficient) return { kind: "quota_insufficient" } as const;
   }
 
+  // 6.5 IKJJR0（B.3 受理事务顺序 2-4 步）：新协议关联受理锁段——锁项目/画布 →
+  //     锁内幂等回读（并发同键命中 → 重放原 preview，不重复建 job；异摘要 → 冲突）→
+  //     锁节点归属行 → 比对 expected_binding_revision（不匹配在 job 写入前抛
+  //     canvas_binding_conflict，零写入零预扣）→ 捕获原目标快照。
+  //     锁不跨上方素材/能力/余额前置查询（先校验后进锁）。
+  let recoveryPlan: CanvasRecoveryPlan | null = null;
+  if (input.canvasRecovery) {
+    const locked = await lockCanvasRecoveryForAcceptance(tx, input.canvasRecovery);
+    if (locked.kind === "replay") {
+      // 锁内并发胜者已受理：回读其 preview 聚合根（resource_id），本事务零写入。
+      const winner = await tx.command_idempotency.findUnique({
+        where: {
+          project_id_operation_idempotency_key: {
+            project_id: projectId,
+            operation: OPERATION,
+            idempotency_key: input.idempotencyKey,
+          },
+        },
+        select: { resource_id: true },
+      });
+      if (!winner || winner.resource_id === null)
+        return { kind: "scene_card_not_found" } as const;
+      return {
+        kind: "replayed",
+        preview_id: winner.resource_id.toString(),
+        scene_card_id: sceneCardId.toString(),
+        generation_job_id: locked.result.generation_job_id,
+      };
+    }
+    if (locked.kind === "idempotency_conflict") return { kind: "idempotency_conflict" };
+    recoveryPlan = locked.plan;
+  }
+
   // === 前置检查全部通过，开始原子写入（AC#2 不碰 Preset / 不切媒体类型）===
 
   // 7. 创建 image GenerationJob（source=storyboard_preview，expected_output_count=count）。
@@ -223,6 +268,12 @@ async function createStoryboardPreviewInTransaction(
       scene_card_id: sceneCardId.toString(),
     },
   });
+  // IKJJQU：该路径不携带 canvasRecovery，返回值恒为 CreatedJob；窄化仅为类型收束。
+  if ("kind" in createdJob) throw new Error("unreachable: storyboard job creation never conflicts idempotency");
+  // IKJJR0：提交关联与归属行随 job 行同事务提交（任务、关联、目标项、幂等结果一体，B.3 步骤 3）。
+  if (recoveryPlan) {
+    await writeCanvasRecoveryRows(tx, recoveryPlan, BigInt(createdJob.generation_job_id));
+  }
 
   // 8. INSERT storyboard_previews（聚合根 + SceneCard 绑定；summary_status=generating）。
   const preview = await tx.storyboard_previews.create({
@@ -370,6 +421,11 @@ export interface StoryboardPreviewRepo {
   createStoryboardPreview(
     input: CreateStoryboardPreviewInput,
   ): Promise<CreateStoryboardPreviewResult>;
+  /** IKJJR0：受理响应/重放的 canvas_binding 视图（is_current 现查 owner 表，与生成任务入口同源）。 */
+  canvasBindingView(
+    projectId: string,
+    submissionId: string,
+  ): Promise<CanvasBindingView | null>;
   /** GET 只读端点：返回某 SceneCard 下所有未删除预览（按 id 升序）。 */
   listStoryboardPreviews(
     projectId: string,
@@ -392,6 +448,9 @@ export function createStoryboardPreviewRepo(
       return transactionWithUniqueRetry(prisma, (tx) =>
         createStoryboardPreviewInTransaction(tx, input),
       );
+    },
+    canvasBindingView(projectId, submissionId) {
+      return canvasBindingView(prisma, projectId, submissionId);
     },
     async listStoryboardPreviews(projectId, sceneCardId, userId) {
       const pid = BigInt(projectId);

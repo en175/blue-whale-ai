@@ -33,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -177,7 +178,8 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
         try {
             assertThat(readJob(Long.parseLong(jobId)).getType()).isEqualTo("audio_video_mux");
             TosVideoMediaRelay relay = mock(TosVideoMediaRelay.class);
-            when(relay.persistStreaming(anyString(), eq("9"), anyLong())).thenAnswer(invocation -> {
+            // processor 调五参重载（带中止句柄 + 任务截止时间，IKILVH）——stub 必须同参绑定才命中。
+            when(relay.persistStreaming(anyString(), eq("9"), anyLong(), any(), any())).thenAnswer(invocation -> {
                 byte[] downloaded = java.net.URI.create((String) invocation.getArgument(0))
                         .toURL().openStream().readAllBytes();
                 var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(storageUploadUrl))

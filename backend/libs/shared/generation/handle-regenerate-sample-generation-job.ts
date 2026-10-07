@@ -14,6 +14,7 @@
  * ============================================ */
 import {
   ERROR_INVALID_INPUT,
+  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   errorCodeToNumeric,
   fail,
@@ -182,13 +183,22 @@ export async function handleRegenerateSampleCreate(
   deps: RegenerateSampleCreateDeps,
   internal: { providerCredential?: string } = {},
 ) {
-  // strict：确认两字段之外任何键（prompt/references/draft_task_id…）直接拒绝——
-  // 上游输入只来自原样片冻结快照，浏览器不重传（契约 §5）。
+  // strict：确认两字段（及可选 canvas_binding）之外任何键（prompt/references/draft_task_id…）
+  // 直接拒绝——上游输入只来自原样片冻结快照，浏览器不重传（契约 §5）。
+  // IKJJR0：canvas_binding 随确认字段并入派生 body，进入创建管线的统一关联受理
+  // （幂等回读先于报价/素材复算；Idempotency-Key == submission_id 由创建入口校验）。
   const parsed = sampleRegenerateRequestSchema.safeParse(body);
   if (!parsed.success) {
+    // IKJJR0（B.8）：携带 canvas_binding 的非法载荷归新协议错误信封（reason 稳定值）。
+    if (
+      typeof body === "object" && body !== null
+      && "canvas_binding" in body
+    ) {
+      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+    }
     return fail(
       errorCodeToNumeric(ERROR_INVALID_INPUT),
-      "重新生成样片仅接受 expected_credits 与 quote_revision（输入由服务端从原样片派生）",
+      "重新生成样片仅接受 expected_credits、quote_revision 与 canvas_binding（输入由服务端从原样片派生）",
       { code: ERROR_INVALID_INPUT },
     );
   }

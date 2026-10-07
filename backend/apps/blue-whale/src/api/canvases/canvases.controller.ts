@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, Param, Post, Put, Query, Res } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CANVAS_SAVE_CONFLICT_CODES, CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import type { Response } from "express";
+// IKJKUA：受控错误判定收敛到共享适配器；canvases 域按画布保存冲突白名单集合判定
+// （IKJJQU B.8：code 即 HTTP 状态且 data.reason 为稳定字符串，信封直写状态码）。
+import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
 @Controller("canvases")
 export class CanvasesController {
@@ -52,11 +55,47 @@ export class CanvasesController {
     return this.canvas.get(user.userId, projectId ?? "");
   }
 
+  /** IKJJQU（B.5）：恢复页查询（分页游标）。受控错误按 code 透传 HTTP 状态。 */
+  @Get(":projectId/generation-recovery")
+  async listGenerationRecovery(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Res() res: Response,
+    @Query("limit") limit?: string,
+    @Query("cursor") cursor?: string,
+  ) {
+    const result = await this.canvas.listGenerationRecovery(
+      user.userId, projectId, limit ?? "", cursor ?? "",
+    );
+    if (isRecoveryControlledEnvelope(result, CANVAS_SAVE_CONFLICT_CODES)) {
+      res.status(result.code).json(result);
+      return;
+    }
+    res.status(200).json(result);
+  }
+
+  /** IKJJQU（B.5）：resolve 定向读取（只读，可重复）。 */
+  @Post(":projectId/generation-recovery/resolve")
+  @HttpCode(200)
+  async resolveGenerationRecovery(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Res() res: Response,
+  ) {
+    const result = await this.canvas.resolveGenerationRecovery(user.userId, projectId, body);
+    if (isRecoveryControlledEnvelope(result, CANVAS_SAVE_CONFLICT_CODES)) {
+      res.status(result.code).json(result);
+      return;
+    }
+    res.status(200).json(result);
+  }
+
   @Put(":projectId")
   async save(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
-    @Body() body: { viewport?: unknown; nodes?: unknown; edges?: unknown; confirmEmpty?: unknown },
+    @Body() body: { viewport?: unknown; nodes?: unknown; edges?: unknown; confirmEmpty?: unknown; recoveryProtocolVersion?: unknown; commandId?: unknown; recoveryChanges?: unknown },
     @Headers("if-match") ifMatch: string | undefined,
     @Res() res: Response,
   ) {

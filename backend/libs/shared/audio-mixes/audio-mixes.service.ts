@@ -7,17 +7,31 @@ import { loadTosStorageConfig } from "@lib/shared/assets/tos-storage.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+// IKJJQZ：恢复契约受理锁内核复用（深路径导入，不改 QU 共享 index 导出面）。
+import {
+  RecoveryContractError,
+  canvasBindingView,
+  lockCanvasRecoveryForAcceptance,
+  lockCanvasRecoveryForRetry,
+  writeCanvasRecoveryRows,
+} from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
+import type { CanvasRecoveryPlan } from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
 import {
   AUDIO_MIX_JOB_TYPE,
   AUDIO_MIX_SOURCE,
   GENERATION_ERROR_DETAIL_HTTP_STATUS,
   PARAM_MISSING_CODE,
+  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   FAILURE_CODE,
   ERROR_ENQUEUE_FAILED,
   DomainError,
   audioMixCreateSchema,
+  canvasBindingSchema,
   ok,
+  recoveryError,
+  type CanvasBinding,
+  type RecoveryErrorEnvelope,
 } from "@lib/contracts";
 
 @Injectable()
@@ -40,6 +54,12 @@ export class AudioMixesService {
     const idempotencyKey = internal.idempotencyKey ?? "";
     if (idempotencyKey && !/^[!-~]{1,128}$/.test(idempotencyKey)) {
       throw new DomainError(PARAM_MISSING_CODE, "Idempotency-Key 必须为 1–128 个可打印非空白字符");
+    }
+    // IKJJQZ（B.3 第 1 步）：canvas_binding 纯载荷校验——Idempotency-Key 必须等于 submission_id，
+    // 携带绑定时强制要求幂等键；未携带走历史路径零变化。
+    const canvasBinding = parsed.data.canvas_binding ?? null;
+    if (canvasBinding && (!idempotencyKey || idempotencyKey !== canvasBinding.submission_id)) {
+      return recoveryError(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", RECOVERY_REASONS.invalidPayload);
     }
 
     const project = await this.project.findOwnedById(projectId, userId);
@@ -75,7 +95,7 @@ export class AudioMixesService {
       return ok({ job_id: job.id.toString(), status: latest.status, replayed: true, enqueue_required: false });
     };
     const previous = await replay();
-    if (previous) return previous;
+    if (previous) return this.withBindingView(previous, projectId, canvasBinding);
 
     const links = await this.prisma.client.project_asset.findMany({
       where: { user_id: BigInt(userId), project_id: BigInt(projectId), is_delete: 0 },
@@ -186,26 +206,66 @@ export class AudioMixesService {
       return ok({ job_id: job.id.toString(), status: "queued", replayed: false, enqueue_required: true });
     }
     let job;
+    let replayed = false;
     try {
-      job = await this.prisma.client.$transaction(async (tx) => {
+      const result = await this.prisma.client.$transaction(async (tx) => {
+        // IKJJQZ（B.3 步骤 2-3）：受理锁序先于任务写入——锁内幂等回读（命中同摘要=重放原关联）
+        // → 节点归属版本比对（冲突在 job 写入前拒绝）→ 提交关联/归属行随 job 同一事务提交。
+        let plan: CanvasRecoveryPlan | null = null;
+        if (canvasBinding) {
+          const locked = await lockCanvasRecoveryForAcceptance(tx, {
+            projectId, userId, binding: canvasBinding,
+            operation: "audio_mix.create", requestHash: hash,
+            idempotencyKey, taskType: AUDIO_MIX_JOB_TYPE,
+          });
+          if (locked.kind === "replay") return { replayed: true, jobId: null as string | null };
+          if (locked.kind === "idempotency_conflict") {
+            throw new DomainError(409, "幂等键已用于另一项音频混合创建");
+          }
+          plan = locked.plan;
+        }
         const created = await tx.generation_jobs.create({ data });
         await tx.command_idempotency.create({
           data: { ...key, request_hash: hash, generation_job_id: created.id, accepted_cursor: 0n },
         });
-        return created;
+        if (plan) await writeCanvasRecoveryRows(tx, plan, created.id);
+        return { replayed: false, jobId: created.id.toString() as string | null };
       });
+      replayed = result.replayed;
+      job = result.jobId;
     } catch (error) {
+      if (error instanceof RecoveryContractError) return error.envelope;
       const existing = await replay();
       if (existing) return existing;
       throw error;
     }
-    return ok({ job_id: job.id.toString(), status: "queued", replayed: false, enqueue_required: true });
+    if (replayed) return this.withBindingView((await replay())!, projectId, canvasBinding);
+    // IKJJQZ：成功 data 追加 canvas_binding 视图（重放与首次受理同形；is_current 现查 owner）。
+    return this.withBindingView(
+      ok({ job_id: job, status: "queued", replayed: false, enqueue_required: true }),
+      projectId,
+      canvasBinding,
+    );
   }
 
-  async retry(userId: string, projectId: string, jobId: string, idempotencyKey: string, providerCredential?: string) {
+  /** IKJJQZ（IKIXK9-SPEC-20261002 B.3）：专属重试可携带 canvas_binding（新 submission_id =
+   *  独立提交意图，同 jobId 不等于同提交意图）。任务重置（CAS failed→queued）与归属版本
+   *  推进（owner 指向新提交、旧关联 transferred）在同一最外层事务；绑定冲突在任务重置前
+   *  拒绝。未携带走历史路径零变化。 */
+  async retry(
+    userId: string,
+    projectId: string,
+    jobId: string,
+    idempotencyKey: string,
+    providerCredential?: string,
+    canvasBindingBody?: unknown,
+  ) {
     if (!/^[!-~]{1,128}$/.test(idempotencyKey)) {
       throw new DomainError(PARAM_MISSING_CODE, "Idempotency-Key 必须为 1–128 个可打印非空白字符");
     }
+    // IKJJQZ（B.3 第 1 步）：canvas_binding 纯载荷校验（Idempotency-Key 必须等于 submission_id）。
+    const canvasBinding = parseDedicatedRetryBinding(canvasBindingBody, idempotencyKey);
+    if (canvasBinding !== null && "code" in canvasBinding) return canvasBinding;
     if (!/^[1-9][0-9]*$/.test(jobId) || !/^[1-9][0-9]*$/.test(projectId)) {
       throw new DomainError(RESOURCE_NOT_FOUND_CODE);
     }
@@ -217,7 +277,10 @@ export class AudioMixesService {
       select: { id: true },
     });
     if (!owned) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
-    const hash = createHash("sha256").update(`POST:audio_mix.retry:${projectId}:${jobId}`).digest("hex");
+    // IKJJQZ（B.3）：请求摘要覆盖完整 canvas_binding（zod 输出按 schema 键序，stringify 即规范化）。
+    const hash = createHash("sha256").update(
+      `POST:audio_mix.retry:${projectId}:${jobId}${canvasBinding ? `:${JSON.stringify(canvasBinding)}` : ""}`,
+    ).digest("hex");
     const key = { project_id: pid, operation: "audio_mix.retry", idempotency_key: idempotencyKey };
     const replay = async () => {
       const existing = await this.prisma.client.command_idempotency.findUnique({
@@ -243,14 +306,34 @@ export class AudioMixesService {
     };
     try {
       const result = await this.prisma.client.$transaction(async (tx) => {
-        const existing = await tx.command_idempotency.findUnique({
-          where: { project_id_operation_idempotency_key: key },
-        });
-        if (existing) {
-          if (existing.request_hash !== hash || existing.generation_job_id !== jid) {
+        // IKJJQZ：受理锁序先于任务重置——锁内幂等回读（命中同摘要=重放原关联）→
+        // 节点归属版本比对（冲突在 CAS 前拒绝、零写入）→ 专属重试关联校验（不得改绑）。
+        let plan: CanvasRecoveryPlan | null = null;
+        if (canvasBinding) {
+          const locked = await lockCanvasRecoveryForRetry(tx, {
+            projectId, userId, binding: canvasBinding,
+            operation: "audio_mix.retry", requestHash: hash,
+            idempotencyKey, taskType: AUDIO_MIX_JOB_TYPE,
+          });
+          if (locked.kind === "replay") return { replayed: true };
+          if (locked.kind === "idempotency_conflict") {
             throw new DomainError(409, "幂等键已用于另一项音频混合重试");
           }
-          return { replayed: true };
+          if (locked.kind === "error") throw new RecoveryContractError(locked.envelope);
+          const rejected = await verifyDedicatedMixRetryTarget(tx, pid, jid, canvasBinding.target_node_id);
+          if (rejected) throw new RecoveryContractError(rejected);
+          plan = locked.plan;
+        }
+        if (!canvasBinding) {
+          const existing = await tx.command_idempotency.findUnique({
+            where: { project_id_operation_idempotency_key: key },
+          });
+          if (existing) {
+            if (existing.request_hash !== hash || existing.generation_job_id !== jid) {
+              throw new DomainError(409, "幂等键已用于另一项音频混合重试");
+            }
+            return { replayed: true };
+          }
         }
         const job = await tx.generation_jobs.findFirst({
           where: { id: jid, project_id: pid, user_id: BigInt(userId), type: AUDIO_MIX_JOB_TYPE,
@@ -281,16 +364,37 @@ export class AudioMixesService {
         await tx.command_idempotency.create({
           data: { ...key, request_hash: hash, generation_job_id: jid, accepted_cursor: 0n },
         });
+        // IKJJQZ：归属版本推进（owner 指向新提交、旧承接项 transferred）与任务重置同一事务。
+        if (plan) await writeCanvasRecoveryRows(tx, plan, jid);
         return { replayed: false };
       });
-      if (result.replayed) return (await replay())!;
-      return ok({ job_id: jobId, status: "queued", replayed: false, enqueue_required: true });
+      if (result.replayed) return this.withBindingView((await replay())!, projectId, canvasBinding);
+      return this.withBindingView(
+        ok({ job_id: jobId, status: "queued", replayed: false, enqueue_required: true }),
+        projectId, canvasBinding,
+      );
     } catch (error) {
+      if (error instanceof RecoveryContractError) return error.envelope;
       if (error instanceof DomainError && error.status !== 409) throw error;
       const existing = await replay();
-      if (existing) return existing;
+      if (existing) return this.withBindingView(existing, projectId, canvasBinding);
       throw error;
     }
+  }
+
+
+  /** IKJJQZ：携带绑定时在响应 data 上追加 canvas_binding 视图（首次受理与重放同形，
+   *  is_current 现查 owner、不将旧关联重新设为当前）。 */
+  private async withBindingView<T extends { data: unknown }>(
+    result: T,
+    projectId: string,
+    canvasBinding: CanvasBinding | null,
+  ): Promise<T> {
+    if (!canvasBinding) return result;
+    const view = await canvasBindingView(this.prisma.client, projectId, canvasBinding.submission_id);
+    if (!view) return result;
+    const data = (result.data ?? {}) as Record<string, unknown>;
+    return { ...result, data: { ...data, canvas_binding: view } } as T;
   }
 
   async markFailed(jobId: string, code: string, message: string): Promise<string> {
@@ -308,6 +412,50 @@ function audioMixDeadline(estimatedDurationMs: number | null): Date {
     ? Math.max(day, estimatedDurationMs * 4 + 6 * 60 * 60 * 1000)
     : 7 * day;
   return new Date(Date.now() + Math.min(budget, 365 * day));
+}
+
+/** IKJJQZ（B.3）：专属重试的 canvas_binding 解析。无 binding 返回 null；
+ *  非法或与 Idempotency-Key 不一致返回 400 受控信封。 */
+function parseDedicatedRetryBinding(
+  canvasBindingBody: unknown,
+  idempotencyKey: string,
+): CanvasBinding | RecoveryErrorEnvelope | null {
+  if (canvasBindingBody === undefined || canvasBindingBody === null) return null;
+  const parsed = canvasBindingSchema.safeParse(canvasBindingBody);
+  if (!parsed.success) {
+    return recoveryError(400, "canvas_binding 载荷无效", RECOVERY_REASONS.invalidPayload);
+  }
+  if (idempotencyKey !== parsed.data.submission_id) {
+    return recoveryError(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", RECOVERY_REASONS.invalidPayload);
+  }
+  return parsed.data;
+}
+
+/** IKJJQZ（B.3 末段）：原卡专属重试从原受理关联解析目标并核对客户端值——
+ *  有原关联则目标必须一致（不得把同 jobId 改绑新目标）；历史任务首次加入新协议
+ *  只接受 job 冻结 input 的固定源卡（inputs[0] 的画布音频卡）作可信原卡关联，
+ *  不能证明关联就按历史规则拒绝迁移。返回非空即 422 拒绝信封。 */
+async function verifyDedicatedMixRetryTarget(
+  tx: Prisma.TransactionClient,
+  pid: bigint,
+  jid: bigint,
+  targetNodeId: string,
+): Promise<RecoveryErrorEnvelope | null> {
+  const prior = await tx.generation_canvas_submissions.findFirst({
+    where: { project_id: pid, generation_job_id: jid },
+    orderBy: { id: "desc" },
+  });
+  let trusted: string | null = prior?.target_node_id ?? null;
+  if (trusted === null) {
+    const job = await tx.generation_jobs.findUnique({ where: { id: jid }, select: { input: true } });
+    const source = (job?.input as { source_node_id?: unknown } | null)?.source_node_id;
+    if (typeof source === "string" && source.length > 0) trusted = source;
+  }
+  if (trusted === targetNodeId) return null;
+  return recoveryError(
+    422, "专属重试目标与原受理关联不符，不能改绑同 jobId 的承接目标",
+    RECOVERY_REASONS.documentMismatch,
+  );
 }
 
 /** 上游 401 判定（IKIHGQ）：error.details 的结构化 HTTP 状态（worker 写入）存在即以它为准；

@@ -346,7 +346,12 @@ async function downloadVia(id: string, type: string): Promise<string> {
   expect(typeof onDownload, `${id} 应已接入下载回调`).toBe('function');
   const blob = new Blob(['x'], { type });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, blob: async () => blob })));
-  vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:stub', revokeObjectURL: () => {} });
+  // IKJJR7 测试自足性修复：{ ...URL } 会把构造器 spread 成普通对象，泄漏到后续用例的
+  // new URL() 直接崩（URL is not a constructor）；保留构造器，只替换两个静态工厂方法。
+  const StubURL = class extends URL {};
+  (StubURL as unknown as { createObjectURL: () => string }).createObjectURL = () => 'blob:stub';
+  (StubURL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = () => {};
+  vi.stubGlobal('URL', StubURL);
   await act(async () => {
     await onDownload!(id);
   });

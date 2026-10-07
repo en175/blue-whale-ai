@@ -15,7 +15,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
-import { VOCAL_SPLIT_EDGE_ORIGIN } from './vocalSplit';
+import { VOCAL_SPLIT_EDGE_ORIGIN, isVocalSplitNodeId } from './vocalSplit';
 import type { GenerationModel } from '@/api/generation';
 
 vi.mock('./components/AgentPanel', () => ({
@@ -126,7 +126,13 @@ vi.mock('@/api/jobs', () => ({
   createMediaExtraction: apiMocks.createMediaExtraction,
   createVocalSplit: apiMocks.createVocalSplit,
   createVideoSubtitleErase: apiMocks.createVideoSubtitleErase,
+  createVideoSceneSplit: vi.fn(async () => ({ job_id: 'ss1', status: 'queued' })),
   readJobFailText: apiMocks.readJobFailText,
+}));
+vi.mock('@/api/canvasRecovery', () => ({
+  fetchGenerationRecoveryPage: vi.fn(async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null })),
+  resolveGenerationRecovery: vi.fn(async () => ({ protocol_version: 1, records: [] })),
+  putCanvasDocWithRecovery: vi.fn(),
 }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 vi.mock('@/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
@@ -243,8 +249,9 @@ async function sendVocal() {
   });
 }
 
-function nodeById(id: string): Node | undefined {
-  return (flowProps.current.mediaNodes as Node[]).find((n) => n.id === id);
+/** IKJJR5：占位卡 id 预分配（vocal-split- 前缀 + 随机后缀），按前缀取当前占位卡 */
+function placeholderNode(): Node | undefined {
+  return (flowProps.current.mediaNodes as Node[]).find((n) => isVocalSplitNodeId(n.id) && n.id !== 'v1');
 }
 
 beforeEach(() => {
@@ -367,24 +374,30 @@ describe('IKHA2W 四退出：未发送退出画布无痕迹', () => {
 });
 
 describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', () => {
-  it('发送（默认通用/aac）：三键参数建任务、先退编辑态再建占位卡、来源边 origin=vocal-split、立即落盘（刷新不丢）', async () => {
+  it('发送（默认通用/aac）：三键参数建任务（canvas_binding + Idempotency-Key）、先退编辑态再预建占位卡、来源边 origin=vocal-split、受理前不落盘', async () => {
     apiMocks.createVocalSplit.mockResolvedValue({ job_id: 'j701', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j701', status: 'processing', progress: 1, asset: null });
     await renderPage();
     await enterVocal();
     await sendVocal();
-    // 建任务带三键（缺省档显式携带：通用/aac）
-    expect(apiMocks.createVocalSplit).toHaveBeenCalledWith('p1', {
-      source_asset_id: '5', scene: 'audio', output_format: 'aac',
-    }, { silent: true });
-    // 先退编辑态再建卡：浮条卸载、splitEditing 移除、占位卡已上画布
+    // 建任务带三键 + canvas_binding（IKJJR5：Idempotency-Key = submission_id）
+    const [sentProject, sentPayload, sentInit] = apiMocks.createVocalSplit.mock.calls[0] as unknown as [
+      string, { source_asset_id: string; scene: string; output_format: string; canvas_binding?: { submission_id: string } }, { silent: boolean; idempotencyKey?: string },
+    ];
+    expect(sentProject).toBe('p1');
+    expect(sentPayload).toMatchObject({ source_asset_id: '5', scene: 'audio', output_format: 'aac' });
+    expect(sentPayload.canvas_binding).toMatchObject({ protocol_version: 1, target_node_id: expect.stringMatching(/^vocal-split-/) });
+    expect(sentInit?.idempotencyKey).toBe(sentPayload.canvas_binding!.submission_id);
+    // 先退编辑态再建卡：浮条卸载、splitEditing 移除、占位卡已上画布（id 预分配）
     expect(toolbar()).toBeNull();
     expect(v1Data().splitEditing).toBeUndefined();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
-    const audio = nodeById('vocal-split-j701')!;
+    const audio = placeholderNode()!;
+    expect(isVocalSplitNodeId(audio.id)).toBe(true);
     expect(audio.data.fileName).toBe('素材视频(人声背景分离)');
     expect(audio.data.mediaType).toBe('audio');
     expect(audio.data.genStatus).toBe('generating');
+    expect(audio.data.jobId).toBe('j701');
     // 占位卡带身份（lastInput 三键冻结源素材+场景+格式，失败重试原样重发）
     expect(audio.data.vocalSplit).toEqual({
       sourceAssetId: '5',
@@ -392,15 +405,11 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     });
     // 来源边：参考推导跳过口径（origin 标记）
     const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
-      .find((e) => e.target === 'vocal-split-j701')!;
+      .find((e) => e.target === audio.id)!;
     expect(edge.source).toBe('v1');
     expect(edge.data).toEqual({ origin: VOCAL_SPLIT_EDGE_ORIGIN });
-    // 立刻落盘（best-effort，不等 800ms 防抖）：占位卡与来源边在同一次 PUT 里，刷新不丢
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    const savedNodes = apiMocks.saveCanvasDoc.mock.calls[0][1].nodes as Array<{ id: string }>;
-    expect(savedNodes.map((n) => n.id)).toContain('vocal-split-j701');
-    const savedEdges = apiMocks.saveCanvasDoc.mock.calls[0][1].edges as Array<{ target: string }>;
-    expect(savedEdges.map((e) => e.target)).toContain('vocal-split-j701');
+    // IKJJR5：result-placeholder 占位卡受理前不落盘（B.3；关页由恢复协议按种子补卡）
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
   });
 
   it('切换场景与格式后发送：任务参数与请求体跟随所选（所见即所得）；未发送退出重进参数复位默认', async () => {
@@ -424,24 +433,25 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     expect(apiMocks.createVocalSplit).toHaveBeenCalledTimes(1);
     expect(apiMocks.createVocalSplit).toHaveBeenCalledWith('p1', {
       source_asset_id: '5', scene: 'drama', output_format: 'flac',
-    }, { silent: true });
-    expect(nodeById('vocal-split-j702')!.data.vocalSplit).toEqual({
+      canvas_binding: expect.any(Object),
+    }, expect.objectContaining({ silent: true }));
+    expect(placeholderNode()!.data.vocalSplit).toEqual({
       sourceAssetId: '5',
       lastInput: { source_asset_id: '5', scene: 'drama', output_format: 'flac' },
     });
   });
 
-  it('创建失败（网络）：不建卡不退编辑态，发送钮复位可重发', async () => {
+  it('创建失败（网络）：预建占位卡转失败态（卡上重试），编辑态已按发送即退会话退出', async () => {
     apiMocks.createVocalSplit.mockRejectedValue(new Error('network down'));
     await renderPage();
     await enterVocal();
     await sendVocal();
     expect(apiMocks.createVocalSplit).toHaveBeenCalledTimes(1);
-    expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
-    expect(flowProps.current.edges).toEqual([]);
-    // 编辑态保留（浮条仍在），submitting 已复位（发送钮可再点）
-    expect(toolbar()).not.toBeNull();
-    expect(bodyBtn('vocal-split-send-btn').disabled).toBe(false);
+    // IKJJR5（对齐场景切分 IKH8BO）：占位卡保留转失败态——卡上重试按 lastInput 原样重发
+    const failed = placeholderNode()!;
+    expect(failed.data.genStatus).toBe('failed');
+    expect(failed.data.errorText).toBe('人声背景分离任务创建失败，请重试');
+    expect(toolbar()).toBeNull();
   });
 
   it('同一视频连续多次发送（不同场景/格式）：各建各的任务与占位卡', async () => {
@@ -459,20 +469,24 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     await sendVocal();
     expect(apiMocks.createVocalSplit).toHaveBeenNthCalledWith(1, 'p1', {
       source_asset_id: '5', scene: 'audio', output_format: 'mp3',
-    }, { silent: true });
+      canvas_binding: expect.any(Object),
+    }, expect.objectContaining({ silent: true }));
     expect(apiMocks.createVocalSplit).toHaveBeenNthCalledWith(2, 'p1', {
       source_asset_id: '5', scene: 'music', output_format: 'wav',
-    }, { silent: true });
+      canvas_binding: expect.any(Object),
+    }, expect.objectContaining({ silent: true }));
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(3);
-    expect(nodeById('vocal-split-j710')).toBeTruthy();
-    expect(nodeById('vocal-split-j711')!.data.vocalSplit).toEqual({
+    const placeholders = (flowProps.current.mediaNodes as Node[]).filter((n) => isVocalSplitNodeId(n.id));
+    expect(placeholders).toHaveLength(2);
+    expect(placeholders.find((n) => n.data.jobId === 'j710')).toBeTruthy();
+    expect(placeholders.find((n) => n.data.jobId === 'j711')!.data.vocalSplit).toEqual({
       sourceAssetId: '5',
       lastInput: { source_asset_id: '5', scene: 'music', output_format: 'wav' },
     });
     // 两张占位卡各自一条来源边
     const targets = (flowProps.current.edges as Array<{ source: string; target: string }>)
       .filter((e) => e.source === 'v1').map((e) => e.target);
-    expect(targets).toEqual(expect.arrayContaining(['vocal-split-j710', 'vocal-split-j711']));
+    expect(targets).toEqual(expect.arrayContaining(placeholders.map((n) => n.id)));
   });
 });
 
@@ -487,7 +501,7 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     await enterVocal();
     await selectScene('narrate');
     await sendVocal();
-    const failed = nodeById('vocal-split-j720')!;
+    const failed = placeholderNode()!;
     expect(failed.data.genStatus).toBe('failed');
     // W 票错误码面：vocal_split_failed（1047）→「人声背景分离失败，请重试」
     expect(failed.data.errorText).toBe('人声背景分离失败，请重试');
@@ -496,15 +510,17 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     apiMocks.createVocalSplit.mockResolvedValueOnce({ job_id: 'j721', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValueOnce({ job_id: 'j721', status: 'processing', progress: 2, asset: null });
     await act(async () => {
-      (failed.data.onRetryJob as (id: string) => void)('vocal-split-j720');
+      (failed.data.onRetryJob as (id: string) => void)(failed.id);
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
+    // 历史兼容重试（服务端无 canvas_binding 回执）：不带绑定与幂等头原样重发，行为零变化
     expect(apiMocks.createVocalSplit).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', scene: 'narrate', output_format: 'aac',
     }, { silent: true });
-    const retried = nodeById('vocal-split-j720')!;
+    const retried = placeholderNode()!;
+    expect(retried.id).toBe(failed.id); // 原地承接（同卡）
     expect(retried.data.jobId).toBe('j721');
     expect(retried.data.genStatus).toBe('generating');
     expect(retried.data.errorText).toBe('');
@@ -519,7 +535,7 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     await renderPage();
     await enterVocal();
     await sendVocal();
-    const failed = nodeById('vocal-split-j730')!;
+    const failed = placeholderNode()!;
     expect(failed.data.genStatus).toBe('failed');
     expect(failed.data.errorText).toBe('任务入队失败，请重试');
   });
@@ -533,7 +549,7 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     await renderPage();
     await enterVocal();
     await sendVocal();
-    const settled = nodeById('vocal-split-j740')!;
+    const settled = placeholderNode()!;
     expect(settled.data.genStatus).toBeUndefined();
     expect(settled.data.progress).toBe(100);
     // 不提前实现扇出：占位卡保留原地，src/assetId 不回填
@@ -552,7 +568,7 @@ it.each(['success', 'failure'] as const)('同卡关闭重开后的旧 %s 不改�
   await renderPage();
   await enterVocal();
   await click('vocal-split-send-btn');
-  await click('vocal-split-close');
+  // IKJJR5：发送即退会话（浮条已卸载）——直接重开新会话配置新参数
   await enterVocal();
   await selectScene('drama'); await selectFormat('flac');
   await click('vocal-split-send-btn');
@@ -560,15 +576,15 @@ it.each(['success', 'failure'] as const)('同卡关闭重开后的旧 %s 不改�
     if (outcome === 'success') acceptOld({ job_id: 'old', status: 'queued' });
     else rejectOld(new Error('old request failure'));
   });
-  expect(toolbar()).not.toBeNull();
-  expect(bodyBtn('vocal-split-send-btn').disabled).toBe(true);
-  expect(bodyBtn('vocal-split-scene-trigger').textContent).toBe('短剧');
-  expect(bodyBtn('vocal-split-format-trigger').textContent).toBe('FLAC');
+  // IKJJR5：人声分离发送即退会话——旧创建定夺时第二次会话参数已冻结不受影响；
+  // 旧失败提示不弹（反馈身份已随第一次发送退出而失效）
   expect(document.body.textContent).not.toContain('人声背景分离任务创建失败');
-  if (outcome === 'success') expect(nodeById('vocal-split-old')).toBeTruthy();
+  const placeholdersAfterOld = (flowProps.current.mediaNodes as Node[]).filter((n) => isVocalSplitNodeId(n.id));
+  if (outcome === 'success') expect(placeholdersAfterOld.some((n) => n.data.jobId === 'old')).toBe(true);
   await act(async () => { acceptNew({ job_id: 'new', status: 'queued' }); });
   expect(toolbar()).toBeNull();
-  expect(nodeById('vocal-split-new')!.data.vocalSplit).toEqual({
+  const placeholders = (flowProps.current.mediaNodes as Node[]).filter((n) => isVocalSplitNodeId(n.id));
+  expect(placeholders.find((n) => n.data.jobId === 'new')!.data.vocalSplit).toEqual({
     sourceAssetId: '5', lastInput: { source_asset_id: '5', scene: 'drama', output_format: 'flac' },
   });
 });

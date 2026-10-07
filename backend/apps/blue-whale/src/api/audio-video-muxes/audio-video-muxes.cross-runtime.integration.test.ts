@@ -183,6 +183,8 @@ describe.skipIf(process.env.IKIHPJ_CROSS_RUNTIME !== "1")("audio_video_mux cross
           // 从聚合根跑并带 -pl/-am：worker 依赖同 reactor 的 server/blue-whale-common，
           // 直接进模块目录 `mvn test` 解析不到该依赖（verification-policy 同款约束）。
           "-pl", "blue-whale-worker", "-am", "-DfailIfNoSpecifiedTests=false",
+          // surefire 3.5.x 只认带插件前缀的属性名；旧名保留是为了兼容更老的 surefire。
+          "-Dsurefire.failIfNoSpecifiedTests=false",
           "-Dtest=AudioVideoMuxCrossRuntimeMySqlIntegrationTest", "test"],
         { cwd: repo });
         let output = "";

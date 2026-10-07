@@ -1,8 +1,18 @@
 import { NewApiError } from "@lib/core";
-import { promptPlanSnapshotSchema } from "@lib/contracts";
+import { promptPlanSnapshotSchema, type RecoveryErrorEnvelope } from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
+import {
+  canvasBindingView,
+  lockCanvasRecoveryForAcceptance,
+  lockCanvasRecoveryForRetry,
+  verifyRetryCanvasRecoveryLink,
+  writeCanvasRecoveryRows,
+  type CanvasBindingView,
+  type CanvasRecoveryAcceptance,
+  type CanvasRecoveryPlan,
+} from "./generation-canvas-recovery-repo.js";
 import { assertPureJobInput } from "./job-input-purity.js";
 import { withBillingCompensation, type JobBilling } from "./job-billing.js";
 import { freezePlacementAnchor } from "./generation-job-placement-anchor.js";
@@ -50,6 +60,9 @@ export interface CreateJobInput {
    *  落 video_stage 列并把 charge_state 置 'held'（创建即预扣）；缺省 = 普通视频，
    *  两列均 NULL（旧任务/普通视频投影缺省 video、费用为 null）。 */
   videoStage?: "sample";
+  /** IKJJQU：新协议恢复绑定受理（纯数据）——锁内核对归属版本（冲突先于任务写入与
+   *  billing.hold），job 行创建后同事务写提交关联与归属行。 */
+  canvasRecovery?: CanvasRecoveryAcceptance;
 }
 
 /** createJob 的**调用参数**（区别于任务本身的数据）：事务复用与计费依赖。两者都是「每次
@@ -122,6 +135,9 @@ export interface GenerationCommandRepo {
       input: Record<string, unknown>,
       jobType: string,
     ) => Promise<string | null>,
+    /** IKJJQU：新协议恢复绑定（通用重试携带 canvas_binding 时传入）。
+     *  原 job 无受理关联或目标不一致时拒绝迁移（不建行）。 */
+    canvasRecovery?: CanvasRecoveryAcceptance,
   ): Promise<
     | (CreatedJob & { type: "image" | "video" | "audio" })
     | { kind: "idempotency_conflict" }
@@ -129,8 +145,11 @@ export interface GenerationCommandRepo {
     | { kind: "not_retryable_status" }
     | { kind: "already_retried" }
     | { kind: "finalize_retry_closed" }
+    | { kind: "recovery_contract_error"; envelope: RecoveryErrorEnvelope }
     | null
   >;
+  /** IKJJQU：受理响应/重放的 canvas_binding 视图（is_current 现查 owner 表）。 */
+  canvasBindingView(projectId: string, submissionId: string): Promise<CanvasBindingView | null>;
   appendLog(
     jobId: string,
     event: string,
@@ -225,8 +244,17 @@ export async function createJobWithinTx(
   input: CreateJobInput,
   billing?: JobBilling,
   idempotency?: CreateJobIdempotency,
-): Promise<CreatedJob> {
+): Promise<CreateJobResult> {
   assertPureJobInput(input);
+  // IKJJQU：新协议受理锁序先于任务写入（冲突在 job.create 与 billing.hold 前拒绝，
+  // 零写入零预扣）；锁内幂等回读命中同摘要时短路返回原关联。
+  let recoveryPlan: CanvasRecoveryPlan | null = null;
+  if (input.canvasRecovery) {
+    const locked = await lockCanvasRecoveryForAcceptance(tx, input.canvasRecovery);
+    if (locked.kind === "replay") return locked.result;
+    if (locked.kind === "idempotency_conflict") return { kind: "idempotency_conflict" };
+    recoveryPlan = locked.plan;
+  }
   if (input.input.prompt_plan_snapshot !== undefined) {
     const snapshot = promptPlanSnapshotSchema.parse(input.input.prompt_plan_snapshot);
     const rows = await tx.$queryRaw<Array<{ version: number }>>`SELECT version FROM canvas WHERE project_id = ${BigInt(input.projectId)} FOR UPDATE`;
@@ -350,6 +378,8 @@ export async function createJobWithinTx(
     { projectId: input.projectId, jobId: job.id, acceptedCursor: event.cursor },
     idempotency,
   );
+  // IKJJQU：提交关联与归属行随 job 行同事务提交（任务、关联、目标项、幂等结果一体）。
+  if (recoveryPlan) await writeCanvasRecoveryRows(tx, recoveryPlan, job.id);
   return {
     generation_job_id: job.id.toString(),
     cursor: Number(event.cursor),
@@ -414,11 +444,18 @@ export function createGenerationCommandRepo(
       idempotencyKey,
       requestHash,
       guardInput,
+      canvasRecovery,
     ) {
       return transactionWithUniqueRetry(
         prisma,
         async (tx) => {
         const pid = BigInt(projectId);
+        // IKJJQU：携带 canvas_binding 先校验原受理关联（历史/改绑拒绝迁移；实现下沉 recovery repo）。
+        let recoveryPlan: CanvasRecoveryPlan | null = null;
+        if (canvasRecovery) {
+          const rejected = await verifyRetryCanvasRecoveryLink(tx, projectId, originalJobId, canvasRecovery.binding.target_node_id);
+          if (rejected) return { kind: "recovery_contract_error", envelope: rejected } as const;
+        }
         const original = await tx.generation_jobs.findFirst({
           where: {
             id: BigInt(originalJobId),
@@ -538,6 +575,17 @@ export function createGenerationCommandRepo(
             original.type,
           );
           if (reason !== null) return { kind: "material_blocked", reason } as const;
+        }
+
+        // IKJJQU：重试受理锁序先于重试行写入（锁段实现下沉 lockCanvasRecoveryForRetry）。
+        if (canvasRecovery) {
+          const locked = await lockCanvasRecoveryForRetry(tx, { ...canvasRecovery, taskType: original.type });
+          if (locked.kind === "replay") {
+            return { generation_job_id: locked.result.generation_job_id, cursor: locked.result.cursor, type: original.type as "image" | "video" | "audio" };
+          }
+          if (locked.kind === "idempotency_conflict") return { kind: "idempotency_conflict" } as const;
+          if (locked.kind === "error") return { kind: "recovery_contract_error", envelope: locked.envelope } as const;
+          recoveryPlan = locked.plan;
         }
 
         const now = new Date();
@@ -703,6 +751,9 @@ export function createGenerationCommandRepo(
             message: `重试 ${originalJobId}`,
           },
         });
+        // IKJJQU：提交关联与归属行随重试 job 同一事务提交（混合/合成的同 jobId 重试
+        // 与新绑定推进在同一最外层事务）。
+        if (recoveryPlan) await writeCanvasRecoveryRows(tx, recoveryPlan, retry.id);
         return {
           generation_job_id: retry.id.toString(),
           cursor: Number(event.cursor),
@@ -713,6 +764,10 @@ export function createGenerationCommandRepo(
         // 与 createJob 同口径放宽（那里也是同一理由：事务里含外部等待）。
         { maxWait: 10_000, timeout: 30_000 },
       );
+    },
+
+    canvasBindingView(projectId, submissionId) {
+      return canvasBindingView(prisma, projectId, submissionId);
     },
 
     async appendLog(jobId, event, status, message, payload) {

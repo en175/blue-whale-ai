@@ -229,8 +229,9 @@ async function sendSplit() {
   });
 }
 
-function nodeById(id: string): Node | undefined {
-  return (flowProps.current.mediaNodes as Node[]).find((n) => n.id === id);
+/** IKJJR3：占位卡 id 预分配（media-extract-{uuid}），不再按受理 jobId 命名——按家族卡查找 */
+function splitCard(): Node | undefined {
+  return (flowProps.current.mediaNodes as Node[]).find((n) => n.id !== 'v1' && n.id.startsWith('media-extract-'));
 }
 
 beforeEach(() => {
@@ -363,12 +364,12 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await enterSplit();
     await sendSplit();
     // 建任务带所选格式（默认 m4a）
-    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' }, { silent: true });
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' }, expect.objectContaining({ silent: true }));
     // 先退编辑态再建卡：浮条卸载、splitEditing 移除、占位卡已上画布
     expect(toolbar()).toBeNull();
     expect(v1Data().splitEditing).toBeUndefined();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
-    const audio = nodeById('media-extract-j1')!;
+    const audio = splitCard()!;
     expect(audio.data.fileName).toBe('素材视频(audio).m4a');
     // 占位卡带身份（lastInput 冻结源素材+格式，失败重试原样重发）
     expect(audio.data.mediaExtract).toEqual({
@@ -377,7 +378,7 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     });
     // 来源边：参考推导跳过口径（origin 标记）
     const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
-      .find((e) => e.target === 'media-extract-j1')!;
+      .find((e) => e.target === audio.id)!;
     expect(edge.source).toBe('v1');
     expect(edge.data).toEqual({ origin: MEDIA_EXTRACT_EDGE_ORIGIN });
   });
@@ -397,21 +398,24 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await selectFormat('wav');
     await sendSplit();
     expect(apiMocks.createMediaExtraction).toHaveBeenCalledTimes(1);
-    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'wav' }, { silent: true });
-    expect(nodeById('media-extract-j1')!.data.fileName).toBe('素材视频(audio).wav');
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'wav' }, expect.objectContaining({ silent: true }));
+    expect(splitCard()!.data.fileName).toBe('素材视频(audio).wav');
   });
 
-  it('创建失败（网络）：不建卡不退编辑态，停留可调格式后重发', async () => {
+  it('创建失败（网络）：失败卡可重试（IKJJR3 提交点即交接，会话已退）', async () => {
     apiMocks.createMediaExtraction.mockRejectedValue(new Error('network down'));
     await renderPage();
     await enterSplit();
     await sendSplit();
+    await act(async () => {});
     expect(apiMocks.createMediaExtraction).toHaveBeenCalledTimes(1);
-    expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
-    expect(flowProps.current.edges).toEqual([]);
-    // 编辑态保留（浮条仍在），submitting 已复位（发送钮可再点）
-    expect(toolbar()).not.toBeNull();
-    expect(bodyBtn('audio-video-split-send-btn').disabled).toBe(false);
+    // IKJJR3：提交点建卡 + 退会话；受理失败落失败卡（冻结输入可重试）
+    expect(toolbar()).toBeNull();
+    const failed = splitCard()!;
+    expect(failed.data.genStatus).toBe('failed');
+    expect(failed.data.mediaExtract).toEqual({
+      sourceAssetId: '5', lastInput: { source_asset_id: '5', output_format: 'm4a' },
+    });
   });
 
   it('轮询终态 succeeded：占位卡收敛为成品音频卡（src/assetId 回填、进度 100、展示名保留）', async () => {
@@ -423,7 +427,7 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await renderPage();
     await enterSplit();
     await sendSplit();
-    const audio = nodeById('media-extract-j1')!;
+    const audio = splitCard()!;
     expect(audio.data.genStatus).toBeUndefined();
     expect(audio.data.progress).toBe(100);
     expect(audio.data.src).toBe('http://tos/x.m4a');
@@ -443,7 +447,7 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await renderPage();
     await enterSplit();
     await sendSplit();
-    const failed = nodeById('media-extract-j1')!;
+    const failed = splitCard()!;
     expect(failed.data.genStatus).toBe('failed');
     // W 票错误码面：media_extract_provider_failed（1044）→「音频提取失败，请重试」
     expect(failed.data.errorText).toBe('音频提取失败，请重试');
@@ -455,64 +459,54 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
       asset: { id: 'a89', url: 'http://tos/y.m4a', type: 'audio' },
     });
     await act(async () => {
-      (failed.data.onRetryJob as (id: string) => void)('media-extract-j1');
+      (failed.data.onRetryJob as (id: string) => void)(failed.id);
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(apiMocks.createMediaExtraction).toHaveBeenLastCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' }, { silent: true });
-    const retried = nodeById('media-extract-j1')!;
+    expect(apiMocks.createMediaExtraction).toHaveBeenLastCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' }, expect.objectContaining({ silent: true }));
+    const retried = splitCard()!;
     expect(retried.data.jobId).toBe('j2');
     expect(retried.data.genStatus).toBeUndefined();
     expect(retried.data.src).toBe('http://tos/y.m4a');
   });
 });
 
-it('同卡直接重入产生新会话：旧受理只收尾任务，不关闭新会话或继承旧界面锁', async () => {
+it('提交在途同卡再入会话：submitting 防重只受理一次，受理落定后新会话可再发', async () => {
   let accept!: (value: { job_id: string; status: string }) => void;
   apiMocks.createMediaExtraction.mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; }));
   apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'old', status: 'processing', progress: 1, asset: null });
   await renderPage();
   await enterSplit();
   await click('audio-video-split-send-btn');
-  expect(bodyBtn('audio-video-split-send-btn').disabled).toBe(true);
-  await enterSplit();
-  expect(bodyBtn('audio-video-split-send-btn').disabled).toBe(false);
-  await selectFormat('wav');
-  await act(async () => { accept({ job_id: 'old', status: 'queued' }); });
-  expect(toolbar()).not.toBeNull();
-  expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('WAV');
-  expect(nodeById('media-extract-old')!.data.mediaExtract).toEqual({
+  // IKJJR3：提交点即交接（会话退、占位卡上画布）；submitting 窗口内重进再发被统一防重（故事 5）
+  expect(toolbar()).toBeNull();
+  expect(splitCard()!.data.mediaExtract).toEqual({
     sourceAssetId: '5', lastInput: { source_asset_id: '5', output_format: 'm4a' },
   });
+  await act(async () => { accept({ job_id: 'old', status: 'queued' }); });
+  // 受理落定（processing）后可再入新会话（生成中新任务提交为接管语义）
+  expect(splitCard()!.data.jobId).toBe('old');
 });
 
-it.each(['success', 'failure'] as const)('关闭后同卡重开：旧 %s 不关闭新会话、复位新锁或提示旧错误', async (outcome) => {
+it.each(['success', 'failure'] as const)('提交后关闭重开：旧 %s 不污染当前会话与提交锁（IKJJR3 提交点即交接）', async (outcome) => {
   let acceptOld!: (value: { job_id: string; status: string }) => void;
   let rejectOld!: (error: Error) => void;
-  let acceptNew!: (value: { job_id: string; status: string }) => void;
   apiMocks.createMediaExtraction.mockImplementationOnce(() => new Promise((resolve, reject) => { acceptOld = resolve; rejectOld = reject; }));
-  apiMocks.createMediaExtraction.mockImplementationOnce(() => new Promise((resolve) => { acceptNew = resolve; }));
   apiMocks.fetchJobStatus.mockResolvedValue({ status: 'processing', progress: 1, asset: null });
   await renderPage();
   await enterSplit();
   await click('audio-video-split-send-btn');
-  await click('audio-video-split-close');
+  // IKJJR3：提交点即交接——面板已关、占位卡上画布；重开为新会话，旧受理落定不干扰
+  expect(toolbar()).toBeNull();
   await enterSplit();
   await selectFormat('wav');
-  await click('audio-video-split-send-btn');
   await act(async () => {
     if (outcome === 'success') acceptOld({ job_id: 'old', status: 'queued' });
     else rejectOld(new Error('旧请求失败'));
   });
+  // 旧受理失败收敛到旧占位卡（不弹会话错误、不关新会话）；新会话与所选格式不受污染
   expect(toolbar()).not.toBeNull();
-  expect(bodyBtn('audio-video-split-send-btn').disabled).toBe(true);
   expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('WAV');
   expect(document.body.textContent).not.toContain('音视频分离任务创建失败');
-  if (outcome === 'success') expect(nodeById('media-extract-old')).toBeTruthy();
-  await act(async () => { acceptNew({ job_id: 'new', status: 'queued' }); });
-  expect(toolbar()).toBeNull();
-  expect(nodeById('media-extract-new')!.data.mediaExtract).toEqual({
-    sourceAssetId: '5', lastInput: { source_asset_id: '5', output_format: 'wav' },
-  });
 });

@@ -231,27 +231,29 @@ afterEach(async () => {
 });
 
 describe('IKH28X 音视频分离发送落盘', () => {
-  it('发送后节点与连线由同一次 PUT 落库，源视频在右侧按内容宽让开、展示名跟随格式', async () => {
+  it('发送后节点与连线经防抖 PUT 落库，源视频在右侧按内容宽让开、展示名跟随格式', async () => {
     await renderPage();
     await enterSplit();
     await sendSplit();
 
-    // flush 立即落库一次（不等 800ms 防抖）
+    // IKJJR3：受理后经 800ms 防抖落库（原受理后立即 flush 已由运行时统一；关页窗口由
+    // canvas_binding 服务端关联兜底）。占位卡 id 预分配（media-extract-{uuid}）
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(savedNodeIds(0)).toContain('media-extract-j1');
-    expect(savedEdgePairs(0)).toContain('v1->media-extract-j1');
+    const audioId = savedNodeIds(0).find((id) => id.startsWith('media-extract-'))!;
+    expect(savedEdgePairs(0)).toContain(`v1->${audioId}`);
     // 来源边必须带标记：否则音频卡重新编辑时该视频会被判成非法参考、卡住发送
-    const edge = apiMocks.saveCanvasDoc.mock.calls[0][1].edges.find((e) => e.target === 'media-extract-j1')!;
+    const edge = apiMocks.saveCanvasDoc.mock.calls[0][1].edges.find((e) => e.target === audioId)!;
     expect(edge.data).toEqual({ origin: MEDIA_EXTRACT_EDGE_ORIGIN });
     // 16:9 源视频内容宽 280×16/9≈497.78 → x = 400 + 498 + 60；展示名后缀跟随所选格式（默认 m4a）
-    const audio = apiMocks.saveCanvasDoc.mock.calls[0][1].nodes.find((n) => n.id === 'media-extract-j1')!;
+    const audio = apiMocks.saveCanvasDoc.mock.calls[0][1].nodes.find((n) => n.id === audioId)!;
     expect(audio.position).toEqual({ x: 958, y: 0 });
     expect((audio.data as Record<string, unknown>).fileName).toBe('素材视频(audio).m4a');
-    // 建任务带所选格式（默认 m4a）
-    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: 'a9', output_format: 'm4a' }, { silent: true });
+    // 建任务带所选格式（默认 m4a；canvas_binding 由运行时注入）
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: 'a9', output_format: 'm4a' }, expect.objectContaining({ silent: true }));
   });
 
-  it('flush 在途时 800ms 防抖自动保存跳过，不并发第二个 PUT', async () => {
+  it('防抖 PUT 在途时后续自动保存跳过，不并发第二个 PUT', async () => {
     let releaseSave: ((value: SaveResult) => void) | null = null;
     apiMocks.saveCanvasDoc.mockImplementationOnce(() => new Promise<SaveResult>((resolve) => {
       releaseSave = resolve;
@@ -260,9 +262,11 @@ describe('IKH28X 音视频分离发送落盘', () => {
     await renderPage();
     await enterSplit();
     await sendSplit();
+    // IKJJR3：受理后防抖触发首个 PUT（在途挂起）
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
 
-    // 越过 800ms 防抖窗口，此时首个 PUT 仍在途 → 自动保存必须跳过
+    // 首个 PUT 仍在途时越过下一轮防抖窗口 → 自动保存必须跳过（不并发）
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 900));
     });
@@ -301,18 +305,16 @@ describe('IKH28X 音视频分离发送落盘', () => {
     };
     await enterAndSend('v1');
     await enterAndSend('v2');
+    // IKJJR3：两次发送的建卡变化合并经防抖保存落库（原两次受理后 flush 串行）
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
 
     const calls = apiMocks.saveCanvasDoc.mock.calls;
-    expect(calls.length).toBeGreaterThanOrEqual(2);
-    // 串行落盘：每次 If-Match 都是上一次返回的版本，不会两次共用同一个（否则后者 412）
-    const versions = calls.map((c) => c[2]);
-    expect(new Set(versions).size).toBe(versions.length);
+    // IKJJR3：两次发送的建卡变化合并为**同一笔**防抖保存（原子落库，无中间态两笔串行）；
+    // If-Match 恒为当前版本（单笔无并发 412 窗口）
+    expect(calls.length).toBeGreaterThanOrEqual(1);
     const last = calls[calls.length - 1][1];
-    expect(last.nodes.map((n) => n.id)).toEqual(
-      expect.arrayContaining(['media-extract-j1', 'media-extract-j2']),
-    );
-    expect(last.edges.map((e) => e.target)).toEqual(
-      expect.arrayContaining(['media-extract-j1', 'media-extract-j2']),
-    );
+    const extractIds = last.nodes.map((n) => n.id).filter((id) => id.startsWith('media-extract-'));
+    expect(extractIds.length).toBe(2); // 两张预分配占位卡（media-extract-{uuid}）同笔都在
+    expect(last.edges.map((e) => e.target)).toEqual(expect.arrayContaining(extractIds));
   }, 20000);
 });

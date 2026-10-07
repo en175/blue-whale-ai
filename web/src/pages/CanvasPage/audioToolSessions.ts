@@ -16,8 +16,8 @@ export interface AudioToolSubmission<Payload> {
 export interface AudioToolSessionHost<Payload> {
   getProjectId(): string | null;
   getSourceNode(nodeId: string): Node | undefined;
-  createTask(input: AudioToolSubmission<Payload>): Promise<{ job_id: string }>;
-  handoff(input: AudioToolSubmission<Payload>, task: { job_id: string }): Promise<void>;
+  /** IKJJR3：建占位卡 + 来源边后交生成任务运行时受理；返回 false = 未发出。 */
+  startTask(input: AudioToolSubmission<Payload>): boolean;
   warn(message: string): void;
   error(message: string): void;
 }
@@ -65,10 +65,12 @@ export function createAudioTrimSession(
       };
     },
     async submit(input, context) {
+      // IKJJR3：提交点先退出会话再交运行时受理（受理失败归失败卡，冻结输入重试走运行时）。
       const host = getHost();
-      const task = await host.createTask(input);
       context.close();
-      await host.handoff(input, task);
+      if (!host.startTask(input)) {
+        host.warn('音频截取任务未发出，请重试');
+      }
     },
     onError(error) {
       getHost().error(apiErrorMessage(error, '音频截取任务创建失败，请重试'));
@@ -81,9 +83,7 @@ export interface AudioSpeedState {
   speed: number;
 }
 
-export type AudioSpeedSessionHost = Omit<AudioToolSessionHost<AudioSpeedInput>, 'handoff'> & {
-  handoff(input: AudioToolSubmission<AudioSpeedInput>, task: { job_id: string }, beforeApply: () => void): Promise<void>;
-};
+export type AudioSpeedSessionHost = AudioToolSessionHost<AudioSpeedInput>;
 
 export function createAudioSpeedSession(
   getHost: () => AudioSpeedSessionHost,
@@ -109,10 +109,13 @@ export function createAudioSpeedSession(
       };
     },
     async submit(input, context) {
+      // IKJJR3：提交点先退出会话再交运行时受理；跨项目接续由运行时归属检查与统一恢复
+      // 接管（迟到受理归发起项目），原「暂存不退会话」机制删除。
       const host = getHost();
-      const task = await host.createTask(input);
-      // 宿主先核对结果项目归属：需要暂存时不触碰界面，实际落卡前才退当次编辑。
-      await host.handoff(input, task, context.close);
+      context.close();
+      if (!host.startTask(input)) {
+        host.warn('音频调速任务未发出，请重试');
+      }
     },
     onError(error) {
       getHost().error(apiErrorMessage(error, '音频调速任务创建失败，请重试'));
@@ -132,8 +135,18 @@ export interface VocalSplitPayload {
   output_format: VocalSplitFormat;
 }
 
+/** IKJJR5：人声分离宿主接口（镜像场景切分 runTask 型）——发送即退会话，预建占位卡与
+ *  创建/轮询/扇出统一归任务运行时；创建失败反馈由占位卡失败态承接（不再经会话 onError）。 */
+export interface VocalSplitSessionHost {
+  getProjectId(): string | null;
+  getSourceNode(nodeId: string): Node | undefined;
+  runTask(input: AudioToolSubmission<VocalSplitPayload>): Promise<void>;
+  warn(message: string): void;
+  error(message: string): void;
+}
+
 export function createVocalSplitSession(
-  getHost: () => AudioToolSessionHost<VocalSplitPayload>,
+  getHost: () => VocalSplitSessionHost,
 ): ToolSessionDefinition<VocalSplitState, string, AudioToolSubmission<VocalSplitPayload>> {
   return {
     kind: 'vocalSplit',
@@ -153,9 +166,10 @@ export function createVocalSplitSession(
     },
     async submit(input, context) {
       const host = getHost();
-      const task = await host.createTask(input);
-      context.close();
-      await host.handoff(input, task);
+      // 发送即退出（对齐场景切分）：exitForSubmission 保留本次失败反馈身份——
+      // 创建失败提示不吞、后来会话或项目切换使其失效
+      context.exitForSubmission();
+      await host.runTask(input);
     },
     onError(error) {
       getHost().error(apiErrorMessage(error, '人声背景分离任务创建失败，请重试'));

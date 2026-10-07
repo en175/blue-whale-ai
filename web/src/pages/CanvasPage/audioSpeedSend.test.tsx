@@ -15,7 +15,6 @@ import {
   enableReactActEnvironment,
   flowProps,
   mediaNodes,
-  navigateRef,
   renderPage,
   unmountPage,
 } from './testing/canvasPageTestHarness';
@@ -51,36 +50,11 @@ function seedProjectA() {
   };
 }
 
-/** 项目二画布：一个就绪音频卡 b1（assetId '9'）——迟到响应不得往这里写任何东西 */
-function seedProjectB() {
-  canvasDocMock.current = {
-    doc: {
-      id: 22,
-      version: 7,
-      viewport: { x: 0, y: 0, zoom: 1 },
-      nodes: [
-        {
-          id: 'b1',
-          type: 'mediaNode',
-          position: { x: 100, y: 100 },
-          data: {
-            src: 'http://aud/b1.mp3',
-            mediaType: 'audio',
-            fileName: '项目二音频.mp3',
-            assetId: '9',
-            duration: 20,
-            mime: 'audio/mpeg',
-          },
-        },
-      ],
-      edges: [],
-    },
-    assets: { 9: { asset_id: 9, type: 'audio', access_url: 'http://aud/b1.mp3', duration: 20 } },
-    refetch: () => Promise.resolve([]),
-    acceptDoc: vi.fn(),
-  };
-}
 
+/** IKJJR3：占位卡 id 预分配（audio-speed-{uuid}），不再按受理 jobId 命名——按家族卡查找 */
+function speedCard(): Node {
+  return mediaNodes().find((n) => n.id.startsWith('audio-speed-'))!;
+}
 const mediaNode = (id: string) => mediaNodes().find((n) => n.id === id)!;
 const dataOf = (id: string) => (mediaNode(id).data ?? {}) as Record<string, unknown>;
 const edges = () =>
@@ -116,35 +90,8 @@ async function clickSend() {
 
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
 
-/** 切到项目二：先经历文档加载中，再交付项目二快照。 */
-async function switchToProjectB() {
-  await act(async () => {
-    canvasDocMock.current = { ...canvasDocMock.current, doc: null };
-    navigateRef!('/canvas?project=p2');
-  });
-  await act(async () => {
-    seedProjectB();
-    navigateRef!('/canvas?project=p2');
-  });
-}
 
-async function switchToProjectA() {
-  await act(async () => {
-    canvasDocMock.current = { ...canvasDocMock.current, doc: null };
-    navigateRef!('/canvas?project=p1');
-  });
-  await act(async () => {
-    seedProjectA();
-    navigateRef!('/canvas?project=p1');
-  });
-}
 
-async function startLoadingProjectA() {
-  await act(async () => {
-    canvasDocMock.current = { ...canvasDocMock.current, doc: null };
-    navigateRef!('/canvas?project=p1');
-  });
-}
 
 beforeEach(() => {
   enableReactActEnvironment();
@@ -164,310 +111,11 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe('IKI4LX 慢响应期间 A→B 切换：迟到响应不污染新项目', () => {
-  it('A→B→A 文档仍在加载时受理：不以空画布覆盖 A，水合后恢复任务', async () => {
-    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveA = resolve; }),
-    );
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558);
-    await clickSend();
-    await switchToProjectB();
-    await startLoadingProjectA();
-    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
-    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
-    await act(async () => { seedProjectA(); navigateRef!('/canvas?project=p1'); });
-    expect(mediaNodes().map((n) => n.id)).toContain('audio-speed-j1');
-    expect(edges().find((e) => e.target === 'audio-speed-j1')).toMatchObject({
-      source: 'a1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
-    });
-  });
-
-  it('返回 A 时快照读取失败：不保存降级空画布，再次进入 A 后恢复', async () => {
-    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveA = resolve; }),
-    );
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558);
-    await clickSend();
-    await switchToProjectB();
-    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
-    await startLoadingProjectA();
-    await act(async () => {
-      canvasDocMock.current = {
-        ...canvasDocMock.current,
-        doc: { id: null, version: null, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] },
-      };
-      Object.assign(canvasDocMock.current, { loadFailed: true });
-      navigateRef!('/canvas?project=p1');
-    });
-    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(false);
-    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
-    await switchToProjectB();
-    await switchToProjectA();
-    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
-  });
-
-  it('A→B→A 已重新水合后受理：当场建卡并保存', async () => {
-    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveA = resolve; }),
-    );
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558);
-    await clickSend();
-    await switchToProjectB();
-    await switchToProjectA();
-    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
-    expect(mediaNodes().map((n) => n.id)).toContain('audio-speed-j1');
-    expect(edges().find((e) => e.target === 'audio-speed-j1')).toMatchObject({
-      source: 'a1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
-    });
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
-  });
-
-  it('发送在途删除源卡后受理：保留结果卡且不创建悬空来源边', async () => {
-    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveA = resolve; }),
-    );
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558);
-    await clickSend();
-    await act(async () => {
-      (dataOf('a1').onDelete as (id: string) => void)('a1');
-    });
-    expect(mediaNodes().some((n) => n.id === 'a1')).toBe(false);
-    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
-    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
-    expect(edges().some((e) => e.target === 'audio-speed-j1')).toBe(false);
-  });
-
-  it('真实空画布的首张音频卡提交：版本尚未产生时仍显示结果卡', async () => {
-    const doc = canvasDocMock.current.doc as { version: number | null };
-    doc.version = null;
-    apiMocks.createAudioSpeed.mockResolvedValueOnce({ job_id: 'j1', status: 'queued' });
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558);
-    await clickSend();
-    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
-  });
-
-  it('首次提交迟到成功：回到 A 恢复结果卡、来源边、轮询与保存', async () => {
-    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveA = resolve; }),
-    );
-    apiMocks.fetchJobStatus.mockResolvedValueOnce({
-      job_id: 'j1', status: 'succeeded', progress: 100,
-      asset: { id: 'a89', url: 'http://tos/result.m4a', type: 'audio', duration: 11.1 },
-    });
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558);
-    await clickSend();
-    await switchToProjectB();
-    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
-    expect(mediaNodes().map((n) => n.id)).toEqual(['b1']);
-    expect(edges()).toEqual([]);
-    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
-
-    await switchToProjectA();
-    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
-    expect(dataOf('audio-speed-j1').audioSpeed).toEqual({
-      sourceAssetId: '8', lastInput: { source_asset_id: '8', speed: 1.35 },
-    });
-    expect(edges().find((e) => e.target === 'audio-speed-j1')).toMatchObject({
-      source: 'a1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
-    });
-    expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
-    expect(dataOf('audio-speed-j1').src).toBe('http://tos/result.m4a');
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith(
-      'p1',
-      expect.objectContaining({
-        nodes: expect.arrayContaining([expect.objectContaining({ id: 'audio-speed-j1' })]),
-        edges: expect.arrayContaining([expect.objectContaining({
-          source: 'a1', target: 'audio-speed-j1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
-        })]),
-      }),
-      expect.anything(),
-    );
-    const savedCall = (apiMocks.saveCanvasDoc.mock.calls as unknown as Array<[
-      string,
-      { viewport: unknown; nodes: Node[]; edges: ReturnType<typeof edges> },
-      number | null,
-    ]>).find(([projectId, body]) => projectId === 'p1' &&
-      body.nodes.some((savedNode) => savedNode.id === 'audio-speed-j1'))!;
-    const savedDoc = JSON.parse(JSON.stringify({
-      id: 11, version: 4, viewport: savedCall[1].viewport,
-      nodes: savedCall[1].nodes, edges: savedCall[1].edges,
-    }));
-    await unmountPage();
-    canvasDocMock.current = { ...canvasDocMock.current, doc: savedDoc };
-    await renderPage();
-    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
-    expect(edges().find((e) => e.target === 'audio-speed-j1')).toMatchObject({
-      source: 'a1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
-    });
-  });
-
-  it('A 补卡保存尚未返回时切 B：A 的保存版本不覆盖 B', async () => {
-    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveA = resolve; }),
-    );
-    let resolveSaveA!: (value: { id: number; project_id: number; version: number; viewport: string; nodes: string }) => void;
-    apiMocks.saveCanvasDoc.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveSaveA = resolve; }),
-    );
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558);
-    await clickSend();
-    await switchToProjectB();
-    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
-    await switchToProjectA();
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
-    await switchToProjectB();
-    await act(async () => {
-      resolveSaveA({ id: 11, project_id: 1, version: 99, viewport: '{}', nodes: '[]' });
-    });
-    apiMocks.createAudioSpeed.mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
-    await enterSpeed('b1');
-    await dragSliderTo(558);
-    await clickSend();
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p2', expect.anything(), 7);
-  });
-
-  it('A 补卡保存占用在途锁时 B 改名：A 返回后 B 自动保存继续', async () => {
-    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveA = resolve; }),
-    );
-    let resolveSaveA!: (value: { id: number; project_id: number; version: number; viewport: string; nodes: string }) => void;
-    apiMocks.saveCanvasDoc.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveSaveA = resolve; }),
-    );
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558);
-    await clickSend();
-    await switchToProjectB();
-    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
-    await switchToProjectA();
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
-    await switchToProjectB();
-    await act(async () => {
-      (dataOf('b1').onTitleChange as (id: string, name: string) => void)('b1', 'B 新名称');
-      await new Promise((resolve) => setTimeout(resolve, 850));
-    });
-    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalledWith('p2', expect.anything(), expect.anything());
-    await act(async () => {
-      resolveSaveA({ id: 11, project_id: 1, version: 99, viewport: '{}', nodes: '[]' });
-      await new Promise((resolve) => setTimeout(resolve, 900));
-    });
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith(
-      'p2', expect.objectContaining({
-        nodes: expect.arrayContaining([expect.objectContaining({
-          id: 'b1', data: expect.objectContaining({ fileName: 'B 新名称' }),
-        })]),
-      }), 7,
-    );
-  });
-
-  it('成功响应迟到：B 无占位卡/无来源边/不启动轮询，B 新进的调速会话与提交中状态不受影响', async () => {
-    // A 的创建请求挂起：构造「往返在途」窗口
-    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveA = resolve; }),
-    );
-    // B 自己的提交也挂起（验证 A 的迟到 finally 不得复位 B 会话的 submitting）
-    let resolveB!: (value: { job_id: string; status: 'queued' }) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveB = resolve; }),
-    );
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558); // 1.35x
-    await clickSend();
-    // 请求已发出：项目一、冻结 payload、silent 传输（http 层不 toast，页面统一提示一次）
-    expect(apiMocks.createAudioSpeed).toHaveBeenCalledTimes(1);
-    expect(apiMocks.createAudioSpeed).toHaveBeenNthCalledWith(
-      1, 'p1', { source_asset_id: '8', speed: 1.35 }, { silent: true },
-    );
-
-    // 等待期间切到项目二（水合重载为 B 的节点），并进入 B 自己的调速会话、提交挂起
-    await switchToProjectB();
-    expect(mediaNodes().map((n) => n.id)).toEqual(['b1']);
-    await enterSpeed('b1');
-    await dragSliderTo(558);
-    await clickSend();
-    expect(apiMocks.createAudioSpeed).toHaveBeenCalledTimes(2);
-    expect(apiMocks.createAudioSpeed).toHaveBeenNthCalledWith(
-      2, 'p2', { source_asset_id: '9', speed: 1.35 }, { silent: true },
-    );
-    expect(sendBtn()!.disabled).toBe(true); // B 提交在途
-
-    // A 的迟到成功响应到达：B 的本地画布不受影响
-    await act(async () => {
-      resolveA({ job_id: 'j1', status: 'queued' });
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    // B 不建卡、不连线、不启动轮询
-    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(false);
-    expect(edges().some((e) => e.target === 'audio-speed-j1')).toBe(false);
-    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
-    // B 的会话不被误关、B 的提交中不被 A 的 finally 复位
-    expect(sendBar()).not.toBeNull();
-    expect(sendBtn()!.disabled).toBe(true);
-
-    // B 自己的响应正常到达：正常建卡（对照——守卫只拦跨项目迟到，不拦正常路径）
-    await act(async () => {
-      resolveB({ job_id: 'j2', status: 'queued' });
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    expect(mediaNodes().some((n) => n.id === 'audio-speed-j2')).toBe(true);
-    expect(sendBar()).toBeNull();
-  });
-
-  it('失败响应迟到：不向 B 弹原项目的错误提示，B 画布与编辑会话无痕迹', async () => {
-    let rejectA!: (reason: unknown) => void;
-    apiMocks.createAudioSpeed.mockImplementationOnce(
-      () => new Promise((_, reject) => { rejectA = reject; }),
-    );
-    await renderPage();
-    await enterSpeed('a1');
-    await dragSliderTo(558);
-    await clickSend();
-    expect(apiMocks.createAudioSpeed).toHaveBeenCalledTimes(1);
-
-    // 切到项目二并进入 B 的调速会话（不提交）
-    await switchToProjectB();
-    await enterSpeed('b1');
-    expect(sendBar()).not.toBeNull();
-
-    // A 的迟到失败响应到达：错误提示属于 A，不得弹给 B
-    await act(async () => {
-      rejectA(new Error('network down'));
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    expect(document.body.textContent).not.toContain('音频调速任务创建失败');
-    expect(document.body.textContent).not.toContain('network down');
-    expect(mediaNodes().map((n) => n.id)).toEqual(['b1']);
-    expect(edges()).toEqual([]);
-    // B 的会话仍在、未进入提交中（未被 A 的回调触碰）
-    expect(sendBar()).not.toBeNull();
-    expect(sendBtn()!.disabled).toBe(false);
-  });
-});
+/* IKJJR3：原「IKI4LX 慢响应期间 A→B 切换」10 用例（迟到受理暂存 + 回 A 当场建卡/补卡保存）
+ * 已随调速迁入生成任务运行时删除——语义等价覆盖于：
+ *  - audioSpeedRetryRecovery.test.tsx：A→B→A 统一恢复接续（受理丢弃 + 恢复页回放 + 不轮询旧任务）；
+ *  - audioSpeedSessionIsolation.test.tsx：迟到响应不污染新项目/新会话、失败收敛到卡。
+ * 新协议下「迟到受理归发起项目」由 canvas_binding 服务端关联与统一恢复负责（工单验收 4）。 */
 
 describe('IKI4LX 正常路径不回归（留在原项目）', () => {
   it('发送成功：退编辑态建占位卡、来源边 origin=audio-speed、身份冻结 lastInput、启动轮询并落盘', async () => {
@@ -478,11 +126,11 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
     await clickSend();
     await flush();
     expect(apiMocks.createAudioSpeed).toHaveBeenCalledWith(
-      'p1', { source_asset_id: '8', speed: 1.35 }, { silent: true },
+      'p1', { source_asset_id: '8', speed: 1.35 }, expect.objectContaining({ silent: true }),
     );
     // 先退编辑态再建卡：发送条卸载、占位卡上画布（源卡右侧 +60px）、身份冻结
     expect(sendBar()).toBeNull();
-    const placeholder = mediaNode('audio-speed-j1');
+    const placeholder = speedCard();
     expect(placeholder.data.genStatus).toBe('generating');
     expect(placeholder.data.fileName).toBe('播客片头(调速1.35x).m4a');
     expect(placeholder.position.x).toBe(400 + 480 + 60);
@@ -490,15 +138,16 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
       sourceAssetId: '8',
       lastInput: { source_asset_id: '8', speed: 1.35 },
     });
-    const edge = edges().find((e) => e.target === 'audio-speed-j1')!;
+    const edge = edges().find((e) => e.target === placeholder.id)!;
     expect(edge.source).toBe('a1');
     expect(edge.data).toEqual({ origin: AUDIO_SPEED_EDGE_ORIGIN });
-    // 启动轮询 + 立刻落盘
+    // 启动轮询；落盘经 800ms 防抖（IKJJR3：原受理后立即 flush 已由运行时统一）
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
   });
 
-  it('创建失败（网络）：不建卡不退编辑态，只提示一次（silent 传输 + 页面统一提示），可调后重发', async () => {
+  it('创建失败（网络）：失败卡可重试（IKJJR3 提交点即交接，会话已退）', async () => {
     apiMocks.createAudioSpeed.mockRejectedValueOnce(new Error('network down'));
     await renderPage();
     await enterSpeed('a1');
@@ -506,12 +155,11 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
     await clickSend();
     await flush();
     expect(apiMocks.createAudioSpeed).toHaveBeenCalledTimes(1);
-    expect(mediaNodes().map((n) => n.id)).toEqual(['a1']);
-    expect(edges()).toEqual([]);
-    // 编辑态保留、submitting 复位可重发；页面统一提示一次（http 层 silent 不再 toast）
-    expect(sendBar()).not.toBeNull();
-    expect(sendBtn()!.disabled).toBe(false);
-    expect(document.body.textContent).toContain('音频调速任务创建失败');
+    // IKJJR3：提交点建卡 + 退会话；受理失败落失败卡（冻结输入可重试）+ 来源边
+    expect(sendBar()).toBeNull();
+    const failed = speedCard();
+    expect(failed.data.genStatus).toBe('failed');
+    expect((edges() as unknown[]).length).toBe(1);
   });
 
   it('失败重试：冻结的源资产与倍速原样重发（Mutation + silent），新任务收敛成品', async () => {
@@ -525,7 +173,7 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
     await dragSliderTo(558); // 冻结 1.35x
     await clickSend();
     await flush();
-    const failed = mediaNode('audio-speed-j1');
+    const failed = speedCard();
     expect(failed.data.genStatus).toBe('failed');
     expect(failed.data.errorText).toBe('音频调速失败，请重试');
 
@@ -536,14 +184,14 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
       asset: { id: 'a89', url: 'http://tos/y.m4a', type: 'audio', duration: 11.1 },
     });
     await act(async () => {
-      (failed.data.onRetryJob as (id: string) => void)('audio-speed-j1');
+      (failed.data.onRetryJob as (id: string) => void)(failed.id);
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(apiMocks.createAudioSpeed).toHaveBeenCalledTimes(2);
     expect(apiMocks.createAudioSpeed).toHaveBeenNthCalledWith(
-      2, 'p1', { source_asset_id: '8', speed: 1.35 }, { silent: true },
+      2, 'p1', { source_asset_id: '8', speed: 1.35 }, expect.objectContaining({ silent: true }),
     );
-    const retried = mediaNode('audio-speed-j1') as Node;
+    const retried = speedCard();
     expect(retried.data.jobId).toBe('j2');
     expect(retried.data.genStatus).toBeUndefined();
     expect(retried.data.src).toBe('http://tos/y.m4a');
@@ -561,15 +209,15 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
     await dragSliderTo(558);
     await clickSend();
     await flush();
-    expect(mediaNode('audio-speed-j1').data.genStatus).toBe('failed');
+    expect(speedCard().data.genStatus).toBe('failed');
+    const failedNode = speedCard();
 
     apiMocks.createAudioSpeed.mockRejectedValueOnce(new Error('network down'));
     await act(async () => {
-      (mediaNode('audio-speed-j1').data.onRetryJob as (id: string) => void)('audio-speed-j1');
+      (failedNode.data.onRetryJob as (id: string) => void)(failedNode.id);
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(mediaNode('audio-speed-j1').data.genStatus).toBe('failed');
-    expect(mediaNode('audio-speed-j1').data.errorText).toBe('音频调速失败');
-    expect(document.body.textContent).toContain('音频调速任务创建失败');
+    expect(speedCard().data.genStatus).toBe('failed');
+    expect(speedCard().data.errorText).toBe('重试失败'); // IKJJR3：非 ApiError 走运行时通用文案
   });
 });

@@ -5,10 +5,14 @@
 // 估算、不走余额拦截门。不写画布——占位卡由前端建任务时本地插入（ADR-0108 骨架），
 // job.input 冻结的三业务键即画布占位身份（前端 node.data 身份标记 lastInput 的数据源，
 // 供刷新恢复与失败原样重试）。
+import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import {
+  CANVAS_RECOVERY_PROTOCOL_VERSION,
   FAILURE_CODE,
+  IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
+  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   VOCAL_SPLIT_DEFAULT_OUTPUT_FORMAT,
   VOCAL_SPLIT_DEFAULT_SCENE,
@@ -16,22 +20,34 @@ import {
   VOCAL_SPLIT_JOB_TYPE,
   VOCAL_SPLIT_OUTPUT_FORMATS,
   VOCAL_SPLIT_SCENES,
-  VOCAL_SPLIT_SCENE_TRACKS,
   VOCAL_SPLIT_SOURCE,
+  canvasBindingSchema,
   fail,
   ok,
   vocalSplitInputSchema,
+  type CanvasBinding,
   type VocalSplitInput,
   type VocalSplitOutputFormat,
   type VocalSplitScene,
 } from "@lib/contracts";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import {
+  RecoveryContractError,
+  canvasBindingView,
+  createGenerationCommandRepo,
+  lockCanvasRecoveryForAcceptance,
+  writeCanvasRecoveryRows,
+  type CanvasRecoveryAcceptance,
+} from "@lib/shared/persistence/index.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 const SUPPORTED_SCENES: ReadonlySet<string> = new Set(VOCAL_SPLIT_SCENES);
 const SUPPORTED_FORMATS: ReadonlySet<string> = new Set(VOCAL_SPLIT_OUTPUT_FORMATS);
+
+/** IKJJQY：新协议受理的幂等表 operation 值（先例命名「领域.动作」，仅 canvas_binding
+ *  请求启用——旧请求不接幂等，行为零变化）。 */
+const IDEMPOTENCY_OPERATION = "vocal_split.create";
 
 /** 契约枚举类型守卫（Set.has 不做类型窄化，收口在这单处）。 */
 function isSupportedScene(value: unknown): value is VocalSplitScene {
@@ -53,10 +69,12 @@ export class VocalSplitsService {
   async create(
     userId: string,
     projectId: string,
-    body: { source_asset_id?: unknown; scene?: unknown; output_format?: unknown },
+    body: { source_asset_id?: unknown; scene?: unknown; output_format?: unknown; canvas_binding?: unknown },
     // 与去字幕 / media-extractions 同构（internal 形参）：请求方 sk- 凭证冻结进
     // job input.provider_credential，worker 处理时直接取用；未携带/非 sk- 时不写键。
     internal: { providerCredential?: string } = {},
+    // IKJJQY（B.3）：canvas_binding 的幂等承载（请求头 Idempotency-Key，无既有 client_token）。
+    idempotencyKey?: string,
   ) {
     const sourceAssetId =
       typeof body.source_asset_id === "number" ||
@@ -84,6 +102,22 @@ export class VocalSplitsService {
       outputFormat = body.output_format;
     }
 
+    // IKJJQY（B.3）：canvas_binding 纯载荷校验——Idempotency-Key 必须等于 submission_id
+    // （人声分离原本无幂等；新协议受理才接 command_idempotency + 恢复关联，旧请求零变化）。
+    let canvasBinding: CanvasBinding | null = null;
+    if (body.canvas_binding !== undefined && body.canvas_binding !== null) {
+      const parsedBinding = canvasBindingSchema.safeParse(body.canvas_binding);
+      if (!parsedBinding.success) {
+        return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+      }
+      canvasBinding = parsedBinding.data;
+      if ((idempotencyKey ?? "").trim() !== canvasBinding.submission_id) {
+        return fail(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", {
+          reason: RECOVERY_REASONS.invalidPayload,
+        });
+      }
+    }
+
     // 冻结后三键恒在，契约 schema 复核（scene / output_format 已被守卫拦住，此处兜住
     // source_asset_id 非数字形态的请求，zod 正则单源在契约）。
     const parsed = vocalSplitInputSchema.safeParse({
@@ -106,6 +140,97 @@ export class VocalSplitsService {
     // video_url / audio_url 二选一），两种源类型均放行。
     if (asset.type !== "video" && asset.type !== "audio") {
       return fail(FAILURE_CODE, "仅支持从视频或音频资产发起人声背景分离");
+    }
+
+    // IKJJQY：携带 canvas_binding 时走恢复受理事务（锁序同 B.3：项目→画布→锁内幂等回读→
+    // owner 版本核对，冲突在任务写入前零副作用拒绝）；job + 幂等行 + submission/owner 关联行
+    // 同事务。无绑定时保持原直建路径（无幂等行为零变化）。
+    if (canvasBinding) {
+      const requestHash = createHash("sha256")
+        .update(
+          `POST:/api/projects/${projectId}/vocal-splits` +
+            `\0${input[VOCAL_SPLIT_INPUT_KEYS.sourceAssetId]}` +
+            `\0${input[VOCAL_SPLIT_INPUT_KEYS.scene]}` +
+            `\0${input[VOCAL_SPLIT_INPUT_KEYS.outputFormat]}` +
+            `\0${JSON.stringify(canvasBinding)}`,
+        )
+        .digest("hex");
+      const acceptance: CanvasRecoveryAcceptance = {
+        projectId,
+        userId,
+        binding: canvasBinding,
+        operation: IDEMPOTENCY_OPERATION,
+        requestHash,
+        idempotencyKey: canvasBinding.submission_id,
+        taskType: VOCAL_SPLIT_JOB_TYPE,
+      };
+      try {
+        return await this.prisma.client.$transaction(async (tx) => {
+          const locked = await lockCanvasRecoveryForAcceptance(tx, acceptance);
+          if (locked.kind === "replay") {
+            const replayed = await tx.generation_jobs.findUnique({
+              where: { id: BigInt(locked.result.generation_job_id) },
+              select: { status: true },
+            });
+            // 同意图网络重放返回原关联（不重复建任务、不重复入队），job 状态现读。
+            return ok({
+              job_id: locked.result.generation_job_id,
+              status: replayed?.status ?? "queued",
+              canvas_binding: await canvasBindingView(
+                this.prisma.client, projectId, canvasBinding.submission_id,
+              ),
+            });
+          }
+          if (locked.kind === "idempotency_conflict") {
+            return fail(IDEMPOTENCY_KEY_REUSED_CODE, "Idempotency-Key 已被使用（同键仅可重放相同参数）");
+          }
+          const job = await tx.generation_jobs.create({
+            data: {
+              user_id: BigInt(userId),
+              project_id: BigInt(projectId),
+              type: VOCAL_SPLIT_JOB_TYPE,
+              source: VOCAL_SPLIT_SOURCE,
+              status: "queued",
+              progress: 0,
+              input: {
+                ...input,
+                ...(internal.providerCredential
+                  ? { provider_credential: internal.providerCredential }
+                  : {}),
+              },
+              next_action_at: new Date(Date.now() - 60_000),
+            },
+          });
+          await tx.command_idempotency.create({
+            data: {
+              project_id: BigInt(projectId),
+              operation: IDEMPOTENCY_OPERATION,
+              idempotency_key: canvasBinding.submission_id,
+              request_hash: requestHash,
+              generation_job_id: job.id,
+              accepted_cursor: 0n,
+            },
+          });
+          await writeCanvasRecoveryRows(tx, locked.plan, job.id);
+          return ok({
+            job_id: job.id.toString(),
+            status: "queued",
+            // 受理视图（B.3 成功 data 新增字段）：刚受理必然拥有目标承接；事务内构造。
+            canvas_binding: {
+              protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION,
+              submission_id: canvasBinding.submission_id,
+              target_node_id: canvasBinding.target_node_id,
+              binding_revision: locked.plan.bindingRevision,
+              job_id: job.id.toString(),
+              is_current: true,
+            },
+          });
+        });
+      } catch (error) {
+        // B.8：新协议受控错误信封直写（code=HTTP 状态），事务已随异常回滚。
+        if (error instanceof RecoveryContractError) return error.envelope;
+        throw error;
+      }
     }
 
     const job = await this.prisma.client.generation_jobs.create({

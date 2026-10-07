@@ -125,8 +125,9 @@ export interface SubtitleEraseHost {
   getProjectId(): string | null;
   getSourceNode(nodeId: string): Node | undefined;
   newTargetId(): string;
-  createTask(input: SubtitleEraseTaskSubmission): Promise<{ job_id: string }>;
-  handoff(input: SubtitleEraseTaskSubmission, task: { job_id: string }, skipSelect: boolean): Promise<void>;
+  /** IKJJR3：建结果卡 + 来源边后交生成任务运行时受理（canvas_binding/轮询/归属/恢复归运行时）。
+   *  返回 false = 未发出（无项目/提交防重窗口）。 */
+  startTask(input: SubtitleEraseTaskSubmission, skipSelect: boolean): boolean;
   warn(message: string): void;
   error(message: string): void;
 }
@@ -162,11 +163,14 @@ export function createSubtitleEraseSession(
       };
     },
     async submit(input, context) {
+      // IKJJR3：提交点先退出会话再交运行时受理（场景切分先例）；受理失败归失败卡，
+      // 冻结输入重试走运行时，不在编辑界面再次发送。
       const host = getHost();
-      const task = await host.createTask(input);
-      const current = context.isCurrent();
+      const skipSelect = !context.isCurrent();
       context.close();
-      await host.handoff(input, task, !current);
+      if (!host.startTask(input, skipSelect)) {
+        host.warn('去字幕任务未发出，请重试');
+      }
     },
     onError(error) { getHost().error(apiErrorMessage(error, '创建去字幕任务失败，请重试')); },
   };

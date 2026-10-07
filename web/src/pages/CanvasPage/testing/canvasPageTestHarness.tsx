@@ -68,7 +68,9 @@ export const apiMocks = {
    *  mockResolvedValue / mockRejectedValue；断言第三参 { silent: true } 与幂等键） */
   createAudioVideoMux: vi.fn(),
   retryAudioVideoMux: vi.fn(),
-  newIdempotencyKey: vi.fn(() => 'test-retry-key'),
+  /** IKJJR3：自增序列——预分配占位卡 id（audio-speed-{key} 等）依赖唯一性；混合重试
+   *  键断言（audioMix/audioVideoMux）按调用序仍可预期（'test-retry-key-1' 起步）。 */
+  newIdempotencyKey: vi.fn((() => { let seq = 0; return () => `test-retry-key-${++seq}`; })()),
   createFrameInterpolation: vi.fn(),
   fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
   fetchJobs: vi.fn(async (_params?: FetchJobsParams): Promise<JobListData> => ({ records: [], total: 0, size: 20, current: 1 })),

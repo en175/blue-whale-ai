@@ -454,3 +454,196 @@ describe("handleRegenerateSampleCreate（IKIZQF）", () => {
     ).toBe(100301);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// canvas_binding（IKJJR0，IKIXK9-SPEC-20261002 B.3）：重生样片接入统一关联受理
+// ═══════════════════════════════════════════════════════════════
+describe("handleRegenerateSampleCreate canvas_binding（IKJJR0）", () => {
+  const SUBMISSION = "0a1b2c3d-0000-4000-8000-000000000021";
+  const NEW_TARGET = "video-node-regen-1";
+
+  function regenBinding(targetNode = NEW_TARGET, revision = 0) {
+    return {
+      protocol_version: 1,
+      submission_id: SUBMISSION,
+      target_node_id: targetNode,
+      expected_binding_revision: revision,
+      recovery_seed: {
+        target: { role: "result-placeholder", x: 0, y: 0, width: 320, height: 180, name: "新样片" },
+        sources: [],
+      },
+    };
+  }
+
+  const BINDING_VIEW = {
+    protocol_version: 1,
+    submission_id: SUBMISSION,
+    target_node_id: NEW_TARGET,
+    binding_revision: 1,
+    job_id: "311",
+    is_current: true,
+  };
+
+  function buildRegenDeps(args: {
+    quote?: unknown;
+    replay?: unknown;
+    createResult?: unknown;
+  } = {}) {
+    const createJob = vi.fn().mockResolvedValue(args.createResult ?? { generation_job_id: "311", cursor: 9 });
+    const lookupCreateIdempotency = vi.fn().mockResolvedValue(args.replay ?? null);
+    const canvasBindingView = vi.fn().mockResolvedValue(BINDING_VIEW);
+    const create: CreateDeps = {
+      projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "1" }) },
+      models: { listEnabledByType: vi.fn().mockResolvedValue([S25_CAPABILITY]) },
+      command: { createJob, lookupCreateIdempotency, canvasBindingView },
+      canvas: { getByProject: vi.fn() },
+      assets: {
+        resolveInputAssets: vi.fn(async (ids: string[]) =>
+          ids.map((id) => ({
+            id,
+            type: id === "31" ? "video" : "image",
+            duration: id === "31" ? 3 : null,
+            material_id: null,
+          }))),
+      },
+      billing: {
+        hold: vi.fn().mockResolvedValue(undefined),
+        release: vi.fn().mockResolvedValue(undefined),
+      },
+      ...(args.quote !== undefined ? { quote: args.quote } : {}),
+    } as unknown as CreateDeps;
+    const deps = {
+      projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "1" }) },
+      models: create.models,
+      sampleSource: { findFinalizeSourceJob: vi.fn().mockResolvedValue(sampleJob()) },
+      ...(args.quote !== undefined ? { quote: args.quote } : {}),
+      create,
+    } as never;
+    return { deps, createJob, lookupCreateIdempotency, canvasBindingView, create };
+  }
+
+  it("★ canvas_binding 随确认字段并入派生 body → 创建管线统一关联受理（独立新目标，operation=generation.create）", async () => {
+    const { quote } = quoteStub();
+    const { deps, createJob } = buildRegenDeps({ quote });
+    const body = {
+      ...confirmationOf(sampleJob(), S25_CAPABILITY as never, quoteStub().result),
+      canvas_binding: regenBinding(),
+    };
+
+    const res = await handleRegenerateSampleCreate("42", "1", "302", body, SUBMISSION, deps);
+
+    expect(res.code).toBe(200);
+    expect(res.data).toMatchObject({ generation_job_id: "311", cursor: 9, canvas_binding: BINDING_VIEW });
+    const [cmdInput, options] = createJob.mock.calls[0]!;
+    expect(cmdInput.canvasRecovery).toMatchObject({
+      projectId: "1",
+      userId: "42",
+      operation: "generation.create",
+      taskType: "video",
+      idempotencyKey: SUBMISSION,
+    });
+    expect(cmdInput.canvasRecovery.binding.target_node_id).toBe(NEW_TARGET);
+    // 请求摘要覆盖 canvas_binding（进幂等与锁内回读比对）。
+    expect(typeof cmdInput.canvasRecovery.requestHash).toBe("string");
+    expect(cmdInput.canvasRecovery.requestHash).toHaveLength(64);
+    // 预扣与补偿照常装配（保留原计费流程）。
+    expect(options.billing).toBeDefined();
+  });
+
+  it("★ 幂等承载不一致（Idempotency-Key ≠ submission_id）→ 400 invalid_recovery_payload，零创建", async () => {
+    const { quote } = quoteStub();
+    const { deps, createJob } = buildRegenDeps({ quote });
+    const body = {
+      ...confirmationOf(sampleJob(), S25_CAPABILITY as never, quoteStub().result),
+      canvas_binding: regenBinding(),
+    };
+
+    const res = await handleRegenerateSampleCreate("42", "1", "302", body, "another-key", deps);
+
+    expect(res).toMatchObject({ code: 400, data: { reason: "invalid_recovery_payload" } });
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("★ canvas_binding 载荷非法 → 400 invalid_recovery_payload（B.8 信封）", async () => {
+    const { deps, createJob } = buildRegenDeps({});
+    const body = {
+      ...confirmationOf(sampleJob(), S25_CAPABILITY as never, quoteStub().result),
+      canvas_binding: { protocol_version: 2, submission_id: "not-uuid" },
+    };
+
+    const res = await handleRegenerateSampleCreate("42", "1", "302", body, SUBMISSION, deps);
+
+    expect(res).toMatchObject({ code: 400, data: { reason: "invalid_recovery_payload" } });
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("★ 报价变化后的已受理重放：同 submission_id 重放原关联，不复算报价、不重复建任务、不预扣（AC3/AC6）", async () => {
+    // 受理后报价上涨（quote 桩换价）：重放命中幂等 → 返回原关联，报价复算根本不发生。
+    const staleQuote = quoteStub();
+    const { deps, createJob, lookupCreateIdempotency } = buildRegenDeps({
+      quote: quoteStub({ credits: 99n }).quote,
+      replay: { generation_job_id: "311", cursor: 9 },
+    });
+    const body = {
+      // 用户确认的是受理时的原价；报价变化不重做当前状态校验。
+      ...confirmationOf(sampleJob(), S25_CAPABILITY as never, staleQuote.result),
+      canvas_binding: regenBinding(),
+    };
+
+    const res = await handleRegenerateSampleCreate("42", "1", "302", body, SUBMISSION, deps);
+
+    expect(res.code).toBe(200);
+    expect(res.data).toMatchObject({ generation_job_id: "311", cursor: 9, canvas_binding: BINDING_VIEW });
+    expect(lookupCreateIdempotency).toHaveBeenCalledTimes(1);
+    // 回读原关联优先于当前报价校验：变价桩不被调用；零创建零预扣。
+    expect(createJob).not.toHaveBeenCalled();
+    const billing = (deps as { create: { billing?: { hold: ReturnType<typeof vi.fn> } } }).create.billing;
+    expect(billing?.hold).not.toHaveBeenCalled();
+  });
+
+  it("★ 携旧承接版本抢占已归属节点 → 受理冲突信封（409）直返，不覆盖旧成片承接（AC4）", async () => {
+    // 节点已被旧成片受理（当前版本 1）；新样片携过期版本 0 抢同节点 → 锁内 409。
+    const conflictEnvelope = {
+      code: 409,
+      msg: "目标节点承接版本已变化，请刷新后重试",
+      data: { reason: "canvas_binding_conflict", currentBindingRevision: 1 },
+    };
+    const createJob = vi.fn().mockRejectedValue(
+      new (await import("@lib/shared/persistence/index.js")).RecoveryContractError(conflictEnvelope as never),
+    );
+    const { quote } = quoteStub();
+    const deps = {
+      projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "1" }) },
+      models: { listEnabledByType: vi.fn().mockResolvedValue([S25_CAPABILITY]) },
+      sampleSource: { findFinalizeSourceJob: vi.fn().mockResolvedValue(sampleJob()) },
+      quote,
+      create: {
+        projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "1" }) },
+        models: { listEnabledByType: vi.fn().mockResolvedValue([S25_CAPABILITY]) },
+        command: { createJob, lookupCreateIdempotency: vi.fn().mockResolvedValue(null), canvasBindingView: vi.fn() },
+        canvas: { getByProject: vi.fn() },
+        assets: {
+          // 参考按声明类型返回（与 buildRegenDeps 同款），素材复核不拦截，走到受理事务。
+          resolveInputAssets: vi.fn(async (ids: string[]) =>
+            ids.map((id) => ({
+              id,
+              type: id === "31" ? "video" : "image",
+              duration: id === "31" ? 3 : null,
+              material_id: null,
+            }))),
+        },
+        billing: { hold: vi.fn(), release: vi.fn() },
+        quote,
+      },
+    } as never;
+    const body = {
+      ...confirmationOf(sampleJob(), S25_CAPABILITY as never, quoteStub().result),
+      canvas_binding: regenBinding("video-node-old-final", 0),
+    };
+
+    const res = await handleRegenerateSampleCreate("42", "1", "302", body, SUBMISSION, deps);
+
+    expect(res).toEqual(conflictEnvelope);
+    expect(createJob).toHaveBeenCalledTimes(1);
+  });
+});
