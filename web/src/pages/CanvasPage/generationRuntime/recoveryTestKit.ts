@@ -85,7 +85,7 @@ export function createHarnessRuntime(host: GenerationRuntimeHost, options: {
     ?? (async (jobId: string | number): Promise<JobDetail> => ({ job_id: String(jobId), status: 'processing', progress: 1, asset: null })));
   let nextId = SID_B;
   const runtime = createGenerationRuntime(host, {
-    fetchJobStatus, newId: () => nextId, setTimeout: () => 1, clearTimeout: () => {}, ...options.deps,
+    ...options.deps, fetchJobStatus, newId: () => nextId, setTimeout: () => 1, clearTimeout: () => {},
   });
   runtime.register(audioMixTask);
   runtime.register(audioVideoMuxTask);
