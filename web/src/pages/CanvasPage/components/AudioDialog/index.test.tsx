@@ -538,3 +538,20 @@ describe('IKJIVN 音频面板报价不带 target_node_id', () => {
     vi.unstubAllGlobals();
   });
 });
+
+
+describe('IKJUGX 音频既有不等待回调语义', () => {
+  it('自由音频发送Promise尚未结算时立即清正文和本地引用', async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const onSend = vi.fn(() => pending);
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    await act(async () => root.render(createElement(QueryClientProvider, { client: new QueryClient() }, createElement(AudioDialog, { onClose: () => {}, onSend, externalPick: { ts: 1, item: CANVAS_REF } }))));
+    await typePromptRefText(container, '立即清空的自由音频');
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.click(); });
+    expect(onSend.mock.calls[0]).toEqual(['立即清空的自由音频', 'm-audio', [CANVAS_REF], null]);
+    expect(readPromptRefText(container)).toBe('');
+    expect(audioThumbs()).toHaveLength(0);
+    await act(async () => { finish(); await pending; });
+  });
+});

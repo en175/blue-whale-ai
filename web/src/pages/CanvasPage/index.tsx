@@ -160,8 +160,7 @@ import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-m
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import TextGenDialog from './components/TextGenDialog';
 import { flattenPromptDocForSend, restorePromptDoc, type PromptDoc } from '@/lib/prompt-doc';
-import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
-import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
+import { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
 import LegacyHistoryModal from './components/LegacyHistoryModal';
 import AssetsPickerModal from './components/AssetsPickerModal';
@@ -281,10 +280,12 @@ import {
   shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
-import { draftSeedEquals, type AudioDraftSeed } from './draftSeed';
 import { createGenerationDockCoordinator, createCompatibilityDock, type CompatibilityDockHost } from './generationDockCoordinator';
 import { createImageGenerationDock, type ImageGenerationDockHost } from './imageGenerationDock';
 import { createVideoGenerationDock, type VideoGenerationDockHost } from './videoGenerationDock';
+import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from './audioMusicGenerationDock';
+import AudioGenerationDockPanel from './audioGenerationDockPanel';
+import MusicGenerationDockPanel from './musicGenerationDockPanel';
 import VideoGenerationDockPanel from './videoGenerationDockPanel';
 import styles from './index.module.css';
 
@@ -396,8 +397,6 @@ export default function CanvasPage() {
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   /** 角色库发起目标（决定选中结果注入哪个对话框）；IKFE8U 起视频面板无发起入口 */
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
-  const [showAudioDialog, setShowAudioDialog] = useState(false);
-  const [showMusicDialog, setShowMusicDialog] = useState(false);
   /** HD 合法多请求各自结算；旧执行失效后，物理创建请求仍属于同卡在途窗口。 */
   const videoEnhanceInFlightRef = useRef(new Map<string, Set<{ projectId: string | null; loadEpoch: object }>>());
   const isVideoEnhanceCardInFlight = (nodeId: string) =>
@@ -971,13 +970,16 @@ export default function CanvasPage() {
   const [imageDock] = useState(() => createImageGenerationDock(() => imageDockHostRef.current!));
   const videoDockHostRef = useRef<VideoGenerationDockHost | null>(null);
   const [videoDock] = useState(() => createVideoGenerationDock(() => videoDockHostRef.current!));
-  const compatibilityDockHostRef = useRef<Record< 'audio' | 'text' | 'music' | 'imageEnhance' | 'videoEnhance' | 'frameInterpolation', CompatibilityDockHost> | null>(null);
+  const audioDockHostRef = useRef<AudioGenerationDockHost | null>(null);
+  const musicDockHostRef = useRef<MusicGenerationDockHost | null>(null);
+  const [audioMusicDock] = useState(() => createAudioMusicGenerationDocks(() => audioDockHostRef.current!, () => musicDockHostRef.current!));
+  const compatibilityDockHostRef = useRef<Record< 'text' | 'imageEnhance' | 'videoEnhance' | 'frameInterpolation', CompatibilityDockHost> | null>(null);
   const [generationDock] = useState(() => createGenerationDockCoordinator({
     image: imageDock,
     video: videoDock,
-    audio: createCompatibilityDock(() => compatibilityDockHostRef.current!.audio),
+    audio: audioMusicDock.audio,
     text: createCompatibilityDock(() => compatibilityDockHostRef.current!.text),
-    music: createCompatibilityDock(() => compatibilityDockHostRef.current!.music),
+    music: audioMusicDock.music,
     imageEnhance: createCompatibilityDock(() => compatibilityDockHostRef.current!.imageEnhance, true),
     videoEnhance: createCompatibilityDock(() => compatibilityDockHostRef.current!.videoEnhance, true),
     frameInterpolation: createCompatibilityDock(() => compatibilityDockHostRef.current!.frameInterpolation, true),
@@ -997,13 +999,9 @@ export default function CanvasPage() {
     else if (node.data.frameInterpolation) generationDock.open('frameInterpolation', { nodeId: node.id });
     else open();
   };
-  const audioPanelHiddenRef = useRef(false);
   const editingTargetRef = useRef<string | null>(null);
-  /** 音频对话框的重挂载 key；草稿入口（IKDMQT）同时携带文字描述/模型/目标节点 */
-  const [audioSeed, setAudioSeed] = useState<AudioDraftSeed | null>(null);
-  /** 面板当前绑定的音频草稿节点 id（IKDMQT）：仅草稿入口（侧栏新建/点击草稿卡）设置；
-   *  生命周期与图片/视频草稿绑定一致 */
-  const [audioDraftId, setAudioDraftId] = useState<string | null>(null);
+  const { visible: showAudioDialog, boundId: audioDraftId, seed: audioSeed } = generationDock.panel('audio');
+  const { visible: showMusicDialog } = generationDock.panel('music');
   /** 侧栏新建草稿的显式选中请求（IKDMQV）：新卡自动选中并取消其余。
    *  经 Canvas 内部 setNodes 应用——直接经 nodes selected 字段传播会因 React Flow
    *  selection store 的时序差报双选中，把自动打开的绑定面板当多选误关 */
@@ -2845,13 +2843,9 @@ export default function CanvasPage() {
     setPickAssetId(null);
   };
   const closeVideoDialog = () => generationDock.close('video');
-  const closeAudioDialog = () => {
-    audioPanelHiddenRef.current = true;
-    setShowAudioDialog(false);
-    endAudioPickSession();
-  };
+  const closeAudioDialog = () => generationDock.close('audio');
   const closeTextGenDialog = () => setShowTextGenDialog(false);
-  const closeMusicDialog = () => setShowMusicDialog(false);
+  const closeMusicDialog = () => generationDock.close('music');
   const dismissGenPanels = () => generationDock.dismissAll('ordinary');
   const dismissAllGenPanels = () => generationDock.dismissAll();
 
@@ -2942,9 +2936,7 @@ export default function CanvasPage() {
         // 程序化选中不得经本路径回弹重开——口径同下方 syncPanelVisible 的 hiddenRef 拦截
         //（发送路径「置 hidden 标记避免紧随的画布选中事件回弹重开」）；手动点卡经 onNodeClick
         // 走 openXxxDraftDialog 重置豁免，照常重开。
-        const panelHidden = toolDraft ? toolDraft.hidden
-          : mediaType === 'video' ? false
-          : mediaType === 'audio' ? audioPanelHiddenRef.current : false;
+        const panelHidden = toolDraft ? toolDraft.hidden : false;
         const alreadyOpen = toolDraft ? toolDraft.visible
           : mediaType === 'video' ? showBottomDialog && videoDraftId === soloId
           : mediaType === 'audio' ? showAudioDialog && audioDraftId === soloId : showImageDialog && imageDraftId === soloId;
@@ -2953,41 +2945,11 @@ export default function CanvasPage() {
         }
       }
     }
-    const syncPanelVisible = (
-      boundId: string | null,
-      setShow: (visible: boolean) => void,
-    ) => {
-      if (!boundId) return;
-      if (submittingNodeId && boundId !== submittingNodeId) return;
-      if (soloId && soloId === boundId) {
-        // 命中绑定目标：保持/恢复（修复程序化选中误报把面板当多选误关）；
-        // IKGZ5O 编辑会话期不回弹面板（工具状态模态，会话退出后按既有口径恢复）
-        if (!editSessionActive) setShow(true);
-        return;
-      }
-      if (soloId || candidates.length > 1) setShow(false); // 单选其他卡或多选：隐藏
-      // 空选中：不动作（真空白点击由 onPaneClick 处理，节点删除由绑定清理 effect 处理）
-    };
     generationDock.selection({ soloId, multiSelect: candidates.length > 1, editing: editSessionActive, submittingNodeId });
-    if (!audioPanelHiddenRef.current) syncPanelVisible(audioDraftId, setShowAudioDialog);
-    // IKFYH6：自由面板（无绑定草稿）与文本/音乐面板纳入同一关闭口径——单选其他卡或多选即关（只关不开，
-    // 不做「命中恢复」）。hiddenRef 豁免沿用：到节点选择命中、@ 菜单选中素材后紧随的 selection 变化不误关
-    //（openVideoDraftDialog 文本选取、视频自由/绑定选取、handleImageAtMention 等既有保护分支）。
-    const hideFreePanel = (
-      hiddenRef: { current: boolean },
-      shown: boolean,
-      setShow: (visible: boolean) => void,
-    ) => {
-      if (hiddenRef.current || !shown) return;
-      if (soloId || candidates.length > 1) setShow(false);
-    };
-    if (!audioDraftId) hideFreePanel(audioPanelHiddenRef, showAudioDialog, setShowAudioDialog);
     // 文本生成面板恒绑定文生文卡：命中绑定卡保持，其余单选/多选关闭（无 hiddenRef 语义，重开只经点卡）
     if (showTextGenDialog && textGenDraftId && ((soloId && soloId !== textGenDraftId) || candidates.length > 1)) {
       setShowTextGenDialog(false);
     }
-    // 音乐面板无绑定目标：任何单选/多选即关
-    if (showMusicDialog && (soloId || candidates.length > 1)) setShowMusicDialog(false);
   };
 
   /** IKIJ60：下传 FlowCanvas 的选中处理函数同步稳定化——页面每轮渲染重建
@@ -3224,7 +3186,7 @@ export default function CanvasPage() {
     const toolDraft = node && toolSessions.draft(node);
     if (toolDraft) { openCoordinatedToolDraft(node!, toolDraft.open); return; }
     if (mediaType === 'video') return generationDock.open('video', { nodeId, intent });
-    if (mediaType === 'audio') return openAudioDraftDialog(nodeId);
+    if (mediaType === 'audio') return generationDock.open('audio', { nodeId, intent });
     return generationDock.open('image', { nodeId, intent });
   };
 
@@ -3712,67 +3674,7 @@ export default function CanvasPage() {
    *  IKIJ61：seed 内容等值（除 ts）时跳过写入；关闭视频/图片面板的路径同步清理其草稿绑定，
    *  不留幽灵绑定（口径同 openVideoDraftDialog 互关清绑定） */
   const openAudioDraftDialog = (nodeId: string) => generationDock.open('audio', { nodeId });
-  const openLegacyAudioDraftDialog = (nodeId: string) => {
-    if (!canOpenEditor(nodeId)) return;
-    endAudioPickSession();
-    audioPanelHiddenRef.current = false;
-    editingTargetRef.current = nodeId;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const d = (node?.data ?? {}) as Record<string, unknown>;
-    setAudioDraftId(nodeId);
-    setAudioPickResult(null);
-    const legacyRefs = Array.isArray(d.audioRefs) ? d.audioRefs as AudioRefItem[] : [];
-    if (legacyRefs.length > 0) {
-      // 迁移是「表达形式转换」而非添加入口（数据在旧机制下已被接纳），不走 checkAddAudioRef——
-      // 失效/重复来源按连线模型落到 invalid/去重兜底，不静默丢弃存量数据
-      for (const item of legacyRefs) {
-        if (item.source !== 'canvas') continue;
-        if (!mediaNodesRef.current.some((n) => n.id === item.id)) continue;
-        addCanvasEdge(item.id, nodeId);
-      }
-      patchMediaNode(nodeId, { audioRefs: [] });
-    }
-    const nextAudioSeed: AudioDraftSeed = {
-      ts: Date.now(),
-      text: typeof d.prompt === 'string' ? d.prompt : '',
-      modelId: typeof d.draftModelId === 'string' ? d.draftModelId : undefined,
-      targetNodeId: nodeId,
-      doc: restorePromptDoc(d.promptDoc, d.prompt),
-      refs: [],
-    };
-    setAudioSeed((prev) => (draftSeedEquals(prev, nextAudioSeed) ? prev : nextAudioSeed));
-    exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
-    setShowAudioDialog(true);
-  };
-
-  /** 面板编辑实时写回音频草稿节点（IKDMQT）：参数随节点 data 进入自动保存，刷新后恢复。
-   *  媒体参考不经此链路（IKFDFZ 起走连线，随画布自动保存） */
-  const handleAudioDraftParamsChange = (
-    nodeId: string,
-    patch: { prompt?: string; modelId?: string; promptDoc?: PromptDoc | null },
-  ) => {
-    const data: Record<string, unknown> = {};
-    if (patch.prompt !== undefined) data.prompt = patch.prompt;
-    if (patch.promptDoc !== undefined) data.promptDoc = patch.promptDoc ? { ...patch.promptDoc, flat: patch.prompt ?? '' } : null;
-    if (patch.modelId !== undefined) data.draftModelId = patch.modelId;
-    if (Object.keys(data).length === 0) return;
-    patchMediaNode(nodeId, data);
-  };
-
-  /** 面板绑定清理（IKDMQT；IKDMQU 扩展到成品卡，同图片） */
-  useEffect(() => {
-    if (!audioDraftId) return;
-    if (audioSeed?.targetNodeId !== audioDraftId) {
-      setAudioDraftId(null);
-      return;
-    }
-    const node = mediaNodes.find((n) => n.id === audioDraftId);
-    const d = (node?.data ?? {}) as Record<string, unknown>;
-    if (!node || (d.draft !== true && !hasGenerationRecord(node))) {
-      setAudioDraftId(null);
-      setShowAudioDialog(false);
-    }
-  }, [audioDraftId, audioSeed, mediaNodes]);
+  useEffect(() => { generationDock.reconcile(); }, [generationDock, audioDraftId, audioSeed, mediaNodes]);
 
   /** 同步 toolMode 到所有文本节点和媒体节点 */
   useEffect(() => {
@@ -6722,13 +6624,6 @@ export default function CanvasPage() {
     if (pending && targetId) connectPlanToDraft(planNodeId, targetId);
   };
 
-  /** 音频草稿绑定面板的文本附件实时跟随画布连线（IKFCKS：画布文本卡连线 → FileText 缩略图进参考栏） */
-  const audioDraftAttachments = useMemo(
-    () => (audioDraftId ? textAttachmentsOf(audioDraftId) : undefined),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [audioDraftId, edges, textNodes],
-  );
-
   /** IKFR4X 会话勾选标识：图片持续选取会话进行中，已并入原目标的媒体来源节点集合（连线推导，与 Dock 参考同源；
    *  文本附件来源无素材勾选语义，不计入）。仅会话活跃时计算——普通模式不标记，勾选只表达当前目标与选择上下文 */
   const imagePickMarkedIds = useMemo(() => {
@@ -6787,33 +6682,6 @@ export default function CanvasPage() {
    *  直接参考在前、文本索引素材追加尾部（同 assetId 去重保首见），面板显示即提交
    *  references 输入（同源）；连线随画布自动保存持久化，刷新/重开经同一推导恢复展示；
    *  失效来源保留原因提示并阻止发送，名称随来源卡片改名即时同步。 */
-  const audioDraftMediaRefs = useMemo(
-    () => {
-      if (!audioDraftId) return undefined;
-      return mergedAudioRefsWithTextIndex(audioDraftId, edges, mediaNodes, textNodes);
-    },
-    [audioDraftId, edges, mediaNodes, textNodes],
-  );
-  /** IKFM41 §11：音频目标文本索引发送校验（失效/不支持类型与业务 API 同口径）——面板持续显示并阻止发送 */
-  const audioDraftTextIndexError = useMemo(
-    () => (audioDraftId ? audioTextIndexSendError(audioDraftId, edges, mediaNodes, textNodes) : undefined),
-    [audioDraftId, edges, mediaNodes, textNodes],
-  );
-
-  /** 音频草稿参考的 AudioRefItem 形态（面板展示/提交共用；文本带入项携带锁定来源与实际类型） */
-  const audioDraftRefItems: AudioRefItem[] | undefined = audioDraftMediaRefs
-    ? audioDraftMediaRefs.refs.map((r) => ({
-      id: r.nodeId,
-      kind: r.mediaType,
-      name: r.name,
-      src: r.url,
-      source: 'canvas' as const,
-      assetId: r.assetId,
-      mediaType: r.mediaType,
-      ...(r.textNodeId != null ? { textNodeId: r.textNodeId } : {}),
-    }))
-    : undefined;
-
   /** 面板「从画布选择」列表添加参考（IKFDFZ）：与画布选取/@ 同一校验与建线语义 */
   const handleAddAudioCanvasRef = (nodeId: string) => {
     if (!audioDraftId) return;
@@ -8903,83 +8771,6 @@ export default function CanvasPage() {
    *  草稿绑定模式（IKDMQT）：先等待在途保存并落盘当前画布编辑（同图片/视频草稿），
    *  再携带 target_node_id 提交；绑定以 audioDraftId 为准（seed 可能残留旧草稿值），
    *  工具条等非草稿入口沿用直接提交 */
-  const handleAudioDialogSend = async (text: string, modelId: string, refs: AudioRefItem[], promptDoc?: PromptDoc | null) => {
-    if (applyingRef.current || saveBlocked || saveStatus === 'error' || !currentId) return;
-    const projectId = currentId;
-    const targetNodeId = audioDraftId && audioSeed?.targetNodeId === audioDraftId ? audioDraftId : undefined;
-    const composedPrompt = composeImageSendPrompt(
-      targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
-      text,
-      promptDoc,
-    );
-    const audioPromptLimitError = composedPromptLimitError(
-      composedPrompt,
-      await promptMaxLengthOfModel('audio', modelId),
-    );
-    if (audioPromptLimitError) {
-      showToast('warn', audioPromptLimitError);
-      return;
-    }
-    applyingRef.current = true;
-    setSubmittingNodeId(targetNodeId ?? null);
-    try {
-      // IKFM41 §11：草稿绑定模式发送校验（失效/不支持类型与业务 API 同口径，不能仅靠按钮禁用）；
-      // 容量与 audio/image 混用由后端 400 权威兜底（面板防线显示对应文案）
-      if (targetNodeId) {
-        const syncError = audioTextIndexSendError(
-          targetNodeId,
-          edgesRef.current,
-          mediaNodesRef.current,
-          textNodesRef.current,
-        );
-        if (syncError) {
-          showToast('warn', syncError);
-          return;
-        }
-      }
-      const resolved: AudioRefItem[] = [];
-      for (const ref of refs) {
-        if (ref.assetId) { resolved.push(ref); continue; }
-        const mediaType = audioRefItemMediaTypeOf(ref);
-        const mime = mediaType === 'image' ? 'image/png' : 'audio/mpeg';
-        const file = ref.file ?? await fetchUrlAsFile(ref.src, ref.name, mime);
-        const uploaded = file ? await uploadFileToAsset(file, mediaType) : null;
-        if (!uploaded) {
-          showToast('error', mediaType === 'image' ? '参考图上传失败，请重试' : '参考音频上传失败，请重试');
-          return;
-        }
-        resolved.push({ ...ref, assetId: uploaded.asset_id, src: uploaded.url, file: undefined, kind: mediaType, mediaType });
-      }
-      if (targetNodeId) {
-        handleAudioDraftParamsChange(targetNodeId, { prompt: text, promptDoc });
-        if (!(await flushCanvasSave(projectId))) return;
-      }
-      // IKFM41：references 类型按实际媒体类型提交（直接参考与文本带入均可为 audio / image）
-      const submitted = startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined,
-        resolved.length ? { references: resolved.map(ref => ({ role: 'reference' as const, type: audioRefItemMediaTypeOf(ref), asset_id: String(ref.assetId) })) } : undefined,
-        targetNodeId, undefined, promptDoc);
-      // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）。
-      // 置 hidden 标记避免紧随的画布选中事件回弹重开
-      if (submitted) { audioPanelHiddenRef.current = true; setShowAudioDialog(false); }
-    } catch (e) {
-      showToast('error', '保存失败，请重试');
-      console.warn('音频生成前准备失败:', e);
-    } finally {
-      applyingRef.current = false;
-      setSubmittingNodeId(null);
-    }
-  };
-
-  /** AI 音乐对话发送 */
-  const handleMusicDialogSend = (
-    text: string,
-    model: string,
-    opts: MusicGenOptions,
-    refs: AudioRefItem[],
-  ) => {
-    console.log('Music dialog send:', text, model, opts, refs);
-  };
-
   /** 上传单个文件到服务器，返回 assetId */
   const uploadFileToAsset = async (file: File, type: 'image' | 'video' | 'audio'): Promise<UploadCompleteData | null> => {
     try {
@@ -9200,32 +8991,78 @@ export default function CanvasPage() {
       />
     ),
   };
+  audioDockHostRef.current = {
+    getNodes: () => [...mediaNodesRef.current, ...textNodesRef.current],
+    getEdges: () => edgesRef.current,
+    attachmentsOf: textAttachmentsOf,
+    canOpen: canOpenEditor,
+    beginEdit: id => { if (id) editingTargetRef.current = id; exitEditSessionForGenPanel(); },
+    endPicking: endAudioPickSession,
+    clearPickResult: () => setAudioPickResult(null),
+    addReferenceEdge: (source, target) => addCanvasEdge(source, target),
+    patchNode: patchMediaNode,
+    getAvailability: () => ({ submittingNodeId, saveFailed: saveBlocked || saveStatus === 'error' }),
+    getProjectId: () => currentId,
+    isApplying: () => applyingRef.current,
+    isSaveBlocked: () => saveBlocked || saveStatus === 'error',
+    setApplying: value => { applyingRef.current = value; },
+    setSubmittingNode: setSubmittingNodeId,
+    promptMaxLength: modelId => promptMaxLengthOfModel('audio', modelId),
+    fetchFile: fetchUrlAsFile,
+    upload: uploadFileToAsset,
+    save: flushCanvasSave,
+    startTask: input => startGenerationJob('audio', { prompt: input.text, model_id: input.modelId }, undefined,
+      input.refs.length ? { references: input.refs.map(ref => ({ role: 'reference' as const, type: audioRefItemMediaTypeOf(ref), asset_id: String(ref.assetId) })) } : undefined,
+      input.targetNodeId, undefined, input.promptDoc),
+    toast: showToast,
+    reportError: error => console.warn('音频生成前准备失败:', error),
+    render: () => <AudioGenerationDockPanel
+      view={generationDock.panel('audio')}
+      actions={{ close: closeAudioDialog, updateDraft: patch => generationDock.updateDraft('audio', patch), submit: input => generationDock.submit('audio', input), switchToMusic: () => { generationDock.open('music', { fromAudio: true }); } }}
+      resources={{
+        projectId: currentId ?? undefined,
+        stripOrder: refStripOrderOf(audioDraftId),
+        onStripOrderChange: audioDraftId ? keys => handleRefStripOrderChange(audioDraftId, keys) : undefined,
+        onToast: showToast,
+        canvasMedia,
+        onPickFromCanvas: () => { endImagePickSession(); endVideoPickSession(); setPickMode('audio'); setPickTarget('audio'); setAudioPickSession(audioDraftId ?? null); },
+        onPickFromAssets: () => {
+          generationDock.referencePicked('audio');
+          setPickMode(null); setPickTarget(null);
+          setAudioAssetPickTarget({ nodeId: audioDraftId, seed: audioSeed?.ts });
+          openAssetsPicker('audioDialog');
+        },
+        externalAssetPick: audioAssetPickResult,
+        onAssetPickConsumed: () => setAudioAssetPickResult(null),
+        externalPick: audioPickResult,
+        pickMode: pickMode === 'audio',
+        onLocateTextSource: locateTextSource,
+        onRemoveDraftRef: audioDraftId ? nodeId => removeRefEdges(audioDraftId, nodeId) : undefined,
+        onAddCanvasRef: audioDraftId ? handleAddAudioCanvasRef : undefined,
+        mentionItems: atMentionItems.filter(item => item.id !== audioDraftId),
+        onMentionCanvas: handleAudioAtMention,
+        followAnchor: audioDraftId ? followAnchor : null,
+        dragHidden: isAnchoredOverlayDragHidden(audioDraftId),
+        onRemoveAttachment: id => removePlanAttachment(audioDraftId ?? undefined, id),
+        onReorderAttachments: audioDraftId ? ids => handleReorderAttachments(audioDraftId, ids) : undefined,
+      }}
+    />,
+  };
+  musicDockHostRef.current = {
+    beginEdit: exitEditSessionForGenPanel,
+    recordSend: input => console.log('Music dialog send:', input.text, input.model, input.options, input.refs),
+    render: () => <MusicGenerationDockPanel
+      actions={{ close: closeMusicDialog, submit: input => generationDock.submit('music', input), switchToAudio: () => { generationDock.open('audio', {}); } }}
+      resources={{ canvasMedia, mentionItems: atMentionItems, onMentionCanvas: handleMusicAtMention, externalPick: musicPickResult }}
+    />,
+  };
   compatibilityDockHostRef.current = {
-    audio: {
-      view: () => ({ visible: showAudioDialog }),
-      canOpen: input => input.nodeId ? canOpenEditor(input.nodeId) : true,
-      beforeOpen: exitEditSessionForGenPanel,
-      open: input => { if (input.nodeId) openLegacyAudioDraftDialog(input.nodeId); else setShowAudioDialog(true); },
-      hide: next => {
-        if (next === 'imageEnhance' || next === 'videoEnhance' || next === 'frameInterpolation') { closeAudioDialog(); return; }
-        if (next === 'image' || next === 'video') setAudioDraftId(null);
-        setShowAudioDialog(false);
-      },
-      close: closeAudioDialog,
-    },
     text: {
       view: () => ({ visible: showTextGenDialog }),
       beforeOpen: exitEditSessionForGenPanel,
       open: input => openLegacyTextGenDialog(input.nodeId!),
       hide: () => setShowTextGenDialog(false),
       close: closeTextGenDialog,
-    },
-    music: {
-      view: () => ({ visible: showMusicDialog }),
-      beforeOpen: exitEditSessionForGenPanel,
-      open: () => setShowMusicDialog(true),
-      hide: () => setShowMusicDialog(false),
-      close: closeMusicDialog,
     },
     imageEnhance: {
       view: () => ({ visible: toolSessions.entries.imageEnhance.handle.getSnapshot().visible === true }),
@@ -9464,10 +9301,7 @@ export default function CanvasPage() {
         undefined,
         promptDoc,
       );
-      if (submitted && audioDraftId === nodeId) {
-        audioPanelHiddenRef.current = true;
-        setShowAudioDialog(false);
-      }
+      if (submitted && audioDraftId === nodeId) generationDock.submitted('audio', nodeId);
     } catch (error) {
       showToast('error', '保存或提交失败，请重试');
       console.warn('更新生成失败:', error);
@@ -10079,85 +9913,8 @@ export default function CanvasPage() {
         )}
 
         {/* 底部音频对话框 */}
-        {showAudioDialog && (
-          <AudioDialog
-            {...(currentId ? { projectId: currentId } : {})}
-            stripOrder={refStripOrderOf(audioDraftId)}
-            onStripOrderChange={audioDraftId ? keys => handleRefStripOrderChange(audioDraftId, keys) : undefined}
-            key={audioSeed?.ts ?? 0}
-            initialText={audioSeed?.text}
-            initialDoc={audioSeed?.doc}
-            initialRefs={audioSeed?.refs}
-            initialModelId={audioSeed?.modelId}
-            draftBinding={
-              audioDraftId
-                ? {
-                    saveFailed: saveBlocked || saveStatus === 'error',
-                    submitting: submittingNodeId === audioDraftId,
-                    restoreExisting: hasGenerationRecord(mediaNodes.find(n => n.id === audioDraftId)),
-                    status: (mediaNodes.find((n) => n.id === audioDraftId)?.data as Record<string, unknown> | undefined)
-                      ?.genStatus as MediaGenStatus | undefined,
-                    onParamsChange: (patch) => handleAudioDraftParamsChange(audioDraftId, patch),
-                  }
-                : undefined
-            }
-            onClose={closeAudioDialog}
-            onSend={handleAudioDialogSend}
-            onToast={(type, msg) => showToast(type, msg)}
-            canvasMedia={canvasMedia}
-            onPickFromCanvas={() => { endImagePickSession(); endVideoPickSession(); setPickMode('audio'); setPickTarget('audio'); setAudioPickSession(audioDraftId ?? null); }}
-            onPickFromAssets={() => {
-              audioPanelHiddenRef.current = true; // 来源切换不因刚选过的素材节点而隐藏目标面板
-              setPickMode(null); setPickTarget(null);
-              setAudioAssetPickTarget({ nodeId: audioDraftId, seed: audioSeed?.ts });
-              openAssetsPicker('audioDialog');
-            }}
-            externalAssetPick={audioAssetPickResult}
-            onAssetPickConsumed={() => setAudioAssetPickResult(null)}
-            externalPick={audioPickResult}
-            pickMode={pickMode === 'audio'}
-            draftRefs={audioDraftRefItems}
-            draftRefInvalid={audioDraftMediaRefs?.invalid.length ? audioDraftMediaRefs.invalid : undefined}
-            textIndexError={audioDraftTextIndexError ?? undefined}
-            onLocateTextSource={locateTextSource}
-            onRemoveDraftRef={audioDraftId ? ((nodeId) => removeRefEdges(audioDraftId, nodeId)) : undefined}
-            onAddCanvasRef={audioDraftId ? handleAddAudioCanvasRef : undefined}
-            mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
-            onMentionCanvas={handleAudioAtMention}
-            followAnchor={audioDraftId ? followAnchor : null}
-            dragHidden={isAnchoredOverlayDragHidden(audioDraftId)}
-            attachments={audioDraftAttachments}
-            onRemoveAttachment={(id) => removePlanAttachment(audioDraftId ?? undefined, id)}
-            onReorderAttachments={
-              audioDraftId ? ((ids) => handleReorderAttachments(audioDraftId, ids)) : undefined
-            }
-            onSwitchToMusic={() => {
-              // 切走即结束草稿绑定并重置 seed：切回音频面板是干净的非草稿状态
-              setAudioSeed({ ts: Date.now() });
-              setAudioDraftId(null);
-              setShowAudioDialog(false);
-              exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
-              generationDock.open('music', {});
-            }}
-          />
-        )}
-
-        {/* 底部 AI 音乐对话框 */}
-        {showMusicDialog && (
-          <MusicDialog
-            onClose={closeMusicDialog}
-            onSend={handleMusicDialogSend}
-            canvasMedia={canvasMedia}
-            mentionItems={atMentionItems}
-            onMentionCanvas={handleMusicAtMention}
-            externalPick={musicPickResult}
-            onSwitchToAudio={() => {
-              setShowMusicDialog(false);
-              exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
-              generationDock.open('audio', {});
-            }}
-          />
-        )}
+        {generationDock.render('audio')}
+        {generationDock.render('music')}
       </div>
 
       {/* Agent 对话框 */}
