@@ -137,6 +137,21 @@
       }
     }
   },
+  "GET /api/canvases/project-1/generation-recovery": {
+    "status": 200,
+    "allowedStatuses": [
+      200
+    ],
+    "body": {
+      "code": 200,
+      "data": {
+        "protocol_version": 1,
+        "canvas_version": 1,
+        "records": [],
+        "next_cursor": null
+      }
+    }
+  },
   "PUT /api/canvases/project-1": {
     "status": 200,
     "allowedStatuses": [
