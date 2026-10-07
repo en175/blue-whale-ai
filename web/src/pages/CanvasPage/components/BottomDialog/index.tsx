@@ -49,7 +49,8 @@ import RefSourceMenu from '../RefSourceMenu';
 import AttachmentActionBar from '../AttachmentActionBar';
 import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
-import { composeImageSendPrompt, type ImageTextAttachment } from '../ImageDialog';
+import { type ImageTextAttachment } from '../ImageDialog';
+import { composeImageSendPrompt } from '../ImageDialog/composeImageSendPrompt';
 import {
   composedPromptLimitError,
   promptCharCountLabel,
@@ -507,6 +508,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     [selectedMode, refItems, orderedTextNodeIds],
   );
   /** 拍平镜像（IKFA1O/IKFA1P）：字数统计与发送门槛共用；失效标签 → 已失效：原N */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const flatValue = useMemo(() => flattenPromptDocWith(promptDoc, (key) => refLabelOfStable.current(key)), [promptDoc, reconcileKey]);
   /** 报价带提示词（IKJ79D）：后端据此判编辑单（时长口径标记输入）。防抖 600ms——报价查询键
    *  含提示词，逐字直传会每敲一个字重新问价，停笔后才问一次。
@@ -806,6 +808,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       out.push({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text', searchText: a.text });
     }
     return out;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoMediaRefs, attachments, reconcileKey]);
   /** IKFXOR：Esc 取消（restoreFocus=true）把光标落回 @ 后并还焦编辑器；点外关闭维持现状不抢焦 */
   const closeMention = (restoreFocus = false) => {

@@ -49,7 +49,7 @@ import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
-import { sampleDeadlineExpired } from './components/MediaNode';
+import { sampleDeadlineExpired } from './components/MediaNode/mediaPlayback';
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
 import NodeFollowToolbar from './components/NodeFollowToolbar';
 import AssetCardToolbar from './components/AssetCardNode/Toolbar';
@@ -154,7 +154,8 @@ import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
-import ImageDialog, { composeImageSendPrompt, type UploadedFile, type ImageTextAttachment } from './components/ImageDialog';
+import ImageDialog, { type UploadedFile, type ImageTextAttachment } from './components/ImageDialog';
+import { composeImageSendPrompt } from './components/ImageDialog/composeImageSendPrompt';
 import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-max-length';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import TextGenDialog from './components/TextGenDialog';
@@ -189,7 +190,7 @@ import {
 } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
-import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
+import { rememberAssetUrl } from './components/AgentPanel/assetUrlCache';
 import { referencePromptPlan, applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, readCanvasConflictVersion, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
 import { envelopeErrorCode, isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
@@ -2317,7 +2318,7 @@ export default function CanvasPage() {
       );
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch]);
+  }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch, rollbackPendingNodes, showToast]);
 
   /** 创建文本节点（正文为受限 Markdown 源，契约 §5 新建一律 v1 形态）；
    *  返回新节点 id（供 IKGBPB 系统剪贴板兜底粘贴后选中） */
@@ -6272,8 +6273,6 @@ export default function CanvasPage() {
           },
         });
         referenceNodes.push(source);
-      } else if (ref.materialId) {
-        patchMediaNode(source.id, { materialId: ref.materialId, compliancePassed: true });
       } else if (ref.materialId) {
         patchMediaNode(source.id, { materialId: ref.materialId, compliancePassed: true });
       }
@@ -10844,7 +10843,7 @@ export default function CanvasPage() {
           <TextGenDialog
             key={textGenDraftId}
             initialText={typeof (textNodes.find((n) => n.id === textGenDraftId)?.data as Record<string, unknown> | undefined)?.prompt === 'string'
-              ? String((textNodes.find((n) => n.id === textGenDraftId)?.data as Record<string, unknown>).prompt)
+              ? String((textNodes.find((n) => n.id === textGenDraftId)?.data as Record<string, unknown> | undefined)?.prompt)
               : ''}
             attachments={textAttachmentsOf(textGenDraftId)}
             followAnchor={followAnchor}

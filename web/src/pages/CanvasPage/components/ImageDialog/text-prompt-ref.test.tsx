@@ -4,7 +4,8 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import ImageDialog, { composeImageSendPrompt, type ImageTextAttachment } from './index';
+import ImageDialog, { type ImageTextAttachment } from './index';
+import { composeImageSendPrompt } from './composeImageSendPrompt';
 import type { PromptDoc } from '@/lib/prompt-doc';
 import { readPromptRefText, typePromptRefRaw } from '../../testing/promptRefEditor';
 

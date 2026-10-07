@@ -9,7 +9,8 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
+import CanvasPageNavProbe from './CanvasPageNavProbe';
 import { vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { GenerationModel } from '@/api/generation';
@@ -194,11 +195,7 @@ let container: HTMLDivElement | null = null;
  *  locationRef 供断言导航是否真的发生（IKILUE 切换中止用例） */
 export let navigateRef: ((to: string) => void) | null = null;
 export let locationRef: { search: string } | null = null;
-function NavProbe() {
-  navigateRef = useNavigate();
-  locationRef = { search: useLocation().search };
-  return null;
-}
+
 
 /** 渲染 CanvasPage（jsdom + 打桩组件；页面经动态 import 加载，保证本文件顶层
  *  的 vi.mock 注册先于页面模块图；卸载走 unmountPage） */
@@ -214,7 +211,7 @@ export async function renderPage() {
       createElement(
         QueryClientProvider,
         { client: new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }) },
-        createElement(MemoryRouter, { initialEntries: ['/canvas?project=p1'] }, createElement(NavProbe), createElement(CanvasPage)),
+        createElement(MemoryRouter, { initialEntries: ['/canvas?project=p1'] }, createElement(CanvasPageNavProbe, { onChange: (navigate, search) => { navigateRef = navigate; locationRef = { search }; } }), createElement(CanvasPage)),
       ),
     );
   });

@@ -164,8 +164,9 @@ function AuthQrModal({
   }, [expired, h5Link]);
 
   useEffect(() => {
-    if (!qrContainerRef.current) return;
-    qrContainerRef.current.innerHTML = '';
+    const qrContainer = qrContainerRef.current;
+    if (!qrContainer) return;
+    qrContainer.innerHTML = '';
     const qr = new QRCodeStyling({
       width: 220,
       height: 220,
@@ -178,9 +179,9 @@ function AuthQrModal({
       margin: 0,
       qrOptions: { errorCorrectionLevel: 'L' },
     });
-    qr.append(qrContainerRef.current);
+    qr.append(qrContainer);
     return () => {
-      qrContainerRef.current?.replaceChildren();
+      qrContainer.replaceChildren();
     };
   }, [h5Link]);
 

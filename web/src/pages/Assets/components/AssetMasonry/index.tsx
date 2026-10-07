@@ -429,12 +429,14 @@ const AssetMasonry = memo(function AssetMasonry({
   useLayoutEffect(() => {
     let resizeObserver: ResizeObserver | undefined;
     let handleScroll: (() => void) | undefined;
+    let attachedScroller: HTMLElement | null = null;
     let raf = 0;
 
     const attach = () => {
       const scroller = scrollContainerRef.current;
       const grid = gridRef.current;
       if (!scroller || !grid) return false;
+      attachedScroller = scroller;
 
       handleScroll = () => {
         updateViewport();
@@ -464,8 +466,7 @@ const AssetMasonry = memo(function AssetMasonry({
 
     return () => {
       if (raf) cancelAnimationFrame(raf);
-      const scroller = scrollContainerRef.current;
-      if (scroller && handleScroll) scroller.removeEventListener('scroll', handleScroll);
+      if (attachedScroller && handleScroll) attachedScroller.removeEventListener('scroll', handleScroll);
       window.removeEventListener('resize', updateViewport);
       resizeObserver?.disconnect();
       if (scrollStopTimer.current) clearTimeout(scrollStopTimer.current);

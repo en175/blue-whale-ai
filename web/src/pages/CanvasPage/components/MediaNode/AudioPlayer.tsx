@@ -15,6 +15,7 @@
 import { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Play, Pause } from 'lucide-react';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { formatTime } from './mediaPlayback';
 import styles from './index.module.css';
 /** 截取选区（秒，内部全精度；形状对齐 audioTrimGeometry.AudioTrimSelection，
  *  此处本地声明避免无谓依赖方向）。 */
@@ -56,13 +57,6 @@ interface AudioPlayerProps {
   /** 截取遮罩插槽（IKHB7A）：渲染在波形区内（贴合原型 .ovl 于 wave-inner 的结构，
    *  遮罩天然只覆盖波形区、底部播放控制仍可用）；层内消化指针不冒泡开音频面板。 */
   trimOverlay?: React.ReactNode;
-}
-
-export function formatTime(sec: number): string {
-  if (!isFinite(sec) || sec <= 0) return '0:00';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 /** 波形竖条数：480×240 横矩形下 72 根细密观感（IKH8PU，对齐原型 audio-card-landscape） */
@@ -293,6 +287,7 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
         if (!abort.signal.aborted) setWaveform(fallbackWaveform(src, duration, BARS));
       });
     return () => abort.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
   // 组件卸载时兜底移除拖拽监听，防止泄漏
@@ -403,26 +398,3 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
 });
 
 export default AudioPlayer;
-
-/** 截取遮罩定位条 → 播放器命令式桥（IKHB7A，MediaNode 消费）：遮罩层只报时点，暂停/
- *  续播语义在此组装——按下暂停记 wasPlaying；松手按 wasPlaying 与「未拖到选区尾」续播
- *  （拖到尾 = 停在终点，等价自动暂停，rAF tick 会收敛到终点）。拖拽为高频命令式 seek，
- *  state 桥会逐帧重排整卡，ref 桥是最小形态。 */
-export function useAudioTrimSeekBridge() {
-  const playerRef = useRef<AudioPlayerHandle | null>(null);
-  const wasPlayingRef = useRef(false);
-  const onSeekStart = useCallback(() => {
-    wasPlayingRef.current = playerRef.current?.pause() ?? false;
-  }, []);
-  const onSeek = useCallback((time: number) => {
-    playerRef.current?.seekTo(time);
-  }, []);
-  const onSeekEnd = useCallback((time: number, selectionEnd?: number) => {
-    const wasPlaying = wasPlayingRef.current;
-    wasPlayingRef.current = false;
-    if (wasPlaying && selectionEnd != null && time < selectionEnd - 1e-6) {
-      playerRef.current?.playFrom(time);
-    }
-  }, []);
-  return { playerRef, onSeekStart, onSeek, onSeekEnd };
-}

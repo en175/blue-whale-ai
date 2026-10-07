@@ -8,20 +8,13 @@
  * ============================================ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Play, Pause } from 'lucide-react';
-import { formatTime } from './AudioPlayer';
+import { formatTime, toggleVideoPlayback } from './mediaPlayback';
 import styles from './index.module.css';
 
 interface VideoPlayerControlsProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   /** 服务端权威时长（秒，对齐 AudioPlayer 口径）：有值时优先于浏览器实测 */
   duration?: number;
-}
-
-/** 播放/暂停切换（MediaNode 画面区点击与本组件播放钮共用同一条路径） */
-export function toggleVideoPlayback(video: HTMLVideoElement | null) {
-  if (!video) return;
-  if (video.paused) void video.play().catch(() => {});
-  else video.pause();
 }
 
 export default function VideoPlayerControls({ videoRef, duration: authoritativeDuration }: VideoPlayerControlsProps) {

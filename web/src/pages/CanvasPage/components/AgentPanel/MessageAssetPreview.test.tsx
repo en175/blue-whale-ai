@@ -2,7 +2,8 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MessageAssetPreview, rememberAssetUrl, isInlineMediaThumbnail } from './MessageAssetPreview';
+import { MessageAssetPreview } from './MessageAssetPreview';
+import { rememberAssetUrl, isInlineMediaThumbnail } from './assetUrlCache';
 
 const fetchAssetDetail = vi.hoisted(() => vi.fn(async (): Promise<{ id: string; url: string }> => {
   throw new Error('asset not found');

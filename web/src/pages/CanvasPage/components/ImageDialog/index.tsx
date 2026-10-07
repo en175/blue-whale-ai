@@ -1,4 +1,5 @@
 import PromptSyncActions from '../PromptSyncActions';
+import { composeImageSendPrompt } from './composeImageSendPrompt';
 /* ============================================
  * ImageDialog 图片对话窗口：参考图上传/模型/清晰度/比例配置
  * ============================================ */
@@ -28,7 +29,6 @@ import {
   docHasInvalidRef,
   flattenPromptDocWith,
   imageRefLabelOf,
-  promptCoveredByAttachmentParts,
   textRefLabelOf,
   type PromptDoc,
   type PromptRefKey,
@@ -52,21 +52,6 @@ import AttachmentActionBar from '../AttachmentActionBar';
 import { type AtMentionItem } from '../../atMention';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import styles from './index.module.css';
-
-/** 参考文本在前、输入文本在后直接拼接，中间不加空行。
- *  生成框若只是文本附件里已经有的 &素材id&，不再追加，避免同一个 @ 拼两次。 */
-export function composeImageSendPrompt(
-  attachments: ImageTextAttachment[] | undefined,
-  input: string,
-  promptDoc?: PromptDoc | null,
-): string {
-  const indexed = promptDoc?.segments.some((segment) => segment.kind === 'text_ref');
-  const parts = indexed
-    ? (attachments ?? []).map((item, i) => `文本${i + 1}：${item.text}`)
-    : (attachments ?? []).map((item) => item.text).filter((text) => text.trim().length > 0);
-  if (input.trim().length > 0 && !promptCoveredByAttachmentParts(input, parts)) parts.push(input);
-  return parts.join('');
-}
 
 export interface UploadedFile {
   id: string;

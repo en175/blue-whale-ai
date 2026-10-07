@@ -329,6 +329,7 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     if (!entry) return;
     redoStack.current.push(undoEntry(entry));
     bump();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bump]);
 
   const redo = useCallback(() => {
@@ -337,6 +338,7 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     undoStack.current.push(entry);
     redoEntry(entry);
     bump();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bump]);
 
   const clear = useCallback(() => {

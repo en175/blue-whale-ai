@@ -785,7 +785,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       };
     });
     return [...frames, ...content];
-  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, edges, refPickMarkedIds, refPickBlockedIds, refPickActive]);
+  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, edges, refPickMarkedIds, refPickBlockedIds, refPickActive, onUpdateGenerate]);
 
   /** 节点拖拽起：仅标记拖拽中（隐藏框选悬浮条）。组内节点可自由拖出组，拖出后按
    *  坐标动态脱离组；不再整组选中——整组拖动改由组框把手承担。

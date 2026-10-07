@@ -117,9 +117,10 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
 
   // 卸载时取消所有待上传任务、释放 blob URL
   useEffect(() => {
+    const pendingUploads = pendingUploadsRef.current;
     return () => {
-      pendingUploadsRef.current.forEach((p) => { p.cancelled = true; });
-      pendingUploadsRef.current.clear();
+      pendingUploads.forEach((p) => { p.cancelled = true; });
+      pendingUploads.clear();
       images.forEach((img) => {
         if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
       });
