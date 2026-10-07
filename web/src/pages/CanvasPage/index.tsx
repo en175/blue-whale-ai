@@ -5,7 +5,7 @@ import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, t
 import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
 import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import { replaceImageMentionsWithAssetTokens, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
-import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { toast as globalToast } from 'sonner';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -279,7 +279,7 @@ import {
   shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
-import { createGenerationDockCoordinator, createCompatibilityDock, type CompatibilityDockHost } from './generationDockCoordinator';
+import { createGenerationDockCoordinator } from './generationDockCoordinator';
 import { createImageGenerationDock, type ImageGenerationDockHost } from './imageGenerationDock';
 import { createVideoGenerationDock, type VideoGenerationDockHost } from './videoGenerationDock';
 import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from './audioMusicGenerationDock';
@@ -287,6 +287,7 @@ import AudioGenerationDockPanel from './audioGenerationDockPanel';
 import MusicGenerationDockPanel from './musicGenerationDockPanel';
 import { createTextGenerationDock, type TextGenerationDockHost } from './textGenerationDock';
 import TextGenerationDockPanel from './textGenerationDockPanel';
+import { createToolGenerationDock } from './toolGenerationDock';
 import VideoGenerationDockPanel from './videoGenerationDockPanel';
 import styles from './index.module.css';
 
@@ -412,7 +413,6 @@ export default function CanvasPage() {
   useCanvasToolSessionEffects(toolSessions);
   // 项目首帧先使旧响应失效，随后从运行时读取唯一状态。
   toolRuntime.setProject(currentId);
-  useSyncExternalStore(toolRuntime.subscribe, toolRuntime.getVersion);
   const audioMixInFlightRef = useRef(false);
   /** IKIZQE 成片（finalize）链路的页面态：按样片卡 node id 记报价，按样片任务 id 记
    *  已受理尝试（会话内）；「提交中/结果不明」是渲染期派生 CTA 状态的数据源。
@@ -973,25 +973,58 @@ export default function CanvasPage() {
   const [audioMusicDock] = useState(() => createAudioMusicGenerationDocks(() => audioDockHostRef.current!, () => musicDockHostRef.current!));
   const textDockHostRef = useRef<TextGenerationDockHost | null>(null);
   const [textDock] = useState(() => createTextGenerationDock(() => textDockHostRef.current!));
-  const compatibilityDockHostRef = useRef<Record< 'imageEnhance' | 'videoEnhance' | 'frameInterpolation', CompatibilityDockHost> | null>(null);
+  const [toolDocks] = useState(() => ({
+    imageEnhance: createToolGenerationDock(toolSessions.entries.imageEnhance.handle, {
+      createDraft: id => toolViewRef.current!.createEnhanceDraft(id),
+      getDeps: () => toolDepsRef.current!,
+      subscribe: toolRuntime.subscribe,
+      getVersion: toolRuntime.getVersion,
+      render: (): ReactNode => toolSessions.entries.imageEnhance.render({
+        close: () => generationDock.close('imageEnhance'),
+        submit: (value): boolean => generationDock.submit('imageEnhance', value),
+      }),
+    }),
+    videoEnhance: createToolGenerationDock(toolSessions.entries.videoEnhance.handle, {
+      createDraft: id => toolViewRef.current!.createVideoEnhanceDraft(id),
+      getDeps: () => toolDepsRef.current!,
+      subscribe: toolRuntime.subscribe,
+      getVersion: toolRuntime.getVersion,
+      updateDraft: input => toolViewRef.current!.changeVideoParams(input.nodeId, input.value),
+      render: (): ReactNode => toolSessions.entries.videoEnhance.render({
+        close: () => generationDock.close('videoEnhance'),
+        submit: (value): boolean => generationDock.submit('videoEnhance', value),
+        updateDraft: (nodeId, value) => generationDock.updateDraft('videoEnhance', { nodeId, value }),
+      }),
+    }),
+    frameInterpolation: createToolGenerationDock(toolSessions.entries.frameInterpolation.handle, {
+      createDraft: id => toolViewRef.current!.createFrameInterpolationDraft(id),
+      getDeps: () => toolDepsRef.current!,
+      subscribe: toolRuntime.subscribe,
+      getVersion: toolRuntime.getVersion,
+      updateDraft: input => toolViewRef.current!.changeFrameParams(input.nodeId, input.value),
+      render: (): ReactNode => toolSessions.entries.frameInterpolation.render({
+        close: () => generationDock.close('frameInterpolation'),
+        submit: (value): boolean => generationDock.submit('frameInterpolation', value),
+        updateDraft: (nodeId, value) => generationDock.updateDraft('frameInterpolation', { nodeId, value }),
+      }),
+    }),
+  }));
   const [generationDock] = useState(() => createGenerationDockCoordinator({
     image: imageDock,
     video: videoDock,
     audio: audioMusicDock.audio,
     text: textDock,
     music: audioMusicDock.music,
-    imageEnhance: createCompatibilityDock(() => compatibilityDockHostRef.current!.imageEnhance, true),
-    videoEnhance: createCompatibilityDock(() => compatibilityDockHostRef.current!.videoEnhance, true),
-    frameInterpolation: createCompatibilityDock(() => compatibilityDockHostRef.current!.frameInterpolation, true),
+    ...toolDocks,
   }));
   useSyncExternalStore(generationDock.subscribe, generationDock.getVersion);
   const { visible: showImageDialog, boundId: imageDraftId, seed: imageSeed } = generationDock.panel('image');
   const { visible: showBottomDialog, boundId: videoDraftId, seed: videoSeed, freeRefs: videoFreeRefs } = generationDock.panel('video');
   const dockToolCallbacks = {
     ...toolSessions.callbacks,
-    onEnhanceImage: (id: string) => generationDock.open('imageEnhance', { nodeId: id, invoke: () => toolSessions.callbacks.onEnhanceImage!(id) }),
-    onVideoEnhance: (id: string) => generationDock.open('videoEnhance', { nodeId: id, invoke: () => toolSessions.callbacks.onVideoEnhance!(id) }),
-    onFrameInterpolation: (id: string) => generationDock.open('frameInterpolation', { nodeId: id, invoke: () => toolSessions.callbacks.onFrameInterpolation!(id) }),
+    onEnhanceImage: (id: string) => generationDock.open('imageEnhance', { sourceId: id }),
+    onVideoEnhance: (id: string) => generationDock.open('videoEnhance', { sourceId: id }),
+    onFrameInterpolation: (id: string) => generationDock.open('frameInterpolation', { sourceId: id }),
   };
   const openCoordinatedToolDraft = (node: Node, open: () => void) => {
     if (node.data.imageEnhance) generationDock.open('imageEnhance', { nodeId: node.id });
@@ -9028,31 +9061,6 @@ export default function CanvasPage() {
       resources={{ followAnchor, dragHidden: isAnchoredOverlayDragHidden(textGenDraftId) }}
     />,
   };
-  compatibilityDockHostRef.current = {
-    imageEnhance: {
-      view: () => ({ visible: toolSessions.entries.imageEnhance.handle.getSnapshot().visible === true }),
-      canOpen: input => canOpenEditor(input.nodeId),
-      open: input => input.invoke ? input.invoke() : toolSessions.entries.imageEnhance.handle.open(input.nodeId!, buildToolSessionDeps()),
-      hide: toolSessions.entries.imageEnhance.handle.close,
-      close: toolSessions.entries.imageEnhance.handle.close,
-    },
-    videoEnhance: {
-      view: () => ({ visible: toolSessions.entries.videoEnhance.handle.getSnapshot().visible === true }),
-      canOpen: input => canOpenEditor(input.nodeId),
-      open: input => input.invoke ? input.invoke() : toolSessions.entries.videoEnhance.handle.open(input.nodeId!, buildToolSessionDeps()),
-      hide: toolSessions.entries.videoEnhance.handle.close,
-      close: toolSessions.entries.videoEnhance.handle.close,
-    },
-    frameInterpolation: {
-      view: () => ({ visible: toolSessions.entries.frameInterpolation.handle.getSnapshot().visible === true }),
-      canOpen: input => canOpenEditor(input.nodeId),
-      open: input => input.invoke ? input.invoke() : toolSessions.entries.frameInterpolation.handle.open(input.nodeId!, buildToolSessionDeps()),
-      hide: toolSessions.entries.frameInterpolation.handle.close,
-      close: toolSessions.entries.frameInterpolation.handle.close,
-    },
-  };
-
-
   /** 「输入已更新 → 更新生成」：用节点已存参数 + 画布上最新文本输入，在当前卡原位重跑。
    *  ratioOverride（IKJ79D）：一键修复传入 'adaptive' 覆盖卡上比例——仅换比例重交，
    *  其余参数（提示词/分辨率/时长/带音频/参考）仍取卡上冻结值。 */
@@ -9807,13 +9815,8 @@ export default function CanvasPage() {
           )}
         </div>
 
-        {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口先建草稿卡再开跟随面板） */}
-        {generationDock.render('video')}
-
-        {/* 底部图片对话框 */}
-        {generationDock.render('image')}
-        {toolSessions.render()}
-        {generationDock.render('text')}
+        {generationDock.render()}
+        {toolSessions.render(generationDock.renderedToolKinds)}
 
         {/* 节点选取模式提示条（IKFE8U：视频面板与图片面板统一「从节点添加素材」文案；
             IKFR4X 图片持续会话：文案改为持续语义并提供「完成选取」退出入口；
@@ -9849,9 +9852,6 @@ export default function CanvasPage() {
           )
         )}
 
-        {/* 底部音频对话框 */}
-        {generationDock.render('audio')}
-        {generationDock.render('music')}
       </div>
 
       {/* Agent 对话框 */}

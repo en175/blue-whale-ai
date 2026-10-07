@@ -1,3 +1,4 @@
+import { createElement, Fragment } from 'react';
 export interface DockSelection {
   soloId: string | null;
   multiSelect: boolean;
@@ -27,12 +28,16 @@ export interface GenerationDockDefinition {
 
 export function createGenerationDockCoordinator<R extends Record<string, GenerationDockDefinition>>(registry: R) {
   const entries = Object.entries(registry);
+  const subscriptions = [...new Set(entries.flatMap(([, definition]) => definition.subscribe ? [definition.subscribe] : []))];
+  const versions = [...new Set(entries.flatMap(([, definition]) => definition.getVersion ? [definition.getVersion] : []))];
+  const renderedToolKinds: ReadonlySet<string> = new Set(entries.filter(([, definition]) => definition.tool && definition.render).map(([kind]) => kind));
   return {
+    renderedToolKinds,
     subscribe(listener: () => void) {
-      const cleanups = entries.flatMap(([, definition]) => definition.subscribe ? [definition.subscribe(listener)] : []);
+      const cleanups = subscriptions.map(subscribe => subscribe(listener));
       return () => cleanups.forEach(cleanup => cleanup());
     },
-    getVersion: () => entries.reduce((version, [, definition]) => version + (definition.getVersion?.() ?? 0), 0),
+    getVersion: () => versions.reduce((version, getVersion) => version + getVersion(), 0),
     get view() {
       return { activePanel: (entries.find(([, definition]) => definition.view().visible)?.[0] ?? null) as keyof R | null } as const;
     },
@@ -41,6 +46,7 @@ export function createGenerationDockCoordinator<R extends Record<string, Generat
     },
     open<K extends keyof R>(kind: K, input: Parameters<R[K]['open']>[0]) {
       const definition = registry[kind];
+      if (definition.tool) return definition.open(input as never) !== false;
       if (definition.canOpen?.(input as never) === false) return false;
       definition.beforeOpen?.(input as never);
       entries.forEach(([otherKind, other]) => { if (otherKind !== kind) other.hide(String(kind)); });
@@ -62,31 +68,9 @@ export function createGenerationDockCoordinator<R extends Record<string, Generat
     submitted<K extends keyof R>(kind: K, nodeId: string) { registry[kind].submitted?.(nodeId); },
     writeSelf<K extends keyof R>(kind: K) { registry[kind].writeSelf?.(); },
     reconcile() { entries.forEach(([, definition]) => definition.reconcile?.()); },
-    render<K extends keyof R>(kind: K) { return registry[kind].render?.(); },
-  };
-}
-
-export interface CompatibilityDockEntry { nodeId?: string; preset?: import('./components/BottomDialog').VideoGenSeedParams; invoke?: () => void }
-export interface CompatibilityDockHost {
-  view(): { visible: boolean };
-  canOpen?(input: CompatibilityDockEntry): boolean;
-  beforeOpen?(): void;
-  open(input: CompatibilityDockEntry): void;
-  hide(nextPanel: string): void;
-  close(): void;
-}
-
-export function createCompatibilityDock(getHost: () => CompatibilityDockHost, tool = false) {
-  return {
-    tool,
-    view: () => getHost().view(),
-    canOpen: (input: CompatibilityDockEntry) => getHost().canOpen?.(input) !== false,
-    beforeOpen: () => getHost().beforeOpen?.(),
-    open: (input: CompatibilityDockEntry) => getHost().open(input),
-    hide: (nextPanel: string) => getHost().hide(nextPanel),
-    close: () => getHost().close(),
-    updateDraft(_input: never) {},
-    submit(_input: never) {},
+    render<K extends keyof R>(kind?: K) {
+      return kind !== undefined ? registry[kind].render?.() : entries.map(([key, definition]) => createElement(Fragment, { key }, definition.render?.()));
+    },
   };
 }
 

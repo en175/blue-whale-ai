@@ -8,6 +8,7 @@
    （新会话再次受理，区别于选中隐藏回看的在途只读）。渲染模式沿用
    videoEnhancePanel.test.tsx（FlowCanvas 打桩透出 props），轮询 mock 终态模式对齐
    audioVideoSplitEdit.test.tsx（IKH28X 先例）。 */
+import { dockActions } from './testing/dockActionsRecorder';
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -341,6 +342,7 @@ describe('IKH3VH 发送创建任务闭环', () => {
 
     await clickPanelResolution('2k');
     await sendHd();
+    expect(dockActions.submit).toHaveBeenCalledWith('videoEnhance', '2k');
 
     // 创建请求携带冻结三键（source_asset_id 冻结自 HD 身份、target_node_id=HD 卡节点 id、面板所选档）
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);

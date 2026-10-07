@@ -1,7 +1,11 @@
+import { createElement, Fragment } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createGenerationDockCoordinator } from './generationDockCoordinator';
 import { createImageGenerationDock } from './imageGenerationDock';
 import type { Node } from '@xyflow/react';
+import { createToolSessionRuntime } from './toolSessionRuntime';
+import { createToolGenerationDock } from './toolGenerationDock';
 import type { ImageGenerationDockHost } from './imageGenerationDock';
 
 function imageHost(nodes: Node[]): ImageGenerationDockHost {
@@ -17,23 +21,40 @@ function imageHost(nodes: Node[]): ImageGenerationDockHost {
 }
 
 describe('生成 Dock 公开协调接口', () => {
+  it('无参渲染自动消费注册定义，工具渲染归属由注册元数据派生', () => {
+    const definition = (text: string, tool = false) => ({
+      tool, view: () => ({ visible: true }), open(_input: {}) {}, hide() {}, close() {}, updateDraft(_input: never) {}, submit(_input: never) {}, render: () => createElement('span', null, text),
+    });
+    const dock = createGenerationDockCoordinator({ existing: definition('既有'), added: definition('新注册'), managed: definition('工具', true) });
+    expect(renderToStaticMarkup(createElement(Fragment, null, dock.render()))).toContain('新注册');
+    expect(dock.renderedToolKinds).toEqual(new Set(['managed']));
+    expect(renderToStaticMarkup(createElement(Fragment, null, dock.render('added')))).toBe('<span>新注册</span>');
+  });
+
   it('八种面板依次打开时只有当前注册项可见，工具状态由句柄快照提供', () => {
-    const panel = (tool = false) => {
+    const runtime = createToolSessionRuntime();
+    let dismissOrdinary = () => {};
+    const panel = (kind: string, tool = false) => {
+      if (tool) {
+        const handle = runtime.register({ kind, panel: 'preserve', initialize: (nodeId: string) => ({ nodeId }), target: state => state.nodeId, capture: () => null, submit: async () => {}, onError() {} });
+        return createToolGenerationDock(handle, { createDraft: id => id, getDeps: () => ({ dismissGenPanels: () => dismissOrdinary(), selectNode() {} }), subscribe: runtime.subscribe, getVersion: runtime.getVersion });
+      }
       let visible = false;
       return {
-        tool, view: () => ({ visible }), open: (_entry: {}) => { visible = true; },
+        view: () => ({ visible }), open: (_entry: {}) => { visible = true; },
         hide: () => { visible = false; }, close: () => { visible = false; },
         updateDraft: (_input: never) => {}, submit: (_input: never) => {},
       };
     };
     const registry = {
-      image: panel(), video: panel(), audio: panel(), text: panel(), music: panel(),
-      imageEnhance: panel(true), videoEnhance: panel(true), frameInterpolation: panel(true),
+      image: panel('image'), video: panel('video'), audio: panel('audio'), text: panel('text'), music: panel('music'),
+      imageEnhance: panel('imageEnhance', true), videoEnhance: panel('videoEnhance', true), frameInterpolation: panel('frameInterpolation', true),
     };
     const dock = createGenerationDockCoordinator(registry);
+    dismissOrdinary = () => dock.dismissAll('ordinary');
     const kinds = Object.keys(registry) as Array<keyof typeof registry>;
     for (const kind of kinds) {
-      dock.open(kind, {});
+      dock.open(kind, { nodeId: 'target' });
       expect(kinds.filter(key => dock.panel(key).visible)).toEqual([kind]);
       expect(dock.view.activePanel).toBe(kind);
     }
