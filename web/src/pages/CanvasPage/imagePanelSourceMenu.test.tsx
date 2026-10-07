@@ -204,6 +204,28 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    queryFn: async () => ({ credits: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ records: [], next_cursor: null }),
+  })),
+}));
+
 /** 场景：图片 m1 / 视频 v1 / 音频 s1 三张就绪素材 + 图片草稿 d1，无连线 */
 function seedDoc() {
   canvasDocMock.current = {

@@ -187,6 +187,28 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    queryFn: async () => ({ credits: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ records: [], next_cursor: null }),
+  })),
+}));
+
 /** 画布文档：文本节点 t1/t2 + 图片媒体节点 m1 + 图片草稿 d1，连线 e1: t1 → m1
  *  d1 作为合法连线目标（connectPair 要求 genKindOf 非空）；m1 为成品卡，不再接受新连线。 */
 function seedDoc() {

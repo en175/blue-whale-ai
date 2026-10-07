@@ -29,6 +29,12 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
     staleTime: Infinity,
     queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
   })),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
 }));
 
 /* IKIIWN 画布空覆盖防护页面级链路：自动保存只在「本会话成功水合（非 loadFailed）」后发起；

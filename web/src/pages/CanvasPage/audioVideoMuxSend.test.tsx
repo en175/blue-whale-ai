@@ -40,6 +40,12 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
     staleTime: Infinity,
     queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
   })),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
 }));
 
 type WireState = {

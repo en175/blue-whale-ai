@@ -166,6 +166,28 @@ const canvasDocMock = vi.hoisted(() => ({
     acceptDoc: vi.fn(),
   },
 }));
+
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    queryFn: async () => ({ credits: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ records: [], next_cursor: null }),
+  })),
+}));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
 /** 画布：就绪视频卡 v1（1920×1080 mp4，assetId 满足门槛；抠像源卡）+ 就绪图片卡 i1

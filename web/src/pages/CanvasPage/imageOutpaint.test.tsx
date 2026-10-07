@@ -147,6 +147,28 @@ const canvasDocMock = vi.hoisted(() => ({
     acceptDoc: vi.fn(),
   },
 }));
+
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    queryFn: async () => ({ credits: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ records: [], next_cursor: null }),
+  })),
+}));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
 /** 画布：图片 i1（1600×900，16:9 → 内容盒 497.78×280）与 i2（点其他卡退出用） */

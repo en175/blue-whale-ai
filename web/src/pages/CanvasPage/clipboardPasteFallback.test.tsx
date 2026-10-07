@@ -47,6 +47,28 @@ vi.mock('@/utils/upload', async (importOriginal) => ({
   uploadAssetFile: uploadMock.uploadAssetFile,
 }));
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    queryFn: async () => ({ credits: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ records: [], next_cursor: null }),
+  })),
+}));
+
 const upsertAssets = vi.fn();
 
 /** 验收画布：t1 文本卡一张（供 C 快照优先级用例），无连线 */

@@ -173,6 +173,14 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    queryFn: async () => ({ credits: null }),
+  })),
+}));
+
 const FUTURE = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 const PAST = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 

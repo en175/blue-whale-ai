@@ -168,6 +168,28 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    queryFn: async () => ({ credits: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ records: [], next_cursor: null }),
+  })),
+}));
+
 /** 默认画布：失败视频草稿卡 v1（编辑意图 + 手选 9:16 被比例约束码拒单，参数与参考保留）
  *  + 9:16 参考视频卡 ref1（经 reference 边连入）+ 普通素材卡 ref2（图片参考）。
  *  errorCode 走数值信封 1060（rebase 前为 1056，撞 IKIZQ5/IKJ8J8 已落号改取）；字符串信封形态由用例覆盖。 */

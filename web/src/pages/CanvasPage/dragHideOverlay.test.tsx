@@ -221,6 +221,20 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ records: [], next_cursor: null }),
+  })),
+}));
+
 /** 组合夹具：图片草稿 d1(400,0) + 视频草稿 v1(800,0) 属 group-a（350..1250）；
  *  音频草稿 au1(1500,0) 属 group-b（1450..1900）——两组互不重叠，组空白拖动互不触及。 */
 function seedDoc() {

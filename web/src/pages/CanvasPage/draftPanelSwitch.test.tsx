@@ -263,6 +263,12 @@ vi.mock('@/api/generationQuote', async (importActual) => ({
 
 vi.mock('@/api/canvasRecovery', async (importActual) => ({
   ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
   generationRecoveryPageOptions: vi.fn(() => ({
     queryKey: ['generation-recovery', 'mock'],
     queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),

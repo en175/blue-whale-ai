@@ -27,6 +27,12 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
     staleTime: Infinity,
     queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
   })),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
 }));
 
 /* IKGBPC 撤销快捷键页面级链路：Ctrl/Cmd+Z 回退删除（卡与悬空连线一并恢复）、

@@ -36,6 +36,12 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
     staleTime: Infinity,
     queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
   })),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
 }));
 
 /** 项目一画布：一个就绪音频卡 a1（assetId '8'，15 秒 mp3） */

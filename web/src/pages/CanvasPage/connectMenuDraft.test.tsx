@@ -29,6 +29,12 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
     staleTime: Infinity,
     queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
   })),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
 }));
 
 /* IKH3WE 拖线落空白 → 类型菜单 → 新建草稿卡链路（页面级集成）：
