@@ -23,8 +23,10 @@ import type { SmartMattingMode } from '../../smartMatting';
 import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
 import AudioTrimOverlay from './AudioTrimOverlay';
-import AudioPlayer, { useAudioTrimSeekBridge } from './AudioPlayer';
-import VideoPlayerControls, { toggleVideoPlayback } from './VideoPlayerControls';
+import AudioPlayer from './AudioPlayer';
+import { useAudioTrimSeekBridge } from './useAudioTrimSeekBridge';
+import VideoPlayerControls from './VideoPlayerControls';
+import { sampleDeadlineExpired, videoSourceList, videoLoadErrorMessage, toggleVideoPlayback } from './mediaPlayback';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
@@ -88,13 +90,6 @@ function sampleDeadlineLabel(at?: string | null): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** IKIZQB：样片转成片是否已过期（按实际截止时间；无效时间不判过期）。 */
-export function sampleDeadlineExpired(at?: string | null): boolean {
-  if (!at) return false;
-  const d = new Date(at);
-  return !Number.isNaN(d.getTime()) && Date.now() > d.getTime();
-}
-
 /** 生成 MP4 常把 moov 放在文件尾，preload=metadata 只拿到时长，画面停在黑底。
  *  暂停时微调 currentTime 逼解码器吐出一帧；解码完成（seeked）再回调回填宽高。 */
 function paintVideoFirstFrame(
@@ -130,31 +125,6 @@ function paintVideoFirstFrame(
  *  展示；checking 提交结果不明核对锁定（IKIZQD——不重发不退款，等轮询定夺）；
  *  failed/cancelled 错误展示；无值为普通媒体 */
 export type MediaGenStatus = 'draft' | 'generating' | 'checking' | 'failed' | 'cancelled';
-
-/** <video> 双源列表项：type 带 codecs 时浏览器才能精确判定解码能力 */
-export interface VideoSourceOption {
-  src: string;
-  type: string;
-}
-
-/** 双源列表：主源编码未知不标 codecs（canPlayType 至少 "maybe" 被选中，解码失败浏览器
- *  自动落到次选）；H.264 兜底标 avc1。次选与主源相同则去重。 */
-export function videoSourceList(src?: string, srcH264?: string): VideoSourceOption[] {
-  const list: VideoSourceOption[] = [];
-  if (src) list.push({ src, type: 'video/mp4' });
-  if (srcH264 && srcH264 !== src) list.push({ src: srcH264, type: 'video/mp4; codecs="avc1"' });
-  return list;
-}
-
-/** 视频加载失败文案（MediaError.code 分类；HTMLMediaElement.error 见各平台实现） */
-export function videoLoadErrorMessage(code?: number): string {
-  switch (code) {
-    case 4: return '浏览器不支持该视频编码，请更换浏览器';
-    case 3: return '视频解码失败';
-    case 2: return '视频加载失败';
-    default: return '视频无法播放';
-  }
-}
 
 /** 媒体节点 data 契约（IKGYYD 起悬浮工具条迁出为 MediaNodeToolbar，本接口供其与 CanvasPage 共用） */
 export interface MediaNodeData {
@@ -622,6 +592,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
      （成组/解组、stale 徽标派生）会沿 syncVideoDims→hydratePausedVideo 拆掉离屏
      解码器重建 <video>，已解码画面与播放态随之丢失。前提：data.onMediaDims 引用
      跨渲染稳定（上游仅在水合/建卡时注入）；若改为渲染期逐帧注入，须同步收紧此处 */
+  const onMediaDims = data.onMediaDims;
   const syncVideoDims = useCallback((video: HTMLVideoElement) => {
     const { videoWidth: w, videoHeight: h, duration } = video;
     const dims: MediaDims = {};
@@ -633,8 +604,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     const widthUnchanged = dims.width === undefined || data.width === dims.width;
     const heightUnchanged = dims.height === undefined || data.height === dims.height;
     if (widthUnchanged && heightUnchanged && dims.duration === undefined) return;
-    data.onMediaDims?.(id, dims);
-  }, [data.width, data.height, data.duration, data.onMediaDims, id]);
+    onMediaDims?.(id, dims);
+  }, [data.width, data.height, data.duration, onMediaDims, id]);
 
   /** 视频播放失败兜底（双源全部失败/解码失败）：错误态替换黑屏为明确提示 +
    *  新窗口打开入口；src 任一变化即复位重试 */

@@ -22,7 +22,8 @@ import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEd
 import RefThumbnail, { INSERT_REF_AT_SELECTION_TITLE } from '../RefThumbnail';
 import AttachmentActionBar from '../AttachmentActionBar';
 import { orderRefStripItems, useMixedRefStrip, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
-import { composeImageSendPrompt, type ImageTextAttachment } from '../ImageDialog';
+import { type ImageTextAttachment } from '../ImageDialog';
+import { composeImageSendPrompt } from '../ImageDialog/composeImageSendPrompt';
 import {
   composedPromptLimitError,
   isPromptOverLimit,

@@ -39,7 +39,8 @@ import {
 } from './attachments';
 import { composerImagePreview } from './composerImagePreview';
 import { ComposerAttachmentChip } from './ComposerAttachmentChip';
-import { isInlineMediaThumbnail, MessageAssetPreview, rememberAssetUrl, useAssetUrlCache } from './MessageAssetPreview';
+import { MessageAssetPreview } from './MessageAssetPreview';
+import { isInlineMediaThumbnail, rememberAssetUrl, useAssetUrlCache } from './assetUrlCache';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipRef, type ChipTextEditorHandle } from '../ChipTextEditor';

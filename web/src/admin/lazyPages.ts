@@ -1,0 +1,16 @@
+import { lazy } from 'react';
+export const Dashboard = lazy(() => import('./pages/Dashboard'));
+export const RechargePlans = lazy(() => import('./pages/RechargePlans'));
+export const RechargeCustomConfig = lazy(() => import('./pages/RechargeCustomConfig'));
+export const Promotions = lazy(() => import('./pages/Promotions'));
+export const MemberDiscounts = lazy(() => import('./pages/MemberDiscounts'));
+export const RechargeRecords = lazy(() => import('./pages/RechargeRecords'));
+export const ConsumptionRecords = lazy(() => import('./pages/ConsumptionRecords'));
+export const JobRecords = lazy(() => import('./pages/JobRecords'));
+export const TemplateManage = lazy(() => import('./pages/TemplateManage'));
+export const SkillManage = lazy(() => import('./pages/SkillManage'));
+export const ModelList = lazy(() => import('./pages/ModelList'));
+export const UserManage = lazy(() => import('./pages/UserManage'));
+export const OperationLog = lazy(() => import('./pages/OperationLog'));
+export const SystemConfig = lazy(() => import('./pages/SystemConfig'));
+export const SiteConfig = lazy(() => import('./pages/SiteConfig'));

@@ -153,10 +153,11 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
 
   // 卸载时取消所有待上传任务、释放 blob URL；同步清理 hover 态（节点删除/项目切换不留悬空悬浮工具条）
   useEffect(() => {
+    const pendingUploads = pendingUploadsRef.current;
     return () => {
       data.onHoverChange?.(id, false);
-      pendingUploadsRef.current.forEach((p) => { p.cancelled = true; });
-      pendingUploadsRef.current.clear();
+      pendingUploads.forEach((p) => { p.cancelled = true; });
+      pendingUploads.clear();
       refs.forEach((r) => {
         if (r.src.startsWith('blob:')) URL.revokeObjectURL(r.src);
       });

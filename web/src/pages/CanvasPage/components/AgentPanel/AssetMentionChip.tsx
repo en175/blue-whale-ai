@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { ImageMentionChip } from '../ImageMentionChip';
 import { VideoMentionChip } from '../VideoMentionChip';
-import { ensureAssetUrls, lookupAssetUrl, useAssetUrlCache } from './MessageAssetPreview';
+import { ensureAssetUrls, lookupAssetUrl, useAssetUrlCache } from './assetUrlCache';
 import styles from './index.module.css';
 
 /**

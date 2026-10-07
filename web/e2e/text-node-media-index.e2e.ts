@@ -272,7 +272,7 @@ function lastPut(tracking: Tracking): PutDoc {
 }
 
 /** 等到出现一次满足条件的 PUT（自动保存 800ms 防抖，轮询放宽到 6s） */
-async function waitPut(tracking: Tracking, predicate: (doc: PutDoc) => boolean, label: string) {
+async function waitPut(tracking: Tracking, predicate: (doc: PutDoc) => boolean, _label: string) {
   await expect
     .poll(
       () => tracking.putBodies.map(parsePut).filter(predicate).length,

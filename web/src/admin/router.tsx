@@ -1,31 +1,11 @@
 /* ============================================
  * admin 子路由表：后台页面，按需懒加载
  * ============================================ */
-import { lazy, Suspense } from 'react';
+import { Dashboard, RechargePlans, RechargeCustomConfig, Promotions, MemberDiscounts, RechargeRecords, ConsumptionRecords, JobRecords, TemplateManage, SkillManage, ModelList, UserManage, OperationLog, SystemConfig, SiteConfig } from './lazyPages';
+import { LazyPage as L } from './LazyPage';
 import { Navigate } from 'react-router-dom';
 import RequireAdmin from '@/router/guards';
 import AdminLayout from './layouts/AdminLayout';
-
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const RechargePlans = lazy(() => import('./pages/RechargePlans'));
-const RechargeCustomConfig = lazy(() => import('./pages/RechargeCustomConfig'));
-const Promotions = lazy(() => import('./pages/Promotions'));
-const MemberDiscounts = lazy(() => import('./pages/MemberDiscounts'));
-const RechargeRecords = lazy(() => import('./pages/RechargeRecords'));
-const ConsumptionRecords = lazy(() => import('./pages/ConsumptionRecords'));
-const JobRecords = lazy(() => import('./pages/JobRecords'));
-const TemplateManage = lazy(() => import('./pages/TemplateManage'));
-const SkillManage = lazy(() => import('./pages/SkillManage'));
-const ModelList = lazy(() => import('./pages/ModelList'));
-const UserManage = lazy(() => import('./pages/UserManage'));
-const OperationLog = lazy(() => import('./pages/OperationLog'));
-const SystemConfig = lazy(() => import('./pages/SystemConfig'));
-const SiteConfig = lazy(() => import('./pages/SiteConfig'));
-
-/** 懒加载包裹 */
-function L({ children }: { children: React.ReactElement }) {
-  return <Suspense fallback={null}>{children}</Suspense>;
-}
 
 /** 后台路由子树（挂载到根路由） */
 export const adminRoutes = {
