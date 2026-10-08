@@ -621,11 +621,13 @@ export async function saveCanvasWithRecovery(
       const submissionRow = await submissionRowOf(submissionId);
       if (outputKey === TARGET_OUTPUT_KEY) {
         if (submissionRow.target_state !== "pending" && submissionRow.target_state !== "present") throw forgedMarker();
+        if (String(node.id) !== submissionRow.target_node_id) throw forgedMarker();
         continue;
       }
       const { projection } = await projectionOf(submissionRow);
       projectionOrThrow(projection);
-      if (!projection.items.some(item => item.outputKey === outputKey)) throw forgedMarker();
+      const projectionItem = projection.items.find(item => item.outputKey === outputKey);
+      if (!projectionItem || String(node.id) !== projectionItem.nodeId) throw forgedMarker();
       const outputRow = await tx.generation_canvas_outputs.findUnique({
         where: { generation_canvas_submission_id_output_key: { generation_canvas_submission_id: submissionRow.id, output_key: outputKey } },
       });

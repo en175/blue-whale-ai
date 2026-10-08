@@ -16,6 +16,7 @@ import {
   type CanvasRecoveryAcceptance,
 } from "./generation-canvas-recovery-repo.js";
 import { saveCanvasWithRecovery } from "./canvas-recovery-save.js";
+import { multiResultNodeId } from "./canvas-recovery-multi-output.js";
 import { createJobWithinTx } from "./generation-command-repo.js";
 import type { PrismaClient } from "@prisma/client";
 
@@ -50,7 +51,7 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
     };
   }
 
-  function acceptance(submissionId: string, node: string): CanvasRecoveryAcceptance {
+  function acceptance(submissionId: string, node: string, taskType = "image"): CanvasRecoveryAcceptance {
     return {
       projectId: PROJECT_ID,
       userId: USER_ID,
@@ -58,7 +59,7 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
       operation: "generation.create",
       requestHash: `hash-${submissionId}`,
       idempotencyKey: submissionId,
-      taskType: "image",
+      taskType,
     };
   }
 
@@ -69,11 +70,11 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
       const created = await createJobWithinTx(tx, {
         projectId: acceptanceInput.projectId,
         userId: acceptanceInput.userId,
-        type: "image",
+        type: acceptanceInput.taskType,
         expectedOutputCount: 1,
         input: { prompt: "whale" },
         actionIdentity: `ikjlpc-${acceptanceInput.binding.submission_id}`,
-        actionType: "generate_image",
+        actionType: `generate_${acceptanceInput.taskType}`,
       }, undefined, { key: acceptanceInput.idempotencyKey, requestHash: acceptanceInput.requestHash });
       await writeCanvasRecoveryRows(tx, locked.plan, BigInt(created.generation_job_id));
       return created;
@@ -91,16 +92,40 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
     await raw.query("UPDATE generation_jobs SET status='failed' WHERE id = ?", [Number(jobId)]);
   }
 
-  function markerNode(id: string, submissionId: string, outputKey: string) {
+  function markerNode(id: string, submissionId: string, outputKey: string, assetId = "7") {
     return {
       id,
       type: "mediaNode",
       position: { x: 1, y: 2 },
       data: {
         generationRecovery: { protocolVersion: 1, submissionId, outputKey },
-        assetId: "7",
+        assetId,
       },
     };
+  }
+
+  async function succeedSceneSplitJob(jobId: string, segments: Array<{ index: number; assetId: string }>) {
+    await raw.query(
+      "UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST(? AS JSON) WHERE id = ?",
+      [JSON.stringify(segments.map(segment => segment.assetId)), Number(jobId)],
+    );
+    await prisma.generation_job_logs.create({
+      data: {
+        generation_job_id: BigInt(jobId),
+        event: "succeeded",
+        status: "succeeded",
+        message: "场景切分完成",
+        payload: {
+          duration: 10,
+          segments: segments.map(segment => ({
+            segment_index: segment.index,
+            start_time: 0,
+            end_time: 5,
+            segment_asset_id: segment.assetId,
+          })),
+        },
+      } as never,
+    });
   }
 
   function save(args: {
@@ -311,5 +336,43 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
     expect(await outputState(UUID_C, TARGET_OUTPUT_KEY)).toEqual({ state: "removed", revision: 2 });
     expect(await receiptOf(CMD("30002"))).toBeNull();
     expect(await receiptOf(CMD("30004"))).toBeNull();
+  });
+
+  it("★ 4. 无声明路径身份克隆：pending $target 占位与多结果虚拟输出的克隆 → 422 且整笔回滚", async () => {
+    const jobC = await accept(acceptance(UUID_C, NODE_C, "video_scene_split"));
+    await succeedSceneSplitJob(jobC.generation_job_id, [
+      { index: 1, assetId: "701" },
+      { index: 2, assetId: "702" },
+    ]);
+    const seg1 = multiResultNodeId(UUID_C, "segment:1");
+    const placed = await save({
+      commandId: CMD("40001"), version: null,
+      nodes: [markerNode(seg1, UUID_C, "segment:1", "701")],
+      changes: [],
+    });
+    await expectRejection(save({
+      commandId: CMD("40002"), version: placed.version,
+      nodes: [markerNode(seg1, UUID_C, "segment:1", "701"), markerNode(NODE_X, UUID_C, "segment:1", "701")],
+      changes: [],
+    }));
+    const targetPlaced = await save({
+      commandId: CMD("40003"), version: placed.version,
+      nodes: [markerNode(seg1, UUID_C, "segment:1", "701"), markerNode(NODE_C, UUID_C, TARGET_OUTPUT_KEY)],
+      changes: [],
+    });
+    await expectRejection(save({
+      commandId: CMD("40004"), version: targetPlaced.version,
+      nodes: [
+        markerNode(seg1, UUID_C, "segment:1", "701"),
+        markerNode(NODE_C, UUID_C, TARGET_OUTPUT_KEY),
+        markerNode(NODE_X, UUID_C, TARGET_OUTPUT_KEY),
+      ],
+      changes: [],
+    }));
+    expect((await canvasRow())?.version).toBe(targetPlaced.version);
+    expect(await canvasNodeIds()).toEqual([seg1, NODE_C].sort());
+    expect(await outputState(UUID_C, TARGET_OUTPUT_KEY)).toEqual({ state: "pending", revision: 1 });
+    expect(await receiptOf(CMD("40002"))).toBeNull();
+    expect(await receiptOf(CMD("40004"))).toBeNull();
   });
 });
