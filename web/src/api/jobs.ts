@@ -114,6 +114,7 @@ export interface VideoJobParameters {
   /** IKIZQB：样片模式（契约 video-sample-mode.ts §1——仅参数增量）。true 时 resolution
    *  锁 480p、单输出，配套请求顶层携带 expected_credits + quote_revision（提交确认）。 */
   sample_mode?: true;
+  mode?: string;
 }
 
 /** 音频生成参数 */

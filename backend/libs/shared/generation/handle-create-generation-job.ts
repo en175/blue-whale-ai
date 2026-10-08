@@ -1914,11 +1914,11 @@ export async function handleCreateGenerationJob(
   // &身份& 换成 @图片N 一类标签（不含意图关键词），转移前后对判定等价。视频恒判定（不依赖
   // size/resolution/duration 携带）——编辑/延长 + 非 adaptive 比例的拒单不能因为没带分辨率档而漏网。
   let videoMode: VideoMode | undefined;
+  let videoRefItems: ReadonlyArray<{ role: string; type: string }> = [];
   if (type === "video") {
     const parsedRefs = parseReferences(effectiveBody.references);
-    videoMode =
-      normalizeVideoMode(params.mode) ??
-      resolveVideoMode(parsedRefs.kind === "ok" ? parsedRefs.items : [], promptText);
+    videoRefItems = parsedRefs.kind === "ok" ? parsedRefs.items : [];
+    videoMode = normalizeVideoMode(params.mode) ?? resolveVideoMode(videoRefItems, promptText);
   }
   // IKE7JP（视频段，随判定迁移到合并后）：仅当请求明确携带尺寸/比例/时长时才校验（缺省由能力
   // 默认值兜底）；视频恒进（aspect_ratio 由 validateCommon 必填）——编辑/延长 + 非 adaptive 的
@@ -1964,6 +1964,15 @@ export async function handleCreateGenerationJob(
         { code: ERROR_TASK_TYPE_PARAM_CONSTRAINT },
       );
     }
+  }
+  if (
+    type === "video" &&
+    (videoMode === "edit" || videoMode === "extend") &&
+    !videoRefItems.some((item) => item.role === "reference" && item.type === "video")
+  ) {
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "视频编辑模式至少需要 1 段参考视频", {
+      code: ERROR_INVALID_INPUT,
+    });
   }
   // IKE7JP：提交时前置查参考素材存在性/类型——复用 worker resolveInputAssets（归属逻辑单份：
   // 项目直属 ∪ 全局 ∪ project_asset 关联）。缺失/无权访问在接纳当下 400，不拖到 worker 执行期。

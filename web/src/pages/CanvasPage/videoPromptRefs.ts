@@ -5,6 +5,7 @@
  * 当前（参考集合 + 模式）推导（C2/C5），与服务端 videoRefLabel 同口径。
  * ============================================ */
 import type { VideoMediaRef, VideoMediaRefs } from './videoMediaRefs';
+import { videoModeAcceptsRef } from './videoModes';
 
 /** 视频参考编译投影（与服务端 VideoRefItem 同构）：身份统一字符串（数字 assetId | asset- 前缀 materialId） */
 export interface VideoPromptRefItem {
@@ -31,15 +32,8 @@ const TYPE_LABELS: Record<VideoPromptRefItem['type'], string> = {
 /** 参考身份（唯一口径）：素材库 materialId 优先，画布数字 assetId 兜底——两空间不混用 */
 export const refIdOf = (item: VideoMediaRef): string => item.materialId ?? item.assetId;
 
-/** 模式是否接受该参考（与 BottomDialog modeConflict 同口径的结构判定）：
- *  prompt（文生视频）不接受任何媒体参考；keyframe 只收首尾帧；
- *  all 不收帧；text2video 不收帧且普通参考仅图片 */
 function modeAccepts(mode: string, role: VideoPromptRefItem['role'], type: VideoPromptRefItem['type']): boolean {
-  if (mode === 'prompt') return false;
-  if (role !== 'reference') return mode === 'keyframe';
-  if (mode === 'keyframe') return false;
-  if (mode === 'text2video') return type === 'image';
-  return true;
+  return videoModeAcceptsRef(mode, role, type);
 }
 
 /** 视频面板有效标签映射（唯一口径）：附件区徽标、@ 菜单、正文标签、发送拍平共用 */

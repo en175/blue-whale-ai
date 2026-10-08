@@ -25,7 +25,7 @@ const fetchGenerationModels = vi.hoisted(() =>
       default_format: null,
       default_aspect_ratio: '16:9',
       default_duration: 5,
-      features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true, video_reference: true, video_reference_max: 3, audio_reference: true, audio_reference_max: 3 },
+      features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true, video_reference: true, video_reference_max: 3, audio_reference: true, audio_reference_max: 3, task_types: { text2video: {}, omni: {}, image_reference: {}, first_frame: {}, first_last_frame: {} } },
       version: 1,
       digest: '',
     },
@@ -43,6 +43,7 @@ const ref = (id: string, mediaType: 'image' | 'video' | 'audio'): VideoMediaRef 
 });
 
 const IMG_A = ref('101', 'image');
+const IMG_B = ref('202', 'image');
 const VID_B = ref('301', 'video');
 const AUD_C = ref('401', 'audio');
 
@@ -56,7 +57,6 @@ interface RenderOpts {
   videoMediaRefs?: VideoMediaRefs;
   initialDoc?: PromptDoc | null;
   initialParams?: { mode?: string };
-  enabledModes?: string[];
   onSend?: ReturnType<typeof vi.fn>;
   onParamsChange?: ReturnType<typeof vi.fn>;
 }
@@ -76,8 +76,7 @@ async function renderDialog(opts: RenderOpts = {}) {
           onClose: vi.fn(),
           onSend,
           initialDoc: opts.initialDoc ?? null,
-          initialParams: opts.initialParams ?? { mode: 'all' },
-          enabledModes: opts.enabledModes as never,
+          initialParams: opts.initialParams ?? { mode: 'omni' },
           videoDraftBinding: { onParamsChange },
           videoMediaRefs: opts.videoMediaRefs ?? { reference: [] },
         } as Parameters<typeof BottomDialog>[0])
@@ -89,22 +88,9 @@ async function renderDialog(opts: RenderOpts = {}) {
 }
 
 async function rerender(opts: RenderOpts = {}) {
-  await act(async () => {
-    root.render(
-      createElement(
-        QueryClientProvider,
-        { client: new QueryClient() },
-        createElement(BottomDialog, {
-          onClose: vi.fn(),
-          onSend: vi.fn(),
-          initialDoc: opts.initialDoc ?? null,
-          enabledModes: opts.enabledModes as never,
-          videoDraftBinding: { onParamsChange: opts.onParamsChange ?? vi.fn() },
-          videoMediaRefs: opts.videoMediaRefs ?? { reference: [] },
-        } as Parameters<typeof BottomDialog>[0])
-      ),
-    );
-  });
+  await act(async () => { root.unmount(); });
+  container.remove();
+  await renderDialog(opts);
 }
 
 function sendButton(): HTMLButtonElement {
@@ -158,7 +144,7 @@ describe('IKFA1O @ 菜单多媒体索引（A2）', () => {
   });
 
   it('首尾帧模式：帧槽参考显示首帧/尾帧徽标并可插入（C1 前置）', async () => {
-    await renderDialog({ videoMediaRefs: KEYFRAME_REFS, initialParams: { mode: 'keyframe' } });
+    await renderDialog({ videoMediaRefs: KEYFRAME_REFS, initialParams: { mode: 'first_last_frame' } });
     await typePromptRefRaw(container, '从@');
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
     const items = mentionMenuItems();
@@ -172,39 +158,46 @@ describe('IKFA1O @ 菜单多媒体索引（A2）', () => {
 
 describe('IKFA1O 角色与模式同步（C1/C2/C5）', () => {
   it('普通图片参考改为首帧后，正文标签同步为首帧（C1）', async () => {
-    await renderDialog({
-      videoMediaRefs: { reference: [IMG_A] },
-      initialDoc: {
-        version: 1,
-        segments: [
-          { kind: 'text', text: '以' },
-          { kind: 'asset_ref', asset_id: '101', label: '图片1' },
-          { kind: 'text', text: '为起点' },
-        ],
-      },
-    });
+    const doc: PromptDoc = {
+      version: 1,
+      segments: [
+        { kind: 'text', text: '以' },
+        { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+        { kind: 'text', text: '为起点' },
+      ],
+    };
+    await renderDialog({ videoMediaRefs: { reference: [IMG_A] }, initialDoc: doc });
     expect(readPromptRefText(container)).toBe('以图片1为起点');
-    // 角色变化：同一身份从普通参考变为首帧 + 模式切 keyframe
-    await rerender({ videoMediaRefs: { reference: [], first: IMG_A }, enabledModes: ['keyframe'] });
+    await rerender({
+      videoMediaRefs: { reference: [], first: IMG_A },
+      initialParams: { mode: 'first_last_frame' },
+      initialDoc: doc,
+    });
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('以首帧为起点'));
   });
 
-  it('切换到不兼容模式：标签失效保留原指向并阻止发送（C2）', async () => {
+  it('切到不兼容模式：标签失效保留原指向并阻止发送（C2）', async () => {
+    const doc: PromptDoc = {
+      version: 1,
+      segments: [
+        { kind: 'text', text: '参考' },
+        { kind: 'asset_ref', asset_id: '202', label: '尾帧' },
+        { kind: 'text', text: '的运镜' },
+      ],
+    };
+    const frames = { reference: [], first: IMG_A, last: IMG_B };
     await renderDialog({
-      videoMediaRefs: { reference: [IMG_A, VID_B] },
-      initialDoc: {
-        version: 1,
-        segments: [
-          { kind: 'text', text: '参考' },
-          { kind: 'asset_ref', asset_id: '301', label: '视频1' },
-          { kind: 'text', text: '的运镜' },
-        ],
-      },
+      videoMediaRefs: frames,
+      initialParams: { mode: 'first_last_frame' },
+      initialDoc: doc,
     });
-    expect(readPromptRefText(container)).toBe('参考视频1的运镜');
-    // enabledModes 自动切到 text2video（视频参考不被接受）
-    await rerender({ videoMediaRefs: { reference: [IMG_A, VID_B] }, enabledModes: ['text2video'] });
-    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('参考已失效：原视频1的运镜'));
+    expect(readPromptRefText(container)).toBe('参考尾帧的运镜');
+    await rerender({
+      videoMediaRefs: frames,
+      initialParams: { mode: 'first_frame' },
+      initialDoc: doc,
+    });
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('参考已失效：原尾帧的运镜'));
     expect(sendButton().disabled).toBe(true);
     expect(container.textContent).toContain('正文有已失效的素材标签');
   });
@@ -212,16 +205,28 @@ describe('IKFA1O 角色与模式同步（C1/C2/C5）', () => {
   it('身份仍在集合但模式仍不兼容：不误恢复（C5）；切回兼容模式才恢复', async () => {
     const invalidDoc: PromptDoc = {
       version: 1,
-      segments: [{ kind: 'asset_ref', asset_id: '301', label: '视频1', invalid_label: '视频1' }],
+      segments: [{ kind: 'asset_ref', asset_id: '202', label: '尾帧', invalid_label: '尾帧' }],
     };
-    await renderDialog({ videoMediaRefs: { reference: [IMG_A, VID_B] }, initialParams: { mode: 'text2video' }, initialDoc: invalidDoc });
-    expect(readPromptRefText(container)).toBe('已失效：原视频1');
+    const frames = { reference: [], first: IMG_A, last: IMG_B };
+    await renderDialog({
+      videoMediaRefs: frames,
+      initialParams: { mode: 'first_frame' },
+      initialDoc: invalidDoc,
+    });
+    expect(readPromptRefText(container)).toBe('已失效：原尾帧');
     // 重开仍不兼容 → 保持失效
-    await rerender({ videoMediaRefs: { reference: [IMG_A, VID_B] }, enabledModes: ['text2video'] });
-    expect(readPromptRefText(container)).toBe('已失效：原视频1');
-    // 切回全能参考 → 自动恢复
-    await rerender({ videoMediaRefs: { reference: [IMG_A, VID_B] }, enabledModes: ['all'] });
-    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('视频1'));
+    await rerender({
+      videoMediaRefs: frames,
+      initialParams: { mode: 'first_frame' },
+      initialDoc: invalidDoc,
+    });
+    expect(readPromptRefText(container)).toBe('已失效：原尾帧');
+    await rerender({
+      videoMediaRefs: frames,
+      initialParams: { mode: 'first_last_frame' },
+      initialDoc: invalidDoc,
+    });
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('尾帧'));
   });
 });
 

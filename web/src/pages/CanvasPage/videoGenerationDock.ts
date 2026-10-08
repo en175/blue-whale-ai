@@ -14,7 +14,7 @@ import type { VideoGenSeedParams, VideoDraftParamsPatch, VideoGenOptions } from 
 import type { MediaGenStatus } from './components/MediaNode';
 import { checkAddVideoRef, freshVideoCanvasRefs, videoRefConflict, type VideoMediaRef, type VideoMediaRefs, type VideoRefRole } from './videoMediaRefs';
 import { mergedVideoRefsWithTextIndex, videoTextIndexSendError } from './textIndexSync';
-import { enabledVideoFollowModes } from './followDialog';
+import { draftVideoModeOf } from './videoModes';
 
 export interface VideoDockEntry { nodeId?: string; preset?: VideoGenSeedParams; intent?: 'manual' | 'selection' }
 export interface VideoDockPatch extends VideoDraftParamsPatch {
@@ -91,7 +91,6 @@ export function createVideoGenerationDock(getHost: () => VideoGenerationDockHost
       return {
         visible: state.visible, boundId: state.boundId, seed: state.seed, freeRefs: state.freeRefs,
         attachments, mediaRefs: state.boundId ? boundRefs! : freeRefsView, textIndexError,
-        enabledModes: state.boundId && state.visible && boundRefs ? enabledVideoFollowModes(boundRefs) : undefined,
         draftBinding: {
           saveFailed: availability?.saveFailed === true,
           ...(state.boundId ? { submitting: availability?.submittingNodeId === state.boundId, restoreExisting: hasGenerationRecord(node), status: node?.data.genStatus as MediaGenStatus | undefined } : {}),
@@ -102,7 +101,12 @@ export function createVideoGenerationDock(getHost: () => VideoGenerationDockHost
     beforeOpen(input: VideoDockEntry) { getHost().endPicking(); getHost().beginEdit(input.nodeId); },
     open(input: VideoDockEntry) {
       if (!input.nodeId) { change({ visible: true, selectionExempt: false }); return; }
-      const data = getHost().getNodes().find(node => node.id === input.nodeId)?.data ?? {};
+      const nodes = getHost().getNodes();
+      const data = nodes.find(node => node.id === input.nodeId)?.data ?? {};
+      const draftRefs = mergedVideoRefsWithTextIndex(
+        input.nodeId, getHost().getEdges(),
+        nodes.filter(node => node.type === 'mediaNode'), nodes.filter(node => node.type === 'textNode'),
+      );
       const preset = input.preset;
       const seed: VideoDraftSeed = {
         ts: Math.max(Date.now(), (state.seed?.ts ?? 0) + 1), targetNodeId: input.nodeId, text: typeof data.prompt === 'string' ? data.prompt : '',
@@ -112,7 +116,7 @@ export function createVideoGenerationDock(getHost: () => VideoGenerationDockHost
           aspectRatio: preset?.aspectRatio ?? (typeof data.draftRatio === 'string' ? data.draftRatio : undefined),
           resolution: preset?.resolution ?? (typeof data.draftSize === 'string' ? data.draftSize : undefined),
           duration: preset?.duration ?? (typeof data.draftDuration === 'number' ? data.draftDuration : undefined),
-          mode: preset?.mode ?? (typeof data.draftMode === 'string' ? data.draftMode : undefined),
+          mode: preset?.mode ?? draftVideoModeOf(data, draftRefs) ?? undefined,
           generateAudio: preset?.generateAudio ?? (typeof data.draftGenerateAudio === 'boolean' ? data.draftGenerateAudio : undefined),
           sampleMode: preset?.sampleMode ?? (typeof data.draftSampleMode === 'boolean' ? data.draftSampleMode : data.videoStage === 'sample' ? true : undefined),
         },
@@ -212,7 +216,7 @@ export function createVideoGenerationDock(getHost: () => VideoGenerationDockHost
       const opts = input.options;
       runSynchronousGenerationDockSubmission(host, targetNodeId, () => {
         const submitted = host.startTask({
-          parameters: { prompt: input.text, model_id: opts.modelId, aspect_ratio: opts.aspectRatio, resolution: opts.resolution, duration: opts.duration, generate_audio: opts.generateAudio, ...(opts.sampleMode ? { sample_mode: true as const } : {}) },
+          parameters: { prompt: input.text, model_id: opts.modelId, aspect_ratio: opts.aspectRatio, resolution: opts.resolution, duration: opts.duration, mode: opts.mode, generate_audio: opts.generateAudio, ...(opts.sampleMode ? { sample_mode: true as const } : {}) },
           references: buildVideoJobReferences(refs), targetNodeId, options: opts, promptDoc: input.promptDoc,
         });
         if (submitted) change({ visible: false, selectionExempt: true, ...(!boundId ? { freeRefs: { reference: [] } } : {}) }, true);

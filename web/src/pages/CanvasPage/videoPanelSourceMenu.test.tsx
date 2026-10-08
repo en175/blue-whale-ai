@@ -148,6 +148,13 @@ const apiMocks = vi.hoisted(() => ({
         first_frame: true,
         last_frame: true,
         first_last_frame: true,
+        task_types: {
+          text2video: {},
+          omni: {},
+          image_reference: {},
+          first_frame: {},
+          first_last_frame: {},
+        },
         audio: false,
       },
       version: 1,
@@ -345,7 +352,7 @@ async function openBoundPanel() {
 }
 
 /** 首页 AI视频带入打开自由面板（无草稿卡；mode 默认全能参考） */
-async function openFreePanelFromHome(mode: 'all' | 'keyframe' | 'text2video' = 'all') {
+async function openFreePanelFromHome(mode: 'omni' | 'first_last_frame' | 'image_reference' = 'omni') {
   genHandoffMock.current = { kind: 'video', text: '', modelId: 'seedance-2', aspectRatio: '16:9', resolution: '720p', duration: 5, mode, refs: [] };
   await renderPage(true);
   await vi.waitFor(() => expect(pickReferenceButton()).toBeTruthy());
@@ -377,11 +384,11 @@ function edgePairs(): string[] {
     .map((e: { source: string; target: string }) => `${e.source}->${e.target}`);
 }
 
-const MODE_LABELS = ['文生视频', '全能参考', '图生视频', '首尾帧'];
+const MODE_LABELS = ['文生视频', '全能参考', '图片参考', '图生视频', '首尾帧', '视频编辑', '视频延长'];
 
 /** 展开模式下拉并切换到目标模式（幂等展开；绑定面板受 enabledModes 门控：
  *  空素材仅文生视频/全能参考，图生视频需 ≥1 图、首尾帧需 ≥2 图——受限场景用自由面板） */
-async function switchMode(label: '全能参考' | '图生视频' | '首尾帧') {
+async function switchMode(label: '全能参考' | '图片参考' | '首尾帧') {
   const modeButtons = () => [...container.querySelectorAll('button')].filter((b) => MODE_LABELS.includes(b.textContent ?? ''));
   if (modeButtons().length <= 1) {
     await act(async () => { modeButtons()[0]!.click(); });
@@ -420,7 +427,7 @@ afterEach(async () => {
 
 describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
   it('首页带入面板（新建草稿卡绑定）：操作条「+ 参考」「资产库」常显，栏尾旧「+」退役，无角色库与媒体专属图标', async () => {
-    await openFreePanelFromHome('all');
+    await openFreePanelFromHome('omni');
 
     expect(pickReferenceButton()).toBeTruthy();
     expect(assetsLibraryButton()).toBeTruthy();
@@ -464,7 +471,7 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
   });
 
   it('点「+ 参考」直接进入画布点选模式且按钮高亮（picking 态）', async () => {
-    await openFreePanelFromHome('all');
+    await openFreePanelFromHome('omni');
 
     await clickPickReference();
 
@@ -482,15 +489,13 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     expect(assetsPickerProps.current.mediaTypes).toEqual(['image', 'video', 'audio']);
   });
 
-  it('图生视频点「资产库」：列表过滤仅图片（隐藏视频/音频）', async () => {
+  it('图片参考点「资产库」：列表过滤仅图片（隐藏视频/音频）', async () => {
     await renderPage();
     await openBoundPanel();
-    // 图生视频需 ≥1 图（enabledModes 门控）：先经操作条加一张图（自动切全能参考）再切模式；
-    // IKFR4Y 选取后会话保持（模式入口锁定），先完成会话再切换
     await clickPickReference();
     await clickNode('m1');
     await pressEscape();
-    await switchMode('图生视频');
+    await switchMode('图片参考');
 
     await clickAssetsLibrary();
     expect(assetsPickerProps.current.mediaTypes).toEqual(['image']);
@@ -512,19 +517,19 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     await vi.waitFor(() => expect(dockRefCount()).toBe(3));
   });
 
-  it('图生视频点「+ 参考」：视频节点禁选并提示且零新增；图片节点仍可接纳', async () => {
+  it('图片参考点「+ 参考」：视频节点禁选并提示且零新增；图片节点仍可接纳', async () => {
     await renderPage();
     await openBoundPanel();
     await clickPickReference();
     await clickNode('m1');
     // IKFR4Y 会话保持：先完成会话再切换模式
     await pressEscape();
-    await switchMode('图生视频');
+    await switchMode('图片参考');
 
     await clickPickReference();
     await clickNode('v1');
 
-    expect(toastText()).toContain('图生视频参考仅支持图片素材');
+    expect(toastText()).toContain('图片参考仅支持图片素材');
     expect(edgePairs()).toEqual(['m1->' + currentVideoDraftId()]);
     // 同一会话内改选合法图片仍可接纳（模式保持）
     await clickNode('m2');
@@ -535,7 +540,7 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     // 绑定面板从零进入首尾帧受 enabledModes 门控（空素材不可达，1f2f498d 产品现状，
     // 同 videoDraft.test skip 用例）；空槽两种来源的角色路由由 BottomDialog 组件级用例覆盖
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
-    (doc.nodes.find((n) => n.id === 'd1')!.data as Record<string, unknown>).draftMode = 'keyframe';
+    (doc.nodes.find((n) => n.id === 'd1')!.data as Record<string, unknown>).draftMode = 'first_last_frame';
     doc.edges = [
       { id: 'f1', source: 'm1', target: 'd1', data: { refRole: 'first' } },
       { id: 'f2', source: 'm2', target: 'd1', data: { refRole: 'last' } },
@@ -555,7 +560,7 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     expect(pickReferenceButton()).toBeTruthy();
     for (const btn of [pickReferenceButton()!, assetsLibraryButton()!]) {
       expect(btn.getAttribute('aria-disabled')).toBe('true');
-      expect(btn.getAttribute('title')).toBe('首帧与尾帧均已指定，请先移除后再添加');
+      expect(btn.getAttribute('title')).toBe('首帧已指定，请先移除后再添加');
     }
   });
 
@@ -605,7 +610,7 @@ describe('IKGB7Y 首尾帧操作条顺序填充与溢出处理', () => {
   /** keyframe 草稿 seed（槽位全空）：2 张图片普通参考连线解锁首尾帧模式（IKFC1T 门控：≥2 图可选），槽位入口可发起 */
   function seedKeyframeEmptySlots() {
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
-    (doc.nodes.find((n) => n.id === 'd1')!.data as Record<string, unknown>).draftMode = 'keyframe';
+    (doc.nodes.find((n) => n.id === 'd1')!.data as Record<string, unknown>).draftMode = 'first_last_frame';
     doc.edges = [
       { id: 'e-m1-d1', source: 'm1', target: 'd1' },
       { id: 'e-m2-d1', source: 'm2', target: 'd1' },
@@ -615,7 +620,7 @@ describe('IKGB7Y 首尾帧操作条顺序填充与溢出处理', () => {
   /** keyframe 草稿 seed（首帧已指定）：帧槽存在即解锁首尾帧模式（IKFJJT hasFrameSlot 恒可选） */
   function seedKeyframeFirstFilled() {
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
-    (doc.nodes.find((n) => n.id === 'd1')!.data as Record<string, unknown>).draftMode = 'keyframe';
+    (doc.nodes.find((n) => n.id === 'd1')!.data as Record<string, unknown>).draftMode = 'first_last_frame';
     doc.edges = [{ id: 'f1', source: 'm1', target: 'd1', data: { refRole: 'first' } }];
   }
 
@@ -764,7 +769,7 @@ describe('IKFEWF 文本选取边界', () => {
     canvasDocMock.current.assets.a5 = { asset_id: 5, type: 'image', access_url: 'http://img/m3.png', width: 100, height: 100 };
     // 保留两张图片以满足既有首尾帧模式门控，混用参考仍受原有提交限制。
     doc.edges = [{ id: 'e3', source: 'm3', target: 'd1' }, { id: 'e1', source: 'm1', target: 'd1', data: { refRole: 'first' } }, { id: 'e2', source: 'm2', target: 'd1', data: { refRole: 'last' } }];
-    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'keyframe';
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'first_last_frame';
     await renderPage();
     await clickNode('d1');
     await switchMode('首尾帧');

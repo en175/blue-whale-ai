@@ -33,7 +33,7 @@ fetchGenerationModels.mockImplementation(async () => [
     default_format: null,
     default_aspect_ratio: '16:9',
     default_duration: 5,
-    features: {},
+    features: { task_types: { text2video: {}, omni: {}, image_reference: {}, first_frame: {}, first_last_frame: {} } },
     version: 1,
     digest: '',
   },
@@ -146,7 +146,7 @@ describe('BottomDialog 文本附件提交契约（IKDLQG）', () => {
       resolution: '720p',
       duration: 5,
       // IKFC1T：无媒体输入的附件驱动提交即文生视频模式（新建默认 prompt）
-      mode: 'prompt',
+      mode: 'text2video',
       // IKG0LP：是否带音频（缺省 true）
       generateAudio: true,
       // IKIZQB：样片开关（缺省关闭，普通视频提交语义）
@@ -257,8 +257,8 @@ describe('IKFCKQ 文本附件进参考栏', () => {
             onClose: vi.fn(),
             onSend: vi.fn(),
             attachments: [{ nodeId: 't1', title: '故事文案', text: '一只蓝鲸在海里' }],
+            initialParams: { mode: 'first_last_frame' },
             videoMediaRefs: { reference: [], first: IMG_REF },
-            enabledModes: ['keyframe'],
             videoDraftBinding: { onParamsChange: vi.fn() },
           })
         ),

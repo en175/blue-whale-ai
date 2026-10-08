@@ -14,7 +14,15 @@ import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecov
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
-import { computeFollowAnchor, enabledVideoFollowModes, firstEnabledVideoMode } from './followDialog';
+import { computeFollowAnchor } from './followDialog';
+import { defaultVideoModeFor, draftVideoModeOf } from './videoModes';
+import {
+  effectiveVideoParams,
+  frameSlotCountOf,
+  isFrameMode,
+  normalizeVideoMode,
+  type VideoMode,
+} from '@/lib/video-modes';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
 import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from './planApplyEdges';
 import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
@@ -721,15 +729,20 @@ export default function CanvasPage() {
     ?? productNodesRef.current.find((n) => n.id === id)
     ?? assetNodesRef.current.find((n) => n.id === id);
 
+  const draftModeOfNode = (nodeId: string, data?: Record<string, unknown> | undefined): VideoMode | null =>
+    draftVideoModeOf(
+      data ?? (mediaNodesRef.current.find((n) => n.id === nodeId)?.data as Record<string, unknown> | undefined),
+      mergedVideoMediaRefsOf(nodeId, edgesRef.current, mediaNodesRef.current),
+    );
+
   /** 视频草稿连线角色：Dock 显式槽位优先；首尾帧模式拖线/@ 按空槽自动占首帧再占尾帧。 */
   const videoEdgeRoleFor = (targetId: string, requested?: VideoRefRole | null): VideoRefRole => {
     if (requested === 'first' || requested === 'last') return requested;
-    const target = mediaNodesRef.current.find((n) => n.id === targetId);
-    const mode = (target?.data as Record<string, unknown> | undefined)?.draftMode;
-    if (mode !== 'keyframe') return 'reference';
+    const slots = frameSlotCountOf(draftModeOfNode(targetId));
+    if (slots === 0) return 'reference';
     const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
     if (!refs.first) return 'first';
-    if (!refs.last) return 'last';
+    if (slots === 2 && !refs.last) return 'last';
     return 'reference';
   };
 
@@ -770,7 +783,7 @@ export default function CanvasPage() {
         return true;
       }
       if (!validateImageRefConnect(source, target)) return false;
-      if (targetKind === 'video' && videoRole === 'reference' && targetData?.draftMode === 'keyframe') {
+      if (targetKind === 'video' && videoRole === 'reference' && isFrameMode(draftModeOfNode(target, targetData))) {
         const refs = mergedVideoMediaRefsOf(target, edgesRef.current, mediaNodesRef.current);
         if (refs.first || refs.last) {
           showToast('warn', '首帧和尾帧已指定，请先移除现有帧');
@@ -3326,7 +3339,7 @@ export default function CanvasPage() {
         // IKIPSX（IKGUXU D-01）：seed 缺失时也按新建场景（参考集合恒为空）派生默认模式写入，
         // 与面板默认显示同源——否则用户全程不碰模式选择器时 draftMode 不落盘，
         // 参考集合变化后重开面板模式解释漂移，违反 IKF93U 用户故事 15。
-        draftMode: seed?.mode ?? firstEnabledVideoMode(enabledVideoFollowModes({ reference: [] })),
+        draftMode: seed?.mode ?? defaultVideoModeFor({ reference: [] }),
         ...(seed?.generateAudio != null ? { draftGenerateAudio: seed.generateAudio } : {}),
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -5082,9 +5095,8 @@ export default function CanvasPage() {
       const customNamed = hasCustomName(inPlaceNode);
       // IKIPSX（IKGUXU D-01）：draftMode 兜底——草稿已保存模式优先；缺失（2026-09-13 前存量
       // 旧草稿或异常路径）时按当前面板选中模式（initialDraft.mode）补写，保证提交后 draftMode 落盘。
-      const existingDraftMode = (inPlaceNode!.data as Record<string, unknown>).draftMode;
-      const fallbackDraftMode =
-        typeof existingDraftMode === 'string' ? undefined : initialDraft?.mode;
+      const existingDraftMode = draftModeOfNode(inPlaceNodeId, inPlaceNode!.data as Record<string, unknown>);
+      const fallbackDraftMode = existingDraftMode ?? normalizeVideoMode(initialDraft?.mode);
       patchMediaNode(inPlaceNodeId, {
         genStatus: 'generating',
         progress: 0,
@@ -7535,9 +7547,9 @@ export default function CanvasPage() {
       // IKFC26：方案绑定媒体时服务端同步切换目标草稿模式（文生视频 → 全能参考），
       // 本地节点以服务端返回为准跟随，防止下一次自动保存把切换结果覆盖回旧模式
       const savedNodes = JSON.parse(saved.nodes ?? '[]') as Node[];
-      const serverMode = (savedNodes.find(n => n.id === targetNodeId)?.data as Record<string, unknown> | undefined)?.draftMode;
-      const localMode = (mediaNodesRef.current.find(n => n.id === targetNodeId)?.data as Record<string, unknown> | undefined)?.draftMode;
-      if (typeof serverMode === 'string' && serverMode !== localMode) patchMediaNode(targetNodeId, { draftMode: serverMode });
+      const serverMode = normalizeVideoMode((savedNodes.find(n => n.id === targetNodeId)?.data as Record<string, unknown> | undefined)?.draftMode);
+      const localMode = normalizeVideoMode((mediaNodesRef.current.find(n => n.id === targetNodeId)?.data as Record<string, unknown> | undefined)?.draftMode);
+      if (serverMode && serverMode !== localMode) patchMediaNode(targetNodeId, { draftMode: serverMode });
       versionRef.current = saved.version;
       lastSavedRef.current = JSON.stringify(JSON.parse(saved.viewport ?? 'null')) + serializeNodes(savedNodes) + serializeEdges(next);
       setSaveStatus('saved');
@@ -8213,9 +8225,7 @@ export default function CanvasPage() {
     };
     if (videoDraftId) {
       const role = videoEdgeRoleFor(videoDraftId);
-      const draft = mediaNodesRef.current.find((n) => n.id === videoDraftId);
-      const mode = (draft?.data as Record<string, unknown> | undefined)?.draftMode;
-      if (role === 'reference' && mode === 'keyframe') {
+      if (role === 'reference' && isFrameMode(draftModeOfNode(videoDraftId))) {
         const refs = mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current);
         if (refs.first || refs.last) {
           showToast('warn', '首帧和尾帧已指定，请先移除现有帧');
@@ -8227,11 +8237,12 @@ export default function CanvasPage() {
       addCanvasEdge(item.id, videoDraftId, role);
       return;
     }
-    const freeMode = videoSeed?.params?.mode;
-    const freeRole: VideoRefRole = freeMode === 'keyframe'
-      ? (!videoFreeRefs.first ? 'first' : !videoFreeRefs.last ? 'last' : 'reference')
+    const freeMode = normalizeVideoMode(videoSeed?.params?.mode);
+    const freeSlots = frameSlotCountOf(freeMode);
+    const freeRole: VideoRefRole = freeSlots > 0
+      ? (!videoFreeRefs.first ? 'first' : freeSlots === 2 && !videoFreeRefs.last ? 'last' : 'reference')
       : 'reference';
-    if (freeRole === 'reference' && freeMode === 'keyframe' && (videoFreeRefs.first || videoFreeRefs.last)) {
+    if (freeRole === 'reference' && isFrameMode(freeMode) && (videoFreeRefs.first || videoFreeRefs.last)) {
       showToast('warn', '首帧和尾帧已指定，请先移除现有帧');
       return;
     }
@@ -8736,17 +8747,20 @@ export default function CanvasPage() {
         // IKIPSX：原位更新生成/文本索引重发不走面板，draftMode 兜底——草稿已保存模式优先；
         // 缺失（2026-09-13 前存量旧草稿）按提交时参考集合派生默认（与面板显示同源）。
         const fallbackMode =
-          typeof data.draftMode === 'string'
-            ? data.draftMode
-            : firstEnabledVideoMode(enabledVideoFollowModes(draftRefs));
+          draftVideoModeOf(data, draftRefs) ?? defaultVideoModeFor(draftRefs);
+        const wireParams = effectiveVideoParams(draftModelOf(nodeId, 'video')?.features, fallbackMode, {
+          aspectRatio,
+          duration,
+        });
         const submitted = startGenerationJob(
           'video',
           {
             prompt,
             model_id: modelId,
-            aspect_ratio: aspectRatio,
+            aspect_ratio: wireParams.aspect_ratio,
             resolution,
-            duration,
+            duration: wireParams.duration,
+            mode: fallbackMode,
             generate_audio: typeof data.draftGenerateAudio === 'boolean' ? data.draftGenerateAudio : true,
           },
           undefined,
@@ -8843,7 +8857,7 @@ export default function CanvasPage() {
       const items = handoff.kind === 'image'
         ? handoff.files.map(f => ({ url: f.url, name: f.name, mediaType: 'image' as const, file: f.file, assetId: f.assetId, role: 'reference' as VideoRefRole }))
         : handoff.refs.map((r, i) => ({ url: r.preview, name: r.file?.name ?? `参考${i + 1}`, mediaType: r.type, file: r.file, assetId: r.assetId,
-            role: (handoff.mode === 'keyframe' ? (i === 0 ? 'first' : 'last') : 'reference') as VideoRefRole }));
+            role: (isFrameMode(handoff.mode) ? (i === 0 ? 'first' : 'last') : 'reference') as VideoRefRole }));
       const references: Array<{
         assetId: string;
         url: string;
@@ -8877,7 +8891,7 @@ export default function CanvasPage() {
             undefined, jobRefs.length > 0 ? { references: jobRefs } : undefined, undefined, { references });
         } else {
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
-            resolution: handoff.resolution, duration: handoff.duration,
+            resolution: handoff.resolution, duration: handoff.duration, mode: handoff.mode,
             // IKG0LP：首页选的「是否带音频」随交接带过来，不能在这里丢
             generate_audio: handoff.generateAudio }, undefined,
             { references: buildVideoJobReferencesFromList(references) },
