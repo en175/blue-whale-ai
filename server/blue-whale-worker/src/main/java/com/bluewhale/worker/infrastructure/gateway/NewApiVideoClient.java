@@ -135,13 +135,13 @@ public class NewApiVideoClient {
         double effectiveDuration = input.duration();
         String effectiveRatio = input.ratio();
         if (input.model().startsWith(SEEDANCE_25_MODEL_PREFIX) && hasVideoReference(input.references())) {
-            switch (input.videoTaskType() == null ? "default" : input.videoTaskType()) {
+            switch (input.videoTaskType() == null ? "text2video" : input.videoTaskType()) {
                 case "edit" -> {
                     omniTaskType = "edit";
                     effectiveRatio = "adaptive";
                     effectiveDuration = -1;
                 }
-                case "prolong" -> {
+                case "extend" -> {
                     omniTaskType = "extend";
                     effectiveRatio = "adaptive";
                 }

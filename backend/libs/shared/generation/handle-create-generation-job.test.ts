@@ -1229,7 +1229,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       });
       const result = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("16:9"), null, deps);
       expect(result.code).toBe(1002);
-      expect(result.msg).toBe("当前任务类型（first_frame）不支持 比例 16:9，可用：adaptive");
+      expect(result.msg).toBe("当前模式（first_frame）不支持 比例 16:9，可用：adaptive");
       expect(createJob).not.toHaveBeenCalled();
     });
 
@@ -1309,17 +1309,21 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       features: {
         video_reference: true,
         task_types: {
-          default: { allowed_ratios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"] },
-          edit: { allowed_ratios: ["adaptive"] },
-          prolong: { allowed_ratios: ["adaptive"] },
+          text2video: {},
+          omni: {},
+          image_reference: {},
+          first_frame: {},
+          first_last_frame: {},
+          edit: { allowed_ratios: ["adaptive"], allowed_durations: [-1] },
+          extend: { allowed_ratios: ["adaptive"] },
         },
       },
     };
     const VIDEO_REF = [{ role: "reference" as const, material_id: "Asset-vid-1", type: "video" as const }];
-    const bodyOf = (prompt: string, aspect: string) => ({
+    const bodyOf = (prompt: string, aspect: string, duration: number = VIDEO_BODY.parameters.duration) => ({
       ...VIDEO_BODY,
       references: VIDEO_REF,
-      parameters: { ...VIDEO_BODY.parameters, prompt, aspect_ratio: aspect },
+      parameters: { ...VIDEO_BODY.parameters, prompt, aspect_ratio: aspect, duration },
     });
 
     it("编辑 + 9:16 → 4xx task_type_param_constraint + 用户向文案，不建任务（不扣费）", async () => {
@@ -1344,10 +1348,10 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
 
     it("编辑 + adaptive → 200，快照携带任务类型 edit", async () => {
       const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
-      const result = await handleCreateGenerationJob("u1", "p1", bodyOf("把背景替换成海边", "adaptive"), null, deps);
+      const result = await handleCreateGenerationJob("u1", "p1", bodyOf("把背景替换成海边", "adaptive", -1), null, deps);
       expect(result.code).toBe(200);
       const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-      expect(cmdArg.input.video_task_type).toBe("edit");
+      expect(cmdArg.input.video_mode).toBe("edit");
     });
 
     it("纯参考 + 9:16 → 放行且快照携带任务类型 default", async () => {
@@ -1355,7 +1359,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       const result = await handleCreateGenerationJob("u1", "p1", bodyOf("参考它的运镜风格", "9:16"), null, deps);
       expect(result.code).toBe(200);
       const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-      expect(cmdArg.input.video_task_type).toBe("default");
+      expect(cmdArg.input.video_mode).toBe("omni");
     });
 
     it("否定句（禁止修改）+ 9:16 → 放行（IKJ78C 否定防护在接纳链路整体成立）", async () => {
@@ -1363,7 +1367,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       const result = await handleCreateGenerationJob("u1", "p1", bodyOf("禁止修改人物形象", "9:16"), null, deps);
       expect(result.code).toBe(200);
       const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-      expect(cmdArg.input.video_task_type).toBe("default");
+      expect(cmdArg.input.video_mode).toBe("omni");
     });
 
     it("无任务类型视频（旧 body 无参考）→ 200，快照仍携带 default", async () => {
@@ -1371,7 +1375,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       const result = await handleCreateGenerationJob("u1", "p1", VIDEO_BODY, null, deps);
       expect(result.code).toBe(200);
       const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-      expect(cmdArg.input.video_task_type).toBe("default");
+      expect(cmdArg.input.video_mode).toBe("text2video");
     });
 
     it("2.0 形态（无 task_types）+ 编辑句 + 9:16 → 放行（不把 2.5 的约束套到 2.0）", async () => {
@@ -1419,9 +1423,13 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       features: {
         video_reference: true,
         task_types: {
-          default: { allowed_ratios: ["16:9", "9:16", "adaptive"] },
-          edit: { allowed_ratios: ["adaptive"] },
-          prolong: { allowed_ratios: ["adaptive"] },
+          text2video: {},
+          omni: {},
+          image_reference: {},
+          first_frame: {},
+          first_last_frame: {},
+          edit: { allowed_ratios: ["adaptive"], allowed_durations: [-1] },
+          extend: { allowed_ratios: ["adaptive"] },
         },
       },
     };
@@ -1470,10 +1478,10 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       } as unknown as HandlerDeps;
       return { deps, createJob: base.createJob };
     }
-    const textRefBodyOf = (prompt: string, aspect: string) => ({
+    const textRefBodyOf = (prompt: string, aspect: string, duration: number = VIDEO_BODY.parameters.duration) => ({
       ...VIDEO_BODY,
       target_node_id: "media-1",
-      parameters: { ...VIDEO_BODY.parameters, prompt, aspect_ratio: aspect },
+      parameters: { ...VIDEO_BODY.parameters, prompt, aspect_ratio: aspect, duration },
     });
 
     it("编辑意图 + 文本带入视频参考 + 9:16 → 1060（统一前判定是 default 会放行，统一后按 edit 拦）", async () => {
@@ -1486,10 +1494,10 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
 
     it("编辑意图 + 文本带入视频参考 + adaptive → 200，冻结 edit 且计价按源视频时长改写（同一请求两判定一致）", async () => {
       const { deps, createJob } = buildTextRefDeps();
-      const result = await handleCreateGenerationJob("u1", "p1", textRefBodyOf("把背景替换成海边", "adaptive"), null, deps);
+      const result = await handleCreateGenerationJob("u1", "p1", textRefBodyOf("把背景替换成海边", "adaptive", -1), null, deps);
       expect(result.code).toBe(200);
       const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-      expect(cmdArg.input.video_task_type).toBe("edit");
+      expect(cmdArg.input.video_mode).toBe("edit");
       // applyEditSourceDurationBasis 按源视频时长（7s）改写——与冻结值同一请求同口径
       expect(cmdArg.input.duration).toBe(7);
     });
@@ -1499,7 +1507,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       const result = await handleCreateGenerationJob("u1", "p1", textRefBodyOf("参考它的运镜风格", "9:16"), null, deps);
       expect(result.code).toBe(200);
       const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-      expect(cmdArg.input.video_task_type).toBe("default");
+      expect(cmdArg.input.video_mode).toBe("omni");
       expect(cmdArg.input.duration).toBe(VIDEO_BODY.parameters.duration);
     });
   });
@@ -3733,7 +3741,7 @@ describe("handleCreateGenerationJob 样片 × 其余三模式（IKIZQ9）", () =
     );
 
     expect(result.code).toBe(1002);
-    expect(result.msg).toBe("当前任务类型（first_frame）不支持 比例 16:9，可用：adaptive");
+    expect(result.msg).toBe("当前模式（first_frame）不支持 比例 16:9，可用：adaptive");
     expect(createJob).not.toHaveBeenCalled();
   });
 

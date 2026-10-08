@@ -660,13 +660,13 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
     const features = {
       task_types: {
         first_frame: { allowed_ratios: ['16:9', '9:16'] },
-        prolong: { allowed_ratios: 'not-an-array' },
+        extend: { allowed_ratios: 'not-an-array' },
       },
     };
     const ratios = pickTaskTypeRatios(features);
     expect(ratios.first_frame).toEqual(['16:9', '9:16']);
-    expect(ratios.default).toEqual([]);
-    expect(ratios.prolong).toEqual([]);
+    expect(ratios.text2video).toEqual([]);
+    expect(ratios.extend).toEqual([]);
   });
 
   it('写回只动 allowed_ratios：其它子键与未知任务类型原样保留', () => {
@@ -681,7 +681,7 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
   });
 
   it('清空某任务类型的比例 → 该键被移除（而不是留下空数组让约束形同虚设）', () => {
-    expect(buildTaskTypes({ default: { allowed_ratios: ['1:1'] } }, { default: [] })).toEqual({});
+    expect(buildTaskTypes({ text2video: { allowed_ratios: ['1:1'] } }, { text2video: [] })).toEqual({});
   });
 });
 

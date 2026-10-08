@@ -746,10 +746,10 @@ public class VideoJobProcessor implements JobProcessor {
         // 缺失或非布尔 → null → 出站不下发，维持上游默认。
         Boolean generateAudio = input.get("generate_audio") instanceof Boolean b ? b : null;
 
-        // IKJ79A：快照冻结的视频任务类型（IKJ795 接纳侧判定冻结，键名同 TS 契约
-        // FROZEN_VIDEO_TASK_TYPE_KEY）。执行层只读不重算；缺失/非字符串 → null，
-        // 出站侧按 default 处理（frozenVideoTaskTypeOf 同口径，不回溯历史任务）。
-        String videoTaskType = input.get("video_task_type") instanceof String s ? s : null;
+        String frozenMode = input.get("video_mode") instanceof String s ? s
+                : input.get("video_task_type") instanceof String t ? t : null;
+        String videoTaskType = "default".equals(frozenMode) ? "text2video"
+                : "prolong".equals(frozenMode) ? "extend" : frozenMode;
 
         // 校验（:598-606）。IKFPYX：duration=-1（模型自动选时长）**仅 edit/prolong 任务合法**，
         // 其余任务须 duration>0。

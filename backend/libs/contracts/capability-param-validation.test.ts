@@ -6,12 +6,12 @@ import { describe, expect, it } from "vitest";
 import {
   aspectRatioIds,
   checkGenerationParamLimit,
-  frozenVideoTaskTypeOf,
+  frozenVideoModeOf,
   parsePixels,
   normalizeSpecKey,
   parseSpecKey,
   resolveOutputPixels,
-  resolveVideoTaskType,
+  resolveVideoMode,
   specKeyOf,
   TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
   toGenerationParamCheckInput,
@@ -218,11 +218,11 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
     supported_aspect_ratios: ["16:9", "9:16", "adaptive"],
     supported_durations: { min: 4, max: 30, step: 1 },
     task_types: {
-      default: { allowed_ratios: ["16:9", "9:16", "adaptive"], allowed_durations: [4, 5, 10, 30] },
+      text2video: { allowed_ratios: ["16:9", "9:16", "adaptive"] },
       first_frame: { allowed_ratios: ["adaptive"] },
       first_last_frame: { allowed_ratios: ["adaptive"] },
       edit: { allowed_ratios: ["adaptive"], allowed_durations: [-1] },
-      prolong: { allowed_ratios: ["adaptive"], allowed_durations: [4, 5, 10, -1] },
+      extend: { allowed_ratios: ["adaptive"] },
     },
   };
 
@@ -231,7 +231,7 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
       size: "1080p",
       aspect_ratio: "16:9",
       duration: 5,
-      task_type: "first_frame",
+      mode: "first_frame",
     });
     expect(err?.field).toBe("aspect_ratio");
     expect(err?.reason).toContain("adaptive");
@@ -243,7 +243,7 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
         size: "1080p",
         aspect_ratio: "adaptive",
         duration: 5,
-        task_type: "first_frame",
+        mode: "first_frame",
       }),
     ).toBeNull();
   });
@@ -254,7 +254,7 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
         size: "1080p",
         aspect_ratio: "adaptive",
         duration: -1,
-        task_type: "edit",
+        mode: "edit",
       }),
     ).toBeNull();
   });
@@ -264,32 +264,40 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
       size: "1080p",
       aspect_ratio: "adaptive",
       duration: 5,
-      task_type: "edit",
+      mode: "edit",
     });
     expect(err?.field).toBe("duration");
   });
 
-  it("default 任务：duration=-1 被拒（基础范围只收正数）", () => {
+  it("text2video 任务：duration=-1 被拒（基础范围只收正数）", () => {
     const err = checkGenerationParamLimit(taskCapability, {
       size: "1080p",
       aspect_ratio: "16:9",
       duration: -1,
-      task_type: "default",
+      mode: "text2video",
     });
     expect(err?.field).toBe("duration");
   });
 
-  it("prolong 任务：duration=-1 与 4/10 均可（清单同时含两者）", () => {
-    for (const d of [-1, 4, 10]) {
+  it("extend 任务：时长走基础范围，-1 被拒（只有 edit 锁跟随）", () => {
+    for (const d of [4, 10]) {
       expect(
         checkGenerationParamLimit(taskCapability, {
           size: "1080p",
           aspect_ratio: "adaptive",
           duration: d,
-          task_type: "prolong",
+          mode: "extend",
         }),
       ).toBeNull();
     }
+    expect(
+      checkGenerationParamLimit(taskCapability, {
+        size: "1080p",
+        aspect_ratio: "adaptive",
+        duration: -1,
+        mode: "extend",
+      })?.field,
+    ).toBe("duration");
   });
 
   it("未配 task_types → 回落基础能力行（-1 仍被拒）", () => {
@@ -303,7 +311,7 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
         size: "1080p",
         aspect_ratio: "adaptive",
         duration: -1,
-        task_type: "edit",
+        mode: "edit",
       })?.field,
     ).toBe("duration");
   });
@@ -315,17 +323,17 @@ describe("编辑/延长比例拒单换结构化码（IKJ795）", () => {
     supported_aspect_ratios: ["16:9", "9:16", "adaptive"],
     supported_durations: { min: 4, max: 30, step: 1 },
     task_types: {
-      default: { allowed_ratios: ["16:9", "9:16", "adaptive"] },
+      text2video: { allowed_ratios: ["16:9", "9:16", "adaptive"] },
       edit: { allowed_ratios: ["adaptive"] },
-      prolong: { allowed_ratios: ["adaptive"] },
+      extend: { allowed_ratios: ["adaptive"] },
     },
   };
 
-  it.each(["edit", "prolong"] as const)("%s + 非 adaptive 比例 → task_type_param_constraint + 用户向文案", (taskType) => {
+  it.each(["edit", "extend"] as const)("%s + 非 adaptive 比例 → task_type_param_constraint + 用户向文案", (taskType) => {
     const err = checkGenerationParamLimit(taskCapability, {
       size: "1080p",
       aspect_ratio: "9:16",
-      task_type: taskType,
+      mode: taskType,
     });
     expect(err?.code).toBe("task_type_param_constraint");
     expect(err?.reason).toBe(TASK_TYPE_PARAM_CONSTRAINT_MESSAGE);
@@ -339,7 +347,7 @@ describe("编辑/延长比例拒单换结构化码（IKJ795）", () => {
       checkGenerationParamLimit(taskCapability, {
         size: "1080p",
         aspect_ratio: "adaptive",
-        task_type: "edit",
+        mode: "edit",
       }),
     ).toBeNull();
   });
@@ -363,124 +371,124 @@ describe("编辑/延长比例拒单换结构化码（IKJ795）", () => {
       checkGenerationParamLimit(plain, {
         size: "1080p",
         aspect_ratio: "9:16",
-        task_type: "edit",
+        mode: "edit",
       }),
     ).toBeNull();
   });
 });
 
-describe("frozenVideoTaskTypeOf（IKJ795）", () => {
+describe("frozenVideoModeOf（IKJ795）", () => {
   it("存量快照无该字段 → default（不重算历史）", () => {
-    expect(frozenVideoTaskTypeOf({ prompt: "旧任务", aspect_ratio: "9:16" })).toBe("default");
+    expect(frozenVideoModeOf({ prompt: "旧任务", aspect_ratio: "9:16" })).toBe("text2video");
   });
 
   it("冻结值原样透出", () => {
-    expect(frozenVideoTaskTypeOf({ video_task_type: "edit" })).toBe("edit");
-    expect(frozenVideoTaskTypeOf({ video_task_type: "prolong" })).toBe("prolong");
-    expect(frozenVideoTaskTypeOf({ video_task_type: "first_last_frame" })).toBe("first_last_frame");
+    expect(frozenVideoModeOf({ video_mode: "edit" })).toBe("edit");
+    expect(frozenVideoModeOf({ video_mode: "extend" })).toBe("extend");
+    expect(frozenVideoModeOf({ video_mode: "first_last_frame" })).toBe("first_last_frame");
   });
 
   it("非法值 / 非对象 → default", () => {
-    expect(frozenVideoTaskTypeOf({ video_task_type: "nonsense" })).toBe("default");
-    expect(frozenVideoTaskTypeOf(null)).toBe("default");
-    expect(frozenVideoTaskTypeOf("edit")).toBe("default");
+    expect(frozenVideoModeOf({ video_mode: "nonsense" })).toBe("text2video");
+    expect(frozenVideoModeOf(null)).toBe("text2video");
+    expect(frozenVideoModeOf("edit")).toBe("text2video");
   });
 });
 
-describe("resolveVideoTaskType（IKFPYX）", () => {
+describe("resolveVideoMode（IKFPYX）", () => {
   const ref = (role: string, type: string) => ({ role, type });
 
   it("首帧 / 首尾帧按 references 角色判定", () => {
-    expect(resolveVideoTaskType([ref("first_frame", "image")], "")).toBe("first_frame");
+    expect(resolveVideoMode([ref("first_frame", "image")], "")).toBe("first_frame");
     expect(
-      resolveVideoTaskType([ref("first_frame", "image"), ref("last_frame", "image")], ""),
+      resolveVideoMode([ref("first_frame", "image"), ref("last_frame", "image")], ""),
     ).toBe("first_last_frame");
   });
 
   it("参考视频 + 延长意图 → prolong（优先于编辑）", () => {
-    expect(resolveVideoTaskType([ref("reference", "video")], "向后延长这个视频")).toBe("prolong");
+    expect(resolveVideoMode([ref("reference", "video")], "向后延长这个视频")).toBe("extend");
   });
 
   it("参考视频 + 编辑意图 → edit", () => {
-    expect(resolveVideoTaskType([ref("reference", "video")], "把背景改成海边")).toBe("edit");
+    expect(resolveVideoMode([ref("reference", "video")], "把背景改成海边")).toBe("edit");
   });
 
   it("参考视频但无意图关键词 → default", () => {
-    expect(resolveVideoTaskType([ref("reference", "video")], "参考它的运镜")).toBe("default");
+    expect(resolveVideoMode([ref("reference", "video")], "参考它的运镜")).toBe("omni");
   });
 
   it("无参考视频（仅图片参考）→ default（即使提示词含编辑词）", () => {
-    expect(resolveVideoTaskType([ref("reference", "image")], "修改一下")).toBe("default");
+    expect(resolveVideoMode([ref("reference", "image")], "修改一下")).toBe("image_reference");
   });
 
   /* 关键词表逐字对齐火山方舟 Seedance 2.5 提示词指南。以下两条钉住**曾经放宽过的词**：
      放宽会让「用户没要求编辑/延长」的提示词也落进 edit/prolong，进而被按编辑任务的锁定额处理。 */
 
   it("裸「编辑」不算编辑意图（官方那条是「编辑视频」）", () => {
-    expect(resolveVideoTaskType([ref("reference", "video")], "编辑一下这个镜头")).toBe("default");
+    expect(resolveVideoMode([ref("reference", "video")], "编辑一下这个镜头")).toBe("omni");
   });
 
   it("裸「向前」不算延长意图（用户说的是运镜，不是要延长视频）", () => {
-    expect(resolveVideoTaskType([ref("reference", "video")], "镜头向前推进")).toBe("default");
+    expect(resolveVideoMode([ref("reference", "video")], "镜头向前推进")).toBe("omni");
   });
 
   it("官方延长词是完整词组「向前延长 / 向后延长」", () => {
-    expect(resolveVideoTaskType([ref("reference", "video")], "向前延长 3 秒")).toBe("prolong");
-    expect(resolveVideoTaskType([ref("reference", "video")], "向后延长这个视频")).toBe("prolong");
+    expect(resolveVideoMode([ref("reference", "video")], "向前延长 3 秒")).toBe("extend");
+    expect(resolveVideoMode([ref("reference", "video")], "向后延长这个视频")).toBe("extend");
     // 官方的另外两个词仍然保留
-    expect(resolveVideoTaskType([ref("reference", "video")], "续写这段")).toBe("prolong");
+    expect(resolveVideoMode([ref("reference", "video")], "续写这段")).toBe("extend");
   });
 
   /* IKJ78C：否定防护——裸子串匹配会把「禁止修改」这类约束句误判成编辑意图（default 即官方 reference）。 */
 
   it("IKJ78C 否定约束句不判编辑（六词闭集逐一覆盖）", () => {
-    expect(resolveVideoTaskType([ref("reference", "video")], "禁止修改人物形象")).toBe("default");
-    expect(resolveVideoTaskType([ref("reference", "video")], "不得替换背景")).toBe("default");
-    expect(resolveVideoTaskType([ref("reference", "video")], "不要替换背景")).toBe("default");
-    expect(resolveVideoTaskType([ref("reference", "video")], "不能去掉人物")).toBe("default");
-    expect(resolveVideoTaskType([ref("reference", "video")], "请勿删除水印")).toBe("default");
-    expect(resolveVideoTaskType([ref("reference", "video")], "无需增加字幕")).toBe("default");
+    expect(resolveVideoMode([ref("reference", "video")], "禁止修改人物形象")).toBe("omni");
+    expect(resolveVideoMode([ref("reference", "video")], "不得替换背景")).toBe("omni");
+    expect(resolveVideoMode([ref("reference", "video")], "不要替换背景")).toBe("omni");
+    expect(resolveVideoMode([ref("reference", "video")], "不能去掉人物")).toBe("omni");
+    expect(resolveVideoMode([ref("reference", "video")], "请勿删除水印")).toBe("omni");
+    expect(resolveVideoMode([ref("reference", "video")], "无需增加字幕")).toBe("omni");
   });
 
   it("IKJ78C 混合句按肯定判：否定词与关键词跨子句不剔除（中英标点同权）", () => {
-    expect(resolveVideoTaskType([ref("reference", "video")], "禁止修改人物，把背景替换成海边"))
+    expect(resolveVideoMode([ref("reference", "video")], "禁止修改人物，把背景替换成海边"))
       .toBe("edit");
-    expect(resolveVideoTaskType([ref("reference", "video")], "不要改人物,把背景替换成海边"))
+    expect(resolveVideoMode([ref("reference", "video")], "不要改人物,把背景替换成海边"))
       .toBe("edit");
   });
 
   it("IKJ78C 否定延长词同样剔除", () => {
-    expect(resolveVideoTaskType([ref("reference", "video")], "不要延续这个故事")).toBe("default");
+    expect(resolveVideoMode([ref("reference", "video")], "不要延续这个故事")).toBe("omni");
   });
 });
 
-describe("task_types.default 约束生效（IKFPYX）", () => {
+describe("task_types 空对象 = 开放且无额外约束（IKK1T4）", () => {
   const cap: CapabilityLimitInput = {
     supported_sizes: [{ id: "1080p", api_value: "1080p" }],
     supported_aspect_ratios: ["16:9", "adaptive"],
     supported_durations: { min: 4, max: 30, step: 1 },
-    task_types: { default: { allowed_durations: [4, 5, 10, 30] } },
+    task_types: { text2video: {} },
   };
 
-  it("default 任务按配置的时长清单校验：7 秒被拒（基础范围本可放行）", () => {
-    const err = checkGenerationParamLimit(cap, {
-      size: "1080p",
-      aspect_ratio: "16:9",
-      duration: 7,
-      task_type: "default",
-    });
-    expect(err?.field).toBe("duration");
-  });
-
-  it("default 任务清单内（10 秒）放行", () => {
+  it("空对象回落基础能力行：区间内任何时长都放行", () => {
     expect(
       checkGenerationParamLimit(cap, {
         size: "1080p",
         aspect_ratio: "16:9",
-        duration: 10,
-        task_type: "default",
+        duration: 7,
+        mode: "text2video",
       }),
     ).toBeNull();
+  });
+
+  it("空对象回落基础能力行：区间外仍被拒", () => {
+    const err = checkGenerationParamLimit(cap, {
+      size: "1080p",
+      aspect_ratio: "16:9",
+      duration: 99,
+      mode: "text2video",
+    });
+    expect(err?.field).toBe("duration");
   });
 });
 

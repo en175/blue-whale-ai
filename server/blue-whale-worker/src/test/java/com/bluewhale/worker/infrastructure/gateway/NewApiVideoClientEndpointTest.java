@@ -159,12 +159,12 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
-    @DisplayName("IKJ79A 延长单：prolong → omni=extend 且 ratio=adaptive、duration 透传用户所选")
+    @DisplayName("IKJ79A 延长单：extend → omni=extend 且 ratio=adaptive、duration 透传用户所选")
     void seedance25ProlongTaskLocksRatioOnlyAndKeepsUserDuration() throws Exception {
         VideoSubmitInput input = new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "把视频向后延长", 12.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null, false, "prolong");
+                null, false, "extend");
 
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
 

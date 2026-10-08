@@ -405,7 +405,7 @@ describe('ModelList 按类型分表单', () => {
     // IKHBDO：task_types 此前只能在整个 features 的 JSON 里手写
     expect(document.body.textContent).toContain('任务类型比例约束 task_types');
     expect(document.body.textContent).toContain('first_last_frame');
-    expect(document.body.textContent).toContain('prolong');
+    expect(document.body.textContent).toContain('extend');
   });
 
   it('★ 切换渠道 → 下面换表（三种解析器各一次，都在「尺寸与素材」的「出站尺寸映射」）', async () => {

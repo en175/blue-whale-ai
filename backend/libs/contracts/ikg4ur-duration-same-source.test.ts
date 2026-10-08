@@ -65,19 +65,16 @@ function capabilityOf(row: VideoDurationRow): CapabilityLimitInput {
     supported_sizes: [{ id: "720p", api_value: "720p" }],
     supported_aspect_ratios: ["16:9"],
     supported_durations: { min: row.min, max: row.max, step: row.step },
-    task_types: row.legacyAllowedDurations
-      ? { default: { allowed_durations: row.legacyAllowedDurations } }
-      : undefined,
+    task_types: { text2video: {} },
   };
 }
 
-/** 固定按 default 任务类型校验——滑杆最常走的路径，也是枚举曾覆盖基础区间的那条。 */
 function checkRange(capability: CapabilityLimitInput, duration: number) {
   return checkGenerationParamLimit(capability, {
     size: "720p",
     aspect_ratio: "16:9",
     duration,
-    task_type: "default",
+    mode: "text2video",
   });
 }
 
@@ -89,14 +86,15 @@ describe("IKG4UR 时长同源：种子声明的区间 = 服务端接受集", () 
     for (const row of rows) expect(row.modelId).toMatch(/^doubao-/);
   });
 
-  it("种子里没有退役字段 allowed_durations（防回流）", () => {
-    // 该键命中时校验改按枚举判，正是「能选却提交被拒」的来源。
-    // 排除注释——文件里有说明它的行内注释。
+  it("种子里 allowed_durations 只允许 [-1]（防回流：正数档位枚举）", () => {
     const withoutComments = seedSql
       .split("\n")
       .filter((line) => !line.trim().startsWith("--"))
       .join("\n");
-    expect(withoutComments).not.toContain("allowed_durations");
+    for (const hit of withoutComments.matchAll(/allowed_durations[^\n]*/g)) {
+      expect(hit[0]).toContain("-1");
+      expect(hit[0].replace(/-1/g, "")).not.toMatch(/\d/);
+    }
   });
 
   it.each(rows)("$modelId：区间内每个 step 都被接受", (row) => {

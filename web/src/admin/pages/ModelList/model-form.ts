@@ -63,7 +63,7 @@ export const KNOWN_FEATURE_KEYS = [
 ] as const;
 
 /** ADR-0086：按任务类型的比例约束（`features.task_types`）。只有视频任务会带 task_type。 */
-export const TASK_TYPE_KEYS = ['default', 'first_frame', 'first_last_frame', 'edit', 'prolong'] as const;
+export const TASK_TYPE_KEYS = ['text2video', 'omni', 'image_reference', 'first_frame', 'first_last_frame', 'edit', 'extend'] as const;
 export type TaskTypeKey = (typeof TASK_TYPE_KEYS)[number];
 
 export const TYPE_TABS: { key: ModelType; label: string }[] = [

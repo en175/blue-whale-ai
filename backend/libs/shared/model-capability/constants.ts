@@ -10,7 +10,7 @@ import {
 } from "../generation/image-channel-parser.js";
 // 像素表的键/值解析与消费侧共用同一对纯函数——写闸门和 `resolveOutputPixels` 各写一套
 // 就会出现「存得进去、跑起来查不到」的漂移（ADR-0110 禁止的跨层重复口径）。
-import { parsePixels, parseSpecKey } from "@lib/contracts";
+import { VIDEO_MODES, parsePixels, parseSpecKey } from "@lib/contracts";
 
 export const MODEL_CAPABILITY_TYPES = ["image", "video", "text", "audio"] as const;
 export type ModelCapabilityType = (typeof MODEL_CAPABILITY_TYPES)[number];
@@ -144,6 +144,25 @@ function featuresFieldErr(features: unknown): string | null {
   if (taskTypes !== undefined && taskTypes !== null) {
     if (!isPlainObject(taskTypes))
       return "任务类型约束(task_types)须为 JSON 对象";
+    for (const [mode, entry] of Object.entries(taskTypes as Record<string, unknown>)) {
+      if (!(VIDEO_MODES as readonly string[]).includes(mode))
+        return `视频模式(task_types)的键须为 ${VIDEO_MODES.join(" / ")}，实为「${mode}」`;
+      if (!isPlainObject(entry))
+        return `视频模式(task_types.${mode})须为 JSON 对象`;
+      const ratios = (entry as Record<string, unknown>).allowed_ratios;
+      if (ratios !== undefined && ratios !== null) {
+        if (
+          !Array.isArray(ratios) ||
+          !ratios.every((r) => typeof r === "string" && r.length > 0)
+        )
+          return `视频模式比例(task_types.${mode}.allowed_ratios)须为非空字符串数组或 null`;
+      }
+      const durations = (entry as Record<string, unknown>).allowed_durations;
+      if (durations !== undefined && durations !== null) {
+        if (!Array.isArray(durations) || durations.length !== 1 || durations[0] !== -1)
+          return `视频模式时长(task_types.${mode}.allowed_durations)只允许 [-1]`;
+      }
+    }
   }
   // 视频输出像素表：`"resolution=480p|aspect_ratio=16:9" → "864x496"`。
   // 只在**预扣**用（估 token）。键/值形态在这里钉死——读侧是宽容降级（查不到当未配），
