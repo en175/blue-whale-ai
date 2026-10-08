@@ -159,14 +159,13 @@ const audioModel = {
 };
 
 const apiMocks = vi.hoisted(() => ({
-  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
+  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一', thumb: null, previews: [], created_at: '2026-01-01T00:00:00Z', last_opened_at: null, pinned_at: null }]),
   createProject: vi.fn(),
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
   // 画布页顶栏读余额（积分卡商品化）：本文件渲染真实 CanvasPage，故 auth 打桩必须带上。
-  fetchCredits: vi.fn(async () => ({ credits: 0 })),
+  fetchCredits: vi.fn(async () => ({ credits: 0, by_source: [] })),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   referencePromptPlan: vi.fn(),
@@ -196,7 +195,6 @@ vi.mock('@/api/projects', () => ({
 
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
   fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
@@ -212,7 +210,7 @@ vi.mock('@/api/assets', () => ({
   assetPageQueryOptions: vi.fn((type: string, size: number) => ({
     queryKey: ['asset-pages', type, size],
     initialPageParam: 1,
-    queryFn: () => Promise.resolve({ records: [], total: 0, current: 1 }),
+    queryFn: () => Promise.resolve({ records: [], total: 0, size, current: 1 }),
     getNextPageParam: () => undefined,
   })),
   assetDetailQueryOptions: vi.fn((id: unknown) => ({
