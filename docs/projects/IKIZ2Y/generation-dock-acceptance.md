@@ -1,6 +1,6 @@
 # IKIZ2Y 八面板接入与验收清单
 
-依据 [IKIZ2Y](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IKIZ2Y) 的规格 `IKIZ2Y-SPEC-20261007`、评论 51464261，以及已确认的 [Q1–Q11 设计](../../specs/2026-10-07-ikiz2y-generation-dock-coordinator-design.md)和[状态分工 ADR](../../adr/0123-generation-dock-coordinator-ownership.md)。本文记录六个实施切片的最终接入、自动测试对应和未验边界，设计文档中的旧行号及只读调查属于历史设计阶段。
+依据 [IKIZ2Y](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IKIZ2Y) 的规格 `IKIZ2Y-SPEC-20261007`、评论 51464261，以及已确认的 [Q1–Q11 设计](../../specs/2026-10-07-ikiz2y-generation-dock-coordinator-design.md)和[状态分工 ADR](../../adr/0124-generation-dock-coordinator-ownership.md)。本文记录六个实施切片的最终接入、自动测试对应和未验边界，设计文档中的旧行号及只读调查属于历史设计阶段。
 
 H5 从集成 `1043b8a2b7ddc7bd2ab5a3c8e28aa1e7018a32b4` 的文件树建立，固定继承 `cf1fb75b332e8934fd9e50e38f2967f2c08cdc28`，发布起点 `ccf1f5cc28149b9b81e03f5e556fe74da7d8efc8`。本票最终 HEAD、完整命令、实际计数和凭证登记在 IKJUH5 收口证据，不将此前子票凭证当作本票或父集成新 HEAD 的验证结果。本子票交接时，父任务同步、两轴整包审查及最终 PR 阶段验证尚待执行；后续实际状态以 IKIZ2Y 收口回执和官方精确 HEAD 凭证为准。人工浏览器与真实服务任务创建均为 NOT_RUN。
 
