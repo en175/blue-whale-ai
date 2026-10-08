@@ -247,6 +247,10 @@ function isSizeArray(v: unknown): boolean {
   );
 }
 
+function isRatioOptions(v: unknown): boolean {
+  return isStringArray(v) || isSizeArray(v);
+}
+
 function reqString(v: unknown, limit: number, label: string): string | null {
   if (typeof v !== "string") return `${label}须为字符串`;
   if (v.length === 0) return `${label}不能为空`;
@@ -259,6 +263,7 @@ function jsonField(
   label: string,
   allowed:
     | "sizes"
+    | "ratioOptions"
     | "stringArray"
     | "numberArray"
     | "nullNumberArray"
@@ -267,6 +272,8 @@ function jsonField(
   if (v === undefined) return null;
   if (allowed === "sizes" && !isSizeArray(v))
     return `${label}须为 [{ id, label? }] 数组`;
+  if (allowed === "ratioOptions" && !isRatioOptions(v))
+    return `${label}须为 [{ id, label? }] 数组（存量裸字符串亦可）`;
   if (allowed === "stringArray" && !isStringArray(v))
     return `${label}须为字符串数组`;
   if (allowed === "numberArray" && !isNumberArray(v))
@@ -688,7 +695,7 @@ export function parseModelCreateBody(
     jsonField(
       body.supported_aspect_ratios,
       "比例(supported_aspect_ratios)",
-      "stringArray",
+      "ratioOptions",
     ) ??
     jsonField(
       body.supported_durations,
@@ -868,7 +875,7 @@ export function parseModelUpdateBody(
     jsonField(
       body.supported_aspect_ratios,
       "比例(supported_aspect_ratios)",
-      "stringArray",
+      "ratioOptions",
     ) ??
     jsonField(
       body.supported_durations,

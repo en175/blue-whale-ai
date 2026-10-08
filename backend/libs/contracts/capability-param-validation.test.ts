@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  aspectRatioIds,
   checkGenerationParamLimit,
   frozenVideoTaskTypeOf,
   parsePixels,
@@ -574,5 +575,35 @@ describe("规格键归一（大小写 / 空白不敏感）", () => {
     const table = { "resolution=4k|aspect_ratio=16:9": "3840x2160" };
     expect(resolveOutputPixels(table, "4k", "9:16")).toBeNull();
     expect(resolveOutputPixels(table, "4k", "adaptive")).toBeNull();
+  });
+});
+
+describe("aspectRatioIds（ADR-0123）", () => {
+  it("裸字符串（存量形态）", () => {
+    expect(aspectRatioIds(["16:9", "9:16"])).toEqual(["16:9", "9:16"]);
+  });
+
+  it("{ id, label }（新形态）只取 id", () => {
+    expect(
+      aspectRatioIds([
+        { id: "16:9", label: "横屏" },
+        { id: "9:16", label: "竖屏" },
+      ]),
+    ).toEqual(["16:9", "9:16"]);
+  });
+
+  it("两种形态混在一行里也认（迁移窗口）", () => {
+    expect(aspectRatioIds(["1:1", { id: "16:9", label: "横屏" }])).toEqual([
+      "1:1",
+      "16:9",
+    ]);
+  });
+
+  it("非数组 / 脏元素返回空或跳过，不抛", () => {
+    expect(aspectRatioIds(null)).toEqual([]);
+    expect(aspectRatioIds("16:9")).toEqual([]);
+    expect(aspectRatioIds([null, 42, {}, { label: "无 id" }, { id: "" }])).toEqual(
+      [],
+    );
   });
 });

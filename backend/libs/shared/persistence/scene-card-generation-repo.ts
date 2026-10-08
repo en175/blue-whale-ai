@@ -6,6 +6,7 @@ import type {
   VideoReferenceMode,
 } from "@lib/contracts";
 import {
+  aspectRatioIds,
   canonicalizeJsonValue,
   referenceModeToRequiredFeature,
   validateVideoReferenceConfiguration,
@@ -164,10 +165,7 @@ function checkCapabilityLimit(
     : null;
 
   const ratios =
-    taskRatios ??
-    (Array.isArray(capability.supported_aspect_ratios)
-      ? (capability.supported_aspect_ratios as string[])
-      : []);
+    taskRatios ?? aspectRatioIds(capability.supported_aspect_ratios);
   if (!ratios.includes(parameters.aspect_ratio))
     return `aspect_ratio ${parameters.aspect_ratio} 不在能力支持范围`;
   const sizes = Array.isArray(capability.supported_sizes)

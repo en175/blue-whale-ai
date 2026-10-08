@@ -492,6 +492,34 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
   });
 
+  it("★ ADR-0123：比例档是 { id, label } 形态时同样能过白名单（不会因元素变对象而误拒）", async () => {
+    const labelledCapFields = {
+      ...CAP_FIELDS,
+      supported_aspect_ratios: [{ id: "16:9", label: "横屏 16:9" }],
+    };
+    const tx = buildTx({
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...labelledCapFields,
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      capability_snapshot_version: {
+        ...CAPABILITY_SNAPSHOT,
+        digest: capabilityDigest(labelledCapFields),
+      },
+    });
+
+    expect(result.kind).not.toBe("capability_limit");
+  });
+
   it("IKFPYX：首尾帧模式按 task_types 约束校验——基础比例含 16:9，但 first_last_frame 仅允许 adaptive", async () => {
     const frames = [referenceAsset("first_frame", "101"), referenceAsset("last_frame", "102")];
     const capFields = {

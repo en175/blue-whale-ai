@@ -784,3 +784,52 @@ describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
     if (!parsed.ok) expect(parsed.error).toContain("maxCredits");
   });
 });
+
+describe("parseModelCreateBody · 比例档元素形态（ADR-0123）", () => {
+  const base = {
+    model_id: "gpt-image-2",
+    capability_type: "image",
+    model_label: "GPT Image 2",
+    icon: null,
+    channel: "seedream-image",
+  } as const;
+
+  it("收 { id, label }（新形态）", () => {
+    const parsed = parseModelCreateBody({
+      ...base,
+      supported_aspect_ratios: [{ id: "16:9", label: "横屏" }],
+    });
+    expect(parsed).toMatchObject({ ok: true });
+  });
+
+  it("收裸字符串（存量形态，未升级的行重存一次不该 400）", () => {
+    const parsed = parseModelCreateBody({
+      ...base,
+      supported_aspect_ratios: ["16:9", "9:16"],
+    });
+    expect(parsed).toMatchObject({ ok: true });
+  });
+
+  it("拒掉没有 id 的对象与非法元素", () => {
+    expect(
+      parseModelCreateBody({
+        ...base,
+        supported_aspect_ratios: [{ label: "只有展示名" }],
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      parseModelCreateBody({ ...base, supported_aspect_ratios: [42] }),
+    ).toMatchObject({ ok: false });
+  });
+});
+
+describe("parseModelUpdateBody · 比例档元素形态（ADR-0123）", () => {
+  it("同样收两种形态", () => {
+    expect(
+      parseModelUpdateBody({ supported_aspect_ratios: [{ id: "16:9", label: "横屏" }] }),
+    ).toMatchObject({ ok: true });
+    expect(
+      parseModelUpdateBody({ supported_aspect_ratios: ["16:9"] }),
+    ).toMatchObject({ ok: true });
+  });
+});

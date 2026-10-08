@@ -16,18 +16,16 @@ function imageView(
         id: "1k",
         label: "1K",
         api_value: "1024x1024",
-        width: 1024,
-        height: 1024,
       },
       {
         id: "2k",
         label: "2K",
         api_value: "2048x2048",
-        width: 2048,
-        height: 2048,
       },
     ],
-    supported_aspect_ratios: ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4"],
+    supported_aspect_ratios: ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4"].map(
+      (id) => ({ id, label: id }),
+    ),
     supported_formats: ["png"],
     supported_durations: null,
     default_size: "1k",
@@ -77,7 +75,7 @@ describe("handleListModels 消费端剥调用值", () => {
       supported_sizes: Array<{
         id: string;
         label: string;
-        available_aspect_ratios: string[];
+        available_aspect_ratios: Array<{ id: string; label: string }>;
         api_value?: unknown;
       }>;
       request_mapping?: unknown;
@@ -86,11 +84,14 @@ describe("handleListModels 消费端剥调用值", () => {
     expect(gpt.supported_sizes[0]).toEqual({
       id: "1k",
       label: "1K",
-      available_aspect_ratios: ["1:1", "3:2"],
+      available_aspect_ratios: [
+        { id: "1:1", label: "1:1" },
+        { id: "3:2", label: "3:2" },
+      ],
     });
     expect(gpt.supported_sizes[1]?.available_aspect_ratios).toEqual([
-      "1:1",
-      "16:9",
+      { id: "1:1", label: "1:1" },
+      { id: "16:9", label: "16:9" },
     ]);
     expect(gpt.request_mapping).toBeUndefined();
     expect(gpt.channel).toBeUndefined();
@@ -176,13 +177,15 @@ describe("handleListModels 消费端剥调用值", () => {
     const banana = (
       result as {
         data: Array<{
-          supported_sizes: Array<{ available_aspect_ratios: string[] }>;
+          supported_sizes: Array<{
+            available_aspect_ratios: Array<{ id: string; label: string }>;
+          }>;
         }>;
       }
     ).data[0];
     expect(banana?.supported_sizes[0]?.available_aspect_ratios).toEqual([
-      "1:1",
-      "16:9",
+      { id: "1:1", label: "1:1" },
+      { id: "16:9", label: "16:9" },
     ]);
   });
 });

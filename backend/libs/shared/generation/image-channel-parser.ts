@@ -323,22 +323,27 @@ function seedreamSizeKeys(sizes: unknown): Set<string> | null {
   return keys.size ? keys : null;
 }
 
+export interface RatioOption {
+  id: string;
+  label: string;
+}
+
 export function availableAspectRatiosForSize(
   mapping: ImageRequestMapping,
   sizeOptionId: string,
-  configuredRatios: readonly string[],
-): string[] {
+  configuredRatios: readonly RatioOption[],
+): RatioOption[] {
   if (mapping.parser === "banana") {
     if (!filled(lookupIgnoreCase(mapping.quality, sizeOptionId))) return [];
     return configuredRatios.filter((ratio) =>
-      filled(lookupIgnoreCase(mapping.size, ratio)),
+      filled(lookupIgnoreCase(mapping.size, ratio.id)),
     );
   }
   if (mapping.parser !== "gpt") {
     return [...configuredRatios];
   }
   return configuredRatios.filter((ratio) =>
-    filled(lookupMatrixCell(mapping.matrix, sizeOptionId, ratio)),
+    filled(lookupMatrixCell(mapping.matrix, sizeOptionId, ratio.id)),
   );
 }
 
