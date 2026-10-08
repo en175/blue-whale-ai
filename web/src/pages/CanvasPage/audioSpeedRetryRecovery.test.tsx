@@ -2,10 +2,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiMocks, canvasDocMock, enableReactActEnvironment, flowProps, mediaNodes, navigateRef, renderPage, unmountPage } from './testing/canvasPageTestHarness';
-/** IKJJR3：恢复扫描页/定向读取（默认空 records——跨项目接续用例按需回放记录）。
- *  文件级 mock（同 audioMixRecovery 先例）：整模块 mock 不进 harness，避免后注册
- *  覆盖其他测试文件自带的 canvasRecovery mock。IKJKU9：扫描经 Query 生命周期取页——
- *  补 generationRecoveryPageOptions（key 形态同资源模块真实工厂，queryFn 走 mock 页）。 */
 const recoveryApi = vi.hoisted(() => ({
   fetchGenerationRecoveryPage: vi.fn(async (_projectId?: string, _options?: { cursor?: string | null }): Promise<{ protocol_version: number; canvas_version: number | null; records: Array<Record<string, unknown>>; next_cursor: string | null }> => ({ protocol_version: 1, canvas_version: 3, records: [], next_cursor: null })),
   generationRecoveryPageOptions: (projectId: string, options: { cursor?: string | null } = {}) => ({
@@ -43,8 +39,6 @@ function seed(project: 'p1' | 'p2', generating = false, overrides: Record<string
   };
 }
 const card = () => mediaNodes().find(n => n.id === 'audio-speed-old-job')!;
-/** IKJJR3：回放「重试已受理」的恢复页记录（回 A 后统一恢复按服务端关联接续，
- *  替代原页面的调速快照回放机制）。 */
 function seedRecoveryRecord(jobStatus: string) {
   recoveryApi.fetchGenerationRecoveryPage.mockResolvedValueOnce({
     protocol_version: 1, canvas_version: 3, next_cursor: null,
@@ -63,8 +57,6 @@ function seedRecoveryRecord(jobStatus: string) {
   });
 }
 async function switchProject(project: 'p1' | 'p2', generating = false, overrides: Record<string, unknown> = {}) {
-  // IKJJR3：generating 形态的持久化卡 jobId 是已受理的新任务（真实形态），非旧任务
-  // 先模拟新项目快照加载中，再交付快照，避免夹具把 A 文档提前交给 B。
   await act(async () => { canvasDocMock.current = { ...canvasDocMock.current, doc: null }; navigateRef!(`/canvas?project=${project}`); });
   await act(async () => { seed(project, generating, overrides); navigateRef!(`/canvas?project=${project}`); });
 }
@@ -86,8 +78,6 @@ it.each([false, true])('迟到成功回 A 后原卡恢复成品，返回时旧�
   expect(mediaNodes().map(n => n.id)).toEqual(['b1']);
   expect(flowProps.current.edges).toEqual([]);
   expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
-  // IKJJR3：回 A 后统一恢复按服务端关联接续重试任务（processing → 轮询 new-job 收敛成品；
-  // 旧任务 old-job 不被轮询）
   seedRecoveryRecord('processing');
   await switchProject('p1', generating, generating ? { jobId: 'new-job' } : undefined);
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
@@ -109,7 +99,6 @@ it('迟到失败仅回 A 显示可读失败，再试仍使用冻结参数', asyn
   await act(async () => { reject(new Error('offline')); });
   expect(mediaNodes().map(n => n.id)).toEqual(['b1']);
   expect(document.body.textContent).not.toContain('音频调速任务创建失败');
-  // IKJJR3：受理失败无服务端关联——回 A 不猜卡，保持持久化失败态（可读失败，可再试）
   await switchProject('p1');
   expect(card().data.genStatus).toBe('failed');
   expect(card().data.errorText).toBe('旧失败');
@@ -129,7 +118,6 @@ it('A→B→A 返回时仍在途，不轮询旧任务，随后响应原卡收敛
   seedRecoveryRecord('processing');
   await switchProject('p1');
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
-  // IKJJR3：恢复扫描接续重试任务（轮询 new-job，不轮询旧任务 old-job）
   expect(card().data.genStatus).toBe('generating');
   expect(apiMocks.fetchJobStatus).not.toHaveBeenCalledWith('old-job');
   await act(async () => { resolve({ job_id: 'new-job', status: 'queued' }); });
@@ -164,7 +152,6 @@ it('A→B→A 恢复接续后任务失败：卡退出生成中且可再次重试
   await switchProject('p1');
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
   expect(card().data.genStatus).toBe('generating');
-  // 迟到的受理拒绝被丢弃（恢复链以服务端任务为准）；任务权威终态失败 → 卡退出可再试
   await act(async () => { reject(new Error('offline')); });
   await act(async () => { await jest_timers(); });
   expect(card().data.genStatus).toBe('failed');

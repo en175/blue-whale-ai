@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Black-box tests for the task-branch synchronization transaction."""
 
 from __future__ import annotations
 
@@ -12,9 +11,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-try:  # 作为 scripts.tests.* 命名空间包导入
+try:
     from .bash_helper import BASH
-except ImportError:  # 经 discover -s scripts/tests 顶层导入
+except ImportError:
     from bash_helper import BASH
 
 
@@ -177,8 +176,6 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), release_head)
         self.assertNotEqual(start_sha, release_head)
 
-        # The commit entry reads its helpers from the task worktree. Copying them
-        # after sync leaves the release commit untouched and tests the real CLI.
         (self.worktree / "scripts" / "lib").mkdir(parents=True)
         for name in ("commit-task-for-review.sh",):
             (self.worktree / "scripts" / name).write_bytes((REPO_ROOT / "scripts" / name).read_bytes())
@@ -440,8 +437,6 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.advance_release()
         git_dir = Path(self.git("rev-parse", "--absolute-git-dir"))
         branch = "feature/测试已有PR更新流程"
-        # 模拟 PR577 前旧版脚本污染：真实分支名 UTF-8 字节按 GBK 解码得到的乱码 str，
-        # 再经 ensure_ascii=False 写文件（utf-8 编码）——即恢复点 branch 字段实际形态。
         polluted = branch.encode("utf-8").decode("gbk")
         marker = git_dir / "agent-sync-recovery.json"
         marker.write_text(
@@ -464,12 +459,10 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
         result = self.invoke("sync", "--json")
 
-        # 旧乱码恢复点不再误判「属于其他分支」；应正常开启同步事务。
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = self.response(result)
         self.assertEqual(payload["status"], "SYNCED")
         self.assertTrue(marker.exists())
-        # branch 字段应在同步事务中被归一化为实时真实 UTF-8 名，供下游严格比较使用。
         recovery_after = json.loads(marker.read_text(encoding="utf-8"))
         self.assertEqual(recovery_after["branch"], branch)
 
@@ -484,8 +477,6 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         payload = self.response(result)
         self.assertEqual(payload["remote_branch_sha"], original_head)
         marker = Path(str(payload["recovery_file"]))
-        # Windows 无 POSIX 权限位（os.chmod 0600 后 st_mode 仍 0o666），
-        # 恢复点私密性改由 ACL 收紧实现：断言仅属主有权，其余（BUILTIN\Users）被拒。
         if os.name == "nt":
             acl = subprocess.run(
                 ["icacls", str(marker)],
@@ -495,7 +486,6 @@ class SyncTaskFromOriginTest(unittest.TestCase):
                 errors="replace",
             )
             self.assertEqual(acl.returncode, 0, acl.stderr)
-            # 收紧后的 ACL 不得含 BUILTIN\Users 条目；注意区分路径本身的 \Users\<name>。
             self.assertNotRegex(acl.stdout, r"BUILTIN[\\/]Users")
         else:
             self.assertEqual(marker.stat().st_mode & 0o777, 0o600)

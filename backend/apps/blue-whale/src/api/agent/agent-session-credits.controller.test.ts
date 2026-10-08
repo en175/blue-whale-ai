@@ -5,14 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AgentSessionCreditsController } from "./agent-session-credits.controller.js";
 
-// 审查 W·S4：这个 controller 此前没有任何测试，而它下面那层（求和 helper）的用例
-// 只喂合成日志行，从不触碰 `runs → 归属 id` 这条链接——积分恒为 0 的缺陷正是从
-// 这个缺口溜过去的。这里补的就是那一段：归属、上游故障、时间窗推导、truncated 透传，
-// 以及「一个归属 id 都没有」时到底该给调用方什么。
-//
-// IKCGE7：归属 id 从券号换成 Run 号。用例形状不变，换的是那一列叫什么、从哪来。
 
-/** 假的 agent 服务：按路径决定返回什么，用来驱动 fetchRuns 的各条分支。 */
 type AgentBehaviour =
   | { kind: "runs"; items: unknown[] }
   | { kind: "status"; status: number }
@@ -37,7 +30,6 @@ function createFakeAgent(behaviour: () => AgentBehaviour) {
       return;
     }
     if (next.kind === "not-json") {
-      // 代理把错误页当 200 返回，是这一层最容易被忽略的一种上游故障。
       res.writeHead(200, { "content-type": "text/html" });
       res.end("<html><body>502 Bad Gateway</body></html>");
       return;
@@ -53,7 +45,6 @@ interface SumCall {
   window?: { startTimestamp?: number; endTimestamp?: number; maxPages?: number; budgetMs?: number };
 }
 
-/** 记下求和调用，并按需给出结果——时间窗推导只能从这里观测。 */
 function createAccount(result: { quota: number; matched: number; truncated: boolean }) {
   const calls: SumCall[] = [];
   return {
@@ -85,7 +76,6 @@ const SETTINGS_UNCONFIGURED = {
   },
 } as never;
 
-/** 结果信封只有 code/data/msg 三个字段，断言直接看 data。 */
 function dataOf(envelope: unknown): Record<string, unknown> {
   return (envelope as { data: Record<string, unknown> }).data;
 }
@@ -152,7 +142,6 @@ describe("AgentSessionCreditsController", () => {
         status: 403,
         code: "forbidden",
       });
-      // 越权请求一条上游调用都不该产生
       expect(account.calls).toEqual([]);
     });
   });
@@ -188,7 +177,6 @@ describe("AgentSessionCreditsController", () => {
       });
     });
 
-    // 审查 W·A14：try 只罩住 fetch，response.json() 抛出去会变成不透明的 500。
     it("agent 返回 200 但不是 JSON，同样是 502 而不是不透明的 500", async () => {
       behaviour = { kind: "not-json" };
       const account = createAccount({ quota: 0, matched: 0, truncated: false });
@@ -206,11 +194,7 @@ describe("AgentSessionCreditsController", () => {
   });
 
   describe("一个 Run 号都读不到时", () => {
-    // 这一条是积分恒为 0 那个缺陷的正面：本层分辨不了「没花钱」和「Run 号没落库」，
-    // 所以它**不编一个数**——credits 给 null，由调用方决定显示什么（审查 W·P1）。
     it("有 Run 却一个 Run 号都读不到 → credits 是 null，不是 0", async () => {
-      // Run 号理应永远存在，读不到只可能是 agent 那边返回了意料之外的形状。
-      // 那时候「不知道」是唯一诚实的答案，编一个 0 会被前端当成确切花费显示出去。
       behaviour = {
         kind: "runs",
         items: [
@@ -231,15 +215,11 @@ describe("AgentSessionCreditsController", () => {
         quota: null,
         matched: 0,
         runCount: 2,
-        // 「不知道」不是「下界」。truncated 有它自己的意思，不能拿来给一个空答案背书。
         truncated: false,
       });
-      // 没有 Run 号就没有可查的东西，不该去翻上游账单
       expect(account.calls).toEqual([]);
     });
 
-    // agent 返回的形状不对时（审查 W·P2 的那一类），整个会话都是「不知道」。
-    // 前端因此会显示「—」并退避重试，而不是一个笃定的 0。
     it("agent 返回的 Run 行整批缺号时，整个会话都是 null 而不是 0", async () => {
       behaviour = {
         kind: "runs",
@@ -319,7 +299,6 @@ describe("AgentSessionCreditsController", () => {
         kind: "runs",
         items: [
           { run_id: "r1", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" },
-          // 号读不出来的 Run。它花的钱查不回来，但它确实花过。
           { run_id: null, created_at: "2026-08-23T07:01:00Z", finished_at: "2026-08-23T07:01:20Z" },
         ],
       };
@@ -331,14 +310,10 @@ describe("AgentSessionCreditsController", () => {
       );
 
       const data = dataOf(await controller.sessionCredits("s1", "p1", USER));
-      // 上游自己没截断，但我们知道只查了 2 个 Run 里的 1 个。
       expect(data).toMatchObject({ credits: 1, matched: 1, runCount: 2, truncated: true });
     });
 
     it("有 Run 号却一条账单都没匹配上 → 同样是 null，不是一个带背书的 0", async () => {
-      // 最常见的成因是券退役上线之前的会话：那些账单行写的是 run_capability_id，按新口径
-      // 一条都查不到。此前这里返回 credits: 0 且 truncated: false——一个有 12 个 Run、
-      // 真花过钱的老会话，会被说成「确切地花了 0」。
       behaviour = {
         kind: "runs",
         items: [
@@ -358,8 +333,6 @@ describe("AgentSessionCreditsController", () => {
     });
 
     it("免费模型留下的 quota=0 账单不算「查不到」——matched 是 1，就是确切的 0", async () => {
-      // 判据必须是 matched 而不是 quota：免费模型会留下一条 quota 为 0 的真实账单行，
-      // 那是确切的 0，不该被说成不知道。
       behaviour = {
         kind: "runs",
         items: [{ run_id: "r1", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" }],
@@ -420,7 +393,6 @@ describe("AgentSessionCreditsController", () => {
       });
     });
 
-    // 还在跑的 Run 没有 finished_at：设上界会把正在产生的账单挡在窗外。
     it("只要还有一条 Run 没结束，就不设上界", async () => {
       behaviour = {
         kind: "runs",

@@ -1,8 +1,3 @@
-// IKGXLS：image_cutout（图片抠图）跨进程契约双端一致性断言。
-// 防漂移约定（沿用 image-erase.test.ts 读种子文本的同源断言模式）：TS 侧常量直接 import 断言值；
-// worker-java 无法 import TS 常量，本测试直接读 Java 源码文本逐值对账——任一侧改动未同步即红。
-// 契约权威章节：docs/specs/2026-09-18-image-cutout-mediakit.md（官方 API 要点节）。
-// 后续票（IKGXM1 创建入口 / IKGXM2 worker 执行 / 前端）照抄本契约与 image-cutout.ts，不得发明字段名。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -29,7 +24,6 @@ import {
   imageCutoutInputSchema,
 } from "./image-cutout.js";
 
-// 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const jobTypeJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
@@ -44,7 +38,6 @@ const contractJava = readFileSync(
   ),
   "utf8",
 );
-// tag 字面量已上移到 GenerationMqRoute（ImageCutoutContract.TAG 只做转发），故 tag 的对账基准改读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
@@ -78,13 +71,11 @@ describe("image_cutout 契约不变量（官方 PDF 口径，TS 侧）", () => {
   it("输入限制与火山官方文档一致：≤30MB、png/jpg/jpeg/heic、分辨率两档", () => {
     expect(IMAGE_CUTOUT_MAX_FILE_BYTES).toBe(30 * 1024 * 1024);
     expect([...IMAGE_CUTOUT_INPUT_FORMATS]).toEqual(["png", "jpg", "jpeg", "heic"]);
-    // general 档：长边 10240 / 短边 6000 / 总像素 40MP（菜单预检同档）。
     expect(IMAGE_CUTOUT_SCENE_SIZE_LIMITS.general).toEqual({
       maxLongSide: 10240,
       maxShortSide: 6000,
       maxTotalPixels: 40 * 1000 * 1000,
     });
-    // human / product 档：长边 7680 / 短边 4320（官方未给该档总像素上限）。
     expect(IMAGE_CUTOUT_SCENE_SIZE_LIMITS.human).toEqual({
       maxLongSide: 7680,
       maxShortSide: 4320,
@@ -118,13 +109,11 @@ describe("image_cutout 契约不变量（官方 PDF 口径，TS 侧）", () => {
       cutout_scene: "general",
     };
     expect(imageCutoutInputSchema.parse(valid)).toEqual(valid);
-    // strict：未知键拒；通用场景不携带描边与裁剪参数（规格故事 29），四键传入即拒。
     expect(imageCutoutInputSchema.safeParse({ ...valid, extra: 1 }).success).toBe(false);
     expect(imageCutoutInputSchema.safeParse({ ...valid, need_contour: true }).success).toBe(false);
     expect(
       imageCutoutInputSchema.safeParse({ ...valid, need_crop_background: false }).success,
     ).toBe(false);
-    // 源素材 id 沿用 Asset id 口径（非 0 开头数字串）。
     expect(imageCutoutInputSchema.safeParse({ ...valid, source_asset_id: "0" }).success).toBe(
       false,
     );
@@ -151,10 +140,8 @@ describe("image_cutout 契约不变量（官方 PDF 口径，TS 侧）", () => {
       ...valid,
       cutout_scene: "product",
     });
-    // 四增强键必填（缺键拒）。
     const { need_contour: _omitted, ...withoutContour } = valid;
     expect(imageCutoutInputSchema.safeParse(withoutContour).success).toBe(false);
-    // 描边颜色固定白色（非 #FFFFFF 拒）；宽度越界 / 非整数拒（官方 [1,100]）。
     expect(
       imageCutoutInputSchema.safeParse({ ...valid, contour_color: "#000000" }).success,
     ).toBe(false);

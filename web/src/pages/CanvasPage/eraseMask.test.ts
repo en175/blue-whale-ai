@@ -1,11 +1,3 @@
-/* IKGOT8 擦除遮罩纯逻辑测试（vitest 纯 node 环境，无 jsdom）：
- * 显示坐标→源图自然分辨率换算（取整/钳位/像素对齐）、笔迹与框的并集叠加、
- * 橡皮差集（只减已涂区）、撤销/重做小栈（含框固化后状态）、
- * 栅格化输出尺寸=自然分辨率与黑白语义锁死（涂区=白 255=擦除、未涂=黑 0=保留）。
- * 规格见 docs/specs/2026-09-18-image-erase-mediakit.md「Implementation Decisions 前端·遮罩模型」。
- * 黑白方向的依据说明：火山官方 PDF（/tmp/mediakit-erase-api.txt）仅说 mask_url 为
- * 「黑白遮罩图，指定需要擦除的任意形状区域」，未规定白/黑哪侧代表擦除；本模块按
- * 修复类接口通行惯例取「白=擦除区域、黑=保留区域」，用常量锁死语义，见模块头注释。 */
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_MASK_EDIT,
@@ -28,7 +20,6 @@ import {
   type MaskStrokeOp,
 } from './eraseMask';
 
-/* ============ 测试辅助（就地构造，不依赖环境） ============ */
 
 function pt(x: number, y: number): MaskPoint {
   return { x, y };
@@ -50,16 +41,14 @@ function eraseRect(x1: number, y1: number, x2: number, y2: number): MaskRectOp {
   return { kind: 'rect', erase: true, from: pt(x1, y1), to: pt(x2, y2) };
 }
 
-/** 坐标空间：displayWidth×displayHeight 显示区域 → naturalWidth×naturalHeight 源图自然分辨率 */
 function spaceOf(dw: number, dh: number, nw: number, nh: number): MaskCoordinateSpace {
   return { displayWidth: dw, displayHeight: dh, naturalWidth: nw, naturalHeight: nh };
 }
 
-const IDENTITY = spaceOf(100, 100, 100, 100); // 显示尺寸=自然分辨率（换算恒等基准）
-const DOUBLE = spaceOf(100, 100, 200, 200); // 2 倍放大（小卡大图）
-const FRACTIONAL = spaceOf(300, 200, 1000, 666); // 非整比例（取整路径）
+const IDENTITY = spaceOf(100, 100, 100, 100);
+const DOUBLE = spaceOf(100, 100, 200, 200);
+const FRACTIONAL = spaceOf(300, 200, 1000, 666);
 
-/* 记录型 sink：断言栅格化发出的指令序列（外部可观察行为） */
 type RecordedCall =
   | { kind: 'fillRect'; x: number; y: number; width: number; height: number; value: number }
   | { kind: 'strokePath'; points: MaskPoint[]; radius: number; value: number };
@@ -79,8 +68,6 @@ function recorderSink(): { sink: MaskRasterSink; calls: RecordedCall[] } {
   };
 }
 
-/* 内存光栅 sink：Uint8Array 网格 + 像素中心采样（中心 (i+0.5, j+0.5) 距折线 ≤ 半径即覆盖），
- * 独立于产品代码实现，用于断言最终黑白像素。 */
 function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
   const dx = bx - ax;
   const dy = by - ay;
@@ -134,14 +121,12 @@ function memoryGrid(width: number, height: number) {
   };
 }
 
-/** 便捷：把操作序列光栅到 naturalWidth×naturalHeight 内存网格 */
 function rasterizeToGrid(ops: readonly MaskOp[], space: MaskCoordinateSpace) {
   const grid = memoryGrid(space.naturalWidth, space.naturalHeight);
   rasterizeMask(ops, space, grid.sink);
   return grid;
 }
 
-/* ============ 黑白语义锁死 ============ */
 
 describe('遮罩黑白语义（官方 PDF 未规定方向，常量锁死口径）', () => {
   it('常量：涂区=白 255=擦除（MASK_PIXEL_ERASED），未涂=黑 0=保留（MASK_PIXEL_KEPT）', () => {
@@ -151,15 +136,14 @@ describe('遮罩黑白语义（官方 PDF 未规定方向，常量锁死口径�
 
   it('涂一个框：框内像素=255、框外=0', () => {
     const grid = rasterizeToGrid([paintRect(10, 10, 30, 25)], IDENTITY);
-    expect(grid.valueAt(10, 10)).toBe(255); // 框内左上
-    expect(grid.valueAt(29, 24)).toBe(255); // 框内右下（不含边界外）
-    expect(grid.valueAt(9, 10)).toBe(0); // 框左侧
-    expect(grid.valueAt(30, 10)).toBe(0); // 框右边界外
-    expect(grid.valueAt(10, 25)).toBe(0); // 框下边界外
+    expect(grid.valueAt(10, 10)).toBe(255);
+    expect(grid.valueAt(29, 24)).toBe(255);
+    expect(grid.valueAt(9, 10)).toBe(0);
+    expect(grid.valueAt(30, 10)).toBe(0);
+    expect(grid.valueAt(10, 25)).toBe(0);
   });
 });
 
-/* ============ 坐标换算 ============ */
 
 describe('displayPointToNatural：显示坐标→自然分辨率像素', () => {
   it('显示尺寸=自然分辨率时四舍五入后原样返回', () => {
@@ -181,7 +165,6 @@ describe('displayPointToNatural：显示坐标→自然分辨率像素', () => {
   });
 
   it('像素对齐：同一显示比例点在不同卡片尺寸下映射到同一自然像素', () => {
-    // 显示区域 25% 处：100 宽卡上的 (25,25) 与 200 宽卡上的 (50,50) → 同一自然像素
     const smallCard = spaceOf(100, 100, 200, 200);
     const largeCard = spaceOf(200, 200, 200, 200);
     expect(displayPointToNatural(pt(25, 25), smallCard)).toEqual(pt(50, 50));
@@ -241,7 +224,6 @@ describe('displayRectToNatural：框换算为整数像素矩形', () => {
   });
 });
 
-/* ============ 栅格化 ============ */
 
 describe('rasterizeMask：指令序列与输出尺寸', () => {
   it('空遮罩：只发一条全图铺黑（保留色）指令', () => {
@@ -317,7 +299,7 @@ describe('rasterizeMask：并集叠加', () => {
     const grid = rasterizeToGrid([paintRect(10, 10, 20, 20), paintRect(50, 50, 70, 70)], IDENTITY);
     expect(grid.valueAt(15, 15)).toBe(255);
     expect(grid.valueAt(60, 60)).toBe(255);
-    expect(grid.valueAt(35, 35)).toBe(0); // 两框之间
+    expect(grid.valueAt(35, 35)).toBe(0);
     expect(grid.paintedCount()).toBe(10 * 10 + 20 * 20);
   });
 
@@ -326,9 +308,9 @@ describe('rasterizeMask：并集叠加', () => {
       [paintStroke([pt(20, 20)], 3), paintStroke([pt(60, 60)], 2)],
       IDENTITY,
     );
-    expect(grid.valueAt(20, 20)).toBe(255); // 第一笔圆心
-    expect(grid.valueAt(60, 60)).toBe(255); // 第二笔圆心
-    expect(grid.valueAt(40, 40)).toBe(0); // 两笔之间
+    expect(grid.valueAt(20, 20)).toBe(255);
+    expect(grid.valueAt(60, 60)).toBe(255);
+    expect(grid.valueAt(40, 40)).toBe(0);
     expect(grid.paintedCount()).toBeGreaterThan(0);
   });
 
@@ -349,7 +331,6 @@ describe('rasterizeMask：并集叠加', () => {
   });
 
   it('显示尺寸≠自然分辨率时并集落在自然分辨率像素上', () => {
-    // 2 倍空间：显示框 (10,10)-(30,25) → 自然像素 (20,20)-(60,50)
     const grid = rasterizeToGrid([paintRect(10, 10, 30, 25)], DOUBLE);
     expect(grid.valueAt(20, 20)).toBe(255);
     expect(grid.valueAt(59, 49)).toBe(255);
@@ -358,7 +339,6 @@ describe('rasterizeMask：并集叠加', () => {
   });
 });
 
-/* ============ 橡皮 ============ */
 
 describe('橡皮：从并集中减去，不产生新涂区', () => {
   it('橡皮笔迹擦掉涂区的重叠部分，环带保留', () => {
@@ -366,9 +346,7 @@ describe('橡皮：从并集中减去，不产生新涂区', () => {
       [paintStroke([pt(30, 30)], 5), eraseStroke([pt(30, 30)], 2)],
       IDENTITY,
     );
-    // 像素(30,30) 中心距(30,30)≈0.71：涂后 255、被半径 2 橡皮擦回 0
     expect(grid.valueAt(30, 30)).toBe(0);
-    // 像素(34,30) 中心距≈4.53：在涂区(≤5)内、橡皮(>2)外 → 保留 255
     expect(grid.valueAt(34, 30)).toBe(255);
   });
 
@@ -390,16 +368,14 @@ describe('橡皮：从并集中减去，不产生新涂区', () => {
       [paintRect(10, 10, 40, 40), eraseRect(20, 20, 30, 30)],
       IDENTITY,
     );
-    expect(grid.valueAt(15, 15)).toBe(255); // 只在涂框内
-    expect(grid.valueAt(25, 25)).toBe(0); // 涂框与橡皮框重叠
-    expect(grid.valueAt(45, 45)).toBe(0); // 两框之外
+    expect(grid.valueAt(15, 15)).toBe(255);
+    expect(grid.valueAt(25, 25)).toBe(0);
+    expect(grid.valueAt(45, 45)).toBe(0);
   });
 });
 
-/* ============ 撤销 / 重做 ============ */
 
 describe('撤销/重做：独立小栈（只作用于未发送的遮罩编辑）', () => {
-  /** 编辑序列：框 → 涂笔迹 → 橡皮（全部显示坐标，恒等空间） */
   const RECT = paintRect(10, 10, 30, 30);
   const STROKE = paintStroke([pt(60, 60)], 3);
   const ERASER = eraseStroke([pt(60, 60)], 2);
@@ -410,16 +386,16 @@ describe('撤销/重做：独立小栈（只作用于未发送的遮罩编辑）
     const s3 = applyMaskOp(s2, ERASER);
 
     const g3 = rasterizeToGrid(s3.ops, IDENTITY);
-    expect(g3.valueAt(20, 20)).toBe(255); // 框仍在
-    expect(g3.valueAt(60, 60)).toBe(0); // 笔迹圆心已被橡皮擦掉
+    expect(g3.valueAt(20, 20)).toBe(255);
+    expect(g3.valueAt(60, 60)).toBe(0);
 
     const g2 = rasterizeToGrid(undoMaskEdit(s3).ops, IDENTITY);
     expect(g2.valueAt(20, 20)).toBe(255);
-    expect(g2.valueAt(60, 60)).toBe(255); // 撤销橡皮 → 笔迹恢复
+    expect(g2.valueAt(60, 60)).toBe(255);
 
     const g1 = rasterizeToGrid(undoMaskEdit(undoMaskEdit(s3)).ops, IDENTITY);
     expect(g1.valueAt(20, 20)).toBe(255);
-    expect(g1.valueAt(60, 60)).toBe(0); // 撤销笔迹 → 只剩框
+    expect(g1.valueAt(60, 60)).toBe(0);
   });
 
   it('撤销含框固化后的状态：框落笔即固化、可整体撤销消失', () => {
@@ -444,12 +420,12 @@ describe('撤销/重做：独立小栈（只作用于未发送的遮罩编辑）
     );
     const target = rasterizeToGrid(s3.ops, IDENTITY);
 
-    let state = undoMaskEdit(undoMaskEdit(undoMaskEdit(s3))); // 撤空
-    state = redoMaskEdit(state); // 恢复框
+    let state = undoMaskEdit(undoMaskEdit(undoMaskEdit(s3)));
+    state = redoMaskEdit(state);
     expect(rasterizeToGrid(state.ops, IDENTITY).valueAt(60, 60)).toBe(0);
-    state = redoMaskEdit(state); // 恢复框+笔迹
+    state = redoMaskEdit(state);
     expect(rasterizeToGrid(state.ops, IDENTITY).valueAt(60, 60)).toBe(255);
-    state = redoMaskEdit(state); // 恢复框+笔迹+橡皮
+    state = redoMaskEdit(state);
     const replayed = rasterizeToGrid(state.ops, IDENTITY);
     expect(replayed.valueAt(20, 20)).toBe(target.valueAt(20, 20));
     expect(replayed.valueAt(60, 60)).toBe(target.valueAt(60, 60));
@@ -468,7 +444,6 @@ describe('撤销/重做：独立小栈（只作用于未发送的遮罩编辑）
     const forked = applyMaskOp(undone, paintRect(5, 5, 6, 6));
     expect(canRedoMaskEdit(forked)).toBe(false);
     expect(forked.ops).toHaveLength(2);
-    // 光栅 = 框 + 新框（笔迹已被放弃）
     const grid = rasterizeToGrid(forked.ops, IDENTITY);
     expect(grid.valueAt(20, 20)).toBe(255);
     expect(grid.valueAt(5, 5)).toBe(255);
@@ -493,7 +468,6 @@ describe('撤销/重做：独立小栈（只作用于未发送的遮罩编辑）
     const s1 = applyMaskOp(EMPTY_MASK_EDIT, RECT);
     const s2 = applyMaskOp(s1, STROKE);
     const undone = undoMaskEdit(s2);
-    // 原 s1 不受后续编辑影响
     expect(s1.ops).toHaveLength(1);
     expect(s2.ops).toHaveLength(2);
     expect(undone.ops).toHaveLength(1);

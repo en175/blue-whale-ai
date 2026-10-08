@@ -16,13 +16,6 @@ import {
   zheToBp,
 } from './discountRules';
 
-/**
- * 折扣展示口径的纯函数测试。
- *
- * <p>两个折扣页都要做同一件事：把库里的**万分比**翻译成运营认得的「折」。
- * 这份测试钉住的是换算与「人话」的边界 —— 最典型的翻车是「一边显示 9 折、
- * 另一边显示 0.9 折」，而两边看起来都正常。
- */
 describe('万分比 ↔ 折', () => {
   it('9000 = 9 折，1000 = 1 折', () => {
     expect(bpToZhe(9000)).toBe(9);
@@ -31,13 +24,11 @@ describe('万分比 ↔ 折', () => {
   });
 
   it('小数折四舍五入到整数万分比', () => {
-    // 8.555 折 → 8555 万分比（库里是整数列，多出来的精度只能舍）
-    expect(parseZheToBp('8.555')).toBeNull(); // 超过两位小数直接拒，不做静默截断
+    expect(parseZheToBp('8.555')).toBeNull();
     expect(parseZheToBp('8.55')).toBe(8550);
   });
 
   it('折数不合法一律 null —— 不兜底成 0（0 在库里是「免费」）', () => {
-    // 0 折 = 白送，1.1 折这种笔误也不该被当成合法输入放进去
     for (const raw of ['', '  ', '0', '0.0', '11', '-1', '九折', '9折', '1e3']) {
       expect(parseZheToBp(raw), raw).toBeNull();
     }
@@ -113,7 +104,6 @@ describe('目录级策略的只读展示', () => {
   });
 
   it('叠加计算与计价侧同一口径（multiply 相乘、best 取优）', () => {
-    // 8 折 × 7 折 = 5.6 折；best 则是 7 折
     expect(combineFactors(8000, 7000, 'multiply')).toBe(5600);
     expect(combineFactors(8000, 7000, 'best')).toBe(7000);
   });

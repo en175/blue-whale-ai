@@ -2,13 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createJobRepo } from "./job-repo.js";
 
-/** 扩展位行（IKJCOE）：阶段身份 / 费用 / 卡片持久状态已从 generation_jobs 主表列搬进
- *  generation_job_extras（extra_key 沿用原列名）。 */
 function extraRow(jobId: bigint, extra_key: string, value_type: string, value_text: string) {
   return { generation_job_id: jobId, extra_key, value_type, value_text };
 }
 
-/** 扩展位假件：默认无键（缺键 = 缺省语义，如 canvas_card_state 缺键 = 'pending'）。 */
 function extrasDelegate(rows: ReturnType<typeof extraRow>[] = []) {
   return {
     findMany: vi.fn().mockResolvedValue(rows),
@@ -29,7 +26,6 @@ describe("createJobRepo.listByUser", () => {
           gmt_create: new Date("2026-09-23T00:00:00Z"), error: null },
       ]) },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
-      // 只有 73 的扩展位记着 removed；72 缺键 → 'pending'（列默认值搬到扩展位后由缺键表达）。
       generation_job_extras: extrasDelegate([extraRow(73n, "canvas_card_state", "string", "removed")]),
     } as never;
     const page = await createJobRepo(prisma).listByUser("9", { projectId: "55", type: "audio_mix", page: 1, size: 100 });
@@ -235,7 +231,6 @@ describe("createJobRepo.findByIdForUser", () => {
 });
 
 describe("createJobRepo.listForAdmin", () => {
-  /** 一行真实列的子集：够投影出管理端那一行即可。 */
   const ROW = {
     id: 73n,
     user_id: 9001n,
@@ -274,7 +269,6 @@ describe("createJobRepo.listForAdmin", () => {
 
     await repo.listForAdmin({ page: 2, size: 20 });
 
-    // is_delete 是 Boolean 列（recharge_orders 那张是 Int，别抄错）
     expect(count).toHaveBeenCalledWith({ where: { is_delete: false } });
   });
 
@@ -298,7 +292,6 @@ describe("createJobRepo.listForAdmin", () => {
         type: "video",
         status: "failed",
       },
-      // 次级键 id：DATETIME 只到秒，只按时间排序会在秒边界跳行或重复行
       orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
       skip: 20,
       take: 20,
@@ -319,7 +312,6 @@ describe("createJobRepo.listForAdmin", () => {
       retry_count: 2,
       stored_error: { code: "unsupported_input" },
     });
-    // 管理端列表不拉 assets：那一列没人看，却会多一轮查询 + N+1
     expect(page.records[0]).not.toHaveProperty("output_assets");
   });
 
@@ -334,7 +326,6 @@ describe("createJobRepo.listForAdmin", () => {
     expect(page.records[0]).toMatchObject({ project_id: "", stored_error: null });
   });
 
-  /* ---------- 模型列（IK：任务记录不再显示厂商，有模型就显示模型） ---------- */
 
   it("从 input 只取 model_id，整份 input 不上列表", async () => {
     const findMany = vi.fn().mockResolvedValue([
@@ -354,7 +345,6 @@ describe("createJobRepo.listForAdmin", () => {
 
     const page = await repo.listForAdmin({ page: 1, size: 20 });
 
-    // 提示词、规格都留在库里：为了一列把整份 input 搬到列表上，接口体积会跟着 input 的结构长
     expect(page.records[0]).not.toHaveProperty("input");
     expect(page.records[0]?.model_id).toBe("doubao-seedance-2-5-260628");
   });
@@ -401,7 +391,6 @@ describe("createJobRepo.listForAdmin", () => {
     const page = await repo.listForAdmin({ page: 1, size: 20 });
 
     expect(page.records[0]).toMatchObject({ model_id: null, model_label: null });
-    // 一个 model_id 都没收到就不该去查能力表
     expect(capabilityFindMany).not.toHaveBeenCalled();
   });
 
@@ -420,7 +409,6 @@ describe("createJobRepo.listForAdmin", () => {
     await repo.listForAdmin({ page: 1, size: 20 });
 
     expect(capabilityFindMany).toHaveBeenCalledTimes(1);
-    // 去重后只查这两个
     expect(capabilityFindMany).toHaveBeenCalledWith({
       where: { model_id: { in: ["a", "b"] } },
       select: { model_id: true, model_label: true },
@@ -429,7 +417,6 @@ describe("createJobRepo.listForAdmin", () => {
   });
 });
 
-/* ---------- 积分记录页：按 jobId 批量取「这个任务是什么」 ---------- */
 
 describe("createJobRepo.loadChargeTaskSummaries", () => {
   const JOB = {
@@ -472,7 +459,6 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
       prompt: "一只猫在草地上跑",
       specs: { model_id: "doubao-seedance-2-5-260628", reference_count: "0", video: "0" },
     });
-    // 与任务记录列表同一条纪律：为了一列把整份 input 搬出去，接口体积会随结构一起长
     expect(map.get("7")).not.toHaveProperty("input");
   });
 
@@ -527,7 +513,6 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
       prompt: "把背景抠掉",
       specs: { reference_count: "0", video: "0" },
     });
-    // 一个 model_id 都没收到就不该去查能力表
     expect(capFindMany).not.toHaveBeenCalled();
   });
 
@@ -544,8 +529,6 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
 
     await repo.loadChargeTaskSummaries(["7"]);
 
-    // 只按 id IN 查。加了 user_id 就会漏掉「全站流水」里别人的行；
-    // 加了 is_delete 就会让软删任务的历史消费那一格空白——两者都是管理端不能接受的
     expect(jobsFindMany).toHaveBeenCalledWith({
       where: { id: { in: [7n] } },
       select: { id: true, type: true, input: true },
@@ -584,7 +567,6 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
     await repo.loadChargeTaskSummaries(["1", "2", "3"]);
 
     expect(capFindMany).toHaveBeenCalledTimes(1);
-    // 去重后只查这两个
     expect(capFindMany).toHaveBeenCalledWith({
       where: { model_id: { in: ["a", "b"] } },
       select: { model_id: true, model_label: true },
@@ -609,20 +591,14 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
 
     const map = await repo.loadChargeTaskSummaries(["1", "2", "3"]);
 
-    // 空白串按「没有」处理：界面上「一行空白」与「没有提示词」没区别，不该多一态
     expect(map.get("1")).toMatchObject({ prompt: null, modelId: null });
     expect(map.get("2")).toMatchObject({ prompt: null, modelId: null });
     expect(map.get("3")).toMatchObject({ prompt: null });
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// IKIZQ8：两阶段视频的阶段投影（契约 videoStageJobProjectionSchema，金标 G11/G12）。
-// 样片行投影阶段/来源/截止/费用；缺列旧行按普通视频兜底（video=video、其余 null）。
-// ═══════════════════════════════════════════════════════════════
 describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
   it("★ G11：样片任务详情投影 video_stage/截止/费用，截止折 RFC3339（金标 G06 值）", async () => {
-    // upstream created_at=2026-09-29T02:00:00Z（金标 G06 输入）→ deadline=2026-10-06T01:00:00Z。
     const finalizeDeadlineMs = 1790647200000 + 7 * 24 * 3600 * 1000 - 3600 * 1000;
     const prisma = {
       generation_jobs: {
@@ -635,12 +611,10 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
           input: null,
           output_asset_ids: [],
           error: null,
-          // source_sample_job_id 仍留主表（它扛唯一索引）。
           source_sample_job_id: null,
         }),
       },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
-      // IKJCOE：阶段身份 / 互指 / 截止 / 费用读自扩展位（原主表列已删，wire 键名不变）。
       generation_job_extras: extrasDelegate([
         extraRow(302n, "video_stage", "string", "sample"),
         extraRow(302n, "final_job_id", "number", "305"),
@@ -675,7 +649,6 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
         }),
       },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
-      // 缺键 = 缺省语义：旧任务/普通视频在扩展表里没有任何阶段键。
       generation_job_extras: extrasDelegate(),
     } as never;
 
@@ -708,7 +681,6 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
         ]),
       },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
-      // 无 finalize_deadline_ms 键（上游可信时间缺失）→ 投影 deadline=null。
       generation_job_extras: extrasDelegate([
         extraRow(303n, "video_stage", "string", "sample"),
         extraRow(303n, "charge_state", "string", "held"),
@@ -736,7 +708,6 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
           input: null,
           output_asset_ids: [88],
           error: null,
-          // source_sample_job_id 仍留主表（扛唯一索引）。
           source_sample_job_id: 302n,
         }),
       },
@@ -745,7 +716,6 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
           { id: 88n, url: "https://tos.test/88.mp4", type: "video", width: 1920, height: 1080 },
         ]),
       },
-      // 成片行的阶段身份与费用在扩展位。
       generation_job_extras: extrasDelegate([
         extraRow(305n, "video_stage", "string", "final"),
         extraRow(305n, "charge_state", "string", "settled"),
@@ -777,7 +747,6 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
         }),
       },
       assets: { findMany: assetsFindMany },
-      // 失败成片行：阶段在扩展位，费用已释放（charge_state='released'）。
       generation_job_extras: extrasDelegate([
         extraRow(306n, "video_stage", "string", "final"),
         extraRow(306n, "charge_state", "string", "released"),
@@ -792,7 +761,6 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
     expect(view?.charge_state).toBe("released");
     expect(view?.stored_error).toMatchObject({ code: "provider_upstream_error" });
     expect(view?.asset).toBeNull();
-    // 失败任务没有成功产出：不产生资产查询，也就不存在成功资产。
     expect(assetsFindMany).not.toHaveBeenCalled();
   });
 
@@ -821,13 +789,11 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
         output_asset_ids: [],
         gmt_create: new Date("2026-09-28T00:00:00Z"),
         error: { code: "provider_upstream_error", message: "上游生成失败" },
-        // 旧任务行：无任何阶段列（受理即入历史的存量侧兼容）。
       },
     ]);
     const prisma = {
       generation_jobs: { count, findMany },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
-      // 只有 301 有阶段键；299（旧任务）在扩展表里没有任何键 → 兜底 video。
       generation_job_extras: extrasDelegate([
         extraRow(301n, "video_stage", "string", "sample"),
         extraRow(301n, "charge_state", "string", "held"),
@@ -836,13 +802,11 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
 
     const page = await createJobRepo(prisma).listByUser("9", { page: 1, size: 20 });
 
-    // 汇总查询按用户过滤，不按项目收窄（跨项目历史）。
     expect(findMany.mock.calls[0][0].where).toEqual({
       user_id: 9n,
       is_delete: false,
     });
     expect(page.total).toBe(2);
-    // 跨项目两行（55 / 91）都在；受理（queued）与失败行都保留；失败行带可见错误与旧数据兜底。
     expect(page.records.map((r) => r.job_id)).toEqual(["301", "299"]);
     expect(page.records[0]).toMatchObject({ video_stage: "sample", charge_state: "held" });
     expect(page.records[1]).toMatchObject({ video_stage: "video", source_sample_job_id: null });
@@ -853,7 +817,6 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
     const findFirst = vi.fn().mockResolvedValue(null);
     const prisma = { generation_jobs: { findFirst } } as never;
 
-    // 用户 8 拿用户 9 的样片任务 ID（或经 final_job_id 拿到的成片任务 ID）查详情。
     const view = await createJobRepo(prisma).findByIdForUser("302", "8");
 
     expect(view).toBeNull();

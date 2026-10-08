@@ -16,11 +16,6 @@ import {
   type SharedAssetTypeStrategy,
 } from "./shared-asset-type.strategy.js";
 
-/** 媒体类策略公共逻辑（画布 mediaNode，data.mediaType ∈ image/video/audio）：
- *  - 校验：源资产归属 + status=normal + 类型与保存 kind 一致；
- *  - 幂等 R2：dedupKey = "media:{sha256(url)}"（同文件跨项目同 url 仍判重）；
- *  - 自包含快照：url + 媒体元数据，不依赖源表（保存不复制文件，§8.4）。
- *  图片/视频/音频三型经工厂 provider 参数化注册（kind = mediaType）；未来媒体子类差异可在本类覆写。 */
 export class MediaStrategy implements SharedAssetTypeStrategy {
   readonly assetType = "media" as const;
   readonly kind: SharedAssetKind;
@@ -71,7 +66,6 @@ export class MediaStrategy implements SharedAssetTypeStrategy {
   }
 }
 
-/** URL 路径尾段作为文件名兜底。 */
 function basename(url: string): string {
   const last = url.split("/").filter(Boolean).pop() ?? "";
   try {

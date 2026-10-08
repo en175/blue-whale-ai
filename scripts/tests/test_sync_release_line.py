@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Black-box synchronization tests using the release-line bare Git fixture."""
 
 import json
 import os

@@ -1,9 +1,3 @@
-/* ============================================
- * BindPhoneModal 绑定手机号（IKJA4R）
- *
- * 只做**首次绑定**，不做换绑——换绑要回答「旧号还作不作数」「换绑期间旧号能不能登」，
- * 那是一套独立状态机，不是这个弹窗的附加项。已经有手机号的账号在界面上根本看不到入口。
- * ============================================ */
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { bindPhone, sendCode } from '@/api/auth';
@@ -12,13 +6,10 @@ import styles from './index.module.css';
 
 interface BindPhoneModalProps {
   onClose: () => void;
-  /** 绑定成功回调（带上刚绑定的号码，供上层立刻刷新展示） */
   onBound: (phone: string) => void;
 }
 
-/** 与后端同一条口径（`libs/core/auth/phone.ts`）。 */
 const PHONE_RE = /^1[3-9]\d{9}$/;
-/** 与登录弹窗同一条冷却口径。 */
 const SEND_CODE_COOLDOWN_SECONDS = 60;
 
 export default function BindPhoneModal({ onClose, onBound }: BindPhoneModalProps) {

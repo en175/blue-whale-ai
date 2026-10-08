@@ -40,8 +40,6 @@ describe('Button', () => {
   });
 
   it('★ type 默认是 button —— 放进表单里不会意外提交', async () => {
-    // HTML 里 <button> 默认是 submit。管理端的筛选栏常套在 form 里，
-    // 漏一个 type="button" 就是一次「点筛选结果整页提交」。
     const btn = await render({ children: '查询' });
     expect(btn.type).toBe('button');
   });
@@ -62,8 +60,6 @@ describe('Button', () => {
   });
 
   it('未知属性透传到原生元素', async () => {
-    // 组件包一层却把 aria-* / data-* 吞掉，是自研 UI 库最常见的坑：
-    // 调用方无法加无障碍标注，测试也无法定位。
     const btn = await render({ 'aria-label': '关闭弹窗', children: '×' });
     expect(btn.getAttribute('aria-label')).toBe('关闭弹窗');
   });

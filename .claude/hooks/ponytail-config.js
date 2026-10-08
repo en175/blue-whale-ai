@@ -1,13 +1,4 @@
 #!/usr/bin/env node
-// ponytail — shared configuration resolver
-//
-// Resolution order for default mode:
-//   1. PONYTAIL_DEFAULT_MODE environment variable
-//   2. Config file defaultMode field:
-//      - $XDG_CONFIG_HOME/ponytail/config.json (any platform, if set)
-//      - ~/.config/ponytail/config.json (macOS / Linux fallback)
-//      - %APPDATA%\ponytail\config.json (Windows fallback)
-//   3. 'full'
 
 const fs = require('fs');
 const path = require('path');
@@ -33,20 +24,11 @@ function normalizePersistedMode(mode) {
   return normalizeMode(mode) || normalizeConfigMode(mode);
 }
 
-// "stop ponytail" / "normal mode" turn ponytail off, but only as a standalone
-// command. Matching the phrase anywhere in the message turned it off mid-task
-// for ordinary requests like "add a normal mode toggle" — so require the whole
-// message to be the command, ignoring case and trailing punctuation.
 function isDeactivationCommand(text) {
   const t = String(text || '').trim().toLowerCase().replace(/[.!?\s]+$/, '');
   return t === 'stop ponytail' || t === 'normal mode';
 }
 
-// ponytail: only embed the plugin install path in a statusline shell command when
-// it's made of ordinary path characters. An allowlist beats escaping every shell's
-// metacharacters; a hostile clone path (quotes, &, $, backtick, ;, etc.) falls back
-// to manual setup instead. Allows : \ / for normal Windows and POSIX paths. Full
-// per-shell escaper only if a real need appears.
 function isShellSafe(p) {
   return typeof p === 'string' && /^[A-Za-z0-9 _.\-:/\\~]+$/.test(p);
 }
@@ -69,39 +51,27 @@ function getConfigPath() {
 }
 
 function getClaudeDir() {
-  // ponytail: CLAUDE_CONFIG_DIR overrides ~/.claude, matching Claude Code.
   return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 }
 
 function getDefaultMode() {
-  // 1. Environment variable (highest priority)
   const envMode = process.env.PONYTAIL_DEFAULT_MODE;
-  // ponytail: a default must be a runtime level (off/lite/full/ultra); review is
-  // a session-only mode, never a valid default (#377). Validate against
-  // RUNTIME_MODES so a stray env var or config can't make review the default.
   if (envMode && RUNTIME_MODES.includes(envMode.toLowerCase())) {
     return envMode.toLowerCase();
   }
 
-  // 2. Config file
   try {
     const configPath = getConfigPath();
-    // Strip UTF-8 BOM (common on Windows-saved files) so JSON.parse doesn't choke
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
     if (config.defaultMode && RUNTIME_MODES.includes(config.defaultMode.toLowerCase())) {
       return config.defaultMode.toLowerCase();
     }
   } catch (e) {
-    // Config file doesn't exist or is invalid — fall through
   }
 
-  // 3. Default
   return DEFAULT_MODE;
 }
 
-// Silence the pi "Ponytail loaded" startup toast while keeping ponytail active.
-// PONYTAIL_QUIET_STARTUP=1 (or any truthy value; 0/false/empty mean "show it")
-// takes precedence, else config.quietStartup === true. Mirrors getHideStatus.
 function getQuietStartup() {
   const env = process.env.PONYTAIL_QUIET_STARTUP;
   if (env !== undefined) {
@@ -116,9 +86,6 @@ function getQuietStartup() {
   }
 }
 
-// Hide the status-bar indicator while keeping ponytail active (#324).
-// PONYTAIL_HIDE_STATUS=1 (or any truthy value; 0/false/empty mean "don't hide")
-// takes precedence, else config.hideStatus === true.
 function getHideStatus() {
   const env = process.env.PONYTAIL_HIDE_STATUS;
   if (env !== undefined) {
@@ -134,7 +101,6 @@ function getHideStatus() {
 }
 
 function writeDefaultMode(mode) {
-  // ponytail: only a runtime level can be a default; review is session-only (#377).
   const normalized = normalizeMode(mode);
   if (!normalized) return null;
 

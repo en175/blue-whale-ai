@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKHK9N 智能抠像编辑态单条组件测试。X 关闭在单条最左（对齐去字幕/场景切分/音视频
-   分离单条先例）；单条要素 = 模式标题（人像抠像/绿幕抠像，跟随入口下拉所选模式——
-   单条内无模式切换控件，换模式 = 退出后从入口菜单重选，ADR-0112）+ 输出格式下拉
-   （两档 WEBM 透明默认 / MP4 纯色、无 MOV 档；点击展开向上弹、当前项蓝底白字高亮）+
-   背景色分段控件（仅 format=MP4 显示：白色默认/黑色/绿色——WEBM 透明无背景色）+
-   ⚡0 免费徽标 + 发送钮（submitting 置灰与回调透传）；单条 territory 标记、sendBar
-   锚样式透传。渲染模式沿用 VocalSplitDialog/VideoAudioSplitDialog 测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

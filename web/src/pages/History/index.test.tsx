@@ -6,23 +6,16 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import History from './index';
 
-/* IKIZQI：画布外生成历史页面——刷新/离开画布后从服务端持久记录找回两阶段任务。
-   页面级测试按真实 fetch 打桩（mock API 层，envelope {code,data,msg}），覆盖：
-   跨项目合并展示、失败任务与旧普通视频展示、样片过期保留、来源跳转（详情弹层）、
-   卸载重挂载（模拟刷新）后记录仍在。 */
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-/** 页面历史行快照：job_id → 行文本（用于跨用例断言）。 */
 const projectRecords: Array<{ id: number; name: string }> = [
   { id: 55, name: '短片工坊' },
   { id: 91, name: '旧画布项目' },
 ];
 
-/** 未过期样片的转成片期限：必须相对当前时间——硬编码绝对日期到期后整用例变红（'2026-10-06T07:00:00Z' 已于当日炸过）。 */
 const FUTURE_FINALIZE_DEADLINE = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
 
-/** 项目 55：样片（带成片来源）+ 成片（指回样片）+ 失败成片；项目 91：旧普通视频（无阶段字段）。 */
 function jobsFor(projectId: string) {
   if (projectId === '55') {
     return {
@@ -93,8 +86,6 @@ function jobsFor(projectId: string) {
         input: null,
         created_at: '2026-09-28T00:00:00Z',
         output_assets: [],
-        // 旧普通视频：无任何阶段字段（旧任务行缺列，后端缺省 video）；
-        // 画布卡已删除（removed）——记录必须仍可从历史找回。
         canvas_card_state: 'removed',
       },
       {
@@ -105,7 +96,6 @@ function jobsFor(projectId: string) {
         input: null,
         created_at: '2026-09-27T00:00:00Z',
         output_assets: [],
-        // 过期样片：截止时间已过——不从历史消失，只提示期限已过。
         video_stage: 'sample',
         source_sample_job_id: null,
         final_job_id: null,
@@ -120,7 +110,6 @@ function jobsFor(projectId: string) {
   };
 }
 
-/** 来源跳转详情：GET /api/jobs/302 → 样片任务（带产物）。 */
 function jobDetailFor(jobId: string) {
   if (jobId === '302') {
     return {
@@ -179,7 +168,6 @@ async function renderPage() {
   });
 }
 
-/** 等真实数据行渲染（骨架 li 无文本，谓词用任务行特征避免提前满足）。 */
 async function waitForRows(label: string) {
   await waitFor(() => pageText().includes('任务 #'), label);
 }
@@ -204,7 +192,6 @@ function pageText(): string {
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   installFetch();
-  // request.md：测试用独立 QueryClient（retry 关），不复用全局。
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -227,7 +214,6 @@ describe('History 生成历史页（IKIZQI）', () => {
 
     const texts = rowTexts();
     expect(texts.length).toBe(5);
-    // 最新在前：成片 305 → 样片 302 → 失败成片 306 → 旧普通视频 299 → 过期样片 298。
     expect(texts[0]).toContain('短片工坊');
     expect(texts[0]).toContain('成片 1080P');
     expect(texts[0]).toContain('已成功');
@@ -235,7 +221,6 @@ describe('History 生成历史页（IKIZQI）', () => {
     expect(texts[1]).toContain('样片 480P');
     expect(texts[1]).toContain('转成片截止');
     expect(texts[3]).toContain('旧画布项目');
-    // 过期样片不从历史消失，只提示期限已过。
     expect(texts[4]).toContain('转成片期限已过，样片保留可预览下载');
   });
 
@@ -280,7 +265,6 @@ describe('History 生成历史页（IKIZQI）', () => {
     expect(dialogText).toContain('样片 480P');
     expect(dialogText).toContain('已成功');
     expect(dialogText).toContain('6 积分');
-    // 成功产物可预览下载（已转存的自有素材）。
     expect(dialogText).toContain('下载已转存素材（#77）');
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/jobs/302')).toBe(true);
   });

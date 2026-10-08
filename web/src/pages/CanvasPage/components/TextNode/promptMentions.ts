@@ -5,26 +5,16 @@ import chipStyles from '../mediaChip.module.css';
 import textNodeStyles from './index.module.css';
 import { resolveMediaSrc } from '@/utils/remoteImageCors';
 
-/* IKFM3L 统一文本卡正文契约 v1：正文是受限 Markdown 源（data.text），
-   mention 区间 [start,end) 锚定 Markdown 源字符串下标（契约 §3）。
-   IKFM3Q 正文媒体索引契约 v1：media 标签共用区间模型；chip 的编号与失效样式
-   全部由身份与有效性派生（契约 §2/§3），序列化把派生标签文本写回源切片。
-   渲染：Markdown 源 → 白名单 HTML，标签区间用占位符遮罩后替换为 chip；
-   序列化：编辑器 DOM → Markdown 源 + 区间，chip 身份独立于 DOM 位置。 */
 
-/** 标签占位符：正文渲染期间临时替代 mention 区间，不参与格式配对 */
 const MENTION_PLACEHOLDER = '￼';
 
 interface MentionChipPart {
   assetId: string;
   index: number;
   label: string;
-  /** IKH4EF：本 chip 覆盖的同区间 media 镜像（applyPreview 派生，IKG6EK）。
-   *  渲染不展示它，但序列化必须原样回吐——否则编辑一次就清空 mediaMentions，连带删掉 textIndex 关系线。 */
   mirror?: MediaChipIdentity;
 }
 
-/** media 标签 chip 的身份：nodeId+assetId 显式绑定（契约 §1）；name/url 是展示快照 */
 interface MediaChipIdentity {
   nodeId: string;
   assetId: string;
@@ -33,7 +23,6 @@ interface MediaChipIdentity {
   url: string;
 }
 
-/** @ 菜单/重绑定选中后创建 media 标签 chip（编号与失效样式按当时有效性派生）。 */
 export function createMediaMentionChip(identity: MediaChipIdentity, label: string, invalid: boolean): HTMLElement {
   return buildMediaChip(identity, label, invalid);
 }
@@ -42,12 +31,9 @@ type ChipQueueItem =
   | { kind: 'prompt'; part: MentionChipPart; invalid: boolean }
   | { kind: 'media'; part: MediaChipIdentity };
 
-/** 正文素材标签 chip 类：胶囊视觉与生成面板共用 mediaChip.module.css（IKG7NH），
- *  文本卡差异（整块选中）叠加 mediaChipSelectable，失效态叠加 mediaChipInvalid。 */
 const MEDIA_CHIP_CLASS = `${chipStyles.mediaChip} ${textNodeStyles.mediaChipSelectable}`;
 const MEDIA_CHIP_INVALID_CLASS = `${MEDIA_CHIP_CLASS} ${chipStyles.mediaChipInvalid}`;
 
-/** 写入 chip 的可变展示（编号/失效文本 + 失效类）；thumb 与身份 dataset 在建 chip 时固定。 */
 function applyMediaChipVisual(chip: HTMLElement, label: string, invalid: boolean) {
   chip.dataset.mediaLabel = label;
   if (invalid) chip.dataset.mediaInvalid = '1';
@@ -61,7 +47,6 @@ function applyMediaChipVisual(chip: HTMLElement, label: string, invalid: boolean
   if (labelEl) labelEl.textContent = label;
 }
 
-/** media 标签 chip：身份 dataset + 缩略图；展示经 applyMediaChipVisual 派生。 */
 function buildMediaChip(identity: MediaChipIdentity, label: string, invalid: boolean): HTMLElement {
   const chip = document.createElement('span');
   chip.contentEditable = 'false';
@@ -99,7 +84,6 @@ function buildMediaChip(identity: MediaChipIdentity, label: string, invalid: boo
   return chip;
 }
 
-/** 方案胶囊：身份走 prompt dataset；有镜像时失效态与 media 标签同源（剪线只失效不删）。 */
 function buildMentionChip(
   part: MentionChipPart,
   materials: Array<PromptMaterial & { url: string }>,
@@ -110,7 +94,6 @@ function buildMentionChip(
   chip.dataset.promptAsset = part.assetId;
   chip.dataset.promptIndex = String(part.index);
   chip.dataset.promptLabel = part.label;
-  // 镜像身份挂在 prompt chip 上（独立 dataset 命名空间，不冒充 media chip），供序列化回吐
   if (part.mirror) {
     chip.dataset.promptMirrorNode = part.mirror.nodeId;
     chip.dataset.promptMirrorAsset = part.mirror.assetId;
@@ -152,12 +135,10 @@ function buildMentionChip(
   return chip;
 }
 
-/** 行内片段（含软换行）→ HTML；软换行渲染为 br。 */
 function inlineHtml(text: string): string {
   return text.split('\n').map(renderMarkdownInline).join('<br>');
 }
 
-/** 把行内 HTML 装载为节点，占位符按出现顺序从 chip 队列消费替换。 */
 function mountInlineHtml(html: string, chips: ChipQueueItem[], materials: Array<PromptMaterial & { url: string }>, mediaParts: Map<string, { label: string; invalid: boolean }>): DocumentFragment {
   const holder = document.createElement('div');
   holder.innerHTML = html;
@@ -196,8 +177,6 @@ function mountInlineHtml(html: string, chips: ChipQueueItem[], materials: Array<
   return fragment;
 }
 
-/** 渲染统一正文：Markdown 源 + prompt/media 区间 → 编辑器 DOM（含 chip）。
- *  media chip 的编号与失效样式由 deriveMediaMentionLabels 派生（契约 §2/§3），不信任源切片文本。 */
 export function renderPromptMentions(
   editor: HTMLElement,
   markdown: string,
@@ -208,13 +187,7 @@ export function renderPromptMentions(
   isValid: (nodeId: string) => boolean = () => false,
 ) {
   editor.replaceChildren();
-  // IKG99G：应用到的生成卡同时携带 promptMentions 与 mediaMentions（同区间），
-  // 渲染去重——promptMention 覆盖的区间不再渲染 media chip，保留方案 #N 身份；
-  // mediaMentions 仅作画布内部接线（供 textIndexOfTarget 消费），不重复展示，
-  // 避免图片后跟一个"已失效/图片N"多余标签
   const promptRanges = new Set(mentions.map(m => `${m.start}-${m.end}`));
-  // IKH4EF：与 prompt 绑定同区间的 media 是「镜像」，不渲染成 chip，但挂到覆盖它的那张 prompt chip 上，
-  // 让序列化把它连同新区间一起回吐。丢镜像会连带删掉 textIndex 关系线，目标的参考素材随之消失。
   const mirrorsByRange = new Map<string, MediaMention[]>();
   for (const mention of mediaMentions) {
     const key = `${mention.start}-${mention.end}`;
@@ -239,7 +212,6 @@ export function renderPromptMentions(
       invalid: !isValid(mention.nodeId),
     });
   }
-  // 占位符遮罩 mention 区间；第 k 个占位符对应第 k 个有序区间
   let masked = '';
   let cursor = 0;
   for (const item of combined) {
@@ -312,7 +284,6 @@ export function renderPromptMentions(
   }
 }
 
-/** 从 chip DOM 读取身份（序列化与就地刷新共用；dataset 是 chip 的唯一身份载体）。 */
 function readChipIdentity(chip: HTMLElement): MediaChipIdentity {
   return {
     nodeId: chip.dataset.mediaNode ?? '',
@@ -323,8 +294,6 @@ function readChipIdentity(chip: HTMLElement): MediaChipIdentity {
   };
 }
 
-/** 编辑中就地刷新标签编号与失效样式（连线/来源变化不重建 DOM，保住光标）。
- *  media 标签与带镜像的方案胶囊同一口径：剪线只失效，不删标签。 */
 export function applyMediaMentionState(editor: HTMLElement, isValid: (nodeId: string) => boolean) {
   const chips = [...editor.querySelectorAll<HTMLElement>('[data-media-node]')];
   if (chips.length > 0) {
@@ -344,18 +313,15 @@ export function applyMediaMentionState(editor: HTMLElement, isValid: (nodeId: st
   }
 }
 
-/** 序列化期 mention 草稿：chip 以占位符进入 Markdown 流，最终区间锚定规范化后的字符串 */
 type DraftMention =
   | { kind: 'prompt'; label: string; assetId: string; index: number; mirror?: MediaChipIdentity }
   | { kind: 'media'; identity: MediaChipIdentity };
 
-/** 行内序列化产物：Markdown 片段（chip 以占位符表示）+ 草稿序列 */
 interface InlineResult {
   markdown: string;
   mentions: DraftMention[];
 }
 
-/** 递归序列化行内节点：粗/斜体产出标记，chip 产出占位符并入草稿，BR 产出软换行。 */
 function serializeInline(node: Node, result: InlineResult) {
   if (node.nodeType === Node.TEXT_NODE) {
     result.markdown += node.textContent ?? '';
@@ -397,11 +363,9 @@ function serializeInline(node: Node, result: InlineResult) {
   if (marker) result.markdown += marker;
 }
 
-/** 序列化块级容器（p、div、h1–h3、li）的整段行内内容。 */
 function serializeBlock(node: HTMLElement): InlineResult {
   const result: InlineResult = { markdown: '', mentions: [] };
   node.childNodes.forEach(child => {
-    // li 内嵌套列表压平为后续列表块
     if (child instanceof HTMLElement && (child.tagName === 'UL' || child.tagName === 'OL')) return;
     serializeInline(child, result);
   });
@@ -413,11 +377,9 @@ interface DomBlock {
   level?: number;
   ordered?: boolean;
   inline: InlineResult;
-  /** 嵌套列表：压平追加到当前块之后 */
   nested?: DomBlock[];
 }
 
-/** 顶层行内容器（裸文本节点/chip/BR 合并为同一段落）：flush 为段落块并复位。 */
 function flushInline(out: DomBlock[], pending: InlineResult) {
   if (pending.markdown.trim() !== '' || pending.mentions.length > 0) {
     out.push({ kind: 'paragraph', inline: { markdown: pending.markdown, mentions: pending.mentions } });
@@ -426,7 +388,6 @@ function flushInline(out: DomBlock[], pending: InlineResult) {
   pending.mentions = [];
 }
 
-/** 把编辑器顶层节点解析为块序列。裸文本节点/chip/BR 属行内内容，并入 pending 段落（契约 §3 原子 chip 不拆段）。 */
 function collectDomBlocks(node: Node, listOrdered: boolean | null, out: DomBlock[], pending: InlineResult) {
   if (node.nodeType === Node.TEXT_NODE) {
     if ((node.textContent ?? '').trim() === '') return;
@@ -461,7 +422,6 @@ function collectDomBlocks(node: Node, listOrdered: boolean | null, out: DomBlock
     out.push({ kind: 'list-item', ordered: listOrdered === true, inline: serializeBlock(node), nested: nested.length ? nested : undefined });
     return;
   }
-  // p/div 及其他容器：整块序列化，嵌套块级子元素随行内压平（execCommand 混合产物）
   if (tag === 'P' || tag === 'DIV') {
     const hasBlockChild = Array.from(node.children).some(child => /^(H[1-3]|UL|OL|HR|LI|P|DIV)$/.test(child.tagName));
     if (hasBlockChild) { node.childNodes.forEach(child => collectDomBlocks(child, null, out, { markdown: '', mentions: [] })); return; }
@@ -469,7 +429,6 @@ function collectDomBlocks(node: Node, listOrdered: boolean | null, out: DomBlock
   out.push({ kind: 'paragraph', inline: serializeBlock(node) });
 }
 
-/** media 身份按出现顺序去重为 refs 快照（契约 §1：精确覆盖由后端校验兜底）。 */
 function dedupeMediaRefs(identities: MediaChipIdentity[]): MediaRef[] {
   const seen = new Set<string>();
   const refs: MediaRef[] = [];
@@ -481,8 +440,6 @@ function dedupeMediaRefs(identities: MediaChipIdentity[]): MediaRef[] {
   return refs;
 }
 
-/** Serialize tag identities independently from their current DOM position.
- *  media 标签文本写回派生标签（有效=类型+编号，失效=已失效：name），区间锚定规范化后的 Markdown 源。 */
 export function readPromptMentions(
   editor: HTMLElement,
   isValid: (nodeId: string) => boolean = () => false,
@@ -491,7 +448,6 @@ export function readPromptMentions(
   const topPending: InlineResult = { markdown: '', mentions: [] };
   editor.childNodes.forEach(node => collectDomBlocks(node, null, blocks, topPending));
   flushInline(blocks, topPending);
-  // 展开 li 嵌套列表
   const flat: DomBlock[] = [];
   const flatten = (list: DomBlock[]) => {
     for (const block of list) {
@@ -522,12 +478,8 @@ export function readPromptMentions(
     parts.push(separator + prefix + block.inline.markdown);
     previous = block;
   }
-  // 先规范化（折叠多余换行、去首尾空白），再把占位符按出现顺序替换回标签文本：
-  // mention 区间锚定规范化后的最终字符串，避免折叠/trim 造成区间偏移（契约 §3）
   const normalized = parts.join('').replace(/\n{3,}/g, '\n\n').trim();
-  // media 标签文本由契约派生（编号/失效），不信任 chip 的 DOM 残留文本
   const mediaDrafts = drafts.filter((draft): draft is Extract<DraftMention, { kind: 'media' }> => draft.kind === 'media');
-  // IKH4EF：prompt chip 上挂的镜像身份与真 media chip 一并进 refs 快照，保证身份覆盖不缺口
   const mirrorIdentities: MediaChipIdentity[] = [];
   for (const draft of drafts) {
     if (draft.kind === 'prompt' && draft.mirror) mirrorIdentities.push(draft.mirror);
@@ -550,7 +502,6 @@ export function readPromptMentions(
       text += draft.label;
       const end = text.length;
       mentions.push({ start, end, assetId: draft.assetId, index: draft.index });
-      // 镜像锚定到 prompt 标签的当前区间：正文平移后跟随，不留旧区间（IKH4EF）
       if (draft.mirror) mediaMentions.push({ start, end, nodeId: draft.mirror.nodeId, assetId: draft.mirror.assetId });
     } else {
       const label = mediaLabels.get(draft.identity.nodeId) ?? draft.identity.name;

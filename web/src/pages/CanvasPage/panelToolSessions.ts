@@ -65,8 +65,6 @@ export function createVideoEnhanceSession(getHost: () => PanelToolHost): ToolSes
       const identity = getHost().getNode(nodeId)?.data.videoEnhance as VideoEnhanceIdentity | undefined;
       const initialResolution = restoreVideoEnhanceResolution(identity?.lastParams);
       if (previous?.nodeId === nodeId) {
-        // IKJPM5 选择隐藏返回=恢复原会话（提交锁语义由运行时保留）：面板隐藏即卸载，重挂初值
-        // 从最新 lastParams 刷新（编辑即时写卡，切走再切回不回退打开时的旧快照）
         return initialResolution === previous.seed.initialResolution
           ? previous
           : { ...previous, seed: { ...previous.seed, initialResolution } };
@@ -77,11 +75,9 @@ export function createVideoEnhanceSession(getHost: () => PanelToolHost): ToolSes
     target: (state) => state.nodeId,
     capture: (state, resolution) => resolution ? captureVideoEnhance(getHost(), state.nodeId, resolution) : null,
     async submit(input, context) { await getHost().startVideo(input); context.close(); },
-    /** 提交锁的宿主在途判定：选中隐藏再选回时运行时以其重算上锁（显式关闭重开即新会话，允许重发）。 */
     inFlight: (state) => getHost().isVideoEnhanceInFlight(state.nodeId),
     onError(error) {
       if (isSilentAuthError(error)) return;
-      // 静默传输只把 HTTP 提示归属移到有效会话；保留原 HD 两路反馈。
       if (isApiError(error)) getHost().httpError(error.message);
       getHost().error(apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
     },

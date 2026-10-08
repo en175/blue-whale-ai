@@ -1,25 +1,15 @@
-/* ============================================
- * videoPromptRefs 视频面板标签映射（IKFA1O）：正文素材标签在生视频场景的有效性判定。
- * 首尾帧按角色显示（首帧/尾帧），普通参考按同类型在 reference 序中的顺序连续编号
- * （图片N/视频N/音频N）；模式不接受的参考身份返回 null——失效与恢复完全由
- * 当前（参考集合 + 模式）推导（C2/C5），与服务端 videoRefLabel 同口径。
- * ============================================ */
 import type { VideoMediaRef, VideoMediaRefs } from './videoMediaRefs';
 import { videoModeAcceptsRef } from './videoModes';
 
-/** 视频参考编译投影（与服务端 VideoRefItem 同构）：身份统一字符串（数字 assetId | asset- 前缀 materialId） */
 export interface VideoPromptRefItem {
   id: string;
   role: 'first_frame' | 'last_frame' | 'reference';
   type: 'image' | 'video' | 'audio';
 }
 
-/** 视频面板标签映射：labelOf 为 null 表示该身份当前失效（不在集合或模式不接受） */
 export interface VideoLabelMap {
   labelOf: (id: string) => string | null;
-  /** 当前参考集合的提交投影（帧在前、reference 保序）：编译/一致性核对用 */
   refItems: VideoPromptRefItem[];
-  /** 普通参考的类型内数字编号（IKFCKQ 缩略图圆钮与 label 同源派生；帧角色与失效身份不在其中） */
   numberMap: Map<string, number>;
 }
 
@@ -29,14 +19,12 @@ const TYPE_LABELS: Record<VideoPromptRefItem['type'], string> = {
   audio: '音频',
 };
 
-/** 参考身份（唯一口径）：素材库 materialId 优先，画布数字 assetId 兜底——两空间不混用 */
 export const refIdOf = (item: VideoMediaRef): string => item.materialId ?? item.assetId;
 
 function modeAccepts(mode: string, role: VideoPromptRefItem['role'], type: VideoPromptRefItem['type']): boolean {
   return videoModeAcceptsRef(mode, role, type);
 }
 
-/** 视频面板有效标签映射（唯一口径）：附件区徽标、@ 菜单、正文标签、发送拍平共用 */
 export function videoLabelMapOf(refs: VideoMediaRefs, mode: string): VideoLabelMap {
   const refItems: VideoPromptRefItem[] = [];
   if (refs.first) refItems.push({ id: refIdOf(refs.first), role: 'first_frame', type: 'image' });

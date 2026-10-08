@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-/* IKI61O 会话纪元页面竞态回归（非调速家族代表：音频截取）——同项目「发送在途 →
-   X 关旧会话 → 开新会话」场景：迟到响应只做任务收尾（建占位卡/来源边/轮询），
-   不关闭用户新开的会话、不复位其提交锁、不向它弹旧失败提示；新会话自身的
-   发送成功/失败仍按既有规则处理。渲染接缝沿用 audioSpeedSessionIsolation.test.tsx
-   （canvasPageTestHarness 共享夹具），调速同场景回归由该文件继续守护。 */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -41,7 +36,6 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
   })),
 }));
 
-/** 项目一画布：两张就绪音频卡 a1（assetId '8'，15 秒 mp3）与 b1（assetId '9'，20 秒） */
 function seedProjectA() {
   return canvasDocMock.current = {
     doc: {
@@ -95,14 +89,12 @@ const sendBar = () => document.body.querySelector('[data-testid="audio-trim-send
 const sendBtn = () => document.body.querySelector<HTMLButtonElement>('[data-testid="audio-trim-send-btn"]');
 const rangeText = () => document.body.querySelector('[data-testid="audio-trim-range"]')!.textContent;
 
-/** 进入截取编辑态（音频卡工具条「截取」按钮派发的回调，IKHB6Y 挂点） */
 async function enterTrim(id: string) {
   await act(async () => {
     (dataOf(id).onTrimAudio as (nodeId: string) => void)(id);
   });
 }
 
-/** 点发送钮（不等待创建往返——挂起场景下只完成发送动作本身） */
 async function clickSend() {
   await act(async () => {
     sendBtn()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -140,11 +132,9 @@ describe('IKI61O 截取会话纪元（迟到响应不误关同项目新会话）
       await renderPage();
       await enterTrim('a1');
       await clickSend();
-      // IKJJR3：提交点即交接（旧会话已退）→ 同项目另一张卡开新会话
       await enterTrim('b1');
       if (bSubmitting) {
         await clickSend();
-        // b 提交点即交接（b 会话退、占位卡上画布）；a 的迟到响应不动 b
         expect(sendBar()).toBeNull();
       }
       const rangeBefore = bSubmitting ? undefined : rangeText();
@@ -153,7 +143,6 @@ describe('IKI61O 截取会话纪元（迟到响应不误关同项目新会话）
         else rejectA(new Error('old request failed'));
       });
       await flush();
-      // 新会话不被旧响应关闭、参数不被复位、提交锁不被释放
       if (!bSubmitting) {
         expect(sendBar()).not.toBeNull();
         expect(sendBtn()!.disabled).toBe(false);
@@ -161,13 +150,11 @@ describe('IKI61O 截取会话纪元（迟到响应不误关同项目新会话）
       }
       expect(document.body.textContent).not.toContain('音频截取任务创建失败');
       if (outcome === 'success') {
-        // 旧任务照常收尾：占位卡（预分配 id）+ 来源边 + 轮询
         const oldCard = mediaNodes().find((n) => n.id.startsWith('audio-trim-') && n.data.jobId === 'old-a')!;
         expect(oldCard).toBeTruthy();
         expect(edges().some((edge) => edge.source === 'a1' && edge.target === oldCard.id
           && edge.data?.origin === AUDIO_TRIM_EDGE_ORIGIN)).toBe(true);
       }
-      // 新会话自身的发送闭环不受旧响应影响
       if (!bSubmitting) await clickSend();
       await act(async () => { resolveB({ job_id: 'new-b', status: 'queued' }); });
       await flush();

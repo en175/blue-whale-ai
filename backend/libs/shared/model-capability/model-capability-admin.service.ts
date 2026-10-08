@@ -2,7 +2,6 @@ import { Injectable } from "@nestjs/common";
 import { createModelCapabilityAdminRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
-/** ModelCapability 管理端用例依赖：wire Prisma admin repo（IK6T46）。 */
 @Injectable()
 export class ModelCapabilityAdminService {
   private repoInstance?: ReturnType<typeof createModelCapabilityAdminRepo>;

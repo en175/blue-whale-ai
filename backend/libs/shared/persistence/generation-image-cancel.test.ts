@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { cancelImageJob } from "./generation-image-cancel.js";
 
-// 图片取消（IKDMQW 公开契约）：queued/processing → cancelled，撤销写入权；
-// 成功/失败终态拒绝取消；同一取消命令幂等重放。用 mock-tx 断言 DB 行为面。
 describe("cancelImageJob（图片任务取消）", () => {
   function makeTx(overrides: Partial<Record<string, unknown>> = {}) {
     return {
@@ -93,7 +91,6 @@ describe("cancelImageJob（图片任务取消）", () => {
   it("updateMany 未命中（终态）时拒绝取消：查是否已取消，是则幂等 true，否则 false", async () => {
     const tx = makeTx();
     tx.generation_jobs.updateMany.mockResolvedValue({ count: 0 });
-    // 已处于 cancelled 且 cancel_requested_at 非空 → 幂等重放返回 true
     tx.generation_jobs.count.mockResolvedValue(1);
 
     const ok = await cancelImageJob(

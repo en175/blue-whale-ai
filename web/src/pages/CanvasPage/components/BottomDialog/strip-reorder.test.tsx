@@ -7,9 +7,6 @@ import BottomDialog from './index';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 import type { ImageTextAttachment } from '../ImageDialog';
 
-/* IKFCKT：BottomDialog 参考栏拖拽换位——统一序列 = 普通参考 + 文本附件；
-   媒体回传 onReorderMediaRefs（nodeId/materialId 混合 key）、文本回传 onReorderAttachments；
-   首尾帧角色槽不参与拖拽；生成中只读禁拖。PromptRefEditor 打桩同 videoRefArea。 */
 
 vi.mock('@/api/generation', () => ({
   fetchGenerationModels: vi.fn(async () => []),
@@ -49,7 +46,6 @@ const edgeRef = (id: string): VideoMediaRef => ({
   mediaType: 'image',
 });
 
-/** 角色库 material 参考（asset- 前缀 materialId；nodeId 与 materialId 同值） */
 const materialRef = (id: string): VideoMediaRef => ({
   nodeId: id,
   url: `http://img/${id}.png`,
@@ -164,7 +160,6 @@ describe('BottomDialog 参考栏拖拽换位（IKFCKT）', () => {
     });
     wideRect();
     const thumbs = refThumbs();
-    // 统一序列 [r1, r2, asset-9]：拖 material 项到最前 → 新 key 序 [asset-9, r1, r2]
     dragAndDrop(thumbs[2]!, thumbs[0]!, 'before');
     expect(onReorderMediaRefs).toHaveBeenCalledWith(['asset-9', 'r1', 'r2']);
     expect(refThumbs().map(el => el.querySelector('[data-testid="ref-thumb-badge"]')?.textContent)).toEqual(['1', '2', '3']);
@@ -178,7 +173,6 @@ describe('BottomDialog 参考栏拖拽换位（IKFCKT）', () => {
       onReorderAttachments,
     });
     wideRect();
-    // 统一序列 [r1, t1, t2]：拖 t2(index 2) 到 t1(index 1) 前半 → 文本 [t2, t1]、媒体不变
     dragAndDrop(textThumbs()[1]!, textThumbs()[0]!, 'before');
     expect(onReorderAttachments).toHaveBeenCalledTimes(1);
     expect(onReorderAttachments).toHaveBeenCalledWith(['t2', 't1']);
@@ -196,7 +190,6 @@ describe('BottomDialog 参考栏拖拽换位（IKFCKT）', () => {
     });
     const thumbs = refThumbs();
     expect(thumbs).toHaveLength(2);
-    // 首帧/尾帧无 dragProps：draggable 不是 true
     expect(thumbs.every((el) => el.getAttribute('draggable') !== 'true')).toBe(true);
     wideRect();
     dragAndDrop(textThumbs()[1]!, textThumbs()[0]!, 'before');

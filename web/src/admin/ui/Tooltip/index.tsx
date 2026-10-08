@@ -14,54 +14,21 @@ import { createPortal } from 'react-dom';
 import styles from './index.module.css';
 
 interface TooltipProps {
-  /** 面板标题（一行）。长说明给它一个标题，读者才知道这段在回答什么。 */
   title?: ReactNode;
-  /** 展开后的正文。 */
   content: ReactNode;
-  /** 读屏用的可读名（图标本身没有文字）。 */
   label?: string;
-  /**
-   * 自定义触发元素。**不传 = 默认的「?」图标**（`Hint` 走的就是这条）。
-   *
-   * <p>传了就把整块元素做成触发器，用于「悬停看明细」这类挂在**数据**上、而不是
-   * 挂在**说明**上的浮层 —— 数据格子里没有位置放一个 `?`，读者要的也不是「解释」，
-   * 而是被收起来的那部分内容本身。
-   */
   trigger?: ReactNode;
 }
 
-/** 面板与图标之间的间隙：够看清是同一组，又小到鼠标能直接移进去。 */
 const GAP = 6;
-/** 视口四周至少留这么多，面板不许贴边。 */
 const VIEWPORT_PADDING = 8;
-/** 关面板的延迟：鼠标从图标移到面板要跨过 GAP，立即关会闪。 */
 const CLOSE_DELAY_MS = 140;
-/** 估算用的面板宽度（用于左右夹紧，真实宽度由 CSS 的 max-width 决定）。 */
 const ESTIMATED_WIDTH = 400;
 
-/**
- * 「?」图标 + 悬停/聚焦才显示的说明面板。
- *
- * <h2>几个不能省的细节</h2>
- *
- * <p>**为什么不是纯 CSS tooltip**：这一套图标全在弹窗里，而弹窗主体的滚动容器是
- * `overflow: auto` —— 就地绝对定位的面板会被容器裁掉（尤其是靠近底部的那些字段）。
- * 所以面板 `createPortal` 到 `document.body`，用 `position: fixed` 按图标的实时矩形定位。
- *
- * <p>**上下翻转**：面板**先渲染再量**（`useLayoutEffect`），量到下方放不下就翻到图标上方。
- * 不这么做，靠近视口底部的那些字段一展开就会把面板顶出屏幕，而滚动容器不会帮你——
- * 它是 `fixed` 的，不跟着滚。
- *
- * <p>**面板自身要接住鼠标**：`onMouseEnter` 取消关闭、`onMouseLeave` 关闭——否则长说明
- * 根本读不完（鼠标一离开图标就消失）。
- *
- * <p>**触屏没有 hover**：点击也能开合；开了之后 Esc 与点击别处都能收。
- */
 export default function Tooltip({ title, content, label = '说明', trigger }: TooltipProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** 先落一个「贴着图标下方」的初值，再由 `useLayoutEffect` 按实测尺寸纠正。 */
   const [anchor, setAnchor] = useState<{ top: number; left: number; above: boolean } | null>(null);
   const panelId = useId();
 
@@ -88,7 +55,6 @@ export default function Tooltip({ title, content, label = '说明', trigger }: T
     timerRef.current = setTimeout(() => setAnchor(null), CLOSE_DELAY_MS);
   }, [clearTimer]);
 
-  // 展开后按**实测**尺寸纠正：下方放不下就翻上去；两侧夹紧视口。
   useLayoutEffect(() => {
     const panel = panelRef.current;
     const trigger = triggerRef.current;
@@ -106,7 +72,6 @@ export default function Tooltip({ title, content, label = '说明', trigger }: T
     }
   }, [anchor]);
 
-  // 展开态：Esc 与点击别处都能收（触屏与键盘用户不该被一个关不掉的面板困住）
   useEffect(() => {
     if (anchor === null) return;
     const onKey = (e: KeyboardEvent) => {
@@ -129,9 +94,6 @@ export default function Tooltip({ title, content, label = '说明', trigger }: T
     };
   }, [anchor, clearTimer]);
 
-  /** 触屏没有 hover：点一下开、再点一下关。
-   *  ⚠️ 必须吞掉事件：图标可能落在 `<summary>` 里（「高级 JSON」那处），
-   *  不吞的话点图标会顺带展开/收起 details。 */
   const toggle = useCallback(
     (event: MouseEvent) => {
       event.preventDefault();
@@ -145,7 +107,6 @@ export default function Tooltip({ title, content, label = '说明', trigger }: T
     [anchor, clearTimer, show],
   );
 
-  // 卸载时清掉未触发的定时器（否则关弹窗后回调仍会 setState）
   useEffect(() => clearTimer, [clearTimer]);
 
   return (

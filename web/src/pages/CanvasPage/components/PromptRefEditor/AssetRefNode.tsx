@@ -1,10 +1,3 @@
-/* ============================================
- * AssetRefNode：正文素材标签节点（IKFA1M）
- *
- * 与 ChipNode 的关键区别：标签不携带「展开文本」，只有稳定身份（assetId）+
- * 展示编号缓存（label）+ 失效恢复信息（invalidLabel）。编号展示由
- * PromptRefContext 按当前有效输入顺序实时派生——编号不是身份，不落节点状态。
- * ============================================ */
 import type { JSX } from 'react';
 import { createContext } from 'react';
 import AssetRefChipComponent from './AssetRefChipComponent';
@@ -24,18 +17,13 @@ export type SerializedAssetRefNode = Spread<
 export interface AssetRefMeta {
   url: string;
   name: string;
-  /** IKFA1O：素材媒体类型——图片/视频显缩略图（视频经 <video preload="metadata"> 抓首帧，IKGABW 对齐
-   *  文本卡）、音频显 ♫ 图标占位、文本附件（来源画布文本节点）无缩略图 */
   mediaType?: 'image' | 'video' | 'audio' | 'text';
 }
 
-/** 标签文案与素材元信息：装饰组件按当前有效输入实时渲染（文案重派生不触发节点变更）。
- *  IKFA1O 泛化：labels 直接给「图片1/视频1/首帧」等最终文案（图片=图片N，视频=角色/类型编号） */
 export const PromptRefContext = createContext<{
   labels: ReadonlyMap<string, string>;
   meta: ReadonlyMap<string, AssetRefMeta>;
   readOnly: boolean;
-  /** 点击失效标签：交由调用方打开「替换为其他已引用项」菜单（IKFA1N B5） */
   onInvalidTagClick?: (nodeKey: string) => void;
 }>({ labels: new Map(), meta: new Map(), readOnly: false });
 
@@ -43,7 +31,6 @@ export class AssetRefNode extends DecoratorNode<JSX.Element> {
   __assetId: string;
   __label: string | undefined;
   __invalidLabel: string | undefined;
-  /** IKFA1P：标签身份类型——asset（媒体资产）| text（来源画布文本节点）；默认 asset（旧序列化兼容） */
   __refKind: 'asset' | 'text';
 
   static getType(): string {
@@ -66,12 +53,10 @@ export class AssetRefNode extends DecoratorNode<JSX.Element> {
     return this.getLatest().__assetId;
   }
 
-  /** 替换该次提及的身份（IKFA1N B5）：节点原地换绑 assetId，位置与其他提及不受影响 */
   setAssetId(assetId: string): void {
     this.getWritable().__assetId = assetId;
   }
 
-  /** IKFA1P：标签身份类型（asset=媒体 / text=来源文本节点） */
   getRefKind(): 'asset' | 'text' {
     return this.getLatest().__refKind;
   }
@@ -111,7 +96,6 @@ export class AssetRefNode extends DecoratorNode<JSX.Element> {
     return true;
   }
 
-  /** 纯文本投影：与拍平镜像同形（失效 → 已失效：原图片N；有效 → 展示编号缓存） */
   getTextContent(): string {
     if (this.__invalidLabel !== undefined) return `已失效：原${this.__invalidLabel}`;
     return this.__label ?? '';

@@ -1,11 +1,3 @@
-/* ============================================
- * VideoPlayerControls：视频卡自绘播放控件（IKI5YM）
- * 原生 <video controls> 的控制条在 shadow DOM 内，无法只对画面区放行指针——
- * 「保住播放控制」与「画面区可拖」在原生控件下互斥。改为对齐 AudioPlayer 先例：
- * 画面区裸给 React Flow（可拖整卡），播放能力由本控件承担，nodrag/nopan 只挂
- * 播放钮与进度轨等交互子元素。叠加于画面底部，层级低于编辑态锁定层
- * （splitEditing zIndex 5）——编辑期间控件不可达。
- * ============================================ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Play, Pause } from 'lucide-react';
 import { formatTime, toggleVideoPlayback } from './mediaPlayback';
@@ -13,7 +5,6 @@ import styles from './index.module.css';
 
 interface VideoPlayerControlsProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
-  /** 服务端权威时长（秒，对齐 AudioPlayer 口径）：有值时优先于浏览器实测 */
   duration?: number;
 }
 
@@ -23,9 +14,6 @@ export default function VideoPlayerControls({ videoRef, duration: authoritativeD
   const [currentTime, setCurrentTime] = useState(0);
   const trackRef = useRef<HTMLDivElement>(null);
 
-  /** 服务端权威时长优先；缺失时挂载即读浏览器实测兜底——收养会话（IKI5YM 审查修订）
-   *  叠加控件前 loadedmetadata 已派发、不会重放，只等事件会让收养路径时长停在 0；
-   *  metadata 晚于控件挂载的树内路径仍由事件监听补齐 */
   useEffect(() => {
     setDuration(authoritativeDuration ?? 0);
     if (authoritativeDuration != null) return;
@@ -39,14 +27,11 @@ export default function VideoPlayerControls({ videoRef, duration: authoritativeD
     return () => video.removeEventListener('loadedmetadata', onLoaded);
   }, [videoRef, authoritativeDuration]);
 
-  /** 播放状态与进度随 video 元素事件同步：画面点击/按钮/ended 全走同一条状态链。
-   *  挂载/ref 更换即对齐元素当前状态：收养会话（IKI5YM 审查修订）叠加控件时元素已在播，
-   *  只靠事件会把播放中的卡显示成「播放」钮；树内路元素新挂载恒暂停，读到同一初值。 */
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     setPlaying(!video.paused);
-    setCurrentTime(video.currentTime); // 与上一行对称：收养叠加瞬间进度/时间直接显示实际位置
+    setCurrentTime(video.currentTime);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onTime = () => setCurrentTime(video.currentTime);
@@ -64,11 +49,8 @@ export default function VideoPlayerControls({ videoRef, duration: authoritativeD
 
   const toggle = useCallback(() => toggleVideoPlayback(videoRef.current), [videoRef]);
 
-  /** 进度轨点按/拖拽 seek（口径对齐 AudioPlayer.handleTrackDown：mousedown 起拖、
-   *  document 级 move/up 收尾；nodrag 保证不落入节点拖拽路径） */
   const handleTrackDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
-    // preventDefault 会吞掉 mousedown 的默认聚焦，须手动补回——否则点按轨道后方向键 seek 无响应
     trackRef.current?.focus({ preventScroll: true });
     const video = videoRef.current;
     if (!video || !duration) return;
@@ -91,7 +73,6 @@ export default function VideoPlayerControls({ videoRef, duration: authoritativeD
     document.addEventListener('mouseup', handleUp);
   }, [videoRef, duration]);
 
-  /** 进度轨键盘 seek（WAI-ARIA slider 契约）：左右方向键按总时长 5%（至少 1s）步进 */
   const handleTrackKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     const video = videoRef.current;
     if (!video || !duration) return;

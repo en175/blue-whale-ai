@@ -129,7 +129,6 @@ describe("RateLimitGuard", () => {
       headers: { "x-real-ip": "203.0.113.9" },
       body: { username: "alice" },
     });
-    // IP 命中即整请求豁免：account 桶也不计数、不 429
     await expect(guard.canActivate(context as never)).resolves.toBe(true);
     expect(take).not.toHaveBeenCalled();
   });
@@ -176,7 +175,6 @@ describe("RateLimitGuard", () => {
   });
 
   it("exempts a whitelisted IP end-to-end with the real allowlist (wiring check)", async () => {
-    // 不打桩 isAllowed：用真实 RateLimitAllowlist 接进 guard，钉住 X-Real-IP 取键接线
     vi.stubEnv("RATE_LIMIT_ALLOW_IPS", "203.0.113.0/24");
     vi.stubEnv("RATE_LIMIT_ALLOW_ACCOUNTS", "");
     const take = vi.fn().mockResolvedValue({ allowed: false, retryAfter: 1 });
@@ -208,7 +206,6 @@ describe("RateLimitGuard", () => {
       { take } as never,
       new RateLimitAllowlist(),
     );
-    // 客户端伪造 XFF 首值 + 真实连接 IP 不在名单：不豁免
     await expect(
       guard.canActivate(
         makeContext({
@@ -220,7 +217,6 @@ describe("RateLimitGuard", () => {
         }) as never,
       ),
     ).rejects.toMatchObject({ status: 429, code: RATE_LIMITED });
-    // 缺 X-Real-IP（如本地直连）同样按未命中处理，不回落 request.ip
     await expect(
       guard.canActivate(
         makeContext({
@@ -286,9 +282,6 @@ describe("RateLimitGuard", () => {
   });
 
   it("★ 字段名对不上时桶**静默跳过**——这就是 phone 维度必须存在的原因", async () => {
-    // 钉住一个真实踩过的形状：`account` 维度写死读 `body.username`，
-    // 而发码路由的入参是 `body.phone`。把 phone 桶配成 account 不报任何错，
-    // 它只是永不计数——看着有防护，实际一条都没拦，而且没有任何信号。
     const take = vi.fn();
     const options: RateLimitOptions = {
       buckets: [

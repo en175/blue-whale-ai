@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKHSFF 插帧提交保存与关页恢复闭环（PR !820 合入前审查整改）：
-   发送前保存失败/项目切换不发起创建请求（不吞失败当成功、面板保留可重发）；
-   创建响应前关页、响应后自动保存前关页——重进画布以「实际提交产生的持久化数据」
-   （发送前冲刷落盘的草稿卡 + 来源边 payload）水合，经服务端权威关联恢复契约
-   （GET /video-frame-interpolations/current?target_node_id=，IKHSFE）恢复原卡与任务：
-   处理中继续展示生成状态并恢复轮询；succeeded/failed 终态按现有口径收敛（不闪生成中）；
-   cancelled 不复活；无关联保持草稿。渲染沿用 testing/canvasPageTestHarness。 */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -43,8 +36,6 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
   })),
 }));
 
-/** 画布：一个就绪视频节点 v1（assetId '5'）——首轮进入后经入口建插帧草稿卡并真实发送，
- *  卸载前的最后一次保存请求 payload 即「服务端实际持久化的画布」，重进时原样水合。 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -74,8 +65,6 @@ function seedDoc() {
   };
 }
 
-/** 以「实际提交产生的持久化数据」重进水合：取卸载前最后一次保存请求的 nodes/edges
- *  （经 JSON 往返剥掉内存态回调函数，还原服务端持久化形态）。 */
 function reseedFromPersisted() {
   const call = apiMocks.saveCanvasDoc.mock.calls.at(-1) as unknown as [
     string,
@@ -111,7 +100,6 @@ const panelFps = (value: number) =>
   document.body.querySelector<HTMLButtonElement>(`[data-testid="frame-interpolation-fps-${value}"]`);
 const panelOpen = () => document.body.querySelector('[data-testid="frame-interpolation-dialog"]') !== null;
 
-/** 走视频节点工具条「高清 ▾」下拉第二项「插帧」建草稿卡 */
 async function frameInterpolation(id = 'v1') {
   await act(async () => {
     ((mediaNode(id).data as Record<string, unknown>).onFrameInterpolation as (nodeId: string) => void)(id);
@@ -127,7 +115,6 @@ async function click(node: Element | null) {
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
 const clickCard = (id: string) => act(async () => { flowProps.current.onNodeClick(mediaNode(id)); });
 
-/** 点面板发送（含创建往返的微任务冲刷；创建挂起场景下仅完成发送前冲刷） */
 async function sendPanel() {
   await act(async () => {
     panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -159,14 +146,11 @@ describe('IKHSFF 发送前保存失败拦截', () => {
     await click(panelFps(120));
     await sendPanel();
 
-    // 保存失败不被吞掉当成功：创建请求一次都不发（运行时保存闸门）
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
     expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
-    // IKJJR3：提交点即交接（面板关）；卡回可恢复的配置草稿态（点卡重开可重发）
     expect(panelOpen()).toBe(false);
     expect(dataOf(draftId).genStatus).toBe('draft');
     expect(dataOf(draftId).jobId).toBeUndefined();
-    // 失败对用户可见（toast 文案），不静默
     expect(document.body.textContent).toContain('画布保存失败');
     await clickCard(draftId);
     expect(panelOpen()).toBe(true);
@@ -185,7 +169,6 @@ describe('IKHSFF 发送前保存失败拦截', () => {
     await sendPanel();
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
 
-    // 保存链路恢复（默认桩成功）后原参数重发：创建受理、面板已交接关闭、卡转生成中
     await clickCard(draftId);
     await sendPanel();
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
@@ -201,7 +184,6 @@ describe('IKHSFF 发送前保存失败拦截', () => {
 
   it('等待保存期间项目切换：旧面板退出，保存成功返回后仍不发起创建请求', async () => {
     seedDoc();
-    // 保存请求挂起：构造「往返在途」窗口，等项目切换完成后再放行
     const saved = { id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' };
     let resolveSave!: (value: typeof saved) => void;
     apiMocks.saveCanvasDoc.mockImplementation(() => new Promise<typeof saved>((r) => { resolveSave = r; }));
@@ -210,17 +192,13 @@ describe('IKHSFF 发送前保存失败拦截', () => {
     await frameInterpolation();
     const draftId = draftNodes()[0]!.id;
     await click(panelFps(60));
-    // 点发送：发送前冲刷挂起（保存请求已发出未返回）
     await act(async () => {
       panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    // 等待期间项目切换（地址栏 query → currentId/activeProjectRef 迁移到 p2）
     await act(async () => {
       navigateRef!('/canvas?project=p2');
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    // 保存返回 false（flush 的项目守卫：activeProjectRef 已切到 p2）→ 运行时保存闸门
-    // 中止创建（不吞失败当成功）；本地卡不落 jobId（任务未受理，无假象）
     await act(async () => {
       resolveSave(saved);
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -242,14 +220,11 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await sendPanel();
     await flush();
     expect(dataOf(draftId).genStatus).toBe('failed');
-    // IKJJR3：受理/终态回填后靠 800ms 防抖自动保存落盘（原受理后立即 flush 已由运行时统一）
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
 
     apiMocks.createFrameInterpolation.mockImplementation(() => new Promise(() => {}));
     await act(async () => { (dataOf(draftId).onRetryJob as (id: string) => void)(draftId); });
     await flush();
-    // IKJJR3：重试不前置保存（IKDMQV「不读画布不落盘」）——持久化仍停留在终态保存
-    //（jobId=j1），重进后由插帧 current 查询按服务端当前关联纠偏到新任务
     await unmountPage();
     const persisted = reseedFromPersisted();
     expect((persisted.nodes.find((n) => n.id === draftId)!.data as Record<string, unknown>).jobId).toBe('j1');
@@ -263,8 +238,6 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     expect(mediaNodes()).toHaveLength(2);
   });
 
-  /** 首轮进入并真实发送：建卡 → 冲刷落盘 → create 挂起（响应未达即关页）。
-   *  返回草稿卡 id 与实际持久化的 payload（发送前那次保存请求的 nodes/edges）。 */
   async function sendAndCloseBeforeCreateResponse(): Promise<{
     draftId: string;
     resolveCreate: (value: { job_id: string; status: string }) => void;
@@ -277,23 +250,21 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await frameInterpolation();
     const draftId = draftNodes()[0]!.id;
     await click(panelFps(120));
-    await sendPanel(); // 发送前冲刷已落盘（草稿卡 + 来源边），create 挂起
+    await sendPanel();
     return { draftId, resolveCreate };
   }
 
   it('创建响应前关页：以实际持久化数据重进，恢复查询命中处理中任务——原卡转生成中并恢复轮询，不重复建卡不改源卡', async () => {
     seedDoc();
     const { draftId } = await sendAndCloseBeforeCreateResponse();
-    await unmountPage(); // create 响应未达即关页
+    await unmountPage();
     const persisted = reseedFromPersisted();
 
-    // 持久化形态核验：草稿卡与来源边已落盘，且未承接任务（无 jobId、非生成中）
     const persistedDraft = persisted.nodes.find((n) => n.id === draftId)!;
     expect((persistedDraft.data as Record<string, unknown>).jobId).toBeUndefined();
     expect((persistedDraft.data as Record<string, unknown>).genStatus).toBe('draft');
     expect(persisted.edges.find((e) => e.target === draftId)?.source).toBe('v1');
 
-    // 重进：水合后按草稿卡节点 id 查服务端权威关联（IKHSFE 契约）
     apiMocks.fetchFrameInterpolationCurrent.mockResolvedValue({
       job_id: 'j1', status: 'processing', progress: 40, created_at: '2026-09-22T05:00:00.000Z',
     });
@@ -302,7 +273,6 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await flush();
 
     expect(apiMocks.fetchFrameInterpolationCurrent).toHaveBeenCalledWith('p1', draftId);
-    // 原卡原地恢复生成状态 + jobId 回挂 + 轮询续接（冻结参数与来源边不动、不重复建卡）
     expect(dataOf(draftId).genStatus).toBe('generating');
     expect(dataOf(draftId).jobId).toBe('j1');
     expect(dataOf(draftId).progress).toBe(40);
@@ -316,12 +286,10 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
   it('创建响应后、自动保存前关页：持久化仍是无 jobId 的草稿卡，重进经恢复契约续接任务', async () => {
     seedDoc();
     const { draftId, resolveCreate } = await sendAndCloseBeforeCreateResponse();
-    // 创建响应到达：内存卡转生成中（jobId 登记）……
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 5, asset: null });
     await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
     await flush();
     expect(dataOf(draftId).genStatus).toBe('generating');
-    // ……但 800ms 防抖自动保存未跑即关页：卸载清掉防抖定时器，无新增保存请求
     const saveCallsBeforeClose = apiMocks.saveCanvasDoc.mock.calls.length;
     await unmountPage();
     expect(apiMocks.saveCanvasDoc.mock.calls.length).toBe(saveCallsBeforeClose);
@@ -330,7 +298,6 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     expect((persistedDraft.data as Record<string, unknown>).jobId).toBeUndefined();
     expect((persistedDraft.data as Record<string, unknown>).genStatus).toBe('draft');
 
-    // 重进：恢复查询命中仍在跑的任务，续接生成状态与轮询
     apiMocks.fetchFrameInterpolationCurrent.mockResolvedValue({
       job_id: 'j1', status: 'queued', progress: 0, created_at: '2026-09-22T05:00:00.000Z',
     });
@@ -362,7 +329,6 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await flush();
 
     const data = dataOf(draftId);
-    // 终态直接收敛：不经过「生成中」占位态（恢复查询已给终态，详情到达即回填）
     expect(data.genStatus).toBeUndefined();
     expect(data.src).toBe('http://tos/recovered.mp4');
     expect(data.assetId).toBe('a77');
@@ -371,7 +337,6 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     expect(data.duration).toBe(11);
     expect(data.draft).toBeUndefined();
     expect(identityOf(draftId)).toBeUndefined();
-    // jobId 保留在成品卡上（来源连线 target Handle 渲染依据，家族口径）
     expect(data.jobId).toBe('j1');
     expect(mediaNodes().length).toBe(2);
     expect(dataOf('v1').src).toBe('http://vid/v1.mp4');
@@ -427,7 +392,6 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     reseedFromPersisted();
     apiMocks.fetchFrameInterpolationCurrent.mockResolvedValue({ job_id: 'j1', status: 'failed', progress: 0, created_at: '2026-09-22T05:00:00.000Z' });
     apiMocks.fetchJobs.mockRejectedValue(new Error('network down'));
-    // 终态核对走通（failed 权威终态），不落入「详情查询失败回退生成中」兜底
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'failed', progress: 0, asset: null, error: { code: 1049 } });
     apiMocks.createFrameInterpolation.mockClear();
     await renderPage();
@@ -437,7 +401,6 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await act(async () => { (dataOf(draftId).onRetryJob as (id: string) => void)(draftId); });
     await flush();
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
-    // IKJJR3：阻断提示走运行时统一口径（A.6：保留失败卡并提示重新编辑，不猜参数）
     expect(document.body.textContent).toContain('原任务输入已不可信');
     expect(identityOf(draftId)?.frozenParams).toBeUndefined();
   });
@@ -473,7 +436,6 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await sendPanel();
     expect(dataOf(draftId).genStatus).toBe('generating');
 
-    // 模拟 acceptDoc 推来完整画布快照，页面不卸载，旧轮询仍在途。
     canvasDocMock.current.doc = {
       id: 11, version: 5, viewport: { x: 0, y: 0, zoom: 1 },
       nodes: JSON.parse(JSON.stringify(mediaNodes())), edges: JSON.parse(JSON.stringify(edges())),
@@ -514,7 +476,6 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await unmountPage();
     reseedFromPersisted();
 
-    // 默认桩 data=null：草稿卡水合后查询无关联（如发送前保存失败即关页），保持草稿
     await renderPage();
     await flush();
 

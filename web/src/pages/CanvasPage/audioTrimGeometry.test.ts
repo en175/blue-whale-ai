@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKHB7A 遮罩几何纯函数测试（仿 imageCrop.test.ts 先例）：默认全选、端点与最小片段
-   钳制、左右抓手拖拽钳制、定位条钳制与选区内判定、渲染换算与文案（胶囊一位小数/
-   发送条 mm:ss）。 */
 import { describe, expect, it } from 'vitest';
 import {
   AUDIO_TRIM_MIN_SEGMENT_SECONDS,

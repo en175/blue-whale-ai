@@ -1,9 +1,3 @@
-/* `features` 结构化字段表的取值整理 —— 纯函数，所以能单测。
- *
- * 这里钉的是**新的输出像素表（`features.video_dimensions`）与高级 JSON 的边界**：
- * 它归结构化控件管，就不该同时在「高级 JSON」里留一份 —— 否则运营把表清空之后，
- * 高级 JSON 里那份旧值会在保存时又写回去（「我删了」变成没删）。
- */
 import { describe, expect, it } from 'vitest';
 import { buildVideoDimensions, dropKnownFeatures, pickVideoDimensions } from './feature-fields';
 
@@ -49,7 +43,6 @@ describe('高级 JSON 与结构化控件的边界', () => {
 
   it('★ 类型不符的脏值留在高级 JSON 里原样回写（静默删掉比让人看到它更危险）', () => {
     const extra = dropKnownFeatures({
-      // 数组不是这张表该有的形态 —— 结构化控件表达不了它，原样留着（写侧闸门会给出可读报错）
       video_dimensions: ['oops'],
       task_types: 'oops',
       tools: 'yes',

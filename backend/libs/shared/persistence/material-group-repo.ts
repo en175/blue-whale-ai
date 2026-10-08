@@ -1,8 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
 
-// IKDE6X：素材库组 repo（Prisma-backed）。写权威=上游，本地表维护虚拟组镜像（IKEXX8 契约 v2）。
-// 虚拟人像库组（每用户至多 1 个默认组）读走本地；真人组不落表、查询仍透传上游。
-// is_default 每用户 virtual 至多 1 个由应用层保证。
 
 export interface MaterialGroupView {
   id: string;
@@ -12,7 +9,6 @@ export interface MaterialGroupView {
   name: string;
   coverUrl: string | null;
   isDefault: boolean;
-  /** IKEXX8：组查询分流信封需要 CreateTime/UpdateTime（上游同款，秒精度）。 */
   createdAt: Date | null;
   updatedAt: Date | null;
 }
@@ -27,22 +23,16 @@ export interface CreateMaterialGroupInput {
 }
 
 export interface MaterialGroupRepo {
-  /** 创建组镜像（上游成功后调用）。同 (user_id, material_group_id) 已存在则覆盖（幂等）。 */
   upsert(input: CreateMaterialGroupInput): Promise<MaterialGroupView>;
-  /** 查某用户未删的虚拟默认组（kind=virtual, is_default=true）。无则 null。 */
   findVirtualDefault(userId: string): Promise<MaterialGroupView | null>;
-  /** 查某用户未删组列表（按 kind 过滤可选）。 */
   listByUser(userId: string, kind?: "virtual" | "real"): Promise<MaterialGroupView[]>;
-  /** IKEXX8：分页查某用户未删组（gmt_create desc, id desc），供 ListAssetGroups 本地分流。 */
   pageByUser(
     userId: string,
     kind: "virtual" | "real",
     page: number,
     size: number,
   ): Promise<{ total: number; rows: MaterialGroupView[] }>;
-  /** 查某用户指定上游组 id 的镜像。无则 null。 */
   findByUserAndUpstream(userId: string, materialGroupId: string): Promise<MaterialGroupView | null>;
-  /** 软删组（上游删除成功后调用，组删除双向维护）。 */
   softDelete(userId: string, materialGroupId: string): Promise<void>;
 }
 

@@ -1,10 +1,3 @@
-/* ============================================
- * CharacterLibraryModal 角色库弹窗
- * 对接素材库 API（POST /api/material/{Action}）
- * 与 SharedAssetsModal 同尺寸（1000×680）
- * Tab: 虚拟人像库（AIGC 平铺去分组）/ 真人人像库（LivenessFace 分组浏览）
- * 虚拟人像库单层平铺可选中，并支持弹窗内本地上传入库（REQ-D-303）；真人人像库保留分组
- * ============================================ */
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -31,7 +24,6 @@ import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/lib/video-reference-comp
 import { resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
-/** Tab 定义（真人人像库 tab 仅视频入口启用，真人素材只用于视频生成） */
 const TABS = [
   { key: 'character', label: '虚拟人像库', icon: User },
   { key: 'real', label: '真人人像库', icon: ScanFace },
@@ -39,17 +31,11 @@ const TABS = [
 
 interface CharacterLibraryModalProps {
   onClose: () => void;
-  /** 多选确认回调（虚拟/真人人像库统一多选，确认后批量返回） */
   onSelectAssets?: (assets: MaterialAsset[]) => void;
-  /** 显示真人人像库 tab（真人素材仅用于视频生成，图片/资产卡入口不展示） */
   enableRealPersonTab?: boolean;
-  /** 视频参考入口：未通过素材点选即拦截（IKGK37 / REQ-D-204） */
   rejectUnapprovedForVideo?: boolean;
 }
 
-/* ============================================
- * 分组卡片（仅真人人像库：展示与点击查看，管理操作归资产页）
- * ============================================ */
 function GroupCard({
   group,
   onView,
@@ -61,7 +47,7 @@ function GroupCard({
     <div className={styles.groupCard} onClick={onView}>
       <div className={styles.groupCover}>
         <FolderOpen className={styles.folderIcon} strokeWidth={1} />
-        {/* 底部信息栏（覆盖在图片上） */}
+        {}
         <div className={styles.groupInfo}>
           <div className={styles.groupInfoLeft}>
             <span className={styles.groupName} title={group.Description || group.Name}>{group.Description || group.Name}</span>
@@ -73,8 +59,6 @@ function GroupCard({
   );
 }
 
-/** 图片缩略图卡片：加载完成后解除 1:1 占位、按真实宽高比撑开（视频/音频保持固定 1:1）。
- *  加载前保持 1:1 占位，避免图片未就绪时高度塌陷引起布局跳动。 */
 function MeasuredThumb({
   src,
   alt,
@@ -93,7 +77,6 @@ function MeasuredThumb({
         loading="lazy"
         onLoad={(e) => {
           const { naturalWidth, naturalHeight } = e.currentTarget;
-          // 正方形图片占位即终态，无需切换，避免无谓重排
           if (naturalWidth > 0 && naturalHeight > 0 && naturalWidth !== naturalHeight) {
             setMeasured(true);
           }
@@ -104,12 +87,10 @@ function MeasuredThumb({
   );
 }
 
-/** 素材是否可被选择：仅 Active 且类型为图片/视频 */
 function isSelectableAsset(asset: MaterialAsset) {
   return asset.Status === 'Active' && (asset.AssetType === 'Image' || asset.AssetType === 'Video');
 }
 
-/** 可多选素材网格（虚拟库平铺 / 真人分组详情共用） */
 function SelectableAssetGrid({
   assets,
   selectedIds,
@@ -163,9 +144,6 @@ function SelectableAssetGrid({
   );
 }
 
-/* ============================================
- * 真人人像库分组详情（多选素材，仅展示与选择）
- * ============================================ */
 function GroupDetail({
   group,
   assets,
@@ -201,7 +179,6 @@ function GroupDetail({
   );
 }
 
-/** 虚拟人像库平铺列表：跨组聚合全部素材，无分组层级 */
 function AigcFlatSelectView({
   assets,
   selectedIds,
@@ -252,7 +229,6 @@ function AigcFlatSelectView({
   );
 }
 
-/** 素材卡片上的角标/勾选浮层（与媒体类型无关，图片/视频/音频卡片共用） */
 function AssetCardOverlays({
   asset,
   selectable,
@@ -292,7 +268,6 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
 
   const isRealTab = activeTab === 'real';
 
-  /** 虚拟人像库：先查全部分组再聚合素材，展示层拍平、底层分组数据不删 */
   const loadFlatAssets = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
       setLoading(true);
@@ -324,7 +299,6 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
     }
   }, []);
 
-  /** 真人人像库：仅加载分组列表；素材进入分组详情后再加载 */
   const loadGroups = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
@@ -371,7 +345,6 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
     void refreshGroupAssets(groupId);
   }, [refreshGroupAssets]);
 
-  /** 虚拟库平铺：存在 Processing 素材时每 5s 刷新，直到全部 Active/Failed */
   const hasFlatProcessing = !isRealTab && flatAssets.some((a) => a.Status === 'Processing');
   useEffect(() => {
     if (!hasFlatProcessing) return;
@@ -379,11 +352,6 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
     return () => clearInterval(timer);
   }, [hasFlatProcessing, loadFlatAssets]);
 
-  /**
-   * 真人人像库：列表中存在 Processing 状态素材时，每 5s 刷新对应分组，
-   * 直到全部 Active/Failed。CreateAsset 后素材是上游异步注册的，
-   * 上传完成后必须靠轮询才能让 UI 状态从 Processing → Active/Failed。
-   */
   const processingGroupIds = Array.from(groupAssets.entries())
     .filter(([, assets]) => assets.some((a) => a.Status === 'Processing'))
     .map(([groupId]) => groupId);
@@ -397,12 +365,10 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRealTab, processingGroupIds.join(','), refreshGroupAssets]);
 
-  /** 素材选中集合（虚拟/真人跨 tab 累加，持有完整素材对象） */
   const [selectedMap, setSelectedMap] = useState<Map<string, MaterialAsset>>(new Map());
   const selectedIds = useMemo(() => new Set(selectedMap.keys()), [selectedMap]);
   const selectedAssets = useMemo(() => Array.from(selectedMap.values()), [selectedMap]);
 
-  /** 切换素材选中态（含 Processing/Failed/音频拦截提示） */
   const handleToggleAsset = (asset: MaterialAsset) => {
     if (asset.Status === 'Processing') {
       toast('素材处理中，稍后可用');
@@ -448,7 +414,6 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
     setUploading(false);
   };
 
-  /** 素材多选确认（虚拟/真人人像库统一入口） */
   const handleConfirmAssets = () => {
     if (selectedAssets.length === 0) return;
     onSelectAssets?.(selectedAssets);
@@ -461,7 +426,7 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
   return createPortal(
     <div className={styles.overlay} data-gen-panel-territory onClick={onClose}>
       <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
-        {/* 头部 */}
+        {}
         <div className={styles.head}>
           <div className={styles.headLeft}>
             <span className={styles.headTitle}>角色库</span>
@@ -471,7 +436,7 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
           </button>
         </div>
 
-        {/* Tab 栏（真人人像库 tab 仅视频入口显示） */}
+        {}
         <div className={styles.tabs}>
           {TABS.filter((tab) => tab.key !== 'real' || enableRealPersonTab).map((tab) => (
             <button
@@ -485,7 +450,7 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
           ))}
         </div>
 
-        {/* 内容区 */}
+        {}
         <div className={styles.content}>
           {loading ? (
             <div className={styles.loadingSpinner}>
@@ -515,7 +480,7 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
             ) : (
               <div className={styles.groupListView}>
                 <div className={styles.groupGrid}>
-                  {/* 真人素材组卡片流（封面不取内部素材图） */}
+                  {}
                   {groups.map((group) => (
                     <GroupCard
                       key={group.Id}
@@ -541,7 +506,7 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
           )}
         </div>
 
-        {/* 弹窗级底部确认栏（虚拟/真人选择跨 tab 累加，任意视图均可确认） */}
+        {}
         <div className={styles.confirmBar}>
           <span className={styles.confirmCount}>已选 {selectedAssets.length} 项</span>
           <div className={styles.confirmActions}>

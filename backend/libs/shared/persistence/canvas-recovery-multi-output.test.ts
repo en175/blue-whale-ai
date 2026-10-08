@@ -1,6 +1,3 @@
-// IKJJQY（IKIXK9-SPEC-20261002 B.4）：多结果家族（输出槽/场景切分/人声分离）的
-// 虚拟输出投影纯规则测试——输出键/节点身份构造 + 可信终态投影与歧义拒绝。
-// 事务性场景（保存扇出、owner 建立）在 ikjjqy-canvas-recovery.integration.test.ts 真库验证。
 import { describe, expect, it } from "vitest";
 
 import {
@@ -16,7 +13,6 @@ import {
 const SUBMISSION = "0a1b2c3d-0000-4000-8000-00000000a001";
 const TARGET = "node-target";
 
-/** 内存 tx：只实现投影需要的两张只读表（按 job 查 / 按 id 查两种 where）。 */
 function fakeTx(args: {
   logs?: Array<{ generation_job_id: bigint; status: string; payload: unknown; occurred_at: number }>;
   slots?: Array<{ id: bigint; project_id: bigint; generation_job_id: bigint; slot_index: number; status: string; asset_id: bigint | null; retry_of_slot_id?: bigint | null }>;
@@ -250,7 +246,6 @@ describe("生成输出槽投影（slot:<slot_id>，沿用既有槽位身份）",
   });
 
   it("重试只补 failed 槽：祖辈 job 的成功槽沿 retry_of_slot_id 上溯一并投影", async () => {
-    // job 9003 = 重试 job：槽 601(idx1, 挂 retry_of_slot_id=502 补 failed 槽)；501/502 是原 job 的槽。
     const projection = await projectVirtualOutputs(
       fakeTx({
         slots: [
@@ -263,7 +258,6 @@ describe("生成输出槽投影（slot:<slot_id>，沿用既有槽位身份）",
     );
     expect(projection.kind).toBe("ok");
     if (projection.kind === "ok") {
-      // idx0 折叠取祖辈成功槽 501；idx1 折叠取重试成功槽 601（失败尝试被 succeeded 覆盖）。
       expect(projection.items.map(item => item.outputKey)).toEqual(["slot:501", "slot:601"]);
     }
   });

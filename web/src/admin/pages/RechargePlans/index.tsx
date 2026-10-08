@@ -1,17 +1,3 @@
-/* ============================================
- * RechargePlans 充值档位管理：CRUD/折扣定价/限时上下架/排序/用户端预览
- *
- * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**（原 index.module.css 已删）——
- * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
- *
- * 两个弹窗各自独立成文件（PlanFormModal / PreviewModal），数据映射与文案在 plan.ts：
- * 本文件撞过 max-lines 上限，拆的是**版面**，不是把规则挪走。
- *
- * 取数走 TanStack Query（IKJ058）。⚠️ 这一页与另两页不同：它展示的是 `toPlan()` 映射过的
- * **`Plan[]` 视图**，而缓存里存的是**原始 `{tiers}`** —— 两者没有反向映射。所以每一处写操作
- * 都要把「服务端返回的原始记录」写回缓存（见 `setTiers`），而不是像旧代码那样在视图空间里改。
- * 这样做是为了**保住乐观更新**：上下移点下去要立刻动。
- * ============================================ */
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -53,7 +39,6 @@ import {
   type PlanFormValues,
 } from './plan';
 
-/** 表格列数（含 ID 与操作列）。加载/空态那一行要跨满，所以只在这里数一次。 */
 const COLUMN_COUNT = 14;
 
 type FilterKey = 'all' | TopupTierStatus;
@@ -68,39 +53,22 @@ export default function RechargePlans() {
   const queryClient = useQueryClient();
   const list = useQuery(topupTiersOptions());
 
-  /** 刷新全部档位（含停用），按 sortOrder 排序展示。 */
   const plans: Plan[] = useMemo(
     () =>
       [...(list.data?.tiers ?? [])].sort((a, b) => a.sortOrder - b.sortOrder).map(toPlan),
     [list.data],
   );
 
-  /**
-   * 把原始档位记录写回缓存。
-   *
-   * <p>⚠️ 页面用 `Plan[]`、缓存存原始 `TopupTier[]`，**两者没有反向映射** ——
-   * 所以每一处写操作都拿**原始记录**来更新（服务端返回的那条，或本地改好 `sortOrder` 的那份），
-   * 而不是像旧代码那样在视图空间里替换。
-   */
   const setTiers = (updater: (prev: TopupTier[]) => TopupTier[]): void => {
     queryClient.setQueryData<TopupTierList>(topupTierKeys.list(), (prev) =>
       prev === undefined ? prev : { ...prev, tiers: updater(prev.tiers) },
     );
   };
 
-  /**
-   * 档位改完之后让**用户端预览**那一份也失效。
-   *
-   * <p>⚠️ 预览是**另一个 key**（`topupTierPreviewKeys`），而全站 `staleTime` 是 30s ——
-   * 不显式失效的话，运营改完上架/改价后点「用户端预览」，看到的会是**改动前**的档位，
-   * 且界面上没有任何地方提示它是旧的。改前每次打开都无条件重拉，所以这是 Query 化
-   * 带进来的新风险，必须在这里堵住。
-   */
   const invalidatePreview = (): void => {
     void queryClient.invalidateQueries({ queryKey: topupTierPreviewKeys.all });
   };
 
-  /** 按 `id → sortOrder` 覆盖顺序（乐观写与失败回滚共用）。 */
   const applyOrder = (orderById: Map<string, number>): void => {
     setTiers((tiers) =>
       tiers.map((t) => ({ ...t, sortOrder: orderById.get(t.id) ?? t.sortOrder })),
@@ -112,7 +80,7 @@ export default function RechargePlans() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [synced, setSynced] = useState(false);
-  const [warning, setWarning] = useState(''); // 包络级警告（Go 折扣同步失败等）
+  const [warning, setWarning] = useState('');
   const [actionError, setActionError] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [sorting, setSorting] = useState(false);
@@ -131,7 +99,6 @@ export default function RechargePlans() {
     [plans, filter]
   );
 
-  /** 排序：本地交换后提交全量排序数组，失败回滚 */
   const move = async (id: string, dir: -1 | 1) => {
     if (sorting) return;
     const prevOrder = new Map(plans.map((p) => [p.id, p.sort]));
@@ -140,7 +107,6 @@ export default function RechargePlans() {
     const j = i + dir;
     if (i < 0 || j < 0 || j >= sorted.length) return;
     [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
-    // 全量重编号 1..n，乐观更新
     const next = sorted.map((p, idx) => ({ ...p, sort: idx + 1 }));
     applyOrder(new Map(next.map((p) => [p.id, p.sort])));
     setSorting(true);
@@ -152,14 +118,13 @@ export default function RechargePlans() {
       invalidatePreview();
       if (warn) setWarning(warn);
     } catch (e) {
-      applyOrder(prevOrder); // 回滚交换前顺序
+      applyOrder(prevOrder);
       setActionError(isApiError(e) ? e.message : '排序失败，请稍后重试');
     } finally {
       setSorting(false);
     }
   };
 
-  /** 全量同步折扣到 Go：PUT /api/admin/topup-tiers/sync */
   const handleSync = async () => {
     if (syncing) return;
     setSyncing(true);
@@ -181,12 +146,8 @@ export default function RechargePlans() {
     }
   };
 
-  /** 新建/编辑提交：POST/PUT /api/admin/topup-tiers，以服务端返回记录更新缓存 */
   const handleSubmit = async (data: PlanFormValues, id?: string) => {
     setWarning('');
-    // ⚠️ 实付价格**仍不在参数里**（它由服务端 `原价 × 折扣` 派生，收下它就等于允许
-    //    「原价 100、实付 1」这种自相矛盾的档位）。
-    //    但**基础积分现在在**：它是配置值，运营填的就是用户到账的（见 PlanFormModal 文件头）。
     const card = {
       baseCredits: data.baseCredits,
       description: data.description,
@@ -200,7 +161,6 @@ export default function RechargePlans() {
       permissionDeniedHint: data.deniedHint,
     };
     if (id !== undefined) {
-      // 部分更新：startTime/endTime 传空字符串表示清空原值
       const { data: tier, warning: warn } = await updateTopupTier(id, {
         originalPrice: data.price,
         discount: data.ratio,
@@ -231,7 +191,6 @@ export default function RechargePlans() {
     setForm(null);
   };
 
-  /** 确认删除：DELETE /api/admin/topup-tiers/:id（逻辑删除） */
   const confirmDelete = async () => {
     if (deleteId === null || deleting) return;
     setDeleting(true);
@@ -253,7 +212,7 @@ export default function RechargePlans() {
 
   return (
     <Page>
-      {/* 页头 */}
+      {}
       <PageHeader
         title="充值档位"
         subtitle="管理档位 CRUD、折扣定价、限时上下架与效果预览"
@@ -279,11 +238,11 @@ export default function RechargePlans() {
         }
       />
 
-      {/* 包络级警告（Go 折扣同步失败等）用 warning 调子；操作错误用 danger */}
+      {}
       {warning && <Alert tone="warning">{warning}</Alert>}
       {actionError && <Alert tone="danger">{actionError}</Alert>}
 
-      {/* 状态筛选 */}
+      {}
       <Select
         options={filterOptions.map((f) => ({ value: f.key, label: f.label }))}
         value={filter}
@@ -291,7 +250,7 @@ export default function RechargePlans() {
         aria-label="状态筛选"
       />
 
-      {/* 档位表格 */}
+      {}
       <Table>
         <thead>
           <tr>
@@ -348,7 +307,7 @@ export default function RechargePlans() {
               <td>{p.id}</td>
               <td>{p.name || '—'}</td>
               <td>{fmtPoints(p.baseCredits)}</td>
-              {/* 赠送积分是首购加赠的额度，不是到账积分：独立一列，不与上一列相加展示 */}
+              {}
               <td>{p.bonusCredits > 0 ? fmtPoints(p.bonusCredits) : '—'}</td>
               <td>¥{fmtMoney(p.price)}</td>
               <td>
@@ -415,7 +374,7 @@ export default function RechargePlans() {
         </tbody>
       </Table>
 
-      {/* 新建/编辑弹窗 */}
+      {}
       {form !== null && (
         <PlanFormModal
           initial={form.id !== undefined ? plans.find((p) => p.id === form.id) : undefined}
@@ -424,7 +383,7 @@ export default function RechargePlans() {
         />
       )}
 
-      {/* 删除二次确认 */}
+      {}
       {deleteId !== null && (
         <ConfirmModal
           title="删除档位"
@@ -435,7 +394,7 @@ export default function RechargePlans() {
         />
       )}
 
-      {/* 用户端预览弹窗 */}
+      {}
       {showPreview && <PreviewModal onClose={() => setShowPreview(false)} />}
     </Page>
   );

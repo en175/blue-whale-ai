@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DRAFT_NODE_SIZE, nextDraftPosition, overlaps, type SpawnBox } from './draftSpawn';
 
-/* IKDMQQ 草稿出生点：视口中心附近、避开底部 Dock 预留区、与既有节点去重叠。
-   random 注入固定值保证断言确定；尺寸与相交判定直接复用实现侧导出，保持同口径。 */
 
 const noJitter = () => 0.5;
 const SIZE = DRAFT_NODE_SIZE;
@@ -42,9 +40,9 @@ describe('nextDraftPosition', () => {
 
   it('多个占位节点围堵：仍能找到空位且避开 Dock', () => {
     const nodes: SpawnBox[] = [
-      { x: 840, y: 330, width: 320, height: 340 }, // 中心
-      { x: 1200, y: 330, width: 320, height: 340 }, // 右
-      { x: 480, y: 330, width: 320, height: 340 }, // 左
+      { x: 840, y: 330, width: 320, height: 340 },
+      { x: 1200, y: 330, width: 320, height: 340 },
+      { x: 480, y: 330, width: 320, height: 340 },
     ];
     const pos = nextDraftPosition({
       center: { x: 1000, y: 500 },
@@ -58,7 +56,6 @@ describe('nextDraftPosition', () => {
   });
 
   it('候选全部占满：回退到 Dock 避让后的中心位，不抛错', () => {
-    // 用超大盒铺满候选区域
     const wall: SpawnBox = { x: -10000, y: -10000, width: 20000, height: 20000 };
     const pos = nextDraftPosition({
       center: { x: 1000, y: 500 },

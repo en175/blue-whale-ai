@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Standard entry for code work in the active local release checkout."""
 
 import argparse
 import json

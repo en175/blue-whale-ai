@@ -1,9 +1,3 @@
-/**
- * 生成卡挂回对话（IKEV0V）。
- *
- * 改过卡之后，上一版要留在写它的那一轮下面——PRD 要求旧卡保留在对话历史中、刷新后仍可查看。
- * 之前只挂当前生效的那一版，刷新一次，上一版就从对话里消失了。
- */
 import { describe, expect, it } from 'vitest';
 
 import type { PromptCardRecord, PromptCardRevision } from '@/api/agentSessions';
@@ -49,7 +43,6 @@ function record(active: PromptCardRevision, history: PromptCardRevision[]): Prom
   };
 }
 
-/** 每条消息下挂着的卡标题。 */
 function titlesByMessage(messages: ChatMessage[]): Record<string, string[]> {
   return Object.fromEntries(
     messages.map((m) => [m.id, (m.blocks ?? []).filter((b) => b.type === 'card').map((b) => b.card!.shotTitle)]),
@@ -96,7 +89,6 @@ describe('attachCards', () => {
     expect(cache.get(rev1.revision_id)).toBe(rev1);
   });
 
-  /** 一个会话多件事（IKG793）：第二件事另开一个批次，两张卡各挂到写它的那一轮，互不覆盖。 */
   it('两个批次：各自挂到写它的那一轮，派生的那张带承接标', () => {
     const first = record(rev1, [rev1]);
     const second: PromptCardRecord = {

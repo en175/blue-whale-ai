@@ -11,11 +11,6 @@ import AttachmentActionBar, {
 import barStyles from '../AttachmentActionBar/index.module.css';
 import dialogStyles from './index.module.css';
 
-/* IKGB7U 图片面板附件操作条（IKGB1X 契约首个落地面板）：
-   输入框上方第一行 = 操作条（左「+ 参考」「资产库」pill、右侧并入展开/关闭）；
-   附件栏空态整条隐藏、有附件时出现在操作条与输入框之间；
-   「+ 参考」分派画布点选（pickMode 高亮）、「资产库」分派资产库弹窗，等价退役「+」菜单两项；
-   附件达上限与生成中只读时常显置灰（aria-disabled）并悬停说明原因，不再入口消失。 */
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -65,7 +60,6 @@ async function renderDialog(props: Partial<Parameters<typeof ImageDialog>[0]> = 
       ),
     );
   });
-  // 等模型能力加载完成（maxImages 依赖 currentGen）
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
   return { onPickFromCanvas, onPickFromAssets };
 }
@@ -108,11 +102,9 @@ describe('IKGB7U 附件操作条渲染与位置', () => {
     const actions = bar.querySelector(`.${barStyles.actions}`)!;
     expect(actions.querySelector(`button[title="${ATTACHMENT_ACTION_PICK_CANVAS_TITLE}"]`)).toBeTruthy();
     expect(actions.querySelector(`button[title="${ATTACHMENT_ACTION_PICK_ASSETS_TITLE}"]`)).toBeTruthy();
-    // 右侧 trailing 并入面板原展开/关闭按钮
     const trailing = bar.querySelector(`.${barStyles.trailing}`)!;
     expect(trailing.querySelector('button[title="展开"]')).toBeTruthy();
     expect(trailing.querySelector('button[title="关闭"]')).toBeTruthy();
-    // 操作条在输入框之前
     const editor = container.querySelector('[contenteditable]')!;
     expect(bar.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -133,7 +125,6 @@ describe('IKGB7U 附件操作条渲染与位置', () => {
     expect(bar.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(strip.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // 删除唯一附件：附件栏重新隐藏
     await click(strip.querySelector('button[title="移除"]')!);
     expect(attachmentStrip()).toBeNull();
   });
@@ -167,7 +158,6 @@ describe('IKGB7U 两类点击分派（等价退役菜单两项）', () => {
 
 describe('IKGB7U 禁用态：常显置灰 + 悬停原因（替代入口消失）', () => {
   it('附件达上限：两按钮 aria-disabled、悬停说明已达上限，点击不分派', async () => {
-    // 夹具模型未配 image_reference_max → 缺省上限 10 张
     const files = Array.from({ length: 10 }, (_, i) => imageFile(`f${i}`));
     const { onPickFromCanvas, onPickFromAssets } = await renderDialog({ initialFiles: files });
 

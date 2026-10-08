@@ -2,15 +2,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sendSessionMessage, setSessionCreativeSkills } from './agentSessions';
 
-/**
- * 胶囊怎么上线的回归护栏（契约 docs/blueprint/capsule-contract-v1.md）。
- *
- * 这里断言的是**实际发出去的请求体**，不是我们自己的中间表示。原因是这条链路真的这样错过：
- * 胶囊曾被放在与 `content` 并列的顶层 `resource_ref` / `skill_ref` 字段上，而 agent 的
- * `parseInboundParts` 只读 `content`——于是带图带技能发过去，落库的 content 只剩那条 text，
- * 模型什么都没看到；一个字不打只带胶囊时 `content` 为空数组，整条消息被 400 掉。
- * 两端各自都「看起来对」，错的只在字节上，所以护栏必须架在字节这一层。
- */
 function captureBody() {
   const fetchMock = vi.fn().mockResolvedValue(
     new Response(JSON.stringify({ message: { message_id: 'm1' } }), {
@@ -76,8 +67,6 @@ describe('胶囊上线格式', () => {
   });
 
   it('带资产库身份的上传素材走 asset_ref，模型才读得到内容', async () => {
-    // asset_ref 会让 agent 建立 Session Asset Grant，模型经受控理解真的读到这张图；
-    // resource_ref 只给一个占位标签。差别不在字段名，在模型看不看得见。
     const read = captureBody();
     await sendSessionMessage('p1', 's1', [], {
       resourceRef: [{ type: 'asset_ref', asset_id: 'ast_001', media_type: 'image', display_label: '参考图' }],
@@ -166,12 +155,6 @@ describe('胶囊上线格式', () => {
   });
 });
 
-/**
- * 会话已载入的创作套路（0028）。
- *
- * 与胶囊同一类护栏，理由也一样：这条路由的动词是 PUT、必须带 If-Match 与 Idempotency-Key，
- * 少任何一样 agent 都会拒——405 / 400 / 400 三种不同的失败，而在界面上都长成「点了没反应」。
- */
 describe('会话创作套路上线格式', () => {
   afterEach(() => vi.unstubAllGlobals());
 

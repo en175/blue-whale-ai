@@ -1,6 +1,3 @@
-// IKHW59：POST /projects/:projectId/audio-speeds — 音频调速（画布音频卡「调速」）建任务端点。
-// 一对一复刻 audio-trims.controller（IKHB6N 先例）：请求方凭证冻结 + RocketMQ 入队 +
-// 入队失败 markFailed(enqueue_failed) 兜底。契约 = @lib/contracts/audio-speed（IKHW48）。
 import { Body, Controller, Headers, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -33,7 +30,6 @@ export class AudioSpeedsController {
       body ?? {},
       idempotencyKey,
     );
-    // IKJJQW（B.8 局部适配器）：新协议受控错误信封直写 HTTP 状态与 data.reason。
     if (isRecoveryControlledEnvelope(result)) {
       writeRecoveryControlled(result, res);
       return;

@@ -2,13 +2,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sendSessionMessage } from './agentSessions';
 
-/**
- * 发消息时把用户选的 Agent 模型带出去的护栏（IKE0II）。
- *
- * 这个选择器上线时是**假的**：`selectedModel` 只用来算 tooltip 和高亮，从不进请求体。
- * 用户点了豆包，界面高亮换了，实际跑的还是服务端默认的 MiniMax——两端各自都「看起来对」，
- * 错的只在字节上。所以护栏架在**实际发出去的请求体**上，和删除会话那组同一个理由。
- */
 function stubFetch(...responses: Response[]) {
   const fetchMock = vi.fn();
   for (const res of responses) fetchMock.mockResolvedValueOnce(res);
@@ -42,7 +35,6 @@ describe('发消息带上 Agent 模型', () => {
   });
 
   it('没传模型时请求体里不出现这个字段', async () => {
-    // 「没选」由字段缺席表达，agent 据此回落到会话已选的、再回落服务端默认。
     const fetchMock = stubFetch(ack());
 
     await sendSessionMessage('p1', 's1', text);
@@ -51,7 +43,6 @@ describe('发消息带上 Agent 模型', () => {
   });
 
   it('空串不发：模型列表还没加载完时选中值就是空串', async () => {
-    // 发一个空字段与不发行为相同，但会让抓包的人多猜一轮「是不是清空了」。
     const fetchMock = stubFetch(ack());
 
     await sendSessionMessage('p1', 's1', text, { model: '' });

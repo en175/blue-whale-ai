@@ -1,10 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// ADR-0087 / IKF YHJ：素材校验状态镜像（material_assets）+ 网关执行凭证（user_info）。
-// 镜像 ikckow/ikeefv-parity 的双轨核对结构：schema 基线片段、prisma migration、docs/sql 快照三处同源。
-// user_info 已整表退役（ADR-0115 决策 1 / ADR-0117 决策 4，落于 20260929000000_drop_user_info）——
-// 下面仍保留对 025 历史建表的核对（025 三轨是冻结件），另起一段守「不许长回来」。
 
 const migrationSql = readFileSync(
   new URL(
@@ -50,12 +46,10 @@ const dropSnapshotSql = readFileSync(
 
 const NEW_TABLES = ["material_assets"];
 
-/** 表定义块（CREATE TABLE `<name>` ... 到分号）。 */
 function tableBlock(sql: string, table: string): string | undefined {
   return sql.match(new RegExp("CREATE TABLE `" + table + "`[^;]*;"))?.[0];
 }
 
-/** 表内反引号列名集合（排除索引名）。 */
 function columnsIn(block: string): string[] {
   return [...block.matchAll(/^\s+`([a-z_]+)`\s/gm)].map((m) => m[1]).sort();
 }
@@ -104,9 +98,6 @@ describe("IKFYHJ 双轨迁移（素材校验状态镜像）", () => {
   });
 });
 
-// ── user_info 退役（ADR-0115 决策 1 / ADR-0117 决策 4）──────────────────────────
-// 这三条守的是「不许长回来」：表由 DROP 迁移删掉、model 从 schema.prisma 摘掉，
-// 且新迁移至今保持三轨逐字同源（与 054 起的实践一致）。
 describe("user_info 退役（网关执行凭证镜像）", () => {
   it("三轨都 DROP TABLE `user_info`", () => {
     for (const sql of [dropMigrationSql, dropStandaloneSql, dropSnapshotSql]) {

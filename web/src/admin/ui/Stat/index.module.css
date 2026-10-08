@@ -33,7 +33,6 @@
   font-size: var(--admin-font-xl);
   font-weight: 600;
   line-height: 1.2;
-  /* 数字等宽：并排的几张卡里，位数不同时小数点/末位不会错开 */
   font-variant-numeric: tabular-nums;
   color: var(--admin-text);
 }
@@ -44,7 +43,6 @@
   color: var(--admin-text-faint);
 }
 
-/* 色调只铺在图标底色上，数字保持正文色 —— 22px 的彩色数字并排五张会像仪表盘玩具 */
 .accent {
   background: var(--admin-accent-soft);
   color: var(--admin-accent);

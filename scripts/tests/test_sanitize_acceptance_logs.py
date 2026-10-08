@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""Unit tests for scripts/lib/sanitize-acceptance-logs.mjs (IK1NS2).
-
-验收失败取证日志必须先脱敏再落盘：不得包含凭据、Token 或原始敏感内容，
-同时保留足以定位问题的普通诊断信息。公开 seam：
-- CLI：stdin → stdout
-"""
 
 import subprocess
 import unittest

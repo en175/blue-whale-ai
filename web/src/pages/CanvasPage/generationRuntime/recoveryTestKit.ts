@@ -92,13 +92,9 @@ export function createHarnessRuntime(host: GenerationRuntimeHost, options: {
   return { runtime, fetchJobStatus, nextSubmission: () => { nextId = SID_C; } };
 }
 
-/** 已确认接缝（同 ikjnvp/ikjlxd）：公开运行时 + 实际任务定义；API、时钟、画布宿主受控。 */
 export function setupRecoveryScenario(options: {
-  /** 恢复页记录携带的归属版本（默认 1）。 */
   revision?: number;
-  /** 画布含来源音频节点及其到混合目标的连线（恢复种子 sources 参与）。 */
   withSourceWire?: boolean;
-  /** 合成目标带草稿标记（恢复种子目标角色推导为 draft）。 */
   muxAsDraft?: boolean;
 } = {}) {
   const { revision = 1, withSourceWire = false, muxAsDraft = false } = options;

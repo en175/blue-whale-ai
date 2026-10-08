@@ -36,7 +36,6 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   closeGenerationQueue: vi.fn(async () => {}),
 }));
 
-/** 浏览器→Nest→隔离 MySQL→Java Worker→本地 MediaKit/存储替身→浏览器播放。 */
 describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
   "IKI68X browser multi-source audio mix",
   () => {
@@ -61,7 +60,6 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
     const guardToken = randomBytes(16).toString("hex");
     const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
-    // 有效 1 秒 PCM WAV，Chromium 可真实解码，供输入播放和成功结果播放/下载。
     const wav = (() => {
       const samples = 8000;
       const bytes = Buffer.alloc(44 + samples * 2);
@@ -75,8 +73,6 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
 
     beforeAll(async () => {
       temp = mkdtempSync(join(tmpdir(), "iki68x-browser-"));
-      // 混合结果夹具 = 检入的 1 秒 440Hz mp3（生成命令见 fixtures/README.md）。
-      // worker 只读取/转发这些字节、不解析音频，容器内仍要求挂成 /fixture/result.mp3。
       copyFileSync(resolve(import.meta.dirname, "fixtures/sine-440-1s.mp3"), join(temp, "result.mp3"));
       expectedOutput = readFileSync(join(temp, "result.mp3"));
       const schema = join(repo, "server/blue-whale-worker/src/test/resources/db/bluewhale-schema.sql");
@@ -328,8 +324,6 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
           "-v", `${repo}:/workspace`, "-w", "/workspace/server",
           "-v", `${temp}:/fixture:ro`, "-v", `${process.env.HOME}/.m2:/root/.m2`,
           "maven:3.9-eclipse-temurin-21", "mvn", "-q",
-          // 从聚合根跑并带 -pl/-am：worker 依赖同 reactor 的 server/blue-whale-common，
-          // 直接进模块目录 `mvn test` 解析不到该依赖（verification-policy 同款约束）。
           "-pl", "blue-whale-worker", "-am", "-DfailIfNoSpecifiedTests=false",
           "-Dsurefire.failIfNoSpecifiedTests=false",
           "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"], { cwd: repo });

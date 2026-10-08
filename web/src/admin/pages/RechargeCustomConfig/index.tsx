@@ -1,23 +1,3 @@
-/* ============================================
- * RechargeCustomConfig 自定义充值配置（PRD §10.3，模块 B）
- *
- * 数据源 GET/PUT /api/admin/recharge-custom-config（**单行配置**，只有读与保存）。
- * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件** —— 与 RechargePlans /
- * MemberDiscounts 同一条纪律：页面只描述结构，样式一处定义在套件里。
- *
- * ── 这一页最要紧的一句话：这里的「每元积分数」不是消费锚点 ──────────────────────
- *
- * 页面上有两个都叫「1 元 = N 积分」的东西，它们**没有任何关系**：
- *   · 本页的 `credits_per_yuan`：**自定义充值的报价兑换率**，价格 = 积分数 ÷ 它，
- *     只影响这一个购买入口；
- *   · 定价目录里的消费锚点（生成任务计价用）：与充值无关。
- * 不写清这一条，运营改完这里的数就会去问「为什么生成任务的价格没变」（或反过来）。
- *
- * ── 保存校验是服务端的镜像 ────────────────────────────────────────────────
- *
- * 整除与步长对齐（PRD §7.1「需能被换算比例整除」）在 `customConfig.ts` 里先拦一道，
- * 文案与服务端逐字相同 —— 免得运营点了保存、转一圈、报一个自己早就能看出来的错。
- * ============================================ */
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Save } from 'lucide-react';
@@ -56,7 +36,6 @@ import {
   type CustomConfigForm,
 } from './customConfig';
 
-/** 购买权限的选项：枚举与档位**同一套**（PRD §10.3「与固定积分卡一致」），中文名也复用同一份 */
 const PERMISSION_OPTIONS = (
   Object.keys(TIER_PERMISSION_LABEL) as (keyof typeof TIER_PERMISSION_LABEL)[]
 ).map((value) => ({
@@ -69,7 +48,6 @@ const fmtTime = (iso: string) => {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', { hour12: false });
 };
 
-/** 积分 → 展示价（分 → 元字符串）；参数非法时给「—」而不是一个编出来的价 */
 function priceLabel(credits: number, creditsPerYuan: number): string {
   if (!Number.isInteger(credits) || credits < 1 || !Number.isInteger(creditsPerYuan) || creditsPerYuan < 1) {
     return '—';
@@ -82,12 +60,10 @@ export default function RechargeCustomConfig() {
   const query = useQuery(adminRechargeCustomConfigOptions());
 
   const [form, setForm] = useState<CustomConfigForm | null>(null);
-  /** 保存成功的一句话（带上服务端回的版本号，运营才知道「这次改动生效了」） */
   const [saved, setSaved] = useState('');
   const [warning, setWarning] = useState('');
   const [actionError, setActionError] = useState('');
 
-  // 数据到位时初始化草稿；保存后再拉一次，拿到的是服务端归一后的权威值（含新版本号）
   useEffect(() => {
     if (query.data) setForm(formFromConfig(query.data));
   }, [query.data]);
@@ -99,7 +75,6 @@ export default function RechargeCustomConfig() {
       setActionError('');
       setWarning(warn ?? '');
       setSaved(`已保存，配置版本 v${data.version}`);
-      // 直接用回包写缓存：省一次 GET，且展示的一定是刚存下的那一份
       queryClient.setQueryData(adminRechargeCustomConfigKeys.all, data);
     },
     onError: (error) => {
@@ -179,7 +154,7 @@ export default function RechargeCustomConfig() {
       {warning && <Alert tone="warning">{warning}</Alert>}
       {saved && <Alert tone="success">{saved}</Alert>}
 
-      {/* 「现在是什么」保持可见（说明性/为什么才收进 ? ） */}
+      {}
       {query.data && (
         <Alert tone="info" title="当前生效">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -351,12 +326,6 @@ export default function RechargeCustomConfig() {
   );
 }
 
-/**
- * 草稿摘要：把「现在填的这组数会报出什么价」摊开。
- *
- * <p>它是**可见的**而不是收进 ? 里：运营填完六个数字最需要立刻确认的就是「600 积分到底多少钱」，
- * 而这正是点保存之前唯一值得看一眼的东西。
- */
 function DraftSummary({ form }: { form: CustomConfigForm }) {
   const issue = previewIssue(form);
   const min = Number(form.minCredits);

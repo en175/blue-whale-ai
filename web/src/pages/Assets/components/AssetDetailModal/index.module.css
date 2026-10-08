@@ -86,9 +86,6 @@
   padding: var(--spacing-xl);
   border-left: 1px solid var(--color-border-primary);
   background-color: var(--color-bg-card);
-  /* IKFTQW：提示词最长 4000 字，会把详情栏撑到几千像素高。上层 .layout 是
-     overflow: hidden 的网格，撑出去的部分会被直接裁掉——所以详情栏自己限高并滚动。
-     这里是纯静态面板，不声明 backdrop-filter，不构成列表/合成层边界。 */
   max-height: min(80vh, 640px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -100,9 +97,6 @@
   justify-content: space-between;
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-xl);
-  /* IKFTQW：详情栏变成独立滚动容器后，关闭按钮会随内容滚出视野。钉住表头，
-     背景取面板同色（--color-bg-card 是不透明色）遮住底下滚过的内容。
-     纯静态背景，不声明 backdrop-filter。 */
   position: sticky;
   top: 0;
   z-index: 1;
@@ -121,7 +115,6 @@
   border: 1px solid var(--color-border-secondary);
 }
 
-/* 两阶段视频阶段徽标（IKIZQI）：样片/成片 */
 .stageBadge {
   display: inline-flex;
   align-items: center;
@@ -134,7 +127,6 @@
   border: 1px solid rgba(59, 130, 246, 0.45);
 }
 
-/* 「视频阶段」详情行的阶段文字 + 来源跳转按钮 */
 .stageText {
   margin-right: 8px;
 }
@@ -211,8 +203,6 @@
   overflow-wrap: anywhere;
 }
 
-/* 提示词是多行文本（画布里的提示词常自带换行），HTML 默认把 \n 折成空格，
-   整段会挤成一坨。只给这一行保留换行——其余字段都是不需要换行的短值。 */
 .promptText {
   white-space: pre-wrap;
 }
@@ -235,9 +225,6 @@
   .detailsPane {
     border-top: 1px solid var(--color-border-primary);
     border-left: none;
-    /* 窄屏是单列，外层 Modal 容器自己就是滚动区。这里再限高会套出第二层滚动容器，
-       配上 overscroll-behavior: contain 会吃掉滚动链接——手指在详情栏上滑到底就
-       滑不动了，得回头去拖那一小条预览区。交回外层做唯一滚动区。 */
     max-height: none;
     overflow-y: visible;
     overscroll-behavior: auto;

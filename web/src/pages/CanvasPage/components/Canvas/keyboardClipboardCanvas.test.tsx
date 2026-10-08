@@ -6,13 +6,9 @@ import type { Node } from '@xyflow/react';
 import FlowCanvas from './index';
 
 vi.hoisted(() => {
-  // 开发期代码定位插件在导入时探测 Canvas；本测试不绘制位图。
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 });
 
-/* IKGBPA 画布快捷键 C/V（真实组件 + 真实 KeyboardEvent）：
-   C 快照上抛已过滤的可复制卡（商品/资产静默排除）、V 上抛粘贴入口、
-   编辑器 / @ 菜单 / Shift 组合让位浏览器原生行为、与 Ctrl/Cmd+D 立即复制并存。 */
 
 let root: Root;
 let container: HTMLDivElement;
@@ -29,7 +25,6 @@ function selectedMedia(id = 'media-1'): Node {
   };
 }
 
-/** 派发真实 keydown 到 document.body（画布监听为 document 捕获级），返回事件供 defaultPrevented 断言 */
 async function press(key: string, opts: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean; target?: HTMLElement } = {}) {
   const event = new KeyboardEvent('keydown', {
     key,
@@ -108,8 +103,6 @@ describe('IKGBPA Ctrl/Cmd+C 复制快照入口', () => {
   });
 
   it('stays silent when no card is selected', async () => {
-    // 无选中挂载：初始 selected:false 直接进入内部 state（合并保护只挡后续 update，
-    // 不挡首次合并——与真实「未选中任何卡」状态等价）。主组件先卸载，避免其键盘监听干扰。
     await act(async () => { root.unmount(); });
     container.remove();
     container = document.createElement('div');
@@ -153,7 +146,6 @@ describe('IKGBPA Ctrl/Cmd+C 复制快照入口', () => {
       menu.remove();
     }
 
-    // 菜单关闭后恢复响应
     await press('c', { metaKey: true });
     expect(props.onCopySelected).toHaveBeenCalledWith(['text-1', 'media-1']);
   });

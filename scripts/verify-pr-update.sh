@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Verify a post-push Gitee PR snapshot before finalizing a sync transaction.
 
 set -euo pipefail
 

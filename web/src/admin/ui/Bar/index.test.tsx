@@ -28,7 +28,6 @@ async function render(props: Parameters<typeof Bar>[0]): Promise<HTMLElement> {
   return mountNode.firstElementChild as HTMLElement;
 }
 
-/** 条的填充宽度（占比的视觉表达）。 */
 function fillWidth(el: HTMLElement): string {
   const track = el.lastElementChild;
   const fill = track === null ? null : track.firstElementChild;
@@ -47,16 +46,12 @@ describe('Bar', () => {
   });
 
   it('★ 占比是四舍五入的，不为了凑满 100% 而动某一条', async () => {
-    // 三条 1/3 各显示 33.3%，加起来 99.9% —— 这是常态。
-    // 把某一条抬成 33.4% 会让人以为那一条比另两条多，而它并不
     const el = await render({ label: '图片', value: '1', ratio: 1 / 3 });
 
     expect(el.textContent).toContain('33.3%');
   });
 
   it('★ 分母缺失（ratio 为 NaN）时画成 0%，不出现 NaN%', async () => {
-    // 0/0 的结果就是 NaN。不钳的话 width: NaN% 是一条不显示的条，
-    // 看起来像「这类一个都没有」，实际是分母算错了
     const el = await render({ label: '视频', value: '0', ratio: Number.NaN });
 
     expect(el.textContent).not.toContain('NaN');

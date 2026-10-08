@@ -1,8 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import { fetchJobs, type JobRecord } from './jobs';
 
-/** 音视频合成画布恢复按项目与类型逐页读取（同 audioMixJobsOptions 先例），
- *  避免遗漏首 100 条之后尚未落盘的任务；冻结快照随 input 返回（服务端只剥离凭据）。 */
 export function audioVideoMuxJobsOptions(projectId: string) {
   return queryOptions({
     queryKey: ['jobs', 'audio_video_mux', projectId] as const,

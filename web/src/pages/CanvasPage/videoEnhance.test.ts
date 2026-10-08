@@ -1,6 +1,3 @@
-/* IKH3VG 视频 HD 高清纯逻辑测试：门槛预检四情形与边界（契约常量同源数值）、
-   lastParams 恢复（缺键/非法值回落默认档）、草稿卡出生位（口径同 imageEnhance）。
-   IKH3VH 增补：契约三键组装（zod strict 校验）与失败文案家族映射（1045 兜底）。 */
 import { describe, expect, it } from 'vitest';
 import {
   VIDEO_ENHANCE_ENTRY_HINT,
@@ -25,9 +22,7 @@ describe('videoEnhanceGateReason（HD 入口门槛预检）', () => {
   });
 
   it('超上限：短边>1080 或长边>1920 拦截（短长边判定竖屏合法）', () => {
-    // 横屏长边超限
     expect(videoEnhanceGateReason({ assetId: '7', width: 2561, height: 1440 })).toContain('1920');
-    // 竖屏短边超限（1080×1920 合法、1081×1920 短边超）
     expect(videoEnhanceGateReason({ assetId: '7', width: 1080, height: 1920 })).toBeNull();
     expect(videoEnhanceGateReason({ assetId: '7', width: 1081, height: 1920 })).toContain('1080');
     expect(videoEnhanceGateReason({ assetId: '7', width: 3840, height: 2160 })).toContain('超出输入上限');

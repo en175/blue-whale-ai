@@ -1,12 +1,3 @@
-/* ============================================
- * 视频处理任务家族定义（IKJJR3，IKIXK9-SPEC-20261002 A 节）：
- * 去字幕 / 音视频分离 / 截取 / 调速 / 抠像 / 视频 HD / 插帧七类单结果后台入口。
- * 差异承载：身份识别（data 身份键 + 节点 id 前缀家族）、冻结输入（identity.lastInput /
- * lastParams / frozenParams）、创建请求（各自端点；canvas_binding 进 body，除抠像外
- * Idempotency-Key 头承载 submission_id，抠像走 body client_token = submission_id）、
- * 通用取消端点、恢复落卡规划（单结果：补卡 + 续轮询收敛，一对一转换复用目标卡）。
- * 共同锁/调度/归属检查/保存确认在 runtime.ts，不在此重复。
- * ============================================ */
 import {
   cancelGenerationJob,
   createAudioSpeed, createAudioTrim, createFrameInterpolation, createMediaExtraction,
@@ -27,7 +18,7 @@ import type {
   GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
 } from './types';
 
-const TARGET_OUTPUT_KEY = '$target';/** 家族载荷（页面在工具提交时机组好；kind 判别各端点）。 */
+const TARGET_OUTPUT_KEY = '$target';
 export type VideoToolPayload =
   | { kind: 'subtitleErase'; input: CreateVideoSubtitleErasePayload }
   | { kind: 'mediaExtract'; input: CreateMediaExtractionPayload }
@@ -41,15 +32,10 @@ type VideoToolKind = VideoToolPayload['kind'];
 
 interface VideoToolSpec {
   kind: VideoToolKind;
-  /** 恢复记录分派键（generation_jobs.type 契约值）。 */
   taskType: string;
-  /** 卡片 data 身份键（成功即清身份的家族由收敛器负责；前缀家族卡兜底用）。 */
   identityKey: string;
-  /** 恢复补卡媒体类型。 */
   mediaType: 'video' | 'audio';
-  /** 恢复补卡兜底名（恢复种子 name 优先）。 */
   recoveryName: string;
-  /** 来源边 origin 标记（恢复补卡的来源线差异，与各工具建卡先例同值）。 */
   edgeOrigin: string;
 }
 
@@ -67,8 +53,6 @@ const SPEC_BY_TASK_TYPE = new Map(SPECS.map((spec) => [spec.taskType, spec]));
 
 const SPEC_BY_KIND = new Map<VideoToolKind, VideoToolSpec>(SPECS.map((spec) => [spec.kind, spec]));
 
-/** 家族身份：七类身份键或节点 id 前缀（分离/截取/调速的卡身份在 data 键之上叠加前缀兜底，
- *  覆盖 sourceAssetId 未知时无身份标记的历史占位卡）。 */
 export function videoToolSpecOf(nodeId: string, nodeData: Record<string, unknown>): VideoToolSpec | null {
   if (isMediaExtractNodeId(nodeId) || nodeData.mediaExtract != null) return SPEC_BY_KIND.get('mediaExtract') ?? null;
   if (isAudioTrimNodeId(nodeId) || nodeData.audioTrim != null) return SPEC_BY_KIND.get('audioTrim') ?? null;
@@ -80,10 +64,6 @@ export function videoToolSpecOf(nodeId: string, nodeData: Record<string, unknown
   return null;
 }
 
-/** 冻结输入（失败卡重试原样重发的客户端载荷）：identity.lastInput 家族直接取冻结 input；
- *  HD 取 lastParams（resolution 单键 + 身份 sourceAssetId 组契约三键）；插帧取受理冻结的
- *  frozenParams（IKHSFH：60fps 任务失败后面板改 120fps，重试仍发 60fps；旧卡回落 lastParams）。
- *  身份缺失/字段不可信 = null（运行时保留失败卡并提示重新编辑，A.6 不猜参数）。 */
 export function videoToolFrozenPayload(
   nodeId: string,
   nodeData: Record<string, unknown>,
@@ -110,7 +90,7 @@ export function videoToolFrozenPayload(
     }
     case 'frameInterpolation': {
       const sourceAssetId = identity.sourceAssetId;
-      if (identity.recoveryBlocked === true) return null; // 恢复查询失败：冻结输入未回填，不按面板值猜
+      if (identity.recoveryBlocked === true) return null;
       if (typeof sourceAssetId !== 'string' || !sourceAssetId) return null;
       const input = buildFrameInterpolationInput(
         sourceAssetId, nodeId,
@@ -121,8 +101,6 @@ export function videoToolFrozenPayload(
   }
 }
 
-/** 按家族分派创建请求（canvas_binding 进 body；除抠像外 Idempotency-Key 头承载 submission_id；
- *  抠像幂等承载为 body client_token = submission_id，B.3「工具原 client_token」口径）。 */
 async function dispatchCreate(
   projectId: string,
   payload: VideoToolPayload,
@@ -147,8 +125,6 @@ async function dispatchCreate(
   }
 }
 
-/** 恢复补卡（受理回执丢失场景）：按恢复种子/原目标快照补目标占位卡；身份键写空对象
- *  占位（claims 分派覆盖取消/删除/重试；冻结输入缺失时重试按 A.6 阻止并提示重新编辑）。 */
 export function buildVideoToolRecoveryNode(
   record: GenerationRecoveryRecord,
   spec: VideoToolSpec,
@@ -183,7 +159,6 @@ function readSnapshotPosition(snapshot: Record<string, unknown> | null): { x: nu
   return null;
 }
 
-/** 视频处理任务家族定义（恢复记录按 task_type 七值分派）。 */
 export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
   taskTypes: SPECS.map((spec) => spec.taskType),
 
@@ -196,7 +171,6 @@ export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
     return { jobId: created.job_id, canvasBinding: created.canvas_binding ?? null };
   },
 
-  // 家族无服务端 retry 端点：重试 = 冻结输入原样重发创建端点（新 submission_id 独立提交身份）。
   async retry(projectId, _jobId, { nodeId, nodeData }, binding, key) {
     const payload = videoToolFrozenPayload(nodeId, nodeData);
     if (payload == null) throw new Error('原任务输入已不可信');
@@ -213,10 +187,8 @@ export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
     if (spec == null) return { kind: 'none' };
     const status = record.job?.status;
     const target = host.findNode(record.target_node_id);
-    // 已取消：不猜卡（草稿回退/空占位移除已按服务端状态收敛）
     if (status !== 'queued' && status !== 'processing' && status !== 'checking'
       && status !== 'succeeded' && status !== 'failed') return { kind: 'none' };
-    // 单结果已落卡（primary present）或用户已删除（removed）：无画布动作
     if (status === 'succeeded' || status === 'failed') {
       const primary = record.items.find((item) => item.output_key !== TARGET_OUTPUT_KEY);
       if (status === 'succeeded' && (primary == null || primary.state !== 'pending')) return { kind: 'none' };
@@ -224,7 +196,6 @@ export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
         if (!record.is_current) return { kind: 'none' };
         if (target != null) {
           if (isRecoveryTargetSettled(target, record)) return { kind: 'none' };
-          // 可靠当前记录已通过运行时归属守卫；不覆盖现有家族冻结输入与卡片编辑。
           host.patchNode(record.target_node_id, {
             jobId: record.job_id,
             generationRecovery: { protocolVersion: 1, submissionId: record.submission_id, outputKey: TARGET_OUTPUT_KEY },
@@ -233,8 +204,6 @@ export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
         }
       }
     }
-    // 目标卡缺失（受理回执丢失）：先按恢复种子补卡 + 来源线（仅实际画布节点，不伪造），
-    // 续轮询由恢复扫描接管（一对一转换复用本卡）
     if (target == null) {
       host.insertMediaNode(buildVideoToolRecoveryNode(record, spec));
       for (const source of record.recovery_seed?.sources ?? []) {
@@ -243,7 +212,6 @@ export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
         }
       }
     } else if (((target.data ?? {}).genStatus !== 'generating' && (target.data ?? {}).genStatus !== 'checking')) {
-      // 持久化失败/草稿态的卡被新提交接管（同节点重试已受理）：转回生成中续轮询
       host.patchNode(record.target_node_id, { genStatus: 'generating', progress: record.job?.progress ?? 0, errorText: undefined, jobId: record.job_id });
     }
     return { kind: 'resume-polling' };

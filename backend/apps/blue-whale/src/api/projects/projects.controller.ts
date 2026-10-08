@@ -75,12 +75,10 @@ export class ProjectsController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: { name?: unknown },
   ) {
-    // 名称为空时由 repo 生成默认名（当前日期时间，PRD E5）
     const name = typeof body.name === "string" ? body.name.trim() : "";
     return ok(await this.project.create(user.userId, name));
   }
 
-  /** 批量删除：一次删除多个项目并级联删关联资产；部分失败返回失败项（PRD E14）。 */
   @Post("batch-delete")
   async batchDelete(
     @CurrentUser() user: AuthenticatedUser,
@@ -120,7 +118,6 @@ export class ProjectsController {
     return ok(project);
   }
 
-  /** PUT /api/projects/:id/last-opened — 进入画布时记一笔「上次打开」（IKH1YI）。无 body。 */
   @Put(":id/last-opened")
   async touchLastOpened(
     @CurrentUser() user: AuthenticatedUser,
@@ -131,7 +128,6 @@ export class ProjectsController {
     return ok(null);
   }
 
-  /** PUT /api/projects/:id/pin — 置顶/取消置顶（IKH1YI）。body { pinned: boolean }。 */
   @Put(":id/pin")
   async pin(
     @CurrentUser() user: AuthenticatedUser,
@@ -158,7 +154,6 @@ export class ProjectsController {
     });
   }
 
-  /** GET /api/projects/:id/events — 项目事件流（SSE），编辑器实时同步生成/计划进展。 */
   @Get(":id/events")
   async events(
     @CurrentUser() user: AuthenticatedUser,
@@ -179,7 +174,6 @@ export class ProjectsController {
     }
 
     const abort = new AbortController();
-    // 客户端断开（res 关闭）时中止轮询；req 'close' 在 GET 请求体读完即触发，不能用。
     res.on("close", () => abort.abort());
 
     res.set({

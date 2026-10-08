@@ -1,10 +1,6 @@
-/* ============================================
- * Canvas 画布容器样式
- * ============================================ */
 .canvasContainer {
   width: 100%;
   height: 100%;
-  /* 自成层叠上下文，避免节点 z-index:1000 和左侧工具栏比层级、把点击抢走 */
   position: relative;
   z-index: 0;
   isolation: isolate;
@@ -18,12 +14,10 @@
   stroke-width: 3;
 }
 
-/* 拖动连线时的预览线，与已建立连线保持同宽 */
 .canvasContainer :global(.react-flow__connection-path) {
   stroke-width: 3;
 }
 
-/* 从 Handle 向外拖时出现的连接预览路径 */
 .canvasContainer :global(.react-flow__connectionline path) {
   stroke-width: 3;
 }
@@ -35,19 +29,15 @@
   border: 2px solid var(--color-bg-primary);
 }
 
-/* 选择模式空白画布：库样式给常驻的 .react-flow__pane.selection 挂 cursor:pointer（手指），
- * 此处覆盖恢复系统默认箭头 */
 .canvasContainer :global(.react-flow__pane.selection) {
   cursor: default;
 }
 
-/* 框选矩形配色：覆盖库默认蓝色变量为亮灰色（深色画布上清晰且不刺眼） */
 .canvasContainer {
   --xy-selection-background-color: rgba(220, 220, 220, 0.10);
   --xy-selection-border: 1px dashed rgba(220, 220, 220, 0.65);
 }
 
-/* 拖动模式：节点不拦截鼠标，画布任意位置按下即可平移 */
 .dragMode :global(.react-flow__node),
 .dragMode :global(.react-flow__node *),
 .dragMode :global(.react-flow__nodesselection),
@@ -55,10 +45,6 @@
   pointer-events: none !important;
 }
 
-/* 对齐线层（IKGGCT T2）：屏幕空间铺满画布，线宽恒 1 屏幕像素（坐标已按
- * zoom+平移换算，等效画布空间 strokeWidth = 1/zoom）。取全局主题强调色——
- * 与画布交互强调（handle 等）同源。层级高于节点 renderer(z4) 与组框边线(z5)、
- * 低于组徽标操作层(z10)：对齐线是拖拽反馈要盖住卡片，但不压操作入口。 */
 .snapGuides {
   position: absolute;
   inset: 0;
@@ -73,7 +59,6 @@
   stroke-width: 1;
 }
 
-/* 拖动画布时仍可从节点「+」拉线到空白弹出类型菜单 */
 .dragMode :global(.react-flow__handle) {
   pointer-events: auto !important;
 }
@@ -86,14 +71,10 @@
   cursor: grabbing;
 }
 
-/* 选择模式：抓手光标只属于空格拖动模式。库样式给 .react-flow__node.draggable
- * 挂 cursor:grab（悬停即抓手），此处覆盖恢复系统默认箭头；该特异性同时压过
- * 库的 .react-flow__node.selectable { cursor: pointer } */
 .canvasContainer :global(.react-flow__node.draggable) {
   cursor: default;
 }
 
-/* 按住卡片实际拖动中保留抓取反馈；显式写死，不依赖样式加载顺序 */
 .canvasContainer :global(.react-flow__node.draggable.dragging) {
   cursor: grabbing;
 }

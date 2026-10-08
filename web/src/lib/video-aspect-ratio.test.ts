@@ -3,8 +3,6 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { pickDefaultVideoRatio, videoRatioLabel } from './video-aspect-ratio';
 
-// IKJ4W6：视频比例内部键 `adaptive` 界面统一显示 `auto`。
-// 映射只服务于**展示**——提交/草稿/上游报文仍是内部键（见下方消费点源码断言）。
 
 const readSrc = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 

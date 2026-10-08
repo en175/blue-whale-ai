@@ -9,12 +9,12 @@ import styles from './index.module.css';
 import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 
-/* IKDMQS 视频草稿绑定模式：模式与角色槽渲染 / 能力约束 / 来源菜单 / 组合冲突 /
-   生成中只读 / 移除参考与禁用本地上传。PromptRefEditor 打桩为 textarea（IKFA1O 编辑器替换）。 */
+
+
 
 const { fetchGenerationModels, editorPendingCalls } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
-  /** IKFCKQ：缩略图 @ 按钮走 insertRefAtPending（记忆光标路径），桩记录调用供断言 */
+
   editorPendingCalls: [] as Array<{ kind: string; id: string }>,
 }));
 
@@ -95,7 +95,7 @@ const noFrameModel: GenerationModel = {
   features: { ...baseFeatures, first_frame: false, last_frame: false, first_last_frame: false },
 };
 
-/* IKJ794：Seedance 2.5 = supported_aspect_ratios 含 adaptive（与组件 IKFQ5S 同锚），支持视频参考 */
+
 const adaptiveModel: GenerationModel = {
   ...fullModel,
   model_id: 'm-25',
@@ -162,7 +162,7 @@ async function renderDialog({ mediaRefs, status, mode }: RenderOptions = {}) {
   });
 }
 
-/** 来源菜单项按钮（菜单展开后按文案查找） */
+
 function menuItem(label: string): HTMLButtonElement | undefined {
   return [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === label);
 }
@@ -201,7 +201,7 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
     await renderDialog({ mode: 'first_last_frame', mediaRefs: {
       reference: [], first: ref('f1'), last: ref('f2'),
     } });
-    // IKFCKQ：共享缩略图角色徽标（首帧/尾帧按角色标识，不参与数字编号）
+
     const badges = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"] [data-testid="ref-thumb-badge"]')]
       .map((n) => n.textContent);
     expect(badges).toEqual(['首帧', '尾帧']);
@@ -211,7 +211,7 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
   });
 
   it('全能参考显示图片和视频缩略图，不显示普通参考角色徽标', async () => {
-    // IKFC1T：dock 默认改为文生视频，本套用例显式回到全能参考场景
+
     await renderDialog({ mode: 'omni', mediaRefs: { reference: [ref('m1'), ref('v1', 'video')] } });
     expect(mountNode.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2);
     expect(mountNode.querySelector('[data-role="reference"]')).toBeNull();
@@ -221,7 +221,7 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
   it('统一草稿绑定：普通参考添加入口 = 附件操作条两 pill 直达（IKGB7W，栏尾旧「+」退役，无角色库项，无上传）', async () => {
     await renderDialog({ mode: 'omni' });
     expect(menuItem('全能参考')).toBeTruthy();
-    // IKGB7W：栏尾旧「+」（RefSourceMenu 普通变体）退役，添加入口 = 操作条「+ 参考」「资产库」
+
     const legacyEntries = [...mountNode.querySelectorAll('button')].filter(
       (b) => b.title === REF_SOURCE_ENTRY_TITLE,
     );
@@ -234,7 +234,7 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('video', 'reference');
     await act(async () => { pickAssets.click(); });
     expect(handlers.onPickFromAssets).toHaveBeenCalledWith('video', 'reference');
-    // 角色库菜单项随统一入口退役；上传入口不复活
+
     expect(mountNode.textContent).not.toContain('角色库');
     expect(mountNode.querySelector('input[type="file"]')).toBeNull();
   });
@@ -263,7 +263,7 @@ describe('IKDMQS 角色显式指定与移除', () => {
     await act(async () => { slotButton('添加首帧（从资产中选择 / 从节点添加素材）')!.click(); });
     await act(async () => { menuItem('从节点添加素材')!.click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('image', 'first');
-    // IKGB7W：普通参考入口 = 操作条「+ 参考」直达（栏尾旧「+」退役），kind/role 口径不变
+
     const pickCanvas = () => [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '参考')!;
     await act(async () => { menuItem('首尾帧')!.click(); });
     await act(async () => { menuItem('全能参考')!.click(); });
@@ -284,7 +284,7 @@ describe('IKDMQS 角色显式指定与移除', () => {
 
   it('移除参考回调携带来源节点 id（父级断开连线）', async () => {
     await renderDialog({ mode: 'first_last_frame', mediaRefs: { reference: [], first: ref('f1') } });
-    // IKFCKQ：× 为共享缩略图按钮（title=移除），走既有断开连线回调
+
     const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')!;
     await act(async () => { removeBtn.click(); });
     expect(handlers.onRemoveVideoRef).toHaveBeenCalledWith('f1');
@@ -307,7 +307,7 @@ describe('IKDMQS 组合冲突与只读', () => {
     expect(mountNode.querySelector('[data-testid="dock-video-ref"]')).toBeTruthy();
     expect(mountNode.querySelector('button[title="移除"]')).toBeNull();
     expect(mountNode.querySelector('button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')).toBeNull();
-    // IKGB7W：添加入口常显但置灰（操作条 aria-disabled + 悬停原因），替代旧「+」隐藏
+
     expect(slotButton(REF_SOURCE_ENTRY_TITLE)).toBeUndefined();
     const pickCanvas = [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '参考')!;
     expect(pickCanvas.getAttribute('aria-disabled')).toBe('true');
@@ -330,8 +330,8 @@ describe('IKDMQS 组合冲突与只读', () => {
   });
 });
 
-/* IKFCKQ：视频面板参考栏接入共享缩略图——三类媒体形态与编号口径 /
-   @ 按钮记忆光标插入 / material 项移除草稿参考 / 音频时长透传预览 */
+
+
 describe('IKFCKQ 共享缩略图接入', () => {
   it('普通参考按类型独立编号（图片N/视频N/音频N 圆钮仅数字），媒体形态按 kind 渲染', async () => {
     await renderDialog({ mode: 'omni', mediaRefs: {
@@ -339,7 +339,7 @@ describe('IKFCKQ 共享缩略图接入', () => {
     } });
     const thumbs = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"]')];
     expect(thumbs).toHaveLength(4);
-    // 编号与正文标签同源：图片 1、音频 1、视频 1、图片 2（类型独立连续编号）
+
     const badges = thumbs.map((t) => t.querySelector('[data-testid="ref-thumb-badge"]')?.textContent);
     expect(badges).toEqual(['1', '1', '1', '2']);
     expect(thumbs[0]!.querySelector('img')).toBeTruthy();
@@ -376,9 +376,9 @@ describe('IKFCKQ 共享缩略图接入', () => {
   });
 });
 
-/* IKJ794：全能参考被动提示行——显示条件 = 全能参考模式 + Seedance 2.5（supported_aspect_ratios
-   含 adaptive）+ 已挂 ≥1 参考视频；四条件组合逐一击破，与提示词内容无关（前端零关键词判定）。
-   同条件同文案也服务首页 ChatBox（见 Home/components/ChatBox/index.test.tsx）。 */
+
+
+
 describe('IKJ794 全能参考被动提示行', () => {
   it('Seedance 2.5 + 全能参考 + 挂参考视频 → 显示提示', async () => {
     fetchGenerationModels.mockResolvedValue([adaptiveModel]);
@@ -406,13 +406,13 @@ describe('IKJ794 全能参考被动提示行', () => {
   it('比例选项 adaptive 档显示 auto，选中后状态栏与提交取值不变（仍为 adaptive）', async () => {
     fetchGenerationModels.mockResolvedValue([adaptiveModel]);
     await renderDialog({ mode: 'omni', mediaRefs: { reference: [] } });
-    // 展开配置面板（状态栏按钮含当前选中档显示名；2.5 默认选中 adaptive，显示 auto）
+
     const configBtn = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('auto'))!;
     await act(async () => { configBtn.click(); });
     const ratioBtns = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.ratioGroup} button`)];
     expect(ratioBtns.some((b) => b.textContent === 'auto')).toBe(true);
     expect(ratioBtns.some((b) => b.textContent === 'adaptive')).toBe(false);
-    // 选中 auto 档：状态栏显示 auto、无 adaptive 黑话；发送取值仍为 adaptive
+
     await act(async () => {
       ratioBtns.find((b) => b.textContent === 'auto')!.click();
     });

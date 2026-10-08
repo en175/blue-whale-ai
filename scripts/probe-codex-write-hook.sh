@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Probe the real Codex apply_patch hook path without applying any patch.
 
 set -u
 

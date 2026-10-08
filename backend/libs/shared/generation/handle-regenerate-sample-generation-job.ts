@@ -1,17 +1,3 @@
-/* ============================================
- * 重新生成样片（regenerate-sample）—— IKIZQF（契约 video-sample-mode.ts §5，金标 G10）
- *
- * 过期或成片失败后的「重新生成样片」：独立报价与提交入口，从原样片**冻结输入**派生
- * 一份**创建请求**，走与首次创建完全相同的 {@link handleCreateGenerationJob} 链路
- * （幂等 / 样片门控 / 素材复核 / 报价复算 / 预扣 / video_stage='sample' 落库）——
- * 新任务新卡，不继承旧报价、旧截止或旧 Draft ID；旧样片、失败成片及其费用记录只读不写。
- *
- * 与 finalize（IKIZQC）的分工：finalize 从样片派生 1080p 成片（新链路、来源唯一约束）；
- * 重新生成从样片派生 480p **新样片**——它就是一次新的创建，输入来自旧任务冻结快照而
- * 非浏览器重传（派生 body 进创建管线后，门控/素材/价格全部按**当前**状态重新校验）。
- * 报价侧 fail open（算不出 / 未放行 → 空报价双 null），提交侧 fail closed
- * （变价 / 前置不满足 → 明确错误码，零创建零扣费）——与样片创建/成片同一对语义。
- * ============================================ */
 import {
   ERROR_INVALID_INPUT,
   RECOVERY_REASONS,
@@ -41,10 +27,6 @@ const NON_REQUEST_INPUT_KEYS = [
   "expected_output_count",
 ] as const;
 
-/** 重新生成前置（报价与提交共用一条；金标 G10）：原任务必须是本人的样片任务。
- *  「过期」与「成片失败」是入口场景**不是**门控——过期样片、已占成片（失败占位）的
- *  样片都可重新生成（与 finalize_precondition 的差异正是两张入口的分工：过期只阻止
- *  转成片 1058，失败占位只锁 finalize 重试 1057）。 */
 export function sampleRegeneratePreconditionOf(sample: FinalizeSourceJob):
   | { ok: true }
   | { ok: false; code: string; message: string } {
@@ -54,8 +36,6 @@ export function sampleRegeneratePreconditionOf(sample: FinalizeSourceJob):
   return { ok: true };
 }
 
-/** parameters 重建：正文/比例/模型原样，480p 与 sample_mode=true 由样片形态重立；
- *  duration / generate_audio 是用户选择，冻结过就原样带回。 */
 function sampleRegenerateParametersOf(
   sampleInput: Record<string, unknown>,
 ): CreateGenerationJobBody["parameters"] {
@@ -63,7 +43,6 @@ function sampleRegenerateParametersOf(
     prompt: sampleInput.prompt,
     aspect_ratio: sampleInput.aspect_ratio,
     model_id: sampleInput.model_id,
-    // 样片任务冻结的 resolution 必为 480p；缺失时由样片门控按契约拒绝（不猜）。
     ...(typeof sampleInput.resolution === "string" ? { resolution: sampleInput.resolution } : {}),
     ...(sampleInput.duration !== undefined ? { duration: sampleInput.duration } : {}),
     ...(sampleInput.generate_audio !== undefined ? { generate_audio: sampleInput.generate_audio } : {}),
@@ -71,8 +50,6 @@ function sampleRegenerateParametersOf(
   };
 }
 
-/** 从样片冻结输入派生创建请求 body（type=video + 480p + sample_mode=true + 单输出）。
- *  量不出 model_id → null（数据异常：调用方按不可提交处置）。 */
 export function deriveSampleRegenerateBody(
   sampleInput: Record<string, unknown>,
 ): CreateGenerationJobBody | null {
@@ -86,8 +63,6 @@ export function deriveSampleRegenerateBody(
     expected_output_count: 1,
     parameters: sampleRegenerateParametersOf(sampleInput),
   };
-  // 参考字段：原任务怎么冻的就怎么放回（单数组 references 或旧字段二选一，创建管线
-  // 重新做存在性/类型/时长复核——「按当前素材状态重新校验」）。
   for (const [key, value] of Object.entries(sampleInput)) {
     if ((NON_REQUEST_INPUT_KEYS as readonly string[]).includes(key)) continue;
     if (key === "prompt" || key === "aspect_ratio" || key === "model_id" ||
@@ -97,38 +72,25 @@ export function deriveSampleRegenerateBody(
   return body;
 }
 
-/** 重新生成报价依赖（提交端点在此之上加 create——见 RegenerateSampleCreateDeps）。 */
 export interface RegenerateSampleQuoteDeps {
   projects: Parameters<typeof handleQuoteGenerationJob>[3]["projects"];
   models: Parameters<typeof handleQuoteGenerationJob>[3]["models"];
-  /** IKJGE6：报价入口的画布/素材依赖透传（派生 body 已剥 target_node_id，合并不触发；
-   *  仍按同一接口传递，避免两个报价入口出现「一个能合并一个不能」的暗分叉）。 */
   canvas: Parameters<typeof handleQuoteGenerationJob>[3]["canvas"];
   assets: Parameters<typeof handleQuoteGenerationJob>[3]["assets"];
-  /** 原样片读取（复用 IKIZQC 的来源样片投影：input/video_stage 全在里面）。 */
   sampleSource: { findFinalizeSourceJob(args: {
     projectId: string;
     userId: string;
     jobId: string;
   }): Promise<FinalizeSourceJob | null> };
-  /** 报价函数（与 /quote、finalize/quote 同一装配）。缺省 → 空报价（fail open）。 */
   quote?: BillingQuote;
 }
 
 export interface RegenerateSampleCreateDeps extends RegenerateSampleQuoteDeps {
-  /** 创建管线全部依赖（控制器按 create 端点同一装配注入：幂等/门控/素材复核/预扣全链）。
-   *  其中的 projects/models/quote 与外层同实例——报价与提交复算天然同源。 */
   create: Parameters<typeof handleCreateGenerationJob>[4];
 }
 
-/** 空报价（双 null，契约 StageQuoteView）。 */
 const EMPTY_QUOTE = { credits: null, quote_revision: null } as const;
 
-/**
- * POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample/quote（IKIZQF）。
- * 只读：不冻结、不写库、不碰余额。非样片任务 / 模型已停用或未放行 / 算不出价 →
- * 空报价双 null（前端据此禁用重新生成按钮）。过期与成片失败**不影响**此处报价。
- */
 export async function handleRegenerateSampleQuote(
   userId: string,
   projectId: string,
@@ -149,8 +111,6 @@ export async function handleRegenerateSampleQuote(
   if (deps.quote === undefined) return ok(EMPTY_QUOTE);
   const derived = deriveSampleRegenerateBody(sample.input);
   if (derived === null) return ok(EMPTY_QUOTE);
-  // 报价走创建入口的同一 handler：门控（ruleSampleMode）、规格投影（projectQuoteInput）、
-  // 指纹（quoteRevisionOf）与提交复算出自同一派生 body——三处同源。
   return handleQuoteGenerationJob(userId, projectId, derived, {
     projects: deps.projects,
     models: deps.models,
@@ -160,14 +120,6 @@ export async function handleRegenerateSampleQuote(
   });
 }
 
-/**
- * POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample（IKIZQF）。
- *
- * 顺序（金标 G10）：请求体 strict 校验 → 项目/样片归属与前置 → 从冻结输入派生创建请求
- * （并入提交确认两字段）→ handleCreateGenerationJob 全链（幂等重放 / 样片门控 / 素材
- * 复核 / 报价复算 quote_stale fail closed / 预扣 / video_stage='sample' 落库）。
- * 重复请求（同 Idempotency-Key）由创建域 command_idempotency 重放首次结果——只建一次。
- */
 export async function handleRegenerateSampleCreate(
   userId: string,
   projectId: string,
@@ -176,13 +128,8 @@ export async function handleRegenerateSampleCreate(
   idempotencyKey: string | null,
   deps: RegenerateSampleCreateDeps,
 ) {
-  // strict：确认两字段（及可选 canvas_binding）之外任何键（prompt/references/draft_task_id…）
-  // 直接拒绝——上游输入只来自原样片冻结快照，浏览器不重传（契约 §5）。
-  // IKJJR0：canvas_binding 随确认字段并入派生 body，进入创建管线的统一关联受理
-  // （幂等回读先于报价/素材复算；Idempotency-Key == submission_id 由创建入口校验）。
   const parsed = sampleRegenerateRequestSchema.safeParse(body);
   if (!parsed.success) {
-    // IKJJR0（B.8）：携带 canvas_binding 的非法载荷归新协议错误信封（reason 稳定值）。
     if (
       typeof body === "object" && body !== null
       && "canvas_binding" in body
@@ -211,8 +158,6 @@ export async function handleRegenerateSampleCreate(
       code: ERROR_INVALID_INPUT,
     });
   }
-  // 一次新的创建：幂等、门控、素材复核、报价复算、预扣、阶段落库全部在创建管线里，
-  // 本层零旁路——旧任务行与费用记录从头到尾只被读过，不被覆盖或删除。
   return handleCreateGenerationJob(
     userId,
     projectId,

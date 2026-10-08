@@ -8,12 +8,6 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { readPromptRefText, typePromptRefText } from './testing/promptRefEditor';
 
-/* IKDMQV 失败重试与修改后重新生成：
-   双路径严格区分——节点「重试」按钮走 retryGenerationJob（沿用失败任务冻结快照，
-   不读画布不落盘）；面板修改参数后「发送」走 createGenerationJob（按现行规则冻结新输入，
-   原位承接不新建卡）。重试防重入：generating 态再次触发直接忽略。
-   保存失败保护沿用 flushCanvasSave 串行化（IKDMQQ），失败卡重新生成路径同样受保护。
-   FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；ImageDialog 用真实实现。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -135,7 +129,6 @@ vi.mock('@/api/canvas', () => ({
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
-  // !779 起保存 catch 会调这个函数对齐 412 version；缺省则 throw，失败提示出不来
   readCanvasConflictVersion: () => undefined,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
@@ -176,7 +169,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 默认画布：失败草稿卡 f1（首生成失败，参数与身份保留）+ 失败成品卡 g1（重新生成失败，旧素材保留） */
 function seedFailureDoc() {
   canvasDocMock.current = {
     doc: {
@@ -255,7 +247,6 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
   await typePromptRefText(container, text);
 }
@@ -270,7 +261,6 @@ async function clickNode(id: string) {
   });
 }
 
-/** 触发节点「重试」（MediaNode 失败角标/占位按钮的真实回调，经 attachCallbacks 注入） */
 async function clickRetry(id: string) {
   await act(async () => {
     const onRetryJob = (nodeOf(id).data as Record<string, unknown>).onRetryJob as (id: string) => void;
@@ -297,14 +287,11 @@ describe('IKDMQV 直接重试：沿用失败任务冻结快照', () => {
 
     await clickRetry('f1');
 
-    // retry 以原任务 id 调用（并带调用方持有的幂等键）；create（修改后新生成路径）不被触碰；
-    // 保存也不发生（快照冻结，无需落盘）
     expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(1);
     expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j1', expect.any(String));
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
 
-    // 原卡承接：同一张卡转成品（draft 清除、jobId 更新、成功结果回填），节点数不变
     await vi.waitFor(() => expect(nodeOf('f1').data.src).toBe('http://img/out.png'));
     const node = nodeOf('f1');
     expect(node.data.draft).toBeUndefined();
@@ -324,7 +311,6 @@ describe('IKDMQV 直接重试：沿用失败任务冻结快照', () => {
     await clickRetry('f1');
     await vi.waitFor(() => expect(nodeOf('f1').data.genStatus).toBe('generating'));
 
-    // retry 请求飞行中（generating 态）再次点重试：不发第二次 retry
     await clickRetry('f1');
     expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(1);
 
@@ -351,7 +337,6 @@ describe('IKDMQV 直接重试：沿用失败任务冻结快照', () => {
     await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(nodeOf('f1').data.genStatus).toBe('failed'));
 
-    // 原样再点一次：同一次意图（同一张卡、同一个被重试的任务），必须复用同一把钥匙
     await clickRetry('f1');
     await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(2));
 
@@ -364,7 +349,6 @@ describe('IKDMQV 直接重试：沿用失败任务冻结快照', () => {
 
     await clickRetry('f1');
     await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(1));
-    // 首轮受理成功：f1 承接 j9 —— 再重试重试的是 j9 而不是 j1，签名变了，钥匙必须换新
     await vi.waitFor(() => expect(nodeOf('f1').data.jobId).toBe('j9'));
 
     apiMocks.retryGenerationJob.mockResolvedValueOnce({ generation_job_id: 'j10', cursor: 3 });
@@ -386,7 +370,6 @@ describe('IKDMQV 修改后新生成：新任务新快照，原失败卡承接', 
     await typePrompt('修改后的提示词');
     await act(async () => { sendButton().click(); });
 
-    // 新任务路径：create（非 retry），输入先落盘（flushCanvasSave），携带新提示词与原卡身份
     expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
@@ -394,7 +377,6 @@ describe('IKDMQV 修改后新生成：新任务新快照，原失败卡承接', 
     expect(payload.target_node_id).toBe('f1');
     expect((payload.parameters as Record<string, unknown>).prompt).toBe('修改后的提示词');
 
-    // 原卡原位承接（无新卡），成功结果回填
     await vi.waitFor(() => expect(nodeOf('f1').data.src).toBe('http://img/out.png'));
     expect(flowProps.current.mediaNodes).toHaveLength(2);
   });
@@ -416,7 +398,6 @@ describe('IKDMQV 修改后新生成：新任务新快照，原失败卡承接', 
     expect(payload.target_node_id).toBe('g1');
     expect((payload.parameters as Record<string, unknown>).prompt).toBe('成品改版');
 
-    // 原位承接：同一张卡转生成中，旧素材 src 不被清除（IKDMQU Q5）
     await vi.waitFor(() => expect(nodeOf('g1').data.genStatus).toBe('generating'));
     const node = nodeOf('g1');
     expect(node.data.src).toBe('http://img/g1.png');
@@ -437,7 +418,6 @@ describe('IKDMQV 修改后新生成：新任务新快照，原失败卡承接', 
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(nodeOf('f1').data.genStatus).toBe('failed'));
 
-    // 原样再发：同一张卡、同一份载荷 = 同一次意图，钥匙必须复用（服务端据此重放首次结果）
     await clickNode('f1');
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('同一句提示词'));
     await act(async () => { sendButton().click(); });
@@ -478,7 +458,6 @@ describe('IKDMQV 修改后新生成：新任务新快照，原失败卡承接', 
 
     await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'));
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    // 卡片保留失败态与参数，不丢草稿
     expect(nodeOf('f1').data.genStatus).toBe('failed');
     expect(nodeOf('f1').data.prompt).toBe('再试一次');
     expect(flowProps.current.mediaNodes).toHaveLength(2);

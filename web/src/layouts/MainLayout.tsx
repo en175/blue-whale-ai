@@ -1,6 +1,3 @@
-/* ============================================
- * MainLayout 全局布局：左侧导航栏 + 页面出口
- * ============================================ */
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from '@/components/Sidebar';
 import { useDocumentTitle } from '@/seo/useDocumentTitle';

@@ -3,15 +3,11 @@ import { AdminException } from "@lib/shared/errors/admin-error.js";
 
 import { beijingDayOf, resolveDashboardRange, withinRange } from "./dashboard-range.js";
 
-/** 北京时间的某个瞬时（测试里只关心它落在哪个北京自然日）。 */
 const beijing = (day: string, time = "12:00:00") => new Date(`${day}T${time}+08:00`);
 
 describe("beijingDayOf —— 按北京时间取自然日", () => {
   it("服务器在 UTC 时，北京时间 00:00–08:00 之间**不能**退回前一天", () => {
-    // 2026-09-25T17:30Z = 北京 2026-09-26 01:30。容器里通常是 UTC，
-    // 用 toISOString().slice(0,10) 会得到 09-25，那是错的
     expect(beijingDayOf(new Date("2026-09-25T17:30:00Z"))).toBe("2026-09-26");
-    // 2026-09-25T15:59Z = 北京 2026-09-25 23:59，仍是当天
     expect(beijingDayOf(new Date("2026-09-25T15:59:00Z"))).toBe("2026-09-25");
   });
 
@@ -31,8 +27,8 @@ describe("resolveDashboardRange —— 默认今天", () => {
   it("默认区间的两个端点就是当天的北京零点与次日零点", () => {
     const range = resolveDashboardRange({}, beijing("2026-09-25"));
 
-    expect(range.start.toISOString()).toBe("2026-09-24T16:00:00.000Z"); // 北京 09-25 00:00
-    expect(range.endExclusive.toISOString()).toBe("2026-09-25T16:00:00.000Z"); // 北京 09-26 00:00
+    expect(range.start.toISOString()).toBe("2026-09-24T16:00:00.000Z");
+    expect(range.endExclusive.toISOString()).toBe("2026-09-25T16:00:00.000Z");
   });
 });
 
@@ -40,9 +36,8 @@ describe("resolveDashboardRange —— 显式区间", () => {
   it("上界是**次日零点且不含**：DATETIME 只到秒，用 23:59:59 会漏掉那一秒里的行", () => {
     const range = resolveDashboardRange({ from: "2026-09-01", to: "2026-09-30" });
 
-    expect(range.start.toISOString()).toBe("2026-08-31T16:00:00.000Z"); // 北京 09-01 00:00
-    expect(range.endExclusive.toISOString()).toBe("2026-09-30T16:00:00.000Z"); // 北京 10-01 00:00
-    // 半开：端点本身必须落在区间内，次日的零点必须落在区间外
+    expect(range.start.toISOString()).toBe("2026-08-31T16:00:00.000Z");
+    expect(range.endExclusive.toISOString()).toBe("2026-09-30T16:00:00.000Z");
     expect(range.endExclusive.getTime()).toBeGreaterThan(
       beijing("2026-09-30", "23:59:59").getTime(),
     );
@@ -57,22 +52,18 @@ describe("resolveDashboardRange —— 显式区间", () => {
   it("两端都是北京时间零点，与服务器本地时区无关", () => {
     const range = resolveDashboardRange({ from: "2026-01-01", to: "2026-01-01" });
 
-    // 北京时间零点 = UTC 前一天 16:00。任何本地时区都不影响这个结果
     expect(range.start.toISOString()).toBe("2025-12-31T16:00:00.000Z");
   });
 });
 
 describe("resolveDashboardRange —— 30 天上限", () => {
   it("正好 30 天（含首尾）放行", () => {
-    // 09-01 ~ 09-30 含首尾正是 30 天
     expect(() =>
       resolveDashboardRange({ from: "2026-09-01", to: "2026-09-30" }),
     ).not.toThrow();
   });
 
   it("31 天**拒绝**，且错误里说清当前多少天", () => {
-    // ⚠️ 必须拒绝而不是静默截断成最近 30 天：截断后界面显示的是一组不完整的数，
-    //    而没有任何东西提示它不完整
     expect(() => resolveDashboardRange({ from: "2026-09-01", to: "2026-10-01" })).toThrow(
       /最多 30 天，当前为 31 天/,
     );
@@ -89,7 +80,6 @@ describe("resolveDashboardRange —— 30 天上限", () => {
   });
 
   it("上限按**自然日**算，跨月跨年都不影响", () => {
-    // 12-05 ~ 01-03 含首尾 = 30 天
     expect(() =>
       resolveDashboardRange({ from: "2026-12-05", to: "2027-01-03" }),
     ).not.toThrow();

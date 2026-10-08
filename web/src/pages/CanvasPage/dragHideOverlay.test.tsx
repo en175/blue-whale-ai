@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-/* IKJR9J 页面级：画布锚定浮层拖拽隐藏（真实 CanvasPage + 真实 ReactFlow 手势）。
- * 口径——拖锚定卡：首帧真实位移起面板 visibility 隐藏（组件不卸载，编辑器 DOM 同一实例
- * 全程在文档中），落定同批在新锚点重现；拖「不含锚定卡」的组框：面板原地不动不隐藏；
- * 组框整组拖含锚定卡：同样隐藏/重现。打桩清单沿 draftPanelSwitch.test.tsx 先例
- * （唯独不 mock Canvas；PromptRefEditor 打桩减负并供「不卸载」断言）。 */
 import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -19,7 +14,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-// 注意：components/Canvas 不打桩——真实手势驱动拖拽隐藏信号（同 draftPanelSwitch 先例）。
 
 vi.mock('./components/CanvasToolbar', () => ({
   default: () => createElement('div', { 'data-testid': 'canvas-toolbar' }),
@@ -36,7 +30,6 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** PromptRefEditor 打桩（Lexical 过重）：与 draftPanelSwitch 同款，textarea 值即面板草稿正文 */
 vi.mock('./components/PromptRefEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   type StubDoc = { version: number; segments: Array<{ kind: string; text?: string }> };
@@ -184,8 +177,6 @@ vi.mock('@/api/jobs', () => ({
 
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
-/** 价格预览不发真实请求；credits:null 是「算不出价不显示价格」的合法降级形状。
- *  mock 工厂本身（queryFn 闭包在模块内部引用真实 quoteGenerationJob，单独 mock 导出拦不住）。 */
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
@@ -227,8 +218,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 组合夹具：图片草稿 d1(400,0) + 视频草稿 v1(800,0) 属 group-a（350..1250）；
- *  音频草稿 au1(1500,0) 属 group-b（1450..1900）——两组互不重叠，组空白拖动互不触及。 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -301,7 +290,6 @@ function fireMouse(type: 'mousedown' | 'mousemove' | 'mouseup' | 'click', target
   target.dispatchEvent(event);
 }
 
-/** 组框手势用 pointer 事件（jsdom 无 PointerEvent 构造器，MouseEvent 补指针属性） */
 function firePointer(type: 'pointerdown' | 'pointermove' | 'pointerup', target: EventTarget, cx: number, cy: number) {
   const event = new MouseEvent(type, {
     bubbles: true, cancelable: true, button: 0, buttons: type === 'pointerup' ? 0 : 1,
@@ -327,7 +315,6 @@ async function clickCard(id: string, x: number, y: number) {
 
 const imageOpen = () => container.textContent!.includes('测试生图模型');
 
-/** 图片生成面板根（锚定浮层最外层定位容器）：编辑器所在的 data-gen-panel-territory 元素 */
 function panelRoot(): HTMLElement {
   const editor = container.querySelector('[data-testid="chip-editor"]');
   expect(editor).toBeTruthy();
@@ -343,12 +330,9 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   });
-  // jsdom 无 document.elementsFromPoint（GroupOverlay 叠层命中检测依赖）：stub 空栈
   document.elementsFromPoint = () => [];
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1000);
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(800);
-  // wrapperSize 取自 clientWidth/clientHeight（jsdom 默认 0 → followAnchor 恒 null）：
-  // 给 2000×900 让面板走出跟随锚定态，位置断言才有意义（宽度取 2000 避开 740 面板右钳）
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(2000);
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(900);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function rectOf(this: HTMLElement) {
@@ -388,21 +372,17 @@ describe('IKJR9J 画布锚定浮层拖拽隐藏（页面级真实手势）', () 
     const leftBefore = panel.style.left;
     expect(panel.style.visibility).toBe('');
 
-    // 拖拽锚定卡 d1：(520,90) → (620,160)，位移 (+100,+70)
     await act(async () => { fireMouse('mousedown', node('d1'), 520, 90); });
     await act(async () => { fireMouse('mousemove', window, 524, 93); });
     await act(async () => { fireMouse('mousemove', window, 620, 160); });
-    // 拖拽中：visibility 级隐藏；组件不卸载——编辑器仍是同一 DOM 实例
     expect(panel.style.visibility).toBe('hidden');
     expect(container.querySelector('[data-testid="chip-editor"]')).toBe(editorEl);
     expect(document.contains(editorEl)).toBe(true);
 
     await act(async () => { fireMouse('mouseup', window, 620, 160); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
-    // 落定：同批在新锚点重现（不在旧位置停留），编辑器实例仍在
     expect(panel.style.visibility).toBe('');
     expect(container.querySelector('[data-testid="chip-editor"]')).toBe(editorEl);
-    // 位移以首个越阈帧为基准（d3-drag 在该帧快照抓取偏移）：(620-524, 160-93) = (+96,+67)
     expect(Number.parseInt(panel.style.left) - Number.parseInt(leftBefore)).toBe(96);
     expect(Number.parseInt(panel.style.top) - Number.parseInt(topBefore)).toBe(67);
     expect(imageOpen()).toBe(true);
@@ -418,7 +398,6 @@ describe('IKJR9J 画布锚定浮层拖拽隐藏（页面级真实手势）', () 
     const topBefore = panel.style.top;
     const leftBefore = panel.style.left;
 
-    // group-a 空白（400,500）按下拖到 (600,600)：整组位移 (+200,+100)，d1 随之移动
     await act(async () => { firePointer('pointerdown', pane(), 400, 500); });
     await act(async () => { firePointer('pointermove', window, 600, 600); });
     expect(panel.style.visibility).toBe('hidden');
@@ -441,8 +420,6 @@ describe('IKJR9J 画布锚定浮层拖拽隐藏（页面级真实手势）', () 
     const topBefore = panel.style.top;
     const leftBefore = panel.style.left;
 
-    // group-b（只含 au1）空白 (1850,500) 按下拖到 (1900,560)：锚定卡 d1 不在被拖集合
-    // （(1850,500) 落在 group-b 框内、au1 卡 x 区间外，且不在 group-a 框内）
     await act(async () => { firePointer('pointerdown', pane(), 1850, 500); });
     await act(async () => { firePointer('pointermove', window, 1900, 560); });
     expect(panel.style.visibility).toBe('');

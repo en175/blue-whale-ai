@@ -104,7 +104,6 @@ describe('资产详情查询（IKFTQW）', () => {
     prompt: '一只白鲸穿过蓝色鲸落',
   };
 
-  /** 打桩详情接口：code/status 非 200 时按 http 层的失败语义返回。 */
   function stubDetail(data: unknown, code = 200, status = 200) {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

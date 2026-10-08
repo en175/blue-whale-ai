@@ -108,7 +108,6 @@ it.each(
 )(
   '%s 经 %s 后旧 %s 不关新会话、不重置新锁、不弹旧错误',
   async (kind, change, outcome) => {
-    // crop 保留真实编码流程，只替换浏览器图像解码与画布出口。
     if (kind === 'crop') {
       vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
         drawImage() {},
@@ -138,7 +137,6 @@ it.each(
     if (change !== 'close') {
       f.open[kind]();
       const accepted = f.send[kind]();
-      // 请求锁是独立事实：混合/合成在途不能再次创建，其他工具的新 UI 可持自己的锁。
       if (kind === 'audioMix' || kind === 'audioVideoMux')
         expect(accepted).toBe(false);
       else expect(accepted).toBe(true);

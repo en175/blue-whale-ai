@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { handleGetSnapshot } from "./handle-snapshot.js";
 
-// 快照 assets 是 Record<asset_id, SnapshotAssetSummary>，前端按 asset_id 取值渲染素材。
-// md5 随行带出，老资产未落 md5 时为 null（不能缺字段，前端按 null 判「不可比对」）。
 
 const PROJECT = {
   id: "523",
@@ -56,9 +54,6 @@ describe("handleGetSnapshot assets", () => {
     const result = await handleGetSnapshot("100", "523", deps);
 
     expect(result.code).toBe(200);
-    // 只钉自己负责的字段：material_* 由 IKEXX8/IKFYHJ 的用例覆盖。
-    // 用 toMatchObject 而非 toEqual —— 精确形状会让每次无关字段新增都弄红这里（rebase 已踩过一次）。
-    // 「字段恒在」照样钉得住：toMatchObject 对**键缺失**同样失败（undefined ≠ null）。
     expect(Object.keys(result.data?.assets ?? {})).toEqual(["3994", "3995"]);
     expect(result.data?.assets["3994"]).toMatchObject({
       asset_id: "3994",

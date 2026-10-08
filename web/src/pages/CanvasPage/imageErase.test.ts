@@ -40,7 +40,6 @@ describe('imageEraseGateReason（擦除门槛预检，IKGOT7）', () => {
     expect(
       imageEraseGateReason({ width: IMAGE_ERASE_MAX_LONG_SIDE, height: IMAGE_ERASE_MAX_SHORT_SIDE, size: IMAGE_ERASE_MAX_SIZE_BYTES }),
     ).toBeNull();
-    // 竖图长短边对调同样合法（短边/长边语义，不是宽高绑定）
     expect(
       imageEraseGateReason({ width: IMAGE_ERASE_MAX_SHORT_SIDE, height: IMAGE_ERASE_MAX_LONG_SIDE }),
     ).toBeNull();
@@ -49,7 +48,6 @@ describe('imageEraseGateReason（擦除门槛预检，IKGOT7）', () => {
   it('长边超 2560 或短边超 1440 置灰并给出原因（横竖图同判）', () => {
     expect(imageEraseGateReason({ width: 2561, height: 1440 })).toContain('2560');
     expect(imageEraseGateReason({ width: 2560, height: 1441 })).toContain('1440');
-    // 竖图：宽 1440 高 2561 长边超；宽 1441 高 2000 短边超
     expect(imageEraseGateReason({ width: 1440, height: 2561 })).toContain('2560');
     expect(imageEraseGateReason({ width: 1441, height: 2000 })).toContain('1440');
   });
@@ -80,7 +78,7 @@ describe('imageEraseGateReason（擦除门槛预检，IKGOT7）', () => {
   });
 
   it('契约白名单外的可识别格式同样置灰（jpg 大小写归一，bmp/tiff 等不在白名单）', () => {
-    expect(imageEraseGateReason({ mime: 'image/jpg' })).toBeNull(); // jpg 归一小写在白名单
+    expect(imageEraseGateReason({ mime: 'image/jpg' })).toBeNull();
     expect(imageEraseGateReason({ mime: 'image/bmp' })).toContain('不支持擦除');
     expect(imageEraseGateReason({ src: 'http://tos/a.tif?x=1' })).toContain('不支持擦除');
   });

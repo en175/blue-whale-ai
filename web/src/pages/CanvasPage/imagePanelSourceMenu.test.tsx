@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKGB7U 图片面板附件操作条（旧「+」菜单页面级断言随入口形态改写为操作条断言）：
-   自由面板（首页 AI图片带入，imageSeed 无 targetNodeId）与节点/工具栏面板
-   （草稿绑定，imageDraftId 恒定）第一行操作条同源——左「+ 参考」「资产库」pill 直达
-   旧菜单两项链路，右侧并入展开/关闭；附件栏空态整条隐藏、点选首个附件后出现。
-   「+ 参考」按图片面板类型边界接纳——图片可入参考，视频/音频画布保留节点但
-   禁选并提示，不产生参考或附件；「资产库」弹窗过滤仅图片（列表隐藏视频/音频）。
-   FlowCanvas/CanvasToolbar/AssetsPickerModal 打桩透出 props；ImageDialog 用真实实现。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -48,7 +41,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布点击 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -57,7 +49,6 @@ vi.mock('./components/Canvas', () => ({
   },
 }));
 
-/** CanvasToolbar 打桩：透出图片入口（工具栏打开绑定草稿的生图面板） */
 const toolbarProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/CanvasToolbar', () => ({
   default: (props: Record<string, any>) => {
@@ -66,7 +57,6 @@ vi.mock('./components/CanvasToolbar', () => ({
   },
 }));
 
-/** AssetsPickerModal 打桩：透出 mediaTypes 断言「从资产中选择」的类型过滤 */
 const assetsPickerProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/AssetsPickerModal', () => ({
   default: (props: Record<string, any>) => {
@@ -86,7 +76,6 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** 首页 AI图片 → 画布交接（自由面板唯一入口）：take 即清语义与真实实现一致 */
 const genHandoffMock = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 vi.mock('@/utils/gen-handoff', () => ({
   setGenHandoff: vi.fn(),
@@ -196,7 +185,6 @@ vi.mock('@/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 
-/* useCanvasDoc 打桩须保持引用稳定；内容经 current 按用例注入 */
 const canvasDocMock = vi.hoisted(() => ({
   current: {
     doc: null as unknown,
@@ -210,7 +198,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 场景：图片 m1 / 视频 v1 / 音频 s1 三张就绪素材 + 图片草稿 d1，无连线 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -259,40 +246,34 @@ async function renderPage(withHomeHandoff = false) {
   });
 }
 
-/** 操作条「+ 参考」按钮（IKGB7U：等价旧菜单项「从节点添加素材」的直达入口） */
 function pickReferenceButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
   );
 }
 
-/** 操作条「资产库」按钮（等价旧菜单项「从资产中选择」的直达入口） */
 function assetsLibraryButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
   );
 }
 
-/** 附件栏（空态整条不渲染） */
 function attachmentStrip(): Element | null {
   return container.querySelector(`.${dialogStyles.previewRow}`);
 }
 
-/** 点「+ 参考」：直接进入画布点选模式 */
 async function clickPickReference() {
   await act(async () => {
     pickReferenceButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
 }
 
-/** 点「资产库」：直接打开资产库选择弹窗 */
 async function clickAssetsLibrary() {
   await act(async () => {
     assetsLibraryButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
 }
 
-/** 画布点击指定节点 */
 async function clickNode(id: string) {
   const node = flowProps.current.mediaNodes.find((n: Node) => n.id === id)
     ?? flowProps.current.textNodes.find((n: Node) => n.id === id)!;
@@ -301,7 +282,6 @@ async function clickNode(id: string) {
   });
 }
 
-/** 工具栏打开生图面板（绑定新建草稿卡，即节点/工具栏面板形态） */
 async function openBoundPanel() {
   await act(async () => {
     toolbarProps.current.onToggleImageDialog();
@@ -309,14 +289,12 @@ async function openBoundPanel() {
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 }
 
-/** 首页 AI图片带入打开自由面板（imageSeed 无 targetNodeId） */
 async function openFreePanelFromHome() {
   genHandoffMock.current = { kind: 'image', text: '', modelId: 'm-test', size: '2k', ratio: '1:1', files: [] };
   await renderPage(true);
   await vi.waitFor(() => expect(pickReferenceButton()).toBeTruthy());
 }
 
-/** 面板参考区预览图 alt 列表（自由模式渲染面板本地 files；绑定模式渲染连线 mediaRefs） */
 function refImages(): string[] {
   return [...container.querySelectorAll<HTMLImageElement>(`.${dialogStyles.previewRow} img`)].map(
     (img) => img.alt,
@@ -413,7 +391,6 @@ describe('IKGB7U 图片面板附件操作条', () => {
 
     expect(toastText()).toContain('图片参考仅支持图片素材');
     expect(refImages()).toEqual([]);
-    // 选取模式保持：紧接点图片节点仍完成注入
     await clickNode('m1');
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
   });
@@ -446,7 +423,6 @@ describe('IKGB7U 图片面板附件操作条', () => {
 
     expect(toastText()).toContain('图片参考仅支持图片素材');
     expect(refImages()).toEqual([]);
-    // 既有规则：绑定面板禁选提示后退出选取模式；用户重新从操作条发起再选图片即可
     await clickPickReference();
     await clickNode('m1');
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));

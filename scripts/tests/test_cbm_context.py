@@ -1,4 +1,3 @@
-"""Black-box tests of repository-scoped CBM context hooks."""
 import json
 import os
 from pathlib import Path
@@ -31,7 +30,6 @@ class CbmContextTests(unittest.TestCase):
         self.assertIn(str(ROOT / 'agent-rules/code-discovery.md'), result['additionalContext'])
 
     def test_global_plugin_does_not_suppress_repository_protocol(self):
-        # The real home has the official plugin installed: local rules must still arrive.
         result = self.context()
         self.assertIn('CBM', result['additionalContext'])
 
@@ -82,9 +80,6 @@ class CbmContextTests(unittest.TestCase):
         self.assertIn(str(ROOT / 'agent-rules/code-discovery.md'), result['additionalContext'])
 
     def test_five_platforms_install_repository_reminders(self):
-        # ZCode 的 hooks.events 严格 schema 只认七个事件（无 SubagentStart）：
-        # 白名单外事件会让整个配置文件被拒载、全部 Hook 静默失效（IKJGD5），
-        # 因此 ZCode 端只断言 SessionStart / PreToolUse 两个注入通道。
         for filename, nested, events in [
                 ('.claude/settings.json', False, ('SessionStart', 'SubagentStart', 'PreToolUse')),
                 ('.codex/hooks.json', False, ('SessionStart', 'SubagentStart', 'PreToolUse')),

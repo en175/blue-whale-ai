@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-/* IKJJR4 合成任务运行时接入后的页面级回归：
-   - 刷新恢复：历史在卡任务经水合即时续轮询（终态由轮询回填原卡）；
-     新协议受理回执丢失经恢复扫描按原目标快照补卡（合成身份随快照恢复）。
-   - 取消回退：服务端取消确认后 settleTarget 回草稿，同一草稿可再次生成。
-   - 已产出成品卡（身份已清）不参与恢复。 */
 import { act, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ReactFlowProvider } from '@xyflow/react';
@@ -14,8 +9,6 @@ import {
   apiMocks, canvasDocMock, flowProps, mediaNodes, renderPage, unmountPage,
 } from './testing/canvasPageTestHarness';
 
-/** 恢复扫描页（B.5）：按用例注入 records；默认空页。IKJKU9：扫描经 Query 生命周期
- *  取页——mock 提供点换到 queryOptions 的 queryFn（保留真实 key 工厂行为）。 */
 const recoveryPageMock = vi.hoisted(() => ({ current: null as null | { records: unknown[] } }));
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -46,7 +39,6 @@ const identity = {
   video: { assetId: '5', nodeId: 'v1', name: '城市夜景.mp4', duration: 12, width: 1280, height: 720 },
 };
 
-/** 画布：音频成品卡 a1 + 视频成品卡 v1 + 可选合成卡 m1（genStatus 可调） */
 function seedDoc(m1?: { genStatus?: string; jobId?: string; keepIdentity?: boolean }) {
   const nodes: Array<Record<string, unknown>> = [
     { id: 'a1', type: 'mediaNode', position: { x: 0, y: 0 },
@@ -112,7 +104,7 @@ describe('IKJJR4 合成任务：刷新恢复', () => {
   });
 
   it('受理回执丢失的新协议任务经恢复扫描补卡：合成身份随原目标快照恢复（视频型、生成中、jobId 续上）', async () => {
-    seedDoc(); // 草稿卡不在画布（回执未落盘）
+    seedDoc();
     recoveryPageMock.current = {
       records: [{
         submission_id: '11111111-1111-4111-8111-111111111111',
@@ -134,7 +126,7 @@ describe('IKJJR4 合成任务：刷新恢复', () => {
       mediaType: 'video', genStatus: 'generating', jobId: '79', fileName: AUDIO_VIDEO_MUX_TITLE,
     });
     expect(dataOf('m1').audioVideoMux).toEqual(identity);
-    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled()); // 补卡落盘
+    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled());
   });
 
   it('已产出成品卡（身份已清、无 genStatus）不进恢复轮询、不被覆盖', async () => {
@@ -155,15 +147,13 @@ describe('IKJJR4 合成任务：取消回退与再次生成（settleTarget 链�
     await renderPage();
     await vi.waitFor(() => expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('79'));
 
-    // 取消：服务端确认 cancelled → 卡回草稿（保留合成身份与连线）
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '79', status: 'cancelled', progress: 30, asset: null });
     await act(async () => { (dataOf('m1').onCancelJob as (id: string) => void)('m1'); });
     await vi.waitFor(() => expect(dataOf('m1').genStatus).toBe('draft'));
     expect(dataOf('m1').audioVideoMux).toEqual(identity);
-    expect(mediaNodes().some((node) => node.id === 'm1')).toBe(true); // 草稿保留，不移除
+    expect(mediaNodes().some((node) => node.id === 'm1')).toBe(true);
     expect((flowProps.current.edges as Array<{ target: string }>).filter((edge) => edge.target === 'm1')).toHaveLength(2);
 
-    // 再次生成：同草稿提交（角色 draft），携 canvas_binding 承接绑定
     apiMocks.createAudioVideoMux.mockResolvedValue({ job_id: '80', status: 'queued', enqueue_required: true });
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '80', status: 'queued', progress: 0, asset: null });
     await act(async () => { flowProps.current.onNodeClick(mediaNodes().find((n) => n.id === 'm1')!); });
@@ -209,6 +199,6 @@ describe('IKJJR4 合成任务：取消回退与再次生成（settleTarget 链�
       selectable: true, deletable: true, draggable: true, isConnectable: true,
       positionAbsoluteX: 0, positionAbsoluteY: 0,
     } as never)));
-    expect(html).not.toContain('mediaVideoPoster'); // 生成中不可播放
+    expect(html).not.toContain('mediaVideoPoster');
   });
 });

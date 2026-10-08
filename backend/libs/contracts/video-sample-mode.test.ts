@@ -1,5 +1,3 @@
-// IKIZQ5 样片/成片契约自检：非平凡语义（strict 拒绝输入重放、报价 null 一致性、
-// 截止公式、旧任务兼容）各留一条最小可跑断言；金标 JSON 与契约字段对账防腐。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -33,7 +31,6 @@ describe("sampleModeParametersSchema", () => {
     expect(() =>
       sampleModeParametersSchema.parse({ sample_mode: true, resolution: "1080p" }),
     ).toThrow();
-    // "true"（字符串）与 1 都是网关历史兼容形态，本仓契约只认字面 true
     expect(() =>
       sampleModeParametersSchema.parse({ sample_mode: "true", resolution: "480p" }),
     ).toThrow();
@@ -54,7 +51,6 @@ describe("成片请求：浏览器只带提交确认，不重放输入", () => {
   });
 
   it("strict 拒绝输入重放与上游 Draft ID（IKIZPZ 成片契约）", () => {
-    // 提示词/参考/时长/比例/音频设置一律进不来
     expect(() =>
       videoFinalizeCreateRequestSchema.parse({
         expected_credits: 19,
@@ -65,7 +61,6 @@ describe("成片请求：浏览器只带提交确认，不重放输入", () => {
         generate_audio: true,
       }),
     ).toThrow();
-    // 上游 Draft ID 不进入浏览器契约（网关私有，IKIZBR）
     expect(() =>
       videoFinalizeCreateRequestSchema.parse({
         expected_credits: 19,
@@ -207,11 +202,10 @@ describe("投影：阶段、来源、截止、费用", () => {
 
 describe("可信截止时间公式（金标 G06）", () => {
   it("截止 = 可信 created_at + 7 天 − 安全余量，严格早于官方窗口结束", () => {
-    const created = Date.UTC(2026, 8, 29, 2, 0, 0); // 2026-09-29T02:00:00Z
+    const created = Date.UTC(2026, 8, 29, 2, 0, 0);
     const deadline = finalizeDeadlineFromUpstreamCreatedAt(created);
     const deadlineMs = Date.parse(deadline);
     expect(deadlineMs).toBe(created + FINALIZE_WINDOW_DAYS * DAY_MS - FINALIZE_SAFETY_MARGIN_MS);
-    // 核心不变量：本仓截止必须落在官方 7 天窗口内（IKIZKG：网关 SubmitTime 偏晚的教训）
     expect(deadlineMs).toBeLessThan(created + FINALIZE_WINDOW_DAYS * DAY_MS);
     expect(deadline).toBe("2026-10-06T01:00:00.000Z");
   });
@@ -222,9 +216,7 @@ describe("枚举值冻结（跨语言对账锚点）", () => {
     expect(VIDEO_STAGES).toEqual(["video", "sample", "final"]);
     expect(CHARGE_STATES).toEqual(["held", "settled", "released"]);
     expect(JOB_STATUS_CHECKING).toBe("checking");
-    // confirmedSubmitFieldsSchema 仍是成片提交的完整形态（三类提交共用增量）。
     expect(videoFinalizeCreateRequestSchema).toBe(confirmedSubmitFieldsSchema);
-    // IKJJR0：重新生成在其上扩展可选 canvas_binding（统一关联受理），仍 strict。
     expect(sampleRegenerateRequestSchema.shape.canvas_binding).toBeDefined();
     expect(Object.keys(sampleRegenerateRequestSchema.shape)).toEqual([
       "expected_credits",
@@ -235,7 +227,6 @@ describe("枚举值冻结（跨语言对账锚点）", () => {
 });
 
 describe("跨语言金标用例 JSON 对账", () => {
-  // 3 级 .. = 仓库根；金标与 ikensz-golden-cases.json 同目录同格式
   const golden = JSON.parse(
     readFileSync(
       new URL("../../../docs/specs/2026-09-29-ikizq5-video-sample-mode-golden-cases.json", import.meta.url),

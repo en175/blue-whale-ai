@@ -23,7 +23,6 @@ interface Props {
 }
 export interface AudioPromptEditorHandle { insert: (key: PromptRefKey) => void; clear: () => void }
 
-/** 音频与曲风共享正文编辑：身份取自已接纳参考；新选择成功出现在参考区后才落标签。 */
 export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEditor(
   { refs, attachments = [], initialDoc, initialText, readOnly, placeholder, className, mentionItems = [], onMentionCanvas, onChange, onSubmit }, ref,
 ) {
@@ -60,7 +59,6 @@ export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEd
       pending.current = null;
       setReplacement(null);
     }
-    // 身份序列变化才确认本次异步添加成功。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
   useImperativeHandle(ref, () => ({
@@ -76,7 +74,6 @@ export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEd
         thumbUrl: r.src,
         assetId: String(r.assetId),
       })),
-      // IKIQGR：文本附件带正文全文（searchText），与画布分区同一过滤谓词命中；媒体项不带
       ...attachments.map(a => ({ id: a.nodeId, kind: 'text' as const, name: a.title, searchText: a.text })),
     ];
     return [...selected, ...mentionItems.filter(item => !selected.some(s => s.kind === item.kind && s.id === item.id))];

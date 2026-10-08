@@ -13,10 +13,6 @@ export interface ComposerAttachmentChipProps {
   onRemove: () => void;
 }
 
-/**
- * 侧边栏上传在输入框上方的那一颗：有 URL 就走图片/视频提及胶囊，
- * 上传中也能看见缩略图，而不是干等「图片：文件名」。
- */
 export function ComposerAttachmentChip({
   name,
   mediaType,

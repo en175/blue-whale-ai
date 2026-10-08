@@ -1,12 +1,3 @@
-/* ============================================
- * PromptRefEditor：生图正文素材标签编辑器（IKFA1M）
- *
- * 底层 Lexical（PlainTextPlugin + AssetRefNode），与 ChipTextEditor 同族但语义不同：
- * 标签只有稳定身份（assetId），编号由 PromptRefContext 按当前有效输入实时派生；
- * 出口始终是结构化 PromptDoc（onChange），拍平与编译都在调用方/服务端。
- * @ 检测：光标前文本末尾命中「@query」时通过 onMentionChange 上报，
- * 菜单由调用方渲染；insertRefAtMention 把本次查询原位替换为素材标签。
- * ============================================ */
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { PlainTextPlugin } from '@lexical/react/LexicalPlainTextPlugin';
@@ -50,43 +41,26 @@ export interface MentionState {
 }
 
 export interface PromptRefEditorHandle {
-  /** 已引用项：把本次 @ 查询原位替换为指定素材的标签；无进行中的查询时不动作 */
   insertRefAtMention: (key: PromptRefKey) => void;
-  /** 添加新参考入口：删除本次 @ 查询并记住插入点（新参考添加成功后由 insertRefAtPending 落标签） */
   consumeMentionForPendingInsert: () => void;
-  /** 在记住的插入点插入标签；音频缩略图可显式选择当前光标，均无有效位置时追加到末尾。 */
   insertRefAtPending: (key: PromptRefKey, atCurrentSelection?: boolean) => void;
-  /** 放弃本次 @ 查询（保留已输入的 @ 文本）；restoreFocus=true（Esc 取消）时光标落回
-   *  「@query」之后并重新聚焦编辑器，点外关闭不传以维持不抢焦现状（IKFXOR） */
   dismissMention: (restoreFocus?: boolean) => void;
-  /** 替换失效提及（IKFA1N B5）：把指定节点换绑为其他已引用素材，仅该处提及变化 */
   replaceRefAt: (nodeKey: string, key: PromptRefKey) => void;
-  /** 清空全部内容（发送后调用） */
   clear: () => void;
 }
 
 interface PromptRefEditorProps {
-  /** 结构化初始内容（草稿恢复）；与 initialText 二选一，结构优先 */
   initialDoc?: PromptDoc | null;
-  /** 纯文本初始内容（旧草稿/重新编辑带入） */
   initialText?: string;
   placeholder?: string;
   readOnly?: boolean;
-  /** 标签有效性判定（reconcile 用）：返回 null 表示该身份当前失效。
-   *  按寻址键分派（IKFA1P）：图片 = 身份在最终 input_asset_ids；视频 = 身份在参考集合
-   *  且当前模式接受（IKFA1O）；文本 = 来源节点在当前文本附件集合（IKFA1P） */
   labelOf: (key: PromptRefKey) => string | null;
-  /** labelOf 结果的稳定键（身份序列）：变化时触发 reconcile 重派生 */
   reconcileKey: string;
-  /** 展示文案：身份 → 标签文案（图片N/视频N/首帧/文本N 等；与附件区/菜单/服务端编译同一映射） */
   labels: ReadonlyMap<string, string>;
-  /** 素材元信息（缩略图/名称/媒体类型）；文本项 name=来源节点标题、mediaType='text' */
   refsMeta: ReadonlyMap<string, AssetRefMeta>;
   onChange: (doc: PromptDoc) => void;
   onMentionChange?: (state: MentionState) => void;
-  /** 点击失效标签（IKFA1N）：交由调用方打开替换菜单，选中后经 replaceRefAt 换绑 */
   onInvalidTagClick?: (nodeKey: string) => void;
-  /** @ 菜单键盘导航：菜单打开时返回 true 消费按键（ArrowUp/Down/Enter/Escape） */
   onMentionKey?: (key: 'down' | 'up' | 'enter' | 'escape') => boolean;
   className?: string;
 }
@@ -99,7 +73,6 @@ function EditorRefBridge({ editorRef }: { editorRef: React.MutableRefObject<Lexi
   const [editor] = useLexicalComposerContext();
   useEffect(() => {
     editorRef.current = editor;
-    // 测试接缝：jsdom 无法驱动 contentEditable 输入，测试经根元素上的实例直接 editor.update
     const root = editor.getRootElement() as (HTMLElement & { __promptRefEditor?: LexicalEditor }) | null;
     if (root) root.__promptRefEditor = editor;
     return () => {
@@ -110,7 +83,6 @@ function EditorRefBridge({ editorRef }: { editorRef: React.MutableRefObject<Lexi
   return null;
 }
 
-/** 只读开关（生成中参数冻结） */
 function EditablePlugin({ readOnly }: { readOnly?: boolean }) {
   const [editor] = useLexicalComposerContext();
   useEffect(() => {
@@ -119,8 +91,6 @@ function EditablePlugin({ readOnly }: { readOnly?: boolean }) {
   return null;
 }
 
-/** @ 查询检测：光标为折叠 Range 且落在文本节点时，取光标前文本做末尾匹配。
- *  命中 → 记录锚点（@ 所在节点 key 与偏移）并上报；失配 → 关闭。 */
 function MentionPlugin({
   onMentionChange,
   mentionAnchorRef,
@@ -137,7 +107,6 @@ function MentionPlugin({
       onMentionChange?.(state);
     };
     return editor.registerUpdateListener(({ editorState, prevEditorState, tags }) => {
-      // 编号重派生/初始化等非编辑更新不重新检测（避免覆盖刚插入标签后的状态）
       if (tags.has('prompt-ref-reconcile')) return;
       editorState.read(() => {
         const selection = $getSelection();
@@ -158,7 +127,6 @@ function MentionPlugin({
           const current = mentionAnchorRef.current;
           const continuing = current?.key === node.getKey() && current.offset === offset;
           if (!continuing) {
-            // 关闭后只允许新插入的 @ 开启查询；光标移动、修改旧查询都不能重开。
             const text = node.getTextContent();
             const previous = prevEditorState.read(() => $getNodeByKey(node.getKey())?.getTextContent() ?? '');
             let start = 0;
@@ -185,8 +153,6 @@ function MentionPlugin({
   return null;
 }
 
-/** 文案重派生与失效标记：有效标签集合变化时，把 reconcile 结果写回标签节点
- *  （IKFA1O 泛化 + IKFA1P 按寻址键分派媒体/文本） */
 function ReconcilePlugin({ labelOf, reconcileKey }: { labelOf: (key: PromptRefKey) => string | null; reconcileKey: string }) {
   const [editor] = useLexicalComposerContext();
   const labelOfRef = useRef(labelOf);
@@ -201,7 +167,6 @@ function ReconcilePlugin({ labelOf, reconcileKey }: { labelOf: (key: PromptRefKe
   return null;
 }
 
-/** @ 菜单键盘导航（菜单打开时由调用方消费按键） */
 function MentionKeyPlugin({ onMentionKey }: { onMentionKey?: (key: 'down' | 'up' | 'enter' | 'escape') => boolean }) {
   const [editor] = useLexicalComposerContext();
   useEffect(() => {
@@ -223,8 +188,6 @@ function MentionKeyPlugin({ onMentionKey }: { onMentionKey?: (key: 'down' | 'up'
   return null;
 }
 
-/** 标签退格删除：Lexical 默认删字行为不处理 DecoratorNode 标签（标签无叉叉，退格是唯一删除途径）。
- *  光标折叠且前一兄弟是标签时删除该标签，其余按键交还默认处理。 */
 function BackspaceRefPlugin() {
   const [editor] = useLexicalComposerContext();
   useEffect(() => {
@@ -253,14 +216,11 @@ function BackspaceRefPlugin() {
   return null;
 }
 
-/** 标签光标吸附：Lexical 默认把光标停在 DecoratorNode 标签的边界点上——该点不可见（光标「被吞」）
- *  且再次按键看似不动（卡在标签里）。左右键与点击标签时直接落到标签前后的可见文本位置。 */
 function RefCursorNavPlugin() {
   const [editor] = useLexicalComposerContext();
   useEffect(() => {
     const $collapseTo = (node: LexicalNode, offset: number, type: 'text' | 'node' | 'element') => {
       const sel = $createRangeSelection();
-      // 'node' 是运行时合法光标类型（装饰节点锚定），Lexical 公开类型未收录，收敛断言不改行为
       sel.anchor.set(node.getKey(), offset, type as 'text' | 'element');
       sel.focus.set(node.getKey(), offset, type as 'text' | 'element');
       $setSelection(sel);
@@ -356,12 +316,10 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       const label = labelOfCurrent(key);
       editor.update(() => {
         if (!$getNodeByKey(anchor.key)) return;
-        // 恢复「@query」的选择范围并原位替换为标签，保留前后文字与段落
         $restoreMentionSelection(anchor)?.insertNodes([
           $createAssetRefNode(key.id, label, undefined, key.kind === 'text_ref' ? 'text' : 'asset'),
         ]);
       }, {
-        // 插入后编辑器聚焦、光标落在标签后（IKFXOR：菜单搜索框曾抢走焦点，选中后还回不打断输入）
         onUpdate: () => editor.focus(),
       });
       mentionAnchorRef.current = null;
@@ -378,7 +336,6 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
           const sel = $restoreMentionSelection(anchor);
           if (!sel) return;
           sel.removeText();
-          // 删除后光标折叠在原 @ 位置，记住插入点等添加成功
           const collapsed = $getSelection();
           if ($isRangeSelection(collapsed) && collapsed.isCollapsed()) {
             pendingInsertRef.current = { key: collapsed.anchor.key, offset: collapsed.anchor.offset };
@@ -395,7 +352,6 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       if (!editor) return;
       const label = labelOfCurrent(key);
       editor.update(() => {
-        // 节点构造必须在 editor.update 内同步执行（Lexical 约束）
         const node = $createAssetRefNode(key.id, label, undefined, key.kind === 'text_ref' ? 'text' : 'asset');
         let inserted = false;
         if (point && $getNodeByKey(point.key)) {
@@ -421,14 +377,11 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
           }
         }
         if (!inserted) {
-          // 插入点已失效（期间文本被改动）：退化为追加到末尾，不丢引用
           $getRoot().selectEnd();
           const sel = $getSelection();
           if ($isRangeSelection(sel)) sel.insertNodes([node]);
         }
       }, {
-        // 插入后编辑器聚焦、光标落在插入内容之后（IKFCKK：@ 按钮插入不打断输入节奏）；
-        // focus 须在本次 update 提交后调用（提交前调用会被 pending 队列吞掉，焦点不落 DOM）
         onUpdate: () => editor.focus(),
       });
     },
@@ -437,9 +390,6 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       mentionAnchorRef.current = null;
       pendingInsertRef.current = null;
       if (restoreFocus && editor) {
-        // 只还焦点：菜单搜索框 autoFocus 抢焦不清模型选区（保留在 typing 位置，即 @query 之后），
-        // focus() 提交后由 Lexical 的 dirty 选区恢复机制把光标写回并聚焦 root。实测手动按锚点
-        // 重建选区会与该恢复机制竞争，反被延迟 reconciliation 覆盖回开头，故不重建。
         editor.focus();
       }
       onMentionChange?.({ open: false, query: '' });
@@ -451,7 +401,6 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if (!$isAssetRefNode(node)) return;
-        // 换绑身份与身份类型（IKFA1P：文本/媒体可互替，仅该处提及变化）
         node.setAssetId(key.id);
         node.setRefKind(key.kind === 'text_ref' ? 'text' : 'asset');
         if (label !== undefined) node.setLabel(label);

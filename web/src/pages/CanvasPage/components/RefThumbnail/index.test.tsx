@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-/* IKFCKK：共享参考缩略图组件——三态交互（默认编号圆钮 → 悬停 ×/@ 淡入 → 悬停 200ms 放大预览）、
-   四类素材（图片/视频/音频/文本）预览形态、× 立即删除、紧凑重编号、@ 两路插入（有/无记忆光标） */
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,9 +6,6 @@ import RefThumbnail, { INSERT_REF_APPEND_TITLE, INSERT_REF_AT_SELECTION_TITLE, t
 import PromptRefEditor, { type PromptRefEditorHandle } from '../PromptRefEditor';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
-// 真实 floating-ui 的 refs 跨渲染稳定（同一实例同一对象，detach/attach 写同一 current）；
-// mock 也必须共享稳定 refs——否则重渲染后闭包持有的旧 refs 被 detach 置 null，
-// IKIQ89 滚动命中判定拿不到锚点
 const mockFloatingRefs = vi.hoisted(() => ({
   reference: { current: null as Element | null },
   floating: { current: null as Element | null },
@@ -22,7 +17,6 @@ vi.mock('@floating-ui/react', () => ({
   flip: () => ({}),
   offset: () => ({}),
   shift: () => ({}),
-  // refs 记录真实元素：IKIQ89 滚动关闭按 reference/floating 的 rect 做指针命中判定
   useFloating: () => ({
     refs: {
       reference: mockFloatingRefs.reference,
@@ -44,8 +38,6 @@ interface HarnessItem {
   duration?: number;
 }
 
-/** 集成台架：缩略图列表 + PromptRefEditor——@ 按钮经 insertRefAtPending 插入素材标签，
- *  删除回调驱动列表收敛（紧凑重编号）。editorRef 由测试持有以驱动记忆光标路径。 */
 function Harness({ items, editorRef }: {
   items: HarnessItem[];
   editorRef: { current: PromptRefEditorHandle | null };
@@ -104,8 +96,6 @@ function hoverState(): string | null {
   return thumb().getAttribute('data-hovered');
 }
 
-// React 的 onMouseEnter/Leave 由根委托的 mouseover/mouseout 合成派发：
-// 从外部进入 = mouseover(relatedTarget=目标外元素)，离开 = mouseout(同上)
 function hover(el: Element) {
   act(() => {
     el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
@@ -140,7 +130,6 @@ describe('RefThumbnail 三态交互（IKFCKK）', () => {
     expect(hoverState()).toBe('false');
     const badge = mountNode.querySelector('[data-testid="ref-thumb-badge"]');
     expect(badge?.textContent).toBe('3');
-    // 底部「图片N」文字标签形态不再出现：缩略图文本内容只有编号
     expect(thumb().textContent).toBe('3');
   });
 
@@ -211,7 +200,6 @@ describe('RefThumbnail 四类素材预览形态（IKFCKK）', () => {
     await vi.waitFor(() => expect(preview()?.querySelector('img')).toBeTruthy());
     const img = preview()!.querySelector('img')!;
     expect(img.getAttribute('src')).toBe('https://x/a.png');
-    // 仅打开时挂载媒体：缩略图本体不重复挂预览节点
     expect(preview()!.querySelectorAll('img')).toHaveLength(1);
   });
 
@@ -228,7 +216,6 @@ describe('RefThumbnail 四类素材预览形态（IKFCKK）', () => {
     expect(video.muted).toBe(true);
     expect(video.loop).toBe(true);
     unhover(thumb());
-    // 预览关闭即卸载播放节点；仅缩略图首帧（preload=metadata，无 autoplay）残留
     expect(preview()).toBeNull();
     const thumbVideo = mountNode.querySelector('video[src="https://x/clip.mp4"]') as HTMLVideoElement;
     expect(thumbVideo.autoplay).toBe(false);
@@ -236,7 +223,6 @@ describe('RefThumbnail 四类素材预览形态（IKFCKK）', () => {
 
   it('音频：图标 + 名称 + 时长卡片', async () => {
     await renderSingle({ kind: 'audio', url: 'https://x/a.mp3', name: '旁白音频', number: 1, audioDuration: 95 });
-    // 缩略图形态：AudioLines 图标占位
     expect(thumb().querySelector('svg')).toBeTruthy();
     await act(async () => {
       hover(thumb());
@@ -268,7 +254,6 @@ describe('RefThumbnail 文本预览可交互（IKFCX4）', () => {
     });
     await vi.waitFor(() => expect(preview()).toBeTruthy());
     expect((preview() as HTMLElement).style.pointerEvents, '文本浮层可交互').not.toBe('none');
-    // 正文卡片保持滚动样式（长文滚动至末尾由浏览器段验证真实滚动）
     const card = preview()!.firstElementChild as HTMLElement;
     expect(card.className).toContain('textCard');
   });
@@ -327,14 +312,12 @@ describe('RefThumbnail 文本预览可交互（IKFCX4）', () => {
     await vi.waitFor(() => expect(preview()).toBeTruthy());
     unhover(thumb());
     hover(preview()!);
-    // 浮层 → 图标往返：离开浮层回到图标，取消中的关闭被图标侧接管，浮层保持打开
     unhover(preview()!);
     hover(thumb());
     await act(async () => {
       await wait(300);
     });
     expect(preview(), '浮层与图标间往返不中断阅读').toBeTruthy();
-    // 真正移出两者后：延迟窗口内保持，超时关闭
     unhover(thumb());
     await act(async () => {
       await wait(60);
@@ -388,18 +371,15 @@ describe('RefThumbnail @ 插入两路（IKFCKK）', () => {
     const editorRef: { current: PromptRefEditorHandle | null } = { current: null };
     await renderHarness([{ id: 'a', kind: 'image', name: '角色图', url: 'https://x/a.png' }], editorRef);
     await typePromptRefText(mountNode, '开头');
-    // 模拟点击 @ 前焦点在缩略图区：先让编辑器失焦
     (document.activeElement as HTMLElement | null)?.blur?.();
     const atBtn = mountNode.querySelector<HTMLButtonElement>('button[title="插入引用"]')!;
     await act(async () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(readPromptRefText(mountNode)).toBe('开头图片1');
-    // 插入后编辑器聚焦
     await vi.waitFor(() => {
       expect(document.activeElement?.hasAttribute('contenteditable')).toBe(true);
     });
-    // 光标落在插入内容之后：继续输入接在标签后
     await typePromptRefRaw(mountNode, '尾巴');
     expect(readPromptRefText(mountNode)).toBe('开头图片1尾巴');
   });
@@ -407,7 +387,6 @@ describe('RefThumbnail @ 插入两路（IKFCKK）', () => {
   it('有记忆光标：@ 引用原位插入在记住的插入点', async () => {
     const editorRef: { current: PromptRefEditorHandle | null } = { current: null };
     await renderHarness([{ id: 'a', kind: 'image', name: '角色图', url: 'https://x/a.png' }], editorRef);
-    // 输入「AB@」产生 @ 查询锚点，consume 删除查询并记住插入点（@ 所在处）
     await typePromptRefText(mountNode, 'AB');
     await typePromptRefRaw(mountNode, '@');
     await act(async () => {
@@ -419,7 +398,6 @@ describe('RefThumbnail @ 插入两路（IKFCKK）', () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(readPromptRefText(mountNode)).toBe('AB图片1');
-    // 插入后光标落在标签之后：继续输入接在原位插入的标签后
     await typePromptRefRaw(mountNode, '尾巴');
     expect(readPromptRefText(mountNode)).toBe('AB图片1尾巴');
   });
@@ -453,7 +431,6 @@ describe('RefThumbnail @ 插入两路（IKFCKK）', () => {
 });
 
 describe('RefThumbnail 预览关闭新时机（IKIQ89）', () => {
-  /** jsdom rect 恒 0：按元素 mock rect（未登记的元素返回零矩形） */
   function mockRects(layout: Map<Element, { left: number; top: number; width: number; height: number }>) {
     return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function mock(this: HTMLElement) {
       const rect = layout.get(this);
@@ -479,7 +456,6 @@ describe('RefThumbnail 预览关闭新时机（IKIQ89）', () => {
       await wait(230);
     });
     await vi.waitFor(() => expect(preview()).toBeTruthy());
-    // jsdom hover 记录的指针坐标在原点：mock 参考栏滚动后缩略图 rect 离开原点
     const restore = mockRects(new Map([[thumb(), { left: 240, top: 12, width: 64, height: 64 }]]));
     scrollStrip();
     expect(preview(), '缩略图离开指针下方即等同移出（媒体预览立即消失）').toBeNull();
@@ -493,7 +469,6 @@ describe('RefThumbnail 预览关闭新时机（IKIQ89）', () => {
       await wait(230);
     });
     await vi.waitFor(() => expect(preview()).toBeTruthy());
-    // 滚动量小：缩略图 rect 仍覆盖指针（原点）
     const restore = mockRects(new Map([[thumb(), { left: -8, top: -8, width: 64, height: 64 }]]));
     scrollStrip();
     expect(preview(), '缩略图仍在指针下方时滚动不关闭').toBeTruthy();
@@ -509,7 +484,6 @@ describe('RefThumbnail 预览关闭新时机（IKIQ89）', () => {
     await vi.waitFor(() => expect(preview()).toBeTruthy());
     unhover(thumb());
     hover(preview()!);
-    // 指针在浮层上：缩略图滚出指针下方但浮层 rect 仍覆盖指针，不关闭
     const layout = new Map<Element, { left: number; top: number; width: number; height: number }>([
       [thumb(), { left: 240, top: 12, width: 64, height: 64 }],
       [preview()!, { left: -40, top: -40, width: 280, height: 200 }],
@@ -520,7 +494,6 @@ describe('RefThumbnail 预览关闭新时机（IKIQ89）', () => {
       await wait(300);
     });
     expect(preview(), '移入文本浮层滚动阅读不被滚动关闭').toBeTruthy();
-    // 浮层也滚出指针下方：等同移出，走文本延迟关闭
     layout.set(preview()!, { left: 240, top: 300, width: 280, height: 200 });
     scrollStrip();
     await act(async () => {
@@ -536,7 +509,6 @@ describe('RefThumbnail 预览关闭新时机（IKIQ89）', () => {
 
   it('打开计时期间缩略图滚出指针下方：到点不弹出浮层（挂载即命中判定）', async () => {
     await renderSingle({ kind: 'image', url: 'https://x/a.png', number: 1 });
-    // 滚动发生在 200ms 打开计时窗口内：该窗口没有 scroll 监听，挂载时的命中判定是唯一收口点
     const restore = mockRects(new Map([[thumb(), { left: 240, top: 12, width: 64, height: 64 }]]));
     await act(async () => {
       hover(thumb());

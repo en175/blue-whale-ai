@@ -6,7 +6,6 @@ describe("canvas optimistic save", () => {
   it("首次保存规范混合结果卡记为 present，移除记 removed，撤销重加回 present", async () => {
     let version = 3;
     let cardState = "pending";
-    // IKJCOE：卡片持久状态住在 generation_job_extras（原主表列已删）——假件照新机制记账。
     const upsertExtra = vi.fn(async ({ where, create }: {
       where: { generation_job_id_extra_key: { generation_job_id: bigint } };
       create: { extra_key: string; value_text: string };
@@ -27,7 +26,6 @@ describe("canvas optimistic save", () => {
           viewport_json: null, nodes_json: [], edges_json: null })),
       },
       generation_output_slots: { updateMany: vi.fn() },
-      // 候选扫描：本轮不在画布上的 audio_mix 任务（作用域收在本项目 + 本人 + 未删）。
       generation_jobs: {
         findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
           if (where.project_id !== 55n || where.user_id !== 9n || where.type !== "audio_mix" || where.is_delete !== false) return [];
@@ -37,7 +35,6 @@ describe("canvas optimistic save", () => {
       },
       generation_job_extras: {
         upsert: upsertExtra,
-        // 缺键 = 'pending' 由调用侧兜底，这里原样报出当前值。
         findMany: vi.fn(async ({ where }: { where: { generation_job_id: bigint | { in: bigint[] } } }) => {
           const ids = typeof where.generation_job_id === "object" && "in" in where.generation_job_id
             ? where.generation_job_id.in
@@ -60,9 +57,6 @@ describe("canvas optimistic save", () => {
   });
 
   it("IKJCOE：卡号不在本人本项目作用域内 → 一个扩展位都不写（跨用户写防护）", async () => {
-    // 卡号来自请求体里的画布节点（node.id 与 node.data.jobId 都是客户端可构造的），
-    // 所以「按 id 写扩展位」之前必须过一次归属过滤。这里用一个不属于本人的 jobId，
-    // 断言作用域查询被调用、且**没有任何** upsert 落到扩展位上。
     const upsertExtra = vi.fn().mockResolvedValue({});
     const tx = {
       canvas: {
@@ -74,7 +68,6 @@ describe("canvas optimistic save", () => {
       },
       generation_output_slots: { updateMany: vi.fn() },
       generation_jobs: {
-        // 作用域过滤：只有属于 (55, 9, audio_mix, 未删) 的 id 才出现在结果里。
         findMany: vi.fn(async ({ where }: { where: { id?: { in?: bigint[] } } }) =>
           (where.id?.in ?? []).includes(73n) ? [{ id: 73n }] : [],
         ),
@@ -144,7 +137,6 @@ describe("canvas optimistic save", () => {
     const repo = createCanvasRepo({ $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as never);
     const forged = JSON.stringify([{ id: "other-73", type: "mediaNode", data: { jobId: "73" } }]);
     await expect(repo.saveIfVersion("55", 3, null, forged, null, { ownerId: "9", items: [] })).resolves.toBeNull();
-    // 冲突（count=0）与非规范卡号都到不了写扩展位那一步。
     expect(jobUpsert).not.toHaveBeenCalled();
   });
 
@@ -160,7 +152,6 @@ describe("canvas optimistic save", () => {
       generation_jobs: { findMany: jobScan },
       generation_job_extras: {
         upsert: jobUpsert,
-        // 该任务此前在画布上（扩展位记 present），这一轮不在节点集里 → 改 removed。
         findMany: vi.fn().mockResolvedValue([
           { generation_job_id: 73n, extra_key: "canvas_card_state", value_type: "string", value_text: "present" },
         ]),
@@ -172,10 +163,8 @@ describe("canvas optimistic save", () => {
     };
     const repo = createCanvasRepo({ $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as never);
 
-    // 节点集里已没有 audio-mix-73 卡（用户在画布上删除了结果卡）。
     await repo.saveIfVersion("55", 3, null, "[]", null, { ownerId: "9", items: [] });
 
-    // 任务只在扩展位上收到 canvas_card_state='removed'（软状态，任务行的 is_delete 不动）；资产行零写调用。
     expect(jobUpsert).toHaveBeenCalledTimes(1);
     const upsertArg = jobUpsert.mock.calls[0]![0];
     expect(upsertArg.create).toEqual({
@@ -272,7 +261,6 @@ describe("canvas optimistic save", () => {
   });
 });
 
-// IKDLQF：edges_json 与 nodes_json 同一次条件写入，读取路径序列化为字符串（缺省 null）。
 describe("canvas edges persistence (IKDLQF)", () => {
   it("persists parsed edges in the same conditional write and returns them serialized", async () => {
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];

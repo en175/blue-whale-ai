@@ -1,37 +1,3 @@
-/* ============================================
- * 系统设置 · 计费：站点级计费参数（换算率 / 折扣叠加策略与底线）
- *
- * ── 为什么这两个字段在这里，而不在模型列表 ────────────────────────────────────
- *
- * `creditsPerYuan` 是「1 元 = 多少积分」，作用于**充值**换算；`discountPolicy` 是全局折扣
- * 怎么叠、底线在哪。两者都描述**站点**，不是任何一个模型的属性 —— 模型列表里的「定价」tab
- * 改的是**那一个模型**的价（写进能力行的 `pricing`），放不下一件与模型无关的事。
- *
- * ── 保存语义与其它 tab 不同（页面必须说清） ───────────────────────────────────
- *
- * 前面几个 tab 是「改一项存一项」（`system_settings` 表逐项更新）。这里不是：
- * 定价目录是**一份 JSON 整份发布**，保存 = 拿本页这两个值**重建**一份目录 → 整份发布，
- * 版本号 +1。所以按钮上直接写着新版本号，而不是一个含义不明的「保存」。
- *
- * ── ⚠️ 这里**是**白名单重建（与旧版相反，页面必须说清为什么）────────────────
- *
- * 目录以前还装着每个模型的计价规则（`models.<模型>.<任务类型>`）。那时发布**绝不能**按本页
- * 认识的字段拼一份新文档 —— 一次「改换算率」的保存会把目录里那十几个模型的规则整个抹掉，
- * 而界面上看不出任何异常。所以旧版是「解析后的原对象展开 + 只换这两个键」，属于**本页不编辑、
- * 但必须逐字带回去**的东西。
- *
- * 那批规则已经搬进模型能力行（`generation_model_capability.pricing`，见模型列表的「定价」tab），
- * 目录现在**只装** `schemaVersion` / `currency` / `creditsPerYuan` / `discountPolicy`。于是重建
- * 不再有受害者，反而是唯一说得清「发出去的文档里有什么」的做法：它不取决于库里那份历史上长什么样。
- * 重建的口径在 `siteCatalogDocument`（`lib/billing-catalog/catalogDraft.ts`），本页只给它两个值。
- *
- * ⚠️ 由此还带出一条**基线**上的讲究：既然发出去的文档是重建的，判断「有没有改动」的基线也必须
- *    是**同一口径重建出来的**那份，而不是读回来那份原文 —— 否则原文里残留的 `models` 会让
- *    「打开看一眼、点保存」永远显示成「改过了」（见下方 `baseline`）。
- *
- * ⚠️ 还有一条并发语义：目录发布没有锁、也没有「版本前置校验」，后保存的整份覆盖先保存的。
- *    所以页面上常驻显示**当前生效版本号** —— 至少能看出「我手里这份不是最新的」。
- * ============================================ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -60,29 +26,17 @@ import {
   textOf,
 } from './billingSiteParams';
 
-/**
- * 服务端那份目录的状态。
- *
- * <p>四种分开写，因为**处置完全不同**：还在读（等）｜没有生效版本（改不了，见下方分支）｜
- * 读到了（正常渲染）｜读到了但不是合法 JSON（不能发布）。压成一个「有或没有」的布尔，
- * 就会把「没有」与「读坏了」混成一件事 —— 而后者拿一份没读懂的文档去发布是会覆盖生效版本的。
- */
 type Loaded =
   | { kind: 'pending' }
   | { kind: 'none' }
   | { kind: 'ok'; doc: CatalogDocumentJson; version: number }
   | { kind: 'broken'; message: string };
 
-/**
- * 算例用的两个折扣倍数。**不是任何一条真实折扣**，只是把「叠加怎么算」说到能心算 ——
- * 与 `DiscountPolicyNotice` 用同一组数，两处说的是同一个例子。
- */
 const EXAMPLE_MEMBER_BP = 9000;
 const EXAMPLE_PROMOTION_BP = 7000;
 
 const errMsg = (e: unknown, fallback: string) => (isApiError(e) ? e.message : fallback);
 
-/** 与页面其它 tab 同一版式（原由 .tabBody 给，见 index.tsx 的 tabBodyStyle） */
 const tabBodyStyle = {
   display: 'flex',
   flexDirection: 'column',
@@ -100,20 +54,10 @@ export default function BillingTab() {
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  /** 上一次成功发布回来的新版本号（保存后回显）。 */
   const [published, setPublished] = useState<number | null>(null);
 
-  /**
-   * 最近一次「表单被服务端数据对齐过」的版本号。
-   *
-   * <p>用它而不是让 `useEffect([catalog.data])` 无条件覆盖表单：react-query 默认会在窗口
-   * 重新获得焦点时重取，取回**同一版本**时若也重设表单，用户正在填的值会被悄悄冲掉
-   * （「我明明改了，切回来又是老数」）。版本号变了才对齐，语义是「手里这份底板过期了」——
-   * 那才是必须重设的时候。
-   */
   const syncedVersionRef = useRef<number | null>(null);
 
-  /** 服务端那份目录的解析结果（解析不了就不能发布：拿一份没读懂的东西去覆盖更坏）。 */
   const loaded = useMemo<Loaded>(() => {
     const data = catalog.data;
     if (data === undefined) return { kind: 'pending' };
@@ -132,7 +76,6 @@ export default function BillingTab() {
     }
   }, [catalog.data]);
 
-  // 版本变了（首次读到 / 别人发布了 / 自己刚发布完取回来）才把表单对齐到服务端那份
   useEffect(() => {
     if (loaded.kind !== 'ok') return;
     if (syncedVersionRef.current === loaded.version) return;
@@ -147,12 +90,6 @@ export default function BillingTab() {
   const rateError = creditsPerYuanError(rateText);
   const floorError = floorFactorBpError(floorText);
 
-  /**
-   * 待发布的文档：**白名单重建**一份只有站点级字段的目录（文件头那条纪律）。
-   *
-   * <p>底板不是 `loaded.doc` —— 目录里那些本页不编辑的历史字段（`models` 等）不会跟着走，
-   * 发布出去的文档只由本页这两个值决定。重建口径在 `siteCatalogDocument` 里。
-   */
   const draft = useMemo(() => {
     if (loaded.kind !== 'ok' || rateError !== null || floorError !== null) return null;
     return siteCatalogDocument(Number(rateText.trim()), {
@@ -161,13 +98,6 @@ export default function BillingTab() {
     });
   }, [loaded, rateError, floorError, rateText, stackMode, floorText]);
 
-  /**
-   * 比「有没有改动」用的基线：**同一口径重建出来的**那份生效文档。
-   *
-   * <p>⚠️ 不能拿 `loaded.doc` 原文当基线：原文里可能还留着上一版目录的 `models` 段（或别的
-   * 本页不认识的键），而发布出去的文档里一定没有 —— 拿原文比，一次「打开看一眼、点保存」会
-   * 永远显示成「改过了」，按钮永远亮着，每点一次就白占一个版本。
-   */
   const baseline = useMemo(
     () =>
       loaded.kind === 'ok'
@@ -176,8 +106,6 @@ export default function BillingTab() {
     [loaded],
   );
 
-  // 没改动就不给发：目录是版本化的冻结物，点一次「保存」多一个内容相同的版本，
-  // 历史里就再也看不出「这版是谁、为什么改的」（isCatalogDirty 比的是解析后的对象，见其注释）
   const dirty = draft !== null && baseline !== null && isCatalogDirty(draft, baseline);
 
   const save = async () => {
@@ -195,9 +123,6 @@ export default function BillingTab() {
         }),
       });
       setPublished(result.catalogVersion);
-      // 发布即新版本：让共用这个 key 的地方（模型列表定价 tab 的换算率、两张折扣页的
-      // 只读提示）一起刷新，否则它们还在按旧换算率解释单价。等它取完再收 saving，
-      // 免得中间那一瞬「按钮还写着 v12 → v13，旁边却已经标着已发布 v13」。
       await queryClient.invalidateQueries({ queryKey: billingCatalogKeys.all });
     } catch (e) {
       setError(errMsg(e, '发布失败：定价目录没被接受，请检查上面两项'));
@@ -215,9 +140,6 @@ export default function BillingTab() {
     );
   }
 
-  // 四种状态各有一句人话的处置，只有「读到了」才往下渲染表单。
-  // ⚠️ 分支写全（含 pending）而不是靠「剩下的就是 ok」：漏一个分支，未生效的目录会被
-  // 当成可编辑的目录渲染出来，而那是「拿一份空目录覆盖生效版本」的起点。
   switch (loaded.kind) {
     case 'pending':
       return <Alert tone="info">正在读取当前定价目录…</Alert>;
@@ -242,11 +164,8 @@ export default function BillingTab() {
       );
 
     case 'ok': {
-      // 「现在是什么」：生效版本号与当前折扣底线 —— 这个分支里多处文案要用它们。
       const version = loaded.version;
       const floorBp = Number(floorText.trim());
-      // 算例照计价侧的口径取一次 max（`CompositeDiscountResolver` 最后一步）：
-      // 算例与真实结果不一致的提示比没有提示更坏。
       const exampleCombined = combineFactors(EXAMPLE_MEMBER_BP, EXAMPLE_PROMOTION_BP, stackMode);
       const exampleFloored = Math.max(exampleCombined, floorBp);
 

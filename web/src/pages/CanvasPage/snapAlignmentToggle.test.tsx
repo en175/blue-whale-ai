@@ -8,9 +8,6 @@ import CanvasPage from './index';
 import pageStyles from './index.module.css';
 import { SNAP_ALIGNMENT_STORAGE_KEY } from './snapPreference';
 
-/* IKGGCT T3 组件层：左下角磁铁开关按钮的接线——初始渲染读 localStorage、
- * 点击后激活态翻转并透传 FlowCanvas、切换写入 localStorage。
- * 页面环境沿 index.test.tsx 先例；FlowCanvas 打桩但透出 snapAlignmentEnabled。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -39,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => null,
 }));
 
-/* FlowCanvas 打桩但透出 props：断言 snapAlignmentEnabled 透传。 */
 const flowCanvasProps: { current?: ComponentProps<typeof import('./components/Canvas').default> } = {};
 
 vi.mock('./components/Canvas', () => ({
@@ -127,7 +123,6 @@ vi.mock('@/api/sharedAssets', () => ({
   saveSharedAsset: vi.fn(),
 }));
 
-/* useCanvasDoc 打桩必须保持引用稳定（同 index.test.tsx：每次新建对象会异步死循环）。 */
 const canvasDocMock = vi.hoisted(() => ({
   doc: { id: null, version: null, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] },
   assets: {},
@@ -141,7 +136,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
 let root: Root;
 let container: HTMLDivElement;
 
-/** 磁铁开关按钮（title 提示随开/关切换，两态都含「对齐吸附」）。 */
 function snapToggleBtn() {
   return container.querySelector<HTMLElement>('button[title*="对齐吸附"]')!;
 }
@@ -170,8 +164,6 @@ async function renderPage() {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // !834 起 CanvasToolbar 布局期用 ResizeObserver 跟随画布舞台定位；jsdom 无此 API，
-  // 按仓库先例（textNodeCard / edgesControl）补桩，本开关测试不需要真实回调
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     unobserve() {}

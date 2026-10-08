@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKGOTB EraseMaskLayer 组件测试：棋盘格 SVG mask 渲染（涂=白/橡皮=黑按序覆盖）、
-   指针事件→显示坐标换算（clientXY 偏移，zoom=1 基准）、按下拖动抬起完整回调序列。
-   渲染模式沿用 ImageEnhanceDialog 测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
@@ -42,7 +39,6 @@ function renderLayer(props: Partial<Parameters<typeof EraseMaskLayer>[0]> = {}) 
 
 const layerEl = () => container!.querySelector<HTMLElement>('[data-testid="erase-mask-layer"]')!;
 
-/** 指针事件（jsdom 无 PointerEvent，用 MouseEvent 带 pointer 类型触发 React 合成指针事件） */
 function pointer(type: string, clientX: number, clientY: number) {
   layerEl().dispatchEvent(
     new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY }),
@@ -65,7 +61,6 @@ afterEach(() => {
 describe('IKGOTB EraseMaskLayer 指针交互', () => {
   it('pointerdown/move/up 回调序列完整，坐标换算为相对内容区左上的显示坐标', async () => {
     renderLayer();
-    // jsdom 布局恒零：stub 内容区屏幕盒（left 100 / top 50），zoom=1（ReactFlowProvider 默认）
     layerEl().getBoundingClientRect = () =>
       ({ left: 100, top: 50, width: 280, height: 158, right: 380, bottom: 208, x: 100, y: 50, toJSON: () => ({}) }) as DOMRect;
     act(() => {
@@ -93,8 +88,6 @@ describe('IKGOTB EraseMaskLayer 指针交互', () => {
   it('落笔后的 click 不冒泡出层（防止触发节点 onNodeClick 退出编辑态）', () => {
     renderLayer();
     layerEl().getBoundingClientRect = () => ({ left: 0, top: 0, width: 280, height: 158 }) as DOMRect;
-    // 父级 click 监听模拟 React Flow NodeWrapper 的 onClick（onSelectNodeHandler）：
-    // 挂在 body 上（React root 容器之外），层的 stopPropagation 生效时此处收不到
     const outerClick = vi.fn();
     document.body.addEventListener('click', outerClick);
     try {
@@ -102,7 +95,6 @@ describe('IKGOTB EraseMaskLayer 指针交互', () => {
         pointer('pointerdown', 10, 10);
         pointer('pointermove', 60, 40);
         pointer('pointerup', 60, 40);
-        // 浏览器在 pointerup 后派发 click（target=层，pointer capture 保证落点仍在层上）
         layerEl().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       });
       expect(callbacks.onStrokeEnd).toHaveBeenCalledTimes(1);
@@ -123,13 +115,11 @@ describe('IKGOTB EraseMaskLayer 棋盘格渲染', () => {
     renderLayer({ ops });
     const mask = container!.querySelector('mask')!;
     expect(mask).toBeTruthy();
-    // mask 黑底 + 三个图元（path 涂白 / rect 涂白 / circle 橡皮黑），按序覆盖
     const shapes = mask.querySelectorAll('path, rect, circle');
-    expect(shapes.length).toBe(4); // 黑底 rect + path + rect + circle
+    expect(shapes.length).toBe(4);
     expect(shapes[1]!.getAttribute('stroke')).toBe('white');
     expect(shapes[2]!.getAttribute('fill')).toBe('white');
     expect(shapes[3]!.getAttribute('fill')).toBe('black');
-    // 棋盘格 pattern + 应用 mask 的填充层（半透明）
     expect(container!.querySelector('pattern')).toBeTruthy();
     const painted = [...container!.querySelectorAll('rect')].find((r) => r.getAttribute('mask'));
     expect(painted).toBeTruthy();
@@ -142,7 +132,7 @@ describe('IKGOTB EraseMaskLayer 棋盘格渲染', () => {
     });
     const mask = container!.querySelector('mask')!;
     const shapes = mask.querySelectorAll('path, rect, circle');
-    expect(shapes.length).toBe(2); // 黑底 + 活框
+    expect(shapes.length).toBe(2);
   });
 
   it('无图元时仅黑底（无涂区渲染，棋盘格不可见区域为空）', () => {

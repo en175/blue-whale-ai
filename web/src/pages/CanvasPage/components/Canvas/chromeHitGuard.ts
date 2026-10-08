@@ -1,6 +1,4 @@
-/** 画布上层控件（工具栏 / 小地图 / 缩放条 / 节点跟随条）命中标记 */
 export const CANVAS_CHROME_SELECTOR = '[data-canvas-chrome], .react-flow__minimap';
-/** 盖在 chrome 之上的浮层（标签操作层 / @ 菜单 / 预览）：命中它们不得转发给底下的工具条 */
 export const CANVAS_OVERLAY_SELECTOR = '[data-canvas-overlay]';
 
 const CHROME_INTERACTIVE = 'button, a, [role="button"], input';
@@ -31,7 +29,6 @@ function collectChromeRoots(): Element[] {
   return [...roots];
 }
 
-/** 只按控件矩形判断 */
 export function canvasChromeAtPoint(clientX: number, clientY: number): Element | null {
   for (const root of collectChromeRoots()) {
     if (isFullViewportCover(root)) continue;
@@ -46,7 +43,6 @@ export function canvasChromeAtPoint(clientX: number, clientY: number): Element |
   return null;
 }
 
-/** 浮层在 pointerdown 卸掉后，同一次手势的 click 仍落在底下 chrome 上，需吞掉转发 */
 let overlayGestureUntil = 0;
 
 function markOverlayGesture(): void {
@@ -79,7 +75,6 @@ let selectionLockUntil = 0;
 let selectionLockIds: Set<string> | null = null;
 let idleSelectedIds = new Set<string>();
 
-/** 指针不在工具栏上时记住选中，避免穿透先选中再上锁把脏快照锁进去 */
 export function rememberIdleSelection(ids: Iterable<string>): void {
   if (selectionLockIds && performance.now() < selectionLockUntil) return;
   idleSelectedIds = new Set(ids);
@@ -107,7 +102,6 @@ export function trackChromePointer(clientX: number, clientY: number): boolean {
   return pointerOverChrome;
 }
 
-/** 指针在工具栏上，或本轮工具栏手势尚未结束：不要应用选中、不要挂操作栏 */
 export function shouldSuppressCanvasSelection(): boolean {
   return pointerOverChrome || chromeSelectionLockIds() != null;
 }

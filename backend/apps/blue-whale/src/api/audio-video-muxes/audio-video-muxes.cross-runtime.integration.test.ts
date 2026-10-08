@@ -23,7 +23,6 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueAudioVideoMuxJob: vi.fn(async () => {}) }));
 
-// IKIHPJ: true Nest HTTP + MySQL + Java Worker, with only MediaKit/MQ/object storage replaced locally.
 describe.skipIf(process.env.IKIHPJ_CROSS_RUNTIME !== "1")("audio_video_mux cross runtime acceptance", () => {
   it("freezes inputs through HTTP and proves api → job → worker → gateway fake → durable video asset", async () => {
     const repo = resolve(import.meta.dirname, "../../../../../..");
@@ -142,11 +141,9 @@ describe.skipIf(process.env.IKIHPJ_CROSS_RUNTIME !== "1")("audio_video_mux cross
         }),
       });
 
-      // 失败相任务：sync=video（出站三键映射）。
       const failResponse = await createJob({ sync: "video" });
       expect(failResponse.status).toBe(201);
       const failJobId = ((await failResponse.json()) as { data: { job_id: string } }).data.job_id;
-      // 成功相任务：默认档（is_audio_reserve 缺省显式冻结 true、sync 缺省显式冻结 none）。
       const succeedResponse = await createJob({});
       expect(succeedResponse.status).toBe(201);
       const succeedJobId = ((await succeedResponse.json()) as { data: { job_id: string } }).data.job_id;
@@ -179,10 +176,7 @@ describe.skipIf(process.env.IKIHPJ_CROSS_RUNTIME !== "1")("audio_video_mux cross
           "-v", `${repo}:/workspace`, "-w", "/workspace/server",
           "-v", `${process.env.HOME}/.m2:/root/.m2`,
           "maven:3.9-eclipse-temurin-21", "mvn", "-q",
-          // 从聚合根跑并带 -pl/-am：worker 依赖同 reactor 的 server/blue-whale-common，
-          // 直接进模块目录 `mvn test` 解析不到该依赖（verification-policy 同款约束）。
           "-pl", "blue-whale-worker", "-am", "-DfailIfNoSpecifiedTests=false",
-          // surefire 3.5.x 只认带插件前缀的属性名；旧名保留是为了兼容更老的 surefire。
           "-Dsurefire.failIfNoSpecifiedTests=false",
           "-Dtest=AudioVideoMuxCrossRuntimeMySqlIntegrationTest", "test"],
         { cwd: repo });

@@ -53,7 +53,6 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
     });
     await app.listen(0, "127.0.0.1");
     baseUrl = await app.getUrl();
-    // 公开读取探测替身：只放行我方测试桶域名，其余透传真实 fetch。
     vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) =>
       String(input).startsWith("https://mux.test/")
         ? Promise.resolve(new Response("x", { status: 206 }))
@@ -68,7 +67,6 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
       user_id: 9n, project_id: project.id, type: "video", source: "uploaded", status: "normal",
       storage_key: "uploads/9/video/source.mp4", url: "https://mux.test/video.mp4", duration_ms: 7_200_000,
     } });
-    // 归属校验样本：属于同用户但挂在别的项目且未建立 project_asset 链接。
     const foreign = await prisma.client.assets.create({ data: {
       user_id: 9n, project_id: 999_999n, type: "video", source: "uploaded", status: "normal",
       storage_key: "uploads/9/video/foreign.mp4", url: "https://mux.test/foreign.mp4", duration_ms: 33_000,
@@ -163,7 +161,6 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
       } },
     });
     const jobId = record.generation_job_id!;
-    // 首次入队失败保留原任务的明确失败状态
     const failedRow = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jobId } });
     expect(failedRow.status).toBe("failed");
     expect(failedRow.error).toMatchObject({ code: "enqueue_failed" });
@@ -173,7 +170,6 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
     expect(await recovered.json()).toMatchObject({
       data: { job_id: jobId.toString(), status: "queued", replayed: true, enqueue_required: true },
     });
-    // 恢复后的重放不再入队、不产生第二个任务
     const replay = await send("enqueue-recover");
     expect(await replay.json()).toMatchObject({
       data: { job_id: jobId.toString(), status: "queued", replayed: true, enqueue_required: false },
@@ -196,10 +192,8 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
     expect(responses.map((response) => response.status)).toEqual([201, 201]);
     const jobIds = new Set((await Promise.all(responses.map(async (response) => (await response.json()).data.job_id))));
     expect(jobIds.size).toBe(1);
-    // 失败一次 + 恢复一次：并发重放不产生第二次执行
     const jobId = [...jobIds][0]!;
     expect(vi.mocked(enqueueAudioVideoMuxJob).mock.calls).toEqual([[jobId], [jobId]]);
-    // 并发恢复不产生第二个任务或第二条幂等记录
     expect(await counts()).toEqual(before);
   });
 
@@ -208,7 +202,6 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
     const rejected = await send("foreign-asset", ownedBody(foreignVideoId));
     expect(rejected.status).toBe(404);
     expect(await counts()).toEqual(before);
-    // 拒绝不落幂等记录：同键随后仍可受理合法请求
     const accepted = await send("foreign-asset");
     expect(accepted.status).toBe(201);
   });

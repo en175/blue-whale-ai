@@ -6,8 +6,6 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CanvasPage from './index';
 
-/* IKDLQK 接线测试：打开项目的迁移报告提示（成功/失败/去重）与「迁移历史」只读入口。
-   FlowCanvas/CanvasToolbar/AgentPanel 打桩；CanvasHeader 与迁移历史弹窗用真实实现。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -112,7 +110,6 @@ vi.mock('@/api/jobs', () => ({
 
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
-/* useCanvasDoc 打桩保持外层引用稳定（见 index.test.tsx 注释）；内容经 current 按用例注入 */
 const canvasDocMock = vi.hoisted(() => ({
   current: {
     doc: null as unknown,

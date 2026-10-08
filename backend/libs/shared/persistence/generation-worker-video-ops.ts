@@ -1,12 +1,9 @@
-// IK74V8：从 generation-worker-repo.ts 拆出（≤800 行硬线）。逐块搬运，语义不变。
-// 视频作业生命周期：提交、轮询重排、结果发布、失败与派发前取消。
 import type {PrismaClient} from "@prisma/client";
 
 import {appendProjectEvent} from "./product-event-repo.js";
 import {syncRecordSummary} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
-/** IKBBXH：视频轮询内循环步调（ms）。须与 generation-runtime 的 VIDEO_POLL_INTERVAL_MS 保持一致。 */
 const VIDEO_POLL_INTERVAL_MS = 5_000;
 
 export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "markProviderSubmitted" | "rescheduleProviderPoll" | "publishVideoResult" | "failVideoJob" | "cancelVideoBeforeDispatch"> {
@@ -106,7 +103,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
           },
           data: {
             status: "settled",
-            // IK7G9X：视频实扣金额由 worker 从 new-api 任务查询 quota 换算后传入；缺省 0（旧行为）。
             actual_amount_fen: input.actualAmountFen ?? 0n,
           },
         });
@@ -122,7 +118,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
         const job = await tx.generation_jobs.findUnique({
           where: { id: BigInt(input.jobId) },
         });
-        // IK67HE/T14：视频产物产出时更新输出槽（slot_index 0 succeeded）+ 回写 record summary。
         const videoSlot = await tx.generation_output_slots.findFirst({
           where: { generation_job_id: BigInt(input.jobId), slot_index: 0 },
         });
@@ -220,7 +215,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
         const job = await tx.generation_jobs.findUnique({
           where: { id: BigInt(input.jobId) },
         });
-        // IK67HE/T14：视频失败时把 pending 槽标 failed + 回写 record summary。
         const pendingVideoSlots = await tx.generation_output_slots.findMany({
           where: { generation_job_id: BigInt(input.jobId), status: "pending" },
         });
@@ -282,8 +276,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
             });
           }
         }
-        // IK7G9X：失败即释放预留（reserved → released，实扣 0）。
-        // IK9VZ0：releaseNote 记录退款校验结果（refund_confirmed / refund_unverified）。
         await tx.cost_reservations.updateMany({
           where: {
             generation_job_id: BigInt(input.jobId),
@@ -300,7 +292,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
     },
 
     async cancelVideoBeforeDispatch(input) {
-      // IK7G9X：job 置 cancelled 与释放预留同事务原子完成（对齐 failVideoJob 后写模式）。
       return prisma.$transaction(async (tx) => {
         const updated = await tx.generation_jobs.updateMany({
           where: {
@@ -320,8 +311,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
           },
         });
         if (updated.count !== 1) return false;
-        // IK7G9X：派发前取消即释放预留（reserved → released，实扣 0）。
-        // IK9VZ0：派发前取消未向 new-api 提交，确认无扣费 → release_note = refund_confirmed。
         await tx.cost_reservations.updateMany({
           where: {
             generation_job_id: BigInt(input.jobId),

@@ -2,17 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminSettingsController } from "./settings.controller.js";
 
-/**
- * 管理端系统设置接口（`GET/PUT /api/admin/settings`）。
- *
- * <p>重点有两处，都不在「能不能存」而在**存的形状**：
- * <ul>
- *   <li>**上游凭证**（ADR-0114 的项目统一 key）要能经这条接口进库、且回显只有脱敏值——
- *       它是全项目共用的一把，不能从接口原值出去；</li>
- *   <li>**未知字段必须 400**：一个拼错的 `new_api_keys` 若不拦，请求一路 200 成功，
- *       运营以为配好了，而系统按「没配」拒绝每一个上游调用——「配了但没生效」的典型工单。</li>
- * </ul>
- */
 
 function createController() {
   const settings = {

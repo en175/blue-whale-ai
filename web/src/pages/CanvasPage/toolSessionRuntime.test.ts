@@ -146,8 +146,6 @@ describe('工具会话运行时公开接口', () => {
     expect(split.getSnapshot()).toEqual({ state: null, submitting: false });
   });
 
-  /* IKJP8Q 旁路在途登记（失败卡重试 → 已打开面板提交中只读）：页面测试无法观测
-     「面板从未打开时点重试」分支，此处接口级补齐。 */
   it('旁路在途登记 notifyInFlight：未打开无副作用、他卡不上锁、同卡上锁幂等、宿主归零 reconcile 解锁', () => {
     const runtime = createToolSessionRuntime();
     let inFlight = true;
@@ -155,25 +153,20 @@ describe('工具会话运行时公开接口', () => {
       inFlight: () => inFlight,
       reconcile: (state) => state,
     });
-    // 从未打开（无会话状态）：登记无副作用——显式关闭重开的新会话例外不受影响
     runtime.notifyInFlight('videoEnhance', 'v1');
     expect(panel.getSnapshot()).toEqual({ state: null, submitting: false, visible: false, hidden: false });
 
     panel.open('v1', sessionDeps());
-    // 他卡目标不匹配不上锁；同卡登记上锁且重复登记幂等
     runtime.notifyInFlight('videoEnhance', 'v2');
     expect(panel.getSnapshot().submitting).toBe(false);
     runtime.notifyInFlight('videoEnhance', 'v1');
     runtime.notifyInFlight('videoEnhance', 'v1');
     expect(panel.getSnapshot().submitting).toBe(true);
-    // 宿主在途归零后 reconcile 解锁（创建失败恢复可操作）
     inFlight = false;
     runtime.reconcileSources(new Set(['v1']));
     expect(panel.getSnapshot().submitting).toBe(false);
   });
 
-  /* IKJPM3 乱序收尾：面板自身发送的收尾不得无条件清零提交锁——有宿主在途判定时
-     以其校准，自己的请求已结束但同卡其他在途仍在时保持只读，全部归零才复位。 */
   it('发送收尾按宿主在途校准提交锁：自己失败而他在途保持只读，宿主归零才复位', async () => {
     const runtime = createToolSessionRuntime();
     let inFlight = true;
@@ -188,22 +181,17 @@ describe('工具会话运行时公开接口', () => {
     panel.send();
     expect(panel.getSnapshot().submitting).toBe(true);
 
-    // 自己的请求失败，但宿主在途（旁路重试等）未归零：锁保持，再次发送被拒
     reject(new Error('network'));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(panel.getSnapshot().submitting).toBe(true);
     expect(panel.send()).toBe(false);
 
-    // 宿主在途归零后解锁，可再次发送
     inFlight = false;
     runtime.reconcileSources(new Set(['v1']));
     expect(panel.getSnapshot().submitting).toBe(false);
     expect(panel.send()).toBe(true);
   });
 
-  /* IKJPM5 选择隐藏返回=恢复原会话：open 不因「不可见」洗掉原会话与提交锁——initialize
-     沿用 previous（同卡恢复）时提交锁按宿主在途重算上锁（同 select 选回规则），随后到达
-     的选择通知不重置；显式关闭重开与隐藏后换卡仍是新会话（submitting 复位，重发例外保留）。 */
   it('选择隐藏后 open 同卡恢复原会话并按宿主在途上锁；显式关闭重开与换卡为新会话', () => {
     const runtime = createToolSessionRuntime();
     let inFlight = false;
@@ -218,81 +206,61 @@ describe('工具会话运行时公开接口', () => {
     runtime.onSelectionChange({ soloId: 'v2', multiSelect: false });
     expect(panel.getSnapshot().visible).toBe(false);
 
-    // 选择隐藏后同卡 open = 恢复原会话：内容保留 + 提交锁按宿主在途重算上锁
     inFlight = true;
     panel.open('v1', sessionDeps());
     expect(panel.getSnapshot().state?.format).toBe('2k');
     expect(panel.getSnapshot().visible).toBe(true);
     expect(panel.getSnapshot().submitting).toBe(true);
-    // 节点点击先到后选择通知随后到达：visible 已同不重置（两顺序同一在途规则）
     runtime.onSelectionChange({ soloId: 'v1', multiSelect: false });
     expect(panel.getSnapshot().submitting).toBe(true);
-    // 宿主在途归零后 reconcile 解锁（面板恢复可编辑）
     inFlight = false;
     runtime.reconcileSources(new Set(['v1']));
     expect(panel.getSnapshot().submitting).toBe(false);
 
-    // 隐藏后换卡 open = 新会话：内容重算、submitting 复位（不同卡互不锁定）
     runtime.onSelectionChange({ soloId: 'v2', multiSelect: false });
     panel.open('v9', sessionDeps());
     expect(panel.getSnapshot().state).toEqual({ nodeId: 'v9', format: 'seed-2' });
     expect(panel.getSnapshot().submitting).toBe(false);
-    // 显式关闭重开 = 新会话：重发例外保留
     panel.close();
     panel.open('v9', sessionDeps());
     expect(panel.getSnapshot().state).toEqual({ nodeId: 'v9', format: 'seed-3' });
     expect(panel.getSnapshot().submitting).toBe(false);
   });
 
-  /* IKJPM7 旁路受理（失败卡重试）的会话归属捕获：受理后该工具会话被显式关闭重开
-     （无论新会话是否发送）或切换，探针即失效——旧响应不向后来会话提示；
-     无后来会话时保持有效（当前有效请求的失败提示保留）。 */
   it('captureSessionOwnership：无后来会话保持有效；受理后打开面板或显式关闭重开即失效', () => {
     const runtime = createToolSessionRuntime();
     const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve' });
 
-    // 面板未打开时旁路受理（重试可发生于面板未开）：探针捕获受理时的会话身份
     const ownsFromClosed = runtime.captureSessionOwnership('videoEnhance');
     expect(ownsFromClosed()).toBe(true);
-    // 受理后同卡打开面板 = 后来会话：探针失效（旧错误不向新会话提示）
     panel.open('v1', sessionDeps());
     expect(ownsFromClosed()).toBe(false);
 
-    // 面板打开时旁路受理：无后来会话保持有效
     const owns = runtime.captureSessionOwnership('videoEnhance');
     expect(owns()).toBe(true);
-    // 显式关闭重开（未发送）即新会话：探针失效
     panel.close();
     panel.open('v1', sessionDeps());
     expect(owns()).toBe(false);
   });
 
-  /* IKJPM7 修订：探针失效只随同 kind 后来新会话（显式关闭/排他退出后重开，或受理于
-     面板未开后的首开）或项目切换推进。选择隐藏后真实点回原卡是恢复原会话（resume，
-     IKJPM5 语义）保持归属；纯显式关闭未重开无后来会话，同样保持有效。 */
   it('captureSessionOwnership：选择隐藏后 resume 恢复原会话保持归属；纯关闭未重开保持有效；项目切换失效', () => {
     const runtime = createToolSessionRuntime();
     const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve' });
 
     panel.open('v1', sessionDeps());
     const owns = runtime.captureSessionOwnership('videoEnhance');
-    // 场景 i：选择隐藏（原纪元 exit 不再是失效信号）→ 真实点回原卡 = resume 恢复原会话
     runtime.onSelectionChange({ soloId: 'v2', multiSelect: false });
     expect(panel.getSnapshot().visible).toBe(false);
     panel.open('v1', sessionDeps());
     expect(panel.getSnapshot().state?.nodeId).toBe('v1');
     expect(owns()).toBe(true);
 
-    // 边界（父级裁定）：纯显式关闭、未重开——无后来会话，按当前有效请求保留提示
     panel.close();
     expect(owns()).toBe(true);
-    // 项目切换（setProject reset）自然失效保持
     runtime.setProject('p2');
     expect(owns()).toBe(false);
   });
 
-  /* IKJPM7 修订（场景 ii）：他卡任何工具的会话开关（open 的 advanceAll）不是本工具
-     归属失效信号——A 仍是当前有效请求，提示不被越权屏蔽。 */
   it('captureSessionOwnership：打开另一工具面板（他卡）不失效本工具归属', () => {
     const runtime = createToolSessionRuntime();
     const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve' });
@@ -300,18 +268,13 @@ describe('工具会话运行时公开接口', () => {
 
     panel.open('v1', sessionDeps());
     const owns = runtime.captureSessionOwnership('videoEnhance');
-    // 打开另一张卡的另一工具面板（videoEnhance 被排他关闭但无后来会话）
     other.open('o1', sessionDeps());
     expect(panel.getSnapshot().state).toBeNull();
     expect(owns()).toBe(true);
-    // 同 kind 后来新会话建立（显式关闭重开）仍失效
     panel.open('v1', sessionDeps());
     expect(owns()).toBe(false);
   });
 
-  /* IKJPXN（决策 5）：同种工具换目标 open 即新会话归属——不能仅凭旧状态存在判为原会话
-     恢复；旧卡受理探针失效，新会话提交锁不按旧在途恢复（重发例外同显式关闭重开）。
-     同目标恢复保持归属与在途上锁见上方既有用例。 */
   it('captureSessionOwnership：换目标 open 即新会话，探针失效且不按旧在途上锁', () => {
     const runtime = createToolSessionRuntime();
     const panel = runtime.register({ ...definition, kind: 'videoEnhance', panel: 'preserve',

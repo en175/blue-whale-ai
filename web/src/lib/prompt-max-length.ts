@@ -1,6 +1,5 @@
 import { fetchGenerationModels, type ModelCapability } from '@/api/generation';
 
-/** 后端未下发、空值或非正整数时，前端不设提示词上限。 */
 export function promptMaxLengthOf(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 1) return raw;
   if (typeof raw === 'string' && raw.trim() !== '') {

@@ -1,9 +1,3 @@
-/* ============================================
- * canvas-marquee-select 验收取证（IKDKII）
- * 真实浏览器（Playwright Chromium）验证画布框选几何判定：
- * 选择模式下空白处左键拖拽直接出框（无需 Shift）、
- * 部分相交即选中、完全包住选中、不相交不选中、单击空白取消选中
- * ============================================ */
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -92,13 +86,11 @@ test('框选：空白拖拽出框 / 部分相交与全包均选中 / 不相交�
   const boxB = (await node(page, 'n-b').boundingBox())!;
   const boxC = (await node(page, 'n-c').boundingBox())!;
 
-  // 选框：从 A 左上外侧空白起拖，右缘只伸进 B 左缘 40px，下缘完整压过 A；不碰 C。
   const start = { x: boxA.x - 30, y: boxA.y - 30 };
   const end = { x: boxB.x + 40, y: boxA.y + boxA.height + 30 };
   expect(end.x, '选框右缘不应触达 C').toBeLessThan(boxC.x);
   expect(start.x, '起点应在 C 左侧空白').toBeLessThan(boxC.x);
 
-  // 不按任何修饰键，直接左键拖拽空白区域
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 12 });
@@ -109,7 +101,6 @@ test('框选：空白拖拽出框 / 部分相交与全包均选中 / 不相交�
   await expect(node(page, 'n-b'), '部分相交的卡片应选中').toHaveClass(/selected/);
   await expect(node(page, 'n-c'), '不相交的卡片不应选中').not.toHaveClass(/selected/);
 
-  // 单击选框以外的空白区域：取消全部选中
   const emptySpot = { x: boxA.x - 30, y: boxC.y - 60 };
   await page.mouse.click(emptySpot.x, emptySpot.y);
   await expect(node(page, 'n-a'), '单击空白后 A 应取消选中').not.toHaveClass(/selected/);

@@ -21,7 +21,6 @@ afterEach(async () => {
   mountNode.remove();
 });
 
-// 弹窗经 createPortal 挂到 document.body，**不在 mountNode 里**——所以下面一律查 document.body。
 async function render(props: Record<string, unknown> = {}): Promise<void> {
   await act(async () => {
     root.render(
@@ -50,7 +49,6 @@ function buttonByText(text: string): HTMLButtonElement {
 
 describe('ConfirmModal', () => {
   it('★ 带 role="dialog" / aria-modal —— 收编 ui/Modal 前这两条是缺的', async () => {
-    // 旧实现是裸 div + 私有 CSS，读屏软件拿不到对话框语义、关闭按钮也没有 aria-label。
     await render();
 
     expect(dialog()).not.toBeNull();
@@ -66,7 +64,6 @@ describe('ConfirmModal', () => {
   });
 
   it('确认文案默认「确认删除」，confirmText 可覆盖', async () => {
-    // 调用页在提交中用 confirmText 传「删除中…」，这条默认值不能丢。
     await render();
     expect(buttonByText('确认删除')).not.toBeNull();
 
@@ -92,9 +89,6 @@ describe('ConfirmModal', () => {
   });
 
   it('★ 点面板内部不关闭，点遮罩才关闭', async () => {
-    // 删除确认里最贵的一类回归：正读着文案，手抖点在字上，弹窗自己关了——而按钮没按，
-    // 用户以为取消了。闸门在 ui/Modal：面板 stopPropagation，遮罩 onClick=onClose。
-    // 这里经 ConfirmModal 渲染，一次把适配层与骨架层都钉住。
     const onClose = vi.fn();
     await render({ onClose });
 

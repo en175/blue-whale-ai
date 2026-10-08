@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# pre-push hook — Blue-Whale
-# Bash + Python 3 标准库。功能：
-# 规则：
-#   - master/main 保护分支：**任何本地直推一律拦截**（合并只在 Gitee 服务端走 PR）。
-#   - 其他本地分支：分支名必须通过结构化中文命名校验。
-#   - 影响前端的推送须有绑定待推送 HEAD 的双模式构建凭证。
-#
-# 退出码非 0 = 拦截 push。
-# 注意：rebase/merge 进行中时此 hook 不应误触发，但 pre-push 正常不会在 rebase 中触发。
 
 set -uo pipefail
 
@@ -22,9 +13,6 @@ else
   exit 1
 fi
 
-# pre-push 从 stdin 读取多行，每行：<local ref> <local sha> <remote ref> <remote sha>
-# 删除远程分支时 local sha=0000：master/main 仍先拦截，普通分支删除跳过后续校验。
-# 每个被推送的本地分支都独立检查命名。
 
 blocked=0
 reason=""
@@ -32,11 +20,7 @@ invalid_name=0
 direct_master=0
 
 while read -r local_ref local_sha remote_ref remote_sha; do
-  # Git Bash 下 stdin 经 Python subprocess 传入时行尾为 CRLF，read 会把 \r 留在
-  # 末位字段 remote_sha 上，导致下方全零判断永不命中（40 个 0 + \r = 41 字符）。
-  # 统一剥离 \r，保证 Linux / macOS / Git Bash 行为一致。
   remote_sha=${remote_sha%$'\r'}
-  # 第一道：master/main 无论更新还是删除都拦截（合并只在 Gitee 服务端走 PR）
   case "$remote_ref" in
     refs/heads/master|refs/heads/main)
       blocked=1
@@ -46,19 +30,16 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       ;;
   esac
 
-  # 普通远程分支删除无需命名校验（删除时 local sha 为全零）。
   case "$local_sha" in
     0000000000000000000000000000000000000000) continue ;;
   esac
 
-  # tags 等非分支 ref 不参与任务分支校验。
   case "$remote_ref" in
     refs/heads/*) branch=${remote_ref#refs/heads/} ;;
     *) continue ;;
   esac
 
   if ! "${validator[@]}" --validate-branch "$branch" >/dev/null 2>&1; then
-    # 已发布到远程的旧 ASCII 分支允许继续收尾；新分支首次 push 必须遵循中文规范。
     case "$remote_sha" in
       0000000000000000000000000000000000000000)
         blocked=1
@@ -72,7 +53,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     esac
   fi
 
-  # 新发布线沿用远端生产版本；更新 release 或携带新代码仍执行构建门禁。
   case "$remote_ref:$remote_sha" in
     refs/heads/release/*:0000000000000000000000000000000000000000)
       production_sha="$(git ls-remote --heads origin refs/heads/master | cut -f1)"

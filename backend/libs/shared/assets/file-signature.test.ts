@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { sniffFileSignature } from "./file-signature.js";
 
-/** 测试站 `asset_id=6012` 的真实字节（`corrupt.jpg`，524 字节）。 */
 const CORRUPT_JPG =
   'q83vEgAQSkZJRgABV/iHIa5uRGaJSzcfNe1eD+g2D0V+zGEHgkfsy+tYlmoQ4oCSe2T5+pG6zMbVihWRdvSG8HRL1xk8/kN0pfdh' +
   'mQ3W9hAe5sHFPQ184XP/W9tzxkhV2inNMRPIGKm0Ig9J8Q/FJ8SU7Wmv88O3rP7uuvHbB9urrR/2SbAq8zwt6DjMqv2uqYAKoGm4' +
@@ -22,8 +21,6 @@ const withHeader = (header: Uint8Array, length = 32) => {
 
 describe("sniffFileSignature", () => {
   it("认不出 2026-09-08 那份坏文件——它不是任何一种媒体容器", () => {
-    // 头四字节 AB CD EF 12，JPEG 该是 FF D8 FF。第 6 位塞了个 JFIF 字样装样子，
-    // 后面五百多字节是随机数据。声明 image/jpeg 一路通过了当时全部四道校验。
     const head = new Uint8Array(Buffer.from(CORRUPT_JPG, "base64")).subarray(0, 32);
     expect([...head.subarray(0, 4)]).toEqual([0xab, 0xcd, 0xef, 0x12]);
     expect(sniffFileSignature(head)).toBeNull();
@@ -49,10 +46,6 @@ describe("sniffFileSignature", () => {
     expect(sniffFileSignature(webp)).toEqual({ kind: "image", format: "webp" });
   });
 
-  /**
-   * 这一层不是格式白名单——支不支持某种编码是策略，住在别处。heic 是 iPhone 拍照的默认格式，
-   * bmp / tiff 也都是真文件、TOS 转得动，把它们挡在门外是错的。
-   */
   it("heic / bmp / tiff 都认得出，不是「坏文件」", () => {
     const heic = withHeader(ascii("\u0000\u0000\u0000\u0018ftypheic"));
     expect(sniffFileSignature(heic)).toEqual({ kind: "image", format: "heic" });

@@ -1,7 +1,3 @@
-// IKHK98：POST /projects/:projectId/video-mattings — 智能抠像（火山 MediaKit
-// matte-portrait-video / matte-greenscreen-video 双端点）建任务端点。入参 = 源资产引用 +
-// 画布占位卡绑定 + 模式（portrait / greenscreen）+ 输出格式（WEBM / MP4，缺省 WEBM）+
-// 背景色（仅 MP4，缺省 white）+ client_token 幂等键（细节见 VideoMattingsService 头注）。
 import { Body, Controller, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -28,8 +24,6 @@ export class VideoMattingsController {
       projectId,
       body ?? {},
     );
-    // IKJJQW（B.8 局部适配器）：新协议受控错误信封直写 HTTP 状态与 data.reason。
-    // 本入口的幂等承载是 body 的 client_token（B.3「工具原 client_token」口径），无头。
     if (isRecoveryControlledEnvelope(result)) {
       writeRecoveryControlled(result, res);
       return;

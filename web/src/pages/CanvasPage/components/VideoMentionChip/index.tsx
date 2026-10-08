@@ -18,16 +18,10 @@ import styles from './index.module.css';
 export interface VideoMentionChipProps {
   url: string;
   label: string;
-  /** 悬停提示，不给就是 label。胶囊上写「视频3」时放素材全名。 */
   title?: string | undefined;
-  /** 输入框里的胶囊要移除按钮；历史消息里不要。 */
   onRemove?: (() => void) | undefined;
 }
 
-/**
- * 画布视频提及胶囊：小视频缩略图 + 文件名；悬浮静音循环播放。
- * 视觉对齐 ImageMentionChip，交互对齐 AssetChip 的视频预览。
- */
 export function VideoMentionChip({ url, label, title, onRemove }: VideoMentionChipProps) {
   return <MediaMentionChip url={url} label={label} title={title} onRemove={onRemove} mediaType="video" />;
 }

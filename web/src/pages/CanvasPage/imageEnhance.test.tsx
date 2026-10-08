@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKGM9F 图片卡「高清放大」入口：建卡/连线/选中链。
-   点工具条「高清放大」→ 源卡右侧建「高清」草稿卡（带高清身份标记）→ 连纯视觉来源边
-   （origin 标记，不占参考位）→ 自动选中新卡。本票不开任何面板（IKGM9O 范围）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -40,7 +37,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -112,7 +108,6 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn(),
 }));
 
-/* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
@@ -153,7 +148,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪图片节点 i1（assetId a5，16:9），无连线 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -196,7 +190,6 @@ async function renderPage() {
   });
 }
 
-/** 走图片节点工具栏的「高清放大」入口（回调挂在节点 data 上） */
 async function enhanceImage() {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
   await act(async () => {
@@ -230,11 +223,8 @@ describe('IKGM9F 高清放大建卡链', () => {
     expect(data.genStatus).toBe('draft');
     expect(data.draft).toBe(true);
     expect(data.mediaType).toBe('image');
-    // 高清身份标记：本票只写源素材身份；lastParams 位由 IKGM9O 提交时写入
     expect(data.imageEnhance).toEqual({ sourceAssetId: 'a5' });
-    // 源卡右侧让开一格：16:9 内容宽 280×16/9≈497.78 → x = 400 + 498 + 60
     expect(draft.position).toEqual({ x: 958, y: 0 });
-    // 源卡不动
     const source = mediaNodes.find((n) => n.id === 'i1')!;
     expect((source.data as Record<string, unknown>).src).toBe('http://img/i1.png');
   });
@@ -248,9 +238,7 @@ describe('IKGM9F 高清放大建卡链', () => {
     const edge = edges.find((e) => e.target === draftId)!;
     expect(edge).toBeTruthy();
     expect(edge.source).toBe('i1');
-    // 纯视觉来源表达：仅 origin 标记，不携带任何参考角色
     expect(edge.data).toEqual({ origin: IMAGE_ENHANCE_EDGE_ORIGIN });
-    // 图片参考推导跳过来源边：高清卡参考位为空（不参与 @ 编号与媒体索引）
     expect(imageMediaRefsOf(draftId, edges as never[], flowProps.current.mediaNodes)).toEqual([]);
   });
 

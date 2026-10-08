@@ -1,9 +1,5 @@
-/* ============================================
- * ChatBox - 对话框组件
- * ============================================ */
 
 .chatBox {
-  /* 毛玻璃上的字色只分两档：静息/占位 70%，输入与选中 100% */
   --chat-fg: #fff;
   --chat-fg-muted: rgba(255, 255, 255, 0.7);
   max-width: 78.4rem;
@@ -21,7 +17,6 @@
   gap: var(--spacing-md);
 }
 
-/* 毛玻璃放在伪元素，避免 ChatBox 自己成为层叠上下文，把下拉/弹层压到画廊下面 */
 .chatBox::before {
   content: '';
   position: absolute;
@@ -39,7 +34,6 @@
   z-index: 1;
 }
 
-/* ---- 顶部选项卡 ---- */
 .tabBar {
   display: flex;
   gap: var(--spacing-lg);
@@ -75,14 +69,12 @@
   transition: left var(--transition-normal), width var(--transition-normal);
 }
 
-/* ---- 描述文字 ---- */
 .desc {
   font-size: var(--font-size-sm);
   color: var(--chat-fg-muted);
   line-height: 1.5;
 }
 
-/* ---- 输入框 ---- */
 .textareaWrap {
   position: relative;
   width: 100%;
@@ -120,7 +112,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- 底部工具栏 ---- */
 .toolbar {
   display: flex;
   align-items: center;
@@ -134,7 +125,6 @@
   gap: var(--spacing-lg);
 }
 
-/* ---- 通用按钮 ---- */
 .iconBtn {
   width: 32px;
   height: 32px;
@@ -155,13 +145,10 @@
   border-color: rgba(255, 255, 255, 0.28);
 }
 
-/* ---- + 上传弹出 ---- */
 .uploadWrap {
   position: relative;
 }
 
-/* 参考/附件卡上传菜单：portal 到 body 的 fixed 定位弹层（避免被 refArea 滚动容器裁切）。
- * 弹层在 .chatBox 作用域之外，字色变量需在此重新声明 */
 .refMenu {
   --chat-fg: #fff;
   --chat-fg-muted: rgba(255, 255, 255, 0.7);
@@ -198,21 +185,18 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* + 按钮悬停小提示文案 */
 .uploadHint {
   font-size: var(--font-size-xs);
   color: var(--chat-fg-muted);
   white-space: nowrap;
 }
 
-/* IKJ794：全能参考被动提示行（Seedance 2.5 + 全能参考 + 已挂参考视频时显示；与画布 BottomDialog 同文案） */
 .followHint {
   font-size: var(--font-size-xs);
   color: var(--chat-fg-muted);
   line-height: 1.4;
 }
 
-/* ---- Skill 按钮 ---- */
 .skillBtn {
   display: flex;
   align-items: center;
@@ -237,7 +221,6 @@
   font-size: 14px;
 }
 
-/* ---- 模型下拉按钮 ---- */
 .dropdownWrap {
   position: relative;
 }
@@ -326,7 +309,6 @@
   background-color: rgba(255, 255, 255, 0.26);
 }
 
-/* ---- Token 用量 ---- */
 .tokenBadge {
   display: flex;
   align-items: center;
@@ -343,7 +325,6 @@
   color: var(--chat-fg-muted);
 }
 
-/* ---- 发送按钮 ---- */
 .sendBtn {
   width: 34px;
   height: 34px;
@@ -382,11 +363,7 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
-/* ============================================
- * AI 视频 tab 专属样式
- * ============================================ */
 
-/* ---- 内容区域 ---- */
 .videoContent {
   flex: 1;
   display: flex;
@@ -394,7 +371,6 @@
   gap: var(--spacing-xs);
   padding: var(--spacing-sm) 0;
   min-height: 0;
-  /* 固定高度下附件过多时内部滚动，不溢出重叠 */
   overflow-y: auto;
 }
 
@@ -424,13 +400,11 @@
   border-color: rgba(255, 255, 255, 0.32);
 }
 
-/* ---- 参考文件区域 ---- */
 .refArea {
   display: flex;
   gap: var(--spacing-sm);
   flex-wrap: wrap;
   flex-shrink: 0;
-  /* 最多约两行缩略图，超出内部滚动，保证固定高度不塌陷 */
   max-height: 9.5rem;
   overflow-y: auto;
 }
@@ -459,7 +433,6 @@
   object-fit: cover;
 }
 
-/* 音频附件缩略图：图标居中 */
 .refThumbAudio {
   width: 100%;
   height: 100%;
@@ -497,7 +470,6 @@
   white-space: nowrap;
 }
 
-/* 首尾帧模式：首帧 + 尾帧两个独立槽位同行（对齐画布交互） */
 .refSlotRow {
   display: flex;
   gap: var(--spacing-sm);
@@ -513,7 +485,6 @@
   gap: 4px;
 }
 
-/* 槽位占位添加按钮：与「参考」按钮同尺寸（56×56） */
 .refSlotAdd {
   display: flex;
   flex-direction: column;
@@ -538,7 +509,6 @@
   color: var(--chat-fg);
 }
 
-/* 首帧/尾帧角色徽标：缩略图角部 */
 .refSlotBadge {
   position: absolute;
   top: 4px;
@@ -553,7 +523,6 @@
   pointer-events: none;
 }
 
-/* 校验轻提示：顶部居中弹出，自动消失，不占据布局（边框统一灰色，不用红色） */
 .toast {
   position: fixed;
   top: 24px;
@@ -582,7 +551,6 @@
   }
 }
 
-/* ---- 参数按钮行 ---- */
 .videoParamBar {
   display: flex;
   align-items: center;
@@ -603,7 +571,6 @@
   gap: var(--spacing-lg);
 }
 
-/* ---- 参数按钮 ---- */
 .paramBtn {
   display: flex;
   align-items: center;
@@ -625,18 +592,13 @@
   border-color: rgba(255, 255, 255, 0.28);
 }
 
-/* ---- 时长滑块 ---- */
 .durationDropdown {
   min-width: 248px !important;
   padding: 12px !important;
   overflow: visible;
 }
 
-/* ============================================
- * AI 图片 tab 专属样式
- * ============================================ */
 
-/* ---- 强度徽章 ---- */
 .imageStrengthBadge {
   display: flex;
   align-items: center;
@@ -654,7 +616,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* IKA64P：直接使用武装的技能气泡（与画布 Agent 风格一致） */
 .armedSkill {
   display: flex;
   align-items: center;

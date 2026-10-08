@@ -1,27 +1,15 @@
-/* ============================================
- * ImageEraseDialog 擦除编辑态工具条与发送条（IKGOTB，IKGOSZ 波3）：
- * 源图卡上方浮出工具条（清除文字一键直发 / 画笔 / 框选 / 橡皮擦 / 笔刷大小 / 撤销重做 / X），
- * 下方浮出窄发送条（本期免费 + 发送）。
- * 编辑状态由工具会话运行时持有（源图卡内的 EraseMaskLayer 共用），本组件受控。
- * 涂抹发送交运行时先冻结输入并锁住编码窗口，再栅格化、上传与创建任务；
- * 「清除文字」不经遮罩直接上抛（规格：两条发送路径共用同一条任务链路）。
- * data-gen-panel-territory 豁免点外关闭误杀；Esc/X/点其他卡/点空白退出由 CanvasPage 承载。
- * ============================================ */
 import { useRef } from 'react';
 import { Brush, Eraser, Square, TypeOutline, Undo2, Redo2, X, ArrowUp } from 'lucide-react';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { MaskCoordinateSpace } from '../../eraseMask';
 import styles from './index.module.css';
 
-/** 擦除编辑工具（三选一互斥）：画笔涂抹 / 矩形框选 / 橡皮擦（从并集减去） */
 export type EraseTool = 'brush' | 'rect' | 'eraser';
 
-/** 笔刷半径范围（显示坐标像素）：滑杆可调 min~max，默认值 */
 export const ERASE_BRUSH_RADIUS_MIN = 6;
 export const ERASE_BRUSH_RADIUS_MAX = 64;
 export const ERASE_BRUSH_RADIUS_DEFAULT = 20;
 const ERASE_BRUSH_RADIUS_STEP = 2;
-/** 滑块把手边长：拖动映射与定位都要扣掉半径，否则两端会留死区 */
 const BRUSH_SLIDER_THUMB_SIZE = 12;
 
 function snapBrushRadius(raw: number): number {
@@ -32,7 +20,6 @@ function snapBrushRadius(raw: number): number {
   return Math.min(ERASE_BRUSH_RADIUS_MAX, Math.max(ERASE_BRUSH_RADIUS_MIN, snapped));
 }
 
-/** 把指针 x 映射到闭合区间 [min, max]：轨道可用宽度 = 全宽 − 把手，再按把手半径偏移。 */
 function brushRadiusFromPointer(clientX: number, trackLeft: number, trackWidth: number): number {
   const thumbRadius = BRUSH_SLIDER_THUMB_SIZE / 2;
   const usableWidth = Math.max(trackWidth - BRUSH_SLIDER_THUMB_SIZE, 0);
@@ -44,11 +31,8 @@ function brushRadiusFromPointer(clientX: number, trackLeft: number, trackWidth: 
 }
 
 interface ImageEraseDialogProps {
-  /** X 关闭（四退出之一，未发送丢弃遮罩由父级处理） */
   onClose: () => void;
-  /** 「清除文字」一键直发：返回 true 表示创建请求已发出；创建成功后父级自行退出编辑态（失败停留编辑态） */
   onSendTextErase: () => boolean;
-  /** 涂抹发送由运行时冻结输入、编码并交给既有上传/任务能力。 */
   onSendMask: () => boolean;
   tool: EraseTool;
   onToolChange: (tool: EraseTool) => void;
@@ -58,15 +42,11 @@ interface ImageEraseDialogProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  /** 存在有效涂区（发送门） */
   hasPaint: boolean;
-  /** 坐标空间（显示尺寸×源图自然分辨率）；null=源图自然分辨率缺失，涂抹发送禁用 */
   maskSpace: MaskCoordinateSpace | null;
-  /** 发送中（遮罩上传/创建请求期间只读防重复提交） */
   submitting?: boolean;
   toolbarAnchor: FollowDialogAnchor | null;
   sendBarAnchor: FollowDialogAnchor | null;
-  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
   dragHidden?: boolean;
 }
 
@@ -116,7 +96,6 @@ export default function ImageEraseDialog({
         ? '源图分辨率未知，暂不能发送'
         : null;
 
-  /** 置灰守卫（口径同 ImageEnhanceDialog：aria-disabled + 点击守卫，title 保留悬停原因） */
   const guarded = (disabled: boolean, dispatch: () => void) => () => {
     if (disabled) return;
     dispatch();
@@ -129,7 +108,7 @@ export default function ImageEraseDialog({
 
   return (
     <>
-      {/* 源图卡上方工具条（跟随锚定时 inline left/top 覆盖默认位，translateX 保持以锚点居中） */}
+      {}
       <div
         className={styles.toolbar}
         style={anchoredOverlayStyle(toolbarAnchor, dragHidden)}
@@ -270,8 +249,7 @@ export default function ImageEraseDialog({
         </button>
       </div>
 
-      {/* 源图卡下方发送条（IKH1WI 中心点锚：inline left = 源卡中心 x，自身 translateX(-50%)
-          真居中；sendBarFollow 解除默认 bottom 定位避免 top/bottom 双侧拉伸） */}
+      {}
       <div
         className={`${styles.sendBar} ${sendBarAnchor ? styles.sendBarFollow : ''}`}
         style={anchoredOverlayStyle(sendBarAnchor, dragHidden)}

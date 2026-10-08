@@ -1,32 +1,12 @@
 version: v2
 
-# 代码生成配置。**生成物不入仓**（见 buf.yaml 说明），构建时执行：
-#
-#     buf generate
-#
-# ⚠️ 前置：`buf` 未安装。安装方式二选一：
-#     brew install bufbuild/buf/buf                    # 本机
-#     见 docs/agents/ 或 CI 配置里的 buf 安装步骤        # 流水线
 plugins:
-  # ── TypeScript（business-api / identity-svc 消费）
-  #    protobuf-es v2：产出 .ts，与现有 TS 代码风格一致。
   - remote: buf.build/bufbuild/es:v2.2.3
     out: ../backend/libs/contracts/gen
     opt:
       - target=ts
-      # ⚠️ 必须显式带 .js 后缀：本仓 tsconfig 是 node16/nodenext 解析，
-      #    裸相对导入（'./usage_pb'）会报 TS2835。protobuf-es 默认不带，要在生成时指定。
       - import_extension=js
 
-  # ── Java（billing-svc / worker-java 消费）
-  #
-  # ⚠️ **暂未启用** —— 输出目录 `server/blue-whale-common/` 还不存在（ADR-0114 的聚合目录尚未落地）。
-  #    `java/` 建好后取消注释即可，buf 会自动生成到 Maven 的 generated-sources 约定位置。
-  #
-  # - remote: buf.build/protocolbuffers/java:v29.3
-  #   out: ../server/blue-whale-common/target/generated-sources/proto
 
-# 关闭 managed mode：java_package / java_multiple_files 已在各 .proto 里**显式声明**，
-# 让配置可见比让工具隐式覆盖更好排查。
 managed:
   enabled: false

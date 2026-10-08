@@ -1,7 +1,3 @@
-/* ============================================
- * 账户积分与订单：独立网页
- * 数据走 fetchAccountCreditsPage，稍后替换函数体即可接真实接口
- * ============================================ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDocumentTitle } from '@/seo/useDocumentTitle';
 import SummaryCards from './SummaryCards';

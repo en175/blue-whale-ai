@@ -1,16 +1,8 @@
-/* ============================================
- * 媒体内容区尺寸规则：图片/视频短边 280、长边按比例且不超过 840；音频恒为 480×240 横矩形（IKH8PU）
- * 真实宽高优先；缺失时用目标比例（生成参数透传，非真实分辨率）；均未知回退 280×280
- * ============================================ */
 
 export interface MediaContentSizeInput {
-  /** 媒体类型：音频无可视宽高，内容区恒横矩形 */
   mediaType?: 'image' | 'video' | 'audio';
-  /** 真实媒体宽度（像素），来自资产数据或浏览器实测 */
   width?: number;
-  /** 真实媒体高度（像素） */
   height?: number;
-  /** 目标比例字符串，如 "16:9"；仅作形状依据，不得当作原始分辨率展示 */
   ratio?: string;
 }
 
@@ -19,7 +11,6 @@ export interface MediaContentBox {
   height: number;
 }
 
-/** 浏览器量得的真实媒体尺寸（宽高、时长均可缺，只回填测到的字段） */
 export interface MediaDims {
   width?: number;
   height?: number;
@@ -29,12 +20,9 @@ export interface MediaDims {
 export const MEDIA_CONTENT_SHORT_SIDE = 280;
 const MEDIA_CONTENT_LONG_SIDE_MAX = 840;
 
-/** 音频内容区恒定横矩形尺寸（IKH8PU，对齐原型 480×240），不随真实宽高/目标比例变化 */
 const MEDIA_AUDIO_CONTENT_WIDTH = 480;
 const MEDIA_AUDIO_CONTENT_HEIGHT = 240;
 
-/** 媒体内容区相对节点左上角的纵向偏移（与 MediaNode wrapper 的 padding-top: 22.5px 对齐，
- *  裁切框（IKGW1N）/扩图扩展框（IKGOQX）等屏幕空间覆盖层据此定位内容区。 */
 export const MEDIA_CONTENT_TOP_OFFSET = 22.5;
 
 function parseRatio(ratio?: string): number | null {

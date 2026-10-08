@@ -1,13 +1,9 @@
-/* ============================================
- * admin 子路由表：后台页面，按需懒加载
- * ============================================ */
 import { Dashboard, RechargePlans, RechargeCustomConfig, Promotions, MemberDiscounts, RechargeRecords, ConsumptionRecords, JobRecords, TemplateManage, SkillManage, ModelList, UserManage, OperationLog, SystemConfig, SiteConfig } from './lazyPages';
 import { LazyPage as L } from './LazyPage';
 import { Navigate } from 'react-router-dom';
 import RequireAdmin from '@/router/guards';
 import AdminLayout from './layouts/AdminLayout';
 
-/** 后台路由子树（挂载到根路由） */
 export const adminRoutes = {
   path: '/admin',
   element: (

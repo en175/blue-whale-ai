@@ -4,8 +4,6 @@ import type {
   ProjectRepo,
 } from "@lib/shared/persistence/index.js";
 
-/** POST /api/projects/{projectId}/generation-jobs/{jobId}/cancel：软取消（置 cancel_requested_at）。
- *  worker 读到后停止；仅归属当前用户的 queued/processing 任务可取消。 */
 export async function handleCancelGenerationJob(
   userId: string,
   projectId: string,

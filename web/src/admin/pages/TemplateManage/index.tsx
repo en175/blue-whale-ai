@@ -1,10 +1,3 @@
-/* ============================================
- * TemplateManage 模板管理：首页 dock 模板卡片增删改与标签改名
- * 数据源 GET/POST/PUT/DELETE /api/admin/templates
- *
- * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**（原 index.module.css 已删）——
- * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
- * ============================================ */
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Film, Image as ImageIcon, Upload, Eye, EyeOff } from 'lucide-react';
@@ -44,7 +37,6 @@ import {
   Hint,
 } from '../../ui';
 
-/** 渲染形态：layout code ↔ 展示名 */
 const LAYOUTS: { code: string; label: string }[] = [
   { code: 'wide', label: '横版视频卡' },
   { code: 'portrait', label: '竖版卡' },
@@ -64,7 +56,6 @@ export default function TemplateManage() {
 
   const tagName = (code: string) => tags.find((t) => t.tag_code === code)?.label ?? code;
 
-  // 标签 tabs（后台标签接口）与卡片列表各自成一个 Query（IKJ058）。
   const queryClient = useQueryClient();
   const tagsQuery = useQuery(templateTagsOptions());
   const cardsQuery = useQuery(
@@ -82,12 +73,6 @@ export default function TemplateManage() {
       : '获取模板列表失败'
     : '';
 
-  /**
-   * 操作之后刷新卡片列表。
-   *
-   * <p>⚠️ `tab` 参数保留**只是为了不改既有调用点**：换 tab 是换 queryKey 的一件事
-   * （不同的 key = 另一份数据），不是对同一份重新过滤 —— 所以这里只管 refetch。
-   */
   const load = useCallback(
     (_tab: string) => {
       void cardsQuery.refetch();
@@ -95,14 +80,12 @@ export default function TemplateManage() {
     [cardsQuery],
   );
 
-  /** 标签的本地同步：缓存里存的就是那一份，写它比再拉一次快，也和改前的本地更新等价。 */
   const writeTags = (updater: (prev: AdminTemplateTag[]) => AdminTemplateTag[]): void => {
     queryClient.setQueryData<AdminTemplateTag[]>(templateTagKeys.list(), (prev) =>
       prev === undefined ? prev : updater(prev),
     );
   };
 
-  /** 排序：POST /:id/move（同 tag 内上移/下移，边缘后端返回 409），成功后刷新 */
   const move = async (id: string, dir: -1 | 1) => {
     setActionError('');
     try {
@@ -113,14 +96,12 @@ export default function TemplateManage() {
     }
   };
 
-  /** 标签改名：PUT /api/admin/template-tags，成功后本地同步展示名 */
   const handleRename = async (code: string, label: string) => {
     await renameAdminTemplateTag(code, label);
     writeTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, label } : t)));
     setRenameCode(null);
   };
 
-  /** 标签隐藏开关（IKA64P）：PUT /api/admin/template-tags/visibility，成功后本地同步 */
   const toggleVisibility = async (code: string, next: number) => {
     setActionError('');
     try {
@@ -131,7 +112,6 @@ export default function TemplateManage() {
     }
   };
 
-  /** 新建/编辑提交：POST/PUT /api/admin/templates，成功后刷新列表 */
   const handleSubmit = async (data: TemplateCardPayload, id?: string) => {
     setActionError('');
     if (id !== undefined) {
@@ -143,7 +123,6 @@ export default function TemplateManage() {
     load(activeTab);
   };
 
-  /** 确认删除：DELETE /api/admin/templates/:id（软删除） */
   const confirmDelete = async () => {
     if (deleteId === null || deleting) return;
     setDeleting(true);
@@ -161,7 +140,7 @@ export default function TemplateManage() {
 
   return (
     <Page>
-      {/* 页头 */}
+      {}
       <PageHeader
         title="模板管理"
         subtitle="首页 dock 下方模板卡片的增删改与标签改名"
@@ -172,11 +151,11 @@ export default function TemplateManage() {
         }
       />
 
-      {/* 操作错误：用户刚做的动作失败，用 danger 调子，不要塞进 Card */}
+      {}
       {actionError && <Alert tone="danger">{actionError}</Alert>}
 
       <Card padded={false}>
-        {/* 标签 tabs：点标签即筛选，标签右侧是改名与隐藏开关 */}
+        {}
         <div style={{ padding: 'var(--admin-space-3)' }}>
           <Toolbar>
             <Chip active={activeTab === 'all'} onClick={() => setActiveTab('all')}>
@@ -218,7 +197,7 @@ export default function TemplateManage() {
           </Toolbar>
         </div>
 
-        {/* 模板表格 */}
+        {}
         <Table>
           <thead>
             <tr>
@@ -334,7 +313,7 @@ export default function TemplateManage() {
         </Table>
       </Card>
 
-      {/* 标签改名弹窗 */}
+      {}
       {renameCode !== null && (
         <RenameTagModal
           tag={tags.find((t) => t.tag_code === renameCode)!}
@@ -343,7 +322,7 @@ export default function TemplateManage() {
         />
       )}
 
-      {/* 新建/编辑模板弹窗 */}
+      {}
       {form !== null && (
         <TemplateFormModal
           initial={form.id !== undefined ? templates.find((t) => t.id === form.id) : undefined}
@@ -354,7 +333,7 @@ export default function TemplateManage() {
         />
       )}
 
-      {/* 删除二次确认 */}
+      {}
       {deleteId !== null && (
         <ConfirmModal
           title="删除模板"
@@ -368,7 +347,6 @@ export default function TemplateManage() {
   );
 }
 
-/* ============ 重命名标签弹窗 ============ */
 function RenameTagModal({
   tag,
   onClose,
@@ -431,7 +409,6 @@ function RenameTagModal({
   );
 }
 
-/* ============ 新建/编辑模板弹窗 ============ */
 interface TemplateFormModalProps {
   initial?: TemplateCard;
   tags: AdminTemplateTag[];
@@ -447,7 +424,6 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
   const [sort, setSort] = useState(initial !== undefined ? String(initial.sort_order) : '0');
   const [videoUrl, setVideoUrl] = useState(initial?.video_url ?? '');
   const [content, setContent] = useState(initial?.content ?? '');
-  // 已有图片携带 id（编辑时保留），新增图片无 id
   const [images, setImages] = useState<{ id?: string; url: string }[]>(
     initial?.images.map((img) => ({ id: img.id, url: img.image_url })) ?? []
   );
@@ -458,7 +434,6 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
   const imgFileRef = useRef<HTMLInputElement>(null);
   const videoFileRef = useRef<HTMLInputElement>(null);
 
-  /** 三步上传：presign → PUT 直传 → complete，成功后将公网 URL 回填表单 */
   const uploadMedia = async (file: File, type: 'image' | 'video') => {
     const isImg = type === 'image';
     const okMime = isImg
@@ -566,7 +541,7 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
         </>
       }
     >
-      {/* 字段标签是「一行说明 + 控件」，套件暂无对应基元，这里只用一次性间距排布 */}
+      {}
       <div style={{ marginBottom: 6 }}>
         标题 <Badge tone="danger">*</Badge>
       </div>
@@ -734,7 +709,7 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
         </div>
       </div>
 
-      {/* 表单保存/校验失败：danger 调子，别再塞进 Card */}
+      {}
       {formError && (
         <div style={{ marginTop: 12 }}>
           <Alert tone="danger">{formError}</Alert>

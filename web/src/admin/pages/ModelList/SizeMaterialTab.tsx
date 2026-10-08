@@ -1,15 +1,3 @@
-/* ============================================
- * 「尺寸与素材」tab：尺寸档位 / 比例 / 出站尺寸映射（渠道类型 + 三张映射表）/
- * 输出像素表 / 默认值 / 时长 / 格式 / 特性 features / 任务类型比例约束。
- *
- * 从 `ModelFormModal.tsx` 拆出来（那个文件已顶到 `max-lines` 上限）：内容按现有区块归位，
- * **没有新增字段**——原先那些 by-type 条件渲染原样保留（`visible.*`）。
- *
- * 图片的「出站尺寸映射」（渠道类型 + gpt 交叉格 / banana 一维表 / seedream 像素矩阵）是从
- * `AdvancedTab` **整块搬来**的（渲染逻辑逐字未改）：它与视频那张输出像素表是同一件事，
- * 而控制项与被它决定的表分在两个 tab 是最难用的一种切分。两张表各有一个小节
- * 标题与 Hint，说明谁在用、什么时候用。
- * ============================================ */
 import { Plus, X } from 'lucide-react';
 import type { KeyValueRow } from '../../lib/billing-catalog/catalogDraft';
 import {
@@ -35,28 +23,20 @@ import { CHIP_LIST, CHECK_STACK, FULL, GRID2, GRID3, INLINE_ROW, LABEL, SECTION,
 
 interface SizeMaterialTabProps {
   type: ModelType;
-  /** 渠道：**只读**。它在「基础」tab 里配（那是身份级决策），这里只回显 ——
-   *  下面那张映射表由它决定，不标明就不知道自己在填哪张表。
-   *  ⚠️ 别把它做成第二个可编辑入口：同一个值两处可改，谁最后写谁生效。 */
   channel: ChannelId;
-  /** gpt 交叉格（行=比例、列=尺寸、格子填官方 size）。 */
   gpt: { matrix: GptMatrix; setCell: (sizeId: string, ratio: string, value: string) => void };
-  /** seedream 像素矩阵（行=比例、列=尺寸、格子填出站像素如 `2048x2048`）。 */
   seedream: { matrix: GptMatrix; setCell: (sizeId: string, ratio: string, value: string) => void };
-  /** banana 一维映射（尺寸→quality、比例→size）。 */
   banana: {
     quality: Record<string, string>;
     setQuality: (value: Record<string, string>) => void;
     size: Record<string, string>;
     setSize: (value: Record<string, string>) => void;
   };
-  /** 哪些区块对当前类型可见（原 `showSizeRatio` / `showDuration` / …） */
   visible: {
     sizeRatio: boolean;
     duration: boolean;
     defaultDuration: boolean;
     format: boolean;
-    /** 该类型有没有专属的结构化特性键 */
     structuredFeature: boolean;
   };
   sizes: {
@@ -73,7 +53,6 @@ interface SizeMaterialTabProps {
     setDraft: (value: string) => void;
     add: () => void;
   };
-  /** 输出像素表 `features.video_dimensions`；`candidates` 由本行的「档位 × 比例」派生 */
   dimensions: { rows: KeyValueRow[]; candidates: string[] | null; set: (rows: KeyValueRow[]) => void };
   defaults: {
     size: string;
@@ -124,9 +103,6 @@ export default function SizeMaterialTab({
   features,
   taskTypes,
 }: SizeMaterialTabProps) {
-  // 三张表的开关仍按**解析器**判断（渲染逻辑逐字未改），解析器来自渠道：
-  // seedream / banana 渠道各只有一种协议，两个 gpt 渠道（内联 / 官方）共用同一张交叉格。
-  // 非图片渠道的 parser 为 null → 回落 seedream（那些行不渲染这一节）。
   const parser = channelOf(channel).parser ?? 'seedream';
   return (
     <>
@@ -222,11 +198,7 @@ export default function SizeMaterialTab({
         </>
       )}
 
-      {/* ── 出站尺寸映射（图片）：渠道类型 + 三张映射表 ──────────────────────────────
-          从「高级」tab 整块搬来（渲染逻辑逐字未改）。<b>控制项与它控制的表必须在一起</b>：
-          渠道类型决定用哪张表，分在两个 tab 里切一下渠道要跑去另一个 tab 才看得见表换没换。
-          与下面视频那张输出像素表并排——两张表说的都是「这张能力行的出站尺寸从哪来」，
-          各自一个小节标题与 Hint 说清谁在用、什么时候用。 */}
+      {}
       {type === 'image' && (
         <>
           <h3 style={SECTION}>出站尺寸映射（图片 · 执行期查表） <Hint>
@@ -246,8 +218,7 @@ export default function SizeMaterialTab({
             <span>（在「基础」里改）</span>
           </div>
 
-          {/* IKHU8P：矩阵转置成「行=比例、列=尺寸」。原方向是行=尺寸、列=比例，而 gpt 的比例最多 13 个，
-              14 列把单元格压到约 40px——下拉框左右 padding 加原生箭头就把正文吃光，值看着是空的。 */}
+          {}
           {parser === 'gpt' && (
             <div style={{ margin: '12px 0 20px' }}>
               <Table>
@@ -289,7 +260,7 @@ export default function SizeMaterialTab({
 
           {parser === 'banana' && (
             <div style={{ margin: '12px 0 20px' }}>
-              {/* 两张一维表各有自己的「列头」——说明挂在第一张表的列头上，才有锚点 */}
+              {}
               <div style={GRID2}>
                 <div>
                   <div style={LABEL}>
@@ -326,7 +297,7 @@ export default function SizeMaterialTab({
             </div>
           )}
 
-          {/* IKHU8P：与 gpt 同因同改——转置成「行=比例、列=尺寸」，免得比例一多就把格子压到看不见。 */}
+          {}
           {parser === 'seedream' && (
             <div style={{ margin: '12px 0 20px' }}>
               <Table>
@@ -370,14 +341,7 @@ export default function SizeMaterialTab({
         </>
       )}
 
-      {/* ── 输出像素表（`features.video_dimensions`）────────────────────────────────
-          存储形态是扁平的 `"resolution=480p|aspect_ratio=16:9" → "864x496"`，<b>不改</b>：这张表
-          不跨进程——跨进程的是 backend 解析出来的 `output_width` / `output_height` 两个标量
-          （`resolveOutputPixels` 查完冻进快照）。矩阵只是<b>视图</b>（行=比例、列=尺寸），
-          扁平是序列化形态，所以下面那张表一个字都不落到存储里。
-          只在<b>预扣估 token</b> 时用（提交那一刻没有真实 token）。键从本行的「档位 × 比例」派生
-          （别手敲——后端写闸门要求键必须形如 `resolution=X|aspect_ratio=Y`、值必须形如 `WxH`，
-          形态不对直接拒存），值由运营按官方对照表填。 */}
+      {}
       {type === 'video' && (
         <>
           <h3 style={SECTION}>输出像素表 video_dimensions（视频 · 只在预扣估 token 时用） <Hint>
@@ -448,8 +412,7 @@ export default function SizeMaterialTab({
         </>
       )}
 
-      {/* IKHBDO：结构化 features 对所有类型开放。此前 audio / text 被排除在结构化块之外，
-          而高级 JSON 兜底又只对 image / video 渲染——两种条件互相抵消，音频行连 JSON 出口都没有。 */}
+      {}
       <h3 style={SECTION}>
         特性 features（结构化）
         {!visible.structuredFeature && (
@@ -494,7 +457,7 @@ export default function SizeMaterialTab({
           ))}
       </div>
 
-      {/* ADR-0086：按任务类型的比例约束——原先只能在整个 features 的 JSON 里手写。 */}
+      {}
       {type === 'video' && (
         <>
           <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。勾「时长跟随原视频」= 该模式的时长由上游按源素材决定、用户不可选（只对消费源素材的模式有意义）。</Hint></h3>

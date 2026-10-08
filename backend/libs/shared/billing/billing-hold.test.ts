@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { createBillingHold, type BillingHoldContext } from './billing-hold.js';
 import type { BillingClient } from './billing-client.js';
 
-/** 造一个记录调用的假客户端。 */
 function fakeClient(overrides: Partial<BillingClient> = {}) {
   const hold = overrides.hold ?? vi.fn().mockResolvedValue({ reservedCredits: 100, catalogVersion: 1, duplicated: false });
   return { client: { hold } as unknown as BillingClient, hold: hold as ReturnType<typeof vi.fn> };
@@ -48,15 +47,12 @@ describe('createBillingHold', () => {
     await dep(CTX);
 
     const specs = hold.mock.calls[0]?.[0].specs as Record<string, string>;
-    // reference_count 是 `references` 的**长度**折算出来的标量（定价要的是数量）：
-    // 数组本身仍不进规格，见下一行
     expect(specs).toEqual({
       size: '2k',
       duration: '5',
       reference_count: '1',
       video: '0',
     });
-    // 数组与 null 不是规格——混进去会让 catalog 的规格表查不到，变成 UNPRICEABLE
     expect(specs).not.toHaveProperty('references');
     expect(specs).not.toHaveProperty('nested');
   });
@@ -73,7 +69,6 @@ describe('createBillingHold', () => {
     await dep(CTX);
 
     expect(hold).toHaveBeenCalledWith(expect.objectContaining({ tier: 'free' }));
-    // 不静默：等级取不到意味着这个用户可能被少给了折扣
     expect(warn).toHaveBeenCalled();
   });
 
@@ -87,19 +82,10 @@ describe('createBillingHold', () => {
       logger: { warn: vi.fn() },
     });
 
-    // 认不出的错误照原样抛（那是我们自己的 bug，不该伪装成上游故障）
     await expect(dep(CTX)).rejects.toThrow('UNAVAILABLE');
   });
 });
 
-/**
- * 契约那三条失败语义在这里换掉**对外的身份**（映射本体在 billing-client 的 toBillingHoldError）。
- *
- * <p>钉的是**真跑出来**的那个 bug：目录里漏配一个模型，用户拿到 `HTTP 500
- * {"code":500,"msg":"服务器内部错误"}` —— 像我们挂了；而 billing 其实说了「这个组合算不出价」。
- *
- * <p>⚠️ 每条都仍然是**拒绝**（fail closed 不变）：变的只是以什么状态、什么话被拒。
- */
 describe('createBillingHold：被拒时的对外身份', () => {
   it('billing 不可用（UNAVAILABLE）→ 503：仍是拒绝，但这次重试有意义', async () => {
     const { client } = fakeClient({
@@ -123,10 +109,8 @@ describe('createBillingHold：被拒时的对外身份', () => {
 
     const error = await dep(CTX).catch((e: unknown) => e);
 
-    // 用户能自己改（换一个模型）：给 4xx 和一句人话
     expect(error).toMatchObject({ code: 1005, status: 400 });
     expect((error as Error).message).not.toMatch(/UNPRICEABLE|未配置计价规则/);
-    // 运营要的是原文：漏配清单就是从这批日志里攒出来的
     expect(warn.mock.calls[0]?.[0]).toContain('UNPRICEABLE');
   });
 

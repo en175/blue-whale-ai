@@ -20,7 +20,6 @@ const toastApi = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 
 vi.mock('@/api/recharge', () => rechargeApi);
 vi.mock('@/api/auth', () => authApi);
-// 只模拟组件用到的两个面：读余额的 selector（固定 500）与写回余额的 actions
 vi.mock('@/stores/auth', () => {
   const store = Object.assign(
     <T,>(selector: (state: { credits: number | null }) => T) => selector({ credits: 500 }),
@@ -39,7 +38,6 @@ let root: Root;
 let mountNode: HTMLDivElement;
 let onClose: ReturnType<typeof vi.fn>;
 
-/** 冲掉一串微任务：下单与轮询都是 promise 串联，单次 await 只推进一格 */
 async function flush() {
   for (let i = 0; i < 8; i += 1) {
     await act(async () => {
@@ -57,7 +55,6 @@ async function renderRechargeModal() {
   });
 }
 
-/** 按可见文字点按钮（套餐卡片 / 确认支付） */
 async function clickButton(text: string) {
   await act(async () => {
     [...document.body.querySelectorAll<HTMLButtonElement>('button')]
@@ -82,10 +79,8 @@ beforeEach(() => {
         discount: 1,
         is_recommended: false,
         sort_order: 1,
-        // 权限信号由服务端算（`canPurchaseTier`）：默认「全部登录用户」可买
         can_purchase: true,
         denied_hint: '当前账号暂不可购买该档位',
-        // 这一档的有效期（月）：卡片上标的就是它，页面级不再写死任何年数
         credits_valid_months: 24,
       },
     ],
@@ -139,24 +134,16 @@ describe('RechargeModal', () => {
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     expect(document.body.querySelector('[data-semantic="mask"]')).not.toBeNull();
 
-    // 到账积分只说「以各档位标注为准」：它现在是后台配置值，与定价目录那条消费锚点不成比例
     expect(document.body.textContent).toContain('到账积分与有效期以各档位标注为准');
-    // ⚠️ 页面级**不再**承诺任何具体年数：有效期是按商品可配的，写死一个数必然对某些档位是假话
-    //    （原先那句「积分自到账起 2 年内有效」已删；「永久有效」是更早的假话）
     expect(document.body.textContent).not.toContain('积分自到账起');
     expect(document.body.textContent).not.toContain('永久有效');
     expect(document.body.textContent).not.toContain('1 元 =');
-    // 有效期标在**卡片自己**那一行，值从接口来（这一档配的是 24 个月）
     expect(document.body.textContent).toContain('有效期 2 年');
-    // 档位卡片：到账积分 + 实付价
     expect(document.body.textContent).toContain('100 积分');
     expect(document.body.textContent).toContain('¥10');
   });
 
   it('★ 有效期按档位可配：配 6 个月的档位，卡片上出现的是 6 个月而不是 2 年', async () => {
-    // 「文案与配置不一致」是这条要抓的缺陷：C 把 `credits_valid_months` 接通之后，
-    // 运营配 6 个月就**真的**按 6 个月发 —— 而页面级那句写死的「2 年」当场变成假话。
-    // 所以卡片上必须出现**这一档自己**的那个数，不是任何一个整页共用的年数。
     rechargeApi.fetchRechargeTierCatalog.mockResolvedValue({
       credits_per_yuan: 10,
       tiers: [
@@ -179,9 +166,7 @@ describe('RechargeModal', () => {
     await flush();
 
     expect(document.body.textContent).toContain('有效期 6 个月');
-    // 一个「2 年」都不该出现：这一档根本不是 2 年
     expect(document.body.textContent).not.toContain('2 年');
-    // 同一个页面上不再有第二条关于有效期的说法（那句话本身就是被删掉的那条假话）
     expect(document.body.textContent).not.toContain('积分自到账起');
   });
 
@@ -238,7 +223,6 @@ describe('RechargeModal', () => {
     await flush();
 
     await clickButton('100 积分');
-    // 选中后底部结算栏带出账本余额（整数积分）
     expect(document.body.textContent).toContain('500 积分');
     await clickButton('确认支付 ¥10');
 
@@ -246,9 +230,7 @@ describe('RechargeModal', () => {
     expect(document.body.textContent).toContain('等待支付结果...');
     expect(document.body.textContent).toContain('请用微信 / 支付宝 / 云闪付 扫码支付');
     expect(document.body.textContent).toContain('获得 100 积分');
-    // 二维码真的画出来了（不是「二维码不可用」占位）
     expect(document.body.textContent).not.toContain('二维码不可用');
-    // 渠道切换与取消支付整条删掉了（没有 cancel 接口，留个假按钮就是骗人）
     expect(document.body.textContent).not.toContain('取消支付');
   });
 
@@ -261,7 +243,6 @@ describe('RechargeModal', () => {
     await flush();
     await clickButton('100 积分');
 
-    // 进入 waiting 后由 3s 定时器驱动下一次查询
     vi.useFakeTimers();
     await clickButton('确认支付 ¥10');
     await flush();
@@ -275,16 +256,11 @@ describe('RechargeModal', () => {
     expect(document.body.textContent).toContain('支付成功');
     expect(document.body.textContent).toContain('+100 积分已到账');
     expect(toastApi.success).toHaveBeenCalledWith('支付成功，积分已到账');
-    // fresh=true：绕开 GET 在途去重，否则拿回支付前的旧余额
     expect(authApi.fetchCredits).toHaveBeenCalledWith({ fresh: true });
-    // 写回的是整个 usage 结果（含按来源拆分），不只是那个数 —— store 里按
-    // 「各类型相加」算显示用的总额，相加逻辑只此一处
     expect(setUsage).toHaveBeenCalledWith({ credits: 1234 });
   });
 
   it('★ 钱已收到、积分还在发（paid_pending）：话术换成「发放中」，仍不算成功', async () => {
-    // 钱已经付了，此刻说「等待支付结果…」是在让用户怀疑自己没付成功；
-    // 但也不能报成功（积分还没到账）—— 两种都不是，就如实说「发放中」
     rechargeApi.fetchRechargeOrderStatus.mockResolvedValue({
       trade_no: 'trade-1',
       status: 'paid_pending',
@@ -305,9 +281,6 @@ describe('RechargeModal', () => {
   });
 
   it('★ 到账异常（grant_failed）：说「发放异常、请联系客服」，不再说「发放中」', async () => {
-    // 「发放中」与「发放异常」的差别是**还会不会自己好**：paid_pending 还有人重试
-    // （扫描器 / 用户轮询都在推），grant_failed 是重试也失败、要人工介入的状态。
-    // 继续让用户等，等于让他等一件不会自己发生的事（PRD §11.1「展示处理中或联系客服」）。
     rechargeApi.fetchRechargeOrderStatus.mockResolvedValue({
       trade_no: 'trade-1',
       status: 'grant_failed',
@@ -322,11 +295,9 @@ describe('RechargeModal', () => {
 
     expect(document.body.textContent).toContain('积分发放异常，请联系客服');
     expect(document.body.textContent).not.toContain('发放中');
-    // 仍然不是成功：积分没到账，不能报成功、也不能刷余额
     expect(document.body.textContent).not.toContain('支付成功');
     expect(toastApi.success).not.toHaveBeenCalled();
     expect(setUsage).not.toHaveBeenCalled();
-    // ⚠️ 仓里没有可跳转的客服入口，就**不编**一个：这句话里不该出现任何链接
     const hints = [...document.body.querySelectorAll('a')].filter((a) =>
       a.textContent?.includes('客服'),
     );
@@ -356,9 +327,6 @@ describe('RechargeModal', () => {
   });
 
   it('★ B-1：下单回来的价与页面上显示的不一致 → 提示「价格已更新」，不让用户自己猜该付哪个数', async () => {
-    // 运营在用户点下「确认支付 ¥10」之后、订单创建之前改了价。服务端按**新价**建单
-    // （PRD §7.5 以服务端最新配置为准），于是卡片上还是 ¥10、二维码面板是 ¥12。
-    // 两个金额同屏必须解释清楚，否则用户不知道该照哪个付（PRD §6.7「需要刷新或提示」）。
     rechargeApi.createRechargeOrder.mockResolvedValue({
       trade_no: 'trade-1',
       qr_code_url: 'https://example.com/cashier',
@@ -374,7 +342,6 @@ describe('RechargeModal', () => {
     await flush();
 
     expect(document.body.textContent).toContain('价格已更新为 ¥12，请确认后再支付');
-    // 面板上就是服务端算的那个价（用户实际要付的钱，只有一个）
     expect(document.body.textContent).toContain('¥12');
   });
 
@@ -416,7 +383,6 @@ describe('RechargeModal', () => {
 
     expect(document.body.textContent).toContain('该档位已下架');
     expect(document.body.textContent).not.toContain('等待支付结果...');
-    // 错误由组件就地展示，http 层已 silent，不重复 toast
     expect(toastApi.error).not.toHaveBeenCalled();
   });
 
@@ -427,7 +393,6 @@ describe('RechargeModal', () => {
     await clickButton('确认支付 ¥10');
     await flush();
 
-    // 关弹窗不撤单（网关侧没有关单接口），但用户可能刚付掉，余额要补一次
     await act(async () => {
       document.body.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')?.click();
       await Promise.resolve();
@@ -452,9 +417,7 @@ describe('RechargeModal', () => {
   });
 });
 
-// 档位购买权限（PRD §6.3）：无权限的卡片置灰 + 展示后台配的提示，与自定义充值面板同一套做法
 describe('RechargeModal — 档位购买权限', () => {
-  /** 让目录只返回一张「当前用户买不了」的档位卡 */
   function deniedCatalog(hint = '该档位仅限内测用户') {
     rechargeApi.fetchRechargeTierCatalog.mockResolvedValue({
       credits_per_yuan: 10,
@@ -481,14 +444,12 @@ describe('RechargeModal — 档位购买权限', () => {
     await renderRechargeModal();
     await flush();
 
-    // 卡片是禁用的（`disabled` 是给键盘/鼠标两层都拦住的），并带上提示文案
     const card = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent?.includes('100 积分'),
     );
     expect(card?.disabled).toBe(true);
     expect(document.body.textContent).toContain('该档位仅限内测用户');
 
-    // 点也点不动：不会选中、底部不会出现「确认支付 ¥10」
     await clickButton('100 积分');
     expect(document.body.textContent).not.toContain('确认支付 ¥10');
     expect(rechargeApi.createRechargeOrder).not.toHaveBeenCalled();
@@ -503,8 +464,6 @@ describe('RechargeModal — 档位购买权限', () => {
   });
 
   it('★ `can_purchase` 为 null（游客未判定）不是无权限：卡片照常可选可买', async () => {
-    // null 是「不知道你是谁」，不是「你不能买」—— 价格表本来就该看得见，
-    // 把它当成 false 会让一张公开价目表变成一排灰卡片
     rechargeApi.fetchRechargeTierCatalog.mockResolvedValue({
       credits_per_yuan: 10,
       tiers: [
@@ -533,9 +492,7 @@ describe('RechargeModal — 档位购买权限', () => {
   });
 });
 
-// 自定义充值（模块 B）：与固定积分卡并列，共用同一条支付链路
 describe('RechargeModal — 自定义充值', () => {
-  /** 切到自定义充值页签并等面板把配置拉回来 */
   async function switchToCustom() {
     await clickButton('自定义充值');
     await flush();
@@ -545,16 +502,13 @@ describe('RechargeModal — 自定义充值', () => {
     await renderRechargeModal();
     await flush();
 
-    // 默认落在固定积分卡：既有路径一个像素都不变
     expect(document.body.textContent).toContain('100 积分');
     expect(document.body.textContent).not.toContain('600 积分');
 
     await switchToCustom();
 
-    // 面板按后台配置给出默认值 600 积分 / ¥40（1 元 = 15 积分）
     expect(document.body.textContent).toContain('600 积分');
     expect(document.body.textContent).toContain('¥40');
-    // 面板自带价格与购买按钮，此时不再渲染档位与底部结算栏（两处各写一次价格会互相打架）
     expect(document.body.textContent).not.toContain('100 积分');
     expect(document.body.textContent).not.toContain('确认支付');
   });
@@ -567,7 +521,6 @@ describe('RechargeModal — 自定义充值', () => {
     await clickButton('¥40 购买');
     await flush();
 
-    // 传的是积分，不是价格：价格一律服务端按当前配置算
     expect(rechargeApi.createCustomRechargeOrder).toHaveBeenCalledWith(600);
     expect(rechargeApi.createRechargeOrder).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('等待支付结果...');
@@ -616,10 +569,8 @@ describe('RechargeModal — 自定义充值', () => {
     await renderRechargeModal();
     await flush();
 
-    // 只剩一种方式：连切换器都不渲染（「选方式」是废话）
     expect(document.body.querySelector('[role="tab"]')).toBeNull();
     expect(document.body.textContent).not.toContain('自定义充值');
-    // 固定积分卡照旧
     expect(document.body.textContent).toContain('100 积分');
   });
 });

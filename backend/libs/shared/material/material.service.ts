@@ -1,9 +1,3 @@
-// 归属与状态以网关/上游为权威；本地仅三处持久化：
-//   - 素材关联镜像 assets.material_id/material_group_id（IKDJNZ）；
-//   - 素材库组 material_groups（IKDE6X/IKEXX8 契约 v2：只维护虚拟组镜像，
-//     ListAssetGroups(AIGC)/GetAssetGroup 命中时读本地，真人组查询仍透传上游）；
-//   - 素材校验状态 material_assets（IKFYHJ，ADR-0087：镜像上游 Status，供生成采纳处判定）。
-// 其余（素材列表等）仍纯过境透传。
 import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import {
@@ -28,36 +22,25 @@ import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { newApiBaseUrl } from "@lib/shared/upstream/new-api-egress.js";
 import { createUploadMaterialGate } from "./material-upload-gate.js";
 
-/**
- * 素材库 Action 白名单（产品侧唯一权威清单）。
- * 不做无白名单的 wildcard 透传：上游未实现的 GetModerationResult 不暴露，
- * 未来网关新增 Action 时由产品侧显式跟进。
- */
 export const MATERIAL_ACTIONS = [
-  // 素材组
   "CreateAssetGroup",
   "GetAssetGroup",
   "UpdateAssetGroup",
   "DeleteAssetGroup",
   "ListAssetGroups",
-  // 素材
   "CreateAsset",
   "ListAssets",
   "GetAsset",
   "UpdateAsset",
   "DeleteAsset",
-  // 真人活体认证会话
   "CreateVisualValidateSession",
   "GetVisualValidateResult",
 ] as const;
 
 export type MaterialAction = (typeof MATERIAL_ACTIONS)[number];
 
-/** 素材库素材 id 格式（对齐上游 asset-...；与 material.controller / 生成侧同源）。 */
 const MATERIAL_ID_PATTERN = /^asset-.{1,128}$/i;
 
-// 真人会话的 CallbackURL 由前端传入（指向刷脸完成后的落地提示页），
-// 本层纯透传不改动；未传时由上游按自身默认行为处理。
 
 @Injectable()
 export class MaterialService {
@@ -75,7 +58,6 @@ export class MaterialService {
     if (!this.clientInstance) {
       let baseUrl: string;
       try {
-        // 地址从上游唯一出口取（不再自己读 NEW_API_BASE_URL）
         baseUrl = newApiBaseUrl();
       } catch {
         throw new NewApiError(
@@ -103,7 +85,6 @@ export class MaterialService {
     return this.materialAssetRepoInstance;
   }
 
-  /** IKF YHJ：失败处置要清 `assets` 的素材关联，这里自带一个最小仓库面。 */
   private get assetRepo(): Pick<AssetRepo, "clearMaterialLink"> {
     if (!this.assetClearRepoInstance) {
       this.assetClearRepoInstance = createAssetRepo(this.prisma.client);
@@ -122,26 +103,16 @@ export class MaterialService {
     return this.client.callAction(action, body, token);
   }
 
-  /** IKDE6X：确保当前用户存在虚拟默认组（kind=virtual, is_default=true），无则上游建组 + 本地落表。
-   *  返回该用户虚拟默认组 id（material_group_id）。前端不感知组、不传 GroupId，
-   *  首次向虚拟人像上传素材时由本方法兜底建组。
-   *  注意：本方法为 check-then-act，无 DB 层 is_default 唯一约束兜底。并发首个上传可能短暂出现
-   *  2 个虚拟默认组（上游建 2 组 + 本地 2 行 is_default=true）；findVirtualDefault 按 id asc 取最低，
-   *  upload 侧后续读取稳定收敛，无数据丢失。已按当前契约（虚拟组每用户 1 个）尽力缩短窗口并
-   *  在本地落表失败时补偿删除上游组；若后续要求严格一次一个，需再加 per-user 锁。 */
   async ensureVirtualDefaultGroup(
     userId: string,
   ): Promise<string> {
-    // 1. 先查本地虚拟默认组（未删）。命中直接复用。
     const existing = await this.groupRepo.findVirtualDefault(userId);
     if (existing) return existing.materialGroupId;
 
-    // 2. 上游建虚拟组（组名：默认分组：<userId>；GroupType=AIGC 网关必填，显式携带不赌默认值）。
     const upstream = await this.callAction("CreateAssetGroup", {
       Name: `默认分组：${userId}`,
       GroupType: "AIGC",
     });
-    // 上游 4xx：透传错误状态与消息（如账号未开通素材组能力），不包装成 502。
     if (upstream.status < 200 || upstream.status >= 300) {
       throw new NewApiError(
         readUpstreamError(upstream.body) ?? "创建默认素材组失败",
@@ -158,12 +129,9 @@ export class MaterialService {
       );
     }
 
-    // 3. 落表前复核：若期间已出现默认组（并发首个上传），本组不设 is_default（避免第二行默认），
-    //    但仍落本地做 (user, group) 镜像，避免上游组孤儿。
     const raced = await this.groupRepo.findVirtualDefault(userId);
     const isDefault = raced === null;
 
-    // 4. 本地落镜像（虚拟默认组）。同 (user_id, material_group_id) 已存在则覆盖（幂等）。
     try {
       await this.groupRepo.upsert({
         userId,
@@ -173,7 +141,6 @@ export class MaterialService {
         isDefault,
       });
     } catch (error) {
-      // 契约 §2.2：上游成功但本地落表失败必须回滚/补偿——best-effort 删上游刚建的组，避免孤儿。
       logger.error(
         `material ensureVirtualDefaultGroup upsert failed, compensating delete upstream group: ${
           error instanceof Error ? error.message : String(error)
@@ -187,9 +154,6 @@ export class MaterialService {
     return materialGroupId;
   }
 
-  /** IKEXX8（契约 v2 §5）：组查询分流——命中本地读规则时返回上游同款信封，否则 null（控制器透传）。
-   *  - ListAssetGroups 且 Filter.GroupType==="AIGC" → 本地虚拟组分页（其余参数形状一律透传）；
-   *  - GetAssetGroup 且 Id 命中本地虚拟组（未删）→ 本地详情；未命中（真人组等）→ 透传上游。 */
   async tryServeLocalGroupAction(
     userId: string,
     action: string,
@@ -225,7 +189,6 @@ export class MaterialService {
     return null;
   }
 
-  /** IKEXX8：上游 DeleteAssetGroup 成功后软删本地虚拟组行（真人组无本地行，updateMany 空操作）。 */
   async softDeleteLocalGroup(
     userId: string,
     materialGroupId: string,
@@ -233,7 +196,6 @@ export class MaterialService {
     await this.groupRepo.softDelete(userId, materialGroupId);
   }
 
-  /** IKF YHJ：给生成创建期的素材门用的最小仓库面（避免把 Prisma 透到 API 层）。 */
   get materialStatusRepo(): Pick<
     MaterialAssetRepo,
     "findByMaterialId" | "mirrorStatus"
@@ -256,22 +218,6 @@ export class MaterialService {
     });
   }
 
-  /** IKI65H：上传接口回显素材审核状态的**只读**口（与 {@link uploadMaterialGate} 并列，
-   *  接线同样在控制器层）。
-   *
-   *  刻意写成内联的匿名结构类型、不 import 资产域的 `MaterialStatusReader`——与那边刻意不
-   *  import 本域是同一个理由，两边靠结构类型对上，素材库域不反向依赖资产域。
-   *
-   *  **不抛**（`MaterialStatusReader` 的契约）：它取的是一个回显字段，不是门。读失败时记一条
-   *  warn 回 null——否则一次已经落库、已经绑好的上传会因为「一个展示字段读不到」回 500，而
-   *  客户端重试还会在同一条路上再撞一次。代价是「读失败」与「无状态行」都呈现为 null，日志
-   *  是唯一的区分线索；这比把一个已完成的写回滚成错误划算。
-   *
-   *  读的是本地镜像那一行的原值（`Active` / `Processing` / `Failed`）；无对应行返回 null，
-   *  存量素材可能从未建过 `material_assets` 行。注意 `findByMaterialId` 内部走
-   *  `toStatus` 归一（白名单外一律 `Processing`），而资产列表的 `resolveMaterialStatuses`
-   *  直接读原值——两边仅在库里出现白名单外的值时才有差异，应用层写不进去（`mirrorStatus`
-   *  的入参类型就是 `MaterialAssetStatus`）。 */
   materialStatusReader(): {
     load(userId: string, materialId: string): Promise<string | null>;
   } {
@@ -295,25 +241,11 @@ export class MaterialService {
     };
   }
 
-  /** IKF YHJ：上游判定素材失败时的**统一处置**（无论哪条路径发现的，都走这一个口子）。
-   *
-   *  三件事，顺序有意：
-   *   ① 本地状态行留 `Failed`（**不删**——留痕，且拦截点据此直接拒绝、不必再问上游）；
-   *   ② 清空 `assets` 表的素材关联（用户侧不再显示「已入库」，需重新走合规校验）；
-   *   ③ 删掉上游素材（死素材不留在人家库里）。
-   *
-   *  ①② 同步完成——紧接着的请求必须立刻看到一致状态。
-   *  ③ 是清理副作用，**不等待、失败只告警**：它不该拖慢/拖挂一个正在被拒绝的请求，
-   *  也不该让上游抖动变成用户可见的错误。真删不掉也无妨（本地已 Failed，拦截点照样拒）。
-   *
-   *  为什么必须配套「本地 Failed 就不再问上游」（{@link tryServeLocalFailedAsset}）：
-   *  ③ 删完之后上游只会回 `NotFound`，前端会看到自相矛盾的「素材不存在」而不是「未通过」。 */
   async handleUpstreamMaterialFailure(input: {
     userId: string;
     materialId: string;
     errorCode?: string | null;
     errorMessage?: string | null;
-    /** 上游**已经**没有这个素材（NotFound / id 非法）时传 false，省一次注定 404 的往返。 */
     deleteUpstream?: boolean;
   }): Promise<void> {
     await this.materialAssetRepo.mirrorStatus({
@@ -326,11 +258,9 @@ export class MaterialService {
     await this.assetRepo.clearMaterialLink(input.userId, input.materialId);
 
     if (input.deleteUpstream === false) return;
-    // 刻意不 await：见方法头 ③。
     void this.deleteUpstreamMaterial(input.materialId);
   }
 
-  /** 删上游素材（best-effort）：任何失败只记日志，绝不外抛。 */
   private async deleteUpstreamMaterial(
     materialId: string,
   ): Promise<void> {
@@ -354,15 +284,6 @@ export class MaterialService {
     }
   }
 
-  /** IKF YHJ：本地已判 `Failed` 的素材，`GetAsset` 直接回本地结论，**不打上游**。
-   *
-   *  两个理由：
-   *   - 正确性：上游那张素材已被 {@link handleUpstreamMaterialFailure} 删掉，再问只会拿到
-   *     `NotFound`，前端看到的是「不存在」而非「未通过」——自相矛盾且无法引导用户重传。
-   *   - 性能：Failed 是终态，问一万次也是 Failed。
-   *
-   *  只短接 `Failed`。`Active` / `Processing` 仍透传上游——那两个状态以上游为准，
-   *  本地行可能陈旧（只跟进创建后 10 分钟），拿本地答会答错。 */
   async tryServeLocalFailedAsset(
     userId: string,
     action: string,
@@ -382,7 +303,6 @@ export class MaterialService {
     });
   }
 
-  /** IKF YHJ：CreateAsset 2xx 后落 Processing 行——上游异步注册，此刻必然尚未 Active。 */
   async trackMaterialProcessing(
     userId: string,
     materialId: string,
@@ -395,8 +315,6 @@ export class MaterialService {
     });
   }
 
-  /** IKF YHJ：把上游返回的素材状态镜像回本地（GetAsset 单条或 ListAssets 列表）。
-   *  只更新已存在的行——无行意味着没走过 CreateAsset，语义是「未校验」，不得凭空造行。 */
   async mirrorMaterialStatuses(
     userId: string,
     entries: ReadonlyArray<{
@@ -417,7 +335,6 @@ export class MaterialService {
     }
   }
 
-  /** IKF YHJ：上游 DeleteAsset 成功后清状态行（硬删，ADR-0087 决策 5）。 */
   async clearMaterialStatus(
     userId: string,
     materialId: string,
@@ -425,7 +342,6 @@ export class MaterialService {
     await this.materialAssetRepo.deleteByMaterialId(userId, materialId);
   }
 
-  /** IKF YHJ：上游 DeleteAssetGroup 成功后按组批量清状态行（硬删）。 */
   async clearMaterialStatusByGroup(
     userId: string,
     materialGroupId: string,
@@ -438,18 +354,15 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** IKF YHJ：上游 Status 白名单收敛——认不出的值一律当 Processing（继续跟进，不误判为可用）。 */
 function normalizeMaterialStatus(raw: string): MaterialAssetStatus {
   return raw === "Active" || raw === "Failed" ? raw : "Processing";
 }
 
-/** PageNumber/PageSize 宽松解析（缺省走 1/10；非正非数走缺省）。 */
 function readPositiveInt(v: unknown): number | undefined {
   const n = typeof v === "string" ? Number(v) : v;
   return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
-/** 本地组 → 上游列表项形状（2026-09-11 实测样例：Id/Name/GroupType/CreateTime/UpdateTime）。 */
 function toUpstreamGroupItem(
   view: MaterialGroupView,
 ): Record<string, unknown> {
@@ -462,7 +375,6 @@ function toUpstreamGroupItem(
   };
 }
 
-/** DateTime(0) 秒精度 → 上游同款 ISO8601 Z（无毫秒段）。 */
 function toIsoSeconds(d: Date | null): string | null {
   return d ? d.toISOString().replace(/\.\d{3}Z$/, "Z") : null;
 }
@@ -480,18 +392,15 @@ function localEnvelope(
   };
 }
 
-/** 上游 CreateAssetGroup 成功信封 Result 里的组 id 字段。 */
 function readGroupId(upstreamBody: unknown): string | undefined {
   if (!upstreamBody || typeof upstreamBody !== "object") return undefined;
   const body = upstreamBody as Record<string, unknown>;
   const result = body.Result;
   if (!result || typeof result !== "object") return undefined;
   const id = (result as Record<string, unknown>).Id;
-  // .{1,122} 封顶：group- 前缀 6 + 122 = 128，恰好匹配 material_group_id VARCHAR(128) 上限。
   return typeof id === "string" && /^group-.{1,122}$/i.test(id) ? id : undefined;
 }
 
-/** 上游错误信封 ResponseError.Message（不存在返回 undefined）。 */
 function readUpstreamError(upstreamBody: unknown): string | undefined {
   if (!upstreamBody || typeof upstreamBody !== "object") return undefined;
   const body = upstreamBody as Record<string, unknown>;

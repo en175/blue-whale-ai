@@ -72,7 +72,6 @@ describe('buildMediaExtractPlaceholderNode', () => {
       },
     });
     expect(node.type).toBe('mediaNode');
-    // 16:9 → 内容宽 280×16/9 = 497.78 → + 60 间距
     expect(node.position).toEqual({ x: 658, y: 220 });
     expect(node.data).toMatchObject({
       src: '',

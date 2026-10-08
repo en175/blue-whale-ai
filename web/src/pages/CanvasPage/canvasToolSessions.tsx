@@ -140,7 +140,6 @@ export interface CanvasToolView {
   nodeBox(node: Node): { width: number; height: number };
   projectId: string | null;
   submittingNodeId: string | null;
-  /** IKJR9J：当前被拖卡 id 集合（null=无拖拽），锚定卡命中即拖拽隐藏其浮层 */
   dragHiddenIds: Set<string> | null;
   createEnhanceDraft(id: string): string | undefined;
   createVideoEnhanceDraft(id: string): string | undefined;
@@ -161,12 +160,10 @@ export interface CanvasToolView {
   ): void;
 }
 
-/** 面板装配所需的最小句柄面：草稿卡可见性与悬浮工具条节点只读快照并按 nodeId 开会话。 */
 type PanelAssemblyHandle = Pick<
   ToolSessionHandle<{ nodeId: string }, string>,
   'getSnapshot' | 'open'
 >;
-/** 唯一工具注册入口。状态、提交定义、专属 UI 和原节点回调在同一注册项内绑定。 */
 export function createCanvasToolSessions(
   getHosts: () => Partial<CanvasToolHosts>,
   getView: () => CanvasToolView,
@@ -225,10 +222,8 @@ export function createCanvasToolSessions(
       dialogWidth: 320,
     });
   }
-  /** IKJR9J 拖拽隐藏命中判定：仅浮层锚定卡在被拖集合中才隐藏（拖别的卡原地不动） */
   const dragHiddenOf = (id: string | undefined | null) =>
     id != null && (getView().dragHiddenIds?.has(id) ?? false);
-  /** 高清/HD 面板共享装配：草稿卡可见性与悬浮工具条节点，差异仅素材身份属性（插帧为重开重建模式，不并入）。 */
   const enhancePanelDraft = (
     identityKey: 'imageEnhance' | 'videoEnhance',
     h: PanelAssemblyHandle,

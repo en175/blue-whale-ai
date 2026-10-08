@@ -1,7 +1,3 @@
-/* ============================================
- * ChipNode：内嵌引用胶囊（原子节点） —— 显示短标签，发送时替换成完整 prompt
- * 用 DecoratorNode 而非 TextNode('token' 模式)，因为胶囊需要渲染可点击的 × 移除按钮
- * ============================================ */
 import type { JSX } from 'react';
 import {
   DecoratorNode,
@@ -86,21 +82,10 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
     return true;
   }
 
-  /**
-   * 胶囊在文本里就是它显示的那个短标签。
-   *
-   * **这里曾经返回 `__prompt`（IKAFSX）**，而 Lexical 的 `root.getTextContent()` 会遍历整棵树
-   * 做拼接——于是编辑器每敲一个字，出口拿到的都是全展开的文本。字数统计因此数的是展开后的
-   * 全文，触发截断，而截断走的是「用纯文本整体替换编辑器内容」，把所有胶囊一起抹掉。
-   * 一个返回值，制造了整条故障链。
-   *
-   * 解引用现在只发生在提交那一刻，见 `composed.ts` 的 `resolveComposed`。
-   */
   getTextContent(): string {
     return this.__pending ? '' : this.__label;
   }
 
-  /** 供 `composed.ts` 读出结构化片段——不经过任何字符串拼接。 */
   toRef(): { id: string; label: string; prompt: string } {
     return { id: this.__refId, label: this.__label, prompt: this.__prompt };
   }

@@ -1,5 +1,3 @@
-/** loginWithCode 用例（DI 注入 db/jwt）。
- *  行为对齐 Java AuthService.login：找未用过、未过期的码 → upsert users（按 phone 找或建）→ 标记码已用 → 签 access token。 */
 
 export interface LoginWithCodeInput {
   phone: string;

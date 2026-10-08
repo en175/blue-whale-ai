@@ -23,9 +23,6 @@ export function MessageAssetPreview({
     const sidebarUpload = mediaType === 'video' && isSidebarUploadedVideo(block);
     const assetId = block.asset_id;
     const url = block.url || lookupAssetUrl(assetId);
-    // 普通 @ / 商品卡 / 图集视频已有文字胶囊时不再额外渲染。
-    // 侧边栏上传在回执/历史里也会被 chipsFromContent 补一颗 `@ [视频]`；刷新后内存缓存是空的，
-    // 签名 URL 又不进消息——必须带着 asset_id 进入 refs，才能跑 ensureAssetUrls（IKCJFQ）。
     if (mediaType === 'video' && !nodeVideo && !sidebarUpload && chips?.some((chip) => mentionIds.includes(chip.id))) return [];
     if (mediaType === 'image' && !url && !assetId) return [];
     if (nodeVideo && !url && !assetId) return [];
@@ -52,7 +49,6 @@ export function MessageAssetPreview({
     return () => {
       alive = false;
     };
-    // 依赖是这条消息引用的素材集合，不是数组本身（每次渲染都是新数组）。
   }, [unresolvedAssetKey]);
 
   if (refs.length === 0) return null;
@@ -71,7 +67,6 @@ export function MessageAssetPreview({
               </span>
             );
           }
-          // 还在反查、或本就该走 chips 行的 `@ [视频]`：不要叠两份。
           return null;
         }
         if (ref.url) {

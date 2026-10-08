@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-/* IKFA1M：ImageDialog 正文素材标签——@ 菜单/插入/编号一致性/失效阻止生成/删除提及 */
 import { act, createElement } from 'react';
 import { $createRangeSelection, $getRoot, $getSelection, $isRangeSelection, $isTextNode, $nodesOfType, $setSelection, KEY_ARROW_LEFT_COMMAND, KEY_ARROW_RIGHT_COMMAND, KEY_BACKSPACE_COMMAND, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { createRoot, type Root } from 'react-dom/client';
@@ -163,7 +162,6 @@ describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
     const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
     await typePromptRefRaw(container, '让');
     await typePromptRefRaw(container, '@');
-    // 菜单出现：已引用两项，编号与附件区角标一致
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
     const items = [...container.querySelectorAll('[data-testid="mention-ref-item"]')];
     expect(items).toHaveLength(2);
@@ -171,19 +169,15 @@ describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
     expect(items[0].textContent).toContain('图片1');
     expect(items[1].textContent).toContain('衣服图');
     expect(items[1].textContent).toContain('图片2');
-    // 附件区角标同编号
     const badges = [...container.querySelectorAll('[data-testid="dock-media-ref"]')].map((el) => el.textContent);
-    // IKFCKK：编号圆钮只显示数字（底部「图片N」文字标签已移除），与菜单编号一致
     expect(badges[0]).toBe('1');
     expect(badges[1]).toBe('2');
 
     await typePromptRefRaw(container, '的衣服');
-    // 查询过滤：名称命中
     await vi.waitFor(() => {
       expect([...container.querySelectorAll('[data-testid="mention-ref-item"]')]).toHaveLength(0);
     });
 
-    // 清空重输：选择第二项（先提图片2）
     await typePromptRefText(container, '让的衣服');
     await typePromptRefRaw(container, '@衣服');
     await vi.waitFor(() => {
@@ -194,9 +188,7 @@ describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
     await act(async () => {
       (container.querySelector('[data-testid="mention-ref-item"]') as HTMLButtonElement).click();
     });
-    // 标签插入在光标处：文本投影保留前后文字，查询消失
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让的衣服图片2'));
-    // 草稿同步结构：asset_ref 绑定 102，flat 与镜像一致
     const patch = lastDocFromParams(onParamsChange);
     expect(patch.prompt).toBe('让的衣服图片2');
     expect(patch.promptDoc?.flat).toBe('让的衣服图片2');
@@ -222,7 +214,6 @@ describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
     });
     await typePromptRefRaw(container, '招手');
     expect(readPromptRefText(container)).toBe('让图片1微笑，再让图片1招手');
-    // 参考集合仍只有一份输入
     expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(1);
   });
 
@@ -256,29 +247,24 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
   it('移除中间参考：剩余有效标签重编号，被移除标签显示失效且不转向（B1）', async () => {
     await renderDialog({ mediaRefs: [REF_A, REF_B, REF_C], initialDoc: DOC_AB });
     expect([...container.querySelectorAll('[data-testid="asset-ref-valid"]')]).toHaveLength(3);
-    // 移除 B（父级断开连线 → mediaRefs 少一项）
     await rerender([REF_A, REF_C]);
     await vi.waitFor(() => {
       expect(container.textContent).toContain('已失效：原图片2');
     });
     const valids = [...container.querySelectorAll('[data-testid="asset-ref-valid"]')].map((el) => el.textContent);
-    // A 仍图片1，C 重编号为图片2（身份不变）；失效标签单独展示
     expect(valids.join('|')).toContain('图片1');
     expect(valids.filter((t) => t?.includes('图片2'))).toHaveLength(1);
     expect([...container.querySelectorAll('[data-testid="asset-ref-invalid"]')]).toHaveLength(1);
-    // 失效标签阻止生成并指出原因
     expect(sendButton().disabled).toBe(true);
     expect(container.textContent).toContain('正文有已失效的素材标签，请点击标签替换或删除后再发送');
   });
 
   it('删除失效提及后可以继续生成；删除正文提及不删除附件（B2）', async () => {
     await renderDialog({ mediaRefs: [REF_A, REF_C], initialDoc: DOC_AB });
-    // 打开时 reconcile：B 已失效
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeTruthy();
     });
     expect(sendButton().disabled).toBe(true);
-    // 删除该失效提及（标签不带叉叉，删除走退格键；jsdom 无法驱动按键，经编辑器实例等价删除）
     const editor = promptRefEditorInstance(container);
     await act(async () => {
       editor.update(() => {
@@ -288,7 +274,6 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
     });
-    // 附件区不受影响（仍两项），发送恢复可用
     expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(2);
     await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
   });
@@ -308,7 +293,6 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
     expect(container.querySelector('[data-testid="asset-ref-valid"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="asset-ref-valid"] button')).toBeNull();
     const editor = promptRefEditorInstance(container);
-    // 光标精确折叠在标签之后的文本起点，等价「标签后按一次退格键」
     await act(async () => {
       editor.update(() => {
         const after = $nodesOfType(AssetRefNode)[0]!.getNextSibling();
@@ -380,8 +364,6 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
     await vi.waitFor(() => expect(anchorOf(editor)).toEqual({ type: 'text', offset: 1 }));
   });
 
-  // 「光标停在标签边界点（node 点）→ 左右键立即跳出」两分支与上面共用同一落点逻辑，
-  // jsdom 无法构造 node 点选区（selection 被清空），该场景由浏览器人工验证覆盖。
 
   it('删除一次提及只删该处（附件与其他提及保留）', async () => {
     const dup: PromptDoc = {
@@ -394,7 +376,6 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
     };
     await renderDialog({ mediaRefs: [REF_A], initialDoc: dup });
     expect([...container.querySelectorAll('[data-testid="asset-ref-valid"]')]).toHaveLength(2);
-    // 删除第一个提及（原经标签叉叉，现统一走退格键；同上经编辑器实例等价删除）
     const editor = promptRefEditorInstance(container);
     await act(async () => {
       editor.update(() => {
@@ -417,7 +398,6 @@ describe('IKFA1N 失效恢复与替换（B3/B4/B5/C4）', () => {
       expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeTruthy();
     });
     expect(sendButton().disabled).toBe(true);
-    // 重新加入 102（末位 → 图片3）：失效标签恢复为有效，附件区与正文同步
     await rerender([REF_A, REF_C, REF_B], onParamsChange);
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
@@ -426,7 +406,6 @@ describe('IKFA1N 失效恢复与替换（B3/B4/B5/C4）', () => {
     expect(valids.join('|')).toBe('图片1|图片3|图片2');
     expect(readPromptRefText(container)).toBe('让图片1穿上图片3，背景参考图片2');
     expect(sendButton().disabled).toBe(false);
-    // 草稿同步恢复后的结构（身份不变、失效标记清除、当次编号）
     const patch = lastDocFromParams(onParamsChange);
     expect(patch.promptDoc?.segments).toEqual([
       { kind: 'text', text: '让' },
@@ -443,7 +422,6 @@ describe('IKFA1N 失效恢复与替换（B3/B4/B5/C4）', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeTruthy();
     });
-    // 104 与 102 同名「衣服图」：名称不参与判定，102 失效标签原样保留
     await rerender([REF_A, REF_C, REF_D_SAME_NAME]);
     await act(async () => {});
     expect(container.querySelector('[data-testid="asset-ref-invalid"]')!.textContent).toContain('已失效：原图片2');
@@ -455,7 +433,6 @@ describe('IKFA1N 失效恢复与替换（B3/B4/B5/C4）', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeTruthy();
     });
-    // 点击失效标签主体 → 替换菜单列出当前已引用项（A=图片1、C=图片2）
     const invalidChip = container.querySelector('[data-testid="asset-ref-invalid"]')!;
     await act(async () => {
       invalidChip.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -466,7 +443,6 @@ describe('IKFA1N 失效恢复与替换（B3/B4/B5/C4）', () => {
     expect(items).toHaveLength(2);
     expect(items[0].textContent).toContain('角色图');
     expect(items[1].textContent).toContain('背景图');
-    // 选择 C（背景图=图片2）：仅该次提及换绑为 103，菜单关闭
     await act(async () => {
       (items[1] as HTMLButtonElement).click();
     });
@@ -474,7 +450,6 @@ describe('IKFA1N 失效恢复与替换（B3/B4/B5/C4）', () => {
       expect(container.querySelector('[data-testid="replace-ref-menu"]')).toBeNull();
     });
     expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
-    // 参考输入不重复添加（仍两项），其余提及身份不变
     expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(2);
     expect(readPromptRefText(container)).toBe('让图片1穿上图片2，背景参考图片2');
     await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
@@ -571,7 +546,6 @@ it.each(['正文', 'Esc', '外部'])('取消 @（%s）后恢复正文编辑，�
   await typePromptRefRaw(container, '继续');
   expect(readPromptRefText(container)).toBe('让@继续');
   expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
-  // 改动 @ 之前的正文也不能让原来的触发符复活。
   await edit(() => {
     const node = $getRoot().getFirstDescendant();
     if ($isTextNode(node)) { node.spliceText(0, 0, '先'); node.selectEnd(); }
@@ -596,8 +570,6 @@ it('真实菜单键盘确认把已引用素材插入正文', async () => {
   expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
 });
 
-/* IKIQ88：缩略图 @ 按钮启用「当前选区」回落——光标置于文本中间时 chip 原位插入；
-   无光标记录（未聚焦过输入框）仍追加末尾，插入后编辑器聚焦、光标落在 chip 之后 */
 describe('IKIQ88 缩略图 @ 光标处插入', () => {
   it('光标置于文本中间：点击缩略图 @ 按钮，chip 插入光标处而非末尾', async () => {
     const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
@@ -608,10 +580,8 @@ describe('IKIQ88 缩略图 @ 光标处插入', () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(readPromptRefText(container)).toBe('让图片1衣服');
-    // 光标落在 chip 之后：继续输入接在标签后
     await typePromptRefRaw(container, '！');
     expect(readPromptRefText(container)).toBe('让图片1衣服！');
-    // 与手动 @ 菜单选择同一种 chip：asset_ref 绑定 101、文案 图片1
     const patch = lastDocFromParams(onParamsChange);
     expect(patch.promptDoc?.segments).toEqual([
       { kind: 'text', text: '让' },
@@ -628,17 +598,14 @@ describe('IKIQ88 缩略图 @ 光标处插入', () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(readPromptRefText(container)).toBe('图片1');
-    // 插入后编辑器聚焦
     await vi.waitFor(() => {
       expect(document.activeElement?.hasAttribute('contenteditable')).toBe(true);
     });
-    // 光标落在 chip 之后：继续输入接在标签后
     await typePromptRefRaw(container, '尾巴');
     expect(readPromptRefText(container)).toBe('图片1尾巴');
   });
 });
 
-/* IKFCKN：文本附件进参考栏——@ 与手动 @ 选择产出同一种 文本N 标签 chip、× 断开连线、只读态不渲染 */
 describe('IKFCKN 文本附件进参考栏', () => {
   const ATT_A: ImageTextAttachment = { nodeId: 'text-a', title: '风格要求', text: '赛博朋克，霓虹灯' };
   const ATT_B: ImageTextAttachment = { nodeId: 'text-b', title: '姿势说明', text: '站立微笑' };
@@ -651,9 +618,7 @@ describe('IKFCKN 文本附件进参考栏', () => {
     await act(async () => {
       atBtns[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
-    // 无记忆光标追加末尾：产出「文本2」标签（第二项附件）
     expect(readPromptRefText(container)).toBe('让文本2');
-    // 与手动 @ 选择同一种 chip：text_ref 绑定来源节点 id
     const patch = onParamsChange.mock.calls.filter((c) => c[0]?.promptDoc !== undefined).pop()?.[0];
     expect(patch.promptDoc.segments).toEqual([
       { kind: 'text', text: '让' },
@@ -678,7 +643,6 @@ describe('IKFCKN 文本附件进参考栏', () => {
     await renderDialog({ mediaRefs: [REF_A, REF_B], attachments: [ATT_A] });
     const row = [...container.querySelectorAll('[data-testid="dock-media-ref"], [data-testid="dock-text-ref"]')];
     expect(row.map((el) => el.getAttribute('data-testid'))).toEqual(['dock-media-ref', 'dock-media-ref', 'dock-text-ref']);
-    // 媒体编号（1/2）与文本编号（1）独立派生
     expect(row[0].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
     expect(row[1].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('2');
     expect(row[2].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
@@ -692,7 +656,6 @@ describe('IKFCKN 文本附件进参考栏', () => {
   });
 });
 
-/* IKIQGR：文本附件 @ 检索按正文全文命中（>200 字尾段、忽略大小写），选择后产出 text_ref 标签 */
 describe('IKIQGR 文本附件全文检索', () => {
   const ATT_PLAIN: ImageTextAttachment = { nodeId: 'text-plain', title: '风格要求', text: '胶片感' };
   const ATT_LONG: ImageTextAttachment = {
@@ -708,7 +671,6 @@ describe('IKIQGR 文本附件全文检索', () => {
     const rows = [...container.querySelectorAll('[data-testid="mention-ref-item"]')];
     expect(rows).toHaveLength(1);
     expect(rows[0].textContent).toContain('文本2');
-    // 菜单不展示正文片段：行内只有名称与编号
     expect(rows[0].textContent).not.toContain('深海观测');
     await act(async () => {
       rows[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -731,7 +693,6 @@ describe('IKIQGR 文本附件全文检索', () => {
   });
 });
 
-/* IKFCKK：附件条共享缩略图集成——× 走既有断开连线链路、@ 与手动 @ 选择产出同一素材标签 */
 describe('IKFCKK 附件条三态集成', () => {
   it('点击 × 立即删除：仅断开当前引用（onRemoveMediaRef 携带来源节点），无确认弹窗', async () => {
     const onRemoveMediaRef = vi.fn();
@@ -754,10 +715,8 @@ describe('IKFCKK 附件条三态集成', () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(readPromptRefText(container)).toBe('让图片1');
-    // 插入后光标落在标签之后：继续输入接在其后
     await typePromptRefRaw(container, '微笑');
     expect(readPromptRefText(container)).toBe('让图片1微笑');
-    // 与手动 @ 选择同一种 chip：草稿同步的结构化正文一致（asset_ref 绑定 101）
     const patch = onParamsChange.mock.calls.filter((c) => c[0]?.promptDoc !== undefined).pop()?.[0];
     expect(patch.promptDoc.segments).toEqual([
       { kind: 'text', text: '让' },
@@ -782,7 +741,6 @@ describe('IKFCKK 附件条三态集成', () => {
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull());
     expect(focusSpy).toHaveBeenCalledTimes(1);
-    // 光标落在「@猫」之后（@ 保留）：Lexical 选区恢复随 focus 提交异步写回
     await vi.waitFor(() => expect(promptRefCaretOffset(container)).toBe(3));
     await act(async () => {
       editor.update(() => {
@@ -802,7 +760,6 @@ describe('IKFCKK 附件条三态集成', () => {
     await act(async () => document.body.dispatchEvent(new Event('pointerdown')));
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull());
     expect(focusSpy).not.toHaveBeenCalled();
-    // @ 查询保留为普通文本
     expect(readPromptRefText(container)).toBe('让@猫');
   });
 });

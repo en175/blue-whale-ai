@@ -40,7 +40,6 @@ vi.mock('@/api/projects', () => ({
 let root: Root | undefined;
 let mountNode: HTMLDivElement | undefined;
 
-/* 服务端排序直出：置顶项目在首位（pinned_at 非空），前端不重排。 */
 const projects: ProjectRecord[] = [
   {
     id: 'with-previews',
@@ -259,7 +258,6 @@ describe('Projects 项目卡片页', () => {
     await settle();
 
     expect(projectApi.pinProject).toHaveBeenCalledWith('without-previews', true, { silent: true });
-    // 置顶口径改变列表顺序：invalidate 后重新拉取已加载页。
     expect(projectApi.fetchProjectPage.mock.calls.length).toBeGreaterThan(callsAfterLoad);
   });
 });

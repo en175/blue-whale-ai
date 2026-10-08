@@ -13,8 +13,6 @@ import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
 import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';
 import { AUDIO_VIDEO_MUX_EDGE_ORIGIN } from './audioVideoMux';
 
-/* IKFDFZ 音频参考连线：来源有效性校验、「连线 → 媒体参考」推导与统一添加校验。
-   面板展示与提交输入共用同一推导，保证所见即实际输入。 */
 
 function mediaNode(id: string, data: Record<string, unknown>): Node {
   return { id, type: 'mediaNode', position: { x: 0, y: 0 }, data };
@@ -180,7 +178,6 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
       { id: 'e2', source: 'u2', target: 'muxed' },
     ] as Edge[];
     const result = audioMediaRefsOf('muxed', sourceEdges, [...nodes, video]);
-    // 视频绑定边若不跳过会进 invalid（视频非法参考）并阻塞合成成品卡再生成
     expect(result.invalid).toEqual([]);
     expect(result.refs).toEqual([
       { nodeId: 'u2', url: 'http://aud/u2.mp3', name: '音u2', assetId: 'a2', mediaType: 'audio' },

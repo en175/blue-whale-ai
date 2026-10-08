@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { checkFileBeforeUpload, isFileRejected, sniffFileSignature } from './fileSignature';
 
-/** 测试站 `asset_id=6012` 的真实字节（`corrupt.jpg`，524 字节，头四字节 AB CD EF 12）。 */
 const CORRUPT_JPG =
   'q83vEgAQSkZJRgABV/iHIa5uRGaJSzcfNe1eD+g2D0V+zGEHgkfsy+tYlmoQ4oCSe2T5+pG6zMbVihWRdvSG8HRL1xk8/kN0pfdh' +
   'mQ3W9hAe5sHFPQ184XP/W9tzxkhV2inNMRPIGKm0Ig9J8Q/FJ8SU7Wmv88O3rP7uuvHbB9urrR/2SbAq8zwt6DjMqv2uqYAKoGm4' +
@@ -42,7 +41,6 @@ describe('sniffFileSignature', () => {
     ).toEqual({ kind: 'image', format: 'png' });
   });
 
-  // 这一层不是格式白名单：heic 是 iPhone 拍照的默认格式，后端转得动，挡它是错的。
   it('heic 认得出，不是「坏文件」', () => {
     expect(sniffFileSignature(asciiHeader('ftypheic', 4))).toEqual({
       kind: 'image',
@@ -86,13 +84,6 @@ describe('checkFileBeforeUpload', () => {
   });
 });
 
-/**
- * IKE53Z：拒绝的理由必须能传到用户面前。
- *
- * 画布上每一处上传失败都被套成「「xxx」添加失败，请重试」，两个资产节点更是只写 console。
- * 对一份坏文件说「请重试」，是让用户把同一件不可能成功的事再做一遍——这正是这次要改掉的
- * 那种错话。调用点靠 isFileRejected 把它和网络抖动分开。
- */
 describe('isFileRejected', () => {
   it('认得出「这份文件本身不行」', async () => {
     const { FileRejectedError } = await import('./fileSignature');

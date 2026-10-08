@@ -36,7 +36,6 @@ async function renderLibrary(props?: Partial<ComponentProps<typeof CharacterLibr
   });
 }
 
-/** 取指定素材（按缩略图 alt / video src）所在的卡片节点 */
 function assetCardOf(selector: string): HTMLElement {
   const card = mountNode.querySelector(selector)?.closest(`.${styles.assetCard}`);
   if (!(card instanceof HTMLElement)) throw new Error(`card not found: ${selector}`);
@@ -64,8 +63,6 @@ afterEach(async () => {
 });
 
 describe('CharacterLibrary', () => {
-  // 5ec28c5d「虚拟人像库去分组」：不再有分组卡可点，组件渲染后自动选中首个分组
-  // 并加载其资产（原「点开分组才加载」的前提已废，用例改为钉新行为）。
   it('loads assets for the auto-selected group without opening a group card', async () => {
     await renderLibrary();
 
@@ -96,9 +93,6 @@ describe('CharacterLibrary', () => {
   });
 });
 
-/* IKGC03 虚拟人像库 picker 模式：资产选择弹窗复用 AigcFlatView 勾选素材，
-   与真人分组详情同款三 props（pickerSelectedIds / onPickerToggleAsset / pickerMediaTypes）。
-   IKGHZ3 修订口径：picker 模式点卡=勾选，同时渲染删除与放大预览按钮（选择弹窗承载素材管理）。 */
 describe('CharacterLibrary AIGC picker mode', () => {
   it('picker 模式点卡片触发勾选回调而非打开预览，且渲染删除与放大预览按钮（IKGHZ3）', async () => {
     const onPickerToggleAsset = vi.fn();
@@ -108,7 +102,6 @@ describe('CharacterLibrary AIGC picker mode', () => {
     expect(card.querySelector('button[title="删除素材"]')).not.toBeNull();
     expect(card.querySelector('button[title="放大预览"]')).not.toBeNull();
 
-    // 音频卡同样渲染两枚按钮（故事12；音频卡无缩略媒体，靠类型标定位）
     const audioCard = [...mountNode.querySelectorAll(`.${styles.assetCard}`)]
       .find((c) => c.textContent?.includes('人像音频'));
     expect(audioCard?.querySelector('button[title="删除素材"]')).not.toBeNull();
@@ -166,8 +159,6 @@ describe('CharacterLibrary AIGC picker mode', () => {
   });
 });
 
-/* IKGHZ3 选择弹窗悬浮操作：picker 模式补齐删除与放大预览（AigcFlatView 原隐藏删除的口径作废，
-   ADR-0091）、删除成功后就地移除并回调 onPickerAssetRemoved 联动已选集合、预览开关上抛。 */
 describe('CharacterLibrary picker 悬浮操作（IKGHZ3）', () => {
   it('picker 模式点删除按钮弹出不可撤销确认弹窗，不触发勾选', async () => {
     const onPickerToggleAsset = vi.fn();
@@ -226,7 +217,6 @@ describe('CharacterLibrary picker 悬浮操作（IKGHZ3）', () => {
     expect(card.classList.contains(styles.assetCardDisabled)).toBe(true);
     expect(card.querySelector('button[title="删除素材"]')).not.toBeNull();
     expect(card.querySelector('button[title="放大预览"]')).not.toBeNull();
-    // 状态标不再单独占用左上角浮层，并入底部名称条
     expect(card.querySelector(`.${styles.statusBadge}`)).toBeNull();
     expect(card.querySelector(`.${styles.assetNameOverlay}`)?.textContent).toContain('处理中');
   });
@@ -280,9 +270,6 @@ describe('CharacterLibrary picker 悬浮操作（IKGHZ3）', () => {
   });
 });
 
-/* IKGC0K 平铺视图分页拉全：AigcFlatView.loadAssets 原两处 PageSize 100 硬编码
-   超出即静默截断（分组丢组、素材丢新条目）。修法：分组与素材均按返回
-   TotalCount 分页拉全；素材聚合时 GroupIds 分批防止 Filter 数组过长。 */
 describe('AigcFlatView 分页拉全（IKGC0K）', () => {
   function pageOf<T>(items: T[], totalCount: number): { TotalCount: number; Items: T[] } {
     return { TotalCount: totalCount, Items: items };
@@ -338,7 +325,6 @@ describe('AigcFlatView 分页拉全（IKGC0K）', () => {
       PageNumber: 2,
       PageSize: 100,
     });
-    // 第 2 页拉到的组参与素材聚合（不丢组）
     expect(listAssets).toHaveBeenCalledWith({
       Filter: { GroupIds: ['group-1', 'group-101'], GroupType: 'AIGC' },
       PageNumber: 1,
@@ -388,7 +374,6 @@ describe('AigcFlatView 分页拉全（IKGC0K）', () => {
       expect(listAssets).toHaveBeenCalledTimes(2);
 
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-      // 5s 后轮询触发新一轮完整拉取（两页都拉）
       expect(listAssets).toHaveBeenCalledTimes(4);
       expect(mountNode.querySelector('img[alt="第二页图片"]')).not.toBeNull();
     } finally {

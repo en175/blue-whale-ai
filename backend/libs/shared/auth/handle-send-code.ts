@@ -6,7 +6,6 @@ export interface SendCodeInput {
   ip: string;
 }
 
-/** send-code 路由处理器：手机号校验 → requestSmsCode → {code,msg,data} 信封，异常兜成 400。 */
 export async function handleSendCode(
   input: SendCodeInput,
   deps: RequestSmsCodeDeps,

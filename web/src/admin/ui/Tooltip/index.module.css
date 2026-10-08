@@ -1,18 +1,4 @@
-/* ============================================
- * Tooltip —— 「?」图标 + 悬停/聚焦才显示的说明面板
- *
- * 为什么要有这个基元：管理端的解释此前一律铺成整块蓝色 Alert，一屏下来解释比控件还占地方，
- * 真正要填的东西被顶到折叠线以下。说明该在**需要时**出现。
- *
- * ⚠️ 面板经 `createPortal` 挂到 `document.body`（弹窗主体是 `overflow: auto` 的，
- *    就地绝对定位会被裁掉）。因此：
- *    · `.panel` 的**颜色只能来自门户根** `.portal`，不能靠 body 继承——body 是产品前台的
- *      深色主题（白字），而面板是浅色的。见 `Modal/index.module.css` 里同一处坑的完整说明。
- *    · z-index 要高于弹窗（Modal 的 `.overlay` 是 200，下拉是 300 —— 取 400）。
- * ============================================ */
 
-/* 图标视觉上 18px，**命中区 24px**（无障碍最小触控尺寸）。用负 margin 抵消多出来的
-   6px，否则图标会把所在的那一行标签撑高——「看着没变大、但点得到」是这里的全部目的。 */
 .trigger {
   display: inline-flex;
   align-items: center;
@@ -38,18 +24,11 @@
   outline: none;
 }
 
-/* 展开态：图标落在它自己打开的面板旁边时要看得出「就是它」。 */
 .trigger[aria-expanded='true'] {
   color: var(--admin-accent);
   background: var(--admin-accent-soft);
 }
 
-/* 自定义 trigger（`trigger` 传了内容时走这条）：**文字也是触发器的一部分**。
-   与上面那个图标按钮的区别：不占固定 24px、不加药丸底 —— 内容决定尺寸，
-   否则「图片 ⓘ」这种会被撑成两截。
-
-   `cursor: help` 与 `.trigger` 同款：这块东西点/悬停**不执行操作**，只是把收起来的内容
-   摊开。用 `pointer` 会让人以为点下去会跳转或提交。 */
 .triggerInline {
   display: inline-flex;
   align-items: center;
@@ -64,10 +43,6 @@
   transition: color 120ms ease;
 }
 
-/* 收起时**不抢眼**：数据格子里的东西不该比数据本身更突出。
-   悬停/聚焦/展开才染成强调色——那是「这里有东西可以摊开」的提示。
-   文字与图标**同色**（都 `inherit`）：它们是同一个触发器，分两档颜色会让图标看着像
-   第二个元素；要拉开层次就在调用方那边处理，别写在这里。 */
 .triggerInline:hover,
 .triggerInline:focus-visible,
 .triggerInline[aria-expanded='true'] {
@@ -78,14 +53,12 @@
 .portal {
   position: fixed;
   z-index: 400;
-  /* ⚠️ 门户根必须声明前景色：面板里的文字都靠它，不能等 body 继承 */
   color: var(--admin-text);
 }
 
 .panel {
   box-sizing: border-box;
   max-width: 380px;
-  /* 长说明**封顶并内部滚动**，不让它变成一堵盖住半个屏幕的墙，也不能顶出视口 */
   max-height: min(60vh, 420px);
   overflow: auto;
   padding: 12px 14px;
@@ -95,7 +68,6 @@
   box-shadow: var(--admin-shadow-pop);
   font-size: var(--admin-font-xs);
   line-height: 1.65;
-  /* 说明里常带 <b> 与换行语义，正文按块排 */
   white-space: normal;
   animation: fade-in 120ms ease-out;
 }
@@ -109,7 +81,6 @@
   }
 }
 
-/* 标题行：和正文分开一点，别读成一整坨 */
 .title {
   margin-bottom: 6px;
   font-weight: 600;
@@ -120,14 +91,12 @@
   color: var(--admin-text-muted);
 }
 
-/* 正文里的强调跟着标题走，避免同一种「重要」在一小块里出现两种颜色 */
 .body strong,
 .body b {
   color: var(--admin-text);
   font-weight: 600;
 }
 
-/* 正文里的次级段落（`<div>` 包一层）：拉开行距，读得出这是两件事 */
 .body > div + div,
 .body > p + p {
   margin-top: 6px;

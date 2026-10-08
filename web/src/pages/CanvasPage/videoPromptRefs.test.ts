@@ -1,8 +1,8 @@
-/* ============================================
- * videoPromptRefs 测试（IKFA1O）：视频面板有效标签映射——
- * 首尾帧按角色、普通参考按同类型编号、模式不兼容失效（C1/C2/C5）。
- * 与服务端 videoRefLabel 同口径（帧在前、reference 保序、同类型连续编号）。
- * ============================================ */
+
+
+
+
+
 import { describe, expect, it } from 'vitest';
 import type { VideoMediaRef, VideoMediaRefs } from './videoMediaRefs';
 import { videoLabelMapOf } from './videoPromptRefs';

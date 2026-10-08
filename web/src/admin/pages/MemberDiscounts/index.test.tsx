@@ -29,7 +29,6 @@ vi.mock('@/api/adminBillingDiscounts', async (importOriginal) => {
   };
 });
 
-// 叠加策略那一块读的是定价目录（只读展示），这里给一份最小目录
 vi.mock('@/api/adminBillingCatalog', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/adminBillingCatalog')>();
   return {
@@ -131,7 +130,6 @@ function buttonByAria(label: string): HTMLButtonElement {
   return found;
 }
 
-/** 选下拉项：Select 不是原生控件（见 ui/Select），点开触发器再点 role=option。 */
 async function choose(label: string, optionIncludes: string) {
   const trigger = document.body.querySelector<HTMLElement>(`[aria-label="${label}"]`);
   if (!trigger) throw new Error(`没有找到下拉框：${label}`);
@@ -181,16 +179,12 @@ describe('会员折扣页', () => {
     expect(document.body.textContent).toContain('9 折');
     expect(document.body.textContent).toContain('8 折');
     expect(document.body.textContent).toContain('停用');
-    // 内部单位也露出来，排查时不用心算
     expect(document.body.textContent).toContain('万分比 9000');
   });
 
   it('★ 冻结语义写在最上面：改折扣不影响已提交未结算的任务', async () => {
     await renderPage();
 
-    // 不说清这一条，运营会把「那笔还按老的算」反复当成 bug 报上来。
-    // ⚠️ 但**形态**是全管理端统一的「?」：它仍在最上面（页面第一块内容就是那个图标），
-    //    只是不再铺满整屏 —— 解释该在需要时展开，而不是一直在场。
     const help = document.body.querySelector('button[aria-label="说明"]');
     expect(help, '页面顶部应有一个「?」').not.toBeNull();
     expect(document.body.textContent).not.toContain('改折扣不影响已提交未结算的任务');
@@ -201,10 +195,8 @@ describe('会员折扣页', () => {
   it('★ 叠加方式与底线只读展示（当前目录是 best / 3000）', async () => {
     await renderPage();
 
-    // 「现在是什么」可见：两个值直接用 MetaRow 摆在页面上
     expect(document.body.textContent).toContain('best');
     expect(document.body.textContent).toContain('3 折（3000）');
-    // 解释与算例收进 `?`（全管理端统一口径），默认不在 DOM 里
     expect(document.body.textContent).not.toContain('目录级配置');
     expect(document.body.textContent).not.toContain('同时命中 →');
     expect(document.body.querySelectorAll('button[aria-label="说明"]').length).toBeGreaterThan(0);
@@ -282,7 +274,6 @@ describe('会员折扣页', () => {
     await renderPage();
 
     await click(buttonByAria('编辑 pro 的折扣'));
-    // 9000 回填成 `9`（不是 9000、也不是 9.0）
     expect(inputByLabel('折扣').value).toBe('9');
     await type(inputByLabel('折扣'), '8');
     await click(button('保存'));
@@ -305,7 +296,6 @@ describe('会员折扣页', () => {
 
     expect(document.body.textContent).toContain('删除会员折扣');
     expect(document.body.textContent).toContain('已提交的任务不受影响');
-    // 还没确认，不能已经删了
     expect(api.deleteMemberDiscount).not.toHaveBeenCalled();
 
     await click(button('确认删除'));

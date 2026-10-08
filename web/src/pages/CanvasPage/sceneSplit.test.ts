@@ -30,7 +30,6 @@ describe('sceneSplitGateReason（场景切分门槛预检，IKH8BJ）', () => {
     expect(sceneSplitGateReason({})).toBe(SCENE_SPLIT_MISSING_ASSET_REASON);
     expect(sceneSplitGateReason({ assetId: null })).toBe(SCENE_SPLIT_MISSING_ASSET_REASON);
     expect(sceneSplitGateReason({})).toContain('尚未关联资产');
-    // 未关联资产且超长：仍归资产原因（先资产后时长的判定顺序）
     expect(
       sceneSplitGateReason({ assetId: null, duration: 7200 + 1 }),
     ).toBe(SCENE_SPLIT_MISSING_ASSET_REASON);
@@ -47,7 +46,6 @@ describe('sceneSplitGateReason（场景切分门槛预检，IKH8BJ）', () => {
 
   it('时长数据缺失（undefined/null）放行不置灰（存量视频交后端按权威数据复核）', () => {
     expect(sceneSplitGateReason({ assetId: '5' })).toBeNull();
-    // 持久化快照可能带 null（JSON 形态），运行时与 undefined 同走 typeof 守卫放行
     expect(sceneSplitGateReason({ assetId: '5', duration: null as unknown as number })).toBeNull();
   });
 
@@ -98,7 +96,6 @@ describe('buildSceneSplitPlaceholderNode（IKH8BR 发送前本地建占位卡）
     });
     expect(node.id).toBe('scene-split-1');
     expect(node.type).toBe('mediaNode');
-    // 16:9 内容区宽 498（280×16/9）→ x = 400 + 498 + 60
     expect(node.position).toEqual({ x: 958, y: 0 });
   });
 
@@ -199,7 +196,6 @@ describe('sceneSplitFanoutLayout（IKH8C1 段卡网格扇出避让落位）', ()
     const gap = 24;
     const stepX = 498 + gap;
     const stepY = 324 + gap;
-    // 网格高 2 行 = 672，垂直中心对齐 anchor 中心 162 → baseY = 162 - 336 = -174
     expect(positions[0]).toEqual({ x: 558, y: -174 });
     expect(positions[1]).toEqual({ x: 558 + stepX, y: -174 });
     expect(positions[2]).toEqual({ x: 558, y: -174 + stepY });
@@ -215,19 +211,17 @@ describe('sceneSplitFanoutLayout（IKH8C1 段卡网格扇出避让落位）', ()
   it('自动避让：既有节点压住理想位时网格整体平移到首个无重叠位（保持源卡右侧）', () => {
     const gap = 24;
     const stepY = 324 + gap;
-    // 理想位（x=558, y=-174）被一张既有卡占据 → 网格向下平移（y 逐格扫描）
     const blocker: SpawnBox = { x: 558, y: -174, width: 498, height: 324 };
     const [p] = sceneSplitFanoutLayout({ anchor, count: 1, segmentSize, occupied: [blocker] });
-    expect(p!.x).toBe(558); // 仍在源卡右侧
+    expect(p!.x).toBe(558);
     const moved = { x: p!.x, y: p!.y, width: 498, height: 324 };
     expect(draftOverlaps(moved, blocker)).toBe(false);
-    // 平移量是 stepY 的整数倍（逐格扫描，不错乱跳位）
     expect(Math.abs(p!.y - -174) / stepY).toBeGreaterThanOrEqual(1);
   });
 
   it('不重叠不变式：任意 N 与既有节点，输出彼此不重叠且避开 occupied（含源卡自身排除由调用方负责）', () => {
     const occupied: SpawnBox[] = [
-      { x: 400, y: 0, width: 498, height: 324 }, // 源卡附近
+      { x: 400, y: 0, width: 498, height: 324 },
       { x: 558, y: -400, width: 498, height: 324 },
       { x: 1100, y: -200, width: 498, height: 324 },
     ];

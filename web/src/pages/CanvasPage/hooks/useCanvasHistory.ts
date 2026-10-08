@@ -1,14 +1,3 @@
-/* ============================================
- * useCanvasHistory 画布撤销/重做栈（IKD0JT A2）
- * 命令条目式历史：移动/删除/复制/连线/删边各存撤销所需的精确数据，
- * 同一次手势（批量拷贝、成组连线等）经 beginBatch/endBatch 聚合成一条。
- * 撤销栈深度 50（OD-A7 推荐值）。
- * 约束（PRD §7.2）：
- *  - 文本内文字编辑不进栈（move 回退只还原坐标，节点 data 保持当前值）
- *  - 生成任务不回退：生成中节点删除路径不登记（由调用方保证）
- *  - 工具栏新建草稿卡算落节点，由调用方 pushAddNodes 登记
- *  - 撤销栈不跨会话（切换项目由调用方 clear）
- * ============================================ */
 import { useRef, useState, useCallback } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { CanvasGroup, GroupFrameDragResult } from '../canvasGroups';
@@ -28,7 +17,6 @@ export interface CanvasHistoryHandles {
   setAssetNodes: (updater: (prev: Node[]) => Node[]) => void;
   setEdges: (updater: (prev: Edge[]) => Edge[]) => void;
   setGroups: (updater: (prev: CanvasGroup[]) => CanvasGroup[]) => void;
-  /** 节点被撤销移除后的通知（清 pending 上传登记等副作用） */
   onNodesRemoved?: (ids: string[]) => void;
 }
 
@@ -38,7 +26,6 @@ interface PositionRecord {
   y: number;
 }
 
-/** type → 取数/写数通道映射（节点数组的四分类落位） */
 type NodeSlot = 'text' | 'media' | 'product' | 'asset';
 
 const slotOfNodeType = (type: string | undefined): NodeSlot => {
@@ -58,34 +45,22 @@ const slotOfNodeType = (type: string | undefined): NodeSlot => {
 
 type HistoryEntry =
   | { kind: 'move'; oldPositions: PositionRecord[]; newPositions: PositionRecord[] }
-  /** 删除：undo = 节点连同悬空边塞回；redo = 再次删除。成员删除可能解散组，携带组状态快照 */
   | { kind: 'delete'; nodes: Node[]; edges: Edge[]; edgeState?: { before: Edge[]; after: Edge[] }; groupsBefore?: CanvasGroup[]; groupsAfter?: CanvasGroup[] }
-  /** 复制等新增：undo = 移除新节点；redo = 塞回（undo 时快照节点） */
   | { kind: 'addNodes'; ids: string[]; nodes: Node[] | null }
-  /** 建立连线：undo = 删边；redo = 加边 */
   | { kind: 'addEdges'; edges: Edge[] }
-  /** 方案引用原子回放新增边及共享边来源，保持连线顺序。 */
   | { kind: 'replaceEdges'; before: Edge[]; after: Edge[] }
-  /** 删边：undo = 加回；redo = 再删 */
   | { kind: 'removeEdges'; edges: Edge[] }
-  /** 成组：undo/redo 均恢复组状态快照（重组会把成员从其他组迁出，需整体回放） */
   | { kind: 'createGroup'; group: CanvasGroup; groupsBefore: CanvasGroup[]; groupsAfter: CanvasGroup[] }
-  /** 解组：undo = 重建组；redo = 解散 */
   | { kind: 'ungroup'; group: CanvasGroup }
-  /** 删除组（连同成员节点）：undo = 全部塞回；redo = 全部再删 */
   | { kind: 'deleteGroup'; group: CanvasGroup; nodes: Node[]; edges: Edge[] }
-  /** 整组拖动：undo/redo 回放矩形、成员位移与排除名单（组盖住的节点） */
   | ({ kind: 'groupMove' } & GroupFrameDragResult)
-  /** 一次手势内的多条命令：undo 逆序回放，redo 正序回放 */
   | { kind: 'batch'; entries: HistoryEntry[] };
 
 export function useCanvasHistory(handles: CanvasHistoryHandles) {
   const undoStack = useRef<HistoryEntry[]>([]);
   const redoStack = useRef<HistoryEntry[]>([]);
-  /** 批次嵌套深度：>0 时 push 先写入缓冲，endBatch 再合成一条 */
   const batchDepthRef = useRef(0);
   const batchBufferRef = useRef<HistoryEntry[]>([]);
-  /** 栈变化时递增触发重渲染（canUndo/canRedo 消费方刷新） */
   const [, bumpVersion] = useState(0);
   const bump = useCallback(() => bumpVersion((v) => v + 1), []);
   const handlesRef = useRef(handles);
@@ -195,7 +170,6 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     handlesRef.current.setEdges((prev) => prev.filter((e) => !idSet.has(e.id)));
   };
 
-  /** 撤销一条记录（就地改写 entry 补充 redo 所需的逆向数据） */
   const undoEntry = (entry: HistoryEntry): HistoryEntry => {
     switch (entry.kind) {
       case 'replaceEdges': {
@@ -271,7 +245,6 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     }
   };
 
-  /** 重做一条记录 */
   const redoEntry = (entry: HistoryEntry) => {
     switch (entry.kind) {
       case 'replaceEdges':
@@ -349,7 +322,6 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     bump();
   }, [bump]);
 
-  /** 移动登记：oldPositions 为拖拽前坐标 */
   const pushMove = useCallback(
     (oldPositions: PositionRecord[]) => {
       if (oldPositions.length === 0) return;
@@ -358,8 +330,6 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     [push],
   );
 
-  /** 删除登记：nodes 为被删节点（含 data），edges 为随之悬空的连线；
-   *  成员删除会解散组时携带组状态前后快照（undo/redo 整体回放） */
   const pushDelete = useCallback(
     (
       nodes: Node[],
@@ -379,7 +349,6 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     [push],
   );
 
-  /** 复制登记：ids 为本次新建的副本节点 id */
   const pushAddNodes = useCallback(
     (ids: string[]) => {
       if (ids.length === 0) return;
@@ -404,7 +373,6 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     [push],
   );
 
-  /** 成组登记：group 新建组；groupsBefore/After 为组状态前后快照（重组含成员迁移） */
   const pushCreateGroup = useCallback(
     (group: CanvasGroup, groupsBefore: CanvasGroup[], groupsAfter: CanvasGroup[]) => {
       push({ kind: 'createGroup', group, groupsBefore, groupsAfter });
@@ -412,7 +380,6 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     [push],
   );
 
-  /** 解组登记：undo 重建组 */
   const pushUngroup = useCallback(
     (group: CanvasGroup) => {
       push({ kind: 'ungroup', group });
@@ -420,7 +387,6 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     [push],
   );
 
-  /** 删除组登记（连同成员节点与悬空边） */
   const pushDeleteGroup = useCallback(
     (group: CanvasGroup, nodes: Node[], edges: Edge[]) => {
       push({ kind: 'deleteGroup', group, nodes, edges });
@@ -428,7 +394,6 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     [push],
   );
 
-  /** 整组拖动登记：直接接收 GroupOverlay 上抛的拖动结果（矩形前后 + 成员位移 + 排除名单前后） */
   const pushGroupMove = useCallback(
     (res: GroupFrameDragResult) => {
       push({ kind: 'groupMove', ...res });

@@ -1,6 +1,3 @@
-/* ============================================
- * 会话过期全局登录门：401 后续接 / 放弃清会话
- * ============================================ */
 import LoginModal from '@/components/LoginModal';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 

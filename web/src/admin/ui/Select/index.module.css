@@ -1,5 +1,3 @@
-/* 自绘下拉。所有颜色走 token，因此**与操作系统主题无关**——
-   这正是它相对原生 select 的唯一意义。 */
 .root {
   position: relative;
   display: inline-block;

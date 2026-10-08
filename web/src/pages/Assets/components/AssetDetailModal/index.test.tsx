@@ -5,9 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AssetRecord } from '@/api/assets';
 import AssetDetailModal from './index';
 
-/* IKFTQW：详情弹窗展示 AI 生成提示词。
-   有提示词才渲染这一行——上传素材、视频提取出来的音频、生成时 prompt 为空串的素材，
-   都不该在弹窗里多出一个空字段。 */
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -31,7 +28,6 @@ async function renderModal(asset: AssetRecord | null) {
   });
 }
 
-/** 「提示词」那一行的 <dd> 文本；没有这一行返回 null。 */
 function promptRowText(): string | null {
   const item = [...document.body.querySelectorAll('dl > div')].find(
     (el) => el.querySelector('dt')?.textContent === '提示词',
@@ -39,7 +35,6 @@ function promptRowText(): string | null {
   return item ? (item.querySelector('dd')?.textContent ?? '') : null;
 }
 
-/** 当前渲染出来的所有字段名，按顺序。 */
 function fieldLabels(): (string | null)[] {
   return [...document.body.querySelectorAll('dl dt')].map((el) => el.textContent);
 }

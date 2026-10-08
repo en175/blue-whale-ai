@@ -1,20 +1,4 @@
 // @vitest-environment jsdom
-/* IKHK9N 智能抠像编辑态与任务卡 + IKHKAC 完成回填与结果卡（画布链路）：入口菜单选定模式
-   进入第八工具会话——源卡锁定（splitEditing/soloToolbarHidden 渲染期注入，视频暂停与
-   播放控制锁定由 MediaNode 承担）、卡下方 24px 胶囊单条（X/模式标题「人像抠像」「绿幕
-   抠像」/输出格式下拉 WEBM 透明默认+MP4 纯色/背景色分段（仅 MP4：白/黑/绿）/⚡0 徽标/
-   发送钮，对齐场景切分单条家族）；接入集中工具会话协调器——四路退出（X/Esc/点其他卡/
-   点画布空白）未发送无痕迹（无卡无边无任务）、与既有九会话互斥、会话期 Dock 面板准入
-   与工具条隐藏走协调器口径；参数不跨会话记忆（每次进入重置 WEBM + 白色）。发送闭环：
-   先退会话再建任务占位卡（target_node_id 取占位卡、模式展示名标题、生成中骨架、
-   smartMatting 身份）、client_token 每次发送/重试新生成、job_id 回写后轮询、飞行期
-   发送钮防重复提交；契约 strict：WEBM 形态不带 background_color 键、MP4 形态必带。
-   任务失败占位卡转失败态（1050 兜底文案），重试按钮按冻结参数原参数重发。轮询终态
-   succeeded（IKHKAC 完成回填）：占位卡就地转普通成品视频卡（src/assetId/宽高时长取
-   产物、标题保持模式展示名、按产物格式冻结 transparentOutput 透明标记供视频区垫棋盘格、
-   清掉 smartMatting 身份——结果卡不记抠像身份、选中开普通视频面板、可再发起全部视频
-   工具）；跨会话恢复一致性（水合 generating 占位卡恢复轮询、进行中仍生成中、完成照常
-   回填）。渲染模式沿用 sceneSplitEdit.test.tsx（FlowCanvas 打桩透出 props）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -52,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -174,8 +157,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：就绪视频卡 v1（1920×1080 mp4，assetId 满足门槛；抠像源卡）+ 就绪图片卡 i1
- *  （擦除/抠图/裁切/扩图源卡）；无连线。 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -248,7 +229,6 @@ function fullNode(id: string): Node {
   return found;
 }
 
-/** 进入智能抠像编辑态（视频卡工具条「智能抠像 ▾」菜单项派发的回调，IKHK7N 挂点） */
 async function enterSmartMatting(mode: 'portrait' | 'greenscreen' = 'portrait') {
   const video = fullNode('v1').data as Record<string, (nodeId: string, mode?: string) => void>;
   await act(async () => {
@@ -274,13 +254,11 @@ function sendBar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="smart-matting-send-bar"]');
 }
 
-/** 编辑态内选输出格式 */
 async function selectFormat(format: 'WEBM' | 'MP4') {
   await click('smart-matting-format-trigger');
   await click(`smart-matting-format-item-${format}`);
 }
 
-/** 编辑态内点发送（startSmartMattingJob 含 await 创建，等 50ms 让建卡与轮询首 tick 发起） */
 async function sendSmartMatting() {
   await click('smart-matting-send-btn');
   await act(async () => {
@@ -319,9 +297,7 @@ describe('IKHK9N 编辑态呈现（进入不建任务）', () => {
     expect(bodyBtn('smart-matting-format-trigger').textContent).toContain('WEBM 透明');
     expect(bodyBtn('smart-matting-free-badge').textContent).toBe('0');
     expect(bodyBtn('smart-matting-send-btn')).toBeTruthy();
-    // WEBM 默认态不渲染背景色分段控件（透明无背景色）
     expect(document.body.querySelector('[data-testid="smart-matting-background"]')).toBeNull();
-    // 控件次序自左至右：X → 标题 → 格式 → ⚡0 → 发送（对齐场景切分/去字幕单条家族）
     const bar = sendBar()!;
     const el = (testId: string) => bar.querySelector(`[data-testid="${testId}"]`)!;
     const before = (a: Element, b: Element) =>
@@ -330,10 +306,8 @@ describe('IKHK9N 编辑态呈现（进入不建任务）', () => {
     expect(before(el('smart-matting-title'), el('smart-matting-format-trigger'))).toBe(true);
     expect(before(el('smart-matting-format-trigger'), el('smart-matting-free-badge'))).toBe(true);
     expect(before(el('smart-matting-free-badge'), el('smart-matting-send-btn'))).toBe(true);
-    // 源视频卡注入 splitEditing（视频暂停+锁定层）与 soloToolbarHidden（会话模态口径）
     expect(v1Data().splitEditing).toBe(true);
     expect(v1Data().soloToolbarHidden).toBe(true);
-    // 进入即编辑态：不创建任务、不建占位卡、不连边
     expect(apiMocks.createVideoMatting).not.toHaveBeenCalled();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
     expect(flowProps.current.edges).toEqual([]);
@@ -362,7 +336,6 @@ describe('IKHK9N 编辑态呈现（进入不建任务）', () => {
     await selectFormat('MP4');
     await click('smart-matting-background-green');
     expect(bodyBtn('smart-matting-background-green').getAttribute('aria-checked')).toBe('true');
-    // 退出重进：格式与背景色不跨会话记忆
     await click('smart-matting-close');
     await enterSmartMatting('portrait');
     expect(bodyBtn('smart-matting-format-trigger').textContent).toContain('WEBM 透明');
@@ -417,8 +390,6 @@ describe('IKHK9N 四路退出：未发送退出画布无痕迹', () => {
 });
 
 describe('IKHK9N 与既有会话互斥（集中协调器口径）', () => {
-  /** 视频卡可进入的既有会话（含新近接入的架构家族三项；音频卡会话 audioTrim 见下方单例
-   *  ——其源卡是音频节点，本组 seed 只有图/视频两卡，单列一例补 seed） */
   type Kind = 'erase' | 'cutout' | 'crop' | 'outpaint' | 'subtitleErase' | 'audioVideoSplit' | 'sceneSplit' | 'vocalSplit';
   const SESSION_UI_TESTID: Record<Kind, string> = {
     erase: 'erase-send-bar',
@@ -434,7 +405,6 @@ describe('IKHK9N 与既有会话互斥（集中协调器口径）', () => {
     'erase', 'cutout', 'crop', 'outpaint', 'subtitleErase', 'audioVideoSplit', 'sceneSplit', 'vocalSplit',
   ];
 
-  /** 进入既有会话（图片工具经图片卡 handler，视频工具经视频卡 handler） */
   async function enterSession(kind: Kind) {
     const image = fullNode('i1').data as Record<string, (nodeId: string) => void>;
     const video = fullNode('v1').data as Record<string, (nodeId: string, mode?: string) => void>;
@@ -471,8 +441,6 @@ describe('IKHK9N 与既有会话互斥（集中协调器口径）', () => {
     expect(sendBar()).toBeTruthy();
     await enterSession(kind);
     expect(sendBar()).toBeNull();
-    // 音视频分离/场景切分/人声背景分离接管时同样向 v1 注入 splitEditing（同款源卡锁定标记），
-    // 不作 undefined 断言
     if (kind !== 'audioVideoSplit' && kind !== 'sceneSplit' && kind !== 'vocalSplit') {
       expect(v1Data().splitEditing).toBeUndefined();
     }
@@ -480,7 +448,6 @@ describe('IKHK9N 与既有会话互斥（集中协调器口径）', () => {
   });
 
   it('音频卡会话（截取）与智能抠像互斥：源卡为音频节点，补 seed 单例覆盖', async () => {
-    // 补一张音频卡（口径同 audioTrimEdit.test.tsx 的 a1），其余 seed 不变
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
     doc.nodes.push({
       id: 'a1',
@@ -504,7 +471,6 @@ describe('IKHK9N 与既有会话互斥（集中协调器口径）', () => {
     await enterSmartMatting('greenscreen');
     expect(document.body.querySelector('[data-testid="audio-trim-send-bar"]')).toBeNull();
     expect(sendBar()).toBeTruthy();
-    // 反向：抠像中进入截取，抠像退出
     await act(async () => {
       audio.onTrimAudio('a1');
     });
@@ -520,8 +486,6 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     await renderPage();
     await enterSmartMatting('portrait');
     await sendSmartMatting();
-    // 建任务：契约键（source_asset_id/target_node_id/mode/format/client_token——token 每次新生成）；
-    // strict 契约：WEBM 形态恒无 background_color 键
     expect(apiMocks.createVideoMatting).toHaveBeenCalledTimes(1);
     const [projectId, payload] = apiMocks.createVideoMatting.mock.calls[0]!;
     expect(projectId).toBe('p1');
@@ -533,7 +497,6 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     expect((payload.client_token as string).length).toBeGreaterThan(0);
     const targetNodeId = payload.target_node_id as string;
     expect(targetNodeId).toContain('smart-matting');
-    // 先退会话再建卡：单条卸载、splitEditing 移除、占位卡已上画布
     expect(sendBar()).toBeNull();
     expect(v1Data().splitEditing).toBeUndefined();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(3);
@@ -542,7 +505,6 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     expect(placeholder.data.genStatus).toBe('generating');
     expect(placeholder.data.mediaType).toBe('video');
     expect(placeholder.data.fileName).toBe('人像抠像');
-    // 占位卡带身份（lastInput 冻结源素材+绑定+模式/格式，失败重试原参数重发）
     expect(placeholder.data.smartMatting).toEqual({
       sourceAssetId: '6',
       lastInput: {
@@ -552,16 +514,12 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
         format: 'WEBM',
       },
     });
-    // job_id 已回写占位卡并进入轮询
     expect(placeholder.data.jobId).toBe('j1');
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
-    // 来源边 origin=smart-matting（参考推导跳过口径）
     const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
       .find((e) => e.target === targetNodeId)!;
     expect(edge.source).toBe('v1');
     expect(edge.data).toEqual({ origin: SMART_MATTING_EDGE_ORIGIN });
-    // IKJJR3：受理后经 800ms 防抖自动保存落盘（原受理后立即 flush 已由运行时统一）；
-    // 关页窗口的丢卡防护由统一恢复（canvas_binding 服务端关联）兜底
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
   });
@@ -588,7 +546,6 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     await renderPage();
     await enterSmartMatting('portrait');
     await act(async () => {
-      // 同步双击（React 尚未重渲染、发送钮未被 disabled 前的第二击）
       bodyBtn('smart-matting-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
       bodyBtn('smart-matting-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -609,10 +566,6 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     expect(sendBar()).toBeNull();
     const placeholder = placeholderNode()!;
     expect(placeholder.data.genStatus).toBe('failed');
-    // IKJJR3：受理失败收敛走运行时通用文案（非 ApiError 网络异常 →「创建任务失败」），
-    // 卡态承载可读原因（ApiError 家族文案映射不变），保留供原参数重试
-    // 提示单源（审查修复 S1）：一次请求失败只有一个提示入口——全局提示归 HTTP 层
-    // （jobs.test 锁「恰好一次」），画布不再叠一层 toast；卡态不是 toast，保留供原参数重试
     expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
   });
 });
@@ -629,10 +582,8 @@ describe('IKHK9N 轮询终态与失败重试', () => {
     await sendSmartMatting();
     const failed = placeholderNode()!;
     expect(failed.data.genStatus).toBe('failed');
-    // W 票错误码面：1050 →「智能抠像失败，请重试」（msg 缺失走本地兜底）
     expect(failed.data.errorText).toBe('智能抠像失败，请重试');
 
-    // 重试：lastInput（源素材+绑定+模式/格式）原样重发创建接口（新 job、新 client_token）
     apiMocks.createVideoMatting.mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValue({
       job_id: 'j2', status: 'processing', progress: 10, asset: null,
@@ -646,14 +597,12 @@ describe('IKHK9N 轮询终态与失败重试', () => {
     expect(apiMocks.createVideoMatting).toHaveBeenCalledTimes(2);
     const [, firstPayload] = apiMocks.createVideoMatting.mock.calls[0]! as [string, Record<string, unknown>];
     const [, retryPayload] = apiMocks.createVideoMatting.mock.calls[1]! as [string, Record<string, unknown>];
-    // 原参数（业务键冻结），client_token 新生成（同 token 只会重放旧任务）
     expect(retryPayload.source_asset_id).toBe(firstPayload.source_asset_id);
     expect(retryPayload.target_node_id).toBe(firstPayload.target_node_id);
     expect(retryPayload.mode).toBe(firstPayload.mode);
     expect(retryPayload.format).toBe(firstPayload.format);
     expect('background_color' in retryPayload).toBe(false);
     expect(retryPayload.client_token).not.toBe(firstPayload.client_token);
-    // 重试后占位卡原地承接新任务（jobId 更新、回到生成中、轮询重启）
     const retried = placeholderNode()!;
     expect(retried.id).toBe(failed.id);
     expect(retried.data.jobId).toBe('j2');
@@ -677,9 +626,7 @@ describe('IKHK9N 轮询终态与失败重试', () => {
     expect(done.data.width).toBe(1920);
     expect(done.data.height).toBe(1080);
     expect(done.data.duration).toBe(30);
-    // 标题保持模式展示名（标题跟随模式）
     expect(done.data.fileName).toBe('绿幕抠像');
-    // 成品卡可再发起（无生成中骨架身份残留）
     expect(done.data.progress).toBe(100);
   });
 });
@@ -695,9 +642,7 @@ describe('IKHKAC 完成回填与结果卡（透明标记、不记身份、恢复
     await enterSmartMatting('portrait');
     await sendSmartMatting();
     const done = placeholderNode()!;
-    // 透明产物标记（MediaNode 据此在视频区垫棋盘格，口径同图片抠图 imageCutout 先例）
     expect(done.data.transparentOutput).toBe(true);
-    // 结果卡不记抠像身份：smartMatting 身份清除（选中开普通视频面板，不再是抠像任务卡）
     expect(done.data.smartMatting).toBeUndefined();
   });
 
@@ -717,8 +662,6 @@ describe('IKHKAC 完成回填与结果卡（透明标记、不记身份、恢复
     expect(done.data.smartMatting).toBeUndefined();
   });
 
-  /** 已保存画布（刷新/换设备回来）：generating 占位卡（jobId + smartMatting 身份随画布
-   *  保存）+ 来源连线（origin=smart-matting，纯视觉） */
   function seedDocWithGeneratingPlaceholder() {
     seedDoc();
     const doc = canvasDocMock.current.doc as {
@@ -764,15 +707,12 @@ describe('IKHKAC 完成回填与结果卡（透明标记、不记身份、恢复
         asset: { id: 'a90', url: 'http://tos/m3.webm', type: 'video', width: 1080, height: 1920, duration: 12 },
       });
     await renderPage();
-    // 水合恢复轮询：j9 被查询
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j9');
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
     });
-    // 首 tick processing：占位卡仍在生成中
     const kept = (flowProps.current.mediaNodes as Node[]).find((n) => n.id === 'smart-matting-kept');
     expect(kept?.data.genStatus).toBe('generating');
-    // 续 tick succeeded：就地回填成品卡（同一张卡，不新建）
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 2600));
     });
@@ -783,7 +723,6 @@ describe('IKHKAC 完成回填与结果卡（透明标记、不记身份、恢复
     expect(done.data.genStatus).toBeUndefined();
     expect(done.data.transparentOutput).toBe(true);
     expect(done.data.smartMatting).toBeUndefined();
-    // 来源连线随画布保存（恢复后仍在）
     expect((flowProps.current.edges as Array<{ target: string }>).some((e) => e.target === 'smart-matting-kept')).toBe(true);
   }, 10000);
 });

@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# 安装/卸载 Blue-Whale-AI 的 Kimi CLI hooks。
-#
-# Kimi CLI 仅从用户级 ~/.kimi-code/config.toml 加载 hooks（实测项目级
-# .kimi-code/local.toml 不加载），因此需要本安装步骤；Claude Code / Codex /
-# ZCode 均为项目级配置，无需安装。
-#
-# 安装（幂等，可重复运行）：
-#   1. 把 .kimi-code/hooks/blue-whale-hook.sh 同步到 ~/.kimi-code/hooks/
-#   2. 把 .kimi-code/hooks.toml 以 managed block 形式写入 ~/.kimi-code/config.toml
-#
-# 卸载（--uninstall）：移除 managed block 与 shim，无残留；config.toml 其余内容不动。
-#
-# shim 带 opt-in 标记守卫（项目根存在 .kimi-code/hooks.toml 才路由），
-# 全局挂载对其它项目零影响，见 .kimi-code/hooks/blue-whale-hook.sh 头注。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -34,8 +20,6 @@ usage() {
 
 [ "$#" -eq 0 ] || { [ "$#" -eq 1 ] && [ "$1" = "--uninstall" ]; } || usage
 
-# upsert_block / remove_block：managed block 的幂等写入与移除。
-# 用 python3 处理多行文本边界，避免 sed 转义陷阱。
 managed_block() {
   python3 - "$CONFIG" "$BEGIN_MARK" "$END_MARK" "$SNIPPET" "$1" <<'PY'
 import sys
@@ -102,7 +86,6 @@ echo "已同步 shim: $SHIM_DST"
 
 managed_block upsert
 
-# kimi doctor 校验配置（若 kimi 在 PATH 中）。
 if command -v kimi >/dev/null 2>&1; then
   kimi doctor
 fi

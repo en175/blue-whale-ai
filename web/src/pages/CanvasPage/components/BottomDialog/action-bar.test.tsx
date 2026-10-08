@@ -14,14 +14,6 @@ import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
 import dialogStyles from './index.module.css';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 
-/* IKGB7W 视频面板附件操作条（IKGB1X 契约第二个落地面板，普通参考模式）：
-   输入框上方第一行 = 操作条（左「+ 参考」「资产库」pill、右侧并入展开/关闭）；
-   附件栏空态整条隐藏（无普通参考且无文本附件）、有内容时出现在操作条与输入框之间；
-   「+ 参考」分派画布点选（kind/role 与旧「+」同口径，pickMode 高亮）、「资产库」分派资产库弹窗；
-   能力位不支持 / 普通参考达上限 / 生成中只读三种禁用态常显置灰并悬停说明原因（替代旧「+ 不出现」）；
-   IKGB7Y 首尾帧顺序填充：操作条按首空槽角色分派（首帧优先、其后尾帧，仅图片边界），
-   两槽均满置灰（生成中只读同口径置灰），pickMode 高亮放开首尾帧；槽位行为原样。
-   PromptRefEditor 打桩为 textarea（与 videoRefArea 同款夹具）。 */
 
 const fetchGenerationModels = vi.hoisted(() => vi.fn());
 
@@ -93,7 +85,6 @@ const fullModel: GenerationModel = {
   digest: '',
 };
 
-/** 模型能力位不支持参考（reference_image=false）：旧行为连「+」都没有，新口径为常显置灰 + 悬停原因 */
 const noRefCapModel: GenerationModel = {
   ...fullModel,
   model_id: 'm-noref',
@@ -148,7 +139,6 @@ async function renderDialog({ mediaRefs, attachments, mode, status, submitting, 
       ),
     );
   });
-  // 等模型能力加载完成（能力位/上限依赖 currentModel）
   await vi.waitFor(() => expect(container.textContent).toContain((models ?? [fullModel])[0]!.model_label));
   return { onPickFromCanvas, onPickFromAssets };
 }
@@ -185,11 +175,9 @@ describe('IKGB7W 操作条渲染与位置（三段布局）', () => {
     const actions = bar.querySelector(`.${barStyles.actions}`)!;
     expect(actions.querySelector(`button[title="${ATTACHMENT_ACTION_PICK_CANVAS_TITLE}"]`)).toBeTruthy();
     expect(actions.querySelector(`button[title="${ATTACHMENT_ACTION_PICK_ASSETS_TITLE}"]`)).toBeTruthy();
-    // 右侧 trailing 并入面板原展开/关闭按钮
     const trailing = bar.querySelector(`.${barStyles.trailing}`)!;
     expect(trailing.querySelector('button[title="展开"]')).toBeTruthy();
     expect(trailing.querySelector('button[title="关闭"]')).toBeTruthy();
-    // 操作条在输入框之前
     const editor = container.querySelector('[data-testid="chip-editor"]')!;
     expect(bar.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -209,10 +197,8 @@ describe('IKGB7W 操作条渲染与位置（三段布局）', () => {
     const editor = container.querySelector('[data-testid="chip-editor"]')!;
     expect(bar.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(strip.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // n/N 计数保留在附件栏原位
     expect(strip.textContent).toContain('1/13');
 
-    // 删光后重新隐藏：videoMediaRefs 为父级受控推导，rerender 为空参考模拟父级断线结果
     await act(async () => {
       root.render(
         createElement(
@@ -298,7 +284,6 @@ describe('IKGB7W 三种禁用态：常显置灰 + 悬停原因（替代旧「+ �
   });
 
   it('普通参考达上限：两按钮 aria-disabled、悬停说明已达上限，n/N 计数保留在附件栏原位', async () => {
-    // 夹具模型 image_reference_max=10（imageMax）+ video_reference_max 缺省 3 → 上限 13
     const refs = Array.from({ length: 13 }, (_, i) => ref(`m${i}`));
     const { onPickFromCanvas, onPickFromAssets } = await renderDialog({ mode: 'omni', mediaRefs: { reference: refs } });
 
@@ -385,7 +370,6 @@ describe('IKGB7Y 首尾帧顺序填充（操作条按首空槽分派，两槽满
     await click(pickAssetsBtn());
     expect(onPickFromCanvas).not.toHaveBeenCalled();
     expect(onPickFromAssets).not.toHaveBeenCalled();
-    // 槽位既有渲染不变：缩略图 + 角色徽标
     const badges = [...container.querySelectorAll('[data-testid="dock-video-ref"] [data-testid="ref-thumb-badge"]')].map(
       (n) => n.textContent,
     );
@@ -418,7 +402,6 @@ describe('IKGB7Y 首尾帧顺序填充（操作条按首空槽分派，两槽满
   it('「+ 首帧」「+ 尾帧」槽位入口原样保留：空槽常显、label 变体按角色分派', async () => {
     const { onPickFromCanvas, onPickFromAssets } = await renderDialog({ mode: 'first_last_frame', mediaRefs: { reference: [] } });
 
-    // 空槽常显（不吃空态隐藏规则）：附件栏整条仍在
     const strip = attachmentStrip()!;
     expect(strip).toBeTruthy();
     const firstSlot = [...strip.querySelectorAll<HTMLButtonElement>('button')].find(
@@ -430,7 +413,6 @@ describe('IKGB7Y 首尾帧顺序填充（操作条按首空槽分派，两槽满
     expect(firstSlot).toBeTruthy();
     expect(lastSlot).toBeTruthy();
 
-    // 槽位添加行为原样：经槽位菜单「从节点添加素材」按角色分派
     await click(firstSlot);
     await click([...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '从节点添加素材')!);
     expect(onPickFromCanvas).toHaveBeenCalledWith('image', 'first');

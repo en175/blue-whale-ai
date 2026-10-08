@@ -1,6 +1,3 @@
-/* ============================================
- * 画布右键菜单：节点菜单与空白处菜单共用
- * ============================================ */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight } from 'lucide-react';
@@ -23,10 +20,8 @@ interface CanvasContextMenuProps {
   onClose: () => void;
 }
 
-/** 菜单与视口边缘的最小间距 */
 const VIEWPORT_MARGIN = 8;
 
-/** 按视口夹取菜单位置：右侧超出向左翻，底部超出向上翻，其余贴边 */
 function clampMenuPosition(x: number, y: number, width: number, height: number) {
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
@@ -104,7 +99,6 @@ export default function CanvasContextMenu({ x, y, items, onSelect, onClose }: Ca
 
   useEffect(() => {
     const close = () => onClose();
-    // 节点拖动走 pointer 事件链，不会触发 click；捕获阶段在非菜单区域按下即关闭（IKG72F）
     const closeIfOutside = (e: Event) => {
       const target = e.target;
       if (target instanceof Node && menuRef.current?.contains(target)) return;

@@ -6,7 +6,6 @@ import {
   type CanvasClipboardKeyInput,
 } from './keyboardClipboard';
 
-/** 无修饰干扰的基线输入（每个用例按需覆盖字段） */
 function baseInput(overrides: Partial<CanvasClipboardKeyInput> = {}): CanvasClipboardKeyInput {
   return {
     key: 'c',

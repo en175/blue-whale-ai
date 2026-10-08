@@ -1,9 +1,3 @@
-// 修正六（IKEL4A）：worker-java 的 MQ 路由表 GenerationMqRoute 与 TS 侧 queue.constants.ts 的
-// 跨语言一致性断言。防漂移约定（沿用 image-enhance.test.ts / image-erase.test.ts 读 Java 源码文本的模式）：
-// TS 侧常量直接 import 当期望值，插进 Java 源码文本里逐项对账——任一侧改动未同步即红。
-// 补这条锚点的原因：image_enhance / image_erase 的 tag 早有各自契约测试钉住，而本次更名的
-// video tag（step→video）此前只有 Java 内部三处互钉，跨端没有锚点。
-// 契约权威章节：docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md §1 / §16。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -29,7 +23,6 @@ import {
   VOCAL_SPLIT_TAG,
 } from "../shared/generation/queue.constants.js";
 
-// 读 worker-java 侧路由表源码（对账基准；3 级 .. = 仓库根）。
 const mqRouteJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
@@ -38,12 +31,8 @@ const mqRouteJava = readFileSync(
   "utf8",
 );
 
-/** 路由注册总数（IKHKMR）：与 EXPECTED_ROUTES 清单互锁的唯一计数源——只改清单不改此数
- * （或反之），下方长度断言即红。历史上计数注释曾发生 11→12→13 三次漂移，故钉死。
- * 18 = 13（IKHKMR 钉死值）+ 视频插帧、智能抠像、音频混合、音频调速、音视频合成（IKIHPJ）。 */
 const EXPECTED_ROUTE_COUNT = 18;
 
-/** 入口清单（项数须恒等于 EXPECTED_ROUTE_COUNT）↔ TS tag 常量（期望值全取自 TS 侧；Java 侧只提供入口名）。 */
 const EXPECTED_ROUTES = [
   { entry: "VIDEO", tag: VIDEO_GENERATION_TAG },
   { entry: "IMAGE", tag: IMAGE_GENERATION_TAG },
@@ -67,7 +56,6 @@ const EXPECTED_ROUTES = [
 
 describe("GenerationMqRoute ↔ queue.constants.ts 双端一致性（读 Java 源码文本，防漂移）", () => {
   it("EXPECTED_ROUTES 长度与显式计数互锁：只改清单不改计数（或反之）即红", () => {
-    // 计数单源：测试名与断言均引用 EXPECTED_ROUTE_COUNT，清单长度必须与它相等。
     expect(
       EXPECTED_ROUTES.length,
       `EXPECTED_ROUTES 有 ${EXPECTED_ROUTES.length} 项，但 EXPECTED_ROUTE_COUNT 声明为 ${EXPECTED_ROUTE_COUNT}——清单与计数必须同步改`,
@@ -81,9 +69,6 @@ describe("GenerationMqRoute ↔ queue.constants.ts 双端一致性（读 Java �
   });
 
   it(`枚举常量表与 TS ${EXPECTED_ROUTE_COUNT} 个 tag 一一对应（多一个 / 少一个 / 任一侧换值都红）`, () => {
-    // 形如 `    VIDEO("generation-task", "video"),`（末项以 `;` 收尾）。
-    // 缩进放宽为 `\s*`：纯格式化改动不该红；下面那条 length 断言负责把「正则没匹配上」
-    // 变成一句可读的失败，而不是 `expected [] to equal [7 items]` 这种查不出原因的报错。
     const declared = [
       ...mqRouteJava.matchAll(/^\s*([A-Z_]+)\("([^"]+)",\s*"([^"]+)"\)[,;]\s*$/gm),
     ].map((match) => ({ entry: match[1], topic: match[2], tag: match[3] }));

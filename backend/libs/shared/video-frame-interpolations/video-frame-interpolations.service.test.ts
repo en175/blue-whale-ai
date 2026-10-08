@@ -1,7 +1,3 @@
-// IKHLK3：视频插帧创建入口复核矩阵与免费口径单测（先例：video-enhancements.service.test.ts）。
-// 只测外部可见行为：拒绝原因可读、落库参数冻结（含 fps 缺省补默认）、免费口径无成本预留、
-// 凭证冻结、无授权门槛（父单口径：不照搬 HD 分辨率门槛、不做源帧率 4 倍建议拦截）、
-// 入队失败回拨（controller 测试覆盖 markFailed 调用，这里覆盖 create / markFailed 的落库口径）。
 import { describe, expect, it, vi } from "vitest";
 
 import { VideoFrameInterpolationsService } from "./video-frame-interpolations.service.js";
@@ -12,7 +8,6 @@ const VALID_BODY = {
   fps: 60,
 };
 
-/** 默认源素材：1920x1080 mp4、1 分钟；宽高权威值齐备（插帧对宽高无门槛，此处仅作存在性对照）。 */
 function makeVideoAsset(overrides: Record<string, unknown> = {}) {
   return {
     type: "video",
@@ -42,7 +37,6 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
@@ -104,8 +98,6 @@ describe("VideoFrameInterpolationsService.create：契约 schema 复核", () => 
   });
 
   it("defaults a missing fps to 60 and freezes it into the job input", async () => {
-    // 父单决策口径：与 HD 高清 resolution 必填不同，fps 缺省补默认 60（前端面板恒有选中值，
-    // 服务端仍兜底，保证落库 input 三键恒在）。
     const { service, create } = makeService();
     const result = await service.create("9", "55", {
       source_asset_id: "88",
@@ -149,7 +141,6 @@ describe("VideoFrameInterpolationsService.create：归属与媒体类型复核",
 
 describe("VideoFrameInterpolationsService.create：无输入门槛（与 HD 高清不同源）", () => {
   it("accepts an over-HD-limit video (2560x1440) — no resolution gate copied from HD", async () => {
-    // 官方对该端点无分辨率限制，ADR-0113「插帧项不做任何额外前置」：HD 的短边/长边门槛不适用于本工具。
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ width: 2560, height: 1440 })),

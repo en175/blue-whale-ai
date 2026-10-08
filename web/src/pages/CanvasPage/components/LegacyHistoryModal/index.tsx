@@ -1,7 +1,3 @@
-/* ============================================
- * LegacyHistoryModal 旧生成卡迁移历史（IKDLQK）
- * 只读展示：标题、迁移时间、画面描述（含用户编辑）、迁移时提示词正文与预览来源
- * ============================================ */
 import Modal from '@/components/Modal';
 import type { LegacyCardHistoryItem } from '@/api/canvas';
 import styles from './index.module.css';
@@ -12,7 +8,6 @@ interface LegacyHistoryModalProps {
   onClose: () => void;
 }
 
-/** 来源展示：有预览来源时标注会话/修订/镜号，无来源不落假标识 */
 function sourceLabel(item: LegacyCardHistoryItem): string | null {
   if (!item.source) return null;
   return `预览来源：会话 ${item.source.sessionId} · 修订 ${item.source.revisionId} · 镜头 ${item.source.shotNo}`;

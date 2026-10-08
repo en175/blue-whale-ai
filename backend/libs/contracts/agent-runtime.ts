@@ -148,7 +148,6 @@ export type CreativeSkillActivation = z.infer<
 >;
 export type CreativeSkillResource = z.infer<typeof creativeSkillResourceSchema>;
 
-/** JSON 值键序规范化：递归按 key 排序，得到确定性序列化输入（digest 计算的共享基元）。 */
 export function canonicalizeJsonValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalizeJsonValue);
   if (value && typeof value === "object") {
@@ -161,7 +160,6 @@ export function canonicalizeJsonValue(value: unknown): unknown {
   return value;
 }
 
-/** RunPin 私有完整性摘要的唯一规范化输入；哈希由 Node 边界负责。 */
 export function canonicalAgentRunPinDigestInput(
   pin: Omit<AgentRunPin, "pin_digest">,
 ): string {

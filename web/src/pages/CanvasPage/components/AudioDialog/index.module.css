@@ -1,6 +1,3 @@
-/* ============================================
- * AudioDialog - 音频生成底部对话框
- * ============================================ */
 
 .dialogWrap {
   position: absolute;
@@ -22,8 +19,6 @@
 
 .dialog {
   position: relative;
-  /* 默认输入区保留三行，最多增长到四行，附件换行时面板向上增长。
-   * 弹出层（来源菜单 / 画布选择）挂在本卡片内向下展开，路径上不加 overflow，避免被裁切。 */
   height: auto;
   min-height: 0;
   max-height: calc(100vh - 2 * var(--spacing-lg));
@@ -48,12 +43,10 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* 放大态：输入区高度占屏幕 2/3，仍锚定底部展示 */
 .dialogExpanded {
   height: 66.66vh;
 }
 
-/* ---- 图标按钮（IKGB82：展开/关闭并入附件操作条 trailing，原绝对定位 .topActions 退役） ---- */
 .iconBtn {
   width: 28px;
   height: 28px;
@@ -73,15 +66,11 @@
   background-color: var(--color-bg-hover);
 }
 
-/* 操作条行包装（与 BottomDialog 同形同值）：操作条视觉定义单一来源在共享样式表
- * （源唯一性锁见 AttachmentActionBar/actionBarVisualSource.test.ts），此处仅承载面板侧行间距；
- * 图片面板无此包装——其 .inputBox flex gap 已给出同值（--spacing-md）行距。 */
 .actionBarRow {
   margin-bottom: var(--spacing-md);
   flex-shrink: 0;
 }
 
-/* ---- 顶部参考按钮行（IKGB82：空态整条不渲染；原 topActions 展开/关闭已并入操作条右侧） ---- */
 .topRow {
   display: flex;
   flex-wrap: wrap;
@@ -96,7 +85,6 @@
   z-index: 30;
 }
 
-/* 菜单打开时的透明遮罩：点击外部关闭 */
 .menuOverlay {
   position: fixed;
   inset: 0;
@@ -104,7 +92,6 @@
   background: transparent;
 }
 
-/* topRow 区域的 inline 小字（提示"参考音频可选"） */
 .refOptionalLabel {
   font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
@@ -121,7 +108,6 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ---- 画布选择面板 ---- */
 .pickerPanel {
   position: absolute;
   top: calc(100% + 6px);
@@ -133,7 +119,6 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   animation: popupFadeIn 0.15s ease;
-  /* 低于共享来源菜单及遮罩，选取中重新点 + 仍可切换来源。 */
   z-index: 20;
 }
 
@@ -225,7 +210,6 @@
   white-space: nowrap;
 }
 
-/* ---- 输入框 ---- */
 .mentionAnchor {
   position: relative;
   flex: 1;
@@ -264,7 +248,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* ---- 字数统计 ---- */
 .charCount {
   white-space: nowrap;
   font-size: 11px;
@@ -277,7 +260,6 @@
   font-weight: 500;
 }
 
-/* ---- 底部状态栏 ---- */
 .bottomBar {
   display: flex;
   align-items: center;
@@ -298,7 +280,6 @@
   gap: var(--spacing-md);
 }
 
-/* 发送按钮（与图片对话框统一） */
 .sendBtn {
   width: 28.8px;
   height: 28.8px;
@@ -323,7 +304,6 @@
   background-color: #555;
 }
 
-/* ---- 模式/模型选择器 ---- */
 .modeWrap {
   position: relative;
 }
@@ -382,7 +362,6 @@
   transition: all var(--transition-fast);
 }
 
-/* AI 音乐暂未上线：禁用态 */
 .modeOption:disabled {
   color: var(--color-text-tertiary);
   cursor: not-allowed;
@@ -403,14 +382,12 @@
   font-weight: 500;
 }
 
-/* 模式选项内图标+文字行 */
 .modeOptionRow {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-/* ---- 生成中只读提示（IKDMQT，草稿绑定） ---- */
 .readOnlyHint {
   font-size: 12px;
   color: var(--color-text-tertiary);

@@ -4,12 +4,8 @@ set -uo pipefail
 
 _branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
 
-# 只检查本次暂存（staged）的文件
 staged_files=$(git diff --cached --name-only --diff-filter=ACMR)
 
-# ============================================================
-# 1. 禁提交生成物
-# ============================================================
 ban_patterns=(
   'graphify-out/cache/'
   'graphify-out/cost.json'
@@ -26,7 +22,6 @@ block_hit=""
 for pat in "${ban_patterns[@]}"; do
   while IFS= read -r f; do
     [ -z "$f" ] && continue
-    # 路径含生成物目录即拦
     if [[ "/$f/" == *"$pat"* ]]; then
       block_hit="${block_hit}  $f\n"
     fi
@@ -42,12 +37,6 @@ if [ -n "$block_hit" ]; then
   exit 1
 fi
 
-# ============================================================
-# 2. 远程落后软提醒（使用本机已有远端引用，不执行 fetch）
-#    职责：commit 前告知分支落后状态，让 rebase 冲突早冒、小颗粒。
-#    不拦 commit 或 push；创建/更新 PR 前由发布入口要求同步。
-#    仅工单分支生效。见 docs/adr/0006-sync-mechanism-auto-block.md。
-# ============================================================
 case "$_branch" in
   feature/*|fix/*|hotfix/*|docs/*|chore/*)
     _root=$(git rev-parse --show-toplevel 2>/dev/null || true)
@@ -56,7 +45,6 @@ case "$_branch" in
       echo "⚠️  pre-commit: 缺少任务发布线元数据；提交可继续，验证和发布前须显式修复。" >&2
     else
       _upstream=$(git rev-parse --verify --quiet "refs/remotes/origin/$_target" 2>/dev/null || true)
-      # 本地 HEAD 是否包含已抓取的目标引用？不是祖先 = 落后。
       if [ -n "$_upstream" ] && ! git merge-base --is-ancestor "$_upstream" HEAD 2>/dev/null; then
         _behind=$(git rev-list --count HEAD.."$_upstream" 2>/dev/null || echo "?")
         echo "⚠️  pre-commit: ${_branch} 落后 origin/${_target} 约 ${_behind} 个提交（本机引用，软提醒）。" >&2
@@ -66,27 +54,13 @@ case "$_branch" in
     ;;
 esac
 
-# ============================================================
-# 3. 错误码改码注释对账（staged 含 error-codes.ts 时）
-#    改码（让号/迁移）提交必须同步清理旧数值在该错误域的注释与测试名残留
-#    （实证：!831 调速 1051→1052 注释漏改约 30 处）。主链路仍纯 shell，
-#    仅此节调用 node；无 node 环境时跳过，不破坏零依赖承诺。
-# ============================================================
 if printf '%s\n' "$staged_files" | grep -qx 'backend/libs/contracts/error-codes.ts' && command -v node >/dev/null 2>&1; then
   node scripts/check-error-code-drift.mjs || exit 1
 fi
 
-# ============================================================
-# 4. 契约 breaking 检测（staged 含 contracts/proto/ 时）
-#    破坏性契约变更是**不可逆的**：字段号复用会让新旧两端读到的数据静默错位，
-#    且线上无法回滚。pre-commit 只拦「本地这次改动」；PR 门禁另跑一次对照批次分支：
-#      bash scripts/check-contract-breaking.sh release/2026.09.29
-#    脚本自身处理 buf 未安装（退出码 2 = 软提醒放行）。
-# ============================================================
 if printf '%s\n' "$staged_files" | grep -q '^contracts/proto/'; then
   bash scripts/check-contract-breaking.sh
   _contract_rc=$?
-  # 1 = 破坏性变更 → 拦；0 = 通过；2 = buf 未装（已软提醒）→ 放行
   [ "$_contract_rc" -eq 1 ] && exit 1
 fi
 

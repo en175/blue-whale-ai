@@ -1,14 +1,10 @@
 // @vitest-environment jsdom
-/* IKFCKT：参考栏拖拽排序共享层——arrayMove 换位纯函数 + useRefStripDrag 状态机
-   （dragStart 记起点 / dragOver 前后半落点指示 / drop 换位回调 / dragEnd 复位 / 只读禁拖），
-   及 RefThumbnail dragProps 透传（根节点 draggable、img 原生拖拽禁用、× 点击与拖拽手势互不干扰） */
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { arrayMove, useRefStripDrag, useMixedRefStrip } from './strip-dnd';
 import RefThumbnail from './index';
 
-/** jsdom 无 DragEvent 且 rect 恒 0：手工挂 dataTransfer / clientX，rect 按需 mock */
 function dragEvent(type: 'dragstart' | 'dragover' | 'drop' | 'dragend', init?: { clientX?: number }) {
   const event = new Event(type, { bubbles: true, cancelable: true }) as Event & {
     dataTransfer?: { setData: () => void; effectAllowed: string; dropEffect: string };
@@ -25,10 +21,8 @@ function rectSpy(rect: { left: number; width: number }) {
   } as DOMRect);
 }
 
-/** 换位回调记录（模块级：断言跨重渲染稳定，重渲染不吞掉已发生的回调） */
 let reorderCalls: string[] = [];
 
-/** 宿主：可拖拽缩略图列表，onReorder 驱动真实换位（编号随 index 重派生） */
 function StripHost({ disabled }: { disabled?: boolean }) {
   const [items, setItems] = useState(['a', 'b', 'c']);
   const drag = useRefStripDrag({
@@ -98,7 +92,6 @@ describe('useRefStripDrag 拖拽换位（IKFCKT）', () => {
     act(() => { item('c').dispatchEvent(dragEvent('dragover', { clientX: 50 })); });
     act(() => { item('c').dispatchEvent(dragEvent('drop', { clientX: 50 })); });
     expect(reorderCalls).toEqual(['0->2']);
-    // 换位后编号按新序紧凑重派生：a=1 → 拖到末位后 b=1 c=2 a=3
     const badgeOf = (id: string) => item(id).querySelector('[data-testid="ref-thumb-badge"]')!.textContent;
     expect([badgeOf('a'), badgeOf('b'), badgeOf('c')]).toEqual(['3', '1', '2']);
   });
@@ -144,7 +137,6 @@ describe('useRefStripDrag 拖拽换位（IKFCKT）', () => {
 });
 
 describe('RefThumbnail dragProps 透传（IKFCKT）', () => {
-  /** 宿主：hook 必须在组件渲染内调用——图片/视频双项参考栏 */
   function KindsHost({ onRemove, onInsertRef }: { onRemove?: () => void; onInsertRef?: () => void }) {
     const drag = useRefStripDrag({ onReorder: () => {} });
     return createElement('div', null,
@@ -199,7 +191,6 @@ describe('RefThumbnail dragProps 透传（IKFCKT）', () => {
 });
 
 describe('RefThumbnail 拖拽开始关闭预览（IKIQ89）', () => {
-  // 真实 FloatingPortal 挂在 document.body（本文件不 mock floating-ui），预览查全文档
   const preview = () => document.querySelector('[data-testid="ref-thumb-preview"]');
 
   function hover(el: Element) {

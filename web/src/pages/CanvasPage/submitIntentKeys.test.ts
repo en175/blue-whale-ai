@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSubmitIntentKeys } from './submitIntentKeys';
 
-/* 幂等键台账：一把钥匙只活在「某次意图尚未受理」的窗口里。
-   服务端建任务/重试幂等靠的就是「同键 → 重放首次结果」，客户端不按这个口径复用钥匙，
-   那个头就是摆设——双击、响应丢了再点一次都是两个 job、两笔预扣。 */
 
 describe('submitIntentKeys 一次用户意图一把 key', () => {
   it('同 scope 同签名复用同一把（双击 / 响应丢了原样重发）', () => {

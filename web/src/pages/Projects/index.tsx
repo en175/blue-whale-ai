@@ -1,6 +1,3 @@
-/* ============================================
- * Projects 项目管理页：图文项目卡片、分页加载与项目管理
- * ============================================ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { type InfiniteData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -24,7 +21,6 @@ import { defaultProjectName } from '@/lib/projectName';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
-/** 页面向用户展示的日期；坏数据不让整张卡片失去可用性。 */
 function formatProjectDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '创建日期未知';
@@ -39,7 +35,6 @@ function errorMessage(error: unknown, fallback: string): string {
   return isApiError(error) ? error.message : fallback;
 }
 
-/** 无限分页在数据变动后可暂时有跨页重复，展示层按 ID 收敛。 */
 function uniqueProjects(records: ProjectRecord[]): ProjectRecord[] {
   const known = new Set<string>();
   return records.filter((project) => {
@@ -50,7 +45,6 @@ function uniqueProjects(records: ProjectRecord[]): ProjectRecord[] {
   });
 }
 
-/** 修改已加载的页缓存；重命名时有意只采纳名称，保留卡片已有 previews。 */
 function updateCachedProjectPages(
   queryClient: ReturnType<typeof useQueryClient>,
   update: (project: ProjectRecord) => ProjectRecord | null,
@@ -184,7 +178,6 @@ export default function Projects() {
     await fetchNextPage();
   }, [fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage]);
 
-  /** 项目页是实际滚动容器，哨兵不能默认观察 window。 */
   useEffect(() => {
     const target = loadMoreRef.current;
     const root = pageRef.current;
@@ -239,14 +232,12 @@ export default function Projects() {
   };
 
   const onCardKeyDown = (event: KeyboardEvent<HTMLElement>, project: ProjectRecord) => {
-    // 菜单和多选按钮同样位于卡片内；它们的 Enter/Space 不能冒泡成“打开项目”。
     if (event.target !== event.currentTarget) return;
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     openProject(project);
   };
 
-  /** 创建成功即进入画布；空名由服务端生成默认时间名称。 */
   const handleCreate = () => {
     if (createMutation.isPending) return;
     setCreateError('');
@@ -302,7 +293,6 @@ export default function Projects() {
     setDeleteError('');
   };
 
-  /** 置顶/取消置顶（IKH1YL）：口径改变列表顺序，成功后重拉已加载页让服务端排序直出。 */
   const handleTogglePin = (project: ProjectRecord) => {
     setOpenMenuId(null);
     setPinError('');
@@ -345,7 +335,6 @@ export default function Projects() {
         });
         setDeleteTarget(null);
         setDeleteConfirmation('');
-        // offset 分页删除后需要重新拉取已加载页，避免页间出现空洞。
         void queryClient.invalidateQueries({ queryKey: projectKeys.all });
       },
       onError: (error) => setDeleteError(errorMessage(error, '删除失败，请稍后重试')),
@@ -502,7 +491,7 @@ export default function Projects() {
                   >
                     <PreviewGallery project={project} />
 
-                    {/* 置顶项目图钉角标（IKH1YL） */}
+                    {}
                     {project.pinned_at && (
                       <span className={styles.pinBadge} title="已置顶">
                         <Pin size={13} strokeWidth={2} aria-hidden="true" />

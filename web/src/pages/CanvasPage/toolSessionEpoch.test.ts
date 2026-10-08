@@ -1,10 +1,4 @@
 import { canvasToolSessionFixture } from './testing/canvasToolSessionFixture';
-/* IKI61O 会话纪元机制单测（toolSessionCoordinator.createToolSessionEpoch）：
-   覆盖全部会话种类的进入/退出/项目切换推进与 capture/isCurrent 比对语义——
-   迟到响应「只做任务收尾、不碰当前会话」的判定只活在这一个机制里，各家族不各自发明。
-   IKI8KZ 审查修订：ALL_KINDS 自 coordinator 导出的 TOOL_SESSION_KINDS 派生，
-   不再手抄全集副本（此前 audioMix 由 IKI68W 加入时手抄清单漏列过）——新增/遗漏
-   种类时测试遍历自动跟随权威集合暴露缺口。 */
 import { describe, expect, it } from 'vitest';
 import {
   createToolSessionEpoch,
@@ -55,9 +49,9 @@ describe('IKI61O createToolSessionEpoch', () => {
     epoch.enter('audioMix');
     const sentAt = epoch.capture('audioMix');
     expect(epoch.isCurrent('audioMix', sentAt)).toBe(true);
-    epoch.exit('audioMix'); // 发送在途 Esc 退出——此前唯一不推进纪元的退出函数
+    epoch.exit('audioMix');
     expect(epoch.isCurrent('audioMix', sentAt)).toBe(false);
-    epoch.enter('audioMix'); // 重开新会话（进入亦推进）
+    epoch.enter('audioMix');
     expect(epoch.isCurrent('audioMix', sentAt)).toBe(false);
     const resentAt = epoch.capture('audioMix');
     expect(epoch.isCurrent('audioMix', resentAt)).toBe(true);

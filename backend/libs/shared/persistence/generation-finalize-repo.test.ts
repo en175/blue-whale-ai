@@ -2,18 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFinalizeCommandRepo, createFinalizeJob } from "./generation-finalize-repo.js";
 
-/** IKIZQC：成片命令 repo 单测——阶段落库、final_job_id 回写、唯一冲突裁决、幂等分域。
- *  （真库并发行为见 ikizqc-finalize-unique.integration.test.ts，门控真 MySQL。） */
 
 const SAMPLE_JOB_ID = "302";
 
-/** 扩展位行（IKJCOE）：video_stage / final_job_id / finalize_deadline_ms 已从主表搬进
- *  generation_job_extras，读方按 extra_key 取值（键名沿用原列名）。 */
 function extraRow(jobId: bigint, extra_key: string, value_type: string, value_text: string) {
   return { generation_job_id: jobId, extra_key, value_type, value_text };
 }
 
-/** 扩展位假件：默认无任何键（缺键 = 缺省语义）。 */
 function extrasDelegate(rows: ReturnType<typeof extraRow>[] = []) {
   return {
     upsert: vi.fn().mockResolvedValue({}),
@@ -22,7 +17,6 @@ function extrasDelegate(rows: ReturnType<typeof extraRow>[] = []) {
   };
 }
 
-/** 逐字钉住一次扩展位 upsert（where 复合键 / create / update 三段都断言）。 */
 function expectExtraWrite(
   upsert: ReturnType<typeof vi.fn>,
   jobId: bigint,
@@ -37,7 +31,6 @@ function expectExtraWrite(
   });
 }
 
-/** 主表行只剩非阶段列（阶段身份与互指都在扩展位上）。 */
 function jobRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 302n,
@@ -57,7 +50,6 @@ function buildPrisma(
 ) {
   const create = vi.fn().mockResolvedValue({ id: 305n, version: 0 });
   const idemCreate = vi.fn().mockResolvedValue({});
-  // tx 与 prisma 共用同一份假件：回写（tx）与投影读（prisma）看到的是同一批扩展位。
   const extras = extrasDelegate(extrasRows);
   const tx = {
     generation_jobs: { create },
@@ -115,20 +107,16 @@ describe("createFinalizeJob（IKIZQC）", () => {
       status: "queued",
       source_sample_job_id: 302n,
     });
-    // IKJCOE：阶段身份与费用初始态在扩展位上（原主表 video_stage / charge_state 列已删）。
     expectExtraWrite(extras.upsert, 305n, "video_stage", "string", "final");
     expectExtraWrite(extras.upsert, 305n, "charge_state", "string", "held");
     expectExtraWrite(extras.upsert, 305n, "strategy_version", "string", "seedance-2.0-v1");
-    // G11 投影互指：先读样片行的 final_job_id 守卫，再同事务回写（键名沿用原列名）。
     expect(extras.findMany).toHaveBeenCalledWith({
       where: { generation_job_id: 302n },
       select: { extra_key: true, value_type: true, value_text: true },
     });
     expectExtraWrite(extras.upsert, 302n, "final_job_id", "number", "305");
-    // ★ 至多一笔预扣：hold 在成片行插入后恰好一次（输家在插入处回滚，走不到这里）。
     expect(hold).toHaveBeenCalledTimes(1);
     expect(hold).toHaveBeenCalledWith(305);
-    // 终态日志与 cost_reservations 兜底行都在。
     expect(tx.generation_job_logs.create).toHaveBeenCalled();
     expect(tx.cost_reservations.create).toHaveBeenCalled();
   });
@@ -141,8 +129,6 @@ describe("createFinalizeJob（IKIZQC）", () => {
     await createFinalizeJob(prisma, INPUT, {});
 
     expect(create).toHaveBeenCalledOnce();
-    // 只有新成片行的三个键被写（strategy_version / video_stage / charge_state）——
-    // 样片行已有互指，不再改写。
     expect(extras.upsert).toHaveBeenCalledTimes(3);
     expect(extras.upsert).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -177,7 +163,6 @@ describe("createFinalizeJob（IKIZQC）", () => {
       { idempotency: { key: "k1", requestHash: "r".repeat(64) } },
     );
 
-    // 幂等行与成片行同事务落库，operation 是 finalize 分域。
     expect(idemCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         operation: "generation.finalize",
@@ -204,7 +189,6 @@ describe("createFinalizeJob（IKIZQC）", () => {
 
     expect(result).toEqual({ generation_job_id: "305", cursor: 7 });
     expect(create).not.toHaveBeenCalled();
-    // findUnique 的 operation 维度必须是 finalize 分域。
     expect(idemFindUnique.mock.calls[0]![0].where.project_id_operation_idempotency_key).toMatchObject({
       operation: "generation.finalize",
     });
@@ -228,7 +212,6 @@ describe("createFinalizeJob（IKIZQC）", () => {
         },
       }),
     );
-    // 阶段身份取自扩展位（video_stage 主表列已删）。
     expect(sample).toMatchObject({
       id: "302",
       project_id: "1",
@@ -247,7 +230,6 @@ describe("createFinalizeJob（IKIZQC）", () => {
         findFirst: vi.fn().mockResolvedValue(jobRow()),
         findUnique,
       },
-      // final_job_id 现在读自扩展位。
       generation_job_extras: extrasDelegate([extraRow(302n, "final_job_id", "number", "305")]),
     } as never;
 

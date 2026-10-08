@@ -5,8 +5,6 @@ import { CANVAS_EDGE_LIMITS, DATA_NOT_EXIST_CODE, DomainError, RECOVERY_REASONS 
 
 import { CanvasService } from "./canvas.service.js";
 
-// IKDLQF：Canvas save() 的 edges 校验分支（契约「连线持久化」：不满足即明确失败、零写入）。
-// 校验失败在读库与事务之前发生，断言 prisma 完全未被触碰（零读零写）。
 
 type CanvasRow = {
   id: bigint;
@@ -36,7 +34,6 @@ function buildService(current: CanvasRow | null = null) {
   };
   const client = {
     canvas: { findFirst: vi.fn().mockResolvedValue(current) },
-    // IKJJQU：save() 的 B.7 守护读恢复关联表（默认无关联 → 旧行为）。
     generation_canvas_submissions: { findFirst: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn(
       async (callback: (client: typeof tx) => Promise<unknown>) =>
@@ -50,7 +47,6 @@ function buildService(current: CanvasRow | null = null) {
   return { service, client, tx };
 }
 
-/** IKJJQU：B.7 旧客户端边界——存在新协议关联的项目缺 If-Match → 428 canvas_version_required。 */
 function buildProtectedService(current: CanvasRow | null = null) {
   const built = buildService(current);
   built.client.generation_canvas_submissions.findFirst.mockResolvedValue({ id: 1n });
@@ -198,7 +194,6 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
 
   it(`超过 ${CANVAS_EDGE_LIMITS.maxEdges} 条 → 400，零读零写`, async () => {
     const { service, client } = buildService();
-    // 24 个节点的全部有序点对共 576 个（自环亦合法，见契约修订），取前 501 条保证除总数外全部合法。
     const nodeIds = Array.from({ length: 24 }, (_, i) => `n${i}`);
     const nodes = JSON.stringify(nodeIds.map((id) => ({ id, type: "textNode", data: {} })));
     const edges: Array<{ id: string; source: string; target: string }> = [];
@@ -267,7 +262,6 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
   });
 });
 
-// 版本冲突（412）信封须带服务端当前 version，前端据此直接刷新 If-Match，无需再 GET 一次。
 describe("CanvasService.save 版本冲突返回当前 version", () => {
   function row(version: number) {
     return {
@@ -305,7 +299,6 @@ describe("CanvasService.save 版本冲突返回当前 version", () => {
   it("条件写失败（读后被并发改动）→ 412 且 data.version 是重读的最新值，不是本次请求的陈旧快照", async () => {
     const { service, client, tx } = buildService(row(3));
     tx.canvas.updateMany.mockResolvedValue({ count: 0 });
-    // 第一次读（校验用）看到 3，第二次读（冲突后重读）看到并发推进后的 5。
     client.canvas.findFirst
       .mockResolvedValueOnce(row(3))
       .mockResolvedValueOnce(row(5));
@@ -319,7 +312,6 @@ describe("CanvasService.save 版本冲突返回当前 version", () => {
 
   it("保存成功仍返回 200 与 data.version，冲突分支不影响成功路径", async () => {
     const { service, tx } = buildService(row(3));
-    // 条件写命中后 repo 重读的是自增后的行。
     tx.canvas.findFirst.mockResolvedValue(row(4));
 
     const result = await service.save("u1", "1", { nodes: NODES, expectedVersion: 3 });
@@ -329,11 +321,8 @@ describe("CanvasService.save 版本冲突返回当前 version", () => {
   });
 });
 
-// 项目不存在/不属于调用方：抛而不是 return 信封。返回的信封走不到 AllExceptionsFilter，
-// 没人写 HTTP 状态码，会回 HTTP 200 + body code 100100（ADR-0083 禁的那类不一致）。
 describe("CanvasService.save 项目不属于调用方", () => {
   it("抛 DomainError：code 100100、HTTP 404（此前回 200）", async () => {
-    // 归属校验在读库之前，画布存不存在无所谓
     const { client } = buildService(null);
     const notOwned = new CanvasService(
       { client } as never,
@@ -349,14 +338,10 @@ describe("CanvasService.save 项目不属于调用方", () => {
       code: DATA_NOT_EXIST_CODE,
       status: 404,
     });
-    // 校验在读库之前，拒绝时不该发生任何读写
     expect(client.$transaction).not.toHaveBeenCalled();
   });
 });
 
-// IKIIWN（契约 §9）：非空画布被单次保存替换为空节点文档是破坏性收缩，须显式 confirmEmpty。
-// 拒绝发生在读 current 之后、条件写之前：事务零写入，版本不消耗。
-// IKIMQJ：确认清空进一步只认明确的数值 If-Match——缺头 428；哨兵/过期版本落条件闸门回 412。
 describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
   const nonEmpty = {
     id: 1n,
@@ -390,7 +375,6 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
     expect(tx.canvas.updateMany).not.toHaveBeenCalled();
   });
 
-  // IKIMQJ：破坏性清空只认明确的数值 If-Match——确认了但缺头，同样拒绝（428）。
   it("确认清空缺 If-Match → 428 信封，零写入、不消耗版本", async () => {
     const { service, client, tx } = buildService(nonEmpty);
 
@@ -467,7 +451,6 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
   });
 });
 
-// IKJJQU（B.7 已批准的旧客户端边界）：存在新协议关联的项目，整文档写必须带实际版本。
 describe("CanvasService.save 受保护项目版本要求（IKJJQU B.7）", () => {
   const nonEmptyRow = {
     id: 1n,

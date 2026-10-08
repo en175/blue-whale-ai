@@ -1,12 +1,7 @@
-// IK74V8：从 new-api-client.ts 拆出（≤800 行硬线）。逐块搬运，语义不变。
-// 生成面：图片生成/编辑与视频提交、任务查询。
-// IK7G9X：新增 with-receipt 变体（透出 X-Oneapi-Request-Id，供消费流水精确关联）；
-// getVideoTask 解析 TaskDto.quota（视频实扣金额来源）。
 import {NewApiError} from "./new-api-transport.js";
 import type {NewApiEnvelope, NewApiRequest, NewApiRequestWithMeta} from "./new-api-transport.js";
 import type {NewApiImage, NewApiImageEditInput, NewApiImageInput, NewApiVideoInput, NewApiVideoSubmission, NewApiVideoTask} from "./new-api-types.js";
 
-/** 图片生成结果 + 本次调用的 request_id（消费流水精确关联键，IK7G9X）。 */
 export interface NewApiImageReceipt {
   images: NewApiImage[];
   requestId: string | null;
@@ -139,9 +134,6 @@ export function createNewApiGenerationOps(
           url,
         })),
       ];
-      // IKDJNZ：单数组 references 语义——首尾帧与普通参考可并存。检测方式：references 里
-      // 存在带 role(first_frame/last_frame) 的条目。旧分字段路径（references 仅普通参考、
-      // 无 role）仍走首尾帧互斥检查。
       const useSingleArray =
         Array.isArray(input.references) &&
         input.references.some(
@@ -162,7 +154,6 @@ export function createNewApiGenerationOps(
       }
       const content: Array<Record<string, unknown>> = [];
       if (useSingleArray) {
-        // 帧（first_frame/last_frame）在前、普通参考随后，保序。
         const frameItems: Array<Record<string, unknown>> = [];
         const refItems: Array<Record<string, unknown>> = [];
         for (const ref of references) {
@@ -319,18 +310,14 @@ export function createNewApiGenerationOps(
             : typeof data.result_url === "string"
               ? data.result_url
               : null,
-        // IK7G9X：TaskDto.quota —— 任务当前 quota（预扣额，结算后=实际扣费额）。
-        // 轮询成功（status 已是终态）时读到的是 new-api 结算后的真实扣费。
         ...(quota !== undefined ? { quota } : {}),
         error,
       };
     },
 
-    // ---- recharge ----
   };
 }
 
-/** 从信封 data 提取图片列表（缺 url 的元素丢弃）。generateImages/editImages 共用。 */
 function parseImageList(data: unknown): NewApiImage[] {
   const list = Array.isArray(data) ? data : [];
   return list.filter((item): item is NewApiImage => {

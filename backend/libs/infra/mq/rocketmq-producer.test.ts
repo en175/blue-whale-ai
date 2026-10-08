@@ -21,7 +21,6 @@ describe("loadRocketMqConfig", () => {
         ROCKETMQ_ACCESS_KEY: "AK123",
         ROCKETMQ_SECRET_KEY: "SK456",
         ROCKETMQ_SSL_ENABLED: "true",
-        // 修正六退役的两个键：部署环境残留也不得再影响投递（topic / tag 只来自编译期常量）。
         ROCKETMQ_TOPIC: "generation-video",
         ROCKETMQ_TAG: "step",
       }),

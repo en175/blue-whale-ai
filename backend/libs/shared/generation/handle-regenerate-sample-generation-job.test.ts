@@ -11,12 +11,6 @@ import { quoteRevisionOf } from "./handle-quote-generation-job.js";
 import { handleFinalizeGenerationJobQuote } from "./handle-finalize-generation-job.js";
 import type { FinalizeSourceJob } from "@lib/shared/persistence/index.js";
 
-/** IKIZQF：重新生成样片（契约 §5，金标 G10）。
- *
- *  覆盖四条验收：独立报价与提交入口（不继承旧报价/截止/Draft ID）、旧任务只读不写、
- *  重复请求幂等、过期只阻止转成片（过期/成片失败两入口 + 旧资产预览不受影响的接缝证明）。
- *  提交用例走**真实 handleCreateGenerationJob**（mock repo 面）——「走与创建相同的
- *  确认/门控/预扣链路」由复用本身保证，而不是重新实现一遍再对拍。 */
 
 const DEADLINE_PAST = BigInt(Date.now() - 1_000);
 
@@ -62,8 +56,6 @@ function sampleJob(overrides: Partial<FinalizeSourceJob> = {}): FinalizeSourceJo
 const S25_CAPABILITY = {
   model_id: "doubao-seedance-2-5-260628",
   version: 77,
-  // 走**完整创建管线**，能力行需满足参考上限与参数档位校验（与 finalize 夹具不同：
-  // 那边不进创建管线，只要 sample_mode 位）。
   features: {
     sample_mode: true,
     video_reference: true,
@@ -79,13 +71,11 @@ const S25_CAPABILITY = {
   supported_durations: { min: 4, max: 12, step: 4 },
 };
 
-/** 报价桩（与创建管线的样片复算同形：credits 为 bigint）。 */
 function quoteStub(overrides: Partial<{ credits: bigint; catalogVersion: number; tier: string }> = {}) {
   const result = { credits: 19n, catalogVersion: 12, tier: "free", ...overrides };
   return { result, quote: vi.fn().mockResolvedValue(result) };
 }
 
-/** 按「报价入口同一套」从派生 body 复算报价视图（credits + quote_revision）——与 handler 内部同源。 */
 function quotedViewOf(
   sample: FinalizeSourceJob,
   capability: Record<string, unknown>,
@@ -106,7 +96,6 @@ function quotedViewOf(
   };
 }
 
-/** 按「提交复算同一套」复算提交确认两字段（expected_credits + quote_revision）。 */
 function confirmationOf(
   sample: FinalizeSourceJob,
   capability: Record<string, unknown>,
@@ -118,7 +107,6 @@ function confirmationOf(
 
 type CreateDeps = Parameters<typeof handleCreateGenerationJob>[4];
 
-/** 提交端点依赖：外层（读原样片 + 报价）+ create（创建管线全 mock 面）。 */
 function buildDeps(args: {
   sample?: FinalizeSourceJob | null;
   capability?: Record<string, unknown> | null;
@@ -141,7 +129,6 @@ function buildDeps(args: {
     command: { createJob, lookupCreateIdempotency },
     canvas: { getByProject: vi.fn() },
     assets: {
-      // 参考按声明类型返回（21 图 / 31 视频）——创建管线复核「类型与声明一致」。
       resolveInputAssets: vi.fn(async (ids: string[]) =>
         ids.map((id) => ({
           id,
@@ -167,9 +154,6 @@ function buildDeps(args: {
   return { deps, findFinalizeSourceJob, createJob, lookupCreateIdempotency, create };
 }
 
-// ═══════════════════════════════════════════════════════════════
-// deriveSampleRegenerateBody（金标 G10：不继承旧状态）
-// ═══════════════════════════════════════════════════════════════
 describe("deriveSampleRegenerateBody（IKIZQF）", () => {
   it("★ G10: 派生创建请求 = 480p 样片形态；references（含时长）原样；旧快照专属键剥除", () => {
     const body = deriveSampleRegenerateBody(SAMPLE_INPUT)!;
@@ -205,9 +189,6 @@ describe("deriveSampleRegenerateBody（IKIZQF）", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// 报价（fail open；过期与成片失败不影响报价——区别于 finalize 入口）
-// ═══════════════════════════════════════════════════════════════
 describe("handleRegenerateSampleQuote（IKIZQF）", () => {
   it("★ 前置满足 → 整数积分与 quote_revision（与提交复算同源，不继承旧报价）", async () => {
     const { result, quote } = quoteStub();
@@ -288,9 +269,6 @@ describe("handleRegenerateSampleQuote（IKIZQF）", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// 提交（fail closed；走真实 handleCreateGenerationJob 全链）
-// ═══════════════════════════════════════════════════════════════
 describe("handleRegenerateSampleCreate（IKIZQF）", () => {
   const happyBody = (sample: FinalizeSourceJob = sampleJob()) =>
     confirmationOf(sample, S25_CAPABILITY as never, quoteStub().result);
@@ -309,8 +287,6 @@ describe("handleRegenerateSampleCreate（IKIZQF）", () => {
     expect(res.code).toBe(200);
     expect(res.data).toEqual({ generation_job_id: "311", cursor: 9 });
     const [cmdInput, options] = createJob.mock.calls[0]!;
-    // 新样片 = 一次新的创建：阶段落库与创建即预扣由创建管线执行（worker 终态守卫按
-    // video_stage 条件释放新阶段预扣，旧样片费用行不在本链路上）。
     expect(cmdInput).toMatchObject({
       projectId: "1",
       userId: "42",
@@ -324,7 +300,6 @@ describe("handleRegenerateSampleCreate（IKIZQF）", () => {
     expect(options.billing).toBeDefined();
     expect(options.billing.hold).toBeTypeOf("function");
     expect(options.billing.release).toBeTypeOf("function");
-    // 新任务 id 与旧样片不同（311 ≠ 302）：旧行不被覆盖或复用。
     expect(cmdInput.input.references).toEqual(SAMPLE_INPUT.references);
   });
 
@@ -437,7 +412,6 @@ describe("handleRegenerateSampleCreate（IKIZQF）", () => {
     await handleRegenerateSampleCreate("42", "1", "302", happyBody(), "k", deps);
 
     expect(findFinalizeSourceJob).toHaveBeenCalledTimes(1);
-    // 创建管线只 insert 新行（createJob 入参是全新任务数据：不含 302 的任何 id/费用/截止字段）。
     const cmdInput = createJob.mock.calls[0]![0];
     expect(JSON.stringify(cmdInput)).not.toContain('"302"');
     expect(JSON.stringify(cmdInput)).not.toContain("finalize_deadline");
@@ -451,9 +425,6 @@ describe("handleRegenerateSampleCreate（IKIZQF）", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// canvas_binding（IKJJR0，IKIXK9-SPEC-20261002 B.3）：重生样片接入统一关联受理
-// ═══════════════════════════════════════════════════════════════
 describe("handleRegenerateSampleCreate canvas_binding（IKJJR0）", () => {
   const SUBMISSION = "0a1b2c3d-0000-4000-8000-000000000021";
   const NEW_TARGET = "video-node-regen-1";
@@ -539,10 +510,8 @@ describe("handleRegenerateSampleCreate canvas_binding（IKJJR0）", () => {
       idempotencyKey: SUBMISSION,
     });
     expect(cmdInput.canvasRecovery.binding.target_node_id).toBe(NEW_TARGET);
-    // 请求摘要覆盖 canvas_binding（进幂等与锁内回读比对）。
     expect(typeof cmdInput.canvasRecovery.requestHash).toBe("string");
     expect(cmdInput.canvasRecovery.requestHash).toHaveLength(64);
-    // 预扣与补偿照常装配（保留原计费流程）。
     expect(options.billing).toBeDefined();
   });
 
@@ -574,14 +543,12 @@ describe("handleRegenerateSampleCreate canvas_binding（IKJJR0）", () => {
   });
 
   it("★ 报价变化后的已受理重放：同 submission_id 重放原关联，不复算报价、不重复建任务、不预扣（AC3/AC6）", async () => {
-    // 受理后报价上涨（quote 桩换价）：重放命中幂等 → 返回原关联，报价复算根本不发生。
     const staleQuote = quoteStub();
     const { deps, createJob, lookupCreateIdempotency } = buildRegenDeps({
       quote: quoteStub({ credits: 99n }).quote,
       replay: { generation_job_id: "311", cursor: 9 },
     });
     const body = {
-      // 用户确认的是受理时的原价；报价变化不重做当前状态校验。
       ...confirmationOf(sampleJob(), S25_CAPABILITY as never, staleQuote.result),
       canvas_binding: regenBinding(),
     };
@@ -591,14 +558,12 @@ describe("handleRegenerateSampleCreate canvas_binding（IKJJR0）", () => {
     expect(res.code).toBe(200);
     expect(res.data).toMatchObject({ generation_job_id: "311", cursor: 9, canvas_binding: BINDING_VIEW });
     expect(lookupCreateIdempotency).toHaveBeenCalledTimes(1);
-    // 回读原关联优先于当前报价校验：变价桩不被调用；零创建零预扣。
     expect(createJob).not.toHaveBeenCalled();
     const billing = (deps as { create: { billing?: { hold: ReturnType<typeof vi.fn> } } }).create.billing;
     expect(billing?.hold).not.toHaveBeenCalled();
   });
 
   it("★ 携旧承接版本抢占已归属节点 → 受理冲突信封（409）直返，不覆盖旧成片承接（AC4）", async () => {
-    // 节点已被旧成片受理（当前版本 1）；新样片携过期版本 0 抢同节点 → 锁内 409。
     const conflictEnvelope = {
       code: 409,
       msg: "目标节点承接版本已变化，请刷新后重试",
@@ -619,7 +584,6 @@ describe("handleRegenerateSampleCreate canvas_binding（IKJJR0）", () => {
         command: { createJob, lookupCreateIdempotency: vi.fn().mockResolvedValue(null), canvasBindingView: vi.fn() },
         canvas: { getByProject: vi.fn() },
         assets: {
-          // 参考按声明类型返回（与 buildRegenDeps 同款），素材复核不拦截，走到受理事务。
           resolveInputAssets: vi.fn(async (ids: string[]) =>
             ids.map((id) => ({
               id,

@@ -1,6 +1,3 @@
-/* ============================================
- * AdminPlaceholder 后台通用占位页：标题 + 建设中提示
- * ============================================ */
 import styles from './index.module.css';
 
 interface AdminPlaceholderProps {

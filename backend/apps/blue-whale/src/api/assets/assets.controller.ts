@@ -21,8 +21,6 @@ export class AssetsController {
     return ok(await this.assets.listByUser(user.userId, filter));
   }
 
-  /** 单个资产详情（画布/资产库弹窗用）：命中返回 AssetDetailView（列表字段 + 生成提示词，
-   *  IKFSSO），不归属/不存在 → 100301。 */
   @Get(":assetId")
   async getOne(
     @CurrentUser() user: AuthenticatedUser,
@@ -32,7 +30,6 @@ export class AssetsController {
     return asset ? ok(asset) : fail(100301, "资源不存在");
   }
 
-  /** IKCZAT：查询素材被多少项目引用（直接归属 ∪ project_asset 并集去重）。只读，不改删除行为。 */
   @Get(":assetId/references")
   async getReferences(
     @CurrentUser() user: AuthenticatedUser,

@@ -22,12 +22,10 @@ export class SkillService {
     return this.repo.listLibrary(userId, filter);
   }
 
-  /** IKA64P：官方技能全文 */
   getOfficialContent(creativeId: string) {
     return this.repo.getOfficialContent(creativeId);
   }
 
-  /** Agent 按 creative_skill_id 解析一条可用技能（IKALMC / IKAP6P）：官方 + 名下个人。 */
   findAgentSkill(creativeSkillId: string, requestingUserId: string) {
     return this.repo.findAgentSkill(creativeSkillId, requestingUserId);
   }

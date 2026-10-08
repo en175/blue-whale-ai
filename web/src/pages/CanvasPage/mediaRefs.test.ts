@@ -6,8 +6,6 @@ import {
   isImageDraftNode,
 } from './mediaRefs';
 
-/* IKDMQR 图片参考连线：来源有效性校验与「连线 → 媒体参考」推导。
-   Dock 展示与提交输入共用同一推导，保证所见即实际输入。 */
 
 function mediaNode(id: string, data: Record<string, unknown>): Node {
   return { id, type: 'mediaNode', position: { x: 0, y: 0 }, data };
@@ -61,7 +59,7 @@ describe('isImageDraftNode 图片草稿身份判定', () => {
 
 describe('imageMediaRefsOf 连线推导图片参考', () => {
   const nodes = [
-    mediaNode('t1', {}), // 非图片媒体形态防御
+    mediaNode('t1', {}),
     readyImage('m1', 'a1'),
     readyImage('m2', 'a2'),
     readyImage('v1', 'a9', { mediaType: 'video', src: 'http://vid/v1.mp4' }),
@@ -105,7 +103,6 @@ describe('imageMediaRefsOf 连线推导图片参考', () => {
       { id: 'e2', source: 'm2', target: 'd1' },
       { id: 'e3', source: 'm1', target: 'd1' },
     ] as Edge[];
-    // m3 与 m1 同素材 a1：首条连线（m3）保留，m1 跳过；asset_id/assetID 形态均可推导
     expect(imageMediaRefsOf('d1', edges, nodes)).toEqual([
       { nodeId: 'm3', url: 'http://img/m3.png', name: '一副本', assetId: 'a1' },
       { nodeId: 'm2', url: 'http://img/m2.png', name: '二', assetId: 'a2' },
@@ -121,22 +118,18 @@ describe('imageMediaRefsOf 连线推导图片参考', () => {
   it('高清来源边（IKGM9F origin 标记）不作参考输入：不占参考位；普通连线不受影响', () => {
     const nodes = [readyImage('m1', 'a1'), readyImage('m2', 'a2')];
     const edges = [
-      // 高清卡 d1 的来源边：视觉表达「高清卡由该图放大而来」，推导必须跳过
       { id: 'e1', source: 'm1', target: 'd1', data: { origin: 'image-enhance' } },
-      // 用户手动拖的普通参考连线仍正常推导
       { id: 'e2', source: 'm2', target: 'd1' },
     ] as Edge[];
     expect(imageMediaRefsOf('d1', edges, nodes)).toEqual([
       { nodeId: 'm2', url: 'http://img/m2.png', name: '图m2', assetId: 'a2' },
     ]);
-    // 只有高清来源边时目标无任何参考
     expect(imageMediaRefsOf('d1', [edges[0]!] as Edge[], nodes)).toEqual([]);
   });
 
   it('擦除来源边（IKGOTB origin=image-erase）同样跳过推导：源图不占参考位、不参与 @ 编号', () => {
     const nodes = [readyImage('m1', 'a1'), readyImage('m2', 'a2')];
     const edges = [
-      // 擦除结果卡 d1 的来源边：纯视觉「结果卡由该图擦除而来」，推导跳过
       { id: 'e1', source: 'm1', target: 'd1', data: { origin: 'image-erase' } },
       { id: 'e2', source: 'm2', target: 'd1' },
     ] as Edge[];
@@ -149,7 +142,6 @@ describe('imageMediaRefsOf 连线推导图片参考', () => {
   it('去字幕来源边（IKGZ83 origin=video-subtitle-erase，首个视频系来源边）同样跳过推导', () => {
     const nodes = [readyImage('m1', 'a1'), readyImage('m2', 'a2')];
     const edges = [
-      // 去字幕结果卡 d1 的来源边：纯视觉「结果卡由该视频去字幕而来」，推导跳过
       { id: 'e1', source: 'm1', target: 'd1', data: { origin: 'video-subtitle-erase' } },
       { id: 'e2', source: 'm2', target: 'd1' },
     ] as Edge[];

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { formFromConfig, previewIssue, toSaveParams, validateCustomConfigForm, type CustomConfigForm } from './customConfig';
 import type { AdminRechargeCustomConfig } from '@/api/adminRechargeCustomConfig';
 
-/** PRD §7.1 的默认口径 */
 const CONFIG: AdminRechargeCustomConfig = {
   minCredits: 600,
   maxCredits: 499_995,
@@ -73,7 +72,6 @@ describe('customConfig — 校验（服务端 validateCustomConfig 的镜像）'
   });
 
   it('★ 步长对不齐要拦：滑杆推不到最高值时，界面上那句「最高 X」就是假的', () => {
-    // 600 + 步长 10 → 499,995 不在格点上
     expect(validateCustomConfigForm(form({ stepCredits: '10' }))).toContain(
       '必须是积分步长 10 的整数倍',
     );
@@ -103,7 +101,6 @@ describe('customConfig — 校验（服务端 validateCustomConfig 的镜像）'
 
   it('输入过程中只给一句安静提示，不喷服务端那串长文案', () => {
     expect(previewIssue(form({ maxCredits: '499996' }))).toBe('最高积分不能被每元积分数整除');
-    // 还没填全（空框）时不提示：那不是错误，是「还没写完」
     expect(previewIssue(form({ minCredits: '' }))).toBeNull();
   });
 });

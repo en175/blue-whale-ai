@@ -1,7 +1,3 @@
-// IKIPWT：generation-jobs cancel/retry 两个 POST 入口的 controller 单测——业务失败
-// `result.code !== 200 → throw DomainError` 改投统一投影后，「失败不透传信封、成功原样返回」
-// 成了本文件的职责。台架抄 scene-card-generate.controller.test.ts：直接 new Controller，
-// handler 与入队边界 vi.mock 掉，不挂 Nest、不连库、不碰 MQ。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DomainError,
@@ -27,8 +23,6 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueImageGenerationJob: vi.fn(),
   enqueueAudioGenerationJob: vi.fn(),
 }));
-// 计费基线：create 必接 billing Hold（fail closed、无开关），但本套件被测对象是 enqueue
-// 日志分级，不是计费——进程内假客户端放行（先例：generation-jobs-soft-delete.integration.test.ts）。
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@lib/shared/billing/billing-client.js")
@@ -66,19 +60,19 @@ const { GenerationJobsController } = await import(
 
 function makeController() {
   return new GenerationJobsController(
-    {} as never, // project：handler 已 mock，不触达
-    { repo: {} } as never, // command：同上（retry audio 入队失败兜底才会用 markFailed）
-    {} as never, // models
-    {} as never, // canvas
-    { materialStatusRepo: {} } as never, // material：门只接线不判定
-    {} as never, // assets
-    {} as never, // identity
+    {} as never,
+    { repo: {} } as never,
+    {} as never,
+    {} as never,
+    { materialStatusRepo: {} } as never,
+    {} as never,
+    {} as never,
   );
 }
 
 const USER = { userId: "9" } as never;
-const INVALID_REFERENCE_CODE = errorCodeToNumeric(ERROR_INVALID_REFERENCE); // 1034
-const NOT_RETRYABLE_STATUS_CODE = errorCodeToNumeric(ERROR_JOB_NOT_RETRYABLE_STATUS); // 1054（IKIPWU）
+const INVALID_REFERENCE_CODE = errorCodeToNumeric(ERROR_INVALID_REFERENCE);
+const NOT_RETRYABLE_STATUS_CODE = errorCodeToNumeric(ERROR_JOB_NOT_RETRYABLE_STATUS);
 
 beforeEach(() => {
   vi.mocked(handleCancelGenerationJob).mockReset();
@@ -146,9 +140,6 @@ describe("GenerationJobsController.retry 响应口径（IKIPWT / IKIPWU）", () 
 });
 
 describe("GenerationJobsController.create enqueue 日志分级（IKJ80Q）", () => {
-  // 回退路径（catch 后仅记日志，任务由 worker 恢复扫描捞起）的日志必须区分两种失败：
-  //   环境缺配 → WARN + 写明任务仍会派发；真派发失败 → 保持 ERROR。
-  // 背景：本地未配 ROCKETMQ_ENDPOINTS 时 ERROR 把排查引向 RocketMQ，实际任务正常消费（IKJ6DK）。
   it("环境缺配（未配置 ROCKETMQ_ENDPOINTS）→ WARN 说明恢复扫描兜底，不打 ERROR，请求照常受理", async () => {
     const controller = makeController();
     const envelope = ok({ generation_job_id: "88" });
@@ -188,6 +179,3 @@ describe("GenerationJobsController.create enqueue 日志分级（IKJ80Q）", () 
     expect(logger.warn).not.toHaveBeenCalled();
   });
 });
-
-// DomainError 本身不写响应：投影由 AllExceptionsFilter 负责（唯一投影出入口），
-// 拒绝用例 rejects DomainError 即是「控制器把失败交出去」的断言。

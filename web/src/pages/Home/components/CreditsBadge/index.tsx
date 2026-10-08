@@ -1,7 +1,3 @@
-/* ============================================
- * 首页顶栏积分余额徽标：黄色实心闪电 + 额度
- * 仅在登录态显示；未加载 / 未登录时隐藏
- * ============================================ */
 import { Zap } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import styles from './index.module.css';

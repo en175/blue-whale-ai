@@ -9,14 +9,9 @@ import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
 
 silenceApiConsoleInfo();
 
-/* 生成面板上的价格预览：有报价就显示「本次预计消耗 N 积分」，
-   算不出价（credits: null）或请求失败则**什么都不显示**——绝不显示 0（会被读成免费）。
-   参考图是定价维度（Seedream 5.0 Pro 首张免费、第 2 张起 0.02 元/张），
-   所以参考一变就得重新问价，否则用户看到的是旧价的预览。 */
 
 let root: Root;
 let container: HTMLDivElement;
-/** 同一个 client 贯穿单个用例：重复渲染时「查询键变没变」才看得出来（换 client 一律重查）。 */
 let client: QueryClient;
 
 function quoteResponse(credits: number | null) {
@@ -26,7 +21,6 @@ function quoteResponse(credits: number | null) {
   });
 }
 
-/** IKJ797：编辑单报价响应携带 duration_basis 标记（其余单字段不出现） */
 function quoteResponseWithBasis(credits: number) {
   return new Response(
     JSON.stringify({ code: 200, msg: null, data: { credits, duration_basis: 'source_video' } }),
@@ -63,7 +57,6 @@ function element(props: BadgeProps) {
   );
 }
 
-/** 挂载（或按新 props 重渲染）—— 用同一个 root 才能观察「键变了 → 重查」。 */
 async function renderBadge(props: BadgeProps) {
   if (!root) {
     container = document.createElement('div');
@@ -75,7 +68,6 @@ async function renderBadge(props: BadgeProps) {
   });
 }
 
-/** 让已经发出的请求有机会落地（用于断言「什么都不显示」的负例）。 */
 async function settle() {
   await act(async () => {
     await new Promise<void>((resolve) => {
@@ -103,7 +95,6 @@ describe('GenerationQuoteBadge', () => {
 
     await renderBadge({});
 
-    // 查询是异步落地的：等它渲染出来（同 ImageDialog 等模型列表的 vi.waitFor 口径）
     await vi.waitFor(() =>
       expect(container.textContent).toContain('本次预计消耗 42 积分'),
     );
@@ -138,7 +129,6 @@ describe('GenerationQuoteBadge', () => {
     await renderBadge({ references: [imageRef('a')] });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
-    // 用户又加了一张参考：价该跟着变，必须再问一次
     await renderBadge({ references: [imageRef('a'), imageRef('b')] });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const init = fetchMock.mock.calls[1]![1] as RequestInit;
@@ -196,7 +186,6 @@ describe('GenerationQuoteBadge', () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string).target_node_id).toBe('media-1');
 
-    // 换了目标卡：文本带入参考随目标变，价必须重查（键含 target_node_id）
     await renderBadge({ targetNodeId: 'media-9' });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(JSON.parse((fetchMock.mock.calls[1]![1] as RequestInit).body as string).target_node_id).toBe('media-9');

@@ -7,8 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CanvasPage from './index';
 import headerStyles from './components/CanvasHeader/index.module.css';
 
-/* 本测试只验证 CanvasPage 的接线：showAgent 同时驱动面板与 CanvasHeader 入口显隐。
-   被测协作方是真实 CanvasHeader；面板本身的抽屉行为由 AgentPanel 自己的测试覆盖，这里打桩。 */
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
@@ -41,12 +39,10 @@ vi.mock('./components/AgentPanel', () => ({
     ),
 }));
 
-/* FlowCanvas（reactflow 画布）与接线无关，打桩掉以隔离画布渲染栈。 */
 vi.mock('./components/Canvas', () => ({
   default: () => createElement('div', { 'data-testid': 'flow-canvas' }),
 }));
 
-/* ProjectSelector 打桩但透出 props：测试要直接触发 onSelect 模拟用户切换项目。 */
 const selectorProps: {
   current?: { onSelect: (id: string) => void; onDelete: (id: string) => void };
 } = {};
@@ -67,8 +63,6 @@ vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({
 }));
 
 const apiMocks = vi.hoisted(() => ({
-  // 列表给一项：currentId 经水合落到 'p1'，后续 onSelect('p2') 才是真实的项目迁移。
-  // 两字段断言放宽为 string | null，供 IKH1YK 用例按需 mockResolvedValue 覆盖
   fetchProjects: vi.fn(async () => [
     { id: 'p1', name: '项目一', last_opened_at: null as string | null, pinned_at: null as string | null },
   ]),
@@ -137,9 +131,6 @@ vi.mock('@/api/sharedAssets', () => ({
   saveSharedAsset: vi.fn(),
 }));
 
-/* useCanvasDoc 的真实实现返回稳定的 state 引用（仅在快照变化时换 identity）。
-   打桩也必须保持引用稳定：每次渲染都新建对象会让 [doc, snapshotAssets] 水合 effect
-   setState → 重渲染 → 再触发，异步死循环直到 OOM。 */
 const canvasDocMock = vi.hoisted(() => ({
   doc: { id: null, version: null, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] },
   assets: {},
@@ -188,8 +179,6 @@ async function renderPage(initialEntry = '/canvas?project=p1') {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // !834 起 CanvasToolbar 布局期用 ResizeObserver 跟随画布舞台定位；jsdom 无此 API，
-  // 按仓库先例（textNodeCard / edgesControl）补桩，本页接线测试不需要真实回调
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     unobserve() {}
@@ -281,7 +270,6 @@ describe('画布恢复落点三级规则与打开即记（IKH1YK）', () => {
     expect(apiMocks.touchProjectLastOpened).toHaveBeenCalledTimes(1);
     expect(apiMocks.touchProjectLastOpened).toHaveBeenCalledWith('p2');
 
-    // 同一次进入不重复记：再冲刷一轮微任务仍是 1 次
     await act(async () => {});
     expect(apiMocks.touchProjectLastOpened).toHaveBeenCalledTimes(1);
   });

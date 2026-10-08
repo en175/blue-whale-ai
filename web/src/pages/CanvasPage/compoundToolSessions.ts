@@ -86,8 +86,6 @@ export function createAudioMixSession(getHost: () => AudioMixHost): ToolSessionD
         if (!host.canApply(input.projectId)) return;
         const task = await host.createTask(input);
         if (!host.canApply(input.projectId)) return;
-        // IKJP8B：失效链（重载/切换/被替代）的 createTask 只会以失败 settle（signal 门控），
-        // 到达此处的受理成功 = 执行仍归属（runtime 同步回填任务身份）——按既有语义交付。
         await host.handoff(input, task, context);
       } finally { host.setInFlight(false); }
     },
@@ -100,7 +98,6 @@ export function createAudioMixSession(getHost: () => AudioMixHost): ToolSessionD
 export interface AudioVideoMuxState {
   draftId: string;
   wireDragging: boolean;
-  /** 仅纯初始化到 opened 之间使用，建卡后不保留源卡副本。 */
   newSource?: Node;
 }
 export type AudioVideoMuxEntry = { sourceNodeId: string } | { draftId: string };
@@ -211,8 +208,6 @@ export function createAudioVideoMuxSession(getHost: () => AudioVideoMuxHost): To
       try {
         const task = await host.createTask(input);
         if (!host.canApply(input.projectId)) return;
-        // IKJP8B：失效链的 createTask 只会以失败 settle（signal 门控），受理成功即执行
-        // 仍归属——交接安全（会话关闭/重开后的旧成功交付为既有正确语义，不按纪元拦）。
         context.close();
         await host.handoff(input, task);
       } finally { host.setInFlight(false); }

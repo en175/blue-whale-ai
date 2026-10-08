@@ -1,5 +1,3 @@
-// IKGM99：高清放大创建入口复核矩阵与免费口径单测（先例：media-extractions.service.test.ts）。
-// 只测外部可见行为：拒绝原因可读、落库参数冻结、免费口径无成本预留。
 import { describe, expect, it, vi } from "vitest";
 
 import { ImageEnhancementsService } from "./image-enhancements.service.js";
@@ -27,7 +25,6 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
@@ -230,8 +227,6 @@ describe("ImageEnhancementsService.create：源图尺寸门槛复核", () => {
   });
 
   it("lets an asset without recorded dimensions pass to the supplier gate", async () => {
-    // assets.width/height 由前端上报、存量图大量为 null（IKE53U）：缺权威尺寸不臆造、不拦，
-    // 交供应商按官方门槛拒（用户故事 30 的兜底路径）。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue({ type: "image", width: null, height: null }) },
     });

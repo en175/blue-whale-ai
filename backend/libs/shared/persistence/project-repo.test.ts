@@ -34,10 +34,8 @@ describe("ProjectRepo GenerationInbox isolation", () => {
         purpose: "canvas",
         is_delete: 0,
       },
-      // 置顶组在前（pinned_at 倒序），其余按创建时间倒序（IKH1YI）
       orderBy: [{ pinned_at: "desc" }, { gmt_create: "desc" }],
     });
-    // 无项目时不发资产查询
     expect(assetFindMany).not.toHaveBeenCalled();
   });
 
@@ -47,12 +45,11 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       { id: 2n, name: "B", thumb: null, gmt_create: new Date("2026-08-24T00:00:00Z") },
     ]);
     const linkFindMany = vi.fn().mockResolvedValue([]);
-    // 模拟 assets 按 gmt_create 倒序返回
     const assetFindMany = vi.fn().mockResolvedValue([
       { id: 11n, project_id: 1n, url: "img1.png" },
       { id: 12n, project_id: 1n, url: "img2.png" },
       { id: 13n, project_id: 1n, url: "img3.png" },
-      { id: 14n, project_id: 1n, url: "img4.png" }, // 第 4 张，应被截断
+      { id: 14n, project_id: 1n, url: "img4.png" },
       { id: 21n, project_id: 2n, url: "other.png" },
     ]);
     const prisma = {
@@ -321,7 +318,6 @@ describe("ProjectRepo GenerationInbox isolation", () => {
         purpose: "canvas",
         is_delete: 0,
       },
-      // 置顶组在前（pinned_at 倒序）→ 创建时间倒序 → id desc 兜底跨页不重复（IKH1YI）
       orderBy: [{ pinned_at: "desc" }, { gmt_create: "desc" }, { id: "desc" }],
       skip: 2,
       take: 2,
@@ -566,7 +562,6 @@ describe("ProjectRepo last_opened_at / pinned_at (IKH1YI)", () => {
         purpose: "canvas",
         is_delete: 0,
       },
-      // data 精确匹配单列：不含 gmt_modified/version（IKH1YI 验收项）
       data: { last_opened_at: expect.any(Date) },
     });
   });
@@ -605,7 +600,6 @@ describe("ProjectRepo last_opened_at / pinned_at (IKH1YI)", () => {
         purpose: "canvas",
         is_delete: 0,
       },
-      // data 精确匹配单列两态：置顶写时间，不含 gmt_modified/version
       data: { pinned_at: expect.any(Date) },
     });
     expect(view).toEqual({

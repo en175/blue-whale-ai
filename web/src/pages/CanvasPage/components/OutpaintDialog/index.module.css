@@ -1,10 +1,4 @@
-/* ============================================
- * OutpaintDialog 扩图工具栏样式（验收拍板改版横条，ADR-0095 修订）：
- * 贴源图卡下方的单行深色胶囊工具栏 + 比例上拉菜单；定位外壳沿用
- * ImageEnhanceDialog 同构（跟随锚定时绝对定位到源图卡下方）。
- * ============================================ */
 
-/* 定位外壳：与 ImageEnhanceDialog 同构（跟随锚定时绝对定位到源图卡下方） */
 .dialogWrap {
   position: absolute;
   bottom: var(--spacing-lg);
@@ -16,7 +10,6 @@
   animation: outpaintFadeIn 0.2s ease;
 }
 
-/* 跟随锚是扩展框中心点（left=中心 x）：自身 translateX(-50%) 真居中，不受估宽误差影响 */
 .dialogWrapFollow {
   bottom: auto;
   left: 0;
@@ -34,7 +27,6 @@
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
-/* ---- 横条工具栏本体：单行深色胶囊 ---- */
 .toolbar {
   box-sizing: border-box;
   display: flex;
@@ -73,7 +65,6 @@
   flex: none;
 }
 
-/* ---- 比例上拉菜单：触发按钮 + 向上弹出的菜单 ---- */
 .menuAnchor {
   position: relative;
   display: flex;
@@ -158,7 +149,6 @@
   background: transparent;
 }
 
-/* 自定义：被动状态项（不可主动点选，与菜单项同版式） */
 .menuChip {
   display: flex;
   align-items: center;
@@ -177,7 +167,6 @@
   font-weight: 700;
 }
 
-/* ---- 张数：固定「1张」禁用展示（多张生成未开放） ---- */
 .countBtn {
   display: flex;
   align-items: center;
@@ -200,8 +189,6 @@
   white-space: nowrap;
 }
 
-/* ---- 发送钮：Dock 主发送钮同款（IKGZ5Q：灰底圆角方形 + 白 ↑ 图标，
- *    色值同源 BottomDialog .sendBtn/.sendBtnActive；尺寸随横条布局 32×32） ---- */
 .sendBtn {
   width: 32px;
   height: 32px;

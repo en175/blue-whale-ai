@@ -1,9 +1,4 @@
-/* ============================================
- * ImageEraseDialog 擦除编辑态工具条/发送条（IKGOTB）
- * 跟随源图卡浮出的两条窄条：视觉语言沿用 ImageEnhanceDialog（底色/边框/圆角/阴影）。
- * ============================================ */
 
-/* ---- 源图卡上方工具条 ---- */
 .toolbar {
   position: absolute;
   left: 50%;
@@ -21,7 +16,6 @@
   white-space: nowrap;
 }
 
-/* ---- 源图卡下方发送条 ---- */
 
 .title {
   font-size: var(--font-size-sm);
@@ -167,7 +161,6 @@
   transform: translateY(-50%);
 }
 
-/* ---- 源图卡下方发送条 ---- */
 .sendBar {
   position: absolute;
   left: 50%;
@@ -184,10 +177,6 @@
   box-shadow: var(--shadow-overlay);
 }
 
-/* 跟随锚定（IKH1WI 中心点锚，inline left/top 生效）：解除默认 bottom 定位避免 top/bottom
-   双侧拉伸；left: 0 兜底 inline 缺失；transform 不覆盖，继承基础态 translateX(-50%)
-   以锚点（源卡中心 x）真居中。口径同 CutoutToolbar .dialogWrapFollow（彼处显式
-   重声明 transform，此处取继承，等价） */
 .sendBarFollow {
   bottom: auto;
   left: 0;
@@ -206,9 +195,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* ---- 发送钮：Dock 主发送钮同款（IKGZ5Q：灰底圆角方形 + 白 ↑ 图标，
- *    色值同源 BottomDialog .sendBtn/.sendBtnActive——置灰态即默认灰，无额外
- *    disabled 透明度；尺寸随发送条布局 30×30） ---- */
 .sendBtn {
   width: 30px;
   height: 30px;

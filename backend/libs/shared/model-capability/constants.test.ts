@@ -130,11 +130,11 @@ describe("时长形态闸门（IKG4UR）", () => {
 
   it("create：非法数组被拒——这些形态会造出「滑杆消失 + 全时长 400」的坏行", () => {
     for (const bad of [
-      [], // [].includes(d) 恒 false → 该模型任何时长都被拒
-      [5], // 滑杆消失，只有 5 能过
-      [30, 4], // max<min → toDurationRange 返回 null、durationInRange 恒 false
-      [-1, 30], // -1 是「智能时长」哨兵，不是区间端点
-      [5, 30, 0], // step 0 会把滑杆钉死在 min
+      [],
+      [5],
+      [30, 4],
+      [-1, 30],
+      [5, 30, 0],
       [5, 30, -1],
     ]) {
       const parsed = parseModelCreateBody({ ...base, supported_durations: bad });
@@ -154,9 +154,6 @@ describe("时长形态闸门（IKG4UR）", () => {
 });
 
 describe("parseModelUpdateBody", () => {
-  // IKHEXG：default_size / default_aspect_ratio 是 NOT NULL（VarChar）列，「未配」的形态是空串。
-  // 表单对非图片/视频行恒发 null（清空尺寸框的图片行也发 null），旧闸门只收字符串
-  // → 音频/文生文行从后台保存必然 400（实测 PUT /api/admin/models/23）。
   it("default_size / default_aspect_ratio 收 null，归一为空串（NOT NULL 列）", () => {
     const parsed = parseModelUpdateBody({
       default_size: null,
@@ -180,9 +177,6 @@ describe("parseModelUpdateBody", () => {
     expect(parseModelUpdateBody({ default_aspect_ratio: "x".repeat(17) }).ok).toBe(false);
   });
 
-  // IKHEXG：上面把两个值提到了 `if` 外面算（为了让返回值用归一后的值），于是「字段缺席」与
-  // 「字段清空」只差 spread 上那个 `body.default_size !== undefined` 的守卫。少了这条钉子，
-  // 日后顺手把守卫删掉，**每次更新都会写一遍空串**，把所有行的默认尺寸静默清掉。
   it("未携带该字段 → 不提交（缺席 ≠ 清空）", () => {
     const parsed = parseModelUpdateBody({ model_label: "新名字" });
     expect(parsed.ok).toBe(true);
@@ -211,8 +205,6 @@ describe("parseModelUpdateBody", () => {
     if (!parsed.ok) expect(parsed.error).toBe("request_mapping 不能为空");
   });
 
-  // IKH BDO：更新是 diff 提交，没改过的渠道不在 body 里，映射校验必须按**库中该行**的
-  // 渠道判定，否则整段校验被跳过（脏值直接落库）。
   it("库中 gpt 行：只改展示名（不带 mapping）→ 放行，且不提交 mapping", () => {
     const parsed = parseModelUpdateBody(
       { model_label: "新名字" },
@@ -259,9 +251,6 @@ describe("parseModelUpdateBody", () => {
     if (parsed.ok) expect(parsed.value.request_mapping).toEqual(matrix);
   });
 
-  // 「null 视为不改」只对**本来就是 seedream** 的行成立。从 gpt 切到 seedream 时，
-  // 那个 null 就是「gpt 矩阵不再适用」的唯一表达——照「不改」处理会把上一族的矩阵
-  // 留在行里，worker 拿它去算 seedream 尺寸，而界面没有任何入口能清掉。
   it("库中 gpt 行：切到 seedream 且 mapping 传 null → 照实清空，不留上一族的矩阵", () => {
     const parsed = parseModelUpdateBody(
       { channel: "seedream-image", request_mapping: null },
@@ -274,7 +263,6 @@ describe("parseModelUpdateBody", () => {
     }
   });
 
-  // IKH BDO：闸门此前只覆盖 9 个键，能力行主流键任意类型都能入库。
   it("features 闸门补键：脏类型 → 拒绝", () => {
     const dirty = [
       { image_reference_max: "abc" },
@@ -320,7 +308,6 @@ describe("parseModelUpdateBody", () => {
   });
 });
 
-// IKESD6 / ADR-0085：features 扩展键写侧闸门（读侧宽容降级，写侧必须拒绝脏类型）。
 describe("features 扩展键闸门（i2i_model_name / max_prompt_length）", () => {
   const createBase = {
     model_id: "gpt-image-2-x",
@@ -378,7 +365,6 @@ describe("features 扩展键闸门（i2i_model_name / max_prompt_length）", () 
     expect(parsed.ok).toBe(true);
   });
 
-  // IKIZQ7：样片放行位（布尔）——运营在能力行显式声明 true 才放行样片模式。
   it("create/update：sample_mode 布尔通过、非布尔拒绝、null 放行（清除=回到默认关闭）", () => {
     const videoBase = { ...createBase, capability_type: "video" };
     expect(parseModelCreateBody({ ...videoBase, features: { sample_mode: true } }).ok).toBe(true);
@@ -420,8 +406,6 @@ describe("seedream 矩阵键闸门（写侧）", () => {
     expect(parsed.ok).toBe(true);
   });
 
-  // ⚠️ 更新是 diff 提交：没改过的 supported_sizes 不在 body 里。少了这个回落，
-  //    「只改矩阵」的保存会因为拿不到档位而跳过校验 —— 闸门形同虚设。
   it("★ update：body 没带 supported_sizes 时回落到**库中那一行**的档位", () => {
     const parsed = parseModelUpdateBody(
       { request_mapping: { matrix: { "2": { "1:1": "2048x2048" } } } },
@@ -444,19 +428,7 @@ describe("seedream 矩阵键闸门（写侧）", () => {
   });
 });
 
-/* ── R4：按渠道收窄写闸门之后，**库里现有的每一条规则都还得存得回去** ──────────────
- *
- * 下面这七份 `pricing` 是 2026-09-26 从开发库 `blue_whale.generation_model_capability`
- * 里逐字抄出来的（19 行去重到 7 种形态，其余 6 行 pricing 为 NULL、走 diff 提交不校验）。
- *
- * 为什么必须有这一条：收窄闸门的产物是「保存被拒」，而运营打开一个模型、什么都没改、
- * 点保存就被拒，是他们完全无从下手的一种故障。改闸门之前先拿真实数据跑一遍，是这件事
- * 唯一的预防手段。
- *
- * ⚠️ 加渠道 / 加计价形态时，**先把新形态的真实行补进来再改闸门**。
- */
 describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门", () => {
-  /** 销售侧真实行的 ( capability_type, channel, pricing )；pricing 逐字抄自库。 */
   const EXISTING: Array<{
     type: "image" | "video" | "text" | "audio";
     channel: string;
@@ -467,8 +439,6 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
       type: "image",
       channel: "seedream-image",
       model: "doubao-seedream-5-0-260128",
-      // 2026-09-26 起：官方 0.22 元/张，按**张**收、与尺寸无关（见迁移 044）。
-      // 原值挂在 `by:["size"]` 上但三档填同一个数 —— 那根轴没有读方。
       pricing: {
         baseUnit: "usage.succeededSlots",
         basePrice: { kind: "const", value: 3300 },
@@ -480,9 +450,6 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
       type: "image",
       channel: "seedream-image",
       model: "doubao-seedream-5-0-pro-260628",
-      // 2026-09-26 起：输出图按像素分档（0.3 / 0.6 元）+ 参考图**首张免费、第 2 张起 0.02 元/张**
-      // （迁移 045）。`dimPrices` 就是为第二项加的 —— `dims` 是相对量，表达不了
-      // 「与 basePrice 无关的固定单价」：同一个 0.02 元在 0.3 / 0.6 两档下是同一个数。
       pricing: {
         baseUnit: "usage.succeededSlots",
         basePrice: {
@@ -531,9 +498,6 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
       type: "audio",
       channel: "seedream-audio",
       model: "seed-audio-1.0",
-      // 2026-09-26 起改为按**产出秒数**（官方 0.3 元/分钟 → 75 mc/秒，见迁移 043）。
-      // ⚠️ maxCredits 是**必配项**不是调优项：音频时长提交时刻取不到，没有上限
-      //    billing 就每次拒单 —— 下面有一组专门钉这条的断言。
       pricing: {
         baseUnit: "usage.seconds",
         basePrice: { kind: "const", value: 75 },
@@ -579,18 +543,8 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
 });
 
 describe("★ 单价的符号：负数一律拒（0 合法）—— 负的在账上就是「倒扣成免费」", () => {
-  // 2026-09-26 架构评审查出的缺口：闸门只判「是不是数字」，不判符号。
-  // 负单价算出的金额 ≤ 0，出口的 max(minCredits, …) 把它变成 minCredits（通常 0），
-  // 而「计价为 0」在提交侧被当成「不用冻钱」⇒ 不建预留、不冻钱、账面无异常。
-  // 一次本该收 200 积分的生成变成免费，**没有任何信号**。
-  //
-  // ⚠️ **只拒负，0 放行** —— 见下面那条「零价模型是合法配置」。第一版把 0 一起拒了，
-  //    当场打红了 Java 侧两条既有断言；测试是规格，收得过紧就是把合法配置拦在门外。
-  //
-  // 不传 capability_type/channel：渠道收窄是另一条规则，这里只测符号本身（与下面那组同理）。
   const update = (pricing: unknown) => parseModelUpdateBody({ pricing });
 
-  /** 一条能存进去的最小规则 —— 只换要测的那一项，别的都不动。 */
   const base = { baseUnit: "constant:1", basePrice: { kind: "const", value: 30000 } };
 
   it("basePrice 常数为负 → 拒", () => {
@@ -600,10 +554,6 @@ describe("★ 单价的符号：负数一律拒（0 合法）—— 负的在账
   });
 
   it("★ basePrice 常数 = 0 **放行** —— 「零价模型」是合法配置，别收得过紧", () => {
-    // ★ 边界用例（这条是被 Java 侧打红后补上的）：`PricingEngineTest.零价模型` 用
-    //   `Constant(0L)` 钉着两条断言（下限 0 时真的收 0、下限缺省 1 时收 1）——
-    //   也就是说 0 是**刻意支持**的表达，真正的价格下限由 minCredits 兜。
-    //   第一版校验把 0 一起拒了，结果把一条合法配置拦在门外。符号校验该拒的只有**负**。
     expect(update({ ...base, basePrice: { kind: "const", value: 0 } }).ok).toBe(true);
   });
 
@@ -629,8 +579,6 @@ describe("★ 单价的符号：负数一律拒（0 合法）—— 负的在账
   });
 
   it("dims = 0 放行 —— 「这一维不加量」，等价于不写它，不该被误伤", () => {
-    // ★ 边界用例：证明我只拒了该拒的。把 dims 的 0 也拒掉会让一批合法规则突然存不进去，
-    //   而它本身没有任何危害（加 0 等于不加）。
     expect(update({ ...base, dims: { "usage.referenceCount": 0 } }).ok).toBe(true);
   });
 
@@ -687,12 +635,6 @@ describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
     expect(parseModelUpdateBody({ pricing: tokenPricing }, { capability_type: "video" }).ok).toBe(true);
   });
 
-  /* ── 按秒计价的音频：maxCredits 不是可选项 ────────────────────────────────────
-   *
-   * 音频时长在提交时刻**取不到**（TTS 由文案决定，请求里没有 duration），
-   * billing 只有「规则配了上限」才转「按上限冻结、结算按实际重算」——
-   * 没配上限的后果不是少收，是**这个模型每一次提交都被拒**（UNPRICEABLE 400）。
-   * 运营看到的会是「音频功能坏了」，根因却在一段 JSON 里，所以在这里当场拦住。 */
   const audioPricing = {
     baseUnit: "usage.seconds",
     basePrice: { kind: "const", value: 75 },
@@ -715,8 +657,6 @@ describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
   });
 
   it("★ 别的媒介按秒计价不受这条限制（只有音频的时长是提交时刻结构性取不到的）", () => {
-    // 视频的 usage.seconds 是契约量（edit/prolong 的 duration=-1 是**这次**取不到，
-    // 不是结构性取不到），它与 tokenEstimate 一起工作，不走这条闸门。
     const parsed = update(
       { baseUnit: "usage.seconds", basePrice: { kind: "const", value: 1 }, unitDenominator: 1 },
       "video",
@@ -725,11 +665,6 @@ describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
     expect(parsed.ok).toBe(true);
   });
 
-  /* ── dimPrices：维度的**绝对**加价（Seedream 5.0 Pro 的参考图按张收费）──────────
-   *
-   * 它存在的理由只有一个：`dims` 是**相对**量（金额 = 万分比 × basePrice），
-   * 所以「每个单位 0.02 元」在 basePrice 分档的规则里表达不了 —— 两档要两个万分比。
-   * 绝对加价与 basePrice 解耦，两档下都是 300 mc。 */
   const withDimPrices = (dimPrices: unknown, extra: Record<string, unknown> = {}) => ({
     baseUnit: "usage.succeededSlots",
     basePrice: { kind: "const", value: 3000 },
@@ -749,8 +684,6 @@ describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
   });
 
   it("★ unitMc 必须是**正**整数 —— 0 与负数都拒", () => {
-    // 0 等于「这个维度免费」，而免费应当由「不写这个维度」表达：
-    // 写一个 0 出来，下一个读配置的人只会当成配漏了。
     for (const bad of [0, -300, 12.5]) {
       const parsed = imageUpdate(withDimPrices({ "usage.referenceCount": { unitMc: bad } }));
       expect(parsed.ok, `unitMc=${bad} 应当被拒`).toBe(false);
@@ -774,9 +707,6 @@ describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
   });
 
   it("★ dimPrices 与 maxCredits 互斥 —— 同时配会让结算超出预扣并记应收（少收且静默）", () => {
-    // 上限计价（capDetailed）跳过用量计算，算不到这份绝对加价 ⇒ 预扣冻的是一份
-    // **不含加价**的上限，而结算会把加价算进去。这条在闸门与 billing 的 CompiledRule
-    // 构造里各拦一次（两道，因为脏配置可能绕过写闸门直接改库进来）。
     const parsed = imageUpdate(
       withDimPrices({ "usage.referenceCount": { unitMc: 300, firstFree: true } }, { maxCredits: 50 }),
     );

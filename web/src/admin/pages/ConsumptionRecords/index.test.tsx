@@ -29,18 +29,13 @@ let mountNode: HTMLDivElement;
 const ITEM = {
   id: 'res:7',
   user_id: 9001,
-  // BFF 回我们自己的库按 user_id 补的展示身份（billing 的账本认不出人）
   nickname: '张小明',
   phone: '13800008888',
   type: 'consume',
   direction: 'out',
   title: '视频生成 · seedance-2.5',
   credits: 30,
-  // 冻 100、实扣 30 —— 余额先降后回的那种行，预扣额必须出得来
   reserved_credits: 100,
-  // 任务的三个语义字段（BFF 按 billing 给的 jobId 回自己库批量补的）。
-  // ⚠️ 有这三个字段时「任务」列**不再**显示 title —— 两条断言才分得开：
-  //    这里是中文展示名「Seedance 2.5」，而 title 里是小写的 `seedance-2.5`。
   task_type: 'video',
   model_id: 'seedance-2.5',
   model_label: 'Seedance 2.5',
@@ -94,7 +89,6 @@ async function click(label: string) {
   await settle();
 }
 
-/** 第 n 次请求带的页码（第 1 次是首次加载）。 */
 function pageOfCall(n: number): number | string {
   return api.fetchAdminConsumptionRecords.mock.calls[n - 1]?.[0]?.page ?? '<缺>';
 }
@@ -117,7 +111,6 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
   it('页面标题是「积分记录」', async () => {
     await renderPage();
 
-    // 钉住改名本身：这一页记的是全站积分流水（含充值/赠送/过期），不只消费。
     expect(document.body.textContent).toContain('积分记录');
   });
 
@@ -126,23 +119,19 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
 
     expect(api.fetchAdminConsumptionRecords).toHaveBeenCalledTimes(1);
     expect(pageOfCall(1)).toBe(1);
-    // keyword 不在参数里 —— 传 undefined 与「不过滤」在契约上是两回事
     expect(api.fetchAdminConsumptionRecords.mock.calls[0]?.[0]).not.toHaveProperty('keyword');
   });
 
   it('渲染归属用户、任务类别与带方向的金额', async () => {
     await renderPage();
 
-    // 归属用户现在显示的是**用户名与手机号**（用户 ID 不占列也不进悬停，见下面「用户列」那个 describe）
     expect(document.body.textContent).toContain('张小明');
     expect(document.body.textContent).toContain('13800008888');
-    // 任务列只放**类别**（模型名与提示词都收在明细面板里，见下面那个 describe）
     expect(document.body.textContent).toContain('视频');
     expect(document.body.textContent).toContain('-30');
   });
 
   it('预扣与实扣不一致时，金额下方补一行预扣', async () => {
-    // 「冻 100、实扣 30」：只显示 -30 的话，用户余额那 70 的来回在界面上没有交代
     await renderPage();
 
     expect(document.body.textContent).toContain('预扣 100');
@@ -161,7 +150,6 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
   });
 
   it('没有预扣的行（发放 / 人工调账）不显示预扣', async () => {
-    // null 不是 0：0 是「冻了 0 分」，null 是「这一行没有预扣这回事」
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, id: 'lot:12', type: 'recharge', direction: 'in', credits: 500, reserved_credits: null }],
       total: 0,
@@ -174,12 +162,6 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
   });
 
   it('后端比前端旧、**整个键都不回**时不崩 —— 「没有」的第二种形态', async () => {
-    // ⚠️ 2026-09-26 实测：前端先上、后端后上（3100 上跑的是 4 小时前的构建，
-    //    压根没投影这一列）时，回包里**根本没有 reserved_credits 这个键**，
-    //    拿到的是 `undefined` 而不是 `null`。
-    //    当时页面写 `!== null`，而 `undefined !== null` 为真 ⇒ 把「没有」当成「有」
-    //    送进渲染 ⇒ `fmt(undefined)` 撞 `toLocaleString of undefined` ⇒ **整页白屏**。
-    //    所以这条测试故意**不写那个键**（而不是写成 null）—— 上面那条只覆盖了 null。
     const oldBackendRow = {
       id: 'res:9',
       user_id: 9001,
@@ -198,15 +180,12 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
 
     await renderPage();
 
-    // 行本身照常渲染，只是没有预扣那一行小字 —— 旧后端下这是唯一正确的呈现
     expect(document.body.textContent).toContain('-30');
     expect(document.body.textContent).not.toContain('预扣');
     expect(document.body.textContent).not.toContain('Unexpected Application Error');
   });
 
   it('结算到 0（失败单全额退回）仍要显示 —— 那正是最该解释的一行', async () => {
-    // 判空若写成 `if (row.reserved_credits)`，0 会被当成「没有预扣」而整行消失，
-    // 恰好漏掉「冻了 12、最后全退回来」这种最需要交代的行
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, credits: 0, reserved_credits: 12 }],
       total: 0,
@@ -219,22 +198,15 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     );
     expect(cell?.textContent).toContain('0');
     expect(cell?.textContent).toContain('预扣 12');
-    // ★ 0 不带符号：`-0` 会让人以为发生过一笔资金流动，
-    //    而这个 0 要说的是「冻过多少、全退回来了」—— 那件事由旁边的预扣注解承担
     expect(cell?.textContent).not.toContain('-0');
     expect(cell?.textContent).not.toContain('+0');
   });
 
   it('预扣与金额在**同一个单元格**里 —— 并排，不另起一行、也不单开一列', async () => {
-    // ⚠️ 这条守的是**形态**不是文案：上面几条只断言「页面上有这几个字」，
-    //    把预扣挪到金额下方另起一行、或者单开一列，它们照样全绿。
-    //    而这是用户明确提过的观感要求（「预扣不要换行」）——所以钉在 DOM 结构上：
-    //    两段文本必须落在同一个 <td> 内。
     api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], total: 0 });
 
     await renderPage();
 
-    // ITEM：credits 30 / reserved 100 —— 恰好是两个数不一致、该显示预扣的那种行
     const holdCells = [...document.querySelectorAll('tbody tr td')].filter((td) =>
       td.textContent?.includes('预扣'),
     );
@@ -257,7 +229,6 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
   });
 
   it('首页禁用「上一页」；没有下一页时禁用「下一页」', async () => {
-    // total = 0：一页都装不满，下一页必须灰着
     await renderPage();
 
     expect(button('上一页').disabled).toBe(true);
@@ -265,8 +236,6 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
   });
 
   it('★ 总数来自服务端，不自己编', async () => {
-    // 40 条 / 每页 20 → 2 页。这一页以前是游标分页、**不显示总数**，
-    // 换成 offset 之后必须显示，否则「下一页」推不出来（当时就退化成了永久置灰）
     api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], total: 40 });
     await renderPage();
 
@@ -292,7 +261,6 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     });
     await click('查询');
 
-    // 换了条件还停在第 2 页，翻出来的页与看到的条件对不上
     expect(pageOfCall(3)).toBe(1);
     expect(api.fetchAdminConsumptionRecords.mock.calls[2]?.[0]?.keyword).toBe('13800008888');
   });
@@ -300,8 +268,6 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
 
 describe('ConsumptionRecords — 哨兵口径', () => {
   it('★ 首次查询**不带** type —— 哨兵漏下去会把列表静默过滤成空', async () => {
-    // 「全部」由**空值**表达。`'all'` 是真值，一旦写回 EMPTY_FILTERS 而判据没跟着改，
-    // 请求里就会多出 `type=all` —— 列表**不报错**，只会静默为空。所以从请求参数上钉。
     await renderPage();
 
     expect(api.fetchAdminConsumptionRecords).toHaveBeenCalled();
@@ -311,12 +277,10 @@ describe('ConsumptionRecords — 哨兵口径', () => {
 });
 
 describe('ConsumptionRecords — 任务列与明细面板', () => {
-  /** 账本侧的真形状：这些行的文案由 billing 给，任务的三个字段一个都没有。 */
   function ledgerRow(overrides: Record<string, unknown> = {}) {
     return {
       id: 'lot:12',
       user_id: 9001,
-      // 查不到用户（跨库历史 / 被清理）——「没有用户名手机号」的唯一形态
       nickname: null,
       phone: null,
       type: 'recharge',
@@ -335,12 +299,10 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
     return [...document.body.querySelectorAll('th')].map((th) => th.textContent?.trim() ?? '');
   }
 
-  /** 悬停任务格的触发器（面板是 portal 到 body 的，悬停后 `document.body` 里才出现）。 */
   async function hoverTaskDetail() {
     const trigger = document.body.querySelector<HTMLButtonElement>('button[aria-label="任务明细"]');
     if (!trigger) throw new Error('没有找到任务明细触发器');
     await act(async () => {
-      // React 的 onMouseEnter 走 mouseover/mouseout 合成，直接派 mouseover 即可触发
       trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     });
     await settle();
@@ -354,8 +316,6 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
   });
 
   it('格子里**只有类别**：模型名与提示词都不进表格', async () => {
-    // 这一条守的是「收起」本身。全铺出来会把表撑散，而一行挂一个按钮就是 20 个描边方块
-    // 比数据还抢眼 —— 所以模型名与提示词**必须**在收起态不可见。
     await renderPage();
 
     const cells = [...document.querySelectorAll('tbody tr td')].filter((td) =>
@@ -377,7 +337,6 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
   });
 
   it('提示词为空时面板里显示「—」而不是空白格子', async () => {
-    // 空白读起来像「还在加载」，而这是查询已经答完的结论
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, prompt: null }],
       total: 0,
@@ -391,8 +350,6 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
   });
 
   it('没有任务的行（发放 / 账本 / 查不到任务）→ 回落账本自带的 title，且**没有**明细触发器', async () => {
-    // 回落不是兜底摆设：老后端 + 新前端时 title 是这一列**唯一**有的信息。
-    // 这类行没有明细可看，挂一个空面板的图标是骗点击。
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [
         ledgerRow({ task_type: null, model_id: null, model_label: null, prompt: null }),
@@ -407,7 +364,6 @@ describe('ConsumptionRecords — 任务列与明细面板', () => {
   });
 
   it('后端比前端旧、**整个键都不回**时回落 title，不崩', async () => {
-    // 与 reserved_credits 那条同一个坑：多一种空值形态，判空写错就是整页白屏
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [ledgerRow()],
       total: 0,
@@ -441,12 +397,9 @@ describe('ConsumptionRecords — 用户列', () => {
   });
 
   it('★ 用户 ID 一个都不露 —— 既不在列里，也不藏在悬停 / 提示里', async () => {
-    // 运营在这一页认人靠用户名与手机号。那串数字是排查时才用的内部标识，
-    // 摆在表里或藏在浮层里都只是噪声。三个记录页同一口径。
     await renderPage();
 
     expect(document.body.textContent).not.toContain('9001');
-    // 用户名格上不该再挂「还有东西可看」的图标
     expect(document.body.querySelector('button[aria-label="用户明细"]')).toBeNull();
   });
 
@@ -458,19 +411,14 @@ describe('ConsumptionRecords — 用户列', () => {
 
     await renderPage();
 
-    // 按列序取：时间(0) 用户名(1) 手机号(2) …
     const cells = [...document.querySelectorAll('tbody tr td')].map(
       (td) => td.textContent?.trim() ?? '',
     );
-    // 两格都必须是「—」：空白读起来像「还在加载」，而这是查询已经答完的结论
     expect(cells[1]).toBe('—');
     expect(cells[2]).toBe('—');
   });
 
   it('后端比前端旧、用户名手机号**整个键都不回**时同样显示「—」，不崩', async () => {
-    // 与 reserved_credits 同一个坑：`undefined` 也是「没有」。这里渲染写的是 `?? '—'`，
-    // 两种形态一起兜住 —— 用真值判断或 `=== null` 就会把它渲染成空白。
-    // 类型上这俩字段是**可选**的，所以 `delete` 合法：这不是在骗类型，而是在造旧后端那种回包。
     const noIdentity: AdminConsumptionRecord = { ...ITEM };
     delete noIdentity.nickname;
     delete noIdentity.phone;

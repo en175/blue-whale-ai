@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildDimensionGrid, gridSpecKey, setGridCell } from './dimensionGrid';
 
-/* ── 输出像素表的矩阵视图（行=比例、列=尺寸）───────────────────────────────────
- *
- * 存储仍是扁平的 `"resolution=480p|aspect_ratio=16:9" → "864x496"`——矩阵只是给人看的排布。
- * 这里钉三件容易出错的事：跨大小写查格子、恒等写回用库里的原键、新格子的键按本行派生。
- */
 describe('buildDimensionGrid 扁平表 → 矩阵', () => {
   const row = (key: string, value: string) => ({ key, value });
   const size = (id: string) => ({ id, label: id.toUpperCase() });
@@ -23,8 +18,6 @@ describe('buildDimensionGrid 扁平表 → 矩阵', () => {
   });
 
   it('★ 档位大小写不一致时格子照样显示得出值（`4K` 列不会整列空掉）', () => {
-    // 能力行的档位 id 写 `4K`，而库里的键是从定价目录搬来的 `resolution=4k|...`
-    // ——同一个值的两种写法，不是脏数据（见 backend 的 normalizeSpecKey）。
     const stored = row('resolution=4k|aspect_ratio=16:9', '3840x2160');
     const grid = buildDimensionGrid([size('4K')], ['16:9'], [stored]);
     expect(grid.rows[0]?.cells[0]?.value).toBe('3840x2160');
@@ -60,11 +53,9 @@ describe('setGridCell 矩阵 → 扁平表', () => {
 
   it('★ 恒等写回：没动过的格子用库里原来的键（`4k` 不被一次保存改成 `4K`）', () => {
     const stored = row('resolution=4k|aspect_ratio=16:9', '3840x2160');
-    // 本行档位 id 是 `4K`（与库里的键只差大小写）；新增一个 9:16 的格子触发表写回
     const grid = buildDimensionGrid([size('4K')], ['16:9', '9:16'], [stored]);
     expect(setGridCell(grid, 1, 0, '2160x3840')).toEqual([
       { key: 'resolution=4k|aspect_ratio=16:9', value: '3840x2160' },
-      // 新建的格子才用本行派生出来的键（这里档位 id 是 `4K`）
       { key: 'resolution=4K|aspect_ratio=9:16', value: '2160x3840' },
     ]);
   });
@@ -99,7 +90,6 @@ describe('setGridCell 矩阵 → 扁平表', () => {
   });
 
   it('两列派生出同一个键时不写第二遍（一个键只能有一个值）', () => {
-    // 两个档位行的 id 只差大小写 ⇒ 归一后派生到同一个规格键（运营重复填档位时的真实场景）
     const stored = row('resolution=480p|aspect_ratio=16:9', '864x496');
     const grid = buildDimensionGrid(
       [size('480p'), size('480P')],

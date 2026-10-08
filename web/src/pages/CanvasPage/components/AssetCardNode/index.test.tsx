@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKGYYF 资产卡顶部操作条悬浮化（迁出文档流、钉屏幕层）集成测试：
-   渲染模式沿用 MediaNode/index.test.tsx（ReactFlowProvider + createRoot/act + NodeProps 兜底）；
-   钉屏幕层 store 注入沿用 ../NodeFollowToolbar/index.test.tsx（StateInjector 直写
-   nodeLookup/transform/width，不依赖真实 ReactFlow 测量）。模拟 CanvasPage 接线
-   （整卡 + NodeFollowToolbar 包 AssetCardToolbar 同挂），锁四件事：
-   屏幕层渲染（不在节点卡 DOM 内）、悬浮形态（不占文档流）、出现时机
-   （唯一选中 / hover / HIDE_ASSET_TOP_BAR 开关现值）、「添加到对话」回调。 */
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +21,6 @@ function StateInjector({ state }: { state: Record<string, unknown> }) {
   return null;
 }
 
-/** 构造注入 store：目标资产卡 asset-1（320×340）+ 可选多选干扰节点 */
 function flowState(selected: boolean, extraNodes: Array<{ id: string; selected: boolean }> = []) {
   const mk = (id: string, sel: boolean, x = 100, y = 200): [string, unknown] => [
     id,
@@ -54,7 +46,6 @@ function flowState(selected: boolean, extraNodes: Array<{ id: string; selected: 
 interface RenderExtra {
   selected?: boolean;
   hovered?: boolean;
-  /** 故意放宽为 string：脏 kind 降级用例需要绕过类型（运行时水合容错场景） */
   kind?: string;
   data?: Record<string, unknown>;
   extraNodes?: Array<{ id: string; selected: boolean }>;
@@ -100,18 +91,14 @@ async function renderCard(extra?: RenderExtra) {
   return { onAddToChat, onHoverChange };
 }
 
-/** 钉屏幕层根（NodeFollowToolbar 容器，data-gen-panel-territory） */
 function pinnedLayer(): HTMLElement | null {
   return mountNode.querySelector('[data-gen-panel-territory]');
 }
 
-/** 节点卡 DOM（AssetCardNode 根 .wrapper） */
 function cardDom(): HTMLElement {
   return mountNode.querySelector(`.${styles.wrapper}`) as HTMLElement;
 }
 
-/** jsdom 无 PointerEvent 构造器：MouseEvent 带指针类型触发 React 合成指针事件（仓库测试同做法）；
- *  relatedTarget 表达指针去向（间隙=卡外非工具条元素） */
 function pointerOn(target: Element, type: string, relatedTarget: EventTarget | null = null) {
   target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, relatedTarget }));
 }
@@ -132,7 +119,6 @@ describe('IKGYYF 资产卡顶部操作条悬浮化（钉屏幕层）', () => {
     expect(pinnedLayer()).toBeTruthy();
     expect(pinnedLayer()!.textContent).toContain('风格卡');
     expect(pinnedLayer()!.textContent).toContain('添加到对话');
-    // 卡内不再有顶部操作条（DOM 已迁出节点卡）
     expect(cardDom().textContent).not.toContain('添加到对话');
   });
 
@@ -214,9 +200,6 @@ describe('IKGYYF 资产卡顶部操作条悬浮化（钉屏幕层）', () => {
   });
 });
 
-/** 模拟 CanvasPage 侧接线（IKGYYB hover 桥接）：hover 态与延迟清除 timer 收口于
- *  useAssetHoverBridge（真实 hook），卡经 data.onHoverChange 上报（叠加 spy 断言）、
- *  工具条根经 AssetCardToolbar 指针回调上报——未选中纯 hover 卡验证穿隙交互 */
 function BridgeHost({ onHoverChange }: { onHoverChange: (id: string, hovered: boolean) => void }) {
   const bridge = useAssetHoverBridge();
   return (
@@ -280,7 +263,6 @@ describe('IKGYYB hover 间隙桥接（卡与钉屏幕工具条间 ~20px 间隙�
     await act(async () => { pointerOn(card, 'pointerover'); });
     expect(pinnedLayer()).toBeTruthy();
     await act(async () => { pointerOn(card, 'pointerout', document.body); });
-    // 桥接窗口内（指针正穿间隙）不闪卸——修复前此处立即卸载、按钮点不到
     expect(pinnedLayer()).toBeTruthy();
     await act(async () => { vi.advanceTimersByTime(120); });
     expect(pinnedLayer()).toBeNull();
@@ -308,7 +290,6 @@ describe('IKGYYB hover 间隙桥接（卡与钉屏幕工具条间 ~20px 间隙�
     expect(pinnedLayer()).toBeTruthy();
     await act(async () => { vi.advanceTimersByTime(120); });
     expect(pinnedLayer()).toBeNull();
-    // 对照：层 leave 后窗口内移回卡，清除被取消
     await act(async () => { pointerOn(card, 'pointerover'); });
     await act(async () => { pointerOn(card, 'pointerout', document.body); });
     await act(async () => { pointerOn(bar, 'pointerover'); });

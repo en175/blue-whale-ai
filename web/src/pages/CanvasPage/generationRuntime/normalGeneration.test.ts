@@ -1,7 +1,3 @@
-/* ============================================
- * 普通生成类型定义契约测试（IKJJR1）：身份识别（排除工具家族）、创建/重试/取消协议、
- * 输出槽投影与恢复落卡规划。「新增类型 = 一份类型定义」的接入基准。
- * ============================================ */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
@@ -54,7 +50,6 @@ describe('普通生成类型定义：身份识别', () => {
     expect(isNormalGenerationCard('audio-trim-9', { jobId: '9' })).toBe(false);
     expect(isNormalGenerationCard('audio-speed-9', { jobId: '9' })).toBe(false);
     expect(isNormalGenerationCard('vocal-split-9', { jobId: '9' })).toBe(false);
-    // 人声轨卡（vocal-track-*）无家族身份键，基线即走通用重试——同样归本类型承接
     expect(isNormalGenerationCard('vocal-track-9-voice', { jobId: '9' })).toBe(true);
   });
 
@@ -89,7 +84,6 @@ describe('普通生成类型定义：创建/重试/取消协议', () => {
   });
 
   it('重试：无 canvas_binding 走历史兼容三参调用；携带时第四参为 binding', async () => {
-    // IKJJR3：第三参为重试上下文（nodeId + nodeData），服务端冻结输入的类型忽略 nodeId
     await normalGenerationTask.retry!('p1', 'j9', { nodeId: 'n9', nodeData: {} }, null, 'k-legacy');
     expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j9', 'k-legacy');
     await normalGenerationTask.retry!('p1', 'j9', { nodeId: 'n9', nodeData: {} }, BINDING, BINDING.submission_id);
@@ -176,7 +170,6 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
     }));
     expect(node.position).toEqual({ x: 42, y: 24 });
     expect(node.data).toMatchObject({ fileName: '用户改名.png', width: 640, height: 480 });
-    // 快照无位置/尺寸/名称 → 种子回退（发送时形态）
     const fallback = buildRecoveryTargetNode(record({
       recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 300, height: 200, name: '种子名' }, sources: [] },
       previous_target_snapshot: { id: 'n1', type: 'mediaNode', data: {} },
@@ -194,7 +187,6 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
       ],
     }), hostOf(['n1'], { n1: { generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' } } }));
     expect(plan).toEqual({ kind: 'none' });
-    // 同项卡缺席（误删/丢失）→ 仍按投影补出
     const restore = normalGenerationTask.planRecovery!(record({
       job: { job_id: 'j1', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
       items: [
@@ -211,13 +203,10 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
       { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending' as const, revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
       { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'present' as const, revision: 1, node_binding_revision: 1, asset_id: '9', slot_id: null },
     ];
-    // 待转换原卡在场（无 marker——受理回执丢失后的空卡）→ 仍 apply-outputs 原位写入
     const plainHost = hostOf(['n1'], { n1: { fileName: '原卡' } });
     expect(normalGenerationTask.planRecovery!(record({ job: succeededJob, items }), plainHost).kind).toBe('apply-outputs');
-    // marker 属他提交（旧任务转换过的卡）→ 不算本输出已应用
     const staleHost = hostOf(['n1'], { n1: { generationRecovery: { protocolVersion: 1, submissionId: 'sub-other', outputKey: 'primary' } } });
     expect(normalGenerationTask.planRecovery!(record({ job: succeededJob, items }), staleHost).kind).toBe('apply-outputs');
-    // pending 一律待应用（原卡在场不豁免）
     const pendingItems = [items[0]!, { ...items[1]!, state: 'pending' as const }];
     expect(normalGenerationTask.planRecovery!(record({ job: succeededJob, items: pendingItems }), plainHost).kind).toBe('apply-outputs');
   });
@@ -276,7 +265,6 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
   });
 });
 
-// ── IKJKU6 不回归网：普通单结果重试保留 def 后仍走一对一 primary 转换 ──────────────
 
 describe('普通生成类型定义：重试运行时回归', () => {
   beforeEach(() => { vi.clearAllMocks(); });
@@ -284,7 +272,7 @@ describe('普通生成类型定义：重试运行时回归', () => {
   it('普通单结果重试成功：仍走一对一 primary 转换（目标卡保留、差分 replaceTarget+apply）', async () => {
     const nodes = new Map<string, RuntimeNodeView>();
     nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: 'j1', genStatus: 'failed' } });
-    const loadEpoch = {}; // 稳定加载身份（重渲染不推进）
+    const loadEpoch = {};
     const host: GenerationRuntimeHost = {
       getProjectId: () => 'p1',
       getLoadEpoch: () => loadEpoch,
@@ -348,6 +336,6 @@ describe('普通生成类型定义：重试运行时回归', () => {
       'apply:gcr:sub-retry-1:primary',
       'replaceTarget:gcr:sub-retry-1:$target',
     ]);
-    expect(nodes.has('n1')).toBe(true); // 一对一：目标卡保留为结果卡（不扇出移除）
+    expect(nodes.has('n1')).toBe(true);
   });
 });

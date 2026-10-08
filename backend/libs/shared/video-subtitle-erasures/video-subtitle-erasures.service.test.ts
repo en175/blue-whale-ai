@@ -1,5 +1,3 @@
-// IKGZ80：去字幕创建入口复核矩阵与免费口径单测（先例：image-erasures.service.test.ts）。
-// 只测外部可见行为：拒绝原因可读、落库参数冻结、免费口径无成本预留、凭证冻结、入队失败回拨终态。
 import { describe, expect, it, vi } from "vitest";
 
 import { VideoSubtitleErasuresService } from "./video-subtitle-erasures.service.js";
@@ -20,7 +18,6 @@ const VALID_BOXES_BODY = {
   ],
 };
 
-/** 默认源素材：1920x1080 mp4、1 分钟；宽高/时长均有权威值。 */
 function makeVideoAsset(overrides: Record<string, unknown> = {}) {
   return {
     type: "video",
@@ -50,7 +47,6 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
@@ -175,7 +171,6 @@ describe("VideoSubtitleErasuresService.create：输入门槛复核（2K 分辨�
       },
     });
     expect((await service.create("9", "55", VALID_SMART_BODY)).code).toBe(200);
-    // 竖屏长短边对调同样合法：短边 1440、长边 2560
     expect((await service.create("9", "55", VALID_SMART_BODY)).code).toBe(200);
   });
 
@@ -195,7 +190,6 @@ describe("VideoSubtitleErasuresService.create：输入门槛复核（2K 分辨�
   it("rejects when short side exceeds 1440 with a readable reason", async () => {
     const { service } = makeService({
       assets: {
-        // 宽 2000 高 1441：短边 1441 超上限（旧宽高绑定语义会漏判这种横图）
         findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ width: 2000, height: 1441 })),
       },
     });
@@ -220,8 +214,6 @@ describe("VideoSubtitleErasuresService.create：输入门槛复核（2K 分辨�
   });
 
   it("lets a video without recorded dimensions or duration pass to the supplier gate", async () => {
-    // assets.width/height/duration_ms 由前端上报、存量大量为 null：缺权威值不臆造、不拦，
-    // 交供应商按官方门槛拒（与擦除/高清同口径；规格故事 5）。
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(
@@ -234,7 +226,6 @@ describe("VideoSubtitleErasuresService.create：输入门槛复核（2K 分辨�
   });
 
   it("lets a video with only one recorded dimension pass (gate needs both)", async () => {
-    // 宽高只有一侧有权威值时无法判定短边/长边，同 null 放行。
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ width: 4096, height: null })),

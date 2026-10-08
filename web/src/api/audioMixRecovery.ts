@@ -1,7 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import { fetchJobs, type JobRecord } from './jobs';
 
-/** 画布恢复按项目与类型逐页读取，避免遗漏首 100 条之后尚未落盘的任务。 */
 export function audioMixJobsOptions(projectId: string) {
   return queryOptions({
     queryKey: ['jobs', 'audio_mix', projectId] as const,

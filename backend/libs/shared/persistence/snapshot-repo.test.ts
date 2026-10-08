@@ -41,7 +41,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
 
   it("returns normal uploaded project assets even when no generation job produced them", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
-    // 200 有 md5、201 无（老资产未落 md5）→ 字段原样带出，缺失归 null。
     const MD5_200 = "d41d8cd98f00b204e9800998ecf8427e";
     const findAssets = vi.fn().mockResolvedValue([
       {
@@ -87,10 +86,8 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         project_id: "55",
         type: "image",
         url: "tos://project/55/200.png",
-        // IKEXX8：素材库关联两列成对携带（mock 行未含列值 → null）。
         material_id: null,
         material_group_id: null,
-        // IKFYHJ：未关联素材库 → 不带校验状态。
         material_status: null,
         material_status_checked_at: null,
         md5: MD5_200,
@@ -109,8 +106,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     ]);
   });
 
-  // IKFYHJ（ADR-0087）：snapshot 是打开画布的读路径，按素材扇出上游 GetAsset 会把一次开页
-  // 变成 N 次往返。所以状态只从本地镜像表批量取一次，且必须带 user_id 谓词。
   it("已关联素材库的 asset 带上本地镜像的校验状态（单次批量查，不打上游）", async () => {
     const checkedAt = new Date("2026-09-15T10:00:00.000Z");
     const findMaterialAssets = vi.fn().mockResolvedValue([
@@ -123,9 +118,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         findMany: vi.fn().mockResolvedValue([
           { id: 200n, project_id: 55n, type: "image", url: "u-200", material_id: "asset-a" },
           { id: 201n, project_id: 55n, type: "image", url: "u-201", material_id: "asset-b" },
-          // 关联了素材库但本地无镜像行（早于本功能入库的存量素材）→ 保持 null，不瞎猜。
           { id: 202n, project_id: 55n, type: "image", url: "u-202", material_id: "asset-c" },
-          // 未关联素材库 → 不进查询、也不带状态。
           { id: 203n, project_id: 55n, type: "image", url: "u-203", material_id: null },
         ]),
       },
@@ -136,7 +129,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
 
     const result = await createSnapshotRepo(prisma).loadJobsAndAssets("55", "100");
 
-    // 只查一次，且只查真正有 material_id 的那三个；带 user_id 谓词。
     expect(findMaterialAssets).toHaveBeenCalledTimes(1);
     expect(findMaterialAssets).toHaveBeenCalledWith({
       where: {
@@ -187,9 +179,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
   it("保留被本项目关联的跨项目素材，丢弃未关联的跨项目素材（IKCNLP bug 回归）", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
     const findAssets = vi.fn().mockResolvedValue([
-      // 跨项目关联命中的素材（project_id=777 是别项目，但已被本项目 project_asset 关联）→ 应保留
       { id: 999n, project_id: 777n, type: "image", url: "tos://project/777/999.png" },
-      // 未关联的跨项目素材（project_id=777，不在 linkedSet）→ 应丢弃
       { id: 888n, project_id: 777n, type: "image", url: "tos://project/777/888.png" },
     ]);
     const prisma = {
@@ -203,7 +193,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
       "55",
       "100",
     );
-    // 999 关联命中 → 保留；888 未关联且 project_id=777 !== 55 且 !== 0 → 丢弃
     const ids = result.assets.map((a) => a.id);
     expect(ids).toContain("999");
     expect(ids).not.toContain("888");
@@ -212,7 +201,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
   it("同一素材同时命中关联+project_id 分支时只在 assets 出现一次（IKCNLP 去重）", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
     const findAssets = vi.fn().mockResolvedValue([
-      // 既是本项目 project_id=55，又被 project_asset 关联 → 两条 OR 分支都命中
       { id: 300n, project_id: 55n, type: "image", url: "tos://project/55/300.png" },
     ]);
     const prisma = {
@@ -233,9 +221,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
   it("不再返回全局素材 project_id=0（全局素材移除回归）", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
     const findAssets = vi.fn().mockResolvedValue([
-      // 全局素材（project_id=0）：未关联任何项目 → 不应出现在项目 snapshot.assets 中
       { id: 600n, project_id: 0n, type: "image", url: "tos://global/600.png" },
-      // 直接归属本项目的素材 → 仍应出现
       { id: 601n, project_id: 55n, type: "image", url: "tos://project/55/601.png" },
     ]);
     const prisma = {
@@ -249,7 +235,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
       "55",
       "100",
     );
-    // 全局素材 id=600 不再出现；project_id=55 直接归属素材 id=601 保留
     expect(findAssets).toHaveBeenCalledTimes(1);
     expect(findAssets).toHaveBeenCalledWith({
       where: {
@@ -313,8 +298,6 @@ describe("SnapshotRepo.loadConversationState", () => {
     });
   });
 
-  // IKEEFV：conversation_message_mentions 表已删，读链不再触该表——message.mentions
-  // 恒为空（引用事实不复存在），asset/scene_card 批量查询被空 id 集 guard 挡住。
   it("mention 表已删 → message.mentions 恒为空且素材批量查询不触发", async () => {
     const assetsFindMany = vi.fn().mockResolvedValue([]);
     const prisma = {

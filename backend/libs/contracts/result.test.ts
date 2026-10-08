@@ -2,11 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { FAILURE_CODE, SUCCESS_CODE, fail, ok } from "./result.js";
 
-// 对齐 Java blue-whale-global Result<T>：
-//   ok(data)        -> { code: 200, msg: null, data }   (msg 默认 null，不是 "success")
-//   ok()            -> { code: 200, msg: null, data: null }
-//   fail(code, msg) -> { code, msg, data: null }
-// 前端 apiRequest 只看 code !== 200 抛错。
 describe("result envelope (matches Java Result<T>)", () => {
   it("SUCCESS_CODE = 200, FAILURE_CODE = 400", () => {
     expect(SUCCESS_CODE).toBe(200);

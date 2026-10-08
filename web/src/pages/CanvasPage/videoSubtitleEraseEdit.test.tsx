@@ -1,14 +1,4 @@
 // @vitest-environment jsdom
-/* IKH3OU/IKH3OV 去字幕会话闭环（画布链路，IKGZ83 双条形态 → 单条化 + 模式前置 + 框选必框与重置）：
-   入口下拉两模式分别进会话（经真实 MediaNodeToolbar 走一次全链路）、会话内不互切、
-   单条形态随模式切换（智能=四元素零框选工具 / 框选=带？帮助与框选·撤销·重做·重置）、四退出
-   （X/Esc/点其他卡/点空白）未发送无痕迹、框交互经 subtitleEraseBoxes 纯逻辑落栈与撤销重做、
-   20 上限提示、重置清空全部框且撤销可整批恢复、框选模式无框发送钮置灰不提交不建卡、
-   发送参数恒 subtitle_smart（智能无框直发 / 框选带归一化框）、发送时才建视频
-   结果卡+纯视觉来源线（origin=video-subtitle-erase，参考推导跳过）、发送即退出会话、
-   创建失败停留会话、终态回填与失败重试（冻结 input 原样重发）。
-   渲染模式沿用 eraseEdit.test.tsx（FlowCanvas 打桩透出 props，框层指针经注入的
-   data.subtitleEraseEditing 回调驱动；DOM 指针换算由 SubtitleEraseBoxesLayer 组件测试覆盖）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -48,7 +38,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -166,7 +155,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪视频节点 v1（1920×1080 mp4，assetId 数字串满足契约；显示区 498×280） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -216,13 +204,11 @@ async function renderPage() {
   });
 }
 
-/** 节点 data（CanvasPage 渲染期派生注入后的最新一份） */
 function nodeData(id: string): Record<string, unknown> {
   const node = (flowProps.current.mediaNodes as Node[]).find((n) => n.id === id)!;
   return node.data as Record<string, unknown>;
 }
 
-/** 进入去字幕会话（视频卡「智能去字幕 ▾」菜单项派发的回调，IKGZ82/IKH3OU 挂点） */
 async function enterErase(mode: VideoSubtitleEraseMode) {
   const video = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
   await act(async () => {
@@ -230,7 +216,6 @@ async function enterErase(mode: VideoSubtitleEraseMode) {
   });
 }
 
-/** 目标源视频卡上注入的框编辑回调（框选模式渲染期派生，不持久化） */
 function editing() {
   return nodeData('v1').subtitleEraseEditing as {
     boxes: Array<Record<string, unknown>>;
@@ -240,7 +225,6 @@ function editing() {
   };
 }
 
-/** 经框层回调拉一个框 */
 async function dragBox(x1: number, y1: number, x2: number, y2: number) {
   const layer = editing();
   await act(async () => {
@@ -280,7 +264,6 @@ beforeEach(() => {
   apiMocks.createVideoSubtitleErase.mockReset();
   apiMocks.fetchJobStatus.mockReset();
   apiMocks.createVideoSubtitleErase.mockResolvedValue({ job_id: 'j88', status: 'queued' });
-  // IKJJR3：运行时轮询首拍立即执行——默认进行中（终态用例自行覆盖）
   apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j88', status: 'processing', progress: 10 });
 });
 
@@ -302,10 +285,8 @@ describe('IKH3OU 两模式入会话与单条形态', () => {
     for (const id of ['subtitle-erase-help', 'subtitle-erase-tool-box', 'subtitle-erase-undo', 'subtitle-erase-redo', 'subtitle-erase-reset']) {
       expect(hasBody(id), id).toBe(false);
     }
-    // 零框选工具：不注入框层（视频上不盖透明十字浮层），停帧由独立标记承担
     expect(nodeData('v1').subtitleEraseEditing).toBeUndefined();
     expect(nodeData('v1').subtitleErasePaused).toBe(true);
-    // 会话模态：顶部悬浮工具条隐藏（!743 体系可观测标记）
     expect(nodeData('v1').soloToolbarHidden).toBe(true);
   });
 
@@ -335,12 +316,10 @@ describe('IKH3OU 两模式入会话与单条形态', () => {
     await enterErase('box');
     await dragBox(49.8, 196, 448.2, 266);
     expect(editing().boxes.length).toBe(1);
-    // 会话内没有模式控件（旧「全画面文字」开关即此形态）；重进入口换模式 = 整会话重建
     expect(document.body.querySelectorAll('[role="switch"]').length).toBe(0);
     await enterErase('smart');
     expect(title()).toBe('智能擦除');
     expect(nodeData('v1').subtitleEraseEditing).toBeUndefined();
-    // 换回框选模式：编辑状态从干净起点开始（上一个会话的框不残留）
     await enterErase('box');
     expect(editing().boxes.length).toBe(0);
     expect(bodyBtn('subtitle-erase-undo').disabled).toBe(true);
@@ -369,7 +348,6 @@ describe('IKH3OU 两模式入会话与单条形态', () => {
     expect(editing().boxes.length).toBe(20);
     await dragBox(100, 100, 150, 150);
     expect(editing().boxes.length).toBe(20);
-    // 撤销后可再拉
     await click('subtitle-erase-undo');
     await dragBox(100, 100, 150, 150);
     expect(editing().boxes.length).toBe(20);
@@ -378,7 +356,6 @@ describe('IKH3OU 两模式入会话与单条形态', () => {
   it('重置清空全部框且一步可撤销：撤销整批恢复，重做再次清空', async () => {
     await renderPage();
     await enterErase('box');
-    // 无框时重置钮置灰（没有可清空内容）
     expect(bodyBtn('subtitle-erase-reset').disabled).toBe(true);
     await dragBox(49.8, 196, 448.2, 266);
     await dragBox(10, 10, 60, 40);
@@ -386,7 +363,6 @@ describe('IKH3OU 两模式入会话与单条形态', () => {
     expect(bodyBtn('subtitle-erase-reset').disabled).toBe(false);
     await click('subtitle-erase-reset');
     expect(editing().boxes.length).toBe(0);
-    // 重置本身在 undo 栈里：框清了仍可撤销；重置钮回到置灰（无可清空内容）
     expect(bodyBtn('subtitle-erase-undo').disabled).toBe(false);
     expect(bodyBtn('subtitle-erase-reset').disabled).toBe(true);
     await click('subtitle-erase-undo');
@@ -406,7 +382,6 @@ describe('IKH3OU 四退出：未发送退出画布无痕迹', () => {
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
     expect(flowProps.current.edges).toEqual([]);
     expect(apiMocks.createVideoSubtitleErase).not.toHaveBeenCalled();
-    // 框已丢弃：重进会话撤销不可用
     await enterErase('box');
     expect(bodyBtn('subtitle-erase-undo').disabled).toBe(true);
   });
@@ -430,7 +405,6 @@ describe('IKH3OU 四退出：未发送退出画布无痕迹', () => {
       flowProps.current.onSelectionChange({ nodes: [{ id: 'other' }] });
     });
     expect(sendBar()).toBeNull();
-    // 空选中不退出（真空白由 PaneClick 承担）
     await enterErase('smart');
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [] });
@@ -462,11 +436,9 @@ describe('IKH3OU 发送与结果闭环', () => {
     expect(sendBar()).not.toBeNull();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
     expect(flowProps.current.edges).toEqual([]);
-    // 拉框后恢复可发（title 回到发送语义 + 输出规格）
     await dragBox(49.8, 196, 448.2, 266);
     expect(bodyBtn('subtitle-erase-send-btn').disabled).toBe(false);
     expect(bodyBtn('subtitle-erase-send-btn').getAttribute('title')).toContain('输出最高 1080P');
-    // 重置清空后又回到必框拦截态
     await click('subtitle-erase-reset');
     expect(bodyBtn('subtitle-erase-send-btn').disabled).toBe(true);
     expect(bodyBtn('subtitle-erase-send-btn').getAttribute('title')).toContain('请先拉框');
@@ -484,10 +456,7 @@ describe('IKH3OU 发送与结果闭环', () => {
       detect_mode: 'subtitle_smart',
       erase_boxes: [],
     });
-    // 发送即退出会话
     expect(sendBar()).toBeNull();
-    // 发送时才建卡：结果卡在源卡右侧、视频占位（mediaType=video、带源分辨率）、generating、
-    // 带去字幕身份（lastInput 供重试）
     const nodes = flowProps.current.mediaNodes as Node[];
     expect(nodes.length).toBe(2);
     const result = nodes.find((n) => n.id !== 'v1')!;
@@ -500,19 +469,16 @@ describe('IKH3OU 发送与结果闭环', () => {
     expect(data.height).toBe(1080);
     expect((data.videoSubtitleErase as Record<string, unknown>).sourceAssetId).toBe('5');
     expect(result.position.x).toBeGreaterThan(400);
-    // 纯视觉来源线：origin=video-subtitle-erase
     const edges = flowProps.current.edges as Array<{ source: string; target: string; data?: { origin?: string } }>;
     expect(edges.length).toBe(1);
     expect(edges[0]).toMatchObject({ source: 'v1', target: result.id });
     expect(edges[0]!.data?.origin).toBe('video-subtitle-erase');
-    // 参考推导跳过该连线：源视频不占参考位、不参与 @ 编号
     expect(imageMediaRefsOf(result.id, flowProps.current.edges, flowProps.current.mediaNodes)).toEqual([]);
   });
 
   it('框选模式有框发送：detect_mode 仍是 subtitle_smart（模式只改框集合）+ 显示坐标换算的归一化框', async () => {
     await renderPage();
     await enterErase('box');
-    // 视频显示区约 498×280（1920×1080 按短边 280 换算）：拉下半字幕典型框
     await dragBox(49.8, 196, 448.2, 266);
     await click('subtitle-erase-send-btn');
     const [, payload] = apiMocks.createVideoSubtitleErase.mock.calls[0]! as [string, {
@@ -523,12 +489,10 @@ describe('IKH3OU 发送与结果闭环', () => {
     expect(payload.detect_mode).toBe('subtitle_smart');
     expect(payload.erase_boxes.length).toBe(1);
     const box = payload.erase_boxes[0]!;
-    // 视频显示区宽含循环小数（1920/1080×280），换算结果按 3 位小数断言
     expect(box.top_left_x).toBeCloseTo(0.1, 3);
     expect(box.top_left_y).toBeCloseTo(0.7, 3);
     expect(box.bottom_right_x).toBeCloseTo(0.9, 3);
     expect(box.bottom_right_y).toBeCloseTo(0.95, 3);
-    // 有框发送走同一占位卡闭环：发送即退会话，结果卡 + 纯视觉来源线落地
     expect(sendBar()).toBeNull();
     const nodes = flowProps.current.mediaNodes as Node[];
     expect(nodes.length).toBe(2);
@@ -559,7 +523,6 @@ describe('IKH3OU 发送与结果闭环', () => {
     await enterErase('smart');
     await click('subtitle-erase-send-btn');
     await act(async () => {});
-    // IKJJR3：提交点先退会话再交运行时受理；受理失败归失败卡（冻结输入可重试）
     expect(sendBar()).toBeNull();
     const nodes = flowProps.current.mediaNodes as Node[];
     expect(nodes.length).toBe(2);
@@ -579,7 +542,7 @@ describe('IKH3OU 发送与结果闭环', () => {
     await renderPage();
     await enterErase('smart');
     await click('subtitle-erase-send-btn');
-    await act(async () => {}); // 轮询首拍（tick 立即执行）回填终态
+    await act(async () => {});
     const nodes = flowProps.current.mediaNodes as Node[];
     const result = nodes.find((n) => n.id !== 'v1')!;
     const data = result.data as Record<string, unknown>;
@@ -588,9 +551,7 @@ describe('IKH3OU 发送与结果闭环', () => {
     expect(data.assetId).toBe('a9');
     expect(data.mediaType).toBe('video');
     expect(data.draft).toBeUndefined();
-    // 成品卡是普通视频卡：去字幕入口回调可用（可再次去字幕）
     expect(typeof data.onVideoSubtitleErase).toBe('function');
-    // 源卡不动
     const source = nodes.find((n) => n.id === 'v1')!;
     expect((source.data as Record<string, unknown>).src).toBe('http://vid/v1.mp4');
   });
@@ -618,15 +579,13 @@ describe('IKH3OU 发送与结果闭环', () => {
     const nodes = flowProps.current.mediaNodes as Node[];
     const result = nodes.find((n) => n.id !== 'v1')!;
     expect((result.data as Record<string, unknown>).genStatus).toBe('failed');
-    // 结果卡重试按钮（MediaNode onRetryJob）→ handleRetryJob 去字幕分流
     await act(async () => {
       ((result.data as Record<string, unknown>).onRetryJob as (id: string) => void)(result.id);
     });
     expect(apiMocks.createVideoSubtitleErase).toHaveBeenCalledTimes(2);
     const first = (apiMocks.createVideoSubtitleErase.mock.calls[0] as [string, Record<string, unknown>])[1];
     const second = (apiMocks.createVideoSubtitleErase.mock.calls[1] as [string, Record<string, unknown>])[1];
-    expect(second).toEqual(first); // 同参数（含 target_node_id=同一张结果卡）
-    // 重试任务轮询回填成品
+    expect(second).toEqual(first);
     const settled = (flowProps.current.mediaNodes as Node[]).find((n) => n.id === result.id)!;
     const data = settled.data as Record<string, unknown>;
     expect(data.genStatus).toBeUndefined();
@@ -634,10 +593,6 @@ describe('IKH3OU 发送与结果闭环', () => {
   });
 });
 
-/* ===== IKH3OU 入口接线（画布级）：用 CanvasPage 真实注入的节点 data 挂载真实
-   MediaNodeToolbar，经「智能去字幕 ▾」下拉菜单项派发回画布回调——覆盖
-   data.onVideoSubtitleErase → actionsRef → handleNodeVideoSubtitleErase 的完整入口链路
-   （下拉交互本体由 Toolbar.test.tsx 覆盖）。 ===== */
 describe('IKH3OU 经入口下拉进会话（画布级全链路）', () => {
   it('点菜单项「框选去字幕」进入框选模式会话：单条形态与框层同步落地', async () => {
     await renderPage();
@@ -685,11 +640,7 @@ describe('IKH3OU 经入口下拉进会话（画布级全链路）', () => {
   });
 });
 
-/* ===== IKH25A 去字幕单条中心点跟随锚：left = 源卡中心 x（单条自身 translateX(-50%) 真居中，
-   口径同 cutoutToolbarAnchor）。旧缺陷（估宽左上角语义）left = round(400 + 248.89 − 130) = 519，
-   恒偏左 130px；top 口径不变（节点下方 + 16）。 ===== */
 
-/** jsdom 无布局：stub 视口尺寸让 wrapperSize 生效（跟随锚计算依赖 containerWidth） */
 function stubWrapperSize(width: number, height: number) {
   vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(width);
   vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(height);
@@ -701,9 +652,7 @@ describe('IKH25A 去字幕单条中心点跟随锚', () => {
     await renderPage();
     await enterErase('smart');
     const bar = sendBar() as HTMLElement;
-    // 独立手算：screenLeft 400 + 内容宽 497.78/2 = 648.89 → round 649（旧缺陷值 519）
     expect(bar.style.left).toBe('649px');
-    // 垂直行为不变：nodeBoxOf 高 280+44 → 下方 top = 324 + 16 = 340
     expect(bar.style.top).toBe('340px');
   });
 
@@ -712,7 +661,6 @@ describe('IKH25A 去字幕单条中心点跟随锚', () => {
     await renderPage();
     await enterErase('box');
     const bar = sendBar() as HTMLElement;
-    // 独立手算：右界 = 700 − 钳制半宽 130 − FOLLOW_PAD 12 = 558；center 649 > 558 → 钳 558
     expect(bar.style.left).toBe('558px');
   });
 });

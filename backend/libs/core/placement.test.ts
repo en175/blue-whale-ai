@@ -36,7 +36,6 @@ describe("findPlacement（core 纯函数，IK67H9 抽取）", () => {
   it("起点格被占时让到同行下一格", () => {
     const stepX = DEFAULT_NODE_WIDTH + DEFAULT_GAP;
     const stepY = DEFAULT_NODE_HEIGHT + DEFAULT_GAP;
-    // 与 findPlacement 内部同构的起点格坐标。
     const baseX = Math.floor((0 - DEFAULT_NODE_WIDTH / 2) / stepX) * stepX;
     const baseY = Math.floor((0 - DEFAULT_NODE_HEIGHT / 2) / stepY) * stepY;
     const occupied = [

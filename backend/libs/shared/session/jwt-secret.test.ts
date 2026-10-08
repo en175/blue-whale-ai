@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sessionJwtSecret } from "./jwt-secret.js";
 
-// IKJAZL：登录凭证的签名密钥。生产必填、非生产回退开发默认值——与
-// `redisConnectionOptions` / `sessionCookieOptions` 用同一个开关（NODE_ENV）。
 describe("sessionJwtSecret（登录凭证签名密钥）", () => {
   it("配了就取配的那把（两端空白不算）", () => {
     expect(
@@ -14,7 +12,6 @@ describe("sessionJwtSecret（登录凭证签名密钥）", () => {
   });
 
   it("★ 生产环境没配 → 抛，不回退默认值", () => {
-    // 默认值是**公开的**：生产回退到它，等于给所有人一把能伪造任意身份的钥匙。
     expect(() => sessionJwtSecret({ NODE_ENV: "production" })).toThrow(
       /SESSION_JWT_SECRET 必填/,
     );

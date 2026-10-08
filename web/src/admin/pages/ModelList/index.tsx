@@ -1,17 +1,3 @@
-/* ============================================
- * ModelList 模型列表：dock 模型能力目录管理（generation_model_capability）
- * 数据源 GET/POST/PUT /api/admin/models + PATCH /:id/toggle + PATCH /:id/default
- *
- * 呈现层全部走 ../../ui 的组件，**本页与表单弹窗都没有自己的样式文件**——
- * ModelList 目录下已无任何 index.module.css。
- *
- * 取数走 TanStack Query（IKJ058）：`adminModelsOptions()` 来自 `@/api/adminModels`，
- * 页面不再手写 `loading / loadError / finally`。
- *
- * ⚠️ 一处**有意的时序变化**：改完（增删改序）之后刷新列表，旧实现是「先置 loading、
- *    表格闪一下「加载中…」再出新数据」；Query 的 `refetch` 会**保留旧数据**直到新数据到。
- *    列表不闪了，这是改善；但确实与改前不同，写在这里备查。
- * ============================================ */
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Power } from 'lucide-react';
@@ -49,9 +35,7 @@ const defaultParams = (m: AdminModel) => {
 export default function ModelList() {
   const queryClient = useQueryClient();
   const list = useQuery(adminModelsOptions());
-  /** ⚠️ 必须记忆：`list.data ?? []` 每次渲染都是新数组，下面那个 `filtered` 的 useMemo 会因此每渲染都重算（IKJ69L）。 */
   const models: AdminModel[] = useMemo(() => list.data ?? [], [list.data]);
-  /** 缓存里的当前列表 —— 写入侧与读取侧都只认它一份，不另立 state。 */
   const writeModels = (
     next: AdminModel[] | ((prev: AdminModel[]) => AdminModel[]),
   ): void => {
@@ -65,8 +49,6 @@ export default function ModelList() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState('');
-  /** IKHBDO：排序号支持直接编辑。仅靠上/下移时，两行 sort_order 相同会让交换变成空操作
-   *  （按钮点了没反应），运营也没有别的入口把顺序改回来。 */
   const [sortDrafts, setSortDrafts] = useState<Record<string, string>>({});
 
   const filtered = useMemo(
@@ -88,8 +70,6 @@ export default function ModelList() {
     const a = filtered[i];
     const b = filtered[j];
     setActionError('');
-    // IKHBDO：两行排序号相同 → 交换写入的是同一个值，等于什么都没做（按钮看起来是坏的）。
-    // 直接把这种情况说出来，并指向可用的入口（直接改排序号）。
     if (a.sort_order === b.sort_order) {
       setActionError(`「${a.model_label}」与「${b.model_label}」的排序号相同（${a.sort_order}），上下移不会生效——请直接改「排序」列的数值。`);
       return;
@@ -105,7 +85,6 @@ export default function ModelList() {
     }
   };
 
-  /** IKHBDO：直接写该行排序号（唯一能把重复排序号改开的入口）。 */
   const commitSort = async (id: string) => {
     const draft = sortDrafts[id];
     if (draft === undefined) return;
@@ -126,18 +105,11 @@ export default function ModelList() {
       setSortDrafts((prev) => ({ ...prev, [id]: String(value) }));
       void list.refetch();
     } catch (e) {
-      // 写入失败 → 回显库里的值，别让输入框停在没生效的数字上
       setSortDrafts((prev) => ({ ...prev, [id]: current ? String(current.sort_order) : '' }));
       setActionError(isApiError(e) ? e.message : '排序号更新失败，请稍后重试');
     }
   };
 
-  /**
-   * 设为该类型的默认模型（IKE0VX）。
-   *
-   * 同类其它行的标记由服务端在同一事务里清掉，所以这里用返回的**整份列表**覆盖，
-   * 不做单行合并——单行合并会让被清掉的那一行在界面上继续显示「默认」。
-   */
   const makeDefault = async (id: string) => {
     setActionError('');
     try {
@@ -255,7 +227,6 @@ export default function ModelList() {
               </td>
               <td>
                 {m.is_default ? (
-                  // 说明文案原先挂在标签自己的 title 上，套件 Badge 不透传原生属性，这里套一层
                   <span title="显式默认模型（同类只设一个）。后端「只设不清」：要取消本行的默认，把同类型另一行设为默认即可。">
                     <Badge tone="accent">默认</Badge>
                   </span>
@@ -278,7 +249,6 @@ export default function ModelList() {
                   onChange={(e) => setSortDrafts((prev) => ({ ...prev, [m.id]: e.target.value }))}
                   onBlur={() => commitSort(m.id)}
                   onKeyDown={(e) => {
-                    // 回车等价于失焦：只留一条提交路径，避免回车 + 失焦连发两次 PUT
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       e.currentTarget.blur();

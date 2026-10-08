@@ -7,7 +7,6 @@ import {
 import type { LegacyCardHistoryDraft, LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { sourceKey } from "./prompt-preview.js";
 
-/** 画布 JSON 中的节点最小形状（IKDLQK 迁移只关心这些字段）。 */
 export interface CanvasNodeLike {
   id: string;
   type: string;
@@ -15,7 +14,6 @@ export interface CanvasNodeLike {
   data?: Record<string, unknown>;
 }
 
-/** 一次迁移的转换计划：nodes 为转换后的完整节点数组；historyDrafts 与画布在同一事务中落库。 */
 export interface LegacyMigrationPlan {
   nodes: CanvasNodeLike[];
   migrated: string[];
@@ -23,12 +21,10 @@ export interface LegacyMigrationPlan {
   historyDrafts: LegacyCardHistoryDraft[];
 }
 
-/** 旧生成卡识别谓词：assetNode 且 data.kind === "generation"（正文块 data.generationCard）。 */
 export function isLegacyGenerationCard(node: CanvasNodeLike): boolean {
   return node.type === "assetNode" && node.data?.kind === "generation";
 }
 
-/** 归一化旧卡正文块：单次提取/校验标题、提示词与来源；失败时给出面向用户的原因。 */
 function inspectCard(card: unknown):
   | { ok: true; title: string; text: string; source: PromptPreviewSource | null; block: Record<string, unknown> }
   | { ok: false; title: string; reason: string } {
@@ -42,13 +38,6 @@ function inspectCard(card: unknown):
   return { ok: true, title, text: prompt, source: source.success ? source.data : null, block: block! };
 }
 
-/**
- * 计算旧生成卡迁移计划（纯函数）。
- * - 无旧卡返回 null（调用方不写画布）；
- * - 已有历史的旧卡内容一致时完成转换（失败恢复不丢历史、不重复落库）；
- * - 损坏/超限卡片保留原样并给出面向用户的原因，不用画面描述代替缺失提示词；
- * - promptSource 只对合法且画布内唯一的来源携带，先扫描到者优先。
- */
 export function planLegacyCardMigration(
   nodes: CanvasNodeLike[],
   history: LegacyCardHistoryRow[],

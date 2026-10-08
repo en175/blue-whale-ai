@@ -12,15 +12,12 @@ export interface AudioPlayerHandle {
 
 interface AudioPlayerProps {
   src: string;
-  /** compact 用于瀑布流卡片，full 用于详情弹窗（可交互） */
   variant?: AudioPlayerVariant;
-  /** 元数据（时长等）就绪时回调 */
   onLoadedMetadata?: () => void;
   onError?: () => void;
   className?: string;
 }
 
-/** 秒数格式化为 m:ss，无限/NaN 显示 0:00 */
 function formatSeconds(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
   const total = Math.floor(seconds);
@@ -29,11 +26,6 @@ function formatSeconds(seconds: number): string {
   return `${minutes}:${rest.toString().padStart(2, '0')}`;
 }
 
-/**
- * Library 轻量音频播放器：替换浏览器原生 <audio controls>。
- * full 形态保留播放/暂停控制，并由与卡片相同的 Audio Wave 反馈播放状态；
- * 素材卡片通过 ref 从整张卡片边界触发悬浮试听，避免只命中播放器本体。
- */
 const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer({
   src,
   variant = 'full',
@@ -53,8 +45,6 @@ const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(functio
     const audio = audioRef.current;
     if (!audio) return;
 
-    // 虚拟列表复用卡片或命中浏览器缓存时，loadedmetadata 可能早于 React
-    // 事件处理器派发。直接读取已经就绪的原生状态，避免骨架屏永久遮住播放器。
     if (!fromMetadataEvent && audio.readyState < HTMLMediaElement.HAVE_METADATA) return;
 
     if (Number.isFinite(audio.duration)) {
@@ -97,7 +87,6 @@ const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(functio
     try {
       audio.currentTime = 0;
     } catch {
-      // 元数据尚未就绪时不能定位，暂停即可。
     }
     setPlaying(false);
     setCurrentTime(0);
@@ -110,7 +99,6 @@ const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(functio
     hoverPreviewingRef.current = true;
     void audio.play()
       .then(() => {
-        // 快速移出时，浏览器可能在 pause 后才完成 play Promise；此处兜底关停。
         if (!hoverPreviewingRef.current) stopPreview();
       })
       .catch(() => setPlaying(false));
@@ -149,7 +137,6 @@ const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(functio
     setCurrentTime(audio.currentTime);
   }, []);
 
-  /** 进度条按下：即时跳转并跟随拖动（Pointer Capture） */
   const handleSeekPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     event.stopPropagation();
     const audio = audioRef.current;
@@ -158,7 +145,6 @@ const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(functio
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
-      /* 不支持 Pointer Capture 时退化为点击跳转 */
     }
     const rect = event.currentTarget.getBoundingClientRect();
     seekToRatio((event.clientX - rect.left) / rect.width);
@@ -178,7 +164,6 @@ const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(functio
     try {
       event.currentTarget.releasePointerCapture(event.pointerId);
     } catch {
-      /* ignore */
     }
   }, []);
 

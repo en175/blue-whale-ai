@@ -42,7 +42,6 @@ import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js"
 import { enqueueFailureLog } from "@lib/infra/mq/rocketmq-producer.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import type { Response } from "express";
-// IKJKUA：受控错误判定收敛到共享适配器（原 IKJJQU B.8 本地同款副本已删）。
 import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
 function bodyString(body: unknown): string {
@@ -61,19 +60,6 @@ export class GenerationJobsController {
     private readonly identity: IdentityService,
   ) {}
 
-  /**
-   * 预扣 + 失败补偿（懒建一次）。
-   *
-   * <p>⚠️ **必接，没有「不接线」的分支**。曾经有两种情况会跳过接线：`BILLING_GRPC_URL`
-   * 未配置、或 `BILLING_ENFORCE_HOLD` 未开——那都是 new-api 还在替我们扣钱时期的产物。
-   * new-api 已被切断，跳过接线就等于**白送一次生成**，而且没有任何报错。
-   *
-   * <p>地址缺失由 {@link sharedBillingClient} 内的 `billingEndpoint` 当场抛
-   * （并已在启动期拦过一道），所以这里不需要判空。
-   *
-   * <p>release 与 hold **成对**（见 {@link createBillingRelease}）：预扣成功之后事务才失败时，
-   * 只有它能把那笔冻结退掉，否则会留下一笔没有对应任务的预留。
-   */
   private billingDep?: { hold: BillingHold; release: BillingRelease };
 
   private billing() {
@@ -93,13 +79,6 @@ export class GenerationJobsController {
     return this.billingDep;
   }
 
-  /**
-   * 报价依赖（懒建一次）。与 {@link billing} 同一个客户端、同一个 `resolveTier`
-   * —— 预览价与实扣价必须出自同一套规格归一与同一个等级解析。
-   *
-   * <p>与预扣不同的一点：这里**允许降级**。`sharedBillingClient()` 在地址缺失时会抛，
-   * 而报价不该因此把「看看多少钱」变成一个 500 —— 见 {@link quote} 的 catch。
-   */
   private billingQuoteDep?: BillingQuote;
 
   private billingQuote(): BillingQuote {
@@ -128,9 +107,6 @@ export class GenerationJobsController {
     });
   }
 
-  /** IKF YHJ：素材被判失败时的统一处置（见 `MaterialService.handleUpstreamMaterialFailure`）。
-   *  **永不抛**——它跑在 `fetchUpstreamStatus` 的 try 里，抛了会被咽成「本轮未知」，
-   *  把本该是终局拒绝的结果降级成「请稍后重试」，正好把这次的修复抵消掉。 */
   private async handleMaterialFailure(
     userId: string,
     materialId: string,
@@ -166,14 +142,6 @@ export class GenerationJobsController {
     @Res({ passthrough: true }) res?: Response,
   ) {
     const billing = this.billing();
-    // 建任务幂等：`result.data` 也可能是**幂等重放**的首次结果（同一个 generation_job_id）。
-    // 这条路径下面照旧把它入队一次，是**刻意**的：
-    //   · 对已领走/已终态的任务，worker 侧 claim 是 CAS 的（候选要求 queued，或 processing
-    //     且租约过期），落不进去就是一次干净的 no-op，不会重复执行；
-    //   · RocketMQ 本身是 at-least-once，消费端**本来就必须**容忍同一 job 的重复消息；
-    //   · 反过来，第一次「建行成功但入队失败/进程崩了」的任务正靠这次重放捞回来
-    //     （否则它只能等恢复扫描）。
-    // 所以这里不按「是不是重放」分流。
     const result = await handleCreateGenerationJob(
       user.userId,
       projectId,
@@ -186,27 +154,16 @@ export class GenerationJobsController {
         canvas: this.canvas,
         assets: this.command.assets,
         materialGate: this.buildMaterialGate(user.userId),
-        // 预扣与补偿必然成对（见 billing 的说明），不再做条件展开
         billing,
-        // IKIZQ8：样片提交确认的复算（与 /quote 端点同一装配——预览价、核对价、实扣价
-        // 三者必须同源）。只在 parameters.sample_mode=true 的样片分支被读；计价地址
-        // 缺失时上面的 billing() 已经先抛，这里不会成为新的失败面。
         quote: this.billingQuote(),
       },
     );
 
-    // IKJJQU（B.8 局部适配器）：新协议受控错误（canvas_binding_conflict 等）信封直写
-    // HTTP 状态与 data.reason，不经 AllExceptionsFilter（它会置空 data）。
     if (isRecoveryControlledEnvelope(result)) {
       res?.status(result.code).json(result);
       return;
     }
 
-    // IKG57P：拒单信封与 HTTP 状态行一致。fail() 信封被 TransformInterceptor 透传时无人写
-    // 状态码，Nest 按 @Post 默认回 201，只看状态码的客户端会把拒绝当成受理成功（ADR-0083）。
-    // 抛 DomainError 走 AllExceptionsFilter 统一投影——code、msg、状态同出一张码表
-    // （httpStatusForCode：4xx/5xx 原样，业务码查表，查不到 400）。只修本 POST 端点，
-    // 全局信封→状态映射不在本单范围。
     if (result.code !== 200) {
       throw new DomainError(result.code, result.msg ?? undefined);
     }
@@ -216,24 +173,18 @@ export class GenerationJobsController {
       try {
         await enqueueVideoGenerationJob(jobId);
       } catch (error) {
-        // IKJ80Q：缺配≠故障（恢复扫描兜底）降 WARN，真失败 ERROR——分级与文案收口在 enqueueFailureLog。
         const log = enqueueFailureLog(error, { scope: "generation", kind: "video", jobId });
         logger[log.level](log.message);
       }
     } else if (result.code === 200 && result.data && body.type === "image") {
-      // IKBGKA：图片 job 走 RocketMQ（消费端 Semaphore 控并发，不再 API 进程内无上限 fire-and-forget）。
       const jobId = String(result.data.generation_job_id);
       try {
         await enqueueImageGenerationJob(jobId);
       } catch (error) {
-        // IKJ80Q：缺配≠故障，恢复扫描兜底（同 video 分支）。
         const log = enqueueFailureLog(error, { scope: "generation", kind: "image", jobId });
         logger[log.level](log.message);
       }
     } else if (result.code === 200 && result.data && body.type === "audio") {
-      // IKCR78：音频 job 走 RocketMQ（与图片同构；封死 API 进程内同步 processJob 后门）。
-      // enqueue 抛异常 → markFailed 置 failed（fail-fast，用户可见失败）；
-      // 与 media-extract（IKARDY）同款兜底，防入队失败后无消费端而静默悬挂。
       const jobId = String(result.data.generation_job_id);
       try {
         await enqueueAudioGenerationJob(jobId);
@@ -251,15 +202,6 @@ export class GenerationJobsController {
     return result;
   }
 
-  /** POST /api/projects/:projectId/generation-jobs/quote
-   *  价格预览（只读）：算得出回一个整数积分，算不出回 `credits: null`（前端不显示价格）。
-   *  **不冻结、不写库、不阻断任何操作**。
-   *
-   *  <p>入参与创建任务同形 —— 同一个 `parameters` 走建任务那一个规格投影，否则预览与实扣会漂。
-   *
-   *  <p>用 POST 而不是 GET：定价规格是一整个生成参数对象，塞查询串会与创建入参分叉（那正是
-   *  要避免的漂移）。@HttpCode(200) 明确压掉 Nest 对 POST 的默认 201 —— 这次什么都没创建，
-   *  「已受理」的状态行会让只看状态码的客户端误读。 */
   @Post("quote")
   @HttpCode(200)
   async quote(
@@ -271,31 +213,22 @@ export class GenerationJobsController {
     try {
       quote = this.billingQuote();
     } catch (error) {
-      // 计费地址缺失（未接线的本地/测试环境）。这与预扣**刻意不同**：预扣缺配置必须硬失败
-      // （否则是一条静默的免费通道），而这里只是「这次没显示价格」——一分钱不动，
-      // 不该把一次看价请求变成 500，更不该挡住用户点生成。
       logger.warn(
         `[generation] 报价不可用，本次不显示价格：${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      // IKIZQ7：空报价双 null（契约 StageQuoteView：不存在「有版本无价格」）。
       return ok({ credits: null, quote_revision: null });
     }
     return handleQuoteGenerationJob(user.userId, projectId, body, {
       projects: this.project,
       models: this.models,
-      // IKJGE6：与建任务同一份画布/素材依赖——视频草稿目标的文本带入参考做同一合并、
-      // 时长同一权威回填，预览价与实扣价才出自同一个数。
       canvas: this.canvas,
       assets: this.command.assets,
       quote,
     });
   }
 
-  /** POST /api/projects/:projectId/generation-jobs/:jobId/finalize/quote（IKIZQC）
-   *  成片报价（只读，fail open）：样片身份/成功/转存/截止/唯一尝试任一不满足或算不出价
-   *  → 空报价双 null。与 /quote 端点同一装配（预览价、核对价、实扣价三者同源）。 */
   @Post(":jobId/finalize/quote")
   @HttpCode(200)
   async finalizeQuote(
@@ -308,7 +241,6 @@ export class GenerationJobsController {
     try {
       quote = this.billingQuote();
     } catch (error) {
-      // 与 /quote 同款降级：计费地址缺失只是「这次没显示价格」，不把看价请求变 500。
       logger.warn(
         `[generation] 成片报价不可用，本次不显示价格：${
           error instanceof Error ? error.message : String(error)
@@ -324,10 +256,6 @@ export class GenerationJobsController {
     });
   }
 
-  /** POST /api/projects/:projectId/generation-jobs/:jobId/finalize（IKIZQC）
-   *  成片提交：请求体仅报价确认两字段（strict——浏览器不重放上游输入），Idempotency-Key
-   *  必带。服务端校验本人/原项目/样片成功已转存/可信截止/现价余额，从冻结输入派生 1080p
-   *  任务；来源唯一约束裁决双击与两页并发（至多一条成片任务与一笔预扣）。 */
   @Post(":jobId/finalize")
   async finalize(
     @CurrentUser() user: AuthenticatedUser,
@@ -351,8 +279,6 @@ export class GenerationJobsController {
         quote: this.billingQuote(),
       },
     );
-    // 与 create（IKG57P）同款口径：业务失败走 AllExceptionsFilter 统一投影，不让
-    // fail() 信封透传成 HTTP 201。
     if (result.code !== 200) {
       throw new DomainError(result.code, result.msg ?? undefined);
     }
@@ -368,9 +294,6 @@ export class GenerationJobsController {
     return result;
   }
 
-  /** POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample/quote（IKIZQF）
-   *  重新生成样片报价（只读，fail open）：非样片任务 / 模型停用或未放行 / 算不出价
-   *  → 空报价双 null。过期与成片失败不影响报价（过期只阻止转成片）。 */
   @Post(":jobId/regenerate-sample/quote")
   @HttpCode(200)
   async regenerateSampleQuote(
@@ -383,7 +306,6 @@ export class GenerationJobsController {
     try {
       quote = this.billingQuote();
     } catch (error) {
-      // 与 /quote 同款降级：计费地址缺失只是「这次没显示价格」，不把看价请求变 500。
       logger.warn(
         `[generation] 重新生成样片报价不可用，本次不显示价格：${
           error instanceof Error ? error.message : String(error)
@@ -394,7 +316,6 @@ export class GenerationJobsController {
     return handleRegenerateSampleQuote(user.userId, projectId, jobId, body, {
       projects: this.project,
       models: this.models,
-      // IKJGE6：报价入口统一依赖面（派生 body 已剥 target_node_id，此处合并不触发）。
       canvas: this.canvas,
       assets: this.command.assets,
       sampleSource: this.command.finalize,
@@ -402,10 +323,6 @@ export class GenerationJobsController {
     });
   }
 
-  /** POST /api/projects/:projectId/generation-jobs/:jobId/regenerate-sample（IKIZQF）
-   *  重新生成样片提交：请求体仅报价确认两字段（strict——输入由服务端从原样片冻结快照
-   *  派生，浏览器不重传），派生创建请求后走 create 端点同一创建管线（幂等/门控/素材
-   *  复核/报价复算/预扣/video_stage='sample'）。旧样片、失败成片及其费用记录只读不写。 */
   @Post(":jobId/regenerate-sample")
   async regenerateSample(
     @CurrentUser() user: AuthenticatedUser,
@@ -425,11 +342,9 @@ export class GenerationJobsController {
       {
         projects: this.project,
         models: this.models,
-        // IKJGE6：报价入口统一依赖面（派生 body 已剥 target_node_id，此处合并不触发）。
         canvas: this.canvas,
         assets: this.command.assets,
         sampleSource: this.command.finalize,
-        // create 端点同一装配（ IKIZQ8：报价复算与 /quote 同源）。
         create: {
           projects: this.project,
           command: this.command.repo,
@@ -442,13 +357,10 @@ export class GenerationJobsController {
         },
       },
     );
-    // IKJJR0（B.8 局部适配器）：新协议受控错误（canvas_binding 载荷无效/受理冲突等）信封
-    // 直写 HTTP 状态与 data.reason，不经 AllExceptionsFilter（它会置空 data）。
     if (isRecoveryControlledEnvelope(result)) {
       res?.status(result.code).json(result);
       return;
     }
-    // 与 create（IKG57P）同款口径：业务失败走 AllExceptionsFilter 统一投影。
     if (result.code !== 200) {
       throw new DomainError(result.code, result.msg ?? undefined);
     }
@@ -476,8 +388,6 @@ export class GenerationJobsController {
       projects: this.project,
       command: this.command.repo,
     });
-    // IKIPWT：与 create（IKG57P）同款口径——业务失败走 AllExceptionsFilter 统一投影，
-    // 不让 fail() 信封透传成 HTTP 201。
     if (result.code !== 200) {
       throw new DomainError(result.code, result.msg ?? undefined);
     }
@@ -493,7 +403,6 @@ export class GenerationJobsController {
     @Headers("idempotency-key") idempotencyKey?: string,
     @Res({ passthrough: true }) res?: Response,
   ) {
-    // IKJJQU：通用重试可携带 canvas_binding（body 为对象时取其 canvas_binding 字段）。
     const canvasBindingBody = typeof body === "object" && body !== null
       ? (body as { canvas_binding?: unknown }).canvas_binding
       : undefined;
@@ -510,7 +419,6 @@ export class GenerationJobsController {
       },
       canvasBindingBody,
     );
-    // IKJJQU（B.8 局部适配器）：新协议受控错误信封直写 HTTP 状态与 data.reason。
     if (isRecoveryControlledEnvelope(result)) {
       res?.status(result.code).json(result);
       return;
@@ -521,21 +429,17 @@ export class GenerationJobsController {
         try {
           await enqueueVideoGenerationJob(newJobId);
         } catch (error) {
-          // IKJ80Q：缺配≠故障，恢复扫描兜底（同 create video 分支）。
           const log = enqueueFailureLog(error, { scope: "generation", kind: "retry video", jobId: newJobId });
           logger[log.level](log.message);
         }
       } else if (result.data.type === "image") {
-        // IKBGKA：图片 retry 走 RocketMQ。
         try {
           await enqueueImageGenerationJob(newJobId);
         } catch (error) {
-          // IKJ80Q：缺配≠故障，恢复扫描兜底（同 create video 分支）。
           const log = enqueueFailureLog(error, { scope: "generation", kind: "retry image", jobId: newJobId });
           logger[log.level](log.message);
         }
       } else if (result.data.type === "audio") {
-        // IKCR78：音频 retry 走 RocketMQ（与 image 同构；enqueue 失败 fail-fast 置 failed）。
         try {
           await enqueueAudioGenerationJob(newJobId);
         } catch (error) {
@@ -550,8 +454,6 @@ export class GenerationJobsController {
         }
       }
     }
-    // IKIPWT：与 create（IKG57P）同款口径——业务失败走 AllExceptionsFilter 统一投影，
-    // 不让 fail() 信封透传成 HTTP 201。
     if (result.code !== 200) {
       throw new DomainError(result.code, result.msg ?? undefined);
     }

@@ -9,11 +9,7 @@ import {
   validateCustomConfig,
 } from "./constants.js";
 
-// 纯函数层（模块 B，PRD §7.1 / §7.3 / §7.6）。
-// 这些规则同时被「下单链路」与「管理端保存接口」用 —— 只留一份，
-// 否则会出现「后台保存时放行、用户下单时拒绝」这种以「配置保存成功了」形式出现的缺陷。
 
-/** PRD §7.1 的默认配置（校验的基准）。 */
 const DEFAULT = {
   minCredits: 600,
   maxCredits: 499_995,
@@ -24,27 +20,19 @@ const DEFAULT = {
 
 describe("customPriceFen — 价格 = 积分数 ÷ 每元积分数，四舍五入到分", () => {
   it("PRD §7.6「价格计算」：按 1 元 = 15 积分正确刷新", () => {
-    // 600 ÷ 15 = ¥40（4000 分）
     expect(customPriceFen(600, 15)).toBe(4_000);
     expect(customPriceFen(900, 15)).toBe(6_000);
     expect(customPriceFen(1_200, 15)).toBe(8_000);
-    // 上限：499,995 ÷ 15 = ¥33,333 整
     expect(customPriceFen(499_995, 15)).toBe(3_333_300);
   });
 
   it("★ 取整以积分为准：价格四舍五入到分，绝不为凑整回头去改积分数", () => {
-    // 601 ÷ 15 = 40.0666… → ¥40.07。那 0.0033 元的零头平台承担 ——
-    // 账本只有整数积分，用户要 601 就发 601
     expect(customPriceFen(601, 15)).toBe(4_007);
-    // 1 ÷ 15 = 0.0666… → ¥0.07
     expect(customPriceFen(1, 15)).toBe(7);
-    // 半分钱恰好落在中点：Math.round 向上（用户多付半分，不会付不出这个价）
-    expect(customPriceFen(7, 8)).toBe(88); // 0.875 元 → 88 分
+    expect(customPriceFen(7, 8)).toBe(88);
   });
 
   it("先乘后除：不允许出现浮点误差把整元价算歪", () => {
-    // 若写成 `credits / rate * 100`，300 ÷ 15 得 20.000000000000004 之类再放大取整，
-    // 上限那几个大数上会漂。这里把「整元」的价逐一对一遍
     for (let credits = 600; credits <= 9_000; credits += 15) {
       expect(customPriceFen(credits, 15)).toBe((credits / 15) * 100);
     }
@@ -77,20 +65,15 @@ describe("validateCustomConfig — 保存配置时的整份口径校验（PRD §
   });
 
   it("★ 下限 / 上限 / 默认值必须能被每元积分数整除", () => {
-    // PRD §7.1 自己注明「最高…需能被换算比例整除」，而换算比例是**可配的**。
-    // 三个值分别取一个「只有它不整除」的比例，确保三条判断都在（不是只查了第一个）
     expect(validateCustomConfig({ ...DEFAULT, minCredits: 601 })).toMatch(/最低积分/);
     expect(validateCustomConfig({ ...DEFAULT, defaultCredits: 601 })).toMatch(/默认积分/);
-    // 比例 4：600 % 4 === 0 通过，而 499995 % 4 === 3 —— 只有上限这一条会响
     expect(validateCustomConfig({ ...DEFAULT, creditsPerYuan: 4 })).toMatch(/最高积分/);
   });
 
   it("★ 校验的是**整份**配置：只改换算率也会让上下限不再整分", () => {
-    // 这正是必须合并后校验的理由 —— 只看着 creditsPerYuan 一个字段是发现不了的
     const err = validateCustomConfig({ ...DEFAULT, creditsPerYuan: 4 });
     expect(err).not.toBeNull();
     expect(err).toContain("499995");
-    // 换一个比例，卡住的换成下限：无论卡在哪一个，报的都是**整份配置**里的矛盾
     expect(validateCustomConfig({ ...DEFAULT, creditsPerYuan: 7 })).toContain("600");
   });
 
@@ -119,18 +102,15 @@ describe("validateCustomConfig — 保存配置时的整份口径校验（PRD §
   });
 
   it("★ 步长必须让滑杆推得到两端（否则「最高可选 499,995」是句假话）", () => {
-    // max-min = 499395；步长 16 除不尽 → 用户拖到底拿不到上限
     expect(validateCustomConfig({ ...DEFAULT, stepCredits: 16 })).toMatch(
       /滑杆推不到最高值/,
     );
-    // default-min = 0 恒成立，所以这里只可能卡在上一条
     expect(validateCustomConfig({ ...DEFAULT, stepCredits: 7 })).toMatch(
       /滑杆推不到最高值/,
     );
   });
 
   it("★ 默认值必须是滑杆上的一个格点（否则「默认选中」那个数拖不出来）", () => {
-    // min=600, step=15, max 取一个能被 15 整除、且 (max-min) 也能被 15 整除的值
     const cfg = {
       minCredits: 600,
       maxCredits: 900,
@@ -138,7 +118,6 @@ describe("validateCustomConfig — 保存配置时的整份口径校验（PRD §
       creditsPerYuan: 15,
       stepCredits: 30,
     };
-    // (900-600) % 30 === 0 通过；但 (615-600) % 30 = 15 ≠ 0
     expect(validateCustomConfig(cfg)).toMatch(/默认值不在滑杆的格点上/);
   });
 });
@@ -163,7 +142,6 @@ describe("canPurchaseCustom — 购买权限（PRD §10.4）", () => {
   });
 
   it("★ member_tier 本阶段**放行**：会员体系还没有，按它拒绝等于把所有人挡在门外", () => {
-    // PRD §10.4 明说它「为后续会员模块预留（阶段 2 生效，本阶段仅保留配置项）」
     expect(
       canPurchaseCustom({ permission: "member_tier", permissionAllowlist: [] }, 9001),
     ).toBe(true);
@@ -186,7 +164,3 @@ describe("customDeniedHint — 无权限提示", () => {
     );
   });
 });
-
-// 有效期换算（原 `customCreditsExpireAt`）已抽到 `recharge/credits-validity.ts`：
-// 档位单与自定义单共用同一份（起算点是支付成功时刻，见那里的文件头），
-// 用例随之搬到 `recharge/credits-validity.test.ts`。

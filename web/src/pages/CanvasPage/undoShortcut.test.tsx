@@ -35,13 +35,7 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
   })),
 }));
 
-/* IKGBPC 撤销快捷键页面级链路：Ctrl/Cmd+Z 回退删除（卡与悬空连线一并恢复）、
-   栈走空静默、Shift+Z 走既有重做而非撤销、编辑器/@ 菜单内让位、右键菜单
-   撤销/重做项保留且灰态正确。共享夹具见 canvasPageTestHarness（FlowCanvas 等
-   协作方打桩透出 props），键盘事件为派发到真实 DOM 的 KeyboardEvent。
-   本文件特有：生图模型列表（生成链路初始化用）。 */
 
-/** 默认画布：文本卡 t1/t1b + 成品媒体卡 m1 + 连线 t1→m1、t1b→m1（全部非生成中，不触发轮询）。 */
 function seedCanvasDoc() {
   canvasDocMock.current = {
     doc: {
@@ -86,7 +80,6 @@ function edgeExists(id: string): boolean {
   return flowProps.current.edges.some((e: { id: string }) => e.id === id);
 }
 
-/** 派发真实 keydown（冒泡 + 可取消），返回事件以断言 defaultPrevented。 */
 function pressKey(init: KeyboardEventInit, target: EventTarget = document.body): KeyboardEvent {
   const evt = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
   target.dispatchEvent(evt);
@@ -104,7 +97,6 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   seedCanvasDoc();
-  // 生成链路初始化需要一个可用模型（harness 默认空列表）
   apiMocks.fetchGenerationModels.mockResolvedValue([
     {
       model_id: 'm-test',
@@ -203,7 +195,6 @@ describe('IKGBPC Ctrl/Cmd+Z 回退画布结构操作', () => {
     });
     expect(nodeExists('m1')).toBe(true);
 
-    // 栈已空：再按 Z 不抛错、不改变画布
     await act(async () => {
       pressKey({ key: 'z', metaKey: true });
     });
@@ -217,13 +208,11 @@ describe('IKGBPC Ctrl/Cmd+Z 回退画布结构操作', () => {
     await deleteNodes(['m1']);
     expect(nodeExists('m1')).toBe(false);
 
-    // 删除后 redo 栈为空：Shift+Z 无操作，不产生回退
     await act(async () => {
       pressKey({ key: 'Z', metaKey: true, shiftKey: true });
     });
     expect(nodeExists('m1')).toBe(false);
 
-    // 撤销恢复后 Shift+Z 是既有重做：卡片再度消失（重做方向，非撤销）
     await act(async () => {
       pressKey({ key: 'z', metaKey: true });
     });
@@ -311,7 +300,6 @@ describe('IKGBPC 画布空白右键菜单「撤销/重做」保留且状态正�
     expect(menuItem('撤销').disabled).toBe(true);
     expect(menuItem('重做').disabled).toBe(true);
 
-    // 关菜单 → 删除 → 重开：撤销可点、重做灰
     await act(async () => {
       menuItem('撤销').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
@@ -320,14 +308,12 @@ describe('IKGBPC 画布空白右键菜单「撤销/重做」保留且状态正�
     expect(menuItem('撤销').disabled).toBe(false);
     expect(menuItem('重做').disabled).toBe(true);
 
-    // 点击「撤销」：卡片与连线恢复，菜单关闭
     await act(async () => {
       menuItem('撤销').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(nodeExists('m1')).toBe(true);
     expect(edgeExists('e1')).toBe(true);
 
-    // 重开：撤销灰、重做可点
     await openPaneMenu();
     expect(menuItem('撤销').disabled).toBe(true);
     expect(menuItem('重做').disabled).toBe(false);

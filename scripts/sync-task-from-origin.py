@@ -189,14 +189,6 @@ def integrated_child_heads(root: Path, branch: str, target_branch: str,
 
 
 def _legacy_polluted_branch(candidate: str, real: str) -> bool:
-    """兼容旧版脚本（PR577 前）写入的 GBK 乱码分支名。
-
-    旧版 git() 未指定 encoding，subprocess 在 Windows 用 locale(GBK) 解码
-    git 输出的 UTF-8 字节，得到的乱码 str 被 ensure_ascii=False 原样写入恢复点。
-    还原方向：乱码 str.encode("gbk") 恰好等于真实 UTF-8 字节，再 decode("utf-8")
-    即得真实分支名。仅当候选恰是这类乱码且还原后等于 real 才放行；
-    其余情况（含 POSIX、合法中文名、非乱码）保持原比较语义。
-    """
     if candidate == real:
         return True
     try:
@@ -352,9 +344,6 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None,
         rebase_input_head = expected_head
         backup_ref = str(recovery.get("backup_ref", backup_ref))
         remote_sha = str(recovery.get("remote_branch_sha", ""))
-        # 旧版脚本（PR577 前）可能写入 GBK 乱码的 branch 字段；read_recovery 已兼容放行，
-        # 这里归一化为实时真实分支名并随 write_recovery 写回，确保下游（如
-        # publish-review-package.sh --update-pr 的严格比较）读到的始终是真实 UTF-8 名。
         recovery["branch"] = branch
         recovery["upstream_sha"] = upstream_sha
     else:
@@ -813,9 +802,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Windows 原生 Python 的 stdout/stderr 默认 GBK，emit() 的 ensure_ascii=False
-    # 中文输出会抛 UnicodeEncodeError（与 subprocess 解码同根因的输出方向）。
-    # 强制改 UTF-8；POSIX 本就 UTF-8，reconfigure 为 no-op，不影响其他操作系统。
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

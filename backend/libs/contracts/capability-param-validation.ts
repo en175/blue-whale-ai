@@ -1,11 +1,11 @@
-// IKE7JP：生成参数对模型能力目录的结构性校验（纯函数，无 IO）。
-// 提交侧（Dock 视频/图片）在接纳当下校验 resolution/size/aspect_ratio/duration 是否
-// 落在能力目录支持范围，失败直接 4xx 返回带可用值的可修复文案，不再拖到 worker 执行期。
-//
-// 与 SceneCard 路径的 checkCapabilityLimit（scene-card-generation-repo.ts）语义一致：
-// 那里的入参是 frozenGenerationParametersSchema（size + aspect_ratio + duration 档位 id），
-// 这里把 Dock 的扁平字段（resolution + aspect_ratio + duration）归一化后同源校验。
-// 后续可把 checkCapabilityLimit 迁到本文件共享（IKE7JP 下一步）。
+
+
+
+
+
+
+
+
 
 import {
   ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION,
@@ -16,13 +16,13 @@ import {
   errorCodeToNumeric,
 } from "./error-codes.js";
 
-/** 提交侧能力目录行（handleCreateGenerationJob 已从 listEnabledByType 取回）。 */
+
 export interface CapabilityLimitInput {
   supported_sizes: Array<{ id?: string; api_value?: string }>;
   supported_aspect_ratios: unknown;
   supported_durations: unknown;
   default_size?: string;
-  /** IKFPYX：按任务类型的比例/时长约束（features.task_types）。命中时覆盖基础比例/时长校验。 */
+
   task_types?: unknown;
 }
 
@@ -53,15 +53,15 @@ export function normalizeVideoMode(raw: unknown): VideoMode | null {
   return LEGACY_VIDEO_MODE[raw] ?? null;
 }
 
-/** 编辑意图关键词。官方原文：「编辑视频、增加/加上、删除/去掉、修改/替换/改成」——斜杠是**同义项**，
- *  展开即这 8 个词。
- *
- *  ⚠️ 这里**没有**裸「编辑」：官方那条是「**编辑视频**」（两个字连写），不是一个「编辑」子串。
- *     加回裸「编辑」会让「编辑一下这个镜头」（用户只是随口说编辑，没说要改视频）落进 edit，
- *     于是该单被按编辑任务的锁定额处理（ratio 强制 adaptive），与官方的判定错位。
- *
- *  ⚠️ **导出是为了跨语言对账**（`video-task-type-parity.test.ts` 拿它当期望值，
- *     去比 worker-java `VideoJobProcessor` 里的同名字段）——两端各自发明过一次，所以钉死。 */
+
+
+
+
+
+
+
+
+
 export const EDIT_INTENT_KEYWORDS = [
   "编辑视频",
   "增加",
@@ -73,29 +73,29 @@ export const EDIT_INTENT_KEYWORDS = [
   "改成",
 ] as const;
 
-/** 延长意图关键词。官方原文：「向前/向后延长、延续、续写」——斜杠是**方向二选一**，
- *  展开即「向前延长」「向后延长」两个完整词组，加「延续」「续写」。
- *
- *  ⚠️ 这里**没有**裸「延长」，也**没有**裸「向前」「向后」：
- *     前者官方未列；后者会命中「镜头向前推进」这种**方向描述**（用户说的是运镜，不是要延长视频），
- *     把参考生视频单误判成 prolong。导出理由同 {@link EDIT_INTENT_KEYWORDS}。 */
+
+
+
+
+
+
 export const PROLONG_INTENT_KEYWORDS = ["向前延长", "向后延长", "延续", "续写"] as const;
 
-/** IKJ78C：否定防护词表（六词闭集，扩词走评审）。
- *
- *  背景：裸子串匹配会把「禁止修改」「不要替换」这类**约束句**误判成编辑意图，
- *  纯参考单被按 edit 的锁定比例 4xx 拒单。防护规则见 {@link hasIntentKeyword}。
- *
- *  ⚠️ **导出是为了跨语言对账**（`video-task-type-parity.test.ts` 拿它当期望值），
- *     与 worker-java `VideoJobProcessor` 同名字段逐字对齐。 */
+
+
+
+
+
+
+
 export const NEGATION_KEYWORDS = ["禁止", "不得", "不要", "不能", "勿", "无需"] as const;
 
-/** IKJ78C：子句切分标点（中英闭集，规格口径）。 */
+
 const CLAUSE_SEPARATORS = /[，。；！？、,.;!?]/;
 
-/** IKJ78C：否定防护后的关键词扫描——先按标点切子句，否定词与关键词落在**同一子句**时
- *  剔除该命中（含否定词的子句整体不参与扫描）；跨子句不剔除（混合句「禁止修改人物，
- *  把背景替换成海边」按肯定判 edit）。任一非否定子句命中即算意图存在。 */
+
+
+
 function hasIntentKeyword(prompt: string, words: readonly string[]): boolean {
   return prompt.split(CLAUSE_SEPARATORS).some(
     (clause) =>
@@ -123,11 +123,11 @@ export function resolveVideoMode(
   return "text2video";
 }
 
-/** IKJ795：编辑/延长 + 非 adaptive 比例拒单的用户向文案（结构化码 task_type_param_constraint 的话）。
- *  ⚠️ 不出现 edit/adaptive 等内部词——用户不需要知道任务类型枚举；「自动」对应前端
- *     adaptive 档的用户可见文案（IKJ794），一键修复动作 = 把比例切换为自动后重交。
- *  文案唯一来源 = error-codes.ts 的 ERROR_CODES 表（字符串码 → 数值码 → 文案查表取回），
- *  不在本文件再抄第二份字面量——两份会静默漂移。 */
+
+
+
+
+
 export const TASK_TYPE_PARAM_CONSTRAINT_MESSAGE =
   ERROR_CODES[errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT)]!;
 
@@ -152,12 +152,12 @@ function readNumberArray(v: unknown): number[] | null {
     : null;
 }
 
-/** 该任务类型**声明的**可用比例；未声明 → `null`（= 不覆盖基础能力行）。
- *
- *  <p>导出是给**接纳侧的另一处判定**用的（`validateVideo` 的首帧/首尾帧比例闸）：那里必须按
- *  同一份能力行配置判定，否则两处各写一套就成了 ADR-0110 禁止的「跨层重复的限制」。
- *
- *  <p>⚠️ 这是「配置说了什么」，不是「校验结论」——是否放行由调用方决定（`null` = 不限）。 */
+
+
+
+
+
+
 export function modeAllowedRatios(
   taskTypes: unknown,
   mode: VideoMode | undefined,
@@ -165,31 +165,31 @@ export function modeAllowedRatios(
   return readStringArray(modeConstraint(taskTypes, mode)?.allowed_ratios);
 }
 
-/* ── 视频输出像素表 ──────────────────────────────────────────────────────────────
- *
- * 形态：`"resolution=480p|aspect_ratio=16:9" → "864x496"`。
- *
- * **键格式是从定价目录原样搬过来的**（原先叫 `tokenEstimate.dimensions`）。逐字搬而不是
- * 重新设计，是为了让这次搬迁「只换存储位置、不换数据」——搬的过程中没有任何一处需要转换，
- * 也就没有转换错误可言。
- *
- * **为什么这张表在能力行而不是目录**：它只在**预扣**用（按宽高估 token）。预扣是 backend
- * 发起的，可以按规格查表、把宽高冻成两个标量随 Hold 带过去。对照组是单价——单价在**结算**用，
- * 那一刻只有 billing 在场（`JobEventConsumer → settlement.settle`），所以单价必须住 billing 的库。
- * 归属由「谁在用它的那一刻在场」决定，不是按「看起来像不像配置」分。
- */
 
-/** 规格键里允许的轴名。只认这两个——多一个轴就是另一种表，不该悄悄忽略。 */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const SPEC_KEY_AXES = ["resolution", "aspect_ratio"] as const;
 
-/** 宽高值：`864x496`。分隔符是小写 `x`（与目录里既有的值逐字一致）。 */
+
 const PIXELS_RE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
 
-/** 解析规格键 `resolution=480p|aspect_ratio=16:9` → `{resolution, aspect_ratio}`；
- *  形态不对（缺轴 / 多轴 / 空值 / 重复轴）返回 null。
- *
- *  ⚠️ 轴名与顺序都**不做宽容**：这张表的键是机器生成的（从档位 × 比例派生），
- *  人手敲错时应该当场报错，而不是「勉强认出来」——认错的后果是按错的像素预扣。 */
+
+
+
+
+
 export function parseSpecKey(key: string): Record<string, string> | null {
   const out: Record<string, string> = {};
   for (const part of key.split("|")) {
@@ -199,26 +199,26 @@ export function parseSpecKey(key: string): Record<string, string> | null {
     const value = part.slice(eq + 1);
     if (value.length === 0) return null;
     if (!(SPEC_KEY_AXES as readonly string[]).includes(axis)) return null;
-    if (out[axis] !== undefined) return null; // 重复轴：后一个会盖掉前一个，宁可拒
+    if (out[axis] !== undefined) return null;
     out[axis] = value;
   }
-  // 两个轴都必须有：少一个轴的键永远匹配不上，留着只会让人以为配了
+
   return SPEC_KEY_AXES.every((a) => out[a] !== undefined) ? out : null;
 }
 
-/** 拼规格键。与 {@link parseSpecKey} 是一对——全仓只有这一处拼键，避免两处写法漂开。 */
+
 export function specKeyOf(resolution: string, aspectRatio: string): string {
   return `resolution=${resolution}|aspect_ratio=${aspectRatio}`;
 }
 
-/** 规格键的**比较用**归一：逐段 trim + 小写，再按轴名排序拼回。
- *
- *  <p>为什么要有这一步：档位的**大小写两处不一致是常态**——能力行的 `api_value` 写 `4K`，
- *  而像素表的键是从定价目录搬过来的 `resolution=4k|...`。这不是脏数据，是同一个值的两种写法。
- *  billing 原先查表走 `PricingKeys.normalizeKey`（同样的 `trim().toLowerCase()`），搬迁时
- *  漏了这一层，实测后果是 **`2.0 + 4K` 从 379 积分变成「算不出价」**（宽高冻不上 → billing 估不出 token）。
- *
- *  <p>⚠️ 归一**只用于比较**，不写回、不改存储。键照原样存，读的时候两边都归一后再比。 */
+
+
+
+
+
+
+
+
 export function normalizeSpecKey(raw: string): string {
   const parts: Array<[string, string]> = [];
   for (const pair of raw.split("|")) {
@@ -230,17 +230,17 @@ export function normalizeSpecKey(raw: string): string {
   return parts.map(([k, v]) => `${k}=${v}`).join("|");
 }
 
-/** 解析宽高值 `"864x496"` → `{width, height}`；形态不对返回 null。 */
+
 export function parsePixels(value: string): { width: number; height: number } | null {
   const m = PIXELS_RE.exec(value);
   return m === null ? null : { width: Number(m[1]), height: Number(m[2]) };
 }
 
-/** 按 (分辨率档, 比例) 查输出像素。
- *
- *  <p>**查不到返回 `null`，不猜**——调用方据此走「预扣算不出上限」的拒绝路径。
- *  尤其**不做「adaptive 取该档位的 16:9 格」这种推断**：`adaptive` 在表里就是一个显式键，
- *  配了就命中、没配就没有，与目录时代的语义逐字相同（搬迁不改行为）。 */
+
+
+
+
+
 export function resolveOutputPixels(
   dimensions: unknown,
   resolution: string,
@@ -249,8 +249,8 @@ export function resolveOutputPixels(
   if (typeof dimensions !== "object" || dimensions === null || Array.isArray(dimensions)) {
     return null;
   }
-  // 逐字面命中优先（绝大多数情况，零额外开销），没命中再按归一后比一遍
-  // ——档位大小写两处不一致是常态（能力行 api_value 写 `4K`、表键写 `4k`），见 normalizeSpecKey。
+
+
   const map = dimensions as Record<string, unknown>;
   const exact = map[specKeyOf(resolution, aspectRatio)];
   if (typeof exact === "string") return parsePixels(exact);
@@ -263,8 +263,8 @@ export function resolveOutputPixels(
   return null;
 }
 
-/** 取该任务类型的约束（未传任务类型/无该类型配置/非法形态 → null = 回落基础能力校验）。
- *  注：`default` 也照常取用——配了 default 约束就应按它校验（否则该配置形同虚设）。 */
+
+
 function modeConstraint(
   taskTypes: unknown,
   mode: VideoMode | undefined,
@@ -278,10 +278,10 @@ function modeConstraint(
     : null;
 }
 
-/** IKJ797：能力行是否给该任务类型配了约束条目（`features.task_types[taskType]` 存在）。
- *  报价/预扣用它判「该模型的 edit 是否锁跟随口径」：Seedance 2.5 配了 `task_types.edit`
- *  （官方：edit 输出比例时长跟随参考视频），2.0 未配（编辑类提示词也可自选时长）——
- *  按模型分叉的约束走能力行配置，与本文件其他读取器同一立场。 */
+
+
+
+
 export function hasModeConstraint(
   taskTypes: unknown,
   mode: VideoMode,
@@ -289,26 +289,26 @@ export function hasModeConstraint(
   return modeConstraint(taskTypes, mode) !== null;
 }
 
-/** 提交侧待校验参数（Dock 视频/图片扁平字段，归一化由调用方完成）。 */
+
 export interface GenerationParamCheckInput {
-  /** 视频分辨率档（如 1080p）或图片尺寸档（如 2k）——与能力行 supported_sizes 的 id/api_value 比对。 */
+
   size: string;
   aspect_ratio: string;
-  /** 视频时长（秒）。图片/音频不校验。 */
+
   duration?: number;
   mode?: VideoMode;
 }
 
-/** 校验失败原因：带可用值提示，前端可直接展示。 */
+
 export interface CapabilityParamFailure {
   reason: string;
-  /** 供日志/调试；对外 message 用 reason。 */
+
   field: "size" | "aspect_ratio" | "duration";
-  /** IKE7JP：细分错误码（resolution/ratio/duration 各一，出自码表）。 */
+
   code: string;
 }
 
-/** 尺寸档命中：按 id 或 api_value 比对能力行 supported_sizes 元素。 */
+
 function matchesSize(
   size: string,
   supported: CapabilityLimitInput["supported_sizes"],
@@ -316,7 +316,7 @@ function matchesSize(
   return supported.some((s) => s.id === size || s.api_value === size);
 }
 
-/** 时长档：DB 支持两种形态（档位数组 [3,5,10] 或 {min,max,step} 范围对象）。 */
+
 function durationInRange(
   duration: number,
   supported: CapabilityLimitInput["supported_durations"],
@@ -326,7 +326,7 @@ function durationInRange(
   }
   const range = supported as { min?: number; max?: number } | null;
   if (!range || typeof range.min !== "number" || typeof range.max !== "number") {
-    // 无有效范围定义：不阻断（能力行未配置时长约束时放行，worker 兜底）。
+
     return true;
   }
   return duration >= range.min && duration <= range.max;
@@ -352,10 +352,10 @@ function ratios(capability: CapabilityLimitInput): string[] {
   return aspectRatioIds(capability.supported_aspect_ratios);
 }
 
-/** 校验提交参数是否落在能力目录支持范围。
- *  IKFPYX：命中 features.task_types[task_type] 时，该类型的 allowed_ratios / allowed_durations
- *  覆盖基础比例/时长校验（支持 duration=-1 自动时长）；未命中回落基础能力行。
- *  @returns 失败原因（带可用值提示）；全部通过返回 null。 */
+
+
+
+
 export function checkGenerationParamLimit(
   capability: CapabilityLimitInput,
   params: GenerationParamCheckInput,
@@ -363,8 +363,8 @@ export function checkGenerationParamLimit(
   const supportedSizes = Array.isArray(capability.supported_sizes)
     ? capability.supported_sizes
     : [];
-  // IKE7JP review：size 为空串（只带 duration 的视频任务）时不按分辨率拦截——
-  // 分辨率未指定时由能力默认值兜底，仅校验明确携带的 duration。
+
+
   if (
     params.size !== "" &&
     supportedSizes.length > 0 &&
@@ -387,9 +387,9 @@ export function checkGenerationParamLimit(
 
   const ratioList = taskRatios ?? ratios(capability);
   if (ratioList.length > 0 && !ratioList.includes(params.aspect_ratio)) {
-    // IKJ795：编辑/延长被任务类型锁定比例拒下时换专用码 + 用户向文案——前端按码识别
-    // 「一键改为跟随视频」场景，文案不出现 edit/adaptive 等内部词。其余任务类型与基础
-    // 比例越界维持 capability_unsupported_ratio（两码语义不混）。
+
+
+
     if (params.mode === "edit" || params.mode === "extend") {
       return {
         field: "aspect_ratio",
@@ -406,7 +406,7 @@ export function checkGenerationParamLimit(
   if (params.duration !== undefined) {
     const d = Number(params.duration);
     if (taskDurations) {
-      // 任务类型约束显式给出可用时长（可含 -1 自动时长）——严格按该清单校验。
+
       if (!taskDurations.includes(d)) {
         return {
           field: "duration",
@@ -415,7 +415,7 @@ export function checkGenerationParamLimit(
         };
       }
     } else {
-      // 基础能力行：仅正数，且在 supported_durations 范围内（不含 -1）。
+
       if (!Number.isFinite(d) || d <= 0) {
         return { field: "duration", code: ERROR_CAPABILITY_UNSUPPORTED_DURATION, reason: "时长必须为正数" };
       }
@@ -442,7 +442,7 @@ export function checkGenerationParamLimit(
   return null;
 }
 
-/** 把 Dock 视频参数解析成校验输入；resolution 缺省回退 size（plan/scene_card 兼容）。 */
+
 export function toGenerationParamCheckInput(input: {
   resolution?: unknown;
   size?: unknown;
@@ -458,8 +458,8 @@ export function toGenerationParamCheckInput(input: {
       : typeof input.size === "string" && input.size.length > 0
         ? input.size
         : "";
-  // IKE7JP review：duration 单独存在（视频只带时长、无 resolution/size）也进入校验——
-  // 不能让只带时长越界一路漏到 worker。size 为空串时 duration 仍有效。
+
+
   const duration =
     input.duration === undefined || input.duration === null
       ? undefined

@@ -28,8 +28,6 @@ run_stage() {
   return "$exit_code"
 }
 
-# 契约生成物不入库（backend/libs/contracts/gen/ 被 .gitignore 排除）：新任务 worktree 未先
-# 在 contracts/ 跑 buf generate 时，tsc 只会报一堆 TS2307 且无根因提示，这里提前指路。
 if [ ! -d backend/libs/contracts/gen/billing ]; then
   echo "契约产物 backend/libs/contracts/gen/ 缺失：请先在 contracts/ 目录执行 buf generate；若 buf.build 远端插件不可达，用 HTTPS_PROXY=http://127.0.0.1:7897 重试" >&2
   exit 1

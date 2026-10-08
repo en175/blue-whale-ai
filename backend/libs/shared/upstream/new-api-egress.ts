@@ -1,67 +1,8 @@
-/* ============================================
- * new-api 的**唯一出口**
- *
- * ── 为什么会有这个文件 ────────────────────────────────────────────────────────
- *
- * 在它之前，`NEW_API_BASE_URL` 被 **6 处各读各的**：
- *   · libs/core/new-api-transport.ts（ops 客户端，账单/管理端走这条）
- *   · libs/shared/text/completions.ts        （文生文，裸 fetch）
- *   · libs/shared/material/material.service.ts（素材库，裸 fetch）
- *   · libs/shared/generation/cost-estimator.service.ts
- *   · apps/.../agent-model-gateway.controller.ts（模块顶层读一次环境变量）
- *   · libs/shared/skills/skill-format.ts
- *
- * 于是「new-api 到底从哪进来」这个问题没有答案，只有六份各自的回答。它们的 base URL
- * 拼接、trace 头、超时/中断策略各不相同——改一处不会影响另一处，出问题要逐个排查。
- * 用户的原话是：「都调用一个接口，为啥写了 2 个，内部有收敛成一个出口吗」。
- *
- * ── 这个出口管什么、不管什么 ──────────────────────────────────────────────────
- *
- * **管**：base URL 解析（含缺失即拒绝）、路径拼接、`X-Trace-Id` 透传、发起请求。
- * 这几件事是纯重复，且漂移了没人会发现。
- *
- * **不再管项目统一凭证**——它已经不在环境变量里了，见下面那段「凭证去哪了」。
- *
- * **不管**：把鉴权**头**塞进请求，也不判别计费主体。因为 new-api 有**两套并存的鉴权模型**，
- * 由调用方按自己的语义各取所需：
- *   · 用户面：`Authorization: Bearer <项目统一 key>`
- *   · Agent 计费面：`Authorization: Bearer bwsvc_...` + `x-bw-subject-user-id`
- *     （服务令牌 + 计费主体矫正，见 agent-model-gateway 的说明）
- * 把「填哪个头」塞进出口，就得让出口去分辨「这次是哪种调用」——那只是把分支换了个地方。
- *
- * ── 凭证去哪了：环境变量 → `system_settings`（管理端可配） ─────────────────────
- *
- * 统一 key 曾由 `NEW_API_UPSTREAM_KEY` 注入，于是「换一把 key」等于「改部署 + 重启全项目」，
- * 而用户的口径是**整个项目共用这一个配置**。现在它是配置表里的一行：
- * `system_settings` 的 `upstream` 模块，管理端「系统设置 → 上游凭证」维护，
- * AES-256-GCM 加密落库、回显只给 `****1234`。
- *
- * **唯一解析点**是 `SystemSettingsService.requireUpstreamKey()`
- * （`libs/shared/system-settings/system-settings.service.ts`）——加密行只有它能解。
- * 「new-api 从哪进来」仍归本文出口（`NEW_API_BASE_URL` 是部署拓扑，跟着容器走）；
- * 「以谁的身份进来」归配置表。两处各答一半，但各只有**一个**答案。
- *
- * ⚠️ **计费面的 `bwsvc_` 服务令牌不是「第二把项目 key」**，不要试图把它并进统一 key：
- *    new-api 的 relay 入口**按前缀分流**（`middleware/relay_auth.go`）——不带的落
- *    `TokenAuth` 查 token 表，带的落 `AgentBillingAuth` 做恒时比对并解出计费主体。
- *    换成 `sk-` 统一 key 不是报错，是**静默换一条路**：走到 `TokenAuth`，账单记到统一 key
- *    的属主头上，`x-bw-subject-user-id` 被无视。它是**服务身份**，与项目凭证不同轴，
- *    因此也**不配在管理端**——它不是「我们发给上游的我们是谁」，是服务之间的身份。
- *
- * ⚠️ 秒级流式（SSE）的**超时策略也不在这里**：文生文按总时长、Agent 网关按空闲时长，
- *    两者对「上游卡住」的定义本来就不同（见各自的注释）。出口只负责把 `signal` 透传下去。
- * ============================================ */
 import { NewApiError } from "@lib/core";
 import { TRACE_ID_HEADER, getCurrentTraceId } from "@lib/core/logging";
 
 export const NEW_API_BASE_URL_ENV = "NEW_API_BASE_URL";
 
-/**
- * 上游地址未配置。
- *
- * <p>返回空串然后让调用方自己去处理，是本仓历史上多处踩过的坑：表现为
- * `fetch("undefined/v1/...")` 或一个来路不明的 404，报错点离原因很远。
- */
 export class NewApiConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -69,7 +10,6 @@ export class NewApiConfigError extends Error {
   }
 }
 
-/** 上游 base URL（去掉尾部斜杠，避免拼出 `//v1`）。未配置即抛。 */
 export function newApiBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   const raw = (env[NEW_API_BASE_URL_ENV] ?? "").trim();
   if (!raw) {
@@ -78,22 +18,11 @@ export function newApiBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return raw.replace(/\/+$/, "");
 }
 
-/**
- * 拼一个上游 URL。
- *
- * @param path 以 `/` 开头的上游路径，例如 `/v1/chat/completions`
- */
 export function newApiUrl(path: string, env: NodeJS.ProcessEnv = process.env): string {
   return `${newApiBaseUrl(env)}${path}`;
 }
 
 
-/**
- * 上游凭证未配置。
- *
- * <p>与「凭证被上游拒绝」是两回事，不要混成一个 401：那是上游不认（401，该查凭证本身），
- * 这是我们**这边没配**（503，该去管理端配）。
- */
 export class UpstreamCredentialMissingError extends NewApiError {
   constructor() {
     super(
@@ -107,14 +36,6 @@ export class UpstreamCredentialMissingError extends NewApiError {
 }
 
 
-/**
- * 向上游发一个请求。
- *
- * <p>`X-Trace-Id` 由这里统一补（IKB29O）：调用方自己带了的以调用方为准——Agent 网关
- * 会把 Agent 发来的那个透传下去，那是同一条链路的延续，不该被我们本地生成的覆盖。
- *
- * @param init 调用方的原始 init。鉴权头等由调用方自己放进 `headers`
- */
 export async function newApiFetch(
   path: string,
   init: RequestInit = {},

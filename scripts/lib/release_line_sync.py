@@ -1,4 +1,3 @@
-"""Synchronize the active local release checkout with its remote branch."""
 
 import errno
 import json
@@ -33,7 +32,6 @@ def configure_git_hooks(root):
     root = Path(root).resolve()
     if not (root / ".githooks/pre-push").is_file():
         raise SyncError("仓库缺少 .githooks/pre-push，无法启用本地推送门禁。")
-    # Set the clone-wide default and also replace a current worktree override.
     git(root, "config", "--local", "--replace-all", "core.hooksPath", ".githooks")
     if git(root, "config", "--bool", "--get", "extensions.worktreeConfig", check=False).stdout.strip() == "true":
         git(root, "config", "--worktree", "--replace-all", "core.hooksPath", ".githooks")
@@ -44,7 +42,6 @@ def configure_git_hooks(root):
 
 @contextmanager
 def release_line_lock(root):
-    """Hold this lock through sync AND worktree creation when starting a task."""
     value = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
     lock_path = value / "blue-whale" / "release-line-sync.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,8 +84,6 @@ def ancestor(root, older, newer):
 
 
 def current_line(root):
-    # manage-release-branch.sh delegates to this same Python authority. Calling it
-    # directly also works from PowerShell, where bare "bash" may launch WSL.
     command = [sys.executable, str(root / "scripts/lib/release-line-state.py"), "current", "--json"]
     result = subprocess.run(command, cwd=root, text=True, encoding="utf-8",
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -105,7 +100,6 @@ def current_line(root):
 
 
 def sync_current_release(root):
-    """Synchronize inside release_line_lock; caller may then create a worktree."""
     root = Path(root).resolve()
     top = Path(git(root, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
     if not os.path.samefile(root, top):

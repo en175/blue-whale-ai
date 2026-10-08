@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Persist and validate the release baseline of a task worktree."""
 
 import argparse
 import json

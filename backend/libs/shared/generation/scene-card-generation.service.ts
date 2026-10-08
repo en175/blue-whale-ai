@@ -4,7 +4,6 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createSceneCardGenerationRepo>;
 
-/** SceneCard 再生成 repo 封装。 */
 @Injectable()
 export class SceneCardGenerationService {
   private repoInstance?: Repo;

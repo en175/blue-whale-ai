@@ -84,7 +84,6 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
-/** 日期输入框是受控的：要绕过 React 的 value setter 才能触发 onChange。 */
 async function setDate(label: string, value: string) {
   const el = input(label);
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -119,8 +118,6 @@ describe('Dashboard 仪表盘（按区间统计）', () => {
 
     expect(api.fetchAdminDashboard).toHaveBeenCalledTimes(1);
     const range = api.fetchAdminDashboard.mock.calls[0]?.[0];
-    // 今天按**北京时间**算：用 toISOString().slice(0,10) 在 UTC 机器上
-    // 会在北京时间 00:00–08:00 之间退回前一天
     const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
     expect(range).toEqual({ from: today, to: today });
     expect(input('起始日期').value).toBe(today);
@@ -140,7 +137,6 @@ describe('Dashboard 仪表盘（按区间统计）', () => {
     expect(text).toContain('总充值积分');
     expect(text).toContain('5,000,000 分');
     expect(text).toContain('总收入金额');
-    // 后端给的是**分**，展示换成元 —— 1000000 分 = 10000.00 元
     expect(text).toContain('10,000.00');
   });
 
@@ -150,7 +146,6 @@ describe('Dashboard 仪表盘（按区间统计）', () => {
     await renderPage();
 
     const text = document.body.textContent ?? '';
-    // 0 的意思是「这段时间确实没人消费」；取不到时我们并不知道消费了多少
     expect(text).toContain('—');
     expect(text).toContain('计费服务当前不可用');
     expect(text).toContain('不代表这段时间没有消费');
@@ -160,12 +155,10 @@ describe('Dashboard 仪表盘（按区间统计）', () => {
     await renderPage();
 
     const text = document.body.textContent ?? '';
-    // 中文名不是 video_subtitle_erase 那种原始 key
     expect(text).toContain('视频');
     expect(text).toContain('图片');
     expect(text).toContain('音频');
     expect(text).not.toContain('video_subtitle_erase');
-    // 120/280 = 42.9%，100/280 = 35.7%，60/280 = 21.4%（分母是区间总数 280，不是全表）
     expect(text).toContain('42.9%');
     expect(text).toContain('35.7%');
     expect(text).toContain('21.4%');
@@ -191,11 +184,10 @@ describe('Dashboard 仪表盘（按区间统计）', () => {
     expect(api.fetchAdminDashboard).toHaveBeenCalledTimes(1);
 
     await setDate('起始日期', '2026-08-01');
-    await setDate('结束日期', '2026-09-25'); // 56 天
+    await setDate('结束日期', '2026-09-25');
 
     expect(document.body.textContent).toContain('最多 30 天');
     expect(button('查询').disabled).toBe(true);
-    // 禁用还不够：真点下去也不该发请求（后端才是权威，但前端不该白等一次往返）
     await click('查询');
     expect(api.fetchAdminDashboard).toHaveBeenCalledTimes(1);
   });
@@ -204,7 +196,7 @@ describe('Dashboard 仪表盘（按区间统计）', () => {
     await renderPage();
 
     await setDate('起始日期', '2026-08-27');
-    await setDate('结束日期', '2026-09-25'); // 含首尾 30 天
+    await setDate('结束日期', '2026-09-25');
 
     expect(button('查询').disabled).toBe(false);
     await click('查询');

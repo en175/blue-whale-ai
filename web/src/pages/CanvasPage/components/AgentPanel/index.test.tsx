@@ -6,7 +6,6 @@ import AgentPanel from './index';
 import styles from './index.module.css';
 import { DEFAULT_PANEL_WIDTH, PANEL_WIDTH_STORAGE_KEY } from './drawerWidth';
 
-/* useAgentSession 是会话状态机（快照水合 + 流式事件流），与抽屉形态无关，整体打桩。 */
 const sessionMock = vi.hoisted(() => ({
   turns: [],
   sessionId: null,
@@ -50,7 +49,6 @@ vi.mock('@/api/agentSessions', () => ({
   fetchSessionCredits: vi.fn(async () => null),
 }));
 
-/* 富文本输入框与抽屉形态无关，打桩掉以隔离 contentEditable 等 jsdom 盲区。 */
 vi.mock('../ChipTextEditor', () => ({
   default: () => createElement('div', { 'data-testid': 'chip-editor' }),
 }));
@@ -135,7 +133,6 @@ describe('AgentPanel 停靠抽屉（IKDLD4）', () => {
     await renderPanel();
     const handle = resizeHandle()!;
 
-    // 向左猛拖 1000px：468 + 1000 远超上限 min(720, 50vw)=720，收在 720
     await pointer('pointerdown', handle, 1200);
     await pointer('pointermove', handle, 200);
     expect(panel().style.width).toBe('720px');
@@ -159,7 +156,6 @@ describe('AgentPanel 停靠抽屉（IKDLD4）', () => {
     await renderPanel();
     expect(panel().style.width).toBe('468px');
 
-    // jsdom 默认 innerWidth 1024；缩到 900 后上限 50vw=450 < 468，宽度被收回
     vi.stubGlobal('innerWidth', 900);
     await act(async () => {
       window.dispatchEvent(new Event('resize'));
@@ -218,7 +214,6 @@ describe('AgentPanel 消息列表跟随到底', () => {
     };
   }
 
-  /** jsdom 不做布局：给消息列表装上可控的滚动几何，内容高度随测试改。 */
   function list(contentHeight = { value: 2000 }) {
     const el = container.querySelector<HTMLElement>(`.${styles.messageList}`)!;
     let top = 0;

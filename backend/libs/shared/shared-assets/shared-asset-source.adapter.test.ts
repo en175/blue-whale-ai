@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SharedAssetSourceAdapter } from "./shared-asset-source.adapter.js";
 
-/** 端口适配器参数顺序测试：SceneCardResourceService 签名是 (userId, sceneCardId)，
- *  曾因透传顺序写反导致场景卡保存必挂（IK9QKP reviewer round2），此测试钉死回归。 */
 describe("SharedAssetSourceAdapter（端口参数顺序）", () => {
   it("findOwnedSource 按 (sourceAssetId, userId) 透传", async () => {
     const assets = { findOwnedSource: vi.fn().mockResolvedValue({ type: "image" }) };

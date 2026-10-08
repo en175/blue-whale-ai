@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* 扩展框覆盖层组件测试：手柄渲染与定位、拖边/拖角/Shift 锁比例换算接线、
-   拖拽结束停止响应、多帧连续拖动（重渲染不拆进行中的监听——拖不动 bug 回归锁）。
-   换算本身在 imageOutpaint.test.ts 纯函数层覆盖，此处测组件把屏幕事件正确接到
-   纯函数并回抛（zoom=1、容器在原点时 flow 坐标 == client 坐标）。 */
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
@@ -10,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import OutpaintFrame from './index';
 import type { ExpandSides } from '../../imageOutpaint';
 
-/** 400×300 内容区（短边 300 → 单方向上限 120） */
 const RECT = { x: 1000, y: 500, width: 400, height: 300 };
 
 let root: Root;
@@ -18,8 +13,6 @@ let container: HTMLDivElement;
 let onChange: ReturnType<typeof vi.fn>;
 let current: ExpandSides;
 
-/** 带状态宿主：rect 每次渲染传新对象、onExpandChange setState 触发真实重渲染，
- *  复现 CanvasPage 的 props 流（旧 bug：重渲染拆掉进行中的拖拽监听）。 */
 function Host({ initial }: { initial: ExpandSides }) {
   const [expands, setExpands] = useState(initial);
   current = expands;
@@ -49,7 +42,6 @@ async function renderFrame(expands: ExpandSides = { top: 0, right: 0, bottom: 0,
   });
 }
 
-/** jsdom 无 PointerEvent 构造器：MouseEvent 补指针属性（marqueeSelect.test.tsx 同做法） */
 function pointerEvent(type: 'pointerdown' | 'pointermove' | 'pointerup', x: number, y: number, shiftKey = false) {
   const event = new MouseEvent(type, {
     bubbles: true, cancelable: true, button: 0, buttons: type === 'pointerup' ? 0 : 1,
@@ -74,7 +66,6 @@ const handle = (id: string) => container.querySelector(`[data-testid="outpaint-h
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // 容器在视口原点：zoom=1 时 flow 坐标 == client 坐标
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
     x: 0, y: 0, left: 0, top: 0, right: 1200, bottom: 900, width: 1200, height: 900,
     toJSON: () => ({}),
@@ -114,14 +105,12 @@ describe('IKGOQX 扩展框渲染', () => {
     await renderFrame();
     const top = handle('top') as HTMLElement;
     const left = handle('left') as HTMLElement;
-    // 命中带几何 = 框的整边（宽 400 / 高 300），线上居中
     expect(top.style.left).toBe('1000px');
     expect(top.style.top).toBe('500px');
     expect(top.style.width).toBe('400px');
     expect(left.style.left).toBe('1000px');
     expect(left.style.top).toBe('500px');
     expect(left.style.height).toBe('300px');
-    // 中点蓝条退为纯视觉层，不再承担命中
     expect((top.firstElementChild as HTMLElement).className).toContain('edgeVisual');
   });
 
@@ -150,7 +139,6 @@ describe('IKGOQX 扩展框渲染', () => {
     await act(async () => { root.render(renderWith(true)); });
     const layer = container.querySelector('[data-testid="outpaint-frame"]') as HTMLElement;
     expect(layer.style.visibility).toBe('hidden');
-    // 隐藏不卸载：手柄仍在文档中
     expect(container.querySelector('[data-testid="outpaint-handle-nw"]')).toBeTruthy();
     await act(async () => { root.render(renderWith(false)); });
     expect(layer.style.visibility).toBe('');
@@ -205,7 +193,6 @@ describe('IKGOQX 扩展框拖拽换算接线', () => {
     await renderFrame();
     await down(handle('top'), 1200, 500);
     await move(1200, 450);
-    // 第一帧生效后宿主已重渲染（rect 新引用），第二帧必须仍然生效
     expect(current).toEqual({ top: 50, right: 0, bottom: 0, left: 0 });
     await move(1200, 420);
     expect(current).toEqual({ top: 80, right: 0, bottom: 0, left: 0 });

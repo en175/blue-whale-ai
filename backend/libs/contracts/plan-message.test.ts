@@ -7,10 +7,6 @@ import {
   providerPromptAssetSchema,
 } from "./plan-message.js";
 
-// IKCKOW / IKD806 退役了内嵌 Agent 运行时与计划应用写路径，本文件原先覆盖的
-// PlanMessage / PlanCardCandidate / PlanApplyImageReceipt / ProviderPromptProjection /
-// deriveProviderPromptProjection / PlanApplicationAvailability 已随那条通道删除。
-// 留下的四项仍被别处真实消费，这里补上它们自己的契约覆盖（改之前这四项没有直接用例）。
 
 const digest = `sha256:${"a".repeat(64)}`;
 
@@ -91,7 +87,6 @@ describe("plan-message 存活契约（能力快照 / 派生引用 / 冻结参数
       count: 1,
     });
     expect(parsed.count).toBe(1);
-    // strict：少一个键（缺 duration）必须被拒，防止「应用时再猜默认值」。
     expect(() =>
       frozenGenerationParametersSchema.parse({
         capability_type: "image",
@@ -113,7 +108,6 @@ describe("plan-message 存活契约（能力快照 / 派生引用 / 冻结参数
         role: "first_frame",
       }).role,
     ).toBe("first_frame");
-    // 画格走 slot_id：带 mention_id 会被 strict 拒（它没有 PlanMessage mention 身份）。
     expect(() =>
       providerPromptAssetSchema.parse({
         mention_id: "101",

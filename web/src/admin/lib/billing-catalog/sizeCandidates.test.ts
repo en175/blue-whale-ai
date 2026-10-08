@@ -14,11 +14,6 @@ import {
   sizeOfSpecKey,
 } from './sizeCandidates';
 
-/** 一个档位在 **wire 上的**真实形态（含出站值与像素宽高）。
- *
- *  `AdminModel['supported_sizes']` 只声明 id/label（见 `api/admin.ts` 那条 ⚠️ 的取舍），
- *  而库里这几列确实在——所以夹具按 wire 造，收口时收窄成 `AdminModel`。
- *  本模块读的正是 wire 形态（`toCapabilitySize(raw: unknown)`），这条缝本身就是被测对象。 */
 type SizeWire = {
   id: string;
   label?: string;
@@ -28,7 +23,6 @@ type SizeWire = {
   height?: number;
 };
 
-/** 能力行夹具：只填本模块读的字段，其余给中性值（模块也不读别的）。 */
 function model(
   partial: Omit<Partial<AdminModel>, 'supported_sizes'> & {
     model_id: string;
@@ -61,7 +55,6 @@ function model(
   };
 }
 
-/** 线上形态的 5.0 Pro：id 与 api_value 只有大小写差异，矩阵键 = api_value。 */
 const SEEDREAM_PRO = model({
   model_id: 'doubao-seedream-5-0-pro-260628',
   supported_sizes: [
@@ -73,7 +66,6 @@ const SEEDREAM_PRO = model({
   default_aspect_ratio: '1:1',
   request_mapping: {
     matrix: {
-      // ⚠️ 故意写成 api_value 的大写拼写：读侧必须大小写不敏感（与 worker 同口径）
       '1K': { '1:1': '1024x1024', '16:9': '1424x800' },
       '2K': { '1:1': '2048x2048', '16:9': '2816x1584' },
     },
@@ -82,7 +74,6 @@ const SEEDREAM_PRO = model({
 
 const seedreamPro = buildCapabilityIndex([SEEDREAM_PRO]).get('doubao-seedream-5-0-pro-260628')!;
 
-/** 视频 2.5：能力行只有分辨率档与比例；宽高**不在**能力行里（视频矩阵是 null）。 */
 const seedance25 = buildCapabilityIndex([
   model({
     model_id: 'doubao-seedance-2-5-260628',
@@ -133,8 +124,6 @@ describe('candidateSpecKeys', () => {
   });
 });
 
-/* ⚠️ 这一组就是用户那句「模型尺寸表，模型配置里面有啊」的落点：尺寸表的候选键
- *   = supported_sizes × supported_aspect_ratios，运营不再手敲。 */
 describe('尺寸表候选键 = 分辨率档 × 宽高比', () => {
   it('★ 视频：候选集就是能力行的两个字段做笛卡尔积', () => {
     expect(dimensionTableCandidates(seedance25)).toEqual([
@@ -246,7 +235,6 @@ describe('规格键的小工具', () => {
 
   it('sizeOfSpecKey 大小写不敏感地找档位', () => {
     expect(sizeOfSpecKey(seedreamPro, 'size=2K')?.id).toBe('2k');
-    // 能力行里没有的档位（就是那个漂移出来的 4k）→ null
     expect(sizeOfSpecKey(seedreamPro, 'size=4k')).toBeNull();
   });
 });

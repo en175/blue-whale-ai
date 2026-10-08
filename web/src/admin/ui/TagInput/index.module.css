@@ -1,4 +1,3 @@
-/* TagInput：值列表 + 输入行。颜色/边框沿用 Chip 与 Input 的同一组 token。 */
 .root {
   display: flex;
   flex-direction: column;
@@ -25,7 +24,6 @@
 }
 
 .tagText {
-  /* 长 mode_id 不许把整行撑破；完整值在 title 与输入框里都能看到 */
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;

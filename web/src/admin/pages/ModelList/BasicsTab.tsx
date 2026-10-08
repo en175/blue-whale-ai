@@ -1,13 +1,3 @@
-/* ============================================
- * 「基础」tab：身份字段（只读）+ 类型 / 复制自 / model_id / 展示名 / 图标 / 启用。
- *
- * 从 `ModelFormModal.tsx` 拆出来（那个文件已顶到 `max-lines` 上限）：内容按现有区块归位，
- * **没有新增字段**——原先那些条件渲染原样保留。
- *
- * ⚠️ 这里的信息分两类，形态也不同（全管理端同一条规矩，见 `ui/Hint`）：
- *   · 「现在是什么」（这一行的身份、当前值）→ 可见的 `Alert`，藏起来等于把状态藏起来；
- *   · 「这是什么 / 为什么」→ 标签旁的 `?`（`Hint`），悬停才展开。
- * ============================================ */
 import type { AdminModel } from '@/api/adminModels';
 import { Checkbox, Field, Hint, Input, MetaRow, Select } from '../../ui';
 import { FULL, GRID2, GRID3, LABEL } from './formLayout';
@@ -20,7 +10,6 @@ import {
 } from './model-form';
 
 interface BasicsTabProps {
-  /** 编辑态传库中那一行；新建态不传 */
   initial?: AdminModel;
   type: ModelType;
   onType: (type: ModelType) => void;
@@ -35,8 +24,6 @@ interface BasicsTabProps {
   onIcon: (value: string) => void;
   enabled: boolean;
   onEnabled: (value: boolean) => void;
-  /** 渠道（`generation_model_capability.channel`）：**身份级配置**，与「类型」并列。
-   *  它决定请求怎么解析、出站用哪种线协议 —— 具体哪种映射表长什么样，在「尺寸与素材」里配。 */
   channel: ChannelId;
   setChannel: (channel: ChannelId) => void;
 }
@@ -61,9 +48,7 @@ export default function BasicsTab({
 }: BasicsTabProps) {
   return (
     <>
-      {/* IKHBDO：类型与供应商是身份字段（后端不接受更新），编辑态只读展示——
-          原先编辑态整块不渲染，运营看不到这一行属于哪个供应商。
-          用 MetaRow 而不是蓝色色块：色块是装饰，这里要表达的是「这一行是什么」。 */}
+      {}
       {initial && (
         <MetaRow
           items={[
@@ -74,8 +59,7 @@ export default function BasicsTab({
         />
       )}
 
-      {/* 类型 / 渠道 / 复制自：**身份级的决策**。编辑态「类型」是只读的（上面那块 Alert），
-          但渠道仍要能改（换出站协议 = 换渠道）。 */}
+      {}
       <div style={GRID3}>
         {!initial && (
           <div>
@@ -146,8 +130,7 @@ export default function BasicsTab({
         </Field>
       </div>
 
-      {/* 图标与启用**在同一行**：两个都是「单个短控件」，各自占一列才与上面的两列对齐 ——
-          单独一行全宽就是前几轮被点名的「一会长一会短」。 */}
+      {}
       <div style={GRID2}>
         <Field label={<>图标 icon <span>（选填）</span></>}>
           <Input placeholder="URL 或图标名" value={icon} onChange={(e) => onIcon(e.target.value)} style={FULL} />

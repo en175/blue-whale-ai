@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-/* CutoutToolbar 抠图工具栏组件（IKGXMT）：横条结构（X/场景上拉/增强控件显隐/本期免费/
-   发送钮——Dock 主发送钮同款图标钮，IKGZ5Q）、
-   场景上拉开合与选择、描边上拉（启用开关+宽度滑杆实时生效+禁用态）、透明裁剪点亮开关、
-   发送置灰与 title 原因、X 关闭。渲染模式 createRoot + act，
-   只断言外部可见行为。 */
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,7 +34,6 @@ const handlers = {
   onSend: vi.fn(() => true),
 };
 
-/** 受控重渲染：组件无内部参数态，父级 state 变化经 props 回流 */
 async function renderToolbar(props: Partial<ToolbarProps> = {}) {
   await act(async () => {
     root.render(
@@ -92,7 +86,6 @@ describe('CutoutToolbar（抠图横条工具栏）', () => {
     expect(btn('cutout-scene-trigger').textContent).toContain('通用');
     expect(el('cutout-toolbar').textContent).toContain('本期免费');
     expect(btn('cutout-send-btn')).toBeTruthy();
-    // 无标题字：横条文本只由控件文案构成
     expect(el('cutout-toolbar').textContent.startsWith('抠图')).toBe(false);
   });
 
@@ -100,15 +93,12 @@ describe('CutoutToolbar（抠图横条工具栏）', () => {
     await renderToolbar();
     expect(el('cutout-scene-menu')).toBeNull();
     await click('cutout-scene-trigger');
-    // 只取菜单项（role=menuitem），排除触发钮与菜单容器自身
     const items = [...mountNode.querySelectorAll('[data-testid^="cutout-scene-"][role="menuitem"]')];
     expect(items.map((n) => n.textContent)).toEqual(['通用', '人像', '商品']);
-    // 每项悬停说明（规格故事 7）
     expect(el('cutout-scene-human').getAttribute('title')).toContain('人物');
     await click('cutout-scene-human');
     expect(handlers.onSceneChange).toHaveBeenCalledWith('human');
     expect(el('cutout-scene-menu')).toBeNull();
-    // 受控回流：父级切到人像后触发钮文案跟随
     await renderToolbar();
     expect(btn('cutout-scene-trigger').textContent).toContain('人像');
   });
@@ -117,7 +107,7 @@ describe('CutoutToolbar（抠图横条工具栏）', () => {
     await renderToolbar();
     await click('cutout-scene-trigger');
     expect(el('cutout-scene-menu')).not.toBeNull();
-    await click('cutout-scene-trigger'); // 再点关闭（规格故事 17）
+    await click('cutout-scene-trigger');
     expect(el('cutout-scene-menu')).toBeNull();
     await click('cutout-scene-trigger');
     await act(async () => {
@@ -142,7 +132,7 @@ describe('CutoutToolbar（抠图横条工具栏）', () => {
     const range = mountNode.querySelector<HTMLInputElement>('[data-testid="cutout-contour-size"]')!;
     expect(range.min).toBe('1');
     expect(range.max).toBe('50');
-    expect(range.disabled).toBe(true); // 描边未开启时宽度不可调
+    expect(range.disabled).toBe(true);
     expect(btn('cutout-contour-toggle').getAttribute('aria-checked')).toBe('false');
   });
 
@@ -156,16 +146,13 @@ describe('CutoutToolbar（抠图横条工具栏）', () => {
     expect(range.disabled).toBe(false);
     await act(async () => {
       range.value = '33';
-      // React valueTracker 守卫：清 tracker 后派发 input，onChange 才会触发
       const tracker = (range as unknown as { _valueTracker?: { setValue(v: string): void } })._valueTracker;
       tracker?.setValue('');
       range.dispatchEvent(new Event('input', { bubbles: true }));
     });
     expect(handlers.onContourSizeChange).toHaveBeenCalledWith(33);
-    // 开关回调（组件不持参，父级受控）
     await click('cutout-contour-toggle');
     expect(handlers.onNeedContourChange).toHaveBeenCalledWith(false);
-    // 透明裁剪点亮开关
     expect(btn('cutout-crop-toggle').getAttribute('aria-checked')).toBe('false');
     await click('cutout-crop-toggle');
     expect(handlers.onNeedCropBackgroundChange).toHaveBeenCalledWith(true);
@@ -177,14 +164,12 @@ describe('CutoutToolbar（抠图横条工具栏）', () => {
     const send = btn('cutout-send-btn');
     expect(send.disabled).toBe(true);
     expect(send.getAttribute('title')).toContain('7680');
-    // Dock 同款形态：白 ↑ 图标（ArrowUp）；置灰态不带激活类（IKGZ5Q）
     expect(send.querySelector('svg.lucide-arrow-up')).toBeTruthy();
     expect(send.className).not.toMatch(/sendBtnActive/);
     await act(async () => {
       send.click();
     });
     expect(handlers.onSend).not.toHaveBeenCalled();
-    // 可发（精校通过）：激活态带 sendBtnActive
     await renderToolbar({ sendDisabledReason: null });
     expect(btn('cutout-send-btn').disabled).toBe(false);
     expect(btn('cutout-send-btn').className).toMatch(/sendBtnActive/);
@@ -200,7 +185,6 @@ describe('CutoutToolbar（抠图横条工具栏）', () => {
 });
 
 describe('IKI61N 描边宽度滑杆键盘操作（Esc 退出会话，组件内自闭环）', () => {
-  /** 人像场景 + 启用描边 + 打开描边上拉，返回可用的宽度滑杆 */
   async function openContourSlider() {
     state.scene = 'human';
     state.needContour = true;

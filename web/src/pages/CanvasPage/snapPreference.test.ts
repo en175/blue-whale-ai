@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-/* IKGGCT T3：吸附开关 localStorage 读写纯函数——默认开、合法值读取、
- * 非法/缺失值回退开、写入往返（jsdom 环境提供原生 localStorage）。 */
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   persistSnapAlignmentEnabled,

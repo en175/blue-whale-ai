@@ -10,8 +10,6 @@ SCRIPT = ROOT / '.claude/hooks/remind-issue-state.sh'
 
 
 class RemindIssueStateTest(unittest.TestCase):
-    """锁定提醒输出通道：非 kimi 端必须以 hookSpecificOutput.additionalContext
-    JSON 注入（裸 stdout 不进入模型上下文），kimi 端纯文本，恒 exit 0。"""
 
     def run_hook(self, payload):
         return subprocess.run([BASH, str(SCRIPT)], input=json.dumps(payload),

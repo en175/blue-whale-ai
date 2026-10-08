@@ -89,7 +89,6 @@ export {
   type ChangePasswordRequest,
 } from "./change-password.js";
 export {
-  // ── 生成任务域错误码（字符串契约 + 数值表 + 信号 + 类型）──
   ERROR_ALL_OUTPUTS_FAILED,
   ERROR_AUDIO_GENERATION_FAILED,
   ERROR_AUDIO_SPEED_FAILED,
@@ -153,7 +152,6 @@ export {
   isContentPolicySignal,
   NEW_API_QUOTA_SIGNAL,
   isQuotaSignal,
-  // ── 账号域错误码 ──
   ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
   ACCOUNT_ERROR_PASSWORD_INCORRECT,
   ACCOUNT_ERROR_PASSWORD_INVALID,
@@ -162,11 +160,9 @@ export {
   accountErrorToNumeric,
   accountMessageFor,
   type PublicAccountError,
-  // ── 一码一文案表 + 查询 ──
   ERROR_CODES,
   errorMessage,
   messageOf,
-  // ── 全局业务码常量（Java SystemCode 系）──
   DATA_NOT_EXIST_CODE,
   ASSET_UNAVAILABLE_CODE,
   RESOURCE_NOT_FOUND_CODE,
@@ -185,7 +181,6 @@ export {
   SHARED_ASSET_EMPTY_CARD_CODE,
   IDEMPOTENCY_CONFLICT_CODE,
   SHARED_ASSET_TYPE_UNSUPPORTED_CODE,
-  // ── 素材域错误码（2xxx）+ 码 → HTTP 状态 ──
   ASSET_ERROR_SPECS,
   SKILL_ERROR_SPECS,
   httpStatusForCode,
@@ -566,7 +561,6 @@ export {
 
 export { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, promptPlanSnapshotSchema, type PromptBinding, type PromptInputSources, type PromptPlanSnapshot } from "./prompt-target.js";
 export {
-  // ── IKIZQ5：Seedance 2.5 样片/成片跨进程契约（父规格 IKIZPZ）──
   VIDEO_STAGES,
   CHARGE_STATES,
   SAMPLE_MODE_PARAM,

@@ -16,7 +16,6 @@ vi.mock('@/api/jobs', async (importOriginal) => ({
   retryAudioMix: vi.fn(),
 }));
 
-/** 接缝已由父规格确认：公开运行时、实际任务定义，API 与画布宿主受控。 */
 function setup(status: JobDetail['status'] = 'processing', record = mixRecord()) {
   let projectId = '1';
   let epoch = {};

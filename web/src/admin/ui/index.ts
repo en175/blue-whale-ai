@@ -1,8 +1,3 @@
-/* 管理端 UI 基元统一出口。
- * 页面一律从这里 import：`import { Button, Card, Table } from '@/admin/ui';`
- *
- * 目标是**页面不再有私有样式**：一个界面元素只有这里一处定义。
- * 看到某个页面自己写 button / table / select / chip 的样式，就是这里缺了对应组件。 */
 export { default as Alert, type AlertTone } from './Alert';
 export { default as Badge, type BadgeTone } from './Badge';
 export { default as Bar } from './Bar';

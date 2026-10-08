@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// IKIZQC：generation_jobs 成片来源唯一约束（FINALIZE_SOURCE_UNIQUE_KEY）三轨迁移核对
-// ——镜像 generation-jobs-video-sample-stage-parity 的结构。
 
 const migrationSql = readFileSync(
   new URL(
@@ -35,7 +33,6 @@ describe("generation_jobs 成片来源唯一约束三轨迁移（IKIZQC）", () 
     expect(migrationSql).toMatch(
       /ADD UNIQUE KEY `uk_generation_jobs__source_sample_job_id` \(`source_sample_job_id`\)/,
     );
-    // G08：失败尝试也占位——索引出现在何处分句不影响语义，但复合键会让「软删绕过占位」成为可能。
     expect(migrationSql).not.toMatch(/UNIQUE KEY[^\n]*is_delete/);
   });
 

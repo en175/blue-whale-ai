@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-/* IKFA1P：BottomDialog 生视频文本附件标签——与媒体混排索引/失效恢复/发送携带 prompt_doc */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -63,7 +62,6 @@ async function renderDialog(opts: RenderOpts = {}) {
           onClose: vi.fn(),
           onSend,
           initialDoc: opts.initialDoc ?? null,
-          // IKFC1T：面板默认模式改为文生视频，本套用例为「有媒体参考」的全能参考场景
           initialParams: opts.initialParams ?? { mode: 'all' },
           attachments: opts.attachments,
           videoDraftBinding: { onParamsChange: vi.fn() },
@@ -158,7 +156,6 @@ describe('IKFA1P 生视频文本附件索引（A2 文本部分）', () => {
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
     const items = mentionMenuItems();
     expect(items.map((b) => b.textContent)).toEqual(['观浪笔记文本2']);
-    // 菜单行不展示正文片段
     expect(items[0]!.textContent).not.toContain('深海观测');
     await act(async () => {
       items[0]!.click();

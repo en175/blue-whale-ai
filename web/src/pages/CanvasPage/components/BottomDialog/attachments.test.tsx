@@ -7,13 +7,13 @@ import BottomDialog from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 
-/* IKDLQG：附件正文有效时允许空提示词提交（契约限长规则在面板侧的落点）。
-   IKFCKQ：文本附件以 FileText 缩略图进参考栏统一序列——独立「文本附件（N）」区块、
-   折叠正文与上移/下移排序随自绘实现下线（拖拽换位随 T5 切片另落）。 */
+
+
+
 
 const { fetchGenerationModels, editorPendingCalls } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
-  /** IKFCKQ：缩略图 @ 按钮走 insertRefAtPending（记忆光标路径），桩记录调用供断言 */
+
   editorPendingCalls: [] as Array<{ kind: string; id: string }>,
 }));
 
@@ -39,7 +39,7 @@ fetchGenerationModels.mockImplementation(async () => [
   },
 ]);
 
-/** PromptRefEditor 打桩（IKFA1O 编辑器替换）：textarea 输入透传结构化 onChange */
+
 vi.mock('../PromptRefEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
@@ -104,7 +104,7 @@ async function renderDialog(props: RenderProps = {}) {
       ),
     );
   });
-  // 等模型能力加载完成（发送门依赖 currentModel）
+
   await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'));
   return { onSend };
 }
@@ -145,11 +145,11 @@ describe('BottomDialog 文本附件提交契约（IKDLQG）', () => {
       aspectRatio: '16:9',
       resolution: '720p',
       duration: 5,
-      // IKFC1T：无媒体输入的附件驱动提交即文生视频模式（新建默认 prompt）
+
       mode: 'text2video',
-      // IKG0LP：是否带音频（缺省 true）
+
       generateAudio: true,
-      // IKIZQB：样片开关（缺省关闭，普通视频提交语义）
+
       sampleMode: false,
     }, null);
   });
@@ -168,9 +168,9 @@ describe('BottomDialog 文本附件提交契约（IKDLQG）', () => {
   });
 });
 
-/* IKFCKQ：文本附件进参考栏——FileText 图标缩略图与媒体同序列、文本N 独立编号、
-   @ 与手动 @ 选择同一插入机制（text_ref 身份）。
-   IKFCXC：× 统一走 onRemoveAttachment 断边链路（方案与普通附件同口径，方案附件素材同步期间禁移除）。 */
+
+
+
 describe('IKFCKQ 文本附件进参考栏', () => {
   it('附件以图标缩略图进参考栏统一序列，编号独立于媒体（文本N 圆钮仅数字）', async () => {
     await renderDialog({
@@ -185,7 +185,7 @@ describe('IKFCKQ 文本附件进参考栏', () => {
     expect(row.map((el) => el.getAttribute('data-testid'))).toEqual(['dock-video-ref', 'dock-text-ref', 'dock-text-ref']);
     const badges = textThumbs().map((t) => t.querySelector('[data-testid="ref-thumb-badge"]')?.textContent);
     expect(badges).toEqual(['1', '2']);
-    // 独立「文本附件（N）」区块不再出现
+
     expect(container.textContent).not.toContain('文本附件（');
   });
 

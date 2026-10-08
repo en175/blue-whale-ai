@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { parseTier, resolveTier, TIERS, type MembershipPeriod } from "./tier.js";
 
-/** 固定「现在」：解析函数不收时间参数就不能被确定性地测。 */
 const NOW = new Date("2026-09-24T12:00:00+08:00");
 
 function period(tier: string, expiresAt: Date | null, status = "active"): MembershipPeriod {
@@ -18,8 +17,6 @@ describe("parseTier", () => {
   });
 
   it("认不出时返回 null，而不是 free", () => {
-    // 返回 free 会把「没有会员」与「值写错了」压成同一个结果，
-    // 调用方再也没法判断该不该告警。
     expect(parseTier("PRO")).toBeNull();
     expect(parseTier("vip")).toBeNull();
     expect(parseTier("")).toBeNull();
@@ -53,8 +50,6 @@ describe("resolveTier", () => {
   });
 
   it("多个有效周期取最高等级，不是最晚到期", () => {
-    // 用户同时有「明天到期的 max」与「一年后到期的 pro」——他现在就是 max，明天才降。
-    // 按最晚到期取会让他今天就被降级，而他明明还持有 max。
     const soonMax = new Date("2026-09-25T12:00:00+08:00");
     const farPro = new Date("2027-09-24T12:00:00+08:00");
 
@@ -68,8 +63,6 @@ describe("resolveTier", () => {
   it("认不出的等级被跳过，并原样回报给调用方", () => {
     const resolution = resolveTier([period("vip", FUTURE), period("pro", FUTURE)], NOW);
 
-    // 跳过不等于无视：这个用户此刻的权益取决于那行脏数据，
-    // 调用方必须有机会把它记下来。
     expect(resolution.tier).toBe("pro");
     expect(resolution.unknownTiers).toEqual(["vip"]);
   });

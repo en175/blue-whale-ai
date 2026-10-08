@@ -1,9 +1,3 @@
-/* ============================================
- * 用户端充值页效果预览（GET /api/admin/topup-tiers/preview）。
- *
- * 只展示**已上架且未失效**的档位——服务端 listActive 过滤，草稿与下架都进不来，
- * 所以运营在这里看到的顺序就是用户在充值页看到的顺序。
- * ============================================ */
 import { useQuery } from '@tanstack/react-query';
 import { Star } from 'lucide-react';
 import { topupTierPreviewOptions, type TopupTierPreview } from '@/api/adminTopupTiers';
@@ -12,7 +6,6 @@ import { Badge, Button, Card, Empty, Hint, Modal, Stat } from '../../ui';
 import { discountLabel, fmtMoney, fmtPoints } from './plan';
 
 export default function PreviewModal({ onClose }: { onClose: () => void }) {
-  // 打开时拉取（Query 的 key 固定一份，所以重开弹窗命中缓存；失败可重试）
   const preview = useQuery(topupTierPreviewOptions());
   const list: TopupTierPreview[] = preview.data ?? [];
   const loading = preview.isPending;

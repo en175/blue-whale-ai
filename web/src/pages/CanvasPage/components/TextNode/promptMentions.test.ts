@@ -4,8 +4,6 @@ import type { PromptMention, PromptMaterial } from '@lib/contracts/prompt-previe
 import { mediaAndPromptMentionsDisjoint, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { applyMediaMentionState, createMediaMentionChip, readPromptMentions, renderPromptMentions } from './promptMentions';
 
-/* IKFM3L 统一正文契约 v1：Markdown 源 + mention 区间 → DOM → Markdown 源 的往返保真
-   IKFM3Q 正文媒体索引契约 v1：media 标签的编号/失效由身份与有效性派生，序列化写回派生文本 */
 
 const materials: Array<PromptMaterial & { url: string }> = [
   { assetId: '101', mediaType: 'image', url: 'https://example.com/a.png' },
@@ -130,7 +128,6 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
     renderPromptMentions(editor, md, [], [], mediaMentions, refs, validity);
     const chipLabels = [...editor.querySelectorAll<HTMLElement>('[data-media-node]')].map(chip => `${chip.dataset.mediaNode}:${chip.dataset.mediaLabel}:${chip.dataset.mediaInvalid ?? 'valid'}`);
     expect(chipLabels).toEqual(['media-i1:图片1:valid', 'media-i2:已失效：猫咪原图:1', 'media-i3:图片2:valid']);
-    // 序列化写回派生文本：失效标签占位居长变化，区间仍锚定各自身份
     const back = readPromptMentions(editor, validity);
     expect(back.text).toBe('图片1被已失效：猫咪原图夹图片2');
     expect(back.text.slice(back.mediaMentions[1].start, back.mediaMentions[1].end)).toBe('已失效：猫咪原图');
@@ -139,7 +136,6 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
 
   it('源切片是显示缓存：陈旧编号在序列化时被规范化', () => {
     const editor = mount();
-    // 磁盘上的切片写着旧编号 图片9，但派生编号是 图片1
     const md = '引用图片9结束';
     const mediaMentions: MediaMention[] = [{ start: 2, end: 5, nodeId: 'media-i1', assetId: '9001' }];
     renderPromptMentions(editor, md, [], [], mediaMentions, [mediaRef('media-i1', '9001', 'image')], allValid);
@@ -158,7 +154,6 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
     expect(back.text).toBe('参考 图片1');
     expect(back.mediaMentions).toEqual([{ start: 3, end: 6, nodeId: 'media-i1', assetId: '9001' }]);
     expect(back.mediaRefs).toEqual([{ nodeId: 'media-i1', assetId: '9001', mediaType: 'image', name: '猫咪.png', url: 'https://example.com/m.png' }]);
-    // 往返：单段落，chip 不被拆成独立块
     const replay = mount();
     renderPromptMentions(replay, back.text, [], [], back.mediaMentions, back.mediaRefs, allValid);
     expect(replay.querySelectorAll('p')).toHaveLength(1);
@@ -181,7 +176,6 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
 
   it('应用生成卡的同区间双数组：渲染去重，但编辑序列化必须保住镜像索引（IKH4EF）', () => {
     const editor = mount();
-    // applyPreview（IKG6EK）把方案绑定原地派生成同区间的 mediaMentions，节点落库即带两套同区间标签
     const md = '[素材][素材]';
     const mentions: PromptMention[] = [
       { start: 0, end: 4, index: 1, assetId: '101' },
@@ -193,10 +187,8 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
     ];
     const refs = [mediaRef('media-i1', '101', 'image')];
     renderPromptMentions(editor, md, mentions, materials, mediaMentions, refs, allValid);
-    // 渲染去重：每段只出一张 chip，且保留方案 #N 身份（IKG99G）
     expect(editor.querySelectorAll('[data-prompt-asset="101"]')).toHaveLength(2);
     expect(editor.querySelectorAll('[data-media-node="media-i1"]')).toHaveLength(0);
-    // 序列化回写：镜像索引不得被清空（清空会连带删掉 textIndex 关系线，目标参考素材随之丢失）
     const back = readPromptMentions(editor, allValid);
     expect(back.text).toBe(md);
     expect(back.mentions).toEqual(mentions);
@@ -211,7 +203,6 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
     const mentions: PromptMention[] = [{ start: 0, end: 4, index: 1, assetId: '101' }];
     const mediaMentions: MediaMention[] = [{ start: 0, end: 4, nodeId: 'media-i1', assetId: '101' }];
     renderPromptMentions(editor, md, mentions, materials, mediaMentions, [mediaRef('media-i1', '101', 'image')], allValid);
-    // 模拟「打开卡片敲一次字」：在首段最前面插入一个字符
     const block = editor.querySelector('p')!;
     block.insertBefore(document.createTextNode('X'), block.firstChild);
     const back = readPromptMentions(editor, allValid);
@@ -229,7 +220,6 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
     ];
     const refs = [mediaRef('media-i1', '9001', 'image'), mediaRef('media-i2', '9002', 'image', '二号图')];
     renderPromptMentions(editor, md, [], [], mediaMentions, refs, allValid);
-    // 连线被删：media-i1 失效，media-i2 重排为 图片1
     applyMediaMentionState(editor, nodeId => nodeId === 'media-i2');
     const first = editor.querySelector<HTMLElement>('[data-media-node="media-i1"]')!;
     const second = editor.querySelector<HTMLElement>('[data-media-node="media-i2"]')!;
@@ -237,7 +227,6 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
     expect(first.dataset.mediaLabel).toBe('已失效：素材名');
     expect(second.dataset.mediaLabel).toBe('图片1');
     expect(second.dataset.mediaInvalid).toBeUndefined();
-    // 连线恢复：就地回到有效编号
     applyMediaMentionState(editor, allValid);
     expect(first.dataset.mediaLabel).toBe('图片1');
     expect(first.dataset.mediaInvalid).toBeUndefined();

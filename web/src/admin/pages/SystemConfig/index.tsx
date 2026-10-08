@@ -1,11 +1,4 @@
 import type { ReactNode } from 'react';
-/* ============================================
- * SystemConfig 系统设置：上游凭证·支付凭证安全配置·充值政策文案·限流参数
- * 数据源 GET/PUT /api/admin/settings
- *
- * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**——
- * 与 SkillManage 同一条纪律：页面只描述结构，样式一处定义在套件里。
- * ============================================ */
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Eye, EyeOff } from 'lucide-react';
@@ -45,7 +38,6 @@ type TabKey = (typeof TABS)[number]['key'];
 
 const errMsg = (e: unknown, fallback: string) => (isApiError(e) ? e.message : fallback);
 
-/** tab 内容区的统一版式：一列、限宽（原来由 .tabBody 给，随私有样式文件删除后内联） */
 const tabBodyStyle = {
   display: 'flex',
   flexDirection: 'column',
@@ -56,28 +48,19 @@ const tabBodyStyle = {
 export default function SystemConfig() {
   const [tab, setTab] = useState<TabKey>('upstream');
 
-  /**
-   * 设置走 Query（IKJ058）。
-   *
-   * <p>⚠️ 这个读**不显示错误态**：失败提示由 http 层默认 toast 承担，页面收掉 loading、
-   * 露出「未配置」即可 —— 与改前同一条口径，不额外加一处错误文案。
-   */
   const list = useQuery(adminSettingsOptions());
   const settings: SystemSettings | null = list.data ?? null;
   const loading = list.isPending;
 
-  /** 保存成功后重拉（凭证回显服务端脱敏值）。 */
   const loadSettings = async () => {
     await list.refetch();
   };
 
-  /** 凭证按 key 增量更新 */
   const saveCredential = async (key: keyof SystemCredentials, value: string) => {
     await updateAdminSettings({ credentials: { [key]: value } });
     await loadSettings();
   };
 
-  /** 上游凭证按 key 增量更新（与支付凭证同一条合并语义） */
   const saveUpstream = async (key: keyof SystemUpstream, value: string) => {
     await updateAdminSettings({ upstream: { [key]: value } });
     await loadSettings();
@@ -118,20 +101,11 @@ export default function SystemConfig() {
   );
 }
 
-/* ============ 上游凭证（new-api） ============ */
 
-/** 上游字段清单。
- *  ⚠️ 只有 `new_api_key` 一项，且是**密**字段：它是全项目共用的一把 key，
- *    backend 与 worker 都从这里取——改一处即全项目生效，不需要重新部署。
- *
- *  ⚠️ Agent 计费面的 `bwsvc_` 服务令牌**不在这里配**：它不是「我们发给上游的我们是谁」，
- *    是服务之间的身份，走 new-api 另一套鉴权模型（按前缀分流），并进统一 key 会静默错账。 */
 const UPSTREAM_FIELDS: {
   key: keyof SystemUpstream;
   label: string;
-  /** 字段级微文案：一行说清「保存后怎样」 */
   hint: string;
-  /** 段落级解释：这一把 key 在系统里的位置，收进标题旁的 `?` */
   info: ReactNode;
   secret: boolean;
 }[] = [
@@ -173,17 +147,7 @@ function UpstreamTab({
   );
 }
 
-/* ============ 支付凭证 ============ */
 
-/** 凭证字段清单。
- *  ⚠️ `secret` 只对**真的密文**为真：密字段走脱敏回显 + 密码框 + 眼睛切换，
- *    非密字段（商户号 / App ID / 回调地址）必须明文回显 + 明文输入框——
- *    它们是拿去和网关后台核对的标识和地址，显示成 **** 只会让人没法核对。
- *
- *  ⚠️ 这四个字段都是**支付网关那一侧**的「我们是谁」，不是杭州银行发给我们的商户参数。
- *    杭州银行的 `merId` / `certId` / 银行签名证书标识 / 商户证书(.pfx) 与密码住在
- *    支付网关自己的库（渠道配置页），**不在这个页面配**——这里再存一份就变成两处会漂的
- *    真相：银行换证时改了一处，另一处静静地错着，而报错会出在远离原因的「验签失败」上。 */
 const CRED_SECTION = '杭州银行聚合主扫 · 支付网关商户信息';
 const CRED_FIELDS: {
   key: keyof SystemCredentials;
@@ -230,7 +194,6 @@ function CredTab({
   );
 }
 
-/** 单个凭证卡片：回显服务端值（密字段为脱敏值），编辑态输入 + 保存走增量更新 */
 function CredCard({
   label,
   hint,
@@ -240,11 +203,8 @@ function CredCard({
   onSave,
 }: {
   label: string;
-  /** **字段级微文案**：一行说清「保存后怎样」。渲染在值下方，一眼可见。 */
   hint?: string;
-  /** **段落级解释**：收进标题旁的 `?`（见 `ui/Hint` 的两层口径）。 */
   info?: ReactNode;
-  /** 是否密文：决定脱敏回显、输入框类型与眼睛切换，以及加密存储提示 */
   secret: boolean;
   value: string;
   onSave: (v: string) => Promise<void>;
@@ -293,7 +253,7 @@ function CredCard({
         </Button>
       }
     >
-      {/* 「现在是什么」保持可见：没配就明写「未配置」，不留一片空白让人以为页面坏了 */}
+      {}
       <div style={value ? undefined : { color: 'var(--admin-text-faint)' }}>{value || '未配置'}</div>
       {hint && (
         <div style={{ marginTop: 'var(--admin-space-1)', fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
@@ -335,7 +295,6 @@ function CredCard({
   );
 }
 
-/* ============ 充值政策文案 ============ */
 function PolicyTab({
   policy,
   onSave,
@@ -349,7 +308,6 @@ function PolicyTab({
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
 
-  /** 服务端数据晚于挂载到达时同步表单 */
   useEffect(() => {
     if (policy) {
       setRefund(policy.refund_text);
@@ -398,7 +356,6 @@ function PolicyTab({
   );
 }
 
-/* ============ 限流配置 ============ */
 function RateTab({
   rateLimit,
   onSave,

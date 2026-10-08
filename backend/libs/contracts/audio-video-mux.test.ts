@@ -48,7 +48,6 @@ describe("audio_video_mux 跨进程契约（IKIHPJ，迁移契约 §21）", () =
     for (const key of ["video_url", "audio_url", "is_audio_reserve", "is_video_audio_sync", "sync_mode", "sync_method", "client_token"]) {
       expect(javaClient, `出站键 ${key} 应冻结在网关客户端`).toContain(`"${key}"`);
     }
-    // 纯出站 snake_case 键不得混入冻结快照常量（is_audio_reserve 是规格钉死的双用同名词，除外）。
     for (const key of ["video_url", "audio_url", "is_video_audio_sync", "sync_mode", "sync_method"]) {
       expect(javaContract, `出站键 ${key} 不应混入冻结快照常量`).not.toContain(`INPUT_KEY_${key.toUpperCase()}`);
     }
@@ -60,9 +59,6 @@ describe("audio_video_mux 跨进程契约（IKIHPJ，迁移契约 §21）", () =
   });
 
   it("pins the result-name suffix so the TS constant and the Java literal cannot drift apart", () => {
-    // §21.4 结果资产命名 = 源视频名去扩展名 + "(音视频合成).mp4"（ASCII 圆括号，空白回落「视频」）。
-    // Java 无法 import TS 常量，JobFinalizer.composeAudioVideoMuxResultName 持同一字面——
-    // 两侧任一改写未同步即红（TS 侧 web/audioVideoMux.ts 的回填命名同源引用本常量）。
     expect(AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX).toBe("(音视频合成).mp4");
     expect(javaFinalizer).toContain(`+ "${AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX}";`);
     expect(javaFinalizer).toContain('if (base.isEmpty()) base = "视频";');
@@ -95,7 +91,6 @@ describe("audio_video_mux 跨进程契约（IKIHPJ，迁移契约 §21）", () =
       sync: "audio",
     })).toMatchObject({ is_audio_reserve: false, sync: "audio", video: { nodeId: "video-node" } });
 
-    // 固定源必有 nodeId；snake_case 与多余键都拒（两套命名不混）。
     expect(audioVideoMuxCreateSchema.safeParse({ ...valid, audio: { assetId: "11" } }).success).toBe(false);
     expect(audioVideoMuxCreateSchema.safeParse({ video: { assetId: "12" } }).success).toBe(false);
     expect(audioVideoMuxCreateSchema.safeParse({ audio: { asset_id: "11", node_id: "source-node" }, video: { asset_id: "12" } }).success).toBe(false);

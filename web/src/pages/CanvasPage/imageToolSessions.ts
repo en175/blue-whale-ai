@@ -106,7 +106,6 @@ export function createOutpaintSession(getHost: () => OutpaintHost): ToolSessionD
       if (!node || node.type !== 'mediaNode') return null;
       const reason = outpaintGateReason(typeof node.data.width === 'number' ? node.data.width : undefined, typeof node.data.height === 'number' ? node.data.height : undefined, typeof node.data.size === 'number' ? node.data.size : undefined);
       if (reason) { host.warn(reason); return null; }
-      // 保留该工具既有顺序：门槛通过后先结束素材选取，再交协调器退出其他编辑会话。
       host.clearPickState();
       return { nodeId, expands: ZERO_EXPANDS };
     },

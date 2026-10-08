@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* IKGABW：生成面板素材标签能力对齐文本卡——视频标签首帧缩略图（<video preload="metadata">）、
-   音频标签 ♫ 图标占位、悬停 150ms 出预览浮层（同文本卡形态：静音自动播放、名称行、
-   挂共享 chipPreview 类）、失效与文本标签不出预览；替换菜单（ReplaceRefMenu）视频行补首帧缩略图。
-   floating-ui 按 VideoMentionChip/index.test.tsx 先例 mock（只测渲染与状态，不测定位）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -95,7 +91,6 @@ async function leave(chip: HTMLElement) {
   await act(async () => chip.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
 }
 
-/** 真实 timer 等 170ms（>150ms 阈值），同 floatPosition.test.tsx 先例 */
 const waitPreviewDelay = () => new Promise(resolve => setTimeout(resolve, 170));
 
 afterEach(async () => {

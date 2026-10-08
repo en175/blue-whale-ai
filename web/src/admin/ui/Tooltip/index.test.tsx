@@ -4,8 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Tooltip from './index';
 
-/** React 的 `onMouseEnter/Leave` 是**用 mouseover/mouseout 模拟**的（带 relatedTarget 判定），
- *  直接 dispatch `mouseenter` 不会被 React 收到。测试里因此走 `mouseover` / `mouseout`。 */
 function hover(el: Element, type: 'over' | 'out') {
   el.dispatchEvent(
     new MouseEvent(type === 'over' ? 'mouseover' : 'mouseout', {
@@ -71,7 +69,6 @@ describe('Tooltip：说明默认不占版面，悬停 / 聚焦才出现', () => 
     expect(panel()).not.toBeNull();
     await act(async () => {
       hover(trigger, 'out');
-      // 关闭是延迟的：立刻检查还在
       expect(panel()).not.toBeNull();
       await new Promise((resolve) => setTimeout(resolve, 200));
     });
@@ -97,7 +94,6 @@ describe('Tooltip：说明默认不占版面，悬停 / 聚焦才出现', () => 
       trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(panel()).not.toBeNull();
-    // 「高级 JSON」那处图标落在 <summary> 里：不吞事件就会顺带展开/收起 details
     expect(bubbled).toBe(false);
   });
 });

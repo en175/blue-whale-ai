@@ -1,23 +1,3 @@
-/* ============================================
- * ConsumptionRecords 积分记录：全站积分流水（读 billing 账本）
- * 数据源 GET /api/admin/consumption-records（BFF → billing 的 /admin/transactions）
- *
- * 骨架（筛选状态机 / 三态 / 分页接线）在 `../../components/AdminQueryTable`；
- * 本页只**声明**筛选、列与空态。
- *
- * ⚠️ 2026-09-30 **分页形状改过**：billing 的账本从**游标**换成了 **offset + 总数**
- *    （后端同批改动，`common/v1/types.proto` 的 PageRequest/PageResponse）。
- *    所以这一页现在与另外两张记录页**同形**：页码 + 「共 N 条」。
- *    改之前的理由是「账本持续追加，要准确总数就得扫全表，扫完那一刻它又变了」——
- *    那条理由仍然成立，代价是产品要「共 N 条」与页码换来的，见对接文档 §6.2。
- *    改完 offset 之后**必须**有 total：没有它翻页组件表达不了「还有没有下一页」
- *    （当时这一页就退化成只能看前 20 条、「下一页」永久置灰）。
- *
- * ⚠️ **预扣额**（§「积分」列）：消费行在 billing 侧就是一条预留，预扣额与结算额都在
- *    同一行上。结算后 `credits` 已换成实际值，预扣额若不显示，用户余额「先降后回」
- *    就没有任何一处交代得了（冻 12、实扣 1 的行只会看到 -1）。
- *    所以这一列**只在两个数不一致时**补一行「预扣 N」——理由见下面的渲染注释。
- * ============================================ */
 import { useQuery } from '@tanstack/react-query';
 import { Eye, Search } from 'lucide-react';
 import {
@@ -39,15 +19,6 @@ const fmt = (n: number) => n.toLocaleString('en-US');
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
 
-/**
- * 金额格：金额徽标与预扣额**并排一行，不换行**。
- *
- * <p>为什么并排而不是另起一行：预扣是**同一个数的另一半解释**（冻了 N、实扣 M）。
- * 拆成上下两行后，视觉上像是两条独立信息，读的时候还要把它们重新对起来；
- * 并排 + nowrap 让这一格始终是「一个金额 + 一句注解」。
- *
- * <p>列宽交给表格自适应：内容变宽时这一列变宽，而不是把字挤成两行。
- */
 const AMOUNT_CELL = {
   display: 'flex',
   alignItems: 'center',
@@ -55,42 +26,19 @@ const AMOUNT_CELL = {
   whiteSpace: 'nowrap',
 } as const;
 
-/** 次要文本（预扣额）。字号与颜色取 token，与 Promotions 的「万分比」同一形态。 */
 const SECONDARY_TEXT = {
   fontSize: 'var(--admin-font-xs)',
   color: 'var(--admin-text-muted)',
 } as const;
 
-/**
- * 明细面板里的提示词正文：**保留换行**（提示词常是多行写的，折成一坨没法读）+ 长词强制断行。
- *
- * <p>换行是这里唯一需要页面自己说的样式 —— 面板的宽度/高度上限、内滚、正文字号
- * 都由 {@link Tooltip} 的面板兜着（见 `ui/Tooltip/index.module.css` 的 `.panel`）。
- */
 const PROMPT_TEXT = {
   whiteSpace: 'pre-wrap',
   overflowWrap: 'anywhere',
 } as const;
 
-/**
- * 任务明细面板与任务格共用的模型展示口径 —— 与 JobRecords 的 `modelText` 逐字相同。
- *
- * <p>「有展示名用展示名，没有就原样显示 model_id，都没有才是「—」」。
- * **不要在前端拼模型名**：中文名维护在 `generation_model_capability.model_label`，
- * 拼出来的名字与「模型列表」页对不上，运营会以为是两个模型。
- *
- * <p>`??` 一层层往下落，正是为了空值只有两种形态（`null` / 键不存在）——
- * 三种「没有」在界面上是同一格「—」，不必分开。
- */
 const modelText = (row: AdminConsumptionRecord) => row.model_label ?? row.model_id ?? '—';
 
-/**
- * 契约里的流水类型（billing 的 TransactionType）。**空串 = 全部** —— 与另外两张记录页
- * 同一套口径（`useQueryFilters` 里写了为什么不用 `'all'` 哨兵）。
- */
 const TYPE_OPTIONS = [
-  // ⚠️ 这里没有「退款」：退回不是一种流水类型，是那条 consume 行的「结算到 0」——
-  //    金额 0、预扣额走注解（见下面「积分」列）。留着这一档只会筛出一张永远空的页。
   { value: '', label: '全部类型' },
   { value: 'consume', label: '消费' },
   { value: 'recharge', label: '充值到账' },
@@ -111,7 +59,6 @@ const TYPE_LABELS: Record<string, string> = Object.fromEntries(
   ]),
 );
 
-/** `type` 用 `type` 而不是 `interface`：见 JobRecords 里的同一条说明。 */
 type Filters = {
   keyword: string;
   type: string;
@@ -139,21 +86,11 @@ export default function ConsumptionRecords() {
     {
       key: 'nickname',
       header: '用户名',
-      // 用户名 / 手机号来自**我们自己库**的 `bw_users`（不是 billing）：账本里只有 user_id，
-      // 认不出人。BFF 拿这一页的 user_id 批量查一次补回来——与「任务」列同一套做法。
-      //
-      // ⚠️ 用户 ID **一处都不露**（不占列、也不进悬停）：运营在这一页认人靠用户名与手机号，
-      //    那串数字是排查时才用的内部标识，摆出来只是噪声。任务记录 / 充值记录两页同口径。
-      //
-      // ⚠️ 判空 `?? '—'`，不是真值判断：后端把「查不到用户」与「用户没有手机号」都收敛成 `null`。
       render: (row) => row.nickname ?? '—',
     },
     {
       key: 'phone',
       header: '手机号',
-      // ⚠️ `?? '—'` 而不是真值判断：后端把「查不到用户」与「用户没有手机号」都收敛成 `null`
-      //    （见 adminConsumptionRecords.ts 的类型注释）。存量用户没手机号是**常态**——
-      //    `bw_users.phone` 可空，老用户那一列本来就该是「—」，不是加载没完成。
       render: (row) => row.phone ?? '—',
     },
     {
@@ -165,33 +102,18 @@ export default function ConsumptionRecords() {
       key: 'task',
       header: '任务',
       render: (row) => {
-        // 任务语义来自**我们自己库**的 generation_jobs：BFF 拿 billing 给的 jobId
-        // 批量补上 type / model / prompt。账本本身答不出「这是什么任务」。
-        //
-        // ⚠️ 判空一律 `== null`（不能 `=== null`，更不能真值判断）：缺值有两种形态，
-        //    老后端压根没投影这几个键时整个键**不存在**。
         if (row.task_type == null) {
-          // 非消费行（发放 / 账本），或后端是旧构建 —— 回到账本自带的 title。
-          // 这个回落不是兜底摆设：老后端 + 新前端时它是这一列**唯一**有的信息。
           return row.title;
         }
         const typeLabel = taskTypeLabel(row.task_type);
-        // 格子里只留**类别**，明细（模型、提示词）收进悬停面板。
-        //
-        // 为什么不铺开：模型名 + 提示词一行放不下 —— 全铺出来要么把表撑散，要么截断成
-        // 没用的半句（而且一行挂一个按钮，20 行就是 20 个描边方块，比数据还抢眼）。
-        // 这一列绝大多数时候只被扫一眼「这是个什么任务」，再决定要不要看细节。
         return (
           <Tooltip
             label="任务明细"
-            // 类型名放**面板标题**而不是正文第一行：它和触发器的文字是同一个词，
-            // 正文里再列一遍就是同一句话说两次。标题槽本来就是给「这面板在讲什么」的。
             title={typeLabel}
             trigger={
               <>
                 {typeLabel}
-                {/* 图标是「这里还有东西」的标记。不加它，一行纯文字看不出能悬停。
-                    尺寸跟 `ui/Tooltip` 默认的 `?` 图标一致（15）——同一种交互不该有第二种大小。 */}
+                {}
                 <Eye size={15} strokeWidth={2} />
               </>
             }
@@ -201,8 +123,6 @@ export default function ConsumptionRecords() {
                   { label: '模型', value: modelText(row) },
                   {
                     label: '提示词',
-                    // 没有提示词（免费工具族、老任务）给「—」而不是空白：
-                    // 空着读起来像「还在加载」，而这是查询已经答完的结论。
                     value: <div style={PROMPT_TEXT}>{row.prompt ?? '—'}</div>,
                   },
                 ]}
@@ -217,29 +137,15 @@ export default function ConsumptionRecords() {
       header: '积分',
       render: (row) => {
         const income = row.direction === 'in';
-        // 0 是「结算到 0」—— 失败单全额退回后就是这一行。它既不是进项也不是出项，
-        // 带上符号（`-0`）会让人以为发生过一笔资金流动 —— 而这个 0 要说的是
-        // 「冻过多少、全退回来了」，那件事由旁边的「预扣 N」注解承担。
         const zero = row.credits === 0;
         return (
           <div style={AMOUNT_CELL}>
-            {/* 金额恒正，正负由 direction 表达 —— 与账本口径一致 */}
+            {}
             <Badge tone={zero ? 'neutral' : income ? 'success' : 'accent'}>
               {zero ? '' : income ? '+' : '-'}
               {fmt(row.credits)}
             </Badge>
-            {/* 预扣额：**只在两个数不一致时**才补这一句。
-                三个理由，缺一个都会让它变成噪音：
-                · 未结算行的 credits 本就是预扣额，再写一遍是同一句话说两次；
-                · 发放 / 人工调账行没有预扣（null），什么都不该出；
-                · 一致时（冻 5 扣 5）写出来也只是复读。
-                于是它只在「余额先降后回」的行上出现 —— 一出现就说明有事发生。
-                ⚠️ 判空只能写 `!= null`（**不能**写 `!== null`）：缺值有两种形态，
-                   `null` 是后端按契约回的，**键不存在**是后端版本比前端旧时的形态
-                   （老构建压根没投影这一列）。漏掉后者，`undefined` 会被当成
-                   「有值」进来渲染，`fmt` 一碰就 `toLocaleString` of undefined ——
-                   整页白屏（2026-09-26 实测，见 adminConsumptionRecords.ts 的类型注释）。
-                也**不能**用真值判断：0 是「结算到 0」（失败单全额退回），那恰恰是最该显示预扣的一行。 */}
+            {}
             {row.reserved_credits != null && row.reserved_credits !== row.credits && (
               <span style={SECONDARY_TEXT}>预扣 {fmt(row.reserved_credits)}</span>
             )}
@@ -251,7 +157,6 @@ export default function ConsumptionRecords() {
       key: 'status',
       header: '状态',
       render: (row) => (
-        // pending 的金额是**预计消耗**，结算后同一行变成实际消耗
         <Badge dot tone={row.status === 'done' ? 'success' : 'warning'}>
           {row.status === 'done' ? '已完成' : '处理中'}
         </Badge>
@@ -279,8 +184,7 @@ export default function ConsumptionRecords() {
         <>
           积分记录{' '}
           <Hint title="为什么有的行写着「预扣」">
-            {/* ⚠️ 每个 div 的文字写成**一整行**：JSX 把源码里的换行折成一个空格，
-                中文句子中途换行会在面板里留下一个「预扣额， 发放」那样的空档。 */}
+            {}
             <div>
               <b>提交任务时先按预计用量冻结，结算时按实际用量扣费，差额自动退回余额。</b>
               所以余额会先降后回。这一页记的是<b>结算后</b>的账：一行「-1」旁边若不补出「预扣 12」，那 12 冻过、11 退回来这件事就没有任何一处交代得了。
@@ -306,9 +210,6 @@ export default function ConsumptionRecords() {
         <>
           <Input
             style={{ width: 220 }}
-            // 「需完整」四个字不能省：用户管理页那个框是**模糊**匹配，这个框是**精确**匹配
-            // （账本按 user_id 过滤，服务端只收一个）。同一句 placeholder 放两页、行为不同，
-            // 运营会照着上一页的习惯输入半截。见 adminConsumptionRecords.ts 的类型注释。
             placeholder="用户 ID / 手机号 / 用户名（需完整，留空 = 全站）"
             value={draft.keyword}
             onChange={(e) => setDraft((d) => ({ ...d, keyword: e.target.value }))}

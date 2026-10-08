@@ -1,9 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// 充值接回支付通道：`recharge_orders`（本地订单）+ `system_settings`（商户凭证）。
-// 镜像 identity-memberships-parity 的三轨核对结构：prisma migration、schema 独立文件、
-// docs/sql 快照三处同源。
 
 const migrationSql = readFileSync(
   new URL(
@@ -36,16 +33,13 @@ describe("recharge_orders / system_settings 三轨迁移", () => {
   });
 
   it("幂等两条路径都落在唯一索引上，不靠应用层判重", () => {
-    // trade_no：我们生成的商户订单号，重投时靠它认出同一笔
     expect(migrationSql).toContain("UNIQUE INDEX `uk_recharge_orders__trade_no`(`trade_no`)");
-    // pay_order_id：网关订单号，防止同一笔网关订单挂到两条本地订单（= 多发一次积分）
     expect(migrationSql).toContain(
       "UNIQUE INDEX `uk_recharge_orders__pay_order_id`(`pay_order_id`)",
     );
   });
 
   it("积分在下单时刻冻结：credits 与 credits_per_yuan 都不可空", () => {
-    // 若 credits 允许为空，到账时就得「按当前换算率现算」——改口径会影响已付款用户
     expect(migrationSql).toMatch(/`credits`\s+BIGINT\s+NOT NULL/);
     expect(migrationSql).toMatch(/`credits_per_yuan`\s+INT\s+NOT NULL/);
   });
@@ -59,7 +53,6 @@ describe("recharge_orders / system_settings 三轨迁移", () => {
   });
 
   it("Prisma 模型与建表语句同源（表名与幂等唯一索引对齐）", () => {
-    // Prisma 认不出索引的 map 名时会想再改一次 schema，数据库就在两套描述之间漂移
     expect(schemaPrisma).toContain("model recharge_orders {");
     expect(schemaPrisma).toContain("model system_settings {");
     expect(schemaPrisma).toContain('map: "uk_recharge_orders__trade_no"');

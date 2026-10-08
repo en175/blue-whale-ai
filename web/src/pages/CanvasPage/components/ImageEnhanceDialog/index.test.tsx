@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKGM9O 高清放大参数面板组件测试：选项渲染与默认值、两级下拉、置灰与悬停原因、
-   尺寸预检各档边界（默认档回退/全不可用禁发）、置灰档提交冻结口径、发送后关闭、生成中只读。
-   渲染模式沿用 ImageDialog/config-panel.test.tsx（createRoot + act，不用 testing-library）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +25,6 @@ function renderPanel(props: Partial<Parameters<typeof ImageEnhanceDialog>[0]> = 
   });
 }
 
-/** 查找面板内按钮/开关（面板渲染在 container 内，无 portal） */
 const btn = (testId: string) => container!.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
 
 async function click(node: Element | null) {
@@ -37,7 +33,6 @@ async function click(node: Element | null) {
   });
 }
 
-/** 打开「模型」下拉 */
 async function openModelMenu() {
   await click(btn('enhance-model-btn'));
 }
@@ -62,7 +57,6 @@ describe('IKGM9O 面板选项渲染与默认值', () => {
     expect(btn('enhance-multiple-2').className).toMatch(/multipleBtnActive/);
     expect(btn('enhance-mode-generative_first').className).toMatch(/multipleBtnActive/);
     expect(btn('enhance-mode-fidelity_first').className).not.toMatch(/multipleBtnActive/);
-    // 默认档 Pro 不支持色彩校正：置灰展示冻结值（关），切 Max 后恢复默认开（见置灰组用例）
     expect((container!.querySelector('[data-testid="enhance-color-toggle"]') as HTMLInputElement).checked).toBe(false);
   });
 
@@ -74,7 +68,6 @@ describe('IKGM9O 面板选项渲染与默认值', () => {
     }
     await click(btn('enhance-provider-btn'));
     const providerOptions = [...container!.querySelectorAll(`.${styles.selectOption}`)] as HTMLButtonElement[];
-    // 供应商级仅一项（MediaKit）；模型级此时收起
     expect(providerOptions.length).toBe(1);
     expect(providerOptions[0]!.textContent).toBe('MediaKit');
   });
@@ -103,7 +96,6 @@ describe('IKGM9O 置灰与悬停原因', () => {
     renderPanel();
     await openModelMenu();
     await click(btn('enhance-model-option-lite'));
-    // 先切到保真度优先再切 Lite：置灰后展示冻结值（服务端口径 generative_first）
     const modeBtn = btn('enhance-mode-generative_first');
     expect(modeBtn.getAttribute('aria-disabled')).toBe('true');
     expect(modeBtn.getAttribute('title')).toBe('Lite 版本不支持增强策略');
@@ -117,7 +109,6 @@ describe('IKGM9O 置灰与悬停原因', () => {
     expect(row.getAttribute('aria-disabled')).toBe('true');
     expect(row.getAttribute('title')).toBe('仅 Max 版本支持色彩校正');
     expect((container!.querySelector('[data-testid="enhance-color-toggle"]') as HTMLInputElement).checked).toBe(false);
-    // 切到 Max 恢复可用与默认开
     await openModelMenu();
     await click(btn('enhance-model-option-max'));
     const rowMax = container!.querySelector('[data-testid="enhance-color-row"]')!;
@@ -128,46 +119,38 @@ describe('IKGM9O 置灰与悬停原因', () => {
 
 describe('IKGM9O 尺寸预检各档边界', () => {
   it('门槛函数边界：各档恰好在门槛上可用、越界不可用（与后端 TIER_SIZE_LIMITS 同源口径）', () => {
-    // Lite：长边 ≤2160 且短边 ≥16
     expect(imageEnhanceTierGateReason('lite', 2160, 16)).toBeNull();
     expect(imageEnhanceTierGateReason('lite', 2161, 100)).toContain('Lite');
     expect(imageEnhanceTierGateReason('lite', 1000, 15)).toContain('Lite');
-    // Pro：短边 ≥256 且长边 ≤2048
     expect(imageEnhanceTierGateReason('pro', 2048, 256)).toBeNull();
     expect(imageEnhanceTierGateReason('pro', 2049, 300)).toContain('Pro');
     expect(imageEnhanceTierGateReason('pro', 1000, 255)).toContain('Pro');
-    // Max：短边 ≥64、长边 ≤6240、宽高比 ≤32
-    expect(imageEnhanceTierGateReason('max', 6240, 195)).toBeNull(); // 6240/195=32 恰好达标
+    expect(imageEnhanceTierGateReason('max', 6240, 195)).toBeNull();
     expect(imageEnhanceTierGateReason('max', 6241, 200)).toContain('Max');
     expect(imageEnhanceTierGateReason('max', 3000, 63)).toContain('Max');
-    expect(imageEnhanceTierGateReason('max', 2065, 64)).toContain('Max'); // 宽高比 >32
-    // 无尺寸数据不拦（服务端同口径放行交供应商拒）
+    expect(imageEnhanceTierGateReason('max', 2065, 64)).toContain('Max');
     expect(imageEnhanceTierGateReason('lite', undefined, undefined)).toBeNull();
     expect(imageEnhanceTierGateReason('pro', undefined, 100)).toBeNull();
   });
 
   it('不满足门槛的档在下拉置灰并悬停原因；点置灰档不切换', async () => {
-    // 1024×100：Pro 短边不足 256 → 置灰
     renderPanel({ sourceDims: { width: 1024, height: 100 } });
     await openModelMenu();
     const pro = btn('enhance-model-option-pro');
     expect(pro.getAttribute('aria-disabled')).toBe('true');
     expect(pro.getAttribute('title')).toContain('Pro 版本门槛');
     await click(pro);
-    expect(btn('enhance-model-btn').textContent).toContain('Lite'); // 未切换（Pro 不可用时默认档已回退）
+    expect(btn('enhance-model-btn').textContent).toContain('Lite');
   });
 
   it('默认档（Pro）不可用时自动落到第一个可用档', () => {
-    // 1200×200：Pro 短边不足 → Lite 可用（长边 ≤2160、短边 ≥16），自动落 Lite
     renderPanel({ sourceDims: { width: 1200, height: 200 } });
     expect(btn('enhance-model-btn').textContent).toContain('Lite');
-    // 3000×900：Lite 长边超限、Pro 长边超限 → 落 Max
     renderPanel({ sourceDims: { width: 3000, height: 900 } });
     expect(btn('enhance-model-btn').textContent).toContain('Max');
   });
 
   it('三档全不可用：禁用发送并说明原因', () => {
-    // 8000×100：Lite 长边超 / Pro 长边超 / Max 长边 6240 超与宽高比 80>32 → 全不可用
     renderPanel({ sourceDims: { width: 8000, height: 100 } });
     const send = btn('enhance-send-btn');
     expect(send.disabled).toBe(true);
@@ -219,7 +202,6 @@ describe('IKGM9O 提交 payload 冻结口径', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({ version_tier: 'max', enable_correct_color: false }),
     );
-    // 重新打开再发一次：true
     const toggle2 = container!.querySelector('[data-testid="enhance-color-toggle"]') as HTMLInputElement;
     await act(async () => {
       toggle2.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -244,8 +226,6 @@ describe('IKGM9O 发送后关闭与生成中只读', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    // 验证父级约定：onSend 返回 true 即视为创建请求已发出，父级（CanvasPage）据此关面板。
-    // 受控重渲染模拟：渲染面板 → 点击发送返回 true → 父级卸载 → 面板不再存在于 DOM。
     act(() => {
       root!.render(
         createElement(ImageEnhanceDialog, {

@@ -21,10 +21,6 @@ import {
   isAudioVideoMuxDraftNode,
 } from './audioVideoMux';
 
-/* IKIHPK 音视频合成纯逻辑：入口门槛（仅源音频 URL 缺失置灰）、拖线绑定源校验
-   （已完成且关联资产的视频成品卡）、草稿卡身份判定与两类语义边识别。
-   页面级链路（建卡/会话/分流/面板）见 audioVideoMuxEdit.test.tsx；
-   运行时恢复规划（IKJJR4）见 generationRuntime/mixMuxTasks.test.ts。 */
 
 function mediaNode(id: string, data: Record<string, unknown>): Node {
   return { id, type: 'mediaNode', position: { x: 0, y: 0 }, data };
@@ -37,13 +33,11 @@ function edge(id: string, source: string, target: string, data?: Record<string, 
 const readyAudio = (id: string, extra: Record<string, unknown> = {}) =>
   mediaNode(id, { src: `http://aud/${id}.mp3`, mediaType: 'audio', fileName: `音${id}`, assetId: `a-${id}`, ...extra });
 
-/** 入口门槛按媒体 data 判定（工具条持 data，不伪造 Node；同 audioSpeedGateReason 口径） */
 const dataOf = (node: Node) => node.data as Record<string, unknown>;
 
 const readyVideo = (id: string, extra: Record<string, unknown> = {}) =>
   mediaNode(id, { src: `http://vid/${id}.mp4`, mediaType: 'video', fileName: `视${id}`, assetId: `v-${id}`, ...extra });
 
-/** 音视频合成草稿卡（未发送：身份 + draft 态） */
 const muxDraft = (id: string, extra: Record<string, unknown> = {}) =>
   mediaNode(id, {
     src: '',
@@ -128,9 +122,7 @@ describe('buildAudioVideoMuxIdentity 默认参数与身份判定', () => {
     const draft = muxDraft('m1');
     expect(isAudioVideoMuxDraftNode(draft)).toBe(true);
     expect(audioVideoMuxIdentityOf(draft)?.sourceNodeId).toBe('a1');
-    // 已发送（生成中占位卡）：不再是绑定目标
     expect(isAudioVideoMuxDraftNode(muxDraft('m2', { genStatus: 'generating', draft: false }))).toBe(false);
-    // 普通视频生成草稿卡：无合成身份
     expect(isAudioVideoMuxDraftNode(mediaNode('d1', { mediaType: 'video', genStatus: 'draft', draft: true }))).toBe(false);
     expect(isAudioVideoMuxDraftNode(undefined)).toBe(false);
   });
@@ -160,9 +152,6 @@ describe('合成语义边识别（固定音频输入线与视频绑定线）', (
   });
 });
 
-/* IKIHP M 提交纯逻辑：结果卡命名与失败文案、恢复占位卡工厂（IKJJR4：节点 id 预分配 =
-   canvas_binding.target_node_id，恢复规划经 generationRuntime/mixMuxTasks）。
-   页面级链路（提交、占位回填、失败重试）见 audioVideoMuxSend.test.tsx。 */
 describe('音视频合成结果卡命名与恢复占位卡', () => {
   it('结果卡名 = 源视频名去扩展名 + (音视频合成).mp4（与 worker 同款；空名回落「视频」）', () => {
     expect(audioVideoMuxResultName('城市夜景.mp4')).toBe('城市夜景(音视频合成).mp4');

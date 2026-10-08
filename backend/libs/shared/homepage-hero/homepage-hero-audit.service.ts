@@ -5,7 +5,6 @@ import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 const OPERATOR = "admin";
 const CATEGORY = "homepage-hero";
 
-/** 首页背景配置管理端审计（IKCH05）：写 admin_operation_logs，失败不阻断主流程。 */
 @Injectable()
 export class HomepageHeroAuditService {
   constructor(private readonly operationLog: OperationLogService) {}

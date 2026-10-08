@@ -22,7 +22,6 @@ function row(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** 构造可用的 mock prisma：$transaction 直接透传回调，findMany 等按需覆盖。 */
 function mockPrisma(overrides: Record<string, unknown> = {}) {
   const prisma = {
     homepage_hero: {
@@ -52,7 +51,6 @@ describe("homepage_hero repo — 首页背景配置", () => {
   it("listAll 只取存活条目并按 sort_order 升序", async () => {
     const prisma = mockPrisma({
       homepage_hero: {
-        // 传入已排序的 mock 行；repo 透传 findMany 结果并按查询参数升序请求
         findMany: vi.fn().mockResolvedValue([
           row({ id: 1n, sort_order: 0 }),
           row({ id: 2n, sort_order: 1 }),
@@ -130,7 +128,6 @@ describe("homepage_hero repo — 首页背景配置", () => {
       media_url: "https://tos.example.com/new.mp4",
     });
     expect(id).toBe("9");
-    // count 用于上限校验（enabled 缺省 1）
     expect(prisma.homepage_hero.count).toHaveBeenCalledWith({
       where: { is_delete: 0, enabled: 1 },
     });
@@ -138,7 +135,7 @@ describe("homepage_hero repo — 首页背景配置", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           media_type: "video",
-          sort_order: 4, // max(3)+1
+          sort_order: 4,
           enabled: 1,
         }),
       }),
@@ -181,7 +178,6 @@ describe("homepage_hero repo — 首页背景配置", () => {
     await expect(
       repoOf(prisma).update(2n, { enabled: 1 }),
     ).rejects.toThrow(HomepageHeroLimitError);
-    // 已是启用态（1→1）不再触发上限校验
     const prisma2 = mockPrisma({
       homepage_hero: {
         findFirst: vi.fn().mockResolvedValue(row({ id: 2n, enabled: 1 })),
@@ -236,7 +232,6 @@ describe("homepage_hero repo — 首页背景配置", () => {
     });
     const res = await repoOf(prisma).move(3n, "up");
     expect(res).toEqual({ ok: true });
-    // 上移 3（sort 2→1），1（sort 0→2）：整体重排后更新的 sort_order 为 [2, 1]
     const calls = prisma.homepage_hero.update.mock.calls.map((c) => c[0].data.sort_order);
     expect(calls.sort()).toEqual([1, 2]);
   });

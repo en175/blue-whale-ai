@@ -1,4 +1,3 @@
-// IK74V8：从 new-api-client.test.ts 拆出（≤800 行硬线）。用例逐块搬运，断言不变。
 import {describe, expect, it} from "vitest";
 
 import {createNewApiClient} from "./new-api-client.js";
@@ -13,7 +12,6 @@ describe("new-api client —— Go option（RootAuth）与链路追踪", () => {
         const url = String(input);
         requests.push({ url, init });
         if (init.method === "GET") {
-          // GET /api/option/ 返回全量 [{key,value}]，value 恒为字符串
           return jsonResponse({
             success: true,
             message: "",
@@ -30,12 +28,10 @@ describe("new-api client —— Go option（RootAuth）与链路追踪", () => {
             ],
           });
         }
-        // PUT /api/option/ 成功壳
         return jsonResponse({ success: true, message: "" });
       },
     });
 
-    // 读：命中键返回原始字符串；未命中返回 null
     await expect(
       client.getRootOption("root-tok", 1, "payment_setting"),
     ).resolves.toBe(
@@ -49,18 +45,15 @@ describe("new-api client —— Go option（RootAuth）与链路追踪", () => {
       client.getRootOption("root-tok", 1, "no_such_key"),
     ).resolves.toBeNull();
 
-    // 写：value 作为 JSON 字符串透传
     await expect(
       client.putRootOption("root-tok", 1, "payment_setting", '{"a":1}'),
     ).resolves.toBeUndefined();
 
-    // 两个请求都带 root Authorization + New-Api-User 头
     for (const { init } of requests) {
       const headers = new Headers(init.headers);
       expect(headers.get("Authorization")).toBe("Bearer root-tok");
       expect(headers.get("New-Api-User")).toBe("1");
     }
-    // PUT 体：{key, value}，value 为字符串（Go UpdateOption 要求字符串值）
     const put = requests.find((r) => r.init.method === "PUT");
     expect(JSON.parse(String(put?.init.body))).toEqual({
       key: "payment_setting",

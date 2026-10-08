@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { VocalSplitsService } from "./vocal-splits.service.js";
 
-// IKHA2I：人声背景分离建单服务复核矩阵（先例：media-extractions.service.test.ts；
-// 凭证冻结断言对齐 video-subtitle-erasures.service.test.ts）。
 function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
@@ -20,7 +18,6 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
@@ -55,7 +52,6 @@ describe("VocalSplitsService.create：参数校验", () => {
   });
 
   it("rejects a source asset not owned by the user", async () => {
-    // 归属口径对齐去字幕 / media-extractions——findOwnedSource 按 user_id 过滤，非本人素材一律 404。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(null) },
     });
@@ -100,8 +96,6 @@ describe("VocalSplitsService.create：参数校验", () => {
 });
 
 describe("VocalSplitsService.create：缺省补默认与建单", () => {
-  // 契约口径（@lib/contracts/vocal-split）：缺省 scene=audio、output_format=aac
-  // （注意默认格式与 extract-audio 的 m4a 不同），三键恒在冻结。
   it("defaults scene to audio and output_format to aac when omitted", async () => {
     const { service, create } = makeService();
     const result = await service.create("9", "55", { source_asset_id: "88" });
@@ -130,9 +124,6 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
     },
   );
 
-  // IKJCOE：主表 expected_output_count 列已删，轨数不再落库——**权威是冻结的 input.scene**，
-  // Worker 按 VocalSplitContract.SCENE_TRACKS 自推 2/3 轨（VocalSplitJobProcessor:241）。
-  // 四场景的覆盖面保留，断言改成「这次跑的是哪个 scene」，那才是轨数的决定因素。
   it.each(["audio", "music", "drama", "narrate"] as const)(
     "freezes scene %s into input（轨数由 Worker 按 scene 自推）",
     async (scene) => {
@@ -162,7 +153,6 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         type: "vocal_split",
-        // 契约 §VOCAL_SPLIT_SOURCE：专属来源值（不沿用 media_extract 的 "dock" 存量特例）。
         source: "vocal_split",
         status: "queued",
         progress: 0,
@@ -175,7 +165,6 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
   });
 
   it("is free-tier: no cost reservation, no provider row", async () => {
-    // 免费口径哨兵（「本期免费」，同去字幕 / media-extractions 先例）：不写成本预留、不落 provider 行。
     const { service, create, costCreate } = makeService();
     const result = await service.create("9", "55", { source_asset_id: "88" });
     expect(result.code).toBe(200);

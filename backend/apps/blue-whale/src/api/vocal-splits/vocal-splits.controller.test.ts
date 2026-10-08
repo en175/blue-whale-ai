@@ -1,6 +1,3 @@
-// IKHA2I：人声背景分离创建入口 controller 单测——凭证密封透传 + 入队失败回拨
-// （先例：video-enhancements.controller.test.ts 直接构造）。
-// service 复核矩阵见 libs/shared/vocal-splits/vocal-splits.service.test.ts。
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ERROR_ENQUEUE_FAILED, ok } from "@lib/contracts";
 
@@ -53,8 +50,6 @@ describe("VocalSplitsController.create", () => {
     const { controller, service } = makeController();
     vi.mocked(enqueueVocalSplitJob).mockRejectedValue(new Error("rocketmq down"));
     const result = await controller.create({ userId: "9" } as never, "55", {}, undefined);
-    // 回拨失败不影响响应形状（任务已建，失败态由 GET /api/jobs/:id 轮询呈现，
-    // 前端文案「任务入队失败，请重试」）。
     expect(result.code).toBe(200);
     expect(service.markFailed).toHaveBeenCalledWith(
       "400",

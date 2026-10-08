@@ -1,14 +1,9 @@
-/* ============================================
- * MediaNode - 画布图片/视频/音频节点
- * 统一外部标题 + 独立圆角内容主体；内容区尺寸由 mediaContentBox 显式给定
- * ============================================ */
 
 .wrapper {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  /* 保留原标题占位（11px × 1.5 行高 + 6px 间距），缩放不推移内容和连接点。 */
   padding-top: 22.5px;
 }
 
@@ -16,7 +11,6 @@
   opacity: 0.4;
 }
 
-/* 外部常驻标题行（宽度随内容主体） */
 .titleRow {
   position: absolute;
   bottom: calc(100% - 22.5px);
@@ -28,7 +22,6 @@
   gap: var(--node-title-group-gap);
   width: 100%;
   padding: 0 min(2px, 2%) var(--node-title-gap);
-  /* 极窄媒体可以截断整行，但不能让图标或固定间距越出内容边界。 */
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -69,10 +62,6 @@
   user-select: none;
 }
 
-/* 独立圆角内容主体：弱化边框，尺寸由 mediaContentBox 显式给定
- * 不用 overflow:hidden（会裁掉探出边缘的连接点并吃掉其命中），圆角改由内容元素自身承担。
- * 内容元素圆角必须与卡片圆角同心（卡片半径 − 1px 边框）：半径偏小会让子元素角圆
- * 在对角线处鼓出卡片外圆角，不透明底色盖住边框弧段（audioCard 16px 配 11px 曾四角弧段全缺） */
 .contentCard {
   --card-radius: 12px;
   position: relative;
@@ -92,7 +81,6 @@
   border-radius: calc(var(--card-radius) - 1px);
 }
 
-/* 音频节点深灰卡片：贴合设计稿（ charcoal #1a1a1a + 浅灰边框） */
 .contentCard.audioCard {
   --card-radius: 16px;
   background-color: #1a1a1a;
@@ -110,7 +98,6 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
-/* 连接点：平时隐藏，悬停/选中/连接中可见（锚定内容区左右中点，Handle 在 .contentCard 内） */
 .handle {
   opacity: 0;
   transition: opacity 0.15s ease;
@@ -124,8 +111,6 @@
   opacity: 1;
 }
 
-/* 选中态悬浮工具条（卡片上方居中）：IKGYYD 迁出节点卡后由 NodeFollowToolbar 钉屏幕容器
-   定位（中心点居中 + 顶边锚，屏幕尺寸恒定），此处只保留工具条本体视觉 */
 .toolbar {
   display: flex;
   align-items: center;
@@ -157,9 +142,6 @@
   background-color: rgba(255, 255, 255, 0.08);
 }
 
-/* 视频 HD 高清入口文字徽标（IKH3VG）：描边小方标形态（非图标），随 toolBtn 继承前景色
-   与悬停高亮（hover 白字 + 浅底，徽标描边 currentColor 跟随变化）；外框高度对齐同排
-   lucide 图标（size 14 / strokeWidth 2），避免徽标在工具条里视觉重于图标 */
 .hdBadge {
   display: inline-flex;
   align-items: center;
@@ -182,16 +164,12 @@
   background: transparent;
 }
 
-/* 画质工具横排按钮（IKH3XZ）对当前卡不可用（IKGZ5P）：aria-disabled 整钮置灰（非原生 disabled，
-   hover 只显示 title 不可用原因，无下拉可改选），口径同 qualityMenuItem 置灰项 */
 .toolBtn[aria-disabled='true'] {
   color: #666;
   cursor: not-allowed;
   background: transparent;
 }
 
-/* 工具按钮激活高亮（IKIHMX 审查修复 1）：源卡有在途任务时对应入口按钮保留高亮
-   （形态对齐 CanvasToolbar.toolBtnActive 的激活态观感：亮字 + 底色常驻） */
 .toolBtnActive {
   color: #fff;
   background-color: rgba(255, 255, 255, 0.12);
@@ -213,10 +191,6 @@
   z-index: 1;
 }
 
-/* 抠图结果卡棋盘格垫底层（IKGXMT）：absolute 铺满内容区、z-index 低于 img（img z-index:1），
-   透明 png 的透明区域透出格纹，一眼确认背景已移除（规格故事 21）；静态纯视觉、aria-hidden。
-   双向 repeating-conic-gradient 拼出棋盘格（8px 格）——先例 EraseMaskLayer 用 SVG pattern 做叠加层，
-   垫底层无组件需求，CSS 背景即够。 */
 .cutoutCheckerboard {
   position: absolute;
   inset: 0;
@@ -227,9 +201,6 @@
   background-size: 16px 16px;
 }
 
-/* 智能抠像透明结果卡角标（IKHKAC，形态取交互验收基准原型 .rcard .screen .alphatag）：
-   视频区左下角半透明深底胶囊，注明产物为透明背景 WebM（MP4 纯色结果不渲染）；静态纯视觉、
-   不接管指针（pointer-events: none），点击/播放操作仍落到视频本体。 */
 .transparentTag {
   position: absolute;
   left: 10px;
@@ -261,8 +232,6 @@
   background-color: #000;
 }
 
-/* 自绘视频控制条（IKI5YM）：叠加画面底部，nodrag/nopan 由组件内交互子元素类承担；
-   z-index 低于编辑态锁定层（inline zIndex 5）——编辑期间控件不可达 */
 .videoControlsBar {
   position: absolute;
   left: 0;
@@ -317,10 +286,6 @@
   line-height: 1;
 }
 
-/* 悬停预览播放层（IKJ7RS）：absolute 铺满 .mediaVideoLayer、盖在首帧画布上，空层零视觉；
-   pointer-events:none 指针穿透（!832 合同：不抢节点点击/悬浮工具条/小地图命中），
-   不打 transform 避免新增合成层化路径；移入的 video 无控件，与 .mediaVideo 同款
-   contain 铺排黑底（圆角由 .mediaVideoLayer 的 overflow:hidden 承担） */
 .mediaHoverPreviewLayer {
   position: absolute;
   inset: 0;
@@ -335,15 +300,10 @@
   background-color: #000;
 }
 
-/* 点选过渡收养（IKJ7OS 故事 16 建；IKI5YM 审查修订去原生控件改自绘控件）：收养会话的
-   画面区回归节点拖拽路径（video 不挂 nodrag），层穿透合同（!832）只约束未选中悬停纯
-   展示期——收养期由收养逻辑挂 styles.adopted 恢复命中：画面可拖整卡、可点切换播放；
-   自绘控件渲染在 React 树内（播放层之外），不受层穿透影响 */
 .mediaHoverPreviewLayer video.adopted {
   pointer-events: auto;
 }
 
-/* 合规校验通过图标：跟在文件名后方，不遮挡图片 */
 .complianceBadge {
   flex-shrink: 0;
   display: inline-flex;
@@ -378,12 +338,6 @@
   pointer-events: none;
 }
 
-/* ---- IKJ7UI（ADR-0119）：样片/成片角标（画面内右上角，v3 原型深色玻璃胶囊定稿）。
-   样式取自 v3 高保真原型 .sampleTag/.finalTag（web/prototypes/seedance-sample-card-v3
-   .prototype.html，一次性分支归档）：位置 top/right 8px、11px 字号、3px 10px 内边距、
-   9999px 圆角、rgba(0,0,0,.6) 深底 + 白 14% 描边。glass 边界：backdrop-filter 仅作角标
-   对底层视频画面的轻模糊，rgba(0,0,0,.6) 静态底色已独立保证对比度（不唯一依赖半透明）；
-   角标随卡片移动，非静止表面上的整层玻璃。pointer-events:none 同 transparentTag 先例。 */
 .stageTag {
   position: absolute;
   top: 8px;
@@ -405,7 +359,6 @@
   pointer-events: none;
 }
 
-/* 样片成功态：「样片 480P」信息蓝点缀（截止时段为暗淡灰） */
 .stageTagAcc {
   color: #8ec4f8;
   font-weight: 600;
@@ -416,7 +369,6 @@
   font-weight: 400;
 }
 
-/* 过期/缺可信截止：整条警告橙（次段 75% 透明度分层） */
 .stageTagExpired {
   color: #f6c95c;
 }
@@ -425,13 +377,11 @@
   color: rgba(246, 201, 92, 0.75);
 }
 
-/* 成片态：紫色文字点缀（ADR-0119「成片 1080P」定稿色） */
 .stageTagFinal {
   color: #a5b6ff;
   font-weight: 600;
 }
 
-/* ---- IKIZQE：样片卡标题行成片按钮（两阶段链式动作唯一入口，原型定稿 titleCta） ---- */
 .finalizeCta {
   flex-shrink: 0;
   display: flex;
@@ -458,7 +408,6 @@
   cursor: not-allowed;
 }
 
-/* ---- IKIZQE：提交结果不明「状态核对中」占位（IKIZQD checking 态卡片呈现） ---- */
 .checkingSpinner {
   border-top-color: #d9a441;
 }
@@ -469,7 +418,6 @@
   font-weight: 600;
 }
 
-/* 失败/核对占位的次行说明（退费状态/勿重复提交） */
 .genSub {
   color: #8a8f99;
   font-size: 11px;
@@ -477,10 +425,6 @@
   text-align: center;
 }
 
-/* ============================================
- * 音频播放器（IKH8PU 横矩形改版：480×240，深槽波形区占主区 +
- * 底部「左时间 / 居中播放钮」控制行，视觉对齐 audio-card-landscape 原型）
- * ============================================ */
 .audioPlayer {
   position: relative;
   width: 100%;
@@ -498,7 +442,6 @@
   color: #e5e5e5;
 }
 
-/* 波形区（内嵌深槽：暗底 + 内阴影，原型的唯一大面积元素） */
 .audioWaveBox {
   position: relative;
   width: 100%;
@@ -515,7 +458,6 @@
   justify-content: center;
 }
 
-/* 静态波形条：72 根细条 space-between 铺满（细密观感） */
 .audioWaveBars {
   position: absolute;
   inset: 0 10px;
@@ -533,7 +475,6 @@
   transition: height 0.12s ease;
 }
 
-/* 红色 playhead：唯一彩色焦点（红色辉光对齐原型） */
 .audioPlayhead {
   position: absolute;
   top: 0;
@@ -544,10 +485,8 @@
   box-shadow: 0 0 6px rgba(240, 67, 74, 0.45);
   pointer-events: none;
   transform: translateX(-50%);
-  /* 由音频 timeupdate 高频直接驱动 left，不加 transition 避免卡顿 */
 }
 
-/* 底部控制区：三列 grid——左时间、中播放钮、右空列补平 */
 .audioControls {
   width: 100%;
   display: grid;
@@ -602,7 +541,6 @@
   border-radius: 16px;
 }
 
-/* 生成中/失败占位区（填满内容主体） */
 .genBox {
   display: flex;
   flex-direction: column;
@@ -643,7 +581,6 @@
   word-break: break-word;
 }
 
-/* 素材已被删除占位区（灰色方案，填满内容主体） */
 .missingBox {
   display: flex;
   flex-direction: column;
@@ -693,9 +630,6 @@
   background-color: #333;
 }
 
-/* 重新生成中角标（IKDMQU Q5）：成品卡保留旧素材显示，底部半透明条标记生成中。
-   glass 边界：backdrop-filter 仅作角标条对底层素材的轻模糊，静态 rgba(0.72) 底色
-   已独立保证对比度（不唯一依赖半透明）；角标随卡片移动，非静止表面上的整层玻璃 */
 .regenOverlay {
   position: absolute;
   left: 8px;
@@ -747,7 +681,6 @@
   background-color: #3a3a3a;
 }
 
-/* IKDMQV 失败角标文案：与 regenText 同布局约束（单行截断），红色区分生成中文案 */
 .failOverlayText {
   flex: 1;
   color: #e5484d;
@@ -757,7 +690,6 @@
   text-overflow: ellipsis;
 }
 
-/* 右键菜单 */
 .contextMenu {
   position: fixed;
   min-width: 200px;
@@ -829,7 +761,6 @@
   color: #888;
 }
 
-/* 「输入已更新」徽标 + 下方操作菜单 */
 .inputStaleWrap {
   position: absolute;
   bottom: calc(100% + 2px);
@@ -901,7 +832,6 @@
   cursor: not-allowed;
 }
 
-/* IKFR4X 持续选取会话勾选标识：已并入当前目标的来源节点，卡片右上角绿底白勾 */
 .pickMarkedBadge {
   position: absolute;
   top: -8px;
@@ -920,8 +850,6 @@
   pointer-events: none;
 }
 
-/* 下拉锚定包裹层（原「高清 ▾」下拉 IKGOT7，图片侧已随 IKH3XZ 横排退役）：现服务视频卡
-   SubtitleEraseMenu 与 AudioVideoSplitMenu 两个下拉，下拉浮层锚定其下方 */
 .qualityWrap {
   position: relative;
   display: flex;
@@ -965,7 +893,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* 置灰项（口径同工具条 disabled）：不响应悬停高亮，title 由组件保留悬停原因 */
 .qualityMenuItem[aria-disabled='true'] {
   color: #666;
   cursor: not-allowed;

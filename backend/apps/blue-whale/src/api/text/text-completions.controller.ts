@@ -65,11 +65,9 @@ export class TextCompletionsController {
       return;
     }
 
-    // 非流请求防 Go 挂起拖死连接；流式 SSE 长连接不加超时（不截断）。
     const isStream = record.stream === true;
     let upstream: globalThis.Response;
     try {
-      // 走上游唯一出口：base URL 拼接与 X-Trace-Id 由它统一负责
       upstream = await newApiFetch("/v1/chat/completions", {
         method: "POST",
         headers: {

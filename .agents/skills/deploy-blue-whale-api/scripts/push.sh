@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# scp 二进制 + Dockerfile + compose 到远程；远程生成 .env（强随机 SESSION_SECRET，不本地落盘）。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -9,8 +8,6 @@ ensure_key
 BIN="$SKILL_DIR/.build/$BIN_NAME"
 [ -f "$BIN" ] || { echo "✗ 二进制不存在，先跑 build.sh" >&2; exit 1; }
 
-# tag 由 build.sh 落盘（.build/image-tag = blue-whale-api:<short-sha>）。
-# compose yml 形如 image: blue-whale-api:${NEW_API_IMAGE_TAG:-latest}，env 变量持短 SHA。
 IMAGE_TAG="$(resolve_image_tag)"
 IMAGE_SHORT="${IMAGE_TAG#blue-whale-api:}"
 echo "▶ push image tag：$IMAGE_TAG"
@@ -24,7 +21,6 @@ echo "▶ scp Dockerfile + compose"
 "${SCP[@]}" "$SKILL_DIR/docker/Dockerfile" "$DEPLOY_USER@$DEPLOY_HOST:$REMOTE_DIR/Dockerfile"
 "${SCP[@]}" "$SKILL_DIR/docker/docker-compose.yml" "$DEPLOY_USER@$DEPLOY_HOST:$REMOTE_DIR/docker-compose.yml"
 
-# 远程生成 .env：SESSION_SECRET 远程 openssl 生成（不本地落盘，避免 ssh 参数携带）
 echo "▶ 远程生成 .env（SESSION_SECRET = openssl rand 远程生成）"
 "${SSH[@]}" "SECRET=\$(openssl rand -hex 32) && cat > $REMOTE_DIR/.env <<EOF
 SQL_DSN=$MYSQL_DSN

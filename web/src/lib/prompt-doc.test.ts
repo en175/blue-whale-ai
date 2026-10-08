@@ -1,7 +1,3 @@
-/* ============================================
- * prompt-doc 纯逻辑层测试（IKFA1M）：编号派生、拍平镜像、草稿恢复防丢失、失效重派生
- * 与 packages/contracts/src/prompt-doc.ts 同语义（web 侧镜像，契约权威在服务端包）
- * ============================================ */
 import { describe, expect, it } from 'vitest';
 import {
   docHasAnyRef,
@@ -99,7 +95,6 @@ describe('reconcilePromptDoc（编号重派生与失效标记）', () => {
         { kind: 'asset_ref', asset_id: '103', label: '图片3' },
       ],
     };
-    // 移除 102：103 重编号为图片2，102 失效显示原图片2
     const { doc } = reconcilePromptDoc(labeled, ['101', '103']);
     expect(doc.segments).toEqual([
       { kind: 'asset_ref', asset_id: '101', label: '图片1' },
@@ -119,7 +114,6 @@ describe('reconcilePromptDoc（编号重派生与失效标记）', () => {
         { kind: 'text', text: '的包' },
       ],
     };
-    // 102 以新输入顺序加回（末位 → 图片3）：失效标记清除，编号按当次输入派生
     const result = reconcilePromptDoc(doc, ['101', '103', '102']);
     expect(result.changed).toBe(true);
     expect(result.doc.segments).toEqual([
@@ -136,7 +130,6 @@ describe('reconcilePromptDoc（编号重派生与失效标记）', () => {
       version: 1,
       segments: [{ kind: 'asset_ref', asset_id: '102', label: '图片2', invalid_label: '图片2' }],
     };
-    // 104 与 102 同名（名称不参与判定）：102 的失效标签原样保留
     const result = reconcilePromptDoc(doc, ['101', '103', '104']);
     expect(result.changed).toBe(false);
     expect(result.doc.segments[0]).toEqual({
@@ -153,7 +146,6 @@ describe('reconcilePromptDoc（编号重派生与失效标记）', () => {
       segments: [{ kind: 'asset_ref', asset_id: '102', label: '图片2', invalid_label: '图片2' }],
     };
     const restored = reconcilePromptDoc(start, ['101', '103', '102']).doc;
-    // 再次移除 102：失效展示的原编号是恢复后的当次编号（图片3），不是历史图片2
     const removed = reconcilePromptDoc(restored, ['101', '103']).doc;
     expect(removed.segments[0]).toEqual({
       kind: 'asset_ref',
@@ -188,9 +180,7 @@ describe('docHasAnyRef / docHasInvalidRef', () => {
   });
 });
 
-/* ============ IKFA1O：泛化标签派生（视频角色/模式失效语义） ============ */
 
-/** 视频场景 labelOf 模拟：keyframe 模式只有帧身份有效，普通参考身份返回 null（模式不兼容） */
 const keyframeLabelOf = (key: { kind: 'asset_ref' | 'text_ref'; id: string }): string | null => {
   const id = key.id;
   return id === '201' ? '首帧' : id === '202' ? '尾帧' : null;
@@ -226,7 +216,7 @@ describe('reconcilePromptDocWith（泛化 labelOf，IKFA1O）', () => {
       version: 1,
       segments: [{ kind: 'asset_ref', asset_id: '101', label: '图片1', invalid_label: '图片1' }],
     };
-    expect(reconcilePromptDocWith(invalid, keyframeLabelOf).doc).toBe(invalid); // 仍不兼容：原样保留
+    expect(reconcilePromptDocWith(invalid, keyframeLabelOf).doc).toBe(invalid);
     const allLabelOf = (key: { kind: 'asset_ref' | 'text_ref'; id: string }): string | null => (key.id === '101' ? '图片1' : null);
     const restored = reconcilePromptDocWith(invalid, allLabelOf);
     expect(restored.doc.segments[0]).toEqual({ kind: 'asset_ref', asset_id: '101', label: '图片1' });

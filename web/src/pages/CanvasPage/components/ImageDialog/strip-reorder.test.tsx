@@ -6,9 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment, type UploadedFile } from './index';
 import type { ImageMediaRef } from '../../mediaRefs';
 
-/* IKFCKT：ImageDialog 参考栏拖拽换位——统一序列 = 媒体（连线 edgeRefs / 本地 files）+ 文本附件；
-   换位后按类型提取新相对序分别落权威源（连线媒体 → onReorderMediaRefs、本地 files → 内部重排、
-   文本 → onReorderAttachments），编号角标随新序紧凑重派生；只读态禁拖。 */
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -73,7 +70,6 @@ async function renderDialog(opts: DialogOptions = {}) {
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 }
 
-/** jsdom 无 DragEvent 且 rect 恒 0：手工挂 dataTransfer / clientX，rect 按需 mock 出前/后半落点 */
 function dragEvent(type: 'dragstart' | 'dragover' | 'drop', init?: { clientX?: number }) {
   const event = new Event(type, { bubbles: true, cancelable: true }) as Event & {
     dataTransfer: { setData: () => void; effectAllowed: string; dropEffect: string };
@@ -84,7 +80,6 @@ function dragEvent(type: 'dragstart' | 'dragover' | 'drop', init?: { clientX?: n
   return event;
 }
 
-/** 让目标项宽度 100、左缘 0：clientX<50 落前半、≥50 落后半 */
 function wideRect() {
   return vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
     left: 0, width: 100, right: 100, top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}),
@@ -170,8 +165,6 @@ describe('ImageDialog 参考栏拖拽换位（IKFCKT）', () => {
       onReorderAttachments,
     });
     wideRect();
-    // 统一序列 [n1, n2, t1, t2]：拖 t2(index 3) 到 n1(index 0) 前半 → 新统一序 [t2, n1, n2, t1]
-    // → 媒体 [n1, n2] 不变、文本 [t2, t1] 重排
     dragAndDrop(textThumbs()[1]!, mediaThumbs()[0]!, 'before');
     expect(onReorderMediaRefs).not.toHaveBeenCalled();
     expect(onReorderAttachments).toHaveBeenCalledTimes(1);

@@ -8,9 +8,6 @@ import type { JobSourceTarget } from '@/components/JobSourceModal';
 import AssetDetailModal from './components/AssetDetailModal';
 import { AssetCard } from './components/AssetMasonry';
 
-/* IKIZQI：资产库两阶段标注与双向来源——
-   卡片/详情弹窗标注样片与成片（旧普通视频不标注），详情里按来源身份
-   （final → source_sample_job_id / sample → final_job_id）发起来源跳转。 */
 
 let root: Root;
 let mountNode: HTMLDivElement;

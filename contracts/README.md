@@ -53,6 +53,12 @@ Java 侧 `QuantityRegistry` **必须是同一套值**。
 
 这是「**配了某个维度但没人上报**」的结构性防线 —— 不是靠人检查。
 
+| 事件 | topic（代码默认值） | 消费方动作 |
+|---|---|---|
+| `JobCompletedEvent` | `generation-job-completed` | billing → Settle（按成功 slot 计费） |
+| `JobFailedEvent` | `generation-job-failed` | billing → Refund（全额返还） |
+| `CatalogActivated` | `pricing.catalog.activated` | 各服务重载内存副本（生产者尚未落地） |
+
 ## 生成
 
 ```bash
@@ -61,6 +67,7 @@ buf generate          # 需先装 buf：brew install bufbuild/buf/buf
 ```
 
 **生成物不入仓**（避免 TS / Java 两端生成物漂移），构建时生成：
+TS 端必须带 `import_extension=js`（见 `buf.gen.yaml`）——本仓 tsconfig 是 node16/nodenext 解析，裸相对导入会报 TS2835。
 
 | 端 | 输出 |
 |---|---|

@@ -1,6 +1,3 @@
-/* ============================================
- * SharedAssetsModal - 共享资产弹框
- * ============================================ */
 
 .overlay {
   position: fixed;
@@ -21,7 +18,6 @@
 .panel {
   width: 1000px;
   max-width: calc(100vw - 80px);
-  /* 固定高度：切换 tab 时弹窗尺寸不变，内容在 gridWrap 内滚动 */
   height: min(680px, calc(100vh - 120px));
   display: flex;
   flex-direction: column;
@@ -33,7 +29,6 @@
   box-sizing: border-box;
 }
 
-/* ---- 头部 ---- */
 .head {
   display: flex;
   align-items: center;
@@ -69,7 +64,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- tabs 行 ---- */
 .tabRow {
   position: relative;
   display: flex;
@@ -118,7 +112,6 @@
   transform: rotate(180deg);
 }
 
-/* 资产子类型下拉 */
 .subDropdown {
   position: absolute;
   top: calc(100% + 6px);
@@ -163,7 +156,6 @@
   font-weight: 500;
 }
 
-/* 搜索 + 选择 */
 .tabRight {
   display: flex;
   align-items: center;
@@ -218,7 +210,6 @@
   background-color: #333;
 }
 
-/* ---- 网格 ---- */
 .gridWrap {
   flex: 1;
   min-height: 0;
@@ -279,7 +270,6 @@
   font-size: var(--font-size-sm);
 }
 
-/* ---- 加载失败态：灰色弹窗内的暗色警示卡片 ---- */
 .loadError {
   gap: 14px;
   background-color: #262626;
@@ -381,7 +371,6 @@
   color: #555;
 }
 
-/* 真实图片封面：铺满 thumbBox，保持宽高比 */
 .coverImg {
   width: 100%;
   height: 100%;
@@ -391,7 +380,6 @@
   background-color: #111;
 }
 
-/* video 标签同样用 cover 裁剪铺满，避免被 flex 拉伸 */
 video.coverImg {
   width: 100%;
   height: 100%;
@@ -461,7 +449,6 @@ video.coverImg {
   background-color: var(--color-bg-hover);
 }
 
-/* ============ 商品选择弹窗 ============ */
 
 .pickOverlay {
   position: fixed;
@@ -565,7 +552,6 @@ video.coverImg {
   background-color: #fff;
 }
 
-/* ============ 预览弹窗 ============ */
 
 .previewOverlay {
   position: fixed;
@@ -626,7 +612,6 @@ video.coverImg {
   overflow-y: auto;
 }
 
-/* 媒体预览（图片/视频） */
 .previewMedia {
   display: block;
   max-width: 100%;
@@ -637,7 +622,6 @@ video.coverImg {
   background-color: #111;
 }
 
-/* 音频预览 */
 .previewAudioBox {
   display: flex;
   flex-direction: column;
@@ -663,7 +647,6 @@ video.coverImg {
   max-width: 480px;
 }
 
-/* 卡片/商品/场景预览 */
 .previewCard {
   display: flex;
   flex-direction: column;
@@ -716,7 +699,6 @@ video.coverImg {
   font-weight: 600;
 }
 
-/* 文本/场景内容预览 */
 .previewText {
   margin: 0;
   padding: 16px 20px;
@@ -734,7 +716,6 @@ video.coverImg {
   margin: 0 0 8px;
 }
 
-/* ---- 响应式 ---- */
 @media (max-width: 900px) {
   .grid {
     grid-template-columns: repeat(3, 1fr);

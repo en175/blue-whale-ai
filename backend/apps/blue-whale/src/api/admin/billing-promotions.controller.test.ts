@@ -55,7 +55,6 @@ describe("AdminBillingPromotionsController.create", () => {
 
     await createController().create(OPERATOR, { ...VALID_BODY, taskTypes: [], tierScope: [] });
 
-    // ⚠️ 不归一会让「界面上清空了」这件事，要靠读 billing 的代码才知道它等于不限
     expect(billing.createPromotion).toHaveBeenCalledWith(
       expect.objectContaining({ taskTypes: null, tierScope: null }),
       "42",

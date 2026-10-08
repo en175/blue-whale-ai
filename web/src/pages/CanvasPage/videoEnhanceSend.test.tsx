@@ -1,13 +1,4 @@
 // @vitest-environment jsdom
-/* IKH3VH 视频 HD 高清发送闭环与结果回填（画布链路）：发送 POST video-enhancements 携带冻结
-   三键（source_asset_id / target_node_id / resolution）、创建成功面板自动关闭卡原地转生成中、
-   创建失败面板保留可重发（卡保持草稿）、轮询 mock 终态收敛（succeeded 回填 URL/mediaType/
-   宽高/时长、failed 走 1045 家族文案映射）、失败 onRetryJob 原 lastParams 重发（不经通用
-   retry）、生成中取消回草稿与只读重开、链式联动（2K/4K 结果卡置灰不建卡、1080P 可再发起）、
-   持久化恢复（生成中水合即恢复轮询并收敛成品、结果卡保持）、发送在途显式关闭重开可重发
-   （新会话再次受理，区别于选中隐藏回看的在途只读）。渲染模式沿用
-   videoEnhancePanel.test.tsx（FlowCanvas 打桩透出 props），轮询 mock 终态模式对齐
-   audioVideoSplitEdit.test.tsx（IKH28X 先例）。 */
 import { dockActions } from './testing/dockActionsRecorder';
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -24,8 +15,6 @@ import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
 
 silenceApiConsoleInfo();
 
-/* sonner 替身：IKJPM7 真实链用例的 HTTP 层默认 toast 观测点（IKI8L4 先例）。
-   页面本地 showToast 为独立 state 渲染，不受影响。 */
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
@@ -66,7 +55,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -139,7 +127,6 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn(),
 }));
 
-/* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
@@ -157,12 +144,8 @@ vi.mock('@/api/canvas', () => ({
     JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target }))),
   ),
 }));
-/* importOriginal 部分真实（IKI8L4 先例）：列出键走 mock（既有用例接缝不变），
-   其余键保持真实实现——IKJPM7 真实链用例把 createVideoEnhancement 动态转发回真实
-   实现（真实 http.ts 默认 toast 逻辑保留），受控响应仅在 fetch 边界注入。 */
 vi.mock('@/api/jobs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/jobs')>()),
-  // 水合/轮询等旁路查询固定空结果，避免 importOriginal 后真实外呼（harness 同口径）
   fetchJobs: vi.fn(async (): Promise<{ records: never[]; total: number; size: number; current: number }> => ({ records: [], total: 0, size: 20, current: 1 })),
   createGenerationJob: apiMocks.createGenerationJob,
   cancelGenerationJob: apiMocks.cancelGenerationJob,
@@ -187,7 +170,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 成品 HD 卡身份（与 VG 面板测试 seedDoc(true) 同构，分辨率可变） */
 function finishedHdNode(id: string, assetId: string, width: number, height: number, resolution: string) {
   return {
     id,
@@ -209,10 +191,6 @@ function finishedHdNode(id: string, assetId: string, width: number, height: numb
   };
 }
 
-/** 画布：一个就绪视频节点 v1（assetId '5'，1280×720 达标）+ 可选附加节点。
- *  mode：'draft' 仅源卡；'failed' 带 4K 失败成品卡（重试链路）；'twoFailed' 带 h1 4K 与
- *  h2 2K 两张失败成品卡（IKJPXN 换目标链路）；'chain' 带 1080P 与 4K 成品结果卡（链式联动）；
- *  'generating' 带生成中 HD 卡（持久化恢复）；'done' 带已完成 1080P 结果卡（结果持久保持） */
 function seedDoc(mode: 'draft' | 'failed' | 'twoFailed' | 'chain' | 'generating' | 'done' = 'draft') {
   const nodes: Array<Record<string, unknown>> = [
     {
@@ -235,7 +213,6 @@ function seedDoc(mode: 'draft' | 'failed' | 'twoFailed' | 'chain' | 'generating'
     assets[9] = { asset_id: 9, type: 'video', access_url: 'http://vid/h1.mp4', width: 3840, height: 2160 };
   }
   if (mode === 'twoFailed') {
-    // IKJPXN 换目标场景：h1（4K）与 h2（2K）两张失败 HD 卡，各自 lastParams 与来源边
     const first = finishedHdNode('h1', '9', 3840, 2160, '4k');
     ((first.data as Record<string, unknown>).genStatus) = 'failed';
     ((first.data as Record<string, unknown>).errorText) = '视频画质增强失败，请重试';
@@ -289,7 +266,6 @@ function seedDoc(mode: 'draft' | 'failed' | 'twoFailed' | 'chain' | 'generating'
 
 let root: Root;
 let container: HTMLDivElement;
-/** 真实 MediaNode 挂载点（IKJP8Q：失败卡重试按钮真实渲染与点击，不以直接调回调为唯一证明） */
 let cardRoot: Root | null = null;
 let cardHost: HTMLDivElement | null = null;
 
@@ -308,7 +284,6 @@ async function renderPage() {
   });
 }
 
-/** 走视频节点工具条的「HD」入口（回调挂在节点 data 上） */
 async function videoEnhance(id = 'v1') {
   const video = flowProps.current.mediaNodes.find((n: Node) => n.id === id)!;
   await act(async () => {
@@ -332,7 +307,6 @@ async function clickPanelResolution(value: string) {
   });
 }
 
-/** HD 面板点发送（startVideoEnhanceJob 含 await 创建，等 50ms 让创建往返与轮询首 tick 完成） */
 async function sendHd() {
   await act(async () => {
     panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -370,24 +344,19 @@ describe('IKH3VH 发送创建任务闭环', () => {
     await sendHd();
     expect(dockActions.submit).toHaveBeenCalledWith('videoEnhance', '2k');
 
-    // 创建请求携带冻结三键（source_asset_id 冻结自 HD 身份、target_node_id=HD 卡节点 id、面板所选档）
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledWith('p1', {
       source_asset_id: '5',
       target_node_id: draftId,
       resolution: '2k',
     }, { silent: true, canvasBinding: expect.anything(), idempotencyKey: expect.any(String) });
-    // 创建成功面板自动关闭（发送钮不在文档）
     expect(panelSend()).toBeNull();
-    // 原地转生成中：lastParams 随提交写卡、jobId 登记并启动轮询（首 tick 已发起）
     const data = mediaNode(draftId).data as Record<string, unknown>;
     expect(data.genStatus).toBe('generating');
-    // 轮询推进：首 tick 已取回 processing 进度
     expect(data.progress).toBe(20);
     expect(data.jobId).toBe('j1');
     expect(identityOf(mediaNode(draftId))).toEqual({ sourceAssetId: '5', lastParams: { resolution: '2k' } });
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
-    // 卡数量不变（不新建占位卡）、来源边保持、源卡不动
     expect(mediaNodes().length).toBe(2);
     expect((mediaNode('v1').data as Record<string, unknown>).src).toBe('http://vid/v1.mp4');
   });
@@ -402,7 +371,6 @@ describe('IKH3VH 发送创建任务闭环', () => {
     await sendHd();
 
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
-    // 面板保留（发送钮仍在）且提交中已复位（可再点）；卡保持草稿原状（未转生成中、无 jobId）
     expect(panelSend()).toBeTruthy();
     expect(panelSend()!.disabled).toBe(false);
     const data = mediaNode(draftId).data as Record<string, unknown>;
@@ -483,11 +451,9 @@ describe('HD 面板迟到请求与新会话', () => {
     await act(async () => { panelSend()!.click(); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-    // 显式关闭（X）：面板关、草稿卡保留（创建仍在途不落地）
     await act(async () => { panelClose()!.click(); });
     expect(panelSend()).toBeNull();
 
-    // 重开（点 HD 草稿卡）：显式关闭即新会话，发送钮可点（对比选中隐藏回看的在途只读口径）
     await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
     expect(panelSend()).toBeTruthy();
     expect(panelSend()!.disabled).toBe(false);
@@ -508,8 +474,6 @@ describe('HD 面板迟到请求与新会话', () => {
     await clickPanelResolution('2k');
     await act(async () => { panelSend()!.click(); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
-    // IKJJR3：提交点即交接（面板关 + 卡转生成中）。选中其它卡后点回本卡：面板重现且
-    // 生成中只读，submitting 窗口统一防重，不重复受理
     await act(async () => { flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')] }); });
     await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
     expect(panelSend()).toBeTruthy();
@@ -540,9 +504,7 @@ describe('IKH3VH 轮询终态回填', () => {
     expect(data.width).toBe(2560);
     expect(data.height).toBe(1440);
     expect(data.duration).toBe(32.5);
-    // 草稿身份结束（成品卡可再发起链式 HD）
     expect(data.draft).toBeUndefined();
-    // 源卡不动
     expect((mediaNode('v1').data as Record<string, unknown>).src).toBe('http://vid/v1.mp4');
   });
 
@@ -566,12 +528,10 @@ describe('IKH3VH 轮询终态回填', () => {
     await sendHd();
     const draftId = hdDraft()!.id;
 
-    // 失败态：msg 为空 → 1045 家族兜底文案「视频画质增强失败，请重试」
     const failed = mediaNode(draftId).data as Record<string, unknown>;
     expect(failed.genStatus).toBe('failed');
     expect(failed.errorText).toBe('视频画质增强失败，请重试');
 
-    // 原参数重试：lastParams（2k）原样重发创建接口（新 job），轮询 succeeded 收敛成品
     await act(async () => {
       (failed.onRetryJob as (id: string) => void)(draftId);
     });
@@ -579,8 +539,6 @@ describe('IKH3VH 轮询终态回填', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
-    // IKJJR3：重试走运行时（冻结输入 lastParams 原样重发；测试受理响应无 canvas_binding
-    // 视图 → 历史兼容路径 binding=null，真实环境带视图时为新提交身份）
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5',
       target_node_id: draftId,
@@ -615,7 +573,6 @@ describe('IKH3VH 生成中取消', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(apiMocks.cancelGenerationJob).toHaveBeenCalledWith('p1', 'j1');
-    // 卡回待生成（保留卡与连线，可重开面板原参数重发），不被移除
     expect(mediaNodes().length).toBe(2);
     const data = mediaNode(draftId).data as Record<string, unknown>;
     expect(data.genStatus).toBe('draft');
@@ -663,7 +620,6 @@ describe('IKH3VH 持久化恢复', () => {
     });
     await renderPage();
 
-    // 水合恢复轮询：以持久化的 jobId 查询任务
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j9');
     const data = mediaNode('h1').data as Record<string, unknown>;
     expect(data.genStatus).toBeUndefined();
@@ -687,16 +643,9 @@ describe('IKH3VH 持久化恢复', () => {
   });
 });
 
-/* IKJP8Q：HD 失败卡重试与面板发送共用同卡同步提交准入。面板保持打开时两种顺序都只受理
-   一次；重试登记在途后已打开面板立即提交中只读；显式关闭重开仍是新会话例外（可再受理一次）；
-   合法多在途各自收尾，旧响应不关闭新面板、不解除新会话锁。重试经真实 MediaNode「重试」按钮
-   点击触发（挂载页面注入的最新节点数据，onRetryJob 仍路由页面 handler），面板用页面真实按钮。 */
 describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
-  /** 挂起的创建响应（在途窗口可控） */
   const pendingCreate = () => new Promise<{ job_id: string; status: 'queued' }>(() => {});
 
-  /** 以页面当前节点数据真实渲染 MediaNode（ReactFlowProvider 上下文，同 cardHtml 先例）。
-   *  宿主带 .react-flow 类：模拟卡片真实所在的画布区域，命中 IKFYH6「画布外点击关面板」豁免。 */
   async function mountCard(id: string) {
     if (cardRoot) { await act(async () => cardRoot!.unmount()); cardRoot = null; }
     cardHost?.remove();
@@ -718,23 +667,18 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
   const retryButton = () =>
     [...(cardHost?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '重试');
 
-  /** 真实失败卡「重试」按钮点击（数据快照里的 onRetryJob 路由页面最新 handler） */
   async function clickCardRetry() {
     await act(async () => {
       retryButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
   }
 
-  /** 打开失败卡 HD 面板（点卡重开，同「生成中点卡重开面板」路径） */
   async function openHdPanel(id = 'h1') {
     await act(async () => {
       flowProps.current.onNodeClick(mediaNode(id));
     });
   }
 
-  /** 真实创建客户端与 HTTP 链脚手架（IKJPM7/IKJPXN 共用）：createVideoEnhancement 转发真实
-   *  实现（真实 http.ts 默认 toast 保留），受控响应仅在 fetch 边界注入；默认兜底成功空信封，
-   *  页面意外真实 fetch 不外呼不干扰受控用例。hooks 随调用处 describe 注册，作用域不变。 */
   function setupRealCreateClient() {
     const fetchMock = vi.fn();
     const jsonEnvelope = (code: number, msg: string, status: number, data: unknown = null) =>
@@ -762,15 +706,12 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await mountCard('h1');
     expect(retryButton()).toBeTruthy();
     await clickCardRetry();
-    // 重试已受理：lastParams（4k）原样重发创建接口（IKJPM7 静默传输，反馈走页面回调），不经通用 retry
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', target_node_id: 'h1', resolution: '4k',
     }, expect.objectContaining({ silent: true }));
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
 
-    // 重试登记在途 → 面板立即提交中只读（发送钮与分辨率参数均按既有只读规则禁用）；
-    // 再点发送（含强制派发）不重复受理
     expect(panelSend()!.disabled).toBe(true);
     expect(panelResolution('4k')!.disabled).toBe(true);
     await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -792,7 +733,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await mountCard('h1');
     await clickCardRetry();
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
-    // 防重拒绝不发请求、不改卡片结果或既有参数（lastParams 保持面板编辑写回的 2k）
     const data = mediaNode('h1').data as Record<string, unknown>;
     expect(data.genStatus).toBe('failed');
     expect(identityOf(mediaNode('h1'))).toEqual({ sourceAssetId: '5', lastParams: { resolution: '2k' } });
@@ -820,7 +760,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await clickCardRetry();
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-    // 显式关闭（X）→ 重开 = 新会话：发送钮可用，可再受理一次
     await act(async () => { panelClose()!.click(); });
     expect(panelSend()).toBeNull();
     await openHdPanel();
@@ -839,7 +778,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await clickCardRetry();
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-    // 重试按钮点击冒泡到节点 onClick：可见同卡重入保留面板内容与提交状态
     await openHdPanel();
     expect(panelSend()!.disabled).toBe(true);
     expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
@@ -859,7 +797,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-    // 创建失败 → 面板恢复可操作（发送钮可用），再次发送受理第二次
     expect(panelSend()!.disabled).toBe(false);
     await act(async () => { panelSend()!.click(); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
@@ -878,7 +815,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await clickCardRetry();
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-    // 对源卡 v1 发起 HD：新建草稿卡并把面板切到它（h1 在途不波及）
     await videoEnhance('v1');
     const draft = mediaNodes().find((n) => n.id !== 'v1' && n.id !== 'h1')!;
     expect(panelSend()!.disabled).toBe(false);
@@ -919,14 +855,12 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await mountCard('h1');
     await clickCardRetry();
 
-    // 显式关闭重开 = 新会话，旧重试在途仍可再发送一次（共两次受理）
     await act(async () => { panelClose()!.click(); });
     await openHdPanel();
     await clickPanelResolution('2k');
     await act(async () => { panelSend()!.click(); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
 
-    // 旧重试先返回（失败）：新面板不关闭、新会话提交锁不解除、卡不被旧请求改动
     await act(async () => {
       rejectOld(new Error('old network'));
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -935,12 +869,10 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(panelSend()!.disabled).toBe(true);
     expect((mediaNode('h1').data as Record<string, unknown>).genStatus).toBe('failed');
 
-    // 新会话自己的发送在途时，同卡失败重试同样被拒（US12 新会话互斥）
     await mountCard('h1');
     await clickCardRetry();
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
 
-    // 新会话请求随后成功：卡原地转生成中并轮询（各自收尾互不提前释放）
     await act(async () => {
       resolveNew({ job_id: 'j2', status: 'queued' });
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -951,9 +883,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j2');
   });
 
-  /* IKJPM3：合法多请求乱序收尾的提交锁校准——新会话发送（B）先失败而旧重试（A）仍
-     等待时，B 的收尾只释放自己的占用，面板继续在途只读、不产生 C；旧重试（A）先返回
-     而 B 仍等待时，A 的收尾不解除新会话自身的提交锁。全部创建请求收尾后按既有卡态恢复。 */
   it.each(['success', 'failure'] as const)('新会话发送先失败而旧重试仍等待：面板保持只读不产生 C（共 2 次），旧重试%s收尾后各自释放', async (outcome) => {
     seedDoc('failed');
     let settleOld!: (value: { job_id: string; status: 'queued' }) => void;
@@ -968,15 +897,12 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await openHdPanel();
     await mountCard('h1');
     await clickCardRetry();
-    // 显式关闭重开 = 新会话：旧重试在途仍可再发送一次（B，共 2 次受理）
     await act(async () => { panelClose()!.click(); });
     await openHdPanel();
     await clickPanelResolution('2k');
     await act(async () => { panelSend()!.click(); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
 
-    // B 先失败而 A 仍等待：当前有效失败保留原有提示，但面板继续只读（发送钮与分辨率
-    // 参数），再点发送（含强制派发）不产生 C
     await act(async () => {
       rejectNew(new Error('new network'));
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -987,7 +913,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
 
-    // A 已被新 B 接管：迟到成功与失败都不回写原卡，仅结算自己的在途资源。
     await act(async () => {
       if (outcome === 'success') settleOld({ job_id: 'j-old', status: 'queued' });
       else rejectOld(new Error('old network'));
@@ -1020,7 +945,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await act(async () => { panelSend()!.click(); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
 
-    // 旧重试先返回（成功或失败）：新会话仍在途，锁与只读保持
     await act(async () => {
       if (outcome === 'success') settleOld({ job_id: 'j-old', status: 'queued' });
       else rejectOld(new Error('old network'));
@@ -1036,16 +960,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     expect(apiMocks.fetchJobStatus).not.toHaveBeenCalledWith('j-old');
   });
 
-  /* IKJPM5：选择隐藏 ≠ 显式关闭——A 重试等待时点击其他卡隐藏面板，再真实点击原卡返回
-     属恢复原会话：面板继续在途只读（发送钮与分辨率参数），不产生第二次创建。真实点击链
-     保留 NodeWrapper 的节点点击与选择通知先后顺序（order 区分真实手势主路径与 useEffect
-     早于/代替 onNodeClick 的窗口），空选中过渡不当显式关闭。对照：显式关闭重开仍为新
-     会话可再发一次（上方 IKJP8Q 既有对照用例）。 */
   describe('IKJPM5 选择隐藏返回在途只读', () => {
-    /** 真实点击 HD 卡返回：MediaNode 真实渲染于带 click 监听的宿主，父级监听模拟 React Flow
-     *  NodeWrapper 的 onClick（onSelectNodeHandler），随后按真实顺序派发选择通知。
-     *  order='node-first' 为真实手势主路径（onNodeClick 先到、选择通知随后）；
-     *  'selection-first' 对应选中变化经 useEffect 早于或代替 onNodeClick 到达。 */
     async function clickCardBack(id: string, order: 'node-first' | 'selection-first' = 'node-first') {
       const nodeClick = () => flowProps.current.onNodeClick(mediaNode(id));
       const selection = () => flowProps.current.onSelectionChange({ nodes: [mediaNode(id)] });
@@ -1054,7 +969,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         const listener = () => chain.forEach((call) => call());
         cardHost!.addEventListener('click', listener);
         try {
-          // 点卡片主体（非重试按钮区域），冒泡到 NodeWrapper 层（cardHost 监听）
           const cardBody = cardHost!.querySelector('span') ?? cardHost!;
           cardBody.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         } finally {
@@ -1063,7 +977,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       });
     }
 
-    /** A 重试受理并等待，面板随选择其他卡隐藏 */
     async function setupRetryHiddenPanel() {
       seedDoc('failed');
       apiMocks.createVideoEnhancement.mockImplementation(pendingCreate);
@@ -1107,8 +1020,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
 
-    /* IKJPM7 修订（场景 i，违反 US19/IKJPM5 语义）：resume 恢复的是同一会话，A 是该
-       会话当前有效请求——失败提示必须保留，不得因选择隐藏的纪元变化被吞。 */
     it('A 重试等待→点其他卡→真实点回原卡（resume 恢复同会话）：A 失败提示保留，创建总数 1', async () => {
       seedDoc('failed');
       let rejectA!: (error: unknown) => void;
@@ -1126,10 +1037,8 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         rejectA(new Error('network down'));
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
-      // US19：A 是恢复会话的当前有效请求，失败保留原有页面提示
       expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
-      // 会话仍在途约束随 A 收尾解除：恢复的会话可继续操作
       expect(panelSend()!.disabled).toBe(false);
     });
   });
@@ -1147,12 +1056,11 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     await act(async () => { panelClose()!.click(); });
     await openHdPanel();
     await clickPanelResolution('2k');
-    await act(async () => { panelSend()!.click(); });   // B 立即失败
+    await act(async () => { panelSend()!.click(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(2);
-    expect(panelSend()!.disabled).toBe(true);           // 旧重试仍等待：面板继续只读
+    expect(panelSend()!.disabled).toBe(true);
 
-    // 再次显式关闭重开 = 又一新会话：例外保留，仍可主动发送一次
     await act(async () => { panelClose()!.click(); });
     await openHdPanel();
     expect(panelSend()!.disabled).toBe(false);
@@ -1163,11 +1071,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     }, expect.objectContaining({ silent: true }));
   });
 
-  /* IKJPM7 旧重试失败提示按有效会话归属：同卡显式关闭重开（即使未再发送）即新会话，
-     旧重试 A 的失败（网络或 HTTP 422）不向其提示——页面与 HTTP 层默认 toast 都不弹，
-     也不先于会话归属判断触发；当前有效请求失败保留原有提示与 401 静默。接缝对齐
-     toolSessionErrorToastOwnership.test.tsx（IKI8L4）：createVideoEnhancement 转发真实
-     实现（真实 http.ts 默认 toast 保留），受控响应仅在 fetch 边界注入。 */
   describe('IKJPM7 旧重试失败按有效会话归属（真实创建客户端与 HTTP 链）', () => {
     const { fetchMock, jsonEnvelope, settle } = setupRealCreateClient();
 
@@ -1181,17 +1084,14 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await clickCardRetry();
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
-      // 显式关闭重开 = 新会话（未发送）：旧 A 的失败不属于它
       await act(async () => { panelClose()!.click(); });
       await openHdPanel();
       await act(async () => { rejectA(new TypeError('Failed to fetch')); });
       await settle();
 
-      // 旧错误全链路静默：HTTP 层默认 toast（sonner）与页面 toast 都不出现
       expect(toast.error).not.toHaveBeenCalled();
       expect(document.body.textContent).not.toContain('网络请求失败');
       expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
-      // 新面板保留且可用、原参数（lastParams 4k）保留，未被旧失败关闭或重置
       expect(panelSend()).toBeTruthy();
       expect(panelSend()!.disabled).toBe(false);
       expect(panelResolution('4k')!.className).toContain('resolutionBtnActive');
@@ -1203,7 +1103,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       let resolveA!: (value: Response) => void;
       fetchMock
         .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveA = resolve; }))
-        .mockImplementationOnce(() => new Promise<Response>(() => {}));   // B 永挂
+        .mockImplementationOnce(() => new Promise<Response>(() => {}));
       await renderPage();
       await openHdPanel();
       await mountCard('h1');
@@ -1213,18 +1113,16 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await act(async () => { panelClose()!.click(); });
       await openHdPanel();
       await clickPanelResolution('2k');
-      await act(async () => { panelSend()!.click(); });   // B 受理（fetch#2 挂起）
+      await act(async () => { panelSend()!.click(); });
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(panelSend()!.disabled).toBe(true);           // B 在途只读
+      expect(panelSend()!.disabled).toBe(true);
 
-      // 旧 A 以 HTTP 422 迟到：默认 toast 不得先于会话归属判断触发
       await act(async () => { resolveA(jsonEnvelope(422, '分辨率档不可用', 422)); });
       await settle();
 
       expect(toast.error).not.toHaveBeenCalled();
       expect(document.body.textContent).not.toContain('分辨率档不可用');
       expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
-      // B 的锁不被旧收尾解除：仍只读、再点不产生 C
       expect(panelSend()!.disabled).toBe(true);
       await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -1243,7 +1141,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       expect(toast.error).toHaveBeenCalledTimes(1);
       expect(toast.error).toHaveBeenCalledWith('分辨率档不可用');
       expect(document.body.textContent).toContain('分辨率档不可用');
-      // 创建失败限制解除（IKJP8Q 既有），面板恢复可操作
       expect(panelSend()!.disabled).toBe(false);
     });
 
@@ -1262,9 +1159,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     });
   });
 
-  /* IKJPM7 修订：会话归属探针语义补齐——探针失效只随同卡显式关闭重开（后来新会话）或
-     项目切换；他卡另一工具面板的打开（场景 ii，违反决策 6/US18）与纯显式关闭未重开
-     （父级裁定边界）都不得吞掉当前有效请求 A 的失败提示。 */
   describe('IKJPM7 修订：探针不过度失效（他工具打开与纯关闭）', () => {
     it('场景ii：A 重试等待时打开另一张卡的另一工具面板（插帧）：A 失败提示保留，创建总数 1', async () => {
       seedDoc('failed');
@@ -1276,7 +1170,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await clickCardRetry();
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-      // 另一张卡（源卡 v1）的另一工具（插帧）面板打开：HD 面板被排他关闭，同卡无后来会话
       await act(async () => {
         ((mediaNode('v1').data as Record<string, unknown>).onFrameInterpolation as (id: string) => void)('v1');
       });
@@ -1300,7 +1193,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await clickCardRetry();
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-      // 纯显式关闭（X）、不重开：无后来会话，A 仍是当前有效请求
       await act(async () => { panelClose()!.click(); });
       expect(panelSend()).toBeNull();
 
@@ -1313,10 +1205,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     });
   });
 
-  /* IKJPXN 换目标会话隔离（决策 5、Testing 4）：同种 HD 工具从 h1 直接切到 h2 即新会话
-     归属——旧 h1 重试 A 的失败（网络错误 / HTTP 422）不向 h2 新 HD 会话提示，h2 面板、
-     参数与自身提交锁保持，请求次数不增加。接缝同 IKJPM7：真实创建客户端与 HTTP 错误
-     处理保留，受控外部响应仅在 fetch 边界注入。 */
   describe('IKJPXN 换目标会话隔离旧重试失败提示（真实创建客户端与 HTTP 链）', () => {
     const { fetchMock, jsonEnvelope, settle } = setupRealCreateClient();
 
@@ -1328,9 +1216,8 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await openHdPanel('h1');
       await mountCard('h1');
       await clickCardRetry();
-      expect(fetchMock).toHaveBeenCalledTimes(1);   // A 受理：h1 lastParams（4k）原样重发
+      expect(fetchMock).toHaveBeenCalledTimes(1);
 
-      // 同种 HD 工具直接换目标：h1 面板切到 h2 = 新会话（未发送）
       await openHdPanel('h2');
       expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
       expect(panelSend()!.disabled).toBe(false);
@@ -1338,11 +1225,9 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await act(async () => { rejectA(new TypeError('Failed to fetch')); });
       await settle();
 
-      // 旧 A 网络失败全链路静默：HTTP 层默认 toast（sonner）与页面 toast 都不出现
       expect(toast.error).not.toHaveBeenCalled();
       expect(document.body.textContent).not.toContain('网络请求失败');
       expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
-      // h2 新会话面板与参数保持、未被旧失败关闭或重置；h1 卡与参数不被旧失败改动；不新增请求
       expect(panelSend()).toBeTruthy();
       expect(panelSend()!.disabled).toBe(false);
       expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
@@ -1356,32 +1241,28 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       let resolveA!: (value: Response) => void;
       fetchMock
         .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveA = resolve; }))
-        .mockImplementationOnce(() => new Promise<Response>(() => {}));   // B 永挂
+        .mockImplementationOnce(() => new Promise<Response>(() => {}));
       await renderPage();
       await openHdPanel('h1');
       await mountCard('h1');
       await clickCardRetry();
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
-      // 换目标打开 h2 并发送 B（fetch#2 挂起）：h2 自身提交锁生效
       await openHdPanel('h2');
       await act(async () => { panelSend()!.click(); });
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      // B 的创建输入按 h2 冻结（源素材与目标卡、分辨率档 2k）
       expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
         source_asset_id: '5', target_node_id: 'h2', resolution: '2k',
         canvas_binding: expect.objectContaining({ protocol_version: 1, target_node_id: 'h2', submission_id: expect.any(String) }),
       });
       expect(panelSend()!.disabled).toBe(true);
 
-      // 旧 A 以 HTTP 422 迟到：默认 toast 不得先于会话归属判断触发
       await act(async () => { resolveA(jsonEnvelope(422, '分辨率档不可用', 422)); });
       await settle();
 
       expect(toast.error).not.toHaveBeenCalled();
       expect(document.body.textContent).not.toContain('分辨率档不可用');
       expect(document.body.textContent).not.toContain('HD 高清任务创建失败，请重试');
-      // B 的锁不被旧收尾解除：仍只读、再点不产生第三次请求；h2 参数保持
       expect(panelSend()!.disabled).toBe(true);
       await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -1389,10 +1270,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     });
   });
 
-  /* IKJPXM：可见同卡重入保留当前有效失败反馈（决策 3、Testing 2/3/6）。真实链：
-     页面 FlowCanvas 仍为打桩透出，另挂真实 ReactFlow 实例——MediaNode 经真实
-     NodeWrapper 渲染，点击与选择通知按 ReactFlow 自有顺序转发回页面回调，不以自造
-     监听串联替代。jsdom 不起布局：节点测量用既定桩（textNodeCard.test.tsx 同款）。 */
   describe('IKJPXM 可见同卡重入保留失败反馈（真实 NodeWrapper 事件链）', () => {
     let realFlowRoot: Root | null = null;
     let realFlowHost: HTMLDivElement | null = null;
@@ -1427,7 +1304,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await act(async () => { realFlowRoot!.render(createElement(RealFlowBridge)); });
     }
 
-    /** 真实 NodeWrapper 点击：先把页面最新节点数据同步进真实画布，再派发真实 click */
     async function realClickNode(id: string) {
       await act(async () => { syncRealFlow?.(); });
       const el = realFlowHost!.querySelector(`.react-flow__node[data-id="${id}"]`);
@@ -1438,7 +1314,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
     }
 
     beforeEach(() => {
-      // jsdom 无这些浏览器测量 API；React Flow 真实实现靠它们初始化与测量节点
       vi.stubGlobal('ResizeObserver', class {
         callback: ResizeObserverCallback;
         constructor(cb: ResizeObserverCallback) { this.callback = cb; }
@@ -1491,7 +1366,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         source_asset_id: '5', target_node_id: 'h1', resolution: '2k',
       }, expect.objectContaining({ silent: true }));
 
-      // B 等待期间真实 NodeWrapper 点击当前可见同卡：面板保留、2K 参数保留、在途只读、不新增创建
       await mountRealFlow();
       await realClickNode('h1');
       expect(panelSend()).toBeTruthy();
@@ -1499,7 +1373,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       expect(panelResolution('2k')!.className).toContain('resolutionBtnActive');
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-      // B 失败：原有失败原因仍显示；随后恢复可操作
       await act(async () => {
         rejectB(new Error('network down'));
         await new Promise((resolve) => setTimeout(resolve, 20));
@@ -1517,7 +1390,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       );
       await renderPage();
       await openHdPanel();
-      await act(async () => { panelSend()!.click(); });   // 按初值 4K 直接发送
+      await act(async () => { panelSend()!.click(); });
       expect(apiMocks.createVideoEnhancement).toHaveBeenLastCalledWith('p1', {
         source_asset_id: '5', target_node_id: 'h1', resolution: '4k',
       }, expect.objectContaining({ silent: true }));
@@ -1537,9 +1410,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
 
-    /* IKJPXF 评审修订（Testing 决策 6）：点其他卡与点回原卡都走真实 NodeWrapper——
-       真实桥挂载含 v1 的全部节点，点击经 ReactFlow 自有事件顺序转发回页面回调，
-       不以直接调 onSelectionChange 替代真实手势。 */
     it('选择隐藏（含空选中过渡）：真实点击其他卡隐藏面板、真实点回原卡恢复——参数与在途只读保留、无额外创建，A 失败反馈仍保留', async () => {
       seedDoc('failed');
       let rejectA!: (error: unknown) => void;
@@ -1553,15 +1423,12 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await clickCardRetry();
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-      // 真实 NodeWrapper 点击其他卡（v1）：真实画布确含 v1 卡，选择切换经真实桥隐藏面板
       await mountRealFlow();
       expect(realFlowHost!.textContent).toContain('素材视频');
       await realClickNode('v1');
       expect(panelSend()).toBeNull();
-      // 空选中过渡不当显式关闭
       await act(async () => { flowProps.current.onSelectionChange({ nodes: [] }); });
 
-      // 真实 NodeWrapper 点回原卡：恢复同一会话，最新参数与按宿主在途只读保留
       await realClickNode('h1');
       expect(panelSend()).toBeTruthy();
       expect(panelSend()!.disabled).toBe(true);
@@ -1570,7 +1437,6 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
 
-      // A 是恢复会话的当前有效请求（US19）：其失败反馈保留，创建总数不变
       await act(async () => {
         rejectA(new Error('network down'));
         await new Promise((resolve) => setTimeout(resolve, 20));

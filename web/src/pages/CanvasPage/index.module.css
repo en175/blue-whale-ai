@@ -1,6 +1,3 @@
-/* ============================================
- * CanvasPage - 画布页面
- * ============================================ */
 
 .canvasPage {
   width: 100%;
@@ -16,12 +13,10 @@
   position: relative;
 }
 
-/* 到节点选择（图片 / 首尾帧）：非图片节点降亮，提示只能点图片节点 */
 .pickingImage :global(.react-flow__node:not(:has([data-media-type="image"]))) {
   opacity: 0.35;
 }
 
-/* ---- 左下角按钮组 ---- */
 .bottomLeftActions {
   position: absolute;
   bottom: var(--spacing-lg);
@@ -82,7 +77,6 @@
   background-color: rgba(76, 110, 245, 0.1);
 }
 
-/* 左下角保存状态 */
 .saveStatus {
   padding: 6px var(--spacing-md);
   border-radius: var(--radius-md);
@@ -101,7 +95,6 @@
   border-color: rgba(229, 72, 77, 0.4);
 }
 
-/* 图片节点选取模式提示条 */
 .pickHint {
   position: absolute;
   top: var(--spacing-lg);
@@ -120,7 +113,6 @@
   white-space: nowrap;
 }
 
-/* IKFR4X 持续选取会话版提示条：含「完成选取」按钮，开启指针交互 */
 .pickHintSession {
   display: flex;
   align-items: center;

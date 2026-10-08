@@ -1,15 +1,4 @@
 #!/usr/bin/env node
-/* ============================================
- * IKA64P 后续校准：首页画廊视频压缩更新（CRF27+faststart，保 720p/24fps/AAC）
- * 环境变量：
- *   BLUEWHALE_API_BASE  后端基址（默认 http://localhost:3000）
- *   BLUEWHALE_ADMIN_TOKEN  管理端 Bearer token
- *   BRAND_GALLERY_ROOT  素材根目录（默认 E:\IDEA_Programme\new\品牌素材\视频库图库）
- *   FFMPEG_BIN / FFPROBE_BIN  可执行文件路径（默认 PATH 查找）
- * 用法：node scripts/recompress-gallery-videos.mjs --dry-run   仅压缩校验不上传不更新
- *       node scripts/recompress-gallery-videos.mjs            压缩+上传+更新 video_url
- * 回退：scripts/.rollback-video-urls.json（标题→旧 URL），旧 TOS 对象不删
- * ============================================ */
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { readFileSync, existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -56,7 +45,6 @@ async function api(method, p, body) {
   throw lastErr ?? new Error(`API ${p} 失败`);
 }
 
-/** TOS 凭据：进程环境优先，回退 worktree .env */
 function loadTosConfig() {
   const vars = {};
   try {
@@ -64,7 +52,7 @@ function loadTosConfig() {
       const m = line.match(/^\s*([A-Z0-9_]+)=(.*)\s*$/);
       if (m) vars[m[1]] = m[2];
     }
-  } catch { /* 无 .env 时纯环境变量模式 */ }
+  } catch {  }
   const get = (k) => process.env[k] ?? vars[k];
   const cfg = {
     accessKeyId: get('VOLC_ACCESS_KEY_ID'),
@@ -117,7 +105,6 @@ function compress(src, out) {
   if (r.status !== 0) throw new Error(`ffmpeg 失败: ${r.stderr}`);
 }
 
-/** 顶层 atom 顺序（校验 moov 在 mdat 前 = faststart 生效） */
 function topLevelOrder(buf) {
   const types = [];
   let pos = 0;
@@ -144,7 +131,6 @@ async function verify(out) {
 async function main() {
   if (!TOKEN) { console.error('缺少 BLUEWHALE_ADMIN_TOKEN'); process.exit(1); }
   const cards = await api('GET', '/api/admin/templates?tagCode=video');
-  // 回退清单增量写：已有记录不覆盖（保证重跑时旧 URL 仍是最初原始版）
   const rollback = existsSync(ROLLBACK_FILE) ? JSON.parse(readFileSync(ROLLBACK_FILE, 'utf8')) : {};
   for (const card of cards) {
     const oldUrl = card.video_url;

@@ -28,14 +28,12 @@ describe("parseRateLimitAllowlist", () => {
       env({ RATE_LIMIT_ALLOW_IPS: "203.0.113.7, 10.0.0.0/8,192.168.1.0/24, ::1 , 2001:DB8::ff" }),
     );
     expect(entries.ipv4).toHaveLength(3);
-    // 精确 IPv4 以 /32 range 存储，钉住实现契约
     expect(entries.ipv4[0]).toEqual({ network: 0xcb007107, mask: 0xffffffff });
     expect(entries.ipv6.has("::1")).toBe(true);
     expect(entries.ipv6.has("2001:db8::ff")).toBe(true);
   });
 
   it("normalizes CIDR entries to their network address", () => {
-    // 10.1.2.3/8 与 10.0.0.0/8 是同一个段
     const entries = parseRateLimitAllowlist(env({ RATE_LIMIT_ALLOW_IPS: "10.1.2.3/8" }));
     expect(entries.ipv4[0]).toEqual({ network: 0x0a000000, mask: 0xff000000 });
   });
@@ -52,7 +50,6 @@ describe("parseRateLimitAllowlist", () => {
       "1.2.3",
       "not-an-ip",
       "10.0.0.0/8/8",
-      // 前导零是 parser-differential（八进制歧义），必须拒绝而非静默解析
       "010.1.1.1",
       "1.2.3.04",
       "10.0.0.0/08",
@@ -75,7 +72,6 @@ describe("parseRateLimitAllowlist", () => {
     const entries = parseRateLimitAllowlist(
       env({ RATE_LIMIT_ALLOW_ACCOUNTS: " alice ,bob,, alice bob " }),
     );
-    // 只 trim 两端；内部空格是合法 username 字符，原样保留
     expect([...entries.accounts].sort()).toEqual(["alice", "alice bob", "bob"]);
   });
 });
@@ -113,7 +109,6 @@ describe("RateLimitAllowlist.isAllowed", () => {
     const list = allowlist({ RATE_LIMIT_ALLOW_IPS: "10.0.0.0/8" });
     expect(list.isAllowed("ip", "garbage")).toBe(false);
     expect(list.isAllowed("ip", "")).toBe(false);
-    // 请求侧同样拒绝前导零形态，防上游代理解析差异导致误命中
     expect(list.isAllowed("ip", "010.0.0.1")).toBe(false);
   });
 

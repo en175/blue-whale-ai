@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-/* 浮层（标签操作层 / @ 菜单）叠在「添加到对话」上时，pointerdown 卸掉浮层后
-   同一次 click 不得被当成 chrome 穿透、转发给底下按钮。 */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { swallowStolenCanvasChromeHit } from './chromeHitGuard';
 

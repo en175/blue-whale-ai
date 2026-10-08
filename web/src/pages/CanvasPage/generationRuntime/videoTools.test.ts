@@ -1,9 +1,3 @@
-/* ============================================
- * 视频处理任务家族契约测试（IKJJR3）：七类身份识别（排除其它家族）、冻结输入
- * （lastInput / lastParams / frozenParams，缺输入 null 阻止）、创建协议（各自端点 +
- * canvas_binding 进 body + Idempotency-Key = submission_id；抠像 client_token = submission_id）、
- * 冻结输入重试、通用取消、恢复落卡规划（补卡 + 来源线 + 续轮询收敛）。
- * ============================================ */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
@@ -94,7 +88,6 @@ describe('视频处理家族：冻结输入（失败卡重试原样重发的权�
   it('HD：lastParams 分辨率 + 身份 sourceAssetId 组契约三键（target_node_id = 本卡）', () => {
     expect(videoToolFrozenPayload('hd1', { videoEnhance: { sourceAssetId: '7', lastParams: { resolution: '2k' } } }))
       .toEqual({ kind: 'videoEnhance', input: { source_asset_id: '7', target_node_id: 'hd1', resolution: '2k' } });
-    // lastParams 缺失回落契约默认档 1080p（面板值可恢复）
     expect(videoToolFrozenPayload('hd1', { videoEnhance: { sourceAssetId: '7' } }))
       .toEqual({ kind: 'videoEnhance', input: { source_asset_id: '7', target_node_id: 'hd1', resolution: '1080p' } });
   });
@@ -103,7 +96,6 @@ describe('视频处理家族：冻结输入（失败卡重试原样重发的权�
     expect(videoToolFrozenPayload('fr1', {
       frameInterpolation: { sourceAssetId: '7', lastParams: { fps: 120 }, frozenParams: { fps: 60 } },
     })).toEqual({ kind: 'frameInterpolation', input: { source_asset_id: '7', target_node_id: 'fr1', fps: 60 } });
-    // 旧持久化卡无 frozenParams → 回落 lastParams 尽力兼容
     expect(videoToolFrozenPayload('fr1', {
       frameInterpolation: { sourceAssetId: '7', lastParams: { fps: 120 } },
     })).toEqual({ kind: 'frameInterpolation', input: { source_asset_id: '7', target_node_id: 'fr1', fps: 120 } });
@@ -111,9 +103,9 @@ describe('视频处理家族：冻结输入（失败卡重试原样重发的权�
 
   it('身份缺失/字段不可信 → null（运行时保留失败卡并提示重新编辑，A.6 不猜参数）', () => {
     expect(videoToolFrozenPayload('n1', {})).toBeNull();
-    expect(videoToolFrozenPayload('media-extract-9', { jobId: '9' })).toBeNull(); // 前缀家族但无身份
-    expect(videoToolFrozenPayload('n1', { mediaExtract: { sourceAssetId: '5' } })).toBeNull(); // 无 lastInput
-    expect(videoToolFrozenPayload('hd1', { videoEnhance: {} })).toBeNull(); // 无 sourceAssetId
+    expect(videoToolFrozenPayload('media-extract-9', { jobId: '9' })).toBeNull();
+    expect(videoToolFrozenPayload('n1', { mediaExtract: { sourceAssetId: '5' } })).toBeNull();
+    expect(videoToolFrozenPayload('hd1', { videoEnhance: {} })).toBeNull();
   });
 });
 
@@ -138,7 +130,7 @@ describe('视频处理家族：创建/重试/取消协议', () => {
     expect(apiMocks.createVideoMatting).toHaveBeenCalledWith(
       'p1',
       { ...mattingInput, client_token: 'key-mat' },
-      { silent: true, canvasBinding: BINDING }, // 无 idempotencyKey
+      { silent: true, canvasBinding: BINDING },
     );
   });
 

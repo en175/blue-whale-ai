@@ -3,14 +3,12 @@ import type { PrismaClient } from "@prisma/client";
 import { syncStoryboardPreviewSummary } from "./generation-worker-internals.js";
 import { appendProjectEvent } from "./product-event-repo.js";
 
-/** 图片供应商为长调用：取消确认撤销本任务写入权，不依赖供应商支持中断。 */
 export async function cancelImageJob(
   prisma: PrismaClient,
   jobId: string,
   userId: string,
 ): Promise<boolean> {
   return prisma.$transaction(async (tx) => {
-    // 与领取、产物写入和成功结算争用同一行锁；先完成的终态获胜。
     const cancelled = await tx.generation_jobs.updateMany({
       where: {
         id: BigInt(jobId), user_id: BigInt(userId), type: "image",
@@ -23,7 +21,6 @@ export async function cancelImageJob(
       },
     });
     if (cancelled.count !== 1) {
-      // 同一取消命令重放安全；成功/失败终态不接受取消。
       return (await tx.generation_jobs.count({ where: {
         id: BigInt(jobId), user_id: BigInt(userId), type: "image",
         is_delete: false, status: "cancelled", cancel_requested_at: { not: null },
@@ -39,7 +36,6 @@ export async function cancelImageJob(
     });
     await tx.cost_reservations.updateMany({
       where: { generation_job_id: job.id, status: "reserved" },
-      // 本地释放预留不证明外部退款；可能已有在途调用，保留待核对标记。
       data: { status: "released", actual_amount_fen: 0n, release_note: "refund_unverified" },
     });
     await tx.generation_job_logs.create({ data: {

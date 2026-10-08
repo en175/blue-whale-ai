@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKGXMT 抠图工具栏与发送闭环（画布链路）：进入（关五面板/不动视角/参数默认 general）、
-   场景上拉切换与增强控件显隐、人像/商品场景档精校（发送置灰 + title 原因）、
-   四退出（X/Esc/点其他卡/点画布空白）未发送无痕迹且参数丢弃、发送（恰三键/七键请求体，
-   无 output_format）→ 退工具栏 + 建结果卡（generating + imageCutout 身份）+ 纯视觉来源线
-   （origin=image-cutout，参考推导跳过）+ 源卡不动、终态回填后结果卡棋盘格底纹、
-   失败态 lastInput 原样重试、创建失败留在工具栏不建卡（擦除口径）。
-   渲染模式沿用 eraseEdit.test.tsx（FlowCanvas 打桩透出 props，MediaNode 真实渲染）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -43,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -67,7 +59,6 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** PromptRefEditor 打桩（TextGenDialog 打开所需，genPanelDismiss 同款） */
 vi.mock('./components/PromptRefEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
@@ -179,8 +170,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：就绪图片节点 i1（1600×900 png，assetId 数字串满足抠图契约）+ 文生文卡 tg1（面板开合断言用）。
- *  bigSubject=true 模拟 8000×4500 图：通用档（10240/6000/40MP）可进，人像/商品档（7680/4320）精校拦。 */
 function seedDoc(bigSubject = false) {
   const dims = bigSubject ? { width: 8000, height: 4500 } : { width: 1600, height: 900 };
   canvasDocMock.current = {
@@ -237,7 +226,6 @@ async function renderPage() {
   });
 }
 
-/** 进入抠图会话（画质工具横排「抠图」按钮派发的回调，IKH3XZ） */
 async function cutoutImage() {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
   await act(async () => {
@@ -259,13 +247,11 @@ function toolbar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="cutout-toolbar"]');
 }
 
-/** 切换场景（场景上拉） */
 async function pickScene(scene: 'general' | 'human' | 'product') {
   await click('cutout-scene-trigger');
   await click(`cutout-scene-${scene}`);
 }
 
-/** 拖描边宽度滑杆到指定值 */
 async function dragContourSize(value: number) {
   const range = document.body.querySelector<HTMLInputElement>('[data-testid="cutout-contour-size"]')!;
   await act(async () => {
@@ -283,7 +269,6 @@ beforeEach(() => {
   seedDoc();
   apiMocks.createImageCutout.mockReset();
   apiMocks.fetchJobStatus.mockReset();
-  // IKJJR2：受理后统一运行时立即开始轮询——reset 后需有默认进行中实现（防 undefined.then）
   apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j88', status: 'processing', progress: 0, asset: null });
   apiMocks.createImageCutout.mockResolvedValue({ job_id: 'j88', status: 'queued' });
 });
@@ -304,17 +289,14 @@ describe('IKGXMT 进入抠图会话', () => {
     expect(bodyBtn('cutout-scene-trigger').textContent).toContain('通用');
     expect(bodyBtn('cutout-send-btn')).toBeTruthy();
     expect(toolbar()!.textContent).toContain('本期免费');
-    // 通用场景：描边与透明裁剪不渲染（隐藏而非置灰，规格故事 9）
     expect(document.body.querySelector('[data-testid="cutout-contour-trigger"]')).toBeNull();
     expect(document.body.querySelector('[data-testid="cutout-crop-toggle"]')).toBeNull();
-    // 进入不建卡不连线（源卡不动，规格故事 13/20）；文本卡 tg1 属 textNodes 不计 mediaNodes
     expect((flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode').length).toBe(1);
     expect(flowProps.current.edges).toEqual([]);
   });
 
   it('进入时关闭打开中的生成面板（面板与抠图会话互斥）', async () => {
     await renderPage();
-    // 先经文生文卡打开文本生成面板（handleCanvasNodeClick 的 textGen 分支需 data.textGen）
     await act(async () => {
       flowProps.current.onNodeClick({ id: 'tg1', type: 'textNode', data: { textGen: true, prompt: '' } });
     });
@@ -334,8 +316,8 @@ describe('IKGXMT 进入抠图会话', () => {
     await click('cutout-contour-trigger');
     const range = document.body.querySelector<HTMLInputElement>('[data-testid="cutout-contour-size"]')!;
     expect(range.value).toBe('10');
-    expect(range.disabled).toBe(true); // 描边未开启
-    await click('cutout-contour-toggle'); // 开启描边
+    expect(range.disabled).toBe(true);
+    await click('cutout-contour-toggle');
     expect(range.disabled).toBe(false);
     await pickScene('general');
     expect(document.body.querySelector('[data-testid="cutout-contour-trigger"]')).toBeNull();
@@ -368,7 +350,6 @@ describe('IKGXMT 四退出：未发送退出画布无痕迹、参数丢弃', () 
     expect((flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode').length).toBe(1);
     expect(flowProps.current.edges).toEqual([]);
     expect(apiMocks.createImageCutout).not.toHaveBeenCalled();
-    // 参数已丢弃：重进后触发钮回「通用」
     await cutoutImage();
     expect(bodyBtn('cutout-scene-trigger').textContent).toContain('通用');
   });
@@ -392,7 +373,6 @@ describe('IKGXMT 四退出：未发送退出画布无痕迹、参数丢弃', () 
     });
     expect(toolbar()).toBeNull();
     await cutoutImage();
-    // 点源卡本身：保持会话
     await act(async () => {
       flowProps.current.onNodeClick({ id: 'i1', type: 'mediaNode', data: {} });
     });
@@ -433,9 +413,7 @@ describe('IKGXMT 发送与结果闭环', () => {
     expect(payload).toMatchObject({ cutout_scene: 'general', source_asset_id: '5' });
     expect(Object.keys(payload).sort()).toEqual(['cutout_scene', 'source_asset_id', 'target_node_id']);
     expect(payload.target_node_id).toBeTruthy();
-    // 发送即退出工具栏
     expect(toolbar()).toBeNull();
-    // 发送时才建卡：结果卡在源卡右侧、generating、带抠图身份（lastInput 供重试）
     const nodes = (flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode');
     expect(nodes.length).toBe(2);
     const result = nodes.find((n) => n.id !== 'i1')!;
@@ -445,14 +423,11 @@ describe('IKGXMT 发送与结果闭环', () => {
     expect(data.fileName).toBe('抠图');
     expect((data.imageCutout as Record<string, unknown>).sourceAssetId).toBe('5');
     expect(result.position.x).toBeGreaterThan(400);
-    // 纯视觉来源线：origin=image-cutout
     const edges = flowProps.current.edges as Array<{ source: string; target: string; data?: { origin?: string } }>;
     expect(edges.length).toBe(1);
     expect(edges[0]).toMatchObject({ source: 'i1', target: result.id });
     expect(edges[0]!.data?.origin).toBe('image-cutout');
-    // 参考推导跳过该连线：源图不占参考位（规格故事 19）
     expect(imageMediaRefsOf(result.id, flowProps.current.edges, flowProps.current.mediaNodes)).toEqual([]);
-    // 源卡不动（规格故事 20）
     const source = nodes.find((n) => n.id === 'i1')!;
     expect((source.data as Record<string, unknown>).src).toBe('http://img/i1.png');
   });
@@ -462,10 +437,10 @@ describe('IKGXMT 发送与结果闭环', () => {
     await cutoutImage();
     await pickScene('human');
     await click('cutout-contour-trigger');
-    await click('cutout-contour-toggle'); // 开启描边
+    await click('cutout-contour-toggle');
     await dragContourSize(33);
-    await click('cutout-crop-toggle'); // 点亮透明裁剪
-    await click('cutout-contour-trigger'); // 收起描边面板（再点关闭）
+    await click('cutout-crop-toggle');
+    await click('cutout-contour-trigger');
     await click('cutout-send-btn');
     expect(apiMocks.createImageCutout).toHaveBeenCalledTimes(1);
     const [, payload] = apiMocks.createImageCutout.mock.calls[0]! as [string, Record<string, unknown>];
@@ -499,7 +474,6 @@ describe('IKGXMT 发送与结果闭环', () => {
   });
 
   it('失败可重试：重试 = lastInput 原样重发创建接口（同参数），重试链路回填成品', async () => {
-    // 首个任务 failed；重试创建的新任务 succeeded（fetchJobStatus 按调用次序返回）
     apiMocks.fetchJobStatus
       .mockResolvedValueOnce({
         job_id: 'j88',
@@ -517,19 +491,17 @@ describe('IKGXMT 发送与结果闭环', () => {
     await renderPage();
     await cutoutImage();
     await click('cutout-send-btn');
-    await act(async () => {}); // 轮询首拍回填失败态
+    await act(async () => {});
     const nodes = (flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode');
     const result = nodes.find((n) => n.id !== 'i1')!;
     expect((result.data as Record<string, unknown>).genStatus).toBe('failed');
-    // 结果卡重试按钮（MediaNode onRetryJob）→ handleRetryJob 抠图分流
     await act(async () => {
       ((result.data as Record<string, unknown>).onRetryJob as (id: string) => void)(result.id);
     });
     expect(apiMocks.createImageCutout).toHaveBeenCalledTimes(2);
     const first = (apiMocks.createImageCutout.mock.calls[0] as [string, Record<string, string>])[1];
     const second = (apiMocks.createImageCutout.mock.calls[1] as [string, Record<string, string>])[1];
-    expect(second).toEqual(first); // 同参数（含 target_node_id=同一张结果卡）
-    // 重试任务轮询回填成品
+    expect(second).toEqual(first);
     const settled = (flowProps.current.mediaNodes as Node[]).find((n) => n.id === result.id)!;
     const data = settled.data as Record<string, unknown>;
     expect(data.genStatus).toBeUndefined();
@@ -546,12 +518,11 @@ describe('IKGXMT 发送与结果闭环', () => {
     await renderPage();
     await cutoutImage();
     await click('cutout-send-btn');
-    await act(async () => {}); // 轮询首拍回填终态
+    await act(async () => {});
     const result = ((flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode')).find((n) => n.id !== 'i1')!;
     const data = result.data as Record<string, unknown>;
     expect(data.genStatus).toBeUndefined();
     expect(data.src).toBe('http://img/cut.png');
-    // 身份标记随卡持久化（成品态棋盘格渲染的判定源；DOM 渲染断言在 MediaNode/index.test.tsx）
     expect(data.imageCutout).toBeTruthy();
     expect((data.imageCutout as Record<string, unknown>).sourceAssetId).toBe('5');
   });

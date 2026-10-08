@@ -1,11 +1,9 @@
-/* 系统剪贴板：复制图片原件 / 读取可粘贴的图或文本 */
 import { fetchRemoteMedia } from './fetchRemoteMedia';
 
 export type ClipboardPastePayload =
   | { kind: 'image'; file: File }
   | { kind: 'text'; text: string };
 
-/** 读取系统剪贴板：优先图片，其次纯文本；不可用时返回 null */
 export async function readCanvasClipboard(): Promise<ClipboardPastePayload | null> {
   try {
     if (navigator.clipboard?.read) {
@@ -20,18 +18,15 @@ export async function readCanvasClipboard(): Promise<ClipboardPastePayload | nul
       }
     }
   } catch {
-    /* 权限拒绝或非安全上下文时回退读文本 */
   }
   try {
     const text = (await navigator.clipboard.readText()).trim();
     if (text) return { kind: 'text', text };
   } catch {
-    /* 忽略 */
   }
   return null;
 }
 
-/** 把图片原件写入系统剪贴板，供外部应用粘贴 */
 export async function copyImageToClipboard(url: string): Promise<void> {
   const res = await fetchRemoteMedia(url);
   if (!res.ok) throw new Error('读取图片失败');

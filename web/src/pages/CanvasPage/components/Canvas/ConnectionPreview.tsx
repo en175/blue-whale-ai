@@ -1,4 +1,3 @@
-/* 拖线预览：落到不能连接的加号时在指针上方提示 */
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getBezierPath, type Position } from '@xyflow/react';

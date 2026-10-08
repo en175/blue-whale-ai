@@ -1,6 +1,3 @@
-/* JobSourceModal 展示文案（IKIZQI）：阶段/状态/费用标签。
- * 独立成文件：组件文件只导出组件（react(only-export-components)，fast-refresh 约束），
- * 历史页与资产库也从这里取同一套文案。 */
 
 const STAGE_LABELS: Record<string, string> = {
   sample: '样片 480P',
@@ -22,7 +19,6 @@ const CHARGE_LABELS: Record<string, string> = {
   released: '已退回',
 };
 
-/** 阶段徽标文案（仅两阶段任务渲染；video/缺省返回 null）。 */
 export function stageBadgeLabel(stage: string | null | undefined): string | null {
   return stage && stage !== 'video' ? (STAGE_LABELS[stage] ?? null) : null;
 }
@@ -31,7 +27,6 @@ export function jobStatusLabel(status: string | null | undefined): string {
   return STATUS_LABELS[status ?? ''] ?? String(status ?? '');
 }
 
-/** 阶段费用行：charge_state + actual_credits（旧任务/普通视频两者皆 null → null 不渲染）。 */
 export function chargeLabel(
   chargeState: string | null | undefined,
   actualCredits: number | null | undefined,

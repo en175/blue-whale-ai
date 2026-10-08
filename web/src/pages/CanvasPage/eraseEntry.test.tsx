@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKGOT7 图片卡画质工具横排「擦除」入口（IKH3XZ）：点「擦除」把目标图片卡置为擦除编辑态。
-   本票仅开关与占位呈现（CanvasPage eraseTargetNodeId state + 占位条）；完整编辑态
-   （擦除工具条/发送条/指针接管/四退出）由 IKGOTB 交付。渲染模式沿用 imageEnhance.test.tsx。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -38,7 +35,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -150,7 +146,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪图片节点 i1（门槛内正常图：1600×900 / png） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -201,7 +196,6 @@ async function renderPage() {
   });
 }
 
-/** 走图片节点工具栏画质横排「擦除」按钮的入口（回调挂在节点 data 上，IKH3XZ） */
 async function eraseImage() {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
   await act(async () => {
@@ -209,7 +203,6 @@ async function eraseImage() {
   });
 }
 
-/** 擦除编辑态工具条（挂在 document.body 下的 CanvasPage 根内，IKGOTB 替换 IKGOT7 占位条） */
 function eraseToolbar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="erase-toolbar"]');
 }
@@ -235,7 +228,6 @@ describe('IKGOT7 点「擦除」进入擦除编辑态（开关与占位）', () 
     await eraseImage();
     expect(eraseToolbar()).toBeTruthy();
     expect(document.body.querySelector('[data-testid="erase-send-bar"]')).toBeTruthy();
-    // 源卡不动（无建卡、无连线）
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
     expect(flowProps.current.edges).toEqual([]);
   });
@@ -254,7 +246,6 @@ describe('IKGOT7 点「擦除」进入擦除编辑态（开关与占位）', () 
     await renderPage();
     await eraseImage();
     expect(eraseToolbar()).toBeTruthy();
-    // 走节点删除回调（MediaNode onDelete → removeMediaNode）
     const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
     await act(async () => {
       image.data.onDelete('i1');

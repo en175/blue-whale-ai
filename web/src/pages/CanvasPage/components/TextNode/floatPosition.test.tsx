@@ -1,14 +1,10 @@
 // @vitest-environment jsdom
-/* IKFR6A 回归：文本节点三处浮层（@ 菜单锚点/标签操作层/标签悬停预览）必须 portal 到
-   document.body——渲染在 React Flow 变换层内时 position:fixed 被劫持，屏幕坐标被
-   位移+缩放二次解读，浮层飞移（67% 缩放下最明显）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import TextNode from './index';
 
 beforeAll(() => {
-  // jsdom 未实现 Range 的几何 API；@ 菜单锚点取光标 rect 用，统一回退全 0
   if (!Range.prototype.getBoundingClientRect) {
     Range.prototype.getBoundingClientRect = function () { return rectOf(0, 0, 0); };
   }
@@ -26,8 +22,6 @@ const storeState = vi.hoisted(() => {
     nodes,
     edges: [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }],
     transform: [0, 0, 1],
-    // IKGYYE 钉屏幕层（FollowToolbarLayer）订阅的字段：nodeLookup/width 必备，
-    // domNode 缺省 null（层在无 portal 宿主时不渲染，本文件不断言工具条）
     width: 1200,
     nodeLookup: new Map(
       nodes.map((n) => [n.id, {
@@ -141,7 +135,6 @@ it('悬停位置充裕时预览仍固定在标签下方', async () => {
   const preview = document.querySelector('[data-testid="media-chip-preview"]') as HTMLElement;
   expect(preview).toBeTruthy();
   expect(container.contains(preview)).toBe(false);
-  // !851：预览固定标签下方（chip.bottom + 8），位置充裕也不翻到上方
   expect(preview.style.top).toBe('428px');
 });
 

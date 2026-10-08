@@ -1,7 +1,5 @@
 import type { RedisOptions } from "ioredis";
 
-/** Redis 连接：显式 REDIS_HOST/PORT/DB/PASSWORD 优先，缺失回退解析 REDIS_CONN_STRING（与 generation-queue 同源）。
- *  生产环境两者皆缺 → 启动即抛（fail-fast，避免静默连本地 Redis 污染会话）。 */
 export function redisConnectionOptions(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): RedisOptions {
@@ -14,7 +12,6 @@ export function redisConnectionOptions(
       REDIS_DB = u.pathname.replace(/^\//, "");
       if (u.password) REDIS_PASSWORD = decodeURIComponent(u.password);
     } catch {
-      // 解析失败走默认 127.0.0.1
     }
   }
   if (env.NODE_ENV === "production" && !REDIS_HOST) {

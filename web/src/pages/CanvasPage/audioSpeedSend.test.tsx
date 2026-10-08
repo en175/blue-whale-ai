@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKI4LX 调速提交项目隔离与请求治理回归（PR !831 审查整改）：
-   慢响应期间 A→B 切换——迟到成功响应不在 B 建卡/连线/启动轮询/误关 B 新进的调速会话、
-   迟到失败响应不向 B 弹原项目错误提示（activeProjectRef settle 双检，先例
-   startFrameInterpolationJob IKHSFF）；首次提交与失败重试统一走 createAudioSpeedMutation
-   （silent 传输，http 层不 toast，页面 catch 统一提示一次，第三参 { silent: true } 同
-   插帧先例）；正常留在原项目的建卡/来源边/退会话/终态补丁不回归；重试原样重发冻结的
-   lastInput（源资产+倍速）。渲染沿用 testing/canvasPageTestHarness。 */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
@@ -44,7 +37,6 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
   })),
 }));
 
-/** 项目一画布：一个就绪音频卡 a1（assetId '8'，15 秒 mp3） */
 function seedProjectA() {
   canvasDocMock.current = {
     doc: {
@@ -75,7 +67,6 @@ function seedProjectA() {
 }
 
 
-/** IKJJR3：占位卡 id 预分配（audio-speed-{uuid}），不再按受理 jobId 命名——按家族卡查找 */
 function speedCard(): Node {
   return mediaNodes().find((n) => n.id.startsWith('audio-speed-'))!;
 }
@@ -86,15 +77,12 @@ const edges = () =>
 const sendBar = () => document.body.querySelector('[data-testid="audio-speed-send-bar"]');
 const sendBtn = () => document.body.querySelector<HTMLButtonElement>('[data-testid="audio-speed-send-btn"]');
 
-/** 进入调速编辑态（音频卡工具条「调速」按钮派发的回调，IKHW5C 挂点） */
 async function enterSpeed(id: string) {
   await act(async () => {
     (dataOf(id).onAudioSpeed as (nodeId: string) => void)(id);
   });
 }
 
-/** 滑杆拖到指定位置（0~1000 整数；native setter + input 事件，同 AudioSpeedBar 单测）。
- *  契约映射：1.0 → 500（原速中点），1.35 → 558 */
 async function dragSliderTo(pos: number) {
   const slider = document.body.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!;
   await act(async () => {
@@ -104,7 +92,6 @@ async function dragSliderTo(pos: number) {
   });
 }
 
-/** 点发送钮（不等待创建往返——挂起场景下只完成发送动作本身） */
 async function clickSend() {
   await act(async () => {
     sendBtn()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -135,24 +122,18 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-/* IKJJR3：原「IKI4LX 慢响应期间 A→B 切换」10 用例（迟到受理暂存 + 回 A 当场建卡/补卡保存）
- * 已随调速迁入生成任务运行时删除——语义等价覆盖于：
- *  - audioSpeedRetryRecovery.test.tsx：A→B→A 统一恢复接续（受理丢弃 + 恢复页回放 + 不轮询旧任务）；
- *  - audioSpeedSessionIsolation.test.tsx：迟到响应不污染新项目/新会话、失败收敛到卡。
- * 新协议下「迟到受理归发起项目」由 canvas_binding 服务端关联与统一恢复负责（工单验收 4）。 */
 
 describe('IKI4LX 正常路径不回归（留在原项目）', () => {
   it('发送成功：退编辑态建占位卡、来源边 origin=audio-speed、身份冻结 lastInput、启动轮询并落盘', async () => {
     apiMocks.createAudioSpeed.mockResolvedValueOnce({ job_id: 'j1', status: 'queued' });
     await renderPage();
     await enterSpeed('a1');
-    await dragSliderTo(558); // 1.35x
+    await dragSliderTo(558);
     await clickSend();
     await flush();
     expect(apiMocks.createAudioSpeed).toHaveBeenCalledWith(
       'p1', { source_asset_id: '8', speed: 1.35 }, expect.objectContaining({ silent: true }),
     );
-    // 先退编辑态再建卡：发送条卸载、占位卡上画布（源卡右侧 +60px）、身份冻结
     expect(sendBar()).toBeNull();
     const placeholder = speedCard();
     expect(placeholder.data.genStatus).toBe('generating');
@@ -165,7 +146,6 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
     const edge = edges().find((e) => e.target === placeholder.id)!;
     expect(edge.source).toBe('a1');
     expect(edge.data).toEqual({ origin: AUDIO_SPEED_EDGE_ORIGIN });
-    // 启动轮询；落盘经 800ms 防抖（IKJJR3：原受理后立即 flush 已由运行时统一）
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
@@ -179,7 +159,6 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
     await clickSend();
     await flush();
     expect(apiMocks.createAudioSpeed).toHaveBeenCalledTimes(1);
-    // IKJJR3：提交点建卡 + 退会话；受理失败落失败卡（冻结输入可重试）+ 来源边
     expect(sendBar()).toBeNull();
     const failed = speedCard();
     expect(failed.data.genStatus).toBe('failed');
@@ -194,14 +173,13 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
     });
     await renderPage();
     await enterSpeed('a1');
-    await dragSliderTo(558); // 冻结 1.35x
+    await dragSliderTo(558);
     await clickSend();
     await flush();
     const failed = speedCard();
     expect(failed.data.genStatus).toBe('failed');
     expect(failed.data.errorText).toBe('音频调速失败，请重试');
 
-    // 重试：lastInput（源素材 8 + 倍速 1.35）原样重发创建接口（新 job），silent 同口径
     apiMocks.createAudioSpeed.mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValueOnce({
       job_id: 'j2', status: 'succeeded', progress: 100,
@@ -242,6 +220,6 @@ describe('IKI4LX 正常路径不回归（留在原项目）', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(speedCard().data.genStatus).toBe('failed');
-    expect(speedCard().data.errorText).toBe('重试失败'); // IKJJR3：非 ApiError 走运行时通用文案
+    expect(speedCard().data.errorText).toBe('重试失败');
   });
 });

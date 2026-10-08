@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* IKGC03 视频面板「从资产中选择」弹窗补虚拟人像库 tab：
-   tab 顺序与资产页一致（…音频/虚拟人像库/真人人像库）、showCharacterTab 仅视频面板入口开启、
-   虚拟 tab 复用 CharacterLibrary AigcFlatView 勾选（点卡=勾选、跨 tab 保留、确认后以
-   character 来源与真人素材同身份提交）、仅图片入口视频素材置灰、上传卡保留。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
@@ -36,8 +32,6 @@ vi.mock('@/api/assets', () => ({
   }),
 }));
 
-/* jsdom 无布局：masonic 视口恒为 {1,1} 不渲染卡片，stub 掉瀑布流承接
-   onDelete/onPreview/onToggleSelect 透传（行为级断言在 AssetCard/CharacterLibrary 套件）。 */
 vi.mock('@/pages/Assets/components/AssetMasonry', async () => {
   const { createElement: h } = await import('react');
   return {
@@ -107,12 +101,10 @@ async function renderPicker(props: Partial<AssetsPickerModalProps> = {}) {
         createElement(AssetsPickerModal, { onClose: vi.fn(), onSelect: vi.fn(), ...props }),
       ),
     );
-    // 冲刷 useInfiniteQuery 首屏请求的微任务链，保证主瀑布流数据就位后再断言
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
-/* 弹窗整体 createPortal 到 document.body：所有查询以 body 为基准（mountNode 仅作挂载点） */
 function tabLabels(): string[] {
   return [...document.body.querySelectorAll(`.${pickerStyles.tabs} button`)].map((b) => b.textContent);
 }
@@ -135,13 +127,11 @@ function hintText(): string {
 }
 
 beforeAll(() => {
-  // jsdom 未实现 Element.scrollTo：弹窗切 tab 回顶 effect 需要它
   Element.prototype.scrollTo = () => {};
 });
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // react-query 通知改同步派发（同 Projects 套件模式），否则 act 内微任务冲不醒无限查询状态
   notifyManager.setScheduler((callback) => callback());
   assetPageFetch.mockResolvedValue({ records: [], total: 0, current: 1 });
   fetchAssetReferencesApi.mockResolvedValue({ projectCount: 0 });
@@ -229,8 +219,6 @@ describe('AssetsPickerModal 虚拟人像库 tab', () => {
   });
 });
 
-/* IKGHZ3 选择弹窗悬浮操作：主瀑布流删除走引用计数确认弹窗、确认后就地移除并联动已选计数；
-   放大预览打开资产详情弹窗且只读；预览打开期间 Esc 不关闭选择弹窗。 */
 describe('AssetsPickerModal 悬浮操作（IKGHZ3）', () => {
   const imageAsset = {
     id: 101,
@@ -278,7 +266,6 @@ describe('AssetsPickerModal 悬浮操作（IKGHZ3）', () => {
 
     await act(async () => { stubCardOf('101').querySelector<HTMLButtonElement>('[data-action="delete"]')!.click(); });
 
-    // 选择弹窗本身也是 role="dialog"（aria-label 被 title 顶掉）：按确认文案特征取删除确认弹窗
     const dialog = [...document.body.querySelectorAll('[role="dialog"]')]
       .find((d) => d.textContent?.includes('此操作不可撤销'));
     expect(dialog?.textContent).toContain('正被 2 个项目引用');

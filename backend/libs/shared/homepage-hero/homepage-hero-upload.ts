@@ -1,12 +1,6 @@
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import type { HomepageHeroAuditService } from "./homepage-hero-audit.service.js";
 
-/**
- * 首页背景媒体上传（IKCH05）：presign → TOS 直传 → complete 校验 size/mime + makePublic。
- * 规则对齐模板管理（admin/templates）：图 jpeg/png/webp/gif ≤20MB；视频 mp4 ≤200MB；
- * 仅 keyPrefix 差异（admin/site-config）。复用 AssetUploadStorage，不新建 TOS client，
- * 前端不接触 AccessKey。
- */
 export const HOMEPAGE_HERO_UPLOAD_KEY_PREFIX = "admin/site-config";
 
 export type HomepageHeroUploadType = "image" | "video";

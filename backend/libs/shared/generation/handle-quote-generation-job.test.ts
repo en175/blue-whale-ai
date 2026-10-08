@@ -1,11 +1,3 @@
-/* ============================================
- * 价格预览（Quote）的接线钉板
- *
- * ★ 这里最要紧的一条：**报价与预扣用同一套 specs、同一个 tier**。
- *   预览价与实际会冻的钱出自同一个数，是本端点存在的全部理由；
- *   所以本文件不单测「报价返回了什么」，而是让**同一条请求体**分别走
- *   「真实建任务管线 + 真实 Hold 装配」与「报价端点」，再逐字比对两边交给 billing 的规格。
- * ============================================ */
 import { describe, expect, it, vi } from "vitest";
 
 import { RESOURCE_NOT_FOUND_CODE } from "@lib/contracts";
@@ -25,9 +17,6 @@ const MODEL_ID = "doubao-seedance-2-0-260128";
 const IMAGE_MODEL_ID = "doubao-seedream-5-0-pro-260628";
 const MODEL_25_ID = "doubao-seedance-2-5-260628";
 
-/** 图片请求体：参考图是**定价维度**（Pro 首张免费、第 2 张起 0.02 元/张）。
- *  ⚠️ 图片的参考图落在 `input.input_asset_ids`，报价侧必须按同一媒介分支投影进去 ——
- *  这里就是钉那条投影的（把它改回 `referenceAssetIds: []`，下面那条断言立刻红）。 */
 const IMAGE_BODY = {
   type: "image",
   expected_output_count: 1,
@@ -44,7 +33,6 @@ const IMAGE_BODY = {
   },
 };
 
-/** 视频请求体：创建与报价**同一份**（面板也是同一份），两边必须因此得出同一个规格。 */
 const VIDEO_BODY = {
   type: "video",
   expected_output_count: 1,
@@ -58,7 +46,6 @@ const VIDEO_BODY = {
   },
 };
 
-/** 记下两个 RPC 的假客户端（另有余额探针：报价**不该**碰它）。 */
 function fakeBilling() {
   const hold = vi
     .fn()
@@ -75,11 +62,6 @@ function fakeBilling() {
 
 const logger = { warn: vi.fn() };
 
-/** 能力行带 `features.audio` —— 与建任务同源：generate_audio 冻不冻由它决定。
- *  version=345：quote_revision 的能力行版本段（金标 G03 示例 `cap-345`）；
- *  videoRow 供样片用例覆盖能力行（如 features.sample_mode）。
- *  IKJ797：加 Seedance 2.5 行（带 task_types.edit / prolong 约束与参考上限，
- *  与 002_seed 的能力目录同构）——编辑单时长口径按它分叉。 */
 function modelWhitelist(videoRow: Record<string, unknown> = {}) {
   return vi
     .fn()
@@ -111,7 +93,6 @@ function modelWhitelist(videoRow: Record<string, unknown> = {}) {
 const ownedProject = () =>
   vi.fn().mockResolvedValue({ id: "1", name: "项目", thumb: null });
 
-/** 预览侧依赖：真实 `createBillingQuote` 装配（等级解析与规格归一的唯一实现）。 */
 function previewDeps(
   client: BillingClient,
   resolveTier: (userId: string) => Promise<string>,
@@ -124,8 +105,6 @@ function previewDeps(
   } as unknown as QuoteGenerationJobDeps;
 }
 
-/** 创建侧依赖：真实 `createBillingHold` 装配 + 假 repo（createJob 内调 hold —— 与真 repo 同序）。
- *  IKJ797：`assetsOverride` 供带视频参考的用例注入 type=video 的素材解析（默认形态沿用图片）。 */
 function createDeps(
   client: BillingClient,
   resolveTier: (userId: string) => Promise<string>,
@@ -159,7 +138,6 @@ function createDeps(
   return deps as unknown as Parameters<typeof handleCreateGenerationJob>[4];
 }
 
-/** billing 的 Hold 入参（只取本文件断言用到的字段）。 */
 interface HoldArgs {
   modelId: string;
   taskType: string;
@@ -179,7 +157,6 @@ describe("handleQuoteGenerationJob", () => {
     const { client, hold, quote, queryBalance } = fakeBilling();
     const resolveTier = vi.fn().mockResolvedValue("pro");
 
-    // 1) 真实建任务管线：冻结 input → 真实 Hold 装配 → billing
     const created = await handleCreateGenerationJob(
       USER_ID,
       PROJECT_ID,
@@ -189,7 +166,6 @@ describe("handleQuoteGenerationJob", () => {
     );
     expect(created.code).toBe(200);
 
-    // 2) 同一个 body 走报价端点
     const result = await handleQuoteGenerationJob(
       USER_ID,
       PROJECT_ID,
@@ -200,11 +176,8 @@ describe("handleQuoteGenerationJob", () => {
     const holdArg = hold.mock.calls[0]?.[0] as unknown as HoldArgs;
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
 
-    // ⚠️ 唯一的例外是 prompt：提示词是创作内容、不是定价维度，预览刻意不带它
-    //    （带上它，前端的查询键就要随每一次打字变化 = 每敲一个字重新报价）。
     const { prompt: _prompt, ...holdPricingSpecs } = holdArg.specs;
     expect(quoteArg.specs).toEqual(holdPricingSpecs);
-    // 定价维度逐个点名：改了 composeInput 却没同步投影，这里就红
     expect(quoteArg.specs).toMatchObject({
       model_id: MODEL_ID,
       aspect_ratio: "16:9",
@@ -213,30 +186,20 @@ describe("handleQuoteGenerationJob", () => {
       generate_audio: "true",
       expected_output_count: "1",
     });
-    // 等级同一个来源、同一档 —— 一边 pro 一边 free 就是「预览一个价、实扣另一个价」
     expect(resolveTier).toHaveBeenCalledTimes(2);
     expect(quoteArg.tier).toBe(holdArg.tier);
     expect(quoteArg.tier).toBe("pro");
-    // 模型与任务类型也必须是同一个
     expect(quoteArg.modelId).toBe(holdArg.modelId);
     expect(quoteArg.taskType).toBe(holdArg.taskType);
 
-    // 3) 只算不扣：报价这一趟没碰余额、没增出第二笔冻结
     expect(quote).toHaveBeenCalledTimes(1);
-    expect(hold).toHaveBeenCalledTimes(1); // 那一次来自建任务，不是报价
+    expect(hold).toHaveBeenCalledTimes(1);
     expect(queryBalance).not.toHaveBeenCalled();
-    // 回给前端的只有**一个整数积分**（不返折扣系数、不返明细）；quote_revision 是
-    // IKIZQ7 并入的报价版本指纹（契约 StageQuoteView），供后续提交核对。
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
   });
 
   it("★ 图片参考图进报价规格 —— 参考图是定价维度，漏了预览就比实扣低", async () => {
-    // 这一条钉的是**报价侧**的投影（`projectQuoteInput`）。它原先写死
-    // `referenceAssetIds: []`，那时参考图还不计价；现在 Pro 按张收（首张免费、
-    // 第 2 张起 0.02 元），写死就等于预览少算 2 × 0.02 元。
-    // ⚠️ 图片的参考落 `input.input_asset_ids`，视频/音频落 `input.references` ——
-    //    报价必须走与建任务**同一个** `resolveReferenceAssets`，而不是自己数一遍。
     const { client, quote } = fakeBilling();
     const result = await handleQuoteGenerationJob(
       USER_ID,
@@ -247,7 +210,6 @@ describe("handleQuoteGenerationJob", () => {
 
     expect(result.code).toBe(200);
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
-    // 3 张参考 —— 预扣侧读的也是这个规格键（`UsageDim.REFERENCE_COUNT` 的契约量来源）
     expect(quoteArg.specs.reference_count).toBe("3");
     expect(quoteArg.taskType).toBe("image");
   });
@@ -264,10 +226,8 @@ describe("handleQuoteGenerationJob", () => {
       previewDeps(client, vi.fn().mockResolvedValue("free")),
     );
 
-    // 预览的失败不等于提交的失败：回「没有报价」让前端不显示价格，而不是甩一个错误
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ credits: null, quote_revision: null });
-    // 但要在日志里留下痕迹：漏配清单就是从这类日志里攒出来的
     expect(logger.warn).toHaveBeenCalled();
   });
 
@@ -334,15 +294,9 @@ describe("handleQuoteGenerationJob", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// IKIZQ7：样片报价与默认关闭门控（契约 video-sample-mode.ts；报价 fail open——
-// 门控未放行/形态不合契约一律**空报价**，不给出可提交金额，也不抢在建任务前面报错）。
-// ═══════════════════════════════════════════════════════════════
 describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
   const SAMPLE_MODEL_ID = "doubao-seedance-2-5-260628";
 
-  /** 样片白名单：能力行声明 features.sample_mode（放行态，运营显式配置）+ 乐观锁版本。
-   *  缺省 features 即「未放行」——目录里没有这一位 = 样片默认关闭。 */
   function sampleWhitelist(features: Record<string, unknown> | null = { sample_mode: true }) {
     return vi.fn().mockResolvedValue([
       { model_id: SAMPLE_MODEL_ID, version: 345, ...(features ? { features } : {}) },
@@ -353,7 +307,6 @@ describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
     return previewDeps(client, vi.fn().mockResolvedValue("free"), models);
   }
 
-  /** 样片请求体（与创建同形）：单输出 + sample_mode=true + 480p；references 区分四种现有模式。 */
   const SAMPLE_BODY = (
     parameters: Record<string, unknown> = {},
     references?: unknown,
@@ -372,7 +325,6 @@ describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
     },
   });
 
-  /** 四种现有模式（父规格「范围与门控」：文生 / 图生首帧 / 首尾帧 / 全能参考）。 */
   const FOUR_MODE_REFERENCES: Array<[string, unknown]> = [
     ["文生视频（无参考）", undefined],
     ["图生首帧", [{ role: "first_frame", asset_id: "7", type: "image" }]],
@@ -509,7 +461,6 @@ describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
       await handleQuoteGenerationJob(USER_ID, PROJECT_ID, SAMPLE_BODY(), sampleDeps(a.client))
     ).data?.quote_revision;
 
-    // 冻结输入变化（时长 5 → 8）
     const b = fakeBilling();
     const revInput = (
       await handleQuoteGenerationJob(
@@ -520,7 +471,6 @@ describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
       )
     ).data?.quote_revision;
 
-    // 用户等级变化（free → pro）
     const c = fakeBilling();
     const revTier = (
       await handleQuoteGenerationJob(
@@ -531,7 +481,6 @@ describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
       )
     ).data?.quote_revision;
 
-    // 能力行版本变化（345 → 346，运营改配）
     const d = fakeBilling();
     const revCap = (
       await handleQuoteGenerationJob(
@@ -552,8 +501,6 @@ describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
 });
 
 describe("IKJ797 编辑/延长任务报价时长口径", () => {
-  /** Seedance 2.5 + 13 秒参考视频 + 用户所选 4 秒（默认档）——TEMP FIX 透支的标准场景：
-   *  编辑单实际输出跟随源视频出十几秒，按 4 秒预估 = 预扣与结算的差额平台垫付。 */
   const video25Body = (prompt: string) => ({
     type: "video" as const,
     expected_output_count: 1,
@@ -577,7 +524,6 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
     );
 
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
-    // 交给 billing 的时长是源视频的 13 秒，不是用户所选的 4 秒；输入时长那一项照旧叠加（官方公式两头都收）
     expect(quoteArg.specs.duration).toBe("13");
     expect(quoteArg.specs.video_input_seconds).toBe("13");
     expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String), duration_basis: "source_video" });
@@ -701,15 +647,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// IKJGE6：画布文本带入合并的报价口径——「参考视频仅来自画布文本带入 + 编辑意图提示词」
-// 时，报价判定输入与建任务合并后引用集合同源：预览计价时长 = 源视频时长（edit 口径），
-// 样片提交确认复算不误拒。此前报价按原始请求体投影，画布文本带入的视频参考进不了
-// 判定输入，编辑单被误判 default 按用户所选时长出价，实扣却按源视频时长冻结。
-// ═══════════════════════════════════════════════════════════════
 describe("IKJGE6 画布文本带入合并报价口径", () => {
-  // 画布：目标视频卡 media-1 ← 文本卡 text-a（正文提及 media-2 的视频素材，快照齐备）
-  // + 索引线 media-2 → text-a——文本带入参考由此派生（与建任务测试的 TEXT_REF_CANVAS 同构）。
   const CANVAS = {
     nodes: JSON.stringify([
       { id: "media-1", type: "mediaNode", data: { mediaType: "video" } },
@@ -732,7 +670,6 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
     ]),
   };
 
-  /** Seedance 2.5 能力行（edit 约束 + 参考位 + 样片开关；supported_* 供建任务档位校验）。 */
   const TEXT_REF_ROW = {
     model_id: MODEL_25_ID,
     version: 345,
@@ -756,8 +693,6 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
     },
   };
 
-  /** 触发场景请求体：references 里没有视频——它只来自画布文本带入（触发条件 1）；
-   *  提示词带编辑意图（条件 2）；用户所选 4 秒（源视频 13 秒长于它 → 修复前预览少算）。 */
   const TEXT_REF_BODY = {
     type: "video",
     expected_output_count: 1,
@@ -771,7 +706,6 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
     },
   };
 
-  /** 同一套画布/素材/能力行喂两侧：报价与建任务取到同一个数，才谈得上同源。 */
   function textRefHarness(
     client: BillingClient,
     resolveTier: (userId: string) => Promise<string>,
@@ -825,12 +759,9 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
 
     const holdArg = hold.mock.calls[0]?.[0] as unknown as HoldArgs;
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
-    // 交给 billing 的时长是回填后的源视频 13 秒（不是用户所选的 4 秒）；输入时长同样吃到
     expect(quoteArg.specs.duration).toBe("13");
     expect(quoteArg.specs.video_input_seconds).toBe("13");
     expect(holdArg.specs.duration).toBe("13");
-    // 除建任务侧的非定价标量（prompt 惯例剥除 + target_node_id/text_input_signature 快照键）外
-    // 逐字相等——「预览价 = 实扣价」的规格级证明。
     const {
       prompt: _prompt,
       target_node_id: _target,
@@ -854,11 +785,9 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
       parameters: { ...TEXT_REF_BODY.parameters, resolution: "480p", sample_mode: true },
     };
 
-    // 1) 用户在面板看到的报价（合并后 edit 口径 + 源时长标记）
     const quoted = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, body, h.quoteDeps);
     expect(quoted.data?.duration_basis).toBe("source_video");
 
-    // 2) 携带确认两字段提交：复算必须重走同一合并 + 同一编辑口径改写，否则 quote_stale 误拒
     const result = await handleCreateGenerationJob(
       USER_ID,
       PROJECT_ID,
@@ -915,7 +844,6 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
   it("素材数不齐（resolveInputAssets 短回——建任务侧会 400）→ 整个不回填，回落旧口径", async () => {
     const { client, quote } = fakeBilling();
     const h = textRefHarness(client, vi.fn().mockResolvedValue("free"), 13);
-    // 短回：请求 N 个 id，只返回 N-1 个——报价侧约定「不按残缺映射猜」，整个不回填。
     h.resolveInputAssets.mockImplementation(async (ids: string[]) =>
       ids.slice(1).map((id) => ({ id, type: "video" as const, duration: 13 })),
     );

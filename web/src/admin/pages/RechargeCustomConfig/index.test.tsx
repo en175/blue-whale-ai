@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/api/http';
 import RechargeCustomConfig from './index';
 
-// 自定义充值配置页（PRD §10.3）：钉住「运营看得见什么、保存发出去什么」。
-// 校验规则本身在 customConfig.test.ts 里单独钉，这里只管接线与就地的错误呈现。
 
 const api = vi.hoisted(() => ({
   fetchConfig: vi.fn(),
@@ -29,7 +27,6 @@ vi.mock('@/api/adminRechargeCustomConfig', async (importOriginal) => {
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-/** PRD §7.1 的默认口径（服务端回包，camelCase） */
 const CONFIG = {
   minCredits: 600,
   maxCredits: 499_995,
@@ -102,7 +99,6 @@ async function type(input: HTMLInputElement, next: string) {
   await settle();
 }
 
-/** 选下拉项：Select 不是原生控件（见 ui/Select），点开触发器再点 role=option */
 async function choose(label: string, optionIncludes: string) {
   const trigger = document.body.querySelector<HTMLElement>(`[aria-label="${label}"]`);
   if (!trigger) throw new Error(`没有找到下拉框：${label}`);
@@ -148,7 +144,6 @@ describe('自定义充值配置页', () => {
   it('★ 把「每元积分数」与消费锚点的区别写在字段旁边（运营最容易搞混的那件事）', async () => {
     await renderPage();
 
-    // 可见的字段说明里就说清两件事：只管本入口报价、不影响生成任务计价
     expect(document.body.textContent).toContain(
       '与消费锚点「1 元 = 15 积分」（生成任务计价）不是一个数',
     );

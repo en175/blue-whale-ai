@@ -1,12 +1,3 @@
-// IKHLK3：video_frame_interpolation（视频插帧，火山 MediaKit video-frame-interpolation）跨进程契约
-// 双端一致性断言（父需求 IKHLES）。防漂移约定（沿用 video-enhance.test.ts 读 Java 源码文本的同源
-// 断言模式）：TS 侧常量直接 import 断言值；worker-java 无法 import TS 常量，本测试直接读 Java 源码
-// 文本逐值对账——任一侧改动未同步即红。
-// 官方 API 口径 = 火山引擎 AI MediaKit 参数级 API 参考页（提交视频插帧任务 API / 查询任务信息 API /
-// 事件回调 / 错误码）四页，结论落盘 docs/specs/2026-09-21-video-frame-interpolation-mediakit.md；
-// fps 官方取值范围 [15,120]（建议不超过原片 4 倍，低于原片时先插帧再降帧），本仓产品面收窄为
-// 30/60/120 三档（ADR-0113）。
-// 后续票（worker 执行 IKHLKJ / 前端面板）照抄本契约与 video-frame-interpolation.ts，不得发明字段名。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -31,7 +22,6 @@ import {
   videoFrameInterpolationRecoveryQuerySchema,
 } from "./video-frame-interpolation.js";
 
-// 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const contractJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/VideoFrameInterpolationContract.java",
@@ -46,7 +36,6 @@ const jobTypeJava = readFileSync(
   ),
   "utf8",
 );
-// tag 字面量单处定义在 GenerationMqRoute（Contract.TAG 只做转发），故 tag 的对账基准读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
@@ -69,7 +58,6 @@ describe("video_frame_interpolation 契约不变量（官方参数级 API 参考
 
   it("网关端点：提交 /v1/mediakit/{tool}（假设值待 IKHLLB 对齐）、查询 /v1/mediakit/tasks/", () => {
     expect(VIDEO_FRAME_INTERPOLATION_SUBMIT_PATH).toBe("/v1/mediakit/video-frame-interpolation");
-    // MediaKit 异步工具共用同一条查询路由；网关路径 ≠ 火山上游路径（video_enhance IKH67T 实测混用即 404）。
     expect(VIDEO_FRAME_INTERPOLATION_POLL_PATH_PREFIX).toBe("/v1/mediakit/tasks/");
   });
 
@@ -124,7 +112,6 @@ describe("video_frame_interpolation 契约不变量（官方参数级 API 参考
   });
 
   it("schema：枚举外 fps 一律拒——含官方合法但产品未暴露的 45 与字符串 / 小数值形态", () => {
-    // 45 在官方 [15,120] 内但被产品三档裁掉（ADR-0113），创建入口明确拒绝；其余为非法值形态。
     for (const fps of [45, 15, 120.5, "60", null, 0, -60, true]) {
       expect(
         videoFrameInterpolationInputSchema.safeParse({
@@ -158,7 +145,6 @@ describe("video_frame_interpolation 恢复查询契约（IKHSFE：按项目 + �
       false,
     );
     expect(videoFrameInterpolationRecoveryQuerySchema.safeParse({ foo: 1 }).success).toBe(false);
-    // 查询键与创建 input 的目标节点键同名（不另造键名）。
     expect(VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId).toBe("target_node_id");
   });
 });
@@ -211,7 +197,6 @@ describe("video_frame_interpolation 双端一致性（读 worker-java 源码文�
     expect(ERROR_VIDEO_FRAME_INTERPOLATION_FAILED).toBe("video_frame_interpolation_failed");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_FRAME_INTERPOLATION_FAILED]).toBe(1049);
     expect(ERROR_CODES[1049]).toBe("视频插帧失败，请重试");
-    // worker 执行面（IKHLKJ）引用侧防漂移：Java 契约常量与错误类常量同值
     expect(contractJava).toContain(
       'String ERROR_VIDEO_FRAME_INTERPOLATION_FAILED = "video_frame_interpolation_failed";',
     );

@@ -9,7 +9,6 @@ type Storage = {
   uploads: AssetUploadStorage;
 };
 
-/** 对象存储装配：TOS 配置优先，缺配置返回 null（调用方判 100202）。 */
 @Injectable()
 export class AssetStorageService {
   private storageInstance?: Storage | null;

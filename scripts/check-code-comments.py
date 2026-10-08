@@ -21,7 +21,7 @@ LEXERS = {
 }
 JS_EXTENSIONS = {'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'}
 DIRECTIVE = re.compile(
-    r'^(?:@ts-(?:expect-error|ignore|check|nocheck)\b|eslint-(?:disable|enable)(?:-next-line|-line)?\b|'
+    r'^(?:@ts-(?:expect-error|ignore|check|nocheck)\b|@vitest-environment\b|@todo\b|TODO\([A-Z0-9]{4,}\)|eslint-(?:disable|enable)(?:-next-line|-line)?\b|'
     r'prettier-ignore\b|(?:istanbul|c8|v8) ignore\b|noinspection\b|noqa\b|type:\s*ignore\b|'
     r'(?:mypy|pyright|ruff|fmt|isort|shellcheck):?\s|go:|\+build\s|'
     r'source(?:Mapping)?URL=|@jsx(?:Runtime|ImportSource)?\s|@vitest-environment\b|[#@]__PURE__|'

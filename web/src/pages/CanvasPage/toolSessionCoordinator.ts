@@ -1,4 +1,3 @@
-/** 注册工具提供差异，共同画布事件规则只在此执行；状态和完整退出由 runtime 持有。 */
 export interface CoordinatedTool {
   kind: string;
   panel: boolean;
@@ -106,7 +105,6 @@ export interface ToolSessionEpoch<Kind extends string = string> {
   capture(kind: Kind): number;
   isCurrent(kind: Kind, captured: number): boolean;
 }
-/** 注册与首次捕获共同建立 kind，新增工具无需维护第二份名单。 */
 export function createToolSessionEpoch<Kind extends string = string>(
   kinds: readonly Kind[] = [],
 ): ToolSessionEpoch<Kind> {

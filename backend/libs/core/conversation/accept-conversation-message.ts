@@ -39,7 +39,6 @@ export interface ConversationCommandStoreInput {
   conversationId: string | null;
   replyToInputRequestId: string | null;
   mentions: ConversationMentionInput[];
-  /** 总结当前对话意图（资产契约 §15.1）：仅 body.skill_summarize === true 置位。 */
   skillSummarize: boolean;
   forcedCreativeSkillId: string | null;
 }
@@ -108,7 +107,6 @@ function canonicalRequest(
       typeof body.forced_creative_skill_id === "string"
         ? body.forced_creative_skill_id
         : null,
-    // 总结意图参与幂等哈希（§15.1）：带与不带该字段的相同文本是两个不同请求。
     skill_summarize: body.skill_summarize === true,
   });
 }

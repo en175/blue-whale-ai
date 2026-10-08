@@ -19,7 +19,6 @@
   margin-bottom: 2px;
 }
 
-/* 文案可能很长（上游把整段报错原文透传回来），必须能换行而不是把布局撑破 */
 .text {
   word-break: break-word;
 }

@@ -1,10 +1,4 @@
-/* ============================================
- * BottomDialog - 画布底部对话框
- * ============================================ */
 
-/* 定位外壳：承载对话框的绝对定位与唤出动画。不加 overflow、不定高——
- * configPanel 以它为包含块悬浮，避免被滚动对话框裁剪（IKEOLP；
- * 同 IKA715 原则：弹出层路径上的容器不加 overflow） */
 .dialogWrap {
   position: absolute;
   bottom: var(--spacing-lg);
@@ -25,7 +19,6 @@
 
 .dialog {
   position: relative;
-  /* 默认输入区保留三行，最多增长到四行，附件换行时面板向上增长。 */
   height: auto;
   min-height: 0;
   max-height: calc(100vh - 2 * var(--spacing-lg));
@@ -50,12 +43,10 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* 放大态：输入区高度占屏幕 2/3，仍锚定底部展示 */
 .dialogExpanded {
   height: 66.66vh;
 }
 
-/* 默认三行，随内容增长到四行；展开后填充窗口剩余高度。 */
 .editorWrap {
   font-size: var(--font-size-md);
   flex: 0 0 auto;
@@ -80,11 +71,6 @@
   max-height: none;
 }
 
-/* ---- 第一行：附件操作条行（IKGB1X） ----
- * IKGB7W：第一行改为共享组件 AttachmentActionBar（左「+ 参考」「资产库」pill、右侧并入
- * 展开/关闭按钮）；旧 .topActions（absolute 右上角）随操作条落地退役，原为其腾位的
- * .refRoleArea padding-right 一并移除。操作条视觉定义单一来源在共享样式表（源唯一性锁见
- * AttachmentActionBar/actionBarVisualSource.test.ts），此处仅承载面板侧行间距。 */
 .actionBarRow {
   margin-bottom: var(--spacing-md);
   flex-shrink: 0;
@@ -109,9 +95,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 顶部媒体行：缩略图 + 上传按钮 + 计数（同一水平行） ---- */
-/* IKA715：保持换行；弹窗高度自适应（.dialog min-height），素材增多时弹窗自然增高，
- * 底部控件不被覆盖。不加 overflow，避免裁切 sourceMenu 弹出层。 */
 .mediaRow {
   display: flex;
   align-items: center;
@@ -121,8 +104,6 @@
   flex-wrap: wrap;
 }
 
-/* 上传按钮（与缩略图同尺寸正方形）——与 ImageDialog/AudioDialog 统一 44.8×44.8，圆角 12px */
-/* IKFE8U：来源菜单按钮退役（统一入口 RefSourceMenu 自带样式），mediaBtn 系列一并下线 */
 
 .mediaDot {
   width: 4px;
@@ -132,8 +113,6 @@
   flex-shrink: 0;
 }
 
-/* ---- 文件名 chip 行 ---- */
-/* IKA715：保持换行，弹窗高度自适应即可，不加 overflow（避免裁切弹出层） */
 .fileChipRow {
   display: flex;
   align-items: center;
@@ -185,7 +164,6 @@
   background-color: rgba(255, 255, 255, 0.15);
 }
 
-/* ---- 底部状态栏 ---- */
 .bottomBar {
   display: flex;
   align-items: center;
@@ -200,7 +178,6 @@
   gap: var(--spacing-sm);
 }
 
-/* ---- 加号按钮 ---- */
 .addBtn {
   width: 32px;
   height: 32px;
@@ -222,7 +199,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 模式选择器 ---- */
 .modeWrap {
   position: relative;
 }
@@ -309,18 +285,15 @@
   background: transparent;
 }
 
-/* ---- 信息文字 ---- */
 .barDivider {
   font-size: var(--font-size-sm);
   color: var(--color-border-primary);
 }
 
-/* ---- 隐藏文件输入 ---- */
 .hiddenInput {
   display: none;
 }
 
-/* ---- 文件计数 ---- */
 .fileCount {
   font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
@@ -328,14 +301,12 @@
   white-space: nowrap;
 }
 
-/* ---- 右侧栏：倍速 + 消耗 + 发送 + 配置 ---- */
 .barRight {
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
 }
 
-/* 发送按钮（与图片对话框统一） */
 .sendBtn {
   width: 28.8px;
   height: 28.8px;
@@ -387,7 +358,6 @@
   transform: rotate(180deg);
 }
 
-/* ---- 底栏配置信息按钮 ---- */
 .configBtn {
   display: flex;
   align-items: center;
@@ -403,7 +373,6 @@
   transition: all var(--transition-fast);
 }
 
-/* ---- 字数统计 ---- */
 .charCount {
   white-space: nowrap;
   font-size: 11px;
@@ -416,14 +385,12 @@
   font-weight: 500;
 }
 
-/* ---- 参考素材数量提示已合并回 placeholder，无需单独样式 ---- */
 
 .configBtn:hover {
   color: var(--color-text-primary);
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 配置面板（悬浮于底栏上方；包含块为不带 overflow 的 .dialogWrap，不被 .dialog 滚动框裁剪，IKEOLP） ---- */
 .configPanel {
   position: absolute;
   bottom: 54px;
@@ -442,7 +409,6 @@
   box-sizing: border-box;
 }
 
-/* ---- 配置面板关闭按钮 ---- */
 .configCloseBtn {
   position: absolute;
   top: var(--spacing-sm);
@@ -473,7 +439,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* ---- IKG0LP：是否带音频开关（结构对齐 MusicDialog 的 switch） ---- */
 .audioRow {
   display: flex;
   align-items: center;
@@ -524,7 +489,6 @@
   transform: translateX(16px);
 }
 
-/* ---- IKIZQB：样片模式条款说明（开启时显示，文案为父规格「截止规则」用户口径） ---- */
 .sampleTerm {
   margin: 0 0 var(--spacing-sm);
   font-size: var(--font-size-sm);
@@ -626,7 +590,6 @@
   font-weight: 500;
 }
 
-/* ---- 时长滑杆 ---- */
 .durationHead {
   display: flex;
   align-items: center;
@@ -702,7 +665,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* ---- 宽高比 ---- */
 .ratioGroup {
   display: flex;
   gap: var(--spacing-sm);
@@ -736,18 +698,12 @@
   font-weight: 600;
 }
 
-/* IKFE8U：来源菜单弹层（sourceWrap/menuOverlay/sourceMenu/sourceMenuItem）与
- * mediaBtnPicking/mediaBtnLabel 随旧来源菜单按钮退役，统一入口样式见 RefSourceMenu。 */
 
-/* ============================================
- * IKDMQS 草稿绑定参考角色区：首帧/尾帧/普通参考分组展示连线推导的输入
- * ============================================ */
 .refRoleArea {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm, 8px);
-  /* 与下方 textarea/编辑器的垂直间距：16px，与 ImageDialog 统一 */
   margin-bottom: var(--spacing-lg, 16px);
 }
 
@@ -758,7 +714,6 @@
   gap: var(--spacing-sm, 8px);
 }
 
-/* 组合冲突提示：明确说明不可提交的原因（禁止静默丢弃或降级） */
 .refConflictHint {
   font-size: 12px;
   color: #e8590c;
@@ -771,14 +726,12 @@
   line-height: 1.4;
 }
 
-/* IKJ794：全能参考被动提示行（Seedance 2.5 + 全能参考 + 已挂参考视频时显示；与首页 ChatBox 同文案） */
 .followHint {
   font-size: 12px;
   color: var(--color-text-tertiary);
   line-height: 1.4;
 }
 
-/* @ 菜单 dock（IKFA1O）：脱出 .dialog 滚动框，挂 .dialogWrap 层向上弹出（与 configPanel 同法） */
 .mentionDock {
   position: absolute;
   bottom: calc(100% + 6px);

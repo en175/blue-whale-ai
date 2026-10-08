@@ -81,9 +81,6 @@ def rebind_inherited_child(child: Path, metadata: dict[str, object], integration
 
 def synced_parent_proves(root: Path, integration: dict[str, object],
                          old_head: str, current_head: str) -> bool:
-    """三态判定父分支同步证明：False=无本分支证明，走默认冲突预检；
-    True=证明有效，改用继承提交作 merge-base 预检；抛 MergeError=恢复点
-    损坏或证明无效，硬停合回，防止把故障静默降级成默认路径误报。"""
     sync = runpy.run_path(str(Path(__file__).with_name("sync-task-from-origin.py")))
     recovery_path = Path(output(root, "rev-parse", "--absolute-git-dir")) / sync["RECOVERY_FILE"]
     if not recovery_path.is_file():

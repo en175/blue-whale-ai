@@ -1,6 +1,3 @@
-/** Mention 可用性判定的唯一权威（T08，IK67H3）。
- *  snapshot-repo 读路径与 agent-run-repo 冻结/重查路径共用同一份四态决策树，
- *  避免两处各自维护导致的发散。类型直接复用契约定义，不本地复刻。 */
 import type {
   MentionAvailability,
   MentionFailureReason,
@@ -15,7 +12,6 @@ export interface MentionClassificationInput {
   type: "asset" | "scene_card";
   targetVersion: number | null;
   acceptedUserId: bigint;
-  /** 调用方按 target_id 查得的当前 asset 事实（缺失则视为删除）。 */
   asset?:
     | {
         user_id: bigint;
@@ -24,7 +20,6 @@ export interface MentionClassificationInput {
         is_delete: boolean;
       }
     | undefined;
-  /** 调用方按 target_id 查得的当前 scene_card 事实（缺失则视为删除）。 */
   sceneCard?:
     | {
         project_id: bigint;
@@ -36,11 +31,6 @@ export interface MentionClassificationInput {
   userId: bigint;
 }
 
-/**
- * 按 mention 类型与当前事实判定 availability + reason：
- * - asset：deleted（不存在/已删/非 normal）/ wrong_project / permission_lost；否则 available。
- * - scene_card：deleted / wrong_project / permission_lost / stale（版本不符）；stale 保留历史可用性。
- */
 export function classifyMentionAvailability(
   input: MentionClassificationInput,
 ): MentionClassification {

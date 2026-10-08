@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createStoryboardPreviewRepo } from "./storyboard-preview-repo.js";
 
-/** listStoryboardFrames 直接用 prisma（非事务），按需 mock 顶层表方法。 */
 function buildPrisma(overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>) {
   return {
     project: {

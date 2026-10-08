@@ -37,7 +37,6 @@
   box-shadow: none;
 }
 
-/* 小号：表格行内操作用它，避免行高被按钮撑开 */
 .sm {
   height: 26px;
   padding: 0 10px;

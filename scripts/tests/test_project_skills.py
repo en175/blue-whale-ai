@@ -1,4 +1,3 @@
-"""Check project skill delivery in a fresh Git worktree."""
 
 import os
 import subprocess

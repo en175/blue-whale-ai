@@ -16,7 +16,6 @@ const CREDENTIALS: PayMerchantCredentials = {
 
 const ENV = { PAY_SERVER_BASE_URL: "https://pay.example.com/" };
 
-/** 拦下出口的 fetch，返回给定应答；同时把请求体记下来给断言用。 */
 function stubGateway(status: number, body: unknown) {
   const calls: { url: string; init: RequestInit }[] = [];
   const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -78,7 +77,6 @@ describe("pay-order-ops — 统一下单", () => {
     expect(payload.notifyUrl).toBe("https://api.example.com/api/recharge/notify/pay");
     expect(payload.version).toBe("1.0");
     expect(payload.signType).toBe("MD5");
-    // 签名字段集必须与真实发出的字段集一致：去掉 sign 后重算要等于发出去的那个
     const { sign, ...unsigned } = payload;
     expect(sign).toBe(paySign(unsigned, CREDENTIALS.appSecret));
 

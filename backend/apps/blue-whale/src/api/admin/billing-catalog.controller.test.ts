@@ -12,9 +12,6 @@ const billing = vi.hoisted(() => ({
   publishCatalog: vi.fn(),
 }));
 
-// billing 的 admin HTTP 面没有鉴权、只在内部网络，管理端页面不能直连 ——
-// 这条路由是唯一入口，所以「文档怎么外发」和「错误怎么分类」都要在这里钉住。
-// 只替换两个网络调用，错误类型仍用真实实现（分类逻辑依赖 instanceof，替身会让它失真）。
 vi.mock("@lib/shared/billing/billing-admin-client.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, ...billing };
@@ -49,7 +46,6 @@ describe("AdminBillingCatalogController.active", () => {
   });
 
   it("没有任何生效版本时原样回 -1 / 空文档，而不是报错", async () => {
-    // 「还没发布过目录」正是要从零建第一份的状态；报成 404 页面就只剩一个失败
     billing.fetchActiveCatalog.mockResolvedValue({
       catalogVersion: -1,
       documentHash: "",
@@ -126,7 +122,6 @@ describe("AdminBillingCatalogController.publish", () => {
   });
 
   it("文档被拒（编译不过）→ 400 且带上 billing 的原话", async () => {
-    // 处置方向是「改文档」：压成 500 会让运维去查一个没坏的服务
     billing.publishCatalog.mockRejectedValue(
       new CatalogRejectedError("目录被拒：baseUnit 指向不存在的维度 usage.不存在"),
     );

@@ -46,7 +46,7 @@ describe('generation-recovery 恢复页 Query 定义（IKJKU9）', () => {
       .mockResolvedValueOnce(page())
       .mockResolvedValueOnce(page());
     await expect(client.fetchQuery(options)).rejects.toThrow('boom');
-    expect(http.apiRequest).toHaveBeenCalledTimes(1); // 失败一次即抛，错误单一呈现
+    expect(http.apiRequest).toHaveBeenCalledTimes(1);
     await client.fetchQuery(options);
     await client.fetchQuery(options);
     expect(http.apiRequest).toHaveBeenCalledTimes(3);

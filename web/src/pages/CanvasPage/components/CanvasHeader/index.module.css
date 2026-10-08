@@ -1,8 +1,4 @@
-/* ============================================
- * CanvasHeader - 画布顶部栏
- * ============================================ */
 
-/* 无容器背景：按钮直接悬浮在画布上（与底部「返回首页」按钮一致） */
 .header {
   position: absolute;
   top: var(--spacing-lg);
@@ -19,19 +15,16 @@
   pointer-events: none;
 }
 
-/* 容器透明后，内部可交互元素恢复点击 */
 .header > * {
   pointer-events: auto;
 }
 
-/* ---- 左侧 ---- */
 .left {
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
 }
 
-/* ---- Logo（点击返回首页） ---- */
 .logoBtn {
   display: flex;
   align-items: center;
@@ -60,14 +53,12 @@
   flex-shrink: 0;
 }
 
-/* ---- 右侧 ---- */
 .right {
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
 }
 
-/* ---- 余额展示 ---- */
 .balance {
   display: flex;
   align-items: center;
@@ -91,7 +82,6 @@
   color: var(--color-text-secondary);
 }
 
-/* ---- Agent 按钮 ---- */
 .agentBtn {
   display: flex;
   align-items: center;
@@ -115,8 +105,6 @@
   border-color: var(--color-border-hover);
 }
 
-/* 面板展开时入口淡出隐藏（150ms 走 .agentBtn 的 transition: all var(--transition-fast)），
-   visibility + pointer-events 保证隐藏后不占命中区域 */
 .agentBtnHidden {
   opacity: 0;
   visibility: hidden;

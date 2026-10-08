@@ -2,17 +2,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deleteSession } from './agentSessions';
 
-/**
- * 删除会话怎么发出去的回归护栏（IKDOXU / IKD3H4）。
- *
- * 这条链路从上线起一次都没成功过，而且是**同一个位置连错两次**：先是漏了
- * `Idempotency-Key`，补上之后又漏了 `If-Match`。agent 对会话写操作的门是两道
- * （`http/app.ts` 的 `idempotentMutation` + `expectedVersion`），少任何一样都是 400，
- * 在界面上都长成一句「删除失败」，谁也看不出少的是哪一样。
- *
- * 所以护栏架在**实际发出去的请求头**上，和胶囊那组测试同一个理由：两端各自都
- * 「看起来对」，错的只在字节上。
- */
 function stubFetch(...responses: Response[]) {
   const fetchMock = vi.fn();
   for (const res of responses) fetchMock.mockResolvedValueOnce(res);
@@ -65,8 +54,6 @@ describe('删除会话的请求形状', () => {
   });
 
   it('412 版本冲突时重读会话拿新 etag，重试一次', async () => {
-    // 另一个端在这中间改了标题，手里的 etag 就旧了。用户看到的是「删除失败」，
-    // 但真相是「再来一次就好」——所以这里自己再来一次，不把它推给用户。
     const fetchMock = stubFetch(
       new Response(JSON.stringify({ code: 'version_conflict', message: 'Version conflict' }), {
         status: 412,

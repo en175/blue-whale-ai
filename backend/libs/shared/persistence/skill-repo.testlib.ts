@@ -1,16 +1,8 @@
-// IK74V8：SkillRepo 用例的共享夹具（从 skill-repo.test.ts 拆出）。
-// 命名 *.testlib.ts：tsconfig 排除编译、vitest 不当作用例文件收集。
 import {expect, vi} from "vitest";
 import {bundledAgentRuntimeManifest} from "./agent-runtime-manifest-fixture.js";
 import {canonicalAgentRunPinDigestInput, type AgentRunPin} from "@lib/contracts";
 import {createHash} from "node:crypto";
 
-// SkillRepo 资产边界（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：
-// wire 主键一律 creative_skill_id；自增 id/skill_id、content/body/prompt 永不出库；
-// mine = 官方引用（official）∪ 名下个人技能（personal）；个人技能跨用户按不存在处理；
-// library v2（IK60WT）：分类过滤、featured/most_used/newest 排序、zh/en 语言解析、
-// keyword 命中解析语言 name/description + search_keywords（绝不匹配 content）、
-// usage_count = creative_skill_activation COUNT(DISTINCT user_id)。
 
 export const FORBIDDEN_KEYS = ["content", "body", "prompt", "id", "skill_id"];
 
@@ -22,7 +14,6 @@ export function expectWhitelistOnly(records: Record<string, unknown>[]) {
   }
 }
 
-// deletePersonal 交互事务 mock（先例：createPersonalSkill 的 $transaction(async cb => cb(tx))）。
 export function withTransaction(
   tx: Record<string, unknown>,
 ): { $transaction: ReturnType<typeof vi.fn> } {
@@ -33,7 +24,6 @@ export function withTransaction(
   };
 }
 
-// RunPin fixture（IKCKOW：原 agent-run-repo.test.ts 已删，保留 fixture 供 skill-repo 用例）。
 export const runPinSource: Omit<AgentRunPin, "pin_digest"> = {
   schema_version: 1 as const,
   manifest_id: bundledAgentRuntimeManifest.manifest_id,
@@ -127,7 +117,6 @@ export function pinWithSkills(
   return signRunPin({
     ...runPinSource,
     auto_creative_skill_candidates: resources.map(candidateOf),
-    // schema 约束 activated_creative_skill_versions 至多 1 个（确定性 auto 激活），fixture 对齐
     activated_creative_skill_versions: resources
       .slice(0, 1)
       .map(activationOf),

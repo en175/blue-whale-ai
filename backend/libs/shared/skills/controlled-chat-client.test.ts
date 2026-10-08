@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createControlledChatClient } from "./controlled-chat-client.js";
 
-// 受控 chat 客户端共用实现（ik6b3l 收拢）：网络行为集中在此测试，
-// skill-summarize 与 BFF format-ai 两处消费方只测各自的包装层。
 
 const OPTIONS = {
   baseUrl: "http://new-api.test",

@@ -1,5 +1,3 @@
-// IKH3VE：POST /projects/:projectId/video-enhancements — 视频 HD 高清（火山 MediaKit 画质增强
-// 大模型版）建任务端点。
 import { Body, Controller, Headers, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -28,7 +26,6 @@ export class VideoEnhancementsController {
       body ?? {},
       idempotencyKey,
     );
-    // IKJJQW（B.8 局部适配器）：新协议受控错误信封直写 HTTP 状态与 data.reason。
     if (isRecoveryControlledEnvelope(result)) {
       writeRecoveryControlled(result, res);
       return;

@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// 真实页面恢复/保存接线，API 与画布组件为受控替身，无认证 HTTP 浏览器端到端。
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act } from 'react';

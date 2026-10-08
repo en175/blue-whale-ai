@@ -1,17 +1,12 @@
-/* ============================================
- * CustomEdge 连线边样式：默认实线，hover 或选中节点相连时变虚线流动
- * ============================================ */
 .edgeGroup {
   cursor: default;
 }
 
-/* 命中路径：扩大悬停检测，不拦截连线拖拽 */
 .hitPath {
   pointer-events: stroke;
   cursor: default;
 }
 
-/* 可见连线：默认静态实线 */
 .basePath {
   stroke: rgba(200, 200, 210, 0.45);
   stroke-width: 3;
@@ -21,7 +16,6 @@
   transition: stroke 0.15s ease;
 }
 
-/* hover 或选中节点相连：变虚线 + 流动（同一份视觉定义，两个触发入口） */
 .edgeGroup:hover .basePath,
 .edgeGroup.selectedConnected .basePath {
   stroke: rgba(220, 220, 230, 0.7);
@@ -34,7 +28,6 @@
   to   { stroke-dashoffset: -40; }
 }
 
-/* 删除按钮默认隐藏：悬停本身不再显示，只有指针停稳满 1 秒后组件追加出现类才露出（IKGUVG） */
 .deleteBtn {
   opacity: 0;
   cursor: pointer;

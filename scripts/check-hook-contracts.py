@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Validate the blocking hook contract shared by supported agent platforms."""
 
 from __future__ import annotations
 
@@ -62,8 +61,6 @@ EXPECTED_CONTRACTS: tuple[Contract, ...] = (
         "mcp__gitee-ent__create_enterprise_repo_release",
         "confirm-release-action.sh",
     ),
-    # 纯提醒型（恒 exit 0，不阻断）：工单状态机流转提醒，
-    # 规则见 docs/agents/issue-tracker.md「任务状态机」。
     ("PostToolUse", "Bash", "remind-issue-state.sh"),
     (
         "PostToolUse",
@@ -81,7 +78,6 @@ GATE_NAME = re.compile(r"[A-Za-z0-9._-]+\.sh")
 CLAUDE_HOOK_PATH = re.compile(r".*/\.claude/hooks/([A-Za-z0-9._-]+\.sh)")
 CODEX_WRAPPER = "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh"
 KIMI_SHIM = "$HOME/.kimi-code/hooks/blue-whale-hook.sh"
-# ZCode hooks.events 的严格 schema 只认七个事件；平台差异见 docs/agents/hooks/README.md。
 ZCODE_SUPPORTED_EVENTS = frozenset(
     {
         "SessionStart",
@@ -141,7 +137,6 @@ def kimi_gate(command: str) -> str | None:
 
 
 def kimi_normalized_contracts(config: dict[str, object]) -> Counter[Contract]:
-    """Normalize Kimi CLI TOML hooks (a flat [[hooks]] list) into contracts."""
     contracts: Counter[Contract] = Counter()
     items = config.get("hooks", [])
     if not isinstance(items, list):
@@ -191,15 +186,8 @@ def normalized_contracts(
                         f"type={hook.get('type')}"
                     )
                 command = hook.get("command", "")
-                # graphify 官方提醒型钩子（hook-guard / hook-check，实测恒 exit 0）：
-                # 只注入"优先查图谱"引导、不阻断，与 Grep|Glob 提醒型同源，
-                # 按 git-workflow.md「Hook 改动同步检查」排除于阻断等价比较。
                 if event == "PreToolUse" and command.startswith("graphify hook-"):
                     continue
-                # ponytail 官方注入型钩子（UserPromptSubmit 模式跟踪 /
-                # SubagentStart 子代理注入，恒 exit 0 不阻断）：
-                # node 前缀命令形态非本脚本 gate 契约，与 SessionStart 注入同源，
-                # 同样排除于阻断等价比较。
                 if event in ("UserPromptSubmit", "SubagentStart") and command.startswith(
                     (
                         'node "${CLAUDE_PROJECT_DIR}"/.claude/hooks/ponytail-',
@@ -234,9 +222,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    # Windows 原生 Python 默认 stdout/stderr 为 cp936（GBK），诊断输出被 test-hooks.sh
-    # 的 UTF-8 needle grep 漏配（与 sync/start-task 同根因的输出方向）。强制改 UTF-8；
-    # POSIX 本就 UTF-8，reconfigure 为 no-op。
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
@@ -286,16 +271,10 @@ def main() -> int:
 
     for platform, path, hook_keys, command_parser in platforms:
         try:
-            # 显式 UTF-8：Windows 默认 cp936 解码 UTF-8 配置会抛 UnicodeDecodeError
             config = json.loads(path.read_text(encoding="utf-8"))
             if platform == "ZCode":
                 events = config.get("hooks", {}).get("events")
                 if isinstance(events, dict):
-                    # ZCode 对 hooks.events 做严格 schema 校验：出现白名单外事件名
-                    # （如 Claude Code/Codex 支持的 SubagentStart）会让整个配置文件
-                    # 加载失败（config.file.invalid），该文件声明的全部 Hook——含
-                    # 阻断 Gate——随之静默失效（IKJGD5）。契约等价比较无法发现，
-                    # 必须在平台白名单层面拦截。
                     unsupported = sorted(set(events) - ZCODE_SUPPORTED_EVENTS)
                     if unsupported:
                         print(
@@ -338,8 +317,6 @@ def main() -> int:
     for gate in sorted(runtime_pretool_gates):
         path = args.hooks_dir / gate
         try:
-            # 显式 UTF-8：gate 脚本含中文注释，Windows 默认 cp936 解码会抛
-            # UnicodeDecodeError——它是 ValueError 子类，只捕 OSError 接不住。
             source = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as error:
             print(f"审计覆盖检查: 无法读取运行时 Gate {path}: {error}", file=sys.stderr)

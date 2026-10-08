@@ -4,11 +4,6 @@ import { handleStoryboardPreviewCreate, storyboardPreviewRequestHash } from "./h
 import { RecoveryContractError, type StoryboardPreviewRepo } from "@lib/shared/persistence/index.js";
 import type { CanvasBinding } from "@lib/contracts";
 
-/** IKJJR0（IKIXK9-SPEC-20261002 B.3）：成片（分镜预览）入口接入统一关联受理的 handler 面。
- *
- *  repo 事务行为（锁内回读、归属版本核对、关联行写入）由真实库集成测试覆盖
- *  （ikjjr0-canvas-recovery.integration.test.ts）；此处验证：
- *  受理数据组装、幂等承载一致性校验（B.8）、受控错误信封直返、受理/重放响应同形。 */
 
 const UUID = "0a1b2c3d-0000-4000-8000-000000000011";
 

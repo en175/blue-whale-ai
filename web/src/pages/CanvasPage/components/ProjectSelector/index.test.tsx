@@ -5,8 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProjectSelector, { type CanvasProject } from './index';
 import styles from './index.module.css';
 
-/* 悬停显隐由 CSS（.projectItem:hover .pinBtn）控制，jsdom 无法驱动 :hover；
- * 用例只断言按钮在 DOM 中渲染且语义（title/顺序/回调）正确，视觉显隐交 CSS 实现。 */
 
 const projects: CanvasProject[] = [
   { id: 'p1', name: '已置顶项目', pinned: true },

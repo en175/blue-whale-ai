@@ -1,6 +1,3 @@
-/* ============================================
- * Router 全局路由配置：用户端路由 + 后台子树
- * ============================================ */
 import { createBrowserRouter, Navigate, Outlet } from 'react-router-dom';
 import MainLayout from '@/layouts/MainLayout';
 import Home from '@/pages/Home';
@@ -15,7 +12,6 @@ import { RequireAuth } from '@/router/guards';
 
 const router = createBrowserRouter([
   {
-    // 真人认证成功落地页：手机刷脸后由上游回调跳转，独立页面（无侧边栏/导航，无需产品登录态）
     path: '/auth-success',
     element: <AuthSuccess />,
   },

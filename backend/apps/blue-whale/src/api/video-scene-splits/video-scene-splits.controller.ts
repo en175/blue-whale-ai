@@ -1,6 +1,3 @@
-// IKH8BO：POST /projects/:projectId/video-scene-splits — 视频场景切分（火山 MediaKit
-// segment-scenes）建任务端点。入参 = 源资产引用 + 画布占位卡绑定 + 粒度档位 + client_token
-// 幂等键（细节见 VideoSceneSplitsService 头注）。
 import { Body, Controller, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";

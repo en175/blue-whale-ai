@@ -35,7 +35,6 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** 构造 MaterialService：mock PrismaService（groupRepo 未用时传哑对象），隔离数据库。 */
 function makeService(prisma?: unknown) {
   return new MaterialService(prisma as never, settingsStub());
 }
@@ -182,7 +181,6 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     vi.unstubAllGlobals();
   });
 
-  /** mock 本地 material_groups 查询：findVirtualDefault / upsert。upsert 默认 vi.fn 防 undefined。 */
   function makeGroupPrisma(overrides: {
     findVirtualDefault?: unknown;
     upsert?: unknown;
@@ -217,15 +215,12 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     const groupId = await service.ensureVirtualDefaultGroup("9");
 
     expect(groupId).toBe("group-virt-1");
-    // 上游建组：组名 默认分组：<uid>。
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("http://gateway.test/api/material/CreateAssetGroup");
-    // IKEXX8：网关文档 GroupType 必填——显式携带 AIGC，不赌上游默认值。
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
       Name: "默认分组：9",
       GroupType: "AIGC",
     });
-    // 本地落表：virtual 默认组。
     expect(prisma.client.material_groups.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -260,8 +255,8 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     const groupId = await service.ensureVirtualDefaultGroup("9");
 
     expect(groupId).toBe("group-virt-1");
-    expect(calls).toHaveLength(0); // 未调上游
-    expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled(); // 未落表
+    expect(calls).toHaveLength(0);
+    expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled();
   });
 
   it("上游建组返回非 group- 前缀 Id：抛 502，不落表", async () => {
@@ -303,7 +298,6 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     await expect(
       service.ensureVirtualDefaultGroup("9"),
     ).rejects.toThrow("db down");
-    // 上游：先建组，再补偿删组。
     expect(calls[0].url).toBe("http://gateway.test/api/material/CreateAssetGroup");
     expect(calls[1].url).toBe("http://gateway.test/api/material/DeleteAssetGroup");
     expect(JSON.parse(String(calls[1].init.body))).toEqual({ Id: "group-virt-1" });
@@ -430,9 +424,6 @@ describe("MaterialService —— 组查询分流 tryServeLocalGroupAction（IKEX
   });
 });
 
-// IKF YHJ：上游判素材失败时的统一处置 + GetAsset 本地优先。
-// 两件事必须配套：处置会删掉上游素材，删完之后再打上游只会拿到 NotFound，
-// 所以 GetAsset 必须先在本地短接，否则前端看到的是「不存在」而不是「未通过」。
 describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（IKFYHJ）", () => {
   const originalBaseUrl = process.env.NEW_API_BASE_URL;
 
@@ -445,12 +436,10 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     vi.unstubAllGlobals();
   });
 
-  /** 造一个只提供素材状态行的 prisma 替身；返回可断言的 spy。 */
   function makePrisma(row: { status: string; errorCode?: string | null; errorMessage?: string | null } | null) {
     const mirrorStatus = vi.fn().mockResolvedValue(undefined);
     const clearMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
-      // 服务内部走 `this.prisma.client`（PrismaService 的约定），mock 要照这个形状给。
       client: {
         material_assets: {
           findFirst: vi.fn().mockResolvedValue(
@@ -482,7 +471,6 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
       errorCode: "Sensitive",
       errorMessage: "命中审核",
     });
-    // 删上游是刻意的 fire-and-forget，等一拍让它落地
     await new Promise((r) => setTimeout(r, 0));
 
     expect(mirrorStatus).toHaveBeenCalledWith(
@@ -491,7 +479,6 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
         data: expect.objectContaining({ status: "Failed", error_code: "Sensitive" }),
       }),
     );
-    // 关联两列一起清（只清 material_id 会留下悬空的 group 关联）
     expect(clearMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { material_id: "asset-a", user_id: 9n },
@@ -571,7 +558,6 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
 });
 
 describe("MaterialService —— 上传口回显素材状态的读口（IKI65H）", () => {
-  /** 造一个只提供素材状态行的 prisma 替身；`failure` 用来模拟查库本身出错。 */
   const makeStatusPrisma = (row: { status: string } | null, failure?: Error) => {
     const findFirst = failure
       ? vi.fn().mockRejectedValue(failure)
@@ -597,7 +583,6 @@ describe("MaterialService —— 上传口回显素材状态的读口（IKI65H�
     await expect(
       new MaterialService(prisma as never, settingsStub()).materialStatusReader().load("9", "asset-a"),
     ).resolves.toBe("Failed");
-    // 归属谓词必须带上——与仓库层其余读一致，纵深防御。
     expect(findFirst).toHaveBeenCalledWith({
       where: { material_id: "asset-a", user_id: 9n },
     });
@@ -610,10 +595,6 @@ describe("MaterialService —— 上传口回显素材状态的读口（IKI65H�
     ).resolves.toBeNull();
   });
 
-  /**
-   * 这个读口取的是**回显字段**，不是门。让它抛出去，一次已经落库、已经绑好的上传就会回 500，
-   * 而客户端重试还会在同一条路上再撞一次。所以失败按「无状态行」处理，靠 warn 留痕。
-   */
   it("查库失败：不抛，按无状态行回 null", async () => {
     const { prisma } = makeStatusPrisma(null, new Error("db down"));
     await expect(

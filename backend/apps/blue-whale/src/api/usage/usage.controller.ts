@@ -16,9 +16,6 @@ export class UsageController {
           source: item.source,
           credits: item.credits,
         })),
-        // 上游早就返回了（gRPC QueryBalance.expiring + 客户端映射都在），此前只是这一层
-        // 没投影出来。契约里 `expires_at` 是 RFC3339，`source` 是**批次口径**
-        // （purchased | bonus | …），不是流水口径的 recharge
         expiring: balance.expiring.map((lot) => ({
           credits: lot.credits,
           expires_at: lot.expiresAt,

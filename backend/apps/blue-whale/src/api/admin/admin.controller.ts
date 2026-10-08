@@ -12,7 +12,6 @@ import { OperationLogService } from "@lib/shared/operation-log/operation-log.ser
 import { toAdminError } from "@lib/shared/errors/admin-error.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
-/** BigInt 列入参守卫：仅十进制正整数串。 */
 const BIGINT_ID_RE = /^\d{1,19}$/;
 
 const FIELD_LIMITS = {

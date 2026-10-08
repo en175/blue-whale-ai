@@ -1,9 +1,7 @@
-// IKDMQU 成功卡原卡编辑与重新生成：纯函数单测
 import { describe, expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 
-/** 构造媒体节点（data 局部覆盖） */
 function mediaNode(data: Record<string, unknown>): Node {
   return { id: 'm1', type: 'mediaNode', position: { x: 0, y: 0 }, data };
 }
@@ -70,7 +68,6 @@ describe('cancelledTerminalAction 取消终态处置（Q5 保留旧素材 + IKDM
 
   it('无生成记录或无旧素材的非草稿节点取消 → 移除（历史占位卡语义）', () => {
     expect(cancelledTerminalAction(mediaNode({ genStatus: 'generating' }))).toBe('remove');
-    // jobId 在但无有效素材（新建占位卡）：没有可保留的内容
     expect(cancelledTerminalAction(mediaNode({ genStatus: 'generating', jobId: 'j3' }))).toBe('remove');
     expect(cancelledTerminalAction(mediaNode({ genStatus: 'generating', jobId: 'j3', src: 'blob:preview' }))).toBe('remove');
   });

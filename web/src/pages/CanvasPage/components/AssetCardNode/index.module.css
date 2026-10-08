@@ -1,17 +1,8 @@
-/* ============================================
- * AssetCardNode - 资产卡节点（风格/角色/物体/环境/自定义）
- * ============================================ */
 
 .wrapper {
   position: relative;
 }
 
-/* ---- 顶部操作条（IKGYYF 迁出卡内文档流：钉屏幕层悬浮形态，见 Toolbar.tsx；
- *  显隐由 NodeFollowToolbar 容器条件渲染，不再有 opacity 占位常驻。
- *  IKGYYB 审查对齐：迁移前 topBar 是 .wrapper 直接子元素、条宽=卡宽（.card 320px）
- *  两端分布（标签贴左缘、按钮贴右缘）——钉屏幕层内条宽自适应内容，min-width 锚回
- *  卡宽保持视觉等价（改 .card 宽度时须同步此值）。
- * IKGZ86 浮层容器视觉统一：顶栏补容器底四件套令牌（背景/描边/圆角/阴影），fit-content 在 min-width 之上按内容收紧 ---- */
 .topBar {
   display: flex;
   align-items: center;
@@ -64,7 +55,6 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-/* ---- 标题 ---- */
 .head {
   display: flex;
   align-items: center;
@@ -89,7 +79,6 @@
   color: var(--color-text-primary);
 }
 
-/* ---- 主体 ---- */
 .body {
   display: flex;
   flex-direction: column;
@@ -152,7 +141,6 @@
   font-size: var(--font-size-xs);
 }
 
-/* ---- 参考图缩略图网格 ---- */
 .refGrid {
   display: flex;
   flex-wrap: wrap;
@@ -213,7 +201,6 @@
   display: none;
 }
 
-/* ---- 角色卡音色区 ---- */
 .voiceSection {
   border-top: 1px solid var(--color-border-primary);
   padding-top: 10px;
@@ -290,7 +277,6 @@
   background-color: rgba(250, 82, 82, 0.8);
 }
 
-/* ---- 右键菜单 ---- */
 .contextMenu {
   position: fixed;
   min-width: 200px;
@@ -328,7 +314,6 @@
   color: #e5484d;
 }
 
-/* ---- Agent 生成卡落画布形态（B2） ---- */
 .gcHeader {
   display: flex;
   align-items: baseline;
@@ -361,14 +346,11 @@
   margin-top: 4px;
 }
 
-/* 落到画布的生成卡：字段值定高、内部滚动。
-   提示词动辄上千字，不封顶的话单个节点能把画布拉出一条几千像素的长龙。 */
 .gcValue {
   max-height: 132px;
   overflow-y: auto;
 }
 
-/* 字段值各自滚动，滚动条只在需要时出现，且不占字宽 */
 .gcValue::-webkit-scrollbar {
   width: 4px;
 }

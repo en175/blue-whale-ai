@@ -39,16 +39,6 @@ export function loadSkillFormatRules(
   return override || DEFAULT_SKILL_FORMAT_RULES;
 }
 
-/**
- * 组装 AI 格式化的依赖。
- *
- * <p>地址与凭证都从上游唯一出口的语义取：地址直接读 `NEW_API_BASE_URL`，
- * 凭证走 `SystemSettingsService.requireUpstreamKey()`（**读库，所以这个函数是异步的**）。
- * 这里就是一次普通的模型调用，用项目统一 key 即可——不需要、也不该有专属凭证。
- *
- * <p>配不出来就返回 null（调用方翻成「AI 格式化未配置」503）：缺 model、缺地址、
- * 缺凭证三者对外都是「这个功能现在不可用」，而**绝不带着空串去打上游**。
- */
 export async function createSkillFormatDeps(
   settings: Pick<SystemSettingsService, "requireUpstreamKey">,
 ): Promise<{ ai: SkillFormatChatClient; rules: string } | null> {

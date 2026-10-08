@@ -7,7 +7,6 @@ export const AUDIO_MIX_EDGE_ORIGIN = 'audio-mix';
 export const AUDIO_MIX_FORMATS = AUDIO_MIX_OUTPUT_FORMATS;
 export type AudioMixFormat = AudioMixCreate['output_format'];
 
-/** 编辑期选材。assetId 是跨入口身份；nodeId 仅表示用户确实选了画布卡。 */
 export interface AudioMixInputSelection {
   assetId: string;
   nodeId?: string;
@@ -40,7 +39,6 @@ function nodeBox(node: Node) {
   return { x: node.position.x, y: node.position.y, width: mediaBox.width, height: mediaBox.height + 44 };
 }
 
-/** 从固定源右侧开始逐行找空位，所有画布节点均参与避让。 */
 export function findAudioMixPosition(source: Node, occupied: Node[]): { x: number; y: number } {
   const anchor = nodeBox(source);
   const width = 480;
@@ -66,7 +64,6 @@ export function isAudioMixNodeId(id: string): boolean {
   return id.startsWith('audio-mix-');
 }
 
-/** 结果占位卡（IKJJR4：节点 id 预分配——target_node_id 在提交前即确定，jobId 受理后回填）。 */
 export function buildAudioMixPlaceholderNode(
   nodeId: string,
   format: AudioMixFormat,

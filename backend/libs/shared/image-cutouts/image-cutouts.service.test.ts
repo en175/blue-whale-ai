@@ -1,6 +1,3 @@
-// IKGXM1：抠图创建入口复核矩阵与免费口径单测（先例：image-erasures.service.test.ts）。
-// 只测外部可见行为：拒绝原因可读、落库参数冻结、免费口径无成本预留、凭证冻结、按场景两档上限。
-// IKJLTX：追加已受理意图重放先于素材等可变状态的顺序分支（B.3 受理事务顺序）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImageCutoutsService } from "./image-cutouts.service.js";
@@ -62,7 +59,6 @@ const VALID_PRODUCT_BODY = {
   need_crop_background: true,
 };
 
-/** 默认源素材：4000x3000 png、5MB（general 12MP ≤40MP、human|product 4000≤7680/3000≤4320，三档复核均过）。 */
 function makeImageAsset(overrides: Record<string, unknown> = {}) {
   return {
     type: "image",
@@ -91,12 +87,10 @@ function makeService(overrides: {
   const costCreate = vi.fn();
   const prisma = {
     client: {
-      // findUnique：重放时 currentJobStatus 现查任务状态（工单场景原任务 501 已 processing）。
       generation_jobs: {
         create,
         findUnique: vi.fn().mockResolvedValue({ status: "processing" }),
       },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
@@ -127,7 +121,6 @@ describe("ImageCutoutsService.create：契约 schema 复核", () => {
   });
 
   it("rejects the general scene carrying enhancement keys (scene forbids them)", async () => {
-    // 规格故事 29：通用场景不携带描边与裁剪参数——官方在 general 场景忽略四参，契约 strict 分支无此键。
     const { service } = makeService();
     const result = await service.create("9", "55", {
       ...VALID_GENERAL_BODY,
@@ -214,7 +207,6 @@ describe("ImageCutoutsService.create：归属与媒体类型复核", () => {
 
 describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限制，按场景两档）", () => {
   it("accepts the general scene at the exact long-side boundary 10240 (total pixels within 40MP)", async () => {
-    // 10240x3906 = 39,997,440 ≤ 40MP：长边恰好到档、总像素仍在限内。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: 10240, height: 3906 })) },
     });
@@ -231,7 +223,6 @@ describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限
   });
 
   it("rejects the general scene when total pixels exceed 40MP (sides within limits)", async () => {
-    // 10000x4001 = 40,010,000 > 40MP：长边 ≤10240、短边 ≤6000 均过，仅总像素超。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: 10000, height: 4001 })) },
     });
@@ -249,7 +240,6 @@ describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限
           .mockResolvedValueOnce(makeImageAsset({ width: 3000, height: 10241 })),
       },
     });
-    // 横图竖图同口径（长边 = max、短边 = min）。
     expect((await service.create("9", "55", VALID_GENERAL_BODY)).msg).toContain("长边超过");
     expect((await service.create("9", "55", VALID_GENERAL_BODY)).msg).toContain("长边超过");
   });
@@ -290,8 +280,6 @@ describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限
   });
 
   it("applies the two-tier limits per scene: same image passes general but is rejected for human and product", async () => {
-    // 8000x5000 = 40MP：general 档（≤10240/≤6000/≤40MP）恰好全过；human|product 档长边 8000 > 7680 拒
-    // （规格故事 15：切人像/商品后更严上限被正确拦截）。
     const asset = makeImageAsset({ width: 8000, height: 5000 });
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(asset) },
@@ -365,8 +353,6 @@ describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限
   });
 
   it("lets an asset without recorded dimensions pass to the supplier gate", async () => {
-    // assets.width/height 由前端上报、存量图大量为 null：缺权威尺寸不臆造、不拦，
-    // 交供应商按官方门槛拒（与擦除/高清同口径，规格故事 5）。
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: null, height: null })),
@@ -426,7 +412,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
     },
   };
 
-  /** 首次受理的共享段 stub 链：幂等 miss → 锁通过（版本 0→1）→ 建行 400。 */
   function stubFreshAcceptance() {
     readIdemMock.mockResolvedValue(null);
     lockMock.mockResolvedValue({
@@ -438,7 +423,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
 
   it("素材删除后同载荷重放返回原任务 501 与原关联，不重新拒绝、不重复受理", async () => {
     stubFreshAcceptance();
-    // 第一次查到素材（受理成功），第二次模拟素材已删除（findOwnedSource → null）。
     const findOwnedSource = vi
       .fn()
       .mockResolvedValueOnce(makeImageAsset())
@@ -456,7 +440,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
     expect(first.code).toBe(200);
     expect(first.data).toMatchObject({ job_id: "400", status: "queued" });
 
-    // 已受理意图重放：受控幂等读取命中原任务 501（现查状态 processing）与原关联。
     readIdemMock.mockResolvedValue({ generation_job_id: "501", cursor: 0 });
     bindingViewMock.mockResolvedValue({
       protocol_version: 1,
@@ -478,9 +461,7 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
       status: "processing",
       canvas_binding: { submission_id: SUBMISSION_ID, job_id: "501", is_current: true },
     });
-    // 回读先于素材查询：重放没有再碰素材（第二次 null 若被读取即 404 拒绝）。
     expect(findOwnedSource).toHaveBeenCalledTimes(1);
-    // 零新增任务、零重复副作用（无预扣口径：成本预留恒零写）。
     expect(create).toHaveBeenCalledTimes(1);
     expect(costCreate).not.toHaveBeenCalled();
     expect(writeRowsMock).toHaveBeenCalledTimes(1);
@@ -510,7 +491,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
   });
 
   it("未受理过的非法输入仍走既有校验拒绝，不因回读前置放宽", async () => {
-    // 幂等 miss + 素材已删：未受理过的请求依旧被素材归属校验拒绝（100301）。
     readIdemMock.mockResolvedValue(null);
     const { service, create } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(null) },

@@ -1,8 +1,5 @@
 FROM node:24.18.0-bookworm-slim
 
-# openssl：Prisma 引擎依赖。ca-certificates：debian slim 不带系统根证书，
-# 而 buf（Go 二进制，读 /etc/ssl/certs）拉 BSR 远程插件要走系统根证书链
-# —— 缺了它 buf generate 直接 x509: certificate signed by unknown authority。
 RUN sed -i \
         's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g; s|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' \
         /etc/apt/sources.list.d/debian.sources \
@@ -12,16 +9,11 @@ RUN sed -i \
 
 RUN npm install --global pnpm@11.17.0 --registry=https://registry.npmmirror.com
 
-# 阿里云 npm 镜像加速。pnpm 11 breaking change：不再读 npm_config_* 环境变量，
-# 只认 pnpm_config_* 前缀（同上游 IK6GLP 对 blue_whale_web/Dockerfile 的修法）。
 ENV pnpm_config_registry=https://registry.npmmirror.com
 
 WORKDIR /workspace
 COPY . .
 
-# 跨进程契约（ADR-0113 决策 8）：生成物不入仓（.gitignore「跨进程契约生成物」），
-# 与 backend/Dockerfile 同一根因——backend/libs 直接 import ../../contracts/gen/**，
-# 不生成就 tsc -b 报 TS2307。buf 版本与那边对齐，两镜像产出一致。
 RUN npm install --global @bufbuild/buf@1.73.0 --registry=https://registry.npmmirror.com \
     && (cd contracts && buf generate)
 

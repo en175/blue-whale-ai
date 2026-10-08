@@ -157,8 +157,6 @@ describe("acceptConversationMessage", () => {
     expect(acceptMessage).not.toHaveBeenCalled();
   });
 
-  // 总结当前对话意图（资产契约 §15.1，IK60X1）：body.skill_summarize === true 才置位，
-  // 省略/false/非布尔均为普通消息；该字段参与 canonicalRequest 幂等哈希。
   it("skill_summarize: true 透传为 skillSummarize 并纳入幂等哈希", async () => {
     const acceptMessage = vi.fn().mockResolvedValue({ kind: "accepted" });
 
@@ -218,9 +216,6 @@ describe("acceptConversationMessage", () => {
     expect(hashes[1]).not.toBe(hashes[0]);
   });
 
-  // Creative Skill 资产边界（资产契约 §4/§7/§8）：forced 激活跨用户个人技能或未知 ID
-  // 一律拒绝，不触碰持久化；official 与本人个人技能放行；无 forced 时不调守卫；
-  // 携带 forced 但守卫未注入时 fail-closed 拒绝。
   const validBody = {
     client_message_id: "client-1",
     content: "做一张蓝鲸海报",

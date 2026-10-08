@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKHA2W 人声背景分离编辑态单条组件测试。X 关闭在单条最左（对齐抠图/音视频分离单条
-   先例——上方仅 X 退出的独立工具条随单条化退役；无框选/开关/撤销重做——本工具无画布
-   操作）；单条要素 = 场景下拉（触发钮显当前场景中文、展开四选一、当前项高亮、菜单项
-   title 携带产出轨数说明）+ 格式下拉（五选一，契约五值）+「本期免费」标注 + 发送钮
-   （submitting 置灰与回调透传）；两下拉点击展开/向上弹/点外与选择即收起/互斥展开；
-   单条 territory 标记、sendBar 锚样式透传。渲染模式沿用 VideoAudioSplitDialog 测试
-   （createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -64,7 +57,6 @@ describe('单条呈现', () => {
     renderDialog();
     const sendBar = container!.querySelector('[data-testid="vocal-split-send-bar"]')!;
     const close = btn('vocal-split-close');
-    // 单条化后 X 在 sendBar 内且是第一个元素（对齐抠图/音视频分离单条先例）
     expect(sendBar.contains(close)).toBe(true);
     expect(sendBar.querySelector('button')).toBe(close);
   });
@@ -106,7 +98,6 @@ describe('发送条要素：场景下拉 + 格式下拉 + 本期免费 + 发送�
     expect(Array.from(items).map((el) => el.textContent)).toEqual(['通用', '音乐', '短剧', '口播']);
     expect(btn('vocal-split-scene-item-drama').getAttribute('aria-checked')).toBe('true');
     expect(btn('vocal-split-scene-item-audio').getAttribute('aria-checked')).toBe('false');
-    // 产出轨数 hint（title）：两轨/三轨按场景分叉
     expect(btn('vocal-split-scene-item-audio').getAttribute('title')).toBe('人声+背景音两轨');
     expect(btn('vocal-split-scene-item-music').getAttribute('title')).toBe('人声+背景音两轨');
     expect(btn('vocal-split-scene-item-drama').getAttribute('title')).toBe('人声/音乐/音效三轨');

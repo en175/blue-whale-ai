@@ -1,17 +1,3 @@
-// IKHW48：audio_speed（音频调速，画布音频卡「调速」，火山 MediaKit adjust-audio-speed）
-// 跨进程契约一致性断言。对齐 audio-trim.test.ts 接缝（TS 侧常量直接 import 断言值；
-// 零新增测试设施）。防漂移约定（audio-trim.test.ts 同款）：worker-java 无法 import TS
-// 常量，下方「双端一致性」组直接读 Java 源码文本逐值对账——任一侧改动未同步即红
-// （AudioSpeedContract.java 已随执行票 IKHW5A 落地，对账组同步补齐；audio-trim.test.ts
-// 「已接线」组的演进先例）。backend 入队 tag（queue.constants.ts 的 AUDIO_SPEED_TAG）
-// 由 IKHW59 落地，mq-route-parity.test.ts 对枚举表自动对账。
-// 官方 API 口径 = 火山引擎 AI MediaKit adjust-audio-speed 官方 CLI 参考文档
-// （volcengine/mediakit-cli 仓库，Cloud 模式契约）：speed 范围 [0.1, 4] 默认 1；
-// 终态 result.audio_url（24h 临时链接）/ result.duration（秒）——字段名已对官方文档逐字复核
-// 证实（非视频侧示例推测）；官方另有可选 format 参数（默认 m4a），本产品不传、产物格式
-// 跟随官方输出。产品口径 = 父单 IKHVYO「实现决策」2、3（分段中点映射、0.05 步进）：
-// https://e.gitee.com/hangzhou-xuanfu_1/issues/IKHVYO 。贴原速省略是 buildAudioSpeedInput 的防御性收口。后续票（IKHW59 backend / IKHW5C+IKHW5S web）照抄本契约
-// 与 audio-speed.ts，不得发明字段名。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -41,7 +27,6 @@ import {
   speedToPos,
 } from "./audio-speed.js";
 
-// 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根；IKHW5A 已落地）。
 const contractJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/AudioSpeedContract.java",
@@ -82,8 +67,6 @@ describe("audio_speed 契约不变量（官方 CLI 参考文档口径，TS 侧�
   });
 
   it("网关端点：提交 /v1/mediakit/adjust-audio-speed、查询 /v1/mediakit/tasks/（IKH67T 实测校准）", () => {
-    // 网关路径 ≠ 火山上游路径 POST /api/v1/tools/adjust-audio-speed（混用即 404）；
-    // 对客路径按家族规律 /v1/mediakit/{上游同名工具段} 取值，网关配置票定稿后回填。
     expect(AUDIO_SPEED_SUBMIT_PATH).toBe("/v1/mediakit/adjust-audio-speed");
     expect(AUDIO_SPEED_POLL_PATH_PREFIX).toBe("/v1/mediakit/tasks/");
   });
@@ -98,7 +81,6 @@ describe("滑杆分段映射（父单 IKHVYO 实现决策 3 原型定稿函数�
     expect(posToSpeed(0)).toBe(0.1);
     expect(posToSpeed(1000)).toBe(4.0);
     expect(posToSpeed(500)).toBe(1.0);
-    // 与滑杆位置域常量互锁（引用方刻度/区间定位不自造字面量）。
     expect(posToSpeed(AUDIO_SPEED_SLIDER_MIN_POS)).toBe(AUDIO_SPEED_MIN_SPEED);
     expect(posToSpeed(AUDIO_SPEED_SLIDER_MAX_POS)).toBe(AUDIO_SPEED_MAX_SPEED);
     expect(posToSpeed(AUDIO_SPEED_SLIDER_MID_POS)).toBe(1.0);
@@ -108,7 +90,6 @@ describe("滑杆分段映射（父单 IKHVYO 实现决策 3 原型定稿函数�
     expect(speedToPos(0.1)).toBe(0);
     expect(speedToPos(4.0)).toBe(1000);
     expect(speedToPos(1.0)).toBe(500);
-    // 父单 IKHVYO「用户故事」13 /「实现决策」3 刻度档位定位值：0.5x / 2.0x 刻度落位（四舍五入取整位置）。
     expect(speedToPos(0.5)).toBe(222);
     expect(speedToPos(2.0)).toBe(667);
   });
@@ -118,14 +99,14 @@ describe("滑杆分段映射（父单 IKHVYO 实现决策 3 原型定稿函数�
       const speed = posToSpeed(pos);
       expect(speed).toBeGreaterThanOrEqual(AUDIO_SPEED_MIN_SPEED);
       expect(speed).toBeLessThanOrEqual(AUDIO_SPEED_MAX_SPEED);
-      expect(Number(speed.toFixed(2))).toBe(speed); // 两位小数内（无第三位尾差）
-      expect(Math.round(speed * 100) % 5).toBe(0); // 0.05 网格点
+      expect(Number(speed.toFixed(2))).toBe(speed);
+      expect(Math.round(speed * 100) % 5).toBe(0);
     }
   });
 
   it("往返一致：全部 0.05 网格点 speedToPos → posToSpeed 还原原值（79 档全覆盖）", () => {
     for (let i = 2; i <= 80; i += 1) {
-      const speed = Number((i * 0.05).toFixed(2)); // 0.10 ~ 4.00 步进 0.05
+      const speed = Number((i * 0.05).toFixed(2));
       expect(posToSpeed(speedToPos(speed)), `speed=${speed}`).toBe(speed);
     }
   });
@@ -206,7 +187,6 @@ describe("input schema（冻结后形态复核）", () => {
         `speed=${speed}`,
       ).toBe(false);
     }
-    // 量化后的值过（收口函数与 schema 同一口径）。
     expect(
       audioSpeedInputSchema.safeParse({
         source_asset_id: "88",
@@ -221,7 +201,6 @@ describe("执行面兜底码（error-codes.ts 注册）", () => {
     expect(ERROR_AUDIO_SPEED_FAILED).toBe("audio_speed_failed");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_AUDIO_SPEED_FAILED]).toBe(1052);
     expect(ERROR_CODES[1052]).toBe("音频调速失败，请重试");
-    // 家族相邻码不冲突（号位唯一）。
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_AUDIO_TRIM_FAILED]).toBe(1048);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_MATTING_FAILED]).toBe(1050);
     expect(

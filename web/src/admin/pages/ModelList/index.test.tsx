@@ -15,8 +15,8 @@ const api = vi.hoisted(() => ({
   fetchBillingCatalog: vi.fn(),
 }));
 
-// 页面走 Query（IKJ058），所以**工厂本身**也要桩：`vi.mock` 换的是模块导出的绑定，
-// 而 `adminModelsOptions` 内部引用的仍是模块自己的 `fetchAdminModels` —— 只桩 fetch 不生效。
+
+
 vi.mock('@/api/adminModels', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/adminModels')>();
   return {
@@ -33,7 +33,7 @@ vi.mock('@/api/adminModels', async (importOriginal) => {
   };
 });
 
-/** 定价 tab 要读换算率（住定价目录里）才能把 mc 渲染成「元」，所以这一层必须给数据。 */
+
 vi.mock('@/api/adminBillingCatalog', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/adminBillingCatalog')>();
   return {
@@ -49,7 +49,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() }, Toaster:
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** 换算率 15 的那份目录（与 billing 里那份同形）。 */
+
 const CATALOG = {
   catalogVersion: 3,
   documentHash: 'abcdef0123456789',
@@ -85,7 +85,7 @@ const audio: AdminModel = {
   updated_at: '2026-09-04T00:00:00.000Z',
 };
 
-/** IKHBDO：gpt 图片行——两个尺寸档 + 两格已填的交叉矩阵。 */
+
 const gptImage: AdminModel = {
   ...audio,
   id: '2',
@@ -109,9 +109,9 @@ const gptImage: AdminModel = {
   sort_order: 10,
 };
 
-/** IKF4LI：**同一个解析器（gpt）、两种协议**——`gpt-image-2-light` 的 `features.image_protocol`
- *  在库里是 NULL（键不存在），`gpt-image-2` 是显式 `openai-images`。两者必须读成两个渠道
- *  （所以存储不能真合并成一个字段）。 */
+
+
+
 const gptInline: AdminModel = {
   ...gptImage,
   id: '7',
@@ -126,7 +126,7 @@ const gptOfficial: AdminModel = {
   channel: 'gpt-image-openai',
 };
 
-/** banana 行：**显式** `inline-image`（迁移有意写在明面上），与 NULL 同义。 */
+
 const banana: AdminModel = {
   ...gptImage,
   id: '9',
@@ -136,7 +136,7 @@ const banana: AdminModel = {
   request_mapping: { quality: { '1K': '1k' }, size: { '1:1': '1x1' } },
 };
 
-/** seedream 行：`features.image_protocol` 是 NULL（本来就不带这个键）——保存不该给它添一个。 */
+
 const seedreamImage: AdminModel = {
   ...gptImage,
   id: '10',
@@ -147,10 +147,10 @@ const seedreamImage: AdminModel = {
   request_mapping: { matrix: { '1K': { '1:1': '2048x2048' }, '2K': { '1:1': '2048x2048' } } },
 };
 
-/**
- * 视频行：两个档位 × 两个比例，且**已经带上 `pricing`**（定价搬到能力行之后的形态）。
- * 20000 mc ÷ 15 积分/元 ÷ 1000 = 1.333333 元。
- */
+
+
+
+
 const videoPriced: AdminModel = {
   ...audio,
   id: '6',
@@ -180,11 +180,11 @@ const videoPriced: AdminModel = {
   sort_order: 1,
 };
 
-/**
- * Seedream 5.0 Pro 的形态：输出图按像素分档（0.3 / 0.6 元），参考图**第 2 张起 0.02 元/张**
- * （首张免费）。`dimPrices` 就是为第二项而生的 —— `dims` 是万分比（相对量），
- * 同一个 0.02 元在两档下会算出两个价。300 mc ÷ 15 积分/元 ÷ 1000 = 0.02 元。
- */
+
+
+
+
+
 const imageDimPriced: AdminModel = {
   ...audio,
   id: '11',
@@ -253,7 +253,7 @@ async function click(el: HTMLElement | undefined | null) {
   await settle();
 }
 
-/** 点弹窗里的某个 tab（顶部那排 role=tab；页面上的类型 tab 文字与它们不重合）。 */
+
 async function openTab(label: string) {
   const tab = [...document.body.querySelectorAll<HTMLButtonElement>('button[role="tab"]')].find(
     (b) => b.textContent?.trim() === label,
@@ -274,7 +274,7 @@ async function openEditModal() {
   await click([...document.body.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.title === '编辑'));
 }
 
-/** 第 index 行的「编辑」（列表里多行时按顺序取，点第 N 个才能开对行）。 */
+
 async function openEditModalAt(index: number) {
   const buttons = [...document.body.querySelectorAll<HTMLButtonElement>('button')].filter(
     (b) => b.title === '编辑',
@@ -282,33 +282,33 @@ async function openEditModalAt(index: number) {
   await click(buttons[index]);
 }
 
-/** 「渠道」下拉当前选中的文案（套件 Select 把选中项渲染在触发器上）。 */
+
 function channelLabel(): string {
   const trigger = document.body.querySelector<HTMLButtonElement>('button[aria-label="渠道"]');
   if (!trigger) throw new Error('没有找到渠道下拉');
   return trigger.textContent?.trim() ?? '';
 }
 
-/** 渠道在**「基础」**tab 里配（身份级决策），这里读它的当前值。 */
+
 async function channelOnBasics(): Promise<string> {
   await openTab('基础');
   return channelLabel();
 }
 
-/** 在「基础」里把渠道切到某个选项。 */
+
 async function pickChannel(label: string) {
   await openTab('基础');
   await pickFromSelect('渠道', label);
 }
 
-/** 当前「出站尺寸映射」显示的是哪张表。
- *
- *  ⚠️ **不按 Hint 文案判**：那些解释已经收进「?」图标（悬停才出现），文案不在 DOM 里。
- *  改按**表自己的形态**判，比文案更稳（文案会改写，表的形态不会）：
- *    · banana → 两张一维表的表头「尺寸 → quality」/「比例 → size」
- *    · seedream → 格子是 Input，aria-label 形如「1:1 行 1K 列」
- *    · gpt → 格子是 Select，选中项文案「留空」
- *  三者的判据互斥，所以判定顺序不影响结果。 */
+
+
+
+
+
+
+
+
 function shownMatrix(): 'gpt' | 'banana' | 'seedream' | null {
   if ((document.body.textContent ?? '').includes('尺寸 → quality')) return 'banana';
   if (document.body.querySelector('input[aria-label*=" 行 "][aria-label$=" 列"]')) return 'seedream';
@@ -316,7 +316,7 @@ function shownMatrix(): 'gpt' | 'banana' | 'seedream' | null {
   return null;
 }
 
-/** 切到某个类型 tab，再点那一行的「编辑」（模型列表按类型分 tab，不是所有行都在当前页签下）。 */
+
 async function openRowEdit(typeLabel: string) {
   await click(adminTab(typeLabel));
   await openEditModal();
@@ -337,11 +337,11 @@ async function type(input: HTMLInputElement, next: string) {
   await settle();
 }
 
-/**
- * 弹窗里的下拉已从原生 select 换成套件的自绘 Select（原生控件外观由 OS 决定，
- * 系统深色模式下会渲染成深色方块）：先点触发器展开，再点候选项。
- * 定位方式变了，断言意图不变。
- */
+
+
+
+
+
 async function pickFromSelect(ariaLabel: string, optionLabel: string) {
   const trigger = document.body.querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`);
   expect(trigger).not.toBeNull();
@@ -355,9 +355,9 @@ async function pickFromSelect(ariaLabel: string, optionLabel: string) {
   await click(option);
 }
 
-/** 弹窗里那个「gpt 矩阵」表（页面本身也有 table，按首列表头文本定位）。 */
+
 function matrixTable(): HTMLTableElement | undefined {
-  // ⚠️ trim：表头是「比例 <Hint/>」——图标没有文字，但 JSX 里的换行/空格会进 textContent
+
   return [...document.body.querySelectorAll('table')].find(
     (table) => table.querySelector('thead th')?.textContent?.trim() === '比例',
   );
@@ -402,7 +402,7 @@ describe('ModelList 按类型分表单', () => {
     await openTab('尺寸与素材');
     expect(document.body.textContent).toContain('时长范围');
     expect(document.body.textContent).toContain('默认时长（秒）');
-    // IKHBDO：task_types 此前只能在整个 features 的 JSON 里手写
+
     expect(document.body.textContent).toContain('视频模式 task_types');
     expect(document.body.textContent).toContain('first_last_frame');
     expect(document.body.textContent).toContain('extend');
@@ -413,11 +413,11 @@ describe('ModelList 按类型分表单', () => {
     await renderPage();
     await openCreateModal();
     await pickFromSelect('类型', '图片');
-    // 控制项（渠道）在「基础」，它控制的表在「尺寸与素材」——
-    // 两张 tab 各司其职：渠道是身份决策，表长什么样是执行期细节。
+
+
     await pickChannel('GPT 图片（内联）');
     await openTab('尺寸与素材');
-    // 三张表同在一个 tab，各自的小节标题说清谁是谁（图片这张是执行期查表）
+
     expect(document.body.textContent).toContain('出站尺寸映射（图片 · 执行期查表）');
     expect(shownMatrix()).toBe('gpt');
     await pickChannel('Banana 图片（内联）');
@@ -433,14 +433,14 @@ describe('ModelList 按类型分表单', () => {
     await renderPage();
     await openCreateModal();
     await pickFromSelect('类型', '文生文');
-    // 基础 tab：创建态不展示供应商
+
     expect(document.body.textContent).not.toContain('供应商 provider_id');
     await openTab('尺寸与素材');
     expect(document.body.textContent).not.toContain('尺寸选项');
     expect(document.body.textContent).not.toContain('比例选项');
     expect(document.body.textContent).not.toContain('时长范围');
-    // IKHBDO：文本行此前既没有结构化 features 块（被类型过滤挡住），也没有高级 JSON
-    // （兜底只对 image / video 渲染）——两种条件互相抵消，features 完全不可配。
+
+
     expect(document.body.textContent).toContain('特性 features（结构化）');
     await openTab('高级');
     expect(document.body.textContent).toContain('高级 JSON');
@@ -450,19 +450,19 @@ describe('ModelList 按类型分表单', () => {
     api.fetchAdminModels.mockResolvedValue([audio]);
     await renderPage();
     await openRowEdit('音频');
-    // 基础 tab：编辑态只读展示身份字段（类型 + 供应商）
+
     expect(document.body.textContent).toContain('供应商（不可改）');
     expect(document.body.textContent).toContain('new-api');
     expect(document.body.textContent).toContain('new-api');
     await openTab('尺寸与素材');
-    // IKHBDO：音频行的 default_duration 原先被锁在 video 专属块里——列表页却把它当「默认参数」展示
+
     expect(document.body.textContent).toContain('默认时长（秒）');
     const durationInputs = [...document.body.querySelectorAll('input')].filter((el) => el.value === '8');
     expect(durationInputs.length).toBeGreaterThan(0);
-    // 音频不可配时长范围（IKG4UR 不变式），也不该出现尺寸/比例块
+
     expect(document.body.textContent).not.toContain('时长范围');
     expect(document.body.textContent).not.toContain('尺寸选项');
-    // D：音频行此前没有任何 features 入口
+
     expect(document.body.textContent).toContain('特性 features（结构化）');
     await openTab('高级');
     expect(document.body.textContent).toContain('高级 JSON');
@@ -475,7 +475,7 @@ describe('ModelList 按类型分表单', () => {
     await renderPage();
     await openEditModal();
     await openTab('尺寸与素材');
-    // A：seedream 行的尺寸换算矩阵此前只有一行提示文案，没有任何编辑入口
+
     expect(shownMatrix()).toBe('seedream');
     const cellInputs = [...document.body.querySelectorAll('input')].filter((el) => el.value === '1024x1024');
     expect(cellInputs.length).toBe(1);
@@ -488,7 +488,7 @@ describe('ModelList 按类型分表单', () => {
     await openTab('高级');
     expect(document.body.textContent).toContain('高级 JSON');
     expect(document.body.textContent).toContain('未识别字段');
-    // 搬走的四块一个都不该留在「高级」：渠道控件、以及三张映射表（按表本身的形态判）
+
     expect(document.body.querySelector('button[aria-label="渠道"]')).toBeNull();
     expect(matrixTable()).toBeUndefined();
     expect(shownMatrix()).toBeNull();
@@ -499,23 +499,23 @@ describe('ModelList 按类型分表单', () => {
     await renderPage();
     await openRowEdit('图片');
     await openTab('尺寸与素材');
-    // IKHU8P：矩阵转置成「行=比例、列=尺寸」——表头首列是「比例」，后面依次是各尺寸档。
-    // 这条钉住方向：行列若再被换回去（正是 IKHU8P 要修的那个缺陷），下面按 select 取值的断言全都不受影响。
+
+
     expect([...(matrixTable()?.querySelectorAll('thead th') ?? [])].map((th) => th.textContent?.trim())).toEqual([
       '比例',
       '1K',
       '2K',
     ]);
-    // 格子里的下拉已换成套件 Select，选中的官方 size 就显示在触发器上
+
     expect(matrixCells()).toContain('1024x1024');
     expect(matrixCells()).toContain('2048x2048');
-    // 尺寸行与矩阵现在同在一个 tab：删行不必来回切页签
+
     const removeButtons = [...document.body.querySelectorAll('button')].filter(
       (btn) => btn.title === '删除尺寸行',
     );
     expect(removeButtons.length).toBe(2);
     await click(removeButtons[1]);
-    // IKHBDO：删行 / 删比例 chip 原先按空矩阵重建，整张交叉格被清零（其余格的映射全丢）
+
     expect(matrixCells()).toContain('1024x1024');
     expect(matrixCells()).not.toContain('2048x2048');
   });
@@ -529,7 +529,7 @@ describe('ModelList 按类型分表单', () => {
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as Record<string, unknown>;
-    // 矩阵的键仍是 size.id（1K / 2K）、值仍是官方 size —— 与搬动前「高级」tab 里改出来的形态一致
+
     expect(payload.request_mapping).toEqual({
       matrix: { '1K': { '1:1': '1536x1024' }, '2K': { '1:1': '2048x2048' } },
     });
@@ -540,7 +540,7 @@ describe('ModelList 按类型分表单', () => {
     const sameB = { ...gptImage, id: '5', model_id: 'm-b', model_label: 'B', sort_order: 5 };
     api.fetchAdminModels.mockResolvedValue([sameA, sameB]);
     await renderPage();
-    // 排序号可直接编辑（原先只有一个只读单元格，重复时无处可改）
+
     const sortInputs = [...(mountNode?.querySelectorAll('input[type="number"]') ?? [])];
     expect(sortInputs.length).toBe(2);
     await click([...(mountNode?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((btn) => btn.title === '下移'));
@@ -549,12 +549,12 @@ describe('ModelList 按类型分表单', () => {
   });
 });
 
-/* ── 定价 tab：原「模型计费」页的定价编辑收进模型列表 ─────────────────────────────
- *
- * 数据现在长在能力行上（`pricing`），保存是一次普通 PUT。这里钉住两条不变式：
- *   ① 没碰过定价 tab ⇒ **完全不提交** pricing（库里那份原样保留）；
- *   ② 碰过但没改价 ⇒ 恒等写回（「打开看一眼、点保存」不会把价挪动哪怕 1 mc）。
- */
+
+
+
+
+
+
 describe('ModelList 定价 tab', () => {
   it('已配的价按「元」显示，量纲由基准维度与单位分母推出来', async () => {
     api.fetchAdminModels.mockResolvedValue([videoPriced]);
@@ -562,10 +562,10 @@ describe('ModelList 定价 tab', () => {
     await openRowEdit('视频');
     await openTab('定价');
 
-    // 20000 mc ÷ 15 积分/元 ÷ 1000 = 1.333333 元
+
     expect(inputByLabel('基准单价').value).toBe('1.333333');
     expect(document.body.textContent).toContain('基准单价（元 / 百万 token）');
-    // 换算率的说明收进「?」里（默认不占版面），需要时才展开
+
     expect(document.body.textContent).not.toContain('1 元 = 15 积分');
   });
 
@@ -574,7 +574,7 @@ describe('ModelList 定价 tab', () => {
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
-    // 只改一个与定价无关的字段（尺寸行的展示名）
+
     await type(inputByLabel('第 1 行展示名'), '864');
     await click(button('保存'));
 
@@ -589,7 +589,7 @@ describe('ModelList 定价 tab', () => {
     await renderPage();
     await openRowEdit('视频');
     await openTab('定价');
-    // 改一个别的值再改回来 —— 文本与原值渲染出来的文本逐字相同 ⇒ 原值写回
+
     await type(inputByLabel('基准单价'), '1.5');
     await type(inputByLabel('基准单价'), '1.333333');
     await click(button('保存'));
@@ -612,7 +612,7 @@ describe('ModelList 定价 tab', () => {
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as Record<string, unknown>;
-    // 2 元 / 次 × 15 积分/元 × 1000 = 30000 mc
+
     expect(payload.pricing).toEqual({
       baseUnit: 'constant:1',
       basePrice: { kind: 'const', value: 30000 },
@@ -628,7 +628,7 @@ describe('ModelList 定价 tab', () => {
     await renderPage();
     await openRowEdit('音频');
     await openTab('定价');
-    // 只选了基准维度、价没填（这一步已经算「动过定价」，所以走校验而不是静默不提交）
+
     await pickFromSelect('基准维度', 'constant:1（按次）');
     await click(button('保存'));
 
@@ -637,13 +637,13 @@ describe('ModelList 定价 tab', () => {
   });
 });
 
-/* ── 维度绝对加价（`dimPrices`）：每个单位**固定**多少钱，与基准单价无关 ──────────────
- *
- * 这一块是 Seedream 5.0 Pro 的「参考图第 2 张起 0.02 元/张、首张免费」进来的：
- * `dims` 是万分比（金额随笔单价变），表达不了「同一个 0.02 元作用在 0.3 / 0.6 两档上」。
- * 这里钉住三件运营真会做的事：看得见（元）、改得动（写回 mc）、以及配不成非法组合
- * （unitMc 必须 > 0、与积分上限互斥 —— 两条都是后端写闸门同一口径）。
- */
+
+
+
+
+
+
+
 describe('ModelList 视频模式「时长跟随原视频」（IKK7QC）', () => {
   const withEdit = {
     ...videoPriced,
@@ -685,7 +685,7 @@ describe('ModelList 视频模式「时长跟随原视频」（IKK7QC）', () => 
 });
 
 describe('ModelList 维度绝对加价 dimPrices', () => {
-  /** 「首张免费」这类带中文 label 的复选框（点击处理挂在 label 上，见 ui/Checkbox）。 */
+
   function checkboxByLabel(label: string): HTMLElement {
     const box = [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')].find((el) =>
       el.closest('label')?.textContent?.includes(label),
@@ -700,10 +700,10 @@ describe('ModelList 维度绝对加价 dimPrices', () => {
     await openRowEdit('图片');
     await openTab('定价');
 
-    // 300 mc ÷ 15 积分/元 ÷ 1000 = 0.02 元
+
     expect(inputByLabel('维度绝对加价第 1 行单价').value).toBe('0.02');
     expect(checkboxByLabel('首张免费').getAttribute('aria-checked')).toBe('true');
-    // 解释收进「?」里：展开前不占版面
+
     expect(document.body.textContent).toContain('维度绝对加价（元 / 每个单位）');
   });
 
@@ -716,19 +716,19 @@ describe('ModelList 维度绝对加价 dimPrices', () => {
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { pricing: Record<string, unknown> };
-    // 0.05 元 × 15 积分/元 × 1000 = 750 mc
+
     expect(payload.pricing.dimPrices).toEqual({
       'usage.referenceCount': { unitMc: 750, firstFree: true },
     });
   });
 
   it('★ 碰过定价但没改加价：报「未检测到任何变更」，不把没动过的加价挪走哪怕 1 mc', async () => {
-    // 除不尽的 mc（100000 mc = ¥6.666666…）：只按「元 → mc」换算会漂，必须命中「原值写回」那条分支
+
     api.fetchAdminModels.mockResolvedValue([
       {
         ...videoPriced,
         pricing: {
-          // `AdminModel.pricing` 是 unknown（形态由 catalogDraft 的 CatalogRuleView 描述）
+
           ...(videoPriced.pricing as Record<string, unknown>),
           dimPrices: { 'usage.referenceCount': { unitMc: 100000 } },
         },
@@ -737,7 +737,7 @@ describe('ModelList 维度绝对加价 dimPrices', () => {
     await renderPage();
     await openRowEdit('视频');
     await openTab('定价');
-    // 改一个别的值再改回来 —— 文本与「原值渲染出来的文本」逐字相同 ⇒ 原值写回
+
     await type(inputByLabel('维度绝对加价第 1 行单价'), '1');
     await type(inputByLabel('维度绝对加价第 1 行单价'), '6.666667');
     await click(button('保存'));
@@ -751,7 +751,7 @@ describe('ModelList 维度绝对加价 dimPrices', () => {
     await renderPage();
     await openRowEdit('图片');
     await openTab('定价');
-    // 加价在里面、上限在外面，两边都在这一页上
+
     await type(inputByLabel('积分上限'), '50');
     await click(button('保存'));
 
@@ -760,15 +760,15 @@ describe('ModelList 维度绝对加价 dimPrices', () => {
   });
 });
 
-/* ── 输出像素表（`features.video_dimensions`）：**行=比例、列=尺寸**的矩阵 ────────────
- *
- * 存储仍是扁平的 `"resolution=480p|aspect_ratio=16:9" → "864x496"`（不跨进程：跨进程的是
- * backend 解析出来的 output_width / output_height 两个标量），矩阵只是视图。
- * 键由本行的「档位 × 比例」派生——后端写闸门要求键形如 `resolution=X|aspect_ratio=Y`、
- * 值形如 `WxH`，形态不对直接拒存，所以矩阵里没有人手敲键的地方。
- */
+
+
+
+
+
+
+
 describe('ModelList 输出像素表 video_dimensions', () => {
-  /** 输出像素表那张矩阵（行列方向与 gpt / seedream 的矩阵一致：首列是「比例」）。 */
+
   function dimensionTable(): HTMLTableElement | undefined {
     return [...document.body.querySelectorAll('table')].find(
       (table) => table.querySelector('thead th')?.textContent === '比例',
@@ -791,12 +791,12 @@ describe('ModelList 输出像素表 video_dimensions', () => {
     await openRowEdit('视频');
     await openTab('尺寸与素材');
 
-    // 图片行那张「出站尺寸映射」不在视频行渲染：这里只有视频这张，标题点明它只在预扣时用
+
     expect(document.body.textContent).toContain('输出像素表 video_dimensions（视频 · 只在预扣估 token 时用）');
-    // 列头是尺寸档（2 个），首列是比例；行是比例选项（2 个）
+
     expect(headers()).toEqual(['比例', '480P', '720P']);
     expect(bodyRows().map((cells) => cells[0])).toEqual(['16:9', '9:16']);
-    // 2 比例 × 2 档位 = 4 个格子，每个格子是可编辑的宽高输入框
+
     expect(document.body.querySelectorAll('input[aria-label="输出像素表值"]')).toHaveLength(0);
     expect(document.body.querySelectorAll('input[aria-label="16:9 行 480P 列"]')).toHaveLength(1);
     expect(document.body.querySelectorAll('input[aria-label="9:16 行 720P 列"]')).toHaveLength(1);
@@ -820,8 +820,8 @@ describe('ModelList 输出像素表 video_dimensions', () => {
   });
 
   it('★ 档位大小写不一致：格子照样显示得出值，写回还保留库里原来的键', async () => {
-    // 能力行的 api_value 写 `4K`，库里的键是从定价目录搬来的 `4k` —— 同一个值的两种写法。
-    // 不做归一比较的话，`4K` 那一整列会显示成空，运营一保存就把已配的像素抹掉。
+
+
     api.fetchAdminModels.mockResolvedValue([
       {
         ...videoPriced,
@@ -839,15 +839,15 @@ describe('ModelList 输出像素表 video_dimensions', () => {
 
     expect(inputByLabel('16:9 行 4K 列').value).toBe('3840x2160');
 
-    // 只改另一个格子再保存
+
     await type(inputByLabel('16:9 行 720P 列'), '1280x720');
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
     expect(payload.features.video_dimensions).toEqual({
-      // 恒等写回：没动过的格子键还是库里的 `4k`，不被一次保存改成 `4K`
+
       'resolution=4k|aspect_ratio=16:9': '3840x2160',
-      // 新建的格子才按本行的 api_value 拼键
+
       'resolution=720p|aspect_ratio=16:9': '1280x720',
     });
   });
@@ -866,7 +866,7 @@ describe('ModelList 输出像素表 video_dimensions', () => {
     await openTab('尺寸与素材');
 
     expect(document.body.textContent).toContain('本行还没配尺寸档与比例，键派生不出来');
-    // 没有矩阵，只有自由键值编辑（库里有几行就显示几行）
+
     expect(dimensionTable()).toBeUndefined();
     expect(inputByLabel('输出像素表键').value).toBe('resolution=480p|aspect_ratio=16:9');
     expect(inputByLabel('输出像素表值').value).toBe('864x496');
@@ -885,12 +885,12 @@ describe('ModelList 输出像素表 video_dimensions', () => {
   });
 });
 
-/* ── 渠道：能力行 `channel` 列（取代 channel_parser × features.image_protocol 两个字段）──
- *
- * 一个渠道 = 一个固定组合（解析器 × 协议），不给自由组合。渠道是**解析与出站的唯一来源**：
- * 它在「基础」tab 里配（身份级决策），「尺寸与素材」只回显、并据此决定显示哪张映射表。
- * 旧的两个字段已随 040 迁移删掉/清空，代码里没有读方。
- */
+
+
+
+
+
+
 describe('ModelList 渠道', () => {
   it('★ gpt-image 与 gpt-image-openai 读出来是两个不同渠道（同一解析器两种协议，换协议 = 新渠道）', async () => {
     api.fetchAdminModels.mockResolvedValue([gptInline, gptOfficial]);
@@ -898,7 +898,7 @@ describe('ModelList 渠道', () => {
     await openRowEdit('图片');
     expect(await channelOnBasics()).toBe('GPT 图片（内联）');
     await openTab('尺寸与素材');
-    // 解析器仍是 gpt：下面显示的是那张 gpt 交叉格
+
     expect(shownMatrix()).toBe('gpt');
 
     await click(button('取消'));
@@ -928,7 +928,7 @@ describe('ModelList 渠道', () => {
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(payload).toHaveProperty('supported_sizes');
-    // 渠道路径下 features 逐字未变 ⇒ diff 层判成没变更，整个 features 都不提交
+
     expect(payload).not.toHaveProperty('features');
   });
 
@@ -964,9 +964,9 @@ describe('ModelList 渠道', () => {
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as Record<string, unknown>;
-    // 同一解析器换协议 = **另一个渠道**（渠道是解析与出站的唯一来源）
+
     expect(payload.channel).toBe('gpt-image-openai');
-    // 出站协议不再单独落一个 features 键：提交体里连 features 都不该出现
+
     expect(payload).not.toHaveProperty('features');
   });
 
@@ -1001,7 +1001,7 @@ describe('ModelList 渠道', () => {
     await openTab('尺寸与素材');
     expect(document.body.textContent).not.toContain('出站图片协议');
     await openTab('高级');
-    // 库里这一行已经没有这个键了（040 迁移清掉），界面上自然也不该冒出来
+
     expect(document.body.querySelector('textarea')?.value ?? '').not.toContain('image_protocol');
   });
 });

@@ -1,16 +1,4 @@
 // @vitest-environment jsdom
-/* IKH3ZH 七工具会话两两切换（画布链路）：擦除/抠图/裁切/扩图/去字幕/音视频分离/音频截取
-   七种编辑会话，任一会话进行中进入另一工具——旧会话按四路口径退出（未发送参数丢弃）、
-   新会话正常进入，全程不新建卡、不新建连线、不发起任何创建请求（无新增任务）。
-   互斥与进入顺序的知识集中在 toolSessionCoordinator（本测试为该 module 的页面级
-   守护：删掉 module 后互斥清单散落回各入口，任一入口漏退即有向切换用例失败）。
-   七工具 × 去自身 = 42 组有向切换全覆盖。渲染模式沿用 toolSessionModal.test.tsx
-   （FlowCanvas 打桩透出 props，进入经 fullNode(id).data 的各工具 handler 派发——
-   去字幕/音视频分离/音频截取挂点参考 videoSubtitleEraseEdit / audioVideoSplitEdit /
-   audioTrimEdit）。IKHB7A 补第七 kind（音频截取，音视频分离同档）。
-   IKH3ZI 追加四路退出与画布事件消费规则的守护：node-click 拦截（退出+选中+同次点击
-   不开普通面板）、程序化选中让位（冻结不误关）、选中规范化退出（单选其他卡/多选）、
-   同一手势多次通知无重复副作用（旧「会话活跃」门）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -69,7 +57,6 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** PromptRefEditor 打桩（面板真实渲染所需，toolSessionModal 同款） */
 vi.mock('./components/PromptRefEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
@@ -183,11 +170,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：就绪图片卡 i1（1600×900 png，擦除/抠图/裁切/扩图四工具源卡）+
- *  就绪视频卡 v1（1920×1080 mp4，去字幕/音视频分离源卡）+
- *  就绪音频卡 a1（15 秒 mp3，音频截取源卡，IKHB7A）；无连线。
- *  withGenImage=true 追加成品图卡 i3（有生成记录——点卡本应开图片生成面板，
- *  供「同次点击不开普通面板 / 旧会话活跃门挡住自动开面板」断言）。 */
 function seedDoc(withGenImage = false) {
   canvasDocMock.current = {
     doc: {
@@ -295,12 +277,8 @@ function fullNode(id: string): Node {
   return found;
 }
 
-/** 七工具身份（与 toolSessionCoordinator 的 ToolSessionKind 同集合） */
 type Kind = 'erase' | 'cutout' | 'crop' | 'outpaint' | 'subtitleErase' | 'audioVideoSplit' | 'audioTrim';
 
-/** 进入编辑会话：四图片工具经图片卡 data handler，去字幕/音视频分离/音频截取经
- *  视频卡/音频卡 data handler（挂点分别参考 toolSessionModal / videoSubtitleEraseEdit /
- *  audioVideoSplitEdit / audioTrimEdit） */
 async function enterSession(kind: Kind) {
   const image = fullNode('i1').data as Record<string, (nodeId: string, mode?: string) => void>;
   const video = fullNode('v1').data as Record<string, (nodeId: string, mode?: string) => void>;
@@ -316,7 +294,6 @@ async function enterSession(kind: Kind) {
   });
 }
 
-/** 各会话进行中的外部可见工具 UI（body portal 挂载，出现=会话活跃、消失=已退出） */
 const SESSION_UI_TESTID: Record<Kind, string> = {
   erase: 'erase-send-bar',
   cutout: 'cutout-toolbar',
@@ -344,13 +321,9 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-// 纯切换42组已由 canvasToolSessions.test.tsx 的真实13编辑工具156组矩阵替代。
-// 下方继续守护真实页面通知顺序、事件消费与普通面板接线。
 describe('IKH3ZI 四路退出与画布事件消费（规则集中在 toolSessionCoordinator）', () => {
-  /** 图片生成面板打开的外部可见信号（PromptRefEditor 打桩元素，仅面板渲染时存在） */
   const genPanelOpen = () => container.querySelector('[data-testid="chip-editor"]') !== null;
 
-  /** 真实手势时序：React Flow 的 selection 通知先于 click 到达 */
   async function selectionChange(nodeIds: string[]) {
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: nodeIds.map((id) => ({ id })) });
@@ -363,16 +336,13 @@ describe('IKH3ZI 四路退出与画布事件消费（规则集中在 toolSession
       seedDoc(true);
       await renderPage();
       await enterSession(kind);
-      // selection 通知先到：会话活跃冻结面板联动（程序化选中让位，会话不退出不误关）
       await selectionChange(['i3']);
       expect(sessionUi(kind), 'selection 先到时会话应保持（冻结让位）').toBeTruthy();
-      // click 后到：node-click 拦截——退出会话并程序化选中新卡，消费本次点击
       await act(async () => {
         flowProps.current.onNodeClick({ id: 'i3', type: 'mediaNode', data: {} });
       });
       expect(sessionUi(kind)).toBeNull();
       expect(flowProps.current.selectRequest).toEqual(expect.objectContaining({ id: 'i3' }));
-      // i3 是有生成记录的成品卡：拦截已消费，同次点击不落入普通开面板分支
       expect(genPanelOpen()).toBe(false);
     },
   );
@@ -405,8 +375,6 @@ describe('IKH3ZI 四路退出与画布事件消费（规则集中在 toolSession
       await enterSession(kind);
       await selectionChange(['i3']);
       expect(sessionUi(kind)).toBeNull();
-      // 退出后继续走面板联动，但本轮渲染的旧「会话活跃」门挡住 IKFOHK 自动开面板
-      //（同一手势多次通知无重复副作用的既有机制；i3 有生成记录，门失效则会自动开面板）
       expect(genPanelOpen()).toBe(false);
     },
   );
@@ -432,17 +400,14 @@ describe('IKH3ZI 四路退出与画布事件消费（规则集中在 toolSession
 });
 
 describe('IKH3ZI 无活动会话时三路事件交还原流程（module 返回 pass 不消费）', () => {
-  /** 图片生成面板打开的外部可见信号（PromptRefEditor 打桩元素，仅面板渲染时存在） */
   const genPanelOpen = () => container.querySelector('[data-testid="chip-editor"]') !== null;
 
-  /** 真实手势时序：React Flow 的 selection 通知先于 click 到达 */
   async function selectionChange(nodeIds: string[]) {
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: nodeIds.map((id) => ({ id })) });
     });
   }
 
-  /** 无会话打开生成面板的既有路径：单选成品卡 i3（有生成记录）经 IKFOHK 面板联动自动开图片面板 */
   async function openPanelViaSoloSelect() {
     await selectionChange(['i3']);
     await vi.waitFor(() => expect(genPanelOpen()).toBe(true));
@@ -461,11 +426,8 @@ describe('IKH3ZI 无活动会话时三路事件交还原流程（module 返回 p
   it('无会话 selection 变化：单选成品卡联动开绑定面板、单选其他卡联动关闭（原流程不被提前 return）', async () => {
     seedDoc(true);
     await renderPage();
-    // 单选成品卡：IKFOHK 面板联动自动开绑定面板（handleToolSessionSelectionChange 返回
-    // false 后不 return，无会话时不冻结联动）
     await selectionChange(['i3']);
     await vi.waitFor(() => expect(genPanelOpen()).toBe(true));
-    // 单选无生成记录的其他卡：绑定面板联动关闭
     await selectionChange(['v1']);
     expect(genPanelOpen()).toBe(false);
   });

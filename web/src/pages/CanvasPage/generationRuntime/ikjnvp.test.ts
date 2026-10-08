@@ -29,7 +29,6 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-/** 已确认接缝：公开运行时 + 实际 audioMixTask；API、时钟、画布宿主受控，不是认证 HTTP 端到端。 */
 function setup(deferGenerating = false) {
   let projectId = '1';
   let epoch = {};
@@ -37,7 +36,7 @@ function setup(deferGenerating = false) {
   const { host, nodes, owners, removed } = createControlledHost({
     getProjectId: () => projectId, getLoadEpoch: () => epoch,
     patchNode: (id, patch) => {
-      if (deferGenerating && patch.genStatus === 'generating') return; // 模拟 React 批量更新尚未提交的窗口
+      if (deferGenerating && patch.genStatus === 'generating') return;
       const node = nodes.get(id); if (node) nodes.set(id, { ...node, data: { ...node.data, ...patch } });
     },
     fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: 3, records: [record], next_cursor: null }),
@@ -163,7 +162,7 @@ describe('迟到创建与重试响应的承接保护（IKJNVP）', () => {
     expect(ctx.runtime.statusOf(NODE_ID)).toBeNull();
     expect(ctx.runtime.bindingRevisionOf(NODE_ID)).toBe(3);
     expect(ctx.nodes.get(NODE_ID)?.data).toMatchObject({ genStatus: 'failed', errorText: '卡片归属已变化，请复核后再发送' });
-    expect(vi.mocked(createAudioMix).mock.calls).toHaveLength(1); // 未经用户复核不自动重发
+    expect(vi.mocked(createAudioMix).mock.calls).toHaveLength(1);
     expect(createRequest(0)).toMatchObject({ projectId: '1', submission_id: SID_B, expected_binding_revision: 1 });
     ctx.nextSubmission();
     expect(ctx.submit()).toBe(true);
@@ -207,7 +206,7 @@ describe('迟到创建与重试响应的承接保护（IKJNVP）', () => {
     expect(ctx.runtime.bindingRevisionOf(NODE_ID)).toBe(2);
     expect(ctx.runtime.retry(NODE_ID)).toBe(true);
     await flush();
-    expect(vi.mocked(retryAudioMix).mock.calls).toHaveLength(2); // 旧返回不能使同一新重试窗口重复发任务
+    expect(vi.mocked(retryAudioMix).mock.calls).toHaveLength(2);
     const [projectId, jobId, key, , binding] = vi.mocked(retryAudioMix).mock.calls[1]!;
     expect({ projectId, jobId, key, binding: canvasBindingSchema.parse(binding) }).toMatchObject({
       projectId: '2', jobId: '503', key: SID_C, binding: { submission_id: SID_C, expected_binding_revision: 2 },

@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { filledKeyValueRows, filledPriceRows, planRows } from './rowPlan';
 
-/* ── 候选集 × 目录里已有的行 ─────────────────────────────────────────────────
- *
- * 候选键来自模型配置（`sizeCandidates.ts`），所以这里测的是「渲染时怎么把两边的行对上」：
- * 已有行按值带过来、候选里没有的行不能被静默丢掉（要标成孤儿）。
- */
 describe('planRows / filledRows', () => {
   const row = (key: string, value = '') => ({ key, value });
 

@@ -1,10 +1,3 @@
-/* ============================================
- * media-node-layout 验收取证（IKDIDO 图片/视频、IKDIDR 音频、IKDJ73 文本）
- * 真实浏览器（Playwright Chromium）量测媒体节点新布局：
- * 统一尺度、音频恒方形、外部标题、未知→已知回填、状态保形、工具栏/连接点交互、视频与音频真实播放
- * IKDJ73 起同画布混入文本节点（n-text），验收四类卡片标题分段缩放一致与正文回归
- * 媒体字节在浏览器内生成（canvas 导出 PNG / MediaRecorder 录 WebM / 手写编码 WAV），不依赖二进制 fixture
- * ============================================ */
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -27,7 +20,6 @@ interface GeneratedMedia {
 
 let mediaCache: GeneratedMedia | null = null;
 
-/** 浏览器内生成真实媒体：精确尺寸 PNG + 一段约 0.9s 的 WebM（VP8）+ 一段 2.4s 的 WAV，headless Chromium 均可解码播放 */
 async function ensureMedia(page: Page): Promise<GeneratedMedia> {
   if (mediaCache) return mediaCache;
   mediaCache = await page.evaluate(async () => {
@@ -95,7 +87,6 @@ async function ensureMedia(page: Page): Promise<GeneratedMedia> {
     });
     out['sample.webm'] = { dataUrl, contentType: 'video/webm' };
 
-    // 音频：手写编码 2.4s 440Hz 单声道 16bit PCM WAV（不依赖音频硬件/MediaRecorder，时长确定）
     const sampleRate = 48000;
     const seconds = 2.4;
     const frames = Math.floor(sampleRate * seconds);
@@ -192,7 +183,6 @@ async function setupPage(page: Page): Promise<Tracking> {
     });
   });
 
-  // 画布文档动态化：PUT 记录请求体并更新内存态，GET 返回最新态（验证 拖动→保存→刷新 闭环）
   const initialDoc = (
     fixture['GET /api/canvases?projectId=project-1'].body as { data: { viewport: string; nodes: string } }
   ).data;
@@ -206,7 +196,6 @@ async function setupPage(page: Page): Promise<Tracking> {
         if (typeof parsed.viewport === 'string') canvasState.viewport = parsed.viewport;
         if (typeof parsed.nodes === 'string') canvasState.nodes = parsed.nodes;
       } catch {
-        /* 保持旧态 */
       }
       canvasState.version += 1;
     }
@@ -220,7 +209,6 @@ async function setupPage(page: Page): Promise<Tracking> {
     });
   });
 
-  // release 构建下 PUT 直传预签名 URL（不经 /api），直接 200
   await page.route('https://tos.e2e.media/**', async (route) => {
     await route.fulfill({ status: 200, body: 'ok' });
   });
@@ -282,26 +270,21 @@ test('布局：统一尺度/外部标题/未知转已知/失败保形/位置不�
   await expectBox(page, 'n-extreme-tall', 84, 840, measurements);
   await expectBox(page, 'n-extreme-wide', 840, 84, measurements);
   await expectBox(page, 'n-small', 280, 280, measurements);
-  // 未知尺寸节点：先 280×280 占位，浏览器实测回填后按真实 16:9 更新
   await expectBox(page, 'n-unknown', 497.78, 280, measurements);
   await expectBox(page, 'n-video', 497.78, 280, measurements);
-  // 音频：内容区恒 480×240 横矩形，时长已知/未知都不变形（IKDIDR→IKH8PU）
   await expectBox(page, 'n-audio', 480, 240, measurements);
   await expectBox(page, 'n-audio-nodur', 480, 240, measurements);
 
-  // 生成中按目标比例占位；轮询转失败后保形、真实错误文案与「重试」可达
   await expect(node(page, 'n-gen')).toContainText('账户余额不足，请充值后重试');
   await expect(node(page, 'n-gen').getByRole('button', { name: '重试' })).toBeVisible();
   await expectBox(page, 'n-gen', 497.78, 280, measurements);
 
-  // 音频生成中→失败：真实轮询转失败后仍横矩形，真实错误文案与「重试」可达；素材缺失同样横矩形
   await expect(node(page, 'n-audio-gen')).toContainText('音频生成失败：模型超时');
   await expect(node(page, 'n-audio-gen').getByRole('button', { name: '重试' })).toBeVisible();
   await expectBox(page, 'n-audio-gen', 480, 240, measurements);
   await expect(node(page, 'n-audio-missing')).toContainText('素材已被删除');
   await expectBox(page, 'n-audio-missing', 480, 240, measurements);
 
-  // 外部标题：真实分辨率/时长；文件大小不出现；目标比例不伪装为分辨率
   await expect(title(page, 'n-landscape')).toContainText('1600×900');
   await expect(title(page, 'n-landscape')).not.toContainText('MB');
   await expect(title(page, 'n-video')).toContainText('640×360');
@@ -310,16 +293,13 @@ test('布局：统一尺度/外部标题/未知转已知/失败保形/位置不�
   await expect(title(page, 'n-unknown')).toContainText('1600×900');
   await expect(title(page, 'n-gen')).not.toContainText('16:9');
 
-  // 音频标题：名称 + 真实时长；文件大小留在详情；时长未知由产品从媒体文件解析补全（如 2s）
   await expect(title(page, 'n-audio')).toContainText('配音成品.wav');
   await expect(title(page, 'n-audio')).toContainText('2s');
   await expect(title(page, 'n-audio')).not.toContainText('MB');
   await expect(title(page, 'n-audio')).not.toContainText('×');
   await expect(title(page, 'n-audio-nodur')).toContainText('历史音频缺时长.wav');
-  // 缺时长条目的时长由产品从媒体文件异步解析，并发下不保证就绪——不强制，只禁占位假数字
   await expect(title(page, 'n-audio-nodur')).not.toContainText('MB');
 
-  // 节点位置不被加载/尺寸变化改写（含未知→已知跳变后与密集邻居）
   expect(await node(page, 'n-unknown').evaluate((el) => (el as HTMLElement).style.transform)).toContain(
     'translate(1400px, 620px)',
   );
@@ -330,7 +310,6 @@ test('布局：统一尺度/外部标题/未知转已知/失败保形/位置不�
     'translate(1200px, 1050px)',
   );
 
-  // 浏览器实测尺寸经既有保存通路持久化（PUT body 是外层 JSON，nodes 为内嵌转义字符串）
   await expect
     .poll(
       () =>
@@ -365,25 +344,19 @@ test('交互：工具栏不遮挡标题/连接点隐现与锚定/拉线/缩放�
   await expect(page.locator('.react-flow')).toBeVisible();
   await waitImagesLoaded(page);
 
-  // 连接点平时隐藏（未悬停未选中）
   await page.mouse.move(2000, 1700);
   const squareSource = node(page, 'n-square').locator('.react-flow__handle-right');
   expect(await squareSource.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
 
-  // 悬停可见（opacity 有 150ms 过渡，轮询到终态）
   await card(page, 'n-square').hover();
   await expect
     .poll(() => squareSource.evaluate((el) => getComputedStyle(el).opacity), { timeout: 3000 })
     .toBe('1');
 
-  // 连接点锚定内容区左右中点（标题存在时仍准确）
-  // 产品语义（MediaNode isGenHost）：左侧 target Handle 只在生成宿主渲染，上传素材只作出源——
-  // 右 handle 用素材节点 n-portrait 验证，左 handle 用生成节点 n-gen 验证
   const cardBox = (await card(page, 'n-portrait').boundingBox())!;
   const sourceHandle = (await node(page, 'n-portrait').locator('.react-flow__handle-right').boundingBox())!;
   const midY = cardBox.y + cardBox.height / 2;
   expect(Math.abs(sourceHandle.y + sourceHandle.height / 2 - midY)).toBeLessThanOrEqual(2);
-  // 连接点悬挂在内容区外缘（HANDLE_STYLE left/right: -16px），中心落在边缘外侧 ≈16px
   expect(Math.abs(sourceHandle.x + sourceHandle.width / 2 - (cardBox.x + cardBox.width) - 16)).toBeLessThanOrEqual(4);
   const genCardBox = (await card(page, 'n-gen').boundingBox())!;
   const targetHandle = (await node(page, 'n-gen').locator('.react-flow__handle-left').boundingBox())!;
@@ -391,16 +364,12 @@ test('交互：工具栏不遮挡标题/连接点隐现与锚定/拉线/缩放�
   expect(Math.abs(targetHandle.y + targetHandle.height / 2 - genMidY)).toBeLessThanOrEqual(2);
   expect(Math.abs(cardBox.x - (targetHandle.x + targetHandle.width / 2) - 16)).toBeLessThanOrEqual(4);
 
-  // 选中：工具栏在外部标题上方，不遮挡标题或内容。
-  // n-portrait 贴视口顶（y=0）会触发钳顶保底（FOLLOW_ABOVE_MIN_TOP=8，压标题带可接受），
-  // 避让语义在不贴顶的 n-small（y=620）上验证
   await title(page, 'n-small').click();
   const toolbarBtn = page.getByRole('button', { name: '详情' });
   await expect(toolbarBtn).toBeVisible();
   const toolbarBox = (await toolbarBtn.locator('xpath=..').boundingBox())!;
   const titleBox = (await title(page, 'n-small').boundingBox())!;
   expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(titleBox.y + 1);
-  // 选中态连接点保持可见（素材节点右 handle；左 handle 仅生成宿主，见上）
   await expect
     .poll(
       () =>
@@ -409,17 +378,12 @@ test('交互：工具栏不遮挡标题/连接点隐现与锚定/拉线/缩放�
     )
     .toBe('1');
 
-  // 拉线：n-square（source）→ n-gen（target）。素材节点只作出源（无左接收 handle），
-  // 接收边的目标改为生成宿主 n-gen。
-  // 注：产品当前隐藏连线渲染（显示连线按钮 display:none，showEdges 恒 false），
-  // 命中证据以 RF 连接状态机的 valid/connectingto 标记为准——它与 onConnect 触发条件一致。
   const src = (await squareSource.boundingBox())!;
   const genHandleBox = (await node(page, 'n-gen').locator('.react-flow__handle-left').boundingBox())!;
   const dstPoint = { x: genHandleBox.x + genHandleBox.width / 2, y: genHandleBox.y + genHandleBox.height / 2 };
   await page.mouse.move(src.x + src.width / 2, src.y + src.height / 2);
   await page.mouse.down();
   await page.mouse.move(dstPoint.x, dstPoint.y, { steps: 12 });
-  // 指针处叠着拖线 SVG（elementFromPoint 拿不到 handle），直接读目标 handle 的 RF 状态类
   const dstValid = await page.evaluate(() => {
     const el = document.querySelector('.react-flow__node[data-id="n-gen"] .react-flow__handle-left');
     const cls = el ? el.getAttribute('class') ?? '' : '';
@@ -429,7 +393,6 @@ test('交互：工具栏不遮挡标题/连接点隐现与锚定/拉线/缩放�
   await page.mouse.up();
   await expect.poll(() => page.locator('.react-flow__connectionline').count(), { timeout: 3000 }).toBe(0);
 
-  // 缩放：标题分辨率文案不变，内容屏幕尺寸随缩放变化（flow 尺寸不变）
   const titleTextBefore = await title(page, 'n-landscape').textContent();
   await page.mouse.move(2000, 1600);
   await zoomWheel(page, 240);
@@ -445,11 +408,9 @@ test('交互：工具栏不遮挡标题/连接点隐现与锚定/拉线/缩放�
 
 test('视频：真实播放且控件可达', async ({ page }) => {  const tracking = await setupPage(page);
   await page.goto('/canvas?project=project-1');
-  // IKI5YM 起 <video> 只挂载在「当前选中」的视频卡（未选中用首帧画布占位），先选中再断言
   await node(page, 'n-video').click();
   const video = node(page, 'n-video').locator('video');
   await expect(video).toBeVisible();
-  // IKI5YM：原生 controls 移除（画面区回归节点拖拽路径），播放能力由自绘控件承担
   expect(await video.getAttribute('controls')).toBeNull();
   const card = node(page, 'n-video');
   await expect(card.locator('button[aria-label="播放"]')).toBeVisible();
@@ -480,14 +441,11 @@ test('音频：方形内容区/连接点锚定/播放控件不被拖动吞掉/�
 
   const measurements: Record<string, unknown> = {};
   const audioSource = node(page, 'n-audio').locator('.react-flow__handle-right');
-  // 素材音频只作出源（MediaNode isGenHost 口径），左接收 handle 在生成宿主 n-audio-gen 上验证
   const audioTarget = node(page, 'n-audio-gen').locator('.react-flow__handle-left');
 
-  // 连接点平时隐藏（未悬停未选中）
   await page.mouse.move(2000, 1700);
   expect(await audioSource.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
 
-  // 悬停显现，并锚定方形内容区左右中点
   await card(page, 'n-audio').hover();
   await expect
     .poll(() => audioSource.evaluate((el) => getComputedStyle(el).opacity), { timeout: 3000 })
@@ -506,14 +464,11 @@ test('音频：方形内容区/连接点锚定/播放控件不被拖动吞掉/�
     contentLeftX: box.x,
     contentRightX: box.x + box.width,
   };
-  // 垂直锚定内容区左右中点；水平悬挂内容区外缘 ≈16px（HANDLE_STYLE left/right: -16px）
   expect(Math.abs(targetBox.y + targetBox.height / 2 - genMidY)).toBeLessThanOrEqual(2);
   expect(Math.abs(sourceBox.y + sourceBox.height / 2 - midY)).toBeLessThanOrEqual(2);
   expect(Math.abs(genBox.x - (targetBox.x + targetBox.width / 2) - 16)).toBeLessThanOrEqual(4);
   expect(Math.abs(sourceBox.x + sourceBox.width / 2 - (box.x + box.width) - 16)).toBeLessThanOrEqual(4);
 
-  // 播放控件可达：AudioPlayer 自绘控件替代原生 controls（audio 元素隐藏但驱动播放），
-  // 真实点击播放按钮推进播放，且节点不被拖走
   const audio = node(page, 'n-audio').locator('audio');
   await expect(audio).toBeAttached();
   const translateBefore = await node(page, 'n-audio').evaluate((el) => (el as HTMLElement).style.transform);
@@ -530,8 +485,6 @@ test('音频：方形内容区/连接点锚定/播放控件不被拖动吞掉/�
   await node(page, 'n-audio').getByRole('button', { name: '暂停' }).click();
   expect(await node(page, 'n-audio').evaluate((el) => (el as HTMLElement).style.transform)).toBe(translateBefore);
 
-  // 选中：工具条钉屏幕锚定卡片上方（n-audio y=1050 不贴顶，无钳顶翻转）。
-  // IKH8Q3 音频工具条改版：「详情」退役，按钮集为 截取/调速/混合/音视频合成/下载
   await title(page, 'n-audio').click();
   const toolBtn = page.getByRole('button', { name: '下载' });
   await expect(toolBtn).toBeVisible();
@@ -548,24 +501,18 @@ test('音频：方形内容区/连接点锚定/播放控件不被拖动吞掉/�
   );
   measurements.toolbarLabels = toolLabels;
   expect(toolLabels).toEqual(['截取', '调速', '混合', '音视频合成', '下载']);
-  // 选中态连接点保持可见（素材音频右 handle）
   await expect
     .poll(() => audioSource.evaluate((el) => getComputedStyle(el).opacity), { timeout: 3000 })
     .toBe('1');
-  // 选中态整页截图：工具栏位于外部标题上方（视觉证据）
   await page.screenshot({ path: join(evidenceDir, 'audio.png') });
 
-  // 右键菜单仍可达（在标题行右键，避开原生媒体控件菜单）
   await title(page, 'n-audio').click({ button: 'right' });
   await expect(page.getByRole('button', { name: '添加到聊天' })).toBeVisible();
   await expect(page.getByRole('button', { name: '创建副本' })).toBeVisible();
   await page.mouse.click(2000, 1700);
 
-  // 100% 缩放下的音频节点特写（缩放步骤会缩小节点，视觉证据先取）
   await node(page, 'n-audio').screenshot({ path: join(evidenceDir, 'audio-node.png') });
 
-  // 缩放：标题时长文案不变，内容屏幕尺寸随缩放变化。
-  // IKH8Q3 音频卡改版后选中态宽度基准不再是 280 常数，改相对验证：缩小变窄、放大复原
   const titleBefore = await title(page, 'n-audio').textContent();
   const widthBeforeZoom = (await card(page, 'n-audio').boundingBox())!.width;
   await page.mouse.move(2000, 1600);
@@ -575,7 +522,6 @@ test('音频：方形内容区/连接点锚定/播放控件不被拖动吞掉/�
   const zoomed = (await card(page, 'n-audio').boundingBox())!;
   measurements.zoomedWidth = zoomed.width;
   expect(zoomed.width).toBeLessThan(widthBeforeZoom);
-  // 放大回 100%：内容区恢复缩放前宽度，标题文案仍不变
   await zoomWheel(page, -240);
   await page.waitForTimeout(300);
   const zoomedBack = (await card(page, 'n-audio').boundingBox())!;
@@ -603,10 +549,8 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
   };
   const nodeTranslate = (id: string) =>
     node(page, id).evaluate((el) => (el as HTMLElement).style.transform);
-  // 等布局与回填保存全部落定，避免拖动与回填 PATCH 竞争
   await expect.poll(() => tracking.putBodies.length, { timeout: 10000 }).toBeGreaterThan(0);
 
-  // 1) 拖动：标题行遵循原有拖动语义；以 DOM 实际落点为准，断言新坐标经自动保存落库
   const squareTitle = title(page, 'n-square');
   const t = (await squareTitle.boundingBox())!;
   await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
@@ -629,7 +573,6 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
     )
     .toBe(true);
 
-  // 1b) 音频节点同样按标题拖动，落点经既有保存通路持久化（IKDIDR）
   const audioTitle = title(page, 'n-audio');
   const audioTitleBox = (await audioTitle.boundingBox())!;
   await page.mouse.move(audioTitleBox.x + audioTitleBox.width / 2, audioTitleBox.y + audioTitleBox.height / 2);
@@ -660,7 +603,6 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
     )
     .toBe(true);
 
-  // 2) 平移（无修饰键滚轮）：视口位置变化、缩放值不变
   const viewportTransform = () =>
     page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform);
   const zoomOf = (transform: string) => /scale\(([^)]+)\)/.exec(transform)?.[1];
@@ -671,7 +613,6 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
   await expect.poll(viewportTransform, { timeout: 3000 }).not.toBe(panBefore);
   expect(zoomOf(await viewportTransform()), '滚轮平移不应改变缩放').toBe(zoomOf(panBefore));
 
-  // 3) 刷新：拖动后的位置从保存通路恢复（旧画布恢复位置）
   await page.reload();
   await expect(page.locator('.react-flow')).toBeVisible();
   await waitImagesLoaded(page);
@@ -681,7 +622,6 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
   expect(Math.abs(audioAfterReload.width - 480)).toBeLessThanOrEqual(1.5);
   expect(Math.abs(audioAfterReload.height - 240)).toBeLessThanOrEqual(1.5);
 
-  // 4) 删除：选中后 Delete 键移除节点，后续保存体不再含该节点
   await title(page, 'n-small').click();
   await page.keyboard.press('Delete');
   await expect(node(page, 'n-small')).toHaveCount(0);
@@ -695,7 +635,6 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
     )
     .toBe(true);
 
-  // 5) 自由投放：工具栏上传 PNG，浏览器实测尺寸回填标题并持久化
   const media = await ensureMedia(page);
   const dropPath = join(evidenceDir, 'drop-source.png');
   writeFileSync(dropPath, Buffer.from(media['landscape.png'].dataUrl.split(',')[1], 'base64'));
@@ -715,7 +654,6 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
 });
 
 
-/** 使用真实滚轮和 Canvas 变换量测屏幕 CSS 像素，禁止以局部字号冒充屏幕尺寸。 */
 async function titleMetrics(page: Page, id: string) {
   return node(page, id).evaluate((el) => {
     const viewport = document.querySelector('.react-flow__viewport')!;
@@ -737,8 +675,6 @@ async function titleMetrics(page: Page, id: string) {
   });
 }
 
-/** 画布缩放需带修饰键（IKDKH1 后滚轮默认平移）。Ctrl+滚轮走捏合缩放路径，
- * macOS 上该路径灵敏度高 10 倍，按平台归一使同一 deltaY 得到相同缩放倍率。 */
 const WHEEL_ZOOM_FACTOR = process.platform === 'darwin' ? 10 : 1;
 
 async function zoomWheel(page: Page, deltaY: number) {
@@ -819,8 +755,6 @@ test(`标题排版：${selectedId} 工具栏避让及窄卡片单行截断`, asy
   await waitImagesLoaded(page);
   const selected = [selectedId];
   await title(page, selectedId).click();
-  // 工具条 IKGYYD 起迁出节点卡，由 NodeFollowToolbar 钉屏幕承载：屏幕尺寸恒定、不随 zoom 缩放。
-  // 「下载」在各媒体分支的工具条上都存在，用它定位工具条容器
   const toolbarLocator = page.getByRole('button', { name: '下载' }).locator('xpath=..');
   const toolbar0 = (await toolbarLocator.boundingBox())!;
   const evidence = [];
@@ -849,17 +783,14 @@ test(`标题排版：${selectedId} 工具栏避让及窄卡片单行截断`, asy
       if (id === 'n-extreme-tall' && zoom <= 1) {
         expect(layout.elements.some((element) => element.truncated)).toBe(true);
       }
-      // 缺时长条目的时长解析异步，'' 或 '2s' 皆合法终态
       if (id === 'n-audio-nodur') expect(['', '2s']).toContain(layout.text);
       if (id === 'n-gen') expect(layout.text).toBe('');
       expect(Math.abs(layout.handleMidY - (layout.content.y + layout.content.height / 2))).toBeLessThan(0.2);
       const index = selected.indexOf(id);
       if (index >= 0) {
         expect(toolbarBox).toBeTruthy();
-        // 钉屏幕工具条屏幕尺寸恒定
         expect(Math.abs(toolbarBox!.width - toolbar0.width)).toBeLessThanOrEqual(1);
         expect(Math.abs(toolbarBox!.height - toolbar0.height)).toBeLessThanOrEqual(1);
-        // 卡片未贴视口顶（未触发钳顶保底 FOLLOW_ABOVE_MIN_TOP=8）时，工具条悬于标题上方
         if (toolbarBox!.y > 10 && zoom <= 2) {
           expect(toolbarBox!.y + toolbarBox!.height).toBeLessThan(layout.row.top + 8);
         }
@@ -932,14 +863,9 @@ for (const width of [10, 1]) {
 }
 
 
-/* ============================================
- * 文本卡片外部标题行分段缩放（IKDJ73）
- * 复用媒体标题的 nodeTitleSizing 规则；正文 360×270、内部滚动与编辑行为保持现状
- * ============================================ */
 const textTitle = (page: Page) => node(page, 'n-text').locator('[data-testid="text-title"]');
 const textContent = (page: Page) => node(page, 'n-text').locator('[data-testid="text-content"]');
 
-/** 文本标题实测：屏幕字号/图标（含 Canvas 变换），正文锚点与节点位置 */
 async function textTitleMetrics(page: Page) {
   return node(page, 'n-text').evaluate((el) => {
     const viewport = document.querySelector('.react-flow__viewport')!;
@@ -965,7 +891,6 @@ test('文本标题分段缩放：屏幕尺寸符合父规格且与同倍率媒�
   await expect(page.locator('.react-flow')).toBeVisible();
   await waitImagesLoaded(page);
 
-  // 正文容器保持 360×270 尺寸契约（含标题占位，标题不推移正文）
   const box = (await textContent(page).boundingBox())!;
   expect(Math.abs(box.width - 360), '正文宽度应≈360').toBeLessThanOrEqual(1.5);
   expect(Math.abs(box.height - 270), '正文高度应≈270').toBeLessThanOrEqual(1.5);
@@ -983,7 +908,6 @@ test('文本标题分段缩放：屏幕尺寸符合父规格且与同倍率媒�
     evidence.push({ expectedZoom: zoom, text: actual, media });
     expect(Math.abs(actual.name - name), `文本名称 @ ${zoom}`).toBeLessThan(0.04);
     expect(Math.abs(actual.icon - icon), `文本图标 @ ${zoom}`).toBeLessThan(0.04);
-    // 混排一致性：与同倍率图片、视频、音频标题使用同一套规则（名称与图标）
     for (const item of media) {
       expect(Math.abs(actual.name - item.name), `文本与媒体名称一致 @ ${zoom}`).toBeLessThan(0.04);
       expect(Math.abs(actual.icon - item.icon), `文本与媒体图标一致 @ ${zoom}`).toBeLessThan(0.04);
@@ -1004,7 +928,6 @@ test('文本标题排版：行不越界不裁切，操作条避让且大小策�
 
   await textTitle(page).click();
   const evidence = [];
-  // 操作条 IKGYYE 起由 FollowToolbarLayer 钉屏幕承载（portal 到 body、屏幕尺寸恒定不随缩放）
   const actionBar = page.getByRole('button', { name: '添加到对话' }).locator('xpath=..');
   const barBaseline = await actionBar.boundingBox();
   for (const zoom of [0.5, 0.63, 0.75, 1, 1.25, 1.5, 8]) {
@@ -1043,27 +966,21 @@ test('文本标题排版：行不越界不裁切，操作条避让且大小策�
       expect(element.box.bottom).toBeLessThanOrEqual(layout.row.bottom + 0.1);
       expect(element.glyphHeight).toBeLessThanOrEqual(element.box.height + 0.1);
     }
-    // 图标在名称左侧，名称单行省略
     expect(layout.elements[0].box.right).toBeLessThanOrEqual(layout.elements[1].box.left + 0.1);
     expect(layout.nameStyle.whiteSpace).toBe('nowrap');
     expect(layout.nameStyle.overflow).toBe('hidden');
     expect(layout.nameStyle.ellipsis).toBe('ellipsis');
-    // 连接点锚定正文容器左右中点
     expect(Math.abs(layout.handleMidY - (layout.content.y + layout.content.height / 2))).toBeLessThan(0.2);
-    // 钉屏幕操作条：屏幕尺寸恒定；卡片未贴视口顶（未触发钳顶保底）时悬于标题上方。
-    // zoom 8 极端档标题行高远超抬升量估算（屏幕像素恒定），轻微压标题是产品接受态，不验证
     const actionBarBox = await actionBar.boundingBox();
     expect(actionBarBox).toBeTruthy();
     expect(Math.abs(actionBarBox!.width - barBaseline!.width)).toBeLessThanOrEqual(1);
     expect(Math.abs(actionBarBox!.height - barBaseline!.height)).toBeLessThanOrEqual(1);
     if (actionBarBox!.y > 10 && zoom <= 2) {
-      // 抬升量按常规字号估算（屏幕像素恒定），大倍率标题行高略超估算、允许 8px 内搭接
       expect(actionBarBox!.y + actionBarBox!.height).toBeLessThan(layout.row.top + 8);
     }
   }
   writeFileSync(join(evidenceDir, 'text-title-layout.json'), `${JSON.stringify(evidence, null, 2)}\n`);
 
-  // 编辑态格式工具栏同样钉屏幕（FollowToolbarLayer），位于标题上方，不遮挡标题或正文
   await zoomTo(page, 1);
   await node(page, 'n-text').locator('[contenteditable]').dblclick();
   const formatBar = page.getByRole('button', { name: '加粗' }).locator('xpath=..');
@@ -1082,7 +999,6 @@ test('文本正文回归：内部滚动/编辑保存/连接点不受标题缩放
   await page.goto('/canvas?project=project-1');
   await waitImagesLoaded(page);
 
-  // 连接点平时隐藏，悬停正文后锚定左右中点
   await page.mouse.move(2000, 1700);
   const sourceHandle = node(page, 'n-text').locator('.react-flow__handle-right');
   expect(await sourceHandle.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
@@ -1095,8 +1011,6 @@ test('文本正文回归：内部滚动/编辑保存/连接点不受标题缩放
   expect(Math.abs(sourceBox.y + sourceBox.height / 2 - (contentBox.y + contentBox.height / 2))).toBeLessThanOrEqual(2);
   expect(Math.abs(sourceBox.x + sourceBox.width / 2 - (contentBox.x + contentBox.width))).toBeLessThanOrEqual(6);
 
-  // 正文内部滚动遵循阅读语义：滚轮推进 scrollTop，不缩放画布。
-  // 产品现非编辑态滚轮交给画布平移（缩放不变）；编辑态正文原生内部滚动——在编辑态验证
   const editor = node(page, 'n-text').locator('[contenteditable]');
   await editor.dblclick();
   const viewportTransform = () =>
@@ -1109,7 +1023,6 @@ test('文本正文回归：内部滚动/编辑保存/连接点不受标题缩放
   const scrollTop = await editor.evaluate((el) => el.scrollTop);
   expect(scrollTop, '正文应真实滚动').toBeGreaterThan(0);
 
-  // 键入内容经既有保存通路持久化（标题缩放不改变编辑行为）
   await editor.pressSequentially('分段缩放后新增的一段');
   await page.locator('.react-flow__pane').click({ position: { x: 1900, y: 300 } });
   await expect

@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKFCKS：MusicDialog 参考音频预览行替换为共享参考缩略图——三态接入面（编号圆钮、
- *  悬停 ×/@、外链注入）、曲风描述 @ 菜单（仅音频可选，选中结果与缩略图 @ 同一入口）、
- *  发送参数回归（refs 随 onSend 透传） */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,7 +64,6 @@ function atButton(name: string): HTMLButtonElement | null {
   return container.querySelector(`button[aria-label="插入引用 ${name}"]`);
 }
 
-/** textarea 原生输入驱动（React onChange 监听 input 事件） */
 async function typeText(value: string) { await typePromptRefRaw(container, value); }
 
 beforeEach(() => {
@@ -88,7 +84,6 @@ describe('MusicDialog 参考缩略图条（IKFCKS）', () => {
     expect(list[0]!.getAttribute('title')).toBe('鼓点采样');
     const badge = list[0]!.querySelector('[data-testid="ref-thumb-badge"]');
     expect(badge?.textContent).toBe('1');
-    // 自绘预览行的「音频·画布」文字标签形态不再出现
     expect(list[0]!.textContent).toBe('1');
   });
 
@@ -96,7 +91,6 @@ describe('MusicDialog 参考缩略图条（IKFCKS）', () => {
     const second: AudioRefItem = { ...CANVAS_REF, id: 'n9', name: '人声哼唱' };
     const third: AudioRefItem = { ...CANVAS_REF, id: 'n8', name: '合成器垫底' };
     await renderDialog({ externalPick: { ts: 1, item: CANVAS_REF } });
-    // externalPick 为 ts 驱动事件：同一挂载连发两次 rerender 注入新对象即逐条消费
     const rerender = (pick: { ts: number; item: AudioRefItem }) =>
       act(async () => {
         root.render(
@@ -119,7 +113,6 @@ describe('MusicDialog 参考缩略图条（IKFCKS）', () => {
     });
     const after = thumbs();
     expect(after).toHaveLength(2);
-    // 删除首项后剩余紧凑重编号：人声哼唱 1、合成器垫底 2
     expect(after[0]!.querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
     expect(after[1]!.querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('2');
   });
@@ -144,7 +137,6 @@ describe('MusicDialog 参考缩略图条（IKFCKS）', () => {
     ];
     await renderDialog({ mentionItems: textItems, onMentionCanvas });
     await typeText('@环境音');
-    // 搜索态菜单：同名文本/视频项被禁用（仅音频可选）
     const rows = Array.from(document.querySelectorAll('button')).filter(
       (b) => b.textContent === '环境音',
     );

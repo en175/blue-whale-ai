@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/**
- * 工具行 / 思考块 / 轮尾账的渲染回归（IKDK5K / IKDK5L）。
- *
- * 用户看到的 bug 是「正在读取图片」一直卡着、点不了、读完也不变。这里把三种状态各画一遍，
- * 断言文案随状态换、耗时出现、子步骤能展开。
- */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -129,7 +123,6 @@ describe('ProcessGroup（IKFLB9 定稿）', () => {
     expect(mountNode.textContent).toContain('15s');
     expect(mountNode.textContent).toContain('查阅对应的创作方法');
     expect(mountNode.textContent).toContain('整理回复');
-    // 31 − (9.8 + 5.2 + 0.03 + 2.5) = 13.47s 是把回复打出来的时间，不补上头上的数和里面的加不起来。
     expect(mountNode.textContent).toContain('写回复');
     expect(mountNode.textContent).toContain('13s');
     const writing = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('写回复'))!;
@@ -209,7 +202,6 @@ describe('TurnFooter', () => {
     cardFailureRetryable: true,
   };
 
-  // IKFLB9 定稿：耗时、token、上下文只在输入框上方那一行，轮尾不再重复。
   it('完成：轮尾什么都不写，账在 LastTurnLine', async () => {
     await render(createElement(TurnFooter, { account: base }));
     expect(mountNode.textContent).toBe('');
@@ -232,14 +224,9 @@ describe('TurnFooter', () => {
     expect(mountNode.textContent).toBe('⊘上一轮已取消 5s · 21:37 结束');
   });
 
-  /**
-   * 报告里记的「前端无重试入口」，在用户那边是成立的：入口在输入框工具栏角落，一个 14px 的
-   * 无字图标，而失败这件事发生在对话流里——那一行以前只有字，什么都点不了。
-   */
   it('失败：给了 onRetry 就在那一行旁边摆一个「重新回答」，点了就调它', async () => {
     const account = { ...base, outcome: 'failed' as const, failureText: '与模型服务的连接中断，自动重连几次都没成功。', tokenUsage: null, contextCapacity: null };
     await render(createElement(TurnFooter, { account }));
-    // 不给回调就不画按钮：不是最后一轮、或者还有别的轮在跑时，重来的会是另一轮。
     expect(mountNode.querySelector('button')).toBeNull();
 
     let clicked = 0;
@@ -254,10 +241,6 @@ describe('TurnFooter', () => {
     expect(clicked).toBe(1);
   });
 
-  /**
-   * 「再试也会被同一道审核拦下」那一类不给按钮——服务端说了算（`failureRetryable`）。
-   * 给了的话用户会一遍遍按、一遍遍撞同一堵墙，那正是 `model_input_blocked` 当初要消灭的事。
-   */
   it('服务端说这次重试没用：不画按钮，只留那句话', async () => {
     await render(
       createElement(TurnFooter, {
@@ -276,8 +259,6 @@ describe('TurnFooter', () => {
     expect(mountNode.querySelector('button')).toBeNull();
   });
 
-  // IKEV0V：聊天里改卡没改成，那一轮照常完成、侧边栏还挂着上一版。不交代的话，
-  // 用户会把旧卡当成这次改出来的。
   it('完成了但卡没写出来：写后端那句话；给了 onRetryCard 才有「再试一次」，点了就调它', async () => {
     const account = { ...base, cardFailureText: '这次没能写出生成卡，请重试。', tokenUsage: null, contextCapacity: null };
     await render(createElement(TurnFooter, { account }));
@@ -294,7 +275,6 @@ describe('TurnFooter', () => {
     expect(onRetryCard).toHaveBeenCalledTimes(1);
   });
 
-  // 素材不可用、没定做图还是视频：得用户先做点什么，再发一遍一样的话没用，不给按钮。
   it('卡没写出来、但重发一遍也没用的：只写那句话，不给「再试一次」', async () => {
     const account = {
       ...base,

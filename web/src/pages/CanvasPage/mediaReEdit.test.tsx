@@ -9,14 +9,7 @@ import CanvasPage from './index';
 import { promptRefReadOnly, readPromptRefText, typePromptRefText } from './testing/promptRefEditor';
 import { setGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 
-/* IKDMQU 成功卡原卡编辑与重新生成：P1 单选成品卡自动开面板 / Q4 上传素材不自动开 /
-   P2 编辑实时写回原卡 / Q1+Q6 发送后原卡重新生成不新建卡（旧素材保留）/
-   Q5 成功替换与取消恢复 / Q9 空白与多选隐藏面板 / Q8 Enter 仅换行 /
-   音频成品卡绑定音频面板（原落入图片分支的缺陷修复）。
-   FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；ImageDialog/AudioDialog 用真实实现。 */
 
-// IKFJJT 合并 0915 适配：视频提交前会对参考图做合规入库（ensureVideoImageRefsCompliance →
-// depositCanvasAssetToCharacterLibrary）。测试环境固定返回 materialId，避免真实调素材入库 API。
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
@@ -43,8 +36,6 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
 vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
   depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
-  // IKFVMQ 合规改轮询 GetAsset：恢复后的节点带 materialId 会走真实 waitAssetReady
-  // （getAsset 未 mock 致视频重编辑发送中止），测试环境跳过轮询等待
   waitComplianceAssetReady: vi.fn(async () => ({})),
 }));
 
@@ -161,7 +152,6 @@ vi.mock('@/api/canvas', () => ({
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
-  // !779 起保存 catch 会调这个函数对齐 412 version；缺省则 throw，失败提示出不来
   readCanvasConflictVersion: () => undefined,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
@@ -202,7 +192,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 默认画布：文本 t1 → 成品图片卡 g1（有生成记录）+ 上传素材卡 u1（无生成记录） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -245,7 +234,6 @@ function seedDoc() {
   };
 }
 
-/** 含成品音频卡 au1 的画布 */
 function seedAudioDoc() {
   canvasDocMock.current = {
     doc: {
@@ -308,7 +296,6 @@ function promptTextarea(): HTMLElement | null {
   return container.querySelector('[contenteditable]');
 }
 
-/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
   await typePromptRefText(container, text);
 }
@@ -335,11 +322,9 @@ afterEach(async () => {
   container?.remove();
   vi.clearAllMocks();
   apiMocks.fetchJobStatus.mockReset().mockImplementation(defaultJobStatus);
-  // clearAllMocks 不清除实现：持续失败的保存替身会污染后续用例，统一恢复默认
   apiMocks.saveCanvasDoc.mockReset().mockImplementation(defaultSaveDoc);
 });
 
-/** 一份带真 PNG 文件头的最小文件：上传前会读开头认容器（IKE53Z），'png' 这三个字母过不去。 */
 const pngFile = (name: string) => {
   const head = new Uint8Array(32);
   head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -351,11 +336,9 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     await renderPage();
     await clickNode('g1');
 
-    // 面板打开且绑定原卡：恢复原提示词
     expect(promptTextarea()).toBeTruthy();
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('原提示词'));
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
-    // 连线文本附件实时展示（IKFCKN：FileText 缩略图进参考栏）
     await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
   });
 
@@ -386,19 +369,15 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     await vi.waitFor(() => expect(promptTextarea()).toBeTruthy());
     await typePrompt('编辑中内容');
 
-    // 点空白（IKDMQV：空白点击收敛为 PaneClick，空选中是过渡态不再关面板）
     await act(async () => {
       flowProps.current.onPaneClick();
     });
     expect(container.querySelector('[contenteditable]')).toBeNull();
-    // 编辑已实时写回节点，隐藏不丢弃
     expect(nodeOf('g1').data.prompt).toBe('编辑中内容');
 
-    // 重新选中恢复编辑
     await clickNode('g1');
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('编辑中内容'));
 
-    // 多选隐藏
     await act(async () => {
       flowProps.current.onSelectionChange({
         nodes: [nodeOf('g1'), nodeOf('u1')],
@@ -413,13 +392,11 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     await clickNode('g1');
     await vi.waitFor(() => expect(promptTextarea()).toBeTruthy());
 
-    // 模拟 React Flow 的过渡空选中事件：面板保持可见
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [], edges: [] });
     });
     expect(promptTextarea()).toBeTruthy();
 
-    // 空白明确隐藏后，迟到选中事件不得重开；用户重新点击才恢复。
     await act(async () => {
       flowProps.current.onPaneClick();
     });
@@ -440,7 +417,6 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     const audioInput = container.querySelector<HTMLElement>('[data-testid="audio-input"]');
     expect(audioInput).toBeTruthy();
     expect(container.querySelector('[data-testid="audio-send"]')).toBeTruthy();
-    // 唯一正文编辑器位于音频面板，不能再用 contenteditable 判断是图片面板。
     const audioEditor = audioInput!.querySelector('[contenteditable="true"]');
     expect(audioEditor).toBeTruthy();
     expect([...container.querySelectorAll('[contenteditable="true"]')]).toEqual([audioEditor]);
@@ -481,12 +457,11 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
       await act(async () => release());
     }
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters.prompt).toBe('一只蓝鲸在海里本次提交 A'); // !723：正文与附件直连，不再 \n\n 分隔
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters.prompt).toBe('一只蓝鲸在海里本次提交 A');
     expect(nodeOf('g1').data.prompt).toBe('本次提交 A');
   });
 
   it('发送后原卡原地转生成中：不新建卡片、保留旧素材、任务带目标节点', async () => {
-    // 任务停留在执行中，捕获「生成中保留旧素材」的中间态
     apiMocks.fetchJobStatus.mockImplementationOnce(
       async () => ({ job_id: 'j2', status: 'running', progress: 30 }),
     );
@@ -503,9 +478,8 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
     const [projectId, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(projectId).toBe('p1');
     expect(payload.target_node_id).toBe('g1');
-    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里重画一版'); // !723：正文与附件直连
+    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里重画一版');
 
-    // 原卡承接：卡片数不变（g1/u1，t1 为文本节点）、生成中、旧素材保留
     expect(flowProps.current.mediaNodes).toHaveLength(2);
     const node = nodeOf('g1');
     expect(node.data.genStatus).toBe('generating');
@@ -545,7 +519,6 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
     });
 
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    // 取消链路一次性收敛：生成中中间态转瞬即逝，直接断言终态
     await vi.waitFor(() => {
       expect(nodeOf('g1').data.genStatus).toBeUndefined();
     });
@@ -574,7 +547,6 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
 
 describe('IKDMQU Q10：保存失败暂停切换编辑目标', () => {
   it('保存失败后点击成品卡不自动开面板并提示重试', async () => {
-    // 追加第二张成品卡 g2 作为切换目标（有生成记录才会触发切换拦截）
     ((canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes).push({
       id: 'g2',
       type: 'mediaNode',
@@ -582,27 +554,21 @@ describe('IKDMQU Q10：保存失败暂停切换编辑目标', () => {
       data: { src: 'http://img/g2.png', mediaType: 'image', fileName: '生成-j2', assetId: 'a3', jobId: 'j2', prompt: '原提示词二', draftModelId: 'm-test', draftSize: '2k', draftRatio: '1:1' },
     });
     (canvasDocMock.current.assets as Record<string, unknown>).a3 = { asset_id: 3, type: 'image', access_url: 'http://img/g2.png', width: 100, height: 100 };
-    // 保存持续失败：面板打开时的参数写回与输入都会触发保存，避免一次性失败被提前消费
     apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('save failed')));
     await renderPage();
 
-    // 绑定成品卡 g1 编辑：输入触发自动保存 → 保存失败
     await clickNode('g1');
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await typePrompt('触发保存失败的编辑');
-    // 面板输入触发 800ms 防抖自动保存，先等保存调用确实发起
     await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled(), { timeout: 3000 });
     await vi.waitFor(() => expect(container.textContent).toContain('保存失败'), { timeout: 3000 });
 
-    // 隐藏面板后点击其它成品卡：暂停切换编辑目标（不开新面板）
-    // （IKDMQV：空白点击收敛为 PaneClick 关面板；空选中是过渡态不再关）
     await act(async () => {
       flowProps.current.onPaneClick();
     });
     await clickNode('g2');
     expect(container.querySelector('[contenteditable]')).toBeNull();
 
-    // 重开当前绑定目标（g1）不算切换：面板恢复，未保存内容保留、可继续触发保存重试
     await clickNode('g1');
     expect(promptTextarea()).toBeTruthy();
   });
@@ -616,8 +582,6 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
       supported_durations: { min: 4, max: 12, step: 1 }, default_duration: 8,
       features: { reference_image: true, first_frame: true, last_frame: true, first_last_frame: true, task_types: { text2video: {}, omni: {}, image_reference: {}, first_frame: {}, first_last_frame: {} } },
     }));
-    // 常驻实现（不再 once 队列）：画布页自身也读模型能力（连线/资产接纳/资产卡上限），
-    // 二次挂载后 once 值已被吃光会让面板退回无能力模型并误判冲突
     apiMocks.fetchGenerationModels.mockResolvedValue(capable);
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j2', status: 'succeeded', progress: 100,
       asset: { id: 'a9', url: kind === 'image' ? 'http://img/out.png' : 'http://img/out.mp4', type: kind } });
@@ -660,8 +624,6 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
     expect(repeated.target_node_id).toBe(generatedId);
     expect(repeated.parameters.model_id).toBe('m-test');
     if (kind === 'image') expect(repeated.references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a2' }]);
-    // IKEXX8 视频参考改为 structured references 数组（首帧/尾帧角色随连线持久化）
-    // !718：首页交接参考不再上传虚拟人像库换 materialId，按本地 asset_id 直接提交
     else expect(repeated.references).toEqual([
       { asset_id: 'a1', role: 'first_frame', type: 'image' },
       { asset_id: 'a2', role: 'last_frame', type: 'image' },

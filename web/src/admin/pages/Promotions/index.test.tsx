@@ -49,7 +49,6 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() }, Toaster:
 let root: Root;
 let mountNode: HTMLDivElement;
 
-/** 一条「周四夜间 7 折、限 seedance 系、pro 与 max 可用」的活动。 */
 const NIGHT = {
   id: 3,
   code: 'night-70',
@@ -142,7 +141,6 @@ function inputByLabel(label: string): HTMLInputElement {
   return found;
 }
 
-/** 勾选一个带中文 label 的复选框（点击处理挂在 label 上，见 ui/Checkbox）。 */
 async function check(label: string) {
   const box = [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')].find((el) =>
     el.closest('label')?.textContent?.includes(label),
@@ -184,7 +182,6 @@ describe('限时活动页', () => {
   it('★ 冻结语义写在最上面：改活动不影响已提交未结算的任务', async () => {
     await renderPage();
 
-    // ⚠️ 形态与全管理端统一：收进「?」，仍放在最上面（页面第一块内容就是那个图标）
     const help = document.body.querySelector('button[aria-label="说明"]');
     expect(help, '页面顶部应有一个「?」').not.toBeNull();
     expect(document.body.textContent).not.toContain('改活动不影响已提交未结算的任务');
@@ -194,7 +191,6 @@ describe('限时活动页', () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('multiply');
-    // 解释与算例收进 `?`
     expect(document.body.textContent).not.toContain('目录级配置');
     expect(document.body.querySelectorAll('button[aria-label="说明"]').length).toBeGreaterThan(0);
   });
@@ -214,7 +210,6 @@ describe('限时活动页', () => {
     await type(inputByLabel('活动名称'), '夜间 7 折');
     await type(inputByLabel('起始时间'), '2026-10-01T00:00');
     await type(inputByLabel('结束时间'), '2026-11-01T00:00');
-    // 默认给了一个 `*`，先删掉它
     await click(buttonByAria('删除 *'));
     await click(button('保存'));
 

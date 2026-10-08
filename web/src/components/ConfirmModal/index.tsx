@@ -1,4 +1,3 @@
-/* 通用确认弹窗：保留既有调用参数，统一由 Modal 承担遮罩、焦点和键盘交互。 */
 import Modal from '@/components/Modal';
 
 interface ConfirmModalProps {

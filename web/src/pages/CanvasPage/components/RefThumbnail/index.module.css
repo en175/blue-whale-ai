@@ -1,4 +1,3 @@
-/* 参考缩略图（IKFCKK）：56×56 圆角 12，三面板统一；三态 = 编号圆钮 / 悬停 × @ / 悬浮放大预览 */
 .thumb {
   position: relative;
   width: 56px;
@@ -18,7 +17,6 @@
   display: block;
 }
 
-/* 音频/文本形态：图标居中占位（类型靠缩略图形态区分，角标只显示数字） */
 .kindIcon {
   position: absolute;
   inset: 0;
@@ -28,7 +26,6 @@
   color: #9a9a9a;
 }
 
-/* 编号圆钮：16px 半透明黑、白 10px 数字、四角内嵌 3px；两位数自动加宽为胶囊 */
 .badge {
   position: absolute;
   top: 3px;
@@ -50,7 +47,6 @@
   transition: opacity 0.15s ease;
 }
 
-/* 悬停操作钮：默认透明（不拦截点击），悬停淡入；约 150ms 过渡 */
 .act {
   position: absolute;
   display: flex;
@@ -86,7 +82,6 @@
   background-color: rgba(0, 0, 0, 0.85);
 }
 
-/* 三态切换：悬停 → 编号淡出、× / @ 淡入 */
 .thumb[data-hovered='true'] .badge {
   opacity: 0;
 }
@@ -95,7 +90,6 @@
   opacity: 1;
 }
 
-/* ---- 悬浮放大预览浮层：上方居中、视口内收敛；媒体预览纯展示鼠标穿透，文本预览由 TSX inline 覆盖为可移入阅读；卡片沿用 AssetChip 常量 ---- */
 .preview {
   z-index: var(--z-tooltip);
   display: flex;
@@ -115,7 +109,6 @@
   object-fit: contain;
 }
 
-/* 音频预览：图标 + 名称 + 时长（对齐 VideoMentionChip audioPreview 宽度规格） */
 .audioCard {
   display: flex;
   align-items: center;
@@ -139,7 +132,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* 文本预览：正文内容卡片，超限滚动可读全 */
 .textCard {
   max-width: 280px;
   max-height: 280px;
@@ -151,7 +143,6 @@
   word-break: break-word;
 }
 
-/* ---- 拖拽排序（IKFCKT）：拖起项半透明 + 目标项前/后半插入指示线 ---- */
 .thumb[data-strip-dragging='true'] {
   opacity: 0.4;
 }
@@ -164,7 +155,6 @@
   box-shadow: 2px 0 0 0 var(--color-accent-active);
 }
 
-/* IKFM3S：锁定条目（文本索引提供）的定位来源按钮——与移除同位，指向来源文本卡 */
 .actLocate {
   top: 3px;
   right: 3px;
@@ -174,7 +164,6 @@
   background-color: rgba(59, 130, 246, 0.85);
 }
 
-/* IKFM3S：锁定条目（文本索引提供）可见标记——橙色虚线描边区分直接参考 */
 .thumbLocked {
   outline: 1.5px dashed rgba(249, 115, 22, 0.85);
   outline-offset: 1px;

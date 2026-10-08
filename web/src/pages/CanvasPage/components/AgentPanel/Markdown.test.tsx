@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/**
- * 助手正文里的素材名渲染成胶囊（IKDLW3）：有匹配 / 无匹配 / 流式半截名字 / 围栏代码里不动。
- * 用真的 react-markdown 管线渲染，断言 DOM，而不是只测插件。
- */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -45,7 +41,6 @@ describe('Markdown 里的素材胶囊', () => {
     const img = mountNode.querySelector('img');
     expect(img?.getAttribute('src')).toBe('https://cdn.test/smoke.jpg');
     expect(mountNode.textContent).toBe('你上传的 _smoke.jpg 是纯色底，我照它的色调来。');
-    // 名字在胶囊里，不在裸文本里
     const p = mountNode.querySelector('p')!;
     const bareText = Array.from(p.childNodes)
       .filter((n) => n.nodeType === Node.TEXT_NODE)

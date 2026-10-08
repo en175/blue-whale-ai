@@ -1,11 +1,3 @@
-/* ============================================
- * 画布生成任务恢复契约 v1 客户端（IKIXK9-SPEC-20261002 B 节 / IKJJR1）：
- *  - GET  /api/canvases/:projectId/generation-recovery   恢复页（游标分页）
- *  - POST /api/canvases/:projectId/generation-recovery/resolve 定向读取
- *  - PUT  /api/canvases/:projectId                        保护性保存（recoveryChanges 显式状态）
- * 形状与 backend/libs/contracts/canvas-recovery.ts 同源；客户端只做类型引用与
- * 常量复制（RECOVERY 页限制），不做 zod 运行时校验——服务端是权威。
- * ============================================ */
 import { queryOptions } from '@tanstack/react-query';
 import { apiRequest } from './http';
 import type { CanvasBinding, RecoveryChange } from '@lib/contracts/canvas-recovery';
@@ -14,12 +6,9 @@ import { serializeEdges, serializeNodes } from './canvas';
 
 export type { CanvasBinding, RecoveryChange };
 
-/** 恢复页/resolve 限制（B.5，与契约常量同值）。 */
 export const RECOVERY_PAGE_LIMIT_MAX = 100;
 
-/** 恢复项（B.5 items 项；形状与服务端 RecoveryItemView 恒等）。 */
 export interface GenerationRecoveryItem {
-  /** 恢复项身份 gcr:<submission_id>:<output_key>（客户端视为不透明） */
   recovery_item_id: string;
   output_key: string;
   node_id: string;
@@ -30,8 +19,6 @@ export interface GenerationRecoveryItem {
   slot_id: string | null;
 }
 
-/** 恢复页单条记录（B.5 records 项）。job 为公开投影子集（无 asset url），需要完整
- *  产物时按 job_id 走 GET /api/jobs/:id。 */
 export interface GenerationRecoveryRecord {
   submission_id: string;
   target_node_id: string;
@@ -53,7 +40,6 @@ export interface GenerationRecoveryRecord {
   items: GenerationRecoveryItem[];
 }
 
-/** GET generation-recovery 成功 data。 */
 export interface GenerationRecoveryPage {
   protocol_version: 1;
   canvas_version: number | null;
@@ -61,8 +47,6 @@ export interface GenerationRecoveryPage {
   next_cursor: string | null;
 }
 
-/** GET /api/canvases/:projectId/generation-recovery（受控错误 4xx 经 apiRequest 抛 ApiError，
- *  data.reason 为稳定值）。 */
 export function fetchGenerationRecoveryPage(
   projectId: string,
   options: { limit?: number; cursor?: string | null } = {},
@@ -77,7 +61,6 @@ export function fetchGenerationRecoveryPage(
   );
 }
 
-/** 恢复页 query keys 工厂（IKJKU9）：按项目隔离，游标/limit 归一进 key。 */
 export const generationRecoveryKeys = {
   all: ['canvases', 'generation-recovery'] as const,
   page: (projectId: string, options: { cursor?: string | null; limit?: number } = {}) => [
@@ -87,9 +70,6 @@ export const generationRecoveryKeys = {
   ] as const,
 };
 
-/** 恢复页的 Query 定义（资源旁 queryOptions，形态同 frameInterpolationRecoveryOptions）：
- *  宿主/测试经 QueryClient.fetchQuery 消费游标分页。staleTime 0 = 每次扫描重新对账
- *  服务端事实；retry false + 传输层 silent = 查询错误单一呈现，失败等下轮水合重试。 */
 export function generationRecoveryPageOptions(
   projectId: string,
   options: { limit?: number; cursor?: string | null } = {},
@@ -102,7 +82,6 @@ export function generationRecoveryPageOptions(
   });
 }
 
-/** POST resolve：按已保存节点标记定向回读旧输出 revision（只读、可重复、不修改状态）。 */
 export function resolveGenerationRecovery(
   projectId: string,
   recoveryItemIds: string[],
@@ -113,14 +92,12 @@ export function resolveGenerationRecovery(
   );
 }
 
-/** 新协议保存的显式恢复字段（B.6）：由调用方（生成任务运行时）推导，随整文档 PUT 携带。 */
 export interface CanvasRecoverySaveFields {
   recoveryProtocolVersion: 1;
   commandId: string;
   recoveryChanges: RecoveryChange[];
 }
 
-/** 新协议保存成功 data：紧凑回执（不回放旧文档快照）。 */
 export interface CanvasRecoverySaveData {
   project_id: string;
   version: number;
@@ -136,12 +113,6 @@ export interface CanvasRecoverySaveData {
   };
 }
 
-/** PUT /api/canvases/:projectId（新协议显式恢复保存）。
- *  与旧 saveCanvasDoc 的差异（IKJJR1 验收 8）：
- *  - 携带 recoveryProtocolVersion/commandId/recoveryChanges，成功返回紧凑回执；
- *  - 412 版本冲突不做「换版本重发」自动重试——保留本地内容由调用方提示复核；
- *  - commandId 是本次保存命令身份：同命令同载荷重放由服务端幂等回放（replayed=true），
- *    因此调用方对同一逻辑命令的完全相同重发复用同一 commandId，其余情况换新。 */
 export function putCanvasDocWithRecovery(
   projectId: string,
   payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean },

@@ -21,24 +21,12 @@ import {
 const PERMISSION_HINT = TOPUP_TIER_PERMISSIONS.join(" | ");
 const MAX_HINT_LENGTH = 255;
 
-/** 正整数（>= 1）。与 `parseBaseCredits` 同口径：0 / 负数 / 小数一律 400。 */
 function requirePositiveInt(raw: unknown, label: string): number {
   const n = parseNonNegativeInt(raw);
   if (n === null || n < 1) throw new AdminException(400, `${label}须为 1 以上的整数`);
   return n;
 }
 
-/**
- * 自定义充值配置（模块 B，PRD §10.3）。
- *
- * <p>单行配置，只有读与保存两个动作 —— 没有新建/删除：**它本来就只有一份**，
- * 「删掉配置」不是一个有意义的状态（删了用户侧拿什么报价？）。
- * 要停用就改 `enabled = false`，那是一个能被展示、能被解释的状态。
- *
- * <p>⚠️ 保存时的整除 / 步长对齐校验在 `RechargeCustomService.saveConfig` 里，
- * 且是对**合并后的整份配置**校验：只改换算率同样会让上下限不再整分（PRD §7.1）。
- * 这里只负责把请求体解析成强类型，解析不了就 400。
- */
 @Controller("admin/recharge-custom-config")
 @UseGuards(AdminGuard)
 export class AdminRechargeCustomConfigController {
@@ -57,12 +45,6 @@ export class AdminRechargeCustomConfigController {
     }
   }
 
-  /**
-   * PUT /api/admin/recharge-custom-config
-   *
-   * <p>**部分更新**：只传要改的键，不传的保持原值。缺的键不落默认值 ——
-   * 那会让「只改下限」的操作把上限悄悄重置成 499995。
-   */
   @Put()
   async update(@Body() body: Record<string, unknown>) {
     const input: SaveRechargeCustomConfigInput = {};
@@ -100,12 +82,9 @@ export class AdminRechargeCustomConfigController {
       if (permission === null) {
         throw new AdminException(400, `购买权限须为 ${PERMISSION_HINT}`);
       }
-      // ⚠️ member_tier（指定会员等级）本阶段**只是占位、不生效**（PRD §10.4 阶段 2）。
-      // 收下它，但别指望它挡住任何人 —— 见 `canPurchaseCustom` 的注释
       input.permission = permission;
     }
     if (body.permissionAllowlist !== undefined) {
-      // null = 显式清空；数组 = 覆盖成这份名单（空数组 = 名单为空，两者物理落点不同）
       if (body.permissionAllowlist === null) {
         input.permissionAllowlist = null;
       } else {
@@ -150,7 +129,6 @@ export class AdminRechargeCustomConfigController {
     }
   }
 
-  /** 审计是 best-effort：写不进去不阻断保存（配置本身已经落库了，回滚才是更大的错）。 */
   private async writeAudit(
     before: RechargeCustomConfigView,
     after: RechargeCustomConfigView,
@@ -164,12 +142,10 @@ export class AdminRechargeCustomConfigController {
         operator: "admin",
       });
     } catch {
-      /* best-effort */
     }
   }
 }
 
-/** 配置改动的一句话 diff（审计里要能看出「改了什么」，不是「又保存了一次」）。 */
 export function describeCustomConfigChanges(
   before: RechargeCustomConfigView,
   after: RechargeCustomConfigView,
@@ -187,7 +163,6 @@ export function describeCustomConfigChanges(
   if (before.stepCredits !== after.stepCredits) {
     changes.push(`积分步长：${before.stepCredits}→${after.stepCredits}`);
   }
-  // ⚠️ 换算率是**价格算法**的输入：改它等于改所有新订单的价格，审计里必须单独看得见
   if (before.creditsPerYuan !== after.creditsPerYuan) {
     changes.push(
       `每元积分数：${before.creditsPerYuan}→${after.creditsPerYuan}（影响新订单价格）`,
@@ -225,7 +200,6 @@ function fmtAllowlist(list: string[]): string {
   return `${list.slice(0, 5).join(",")}…等 ${list.length} 人`;
 }
 
-/** 管理端视图：加上中文枚举名，免得每个页面各写一份映射。 */
 function toAdminView(config: RechargeCustomConfigView) {
   return {
     ...config,

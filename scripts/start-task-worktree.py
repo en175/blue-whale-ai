@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Synchronize the active release, then create a structured task worktree."""
 
 import argparse
 import hashlib
@@ -15,9 +14,6 @@ from task_metadata import TaskMetadataError, read_task_metadata, write_task_meta
 
 
 ALLOWED_TYPES = ("feature", "fix", "hotfix", "docs", "chore")
-# release 分支与任务分支不同：无工单号、日期+描述命名、不建 worktree，单独校验，不进 ALLOWED_TYPES。
-# 形态：release/YYYY.MM.DD[_<描述>][_N]。描述组结构性要求至少一个 CJK 字符（长度另查），
-# 防止同日碰撞序号 "_2" 被贪吃成描述后又被长度检查误杀；_N 为碰撞序号（manage-release-branch.sh 生成）。
 RELEASE_RE = re.compile(
     r"^release/(\d{4})\.(\d{2})\.(\d{2})"
     r"(?:_([A-Za-z0-9\u3400-\u4dbf\u4e00-\u9fff]*[\u3400-\u4dbf\u4e00-\u9fff][A-Za-z0-9\u3400-\u4dbf\u4e00-\u9fff]*))?"
@@ -201,9 +197,6 @@ def parse_start_args(argv):
 
 
 def main(argv=None):
-    # Windows 原生 Python 的 stdout/stderr 默认 GBK，中文/emoji print 会抛
-    # UnicodeEncodeError（与 subprocess 解码同根因的输出方向）。强制改 UTF-8；
-    # POSIX 本就 UTF-8，reconfigure 为 no-op，不影响其他操作系统。
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

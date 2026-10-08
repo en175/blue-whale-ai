@@ -33,7 +33,6 @@ describe("AI 格式化草稿", () => {
       code: SKILL_ERROR_SPECS.SKILL_FORMAT_FAILED.code,
       status: 503,
     });
-    // 上游原文不许漏给用户。
     expect(error.message).not.toContain("upstream");
   });
 
@@ -57,9 +56,6 @@ describe("AI 格式化草稿", () => {
   });
 });
 
-/* ────────────────────────────────────────────────────────────────────────────
- * 依赖组装：地址读环境变量，凭证读**配置表**（所以这个函数是异步的）
- * ──────────────────────────────────────────────────────────────────────────── */
 
 describe("createSkillFormatDeps", () => {
   const ENV_KEYS = ["SKILL_FORMAT_MODEL", "NEW_API_BASE_URL"] as const;

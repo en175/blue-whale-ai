@@ -1,8 +1,3 @@
-// CanvasPage 页面级测试共享夹具（IKGBP1 审查收口）：keyboardClipboardPage /
-// clipboardPasteFallback / undoShortcut 三份页面级测试近乎逐行相同的 vi.mock
-// 组件与 API 打桩、画布文档接缝、渲染与剪贴板/撤销操作助手收口于此。
-// 各文件特有的打桩（系统剪贴板、上传、seed 画布、生成模型等）留在各自文件。
-//
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -18,7 +13,6 @@ vi.mock('../components/AgentPanel', () => ({
     createElement('div', { 'data-testid': 'agent-panel-stub' }, initialCardLabel),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 export const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('../components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -39,11 +33,6 @@ vi.mock('../components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** API 打桩：fetchProjects 默认单项目、fetchGenerationModels 默认空、fetchJobStatus 默认无实现——
- *  需要多项目/生成模型/任务状态的测试在各自 beforeEach 里 mockResolvedValue / mockImplementation 覆盖。
- *  cancelGenerationJob 默认成功返回（取消确认链 .then 需要 promise）；createFrameInterpolation
- *  默认无实现（IKHLKX 插帧发送：需要的测试显式 mockResolvedValue）；fetchFrameInterpolationCurrent
- *  默认 null（IKHSFF 关页恢复：无关联任务时水合恢复查询为 no-op，需要恢复的测试显式覆盖）。 */
 export const apiMocks = {
   fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
   createProject: vi.fn(),
@@ -55,28 +44,19 @@ export const apiMocks = {
   fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
-  /** 参数签名供测试断言 calls 元组（IKIIWN confirmEmpty 在 payload 上） */
   saveCanvasDoc: vi.fn(async (_projectId: string, _payload: { viewport: unknown; nodes: unknown[]; edges: unknown[]; confirmEmpty?: boolean }, _version: number | null) => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
   fetchJobStatus: vi.fn(),
   cancelGenerationJob: vi.fn(async () => null),
   retryGenerationJob: vi.fn(),
   retryAudioMix: vi.fn(),
-  /** 音视频合成创建/重试（IKIHPM 发送与失败重试闭环：默认无实现，需要的测试显式
-   *  mockResolvedValue / mockRejectedValue；断言第三参 { silent: true } 与幂等键） */
   createAudioVideoMux: vi.fn(),
   retryAudioVideoMux: vi.fn(),
-  /** IKJJR3：自增序列——预分配占位卡 id（audio-speed-{key} 等）依赖唯一性；混合重试
-   *  键断言（audioMix/audioVideoMux）按调用序仍可预期（'test-retry-key-1' 起步）。 */
   newIdempotencyKey: vi.fn((() => { let seq = 0; return () => `test-retry-key-${++seq}`; })()),
   createFrameInterpolation: vi.fn(),
   fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
   fetchJobs: vi.fn(async (_params?: FetchJobsParams): Promise<JobListData> => ({ records: [], total: 0, size: 20, current: 1 })),
-  /** 调速创建（IKI4LX 项目隔离回归：默认无实现，需要的测试显式 mockResolvedValue /
-   *  挂起手工放行；断言第三参 { silent: true } 同插帧先例） */
   createAudioSpeed: vi.fn(),
-  /** 截取创建（IKI61O 会话纪元回归：默认无实现，需要的测试显式 mockResolvedValue /
-   *  挂起手工放行） */
   createAudioTrim: vi.fn(),
 };
 
@@ -92,8 +72,6 @@ vi.mock('@/api/auth', () => ({
   fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
-/** 素材库分页记录（IKIHPK 音视频合成素材库浮层等新消费方）：默认空列表，用例按需注入
- *  （assetPageQueryOptions 的 queryFn 在查询发起时读取，beforeEach 设置即可生效） */
 export const assetLibraryRecords: { current: Array<Record<string, unknown>> } = { current: [] };
 
 vi.mock('@/api/assets', () => ({
@@ -117,8 +95,6 @@ vi.mock('@/api/assets', () => ({
   }),
 }));
 vi.mock('@/api/canvas', async (importOriginal) => ({
-  // IKILUE：readCanvasConflictVersion 等纯函数沿用真实现（412 信封解析口径与线上一致），
-  // 仅覆盖需要打桩的请求函数与序列化助手
   ...(await importOriginal<typeof import('@/api/canvas')>()),
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
@@ -158,8 +134,6 @@ vi.mock('@/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 
-/** 画布文档接缝（useCanvasDoc 打桩）：各测试文件的 seed 函数改写 current 注入专属画布；
- *  loadFailed（IKIIWN 空覆盖防护）缺省视为水合成功，需要失败场景的测试显式置 true。 */
 export const canvasDocMock: {
   current: {
     doc: unknown;
@@ -181,15 +155,12 @@ vi.mock('../hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** React act 环境标记（renderPage 内亦会设置，beforeEach 显式调用以兼容 act 外操作） */
 export function enableReactActEnvironment() {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 }
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
-/** 暴露 navigate 供切项目用例改 URL query（currentId 随 location.search 迁移）；
- *  locationRef 供断言导航是否真的发生（IKILUE 切换中止用例） */
 export let navigateRef: ((to: string) => void) | null = null;
 export let locationRef: { search: string } | null = null;
 
@@ -218,7 +189,6 @@ export async function renderPage() {
   });
 }
 
-/** 卸载当前渲染的页面（afterEach 调用） */
 export async function unmountPage() {
   const current = root;
   if (current) await act(async () => { current.unmount(); });
@@ -237,7 +207,6 @@ export function mediaNodes(): Node[] {
   return flowProps.current.mediaNodes as Node[];
 }
 
-/** 粘贴副本（newNodeId 生成 text- 前缀；seed 节点 t1 无该前缀，天然区分原卡） */
 export function textCopies(): Node[] {
   return textNodes().filter((n) => n.id.startsWith('text-'));
 }
@@ -246,14 +215,12 @@ export function mediaCopies(): Node[] {
   return mediaNodes().filter((n) => n.id.startsWith('media-'));
 }
 
-/** C 快照上抛（Canvas 入口已过滤 text/media，页面收到的即最终名单） */
 export async function copySelected(ids: string[]) {
   await act(async () => {
     flowProps.current.onCopySelected(ids);
   });
 }
 
-/** V 粘贴上抛（内部为空时走系统剪贴板兜底异步链，补一轮微任务冲刷） */
 export async function pasteClipboard() {
   await act(async () => {
     flowProps.current.onPasteClipboard();
@@ -261,7 +228,6 @@ export async function pasteClipboard() {
   await act(async () => {});
 }
 
-/** 页面级撤销监听（document 捕获级）收真实 Ctrl/Cmd+Z */
 export async function pressUndo(modifier: 'ctrl' | 'meta' = 'ctrl') {
   await act(async () => {
     document.body.dispatchEvent(new KeyboardEvent('keydown', {

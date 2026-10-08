@@ -1,10 +1,4 @@
-/* ============================================
- * ImageEnhanceDialog 高清放大参数面板（IKGM9O）
- * 轻量面板：无提示词框/无参考栏；下拉与分段按钮视觉模式沿用 ImageDialog
- * （selectBtn/selectDropdown/selectOption/ratioGroup），跟随定位同 dialogWrapFollow。
- * ============================================ */
 
-/* 定位外壳：与 ImageDialog 同构（跟随锚定时绝对定位到高清卡下方） */
 .dialogWrap {
   position: absolute;
   bottom: var(--spacing-lg);
@@ -45,7 +39,6 @@
   box-shadow: var(--shadow-overlay);
 }
 
-/* ---- 标题行 ---- */
 .headerRow {
   display: flex;
   align-items: center;
@@ -77,14 +70,12 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 生成中只读提示（同 ImageDialog readOnlyHint） ---- */
 .readOnlyHint {
   font-size: 12px;
   color: var(--color-text-tertiary);
   line-height: 1.4;
 }
 
-/* ---- 字段区 ---- */
 .fieldWrap {
   display: flex;
   flex-direction: column;
@@ -108,7 +99,6 @@
   gap: 6px;
 }
 
-/* ---- 下拉（视觉模式沿用 ImageDialog selectBtn/selectDropdown/selectOption） ---- */
 .selectBtn {
   display: flex;
   align-items: center;
@@ -193,7 +183,6 @@
   cursor: not-allowed;
 }
 
-/* ---- 分段按钮（视觉模式沿用 ImageDialog 宽高比 ratioGroup/ratioBtn，单行文本变体） ---- */
 .multipleGroup {
   display: flex;
   gap: 4px;
@@ -239,7 +228,6 @@
   color: #666;
 }
 
-/* ---- 色彩校正开关行 ---- */
 .switchRow {
   display: flex;
   align-items: center;
@@ -262,14 +250,12 @@
   cursor: pointer;
 }
 
-/* ---- 三档全不可用提示 ---- */
 .allDisabledHint {
   font-size: 12px;
   color: #e5484d;
   line-height: 1.4;
 }
 
-/* ---- 底部栏：免费提示 + 发送按钮（视觉模式沿用 ImageDialog sendBtn） ---- */
 .bottomBar {
   display: flex;
   align-items: center;

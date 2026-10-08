@@ -12,13 +12,6 @@ import {
   type PagedQuery,
 } from './useQueryFilters';
 
-/* ============================================
- * 这套骨架此前只活在三个页面里，**只能整页测**（而整页测要先备好假 API、假路由）。
- * 收成组件与 hook 之后，三态、防抖、重置、分页接线第一次可以直接对着测。
- *
- * 每条测试的注释写的是「这条挡的是什么 bug」，不是「这条在测什么函数」——
- * 上面那些行为每一条都是这三页**已经踩过**或**已经漂过**的坑。
- * ============================================ */
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -43,7 +36,6 @@ async function render(node: ReactNode): Promise<void> {
   });
 }
 
-// ========== 筛选状态机 ==========
 
 const EMPTY = { userId: '', status: '' };
 
@@ -92,9 +84,6 @@ describe('useAppliedFilters — 查询条件与输入框分离', () => {
   });
 
   it('★ 空条件一色用空串 —— 哨兵是真值，会被当成「有这个筛选」', async () => {
-    // ⚠️ 这条**不**断言「三页的常量长什么样」——那样写只是在测测试文件自己（评审实证：
-    //    把哨兵改回 `all` 它照样绿）。真正的闸门在页面测试里：断言**请求参数**不带它。
-    //    这里只钉 hook 这一侧的判据：空条件 ⇒ 没有生效筛选。
     const probe = await mount();
 
     expect(probe.get().hasApplied).toBe(false);
@@ -104,7 +93,6 @@ describe('useAppliedFilters — 查询条件与输入框分离', () => {
     const probe = await mount();
 
     await act(async () => probe.get().setDraft((d) => ({ ...d, userId: '9001' })));
-    // 还没点「查询」：查询条件没变，空态文案也就不该变
     expect(probe.get().hasApplied).toBe(false);
 
     await act(async () => probe.get().apply());
@@ -125,7 +113,6 @@ function CursorProbe({ epoch, onState }: { epoch: number; onState: (c: CursorSta
   return null;
 }
 
-// ========== 分页：两种形状 ==========
 
 describe('分页状态', () => {
   it('★ epoch 一变，页码回到第 1 页 —— 换了筛选还停在第 3 页会看到莫名其妙的空列表', async () => {
@@ -181,7 +168,6 @@ describe('分页状态', () => {
   });
 });
 
-// ========== 组件的三态与分页接线 ==========
 
 const COLUMNS: Column<{ id: string }>[] = [{ key: 'id', header: 'ID', render: (row) => row.id }];
 
@@ -200,7 +186,6 @@ function table(over: {
   status?: QueryStatus;
   rows?: { id: string }[];
   hasFilters?: boolean;
-  /** 覆盖**表体**那句错误文案（横幅那句仍是 `errorMessage`） */
   tableErrorMessage?: string;
   pagination?: Parameters<typeof AdminQueryTable<{ id: string }>>[0]["pagination"];
 }) {
@@ -264,8 +249,6 @@ describe('AdminQueryTable — 三态', () => {
   });
 
   it('★ 三态**互斥**：pending 时只出「加载中…」那一行', async () => {
-    // 三条分支此前是三份复制品，散在三个页面里各写一遍。只断言「加载中…在」抓不到
-    // 「三条同时渲染」——而那正是收成一个组件要守的口径（三条分支恰好出一条）。
     await render(table({ status: status({ isPending: true }) }));
 
     expect(text()).toContain('加载中…');
@@ -283,7 +266,6 @@ describe('AdminQueryTable — 三态', () => {
   });
 
   it('★ 横幅与表体是**两句不同**的话 —— 合成一句会让同一个错误在一页上出现两次', async () => {
-    // 表体那一行还挂着「重试」按钮，不是冗余：横幅给概览、表体给上下文 + 动作。
     await render(
       table({
         status: status({ isError: true }),
@@ -291,8 +273,8 @@ describe('AdminQueryTable — 三态', () => {
       }),
     );
 
-    expect(text()).toContain('加载失败'); // 横幅（errorMessage）
-    expect(text()).toContain('任务记录加载失败'); // 表体（tableErrorMessage）
+    expect(text()).toContain('加载失败');
+    expect(text()).toContain('任务记录加载失败');
   });
 });
 

@@ -15,7 +15,6 @@ import {
 } from './subtitleEraseBoxes';
 import { VIDEO_SUBTITLE_ERASE_MAX_BOXES } from '@lib/contracts/video-subtitle-erase';
 
-/** 便捷构造：显示坐标对角框图元 */
 function box(x1: number, y1: number, x2: number, y2: number): SubtitleBoxOp {
   return { kind: 'box', from: { x: x1, y: y1 }, to: { x: x2, y: y2 } };
 }
@@ -32,7 +31,6 @@ describe('IKGZ83 框集合：增删与撤销重做小栈', () => {
     state = undoSubtitleBoxEdit(state);
     expect(state.boxes.length).toBe(1);
     expect(canRedoSubtitleBoxEdit(state)).toBe(true);
-    // 撤销后落新框：重做栈被清空
     state = applySubtitleBox(state, box(0, 0, 10, 10));
     expect(canRedoSubtitleBoxEdit(state)).toBe(false);
     expect(state.boxes.length).toBe(2);
@@ -46,7 +44,6 @@ describe('IKGZ83 框集合：增删与撤销重做小栈', () => {
     const redone = redoSubtitleBoxEdit(undone);
     expect(redone.boxes.length).toBe(1);
     expect(redone.redoStack).toEqual([]);
-    // 空栈幂等
     expect(undoSubtitleBoxEdit(EMPTY_SUBTITLE_BOX_EDIT)).toBe(EMPTY_SUBTITLE_BOX_EDIT);
     expect(redoSubtitleBoxEdit(EMPTY_SUBTITLE_BOX_EDIT)).toBe(EMPTY_SUBTITLE_BOX_EDIT);
   });
@@ -61,7 +58,6 @@ describe('IKGZ83 框集合：增删与撤销重做小栈', () => {
     const rejected = applySubtitleBox(state, box(0, 0, 5, 5));
     expect(rejected).toBe(state);
     expect(rejected.boxes.length).toBe(VIDEO_SUBTITLE_ERASE_MAX_BOXES);
-    // 撤销一个后可再加
     const afterUndo = undoSubtitleBoxEdit(state);
     expect(canAddSubtitleBox(afterUndo)).toBe(true);
   });
@@ -81,11 +77,9 @@ describe('IKH3OV 重置：清空全部框且一步可撤销（undo/redo 从逐�
     state = applySubtitleBox(state, box(3, 3, 4, 4));
     const cleared = resetSubtitleBoxEdit(state);
     expect(cleared.boxes).toEqual([]);
-    // 重置本身是撤销栈里的一步：框清了但仍可撤销
     expect(canUndoSubtitleBoxEdit(cleared)).toBe(true);
     expect(canRedoSubtitleBoxEdit(cleared)).toBe(false);
     expect(canAddSubtitleBox(cleared)).toBe(true);
-    // 已无框可清：不产生第二次 reset 步骤（避免用无效操作污染撤销栈）
     expect(resetSubtitleBoxEdit(cleared)).toBe(cleared);
   });
 
@@ -159,7 +153,6 @@ describe('IKGZ83 显示坐标 → 归一化坐标换算（官方 Location 语义
     expect(payload.length).toBe(2);
     expect(payload[0]).toMatchObject({ top_left_x: 0, top_left_y: 0, bottom_right_x: 0.5, bottom_right_y: 0.5 });
     expect(payload[1]).toMatchObject({ top_left_x: 0.5, top_left_y: 0.5, bottom_right_x: 1, bottom_right_y: 1 });
-    // 契约 zod 形态自查：四键齐、值域 [0,1]
     for (const item of payload) {
       for (const value of Object.values(item)) {
         expect(value).toBeGreaterThanOrEqual(0);

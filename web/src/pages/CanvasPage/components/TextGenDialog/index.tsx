@@ -1,4 +1,3 @@
-/* 文本生成跟随输入框：文生文模式，大类定死 */
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, SlidersHorizontal, X } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
@@ -14,7 +13,6 @@ interface TextGenDialogProps {
   initialText?: string;
   attachments?: ImageTextAttachment[];
   followAnchor?: FollowDialogAnchor | null;
-  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
   dragHidden?: boolean;
   onParamsChange?: (patch: { prompt?: string; modelId?: string }) => void;
 }

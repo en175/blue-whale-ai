@@ -1,14 +1,9 @@
-/* ============================================
- * SkillModal 技能弹窗：我的技能/技能库/创建技能三标签
- * 技能库/我的技能走 /api/agent/skills 接口，滚动分页加载
- * ============================================ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
   MoreHorizontal,
   Eye,
-  // Plus, // 隐藏「创建技能」入口（2026-08-26 需求：仅隐藏按钮保留代码，恢复时一并解注释）
   Search,
   ChevronDown,
   Store,
@@ -41,36 +36,29 @@ import ConfirmModal from '@/components/ConfirmModal';
 interface SkillModalProps {
   open: boolean;
   onClose: () => void;
-  /** 用户点击「直接使用」：宿主决定去向（AgentPanel 置一次性强制技能 / Home 跳画布携带技能意图） */
   onUseSkill?: (skill: SkillRecord) => void;
 }
 
-/** 每页数量 */
 const PAGE_SIZE = 50;
 
-/** 语言：默认按 navigator.language 检测 */
 const LANG: 'zh' | 'en' = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
 
-/** 旧分类码中文映射（IKA64P：数据库存量旧码前端映射显示，新分类原样） */
 const LEGACY_CATEGORY_LABELS: Record<string, string> = {
   film: '影视',
   marketing: '营销',
   other: '其他',
 };
 
-/** 排序选项（key 对应接口 sort 参数） */
 const sortOptions = [
   { key: 'featured', label: '精选' },
   { key: 'most_used', label: '最多使用' },
   { key: 'newest', label: '最新发布' },
 ] as const;
 
-/** 接口错误提示（透传后端 msg） */
 function errMsg(e: unknown): string {
   return isApiError(e) ? e.message : '请求失败，请稍后重试';
 }
 
-/** SKILL.md 初始模板 */
 const SKILL_TEMPLATE = `---
 name:
 description:
@@ -80,12 +68,10 @@ description:
 export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProps) {
   const [tab, setTab] = useState<'mine' | 'library' | 'create'>('library');
 
-  /* ---- 技能库状态 ---- */
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<(typeof sortOptions)[number]['key']>('featured');
   const [sortOpen, setSortOpen] = useState(false);
-  /** IKA64P：动态分类（全部默认 + 后台维护），加载失败仅保留全部 */
   const [category, setCategory] = useState('all');
   const [categoryList, setCategoryList] = useState<string[]>([]);
   const [libraryList, setLibraryList] = useState<SkillRecord[]>([]);
@@ -94,7 +80,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   const libPageRef = useRef(1);
   const libGridRef = useRef<HTMLDivElement>(null);
 
-  /* ---- 我的技能状态 ---- */
   const [mySkills, setMySkills] = useState<SkillRecord[]>([]);
   const [removalTarget, setRemovalTarget] = useState<SkillRecord | null>(null);
   const [mineHasMore, setMineHasMore] = useState(true);
@@ -102,15 +87,12 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   const mineLoadedRef = useRef(false);
   const mineGridRef = useRef<HTMLDivElement>(null);
 
-  /* ---- 卡片三个点菜单 + 详情弹窗（IKD0RJ） ---- */
   const [menuSkillId, setMenuSkillId] = useState<string | null>(null);
-  /** 挂在 .cardMenu 包裹层上（含按钮与下拉项），mousedown 关闭逻辑以它为准 */
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
   const [detailTarget, setDetailTarget] = useState<SkillRecord | null>(null);
   const [detailContent, setDetailContent] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
 
-  /* ---- 创建技能状态 ---- */
   const [createTab, setCreateTab] = useState<'edit' | 'upload'>('edit');
   const [skillContent, setSkillContent] = useState(SKILL_TEMPLATE);
   const [saving, setSaving] = useState(false);
@@ -119,17 +101,13 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
 
   const currentSort = sortOptions.find((s) => s.key === sortKey);
 
-  /** 产品要求：无封面 skill 整卡隐藏，列表只展示有 cover_url 的 */
   const coverLibrary = libraryList.filter((s) => s.cover_url);
   const coverMine = mySkills.filter((s) => s.cover_url);
 
-  /** name / description 是否已填写（同一行存在非空内容） */
   const nameFilled = /^name:[ \t]*\S/m.test(skillContent);
   const descFilled = /^description:[ \t]*\S/m.test(skillContent);
-  /** 两项都不是初始状态时才允许保存 */
   const canSave = nameFilled && descFilled && !saving;
 
-  /** 弹框打开时重置两个列表，重新拉取 */
   useEffect(() => {
     if (!open) {
       setRemovalTarget(null);
@@ -150,7 +128,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
       .catch(() => setCategoryList([]));
   }, [open]);
 
-  /** 加载技能库指定页（append=true 追加，否则重置） */
   const loadLibrary = useCallback(
     async (pageNum: number, append: boolean) => {
       setLibraryLoading(true);
@@ -177,13 +154,11 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     [searchQuery, category, sortKey],
   );
 
-  /** 筛选/排序/搜索变化时重新拉取第一页 */
   useEffect(() => {
     if (!open) return;
     loadLibrary(1, false);
   }, [open, loadLibrary]);
 
-  /** 技能库滚动加载下一页 */
   const handleLibraryScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     if (libraryLoading || !libraryHasMore) return;
@@ -192,7 +167,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     }
   };
 
-  /** 加载我的技能（进入 Tab 或滚动分页时） */
   const loadMySkills = useCallback(async (pageNum: number) => {
     try {
       const data = await fetchMySkills(pageNum, PAGE_SIZE);
@@ -210,7 +184,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     if (open && tab === 'mine' && !mineLoadedRef.current) loadMySkills(1);
   }, [open, tab, loadMySkills]);
 
-  /** 我的技能滚动加载下一页 */
   const handleMineScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     if (!mineHasMore) return;
@@ -219,12 +192,10 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     }
   };
 
-  /** 弹窗关闭时收起三个点菜单 */
   useEffect(() => {
     if (!open) setMenuSkillId(null);
   }, [open]);
 
-  /** 点击菜单外区域收起三个点菜单 */
   useEffect(() => {
     if (!menuSkillId) return;
     const onDown = (e: MouseEvent) => {
@@ -237,7 +208,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
 
   if (!open) return null;
 
-  /** SKILL.md 正文渲染：复用 AgentPanel 同款 react-markdown + GFM（表格横向滚动、链接新标签） */
   function SkillMarkdown({ text }: { text: string }) {
     return (
       <div className={styles.md}>
@@ -262,15 +232,13 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     );
   }
 
-  /** 添加技能到「我的」（接口仅提供 add，已添加时不重复请求） */
   const handleAddSkill = (s: SkillRecord) => {
     if (!s.creative_skill_id || s.added) return;
     const id = s.creative_skill_id;
-    // 乐观更新，失败回滚
     setLibraryList((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, added: true } : r)));
     addLibrarySkill(id)
       .then(() => {
-        mineLoadedRef.current = false; // 切回「我的技能」时重新拉取，避免旧缓存不显示新加的技能
+        mineLoadedRef.current = false;
       })
       .catch((e) => {
         setLibraryList((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, added: false } : r)));
@@ -278,19 +246,16 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
       });
   };
 
-  /** 删除个人技能（永久删除，需确认） */
   const handleDeletePersonal = (s: SkillRecord) => {
     if (!s.creative_skill_id) return;
     setRemovalTarget(s);
   };
 
-  /** 从「我的技能」移除官方技能（仅解除引用，需确认） */
   const handleRemoveOfficial = (s: SkillRecord) => {
     if (!s.creative_skill_id) return;
     setRemovalTarget(s);
   };
 
-  /** 确认后按技能归属执行原有的删除或解除引用请求。 */
   const confirmRemoval = () => {
     const target = removalTarget;
     const id = target?.creative_skill_id;
@@ -303,7 +268,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
       .catch((e) => window.alert(errMsg(e)));
   };
 
-  /** 查看技能详情：按归属拉取 SKILL.md 全文，打开详情弹窗（IKD0RJ） */
   const openDetail = (s: SkillRecord) => {
     const id = s.creative_skill_id;
     if (!id) return;
@@ -318,7 +282,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
       .finally(() => setDetailLoading(false));
   };
 
-  /** 详情弹窗右上角「使用」：复用卡片「直接使用」同一去向（首页武装技能 / 画布强制技能） */
   const useDetailSkill = () => {
     const s = detailTarget;
     if (!s?.creative_skill_id) return;
@@ -326,7 +289,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     onUseSkill?.(s);
   };
 
-  /** 上传 SKILL.md */
   const handleMdSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -337,7 +299,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     e.target.value = '';
   };
 
-  /** AI 格式化：调用后端接口返回完整替换文本 */
   const handleAiFormat = () => {
     if (formatting || !skillContent.trim()) return;
     setFormatting(true);
@@ -347,14 +308,13 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
       .finally(() => setFormatting(false));
   };
 
-  /** 保存到我的技能：提交完整 SKILL.md 文本创建个人技能 */
   const handleSaveSkill = () => {
     if (!canSave) return;
     setSaving(true);
     createPersonalSkill(skillContent)
       .then(() => {
         setSkillContent(SKILL_TEMPLATE);
-        mineLoadedRef.current = false; // 切回「我的技能」时重新拉取
+        mineLoadedRef.current = false;
         setTab('mine');
       })
       .catch((e) => window.alert(errMsg(e)))
@@ -365,7 +325,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     <>
       <div className={styles.overlay} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        {/* 头部标签栏 */}
+        {}
         <div className={styles.header}>
           <div className={styles.tabs}>
             <button
@@ -382,22 +342,14 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
               <Store size={15} strokeWidth={2} />
               <span>技能库</span>
             </button>
-            {/* 隐藏「创建技能」入口（2026-08-26 需求：仅隐藏按钮保留代码，恢复时一并解注释）
-            <button
-              className={`${styles.tab} ${tab === 'create' ? styles.tabActive : ''}`}
-              onClick={() => setTab('create')}
-            >
-              <Plus size={15} strokeWidth={2} />
-              <span>创建技能</span>
-            </button>
-            */}
+            {}
           </div>
           <button className={styles.closeBtn} onClick={onClose} title="关闭">
             <X size={16} strokeWidth={2} />
           </button>
         </div>
 
-        {/* ============ 技能库 ============ */}
+        {}
         {tab === 'library' && (
           <>
             <div className={styles.libToolbar}>
@@ -470,7 +422,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
                 const menuOpen = menuSkillId === sid;
                 return (
                   <div key={sid} className={styles.card}>
-                    {/* 卡片左上角三个点菜单（技能库 tab，IKD22K：查看官方 SKILL.md 全文） */}
+                    {}
                     <div ref={menuOpen ? menuWrapRef : undefined} className={styles.cardMenu}>
                       <button
                         className={`${styles.menuBtn} ${menuOpen ? styles.menuBtnOpen : ''}`}
@@ -525,7 +477,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
           </>
         )}
 
-        {/* ============ 我的技能 ============ */}
+        {}
         {tab === 'mine' && (
           <div className={styles.mineWrap}>
             <div ref={mineGridRef} className={styles.cardGrid} onScroll={handleMineScroll}>
@@ -534,7 +486,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
                 const menuOpen = menuSkillId === sid;
                 return (
                   <div key={sid} className={styles.card}>
-                    {/* 卡片左上角三个点菜单（仅「我的技能」tab，IKD0RJ） */}
+                    {}
                     <div ref={menuOpen ? menuWrapRef : undefined} className={styles.cardMenu}>
                       <button
                         className={`${styles.menuBtn} ${menuOpen ? styles.menuBtnOpen : ''}`}
@@ -600,7 +552,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
           </div>
         )}
 
-        {/* ============ 创建技能 ============ */}
+        {}
         {tab === 'create' && (
           <div className={styles.createWrap}>
             <div className={styles.createToolbar}>
@@ -672,7 +624,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
         />
       </div>
     </div>
-      {/* 技能详情弹窗（IKD0RJ）：叠在技能弹窗上层，右上角「使用」直接使用该技能 */}
+      {}
       {detailTarget && (
         <div className={styles.detailOverlay} onClick={() => setDetailTarget(null)}>
           <div className={styles.detailModal} onClick={(e) => e.stopPropagation()}>

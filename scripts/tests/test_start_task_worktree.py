@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Black-box tests for the cross-platform task worktree entrypoint."""
 
 import json
 import os
@@ -10,9 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-try:  # 作为 scripts.tests.* 命名空间包导入
+try:
     from .bash_helper import BASH
-except ImportError:  # 经 discover -s scripts/tests 顶层导入
+except ImportError:
     from bash_helper import BASH
 
 
@@ -566,8 +565,6 @@ class StartTaskWorktreeTest(unittest.TestCase):
         "（对应 test-hooks.sh 的 IS_WINDOWS 降级先例）",
     )
     def test_conflict_abort_failure_reports_honestly_without_claiming_success(self):
-        # 与上一用例同样的分叉冲突，但通过 PATH 注入假 git，让 merge --abort
-        # 强制失败，其余 git 调用透传真实 git，验证文案如实、不误报成功。
         self.commit(self.repo, "shared.txt", "local\n", "fix: 修改本地共享内容")
         self.commit(self.actor, "shared.txt", "remote\n", "fix: 修改远程共享内容")
         run("git", "push", "origin", self.release_branch, cwd=self.actor)
@@ -617,7 +614,6 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertEqual(0, len(self.task_worktrees()))
 
     def test_wrapper_skips_microsoft_store_python3_stub(self):
-        """合成 Store 桩（路径含 WindowsApps）且不提供 py launcher，验证 wrapper 跳过桩、报桩引导、不建 worktree。当前平台 PATH 注入模拟 Windows Git Bash 链路，非真 Windows 冒烟（真 Windows 见 docs/agents/worktree-workflow.md 手动验证）。"""
         store_dir = self.root / "Microsoft" / "WindowsApps"
         store_dir.mkdir(parents=True)
         stub = store_dir / "python3"
@@ -645,12 +641,10 @@ class StartTaskWorktreeTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode, result.stderr)
         self.assertIn("桩", result.stderr)
-        # 桩未被 exec：stderr 不应含桩的特征输出
         self.assertNotIn("Python was not found", result.stderr)
         self.assertEqual(0, len(self.task_worktrees()))
 
     def test_wrapper_falls_back_to_py_launcher_when_python3_is_stub(self):
-        """合成桩 + 假 py launcher（shift 去掉 -3，转给真 python3 绝对路径），验证 wrapper 跳过桩后 fallback py -3 成功建 worktree。逻辑等价模拟，非真 Windows 冒烟（真 Windows 见 docs/agents/worktree-workflow.md 手动验证）。"""
         real_python3 = shutil.which("python3")
         self.assertIsNotNone(real_python3, "测试机需有真 python3")
 

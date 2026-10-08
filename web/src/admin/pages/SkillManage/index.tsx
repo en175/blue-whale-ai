@@ -1,10 +1,3 @@
-/* ============================================
- * SkillManage 技能管理：官方技能归类与分类维护（IKA64P）
- * 效率优化：行内改动暂存高亮 + 顶部一键保存；多选批量归类；分类 chip 过滤表格
- *
- * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**——
- * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
- * ============================================ */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Pencil, Trash2 } from 'lucide-react';
@@ -35,35 +28,26 @@ import {
   Toolbar,
 } from '../../ui';
 
-/** 下拉选项：新分类（随归类创建） */
 const NEW_CAT = '__new__';
-/** 过滤项：未分类 */
 const FILTER_NONE = '__none__';
 
 export default function SkillManage() {
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
-  /** 暂存改动：技能 id → 目标分类（NEW_CAT 表示新分类，名字见 newNames） */
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [newNames, setNewNames] = useState<Record<string, string>>({});
-  /** 勾选集合 */
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  /** 表格过滤：all / 分类名 / 未分类 */
   const [filter, setFilter] = useState<string>('all');
-  /** 批量栏 */
   const [bulkCat, setBulkCat] = useState<string>('');
   const [bulkNew, setBulkNew] = useState('');
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
-  // 两个读各自成一个 Query：旧代码用 Promise.all 把它们绑成一次加载 + 一套三态。
   const skillsQuery = useQuery(adminSkillsOptions());
   const catsQuery = useQuery(adminSkillCategoriesOptions());
-  /** ⚠️ 必须记忆：`skillsQuery.data ?? []` 每次渲染都是新数组，下游两个 useMemo 会因此每渲染都重算（IKJ69L）。 */
   const skills: AdminSkill[] = useMemo(() => skillsQuery.data ?? [], [skillsQuery.data]);
   const cats = catsQuery.data ?? [];
   const loading = skillsQuery.isPending || catsQuery.isPending;
-  // 两份是并发读的，任意一份失败都算这次加载失败；报先出错那一份的原文。
   const firstError = skillsQuery.error ?? catsQuery.error;
   const loadError =
     skillsQuery.isError || catsQuery.isError
@@ -72,13 +56,11 @@ export default function SkillManage() {
         : '加载技能列表失败'
       : '';
 
-  /** 改完之后重新读两份 —— 归类会同时改技能行与分类计数。 */
   const load = useCallback(() => {
     void skillsQuery.refetch();
     void catsQuery.refetch();
   }, [skillsQuery, catsQuery]);
 
-  /** 行的生效目标分类（暂存优先） */
   const effectiveTarget = useCallback(
     (s: AdminSkill): string => {
       const d = drafts[s.id];
@@ -88,7 +70,6 @@ export default function SkillManage() {
     [drafts, newNames],
   );
 
-  /** 待保存列表（目标有效且与现状不同） */
   const pending = useMemo(
     () =>
       skills
@@ -97,7 +78,6 @@ export default function SkillManage() {
     [skills, effectiveTarget],
   );
 
-  /** 表格过滤 */
   const filtered = useMemo(() => {
     if (filter === 'all') return skills;
     if (filter === FILTER_NONE) return skills.filter((s) => s.category === '');
@@ -125,7 +105,6 @@ export default function SkillManage() {
     });
   };
 
-  /** 批量栏「应用到选中」：写入暂存（不请求），由一键保存统一提交 */
   const applyBulk = () => {
     if (!bulkCat || selected.size === 0) return;
     if (bulkCat === NEW_CAT && !bulkNew.trim()) {
@@ -151,7 +130,6 @@ export default function SkillManage() {
     setActionError('');
   };
 
-  /** 一键保存：按目标分组批量提交 */
   const saveAll = async () => {
     if (pending.length === 0 || busy) return;
     setBusy(true);
@@ -215,7 +193,7 @@ export default function SkillManage() {
       {actionError && <Card>{actionError}</Card>}
 
       <Card padded={false}>
-        {/* 分类条（点击过滤表格） */}
+        {}
         <div style={{ padding: 'var(--admin-space-3)' }}>
           <Toolbar>
             <Chip active={filter === 'all'} onClick={() => setFilter('all')}>
@@ -253,7 +231,7 @@ export default function SkillManage() {
           </Toolbar>
         </div>
 
-        {/* 批量栏 */}
+        {}
         <div style={{ padding: '0 12px 12px' }}>
           <Toolbar>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -280,7 +258,7 @@ export default function SkillManage() {
           </Toolbar>
         </div>
 
-        {/* 技能表 */}
+        {}
         <Table>
           <thead>
             <tr>
@@ -337,8 +315,6 @@ export default function SkillManage() {
                   </td>
                   <td>
                     {s.cover_url ? (
-                      // 保留 release 分支的 resolveMediaSrc + crossOrigin（媒体跨域）；
-                      // 尺寸走内联而非私有样式类 —— 本页已无自己的 CSS 文件
                       <img
                         src={resolveMediaSrc(s.cover_url)}
                         crossOrigin={remoteImageCrossOrigin(s.cover_url)}
@@ -404,7 +380,6 @@ export default function SkillManage() {
   );
 }
 
-/* ============ 分类改名弹窗 ============ */
 function RenameModal({
   from,
   onClose,
@@ -418,7 +393,6 @@ function RenameModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // 每次打开以当前分类名初始化
   useEffect(() => {
     setTo(from ?? '');
     setError('');

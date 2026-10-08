@@ -1,5 +1,3 @@
-// generation worker 仓储组合入口。实现按职责拆分到同目录子模块（IK74V8，≤800 行硬线）；
-// 本文件只做组合与再导出，对外导出面保持不变。
 import type { PrismaClient } from "@prisma/client";
 
 import { createWorkerClaimOps } from "./generation-worker-claim-ops.js";

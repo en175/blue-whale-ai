@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# 远程重启：备份当前二进制为 prev → 检测容器 rm -f → compose up -d → curl 重试验证。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -9,8 +8,6 @@ ensure_key
 echo "▶ 备份当前二进制 → $BIN_NAME.prev（回滚用）"
 "${SSH[@]}" "cd $REMOTE_DIR && [ -f $BIN_NAME ] && cp -a $BIN_NAME $BIN_NAME.prev || true"
 
-# 记录当前容器 image tag → 远端 .image-tag.prev（tag 维度回滚用；容器不存在则清空 prev）。
-# 注意：binary prev 备份在 push 覆盖之后，语义本就无效；tag 维度回滚（rollback.sh）已绕开它。
 echo "▶ 记录当前 image tag → .image-tag.prev（tag 维度回滚用）"
 "${SSH[@]}" "prev=\$(docker inspect --format '{{.Config.Image}}' $CONTAINER 2>/dev/null || true); if [ -n \"\$prev\" ]; then printf '%s\n' \"\$prev\" > $REMOTE_DIR/.image-tag.prev; else rm -f $REMOTE_DIR/.image-tag.prev; fi"
 
@@ -38,5 +35,5 @@ SOURCE_COMMIT="$(cat "$SKILL_DIR/.build/source-commit" 2>/dev/null || echo unkno
 echo ""
 echo "▶ 运行 image：$RUNNING_TAG ｜ source：${SOURCE_COMMIT:0:12}"
 echo "⚠️  外部访问需云安全组放行 TCP $API_PORT"
-echo "✓ restart 完成 → 宿主内 http://localhost:$API_PORT ｜ 外部 http://$DEPLOY_HOST:${API_PORT}（放行后）"  # ${API_PORT} 界定：紧邻全角（，bash 3.2 CJK 边界 bug
+echo "✓ restart 完成 → 宿主内 http://localhost:$API_PORT ｜ 外部 http://$DEPLOY_HOST:${API_PORT}（放行后）"
 echo "回滚：bash scripts/rollback.sh（用远端 .image-tag.prev 的 tag 重建，--no-build 复用存活镜像）"

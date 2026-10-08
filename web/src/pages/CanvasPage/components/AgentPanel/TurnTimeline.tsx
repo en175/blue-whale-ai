@@ -1,10 +1,3 @@
-/**
- * 一轮时间线里的叶子组件（IKDK5K / IKDK5L / IKFLB9）：思考块、一段思考、工具行、等待行、轮尾的账。
- *
- * 单独成文件是为了能在 jsdom 里直接渲染它们做回归——AgentPanel/index.tsx 牵着编辑器、
- * 弹窗和一堆接口，在测试里立不起来。条目的编排（AssistantTurnBody）仍在那边，因为它要用
- * 生成卡与 Markdown。
- */
 import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, ChevronUp, Clock, Loader2, Minus, X } from 'lucide-react';
 import styles from './index.module.css';
@@ -24,9 +17,6 @@ import {
   type TurnAccount,
 } from '../../hooks/sessionTimeline';
 
-/**
- * 每秒推进一次的「现在」。只在 `active` 时开表——结束的行不需要再重渲染。
- */
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -38,18 +28,6 @@ function useNow(active: boolean): number {
   return now;
 }
 
-/**
- * 思考块：模型在想什么（IKDK5K）。
- *
- * 两种内容，来源不同所以分开渲染：`steps` 是服务端报的轮级活动（「正在理解创作需求」），
- * `reasoning` 是模型自己的原话（经服务端过滤，IKDK5D）。工具自己的进度不在这里——它有自己
- * 的一行（ToolCallRow），同一事实只画一次。
- *
- * ## 开合归谁管
- *
- * `autoOpen` 是**随状态变化的默认值**，不是初始值：运行中、正文还没出来时展开（那段等待正是
- * 它要填的），正文一出现就收起（它已经完成了自己的作用）。用户点过就以用户为准（`override`）。
- */
 export function ThinkingBlock({
   steps,
   reasoning,
@@ -58,18 +36,12 @@ export function ThinkingBlock({
 }: {
   steps: string[];
   reasoning?: string;
-  /** 这一轮还在跑：标记脉动，最后一步保留进行时。 */
   live: boolean;
   autoOpen?: boolean;
 }) {
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? autoOpen;
 
-  /**
-   * 思考原话自己就是一个滚动容器（`.thinkingReasoning` 上有 `max-height; overflow-y: auto`），
-   * 外层消息列表滚到底对它没有作用，要跟上流式输出得滚这个盒子本身。
-   * `stick` 记的是「用户此刻是不是贴着底」，在 onScroll 里更新：用户往上翻看前文时不把他拽回来。
-   */
   const reasoningRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   useEffect(() => {
@@ -97,7 +69,7 @@ export function ThinkingBlock({
         <div className={styles.thinkingBody}>
           {steps.map((s, i) => (
             <div key={i} className={styles.thinkingStep}>
-              {/* 进行中只有最后一步还在做，前面的都已经过去了；结束后全部翻成过去式。 */}
+              {}
               {live && i === steps.length - 1 ? s : settledStepLabel(s)}
             </div>
           ))}
@@ -119,15 +91,6 @@ export function ThinkingBlock({
   );
 }
 
-/**
- * 一段思考（IKFLB9）：模型在这一刻想了什么、想了多久，落在它发生的位置上。
- *
- * 此前思考是整轮一块、固定在最前，工具行之间的那几十秒没有任何东西——测试站项目 462 写卡那一行
- * 记 1m 9s，点开只有两条 <0.1s。现在每一段想各占一行，时长和工具行、等待行一起加起来就是这一轮。
- *
- * 默认收起；正在想的那一段展开，想完就收——那段等待正是它要填的。用户点过就以用户为准。
- * 投影把整段话都拦下时（原话讲的全是内部的东西）只剩一行「思考了 12s」，没有可展开的内容。
- */
 export function ThoughtBlock({ item }: { item: Extract<TimelineItem, { kind: 'thought' }> }) {
   const [override, setOverride] = useState<boolean | null>(null);
   const hasText = item.text.trim() !== '';
@@ -174,12 +137,6 @@ export function ThoughtBlock({ item }: { item: Extract<TimelineItem, { kind: 'th
   );
 }
 
-/**
- * 等待行（IKFLB9）：两段之间没有任何输出的那段时间，比如工具返回之后模型把结果读一遍。
- *
- * 只在落库之后出现（服务端补缝算出来的），一秒以内的不画（见 MIN_VISIBLE_WAITING_MS）。画得比工具行
- * 更淡：它不是做了一件事，是在等一件事。
- */
 export function WaitingRow({ item }: { item: Extract<TimelineItem, { kind: 'waiting' }> }) {
   return (
     <div className={`${styles.toolCall} ${styles.toolCallWaiting}`}>
@@ -216,22 +173,12 @@ function ToolStatusMark({ status }: { status: ToolStatus }) {
   }
 }
 
-/**
- * 工具行：它在做什么（IKDK5K）。
- *
- * 有生命周期：运行中转圈读秒，结束翻成过去式带耗时（「正在读取图片」→「已读取图片 · 10.4s」），
- * 失败与被门挡下各有自己的语气。子步骤运行中默认展开——用户此刻正盯着它等；结束后默认收起，
- * 点一下再看。用户点过就以用户为准。
- *
- * 文案里刻意没有「调用」「工具」和工具名：用户关心的是做了什么事，不是用什么机制做的。
- */
 export function ToolCallRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const running = item.status === 'running';
   const [override, setOverride] = useState<boolean | null>(null);
   const hasSubsteps = item.substeps.length > 0;
   const open = hasSubsteps && (override ?? running);
   const now = useNow(running && item.startedAt !== null);
-  // 运行中按整秒读，结束后用服务端报的精确值。
   const elapsedMs =
     item.elapsedMs ?? (running && item.startedAt !== null ? Math.floor((now - item.startedAt) / 1000) * 1000 : null);
   return (
@@ -272,17 +219,6 @@ export function ToolCallRow({ item }: { item: Extract<TimelineItem, { kind: 'too
   );
 }
 
-/**
- * 过程组（IKFLB9 定稿）：一轮里模型做的事——思考、查阅、等待——收成一个整体，正文只放结论。
- *
- * 此前思考、工具行、等待行和正文一句一句交替着铺（「已等待 9.8s / ✶ 思考了 5.2s / 我先把方向对一下 / 已查阅…」），
- * 用户读到的是十几行碎片。定稿后每轮只有一行「▶ ✻ 已处理 31s · 思考 2 段 · 工具 1 次」，默认折起；点开按阶段分组
- * （理解需求 / 查阅对应的创作方法 / 整理回复），每个阶段一个合计时长，再点开才是里面的思考原文、读了哪些文件。
- *
- * 运行中是「✶ 处理中」并展开，正在跑的那个阶段也展开——那段等待正是它要填的；结束就收。用户点过以用户为准。
- * `totalMs` 是这一轮的总耗时（落库后取轮的账，和输入框上方那一行同一个数）；没有就把各段加起来。
- * 总数减各段剩下的是写回复的时间，补成最后一段「写回复」，头上的数和里面的加得起来（withWriting）。
- */
 export function ProcessGroup({ items: given, live, totalMs = null }: { items: readonly ProcessItem[]; live: boolean; totalMs?: number | null }) {
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? live;
@@ -318,11 +254,9 @@ export function ProcessGroup({ items: given, live, totalMs = null }: { items: re
   );
 }
 
-/** 一个阶段：✓ / 转圈 + 名字 + 合计时长；点开是里面的思考段、工具行、等待行，各自沿用原来的叶子组件。 */
 function PhaseRow({ phase, now }: { phase: ProcessPhase; now: number }) {
   const running = phase.items.some(processItemRunning);
   const [override, setOverride] = useState<boolean | null>(null);
-  // 写回复那一段没有可展开的内容：回复就在下面。
   const expandable = phase.items.some((item) => item.kind !== 'writing');
   const open = expandable && (override ?? running);
   const elapsed = phase.items.reduce((acc, item) => acc + processItemElapsedMs(item, now), 0);
@@ -378,21 +312,6 @@ const ACCOUNT_CLASS: Record<TurnAccount['outcome'], string> = {
   failed: styles.turnFooterFailed ?? '',
 };
 
-/**
- * 轮尾的交代（IKDK5L / IKEV0V）：这一轮是怎么结束的——取消、失败、完成了但卡没写出来。
- *
- * 耗时、token、上下文那笔账不再挂在这里（IKFLB9 定稿）：它只在输入框上方一行（LastTurnLine），
- * 每轮尾都写一遍是噪音。完成的轮什么都不写——回答就在上面。
- *
- * `onRetryCard` 只给最后一轮：它把这一轮用户的原话重发一遍——重试接口只接失败的轮，这一轮是完成的，走不了那条。
- *
- * `onRetry` 是**整轮失败**时的重来（IKHCJ2 第 5 项），走重试接口。在这之前，失败的轮在这里
- * 只有一行字、什么都点不了，唯一的重试入口是输入框工具栏角落一个 14px 的无字图标——
- * 测试报告因此记成「前端无重试入口」，而那个判断在用户那边是成立的：够不着的入口等于没有。
- *
- * 要不要给这个按钮由**服务端**说了算（`account.failureRetryable`，与失败文案同出一张表）。
- * 「再试也会被同一道审核拦下」那一类不给，否则用户会一遍遍按、一遍遍撞同一堵墙。
- */
 export function TurnFooter({
   account,
   onRetryCard,
@@ -438,18 +357,11 @@ const LAST_TURN_LABEL: Record<TurnAccount['outcome'], string> = {
   failed: '上一轮未完成',
 };
 
-/** `21:37`。本地时间，只到分钟——那一行是给人扫一眼的。 */
 function clockOf(ms: number): string {
   const d = new Date(ms);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-/**
- * 输入框上方那一行账（IKFLB9 定稿）：「✻ 上一轮 57s · ↓ 14.7k · 上下文 9% · 21:37 完成」。
- *
- * 只有一行、只说最近一轮、钉在输入框上方不随消息滚走。运行中这一行让位给 RunStatusLine（读秒、在等什么）。
- * 三个数各自可缺，一个都没有、也没时刻时不画。
- */
 export function LastTurnLine({ account }: { account: TurnAccount }) {
   const meta: string[] = [];
   if (account.seconds !== null) meta.push(formatElapsed(account.seconds));

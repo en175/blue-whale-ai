@@ -5,19 +5,6 @@ import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorato
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { SkillService } from "@lib/shared/skills/skills.service.js";
 
-/**
- * Agent 解析用户点选的创作套路（IKALMC / IKAP6P）。
- *
- * 108 套路库的权威副本只有一份，就是本库的 creative_skill / creative_skill_version：它有
- * creative_skill_id、有版本、有个人技能、有分类与使用量，也正是用户在技能库里浏览和点选的
- * 那一份。agent 镜像里曾另外捆绑了一份同内容的文件副本，两份 id 体系不同
- * （`custom-ecom-tvc-product-ad` ⟷ `tvc_product_ad`），实测 108 个 id 一个都对不上，
- * 于是每一次「直接使用」在 agent 侧都判「不认识这条」，静默不生效。那份副本已删除，
- * agent 一律经本端点解析。
- *
- * 形制照 internal/agent-assets/resolve：服务令牌 + 可信上下文头，与用户令牌无关。用户身份
- * 仍然必须带，因为个人技能有归属——官方域对所有人可见，个人域只对 owner 可见。
- */
 function authorizedService(header: string | undefined): boolean {
   const expected = process.env.AGENT_SERVICE_TOKEN?.trim();
   const supplied = header?.startsWith("Bearer ")
@@ -66,8 +53,6 @@ export class InternalAgentSkillsController {
     }
 
     const skill = await this.skills.findAgentSkill(creativeSkillId.trim(), userId);
-    // 不存在、已删、或个人技能不属于这个用户，一律 404：不泄露存在性，也让 agent 能把
-    // 「点了没用上」如实说给用户听，而不是当作没点过。
     if (!skill || !skill.body.trim()) {
       throw new NewApiError("技能不存在或无正文", 404, "skill_not_found");
     }

@@ -71,14 +71,12 @@ describe('audioTrim 会话身份与占位卡（IKHB7A，mediaExtract 同族先�
     });
     expect(node.id).toBe('audio-trim-j1');
     expect(node.type).toBe('mediaNode');
-    // 音频卡内容宽恒 480：x = 100 + 480 + 60 = 640，y 与源同排
     expect(node.position).toEqual({ x: 640, y: 20 });
     expect(node.data.mediaType).toBe('audio');
     expect(node.data.genStatus).toBe('generating');
     expect(node.data.progress).toBe(0);
     expect(node.data.jobId).toBe('j1');
     expect(node.data.fileName).toBe('播客片头(截取).wav');
-    // lastInput 冻结：贴边省略的 start_time 保留、end_time 键不出现（strict 冻结形态）
     expect(node.data.audioTrim).toEqual({
       sourceAssetId: '5',
       lastInput: { source_asset_id: '5', start_time: 2.4, output_format: 'wav' },

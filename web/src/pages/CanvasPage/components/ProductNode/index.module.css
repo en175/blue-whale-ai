@@ -1,12 +1,8 @@
-/* ============================================
- * ProductNode - 画布商品节点
- * ============================================ */
 
 .wrapper {
   position: relative;
 }
 
-/* ---- 悬停/选中顶部操作条 ---- */
 .topBar {
   display: flex;
   align-items: center;
@@ -67,7 +63,6 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-/* ---- 标题 ---- */
 .head {
   display: flex;
   align-items: center;
@@ -93,7 +88,6 @@
   color: var(--color-text-primary);
 }
 
-/* ---- 商品图片区 ---- */
 .imgHead {
   display: flex;
   align-items: center;
@@ -139,7 +133,6 @@
   opacity: 0.35;
 }
 
-/* 素材已被删除缩略占位（灰色方案） */
 .thumbMissing {
   width: 100%;
   height: 100%;
@@ -169,7 +162,6 @@
   background-color: rgba(250, 82, 82, 0.8);
 }
 
-/* 拖入/点击上传区 */
 .dropzone {
   height: 140px;
   display: flex;
@@ -194,7 +186,6 @@
   display: none;
 }
 
-/* ---- 商品详情 ---- */
 .detailLabel {
   margin: 12px 0 6px;
   font-size: var(--font-size-xs);
@@ -227,7 +218,6 @@
   background-color: var(--color-border-primary);
 }
 
-/* ---- 链接导入 ---- */
 .linkToggle {
   display: flex;
   align-items: center;
@@ -271,7 +261,6 @@
   align-items: center;
 }
 
-/* 空链接时展示支持平台徽章（充当 placeholder） */
 .linkPlaceholder {
   position: absolute;
   left: 6px;
@@ -334,7 +323,6 @@
   cursor: not-allowed;
 }
 
-/* ---- 右键菜单 ---- */
 .contextMenu {
   position: fixed;
   min-width: 200px;
@@ -372,7 +360,6 @@
   color: #e5484d;
 }
 
-/* ---- 添加菜单（上传 / 从节点中选择） ---- */
 .addMenu {
   position: relative;
   margin-top: 6px;
@@ -407,7 +394,6 @@
   background-color: rgba(255, 255, 255, 0.08);
 }
 
-/* ---- 图片选择器 ---- */
 .picker {
   position: relative;
   margin-top: 6px;

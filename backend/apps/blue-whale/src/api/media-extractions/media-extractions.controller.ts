@@ -1,5 +1,3 @@
-// IKARDY：POST /projects/:projectId/media-extractions — 视频提取音频建任务端点。
-// IKH28V：补请求方凭证冻结链（去字幕同构）——请求体结构不变（ADR-0103）。
 import { Body, Controller, Headers, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -28,7 +26,6 @@ export class MediaExtractionsController {
       body ?? {},
       idempotencyKey,
     );
-    // IKJJQW（B.8 局部适配器）：新协议受控错误信封直写 HTTP 状态与 data.reason。
     if (isRecoveryControlledEnvelope(result)) {
       writeRecoveryControlled(result, res);
       return;

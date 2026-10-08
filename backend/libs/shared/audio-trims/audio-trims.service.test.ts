@@ -2,9 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AudioTrimsService } from "./audio-trims.service.js";
 
-// IKHB6N：一对一仿 media-extractions.service.test 先例。资产归属读法同 findOwnedSource；
-// 免费口径哨兵（cost_reservations.create）与凭证冻结断言同款；截取特有面（贴边省略键不落、
-// 时间精度/顺序服务端复核、缺省格式按源文件名后缀推导）覆盖契约 audio-trim.ts 口径。
 function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
@@ -25,7 +22,6 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
@@ -52,7 +48,6 @@ describe("AudioTrimsService.create", () => {
   });
 
   it("rejects a source asset not owned by the user", async () => {
-    // 归属口径同 media_extract——findOwnedSource 按 user_id 过滤，非本人素材一律 404。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(null) },
     });
@@ -98,8 +93,6 @@ describe("AudioTrimsService.create", () => {
     });
   });
 
-  // 贴边省略口径（ADR-0111 / buildAudioTrimTimeParams）：左缘贴 0 / 右缘贴源全长时前端省略
-  // start_time / end_time，创建入口原样落库——undefined 键不写（toEqual 精确匹配钉死）。
   it("omits start_time / end_time keys when not sent (贴边省略原样落库)", async () => {
     const { service, create } = makeService();
     const result = await service.create("9", "55", { source_asset_id: "88" });
@@ -124,8 +117,6 @@ describe("AudioTrimsService.create", () => {
     });
   });
 
-  // 缺省推导（ADR-0111 默认跟随源音频格式）：storage_key 后缀在枚举内跟随源格式，
-  // 无后缀 / 枚举外后缀（如 aac）/ storage_key 缺失一律回退 m4a。
   it("defaults output_format from the source file extension", async () => {
     const { service, create } = makeService({
       assets: {
@@ -188,8 +179,6 @@ describe("AudioTrimsService.create", () => {
     },
   );
 
-  // 服务端复核契约枚举（audioTrimInputSchema）：非负、最多两位小数、start < end
-  // （官方 PDF start_time / end_time 节硬性条款）。
   it.each([
     ["负数", { start_time: -1 }],
     ["超两位小数", { start_time: 1.234 }],
@@ -222,7 +211,6 @@ describe("AudioTrimsService.create", () => {
   });
 
   it("is free-tier: no cost reservation, no provider row", async () => {
-    // 免费口径哨兵（网关零价模型族，同 media_extract 先例）：本工具不写成本预留、不落 provider 行。
     const { service, create, costCreate } = makeService();
     const result = await service.create("9", "55", {
       source_asset_id: "88",

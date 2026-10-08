@@ -6,11 +6,6 @@ import {
   type UploadMaterialGateDeps,
 } from "./material-upload-gate.js";
 
-// IKGQWR / ADR-0093 决策 3：上传口素材闸的内核。
-//
-// 这些用例钉的是**三分支规则**与**上传口独有的补行**两件事。规则本身与生成门
-// （material-compliance-gate.test.ts）逐条对齐，差别只有「无记录时补建行」这一条——
-// 所以「无记录 + 上游给了 GroupId」那两个用例是这边独有、那边刻意做不到的。
 
 const MATERIAL = "asset-20260820153209-6c9z8";
 const GROUP = "group-20260827113901-cbkmf";
@@ -63,7 +58,6 @@ describe("assertMaterialLinkable（上传口素材闸）", () => {
     const { gateDeps, fetchUpstream } = deps(rowOf("Active"));
     const result = await assertMaterialLinkable(gateDeps, "9", MATERIAL);
     expect(result).toEqual({ ok: true, materialGroupId: GROUP });
-    // 终态直接判是这张表存在的意义——每次上传都打一次上游等于把表白建。
     expect(fetchUpstream).not.toHaveBeenCalled();
   });
 
@@ -87,9 +81,6 @@ describe("assertMaterialLinkable（上传口素材闸）", () => {
   });
 
   it("无记录 + 上游 Active 带 GroupId → **补建行**并放行（上传口独有）", async () => {
-    // 生成门做不到这件事：它的注释写着「无行不造行（造行需要 group id，只有 CreateAsset 拿得到）」。
-    // 上游 GetAsset 的 Result.GroupId 是第二个拿得到的位置，上传口顺手把这个洞堵上——
-    // 补一次行之后，存量素材不必每次生成都回查上游。
     const { gateDeps, upsertProcessing, mirrorStatus } = deps(null, {
       status: "Active",
       groupId: GROUP,
@@ -100,7 +91,6 @@ describe("assertMaterialLinkable（上传口素材闸）", () => {
       materialId: MATERIAL,
       materialGroupId: GROUP,
     });
-    // 已经查到终态，所以要跟一次镜像把它从 Processing 覆盖成真实值。
     expect(mirrorStatus).toHaveBeenCalledWith(
       expect.objectContaining({ status: "Active" }),
     );

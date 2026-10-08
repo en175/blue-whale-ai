@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { canvasBindingSchema } from "./canvas-recovery.js";
 
-/** IKI68N: 业务 API、持久化快照与 Worker 共用的音频混合字段。 */
 export const AUDIO_MIX_JOB_TYPE = "audio_mix";
 export const AUDIO_MIX_SOURCE = "dock";
 export const AUDIO_MIX_OUTPUT_FORMATS = ["mp3", "m4a", "ogg", "flac", "wav"] as const;
@@ -18,8 +17,6 @@ export const audioMixCreateSchema = z.object({
   source_node_id: z.string().min(1),
   inputs: z.array(inputIdentitySchema).min(2).max(100),
   output_format: z.enum(AUDIO_MIX_OUTPUT_FORMATS).default(AUDIO_MIX_DEFAULT_OUTPUT_FORMAT),
-  // IKJJQZ（IKIXK9-SPEC-20261002 B.3）：恢复契约 v1 绑定（可选；未携带走历史路径零变化）。
-  // 冻结进 job.input 的字段不含它——请求摘要（JSON.stringify(parsed)）自动覆盖。
   canvas_binding: canvasBindingSchema.optional(),
 }).strict().superRefine((value, context) => {
   if (value.inputs[0]?.node_id !== value.source_node_id) {

@@ -1,24 +1,3 @@
-/* ============================================
- * Promotions 限时活动：名称 / 折扣 / 时间窗 / 条件（billing_promotions）
- *
- * 数据源 GET/POST/PUT/DELETE /api/admin/billing-promotions（后端转发 billing 的管理端接口）。
- * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**。
- *
- * ── 三处「配错了在计价侧是静默的」坑，界面上都要拦住或说清 ──────────────────────
- *
- * 1. **模型范围不能留空**：计价侧对空集合返回「命中」（= 不限）。一个「限时活动」把全站
- *    模型都打折几乎不会是本意，所以至少给一个模式；要全站就打 `*`，让它是显式的。
- * 2. **每日时段要么都填、要么都留空**：只填一半在计价侧等于**全天** ——
- *    配置与意图不符，所以这里在提交前就拦住。
- * 3. **时区**（默认 `Asia/Shanghai`）：跨零点的「夜间 22:00–06:00」必须按活动自己的时区算；
- *    名字写错会让命中它的任务提交失败（预扣路径解析时区）。
- *
- * ── 客户端的校验边界 ────────────────────────────────────────────────────────
- *
- * 这里只拦「不填就没法发请求」的（必填、折数、时间先后），**其余一律交给 billing**：
- * 规则抄第二份就会出现「这里放行、那边拒绝」。billing 的报错指得出是哪一列不对，
- * 界面原样呈现它。
- * ============================================ */
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
@@ -67,19 +46,15 @@ import {
   formGrid,
 } from '../../ui';
 
-/** 表单状态：数值与时间都是**文字**（`datetime-local` / `time` 的原生值形态）。 */
 interface FormState {
   code: string;
   name: string;
   discountZhe: string;
   modelIds: string[];
   taskTypes: string[];
-  /** 勾选的等级；空 = 不限等级 */
   tierScope: string[];
-  /** `2026-10-01T00:00`（datetime-local 的形态） */
   startAt: string;
   endAt: string;
-  /** `22:00`（time 的形态）；两个都空 = 全天 */
   dailyTimeStart: string;
   dailyTimeEnd: string;
   daysOfWeek: number[];
@@ -92,8 +67,6 @@ const EMPTY_FORM: FormState = {
   code: '',
   name: '',
   discountZhe: '7',
-  // 默认给 `*`（全部模型）：它是**显式**的全站折扣，比留空安全 —— 留空在计价侧也是「不限」，
-  // 但界面上看不出区别，而「活动只对某几个模型生效」才是常态
   modelIds: ['*'],
   taskTypes: [],
   tierScope: [],
@@ -126,13 +99,6 @@ function formFrom(row: Promotion): FormState {
   };
 }
 
-/**
- * 已存在的行 → 接口入参（**不校验**：它本来就是从这个接口读回来的）。
- *
- * <p>用于「就地停用 / 启用」这类不改其它字段的操作 —— 走一遍表单校验在这里没有意义，
- * 而且库里可能有一条更早写进去的历史行（比如标识不合现在的规则），
- * 那不该妨碍运营把它停掉。
- */
 function inputFrom(row: Promotion): PromotionInput {
   return {
     code: row.code,
@@ -152,7 +118,6 @@ function inputFrom(row: Promotion): PromotionInput {
   };
 }
 
-/** 表单 → 接口入参；返回错误文案（`error` 存在就是没通过）。 */
 function toInput(form: FormState): { input: PromotionInput } | { error: string } {
   if (!form.code.trim()) return { error: '活动标识必填（审计用，如 night-70）' };
   if (!form.name.trim()) return { error: '活动名称必填' };
@@ -167,7 +132,6 @@ function toInput(form: FormState): { input: PromotionInput } | { error: string }
   if (!(form.endAt > form.startAt)) {
     return { error: '结束时间必须晚于起始时间（活动区间是 [起始, 结束)）' };
   }
-  // 只填一半在计价侧等于全天（见文件头第 2 条）—— 配置与意图不符，这里就拦住
   if ((form.dailyTimeStart === '') !== (form.dailyTimeEnd === '')) {
     return { error: '每日时段要么都填、要么都留空（都留空 = 全天）' };
   }
@@ -180,7 +144,6 @@ function toInput(form: FormState): { input: PromotionInput } | { error: string }
       name: form.name.trim(),
       discountBp,
       modelIds: form.modelIds,
-      // 空 → null：接口上「不限」只有一种表示
       taskTypes: form.taskTypes.length > 0 ? form.taskTypes : null,
       tierScope: form.tierScope.length > 0 ? form.tierScope : null,
       startAt: form.startAt,
@@ -238,7 +201,6 @@ export default function Promotions() {
     },
   });
 
-  /** 立刻切换启用 / 停用：运营最常用的动作，不该逼他打开弹窗改一个下拉再保存。 */
   const toggleStatus = useMutation({
     mutationFn: (row: Promotion) =>
       updatePromotion(row.id, {
@@ -456,7 +418,6 @@ export default function Promotions() {
   );
 }
 
-/* ============ 新建 / 编辑弹窗 ============ */
 
 const TZ_HINT = '活动自己的时区（默认 Asia/Shanghai）。下面的时间都按它理解，跨零点时段尤其依赖它';
 
@@ -479,7 +440,6 @@ function PromotionEditorModal({
   const patch = (next: Partial<FormState>) => setDraft((d) => ({ ...d, ...next }));
   const bp = parseZheToBp(draft.discountZhe);
 
-  /** 勾选式多选：等级与星期都是**封闭取值**，勾选比手打靠谱。 */
   const toggleIn = <T,>(values: T[], value: T): T[] =>
     values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
 

@@ -8,11 +8,6 @@ import type { Node } from '@xyflow/react';
 import { ApiError } from '@/api/http';
 import CanvasPage from './index';
 
-/* IKIZQE 成片按钮与关联结果卡（页面流）：
-   单一入口（仅样片卡标题行注入 finalizeCta）、点击前预计积分、直接提交无二次确认、
-   提交中禁用 + 邻近关联成片卡、并发点击至多一次提交、过期/缺截止禁用、空报价禁用、
-   失败呈现（不提供同 Draft ID 重试）、状态核对中禁点、两卡关系与 final 阶段轮询承接。
-   FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；API 层全 mock。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -149,7 +144,6 @@ vi.mock('@/api/jobs', () => ({
   fetchJobStatus: apiMocks.fetchJobStatus,
   quoteVideoFinalize: apiMocks.quoteVideoFinalize,
   finalizeVideoJob: apiMocks.finalizeVideoJob,
-  // IKIZQG：过期样片/失败成片入口会请求重新生成报价（本文件不覆盖重生成流，恒空报价禁用入口）
   quoteSampleRegenerate: vi.fn(async () => ({ credits: null, quote_revision: null })),
   regenerateSampleJob: vi.fn(),
   readJobFailText: apiMocks.readJobFailText,
@@ -177,7 +171,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
 const FUTURE = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 const PAST = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-/** 默认画布：成功样片卡 s1（videoStage=sample + jobId + 未来截止）+ 普通视频卡 v1 */
 function seedDoc(opts?: { deadline?: string | null }) {
   canvasDocMock.current = {
     doc: {
@@ -256,7 +249,6 @@ function finalNodeOf(sampleJobId = '9001'): Node | undefined {
   );
 }
 
-/** 等样片卡注入指定 phase 的成片按钮，并返回当时的注入态 */
 async function waitForCta(phase: string) {
   await vi.waitFor(() => {
     expect((nodeData('s1').finalizeCta as { phase?: string } | undefined)?.phase).toBe(phase);
@@ -306,7 +298,6 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     expect(cta.credits).toBe(80);
     expect(apiMocks.quoteVideoFinalize).toHaveBeenCalledTimes(1);
     expect(apiMocks.quoteVideoFinalize).toHaveBeenCalledWith('p1', '9001', { silent: true });
-    // 单一入口：普通视频卡/无 jobId 卡不注入 finalizeCta
     const v1 = mediaNodes().find((n) => n.id === 'v1')!;
     expect(v1.data?.finalizeCta).toBeUndefined();
     const injected = mediaNodes().filter((n) => n.data?.finalizeCta != null);
@@ -322,14 +313,13 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     await waitForCta('ready');
     await clickFinalize();
 
-    // 提交中：CTA 已派生为 running（生成中，禁用），成片占位卡已在样片卡右侧邻近落位并带两卡关系
     await vi.waitFor(() => expect(finalNodeOf()).toBeTruthy());
     expect((nodeData('s1').finalizeCta as { phase?: string } | undefined)?.phase).toBe('running');
     const finalNode = finalNodeOf()!;
     expect(finalNode.data?.videoStage).toBe('final');
     expect(finalNode.data?.sourceSampleJobId).toBe('9001');
     expect(finalNode.data?.genStatus).toBe('generating');
-    expect(finalNode.data?.jobId).toBeUndefined(); // 受理回填前无 jobId
+    expect(finalNode.data?.jobId).toBeUndefined();
     expect(finalNode.position.x).toBeGreaterThan(sampleNode().position.x);
     expect(finalNode.position.y).toBe(sampleNode().position.y);
 
@@ -341,7 +331,6 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     expect(typeof key).toBe('string');
     expect(key.length).toBeGreaterThan(0);
 
-    // 受理：回填 jobId 并启动轮询，终态承接 final 阶段投影
     await act(async () => { resolveFinalize({ generation_job_id: '9002', cursor: 7 }); });
     await vi.waitFor(() => expect(finalNodeOf()!.data?.src).toBe('http://vid/final.mp4'));
     const done = finalNodeOf()!;
@@ -352,7 +341,6 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     expect(done.data?.chargeState).toBe('settled');
     expect(done.data?.actualCredits).toBe(80);
     expect(done.data?.jobId).toBe('9002');
-    // 成片已存在：样片卡不再渲染成片入口（首版一张样片至多一条成片）
     await vi.waitFor(() => expect(sampleNode().data?.finalizeCta).toBeUndefined());
   });
 
@@ -379,7 +367,6 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     await renderPage();
     await waitForCta('expired');
     expect(apiMocks.quoteVideoFinalize).not.toHaveBeenCalled();
-    // 点击派发被页面守卫拦下（无报价不提交）
     await clickFinalize();
     expect(apiMocks.finalizeVideoJob).not.toHaveBeenCalled();
 
@@ -403,7 +390,6 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     await renderPage();
     await waitForCta('ready');
     await clickFinalize();
-    // 占位卡已撤回，报价重取
     await vi.waitFor(() => expect(finalNodeOf()).toBeUndefined());
     await waitForCta('ready');
     expect(apiMocks.quoteVideoFinalize).toHaveBeenCalledTimes(2);
@@ -416,11 +402,9 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     await waitForCta('ready');
     await clickFinalize();
     await vi.waitFor(() => expect(apiMocks.finalizeVideoJob).toHaveBeenCalledTimes(2));
-    // 两次调用复用同一把幂等键（一次用户意图一把：响应丢失原样重发 → 服务端重放）
     expect(apiMocks.finalizeVideoJob.mock.calls[0]![3]).toBe(apiMocks.finalizeVideoJob.mock.calls[1]![3]);
     await vi.waitFor(() => expect(finalNodeOf()).toBeUndefined());
     await waitForCta('checking');
-    // 核对中禁止再次点击：页面守卫直接忽略
     await clickFinalize();
     expect(apiMocks.finalizeVideoJob).toHaveBeenCalledTimes(2);
   });
@@ -432,11 +416,9 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     await clickFinalize();
     await vi.waitFor(() => expect(finalNodeOf()!.data?.genStatus).toBe('checking'));
     await waitForCta('checking');
-    // 核对中禁止再次点击
     await clickFinalize();
     expect(apiMocks.finalizeVideoJob).toHaveBeenCalledTimes(1);
 
-    // 核对成功：任务恢复，终态照常收敛（轮询 2.5s 一拍，等待需盖过下一拍）
     apiMocks.fetchJobStatus.mockImplementation(async () => defaultFinalDetail());
     await vi.waitFor(() => expect(finalNodeOf()!.data?.src).toBe('http://vid/final.mp4'), { timeout: 5000 });
     await vi.waitFor(() => expect(sampleNode().data?.finalizeCta).toBeUndefined());
@@ -459,8 +441,6 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     expect(failed.data?.errorText).toBe('上游生成失败');
     expect(failed.data?.chargeState).toBe('released');
     expect(failed.data?.videoStage).toBe('final');
-    // 失败终态后样片卡不再渲染成片入口（同 Draft ID 重试首版关闭，重新生成归 IKIZQG；
-    // 失败卡不渲染重试钮的行为由 MediaNode 组件测试覆盖）
     await vi.waitFor(() => expect(sampleNode().data?.finalizeCta).toBeUndefined());
   });
 });

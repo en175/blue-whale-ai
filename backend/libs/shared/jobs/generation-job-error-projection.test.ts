@@ -1,5 +1,3 @@
-// IKBQEE / ADR-0078：错误码枚举 + 投影补齐 单元测试。
-// 二期：对外输出为 { code: 数值码, message: 中文 }——数值码每错一码、前端可映射。
 import { describe, expect, it } from "vitest";
 
 import {
@@ -52,7 +50,6 @@ describe("error-codes", () => {
   });
 
   it("全部常量都在 GENERATION_ERROR_CODES 白名单内", () => {
-    // 逐个校验每个导出常量已登记——新增失败码忘登记会被此测试捕获。
     const exported = [
       ERROR_INVALID_INPUT,
       ERROR_UNSUPPORTED_TYPE,
@@ -122,19 +119,16 @@ describe("error-codes", () => {
       ERROR_AUDIO_GENERATION_FAILED,
     ];
     const codes = exported.map((c) => GENERATION_ERROR_NUMERIC_CODES[c]);
-    // 每个字符串码都有数值码，且数值码互不重复
     for (const n of codes) {
       expect(typeof n).toBe("number");
     }
     expect(new Set(codes).size).toBe(exported.length);
-    // 特定映射稳定（对外契约）
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_QUOTA_EXHAUSTED]).toBe(1001);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_INVALID_INPUT]).toBe(1002);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_PROVIDER_FAILED]).toBe(1011);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_IMAGE_GENERATION_FAILED]).toBe(
       1022,
     );
-    // 未知码兜底
     expect(errorCodeToNumeric("some_unknown_code")).toBe(1000);
     expect(GENERATION_ERROR_UNKNOWN_NUMERIC_CODE).toBe(1000);
   });
@@ -149,7 +143,6 @@ describe("error-codes", () => {
       "unsupported_input",
     );
     expect(resolveErrorCode("invalid_video_response")).toBe("provider_failed");
-    // 未在别名表的码原样返回
     expect(resolveErrorCode("provider_failed")).toBe("provider_failed");
   });
 
@@ -158,7 +151,6 @@ describe("error-codes", () => {
     expect(fallbackErrorCode("media_extract")).toBe("media_extract_failed");
     expect(fallbackErrorCode("image")).toBe("image_generation_failed");
     expect(fallbackErrorCode("audio")).toBe("audio_generation_failed");
-    // IKHLK3：插帧兜到契约 1049（同 vocal_split 先例，不落到图片生成的默认文案）。
     expect(fallbackErrorCode("video_frame_interpolation")).toBe(
       ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
     );
@@ -173,7 +165,6 @@ describe("projectPublicError", () => {
     );
     expect(out).not.toBeNull();
     expect(out!.code).toBe(1011);
-    // 码表优先（ADR-0078）：provider_failed 统一文案，不返上游英文原文。
     expect(out!.message).toBe("生成服务响应异常");
     expect("retryable" in out!).toBe(false);
     expect("params" in out!).toBe(false);
@@ -181,7 +172,6 @@ describe("projectPublicError", () => {
   });
 
   it("quota_exhausted：1001 + 码表文案（上游英文不回显）", () => {
-    // 真实案例 job 1494：provider_failed + overdue balance 英文
     const out = projectPublicError(
       {
         code: "quota_exhausted",
@@ -203,9 +193,6 @@ describe("projectPublicError", () => {
   });
 
   it("IKFL53/IKJ8J8: content_rejected_reference → 1038 + 中性兜底文案", () => {
-    // 版权拒绝任务 DB error.code=content_rejected_reference → 后端投影到 1038 + 中文文案，
-    // 不返上游 copyright 英文原文（含 Request id）。
-    // IKJ8J8：文案中性化——判定只按上游版权关键词、不区分参考/输出，不再宣称「参考内容」。
     const out = projectPublicError(
       {
         code: "content_rejected_reference",
@@ -219,8 +206,6 @@ describe("projectPublicError", () => {
   });
 
   it("IKJ8J8: content_rejected_audio → 1059 + 音频版权精确文案", () => {
-    // 输出侧音频版权拒绝（火山官方码 OutputAudioSensitiveContentDetected，worker 前置分支归类）
-    // → 后端投影到 1059 + 对齐官方释义的文案，用户一眼知道是配乐的问题。
     const out = projectPublicError(
       {
         code: "content_rejected_audio",
@@ -235,7 +220,7 @@ describe("projectPublicError", () => {
 
   it("白名单外码 fallback 到类型兜底：码表文案（视频生成失败）", () => {
     const out = projectPublicError({ code: "some_new_code" }, "video");
-    expect(out!.code).toBe(1021); // video_generation_failed
+    expect(out!.code).toBe(1021);
     expect(out!.message).toBe("视频生成失败");
   });
 
@@ -246,8 +231,6 @@ describe("projectPublicError", () => {
   });
 
   it("IKJFGQ：reason 随投影外发 canonical 字符串码——数值码撞号重排时前端识别的稳定锚点", () => {
-    // worker 归类的比例约束失败（1060）是撞号重排已发生过一次的码：字符串码进信封 data.code，
-    // 前端识别优先读它。归一（旧码别名）与 fallback（白名单外兜底）同样带归一后的 canonical 串。
     const out = projectPublicError(
       { code: "task_type_param_constraint", message: "任意" },
       "video",
@@ -300,11 +283,9 @@ describe("messageFor", () => {
   });
 
   it("I一码一文案：provider_failed 统一文案，media_extract 码表文案（ADR-0083）", () => {
-    // IKDZGM / ADR-0083：一码一文案——provider_failed 不再按 type 分词。
     expect(messageFor(ERROR_PROVIDER_FAILED, "video")).toBe("生成服务响应异常");
     expect(messageFor(ERROR_PROVIDER_FAILED, "audio")).toBe("生成服务响应异常");
     expect(messageFor(ERROR_PROVIDER_FAILED, "image")).toBe("生成服务响应异常");
-    // media_extract 码：码表有文案（1020/1026 均「音频提取失败」），直接查表。
     expect(messageFor(ERROR_MEDIA_EXTRACT_FAILED, "media_extract")).toBe(
       "音频提取失败",
     );
@@ -321,8 +302,6 @@ describe("messageFor", () => {
   });
 
   it("projectPublicError 对 null stored_error 不抛错", () => {
-    // 失败 job 但 stored_error 为 null（历史数据/非对象 error）→ 投影返回 null，
-    // 调用方 jobs.service 会走类型兜底（code/msg 同步）。
     expect(projectPublicError(null, "video")).toBeNull();
   });
 });

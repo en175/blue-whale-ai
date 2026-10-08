@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// generation_jobs 补 (is_delete, gmt_create) 索引（仪表盘区间统计）。
-// 镜像 identity-users-email-unique-parity 的三轨核对结构。
 
 const migrationSql = readFileSync(
   new URL(
@@ -34,9 +32,6 @@ describe("generation_jobs 区间统计索引三轨迁移", () => {
   });
 
   it("★ 列顺序是 (is_delete, gmt_create)，不是反过来", () => {
-    // 这个顺序不是随便写的：`is_delete` 做**等值前缀**、`gmt_create` 跟在其后走**区间扫描**，
-    // 才吃得到"前导列等值 + 次列范围"。反过来放的话范围列在前、等值条件退化成过滤，
-    // 索引基本白建 —— 而 EXPLAIN 看起来仍然"用上了索引"，没人会发现。
     const m = standaloneSql.match(/ADD INDEX\s+`[^`]+`\s*\(([^)]*)\)/);
     expect(m).not.toBeNull();
     const cols = m![1].split(",").map((c) => c.trim().replace(/`/g, ""));
@@ -44,8 +39,6 @@ describe("generation_jobs 区间统计索引三轨迁移", () => {
   });
 
   it("Prisma 模型与迁移同源（列同样的顺序）", () => {
-    // Prisma 侧写成 [gmt_create, is_delete] 不会报错、也不会红 ——
-    // 下一次 `prisma migrate` 会把它当成一次**索引重建**，顺序悄悄变回去。
     expect(schemaPrisma).toContain(`@@index([is_delete, gmt_create], map: "${INDEX_NAME}")`);
   });
 

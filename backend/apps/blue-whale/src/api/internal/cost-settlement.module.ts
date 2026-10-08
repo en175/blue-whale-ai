@@ -1,4 +1,3 @@
-// IK9VZ0：多退少补结算结果接收模块（new-api 端结算 → 蓝鲸端只记账，用户端零暴露）。
 import { Module } from "@nestjs/common";
 import {
   alignReservationBySettlement,

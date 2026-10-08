@@ -17,8 +17,6 @@ export class AgentTemplatesController {
   async page(@Query() query: Record<string, string> = {}) {
     const tagCode = query.tagCode ?? "";
     if (!isValidTagCode(tagCode)) {
-      // 这是 @Get，默认状态 200——不抛的话回的是 HTTP 200 而 body 写着 400，
-      // 只看状态码的客户端会把「非法标签」当成一页空结果。
       throw new DomainError(FAILURE_CODE, `非法标签: ${tagCode}`);
     }
     const result = await this.template.pageByTagCode(

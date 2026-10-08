@@ -133,8 +133,6 @@ describe('buildCreateParams', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.capability_type).toBe('audio');
-    // IKG4UR：音频没有可配时长——上游是 TTS 式接口（请求无 duration），库里该列已置 NULL。
-    // 表单也不再渲染时长控件；即便传了值也不落库，维持「非空 ⟺ 可配」不变式。
     expect(result.value.supported_durations).toBeNull();
     expect(result.value.supported_formats).toEqual(['mp3']);
     expect(result.value.supported_sizes).toEqual([]);
@@ -142,11 +140,6 @@ describe('buildCreateParams', () => {
   });
 });
 
-// IKHEXG：`default_size` / `default_aspect_ratio` 在后端是 **NOT NULL**（VarChar）列，「未配」的形态
-// 是**空串**。表单曾把它们序列化成 null（`form.defaultSize.trim() || null`），写闸门又只收字符串
-// → 非图片/视频行（音频 / 文生文）从后台保存**必然 400**（实测：`PUT /api/admin/models/23` 报
-// 「默认尺寸(default_size)须为字符串且≤32字符」）。
-// 另一层：diff 比对两侧都套 `?? null`，库里是 `''` 而提交侧是 `null`，会把「其实等价」判成变更。
 describe('NOT NULL 尺寸/比例列：提交空串而非 null（IKHEXG）', () => {
   const audioSnapshot = () =>
     snapshot({
@@ -190,8 +183,6 @@ describe('NOT NULL 尺寸/比例列：提交空串而非 null（IKHEXG）', () =
     expect(result.value.default_aspect_ratio).toBe('');
   });
 
-  // 上面三条都在证「不要多提交」；这条证反向——真的改了就必须提交。
-  // 少了它，日后把 diff 的归一写过头（比如恒判相等）会静默吞掉真实修改，而测试全绿。
   it('图片行：真的改了尺寸/比例 → 原样提交（正向往返）', () => {
     const initial = modelRow({ default_size: '1K', default_aspect_ratio: '1:1' });
     const result = buildCreateParams(snapshot({ type: 'image', defaultSize: '2K', defaultRatio: '16:9' }));
@@ -203,8 +194,6 @@ describe('NOT NULL 尺寸/比例列：提交空串而非 null（IKHEXG）', () =
   });
 });
 
-// IKG4UR：库中 supported_durations 有数组（管理端写入）与对象（消费端契约/种子写入）两种形态。
-// 只认数组时，打开对象行会读成空、保存把整列覆盖成 null——静默数据损坏。
 describe('durationsFromModel 兼容两种形态（IKG4UR）', () => {
   const model = (durations: unknown) =>
     ({ supported_durations: durations }) as unknown as AdminModel;
@@ -219,7 +208,6 @@ describe('durationsFromModel 兼容两种形态（IKG4UR）', () => {
       max: '30',
       step: '1',
     });
-    // step 可缺省
     expect(durationsFromModel(model({ min: 5, max: 10 }))).toEqual({
       min: '5',
       max: '10',
@@ -245,7 +233,6 @@ describe('durationsFromModel 兼容两种形态（IKG4UR）', () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // 形态必须保持：写成数组会让 durationInRange 把它当档位列表，4–30 缩成 {1,4,30}
     expect(result.value.supported_durations).toEqual({ min: 4, max: 30, step: 1 });
   });
 
@@ -324,8 +311,6 @@ describe('gpt / banana mapping', () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // IKHBDO：`undefined` = 不提交该字段。原先无条件写死 null——虽然后端对
-    // seedream 行的 null 当「不改」，但前端不该依赖这条宽容规则来表达「我什么都没说」。
     expect(result.value.request_mapping).toBeUndefined();
   });
 
@@ -343,8 +328,6 @@ describe('gpt / banana mapping', () => {
   });
 
   it('seedream：提交时矩阵键就是档位 id（api_value 恒等于 id，不再换写拼写）', () => {
-    // IKHTVR：出站档位值（旧 api_value）恒等于 id，提交侧送的也已经是 id，
-    // 所以矩阵键就是 id 拼写。worker 查表大小写不敏感，库里遗留的 `1K` 键命中同一格。
     const result = buildCreateParams(
       snapshot({
         channel: 'seedream-image',
@@ -364,11 +347,6 @@ describe('gpt / banana mapping', () => {
   });
 
   it('★ 无操作保存：矩阵键与 api_value 一起归一到 id 拼写，不留错位（IKHTVR）', () => {
-    // 生产形态：id 是小写 `1k`，而矩阵键是大写 `1K`（IKDBYY 与 IK629 两次迁移分别写入）。
-    // 读侧类型刻意不建模 api_value（见 api/adminModels.ts 的「读侧最保守形态」），
-    // 但提交侧恒写 `api_value = id`——两者必须**一起写**：只重写矩阵键会留下
-    // 「键 1k / api_value 1K」，违背
-    // docs/sql/20260922_ikhues_image_matrix_fill.sql:13「seedream 的矩阵键必须等于 api_value」。
     const stored = modelRow({
       supported_sizes: [{ id: '1k', label: '1K' }],
       request_mapping: { matrix: { '1K': { '1:1': '2048x2048' } } },
@@ -453,8 +431,6 @@ describe('gpt / banana mapping', () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // null 是「旧族的矩阵不再适用」的唯一表达；当成「不改」会把 gpt 矩阵留在库里，
-    // worker 会拿它去算 seedream 尺寸，而界面上再也清不掉。
     expect(result.value.request_mapping).toBeNull();
   });
 
@@ -513,8 +489,6 @@ describe('gpt / banana mapping', () => {
   });
 });
 
-// IKHTVR：尺寸行只留 id / 展示名两个可编辑字段——`api_value` 恒等于 id（提交时按 id 重建），
-// 像素宽高无任何消费方（提交时不再写，库里遗留的键随下次保存清掉）。
 describe('尺寸行字段收敛（IKHTVR）', () => {
   it('读回只取 id / label，忽略 api_value / width / height（含 camelCase 写法）', () => {
     expect(
@@ -584,9 +558,6 @@ describe('时长区间解析（IKHBDO）', () => {
   });
 });
 
-// 渠道（能力行 `channel` 列）是「这个模型走哪家、请求怎么解析、出站用哪种线协议」的**一个**字段，
-// 取代了原先「`channel_parser` 列 × `features.image_protocol`」两个字段——那两个说的是一件事的
-// 两半，却住在两个地方、两种形态。下面是 IKF4LI / 本次迁移在库里留下的几种真实行。
 describe('渠道：读侧归一', () => {
   const row = (channel: string | null, capability_type: AdminModel['capability_type'] = 'image') =>
     modelRow({ channel, capability_type });
@@ -632,9 +603,6 @@ describe('渠道：读侧归一', () => {
   });
 });
 
-// 「渠道 → features.image_protocol 的兼容双写」那一段已随该键退役**整段删除**：
-// 出站协议现在只由渠道决定，键本身被迁移清掉了，没有任何读方，也就没有可写的回写语义。
-// 渠道 → 协议的展开仍在上面那条 `channelOf(...)` 断言里。
 
 describe('features 键形与类型（IKHBDO）', () => {
   it('读侧回落 camelCase（后端 toFeatures 优先认 camel）', () => {
@@ -650,8 +618,6 @@ describe('features 键形与类型（IKHBDO）', () => {
     expect(featureValueTypeOk('image_reference_max', '4')).toBe(false);
     expect(featureValueTypeOk('tools', true)).toBe(true);
     expect(featureValueTypeOk('tools', 'yes')).toBe(false);
-    // ⚠️ `image_protocol` 曾是这张表里的字符串键，已随渠道列落地**整键退役**
-    //     （见 `FEATURE_STRING_KEYS` 的注释）——它现在是未知键，不再由结构化控件管。
     expect(featureValueTypeOk('image_protocol', 'openai-images')).toBe(false);
   });
 });
@@ -737,10 +703,6 @@ describe('mergeMatrix：集合变化时保住其它格（IKHBDO）', () => {
   });
 });
 
-// IKHTL0：库里 matrix 的键与 supported_sizes 的 id 由两次迁移分别写入，大小写可能不一致
-// （IKDBYY 写 id 小写 `1k`，IK629 写矩阵键大写 `1K`）。读侧原本精确匹配 → 这些 seedream 行的
-// 矩阵整张显空白；而 worker 查表本来就大小写不敏感（ImageChannelMapper.resolveSeedreamSize
-// 有显式兜底），所以线上生成一直正常，坏的只有管理端显示。读侧必须与 worker 同口径。
 describe('parseGptMatrix：库中键大小写与表单 id 不一致（IKHTL0）', () => {
   const sizes = [
     { id: '1k', label: '1K' },
@@ -790,7 +752,6 @@ describe('音频 / 文本行（IKHBDO）', () => {
         label: '音频',
         channel: 'seedream-audio',
         originalChannel: 'seedream-audio',
-        // 表单不再渲染音频的时长范围控件；即便快照里带了值也不落库（IKG4UR 不变式）
         durationMin: '1',
         durationMax: '120',
         defaultDuration: '12',

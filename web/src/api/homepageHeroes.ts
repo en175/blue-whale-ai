@@ -1,8 +1,3 @@
-/* ============================================
- * 首页背景图/视频：公开轮播 + admin 通用配置
- * 管理端包络 {success, data}，公开面 {code, data, msg}；http 层均已解包
- * 上传路径以后端控制器为准：/api/admin/site-config/homepage-heroes/uploads/*
- * ============================================ */
 import { queryOptions } from '@tanstack/react-query';
 import { http, type ApiRequestInit } from './http';
 import { putToPresignedUrl, type PresignData } from './assets';
@@ -11,7 +6,6 @@ export const HOMEPAGE_HERO_MAX_ENABLED = 8;
 
 export type HomepageHeroMediaType = 'image' | 'video';
 
-/** 公开轮播条目（不含 enabled） */
 export interface HomepageHeroPublic {
   id: string;
   media_type: HomepageHeroMediaType;
@@ -20,7 +14,6 @@ export interface HomepageHeroPublic {
   sort_order: number;
 }
 
-/** 管理端条目（含启停与时间） */
 export interface HomepageHeroAdmin extends HomepageHeroPublic {
   enabled: number;
   created_at: string;
@@ -35,7 +28,6 @@ export interface HomepageHeroPayload {
   enabled?: number;
 }
 
-/** 轮播可播放片源（已过滤空地址 / 非 http(s)） */
 export interface HeroSlide {
   id: string;
   mediaType: HomepageHeroMediaType;
@@ -62,7 +54,6 @@ export function isPlayableHeroUrl(url: string | null | undefined): boolean {
   return typeof url === 'string' && /^https?:\/\//i.test(url.trim());
 }
 
-/** 公开列表 → 轮播片源：空 media_url / 非 http(s) 丢弃，避免迁移期占位打挂首页 */
 export function selectPlayableHeroSlides(
   items: HomepageHeroPublic[] | undefined,
 ): HeroSlide[] {
@@ -133,7 +124,6 @@ export function completeHomepageHeroUpload(
   return http.post<{ url: string }>(`${ADMIN_UPLOADS}/complete`, params, init);
 }
 
-/** 三段式上传：presign → putToPresignedUrl（dev 走 /__tos-upload）→ complete，返回公网 URL */
 export async function uploadHomepageHeroFile(
   file: File,
   type: HomepageHeroMediaType,

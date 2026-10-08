@@ -19,7 +19,6 @@ function readBuckets(handler: Handler): RateLimitOptions | undefined {
   ]);
 }
 
-/** 用真实 Reflector 读取控制器上的 @RateLimit 元数据跑 RateLimitGuard，RateLimiter 打桩。 */
 function runGuard(handler: Handler, take: ReturnType<typeof vi.fn>, userId = "user-1") {
   const guard = new RateLimitGuard(reflector, { take } as never, {
     isAllowed: () => false,
@@ -40,7 +39,6 @@ async function expectLimitedWith(handler: Handler, take: ReturnType<typeof vi.fn
   });
 }
 
-/** 工单 IKDR4P 口径：presign 与 uploads/presign 共享 asset-presign scope（30/min + 120/hr）。 */
 const PRESIGN_BUCKETS = [
   { scope: "asset-presign", key: "user", limit: 30, windowMs: 60_000 },
   { scope: "asset-presign", key: "user", limit: 120, windowMs: 3_600_000 },

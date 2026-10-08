@@ -16,7 +16,6 @@ describe('音视频分离工具定义契约', () => {
     const inputs: AudioVideoSplitSubmission[] = [];
     const cards: string[] = [];
     const runtime = createToolSessionRuntime();
-    // IKJJR3：会话提交 = 退会话后同步 startTask（受理归生成任务运行时，无在途受理窗口）
     const split = runtime.register(createAudioVideoSplitSession(() => ({
       getProjectId: () => projectId,
       getSourceNode: () => source,

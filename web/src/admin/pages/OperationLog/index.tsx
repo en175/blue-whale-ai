@@ -1,13 +1,3 @@
-/* ============================================
- * OperationLog 操作日志：管理操作审计记录，按类别/时间/关键词查询
- * 数据源 GET /api/admin/operation-logs（时间倒序）
- *
- * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**——
- * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
- *
- * 取数走 TanStack Query（IKJ058）：`queryOptions` 工厂在 `@/api/adminOperationLogs`，
- * 页面不再手写 `loading / loadError / finally` 那套三态样板。
- * ============================================ */
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
@@ -18,10 +8,8 @@ import {
 import { isApiError } from '@/api/http';
 import { Badge, Button, Empty, Input, Page, PageHeader, Select, Table, Toolbar } from '../../ui';
 
-/** 长 token（模型 ID、无空格的 JSON）允许在列内断行 —— 否则固定列宽下它会撑破单元格 */
 const BREAK_ANY = { overflowWrap: 'anywhere' } as const;
 
-/** 类别 code → 展示名（筛选下拉与表格徽章共用） */
 const CATEGORY_OPTIONS: { code: string; label: string }[] = [
   { code: 'model.capability', label: '模型列表' },
   { code: 'tier', label: '充值档位' },
@@ -30,7 +18,6 @@ const CATEGORY_OPTIONS: { code: string; label: string }[] = [
   { code: 'template', label: '模板管理' },
 ];
 
-/** 类别筛选下拉选项（Select 基元收的是 {value,label}） */
 const CATEGORY_SELECT_OPTIONS = [
   { value: 'all', label: '全部类别' },
   ...CATEGORY_OPTIONS.map((c) => ({ value: c.code, label: c.label })),
@@ -39,7 +26,6 @@ const CATEGORY_SELECT_OPTIONS = [
 const categoryLabel = (code: string) =>
   CATEGORY_OPTIONS.find((c) => c.code === code)?.label ?? code;
 
-/** 已知 action → 中文展示名，未匹配原样展示 */
 const ACTION_LABEL: Record<string, string> = {
   'model.capability.create': '新建模型',
   'model.capability.update': '编辑模型',
@@ -64,13 +50,10 @@ const ACTION_LABEL: Record<string, string> = {
 
 const actionLabel = (action: string) => ACTION_LABEL[action] ?? action;
 
-/** ISO 时间 → 本地展示 */
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
 
-/** 日期（yyyy-mm-dd）→ 当天零点 ISO */
 const dayToIso = (day: string) => new Date(`${day}T00:00:00`).toISOString();
 
-/** detail JSON 字符串 → 可读摘要，解析失败原样展示 */
 function formatDetail(detail: string): string {
   if (!detail) return '—';
   try {
@@ -82,7 +65,6 @@ function formatDetail(detail: string): string {
       if (parts.length) return parts.join('；');
     }
   } catch {
-    /* 非 JSON 原样展示 */
   }
   return detail;
 }
@@ -94,18 +76,11 @@ export default function OperationLog() {
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
 
-  /** 搜索输入 300ms 防抖，避免每次按键都请求 */
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search.trim()), 300);
     return () => clearTimeout(t);
   }, [search]);
 
-  /**
-   * 拉取日志（筛选变化时重新请求，服务端时间倒序）。
-   *
-   * <p>筛选条件是**服务端参数**，所以它们整份进 queryKey —— 换一个日期范围就是另一份数据，
-   * 不是对同一份的本地过滤。缓存的命中与失效都由此决定。
-   */
   const list = useQuery(
     operationLogsOptions({
       category: category === 'all' ? undefined : category,
@@ -125,14 +100,13 @@ export default function OperationLog() {
     <Page>
       <PageHeader title="操作日志" subtitle="管理操作审计记录，按类别和时间筛选" />
 
-      {/* 筛选行 */}
+      {}
       <Toolbar>
         <Select options={CATEGORY_SELECT_OPTIONS} value={category} onChange={setCategory} />
         <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         <span>—</span>
         <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        {/* 搜索框：基元没有「前置图标」位，图标与输入框并排放在同一行内；
-            宽度走内联而非私有样式类 —— 本页已无自己的 CSS 文件 */}
+        {}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <Search size={16} strokeWidth={2} aria-hidden />
           <Input
@@ -144,13 +118,9 @@ export default function OperationLog() {
         </div>
       </Toolbar>
 
-      {/* 日志表格 */}
+      {}
       <Table fixed>
-        {/* ⚠️ **列宽必须显式分配**，否则宽度由内容决定：详情列的文字最长，它会把宽度全抢走，
-            目标列被压到 76px、「doubao-seedream-5-0-pro-260628」折成四行（行高因此暴涨），
-            最右的列**直接被挤出视口**（外壳是 overflow-x: auto，只在横向滚动后才出现）。
-            固定列加起来 ~700px，剩下的留给详情 —— 常见屏宽下不再出现横向滚动。
-            「操作人」放最前：看日志先问「谁干的」，它比时间更常是第一眼要找的东西。 */}
+        {}
         <thead>
           <tr>
             <th style={{ width: 104 }}>操作人</th>
@@ -162,7 +132,7 @@ export default function OperationLog() {
           </tr>
         </thead>
         <tbody>
-          {/* 三态统一走 Empty：加载中 / 加载失败（可重试）/ 空数据 */}
+          {}
           {list.isPending && (
             <tr>
               <td colSpan={6}>
@@ -198,8 +168,7 @@ export default function OperationLog() {
               return (
                 <tr key={l.id}>
                   <td>{l.operator}</td>
-                  {/* 时间**不许换行**：折成「日期 / 时分秒」两行会让每一行都变高，
-                      而它只是定位用的坐标，不该占两行的视觉重量 */}
+                  {}
                   <td style={{ whiteSpace: 'nowrap' }}>{fmtTime(l.createdAt)}</td>
                   <td>
                     <Badge tone="neutral">{categoryLabel(l.category)}</Badge>

@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Edge } from '@xyflow/react';
 import { fetchCanvasDoc, saveCanvasDoc, serializeEdges } from './canvas';
 
-/** 成功信封包裹的 Response */
 function okResponse(data: unknown) {
   return new Response(JSON.stringify({ code: 200, msg: 'ok', data }), {
     status: 200,
@@ -86,7 +85,6 @@ describe('fetchCanvasDoc', () => {
 describe('saveCanvasDoc', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  /** 412 版本冲突信封（构造口径同后端实返：ApiError status=412 + msg + data.version） */
   function conflictResponse(version: number) {
     return new Response(JSON.stringify({ code: 412, msg: 'Canvas 版本冲突', data: { version } }), {
       status: 412,
@@ -120,7 +118,6 @@ describe('saveCanvasDoc', () => {
     expect(body.edges).toBe('[{"id":"e1","source":"text-1","target":"media-1"}]');
     expect(body.nodes).toBe('[]');
     expect(JSON.parse(body.viewport)).toEqual({ x: 0, y: 0, zoom: 1 });
-    // IKIIWN：未确认时不得出现 confirmEmpty 字段（缺省即 false，服务端对空覆盖回 422）
     expect('confirmEmpty' in body).toBe(false);
   });
 
@@ -147,7 +144,6 @@ describe('saveCanvasDoc', () => {
       saveCanvasDoc('p1', { viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [], confirmEmpty: true }, 3),
     ).rejects.toMatchObject({ status: 412, code: 412, message: 'Canvas 版本冲突', data: { version: 8 } });
 
-    // 整个保存只发出一次 PUT：不用信封里的服务端新版本号重发旧空文档（重发会覆盖另一会话的新画布）
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
     expect((init.headers as Headers).get('If-Match')).toBe('"3"');
@@ -171,7 +167,6 @@ describe('saveCanvasDoc', () => {
 
     expect(saved.version).toBe(9);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    // 重试那次换用信封里的服务端当前版本号
     const [, retryInit] = fetchMock.mock.calls[1]! as [string, RequestInit];
     expect((retryInit.headers as Headers).get('If-Match')).toBe('"8"');
   });

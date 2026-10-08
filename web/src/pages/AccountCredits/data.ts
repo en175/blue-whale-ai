@@ -1,11 +1,3 @@
-/**
- * 页面数据入口。
- *
- * @todo 接真实接口后只改本文件：
- *   - GET /api/usage/token（余额 + 临期批次）
- *   - GET /api/recharge/orders（我的订单）
- *   - GET /api/account/consumptions（积分明细）
- */
 import type { AccountCreditsPageData } from './types';
 
 /** @todo 当前返回占位数据，接入接口后删除 PLACEHOLDER_PAGE_DATA 的页面依赖 */

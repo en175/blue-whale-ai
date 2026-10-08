@@ -4,7 +4,6 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createModelCapabilityRepo>;
 
-/** 模型能力读 repo 封装（生成白名单 listEnabledByType）。 */
 @Injectable()
 export class ModelCapabilityReadService {
   private repoInstance?: Repo;

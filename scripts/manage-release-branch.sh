@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Public release-line entrypoint. Keep shell invocation compatible with callers.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/scripts/lib/python3-command.sh"

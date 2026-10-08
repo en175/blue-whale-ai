@@ -1,4 +1,3 @@
-/* 方案卡应用到画布后：按素材身份把已有图片节点连到生成卡（media → text，textIndex）。 */
 import type { Edge, Node } from '@xyflow/react';
 import { readAssetId } from './mediaRefs';
 
@@ -15,7 +14,6 @@ export function appliedPlanAssetIds(node: Node | undefined, extraAssetIds: strin
   return [...new Set([...fromRefs, ...fromMaterials, ...extraAssetIds.map(String)].filter(Boolean))];
 }
 
-/** 丢掉应用接口误写的 text → media 方向 textIndex 边。 */
 export function dropReversedTextIndexEdges(textNodeId: string, edges: Edge[]): Edge[] {
   return edges.filter((edge) => {
     if (edge.source !== textNodeId) return true;
@@ -79,10 +77,6 @@ function rewriteTextNodeMediaPointers(node: Node, assetId: string, mediaNodeId: 
   return { ...node, data };
 }
 
-/**
- * 画布上同身份素材只剩「素材已被删除」空壳时，新建可播放素材卡并改写生成卡指针。
- * 旧空壳从画布拿掉，避免资产字典补齐后同一素材复活成两张卡。
- */
 export function replaceMissingPlanMediaNodes(input: {
   textNodeId: string;
   assetIds: string[];
@@ -144,7 +138,6 @@ export function replaceMissingPlanMediaNodes(input: {
   return { nodes: next, removedNodeIds, replaced };
 }
 
-/** 已有同 assetId 的可用媒体节点 → 生成卡；已存在同向边不重复建。 */
 export function textIndexEdgesForAppliedPlan(
   textNodeId: string,
   assetIds: string[],

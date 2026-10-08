@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Black-box tests for the Hook audit query interface."""
 
 from __future__ import annotations
 
@@ -56,8 +55,6 @@ class QueryHookAuditTest(unittest.TestCase):
             [sys.executable, str(SCRIPT), "--project-dir", str(self.repo), *args],
             capture_output=True,
             text=True,
-            # 显式 utf-8：Windows 原生 Python 默认 cp936，子进程按 utf-8 打印的
-            # 中文会被解码崩溃（与 sync/start-task 同根因）；POSIX 本就 UTF-8，no-op。
             encoding="utf-8",
         )
 

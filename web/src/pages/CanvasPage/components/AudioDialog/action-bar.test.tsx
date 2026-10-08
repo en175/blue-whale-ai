@@ -13,12 +13,6 @@ import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
 import barStyles from '../AttachmentActionBar/index.module.css';
 import dialogStyles from './index.module.css';
 
-/* IKGB82 音频面板附件操作条（IKGB1X 契约接入，图片面板范例同源）：
-   输入框上方第一行 = 操作条（左「+ 参考」「资产库」pill、右侧并入展开/关闭）；
-   附件栏空态整条隐藏、有参考/文本附件时出现在操作条与输入框之间；
-   「+ 参考」分派画布点选（startCanvasPick 既有行为保留，pickMode 高亮）、
-   「资产库」分派资产库弹窗，等价退役「+」菜单两项；
-   参考达上限与生成中只读时常显置灰（aria-disabled）并悬停说明原因，「已达上限」文案保留在附件栏原位。 */
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -79,8 +73,6 @@ async function renderDialog(props: Partial<Parameters<typeof AudioDialog>[0]> = 
       ),
     );
   });
-  // 等面板就绪：常规路径等模型能力加载完成（maxAudioRefs 依赖 currentModel）；
-  // 生成中只读路径模型选中不应用（现状行为），等只读提示条出现即可
   const readOnly = props.draftBinding?.submitting === true || props.draftBinding?.status === 'generating';
   await vi.waitFor(() =>
     expect(container.textContent).toContain(readOnly ? '生成中，参数只读' : '测试音频模型'));
@@ -123,17 +115,14 @@ describe('IKGB82 附件操作条渲染与位置', () => {
     const actions = bar.querySelector(`.${barStyles.actions}`)!;
     expect(actions.querySelector(`button[title="${ATTACHMENT_ACTION_PICK_CANVAS_TITLE}"]`)).toBeTruthy();
     expect(actions.querySelector(`button[title="${ATTACHMENT_ACTION_PICK_ASSETS_TITLE}"]`)).toBeTruthy();
-    // 右侧 trailing 并入面板原 topActions 展开/关闭按钮
     const trailing = bar.querySelector(`.${barStyles.trailing}`)!;
     expect(trailing.querySelector('button[title="展开"]')).toBeTruthy();
     expect(trailing.querySelector('button[title="关闭"]')).toBeTruthy();
-    // 栏尾旧「+」菜单入口不再出现
     expect(
       [...container.querySelectorAll<HTMLButtonElement>('button')].some(
         (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
       ),
     ).toBe(false);
-    // 操作条在输入框之前
     const editor = container.querySelector('[contenteditable]')!;
     expect(bar.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -154,7 +143,6 @@ describe('IKGB82 附件操作条渲染与位置', () => {
     expect(bar.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(strip.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // 删除唯一参考：附件栏重新隐藏
     await click(container.querySelector('button[aria-label="移除 音频n1"]')!);
     expect(attachmentStrip()).toBeNull();
   });
@@ -174,7 +162,6 @@ describe('IKGB82 两类点击分派（等价退役菜单两项）', () => {
     await click(pickCanvasBtn());
     expect(onPickFromCanvas).toHaveBeenCalledTimes(1);
     expect(onPickFromAssets).not.toHaveBeenCalled();
-    // startCanvasPick 既有行为：面板内画布选择列表同时打开
     expect(container.textContent).toContain('从画布选择素材');
 
     await click(pickAssetsBtn());
@@ -191,7 +178,6 @@ describe('IKGB82 两类点击分派（等价退役菜单两项）', () => {
 
 describe('IKGB82 禁用态：常显置灰 + 悬停原因（替代入口消失）', () => {
   it('参考达上限：两按钮 aria-disabled、悬停说明已达上限，点击不分派；「已达上限」文案保留在附件栏原位', async () => {
-    // 夹具模型未配 audio_reference_max → 缺省上限 3 段
     const initialRefs = [audioRef('n1', 601), audioRef('n2', 602), audioRef('n3', 603)];
     const { onPickFromCanvas, onPickFromAssets } = await renderDialog({ initialRefs });
 
@@ -203,7 +189,6 @@ describe('IKGB82 禁用态：常显置灰 + 悬停原因（替代入口消失）
     await click(pickAssetsBtn());
     expect(onPickFromCanvas).not.toHaveBeenCalled();
     expect(onPickFromAssets).not.toHaveBeenCalled();
-    // 「已达上限」文案保留在附件栏栏尾原位
     const limitText = attachmentStrip()!.querySelector(`.${dialogStyles.refCount}`)!;
     expect(limitText.textContent).toBe('已达上限');
     expect(limitText.getAttribute('title')).toBe('参考音频最多 3 段');

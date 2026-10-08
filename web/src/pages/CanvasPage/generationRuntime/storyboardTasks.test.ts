@@ -1,8 +1,3 @@
-/* ============================================
- * 成片/重生样片类型定义契约测试（IKJJR6）：两入口创建协议（成片不带 canvas_binding、
- * 重生样片随确认字段携带）、身份让渡（卡片生命周期归 normalGeneration）、与运行时组合
- * 的提交贯通（受理回填/新旧卡分离/同意图重发复用 submission_id/受理回执丢失恢复扫描）。
- * ============================================ */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ApiError } from '@/api/http';
 
@@ -24,7 +19,6 @@ import { normalGenerationTask } from './normalGeneration';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 import type { GenerationRecoveryPage } from '@/api/canvasRecovery';
 
-/** 手动时钟：轮询续链只在 fireNext 时推进。 */
 class ManualClock {
   private seq = 0;
   private timers = new Map<number, { fn: () => void; at: number }>();
@@ -128,7 +122,6 @@ const targetFacts = (nodeId: string) => ({
   expectedBindingRevision: 0,
 });
 
-/** 组装运行时：normalGeneration 先注册（页面同序），手动时钟 + 可控 API。 */
 function setup(statusScript: Array<Record<string, unknown>> = [{ status: 'processing', progress: 10, asset: null }]) {
   const fake = createFakeHost();
   const clock = new ManualClock();
@@ -157,11 +150,9 @@ beforeEach(() => {
 describe('成片/重生样片类型定义：身份让渡与冻结输入', () => {
   it('不承接卡片生命周期（identify 恒 false）：两阶段卡归 normalGeneration 统一认领', () => {
     expect(storyboardTask.taskTypes).toEqual([]);
-    // 成片卡/样片卡/成片失败卡——轮询/失败重试/取消/删除/水合恢复均走 normalGeneration
     expect(storyboardTask.identify('f1', { jobId: '9002', videoStage: 'final', genStatus: 'failed' })).toBe(false);
     expect(storyboardTask.identify('s1', { jobId: '9001', videoStage: 'sample', genStatus: 'generating' })).toBe(false);
     expect(storyboardTask.identify('n1', { jobId: '9100' })).toBe(false);
-    // 组合事实：claims 由 normalGeneration 命中（注册序同页面）
     const { runtime } = setup();
     expect(runtime.claims('f1', { jobId: '9002', videoStage: 'final', genStatus: 'generating' })).toBe(true);
     expect(normalGenerationTask.identify('f1', { jobId: '9002', videoStage: 'final' })).toBe(true);
@@ -234,20 +225,19 @@ describe('成片/重生样片：运行时提交贯通', () => {
     })).toBe(true);
     await flushMicrotasks();
     expect(accepted).toEqual(['9002']);
-    expect(fake.data('f1').jobId).toBe('9002'); // 受理回填
+    expect(fake.data('f1').jobId).toBe('9002');
     expect(runtime.statusOf('f1')).toMatchObject({ phase: 'generating', jobId: '9002' });
-    expect(clock.pendingCount()).toBe(1); // 轮询在途
-    clock.fireNext(); // 第二次轮询返回 succeeded 终态
+    expect(clock.pendingCount()).toBe(1);
+    clock.fireNext();
     await flushMicrotasks();
     expect(fake.terminalResults).toContainEqual({ nodeId: 'f1', jobId: '9002', status: 'succeeded' });
     expect(fake.data('f1')).toMatchObject({ videoStage: 'final', genStatus: undefined, src: 'http://v/f.mp4' });
-    expect(runtime.bindingRevisionOf('f1')).toBe(0); // 无受理关联：无归属版本
-    expect(fake.data('f1').generationRecovery).toBeUndefined(); // 历史兼容：不写 marker
+    expect(runtime.bindingRevisionOf('f1')).toBe(0);
+    expect(fake.data('f1').generationRecovery).toBeUndefined();
   });
 
   it('重生样片提交：canvas_binding 独立承接新样片卡，旧成片卡 data 原样（新旧卡分离）', async () => {
     const { fake, runtime } = setup();
-    // 旧成片失败卡（入口）+ 新样片占位卡（承接目标）
     fake.nodes.set('f1', { id: 'f1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { videoStage: 'final', genStatus: 'failed', jobId: '9002', sourceSampleJobId: '9001', errorText: '上游成片失败', chargeState: 'released' } });
     fake.nodes.set('s2', { id: 's2', type: 'mediaNode', position: { x: 0, y: 400 }, data: { videoStage: 'sample', genStatus: 'generating' } });
     const oldCardPatchesBefore = fake.patches.length;
@@ -261,10 +251,8 @@ describe('成片/重生样片：运行时提交贯通', () => {
       target: targetFacts('s2'),
     })).toBe(true);
     await flushMicrotasks();
-    // 新样片卡：受理回填 + 台账登记（canvas_binding 视图）
     expect(fake.data('s2').jobId).toBe('9100');
     expect(runtime.statusOf('s2')).toMatchObject({ phase: 'generating', jobId: '9100', submissionId: 'uuid-0001' });
-    // 旧成片卡：一次未被触碰（不在原成片卡重跑；失败原因与费用状态保留）
     expect(fake.patches.filter((patch) => patch.nodeId === 'f1')).toHaveLength(oldCardPatchesBefore);
     expect(fake.data('f1')).toMatchObject({ videoStage: 'final', genStatus: 'failed', sourceSampleJobId: '9001', chargeState: 'released' });
   });
@@ -279,18 +267,17 @@ describe('成片/重生样片：运行时提交贯通', () => {
       payload: { kind: 'regenerate-sample' as const, sampleJobId: '9001', expectedCredits: 40, quoteRevision: 'rev-r1' },
       target: targetFacts('s2'),
     };
-    const onPageCreateFailure = vi.fn(() => true); // 页面接管（撤卡/核对中逻辑归页面）
+    const onPageCreateFailure = vi.fn(() => true);
     expect(runtime.submit(storyboardTask, input, { onCreateFailure: onPageCreateFailure })).toBe(true);
     await flushMicrotasks();
     expect(onPageCreateFailure).toHaveBeenCalledTimes(1);
-    // 同意图原样重发（页面 408 一次重发路径）：同载荷同目标 → 同 submission_id
     expect(runtime.submit(storyboardTask, input)).toBe(true);
     await flushMicrotasks();
     expect(apiMocks.regenerateSampleJob).toHaveBeenCalledTimes(2);
     const firstKey = apiMocks.regenerateSampleJob.mock.calls[0]![3];
     const secondKey = apiMocks.regenerateSampleJob.mock.calls[1]![3];
     expect(secondKey).toBe(firstKey);
-    expect(fake.data('s2').jobId).toBe('9100'); // 重放受理回填
+    expect(fake.data('s2').jobId).toBe('9100');
   });
 
   it('报价变价（1056 信封错误）：页面 onCreateFailure 接管（撤卡 + 重报价），不落失败卡', async () => {
@@ -305,8 +292,8 @@ describe('成片/重生样片：运行时提交贯通', () => {
     await flushMicrotasks();
     expect(handled).toHaveBeenCalledTimes(1);
     expect((handled.mock.calls[0]![0] as ApiError).code).toBe(1056);
-    expect(fake.data('s2').genStatus).toBe('generating'); // 未被通用失败落卡覆盖（页面撤卡接管）
-    expect(clock.pendingCount()).toBe(0); // 未受理不轮询
+    expect(fake.data('s2').genStatus).toBe('generating');
+    expect(clock.pendingCount()).toBe(0);
   });
 });
 
@@ -314,7 +301,6 @@ describe('成片/重生样片：断连恢复', () => {
   it('重生样片受理回执丢失（刷新后恢复扫描）：新样片任务的恢复记录按 video 由 normalGeneration 对账补卡', async () => {
     const fake = createFakeHost();
     const clock = new ManualClock();
-    // 恢复页：重生样片任务的记录（task_type='video'，目标 = 新样片占位卡，卡不在画布）
     const page: GenerationRecoveryPage = {
       protocol_version: 1,
       canvas_version: null,
@@ -332,7 +318,7 @@ describe('成片/重生样片：断连恢复', () => {
         items: [{ recovery_item_id: 'gcr:sub-regen:$target', output_key: '$target', node_id: 's2', state: 'pending', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null }],
       }],
     };
-    fake.host.fetchRecoveryPage = (async () => JSON.parse(JSON.stringify(page))) as never; // 扫描取页走宿主接缝（IKJKU9）
+    fake.host.fetchRecoveryPage = (async () => JSON.parse(JSON.stringify(page))) as never;
     const runtime = createGenerationRuntime(fake.host, {
       fetchJobStatus: apiMocks.fetchJobStatus as never,
       fetchRecoveryPage: (async () => JSON.parse(JSON.stringify(page))) as never,
@@ -343,11 +329,9 @@ describe('成片/重生样片：断连恢复', () => {
     runtime.register(storyboardTask);
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '9100', status: 'processing', progress: 20, asset: null });
     await runtime.recover('p1');
-    // 受理回执丢失的占位卡被补回（mediaType=video，jobId 续上）——刷新后可找回任务入口
     expect(fake.inserts).toHaveLength(1);
     expect(fake.inserts[0]).toMatchObject({ id: 's2', type: 'mediaNode', position: { x: 5, y: 6 } });
     expect(fake.inserts[0]!.data).toMatchObject({ genStatus: 'generating', jobId: '9100', mediaType: 'video' });
-    // 补卡后的再次扫描对账（不重复建卡）：卡已在 → 接续轮询（重复扫描仅对账不双链）
     await runtime.recover('p1');
     expect(fake.inserts).toHaveLength(1);
     expect(runtime.statusOf('s2')).toMatchObject({ phase: 'generating', jobId: '9100' });

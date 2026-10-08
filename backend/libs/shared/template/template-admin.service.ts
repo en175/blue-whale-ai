@@ -4,7 +4,6 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createTemplateAdminRepo>;
 
-/** 模板管理端用例依赖：wire Prisma template admin repo（IK764F）。 */
 @Injectable()
 export class TemplateAdminService {
   private repoInstance?: Repo;
@@ -22,7 +21,6 @@ export class TemplateAdminService {
     return this.repo.renameTag(tagCode, label);
   }
 
-  /** IKA64P：标签隐藏开关 */
   setTagVisibility(tagCode: string, visible: number) {
     return this.repo.setTagVisibility(tagCode, visible);
   }

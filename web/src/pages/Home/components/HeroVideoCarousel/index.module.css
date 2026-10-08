@@ -42,7 +42,6 @@
 .scrim {
   z-index: 2;
   pointer-events: none;
-  /* 只在标题一带加很浅的压暗，避免整段视频发灰 */
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.22) 0%, rgba(0, 0, 0, 0) 28%);
 }
 

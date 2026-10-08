@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// 自建用户体系：角色 / 用户角色 / 登录日志（替代 auth.guard.ts 的 role >= 10 魔数）。
-// 镜像 identity_memberships-parity 的三轨核对结构。
 
 const migrationSql = readFileSync(
   new URL("../../../prisma/migrations/20260924200000_identity_roles/migration.sql", import.meta.url),
@@ -42,8 +40,6 @@ describe("identity_roles 三轨迁移", () => {
   });
 
   it("seed 的角色 code 与 core 侧的判定集合一致", () => {
-    // 两处漂移的后果是「库里是 admin，代码不认」——用户看不到后台入口，
-    // 而库里那一行看起来完全正常。
     expect(migrationSql).toContain("('admin',");
     expect(migrationSql).toContain("('super_admin',");
   });
@@ -57,20 +53,15 @@ describe("identity_roles 三轨迁移", () => {
   });
 
   it("Prisma 模型与迁移同源", () => {
-    // 模型名与索引名都是**当前态**（被 20260928100000 收敛过前缀）；
-    // 本文件只钉住该迁移的冻结内容，当前态以 bw-prefix-rename-parity.test.ts 为准。
     for (const model of ["bw_roles", "bw_user_roles", "bw_login_logs"]) {
       expect(schemaPrisma).toContain(`model ${model} {`);
     }
     expect(schemaPrisma).toContain('map: "uk_bw_roles__code"');
     expect(schemaPrisma).toContain('map: "uk_bw_user_roles__grant_key"');
-    // user_id 可空：漏了 `?` 会让下一次 migrate 试图把列改回 NOT NULL
     expect(schemaPrisma).toMatch(/^  user_id\s+BigInt\?$/m);
   });
 
   it("本迁移不动守卫里的魔数（读侧切换是独立一步）", () => {
-    // 角色的写侧现在落地；读侧（守卫怎么用）在 new-api 断链那一步切换——
-    // 它是鉴权路径，要同时决定每请求查库还是随会话走，不该搭在建表这一刀上。
     expect(migrationSql).toContain("ADMIN_ROLE_THRESHOLD");
   });
 });

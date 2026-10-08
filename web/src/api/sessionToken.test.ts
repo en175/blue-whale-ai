@@ -3,10 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSessionToken, getSessionToken, setSessionToken } from './sessionToken';
 import { apiRequest } from './http';
 
-/**
- * IKJAZN：登录凭证从 HttpOnly cookie 换成前端持有之后，
- * 「令牌存哪、有没有带上」变成了前端自己的责任——此前一条测试都没有。
- */
 
 afterEach(() => {
   window.localStorage.clear();
@@ -14,7 +10,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** 造一个成功的产品信封响应。 */
 function okResponse() {
   return {
     ok: true,
@@ -48,7 +43,7 @@ describe('sessionToken（令牌存取）', () => {
       throw new Error('denied');
     });
 
-    expect(getSessionToken()).toBeNull(); // 当作没有令牌，而不是抛出去
+    expect(getSessionToken()).toBeNull();
     expect(() => setSessionToken('jwt')).not.toThrow();
     expect(() => clearSessionToken()).not.toThrow();
   });

@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Commit a task worktree diff as a reviewable, revertable checkpoint.
-# worktree 工单分支上的 commit 是本地可逆动作（不碰发布线、不 push、不 PR），
-# 不属发布红线，无需用户授权门槛。推送并创建 PR 前须有用户授权。
-#
-# 两种模式：
-#   提交（默认）：把已完成的子 issue diff 落成一个新 commit。一个工单分支可以提交多次——
-#            一个父工单一个 worktree、逐子项各落一个 commit 是既定流程，不是例外。
-#   --amend：用户 review commit 后发现修订，覆盖最后 commit。默认 --no-edit 保留原 commit
-#            message；-m 覆盖 message。仅在该分支已有自己的 commit 后可用。
 
 set -euo pipefail
 
@@ -54,8 +45,6 @@ fail() {
 }
 
 ROOT="$(git rev-parse --show-toplevel)"
-# Git Bash on Windows：git rev-parse 返回 `D:/...`（大写盘符），pwd 返回 `/d/...`（小写 posix）。
-# case 比较大小写敏感会误判，统一走 pwd 风格。
 ROOT="$(cd "$ROOT" && pwd)"
 # shellcheck source=lib/worktree-paths.sh
 source "$ROOT/scripts/lib/worktree-paths.sh"
@@ -73,7 +62,6 @@ case "$branch" in
   *) fail "当前分支不是工单分支：$branch" ;;
 esac
 
-# 任务起点由开工入口写入私有 Git 元数据，缺失时禁止回退 master 推断。
 source "$ROOT/scripts/lib/python3-command.sh"
 select_python3_command || fail "未找到可用的 Python 3，无法读取任务起点。"
 base_sha="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT" --field start_sha)" \
@@ -88,8 +76,6 @@ branch_has_own_commit() {
   local head_sha target_ref target_sha found_target=0
   head_sha="$(git -C "$ROOT" rev-parse HEAD)"
   [ "$own_base_sha" != "$head_sha" ] || return 1
-  # 同步任务后，HEAD 可能只是前进的 release 提交。只允许修订尚未进入
-  # 本地或已抓取远端目标发布线的任务顶端提交。
   for target_ref in "refs/heads/$target_branch" "refs/remotes/origin/$target_branch"; do
     target_sha="$(git -C "$ROOT" rev-parse --verify --quiet "$target_ref" 2>/dev/null)" || continue
     found_target=1
@@ -98,10 +84,6 @@ branch_has_own_commit() {
   [ "$found_target" = 1 ]
 }
 
-# ── web 类型门禁（IKIZPZ 复盘）─────────────────────────────────────────────
-# vitest 走 esbuild 不查类型，类型错误曾一路绿着提交进集成分支（IKIZQE 的 9 个
-# tsc -b 错误到收口审查才暴露）。检查命令本身现成，这里只是接线：staged 含
-# web/ 路径就必须先证明类型干净；web 依赖未安装视同无法证明，同样拒绝。
 run_web_typecheck_gate() {
   git -C "$ROOT" diff --cached --name-only | grep -q '^web/' || return 0
   local tsc_bin="$ROOT/web/node_modules/.bin/tsc"
@@ -133,7 +115,6 @@ else
   run_web_typecheck_gate
   git -C "$ROOT" commit -m "$MESSAGE"
   commit_count="$(git -C "$ROOT" rev-list --count "$own_base_sha"..HEAD)"
-  # ${} 包起来：紧跟其后的全角括号是多字节字符，裸 $branch 会被 bash 当成变量名的一部分。
   echo "✅ 已提交任务验收分支：${branch}（本分支第 ${commit_count} 个 commit）"
 fi
 

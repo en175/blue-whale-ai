@@ -1,14 +1,4 @@
 // @vitest-environment jsdom
-/* IKGZ5O 工具会话期模态（画布链路）：进入抠图/扩图/裁切/擦除会话后界面进入「工具状态」——
-   生成 Dock 六面板不可见不可开（进入时维持现状全量 dismiss），源图卡悬浮工具条隐藏
-   （MediaNode 渲染期注入 soloToolbarHidden，组件渲染门断言在 MediaNode/index.test.tsx）；
-   会话期请求打开生成面板（左工具栏/点草稿卡等）先按四路退出口径退出会话（参数丢弃）再放行；
-   选中联动不回弹面板；未发送草稿在隐藏期间保留、退出后原样回来；高清/HD 参数面板
-   打开不再藏上方操作条（IKHFUF，对齐普通生成面板）；四方互斥无回归。渲染模式沿用 genPanelDismiss.test.tsx
-   （FlowCanvas/CanvasToolbar 打桩透出 props，面板真实渲染）。
-   IKH3ZJ 生成面板准入经 toolSessionCoordinator（exitAllToolSessions）后补齐守护：
-   面板准入矩阵扩到 erase/crop/outpaint/去字幕（此前仅 cutout×工具栏、crop×点草稿卡），
-   草稿往返补参考连线保持维度。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -72,7 +62,6 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** PromptRefEditor 打桩（面板真实渲染所需，genPanelDismiss 同款） */
 vi.mock('./components/PromptRefEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
@@ -202,8 +191,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：就绪图片卡 i1（1600×900 png，四会话源卡）+ 图片草稿 d1（prompt 预置，草稿保留断言用）
- *  + 文生文卡 tg1（面板开合断言用） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -298,7 +285,6 @@ async function clickNode(id: string) {
   });
 }
 
-/** 进入编辑会话（画质工具横排对应按钮派发的回调，四会话同构，IKH3XZ） */
 async function enterSession(kind: 'cutout' | 'erase' | 'crop' | 'outpaint', id = 'i1') {
   const data = fullNode(id).data as Record<string, (nodeId: string) => void>;
   const handler = {
@@ -312,16 +298,10 @@ async function enterSession(kind: 'cutout' | 'erase' | 'crop' | 'outpaint', id =
   });
 }
 
-/** 源卡悬浮工具条隐藏标记（CanvasPage 渲染期注入 MediaNode data 的模态条件） */
 function soloToolbarHidden(id: string): boolean {
   return (fullNode(id).data as Record<string, unknown>).soloToolbarHidden === true;
 }
 
-/** 钉屏幕媒体卡工具条容器 show 门（IKGZ5O×IKGYYD 缝合后的真实显隐控制点）：工具条迁出
- *  MediaNode 后模态显隐由 followToolbarLayer 的 show 表达式承担（!editSessionActive）；
- *  FlowCanvas 打桩不渲染钉屏幕层，从捕获的 JSX 结构读
- *  NodeFollowToolbar.show 锁定「会话态传进了容器门」这一环。须先模拟唯一选中
- *  （onSelectionChange）使 soloMediaToolbarNode 非空，否则容器不挂载、返回 undefined */
 function mediaFollowToolbarShow(): boolean | undefined {
   const frag = flowProps.current.followToolbarLayer as { props?: { children?: unknown } } | undefined;
   const children = frag?.props?.children;
@@ -331,14 +311,12 @@ function mediaFollowToolbarShow(): boolean | undefined {
   return el?.props?.show;
 }
 
-/** 模拟 React Flow 唯一选中（打桩透出 onSelectionChange，soloId 回写使钉屏幕容器挂载） */
 async function selectSolo(id: string) {
   await act(async () => {
     flowProps.current.onSelectionChange?.({ nodes: [fullNode(id)] });
   });
 }
 
-/** 面板开关标记（模型选择器文案仅在该面板打开时渲染，genPanelDismiss 同款） */
 const imageOpen = () => container.textContent!.includes('测试生图模型');
 const textGenOpen = () => container.textContent!.includes('文本生成 · 文生文');
 
@@ -347,8 +325,6 @@ const eraseSendBar = () => document.body.querySelector('[data-testid="erase-send
 const cropConfirm = () => document.body.querySelector('[data-testid="crop-confirm"]');
 const enhanceSend = () => document.body.querySelector('[data-testid="enhance-send-btn"]');
 
-/** 各会话进行中的外部可见工具 UI（出现=会话活跃、消失=已退出），testid 对齐
- *  toolSessionSwitch 的 SESSION_UI_TESTID。 */
 const SESSION_UI_TESTID: Record<string, string> = {
   erase: 'erase-send-bar',
   cutout: 'cutout-toolbar',
@@ -398,7 +374,6 @@ describe('IKGZ5O 进入会话：Dock 关闭 + 源卡悬浮工具条隐藏', () =
     await renderPage();
     await enterSession('cutout');
     expect(cutoutToolbar()).toBeTruthy();
-    // 人像场景 → 打开描边上拉 → 启用描边（滑杆转可用）
     const toolbarClick = async (testId: string) => {
       await act(async () => {
         (document.body.querySelector(`[data-testid="${testId}"]`) as HTMLButtonElement).click();
@@ -450,7 +425,6 @@ describe('IKGZ5O 进入会话：Dock 关闭 + 源卡悬浮工具条隐藏', () =
     await vi.waitFor(() => expect(textGenOpen()).toBe(true));
     await enterSession('cutout');
     expect(textGenOpen()).toBe(false);
-    // 草稿静默保留：面板隐藏不触碰草稿卡输入（重新打开面板即回填）
     expect((fullNode('d1').data as Record<string, unknown>).prompt).toBe('未发送草稿');
   });
 
@@ -459,14 +433,12 @@ describe('IKGZ5O 进入会话：Dock 关闭 + 源卡悬浮工具条隐藏', () =
     await enterSession('erase');
     expect(eraseSendBar()).toBeTruthy();
     await pressEscape();
-    // 退出后 Dock 恢复：点草稿卡重新打开图片面板，提示词原样回来
     await clickNode('d1');
     await vi.waitFor(() => expect(imageOpen()).toBe(true));
     expect((fullNode('d1').data as Record<string, unknown>).prompt).toBe('未发送草稿');
   });
 
   it('IKH3ZJ 草稿往返参考维度：进入会话→退出→重开草稿，参考连线原样保持', async () => {
-    // d1 预置一条参考连线（i1→d1）：会话进入/退出均不触碰 edges，往返后参考关系仍在
     (canvasDocMock.current.doc as { edges: unknown[] }).edges = [
       { id: 'e1', source: 'i1', target: 'd1' },
     ];
@@ -479,7 +451,6 @@ describe('IKGZ5O 进入会话：Dock 关闭 + 源卡悬浮工具条隐藏', () =
     await clickNode('d1');
     await vi.waitFor(() => expect(imageOpen()).toBe(true));
     expect((fullNode('d1').data as Record<string, unknown>).prompt).toBe('未发送草稿');
-    // 参考关系保持：往返后画布连线原样（无删除、无重复建线）
     expect(flowProps.current.edges as unknown[]).toHaveLength(1);
     expect((flowProps.current.edges as Array<{ id: string }>)[0]!.id).toBe('e1');
   });
@@ -510,8 +481,6 @@ describe('IKGZ5O 会话期打开生成面板：先退会话（参数丢弃）再
 
   it('会话期选中联动不回弹面板（擦除会话源卡即面板绑定卡）', async () => {
     await renderPage();
-    // 先经草稿卡 d1 打开图片面板（imageDraftId 绑定 d1），再以 d1 为源卡进入擦除会话
-    // （进入时全量 dismiss 关面板），随后程序化单选 d1（源卡本身，不触发退出路径）
     await clickNode('d1');
     await vi.waitFor(() => expect(imageOpen()).toBe(true));
     await enterSession('erase', 'd1');
@@ -520,14 +489,10 @@ describe('IKGZ5O 会话期打开生成面板：先退会话（参数丢弃）再
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [fullNode('d1')], edges: [] });
     });
-    // 会话仍在（源卡本身选中不退出），面板不得回弹
     expect(eraseSendBar()).toBeTruthy();
     expect(imageOpen()).toBe(false);
   });
 
-  /* IKH3ZJ 准入矩阵补齐：exitEditSessionForGenPanel 收口经 exitAllToolSessions 后，
-   * 每个会话的 target 快照都能正确驱动退出（cutout×工具栏已有上方用例，此处补
-   * erase/crop/outpaint 三图片工具 + 去字幕视频工具，共五工具 × 左工具栏入口）。 */
   it.each(['erase', 'crop', 'outpaint'] as const)(
     '左工具栏开图片面板（%s 会话）：会话退出后面板才出现',
     async (kind) => {
@@ -544,7 +509,6 @@ describe('IKGZ5O 会话期打开生成面板：先退会话（参数丢弃）再
   );
 
   it('左工具栏开图片面板（去字幕会话）：会话退出后面板才出现', async () => {
-    // 用例内局部追加视频源卡（去字幕工具的源卡），不扰动其他组的媒体卡数断言
     (canvasDocMock.current.doc as { nodes: unknown[] }).nodes.push({
       id: 'v1',
       type: 'mediaNode',

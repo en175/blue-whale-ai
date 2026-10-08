@@ -5,7 +5,6 @@ import {
 } from '@lib/contracts/video-frame-interpolation';
 import { fetchFrameInterpolationCurrent, fetchJobs } from './jobs';
 
-/** 当前关联与该任务的公开冻结输入一同恢复，不从面板编辑值推测受理参数。 */
 export function frameInterpolationRecoveryOptions(projectId: string, nodeId: string) {
   return queryOptions({
     queryKey: ['jobs', 'frame-interpolation-recovery', projectId, nodeId],

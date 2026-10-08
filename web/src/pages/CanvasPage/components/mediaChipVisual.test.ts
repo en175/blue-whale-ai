@@ -6,10 +6,6 @@ import { applyMediaMentionState, createMediaMentionChip, renderPromptMentions } 
 import chipStyles from './mediaChip.module.css';
 import textNodeStyles from './TextNode/index.module.css';
 
-/* IKG7NH 正文素材标签视觉同源回归锁（渲染断言）：文本卡正文 chip（媒体索引标签
-   与素材引用标签）与生成面板输入框 chip 共用 mediaChip.module.css 一份视觉定义。
-   CSS 源断言与源唯一性锁在 mediaChipVisualSource.test.ts（node 环境）。
-   最终渲染效果由人工浏览器回归验证。 */
 
 const materials: Array<PromptMaterial & { url: string }> = [
   { assetId: '101', mediaType: 'image', url: 'https://example.com/a.png' },

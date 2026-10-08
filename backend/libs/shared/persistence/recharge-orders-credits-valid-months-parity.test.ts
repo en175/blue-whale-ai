@@ -1,9 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// 充值订单加一列：`credits_valid_months`（到账积分有效期快照，单位月）。
-// 镜像 recharge-orders-cashier-parity 的三轨核对结构：prisma migration、schema 独立文件、
-// docs/sql 快照三处同源。
 
 const migrationSql = readFileSync(
   new URL(
@@ -46,8 +43,6 @@ describe("recharge_orders 有效期月数快照 三轨迁移", () => {
   });
 
   it("**不给默认值**：默认值会让存量行凭空多出一个从未承诺过的有效期", () => {
-    // 若写 `DEFAULT 24`，那些从来没记过有效期快照的行会被当成「承诺了 24 个月」，
-    // 发放时就会拿一个它们从来没有的口径去覆盖 billing 的来源策略
     const columns = migrationSql.slice(migrationSql.indexOf("ALTER TABLE"));
     expect(columns).not.toMatch(/`credits_valid_months`[^,;]*DEFAULT/i);
   });

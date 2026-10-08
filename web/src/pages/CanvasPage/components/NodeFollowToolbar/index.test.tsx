@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-/* IKGYYD 钉屏幕工具栏容器（NodeFollowToolbar）测试：渲染模式沿用 MediaNode/index.test.tsx
-   （createRoot + act）；store 状态经 ReactFlowProvider 的 useStoreApi().setState 直接注入
-   （组件只订阅 nodeLookup/transform/width 与选中集合，不依赖真实 ReactFlow 测量），
-   断言口径：锚点 = computeFollowAnchorAbove 手算值、根元素带 data-gen-panel-territory
-   （IKFYH6 点外关闭豁免）、唯一选中门（useSoloNodeSelected）与调用方 show 条件。 */
 import { act, createElement, useEffect, useRef, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -23,8 +18,6 @@ async function renderTree(children: ReactNode) {
   });
 }
 
-/** 注入 React Flow store 状态（挂载后 effect 内生效；state prop 变化时重注入，
- *  同一挂载下驱动被测组件的 store 订阅重渲染——拖动/平移跟随的代理链路） */
 function StateInjector({ state }: { state: Record<string, unknown> }) {
   const { setState } = useStoreApi();
   useEffect(() => {
@@ -33,7 +26,6 @@ function StateInjector({ state }: { state: Record<string, unknown> }) {
   return null;
 }
 
-/** 构造注入用的节点查找表与选中数组 */
 function flowState(
   nodes: Array<{ id: string; x: number; y: number; width: number; height: number; selected?: boolean }>,
   transform: [number, number, number] = [0, 0, 1],
@@ -186,8 +178,6 @@ describe('IKGYYD NodeFollowToolbar（钉屏幕工具栏容器）', () => {
 describe('IKIXDB NodeFollowToolbar 浮层滚轮直通', () => {
   let forwarded: WheelEvent[];
 
-  /** 模拟 ReactFlow children 的 DOM 语境：.react-flow 根 + renderer 桩（收集转发事件）。
-   *  真实结构中工具条渲染在 .react-flow 内、.react-flow__renderer 兄弟层（index.tsx）。 */
   function FlowStub({ children }: { children: ReactNode }) {
     const rendererRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
@@ -269,7 +259,6 @@ describe('IKIXDB NodeFollowToolbar 浮层滚轮直通', () => {
       ]));
     });
     expect(mountNode.querySelector('[data-gen-panel-territory]')).toBeNull();
-    // 卸载后的旧 layer 派发不再触达 renderer（监听已随布防元素拆除）
     await dispatchWheel(layer, { deltaY: 10 });
     expect(forwarded).toHaveLength(0);
   });

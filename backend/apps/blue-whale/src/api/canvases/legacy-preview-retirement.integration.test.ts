@@ -12,8 +12,6 @@ import { ProjectsController } from "../projects/projects.controller.js";
 import { AgentV1ProxyController } from "../agent/agent-v1-proxy.controller.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 
-// Public HTTP seam, real production Canvas/Project services and disposable MySQL (IKDLQL).
-// Historical-revision compatibility mapping + legacy card read-only retirement.
 describe.skipIf(!process.env.IKDLQL_DATABASE_URL)("Legacy preview compatibility public API", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -22,9 +20,7 @@ describe.skipIf(!process.env.IKDLQL_DATABASE_URL)("Legacy preview compatibility 
 
   const SOURCE = { sessionId: "session-legacy-preview", revisionId: "revision-old", shotNo: 1 };
   const HISTORICAL_PROMPT = "历史修订的提示词\n保留换行与 <细节>";
-  /** 历史修订路由的行为开关：ok 正常返回；missing-route 模拟 Agent 未发布该路由；no-revision 返回空；no-prompt 修订缺提示词；gateway 模拟上游故障。 */
   let revisionRouteMode: "ok" | "missing-route" | "no-revision" | "no-prompt" | "gateway" = "ok";
-  /** 快照当前 active 修订；默认指向新版，强制历史来源走兼容映射。 */
   let activeRevisionId = "revision-newer";
   const agentRequests: string[] = [];
 
@@ -153,7 +149,6 @@ describe.skipIf(!process.env.IKDLQL_DATABASE_URL)("Legacy preview compatibility 
     expect((await saveCanvas(projectId, [], canvas.version)).status).toBe(200);
     const recreated = await (await apply(projectId)).json();
     expect(recreated.data.node.id).not.toBe(first.data.node.id);
-    // 重建正文来自首次应用保存的可信快照，不再依赖历史修订路由在线
     expect(recreated.data.node.data.text).toBe(HISTORICAL_PROMPT);
   });
 
@@ -190,7 +185,6 @@ describe.skipIf(!process.env.IKDLQL_DATABASE_URL)("Legacy preview compatibility 
     try {
       const before = await canvasNodes(projectId);
       const response = await apply(projectId);
-      // 正文缺失按限长契约明确拒绝（400），不是 404 也不是静默兜底
       expect(response.status).toBe(400);
       expect((await response.json()).message).toContain("预览正文缺失");
       const after = await canvasNodes(projectId);
@@ -231,7 +225,6 @@ describe.skipIf(!process.env.IKDLQL_DATABASE_URL)("Legacy preview compatibility 
   });
 
   it("retired legacy cards stay read-only and quotable in the real browser", async () => {
-    // 浏览器段复用同一 harness：好卡打开即迁移并可查只读历史，坏卡保留旧卡形态且不再有 dock/给 Agent/双正文编辑入口。
     if (!process.env.IKDLQL_BROWSER) return;
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
@@ -260,31 +253,26 @@ describe.skipIf(!process.env.IKDLQL_DATABASE_URL)("Legacy preview compatibility 
       } }, version: 0 })));
       await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
 
-      // 好卡打开即迁移为普通文本节点；坏卡（提示词缺失）保留旧卡形态，提示词区不渲染、不伪造
       await page.getByText("好卡提示词正文").waitFor();
       await page.getByText("只有画面的坏卡").waitFor();
       expect(await page.getByText("提示词", { exact: true }).count()).toBe(0);
 
-      // 迁移历史只读查阅：画面描述与迁移时提示词可查（限定在弹窗内，画布文本节点有同名正文）
       await page.getByRole("button", { name: "迁移历史" }).click();
       const historyModal = page.locator('[data-semantic="container"]');
       await historyModal.getByText("好卡的画面描述").waitFor();
       await historyModal.getByText("好卡提示词正文").waitFor();
       await page.keyboard.press("Escape");
 
-      // 退役断言：旧卡无「引用到 dock」「给 Agent」入口；双击不进入正文编辑
       expect(await page.getByRole("button", { name: "引用到 dock" }).count()).toBe(0);
       expect(await page.getByRole("button", { name: "给 Agent" }).count()).toBe(0);
       await page.getByText("只有画面的坏卡").dblclick();
       expect(await page.locator("textarea:visible").count()).toBe(0);
 
-      // 统一引用入口仍可用：旧卡顶部「添加到对话」进入引用链路（坏卡无提示词，退化为 @ 引用并打开面板）
       activeRevisionId = SOURCE.revisionId;
       const badCard = page.locator(".react-flow__node").filter({ hasText: "只有画面的坏卡" }).first();
       await badCard.hover();
       await badCard.getByRole("button", { name: "添加到对话" }).click();
 
-      // 历史修订兼容映射的浏览器链路：时间轴旧修订卡（水合自 active）→ 替身推进修订 → 应用走历史路由
       await page.getByRole("button", { name: "手动应用", exact: true }).waitFor();
       activeRevisionId = "revision-newer";
       await page.getByRole("button", { name: "手动应用", exact: true }).click();
@@ -293,7 +281,6 @@ describe.skipIf(!process.env.IKDLQL_DATABASE_URL)("Legacy preview compatibility 
       const editor = appliedNode.locator('[data-placeholder="输入内容..."]');
       expect(await editor.innerText()).toBe(HISTORICAL_PROMPT);
 
-      // 应用后按普通文本编辑并刷新恢复；迁移结果与坏卡共存
       await editor.dblclick();
       const editSaved = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
       await editor.fill("退役后的独立编辑\n第二行");

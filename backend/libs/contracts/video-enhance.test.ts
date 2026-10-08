@@ -1,11 +1,3 @@
-// IKH3VE：video_enhance（视频 HD 高清，火山 MediaKit 画质增强大模型版）跨进程契约
-// 双端一致性断言。防漂移约定（沿用 media-extract.test.ts / video-subtitle-erase.test.ts
-// 读种子文本的同源断言模式）：TS 侧常量直接 import 断言值；worker-java 无法 import TS
-// 常量，本测试直接读 Java 源码文本逐值对账——任一侧改动未同步即红。
-// 官方 API 口径 = 火山引擎 AI MediaKit「提交画质增强（大模型版）任务 API」官方 PDF
-// （resolution 枚举 720p/1080p/2k/4k、输入短边 [360,1080] / 长边 [360,1920]——失败示例
-// 报错文案写 resolution 仅 [720p,1080p] 系文档内部矛盾，以参数表与码率参考表为准）。
-// 后续票（worker 执行 / 前端）照抄本契约与 video-enhance.ts，不得发明字段名。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -31,7 +23,6 @@ import {
   videoEnhanceInputSchema,
 } from "./video-enhance.js";
 
-// 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const contractJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/VideoEnhanceContract.java",
@@ -46,7 +37,6 @@ const jobTypeJava = readFileSync(
   ),
   "utf8",
 );
-// tag 字面量单处定义在 GenerationMqRoute（VideoEnhanceContract.TAG 只做转发），故 tag 的对账基准读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
@@ -69,7 +59,6 @@ describe("video_enhance 契约不变量（官方 PDF 口径，TS 侧）", () => 
 
   it("网关端点：提交 /v1/mediakit/{tool}、查询 /v1/mediakit/tasks/（IKH67T 实测校准）", () => {
     expect(VIDEO_ENHANCE_SUBMIT_PATH).toBe("/v1/mediakit/enhance-video-generative");
-    // 三个 MediaKit 异步工具共用同一条查询路由；网关路径 ≠ 火山上游路径（混用即 404）。
     expect(VIDEO_ENHANCE_POLL_PATH_PREFIX).toBe("/v1/mediakit/tasks/");
   });
 
@@ -106,7 +95,6 @@ describe("video_enhance 契约不变量（官方 PDF 口径，TS 侧）", () => 
         }).success,
       ).toBe(true);
     }
-    // 720p 是官方合法值但产品裁掉不暴露（ADR-0105），创建入口明确拒绝；其余为非法值。
     for (const resolution of ["720p", "1080P", "2K", "4K", "", null, 42, undefined]) {
       expect(
         videoEnhanceInputSchema.safeParse({
@@ -174,7 +162,6 @@ describe("video_enhance 双端一致性（读 worker-java 源码文本，防漂�
     expect(ERROR_VIDEO_ENHANCE_FAILED).toBe("video_enhance_failed");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_ENHANCE_FAILED]).toBe(1045);
     expect(ERROR_CODES[1045]).toBeTruthy();
-    // worker 执行面（IKH3VF）引用侧防漂移：Java 契约常量与错误类常量同值
     expect(contractJava).toContain(
       'String ERROR_VIDEO_ENHANCE_FAILED = "video_enhance_failed";',
     );

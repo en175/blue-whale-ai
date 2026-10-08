@@ -1,10 +1,6 @@
-/* ============================================
- * 站点 SEO 文案与路由标题：index.html 与 document.title 共用
- * ============================================ */
 
 export const SITE_NAME = '蓝鲸';
 
-/** 对齐首页 H1：品牌 + 动作，不用空泛品类词 */
 export const SITE_TITLE = '蓝鲸 | 任意视频，告诉 Agent 即可创建';
 
 export const SITE_DESCRIPTION =
@@ -27,7 +23,6 @@ export const WEBSITE_JSON_LD = {
   description: SITE_DESCRIPTION,
 } as const;
 
-/** 按路径给出浏览器标题：首页用完整站点标题，其余为「页面 | 蓝鲸」 */
 export function titleForPath(pathname: string): string {
   if (pathname.startsWith('/admin')) return `管理后台 | ${SITE_NAME}`;
   const normalized = pathname.replace(/\/+$/, '') || '/';

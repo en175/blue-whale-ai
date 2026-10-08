@@ -4,7 +4,6 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createSkillAdminRepo>;
 
-/** 技能管理端用例依赖（IKA64P 后续校准）：wire Prisma skill admin repo。 */
 @Injectable()
 export class SkillAdminService {
   private repoInstance?: Repo;

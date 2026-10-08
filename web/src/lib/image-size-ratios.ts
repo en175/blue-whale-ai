@@ -1,4 +1,3 @@
-/** 消费端图片尺寸/比例：只认展示 id 与已填组合，不露出调用值。 */
 
 export type AspectRatioOption = {
   id: string;
@@ -44,7 +43,6 @@ export function hasAspectRatio(raw: unknown, ratioId: string): boolean {
   return aspectRatioOptions(raw).some((ratio) => ratio.id === ratioId);
 }
 
-/** 当前尺寸下可供用户选择的比例。新契约走 size.available_aspect_ratios；旧接口回退全量比例。 */
 export function ratiosForSelectedSize(
   model: ConsumerImageModel,
   sizeId: string,
@@ -56,7 +54,6 @@ export function ratiosForSelectedSize(
   return aspectRatioOptions(model.supported_aspect_ratios);
 }
 
-/** 尺寸切换后夹取比例：保留仍可用的当前值，否则默认比例，再否则第一项。 */
 export function pickRatioForSize(
   model: ConsumerImageModel,
   sizeId: string,

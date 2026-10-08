@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKIXDB 浮层滚轮直通测试：单元覆盖 renderer 定位与滚动区判定；集成把真实 FlowCanvas
-   挂进 [data-canvas-stage] 舞台（mock 手法同 spacePan.test.tsx），断言 Dock 浮层上的
-   wheel 经 hook 转发后视口平移/缩放、浮层内真实滚动区滚自身。 */
 import { act, createElement, useRef, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,7 +11,6 @@ import {
 } from './canvasWheelPassthrough';
 
 vi.hoisted(() => {
-  // 开发期代码定位插件在导入时探测 Canvas；本测试不绘制位图。
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 });
 
@@ -36,7 +32,6 @@ async function wheel(target: EventTarget, init: WheelEventInit = {}) {
   return event;
 }
 
-/** 测试宿主：同构 canvasWrapper 的画布舞台，hook 布防在舞台上（接线一口径） */
 function Stage({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null);
   useOverlayWheelPassthrough(ref, { ignoreInsideReactFlow: true });
@@ -45,7 +40,6 @@ function Stage({ children }: { children: ReactNode }) {
 
 beforeEach(async () => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // jsdom 不做布局；只补浏览器测量 API，React Flow 使用真实实现（同 spacePan.test.tsx）。
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     unobserve() {}
@@ -76,9 +70,7 @@ beforeEach(async () => {
   await act(async () => {
     root.render(createElement(Stage, null,
       createElement(FlowCanvas, props),
-      // 画布旁的非 .react-flow 浮层桩：Dock 面板命中面（IKIXDB 场景）
       createElement('div', { 'data-testid': 'overlay-stub' }),
-      // 浮层内真实滚动区桩：overflow 溢出的参考图条等价物（jsdom 无布局，实例 mock 几何）
       createElement('div', { 'data-testid': 'scroll-stub', style: { overflowY: 'auto' } }),
     ));
   });
@@ -175,7 +167,6 @@ describe('forwardWheelToRenderer', () => {
     const received: WheelEvent[] = [];
     renderer.addEventListener('wheel', (e) => received.push(e as WheelEvent));
 
-    // 先派发确定 event.target = 浮层元素，再走被测函数转发
     const event = new WheelEvent('wheel', {
       bubbles: true, cancelable: true,
       clientX: 30, clientY: 40,
@@ -196,10 +187,8 @@ describe('forwardWheelToRenderer', () => {
     expect(forwarded.shiftKey).toBe(true);
     expect(forwarded.altKey).toBe(true);
     expect(forwarded.metaKey).toBe(true);
-    // 原 forwardWheel 基准行为：合成事件不冒泡（renderer 之外不再二次触发）
     expect(forwarded.bubbles).toBe(false);
 
-    // 舞台外的游离元素定位不到 renderer：返回 false、不派发
     const stray = new WheelEvent('wheel', { bubbles: true, cancelable: true });
     const strayHost = document.createElement('div');
     document.body.appendChild(strayHost);

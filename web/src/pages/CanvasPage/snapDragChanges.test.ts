@@ -1,6 +1,3 @@
-/* IKGGCT T2：拖拽 change 流吸附改写——主拖卡修正、多选统一偏移、被拖集合互不为
- * 参考、开关/Alt 短路、组框参考块、zoom 换算、非位移帧与未知尺寸原样透传、
- * guides 与 snapAlignment 计算一致 */
 import { describe, expect, it } from 'vitest';
 import type { NodeChange } from '@xyflow/react';
 import { collectSnapTargets, computeSnapAlignment, type SnapGuide, type SnapNodeLike } from './snapAlignment';
@@ -18,17 +15,12 @@ function posChange(id: string, x: number, y: number, dragging = true): NodeChang
   return { id, type: 'position', position: { x, y }, dragging };
 }
 
-/** 100×80 的静止参考卡，左上角在原点（左边 0、中心 x 50） */
 const REF_C = node('ref-c', 0, 0, { w: 100, h: 80 });
-/** 主拖卡 A：100×80，尺寸走 measured 分支 */
 const MAIN_A = node('main-a', 0, 0, { w: 100, h: 80, measured: true });
 
 describe('snapDragChanges：位置改写', () => {
   it('主拖卡 position change 被改写为吸附后位置（left 贴 left，dx 施加到 change.position）', () => {
-    // 参考卡宽 60（中心 x=30，距主拖卡中心 23px 不命中）：唯一命中 left——
-    // 与 centerX 并列时 T1 约定取前者，此处让关系唯一以便断言
     const ref = node('ref-c', 0, 0, { w: 60, h: 80 });
-    // 主拖卡本帧原始位置 (3,100)：左边距参考卡左边 3px，命中吸附被拉到 0
     const { changes, guides } = snapDragChanges(
       [posChange('main-a', 3, 100)],
       [MAIN_A, ref],
@@ -66,7 +58,6 @@ describe('snapDragChanges：位置改写', () => {
   });
 
   it('被拖集合互不为参考块：与主拖卡完全对齐的被拖成员不产生命中，修正由静止参考卡决定', () => {
-    // member-b 与主拖卡同 x=3：若未被排除，其 dx=0 会抢先命中（targetId=member-b 且无修正）
     const aligned = node('member-b', 3, 500, { w: 100, h: 80 });
     const { changes, guides } = snapDragChanges(
       [posChange('main-a', 3, 100), posChange('member-b', 3, 500)],

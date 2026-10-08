@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKH3OU/IKH3OV 去字幕会话单条组件测试（IKGZ83 双条 → 单条化，ADR-0104）：形态随 mode 切换——
-   智能模式仅 X/「智能擦除」/⚡0/发送四元素（零框选工具、无？帮助、无重置），框选模式按
-   「框选擦除 ？ | 框选/撤销/重做/重置」补齐四控件；唯一一条浮条、标记 data-gen-panel-territory；
-   ⚡0 徽标取代「本期免费」文字、「输出最高 1080P」挪到发送钮 title；框选模式无框时发送钮
-   按父级 sendBlockedReason 置灰（title 即拦发原因）、重置钮无框可清时置灰；
-   撤销重做重置与发送中置灰透传、框满置灰。
-   渲染模式沿用 ImageEraseDialog 测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
@@ -76,11 +69,9 @@ describe('IKH3OU 单条两形态', () => {
     expect(btn('subtitle-erase-title').textContent).toBe('智能擦除');
     expect(btn('subtitle-erase-free-badge')).toBeTruthy();
     expect(btn('subtitle-erase-send-btn')).toBeTruthy();
-    // 零框选工具：？帮助/框选/撤销/重做/重置一律不渲染（规格：智能模式无？帮助）
     for (const id of ['subtitle-erase-help', 'subtitle-erase-tool-box', 'subtitle-erase-undo', 'subtitle-erase-redo', 'subtitle-erase-reset']) {
       expect(has(id), id).toBe(false);
     }
-    // X 在最左
     const bar = sendBar();
     expect(bar.firstElementChild).toBe(btn('subtitle-erase-close'));
   });
@@ -116,7 +107,6 @@ describe('IKH3OU 单条两形态', () => {
     renderDialog({ mode: 'box' });
     expect(has('subtitle-erase-toolbar')).toBe(false);
     expect(has('subtitle-erase-full-text-toggle')).toBe(false);
-    // 组件内仅一条浮条（data-gen-panel-territory 唯一，豁免点外关闭误杀）
     expect(container!.querySelectorAll('[data-gen-panel-territory]').length).toBe(1);
     expect(sendBar().hasAttribute('data-gen-panel-territory')).toBe(true);
     expect(container!.textContent).not.toContain('全画面文字');
@@ -168,7 +158,6 @@ describe('IKH3OV 重置与必框发送', () => {
     expect(btn('subtitle-erase-send-btn').getAttribute('title')).toBe(blockedReason);
     await click(btn('subtitle-erase-send-btn'));
     expect(sendMock).not.toHaveBeenCalled();
-    // 有框（父级不再拦）：发送钮恢复可用，title 回到发送语义 + 输出规格
     renderDialog({ mode: 'box', sendBlockedReason: null });
     expect(btn('subtitle-erase-send-btn').disabled).toBe(false);
     expect(btn('subtitle-erase-send-btn').getAttribute('title')).toContain('输出最高 1080P');
@@ -219,11 +208,6 @@ describe('IKH3OU 回调透传与只读', () => {
   });
 });
 
-/* ===== IKH25A 单条跟随态 CSS 中心点锚（CSS 源断言，先例 CropDialog IKH1WI describe）：
-   跟随锚 left 是源卡中心 x，真居中由基础 .sendBar 的 translateX(-50%) 完成；
-   .sendBarFollow 对齐 CropDialog .panelFollow 先例（left:0 兜底 inline 缺失，
-   transform 不覆盖 → 继承基础态完成真居中，不再对中心点锚二次左移）。
-   IKH3OU 单条化后成员数从两条降为一条，退役样式块一并删除。 ===== */
 describe('IKH25A 单条跟随态 CSS 中心点锚', () => {
   const css = readFileSync(resolve('src/pages/CanvasPage/components/VideoSubtitleEraseDialog/index.module.css'), 'utf-8');
   const block = (selector: string) => css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
@@ -244,7 +228,6 @@ describe('IKH25A 单条跟随态 CSS 中心点锚', () => {
     expect(block('\\.fullTextToggle')).toBe('');
     expect(block('\\.togglePill')).toBe('');
     expect(block('\\.toggleKnob')).toBe('');
-    // 输出最高 1080P 已挪到发送钮 title，条内说明文字样式同步退役
     expect(block('\\.sendHint')).toBe('');
   });
 });

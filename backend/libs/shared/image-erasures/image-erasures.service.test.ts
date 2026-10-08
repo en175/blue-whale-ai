@@ -1,6 +1,3 @@
-// IKGOT4：擦除创建入口复核矩阵与免费口径单测（先例：image-enhancements.service.test.ts）。
-// 只测外部可见行为：拒绝原因可读、落库参数冻结、免费口径无成本预留、凭证冻结。
-// IKJJQW：追加恢复协议 v1 接入分支（canvas_binding 剥离/承载一致性/受理事务/受控错误）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImageErasuresService } from "./image-erasures.service.js";
@@ -58,7 +55,6 @@ const VALID_AREA_BODY = {
   mask_asset_id: "99",
 };
 
-/** 默认源素材：1920x1080 png、5MB；id=99 视为遮罩素材（同形状，均为本人图片）。 */
 function makeImageAsset(overrides: Record<string, unknown> = {}) {
   return {
     type: "image",
@@ -90,7 +86,6 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create, findUnique: vi.fn().mockResolvedValue({ status: "queued" }) },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
@@ -217,7 +212,6 @@ describe("ImageErasuresService.create：输入门槛复核（官方 PDF 输入�
       },
     });
     expect((await service.create("9", "55", VALID_TEXT_BODY)).code).toBe(200);
-    // 竖图长短边对调同样合法：短边 1440、长边 2560
     expect((await service.create("9", "55", VALID_TEXT_BODY)).code).toBe(200);
   });
 
@@ -237,7 +231,6 @@ describe("ImageErasuresService.create：输入门槛复核（官方 PDF 输入�
   it("rejects when short side exceeds 1440 with a readable reason", async () => {
     const { service } = makeService({
       assets: {
-        // 宽 2000 高 1441：短边 1441 超上限（旧宽高绑定语义会漏判这种横图）
         findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: 2000, height: 1441 })),
       },
     });
@@ -321,8 +314,6 @@ describe("ImageErasuresService.create：输入门槛复核（官方 PDF 输入�
   });
 
   it("lets an asset without recorded dimensions pass to the supplier gate", async () => {
-    // assets.width/height 由前端上报、存量图大量为 null：缺权威尺寸不臆造、不拦，
-    // 交供应商按官方门槛拒（与高清放大同口径）。
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: null, height: null })),
@@ -399,7 +390,6 @@ describe("ImageErasuresService.create：恢复协议 v1 接入（IKJJQW）", () 
       status: "queued",
       canvas_binding: { submission_id: SUBMISSION_ID, binding_revision: 1, is_current: true },
     });
-    // 业务键照旧冻结（canvas_binding 剥离后不进 input）。
     expect(create.mock.calls[0][0].data.input).toEqual(VALID_TEXT_BODY);
     expect(lockMock).toHaveBeenCalledTimes(1);
   });

@@ -1,18 +1,3 @@
-/* ============================================
- * UserManage 用户管理：积分调整/冻结解冻/审计日志
- * 数据源 GET /api/admin/users + POST /:userId/manage + GET /api/admin/operation-logs
- *
- * 骨架（筛选状态机 / 三态 / 分页接线）在 `../../components/AdminQueryTable`；
- * 本页只**声明**筛选、列与空态。
- *
- * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**——
- * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
- *
- * ⚠️ 搜索与分页**都在服务端**（IKJ5M7）：此前是「拉前 100 条 + 本地过滤」，
- * 于是第 101 名之后的用户既搜不到也翻不到，而界面上完全看不出来。
- * 余额区间筛选随之删除 —— 它筛的是本地那 100 行，看着在工作，
- * 给出的却是一份与全站无关的名单。要按余额筛，得先有一条能按余额查的接口。
- * ============================================ */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Coins, Lock, LockOpen, Search } from 'lucide-react';
@@ -51,21 +36,17 @@ const PAGE_SIZE = 20;
 
 const fmt = (n: number) => n.toLocaleString('en-US');
 
-/** ISO 时间 → 本地展示 */
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
 
-/** 角色：1 普通用户 / 10 管理员 / 100 root */
 const ROLE_LABELS: Record<number, string> = { 1: '普通用户', 10: '管理员', 100: 'Root' };
 const roleName = (r: number) => ROLE_LABELS[r] ?? `角色 ${r}`;
 
-/** 审计日志 action → 展示名 */
 const ACTION_LABELS: Record<string, string> = {
   'user.freeze': '冻结',
   'user.unfreeze': '解冻',
   'user.adjust_balance': '调整积分',
 };
 
-/** 解析日志 detail JSON 字符串（含 reason 与 value），失败返回空对象 */
 const parseDetail = (raw: string): { reason?: string; value?: number } => {
   try {
     return JSON.parse(raw);
@@ -74,26 +55,16 @@ const parseDetail = (raw: string): { reason?: string; value?: number } => {
   }
 };
 
-/** 状态筛选下拉选项。**空串 = 全部**（不发给后端）—— 与另外三张记录页同一套口径。 */
 const STATUS_OPTIONS = [
   { value: '', label: '全部状态' },
   { value: 'active', label: '正常' },
   { value: 'disabled', label: '已冻结' },
 ];
 
-/** `type` 而不是 `interface`：`useAppliedFilters` 要求筛选形状可按字符串索引。 */
 type Filters = { keyword: string; status: string };
 
-/** ⚠️ 必须是**模块级常量**：它是 `useAppliedFilters` 里 useCallback 的依赖（见其文件头）。 */
 const EMPTY_FILTERS: Filters = { keyword: '', status: '' };
 
-/**
- * 累计充值那一列的「？」。
- *
- * <p>摆在这一列的表头而不是页面标题下：它解释的正是**这一列**的读法，而这一列的数
- * 与运营脑子里的「充值」很可能不是一个东西（赠送算不算、花掉的还算不算）。
- * 写在别处等于把说明和它说明的列分开。
- */
 const RECHARGE_CALIBER = (
   <Hint label="累计充值的口径" title="累计充值怎么算">
     <div>
@@ -118,9 +89,6 @@ export default function UserManage() {
   const paging = usePagedQuery(filters.epoch);
   const { applied, draft, setDraft, apply, reset } = filters;
 
-  // 三个弹窗的目标用户存**整行**，不存 userId。
-  // ⚠️ 这不是风格问题：翻页或刷新之后当前页里可能已经没有那个 id 了，
-  //    按 id 回查会得到 undefined，弹窗当场凭空消失（`detailId !== null && findUser(...)`）。
   const [detailUser, setDetailUser] = useState<AdminUserRow | null>(null);
   const [adjustUser, setAdjustUser] = useState<AdminUserRow | null>(null);
   const [freezeUser, setFreezeUser] = useState<AdminUserRow | null>(null);
@@ -128,13 +96,11 @@ export default function UserManage() {
   const query = {
     page: paging.page,
     pageSize: PAGE_SIZE,
-    // `#42` 这种写法照旧能搜：归一在发出去之前做（见 userSearch）
     ...(applied.keyword ? { keyword: normalizeAdminUserKeyword(applied.keyword) } : {}),
     ...(applied.status ? { status: applied.status } : {}),
   };
   const list = useQuery(adminUsersOptions(query));
 
-  /** 用户管理操作：冻结/解冻/发放积分（POST /:userId/manage），成功后关弹窗并刷新列表 */
   const doManage = async (
     userId: number,
     params: { action: UserManageAction; reason: string; value?: number; idempotencyKey?: string }
@@ -187,7 +153,6 @@ export default function UserManage() {
       key: 'actions',
       header: '操作',
       render: (u) => (
-        // 行内操作：图标按钮并排（Button 基元已含尺寸/悬停态，不用私有样式）
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <Button
             size="sm"
@@ -242,8 +207,7 @@ export default function UserManage() {
         pagination={pagination}
         filters={
           <>
-            {/* 搜索框：基元没有「前置图标」位，图标与输入框并排放在同一行内；
-                宽度走内联而非私有样式类 —— 本页已无自己的 CSS 文件 */}
+            {}
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <Search size={16} strokeWidth={2} aria-hidden />
               <Input
@@ -282,10 +246,10 @@ export default function UserManage() {
         }
       />
 
-      {/* 用户详情（审计日志：调整记录 + 操作日志） */}
+      {}
       {detailUser && <UserDetailModal user={detailUser} onClose={() => setDetailUser(null)} />}
 
-      {/* 发放积分 */}
+      {}
       {adjustUser && (
         <AdjustModal
           user={adjustUser}
@@ -294,7 +258,7 @@ export default function UserManage() {
         />
       )}
 
-      {/* 冻结/解冻 */}
+      {}
       {freezeUser && (
         <FreezeModal
           user={freezeUser}
@@ -306,7 +270,6 @@ export default function UserManage() {
   );
 }
 
-/* ============ 用户详情弹窗 ============ */
 const DETAIL_TABS = [
   { key: 'base', label: '基本信息' },
   { key: 'adjust', label: '调整记录' },
@@ -317,8 +280,6 @@ type DetailTab = (typeof DETAIL_TABS)[number]['key'];
 
 function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () => void }) {
   const [tab, setTab] = useState<DetailTab>('base');
-  // 按类别 + 用户 ID 拉审计日志，走 Query（IKJ058）—— 参数整份进 key，
-  // 所以换一个用户就是另一份数据，不会命中上一个人的缓存。
   const logsQuery = useQuery(
     operationLogsOptions({ category: 'user', searchText: `user:${user.userId}` }),
   );
@@ -330,10 +291,8 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
       : '获取日志失败'
     : '';
 
-  /** 调整记录 tab：仅 adjust_balance */
   const adjusts = logs.filter((l) => l.action === 'user.adjust_balance');
 
-  /** 三态统一走 Empty：加载中 / 加载失败（可重试）/ 空数据；有数据时不渲染任何状态行 */
   const logRows = (isEmpty: boolean, emptyMessage: string) => (
     <>
       {logsLoading && (
@@ -371,7 +330,7 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
     <Modal open title="用户详情" width={960} onClose={onClose}>
       <Tabs items={DETAIL_TABS} value={tab} onChange={(k) => setTab(k as DetailTab)} />
 
-      {/* 页签与内容之间的一次性间距（基元不自带外边距） */}
+      {}
       <div style={{ marginTop: 20 }}>
         {tab === 'base' && (
           <div
@@ -422,7 +381,7 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
                     <tr key={l.id}>
                       <td>{fmtTime(l.createdAt)}</td>
                       <td>
-                        {/* 正负用 Badge 的 success/danger 表达，不用私有颜色类 */}
+                        {}
                         <Badge tone={v >= 0 ? 'success' : 'danger'}>
                           {v >= 0 ? `+${fmt(v)}` : fmt(v)}
                         </Badge>
@@ -472,7 +431,6 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
   );
 }
 
-/* ============ 发放积分弹窗 ============ */
 function AdjustModal({
   user,
   onClose,
@@ -491,13 +449,8 @@ function AdjustModal({
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  // 幂等键**在弹窗打开那一刻**铸一把，整段填写与重试复用同一个 —— 服务端拿它当 billing
-  // 发放的幂等键。写在请求函数里现造等于没有幂等：双击/超时重发会各拿一把新钥匙，发两笔。
-  // 重新打开弹窗 = 新意图 = 新钥匙，所以「有意再发一笔」不受影响。
   const [idempotencyKey] = useState(() => newIdempotencyKey());
   const amountNum = Number(amount);
-  // `isSafeInteger` 而不是 `isInteger`：后者放行 1e21，而超过 2^53 的整数在 JS 里
-  // 读进来就已经被四舍五入过 —— 界面看着是合法值，发出去的是另一个数。
   const valid =
     Number.isSafeInteger(amountNum) && amountNum > 0 && reason.trim().length > 0;
 
@@ -534,7 +487,7 @@ function AdjustModal({
         </>
       }
     >
-      {/* 账号摘要：只读状态，用 MetaRow 而不是蓝色色块 */}
+      {}
       <MetaRow
         items={[
           { label: '用户', value: user.nickname },
@@ -543,7 +496,7 @@ function AdjustModal({
         tone="sunken"
       />
 
-      {/* 表单标签只用一次性外边距，字号/颜色交给套件默认值 */}
+      {}
       <div style={{ margin: '16px 0 6px' }}>发放积分（正整数）</div>
       <Input
         style={{ width: '100%' }}
@@ -570,7 +523,6 @@ function AdjustModal({
   );
 }
 
-/* ============ 冻结/解冻弹窗 ============ */
 function FreezeModal({
   user,
   onClose,
@@ -618,7 +570,7 @@ function FreezeModal({
         </>
       }
     >
-      {/* 后果说明：冻结=warning（有副作用）、解冻=success（恢复能力） */}
+      {}
       <Alert tone={freezing ? 'warning' : 'success'}>
         {freezing ? (
           <>

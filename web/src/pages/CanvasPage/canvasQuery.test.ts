@@ -78,7 +78,6 @@ describe('pickCanvasIdAfterLoad', () => {
   });
 
   it('falls back to the latest created canvas when neither query nor last opened matches', () => {
-    // 置顶排序后首项是置顶组头，第三级兜底仍按最新创建落点
     expect(pickCanvasIdAfterLoad('', ['pinned-old', 'newest', 'mid'], '', 'newest')).toBe('newest');
     expect(pickCanvasIdAfterLoad('gone', ['pinned-old', 'newest', 'mid'], '', 'newest')).toBe('newest');
   });

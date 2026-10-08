@@ -1,16 +1,4 @@
 // @vitest-environment jsdom
-/* IKJKU8（PR981-REVIEW-20261003-F8）：恢复保存回执丢失可安全重放（用户故事 38）。
-   修复前 composeSaveFields 每次组合都拿新 commandId，保存成功但响应丢失（断连）后用户
-   原样重试 = 新 commandId + 旧 If-Match → 服务端幂等回读永不命中 → 必 412 进冲突复核。
-   本文件锁死发送侧：完全相同的重试（画布签名与版本未变）复用保留的命令身份/完整载荷/
-   If-Match 重发；新增编辑或版本推进必须换新命令；412 与 409 对账路径行为不变。
-   运行时 mock 只为可控 composeSaveFields（命令保留本身在页面保存接缝，见 index.tsx）。
-
-   IKJLTY（PR981-REVIEW2-20261003-R6）：回执丢失后「继续编辑」窗口修复——签名/版本变化
-   不再丢弃未决命令；新保存意图到来时先按原 commandId/完整载荷/原 If-Match 重放确认原
-   命令结果（服务端幂等先于版本检查：已落库命中回读返回 replayed 回执与确认版本），
-   确认后新内容再以确认版本为基换新命令保存。旧回执只确认原保存与合法版本、只进台账，
-   不回写旧全文覆盖新编辑；确认笔撞其他客户端真实更新的受控 412 仍走既有冲突闸门。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -33,7 +21,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -89,7 +76,6 @@ const apiMocks = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
 }));
 
-/** IKJKU8：恢复保存传输层打桩——按调用序编排「首次结果 + 后续行为」，回执身份跟随实际命令 */
 const recoveryApi = vi.hoisted(() => ({
   fetchGenerationRecoveryPage: vi.fn(async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null })),
   resolveGenerationRecovery: vi.fn(async () => ({ protocol_version: 1, records: [] })),
@@ -106,8 +92,6 @@ vi.mock('@/api/canvasRecovery', () => ({
   })),
 }));
 
-/** IKJKU8：运行时打桩——composeSaveFields 逐次返回递增命令身份（重放路径不得再调它），
- *  onSaveReceipt/reconcileConflictItems 记录回填与对账调用。 */
 const runtimeMock = vi.hoisted(() => {
   let seq = 0;
   return {
@@ -160,7 +144,6 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn(),
 }));
 
-/* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
@@ -206,7 +189,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪视频节点 v1（assetId a9），无连线 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -249,7 +231,6 @@ async function renderPage() {
   });
 }
 
-/** 改卡片标题（真实编辑）：内容变化推进防抖自动保存；同名改写只动引用不动签名 */
 async function renameNode(name: string) {
   await act(async () => {
     const data = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!.data as {
@@ -259,12 +240,10 @@ async function renameNode(name: string) {
   });
 }
 
-/** 等一轮 800ms 防抖自动保存收尾 */
 async function waitDebounce() {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
 }
 
-/** 点左下角「重试保存」（flushCanvasSave 的用户入口） */
 async function clickRetrySave() {
   await act(async () => {
     const button = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
@@ -275,7 +254,6 @@ async function clickRetrySave() {
 
 const putCalls = () => recoveryApi.putCanvasDocWithRecovery.mock.calls as unknown as Array<[string, SavePayload, number | null, RecoverySaveFields]>;
 
-/** 首次保存成功响应（replayed=false；重放场景由编排覆写 replayed） */
 const savedReceipt = (commandId: string, version: number) => ({
   project_id: 'p1',
   version,
@@ -286,7 +264,6 @@ const savedReceipt = (commandId: string, version: number) => ({
   },
 });
 
-/** 传输层编排：第 1 次 PUT 丢响应（网络层失败，无服务端回执），第 2 次起返回 replayed 回执 */
 function stageResponseLostReplay() {
   let attempts = 0;
   recoveryApi.putCanvasDocWithRecovery.mockImplementation(async (_p: string, _pl: SavePayload, _v: number | null, recovery: RecoverySaveFields) => {
@@ -323,25 +300,21 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(1);
     const [first] = putCalls();
-    expect(first[2]).toBe(3); // If-Match = 水合版本
+    expect(first[2]).toBe(3);
     const composed = runtimeMock.runtime.composeSaveFields.mock.calls.length;
 
-    // 回执丢失（首次 reject）：用户原样重试——同名改写触发防抖，画布签名未变
     await renameNode('改名A');
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
     const [, replay] = putCalls();
-    expect(replay[3].commandId).toBe(first[3].commandId); // 复用原命令身份
-    expect(replay[1]).toEqual(first[1]); // 完整载荷原样重发
-    expect(replay[2]).toBe(3); // If-Match 未变
-    // 完全相同的重试不重新组命令（无新保存意图）
+    expect(replay[3].commandId).toBe(first[3].commandId);
+    expect(replay[1]).toEqual(first[1]);
+    expect(replay[2]).toBe(3);
     expect(runtimeMock.runtime.composeSaveFields.mock.calls.length).toBe(composed);
 
-    // 服务端幂等回读命中回放原回执（replayed=true）→ 按既有语义回填台账
     expect(runtimeMock.runtime.onSaveReceipt).toHaveBeenCalledWith(
       expect.objectContaining({ commandId: first[3].commandId, replayed: true }),
     );
-    // 回执落定后命令不再保留：签名未变的再次防抖不再发 PUT
     await renameNode('改名A');
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
@@ -357,7 +330,6 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
     const [first] = putCalls();
     const composed = runtimeMock.runtime.composeSaveFields.mock.calls.length;
 
-    // 防抖保存失败 → 「重试保存」入口走 flushCanvasSave：必须复用保留命令原样重发
     await clickRetrySave();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
     const [, replay] = putCalls();
@@ -371,8 +343,6 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
   }, 20000);
 
   it('IKJLTY：丢回执后继续改名——原命令先原样重放确认（版本对齐 4），新内容再以版本 4 为基换新命令保存', async () => {
-    // 已提交丢响应：第 1 笔服务端已落库（版本 3→4）但响应丢失；第 2 笔（原命令重放）
-    // 命中服务端幂等回读返回 replayed 回执（版本 4）；第 3 笔（新内容新命令）If-Match 4 首存成功
     let attempts = 0;
     recoveryApi.putCanvasDocWithRecovery.mockImplementation(async (_p: string, _pl: SavePayload, _v: number | null, recovery: RecoverySaveFields) => {
       attempts += 1;
@@ -389,42 +359,36 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(1);
     const [first] = putCalls();
-    expect(first[2]).toBe(3); // If-Match = 水合版本
+    expect(first[2]).toBe(3);
     const composedAfterFirst = runtimeMock.runtime.composeSaveFields.mock.calls.length;
 
-    // 回执丢失后继续改名（签名变化）——不得丢弃未决命令：先按原 commandId/完整载荷/原 If-Match 重放确认
     await renameNode('改名B');
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
     const [, confirmReplay] = putCalls();
-    expect(confirmReplay[3].commandId).toBe(first[3].commandId); // 原命令身份保留（重放入口不失）
-    expect(confirmReplay[1]).toEqual(first[1]); // 完整原载荷（改名A，不掺入新编辑）
-    expect(confirmReplay[2]).toBe(3); // 原 If-Match（命令实际版本，服务端摘要含版本必须原样）
-    expect(runtimeMock.runtime.composeSaveFields.mock.calls.length).toBe(composedAfterFirst); // 确认笔不组新命令
-    // 旧回执只确认原保存与合法版本：replayed 回执按既有语义回填台账，不触碰画布新编辑
+    expect(confirmReplay[3].commandId).toBe(first[3].commandId);
+    expect(confirmReplay[1]).toEqual(first[1]);
+    expect(confirmReplay[2]).toBe(3);
+    expect(runtimeMock.runtime.composeSaveFields.mock.calls.length).toBe(composedAfterFirst);
     expect(runtimeMock.runtime.onSaveReceipt).toHaveBeenCalledWith(
       expect.objectContaining({ commandId: first[3].commandId, replayed: true }),
     );
     expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
 
-    // 原命令确认后：新编辑内容以确认版本 4 为基、换新命令保存
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(3);
     const [, , freshSave] = putCalls();
     expect(freshSave[3].commandId).not.toBe(first[3].commandId);
     expect((freshSave[1].nodes as Node[]).find((n) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
-    expect(freshSave[2]).toBe(4); // 确认版本为基——修复前此笔仍携版本 3 必吃受控 412
+    expect(freshSave[2]).toBe(4);
     expect(runtimeMock.runtime.composeSaveFields.mock.calls.length).toBe(composedAfterFirst + 1);
 
-    // 新内容保存成功后签名对齐：同名改写不再发 PUT
     await renameNode('改名B');
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(3);
   }, 20000);
 
   it('IKJLTY：未提交丢响应（原命令未落库）继续改名——重放按原 If-Match 首存成功，新内容再以确认版本为基', async () => {
-    // 第 1 笔响应丢失且服务端未落库；第 2 笔（原命令重放）按原 If-Match 3 首存成功
-    // （replayed=false，版本 4）；第 3 笔（新内容新命令）If-Match 4 首存成功（版本 5）
     let attempts = 0;
     recoveryApi.putCanvasDocWithRecovery.mockImplementation(async (_p: string, _pl: SavePayload, _v: number | null, recovery: RecoverySaveFields) => {
       attempts += 1;
@@ -445,7 +409,6 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
     expect(confirmReplay[3].commandId).toBe(first[3].commandId);
     expect(confirmReplay[1]).toEqual(first[1]);
     expect(confirmReplay[2]).toBe(3);
-    // 未落库的重放 = 按原 If-Match 的正常首存：回执 replayed=false，同样只确认版本与台账
     expect(runtimeMock.runtime.onSaveReceipt).toHaveBeenCalledWith(
       expect.objectContaining({ commandId: first[3].commandId, replayed: false }),
     );
@@ -459,8 +422,6 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
   }, 20000);
 
   it('IKJLTY：flush 链路（重试保存按钮）——丢回执后继续改名，一次 flush 连续完成确认笔与新内容笔', async () => {
-    // 已提交丢响应：第 1 笔落库（版本 4）丢响应；flush 第 1 轮重放原命令确认（replayed 回执），
-    // 第 2 轮以确认版本 4 为基保存当前内容（版本 5）
     let attempts = 0;
     recoveryApi.putCanvasDocWithRecovery.mockImplementation(async (_p: string, _pl: SavePayload, _v: number | null, recovery: RecoverySaveFields) => {
       attempts += 1;
@@ -479,15 +440,14 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
     const [first] = putCalls();
     const composedAfterFirst = runtimeMock.runtime.composeSaveFields.mock.calls.length;
 
-    // 回执丢失后继续改名（签名变化），再点「重试保存」——flush 不得丢弃未决命令直接组新命令
     await renameNode('改名B');
     await clickRetrySave();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(3);
     const [, confirmReplay, freshSave] = putCalls();
-    expect(confirmReplay[3].commandId).toBe(first[3].commandId); // 确认笔：原命令原载荷原 If-Match
+    expect(confirmReplay[3].commandId).toBe(first[3].commandId);
     expect(confirmReplay[1]).toEqual(first[1]);
     expect(confirmReplay[2]).toBe(3);
-    expect(freshSave[3].commandId).not.toBe(first[3].commandId); // 新内容笔：新命令 + 确认版本为基
+    expect(freshSave[3].commandId).not.toBe(first[3].commandId);
     expect((freshSave[1].nodes as Node[]).find((n) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
     expect(freshSave[2]).toBe(4);
     expect(runtimeMock.runtime.composeSaveFields.mock.calls.length).toBe(composedAfterFirst + 1);
@@ -497,9 +457,6 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
   }, 20000);
 
   it('IKJLTY：确认笔撞其他客户端真实更新的受控 412——保留本地新编辑并登记复核闸门，重试被拦截', async () => {
-    // 第 1 笔响应丢失且服务端未落库；期间其他客户端把版本推到 4——第 2 笔（原命令重放）
-    // 携原 If-Match 3 收到受控 412（canvas_version_conflict）：原命令结果落定（未保存），
-    // 本地新编辑保留，登记恢复冲突闸门引导刷新复核（既有口径，不因重放路径旁路）
     let attempts = 0;
     recoveryApi.putCanvasDocWithRecovery.mockImplementation(async () => {
       attempts += 1;
@@ -517,15 +474,12 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
     const [, confirmReplay] = putCalls();
-    expect(confirmReplay[3].commandId).toBe(first[3].commandId); // 仍是原命令重放
+    expect(confirmReplay[3].commandId).toBe(first[3].commandId);
     expect(confirmReplay[2]).toBe(3);
-    // 本地新编辑保留（不被旧回执/旧全文覆盖）
     expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
 
-    // 复核闸门已登记：「重试保存」入口拦截，不再发请求
     await clickRetrySave();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
-    // 本地内容仍未被覆盖
     expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!.data).toMatchObject({ fileName: '改名B' });
   }, 20000);
 
@@ -541,13 +495,12 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(1);
     const [first] = putCalls();
 
-    // 服务端已明确表态（412）→ 命令已死：重试必须换新命令，且 If-Match 采用服务端对齐版本
     await renameNode('改名A');
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);
     const [, second] = putCalls();
     expect(second[3].commandId).not.toBe(first[3].commandId);
-    expect(second[2]).toBe(4); // adoptCanvasConflictVersion 对齐后重发（既有行为）
+    expect(second[2]).toBe(4);
   }, 20000);
 
   it('409 项冲突对账路径行为不变：保留命令作废，resolve 对账后被调用', async () => {
@@ -561,11 +514,9 @@ describe('IKJKU8 恢复保存回执丢失可安全重放', () => {
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(1);
     const [first] = putCalls();
-    // 既有行为：定向对账刷新台账（不自动重发旧全文）
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(runtimeMock.runtime.reconcileConflictItems).toHaveBeenCalledWith('p1');
 
-    // 明确拒绝后命令作废：后续保存走新命令
     await renameNode('改名A');
     await waitDebounce();
     expect(recoveryApi.putCanvasDocWithRecovery).toHaveBeenCalledTimes(2);

@@ -1,6 +1,3 @@
-/* ============================================
- * Assets 资产页面样式
- * ============================================ */
 
 .page {
   --asset-glass-surface: rgba(8, 8, 8, 0.68);
@@ -8,7 +5,6 @@
   --asset-glass-filter: blur(16px);
   --asset-glass-shadow: 0 14px 34px rgba(0, 0, 0, 0.42), 0 1px 0 rgba(255, 255, 255, 0.12);
   --asset-glass-shadow-hover: 0 20px 46px rgba(0, 0, 0, 0.52), 0 1px 0 rgba(255, 255, 255, 0.16);
-  /* 与首页 ChatBox 一致的深色玻璃表面，供加载态与音频卡片共用。 */
   --asset-upload-surface: rgba(6, 6, 6, 0.72);
   --asset-upload-border: rgba(255, 255, 255, 0.16);
   --asset-upload-filter: blur(28px) saturate(1.15);
@@ -18,7 +14,6 @@
   box-sizing: border-box;
   position: relative;
   z-index: 1;
-  /* 背景延伸到固定侧栏下方，内容本身仍避让侧栏。 */
   padding: 0 0 0 var(--sidebar-width);
   overflow-y: auto;
   background: rgba(7, 7, 10, 0.2);
@@ -32,7 +27,6 @@
   margin: 0;
 }
 
-/* ---- 顶部标题栏 ---- */
 .header {
   display: flex;
   align-items: center;
@@ -40,7 +34,6 @@
   position: sticky;
   top: 0;
   z-index: 5;
-  /* Header 贴合素材区顶部，滚动后由伪元素提供整条玻璃表面。 */
   padding: var(--spacing-xl);
   margin: 0;
   border: 0;
@@ -61,7 +54,6 @@
   transition: background var(--transition-fast);
 }
 
-/* 只有标题栏覆盖正在滚动的素材时才显示玻璃，避免首屏多一层深色遮罩。 */
 .headerScrolled {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
 }
@@ -94,7 +86,6 @@
   gap: var(--spacing-xs);
 }
 
-/* ---- 筛选按钮 ---- */
 .filterBtn {
   padding: 10px 16px;
   border-radius: var(--radius-md);
@@ -122,7 +113,6 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
-/* ---- 分隔线 ---- */
 .divider {
   width: 1px;
   height: 20px;
@@ -130,7 +120,6 @@
   margin: 0 var(--spacing-sm);
 }
 
-/* ---- 上传按钮 ---- */
 .uploadBtn {
   display: flex;
   align-items: center;
@@ -170,7 +159,6 @@
   display: none;
 }
 
-/* ---- 初始加载骨架 ---- */
 .skeletonGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -196,14 +184,12 @@
   box-shadow: var(--asset-upload-shadow);
 }
 
-/* ---- 虚拟化五列瀑布流 ---- */
 .masonry {
   width: 100%;
   border-radius: 12px 12px 0 0;
   overflow: hidden;
 }
 
-/* /library 的每张瀑布流卡片独立圆角，避免外层网格裁切卡片阴影。 */
 .libraryMasonry {
   border-radius: 0;
   overflow: visible;
@@ -221,7 +207,6 @@
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
 }
 
-/* ---- 资产卡片 ---- */
 .card {
   background: transparent;
   border: none;
@@ -229,8 +214,6 @@
   overflow: visible;
   box-shadow: var(--asset-glass-shadow);
   cursor: pointer;
-  /* 仅过渡 box-shadow：transition: all 会把列宽变化派生的卡片高度变化拉成动画，
-     masonic ResizeObserver 在动画期间逐帧测量并重排，引发弹窗尺寸抖动。 */
   transition: box-shadow var(--transition-normal);
 }
 
@@ -252,7 +235,6 @@
   outline-offset: 2px;
 }
 
-/* ---- 上传素材卡片 ---- */
 .uploadCard {
   display: flex;
   flex-direction: column;
@@ -298,7 +280,6 @@
   font-weight: 500;
 }
 
-/* ---- 缩略图区域 ---- */
 .thumbnail {
   position: relative;
   aspect-ratio: 1 / 1;
@@ -309,14 +290,12 @@
   background: transparent;
 }
 
-/* 图片/视频媒体填充 */
 .media {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-/* 图片/视频资源未就绪或加载失败时持续覆盖卡片，不改变已经确定的纵横比。 */
 .thumbnail .mediaSkeleton {
   position: absolute;
   inset: 0;
@@ -328,7 +307,6 @@
   border: 1px solid var(--asset-upload-border);
 }
 
-/* 音频同样覆盖加载骨架屏；时长元数据到达后再露出播放器。 */
 .thumbnail .audioMediaSkeleton {
   position: absolute;
   inset: 0;
@@ -338,9 +316,6 @@
   border: 1px solid var(--asset-upload-border);
 }
 
-/* 音频没有可展示的封面，始终保留深色玻璃观感的静态底。
- * Masonic 会 transform 虚拟化卡片；这里避免逐卡 backdrop-filter，防止滚动时
- * 叠加的视频背景与毛玻璃合成层丢失文字或整块内容。 */
 .audioThumbnail {
   background-color: var(--asset-item-surface);
   background-image: radial-gradient(circle at 24% 28%, rgba(255, 255, 255, 0.09), transparent 38%);
@@ -348,13 +323,11 @@
   box-shadow: var(--asset-upload-shadow);
 }
 
-/* 加载骨架只提供 shimmer，背景由音频缩略图的玻璃表面承载。 */
 .audioThumbnail .audioMediaSkeleton {
   background: transparent;
   border: none;
 }
 
-/* /library 的卡片外框由 .libraryCard 统一承载，避免内层边框被圆角裁切。 */
 .libraryCard .thumbnail .mediaSkeleton,
 .libraryCard .thumbnail .audioMediaSkeleton,
 .libraryCard .audioThumbnail,
@@ -362,24 +335,20 @@
   border: none;
 }
 
-/* 视频容器：承载懒加载检测与悬浮预览事件。 */
 .videoContainer {
   position: relative;
   width: 100%;
   height: 100%;
 }
 
-/* 卡片紧凑音频播放器：缩略图内居中展示 */
 .audioCardPlayer {
   width: 88%;
 }
 
-/* 图片本体不单独消费点击；视频与音频卡片保留指针事件以触发悬浮预览。 */
 .thumbnail .media {
   pointer-events: none;
 }
 
-/* 卡片右下角悬浮操作组（IKGHZ3：删除在左、放大预览在右；资产页仅删除）：悬停显现 */
 .cardActions {
   position: absolute;
   bottom: var(--spacing-sm);
@@ -415,7 +384,6 @@
   background-color: rgba(0, 0, 0, 0.7);
 }
 
-/* 合规通过角标：缩略图右上角 */
 .complianceBadge {
   position: absolute;
   top: var(--spacing-sm);
@@ -435,14 +403,12 @@
   height: 18px;
 }
 
-/* 音频图标 */
 .audioIcon {
   font-size: 40px;
   color: rgba(255, 255, 255, 0.8);
   font-weight: 300;
 }
 
-/* 类型标签 */
 .typeBadge {
   position: absolute;
   top: var(--spacing-sm);
@@ -457,12 +423,10 @@
   color: #fff;
   background-color: rgba(7, 10, 15, 0.82);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-  /* Masonic 在滚动时会 transform 卡片；标签不用 backdrop-filter，避免合成层重绘丢字。 */
   isolation: isolate;
   z-index: 4;
 }
 
-/* 两阶段视频阶段徽标（IKIZQI）：样片/成片，紧挨类型标签右侧 */
 .stageBadge {
   position: absolute;
   top: var(--spacing-sm);
@@ -481,7 +445,6 @@
   z-index: 4;
 }
 
-/* ---- 多选模式勾选角标（画布资产库选择弹窗）---- */
 .selectBadge {
   position: absolute;
   top: var(--spacing-sm);
@@ -503,7 +466,6 @@
   background-color: var(--color-bg-hover, #3a3a3a);
 }
 
-/* ---- 媒体加载失败遮罩 ---- */
 .mediaError {
   position: absolute;
   inset: 0;
@@ -544,7 +506,6 @@
   border-color: rgba(248, 113, 113, 0.7);
 }
 
-/* ---- 信息区 ---- */
 .cardInfo {
   padding: var(--spacing-sm) var(--spacing-md);
   display: flex;

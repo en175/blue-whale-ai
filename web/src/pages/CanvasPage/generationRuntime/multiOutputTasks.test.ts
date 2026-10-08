@@ -1,10 +1,3 @@
-/* ============================================
- * 多结果家族（场景切分/人声分离）类型定义契约测试（IKJJR5）：身份识别（占位卡 +
- * 规范结果卡）、冻结输入、创建/重试协议（client_token/Idempotency-Key = submission_id）、
- * 多结果成功判定（1 段场景切分仍走扇出）、恢复规划、扇出落卡（既有排列/命名/来源线），
- * 以及运行时集成：规范 node_id 扇出、一笔原子保存、逐项删除/撤销差分、恢复扫描判重、
- * marker 成品卡直接删除（不走取消流）。
- * ============================================ */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 type CreatedWithBindingView = { job_id: string; status: string; canvas_binding?: unknown };
@@ -66,7 +59,6 @@ describe('多结果家族：身份识别', () => {
     const trackId = `generation-result:${SUBMISSION}:track:voice`;
     expect(isSceneSplitCard(segmentId, { generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'segment:1' } })).toBe(true);
     expect(isVocalSplitCard(trackId, { generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'track:voice' } })).toBe(true);
-    // 交叉不认领；无 marker 的前缀卡不认领
     expect(isVocalSplitCard(segmentId, { generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'segment:1' } })).toBe(false);
     expect(isSceneSplitCard(trackId, { generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'track:voice' } })).toBe(false);
     expect(isSceneSplitCard(segmentId, {})).toBe(false);
@@ -106,7 +98,6 @@ describe('多结果家族：创建/重试/冻结输入', () => {
     expect(apiMocks.createVocalSplit).toHaveBeenCalledWith('p1', {
       source_asset_id: '5', scene: 'drama', output_format: 'flac', canvas_binding: BINDING,
     }, { silent: true, idempotencyKey: SUBMISSION });
-    // 历史兼容（binding=null）不带幂等头（旧请求零变化）
     await vocalSplitTask.create('p1', { payload: { source_asset_id: '5', scene: 'audio', output_format: 'aac' } }, null, 'k');
     expect(apiMocks.createVocalSplit).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', scene: 'audio', output_format: 'aac',
@@ -224,7 +215,6 @@ describe('多结果家族：扇出落卡（既有排列规则）', () => {
     expect(plan.nodes.map((node) => node.id)).toEqual([`generation-result:${SUBMISSION}:segment:1`, `generation-result:${SUBMISSION}:segment:2`]);
     expect(plan.nodes[0]!.data).toMatchObject({ fileName: '第 1 段 00:00-00:15', mediaType: 'video', width: 1280, height: 720, jobId: 'sj1' });
     expect(plan.nodes[1]!.data).toMatchObject({ fileName: '第 2 段 00:15-00:30' });
-    // 网格排布在源卡（锚点）右侧、第 2 段在第 1 段右侧（列数 = ceil(√2) = 2）
     expect(plan.nodes[1]!.position.x).toBeGreaterThan(plan.nodes[0]!.position.x);
     expect(plan.edges).toEqual([
       { source: 'v1', target: `generation-result:${SUBMISSION}:segment:1`, origin: 'scene-split' },
@@ -259,7 +249,6 @@ describe('多结果家族：扇出落卡（既有排列规则）', () => {
   });
 });
 
-// ── 运行时集成（提交→受理→成功扇出→保存差分；恢复扫描；marker 成品卡删除） ──────────
 
 interface FakeHost {
   host: GenerationRuntimeHost;
@@ -276,7 +265,7 @@ function createFakeHost(): FakeHost {
   const inserts: RuntimeNodeView[] = [];
   const removes: string[] = [];
   const counters = { saves: 0 };
-  const loadEpoch = {}; // 稳定加载身份（普通重渲染不推进）
+  const loadEpoch = {};
   const host: GenerationRuntimeHost = {
     getProjectId: () => 'p1',
     getLoadEpoch: () => loadEpoch,
@@ -313,7 +302,6 @@ const flushMicrotasks = async (rounds = 16) => {
   for (let i = 0; i < rounds; i += 1) await Promise.resolve();
 };
 
-/** 场景切分成功终态（1 段 + 1 段资产）与恢复页投影（segment:1 规范身份）。 */
 const oneSegmentDetail = () => ({
   job_id: 'sj1', status: 'succeeded', progress: 100, asset: null,
   output_assets: [{ id: 'a1', url: 'http://t/1.mp4', type: 'video' }],
@@ -337,7 +325,7 @@ const oneSegmentPage = (): GenerationRecoveryPage => ({
 
 function setupRuntime(fake: FakeHost, statusScript: Array<Record<string, unknown>>, page: GenerationRecoveryPage) {
   let statusIndex = 0;
-  fake.host.fetchRecoveryPage = vi.fn(async () => JSON.parse(JSON.stringify(page))) as never; // 扫描取页走宿主接缝（IKJKU9）
+  fake.host.fetchRecoveryPage = vi.fn(async () => JSON.parse(JSON.stringify(page))) as never;
   const runtime = createGenerationRuntime(fake.host, {
     fetchJobStatus: (vi.fn(async () => {
       const item = statusScript[Math.min(statusIndex, statusScript.length - 1)];
@@ -387,7 +375,7 @@ describe('多结果家族：运行时集成', () => {
       `apply:gcr:${SUBMISSION}:segment:1`,
       `replaceTarget:gcr:${SUBMISSION}:$target`,
     ]);
-    expect(fake.saves).toBeGreaterThan(0); // 扇出同笔落盘
+    expect(fake.saves).toBeGreaterThan(0);
   });
 
   it('部分删除：段卡删除后差分 remove（其余输出不动）；撤销恢复差分 restore', async () => {
@@ -398,31 +386,26 @@ describe('多结果家族：运行时集成', () => {
     runtime.submit(sceneSplitTask, { payload: { source_asset_id: '5', target_node_id: 'ph-1', granularity: 'standard' } as SceneSplitTaskPayload, target: sceneTargetFacts() });
     await flushMicrotasks(20);
 
-    // marker 成品卡删除：不走取消流（任务已终态），直接移除 + 差分 remove
     const segmentId = `generation-result:${SUBMISSION}:segment:1`;
     expect(apiMocks.cancelGenerationJob).not.toHaveBeenCalled();
     expect(runtime.remove(segmentId)).toBe(true);
     expect(fake.removes).toContain(segmentId);
-    // 首次保存前删除（B.6）：该项差分 remove、目标项照常 replaceTarget——一笔保存里
-    // 「每项明确 apply 或用户 remove」，不能只删占位遗漏结果
     expect(runtime.composeSaveFields()!.recoveryChanges).toEqual([
       { recoveryItemId: `gcr:${SUBMISSION}:$target`, expectedRevision: 1, action: 'replaceTarget' },
       { recoveryItemId: `gcr:${SUBMISSION}:segment:1`, expectedRevision: 0, action: 'remove' },
     ]);
-    // 撤销：段卡带 marker 回画布 → 差分 restore
     fake.nodes.set(segmentId, { id: segmentId, type: 'mediaNode', position: { x: 0, y: 0 }, data: { generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'segment:1' } } });
     expect(runtime.composeSaveFields()!.recoveryChanges).toEqual([
       { recoveryItemId: `gcr:${SUBMISSION}:$target`, expectedRevision: 1, action: 'replaceTarget' },
-      { recoveryItemId: `gcr:${SUBMISSION}:segment:1`, expectedRevision: 0, action: 'apply' }, // 撤销后该项回到 apply
+      { recoveryItemId: `gcr:${SUBMISSION}:segment:1`, expectedRevision: 0, action: 'apply' },
     ]);
-    // 已确认 removed 的项经撤销（marker 回画布）→ 差分 restore（显式撤销恢复同一结果）
     runtime.onSaveReceipt({ commandId: 'cmd-x', replayed: false, changes: [
       { recoveryItemId: `gcr:${SUBMISSION}:$target`, revision: 2, nodeBindingRevision: 1, state: 'replaced' },
       { recoveryItemId: `gcr:${SUBMISSION}:segment:1`, revision: 2, nodeBindingRevision: 1, state: 'removed' },
     ] });
     fake.nodes.delete(segmentId);
     const removedFields = runtime.composeSaveFields()!;
-    expect(removedFields).toBeNull(); // removed 已确认且卡缺席：无待确认动作
+    expect(removedFields).toBeNull();
     fake.nodes.set(segmentId, { id: segmentId, type: 'mediaNode', position: { x: 0, y: 0 }, data: { generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'segment:1' } } });
     expect(runtime.composeSaveFields()!.recoveryChanges).toEqual([
       { recoveryItemId: `gcr:${SUBMISSION}:segment:1`, expectedRevision: 2, action: 'restore' },
@@ -439,7 +422,7 @@ describe('多结果家族：运行时集成', () => {
     expect(fake.inserts.filter((node) => node.id === segmentId)).toHaveLength(1);
     await runtime.recover('p1');
     await flushMicrotasks(20);
-    expect(fake.inserts.filter((node) => node.id === segmentId)).toHaveLength(1); // 判重：不重复建卡
+    expect(fake.inserts.filter((node) => node.id === segmentId)).toHaveLength(1);
   });
 
   it('取消抢先成功：保留作品（收敛器挂载），不转为自动删除结果', async () => {
@@ -449,18 +432,15 @@ describe('多结果家族：运行时集成', () => {
     const runtime = setupRuntime(fake, [{ status: 'processing', progress: 10, asset: null }, oneSegmentDetail()], oneSegmentPage());
     runtime.submit(sceneSplitTask, { payload: { source_asset_id: '5', target_node_id: 'ph-1', granularity: 'standard' } as SceneSplitTaskPayload, target: sceneTargetFacts() });
     await flushMicrotasks(20);
-    // 删除流程发起（轮询 processing 中登记意图）后任务抢先成功：converge 挂载作品并提示
     apiMocks.fetchJobStatus.mockImplementation(async () => JSON.parse(JSON.stringify(oneSegmentDetail())) as never);
     expect(runtime.remove('ph-1')).toBe(true);
     await flushMicrotasks(30);
     const segmentId = `generation-result:${SUBMISSION}:segment:1`;
-    expect(fake.nodes.get(segmentId)).toBeTruthy(); // 作品保留（扇出成功）
+    expect(fake.nodes.get(segmentId)).toBeTruthy();
     expect(fake.removes).not.toContain(segmentId);
   });
 
-  // ── IKJKU6：失败重试保留任务类型定义——重试成功终态经 isMultiOutputSuccess / planFanoutCards 分发 ──
 
-  /** 场景切分失败卡（marker 受理关联 + identity.lastInput 冻结输入）。 */
   const sceneSplitFailedCard = () => ({
     id: 'ph-1', type: 'mediaNode' as const, position: { x: 958, y: 0 },
     data: {
@@ -508,7 +488,7 @@ describe('多结果家族：运行时集成', () => {
     await flushMicrotasks(20);
 
     const segmentId = `generation-result:${SUBMISSION}:segment:1`;
-    expect(fake.removes).toContain('ph-1'); // 占位卡扇出移除——非一对一 primary 转换
+    expect(fake.removes).toContain('ph-1');
     expect(fake.nodes.get(segmentId)!.data).toMatchObject({
       fileName: '第 1 段 00:00-00:10',
       generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'segment:1' },
@@ -532,7 +512,7 @@ describe('多结果家族：运行时集成', () => {
     const second = fake.nodes.get(`generation-result:${SUBMISSION}:segment:2`);
     expect(first!.data).toMatchObject({ fileName: '第 1 段 00:00-00:15', generationRecovery: { outputKey: 'segment:1' } });
     expect(second!.data).toMatchObject({ fileName: '第 2 段 00:15-00:30', generationRecovery: { outputKey: 'segment:2' } });
-    expect(second!.position.x).toBeGreaterThan(first!.position.x); // 网格布局（默认横排 320 之外的家族排列）
+    expect(second!.position.x).toBeGreaterThan(first!.position.x);
     expect(runtime.composeSaveFields()!.recoveryChanges.map((change) => `${change.action}:${change.recoveryItemId}`).sort()).toEqual([
       `apply:gcr:${SUBMISSION}:segment:1`,
       `apply:gcr:${SUBMISSION}:segment:2`,
@@ -586,8 +566,8 @@ describe('多结果家族：运行时集成', () => {
     const music = fake.nodes.get(`generation-result:${SUBMISSION}:track:music`);
     expect(voice!.data).toMatchObject({ fileName: '素材视频(人声).flac', generationRecovery: { outputKey: 'track:voice' } });
     expect(music!.data).toMatchObject({ fileName: '素材视频(音乐).flac' });
-    expect('jobId' in voice!.data).toBe(false); // 轨卡不带 jobId（家族口径，默认布局会写）
-    expect(voice!.position).toEqual({ x: 958, y: 0 }); // 纵向轨列（默认横排 320 之外的家族排列）
+    expect('jobId' in voice!.data).toBe(false);
+    expect(voice!.position).toEqual({ x: 958, y: 0 });
     expect(music!.position).toEqual({ x: 958, y: 300 });
     expect(fake.removes).toContain('vs-1');
   });

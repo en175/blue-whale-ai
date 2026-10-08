@@ -70,7 +70,6 @@ async function renderPage() {
   throw new Error(`列表仍在加载: ${document.body.textContent}`);
 }
 
-/** 表头文字（用来钉「哪一列在、哪一列不在」）。 */
 function headers(): string[] {
   return [...document.body.querySelectorAll('th')].map((th) => th.textContent?.trim() ?? '');
 }
@@ -108,7 +107,6 @@ describe('JobRecords 任务记录 · 模型列', () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('豆包 Seedance 2.5');
-    // 展示名在时不再重复显示内部 id —— 一格里两行同名信息是噪音
     expect(document.body.textContent).not.toContain('doubao-seedance-2-5-260628');
   });
 
@@ -131,7 +129,6 @@ describe('JobRecords 任务记录 · 模型列', () => {
 
     expect(cells).toContain('—');
     expect(document.body.textContent).not.toContain('undefined');
-    // 模型列的位置：任务 ID / 用户名 / 手机号 / 项目 ID / 类型 / 模型
     expect(cells[5]).toBe('—');
   });
 
@@ -140,13 +137,8 @@ describe('JobRecords 任务记录 · 模型列', () => {
 
     const first = api.fetchAdminJobRecords.mock.calls[0]?.[0] as Record<string, unknown>;
 
-    // ⚠️ 先证明**调用确实发生过**：`calls[0]?.[0]` 在没调用时是 `undefined`，
-    //    而下一条断言对 `undefined` 也是绿的 —— 不先钉这一句，这个闸门就有暗门。
     expect(api.fetchAdminJobRecords).toHaveBeenCalled();
 
-    // 「全部」由**空值**表达，不是哨兵值。这条是本工单要消灭的那个 bug 的**直接闸门**：
-    // 一旦有人把 `'all'` 写回 EMPTY_FILTERS 而判据没跟着改，请求里就会多出
-    // `status=all` —— 而列表**不报错**，只会静默为空。所以只能从请求参数上钉。
     expect(first).not.toHaveProperty('status');
     expect(first).not.toHaveProperty('type');
   });
@@ -155,14 +147,12 @@ describe('JobRecords 任务记录 · 模型列', () => {
     api.fetchAdminJobRecords.mockResolvedValue({ list: [], total: 0 });
     await renderPage();
 
-    // 还没筛选：说「暂无任务」
     expect(document.body.textContent).toContain('暂无任务');
 
     const input = [...document.querySelectorAll('input')].find(
       (el) => el.placeholder === '用户 ID / 手机号 / 用户名（需完整，留空 = 全站）',
     ) as HTMLInputElement;
     await act(async () => {
-      // React 受控输入：要绕过它自己的 value setter 才会触发 onChange
       const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
       setValue?.call(input, '9001');
       input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -174,7 +164,6 @@ describe('JobRecords 任务记录 · 模型列', () => {
     await act(async () => search?.click());
     for (let i = 0; i < 10; i += 1) await settle();
 
-    // 提交之后才改口径 —— 页面把 `hasFilters` 接到生效条件上，而不是草稿
     expect(document.body.textContent).toContain('没有匹配的任务');
   });
 });
@@ -201,13 +190,10 @@ describe('JobRecords — 用户列', () => {
   });
 
   it('★ 用户 ID 一个都不露 —— 既不在列里，也不藏在悬停 / 提示里', async () => {
-    // 运营在这一页认人靠用户名与手机号。那串数字是排查时才用的内部标识，
-    // 摆在表里或藏在浮层里都只是噪声。
     api.fetchAdminJobRecords.mockResolvedValue({ list: [record({})], total: 1 });
     await renderPage();
 
     expect(document.body.textContent).not.toContain('9001');
-    // 用户名格上不该再挂「还有东西可看」的图标
     expect(document.body.querySelector('button[aria-label="用户明细"]')).toBeNull();
   });
 
@@ -221,13 +207,11 @@ describe('JobRecords — 用户列', () => {
     const cells = [...(document.body.querySelector('tbody tr')?.querySelectorAll('td') ?? [])].map(
       (td) => td.textContent?.trim() ?? '',
     );
-    // 用户名(1) / 手机号(2)：空白读起来像「还在加载」，而这是查询已经答完的结论
     expect(cells[1]).toBe('—');
     expect(cells[2]).toBe('—');
   });
 
   it('后端比前端旧、**整个键都不回**时同样显示「—」，不崩', async () => {
-    // `undefined` 也是「没有」。这里渲染写的是 `?? '—'`，两种形态一起兜住。
     api.fetchAdminJobRecords.mockResolvedValue({ list: [record({})], total: 1 });
     await renderPage();
 
