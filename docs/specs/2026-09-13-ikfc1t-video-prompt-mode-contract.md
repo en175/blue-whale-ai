@@ -50,11 +50,11 @@
 
 - 草稿模式持久化链不变：面板实时写 `data.draftMode`；恢复经 `openVideoDraftDialog` 读回；生成卡记录 `draftMode` 供重新编辑带回。
 - 恢复保持已保存模式含义；引用使用显式素材与节点身份（数字 assetId / `asset-` 前缀 materialId / 文本节点 id），切换目标不串用模式或参考。
-- 后端 `validateVideoPlan` 对 `'prompt'` **无特判**（宽容通过，不新增拒绝分支）：方案绑定校验成功后，目标 draftMode 为 prompt 且方案绑定包含媒体时切为 all，与连线同版本保存；前端以服务端返回模式同步本地，防止自动保存回退。
+- 后端 `validateVideoPlan` 的模式判定按 `normalizeVideoMode` 归一后读新键：帧模式与普通参考互斥、`image_reference` 只收图片、`edit`/`extend` 至少要有 1 段参考视频。
 
 ## 6. 验证与关联
 
-- 纯函数：`web/src/pages/CanvasPage/followDialog.test.ts`（门控新口径）、`videoMediaRefs.test.ts`（角色库参考读取）、`videoPromptRefs.test.ts`（prompt 标签失效）。
+- 纯函数：`web/src/pages/CanvasPage/videoModes.test.ts`（门控 / 默认表 / 兜底 / 自动切换 / 参数锁 / 读侧兼容）、`videoMediaRefs.test.ts`（角色库参考读取）、`videoPromptRefs.test.ts`（标签失效）。
 - 画布流程层：`web/src/pages/CanvasPage/videoDraft.test.tsx`（新建默认、仅提示词提交省略 references、文本附件不切换、连线/角色库/暂存触发自动切换、置灰与不切回、草稿恢复）；组件层 `videoRefArea.test.tsx` 维持来源菜单/角色槽覆盖。
 - 测试边界：供应商为替身，不声明真实视频生成或人工验收通过。
 - 关联：IKF93U（父需求）、IKDMQS/IKDMQU（草稿绑定与跟随输入框）、IKFC26（方案绑定模式同步）。

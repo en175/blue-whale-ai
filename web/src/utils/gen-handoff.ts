@@ -1,3 +1,5 @@
+import type { VideoMode } from '@/lib/video-modes';
+
 /* ============================================
  * 首页 AI视频/AI图片 → 画布页生成交接
  * File / objectURL 无法序列化进 navigate state，
@@ -34,7 +36,7 @@ export interface VideoGenHandoff {
   aspectRatio: string;
   resolution: string;
   duration: number;
-  mode: string;
+  mode: VideoMode;
   /** IKG0LP：是否带音频（用户选择，缺省 true）。必须随交接带到画布，
    *  否则首页选的值会在跳转后丢失。 */
   generateAudio: boolean;

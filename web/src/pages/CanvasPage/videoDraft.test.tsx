@@ -1044,6 +1044,86 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
   });
 });
 
+describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
+  function editCapableModel() {
+    return {
+      model_id: 'seedance-2',
+      provider_id: 'prov',
+      model_label: '测试视频模型',
+      icon: null,
+      supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
+      supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: 'adaptive', label: 'adaptive' }],
+      supported_formats: [],
+      supported_durations: { min: 4, max: 12, step: 1 },
+      default_size: '720p',
+      default_format: null,
+      default_aspect_ratio: '16:9',
+      default_duration: 5,
+      features: {
+        reference_image: true,
+        image_reference_max: 10,
+        watermark: false,
+        quantity_max: 1,
+        sequential_image_generation: false,
+        stream: false,
+        tools: false,
+        first_frame: true,
+        last_frame: true,
+        first_last_frame: true,
+        audio: false,
+        video_reference: true,
+        video_reference_max: 3,
+        task_types: {
+          text2video: {},
+          omni: {},
+          image_reference: {},
+          first_frame: { allowed_ratios: ['adaptive'] },
+          first_last_frame: { allowed_ratios: ['adaptive'] },
+          edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
+          extend: { allowed_ratios: ['adaptive'] },
+        },
+      },
+      version: 1,
+      digest: '',
+    };
+  }
+
+  it('只有一段参考视频 → 默认表落视频编辑；比例/时长按能力行锁定；提交带 mode 与锁定值', async () => {
+    apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+
+    await expectMode('视频编辑');
+    expect(container.textContent).toContain('跟随原视频');
+
+    await typePrompt('把背景换成夜晚');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.parameters).toMatchObject({
+      mode: 'edit',
+      aspect_ratio: 'adaptive',
+      duration: -1,
+    });
+  });
+
+  it('视频编辑时撤掉唯一参考视频：模式收不下 → 自动切走，不留冲突', async () => {
+    apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+    await expectMode('视频编辑');
+
+    const removeButtons = () => container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]');
+    await act(async () => { removeButtons()[0]!.click(); });
+    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(0));
+    await expectMode('文生视频');
+  });
+});
+
 /* IKFC26 方案绑定媒体同步视频模式（!736 对齐）：方案连到视频草稿不再走后端方案同步
    （referencePromptPlan 该路径退役），改为前端只建「方案 → 草稿」方案边并把绑定写在边上的
    promptReference；目标模式不被切换（保持文生视频），素材图不经此路径直连草稿。纯文本方案

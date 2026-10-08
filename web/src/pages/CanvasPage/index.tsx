@@ -20,6 +20,7 @@ import {
   effectiveVideoParams,
   frameSlotCountOf,
   isFrameMode,
+  lockedDurationOf,
   normalizeVideoMode,
   type VideoMode,
 } from '@/lib/video-modes';
@@ -8692,10 +8693,6 @@ export default function CanvasPage() {
       const aspectRatio = opts?.ratioOverride ?? (typeof data.draftRatio === 'string' ? data.draftRatio : '');
       const resolution = typeof data.draftSize === 'string' ? data.draftSize : '';
       const duration = typeof data.draftDuration === 'number' ? data.draftDuration : Number(data.draftDuration);
-      if (!aspectRatio || !resolution || !Number.isFinite(duration) || duration <= 0) {
-        showToast('warn', '缺少视频参数，请先打开面板确认比例、分辨率和时长');
-        return;
-      }
       const syncError = videoTextIndexSendError(
         nodeId,
         edgesRef.current,
@@ -8721,6 +8718,24 @@ export default function CanvasPage() {
           Array.isArray(savedStripOrder) ? savedStripOrder : [],
         ),
       };
+      // IKIPSX：原位更新生成/文本索引重发不走面板，draftMode 兜底——草稿已保存模式优先；
+      // 缺失（2026-09-13 前存量旧草稿）按提交时参考集合派生默认（与面板显示同源）。
+      const fallbackMode = draftVideoModeOf(data, draftRefs) ?? defaultVideoModeFor(draftRefs);
+      const modeFeatures = draftModelOf(nodeId, 'video')?.features;
+      const lockedDuration = lockedDurationOf(modeFeatures, fallbackMode);
+      const wireParams = effectiveVideoParams(modeFeatures, fallbackMode, {
+        aspectRatio,
+        duration,
+      });
+      if (
+        !wireParams.aspect_ratio ||
+        !resolution ||
+        !Number.isFinite(wireParams.duration) ||
+        (wireParams.duration <= 0 && wireParams.duration !== lockedDuration)
+      ) {
+        showToast('warn', '缺少视频参数，请先打开面板确认比例、分辨率和时长');
+        return;
+      }
       const conflict = videoRefConflict(draftRefs, {
         firstFrame: true,
         lastFrame: true,
@@ -8744,14 +8759,6 @@ export default function CanvasPage() {
         if (!(await flushCanvasSave(projectId))) return;
         if (activeProjectRef.current !== projectId) return;
         const jobRefs = buildVideoJobReferences(draftRefs);
-        // IKIPSX：原位更新生成/文本索引重发不走面板，draftMode 兜底——草稿已保存模式优先；
-        // 缺失（2026-09-13 前存量旧草稿）按提交时参考集合派生默认（与面板显示同源）。
-        const fallbackMode =
-          draftVideoModeOf(data, draftRefs) ?? defaultVideoModeFor(draftRefs);
-        const wireParams = effectiveVideoParams(draftModelOf(nodeId, 'video')?.features, fallbackMode, {
-          aspectRatio,
-          duration,
-        });
         const submitted = startGenerationJob(
           'video',
           {

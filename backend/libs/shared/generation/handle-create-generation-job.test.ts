@@ -1354,6 +1354,30 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       expect(cmdArg.input.video_mode).toBe("edit");
     });
 
+    it("显式 mode=edit 但参考里没有视频 → 1002，不建任务（前端同口径禁用发送）", async () => {
+      const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
+      const result = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        {
+          ...VIDEO_BODY,
+          references: [{ role: "reference", type: "image", material_id: "Asset-img-1" }],
+          parameters: {
+            ...VIDEO_BODY.parameters,
+            prompt: "把背景替换成海边",
+            aspect_ratio: "adaptive",
+            duration: -1,
+            mode: "edit",
+          },
+        },
+        null,
+        deps,
+      );
+      expect(result.code).toBe(1002);
+      expect(result.msg).toBe("视频编辑模式至少需要 1 段参考视频");
+      expect(createJob).not.toHaveBeenCalled();
+    });
+
     it("纯参考 + 9:16 → 放行且快照携带任务类型 default", async () => {
       const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
       const result = await handleCreateGenerationJob("u1", "p1", bodyOf("参考它的运镜风格", "9:16"), null, deps);

@@ -640,7 +640,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   useEffect(() => {
     if (!selectedVideoModel) return;
     const next = nextVideoModeOnRefsChange(videoMode, videoRefsProjection, videoConfiguredModes);
-    if (next) setVideoMode(next);
+    if (next) {
+      setVideoMode(next);
+      showToast('已根据当前素材切换生成模式');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoModeRefsSignature(videoRefsProjection), videoConfiguredModes.join('|'), selectedVideoModel, videoMode]);
 
