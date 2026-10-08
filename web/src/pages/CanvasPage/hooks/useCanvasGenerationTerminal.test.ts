@@ -1,11 +1,11 @@
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import { AUDIO_SPEED_NODE_PREFIX } from '../audioSpeed';
 import { AUDIO_TRIM_NODE_PREFIX } from '../audioTrim';
 import { MEDIA_EXTRACT_NODE_PREFIX } from '../mediaExtract';
-import { VOCAL_SPLIT_NODE_PREFIX } from '../vocalSplit';
+import { VOCAL_SPLIT_NODE_PREFIX, VOCAL_SPLIT_TRACK_NODE_PREFIX } from '../vocalSplit';
 import {
   useCanvasGenerationTerminal,
   type CanvasGenerationTerminalHandles,
@@ -34,11 +34,13 @@ interface ProbeBag {
   pendingDelete: Set<string>;
   activeJob: Map<string, string>;
   nodes: Node[];
+  edges: Edge[];
+  addedEdges: Array<{ source: string; target: string }>;
+  attached: string[];
+  flushCalls: string[];
   patches: Array<{ nodeId: string; patch: Record<string, unknown> }>;
   toasts: Array<{ type: string; msg: string }>;
   upserts: unknown[][];
-  fanOutScene: unknown[][];
-  fanOutVocal: unknown[][];
   removedAudioMix: string[];
 }
 
@@ -54,15 +56,18 @@ function createBag(initialNodes: Node[]): ProbeBag {
     pendingDelete: new Set<string>(),
     activeJob: new Map<string, string>(),
     nodes: initialNodes,
+    edges: [],
+    addedEdges: [],
+    attached: [],
+    flushCalls: [],
     patches: [],
     toasts: [],
     upserts: [],
-    fanOutScene: [],
-    fanOutVocal: [],
     removedAudioMix: [],
   };
+  const mediaNodesRef: CanvasGenerationTerminalHost['mediaNodesRef'] = { current: initialNodes };
   const host: CanvasGenerationTerminalHost = {
-    mediaNodesRef: { current: initialNodes },
+    mediaNodesRef,
     locallyRemovedGenerationNodesRef: { current: next.locallyRemoved },
     pendingDeleteJobNodesRef: { current: next.pendingDelete },
     settledExtractNodesRef: { current: next.settled },
@@ -72,7 +77,7 @@ function createBag(initialNodes: Node[]): ProbeBag {
       next.nodes = typeof updater === 'function'
         ? (updater as (prev: Node[]) => Node[])(next.nodes)
         : (updater as Node[]);
-      host.mediaNodesRef.current = next.nodes;
+      mediaNodesRef.current = next.nodes;
       const removed = initialNodes.filter((n) => !next.nodes.some((m) => m.id === n.id));
       removed.forEach((n) => next.removed.add(n.id));
     }) as CanvasGenerationTerminalHost['setMediaNodes'],
@@ -83,8 +88,18 @@ function createBag(initialNodes: Node[]): ProbeBag {
       next.removed.add(nodeId);
     },
     showToast: (type, msg) => { next.toasts.push({ type, msg }); },
-    fanOutSceneSplitSegments: (...args) => { next.fanOutScene.push(args as unknown[]); },
-    fanOutVocalSplitTracks: (...args) => { next.fanOutVocal.push(args as unknown[]); },
+    edgesRef: { current: next.edges },
+    textNodesRef: { current: [] },
+    productNodesRef: { current: [] },
+    assetNodesRef: { current: [] },
+    currentId: 'project-1',
+    attachCallbacks: (n) => { next.attached.push(n.id); return n; },
+    addCanvasEdge: (source, target) => {
+      next.addedEdges.push({ source, target });
+      next.edges.push({ id: `e-${source}-${target}`, source, target });
+    },
+    nodeBoxOf: (n) => ({ x: n.position.x, y: n.position.y, width: 320, height: 340 }),
+    flushCanvasSave: async (projectId) => { next.flushCalls.push(projectId); return true; },
   };
   next.host = host;
   return next;
@@ -214,10 +229,10 @@ describe('settleCancelledNode 取消终态收敛', () => {
 });
 
 describe('applyJobTerminal 家族分流终态', () => {
-  it('场景切分成功且无提交关联时扇出段卡', async () => {
+  it('场景切分成功但缺段返回时按失败口径兜底', async () => {
     await mount([mediaNode(NODE_ID, { sceneSplit: {} })]);
     expect(handles().applyJobTerminal(NODE_ID, JOB_ID, detail('succeeded'))).toBe('terminal');
-    expect(bag.fanOutScene).toHaveLength(1);
+    expect(lastPatch()).toMatchObject({ genStatus: 'failed', progress: 100 });
   });
 
   it('场景切分失败落失败态与家族文案', async () => {
@@ -316,11 +331,11 @@ describe('applyJobTerminal 家族分流终态', () => {
     expect(bag.removed.has('audio-mix-1')).toBe(false);
   });
 
-  it('人声分离成功且无提交关联时扇出轨卡', async () => {
+  it('人声分离成功但轨道结果缺失时保留占位卡停生成中', async () => {
     const nodeId = `${VOCAL_SPLIT_NODE_PREFIX}7`;
     await mount([mediaNode(nodeId, {})]);
     expect(handles().applyJobTerminal(nodeId, JOB_ID, detail('succeeded'))).toBe('terminal');
-    expect(bag.fanOutVocal).toHaveLength(1);
+    expect(lastPatch()).toMatchObject({ genStatus: undefined, progress: 100 });
     expect(bag.settled.has(nodeId)).toBe(true);
   });
 
@@ -391,5 +406,94 @@ describe('applyJobTerminal 家族分流终态', () => {
       text_input_signature: 'sig-1',
     }));
     expect(patchesFor(NODE_ID).at(-1)).toMatchObject({ usedInputSignature: 'sig-1', usedInputJobId: JOB_ID });
+  });
+});
+
+describe('fanOutVocalSplitTracks 人声分离轨卡扇出', () => {
+  const VOCAL_ID = `${VOCAL_SPLIT_NODE_PREFIX}42`;
+
+  it('按轨道结果扇出成品轨卡、拉来源边并落库', async () => {
+    await mount([
+      mediaNode(VOCAL_ID, { vocalSplit: { lastInput: { output_format: 'MP3' } }, fileName: '来源(人声背景分离)' }),
+      mediaNode('src-1', { assetId: 'a1' }),
+    ]);
+    bag.edges.push({ id: `e-src-1-${VOCAL_ID}`, source: 'src-1', target: VOCAL_ID });
+    handles().fanOutVocalSplitTracks(VOCAL_ID, detail('succeeded', {
+      tracks: [
+        { track_type: 'voice', asset_id: 't1', url: 'https://a/voice.mp3', duration: 10 },
+        { track_type: 'background', asset_id: 't2', url: 'https://a/bg.mp3', duration: 20 },
+      ],
+    }));
+    const ids = bag.nodes.map((n) => n.id);
+    expect(ids).toContain(`${VOCAL_SPLIT_TRACK_NODE_PREFIX}42-voice`);
+    expect(ids).toContain(`${VOCAL_SPLIT_TRACK_NODE_PREFIX}42-background`);
+    expect(ids).not.toContain(VOCAL_ID);
+    expect(bag.locallyRemoved.has(VOCAL_ID)).toBe(true);
+    expect(bag.addedEdges).toHaveLength(2);
+    expect(bag.addedEdges.every((e) => e.source === 'src-1')).toBe(true);
+    expect(bag.flushCalls).toEqual(['project-1']);
+  });
+
+  it('轨道结果缺失时保留占位卡停生成中', async () => {
+    await mount([mediaNode(VOCAL_ID, { vocalSplit: { lastInput: { output_format: 'MP3' } } })]);
+    handles().fanOutVocalSplitTracks(VOCAL_ID, detail('succeeded'));
+    expect(lastPatch()).toMatchObject({ genStatus: undefined, progress: 100 });
+    expect(bag.nodes.map((n) => n.id)).toContain(VOCAL_ID);
+  });
+
+  it('占位卡不在场上时静默返回', async () => {
+    await mount([mediaNode(OTHER_NODE_ID)]);
+    handles().fanOutVocalSplitTracks(VOCAL_ID, detail('succeeded', {
+      tracks: [{ track_type: 'voice', asset_id: 't1', url: 'https://a/voice.mp3', duration: 10 }],
+    }));
+    expect(bag.patches).toHaveLength(0);
+    expect(bag.nodes.map((n) => n.id)).not.toContain(VOCAL_ID);
+  });
+});
+
+describe('fanOutSceneSplitSegments 场景切分段卡扇出', () => {
+  const PLACEHOLDER = 'scene-split-9';
+  const SEGMENTS = [
+    { segment_index: 1, start_time: 0, end_time: 15, segment_asset_id: 's1' },
+    { segment_index: 2, start_time: 15, end_time: 46, segment_asset_id: 's2' },
+  ];
+  const OUTPUT_ASSETS = [
+    { id: 's1', url: 'https://a/s1.mp4', width: 640, height: 360 },
+    { id: 's2', url: 'https://a/s2.mp4', width: 640, height: 360 },
+  ];
+
+  it('按段结果在源卡右侧扇出段卡、拉来源边并落库', async () => {
+    await mount([
+      mediaNode(PLACEHOLDER, { sceneSplit: { sourceAssetId: 'a1' } }),
+      mediaNode('src-1', { assetId: 'a1' }),
+    ]);
+    handles().fanOutSceneSplitSegments(PLACEHOLDER, JOB_ID, detail('succeeded', {
+      result: { segments: SEGMENTS },
+      output_assets: OUTPUT_ASSETS,
+    }));
+    const segs = bag.nodes.filter((n) => n.id.startsWith('scene-segment-'));
+    expect(segs).toHaveLength(2);
+    expect(bag.nodes.map((n) => n.id)).not.toContain(PLACEHOLDER);
+    expect(bag.locallyRemoved.has(PLACEHOLDER)).toBe(true);
+    expect(bag.addedEdges).toHaveLength(2);
+    expect(bag.addedEdges.every((e) => e.source === 'src-1')).toBe(true);
+    expect(bag.upserts).toHaveLength(2);
+    expect(bag.flushCalls).toEqual(['project-1']);
+  });
+
+  it('段结果为空时按失败口径兜底', async () => {
+    await mount([mediaNode(PLACEHOLDER, { sceneSplit: {} })]);
+    handles().fanOutSceneSplitSegments(PLACEHOLDER, JOB_ID, detail('succeeded', { result: { segments: [] } }));
+    expect(lastPatch()).toMatchObject({ genStatus: 'failed', progress: 100 });
+  });
+
+  it('占位卡不在场上时静默返回', async () => {
+    await mount([mediaNode(OTHER_NODE_ID)]);
+    handles().fanOutSceneSplitSegments(PLACEHOLDER, JOB_ID, detail('succeeded', {
+      result: { segments: SEGMENTS },
+      output_assets: OUTPUT_ASSETS,
+    }));
+    expect(bag.patches).toHaveLength(0);
+    expect(bag.nodes.map((n) => n.id)).not.toContain(PLACEHOLDER);
   });
 });
