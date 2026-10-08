@@ -157,6 +157,10 @@ vi.mock('@/api/canvasRecovery', () => ({
   fetchGenerationRecoveryPage: recoveryMocks.fetchGenerationRecoveryPage,
   resolveGenerationRecovery: recoveryMocks.resolveGenerationRecovery,
   putCanvasDocWithRecovery: recoveryMocks.putCanvasDocWithRecovery,
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
+  })),
 }));
 
 /** 受理回执视图（submission_id 固定，扇出投影按它构造规范 node_id）。 */

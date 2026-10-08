@@ -152,6 +152,10 @@ vi.mock('@/api/canvasRecovery', () => ({
     version: 5,
     recoveryReceipt: { commandId: 'cmd-test', replayed: false, changes: [] },
   })),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
+  })),
 }));
 
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));

@@ -100,6 +100,10 @@ vi.mock('@/api/canvasRecovery', () => ({
   fetchGenerationRecoveryPage: recoveryApi.fetchGenerationRecoveryPage,
   resolveGenerationRecovery: recoveryApi.resolveGenerationRecovery,
   putCanvasDocWithRecovery: recoveryApi.putCanvasDocWithRecovery,
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    queryFn: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
+  })),
 }));
 
 /** IKJKU8：运行时打桩——composeSaveFields 逐次返回递增命令身份（重放路径不得再调它），
