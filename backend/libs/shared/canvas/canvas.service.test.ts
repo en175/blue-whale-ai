@@ -1,7 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
-import { CANVAS_EDGE_LIMITS, DATA_NOT_EXIST_CODE, DomainError } from "@lib/contracts";
+import { CANVAS_EDGE_LIMITS, DATA_NOT_EXIST_CODE, DomainError, RECOVERY_REASONS } from "@lib/contracts";
 
 import { CanvasService } from "./canvas.service.js";
 
@@ -497,5 +497,45 @@ describe("CanvasService.save 受保护项目版本要求（IKJJQU B.7）", () =>
 
     expect(result.code).toBe(200);
     expect(tx.canvas.updateMany).toHaveBeenCalled();
+  });
+});
+
+describe("CanvasService.save 旧协议受保护标记严格比较", () => {
+  const marker = { protocolVersion: 1, submissionId: "0a1b2c3d-0000-4000-8000-000000000000", outputKey: "$target" };
+  const previous = [{ id: "media-1", type: "mediaNode", position: { x: 1, y: 2 }, data: { assetId: "7", generationRecovery: marker } }];
+  const current: CanvasRow = {
+    id: 1n,
+    project_id: 1n,
+    version: 3,
+    viewport_json: {},
+    nodes_json: previous,
+    edges_json: [],
+  };
+
+  it.each([
+    { label: "布尔值", protocolVersion: true },
+    { label: "数组", protocolVersion: [1] },
+  ])("协议版本从 1 改为$label → 428，零写入", async ({ protocolVersion }) => {
+    const { service, client, tx } = buildProtectedService(current);
+    const incoming = [{ ...previous[0]!, data: { assetId: "7", generationRecovery: { ...marker, protocolVersion } } }];
+
+    const result = await service.save("u1", "1", { expectedVersion: 3, nodes: JSON.stringify(incoming), edges: "[]" });
+
+    expect(result).toMatchObject({ code: 428, data: { reason: RECOVERY_REASONS.protocolRequired } });
+    expect(client.$transaction).not.toHaveBeenCalled();
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+  });
+
+  it("合法标记不变时，受保护卡普通编辑仍可保存", async () => {
+    const { service, tx } = buildProtectedService(current);
+    const incoming = [{ ...previous[0]!, position: { x: 99, y: 2 }, data: { ...previous[0]!.data, fileName: "改名" } }];
+
+    const result = await service.save("u1", "1", { expectedVersion: 3, nodes: JSON.stringify(incoming), edges: "[]" });
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ nodes_json: incoming }) }),
+    );
   });
 });

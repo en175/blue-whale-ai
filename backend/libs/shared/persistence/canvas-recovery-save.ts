@@ -102,6 +102,24 @@ function markerMatches(marker: Record<string, unknown> | null, submissionId: str
     && marker.outputKey === outputKey;
 }
 
+const MARKER_IDENTITY_KEYS = ["protocolVersion", "submissionId", "outputKey"] as const;
+
+function sameMarkerIdentity(previousMarker: Record<string, unknown>, nextMarker: Record<string, unknown> | null): boolean {
+  if (nextMarker === null) return false;
+  if (!(MARKER_IDENTITY_KEYS as readonly string[]).every(key => key in nextMarker)) return false;
+  return (MARKER_IDENTITY_KEYS as readonly string[]).every(key => previousMarker[key] === nextMarker[key]);
+}
+
+function protectedCardKept(previousNode: Record<string, unknown>, node: Record<string, unknown>): boolean {
+  const previousMarker = markerOf(previousNode);
+  if (previousMarker === null) return true;
+  if (!sameMarkerIdentity(previousMarker, markerOf(node))) return false;
+  if ((previousNode.type ?? null) !== (node.type ?? null)) return false;
+  const previousAsset = (previousNode.data as Record<string, unknown> | undefined)?.assetId ?? null;
+  const nextAsset = (node.data as Record<string, unknown> | undefined)?.assetId ?? null;
+  return previousAsset === null || previousAsset === nextAsset;
+}
+
 /** 单个恢复项的当前状态（$target 读 submission 行，其余读 outputs 行；无行=pending/0）。
  *  IKJJQY：nodeId 为该项的规范节点身份——持久输出读行、虚拟输出按 output_key 推导
  *  （$target/primary=目标节点；slot:<id>=generation-output:<id>；segment/track=generation-result 形态）。 */
@@ -545,11 +563,7 @@ export async function saveCanvasWithRecovery(
       const tampered = () => new RecoveryContractError(
         recoveryError(422, "未声明的受保护项被改动，须以显式恢复动作变更", RECOVERY_REASONS.documentMismatch),
       );
-      if (!markerMatches(markerOf(node), submissionId, outputKey)) throw tampered();
-      if ((previousNode.type ?? null) !== (node.type ?? null)) throw tampered();
-      const previousAsset = (previousNode.data as Record<string, unknown> | undefined)?.assetId ?? null;
-      const nextAsset = (node.data as Record<string, unknown> | undefined)?.assetId ?? null;
-      if (previousAsset !== null && previousAsset !== nextAsset) throw tampered();
+      if (!markerMatches(markerOf(node), submissionId, outputKey) || !protectedCardKept(previousNode, node)) throw tampered();
     }
     // 未声明缺席项以服务端可信状态联判（提交/输出记录，不信客户端自报）：仅服务端已
     // removed 的缺席合法；提交记录不存在也不豁免。canvas 行锁内普通读即可——所有写
@@ -785,16 +799,11 @@ export function guardLegacyCanvasWrite(
     );
   };
   // 没有恢复变更却使受保护卡缺席 → 拒绝。
-  for (const [nodeId, marker] of previousMarkers) {
+  const previousById = new Map(previous.map(node => [String(node.id), node]));
+  for (const nodeId of previousMarkers.keys()) {
     const node = incomingById.get(nodeId) ?? reject();
     // 标记/承接/任务身份不可变；结果资产（mediaNode.assetId）不可变。
-    const nextMarker = markerOf(node);
-    if (JSON.stringify(nextMarker) !== JSON.stringify(marker)) reject();
-    const previousNode = previous.find(item => String(item.id) === nodeId)!;
-    if ((previousNode.type ?? null) !== (node.type ?? null)) reject();
-    const previousAsset = (previousNode.data as Record<string, unknown> | undefined)?.assetId ?? null;
-    const nextAsset = (node.data as Record<string, unknown> | undefined)?.assetId ?? null;
-    if (previousAsset !== null && previousAsset !== nextAsset) reject();
+    if (!protectedCardKept(previousById.get(nodeId)!, node)) reject();
   }
   // 新增受保护标记须走新协议。
   for (const node of incoming) {
