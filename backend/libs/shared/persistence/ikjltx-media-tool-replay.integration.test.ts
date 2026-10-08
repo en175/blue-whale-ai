@@ -1,26 +1,26 @@
-// IKJLTX（PR981 二轮审查 R5 / IKIXK9-SPEC-20261002 B.3）：媒体工具「原意图幂等回读先于
-// 素材等可变状态」的真 MySQL 验证——公开服务入口 + 真实数据库（素材与权限查询为受控替身，
-// 幂等/任务/关联/成本行全部走真实库）。
-//
-// 与 ikjjqw-media-tool-recovery.integration.test.ts 同款门控：需要本地 MySQL（本票用 3309，
-// 勿动 QU 的 3307 / QW 的 3308）：
-//   # 容器与建库（一次）：
-//   docker run -d --name ikjltx-mysql -e MYSQL_ROOT_PASSWORD=ikjltx \
-//     -e MYSQL_DATABASE=bw_gate_ikjltx -p 3309:3306 mysql:8
-//   cd backend && DATABASE_URL='mysql://root:ikjltx@127.0.0.1:3309/bw_gate_ikjltx' \
-//     npx prisma db push --accept-data-loss
-//   # 跑测试：
-//   IKJLTX_DATABASE_URL='mysql://root:ikjltx@127.0.0.1:3309/bw_gate_ikjltx' \
-//     pnpm exec vitest run backend/libs/shared/persistence/ikjltx-media-tool-replay.integration.test.ts
-// 未配置该变量时整组跳过；跳过不算通过。
-//
-// 验收场景（AC2/AC3，11 个走共享受理段的入口表驱动）：
-//   1. 素材删除后同载荷重放：返回原任务与原关联，零新增任务、零重复副作用（无预扣口径：
-//      cost_reservations 恒零行——本票 11 个入口全部免费口径；有预扣入口 audio-mixes /
-//      audio-video-muxes / vocal-splits / video-scene-splits 不走共享段，不在本票范围）。
-//   2. 同键异载荷重放：幂等冲突（100409），零写入。
-//   3. 重放不把旧关联设为当前：节点被新意图接管后重放旧意图，原任务返回、当前关联不变。
-// 另含 video-mattings legacy client_token 形态与跨项目隔离的真实库面。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -47,7 +47,7 @@ const PROJECT_ID = "930001";
 const OTHER_PROJECT_ID = "930002";
 const USER_ID = "930009";
 
-/** 各工具最小合规资产形状（service 层校验用；权限校验由 stub 恒返回通过）。 */
+
 function assetOf(kind: "image" | "video" | "audio") {
   const base = { url: "https://tos.example.com/uploads/9/x/a.bin", storage_key: null, mime: null, size: 1_000_000n, width: null, height: null, duration_ms: null };
   if (kind === "image") return { ...base, type: "image", url: "https://tos.example.com/uploads/9/x/a.png", mime: "image/png", width: 1080, height: 1920 };
@@ -55,8 +55,8 @@ function assetOf(kind: "image" | "video" | "audio") {
   return { ...base, type: "audio", url: "https://tos.example.com/uploads/9/x/a.mp3", mime: "audio/mp3", duration_ms: 60_000 };
 }
 
-/** 11 个单结果媒体工具的受理形态（与 ikjjqw 集成测试同源清单；make 收素材替身，
- *  用例内可切换「素材在/素材已删除」）。 */
+
+
 const TOOLS = [
   { name: "擦除", op: "image_erase.create", kind: "image" as const,
     make: (c: unknown, assets: unknown) => new ImageErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
@@ -75,7 +75,7 @@ const TOOLS = [
     body: () => ({ source_asset_id: "88", speed: 1.5 }) },
   { name: "抠像", op: "video_matting.create", kind: "video" as const,
     make: (c: unknown, assets: unknown) => new VideoMattingsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
-    // 抠像的幂等承载是 client_token（= submission_id），不是 Idempotency-Key 头。
+
     body: (submissionId: string) => ({ source_asset_id: "88", target_node_id: "node-1", mode: "portrait", client_token: submissionId }) },
   { name: "抠图", op: "image_cutout.create", kind: "image" as const,
     make: (c: unknown, assets: unknown) => new ImageCutoutsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
@@ -95,7 +95,7 @@ const TOOLS = [
 ] as const;
 
 function submissionId(seed: number): string {
-  // 确定性小写 UUID（每用例唯一即可，v4 形态合法：段长 8-4-4-4-12）。
+
   const hex = seed.toString(16).padStart(12, "0").slice(-12);
   return `${hex.slice(0, 8)}-1111-4222-8333-${hex.slice(4)}0000`;
 }
@@ -113,7 +113,7 @@ function bindingOf(sid: string, node: string, revision: number): CanvasBinding {
   };
 }
 
-/** 受控素材替身：受理时素材在（返回合规资产），置 visible=false 后模拟素材已删除。 */
+
 function ownedSourceStub(kind: "image" | "video" | "audio") {
   const stub = { visible: true };
   return {
@@ -129,7 +129,7 @@ function ownedSourceStub(kind: "image" | "video" | "audio") {
 
 type CreateResult = { code: number; msg?: string | null; data?: unknown };
 
-/** 各工具 service 的受理调用（video-mattings 无头、其余走 Idempotency-Key 头）。 */
+
 async function submit(
   tool: (typeof TOOLS)[number],
   prisma: PrismaClient,
@@ -205,7 +205,7 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         const subsAfterAccept = await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } });
         const idemAfterAccept = await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } });
 
-        // 素材删除（替身切换）后同载荷同 submission_id 重放：修复前此处被 100301 拒绝。
+
         stub.visible = false;
         const replay = await call();
         expect(replay.code).toBe(200);
@@ -215,7 +215,7 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
           job_id: jobId,
           is_current: true,
         });
-        // 零新增任务、零重复副作用（关联/幂等行不增），无预扣口径成本预留恒零。
+
         expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(jobsAfterAccept);
         expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(subsAfterAccept);
         expect(await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(idemAfterAccept);
@@ -228,9 +228,9 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         expect(first.code).toBe(200);
         const jobsAfterAccept = await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } });
 
-        // 同 submission_id 换载荷：擦除换遮罩场景没有通用差异键，统一以 target_node_id 漂移
-        // 之外的载荷差异表达——改 cutout/分辨率等键太工具特定，这里换 canvas_binding 内容
-        // （expected_binding_revision 参与 requestHash，载荷摘要必变）。
+
+
+
         const visible = () => true;
         const service = tool.make(prisma, { findOwnedSource: async () => (visible() ? assetOf(tool.kind) : null) }) as {
           create: (userId: string, projectId: string, body: Record<string, unknown>, internal?: unknown, key?: string) => Promise<CreateResult>;
@@ -253,11 +253,11 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         const firstA = await submit(tool, prisma, sidA, "node-3");
         expect(firstA.code).toBe(200);
         const jobA = (firstA.data as { job_id: string }).job_id;
-        // 新意图 B 接管 node-3（binding revision 0→1 后，B 以 revision 1 受理）。
+
         const secondB = await submit(tool, prisma, sidB, "node-3", { revision: 1 });
         expect(secondB.code).toBe(200);
 
-        // 素材删除后重放 A：返回原任务 A，但其关联已非当前（B 仍持有当前关联）。
+
         const replayA = await submit(tool, prisma, sidA, "node-3", { assetVisible: () => false });
         expect(replayA.code).toBe(200);
         expect((replayA.data as { job_id: string }).job_id).toBe(jobA);
@@ -266,7 +266,7 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         const owner = await prisma.generation_canvas_node_owners.findUnique({
           where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-3" } },
         });
-        // 当前关联仍是 B（submission_id 维度）：owner 版本未被重放推进。
+
         expect(owner?.binding_revision).toBe(2);
         expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(2);
       });
@@ -324,7 +324,7 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
       expect(first.code).toBe(200);
       const jobId = (first.data as { job_id: string }).job_id;
 
-      // 同用户在另一项目以同 submission_id 提交：幂等按 project 隔离，不回读原任务。
+
       const other = await service.create(USER_ID, OTHER_PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-x", 0) }, {}, sid);
       expect(other.code).toBe(200);
       expect((other.data as { job_id: string }).job_id).not.toBe(jobId);

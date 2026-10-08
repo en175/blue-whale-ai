@@ -1,11 +1,11 @@
-// IKHSFE【后端】PR !820 整改：插帧任务与目标卡关联的持久化恢复——服务级集成测试
-// （真实隔离 MySQL，IKHSFE_DATABASE_URL 门控；先例：canvases/generation-retry.integration.test.ts
-// 的真 NestFactory + 生产控制器模式）。
-// 覆盖验收 4 的四个场景：受理后断开客户端（不读创建响应直接重查）、重新查询、多个历史任务
-// （最新者为当前关联、旧任务翻终态不覆盖）、越权访问（他人项目 / 他人同节点任务不可见）；
-// 另覆盖验收 2 的入队失败兜底任务可查回与凭证不外泄。
-// 服务端可观测结果 = HTTP 响应 + 隔离库 generation_jobs 行（不止 mock 断言）：唯一的桩是
-// RocketMQ 投递边界（vi.mock generation-queue，controller 单测同款边界），DB 与业务链路全真实。
+
+
+
+
+
+
+
+
 import "reflect-metadata";
 import { Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
@@ -29,7 +29,7 @@ const { enqueueVideoFrameInterpolationJob } = await import(
 );
 
 const OWNER = "987654";
-const STRANGER = "987655"; // 越权用户（同实例另一 New API 用户）
+const STRANGER = "987655";
 
 describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
   "Video frame interpolation recovery (IKHSFE)",
@@ -43,7 +43,7 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
     beforeAll(async () => {
       process.env.DATABASE_URL = process.env.IKHSFE_DATABASE_URL;
       vi.mocked(enqueueVideoFrameInterpolationJob).mockResolvedValue(undefined);
-      const assets = new AssetService(prisma, {} as never); // storage 仅上传链路使用，本测试不触达
+      const assets = new AssetService(prisma, {} as never);
       Reflect.defineMetadata(
         "design:paramtypes",
         [PrismaService, ProjectService, AssetService],
@@ -67,7 +67,7 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
       app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
       app.use(json({ limit: "16mb" }));
       app.setGlobalPrefix("api");
-      // 按 x-test-user 切换身份（默认项目主人），越权用例用 STRANGER 走同一真实链路。
+
       app.use((req: { user: unknown; headers: Record<string, string | string[] | undefined> }, _res: unknown, next: () => void) => {
         const header = req.headers["x-test-user"];
         const userId = Array.isArray(header) ? header[0] : header;
@@ -120,7 +120,7 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
       return response.json();
     }
 
-    /** 恢复查询（真实 HTTP GET current）。 */
+
     async function queryCurrent(
       projectId: string,
       targetNodeId: string,
@@ -140,7 +140,7 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
 
     it("受理后断开客户端：不读创建响应，仅凭项目 + 目标节点即可查回刚受理的任务（权威关联在服务端）", async () => {
       const projectId = (await projects.create(OWNER, "IKHSFE 断链恢复")).id.toString();
-      // 模拟浏览器没拿到创建响应：POST 完成但不从响应取任何字段。
+
       await createInterpolation(projectId, "node-recover");
       const serverRow = await prisma.client.generation_jobs.findFirstOrThrow({
         where: { project_id: BigInt(projectId), type: "video_frame_interpolation" },
@@ -159,9 +159,9 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
 
     it("多个历史任务：最新创建者为当前关联；旧任务迟到翻终态不覆盖更新关联", async () => {
       const projectId = (await projects.create(OWNER, "IKHSFE 历史任务")).id.toString();
-      await createInterpolation(projectId, "node-multi"); // 第 1 条
-      await createInterpolation(projectId, "node-multi"); // 第 2 条
-      await createInterpolation(projectId, "node-multi"); // 第 3 条（最新）
+      await createInterpolation(projectId, "node-multi");
+      await createInterpolation(projectId, "node-multi");
+      await createInterpolation(projectId, "node-multi");
       const rows = await prisma.client.generation_jobs.findMany({
         where: { project_id: BigInt(projectId), type: "video_frame_interpolation" },
         orderBy: { id: "asc" },
@@ -171,14 +171,14 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
       const latest = () => queryCurrent(projectId, "node-multi").then((r) => r.body.data);
       expect((await latest()).job_id).toBe(rows[2]!.id.toString());
 
-      // 旧任务「迟到成功」（第 1 条直改库置 succeeded）：当前关联仍是最新那条。
+
       await prisma.client.generation_jobs.update({
         where: { id: rows[0]!.id },
         data: { status: "succeeded" },
       });
       expect((await latest()).job_id).toBe(rows[2]!.id.toString());
 
-      // 最新任务自己翻终态后依然可查回（状态原样投影，判定不受终态影响）。
+
       await prisma.client.generation_jobs.update({
         where: { id: rows[2]!.id },
         data: { status: "succeeded", progress: 100 },
@@ -237,19 +237,19 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
         where: { project_id: BigInt(mine), type: "video_frame_interpolation" },
       });
 
-      // 陌生人查我的项目：资源不存在口径（HTTP 200 信封 code=100301，与家族 404 口径一致）。
+
       const stranger = await queryCurrent(mine, "node-private", { userId: STRANGER });
       expect(stranger.body.code).not.toBe(200);
       expect(stranger.body.code).toBe(100301);
       expect(stranger.body.data).toBeNull();
 
-      // 陌生人自己的项目里同节点名：查不到我的任务（user_id 过滤）。
+
       const strangerProject = (await projects.create(STRANGER, "IKHSFE 陌生人项目")).id.toString();
       const strangerOwn = await queryCurrent(strangerProject, "node-private", { userId: STRANGER });
       expect(strangerOwn.body.code).toBe(200);
       expect(strangerOwn.body.data).toBeNull();
 
-      // 我的任务不受上述探测影响，仍可查回。
+
       const still = (await queryCurrent(mine, "node-private")).body.data;
       expect(still.job_id).toBe(myRow.id.toString());
     });
@@ -258,10 +258,10 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
       vi.mocked(enqueueVideoFrameInterpolationJob).mockRejectedValueOnce(new Error("rocketmq down"));
       const projectId = (await projects.create(OWNER, "IKHSFE 入队失败")).id.toString();
       const created = await createInterpolation(projectId, "node-enqueue-failed");
-      expect(created.code).toBe(200); // 入队失败仍返回 200（家族口径：job 已持久化）
+      expect(created.code).toBe(200);
       const jobId = created.data.job_id as string;
 
-      // 等兜底 markFailed 落库（服务端可观测：DB 行终态 + stored_error 码）。
+
       await vi.waitFor(async () => {
         const row = await readJob(jobId);
         expect(row?.status).toBe("failed");

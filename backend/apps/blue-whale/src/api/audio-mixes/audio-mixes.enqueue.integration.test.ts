@@ -22,8 +22,8 @@ import { GenerationJobsController } from "../generation/generation-jobs.controll
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueAudioMixJob: vi.fn() }));
 
-// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
-// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
+
+
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
   return {
@@ -74,8 +74,8 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: CanvasService, useValue: new CanvasService(prisma, projects) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      // 造素材校验门（IKFYHJ / ADR-0087）自 MaterialService 取仓库面、自 AssetService 解析
-      // 本地素材绑定；无输入素材的建单路径只建门不发起上游调用。
+
+
       { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: IdentityService, useValue: new IdentityService(prisma) },

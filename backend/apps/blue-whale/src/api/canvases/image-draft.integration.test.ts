@@ -22,8 +22,8 @@ import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 
-// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
-// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
+
+
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
   return {
@@ -37,11 +37,11 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   };
 });
 
-// IKDMQQ「图片草稿创建、保存与首次生成」公开接口集成（契约「验证」节服务端项）：
-// 真 NestFactory 挂载生产 Canvas/Generation/Jobs 控制器与服务 + 隔离 MySQL（IKDMQQ_DATABASE_URL 门控）。
-// 本切片服务端零改动：草稿身份（genStatus=draft、无 assetId）随 nodes JSON 原样存取；
-// target_node_id 接纳校验不要求 assetId（IKDLQF 既有行为），快照冻结语义复用。
-// 浏览器段（IKDMQQ_BROWSER=1）在同 describe 尾部：另挂 JobsController 支撑前端轮询原位回填。
+
+
+
+
+
 describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQQ)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -65,7 +65,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: {},
-        // channel 为必填封闭枚举，取默认渠道 seedream-image
+
         channel: "seedream-image",
       },
       update: { supported_sizes: sizes, default_size: "1024x1024" },
@@ -85,7 +85,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       { provide: JobsService, useValue: new JobsService(prisma, projects) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      // 造素材校验门（IKFYHJ / ADR-0087）自 MaterialService 取仓库面、自 AssetService 解析本地素材绑定。
+
       { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: IdentityService, useValue: new IdentityService(prisma) },
@@ -171,11 +171,11 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     const canvas = await getCanvas(projectId);
     const nodes = JSON.parse(canvas.nodes) as Array<Record<string, unknown>>;
     expect(nodes).toHaveLength(2);
-    // 草稿身份与全部参数原样恢复（前端据此渲染「待生成」而非「素材已被删除」）
+
     expect(nodes[1]).toEqual(draft);
     expect(JSON.parse(canvas.edges)).toEqual(edges);
 
-    // 重读（等价刷新/重开项目）内容一致
+
     const reloaded = await getCanvas(projectId);
     expect(JSON.parse(reloaded.nodes)).toEqual(nodes);
   });
@@ -186,7 +186,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     const edges = [{ id: "e1", source: "text-1", target: "media-draft-1" }];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
-    // 空草稿（无 assetId）作为生成目标被接纳：任务身份约定 target_node_id = 草稿节点 id
+
     const created = await createJob(projectId, {
       type: "image",
       target_node_id: "media-draft-1",
@@ -200,7 +200,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     expect(job!.input.prompt).toBe("暮色");
     expect(job!.input.text_attachments).toEqual([{ node_id: "text-1", title: "雨夜", text: "赛博朋克" }]);
 
-    // 接纳后来源正文修改：当次任务输入不回读、不改写；下一次任务读取最新画布
+
     const canvas = await getCanvas(projectId);
     const edited = await saveCanvas(
       projectId,
@@ -296,7 +296,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       await page.locator('.react-flow__pane').click({ position: { x: 1100, y: 450 } });
       await page.locator('[data-id="saved-image"] [data-testid="media-content"]').click();
       expect(await page.locator("textarea").inputValue()).toBe("B\n");
-      // 恢复网络前仅保存重试，不以发送动作作为重试入口。
+
       await page.route("**/api/canvases/*", route => route.request().method() === "PUT"
         ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ code: 500, msg: "保存故障" }) })
         : route.continue());
@@ -388,13 +388,13 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     expect((await saveCanvas(projectId, [draftNode("same-node", "B")], [], version)).status).toBe(200);
     const stale = await saveCanvas(projectId, [draftNode("same-node", "late A")], [], version);
     expect(stale.status).toBe(412);
-    // 冲突信封须带回服务端当前版本，前端据此刷新 If-Match 而无需再 GET 一次。
+
     expect((await stale.json()).data).toEqual({ version: (await getCanvas(projectId)).version });
     expect(JSON.parse((await getCanvas(projectId)).nodes)[0].data.prompt).toBe("B");
     expect(await getJobs(projectId)).toEqual([]);
   });
 
-  // 项目不属于调用方：走 AllExceptionsFilter 统一投影，状态码与信封一致（此前回 HTTP 200 + code 100100）。
+
   it("IKDUHM API: 保存他人项目 → HTTP 404 且信封 code 100100", async () => {
     const foreignProjectId = (await projects.create("987655", "IKDUHM foreign project")).id;
 
@@ -404,9 +404,9 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     expect(await response.json()).toMatchObject({ code: 100100, data: null });
   });
 
-  // 浏览器段（契约「验证」节）：真实浏览器 + 真实业务 API + 隔离 MySQL。
-  // 场景：建卡未建任务 → 重复创建 → 参数编辑与刷新恢复 → 保存故障阻断生成与项目切换 →
-  // 恢复后原位提交（生成中只读）→ DB 翻 succeeded → 同卡回填不新增结果卡 → 项目切换放行。
+
+
+
   it.runIf(process.env.IKDMQQ_BROWSER)("browser: draft create → restore → save-failure gate → in-place generation", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
@@ -420,7 +420,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-      // 只捕获创建调用（不含 retry/cancel 子路径）：断言「建卡与编辑不自动执行」与请求体
+
       const generationRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
       page.on("request", (request) => {
         if (request.method() === "POST" && /\/api\/projects\/\d+\/generation-jobs$/.test(request.url())) {
@@ -435,7 +435,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       const sidebarImage = page.locator('button[aria-label="图片对话"]');
       await sidebarImage.waitFor();
 
-      // 1) 侧栏点击：先出现草稿卡、自动选中并打开面板；位置避开 Dock；不创建任务
+
       await sidebarImage.click();
       await vi.waitFor(async () => expect(await mediaNodes.count()).toBe(1));
       const textarea = page.locator("textarea");
@@ -450,14 +450,14 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       expect(overlaps, "新卡不与 Dock 区域重叠").toBe(false);
       expect(generationRequests, "建卡不创建生成任务").toEqual([]);
 
-      // 2) 重复点击：每次新增独立草稿（面板绑定最新一张，后续编辑与提交都以它为准）
+
       await sidebarImage.click();
       await vi.waitFor(async () => expect(await mediaNodes.count()).toBe(2));
       expect(generationRequests).toEqual([]);
       const draftId = (await mediaNodes.nth(1).getAttribute("data-id"))!;
       expect(draftId).not.toBe(await mediaNodes.first().getAttribute("data-id"));
 
-      // 3) 面板编辑：提示词与模型参数实时写回并落盘；模型目录就位
+
       await page.getByText("IKDMQQ Test").waitFor();
       await textarea.fill("画一只蓝鲸");
       await vi.waitFor(async () => {
@@ -471,7 +471,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       }, { timeout: 10_000 });
       expect(generationRequests, "编辑不创建生成任务").toEqual([]);
 
-      // 4) 刷新恢复：草稿与参数原样回来，点击卡片重开面板
+
       await page.reload();
       await vi.waitFor(async () => expect(await mediaNodes.count()).toBe(2));
       expect(await page.locator(`.react-flow__node-mediaNode[data-id="${draftId}"]`).innerText()).toContain("待生成");
@@ -481,7 +481,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       expect(await page.locator("textarea").inputValue(), "刷新后草稿提示词恢复").toBe("画一只蓝鲸");
       await page.getByText("IKDMQQ Test").waitFor();
 
-      // 5) 保存故障：阻断生成与项目切换，保留当前编辑与草稿
+
       await page.route("**/api/canvases/*", (route) => {
         if (route.request().method() === "PUT") return route.fulfill({ status: 500, body: "forced failure" });
         return route.continue();
@@ -494,15 +494,15 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       });
       expect(generationRequests, "保存失败暂停生成").toEqual([]);
       expect(await page.locator(`.react-flow__node-mediaNode[data-id="${draftId}"]`).count(), "草稿保留").toBe(1);
-      // 项目切换被阻断：选择另一项目后仍停留在当前项目
+
       await page.locator("button", { hasText: "IKDMQQ browser A" }).first().click();
-      // 下拉项（同名历史项目取首个 = 最新）
+
       await page.locator('div[class*="projectItem"]', { hasText: "IKDMQQ browser B" }).first().click();
       await page.waitForTimeout(800);
       expect(page.url(), "保存失败暂停项目切换").toContain(`project=${projectId}`);
       await page.unroute("**/api/canvases/*");
 
-      // 6) 保存恢复后原位提交：先落盘再建任务；生成中面板只读
+
       await page.locator('button[title="发送"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
       expect(generationRequests[0].body.target_node_id).toBe(draftId);
@@ -520,7 +520,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       await page.getByText("生成中，参数与连线只读").waitFor();
       expect(await mediaNodes.count(), "原位生成不新增占位卡").toBe(2);
 
-      // 7) 任务成功：结果填回同一张卡（身份不变、不新增结果卡），另一张草稿不受影响
+
       const jobRow = await prisma.client.generation_jobs.findFirst({
         where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" },
       });
@@ -548,10 +548,10 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       expect(await doneCard.innerText()).not.toContain("待生成");
       expect(await mediaNodes.count(), "成功回填不新增结果卡").toBe(2);
       expect(await mediaNodes.first().innerText(), "另一张草稿保持待生成").toContain("待生成");
-      // 草稿转成品卡后面板自动收起
+
       await vi.waitFor(async () => expect(await page.locator("textarea").count()).toBe(0));
 
-      // 8) 保存状态正常：项目切换放行
+
       await page.locator("button", { hasText: "IKDMQQ browser A" }).first().click();
       await page.locator('div[class*="projectItem"]', { hasText: "IKDMQQ browser B" }).first().click();
       await page.waitForURL(`**project=${otherProjectId}**`, { timeout: 10_000 });

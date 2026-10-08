@@ -1,26 +1,26 @@
-// IKJLTS（PR981-REVIEW2-20261003-R2）：显式 apply/restore 的结果资产必须核对可信产物。
-//
-// 与 ikjku2-canvas-recovery.integration.test.ts 同款门控（独立容器隔离）：
-//   docker run -d --name ikjlts-mysql -e MYSQL_ROOT_PASSWORD=ikjlts \
-//     -e MYSQL_DATABASE=bw_gate_ikjlts -p 3314:3306 mysql:8
-//   cd backend && DATABASE_URL='mysql://root:ikjlts@127.0.0.1:3314/bw_gate_ikjlts' \
-//     pnpm exec prisma db push --accept-data-loss
-//   IKJLTS_DATABASE_URL='mysql://root:ikjlts@127.0.0.1:3314/bw_gate_ikjlts' \
-//     pnpm exec vitest run backend/libs/shared/persistence/ikjlts-canvas-recovery.integration.test.ts
-// 未配置该变量时整组跳过；跳过不算通过。（QU 容器在 3307，勿动。）
-//
-// 验收场景（IKJLTS brief）：
-//   1. ★ 一对一伪造：任务产物清单 ["11"]，replaceTarget+apply(primary) 文档资产 999
-//      → 422 整笔回滚（画布版本/恢复项/节点归属/回执零部分写入）；修复前 999 落库
-//   2. ★ 一对一合法：文档资产=产物 11 → 200；画布回读、恢复查询与产物一致
-//   3. ★ 已持久输出重复 apply 换资产 999 → 422（present 幂等也核对）
-//   4. ★ 多结果（场景切分 segment）伪造 999 / 跨项错挂他项产物 → 422；合法 → 200
-//   5. ★ restore 恢复卡资产伪造 → 422；合法 → 200
-//   6. ★ 公开保存入口 CanvasService.save（recoveryProtocolVersion）伪造 → code 422；
-//      合法 → code 200 落库可恢复
-//   7. ★ 一对一 primary restore 伪造：文档资产 999（任务产物清单 ["11"]）→ 422 整笔
-//      拒绝零部分写入（画布版本/输出行/回执不动）
-//   8. ★ 一对一 primary restore 合法：资产=产物 11 → 200 present，文档卡回归
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
@@ -84,7 +84,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     };
   }
 
-  /** 完整受理（与 ikjku2 同构）：锁序核对 + job 行 + 关联行 + 幂等行。 */
+
   async function accept(acceptanceInput: CanvasRecoveryAcceptance, args?: {
     type?: string;
     input?: Record<string, unknown>;
@@ -113,7 +113,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     );
   }
 
-  /** 场景切分 job 置成功 + 写契约终态日志（与 ikjjqy 同款）。 */
+
   async function succeedSceneSplitJob(jobId: string, segments: Array<{ index: number; assetId: string }>) {
     await succeedJob(jobId, JSON.stringify(segments.map(segment => segment.assetId)));
     await prisma.generation_job_logs.create({
@@ -228,7 +228,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 
-  /** 一对一种子：受理 → 产物 ["11"] → 占位入库（previous 有 $target 标记卡）。 */
+
   async function seedOneToOne() {
     const job = await accept(acceptance(UUID_A, "ikjlts-node-a"));
     await succeedJob(job.generation_job_id, '["11"]');
@@ -241,7 +241,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     return { base, jobId: job.generation_job_id };
   }
 
-  /** 场景切分种子：受理 → 两段产物 701/702（投影 segment:1 / segment:2）。 */
+
   async function seedSceneSplit(node: string, submissionId = UUID_A) {
     const created = await accept(acceptance(submissionId, node, "video_scene_split"), {
       type: "video_scene_split",
@@ -256,7 +256,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
 
   it("★ 1. 一对一伪造：replaceTarget+apply(primary) 文档资产 999 → 422 整笔回滚（修复前 999 落库）", async () => {
     const { base } = await seedOneToOne();
-    // 审查复现场景：显式合法动作声明，文档资产伪造为 999（不在产物清单 ["11"]）。
+
     await expectRejection(save({
       commandId: CMD("10001"),
       version: base.version,
@@ -266,8 +266,8 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
         { id: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), rev: 0, action: "apply" },
       ],
     }));
-    // 整笔回滚：画布版本不递增、文档仍为占位、$target 状态未推进、无 primary 输出行、
-    // owner 仍挂 $target、无幂等回执行。
+
+
     const row = await canvasRow();
     expect(row?.version).toBe(base.version);
     const nodes = (row?.nodes_json ?? []) as Array<{ id: string; data: Record<string, unknown> }>;
@@ -303,7 +303,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
       expect.objectContaining({ state: "replaced", revision: 2 }),
       expect.objectContaining({ state: "present", revision: 1, nodeBindingRevision: 1 }),
     ]));
-    // MySQL 回读：资产 11 落库、primary present、恢复查询与文档一致。
+
     const row = await canvasRow();
     const nodes = (row?.nodes_json ?? []) as Array<{ data: Record<string, unknown> }>;
     expect(nodes[0]!.data.assetId).toBe("11");
@@ -325,7 +325,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
         { id: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), rev: 0, action: "apply" },
       ],
     });
-    // present 幂等重复 apply 合法的前提是资产仍是可信产物；换成 999 → 拒绝。
+
     await expectRejection(save({
       commandId: CMD("30002"),
       version: fanned.version,
@@ -353,18 +353,18 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
         { id: recoveryItemId(UUID_A, "segment:2"), rev: 0, action: "apply" },
       ],
     });
-    // 伪造 999：不在产物清单（701/702）→ 整笔拒绝。
+
     await expectRejection(fanout("701", "999", CMD("40001")));
-    // 跨项错挂：segment:1 的卡挂 segment:2 的产物（702）→ 错误输出身份，同样拒绝。
+
     await expectRejection(fanout("702", "702", CMD("40002")));
-    // 整笔回滚：无输出行、无画布、无回执行、$target 未推进。
+
     expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
     expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await submissionRow(UUID_A)).toMatchObject({ target_state: "pending" });
     expect(await prisma.command_idempotency.count({
       where: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1" },
     })).toBe(0);
-    // 合法：各段挂各自产物 → 成功落库。
+
     const saved = await fanout("701", "702", CMD("40003"));
     expect(saved.recoveryReceipt.changes).toEqual(expect.arrayContaining([
       expect.objectContaining({ state: "replaced", revision: 2 }),
@@ -381,7 +381,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     await seedSceneSplit("ikjlts-scene-2", UUID_B);
     const seg1 = multiResultNodeId(UUID_B, "segment:1");
     const seg2 = multiResultNodeId(UUID_B, "segment:2");
-    // 首次保存前显式删 segment:2（文档只带 seg1）。
+
     const removed = await save({
       commandId: CMD("50001"),
       version: null,
@@ -389,7 +389,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
       changes: [{ id: recoveryItemId(UUID_B, "segment:2"), rev: 0, action: "remove" }],
     });
     expect(removed.recoveryReceipt.changes[0]).toMatchObject({ state: "removed", revision: 1 });
-    // restore 时文档卡资产伪造 999 → 拒绝。
+
     await expectRejection(save({
       commandId: CMD("50002"),
       version: removed.version,
@@ -398,7 +398,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     }));
     expect(await outputRow(UUID_B, "segment:2")).toMatchObject({ state: "removed", revision: 1 });
     expect((await canvasRow())?.version).toBe(removed.version);
-    // 合法 restore：资产=产物 702 → present。
+
     const restored = await save({
       commandId: CMD("50003"),
       version: removed.version,
@@ -427,7 +427,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     }) as { code: number; data: { version: number } };
     expect(base.code).toBe(200);
     const baseVersion = (base.data as unknown as { version: number }).version;
-    // 公开入口伪造：文档资产 999 → 信封 code 422、零部分写入。
+
     const forged = await service.save(USER_ID, PROJECT_ID, {
       viewport: "{}",
       nodes: JSON.stringify([markerNode("ikjlts-node-open", UUID_A, PRIMARY_OUTPUT_KEY, "999")]),
@@ -444,7 +444,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     expect(forged.data.reason).toBe(RECOVERY_REASONS.documentMismatch);
     expect((await canvasRow())?.version).toBe(baseVersion);
     expect(await outputRow(UUID_A, PRIMARY_OUTPUT_KEY)).toBeNull();
-    // 公开入口合法：文档资产 11 → code 200、落库、恢复查询可见。
+
     const applied = await service.save(USER_ID, PROJECT_ID, {
       viewport: "{}",
       nodes: JSON.stringify([markerNode("ikjlts-node-open", UUID_A, PRIMARY_OUTPUT_KEY, "11")]),
@@ -465,9 +465,9 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     expect(record.items.find(item => item.output_key === PRIMARY_OUTPUT_KEY)?.state).toBe("present");
   });
 
-  /** 一对一 primary 已移除种子（PR981-REVIEW2-Spec a3）：受理产物 ["11"] → 占位入库 →
-   *  replaceTarget+apply(11)（primary 落行 present/1，owner 切 primary）→ remove（文档撤卡）。
-   *  primary 输出行 removed/2，owner 保持本提交 primary 供 restore。 */
+
+
+
   async function seedOneToOneRemoved() {
     const { base } = await seedOneToOne();
     const applied = await save({
@@ -491,14 +491,14 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
 
   it("★ 7. 一对一 primary restore 伪造：文档资产 999 → 422 整笔回滚零部分写入", async () => {
     const { removed } = await seedOneToOneRemoved();
-    // primary 的可信产物取任务产物清单（["11"]），restore 回卡资产伪造 999 → 拒绝。
+
     await expectRejection(save({
       commandId: CMD("70003"),
       version: removed.version,
       nodes: [markerNode("ikjlts-node-a", UUID_A, PRIMARY_OUTPUT_KEY, "999")],
       changes: [{ id: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), rev: 2, action: "restore" }],
     }));
-    // 整笔回滚：输出行仍 removed/2、画布版本不递增、文档仍空、无回执行。
+
     expect(await outputRow(UUID_A, PRIMARY_OUTPUT_KEY)).toMatchObject({ state: "removed", revision: 2 });
     expect((await canvasRow())?.version).toBe(removed.version);
     expect(((await canvasRow())?.nodes_json ?? []) as unknown[]).toHaveLength(0);
@@ -520,7 +520,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     expect(await outputRow(UUID_A, PRIMARY_OUTPUT_KEY)).toMatchObject({ state: "present", revision: 3 });
     const nodes = ((await canvasRow())?.nodes_json ?? []) as Array<{ data: Record<string, unknown> }>;
     expect(nodes[0]!.data.assetId).toBe("11");
-    // restore 不改归属：owner 仍是本提交 primary。
+
     const owner = await prisma.generation_canvas_node_owners.findUnique({
       where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "ikjlts-node-a" } },
     });

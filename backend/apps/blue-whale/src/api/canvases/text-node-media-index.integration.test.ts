@@ -8,11 +8,11 @@ import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 
-/* IKFM3Q 文本卡正文媒体索引契约 v1 集成（隔离 MySQL，IKFM3Q_DATABASE_URL 门控）：
-   真实保存 API → 数据库核对——契约见 docs/specs/2026-09-14-ikfm3q-text-node-media-index-contract.md。
-   - 合法新增：媒体节点 + 正文索引 + textIndex 关系线落库；
-   - 防伪造：素材不存在/不归属、区间无效、refs 不覆盖、字段缺省、非 textNode 一律 400 零写入；
-   - 存量失效豁免：来源节点/连线删除后编辑正文放行；展示元数据不可变。 */
+
+
+
+
+
 describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contract (IKFM3Q)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -109,25 +109,25 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     const baseMentions = [{ start: 2, end: 5, nodeId: "media-1", assetId }];
     const baseRefs = [{ nodeId: "media-1", assetId, mediaType: "image", name: "狗", url }];
     const nodes = [mediaNode("media-1", assetId, "image", url), textNode("text-1", text, { mediaMentions: baseMentions, mediaRefs: baseRefs })];
-    // 素材不存在
+
     const ghost = [mediaNode("media-1", "999999", "image", url), textNode("text-1", text, {
       mediaMentions: [{ start: 2, end: 5, nodeId: "media-1", assetId: "999999" }],
       mediaRefs: [{ nodeId: "media-1", assetId: "999999", mediaType: "image", name: "狗", url }],
     })];
     expect((await saveCanvas(project.id, ghost, [indexEdge("media-1", "text-1")], "missing")).status).toBe(400);
-    // 类型不符（image 素材声称 video）
+
     const wrongType = [mediaNode("media-1", assetId, "video", url), textNode("text-1", text, {
       mediaMentions: baseMentions,
       mediaRefs: [{ ...baseRefs[0], mediaType: "video" }],
     })];
     expect((await saveCanvas(project.id, wrongType, [indexEdge("media-1", "text-1")], "missing")).status).toBe(400);
-    // 地址不符
+
     const wrongUrl = [mediaNode("media-1", assetId, "image", url), textNode("text-1", text, {
       mediaMentions: baseMentions,
       mediaRefs: [{ ...baseRefs[0], url: "https://example.com/other.png" }],
     })];
     expect((await saveCanvas(project.id, wrongUrl, [indexEdge("media-1", "text-1")], "missing")).status).toBe(400);
-    // 来源节点身份不一致（节点 assetId 与索引不符）
+
     const wrongNode = [mediaNode("media-1", "888888", "image", url), textNode("text-1", text, { mediaMentions: baseMentions, mediaRefs: baseRefs })];
     expect((await saveCanvas(project.id, wrongNode, [indexEdge("media-1", "text-1")], "missing")).status).toBe(400);
     expect(await readCanvasRow(project.id)).toBeNull();
@@ -138,25 +138,25 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     const url = "https://example.com/a.png";
     const assetId = await createAsset(project.id, "image", url);
     const ref = { nodeId: "media-1", assetId, mediaType: "image", name: "图", url };
-    // 区间重叠
+
     const overlap = textNode("text-1", "图片1图片2", {
       mediaMentions: [{ start: 0, end: 4, nodeId: "media-1", assetId }, { start: 2, end: 6, nodeId: "media-1", assetId }],
       mediaRefs: [ref],
     });
     expect((await saveCanvas(project.id, [mediaNode("media-1", assetId, "image", url), overlap], [], "missing")).status).toBe(400);
-    // refs 缺（有区间无 ref）
+
     const missing = textNode("text-1", "图片1", { mediaMentions: [{ start: 0, end: 3, nodeId: "media-1", assetId }], mediaRefs: [] });
     expect((await saveCanvas(project.id, [mediaNode("media-1", assetId, "image", url), missing], [], "missing")).status).toBe(400);
-    // refs 多（未被引用的隐藏列表）
+
     const extra = textNode("text-1", "图片1", {
       mediaMentions: [{ start: 0, end: 3, nodeId: "media-1", assetId }],
       mediaRefs: [ref, { ...ref, nodeId: "media-2" }],
     });
     expect((await saveCanvas(project.id, [mediaNode("media-1", assetId, "image", url), extra], [], "missing")).status).toBe(400);
-    // 字段缺省其一
+
     const onlyMentions = textNode("text-1", "图片1", { mediaMentions: [] });
     expect((await saveCanvas(project.id, [onlyMentions], [], "missing")).status).toBe(400);
-    // 非 textNode 携带
+
     const mediaCarrying = { ...mediaNode("media-1", assetId, "image", url), data: { assetId, mediaType: "image", src: url, mediaMentions: [], mediaRefs: [] } };
     expect((await saveCanvas(project.id, [mediaCarrying], [], "missing")).status).toBe(400);
     expect(await readCanvasRow(project.id)).toBeNull();
@@ -174,7 +174,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     ], [indexEdge("media-1", "text-1")], "missing");
     expect(first.status).toBe(200);
     const version = (await readCanvasRow(project.id))!.version;
-    // 来源节点与连线删除（标签失效）：编辑正文放行，身份快照原样保留
+
     const edited = await saveCanvas(project.id, [
       textNode("text-1", "改为已失效：旧图继续", { mediaMentions: [{ start: 2, end: 8, nodeId: "media-1", assetId }], mediaRefs: refs }),
     ], [], version);
@@ -182,7 +182,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     const persisted = parseNodes((await readCanvasRow(project.id))!).find(n => n.id === "text-1")!;
     expect(persisted.data.text).toBe("改为已失效：旧图继续");
     expect(persisted.data.mediaRefs).toEqual(refs);
-    // 展示元数据不可变：改名拒绝
+
     const renamed = await saveCanvas(project.id, [
       textNode("text-1", "改为已失效：旧图继续", {
         mediaMentions: [{ start: 2, end: 8, nodeId: "media-1", assetId }],
@@ -197,7 +197,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     const url = "https://example.com/c.png";
     const assetId = await createAsset(project.id, "image", url);
     const promptSource = { sessionId: "ikfm3q-session", revisionId: "rev-1", shotNo: 1 };
-    // Agent 绑定卡种子只能直写 DB（保存 API 拒绝伪造绑定字段入口）
+
     await prisma.client.canvas.create({ data: {
       project_id: project.id,
       nodes_json: [
@@ -210,7 +210,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
       ],
       edges_json: [], viewport_json: {}, version: 1,
     } });
-    // 叠加与 promptMentions 重叠的 media 区间（start 4 落在 [2,6) 内）：400
+
     const overlapped = await saveCanvas(project.id, [
       mediaNode("media-1", assetId, "image", url),
       { id: "text-1", type: "textNode", position: { x: 400, y: 0 }, data: {
@@ -222,7 +222,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
       } },
     ], [indexEdge("media-1", "text-1")], 1);
     expect(overlapped.status).toBe(400);
-    // 不重叠（media 区间锚定「尾巴」字样）：放行
+
     const clean = await saveCanvas(project.id, [
       mediaNode("media-1", assetId, "image", url),
       { id: "text-1", type: "textNode", position: { x: 400, y: 0 }, data: {
@@ -241,7 +241,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     const url = "https://example.com/mirror.png";
     const assetId = await createAsset(project.id, "image", url);
     const promptSource = { sessionId: "ikh4ef-session", revisionId: "rev-1", shotNo: 1 };
-    // 现场形态：applyPreview 直写 DB 的生成卡，promptMentions 与派生的 mediaMentions 区间逐字相同
+
     await prisma.client.canvas.create({ data: {
       project_id: project.id,
       nodes_json: [
@@ -289,7 +289,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
       ],
       edges_json: [], viewport_json: {}, version: 1,
     } });
-    // 同区间，但 media 指向 assetA、方案绑定指向 assetB
+
     const dirty = await saveCanvas(project.id, [
       mediaNode("media-1", assetA, "image", urlA),
       { id: "text-1", type: "textNode", position: { x: 400, y: 0 }, data: {
@@ -317,7 +317,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
       }),
     ], [indexEdge("media-1", "text-1")], "missing");
     expect(first.status).toBe(200);
-    // 删除来源（旧身份失效），随后重新绑定 media-2/assetB：新身份合法新增
+
     const rebound = await saveCanvas(project.id, [
       mediaNode("media-2", assetB, "image", urlB),
       textNode("text-1", "参考图片1", {

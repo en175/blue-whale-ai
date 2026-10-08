@@ -22,9 +22,9 @@ import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 
-// 计费基线（ADR-0114 波次）起建任务必接 billing Hold（fail closed、无开关），
-// 控制器第 7 参也新增 IdentityService（resolveTier 供折扣）。本套件被测对象是改名口径，
-// billing 冻结不是断言目标：进程内假客户端放行 hold/quote，余额与流水面不在本套件挂载的控制器内。
+
+
+
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
   return {
@@ -38,11 +38,11 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   };
 });
 
-// IKFA8X「卡片名称编辑、持久保存与生成保留」验收（父规格 IKFA8U A01–A18、A23）：
-// 真实浏览器（Playwright Chromium）→ 真实业务 API（生产控制器）→ 隔离 MySQL（IKFA8X_DATABASE_URL 门控）→ 刷新恢复。
-// 名称字段约定（供后续子任务消费）：媒体节点 data.fileName / 文本节点 data.title；
-// 显式自定义状态 data.customName === true（不靠名称内容推断），自动命名路径前置跳过。
-// 浏览器段（IKFA8X_BROWSER=1）驱动真实生成生命周期：DB 翻 succeeded/failed 模拟供应商终态。
+
+
+
+
+
 describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8X)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -67,7 +67,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: {},
-        // channel 为必填封闭枚举，取迁移的默认渠道 seedream-image
+
         channel: "seedream-image",
       },
       update: { supported_sizes: sizes, default_size: "1024x1024" },
@@ -89,8 +89,8 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         { provide: JobsService, useValue: new JobsService(prisma, projects) },
         { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
         { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-        // 造素材校验门（IKFYHJ / ADR-0087）自 MaterialService 取仓库面、自 AssetService 解析
-        // 本地素材绑定；无输入素材的建单路径只建门不发起上游调用。
+
+
         { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
         { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
         { provide: IdentityService, useValue: new IdentityService(prisma) },
@@ -188,7 +188,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     const row = await prisma.client.generation_jobs.findUnique({ where: { id: BigInt(jobId) } });
     return row ? { ...row, input: row.input as Record<string, unknown> } : null;
   }
-  /** 直接落库把任务翻为 succeeded（输出槽挂产物资产），模拟供应商执行成功 */
+
   async function succeedJob(projectId: string, jobId: string, url: string) {
     const asset = await prisma.client.assets.create({
       data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url, width: 1024, height: 1024, size: BigInt(2048) },
@@ -202,7 +202,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       data: { status: "succeeded", output_asset_ids: [asset.id.toString()] },
     });
   }
-  /** 直接落库把任务翻为 failed（job + 输出槽），模拟供应商执行失败 */
+
   async function failJob(jobId: string) {
     await prisma.client.generation_output_slots.updateMany({
       where: { generation_job_id: BigInt(jobId) },
@@ -222,10 +222,10 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     return row!.id.toString();
   }
 
-  /* ===== 浏览器验收共享夹具（IKIQ9X：引导/改名/面板发送曾按用例各复制一份，同一文件 5 份近似副本，归一于此） ===== */
 
-  /** 起 Vite 把 /api、/agent 代理到本套件真实业务 API，开 Chromium 页并注入登录态。
-   *  页面路由等前置在 open() 前注册；调用方 finally 里 close()（先关浏览器再关 Vite）。 */
+
+
+
   async function bootCanvas(projectId: string, opts: { acceptDownloads?: boolean } = {}) {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
@@ -248,19 +248,19 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
 
   type BrowserPage = Awaited<ReturnType<typeof bootCanvas>>["page"];
 
-  /** 名称标题行定位：媒体卡 media-title 与文本卡 text-title 同沟 */
+
   const nameRowOf = (page: BrowserPage, id: string) =>
     page.locator(`[data-id="${id}"] [data-testid="media-title"], [data-id="${id}"] [data-testid="text-title"]`);
   const nameInputOf = (page: BrowserPage, id: string) => nameRowOf(page, id).locator("input");
   const nameSpanOf = (page: BrowserPage, id: string) => nameRowOf(page, id).locator("span").first();
 
-  /** 双击名称进入原位编辑并填值（不提交；回车 / Esc / 失焦由各段决定） */
+
   async function startRename(page: BrowserPage, id: string, value?: string) {
     await nameSpanOf(page, id).dblclick();
     await nameInputOf(page, id).waitFor();
     if (value !== undefined) await nameInputOf(page, id).fill(value);
   }
-  /** 等自动保存把节点名称与显式 customName 标记落进隔离库 */
+
   async function waitPersisted(projectId: string, id: string, name: string, key: "fileName" | "title" = "fileName") {
     await vi.waitFor(async () => {
       const node = await canvasNode(projectId, id);
@@ -268,16 +268,16 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect(node?.data.customName, "改名后须显式标记 customName，不靠名称内容推断").toBe(true);
     }, { timeout: 10_000 });
   }
-  /** 双击 → 回车保存 → 等落库 */
+
   async function renameCard(page: BrowserPage, projectId: string, id: string, value: string) {
     await startRename(page, id, value);
     await nameInputOf(page, id).press("Enter");
     await waitPersisted(projectId, id, value);
   }
 
-  /** 面板提示词编辑器：PromptRefEditor 富文本编辑器（contenteditable），不再是 textarea（IKFA1M 起） */
+
   const promptEditorOf = (page: BrowserPage) => page.locator('[contenteditable="true"]').first();
-  /** 先全选清空再逐字键入，走浏览器真实输入路径 */
+
   async function fillPrompt(page: BrowserPage, text: string) {
     const editor = promptEditorOf(page);
     await editor.click();
@@ -286,9 +286,9 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     await page.waitForTimeout(150);
     await editor.pressSequentially(text, { delay: 30 });
   }
-  /** 点卡 → 面板填词 → 发送，等任务落库并返回任务号。
-   *  草稿卡与有生成记录的成品卡同路径：点卡即自动打开其生成面板（IKDMQU），发送后原卡承接任务。
-   *  生成终态由直接改库驱动，任务停在 processing 期间卡片稳定处于生成中。 */
+
+
+
   async function sendDraft(page: BrowserPage, projectId: string, id: string, prompt: string) {
     await page.locator(`[data-id="${id}"] [data-testid="media-content"]`).click();
     await promptEditorOf(page).waitFor();
@@ -314,7 +314,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     const canvas = await getCanvas(projectId);
     const stored = JSON.parse(canvas.nodes) as Array<SeedNode>;
     expect(stored).toEqual(nodes);
-    // 重读（等价刷新/重开项目）内容一致
+
     const reloaded = await getCanvas(projectId);
     expect(JSON.parse(reloaded.nodes)).toEqual(stored);
   });
@@ -324,8 +324,8 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     const assetA = await createAsset(projectId, "image", "https://example.com/shared.png");
     const assetV = await createAsset(projectId, "video", "https://example.com/clip.mp4");
     const assetU = await createAsset(projectId, "audio", "https://example.com/bgm.mp3");
-    // 音频内容区恒宽 480（IKH8PU），按原单行 380 间距会盖住相邻卡标题行（本票红的根因）：
-    // 图片/视频卡一行、音频与文本卡下移一行，行内间距留足 40px 以上
+
+
     const initialNodes = [
       mediaNode("img-a", "image", "上传图.png", assetA, 0),
       mediaNode("img-b", "image", "上传图.png", assetA, 420),
@@ -340,43 +340,43 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       await open();
       await page.locator('[data-id="img-a"] [data-testid="media-title"]').waitFor();
 
-      // A01+A02+A07：图片双击原位编辑，回车保存（首尾空格被去掉），不产生画布缩放
+
       const zoomBefore = await page.locator(".react-flow__viewport").getAttribute("style");
       await startRename(page, "img-a", "  海边日落  ");
       await nameInputOf(page, "img-a").press("Enter");
       await waitPersisted(projectId, "img-a", "海边日落");
       expect(await page.locator(".react-flow__viewport").getAttribute("style"), "双击改名不触发画布缩放").toBe(zoomBefore);
 
-      // A03：视频改名后点击画布空白保存（右侧无卡区域）
+
       await startRename(page, "vid", "片头素材");
       await page.locator(".react-flow__pane").click({ position: { x: 1400, y: 700 } });
       await waitPersisted(projectId, "vid", "片头素材");
 
-      // A04：音频改名后点击其他卡片（失焦路径）保存
+
       await startRename(page, "aud", "旁白配音");
       await page.locator('[data-id="vid"] [data-testid="media-content"]').click();
       await waitPersisted(projectId, "aud", "旁白配音");
 
-      // A01+A02：文本卡改名（既有入口回归）
+
       await startRename(page, "txt", "分镜大纲");
       await nameInputOf(page, "txt").press("Enter");
       await waitPersisted(projectId, "txt", "分镜大纲", "title");
 
-      // A05：Esc 恢复编辑前名称，取消内容不保存
+
       await startRename(page, "img-a", "被放弃的名字");
       await nameInputOf(page, "img-a").press("Escape");
       await vi.waitFor(async () => expect(await nameInputOf(page, "img-a").count()).toBe(0));
       expect(await nameSpanOf(page, "img-a").textContent()).toBe("海边日落");
-      await page.waitForTimeout(1200); // 越过 800ms 自动保存窗口
+      await page.waitForTimeout(1200);
       expect((await canvasNode(projectId, "img-a"))?.data.fileName).toBe("海边日落");
 
-      // A06：全空格提交保留原名
+
       await startRename(page, "img-a", "   ");
       await nameInputOf(page, "img-a").press("Enter");
       expect(await nameSpanOf(page, "img-a").textContent()).toBe("海边日落");
       expect((await canvasNode(projectId, "img-a"))?.data.fileName).toBe("海边日落");
 
-      // A08：100 字符可保存；101 字符提示超长、保留编辑内容、不保存不截断
+
       const name100 = "鲸".repeat(100);
       await startRename(page, "vid", name100);
       await nameInputOf(page, "vid").press("Enter");
@@ -388,17 +388,17 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect(await nameInputOf(page, "vid").inputValue(), "超长后保留编辑内容").toBe(name101);
       await page.waitForTimeout(1200);
       expect((await canvasNode(projectId, "vid"))?.data.fileName, "超长不写入").toBe(name100);
-      // Esc 收起超长草稿后再改名验证恢复
+
       await nameInputOf(page, "vid").press("Escape");
 
-      // A10：中文输入法组合期间回车不提前提交
+
       await startRename(page, "aud", "拼音候选");
       await nameInputOf(page, "aud").dispatchEvent("keydown", { key: "Enter", isComposing: true });
       expect(await nameInputOf(page, "aud").count(), "组合中回车不退出编辑").toBe(1);
       await nameInputOf(page, "aud").press("Enter");
       await waitPersisted(projectId, "aud", "拼音候选");
 
-      // A09：两张卡改为同名，身份与持久化互不混淆
+
       await startRename(page, "aud", "海边日落");
       await nameInputOf(page, "aud").press("Enter");
       await waitPersisted(projectId, "aud", "海边日落");
@@ -406,14 +406,14 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect((await canvasNode(projectId, "img-a"))?.id).toBe("img-a");
       expect((await canvasNode(projectId, "aud"))?.id).toBe("aud");
 
-      // A13：同素材两张卡只改一张，另一张保持；素材库资产行不被触碰
+
       const assetRowBefore = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
       expect((await canvasNode(projectId, "img-b"))?.data.fileName).toBe("上传图.png");
       expect((await canvasNode(projectId, "img-b"))?.data.customName).toBeUndefined();
       const assetRowAfter = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
       expect(assetRowAfter?.gmt_modified).toEqual(assetRowBefore?.gmt_modified);
 
-      // A11：新建普通文本立即改名，无需刷新
+
       await page.getByRole("button", { name: "添加文本" }).click();
       const newText = page.locator(".react-flow__node-textNode", { hasNot: page.locator('[data-id="txt"]') }).last();
       const newTextId = await newText.getAttribute("data-id");
@@ -422,14 +422,14 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       await nameInputOf(page, newTextId!).press("Enter");
       await waitPersisted(projectId, newTextId!, "新建即改", "title");
 
-      // A17：先给 img-b 自定义名再复制：副本继承名称与自定义状态；此后分别改名互不影响
+
       await startRename(page, "img-b", "母版名");
       await nameInputOf(page, "img-b").press("Enter");
       await waitPersisted(projectId, "img-b", "母版名");
       await page.locator('[data-id="img-b"] [data-testid="media-content"]').click({ button: "right" });
-      // 菜单项激活走 click 事件：右键弹菜单（真实指针路径）后，合成鼠标/键盘激活在 headless
-      // Chromium 下连页面首个 document 捕获监听都收不到 pointerdown（事件层探针实证），
-      // 属于合成输入层伪迹而非产品行为——React onSelect 链经同一 click 激活事件驱动验证。
+
+
+
       await page.getByRole("button", { name: "创建副本" }).dispatchEvent("click");
       let namedCopyId = "";
       await vi.waitFor(async () => {
@@ -440,14 +440,14 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         expect(copy!.data.customName).toBe(true);
         namedCopyId = copy!.id;
       }, { timeout: 10_000 });
-      // 副本与源卡错位 40px 堆叠且源卡仍处于选中高 z 序：先点空白取消选中，让副本标题行可点
+
       await page.locator(".react-flow__pane").click({ position: { x: 1400, y: 760 } });
       await startRename(page, namedCopyId, "副本改名");
       await nameInputOf(page, namedCopyId).press("Enter");
       await waitPersisted(projectId, namedCopyId, "副本改名");
       expect((await canvasNode(projectId, "img-b"))?.data.fileName).toBe("母版名");
 
-      // A12：刷新后从真实保存链路恢复全部新名称
+
       await page.reload();
       await page.locator('[data-id="img-a"] [data-testid="media-title"]').waitFor();
       expect(await nameSpanOf(page, "img-a").textContent()).toBe("海边日落");
@@ -458,8 +458,8 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect(await nameSpanOf(page, newTextId!).textContent()).toBe("新建即改");
       expect(await nameSpanOf(page, namedCopyId).textContent()).toBe("副本改名");
 
-      // A23：常用缩放下名称可编辑，普通拖动不退化（缩小一档后 vid 仍在视口内）
-      await page.getByRole("button", { name: "缩小" }).click(); // ZoomControl 缩小一档
+
+      await page.getByRole("button", { name: "缩小" }).click();
       await startRename(page, "vid", "缩放下改名");
       await nameInputOf(page, "vid").press("Enter");
       await waitPersisted(projectId, "vid", "缩放下改名");
@@ -497,7 +497,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       const customTitle = () => customCard.locator('[data-testid="media-title"]');
       const autoTitle = () => autoCard.locator('[data-testid="media-title"]');
 
-      // A14 首次生成：自定义名草稿原位转生成中 → DB 翻 succeeded → 同卡回填，名称保留
+
       const firstJobId = await sendDraft(page, projectId, "d-custom", "画一只蓝鲸");
       expect(await customTitle().textContent(), "生成中不被自动改名").toContain("我的封面图");
       await succeedJob(projectId, firstJobId, "https://example.com/ikfa8x-out-1.png");
@@ -511,21 +511,21 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         expect(node?.data.src).toBe("https://example.com/ikfa8x-out-1.png");
       }, { timeout: 10_000 });
 
-      // 刷新后名称与自定义状态仍在（持久状态恢复）
+
       await page.reload();
       await customCard.waitFor();
       expect(await customTitle().textContent()).toContain("我的封面图");
 
-      // A15 重新生成失败：名称与重试入口保留。
-      // 「重新编辑」入口已下线：有生成记录的成品卡点卡即自动打开其生成面板（IKDMQU），
-      // 与草稿卡同一条 sendDraft 接缝发送，原卡承接任务。
+
+
+
       const regenJobId = await sendDraft(page, projectId, "d-custom", "换成深海");
       expect(await customTitle().textContent(), "重新生成中仍保留自定义名").toContain("我的封面图");
       await failJob(regenJobId);
       await customCard.locator('[data-testid="fail-overlay"]').waitFor({ timeout: 15_000 });
       expect(await customTitle().textContent(), "失败保留自定义名").toContain("我的封面图");
 
-      // A15 失败重试：沿用冻结快照建任务，成功后名称与自定义状态保留
+
       await customCard.locator('[data-testid="fail-overlay"] button', { hasText: "重试" }).click();
       let retryJobId = "";
       await vi.waitFor(async () => {
@@ -542,7 +542,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         expect(node?.data.src).toBe("https://example.com/ikfa8x-out-3.png");
       }, { timeout: 15_000 });
 
-      // A16 对照：未自定义草稿沿用自动命名（生成-<jobId>）
+
       const autoJobId = await sendDraft(page, projectId, "d-auto", "自动命名对照");
       await succeedJob(projectId, autoJobId, "https://example.com/ikfa8x-out-auto.png");
       await vi.waitFor(async () => {
@@ -558,13 +558,13 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     }
   }, 180_000);
 
-  // IKIQ2E（父决策 IKIQ2D「生成中允许改名」分支）：生成进行中当刻执行改名这个动作本身，
-  // 此前只在「改名前置已完成」的终态断言里被间接覆盖。这里把改名动作落到 genStatus='generating'
-  // 当刻，走与 A14–A16 同一条接缝：真实浏览器 → 真实业务 API → 隔离 MySQL → 刷新恢复。
+
+
+
   it.runIf(process.env.IKFA8X_BROWSER)("browser: 生成进行中改名覆盖编辑入口、终态保留、引用同步与刷新恢复（IKIQ2E）", async () => {
     const projectId = (await projects.create("987654", "IKIQ2E generating rename")).id;
     const assetA = await createAsset(projectId, "image", "https://example.com/gen-shared.png");
-    // d1：生成中改名主用例卡；img-a/img-b：同素材两张卡做归属隔离对照；d2：引用 d1 的草稿卡
+
     const initialNodes = [
       mediaNode("img-a", "image", "上传图.png", assetA, 0, { mime: "image/png" }),
       mediaNode("img-b", "image", "上传图.png", assetA, 380, { mime: "image/png" }),
@@ -581,7 +581,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       const d1Card = page.locator('[data-id="d1"]');
       await d1Card.locator('[data-testid="media-title"]').waitFor();
 
-      // 生成中编辑入口：草稿卡进入生成中后双击仍进原位编辑，回车落库，画布不放大
+
       const firstJobId = await sendDraft(page, projectId, "d1", "画一只蓝鲸");
       expect(await nameSpanOf(page, "d1").textContent(), "未自定义草稿生成中沿用自动占位名").toContain("图片生成中");
       const zoomBefore = await page.locator(".react-flow__viewport").getAttribute("style");
@@ -592,16 +592,16 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect(nodeWhileGenerating?.id, "原位生成保持同一卡身份").toBe("d1");
       expect(nodeWhileGenerating?.data.genStatus, "改名当刻卡片确在生成中").toBe("generating");
 
-      // Esc 取消：编辑内容丢弃，随后真实失焦不提交已取消内容
+
       await startRename(page, "d1", "被放弃的名字");
       await nameInputOf(page, "d1").press("Escape");
       await vi.waitFor(async () => expect(await nameInputOf(page, "d1").count()).toBe(0));
       expect(await nameSpanOf(page, "d1").textContent()).toContain("生成中起的名");
-      await page.locator('[data-id="img-a"] [data-testid="media-content"]').click(); // 触发真实失焦
-      await page.waitForTimeout(1200); // 越过 800ms 自动保存窗口
+      await page.locator('[data-id="img-a"] [data-testid="media-content"]').click();
+      await page.waitForTimeout(1200);
       expect((await canvasNode(projectId, "d1"))?.data.fileName, "Esc 取消后失焦不提交").toBe("生成中起的名");
 
-      // 成功回填：生成中改的名不被自动名覆盖
+
       await succeedJob(projectId, firstJobId, "https://example.com/ikiq2e-out-1.png");
       await vi.waitFor(async () => {
         const node = await canvasNode(projectId, "d1");
@@ -612,7 +612,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       }, { timeout: 15_000 });
       expect(await nameSpanOf(page, "d1").textContent()).toContain("生成中起的名");
 
-      // 失败重试：重新生成进入生成中后再改名，失败态与重试后的成功回填都保留
+
       const regenJobId = await sendDraft(page, projectId, "d1", "换成深海");
       await renameCard(page, projectId, "d1", "重试前改的名");
       await failJob(regenJobId);
@@ -632,7 +632,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         expect(node?.data.customName).toBe(true);
       }, { timeout: 15_000 });
 
-      // 成品卡重新生成中改名：重新生成成功后不被自动名覆盖
+
       const regen2JobId = await sendDraft(page, projectId, "d1", "第三次重画");
       await renameCard(page, projectId, "d1", "成品重生成中改的名");
       await succeedJob(projectId, regen2JobId, "https://example.com/ikiq2e-out-3.png");
@@ -643,7 +643,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         expect(node?.data.customName).toBe(true);
       }, { timeout: 15_000 });
 
-      // 归属隔离：改的是与 img-b 同素材的 img-a，img-b 名称与自定义状态、素材库资产行都不被联动
+
       const assetRowBefore = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
       await renameCard(page, projectId, "img-a", "只改这张");
       expect((await canvasNode(projectId, "img-a"))?.data.fileName).toBe("只改这张");
@@ -652,13 +652,13 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       const assetRowAfter = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
       expect(assetRowAfter?.gmt_modified, "素材库资产行不被改名触碰").toEqual(assetRowBefore?.gmt_modified);
 
-      // 生成中改名的卡仍是被 d2 引用的那张：连线与引用身份不变，生成结束后参考显示同步新名称
+
       const regen3JobId = await sendDraft(page, projectId, "d1", "第四次重画");
       const beforeRename = (await canvasNode(projectId, "d1"))!;
       await renameCard(page, projectId, "d1", "被引用的生成中卡");
-      // 生成中改名不扰动连线与卡片身份。
-      // 注：生成中的卡片按 mediaRefs 口径不能作为参考（mediaRefs.ts「生成中的卡片不能作为参考」），
-      // 所以参考显示同步只能在生成结束后观察；此处先钉住改名当刻连线与身份不变。
+
+
+
       const edgePairs = async () => {
         const canvas = await getCanvas(projectId);
         return (JSON.parse(canvas.edges) as Array<{ source: string; target: string }>)
@@ -675,7 +675,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         expect((await canvasNode(projectId, "d1"))?.data.src).toBe("https://example.com/ikiq2e-out-4.png");
       }, { timeout: 15_000 });
 
-      // 参考显示同步当前名称：改名是在生成中做的，此处读回的是它落库后的结果
+
       await page.locator('[data-id="d2"] [data-testid="media-content"]').click();
       await promptEditorOf(page).waitFor();
       const dockRefNames = () => page.locator('[data-testid="dock-media-ref"] img').evaluateAll(
@@ -687,11 +687,11 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect(await edgePairs(), "参考显示更新不改变连线").toEqual(["d1->d2"]);
       const referencedNode = await canvasNode(projectId, "d1");
       expect(referencedNode?.id, "引用对象仍是同一节点").toBe("d1");
-      // 本轮重新生成成功后卡片指向新产物资产是预期行为；「改名不改素材绑定」由上方生成中
-      // 当刻的 assetId 断言承担，此处回读引用已跟随到本轮产物。
+
+
       expect(referencedNode?.data.assetId, "参考跟随本轮新产物资产").not.toBe(beforeRename.data.assetId);
 
-      // 刷新恢复：名称与「用户自定义过」状态同时从真实保存链路恢复
+
       await page.reload();
       await d1Card.waitFor();
       expect(await nameSpanOf(page, "d1").textContent(), "刷新后恢复生成中改的名").toContain("被引用的生成中卡");
@@ -715,7 +715,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       const titleRow = page.locator('[data-id="img-a"] [data-testid="media-title"]');
       await titleRow.waitFor();
 
-      // 保存故障注入：PUT 画布一律 500
+
       await page.route("**/api/canvases/*", (route) => {
         if (route.request().method() === "PUT") return route.fulfill({ status: 500, body: "forced failure" });
         return route.continue();
@@ -725,12 +725,12 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       await input.waitFor();
       await input.fill("故障期新名");
       await input.press("Enter");
-      // 现有错误反馈：左下角保存失败提示出现；本地显示变化不视为持久化成功
+
       await page.getByText("保存失败，请重试").first().waitFor({ timeout: 10_000 });
       await page.waitForTimeout(300);
       expect((await canvasNode(projectId, "img-a"))?.data.fileName, "故障期名称不落库").toBe("原名.png");
 
-      // 恢复后再次编辑名称即可随自动保存落库
+
       await page.unroute("**/api/canvases/*");
       await titleRow.locator("span").first().dblclick();
       await input.waitFor();
@@ -750,21 +750,21 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     const projectId = (await projects.create("987654", "IKFA8Y browser reference sync")).id;
     const assetA = await createAsset(projectId, "image", "https://example.com/shared.png");
     const assetV = await createAsset(projectId, "video", "https://example.com/clip.mp4");
-    // 两张卡共享同一 Asset 身份，改名只影响被选择的节点。
+
     const initialNodes = [
       mediaNode("img-a", "image", "上传图.png", assetA, 0, { mime: "image/png" }),
       mediaNode("img-b", "image", "上传图.png", assetA, 380, { mime: "image/png" }),
       mediaNode("vid", "video", "片头.mp4", assetV, 760, { mime: "video/mp4" }),
       imageDraftNode("draft", "图片草稿", 1140),
     ];
-    // 当前生成面板已引用两张卡：草稿绑定面板按连线实时推导参考
+
     const initialEdges = [
       { id: "e-img-a-draft", source: "img-a", target: "draft" },
       { id: "e-vid-draft", source: "vid", target: "draft" },
     ];
     expect((await saveCanvas(projectId, initialNodes, initialEdges, "missing")).status).toBe(200);
 
-    // A21：改名前通过真实生成 API 创建历史输入；稍后验证改名与刷新不改写落库快照。
+
     const created = await createJob(projectId, {
       type: "image", expected_output_count: 1, input_asset_ids: [assetA],
       parameters: { prompt: "参考上传图.png", model_id: MODEL_ID, aspect_ratio: "1:1" },
@@ -776,8 +776,8 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
 
     const { page, open, close } = await bootCanvas(projectId, { acceptDownloads: true });
     try {
-      // 独立 Agent 服务用契约快照夹具；画布改名、保存和刷新仍走真实业务 API + MySQL。
-      // 这里只验前端保留历史名称，不作为 Agent 真实落库证明。
+
+
       const session = { session_id: "rename-session", title: "改名验收", phase: "idle", lifecycle: "active" };
       const messages = [{
         message_id: "old-user", sequence: 1, role: "user", input_batch_id: "old-batch",
@@ -802,8 +802,8 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         if (path.endsWith("/snapshot")) return route.fulfill({ json: { session, messages, prompt_cards: promptCards, event_cursor: "3" } });
         return route.fulfill({ json: { items: path.endsWith("/sessions") ? [session] : [] } });
       });
-      // 素材地址在测试域外：开发模式下前端经 Vite /__tos-fetch 代理取素材，
-      // 路由内按目标地址返回真实类型响应，走与生产一致的 fetch→blob→下载分支
+
+
       await page.route("**/__tos-fetch**", (route) => {
         const target = decodeURIComponent(new URL(route.request().url()).searchParams.get("url") ?? "");
         const contentType = target.endsWith(".mp4") ? "video/mp4" : "image/png";
@@ -812,9 +812,9 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       await open();
       await page.locator('[data-id="img-a"] [data-testid="media-title"]').waitFor();
 
-      /** 检查浏览器下载事件、实际文件字节与建议文件名，不替换 DOM 下载行为。
-       *  选中态悬浮工具条已迁出节点卡 DOM（IKGYYD 起经 NodeFollowToolbar 钉屏幕层渲染，
-       *  唯一选中成品卡时出现且页级唯一）：先点卡选中，再按 title 定位下载按钮。 */
+
+
+
       async function downloadVia(id: string) {
         await page.locator(`[data-id="${id}"] [data-testid="media-content"]`).click();
         const [download] = await Promise.all([
@@ -827,20 +827,20 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         return download.suggestedFilename();
       }
 
-      // A22：改名后下载用当前卡片名称 + 真实类型扩展名（素材地址 .png 决定扩展名）
+
       expect(await downloadVia("img-a"), "原名下载：名称即卡片名").toBe("上传图.png");
       await renameCard(page, projectId, "img-a", "海边日落");
       expect(await downloadVia("img-a"), "改名后下载：当前卡片名 + 真实扩展名").toBe("海边日落.png");
-      // A22 边界：名称自带别的扩展名时按真实类型替换，不出现「.mp4.png」
+
       await renameCard(page, projectId, "img-a", "海边日落.mp4");
       expect(await downloadVia("img-a"), "名称带异类扩展名：按真实类型替换").toBe("海边日落.png");
-      // A22：同素材另一张卡下载名称不被联动
+
       expect(await downloadVia("img-b"), "同素材其他卡不联动").toBe("上传图.png");
-      // 视频卡按各自真实类型命名
+
       await renameCard(page, projectId, "vid", "片头素材");
       expect(await downloadVia("vid"), "视频按真实类型命名").toBe("片头素材.mp4");
 
-      // A19：改名已被当前生成面板引用的卡片 → 参考显示同步新名称，连线与引用身份不变
+
       await page.locator('[data-id="draft"] [data-testid="media-content"]').click();
       const dockRefNames = () => page.locator('[data-testid="dock-media-ref"] img').evaluateAll(
         (imgs) => imgs.map((img) => img.getAttribute("alt")),
@@ -858,7 +858,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect(renamedNode?.data.assetId, "引用对象仍是原先明确选择的素材").toBe(assetA);
       expect(renamedNode?.data.id ?? renamedNode?.id).toBe("img-a");
 
-      // A19+A22：保存成功并刷新恢复后，参考显示与下载都使用持久恢复的新名称
+
       await page.reload();
       await page.locator('[data-id="img-a"] [data-testid="media-title"]').waitFor();
       expect(await nameSpanOf(page, "img-a").textContent(), "刷新后恢复新名称").toBe("海边日落.mp4");
@@ -868,7 +868,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       }, { timeout: 10_000 });
       expect(await downloadVia("img-a"), "刷新后下载仍用持久名称").toBe("海边日落.png");
 
-      // A20/A21：新加入聊天用当前名；已有聊天与生成方案仍显示历史名称。
+
       await page.locator('[data-id="img-a"] [data-testid="media-content"]').click();
       await page.locator('button[title="添加到 Agent 聊天"]').click();
       const composer = page.locator('[contenteditable="true"][role="textbox"]').last();
@@ -879,7 +879,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect(await page.locator('[class*="_generationCard_"]').textContent()).toContain("参考上传图.png");
       await page.reload();
       await page.locator('[data-id="img-a"] [data-testid="media-title"]').waitFor();
-      // 重新打开 Agent 后从快照恢复，旧消息及方案不得变成当前卡名。
+
       await page.locator('[data-id="img-a"] [data-testid="media-content"]').click();
       await page.locator('button[title="添加到 Agent 聊天"]').click();
       await vi.waitFor(async () => {
