@@ -160,7 +160,7 @@ _Avoid_: 绕开会话注册另渲染锚定浮层、认为穷举类型能拦住�
 
 **报价/恢复查询 mock（quote/recovery query mock）**:
 渲染真实 CanvasPage 的页面级测试（testing/canvasPageTestHarness 的 `renderPage()`）须在测试文件内自备双 mock：`@/api/generationQuote` 覆写 `generationQuoteOptions`、`@/api/canvasRecovery` 覆写 `generationRecoveryPageOptions`。写法用 importActual 展开保留其余导出，仅覆写工厂的 queryFn（范本 draftPanelSwitch.test.tsx，IKJTVE 落档、IKJUCH 全目录铺开）。mock 返回用契约完整形状：无报价时 `credits` 与 `quote_revision` 同为 null（StageQuoteView）；恢复空页含 `protocol_version: 1` 与 `canvas_version: null`（GenerationRecoveryPage）。缺任一段，测试运行期即向真实后端出网（genPanelDismiss 单文件 22 次 POST 报价、dragHideOverlay 3 次 GET 恢复，IKJUCH 落档）。
-_Avoid_: 只 mock quoteGenerationJob/fetchGenerationRecoveryPage 导出（工厂 queryFn 闭包引用模块内部实现，拦不住出网）、漏恢复段（恢复工厂在 canvasRecovery 模块不在 jobs）、mock 返回缺契约字段（消费方严格判 null 时踩坑）、删用例换绿
+_Avoid_: 只 mock quoteGenerationJob/fetchGenerationRecoveryPage 导出（工厂 queryFn 闭包引用模块内部实现，拦不住出网）、漏恢复段（恢复工厂在 canvasRecovery 模块不在 jobs）、mock 返回缺契约字段（消费方严格判 null 时踩坑）、恒定 queryKey 的 mock 必须 `staleTime: Infinity`（默认 staleTime 0 时参数变化触发 refetch，节拍与真实工厂 key 含参数→新查询挂起不同，放大时序敏感用例竞态）、删用例换绿
 
 ### 画布高清放大（IKGLZV 已实现）
 

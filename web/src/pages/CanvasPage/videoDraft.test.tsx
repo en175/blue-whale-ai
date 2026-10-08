@@ -419,6 +419,7 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
   vi.clearAllMocks();
+  quoteMock.current = null;
 });
 
 describe('IKDMQS 视频草稿创建与编辑', () => {
@@ -1341,7 +1342,6 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
   afterEach(() => {
     apiMocks.fetchGenerationModels.mockImplementation(defaultModelsImpl);
     vi.unstubAllGlobals();
-    quoteMock.current = null;
   });
 
   it('能力位未放行（默认 fixture 无 sample_mode）→ 配置面板无样片开关', async () => {
