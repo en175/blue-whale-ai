@@ -17,6 +17,9 @@ import { createGenerationRuntime } from './runtime';
 import { normalGenerationTask } from './normalGeneration';
 import { videoToolsTask, type VideoToolPayload } from './videoTools';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
+import { silenceApiConsoleInfo } from '../testing/silenceApiLogs';
+
+silenceApiConsoleInfo();
 
 const SID = '12345678-0000-4000-8000-000000000001';
 const RETRY_SID = '12345678-0000-4000-8000-000000000002';

@@ -7,6 +7,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog from './index';
+import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
+
+silenceApiConsoleInfo();
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [

@@ -21,6 +21,9 @@ import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth';
 import { useAuthPromptStore } from '@/stores/authPrompt';
+import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
+
+silenceApiConsoleInfo();
 
 /* ---------- 打桩：组件（同 harness 口径，Canvas 透出 props） ---------- */
 

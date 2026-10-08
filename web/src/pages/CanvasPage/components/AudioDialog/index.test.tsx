@@ -12,6 +12,9 @@ import type { ImageTextAttachment } from '../ImageDialog';
 import { INSERT_REF_AT_SELECTION_TITLE } from '../RefThumbnail';
 import { readPromptRefText, typePromptRefText, typePromptRefRaw, promptRefEditorInstance } from '../../testing/promptRefEditor';
 import type { AtMentionItem } from '../../atMention';
+import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
+
+silenceApiConsoleInfo();
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [

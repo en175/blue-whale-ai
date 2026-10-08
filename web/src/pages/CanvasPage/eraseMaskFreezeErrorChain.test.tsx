@@ -21,6 +21,7 @@ import type { GenerationModel } from '@/api/generation';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth';
 import { useAuthPromptStore } from '@/stores/authPrompt';
+import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
 
 /* ---------- 打桩：组件（同 harness 口径，Canvas 透出 props） ---------- */
 
@@ -363,6 +364,7 @@ function stubControlledToBlob() {
 }
 
 beforeEach(() => {
+  silenceApiConsoleInfo();
   enableReactActEnvironment();
   localStorage.clear();
   sessionStorage.clear();

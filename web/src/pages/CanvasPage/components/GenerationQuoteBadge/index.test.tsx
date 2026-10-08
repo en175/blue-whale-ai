@@ -5,6 +5,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationRefItem } from '@/api/jobs';
 import GenerationQuoteBadge from './index';
+import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
+
+silenceApiConsoleInfo();
 
 /* 生成面板上的价格预览：有报价就显示「本次预计消耗 N 积分」，
    算不出价（credits: null）或请求失败则**什么都不显示**——绝不显示 0（会被读成免费）。

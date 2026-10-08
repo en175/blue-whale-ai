@@ -7,6 +7,9 @@ import type { GenerationModel } from '@/api/generation';
 import BottomDialog from './index';
 import styles from './index.module.css';
 import { typePromptRefText } from '../../testing/promptRefEditor';
+import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
+
+silenceApiConsoleInfo();
 
 const { fetchGenerationModels } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
