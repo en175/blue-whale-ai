@@ -16,7 +16,7 @@ function fixture() {
   const runtime = createToolSessionRuntime(); runtime.setProject('project');
   const handle = runtime.register(createVideoEnhanceSession(() => host));
   let ordinaryVisible = false, createAllowed = false, creations = 0;
-  const normal = { view: () => ({ visible: ordinaryVisible }), open: (_input: {}) => { ordinaryVisible = true; }, hide: () => { ordinaryVisible = false; }, close: () => { ordinaryVisible = false; }, updateDraft(_input: never) {}, submit(_input: never) {} };
+  const normal = { view: () => ({ visible: ordinaryVisible }), open: (_input: Record<string, unknown>) => { ordinaryVisible = true; }, hide: () => { ordinaryVisible = false; }, close: () => { ordinaryVisible = false; }, updateDraft(_input: never) {}, submit(_input: never) {} };
   const dock = createGenerationDockCoordinator({ ordinary: normal, videoEnhance: createToolGenerationDock(handle, {
     createDraft: () => { creations += 1; if (!createAllowed) return; const id = `derived-${creations}`; nodes.push({ ...nodes[0], id, data: { ...nodes[0].data } }); return id; },
     getDeps: () => ({ dismissGenPanels: normal.close, selectNode: () => {} }),
