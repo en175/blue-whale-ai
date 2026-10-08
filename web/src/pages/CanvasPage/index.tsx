@@ -249,6 +249,7 @@ import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
+import { useCanvasPickers } from './hooks/useCanvasPickers';
 import {
   applyIndependentGroupDrag,
   bringGroupToFront,
@@ -360,66 +361,35 @@ export default function CanvasPage() {
     handleToolbarPointerEnter,
     handleToolbarPointerLeave,
   } = useAssetHoverBridge();
-  /** 「到节点选择」：画布节点选取模式（image/video/audio 对应三个底部对话框；product 商品卡选图） */
-  const [pickMode, setPickMode] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
-  /** 选取发起对话框（决定选取结果注入哪个对话框；视频对话框图片槽/首尾帧只选图片节点，视频槽只选视频节点） */
-  const [pickTarget, setPickTarget] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
-  /** 视频草稿「到节点选择」的目标参考角色（IKDMQS）：首帧/尾帧由 Dock 入口显式指定，缺省普通参考 */
-  const [pickRefRole, setPickRefRole] = useState<VideoRefRole | null>(null);
-  /** IKFR4X 图片持续选取会话：undefined=无会话；string=发起时绑定的目标节点 id；null=自由面板会话。
-   *  会话身份 = 发起瞬间的画布与生成目标（快照），普通节点选中变化不改变该绑定；纯界面交互态不持久化 */
-  const [imagePickSession, setImagePickSession] = useState<string | null | undefined>(undefined);
-  /** IKFR4X 结束图片持续选取会话：保留已建参考与原目标 Dock，恢复普通编辑（不生成、不二次确认） */
-  const endImagePickSession = useCallback(() => {
-    setImagePickSession(undefined);
-    setPickMode(null);
-    setPickTarget(null);
-  }, []);
-  /** IKFR4X 图片持续选取会话进行中（派生布尔，会话身份三条件单点收敛） */
-  const imagePickSessionActive = pickMode === 'image' && pickTarget === 'image' && imagePickSession !== undefined;
-  /** IKFR4Y 视频持续选取会话：undefined=无会话；string=发起时绑定的视频草稿节点 id；null=自由面板会话。
-   *  会话角色由 pickRefRole 快照承载（发起入口指定，会话期间无其他写入点）；首尾帧入口发起的
-   *  会话槽位已占时以最后一次有效选择替换（IKFR4Y），普通参考入口连续并入。纯界面交互态不持久化 */
-  const [videoPickSession, setVideoPickSession] = useState<string | null | undefined>(undefined);
-  /** IKFR4Y 结束视频持续选取会话：保留已建参考与原目标 Dock，恢复普通编辑（不生成、不二次确认） */
-  const endVideoPickSession = useCallback(() => {
-    setVideoPickSession(undefined);
-    setPickMode(null);
-    setPickTarget(null);
-    setPickRefRole(null);
-  }, []);
-  /** IKFR4Y 视频持续选取会话进行中（派生布尔：视频目标 + 发起槽位类型 + 会话三条件单点收敛） */
-  const videoPickSessionActive = pickTarget === 'video'
-    && (pickMode === 'image' || pickMode === 'video')
-    && videoPickSession !== undefined;
-  /** IKFR4Z 音频持续选取会话：undefined=无会话；string=发起时绑定的音频草稿节点 id；null=自由面板会话。
-   *  会话身份 = 发起瞬间的画布与生成目标（快照），普通节点选中变化不改变该绑定；音频参考无槽位角色
-   *  （服务端契约恒 reference），会话内所有合法来源连续并入。纯界面交互态不持久化 */
-  const [audioPickSession, setAudioPickSession] = useState<string | null | undefined>(undefined);
-  /** IKFR4Z 结束音频持续选取会话：保留已建参考与原目标 Dock，恢复普通编辑（不生成、不二次确认） */
-  const endAudioPickSession = useCallback(() => {
-    setAudioPickSession(undefined);
-    setPickMode(null);
-    setPickTarget(null);
-  }, []);
-  /** IKFR4Z 音频持续选取会话进行中（派生布尔，会话身份三条件单点收敛） */
-  const audioPickSessionActive = pickMode === 'audio' && pickTarget === 'audio' && audioPickSession !== undefined;
-  /** 商品卡选取目标节点ID（选中的图片注入哪个商品卡） */
-  const [pickProductId, setPickProductId] = useState<string | null>(null);
-  /** 资产卡选取目标节点ID（选中的图片注入哪个资产卡） */
-  const [pickAssetId, setPickAssetId] = useState<string | null>(null);
-  /** 画布节点选取/角色库多选结果（ts 驱动注入图片对话框） */
-  const [imagePickResult, setImagePickResult] = useState<{ ts: number; files: UploadedFile[] } | null>(null);
-  /** 画布节点选取结果（ts 驱动注入商品卡） */
-  const [productPickResult, setProductPickResult] = useState<{ ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null>(null);
-  /** 画布节点选取结果（ts 驱动注入资产卡） */
-  const [assetPickResult, setAssetPickResult] = useState<{ ts: number; assetId: string; ref: CanvasGalleryRef } | null>(null);
-  /** 画布音频节点选取结果（ts 驱动注入音频对话框参考音频） */
-  const [audioPickResult, setAudioPickResult] = useState<{ ts: number; item: AudioRefItem } | null>(null);
-  const [audioAssetPickResult, setAudioAssetPickResult] = useState<{ ts: number; items: AudioRefItem[] } | null>(null);
-  const [audioAssetPickTarget, setAudioAssetPickTarget] = useState<{ nodeId: string | null; seed: number | undefined } | null>(null);
-  /** AI 音乐面板 @ 选中结果（ts 驱动注入 MusicDialog 参考音频，IKFCKS） */
-  const [musicPickResult, setMusicPickResult] = useState<{ ts: number; item: AudioRefItem } | null>(null);
+  const {
+    pickMode, setPickMode,
+    pickTarget, setPickTarget,
+    pickRefRole, setPickRefRole,
+    imagePickSession, setImagePickSession,
+    endImagePickSession,
+    imagePickSessionActive,
+    videoPickSession, setVideoPickSession,
+    endVideoPickSession,
+    videoPickSessionActive,
+    audioPickSession, setAudioPickSession,
+    endAudioPickSession,
+    audioPickSessionActive,
+    pickProductId, setPickProductId,
+    pickAssetId, setPickAssetId,
+    imagePickResult, setImagePickResult,
+    productPickResult, setProductPickResult,
+    assetPickResult, setAssetPickResult,
+    audioPickResult, setAudioPickResult,
+    audioAssetPickResult, setAudioAssetPickResult,
+    audioAssetPickTarget, setAudioAssetPickTarget,
+    musicPickResult, setMusicPickResult,
+    showAssetsPicker, setShowAssetsPicker,
+    assetsPickerTarget,
+    openAssetsPicker,
+    videoAssetPickRole, setVideoAssetPickRole,
+    videoAssetPickKind, setVideoAssetPickKind,
+    agentAssetPicks, setAgentAssetPicks,
+  } = useCanvasPickers();
   /** 角色库弹窗状态 */
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   /** 角色库发起目标（决定选中结果注入哪个对话框）；IKFE8U 起视频面板无发起入口 */
@@ -976,23 +946,6 @@ export default function CanvasPage() {
   const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);
   const [imageModels, setImageModels] = useState<GenerationModel[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
-  /** 工具栏加号 →「资产库选择」弹窗开关 */
-  const [showAssetsPicker, setShowAssetsPicker] = useState(false);
-  /** 资产选择弹窗的打开来源（决定 mediaTypes 过滤与确认后的去向）：
-   *  toolbar 画布工具栏（全类型落画布）/ videoDraft 视频草稿面板（落画布+按槽位连线）/ imageDialog 图片 dock / agentPanel Agent 面板 */
-  const [assetsPickerTarget, setAssetsPickerTarget] = useState<'toolbar' | 'videoDraft' | 'imageDialog' | 'audioDialog' | 'agentPanel'>('toolbar');
-  /** 打开资产选择弹窗（记录来源入口，确认时按来源路由） */
-  const openAssetsPicker = (target: typeof assetsPickerTarget) => {
-    setAssetsPickerTarget(target);
-    setShowAssetsPicker(true);
-  };
-  /** 视频草稿面板「从资产中选择」的目标槽位角色：first/last 仅图片，reference 按模式过滤 */
-  const [videoAssetPickRole, setVideoAssetPickRole] = useState<VideoRefRole>('reference');
-  /** 同一入口的槽位类型边界（IKFE8U）：'video' 全能参考（图/视频/音频）、'image' 仅图片
-   *  （首尾帧槽 / 图生视频普通参考）——资产弹窗 mediaTypes 过滤与确认接纳共用 */
-  const [videoAssetPickKind, setVideoAssetPickKind] = useState<'image' | 'video'>('video');
-  /** 资产库选择 → Agent 面板待发附件（ts 驱动注入，画布侧已落节点） */
-  const [agentAssetPicks, setAgentAssetPicks] = useState<{ ts: number; blocks: SessionContentBlock[] } | null>(null);
   const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
   const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<string | undefined>(undefined);
   const [assetDetailTarget, setAssetDetailTarget] = useState<AssetRecord | null>(null);
@@ -1452,7 +1405,7 @@ export default function CanvasPage() {
     // 画布剪贴板不跨项目（IKGBPA）
     clipboardSnapshotRef.current = [];
     clipboardPasteOffsetRef.current = 0;
-  }, [currentId]);
+  }, [currentId, setAgentAssetPicks]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
   const { doc, assets: snapshotAssets, loadFailed: canvasLoadFailed, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
