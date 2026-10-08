@@ -97,6 +97,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -158,19 +159,21 @@ describe('Canvas space pan', () => {
   });
 
   it('keeps moving the card if Space is pressed after mouse down', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await mouse('mousedown', node());
     await mouse('mousemove', window, 120, 110);
     await key('keydown');
     expect(node().classList.contains('draggable')).toBe(true);
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ position: { x: 90, y: 90 } }), expect.any(Array));
+    expect(node().classList.contains('draggable')).toBe(false);
     const panCalls = vi.mocked(props.onViewportChange!).mock.calls.filter(([v]) => v.x !== 0 || v.y !== 0 || v.zoom !== 1);
     expect(panCalls).toEqual([]);
-
-    await vi.waitFor(() => {
-      expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ position: { x: 90, y: 90 } }), expect.any(Array));
-      expect(node().classList.contains('draggable')).toBe(false);
-    }, { timeout: WAIT_TIMEOUT_MS });
+    expect(container.querySelector<HTMLElement>('.react-flow__viewport')!.style.transform)
+      .toBe('translate(0px,0px) scale(1)');
   });
 
   it('keeps panning if Space is released before mouse up', async () => {
