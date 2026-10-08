@@ -595,7 +595,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   // AI视频 比例/清晰度/时长范围：取自所选模型能力（接口为唯一数据源）
   const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
-  const videoRatioOptions = selectedVideoModel?.supported_aspect_ratios ?? [];
+  const videoRatioOptions = aspectRatioOptions(selectedVideoModel?.supported_aspect_ratios);
   const videoRatioText = (id: string) =>
     videoRatioLabel(videoRatioOptions.find((ratio) => ratio.id === id)?.label ?? id);
   const videoSizeItems =

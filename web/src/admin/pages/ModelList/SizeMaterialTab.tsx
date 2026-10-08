@@ -163,7 +163,9 @@ export default function SizeMaterialTab({
             </Button>
           </div>
 
-          <h3 style={SECTION}>比例选项</h3>
+          <h3 style={SECTION}>比例选项 <Hint>
+            id 既是能力行内部标识，也是<b>出站提交给上游</b>的比例值；展示名只影响界面。
+          </Hint></h3>
           {ratios.rows.map((ratio, index) => (
             <div style={SIZE_ROW} key={index}>
               <Input

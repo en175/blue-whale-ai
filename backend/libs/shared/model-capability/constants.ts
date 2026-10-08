@@ -248,7 +248,14 @@ function isSizeArray(v: unknown): boolean {
 }
 
 function isRatioOptions(v: unknown): boolean {
-  return isStringArray(v) || isSizeArray(v);
+  if (isStringArray(v)) return true;
+  if (!isSizeArray(v)) return false;
+  return (v as Array<{ label?: unknown }>).every(
+    (item) =>
+      item.label === undefined ||
+      item.label === null ||
+      typeof item.label === "string",
+  );
 }
 
 function reqString(v: unknown, limit: number, label: string): string | null {

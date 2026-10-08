@@ -305,7 +305,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const sizeOptions = currentModel?.supported_sizes?.length
     ? currentModel.supported_sizes.map((s) => ({ key: s.id, label: s.label }))
     : [];
-  const ratioOptions = currentModel?.supported_aspect_ratios ?? [];
+  const ratioOptions = aspectRatioOptions(currentModel?.supported_aspect_ratios);
   const durationRange = currentModel?.supported_durations ?? null;
   const currentSizeLabel =
     sizeOptions.find((s) => s.key === selectedSize)?.label ?? selectedSize;

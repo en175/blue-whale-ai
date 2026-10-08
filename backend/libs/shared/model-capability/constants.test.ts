@@ -810,6 +810,15 @@ describe("parseModelCreateBody · 比例档元素形态（ADR-0123）", () => {
     expect(parsed).toMatchObject({ ok: true });
   });
 
+  it("拒掉 label 不是字符串的对象（契约：label 可选字符串）", () => {
+    expect(
+      parseModelCreateBody({
+        ...base,
+        supported_aspect_ratios: [{ id: "16:9", label: 42 }],
+      }),
+    ).toMatchObject({ ok: false });
+  });
+
   it("拒掉没有 id 的对象与非法元素", () => {
     expect(
       parseModelCreateBody({

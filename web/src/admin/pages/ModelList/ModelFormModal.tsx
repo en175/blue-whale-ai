@@ -356,7 +356,12 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   };
 
   const updateRatio = (index: number, patch: Partial<RatioForm>) => {
-    setRatios((prev) => prev.map((ratio, i) => (i === index ? { ...ratio, ...patch } : ratio)));
+    const next = ratios.map((ratio, i) => (i === index ? { ...ratio, ...patch } : ratio));
+    setRatios(next);
+    if (patch.id !== undefined) {
+      setGptMatrix((matrix) => mergeMatrix(matrix, sizes, next));
+      setSeedreamMatrix((matrix) => mergeMatrix(matrix, sizes, next));
+    }
   };
 
   const addChip = (

@@ -50,7 +50,7 @@ export function ratiosForSelectedSize(
   sizeId: string,
 ): AspectRatioOption[] {
   const size = model.supported_sizes.find((item) => sameId(item.id, sizeId));
-  if (size && size.available_aspect_ratios !== undefined) {
+  if (size && Array.isArray(size.available_aspect_ratios)) {
     return aspectRatioOptions(size.available_aspect_ratios);
   }
   return aspectRatioOptions(model.supported_aspect_ratios);

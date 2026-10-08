@@ -389,6 +389,63 @@ describe('gpt / banana mapping', () => {
     expect(changes.request_mapping).toEqual({ matrix: { '1k': { '1:1': '2048x2048' } } });
   });
 
+  it('★ 存量裸字符串行：原样保存不提交 supported_aspect_ratios（ADR-0123）', () => {
+    const stored = modelRow({ supported_aspect_ratios: ['1:1'] });
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const ratios = ratiosFromModel(stored.supported_aspect_ratios);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios,
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratios),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(stored, result.value);
+    expect('supported_aspect_ratios' in changes).toBe(false);
+    expect('request_mapping' in changes).toBe(false);
+  });
+
+  it('★ 展示名改动会提交，且只写 label 键（ADR-0123）', () => {
+    const stored = modelRow();
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const ratios = ratiosFromModel(stored.supported_aspect_ratios);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios: ratios.map((ratio) => ({ ...ratio, label: '方形' })),
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratios),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(stored, result.value);
+    expect(changes.supported_aspect_ratios).toEqual([{ id: '1:1', label: '方形' }]);
+  });
+
+  it('★ 展示名与 id 相同不写 label 键（ADR-0123）', () => {
+    const stored = modelRow({ supported_aspect_ratios: ['1:1'] });
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const ratios = ratiosFromModel(stored.supported_aspect_ratios);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios: ratios.map((ratio) => ({ ...ratio, label: ratio.id })),
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratios),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.supported_aspect_ratios).toEqual([{ id: '1:1' }]);
+  });
+
   it('从别的解析器切到 seedream：显式提交 null 清掉旧族矩阵', () => {
     const result = buildCreateParams(
       snapshot({ channel: 'seedream-image', originalChannel: 'gpt-image', seedreamMatrix: {} }),

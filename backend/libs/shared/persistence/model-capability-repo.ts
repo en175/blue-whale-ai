@@ -361,7 +361,12 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
       // 而配置极低频——缓存把热路径从「每次查库」降成「每 5 分钟查一次」。
       // 失效由管理端各写方法显式触发（见 model-capability-admin-repo）。
       const cached = await getModelCapabilityList(capabilityType);
-      if (cached) return cached;
+      if (cached) {
+        return cached.map((view) => ({
+          ...view,
+          supported_aspect_ratios: toAspectRatios(view.supported_aspect_ratios),
+        }));
+      }
       const rows = await prisma.generation_model_capability.findMany({
         where: { capability_type: capabilityType, enabled: true, is_delete: false },
         orderBy: { sort_order: "asc" },
