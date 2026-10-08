@@ -12,7 +12,7 @@ import { isMediaExtractNodeId } from '../mediaExtract';
 import { isVocalSplitNodeId } from '../vocalSplit';
 import { audioVideoMuxIdentityOf } from '../audioVideoMux';
 import type { Node } from '@xyflow/react';
-import { isJobInFlight, isRecoveryTargetSettled } from './types';
+import { isJobInFlight, isRecoveryTargetSettled, readMarker } from './types';
 import type {
   CreateJobOutcome, GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
 } from './types';
@@ -93,12 +93,8 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
     // 但无本输出 marker（IKJKU3：受理回执丢失的空原卡/卡数据丢失）= 待转换原卡，仍待
     // 应用——由扇出原位写回，防止服务端状态先行推进造成永久跳过。pending 一律待应用。
     const appliedOnCanvas = (item: GenerationRecoveryRecord['items'][number]) => {
-      const node = host.findNode(item.node_id);
-      if (node == null) return false;
-      const marker = node.data?.generationRecovery;
-      if (marker == null || typeof marker !== 'object') return false;
-      const { protocolVersion, submissionId, outputKey } = marker as Record<string, unknown>;
-      return protocolVersion === 1 && submissionId === record.submission_id && outputKey === item.output_key;
+      const marker = readMarker(host.findNode(item.node_id)?.data);
+      return marker != null && marker.submissionId === record.submission_id && marker.outputKey === item.output_key;
     };
     const pendingOutputs = record.items.filter(
       (item) => item.output_key !== TARGET_OUTPUT_KEY

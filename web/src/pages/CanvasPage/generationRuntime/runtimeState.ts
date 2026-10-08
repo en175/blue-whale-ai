@@ -5,6 +5,7 @@ import {
   type CanvasBinding, type GenerationRecoveryRecord,
 } from '@/api/canvasRecovery';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
+import { readMarker } from './types';
 import type {
   GenerationRuntimeHost, GenerationTaskDefinition,
   LedgerEntry, RuntimeNodeView,
@@ -99,13 +100,6 @@ export function createContext(host: GenerationRuntimeHost, deps: GenerationRunti
   const nextRound = () => `grt-${++roundCounter}-${newId().slice(0, 8)}`;
 
   const recoveryItemIdOf = (submissionId: string, outputKey: string) => `gcr:${submissionId}:${outputKey}`;
-  const readMarker = (data: Record<string, unknown> | undefined): { protocolVersion: number; submissionId: string; outputKey: string } | null => {
-    const marker = data?.generationRecovery;
-    if (marker == null || typeof marker !== 'object') return null;
-    const { protocolVersion, submissionId, outputKey } = marker as Record<string, unknown>;
-    if (protocolVersion !== 1 || typeof submissionId !== 'string' || typeof outputKey !== 'string') return null;
-    return { protocolVersion: 1, submissionId, outputKey };
-  };
   const defForNode = (nodeId: string): { def: GenerationTaskDefinition; node: RuntimeNodeView } | null => {
     const node = host.findNode(nodeId);
     if (!node) return null;

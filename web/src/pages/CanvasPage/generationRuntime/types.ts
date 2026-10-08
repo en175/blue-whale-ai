@@ -32,9 +32,9 @@ export function isJobInFlight(status: string | null | undefined): boolean {
 
 /** 当前提交已收敛的成品或失败目标，重复恢复保留当前卡。 */
 export function isRecoveryTargetSettled(target: RuntimeNodeView, record: GenerationRecoveryRecord): boolean {
-  const marker = target.data?.generationRecovery as Record<string, unknown> | undefined;
-  return marker?.protocolVersion === 1 && marker.submissionId === record.submission_id
-    && ((typeof marker.outputKey === 'string' && marker.outputKey !== '$target')
+  const marker = readMarker(target.data);
+  return marker != null && marker.submissionId === record.submission_id
+    && (marker.outputKey !== '$target'
       || (target.data?.genStatus === 'failed' && String(target.data?.jobId) === record.job_id));
 }
 
@@ -43,6 +43,14 @@ export interface GenerationRecoveryMarker {
   protocolVersion: 1;
   submissionId: string;
   outputKey: string;
+}
+
+export function readMarker(data: Record<string, unknown> | undefined): GenerationRecoveryMarker | null {
+  const marker = data?.generationRecovery;
+  if (marker == null || typeof marker !== 'object') return null;
+  const { protocolVersion, submissionId, outputKey } = marker as Record<string, unknown>;
+  if (protocolVersion !== 1 || typeof submissionId !== 'string' || typeof outputKey !== 'string') return null;
+  return { protocolVersion: 1, submissionId, outputKey };
 }
 
 /** 恢复种子目标快照（B.3）：发送时目标位置/尺寸/名称。 */

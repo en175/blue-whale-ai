@@ -22,6 +22,7 @@ import {
   normalGenerationTask, isNormalGenerationCard, buildRecoveryTargetNode, mediaTypeOfTask,
 } from './normalGeneration';
 import { createGenerationRuntime } from './runtime';
+import { isRecoveryTargetSettled } from './types';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/api/canvasRecovery';
 
@@ -219,6 +220,55 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
     // pending 一律待应用（原卡在场不豁免）
     const pendingItems = [items[0]!, { ...items[1]!, state: 'pending' as const }];
     expect(normalGenerationTask.planRecovery!(record({ job: succeededJob, items: pendingItems }), plainHost).kind).toBe('apply-outputs');
+  });
+
+  it('IKJLPF：present 项遇非法 marker 形态不视为已应用（原始值/协议版本/字段类型）', () => {
+    const succeededJob = { job_id: 'j1', type: 'image', status: 'succeeded', progress: 100, output_asset_ids: ['9'], stored_error: null, created_at: '2026-10-01T00:00:00Z' };
+    const items = [
+      { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'n1', state: 'pending' as const, revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+      { recovery_item_id: 'gcr:sub-1:primary', output_key: 'primary', node_id: 'n1', state: 'present' as const, revision: 1, node_binding_revision: 1, asset_id: '9', slot_id: null },
+    ];
+    const shapes: unknown[] = [
+      'garbage',
+      { protocolVersion: 2, submissionId: 'sub-1', outputKey: 'primary' },
+      { protocolVersion: 1, submissionId: 123, outputKey: 'primary' },
+      { protocolVersion: 1, submissionId: 'sub-1', outputKey: 456 },
+    ];
+    for (const generationRecovery of shapes) {
+      const host = hostOf(['n1'], { n1: { generationRecovery } });
+      expect(normalGenerationTask.planRecovery!(record({ job: succeededJob, items }), host).kind).toBe('apply-outputs');
+    }
+  });
+
+  it('IKJLPF：isRecoveryTargetSettled 的 marker 判定口径（成品卡/他提交/非法形态/失败卡）', () => {
+    const target = (data: Record<string, unknown>): RuntimeNodeView =>
+      ({ id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data });
+    const r = record();
+    expect(isRecoveryTargetSettled(target({
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
+    }), r)).toBe(true);
+    expect(isRecoveryTargetSettled(target({
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-other', outputKey: 'primary' },
+    }), r)).toBe(false);
+    const shapes: unknown[] = [
+      'garbage',
+      { protocolVersion: 2, submissionId: 'sub-1', outputKey: 'primary' },
+      { protocolVersion: 1, submissionId: 'sub-1', outputKey: 456 },
+    ];
+    for (const generationRecovery of shapes) {
+      expect(isRecoveryTargetSettled(target({ generationRecovery }), r)).toBe(false);
+    }
+    expect(isRecoveryTargetSettled(target({
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: '$target' },
+      genStatus: 'failed', jobId: 'j1',
+    }), r)).toBe(true);
+    expect(isRecoveryTargetSettled(target({
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 456 },
+      genStatus: 'failed', jobId: 'j1',
+    }), r)).toBe(false);
+    expect(isRecoveryTargetSettled(target({
+      generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: '$target' },
+    }), r)).toBe(false);
   });
 });
 
