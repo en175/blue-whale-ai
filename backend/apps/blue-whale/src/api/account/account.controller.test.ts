@@ -53,8 +53,6 @@ describe("AccountController.consumptions（billing 账本）", () => {
     listTransactions.mockReset();
     listCreditLots.mockReset();
     loadTaskSummaries.mockReset();
-    // 缺省：这一页一条任务都查不到（summary 全 undefined）→ 四字段全 null。
-    // 需要「查得到」的用例自己 mockResolvedValue 一份 Map。
     loadTaskSummaries.mockResolvedValue(new Map());
   });
 
@@ -146,16 +144,16 @@ describe("AccountController.consumptions（billing 账本）", () => {
         4,
       ),
     );
-    // 任务查得到 → 三个语义字段有值；提示词为 null（免费工具族）也能分辨
     loadTaskSummaries.mockResolvedValue(
       new Map([
         [
           "7",
           {
-            type: "text2video",
+            type: "video",
             modelId: "seedance-2.5",
             modelLabel: "Seedance 2.5",
             prompt: null,
+            specs: { resolution: "1080p", duration: "5" },
           },
         ],
       ]),
@@ -174,10 +172,11 @@ describe("AccountController.consumptions（billing 账本）", () => {
       created_at: "2026-09-25T10:00:00+08:00",
       settled_at: "2026-09-25T10:01:00+08:00",
       job_id: "7",
-      task_type: "text2video",
+      task_type: "video",
       model_id: "seedance-2.5",
       model_label: "Seedance 2.5",
       prompt: null,
+      specs: { resolution: "1080p", duration: "5" },
     });
   });
 
@@ -216,7 +215,7 @@ describe("AccountController.consumptions（billing 账本）", () => {
     expect(loadTaskSummaries).toHaveBeenCalledWith(["7"]);
   });
 
-  it("任务查不到（跨库历史 / 已清理）→ 四字段全 null，但**不是错误**", async () => {
+  it("任务查不到（跨库历史 / 已清理）→ 五个语义字段全 null，但**不是错误**", async () => {
     listTransactions.mockResolvedValue(
       page([
         {
@@ -236,12 +235,12 @@ describe("AccountController.consumptions（billing 账本）", () => {
 
     const item = (await controller.consumptions(USER, {})).data.items[0];
 
-    // job_id 仍然给（那笔钱确实关联过一个任务），只是语义字段查不到 → 前端回落显示 title
     expect(item.job_id).toBe("9");
     expect(item.task_type).toBeNull();
     expect(item.model_id).toBeNull();
     expect(item.model_label).toBeNull();
     expect(item.prompt).toBeNull();
+    expect(item.specs).toBeNull();
   });
 
   it("billing 未配置 → 503，billing 报错 → 502（都不是静默空列表）", async () => {

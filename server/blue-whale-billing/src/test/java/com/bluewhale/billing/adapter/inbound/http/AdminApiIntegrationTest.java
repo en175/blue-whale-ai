@@ -189,10 +189,8 @@ class AdminApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.availableCredits").value(1000))
                 .andExpect(jsonPath("$.frozenCredits").value(0))
-                // 本金有效期 2 年 ≫ 临期窗口（31 天），所以不出现在临期列表里。
-                // ⚠️ 这条断言证明的是「窗口远小于有效期」，不是「本金没有有效期」——
-                //    后者由下面那条用例直接读 expires_at 钉住。
-                .andExpect(jsonPath("$.expiring").isEmpty());
+                .andExpect(jsonPath("$.expiring[0].source").value("purchased"))
+                .andExpect(jsonPath("$.expiring[0].credits").value(1000));
     }
 
     @Test

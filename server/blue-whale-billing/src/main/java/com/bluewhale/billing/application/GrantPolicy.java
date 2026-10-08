@@ -51,16 +51,7 @@ public class GrantPolicy {
     /** 每日登录赠送：当日 23:59:59 过期——当日不领就作废，这是「每日」的题中之义。 */
     private static final LocalTime END_OF_DAY = LocalTime.of(23, 59, 59);
 
-    /**
-     * 运营类赠送的默认有效期。
-     *
-     * <p>public 是因为**临期提醒的时间窗不得与它相等**（见
-     * {@code BillingApplicationService.EXPIRING_WINDOW_DAYS}）：两者相等时，
-     * 刚按默认策略发出的那批积分恰好压在窗口边界上——DATETIME 列会把小数秒
-     * 四舍五入，而查询用的是执行那一刻的 {@code NOW()}，两者先后不定，
-     * 同一份数据时而显示在「即将过期」里、时而消失。
-     */
-    public static final int DEFAULT_GIFT_DAYS = 30;
+    private static final int DEFAULT_GIFT_DAYS = 30;
 
     /** 事故补偿给最长的有效期：平台欠用户的，不该再设短期限制。 */
     private static final int COMPENSATION_DAYS = 365;
