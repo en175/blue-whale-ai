@@ -149,8 +149,12 @@ _Avoid_: 弹窗、模态框、把悬浮工具条算入锚定浮层
 _Avoid_: 拖拽中实时跟随面板、落定后才跳转位置、隐藏即卸载重建
 
 **dragHidden 接线（dragHidden wiring）**:
-锚定浮层接入拖拽隐藏的唯一通道：工具会话对话框与画布层框在 `createCanvasToolSessions` 注册处按锚定卡 id 经 `dragHiddenOf` 传值。`CanvasToolKind` 由注册表 entries 派生，dragHideSessions.test.tsx 以 `Record<CanvasToolKind, …>` 锚定卡表配 `it.each` 强制覆盖每个 kind——新增会话忘接线即测试红（IKJTVE 落档）。不经会话注册的锚定浮层（四类生成面板等页面级浮层）不在该类型链内，由 dragHidePageOverlays.test.tsx 机械护栏接管：页面级出口清单 = anchoredOverlayStyle 组件全集 − 会话注册组件（按 canvasToolSessions 导入解析），CanvasPage 每处 JSX 渲染必须接线 `dragHidden={isAnchoredOverlayDragHidden(锚定卡 id)}`，并以真实手势矩阵断言四面板传递语义（拖锚定卡 true / 拖不含锚定卡的组 false）——新增页面级锚定浮层未接线即测试红（IKJU9T 落档）。
-_Avoid_: 绕开会话注册另渲染锚定浮层、认为穷举类型能拦住页面级浮层漏接线、页面级锚定浮层不经 CanvasPage 出口另嵌进其他组件、只改实现不补用例
+锚定浮层接入拖拽隐藏的统一通道。工具会话对话框与画布层框在 `createCanvasToolSessions` 注册处按锚定卡 id 经 `dragHiddenOf` 传值，`CanvasToolKind` 由注册表 entries 派生，dragHideSessions.test.tsx 以 `Record<CanvasToolKind, …>` 锚定卡表配 `it.each` 强制覆盖每个 kind，新增会话忘接线即测试失败。
+
+不经会话注册的锚定浮层由 dragHidePageOverlays.test.tsx 机械护栏覆盖，其清单由使用 `anchoredOverlayStyle` 的组件全集扣除会话注册组件得到，会话注册组件按 canvasToolSessions 的导入解析。图片、视频、音频、文本四类生成面板由 CanvasPage 按对应锚定卡 id 计算 `isAnchoredOverlayDragHidden`，将结果放入 `resources.dragHidden` 交给对应 `GenerationDockPanel`，再由 Dock 包装组件将 `resources` 透传给原对话框。
+
+护栏检查页面资源接线、Dock 包装组件透传及禁止页面绕过包装直接渲染原对话框，新增非工具会话锚定浮层遗漏覆盖或接线时测试失败。四类面板的真实手势矩阵验证拖锚定卡时隐藏值为 true、落定时为 false、拖不含锚定卡的组时为 false。
+_Avoid_: 绕开会话注册另渲染锚定浮层、认为穷举类型能拦住非工具会话浮层漏接线、页面绕过 Dock 包装直接渲染生成对话框、只改实现不补用例
 
 ### CanvasPage 页面级测试出网护栏（IKJUCH 已实现）
 
