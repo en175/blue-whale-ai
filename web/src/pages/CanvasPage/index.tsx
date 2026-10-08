@@ -159,7 +159,7 @@ import ImageGenerationDockPanel from './imageGenerationDockPanel';
 import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-max-length';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import { flattenPromptDocForSend, restorePromptDoc, type PromptDoc } from '@/lib/prompt-doc';
-import { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
+import { type CanvasPickItem } from './components/AudioDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
 import LegacyHistoryModal from './components/LegacyHistoryModal';
 import AssetsPickerModal from './components/AssetsPickerModal';
