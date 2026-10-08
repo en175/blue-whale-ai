@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
+import type { GenerationQuote } from '@/api/generationQuote';
+import type { GenerationRecoveryPage } from '@/api/canvasRecovery';
 
 /* IKIJ60 草稿面板切换崩溃回归（页面级）：用户点图片草稿卡展开生成面板后，再点视频草稿卡，
    页面曾崩溃为整页 Maximum update depth exceeded。根因在 @xyflow/react 12.11.2 的
@@ -257,7 +259,7 @@ vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
     queryKey: ['generation-quote', 'mock'],
-    queryFn: async () => ({ credits: null, quote_revision: null }),
+    queryFn: async () => ({ credits: null, quote_revision: null }) satisfies GenerationQuote,
   })),
 }));
 
@@ -265,14 +267,14 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
   ...(await importActual<typeof import('@/api/canvasRecovery')>()),
   generationRecoveryPageOptions: vi.fn(() => ({
     queryKey: ['generation-recovery', 'mock'],
-    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }) satisfies GenerationRecoveryPage,
   })),
   fetchGenerationRecoveryPage: vi.fn(async () => ({
     protocol_version: 1,
     canvas_version: null,
     records: [],
     next_cursor: null,
-  })),
+  }) satisfies GenerationRecoveryPage),
 }));
 
 vi.mock('@/api/generation', () => ({
