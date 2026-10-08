@@ -1,6 +1,6 @@
 {
   "scope_base": "3e689cf6fc77edff58573fb137349024ebcecfa2",
-  "tracked_files": 3361,
+  "tracked_files": 3364,
   "parsed_code_files": 2592,
   "language_file_counts": {
     "yaml": 49,
@@ -20,8 +20,10 @@
   },
   "js_parse_errors": 0,
   "unexplained_ordinary_comments": [],
+  "source_snapshot_sha": "b21e3ef7a76a75c0974c4c0ac9d0770fe00df284",
+  "release_sha": "8c43ea43fc372ce086c5f1807576d7e882578784",
   "retained_reason_counts": {
-    "tool_directive_or_license": 410,
+    "tool_directive_or_license": 409,
     "hook_audit_source_marker": 1,
     "applied_migration_checksum": 1479,
     "prisma_generated_documentation": 193,
@@ -9146,12 +9148,12 @@
       "language": "javascript",
       "comment_count": 3,
       "consumers": [],
-      "sha256": "e3b4febd79f2a1ac35babd875297608428df8a80963d9e238cdbaf1877c3275b",
+      "sha256": "fdca31e9edf8233f43b61777eab28887d24719edecae68ada590cee20b5b70cd",
       "retained_lines_by_reason": {
         "tool_directive_or_license": [
-          88,
-          102,
-          138
+          114,
+          129,
+          168
         ]
       }
     },
@@ -10103,18 +10105,6 @@
       "retained_lines_by_reason": {
         "tool_directive_or_license": [
           1
-        ]
-      }
-    },
-    {
-      "file": "web/src/pages/CanvasPage/components/SharedAssetsModal/index.tsx",
-      "language": "javascript",
-      "comment_count": 1,
-      "consumers": [],
-      "sha256": "deca58e4a73d3bb38766273df9bbe671661dcbadabb20359d671f714d16e5b16",
-      "retained_lines_by_reason": {
-        "tool_directive_or_license": [
-          635
         ]
       }
     },

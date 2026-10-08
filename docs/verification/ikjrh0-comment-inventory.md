@@ -4,7 +4,9 @@
 
 ## 范围
 
-盘点 3361 个跟踪文件，其中 2592 个属于已识别代码语言。Markdown、JSON、图片和其他资料分别识别为文档、数据或静态资产。逐语言数量及逐文件保留项见 [机器清单](ikjrh0-comment-inventory.json)。清理文件清单以 Git diff 为准。
+发布线随后同步至 `8c43ea43fc372ce086c5f1807576d7e882578784`。三个 lint 冲突保留该发布线的执行代码并重放注释清理，语法树与编译输出一致。机器清单在同步后重新生成，源码快照为 `b21e3ef7a76a75c0974c4c0ac9d0770fe00df284`。
+
+同步后盘点 3364 个跟踪文件，其中 2592 个属于已识别代码语言。Markdown、JSON、图片和其他资料分别识别为文档、数据或静态资产。逐语言数量及逐文件保留项见 [机器清单](ikjrh0-comment-inventory.json)。清理文件清单以 Git diff 为准。
 
 本轮修改 470 个维护文件，删除 7147 个普通注释 token。包括两个 Web 测试、405 个 Java 文件、两个 YAML 文件、11 个 XML 文件、四个 properties 文件、两个 Dockerfile、42 个未受 checksum 或逐字对账约束的 SQL 文件、Prisma 普通行说明及一个 Hook 普通说明。
 
