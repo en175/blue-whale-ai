@@ -27,6 +27,14 @@ import { useAuthPromptStore } from '@/stores/authPrompt';
 export const flowProps: { current: Record<string, any> } = { current: {} };
 // IKJJR1：水合后恢复扫描 GET /generation-recovery——本文件用例按序消费全局 fetch once 队列，
 // 扫描请求须 mock 掉（空恢复页），否则会抢先消费各用例排队中的首个 fetch。
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
 vi.mock('@/api/canvasRecovery', () => ({
   fetchGenerationRecoveryPage: vi.fn(async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null })),
   resolveGenerationRecovery: vi.fn(async () => ({ protocol_version: 1, records: [] })),

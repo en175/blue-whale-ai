@@ -25,6 +25,23 @@ import {
 const uploadMock = vi.hoisted(() => ({ uploadAssetFile: vi.fn() }));
 /* 只替换 uploadAssetFile（图片落卡链路的上传封装），其余导出透传真实实现，
    避免破坏经 CanvasPage 一并加载的其他消费方 */
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
 vi.mock('@/utils/upload', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/utils/upload')>()),
   uploadAssetFile: uploadMock.uploadAssetFile,

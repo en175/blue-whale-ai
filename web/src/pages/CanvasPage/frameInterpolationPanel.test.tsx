@@ -22,6 +22,24 @@ import {
   unmountPage,
 } from './testing/canvasPageTestHarness';
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
+
 /** 画布：一个就绪视频节点 v1（assetId '5'，1280×720 达标）+ 可选带插帧身份的卡 i1 */
 function seedDoc(opts?: { withDraftCard?: boolean; unlinked?: boolean }) {
   const nodes: Array<Record<string, unknown>> = [

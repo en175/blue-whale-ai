@@ -12,6 +12,23 @@ import { SNAP_ALIGNMENT_STORAGE_KEY } from './snapPreference';
  * 点击后激活态翻转并透传 FlowCanvas、切换写入 localStorage。
  * 页面环境沿 index.test.tsx 先例；FlowCanvas 打桩但透出 snapAlignmentEnabled。 */
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
 vi.mock('./components/AgentPanel', () => ({
   default: () => null,
 }));

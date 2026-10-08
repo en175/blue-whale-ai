@@ -13,6 +13,23 @@ import { typePromptRefText } from './testing/promptRefEditor';
    未自定义卡片沿用自动命名。FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；
    ImageDialog 用真实实现（沿用 imageDraft/failureRetry 组织方式）。 */
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
 vi.mock('./components/AgentPanel', () => ({
   default: ({ initialCardLabel }: { initialCardLabel?: string }) =>
     createElement('div', { 'data-testid': 'agent-panel-stub' }, initialCardLabel),

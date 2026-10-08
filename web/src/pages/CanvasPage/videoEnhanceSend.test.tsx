@@ -23,6 +23,23 @@ import type { GenerationModel } from '@/api/generation';
 
 /* sonner 替身：IKJPM7 真实链用例的 HTTP 层默认 toast 观测点（IKI8L4 先例）。
    页面本地 showToast 为独立 state 渲染，不受影响。 */
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
 vi.mock('sonner', () => ({
   toast: {
     error: vi.fn(),

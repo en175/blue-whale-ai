@@ -25,6 +25,23 @@ import { useAuthPromptStore } from '@/stores/authPrompt';
 /* ---------- 打桩：组件（同 harness 口径，Canvas 透出 props） ---------- */
 
 export const flowProps: { current: Record<string, any> } = { current: {} };
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
     flowProps.current = props;

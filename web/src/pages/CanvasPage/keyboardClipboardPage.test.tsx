@@ -18,6 +18,24 @@ import {
   unmountPage,
 } from './testing/canvasPageTestHarness';
 
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
+
+vi.mock('@/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+  generationRecoveryPageOptions: vi.fn(() => ({
+    queryKey: ['generation-recovery', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+  })),
+}));
+
 /* IKGBPA 画布内部剪贴板（页面级）：C 快照定格（删/改名/编辑原卡不影响副本）、
    V 视口中心落位 + 多卡原相对位置 + 连续粘贴阶梯、新卡自动选中、@ 派生索引线重建、
    手拉连线不复制、粘贴可撤销（真实 Ctrl+Z）、切项目清空、与 Ctrl/Cmd+D 立即复制并存。

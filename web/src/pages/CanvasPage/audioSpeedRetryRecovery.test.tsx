@@ -17,6 +17,14 @@ const recoveryApi = vi.hoisted(() => ({
   resolveGenerationRecovery: vi.fn(async (): Promise<{ protocol_version: number; records: Array<Record<string, unknown>> }> => ({ protocol_version: 1, records: [] })),
   putCanvasDocWithRecovery: vi.fn(async () => ({ project_id: '1', version: 4, recoveryReceipt: { commandId: 'cmd', replayed: false, changes: [] } })),
 }));
+vi.mock('@/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/api/generationQuote')>()),
+  generationQuoteOptions: vi.fn(() => ({
+    queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
+    queryFn: async () => ({ credits: null, quote_revision: null }),
+  })),
+}));
 vi.mock('@/api/canvasRecovery', () => recoveryApi);
 const frozenInput = { source_asset_id: '8', speed: 1.35 };
 function seed(project: 'p1' | 'p2', generating = false, overrides: Record<string, unknown> = {}) {
