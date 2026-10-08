@@ -7,7 +7,7 @@ import {
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import { readMarker } from './types';
 import type {
-  GenerationRuntimeHost, GenerationTaskDefinition,
+  GenerationRecoveryMarker, GenerationRuntimeHost, GenerationTaskDefinition,
   LedgerEntry, RuntimeNodeView,
 } from './types';
 
@@ -63,7 +63,7 @@ export interface RuntimeContext {
   submitAttempts: Map<string, { signature: string; binding: CanvasBinding }>;
   nextRound: () => string;
   recoveryItemIdOf: (submissionId: string, outputKey: string) => string;
-  readMarker: (data: Record<string, unknown> | undefined) => { protocolVersion: number; submissionId: string; outputKey: string } | null;
+  readMarker: (data: Record<string, unknown> | undefined) => GenerationRecoveryMarker | null;
   defForNode: (nodeId: string) => { def: GenerationTaskDefinition; node: RuntimeNodeView } | null;
   defForRecord: (record: GenerationRecoveryRecord) => GenerationTaskDefinition | undefined;
   owns: (execution: ActiveExecution, jobId?: string) => boolean;
