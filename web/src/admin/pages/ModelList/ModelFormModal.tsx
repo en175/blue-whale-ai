@@ -69,6 +69,7 @@ import {
   parseGptMatrix,
   pickTaskTypeRatios,
   pickTaskTypeEnabled,
+  pickTaskTypeFollowDuration,
   ratiosFromModel,
   readFeature,
   sizesFromModel,
@@ -153,6 +154,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   );
   const [taskTypesBase, setTaskTypesBase] = useState<Record<string, unknown>>(() =>
     readTaskTypesBase(initial?.features),
+  );
+  const [taskTypeFollowDuration, setTaskTypeFollowDuration] = useState<Record<string, boolean>>(() =>
+    pickTaskTypeFollowDuration(initial?.features),
   );
   /** 输出像素表 `features.video_dimensions`（键从本行的档位 × 比例派生，值由运营填）。 */
   const [videoDimensions, setVideoDimensions] = useState<KeyValueRow[]>(() =>
@@ -287,6 +291,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setFeatureNumbers(pickFeatureNumbers(src.features));
     setFeatureStrings(pickFeatureStrings(src.features));
     setTaskTypeRatios(pickTaskTypeRatios(src.features));
+    setTaskTypeFollowDuration(pickTaskTypeFollowDuration(src.features));
     setTaskTypesBase(readTaskTypesBase(src.features));
     setVideoDimensions(pickVideoDimensions(src.features));
     setExtraFeatures(pretty(dropKnownFeatures(src.features)));
@@ -406,7 +411,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     } catch {
       extra = {};
     }
-    const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios, taskTypeEnabled);
+    const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios, taskTypeEnabled, taskTypeFollowDuration);
     const dimensions = buildVideoDimensions(videoDimensions);
     return {
       type,
@@ -606,6 +611,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             setDraft: setTaskRatioDraft,
             add: addTaskRatio,
             remove: removeTaskRatio,
+            followDuration: taskTypeFollowDuration,
+            toggleFollowDuration: (taskType: string) =>
+              setTaskTypeFollowDuration((p) => ({ ...p, [taskType]: !p[taskType] })),
           }}
         />
       )}

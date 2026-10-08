@@ -753,6 +753,21 @@ export function pickTaskTypeRatios(features: Record<string, unknown> | undefined
   return out;
 }
 
+export function pickTaskTypeFollowDuration(features: Record<string, unknown> | undefined): Record<string, boolean> {
+  const raw = readFeature(features, 'task_types');
+  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out: Record<string, boolean> = {};
+  for (const taskType of TASK_TYPE_KEYS) {
+    const entry = map[taskType];
+    const durations =
+      entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>).allowed_durations
+        : undefined;
+    out[taskType] = Array.isArray(durations) && durations.length === 1 && durations[0] === -1;
+  }
+  return out;
+}
+
 export function pickTaskTypeEnabled(features: Record<string, unknown> | undefined): Record<string, boolean> {
   const raw = readFeature(features, 'task_types');
   const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -769,6 +784,7 @@ export function buildTaskTypes(
   base: Record<string, unknown>,
   ratios: Record<string, string[]>,
   enabled: Record<string, boolean>,
+  followDuration: Record<string, boolean> = {},
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
   for (const taskType of TASK_TYPE_KEYS) {
@@ -783,8 +799,11 @@ export function buildTaskTypes(
         ? { ...(entry as Record<string, unknown>) }
         : {};
     delete rest.allowed_ratios;
-    if (list.length) out[taskType] = { ...rest, allowed_ratios: list };
-    else out[taskType] = rest;
+    delete rest.allowed_durations;
+    const next: Record<string, unknown> = { ...rest };
+    if (list.length) next.allowed_ratios = list;
+    if (followDuration[taskType]) next.allowed_durations = [-1];
+    out[taskType] = next;
   }
   return out;
 }
