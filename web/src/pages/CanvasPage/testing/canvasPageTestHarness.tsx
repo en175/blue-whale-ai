@@ -3,15 +3,12 @@
 // 组件与 API 打桩、画布文档接缝、渲染与剪贴板/撤销操作助手收口于此。
 // 各文件特有的打桩（系统剪贴板、上传、seed 画布、生成模型等）留在各自文件。
 //
-// 注意：vi.mock 在本文件顶层执行（非测试文件不提升）；CanvasPage 由 renderPage
-// 动态 import 加载，测试文件自身不得再静态 import './index'，否则页面模块图
-// 会在打桩注册前解析、mock 失效。
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import CanvasPageNavProbe from './CanvasPageNavProbe';
-import { vi } from 'vitest';
+import { beforeAll, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { GenerationModel } from '@/api/generation';
 import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from '@/api/jobs';
@@ -197,11 +194,15 @@ export let navigateRef: ((to: string) => void) | null = null;
 export let locationRef: { search: string } | null = null;
 
 
-/** 渲染 CanvasPage（jsdom + 打桩组件；页面经动态 import 加载，保证本文件顶层
- *  的 vi.mock 注册先于页面模块图；卸载走 unmountPage） */
+let CanvasPage: typeof import('../index').default;
+
+beforeAll(async () => {
+  enableReactActEnvironment();
+  CanvasPage = (await import('../index')).default;
+});
+
 export async function renderPage() {
   enableReactActEnvironment();
-  const { default: CanvasPage } = await import('../index');
   container = document.createElement('div');
   document.body.appendChild(container);
   const createdRoot = createRoot(container);
