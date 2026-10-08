@@ -175,7 +175,7 @@ import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
-import { draftFileNameOf, hasCustomName, planBindingsCoveredBy, readNodeAssetId, mapBackendNode, characterLibraryVerifiedPatch } from './canvasNodeUtils';
+import { draftFileNameOf, hasCustomName, planBindingsCoveredBy, readNodeAssetId, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
@@ -1596,93 +1596,6 @@ export default function CanvasPage() {
     return base;
   };
 
-  /** 水合期素材解析：所有素材一律用 assetId 匹配 snapshot 资产字典取 access_url，不走节点内嵌 src。
-   *  - 命中 → src 替换为 access_url；material_status === Active 视为已通过合规校验
-   *  - 无 assetId 或字典查不到 → 整页水合（fromHistory）标缺失；增量刷新字典时若节点已有可播放 src 则保留，避免刚生成产物尚未写入打开时快照而被误标「素材已被删除」
-   *  - 无旧素材的生成占位与 blob: 上传预览跳过；重新生成中的旧素材仍需刷新地址。 */
-  const resolveNodeAssets = (node: Node, fromHistory = false): Node => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    if (node.type === 'mediaNode') {
-      if (data.genStatus && readAssetId(data) === undefined) return node;
-      if (typeof data.src === 'string' && (data.src as string).startsWith('blob:')) return node;
-      const aid = (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
-      // 真实人像库等素材库条目不在本地资产字典：保留已持久化的 src，不按 snapshot 标缺失
-      if (isMaterialLibraryId(aid == null ? undefined : String(aid))) {
-        const src = typeof data.src === 'string' ? data.src : '';
-        if (src && !src.startsWith('blob:')) {
-          const patch: Record<string, unknown> = {};
-          if (data.assetMissing) patch.assetMissing = undefined;
-          if (fromHistory && data.complianceBusy) patch.complianceBusy = undefined;
-          return Object.keys(patch).length === 0 ? node : { ...node, data: { ...data, ...patch } };
-        }
-      }
-      const asset = aid != null && aid !== '' ? snapshotAssets[String(aid)] : undefined;
-      const url = asset?.access_url;
-      if (url) {
-        // 水合即回填资产字典里的真实尺寸：前端数据足够时不再经历 方形→实测 跳变与多余自动保存
-        const fill: Record<string, number> = {};
-        if (typeof data.width !== 'number' && typeof asset?.width === 'number') fill.width = asset.width;
-        if (typeof data.height !== 'number' && typeof asset?.height === 'number') fill.height = asset.height;
-        const verified = characterLibraryVerifiedPatch(data, asset.material_id, asset.material_status ?? null, fromHistory);
-        return data.src === url && !data.assetMissing && Object.keys(fill).length === 0 && Object.keys(verified).length === 0
-          ? node
-          : { ...node, data: { ...data, ...fill, ...verified, src: url, assetMissing: undefined } };
-      }
-      if (fromHistory) {
-        if (data.assetMissing && !data.complianceBusy) return node;
-        return { ...node, data: { ...data, assetMissing: true, complianceBusy: undefined } };
-      }
-      // 增量刷新字典时：节点已有可播放地址说明素材仍在（刚生成/刚上传尚未写入打开时的快照），
-      // 不得误标「素材已被删除」。整页水合仍以字典为准（fromHistory）。
-      const existingSrc = typeof data.src === 'string' ? data.src : '';
-      if (existingSrc !== '' && !existingSrc.startsWith('blob:')) {
-        return data.assetMissing ? { ...node, data: { ...data, assetMissing: undefined } } : node;
-      }
-      return data.assetMissing ? node : { ...node, data: { ...data, assetMissing: true } };
-    }
-    if (node.type === 'productNode') {
-      const images = data.images;
-      if (!Array.isArray(images)) return node;
-      let changed = false;
-      const next = images.map((img) => {
-        const item = (img ?? {}) as Record<string, unknown>;
-        if (typeof item.src === 'string' && item.src.startsWith('blob:')) return img; // 上传中
-        const aid = (item.assetId ?? item.asset_id) as string | number | undefined;
-        const url = aid != null && aid !== '' ? snapshotAssets[String(aid)]?.access_url : undefined;
-        if (url) {
-          if (item.src === url && !item.missing) return img;
-          changed = true;
-          return { ...item, src: url, missing: undefined };
-        }
-        if (item.missing) return img;
-        changed = true;
-        return { ...item, src: '', missing: true };
-      });
-      return changed ? { ...node, data: { ...data, images: next } } : node;
-    }
-    if (node.type === 'assetNode') {
-      const refs = data.initialRefs;
-      if (!Array.isArray(refs)) return node;
-      let changed = false;
-      const next = refs.map((r) => {
-        const ref = (r ?? {}) as Record<string, unknown>;
-        if (typeof ref.src === 'string' && ref.src.startsWith('blob:')) return r; // 上传中
-        const aid = (ref.assetId ?? ref.asset_id) as string | number | undefined;
-        const url = aid != null && aid !== '' ? snapshotAssets[String(aid)]?.access_url : undefined;
-        if (url) {
-          if (ref.src === url && !ref.missing) return r;
-          changed = true;
-          return { ...ref, src: url, missing: undefined };
-        }
-        if (ref.missing) return r;
-        changed = true;
-        return { ...ref, src: '', missing: true };
-      });
-      return changed ? { ...node, data: { ...data, initialRefs: next } } : node;
-    }
-    return node;
-  };
-
   /** 最近一次完整水合所用的 doc 引用。snapshotAssets 单独更新时不得整页重水合，
    *  否则会把 versionRef 打回打开时的旧 version，随后保存带着过期 If-Match 必 412。 */
   const hydratedDocRef = useRef<typeof doc>(null);
@@ -1733,7 +1646,7 @@ export default function CanvasPage() {
     if (!docChanged) {
       // 仅资产字典变化：刷新节点 URL / 缺失标记，保留当前编辑与保存接口已确认的 version
       const refresh = (prev: Node[]) => {
-        const next = prev.map((node) => resolveNodeAssets(node));
+        const next = prev.map((node) => resolveNodeAssets(node, snapshotAssets));
         return next.some((node, index) => node !== prev[index]) ? next : prev;
       };
       setMediaNodes(refresh);
@@ -1762,14 +1675,14 @@ export default function CanvasPage() {
     const { groups: hydratedGroups, contentNodes } = parseGroupsFromNodes(doc.nodes);
     contentNodes.forEach((node) => {
       if (node.type === 'textNode') t.push(attachCallbacks(node));
-      else if (node.type === 'mediaNode') m.push(attachCallbacks(resolveNodeAssets(node, true)));
-      else if (node.type === 'productNode') p.push(attachCallbacks(resolveNodeAssets(node)));
-      else if (node.type === 'assetNode') a.push(attachCallbacks(resolveNodeAssets(node)));
+      else if (node.type === 'mediaNode') m.push(attachCallbacks(resolveNodeAssets(node, snapshotAssets, true)));
+      else if (node.type === 'productNode') p.push(attachCallbacks(resolveNodeAssets(node, snapshotAssets)));
+      else if (node.type === 'assetNode') a.push(attachCallbacks(resolveNodeAssets(node, snapshotAssets)));
       else {
         // 后端节点类型（reference 参考卡 / text 等）：映射为本地节点后归类（映射内部已按资产字典解析/标缺失）
         const mapped = mapBackendNode(node, snapshotAssets);
         if (mapped) {
-          const attached = attachCallbacks(resolveNodeAssets(mapped, true));
+          const attached = attachCallbacks(resolveNodeAssets(mapped, snapshotAssets, true));
           if (mapped.type === 'assetNode') a.push(attached);
           else if (mapped.type === 'textNode') t.push(attached);
           else m.push(attached);

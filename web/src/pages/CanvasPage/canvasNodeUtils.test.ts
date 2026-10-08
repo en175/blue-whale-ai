@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { draftFileNameOf, hasCustomName, planBindingsCoveredBy, readNodeAssetId, resolveAssetRef, readRefLookupId, resolveRefType, mapBackendNode, characterLibraryVerifiedPatch } from './canvasNodeUtils';
+import { draftFileNameOf, hasCustomName, planBindingsCoveredBy, readNodeAssetId, resolveAssetRef, readRefLookupId, resolveRefType, mapBackendNode, characterLibraryVerifiedPatch, resolveNodeAssets } from './canvasNodeUtils';
 
 type Snap = Record<string, { asset_id: number; type: 'image' | 'video' | 'audio'; access_url: string; width: number | null; height: number | null; material_id?: string | null; material_status?: 'Active' | 'Processing' | 'Failed' | null }>;
 const snap = (o: Snap): Snap => o;
@@ -91,5 +91,48 @@ describe('canvasNodeUtils 画布节点纯函数', () => {
     expect(characterLibraryVerifiedPatch({ mediaType: 'video' }, null, 'Processing', true)).toEqual({ compliancePassed: false });
     expect(characterLibraryVerifiedPatch({ mediaType: 'video' }, 'm3', 'Active', true)).toEqual({ materialId: 'm3', compliancePassed: true });
     expect(characterLibraryVerifiedPatch({ mediaType: 'image', compliancePassed: false }, null, null, true)).toEqual({});
+  });
+
+  it('resolveNodeAssets：媒体节点命中字典回填 src 与缺失标记；生成占位/blob 跳过', () => {
+    const assets = snap({ '7': { asset_id: 7, type: 'image', access_url: 'https://x/7.png', width: 800, height: 600 }, '9': { asset_id: 9, type: 'video', access_url: 'https://x/9.mp4', width: null, height: null, material_status: 'Processing' } });
+    const filled = resolveNodeAssets({ id: 'm1', type: 'mediaNode', data: { assetId: '7' } } as never, assets);
+    expect(filled.data).toMatchObject({ src: 'https://x/7.png', width: 800, height: 600 });
+    expect(resolveNodeAssets({ id: 'm2', type: 'mediaNode', data: { genStatus: 'generating' } } as never, assets).data.assetMissing).toBeUndefined();
+    const blob = { id: 'm3', type: 'mediaNode', data: { src: 'blob:pending' } };
+    expect(resolveNodeAssets(blob as never, assets)).toBe(blob);
+  });
+
+  it('resolveNodeAssets：整页水合查不到标缺失，增量刷新已有可播放 src 则不误标', () => {
+    const assets = snap({});
+    expect(resolveNodeAssets({ id: 'm1', type: 'mediaNode', data: { assetId: '99' } } as never, assets, true).data.assetMissing).toBe(true);
+    const kept = resolveNodeAssets({ id: 'm2', type: 'mediaNode', data: { assetId: '99', src: 'https://x/old.png' } } as never, assets, false);
+    expect(kept.data.assetMissing).toBeUndefined();
+    const flagged = resolveNodeAssets({ id: 'm3', type: 'mediaNode', data: { assetId: '99' } } as never, assets, false);
+    expect(flagged.data.assetMissing).toBe(true);
+  });
+
+  it('resolveNodeAssets：素材库条目保留已持久化 src，不按字典标缺失', () => {
+    const node = { id: 'm1', type: 'mediaNode', data: { assetId: 'Asset-abc', src: 'https://x/lib.png', assetMissing: true } };
+    expect(resolveNodeAssets(node as never, snap({})).data.assetMissing).toBeUndefined();
+  });
+
+  it('resolveNodeAssets：商品卡与资产卡逐项回填 src，查不到标 missing', () => {
+    const assets = snap({ '5': { asset_id: 5, type: 'image', access_url: 'https://x/5.png', width: null, height: null } });
+    const p = resolveNodeAssets({ id: 'p1', type: 'productNode', data: { images: [{ assetId: '5' }, { assetId: '6' }] } } as never, assets);
+    expect((p.data.images as Array<Record<string, unknown>>)[0]).toMatchObject({ src: 'https://x/5.png' });
+    expect((p.data.images as Array<Record<string, unknown>>)[1]).toMatchObject({ src: '', missing: true });
+    const a = resolveNodeAssets({ id: 'a1', type: 'assetNode', data: { initialRefs: [{ assetId: '5' }, { assetId: '6' }] } } as never, assets);
+    expect((a.data.initialRefs as Array<Record<string, unknown>>)[0]).toMatchObject({ src: 'https://x/5.png' });
+    expect((a.data.initialRefs as Array<Record<string, unknown>>)[1]).toMatchObject({ src: '', missing: true });
+  });
+
+  it('resolveNodeAssets：非媒体/商品/资产节点与无变更节点原样返回', () => {
+    const text = { id: 't1', type: 'textNode', data: {} };
+    expect(resolveNodeAssets(text as never, snap({}))).toBe(text);
+    const noImages = { id: 'p2', type: 'productNode', data: {} };
+    expect(resolveNodeAssets(noImages as never, snap({}))).toBe(noImages);
+    const assets = snap({ '5': { asset_id: 5, type: 'image', access_url: 'https://x/5.png', width: null, height: null } });
+    const same = { id: 'p3', type: 'productNode', data: { images: [{ assetId: '5', src: 'https://x/5.png' }] } };
+    expect(resolveNodeAssets(same as never, assets)).toBe(same);
   });
 });
