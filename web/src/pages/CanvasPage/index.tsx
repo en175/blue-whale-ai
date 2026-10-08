@@ -8741,7 +8741,7 @@ export default function CanvasPage() {
         lastFrame: true,
         firstLastFrame: true,
         referenceImage: true,
-      });
+      }, fallbackMode);
       if (conflict) {
         showToast('warn', conflict);
         return;

@@ -209,7 +209,7 @@ export function createVideoGenerationDock(getHost: () => VideoGenerationDockHost
         const error = videoTextIndexSendError(targetNodeId, edges, mediaNodes, textNodes);
         if (error) { host.toast('warn', error); return; }
       }
-      const conflict = videoRefConflict(refs, { firstFrame: true, lastFrame: true, firstLastFrame: true, referenceImage: true });
+      const conflict = videoRefConflict(refs, { firstFrame: true, lastFrame: true, firstLastFrame: true, referenceImage: true }, input.options.mode);
       if (conflict) { host.toast('warn', conflict); return; }
       const gate = host.refUnsupported(input.options.modelId, refs);
       if (gate) { host.toast('warn', gate); return; }

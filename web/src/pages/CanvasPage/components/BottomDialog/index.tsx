@@ -382,7 +382,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         currentModel?.features,
         videoMediaRefs.reference.map((r) => ({ type: r.mediaType, duration: r.duration })),
         'video',
-      ) ?? videoRefConflict(videoMediaRefs, caps))
+      ) ?? videoRefConflict(videoMediaRefs, caps, selectedMode))
     : null);
   const modeConflict = (() => {
     const ordinary = videoMediaRefs.reference;
@@ -567,9 +567,13 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     if (slots > 0) {
       // IKFJJT：普通参考切首尾帧——已连图片自动转为首帧/尾帧槽（第 1 张首帧、第 2 张尾帧），
       // 不再要求用户先移除（旧行为「请先移除普通参考」与「图片≥2 才解锁首尾帧」互锁，永远切不进）。
+      if (key === 'first_frame' && videoMediaRefs.last) {
+        onToast?.('warn', '图生视频只使用首帧，请先移除尾帧');
+        return;
+      }
       const imageRefs = videoMediaRefs.reference.filter((r) => r.mediaType === 'image');
       if (imageRefs.length > slots) {
-        onToast?.('warn', `首尾帧模式最多 ${slots} 张图片，请先减少参考`);
+        onToast?.('warn', `${VIDEO_MODE_LABEL[key]}模式最多 ${slots} 张图片，请先减少参考`);
         return;
       }
       if (imageRefs.length > 0) {
