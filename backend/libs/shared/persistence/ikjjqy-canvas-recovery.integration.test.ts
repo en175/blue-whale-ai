@@ -267,7 +267,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const first = await service.create(USER_ID, PROJECT_ID, {
       source_asset_id: "88", scene: "drama", output_format: "aac",
       canvas_binding: binding(UUID_A, "vocal-node-1", 0),
-    }, {}, UUID_A);
+    }, UUID_A);
     expect(first.code).toBe(200);
     expect(first.data).toMatchObject({
       status: "queued",
@@ -278,13 +278,13 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const replay = await service.create(USER_ID, PROJECT_ID, {
       source_asset_id: "88", scene: "drama", output_format: "aac",
       canvas_binding: binding(UUID_A, "vocal-node-1", 0),
-    }, {}, UUID_A);
+    }, UUID_A);
     expect(replay.data?.job_id).toBe(first.data?.job_id);
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
     // Idempotency-Key 与 submission_id 不一致 → 400。
     const mismatch = await service.create(USER_ID, PROJECT_ID, {
       source_asset_id: "88", canvas_binding: binding(UUID_B, "n", 0),
-    }, {}, UUID_C);
+    }, UUID_C);
     expect(mismatch.code).toBe(400);
     // 旧请求（无 canvas_binding）不接幂等，行为零变化：两次直建两个 job。
     const legacyA = await service.create(USER_ID, PROJECT_ID, { source_asset_id: "88" });
