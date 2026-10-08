@@ -121,45 +121,23 @@ export default function SizeMaterialTab({
       {visible.sizeRatio && (
         <>
           <h3 style={SECTION}>尺寸选项 <Hint>
-            id 是能力行内部标识；api_value 是<b>出站实际提交给上游</b>的档位值（如 4k），留空则回落用 id。
-            像素宽 / 高只随本行走（当前没有消费方读它）——留空表示这一档不写宽高。
+            id 既是能力行内部标识，也是<b>出站提交给上游</b>的档位值；展示名只影响界面。
+            {type === 'image' && <> 每个档位出站的实际像素由下面「出站尺寸映射」那张表决定。</>}
           </Hint></h3>
           {sizes.rows.map((size, index) => (
             <div style={SIZE_ROW} key={index}>
               <Input
-                placeholder="id，如 1K"
+                placeholder="id，如 2k"
+                aria-label={`第 ${index + 1} 行尺寸 id`}
                 value={size.id}
                 onChange={(e) => sizes.update(index, { id: e.target.value })}
                 style={FULL}
               />
               <Input
                 placeholder="展示名"
+                aria-label={`第 ${index + 1} 行展示名`}
                 value={size.label ?? ''}
                 onChange={(e) => sizes.update(index, { label: e.target.value })}
-                style={FULL}
-              />
-              <Input
-                placeholder="上游值 api_value，如 4k"
-                value={size.apiValue ?? ''}
-                onChange={(e) => sizes.update(index, { apiValue: e.target.value })}
-                style={FULL}
-              />
-              <Input
-                type="number"
-                min={1}
-                placeholder="像素宽"
-                aria-label={`第 ${index + 1} 行像素宽`}
-                value={size.width ?? ''}
-                onChange={(e) => sizes.update(index, { width: e.target.value })}
-                style={FULL}
-              />
-              <Input
-                type="number"
-                min={1}
-                placeholder="像素高"
-                aria-label={`第 ${index + 1} 行像素高`}
-                value={size.height ?? ''}
-                onChange={(e) => sizes.update(index, { height: e.target.value })}
                 style={FULL}
               />
               <Button

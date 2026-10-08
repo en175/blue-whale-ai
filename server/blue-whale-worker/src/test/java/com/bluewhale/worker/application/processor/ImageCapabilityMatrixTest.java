@@ -216,31 +216,31 @@ class ImageCapabilityMatrixTest {
     class SupportedSizesMatching {
 
         @Test
-        @DisplayName("按 id 匹配")
+        @DisplayName("按 id 匹配 → 返回该档位的出站值")
         void matchById() {
             String json = "[{\"id\":\"1K\",\"api_value\":\"1024x1024\",\"width\":1024,\"height\":1024}]";
-            String[] result = ImageChannelMapper.matchSupportedSize(json, "1K");
-            assertThat(result).isNotNull();
-            assertThat(result[0]).isEqualTo("1024x1024");
-            assertThat(result[1]).isEqualTo("1024");
-            assertThat(result[2]).isEqualTo("1024");
+            assertThat(ImageChannelMapper.matchSupportedSize(json, "1K")).isEqualTo("1024x1024");
         }
 
         @Test
         @DisplayName("按 api_value 匹配")
         void matchByApiValue() {
             String json = "[{\"id\":\"std\",\"api_value\":\"1024x1024\",\"width\":1024,\"height\":1024}]";
-            String[] result = ImageChannelMapper.matchSupportedSize(json, "1024x1024");
-            assertThat(result).isNotNull();
-            assertThat(result[0]).isEqualTo("1024x1024");
+            assertThat(ImageChannelMapper.matchSupportedSize(json, "1024x1024"))
+                    .isEqualTo("1024x1024");
+        }
+
+        @Test
+        @DisplayName("★ 条目没有出站值 → null，调用方保持行级 api_size 兜底（IKHTVR）")
+        void noApiValue() {
+            assertThat(ImageChannelMapper.matchSupportedSize("[{\"id\":\"1K\"}]", "1K")).isNull();
         }
 
         @Test
         @DisplayName("未匹配 → null")
         void noMatch() {
             String json = "[{\"id\":\"1K\",\"api_value\":\"1024x1024\"}]";
-            String[] result = ImageChannelMapper.matchSupportedSize(json, "4K");
-            assertThat(result).isNull();
+            assertThat(ImageChannelMapper.matchSupportedSize(json, "4K")).isNull();
         }
 
         @Test

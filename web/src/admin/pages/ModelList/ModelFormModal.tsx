@@ -122,8 +122,8 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const [modelId, setModelId] = useState(initial?.model_id ?? '');
   const [label, setLabel] = useState(initial?.model_label ?? '');
   const [icon, setIcon] = useState(initial?.icon ?? '');
-  // IKHBDO：尺寸行按库里的完整字段集读回（id / label / api_value / width / height）——
-  // 只读 id+label 时，保存会把出站值（如 4k）与像素宽高整包抹掉。
+  // IKHTVR：尺寸行只认 id / label 两个可编辑字段；`api_value` 提交时按 id 重建，
+  // 像素宽高不再写（无消费方）。
   const [sizes, setSizes] = useState<SizeForm[]>(() => {
     const stored = sizesFromModel(initial?.supported_sizes);
     if (stored.length) return stored;
@@ -251,7 +251,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
         .map((size) => ({
           id: size.id.trim(),
           label: (size.label ?? '').trim(),
-          apiValue: (size.apiValue ?? '').trim(),
+          // IKHTVR：`api_value` 恒等于 id（表单不再单独编辑），这里保持一致以便
+          // `configuredSizePixels` 用同一个键去矩阵里查像素。
+          apiValue: size.id.trim(),
           width: null,
           height: null,
         })),
@@ -318,7 +320,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   };
 
   const addSizeRow = () => {
-    const next = [...sizes, { id: '', label: '', apiValue: '', width: '', height: '' }];
+    const next = [...sizes, { id: '', label: '' }];
     setSizes(next);
     setGptMatrix((prev) => mergeMatrix(prev, next, ratios));
     setSeedreamMatrix((prev) => mergeMatrix(prev, next, ratios));

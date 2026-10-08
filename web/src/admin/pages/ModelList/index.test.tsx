@@ -574,8 +574,8 @@ describe('ModelList 定价 tab', () => {
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
-    // 只改一个与定价无关的字段（尺寸行的像素宽）
-    await type(inputByLabel('第 1 行像素宽'), '864');
+    // 只改一个与定价无关的字段（尺寸行的展示名）
+    await type(inputByLabel('第 1 行展示名'), '864');
     await click(button('保存'));
 
     expect(api.updateAdminModel).toHaveBeenCalledTimes(1);
@@ -883,7 +883,7 @@ describe('ModelList 渠道', () => {
     await openRowEdit('图片');
     expect(await channelOnBasics()).toBe('Seedream 图片（内联）');
     await openTab('尺寸与素材');
-    await type(inputByLabel('第 1 行像素宽'), '1536');
+    await type(inputByLabel('第 1 行展示名'), '1536');
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as Record<string, unknown>;
@@ -897,7 +897,7 @@ describe('ModelList 渠道', () => {
     await renderPage();
     await openRowEdit('图片');
     await openTab('尺寸与素材');
-    await type(inputByLabel('第 1 行像素宽'), '1536');
+    await type(inputByLabel('第 1 行展示名'), '1536');
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as Record<string, unknown>;
@@ -909,7 +909,7 @@ describe('ModelList 渠道', () => {
     await renderPage();
     await openRowEdit('图片');
     await openTab('尺寸与素材');
-    await type(inputByLabel('第 1 行像素宽'), '1536');
+    await type(inputByLabel('第 1 行展示名'), '1536');
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as Record<string, unknown>;

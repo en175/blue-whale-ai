@@ -109,8 +109,6 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
       });
       if (!cap) return null;
       let apiSize: string | null = null;
-      let width: number | null = null;
-      let height: number | null = null;
       if (sizeId && Array.isArray(cap.supported_sizes)) {
         const match = (
           cap.supported_sizes as Array<Record<string, unknown>>
@@ -123,8 +121,6 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
         if (match) {
           apiSize =
             (match.api_value as string) ?? (match.apiValue as string) ?? null;
-          width = (match.width as number) ?? null;
-          height = (match.height as number) ?? null;
         }
       }
       const features = (cap.features ?? {}) as {
@@ -137,8 +133,6 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
       return {
         model_id: cap.model_id,
         api_size: apiSize,
-        width,
-        height,
         image_reference_max:
           features.imageReferenceMax ??
           features.image_reference_max ??

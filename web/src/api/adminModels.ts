@@ -9,12 +9,13 @@ import { http, apiRequest } from './http';
 
 /** 模型分辨率档位。
  *
- *  ⚠️ 这只是**读侧最保守**的形态：wire 上的元素还带出站值（`api_value`）与像素宽高
- *  （库里 `generation_model_capability.supported_sizes` 就是 `{id,label,api_value,width,height}`）。
- *  读它们的消费方按 `unknown` 收（`sizeCandidates.ts` 的 `toCapabilitySize`、
- *  `model-form.ts` 的 `sizesFromModel`，两者都两种键形都认），**刻意不在这里声明成可选字段**
- *  ——`width` 在这两处是字符串、在 wire 上是数字，声明进来会让 ModelList 表单的 `SizeForm`
- *  与这里打架，而收益只是少一次断言。 */
+ *  ⚠️ 这只是**读侧最保守**的形态：存量行的 wire 元素还带出站值（`api_value`）与像素宽高
+ *  （库里 `generation_model_capability.supported_sizes` 的完整字段集是
+ *  `{id,label,api_value,width,height}`）。读它们的消费方按 `unknown` 收
+ *  （`sizeCandidates.ts` 的 `toCapabilitySize` 仍两种键形都认；IKHTVR 起
+ *  `model-form.ts` 的 `sizesFromModel` 只取 id / label，其余键在提交时重建或不写），
+ *  **刻意不在这里声明成可选字段**——`width` 在 wire 上是数字、消费方按字符串收，
+ *  声明进来会让 ModelList 表单的 `SizeForm` 与这里打架，而收益只是少一次断言。 */
 export interface ModelSize {
   id: string;
   label?: string;
