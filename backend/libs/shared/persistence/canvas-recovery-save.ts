@@ -102,17 +102,12 @@ function markerMatches(marker: Record<string, unknown> | null, submissionId: str
     && marker.outputKey === outputKey;
 }
 
-function sameMarkerValue(a: unknown, b: unknown): boolean {
-  if (typeof a === "string" || typeof b === "string") return a === b;
-  return a == b;
-}
-
 const MARKER_IDENTITY_KEYS = ["protocolVersion", "submissionId", "outputKey"] as const;
 
 function sameMarkerIdentity(previousMarker: Record<string, unknown>, nextMarker: Record<string, unknown> | null): boolean {
   if (nextMarker === null) return false;
   if (!(MARKER_IDENTITY_KEYS as readonly string[]).every(key => key in nextMarker)) return false;
-  return (MARKER_IDENTITY_KEYS as readonly string[]).every(key => sameMarkerValue(previousMarker[key], nextMarker[key]));
+  return (MARKER_IDENTITY_KEYS as readonly string[]).every(key => previousMarker[key] === nextMarker[key]);
 }
 
 function protectedCardKept(previousNode: Record<string, unknown>, node: Record<string, unknown>): boolean {
