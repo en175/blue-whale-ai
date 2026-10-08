@@ -230,6 +230,8 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
     ];
     const shapes: unknown[] = [
       'garbage',
+      [{ protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' }],
+      { protocolVersion: '1', submissionId: 'sub-1', outputKey: 'primary' },
       { protocolVersion: 2, submissionId: 'sub-1', outputKey: 'primary' },
       { protocolVersion: 1, submissionId: 123, outputKey: 'primary' },
       { protocolVersion: 1, submissionId: 'sub-1', outputKey: 456 },
@@ -252,6 +254,8 @@ describe('普通生成类型定义：恢复规划与输出槽', () => {
     }), r)).toBe(false);
     const shapes: unknown[] = [
       'garbage',
+      [{ protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' }],
+      { protocolVersion: '1', submissionId: 'sub-1', outputKey: 'primary' },
       { protocolVersion: 2, submissionId: 'sub-1', outputKey: 'primary' },
       { protocolVersion: 1, submissionId: 'sub-1', outputKey: 456 },
     ];
