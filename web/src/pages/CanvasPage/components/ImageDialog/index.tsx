@@ -369,7 +369,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
     : !currentGen ? '原生成模型已不可用，请重新选择模型'
     : selectedResolution && !resolutionOptions.some(option => option.key === selectedResolution)
       ? '原分辨率已不可用，请重新选择分辨率'
-    : selectedRatio && !ratioOptions.includes(selectedRatio)
+    : selectedRatio && !ratioOptions.some(option => option.id === selectedRatio)
       ? '原比例与当前配置不兼容，请重新选择比例'
     : invalidMediaRefs?.length ? '参考素材不可用，请调整参考后发送'
     : textIndexError ? textIndexError
@@ -507,7 +507,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
             finalSize = nextSize;
           }
           const allowed = ratiosForSelectedSize(target, nextSize ?? '');
-          if (initialParams.ratio && allowed.includes(initialParams.ratio)) {
+          if (initialParams.ratio && allowed.some((option) => option.id === initialParams.ratio)) {
             setSelectedRatio(initialParams.ratio);
             finalRatio = initialParams.ratio;
           }
@@ -717,18 +717,18 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
           <div className={styles.configSection}>
             <span className={styles.configLabel}>宽高比</span>
             <div className={styles.ratioGroup}>
-              {ratioOptions.map((r) => (
+              {ratioOptions.map((option) => (
                 <button
-                  key={r}
-                  className={`${styles.ratioBtn} ${r === selectedRatio ? styles.ratioBtnActive : ''}`}
+                  key={option.id}
+                  className={`${styles.ratioBtn} ${option.id === selectedRatio ? styles.ratioBtnActive : ''}`}
                   onClick={() => {
-                    setSelectedRatio(r);
-                    syncDraftParams({ ratio: r });
+                    setSelectedRatio(option.id);
+                    syncDraftParams({ ratio: option.id });
                   }}
                   disabled={readOnly}
                 >
-                  <RatioIcon ratio={r} />
-                  <span>{r}</span>
+                  <RatioIcon ratio={option.id} />
+                  <span>{option.label}</span>
                 </button>
               ))}
             </div>

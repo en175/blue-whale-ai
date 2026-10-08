@@ -15,6 +15,11 @@ export interface SizeForm {
   label?: string;
 }
 
+export interface RatioForm {
+  id: string;
+  label?: string;
+}
+
 /** `supported_sizes` 元素：id/label 之外允许任意扩展字段（wire 形态）。 */
 export type ModelSizeWire = ModelSize & Record<string, unknown>;
 
@@ -187,7 +192,9 @@ export const DEFAULT_IMAGE_SIZES: ModelSize[] = [
   { id: '4K', label: '4K' },
 ];
 
-export const DEFAULT_IMAGE_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4'];
+export const DEFAULT_IMAGE_RATIOS: RatioForm[] = ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4'].map(
+  (id) => ({ id }),
+);
 
 export type GptMatrix = Record<string, Record<string, string>>;
 
@@ -197,7 +204,7 @@ export type FormSnapshot = {
   label: string;
   icon: string;
   sizes: SizeForm[];
-  ratios: string[];
+  ratios: RatioForm[];
   durationMin: string;
   durationMax: string;
   durationStep: string;
@@ -245,11 +252,12 @@ export function isGptProviderSize(value: string): boolean {
   return (GPT_PROVIDER_SIZES as readonly string[]).includes(value);
 }
 
-export function emptyGptMatrix(sizes: SizeForm[], ratios: string[]): GptMatrix {
+export function emptyGptMatrix(sizes: SizeForm[], ratios: RatioForm[]): GptMatrix {
+  const ratioIds = ratios.map((ratio) => ratio.id);
   const matrix: GptMatrix = {};
   for (const size of sizes) {
     if (!size.id.trim()) continue;
-    matrix[size.id] = Object.fromEntries(ratios.map((ratio) => [ratio, '']));
+    matrix[size.id] = Object.fromEntries(ratioIds.map((ratioId) => [ratioId, '']));
   }
   return matrix;
 }
@@ -257,14 +265,15 @@ export function emptyGptMatrix(sizes: SizeForm[], ratios: string[]): GptMatrix {
 /** 尺寸/比例集合变化时**合并**已有矩阵，而不是重建。
  *  只保留仍存在的行与列，其余格子原样保位——重建会把整张表清零（IKHBDO：
  *  删一个尺寸行 / 删一个比例 chip 曾让整个交叉格归零）。 */
-export function mergeMatrix(prev: GptMatrix, sizes: SizeForm[], ratios: string[]): GptMatrix {
+export function mergeMatrix(prev: GptMatrix, sizes: SizeForm[], ratios: RatioForm[]): GptMatrix {
   const rebuilt = emptyGptMatrix(sizes, ratios);
+  const ratioIds = ratios.map((ratio) => ratio.id);
   for (const [sizeId, row] of Object.entries(prev)) {
     const target = rebuilt[sizeId];
     if (!target) continue;
-    for (const ratio of ratios) {
-      const cell = row[ratio];
-      if (cell !== undefined) target[ratio] = cell;
+    for (const ratioId of ratioIds) {
+      const cell = row[ratioId];
+      if (cell !== undefined) target[ratioId] = cell;
     }
   }
   return rebuilt;
@@ -296,6 +305,29 @@ export function sizeToWire(size: SizeForm): ModelSizeWire {
   return out;
 }
 
+export function ratiosFromModel(raw: unknown): RatioForm[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RatioForm[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      if (item) out.push({ id: item });
+      continue;
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.id !== 'string' || !o.id) continue;
+    const label = typeof o.label === 'string' && o.label.trim() && o.label !== o.id ? o.label : '';
+    out.push({ id: o.id, label });
+  }
+  return out;
+}
+
+export function ratioToWire(ratio: RatioForm): { id: string; label?: string } {
+  const id = ratio.id.trim();
+  const label = (ratio.label ?? '').trim();
+  return label && label !== id ? { id, label } : { id };
+}
+
 /** 库里矩阵键 → 表单键的规范化匹配：命中返回**表单自己的拼写**，未命中返回 undefined。
  *  IKHTL0：同一行的 `supported_sizes[].id` 与 `request_mapping.matrix` 键由两次迁移分别写入，
  *  大小写可能不一致（id 写小写 `1k`，IK629 的矩阵键写大写 `1K`）。worker 查表本来就走
@@ -307,19 +339,20 @@ function matchFormKey(formKeys: string[], raw: string): string | undefined {
   return formKeys.find((key) => key.toLowerCase() === lower);
 }
 
-export function parseGptMatrix(mapping: unknown, sizes: SizeForm[], ratios: string[]): GptMatrix {
+export function parseGptMatrix(mapping: unknown, sizes: SizeForm[], ratios: RatioForm[]): GptMatrix {
   const base = emptyGptMatrix(sizes, ratios);
   if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return base;
   const matrix = (mapping as { matrix?: unknown }).matrix;
   if (!matrix || typeof matrix !== 'object' || Array.isArray(matrix)) return base;
   const sizeIds = sizes.map((size) => size.id).filter((id) => id.trim());
+  const ratioIds = ratios.map((ratio) => ratio.id);
   for (const [rawSizeId, row] of Object.entries(matrix as Record<string, unknown>)) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
     // 命中表单尺寸 → 归一到表单 id；命不中则**原样保留**——表单外的键在保存时不得被静默抹掉。
     const sizeId = matchFormKey(sizeIds, rawSizeId) ?? rawSizeId;
     const cells: Record<string, string> = {};
     for (const [rawRatio, cell] of Object.entries(row as Record<string, string>)) {
-      cells[matchFormKey(ratios, rawRatio) ?? rawRatio] = cell;
+      cells[matchFormKey(ratioIds, rawRatio) ?? rawRatio] = cell;
     }
     base[sizeId] = { ...(base[sizeId] ?? {}), ...cells };
   }
@@ -488,7 +521,10 @@ export function buildCreateParams(form: FormSnapshot): { ok: true; value: Create
   }
 
   const sizes = form.type === 'text' || form.type === 'audio' ? [] : form.sizes.filter((s) => s.id.trim()).map(sizeToWire);
-  const ratios = form.type === 'text' || form.type === 'audio' ? [] : form.ratios.filter(Boolean);
+  const ratios =
+    form.type === 'text' || form.type === 'audio'
+      ? []
+      : form.ratios.filter((ratio) => ratio.id.trim()).map(ratioToWire);
   const formats = form.type === 'text' ? [] : form.formats.filter(Boolean);
 
   let defaultDuration: number | null = null;
@@ -548,6 +584,12 @@ function sizesForDiff(raw: unknown): string {
   );
 }
 
+function ratiosForDiff(raw: unknown): string {
+  return JSON.stringify(
+    ratiosFromModel(raw).map((ratio) => [ratio.id, ratio.label || ratio.id]),
+  );
+}
+
 export function diffUpdateParams(
   initial: AdminModel,
   created: CreateAdminModelParams,
@@ -559,8 +601,8 @@ export function diffUpdateParams(
     changes.supported_sizes = created.supported_sizes;
   }
   if (
-    JSON.stringify(created.supported_aspect_ratios ?? []) !==
-    JSON.stringify(initial.supported_aspect_ratios ?? [])
+    ratiosForDiff(created.supported_aspect_ratios) !==
+    ratiosForDiff(initial.supported_aspect_ratios)
   ) {
     changes.supported_aspect_ratios = created.supported_aspect_ratios;
   }

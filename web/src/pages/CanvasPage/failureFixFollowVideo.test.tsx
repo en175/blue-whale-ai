@@ -67,7 +67,7 @@ const apiMocks = vi.hoisted(() => ({
       model_label: '测试生视频模型',
       icon: null,
       supported_sizes: [{ id: '1080p', label: '1080p' }],
-      supported_aspect_ratios: ['16:9', '9:16', 'adaptive'],
+      supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }, { id: 'adaptive', label: 'adaptive' }],
       supported_formats: [],
       supported_durations: { min: 4, max: 30, step: 1 },
       default_size: '1080p',

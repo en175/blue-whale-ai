@@ -19,6 +19,7 @@ import {
   type ChannelId,
   type GptMatrix,
   type ModelType,
+  type RatioForm,
   type SizeForm,
 } from './model-form';
 import {
@@ -64,7 +65,14 @@ interface SizeMaterialTabProps {
     update: (index: number, patch: Partial<SizeForm>) => void;
     remove: (index: number) => void;
   };
-  ratios: { rows: string[]; remove: (ratio: string) => void; draft: string; setDraft: (value: string) => void; add: () => void };
+  ratios: {
+    rows: RatioForm[];
+    update: (index: number, patch: Partial<RatioForm>) => void;
+    remove: (ratioId: string) => void;
+    draft: string;
+    setDraft: (value: string) => void;
+    add: () => void;
+  };
   /** 输出像素表 `features.video_dimensions`；`candidates` 由本行的「档位 × 比例」派生 */
   dimensions: { rows: KeyValueRow[]; candidates: string[] | null; set: (rows: KeyValueRow[]) => void };
   defaults: {
@@ -156,13 +164,31 @@ export default function SizeMaterialTab({
           </div>
 
           <h3 style={SECTION}>比例选项</h3>
-          <div style={CHIP_LIST}>
-            {ratios.rows.map((ratio) => (
-              <Chip key={ratio} onClick={() => ratios.remove(ratio)}>
-                {ratio} ×
-              </Chip>
-            ))}
-          </div>
+          {ratios.rows.map((ratio, index) => (
+            <div style={SIZE_ROW} key={index}>
+              <Input
+                placeholder="id，如 16:9"
+                aria-label={`第 ${index + 1} 行比例`}
+                value={ratio.id}
+                onChange={(e) => ratios.update(index, { id: e.target.value })}
+                style={FULL}
+              />
+              <Input
+                placeholder={ratio.id.trim() || '展示名'}
+                aria-label={`第 ${index + 1} 行比例展示名`}
+                value={ratio.label ?? ''}
+                onChange={(e) => ratios.update(index, { label: e.target.value })}
+                style={FULL}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                title="删除比例"
+                icon={<X size={14} strokeWidth={2} />}
+                onClick={() => ratios.remove(ratio.id)}
+              />
+            </div>
+          ))}
           <div style={INLINE_ROW}>
             <Input
               placeholder="如 16:9"
@@ -232,19 +258,19 @@ export default function SizeMaterialTab({
                 </thead>
                 <tbody>
                   {ratios.rows.map((ratio) => (
-                    <tr key={ratio}>
-                      <td>{ratio}</td>
+                    <tr key={ratio.id}>
+                      <td>{ratio.label || ratio.id}</td>
                       {sizes.rows.map((size) => (
                         <td key={size.id || size.label}>
                           <Select
                             size="sm"
-                            aria-label={`${ratio} 行 ${size.label || size.id} 列`}
+                            aria-label={`${ratio.label || ratio.id} 行 ${size.label || size.id} 列`}
                             options={[
                               { value: '', label: '留空' },
                               ...GPT_PROVIDER_SIZES.map((item) => ({ value: item, label: item })),
                             ]}
-                            value={gpt.matrix[size.id]?.[ratio] ?? ''}
-                            onChange={(next) => gpt.setCell(size.id, ratio, next)}
+                            value={gpt.matrix[size.id]?.[ratio.id] ?? ''}
+                            onChange={(next) => gpt.setCell(size.id, ratio.id, next)}
                           />
                         </td>
                       ))}
@@ -279,12 +305,12 @@ export default function SizeMaterialTab({
                 <div>
                   <div style={LABEL}>比例 → size</div>
                   {ratios.rows.map((ratio) => (
-                    <div style={INLINE_ROW} key={ratio}>
-                      <Badge tone="neutral">{ratio}</Badge>
+                    <div style={INLINE_ROW} key={ratio.id}>
+                      <Badge tone="neutral">{ratio.label || ratio.id}</Badge>
                       <Input
                         placeholder="调用值，如 1x1"
-                        value={banana.size[ratio] ?? ''}
-                        onChange={(e) => banana.setSize({ ...banana.size, [ratio]: e.target.value })}
+                        value={banana.size[ratio.id] ?? ''}
+                        onChange={(e) => banana.setSize({ ...banana.size, [ratio.id]: e.target.value })}
                         style={FULL}
                       />
                     </div>
@@ -315,16 +341,16 @@ export default function SizeMaterialTab({
                 </thead>
                 <tbody>
                   {ratios.rows.map((ratio) => (
-                    <tr key={ratio}>
-                      <td>{ratio}</td>
+                    <tr key={ratio.id}>
+                      <td>{ratio.label || ratio.id}</td>
                       {sizes.rows.map((size) => (
                         <td key={size.id || size.label}>
                           <Input
                             size="sm"
-                            aria-label={`${ratio} 行 ${size.label || size.id} 列`}
+                            aria-label={`${ratio.label || ratio.id} 行 ${size.label || size.id} 列`}
                             placeholder="留空"
-                            value={seedream.matrix[size.id]?.[ratio] ?? ''}
-                            onChange={(e) => seedream.setCell(size.id, ratio, e.target.value)}
+                            value={seedream.matrix[size.id]?.[ratio.id] ?? ''}
+                            onChange={(e) => seedream.setCell(size.id, ratio.id, e.target.value)}
                             style={FULL}
                           />
                         </td>
@@ -358,7 +384,7 @@ export default function SizeMaterialTab({
           </Hint></h3>
           <DimensionMatrix
             sizes={sizes.rows}
-            ratios={ratios.rows}
+            ratios={ratios.rows.map((ratio) => ratio.id)}
             rows={dimensions.rows}
             derived={dimensions.candidates !== null}
             onRows={dimensions.set}

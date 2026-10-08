@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { pickDefaultVideoRatio, videoRatioLabel } from '@/lib/video-aspect-ratio';
+import { aspectRatioOptions, hasAspectRatio } from '@/lib/image-size-ratios';
 import { generationQuoteOptions } from '@/api/generationQuote';
 import RatioIcon from '@/components/RatioIcon';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
@@ -398,7 +399,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const isKeyframe = selectedMode === 'keyframe';
   /** IKFQ5S：首尾帧强制 adaptive 仅对**支持该档的模型**生效（Seedance 2.5）。
    *  2.0 系列上游不接受 adaptive（实测 400 unsupported ratio），仍走用户可选的固定比例。 */
-  const supportsAdaptiveRatio = !!currentModel?.supported_aspect_ratios?.includes('adaptive');
+  const supportsAdaptiveRatio = !!hasAspectRatio(currentModel?.supported_aspect_ratios, 'adaptive');
   const forceAdaptive = isKeyframe && supportsAdaptiveRatio;
   const isText2Video = selectedMode === 'text2video';
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
@@ -570,7 +571,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       return;
     }
     // 离开首尾帧：若当前是 adaptive（首尾帧内置值）且新模型比例列表不含 adaptive，回落到模型默认/首个比例。
-    if (selectedRatio === 'adaptive' && currentModel && !currentModel.supported_aspect_ratios.includes('adaptive')) {
+    if (selectedRatio === 'adaptive' && currentModel && !hasAspectRatio(currentModel.supported_aspect_ratios, 'adaptive')) {
       const fallbackRatio = pickDefaultVideoRatio(currentModel.supported_aspect_ratios, currentModel.default_aspect_ratio);
       setSelectedRatio(fallbackRatio);
       syncDraftParams({ mode: key, ratio: fallbackRatio });
@@ -583,7 +584,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     : !currentModel ? '原生成模型不可用，请重新选择模型'
     : !sizeOptions.some(option => option.key === selectedSize) ? '原分辨率不可用，请重新选择分辨率'
     // ADR-0086：首尾帧比例内置 adaptive（不暴露给用户），跳过比例合法性校验，避免误报「原比例不兼容」。
-    : !forceAdaptive && !ratioOptions.includes(selectedRatio) ? '原比例不兼容，请重新选择比例'
+    : !forceAdaptive && !ratioOptions.some(option => option.id === selectedRatio) ? '原比例不兼容，请重新选择比例'
     : durationRange && (duration < durationRange.min || duration > durationRange.max
       || (duration - durationRange.min) % durationRange.step !== 0)
       ? '原时长不兼容，请重新选择时长'
@@ -608,7 +609,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     setSelectedModel(m.model_id);
     setSampleMode(false);
     let nextRatio = selectedRatio;
-    if (m.supported_aspect_ratios.length) {
+    if (aspectRatioOptions(m.supported_aspect_ratios).length) {
       nextRatio = pickDefaultVideoRatio(m.supported_aspect_ratios, m.default_aspect_ratio);
       setSelectedRatio(nextRatio);
     }
@@ -658,7 +659,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           // 样片开启恢复时记住草稿原档位：关闭样片即恢复「原先选择的普通清晰度」（用户故事 4）
           normalSizeRef.current = restoredSampleMode && size?.id ? size.id : '';
           // IKFQ5S：仅模型支持 adaptive 时才内置该档（恢复时模型可能未就绪，按 list 查）。
-          const restoredSupportsAdaptive = !!model?.supported_aspect_ratios?.includes('adaptive');
+          const restoredSupportsAdaptive = !!hasAspectRatio(model?.supported_aspect_ratios, 'adaptive');
           setSelectedRatio(
             restoredMode === 'keyframe' && restoredSupportsAdaptive
               ? 'adaptive'
@@ -684,7 +685,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         // IKG0LP：音频选择随草稿落值（首次打开即持久化当前生效值）
         patch.generateAudio = generateAudio;
         if (initialParams) {
-          if (initialParams.aspectRatio && target.supported_aspect_ratios.includes(initialParams.aspectRatio)) {
+          if (initialParams.aspectRatio && hasAspectRatio(target.supported_aspect_ratios, initialParams.aspectRatio)) {
             setSelectedRatio(initialParams.aspectRatio);
             patch.ratio = initialParams.aspectRatio;
           }
@@ -706,7 +707,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           if (initialParams.mode && modeOptions.some((o) => o.key === initialParams.mode)) {
             setSelectedMode(initialParams.mode);
             // IKFQ5S：首尾帧且模型支持 adaptive 时才内置该档，覆盖首页带入的固定比例。
-            if (initialParams.mode === 'keyframe' && target.supported_aspect_ratios.includes('adaptive')) {
+            if (initialParams.mode === 'keyframe' && hasAspectRatio(target.supported_aspect_ratios, 'adaptive')) {
               setSelectedRatio('adaptive');
               patch.ratio = 'adaptive';
             }
@@ -1175,19 +1176,19 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             <>
               <span className={styles.configLabel}>宽高比</span>
               <div className={styles.ratioGroup}>
-                {ratioOptions.map((r) => (
+                {ratioOptions.map((option) => (
                   <button
-                    key={r}
-                    className={`${styles.ratioBtn} ${r === selectedRatio ? styles.ratioBtnActive : ''}`}
+                    key={option.id}
+                    className={`${styles.ratioBtn} ${option.id === selectedRatio ? styles.ratioBtnActive : ''}`}
                     disabled={readOnly}
                     onClick={() => {
-                      setSelectedRatio(r);
-                      syncDraftParams({ ratio: r });
+                      setSelectedRatio(option.id);
+                      syncDraftParams({ ratio: option.id });
                     }}
                   >
-                    <RatioIcon ratio={r} />
+                    <RatioIcon ratio={option.id} />
                     {/* IKJ4W6：内部键 adaptive 展示为 auto；选中/提交值仍是 adaptive。 */}
-                    <span>{videoRatioLabel(r)}</span>
+                    <span>{videoRatioLabel(option.label)}</span>
                   </button>
                 ))}
               </div>

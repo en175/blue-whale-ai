@@ -18,7 +18,7 @@ const fetchGenerationModels = vi.hoisted(() =>
       model_label: '测试生视频模型',
       icon: null,
       supported_sizes: [{ id: '1080p', label: '1080P', api_value: '1080p' }],
-      supported_aspect_ratios: ['16:9'],
+      supported_aspect_ratios: [{ id: '16:9', label: '16:9' }],
       supported_formats: [],
       supported_durations: { min: 5, max: 5, step: 5 },
       default_size: '1080p',

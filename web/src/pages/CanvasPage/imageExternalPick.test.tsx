@@ -90,7 +90,7 @@ const apiMocks = vi.hoisted(() => ({
       model_label: '测试生图模型',
       icon: null,
       supported_sizes: [{ id: '2k', label: '2K' }],
-      supported_aspect_ratios: ['1:1'],
+      supported_aspect_ratios: [{ id: '1:1', label: '1:1' }],
       supported_formats: [],
       supported_durations: null,
       default_size: '2k',

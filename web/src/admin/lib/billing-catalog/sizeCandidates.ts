@@ -96,6 +96,14 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function readRatioId(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return readString((value as { id?: unknown }).id);
+  }
+  return '';
+}
+
 function readNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -156,7 +164,7 @@ function toView(modelId: string, model: AdminModel): ModelCapabilityView {
   const rawSizes = Array.isArray(model.supported_sizes) ? model.supported_sizes : [];
   const sizes = rawSizes.map(toCapabilitySize).filter((s): s is CapabilitySize => s !== null);
   const ratios = (Array.isArray(model.supported_aspect_ratios) ? model.supported_aspect_ratios : [])
-    .map(readString)
+    .map(readRatioId)
     .filter((r) => r.length > 0);
   return {
     modelId,
