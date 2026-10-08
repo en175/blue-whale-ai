@@ -175,7 +175,7 @@ import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
-import { draftFileNameOf, hasCustomName, planBindingsCoveredBy, readNodeAssetId } from './canvasNodeUtils';
+import { draftFileNameOf, hasCustomName, planBindingsCoveredBy, readNodeAssetId, mapBackendNode, characterLibraryVerifiedPatch } from './canvasNodeUtils';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
@@ -1596,172 +1596,6 @@ export default function CanvasPage() {
     return base;
   };
 
-  /** 解析后端节点引用的资产（data/顶层的 asset_id、reference_asset_ids）。
-   *  素材 URL 以 snapshot 资产字典为唯一来源：查不到一律返回 null（调用方标「素材已被删除」），不再回退内嵌 url */
-  const resolveAssetRef = (node: Node): { url: string; type: string; assetId?: string } | null => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const raw = node as unknown as Record<string, unknown>;
-    const candidates: unknown[] = [
-      data.asset_id,
-      raw.asset_id,
-      data.assetId,
-      raw.assetId,
-      data.assetID,
-      raw.assetID,
-      data.sourceAssetId,
-      raw.sourceAssetId,
-      Array.isArray(data.reference_asset_ids) ? data.reference_asset_ids[0] : undefined,
-      Array.isArray(raw.reference_asset_ids) ? raw.reference_asset_ids[0] : undefined,
-    ];
-    for (const c of candidates) {
-      if (c == null || c === '') continue;
-      const asset = snapshotAssets[String(c)];
-      if (asset?.access_url) return { url: asset.access_url, type: asset.type, assetId: String(c) };
-    }
-    return null;
-  };
-
-  /** 解析 references 数组元素 → 资产 ID（兼容 assetId 数字/字符串与 o.id 历史形态）。
-   *  素材 URL 以 snapshot 资产字典为唯一来源，无 assetId 的条目一律按「素材已被删除」处理 */
-  const readRefLookupId = (r: unknown): string | undefined => {
-    if (typeof r === 'number' || typeof r === 'string') return r === '' ? undefined : String(r);
-    if (r != null && typeof r === 'object') {
-      const o = r as Record<string, unknown>;
-      const aid = o.asset_id ?? o.assetId ?? o.id;
-      if (aid != null && aid !== '') return String(aid);
-    }
-    return undefined;
-  };
-
-  /** 解析 references 数组元素 → 媒体类型（image/video） */
-  const resolveRefType = (r: unknown): 'image' | 'video' => {
-    if (r != null && typeof r === 'object') {
-      const o = r as Record<string, unknown>;
-      const t = (o.type ?? o.media_type) as string | undefined;
-      if (t === 'video') return 'video';
-      // 检查 MIME 类型
-      const mime = o.mime as string | undefined;
-      if (mime?.startsWith('video/')) return 'video';
-    }
-    return 'image';
-  };
-
-  /** 后端节点类型映射为本地节点：reference 参考卡→资产卡，text→文本节点，其余按资产引用试解为媒体节点 */
-  const mapBackendNode = (node: Node): Node | null => {
-    const raw = node as unknown as Record<string, unknown>;
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const position = node.position ?? { x: 0, y: 0 };
-
-    // 参考卡（Agent 计划产物）：cardType 对应资产卡五种类型
-    if (node.type === 'reference') {
-      const cardType = typeof raw.cardType === 'string' ? raw.cardType : 'custom';
-      const kind: AssetCardKind = (
-        ['style', 'character', 'object', 'environment', 'custom'] as AssetCardKind[]
-      ).includes(cardType as AssetCardKind)
-        ? (cardType as AssetCardKind)
-        : 'custom';
-      const refsRaw = Array.isArray(raw.references) ? raw.references : [];
-      // 参考图有效性以 snapshot 资产字典为唯一来源：命中→access_url；查不到→保留条目并标 missing（渲染占位），不再静默丢弃
-      const initialRefs = refsRaw.map((r, i) => {
-        const type = resolveRefType(r);
-        const lookupAid = readRefLookupId(r);
-        const url = lookupAid != null ? snapshotAssets[lookupAid]?.access_url : undefined;
-        const base = { id: `ref-hydra-${node.id}-${i}`, type };
-        return url
-          ? { ...base, src: url, assetId: lookupAid }
-          : { ...base, src: '', missing: true, ...(lookupAid ? { assetId: lookupAid } : {}) };
-      });
-      const desc = (data.content ?? data.desc ?? raw.content) as unknown;
-      return {
-        id: node.id,
-        type: 'assetNode',
-        position,
-        data: {
-          kind,
-          initialRefs,
-          initialDesc: typeof desc === 'string' ? desc : '',
-        },
-      };
-    }
-
-    // 文本节点
-    if (node.type === 'text') {
-      const html = (data.html ?? data.content ?? data.text ?? raw.content ?? raw.text ?? '') as unknown;
-      return {
-        id: node.id,
-        type: 'textNode',
-        position,
-        data: { html: typeof html === 'string' ? html : '' },
-      };
-    }
-
-    // 其余未知类型：按资产引用尽力还原为媒体节点；素材查不到时保留节点并标「素材已被删除」（不再静默丢弃）
-    const ref = resolveAssetRef(node);
-    const prompt = (data.prompt ?? raw.prompt) as unknown;
-    if (!ref) {
-      return {
-        id: node.id,
-        type: 'mediaNode',
-        position,
-        data: {
-          src: '',
-          mediaType: 'image',
-          fileName: `参考 ${node.id}`,
-          prompt: typeof prompt === 'string' ? prompt : undefined,
-          assetMissing: true,
-        },
-      };
-    }
-    return {
-      id: node.id,
-      type: 'mediaNode',
-      position,
-      data: {
-        src: ref.url,
-        mediaType: ref.type === 'video' ? 'video' : 'image',
-        fileName: `参考 ${node.id}`,
-        prompt: typeof prompt === 'string' ? prompt : undefined,
-        assetId: ref.assetId,
-      },
-    };
-  };
-
-  /** 图片/视频：身份只认快照 assets[assetId].material_id；合规角标只认 material_status === Active（音频不参与） */
-  const characterLibraryVerifiedPatch = (
-    data: Record<string, unknown>,
-    snapshotMaterialId?: string | null,
-    snapshotMaterialStatus?: string | null,
-    fromHistory = false,
-  ): Record<string, unknown> => {
-    if (data.mediaType === 'audio') return {};
-    const verifiedId = resolveCharacterLibraryMaterialId({
-      mediaType: data.mediaType,
-      snapshotMaterialId,
-    });
-    const patch: Record<string, unknown> = {};
-    if (verifiedId) {
-      if (data.materialId !== verifiedId) patch.materialId = verifiedId;
-    } else if (data.materialId) {
-      patch.materialId = undefined;
-    }
-    const passed = snapshotMaterialStatus === 'Active';
-    if (!fromHistory) {
-      // 会话内字典刷新：只把已是 Active 的镜像对齐为已校验，不打断进行中的校验
-      if (passed) {
-        if (data.complianceBusy) patch.complianceBusy = undefined;
-        if (data.compliancePassed !== true) patch.compliancePassed = true;
-        if (data.complianceFailed) patch.complianceFailed = undefined;
-      }
-      return patch;
-    }
-    // 二次进入历史画布：合规 UI 只从 data-assets.material_status 派生。
-    // Active = 已校验；Processing / Failed / null = 未校验（不恢复校验中 loading）
-    if (data.complianceBusy) patch.complianceBusy = undefined;
-    if (data.compliancePassed !== passed) patch.compliancePassed = passed;
-    if (data.complianceFailed) patch.complianceFailed = undefined;
-    return patch;
-  };
-
   /** 水合期素材解析：所有素材一律用 assetId 匹配 snapshot 资产字典取 access_url，不走节点内嵌 src。
    *  - 命中 → src 替换为 access_url；material_status === Active 视为已通过合规校验
    *  - 无 assetId 或字典查不到 → 整页水合（fromHistory）标缺失；增量刷新字典时若节点已有可播放 src 则保留，避免刚生成产物尚未写入打开时快照而被误标「素材已被删除」
@@ -1933,7 +1767,7 @@ export default function CanvasPage() {
       else if (node.type === 'assetNode') a.push(attachCallbacks(resolveNodeAssets(node)));
       else {
         // 后端节点类型（reference 参考卡 / text 等）：映射为本地节点后归类（映射内部已按资产字典解析/标缺失）
-        const mapped = mapBackendNode(node);
+        const mapped = mapBackendNode(node, snapshotAssets);
         if (mapped) {
           const attached = attachCallbacks(resolveNodeAssets(mapped, true));
           if (mapped.type === 'assetNode') a.push(attached);
