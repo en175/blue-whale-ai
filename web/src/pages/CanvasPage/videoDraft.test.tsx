@@ -36,6 +36,12 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
     staleTime: Infinity,
     queryFn: async () => { throw new Error('recovery unavailable (mock)'); },
   })),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
 }));
 
 vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
