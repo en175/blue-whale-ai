@@ -151,6 +151,7 @@ function planMixMuxRecovery(
     if (!targetExists) {
       const node = buildRestore(record);
       if (node) return { kind: 'restore-target', node };
+      return { kind: 'none' };
     }
     return { kind: 'resume-polling' };
   }
