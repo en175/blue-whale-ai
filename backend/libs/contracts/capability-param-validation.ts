@@ -26,16 +26,32 @@ export interface CapabilityLimitInput {
   task_types?: unknown;
 }
 
-/** IKFPYX：视频任务类型（官方口径，由输入素材角色 + 提示词意图判定）。
- *  与火山方舟 Seedance 2.5 提示词指南的「任务使用说明」一致：
- *    · 首帧/首尾帧 —— 按 references 的 role（first_frame / last_frame）；
- *    · 编辑 / 延长 —— 参考素材 + 提示词含官方关键词（见下面两个列表）；
- *    · 官方另有一层「是否锁定输出属性」的分类（有锁定：编辑/首尾帧/延长），本枚举只落**有锁定**那三种
- *      加上 default；参考任务/多宫格分镜/关键帧对输出不锁比例时长，约束上没有区别，一并归 default。
- *
- *  ⚠️ 关键词表**逐字对齐官方**，不要凭语感加词：官方原文是「包含其一即可」的**闭集**，
- *     多一个词就等于把「用户没要求编辑」的提示词也当成编辑任务（后果见下面各列表的注释）。 */
-export type VideoTaskType = "default" | "first_frame" | "first_last_frame" | "edit" | "prolong";
+export const VIDEO_MODES = [
+  "text2video",
+  "omni",
+  "image_reference",
+  "first_frame",
+  "first_last_frame",
+  "edit",
+  "extend",
+] as const;
+
+export type VideoMode = (typeof VIDEO_MODES)[number];
+
+const LEGACY_VIDEO_MODE: Record<string, VideoMode> = {
+  default: "text2video",
+  prolong: "extend",
+};
+
+export function isVideoMode(raw: unknown): raw is VideoMode {
+  return typeof raw === "string" && (VIDEO_MODES as readonly string[]).includes(raw);
+}
+
+export function normalizeVideoMode(raw: unknown): VideoMode | null {
+  if (typeof raw !== "string") return null;
+  if (isVideoMode(raw)) return raw;
+  return LEGACY_VIDEO_MODE[raw] ?? null;
+}
 
 /** 编辑意图关键词。官方原文：「编辑视频、增加/加上、删除/去掉、修改/替换/改成」——斜杠是**同义项**，
  *  展开即这 8 个词。
@@ -87,33 +103,24 @@ function hasIntentKeyword(prompt: string, words: readonly string[]): boolean {
   );
 }
 
-/** IKFPYX：判定视频任务类型（纯函数，无 IO；backend 与 worker-java 同源口径）。
- *  优先级：首尾帧角色 > 单帧角色 > 参考视频 + 提示词意图（延长先于编辑，后者词面更宽）> default。
- *
- *  ⚠️ **「必须至少有一个参考视频」是官方明文**，不是本仓的取舍。出处在**创建视频生成任务 API**
- *     的 `omni_reference_task_type` 参数说明：「设置 edit 时，content 中必须至少包含一个
- *     reference_video」「设置 extend 时……必须至少包含一个 reference_video」。
- *     （提示词指南那页只列了 role 名单、没写这一条，所以要引 API 文档，别引错页。）
- *
- *  ⚠️ **别把 2.5 的约束素推到 2.0**：`ratio 必须为 adaptive` / `duration 必须为 -1` 写在
- *     `omni_reference_task_type` 下，而那个参数的「模型支持」只有 **Seedance 2.5**。
- *     官方「不同模型的取值限制和 adaptive 适配规则」表里，视频编辑/视频延长一行的
- *     Seedance 2.0 系列 = 「支持 adaptive 或指定宽高比」，2.5 = 「默认且仅支持 adaptive」。
- *     本函数是**所有视频模型共用**的判定器（只回答「这单属于哪类」），
- *     按模型分叉的**约束**走能力行配置（`features.task_types`），不要写进这里。 */
-export function resolveVideoTaskType(
+export function resolveVideoMode(
   references: ReadonlyArray<{ role: string; type: string }>,
   prompt: string,
-): VideoTaskType {
+): VideoMode {
   const hasFirst = references.some((r) => r.role === "first_frame");
   const hasLast = references.some((r) => r.role === "last_frame");
   if (hasFirst && hasLast) return "first_last_frame";
   if (hasFirst || hasLast) return "first_frame";
-  const hasVideoRef = references.some((r) => r.role === "reference" && r.type === "video");
-  if (!hasVideoRef) return "default";
-  if (hasIntentKeyword(prompt, PROLONG_INTENT_KEYWORDS)) return "prolong";
-  if (hasIntentKeyword(prompt, EDIT_INTENT_KEYWORDS)) return "edit";
-  return "default";
+  const ordinary = references.filter((r) => r.role === "reference");
+  const hasVideoRef = ordinary.some((r) => r.type === "video");
+  if (hasVideoRef) {
+    if (hasIntentKeyword(prompt, PROLONG_INTENT_KEYWORDS)) return "extend";
+    if (hasIntentKeyword(prompt, EDIT_INTENT_KEYWORDS)) return "edit";
+    return "omni";
+  }
+  if (ordinary.some((r) => r.type === "audio")) return "omni";
+  if (ordinary.some((r) => r.type === "image")) return "image_reference";
+  return "text2video";
 }
 
 /** IKJ795：编辑/延长 + 非 adaptive 比例拒单的用户向文案（结构化码 task_type_param_constraint 的话）。
@@ -124,18 +131,15 @@ export function resolveVideoTaskType(
 export const TASK_TYPE_PARAM_CONSTRAINT_MESSAGE =
   ERROR_CODES[errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT)]!;
 
-/** 快照上冻结任务类型的键名（GenerationJob.input.video_task_type）。 */
-export const FROZEN_VIDEO_TASK_TYPE_KEY = "video_task_type";
+export const FROZEN_VIDEO_MODE_KEY = "video_mode";
 
-/** IKJ795：读 GenerationJob 输入快照里**冻结**的视频任务类型。
- *  消费侧（执行/报价/结算）只读这份判定结果，不现场重算；存量快照未携带该字段（或值非法）
- *  按 default 处理，不回溯历史——旧任务的判定口径让它留在旧任务里。 */
-export function frozenVideoTaskTypeOf(input: unknown): VideoTaskType {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) return "default";
-  const v = (input as Record<string, unknown>)[FROZEN_VIDEO_TASK_TYPE_KEY];
-  return v === "default" || v === "first_frame" || v === "first_last_frame" || v === "edit" || v === "prolong"
-    ? v
-    : "default";
+export const LEGACY_FROZEN_VIDEO_MODE_KEY = "video_task_type";
+
+export function frozenVideoModeOf(input: unknown): VideoMode {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return "text2video";
+  const row = input as Record<string, unknown>;
+  const raw = row[FROZEN_VIDEO_MODE_KEY] ?? row[LEGACY_FROZEN_VIDEO_MODE_KEY];
+  return normalizeVideoMode(raw) ?? "text2video";
 }
 
 function readStringArray(v: unknown): string[] | null {
@@ -154,11 +158,11 @@ function readNumberArray(v: unknown): number[] | null {
  *  同一份能力行配置判定，否则两处各写一套就成了 ADR-0110 禁止的「跨层重复的限制」。
  *
  *  <p>⚠️ 这是「配置说了什么」，不是「校验结论」——是否放行由调用方决定（`null` = 不限）。 */
-export function taskTypeAllowedRatios(
+export function modeAllowedRatios(
   taskTypes: unknown,
-  taskType: VideoTaskType | undefined,
+  mode: VideoMode | undefined,
 ): string[] | null {
-  return readStringArray(taskTypeConstraint(taskTypes, taskType)?.allowed_ratios);
+  return readStringArray(modeConstraint(taskTypes, mode)?.allowed_ratios);
 }
 
 /* ── 视频输出像素表 ──────────────────────────────────────────────────────────────
@@ -261,14 +265,14 @@ export function resolveOutputPixels(
 
 /** 取该任务类型的约束（未传任务类型/无该类型配置/非法形态 → null = 回落基础能力校验）。
  *  注：`default` 也照常取用——配了 default 约束就应按它校验（否则该配置形同虚设）。 */
-function taskTypeConstraint(
+function modeConstraint(
   taskTypes: unknown,
-  taskType: VideoTaskType | undefined,
+  mode: VideoMode | undefined,
 ): Record<string, unknown> | null {
-  if (!taskType) return null;
+  if (!mode) return null;
   const map = taskTypes;
   if (!map || typeof map !== "object" || Array.isArray(map)) return null;
-  const entry = (map as Record<string, unknown>)[taskType];
+  const entry = (map as Record<string, unknown>)[mode];
   return entry && typeof entry === "object" && !Array.isArray(entry)
     ? (entry as Record<string, unknown>)
     : null;
@@ -278,11 +282,11 @@ function taskTypeConstraint(
  *  报价/预扣用它判「该模型的 edit 是否锁跟随口径」：Seedance 2.5 配了 `task_types.edit`
  *  （官方：edit 输出比例时长跟随参考视频），2.0 未配（编辑类提示词也可自选时长）——
  *  按模型分叉的约束走能力行配置，与本文件其他读取器同一立场。 */
-export function hasTaskTypeConstraint(
+export function hasModeConstraint(
   taskTypes: unknown,
-  taskType: VideoTaskType,
+  mode: VideoMode,
 ): boolean {
-  return taskTypeConstraint(taskTypes, taskType) !== null;
+  return modeConstraint(taskTypes, mode) !== null;
 }
 
 /** 提交侧待校验参数（Dock 视频/图片扁平字段，归一化由调用方完成）。 */
@@ -292,8 +296,7 @@ export interface GenerationParamCheckInput {
   aspect_ratio: string;
   /** 视频时长（秒）。图片/音频不校验。 */
   duration?: number;
-  /** IKFPYX：视频任务类型（命中 features.task_types 时按该类型的比例/时长约束校验）。 */
-  task_type?: VideoTaskType;
+  mode?: VideoMode;
 }
 
 /** 校验失败原因：带可用值提示，前端可直接展示。 */
@@ -377,18 +380,17 @@ export function checkGenerationParamLimit(
       reason: `当前模型不支持 分辨率/尺寸 ${params.size}，可用：${available}`,
     };
   }
-  // IKFPYX：任务类型约束优先（首帧/首尾帧/edit/prolong 各自的比例与时长口径）。
-  const constraint = taskTypeConstraint(capability.task_types, params.task_type);
+  const constraint = modeConstraint(capability.task_types, params.mode);
   const taskRatios = readStringArray(constraint?.allowed_ratios);
   const taskDurations = readNumberArray(constraint?.allowed_durations);
-  const taskLabel = params.task_type ? `当前任务类型（${params.task_type}）` : "当前任务类型";
+  const taskLabel = params.mode ? `当前模式（${params.mode}）` : "当前模式";
 
   const ratioList = taskRatios ?? ratios(capability);
   if (ratioList.length > 0 && !ratioList.includes(params.aspect_ratio)) {
     // IKJ795：编辑/延长被任务类型锁定比例拒下时换专用码 + 用户向文案——前端按码识别
     // 「一键改为跟随视频」场景，文案不出现 edit/adaptive 等内部词。其余任务类型与基础
     // 比例越界维持 capability_unsupported_ratio（两码语义不混）。
-    if (params.task_type === "edit" || params.task_type === "prolong") {
+    if (params.mode === "edit" || params.mode === "extend") {
       return {
         field: "aspect_ratio",
         code: ERROR_TASK_TYPE_PARAM_CONSTRAINT,

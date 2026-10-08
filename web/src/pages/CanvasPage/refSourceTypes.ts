@@ -19,7 +19,7 @@ export const PANEL_REF_MEDIA_TYPES = {
   videoAll: { types: ['image', 'video', 'audio'] },
   /** 视频图生视频（IKFE8U）：普通参考仅图片（画布禁选提示走本键）；
    *  首尾帧槽同为仅图片（槽位资产过滤直接 ['image']，与 checkAddVideoRef 首尾帧约束同口径） */
-  videoText2Video: { types: ['image'], canvasRefError: '图生视频参考仅支持图片素材' },
+  videoText2Video: { types: ['image'], canvasRefError: '图片参考仅支持图片素材' },
 } as const;
 
 export type RefPanelKind = keyof typeof PANEL_REF_MEDIA_TYPES;

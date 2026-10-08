@@ -746,10 +746,12 @@ public class VideoJobProcessor implements JobProcessor {
         // 缺失或非布尔 → null → 出站不下发，维持上游默认。
         Boolean generateAudio = input.get("generate_audio") instanceof Boolean b ? b : null;
 
-        // IKJ79A：快照冻结的视频任务类型（IKJ795 接纳侧判定冻结，键名同 TS 契约
-        // FROZEN_VIDEO_TASK_TYPE_KEY）。执行层只读不重算；缺失/非字符串 → null，
-        // 出站侧按 default 处理（frozenVideoTaskTypeOf 同口径，不回溯历史任务）。
-        String videoTaskType = input.get("video_task_type") instanceof String s ? s : null;
+        String frozenMode = input.get("video_mode") instanceof String s ? s
+                : input.get("video_task_type") instanceof String t ? t : null;
+        String videoTaskType = "default".equals(frozenMode) ? "text2video"
+                : "prolong".equals(frozenMode) ? "extend" : frozenMode;
+        boolean omniTaskTypeAllowed =
+                input.get("omni_reference_task_type_allowed") instanceof Boolean b && b;
 
         // 校验（:598-606）。IKFPYX：duration=-1（模型自动选时长）**仅 edit/prolong 任务合法**，
         // 其余任务须 duration>0。
@@ -757,13 +759,12 @@ public class VideoJobProcessor implements JobProcessor {
         // 文本附件属创作上下文不计入；与 backend handle-create-generation-job 用的 params.prompt 同源。
         // IKG0FR：不再要求 resolution 能换算成像素——分辨率合法性由提交时的能力行白名单负责，
         // 像素只用于回写 assets.width/height（列可空），换算不出写 null 即可，不拒单。
-        String taskType = resolveVideoTaskType(input.get("references"), basePrompt);
-        boolean autoDurationAllowed = "edit".equals(taskType) || "prolong".equals(taskType);
+        boolean autoDurationAllowed = "edit".equals(videoTaskType) || "extend".equals(videoTaskType);
         boolean durationOk = Double.isFinite(duration)
                 && (duration > 0 || (duration == -1 && autoDurationAllowed));
         if (prompt.isEmpty() || model.isEmpty() || !durationOk) {
             log.warn("[IKE7JP] 前置校验遗漏：job {} 视频参数无效仍进入 worker（taskType={} duration={}）",
-                    claim.id(), taskType, duration);
+                    claim.id(), videoTaskType, duration);
             throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频生成参数无效");
         }
 
@@ -784,7 +785,7 @@ public class VideoJobProcessor implements JobProcessor {
             }
             return new VideoSubmitInput(model, prompt, duration,
                     strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references,
-                    generateAudio, sample, videoTaskType);
+                    generateAudio, sample, videoTaskType, omniTaskTypeAllowed);
         }
 
         // 参考素材解析（video-job-runner.ts:608-650）
@@ -946,12 +947,13 @@ public class VideoJobProcessor implements JobProcessor {
             }
             merged.addAll(references);
             return new VideoSubmitInput(model, prompt, duration, resolution, ratio,
-                    null, null, merged, generateAudio, sample, videoTaskType);
+                    null, null, merged, generateAudio, sample, videoTaskType, omniTaskTypeAllowed);
         }
 
         return new VideoSubmitInput(
                 model, prompt, duration, resolution, ratio,
-                firstFrameImage, lastFrameImage, references, generateAudio, sample, videoTaskType
+                firstFrameImage, lastFrameImage, references, generateAudio, sample, videoTaskType,
+                omniTaskTypeAllowed
         );
     }
 

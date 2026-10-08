@@ -27,7 +27,17 @@
  * 「长度」算成一个数字规格传进来，而不是把正文塞进规格表。
  */
 
-const NON_SPEC_FIELDS = new Set(["prompt", "title", "provider_credential"]);
+export const DURATION_BASIS_KEY = "duration_basis_seconds";
+
+export const OMNI_TASK_TYPE_ALLOWED_KEY = "omni_reference_task_type_allowed";
+
+const NON_SPEC_FIELDS = new Set([
+  "prompt",
+  "title",
+  "provider_credential",
+  DURATION_BASIS_KEY,
+  OMNI_TASK_TYPE_ALLOWED_KEY,
+]);
 
 /**
  * 规格键：视频输入档（轴名沿用火山的 `video`）。
@@ -96,6 +106,10 @@ export function extractSpecs(
   //    预览价就比实冻价少了加价那部分（也就是「预览一个价、实扣另一个价」）。
   //    只取长度：**数组本身不进规格**（有测试钉住这条，混进去会让 catalog 查不到规格）。
   specs.reference_count = String(referenceList(input, taskType).length);
+  const basisSeconds = input[DURATION_BASIS_KEY];
+  if (typeof basisSeconds === "number" && Number.isFinite(basisSeconds)) {
+    specs.duration = String(basisSeconds);
+  }
   // ⚠️ 视频输入档：视频按 token 计价的**单价**分两档（火山官方：输入不含视频 / 输入包含视频），
   //    而「有没有视频参考」是 `references` 数组里的**元素类型**，同样进不了规格。
   //    与 reference_count 同一处、同一套理由折算成标量键，两个调用点取到同一个值。

@@ -60,6 +60,13 @@ const baseFeatures = {
   first_frame: true,
   last_frame: true,
   first_last_frame: true,
+  task_types: {
+    text2video: {},
+    omni: {},
+    image_reference: {},
+    first_frame: {},
+    first_last_frame: {},
+  },
   audio: false,
 };
 
@@ -151,7 +158,7 @@ describe('IKJ794 全能参考被动提示行（ChatBox）', () => {
   it('首尾帧模式 → 不显示（首帧挂图片也不显示）', async () => {
     await renderChatBox();
     await act(async () => { buttonByLabel('AI 视频').click(); });
-    await act(async () => { buttonByLabel('全能参考').click(); });
+    await act(async () => { buttonByLabel('文生视频').click(); });
     await act(async () => { buttonByLabel('首尾帧').click(); });
     // 首帧槽位经「首帧 → 从资产中选择」注入图片
     await act(async () => { buttonByLabel('首帧').click(); });

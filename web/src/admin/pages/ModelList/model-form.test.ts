@@ -660,13 +660,13 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
     const features = {
       task_types: {
         first_frame: { allowed_ratios: ['16:9', '9:16'] },
-        prolong: { allowed_ratios: 'not-an-array' },
+        extend: { allowed_ratios: 'not-an-array' },
       },
     };
     const ratios = pickTaskTypeRatios(features);
     expect(ratios.first_frame).toEqual(['16:9', '9:16']);
-    expect(ratios.default).toEqual([]);
-    expect(ratios.prolong).toEqual([]);
+    expect(ratios.text2video).toEqual([]);
+    expect(ratios.extend).toEqual([]);
   });
 
   it('写回只动 allowed_ratios：其它子键与未知任务类型原样保留', () => {
@@ -674,14 +674,22 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
       first_frame: { allowed_ratios: ['1:1'], allowed_durations: [5, 10] },
       custom_type: { allowed_ratios: ['4:3'] },
     };
-    expect(buildTaskTypes(base, { first_frame: ['16:9'] })).toEqual({
+    expect(buildTaskTypes(base, { first_frame: ['16:9'] }, { first_frame: true })).toEqual({
       first_frame: { allowed_ratios: ['16:9'], allowed_durations: [5, 10] },
       custom_type: { allowed_ratios: ['4:3'] },
     });
   });
 
-  it('清空某任务类型的比例 → 该键被移除（而不是留下空数组让约束形同虚设）', () => {
-    expect(buildTaskTypes({ default: { allowed_ratios: ['1:1'] } }, { default: [] })).toEqual({});
+  it('取消勾选某模式 → 该键被移除（键不在 = 该模式不开放）', () => {
+    expect(
+      buildTaskTypes({ text2video: { allowed_ratios: ['1:1'] } }, { text2video: [] }, {}),
+    ).toEqual({});
+  });
+
+  it('勾选但比例留空 → 保留空对象（键在 = 开放且无额外约束）', () => {
+    expect(
+      buildTaskTypes({}, { text2video: [] }, { text2video: true }),
+    ).toEqual({ text2video: {} });
   });
 });
 

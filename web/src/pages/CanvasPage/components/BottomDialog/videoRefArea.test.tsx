@@ -59,6 +59,13 @@ const baseFeatures = {
   first_frame: true,
   last_frame: true,
   first_last_frame: true,
+  task_types: {
+    text2video: {},
+    omni: {},
+    image_reference: {},
+    first_frame: {},
+    first_last_frame: {},
+  },
   audio: false,
 };
 
@@ -118,7 +125,7 @@ const handlers = {
 
 interface RenderOptions {
   mediaRefs?: VideoMediaRefs;
-  mode?: 'all' | 'keyframe' | 'prompt';
+  mode?: 'omni' | 'first_last_frame' | 'text2video';
   status?: 'draft' | 'generating' | 'failed' | 'cancelled';
 }
 
@@ -191,7 +198,7 @@ afterEach(async () => {
 
 describe('IKDMQS 草稿绑定模式渲染', () => {
   it('首尾帧模式恢复首帧和尾帧，普通参考入口与本地上传不显示', async () => {
-    await renderDialog({ mode: 'keyframe', mediaRefs: {
+    await renderDialog({ mode: 'first_last_frame', mediaRefs: {
       reference: [], first: ref('f1'), last: ref('f2'),
     } });
     // IKFCKQ：共享缩略图角色徽标（首帧/尾帧按角色标识，不参与数字编号）
@@ -205,14 +212,14 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
 
   it('全能参考显示图片和视频缩略图，不显示普通参考角色徽标', async () => {
     // IKFC1T：dock 默认改为文生视频，本套用例显式回到全能参考场景
-    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1'), ref('v1', 'video')] } });
+    await renderDialog({ mode: 'omni', mediaRefs: { reference: [ref('m1'), ref('v1', 'video')] } });
     expect(mountNode.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2);
     expect(mountNode.querySelector('[data-role="reference"]')).toBeNull();
     expect(menuItem('全能参考')).toBeTruthy();
   });
 
   it('统一草稿绑定：普通参考添加入口 = 附件操作条两 pill 直达（IKGB7W，栏尾旧「+」退役，无角色库项，无上传）', async () => {
-    await renderDialog({ mode: 'all' });
+    await renderDialog({ mode: 'omni' });
     expect(menuItem('全能参考')).toBeTruthy();
     // IKGB7W：栏尾旧「+」（RefSourceMenu 普通变体）退役，添加入口 = 操作条「+ 参考」「资产库」
     const legacyEntries = [...mountNode.querySelectorAll('button')].filter(
@@ -235,7 +242,7 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
 
 describe('IKDMQS 角色槽能力约束', () => {
   it('切换首尾帧模式后，空首帧和尾帧入口同时显示（统一入口具名槽位）', async () => {
-    await renderDialog({ mode: 'all', mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'omni', mediaRefs: { reference: [] } });
     await act(async () => { menuItem('全能参考')!.click(); });
     await act(async () => { menuItem('首尾帧')!.click(); });
     expect(slotButton('添加首帧（从资产中选择 / 从节点添加素材）')).toBeTruthy();
@@ -244,7 +251,7 @@ describe('IKDMQS 角色槽能力约束', () => {
 
   it('无首帧能力时首帧入口隐藏，尾帧空槽仍显示', async () => {
     fetchGenerationModels.mockResolvedValue([noFrameModel]);
-    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'first_last_frame', mediaRefs: { reference: [] } });
     expect(slotButton('添加首帧（从资产中选择 / 从节点添加素材）')).toBeUndefined();
     expect(slotButton('添加尾帧（从资产中选择 / 从节点添加素材）')).toBeTruthy();
   });
@@ -252,7 +259,7 @@ describe('IKDMQS 角色槽能力约束', () => {
 
 describe('IKDMQS 角色显式指定与移除', () => {
   it('首帧槽「从节点添加素材」按首帧角色发起；普通参考经操作条按 reference 角色与模式类型边界分派', async () => {
-    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'first_last_frame', mediaRefs: { reference: [] } });
     await act(async () => { slotButton('添加首帧（从资产中选择 / 从节点添加素材）')!.click(); });
     await act(async () => { menuItem('从节点添加素材')!.click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('image', 'first');
@@ -262,22 +269,21 @@ describe('IKDMQS 角色显式指定与移除', () => {
     await act(async () => { menuItem('全能参考')!.click(); });
     await act(async () => { pickCanvas().click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('video', 'reference');
-    // 全能 → 图生视频：先点收起按钮（显示当前模式名）展开下拉，再点选项
     await act(async () => { menuItem('全能参考')!.click(); });
     await act(async () => { menuItem('图生视频')!.click(); });
     await act(async () => { pickCanvas().click(); });
-    expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('image', 'reference');
+    expect(handlers.onPickFromCanvas).toHaveBeenLastCalledWith('image', 'first');
   });
 
   it('来源菜单携带槽位角色：资产入口按目标槽位发起（首帧槽仅图片）', async () => {
-    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'first_last_frame', mediaRefs: { reference: [] } });
     await act(async () => { slotButton('添加首帧（从资产中选择 / 从节点添加素材）')!.click(); });
     await act(async () => { menuItem('从资产中选择')!.click(); });
     expect(handlers.onPickFromAssets).toHaveBeenCalledWith('image', 'first');
   });
 
   it('移除参考回调携带来源节点 id（父级断开连线）', async () => {
-    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1') } });
+    await renderDialog({ mode: 'first_last_frame', mediaRefs: { reference: [], first: ref('f1') } });
     // IKFCKQ：× 为共享缩略图按钮（title=移除），走既有断开连线回调
     const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')!;
     await act(async () => { removeBtn.click(); });
@@ -297,7 +303,7 @@ describe('IKDMQS 组合冲突与只读', () => {
   });
 
   it('生成中只读：参考可见但无添加/移除/@ 入口，发送禁用并提示', async () => {
-    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
+    await renderDialog({ mode: 'omni', mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
     expect(mountNode.querySelector('[data-testid="dock-video-ref"]')).toBeTruthy();
     expect(mountNode.querySelector('button[title="移除"]')).toBeNull();
     expect(mountNode.querySelector('button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')).toBeNull();
@@ -312,7 +318,7 @@ describe('IKDMQS 组合冲突与只读', () => {
   });
 
   it('完整首尾帧不提示冲突，按首尾帧模式发送', async () => {
-    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
+    await renderDialog({ mode: 'first_last_frame', mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
     expect(mountNode.textContent).not.toContain('不能混用');
     await typePrompt('首尾帧驱动视频');
     expect(sendButton().disabled).toBe(false);
@@ -320,7 +326,7 @@ describe('IKDMQS 组合冲突与只读', () => {
     expect(handlers.onSend).toHaveBeenCalledTimes(1);
     const [, opts] = handlers.onSend.mock.calls[0]!;
     expect(opts.modelId).toBe('m-full');
-    expect(opts.mode).toBe('keyframe');
+    expect(opts.mode).toBe('first_last_frame');
   });
 });
 
@@ -328,7 +334,7 @@ describe('IKDMQS 组合冲突与只读', () => {
    @ 按钮记忆光标插入 / material 项移除草稿参考 / 音频时长透传预览 */
 describe('IKFCKQ 共享缩略图接入', () => {
   it('普通参考按类型独立编号（图片N/视频N/音频N 圆钮仅数字），媒体形态按 kind 渲染', async () => {
-    await renderDialog({ mode: 'all', mediaRefs: {
+    await renderDialog({ mode: 'omni', mediaRefs: {
       reference: [ref('m1'), ref('a1', 'audio'), ref('v1', 'video'), ref('m2')],
     } });
     const thumbs = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"]')];
@@ -344,14 +350,14 @@ describe('IKFCKQ 共享缩略图接入', () => {
   });
 
   it('缩略图 @ 按钮走 insertRefAtPending 记忆光标路径（媒体身份 asset_ref）', async () => {
-    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] } });
+    await renderDialog({ mode: 'omni', mediaRefs: { reference: [ref('m1')] } });
     const atBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')!;
     await act(async () => { atBtn.click(); });
     expect(editorPendingCalls).toEqual([{ kind: 'asset_ref', id: 'a-m1' }]);
   });
 
   it('首尾帧模式：帧槽 @ 按钮同样开放，角色徽标不参与数字编号', async () => {
-    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1') } });
+    await renderDialog({ mode: 'first_last_frame', mediaRefs: { reference: [], first: ref('f1') } });
     const thumb = mountNode.querySelector('[data-testid="dock-video-ref"]')!;
     expect(thumb.querySelector('[data-testid="ref-thumb-badge"]')!.textContent).toBe('首帧');
     const atBtn = thumb.querySelector<HTMLButtonElement>('button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')!;
@@ -360,7 +366,7 @@ describe('IKFCKQ 共享缩略图接入', () => {
   });
 
   it('角色库 material 项：× 走移除 material 回调（操作草稿 data，非断连线）', async () => {
-    await renderDialog({ mode: 'all', mediaRefs: {
+    await renderDialog({ mode: 'omni', mediaRefs: {
       reference: [{ ...ref('asset-x1'), assetId: 'asset-x1', materialId: 'asset-x1' }],
     } });
     const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')!;
@@ -376,30 +382,30 @@ describe('IKFCKQ 共享缩略图接入', () => {
 describe('IKJ794 全能参考被动提示行', () => {
   it('Seedance 2.5 + 全能参考 + 挂参考视频 → 显示提示', async () => {
     fetchGenerationModels.mockResolvedValue([adaptiveModel]);
-    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('v1', 'video'), ref('m1')] } });
+    await renderDialog({ mode: 'omni', mediaRefs: { reference: [ref('v1', 'video'), ref('m1')] } });
     expect(mountNode.textContent).toContain('提示词若涉及修改、替换或延长原视频，输出比例与时长将自动跟随参考视频');
   });
 
   it('首尾帧模式 → 不显示', async () => {
     fetchGenerationModels.mockResolvedValue([adaptiveModel]);
-    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
+    await renderDialog({ mode: 'first_last_frame', mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
     expect(mountNode.textContent).not.toContain('自动跟随参考视频');
   });
 
   it('Seedance 2.0 系列（比例表无 adaptive）→ 不显示', async () => {
-    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('v1', 'video')] } });
+    await renderDialog({ mode: 'omni', mediaRefs: { reference: [ref('v1', 'video')] } });
     expect(mountNode.textContent).not.toContain('自动跟随参考视频');
   });
 
   it('全能参考 + 2.5 但只挂图片（未挂视频）→ 不显示', async () => {
     fetchGenerationModels.mockResolvedValue([adaptiveModel]);
-    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1'), ref('m2')] } });
+    await renderDialog({ mode: 'omni', mediaRefs: { reference: [ref('m1'), ref('m2')] } });
     expect(mountNode.textContent).not.toContain('自动跟随参考视频');
   });
 
   it('比例选项 adaptive 档显示 auto，选中后状态栏与提交取值不变（仍为 adaptive）', async () => {
     fetchGenerationModels.mockResolvedValue([adaptiveModel]);
-    await renderDialog({ mode: 'all', mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'omni', mediaRefs: { reference: [] } });
     // 展开配置面板（状态栏按钮含当前选中档显示名；2.5 默认选中 adaptive，显示 auto）
     const configBtn = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('auto'))!;
     await act(async () => { configBtn.click(); });

@@ -139,10 +139,10 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
-    @DisplayName("IKJ79A 编辑单：2.5+参考视频+edit → omni=edit 且 ratio=adaptive、duration=-1（强制跟随）")
-    void seedance25EditTaskForcesAdaptiveAndAutoDuration() throws Exception {
+    @DisplayName("IKK1T4 编辑单：edit → omni=edit，出站 ratio/duration 原样透传（不再静默改写）")
+    void seedance25EditTaskKeepsUserRatioAndDuration() throws Exception {
         VideoSubmitInput input = new VideoSubmitInput(
-                "doubao-seedance-2-5-260628", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
+                "doubao-seedance-2-5-260628", "把杯子换成红色", -1.0, "720p", "adaptive", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
                 null, false, "edit");
 
@@ -159,19 +159,18 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
-    @DisplayName("IKJ79A 延长单：prolong → omni=extend 且 ratio=adaptive、duration 透传用户所选")
-    void seedance25ProlongTaskLocksRatioOnlyAndKeepsUserDuration() throws Exception {
+    @DisplayName("IKK1T4 延长单：extend → omni=extend，ratio/duration 均原样透传")
+    void seedance25ProlongTaskKeepsUserRatioAndDuration() throws Exception {
         VideoSubmitInput input = new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "把视频向后延长", 12.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null, false, "prolong");
+                null, false, "extend");
 
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
 
         JsonNode body = JSON.readTree(lastBody.get());
         assertThat(body.get("metadata").get("omni_reference_task_type").asText()).isEqualTo("extend");
-        assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("adaptive");
-        // 官方 extend 只锁比例不锁时长：duration 透传用户所选（含默认档）
+        assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("16:9");
         assertThat(body.get("duration").asDouble()).isEqualTo(12.0);
         assertThat(body.get("metadata").get("duration").asDouble()).isEqualTo(12.0);
     }
@@ -196,38 +195,35 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
-    @DisplayName("IKJ79A 存量快照：无 video_task_type（null）→ 按 default → reference，原样透传")
-    void seedance25LegacySnapshotWithoutTaskTypeFallsBackToReference() throws Exception {
-        // 9 参兼容构造器 = 快照未携带 video_task_type 的存量任务
-        VideoSubmitInput input = new VideoSubmitInput(
+    @DisplayName("IKK1T4 存量快照：无能力位冻结 → 不下发 omni；位为 true 时按模式下发")
+    void legacySnapshotWithoutCapabilityFlagSendsNoOmniTaskType() throws Exception {
+        VideoSubmitInput legacy = new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
                 null);
 
-        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", legacy);
 
         JsonNode body = JSON.readTree(lastBody.get());
-        assertThat(body.get("metadata").get("omni_reference_task_type").asText()).isEqualTo("reference");
+        assertThat(body.get("metadata").has("omni_reference_task_type")).isFalse();
         assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("16:9");
         assertThat(body.get("duration").asDouble()).isEqualTo(5.0);
 
-        // 非法值同口径按 default（frozenVideoTaskTypeOf 语义，不重算）
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null, false, "banana"));
+                null, false, "banana", true));
         assertThat(JSON.readTree(lastBody.get()).get("metadata").get("omni_reference_task_type").asText())
                 .isEqualTo("reference");
     }
 
     @Test
-    @DisplayName("IKJ79A 边界：2.0 系列与首尾帧/无参考视频均不下发 omni、原值不动")
-    void omniTaskTypeOnlyForSeedance25WithVideoReference() throws Exception {
-        // 2.0 系列：不下发该参数、行为不变（官方允许 2.0 编辑任务指定比例）
+    @DisplayName("IKK1T4 边界：能力位 false 与首尾帧/无参考视频均不下发 omni、原值不动")
+    void omniTaskTypeGatedByCapabilityFlagAndVideoReference() throws Exception {
         new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-0-260128", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
-                null, false, "edit"));
+                null, false, "edit", false));
         JsonNode seedance20 = JSON.readTree(lastBody.get());
         assertThat(seedance20.get("metadata").has("omni_reference_task_type")).isFalse();
         assertThat(seedance20.get("duration").asDouble()).isEqualTo(5.0);

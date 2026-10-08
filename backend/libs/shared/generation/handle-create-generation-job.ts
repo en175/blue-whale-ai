@@ -34,13 +34,16 @@ import {
   errorCodeToNumeric,
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
-  resolveVideoTaskType,
-  taskTypeAllowedRatios,
+  resolveVideoMode,
+  normalizeVideoMode,
+  frozenVideoModeOf,
+  modeAllowedRatios,
+  FROZEN_VIDEO_MODE_KEY,
   ERROR_TASK_TYPE_PARAM_CONSTRAINT,
   TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
-  hasTaskTypeConstraint,
+  hasModeConstraint,
   resolveOutputPixels,
-  type VideoTaskType,
+  type VideoMode,
   videoRefLabel,
   buildReferenceMarkerLabels,
   mediaMentionSchema,
@@ -93,6 +96,7 @@ import {
 import type { BillingHold } from "@lib/shared/billing/billing-hold.js";
 import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
 import type { BillingQuote } from "@lib/shared/billing/billing-quote.js";
+import { DURATION_BASIS_KEY, OMNI_TASK_TYPE_ALLOWED_KEY } from "@lib/shared/billing/billing-specs.js";
 import { quoteRevisionOf } from "./handle-quote-generation-job.js";
 
 import {
@@ -138,6 +142,7 @@ export interface GenerationParameters {
   /** IKIZQ7：样片模式增量参数（契约 video-sample-mode.ts）。undefined/false = 普通视频语义；
    *  字面 true 时须为 video + 480p + 单输出且能力行已声明 features.sample_mode（默认关闭）。 */
   sample_mode?: unknown;
+  mode?: unknown;
 }
 
 export interface CreateGenerationJobBody {
@@ -555,8 +560,8 @@ function validateVideo(
       const hasFrame = parsed.items.some(
         (r) => r.role === "first_frame" || r.role === "last_frame",
       );
-      const frameTaskType = hasFrame ? resolveVideoTaskType(parsed.items, "") : undefined;
-      const allowedRatios = taskTypeAllowedRatios(features.task_types, frameTaskType);
+      const frameMode = hasFrame ? resolveVideoMode(parsed.items, "") : undefined;
+      const allowedRatios = modeAllowedRatios(features.task_types, frameMode);
       if (allowedRatios) {
         // 走到这里 aspect_ratio 一定是合法字符串：validateCommon 对非音频类型的
         // 缺失/非法比例已经 400 了（见上方 `aspect_ratio 无效`）。所以这里**不写**
@@ -565,7 +570,7 @@ function validateVideo(
         if (!allowedRatios.includes(ratio)) {
           return {
             code: ERROR_INVALID_INPUT,
-            message: `当前任务类型（${frameTaskType}）不支持 比例 ${ratio}，可用：${allowedRatios.join(" / ")}`,
+            message: `当前模式（${frameMode}）不支持 比例 ${ratio}，可用：${allowedRatios.join(" / ")}`,
           };
         }
       }
@@ -696,7 +701,7 @@ interface ComposeInputContext {
   capability?: ModelCapabilityView;
   /** IKJ795：视频任务类型（调用方单次判定的结果）——冻结进 input 快照（video_task_type），
    *  建任务与报价走同一 composeInput，两边的 specs 才不会漂（「预览价 = 实扣价」不变式）。 */
-  videoTaskType?: VideoTaskType;
+  videoMode?: VideoMode;
 }
 
 interface GenerationTypeStrategy {
@@ -755,7 +760,7 @@ const videoStrategy: GenerationTypeStrategy = {
     textAttachments,
     referenceAssetIds,
     capability,
-    videoTaskType,
+    videoMode,
   }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
@@ -767,12 +772,16 @@ const videoStrategy: GenerationTypeStrategy = {
     // IKJ795：任务类型判定结果冻结进输入快照——执行层（worker 出站传参与强制）与报价链路
     // 读这份字段，不再各自重算（两端不漂移）。存量快照无该字段由消费侧按 default 处理
     // （frozenVideoTaskTypeOf），不重算历史。视频恒有判定结果（resolveVideoTaskType 至少回 default）。
-    if (videoTaskType !== undefined) input.video_task_type = videoTaskType;
+    if (videoMode !== undefined) input[FROZEN_VIDEO_MODE_KEY] = videoMode;
     // IKG0LP：视频带音频——能力位允许时冻结用户选择（缺省 true，不支持则恒 false）；
     // 能力位不允许（false/未配）时不写该字段，worker 不下发，维持上游默认。
     // 契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md
     if (capability?.features?.audio === true) {
       input.generate_audio = params.generate_audio !== false;
+    }
+    if (capability?.features) {
+      input[OMNI_TASK_TYPE_ALLOWED_KEY] =
+        capability.features.omni_reference_task_type === true;
     }
     // IKHBDO：参考素材上限（图/视频/音频数量 + 总时长）从能力行冻结进快照——
     // worker 不含任何模型知识，执行期只读这份配置（对齐上面 generate_audio 的冻结口径）。
@@ -889,10 +898,10 @@ const strategies: Record<GenerationType, GenerationTypeStrategy> = {
  */
 export function applyEditSourceDurationBasis(
   input: Record<string, unknown>,
-  prompt: string,
+  mode: VideoMode,
   taskTypes: unknown,
 ): boolean {
-  if (!hasTaskTypeConstraint(taskTypes, "edit")) return false;
+  if (!hasModeConstraint(taskTypes, "edit")) return false;
   // 两处调用点的 input.references 都出自 parseReferences（role/type 恒为字符串），可直接窄化。
   const refs = Array.isArray(input.references)
     ? (input.references as ReadonlyArray<{
@@ -901,7 +910,7 @@ export function applyEditSourceDurationBasis(
         duration?: unknown;
       }>)
     : [];
-  if (resolveVideoTaskType(refs, prompt) !== "edit") return false;
+  if (mode !== "edit") return false;
   let maxSeconds: number | null = null;
   for (const ref of refs) {
     if (ref.type !== "video") continue;
@@ -912,7 +921,7 @@ export function applyEditSourceDurationBasis(
     maxSeconds = Math.max(maxSeconds ?? 0, Math.floor(seconds));
   }
   if (maxSeconds === null) return false;
-  input.duration = maxSeconds;
+  input[DURATION_BASIS_KEY] = maxSeconds;
   return true;
 }
 
@@ -962,9 +971,10 @@ export function projectQuoteInput(
   // IKJ795：视频报价与建任务同源判定任务类型（同函数同输入，结果一致），随 composeInput
   // 冻结进投影——specs 与 Hold 同键，「预览价 = 实扣价」不变式不受快照新字段影响。
   // 报价侧不做编辑/延长拒单（只算不扣，建任务入口自会 4xx）。
-  const quoteVideoTaskType =
+  const quoteVideoMode =
     type === "video"
-      ? resolveVideoTaskType(
+      ? normalizeVideoMode(params.mode) ??
+        resolveVideoMode(
           (() => {
             const parsed = parseReferences(body.references);
             return parsed.kind === "ok" ? parsed.items : [];
@@ -982,7 +992,7 @@ export function projectQuoteInput(
     textAttachments: [],
     referenceAssetIds: referenceAssets.ok ? referenceAssets.value.referenceAssetIds : [],
     ...(capability ? { capability } : {}),
-    ...(quoteVideoTaskType !== undefined ? { videoTaskType: quoteVideoTaskType } : {}),
+    ...(quoteVideoMode !== undefined ? { videoMode: quoteVideoMode } : {}),
   });
   delete input.prompt;
   // 与建任务同口径：输出数也是定价维度（多图按张计价），它在建任务那边同样冻在 input 上。
@@ -1903,13 +1913,12 @@ export async function handleCreateGenerationJob(
   // default 不拦比例、计价按编辑口径改写时长）。判定用主提示词（不含文本附件）；标记转移只把
   // &身份& 换成 @图片N 一类标签（不含意图关键词），转移前后对判定等价。视频恒判定（不依赖
   // size/resolution/duration 携带）——编辑/延长 + 非 adaptive 比例的拒单不能因为没带分辨率档而漏网。
-  let videoTaskType: VideoTaskType | undefined;
+  let videoMode: VideoMode | undefined;
+  let videoRefItems: ReadonlyArray<{ role: string; type: string }> = [];
   if (type === "video") {
     const parsedRefs = parseReferences(effectiveBody.references);
-    videoTaskType = resolveVideoTaskType(
-      parsedRefs.kind === "ok" ? parsedRefs.items : [],
-      promptText,
-    );
+    videoRefItems = parsedRefs.kind === "ok" ? parsedRefs.items : [];
+    videoMode = normalizeVideoMode(params.mode) ?? resolveVideoMode(videoRefItems, promptText);
   }
   // IKE7JP（视频段，随判定迁移到合并后）：仅当请求明确携带尺寸/比例/时长时才校验（缺省由能力
   // 默认值兜底）；视频恒进（aspect_ratio 由 validateCommon 必填）——编辑/延长 + 非 adaptive 的
@@ -1931,7 +1940,7 @@ export async function handleCreateGenerationJob(
           supported_durations: capability.supported_durations,
           task_types: capability.features?.task_types,
         },
-        videoTaskType ? { ...checked, task_type: videoTaskType } : checked,
+        videoMode ? { ...checked, mode: videoMode } : checked,
       );
       if (limitErr) {
         return fail(errorCodeToNumeric(limitErr.code), limitErr.reason, {
@@ -1945,8 +1954,8 @@ export async function handleCreateGenerationJob(
   // 返回 null），而这道约束只关乎比例，不能因缺档位漏网。判定输入读上面冻结的 videoTaskType
   // （不现场重算）；约束按能力行 task_types 配置——未配置该类型（2.0 形态）不拦，官方允许
   // 2.0 编辑任务指定比例。首帧/首尾帧走 validateVideo 既有闸，不在此重复。
-  if (capability && type === "video" && (videoTaskType === "edit" || videoTaskType === "prolong")) {
-    const allowed = taskTypeAllowedRatios(capability.features?.task_types, videoTaskType);
+  if (capability && type === "video" && (videoMode === "edit" || videoMode === "extend")) {
+    const allowed = modeAllowedRatios(capability.features?.task_types, videoMode);
     const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
     if (allowed && !allowed.includes(ratio)) {
       return fail(
@@ -1955,6 +1964,15 @@ export async function handleCreateGenerationJob(
         { code: ERROR_TASK_TYPE_PARAM_CONSTRAINT },
       );
     }
+  }
+  if (
+    type === "video" &&
+    (videoMode === "edit" || videoMode === "extend") &&
+    !videoRefItems.some((item) => item.role === "reference" && item.type === "video")
+  ) {
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "视频编辑模式至少需要 1 段参考视频", {
+      code: ERROR_INVALID_INPUT,
+    });
   }
   // IKE7JP：提交时前置查参考素材存在性/类型——复用 worker resolveInputAssets（归属逻辑单份：
   // 项目直属 ∪ 全局 ∪ project_asset 关联）。缺失/无权访问在接纳当下 400，不拖到 worker 执行期。
@@ -2086,7 +2104,7 @@ export async function handleCreateGenerationJob(
     if (quoteInput !== null) {
       applyEditSourceDurationBasis(
         quoteInput,
-        isStr(params.prompt) ? params.prompt : "",
+        frozenVideoModeOf(quoteInput),
         capability?.features?.task_types,
       );
     }
@@ -2189,7 +2207,7 @@ export async function handleCreateGenerationJob(
     referenceAssetIds,
     // IKG0LP：exactOptionalPropertyTypes 下不能显式传 undefined，按本仓惯例条件展开
     ...(capability ? { capability } : {}),
-    ...(videoTaskType !== undefined ? { videoTaskType } : {}),
+    ...(videoMode !== undefined ? { videoMode } : {}),
   });
   input.expected_output_count = expectedOutputCount;
   // IKIZQ8：样片增量冻结进 input 快照（契约 §1）——Worker 读它走 Draft 提交、
@@ -2203,7 +2221,7 @@ export async function handleCreateGenerationJob(
   // worker 对编辑单的出站时长恒强制 -1、不读该字段。量不到源时长时不改写（详见函数注释）。
   applyEditSourceDurationBasis(
     input,
-    typeof input.prompt === "string" ? input.prompt : "",
+    videoMode ?? "text2video",
     capability?.features?.task_types,
   );
   // IKFM3S §4：文本输入签名冻结进快照——任务成功后前端轮询回写目标 usedInputSignature，

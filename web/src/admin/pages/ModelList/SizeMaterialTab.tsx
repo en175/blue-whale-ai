@@ -97,6 +97,8 @@ interface SizeMaterialTabProps {
   };
   taskTypes: {
     ratios: Record<string, string[]>;
+    enabled: Record<string, boolean>;
+    toggle: (taskType: string) => void;
     draft: Record<string, string>;
     setDraft: (value: Record<string, string>) => void;
     add: (taskType: string) => void;
@@ -493,10 +495,14 @@ export default function SizeMaterialTab({
       {/* ADR-0086：按任务类型的比例约束——原先只能在整个 features 的 JSON 里手写。 */}
       {type === 'video' && (
         <>
-          <h3 style={SECTION}>任务类型比例约束 task_types <Hint>留空 = 该任务类型沿用基础「比例选项」。只编辑 allowed_ratios，行内其它子键原样保留。</Hint></h3>
+          <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。</Hint></h3>
           {TASK_TYPE_KEYS.map((taskType) => (
             <div style={TASK_ROW} key={taskType}>
-              <Badge tone="neutral">{taskType}</Badge>
+              <Checkbox
+                checked={!!taskTypes.enabled[taskType]}
+                onChange={() => taskTypes.toggle(taskType)}
+                label={taskType}
+              />
               <div style={CHIP_LIST}>
                 {(taskTypes.ratios[taskType] ?? []).map((ratio) => (
                   <Chip key={ratio} onClick={() => taskTypes.remove(taskType, ratio)}>

@@ -68,6 +68,7 @@ import {
   parseBananaMaps,
   parseGptMatrix,
   pickTaskTypeRatios,
+  pickTaskTypeEnabled,
   ratiosFromModel,
   readFeature,
   sizesFromModel,
@@ -146,6 +147,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const [featureStrings, setFeatureStrings] = useState(initial ? pickFeatureStrings(initial.features) : {});
   const [taskTypeRatios, setTaskTypeRatios] = useState<Record<string, string[]>>(() =>
     pickTaskTypeRatios(initial?.features),
+  );
+  const [taskTypeEnabled, setTaskTypeEnabled] = useState<Record<string, boolean>>(() =>
+    pickTaskTypeEnabled(initial?.features),
   );
   const [taskTypesBase, setTaskTypesBase] = useState<Record<string, unknown>>(() =>
     readTaskTypesBase(initial?.features),
@@ -402,7 +406,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     } catch {
       extra = {};
     }
-    const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios);
+    const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios, taskTypeEnabled);
     const dimensions = buildVideoDimensions(videoDimensions);
     return {
       type,
@@ -595,6 +599,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
           }}
           taskTypes={{
             ratios: taskTypeRatios,
+            enabled: taskTypeEnabled,
+            toggle: (taskType: string) =>
+              setTaskTypeEnabled((p) => ({ ...p, [taskType]: !p[taskType] })),
             draft: taskRatioDraft,
             setDraft: setTaskRatioDraft,
             add: addTaskRatio,

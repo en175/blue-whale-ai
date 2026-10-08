@@ -48,6 +48,13 @@ const seedance: GenerationModel = {
     last_frame: false,
     first_last_frame: false,
     audio: false,
+    task_types: {
+      text2video: {},
+      omni: {},
+      image_reference: {},
+      first_frame: {},
+      first_last_frame: {},
+    },
   },
   is_default: false,
   version: 1,
@@ -482,7 +489,7 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     // 底部模式选择器依次切：全能参考 → 首尾帧 → 图生视频 → 文生视频
     for (const label of ['全能参考', '首尾帧', '图生视频', '文生视频']) {
       const modeBtn = [...mountNode.querySelectorAll('button')]
-        .find((b) => ['文生视频', '全能参考', '首尾帧', '图生视频'].includes(b.textContent ?? ''));
+        .find((b) => ['文生视频', '全能参考', '图片参考', '首尾帧', '图生视频', '视频编辑', '视频延长'].includes(b.textContent ?? ''));
       await act(async () => { modeBtn!.click(); });
       const option = [...mountNode.querySelectorAll('button')].find((b) => b.textContent === label);
       await act(async () => { option!.click(); });

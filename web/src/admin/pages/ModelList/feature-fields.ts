@@ -34,6 +34,7 @@ export const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelT
   audio_reference: { label: '音频素材参考 audio_reference', types: ['video'] },
   /** IKHBDO：模型是否开放工具调用（web_search 等）。写侧闸门对四种类型都收布尔值。 */
   tools: { label: '工具调用 tools' },
+  omni_reference_task_type: { label: '显式任务类型 omni_reference_task_type', types: ['video'] },
 };
 
 export const FEATURE_NUMBER_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {

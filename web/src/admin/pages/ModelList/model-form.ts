@@ -63,7 +63,7 @@ export const KNOWN_FEATURE_KEYS = [
 ] as const;
 
 /** ADR-0086：按任务类型的比例约束（`features.task_types`）。只有视频任务会带 task_type。 */
-export const TASK_TYPE_KEYS = ['default', 'first_frame', 'first_last_frame', 'edit', 'prolong'] as const;
+export const TASK_TYPE_KEYS = ['text2video', 'omni', 'image_reference', 'first_frame', 'first_last_frame', 'edit', 'extend'] as const;
 export type TaskTypeKey = (typeof TASK_TYPE_KEYS)[number];
 
 export const TYPE_TABS: { key: ModelType; label: string }[] = [
@@ -753,14 +753,29 @@ export function pickTaskTypeRatios(features: Record<string, unknown> | undefined
   return out;
 }
 
+export function pickTaskTypeEnabled(features: Record<string, unknown> | undefined): Record<string, boolean> {
+  const raw = readFeature(features, 'task_types');
+  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out: Record<string, boolean> = {};
+  for (const taskType of TASK_TYPE_KEYS) {
+    out[taskType] = Object.prototype.hasOwnProperty.call(map, taskType);
+  }
+  return out;
+}
+
 /** 表单的 task_types 编辑态 + 原对象 → 提交用的 task_types。
  *  只动 `allowed_ratios`：其它子键、其它任务类型原样保留（整包替换会把它们抹掉）。 */
 export function buildTaskTypes(
   base: Record<string, unknown>,
   ratios: Record<string, string[]>,
+  enabled: Record<string, boolean>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
   for (const taskType of TASK_TYPE_KEYS) {
+    if (!enabled[taskType]) {
+      delete out[taskType];
+      continue;
+    }
     const list = (ratios[taskType] ?? []).map((s) => s.trim()).filter(Boolean);
     const entry = base[taskType];
     const rest =
@@ -769,8 +784,7 @@ export function buildTaskTypes(
         : {};
     delete rest.allowed_ratios;
     if (list.length) out[taskType] = { ...rest, allowed_ratios: list };
-    else if (Object.keys(rest).length) out[taskType] = rest;
-    else delete out[taskType];
+    else out[taskType] = rest;
   }
   return out;
 }

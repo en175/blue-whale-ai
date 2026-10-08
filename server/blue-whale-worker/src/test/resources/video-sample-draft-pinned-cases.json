@@ -460,7 +460,7 @@
   {
     "case_id": "E",
     "mode_zh": "全能参考：视频编辑",
-    "matrix_ref": "IKIZH2 九组矩阵 · E 视频编辑：reference_video + 编辑意图提示词；出站 omni=edit、强制 ratio=adaptive/duration=-1（IKJ79A 按任务类型约束，替代 TEMP FIX）",
+    "matrix_ref": "IKIZH2 九组矩阵 · E 视频编辑：reference_video + 编辑意图提示词；出站 omni=edit，ratio/duration 原样透传（IKK1T4 取消静默改写）",
     "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
     "submit_input": {
       "model": "doubao-seedance-2-5-260628",
@@ -481,11 +481,11 @@
     "expected_submit_body": {
       "model": "doubao-seedance-2-5-260628",
       "prompt": "把视频里的杯子改成红色",
-      "duration": -1.0,
+      "duration": 5.0,
       "response_format": "url",
       "draft": true,
       "metadata": {
-        "duration": -1.0,
+        "duration": 5.0,
         "resolution": "480p",
         "ratio": "adaptive",
         "omni_reference_task_type": "edit",
@@ -542,7 +542,7 @@
           "role": null
         }
       ],
-      "video_task_type": "prolong"
+      "video_task_type": "extend"
     },
     "expected_submit_body": {
       "model": "doubao-seedance-2-5-260628",

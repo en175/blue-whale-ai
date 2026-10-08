@@ -90,9 +90,11 @@ INSERT INTO generation_model_capability (
       'image_reference_max', 1,
       'max_reference_duration_sec', 15,
       'task_types', JSON_OBJECT(
-        'default', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1')),
-        'first_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1')),
-        'first_last_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1'))
+        'text2video', JSON_OBJECT(),
+        'omni', JSON_OBJECT(),
+        'image_reference', JSON_OBJECT(),
+        'first_frame', JSON_OBJECT(),
+        'first_last_frame', JSON_OBJECT()
       )
     ),
     TRUE,
@@ -133,12 +135,15 @@ INSERT INTO generation_model_capability (
       'audio_reference_max', 10,
       'image_reference_max', 30,
       'max_reference_duration_sec', 30,
+      'omni_reference_task_type', TRUE,
       'task_types', JSON_OBJECT(
-        'default', JSON_OBJECT('allowed_ratios', JSON_ARRAY('21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive')),
+        'text2video', JSON_OBJECT(),
+        'omni', JSON_OBJECT(),
+        'image_reference', JSON_OBJECT(),
         'first_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
         'first_last_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
-        'edit', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
-        'prolong', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'))
+        'edit', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'), 'allowed_durations', JSON_ARRAY(-1)),
+        'extend', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'))
       )
     ),
     -- 视频目录 Seedance 2.5 置顶（迁移 20260916150000_48ae4438_video_model_25_first

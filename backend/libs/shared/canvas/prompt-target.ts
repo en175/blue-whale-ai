@@ -1,6 +1,6 @@
 import { extractTextNodeText } from "@lib/core";
 import { BadRequestException } from "@nestjs/common";
-import { promptBindingList, promptMentionSchema, previewSourceSchema, validPromptMentions, type PromptBinding } from "@lib/contracts";
+import { normalizeVideoMode, promptBindingList, promptMentionSchema, previewSourceSchema, validPromptMentions, type PromptBinding } from "@lib/contracts";
 import type { ModelCapabilityView } from "@lib/shared/persistence/model-capability-repo.js";
 
 export interface PromptTargetNode { id: string; type: string; data?: Record<string, unknown> }
@@ -48,13 +48,16 @@ export function validatePlanModel(nodeId: string, bindings: PromptBinding[], cou
 /** Video reference validation uses the existing execution constraints before accepting any edges/job. */
 export function validateVideoPlan(nodeId: string, bindings: PromptBinding[], refs: Array<{ type: string; role: string }>, model: ModelCapabilityView | undefined, mode?: unknown) {
   if (!model) planError(nodeId, bindings, "请选择可用视频模型");
+  const videoMode = normalizeVideoMode(mode);
+  const frameMode = videoMode === "first_frame" || videoMode === "first_last_frame";
   const frames = refs.filter(r => r.role !== "reference");
   const ordinary = refs.filter(r => r.role === "reference");
   if (frames.some(r => r.type !== "image")) planError(nodeId, bindings, "首尾帧仅支持图片");
   if (frames.length && ordinary.length) planError(nodeId, bindings, "首尾帧与普通参考不能混用");
-  if (mode === "keyframe" && ordinary.length) planError(nodeId, bindings, "首尾帧模式不支持普通参考，请调整模式或引用");
-  if ((mode === "all" || mode === "text2video") && frames.length) planError(nodeId, bindings, "当前模式不支持首尾帧，请调整模式或引用");
-  if (mode === "text2video" && ordinary.some(r => r.type !== "image")) planError(nodeId, bindings, "图生视频模式不支持视频或音频参考");
+  if (frameMode && ordinary.length) planError(nodeId, bindings, "首尾帧模式不支持普通参考，请调整模式或引用");
+  if (videoMode && !frameMode && frames.length) planError(nodeId, bindings, "当前模式不支持首尾帧，请调整模式或引用");
+  if (videoMode === "image_reference" && ordinary.some(r => r.type !== "image")) planError(nodeId, bindings, "图片参考模式不支持视频或音频参考");
+  if ((videoMode === "edit" || videoMode === "extend") && !ordinary.some(r => r.type === "video")) planError(nodeId, bindings, "视频编辑模式至少需要 1 段参考视频");
   if (frames.some(r => r.role === "first_frame") && !(model.features.first_frame || model.features.first_last_frame)) planError(nodeId, bindings, "当前模型不支持首帧");
   if (frames.some(r => r.role === "last_frame") && !(model.features.last_frame || model.features.first_last_frame)) planError(nodeId, bindings, "当前模型不支持尾帧");
   validatePlanModel(nodeId, bindings, ordinary.filter(r => r.type === "image").length, model);

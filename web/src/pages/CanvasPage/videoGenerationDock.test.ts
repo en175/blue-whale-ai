@@ -165,7 +165,7 @@ describe('视频 Dock 公开接口', () => {
     const { dock, nodes } = fixture();
     dock.open('video', { nodeId: 'video', preset: { resolution: '480p' } });
     const seed = dock.panel('video').seed;
-    expect(seed?.params).toMatchObject({ mode: 'all', resolution: '480p', sampleMode: true });
+    expect(seed?.params).toMatchObject({ mode: 'omni', resolution: '480p', sampleMode: true });
     dock.open('video', { nodeId: 'video', preset: { resolution: '480p' } });
     expect(dock.panel('video').seed).toBe(seed);
     dock.close('video');

@@ -137,6 +137,13 @@ const apiMocks = vi.hoisted(() => ({
           first_frame: true,
           last_frame: true,
           first_last_frame: true,
+          task_types: {
+            text2video: {},
+            omni: {},
+            image_reference: {},
+            first_frame: {},
+            first_last_frame: {},
+          },
           audio: false,
         },
         version: 1,

@@ -197,6 +197,13 @@ function videoModel(
       first_frame: true,
       last_frame: true,
       first_last_frame: true,
+      task_types: {
+        text2video: {},
+        omni: {},
+        image_reference: {},
+        first_frame: {},
+        first_last_frame: {},
+      },
       audio: false,
       // ADR-0086：seedance-2 系视频参考能力位——测试模型默认支持视频/音频参考，可被用例覆盖
       video_reference: modelId === 'seedance-2',

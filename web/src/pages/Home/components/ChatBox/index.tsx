@@ -1,7 +1,7 @@
 /* ============================================
  * ChatBox 首页对话输入框：模型/技能/附件配置与发送
  * ============================================ */
-import { useState, useRef, useEffect, useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
@@ -10,6 +10,24 @@ import LoginModal from '@/components/LoginModal';
 import RatioIcon from '@/components/RatioIcon';
 import AssetsPickerModal from '@/pages/CanvasPage/components/AssetsPickerModal';
 import { PANEL_REF_MEDIA_TYPES } from '@/pages/CanvasPage/refSourceTypes';
+import {
+  defaultVideoModeFor,
+  enabledVideoModes,
+  nextVideoModeOnRefsChange,
+  resolveVideoMode,
+  videoModeRefsSignature,
+} from '@/pages/CanvasPage/videoModes';
+import type { VideoMediaRef, VideoMediaRefs } from '@/pages/CanvasPage/videoMediaRefs';
+import {
+  VIDEO_MODE_LABEL,
+  configuredVideoModes,
+  effectiveVideoParams,
+  frameSlotCountOf,
+  isFrameMode,
+  lockedDurationOf,
+  lockedRatioOf,
+  type VideoMode,
+} from '@/lib/video-modes';
 import { type AssetRecord } from '@/api/assets';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
@@ -35,13 +53,6 @@ const tabItems = [
   { key: 'agent', label: '视频智能体' },
   { key: 'video', label: 'AI 视频' },
   { key: 'image', label: 'AI 图片' },
-];
-
-/** AI视频 - 模式选项（纯 UI 交互概念，非后端参数） */
-const videoModes = [
-  { key: 'omni', label: '全能参考' },
-  { key: 'firstlast', label: '首尾帧' },
-  { key: 'text2video', label: '图生视频' },
 ];
 
 /** AI视频首尾帧槽位素材项（仅图片；普通参考与槽位互转时复用） */
@@ -118,7 +129,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   // AI视频专属状态（模型/比例/清晰度/时长初始均为空，接口加载完成后由校准 effect 套用模型默认值）
   const [videoModel, setVideoModel] = useState('');
-  const [videoMode, setVideoMode] = useState('omni');
+  const [videoMode, setVideoMode] = useState<VideoMode>('text2video');
   const [aspectRatio, setAspectRatio] = useState('');
   const [resolution, setResolution] = useState('');
   const [duration, setDuration] = useState(0);
@@ -134,7 +145,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     { file?: File; preview: string; type: 'image' | 'video'; assetId?: string | number }[]
   >([]);
   /** 当前是否首尾帧模式（对齐画布：首尾帧为两个独立槽位，各一张图片） */
-  const isKeyframe = videoMode === 'firstlast';
+  const isKeyframe = isFrameMode(videoMode);
   /** 首尾帧模式专用：首帧/尾帧各一张图片。提交按 first→last 拼进 refs，保证顺序兼容画布映射 */
   const [keyframeRefs, setKeyframeRefs] = useState<{
     first?: { file?: File; preview: string; type: 'image'; assetId?: string | number };
@@ -213,10 +224,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   useEffect(() => {
     const m = videoModelList.find((x) => x.model_id === videoModel);
     if (!m) return;
-    // IKFQ5S：首尾帧仅在**支持 adaptive 的模型**（2.5）内置该档；2.0 上游不接受 adaptive
-    // （实测 400 unsupported ratio），走其固定比例档。
-    if (isKeyframe && hasAspectRatio(m.supported_aspect_ratios, 'adaptive')) {
-      setAspectRatio('adaptive');
+    const lockedRatio = lockedRatioOf(m.features, videoMode);
+    if (lockedRatio) {
+      setAspectRatio(lockedRatio);
     } else if (aspectRatioOptions(m.supported_aspect_ratios).length && !hasAspectRatio(m.supported_aspect_ratios, aspectRatio)) {
       setAspectRatio(pickDefaultVideoRatio(m.supported_aspect_ratios, m.default_aspect_ratio));
     }
@@ -237,8 +247,28 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         return Math.min(Math.max(prev, d.min), d.max);
       });
     }
+    const lockedDuration = lockedDurationOf(m.features, videoMode);
+    if (lockedDuration != null) {
+      setDuration(lockedDuration);
+    } else {
+      setDuration((prev) => {
+        if (prev > 0) return prev;
+        const d = m.supported_durations;
+        if (!d) return prev;
+        const base = typeof m.default_duration === 'number' ? m.default_duration : d.min;
+        return Math.min(Math.max(base, d.min), d.max);
+      });
+    }
+    if (!isFrameMode(videoMode)) {
+      const enabled = enabledVideoModes(videoRefsProjection, configuredVideoModes(m.features));
+      const target = resolveVideoMode(defaultVideoModeFor(videoRefsProjection), enabled);
+      if (target && target !== videoMode) {
+        setVideoMode(target);
+        showToast('已根据当前素材切换生成模式');
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoModelList, videoModel, isKeyframe]);
+  }, [videoModelList, videoModel, isKeyframe, videoMode]);
 
   // 并发加载三种能力的模型列表
   useEffect(() => {
@@ -363,17 +393,24 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         showToast('视频模型能力加载中，请稍后重试');
         return;
       }
+      if (videoConfiguredModes.length === 0) {
+        showToast('当前模型未配置视频模式，请更换模型');
+        return;
+      }
       // 后端视频任务 resolution 期望 api_value（如 720p），此处由所选档位 id 换算
       const sizeEntry = selectedVideoModel.supported_sizes.find((s) => s.id === resolution);
+      const handoffParams = effectiveVideoParams(selectedVideoModel.features, videoMode, {
+        aspectRatio,
+        duration,
+      });
       setGenHandoff({
         kind: 'video',
         text,
         modelId: videoModel,
-        aspectRatio,
+        aspectRatio: handoffParams.aspect_ratio,
         resolution: sizeEntry?.api_value ?? sizeEntry?.id ?? resolution,
-        duration,
-        // 首页模式键映射画布模式：首尾帧→keyframe；其余保留原键（omni→all、text2video→text2video）
-        mode: videoMode === 'firstlast' ? 'keyframe' : (videoMode === 'text2video' ? 'text2video' : 'all'),
+        duration: handoffParams.duration,
+        mode: videoMode,
         // IKG0LP：音频选择必须进交接结构，否则跳到画布就丢了
         generateAudio,
         refs: isKeyframe
@@ -572,8 +609,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const currentVideoModel =
     videoModelOptions.find((m) => m.key === videoModel)?.label ?? '';
-  const currentVideoMode =
-    videoModes.find((m) => m.key === videoMode)?.label ?? '';
 
   const isVideoTab = activeTab === 'video';
   const isImageTab = activeTab === 'image';
@@ -595,6 +630,43 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   // AI视频 比例/清晰度/时长范围：取自所选模型能力（接口为唯一数据源）
   const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
+
+  const videoRefsProjection = useMemo<VideoMediaRefs>(() => {
+    const asRef = (
+      item: { preview: string; type: 'image' | 'video'; assetId?: string | number; file?: File },
+      index: number,
+      prefix: string,
+    ): VideoMediaRef => ({
+      nodeId: `${prefix}-${index}`,
+      url: item.preview,
+      name: item.file?.name ?? `${prefix}-${index}`,
+      assetId: String(item.assetId ?? item.file?.name ?? `${prefix}-${index}`),
+      mediaType: item.type,
+    });
+    return {
+      reference: refFiles.map((item, index) => asRef(item, index, 'home-ref')),
+      ...(keyframeRefs.first ? { first: asRef(keyframeRefs.first, 0, 'home-first') } : {}),
+      ...(keyframeRefs.last ? { last: asRef(keyframeRefs.last, 1, 'home-last') } : {}),
+    };
+  }, [refFiles, keyframeRefs]);
+  const videoConfiguredModes = configuredVideoModes(selectedVideoModel?.features);
+  const videoEnabledModes = enabledVideoModes(videoRefsProjection, videoConfiguredModes);
+  const videoModeOptions = videoConfiguredModes.map((key) => ({ key, label: VIDEO_MODE_LABEL[key] }));
+  const currentVideoMode =
+    videoModeOptions.find((m) => m.key === videoMode)?.label ?? VIDEO_MODE_LABEL[videoMode];
+  const videoRatioLocked = lockedRatioOf(selectedVideoModel?.features, videoMode);
+  const videoDurationLocked = lockedDurationOf(selectedVideoModel?.features, videoMode);
+
+  useEffect(() => {
+    if (!selectedVideoModel) return;
+    const next = nextVideoModeOnRefsChange(videoMode, videoRefsProjection, videoConfiguredModes);
+    if (next) {
+      setVideoMode(next);
+      showToast('已根据当前素材切换生成模式');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoModeRefsSignature(videoRefsProjection), videoConfiguredModes.join('|'), selectedVideoModel, videoMode]);
+
   const videoRatioOptions = aspectRatioOptions(selectedVideoModel?.supported_aspect_ratios);
   const videoRatioText = (id: string) =>
     videoRatioLabel(videoRatioOptions.find((ratio) => ratio.id === id)?.label ?? id);
@@ -628,8 +700,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const videoRefImageCount = refFiles.filter((r) => r.type === 'image').length;
   const videoRefVideoCount = refFiles.filter((r) => r.type === 'video').length;
   const videoMaxImages =
-    videoMode === 'firstlast'
-      ? 2
+    frameSlotCountOf(videoMode) > 0
+      ? frameSlotCountOf(videoMode)
       // 能力未加载时用不阻断的宽松兜底（IKHBO 口径），而非能力缺省 1。
       : (selectedVideoModel?.features?.image_reference_max ?? UNRESOLVED_IMAGE_REFERENCE_LIMIT);
   const videoMaxVideos = videoReferenceMaxOf(selectedVideoModel?.features);
@@ -658,42 +730,47 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     && videoRefVideoCount > 0;
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
-  /** 切换 AI视频模式（ADR-0086 对齐画布）：切首尾帧把普通参考里的图片转为首帧/尾帧槽，
-   *  切回全能参考/图生视频把首尾帧槽转回普通参考——素材智能转换，不让用户手动搬。
-   *  首尾帧只收图片：普通参考含视频时拒绝切换（明确提示，不静默丢弃）。 */
-  const handleVideoModeChange = (key: string) => {
+  const handleVideoModeChange = (key: VideoMode) => {
     setShowVideoModeDrop(false);
     if (key === videoMode) return;
-    if (key === 'firstlast') {
+    const slots = frameSlotCountOf(key);
+    if (slots > 0) {
       const videos = refFiles.filter((f) => f.type === 'video');
       if (videos.length > 0) {
         showToast('首尾帧模式仅支持图片素材，请先移除视频参考');
         return;
       }
-      if (refFiles.length > 2) {
-        showToast('首尾帧模式最多 2 张图片（首帧 + 尾帧），请先减少参考');
+      if (refFiles.length > slots) {
+        showToast(`首尾帧模式最多 ${slots} 张图片，请先减少参考`);
         return;
       }
       const images = refFiles.filter((f): f is KeyframeRefItem => f.type === 'image');
       if (images.length > 0) {
-        setKeyframeRefs({ first: images[0], last: images[1] });
+        setKeyframeRefs({ first: images[0], ...(slots === 2 && images[1] ? { last: images[1] } : {}) });
         setRefFiles([]);
       }
-      // IKFQ5S：仅支持 adaptive 的模型才内置该档；2.0 保持用户可选固定比例。
-      const km = videoModelList.find((x) => x.model_id === videoModel);
-      if (hasAspectRatio(km?.supported_aspect_ratios, 'adaptive')) setAspectRatio('adaptive');
-    } else if (videoMode === 'firstlast') {
-      // 切离首尾帧：首帧/尾帧转回普通参考（图片），清空槽位
+    } else if (isFrameMode(videoMode)) {
       const restored = [keyframeRefs.first, keyframeRefs.last].filter(Boolean) as KeyframeRefItem[];
       if (restored.length > 0) setRefFiles((prev) => [...prev, ...restored]);
       setKeyframeRefs({});
-      // 离开首尾帧：adaptive 内置值若新模型比例列表不含，回落模型默认/首个比例。
-      const m = videoModelList.find((x) => x.model_id === videoModel);
-      if (aspectRatio === 'adaptive' && m && !hasAspectRatio(m.supported_aspect_ratios, 'adaptive')) {
-        setAspectRatio(pickDefaultVideoRatio(m.supported_aspect_ratios, m.default_aspect_ratio));
-      }
     }
     setVideoMode(key);
+    const lockedRatio = lockedRatioOf(selectedVideoModel?.features, key);
+    const lockedDuration = lockedDurationOf(selectedVideoModel?.features, key);
+    if (lockedRatio) {
+      setAspectRatio(lockedRatio);
+    } else if (aspectRatio === 'adaptive' && selectedVideoModel && !hasAspectRatio(selectedVideoModel.supported_aspect_ratios, 'adaptive')) {
+      setAspectRatio(pickDefaultVideoRatio(selectedVideoModel.supported_aspect_ratios, selectedVideoModel.default_aspect_ratio));
+    }
+    if (lockedDuration != null) {
+      setDuration(lockedDuration);
+    } else if (duration < 0) {
+      const range = selectedVideoModel?.supported_durations;
+      const base = typeof selectedVideoModel?.default_duration === 'number'
+        ? selectedVideoModel.default_duration
+        : (range?.min ?? 5);
+      setDuration(range ? Math.min(Math.max(base, range.min), range.max) : base);
+    }
   };
 
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1138,10 +1215,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   </button>
                   {showVideoModeDrop && (
                     <div className={styles.dropdownMenuDown}>
-                      {videoModes.map((m) => (
+                      {videoModeOptions.map((m) => (
                         <button
                           key={m.key}
                           className={`${styles.dropdownItem} ${videoMode === m.key ? styles.dropdownItemActive : ''}`}
+                          disabled={!videoEnabledModes.includes(m.key)}
                           onClick={() => handleVideoModeChange(m.key)}
                         >
                           {m.label}
@@ -1152,7 +1230,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 </div>
 
                 {/* 宽高比下拉（ADR-0086：首尾帧任务官方强制 adaptive、比例内置不暴露，整块不渲染） */}
-                {!(isKeyframe && !!hasAspectRatio(selectedVideoModel?.supported_aspect_ratios, 'adaptive')) && (
+                {!videoRatioLocked && (
                   <div className={styles.dropdownWrap} ref={ratioRef}>
                     <button
                       className={styles.paramBtn}
@@ -1209,12 +1287,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <div className={styles.dropdownWrap} ref={durationRef}>
                   <button
                     className={styles.paramBtn}
+                    disabled={videoDurationLocked != null}
                     onClick={() => setShowDurationDrop(!showDurationDrop)}
                   >
-                    <span>⏱ {duration}s</span>
+                    <span>{videoDurationLocked != null ? '⏱ 跟随原视频' : `⏱ ${duration}s`}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showDurationDrop && videoDurationRange && (
+                  {showDurationDrop && videoDurationLocked == null && videoDurationRange && (
                     <div className={`${styles.dropdownMenuDown} ${styles.durationDropdown}`}>
                       <DurationSlider
                         value={duration}
@@ -1663,7 +1742,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               ? ['image']
               : assetsPickerTarget === 'agent'
                 ? ['image', 'video', 'audio']
-                : isKeyframe || videoMode === 'text2video'
+                : isFrameMode(videoMode) || videoMode === 'image_reference'
                   ? ['image']
                   : [...PANEL_REF_MEDIA_TYPES.videoAll.types]
           }

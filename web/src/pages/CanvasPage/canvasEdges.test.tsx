@@ -115,7 +115,7 @@ const apiMocks = vi.hoisted(() => ({
       default_format: null,
       default_aspect_ratio: '1:1',
       default_duration: null,
-      features: {},
+      features: { task_types: { text2video: {}, omni: {}, image_reference: {}, first_frame: {}, first_last_frame: {} } },
       version: 1,
       digest: '',
     },
@@ -692,7 +692,7 @@ describe('IKFCJG 跨来源视频参考提交顺序', () => {
     seedVideoDoc();
     const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: Array<Record<string, string>> };
     Object.assign(doc.nodes.find(n => n.id === 'v1')!.data, {
-      src: '', draft: true, genStatus: 'draft', draftMode: 'all', prompt: '组合图片1和图片2',
+      src: '', draft: true, genStatus: 'draft', draftMode: 'omni', prompt: '组合图片1和图片2',
       draftMaterialRefs: [{ materialId: 'asset-lib1', url: 'http://img/lib.png', name: '角色立绘', mediaType: 'image', role: 'reference' }],
       promptDoc: { version: 1, flat: '组合图片1和图片2', segments: [
         { kind: 'text', text: '组合' }, { kind: 'asset_ref', asset_id: '101', label: '图片1' },
@@ -705,7 +705,7 @@ describe('IKFCJG 跨来源视频参考提交顺序', () => {
     const models = await apiMocks.fetchGenerationModels();
     // 常驻实现（不再 once）：画布页自身也要读模型能力（连线校验/资产接纳），
     // once 队列会被画布的 video/image 能力调用提前吃掉，面板拿不到带能力的位置而误判冲突
-    apiMocks.fetchGenerationModels.mockResolvedValue(models.map(model => ({ ...model, features: { reference_image: true, image_reference_max: 9 } })));
+    apiMocks.fetchGenerationModels.mockResolvedValue(models.map(model => ({ ...model, features: { reference_image: true, image_reference_max: 9, ...{ task_types: { text2video: {}, omni: {}, image_reference: {}, first_frame: {}, first_last_frame: {} } } } })));
     await renderPage();
     await act(async () => flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')));
     await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2));

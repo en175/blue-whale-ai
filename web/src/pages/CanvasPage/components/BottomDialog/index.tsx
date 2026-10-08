@@ -79,23 +79,29 @@ import {
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/lib/video-reference-hints';
 import AtMentionMenu from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import {
-  anchoredOverlayStyle,
-  VIDEO_FOLLOW_MODE_LABEL,
-  VIDEO_FOLLOW_MODE_ORDER,
-  firstEnabledVideoMode,
-  type FollowDialogAnchor,
-  type VideoFollowMode,
-} from '../../followDialog';
+  defaultVideoModeFor,
+  enabledVideoModes,
+  hasVideoReference,
+  nextVideoModeOnRefsChange,
+  normalizeStoredVideoMode,
+  resolveVideoMode,
+  videoModeRefsSignature,
+} from '../../videoModes';
+import {
+  VIDEO_MODE_LABEL,
+  configuredVideoModes,
+  effectiveVideoParams,
+  frameSlotCountOf,
+  isFrameMode,
+  isVideoMode,
+  lockedDurationOf,
+  lockedRatioOf,
+  normalizeVideoMode,
+  type VideoMode,
+} from '@/lib/video-modes';
 import styles from './index.module.css';
-
-/** 模式选项：自由态与跟随态同构四项（IKFC1T 文生视频置首 = 新建默认）；跟随态由 enabledModes 门控 */
-const dockModeOptions = [
-  { key: 'prompt', label: '文生视频' },
-  { key: 'all', label: '全能参考' },
-  { key: 'keyframe', label: '首尾帧' },
-  { key: 'text2video', label: '图生视频' },
-];
 
 /** 视频生成参数（发送时传给画布创建生成任务） */
 export interface VideoGenOptions {
@@ -106,7 +112,6 @@ export interface VideoGenOptions {
   resolution: string;
   /** 时长（秒） */
   duration: number;
-  /** 参考模式：prompt 文生视频 / all 全能参考 / keyframe 首尾帧 / text2video 图生视频（IKFC1T） */
   mode: string;
   /** IKG0LP：是否带音频（用户选择，缺省 true）。仅模型能力位 features.audio 为 true 时才提供该选择，
    *  后端按能力位决定是否透传给上游。契约见 docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md */
@@ -210,8 +215,6 @@ interface BottomDialogProps extends RefStripOrderProps {
   followAnchor?: FollowDialogAnchor | null;
   /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
   dragHidden?: boolean;
-  /** 跟随节点时按已连素材给出可高亮模式；缺省不限制 */
-  enabledModes?: VideoFollowMode[];
 }
 
 /** 首页带入的初始生成参数（resolution 传 api_value 如 720p，模型列表加载后反查档位 id；
@@ -225,7 +228,6 @@ export interface VideoGenSeedParams {
   resolution?: string;
   /** 时长（秒） */
   duration?: number;
-  /** 参考模式：prompt 文生视频 / all 全能参考 / keyframe 首尾帧 / text2video 图生视频（IKFC1T） */
   mode?: string;
   /** IKG0LP：是否带音频（首页带入，缺省 true） */
   generateAudio?: boolean;
@@ -233,7 +235,7 @@ export interface VideoGenSeedParams {
   sampleMode?: boolean;
 }
 
-export default function BottomDialog({ projectId, onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, dragHidden, enabledModes, targetNodeId }: BottomDialogProps) {
+export default function BottomDialog({ projectId, onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, dragHidden, targetNodeId }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -249,15 +251,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQG 契约：附件可单独驱动生成）；
    *  全部有效文本为空时沿用「提示词必填」 */
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
-  const followModeOptions = VIDEO_FOLLOW_MODE_ORDER.map((key) => ({
-    key,
-    label: VIDEO_FOLLOW_MODE_LABEL[key],
-  }));
-  const modeOptions = enabledModes ? followModeOptions : dockModeOptions;
-  const [selectedMode, setSelectedMode] = useState(
-    initialParams?.mode && modeOptions.some((item) => item.key === initialParams.mode)
-      ? initialParams.mode
-      : modeOptions[0].key,
+  const [selectedMode, setSelectedMode] = useState<VideoMode>(
+    () => normalizeVideoMode(initialParams?.mode) ?? 'text2video',
   );
   const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -319,18 +314,23 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       })();
   /** 报价带提示词（IKJ79D）：后端据此判编辑单（时长口径标记输入）。声明前移供 quoteParameters 引用（值防抖同步见下方 effect）。 */
   const [quotePrompt, setQuotePrompt] = useState('');
+  const wireParams = effectiveVideoParams(currentModel?.features, selectedMode, {
+    aspectRatio: selectedRatio,
+    duration,
+  });
   /** 报价定价维度（IKIZQB 起 sample_mode 也是定价输入之一）：徽标与面板内样片报价查询共用
    *  同一份参数对象 —— 同一个 queryKey 才会命中同一份缓存，两个 useQuery 只发一次请求。 */
   const quoteParameters = useMemo(() => ({
     model_id: currentModel?.model_id ?? '',
     ...(quoteResolution ? { resolution: quoteResolution } : {}),
-    ...(selectedRatio ? { aspect_ratio: selectedRatio } : {}),
-    ...(duration ? { duration } : {}),
+    ...(wireParams.aspect_ratio ? { aspect_ratio: wireParams.aspect_ratio } : {}),
+    ...(wireParams.duration ? { duration: wireParams.duration } : {}),
     generate_audio: generateAudio,
     ...(sampleMode ? { sample_mode: true as const } : {}),
     // IKJ79D：防抖后的提示词（编辑单时长口径判定输入），空串不带键
     ...(quotePrompt ? { prompt: quotePrompt } : {}),
-  }), [currentModel?.model_id, quoteResolution, selectedRatio, duration, generateAudio, sampleMode, quotePrompt]);
+    mode: selectedMode,
+  }), [currentModel?.model_id, quoteResolution, wireParams.aspect_ratio, wireParams.duration, generateAudio, sampleMode, quotePrompt, selectedMode]);
 
   /** 生成中只读（IKDMQS）：任务执行期间目标参数与输入冻结，保留查看与画布上的取消入口 */
   const readOnly = sending || videoDraftBinding.submitting || videoDraftBinding.status === 'generating';
@@ -339,15 +339,26 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     videoDraftBinding.onParamsChange(patch);
   };
 
+  const configuredModes = useMemo(
+    () => configuredVideoModes(currentModel?.features),
+    [currentModel],
+  );
+  const enabledModes = useMemo(
+    () => enabledVideoModes(videoMediaRefs, configuredModes),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [videoModeRefsSignature(videoMediaRefs), configuredModes],
+  );
+  const modeOptions = configuredModes.map((key) => ({ key, label: VIDEO_MODE_LABEL[key] }));
+
   useEffect(() => {
-    if (!enabledModes || enabledModes.length === 0) return;
-    if (enabledModes.includes(selectedMode as VideoFollowMode)) return;
-    const next = firstEnabledVideoMode(enabledModes);
+    if (!modelsLoaded || !currentModel) return;
+    const next = nextVideoModeOnRefsChange(selectedMode, videoMediaRefs, configuredModes);
+    if (!next || next === selectedMode) return;
     setSelectedMode(next);
     syncDraftParams({ mode: next });
     onToast?.('warn', '已根据当前素材切换生成模式');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabledModes, selectedMode]);
+  }, [videoModeRefsSignature(videoMediaRefs), configuredModes, selectedMode, modelsLoaded, currentModel]);
   /** 当前模型与视频参考相关的能力位 + 分类上限（ADR-0086；模型未加载时为 null，约束入口按不可用处理） */
   const caps: VideoRefCapabilities | null = currentModel
     ? {
@@ -371,16 +382,28 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         currentModel?.features,
         videoMediaRefs.reference.map((r) => ({ type: r.mediaType, duration: r.duration })),
         'video',
-      ) ?? videoRefConflict(videoMediaRefs, caps))
+      ) ?? videoRefConflict(videoMediaRefs, caps, selectedMode))
     : null);
-  const modeConflict = selectedMode === 'prompt' && hasAnyMediaRef(videoMediaRefs)
-    ? '文生视频模式不支持媒体参考，请移除参考或切换模式'
-    : selectedMode === 'keyframe' && videoMediaRefs.reference.length > 0
-    ? '首尾帧模式不支持普通参考，请调整模式或引用'
-    : selectedMode === 'text2video' && videoMediaRefs.reference.some(r => r.mediaType !== 'image')
-      ? '图生视频模式不支持视频或音频参考'
-      : selectedMode !== 'keyframe' && (videoMediaRefs.first || videoMediaRefs.last)
-        ? '当前模式不支持首尾帧，请调整模式或引用' : null;
+  const modeConflict = (() => {
+    const ordinary = videoMediaRefs.reference;
+    const hasFrames = Boolean(videoMediaRefs.first || videoMediaRefs.last);
+    if (selectedMode === 'text2video' && hasAnyMediaRef(videoMediaRefs)) {
+      return '文生视频模式不支持媒体参考，请移除参考或切换模式';
+    }
+    if (isFrameMode(selectedMode)) {
+      return ordinary.length > 0 ? '首尾帧模式不支持普通参考，请调整模式或引用' : null;
+    }
+    if (hasFrames) return '当前模式不支持首尾帧，请调整模式或引用';
+    if (selectedMode === 'image_reference' && ordinary.some((r) => r.mediaType !== 'image')) {
+      return '图片参考模式不支持视频或音频参考';
+    }
+    if (selectedMode === 'edit' || selectedMode === 'extend') {
+      return hasVideoReference(videoMediaRefs)
+        ? null
+        : `${VIDEO_MODE_LABEL[selectedMode]}模式至少需要 1 段参考视频`;
+    }
+    return null;
+  })();
   const inputConflict = referenceConflict ?? modeConflict;
   // planReferenceError 已自带「方案索引 #N …」，再套 planIndices 会变成「方案索引 #1：方案索引 #1 …」
   const conflict = inputConflict && planIndices && !inputConflict.startsWith('方案索引')
@@ -392,21 +415,34 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const canAddLast = !videoMediaRefs.last;
   const canAddReference = !!caps?.referenceImage;
 
-  /** 参考模式（与首页底部操作同步）：文生视频(prompt) / 全能参考(all) / 首尾帧(keyframe) / 图生视频(text2video)。
-   *  首尾帧模式才展示首帧/尾帧槽（同一行）；其余模式仅展示普通参考；图生视频不收视频参考；
-   *  文生视频保留参考添加入口（媒体实际成为参考时由 enabledModes 自动切全能参考，IKFC1T）。 */
   const currentMode = modeOptions.find((m) => m.key === selectedMode);
-  const isKeyframe = selectedMode === 'keyframe';
-  /** IKFQ5S：首尾帧强制 adaptive 仅对**支持该档的模型**生效（Seedance 2.5）。
-   *  2.0 系列上游不接受 adaptive（实测 400 unsupported ratio），仍走用户可选的固定比例。 */
+  const isKeyframe = isFrameMode(selectedMode);
   const supportsAdaptiveRatio = !!hasAspectRatio(currentModel?.supported_aspect_ratios, 'adaptive');
-  const forceAdaptive = isKeyframe && supportsAdaptiveRatio;
-  const isText2Video = selectedMode === 'text2video';
-  /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
-  const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
-  /** IKJ794：全能参考被动提示——全能参考模式 + 模型支持 adaptive（Seedance 2.5，与 IKFQ5S 同锚）
-   *  + 已挂 ≥1 参考视频；纯条件渲染（零关键词判定），首尾帧 / 2.0 系列 / 未挂视频均不显示。 */
-  const showOmniFollowHint = selectedMode === 'all'
+  const ratioLocked = lockedRatioOf(currentModel?.features, selectedMode);
+  const durationLocked = lockedDurationOf(currentModel?.features, selectedMode);
+
+  const fallbackDurationOf = (model: GenerationModel | null | undefined): number => {
+    const range = model?.supported_durations;
+    if (!range) return 5;
+    const base = typeof model?.default_duration === 'number' ? model.default_duration : range.min;
+    return Math.min(Math.max(base, range.min), range.max);
+  };
+
+  useEffect(() => {
+    if (ratioLocked && selectedRatio !== ratioLocked) setSelectedRatio(ratioLocked);
+    if (durationLocked != null) {
+      if (duration !== durationLocked) setDuration(durationLocked);
+      return;
+    }
+    if (duration < 0) {
+      const next = fallbackDurationOf(currentModel);
+      setDuration(next);
+      syncDraftParams({ duration: next });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ratioLocked, durationLocked, selectedRatio, duration, currentModel]);
+  const isImageReference = selectedMode === 'image_reference';
+  const showOmniFollowHint = selectedMode === 'omni'
     && supportsAdaptiveRatio
     && videoMediaRefs.reference.some((r) => r.mediaType === 'video');
 
@@ -418,15 +454,15 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const referenceMaxTotal = caps ? (caps.imageMax ?? 9) + (caps.videoReferenceMax ?? 3) : 12;
   /** 普通参考达上限（IKGB1X 操作条禁用原因之一；旧口径无此门控，仅计数展示） */
   const referencesFull = videoMediaRefs.reference.length >= referenceMaxTotal;
-  /** 操作条分派的媒体边界（与栏尾旧「+」同口径）：图生视频仅图片，其余普通参考模式全能（图/视频/音频）；
-   *  首尾帧模式按槽位边界传 'image'（契约 §4；IKGB7Y 顺序填充：role 按首空槽分派——首帧优先、其后尾帧） */
-  const actionBarKind: 'image' | 'video' = isKeyframe || isText2Video ? 'image' : 'video';
+  const actionBarKind: 'image' | 'video' = isKeyframe || isImageReference ? 'image' : 'video';
   /** 附件操作条禁用原因（IKGB1X：常显置灰 + 悬停说明，替代旧「+ 不出现」口径）：
    *  生成中只读最优先；首尾帧模式两槽均满才置灰（IKGB7Y，未满按首空槽正常分派）；
    *  普通参考模式按能力位不支持 / 达上限门控（与旧「+」的隐藏门控一一对应 + 上限补齐） */
   const actionBarDisabledReason = readOnly ? readOnlyReason
     : isKeyframe
-      ? (videoMediaRefs.first && videoMediaRefs.last ? '首帧与尾帧均已指定，请先移除后再添加' : null)
+      ? (videoMediaRefs.first && (selectedMode === 'first_frame' || videoMediaRefs.last)
+        ? '首帧已指定，请先移除后再添加'
+        : null)
       : !canAddReference ? '当前模型不支持参考'
       : referencesFull ? `普通参考最多 ${referenceMaxTotal} 条，已达上限`
       : null;
@@ -524,68 +560,73 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   /** 切换模式：目标模式与现有参考冲突时明确提示并阻止切换（保证「可见槽 = 实际参考」），否则写回草稿 */
   const handleModeChange = (key: string) => {
     setModeOpen(false);
-    if (enabledModes && !enabledModes.includes(key as VideoFollowMode)) return;
+    if (!isVideoMode(key) || !enabledModes.includes(key)) return;
     if (key === selectedMode) return;
     const hasFrames = !!(videoMediaRefs.first || videoMediaRefs.last);
-    if (key === 'prompt') {
-      if (hasAnyMediaRef(videoMediaRefs)) {
-        onToast?.('warn', '文生视频模式不支持媒体参考，请先移除参考');
-        return;
-      }
-    } else if (key === 'keyframe') {
+    const slots = frameSlotCountOf(key);
+    if (slots > 0) {
       // IKFJJT：普通参考切首尾帧——已连图片自动转为首帧/尾帧槽（第 1 张首帧、第 2 张尾帧），
       // 不再要求用户先移除（旧行为「请先移除普通参考」与「图片≥2 才解锁首尾帧」互锁，永远切不进）。
-      const imageRefs = videoMediaRefs.reference.filter((r) => r.mediaType === 'image');
-      const nonImageRefs = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image');
-      if (nonImageRefs.length > 0) {
-        onToast?.('warn', '首尾帧模式仅支持图片素材，请先移除视频/音频参考');
+      if (key === 'first_frame' && videoMediaRefs.last) {
+        onToast?.('warn', '图生视频只使用首帧，请先移除尾帧');
         return;
       }
-      if (imageRefs.length > 2) {
-        onToast?.('warn', '首尾帧模式最多 2 张图片（首帧 + 尾帧），请先减少参考');
+      const imageRefs = videoMediaRefs.reference.filter((r) => r.mediaType === 'image');
+      if (imageRefs.length > slots) {
+        onToast?.('warn', `${VIDEO_MODE_LABEL[key]}模式最多 ${slots} 张图片，请先减少参考`);
         return;
       }
       if (imageRefs.length > 0) {
         onAssignRefRoles?.(
-          imageRefs.slice(0, 2).map((r, i) => ({ nodeId: r.nodeId, role: i === 0 ? 'first' : 'last' })),
+          imageRefs.slice(0, slots).map((r, i) => ({ nodeId: r.nodeId, role: i === 0 ? 'first' : 'last' })),
         );
       }
-    } else {
-      // all（全能参考）/ text2video（图生视频）：首帧/尾帧转回普通参考（IKFJJT：与切首尾帧对称）。
-      // 首尾帧槽只收图片，转回后即图片普通参考，两种模式都接受。
-      if (hasFrames) {
-        const frames = [videoMediaRefs.first, videoMediaRefs.last].filter(
-          (f): f is VideoMediaRef => !!f,
-        );
-        onAssignRefRoles?.(frames.map((f) => ({ nodeId: f.nodeId, role: 'reference' })));
-      } else if (key === 'text2video' && videoRefCount > 0) {
-        onToast?.('warn', '图生视频模式不支持视频或音频参考，请先调整引用');
-        return;
-      }
+    } else if (hasFrames) {
+      const frames = [videoMediaRefs.first, videoMediaRefs.last].filter(
+        (f): f is VideoMediaRef => !!f,
+      );
+      onAssignRefRoles?.(frames.map((f) => ({ nodeId: f.nodeId, role: 'reference' })));
     }
     setSelectedMode(key);
-    // IKFQ5S：仅支持 adaptive 的模型（2.5）才内置该档；2.0 保持用户可选的固定比例。
-    if (key === 'keyframe' && supportsAdaptiveRatio) {
-      setSelectedRatio('adaptive');
-      syncDraftParams({ mode: key, ratio: 'adaptive' });
-      return;
-    }
-    // 离开首尾帧：若当前是 adaptive（首尾帧内置值）且新模型比例列表不含 adaptive，回落到模型默认/首个比例。
-    if (selectedRatio === 'adaptive' && currentModel && !hasAspectRatio(currentModel.supported_aspect_ratios, 'adaptive')) {
+    const lockedRatio = lockedRatioOf(currentModel?.features, key);
+    const lockedDuration = lockedDurationOf(currentModel?.features, key);
+    const patch: VideoDraftParamsPatch = { mode: key };
+    if (lockedRatio) {
+      setSelectedRatio(lockedRatio);
+      patch.ratio = lockedRatio;
+    } else if (selectedRatio === 'adaptive' && currentModel && !hasAspectRatio(currentModel.supported_aspect_ratios, 'adaptive')) {
       const fallbackRatio = pickDefaultVideoRatio(currentModel.supported_aspect_ratios, currentModel.default_aspect_ratio);
       setSelectedRatio(fallbackRatio);
-      syncDraftParams({ mode: key, ratio: fallbackRatio });
-      return;
+      patch.ratio = fallbackRatio;
     }
-    syncDraftParams({ mode: key });
+    if (lockedDuration != null) {
+      setDuration(lockedDuration);
+      patch.duration = lockedDuration;
+    } else if (duration < 0) {
+      const nextDuration = fallbackDurationOf(currentModel);
+      setDuration(nextDuration);
+      patch.duration = nextDuration;
+    }
+    syncDraftParams(patch);
+  };
+
+  const syncModeToModel = (model: GenerationModel) => {
+    if (isFrameMode(selectedMode)) return;
+    const enabled = enabledVideoModes(videoMediaRefs, configuredVideoModes(model.features));
+    const target = resolveVideoMode(defaultVideoModeFor(videoMediaRefs), enabled);
+    if (!target || target === selectedMode) return;
+    setSelectedMode(target);
+    syncDraftParams({ mode: target });
+    onToast?.('warn', '已根据当前素材切换生成模式');
   };
 
   const configurationError = !modelsLoaded ? '正在加载模型配置'
     : !currentModel ? '原生成模型不可用，请重新选择模型'
+    : configuredModes.length === 0 ? '当前模型未配置视频模式，请重新选择模型'
     : !sizeOptions.some(option => option.key === selectedSize) ? '原分辨率不可用，请重新选择分辨率'
     // ADR-0086：首尾帧比例内置 adaptive（不暴露给用户），跳过比例合法性校验，避免误报「原比例不兼容」。
-    : !forceAdaptive && !ratioOptions.some(option => option.id === selectedRatio) ? '原比例不兼容，请重新选择比例'
-    : durationRange && (duration < durationRange.min || duration > durationRange.max
+    : !ratioLocked && !ratioOptions.some(option => option.id === selectedRatio) ? '原比例不兼容，请重新选择比例'
+    : !durationLocked && durationRange && (duration < durationRange.min || duration > durationRange.max
       || (duration - durationRange.min) % durationRange.step !== 0)
       ? '原时长不兼容，请重新选择时长'
     : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
@@ -644,7 +685,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         setModelsLoaded(true);
         // 已有节点配置原样恢复，禁止因模型能力变化自动改写最新编辑。
         if (videoDraftBinding.restoreExisting || initialParams?.modelId) {
-          const restoredMode = initialParams?.mode ?? 'prompt';
+          const restoredMode = normalizeStoredVideoMode(initialParams?.mode, videoMediaRefs) ?? 'text2video';
           setSelectedModel(initialParams?.modelId ?? '');
           const model = list.find(m => m.model_id === initialParams?.modelId);
           // IKIZQB：样片开关随草稿/样片卡恢复（父规格用户故事 6、7）；开启时分辨率锁 480p 档。
@@ -658,13 +699,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           setSelectedSize(restoredSampleMode ? (size480?.id ?? size?.id ?? initialParams?.resolution ?? '') : (size?.id ?? initialParams?.resolution ?? ''));
           // 样片开启恢复时记住草稿原档位：关闭样片即恢复「原先选择的普通清晰度」（用户故事 4）
           normalSizeRef.current = restoredSampleMode && size?.id ? size.id : '';
-          // IKFQ5S：仅模型支持 adaptive 时才内置该档（恢复时模型可能未就绪，按 list 查）。
-          const restoredSupportsAdaptive = !!hasAspectRatio(model?.supported_aspect_ratios, 'adaptive');
-          setSelectedRatio(
-            restoredMode === 'keyframe' && restoredSupportsAdaptive
-              ? 'adaptive'
-              : (initialParams?.aspectRatio ?? ''),
-          );
+          const restoredLockedRatio = lockedRatioOf(model?.features, restoredMode);
+          setSelectedRatio(restoredLockedRatio ?? (initialParams?.aspectRatio ?? ''));
           setDuration(initialParams?.duration ?? 0);
           setSelectedMode(restoredMode);
           // IKG0LP：首页带入的音频选择随交接恢复（缺省 true）
@@ -704,12 +740,13 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             setDuration(clamped);
             patch.duration = clamped;
           }
-          if (initialParams.mode && modeOptions.some((o) => o.key === initialParams.mode)) {
-            setSelectedMode(initialParams.mode);
-            // IKFQ5S：首尾帧且模型支持 adaptive 时才内置该档，覆盖首页带入的固定比例。
-            if (initialParams.mode === 'keyframe' && hasAspectRatio(target.supported_aspect_ratios, 'adaptive')) {
-              setSelectedRatio('adaptive');
-              patch.ratio = 'adaptive';
+          const incomingMode = normalizeVideoMode(initialParams.mode);
+          if (incomingMode && modeOptions.some((o) => o.key === incomingMode)) {
+            setSelectedMode(incomingMode);
+            const incomingLockedRatio = lockedRatioOf(target.features, incomingMode);
+            if (incomingLockedRatio) {
+              setSelectedRatio(incomingLockedRatio);
+              patch.ratio = incomingLockedRatio;
             }
           }
         }
@@ -780,9 +817,9 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     }
     void submit(text, {
       modelId: currentModel.model_id,
-      aspectRatio: selectedRatio,
+      aspectRatio: wireParams.aspect_ratio,
       resolution: sampleMode ? '480p' : (size.api_value ?? size.id),
-      duration,
+      duration: wireParams.duration,
       mode: selectedMode,
       generateAudio,
       sampleMode,
@@ -1042,7 +1079,10 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
                       className={`${styles.selectOption} ${m.key === selectedModel ? styles.selectOptionActive : ''}`}
                       onClick={() => {
                         const gen = modelList.find((x) => x.model_id === m.key);
-                        if (gen) syncDraftParams(applyModelDefaults(gen));
+                        if (gen) {
+                          syncDraftParams(applyModelDefaults(gen));
+                          syncModeToModel(gen);
+                        }
                         setModelOpen(false);
             }}
                     >
@@ -1137,8 +1177,14 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             </p>
           )}
 
-          {/* 时长滑杆（模型能力未加载完时不渲染） */}
-          {durationRange && (
+          {durationLocked ? (
+            <>
+              <span className={styles.configLabel}>时长</span>
+              <div className={styles.durationRange}>
+                <span>跟随原视频</span>
+              </div>
+            </>
+          ) : durationRange && (
             <>
               <div className={styles.durationHead}>
                 <span className={styles.configLabel}>时长</span>
@@ -1171,8 +1217,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             </>
           )}
 
-          {/* 宽高比（IKFQ5S：仅首尾帧 + 模型支持 adaptive 时内置不渲染；2.0 首尾帧仍需用户选固定比例） */}
-          {!forceAdaptive && (
+          {!ratioLocked && (
             <>
               <span className={styles.configLabel}>宽高比</span>
               <div className={styles.ratioGroup}>
@@ -1232,7 +1277,9 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       <div className={styles.actionBarRow}>
         <AttachmentActionBar
           kind={actionBarKind}
-          role={isKeyframe ? (videoMediaRefs.first ? 'last' : 'first') : 'reference'}
+          role={isKeyframe
+            ? (selectedMode === 'first_frame' || !videoMediaRefs.first ? 'first' : 'last')
+            : 'reference'}
           /* 类型收窄守卫（TypeScript 类型层必需，非运行期可达）：共享组件回调签名 kind 为
              'image'|'video'|'audio' 联合，本面板回调仅收 'image'|'video'，不 narrowing 不能通过类型检查；
              运行期 actionBarKind 已锁边界，'audio' 分支不会到达 */
@@ -1273,11 +1320,11 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
               !readOnly && canAddFirst && renderSourceMenu('image', 'first', '首帧')
             )}
             {/* 尾帧（与首帧同一行）：有图时共享缩略图；无图时统一入口具名槽位（仅图片） */}
-            {videoMediaRefs.last ? (
+            {selectedMode === 'first_last_frame' && (videoMediaRefs.last ? (
               renderRefThumb(videoMediaRefs.last, undefined, '尾帧')
             ) : (
               !readOnly && canAddLast && renderSourceMenu('image', 'last', '尾帧')
-            )}
+            ))}
             {mixedStrip.render([], textThumbsAt(0))}
           </div>
         ) : (
@@ -1361,7 +1408,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             {modeOpen && (
               <div className={styles.modeDropdown}>
                 {modeOptions.map((opt) => {
-                  const disabled = Boolean(enabledModes && !enabledModes.includes(opt.key as VideoFollowMode));
+                  const disabled = !enabledModes.includes(opt.key);
                   return (
                     <button
                       key={opt.key}
@@ -1387,7 +1434,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           >
             <SlidersHorizontal size={14} strokeWidth={2} />
             <span>{currentModel?.model_label ?? '选择模型'}</span>
-            {!forceAdaptive && (
+            {!ratioLocked && (
               <>
                 <span className={styles.barDivider}>|</span>
                 {/* IKJ4W6：内部键 adaptive 展示为 auto；selectedRatio/提交值仍是 adaptive。 */}
@@ -1397,7 +1444,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             <span className={styles.barDivider}>|</span>
             <span>{currentSizeLabel}</span>
             <span className={styles.barDivider}>|</span>
-            <span>{duration}s</span>
+            <span>{durationLocked ? '跟随原视频' : `${duration}s`}</span>
           </button>
         </div>
 

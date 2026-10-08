@@ -37,6 +37,7 @@ export interface QuoteJobParameters {
   /** IKIZQB：样片模式（仅放行模型 + 480p 有意义；契约 sampleModeParametersSchema）。
    *  开启时报价按样片规格计价并返回 quote_revision（提交确认用）；未传沿用普通视频语义。 */
   sample_mode?: true;
+  mode?: string;
   /** 视频（IKJ79D）：提示词——编辑单时长口径判定输入，防抖后传 */
   prompt?: string;
 }

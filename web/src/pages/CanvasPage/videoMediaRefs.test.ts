@@ -201,6 +201,13 @@ describe('videoRefConflict 组合校验（与服务端 400 同口径 + 能力位
     expect(videoRefConflict({ reference: [ref('m1')], first: ref('f1'), last: ref('f2') }, allCaps)).toBe('首尾帧与普通参考不能混用，请移除其中一类输入');
   });
 
+  it('单首帧模式（first_frame）：只有首帧槽合法，不索要尾帧', () => {
+    expect(videoRefConflict({ reference: [], first: ref('f1') }, allCaps, 'first_frame')).toBeNull();
+    expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, allCaps, 'first_frame')).toBe('图生视频只使用首帧，请先移除尾帧');
+    expect(videoRefConflict({ reference: [], last: ref('f2') }, allCaps, 'first_frame')).toBe('图生视频只使用首帧，请先移除尾帧');
+    expect(videoRefConflict({ reference: [], first: ref('f1') }, allCaps, 'first_last_frame')).toBe('请补充尾帧');
+  });
+
   it('首尾帧不按不可靠能力位拦截，普通参考仍校验能力', () => {
     expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, firstLastFrame: false })).toBeNull();
     expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, firstFrame: false })).toBeNull();

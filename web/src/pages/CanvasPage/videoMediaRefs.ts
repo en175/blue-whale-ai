@@ -300,15 +300,16 @@ export interface VideoRefCapabilities {
 export function videoRefConflict(
   refs: VideoMediaRefs,
   caps: VideoRefCapabilities,
+  mode?: string | null,
 ): string | null {
   if (refs.invalid?.length) return '参考素材不可用，请恢复素材或移除失效引用后发送';
   if ((refs.first || refs.last) && refs.reference.length > 0) {
     return '首尾帧与普通参考不能混用，请移除其中一类输入';
   }
-  // 首尾帧模式发送：首帧与尾帧需齐全，否则按缺项提示补全
   if (refs.first || refs.last) {
+    if (mode === 'first_frame' && refs.last) return '图生视频只使用首帧，请先移除尾帧';
     if (!refs.first) return '请补充首帧';
-    if (!refs.last) return '请补充尾帧';
+    if (!refs.last && mode !== 'first_frame') return '请补充尾帧';
   }
   if (refs.reference.length > 0 && !caps.referenceImage) {
     return '当前模型不支持图片参考，请移除普通参考';

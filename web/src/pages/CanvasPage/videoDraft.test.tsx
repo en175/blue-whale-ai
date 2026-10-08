@@ -166,6 +166,13 @@ const apiMocks = vi.hoisted(() => ({
         first_frame: true,
         last_frame: true,
         first_last_frame: true,
+        task_types: {
+          text2video: {},
+          omni: {},
+          image_reference: {},
+          first_frame: {},
+          first_last_frame: {},
+        },
         audio: false,
       },
       version: 1,
@@ -358,7 +365,7 @@ async function waitModelReady() {
 
 /** 1f2f498d 起模式选择器为下拉：先点底部当前模式按钮展开，再从下拉选项切首尾帧 */
 async function selectMode(label: string) {
-  const modeLabels = ['文生视频', '全能参考', '图生视频', '首尾帧'];
+  const modeLabels = ['文生视频', '全能参考', '图片参考', '图生视频', '首尾帧', '视频编辑', '视频延长'];
   await act(async () => {
     [...container.querySelectorAll('button')].find((b) => modeLabels.includes(b.textContent ?? ''))!.click();
   });
@@ -721,6 +728,13 @@ describe('IKFQ5S 首尾帧 adaptive 按模型门控', () => {
       first_frame: true,
       last_frame: true,
       first_last_frame: true,
+      task_types: {
+        text2video: {},
+        omni: {},
+        image_reference: {},
+        first_frame: {},
+        first_last_frame: ratioIds.includes('adaptive') ? { allowed_ratios: ['adaptive'] } : {},
+      },
       audio: false,
     },
     is_default: true,
@@ -778,6 +792,13 @@ describe('IKG0LP 视频是否带音频开关', () => {
       first_frame: true,
       last_frame: true,
       first_last_frame: true,
+      task_types: {
+        text2video: {},
+        omni: {},
+        image_reference: {},
+        first_frame: {},
+        first_last_frame: {},
+      },
       audio,
     },
     is_default: true,
@@ -869,10 +890,7 @@ describe('IKDWL8 视频失效引用保护', () => {
   });
 });
 
-/* IKFC1T 文生视频入口与媒体参考自动切换：新建默认文生视频（仅提示词省略 references）、
-   文本附件不触发切换、三个接入路径（连线/从节点添加素材落线）触发自动切全能参考并保留输入、
-   存在媒体参考时文生视频置灰（部分删除仍置灰，全部删除恢复可选但不自动切回）、草稿恢复保持已存模式。 */
-const MODE_LABELS = ['文生视频', '全能参考', '图生视频', '首尾帧'];
+const MODE_LABELS = ['文生视频', '全能参考', '图片参考', '图生视频', '首尾帧', '视频编辑', '视频延长'];
 
 function modeButton(): HTMLButtonElement {
   return [...container.querySelectorAll('button')].find((b) => MODE_LABELS.includes(b.textContent ?? ''))!;
@@ -920,7 +938,7 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     expect(sendButton().disabled).toBe(false);
   });
 
-  it('画布连线图片成为参考：自动切全能参考并保留输入（提示词与文本附件），提交携带完整引用', async () => {
+  it('画布连线图片成为参考：按默认表自动切图片参考并保留输入（提示词与文本附件），提交携带完整引用', async () => {
     const doc = canvasDocMock.current.doc as { nodes: Node[] };
     doc.nodes.push({
       id: 't1',
@@ -938,11 +956,11 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
 
     await connect('m1', 'd1');
 
-    await expectMode('全能参考');
+    await expectMode('图片参考');
     expect(container.textContent).toContain('已根据当前素材切换生成模式');
     // 自动切换保留文本附件与提示词（缩略图仍在参考栏）
     expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
-    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('image_reference'));
     await vi.waitFor(() => expect(draftDataOf('d1').prompt).toBe('海边日落'));
 
     await act(async () => { sendButton().click(); });
@@ -952,7 +970,7 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
   });
 
-  it('角色库 material 参考成为参考（草稿 data，无连线）：打开面板即自动切全能参考', async () => {
+  it('角色库 material 参考成为参考（草稿 data，无连线）：打开面板即按默认表切图片参考', async () => {
     const doc = canvasDocMock.current.doc as { nodes: Node[] };
     doc.nodes.find(n => n.id === 'd1')!.data.draftMaterialRefs = [
       { materialId: 'asset-lib1', url: 'http://img/lib1.png', name: '角色立绘', mediaType: 'image', role: 'reference' },
@@ -960,11 +978,11 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await renderPage();
     // 面板未开：角色库参考不触发任何行为；打开后按实际参考判定
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
-    await expectMode('全能参考');
+    await expectMode('图片参考');
     expect(flowProps.current.edges).toHaveLength(0);
   });
 
-  it('从节点添加素材参考：选取即落线成为当前参考（IKFDFW），自动切全能参考', async () => {
+  it('从节点添加素材参考：选取即落线成为当前参考（IKFDFW），按默认表切图片参考', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
@@ -973,16 +991,16 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
 
     expect(flowProps.current.edges).toHaveLength(1); // IKFDFW：选取即建连线，不再经暂存
-    await expectMode('全能参考');
+    await expectMode('图片参考');
   });
 
-  it('存在媒体参考时文生视频置灰；部分删除仍置灰；全部删除恢复可选但不自动切回', async () => {
+  it('存在媒体参考时文生视频置灰；部分删除仍置灰；全部删除恢复可选并按默认表切回文生视频', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
     await connect('m1', 'd1');
     await connect('m2', 'd1');
-    await expectMode('全能参考');
+    await expectMode('图片参考');
 
     await openModeMenu();
     expect(modeOption('文生视频')!.disabled).toBe(true);
@@ -993,18 +1011,17 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await openModeMenu();
     expect(modeOption('文生视频')!.disabled).toBe(true);
 
-    // 全部移除：文生视频恢复可选，当前模式保持全能参考（不自动切回，不代用户改模式）
     await act(async () => { removeButtons()[0]!.click(); });
     await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(0));
+    await expectMode('文生视频');
     await openModeMenu();
     expect(modeOption('文生视频')!.disabled).toBe(false);
-    expect(modeButton().textContent).toBe('全能参考');
   });
 
   it('草稿恢复保持已保存模式：首尾帧草稿恢复首尾帧，文生视频草稿无媒体恢复文生视频', async () => {
     const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: unknown[] };
     // 已保存首尾帧草稿：模式与首尾帧连线一并恢复
-    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'keyframe';
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'first_last_frame';
     doc.edges = [
       { id: 'f1', source: 'm1', target: 'd1', data: { refRole: 'first' } },
       { id: 'f2', source: 'm2', target: 'd1', data: { refRole: 'last' } },
@@ -1013,18 +1030,158 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await expectMode('首尾帧');
 
-    // 已保存文生视频草稿 + 画布连线加入媒体（面板关闭时）：重开面板自动切全能参考
-    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'prompt';
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'text2video';
     doc.edges = [{ id: 'r1', source: 'm1', target: 'd1' }];
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
-    await expectMode('全能参考');
-    expect(container.textContent).toContain('已根据当前素材切换生成模式');
+    await expectMode('图片参考');
 
     // 已保存文生视频草稿 + 无媒体：恢复文生视频
     doc.edges = [];
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('文生视频');
+  });
+});
+
+describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
+  function editCapableModel() {
+    return {
+      model_id: 'seedance-2',
+      provider_id: 'prov',
+      model_label: '测试视频模型',
+      icon: null,
+      supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
+      supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: 'adaptive', label: 'adaptive' }],
+      supported_formats: [],
+      supported_durations: { min: 4, max: 12, step: 1 },
+      default_size: '720p',
+      default_format: null,
+      default_aspect_ratio: '16:9',
+      default_duration: 5,
+      features: {
+        reference_image: true,
+        image_reference_max: 10,
+        watermark: false,
+        quantity_max: 1,
+        sequential_image_generation: false,
+        stream: false,
+        tools: false,
+        first_frame: true,
+        last_frame: true,
+        first_last_frame: true,
+        audio: false,
+        video_reference: true,
+        video_reference_max: 3,
+        task_types: {
+          text2video: {},
+          omni: {},
+          image_reference: {},
+          first_frame: { allowed_ratios: ['adaptive'] },
+          first_last_frame: { allowed_ratios: ['adaptive'] },
+          edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
+          extend: { allowed_ratios: ['adaptive'] },
+        },
+      },
+      version: 1,
+      digest: '',
+    };
+  }
+
+  it('只有一段参考视频 → 默认表落视频编辑；比例/时长按能力行锁定；提交带 mode 与锁定值', async () => {
+    apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+
+    await expectMode('视频编辑');
+    expect(container.textContent).toContain('跟随原视频');
+
+    await typePrompt('把背景换成夜晚');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.parameters).toMatchObject({
+      mode: 'edit',
+      aspect_ratio: 'adaptive',
+      duration: -1,
+    });
+  });
+
+  it('两张图片切图生视频：以图生视频的名义拒绝切换，不改模式也不索要尾帧', async () => {
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('m1', 'd1');
+    await connect('m2', 'd1');
+    await expectMode('图片参考');
+
+    await openModeMenu();
+    await act(async () => { modeOption('图生视频')!.click(); });
+
+    await expectMode('图片参考');
+    expect(container.textContent).toContain('图生视频模式最多 1 张图片');
+    expect(container.textContent).not.toContain('请补充尾帧');
+    expect(container.textContent).not.toContain('首尾帧模式最多');
+  });
+
+  it('离开视频编辑切到其他模式：时长不再留在 -1，提交值回到正常时长', async () => {
+    apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+    await expectMode('视频编辑');
+    expect(container.textContent).toContain('跟随原视频');
+
+    await openModeMenu();
+    await act(async () => { modeOption('全能参考')!.click(); });
+    await expectMode('全能参考');
+    expect(container.textContent).not.toContain('跟随原视频');
+    expect(container.textContent).not.toContain('-1s');
+
+    await typePrompt('换成夜晚');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.parameters).toMatchObject({ mode: 'omni' });
+    expect((payload.parameters as { duration: number }).duration).toBeGreaterThan(0);
+  });
+
+  it('模型切到 2.5：原先因不开放而落到全能参考的「只有视频」应回到视频编辑', async () => {
+    const editModel = editCapableModel();
+    const { edit: _edit, extend: _extend, ...modes20 } = editModel.features.task_types;
+    apiMocks.fetchGenerationModels.mockResolvedValue([
+      { ...editModel, model_id: 'seedance-2', model_label: '测试视频模型 20', features: { ...editModel.features, task_types: modes20 } },
+      { ...editModel, model_id: 'seedance-2.5', model_label: '测试视频模型 25' },
+    ]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+    await expectMode('全能参考');
+
+    const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('测试视频模型 20'))!;
+    await act(async () => { configBtn.click(); });
+    const modelTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('测试视频模型 20'))!;
+    await act(async () => { modelTrigger.click(); });
+    const option = [...container.querySelectorAll('button')].find((b) => b.textContent === '测试视频模型 25')!;
+    await act(async () => { option.click(); });
+    await expectMode('视频编辑');
+  });
+
+  it('视频编辑时撤掉唯一参考视频：模式收不下 → 自动切走，不留冲突', async () => {
+    apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+    await expectMode('视频编辑');
+
+    const removeButtons = () => container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]');
+    await act(async () => { removeButtons()[0]!.click(); });
+    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(0));
     await expectMode('文生视频');
   });
 });
@@ -1060,7 +1217,7 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
             promptMentions: [], promptMaterials: [],
           },
     });
-    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'prompt';
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'text2video';
     // 素材字典补 101：水合按字典推导 assetMissing，缺失会被判「素材已被删除」排除出参考
     canvasDocMock.current.assets = {
       ...canvasDocMock.current.assets,
@@ -1096,7 +1253,7 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
 
     // 不再调后端方案同步；目标模式保持文生视频（素材图不经此路径直连草稿）
     expect(apiMocks.referencePromptPlan).not.toHaveBeenCalled();
-    expect(draftDataOf('d1').draftMode).toBe('prompt');
+    expect(draftDataOf('d1').draftMode).toBe('text2video');
 
     // 面板重开：无素材直连边，恢复文生视频
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
@@ -1120,7 +1277,7 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
     await connect('plan1', 'd1');
 
     await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(1));
-    expect(draftDataOf('d1').draftMode).toBe('prompt');
+    expect(draftDataOf('d1').draftMode).toBe('text2video');
 
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await expectMode('文生视频');
@@ -1157,6 +1314,13 @@ describe('IKJ4W6 画布视频比例显示 auto 并默认选中', () => {
       first_frame: true,
       last_frame: true,
       first_last_frame: true,
+      task_types: {
+        text2video: {},
+        omni: {},
+        image_reference: {},
+        first_frame: {},
+        first_last_frame: {},
+      },
       audio: false,
     },
     is_default: true,
@@ -1217,7 +1381,7 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     expect(videoDrafts()).toHaveLength(2);
     const newDraft = videoDrafts().find((n) => n.id !== 'd1')!;
     // 创建路径补写：与面板默认显示（modeOptions[0].key = 'prompt'）同源
-    expect((newDraft.data as Record<string, unknown>).draftMode).toBe('prompt');
+    expect((newDraft.data as Record<string, unknown>).draftMode).toBe('text2video');
     // 面板显示与落盘一致：新建默认文生视频
     expect(container.textContent).toContain('文生视频');
 
@@ -1229,7 +1393,7 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
         [string, { nodes: Node[] }] | undefined;
       expect(last).toBeTruthy();
       const saved = last![1].nodes.find((n) => n.id === newDraft.id);
-      expect((saved?.data as Record<string, unknown> | undefined)?.draftMode).toBe('prompt');
+      expect((saved?.data as Record<string, unknown> | undefined)?.draftMode).toBe('text2video');
     }, { timeout: 3000 });
   });
 
@@ -1248,33 +1412,34 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     // 提交路径兜底：草稿已保存模式缺失时，按当前面板选中模式写入
-    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('prompt'));
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('text2video'));
   });
 
   it('手动切过模式的存量草稿经面板发送：draftMode 保留为所选模式，不被兜底覆盖', async () => {
-    // seed 的 d1 草稿 data 无 draftMode（存量），用户打开面板手动切到「全能参考」
     await renderPage();
     expect(draftDataOf('d1').draftMode).toBeUndefined();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
-    await connect('m1', 'd1'); // 加图参考使「全能参考」可选且自动切
+    await connect('m1', 'd1');
+    await expectMode('图片参考');
+    await openModeMenu();
+    await act(async () => { modeOption('全能参考')!.click(); });
     await expectMode('全能参考');
-    // 自动切换路径已经写过一次（syncDraftParams）
-    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('omni'));
     await typePrompt('已切模式提交');
 
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     // 提交后仍为所选模式（兜底不覆盖已保存值）
-    expect(draftDataOf('d1').draftMode).toBe('all');
+    expect(draftDataOf('d1').draftMode).toBe('omni');
   });
 
   it('存量草稿带参考经更新生成（不走面板）：draftMode 按提交时参考集合派生默认补写', async () => {
     // seed 的 d1 草稿 data 无 draftMode（存量）；draftModelId 等参数齐全可直接更新生成
     await renderPage();
     expect(draftDataOf('d1').draftMode).toBeUndefined();
-    await connect('m1', 'd1'); // 加图参考：派生默认应为 'all'（与面板显示同源）
+    await connect('m1', 'd1');
 
     // 触发更新生成（卡片 onUpdateGenerate 回调，不走面板）
     await act(async () => {
@@ -1282,8 +1447,7 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
-    // 提交后 draftMode 被补写为按当前参考集合派生的默认（m1 图参考 → 'all'）
-    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('image_reference'));
   });
 });
 
@@ -1324,6 +1488,13 @@ function sampleCapableModel() {
       first_frame: true,
       last_frame: true,
       first_last_frame: true,
+      task_types: {
+        text2video: {},
+        omni: {},
+        image_reference: {},
+        first_frame: {},
+        first_last_frame: {},
+      },
       audio: false,
       sample_mode: true,
     },

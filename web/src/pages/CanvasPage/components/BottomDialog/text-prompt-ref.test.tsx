@@ -25,7 +25,7 @@ const fetchGenerationModels = vi.hoisted(() =>
       default_format: null,
       default_aspect_ratio: '16:9',
       default_duration: 5,
-      features: { reference_image: true, image_reference_max: 9, first_frame: true, last_frame: true, first_last_frame: true },
+      features: { reference_image: true, image_reference_max: 9, first_frame: true, last_frame: true, first_last_frame: true, task_types: { text2video: {}, omni: {}, image_reference: {}, first_frame: {}, first_last_frame: {} } },
       version: 1,
       digest: '',
     },

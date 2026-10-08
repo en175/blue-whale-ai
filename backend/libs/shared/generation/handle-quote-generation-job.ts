@@ -12,7 +12,7 @@
  * ============================================ */
 import { createHash } from "node:crypto";
 
-import { RESOURCE_NOT_FOUND_CODE, fail, ok, type ResultEnvelope } from "@lib/contracts";
+import { RESOURCE_NOT_FOUND_CODE, fail, frozenVideoModeOf, ok, type ResultEnvelope } from "@lib/contracts";
 import {
   DEFAULT_IMAGE_REFERENCE_MAX,
   type AssetOwnershipOps,
@@ -195,7 +195,7 @@ export async function handleQuoteGenerationJob(
   const prompt = typeof quoteParams?.prompt === "string" ? quoteParams.prompt : "";
   const bySourceVideo = applyEditSourceDurationBasis(
     input,
-    prompt,
+    frozenVideoModeOf(input),
     capability?.features?.task_types,
   );
 

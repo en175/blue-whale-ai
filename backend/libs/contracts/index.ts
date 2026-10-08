@@ -1,12 +1,16 @@
 export {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
-  resolveVideoTaskType,
-  taskTypeAllowedRatios,
-  frozenVideoTaskTypeOf,
+  resolveVideoMode,
+  VIDEO_MODES,
+  isVideoMode,
+  normalizeVideoMode,
+  modeAllowedRatios,
+  frozenVideoModeOf,
   TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
-  FROZEN_VIDEO_TASK_TYPE_KEY,
-  hasTaskTypeConstraint,
+  FROZEN_VIDEO_MODE_KEY,
+  LEGACY_FROZEN_VIDEO_MODE_KEY,
+  hasModeConstraint,
   parseSpecKey,
   specKeyOf,
   normalizeSpecKey,
@@ -16,7 +20,7 @@ export {
   type CapabilityLimitInput,
   type CapabilityParamFailure,
   type GenerationParamCheckInput,
-  type VideoTaskType,
+  type VideoMode,
 } from "./capability-param-validation.js";
 export { previewSourceSchema, applyPreviewSchema, promptMentionSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent, type PromptMention, type PromptMaterial } from "./prompt-preview.js";
 export { mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, invalidMediaMentionLabel, imageMentionSendToken, replaceImageMentionsWithAssetTokens, MEDIA_TYPE_LABEL, MEDIA_MENTION_LIMITS, TEXT_INDEX_EDGE_MARKER, type MediaMention, type MediaRef, type MediaMentionType } from "./text-node-media.js";

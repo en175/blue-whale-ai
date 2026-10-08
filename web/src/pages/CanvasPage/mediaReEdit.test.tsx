@@ -614,7 +614,7 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
     const models = await apiMocks.fetchGenerationModels();
     const capable = models.map(model => ({ ...model,
       supported_durations: { min: 4, max: 12, step: 1 }, default_duration: 8,
-      features: { reference_image: true, first_frame: true, last_frame: true, first_last_frame: true },
+      features: { reference_image: true, first_frame: true, last_frame: true, first_last_frame: true, task_types: { text2video: {}, omni: {}, image_reference: {}, first_frame: {}, first_last_frame: {} } },
     }));
     // 常驻实现（不再 once 队列）：画布页自身也读模型能力（连线/资产接纳/资产卡上限），
     // 二次挂载后 once 值已被吃光会让面板退回无能力模型并误判冲突
@@ -625,7 +625,7 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
       ? { kind, text: '首页输入', modelId: 'm-test', size: '2k', ratio: '1:1',
           files: [{ id: 'ref-a2', name: '参考图', type: 'image', assetId: 'a2', url: 'http://img/u1.png' }] }
       : { kind, text: '首页输入', modelId: 'm-test', resolution: '2k', aspectRatio: '1:1', duration: 8,
-          mode: 'keyframe', refs: [
+          mode: 'first_last_frame', refs: [
             { type: 'image', assetId: 'a1', preview: 'http://img/g1.png' },
             { type: 'image', assetId: 'a2', preview: 'http://img/u1.png' },
           ] };
@@ -634,7 +634,7 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
     const generated = () => flowProps.current.mediaNodes.find((n: Node) => n.id.startsWith('media-gen')) as Node;
     await vi.waitFor(() => expect(generated()?.data.jobId).toBe('j2'));
     expect(generated().data).toMatchObject({ prompt: '首页输入', draftModelId: 'm-test', draftSize: '2k', draftRatio: '1:1',
-      ...(kind === 'video' ? { draftDuration: 8, draftMode: 'keyframe' } : {}) });
+      ...(kind === 'video' ? { draftDuration: 8, draftMode: 'first_last_frame' } : {}) });
     const refs = flowProps.current.edges.filter((e: { target: string }) => e.target === generated().id);
     expect(refs).toHaveLength(kind === 'image' ? 1 : 2);
     expect(refs.map((e: { source: string }) => nodeOf(e.source).data.assetId)).toEqual(kind === 'image' ? ['a2'] : ['a1', 'a2']);
