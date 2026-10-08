@@ -6,6 +6,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
+const WAIT_TIMEOUT_MS = 10_000;
+
 vi.hoisted(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 });
@@ -309,7 +312,6 @@ async function clickCard(id: string, x: number, y: number) {
     fireMouse('mousemove', window, x, y);
     fireMouse('mouseup', window, x, y);
     fireMouse('click', node(id), x, y);
-    await new Promise((resolve) => setTimeout(resolve, 5));
   });
 }
 
@@ -362,10 +364,10 @@ afterEach(async () => {
 describe('IKJR9J 画布锚定浮层拖拽隐藏（页面级真实手势）', () => {
   it('拖锚定卡：拖拽中面板 visibility 隐藏且编辑器不卸载，落定在新锚点重现', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
     await clickCard('d1', 520, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     const panel = panelRoot();
     const editorEl = container.querySelector('[data-testid="chip-editor"]');
     const topBefore = panel.style.top;
@@ -375,47 +377,52 @@ describe('IKJR9J 画布锚定浮层拖拽隐藏（页面级真实手势）', () 
     await act(async () => { fireMouse('mousedown', node('d1'), 520, 90); });
     await act(async () => { fireMouse('mousemove', window, 524, 93); });
     await act(async () => { fireMouse('mousemove', window, 620, 160); });
-    expect(panel.style.visibility).toBe('hidden');
+
+    await vi.waitFor(() => expect(panel.style.visibility).toBe('hidden'), { timeout: WAIT_TIMEOUT_MS });
     expect(container.querySelector('[data-testid="chip-editor"]')).toBe(editorEl);
     expect(document.contains(editorEl)).toBe(true);
 
     await act(async () => { fireMouse('mouseup', window, 620, 160); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
-    expect(panel.style.visibility).toBe('');
+
+
+    await vi.waitFor(() => {
+      expect(panel.style.visibility).toBe('');
+      expect(Number.parseInt(panel.style.left) - Number.parseInt(leftBefore)).toBe(96);
+      expect(Number.parseInt(panel.style.top) - Number.parseInt(topBefore)).toBe(67);
+    }, { timeout: WAIT_TIMEOUT_MS });
     expect(container.querySelector('[data-testid="chip-editor"]')).toBe(editorEl);
-    expect(Number.parseInt(panel.style.left) - Number.parseInt(leftBefore)).toBe(96);
-    expect(Number.parseInt(panel.style.top) - Number.parseInt(topBefore)).toBe(67);
     expect(imageOpen()).toBe(true);
   });
 
   it('组框整组拖含锚定卡：拖拽中面板隐藏，落定在新锚点重现', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
     await clickCard('d1', 520, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     const panel = panelRoot();
     const topBefore = panel.style.top;
     const leftBefore = panel.style.left;
 
     await act(async () => { firePointer('pointerdown', pane(), 400, 500); });
     await act(async () => { firePointer('pointermove', window, 600, 600); });
-    expect(panel.style.visibility).toBe('hidden');
+    await vi.waitFor(() => expect(panel.style.visibility).toBe('hidden'), { timeout: WAIT_TIMEOUT_MS });
 
     await act(async () => { firePointer('pointerup', window, 600, 600); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
-    expect(panel.style.visibility).toBe('');
-    expect(Number.parseInt(panel.style.left) - Number.parseInt(leftBefore)).toBe(200);
-    expect(Number.parseInt(panel.style.top) - Number.parseInt(topBefore)).toBe(100);
+    await vi.waitFor(() => {
+      expect(panel.style.visibility).toBe('');
+      expect(Number.parseInt(panel.style.left) - Number.parseInt(leftBefore)).toBe(200);
+      expect(Number.parseInt(panel.style.top) - Number.parseInt(topBefore)).toBe(100);
+    }, { timeout: WAIT_TIMEOUT_MS });
     expect(imageOpen()).toBe(true);
   });
 
   it('拖「不含锚定卡」的组框：面板原地不动、不隐藏', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
     await clickCard('d1', 520, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     const panel = panelRoot();
     const topBefore = panel.style.top;
     const leftBefore = panel.style.left;

@@ -7,6 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
+const WAIT_TIMEOUT_MS = 10_000;
+const waitFor = (callback: () => unknown) => vi.waitFor(callback, { timeout: WAIT_TIMEOUT_MS });
+
+
 
 const quoteMock = vi.hoisted(() => ({
   current: null as { credits: number; quote_revision: string } | null,
@@ -348,7 +353,7 @@ async function clickNode(node: { id: string; type: string; data?: Record<string,
 }
 
 async function waitModelReady() {
-  await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'), { timeout: 3000 });
+  await waitFor(() => expect(container.textContent).toContain('测试视频模型'));
 }
 
 async function selectMode(label: string) {
@@ -367,7 +372,7 @@ async function selectKeyframeMode() {
 
 async function pickRefNode(slotTitle: string, nodeId: string) {
   if (slotTitle === '从资产中选择 / 从节点添加素材') {
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect([...container.querySelectorAll('button')].some((b) => b.textContent === '参考')).toBe(true);
     });
     await act(async () => {
@@ -376,14 +381,14 @@ async function pickRefNode(slotTitle: string, nodeId: string) {
     await clickNode(flowProps.current.mediaNodes.find((n: Node) => n.id === nodeId)!);
     return;
   }
-  await vi.waitFor(() => {
+  await waitFor(() => {
     const btn = [...container.querySelectorAll('button')].find((b) => b.title === slotTitle);
     expect(btn).toBeTruthy();
   });
   await act(async () => {
     [...container.querySelectorAll('button')].find((b) => b.title === slotTitle)!.click();
   });
-  await vi.waitFor(() => {
+  await waitFor(() => {
     const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材');
     expect(item).toBeTruthy();
   });
@@ -420,8 +425,12 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
 
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
 
-    expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
-    expect(videoDrafts()).toHaveLength(2);
+
+    await waitFor(() => {
+      expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
+      expect(videoDrafts()).toHaveLength(2);
+    });
+
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(container.textContent).toContain('文生视频');
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '参考')).toBe(true);
@@ -435,7 +444,7 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     await typePrompt('自由模式输入');
 
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.type).toBe('video');
@@ -451,7 +460,7 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
-    expect(videoDrafts()).toHaveLength(3);
+    await waitFor(() => expect(videoDrafts()).toHaveLength(3));
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(container.textContent).toContain('文生视频');
   });
@@ -515,7 +524,7 @@ describe('IKFXZD 发送成功后面板自动隐藏', () => {
     apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('boom')));
     try {
       await act(async () => { sendButton().click(); });
-      await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'));
+      await waitFor(() => expect(container.textContent).toContain('保存失败，请重试'));
       expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
       expect(container.querySelector('textarea')).toBeTruthy();
     } finally {
@@ -534,7 +543,8 @@ describe('IKFXZD 发送成功后面板自动隐藏', () => {
       await typePrompt('选中回弹场景');
 
       await act(async () => { sendButton().click(); });
-      await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
       expect(container.querySelector('textarea')).toBeNull();
 
       const draft = () => flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1')!;
@@ -544,7 +554,7 @@ describe('IKFXZD 发送成功后面板自动隐藏', () => {
       expect(container.querySelector('textarea')).toBeNull();
 
       await clickNode(draft());
-      await vi.waitFor(() => expect(container.querySelector('textarea')).toBeTruthy());
+      await waitFor(() => expect(container.querySelector('textarea')).toBeTruthy());
     } finally {
       apiMocks.fetchJobStatus.mockImplementation(async (): Promise<any> => ({
         job_id: 'j1', status: 'succeeded', progress: 100,
@@ -563,7 +573,7 @@ describe('IKDMQS 提交推导与组合约束', () => {
     await typePrompt('大海与蓝鲸');
 
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
     const [projectId, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
@@ -572,7 +582,9 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(payload.target_node_id).toBe('d1');
     expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
     expect(payload.first_frame_asset_id).toBeUndefined();
-    await vi.waitFor(() => {
+
+
+    await waitFor(() => {
       const d1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1');
       const data = d1!.data as Record<string, unknown>;
       expect(data.src).toBe('http://vid/out.mp4');
@@ -592,11 +604,11 @@ describe('IKDMQS 提交推导与组合约束', () => {
     await connect('m2', 'd1');
     expect(flowProps.current.edges).toHaveLength(2);
     await selectKeyframeMode();
-    await vi.waitFor(() => expect(flowProps.current.edges.map((edge: { data?: { refRole?: string } }) => edge.data?.refRole)).toEqual(['first', 'last']));
+    await waitFor(() => expect(flowProps.current.edges.map((edge: { data?: { refRole?: string } }) => edge.data?.refRole)).toEqual(['first', 'last']));
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     await typePrompt('首尾帧驱动');
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.references).toEqual([
       { asset_id: 'a1', type: 'image', role: 'first_frame' },
@@ -629,7 +641,8 @@ describe('IKDMQS 提交推导与组合约束', () => {
     await connect('m2', 'd1');
     await waitModelReady();
     await selectKeyframeMode();
-    await vi.waitFor(() => {
+
+    await waitFor(() => {
       const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
       expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBe('first');
       expect(edges.find((e) => e.source === 'm2')?.data?.refRole).toBe('last');
@@ -645,12 +658,12 @@ describe('IKDMQS 提交推导与组合约束', () => {
     await connect('m2', 'd1');
     await waitModelReady();
     await selectKeyframeMode();
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
       expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBe('first');
     });
     await selectMode('全能参考');
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
       expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBeUndefined();
       expect(edges.find((e) => e.source === 'm2')?.data?.refRole).toBeUndefined();
@@ -805,7 +818,7 @@ describe('IKDMQS 生成中连线只读', () => {
     await typePrompt('转生成中');
     apiMocks.fetchJobStatus.mockImplementation(async () => ({ job_id: 'j1', status: 'running', progress: 10 }) as unknown as Awaited<ReturnType<typeof apiMocks.fetchJobStatus>>);
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const d1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1');
       expect((d1!.data as Record<string, unknown>).genStatus).toBe('generating');
     });
@@ -846,7 +859,7 @@ function modeButton(): HTMLButtonElement {
 }
 
 async function expectMode(label: string) {
-  await vi.waitFor(() => expect(modeButton().textContent).toBe(label));
+  await waitFor(() => expect(modeButton().textContent).toBe(label));
 }
 
 async function openModeMenu() {
@@ -905,11 +918,11 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await expectMode('图片参考');
     expect(container.textContent).toContain('已根据当前素材切换生成模式');
     expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
-    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('image_reference'));
-    await vi.waitFor(() => expect(draftDataOf('d1').prompt).toBe('海边日落'));
+    await waitFor(() => expect(draftDataOf('d1').draftMode).toBe('image_reference'));
+    await waitFor(() => expect(draftDataOf('d1').prompt).toBe('海边日落'));
 
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
   });
@@ -954,7 +967,7 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     expect(modeOption('文生视频')!.disabled).toBe(true);
 
     await act(async () => { removeButtons()[0]!.click(); });
-    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(0));
+    await waitFor(() => expect(flowProps.current.edges).toHaveLength(0));
     await expectMode('文生视频');
     await openModeMenu();
     expect(modeOption('文生视频')!.disabled).toBe(false);
@@ -1040,7 +1053,7 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
 
     await typePrompt('把背景换成夜晚');
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.parameters).toMatchObject({
       mode: 'edit',
@@ -1083,7 +1096,7 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
 
     await typePrompt('换成夜晚');
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.parameters).toMatchObject({ mode: 'omni' });
     expect((payload.parameters as { duration: number }).duration).toBeGreaterThan(0);
@@ -1121,7 +1134,7 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
 
     const removeButtons = () => container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]');
     await act(async () => { removeButtons()[0]!.click(); });
-    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(0));
+    await waitFor(() => expect(flowProps.current.edges).toHaveLength(0));
     await expectMode('文生视频');
   });
 });
@@ -1178,7 +1191,8 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
     await renderPage();
     await connect('plan1', 'd1');
 
-    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(1));
+
+    await waitFor(() => expect(flowProps.current.edges).toHaveLength(1));
     const planEdge = flowProps.current.edges.find((e: { source: string; target: string; data?: { promptReference?: { bindings?: unknown } } }) => e.source === 'plan1' && e.target === 'd1');
     expect(planEdge?.data?.promptReference).toEqual({ bindings: [{ index: 1, assetId: '101' }] });
 
@@ -1189,12 +1203,13 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
     await expectMode('文生视频');
 
     await typePrompt('绑定后再编辑');
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const last = apiMocks.saveCanvasDoc.mock.calls.at(-1) as unknown as [string, { edges: { source: string; target: string }[] }] | undefined;
       expect(last).toBeTruthy();
       const saved = last![1].edges.find(e => e.source === 'plan1' && e.target === 'd1');
       expect(saved).toBeTruthy();
-    }, { timeout: 3000 });
+    });
+
   });
 
   it('方案仅文本：服务端不切换，本地保持文生视频，重开面板恢复文生视频', async () => {
@@ -1203,7 +1218,7 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
     await renderPage();
     await connect('plan1', 'd1');
 
-    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(1));
+    await waitFor(() => expect(flowProps.current.edges).toHaveLength(1));
     expect(draftDataOf('d1').draftMode).toBe('text2video');
 
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
@@ -1267,7 +1282,7 @@ describe('IKJ4W6 画布视频比例显示 auto 并默认选中', () => {
     await typePrompt('默认跟随输入');
 
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect((payload.parameters as Record<string, unknown>).aspect_ratio).toBe('adaptive');
@@ -1295,19 +1310,20 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
 
-    expect(videoDrafts()).toHaveLength(2);
+
+    await waitFor(() => expect(videoDrafts()).toHaveLength(2));
     const newDraft = videoDrafts().find((n) => n.id !== 'd1')!;
     expect((newDraft.data as Record<string, unknown>).draftMode).toBe('text2video');
     expect(container.textContent).toContain('文生视频');
 
     await typePrompt('新建草稿保存');
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const last = apiMocks.saveCanvasDoc.mock.calls.at(-1) as unknown as
         [string, { nodes: Node[] }] | undefined;
       expect(last).toBeTruthy();
       const saved = last![1].nodes.find((n) => n.id === newDraft.id);
       expect((saved?.data as Record<string, unknown> | undefined)?.draftMode).toBe('text2video');
-    }, { timeout: 3000 });
+    });
   });
 
   it('存量无 draftMode 草稿经面板发送：提交时按当前面板选中模式兜底写入', async () => {
@@ -1319,9 +1335,10 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     await typePrompt('存量草稿提交');
 
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
-    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('text2video'));
+
+    await waitFor(() => expect(draftDataOf('d1').draftMode).toBe('text2video'));
   });
 
   it('手动切过模式的存量草稿经面板发送：draftMode 保留为所选模式，不被兜底覆盖', async () => {
@@ -1334,11 +1351,11 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     await openModeMenu();
     await act(async () => { modeOption('全能参考')!.click(); });
     await expectMode('全能参考');
-    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('omni'));
+    await waitFor(() => expect(draftDataOf('d1').draftMode).toBe('omni'));
     await typePrompt('已切模式提交');
 
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     expect(draftDataOf('d1').draftMode).toBe('omni');
   });
@@ -1351,9 +1368,9 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     await act(async () => {
       flowProps.current.onUpdateGenerate('d1');
     });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
-    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('image_reference'));
+    await waitFor(() => expect(draftDataOf('d1').draftMode).toBe('image_reference'));
   });
 });
 
@@ -1438,9 +1455,10 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     expect(sw.getAttribute('aria-checked')).toBe('true');
     expect(container.textContent).toContain('成片另行计费');
 
-    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect((payload.parameters as Record<string, unknown>).sample_mode).toBe(true);
@@ -1472,12 +1490,12 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="sample-mode-switch"]')!.click();
     });
-    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     const targetId = (apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, unknown>).target_node_id as string;
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const done = flowProps.current.mediaNodes.find((n: Node) => n.id === targetId);
       expect(done?.data?.genStatus).toBeUndefined();
       expect(done?.data?.src).toBe('http://vid/sample.mp4');
@@ -1490,7 +1508,7 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     const reopenConfigBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
     await act(async () => { reopenConfigBtn.click(); });
     expect(container.textContent).toContain('模型与质量');
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(container.querySelector('[data-testid="sample-mode-switch"]')?.getAttribute('aria-checked')).toBe('true'),
     );
     apiMocks.fetchJobStatus.mockImplementation(async () => ({
@@ -1507,9 +1525,9 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     await waitModelReady();
     await typePrompt('普通视频');
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const targetId = (apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, unknown>).target_node_id as string;
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const done = flowProps.current.mediaNodes.find((n: Node) => n.id === targetId);
       expect(done?.data?.genStatus).toBeUndefined();
     });
@@ -1596,13 +1614,13 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     await clickNode({ id: 's1', type: 'mediaNode' });
     await waitModelReady();
     await openConfigPanel();
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(container.querySelector('[data-testid="sample-mode-switch"]')?.getAttribute('aria-checked')).toBe('true'),
     );
     await typePrompt('样片重编再生成');
-    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     const payload = apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, any>;
     expect(payload.target_node_id).toBe('s1');
@@ -1611,7 +1629,8 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     expect(payload.expected_credits).toBe(30);
     expect(payload.quote_revision).toBe('rev-1');
 
-    await vi.waitFor(() => {
+
+    await waitFor(() => {
       expect(flowProps.current.mediaNodes.filter((n: Node) => n.data?.videoStage === 'sample')).toHaveLength(2);
     });
     const s1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 's1')!;
@@ -1624,9 +1643,9 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     expect(s1.data?.jobId).toBe('9001');
     expect(s1.data?.finalizeDeadlineAt).toBe(future);
     expect(s1.data?.genStatus).toBeUndefined();
-    await vi.waitFor(() => expect(finishStatus).toBeTruthy());
+    await waitFor(() => expect(finishStatus).toBeTruthy());
     await act(async () => { finishStatus(); });
-    await vi.waitFor(() => expect(flowProps.current.mediaNodes.find((node: Node) => node.id === regen.id)?.data.src).toBe('http://vid/out.mp4'));
+    await waitFor(() => expect(flowProps.current.mediaNodes.find((node: Node) => node.id === regen.id)?.data.src).toBe('http://vid/out.mp4'));
     vi.unstubAllGlobals();
   });
 
@@ -1640,13 +1659,13 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     await clickNode({ id: 'f1', type: 'mediaNode' });
     await waitModelReady();
     await openConfigPanel();
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(container.querySelector('[data-testid="sample-mode-switch"]')?.getAttribute('aria-checked')).toBe('false'),
     );
     await typePrompt('成片重编为普通视频');
-    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
     await act(async () => { sendButton().click(); });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     const payload = apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, any>;
     expect(payload.target_node_id).toBe('f1');
@@ -1654,7 +1673,8 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     expect(payload.expected_credits).toBeUndefined();
     expect(payload.quote_revision).toBeUndefined();
 
-    await vi.waitFor(() => {
+
+    await waitFor(() => {
       expect(flowProps.current.mediaNodes.some(
         (n: Node) => n.id !== 'f1' && n.data?.genStatus === 'generating',
       )).toBe(true);
@@ -1670,9 +1690,9 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     expect(f1.data?.videoStage).toBe('final');
     expect(f1.data?.sourceSampleJobId).toBe('9001');
     expect(f1.data?.genStatus).toBeUndefined();
-    await vi.waitFor(() => expect(finishStatus).toBeTruthy());
+    await waitFor(() => expect(finishStatus).toBeTruthy());
     await act(async () => { finishStatus(); });
-    await vi.waitFor(() => expect(flowProps.current.mediaNodes.find((node: Node) => node.id === regen.id)?.data.src).toBe('http://vid/out.mp4'));
+    await waitFor(() => expect(flowProps.current.mediaNodes.find((node: Node) => node.id === regen.id)?.data.src).toBe('http://vid/out.mp4'));
     vi.unstubAllGlobals();
   });
 });

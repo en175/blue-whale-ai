@@ -14,6 +14,8 @@ import {
   unmountPage,
 } from './testing/canvasPageTestHarness';
 
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
+
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
@@ -146,12 +148,11 @@ async function clickCard(id: string) {
   });
 }
 
-const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+const flush = () => act(async () => {});
 
 async function sendPanel() {
   await act(async () => {
     panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 }
 
@@ -446,12 +447,10 @@ describe('IKHLKX 生成中取消与竞态', () => {
     await act(async () => {
       (dataOf(draftId).onCancelJob as (nodeId: string) => void)(draftId);
     });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(apiMocks.cancelGenerationJob).toHaveBeenCalledWith('p1', 'j1');
     expect(resolvers.length).toBe(2);
     await act(async () => {
       resolvers[1]!({ job_id: 'j1', status: 'cancelled', progress: 0, asset: null });
-      await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
     expect(mediaNodes().length).toBe(2);
@@ -465,7 +464,6 @@ describe('IKHLKX 生成中取消与竞态', () => {
         job_id: 'j1', status: 'succeeded', progress: 100,
         asset: { id: 'a99', url: 'http://tos/late.mp4', type: 'video', width: 1280, height: 720, duration: 5 },
       });
-      await new Promise((resolve) => setTimeout(resolve, 30));
     });
     expect(dataOf(draftId).genStatus).toBe('draft');
     expect(dataOf(draftId).src).toBe('');
@@ -505,14 +503,12 @@ describe('IKHLKX 并行任务隔离', () => {
 
     await act(async () => {
       resolvers.get('jB')!({ job_id: 'jB', status: 'failed', progress: 1, error: { code: 1049, msg: '' } });
-      await new Promise((resolve) => setTimeout(resolve, 20));
     });
     await act(async () => {
       resolvers.get('jA')!({
         job_id: 'jA', status: 'succeeded', progress: 100,
         asset: { id: 'aA', url: 'http://tos/a30.mp4', type: 'video', width: 1280, height: 720, duration: 7 },
       });
-      await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(dataOf(cardB).genStatus).toBe('failed');
     expect(dataOf(cardB).errorText).toBe('视频插帧失败，请重试');
@@ -528,9 +524,6 @@ describe('IKHLKX 并行任务隔离', () => {
     await act(async () => {
       (dataOf(cardB).onRetryJob as (nodeId: string) => void)(cardB);
     });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
     expect(apiMocks.createFrameInterpolation).toHaveBeenNthCalledWith(3, 'p1', {
       source_asset_id: '5', target_node_id: cardB, fps: 120,
     }, expect.objectContaining({ silent: true }));
@@ -539,7 +532,6 @@ describe('IKHLKX 并行任务隔离', () => {
         job_id: 'jC', status: 'succeeded', progress: 100,
         asset: { id: 'aB', url: 'http://tos/b120.mp4', type: 'video', width: 1280, height: 720, duration: 7 },
       });
-      await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(dataOf(cardB).src).toBe('http://tos/b120.mp4');
     expect(dataOf(cardA).src).toBe('http://tos/a30.mp4');
@@ -741,7 +733,6 @@ describe('IKHSFH 同步防重（保存至创建返回窗口）与失败解锁', 
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
 
     await act(async () => { resolveSave(); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
 
     await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });

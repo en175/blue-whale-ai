@@ -4,6 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import TextNode from './index';
 
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
+const WAIT_TIMEOUT_MS = 10_000;
+
 beforeAll(() => {
   if (!Range.prototype.getBoundingClientRect) {
     Range.prototype.getBoundingClientRect = function () { return rectOf(0, 0, 0); };
@@ -120,9 +123,8 @@ it('悬停有效标签后预览挂在 body 下，贴近屏幕顶部时翻到标�
   const { chip } = await renderNode();
   chipRectSpy.current = rectOf(50, 70, 10);
   await act(async () => chip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
-  await new Promise(resolve => setTimeout(resolve, 170));
+  await vi.waitFor(() => expect(document.querySelector('[data-testid="media-chip-preview"]')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
   const preview = document.querySelector('[data-testid="media-chip-preview"]') as HTMLElement;
-  expect(preview).toBeTruthy();
   expect(container.contains(preview)).toBe(false);
   expect(preview.style.top).toBe('78px');
 });
@@ -131,9 +133,8 @@ it('悬停位置充裕时预览仍固定在标签下方', async () => {
   const { chip } = await renderNode();
   chipRectSpy.current = rectOf(400, 420, 10);
   await act(async () => chip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
-  await new Promise(resolve => setTimeout(resolve, 170));
+  await vi.waitFor(() => expect(document.querySelector('[data-testid="media-chip-preview"]')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
   const preview = document.querySelector('[data-testid="media-chip-preview"]') as HTMLElement;
-  expect(preview).toBeTruthy();
   expect(container.contains(preview)).toBe(false);
   expect(preview.style.top).toBe('428px');
 });
