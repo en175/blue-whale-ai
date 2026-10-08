@@ -20,6 +20,9 @@ import MediaNode from './components/MediaNode';
 import { VIDEO_ENHANCE_EDGE_ORIGIN } from './videoEnhance';
 import { toast } from 'sonner';
 import type { GenerationModel } from '@/api/generation';
+import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
+
+silenceApiConsoleInfo();
 
 /* sonner 替身：IKJPM7 真实链用例的 HTTP 层默认 toast 观测点（IKI8L4 先例）。
    页面本地 showToast 为独立 state 渲染，不受影响。 */

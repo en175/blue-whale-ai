@@ -97,6 +97,8 @@ vi.mock('@/api/canvas', () => ({
   listLegacyCardHistory: apiMocks.listLegacyCardHistory,
 }));
 
+vi.mock('@/api/generation', () => ({ fetchGenerationModels: vi.fn(async () => []) }));
+
 vi.mock('@/api/jobs', () => ({
   createGenerationJob: vi.fn(),
   cancelGenerationJob: vi.fn(),
