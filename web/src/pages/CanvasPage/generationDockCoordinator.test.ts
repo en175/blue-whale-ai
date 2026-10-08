@@ -23,7 +23,7 @@ function imageHost(nodes: Node[]): ImageGenerationDockHost {
 describe('生成 Dock 公开协调接口', () => {
   it('无参渲染自动消费注册定义，工具渲染归属由注册元数据派生', () => {
     const definition = (text: string, tool = false) => ({
-      tool, view: () => ({ visible: true }), open(_input: {}) {}, hide() {}, close() {}, updateDraft(_input: never) {}, submit(_input: never) {}, render: () => createElement('span', null, text),
+      tool, view: () => ({ visible: true }), open(_input: Record<string, unknown>) {}, hide() {}, close() {}, updateDraft(_input: never) {}, submit(_input: never) {}, render: () => createElement('span', null, text),
     });
     const dock = createGenerationDockCoordinator({ existing: definition('既有'), added: definition('新注册'), managed: definition('工具', true) });
     expect(renderToStaticMarkup(createElement(Fragment, null, dock.render()))).toContain('新注册');
@@ -41,7 +41,7 @@ describe('生成 Dock 公开协调接口', () => {
       }
       let visible = false;
       return {
-        view: () => ({ visible }), open: (_entry: {}) => { visible = true; },
+        view: () => ({ visible }), open: (_entry: Record<string, unknown>) => { visible = true; },
         hide: () => { visible = false; }, close: () => { visible = false; },
         updateDraft: (_input: never) => {}, submit: (_input: never) => {},
       };
@@ -127,7 +127,7 @@ describe('图片 Dock 草稿与选择', () => {
     const dock = createGenerationDockCoordinator({
       image: createImageGenerationDock(() => host),
       video: {
-        view: () => ({ visible: otherVisible }), open: (_entry: {}) => { otherVisible = true; },
+        view: () => ({ visible: otherVisible }), open: (_entry: Record<string, unknown>) => { otherVisible = true; },
         hide: () => { otherVisible = false; }, close: () => { otherVisible = false; },
         updateDraft: (_input: never) => {}, submit: (_input: never) => {},
       },

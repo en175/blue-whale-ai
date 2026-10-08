@@ -64,7 +64,7 @@ export function setupAudioMixRecovery(options: {
     }],
   ]);
   let edges: FakeEdge[] = [];
-  let project: string | null = 'p1';
+  const project: string | null = 'p1';
   let epoch = {};
   let inFlight = false;
   let nodeSeq = 0;

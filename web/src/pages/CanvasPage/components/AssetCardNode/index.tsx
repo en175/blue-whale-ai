@@ -46,7 +46,7 @@ const NOWHEEL = 'nowheel';
 /** Agent 生成卡数据（kind=generation 时承载，落画布后从节点选引用）
  * 字段复用会话层的 GenerationCardBlock（唯一形状定义）；IKDLQL 起旧卡只读兼容：
  * 双正文编辑、「引用到 dock」「给 Agent」活动路径已退役，引用统一走顶部「添加到对话」。 */
-export interface GenerationCardNodeData extends Partial<GenerationCardBlock> {}
+export type GenerationCardNodeData = Partial<GenerationCardBlock>;
 
 export interface AssetCardNodeData {
   kind?: AssetCardKind;
