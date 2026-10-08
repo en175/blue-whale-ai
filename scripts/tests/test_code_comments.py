@@ -106,6 +106,7 @@ class CodeCommentsTest(unittest.TestCase):
                               'value = 1  # noqa: F841\n')
         self.stage('main.sh', '#!/bin/sh\n# shellcheck disable=SC2086\necho $value\n')
         self.stage('main.sql', '/*!40101 SET NAMES utf8mb4 */;\n')
+        self.stage('main.test.tsx', '// @vitest-environment jsdom\nimport { it } from "vitest";\n')
         self.assert_status(0)
 
     def test_does_not_treat_bang_comments_or_attached_prose_as_tools(self):

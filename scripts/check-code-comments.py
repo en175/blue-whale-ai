@@ -24,7 +24,7 @@ DIRECTIVE = re.compile(
     r'^(?:@ts-(?:expect-error|ignore|check|nocheck)\b|eslint-(?:disable|enable)(?:-next-line|-line)?\b|'
     r'prettier-ignore\b|(?:istanbul|c8|v8) ignore\b|noinspection\b|noqa\b|type:\s*ignore\b|'
     r'(?:mypy|pyright|ruff|fmt|isort|shellcheck):?\s|go:|\+build\s|'
-    r'source(?:Mapping)?URL=|@jsx(?:Runtime|ImportSource)?\s|[#@]__PURE__|'
+    r'source(?:Mapping)?URL=|@jsx(?:Runtime|ImportSource)?\s|@vitest-environment\b|[#@]__PURE__|'
     r'\+goose\s|(?:migrate|liquibase):)', re.I,
 )
 LICENSE = re.compile(r'^(?:SPDX-License-Identifier:|@license\b|Copyright\b|Licensed under\b|'
