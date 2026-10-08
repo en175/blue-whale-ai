@@ -30,21 +30,6 @@ describe("ImageCutoutsController.create", () => {
   beforeEach(() => {
     vi.mocked(enqueueImageCutoutJob).mockReset();
   });
-
-  it("seals the requester sk- token and passes it to the service as internal", async () => {
-    const { controller, service } = makeController();
-    const result = await controller.create(
-      { userId: "9" } as never,
-      "55",
-      { source_asset_id: "88" },
-      "Bearer sk-live-token",
-    );
-    expect(result.code).toBe(200);
-    expect(service.create).toHaveBeenCalledWith("9", "55", { source_asset_id: "88" }, {
-      providerCredential: "sk-live-token",
-    }, undefined);
-  });
-
   it("enqueues the created job and returns the result unchanged", async () => {
     const { controller, service } = makeController();
     vi.mocked(enqueueImageCutoutJob).mockResolvedValue(undefined);

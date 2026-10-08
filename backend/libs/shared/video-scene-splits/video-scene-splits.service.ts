@@ -99,9 +99,6 @@ export class VideoSceneSplitsService {
     userId: string,
     projectId: string,
     body: Record<string, unknown>,
-    // 与去字幕 / HD / 音视频分离同构（video-subtitle-erasures.service.ts 的 internal 形参）：
-    // 请求方 sk- 凭证冻结进 job input.provider_credential，worker 处理时直接取用。
-    internal: { providerCredential?: string } = {},
   ) {
     // client_token 是业务键之上的基础设施键（不进契约 zod——它校验业务 payload；token 的
     // 消费方是 command_idempotency 表，不冻结进 job input）：先行剥离再过契约 schema。
@@ -229,15 +226,7 @@ export class VideoSceneSplitsService {
         return fail(FAILURE_CODE, "暂支持 2 小时以内的视频场景切分");
       }
 
-      // 契约 schema parse 后原样冻结（重试原样沿用）。provider_credential 是业务键之上的
-      // 基础设施键（不进契约 zod——凭证由服务端注入）：请求方 sk- 明文冻结进 job input，
-      // worker（worker 票按附录 C 注册的处理器）处理时直接取用；未携带/非 sk- 时不写键。
-      const frozenInput: VideoSceneSplitInput & { provider_credential?: string } = {
-        ...input,
-        ...(internal.providerCredential
-          ? { provider_credential: internal.providerCredential }
-          : {}),
-      };
+      const frozenInput: VideoSceneSplitInput = { ...input };
 
       const job = await tx.generation_jobs.create({
         data: {

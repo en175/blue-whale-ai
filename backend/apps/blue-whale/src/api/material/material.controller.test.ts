@@ -57,7 +57,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     await controller.callAction(
       "CreateAsset",
-      "Bearer sk-test",
       {
         GroupId: "group-1",
         URL: "https://cdn.test/a.jpg",
@@ -71,7 +70,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     // 透传：SourceAssetId 剥离，上游请求体保持原样。
     expect(material.callAction).toHaveBeenCalledWith(
-      "Bearer sk-test",
       "CreateAsset",
       {
         GroupId: "group-1",
@@ -105,7 +103,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     await controller.callAction(
       "CreateAsset",
-      "Bearer sk-test",
       { GroupId: "group-1", URL: "https://cdn.test/b.jpg", Name: "b", AssetType: "Video" },
       res,
       { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
@@ -131,7 +128,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     await controller.callAction(
       "DeleteAsset",
-      "Bearer sk-test",
       { Id: "asset-del-1" },
       res,
       { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
@@ -150,7 +146,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     await controller.callAction(
       "DeleteAssetGroup",
-      "Bearer sk-test",
       { Id: "group-del-1" },
       res,
       { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
@@ -171,7 +166,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     await controller.callAction(
       "DeleteAssetGroup",
-      "Bearer sk-test",
       { Id: "group-del-1" },
       res,
       { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
@@ -192,7 +186,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     await controller.callAction(
       "CreateAsset",
-      "Bearer sk-test",
       { GroupId: "g", URL: "u", Name: "n", AssetType: "Image", SourceAssetId: "1" },
       res,
       { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
@@ -214,7 +207,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
     await expect(
       controller.callAction(
         "CreateAsset",
-        "Bearer sk-test",
         { GroupId: "g", URL: "u", Name: "n", AssetType: "Image", SourceAssetId: "7" },
         res,
         { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
@@ -234,14 +226,12 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     await controller.callAction(
       "ListAssetGroups",
-      "Bearer sk-test",
       { PageNumber: 1, PageSize: 20 },
       res,
       { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
     );
 
     expect(material.callAction).toHaveBeenCalledWith(
-      "Bearer sk-test",
       "ListAssetGroups",
       { PageNumber: 1, PageSize: 20 },
     );
@@ -260,7 +250,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     await controller.callAction(
       "CreateAsset",
-      "Bearer sk-test",
       { URL: "https://cdn.test/v.png", Name: "v", AssetType: "Image", SourceAssetId: "88" },
       res,
       { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
@@ -268,12 +257,10 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     // 建组被触发（前端不传组，后端兜底建虚拟组）。
     expect(material.ensureVirtualDefaultGroup).toHaveBeenCalledWith(
-      "Bearer sk-test",
       "9",
     );
     // 透传：SourceAssetId 剥离，GroupId 被强制替换为虚拟组 id。
     expect(material.callAction).toHaveBeenCalledWith(
-      "Bearer sk-test",
       "CreateAsset",
       {
         GroupId: "group-virt-1",
@@ -301,7 +288,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     await controller.callAction(
       "CreateAsset",
-      "Bearer sk-test",
       { GroupId: "group-real-1", URL: "https://cdn.test/r.png", Name: "r", AssetType: "Image", SourceAssetId: "77" },
       res,
       { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
@@ -310,7 +296,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
     // 已传 GroupId → 不建虚拟组。
     expect(material.ensureVirtualDefaultGroup).not.toHaveBeenCalled();
     expect(material.callAction).toHaveBeenCalledWith(
-      "Bearer sk-test",
       "CreateAsset",
       { GroupId: "group-real-1", URL: "https://cdn.test/r.png", Name: "r", AssetType: "Image" },
     );
@@ -330,7 +315,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
     await expect(
       controller.callAction(
         "CreateAsset",
-        "Bearer sk-test",
         { URL: "https://cdn.test/x.png", Name: "x", AssetType: "Image", SourceAssetId: "66" },
         res,
         { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
@@ -360,7 +344,6 @@ describe("MaterialController IKEXX8 组查询分流", () => {
 
     await controller.callAction(
       "ListAssetGroups",
-      "Bearer sk-test",
       { Filter: { GroupType: "AIGC" }, PageNumber: 1, PageSize: 10 },
       res,
       USER,
@@ -386,9 +369,9 @@ describe("MaterialController IKEXX8 组查询分流", () => {
     });
     const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
 
-    await controller.callAction("GetAssetGroup", "Bearer sk-test", { Id: "group-real-1" }, res, USER);
+    await controller.callAction("GetAssetGroup", { Id: "group-real-1" }, res, USER);
 
-    expect(material.callAction).toHaveBeenCalledWith("Bearer sk-test", "GetAssetGroup", {
+    expect(material.callAction).toHaveBeenCalledWith("GetAssetGroup", {
       Id: "group-real-1",
     });
     expect(res.json).toHaveBeenCalledWith({
@@ -414,7 +397,6 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
 
     await controller.callAction(
       "CreateAsset",
-      "Bearer sk-test",
       {
         GroupId: "group-9",
         URL: "https://cdn.test/a.jpg",
@@ -443,7 +425,6 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
 
     await controller.callAction(
       "CreateAsset",
-      "Bearer sk-test",
       { GroupId: "group-9", URL: "https://cdn.test/a.jpg", Name: "a", AssetType: "Image", SourceAssetId: "10086" },
       res,
       USER,
@@ -458,7 +439,7 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
     const { controller, material } = makeController({});
     material.callAction.mockResolvedValue({ status: 200, body: { ResponseMetadata: {}, Result: {} } });
 
-    await controller.callAction("DeleteAsset", "Bearer sk-test", { Id: "asset-del-1" }, okRes(), USER);
+    await controller.callAction("DeleteAsset", { Id: "asset-del-1" }, okRes(), USER);
 
     expect(material.clearMaterialStatus).toHaveBeenCalledWith("9", "asset-del-1");
   });
@@ -467,7 +448,7 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
     const { controller, material } = makeController({});
     material.callAction.mockResolvedValue({ status: 200, body: { ResponseMetadata: {}, Result: {} } });
 
-    await controller.callAction("DeleteAssetGroup", "Bearer sk-test", { Id: "group-del-1" }, okRes(), USER);
+    await controller.callAction("DeleteAssetGroup", { Id: "group-del-1" }, okRes(), USER);
 
     expect(material.clearMaterialStatusByGroup).toHaveBeenCalledWith("9", "group-del-1");
   });
@@ -492,7 +473,6 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
 
     await controller.callAction(
       "ListAssets",
-      "Bearer sk-test",
       { Filter: { GroupIds: ["group-9"], GroupType: "AIGC" }, PageNumber: 1, PageSize: 10 },
       okRes(),
       USER,
@@ -523,7 +503,7 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
       },
     });
 
-    await controller.callAction("GetAsset", "Bearer sk-test", { Id: "asset-one" }, okRes(), USER);
+    await controller.callAction("GetAsset", { Id: "asset-one" }, okRes(), USER);
 
     expect(material.mirrorMaterialStatuses).toHaveBeenCalledWith("9", [
       {
@@ -542,7 +522,7 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
       body: { ResponseError: { Code: "NotFound", Message: "not found" } },
     });
 
-    await controller.callAction("GetAsset", "Bearer sk-test", { Id: "asset-missing" }, okRes(), USER);
+    await controller.callAction("GetAsset", { Id: "asset-missing" }, okRes(), USER);
 
     expect(material.mirrorMaterialStatuses).not.toHaveBeenCalled();
   });
@@ -566,7 +546,6 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
 
     await controller.callAction(
       "ListAssets",
-      "Bearer sk-test",
       { Filter: { GroupIds: ["group-9"], GroupType: "AIGC" } },
       okRes(),
       USER,
@@ -604,7 +583,6 @@ describe("MaterialController —— 素材失败处置与本地优先（IKFYHJ�
 
     await controller.callAction(
       "ListAssets",
-      "Bearer sk-test",
       { Filter: { GroupIds: ["group-9"], GroupType: "AIGC" }, PageNumber: 1, PageSize: 10 },
       okRes(),
       USER,
@@ -614,7 +592,6 @@ describe("MaterialController —— 素材失败处置与本地优先（IKFYHJ�
     expect(material.handleUpstreamMaterialFailure).toHaveBeenCalledWith({
       userId: "9",
       materialId: "asset-bad",
-      authorization: "Bearer sk-test",
       errorCode: "Sensitive",
       errorMessage: "命中审核",
     });
@@ -629,7 +606,6 @@ describe("MaterialController —— 素材失败处置与本地优先（IKFYHJ�
 
     await controller.callAction(
       "ListAssets",
-      "Bearer sk-test",
       { Filter: { GroupIds: ["group-9"], GroupType: "AIGC" }, PageNumber: 1, PageSize: 10 },
       okRes(),
       USER,
@@ -648,7 +624,6 @@ describe("MaterialController —— 素材失败处置与本地优先（IKFYHJ�
     const res = okRes();
     await controller.callAction(
       "GetAsset",
-      "Bearer sk-test",
       { Id: "asset-bad" },
       res,
       USER,
@@ -667,7 +642,7 @@ describe("MaterialController —— 素材失败处置与本地优先（IKFYHJ�
       body: { Result: { Id: "asset-ok", Status: "Processing" } },
     });
 
-    await controller.callAction("GetAsset", "Bearer sk-test", { Id: "asset-ok" }, okRes(), USER);
+    await controller.callAction("GetAsset", { Id: "asset-ok" }, okRes(), USER);
 
     expect(material.callAction).toHaveBeenCalledTimes(1);
   });

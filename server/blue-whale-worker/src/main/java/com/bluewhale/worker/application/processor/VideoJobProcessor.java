@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
@@ -11,7 +12,6 @@ import com.bluewhale.worker.domain.contract.VideoSampleContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
@@ -35,40 +35,6 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * 视频作业处理器（video-job-runner.ts:195-376 runVideoJobStep 逐字移植）。
- * <p>
- * 编排流程（与音频/图片不同：视频是多步状态机，每步 = 一次 MQ 消费）：
- * <ol>
- *   <li>claimVideoJobById（富投影：pollCount/progress/providerTaskId/parentProviderTaskId）</li>
- *   <li>cancelRequested AND providerTaskId==null → cancelVideoBeforeDispatch</li>
- *   <li>providerTaskId==null → (a) parent-reuse 防双扣 → (b) buildSubmitRequest → submit →
- *       markProviderSubmitted → scheduleNext(5s)；IKIZQD：submit/finalize 前先落
- *       markSubmissionAttempt（processing→checking「提交中」），结果不明留 checking 锁定
- *       （不重提不退款），见 {@link #dispatchSubmission}</li>
- *   <li>providerTaskId!=null → poll → transient → rescheduleProviderPoll(5s)（与
- *       processing 共享 720 轮询预算，超限同归 provider_timeout）;
- *       pollCount>=720 → provider_timeout; succeeded+URL → relay → publishVideoResult;
- *       failed → failVideoJob</li>
- * </ol>
- * <p>
- * 错误码映射（附录 A video + video-job-runner.ts:357-375）：
- * <ul>
- *   <li>provider_credential_missing：缺少密封凭证 (:218-221)</li>
- *   <li>invalid_input：参数无效（buildSubmitRequest :598-606）</li>
- *   <li>invalid_reference / invalid_reference_type / invalid_reference_media / unsupported_input /
- *       reference_asset_unavailable / reference_limit_exceeded：参考校验</li>
- *   <li>provider_timeout：轮询超限 720 次 (:272-279)</li>
- *   <li>provider_failed：兜底 catch-all (:360-365)</li>
- *   <li>VideoProviderError.code：provider 层分类透传</li>
- *   <li>VideoInputError.code：输入校验码透传</li>
- * </ul>
- * <p>
- * 修正一：cost_reservations / actual_amount_fen / release_note 整体省略。
- * quota 偏差告警段 (:317-339) 保留注释但不实现（无 quotaToFen）。
- * <p>
- * 修正三：ARK provider 不移植——new-api 网关是唯一 provider。
- */
 @Component
 public class VideoJobProcessor implements JobProcessor {
 
@@ -210,7 +176,7 @@ public class VideoJobProcessor implements JobProcessor {
     private final JobStateMachineService stateMachine;
     private final JobFinalizer finalizer;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiVideoClient videoClient;
     private final TosVideoMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
@@ -221,13 +187,13 @@ public class VideoJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiVideoClient videoClient,
             TosVideoMediaRelay mediaRelay,
             @org.springframework.beans.factory.annotation.Qualifier("generationMessageProducer")
             GenerationMessageProducer producer
     ) {
-        this(stateMachine, finalizer, assetSource, credentialService, videoClient, mediaRelay, producer,
+        this(stateMachine, finalizer, assetSource, upstreamCredential, videoClient, mediaRelay, producer,
                 "video-" + hostname() + "-" + ProcessHandle.current().pid());
     }
 
@@ -235,7 +201,7 @@ public class VideoJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiVideoClient videoClient,
             TosVideoMediaRelay mediaRelay,
             GenerationMessageProducer producer,
@@ -244,7 +210,7 @@ public class VideoJobProcessor implements JobProcessor {
         this.stateMachine = stateMachine;
         this.finalizer = finalizer;
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.videoClient = videoClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
@@ -284,20 +250,12 @@ public class VideoJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 取明文凭证（修正四：去密，video-job-runner.ts:218-222）
-        Object credentialObj = claim.input().get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failVideo(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "视频任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[video] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failVideo(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "视频任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[video] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failVideo(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

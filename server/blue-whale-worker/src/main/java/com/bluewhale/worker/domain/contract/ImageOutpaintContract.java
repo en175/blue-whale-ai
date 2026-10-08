@@ -47,9 +47,6 @@ public final class ImageOutpaintContract {
     /** 右侧扩展比例（与火山 API 参数 expand_right 同名同值，相对原图短边，出站原样透传）。 */
     public static final String INPUT_KEY_EXPAND_RIGHT = "expand_right";
 
-    /** 基础设施键（六键之上、非客户端 payload）：用户 sk- 凭证由创建侧 controller 注入冻结，
-     *  不进 TS 侧 imageOutpaintInputSchema（strict 六键）；worker 处理时取本键出站鉴权
-     *  （与图片生成 / 高清放大同构）。 */
     public static final String INPUT_KEY_PROVIDER_CREDENTIAL = "provider_credential";
 
     // ========== 单方向扩展比例值域（相对原图短边；四键中至少一项大于 0，创建入口 refine 拦截零扩展） ==========

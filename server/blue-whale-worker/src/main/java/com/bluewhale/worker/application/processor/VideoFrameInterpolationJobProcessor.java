@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
@@ -12,7 +13,6 @@ import com.bluewhale.worker.domain.dto.PublishVideoFrameInterpolationDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoFrameInterpolationError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitInterpolateVideoClient;
@@ -32,54 +32,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * video_frame_interpolation（视频插帧，火山 MediaKit video-frame-interpolation）作业处理器
- * （IKHLKJ，父需求 IKHLES，附录 C 触点③）。编排与 {@link VideoEnhanceJobProcessor} 同构
- * （视频轮询骨架，每步 = 一次 MQ 消费，fencing / 租约 / claim-by-id 全部走视频件）：
- * <ol>
- *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
- *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（video_url + 整型 fps
- *       原样透传）→ markProviderSubmitted（存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误与 processing 续排**共用同一轮询预算**
- *       （pollCount 上限 720，超限一律 1049 终态并停止续排，IKHSFI）；failed →
- *       分类终态；completed → **立即下载转存（火山 video_url
- *       仅 24h 有效）** → 建 Asset（type=video / source='generated'）→ 终态 succeeded</li>
- * </ol>
- * 下载与转存复用 {@link TosVideoMediaRelay}（视频家族同套：fetch → video/ mime 校验 →
- * TOS 公开读 → md5）；结果 URL 24h 失效故**强依赖 TOS，不降级直存**（对齐 HD / 去字幕口径）。
- * <p>
- * 结果元数据（官方 result 四键 video_url / duration / resolution / fps）：宽高**取源 Asset
- * 近似值**——官方明示「插帧不改变分辨率，跟随原片」，故不复制 HD 的档位短边推导、也不设输入
- * 门槛（规格「输入分辨率上下限官方未明确 → 不设门槛」）；时长优先官方精确值、缺失回落源
- * duration_ms 换算；输出 fps 优先官方 result.fps、缺失回落冻结 input fps——resolution / fps
- * 落终态日志 payload（assets 无对应列，**不新增卡片 / 资产 fps 元数据链**，ADR-0113）。
- * <p>
- * 心跳续租沿用视频骨架的「每步释放租约 + 自投延迟消息」：claim 时取 420s 租约，submit / poll
- * 每步以 CAS 守卫（status='processing' + lease_owner + fencing_token）写状态并**显式释放租约**、
- * 自投 5s 延迟消息驱动下一步——租约不跨步累积，长任务不会因单步超时被 recovery 判孤儿重投；
- * completed 步的下载 + 转存落在同一 420s 租约窗口内（大文件余量，见 JobClaimService 常量注释）。
- * <p>
- * 取消（后端软取消入口对本类型生效：置 cancel_requested_at，无按 type 白名单）：每一步 claim
- * 读到 cancelRequested 即落**确定终态 cancelled**——未提交上游走家族既有
- * {@code cancelVideoBeforeDispatch}；已提交上游时官方无取消端点（上游任务不可撤），走
- * {@code cancelVideoAfterDispatch}（本仓侧停止接纳结果）。取消与结果返回的竞态由 fencing /
- * 终态权威裁决：两种写都要求 status='processing' + 当前 lease_owner + 当前 fencing_token，
- * 先生效的终态获胜，**已取消任务的迟到结果过不了 publish 守卫，不会把任务或卡片复活为成功**。
- * <p>
- * 错误码口径（数值 1049，无 worker 级自动重试，用户手动重试沿用冻结 input）：
- * <ul>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与视频 / HD 同构；凭证冻结在创建入口 IKHLK3）</li>
- *   <li>invalid_input：业务键缺失 / fps 三档枚举外（创建入口复核是权威，worker 兜底防御）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
- *       §5 分类信号（网关错误与火山 failed 双路），保留既有码投影</li>
- *   <li>video_frame_interpolation_failed（1049）：其余一律归并兜底——网关 provider_failed /
- *       提交超时 / 轮询超时（**瞬时错误与 processing 续排耗尽同一 720 次预算即落终态，
- *       不再无限轮询**，IKHSFI）/ 火山任务 failed（**含入口未前置判定的官方门槛拒绝**：目标帧率
- *       实际落在 [15,120] 外、输入规格不符、文件大小或时长超上游限制）/ 源素材不可用 /
- *       结果下载转存失败（超时也归并是家族口径：宁可不重试也不双跑），上游可读原因随 message
- *       透传前端投影</li>
- * </ul>
- */
 @Component
 public class VideoFrameInterpolationJobProcessor implements JobProcessor {
 
@@ -106,7 +58,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitInterpolateVideoClient interpolateVideoClient;
     private final TosVideoMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
@@ -118,7 +70,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitInterpolateVideoClient interpolateVideoClient,
             TosVideoMediaRelay mediaRelay,
             @Qualifier("videoFrameInterpolationMessageProducer")
@@ -130,7 +82,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.bySources(
                 VideoFrameInterpolationContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.interpolateVideoClient = interpolateVideoClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
@@ -202,20 +154,12 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             return;
         }
 
-        // 取明文凭证（基础设施键，per-job 冻结；与视频 / HD 同构，冻结在创建入口 IKHLK3）
-        Object credentialObj = claim.input().get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "视频插帧任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[video_frame_interpolation] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "视频插帧任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[video_frame_interpolation] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

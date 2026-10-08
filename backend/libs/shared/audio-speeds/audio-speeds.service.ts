@@ -49,9 +49,6 @@ export class AudioSpeedsService {
       speed?: unknown;
       canvas_binding?: unknown;
     },
-    // 与 audio_trim 同构（audio-trims.service.ts 的 internal 形参）：请求方 sk- 凭证
-    // 冻结进 job input.provider_credential，worker 切网关后直接取用；未携带/非 sk- 时不写键。
-    internal: { providerCredential?: string } = {},
     // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
     idempotencyKey?: string,
   ) {
@@ -128,11 +125,6 @@ export class AudioSpeedsService {
             progress: 0,
             input: {
               ...parsed.data,
-              // provider_credential 是业务键之上的基础设施键（不进契约 zod——audio_trim 同构）：
-              // 请求方 sk- 明文冻结，worker 切网关后直接取用；未携带/非 sk- 时不写键。
-              ...(internal.providerCredential
-                ? { provider_credential: internal.providerCredential }
-                : {}),
             },
             // 过去 60s：audio_speed 即时消费无延迟，next_action_at 必须 ≤ now 才能被 claim。
             // DATETIME(0) 秒精度会把 new Date() 进位到下一秒 → 同秒 claim 的 lte now 判 false，

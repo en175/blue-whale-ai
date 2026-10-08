@@ -100,17 +100,15 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
       return row.id.toString();
     }
 
-    /** 创建插帧任务（真实 HTTP POST）；headers 可带 Authorization（凭证冻结用例）与身份切换。 */
     async function createInterpolation(
       projectId: string,
       targetNodeId: string,
-      options: { authorization?: string; userId?: string } = {},
+      options: { userId?: string } = {},
     ) {
       const response = await fetch(`${base}/api/projects/${projectId}/video-frame-interpolations`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...(options.authorization ? { authorization: options.authorization } : {}),
           ...(options.userId ? { "x-test-user": options.userId } : {}),
         },
         body: JSON.stringify({
@@ -273,20 +271,6 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
       const { body } = await queryCurrent(projectId, "node-enqueue-failed");
       expect(body.code).toBe(200);
       expect(body.data).toMatchObject({ job_id: jobId, status: "failed" });
-    });
-
-    it("凭证不外泄：sk- 冻结进 job input（服务端可观测），恢复查询响应全文不含凭证", async () => {
-      const projectId = (await projects.create(OWNER, "IKHSFE 凭证")).id.toString();
-      const created = await createInterpolation(projectId, "node-credential", {
-        authorization: "Bearer sk-ikhsfe-live-token",
-      });
-      const row = await readJob(created.data.job_id as string);
-      expect(row?.input.provider_credential).toBe("sk-ikhsfe-live-token"); // 冻结在服务端
-
-      const { body } = await queryCurrent(projectId, "node-credential");
-      expect(body.code).toBe(200);
-      expect(JSON.stringify(body)).not.toContain("provider_credential");
-      expect(JSON.stringify(body)).not.toContain("sk-ikhsfe-live-token");
     });
   },
   60_000,

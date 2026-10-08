@@ -37,12 +37,6 @@ export const IMAGE_OUTPAINT_INPUT_KEYS = {
   expandRight: "expand_right",
 } as const;
 
-/** 基础设施键（六键之上、非客户端 payload）：用户 sk- 凭证由创建侧 controller 从
- *  authorization 头取出注入冻结（IKGLZV 审查 P0 口径，与图片生成/高清放大同构），
- *  不进 imageOutpaintInputSchema（strict 六键校验的是客户端提交参数）；
- *  worker 处理时取本键出站鉴权。单处定义防字面量漂移。 */
-export const IMAGE_OUTPAINT_PROVIDER_CREDENTIAL_KEY = "provider_credential";
-
 /** 单方向扩展比例值域（相对原图短边）：[0, 0.4]，0 表示该方向不扩；
  *  四键中至少一项 > 0（零扩展无任务意义，schema refine 拦截）。
  *  火山官方接口四参数默认各 0.1，但产品总是显式传值（初始框零扩展即传 0），不依赖官方默认。 */

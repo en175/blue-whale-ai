@@ -4,13 +4,13 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEnhanceError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitClient;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
@@ -33,29 +33,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * image_enhance（高清放大）作业处理器（契约 §14.5 / IKGM9D，附录 C 触点③）。
- * <p>
- * 编排流程：claim → 解析冻结 input 六键 → 解析源素材（公网 url 即 image_url）→
- * 取任务冻结的用户 sk- → 版本档映射与能力裁剪 → 经网关调 MediaKit 同步 enhance →
- * 立即下载结果图（火山 URL 仅 24h 有效）→ TOS 公开读转存 → 建 Asset（type=image,
- * source=generated）→ 终态 succeeded 收口（publishMediaExtractResult 同形态）。
- * 前端经 GET /api/jobs/:id 拿 Asset 按 input.target_node_id 回填目标高清卡（worker 不消费画布拓扑）。
- * <p>
- * 错误码口径（§14.5，无 worker 级自动重试，用户在原卡手动重试并沿用冻结 input）：
- * <ul>
- *   <li>invalid_input：六键缺失 / 枚举非法（创建入口 IKGM99 复核是权威，worker 兜底防御）</li>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与 image/audio 同构）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：
- *       NewApiErrorClassifier §5 分类信号，保留既有码投影</li>
- *   <li>image_enhance_failed：其余一律归并兜底（调用失败 / 超时 / 供应商错误
- *       （网关 success=false 返 400 且不扣费）/ 源素材不可用 / 结果下载转存失败），
- *       上游可读原因随 message 透传</li>
- * </ul>
- * <p>
- * 进度投影与图片任务同构：终态事件（status_changed，成功 progress=100 / 失败 error 投影），
- * 同步接口秒级返回无中间进度带。
- */
 @Component
 public class ImageEnhanceJobProcessor implements JobProcessor {
 
@@ -75,7 +52,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
     private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitClient mediaKitClient;
     private final TosMediaStorage tosService;
     private final String workerId;
@@ -86,7 +63,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitClient mediaKitClient,
             TosMediaStorage tosService
     ) {
@@ -95,7 +72,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.bySources(
                 ImageEnhanceContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.mediaKitClient = mediaKitClient;
         this.tosService = tosService;
         this.workerId = "enhance-" + hostname() + "-" + ProcessHandle.current().pid();
@@ -193,20 +170,12 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 取任务冻结的用户 sk-（与图片生成同构，修正四：明文直通）
-        Object credentialObj = input.get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "高清放大任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[image_enhance] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "高清放大任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[image_enhance] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

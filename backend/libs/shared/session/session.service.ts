@@ -30,16 +30,6 @@ type SessionPayload = {
   verifiedAt: number;
 };
 
-/**
- * 登录态会话（ADR-0062 #19 凭证分层）。浏览器只持 HttpOnly 会话 cookie 里的 `sess_` 令牌，
- * 会话映射存 Redis（7 天滑动 TTL）。
- *
- * <p>⚠️ **会话不再存上游 key**。它以前存每个用户自己的 `sk-`，后来 new-api 改成项目级统一
- * key，这里就变成**给每个用户存同一把 key**——那既是一份 7 天不过期的密钥副本，也让
- * 「管理端改了 key」对已登录用户不生效（他们手里那份是登录那一刻的快照）。现在 key 由
- * AuthGuard 按**当前配置**回注（`SystemSettingsService.requireUpstreamKey()`），
- * 轮换对全部在线会话立即生效。
- */
 @Injectable()
 export class SessionService implements OnModuleDestroy {
   private readonly redis: Redis;

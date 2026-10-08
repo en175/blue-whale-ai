@@ -40,10 +40,6 @@ export const AUDIO_SPEED_SOURCE = "dock";
  *  .TRANSFER_OUTPUT_FORMAT（Java 无法 import TS，双端一致性测试读源码文本对账同值）。 */
 export const AUDIO_SPEED_OUTPUT_FORMAT = "m4a";
 
-/** input 冻结键名（创建时定死，重试原样沿用）。
- *  基础设施键 provider_credential 在业务键之上由创建侧冻结落库（同 audio-trim 先例，
- *  不进本 zod——它校验的是客户端 payload，凭证来自请求头冻结）。
- *  speed 是**可选键**：贴原速省略口径（见 buildAudioSpeedInput）下不传。 */
 export const AUDIO_SPEED_INPUT_KEYS = {
   /** 源素材身份（被调速的音频 Asset id）。 */
   sourceAssetId: "source_asset_id",

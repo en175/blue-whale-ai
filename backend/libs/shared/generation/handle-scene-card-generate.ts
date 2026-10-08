@@ -47,7 +47,6 @@ export async function handleSceneCardGenerate(
   body: string,
   deps: SceneCardGenerationRepo,
   options?: {
-    providerCredential?: string;
     /** IKF YHJ（ADR-0087）：素材校验门。场景卡再生成是第三条视频创建路径，
      *  与创建期/重试期共用同一个门实现；缺省不接（未接线时行为与改造前一致）。 */
     materialGate?: MaterialGate;
@@ -85,9 +84,6 @@ export async function handleSceneCardGenerate(
     reference_mode: parsed.data.reference_mode,
     reference_assets: parsed.data.reference_assets,
     capability_snapshot_version: parsed.data.capability_snapshot_version,
-    ...(options?.providerCredential
-      ? { provider_credential: options.providerCredential }
-      : {}),
     ...(options?.materialGate
       ? {
           guardInput: (jobInput: Record<string, unknown>) =>

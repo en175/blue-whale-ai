@@ -358,25 +358,6 @@ export class IdentityService {
       : null;
   }
 
-  /**
-   * 修改口令 —— 校验原密码后写**我们自己的库**（`bw_users.password`）。
-   *
-   * <h2>为什么不再转发 new-api</h2>
-   *
-   * 原先这条走网关的 `PUT /api/user/self`，而会话里能回注的只有那把**项目级统一
-   * key**——等于拿一把跟这个用户无关的凭证去校验「原密码」。new-api 独立之后
-   * 那边更没有我们的用户，这条链路整个消失。
-   *
-   * <p>两处刻意：**先验原密码、再判新口令策略**（原密码就不对时，不该顺带告诉
-   * 调用方新口令合不合规）；以及原密码错误只报 {@link InvalidCredentialsError}——
-   * 与 {@link login} 同口径，不区分「账号没设过口令」和「密码错」。
-   *
-   * @returns 本次是不是**强制改密**（进入时账号正被管理员重置过）。
-   *          调用方据此决定会话吊销范围：强制改密时当前会话必须**留下**，
-   *          否则用户刚登进来、被迫改完密码、立刻又被踢出去（IKJABH 任务 5）。
-   * @throws InvalidCredentialsError 用户不存在 / 账号有口令但原密码不匹配
-   * @throws PasswordPolicyError 新口令短于下限或超过 bcrypt 的 72 字节上限
-   */
   async changePassword(
     userId: string | number,
     input: { oldPassword?: string | undefined; newPassword: string },

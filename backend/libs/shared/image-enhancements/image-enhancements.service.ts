@@ -67,8 +67,6 @@ export class ImageEnhancementsService {
     userId: string,
     projectId: string,
     body: Record<string, unknown>,
-    // 与图片生成同构（handle-create-generation-job.ts 的 internal 形参）：请求方 sk- 凭证冻结进 job。
-    internal: { providerCredential?: string } = {},
     // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
     idempotencyKey?: string,
   ) {
@@ -140,16 +138,7 @@ export class ImageEnhancementsService {
     }
 
     // 契约 schema parse 后原样冻结（六键恒在、重试原样沿用，§14.2）。
-    // provider_credential 是六键之上的基础设施键（不进契约 zod——它校验的是客户端 payload，
-    // 凭证由服务端注入）：与图片生成同构（handle-create-generation-job.ts 修正四，凭证去密），
-    // 请求方 sk- 明文冻结进 job input，worker（ImageEnhanceJobProcessor）处理时直接取用；
-    // 未携带/非 sk- 时不写键。契约 strict 六键口径不变。
-    const frozenInput: ImageEnhanceInput & { provider_credential?: string } = {
-      ...input,
-      ...(internal.providerCredential
-        ? { provider_credential: internal.providerCredential }
-        : {}),
-    };
+    const frozenInput: ImageEnhanceInput = { ...input };
 
     // IKJJQW：受理主体走共享段（B.3）——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 →
     // 幂等行」一个事务；无 canvas_binding 时建行路径与接入前一致。前置回读 miss 后此处

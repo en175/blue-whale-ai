@@ -9,7 +9,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.ProjectEventPublisher;
 import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
 import com.bluewhale.worker.application.service.StoryboardPreviewSync;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
@@ -31,6 +31,9 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import javax.sql.DataSource;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** The public API test creates the job and verifies the HTTP provider request and resulting job.
  * This runner drives the real Java processor, mappers and isolated database, without internal mocks.
@@ -94,9 +97,11 @@ class PromptPlanVideoIntegrationTest {
                     return new StoredVideo(url, null, "video/mp4", 100L, "0123456789abcdef0123456789abcdef");
                 }
             };
+            UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+            when(upstreamCredential.requireKey()).thenReturn("sk-integration-token");
             var processor = new VideoJobProcessor(context.getBean(JobStateMachineService.class),
                     context.getBean(JobFinalizer.class),
-                    context.getBean(AssetSourceService.class), new GenerationCredentialService(),
+                    context.getBean(AssetSourceService.class), upstreamCredential,
                     new NewApiVideoClient(new UpstreamBaseUrl(System.getenv("IKETSX_PROVIDER_URL"))), relay, queue);
             processor.handle(System.getenv("IKETSX_JOB_ID"));
             Thread.sleep(5500);

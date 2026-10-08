@@ -69,8 +69,6 @@ export class VideoFrameInterpolationsService {
     userId: string,
     projectId: string,
     body: Record<string, unknown>,
-    // 与 HD 高清同构（video-enhancements.service.ts 的 internal 形参）：请求方 sk- 凭证冻结进 job。
-    internal: { providerCredential?: string } = {},
     // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
     idempotencyKey?: string,
   ) {
@@ -123,15 +121,7 @@ export class VideoFrameInterpolationsService {
     // 交供应商按官方限制拒（与去字幕 / HD 同口径：缺权威值不臆造、不拦）。
 
     // 契约 schema parse 后原样冻结（重试原样沿用；fps 缺省已补默认值，落库恒为三档之一）。
-    // provider_credential 是业务键之上的基础设施键（不进契约 zod——它校验的是客户端 payload，
-    // 凭证由服务端注入）：与去字幕 / HD 同构，请求方 sk- 明文冻结进 job input，
-    // worker（IKHLKJ 按附录 C 注册的处理器）处理时直接取用；未携带/非 sk- 时不写键。
-    const frozenInput: VideoFrameInterpolationInput & { provider_credential?: string } = {
-      ...input,
-      ...(internal.providerCredential
-        ? { provider_credential: internal.providerCredential }
-        : {}),
-    };
+    const frozenInput: VideoFrameInterpolationInput = { ...input };
 
     // job 先落库再投递（父单验收：创建后关页面不丢 job，任务可经既有 GET /api/jobs/:id 查询）。
     // IKJJQW：受理主体走共享段（B.3）——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 →
@@ -186,17 +176,6 @@ export class VideoFrameInterpolationsService {
     );
   }
 
-  /** 恢复查询（IKHSFE）：浏览器未收到创建响应就关页时，按「项目 + 目标节点」查回当前任务
-   *  的权威关联，供重新进入画布恢复。契约 = video-frame-interpolation.ts 的恢复查询节
-   *  （RECOVERY_* 常量与 schema）。
-   *  - 归属：先 project.findOwnedById 复核（非本人项目一律 404，不泄露存在性）；
-   *  - 判定：同 user + project + target_node_id 的未软删任务中 gmt_create/id 最新者为当前关联
-   *    （旧任务不得覆盖更新关联，不同卡互不串联），**不过滤 status**——入队失败兜底置 failed
-   *    的任务同样可查回；
-   *  - 外泄面：响应只回 job_id / status / progress / created_at，**不回 input**——
-   *    provider_credential 冻结在 job input，恢复查询不投影（详情走 GET /api/jobs/:id）。
-   *  JSON path 过滤（input.target_node_id）经实测在 Prisma 7 + mariadb adapter 生效
-   *  （path 须带 "$." 前缀，MySQL JSON 等值比较类型敏感）。 */
   async findCurrent(userId: string, projectId: string, query: Record<string, unknown>) {
     const parsed = videoFrameInterpolationRecoveryQuerySchema.safeParse(query ?? {});
     if (!parsed.success) {

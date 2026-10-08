@@ -143,7 +143,7 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       expect(created.code).toBe(200);
       const job = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(created.data.job_id) } });
       expect(job.input).toMatchObject({ source_node_id: "source-node", output_format: "mp3",
-        estimated_duration_ms: 12_500, provider_credential: "sk-test", inputs: [
+        estimated_duration_ms: 12_500, inputs: [
           { asset_id: String(source.id), node_id: "source-node", url: `${inputBase}/uploads/9/audio/source.mp3` },
           { asset_id: String(other.id), url: `${inputBase}/generated/9/audio/other.mp3` },
         ] });

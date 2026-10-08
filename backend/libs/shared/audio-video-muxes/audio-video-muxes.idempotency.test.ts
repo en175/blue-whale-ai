@@ -42,8 +42,8 @@ describe("audio video mux create idempotency", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, body: { cancel: vi.fn() } })));
     const service = new AudioVideoMuxesService({ client } as never, project as never, assets as never, storage as never);
 
-    const first = await service.create("9", "5", payload, { idempotencyKey: "one-click", providerCredential: "sk-old" });
-    const again = await service.create("9", "5", payload, { idempotencyKey: "one-click", providerCredential: "sk-new" });
+    const first = await service.create("9", "5", payload, { idempotencyKey: "one-click" });
+    const again = await service.create("9", "5", payload, { idempotencyKey: "one-click" });
     expect(first.data).toMatchObject({ job_id: "70", replayed: false, enqueue_required: true });
     expect(again.data).toMatchObject({ job_id: "70", replayed: true, enqueue_required: false });
     expect(client.generation_jobs.create).toHaveBeenCalledOnce();

@@ -368,31 +368,6 @@ describe("ImageErasuresService.create：落任务与免费口径", () => {
     expect(Object.keys(data)).not.toContain("provider");
   });
 });
-
-describe("ImageErasuresService.create：请求方凭证冻结（断链防护）", () => {
-  // 断链背景：worker（ImageEraseJobProcessor）只从 input.provider_credential 取请求方 sk-，
-  // 创建链路不冻结则必落 provider_credential_missing（先例：图片生成 / 高清放大）。
-  it("freezes the requester sk- token into job input (provider_credential)", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_TEXT_BODY, {
-      providerCredential: "sk-live-token",
-    });
-    expect(result.code).toBe(200);
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: { ...VALID_TEXT_BODY, provider_credential: "sk-live-token" },
-      }),
-    });
-  });
-
-  it("omits provider_credential when the requester carries no sk- token", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_AREA_BODY);
-    expect(result.code).toBe(200);
-    expect(create.mock.calls[0][0].data.input).toEqual(VALID_AREA_BODY);
-  });
-});
-
 describe("ImageErasuresService.create：恢复协议 v1 接入（IKJJQW）", () => {
   beforeEach(() => {
     readIdemMock.mockReset().mockResolvedValue(null);
@@ -416,7 +391,6 @@ describe("ImageErasuresService.create：恢复协议 v1 接入（IKJJQW）", () 
       "9",
       "55",
       { ...VALID_TEXT_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       SUBMISSION_ID,
     );
     expect(result.code).toBe(200);
@@ -436,7 +410,6 @@ describe("ImageErasuresService.create：恢复协议 v1 接入（IKJJQW）", () 
       "9",
       "55",
       { ...VALID_TEXT_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       "11111111-2222-4333-8444-555555555555",
     );
     expect(result.code).toBe(400);
@@ -450,7 +423,6 @@ describe("ImageErasuresService.create：恢复协议 v1 接入（IKJJQW）", () 
       "9",
       "55",
       { ...VALID_TEXT_BODY, canvas_binding: { protocol_version: 9 } },
-      {},
       SUBMISSION_ID,
     );
     expect(result.code).toBe(400);
@@ -471,7 +443,6 @@ describe("ImageErasuresService.create：恢复协议 v1 接入（IKJJQW）", () 
       "9",
       "55",
       { ...VALID_TEXT_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       SUBMISSION_ID,
     );
     expect(result.code).toBe(409);
@@ -487,7 +458,6 @@ describe("ImageErasuresService.create：恢复协议 v1 接入（IKJJQW）", () 
       "9",
       "55",
       { ...VALID_TEXT_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       SUBMISSION_ID,
     );
     expect(result.code).toBe(200);

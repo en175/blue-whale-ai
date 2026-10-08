@@ -6,7 +6,6 @@ import {
   VOCAL_SPLIT_SCENE_TRACKS,
 } from "@lib/contracts";
 
-import { publicGenerationInput } from "./generation-input.js";
 import {
   extraNumber,
   extraString,
@@ -347,7 +346,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
           type: r.type,
           status: r.status,
           progress: r.progress,
-          input: publicGenerationInput(r.input ?? null),
+          input: r.input ?? null,
           // canvas_card_state 缺键 = 'pending'（列默认值搬到扩展位后由缺键表达）。
           ...(r.type === "audio_mix"
             ? { canvas_card_state: extraString(extras, "canvas_card_state") ?? "pending" }

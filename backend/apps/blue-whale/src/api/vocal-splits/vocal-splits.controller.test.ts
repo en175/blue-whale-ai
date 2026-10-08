@@ -31,37 +31,6 @@ describe("VocalSplitsController.create", () => {
   beforeEach(() => {
     vi.mocked(enqueueVocalSplitJob).mockReset();
   });
-
-  it("seals the requester sk- token and passes it to the service as internal", async () => {
-    const { controller, service } = makeController();
-    const result = await controller.create(
-      { userId: "9" } as never,
-      "55",
-      { source_asset_id: "88", scene: "drama", output_format: "mp3" },
-      "Bearer sk-live-token",
-    );
-    expect(result.code).toBe(200);
-    expect(service.create).toHaveBeenCalledWith("9", "55", {
-      source_asset_id: "88",
-      scene: "drama",
-      output_format: "mp3",
-    }, {
-      providerCredential: "sk-live-token",
-    }, undefined);
-  });
-
-  it("passes an empty credential object when the requester carries no sk- token", async () => {
-    const { controller, service } = makeController();
-    const result = await controller.create(
-      { userId: "9" } as never,
-      "55",
-      { source_asset_id: "88" },
-      "Bearer not-an-sk-token",
-    );
-    expect(result.code).toBe(200);
-    expect(service.create).toHaveBeenCalledWith("9", "55", { source_asset_id: "88" }, {}, undefined);
-  });
-
   it("enqueues the created job and returns the result unchanged", async () => {
     const { controller, service } = makeController();
     vi.mocked(enqueueVocalSplitJob).mockResolvedValue(undefined);

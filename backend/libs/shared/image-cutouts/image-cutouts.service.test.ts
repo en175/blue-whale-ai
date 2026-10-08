@@ -412,31 +412,6 @@ describe("ImageCutoutsService.create：落任务与免费口径", () => {
     expect(Object.keys(data)).not.toContain("provider");
   });
 });
-
-describe("ImageCutoutsService.create：请求方凭证冻结（断链防护）", () => {
-  // 断链背景：worker（ImageCutoutJobProcessor）只从 input.provider_credential 取请求方 sk-，
-  // 创建链路不冻结则必落 provider_credential_missing（先例：图片生成 / 擦除）。
-  it("freezes the requester sk- token into job input (provider_credential)", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_GENERAL_BODY, {
-      providerCredential: "sk-live-token",
-    });
-    expect(result.code).toBe(200);
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: { ...VALID_GENERAL_BODY, provider_credential: "sk-live-token" },
-      }),
-    });
-  });
-
-  it("omits provider_credential when the requester carries no sk- token", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_HUMAN_BODY);
-    expect(result.code).toBe(200);
-    expect(create.mock.calls[0][0].data.input).toEqual(VALID_HUMAN_BODY);
-  });
-});
-
 describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理事务顺序）", () => {
   const SUBMISSION_ID = "0a1b2c3d-0000-4000-8000-00000000a001";
 
@@ -476,7 +451,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
       "9",
       "55",
       { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       SUBMISSION_ID,
     );
     expect(first.code).toBe(200);
@@ -496,7 +470,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
       "9",
       "55",
       { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       SUBMISSION_ID,
     );
     expect(replay.code).toBe(200);
@@ -521,7 +494,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
       "9",
       "55",
       { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       SUBMISSION_ID,
     );
     expect(first.code).toBe(200);
@@ -531,7 +503,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
       "9",
       "55",
       { ...VALID_HUMAN_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       SUBMISSION_ID,
     );
     expect(replay.code).toBe(100409);
@@ -548,7 +519,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
       "9",
       "55",
       { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       SUBMISSION_ID,
     );
     expect(result.code).toBe(100301);
@@ -563,7 +533,6 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
       "9",
       "55",
       { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
-      {},
       SUBMISSION_ID,
     );
     expect(result.code).toBe(100301);

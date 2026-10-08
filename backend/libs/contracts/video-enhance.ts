@@ -20,9 +20,6 @@ export const VIDEO_ENHANCE_JOB_TYPE = "video_enhance";
  *  source 白名单仅含本值（video_subtitle_erase / image_erase 的专属来源值同款模式）。 */
 export const VIDEO_ENHANCE_SOURCE = "video_enhance";
 
-/** input 冻结键名（三键恒在、值恒为合法枚举，创建时定死，重试原样沿用）。
- *  基础设施键 provider_credential 在业务键之上由创建侧冻结落库（同 video-subtitle-erase
- *  先例，不进本 zod——它校验的是客户端 payload，凭证来自请求头冻结）。 */
 export const VIDEO_ENHANCE_INPUT_KEYS = {
   /** 源素材身份（被增强的视频 Asset id；命名沿用 media_extract / video_subtitle_erase
    *  的 source_asset_id）。 */

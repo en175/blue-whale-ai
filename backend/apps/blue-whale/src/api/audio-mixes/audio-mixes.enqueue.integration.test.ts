@@ -14,6 +14,7 @@ import { ModelCapabilityReadService } from "@lib/shared/generation/model-capabil
 import { enqueueAudioMixJob } from "@lib/shared/generation/generation-queue.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AudioMixesController } from "./audio-mixes.controller.js";
@@ -75,7 +76,7 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
       // 造素材校验门（IKFYHJ / ADR-0087）自 MaterialService 取仓库面、自 AssetService 解析
       // 本地素材绑定；无输入素材的建单路径只建门不发起上游调用。
-      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: IdentityService, useValue: new IdentityService(prisma) },
     ] })(HarnessModule);

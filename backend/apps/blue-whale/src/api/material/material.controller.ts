@@ -1,5 +1,4 @@
 // 素材库透传镜像：POST /api/material/{Action}（对齐上游网关对外入口形状）。
-// - 鉴权：全局 AuthGuard 按登录会话校验并回注 Bearer sk-，本控制器不自建鉴权。
 // - Action 白名单在 MaterialService；请求体（含真人会话 CallbackURL，由前端传入）原样透传。
 // - 上游状态码与信封（ResponseMetadata/Result、ResponseError、真人会话直接格式）
 //   经 @Res 原样回传；因此类级 @BypassTransform，避免被统一信封二次包裹。
@@ -9,7 +8,7 @@
 //   本地 assets 的素材库关联字段（上游为权威，本地只做关联镜像；失败仅告警不阻断透传）。
 // - IKEXX8 组查询分流（契约 v2 §5）：ListAssetGroups(AIGC) / GetAssetGroup（本地命中）
 //   读 material_groups 返回上游同款信封、不打远程；其余（含真人组）透传不变，前端无感。
-import { Body, Controller, Headers, Param, Post, Res } from "@nestjs/common";
+import { Body, Controller, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -39,7 +38,6 @@ export class MaterialController {
   @Post(":action")
   async callAction(
     @Param("action") action: string,
-    @Headers("authorization") authorization: string | undefined,
     @Body() body: unknown,
     @Res() res: Response,
     @CurrentUser() user: AuthenticatedUser,
@@ -67,7 +65,6 @@ export class MaterialController {
       // 建组失败（拿不到虚拟组）抛错阻断，不静默拖到上游 400。
       if (user && !(payload as Record<string, unknown>).GroupId) {
         const groupId = await this.material.ensureVirtualDefaultGroup(
-          authorization,
           user.userId,
         );
         payload = { ...(payload as Record<string, unknown>), GroupId: groupId };
@@ -99,7 +96,7 @@ export class MaterialController {
       }
     }
 
-    const upstream = await this.material.callAction(authorization, action, payload);
+    const upstream = await this.material.callAction(action, payload);
     res.status(upstream.status).json(upstream.body);
 
     // IKDJNZ：关联旁路——仅上游 2xx 成功且当前用户可解析时执行；失败只告警，不阻断透传响应。
@@ -112,7 +109,6 @@ export class MaterialController {
           isRecord(body) && isRecord(payload) ? { ...body, ...payload } : payload,
           upstream.body,
           user.userId,
-          authorization,
         );
       } catch (error) {
         logger.error(
@@ -129,7 +125,6 @@ export class MaterialController {
     body: unknown,
     upstreamBody: unknown,
     userId: string,
-    authorization: string | undefined,
   ): Promise<void> {
     if (action === "CreateAsset") {
       const sourceAssetId = isRecord(body)
@@ -198,7 +193,6 @@ export class MaterialController {
           await this.material.handleUpstreamMaterialFailure({
             userId,
             materialId: entry.materialId,
-            authorization,
             errorCode: entry.errorCode ?? null,
             errorMessage: entry.errorMessage ?? null,
           });

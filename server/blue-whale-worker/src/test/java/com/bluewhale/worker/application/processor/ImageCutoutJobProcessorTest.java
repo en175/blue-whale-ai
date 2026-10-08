@@ -4,13 +4,13 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageCutoutDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageCutoutContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageCutoutError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitCutoutClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
@@ -68,7 +68,7 @@ class ImageCutoutJobProcessorTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiMediaKitCutoutClient mediaKitCutoutClient;
     @Mock private TosMediaStorage tosService;
 
@@ -81,7 +81,7 @@ class ImageCutoutJobProcessorTest {
         processor = new ImageCutoutJobProcessor(
                 claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
-                credentialService, mediaKitCutoutClient, tosService);
+                upstreamCredential, mediaKitCutoutClient, tosService);
         when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
@@ -113,7 +113,6 @@ class ImageCutoutJobProcessorTest {
         input.put("source_asset_id", "555");
         input.put("target_node_id", "node-abc");
         input.put("cutout_scene", "general");
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -126,7 +125,6 @@ class ImageCutoutJobProcessorTest {
         input.put("contour_color", "#FFFFFF");
         input.put("contour_size", 10);
         input.put("need_crop_background", true);
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -142,7 +140,7 @@ class ImageCutoutJobProcessorTest {
     private void stubClaim(Map<String, Object> input) {
         when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input)));
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
     }
 
     private void stubPublish() {
@@ -327,13 +325,15 @@ class ImageCutoutJobProcessorTest {
     }
 
     @Test
-    @DisplayName("缺冻结凭证 → provider_credential_missing（与 image/imageErase 同构）")
+    @DisplayName("上游凭证未配置 → provider_credential_missing（与 image/imageErase 同构）")
     void missingCredential_credentialMissing() {
         Map<String, Object> input = generalSceneInput();
-        input.remove("provider_credential");
         stubClaim(input);
         stubSourceAsset();
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);

@@ -54,7 +54,7 @@ export class AudioVideoMuxesService {
     userId: string,
     projectId: string,
     body: unknown,
-    internal: { providerCredential?: string; idempotencyKey?: string } = {},
+    internal: { idempotencyKey?: string } = {},
   ) {
     const parsed = audioVideoMuxCreateSchema.safeParse(body);
     if (!parsed.success) throw new DomainError(PARAM_MISSING_CODE, parsed.error.issues[0]?.message ?? "音视频合成参数非法");
@@ -213,7 +213,6 @@ export class AudioVideoMuxesService {
         sync: parsed.data.sync,
         estimated_duration_ms: estimatedDurationMs,
         submit_attempt: 1,
-        ...(internal.providerCredential ? { provider_credential: internal.providerCredential } : {}),
       },
       next_action_at: new Date(Date.now() - 60_000),
       execution_deadline_at: audioVideoMuxDeadline(estimatedDurationMs),

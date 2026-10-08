@@ -436,42 +436,6 @@ describe("VideoMattingsService.create：任务与占位数据同事务落库", (
     expect(tx.cost_reservations.create).not.toHaveBeenCalled();
   });
 });
-
-describe("VideoMattingsService.create：请求方凭证冻结（断链防护）", () => {
-  // 断链背景：worker（IKHK99 按附录 C 注册的处理器）只从 input.provider_credential 取请求方 sk-，
-  // 创建链路不冻结则必落 provider_credential_missing（先例：去字幕 / HD / 场景切分）。
-  it("freezes the requester sk- token into job input (provider_credential)", async () => {
-    const { service, tx } = makeService();
-    const result = await service.create("9", "55", VALID_BODY, {
-      providerCredential: "sk-live-token",
-    });
-    expect(result.code).toBe(200);
-    expect(tx.generation_jobs.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: {
-          source_asset_id: "88",
-          target_node_id: "node-1",
-          mode: "portrait",
-          format: "WEBM",
-          provider_credential: "sk-live-token",
-        },
-      }),
-    });
-  });
-
-  it("omits provider_credential when the requester carries no sk- token", async () => {
-    const { service, tx } = makeService();
-    const result = await service.create("9", "55", VALID_BODY);
-    expect(result.code).toBe(200);
-    expect(tx.generation_jobs.create.mock.calls[0][0].data.input).toEqual({
-      source_asset_id: "88",
-      target_node_id: "node-1",
-      mode: "portrait",
-      format: "WEBM",
-    });
-  });
-});
-
 describe("VideoMattingsService.create：恢复协议 v1 接入（IKJJQW）", () => {
   beforeEach(() => {
     lockMock.mockReset().mockImplementation(async (_tx: unknown, acceptance: { binding: unknown }) => ({

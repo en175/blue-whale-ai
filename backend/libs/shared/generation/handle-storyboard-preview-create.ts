@@ -54,7 +54,6 @@ export async function handleStoryboardPreviewCreate(
   body: string,
   deps: StoryboardPreviewRepo,
   options?: {
-    providerCredential?: string;
     quotaCheck?: () => Promise<{ sufficient: boolean }>;
   },
 ) {
@@ -93,11 +92,6 @@ export async function handleStoryboardPreviewCreate(
       reason: RECOVERY_REASONS.invalidPayload,
     });
   }
-  // 图片 worker 必须持有明文凭证（修正四：去密）；缺失时在任何事务写入前拒绝，避免创建必然失败的预览与 Job。
-  if (!options?.providerCredential) {
-    return fail(PARAM_MISSING_CODE, "缺少生成凭证");
-  }
-
   // IKJJR0：统一关联受理数据（operation 与幂等行同键；taskType 固定 image——
   // 分镜预览走图片通道，画格与视频通道物理隔离）。
   const requestHash = storyboardPreviewRequestHash(projectId, sceneCardId, body);
@@ -124,7 +118,6 @@ export async function handleStoryboardPreviewCreate(
       base_scene_card_version: parsed.data.base_scene_card_version,
       parameters: parsed.data.parameters,
       capability_snapshot_version: parsed.data.capability_snapshot_version,
-      provider_credential: options.providerCredential,
       ...(options?.quotaCheck ? { quotaCheck: options.quotaCheck } : {}),
       ...(canvasRecovery ? { canvasRecovery } : {}),
     });

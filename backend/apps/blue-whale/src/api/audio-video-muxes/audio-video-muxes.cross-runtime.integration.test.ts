@@ -160,7 +160,6 @@ describe.skipIf(process.env.IKIHPJ_CROSS_RUNTIME !== "1")("audio_video_mux cross
           sync,
           estimated_duration_ms: 33_000,
           submit_attempt: 1,
-          provider_credential: "sk-test",
         });
         const frozen = job.input as { audio: { url: string }; video: { url: string } };
         for (const slot of [frozen.audio, frozen.video]) {

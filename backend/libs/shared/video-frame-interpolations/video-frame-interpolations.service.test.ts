@@ -207,31 +207,6 @@ describe("VideoFrameInterpolationsService.create：落任务与免费口径", ()
     expect(Object.keys(data)).not.toContain("provider");
   });
 });
-
-describe("VideoFrameInterpolationsService.create：请求方凭证冻结（断链防护）", () => {
-  // 断链背景：worker（IKHLKJ 注册的处理器）只从 input.provider_credential 取请求方 sk-，
-  // 创建链路不冻结则必落 provider_credential_missing（先例：去字幕 / 图片生成 / HD 高清）。
-  it("freezes the requester sk- token into job input (provider_credential)", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_BODY, {
-      providerCredential: "sk-live-token",
-    });
-    expect(result.code).toBe(200);
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: { ...VALID_BODY, provider_credential: "sk-live-token" },
-      }),
-    });
-  });
-
-  it("omits provider_credential when the requester carries no sk- token", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_BODY);
-    expect(result.code).toBe(200);
-    expect(create.mock.calls[0][0].data.input).toEqual(VALID_BODY);
-  });
-});
-
 describe("VideoFrameInterpolationsService.findCurrent：恢复查询（IKHSFE）", () => {
   function makeJobRow(overrides: Record<string, unknown> = {}) {
     return {
@@ -280,11 +255,11 @@ describe("VideoFrameInterpolationsService.findCurrent：恢复查询（IKHSFE）
     expect(result.data).toBeNull();
   });
 
-  it("projects only job_id / status / progress / created_at — no input, no credential", async () => {
+  it("projects only job_id / status / progress / created_at — no input", async () => {
     const { service } = makeFindService({
       findFirst: vi.fn().mockResolvedValue(
         makeJobRow({
-          input: { ...VALID_BODY, provider_credential: "sk-live-token" },
+          input: { ...VALID_BODY },
           status: "failed",
           progress: 0,
         }),
@@ -298,7 +273,5 @@ describe("VideoFrameInterpolationsService.findCurrent：恢复查询（IKHSFE）
       progress: 0,
       created_at: "2026-09-22T05:00:00.000Z",
     });
-    expect(JSON.stringify(result)).not.toContain("provider_credential");
-    expect(JSON.stringify(result)).not.toContain("sk-live-token");
   });
 });

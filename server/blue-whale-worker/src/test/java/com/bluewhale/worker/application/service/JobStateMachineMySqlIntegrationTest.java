@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
@@ -27,7 +28,6 @@ import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
 import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient.ExtractAudioTaskObservation;
@@ -1181,11 +1181,13 @@ class JobStateMachineMySqlIntegrationTest {
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         NewApiMediaKitMixAudioClient gateway = mock(NewApiMediaKitMixAudioClient.class);
         TosAudioMediaRelay relay = mock(TosAudioMediaRelay.class);
+        UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         var processor = new AudioMixJobProcessor(service, claimService, jobMapper, finalizer,
-                new GenerationCredentialService(), gateway, relay, producer);
+                upstreamCredential, gateway, relay, producer);
         for (String providerTaskId : new String[] { null, "provider-already-submitted" }) {
             long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10), 99L, "{\"provider_credential\":\"sk-frozen\"}");
+                    WorkerClock.now().minusSeconds(10), 99L, "{}");
             jdbc.update("UPDATE generation_jobs SET cancel_requested_at=NOW(), provider_task_id=? WHERE id=?",
                     providerTaskId, jobId);
 
@@ -1226,7 +1228,7 @@ class JobStateMachineMySqlIntegrationTest {
         jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
         long retryId = seedJob(9L, "media_extract", "dock", "processing", 4L,
                 WorkerClock.now().minusSeconds(10), 99L,
-                "{\"provider_credential\":\"sk-frozen-token\",\"source_asset_id\":\"555\",\"output_format\":\"mp3\"}");
+                "{\"source_asset_id\":\"555\",\"output_format\":\"mp3\"}");
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, lease_owner='worker-old', "
                 + "lease_expires_at=DATE_ADD(NOW(), INTERVAL 7 MINUTE), "
                 + "gmt_create=DATE_SUB(NOW(), INTERVAL 119 MINUTE) WHERE id=?", parentId, retryId);
@@ -1251,18 +1253,18 @@ class JobStateMachineMySqlIntegrationTest {
         recovery.recover();
         verify(recoveryProducer).enqueue(String.valueOf(retryId), 1000L);
 
-        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
         NewApiMediaKitExtractAudioClient client = mock(NewApiMediaKitExtractAudioClient.class);
         TosAudioMediaRelay relay = mock(TosAudioMediaRelay.class);
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        when(credentials.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
         when(client.poll("sk-frozen-token", "amk-parent"))
                 .thenReturn(new ExtractAudioTaskObservation("succeeded", "https://volc/old.mp3", 12.5, null, null));
         when(relay.persist("https://volc/old.mp3", "9", "mp3"))
                 .thenReturn(new TosAudioMediaRelay.StoredAudio("https://cdn/old.mp3", "gen/old.mp3",
                         "audio/mpeg", 500L, "0123456789abcdef0123456789abcdef"));
         var processor = new MediaExtractJobProcessor(service, claimService, jobMapper, finalizer,
-                new AssetSourceService(assetMapper), credentials, client, relay, producer);
+                new AssetSourceService(assetMapper), upstreamCredential, client, relay, producer);
 
         processor.handle(String.valueOf(retryId));
 
@@ -1366,7 +1368,7 @@ class JobStateMachineMySqlIntegrationTest {
         jdbc.update("UPDATE generation_jobs SET provider_task_id='video-parent-task' WHERE id=?", parentId);
         long retryId = seedJob(9L, "video", "bottom_dock", "queued", 0L,
                 WorkerClock.now().minusSeconds(10), 99L,
-                "{\"provider_credential\":\"sk-frozen-token\",\"prompt\":\"一只猫在跑步\","
+                "{\"prompt\":\"一只猫在跑步\","
                         + "\"model_id\":\"seedance-2\",\"duration\":5.0,"
                         + "\"resolution\":\"720p\",\"aspect_ratio\":\"16:9\"}");
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
@@ -1403,11 +1405,11 @@ class JobStateMachineMySqlIntegrationTest {
         verify(recoveryProducer).enqueue(retry, 1000L);
 
         // 新 Worker 真实领取接手（token 1→2），沿父结果收割路径发布成功
-        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
         NewApiVideoClient client = mock(NewApiVideoClient.class);
         TosVideoMediaRelay relay = mock(TosVideoMediaRelay.class);
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        when(credentials.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
         when(client.poll("sk-frozen-token", "video-parent-task"))
                 .thenReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null));
         when(relay.persist("http://parent-video.mp4", "9"))
@@ -1415,7 +1417,7 @@ class JobStateMachineMySqlIntegrationTest {
                         "video/mp4", 500L, "0123456789abcdef0123456789abcdef"));
         var newProcessor = VideoJobProcessorFixtures.withWorkerId(
                 spiedService, spiedFinalizer, new AssetSourceService(assetMapper),
-                credentials, client, relay, producer, "video-worker-new");
+                upstreamCredential, client, relay, producer, "video-worker-new");
 
         newProcessor.handle(retry);
 
@@ -1672,7 +1674,7 @@ class JobStateMachineMySqlIntegrationTest {
             long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
                     WorkerClock.now().minusSeconds(10), 99L,
                     "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"estimated_duration_ms\":12500,"
-                    + "\"provider_credential\":\"sk-frozen\",\"inputs\":["
+                    + "\"inputs\":["
                     + "{\"asset_id\":\"11\",\"node_id\":\"source\",\"url\":\"https://tos/a.mp3\"},"
                     + "{\"asset_id\":\"12\",\"url\":\"https://tos/b.mp3\"}]}");
             TosAudioMediaRelay relay = mock(TosAudioMediaRelay.class);
@@ -1684,8 +1686,10 @@ class JobStateMachineMySqlIntegrationTest {
                         "0123456789abcdef0123456789abcdef");
             });
             GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+            UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+            when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
             var processor = new AudioMixJobProcessor(service, claimService, jobMapper, finalizer,
-                    new GenerationCredentialService(),
+                    upstreamCredential,
                     new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(base.get())), relay, producer);
 
             processor.handle(String.valueOf(jobId));

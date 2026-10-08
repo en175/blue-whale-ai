@@ -4,13 +4,13 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageOutpaintDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageOutpaintError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitOutpaintClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
@@ -59,7 +59,7 @@ class ImageOutpaintJobProcessorTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiMediaKitOutpaintClient mediaKitClient;
     @Mock private TosMediaStorage tosService;
 
@@ -72,7 +72,7 @@ class ImageOutpaintJobProcessorTest {
         processor = new ImageOutpaintJobProcessor(
                 claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
-                credentialService, mediaKitClient, tosService);
+                upstreamCredential, mediaKitClient, tosService);
         when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
@@ -107,7 +107,6 @@ class ImageOutpaintJobProcessorTest {
         input.put("expand_bottom", 0.0);
         input.put("expand_left", 0.25);
         input.put("expand_right", 0.4);
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -123,7 +122,7 @@ class ImageOutpaintJobProcessorTest {
     private void stubClaim(Map<String, Object> input) {
         when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input)));
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
     }
 
     private void assertFailCode(String expectedCode) {
@@ -241,13 +240,15 @@ class ImageOutpaintJobProcessorTest {
     }
 
     @Test
-    @DisplayName("缺冻结凭证 → provider_credential_missing（与 image/audio 同构）")
+    @DisplayName("上游凭证未配置 → provider_credential_missing（与 image/audio 同构）")
     void missingCredential_credentialMissing() {
         Map<String, Object> input = validInput();
-        input.remove("provider_credential");
         stubClaim(input);
         stubSourceAsset();
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);

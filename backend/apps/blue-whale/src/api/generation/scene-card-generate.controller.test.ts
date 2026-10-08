@@ -82,7 +82,7 @@ describe("SceneCardGenerateController.generate 响应写出（IKIQGQ）", () => 
       }) as never,
     );
 
-    const rejection = controller.generate(USER, "523", "12", {}, "idem-1", undefined, res);
+    const rejection = controller.generate(USER, "523", "12", {}, "idem-1", res);
     await expect(rejection).rejects.toBeInstanceOf(DomainError);
     await expect(rejection).rejects.toMatchObject({
       code: INVALID_REFERENCE_CODE,
@@ -101,7 +101,7 @@ describe("SceneCardGenerateController.generate 响应写出（IKIQGQ）", () => 
       fail(RESOURCE_NOT_FOUND_CODE, "资源不存在") as never,
     );
 
-    const rejection = controller.generate(USER, "523", "12", {}, "idem-1", undefined, res);
+    const rejection = controller.generate(USER, "523", "12", {}, "idem-1", res);
     await expect(rejection).rejects.toBeInstanceOf(DomainError);
     await expect(rejection).rejects.toMatchObject({
       code: RESOURCE_NOT_FOUND_CODE,
@@ -123,7 +123,7 @@ describe("SceneCardGenerateController.generate 响应写出（IKIQGQ）", () => 
     });
     vi.mocked(handleSceneCardGenerate).mockResolvedValue(envelope as never);
 
-    await controller.generate(USER, "523", "12", {}, "idem-1", undefined, res);
+    await controller.generate(USER, "523", "12", {}, "idem-1", res);
 
     expect(enqueueVideoGenerationJob).toHaveBeenCalledWith("400");
     expect(res.status).toHaveBeenCalledTimes(1);
@@ -150,7 +150,7 @@ describe("SceneCardGenerateController.generate 响应写出（IKIQGQ）", () => 
       ),
     );
 
-    await controller.generate(USER, "523", "12", {}, "idem-2", undefined, res);
+    await controller.generate(USER, "523", "12", {}, "idem-2", res);
 
     expect(res.status).toHaveBeenCalledWith(202);
     expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -173,7 +173,7 @@ describe("SceneCardGenerateController.generate 响应写出（IKIQGQ）", () => 
       new Error("gRPC 通道断开"),
     );
 
-    await controller.generate(USER, "523", "12", {}, "idem-3", undefined, res);
+    await controller.generate(USER, "523", "12", {}, "idem-3", res);
 
     expect(res.status).toHaveBeenCalledWith(202);
     expect(logger.error).toHaveBeenCalledTimes(1);
@@ -191,7 +191,7 @@ describe("SceneCardGenerateController.storyboardPreview 响应写出（IKIQGQ）
       fail(PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE, "余额不足") as never,
     );
 
-    const rejection = controller.storyboardPreview(USER, "523", "12", {}, "idem-1", undefined, res);
+    const rejection = controller.storyboardPreview(USER, "523", "12", {}, "idem-1", res);
     await expect(rejection).rejects.toBeInstanceOf(DomainError);
     await expect(rejection).rejects.toMatchObject({
       code: PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE,
@@ -210,7 +210,7 @@ describe("SceneCardGenerateController.storyboardPreview 响应写出（IKIQGQ）
       fail(RESOURCE_NOT_FOUND_CODE, "资源不存在") as never,
     );
 
-    const rejection = controller.storyboardPreview(USER, "523", "12", {}, "idem-1", undefined, res);
+    const rejection = controller.storyboardPreview(USER, "523", "12", {}, "idem-1", res);
     await expect(rejection).rejects.toBeInstanceOf(DomainError);
     await expect(rejection).rejects.toMatchObject({
       code: RESOURCE_NOT_FOUND_CODE,
@@ -231,7 +231,7 @@ describe("SceneCardGenerateController.storyboardPreview 响应写出（IKIQGQ）
     });
     vi.mocked(handleStoryboardPreviewCreate).mockResolvedValue(envelope as never);
 
-    await controller.storyboardPreview(USER, "523", "12", {}, "idem-1", undefined, res);
+    await controller.storyboardPreview(USER, "523", "12", {}, "idem-1", res);
 
     expect(enqueueImageGenerationJob).toHaveBeenCalledWith("401");
     expect(res.status).toHaveBeenCalledTimes(1);
@@ -255,7 +255,7 @@ describe("SceneCardGenerateController.storyboardPreview 响应写出（IKIQGQ）
       new Error("gRPC 通道断开"),
     );
 
-    await controller.storyboardPreview(USER, "523", "12", {}, "idem-4", undefined, res);
+    await controller.storyboardPreview(USER, "523", "12", {}, "idem-4", res);
     // fire-and-forget：让出一个宏任务，等 .catch 回调落地。
     await new Promise((resolve) => setTimeout(resolve, 0));
 

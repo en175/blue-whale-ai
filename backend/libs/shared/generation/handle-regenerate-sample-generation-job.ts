@@ -27,12 +27,6 @@ import type { BillingQuote } from "../billing/billing-quote.js";
 import { handleCreateGenerationJob, type CreateGenerationJobBody } from "./handle-create-generation-job.js";
 import { handleQuoteGenerationJob } from "./handle-quote-generation-job.js";
 
-/** 冻结输入里**不进重新生成创建请求**的键——与 finalize 的 SAMPLE_ONLY_INPUT_KEYS 同口径
- *  （画布目标/快照属旧任务的创建现场，新样片是独立新卡；凭证用本次请求的新凭证），
- *  另加三组创建管线会**重新冻结**的键：sample_mode（重建进 parameters.sample_mode=true）、
- *  reference_limits 与 output_width/height（能力行现查现冻——「重新校验能力规则」）。
- *  references（含视频时长）/ 旧参考字段 / prompt / duration / generate_audio 原样保留：
- *  它们既是创作输入也是计费规格（G13）。 */
 const NON_REQUEST_INPUT_KEYS = [
   "sample_mode",
   "placement_anchor",
@@ -40,7 +34,6 @@ const NON_REQUEST_INPUT_KEYS = [
   "text_attachments",
   "prompt_plan_snapshot",
   "text_input_signature",
-  "provider_credential",
   "reference_limits",
   "output_width",
   "output_height",
@@ -181,7 +174,6 @@ export async function handleRegenerateSampleCreate(
   body: unknown,
   idempotencyKey: string | null,
   deps: RegenerateSampleCreateDeps,
-  internal: { providerCredential?: string } = {},
 ) {
   // strict：确认两字段（及可选 canvas_binding）之外任何键（prompt/references/draft_task_id…）
   // 直接拒绝——上游输入只来自原样片冻结快照，浏览器不重传（契约 §5）。
@@ -226,6 +218,5 @@ export async function handleRegenerateSampleCreate(
     { ...derived, ...parsed.data },
     idempotencyKey,
     deps.create,
-    internal,
   );
 }

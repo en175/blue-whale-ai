@@ -2,11 +2,11 @@ package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.application.processor.AudioVideoMuxJobProcessor;
 import com.bluewhale.worker.application.service.WorkerClock;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient.MuxAudioVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
@@ -280,8 +280,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                 WorkerClock.now().minusSeconds(30),
                 "{\"audio\":{\"assetId\":\"11\",\"nodeId\":\"source-node\",\"url\":\"https://tos/a.mp3\"},"
                         + "\"video\":{\"assetId\":\"12\",\"url\":\"https://tos/v.mp4\"},"
-                        + "\"is_audio_reserve\":true,\"sync\":\"none\",\"submit_attempt\":1,"
-                        + "\"provider_credential\":\"sk-frozen\"}");
+                        + "\"is_audio_reserve\":true,\"sync\":\"none\",\"submit_attempt\":1}");
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         return id != null ? id : -1;
     }
@@ -316,8 +315,8 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
     private WiredProcessor wireProcessor(ConcurrentHashMap<String, byte[]> objects, String storageKey) {
         JobStateMachineService spyService = spy(realService);
         JobFinalizer spyFinalizer = spy(realFinalizer);
-        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
@@ -337,7 +336,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         }).when(relay).deleteUnpublishedObject(anyString());
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         var processor = new AudioVideoMuxJobProcessor(spyService, realClaimService, realJobMapper, spyFinalizer,
-                credentials, gateway, relay, producer);
+                upstreamCredential, gateway, relay, producer);
         return new WiredProcessor(processor, spyFinalizer, objects);
     }
 
@@ -642,14 +641,14 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         TosVideoMediaRelay relay = new TosVideoMediaRelay(realTosStandin(objects, null), "bkt", "tos.example.com");
         JobStateMachineService spyService = spy(realService);
         JobFinalizer spyFinalizer = spy(realFinalizer);
-        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
         var processor = new AudioVideoMuxJobProcessor(spyService, realClaimService, realJobMapper, spyFinalizer,
-                credentials, gateway, relay,
+                upstreamCredential, gateway, relay,
                 mock(GenerationMessageProducer.class));
 
         CountDownLatch rawTxOpen = new CountDownLatch(1);
@@ -738,14 +737,14 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         TosVideoMediaRelay relay = new TosVideoMediaRelay(realTosStandin(objects, null), "bkt", "tos.example.com");
         JobStateMachineService spyService = spy(realService);
         JobFinalizer spyFinalizer = spy(realFinalizer);
-        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
         AudioVideoMuxJobProcessor processor = new AudioVideoMuxJobProcessor(spyService,
-                realClaimService, realJobMapper, spyFinalizer, credentials, gateway, relay,
+                realClaimService, realJobMapper, spyFinalizer, upstreamCredential, gateway, relay,
                 mock(GenerationMessageProducer.class));
 
         CountDownLatch rawTxOpen = new CountDownLatch(1);
@@ -849,14 +848,14 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
         JobStateMachineService spyService = spy(realService);
         JobFinalizer spyFinalizer = spy(realFinalizer);
-        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
         var processor = new AudioVideoMuxJobProcessor(spyService, realClaimService, realJobMapper, spyFinalizer,
-                credentials, gateway, relay,
+                upstreamCredential, gateway, relay,
                 mock(GenerationMessageProducer.class));
         doAnswer(invocation -> {
             realKey.set(((PublishAudioVideoMuxDto) invocation.getArgument(0)).storageKey());

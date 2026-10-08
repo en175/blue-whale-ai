@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -12,7 +13,6 @@ import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSubtitleEraseError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSubtitleEraseClient;
@@ -33,40 +33,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * video_subtitle_erase（视频智能去字幕）作业处理器（迁移契约 §17 / IKGZ81，附录 C 触点③）。
- * <p>
- * 本仓首个 MediaKit **异步任务**：编排复用视频生成的多步状态机骨架（每步 = 一次 MQ 消费，
- * fencing / 租约 / claim-by-id 全部走视频件，不新建任务状态机形态）：
- * <ol>
- *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
- *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（返 task_id）→
- *       markProviderSubmitted（存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
- *       processing 共享 720 轮询预算，超限同归 1043）；processing →
- *       续排；failed → 终态 1043 + 上游原因透传；completed → **立即下载转存（火山 URL 仅
- *       24h 有效）** → 建 Asset（type=video / source=generated）→ 终态 succeeded</li>
- * </ol>
- * 下载与转存复用 {@link TosVideoMediaRelay}（视频家族同套：fetch → video/ mime 校验 →
- * TOS 公开读 → md5）；结果 URL 24h 失效故**强依赖 TOS，不降级直存**（对齐 image_erase 的
- * 强依赖口径，区别于视频生成的 passthrough 容忍）。
- * <p>
- * 出站映射（§17.3）：mode 由客户端按 {@link VideoSubtitleEraseContract#MODE} 换算；
- * model_version=v5 / output_encode_mode=Quality 服务端常量；无框出站不发
- * erase_ratio_location 键。
- * <p>
- * 错误码口径（§17.5，无 worker 级自动重试，用户在结果卡手动重试并沿用冻结 input）：
- * <ul>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与视频/image_erase 同构）</li>
- *   <li>invalid_input：业务键缺失 / 检测模式枚举外 / 框列表形状非法（创建入口 Z80 复核是
- *       权威，worker 兜底防御）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
- *       §5 分类信号，保留既有码投影</li>
- *   <li>video_subtitle_erase_failed（1043）：其余一律归并兜底——提交失败 / 轮询超时 /
- *       供应商任务 failed / 源素材不可用 / 结果下载转存失败（超时也归并是同步家族口径：
- *       宁可不重试也不双跑），上游可读原因随 message 透传前端投影</li>
- * </ul>
- */
 @Component
 public class VideoSubtitleEraseJobProcessor implements JobProcessor {
 
@@ -98,7 +64,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitSubtitleEraseClient subtitleEraseClient;
     private final TosVideoMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
@@ -110,7 +76,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitSubtitleEraseClient subtitleEraseClient,
             TosVideoMediaRelay mediaRelay,
             @Qualifier("videoSubtitleEraseMessageProducer")
@@ -122,7 +88,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.bySources(
                 VideoSubtitleEraseContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.subtitleEraseClient = subtitleEraseClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
@@ -183,20 +149,12 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
      * 分相主逻辑（视频骨架 runVideoStep 同构）：凭证 → submit 相 / poll 相。
      */
     private void runStep(ClaimedJob claim) {
-        // 取明文凭证（§17.2 基础设施键；与视频/image_erase 同构，修正四：明文直通）
-        Object credentialObj = claim.input().get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "去字幕任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[video_subtitle_erase] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "去字幕任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[video_subtitle_erase] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

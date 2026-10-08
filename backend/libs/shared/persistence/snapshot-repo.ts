@@ -4,7 +4,6 @@ import {
   type MentionFailureReason,
 } from "@lib/core";
 
-import { publicGenerationInput } from "./generation-input.js";
 import { classifyMentionAvailability } from "./mention-availability.js";
 import {
   resolveLogicalSlots,
@@ -284,7 +283,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         source: job.source,
         status: job.status,
         progress: job.progress,
-        input: publicGenerationInput(job.input ?? null),
+        input: job.input ?? null,
         output_asset_ids: parseAssetIdList(job.output_asset_ids),
         output_slots: slotsByJob.get(job.id.toString()) ?? [],
         stored_error: toStoredError(job.error),

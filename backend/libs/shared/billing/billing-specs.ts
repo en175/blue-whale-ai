@@ -27,21 +27,7 @@
  * 「长度」算成一个数字规格传进来，而不是把正文塞进规格表。
  */
 
-/**
- * <h2>二、凭证（provider_credential）—— 这是**密钥泄漏**，不是分层问题</h2>
- *
- * 建任务时把上游 key 明文写进 `job.input.provider_credential`
- * （`handle-create-generation-job.ts`，修正四「凭证去密」）。它是字符串，
- * 于是被「取所有标量」的规则一并收进 specs，**跟着 Hold/Quote 的请求离开这个进程**、
- * 落进 billing 的 MQ 日志与计费记录里。
- *
- * <p>实测撞到：billing 的 MQ 日志里能读到明文 key。
- *
- * <p>⚠️ 它与上面那类字段**理由不同**（那个是分层，这个是安全），但处理方式一样 ——
- * 都在离开本进程之前挡掉。加进来的时候别再分两个集合：**「不该进规格的字段」
- * 只有一个清单，分开维护就一定有一边漏。**
- */
-const NON_SPEC_FIELDS = new Set(["prompt", "title", "provider_credential"]);
+const NON_SPEC_FIELDS = new Set(["prompt", "title"]);
 
 /**
  * 规格键：视频输入档（轴名沿用火山的 `video`）。

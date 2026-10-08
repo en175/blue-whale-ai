@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto;
@@ -13,7 +14,6 @@ import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoSceneSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSceneSplitError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient;
@@ -35,50 +35,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * video_scene_split（视频场景切分）作业处理器（IKH8BP，父规格 IKH86V，附录 C 触点③）。
- * <p>
- * 火山 MediaKit **异步任务 + 一对多扇出**：编排复用视频生成的多步状态机骨架（每步 =
- * 一次 MQ 消费，fencing / 租约 / claim-by-id 全部走视频件，去字幕
- * {@link VideoSubtitleEraseJobProcessor} / 音视频分离 {@link MediaExtractJobProcessor} 同构）：
- * <ol>
- *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
- *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（granularity 经契约
- *       SEGMENT_THRESHOLD 映射 segment_threshold，返 task_id）→ markProviderSubmitted（存
- *       provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
- *       processing 共享 720 轮询预算，超限同归 1046）；processing →
- *       续排；failed → 分类终态；completed → **逐段下载切片转存自家 TOS（火山
- *       segment_video_url 仅 24h 有效；每段转存前心跳续租防长窗口租约过期）** → 单事务逐段
- *       建 Asset + 契约 result 回传 → 终态 succeeded</li>
- * </ol>
- * 下载与转存复用 {@link TosVideoMediaRelay}（视频家族同套：fetch → video/ mime 校验 →
- * TOS 公开读 → md5）；切片链接 24h 失效故**强依赖 TOS，不降级直存**（去字幕家族口径）。
- * <p>
- * **逐段转存与部分失败口径（工单验收标准）**：completed 后先逐段下载转存收集产物列表，
- * 每段转存前 updateVideoSceneSplitProgress 心跳续租（N 段串行总时长可远超 claim 的 420s
- * 租约，审查修复细节见该方法 javadoc）；全部段转存成功才进 publish 事务（单事务逐段建
- * Asset + output_asset_ids + 契约 result 回传）；任一段下载/转存失败即整体失败（契约：
- * video_scene_split_failed 1046 归并），此时无任何段 Asset 落库（不建半成品资产行），
- * 已上传的 TOS 孤儿对象与家族先例同口径（转存后守卫未命中同款，无 Asset 引用即无悬挂）。
- * <p>
- * 出站映射：只传 model / video_url / segment_threshold——min_duration（默认 3s）/
- * max_duration（默认 30s）/ enable_clip_fade（默认 false）/ return_segment_videos（默认
- * true）一律不传走服务端默认（规格「高级参数不暴露」）；两阶段切分（threshold+min 初切、
- * 超 max 强制再切）由上游完成，返回 segments[] 照单全收，整片仅 1 段不特判（规格故事 18）。
- * <p>
- * 错误码口径（契约：数值 1046，无 worker 级自动重试，用户在任务占位卡手动重试沿用冻结 input）：
- * <ul>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与视频/去字幕同构）</li>
- *   <li>invalid_input：业务键缺失 / 粒度枚举外（创建入口复核是权威，worker 兜底防御）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
- *       §5 分类信号，保留既有码投影</li>
- *   <li>video_scene_split_failed（1046）：其余一律归并兜底——提交失败 / 轮询超时 / 供应商
- *       任务 failed（error 对象 code / message / param / type——TaskError / ApiError）/
- *       源素材不可用 / 结果无段 / 逐段下载转存失败（任一段即整体失败；超时也归并是同步
- *       家族口径：宁可不重试也不双跑），上游可读原因随 message 透传前端投影</li>
- * </ul>
- */
 @Component
 public class VideoSceneSplitJobProcessor implements JobProcessor {
 
@@ -108,7 +64,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitSegmentScenesClient segmentScenesClient;
     private final TosVideoMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
@@ -120,7 +76,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitSegmentScenesClient segmentScenesClient,
             TosVideoMediaRelay mediaRelay,
             @Qualifier("videoSceneSplitMessageProducer")
@@ -132,7 +88,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.bySources(
                 VideoSceneSplitContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.segmentScenesClient = segmentScenesClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
@@ -193,20 +149,12 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 分相主逻辑（去字幕 runStep 同构）：凭证 → submit 相 / poll 相。
      */
     private void runStep(ClaimedJob claim) {
-        // 取明文凭证（基础设施键；与视频/去字幕同构，修正四：明文直通）
-        Object credentialObj = claim.input().get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "场景切分任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[video_scene_split] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "场景切分任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[video_scene_split] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

@@ -16,7 +16,6 @@ import {
   IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS,
   IMAGE_OUTPAINT_INPUT_KEYS,
   IMAGE_OUTPAINT_JOB_TYPE,
-  IMAGE_OUTPAINT_PROVIDER_CREDENTIAL_KEY,
   IMAGE_OUTPAINT_SOURCE,
   IMAGE_OUTPAINT_SOURCE_LIMITS,
   imageOutpaintInputSchema,
@@ -57,11 +56,6 @@ describe("image_outpaint 契约不变量（TS 侧）", () => {
     });
     expect(IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS).toEqual({ min: 0, max: 0.4 });
   });
-
-  it("基础设施键 provider_credential 单处定义（非客户端 payload，不进 schema）", () => {
-    expect(IMAGE_OUTPAINT_PROVIDER_CREDENTIAL_KEY).toBe("provider_credential");
-  });
-
   it("源图门槛单处定义：长边 ≤4160px、文件 ≤10MB、宽高缺失即拒，判定与文案同源", () => {
     // 门槛数值（火山官方 PDF 溯源）与判定函数 imageOutpaintSourceGate 只此一份：
     // backend 创建入口复核与 web 菜单项预检两端 import 引用（防漂移锚点）。
@@ -124,8 +118,6 @@ describe("image_outpaint 契约不变量（TS 侧）", () => {
     // 源素材 ID 为正整数字符串（BigInt Asset id 口径，同高清放大）。
     expect(imageOutpaintInputSchema.safeParse({ ...valid, source_asset_id: "0" }).success).toBe(false);
     expect(imageOutpaintInputSchema.safeParse({ ...valid, source_asset_id: "abc" }).success).toBe(false);
-    // 凭证是服务端注入的基础设施键，不进客户端 payload 校验。
-    expect(imageOutpaintInputSchema.safeParse({ ...valid, provider_credential: "sk-x" }).success).toBe(false);
   });
 
   it("兜底错误码 image_outpaint_failed → 1041，文案表同步", () => {
@@ -145,13 +137,10 @@ describe("image_outpaint 双端一致性（读 worker-java 源码文本，防漂
     expect(contractJava).toContain('String SOURCE = "image_outpaint";');
   });
 
-  it("ImageOutpaintContract：六 input 键名 + provider_credential 基础设施键与 TS 同值", () => {
+  it("ImageOutpaintContract：六 input 键名与 TS 同值", () => {
     for (const key of Object.values(IMAGE_OUTPAINT_INPUT_KEYS)) {
       expect(contractJava).toContain(`= "${key}";`);
     }
-    expect(contractJava).toContain(
-      `String INPUT_KEY_PROVIDER_CREDENTIAL = "${IMAGE_OUTPAINT_PROVIDER_CREDENTIAL_KEY}";`,
-    );
   });
 
   it("ImageOutpaintContract：扩展比例值域上下限与 TS 同值", () => {

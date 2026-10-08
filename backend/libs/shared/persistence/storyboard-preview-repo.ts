@@ -37,8 +37,6 @@ export interface CreateStoryboardPreviewInput {
   base_scene_card_version: number;
   parameters: StoryboardPreviewParameters;
   capability_snapshot_version: CapabilitySnapshotVersion;
-  /** 明文供应商 sk token（修正四：去密，与图片计划应用一致）；worker 直接取用调网关。 */
-  provider_credential?: string;
   /** 余额预检回调（与 plan apply 图片分支一致）；缺失视为不检查。 */
   quotaCheck?: () => Promise<{ sufficient: boolean }>;
   /** IKJJR0：新协议恢复绑定（operation=scene_card.storyboard_preview，与幂等行同一键）。 */
@@ -260,7 +258,6 @@ async function createStoryboardPreviewInTransaction(
       model_id: input.parameters.model_id,
       size: input.parameters.size,
       aspect_ratio: input.parameters.aspect_ratio,
-      provider_credential: input.provider_credential,
       web_search: false,
       sequential_image_generation: false,
       storyboard_preview: true,

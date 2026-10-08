@@ -11,51 +11,6 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * new-api 网关 MediaKit 智能抠像客户端（IKHK99，父规格 IKHJRC，契约 IKHK7F；
- * IKHKMK 家族模板收敛后同构：submit / poll 的 HTTP 骨架在
- * {@link NewApiMediaKitAsyncTaskClient}，本类只保留**双端点按模式分流**、契约枚举兜底校验
- * 与 completed 结果解析）。
- * <p>
- * 双端点是 family 首例：其余六个 MediaKit 异步工具都是「一个工具 = 一条提交路径 = 一个
- * 模型名」，可直接把路径写成单路径子类的模板方法；抠像无查询参数可表达模式（模式即端点，
- * ADR-0112），故本类持两个单端点子类实例（{@link EndpointClient}，各持有自己的路径与
- * 模型名常量）按模式分流，对外仍是单 bean、单套 submit/poll 签名（处理器与家族同形）。
- * <p>
- * 端点（网关**对客**路径，常量单源在 {@link VideoMattingContract}）：
- * <ul>
- *   <li>submit：POST {SUBMIT_PATHS[mode]}（30s 超时，异步提交秒级入队）</li>
- *   <li>poll：GET {POLL_PATH_PREFIX}{task_id}（10s 超时）——两工具任务流程完全相同、
- *       共用同一条查询路由，查询与模式无关</li>
- * </ul>
- * ⚠️ 网关路径 ≠ 火山上游路径（IKH67T 实测：混用即 404 Invalid URL，任务卡在提交相）。
- * 火山上游侧对应 POST /api/v1/tools/matte-portrait-video 与
- * /api/v1/tools/matte-greenscreen-video（官方开发指南 PDF 逐字），由网关内部转发，
- * 本仓不直连上游。鉴权与家族同构（契约 §5 / ADR-0080）：Authorization: Bearer 任务冻结的
- * 用户 sk-（processor 从 job.input.provider_credential 取出传入）+ X-Trace-Id +
- * X-Client-System: bluewhale。
- * <p>
- * 出站请求映射（官方开发指南 PDF「快速入门」+「进阶使用·选择输出格式与背景颜色」节）：
- * model（对客模型名，按模式取值，网关按模型名路由 MediaKit 渠道，本期 model_price 配 0）+
- * video_url（源视频公网对象存储地址）+ format（WEBM / MP4 透传）+ background_color
- * （**仅 format=MP4 时出站且显式携带**——官方两端点默认底色不同〔人像 green、绿幕 black〕，
- * 本仓统一冻结 white 防歧义；WEBM 透明不接受背景色）。模式不进出站参数（选择端点即选择
- * 模式）。不发 client_token（本仓 command_idempotency 幂等键，与官方提交参数无关）/
- * callback_url / callback_args / queue_id / media_output_destination（家族轮询口径 +
- * worker 转存自家 TOS，ADR-0112）。
- * <p>
- * 响应形状（官方开发指南 PDF）：submit = {success, task_id, request_id}（success=false 时带
- * error{code,type,message,param}）；poll 顶层含 task_id / status 与 completed 态
- * result{video_url, resolution, duration}——video_url 为 24h 临时链接，processor 须立即
- * 转存自家 TOS（查询接口在结果临期 2 小时内自动续期，轮询天然保活）。status 大小写与
- * 中间态枚举官方 PDF 未逐字冻结，按小写归一容错解析（completed→succeeded、failed→failed、
- * 其余→processing，家族先例同款）。
- * <p>
- * 错误分类复用 NewApiErrorClassifier（content &gt; quota &gt; provider_failed，§5 优先级；
- * 本 PDF 未含错误对象节，错误信封口径 = 家族先例）；poll 的网络超时 / 连接失败 /
- * HTTP 429/5xx 抛错时以 cause 携带状态（{@link NewApiVideoClient.HttpStatusException} 复用），
- * 供 processor 按 isTransientPollError 语义判定瞬时重排。
- */
 @Component
 public class NewApiMediaKitMatteVideoClient {
 
@@ -70,19 +25,6 @@ public class NewApiMediaKitMatteVideoClient {
         this.endpoints = Map.copyOf(clients);
     }
 
-    /**
-     * 提交智能抠像异步任务（官方「提交成功响应」：返回 task_id；双端点按模式分流）。
-     *
-     * @param token           per-job Bearer 凭证（任务冻结的用户 sk-）
-     * @param videoUrl        源视频公网对象存储地址
-     * @param mode            任务冻结的抠像模式（portrait / greenscreen，IKHK7F 契约枚举；
-     *                        经契约 SUBMIT_PATHS / MODEL_NAMES 分流端点与模型名）
-     * @param format          输出格式（WEBM / MP4，透传官方 format 参数）
-     * @param backgroundColor MP4 纯色背景色（white / black / green；仅 format=MP4 时非 null——
-     *                        显式携带防两端点官方默认底色歧义；WEBM 时须为 null，出站不带）
-     * @return 上游任务 id（processor 存 provider_task_id 后转轮询）
-     * @throws VideoMattingError 按错误分类抛错
-     */
     public String submit(String token, String videoUrl, String mode, String format, String backgroundColor) {
         return endpointOf(mode).submit(token, videoUrl, format, backgroundColor);
     }

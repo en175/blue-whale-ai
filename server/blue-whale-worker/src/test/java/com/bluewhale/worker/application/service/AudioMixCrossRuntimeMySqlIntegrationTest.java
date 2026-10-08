@@ -3,8 +3,8 @@ package com.bluewhale.worker.application.service;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.application.processor.AudioMixJobProcessor;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
@@ -126,14 +126,14 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
         if ("cancel".equals(System.getenv("IKI68N_CROSS_RUNTIME_PHASE"))) {
             assertThat(jdbc.queryForObject("SELECT cancel_requested_at FROM generation_jobs WHERE id=?",
                     java.sql.Timestamp.class, Long.parseLong(jobId))).isNotNull();
-            var credentials = mock(GenerationCredentialService.class);
+            var upstreamCredential = mock(UpstreamCredential.class);
             var gateway = mock(NewApiMediaKitMixAudioClient.class);
             var relay = mock(TosAudioMediaRelay.class);
             var producer = mock(GenerationMessageProducer.class);
-            new AudioMixJobProcessor(service, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle(jobId);
+            new AudioMixJobProcessor(service, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle(jobId);
             assertThat(readJob(Long.parseLong(jobId)).getStatus()).isEqualTo("cancelled");
             assertThat(countAssets(Long.parseLong(jobId))).isZero();
-            verifyNoInteractions(credentials, gateway, relay, producer);
+            verifyNoInteractions(upstreamCredential, gateway, relay, producer);
             return;
         }
         boolean failPhase = "fail".equals(System.getenv("IKI68N_CROSS_RUNTIME_PHASE"));
@@ -197,8 +197,10 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
                         "0123456789abcdef0123456789abcdef");
             });
             GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+            UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+            when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
             var processor = new AudioMixJobProcessor(service, claimService, jobMapper, finalizer,
-                    new GenerationCredentialService(),
+                    upstreamCredential,
                     new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(base.get())), relay, producer);
             processor.handle(jobId);
             assertThat(readJob(Long.parseLong(jobId)).getProviderTaskId()).isEqualTo("cross-task-1");

@@ -372,8 +372,6 @@ describe("AuthController 会话内容（凭证已移出会话）", () => {
       status: 1,
       email: null,
     });
-    // 断言的是「没有任何额外的密钥字段」：载荷就是上面那五个，
-    // 上游 key 由 AuthGuard 按当前配置回注（见 auth.guard.test.ts）。
     expect(Object.keys(sessions.createSession.mock.calls[0]![1])).toEqual([
       "userId",
       "username",

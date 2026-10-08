@@ -190,24 +190,3 @@ describe('extractSpecs —— 参考素材数**按媒介取不同的键**', () =
     expect(extractSpecs(input, 'video')).toMatchObject({ reference_count: '1' });
   });
 });
-
-describe('extractSpecs —— 不该出现在定价那侧的字段', () => {
-  it('★ 凭证绝不进规格 —— 它是密钥，会跟着请求离开本进程', () => {
-    // 建任务时把上游 key 明文写进 job.input.provider_credential。
-    // 它是字符串，于是被「取所有标量」一并收进 specs → 跟着 Hold/Quote 的请求
-    // 离开本进程、落进 billing 的 MQ 日志与计费记录。
-    // **实测撞到过**：billing 的 MQ 日志里能读到明文 key。
-    const specs = videoSpecs({
-      size: '1080p',
-      duration: 5,
-      provider_credential: 'sk-should-never-leave-this-process',
-    });
-
-    expect(specs).not.toHaveProperty('provider_credential');
-    // ⚠️ 断言「整串里没有它」，而不是「只有那两个键」——
-    //    后者会因为**别人合理地加了派生规格**而误报（本文件另有两处派生键），
-    //    而这条测试要守的只有一件事：凭证不离开本进程。
-    expect(JSON.stringify(specs)).not.toContain('sk-should-never-leave');
-    expect(specs).toMatchObject({ size: '1080p', duration: '5' });
-  });
-});

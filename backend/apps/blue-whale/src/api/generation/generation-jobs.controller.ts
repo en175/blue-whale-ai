@@ -34,7 +34,6 @@ import {
   enqueueImageGenerationJob,
   enqueueVideoGenerationJob,
 } from "@lib/shared/generation/generation-queue.js";
-import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import { createRequestMaterialGate } from "@lib/shared/generation/material-gate-wiring.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
@@ -114,19 +113,14 @@ export class GenerationJobsController {
     return this.billingQuoteDep;
   }
 
-  /** IKF YHJ：造素材校验状态门（ADR-0087）。生产判定逻辑在 `material-gate-wiring.ts`，
-   *  这里只把本请求的依赖（用户、凭证、仓库面、失败处置）接上去——抽出去是为了可测：
-   *  它曾是控制器里的私有方法，整条生产判定路径零测试覆盖。 */
-  private buildMaterialGate(userId: string, authorization: string | undefined) {
+  private buildMaterialGate(userId: string) {
     return createRequestMaterialGate({
       repo: this.material.materialStatusRepo,
-      callAction: (action, body) =>
-        this.material.callAction(authorization, action, body),
+      callAction: (action, body) => this.material.callAction(action, body),
       resolveLocalAssetMaterialIds: (userId, assetIds) =>
         this.assets.findBoundMaterialIds(userId, assetIds),
       onMaterialFailure: (input) =>
         this.handleMaterialFailure(userId, input.materialId, {
-          authorization,
           errorCode: input.errorCode,
           errorMessage: input.errorMessage,
           deleteUpstream: input.deleteUpstream,
@@ -141,7 +135,6 @@ export class GenerationJobsController {
     userId: string,
     materialId: string,
     opts: {
-      authorization: string | undefined;
       errorCode?: string | null;
       errorMessage?: string | null;
       deleteUpstream?: boolean;
@@ -151,7 +144,6 @@ export class GenerationJobsController {
       await this.material.handleUpstreamMaterialFailure({
         userId,
         materialId,
-        authorization: opts.authorization,
         errorCode: opts.errorCode ?? null,
         errorMessage: opts.errorMessage ?? null,
         ...(opts.deleteUpstream === false ? { deleteUpstream: false } : {}),
@@ -171,10 +163,8 @@ export class GenerationJobsController {
     @Param("projectId") projectId: string,
     @Body() body: CreateGenerationJobBody,
     @Headers("idempotency-key") idempotencyKey?: string,
-    @Headers("authorization") authorization?: string,
     @Res({ passthrough: true }) res?: Response,
   ) {
-    const internal = sealProviderCredential(authorization);
     const billing = this.billing();
     // 建任务幂等：`result.data` 也可能是**幂等重放**的首次结果（同一个 generation_job_id）。
     // 这条路径下面照旧把它入队一次，是**刻意**的：
@@ -195,7 +185,7 @@ export class GenerationJobsController {
         models: this.models,
         canvas: this.canvas,
         assets: this.command.assets,
-        materialGate: this.buildMaterialGate(user.userId, authorization),
+        materialGate: this.buildMaterialGate(user.userId),
         // 预扣与补偿必然成对（见 billing 的说明），不再做条件展开
         billing,
         // IKIZQ8：样片提交确认的复算（与 /quote 端点同一装配——预览价、核对价、实扣价
@@ -203,7 +193,6 @@ export class GenerationJobsController {
         // 缺失时上面的 billing() 已经先抛，这里不会成为新的失败面。
         quote: this.billingQuote(),
       },
-      internal,
     );
 
     // IKJJQU（B.8 局部适配器）：新协议受控错误（canvas_binding_conflict 等）信封直写
@@ -346,7 +335,6 @@ export class GenerationJobsController {
     @Param("jobId") jobId: string,
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey?: string,
-    @Headers("authorization") authorization?: string,
   ) {
     const billing = this.billing();
     const result = await handleFinalizeGenerationJobCreate(
@@ -362,7 +350,6 @@ export class GenerationJobsController {
         billing,
         quote: this.billingQuote(),
       },
-      sealProviderCredential(authorization),
     );
     // 与 create（IKG57P）同款口径：业务失败走 AllExceptionsFilter 统一投影，不让
     // fail() 信封透传成 HTTP 201。
@@ -426,7 +413,6 @@ export class GenerationJobsController {
     @Param("jobId") jobId: string,
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey?: string,
-    @Headers("authorization") authorization?: string,
     @Res({ passthrough: true }) res?: Response,
   ) {
     const billing = this.billing();
@@ -450,12 +436,11 @@ export class GenerationJobsController {
           models: this.models,
           canvas: this.canvas,
           assets: this.command.assets,
-          materialGate: this.buildMaterialGate(user.userId, authorization),
+          materialGate: this.buildMaterialGate(user.userId),
           billing,
           quote: this.billingQuote(),
         },
       },
-      sealProviderCredential(authorization),
     );
     // IKJJR0（B.8 局部适配器）：新协议受控错误（canvas_binding 载荷无效/受理冲突等）信封
     // 直写 HTTP 状态与 data.reason，不经 AllExceptionsFilter（它会置空 data）。
@@ -506,7 +491,6 @@ export class GenerationJobsController {
     @Param("jobId") jobId: string,
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey?: string,
-    @Headers("authorization") authorization?: string,
     @Res({ passthrough: true }) res?: Response,
   ) {
     // IKJJQU：通用重试可携带 canvas_binding（body 为对象时取其 canvas_binding 字段）。
@@ -522,7 +506,7 @@ export class GenerationJobsController {
       {
         projects: this.project,
         command: this.command.repo,
-        materialGate: this.buildMaterialGate(user.userId, authorization),
+        materialGate: this.buildMaterialGate(user.userId),
       },
       canvasBindingBody,
     );

@@ -964,20 +964,21 @@ new-api 为 User 分配的稳定整数身份，是蓝鲸产品事实的唯一所
 均不得改变 User ID。
 _Avoid_: Token 指纹、用户名、邮箱、浏览器本地 ID、客户端自报且未经验证的 `user_id`。
 
-**默认 API Key（上游执行凭证）**:
-new-api 在 User 登录后提供、以 `sk-` 开头的默认 Token，用于 relay 调用、quota 扣减以及由
-new-api 解析所属 User ID；上线前所有新 User 在注册事务中必须自动获得一把，创建失败则注册失败。
-它是**上游执行凭证**：仅由 BFF 在登录/注册响应时获取、AES-256-GCM 密封后持久化绑定 User，代理
-调用 new-api 用户态接口与 relay 扣费，**永不下发浏览器**。它对普通蓝鲸 User 隐藏，但可因安全或
-运维原因轮换；登录发现缺失时返回配置错误，不做历史补建。浏览器持有的登录态是独立的「登录会话」，
-不是这把 Key。
-_Avoid_: 永久用户身份、产品资源所有者 ID、不可轮换密钥、把默认 Key 当浏览器会话凭证。
+**上游统一 Key（项目级上游凭证）**:
+调用 new-api 的唯一凭证，**全项目共用一把**，以 `sk-` 开头。new-api 已从「我们的用户体系」降级为
+「带一把统一 key 的上游供应商」（[ADR-0114](docs/adr/0114-new-api-as-upstream-identity-and-billing-services.md)），
+所以这把 Key **不绑定任何 User**，与谁登录无关。它住在 `system_settings` 表 `upstream` 行的
+`new_api_key`（管理端「系统设置 → 上游凭证」维护，AES-256-GCM 信封由 `SYSTEM_SETTINGS_SECRET` 解），
+**每次调用现查**，因此轮换对全部在线会话与在途任务立即生效。消费方只有一类：需要打上游的执行体
+——worker 的 18 个 GenerationJob 处理器与素材状态定时跟进，都直连该配置读取，**不冻结进 job**。
+_Avoid_: 每 User 一把（已退役）、把 Key 冻结进 `GenerationJob` 的 input（已退役）、把 Key 当浏览器会话凭证、
+「默认 API Key」这个旧名（它描述的是已删掉的按用户存储模型）。
 
 **登录会话（浏览器会话凭证）**:
 BFF 签发的不透明短期会话凭证，是浏览器持有的唯一登录态。BFF 本地校验会话（Redis/DB），
-7 天滑动续期、登出吊销；不承载 relay/扣费能力，浏览器永不接触能扣费的凭证。会话与上游默认 Key
+7 天滑动续期、登出吊销；不承载 relay/扣费能力，浏览器永不接触能扣费的凭证。会话与上游统一 Key
 相互独立：吊销会话不影响已接纳 GenerationJob，普通登出不轮换上游 Key。
-_Avoid_: 把会话当扣费凭证、把默认 Key 当会话凭证、浏览器自造或自报会话。
+_Avoid_: 把会话当扣费凭证、把上游统一 Key 当会话凭证、浏览器自造或自报会话。
 
 **产品事实（Product Facts）**:
 由蓝鲸唯一维护的 User 产品数据，包括 Project、Canvas、Asset、Conversation 与 GenerationJob；

@@ -69,10 +69,6 @@ export interface FinalizeGenerationJobDeps {
 /** 空报价（双 null，契约 StageQuoteView：不存在「有版本无价格」）。 */
 const EMPTY_QUOTE = { credits: null, quote_revision: null } as const;
 
-/** 样片冻结输入里**不属于成片**的键——成片由网关引用上游 Draft，不重放画布目标、
- *  样片标记与样片期凭证（成片用本次请求的新凭证，见 handler 内 assembly 顺序）。
- *  references / duration / aspect_ratio / generate_audio / reference_limits 原样保留：
- *  它们是计费规格（G13：输入视频时长取原参考素材，样片视频不计入）。 */
 const SAMPLE_ONLY_INPUT_KEYS = [
   "sample_mode",
   "placement_anchor",
@@ -80,7 +76,6 @@ const SAMPLE_ONLY_INPUT_KEYS = [
   "text_attachments",
   "prompt_plan_snapshot",
   "text_input_signature",
-  "provider_credential",
 ] as const;
 
 /** 从样片冻结输入派生成片输入：同模型 + 1080p，剥掉样片/画布专属键，输出像素按 1080p 重算。
@@ -262,7 +257,6 @@ export async function handleFinalizeGenerationJobCreate(
   body: unknown,
   idempotencyKey: string | null,
   deps: FinalizeGenerationJobDeps,
-  internal: { providerCredential?: string } = {},
 ) {
   // 1. 请求体 strict（G02）：确认两字段之外任何键（prompt/references/duration/ratio/
   //    generate_audio/draft_task_id/source_draft_id…）直接拒绝，机械防线上游输入重放。
@@ -355,12 +349,7 @@ export async function handleFinalizeGenerationJobCreate(
       code: ERROR_QUOTE_STALE,
     });
   }
-  // 6. 凭证：成片用**本次请求**的密封凭证（样片期冻结的已随派生剥除），挂在报价复算之后
-  //    ——它不进任何指纹或报价输入。
   const finalInput: Record<string, unknown> = { ...derived };
-  if (internal.providerCredential) {
-    finalInput.provider_credential = internal.providerCredential;
-  }
   // 7. 建成片任务（+成片阶段预扣）。actionIdentity 与建任务同式带 Date.now()：同一把
   //    key 的两次提交得到不同 commandId，规避 billing 永久幂等记录按 job_id 回放的死锁
   //    （见 handle-create-generation-job 第 8 步的完整说明，同一理由。

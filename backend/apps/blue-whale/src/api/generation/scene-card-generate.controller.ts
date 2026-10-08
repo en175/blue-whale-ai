@@ -29,7 +29,6 @@ import {
   enqueueVideoGenerationJob,
   enqueueImageGenerationJob,
 } from "@lib/shared/generation/generation-queue.js";
-import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { enqueueFailureLog } from "@lib/infra/mq/rocketmq-producer.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
@@ -57,10 +56,8 @@ export class SceneCardGenerateController {
     @Param("sceneCardId") sceneCardId: string,
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey: string | undefined,
-    @Headers("authorization") authorization: string | undefined,
     @Res() res: Response,
   ) {
-    const internal = sealProviderCredential(authorization);
     const result = await handleSceneCardGenerate(
       user.userId,
       projectId,
@@ -69,16 +66,13 @@ export class SceneCardGenerateController {
       bodyString(body),
       this.sceneCard.repo,
       {
-        ...(internal.providerCredential
-          ? { providerCredential: internal.providerCredential }
-          : {}),
         // IKF YHJ（ADR-0087）：场景卡再生成是第三条视频创建路径，与创建期/重试期共用同一个门
         // （同一工厂、同一判定、同一失败处置）。原先漏接，导致预设保存后才变成 Failed 的素材
         // 仍能从这里进生成。
         materialGate: createRequestMaterialGate({
           repo: this.material.materialStatusRepo,
           callAction: (action, body) =>
-            this.material.callAction(authorization, action, body),
+            this.material.callAction(action, body),
           resolveLocalAssetMaterialIds: (uid, assetIds) =>
             this.assets.findBoundMaterialIds(uid, assetIds),
           onMaterialFailure: (input) =>
@@ -86,7 +80,6 @@ export class SceneCardGenerateController {
               .handleUpstreamMaterialFailure({
                 userId: user.userId,
                 materialId: input.materialId,
-                authorization,
                 errorCode: input.errorCode,
                 errorMessage: input.errorMessage,
                 ...(input.deleteUpstream === false ? { deleteUpstream: false } : {}),
@@ -163,9 +156,6 @@ export class SceneCardGenerateController {
     });
   }
 
-  /** POST /api/projects/:projectId/scene-cards/:sceneCardId/storyboard-preview
-   *  User 从 SceneCard 显式触发分镜预览（CONTEXT L43-47，可选旁路）：建 type=image 的 GenerationJob，
-   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：额度预检问 billing 账本，凭证明文透传（修正四：去密）。 */
   @Post("storyboard-preview")
   async storyboardPreview(
     @CurrentUser() user: AuthenticatedUser,
@@ -173,10 +163,8 @@ export class SceneCardGenerateController {
     @Param("sceneCardId") sceneCardId: string,
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey: string | undefined,
-    @Headers("authorization") authorization: string | undefined,
     @Res() res: Response,
   ) {
-    const internal = sealProviderCredential(authorization);
     // 余额预检问 billing：new-api 那把 key 是全项目共用的，问它「余额够不够」
     // 得到的是统一 key 属主的余额，与发起人无关。
     const quotaCheck = async () => {
@@ -192,9 +180,6 @@ export class SceneCardGenerateController {
       bodyString(body),
       this.storyboard.repo,
       {
-        ...(internal.providerCredential
-          ? { providerCredential: internal.providerCredential }
-          : {}),
         quotaCheck,
       },
     );

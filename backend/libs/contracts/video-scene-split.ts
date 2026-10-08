@@ -25,15 +25,6 @@ export const VIDEO_SCENE_SPLIT_JOB_TYPE = "video_scene_split";
  *  source 白名单仅含本值（video_enhance / video_subtitle_erase 的专属来源值同款模式）。 */
 export const VIDEO_SCENE_SPLIT_SOURCE = "video_scene_split";
 
-/** input 冻结键名（三键恒在、粒度恒为合法枚举，创建时定死，重试原样沿用）。
- *  基础设施键 provider_credential（请求头冻结）与 client_token（提交幂等键，消费方是
- *  command_idempotency 表）在业务键之上由创建侧处理（同 video-subtitle-erase 先例，
- *  均不进本 zod——它校验的是客户端业务 payload）。
- *  IKH8BO 扩展：补 target_node_id（画布任务占位卡绑定键）——先例 video_enhance /
- *  video_subtitle_erase 同款；画布单写入方架构（IKFS5W：后端停写 nodes_json，前端唯一
- *  写入方）下「任务与占位数据同事务创建」的落法 = 占位卡绑定随任务 input 原子落库，
- *  前端按本键把 job 映射到它本地创建并随画布保存的任务占位卡（轮询终态/完成扇出/失败
- *  重试都以本键找到卡）。 */
 export const VIDEO_SCENE_SPLIT_INPUT_KEYS = {
   /** 源素材身份（被切分的视频 Asset id；命名沿用 media_extract / video_subtitle_erase /
    *  video_enhance 的 source_asset_id）。 */

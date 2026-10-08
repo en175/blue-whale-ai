@@ -56,14 +56,6 @@ const CREDENTIAL_FIELDS = [
   { name: "hccb_notify_url", secret: false },
 ] as const;
 
-/**
- * 上游（new-api）凭证字段。**只有这一把**——项目里所有以「蓝鲸自己」身份打
- * new-api 的调用都用它（登录后回注请求头、技能格式化、worker 的素材跟进）。
- *
- * <p>⚠️ 与它并列的 `bwsvc_` 服务令牌**不在这里配、也不该并进来**：那是 Agent 计费面的
- * **服务身份**，走 new-api 另外一套鉴权模型（按前缀分流），换成统一 key 会静默把账
- * 记到别人头上。见 `libs/shared/upstream/new-api-egress.ts` 文件头。
- */
 const UPSTREAM_FIELDS = [{ name: "new_api_key", secret: true }] as const;
 
 const POLICY_FIELDS = ["refund_text", "invoice_text"] as const;
@@ -276,19 +268,6 @@ export class SystemSettingsService {
     };
   }
 
-  /**
-   * 内部用：解出**真实**的上游统一 key（不脱敏）。
-   *
-   * <p>⚠️ 拿不到就抛 {@link UpstreamCredentialMissingError}（503 +
-   *    `upstream_credential_missing`），**绝不返回空串**。空串打上游的表现是
-   *    `Authorization: Bearer `，上游回一个 401，而报错点离原因（管理端没配）很远——
-   *    这正是出口文件头点名过的「空串陷阱」。
-   *
-   * <p>⚠️ **每次调用都现查库**，进程内不缓存。调用点都是控制面路径——AuthGuard 每请求回注、
-   *    技能格式化——而缓存买到的是「改了配置不生效」：多副本部署下没有一条不存在的广播
-   *    通道能去让它失效。库是唯一真相，就没有这个问题。（worker-java 侧同口径，
-   *    见 `SystemSettingMapper` 与 `UpstreamCredential.requireKey`。）
-   */
   async requireUpstreamKey(): Promise<string> {
     const upstream = await this.readUpstream();
     if (!upstream.new_api_key) {

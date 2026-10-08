@@ -96,14 +96,6 @@ export const VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR: VideoMattingBackgroundColor
  *  （前端生成、每次发送与失败重试都新生成），出站请求不发）。 */
 export const VIDEO_MATTING_CLIENT_TOKEN_PATTERN = /^[\x20-\x7E]{1,64}$/;
 
-/** input 冻结键名（画布创建入口对客 body 的业务键，创建时定死、重试原样沿用；
- *  IKHK98 按 IKH8BO 扩展先例补齐——videoSceneSplitInputSchema 同款）。基础设施键
- *  provider_credential（请求头冻结）与 client_token（提交幂等键，消费方是
- *  command_idempotency 表）在业务键之上由创建侧处理（均不进本 zod——它校验的是客户端
- *  业务 payload）。mode 是**创建入口入参**（决定走哪个火山端点），故进 input 冻结形态；
- *  它不进出站提交参数（videoMattingSubmitSchema——双端点已按模式分流，见
- *  VIDEO_MATTING_SUBMIT_PATHS）：worker 出站按 input.mode 取提交路径，前端扇出 /
- *  失败重试按冻结 input 读回原参数。 */
 export const VIDEO_MATTING_INPUT_KEYS = {
   /** 源素材身份（被抠像的视频 Asset id；命名沿用 media_extract / video_enhance /
    *  video_scene_split 的 source_asset_id）。 */

@@ -22,9 +22,6 @@ export const IMAGE_ERASE_JOB_TYPE = "image_erase";
  *  （image_enhance 的 source="image_enhance" 同款「专属来源值」模式）。 */
 export const IMAGE_ERASE_SOURCE = "image_erase";
 
-/** input 冻结键名（四业务键按场景恒在、值恒为合法枚举，创建时定死，重试原样沿用）。
- *  基础设施键 provider_credential 在四键之上由创建侧冻结落库（同 image_enhance 先例，
- *  不进本 zod——它校验的是客户端 payload，凭证来自请求头经 sealProviderCredential 密封）。 */
 export const IMAGE_ERASE_INPUT_KEYS = {
   /** 源素材身份（被擦除的图片 Asset id；命名沿用 media_extract 的 source_asset_id）。 */
   sourceAssetId: "source_asset_id",

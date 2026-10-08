@@ -3,12 +3,12 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.mapper.GenerationModelCapabilityMapper;
@@ -54,7 +54,7 @@ class ImageJobProcessorI2iAliasTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiImageClient imageClient;
     @Mock private GenerationModelCapabilityMapper capabilityMapper;
     @Mock private TosMediaStorage tosService;
@@ -67,7 +67,7 @@ class ImageJobProcessorI2iAliasTest {
     @BeforeEach
     void setUp() {
         processor = new ImageJobProcessor(
-                stateMachine, finalizer, assetSource, credentialService,
+                stateMachine, finalizer, assetSource, upstreamCredential,
                 imageClient, capabilityMapper, tosService);
     }
 
@@ -86,8 +86,7 @@ class ImageJobProcessorI2iAliasTest {
             List<String> refs, String featuresJson, String channel, String requestMapping) {
         Map<String, Object> input = new HashMap<>(Map.of(
                 "prompt", "hello", "model_id", MODEL_ID,
-                "size", "1024x1024", "aspect_ratio", "1:1",
-                "provider_credential", "sealed-token"));
+                "size", "1024x1024", "aspect_ratio", "1:1"));
         if (!refs.isEmpty()) input.put("input_asset_ids", refs);
         ClaimedJobDto job = new ClaimedJobDto(
                 "100", "1", "1", "image", input, 0, false, 1L);
@@ -119,7 +118,7 @@ class ImageJobProcessorI2iAliasTest {
             when(assetSource.resolveInputAssets(anyList(), anyString(), anyString()))
                     .thenReturn(byId);
         }
-        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(), anyString(),
                 anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
@@ -169,10 +168,10 @@ class ImageJobProcessorI2iAliasTest {
     void dirtyAliasDegradesToCanonical() {
         assertThat(captureOutbound(List.of("101"), "{\"i2i_model_name\": \"  \"}").model())
                 .isEqualTo(MODEL_ID);
-        reset(stateMachine, assetSource, credentialService, imageClient, capabilityMapper);
+        reset(stateMachine, assetSource, upstreamCredential, imageClient, capabilityMapper);
         assertThat(captureOutbound(List.of("101"), "{\"i2i_model_name\": 42}").model())
                 .isEqualTo(MODEL_ID);
-        reset(stateMachine, assetSource, credentialService, imageClient, capabilityMapper);
+        reset(stateMachine, assetSource, upstreamCredential, imageClient, capabilityMapper);
         assertThat(captureOutbound(List.of("101"), "{broken json").model())
                 .isEqualTo(MODEL_ID);
     }

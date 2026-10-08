@@ -15,47 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * new-api 网关 MediaKit 场景切分客户端（IKH8BP，父规格 IKH86V；以
- * {@link NewApiMediaKitExtractAudioClient} 为模板——家族第四个 MediaKit 异步任务：
- * 提交返 task_id + 查询端点轮询取 result.duration + result.segments[]。HTTP 骨架自
- * IKHKMK 起收敛入 {@link NewApiMediaKitAsyncTaskClient}，本类只保留契约枚举校验、
- * 出站 payload 构造与 completed 结果解析）。
- * <p>
- * 端点（网关**对客**路径，常量单源在 {@link VideoSceneSplitContract}，IKH8BH 契约冻结）：
- * <ul>
- *   <li>submit：POST {SUBMIT_PATH}（30s 超时，异步提交秒级入队）</li>
- *   <li>poll：GET {POLL_PATH_PREFIX}{task_id}（10s 超时）——四个 MediaKit 异步工具共用
- *       同一条查询路由，路径不含 async 段（IKH67T 实测校准）</li>
- * </ul>
- * ⚠️ 网关路径 ≠ 火山上游路径（IKH67T 实测：混用即 404 Invalid URL，任务卡在提交相）。
- * 火山上游侧对应 POST /api/v1/tools/segment-scenes，由网关内部转发，本仓不直连上游。
- * 鉴权与家族同构（契约 §5 / ADR-0080）：Authorization: Bearer 任务冻结的用户 sk-
- * （processor 从 job.input.provider_credential 取出传入）+ X-Trace-Id +
- * X-Client-System: bluewhale。
- * <p>
- * 出站请求映射（官方 PDF「第 1 步：提交任务」+「调整切分粒度」节）：model（对客模型名，
- * 网关按模型名路由 MediaKit 渠道，本期 model_price 配 0）+ video_url（源视频公网对象
- * 存储地址）+ segment_threshold（= 任务冻结的 granularity 经
- * {@link VideoSceneSplitContract#SEGMENT_THRESHOLD} 映射的数值，[0,100) 值越低切得越细）。
- * 不发 min_duration（默认 3s）/ max_duration（默认 30s）/ enable_clip_fade（默认 false）/
- * return_segment_videos（默认 true）——一律走服务端默认（规格「高级参数不暴露」）；不发
- * client_token / callback_* / queue_id（无幂等与回调需求）。
- * <p>
- * 响应形状（官方 PDF「响应说明」+「异步任务结果」节）：submit = {success, task_id,
- * request_id}（success=false 时带 error{code,type,message,param}）；poll 顶层含 task_id /
- * status（running / completed / failed，查询窗口 30 天）与 result{duration, segments[]}——
- * segments[] 每段 start_time / end_time / segment_video_url（切片恒 MP4，链接 24h 有效），
- * processor 须逐段立即转存自家 TOS。两阶段切分（threshold+min 初切、超 max 强制再切）
- * 由上游完成，返回结果照单全收（含整片仅 1 段，不特判）。status 大小写与中间态枚举
- * 官方 PDF 未逐字冻结，按小写归一容错解析（completed→succeeded、failed→failed、
- * 其余→processing）。
- * <p>
- * 错误分类复用 NewApiErrorClassifier（content &gt; quota &gt; provider_failed，§5 优先级）；
- * poll 的网络超时 / 连接失败 / HTTP 429/5xx 抛错时以 cause 携带状态
- * （{@link NewApiVideoClient.HttpStatusException} 复用），供 processor 按
- * isTransientPollError 语义判定瞬时重排。
- */
 @Component
 public class NewApiMediaKitSegmentScenesClient extends NewApiMediaKitAsyncTaskClient {
 
@@ -99,16 +58,6 @@ public class NewApiMediaKitSegmentScenesClient extends NewApiMediaKitAsyncTaskCl
         return new VideoSceneSplitError(code, message);
     }
 
-    /**
-     * 提交场景切分异步任务（官方「响应说明」：成功返回 task_id）。
-     *
-     * @param token       per-job Bearer 凭证（任务冻结的用户 sk-）
-     * @param videoUrl    源视频公网对象存储地址
-     * @param granularity 任务冻结的切分粒度档（fine / standard / coarse，IKH8BH 契约枚举；
-     *                    出站经契约 SEGMENT_THRESHOLD 映射官方 segment_threshold 数值）
-     * @return 上游任务 id（processor 存 provider_task_id 后转轮询）
-     * @throws VideoSceneSplitError 按错误分类抛错
-     */
     public String submit(String token, String videoUrl, String granularity) {
         Integer threshold = VideoSceneSplitContract.SEGMENT_THRESHOLD.get(granularity);
         if (threshold == null) {

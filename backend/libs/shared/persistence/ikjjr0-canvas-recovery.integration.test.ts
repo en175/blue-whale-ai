@@ -123,7 +123,6 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
       base_scene_card_version: args.baseVersion ?? 1,
       parameters: { model_id: "seedream-4", size: "2k", aspect_ratio: "16:9", count: 4 },
       capability_snapshot_version: currentSnapshot,
-      provider_credential: "sk-ikjjr0",
       quotaCheck: async () => ({ sufficient: args.quotaSufficient ?? true }),
       ...(args.canvasRecovery ? { canvasRecovery: args.canvasRecovery } : {}),
     };

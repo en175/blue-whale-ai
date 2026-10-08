@@ -3,12 +3,12 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;
@@ -58,7 +58,7 @@ class VideoJobProcessorTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiVideoClient videoClient;
     @Mock private TosVideoMediaRelay mediaRelay;
     @Mock private GenerationMessageProducer producer;
@@ -68,7 +68,7 @@ class VideoJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VideoJobProcessor(
-                stateMachine, finalizer, assetSource, credentialService,
+                stateMachine, finalizer, assetSource, upstreamCredential,
                 videoClient, mediaRelay, producer);
         // IKIZQD：提交相统一先落「提交中」标记——默认放行，个别用例覆写为 false 测失租停止。
         lenient().doReturn(true).when(stateMachine)
@@ -98,7 +98,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("101", true, "task-123", 0, 0, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("101"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null, null))
                 .when(videoClient).poll(anyString(), eq("task-123"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
@@ -121,7 +121,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("102", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("102"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new SubmitResult("task-456", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
@@ -145,7 +145,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("110", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("110"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new SubmitResult("task-ikfa1p", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
@@ -170,7 +170,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("122", false, "task-789", 0, 0, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("122"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                 "new-api 视频轮询失败: 慢", new java.net.SocketTimeoutException()))
                 .when(videoClient).poll(anyString(), eq("task-789"));
@@ -215,7 +215,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("112", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("112"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new SubmitResult("task-ikfcxc-2", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
@@ -238,7 +238,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("113", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("113"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new SubmitResult("task-ikfcxc-3", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
@@ -252,10 +252,9 @@ class VideoJobProcessorTest {
     }
 
     @Test
-    @DisplayName("G52: 缺少凭证 → provider_credential_missing")
+    @DisplayName("G52: 上游凭证未配置 → provider_credential_missing")
     void missingCredential() {
         Map<String, Object> input = new HashMap<>(baseInput());
-        input.remove("provider_credential");
         ClaimedVideoJobDto claim = videoClaim("103", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("103"), anyString());
@@ -263,6 +262,9 @@ class VideoJobProcessorTest {
                 .failVideoJob(eq("103"), eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
                         anyString(), any(), anyString(), eq(1L));
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("103");
 
         verify(finalizer).failVideoJob(eq("103"), eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
@@ -277,7 +279,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("104", false, null, 0, 0, "parent-task-789");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("104"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("parent-task-789"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
@@ -299,7 +301,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("105", false, null, 0, 0, "parent-task-fail");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("105"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("failed", 100, null, null,
                 new TaskError("provider_failed", "上游失败"), null))
                 .when(videoClient).poll(eq("token"), eq("parent-task-fail"));
@@ -321,7 +323,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("117", false, null, 0, 0, "parent-task-blank");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("117"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, resultUrl, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("parent-task-blank"));
         doReturn(new SubmitResult("new-task-blank", "queued")).when(videoClient)
@@ -345,7 +347,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("116", false, null, 0, 0, "parent-task-err");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("116"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError("provider_failed", "查询超时"))
                 .when(videoClient).poll(eq("token"), eq("parent-task-err"));
         doReturn(new SubmitResult("new-task-err", "queued")).when(videoClient)
@@ -364,7 +366,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("118", false, null, 0, 0, "parent-task-expired");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("118"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-expired.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("parent-task-expired"));
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频下载失败: HTTP 404"))
@@ -390,7 +392,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("114", false, null, 0, 0, "parent-task-stale");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("114"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-stale.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("parent-task-stale"));
         doReturn(new StoredVideo("http://tos/stale.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
@@ -416,16 +418,16 @@ class VideoJobProcessorTest {
                 "115", "1", "42", baseInput(), null, false,
                 "video-worker-new", 2L, 0, 0, "parent-task-tko");
         VideoJobProcessor staleProcessor = new VideoJobProcessor(
-                stateMachine, finalizer, assetSource, credentialService, videoClient, mediaRelay, producer,
+                stateMachine, finalizer, assetSource, upstreamCredential, videoClient, mediaRelay, producer,
                 "video-worker-old");
         VideoJobProcessor newProcessor = new VideoJobProcessor(
-                stateMachine, finalizer, assetSource, credentialService, videoClient, mediaRelay, producer,
+                stateMachine, finalizer, assetSource, upstreamCredential, videoClient, mediaRelay, producer,
                 "video-worker-new");
         doReturn(Optional.of(staleWorker)).when(stateMachine)
                 .claimVideoJobById("115", "video-worker-old");
         doReturn(Optional.of(newWorker)).when(stateMachine)
                 .claimVideoJobById("115", "video-worker-new");
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-tko.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("parent-task-tko"));
         doReturn(new StoredVideo("http://tos/tko.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
@@ -462,7 +464,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("106", false, "task-106", 5, 30, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("106"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("processing", 50, null, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-106"));
         doReturn(true).when(stateMachine)
@@ -480,7 +482,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("107", false, "task-107", 720, 90, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("107"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("processing", 90, null, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-107"));
         doReturn(true).when(finalizer)
@@ -508,7 +510,7 @@ class VideoJobProcessorTest {
                 VideoJobProcessor.MAX_VIDEO_POLLS - 1, 30, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("109"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
                 .when(videoClient).poll(eq("token"), eq("task-109"));
         doReturn(true).when(stateMachine)
@@ -529,7 +531,7 @@ class VideoJobProcessorTest {
                 VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("110"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
                 .when(videoClient).poll(eq("token"), eq("task-110"));
         doReturn(true).when(finalizer)
@@ -559,7 +561,7 @@ class VideoJobProcessorTest {
                 VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("111"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "网关繁忙",
                 new NewApiVideoClient.HttpStatusException(503)))
                 .when(videoClient).poll(eq("token"), eq("task-111"));
@@ -590,7 +592,7 @@ class VideoJobProcessorTest {
                 VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("121"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                 "new-api 视频轮询失败: HTTP 429 body={\"error\":{\"message\":\"Requests too fast\"}} request_id=req-882",
                 new NewApiVideoClient.HttpStatusException(429)))
@@ -622,7 +624,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("112", false, "task-112", 3, 30, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("112"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
                 .when(videoClient).poll(eq("token"), eq("task-112"));
         doReturn(false).when(stateMachine)
@@ -641,7 +643,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("108", false, "task-108", 10, 100, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("108"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-108"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 1024L, "0123456789abcdef0123456789abcdef"))
@@ -666,7 +668,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("109a", false, "task-109a", 1, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("109a"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-109a"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 1024L, "0123456789abcdef0123456789abcdef"))
@@ -691,7 +693,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("109", false, "task-109", 3, 0, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("109"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("failed", 100, null, null,
                 new TaskError("content_rejected", "内容违规"), null))
                 .when(videoClient).poll(eq("token"), eq("task-109"));
@@ -711,7 +713,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("109a", false, "task-109a", 3, 0, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("109a"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         // IKFL53：new-api tasks 表 FAILURE 状态把终端错误放顶层 fail_reason，无 data.error。
         doReturn(new VideoTaskObservation("failed", 100, null, null,
                 new TaskError("content_rejected_reference",
@@ -735,7 +737,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("110", false, "task-110", 5, 0, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("110"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, null, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-110"));
         doReturn(true).when(finalizer)
@@ -756,7 +758,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("119", false, "task-119", 3, 0, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("119"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         // 401 不在瞬时白名单（429/500/502/503/504）→ 非瞬时直进失败终态；submit !2xx 不带
         // cause 是已知现状，故本族透传用例走 poll（poll !2xx 挂 HttpStatusException cause）
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -785,7 +787,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("120", false, "task-120", 5, 100, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("120"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-120"));
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -1177,7 +1179,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("601", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("601"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new SubmitResult("task-ikhbdo", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
@@ -1213,7 +1215,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("602", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("602"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new SubmitResult("task-ikhbdo-audio", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
@@ -1792,7 +1794,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("130", false, null, 0, 0, null, sampleInput());
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("130"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new SubmitResult("task-sample-1", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
@@ -1812,7 +1814,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("131", false, "task-sample-2", 3, 100, null, sampleInput());
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("131"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null,
                 40_594L, G06_UPSTREAM_CREATED_AT_MS))
                 .when(videoClient).poll(eq("token"), eq("task-sample-2"));
@@ -1838,7 +1840,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("132", false, "task-sample-3", 3, 100, null, sampleInput());
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("132"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null,
                 40_594L, null))
                 .when(videoClient).poll(eq("token"), eq("task-sample-3"));
@@ -1862,11 +1864,11 @@ class VideoJobProcessorTest {
     @DisplayName("IKIZQ8 G14: 样片转存不可用（无 TOS）→ 按本阶段失败，不以供应商 URL 充当成功")
     void sampleRelayUnavailableFailsInsteadOfStoringProviderUrl() {
         VideoJobProcessor noRelayProcessor = new VideoJobProcessor(
-                stateMachine, finalizer, assetSource, credentialService, videoClient, null, producer);
+                stateMachine, finalizer, assetSource, upstreamCredential, videoClient, null, producer);
         ClaimedVideoJobDto claim = videoClaim("133", false, "task-sample-4", 3, 100, null, sampleInput());
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("133"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://provider-temp.mp4", null, null,
                 null, G06_UPSTREAM_CREATED_AT_MS))
                 .when(videoClient).poll(eq("token"), eq("task-sample-4"));
@@ -1884,11 +1886,11 @@ class VideoJobProcessorTest {
     @DisplayName("IKIZQ8 G12 回归: 普通视频转存不可用 → 仍走既有 URL 直存降级（旧行为零变化）")
     void normalVideoRelayUnavailableKeepsLegacyUrlFallback() {
         VideoJobProcessor noRelayProcessor = new VideoJobProcessor(
-                stateMachine, finalizer, assetSource, credentialService, videoClient, null, producer);
+                stateMachine, finalizer, assetSource, upstreamCredential, videoClient, null, producer);
         ClaimedVideoJobDto claim = videoClaim("134", false, "task-normal", 3, 100, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("134"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://provider-temp.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-normal"));
         // 降级直存路径的 storageKey/mime/size/md5 均为 null——字符串槽用 any()（anyString() 不匹配 null）。
@@ -1977,7 +1979,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("140", null, "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("140"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new SubmitResult("task-final-77", "queued")).when(videoClient)
                 .finalize(eq("token"), eq("task-sample-9"));
         doReturn(true).when(stateMachine)
@@ -1999,7 +2001,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("141", null, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("141"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
 
         processor.handle("141");
 
@@ -2016,7 +2018,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("142", "task-final-77", "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("142"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://provider-final.mp4", null, null,
                 118_000L, null))
                 .when(videoClient).poll(eq("token"), eq("task-final-77"));
@@ -2045,11 +2047,11 @@ class VideoJobProcessorTest {
     @DisplayName("IKIZQC G14: 成片转存不可用（无 TOS）→ 按本阶段失败，不以供应商 URL 充当成功")
     void finalRelayUnavailableFailsInsteadOfStoringProviderUrl() {
         VideoJobProcessor noRelayProcessor = new VideoJobProcessor(
-                stateMachine, finalizer, assetSource, credentialService, videoClient, null, producer);
+                stateMachine, finalizer, assetSource, upstreamCredential, videoClient, null, producer);
         ClaimedVideoJobDto claim = finalClaim("143", "task-final-8", "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("143"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://provider-temp.mp4", null, null,
                 null, null))
                 .when(videoClient).poll(eq("token"), eq("task-final-8"));
@@ -2069,7 +2071,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("144", "task-final-9", "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("144"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("failed", 100, null, null,
                 new TaskError("InternalServiceError", "上游成片失败"), null, null))
                 .when(videoClient).poll(eq("token"), eq("task-final-9"));
@@ -2091,7 +2093,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("145", null, "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("145"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "new-api 成片提交超时"))
                 .when(videoClient).finalize(eq("token"), eq("task-sample-9"));
 
@@ -2114,7 +2116,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("146", null, "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("146"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         // 网关已受理但响应不可用（无 HTTP 状态 cause）——与超时同为「结果不明」。
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "new-api 视频提交响应缺少 task_id"))
                 .when(videoClient).finalize(eq("token"), eq("task-sample-9"));
@@ -2133,7 +2135,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("147", null, "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("147"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new SubmitResult("task-final-x", "queued")).when(videoClient)
                 .finalize(eq("token"), eq("task-sample-9"));
         doThrow(new RuntimeException("DB down"))
@@ -2155,7 +2157,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("148", null, "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("148"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doReturn(false).when(stateMachine)
                 .markSubmissionAttempt(eq("148"), anyString(), eq(1L));
 
@@ -2174,7 +2176,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("149", null, "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("149"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_QUOTA_EXHAUSTED,
                 "new-api 成片提交失败: HTTP 403 body=quota",
                 new NewApiVideoClient.HttpStatusException(403)))
@@ -2195,7 +2197,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("150", null, "task-sample-9");
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("150"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "new-api 成片提交超时"))
                 .when(videoClient).finalize(eq("token"), eq("task-sample-9"));
 
@@ -2213,7 +2215,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("151", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("151"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "new-api 视频提交超时"))
                 .when(videoClient).submit(eq("token"), any(VideoSubmitInput.class));
 
@@ -2231,7 +2233,7 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = finalClaim("152", null, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("152"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
 
         processor.handle("152");
 
@@ -2262,7 +2264,6 @@ class VideoJobProcessorTest {
 
     private Map<String, Object> baseInput() {
         Map<String, Object> input = new HashMap<>();
-        input.put("provider_credential", "sealed-cred");
         input.put("prompt", "一只猫在跑步");
         input.put("model_id", "seedance-2");
         input.put("duration", 5.0);

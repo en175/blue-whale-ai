@@ -19,9 +19,6 @@ export const VIDEO_FRAME_INTERPOLATION_JOB_TYPE = "video_frame_interpolation";
  *  仅含本值（video_enhance / video_scene_split 的专属来源值同款模式）。 */
 export const VIDEO_FRAME_INTERPOLATION_SOURCE = "video_frame_interpolation";
 
-/** input 冻结键名（三键恒在、值恒为合法帧率，创建时定死，重试原样沿用）。
- *  基础设施键 provider_credential 在业务键之上由创建侧冻结落库（同 video_enhance 先例，不进本
- *  zod——它校验的是客户端 payload，凭证来自请求头冻结）。 */
 export const VIDEO_FRAME_INTERPOLATION_INPUT_KEYS = {
   /** 源素材身份（被插帧的视频 Asset id；命名沿用 media_extract / video_enhance 家族的
    *  source_asset_id）。 */
@@ -105,12 +102,6 @@ export type VideoFrameInterpolationInput = z.infer<
  *  .targetNodeId，不另造键名）。 */
 export const VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT = "current";
 
-/** 恢复查询的「当前关联」判定规则（契约冻结，双端不得各自发明）：同 user + 同 project + 同
- *  target_node_id 的全部未软删插帧任务中，**创建时间最新者为当前关联**（gmt_create desc、
- *  id desc 双键稳定排序）；旧任务不得覆盖更新关联，不同卡（不同 target_node_id）、不同项目的
- *  任务互不串联。**不过滤 status**——queued / running / succeeded / failed（含入队失败兜底置
- *  failed 的任务）均可查回；软删（is_delete）任务不参与。响应**不含 input**（凭证不外泄：
- *  provider_credential 冻结在 job input，恢复查询只回任务身份与进度，详情走 GET /api/jobs/:id）。 */
 export const VIDEO_FRAME_INTERPOLATION_RECOVERY_RESPONSE_KEYS = {
   /** 当前关联任务 id（无任何关联任务时整个 data 为 null，不另设空对象形态）。 */
   jobId: "job_id",

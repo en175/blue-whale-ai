@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
 import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
@@ -12,7 +13,6 @@ import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.MediaExtractError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
@@ -66,7 +66,7 @@ public class AudioMixJobProcessor implements JobProcessor {
     private final JobClaimService claimService;
     private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
-    private final GenerationCredentialService credentials;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitMixAudioClient gateway;
     private final TosAudioMediaRelay relay;
     private final GenerationMessageProducer producer;
@@ -77,7 +77,7 @@ public class AudioMixJobProcessor implements JobProcessor {
                                 JobClaimService claimService,
                                 GenerationJobMapper jobMapper,
                                 JobFinalizer finalizer,
-                                GenerationCredentialService credentials,
+                                UpstreamCredential upstreamCredential,
                                 NewApiMediaKitMixAudioClient gateway,
                                 TosAudioMediaRelay relay,
                                 @Qualifier("audioMixMessageProducer") GenerationMessageProducer producer) {
@@ -86,7 +86,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.bySources(
                 AudioMixContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
-        this.credentials = credentials;
+        this.upstreamCredential = upstreamCredential;
         this.gateway = gateway;
         this.relay = relay;
         this.producer = producer;
@@ -129,16 +129,12 @@ public class AudioMixJobProcessor implements JobProcessor {
 
     private void runStep(ClaimedJob job) {
         if (cancelIfRequested(job)) return;
-        Object credential = job.input().get("provider_credential");
-        if (!(credential instanceof String frozen) || frozen.isBlank()) {
-            fail(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "音频混合任务缺少供应商凭证");
-            return;
-        }
         String token;
         try {
-            token = credentials.open(frozen);
-        } catch (Exception error) {
-            fail(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "音频混合任务凭证无效");
+            token = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[audio_mix] 生成服务凭证未配置 jobId={}: {}", job.id(), e.getMessage());
+            fail(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
         if (job.providerTaskId() == null) submit(job, token);

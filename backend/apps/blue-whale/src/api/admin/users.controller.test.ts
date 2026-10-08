@@ -50,12 +50,10 @@ function createController(overrides: {
 }
 
 const USER = { userId: "1", username: "admin" } as never;
-const BEARER = "Bearer sk-admin-token";
 const ADMIN_CTX = {
   user: USER,
   rawUserId: "42",
   body: { action: "freeze", reason: "违规" },
-  authorization: BEARER,
 };
 
 describe("AdminUsersController.manage（冻结强制登出）", () => {
@@ -81,7 +79,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
       ADMIN_CTX.user,
       ADMIN_CTX.rawUserId,
       ADMIN_CTX.body,
-      ADMIN_CTX.authorization,
     );
 
     expect(result).toEqual({ success: true, data: { revokedSessions: 3 } });
@@ -98,7 +95,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
       ADMIN_CTX.user,
       ADMIN_CTX.rawUserId,
       ADMIN_CTX.body,
-      ADMIN_CTX.authorization,
     );
     expect(operationLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -121,7 +117,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
       ADMIN_CTX.user,
       ADMIN_CTX.rawUserId,
       ADMIN_CTX.body,
-      ADMIN_CTX.authorization,
     );
     expect(result).toEqual({ success: true, data: { revokedSessions: 0 } });
     expect(operationLog.create).toHaveBeenCalledWith(
@@ -140,7 +135,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         ADMIN_CTX.user,
         ADMIN_CTX.rawUserId,
         ADMIN_CTX.body,
-        ADMIN_CTX.authorization,
       ),
     ).rejects.toBeInstanceOf(Error);
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
@@ -155,7 +149,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         ADMIN_CTX.user,
         ADMIN_CTX.rawUserId,
         ADMIN_CTX.body,
-        ADMIN_CTX.authorization,
       ),
     ).rejects.toMatchObject({ status: 404 });
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
@@ -167,7 +160,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
       ADMIN_CTX.user,
       ADMIN_CTX.rawUserId,
       { action: "unfreeze", reason: "已改正" },
-      ADMIN_CTX.authorization,
     );
     expect(result).toEqual({ success: true, data: null });
     expect(identity.setUserStatus).toHaveBeenCalledWith(42, "NORMAL");
@@ -182,7 +174,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
       ADMIN_CTX.user,
       ADMIN_CTX.rawUserId,
       { action: "adjustBalance", reason: "补偿", value: 10 },
-      ADMIN_CTX.authorization,
       undefined,
       "key-1",
     );
@@ -210,7 +201,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         ADMIN_CTX.user,
         ADMIN_CTX.rawUserId,
         { action: "adjustBalance", reason: "补偿", value: 10 },
-        ADMIN_CTX.authorization,
         undefined,
         "key-1",
       ),
@@ -235,7 +225,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         ADMIN_CTX.user,
         ADMIN_CTX.rawUserId,
         { action: "adjustBalance", reason: "补偿", value: 10 },
-        ADMIN_CTX.authorization,
         undefined,
         "key-1",
       ),
@@ -252,7 +241,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
           ADMIN_CTX.user,
           ADMIN_CTX.rawUserId,
           { action: "adjustBalance", reason: "补偿", value },
-          ADMIN_CTX.authorization,
           undefined,
           "key-1",
         ),
@@ -269,7 +257,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
       ADMIN_CTX.user,
       ADMIN_CTX.rawUserId,
       { action: "adjustBalance", reason: "补偿", value: 10 },
-      ADMIN_CTX.authorization,
       undefined,
       "key-1",
     );
@@ -293,7 +280,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         ADMIN_CTX.user,
         ADMIN_CTX.rawUserId,
         { action: "adjustBalance", reason: "补偿", value: 10 },
-        ADMIN_CTX.authorization,
         undefined,
         "   ",
       ),
@@ -310,7 +296,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
           ADMIN_CTX.user,
           ADMIN_CTX.rawUserId,
           { action: "adjustBalance", reason: "补偿", value },
-          ADMIN_CTX.authorization,
           undefined,
           "key-1",
         ),
@@ -328,7 +313,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         ADMIN_CTX.user,
         ADMIN_CTX.rawUserId,
         { action: "adjustBalance", reason: "补偿", value: 10 },
-        ADMIN_CTX.authorization,
         undefined,
         "key-1",
       ),
@@ -346,7 +330,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         ADMIN_CTX.user,
         ADMIN_CTX.rawUserId,
         { action: "adjustBalance", reason: "补偿", value: 10 },
-        ADMIN_CTX.authorization,
         undefined,
         "key-1",
       ),
@@ -364,7 +347,6 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
         ADMIN_CTX.user,
         ADMIN_CTX.rawUserId,
         { action: "adjustBalance", reason: "补偿", value: 10 },
-        ADMIN_CTX.authorization,
         undefined,
         "key-1",
       ),
@@ -380,7 +362,7 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
       { rawUserId: "42", body: { action: "kick", reason: "x" } },
     ]) {
       await expect(
-        controller.manage(ADMIN_CTX.user, bad.rawUserId, bad.body, BEARER),
+        controller.manage(ADMIN_CTX.user, bad.rawUserId, bad.body),
       ).rejects.toMatchObject({ status: 400 });
     }
     expect(identity.setUserStatus).not.toHaveBeenCalled();
@@ -404,7 +386,7 @@ describe("AdminUsersController.manage（IKJABH 重置密码）", () => {
   const RESET = { action: "reset_password", reason: "用户报障", password: "TempPass123" };
 
   function call(controller: AdminUsersController, body: unknown, rawUserId = "42") {
-    return controller.manage(USER, rawUserId, body as Record<string, unknown>, BEARER);
+    return controller.manage(USER, rawUserId, body as Record<string, unknown>);
   }
 
   it("重置：写新口令（置强制改密）→ 踢该用户全部会话 → 审计 user.reset_password", async () => {
@@ -523,7 +505,7 @@ describe("AdminUsersController.list（余额三列来自 billing）", () => {
         .mockRejectedValue(new BillingAdminConfigError("缺 BILLING_ADMIN_URL")),
     });
 
-    await expect(controller.list(USER, BEARER, {})).rejects.toMatchObject({ status: 503 });
+    await expect(controller.list(USER, {})).rejects.toMatchObject({ status: 503 });
   });
 
   it("billing 调用失败 → 502 且带原因，不回落成空列表", async () => {
@@ -531,7 +513,7 @@ describe("AdminUsersController.list（余额三列来自 billing）", () => {
       listAdminUsers: vi.fn().mockRejectedValue(new BillingAdminError("服务不可用")),
     });
 
-    await expect(controller.list(USER, BEARER, {})).rejects.toMatchObject({
+    await expect(controller.list(USER, {})).rejects.toMatchObject({
       status: 502,
       message: expect.stringContaining("用户列表查询失败"),
     });
@@ -550,7 +532,7 @@ describe("AdminUsersController.list（余额三列来自 billing）", () => {
       listAdminUsers: vi.fn().mockRejectedValue(new Error("prisma 炸了")),
     });
 
-    const error = await controller.list(USER, BEARER, {}).catch((e: unknown) => e);
+    const error = await controller.list(USER, {}).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe("prisma 炸了");
     // 没有被包装成 AdminException（那会带上一个指向 billing 的状态码）

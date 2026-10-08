@@ -10,7 +10,6 @@ import {
   IDEMPOTENCY_CONFLICT_CODE,
   IMAGE_OUTPAINT_INPUT_KEYS,
   IMAGE_OUTPAINT_JOB_TYPE,
-  IMAGE_OUTPAINT_PROVIDER_CREDENTIAL_KEY,
   IMAGE_OUTPAINT_SOURCE,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
@@ -100,8 +99,6 @@ export class ImageOutpaintsService {
     userId: string,
     projectId: string,
     body: Record<string, unknown>,
-    // 与图片生成/高清放大同构：请求方 sk- 凭证由 controller 注入、冻结进 job input。
-    internal: { providerCredential?: string } = {},
     // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
     idempotencyKey?: string,
   ) {
@@ -171,19 +168,7 @@ export class ImageOutpaintsService {
     );
     if (gateError) return fail(FAILURE_CODE, gateError);
 
-    // 契约 schema parse 后原样冻结（六键恒在、重试原样沿用）。provider_credential 是六键之上的
-    // 基础设施键（不进契约 zod——它校验的是客户端 payload，凭证由服务端注入）：与图片生成/高清放大
-    // 同构，请求方 sk- 明文冻结进 job input，worker（ImageOutpaintJobProcessor）处理时直接取用；
-    // 未携带/非 sk- 时不写键。键名用契约常量，防字面量漂移。契约 strict 六键口径不变。
-    const frozenInput: ImageOutpaintInput & { provider_credential?: string } = {
-      ...input,
-      ...(internal.providerCredential
-        ? {
-            [IMAGE_OUTPAINT_PROVIDER_CREDENTIAL_KEY]:
-              internal.providerCredential,
-          }
-        : {}),
-    };
+    const frozenInput: ImageOutpaintInput = { ...input };
 
     // IKJJQW：受理主体走共享段（B.3）——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 →
     // 幂等行」一个事务；无 canvas_binding 时建行路径与接入前一致。前置回读 miss 后此处

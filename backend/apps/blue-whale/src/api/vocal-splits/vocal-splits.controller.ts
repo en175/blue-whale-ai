@@ -4,7 +4,6 @@ import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { enqueueVocalSplitJob } from "@lib/shared/generation/generation-queue.js";
-import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import { VocalSplitsService } from "@lib/shared/vocal-splits/vocal-splits.service.js";
 import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
@@ -18,20 +17,14 @@ export class VocalSplitsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
     @Body() body: { source_asset_id?: unknown; scene?: unknown; output_format?: unknown; canvas_binding?: unknown },
-    @Headers("authorization") authorization?: string,
     // IKJJQY（B.3）：canvas_binding 的幂等承载——人声分离无 client_token 既有承载方式，
     // 新协议走请求头 Idempotency-Key（必须等于 submission_id）。
     @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    // 与去字幕 / 音视频分离同构（media-extractions.controller.ts）：从请求 Authorization
-    // 头取请求方 sk-，冻结进 job input.provider_credential，worker 处理时直接取用
-    // （未携带/非 sk- 为空对象）。
-    const internal = sealProviderCredential(authorization);
     const result = await this.vocalSplits.create(
       user.userId,
       projectId,
       body ?? {},
-      internal,
       idempotencyKey,
     );
     if (result.code !== 200 || !result.data) return result;

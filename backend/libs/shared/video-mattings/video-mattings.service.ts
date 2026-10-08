@@ -106,9 +106,6 @@ export class VideoMattingsService {
     userId: string,
     projectId: string,
     body: Record<string, unknown>,
-    // 与去字幕 / HD / 场景切分同构（video-scene-splits.service.ts 的 internal 形参）：
-    // 请求方 sk- 凭证冻结进 job input，worker 处理时直接取用（未携带/非 sk- 为空对象）。
-    internal: { providerCredential?: string } = {},
   ) {
     // client_token 是业务键之上的基础设施键（不进契约 zod——它校验业务 payload；token 的
     // 消费方是 command_idempotency 表，不冻结进 job input）：先行剥离再过契约 schema。
@@ -213,17 +210,7 @@ export class VideoMattingsService {
       return fail(FAILURE_CODE, "暂支持 10 分钟以内的视频智能抠像");
     }
 
-    // 契约 schema parse 后原样冻结（含补齐的 format / background_color 默认值；重试原样
-    // 沿用，前端按冻结 input 读回原参数）。provider_credential 是业务键之上的基础设施键
-    // （不进契约 zod——凭证由服务端注入）：请求方 sk- 明文冻结进 job input，worker
-    // （IKHK99 按附录 C 注册的处理器）按 input.mode 取提交端点处理；未携带/非 sk- 时
-    // 不写键。
-    const frozenInput: VideoMattingInput & { provider_credential?: string } = {
-      ...input,
-      ...(internal.providerCredential
-        ? { provider_credential: internal.providerCredential }
-        : {}),
-    };
+    const frozenInput: VideoMattingInput = { ...input };
 
     // IKJJQW：受理主体走共享段——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 → 幂等行」
     // 一个事务；无 canvas_binding 时保持既有 client_token 幂等事务（回读 → 建行 → 幂等行）。

@@ -60,8 +60,6 @@ function buildRepo(result: unknown, view: unknown = BINDING_VIEW) {
   };
 }
 
-const OPTIONS = { providerCredential: "sk-plain" };
-
 function requestBody(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({ ...BASE_BODY, ...overrides });
 }
@@ -77,7 +75,7 @@ describe("handleStoryboardPreviewCreate canvas_binding（IKJJR0）", () => {
     });
 
     const res = await handleStoryboardPreviewCreate(
-      "42", "1", "5001", UUID, requestBody({ canvas_binding: binding(UUID) }), repo, OPTIONS,
+      "42", "1", "5001", UUID, requestBody({ canvas_binding: binding(UUID) }), repo,
     );
 
     expect(res.code).toBe(200);
@@ -102,7 +100,7 @@ describe("handleStoryboardPreviewCreate canvas_binding（IKJJR0）", () => {
     const repo = buildRepo({ kind: "applied", preview_id: "7001", scene_card_id: "5001", generation_job_id: "8101", cursor: "42" });
 
     const res = await handleStoryboardPreviewCreate(
-      "42", "1", "5001", "another-key", requestBody({ canvas_binding: binding(UUID) }), repo, OPTIONS,
+      "42", "1", "5001", "another-key", requestBody({ canvas_binding: binding(UUID) }), repo,
     );
 
     expect(res).toMatchObject({ code: 400, data: { reason: "invalid_recovery_payload" } });
@@ -114,7 +112,7 @@ describe("handleStoryboardPreviewCreate canvas_binding（IKJJR0）", () => {
     const bad = { ...BASE_BODY, canvas_binding: { protocol_version: 2, submission_id: "not-uuid" } };
 
     const res = await handleStoryboardPreviewCreate(
-      "42", "1", "5001", UUID, JSON.stringify(bad), repo, OPTIONS,
+      "42", "1", "5001", UUID, JSON.stringify(bad), repo,
     );
 
     expect(res).toMatchObject({ code: 400, data: { reason: "invalid_recovery_payload" } });
@@ -132,7 +130,7 @@ describe("handleStoryboardPreviewCreate canvas_binding（IKJJR0）", () => {
     );
 
     const res = await handleStoryboardPreviewCreate(
-      "42", "1", "5001", UUID, requestBody({ canvas_binding: binding(UUID) }), repo, OPTIONS,
+      "42", "1", "5001", UUID, requestBody({ canvas_binding: binding(UUID) }), repo,
     );
 
     expect(res).toEqual({
@@ -151,7 +149,7 @@ describe("handleStoryboardPreviewCreate canvas_binding（IKJJR0）", () => {
     }, { ...BINDING_VIEW, is_current: false });
 
     const res = await handleStoryboardPreviewCreate(
-      "42", "1", "5001", UUID, requestBody({ canvas_binding: binding(UUID) }), repo, OPTIONS,
+      "42", "1", "5001", UUID, requestBody({ canvas_binding: binding(UUID) }), repo,
     );
 
     expect(res.code).toBe(200);
@@ -172,7 +170,7 @@ describe("handleStoryboardPreviewCreate canvas_binding（IKJJR0）", () => {
     });
 
     const res = await handleStoryboardPreviewCreate(
-      "42", "1", "5001", "plain-key", requestBody(), repo, OPTIONS,
+      "42", "1", "5001", "plain-key", requestBody(), repo,
     );
 
     expect(res.code).toBe(200);
