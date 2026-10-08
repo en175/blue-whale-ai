@@ -212,6 +212,8 @@ def read_recovery(path: Path, branch: str) -> dict[str, object]:
         payload = load_recovery(path)
     except RecoveryError as exc:
         raise WorkflowError("同步恢复点无法读取：{}".format(exc)) from exc
+    if "original_head" not in payload:
+        raise WorkflowError("同步恢复点缺少 original_head 键，无法读取。")
     if not _legacy_polluted_branch(str(payload.get("branch", "")), branch):
         raise WorkflowError("同步恢复点属于其他分支，拒绝使用。")
     return payload

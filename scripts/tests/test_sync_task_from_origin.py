@@ -525,10 +525,19 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertNotEqual(synced_head, original_head)
         recovery = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
         self.assertTrue(recovery.exists())
+        missing_original_head = {
+            "version": 1,
+            "branch": "feature/测试已有PR更新流程",
+            "target_branch": "release/prod",
+        }
         corruptions = (
             ("非法 JSON", "{ not json"),
             ("非 JSON object", json.dumps(["corrupted"], ensure_ascii=False)),
             ("非法 UTF-8 字节", b'{"head": "\xff\xfe\x80"}'),
+            ("缺 original_head 键且无 synced_head",
+             json.dumps(missing_original_head, ensure_ascii=False)),
+            ("缺 original_head 键但含 synced_head",
+             json.dumps({**missing_original_head, "synced_head": synced_head}, ensure_ascii=False)),
         )
         for name, content in corruptions:
             with self.subTest(corruption=name):
