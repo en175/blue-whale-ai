@@ -607,9 +607,20 @@ export async function saveCanvasWithRecovery(
       submissionsById.set(submissionId, row);
       return row;
     };
+    const seenNodeIds = new Set<string>();
+    const markerNodeIds = new Set<string>();
+    for (const node of incomingNodes) {
+      const id = String(node.id);
+      const marked = markerOf(node) !== null;
+      if ((marked && seenNodeIds.has(id)) || (!marked && markerNodeIds.has(id))) throw forgedMarker();
+      seenNodeIds.add(id);
+      if (marked) markerNodeIds.add(id);
+    }
     for (const node of incomingNodes) {
       const marker = markerOf(node);
       if (!marker) continue;
+      if (marker.protocolVersion !== CANVAS_RECOVERY_PROTOCOL_VERSION
+        || typeof marker.submissionId !== "string" || typeof marker.outputKey !== "string") throw forgedMarker();
       const submissionId = String(marker.submissionId);
       const outputKey = String(marker.outputKey);
       const declaredNodeId = declaredNodeIdByKey.get(`${submissionId}:${outputKey}`);

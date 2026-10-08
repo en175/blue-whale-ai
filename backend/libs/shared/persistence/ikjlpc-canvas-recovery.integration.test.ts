@@ -51,11 +51,16 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
     };
   }
 
-  function acceptance(submissionId: string, node: string, taskType = "image"): CanvasRecoveryAcceptance {
+  function acceptance(
+    submissionId: string,
+    node: string,
+    taskType = "image",
+    bindingRevision = 0,
+  ): CanvasRecoveryAcceptance {
     return {
       projectId: PROJECT_ID,
       userId: USER_ID,
-      binding: binding(submissionId, node, 0),
+      binding: binding(submissionId, node, bindingRevision),
       operation: "generation.create",
       requestHash: `hash-${submissionId}`,
       idempotencyKey: submissionId,
@@ -374,5 +379,97 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
     expect(await outputState(UUID_C, TARGET_OUTPUT_KEY)).toEqual({ state: "pending", revision: 1 });
     expect(await receiptOf(CMD("40002"))).toBeNull();
     expect(await receiptOf(CMD("40004"))).toBeNull();
+  });
+
+  it("★ 5. 同 id 重复带标记卡与畸形 protocolVersion 标记 → 422 且整笔回滚", async () => {
+    const jobC = await accept(acceptance(UUID_C, NODE_C, "video_scene_split"));
+    await succeedSceneSplitJob(jobC.generation_job_id, [
+      { index: 1, assetId: "701" },
+      { index: 2, assetId: "702" },
+    ]);
+    const seg1 = multiResultNodeId(UUID_C, "segment:1");
+    const seg2 = multiResultNodeId(UUID_C, "segment:2");
+    const placed = await save({
+      commandId: CMD("50001"), version: null,
+      nodes: [markerNode(seg1, UUID_C, "segment:1", "701")],
+      changes: [],
+    });
+    await expectRejection(save({
+      commandId: CMD("50002"), version: placed.version,
+      nodes: [markerNode(seg1, UUID_C, "segment:1", "701"), markerNode(seg1, UUID_C, "segment:1", "701")],
+      changes: [],
+    }));
+    await expectRejection(save({
+      commandId: CMD("50003"), version: placed.version,
+      nodes: [
+        markerNode(seg1, UUID_C, "segment:1", "701"),
+        { id: seg1, type: "mediaNode", position: { x: 1, y: 2 }, data: { assetId: "701" } },
+      ],
+      changes: [],
+    }));
+    await expectRejection(save({
+      commandId: CMD("50004"), version: placed.version,
+      nodes: [
+        markerNode(seg1, UUID_C, "segment:1", "701"),
+        {
+          id: seg2,
+          type: "mediaNode",
+          position: { x: 1, y: 2 },
+          data: { generationRecovery: { protocolVersion: 2, submissionId: UUID_C, outputKey: "segment:2" }, assetId: "702" },
+        },
+      ],
+      changes: [],
+    }));
+    expect((await canvasRow())?.version).toBe(placed.version);
+    expect(await canvasNodeIds()).toEqual([seg1]);
+    expect(await receiptOf(CMD("50002"))).toBeNull();
+    expect(await receiptOf(CMD("50003"))).toBeNull();
+    expect(await receiptOf(CMD("50004"))).toBeNull();
+  });
+
+  it("★ 6. $target replaced 终态重现：fanned 后占位卡重现 → 422 且整笔回滚", async () => {
+    const jobC = await accept(acceptance(UUID_C, NODE_C, "video_scene_split"));
+    await succeedSceneSplitJob(jobC.generation_job_id, [
+      { index: 1, assetId: "701" },
+      { index: 2, assetId: "702" },
+    ]);
+    const seg1 = multiResultNodeId(UUID_C, "segment:1");
+    const seg2 = multiResultNodeId(UUID_C, "segment:2");
+    const fanned = await save({
+      commandId: CMD("60001"), version: null,
+      nodes: [markerNode(seg1, UUID_C, "segment:1", "701"), markerNode(seg2, UUID_C, "segment:2", "702")],
+      changes: [
+        { id: recoveryItemId(UUID_C, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
+        { id: recoveryItemId(UUID_C, "segment:1"), rev: 0, action: "apply" },
+        { id: recoveryItemId(UUID_C, "segment:2"), rev: 0, action: "apply" },
+      ],
+    });
+    await expectRejection(save({
+      commandId: CMD("60002"), version: fanned.version,
+      nodes: [
+        markerNode(seg1, UUID_C, "segment:1", "701"),
+        markerNode(seg2, UUID_C, "segment:2", "702"),
+        markerNode(NODE_C, UUID_C, TARGET_OUTPUT_KEY),
+      ],
+      changes: [],
+    }));
+    expect((await canvasRow())?.version).toBe(fanned.version);
+    expect(await canvasNodeIds()).toEqual([seg1, seg2].sort());
+    expect(await outputState(UUID_C, TARGET_OUTPUT_KEY)).toEqual({ state: "replaced", revision: 2 });
+    expect(await receiptOf(CMD("60002"))).toBeNull();
+  });
+
+  it("★ 7. $target transferred 终态重现：接管后旧占位卡重现 → 422 且整笔回滚", async () => {
+    await accept(acceptance(UUID_A, NODE_A));
+    await accept(acceptance(UUID_B, NODE_A, "image", 1));
+    expect(await outputState(UUID_A, TARGET_OUTPUT_KEY)).toEqual({ state: "transferred", revision: 2 });
+    await expectRejection(save({
+      commandId: CMD("70001"), version: null,
+      nodes: [markerNode(NODE_A, UUID_A, TARGET_OUTPUT_KEY)],
+      changes: [],
+    }));
+    expect(await canvasRow()).toBeNull();
+    expect(await outputState(UUID_A, TARGET_OUTPUT_KEY)).toEqual({ state: "transferred", revision: 2 });
+    expect(await receiptOf(CMD("70001"))).toBeNull();
   });
 });
