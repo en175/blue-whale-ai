@@ -94,6 +94,7 @@ import {
 import type { BillingHold } from "@lib/shared/billing/billing-hold.js";
 import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
 import type { BillingQuote } from "@lib/shared/billing/billing-quote.js";
+import { DURATION_BASIS_KEY, OMNI_TASK_TYPE_ALLOWED_KEY } from "@lib/shared/billing/billing-specs.js";
 import { quoteRevisionOf } from "./handle-quote-generation-job.js";
 
 import {
@@ -775,6 +776,10 @@ const videoStrategy: GenerationTypeStrategy = {
     if (capability?.features?.audio === true) {
       input.generate_audio = params.generate_audio !== false;
     }
+    if (capability?.features) {
+      input[OMNI_TASK_TYPE_ALLOWED_KEY] =
+        capability.features.omni_reference_task_type === true;
+    }
     // IKHBDO：参考素材上限（图/视频/音频数量 + 总时长）从能力行冻结进快照——
     // worker 不含任何模型知识，执行期只读这份配置（对齐上面 generate_audio 的冻结口径）。
     // 接纳侧仍按同一份 features 先判一次（checkReferenceLimits），冻结值只用于执行期复核。
@@ -913,7 +918,7 @@ export function applyEditSourceDurationBasis(
     maxSeconds = Math.max(maxSeconds ?? 0, Math.floor(seconds));
   }
   if (maxSeconds === null) return false;
-  input.duration = maxSeconds;
+  input[DURATION_BASIS_KEY] = maxSeconds;
   return true;
 }
 

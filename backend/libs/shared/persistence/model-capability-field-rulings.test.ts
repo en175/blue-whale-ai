@@ -210,6 +210,15 @@ const RULINGS: Record<string, Ruling> = {
     configWinsTest:
       "backend/libs/shared/generation/handle-create-generation-job.test.ts",
   },
+  omni_reference_task_type: {
+    consumer:
+      "backend/libs/shared/generation/handle-create-generation-job.ts（按该位把 input.omni_reference_task_type_allowed 冻结进快照）；" +
+      "server/blue-whale-worker 的 NewApiVideoClient（按冻结位决定是否下发上游 metadata.omni_reference_task_type）。" +
+      "写侧形态闸门在 backend/libs/shared/model-capability/constants.ts（featuresFieldErr 布尔裁定）",
+    fallback: "false（能力行未声明即不下发该参数）",
+    configWinsTest:
+      "backend/libs/shared/generation/handle-create-generation-job.test.ts",
+  },
 };
 
 /** 能力行里存在、但 `toFeatures` 不产出的字段：上面的枚举机制**看不见**它们，改动不会被拦。

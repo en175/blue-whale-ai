@@ -750,6 +750,8 @@ public class VideoJobProcessor implements JobProcessor {
                 : input.get("video_task_type") instanceof String t ? t : null;
         String videoTaskType = "default".equals(frozenMode) ? "text2video"
                 : "prolong".equals(frozenMode) ? "extend" : frozenMode;
+        boolean omniTaskTypeAllowed =
+                input.get("omni_reference_task_type_allowed") instanceof Boolean b && b;
 
         // 校验（:598-606）。IKFPYX：duration=-1（模型自动选时长）**仅 edit/prolong 任务合法**，
         // 其余任务须 duration>0。
@@ -784,7 +786,7 @@ public class VideoJobProcessor implements JobProcessor {
             }
             return new VideoSubmitInput(model, prompt, duration,
                     strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references,
-                    generateAudio, sample, videoTaskType);
+                    generateAudio, sample, videoTaskType, omniTaskTypeAllowed);
         }
 
         // 参考素材解析（video-job-runner.ts:608-650）
@@ -946,12 +948,13 @@ public class VideoJobProcessor implements JobProcessor {
             }
             merged.addAll(references);
             return new VideoSubmitInput(model, prompt, duration, resolution, ratio,
-                    null, null, merged, generateAudio, sample, videoTaskType);
+                    null, null, merged, generateAudio, sample, videoTaskType, omniTaskTypeAllowed);
         }
 
         return new VideoSubmitInput(
                 model, prompt, duration, resolution, ratio,
-                firstFrameImage, lastFrameImage, references, generateAudio, sample, videoTaskType
+                firstFrameImage, lastFrameImage, references, generateAudio, sample, videoTaskType,
+                omniTaskTypeAllowed
         );
     }
 

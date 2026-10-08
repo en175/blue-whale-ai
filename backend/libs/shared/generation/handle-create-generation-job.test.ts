@@ -1499,7 +1499,8 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
       expect(cmdArg.input.video_mode).toBe("edit");
       // applyEditSourceDurationBasis 按源视频时长（7s）改写——与冻结值同一请求同口径
-      expect(cmdArg.input.duration).toBe(7);
+      expect(cmdArg.input.duration).toBe(-1);
+      expect(cmdArg.input.duration_basis_seconds).toBe(7);
     });
 
     it("纯参考意图 + 文本带入视频参考 + 9:16 → 200 冻结 default，时长不改写（不误伤参考单）", async () => {

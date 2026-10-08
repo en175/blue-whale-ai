@@ -135,6 +135,7 @@ INSERT INTO generation_model_capability (
       'audio_reference_max', 10,
       'image_reference_max', 30,
       'max_reference_duration_sec', 30,
+      'omni_reference_task_type', TRUE,
       'task_types', JSON_OBJECT(
         'text2video', JSON_OBJECT(),
         'omni', JSON_OBJECT(),

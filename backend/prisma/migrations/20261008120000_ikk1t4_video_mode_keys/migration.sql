@@ -21,6 +21,12 @@ WHERE `is_delete` = 0
   AND `model_id` = 'doubao-seedance-2-5-260628';
 
 UPDATE `generation_model_capability`
+SET `features` = JSON_SET(`features`, '$.omni_reference_task_type', TRUE)
+WHERE `is_delete` = 0
+  AND `capability_type` = 'video'
+  AND `model_id` = 'doubao-seedance-2-5-260628';
+
+UPDATE `generation_model_capability`
 SET `features` = JSON_SET(
       `features`,
       '$.task_types',

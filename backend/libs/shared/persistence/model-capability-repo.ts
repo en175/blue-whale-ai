@@ -108,6 +108,7 @@ export interface ModelFeatures {
    *  **默认关闭**——仅运营在能力行显式声明 `sample_mode: true` 的视频模型（Seedance 2.5）
    *  才能提交 `parameters.sample_mode=true` 的样片创建/报价；未声明一律拒绝。 */
   sample_mode: boolean;
+  omni_reference_task_type: boolean;
 }
 
 export interface ModelCapabilityView {
@@ -194,6 +195,8 @@ type FeaturesJson = {
   video_dimensions?: unknown;
   sampleMode?: boolean;
   sample_mode?: boolean;
+  omniReferenceTaskType?: boolean;
+  omni_reference_task_type?: boolean;
 };
 
 type DurationRangeJson = {
@@ -302,6 +305,8 @@ export function toFeatures(json: unknown, capabilityType?: string): ModelFeature
     video_dimensions: pickDimensions(f.videoDimensions ?? f.video_dimensions),
     // IKIZQ7：缺省即关闭——样片能力默认不向任何模型开放（放行 = 能力行显式声明）。
     sample_mode: f.sampleMode === true || f.sample_mode === true,
+    omni_reference_task_type:
+      f.omniReferenceTaskType === true || f.omni_reference_task_type === true,
   };
 }
 

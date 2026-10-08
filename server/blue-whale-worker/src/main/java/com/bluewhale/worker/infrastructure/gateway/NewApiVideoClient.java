@@ -71,10 +71,6 @@ public class NewApiVideoClient {
     /** poll 超时 10s（默认）。 */
     private static final int POLL_TIMEOUT_MS = 10_000;
 
-    /** IKJ79A：doubao-seedance-2-5 系模型名前缀——官方 omni_reference_task_type 仅 2.5 支持，
-     * 下发该参数（及对应的出站 ratio/duration 约束）以此前缀为门，2.0 系列行为不变。 */
-    static final String SEEDANCE_25_MODEL_PREFIX = "doubao-seedance-2-5";
-
     private static final Map<String, Boolean> SUCCESS_STATUSES = Map.of(
             "success", true, "succeeded", true, "completed", true);
     private static final Map<String, Boolean> FAILED_STATUSES = Map.of(
@@ -132,23 +128,16 @@ public class NewApiVideoClient {
         // edit 锁 ratio=adaptive + duration=-1（时长只能跟随）；prolong 仅锁 ratio=adaptive，
         // duration 透传用户所选；reference 比例/时长原样透传——用户比例首次真正生效。
         String omniTaskType = null;
+        if (input.omniTaskTypeAllowed() && hasVideoReference(input.references())) {
+            omniTaskType = switch (input.videoTaskType() == null ? "text2video" : input.videoTaskType()) {
+                case "edit" -> "edit";
+                case "extend" -> "extend";
+                case "first_frame", "first_last_frame" -> null;
+                default -> "reference";
+            };
+        }
         double effectiveDuration = input.duration();
         String effectiveRatio = input.ratio();
-        if (input.model().startsWith(SEEDANCE_25_MODEL_PREFIX) && hasVideoReference(input.references())) {
-            switch (input.videoTaskType() == null ? "text2video" : input.videoTaskType()) {
-                case "edit" -> {
-                    omniTaskType = "edit";
-                    effectiveRatio = "adaptive";
-                    effectiveDuration = -1;
-                }
-                case "extend" -> {
-                    omniTaskType = "extend";
-                    effectiveRatio = "adaptive";
-                }
-                case "first_frame", "first_last_frame" -> { /* 角色驱动，不下发 */ }
-                default -> omniTaskType = "reference"; // default；快照缺字段/非法值同口径按 default
-            }
-        }
 
         // 构建 body（new-api-generation-ops.ts:229-240）
         ObjectNode metadata = JSON.createObjectNode();
@@ -690,7 +679,8 @@ public class NewApiVideoClient {
              * 接纳侧判定冻结，执行层不重算）。取值同 TS 契约 VideoTaskType；
              * null / 非法值 = default（存量快照无字段口径，frozenVideoTaskTypeOf 同源）。
              */
-            String videoTaskType
+            String videoTaskType,
+            boolean omniTaskTypeAllowed
     ) {
         /** 普通视频（非样片）的既有 9 参形态：draft 缺省 false、videoTaskType 缺省 null（按 default 处理），旧调用点零改动。 */
         public VideoSubmitInput(
@@ -698,7 +688,15 @@ public class NewApiVideoClient {
                 String firstFrameImage, String lastFrameImage,
                 List<VideoReference> references, Boolean generateAudio) {
             this(model, prompt, duration, resolution, ratio, firstFrameImage, lastFrameImage,
-                    references, generateAudio, false, null);
+                    references, generateAudio, false, null, false);
+        }
+
+        public VideoSubmitInput(
+                String model, String prompt, double duration, String resolution, String ratio,
+                String firstFrameImage, String lastFrameImage, List<VideoReference> references,
+                Boolean generateAudio, boolean draft, String videoTaskType) {
+            this(model, prompt, duration, resolution, ratio, firstFrameImage, lastFrameImage,
+                    references, generateAudio, draft, videoTaskType, true);
         }
     }
 
