@@ -17,8 +17,6 @@ export interface ClaimedJob {
 export interface ImageCapabilitySnapshot {
   model_id: string;
   api_size: string | null;
-  width: number | null;
-  height: number | null;
   /** 参考图数量上限（features.image_reference_max 归一化；缺省与网关/ARK 一致的 10，IKA72G）。 */
   image_reference_max: number;
   /** 渠道（见 `CHANNELS`）。落库可为 NULL 的存量行由调用方按媒介归一。 */

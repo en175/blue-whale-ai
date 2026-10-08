@@ -2,18 +2,17 @@ import type { AdminModel, CreateAdminModelParams, DurationRange, ModelSize } fro
 
 export type ModelType = 'image' | 'video' | 'text' | 'audio';
 
-/** IKHBDO：表单态尺寸行。库里 `supported_sizes` 元素除 id/label 外还带出站值与像素宽高
- *  （字段集见 backend `model-capability-repo.ts` 的 `SizeJson`），原先表单只认 id/label，
- *  保存时整包覆盖 → 这三个字段每次保存都被抹掉。宽高是**字符串**（空串 = 不写）。 */
+/** IKHBDO / IKHTVR：表单态尺寸行。库里 `supported_sizes` 元素带 id / label / api_value /
+ *  width / height（字段集见 backend `model-capability-repo.ts` 的 `SizeJson`），
+ *  但**只有 id 与 label 是可编辑信息**：
+ *
+ *  - `api_value`（出站档位值）恒等于 id——全仓库数据里两者从未出现过真正不同的值，
+ *    只在大小写上有出入（`1k` / `1K`），而消费端查表本就大小写不敏感。提交时由 id 重建。
+ *  - `width` / `height` 无任何消费方（图片侧 worker 读了不用、视频侧零引用，见 IKHTVR）。
+ *    提交时不再写这两个键。 */
 export interface SizeForm {
   id: string;
   label?: string;
-  /** 出站实际用到的档位值（如 `4k`）；留空时消费端回落用 id。 */
-  apiValue?: string;
-  /** 像素宽 / 高：**当前无任何消费方**（图片侧 worker 读了不用，视频侧零引用，见 IKHTVR）——
-   *  表单不再显示这两列，但字段保留：库里已有的值原样读回、原样写回，保存不丢数据。 */
-  width?: string;
-  height?: string;
 }
 
 /** `supported_sizes` 元素：id/label 之外允许任意扩展字段（wire 形态）。 */
@@ -271,45 +270,29 @@ export function mergeMatrix(prev: GptMatrix, sizes: SizeForm[], ratios: string[]
   return rebuilt;
 }
 
-/** 库里 `supported_sizes` 原始 JSON → 表单行。读侧兼容 camelCase `apiValue`
- *  （与 backend `toSizes` 的 `o.apiValue ?? o.api_value` 同口径）。 */
+/** 库里 `supported_sizes` 原始 JSON → 表单行。IKHTVR：表单只认 id / label——
+ *  其余键（`api_value` / `width` / `height`）在提交时按 id 重建或直接不写。 */
 export function sizesFromModel(raw: unknown): SizeForm[] {
   if (!Array.isArray(raw)) return [];
   const out: SizeForm[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const o = item as Record<string, unknown>;
-    const apiValue = o.apiValue ?? o.api_value;
     out.push({
       id: typeof o.id === 'string' ? o.id : '',
       label: typeof o.label === 'string' ? o.label : '',
-      apiValue: typeof apiValue === 'string' ? apiValue : '',
-      width: typeof o.width === 'number' && Number.isFinite(o.width) ? String(o.width) : '',
-      height: typeof o.height === 'number' && Number.isFinite(o.height) ? String(o.height) : '',
     });
   }
   return out;
 }
 
-function positiveInt(value?: string): number | null {
-  const raw = (value ?? '').trim();
-  if (!raw) return null;
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : null;
-}
-
-/** 表单尺寸行 → 提交形态。留空的扩展字段直接**不写该键**（读侧回落 id / null），
- *  这样「清空输入框」才是真的有出口。 */
+/** 表单尺寸行 → 提交形态。IKHTVR：`api_value` 恒等于 id，提交时按 id 重建；
+ *  `width` / `height` 无消费方，不再写（库里遗留的这两个键随下次保存清掉）。 */
 export function sizeToWire(size: SizeForm): ModelSizeWire {
-  const out: ModelSizeWire = { id: size.id.trim() };
+  const id = size.id.trim();
+  const out: ModelSizeWire = { id, api_value: id };
   const label = (size.label ?? '').trim();
   if (label) out.label = label;
-  const apiValue = (size.apiValue ?? '').trim();
-  if (apiValue) out.api_value = apiValue;
-  const width = positiveInt(size.width);
-  if (width !== null) out.width = width;
-  const height = positiveInt(size.height);
-  if (height !== null) out.height = height;
   return out;
 }
 
@@ -410,21 +393,6 @@ export function validateSeedreamMatrix(matrix: GptMatrix): string | null {
   return null;
 }
 
-/** IKHTL0：seedream 行的矩阵键必须是该档位的 **api_value**，不是 `supported_sizes[].id`。
- *  worker 的查找链是「按 id 命中 supported_sizes 条目 → 取该条目的 api_value 当 providerSize
- *  → 再用它当矩阵查找键」（`ImageChannelMapper.matchSupportedSize` / `resolveSeedreamSize`）。
- *  表单内部按 `size.id` 存键（渲染要按 id 取格），提交时在这里换回 api_value 拼写——
- *  否则一次「什么都没改」的保存就会把库里 `1K` 的键改写成 `1k`，靠 worker 的大小写兜底
- *  才不出事，等于把一个隐性不变式悄悄写坏。没有 api_value 的档位回落到 id。 */
-function seedreamWireMatrix(matrix: GptMatrix, sizes: SizeForm[]): GptMatrix {
-  const wireKey = new Map(sizes.map((size) => [size.id, (size.apiValue ?? '').trim() || size.id]));
-  const out: GptMatrix = {};
-  for (const [sizeId, row] of Object.entries(matrix)) {
-    out[wireKey.get(sizeId) ?? sizeId] = row;
-  }
-  return out;
-}
-
 /** 提交用的 request_mapping 意图（IKHBDO，与 backend `parseParserAndMapping` 契约对齐）：
  *  - `undefined`：本次**不提交**该字段——库里原样保留（seedream→seedream 的唯一正确表达：
  *    界面上没有「清空矩阵」入口，diff 提交里那个 null 不是运营意图）；
@@ -440,7 +408,9 @@ export function buildRequestMapping(
 ): unknown | undefined {
   if (form.type !== 'image') return undefined;
   if (parser === 'seedream') {
-    const matrix = compactGptMatrix(seedreamWireMatrix(form.seedreamMatrix, form.sizes));
+    // IKHTVR：矩阵键 = 档位 id（api_value 恒等于 id，原先那次「表单键 → api_value 拼写」的
+    // 换写随之取消）。worker 查表大小写不敏感，库里遗留的 `1K` 键命中同一格。
+    const matrix = compactGptMatrix(form.seedreamMatrix);
     if (Object.keys(matrix).length) return { matrix };
     return channelOf(form.originalChannel).parser === 'seedream' ? undefined : null;
   }
@@ -562,6 +532,22 @@ export function buildCreateParams(form: FormSnapshot): { ok: true; value: Create
   return { ok: true, value: params };
 }
 
+/** IKHTVR：尺寸行的比较口径收敛到 id / 展示名两个**可编辑**字段。
+ *  提交侧恒写 `api_value = id`、不写 width/height，而库里旧行常带 `api_value: '1K'`（大小写
+ *  变体）与遗留的 `width` / `height`——直接整对象比会把「打开看一眼再保存」误判成有变更。 */
+function sizesForDiff(raw: unknown): string {
+  const rows = Array.isArray(raw) ? raw : [];
+  return JSON.stringify(
+    rows.map((item) => {
+      const o = (item ?? {}) as Record<string, unknown>;
+      return [
+        typeof o.id === 'string' ? o.id.trim() : '',
+        typeof o.label === 'string' ? o.label.trim() : '',
+      ];
+    }),
+  );
+}
+
 export function diffUpdateParams(
   initial: AdminModel,
   created: CreateAdminModelParams,
@@ -569,7 +555,7 @@ export function diffUpdateParams(
   const changes: Partial<CreateAdminModelParams> = {};
   if (created.model_label !== initial.model_label) changes.model_label = created.model_label;
   if ((created.icon ?? null) !== (initial.icon ?? null)) changes.icon = created.icon ?? null;
-  if (JSON.stringify(created.supported_sizes ?? []) !== JSON.stringify(initial.supported_sizes ?? [])) {
+  if (sizesForDiff(created.supported_sizes) !== sizesForDiff(initial.supported_sizes)) {
     changes.supported_sizes = created.supported_sizes;
   }
   if (
@@ -610,11 +596,20 @@ export function diffUpdateParams(
   }
   // IKHBDO：`undefined` = 表单没有可表达的映射意图（seedream 行），既不算变更也不要覆盖——
   // 原先无条件比较 `?? null`，让每个 seedream 行的「原样保存」都提交一次 null。
-  if (
+  const mappingChanged =
     created.request_mapping !== undefined &&
-    JSON.stringify(created.request_mapping) !== JSON.stringify(initial.request_mapping ?? null)
-  ) {
+    JSON.stringify(created.request_mapping) !== JSON.stringify(initial.request_mapping ?? null);
+  if (mappingChanged) {
     changes.request_mapping = created.request_mapping;
+  }
+  // IKHTVR：矩阵键与 `supported_sizes[].api_value` **必须同族**——worker 的查找链是
+  // 「按 id 命中 supported_sizes 条目 → 取该条目的 api_value 当 providerSize → 再用它当矩阵键」
+  // （`docs/sql/20260922_ikhues_image_matrix_fill.sql:13` 把这条写成硬约束）。
+  // 提交侧恒写 `api_value = id`，而矩阵键在表单读侧就被归一到 id 拼写（IKHTL0），
+  // 两者只能**一起写**：否则一次「打开看一眼再保存」会只重写矩阵键、留下
+  // 「键 `1k` / api_value `1K`」的错位，把那条不变式悄悄写坏。
+  if (mappingChanged) {
+    changes.supported_sizes = created.supported_sizes;
   }
   // 同 request_mapping：`undefined` = 表单没有可表达的定价意图（定价 tab 没被碰过），
   // 既不算变更也不要覆盖。比的是**序列化后的对象**——`ruleFromForm` 对没动过的价是恒等的

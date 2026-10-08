@@ -25,10 +25,10 @@ export const GRID3: CSSProperties = formGrid(3);
 export const LABEL: CSSProperties = { marginBottom: 6 };
 /** 分节标题（尺寸选项 / 渠道类型 / 时长范围 …）。 */
 export const SECTION: CSSProperties = { margin: '24px 0 8px' };
-/** 尺寸行：id / label / api_value / 像素宽 / 像素高 / 删除按钮。 */
+/** 尺寸行：id / 展示名 / 删除按钮（IKHTVR 起不再有 api_value、像素宽、像素高三个输入）。 */
 export const SIZE_ROW: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '1fr 1fr 1fr 88px 88px auto',
+  gridTemplateColumns: '1fr 1fr auto',
   gap: 8,
   alignItems: 'center',
   marginBottom: 8,

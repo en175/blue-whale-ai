@@ -34,9 +34,8 @@ export const DEFAULT_IMAGE_REFERENCE_MAX_FOR_AUDIO = 1;
 export interface ModelSizeOption {
   id: string;
   label: string;
+  /** 出站档位值；IKHTVR 起恒等于 `id`（管理端不再单独编辑），读侧仍兼容库里的旧值。 */
   api_value: string;
-  width: number | null;
-  height: number | null;
 }
 
 /** 视频时长档（DB supported_durations JSON：{min,max,step}）。图片模型为 null。 */
@@ -149,8 +148,6 @@ type SizeJson = {
   label?: string;
   apiValue?: string;
   api_value?: string;
-  width?: number;
-  height?: number;
 };
 
 type FeaturesJson = {
@@ -206,8 +203,6 @@ function toSizes(json: unknown): ModelSizeOption[] {
     id: o.id ?? "",
     label: o.label ?? "",
     api_value: o.apiValue ?? o.api_value ?? "",
-    width: o.width ?? null,
-    height: o.height ?? null,
   }));
 }
 

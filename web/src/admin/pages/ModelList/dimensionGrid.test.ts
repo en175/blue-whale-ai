@@ -8,7 +8,7 @@ import { buildDimensionGrid, gridSpecKey, setGridCell } from './dimensionGrid';
  */
 describe('buildDimensionGrid 扁平表 → 矩阵', () => {
   const row = (key: string, value: string) => ({ key, value });
-  const size = (id: string, apiValue = id) => ({ id, label: id.toUpperCase(), apiValue });
+  const size = (id: string) => ({ id, label: id.toUpperCase() });
 
   it('行列就位：行=比例、列=尺寸档，格子取库里的值', () => {
     const grid = buildDimensionGrid(
@@ -23,10 +23,10 @@ describe('buildDimensionGrid 扁平表 → 矩阵', () => {
   });
 
   it('★ 档位大小写不一致时格子照样显示得出值（`4K` 列不会整列空掉）', () => {
-    // 能力行的 api_value 写 `4K`，而库里的键是从定价目录搬来的 `resolution=4k|...`
+    // 能力行的档位 id 写 `4K`，而库里的键是从定价目录搬来的 `resolution=4k|...`
     // ——同一个值的两种写法，不是脏数据（见 backend 的 normalizeSpecKey）。
     const stored = row('resolution=4k|aspect_ratio=16:9', '3840x2160');
-    const grid = buildDimensionGrid([size('4k', '4K')], ['16:9'], [stored]);
+    const grid = buildDimensionGrid([size('4K')], ['16:9'], [stored]);
     expect(grid.rows[0]?.cells[0]?.value).toBe('3840x2160');
     expect(grid.rows[0]?.cells[0]?.originalKey).toBe(stored.key);
   });
@@ -56,28 +56,23 @@ describe('buildDimensionGrid 扁平表 → 矩阵', () => {
 
 describe('setGridCell 矩阵 → 扁平表', () => {
   const row = (key: string, value: string) => ({ key, value });
-  const size = (id: string, apiValue = id) => ({ id, label: id.toUpperCase(), apiValue });
+  const size = (id: string) => ({ id, label: id.toUpperCase() });
 
   it('★ 恒等写回：没动过的格子用库里原来的键（`4k` 不被一次保存改成 `4K`）', () => {
     const stored = row('resolution=4k|aspect_ratio=16:9', '3840x2160');
-    // 本行档位的 api_value 是 `4K`（与库里的键只差大小写）；新增一个 9:16 的格子触发表写回
-    const grid = buildDimensionGrid([size('4k', '4K')], ['16:9', '9:16'], [stored]);
+    // 本行档位 id 是 `4K`（与库里的键只差大小写）；新增一个 9:16 的格子触发表写回
+    const grid = buildDimensionGrid([size('4K')], ['16:9', '9:16'], [stored]);
     expect(setGridCell(grid, 1, 0, '2160x3840')).toEqual([
       { key: 'resolution=4k|aspect_ratio=16:9', value: '3840x2160' },
-      // 新建的格子才用本行派生出来的键（这里 api_value 是 `4K`）
+      // 新建的格子才用本行派生出来的键（这里档位 id 是 `4K`）
       { key: 'resolution=4K|aspect_ratio=9:16', value: '2160x3840' },
     ]);
   });
 
-  it('★ 新建一格的键按本行的档位拼：api_value 优先、留空回落 id', () => {
-    const withApi = buildDimensionGrid([size('480p', '480p')], ['16:9'], []);
-    expect(setGridCell(withApi, 0, 0, '864x496')).toEqual([
+  it('★ 新建一格的键按本行的档位 id 拼', () => {
+    const grid = buildDimensionGrid([size('480p')], ['16:9'], []);
+    expect(setGridCell(grid, 0, 0, '864x496')).toEqual([
       { key: 'resolution=480p|aspect_ratio=16:9', value: '864x496' },
-    ]);
-
-    const noApi = buildDimensionGrid([{ id: '1080p', label: '1080P' }], ['adaptive'], []);
-    expect(setGridCell(noApi, 0, 0, '1920x1080')).toEqual([
-      { key: 'resolution=1080p|aspect_ratio=adaptive', value: '1920x1080' },
     ]);
   });
 
@@ -104,10 +99,10 @@ describe('setGridCell 矩阵 → 扁平表', () => {
   });
 
   it('两列派生出同一个键时不写第二遍（一个键只能有一个值）', () => {
-    // 两个档位行的 id 不同、api_value 相同 ⇒ 派生到同一个规格键
+    // 两个档位行的 id 只差大小写 ⇒ 归一后派生到同一个规格键（运营重复填档位时的真实场景）
     const stored = row('resolution=480p|aspect_ratio=16:9', '864x496');
     const grid = buildDimensionGrid(
-      [size('480p', '480p'), size('480p-alt', '480p')],
+      [size('480p'), size('480P')],
       ['16:9'],
       [stored],
     );

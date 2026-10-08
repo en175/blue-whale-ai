@@ -335,16 +335,15 @@ describe('gpt / banana mapping', () => {
     expect(result.value.request_mapping).toEqual({ matrix: { '1K': { '1:1': '2048x2048' } } });
   });
 
-  it('seedream：提交时矩阵键换回 api_value 拼写（worker 的查找键），不是 size.id', () => {
-    // IKHTL0：表单内部按 size.id 存键（渲染要按 id 取格），但 worker 查表用的是该档位的
-    // api_value。若按 id 提交，一次「什么都没改」的保存就会把库里 `1K` 的键改写成 `1k`，
-    // 靠 worker 的大小写兜底才不出事——隐性不变式被悄悄写坏。无 api_value 的档位回落用 id。
+  it('seedream：提交时矩阵键就是档位 id（api_value 恒等于 id，不再换写拼写）', () => {
+    // IKHTVR：出站档位值（旧 api_value）恒等于 id，提交侧送的也已经是 id，
+    // 所以矩阵键就是 id 拼写。worker 查表大小写不敏感，库里遗留的 `1K` 键命中同一格。
     const result = buildCreateParams(
       snapshot({
         channel: 'seedream-image',
         originalChannel: 'seedream-image',
         sizes: [
-          { id: '1k', label: '1K', apiValue: '1K' },
+          { id: '1k', label: '1K' },
           { id: '1.5k', label: '1.5K' },
         ],
         seedreamMatrix: { '1k': { '1:1': '1024x1024' }, '1.5k': { '1:1': '1536x1536' } },
@@ -353,8 +352,35 @@ describe('gpt / banana mapping', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.request_mapping).toEqual({
-      matrix: { '1K': { '1:1': '1024x1024' }, '1.5k': { '1:1': '1536x1536' } },
+      matrix: { '1k': { '1:1': '1024x1024' }, '1.5k': { '1:1': '1536x1536' } },
     });
+  });
+
+  it('★ 无操作保存：矩阵键与 api_value 一起归一到 id 拼写，不留错位（IKHTVR）', () => {
+    // 生产形态：id 是小写 `1k`，而矩阵键是大写 `1K`（IKDBYY 与 IK629 两次迁移分别写入）。
+    // 读侧类型刻意不建模 api_value（见 api/adminModels.ts 的「读侧最保守形态」），
+    // 但提交侧恒写 `api_value = id`——两者必须**一起写**：只重写矩阵键会留下
+    // 「键 1k / api_value 1K」，违背
+    // docs/sql/20260922_ikhues_image_matrix_fill.sql:13「seedream 的矩阵键必须等于 api_value」。
+    const stored = modelRow({
+      supported_sizes: [{ id: '1k', label: '1K' }],
+      request_mapping: { matrix: { '1K': { '1:1': '2048x2048' } } },
+    });
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios: ['1:1'],
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ['1:1']),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(stored, result.value);
+    expect(changes.supported_sizes).toEqual([{ id: '1k', api_value: '1k', label: '1K' }]);
+    expect(changes.request_mapping).toEqual({ matrix: { '1k': { '1:1': '2048x2048' } } });
   });
 
   it('从别的解析器切到 seedream：显式提交 null 清掉旧族矩阵', () => {
@@ -423,37 +449,37 @@ describe('gpt / banana mapping', () => {
   });
 });
 
-// IKHBDO：库里 supported_sizes 元素除 id/label 外还带 api_value / width / height。
-// 表单只认 id+label 时，任何一次保存都会把这三个字段整包抹掉（api_value 正是出站真实取值）。
-describe('尺寸行扩展字段（IKHBDO）', () => {
-  it('读回 id / label / api_value / width / height（兼容 camelCase apiValue）', () => {
+// IKHTVR：尺寸行只留 id / 展示名两个可编辑字段——`api_value` 恒等于 id（提交时按 id 重建），
+// 像素宽高无任何消费方（提交时不再写，库里遗留的键随下次保存清掉）。
+describe('尺寸行字段收敛（IKHTVR）', () => {
+  it('读回只取 id / label，忽略 api_value / width / height（含 camelCase 写法）', () => {
     expect(
       sizesFromModel([
-        { id: '1K', label: '1K' },
+        { id: '1k', label: '1K' },
         { id: '2k', label: '2K', api_value: '2k', width: 2048, height: 1152 },
         { id: '3k', label: '3K', apiValue: '3k' },
       ]),
     ).toEqual([
-      { id: '1K', label: '1K', apiValue: '', width: '', height: '' },
-      { id: '2k', label: '2K', apiValue: '2k', width: '2048', height: '1152' },
-      { id: '3k', label: '3K', apiValue: '3k', width: '', height: '' },
+      { id: '1k', label: '1K' },
+      { id: '2k', label: '2K' },
+      { id: '3k', label: '3K' },
     ]);
   });
 
-  it('提交时写回 api_value / width / height，留空的键不写', () => {
+  it('提交时 api_value 按 id 重建，不写 width / height', () => {
     const result = buildCreateParams(
       snapshot({
         sizes: [
-          { id: '4K', label: '4K', apiValue: '4k', width: '4096', height: '4096' },
-          { id: '2K', label: '2K', apiValue: '', width: '', height: '' },
+          { id: '4k', label: '4K' },
+          { id: '2k', label: '' },
         ],
       }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.supported_sizes).toEqual([
-      { id: '4K', label: '4K', width: 4096, height: 4096, api_value: '4k' },
-      { id: '2K', label: '2K' },
+      { id: '4k', api_value: '4k', label: '4K' },
+      { id: '2k', api_value: '2k' },
     ]);
   });
 });

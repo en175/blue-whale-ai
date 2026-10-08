@@ -271,9 +271,12 @@ final class ImageChannelMapper {
 
     /**
      * 从 supported_sizes JSON 匹配 sizeId（asset-ops.ts:111-126）。
-     * @return [apiValue, width, height] 或 null
+     * @return 该档位的出站值 api_value（缺省回落 id）或 null
+     *
+     * <p>IKHTVR：原先还一并返回该档位的 width / height，但调用方把这两个值赋给局部变量后
+     * 再没读过（全文件零引用），条目里的宽高也没有任何消费方——故收敛掉，只返回出站值。
      */
-    static String[] matchSupportedSize(String supportedSizesJson, String sizeId) {
+    static String matchSupportedSize(String supportedSizesJson, String sizeId) {
         if (supportedSizesJson == null || supportedSizesJson.isBlank()
                 || sizeId == null || sizeId.isEmpty()) return null;
         try {
@@ -284,14 +287,8 @@ final class ImageChannelMapper {
                 String apiValue = strVal(s, "api_value");
                 String apiValueAlt = strVal(s, "apiValue");
                 if (sizeId.equals(id) || sizeId.equals(apiValue) || sizeId.equals(apiValueAlt)) {
-                    String av = apiValue != null ? apiValue : apiValueAlt;
-                    Integer w = intVal(s, "width");
-                    Integer h = intVal(s, "height");
-                    return new String[]{
-                            av,
-                            w != null ? w.toString() : null,
-                            h != null ? h.toString() : null
-                    };
+                    // 出站值缺失时返回 null = 与「未命中」同路：调用方保持行级 api_size 兜底不变。
+                    return apiValue != null ? apiValue : apiValueAlt;
                 }
             }
             return null;
@@ -303,12 +300,6 @@ final class ImageChannelMapper {
     private static String strVal(Map<String, Object> m, String key) {
         Object v = m.get(key);
         return (v instanceof String s && !s.isEmpty()) ? s : null;
-    }
-
-    private static Integer intVal(Map<String, Object> m, String key) {
-        Object v = m.get(key);
-        if (v instanceof Number n) return n.intValue();
-        return null;
     }
 
     /** 渠道映射中间结构（对齐 TS ImageRequestMapping）。 */

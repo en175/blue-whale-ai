@@ -212,17 +212,13 @@ public class ImageJobProcessor implements JobProcessor {
         }
 
         // 匹配 supported_sizes（asset-ops.ts:111-126）
+        // IKHTVR：原先还读出该档位的 width / height 存在 capWidth / capHeight 里，但此后
+        // 全文件再没读过（出站像素由 request_mapping 矩阵决定），随条目宽高字段一并收敛掉。
         String providerSize = cap.getApiSize();
-        Integer capWidth = cap.getWidth();
-        Integer capHeight = cap.getHeight();
         if (sizeId != null) {
-            String[] matched = ImageChannelMapper.matchSupportedSize(
+            String matched = ImageChannelMapper.matchSupportedSize(
                     cap.getSupportedSizes(), sizeId);
-            if (matched != null) {
-                if (matched[0] != null) providerSize = matched[0];
-                if (matched[1] != null) capWidth = Integer.parseInt(matched[1]);
-                if (matched[2] != null) capHeight = Integer.parseInt(matched[2]);
-            }
+            if (matched != null) providerSize = matched;
         }
 
         // 参考图上限（asset-ops.ts:131-139）

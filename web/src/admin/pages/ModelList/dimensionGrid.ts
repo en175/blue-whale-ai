@@ -23,12 +23,10 @@ import type { KeyValueRow } from '../../lib/billing-catalog/catalogDraft';
 import { normalizeKey } from '../../lib/billing-catalog/rowPlan';
 import { axisValueInKey } from '../../lib/billing-catalog/sizeCandidates';
 
-/** 一个尺寸档（只取派生键需要的三个字段，`SizeForm` 结构上满足它）。 */
+/** 一个尺寸档（只取派生键需要的两个字段，`SizeForm` 结构上满足它）。 */
 export interface GridSize {
   id: string;
   label?: string;
-  /** 出站实际提交给上游的档位值；留空时回落用 id（与消费端同口径） */
-  apiValue?: string;
 }
 
 /** 一列 = 一个尺寸档。 */
@@ -38,11 +36,10 @@ export interface GridColumn {
   /** 列头展示名：label 优先、回落 id */
   label: string;
   /**
-   * 拼进 `resolution=` 的那个值：**api_value 优先、回落 id**。
+   * 拼进 `resolution=` 的那个值。
    *
-   * <p>为什么是 api_value：提交侧送的就是它（`ChatBox` 的 `resolution: api_entry?.api_value ?? id`），
-   * 而这张表正是按 `params.resolution` 查的。与 id 只差大小写时两种写法都命中（归一后比），
-   * 但直接用提交侧的值可以少一层「靠归一兜着」的运气。
+   * <p>IKHTVR 起就是档位 id 本身——出站档位值（旧 `api_value`）恒等于 id，提交侧送的
+   * 也已经是 id，与这张表的查表键同一拼写。
    */
   resolution: string;
 }
@@ -105,7 +102,7 @@ export function buildDimensionGrid(
     columns.push({
       id,
       label: (size.label ?? '').trim() || id,
-      resolution: (size.apiValue ?? '').trim() || id,
+      resolution: id,
     });
   }
 
