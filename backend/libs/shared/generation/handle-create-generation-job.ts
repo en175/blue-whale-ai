@@ -35,6 +35,8 @@ import {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
   resolveVideoMode,
+  normalizeVideoMode,
+  frozenVideoModeOf,
   modeAllowedRatios,
   FROZEN_VIDEO_MODE_KEY,
   ERROR_TASK_TYPE_PARAM_CONSTRAINT,
@@ -140,6 +142,7 @@ export interface GenerationParameters {
   /** IKIZQ7：样片模式增量参数（契约 video-sample-mode.ts）。undefined/false = 普通视频语义；
    *  字面 true 时须为 video + 480p + 单输出且能力行已声明 features.sample_mode（默认关闭）。 */
   sample_mode?: unknown;
+  mode?: unknown;
 }
 
 export interface CreateGenerationJobBody {
@@ -895,7 +898,7 @@ const strategies: Record<GenerationType, GenerationTypeStrategy> = {
  */
 export function applyEditSourceDurationBasis(
   input: Record<string, unknown>,
-  prompt: string,
+  mode: VideoMode,
   taskTypes: unknown,
 ): boolean {
   if (!hasModeConstraint(taskTypes, "edit")) return false;
@@ -907,7 +910,7 @@ export function applyEditSourceDurationBasis(
         duration?: unknown;
       }>)
     : [];
-  if (resolveVideoMode(refs, prompt) !== "edit") return false;
+  if (mode !== "edit") return false;
   let maxSeconds: number | null = null;
   for (const ref of refs) {
     if (ref.type !== "video") continue;
@@ -970,7 +973,8 @@ export function projectQuoteInput(
   // 报价侧不做编辑/延长拒单（只算不扣，建任务入口自会 4xx）。
   const quoteVideoMode =
     type === "video"
-      ? resolveVideoMode(
+      ? normalizeVideoMode(params.mode) ??
+        resolveVideoMode(
           (() => {
             const parsed = parseReferences(body.references);
             return parsed.kind === "ok" ? parsed.items : [];
@@ -1912,10 +1916,9 @@ export async function handleCreateGenerationJob(
   let videoMode: VideoMode | undefined;
   if (type === "video") {
     const parsedRefs = parseReferences(effectiveBody.references);
-    videoMode = resolveVideoMode(
-      parsedRefs.kind === "ok" ? parsedRefs.items : [],
-      promptText,
-    );
+    videoMode =
+      normalizeVideoMode(params.mode) ??
+      resolveVideoMode(parsedRefs.kind === "ok" ? parsedRefs.items : [], promptText);
   }
   // IKE7JP（视频段，随判定迁移到合并后）：仅当请求明确携带尺寸/比例/时长时才校验（缺省由能力
   // 默认值兜底）；视频恒进（aspect_ratio 由 validateCommon 必填）——编辑/延长 + 非 adaptive 的
@@ -2092,7 +2095,7 @@ export async function handleCreateGenerationJob(
     if (quoteInput !== null) {
       applyEditSourceDurationBasis(
         quoteInput,
-        isStr(params.prompt) ? params.prompt : "",
+        frozenVideoModeOf(quoteInput),
         capability?.features?.task_types,
       );
     }
@@ -2209,7 +2212,7 @@ export async function handleCreateGenerationJob(
   // worker 对编辑单的出站时长恒强制 -1、不读该字段。量不到源时长时不改写（详见函数注释）。
   applyEditSourceDurationBasis(
     input,
-    typeof input.prompt === "string" ? input.prompt : "",
+    videoMode ?? "text2video",
     capability?.features?.task_types,
   );
   // IKFM3S §4：文本输入签名冻结进快照——任务成功后前端轮询回写目标 usedInputSignature，
