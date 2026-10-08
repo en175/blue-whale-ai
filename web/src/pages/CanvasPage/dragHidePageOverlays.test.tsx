@@ -50,30 +50,75 @@ function defaultImportLocalsByComponentDir(file: string, wanted: ReadonlySet<str
   return map;
 }
 
-function jsxRenderSites(sourceFile: ts.SourceFile, localName: string): Array<{ wired: boolean }> {
-  const sites: Array<{ wired: boolean }> = [];
+function jsxElementsNamed(
+  sourceFile: ts.SourceFile,
+  localName: string,
+): Array<ts.JsxOpeningElement | ts.JsxSelfClosingElement> {
+  const found: Array<ts.JsxOpeningElement | ts.JsxSelfClosingElement> = [];
   const visit = (node: ts.Node): void => {
     if (
       (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
       ts.isIdentifier(node.tagName) &&
       node.tagName.text === localName
     ) {
-      const attr = node.attributes.properties.find(
-        (p): p is ts.JsxAttribute => ts.isJsxAttribute(p) && ts.isIdentifier(p.name) && p.name.text === 'dragHidden',
-      );
-      const expr = attr?.initializer && ts.isJsxExpression(attr.initializer) ? attr.initializer.expression : undefined;
-      sites.push({
-        wired:
-          expr != null &&
-          ts.isCallExpression(expr) &&
-          ts.isIdentifier(expr.expression) &&
-          expr.expression.text === 'isAnchoredOverlayDragHidden',
-      });
+      found.push(node);
     }
     node.forEachChild(visit);
   };
   sourceFile.forEachChild(visit);
-  return sites;
+  return found;
+}
+
+function resourcesDragHiddenWired(node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): boolean {
+  const attr = node.attributes.properties.find(
+    (p): p is ts.JsxAttribute => ts.isJsxAttribute(p) && ts.isIdentifier(p.name) && p.name.text === 'resources',
+  );
+  const expr = attr?.initializer && ts.isJsxExpression(attr.initializer) ? attr.initializer.expression : undefined;
+  if (expr == null || !ts.isObjectLiteralExpression(expr)) return false;
+  return expr.properties.some((property) => {
+    if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name) || property.name.text !== 'dragHidden') {
+      return false;
+    }
+    const initializer = property.initializer;
+    return (
+      ts.isCallExpression(initializer) &&
+      ts.isIdentifier(initializer.expression) &&
+      initializer.expression.text === 'isAnchoredOverlayDragHidden'
+    );
+  });
+}
+
+function spreadsResources(node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): boolean {
+  return node.attributes.properties.some(
+    (p) => ts.isJsxSpreadAttribute(p) && ts.isIdentifier(p.expression) && p.expression.text === 'resources',
+  );
+}
+
+function tsxFilesDirectlyUnder(dir: string): string[] {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.tsx') && !entry.name.endsWith('.test.tsx'))
+    .map((entry) => path.join(dir, entry.name));
+}
+
+function overlayWrapperModule(overlayName: string): string {
+  const matches = tsxFilesDirectlyUnder(PAGE_DIR).filter((file) =>
+    defaultImportLocalsByComponentDir(file, new Set([overlayName])).has(overlayName),
+  );
+  expect(matches.length, `未找到 CanvasPage 目录下默认导入 ./components/${overlayName} 的包装模块`).toBe(1);
+  return matches[0];
+}
+
+function defaultImportLocalOf(file: string, moduleSpecifier: string): string | null {
+  const sourceFile = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX);
+  let local: string | null = null;
+  sourceFile.forEachChild((stmt) => {
+    if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) return;
+    if (stmt.moduleSpecifier.text !== moduleSpecifier) return;
+    const name = stmt.importClause?.name?.text;
+    if (name) local = name;
+  });
+  return local;
 }
 
 describe('IKJU9T 页面级锚定浮层出口机械护栏', () => {
@@ -88,21 +133,55 @@ describe('IKJU9T 页面级锚定浮层出口机械护栏', () => {
     expect(pageLevel).toEqual(['AudioDialog', 'BottomDialog', 'ImageDialog', 'TextGenDialog']);
   });
 
-  it('每个页面级锚定浮层在 CanvasPage 的每处渲染都接线 dragHidden={isAnchoredOverlayDragHidden(…)}', () => {
+  it('每个页面级锚定浮层经 CanvasPage 的 Dock 包装出口接线 dragHidden={isAnchoredOverlayDragHidden(…)}', () => {
     const indexFile = path.join(PAGE_DIR, 'index.tsx');
-    const locals = defaultImportLocalsByComponentDir(indexFile, new Set(pageLevel));
-    const sourceFile = ts.createSourceFile(
+    const indexSource = ts.createSourceFile(
       indexFile,
       fs.readFileSync(indexFile, 'utf8'),
       ts.ScriptTarget.ESNext,
       true,
       ts.ScriptKind.TSX,
     );
+    const directLocals = defaultImportLocalsByComponentDir(indexFile, new Set(pageLevel));
     for (const name of pageLevel) {
-      const sites = jsxRenderSites(sourceFile, locals.get(name) ?? name);
-      expect(sites.length, `${name} 未在 CanvasPage 出口渲染（页面级锚定浮层必须从 CanvasPage 直接接线）`).toBeGreaterThan(0);
-      sites.forEach((site, i) => {
-        expect(site.wired, `${name} 第 ${i + 1} 处渲染未接线 dragHidden={isAnchoredOverlayDragHidden(锚定卡 id)}`).toBe(true);
+      const directLocal = directLocals.get(name);
+      if (directLocal) {
+        expect(
+          jsxElementsNamed(indexSource, directLocal).length,
+          `${name} 绕过 Dock 包装在 CanvasPage 直接渲染（页面级锚定浮层只能经包装出口接线）`,
+        ).toBe(0);
+      }
+
+      const wrapperFile = overlayWrapperModule(name);
+      const wrapperBase = path.basename(wrapperFile, '.tsx');
+      const wrapperLocal = defaultImportLocalOf(indexFile, `./${wrapperBase}`);
+      expect(wrapperLocal, `${name} 的包装模块 ${wrapperBase} 未在 CanvasPage 中默认导入`).toBeTruthy();
+
+      const pageSites = jsxElementsNamed(indexSource, wrapperLocal!);
+      expect(pageSites.length, `${name} 的包装 ${wrapperLocal} 未在 CanvasPage 出口渲染`).toBeGreaterThan(0);
+      pageSites.forEach((site, i) => {
+        expect(
+          resourcesDragHiddenWired(site),
+          `${name} 第 ${i + 1} 处包装渲染的 resources 未含 dragHidden: isAnchoredOverlayDragHidden(锚定卡 id)`,
+        ).toBe(true);
+      });
+
+      const wrapperSource = ts.createSourceFile(
+        wrapperFile,
+        fs.readFileSync(wrapperFile, 'utf8'),
+        ts.ScriptTarget.ESNext,
+        true,
+        ts.ScriptKind.TSX,
+      );
+      const overlayLocal = defaultImportLocalsByComponentDir(wrapperFile, new Set([name])).get(name);
+      expect(overlayLocal, `${wrapperBase} 未默认导入 ./components/${name}`).toBeTruthy();
+      const wrapperSites = jsxElementsNamed(wrapperSource, overlayLocal!);
+      expect(wrapperSites.length, `${wrapperBase} 未渲染 ${name}`).toBeGreaterThan(0);
+      wrapperSites.forEach((site, i) => {
+        expect(
+          spreadsResources(site),
+          `${wrapperBase} 第 ${i + 1} 处 ${name} 渲染未透传 {...resources}（dragHidden 会被静默丢弃）`,
+        ).toBe(true);
       });
     }
   });
