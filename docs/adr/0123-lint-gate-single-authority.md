@@ -21,11 +21,11 @@ IKJLPG（2026-10-07，release/2026.09.29 @ ccf1f5cc2）实测 `pnpm lint`：250 
 ## 否决的备选
 
 - **eslint 接入验证链路**：需先清 250 error（拆 45 个文件 + 修 177 处 `any`），远超本工单范围；先接入门禁再逐项豁免会制造「门禁内挂账违规」的中间态，违背口径对齐初衷。
-- **max-lines 迁移 oxlint**：项目实际安装的 oxlint（1.78.0）含 `eslint/max-lines` 规则（restriction 类，默认关闭，可在 `web/.oxlintrc.json` 显式开启，默认上限 300 须显式传 800），技术可行；否决理由是开启即翻红——web 下 29 个超线文件（16 源码 + 13 测试）须先拆到线下，且 oxlint 门禁只覆盖 web，backend 超线文件不受管辖。
+- **max-lines 迁移 oxlint**：项目实际安装的 oxlint（1.78.0）含 `eslint/max-lines` 规则（restriction 类，默认关闭，可在 `web/.oxlintrc.json` 显式开启，默认上限 300 须显式传 800），技术可行；否决理由是开启即翻红——web 下 31 个超线文件（15 源码 + 16 测试，截至 2de3e860e）须先拆到线下，且 oxlint 门禁只覆盖 web，backend 超线文件不受管辖。
 
 ## 恢复硬线的路径
 
-恢复 `max-lines` 硬线的路径有二：根 eslint 升回 error 并接入验证链路（须先清全部存量 error），或 oxlint 显式开启 `eslint/max-lines`（仅覆盖 web）。两路的共同前置：45 个超线文件全部拆到线下。其中 24 个测试文件——测试用例堆叠天然偏长，800 阈值是否适用测试文件须在该工单中一并评估。属独立工程工单，本 ADR 不排期。
+恢复 `max-lines` 硬线的路径有二：根 eslint 升回 error 并接入验证链路（须先清全部存量 error），或 oxlint 显式开启 `eslint/max-lines`（仅覆盖 web）。两路的共同前置：49 个超线文件全部拆到线下（截至 2de3e860e）。其中 28 个测试文件——测试用例堆叠天然偏长，800 阈值是否适用测试文件须在该工单中一并评估。属独立工程工单，本 ADR 不排期。
 
 ## 后果
 
