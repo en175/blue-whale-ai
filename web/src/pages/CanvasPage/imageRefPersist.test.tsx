@@ -26,6 +26,12 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
     staleTime: Infinity,
     queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
   })),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
 }));
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
@@ -185,28 +191,6 @@ const canvasDocMock = vi.hoisted(() => ({
 
 vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
-}));
-
-vi.mock('@/api/generationQuote', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/generationQuote')>()),
-  generationQuoteOptions: vi.fn(() => ({
-    queryKey: ['generation-quote', 'mock'],
-    queryFn: async () => ({ credits: null }),
-  })),
-}));
-
-vi.mock('@/api/canvasRecovery', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
-  fetchGenerationRecoveryPage: vi.fn(async () => ({
-    protocol_version: 1,
-    canvas_version: null,
-    records: [],
-    next_cursor: null,
-  })),
-  generationRecoveryPageOptions: vi.fn(() => ({
-    queryKey: ['generation-recovery', 'mock'],
-    queryFn: async () => ({ records: [], next_cursor: null }),
-  })),
 }));
 
 /** 默认画布：文本节点 t1 + 就绪图片 m1（assetId a1）+ 视频节点 v1 + 图片草稿 d1 */

@@ -39,6 +39,12 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
     staleTime: Infinity,
     queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
   })),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
 }));
 vi.mock('sonner', () => ({
   toast: {
@@ -175,28 +181,6 @@ const canvasDocMock = vi.hoisted(() => ({
     refetch: () => Promise.resolve([]),
     acceptDoc: vi.fn(),
   },
-}));
-
-vi.mock('@/api/generationQuote', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/generationQuote')>()),
-  generationQuoteOptions: vi.fn(() => ({
-    queryKey: ['generation-quote', 'mock'],
-    queryFn: async () => ({ credits: null }),
-  })),
-}));
-
-vi.mock('@/api/canvasRecovery', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
-  fetchGenerationRecoveryPage: vi.fn(async () => ({
-    protocol_version: 1,
-    canvas_version: null,
-    records: [],
-    next_cursor: null,
-  })),
-  generationRecoveryPageOptions: vi.fn(() => ({
-    queryKey: ['generation-recovery', 'mock'],
-    queryFn: async () => ({ records: [], next_cursor: null }),
-  })),
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 

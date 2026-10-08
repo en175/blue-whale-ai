@@ -30,6 +30,12 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
     staleTime: Infinity,
     queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
   })),
+  fetchGenerationRecoveryPage: vi.fn(async () => ({
+    protocol_version: 1,
+    canvas_version: null,
+    records: [],
+    next_cursor: null,
+  })),
 }));
 vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
@@ -185,28 +191,6 @@ const canvasDocMock = vi.hoisted(() => ({
 
 vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
-}));
-
-vi.mock('@/api/generationQuote', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/generationQuote')>()),
-  generationQuoteOptions: vi.fn(() => ({
-    queryKey: ['generation-quote', 'mock'],
-    queryFn: async () => ({ credits: null }),
-  })),
-}));
-
-vi.mock('@/api/canvasRecovery', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
-  fetchGenerationRecoveryPage: vi.fn(async () => ({
-    protocol_version: 1,
-    canvas_version: null,
-    records: [],
-    next_cursor: null,
-  })),
-  generationRecoveryPageOptions: vi.fn(() => ({
-    queryKey: ['generation-recovery', 'mock'],
-    queryFn: async () => ({ records: [], next_cursor: null }),
-  })),
 }));
 
 /** 画布文档：文本节点 t1/t2 + 图片媒体节点 m1 + 图片草稿 d1，连线 e1: t1 → m1
