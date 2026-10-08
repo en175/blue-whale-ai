@@ -175,6 +175,7 @@ import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
+import { draftFileNameOf, hasCustomName, planBindingsCoveredBy, readNodeAssetId } from './canvasNodeUtils';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
@@ -287,22 +288,6 @@ type ToolMode = 'drag' | 'select';
 /** 资产卡顶部操作条抬升量（IKGYYB 审查对齐）：条高约 32（addToChatBtn padding 8×2 +
  *  内容 14 + 边框 2）+ 与卡片顶边间距 10 = 42，对齐文本卡操作条 NODE_BAR_LIFT 口径 */
 const ASSET_TOOLBAR_LIFT = 42;
-
-/** 草稿回退显示名（IKDMQW）：取消回待生成/创建回退共用（节点 data 宽松类型，按字面量收窄） */
-function draftFileNameOf(type: unknown): string {
-  return type === 'video' ? '视频草稿' : type === 'audio' ? '音频草稿' : '图片草稿';
-}
-
-/** 卡片名称已被用户自定义（IKFA8X）：显式 customName 标记，不靠名称内容推断 */
-function hasCustomName(node: Node | undefined): boolean {
-  return ((node?.data ?? {}) as Record<string, unknown>).customName === true;
-}
-
-/** 当前方案绑定是否已被边上的确认记录覆盖：只少不少（删标签）视为已同步。 */
-function planBindingsCoveredBy(current: PromptBinding[], confirmed: PromptBinding[]): boolean {
-  const confirmedKeys = new Set(confirmed.map(binding => `${binding.index}\0${binding.assetId}`));
-  return current.every(binding => confirmedKeys.has(`${binding.index}\0${binding.assetId}`));
-}
 
 /** IKILUE：带 confirmEmpty 的清空保存被 412 拒绝后的复核指引——另一会话已改写画布，
  *  刷新重新水合后 confirmEmpty 才会按新基线重新授予，直接重试只会用旧空文档覆盖对方成果。 */
@@ -2682,10 +2667,6 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
     toolRuntime.closePanels();
   };
-
-  /** 节点选取时读取资产 ID：兼容 assetId/asset_id/assetID 三形态（后端写入节点为下划线形态） */
-  const readNodeAssetId = (data: Record<string, unknown>): string | number | undefined =>
-    (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
 
   // 隐藏与重开同一目标可放行；重试尚未成功时不能换到其它编辑目标。
   const canOpenEditor = (nodeId?: string): boolean => {
