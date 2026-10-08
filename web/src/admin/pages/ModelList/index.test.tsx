@@ -403,7 +403,7 @@ describe('ModelList 按类型分表单', () => {
     expect(document.body.textContent).toContain('时长范围');
     expect(document.body.textContent).toContain('默认时长（秒）');
     // IKHBDO：task_types 此前只能在整个 features 的 JSON 里手写
-    expect(document.body.textContent).toContain('任务类型比例约束 task_types');
+    expect(document.body.textContent).toContain('视频模式 task_types');
     expect(document.body.textContent).toContain('first_last_frame');
     expect(document.body.textContent).toContain('extend');
   });
