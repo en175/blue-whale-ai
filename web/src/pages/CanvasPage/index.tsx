@@ -91,8 +91,8 @@ import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import { AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON, AUDIO_VIDEO_MUX_EDGE_ORIGIN, AUDIO_VIDEO_MUX_TITLE, audioVideoMuxIdentityOf, audioVideoMuxVideoError, buildAudioVideoMuxIdentity, isAudioVideoMuxAudioEdge, isAudioVideoMuxBindEdge, isAudioVideoMuxDraftNode } from './audioVideoMux';
 
 
-import { VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_EDGE_ORIGIN, VOCAL_SPLIT_NODE_PREFIX, buildVocalSplitPlaceholderNode, buildVocalSplitTrackNodes, vocalSplitSourceName, type VocalSplitIdentity } from './vocalSplit';
-import { SCENE_SPLIT_EDGE_ORIGIN, SCENE_SPLIT_NODE_GAP, buildSceneSplitPlaceholderNode, sceneSplitErrorText, sceneSplitFanoutLayout, sceneSplitSegmentBox, sceneSplitSegmentLabel, type SceneSplitIdentity } from './sceneSplit';
+import { VOCAL_SPLIT_EDGE_ORIGIN, buildVocalSplitPlaceholderNode } from './vocalSplit';
+import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from './sceneSplit';
 import { type SceneSplitSubmission } from './sceneSplitSession';
 import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from './smartMatting';
 import {
@@ -4615,157 +4615,6 @@ export default function CanvasPage() {
     patchMediaNode(nodeId, patch);
   };
 
-  /** 人声背景分离成功扇出（IKHA30，本仓一对多扇出骨架首例——场景切分 ADR-0108 复用此形态）：
-   *  移除占位卡，按任务结果 tracks 在占位卡实时位置（建卡时已按源卡实际内容宽让位）纵向扇出
-   *  N 张普通音频成品卡（零样式改动：src/assetId/duration，可播放/下载/再作工具输入），各轨卡
-   *  对源卡拉来源边（origin=vocal-split，参考推导跳过）。轨卡 id 确定性（vocal-track-{jobId}-
-   *  {track}）+ 建卡判重：重复终态/重复水合幂等不重复建卡。tracks 缺失（契约上线前完成的
-   *  旧任务）防御性保留占位卡停生成中，不扇出不丢卡。 */
-  const fanOutVocalSplitTracks = (
-    placeholderNodeId: string,
-    detail: Awaited<ReturnType<typeof fetchJobStatus>>,
-  ): void => {
-    const node = mediaNodesRef.current.find((n) => n.id === placeholderNodeId);
-    if (!node) return;
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const identity = data.vocalSplit as VocalSplitIdentity | undefined;
-    const outputFormat = identity?.lastInput.output_format ?? VOCAL_SPLIT_DEFAULT_FORMAT;
-    const tracks = detail.tracks ?? [];
-    if (tracks.length === 0) {
-      patchMediaNode(placeholderNodeId, { genStatus: undefined, progress: 100 });
-      return;
-    }
-    // 删除等待终态期间任务抢先成功：同通用成功分支口径，停止删除保留作品（轨卡）
-    if (pendingDeleteJobNodesRef.current.has(placeholderNodeId)) {
-      pendingDeleteJobNodesRef.current.delete(placeholderNodeId);
-      showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
-    }
-    // 来源边反查源卡（占位卡发送时拉的边）：扇出后各轨卡改拉 源卡→轨卡 来源边
-    const sourceNodeId = edgesRef.current.find((e) => e.target === placeholderNodeId)?.source;
-    const plan = buildVocalSplitTrackNodes({
-      jobId: placeholderNodeId.slice(VOCAL_SPLIT_NODE_PREFIX.length),
-      outputFormat,
-      tracks,
-      sourceName: vocalSplitSourceName(data.fileName),
-      anchor: node.position,
-    });
-    locallyRemovedGenerationNodesRef.current.add(placeholderNodeId);
-    const current = mediaNodesRef.current;
-    // 幂等判重：已存在的轨卡（重复终态/重复水合）不重建；占位卡移除（其连线由级联清理收走）
-    const fresh = plan.filter((item) => !current.some((n) => n.id === item.node.id));
-    rememberGeneratedAsset(detail.asset, 'audio');
-    for (const track of tracks) {
-      rememberGeneratedAsset({ id: track.asset_id, url: track.url, type: 'audio' }, 'audio');
-    }
-    const next = [
-      ...current.filter((n) => n.id !== placeholderNodeId),
-      ...fresh.map((item) => attachCallbacks(item.node as Node)),
-    ];
-    // 先同步写 ref 再 setState：来源边端点与后续落库都读 ref
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    if (sourceNodeId) {
-      fresh.forEach((item) =>
-        addCanvasEdge(sourceNodeId, item.node.id, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN }),
-      );
-    }
-    // 立刻落库（best-effort）：占位移除 + 轨卡 + 来源边同一次保存，防刷新后占位卡复活
-    if (currentId) void flushCanvasSave(currentId).catch(() => {});
-  };
-
-  /** 场景切分完成扇出（IKH8C1）：移除任务占位卡，按 result.segments 返回顺序在源卡右侧
-   *  网格建 N 张普通视频段卡（「第 N 段 起止时间」标注、assetId 关联段资产——工具条门槛
-   *  走 BJ 已有 gate，全量工具可用含链式再切分），逐张拉来源连线（纯视觉 origin=scene-split），
-   *  立即落盘。段资产 = output_assets 里 id === segment_asset_id 项；段卡宽高随资产回填
-   *  （缺失回退源卡分辨率），1 段不特判（第 1 段、全程时间轴照常出 1 张）。
-   *  段卡 data 保留 jobId（家族口径同 applyJobTerminal 通用成功分支——成品卡不清 jobId）：
-   *  MediaNode 以 jobId≠null 判定生成宿主渲染 target Handle，缺它则来源连线无法渲染。
-   *  落位 sceneSplitFanoutLayout 纯函数自动避让画布既有节点（源卡与占位卡不参与避让
-   *  ——占位卡本步移除、扇出语义就在其右侧）。占位卡登记 locallyRemoved 防迟到响应复活。 */
-  const fanOutSceneSplitSegments = (
-    placeholderId: string,
-    jobId: number | string,
-    detail: Awaited<ReturnType<typeof fetchJobStatus>>,
-  ) => {
-    const placeholder = mediaNodesRef.current.find((n) => n.id === placeholderId);
-    if (!placeholder) return;
-    const identity = ((placeholder.data ?? {}) as Record<string, unknown>).sceneSplit as
-      | SceneSplitIdentity
-      | undefined;
-    const segments = detail.result?.segments ?? [];
-    const outputAssets = detail.output_assets ?? [];
-    if (segments.length === 0) {
-      // 畸形 payload 防御（契约校验后 result 为 null）：成功却无段，占位卡按失败口径兜底
-      patchMediaNode(placeholderId, { progress: 100, genStatus: 'failed', errorText: sceneSplitErrorText(null) });
-      return;
-    }
-    const sourceAssetId = identity?.sourceAssetId;
-    const source = sourceAssetId != null
-      ? mediaNodesRef.current.find(
-          (n) => readAssetId((n.data ?? {}) as Record<string, unknown>) === sourceAssetId,
-        )
-      : undefined;
-    const sourceData = (source?.data ?? {}) as Record<string, unknown>;
-    const fallbackWidth = typeof sourceData.width === 'number' ? sourceData.width : undefined;
-    const fallbackHeight = typeof sourceData.height === 'number' ? sourceData.height : undefined;
-    const segAssetOf = (assetId: string) =>
-      outputAssets.find((a) => String(a.id) === String(assetId));
-    // 落位：锚点取源卡（缺失降级占位卡），既有节点排除源卡与占位卡
-    const anchor = nodeBoxOf(source ?? placeholder);
-    const occupied = [
-      ...mediaNodesRef.current,
-      ...textNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ]
-      .filter((n) => n.id !== placeholderId && n.id !== source?.id)
-      .map(nodeBoxOf);
-    const positions = sceneSplitFanoutLayout({
-      anchor,
-      count: segments.length,
-      segmentSize: sceneSplitSegmentBox({ width: fallbackWidth, height: fallbackHeight }),
-      occupied,
-    });
-    const fallbackPos = {
-      x: Math.round(anchor.x + anchor.width + SCENE_SPLIT_NODE_GAP),
-      y: Math.round(anchor.y),
-    };
-    const segmentNodes = segments.map((seg, i) => {
-      const asset = segAssetOf(seg.segment_asset_id);
-      const pos = positions[i] ?? fallbackPos;
-      return {
-        id: newNodeId('scene-segment'),
-        type: 'mediaNode' as const,
-        position: pos,
-        data: {
-          src: asset?.url ?? '',
-          fileName: sceneSplitSegmentLabel(seg.segment_index, seg.start_time, seg.end_time),
-          mediaType: 'video' as const,
-          assetId: String(seg.segment_asset_id),
-          width: asset?.width ?? fallbackWidth,
-          height: asset?.height ?? fallbackHeight,
-          jobId,
-        },
-      };
-    });
-    for (const asset of outputAssets) {
-      rememberGeneratedAsset(asset, 'video');
-    }
-    // 同步写 ref 再 setState（扇出后 flush 才能读到本轮节点，口径同 startSceneSplitJob）
-    const next = mediaNodesRef.current
-      .filter((n) => n.id !== placeholderId)
-      .concat(segmentNodes.map((n) => attachCallbacks(n as Node)));
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    locallyRemovedGenerationNodesRef.current.add(placeholderId);
-    if (source) {
-      for (const seg of segmentNodes) {
-        addCanvasEdge(source.id, seg.id, undefined, { origin: SCENE_SPLIT_EDGE_ORIGIN });
-      }
-    }
-    if (currentId) void flushCanvasSave(currentId).catch(() => {});
-  };
-
   /** 插帧关页恢复函数引用（IKHSFF，水合 effect 声明在前） */
   const recoverFrameInterpolationRef = useRef<(nodeId: string, savedJobId?: unknown) => void>(() => {});
 
@@ -5823,8 +5672,15 @@ export default function CanvasPage() {
       patchMediaNode,
       removeAudioMixCardNow,
       showToast,
-      fanOutSceneSplitSegments,
-      fanOutVocalSplitTracks,
+      edgesRef,
+      textNodesRef,
+      productNodesRef,
+      assetNodesRef,
+      currentId,
+      attachCallbacks,
+      addCanvasEdge,
+      nodeBoxOf,
+      flushCanvasSave: (projectId) => flushCanvasSave(projectId),
     });
 
   /** 删除生成中卡片（IKDMQW）：先请求取消；任务权威终态非 succeeded 才移除——

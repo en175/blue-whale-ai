@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import { fetchJobStatus, readJobFailText } from '@/api/jobs';
 import type { SnapshotAsset } from '@/api/projects';
 import { audioMixTerminalPatch, isAudioMixNodeId } from '../audioMix';
@@ -8,15 +8,36 @@ import { audioSpeedTerminalPatch, isAudioSpeedNodeId } from '../audioSpeed';
 import { audioTrimTerminalPatch, isAudioTrimNodeId } from '../audioTrim';
 import { audioVideoMuxErrorText, audioVideoMuxIdentityOf, audioVideoMuxResultName } from '../audioVideoMux';
 import { draftFileNameOf, hasCustomName } from '../canvasNodeUtils';
+import type { SpawnBox } from '../draftSpawn';
 import { frameInterpolationErrorText } from '../frameInterpolation';
 import type { GenerationRuntime } from '../generationRuntime/runtime';
 import { cancelledTerminalAction } from '../mediaReEdit';
 import { isMediaExtractNodeId, mediaExtractTerminalPatch } from '../mediaExtract';
-import { sceneSplitErrorText } from '../sceneSplit';
+import { readAssetId } from '../mediaRefs';
+import { newNodeId } from '../nodeId';
+import {
+  SCENE_SPLIT_EDGE_ORIGIN,
+  SCENE_SPLIT_NODE_GAP,
+  sceneSplitErrorText,
+  sceneSplitFanoutLayout,
+  sceneSplitSegmentBox,
+  sceneSplitSegmentLabel,
+  type SceneSplitIdentity,
+} from '../sceneSplit';
 import { smartMattingErrorText, type SmartMattingIdentity } from '../smartMatting';
 import { nextUsedInputState } from '../textIndexSync';
+import type { VideoRefRole } from '../videoMediaRefs';
 import { videoEnhanceErrorText } from '../videoEnhance';
-import { isVocalSplitNodeId, vocalSplitTerminalPatch } from '../vocalSplit';
+import {
+  VOCAL_SPLIT_DEFAULT_FORMAT,
+  VOCAL_SPLIT_EDGE_ORIGIN,
+  VOCAL_SPLIT_NODE_PREFIX,
+  buildVocalSplitTrackNodes,
+  isVocalSplitNodeId,
+  vocalSplitSourceName,
+  vocalSplitTerminalPatch,
+  type VocalSplitIdentity,
+} from '../vocalSplit';
 
 export type JobTerminalDetail = Awaited<ReturnType<typeof fetchJobStatus>>;
 
@@ -40,8 +61,15 @@ export interface CanvasGenerationTerminalHost {
   patchMediaNode: (nodeId: string, patch: Record<string, unknown>) => void;
   removeAudioMixCardNow: (nodeId: string) => void;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
-  fanOutSceneSplitSegments: (nodeId: string, jobId: number | string, detail: JobTerminalDetail) => void;
-  fanOutVocalSplitTracks: (nodeId: string, detail: JobTerminalDetail) => void;
+  edgesRef: RefObject<Edge[]>;
+  textNodesRef: RefObject<Node[]>;
+  productNodesRef: RefObject<Node[]>;
+  assetNodesRef: RefObject<Node[]>;
+  currentId: string;
+  attachCallbacks: (node: Node) => Node;
+  addCanvasEdge: (source: string, target: string, refRole?: VideoRefRole, marker?: Record<string, unknown>) => void;
+  nodeBoxOf: (n: Node) => SpawnBox;
+  flushCanvasSave: (projectId: string) => Promise<boolean>;
 }
 
 export interface CanvasGenerationTerminalHandles {
@@ -49,6 +77,8 @@ export interface CanvasGenerationTerminalHandles {
   settleCancelledNode: (nodeId: string) => void;
   jobResponseGuarded: (nodeId: string, jobId: number | string) => boolean;
   rememberGeneratedAsset: (asset: GeneratedAssetInput | null | undefined, fallbackType: 'image' | 'video' | 'audio') => void;
+  fanOutSceneSplitSegments: (nodeId: string, jobId: number | string, detail: JobTerminalDetail) => void;
+  fanOutVocalSplitTracks: (nodeId: string, detail: JobTerminalDetail) => void;
 }
 
 export function useCanvasGenerationTerminal(host: CanvasGenerationTerminalHost): CanvasGenerationTerminalHandles {
@@ -114,11 +144,139 @@ export function useCanvasGenerationTerminal(host: CanvasGenerationTerminalHost):
     setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
   }, []);
 
+  const fanOutVocalSplitTracks = useCallback((placeholderNodeId: string, detail: JobTerminalDetail): void => {
+    const {
+      mediaNodesRef, locallyRemovedGenerationNodesRef, pendingDeleteJobNodesRef, edgesRef,
+      setMediaNodes, patchMediaNode, showToast, attachCallbacks, addCanvasEdge, currentId, flushCanvasSave,
+    } = hostRef.current;
+    const node = mediaNodesRef.current.find((n) => n.id === placeholderNodeId);
+    if (!node) return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const identity = data.vocalSplit as VocalSplitIdentity | undefined;
+    const outputFormat = identity?.lastInput.output_format ?? VOCAL_SPLIT_DEFAULT_FORMAT;
+    const tracks = detail.tracks ?? [];
+    if (tracks.length === 0) {
+      patchMediaNode(placeholderNodeId, { genStatus: undefined, progress: 100 });
+      return;
+    }
+    if (pendingDeleteJobNodesRef.current.has(placeholderNodeId)) {
+      pendingDeleteJobNodesRef.current.delete(placeholderNodeId);
+      showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
+    }
+    const sourceNodeId = edgesRef.current.find((e) => e.target === placeholderNodeId)?.source;
+    const plan = buildVocalSplitTrackNodes({
+      jobId: placeholderNodeId.slice(VOCAL_SPLIT_NODE_PREFIX.length),
+      outputFormat,
+      tracks,
+      sourceName: vocalSplitSourceName(data.fileName),
+      anchor: node.position,
+    });
+    locallyRemovedGenerationNodesRef.current.add(placeholderNodeId);
+    const current = mediaNodesRef.current;
+    const fresh = plan.filter((item) => !current.some((n) => n.id === item.node.id));
+    rememberGeneratedAsset(detail.asset, 'audio');
+    for (const track of tracks) {
+      rememberGeneratedAsset({ id: track.asset_id, url: track.url, type: 'audio' }, 'audio');
+    }
+    const next = [
+      ...current.filter((n) => n.id !== placeholderNodeId),
+      ...fresh.map((item) => attachCallbacks(item.node as Node)),
+    ];
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    if (sourceNodeId) {
+      fresh.forEach((item) =>
+        addCanvasEdge(sourceNodeId, item.node.id, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN }),
+      );
+    }
+    if (currentId) void flushCanvasSave(currentId).catch(() => {});
+  }, [rememberGeneratedAsset]);
+
+  const fanOutSceneSplitSegments = useCallback((placeholderId: string, jobId: number | string, detail: JobTerminalDetail): void => {
+    const {
+      mediaNodesRef, locallyRemovedGenerationNodesRef, textNodesRef, productNodesRef, assetNodesRef,
+      setMediaNodes, patchMediaNode, attachCallbacks, addCanvasEdge, nodeBoxOf, currentId, flushCanvasSave,
+    } = hostRef.current;
+    const placeholder = mediaNodesRef.current.find((n) => n.id === placeholderId);
+    if (!placeholder) return;
+    const identity = ((placeholder.data ?? {}) as Record<string, unknown>).sceneSplit as
+      | SceneSplitIdentity
+      | undefined;
+    const segments = detail.result?.segments ?? [];
+    const outputAssets = detail.output_assets ?? [];
+    if (segments.length === 0) {
+      patchMediaNode(placeholderId, { progress: 100, genStatus: 'failed', errorText: sceneSplitErrorText(null) });
+      return;
+    }
+    const sourceAssetId = identity?.sourceAssetId;
+    const source = sourceAssetId != null
+      ? mediaNodesRef.current.find(
+          (n) => readAssetId((n.data ?? {}) as Record<string, unknown>) === sourceAssetId,
+        )
+      : undefined;
+    const sourceData = (source?.data ?? {}) as Record<string, unknown>;
+    const fallbackWidth = typeof sourceData.width === 'number' ? sourceData.width : undefined;
+    const fallbackHeight = typeof sourceData.height === 'number' ? sourceData.height : undefined;
+    const segAssetOf = (assetId: string) =>
+      outputAssets.find((a) => String(a.id) === String(assetId));
+    const anchor = nodeBoxOf(source ?? placeholder);
+    const occupied = [
+      ...mediaNodesRef.current,
+      ...textNodesRef.current,
+      ...productNodesRef.current,
+      ...assetNodesRef.current,
+    ]
+      .filter((n) => n.id !== placeholderId && n.id !== source?.id)
+      .map(nodeBoxOf);
+    const positions = sceneSplitFanoutLayout({
+      anchor,
+      count: segments.length,
+      segmentSize: sceneSplitSegmentBox({ width: fallbackWidth, height: fallbackHeight }),
+      occupied,
+    });
+    const fallbackPos = {
+      x: Math.round(anchor.x + anchor.width + SCENE_SPLIT_NODE_GAP),
+      y: Math.round(anchor.y),
+    };
+    const segmentNodes = segments.map((seg, i) => {
+      const asset = segAssetOf(seg.segment_asset_id);
+      const pos = positions[i] ?? fallbackPos;
+      return {
+        id: newNodeId('scene-segment'),
+        type: 'mediaNode' as const,
+        position: pos,
+        data: {
+          src: asset?.url ?? '',
+          fileName: sceneSplitSegmentLabel(seg.segment_index, seg.start_time, seg.end_time),
+          mediaType: 'video' as const,
+          assetId: String(seg.segment_asset_id),
+          width: asset?.width ?? fallbackWidth,
+          height: asset?.height ?? fallbackHeight,
+          jobId,
+        },
+      };
+    });
+    for (const asset of outputAssets) {
+      rememberGeneratedAsset(asset, 'video');
+    }
+    const next = mediaNodesRef.current
+      .filter((n) => n.id !== placeholderId)
+      .concat(segmentNodes.map((n) => attachCallbacks(n as Node)));
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    locallyRemovedGenerationNodesRef.current.add(placeholderId);
+    if (source) {
+      for (const seg of segmentNodes) {
+        addCanvasEdge(source.id, seg.id, undefined, { origin: SCENE_SPLIT_EDGE_ORIGIN });
+      }
+    }
+    if (currentId) void flushCanvasSave(currentId).catch(() => {});
+  }, [rememberGeneratedAsset]);
+
   const applyJobTerminal = useCallback((nodeId: string, jobId: number | string, detail: JobTerminalDetail): 'terminal' | 'processing' => {
     const {
       mediaNodesRef, pendingDeleteJobNodesRef, locallyRemovedGenerationNodesRef, settledExtractNodesRef,
       generationRuntimeRef, setMediaNodes, patchMediaNode, removeAudioMixCardNow, showToast,
-      fanOutSceneSplitSegments, fanOutVocalSplitTracks,
     } = hostRef.current;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     if (!node) return 'terminal';
@@ -325,7 +483,10 @@ export function useCanvasGenerationTerminal(host: CanvasGenerationTerminalHost):
       return 'terminal';
     }
     return 'processing';
-  }, [rememberGeneratedAsset, settleCancelledNode]);
+  }, [rememberGeneratedAsset, settleCancelledNode, fanOutSceneSplitSegments, fanOutVocalSplitTracks]);
 
-  return { applyJobTerminal, settleCancelledNode, jobResponseGuarded, rememberGeneratedAsset };
+  return {
+    applyJobTerminal, settleCancelledNode, jobResponseGuarded, rememberGeneratedAsset,
+    fanOutSceneSplitSegments, fanOutVocalSplitTracks,
+  };
 }
