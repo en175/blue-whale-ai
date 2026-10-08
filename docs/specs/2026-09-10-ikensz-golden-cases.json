@@ -206,8 +206,8 @@
   "case_id": "G31",
   "contract_ref": "附录A/image:502",
   "title_zh": "图片 provider_credential_missing：凭证缺失",
-  "given": "input.provider_credential 非字符串或为空",
-  "expect": "failClaimed(ERROR_PROVIDER_CREDENTIAL_MISSING, '图片任务缺少供应商凭证')"
+  "given": "未配置项目级上游 key：UpstreamCredential.requireKey() 抛 IllegalStateException（system_settings 的 upstream 凭证缺失）",
+  "expect": "failClaimed(ERROR_PROVIDER_CREDENTIAL_MISSING, '生成服务凭证未配置')"
  },
  {
   "case_id": "G32",

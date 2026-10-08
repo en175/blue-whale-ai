@@ -13,7 +13,6 @@ import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.contract.JobTypeEnum;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;

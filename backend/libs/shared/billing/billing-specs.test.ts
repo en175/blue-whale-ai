@@ -190,3 +190,17 @@ describe('extractSpecs —— 参考素材数**按媒介取不同的键**', () =
     expect(extractSpecs(input, 'video')).toMatchObject({ reference_count: '1' });
   });
 });
+
+describe('extractSpecs —— 凭证不进规格', () => {
+  it('★ provider_credential 被排除，密钥不随请求离开本进程', () => {
+    const specs = videoSpecs({
+      size: '1080p',
+      duration: 5,
+      provider_credential: 'sk-should-never-leave-this-process',
+    });
+
+    expect(specs).not.toHaveProperty('provider_credential');
+    expect(JSON.stringify(specs)).not.toContain('sk-should-never-leave');
+    expect(specs).toMatchObject({ size: '1080p', duration: '5' });
+  });
+});

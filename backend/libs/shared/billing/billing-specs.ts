@@ -27,7 +27,7 @@
  * 「长度」算成一个数字规格传进来，而不是把正文塞进规格表。
  */
 
-const NON_SPEC_FIELDS = new Set(["prompt", "title"]);
+const NON_SPEC_FIELDS = new Set(["prompt", "title", "provider_credential"]);
 
 /**
  * 规格键：视频输入档（轴名沿用火山的 `video`）。

@@ -76,6 +76,7 @@ const SAMPLE_ONLY_INPUT_KEYS = [
   "text_attachments",
   "prompt_plan_snapshot",
   "text_input_signature",
+  "provider_credential",
 ] as const;
 
 /** 从样片冻结输入派生成片输入：同模型 + 1080p，剥掉样片/画布专属键，输出像素按 1080p 重算。

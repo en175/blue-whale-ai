@@ -5,6 +5,40 @@ import { createSnapshotRepo } from "./snapshot-repo.js";
 import { capabilityDigest } from "./capability-digest.js";
 
 describe("SnapshotRepo.loadJobsAndAssets", () => {
+  it("快照投影剥掉 input 里的 provider_credential", async () => {
+    const prisma = {
+      generation_jobs: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 300n,
+            type: "video",
+            source: "bottom_dock",
+            status: "processing",
+            progress: 10,
+            input: {
+              prompt: "鲸鱼游动",
+              provider_credential: "sealed-token",
+            },
+            output_asset_ids: [],
+            error: null,
+          },
+        ]),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_output_slots: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    } as unknown as PrismaClient;
+
+    const result = await createSnapshotRepo(prisma).loadJobsAndAssets(
+      "55",
+      "100",
+    );
+
+    expect(result.generation_jobs[0]?.input).toEqual({ prompt: "鲸鱼游动" });
+  });
+
   it("returns normal uploaded project assets even when no generation job produced them", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
     // 200 有 md5、201 无（老资产未落 md5）→ 字段原样带出，缺失归 null。

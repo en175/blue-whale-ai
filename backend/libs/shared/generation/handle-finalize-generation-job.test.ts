@@ -15,6 +15,7 @@ const DEADLINE_PAST = BigInt(Date.now() - 1_000);
 
 /** 样片冻结输入：含参考视频时长（G13——成片计价的输入视频维度）与样片专属键。 */
 const SAMPLE_INPUT = {
+  provider_credential: "sealed-sample-cred",
   prompt: "人物走过街角",
   model_id: "doubao-seedance-2-5-260628",
   aspect_ratio: "16:9",
@@ -137,6 +138,7 @@ describe("deriveFinalizeInput（IKIZQC）", () => {
     expect(derived.prompt_plan_snapshot).toBeUndefined();
     expect(derived.text_input_signature).toBeUndefined();
     expect(derived.placement_anchor).toBeUndefined();
+    expect(derived.provider_credential).toBeUndefined();
     // 480p 像素按 1080p 重算。
     expect(derived.output_width).toBe(1920);
     expect(derived.output_height).toBe(1080);
@@ -161,6 +163,7 @@ describe("handleFinalizeGenerationJobQuote（IKIZQC）", () => {
     expect(res.data).toEqual({ credits: 76, quote_revision: confirmationOf(sampleJob(), S25_CAPABILITY as never, result).quote_revision });
     const call = quote.mock.calls[0]![0];
     expect(call.input.resolution).toBe("1080p");
+    expect(call.input.provider_credential).toBeUndefined();
   });
 
   it.each([

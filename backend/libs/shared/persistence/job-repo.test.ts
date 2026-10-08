@@ -22,7 +22,7 @@ describe("createJobRepo.listByUser", () => {
     const prisma = {
       generation_jobs: { count: vi.fn().mockResolvedValue(2), findMany: vi.fn().mockResolvedValue([
         { id: 73n, type: "audio_mix", status: "failed",
-          progress: 0, input: { source_node_id: "source" },
+          progress: 0, input: { source_node_id: "source", provider_credential: "secret" },
           output_asset_ids: [], gmt_create: new Date("2026-09-23T00:00:00Z"), error: null },
         { id: 72n, type: "audio_mix", status: "queued",
           progress: 0, input: { source_node_id: "source" }, output_asset_ids: [],

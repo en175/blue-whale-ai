@@ -34,6 +34,7 @@ const NON_REQUEST_INPUT_KEYS = [
   "text_attachments",
   "prompt_plan_snapshot",
   "text_input_signature",
+  "provider_credential",
   "reference_limits",
   "output_width",
   "output_height",

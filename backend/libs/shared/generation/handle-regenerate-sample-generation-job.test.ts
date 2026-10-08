@@ -21,6 +21,7 @@ import type { FinalizeSourceJob } from "@lib/shared/persistence/index.js";
 const DEADLINE_PAST = BigInt(Date.now() - 1_000);
 
 const SAMPLE_INPUT = {
+  provider_credential: "sealed-sample-cred",
   prompt: "人物走过街角",
   model_id: "doubao-seedance-2-5-260628",
   aspect_ratio: "16:9",
@@ -187,6 +188,7 @@ describe("deriveSampleRegenerateBody（IKIZQF）", () => {
     expect(body.finalize_deadline_at).toBeUndefined();
     expect(body.finalize_deadline_ms).toBeUndefined();
     expect(body.provider_task_id).toBeUndefined();
+    expect(body.provider_credential).toBeUndefined();
     expect(body.target_node_id).toBeUndefined();
     expect(body.text_attachments).toBeUndefined();
     expect(body.prompt_plan_snapshot).toBeUndefined();
@@ -217,6 +219,7 @@ describe("handleRegenerateSampleQuote（IKIZQF）", () => {
     expect(res.data).toEqual(quotedViewOf(sampleJob(), S25_CAPABILITY as never, result));
     const call = quote.mock.calls[0]![0];
     expect(call.input.resolution).toBe("480p");
+    expect(call.input.provider_credential).toBeUndefined();
   });
 
   it.each([
@@ -317,6 +320,7 @@ describe("handleRegenerateSampleCreate（IKIZQF）", () => {
     });
     expect(cmdInput.input.sample_mode).toBe(true);
     expect(cmdInput.input.resolution).toBe("480p");
+    expect(cmdInput.input.provider_credential).toBeUndefined();
     expect(options.billing).toBeDefined();
     expect(options.billing.hold).toBeTypeOf("function");
     expect(options.billing.release).toBeTypeOf("function");
