@@ -3,6 +3,7 @@ import type { PromptBinding } from '@lib/contracts/prompt-target';
 import type { SnapshotAsset } from '@/api/projects';
 import type { AssetCardKind } from './components/AssetCardNode';
 import { resolveCharacterLibraryMaterialId } from './characterLibraryDeposit';
+import { isMaterialLibraryId, readAssetId } from './mediaRefs';
 
 export function draftFileNameOf(type: unknown): string {
   return type === 'video' ? '视频草稿' : type === 'audio' ? '音频草稿' : '图片草稿';
@@ -176,4 +177,87 @@ export function characterLibraryVerifiedPatch(
   if (data.compliancePassed !== passed) patch.compliancePassed = passed;
   if (data.complianceFailed) patch.complianceFailed = undefined;
   return patch;
+}
+
+export function resolveNodeAssets(
+  node: Node,
+  snapshotAssets: Record<string, SnapshotAsset>,
+  fromHistory = false,
+): Node {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  if (node.type === 'mediaNode') {
+    if (data.genStatus && readAssetId(data) === undefined) return node;
+    if (typeof data.src === 'string' && (data.src as string).startsWith('blob:')) return node;
+    const aid = (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
+    if (isMaterialLibraryId(aid == null ? undefined : String(aid))) {
+      const src = typeof data.src === 'string' ? data.src : '';
+      if (src && !src.startsWith('blob:')) {
+        const patch: Record<string, unknown> = {};
+        if (data.assetMissing) patch.assetMissing = undefined;
+        if (fromHistory && data.complianceBusy) patch.complianceBusy = undefined;
+        return Object.keys(patch).length === 0 ? node : { ...node, data: { ...data, ...patch } };
+      }
+    }
+    const asset = aid != null && aid !== '' ? snapshotAssets[String(aid)] : undefined;
+    const url = asset?.access_url;
+    if (url) {
+      const fill: Record<string, number> = {};
+      if (typeof data.width !== 'number' && typeof asset?.width === 'number') fill.width = asset.width;
+      if (typeof data.height !== 'number' && typeof asset?.height === 'number') fill.height = asset.height;
+      const verified = characterLibraryVerifiedPatch(data, asset.material_id, asset.material_status ?? null, fromHistory);
+      return data.src === url && !data.assetMissing && Object.keys(fill).length === 0 && Object.keys(verified).length === 0
+        ? node
+        : { ...node, data: { ...data, ...fill, ...verified, src: url, assetMissing: undefined } };
+    }
+    if (fromHistory) {
+      if (data.assetMissing && !data.complianceBusy) return node;
+      return { ...node, data: { ...data, assetMissing: true, complianceBusy: undefined } };
+    }
+    const existingSrc = typeof data.src === 'string' ? data.src : '';
+    if (existingSrc !== '' && !existingSrc.startsWith('blob:')) {
+      return data.assetMissing ? { ...node, data: { ...data, assetMissing: undefined } } : node;
+    }
+    return data.assetMissing ? node : { ...node, data: { ...data, assetMissing: true } };
+  }
+  if (node.type === 'productNode') {
+    const images = data.images;
+    if (!Array.isArray(images)) return node;
+    let changed = false;
+    const next = images.map((img) => {
+      const item = (img ?? {}) as Record<string, unknown>;
+      if (typeof item.src === 'string' && item.src.startsWith('blob:')) return img;
+      const aid = (item.assetId ?? item.asset_id) as string | number | undefined;
+      const url = aid != null && aid !== '' ? snapshotAssets[String(aid)]?.access_url : undefined;
+      if (url) {
+        if (item.src === url && !item.missing) return img;
+        changed = true;
+        return { ...item, src: url, missing: undefined };
+      }
+      if (item.missing) return img;
+      changed = true;
+      return { ...item, src: '', missing: true };
+    });
+    return changed ? { ...node, data: { ...data, images: next } } : node;
+  }
+  if (node.type === 'assetNode') {
+    const refs = data.initialRefs;
+    if (!Array.isArray(refs)) return node;
+    let changed = false;
+    const next = refs.map((r) => {
+      const ref = (r ?? {}) as Record<string, unknown>;
+      if (typeof ref.src === 'string' && ref.src.startsWith('blob:')) return r;
+      const aid = (ref.assetId ?? ref.asset_id) as string | number | undefined;
+      const url = aid != null && aid !== '' ? snapshotAssets[String(aid)]?.access_url : undefined;
+      if (url) {
+        if (ref.src === url && !ref.missing) return r;
+        changed = true;
+        return { ...ref, src: url, missing: undefined };
+      }
+      if (ref.missing) return r;
+      changed = true;
+      return { ...ref, src: '', missing: true };
+    });
+    return changed ? { ...node, data: { ...data, initialRefs: next } } : node;
+  }
+  return node;
 }
