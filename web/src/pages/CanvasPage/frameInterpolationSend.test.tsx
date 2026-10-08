@@ -9,6 +9,7 @@
    （慢网连点只建一个任务）、失败解锁再试、A 在途回调不关闭/不重置/不冻结 B 面板（提交会话隔离）。
    渲染沿用 testing/canvasPageTestHarness（页面级共享夹具）；轮询终态模式对齐 videoEnhanceSend
    .test.tsx（IKH3VH 先例）。 */
+import { dockActions } from './testing/dockActionsRecorder';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
@@ -189,6 +190,7 @@ describe('IKHLKX 发送创建闭环', () => {
 
     await click(panelFps(120));
     await sendPanel();
+    expect(dockActions.submit).toHaveBeenCalledWith('frameInterpolation', 120);
 
     // 创建请求携带冻结三键（source_asset_id 冻结自插帧身份、target_node_id=插帧卡节点 id、fps 面板所选档整型）
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);

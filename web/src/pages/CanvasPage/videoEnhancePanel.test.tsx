@@ -4,6 +4,7 @@
    生成面板）、关闭再点 HD 草稿卡重开参数恢复、「重新编辑」分流回 HD 面板、
    四路退出（X/Esc/点外/点其他卡）不建任务不丢参数草稿保留、与去字幕会话互斥。
    渲染模式沿用 imageEnhancePanel.test.tsx（FlowCanvas 打桩透出 props）。 */
+import { dockActions } from './testing/dockActionsRecorder';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -291,6 +292,7 @@ describe('IKH3VG 点 HD 建草稿卡与面板跟随', () => {
     });
     // patchMediaNode 产出新节点对象：重新读取（点击前引用已过期）
     expect(identityOf(hdDraft())).toEqual({ sourceAssetId: '5', lastParams: { resolution: '4k' } });
+    expect(dockActions.updateDraft).toHaveBeenCalledWith('videoEnhance', { nodeId: hdDraft()!.id, value: '4k' });
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(apiMocks.createImageEnhancement).not.toHaveBeenCalled();
   });
@@ -400,4 +402,13 @@ describe('IKH3VG 重新编辑分流与参数恢复', () => {
     expect(panelResolution('4k')!.className).toMatch(/Active/);
     expect(panelResolution('1080p')!.className).not.toMatch(/Active/);
   });
+});
+
+
+it('IKJUH0 HD只渲染一份，真实X调用Dock.close', async () => {
+  seedDoc(); await renderPage(); await videoEnhance();
+  expect(document.body.querySelectorAll('[data-testid="video-enhance-send-btn"]')).toHaveLength(1);
+  await closeViaX();
+  expect(dockActions.close).toHaveBeenCalledWith('videoEnhance');
+  expect(panelSend()).toBeNull();
 });

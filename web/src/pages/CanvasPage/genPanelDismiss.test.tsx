@@ -1,17 +1,57 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { act, createElement, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import CanvasPage from './index';
+import type { GenerationDockDefinition } from './generationDockCoordinator';
+import { createTextGenerationDock } from './textGenerationDock';
+import TextGenerationDockPanel from './textGenerationDockPanel';
 
 /* IKFYH6 生成面板「点面板外 / Esc」统一关闭：五面板（视频/图片/音频/文本生成/音乐）同口径。
    覆盖拍板口径：空白 PaneClick 统一关、选中变化补自由面板、document 捕获 click 管画布外 UI
    （拖拽位移抑制、.react-flow 与「面板领土」豁免）、Esc 优先级链（@菜单→选取→输入框→关面板）、
    持续选取会话中空白点击只退选取（推翻 IKFR4X/Y/Z 空白不退出旧口径）。
    FlowCanvas/CanvasToolbar 打桩透出 props；面板真实渲染（PromptRefEditor 打桩 textarea）。 */
+
+const addedDock = vi.hoisted(() => {
+  const nodes: Node[] = [];
+  return { open: () => {}, active: (): string | null => null, nodes };
+});
+
+vi.mock('./generationDockCoordinator', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./generationDockCoordinator')>();
+  return { ...actual, createGenerationDockCoordinator<R extends Record<string, GenerationDockDefinition>>(registry: R) {
+    const added: ReturnType<typeof createTextGenerationDock> = createTextGenerationDock(() => ({
+      getNodes: () => addedDock.nodes, getEdges: () => [], attachmentsOf: () => [], beginEdit() {},
+      patchNode: (id, patch) => {
+        const node = addedDock.nodes.find(node => node.id === id)!;
+        node.data = { ...node.data, ...patch };
+      },
+      render: (): ReactNode => createElement(TextGenerationDockPanel, {
+        view: added.view(), resources: {}, actions: {
+          close: () => dock.close('added'),
+          updateDraft: patch => dock.updateDraft('added', patch),
+          submit: input => dock.submit('added', input),
+        },
+      }),
+    }));
+    const dock = actual.createGenerationDockCoordinator({ ...registry, added });
+    addedDock.open = () => { dock.open('added', { nodeId: 'added' }); };
+    addedDock.active = () => String(dock.view.activePanel ?? '') || null;
+    return dock;
+  } };
+});
+
+
+type ConnectMenuProps = ComponentProps<typeof import('./components/ConnectTypeMenu').default>;
+const connectMenuProps = vi.hoisted(() => ({ current: null as ConnectMenuProps | null }));
+vi.mock('./components/ConnectTypeMenu', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./components/ConnectTypeMenu')>();
+  return { ...actual, default: (props: ConnectMenuProps) => { connectMenuProps.current = props; return createElement(actual.default, props); } };
+});
 
 vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
@@ -717,5 +757,133 @@ describe('IKFYH6 选取会话与空白点击分层', () => {
 
     expect(imageOpen()).toBe(true);
     expect(finishPickButton()).toBeTruthy();
+  });
+});
+
+
+describe('IKJUGY 文生文真实页面接线', () => {
+  it('点卡输入与模型写回，当前附件加正文只写本地卡片，不创建任务', async () => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: Edge[] };
+    const target = doc.nodes.find(node => node.id === 'tg1')!;
+    target.data = { ...target.data, prompt: '原描述', draftModelId: 'stored-text-model' };
+    doc.nodes.push({ id: 'source-text', type: 'textNode', position: { x: 0, y: 100 }, data: { title: '附加文案', text: '附件正文' } });
+    doc.edges.push({ id: 'attachment-edge', source: 'source-text', target: 'tg1' });
+    apiMocks.fetchGenerationModels.mockResolvedValue([
+      { ...imageModel, model_id: 'default-text-model', model_label: '默认文本模型', is_default: true },
+      { ...imageModel, model_id: 'stored-text-model', model_label: '旧文本模型', is_default: false },
+    ]);
+    await renderPage();
+    await openTextGenPanel();
+    await vi.waitFor(() => expect(container.textContent).toContain('默认文本模型'));
+    const input = container.querySelector<HTMLTextAreaElement>('textarea')!;
+    expect(input.value).toBe('原描述');
+    expect(container.textContent).toContain('附加文案：附件正文');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '新的正文');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(fullNode('tg1').data.prompt).toBe('新的正文');
+    const model = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '默认文本模型')!;
+    await act(async () => { model.click(); });
+    const stored = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '旧文本模型')!;
+    await act(async () => { stored.click(); });
+    expect(fullNode('tg1').data.draftModelId).toBe('stored-text-model');
+    await act(async () => { container.querySelector<HTMLButtonElement>('button[title="发送"]')!.click(); });
+    expect(fullNode('tg1').data).toMatchObject({ text: '附件正文\n\n新的正文', prompt: '新的正文', draftModelId: 'stored-text-model' });
+    expect(textGenOpen()).toBe(false);
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  });
+  it('水合卡自己写内容后跳过一次点卡，关闭后的纯选中不回弹', async () => {
+    await renderPage();
+    await openTextGenPanel();
+    const writeSelf = fullNode('tg1').data.onWriteSelf;
+    if (typeof writeSelf !== 'function') throw new Error('缺少自己写内容入口');
+    await act(async () => { writeSelf(); });
+    expect(textGenOpen()).toBe(false);
+    await clickNode('tg1');
+    expect(textGenOpen()).toBe(false);
+    await clickNode('tg1');
+    expect(textGenOpen()).toBe(true);
+    await paneClick();
+    await selectNodes(['tg1']);
+    expect(textGenOpen()).toBe(false);
+  });
+  it('真实菜单保留三项，文本新建仅验证页面回调，新卡自己写内容也只跳过一次', async () => {
+    await renderPage();
+    await act(async () => { flowProps.current.onConnectGroupDrop(['tg1'], null, { x: 100, y: 100 }); });
+    const labels = Array.from(document.body.querySelectorAll('button')).map(button => button.textContent?.trim());
+    expect(labels).toEqual(expect.arrayContaining(['图片生成', '视频生成', '音频生成']));
+    expect(labels).not.toContain('文本生成');
+    expect(connectMenuProps.current?.onSelect).toBeTypeOf('function');
+    await act(async () => { connectMenuProps.current!.onSelect('text'); });
+    const added = flowProps.current.textNodes.find((node: Node) => node.id !== 'tg1' && node.data.textGen === true);
+    expect(added).toBeTruthy();
+    expect(textGenOpen()).toBe(true);
+    expect(flowProps.current.edges.some((edge: { source: string; target: string }) => edge.source === 'tg1' && edge.target === added.id)).toBe(true);
+    await act(async () => { added.data.onWriteSelf(); });
+    await clickNode(added.id);
+    expect(textGenOpen()).toBe(false);
+    await clickNode(added.id);
+    expect(textGenOpen()).toBe(true);
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('IKJUH5 注册扩展的真实页面契约', () => {
+  beforeEach(() => {
+    addedDock.nodes = [{ id: 'added', type: 'textNode', position: { x: 0, y: 0 }, data: { textGen: true, prompt: '新增定义的正文' } }];
+    apiMocks.fetchGenerationModels.mockResolvedValue([{ ...imageModel, model_id: 'text-model', model_label: '扩展测试模型' }]);
+  });
+
+  it('只加registry定义，真实Page无参render自动显示真实组件，原面板互斥与submit写宿主结果均工作', async () => {
+    await renderPage();
+    await clickNode('d1');
+    expect(addedDock.active()).toBe('image');
+    await act(async () => { addedDock.open(); });
+    expect(addedDock.active()).toBe('added');
+    expect(document.body.querySelectorAll('textarea[placeholder="描述你希望生成的文案，可结合连入的参考。"]')).toHaveLength(1);
+    expect(document.body.querySelectorAll('[data-gen-panel-territory] button[title="发送"]')).toHaveLength(1);
+    await act(async () => { document.body.querySelector<HTMLButtonElement>('[data-gen-panel-territory] button[title="发送"]')!.click(); });
+    expect(addedDock.nodes[0].data).toMatchObject({ text: '新增定义的正文', prompt: '新增定义的正文', draftModelId: 'text-model' });
+    expect(addedDock.active()).toBeNull();
+    expect(document.body.querySelector('textarea[placeholder="描述你希望生成的文案，可结合连入的参考。"]')).toBeNull();
+    await act(async () => { addedDock.open(); });
+    await act(async () => { document.body.querySelector<HTMLButtonElement>('[data-gen-panel-territory] button[title="关闭"]')!.click(); });
+    expect(addedDock.active()).toBeNull();
+  });
+
+  it('新增registry定义仍由原页面Esc和空白全收起链关闭，不添加kind事件分支', async () => {
+    await renderPage();
+    await act(async () => { addedDock.open(); });
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+    expect(addedDock.active()).toBeNull();
+    await act(async () => { addedDock.open(); });
+    await act(async () => { flowProps.current.onPaneClick(); });
+    expect(addedDock.active()).toBeNull();
+  });
+
+  it('页面卸载清监听，旧实例不再消费Esc或画布外点击', async () => {
+    await renderPage();
+    await act(async () => { addedDock.open(); });
+    await act(async () => { root.unmount(); });
+    container.remove();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(addedDock.active()).toBe('added');
+  });
+
+  it('新增registry定义仍由原页面画布外点击链收起，面板领土内点击保持可见', async () => {
+    await renderPage();
+    await act(async () => { addedDock.open(); });
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea[placeholder="描述你希望生成的文案，可结合连入的参考。"]')!;
+    await act(async () => { textarea.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(addedDock.active()).toBe('added');
+    const neutral = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(button => button.title === '显示小地图')!;
+    await act(async () => {
+      neutral.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
+      neutral.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(addedDock.active()).toBeNull();
   });
 });

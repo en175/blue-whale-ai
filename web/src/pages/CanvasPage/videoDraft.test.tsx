@@ -584,31 +584,24 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(container.querySelector('textarea')).toBeNull();
   });
 
-  // 1f2f498d 起跟随模式按已连素材门控：空素材仅「文生视频」，首尾帧需 ≥2 图，
-  // 且普通参考存在时切换被拒——「空素材直接选首尾帧」旧路径已不可达，待与产品确认新路径后重写
-  it.skip('首尾帧选取暂存，发送时落线并提交带角色的 references', async () => {
+  it('两张即时连线图片支持首尾帧模式，转换角色立即落边并按角色提交', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
+    await connect('m1', 'd1');
+    await connect('m2', 'd1');
+    expect(flowProps.current.edges).toHaveLength(2);
     await selectKeyframeMode();
-    // 经 Dock 首帧/尾帧入口显式指定（不按连入顺序猜测）
-    await pickRefNode('添加首帧（从资产中选择 / 从节点添加素材）', 'm1');
-    await pickRefNode('添加尾帧（从资产中选择 / 从节点添加素材）', 'm2');
-    expect(flowProps.current.edges).toHaveLength(0);
-    expect(container.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2);
+    await vi.waitFor(() => expect(flowProps.current.edges.map((edge: { data?: { refRole?: string } }) => edge.data?.refRole)).toEqual(['first', 'last']));
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     await typePrompt('首尾帧驱动');
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-
-    expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.references).toEqual([
-      { material_id: 'asset-compliance-test', type: 'image', role: 'first_frame' },
-      { material_id: 'asset-compliance-test', type: 'image', role: 'last_frame' },
+      { asset_id: 'a1', type: 'image', role: 'first_frame' },
+      { asset_id: 'a2', type: 'image', role: 'last_frame' },
     ]);
-    expect(flowProps.current.edges.map((e: { data?: { refRole?: string } }) => e.data?.refRole))
-      .toEqual(expect.arrayContaining(['first', 'last']));
-    expect(payload.reference_asset_ids).toBeUndefined();
     expect(payload.target_node_id).toBe('d1');
   });
 
@@ -1517,6 +1510,8 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
   }
 
   it('样片卡重新编辑：默认开启样片；发送后新建样片结果卡，原卡身份/素材/截止保留', async () => {
+    let finishStatus!: () => void;
+    apiMocks.fetchJobStatus.mockImplementationOnce(() => new Promise(resolve => { finishStatus = () => resolve({ job_id: 'j1', status: 'succeeded', progress: 100, asset: { id: 'a2', url: 'http://vid/out.mp4', type: 'video' } }); }));
     apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
       Promise.resolve(quoteResponse({ credits: 30, quote_revision: 'rev-1' }))));
@@ -1555,10 +1550,15 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     expect(s1.data?.jobId).toBe('9001');
     expect(s1.data?.finalizeDeadlineAt).toBe(future);
     expect(s1.data?.genStatus).toBeUndefined();
+    await vi.waitFor(() => expect(finishStatus).toBeTruthy());
+    await act(async () => { finishStatus(); });
+    await vi.waitFor(() => expect(flowProps.current.mediaNodes.find((node: Node) => node.id === regen.id)?.data.src).toBe('http://vid/out.mp4'));
     vi.unstubAllGlobals();
   });
 
   it('成片卡重新编辑：默认关闭样片；发送后新建普通视频结果卡，成片卡不被覆盖', async () => {
+    let finishStatus!: () => void;
+    apiMocks.fetchJobStatus.mockImplementationOnce(() => new Promise(resolve => { finishStatus = () => resolve({ job_id: 'j1', status: 'succeeded', progress: 100, asset: { id: 'a2', url: 'http://vid/out.mp4', type: 'video' } }); }));
     apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
       Promise.resolve(quoteResponse({ credits: 20, quote_revision: 'rev-2' }))));
@@ -1599,6 +1599,9 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     expect(f1.data?.videoStage).toBe('final');
     expect(f1.data?.sourceSampleJobId).toBe('9001');
     expect(f1.data?.genStatus).toBeUndefined();
+    await vi.waitFor(() => expect(finishStatus).toBeTruthy());
+    await act(async () => { finishStatus(); });
+    await vi.waitFor(() => expect(flowProps.current.mediaNodes.find((node: Node) => node.id === regen.id)?.data.src).toBe('http://vid/out.mp4'));
     vi.unstubAllGlobals();
   });
 });

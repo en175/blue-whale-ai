@@ -6,6 +6,7 @@
    发送闭环（创建请求三键 / 提交期只读 / 关面板时序 / 终态回填）归 IKHLKX：其页面级用例见
    frameInterpolationSend.test.tsx；本文件只保留「切档不建任务」与「创建失败不制造受理假象」两条。
    渲染沿用 testing/canvasPageTestHarness（页面级共享夹具）。 */
+import { dockActions } from './testing/dockActionsRecorder';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
@@ -228,6 +229,7 @@ describe('IKHLKR 切档即时改名与持久化', () => {
     expect(panelFps(60)!.className).not.toMatch(/Active/);
     expect(fileNameOf(mediaNode(draftId))).toBe('插帧 · 120fps');
     expect(identityOf(mediaNode(draftId))).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 } });
+    expect(dockActions.updateDraft).toHaveBeenCalledWith('frameInterpolation', { nodeId: draftId, value: 120 });
 
     await click(panelFps(30));
     expect(fileNameOf(mediaNode(draftId))).toBe('插帧 · 30fps');
@@ -261,6 +263,7 @@ describe('IKHLKR 切档即时改名与持久化', () => {
     await frameInterpolation();
     const draftId = draftNode()!.id;
     await click(panelSend());
+    expect(dockActions.submit).toHaveBeenCalledWith('frameInterpolation', 60);
     await act(async () => {});
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
     // 提交点即交接（面板关）；受理失败草稿回配置态、无 jobId（点卡可重开重发）
@@ -388,4 +391,13 @@ describe('IKHLKR 会话模态与跟随锚定', () => {
     expect(panelSend()).toBeNull();
     expect(draftNode()).toBeTruthy(); // 草稿卡保留
   });
+});
+
+
+it('IKJUH0 插帧只渲染一份，真实X调用Dock.close', async () => {
+  seedDoc(); await renderPage(); await frameInterpolation();
+  expect(document.body.querySelectorAll('[data-testid="frame-interpolation-send-btn"]')).toHaveLength(1);
+  await closeViaX();
+  expect(dockActions.close).toHaveBeenCalledWith('frameInterpolation');
+  expect(panelSend()).toBeNull();
 });

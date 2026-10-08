@@ -6,11 +6,18 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import type { AudioDialogProps } from './components/AudioDialog';
 import { typePromptRefText, readPromptRefText, promptRefReadOnly } from './testing/promptRefEditor';
 
 /* IKDMQT 音频生成草稿：侧栏建卡 / 重复创建 / 参数写回与水合恢复 / 原位提交回填 /
    生成中只读（面板 + 连线）/ 保存失败阻断生成 / 401 回退与失败保留。
    FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；AudioDialog 用真实实现（原生 textarea）。 */
+
+const audioDialogProps = vi.hoisted(() => ({ current: null as AudioDialogProps | null }));
+vi.mock('./components/AudioDialog', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./components/AudioDialog')>();
+  return { ...actual, default: (props: AudioDialogProps) => { audioDialogProps.current = props; return createElement(actual.default, props); } };
+});
 
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
@@ -489,6 +496,7 @@ describe('IKDMQT 原位提交与首次生成', () => {
 
     // 保存串行化：先落盘再创建任务
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+    expect(apiMocks.saveCanvasDoc.mock.calls[1]?.[1].nodes.find(node => node.id === draftId)?.data).toMatchObject({ genStatus: 'draft', fileName: '音频草稿', promptDoc: null });
     expect(apiMocks.saveCanvasDoc.mock.invocationCallOrder.at(-1)!).toBeLessThan(
       apiMocks.createGenerationJob.mock.invocationCallOrder[0]!,
     );
@@ -784,5 +792,55 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
     expect(container.querySelector('[data-testid="audio-ref-thumb"]')).toBeNull();
     await openDraftPanel();
     expect(container.querySelector('[data-testid="audio-ref-thumb"]')).toBeNull();
+  });
+});
+
+
+describe('IKJUGX 音频与音乐页面接线和入口边界', () => {
+  it('音乐真实发送按钮只记录回调并清正文，关闭后卸载局部歌词', async () => {
+    await renderPage();
+    await clickSidebarAudio();
+    await waitModelReady();
+    await act(async () => { audioDialogProps.current!.onSwitchToMusic!(); });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await typePromptRefText(container, '海风旋律');
+      const lyrics = container.querySelector<HTMLTextAreaElement>('textarea')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(lyrics, '局部歌词');
+        lyrics.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { container.querySelector<HTMLButtonElement>('button[title="发送"]')!.click(); });
+      expect(log).toHaveBeenCalledWith('Music dialog send:', '海风旋律', expect.any(String), { instrumental: false, speed: 1, lyrics: '局部歌词' }, []);
+      expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+      expect(readPromptRefText(container)).toBe('');
+      expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('局部歌词');
+      await act(async () => { container.querySelector<HTMLButtonElement>('button[title="关闭"]')!.click(); });
+      expect(container.querySelector('textarea')).toBeNull();
+      await act(async () => { audioDialogProps.current!.onSwitchToMusic!(); });
+      expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
+    } finally { log.mockRestore(); }
+  });
+
+  it('音频到音乐仅验证既有页面回调；真实音乐菜单可切回干净自由音频', async () => {
+    seedEmptyDraftDoc();
+    await renderPage();
+    await openDraftPanel();
+    await waitModelReady();
+    await typePrompt('原草稿正文');
+    expect(Array.from(container.querySelectorAll('button')).some(button => button.textContent?.trim() === 'AI 音乐')).toBe(false);
+    expect(audioDialogProps.current?.onSwitchToMusic).toBeTypeOf('function');
+    await act(async () => { audioDialogProps.current!.onSwitchToMusic!(); });
+    expect(container.querySelector('[data-testid="audio-input"]')).toBeNull();
+    const musicMode = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === 'AI 音乐')!;
+    await act(async () => { musicMode.click(); });
+    const audioMode = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '音频生成')!;
+    await act(async () => { audioMode.click(); });
+    await waitModelReady();
+    expect(readPromptRefText(container)).toBe('');
+    expect(audioDialogProps.current?.draftBinding).toBeUndefined();
+    await typePrompt('切回自由输入');
+    expect(flowProps.current.mediaNodes.find((node: Node) => node.id === 'd1').data.prompt).toBe('原草稿正文');
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
 });

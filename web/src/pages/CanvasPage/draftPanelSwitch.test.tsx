@@ -3,7 +3,7 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 
 /* IKIJ60 草稿面板切换崩溃回归（页面级）：用户点图片草稿卡展开生成面板后，再点视频草稿卡，
@@ -330,8 +330,13 @@ let container: HTMLDivElement;
 /** React 深度更新哨兵：捕获 Maximum update depth exceeded 的 console.error（act 内同时会抛错使用例失败） */
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
+let Page: typeof import('./index').default;
+
+beforeAll(async () => {
+  Page = (await import('./index')).default;
+});
+
 async function renderPage() {
-  const { default: Page } = await import('./index');
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);

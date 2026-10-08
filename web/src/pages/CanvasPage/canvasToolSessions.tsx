@@ -943,14 +943,14 @@ export function createCanvasToolSessions(
             if (draftId) h.open(draftId, getDeps());
           },
         }),
-        render(h) {
+        render(h, actions) {
           const { state: s, visible, submitting } = h.getSnapshot();
           if (!visible || !s) return null;
           return (
             <ImageEnhanceDialog
               key={s.seed.ts}
-              onClose={h.close}
-              onSend={h.send}
+              onClose={actions?.close ?? h.close}
+              onSend={actions?.submit ?? h.send}
               sourceDims={s.seed.sourceDims}
               initialParams={s.seed.initialParams}
               generating={nodeOf(s.nodeId)?.data.genStatus === 'generating'}
@@ -974,16 +974,16 @@ export function createCanvasToolSessions(
             if (draftId) h.open(draftId, getDeps());
           },
         }),
-        render(h) {
+        render(h, actions) {
           const { state: s, visible, submitting } = h.getSnapshot();
           if (!visible || !s) return null;
           return (
             <VideoEnhanceDialog
               key={s.seed.ts}
-              onClose={h.close}
-              onSend={h.send}
+              onClose={actions?.close ?? h.close}
+              onSend={actions?.submit ?? h.send}
               onParamsChange={(value) =>
-                getView().changeVideoParams(s.nodeId, value)
+                actions?.updateDraft ? actions.updateDraft(s.nodeId, value) : getView().changeVideoParams(s.nodeId, value)
               }
               initialResolution={s.seed.initialResolution}
               generating={nodeOf(s.nodeId)?.data.genStatus === 'generating'}
@@ -1022,16 +1022,16 @@ export function createCanvasToolSessions(
           h.getSnapshot().visible
             ? { ...node, data: { ...node.data, soloToolbarHidden: true } }
             : node,
-        render(h) {
+        render(h, actions) {
           const { state: s, visible, submitting } = h.getSnapshot();
           if (!visible || !s) return null;
           return (
             <FrameInterpolationDialog
               key={s.seed.ts}
-              onClose={h.close}
-              onSend={h.send}
+              onClose={actions?.close ?? h.close}
+              onSend={actions?.submit ?? h.send}
               onParamsChange={(fps) =>
-                getView().changeFrameParams(s.nodeId, fps)
+                actions?.updateDraft ? actions.updateDraft(s.nodeId, fps) : getView().changeFrameParams(s.nodeId, fps)
               }
               initialFps={s.seed.initialFps}
               generating={nodeOf(s.nodeId)?.data.genStatus === 'generating'}

@@ -3,6 +3,7 @@
    写入 + 原地转生成中 + 面板自动关闭）、「重新编辑」分流回填 lastParams、失败重试走 lastParams
    原样重发（不走通用 retry 接口）、生成中重开面板只读、成品高清卡链式放大。
    渲染模式沿用 imageEnhance.test.tsx（FlowCanvas 打桩透出 props）。 */
+import { dockActions } from './testing/dockActionsRecorder';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -279,6 +280,7 @@ describe('IKGM9O 发送创建任务闭环', () => {
     });
     // 创建请求已发出 → 面板自动关闭
     expect(panelSend()).toBeNull();
+    expect(dockActions.submit).toHaveBeenCalledWith('imageEnhance', { version_tier: 'pro', multiple: 2, generative_enhance_mode: 'generative_first', enable_correct_color: false });
     expect(apiMocks.createImageEnhancement).toHaveBeenCalledTimes(1);
     const [projectId, payload] = apiMocks.createImageEnhancement.mock.calls[0];
     expect(projectId).toBe('p1');
@@ -444,4 +446,16 @@ describe('IKGM9O 链式放大', () => {
     expect(edge.source).toBe('h1');
     expect(edge.data).toEqual({ origin: IMAGE_ENHANCE_EDGE_ORIGIN });
   });
+});
+
+it('IKJUH0 高清只渲染一份，真实X调用Dock.close且不增加实时参数事件', async () => {
+  seedDoc();
+  await renderPage();
+  await enhanceImage();
+  expect(document.body.querySelectorAll('[data-testid="enhance-send-btn"]')).toHaveLength(1);
+  const territory = panelSend()!.closest('[data-gen-panel-territory]')!;
+  await act(async () => { territory.querySelector<HTMLButtonElement>('button[title="关闭"]')!.click(); });
+  expect(dockActions.close).toHaveBeenCalledWith('imageEnhance');
+  expect(dockActions.updateDraft).not.toHaveBeenCalledWith('imageEnhance', expect.anything());
+  expect(panelSend()).toBeNull();
 });

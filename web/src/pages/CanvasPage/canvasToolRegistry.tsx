@@ -37,12 +37,17 @@ export interface CanvasToolAssembly {
   wireStart(nodeId: string | null): void;
   blocksCanvasDrag(): boolean;
 }
+export interface CanvasToolRenderActions<Request> {
+  close(): void;
+  submit(request: Request): boolean;
+  updateDraft?(nodeId: string, request: Request): void;
+}
 /** 类型明确的句柄封在闭包里，公共遍历不擦除异构参数。 */
 export function registerCanvasTool<State, Entry, Input, Request = void>(
   runtime: Runtime,
   definition: ToolSessionDefinition<State, Entry, Input, Request>,
   ui: {
-    render(handle: ToolSessionHandle<State, Entry, Request>): ReactNode;
+    render(handle: ToolSessionHandle<State, Entry, Request>, actions?: CanvasToolRenderActions<Request>): ReactNode;
     decorateNode?(
       handle: ToolSessionHandle<State, Entry, Request>,
       node: Node,
@@ -70,7 +75,7 @@ export function registerCanvasTool<State, Entry, Input, Request = void>(
   const handle = runtime.register(definition);
   return {
     handle,
-    render: () => ui.render(handle),
+    render: (actions?: CanvasToolRenderActions<Request>) => ui.render(handle, actions),
     decorateNode: (node: Node) => ui.decorateNode?.(handle, node) ?? node,
     callbacks: ui.callbacks?.(handle) ?? {},
     connect: (source: Node, target: Node) =>
@@ -125,8 +130,8 @@ export function assembleCanvasTools<
       {},
       ...tools.map(([, tool]) => tool.callbacks),
     ) as NodeCallbacks,
-    render: () =>
-      tools.map(([kind, tool]) => (
+    render: (exclude?: ReadonlySet<string>) =>
+      tools.filter(([kind]) => !exclude?.has(kind)).map(([kind, tool]) => (
         <Fragment key={kind}>{tool.render()}</Fragment>
       )),
     decorateNode: (node: Node) =>

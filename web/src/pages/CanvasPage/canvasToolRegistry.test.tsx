@@ -47,3 +47,16 @@ it('新工具一次注册即接入入口、渲染、节点装饰与共同退出�
   runtime.beforeGenPanel();
   expect(renderToStaticMarkup(<>{tools.render()}</>)).toBe('');
 });
+
+
+it('entry可选typed动作透传到既有renderer，默认渲染仍原入口且可按归属排除', () => {
+  const runtime = createToolSessionRuntime();
+  const entry = registerCanvasTool(runtime, {
+    kind: 'extension', initialize: (nodeId: string) => ({ nodeId }), target: state => state.nodeId,
+    capture: (_state, request?: string) => request ?? null, submit: async () => {}, onError() {},
+  }, { render: (_handle, actions) => <span>{actions ? '协调入口' : '原入口'}</span> });
+  const tools = assembleCanvasTools({ extension: entry });
+  expect(renderToStaticMarkup(<>{entry.render({ close() {}, submit: () => true, updateDraft() {} })}</>)).toBe('<span>协调入口</span>');
+  expect(renderToStaticMarkup(<>{tools.render()}</>)).toBe('<span>原入口</span>');
+  expect(renderToStaticMarkup(<>{tools.render(new Set(['extension']))}</>)).toBe('');
+});
