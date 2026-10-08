@@ -17,10 +17,10 @@ import { nextDraftPosition, type SpawnBox } from './draftSpawn';
 import { computeFollowAnchor, enabledVideoFollowModes, firstEnabledVideoMode, type VideoFollowMode } from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
 import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from './planApplyEdges';
-import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, nextUsedInputState, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
+import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
 import { audioRefItemMediaTypeOf, audioRefMediaTypeOf, audioRefSourceError, audioMergedRefsError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
-import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
+import { hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   asVideoRefMediaType,
   isLibraryOnlyVideoRef,
@@ -60,9 +60,7 @@ import {
   MEDIA_EXTRACT_EDGE_ORIGIN,
   MEDIA_EXTRACT_NODE_PREFIX,
   buildMediaExtractPlaceholderNode,
-  isMediaExtractNodeId,
   mediaExtractNodeId,
-  mediaExtractTerminalPatch,
 } from './mediaExtract';
 
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
@@ -73,9 +71,7 @@ import {
   AUDIO_TRIM_EDGE_ORIGIN,
   AUDIO_TRIM_NODE_PREFIX,
   audioTrimNodeId,
-  audioTrimTerminalPatch,
   buildAudioTrimPlaceholderNode,
-  isAudioTrimNodeId,
 } from './audioTrim';
 
 import { type VocalSplitPayload, type AudioToolSubmission } from './audioToolSessions';
@@ -83,25 +79,23 @@ import {
   type AudioTrimInput,
 } from '@lib/contracts/audio-trim';
 
-import { AUDIO_MIX_EDGE_ORIGIN, audioMixTerminalPatch, buildAudioMixPlaceholderNode, findAudioMixPosition, isAudioMixNodeId } from './audioMix';
+import { AUDIO_MIX_EDGE_ORIGIN, buildAudioMixPlaceholderNode, findAudioMixPosition, isAudioMixNodeId } from './audioMix';
 
 import {
   AUDIO_SPEED_EDGE_ORIGIN,
   AUDIO_SPEED_NODE_PREFIX,
   audioSpeedNodeId,
-  audioSpeedTerminalPatch,
   buildAudioSpeedPlaceholderNode,
-  isAudioSpeedNodeId,
 } from './audioSpeed';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 
-import { AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON, AUDIO_VIDEO_MUX_EDGE_ORIGIN, AUDIO_VIDEO_MUX_TITLE, audioVideoMuxErrorText, audioVideoMuxIdentityOf, audioVideoMuxResultName, audioVideoMuxVideoError, buildAudioVideoMuxIdentity, isAudioVideoMuxAudioEdge, isAudioVideoMuxBindEdge, isAudioVideoMuxDraftNode } from './audioVideoMux';
+import { AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON, AUDIO_VIDEO_MUX_EDGE_ORIGIN, AUDIO_VIDEO_MUX_TITLE, audioVideoMuxIdentityOf, audioVideoMuxVideoError, buildAudioVideoMuxIdentity, isAudioVideoMuxAudioEdge, isAudioVideoMuxBindEdge, isAudioVideoMuxDraftNode } from './audioVideoMux';
 
 
-import { VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_EDGE_ORIGIN, VOCAL_SPLIT_NODE_PREFIX, buildVocalSplitPlaceholderNode, buildVocalSplitTrackNodes, isVocalSplitNodeId, vocalSplitSourceName, vocalSplitTerminalPatch, type VocalSplitIdentity } from './vocalSplit';
+import { VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_EDGE_ORIGIN, VOCAL_SPLIT_NODE_PREFIX, buildVocalSplitPlaceholderNode, buildVocalSplitTrackNodes, vocalSplitSourceName, type VocalSplitIdentity } from './vocalSplit';
 import { SCENE_SPLIT_EDGE_ORIGIN, SCENE_SPLIT_NODE_GAP, buildSceneSplitPlaceholderNode, sceneSplitErrorText, sceneSplitFanoutLayout, sceneSplitSegmentBox, sceneSplitSegmentLabel, type SceneSplitIdentity } from './sceneSplit';
 import { type SceneSplitSubmission } from './sceneSplitSession';
-import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode, smartMattingErrorText, type SmartMattingIdentity } from './smartMatting';
+import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from './smartMatting';
 import {
   IMAGE_ENHANCE_EDGE_ORIGIN,
   imageEnhanceDraftPosition,
@@ -109,7 +103,6 @@ import {
 import {
   VIDEO_ENHANCE_EDGE_ORIGIN,
   videoEnhanceDraftPosition,
-  videoEnhanceErrorText,
   videoEnhanceGateReason,
   type VideoEnhanceIdentity,
 } from './videoEnhance';
@@ -119,7 +112,6 @@ import {
   FRAME_INTERPOLATION_EDGE_ORIGIN,
   frameInterpolationDisplayName,
   frameInterpolationDraftPosition,
-  frameInterpolationErrorText,
   frameInterpolationGateReason,
   type FrameInterpolationFps,
   type FrameInterpolationIdentity,
@@ -201,7 +193,6 @@ import {
   fetchJobStatus,
   quoteVideoFinalize,
   quoteSampleRegenerate,
-  readJobFailText,
   type CreateJobPayload,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -250,6 +241,7 @@ import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
 import { useCanvasPickers } from './hooks/useCanvasPickers';
+import { useCanvasGenerationTerminal } from './hooks/useCanvasGenerationTerminal';
 import {
   applyIndependentGroupDrag,
   bringGroupToFront,
@@ -4930,27 +4922,6 @@ export default function CanvasPage() {
     );
   };
 
-  /** 生成产物写入快照资产字典：否则字典仍停留在打开画布时的旧快照，后续 resolveNodeAssets
-   *  增量刷新会把刚成功的成品卡误标「素材已被删除」（IKFPOT 同因，生成回填此前未补字典）。 */
-  const rememberGeneratedAsset = (
-    asset: { id?: string; url?: string; type?: string; width?: number | null; height?: number | null } | null | undefined,
-    fallbackType: 'image' | 'video' | 'audio',
-  ) => {
-    if (!asset?.id || !asset.url || typeof upsertAssets !== 'function') return;
-    const type = asset.type === 'audio' || asset.type === 'video' || asset.type === 'image'
-      ? asset.type
-      : fallbackType;
-    upsertAssets([{
-      asset_id: Number(asset.id),
-      type,
-      access_url: asset.url,
-      width: typeof asset.width === 'number' ? asset.width : null,
-      height: typeof asset.height === 'number' ? asset.height : null,
-      material_id: null,
-      material_status: null,
-    }]);
-  };
-
   /** 浏览器实测媒体尺寸回填：仅写缺失/不一致字段，避免触发无谓自动保存 */
   const handleMediaDims = (nodeId: string, dims: MediaDims) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -4969,13 +4940,6 @@ export default function CanvasPage() {
     if (Object.keys(patch).length === 0) return;
     patchMediaNode(nodeId, patch);
   };
-
-  /** 迟到响应防线（IKDMQW）：节点已被本地删除（防复活）、已离开画布、或活跃任务已被新任务
-   *  接管（IKDMQV 登记）时，迟到的取消响应/权威核对/轮询响应一律丢弃，不得覆盖新状态。 */
-  const jobResponseGuarded = (nodeId: string, jobId: number | string): boolean =>
-    !locallyRemovedGenerationNodesRef.current.has(nodeId) &&
-    mediaNodesRef.current.some((n) => n.id === nodeId) &&
-    activeJobByNodeRef.current.get(nodeId) === String(jobId);
 
   /** 人声背景分离成功扇出（IKHA30，本仓一对多扇出骨架首例——场景切分 ADR-0108 复用此形态）：
    *  移除占位卡，按任务结果 tracks 在占位卡实时位置（建卡时已按源卡实际内容宽让位）纵向扇出
@@ -5126,312 +5090,6 @@ export default function CanvasPage() {
       }
     }
     if (currentId) void flushCanvasSave(currentId).catch(() => {});
-  };
-
-  /** 任务终态收敛（IKDMQW）：按任务权威状态落卡片终态，轮询 tick、普通取消与删除流程共用。
-   *  返回 'terminal' 表示已终态（轮询应停），'processing' 表示未终态（调用方决定续链）。
-   *  调用方需先过 jobResponseGuarded 防线。
-   *  pendingDelete（删除流程登记的删除意图）在终态处接管：cancelled/failed → 移除；
-   *  succeeded → 挂载作品并提示（停止删除，用户需要时再操作一次）。 */
-  const applyJobTerminal = (
-    nodeId: string,
-    jobId: number | string,
-    detail: Awaited<ReturnType<typeof fetchJobStatus>>,
-  ): 'terminal' | 'processing' => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    if (!node) return 'terminal'; // 节点已删除：不续链
-    const removeWithPendingDelete = () => {
-      pendingDeleteJobNodesRef.current.delete(nodeId);
-      locallyRemovedGenerationNodesRef.current.add(nodeId);
-      if (isAudioMixNodeId(nodeId)) {
-        removeAudioMixCardNow(nodeId);
-        return;
-      }
-      setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
-    };
-    if (((node.data ?? {}) as Record<string, unknown>).sceneSplit != null) {
-      // 场景切分占位卡分流（IKH8BR 建卡/失败，IKH8C1 完成扇出）：按任务类型收敛终态。
-      // IKJJR5：新协议任务（运行时在途且有 submission 关联）的成功扇出归运行时（规范
-      // segment:<n> node_id + 网格排列 + 原子保存）；此分支仅承接历史兼容任务（无关联，
-      // 旧随机 id 段卡口径不变）。
-      if (detail.status === 'succeeded') {
-        // 停轮询后扇出：移除占位卡、按返回顺序建 N 张段卡拉来源连线（1 段不特判）
-        if (generationRuntimeRef.current?.statusOf(nodeId)?.submissionId == null) {
-          fanOutSceneSplitSegments(nodeId, jobId, detail);
-        }
-        return 'terminal';
-      }
-      if (detail.status === 'failed') {
-        patchMediaNode(nodeId, {
-          genStatus: 'failed',
-          // 失败文案走场景切分家族映射（1046 兜底「场景切分失败，请重试」）
-          errorText: sceneSplitErrorText(detail.error),
-        });
-        return 'terminal';
-      }
-      // cancelled 落到下方通用分支：占位卡无成品内容，收敛为移除
-    }
-    if (((node.data ?? {}) as Record<string, unknown>).smartMatting != null) {
-      // 智能抠像占位卡分流（IKHK9N 建、IKHKAC 完成回填）：成功即就地转普通成品视频卡
-      //（src/assetId/宽高时长取产物、genStatus 清空；fileName 保持建卡时的模式展示名
-      //  ——标题跟随模式）；同时按产物格式冻结透明标记 transparentOutput（WEBM 透明=true
-      //  → 视频区垫棋盘格；MP4 纯色不设），并清掉 smartMatting 身份——结果卡不记抠像身份，
-      //  选中开普通视频面板、可下载入库、可再发起全部视频工具（含再次抠像）。
-      //  失败落失败态 + 家族可读文案（重试按 lastInput 原参数重发）。
-      if (detail.status === 'succeeded') {
-        const mattingIdentity = ((node.data ?? {}) as Record<string, unknown>).smartMatting as
-          | SmartMattingIdentity
-          | undefined;
-        const transparent = mattingIdentity?.lastInput?.format === 'WEBM';
-        rememberGeneratedAsset(detail.asset, 'video');
-        patchMediaNode(nodeId, {
-          genStatus: undefined,
-          progress: 100,
-          errorText: undefined,
-          src: detail.asset?.url ?? '',
-          mediaType: 'video',
-          assetId: detail.asset?.id,
-          width: detail.asset?.width ?? undefined,
-          height: detail.asset?.height ?? undefined,
-          duration: detail.asset?.duration ?? undefined,
-          transparentOutput: transparent ? true : undefined,
-          smartMatting: undefined,
-        });
-        return 'terminal';
-      }
-      if (detail.status === 'failed') {
-        patchMediaNode(nodeId, {
-          genStatus: 'failed',
-          // 失败文案走智能抠像家族映射（1050 兜底「智能抠像失败，请重试」）
-          errorText: smartMattingErrorText(detail.error),
-        });
-        return 'terminal';
-      }
-      // cancelled 落到下方通用分支：占位卡无成品内容，收敛为移除
-    }
-    if (isMediaExtractNodeId(nodeId)) {
-      const extractPatch = mediaExtractTerminalPatch(
-        detail,
-        typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
-      );
-      if (extractPatch) {
-        settledExtractNodesRef.current.add(nodeId);
-        if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
-        patchMediaNode(nodeId, extractPatch);
-        return 'terminal';
-      }
-    }
-    if (isAudioTrimNodeId(nodeId)) {
-      // 截取占位卡终态收敛（IKHB7A）：成功写 src/assetId/duration/fileName（时长以火山
-      // 返回为权威值），失败转失败态（audioTrim 身份卡可按 lastInput 原参数重试）
-      const trimPatch = audioTrimTerminalPatch(
-        detail,
-        typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
-      );
-      if (trimPatch) {
-        settledExtractNodesRef.current.add(nodeId);
-        if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
-        patchMediaNode(nodeId, trimPatch);
-        return 'terminal';
-      }
-    }
-    if (isAudioMixNodeId(nodeId)) {
-      const mixPatch = audioMixTerminalPatch(detail);
-      if (mixPatch) {
-        if (pendingDeleteJobNodesRef.current.has(nodeId) || node.data.audioMixCancelPending === true) {
-          if (detail.status === 'failed' || detail.status === 'cancelled') {
-            removeWithPendingDelete();
-            return 'terminal';
-          }
-          if (detail.status === 'succeeded') {
-            pendingDeleteJobNodesRef.current.delete(nodeId);
-            showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
-          }
-        }
-        settledExtractNodesRef.current.add(nodeId);
-        if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
-        patchMediaNode(nodeId, { ...mixPatch, audioMixCancelPending: undefined });
-        return 'terminal';
-      }
-    }
-    if (isAudioSpeedNodeId(nodeId)) {
-      // 调速占位卡终态收敛（IKHW5S）：成功原地补丁调速成品卡（src/assetId/duration，
-      // 时长以火山返回为权威值，命名保留占位名不抢选中），失败转失败态（audioSpeed
-      // 身份卡可按 lastInput 原参数重试——IKJJR3 起归运行时冻结输入重发）
-      const speedPatch = audioSpeedTerminalPatch(
-        detail,
-        typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
-      );
-      if (speedPatch) {
-        settledExtractNodesRef.current.add(nodeId);
-        patchMediaNode(nodeId, speedPatch);
-        return 'terminal';
-      }
-    }
-    // 人声背景分离占位卡（IKHA2W 建、IKHA30 收敛）：succeeded 移除占位卡按 tracks 扇出
-    // 轨卡（一对多骨架首例，见 fanOutVocalSplitTracks）；failed 落失败态 + 可读文案（重试按
-    // lastInput 原样重发）；cancelled 落已取消。
-    // IKJJR5：新协议任务（运行时在途且有 submission 关联）的轨卡扇出归运行时（规范
-    // track:<type> node_id + 纵向轨列 + 原子保存）；此分支仅承接历史兼容任务。
-    if (isVocalSplitNodeId(nodeId)) {
-      if (detail.status === 'succeeded') {
-        if (generationRuntimeRef.current?.statusOf(nodeId)?.submissionId == null) {
-          settledExtractNodesRef.current.add(nodeId);
-          fanOutVocalSplitTracks(nodeId, detail);
-        }
-        return 'terminal';
-      }
-      const vocalPatch = vocalSplitTerminalPatch(detail);
-      if (vocalPatch) {
-        settledExtractNodesRef.current.add(nodeId);
-        patchMediaNode(nodeId, vocalPatch);
-        return 'terminal';
-      }
-    }
-    if (detail.status === 'succeeded') {
-      const originalType = node.data?.mediaType;
-      const assetType = detail.asset?.type;
-      /** 插帧草稿卡（IKHLKX）：本品成功即身份结束——清除 frameInterpolation 身份（选中进入
-       *  普通视频面板，与源卡/成品 HD 卡一致；身份只在失败态承担「原 fps 冻结重试」职责）。 */
-      const wasFrameInterpolation = ((node.data ?? {}) as Record<string, unknown>).frameInterpolation != null;
-      /** 音视频合成身份（IKIHPM）：本品成功即身份结束——结果卡原地转普通视频成品卡，不记
-       *  合成身份（插帧/智能抠像同款口径）；命名与「供应商值缺失回落源资产」用冻结的绑定
-       *  视频身份（源视频卡删除后仍可回落）。 */
-      const muxIdentity = audioVideoMuxIdentityOf(node);
-      const mediaType = (assetType === 'audio' || assetType === 'video' || assetType === 'image')
-        ? assetType
-        : (originalType === 'audio' || originalType === 'video' || originalType === 'image')
-          ? originalType
-          : 'image';
-      rememberGeneratedAsset(detail.asset, mediaType);
-      patchMediaNode(nodeId, {
-        genStatus: undefined,
-        progress: 100,
-        errorText: undefined,
-        errorCode: undefined,
-        src: detail.asset?.url ?? '',
-        mediaType: (assetType === 'audio' || assetType === 'video' || assetType === 'image')
-          ? assetType
-          : (originalType ?? 'image'),
-        // 已自定义名称的卡不被自动命名覆盖（IKFA8X）；合成结果卡按 worker 同款格式化命名
-        // 「视频名(音视频合成).mp4」（源视频名取冻结身份）
-        ...(hasCustomName(node)
-          ? {}
-          : { fileName: muxIdentity ? audioVideoMuxResultName(muxIdentity.video?.name) : `生成-${jobId}` }),
-        assetId: detail.asset?.id,
-        width: detail.asset?.width ?? muxIdentity?.video?.width ?? undefined,
-        height: detail.asset?.height ?? muxIdentity?.video?.height ?? undefined,
-        duration: detail.asset?.duration ?? muxIdentity?.video?.duration ?? undefined,
-        // 原位草稿成功（IKDMQQ）：草稿身份结束转为普通成品卡；
-        // draftModelId/draftSize/draftRatio 保留为该卡的生成参数记录（再次编辑复制切片复用）
-        draft: undefined,
-        ...(wasFrameInterpolation ? { frameInterpolation: undefined } : {}),
-        ...(muxIdentity ? { audioVideoMux: undefined } : {}),
-        // IKIZQB：阶段身份以服务端持久投影为准（父规格「投影与兼容」）——样片成功回填实际
-        // 截止时间（finalize_deadline_at，缺可信时间时 null 但样片仍保留）；普通成功清样片标记。
-        // IKIZQE：成片成功标 final 并按投影回填来源样片关系（本地建卡值仅兜底）；
-        // 两阶段卡另回填该阶段费用状态（settled + actual_credits；IKJ7UI 起不上画面内
-        // 角标，供历史记录与资产详情展示）。
-        videoStage: detail.video_stage === 'sample' ? 'sample' : detail.video_stage === 'final' ? 'final' : undefined,
-        finalizeDeadlineAt: detail.video_stage === 'sample' ? (detail.finalize_deadline_at ?? null) : undefined,
-        ...(detail.video_stage === 'final' && detail.source_sample_job_id != null
-          ? { sourceSampleJobId: detail.source_sample_job_id }
-          : {}),
-        chargeState: detail.charge_state ?? undefined,
-        actualCredits: detail.actual_credits ?? undefined,
-      });
-      // IKFM3S §4：成功任务把快照冻结的文本输入签名回写目标（刷新持久、提示按签名派生清除）；
-      // 乱序保护（nextUsedInputState）：仅更新的 jobId 覆盖——旧任务成功不清除更晚编辑的提示。
-      const nextUsed = nextUsedInputState((node.data ?? {}) as Record<string, unknown>, detail.text_input_signature, jobId);
-      if (nextUsed) patchMediaNode(nodeId, nextUsed);
-      if (pendingDeleteJobNodesRef.current.has(nodeId)) {
-        // 删除等待终态期间任务抢先成功：停止删除保留作品，用户需要时再操作一次
-        pendingDeleteJobNodesRef.current.delete(nodeId);
-        showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
-      }
-      return 'terminal';
-    }
-    if (detail.status === 'failed') {
-      if (pendingDeleteJobNodesRef.current.has(nodeId)) {
-        removeWithPendingDelete();
-        return 'terminal';
-      }
-      patchMediaNode(nodeId, {
-        genStatus: 'failed',
-        // HD 卡失败文案走家族映射（IKH3VH）：msg 为空时按 1045 兜底「视频画质增强失败，请重试」
-        //（含 SDR/超限供应商拒绝场景）；插帧卡同款家族映射（IKHLKX）：msg 为空时按 1049 /
-        // video_frame_interpolation_failed 兜底「视频插帧失败，请重试」、入队失败「任务入队失败，请重试」；
-        // 合成卡同款（IKIHPM）：msg 为空时按 1053 兜底「音视频合成失败，请重试」；
-        // 其余卡维持 msg 透传
-        errorText: ((node.data ?? {}) as Record<string, unknown>).videoEnhance
-          ? videoEnhanceErrorText(detail.error)
-          : ((node.data ?? {}) as Record<string, unknown>).frameInterpolation
-            ? frameInterpolationErrorText(detail.error)
-            : audioVideoMuxIdentityOf(node)
-              ? audioVideoMuxErrorText(detail.error)
-              : readJobFailText(detail.error),
-        // IKIZQB：失败卡同样按服务端投影标注阶段（样片失败卡标样片；普通失败清标记）。
-        // IKIZQE：成片失败卡标 final（保留失败原因与退费状态，不提供同 Draft ID 重试）；
-        // 两阶段卡回填该阶段费用状态（released → 失败卡注明「预扣已退回」）。
-        videoStage: detail.video_stage === 'sample' ? 'sample' : detail.video_stage === 'final' ? 'final' : undefined,
-        finalizeDeadlineAt: undefined,
-        ...(detail.video_stage === 'final' && detail.source_sample_job_id != null
-          ? { sourceSampleJobId: detail.source_sample_job_id }
-          : {}),
-        chargeState: detail.charge_state ?? undefined,
-        actualCredits: detail.actual_credits ?? undefined,
-        // 失败码随文案同点落卡（IKJ79D）：worker 归类的比例约束失败供一键修复按码识别
-        errorCode: detail.error?.code,
-      });
-      return 'terminal';
-    }
-    if (detail.status === 'checking') {
-      // IKIZQD/IKIZQE：提交结果不明核对锁定——任务不重发、预扣不动，轮询继续等核对定夺
-      //（明确成功恢复原任务 / 明确失败释放该阶段预扣）。卡片收敛为「状态核对中」占位，
-      // 样片卡成片按钮经 final 卡在场关系同步禁点（勿重复提交）。
-      patchMediaNode(nodeId, { genStatus: 'checking', progress: undefined });
-      return 'processing';
-    }
-    if (detail.status === 'cancelled') {
-      settleCancelledNode(nodeId);
-      return 'terminal';
-    }
-    return 'processing';
-  };
-
-  /** 取消终态可见收敛（IKDMQW）：草稿卡回待生成（保留参数与连线）、有旧素材的成品卡
-   *  恢复成品态（IKDMQU Q5）、无内容可保留的占位卡移除并防迟到响应复活。
-   *  删除流程登记的删除意图优先：cancelled 时直接移除。 */
-  const settleCancelledNode = (nodeId: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    if (!node) return;
-    if (pendingDeleteJobNodesRef.current.has(nodeId)) {
-      pendingDeleteJobNodesRef.current.delete(nodeId);
-      locallyRemovedGenerationNodesRef.current.add(nodeId);
-      if (isAudioMixNodeId(nodeId)) {
-        removeAudioMixCardNow(nodeId);
-        return;
-      }
-      setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
-      return;
-    }
-    const action = cancelledTerminalAction(node);
-    if (action === 'to-draft') {
-      patchMediaNode(nodeId, {
-        genStatus: 'draft',
-        progress: undefined,
-        errorText: undefined,
-        // 已自定义名称的草稿卡回退时保留名称（IKFA8X）
-        ...(hasCustomName(node) ? {} : { fileName: draftFileNameOf(node.data?.mediaType) }),
-      });
-      return;
-    }
-    if (action === 'restore') {
-      patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
-      return;
-    }
-    locallyRemovedGenerationNodesRef.current.add(nodeId);
-    setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
   };
 
   /** 插帧关页恢复函数引用（IKHSFF，水合 effect 声明在前） */
@@ -6477,6 +6135,23 @@ export default function CanvasPage() {
     activeJobByNodeRef.current.delete(nodeId);
     if (currentId) void flushCanvasSave(currentId).catch(() => {});
   };
+
+  const { applyJobTerminal, settleCancelledNode, jobResponseGuarded, rememberGeneratedAsset } =
+    useCanvasGenerationTerminal({
+      mediaNodesRef,
+      locallyRemovedGenerationNodesRef,
+      pendingDeleteJobNodesRef,
+      settledExtractNodesRef,
+      activeJobByNodeRef,
+      generationRuntimeRef,
+      setMediaNodes,
+      upsertAssets,
+      patchMediaNode,
+      removeAudioMixCardNow,
+      showToast,
+      fanOutSceneSplitSegments,
+      fanOutVocalSplitTracks,
+    });
 
   /** 删除生成中卡片（IKDMQW）：先请求取消；任务权威终态非 succeeded 才移除——
    *  cancelled/failed 终态确认后立即移除；仍 processing（软取消已登记、worker 未停）时不
