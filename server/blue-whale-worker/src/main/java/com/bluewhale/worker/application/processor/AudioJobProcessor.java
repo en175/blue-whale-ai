@@ -49,7 +49,6 @@ public class AudioJobProcessor implements JobProcessor {
         this.upstreamCredential = upstreamCredential;
         this.audioClient = audioClient;
         this.tosService = tosService;
-        // workerId = audio-{hostname}-{pid}（与 extract 同构）
         this.workerId = "audio-" + hostname() + "-" + ProcessHandle.current().pid();
     }
 
@@ -58,31 +57,22 @@ public class AudioJobProcessor implements JobProcessor {
         return GenerationMqRouteEnum.AUDIO.tag();
     }
 
-    /**
-     * 处理一个音频 job（generation-worker.ts:367-446 audio 分支）。
-     * <p>
-     * claim 在 try 外（IKC9EJ：DB 异常上抛 → consumer 不 ack → 重投）。
-     */
     @Override
     public void handle(String jobId) {
-        // IKC9EJ：claim 在 try 外
         Optional<ClaimedJobDto> claimOpt;
         try {
             claimOpt = stateMachine.claimAudioJobById(jobId, workerId);
         } catch (Exception error) {
             log.error("[audio] claimAudioJobById 失败 jobId={}: {}", jobId, error.getMessage(), error);
-            throw error; // 保持不 ack → RocketMQ 重投
+            throw error;
         }
         if (claimOpt.isEmpty()) return;
 
         ClaimedJobDto job = claimOpt.get();
         log.info("[audio] 已领取 jobId={} type={} token={}", job.id(), job.type(), job.fencingToken());
 
-        // cancelRequested → 取消（generation-worker.ts:237-241）
-        // 音频不走 cancelVideoBeforeDispatch（视频专用），但按契约应检查
         if (job.cancelRequested()) {
             log.info("[audio] 取消已执行(cancelRequested) jobId={}", job.id());
-            // 音频无 cancel-before-dispatch 端点——直接 fail（与 TS cancelVideoBeforeDispatch 语义等价）
             finalizer.failJob(job.id(), GenerationError.ERROR_PROVIDER_FAILED,
                     "任务已取消", null, workerId, job.fencingToken());
             return;
@@ -95,21 +85,16 @@ public class AudioJobProcessor implements JobProcessor {
         }
     }
 
-    /**
-     * 处理已领取的音频作业（generation-worker.ts:367-446）。
-     */
     private void processClaimedAudioJob(ClaimedJobDto job) {
         Map<String, Object> input = job.input();
         String prompt = strOrEmpty(input, "prompt");
         String modelId = strOrEmpty(input, "model_id");
 
-        // 1. 校验输入（generation-worker.ts:302-305）
         if (prompt.isEmpty() || modelId.isEmpty()) {
             failClaimed(job, GenerationError.ERROR_INVALID_INPUT, "缺少 prompt 或 model_id");
             return;
         }
 
-        // 音频不支持旧参考字段（generation-worker.ts:319-326）
         @SuppressWarnings("unchecked")
         List<Object> oldRefIds = input.get("reference_asset_ids") instanceof List<?> l
                 ? (List<Object>) l : List.of();
@@ -128,13 +113,7 @@ public class AudioJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 校验模型能力（generation-worker.ts:379-386）
-        // 音频用 findImageCapability(modelId, null) 读 model_id（TS :379 同构）
-        // 此处简化为直接传 modelId（音频不需要 size 解析）
-        // 若模型不存在 → model_unavailable
-        // TODO: 如需完整能力查询，后续接入 GenerationModelCapabilityMapper
 
-        // 4. 解析参考素材（generation-worker.ts:388-397 resolveAudioSeedReferences）
         AudioRefsResult audioRefs = resolveAudioSeedReferences(
                 input.get("references"), job.user_id(), job.project_id());
         if (!audioRefs.ok()) {
@@ -142,10 +121,6 @@ public class AudioJobProcessor implements JobProcessor {
             return;
         }
 
-        // 5. 调 TTS（generation-worker.ts:398-401）
-        // IKG6EK / ADR-0088：正文唯一来源是冻结的 input.prompt——接纳侧已完成引用标记转移
-        // （&asset_id& → @图片N）与附件拼装，执行与重试不得重新拼接覆盖它。
-        // 原 composed_prompt 优先链与 TextAttachmentPrompts 兜底组合已退役。
         NewApiAudioClient.AudioResult audio = audioClient.generate(
                 providerToken, modelId, prompt, audioRefs.refs());
         log.info("[audio] 上游已返回 jobId={} requestId={} dataLen={} url={}",
@@ -153,38 +128,19 @@ public class AudioJobProcessor implements JobProcessor {
                 audio.data() != null ? audio.data().length : 0,
                 audio.url() != null ? audio.url() : "<null>");
 
-        // 6. 转存（generation-worker.ts:404-411 persistProviderMedia data-direct）
-        // data-direct 路径：base64 audio → PUT，mime 恒 audio/mpeg
-        // TOS 未配置 → 硬失败「音频转存存储未配置」（generation-worker.ts:749-751）
         StoredMedia stored = persistAudioData(audio.data(), audio.url(), job.user_id());
         log.info("[audio] 转存完成 jobId={} storageKey={} size={}", job.id(), stored.storageKey(), stored.size());
 
-        // 7. 产出音频的真实时长 —— **两个落点共用这一个数，不许各自算一遍**
-        //
-        //    · assets.duration_ms：产物的属性（毫秒），播放/展示用
-        //    · 结算用量 usage.seconds：音频按秒计价的**权威量**（火山官方口径
-        //      「按模型原始输出时长计费、精确至秒折算」）
-        //
-        // ⚠️ 为什么结算侧必须拿到它：音频的定价规则以 usage.seconds 为基准维度，
-        //    而 billing 有一条基准维度守卫——**没报就是拒绝计价**（MQ 重投 → 死信 → 红灯），
-        //    那笔预扣会一直冻着等人处理。所以这里不是「有就带上」的可选项，
-        //    是这条路径的必交作业；真取不到时下面的 WARN 就是唯一的信号。
         Long audioSeconds = null;
         Integer durationMs = null;
         if (audio.duration() != null && audio.duration() > 0) {
-            // 向上兜到 1 秒：Math.round 对 <0.5s 会给出 0，而 0 秒会被 billing 当成
-            // 「报过、且真的是 0 秒」→ 白送一次。产物既然存在，它至少值 1 秒。
             audioSeconds = Math.max(1L, Math.round(audio.duration()));
             durationMs = (int) Math.round(audio.duration() * 1000);
         } else {
-            // 上游没回 duration。不是崩溃，但**必须吵**：这次结算会被 billing 拒绝，
-            // 结果是「用户的钱冻着 + 一条死信」。把 jobId 打出来，人工用
-            // billing 的 POST /admin/jobs/{id}/settle 兜底（见 JobSettlementPublisher 类注释）。
             log.warn("[audio] 上游未返回 duration，结算将缺少 usage.seconds 而被拒：jobId={} —— "
                     + "可用 billing 的 POST /admin/jobs/{id}/settle 人工补", job.id());
         }
 
-        // 8. createAsset（generation-worker.ts:412-425）
         String assetId = stateMachine.createAsset(new JobStateMachineService.CreateAssetInput(
                 job.user_id(),
                 job.project_id(),
@@ -195,18 +151,17 @@ public class AudioJobProcessor implements JobProcessor {
                 stored.mime(),
                 stored.size(),
                 stored.md5(),
-                null, // width
-                null, // height
+                null,
+                null,
                 durationMs,
                 workerId,
                 job.fencingToken()
         ));
         if (assetId == null) {
             log.warn("[audio] 终态失败(createAsset 守卫未命中) jobId={}", job.id());
-            return; // 守卫失败 → 退出
+            return;
         }
 
-        // 9. completeJob（generation-worker.ts:445 finishJob）—— 带上按秒计价的权威量
         boolean completed = finalizer.completeJob(
                 job.id(), List.of(assetId), workerId, job.fencingToken(), audioSeconds);
         if (completed) {
@@ -218,15 +173,9 @@ public class AudioJobProcessor implements JobProcessor {
         }
     }
 
-    /**
-     * 音频参考素材解析（generation-worker.ts:148-207 resolveAudioSeedReferences）。
-     * <p>
-     * input.references[].asset_id → resolveInputAssets → 过滤 audio/image → 按 URL 去重。
-     */
     AudioRefsResult resolveAudioSeedReferences(
             Object rawReferences, String userId, String projectId) {
 
-        // 无 references → 空数组（generation-worker.ts:155）
         if (rawReferences == null) {
             return new AudioRefsResult(true, List.of(), null);
         }
@@ -234,7 +183,6 @@ public class AudioJobProcessor implements JobProcessor {
             return new AudioRefsResult(false, null, "参考素材引用无效");
         }
 
-        // 提取 asset_id（generation-worker.ts:163-169）
         List<String> assetIds = new ArrayList<>();
         List<RawAudioReference> items = new ArrayList<>();
         for (Object item : rawList) {
@@ -249,12 +197,10 @@ public class AudioJobProcessor implements JobProcessor {
             }
         }
 
-        // resolveInputAssets（generation-worker.ts:170-173）
         Map<String, AssetEntity> assetsMap = assetIds.isEmpty()
                 ? Map.of()
                 : assetSource.resolveInputAssets(assetIds, userId, projectId);
 
-        // 按序遍历、过滤、去重（generation-worker.ts:179-205）
         LinkedHashSet<String> seen = new LinkedHashSet<>();
         List<Map<String, String>> refs = new ArrayList<>();
         for (RawAudioReference it : items) {
@@ -263,13 +209,11 @@ public class AudioJobProcessor implements JobProcessor {
             if (asset == null) {
                 return new AudioRefsResult(false, null, "参考素材不存在或无权访问");
             }
-            // 只收 audio/image（generation-worker.ts:195-197）
             if (!"audio".equals(asset.getType()) && !"image".equals(asset.getType())) {
                 return new AudioRefsResult(false, null, "参考素材类型不适用");
             }
             if (asset.getUrl() == null || seen.contains(asset.getUrl())) continue;
             seen.add(asset.getUrl());
-            // audio → {audio_url}，image → {image_url}（generation-worker.ts:200-204）
             if ("audio".equals(asset.getType())) {
                 refs.add(Map.of("audio_url", asset.getUrl()));
             } else {
@@ -280,37 +224,23 @@ public class AudioJobProcessor implements JobProcessor {
         return new AudioRefsResult(true, refs, null);
     }
 
-    /**
-     * 音频数据转存（generation-worker.ts:731-818 persistProviderMedia data-direct 路径）。
-     * <p>
-     * data-direct：base64 解码后的字节 → TOS PUT，mime 恒 audio/mpeg。
-     * TOS 未配置 → 硬失败「音频转存存储未配置」（generation-worker.ts:749-751）。
-     */
     private StoredMedia persistAudioData(byte[] data, String url, String userId) {
-        // data-direct 路径：data 非空（generation-worker.ts:749-751）
         if (data != null && data.length > 0) {
-            // TOS 未配置 → 硬失败（与 image/video 降级不同，音频不允许直存 URL）
             if (tosService == null) {
                 throw new AudioProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                         "音频转存存储未配置");
             }
-            // 上传到 TOS
             TosMediaStorage.UploadResult uploaded = tosService.uploadBytes(data, "audio/mpeg");
             return new StoredMedia(uploaded.url(), uploaded.storageKey(),
                     "audio/mpeg", (long) data.length, uploaded.md5());
         }
-        // URL 回退（generation-worker.ts:752-761）——仅当 data 为空
         if (url != null && !url.isEmpty()) {
-            // IKGS73：上游只给了 URL、没给字节 → assets.md5 留空。**这条不依赖 TOS 配置**，
-            // 是三条降级路径里唯一「TOS 正常也可能走到」的一条。留一行痕，否则 md5 为空
-            // 这件事在库里静得看不出来。
             log.warn("[audio] 上游未返回字节，仅回退 URL：assets.md5 将为空（IKGS73 已知边界）");
             return new StoredMedia(url, null, null, null, null);
         }
         throw new AudioProviderError(GenerationError.ERROR_NO_RESULT, "生成服务未返回音频结果");
     }
 
-    /** 音频错误处理（generation-worker.ts:686-728 catch 块）。 */
     private void handleAudioError(ClaimedJobDto job, Exception e) {
         String code;
         String msg;
@@ -328,7 +258,6 @@ public class AudioJobProcessor implements JobProcessor {
         failClaimed(job, code, msg);
     }
 
-    /** 失败处理（generation-worker.ts:246-286 failClaimed）。 */
     private void failClaimed(ClaimedJobDto job, String code, String msg) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
@@ -348,14 +277,11 @@ public class AudioJobProcessor implements JobProcessor {
         }
     }
 
-    /** 音频参考素材项（generation-worker.ts:142-147 RawAudioReference）。 */
     private static class RawAudioReference {
         String assetId;
     }
 
-    /** 参考素材解析结果。 */
     record AudioRefsResult(boolean ok, List<Map<String, String>> refs, String message) {}
 
-    /** 转存结果。 */
     record StoredMedia(String url, String storageKey, String mime, Long size, String md5) {}
 }

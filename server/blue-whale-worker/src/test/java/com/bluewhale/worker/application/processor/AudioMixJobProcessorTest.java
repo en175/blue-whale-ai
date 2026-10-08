@@ -363,8 +363,6 @@ class AudioMixJobProcessorTest {
         verify(finalizer).failMediaExtractJob(anyString(), code.capture(), message.capture(),
                 details.capture(), anyString(), anyLong());
         assertThat(code.getValue()).isEqualTo("audio_mix_failed");
-        // 生产文案剥离状态码字样（IKIMS6）：判定只依赖结构化 details.http_status，
-        // 上游原因与 request_id 原样保留
         assertThat(message.getValue()).doesNotContain("401").contains("上游凭证被拒绝");
         assertThat(details.getValue())
                 .containsEntry("raw", "音频混合任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
@@ -389,7 +387,6 @@ class AudioMixJobProcessorTest {
         ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.captor();
         verify(finalizer).failMediaExtractJob(anyString(), anyString(), message.capture(),
                 details.capture(), anyString(), anyLong());
-        // 文案不含「401」字样：换凭证判定只依赖结构化 details.http_status，措辞变化不影响重试
         assertThat(message.getValue()).doesNotContain("401").contains("Incorrect API key");
         assertThat(details.getValue())
                 .containsEntry("raw", "MediaKit 音频混合任务查询失败:"

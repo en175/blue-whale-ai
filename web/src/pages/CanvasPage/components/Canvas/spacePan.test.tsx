@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowCanvas from './index';
 
 vi.hoisted(() => {
-  // 开发期代码定位插件在导入时探测 Canvas；本测试不绘制位图。
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 });
 
@@ -25,7 +24,6 @@ function pane() {
   return container.querySelector<HTMLElement>('.react-flow__pane')!;
 }
 
-/** React Flow 框选走 pointer 事件；真实浏览器一次按下同时派发 pointer 与 mouse 序列。 */
 async function pointer(type: 'pointerdown' | 'pointermove' | 'pointerup', target: EventTarget, x: number, y: number) {
   await act(async () => {
     const event = new MouseEvent(type, {
@@ -51,7 +49,6 @@ async function mouse(type: string, target: EventTarget, x = 100, y = 100) {
       bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' ? 0 : 1,
       clientX: x, clientY: y,
     });
-    // Vitest 的 window 代理不通过 jsdom 构造器的 Window 身份检查。
     Object.defineProperty(event, 'view', { value: window });
     target.dispatchEvent(event);
   });
@@ -64,7 +61,6 @@ async function finishGesture() {
 
 beforeEach(async () => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // jsdom 不做布局；只补浏览器测量 API，React Flow 与卡片均使用真实实现。
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     unobserve() {}
@@ -116,11 +112,9 @@ describe('Canvas space pan', () => {
 
   it('moves the viewport without moving or deselecting the card', async () => {
     await key('keydown');
-    // 浏览器在穿透卡片后命中 pane；jsdom 不执行 CSS 命中测试。
     await mouse('mousedown', pane());
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
-    // React Flow 对启用了滚轮平移的视口结束事件有 150ms 防抖。
     await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
     expect(props.onNodeDragStop).not.toHaveBeenCalled();
     expect(node().style.transform).toBe('translate(50px,60px)');
@@ -129,7 +123,6 @@ describe('Canvas space pan', () => {
 
   it('does not activate card buttons or click callbacks while panning', async () => {
     await key('keydown');
-    // IKGYYD 工具条迁出节点卡后，卡内交互元素探针改用标题行（按钮在钉屏幕层，不在卡内）
     const title = node().querySelector('[data-testid="media-title"]')!;
     await mouse('click', title);
     await mouse('click', node());
@@ -168,7 +161,6 @@ describe('Canvas space pan', () => {
     expect(node().classList.contains('draggable')).toBe(true);
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
-    // React Flow 从超过拖拽阈值的首个移动事件开始累计位移。
     expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ position: { x: 90, y: 90 } }), expect.any(Array));
     expect(props.onViewportChange).not.toHaveBeenCalled();
     expect(node().classList.contains('draggable')).toBe(false);
@@ -182,7 +174,6 @@ describe('Canvas space pan', () => {
     expect(node().classList.contains('draggable')).toBe(false);
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
-    // React Flow 对启用了滚轮平移的视口结束事件有 150ms 防抖。
     await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
     expect(node().classList.contains('draggable')).toBe(true);
   });
@@ -217,12 +208,6 @@ describe('Canvas space pan', () => {
     expect(node().classList.contains('draggable')).toBe(false);
   });
 
-  /** IKJFH1：布置「已选中卡远离、未选中卡压住穿透落点」的两卡场景，做完整穿透平移手势。
-   *  pointer 序列武装框选、mouse 序列驱动平移——真实浏览器一次按下两类事件同发，
-   *  既有用例只发 mouse 序列，从未武装框选，因此长期漏掉选中泄漏。
-   *  groups: [] 模拟真实无组画布：GroupOverlay 仍挂载，其穿透补选中在抓手态误伤选中集合。
-   *  jsdom 下 ResizeObserver 被 stub，节点 measured 无值；显式 width/height 供
-   *  contentNodeAtFlowPoint 几何命中（与真实浏览器 measured 同口径）。 */
   async function panGestureOverUnselectedCard() {
     props = {
       ...props,
@@ -238,7 +223,6 @@ describe('Canvas space pan', () => {
     };
     await act(async () => { root.render(createElement(FlowCanvas, props)); });
     vi.mocked(props.onViewportChange!).mockClear();
-    // 落点 (100,100) 在未选中卡几何范围内：浏览器穿透卡片命中 pane，jsdom 直接派发在 pane 上
     await pointer('pointerdown', pane(), 100, 100);
     await mouse('mousedown', pane(), 100, 100);
     await pointer('pointermove', pane(), 104, 103);
@@ -251,7 +235,6 @@ describe('Canvas space pan', () => {
   it('leaves the selection untouched when a Space pan passes over an unselected card', async () => {
     await key('keydown');
     await panGestureOverUnselectedCard();
-    // React Flow 对启用了滚轮平移的视口结束事件有 150ms 防抖。
     await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
     expect(nodeById('image-2').classList.contains('selected')).toBe(false);
     expect(nodeById('image-1').classList.contains('selected')).toBe(true);
@@ -290,7 +273,6 @@ describe('Canvas 滚轮平移与修饰键缩放', () => {
   });
 
   it('按住平台原生缩放键时滚轮缩放视口', async () => {
-    // 与库同源判定：macOS 激活键为 Meta，其他平台为 Control。
     const zoomKey = navigator.userAgent.includes('Mac') ? 'Meta' : 'Control';
     await act(async () => {
       document.body.dispatchEvent(new KeyboardEvent('keydown', {
@@ -323,8 +305,6 @@ describe('Canvas 媒体标题缩放与交互组合', () => {
     };
     await act(async () => { root.render(createElement(FlowCanvas, props)); });
     if (mediaType === 'video') {
-      // !834 起选中 + 选择工具的视频卡延迟 80ms 布防树内 <video>（离屏解码先行）：
-      // 等 200ms（布防 + 余量）再取元素，避免慢机竞态
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
     }
     const media = node().querySelector(mediaType === 'image' ? 'img' : 'video')!;
@@ -338,7 +318,6 @@ describe('Canvas 媒体标题缩放与交互组合', () => {
     expect(title.textContent).toContain('1600×900');
     if (mediaType === 'video') expect(title.textContent).toContain('12s');
     expect(node().style.transform).toBe('translate(50px,60px)');
-    // IKGYYD 工具条迁出节点卡：选中态探针由「重新编辑」按钮改为 React Flow selected class
     expect(node().classList.contains('selected')).toBe(true);
 
     await mouse('mousedown', title);
@@ -388,7 +367,6 @@ describe('Canvas media loading during interaction', () => {
     await mouse('mousemove', window, 160, 140);
     const draggedPosition = node().style.transform;
     expect(draggedPosition).not.toBe('translate(50px,60px)');
-    // IKGYYD 工具条迁出节点卡：选中态探针由「详情」按钮改为 React Flow selected class
     expect(node().classList.contains('selected')).toBe(true);
 
     const image = container.querySelector<HTMLImageElement>(`[data-id="${loadingId}"] img`)!;

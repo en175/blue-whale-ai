@@ -4,16 +4,8 @@
 
 <mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.PricingCatalogMapper">
 
-  <!--
-    取当前生效版本。
 
-    带 ORDER BY + LIMIT，所以落在 XML。这条同时替代了原来的做法——把
-    "WHERE status = 'active' ORDER BY ... LIMIT 1" 拆成 whereClause 片段在 Java 里拼接。
-    那种写法把 SQL 拆散在两处，改索引或加条件时容易只改一边。
 
-    status='active' 全表至多一条（迁移脚本的约定），ORDER BY 只是防御：
-    万一因为人工操作出现两条，取版本号大的那条，而不是随机一条。
-  -->
   <select id="selectActive" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.PricingCatalogEntity">
     SELECT id, catalog_version, status, document, schema_version, document_hash,
            effective_from, effective_to, published_by, published_at, note
@@ -23,11 +15,7 @@
     LIMIT 1
   </select>
 
-  <!--
-    当前最大版本号；空表返回 0（COALESCE 兜住 MAX 的 NULL）。
 
-    聚合表达式，Wrapper 的 select 表达不了，所以写在 XML。
-  -->
   <select id="selectMaxVersion" resultType="int">
     SELECT COALESCE(MAX(catalog_version), 0) FROM billing_pricing_catalogs
   </select>

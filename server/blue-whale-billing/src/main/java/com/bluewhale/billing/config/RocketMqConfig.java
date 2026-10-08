@@ -12,26 +12,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
-/**
- * RocketMQ 客户端的装配（结算 / 返还的消费端）。
- *
- * <p>与 worker 同一套配置键（{@code rocketmq.endpoints/access-key/secret-key/ssl-enabled}），
- * 同一套守卫。两端用同一套键名，部署时不必记两套。
- *
- * <h2>缺 endpoints 为什么直接启动失败</h2>
- *
- * 与 worker 同一立场：MQ 缺配置是**部署错误**，越早炸越好。
- * 若改成「静默跳过消费者」，服务照常起来、Hold 照常工作——但任务跑完之后
- * **没有任何人会结算或解冻**，用户的钱一直冻着，而所有健康检查都是绿的。
- * 这种「起来了一半」比起不来难查得多。
- *
- * <p>本地只想验 Hold、不想起 RocketMQ：设 {@code BILLING_MQ_ENABLED=false} 跳过整个消费者。
- */
 @Configuration
 @ConditionalOnProperty(name = "billing.mq.enabled", havingValue = "true")
 public class RocketMqConfig {
 
-    /** 消费组名。**硬编码而不是从 spring.application.name 推导**——改服务名不该改消费位点。 */
     private static final String CONSUMER_GROUP = "billing-job-event";
 
     @Bean
@@ -60,11 +44,6 @@ public class RocketMqConfig {
         return builder.build();
     }
 
-    /**
-     * ⚠️ 只有 destroyMethod，没有 initMethod：RocketMQ 5 的 {@code PushConsumer}
-     * 在 {@code build()} 那一刻就开始拉消息，它没有 {@code start()}。
-     * 见 {@link JobEventConsumer} 的类注释。
-     */
     @Bean(destroyMethod = "close")
     public JobEventConsumer jobEventConsumer(ClientConfiguration clientConfiguration,
                                              SettlementService settlement,
@@ -76,10 +55,6 @@ public class RocketMqConfig {
                 completedTopic, failedTopic, settlement);
     }
 
-    /**
-     * @param endpoints  gRPC proxy 端点；空 = 未配置（启动会失败）
-     * @param accessKey  集群需要鉴权时配，与 secretKey 同时给才生效
-     */
     public record RocketMqProperties(String endpoints, String accessKey,
                                      String secretKey, boolean sslEnabled) {}
 }

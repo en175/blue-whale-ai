@@ -84,26 +84,6 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/**
- * 音视频合成「发布结果不明」清理决策真库交错测试（IKIN8Z）。
- * <p>
- * 夹具仿 {@link JobStateMachineMySqlIntegrationTest}（手动 AnnotationConfigApplicationContext +
- * MySQL Testcontainers + TRUNCATE 隔离）。交错控制方式：处理器跑在独立线程上，用
- * {@code spy(service)} 在发布/探测两个点上挂钩子；「服务端仍在进行的发布事务」用独立
- * JDBC 连接（DriverManager，非池内连接）开启事务、逐字复刻 {@code publishResultGuard}
- * CAS UPDATE + assets 插入后保持未提交——与生产 {@code @Transactional publishSingleAssetResult}
- * 同形（守卫 UPDATE 先持 generation_jobs 行 X 锁，Asset 插入不可见于并发查询）。
- * <p>
- * 钉的行为（验收硬口径）：
- * <ol>
- *   <li>清理首次查询尚未看到 Asset、发布事务随后提交成功 → 不删；提交后 Asset 引用的
- *       对象仍存在，GenerationJob 为正确成功终态，旧执行者不能改写终态（fail 守卫被拒）。</li>
- *   <li>发布事务回滚 → 确认不会再被提交且无 Asset 引用后删除该次未发布对象。</li>
- *   <li>新执行者用另一对象键成功发布 → 旧键按对象键核实后删除、新键保留——GenerationJob
- *       成功不作旧键已发布的判据；旧执行者 fencing 不能写 Asset 或改写终态。</li>
- * </ol>
- * 容器复用（withReuse）下每测试 TRUNCATE + raw 连接 finally 落定（提交/回滚并关闭），防污染。
- */
 @Testcontainers(disabledWithoutDocker = true)
 @DisplayName("音视频合成发布结果不明的清理决策真库交错测试（MySQL Testcontainers，IKIN8Z）")
 class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
@@ -122,14 +102,11 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
 
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService realService;
-    /** 真库终态收口（IKIWP8 ③）：发布/失败/探测直连。 */
     static JobFinalizer realFinalizer;
-    /** 真实领取服务与真实 Mapper（IKIWP8：领取收敛为唯一管道 JobClaimService.claim）。 */
     static JobClaimService realClaimService;
     static GenerationJobMapper realJobMapper;
     static JdbcTemplate jdbc;
 
-    /** 最小 Spring 上下文：与金标夹具同款（Hikari +08:00 会话、7 Mapper、7-mapper 测试直连 service）。 */
     @Configuration
     static class TestConfig {
 
@@ -191,7 +168,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             return factory(StoryboardPreviewMapper.class, sf).getObject();
         }
 
-        /** IKJCOE：任务特有列的扩展位表 mapper。 */
         @Bean
         GenerationJobExtraMapper extraMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationJobExtraMapper.class, sf).getObject();
@@ -206,10 +182,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
         }
 
-        /**
-         * 真库 JobFinalizer（IKIWP8 ③）：终态收口方法已从 JobStateMachineService 删除，
-         * 测试直连 finalizer；按 7-mapper 兼容构造的内部装配逐项复制，共用同一批真库 mapper。
-         */
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
@@ -251,7 +223,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         if (ctx != null) ctx.close();
     }
 
-    /** 截断所有表，保留结构；每个测试隔离（容器 withReuse 防污染）。 */
     @BeforeEach
     void cleanup() {
         List<String> tables = jdbc.queryForList(
@@ -262,12 +233,10 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         jdbc.execute("SET FOREIGN_KEY_CHECKS = 1");
     }
 
-    // ========== 种子与夹具 ==========
 
     private static final byte[] OLD_KEY_PAYLOAD = "mux-result-payload".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     private static final byte[] NEW_KEY_PAYLOAD = "mux-result-payload-new".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
-    /** 可领取的 audio_video_mux 冻结任务（provider_task_id 已持久化 → handle 直接进 poll 相）。 */
     private long seedClaimableMuxJob() {
         jdbc.update("""
                 INSERT INTO generation_jobs
@@ -306,7 +275,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         return count != null ? count : 0;
     }
 
-    /** 有状态 TOS 替身 + 全链处理器：转存落 objects 表，deleteUnpublishedObject 真删。 */
     private record WiredProcessor(
             AudioVideoMuxJobProcessor processor,
             JobFinalizer spyFinalizer,
@@ -340,19 +308,16 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         return new WiredProcessor(processor, spyFinalizer, objects);
     }
 
-    /** 独立 JDBC 连接（非池内）：模拟服务端仍在进行的发布事务（guard CAS + Asset 插入，未提交）。 */
     private Connection openRawConnection() throws Exception {
         Connection raw = DriverManager.getConnection(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword());
         raw.setAutoCommit(false);
         return raw;
     }
 
-    // ========== 真实 relay 组合线法（IKIN8V：处理器级组合用例，复用 StreamingTransferTest 线法） ==========
 
     private HttpServer sourceServer;
     private HttpServer uploadServer;
 
-    /** 受控源分块参数：4×64KiB、块间 20ms——真实 HTTP 流式下载（持续有进度），转存亚秒完成。 */
     private static final int SOURCE_BLOCK_BYTES = 64 * 1024;
     private static final int SOURCE_BLOCK_COUNT = 4;
 
@@ -362,7 +327,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         if (sourceServer != null) sourceServer.stop(0);
     }
 
-    /** 本地受控视频源（真实 relay 线法，AudioVideoMuxStreamingTransferTest 同款缩小版）。 */
     private String serveControlledSource() throws IOException {
         byte[] block = new byte[SOURCE_BLOCK_BYTES];
         for (int i = 0; i < SOURCE_BLOCK_BYTES; i++) block[i] = (byte) (i % 251);
@@ -384,8 +348,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         return "http://127.0.0.1:" + sourceServer.getAddress().getPort() + "/out.mp4";
     }
 
-    /** 真实 relay 的有状态 TOS 替身：preSignedURL 走 mock 指向本地上传桩（key 可经 sink 捕获），
-     *  上传字节真实流式送达并按 key 落对象表；deleteObject 查表真删——对象存在性断言以此为准。 */
     private TOSV2 realTosStandin(ConcurrentHashMap<String, byte[]> objects,
                                  AtomicReference<String> keySink) throws IOException {
         uploadServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -416,7 +378,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
 
     private void executeInFlightPublish(Connection raw, long jobId, String workerId, long token,
                                         String storageKey) throws Exception {
-        // 逐字复刻 publishResultGuard（守卫 CAS：第一句即持 generation_jobs 行 X 锁直至提交/回滚）
         try (PreparedStatement guard = raw.prepareStatement("""
                 UPDATE generation_jobs
                 SET status = 'succeeded', progress = 100, next_action_at = NULL,
@@ -439,7 +400,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         }
     }
 
-    // ========== 用例 ==========
 
     @Test
     @Timeout(90)
@@ -456,7 +416,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         AtomicInteger probes = new AtomicInteger();
         AtomicReference<Connection> rawRef = new AtomicReference<>();
 
-        // 发布调用视角「结果不明」：方法抛异常，但服务端发布事务仍在另一连接上进行
         doAnswer(invocation -> {
             PublishAudioVideoMuxDto dto = invocation.getArgument(0);
             Connection raw = openRawConnection();
@@ -466,7 +425,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             throw new RuntimeException("发布事务提交窗口断连（结果不明）");
         }).when(wired.spyFinalizer()).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
 
-        // 探测钩子：首轮真跑（行锁被在飞事务占用 → in-flight）；后续轮等主线程落定 raw 事务再放行（交错确定化）
         doAnswer(invocation -> {
             if (probes.incrementAndGet() == 1) {
                 boolean inFlight = (Boolean) invocation.callRealMethod();
@@ -482,7 +440,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             var handle = single.submit(() -> wired.processor().handle(String.valueOf(jobId)));
             assertThat(rawTxOpen.await(20, TimeUnit.SECONDS)).as("在飞发布事务应已开启").isTrue();
             assertThat(firstProbeDone.await(20, TimeUnit.SECONDS)).as("首轮探测应已执行").isTrue();
-            // 此刻权威查询尚未看到 Asset（在飞事务未提交，REPEATABLE READ 不可见）——正式提交
             assertThat(countAssets(jobId, oldKey)).as("提交前 Asset 行对并发查询不可见").isZero();
             rawRef.get().commit();
             rawTxSettled.countDown();
@@ -492,13 +449,11 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             single.shutdownNow();
         }
 
-        // 对象保留（未被删除）+ 提交后 Asset 引用存在 + GenerationJob 正确成功终态
         assertThat(objects).containsKey(oldKey);
         assertThat(countAssets(jobId, oldKey)).isOne();
         GenerationJobEntity job = readJob(jobId);
         assertThat(job.getStatus()).isEqualTo("succeeded");
         assertThat(job.getLeaseOwner()).isNull();
-        // 旧执行者 fencing：发布异常上抛后的 fail 尝试被守卫拒绝，不能改写成功终态
         verify(wired.spyFinalizer()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
         assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
         assertThat(readJob(jobId).getError()).isNull();
@@ -552,10 +507,8 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             single.shutdownNow();
         }
 
-        // 事务已结束（回滚）且无 Asset 引用 → 安全删除该次未发布对象
         assertThat(objects).doesNotContainKey(oldKey);
         assertThat(countAssets(jobId, oldKey)).isZero();
-        // 租约仍在旧执行者手上：发布异常按既有语义上抛 fail 终态（守卫命中，非 fencing 拒绝）
         GenerationJobEntity job = readJob(jobId);
         assertThat(job.getStatus()).isEqualTo("failed");
         assertThat(job.getError()).contains("audio_video_mux_failed");
@@ -575,7 +528,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         AtomicReference<String> oldWorkerId = new AtomicReference<>();
         AtomicReference<Long> oldToken = new AtomicReference<>();
 
-        // 旧执行者发布瞬间被接管：新执行者换租约 + 换对象键发布成功，旧执行者的守卫被拒
         doAnswer(invocation -> {
             PublishAudioVideoMuxDto dto = invocation.getArgument(0);
             oldWorkerId.set(dto.workerId());
@@ -596,7 +548,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
 
         wired.processor().handle(String.valueOf(jobId));
 
-        // GenerationJob 已成功不充当旧键已发布的判据：按对象键核实——旧键无引用 → 删旧键、新键保留
         assertThat(objects).doesNotContainKey(oldKey);
         assertThat(objects).containsKey(newKey);
         assertThat(countAssets(jobId, newKey)).isOne();
@@ -607,7 +558,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         GenerationJobEntity job = readJob(jobId);
         assertThat(job.getStatus()).isEqualTo("succeeded");
 
-        // 旧执行者 fencing：迟到 fail（旧 worker/token）被守卫拒绝——不能写 Asset、不能改写成功终态
         assertThat(realFinalizer.failMediaExtractJob(
                 String.valueOf(jobId), "audio_video_mux_failed", "迟到失败", Map.of(),
                 oldWorkerId.get(), oldToken.get())).isFalse();
@@ -617,18 +567,9 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                 (long) OLD_KEY_PAYLOAD.length, "md5", 227.0, "1920x1080", "12"))).isFalse();
         assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
         assertThat(countAssets(jobId, oldKey)).isZero();
-        // 守卫拒绝路径不落失败终态（对象键清理即收口）
         verify(wired.spyFinalizer(), never()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
     }
 
-    /**
-     * 处理器级组合用例（IKIN8V，规格 Testing Decisions「Worker 处理器使用真实 relay、隔离
-     * MySQL、受控租约与提交时序，并复用同一有状态 TOS 替身」）：与
-     * {@link #inFlightPublishCommittingAfterFirstProbeKeepsObjectAndBlocksOldExecutor} 同一
-     * 交错（发布异常 + 在飞事务于探测窗口内提交），但转存换**真实 relay**——本地 HttpServer
-     * 受控源 + mock TOSV2 仅签名 + 上传真实流式落对象表（真实 key 含本次执行独有 uuid，非
-     * 测试预置）：对象确实完整送达过替身，保留 / 引用 / 终态断言全部对着真实上传结果。
-     */
     @Test
     @Timeout(90)
     @DisplayName("组合（真实 relay）：在飞发布事务于探测窗口内提交——替身对象保留、真库 Asset 引用真实 key、成功终态、旧执行者 fail/publish 被 fencing 拒")
@@ -657,7 +598,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         AtomicInteger probes = new AtomicInteger();
         AtomicReference<Connection> rawRef = new AtomicReference<>();
 
-        // 发布调用视角「结果不明」：真实转存产物（真实 key）进入在飞发布事务后抛异常
         doAnswer(invocation -> {
             PublishAudioVideoMuxDto dto = invocation.getArgument(0);
             realKey.set(dto.storageKey());
@@ -670,7 +610,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             throw new RuntimeException("发布事务提交窗口断连（结果不明）");
         }).when(spyFinalizer).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
 
-        // 探测钩子：首轮真跑（行锁被在飞事务占用 → in-flight）；后续轮等主线程落定 raw 事务再放行
         doAnswer(invocation -> {
             if (probes.incrementAndGet() == 1) {
                 boolean inFlight = (Boolean) invocation.callRealMethod();
@@ -686,7 +625,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             var handle = single.submit(() -> processor.handle(String.valueOf(jobId)));
             assertThat(rawTxOpen.await(20, TimeUnit.SECONDS)).as("真实转存应完成并进入发布异常").isTrue();
             assertThat(firstProbeDone.await(20, TimeUnit.SECONDS)).as("首轮探测应已执行").isTrue();
-            // 真实上传的完整字节数（受控源 4×64KiB 全量送达替身）；提交前 Asset 行对并发查询不可见
             assertThat(objects).containsKey(realKey.get());
             assertThat(objects.get(realKey.get())).hasSize(SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT);
             assertThat(countAssets(jobId, realKey.get())).as("提交前 Asset 行对并发查询不可见").isZero();
@@ -698,13 +636,11 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             single.shutdownNow();
         }
 
-        // 替身中真实上传对象仍在（未删）+ 真库 Asset 引用真实 key + GenerationJob 成功终态
         assertThat(objects).containsKey(realKey.get());
         assertThat(countAssets(jobId, realKey.get())).isOne();
         GenerationJobEntity job = readJob(jobId);
         assertThat(job.getStatus()).isEqualTo("succeeded");
         assertThat(job.getLeaseOwner()).isNull();
-        // 旧执行者 fencing：发布异常上抛后的 fail 尝试被守卫拒绝，不能改写成功终态
         verify(spyFinalizer).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
         assertThat(readJob(jobId).getError()).isNull();
         assertThat(realFinalizer.failMediaExtractJob(
@@ -718,15 +654,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         assertThat(probes.get()).isEqualTo(2);
     }
 
-    /**
-     * UNCONFIRMED 保守保留 + 恢复复判（IKIN8V，规格缺失 a2）：在飞发布事务对 generation_jobs
-     * 行持 X 锁贯穿全部探测轮（默认 {@code publishSettleProbeAttempts=3}、轮间 500ms——探测轮
-     * 与延时为 processor 包级旋钮，本类跨包不可注入，默认值窗口 ~1s 对 {@code @Timeout(90)}
-     * 缩比可忽略）→ 判 UNCONFIRMED 保守保留并留 {@code [pending-cleanup]} 结构化记录；随后
-     * 提交该在飞事务（同键 Asset 落定、job 由守卫 CAS 写成 succeeded）→ fail 落库被守卫拒绝
-     * （不改写成功终态）→ 再次调用清理决策（同一决策入口，结果不明口径）→ 权威引用已可见 →
-     * 对象保留。raw 连接 finally 兜底落定防容器复用污染。
-     */
     @Test
     @Timeout(90)
     @DisplayName("在飞事务贯穿全部探测轮：UNCONFIRMED 保守保留 + [pending-cleanup] 结构化记录；提交后再次清理决策 → Asset 已可见，对象仍保留")
@@ -762,14 +689,11 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             throw new RuntimeException("发布事务提交窗口断连（结果不明）");
         }).when(spyFinalizer).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
 
-        // 全部探测轮真跑：行锁被在飞事务占用 → in-flight；窗口耗尽即 UNCONFIRMED（默认 3 轮）
         doAnswer(invocation -> {
             probes.incrementAndGet();
             return invocation.callRealMethod();
         }).when(spyFinalizer).hasInFlightJobWriteTransaction(String.valueOf(jobId));
 
-        // fail 落库钩子：[pending-cleanup] 记录在 discard 内同步先于 fail 写出——latch 放行即
-        // 留痕已定；真实 fail UPDATE 阻塞在在飞事务行锁上，等主线程提交后守卫不命中（已 succeeded）
         doAnswer(invocation -> {
             failAttempted.countDown();
             return invocation.callRealMethod();
@@ -785,12 +709,10 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             assertThat(rawTxOpen.await(20, TimeUnit.SECONDS)).as("在飞发布事务应已开启").isTrue();
             assertThat(failAttempted.await(20, TimeUnit.SECONDS))
                     .as("探测窗口应耗尽（UNCONFIRMED）并进入 fail 落库").isTrue();
-            // 行锁贯穿全部探测轮（publishSettleProbeAttempts 默认 3）：无一轮见到锁空闲
             assertThat(probes.get()).isEqualTo(3);
             rawRef.get().commit();
             handle.get(60, TimeUnit.SECONDS);
 
-            // 第一次决策（UNCONFIRMED）：对象保守保留 + 结构化待处理记录（jobId/storageKey/reason/resolution）
             assertThat(objects).containsKey(realKey.get());
             assertThat(appender.list.stream().map(ILoggingEvent::getFormattedMessage)
                     .filter(message -> message.contains("[pending-cleanup]")).toList())
@@ -799,15 +721,12 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                             .contains("storageKey=" + realKey.get())
                             .contains("发布结果不明")
                             .contains("resolution=retain-pending"));
-            // 在飞事务提交后：Asset 引用可见、job 成功终态，迟到 fail 守卫被拒不改写终态
             assertThat(countAssets(jobId, realKey.get())).isOne();
             GenerationJobEntity job = readJob(jobId);
             assertThat(job.getStatus()).isEqualTo("succeeded");
             verify(spyFinalizer).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
             assertThat(readJob(jobId).getError()).isNull();
 
-            // 恢复复判：状态恢复后再次调用同一清理决策（发布结果不明口径）——探测锁空闲 +
-            // Asset 引用已可见 → REFERENCED 保留，对象不删
             ClaimedJob jobDto = new ClaimedJob(String.valueOf(jobId),
                     "99", "9", Map.of(), "audio_video_mux", "mux-task-1", false, "amux-recheck",
                     job.getFencingToken(), 0, 0, WorkerClock.now(), null, null);
@@ -829,12 +748,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         }
     }
 
-    /**
-     * 发布异常路径删除失败不记成功（IKIN8V，规格缺失 a3）：发布异常且已确认可删（无在飞事务、
-     * 无 Asset 引用）时 TOS {@code deleteObject} 抛错——真实 relay 链路上删除失败由 relay 吞掉
-     * 并留失败痕迹（storageKey + err），不得报告清理成功（无成功记录）；对象保留在替身（删除
-     * 未生效）；清理失败不改写任务失败原因（failed 的 error 仍是发布异常，不含删除错误）。
-     */
     @Test
     @Timeout(90)
     @DisplayName("组合（真实 relay）：已确认可删但 TOS deleteObject 抛错——对象保留、失败留痕含 storageKey 与错误、不报告清理成功、失败原因不改写")
@@ -869,18 +782,15 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         try {
             processor.handle(String.valueOf(jobId));
 
-            // 删除动作确实发生且失败未生效：真实上传对象仍完整保留在替身（不得记为清理成功）
             assertThat(realKey.get()).startsWith("generated/9/video/");
             assertThat(objects).containsKey(realKey.get());
             assertThat(objects.get(realKey.get())).hasSize(SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT);
             List<String> messages = relayLogs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
-            // 失败留痕含对象身份与错误（jobId 由失败终态行关联，见下）；成功留痕不得出现
             assertThat(messages.stream().filter(m -> m.contains("清理未发布 TOS 对象失败")).toList())
                     .anySatisfy(m -> assertThat(m)
                             .contains("storageKey=" + realKey.get())
                             .contains("TOS 删除 5xx"));
             assertThat(messages).noneMatch(m -> m.contains("清理未发布 TOS 对象 storageKey="));
-            // 不转成（额外的）任务失败：failed 的原因仍是发布异常，清理失败不改写失败语义
             GenerationJobEntity job = readJob(jobId);
             assertThat(job.getStatus()).isEqualTo("failed");
             assertThat(job.getError())
@@ -893,7 +803,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         }
     }
 
-    /** raw 连接兜底落定（容器复用防污染）：未关闭则回滚并关闭。 */
     private static void settleQuietly(Connection raw) {
         if (raw == null) return;
         try {
@@ -902,7 +811,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                 raw.close();
             }
         } catch (Exception ignore) {
-            // 兜底路径：主断言失败时不因清理噪声掩盖原因
         }
     }
 }

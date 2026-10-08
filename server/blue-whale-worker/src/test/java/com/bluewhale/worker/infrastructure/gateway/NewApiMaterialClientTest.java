@@ -16,18 +16,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * 素材库 GetAsset 出站协议钉桩测试（ADR-0087 决策 4）。
- * <p>
- * 覆盖两层：
- * <ul>
- *   <li><b>请求形状</b>：POST {@code /api/material/GetAsset}，body {@code {"Id":"..."}}，
- *       标准头三元组（Authorization: Bearer / X-Trace-Id / X-Client-System: bluewhale）。</li>
- *   <li><b>解析与失败口径</b>：Result.Status 透传（含 Error.Code/Message 原文）；
- *       非 2xx / ResponseError 信封 / 非 JSON / 缺 Status 一律返回 null——
- *       调用方按「本轮未知」处理，不把坏响应固化成终态。</li>
- * </ul>
- */
 class NewApiMaterialClientTest {
 
     private HttpServer server;
@@ -143,9 +131,6 @@ class NewApiMaterialClientTest {
         assertThatThrownBy(() -> client.getAsset("sk-user9", " "))
                 .isInstanceOf(IllegalArgumentException.class);
     }
-    // 2026-09-15 真网关实测：素材被删 / id 非法时上游在非 2xx 上回 ResponseError，
-    // 这类「指认素材本身不可用」必须收敛成 Failed（否则跟进器白追满 10 分钟窗口）；
-    // 而鉴权失败走的是另一套 new_api_error 信封、限流/5xx 更不是素材的错，都必须保持「本轮未知」。
     @Test
     @DisplayName("上游指认素材不可用（NotFound.asset_id / InvalidParameter.AssetID）→ 收敛为 Failed")
     void materialLevelRejectionBecomesFailed() {

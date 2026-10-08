@@ -35,9 +35,6 @@ import javax.sql.DataSource;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/** The public API test creates the job and verifies the HTTP provider request and resulting job.
- * This runner drives the real Java processor, mappers and isolated database, without internal mocks.
- */
 @EnabledIfEnvironmentVariable(named = "IKETSX_JOB_ID", matches = "[0-9]+")
 class PromptPlanVideoIntegrationTest {
     @Configuration
@@ -51,9 +48,6 @@ class PromptPlanVideoIntegrationTest {
             source.setJdbcUrl(System.getenv("IKETSX_JDBC_URL"));
             source.setUsername("root");
             source.setMaximumPoolSize(3);
-            // 时间口径（IKHJ0Q）：与生产 DataSourceConfig 同款。集成测试手工装配 Hikari，不扫 autoconfig——
-            // 不补这一条就会在 UTC 会话下跑而生产跑在 +08:00，而所有到期判断都在 SQL 里对 NOW()，
-            // 「窗口静默失效」这类 bug 一条都测不出来。容器默认时区仍留 +00:00 是刻意的：正好证明它能覆盖服务端默认值。
             source.setConnectionInitSql("SET time_zone='+08:00'");
             return source;
         }
@@ -68,7 +62,6 @@ class PromptPlanVideoIntegrationTest {
             return new DataSourceTransactionManager(source);
         }
 
-        /** 终态收口（刀④）：真库直连装配，MQ 生产者为 noop（本测试无外部队列）。 */
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
@@ -87,7 +80,6 @@ class PromptPlanVideoIntegrationTest {
     @Test
     void executeAcceptedVideoThroughRealPersistenceAndProvider() throws Exception {
         try (var context = new AnnotationConfigApplicationContext(Database.class)) {
-            // The external queue is driven synchronously; external object storage is a passthrough.
             var queue = new GenerationMessageProducer() {
                 public void enqueue(String jobId, long delayMs) {}
                 public void close() {}

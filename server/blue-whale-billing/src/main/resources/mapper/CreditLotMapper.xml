@@ -2,35 +2,14 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<!--
-  积分批次的复杂语句。
 
-  落位约定（全模块统一）：带 ORDER BY / LIMIT / FOR UPDATE / 聚合 / 自引用表达式的语句写在
-  XML；纯等值或比较谓词的单表读写用 LambdaQueryWrapper，不在这里重复一遍样板。
--->
 <mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.CreditLotMapper">
 
-  <!--
-    ★ 锁该用户的全部有效批次，按扣减顺序排好序返回（《计费逻辑详细设计》§4.1）。
 
-    三级 tie-break：
-      ① (expires_at IS NULL)   永久排最后
-      ① expires_at ASC         先过期先扣
-      ② source_priority ASC    同到期时间按来源（先消耗平台赠送的）
-      ③ id ASC                 先获得的先扣
 
-    ⚠️ source_priority 是**冗余列**而非 FIELD(source, 'compensation','bonus',...)：
-       后者把优先级硬编码进 SQL，枚举一改就静默错位；前者由插入时决定且能走索引。
 
-    ⚠️ ORDER BY 第一项是布尔表达式——MySQL 里 (expires_at IS NULL) 取 0/1，
-       所以 NULL（永久）排在非 NULL 之后，正好是「永久最后扣」。
 
-    只用 FOR UPDATE 锁**单个用户**的行，不是全表：争用范围天然是单用户
-    （同一用户的并发提交是个位数，业务语义上本就该串行）。
-    对比 GeekAI 的全局 sync.Mutex——那是把「同用户串行」做成了「全库串行」。
 
-    过期批次靠 WHERE 天然排除，不需要定时任务清理（行不删，见 expireLot）。
-  -->
   <select id="lockActiveLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
@@ -40,11 +19,7 @@
     FOR UPDATE
   </select>
 
-  <!--
-    可用余额 = Σ(remaining − frozen)，仅计未过期的批次。
 
-    这是**聚合表达式**，Wrapper 的 select 只能列字段名，表达不了 remaining - frozen。
-  -->
   <select id="sumAvailable" resultType="long">
     SELECT COALESCE(SUM(remaining - frozen), 0)
     FROM billing_credit_lots
@@ -52,13 +27,7 @@
       AND (expires_at IS NULL OR expires_at > NOW())
   </select>
 
-  <!--
-    可用余额按来源拆开（用户界面「总积分 = 各类型之和」的数据源）。
 
-    ⚠️ **WHERE 与上面的 sumAvailable 逐字相同**，只多一个 GROUP BY —— 这不是巧合，
-       是「Σ 分项 == 总额」那条等式赖以成立的东西。两处谓词一旦分叉，
-       界面上就会出现一个凑不出来的总数，而且不报错。要改就两处一起改。
-  -->
   <select id="sumAvailableBySource" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.SourceAvailableRow">
     SELECT source, COALESCE(SUM(remaining - frozen), 0) AS credits
     FROM billing_credit_lots
@@ -67,20 +36,9 @@
     GROUP BY source
   </select>
 
-  <!--
-    ★ 批量版 sumAvailable：一次问一批用户的可用余额（管理端用户列表的一列）。
 
-    ⚠️ WHERE 与上面的 sumAvailable **逐字相同**（只多一个 user_id IN）—— 这不是巧合，
-       是要求：列表页那一列与详情页显示的必须是同一个数。两处谓词一旦分叉，
-       运营会在列表上看到一个、点进详情看到另一个，而两边都不报错。
 
-    ⚠️ 走 idx_lots__user_id (user_id, id)：前导列等值 + IN 是索引区间扫描，
-       GROUP BY user_id 与索引首列同序，不需要文件排序。
 
-    ⚠️ **没有批次的用户不会出现在结果里**（GROUP BY 的语义），不是返回一行 0。
-       需要补零的是调用方（它手里才有请求清单）；在这层补零得先知道问过哪些 id，
-       而那是本层拿不到的信息。
-  -->
   <select id="sumAvailableByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
     SELECT user_id, COALESCE(SUM(remaining - frozen), 0) AS amount
     FROM billing_credit_lots
@@ -90,21 +48,9 @@
     GROUP BY user_id
   </select>
 
-  <!--
-    ★ 批量版的「按来源发放合计」：Σ amount，只算给定来源的批次。
-       管理端用户列表的「累计充值」列用它（调用方传 purchased）。
 
-    ⚠️ 取 amount（发放量）而不是 remaining - frozen（可用量）：消耗过之后可用量就
-       小于发放量，而「累计充值」问的是**历史上充了多少**，不是现在还剩多少。
-       amount 也是这份历史里唯一不会被后续动作改动的列 —— 结算与过期核销都只动 remaining。
 
-    ⚠️ source 由调用方从 CreditSource.key() 传进来，**不在这里写字面量**：硬编码的
-       source = 'purchased' 会在枚举改名时静默变成「一条都查不到 → 全员 0」，
-       而 0 看起来又是一个完全合法的数（同一个坑见上面 source_priority 那段）。
 
-    ⚠️ 本语句**不筛 expires_at**：它问的是「发过多少」，与批次过期没过期无关 ——
-       过期只是把剩余的作废，不改变「当初充了 500」这个事实。
-  -->
   <select id="sumGrantedByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
     SELECT user_id, COALESCE(SUM(amount), 0) AS amount
     FROM billing_credit_lots
@@ -114,27 +60,10 @@
     GROUP BY user_id
   </select>
 
-  <!--
-    ★ 已到期、仍有可核销量的批次（过期核销任务用）。
 
-    三个条件：
-      expires_at IS NOT NULL     NULL = 永久，永不核销
-      expires_at <= NOW()        「已到期」是核销的唯一依据——**不做提前核销**
-      remaining > frozen         可核销量为 0 的批次不必取（全部冻结的不销，见下）
 
-    ⚠️ 本语句是**全表范围**的，与上面两条「按 user_id」的取数不是一回事：
-       核销是平台按批次推的动作，逐用户分片只会把同一件事拆成 N 次扫描。
-       走 idx_lots__expires_at（见 V10 迁移）：区间扫描 + 顺序取数，
-       NULL（永久）不在任何区间里、天然被跳过；没有这个索引就是全表扫 + 文件排序。
 
-    ⚠️ 冻结部分不过期（§10 决策 7：预扣锁定的 frozen 不受过期影响）：
-       核销量是 remaining − frozen，故筛选用 `remaining > frozen` 而不是 `remaining > 0`。
-       一个批次的 frozen 被解冻回可用之后（任务失败返还），它会**再次**进入本窗口——
-       这正是核销幂等键必须带上批次版本号的原因（见 CreditService.expireLot）。
 
-    ORDER BY expires_at ASC：先到期的先销，与扣减顺序同一取向；也保证 LIMIT 截断时
-    丢掉的是较晚到期的那些，不会让某个批次永远排在后面取不到。
-  -->
   <select id="listDueLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
@@ -145,15 +74,7 @@
     LIMIT #{limit}
   </select>
 
-  <!--
-    按主键读一行并**锁住它**。
 
-    核销的金额由读到的 remaining − frozen 算出，读与写之间必须没有别的写入者——
-    否则「销掉多少」在前一条语句里算好、后一条语句里扣掉时已经不再成立。
-    FOR UPDATE 是当前读：并发的 hold / settle / 返还都会阻塞到本事务提交，
-    而它们各自也会先拿这一行的锁（lockActiveLots 或直接 UPDATE），
-    所以「读到什么就销掉什么」在这里成立。
-  -->
   <select id="lockById" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
@@ -161,6 +82,11 @@
     FOR UPDATE
   </select>
 
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> b21e3ef7a (fix: 补齐全仓维护范围注释清理)
   <select id="listExpiring" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, amount, remaining, frozen, expires_at, version
     FROM billing_credit_lots
@@ -172,13 +98,7 @@
     LIMIT #{limit}
   </select>
 
-  <!--
-    冻结：预扣用。**只动 frozen**，remaining 不动 —— 钱还没花掉，只是不能用了。
 
-    SET frozen = frozen + #{amount} 是**自引用表达式**：Wrapper 的 set 只能赋常量，
-    所以这类语句一律落在 XML，顺带也就不必在 Java 里拼 SQL 片段。
-    下面的 releaseFrozen / settle 同理。
-  -->
   <update id="addFrozen">
     UPDATE billing_credit_lots
     SET frozen = frozen + #{amount},
@@ -186,12 +106,7 @@
     WHERE id = #{lotId}
   </update>
 
-  <!--
-    解冻：返还用。**只动 frozen**，也不新建批次。
 
-    ⚠️ 刻意不动 remaining：若改成「先扣掉、返还时新建批次」，返还的积分会带**新的有效期**，
-    用户凭空获得一次有效期重置，与应得权益不符。
-  -->
   <update id="releaseFrozen">
     UPDATE billing_credit_lots
     SET frozen = frozen - #{amount},
@@ -199,14 +114,8 @@
     WHERE id = #{lotId}
   </update>
 
-  <!--
-    结算：解冻并实扣。
 
-    frozenTake 是预扣时锁定的量，actualTake 是实际消耗的量。两者可以不等
-    （部分成功 / 缓存命中）——差额自动回到可用余额。
 
-    两列同时按不同数量更新，且都是自引用表达式，Wrapper 表达不了。
-  -->
   <update id="settle">
     UPDATE billing_credit_lots
     SET frozen = frozen - #{frozenTake},
@@ -215,23 +124,9 @@
     WHERE id = #{lotId}
   </update>
 
-  <!--
-    核销：把已到期的可用量从 remaining 里扣掉。**frozen 原封不动**。
 
-    语义上等价于「这批积分作废了」，所以 remaining 必须跟着降：
-    批次表是余额的唯一权威，只写账本分录不改批次，会让每日自检钉的
-    Σ lots.remaining == ledger(wallet) + ledger(frozen) 当场差一个「已核销额」。
 
-    ⚠️ 为什么是 `remaining = remaining - #{amount}` 而不是 `remaining = frozen`：
-       两者在调用方按 lockById 读到的快照上等价（amount = remaining − frozen），
-       但写成自引用减法时，「扣掉的数」与账本那条 expire 分录的金额来自**同一个变量**，
-       由调用方算一次；写成 `= frozen` 则是让 SQL 自己再算一次差额——
-       两条路径各自算一次，迟早有一天算得不一样，而差额会静默留在批次里。
 
-    ⚠️ 冻结部分不过期（§10 决策 7）：任务在途时预扣锁住的 frozen 不受过期影响，
-       这样它仍能结算成功（用户为已经发生的生成付费），失败返还时钱回到可用余额，
-       由**下一轮**核销带走（幂等键带版本号，见 CreditService.expireLot）。
-  -->
   <update id="expireLot">
     UPDATE billing_credit_lots
     SET remaining = remaining - #{amount},
@@ -239,24 +134,10 @@
     WHERE id = #{lotId}
   </update>
 
-  <!--
-    用户的**批次台账**（积分明细「已获取」页签，gRPC ListLots）。
 
-    ⚠️ 与 listExpiring 的三条过滤**刻意相反**，不要照抄过来：
-      · 不筛 expires_at    —— 用户要看到「这笔什么时候到期」；已到期的批次也是他的历史，
-                              抹掉它等于让一行从用户眼皮底下消失（同 v11「released 行不消失」）
-      · 不筛 remaining     —— 用光了的批次同样要出现在「已获取」里，理由同上
-      · 不筛 frozen        —— 没有「不值得展示」这回事，这是一份完整台账
 
-    一句话：`listExpiring` 问的是「该提醒我什么」，这条问的是「我拿到过什么」。
 
-    ⚠️ 这一条**不**做有效期的过滤，所以它不是「当前可用余额」的分解，别拿它去和
-       `sumAvailable` 对账 —— 那个数只算未过期批次，两者本来就不相等。
 
-    ORDER BY gmt_create DESC, id DESC：最新的在前，与流水同一取向。
-    次级键 id 不是可选项：DATETIME 只到秒，同一秒落两个批次是常态
-    （首购单的基础积分与赠送积分就是同一秒发的）。
-  -->
   <select id="listUserLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at,
            biz_type, biz_id, version, gmt_create
@@ -266,12 +147,7 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
-  <!--
-    台账总数（「共 N 条」）。
 
-    ⚠️ WHERE 必须与 listUserLots **逐字相同**：两处谓词分叉时，「共 N 条」与翻出来的行
-       会对不上，而且不报错 —— 界面只是显示一个错的数。
-  -->
   <select id="countUserLots" resultType="long">
     SELECT COUNT(*)
     FROM billing_credit_lots

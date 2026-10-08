@@ -10,13 +10,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 
-/**
- * StoryboardPreview 摘要同步（刀④ 拆分自 JobStateMachineService syncStoryboardPreviewSummary）。
- * <p>
- * 按 first_generation_job_id 反查预览，聚合该 job 的 output_slots 推进汇总态
- * （generation-worker-internals.ts:67-113）。与 SceneCardGenerationRecordSync 对偶：
- * 视频走 record 外键，图片 job 不设该外键故走本路径。
- */
 @Service
 public class StoryboardPreviewSync {
 
@@ -34,10 +27,6 @@ public class StoryboardPreviewSync {
         this.eventPublisher = eventPublisher;
     }
 
-    /**
-     * 回写 preview summary_status（internals.ts:67-113 syncStoryboardPreviewSummary）。
-     * null-guard：findFirst 无命中 → 立即返回（internals.ts:75）。
-     */
     public void sync(Long jobId) {
         StoryboardPreviewEntity preview = previewMapper.findByFirstGenerationJobId(jobId);
         if (preview == null) return;

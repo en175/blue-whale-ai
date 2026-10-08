@@ -9,19 +9,10 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 
-/**
- * RocketMQ 5.x 生产者实现（generation-queue.ts:66-103 getStartedRocketMqProducer 逐字移植）。
- * <p>
- * 懒建 + 启动失败重置（与 TS 单例同构）。
- * 发送消息：topic + tag + body={"jobId":"..."} + delayMs（generation-queue.ts:56-61）。
- * <p>
- * delay 下限 1000ms（generation-queue.ts:17 GENERATION_MIN_DELAY_MS）。
- */
 public class RocketMqGenerationMessageProducer implements GenerationMessageProducer {
 
     private static final Logger log = LoggerFactory.getLogger(RocketMqGenerationMessageProducer.class);
 
-    /** delay 下限（generation-queue.ts:17）。 */
     static final long MIN_DELAY_MS = 1_000;
 
     private final Producer producer;
@@ -34,9 +25,6 @@ public class RocketMqGenerationMessageProducer implements GenerationMessageProdu
         this.tag = tag;
     }
 
-    /**
-     * 从 ClientConfiguration 构建 Producer（generation-queue.ts:79-98）。
-     */
     public static RocketMqGenerationMessageProducer create(
             ClientConfiguration clientConfig, String topic, String tag) {
         ClientServiceProvider provider = ClientServiceProvider.loadService();

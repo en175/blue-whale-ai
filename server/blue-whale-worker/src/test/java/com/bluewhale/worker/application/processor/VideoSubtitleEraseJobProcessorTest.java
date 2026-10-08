@@ -39,15 +39,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * VideoSubtitleEraseJobProcessor 单测（迁移契约 §17 / IKGZ81）。
- * <p>
- * 覆盖：异步两段式状态机（submit 存 task_id → markProviderSubmitted + scheduleNext / poll
- * processing 续排 / 轮询超限 / completed 立即转存发布 / failed 归 1043 + 上游原因透传）、
- * 四种请求形态的 submit 参数（无框/有框 × subtitle_smart/text_full，出站 JSON 映射在
- * 客户端测试钉）、input 业务键兜底校验、凭证缺失分类、§5 信号保留与兜底归并、瞬时轮询
- * 错误判定。不连真实 MQ/DB/TOS/网关。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class VideoSubtitleEraseJobProcessorTest {
@@ -64,7 +55,6 @@ class VideoSubtitleEraseJobProcessorTest {
 
     private VideoSubtitleEraseJobProcessor processor;
 
-    /** 官方 Location 同构框（[0,1] 归一化，出站原样透传）。 */
     private static Map<String, Object> box(double x1, double y1, double x2, double y2) {
         Map<String, Object> map = new HashMap<>();
         map.put(VideoSubtitleEraseContract.BOX_KEY_TOP_LEFT_X, x1);
@@ -94,7 +84,6 @@ class VideoSubtitleEraseJobProcessorTest {
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
-    /** 源视频素材（宽高/时长供结果 Asset 近似回填）。 */
     private void stubSourceAsset() {
         AssetEntity source = new AssetEntity();
         source.setType("video");
@@ -134,7 +123,6 @@ class VideoSubtitleEraseJobProcessorTest {
                 any(), eq("worker-1"), eq(5L));
     }
 
-    // ========== claim 语义 ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -162,7 +150,6 @@ class VideoSubtitleEraseJobProcessorTest {
         verify(finalizer, never()).publishVideoSubtitleEraseResult(any());
     }
 
-    // ========== input 业务键兜底校验（§17.2；权威复核在创建入口 Z80） ==========
 
     @Test
     @DisplayName("缺 source_asset_id → invalid_input")
@@ -198,7 +185,6 @@ class VideoSubtitleEraseJobProcessorTest {
         assertFailCode(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== 源素材 / 凭证 ==========
 
     @Test
     @DisplayName("源素材不可用（非 video）→ 1043 兜底 + 可读原因，不提交上游")
@@ -231,7 +217,6 @@ class VideoSubtitleEraseJobProcessorTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== submit 相：四种请求形态参数 + 状态机（出站 JSON 映射在客户端测试钉） ==========
 
     @Test
     @DisplayName("无框 subtitle_smart：submit 传空框列表 → markProviderSubmitted 存 task_id + scheduleNext(5s)")
@@ -321,7 +306,6 @@ class VideoSubtitleEraseJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== submit 相：错误归并（§5 信号保留，其余归 1043；无自动重试） ==========
 
     @Test
     @DisplayName("submit content_rejected → 保留既有码投影（§5 信号）")
@@ -380,7 +364,6 @@ class VideoSubtitleEraseJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== parent-reuse 重试收割（IKI89U / ADR-0114；平移 VideoJobProcessorTest 先例）==========
 
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
@@ -410,7 +393,6 @@ class VideoSubtitleEraseJobProcessorTest {
         assertThat(published.mime()).isEqualTo("video/mp4");
         assertThat(published.size()).isEqualTo(123_456L);
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        // 源 1920x1080 近似回填 + 官方 duration 秒优先，与正常完成路径同型
         assertThat(published.width()).isEqualTo(1920);
         assertThat(published.height()).isEqualTo(1080);
         assertThat(published.durationSec()).isEqualTo(65.5);
@@ -556,15 +538,12 @@ class VideoSubtitleEraseJobProcessorTest {
 
         processor.handle("100");
 
-        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
-        // 任务保持 processing 由新 worker 重新领取继续收割
         verify(subtitleEraseClient, never()).submit(anyString(), anyString(), anyString(), anyList());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
-    // ========== poll 相：状态机 ==========
 
     @Test
     @DisplayName("poll processing → rescheduleProviderPoll + scheduleNext(5s)")
@@ -652,7 +631,6 @@ class VideoSubtitleEraseJobProcessorTest {
                 eq("去字幕轮询超时（超过 " + VideoSubtitleEraseJobProcessor.MAX_SUBTITLE_ERASE_POLLS
                         + " 次），上游持续错误: MediaKit 去字幕任务查询超时"),
                 detailsCaptor.capture(), eq("worker-1"), eq(5L));
-        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
         assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -670,8 +648,6 @@ class VideoSubtitleEraseJobProcessorTest {
 
         processor.handle("100");
 
-        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：状态落 details，message 剥
-        // 「: HTTP 503」片段（冒号保留），上游可读原因保留
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(finalizer).failVideoJob(eq("100"),
@@ -747,7 +723,6 @@ class VideoSubtitleEraseJobProcessorTest {
         assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
     }
 
-    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS4；对齐音频提取 IKIMS2 样板） ==========
 
     @Test
     @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
@@ -767,7 +742,6 @@ class VideoSubtitleEraseJobProcessorTest {
         verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
-        // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
         assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
         assertThat(detailsCaptor.getValue())
                 .containsEntry("raw", "MediaKit 去字幕任务查询失败:"
@@ -775,7 +749,6 @@ class VideoSubtitleEraseJobProcessorTest {
                 .containsEntry("http_status", 401);
     }
 
-    // ========== poll 相：completed → 立即下载转存 + 终态发布（URL 24h 有效） ==========
 
     @Test
     @DisplayName("poll completed → persist 转存 → 发布 payload：官方 duration 秒 + 源宽高近似 + md5 穿透")
@@ -793,7 +766,6 @@ class VideoSubtitleEraseJobProcessorTest {
 
         processor.handle("100");
 
-        // URL 24h 有效：completed 后立即转存（同步链路，无续排）
         verify(mediaRelay).persist("https://volc/out.mp4?auth_key=...", "9");
         ArgumentCaptor<PublishVideoSubtitleEraseDto> captor =
                 ArgumentCaptor.forClass(PublishVideoSubtitleEraseDto.class);
@@ -901,7 +873,6 @@ class VideoSubtitleEraseJobProcessorTest {
         verify(finalizer, never()).publishVideoSubtitleEraseResult(any());
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架同语义） ==========
 
     @Test
     @DisplayName("瞬时判定：provider_timeout / 网络不可达 / HTTP 429/5xx → 瞬时；4xx / 业务失败 → 非瞬时")

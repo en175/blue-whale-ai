@@ -1,7 +1,5 @@
--- 工单 IKDLQE | 2026-09-06 | 保存首次应用预览快照，支持删除后重建历史修订。
 SET NAMES utf8mb4;
 
--- IKDLQE: retain canonical preview content after deletion or Agent revision changes.
 CREATE TABLE `prompt_preview_snapshots` (
   `id` BIGINT NOT NULL AUTO_INCREMENT,
   `project_id` BIGINT NOT NULL,

@@ -10,12 +10,6 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * 项目事件发布（刀④ 拆分自 JobStateMachineService 的 appendProjectEvent）。
- * <p>
- * nextCursor 顺序游标 + event_id UUID + 全量 payload 落库（settle-ops 事件段）。
- * 在 complete/fail 事务内调用，保证事件与槽位/日志原子一致。
- */
 @Service
 public class ProjectEventPublisher {
 
@@ -27,9 +21,6 @@ public class ProjectEventPublisher {
         this.projectEventMapper = projectEventMapper;
     }
 
-    /**
-     * 落一条 project_events（生成侧各路径共用）。
-     */
     public void publish(
             Long projectId, String eventType, String aggregateType,
             String aggregateId, Integer aggregateVersion,

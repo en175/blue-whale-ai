@@ -38,16 +38,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * VideoFrameInterpolationJobProcessor 单测（IKHLKJ，父需求 IKHLES）。
- * <p>
- * 覆盖：异步两段式状态机（submit 存 task_id → markProviderSubmitted + scheduleNext / poll
- * processing 续排 / 轮询超限 720≈60 分钟 / completed 立即转存发布——官方 duration、源宽高近似、
- * resolution/fps 随发布 payload / failed 归 1049 + 上游原因透传）、input 业务键兜底校验
- * （含整型 fps 三档）、凭证缺失与 **per-job 凭证隔离**、§5 信号保留与兜底归并、瞬时轮询错误
- * 判定、取消落确定终态（未提交 / 已提交两条 CAS）、迟到结果发布守卫未命中即不落资产。
- * 不连真实 MQ/DB/TOS/网关。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class VideoFrameInterpolationJobProcessorTest {
@@ -83,7 +73,6 @@ class VideoFrameInterpolationJobProcessorTest {
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
-    /** 源视频素材（横屏 1920x1080 / 65s：宽高作输出近似值、时长供回落）。 */
     private void stubSourceAsset(Integer width, Integer height) {
         AssetEntity source = new AssetEntity();
         source.setType("video");
@@ -130,7 +119,6 @@ class VideoFrameInterpolationJobProcessorTest {
                 any(), eq("worker-1"), eq(5L));
     }
 
-    // ========== claim 语义 ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -158,7 +146,6 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(finalizer, never()).publishVideoFrameInterpolationResult(any());
     }
 
-    // ========== 取消（生成中可取消：软取消 → 确定终态；迟到结果不得复活） ==========
 
     @Test
     @DisplayName("cancelRequested + 未提交上游 → cancelVideoFrameInterpolation(providerTaskId=null)，不提交不轮询")
@@ -184,7 +171,6 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
-        // 上游任务不可撤（官方无取消端点）→ 本仓侧停止接纳结果：不轮询、不转存、不发布
         verify(stateMachine).cancelVideoFrameInterpolation("100", "worker-1", 5L, "amk-task-1");
         verify(interpolateVideoClient, never()).poll(anyString(), anyString());
         verify(mediaRelay, never()).persist(anyString(), anyString());
@@ -205,7 +191,6 @@ class VideoFrameInterpolationJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 1L, null));
-        // 守卫未命中 = 任务已被取消（status='cancelled'，非 processing）或 fencing 失效
         when(finalizer.publishVideoFrameInterpolationResult(any())).thenReturn(false);
 
         processor.handle("100");
@@ -215,7 +200,6 @@ class VideoFrameInterpolationJobProcessorTest {
                 anyString(), anyLong());
     }
 
-    // ========== input 业务键兜底校验（权威复核在创建入口 IKHLK3） ==========
 
     @Test
     @DisplayName("缺 source_asset_id → invalid_input")
@@ -245,7 +229,6 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
     }
 
-    // ========== 源素材 / 凭证 ==========
 
     @Test
     @DisplayName("源素材不可用（非 video）→ 1049 兜底 + 可读原因，不提交上游")
@@ -278,7 +261,6 @@ class VideoFrameInterpolationJobProcessorTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== submit 相：参数 + 状态机（出站 JSON 映射在客户端测试钉） ==========
 
     @Test
     @DisplayName("submit：整型 fps 透传 → markProviderSubmitted 存 task_id + scheduleNext(5s)")
@@ -314,7 +296,6 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== submit 相：错误归并（§5 信号保留，其余归 1049；无自动重试） ==========
 
     @Test
     @DisplayName("submit content_rejected → 保留既有码投影（§5 信号）")
@@ -359,7 +340,6 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== parent-reuse 重试收割（IKI8A0 / ADR-0114；平移定型票 IKI89P 用例）==========
 
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
@@ -389,7 +369,6 @@ class VideoFrameInterpolationJobProcessorTest {
         assertThat(published.mime()).isEqualTo("video/mp4");
         assertThat(published.size()).isEqualTo(123_456L);
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        // 插帧不改变分辨率 → 宽高 = 源近似（1920x1080），不做档位推导，与正常完成路径同型
         assertThat(published.width()).isEqualTo(1920);
         assertThat(published.height()).isEqualTo(1080);
         assertThat(published.durationSec()).isEqualTo(65.5);
@@ -397,7 +376,6 @@ class VideoFrameInterpolationJobProcessorTest {
         assertThat(published.fps()).isEqualTo(60.0);
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        // 收割即终态：不自投下一步
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
@@ -535,15 +513,12 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
-        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
-        // 任务保持 processing 由新 worker 重新领取继续收割
         verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
-    // ========== poll 相：状态机 ==========
 
     @Test
     @DisplayName("poll processing → rescheduleProviderPoll + scheduleNext(5s)（每步释放租约 + 自投驱动下一步）")
@@ -596,7 +571,6 @@ class VideoFrameInterpolationJobProcessorTest {
                 anyString(), anyLong());
     }
 
-    // ========== IKHSFI：瞬时错误续排与 processing 续排共用轮询预算（超限即终态） ==========
 
     @Test
     @DisplayName("poll 瞬时错误达上限（timeout + pollCount=720）→ 1049 终态，不续排不重提交，不写 http_status（无 cause 不推断，IKIN6X）")
@@ -612,11 +586,9 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 contains("持续瞬时错误"), detailsCaptor.capture(), eq("worker-1"), eq(5L));
-        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
         assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        // 不新增自动重新提交供应商任务的行为：超限只落终态，用户手动重试才走新 job
         verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
     }
 
@@ -631,8 +603,6 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
-        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：状态落 details，message 剥
-        // 「: HTTP 503」片段（冒号保留），上游可读原因保留
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(finalizer).failVideoJob(eq("100"),
@@ -660,7 +630,6 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
-        // 与 503 用例同口径（IKIN6X）：429 也经 cause 链结构化透传，message 剥状态码字样
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(finalizer).failVideoJob(eq("100"),
@@ -692,11 +661,9 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 contains("连接被拒"), detailsCaptor.capture(), eq("worker-1"), eq(5L));
-        // 反例（IKIN6X）：连接失败 cause 非 HttpStatusException → 不写 http_status 键
         assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        // 超限只落终态，不自动重新提交供应商任务（用户手动重试才走新 job）
         verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
     }
 
@@ -725,8 +692,6 @@ class VideoFrameInterpolationJobProcessorTest {
         when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenThrow(new VideoFrameInterpolationError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                         "MediaKit 视频插帧任务查询超时"));
-        // reschedule CAS 要求 status='processing' + 当前 lease_owner + fencing_token：
-        // 已取消 / 已终态 / 旧 worker 一律不命中 → 不派发下一次轮询
         when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(false);
 
@@ -740,7 +705,6 @@ class VideoFrameInterpolationJobProcessorTest {
     @Test
     @DisplayName("超限落 failed 终态后：重复唤醒 claim 不命中 → 静默返回，不复活不续排（IKHSFI）")
     void pollBudgetExhaustedTerminalRewake_noRevival() {
-        // 第一步：瞬时错误超限 → failVideoJob 写终态 failed（清 next_poll_at，不自投消息）
         stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
         when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenThrow(new VideoFrameInterpolationError(GenerationError.ERROR_PROVIDER_TIMEOUT,
@@ -750,11 +714,6 @@ class VideoFrameInterpolationJobProcessorTest {
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 anyString(), any(), eq("worker-1"), eq(5L));
 
-        // 第二步：终态后的重复唤醒（MQ 迟到重投，或 recovery 扫描兜底重投同一条消息）。
-        // claim 候选查询（findCandidateByTypeAndSources）只认 queued / processing(+空或过期
-        // 租约) 且 next_action_at 到期——failed 终态一律不命中 → claim 返回空 → 处理器静默
-        // 返回，不产生任何状态机写或自投（claimReturnsEmpty_silentReturn 同款语义，
-        // 锚定超限终态场景：claim 与 recovery 两条唤醒路径都不复活已终态任务）。
         clearInvocations(stateMachine, finalizer, interpolateVideoClient, producer);
         when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
@@ -830,7 +789,6 @@ class VideoFrameInterpolationJobProcessorTest {
         assertFailCode(GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
     }
 
-    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS4；对齐音频提取 IKIMS2 样板） ==========
 
     @Test
     @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
@@ -850,7 +808,6 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
-        // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
         assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
         assertThat(detailsCaptor.getValue())
                 .containsEntry("raw", "MediaKit 视频插帧任务查询失败:"
@@ -858,7 +815,6 @@ class VideoFrameInterpolationJobProcessorTest {
                 .containsEntry("http_status", 401);
     }
 
-    // ========== poll 相：completed → 立即下载转存 + 终态发布（URL 24h 有效） ==========
 
     @Test
     @DisplayName("poll completed → persist 转存 → 发布 payload：官方 duration/resolution/fps + 源宽高近似 + md5 穿透")
@@ -876,7 +832,6 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
-        // URL 24h 有效：completed 后立即转存（同步链路，无续排）
         verify(mediaRelay).persist("https://volc/out.mp4?auth_key=...", "9");
         ArgumentCaptor<PublishVideoFrameInterpolationDto> captor =
                 ArgumentCaptor.forClass(PublishVideoFrameInterpolationDto.class);
@@ -887,7 +842,6 @@ class VideoFrameInterpolationJobProcessorTest {
         assertThat(published.mime()).isEqualTo("video/mp4");
         assertThat(published.size()).isEqualTo(123_456L);
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        // 插帧不改变分辨率 → 宽高 = 源近似（1920x1080），不做档位推导
         assertThat(published.width()).isEqualTo(1920);
         assertThat(published.height()).isEqualTo(1080);
         assertThat(published.durationSec()).isEqualTo(65.5);
@@ -917,8 +871,8 @@ class VideoFrameInterpolationJobProcessorTest {
         ArgumentCaptor<PublishVideoFrameInterpolationDto> captor =
                 ArgumentCaptor.forClass(PublishVideoFrameInterpolationDto.class);
         verify(finalizer).publishVideoFrameInterpolationResult(captor.capture());
-        assertThat(captor.getValue().durationSec()).isEqualTo(65.0); // 源 65000ms 换算
-        assertThat(captor.getValue().fps()).isEqualTo(30.0);         // 冻结 input fps 回落
+        assertThat(captor.getValue().durationSec()).isEqualTo(65.0);
+        assertThat(captor.getValue().fps()).isEqualTo(30.0);
         assertThat(captor.getValue().width()).isNull();
         assertThat(captor.getValue().height()).isNull();
         assertThat(captor.getValue().resolution()).isNull();
@@ -974,7 +928,6 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(finalizer, never()).publishVideoFrameInterpolationResult(any());
     }
 
-    // ========== 冻结 input 解析（整型 fps 兜底，契约三档） ==========
 
     @Test
     @DisplayName("parseFps：三档整型通过；字符串 / 小数 / 越界 / null 一律拒（兜底防御不放松口径）")
@@ -989,7 +942,6 @@ class VideoFrameInterpolationJobProcessorTest {
         assertThat(VideoFrameInterpolationJobProcessor.parseFps(null)).isNull();
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架同语义） ==========
 
     @Test
     @DisplayName("瞬时判定：provider_timeout / 网络不可达 / HTTP 429/5xx → 瞬时；4xx / 业务失败 → 非瞬时")

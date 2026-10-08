@@ -4,14 +4,8 @@
 
 <mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.CostReservationMapper">
 
-  <!--
-    取出并锁住该 job 的预留。
 
-    结算与返还是两条并发路径（任务完成回调 vs 超时兜底扫描），都可能同时到达。
-    没有这把行锁，两者会各自读到 held、各自解冻一次——同一笔钱退两遍。
 
-    走 uk_reservation__job（generation_job_id 唯一索引），锁的是那一行本身。
-  -->
   <select id="lockByJobId" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CostReservationEntity">
     SELECT id, generation_job_id, user_id, reserved_credits, actual_credits, receivable_credits,
            status, allocations, catalog_version, discount_bp, rule_snapshot, title, release_note,
@@ -21,15 +15,8 @@
     FOR UPDATE
   </select>
 
-  <!--
-    置为已结算。actual_credits 落最终值——对账时「预扣多少、实际多少」都在这张表上。
 
-    ★ receivable_credits 与 actual_credits **同一条 UPDATE 写**（见 V9 迁移）：
-    它记的是「实际里没收到的那部分」，与账本 RECEIVABLE 那一腿由同一次结算给出。
-    拆成两条语句就会留下「欠费列已写、账本腿还没写」的窗口——那正是这次要消灭的东西。
 
-    version = version + 1 是自引用表达式，故写在 XML 而非 Wrapper。
-  -->
   <update id="markSettled">
     UPDATE billing_cost_reservations
     SET status = 'settled',
@@ -39,7 +26,6 @@
     WHERE generation_job_id = #{jobId}
   </update>
 
-  <!-- 置为已释放；actual_credits 归零，release_note 留痕。 -->
   <update id="markReleased">
     UPDATE billing_cost_reservations
     SET status = 'released',
@@ -49,18 +35,9 @@
     WHERE generation_job_id = #{jobId}
   </update>
 
-  <!--
-    区间内已结算的实际消耗合计（管理端仪表盘用）。
 
-    ⚠️ COALESCE 不是装饰：SUM 在没有匹配行时返回 NULL，而接口声明的是基本类型 long。
-       不兜底的话「这段时间一个任务都没结算」这条最正常的路径会变成 null 拆箱报错。
 
-    ⚠️ 区间列是 gmt_modified（这张表没有 settled_at 列，结算那一刻由
-       ON UPDATE CURRENT_TIMESTAMP 写在它上面），与用户流水投影里 settled_at 的取法一致。
 
-    ⚠️ 半开区间 [from, to)：DATETIME 只到秒，写成 `<= '23:59:59'` 会漏掉那一秒内的行，
-       而漏掉的部分不会以任何形式表现出来。
-  -->
   <select id="sumSettledActualCredits" resultType="long">
     SELECT COALESCE(SUM(actual_credits), 0)
     FROM billing_cost_reservations
@@ -69,21 +46,10 @@
       AND gmt_modified &lt; #{to}
   </select>
 
-  <!--
-    ★ 批量版 sumSettledActualCredits：一次问一批用户的已结算消耗
-      （管理端用户列表的「累计消费」列）。
 
-    ⚠️ 口径与上面那条**逐字相同**（status = 'settled' + SUM(actual_credits)），
-       只把「时间区间」换成「user_id IN」—— 统计口径必须是同一个，否则列表页
-       按用户的合计与仪表盘的全站合计对不上，而两边都不报错。
 
-    ⚠️ 只 IN 不给区间：列表页要的是**累计**（从注册至今），不是某一段时间。
 
-    ⚠️ 走 idx_reservation__user_time (user_id, gmt_create)（见 V7 迁移）：前导列等值 + IN
-       是索引区间扫描；GROUP BY user_id 与索引首列同序，不需要文件排序。
 
-    ⚠️ **没有已结算预留的用户不会出现在结果里**（GROUP BY 的语义）。补零是调用方的事。
-  -->
   <select id="sumSettledActualByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
     SELECT user_id, COALESCE(SUM(actual_credits), 0) AS amount
     FROM billing_cost_reservations
@@ -93,24 +59,11 @@
     GROUP BY user_id
   </select>
 
-  <!--
-    持有超时仍未终态的预留（《计费逻辑详细设计》§9 层次②）。
 
-    三处细节各有理由：
 
-    ① `status = 'held'` + `gmt_modified` 正好是 idx_reservation__status (status, gmt_modified)
-       的前两列：索引区间扫描，不是全表扫。这张表随任务增长，而这条扫描每 10 分钟跑一次。
 
-    ② 阈值用 `INTERVAL #{seconds} SECOND` 而不是 Java 传来的时间点：判定「冻了多久」
-       只能有一个时钟，见接口注释。NOW() 是**会话时区**（被钉成北京时间），
-       与写入 gmt_modified 的 CURRENT_TIMESTAMP 同源。
 
-    ③ held_seconds 由 TIMESTAMPDIFF 现算：日志里要报「冻了几个小时」给人看，
-       同一个时钟算出来的秒数才是可信的。
 
-    ORDER BY gmt_modified ASC + LIMIT：最久的先处理。配合「每轮重扫」，
-    即使一轮取不完（limit 截断），下一轮也会接着最久的那些，不会有饥饿。
-  -->
   <select id="listStaleHeld" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.StaleReservationRow">
     SELECT id,
            generation_job_id,

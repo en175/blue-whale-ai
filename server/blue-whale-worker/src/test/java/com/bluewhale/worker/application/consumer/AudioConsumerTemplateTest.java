@@ -13,14 +13,6 @@ import java.nio.charset.StandardCharsets;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
-/**
- * 音频消费者模板测试（对齐 MediaExtractConsumerTemplateTest）。
- * <p>
- * 验证 AudioConsumer 的 TEMPLATE METHOD 行为：
- * - tag = "audio"
- * - digitGuard = true（纯数字守卫）
- * - 毒丸 ack / handler 成功 ack / handler 抛错不 ack
- */
 @ExtendWith(MockitoExtension.class)
 class AudioConsumerTemplateTest {
 
@@ -54,7 +46,7 @@ class AudioConsumerTemplateTest {
 
         boolean shouldAck = consumer.processBody(bytes);
 
-        assertThat(shouldAck).isTrue(); // 毒丸 → ack 丢弃
+        assertThat(shouldAck).isTrue();
         verify(processor, never()).handle(anyString());
     }
 
@@ -80,7 +72,7 @@ class AudioConsumerTemplateTest {
 
         boolean shouldAck = consumer.processBody(bytes);
 
-        assertThat(shouldAck).isFalse(); // 不 ack → 重投
+        assertThat(shouldAck).isFalse();
     }
 
     @Test

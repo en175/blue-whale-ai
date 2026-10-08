@@ -7,12 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 
-/* IKDMQS 视频草稿：侧栏建卡 / 重复创建 / 连线角色与提交推导 / 组合约束 /
-   无效来源拒绝 / 移除断线 / 生成中连线只读。
-   FlowCanvas/CanvasToolbar 打桩透出 props；BottomDialog 用真实实现（ChipTextEditor 打桩）。 */
 
-// IKFJJT 合并 0915 适配：视频提交前会对参考图做合规入库（ensureVideoImageRefsCompliance →
-// depositCanvasAssetToCharacterLibrary）。测试环境固定返回 materialId，避免真实调素材入库 API。
 const quoteMock = vi.hoisted(() => ({
   current: null as { credits: number; quote_revision: string } | null,
 }));
@@ -84,7 +79,6 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** PromptRefEditor 打桩（IKFA1O 编辑器替换）：textarea 输入透传结构化 onChange（驱动草稿提示词写回） */
 vi.mock('./components/PromptRefEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
@@ -227,10 +221,8 @@ vi.mock('@/api/jobs', () => ({
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
   fetchJobStatus: apiMocks.fetchJobStatus,
-  // IKIZQE：样片成功卡会请求成片报价（本文件不覆盖成片流，恒空报价禁用入口）
   quoteVideoFinalize: vi.fn(async () => ({ credits: null, quote_revision: null })),
   finalizeVideoJob: vi.fn(),
-  // IKIZQG：过期样片/失败成片入口的重新生成报价（本文件恒空报价禁用入口，不覆盖重生成流）
   quoteSampleRegenerate: vi.fn(async () => ({ credits: null, quote_revision: null })),
   regenerateSampleJob: vi.fn(),
   createVideoEnhancement: apiMocks.createVideoEnhancement,
@@ -258,7 +250,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 默认画布文档：图片成品 m1/m2 + 视频成品 v1 + 待生成草稿视频 d1 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -350,20 +341,16 @@ async function connect(source: string, target: string) {
 }
 
 async function clickNode(node: { id: string; type: string; data?: Record<string, unknown> }) {
-  // 与真实 Canvas 行为对齐：onNodeClick 传入完整节点（含 data），
-  // 而非测试构造的局部对象——handleCanvasNodeClick 从 node.data 读取 assetId 等字段
   const fullNode = flowProps.current.mediaNodes?.find((n: Node) => n.id === node.id);
   await act(async () => {
     flowProps.current.onNodeClick((fullNode ?? node) as Node);
   });
 }
 
-/** 等待视频模型能力加载完成（发送前置条件） */
 async function waitModelReady() {
   await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'), { timeout: 3000 });
 }
 
-/** 1f2f498d 起模式选择器为下拉：先点底部当前模式按钮展开，再从下拉选项切首尾帧 */
 async function selectMode(label: string) {
   const modeLabels = ['文生视频', '全能参考', '图片参考', '图生视频', '首尾帧', '视频编辑', '视频延长'];
   await act(async () => {
@@ -378,8 +365,6 @@ async function selectKeyframeMode() {
   await selectMode('首尾帧');
 }
 
-/** 经 Dock 槽位入口选取来源节点建立指定角色的连线（首尾帧真实路径：+ 按钮弹来源菜单 →「从节点添加素材」→ 画布节点点击）；
- *  IKGB7W：slotTitle 为普通参考旧入口 title 时改走操作条「+ 参考」pill 直达（栏尾旧「+」退役，分派语义不变） */
 async function pickRefNode(slotTitle: string, nodeId: string) {
   if (slotTitle === '从资产中选择 / 从节点添加素材') {
     await vi.waitFor(() => {
@@ -408,7 +393,6 @@ async function pickRefNode(slotTitle: string, nodeId: string) {
   await clickNode(flowProps.current.mediaNodes.find((n: Node) => n.id === nodeId)!);
 }
 
-/** 视频草稿节点集合（画布 state 中的实时形态） */
 function videoDrafts(): Node[] {
   return flowProps.current.mediaNodes.filter(
     (n: Node) => n.data?.draft === true && n.data?.mediaType === 'video',
@@ -436,14 +420,10 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
 
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
 
-    // 工具栏入口先建视频草稿卡再打开跟随输入框：seed 的 d1 之外新增一张草稿
     expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
     expect(videoDrafts()).toHaveLength(2);
-    // 仅点击入口不创建任务
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    // 面板打开：绑定空草稿卡默认跟随模式「文生视频」（下拉收起仅显示当前模式名）
     expect(container.textContent).toContain('文生视频');
-    // IKGB7W：添加入口 = 操作条「+ 参考」pill（栏尾旧「+」退役）
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '参考')).toBe(true);
     expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeNull();
   });
@@ -459,15 +439,11 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.type).toBe('video');
-    // IKFC1T：新建默认文生视频，仅提示词提交——省略 references 字段，不发 references: []
     expect(payload.references).toBeUndefined();
     expect('references' in payload).toBe(false);
-    // 发送绑定入口新建的草稿卡，在原卡生成
     expect(typeof payload.target_node_id).toBe('string');
     expect((payload.parameters as Record<string, unknown>).prompt).toBe('自由模式输入');
-    // seed 4 节点 + 入口建的 1 张草稿卡；生成发生在原卡，不新增节点
     expect(flowProps.current.mediaNodes).toHaveLength(5);
-    // IKFXZD：创建请求发出即隐藏面板（提交前校验/落盘/上传失败则保持打开）
     expect(container.querySelector('textarea')).toBeNull();
   });
 
@@ -475,21 +451,19 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
-    expect(videoDrafts()).toHaveLength(3); // seed d1 + 两次点击各建一张
+    expect(videoDrafts()).toHaveLength(3);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(container.textContent).toContain('文生视频');
   });
 
   it('点击已保存的视频草稿卡重开绑定面板', async () => {
     await renderPage();
-    // 关闭面板后点击草稿卡 d1（seed 中的已保存草稿）
     await clickNode({
       id: 'd1',
       type: 'mediaNode',
       data: { draft: true, mediaType: 'video', genStatus: 'draft' },
     });
     expect(container.textContent).toContain('文生视频');
-    // IKGB7W：添加入口 = 操作条「+ 参考」pill（栏尾旧「+」退役）
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '参考')).toBe(true);
     expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeNull();
   });
@@ -503,14 +477,11 @@ describe('IKDMQS 视频参考连线与显式角色', () => {
     await connect('m1', 'd1');
     const edge = flowProps.current.edges.find((e: { source: string; target: string }) => e.source === 'm1' && e.target === 'd1');
     expect(edge).toBeTruthy();
-    // 缺省角色不写 data（普通参考）
     expect(edge.data?.refRole).toBeUndefined();
-    // Dock 普通参考区显示该项
     expect(container.querySelector('[data-testid="dock-video-ref"]')).toBeTruthy();
   });
 
   it('无效来源被拒绝并提示：待生成草稿不能作为参考', async () => {
-    // 追加第二个待生成草稿 d2 作为无效来源（draft 状态不可作参考）
     (canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes.push({
       id: 'd2',
       type: 'mediaNode',
@@ -546,10 +517,8 @@ describe('IKFXZD 发送成功后面板自动隐藏', () => {
       await act(async () => { sendButton().click(); });
       await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'));
       expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-      // 失败分支：面板保持打开（成功才关）
       expect(container.querySelector('textarea')).toBeTruthy();
     } finally {
-      // clearAllMocks 不重置实现，手动恢复成功落盘
       apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
     }
   });
@@ -566,21 +535,17 @@ describe('IKFXZD 发送成功后面板自动隐藏', () => {
 
       await act(async () => { sendButton().click(); });
       await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-      // 发送成功面板已关
       expect(container.querySelector('textarea')).toBeNull();
 
-      // 模拟发送后 patch 触发的画布选中事件（单选生成中的草稿卡）：不得回弹重开
       const draft = () => flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1')!;
       await act(async () => {
         flowProps.current.onSelectionChange({ nodes: [draft()] });
       });
       expect(container.querySelector('textarea')).toBeNull();
 
-      // 手动点卡：照常重开只读面板（口径 3 不受影响）
       await clickNode(draft());
       await vi.waitFor(() => expect(container.querySelector('textarea')).toBeTruthy());
     } finally {
-      // 恢复秒回 succeeded 的默认 mock（clearAllMocks 不重置实现，避免泄漏给后续回填用例）
       apiMocks.fetchJobStatus.mockImplementation(async (): Promise<any> => ({
         job_id: 'j1', status: 'succeeded', progress: 100,
         asset: { id: 'a2', url: 'http://vid/out.mp4', type: 'video' },
@@ -605,11 +570,8 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(projectId).toBe('p1');
     expect(payload.type).toBe('video');
     expect(payload.target_node_id).toBe('d1');
-    // !718：画布连线图片按本地参考 asset_id 直接提交，不再上传虚拟人像库换 materialId
     expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
     expect(payload.first_frame_asset_id).toBeUndefined();
-    // 原位承接 + 首次结果回填同一张卡（fetchJobStatus mock 秒回 succeeded）：
-    // 节点数量与身份不变，草稿标记清除、结果 src/assetId 写入同节点
     await vi.waitFor(() => {
       const d1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1');
       const data = d1!.data as Record<string, unknown>;
@@ -619,7 +581,6 @@ describe('IKDMQS 提交推导与组合约束', () => {
       expect(data.genStatus).toBeUndefined();
     });
     expect(flowProps.current.mediaNodes).toHaveLength(4);
-    // IKFXZD：创建请求发出即隐藏面板
     expect(container.querySelector('textarea')).toBeNull();
   });
 
@@ -658,19 +619,16 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(sendButton().disabled).toBe(true);
     await act(async () => { sendButton().click(); });
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    // IKFXZD：提交被拦（校验失败）面板保持打开
     expect(container.querySelector('textarea')).toBeTruthy();
   });
 
   it('已有 2 张普通参考图片时切换首尾帧模式：自动转为首帧/尾帧槽（IKFJJT）', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
-    // 2 张图片连线后首尾帧模式可选；切换时自动把第 1/2 张转为首帧/尾帧（不再要求先移除）
     await connect('m1', 'd1');
     await connect('m2', 'd1');
     await waitModelReady();
     await selectKeyframeMode();
-    // 连线保留并带上角色：m1→first、m2→last
     await vi.waitFor(() => {
       const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
       expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBe('first');
@@ -691,7 +649,6 @@ describe('IKDMQS 提交推导与组合约束', () => {
       const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
       expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBe('first');
     });
-    // 切回全能参考：首尾帧转回普通参考（refRole 字段移除 = 缺省 reference）
     await selectMode('全能参考');
     await vi.waitFor(() => {
       const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
@@ -703,7 +660,6 @@ describe('IKDMQS 提交推导与组合约束', () => {
 });
 
 describe('IKFQ5S 首尾帧 adaptive 按模型门控', () => {
-  /** 构造视频模型能力项（IKFQ5S：比例档按参数给，用于区分支持/不支持 adaptive 的模型）。 */
   const videoModelWith = (ratioIds: string[]) => ({
     model_id: 'seedance-2',
     provider_id: 'prov',
@@ -754,20 +710,17 @@ describe('IKFQ5S 首尾帧 adaptive 按模型门控', () => {
 
   it('模型不支持 adaptive（2.0）：首尾帧仍用固定比例（状态栏可见），不内置 adaptive', async () => {
     await openKeyframeWith(['16:9', '9:16', '1:1']);
-    // 状态栏「模型|比例|分辨率|时长」——比例项照常出现且是固定档
     expect(container.textContent).toContain('测试视频模型|16:9|720p');
     expect(container.textContent).not.toContain('adaptive');
   });
 
   it('模型支持 adaptive（2.5）：首尾帧隐去比例项（内置 adaptive，用户不可见）', async () => {
     await openKeyframeWith(['16:9', 'adaptive']);
-    // 状态栏比例项被隐去：模型名后直接跟分辨率
     expect(container.textContent).toContain('测试视频模型|720p');
   });
 });
 
 describe('IKG0LP 视频是否带音频开关', () => {
-  /** 视频模型能力项：`audio` 为能力位 features.audio（是否允许生成带音频）。 */
   const videoModelWith = (audio: boolean) => ({
     model_id: 'seedance-2',
     provider_id: 'prov',
@@ -806,7 +759,6 @@ describe('IKG0LP 视频是否带音频开关', () => {
     digest: '',
   });
 
-  /** 状态栏配置按钮（文案 = 模型名|比例|分辨率|时长）→ 打开参数浮层 */
   async function openConfigPanel() {
     const btn = [...container.querySelectorAll('button')].find((b) =>
       (b.textContent ?? '').includes('测试视频模型|'),
@@ -847,12 +799,10 @@ describe('IKG0LP 视频是否带音频开关', () => {
 describe('IKDMQS 生成中连线只读', () => {
   it('生成中的视频草稿：新建连线被拦截并提示', async () => {
     await renderPage();
-    // 提交使 d1 原地转生成中
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await connect('m1', 'd1');
     await waitModelReady();
     await typePrompt('转生成中');
-    // 轮询挂起在执行中，保持 generating 只读态
     apiMocks.fetchJobStatus.mockImplementation(async () => ({ job_id: 'j1', status: 'running', progress: 10 }) as unknown as Awaited<ReturnType<typeof apiMocks.fetchJobStatus>>);
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => {
@@ -860,7 +810,6 @@ describe('IKDMQS 生成中连线只读', () => {
       expect((d1!.data as Record<string, unknown>).genStatus).toBe('generating');
     });
 
-    // 生成中再连入新来源被拦
     await connect('m2', 'd1');
     expect(
       flowProps.current.edges.some((e: { source: string; target: string }) => e.source === 'm2' && e.target === 'd1'),
@@ -900,11 +849,9 @@ async function expectMode(label: string) {
   await vi.waitFor(() => expect(modeButton().textContent).toBe(label));
 }
 
-/** 展开模式下拉（幂等）：下拉已展开（出现多个模式按钮）时不再点击——jsdom click 不触发
- *  mousedown 关不掉了 useDismissOnOutside，二次点击会误选下拉首项 */
 async function openModeMenu() {
   const modeButtons = () => [...container.querySelectorAll('button')].filter((b) => MODE_LABELS.includes(b.textContent ?? ''));
-  if (modeButtons().length > 1) return; // 已展开（收起态仅当前模式一个按钮）
+  if (modeButtons().length > 1) return;
   await act(async () => { modeButtons()[0]!.click(); });
 }
 
@@ -932,7 +879,6 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await connect('t1', 'd1');
 
     await expectMode('文生视频');
-    // IKFCKQ：文本附件以 FileText 缩略图进参考栏（独立区块下线）
     expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
     await waitModelReady();
     expect(sendButton().disabled).toBe(false);
@@ -951,14 +897,13 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await waitModelReady();
     await expectMode('文生视频');
     await typePrompt('海边日落');
-    await connect('t1', 'd1'); // 文本附件先入（不触发切换）
+    await connect('t1', 'd1');
     await expectMode('文生视频');
 
     await connect('m1', 'd1');
 
     await expectMode('图片参考');
     expect(container.textContent).toContain('已根据当前素材切换生成模式');
-    // 自动切换保留文本附件与提示词（缩略图仍在参考栏）
     expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
     await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('image_reference'));
     await vi.waitFor(() => expect(draftDataOf('d1').prompt).toBe('海边日落'));
@@ -966,7 +911,6 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
-    // !718：连线图片按本地参考 asset_id 提交（文本附件仍由提示词链路携带）
     expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
   });
 
@@ -976,7 +920,6 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
       { materialId: 'asset-lib1', url: 'http://img/lib1.png', name: '角色立绘', mediaType: 'image', role: 'reference' },
     ];
     await renderPage();
-    // 面板未开：角色库参考不触发任何行为；打开后按实际参考判定
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await expectMode('图片参考');
     expect(flowProps.current.edges).toHaveLength(0);
@@ -990,7 +933,7 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
 
     await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
 
-    expect(flowProps.current.edges).toHaveLength(1); // IKFDFW：选取即建连线，不再经暂存
+    expect(flowProps.current.edges).toHaveLength(1);
     await expectMode('图片参考');
   });
 
@@ -1005,7 +948,6 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await openModeMenu();
     expect(modeOption('文生视频')!.disabled).toBe(true);
 
-    // 移除部分参考：仍有媒体参考，文生视频保持置灰（IKFCKQ：× 为共享缩略图按钮，title=移除）
     const removeButtons = () => container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]');
     await act(async () => { removeButtons()[0]!.click(); });
     await openModeMenu();
@@ -1020,7 +962,6 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
 
   it('草稿恢复保持已保存模式：首尾帧草稿恢复首尾帧，文生视频草稿无媒体恢复文生视频', async () => {
     const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: unknown[] };
-    // 已保存首尾帧草稿：模式与首尾帧连线一并恢复
     doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'first_last_frame';
     doc.edges = [
       { id: 'f1', source: 'm1', target: 'd1', data: { refRole: 'first' } },
@@ -1036,7 +977,6 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await expectMode('图片参考');
 
-    // 已保存文生视频草稿 + 无媒体：恢复文生视频
     doc.edges = [];
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
@@ -1186,13 +1126,7 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
   });
 });
 
-/* IKFC26 方案绑定媒体同步视频模式（!736 对齐）：方案连到视频草稿不再走后端方案同步
-   （referencePromptPlan 该路径退役），改为前端只建「方案 → 草稿」方案边并把绑定写在边上的
-   promptReference；目标模式不被切换（保持文生视频），素材图不经此路径直连草稿。纯文本方案
-   连线不带绑定。 */
 describe('IKFC26 方案绑定媒体同步视频模式', () => {
-  /** 画布加方案节点（promptSource 方案，媒体索引可选）并把视频草稿置为文生视频；
-   *  方案素材索引 assetId 须为纯数字（promptMentionSchema 契约），自建 m9 承载 */
   function seedPlanDoc(mediaMentions: boolean) {
     seedDoc();
     const doc = canvasDocMock.current.doc as { nodes: Node[] };
@@ -1218,14 +1152,12 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
           },
     });
     doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'text2video';
-    // 素材字典补 101：水合按字典推导 assetMissing，缺失会被判「素材已被删除」排除出参考
     canvasDocMock.current.assets = {
       ...canvasDocMock.current.assets,
       101: { asset_id: 101, type: 'image', access_url: 'http://img/m9.png', width: 100, height: 100 },
     };
   }
 
-  /** 方案绑定 API 返回：服务端按切换规则写回目标 draftMode，素材边/方案边随 edges 返回 */
   function mockReferenceSaved(draftModeAfter: 'all' | 'prompt', withMaterialEdges: boolean) {
     const doc = canvasDocMock.current.doc as { nodes: Node[] };
     const nodes = doc.nodes.map(n => n.id === 'd1' ? { ...n, data: { ...n.data, draftMode: draftModeAfter } } : n);
@@ -1244,22 +1176,18 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
   it('方案绑定媒体：画布连线走前端方案边，绑定随边携带且不再切换目标模式', async () => {
     seedPlanDoc(true);
     await renderPage();
-    await connect('plan1', 'd1'); // 画布拖方案到视频目标：!736 起走前端方案边，不经服务端方案同步
+    await connect('plan1', 'd1');
 
-    // 只建一根 plan1→d1 方案边，绑定写在边上（promptReference.bindings）
     await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(1));
     const planEdge = flowProps.current.edges.find((e: { source: string; target: string; data?: { promptReference?: { bindings?: unknown } } }) => e.source === 'plan1' && e.target === 'd1');
     expect(planEdge?.data?.promptReference).toEqual({ bindings: [{ index: 1, assetId: '101' }] });
 
-    // 不再调后端方案同步；目标模式保持文生视频（素材图不经此路径直连草稿）
     expect(apiMocks.referencePromptPlan).not.toHaveBeenCalled();
     expect(draftDataOf('d1').draftMode).toBe('text2video');
 
-    // 面板重开：无素材直连边，恢复文生视频
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await expectMode('文生视频');
 
-    // 绑定后再编辑触发自动保存：方案边随画布持久化（bindings 不丢）
     await typePrompt('绑定后再编辑');
     await vi.waitFor(() => {
       const last = apiMocks.saveCanvasDoc.mock.calls.at(-1) as unknown as [string, { edges: { source: string; target: string }[] }] | undefined;
@@ -1267,7 +1195,6 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
       const saved = last![1].edges.find(e => e.source === 'plan1' && e.target === 'd1');
       expect(saved).toBeTruthy();
     }, { timeout: 3000 });
-    // 生成提交对方案边的消费属 IKG99G 前端方案边语义（进行中），不在本用例代测
   });
 
   it('方案仅文本：服务端不切换，本地保持文生视频，重开面板恢复文生视频', async () => {
@@ -1284,12 +1211,7 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
   });
 });
 
-/* IKJ4W6：视频比例内部键 `adaptive`（跟随输入）界面统一显示 `auto` 且默认选中。
-   核心不变式：**展示名 ≠ 内部名**——提交/落草稿的 ratio 仍必须是 adaptive
-   （worker 侧 NewApiVideoClient 强制要求，写成 auto 视频直接失败）。
-   默认选中由前端完成：能力行含 adaptive 即选中，不依赖后端 default_aspect_ratio。 */
 describe('IKJ4W6 画布视频比例显示 auto 并默认选中', () => {
-  /** 2.5 形态：支持 adaptive；后端默认仍可能是 16:9。 */
   const adaptiveModel = {
     model_id: 'seedance-2-5',
     provider_id: 'prov',
@@ -1368,25 +1290,16 @@ describe('IKJ4W6 画布视频比例显示 auto 并默认选中', () => {
   });
 });
 
-/* IKIPSX（IKGUXU D-01）：新建视频草稿默认模式写入 draftMode。
-   创建路径：画布常规新建（无 seed）也要把当前默认模式写入草稿 data.draftMode，与面板默认显示同源；
-   提交路径：startGenerationJob 兜底——草稿已保存模式优先，否则用当前面板选中模式，
-   覆盖 2026-09-13 功能上线以来存量的无 draftMode 旧草稿；手动切换路径（syncDraftParams）行为不变。 */
 describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
   it('侧栏入口新建视频草稿：未碰模式选择器，data.draftMode 落盘为面板默认显示模式 prompt', async () => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
 
-    // 新建草稿卡（seed d1 之外新增一张）
     expect(videoDrafts()).toHaveLength(2);
     const newDraft = videoDrafts().find((n) => n.id !== 'd1')!;
-    // 创建路径补写：与面板默认显示（modeOptions[0].key = 'prompt'）同源
     expect((newDraft.data as Record<string, unknown>).draftMode).toBe('text2video');
-    // 面板显示与落盘一致：新建默认文生视频
     expect(container.textContent).toContain('文生视频');
 
-    // 不止页面内节点状态：编辑驱动自动保存后，画布保存请求体中该新草稿同样携带
-    // 与面板默认显示一致的模式值（payload.nodes 为节点对象数组，见 saveCanvasDoc 调用）
     await typePrompt('新建草稿保存');
     await vi.waitFor(() => {
       const last = apiMocks.saveCanvasDoc.mock.calls.at(-1) as unknown as
@@ -1398,20 +1311,16 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
   });
 
   it('存量无 draftMode 草稿经面板发送：提交时按当前面板选中模式兜底写入', async () => {
-    // seed 的 d1 草稿 data 无 draftMode（模拟 2026-09-13 前的存量旧草稿）；
-    // 画布渲染后读节点——单跑时 flowProps.current 尚未赋值，不得在 renderPage 前读取
     await renderPage();
     expect(draftDataOf('d1').draftMode).toBeUndefined();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
-    // 不碰模式选择器，面板默认显示「文生视频」
     await expectMode('文生视频');
     await typePrompt('存量草稿提交');
 
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
-    // 提交路径兜底：草稿已保存模式缺失时，按当前面板选中模式写入
     await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('text2video'));
   });
 
@@ -1431,17 +1340,14 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
-    // 提交后仍为所选模式（兜底不覆盖已保存值）
     expect(draftDataOf('d1').draftMode).toBe('omni');
   });
 
   it('存量草稿带参考经更新生成（不走面板）：draftMode 按提交时参考集合派生默认补写', async () => {
-    // seed 的 d1 草稿 data 无 draftMode（存量）；draftModelId 等参数齐全可直接更新生成
     await renderPage();
     expect(draftDataOf('d1').draftMode).toBeUndefined();
     await connect('m1', 'd1');
 
-    // 触发更新生成（卡片 onUpdateGenerate 回调，不走面板）
     await act(async () => {
       flowProps.current.onUpdateGenerate('d1');
     });
@@ -1451,14 +1357,7 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
   });
 });
 
-/* ============================================
- * IKIZQB 样片模式（页面级）：开关门控渲染、480p 锁定提交与报价确认两字段、
- * 成功回填阶段投影（video_stage / finalize_deadline_at）、样片卡重新编辑默认开启。
- * 模型能力位经 mockResolvedValueOnce 覆盖（不影响其他用例的默认 fixture）；
- * 报价走全局 fetch 桩（generationQuoteOptions → apiRequest）。
- * ============================================ */
 
-/** 样片放行模型（Seedance 2.5 形态）：features.sample_mode + 480p 档。 */
 function sampleCapableModel() {
   return {
     model_id: 'seedance-2',
@@ -1504,8 +1403,6 @@ function sampleCapableModel() {
 }
 
 describe('IKIZQB 样片模式提交与样片卡', () => {
-  /** 保存 hoisted 默认模型实现：面板与页面可能各自拉一次能力列表（Once 会被首个调用
-      消耗导致后续回落无 sample_mode 的默认 fixture），用例内 override 后 afterEach 恢复。 */
   let defaultModelsImpl = apiMocks.fetchGenerationModels.getMockImplementation()!;
   beforeEach(() => {
     defaultModelsImpl = apiMocks.fetchGenerationModels.getMockImplementation()!;
@@ -1519,7 +1416,6 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     await waitModelReady();
-    // 打开「模型与质量」配置面板
     const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
     await act(async () => { configBtn.click(); });
     expect(container.textContent).toContain('模型与质量');
@@ -1540,10 +1436,8 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     expect(sw.getAttribute('aria-checked')).toBe('false');
     await act(async () => { sw.click(); });
     expect(sw.getAttribute('aria-checked')).toBe('true');
-    // 条款说明（成片另收费）
     expect(container.textContent).toContain('成片另行计费');
 
-    // 报价落地后可发送
     await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
@@ -1551,10 +1445,8 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect((payload.parameters as Record<string, unknown>).sample_mode).toBe(true);
     expect((payload.parameters as Record<string, unknown>).resolution).toBe('480p');
-    // 提交确认两字段在请求顶层（契约 confirmedSubmitFields），值为报价响应原样
     expect(payload.expected_credits).toBe(60);
     expect(payload.quote_revision).toBe('rev-1');
-    // 生成中卡身份：样片标记 + 标题（验收「生成中标样片 480P」的 data 源）
     const generating = flowProps.current.mediaNodes.find((n: Node) => n.data?.genStatus === 'generating')!;
     expect(generating.data.videoStage).toBe('sample');
     expect(generating.data.fileName).toBe('样片生成中');
@@ -1584,7 +1476,6 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
-    // 成功终态：阶段投影回填卡身份（videoStage + 实际截止），草稿转成品可预览下载
     const targetId = (apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, unknown>).target_node_id as string;
     await vi.waitFor(() => {
       const done = flowProps.current.mediaNodes.find((n: Node) => n.id === targetId);
@@ -1595,7 +1486,6 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     expect(done.data.videoStage).toBe('sample');
     expect(done.data.finalizeDeadlineAt).toBe('2026-10-06T04:30:00.000Z');
 
-    // 重新编辑样片卡：面板默认开启样片模式（父规格用户故事 7）——开关在配置面板内，先展开
     await act(async () => { clickNode(done); });
     const reopenConfigBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
     await act(async () => { reopenConfigBtn.click(); });
@@ -1603,7 +1493,6 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     await vi.waitFor(() =>
       expect(container.querySelector('[data-testid="sample-mode-switch"]')?.getAttribute('aria-checked')).toBe('true'),
     );
-    // 恢复默认轮询响应，避免本用例的样片投影残留到后续用例
     apiMocks.fetchJobStatus.mockImplementation(async () => ({
       job_id: 'j1',
       status: 'succeeded',
@@ -1630,12 +1519,6 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
   });
 });
 
-/* ============================================
- * IKIZQG 两阶段卡重新编辑（用户故事 7/25）：
- * 样片卡重新编辑默认开启样片、成片卡默认关闭；两阶段卡再次发送是原位重跑规则的
- * 明确例外——新建结果卡，旧结果与来源关系不被覆盖（成片卡由服务端冻结输入派生，
- * 面板仅预填卡上配置）。
- * ============================================ */
 describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
   const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -1721,7 +1604,6 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
-    // 样片重提：sample_mode + 480p + 确认两字段，目标仍指向原卡（正文/参考推导同源）
     const payload = apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, any>;
     expect(payload.target_node_id).toBe('s1');
     expect(payload.parameters.sample_mode).toBe(true);
@@ -1729,7 +1611,6 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     expect(payload.expected_credits).toBe(30);
     expect(payload.quote_revision).toBe('rev-1');
 
-    // 明确例外：新建样片结果卡（生成中、样片身份、落在原卡下方），原卡不被覆盖
     await vi.waitFor(() => {
       expect(flowProps.current.mediaNodes.filter((n: Node) => n.data?.videoStage === 'sample')).toHaveLength(2);
     });
@@ -1767,14 +1648,12 @@ describe('IKIZQG 两阶段卡重新编辑与新建结果卡', () => {
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
-    // 默认关闭：普通视频语义（无 sample_mode / 无确认两字段）
     const payload = apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, any>;
     expect(payload.target_node_id).toBe('f1');
     expect(payload.parameters.sample_mode).toBeUndefined();
     expect(payload.expected_credits).toBeUndefined();
     expect(payload.quote_revision).toBeUndefined();
 
-    // 新建结果卡（普通视频、落在成片卡下方），成片卡身份/素材/来源关系保留
     await vi.waitFor(() => {
       expect(flowProps.current.mediaNodes.some(
         (n: Node) => n.id !== 'f1' && n.data?.genStatus === 'generating',

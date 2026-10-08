@@ -21,13 +21,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-/**
- * NewApiMediaKitClient 接口级 mock 网关测试（契约 §14.5 / IKGM9D）。
- * <p>
- * 覆盖：请求映射（model / image_url / tool_version / multiple / 能力矩阵裁剪）、
- * 标准请求头三元组、错误分类（网关 400 且不扣费 → §5 分类 + 上游原因透传）、
- * result.image_url 解析与缺失兜底。不连真实网关。
- */
 class NewApiMediaKitClientTest {
 
     private HttpServer server;
@@ -76,7 +69,6 @@ class NewApiMediaKitClientTest {
                 "fidelity_first", false);
     }
 
-    // ========== 请求映射（§14.3） ==========
 
     @Test
     @DisplayName("max 档全字段：路径 /v1/mediakit/sync/enhance-image + model + 全部 MediaKit 参数")
@@ -128,7 +120,6 @@ class NewApiMediaKitClientTest {
         assertThat(body).doesNotContain("enable_correct_color");
     }
 
-    // ========== 响应与错误分类（§14.5 / §5） ==========
 
     @Test
     @DisplayName("成功：解析 result.image_url（火山托管 URL，24h 有效）")

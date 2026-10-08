@@ -38,16 +38,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * AudioTrimJobProcessor 错误码映射与异步链编排测试（IKHB6S，父单 IKHB08；火山 MediaKit
- * trim-audio 执行面，模板 MediaExtractJobProcessorErrorMappingTest 一对一平移）。
- * <p>
- * 覆盖：claim 语义、input 业务键兜底校验（含 start_time / end_time 可选与脏值形态）、
- * 凭证缺失分类、submit 相（提交成功存 task_id + 续排 / §5 信号保留 / 归并 1048）、
- * poll 相（processing 续排进度保持 / 轮询超限 / 瞬时错误重排 / 火山 failed 分类 + 上游
- * 原因透传）、completed 立即转存发布（官方 duration 直取不回落 / md5 穿透）、转存强依赖
- * 与瞬时判定。不连真实 MQ/DB/TOS/网关。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class AudioTrimJobProcessorErrorMappingTest {
@@ -83,7 +73,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
-    /** 源音频素材（worker 不消费其时长——截取产物时长只取官方 duration，不回落）。 */
     private void stubSourceAsset() {
         AssetEntity source = new AssetEntity();
         source.setType("audio");
@@ -124,7 +113,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         assertThat(captor.getValue().code()).isEqualTo(expectedCode);
     }
 
-    // ========== claim 语义（家族同构：DB 异常上抛保重投） ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -150,7 +138,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(finalizer, never()).publishAudioTrimResult(any());
     }
 
-    // ========== input 业务键兜底校验（权威复核在创建入口） ==========
 
     @Test
     @DisplayName("缺少 source_asset_id → invalid_input")
@@ -211,7 +198,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(finalizer, never()).failAudioTrimJob(any());
     }
 
-    // ========== 源素材 / 凭证 ==========
 
     @Test
     @DisplayName("源素材不可用（非 audio）→ 1048 兜底 + 可读原因，不提交上游")
@@ -243,7 +229,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== submit 相：提交成功 + 错误归并（§5 分类；无自动重试） ==========
 
     @Test
     @DisplayName("提交成功：submit 带 audio_url + 时间区间 + output_format → markProviderSubmitted 存 task_id + scheduleNext(5s)")
@@ -322,7 +307,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
 
     @Test
     @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
@@ -342,14 +326,12 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(finalizer).failAudioTrimJob(captor.capture());
         com.bluewhale.worker.domain.dto.FailAudioTrimDto failure = captor.getValue();
         assertThat(failure.code()).isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
-        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
         assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
         assertThat(failure.details())
                 .containsEntry("raw", "音频截取任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
                 .containsEntry("http_status", 401);
     }
 
-    // ========== parent-reuse 重试收割（IKI89Q / ADR-0114；平移 IKI89P 定型用例）==========
 
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
@@ -517,14 +499,11 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
-        // 任务保持 processing 由新 worker 重新领取继续收割
         verify(trimAudioClient, never()).submit(anyString(), anyString(), any(), any(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(finalizer, never()).failAudioTrimJob(any());
     }
 
-    // ========== poll 相：状态机 + 进度口径（家族对齐） ==========
 
     @Test
     @DisplayName("poll processing → rescheduleProviderPoll(进度保持不倒退) + scheduleNext(5s)")
@@ -609,7 +588,6 @@ class AudioTrimJobProcessorErrorMappingTest {
                 .isEqualTo("音频截取轮询超时（超过 "
                         + AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS
                         + " 次），上游持续错误: MediaKit 音频截取任务查询超时");
-        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
         assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -631,7 +609,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(finalizer).failAudioTrimJob(gatewayCaptor.capture());
         assertThat(gatewayCaptor.getValue().code())
                 .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
-        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
         assertThat(gatewayCaptor.getValue().message())
                 .isEqualTo("音频截取轮询超时（超过 "
                         + AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS
@@ -676,7 +653,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         assertFailCode(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
     }
 
-    // ========== poll 相：火山任务 failed（§5 分类映射） ==========
 
     @Test
     @DisplayName("poll failed（end_time 超真实片尾官方约束拒绝）→ 1048 + 上游可读原因透传（前端投影）")
@@ -727,7 +703,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         assertThat(captor.getValue().message()).isEqualTo("音频截取任务失败");
     }
 
-    // ========== poll 相：completed → 立即转存 + 终态发布（URL 24h 有效） ==========
 
     @Test
     @DisplayName("poll completed → persist 按任务格式转存 → 发布 payload：官方 duration 秒 + md5 穿透")
@@ -745,7 +720,6 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        // URL 24h 有效：completed 后立即转存（同步链路，无续排）
         verify(mediaRelay).persist("https://volc/out.mp3?auth_key=...", "9", "mp3");
         ArgumentCaptor<PublishAudioTrimDto> captor =
                 ArgumentCaptor.forClass(PublishAudioTrimDto.class);
@@ -852,7 +826,6 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(finalizer, never()).publishAudioTrimResult(any());
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架同语义） ==========
 
     @Test
     @DisplayName("瞬时判定：provider_timeout / 网络不可达 / HTTP 429/5xx → 瞬时；4xx / 业务失败 → 非瞬时")

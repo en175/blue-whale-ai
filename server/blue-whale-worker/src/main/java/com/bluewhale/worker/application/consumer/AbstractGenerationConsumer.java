@@ -24,20 +24,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 
-/**
- * MQ 消费者 TEMPLATE METHOD（IKENSZ pattern spec：start/stop lifecycle, receive loop, poison ack）。
- * <p>
- * 逐字移植自 TS 消费者模板（rocketmq-extract.consumer.ts / rocketmq-audio.consumer.ts）：
- * <ul>
- *   <li>receive(10, 30_000)：batch=10，不可见期 30s（契约 §1）</li>
- *   <li>消息解析：GenerationMessage.parse(body, digitGuard)</li>
- *   <li>毒丸：parse 返回 null → ack 丢弃</li>
- *   <li>handler 抛错 → 不 ack 不 nack（broker 30s 后重投）—— 全仓无显式 nack（契约 §1）</li>
- *   <li>Semaphore 并发控制（与 TS Semaphore 类一致）</li>
- * </ul>
- * <p>
- * 子类只须指定 tag / digitGuard / processor / concurrency。
- */
 public abstract class AbstractGenerationConsumer implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(AbstractGenerationConsumer.class);
@@ -73,7 +59,6 @@ public abstract class AbstractGenerationConsumer implements Closeable {
         this.consumerGroup = consumerGroup;
     }
 
-    /** 启动消费者（创建 SimpleConsumer + 启 receive 循环线程）。 */
     public void start() {
         ClientServiceProvider provider = ClientServiceProvider.loadService();
 
@@ -89,7 +74,6 @@ public abstract class AbstractGenerationConsumer implements Closeable {
             throw new IllegalStateException("SimpleConsumer 创建失败: " + e.getMessage(), e);
         }
 
-        // RocketMQ 5.x SimpleConsumer 无显式 start()——构造即可用
         running = true;
         dispatchExecutor = Executors.newCachedThreadPool(r -> {
             Thread t = new Thread(r, "mq-dispatch-" + consumerTag);
@@ -104,7 +88,6 @@ public abstract class AbstractGenerationConsumer implements Closeable {
                 topic, consumerTag, consumerGroup, semaphore.availablePermits());
     }
 
-    /** 停止消费者（关闭 receive 循环 + SimpleConsumer）。 */
     public void stop() {
         running = false;
         if (receiveThread != null) {
@@ -128,16 +111,9 @@ public abstract class AbstractGenerationConsumer implements Closeable {
         stop();
     }
 
-    /**
-     * Receive 循环（rocketmq-extract.consumer.ts:75-92 loop()）。
-     * <p>
-     * receive(10, 30s) → 逐条 acquire semaphore → fire-and-forget dispatch。
-     * receive 失败 → 1s 后重试（与 TS 一致）。
-     */
     private void receiveLoop() {
         while (running) {
             try {
-                // 契约 §1：receive(10, 30_000)
                 List<MessageView> messages = consumer.receive(10, Duration.ofSeconds(30));
                 for (MessageView message : messages) {
                     if (!running) return;
@@ -151,7 +127,6 @@ public abstract class AbstractGenerationConsumer implements Closeable {
                         semaphore.release();
                         return;
                     }
-                    // 并发派发（与 TS void this.dispatch(message) fire-and-forget 一致）
                     CompletableFuture.runAsync(
                             () -> dispatch(message), dispatchExecutor
                     );
@@ -169,12 +144,6 @@ public abstract class AbstractGenerationConsumer implements Closeable {
         }
     }
 
-    /**
-     * 单消息派发（rocketmq-extract.consumer.ts:94-107 dispatch + processMessage）。
-     * <p>
-     * 解析 → 毒丸 ack → handler → 成功 ack。
-     * handler 抛错 → 不 ack 不 nack（契约 §1：broker 30s 重投）。
-     */
     private void dispatch(MessageView message) {
         try {
             processMessage(message);
@@ -198,26 +167,17 @@ public abstract class AbstractGenerationConsumer implements Closeable {
         }
     }
 
-    /** 订阅的 topic（package-private：供同包测试断言订阅值，其余用途请勿扩用）。 */
     String topic() {
         return topic;
     }
 
-    /** 订阅的 tag（即 {@code start()} 里 FilterExpression 用的那个；package-private，同上）。 */
     String tag() {
         return consumerTag;
     }
 
-    /**
-     * 处理消息体，返回是否应 ack（package-private：供测试使用）。
-     * <p>
-     * true = ack（毒丸或 handler 成功）；false = 不 ack（handler 抛错 → broker 重投）。
-     * 与 TS processMessage 逻辑完全一致（rocketmq-extract.consumer.ts:111-156）。
-     */
     boolean processBody(byte[] body) {
         GenerationMessage parsed = GenerationMessage.parse(body, digitGuard);
 
-        // 毒丸：parse 返回 null → ack 丢弃（契约 §1）
         if (parsed == null) {
             String rawPreview = body != null && body.length > 0
                     ? new String(body, 0, Math.min(body.length, 120), java.nio.charset.StandardCharsets.UTF_8)
@@ -226,12 +186,10 @@ public abstract class AbstractGenerationConsumer implements Closeable {
             return true;
         }
 
-        // handler（契约 §1：成功才 ack；handler 抛错 → 不 ack 不 nack）
         try {
             processor.handle(parsed.jobId());
             return true;
         } catch (Exception e) {
-            // 瞬时失败：不 ack → 不可见期后重投（与 TS 逐字一致）
             log.warn("[{}] handle 失败，等待重投 jobId={}: {}",
                     consumerTag, parsed.jobId(), e.getMessage(), e);
             return false;

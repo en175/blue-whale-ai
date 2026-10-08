@@ -22,22 +22,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * 出站协议钉桩测试。
- * <p>
- * 覆盖两层：
- * <ul>
- *   <li><b>OPENAI_IMAGES</b>（IKF4LI，gpt-image-2）：无参考图 → {@code /v1/images/generations}
- *       JSON 且<strong>不含</strong> response_format（2026-09-11 实测上游 400
- *       {@code Unknown parameter: 'response_format'}）；有参考图 → {@code /v1/images/edits}
- *       multipart（generations 带 {@code image} 亦被上游 400）；响应只回 b64_json。</li>
- *   <li><b>INLINE_IMAGE</b>（现状，banana/seedream）：恒 generations + body.image 透传。</li>
- * </ul>
- * 超时/连接失败的错误分类政策见契约 §11。
- */
 class NewApiImageClientEndpointTest {
 
-    /** 最小 PNG 头（嗅探只认魔数，不做解码）。 */
     private static final byte[] PNG_MAGIC = {
             (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D
     };
@@ -57,13 +43,11 @@ class NewApiImageClientEndpointTest {
         responseJson.set("{\"data\":[{\"url\":\"https://gen/x.png\"}]}");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 
-        // 参考图下载失败桩（HttpServer 按最长前缀匹配，不会被下面的 "/" 兜底吞掉）
         server.createContext("/missing.png", exchange -> {
             exchange.sendResponseHeaders(404, -1);
             exchange.close();
         });
 
-        // 参考图素材端点（官方协议 multipart 前会先 GET 它）
         server.createContext("/ref.png", exchange -> {
             exchange.getResponseHeaders().add("Content-Type", "image/png");
             exchange.sendResponseHeaders(200, PNG_MAGIC.length);
@@ -106,7 +90,6 @@ class NewApiImageClientEndpointTest {
         server.stop(0);
     }
 
-    // ========== OPENAI_IMAGES（gpt-image-2，IKF4LI） ==========
 
     @Test
     @DisplayName("官方协议·无参考图 → generations JSON，只发官方字段（不含 response_format/stream/tools）")
@@ -120,14 +103,11 @@ class NewApiImageClientEndpointTest {
         assertThat(body).contains("\"prompt\":\"猫\"");
         assertThat(body).contains("\"size\":\"2048x2048\"");
         assertThat(body).contains("\"n\":1");
-        // 上游实测拒绝 response_format / watermark；非官方字段一并克制不发
         assertThat(body).doesNotContain("response_format");
         assertThat(body).doesNotContain("\"stream\"");
         assertThat(body).doesNotContain("\"tools\"");
         assertThat(body).doesNotContain("sequential_image_generation");
         assertThat(body).doesNotContain("\"image\"");
-        // 回归钉桩（刀③ NewApiHttpSupport 统一时曾漏加标准头 → 上游 401 Invalid token）：
-        // 三路客户端（image/video/audio）出站必须带鉴权与白名单头。
         assertThat(lastAuthorization.get()).isEqualTo("Bearer t");
         assertThat(lastClientSystem.get()).isEqualTo("bluewhale");
         assertThat(lastTraceId.get()).isNotBlank();
@@ -196,7 +176,6 @@ class NewApiImageClientEndpointTest {
         assertThat(images.get(0).mime()).isEqualTo("image/png");
     }
 
-    // ========== INLINE_IMAGE（现状，banana/seedream） ==========
 
     @Test
     @DisplayName("inline 形态·无参考图 → generations，body 无 image 字段")
@@ -235,7 +214,6 @@ class NewApiImageClientEndpointTest {
         assertThat(body.indexOf("\"image\"")).isLessThan(body.indexOf("\"n\""));
     }
 
-    // ========== 错误分类政策（契约 §11） ==========
 
     @Test
     @DisplayName("读超时 → provider_timeout 终态不重试（2026-09-11 政策：重试=双扣风险）")
@@ -255,7 +233,6 @@ class NewApiImageClientEndpointTest {
     @Test
     @DisplayName("连接失败（请求未达上游，零扣费风险）→ provider_failed 瞬态可重试")
     void connectFailureIsTransientProviderFailed() {
-        // 端口 1 无监听 → ConnectException（非 SocketTimeout）→ 通用 IO 分支归瞬态。
         NewApiImageClient client = new NewApiImageClient(new UpstreamBaseUrl("http://127.0.0.1:1"), 300);
         ImageProviderError error = null;
         try {
@@ -268,7 +245,6 @@ class NewApiImageClientEndpointTest {
         assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);
     }
 
-    // ========== 工具方法 ==========
 
     @Test
     @DisplayName("mime 嗅探：魔数优先于响应头，未知格式兜底 image/png")

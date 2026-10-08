@@ -102,12 +102,10 @@ class TosAudioMediaRelayMixTest {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/flood.wav", exchange -> {
             exchange.getResponseHeaders().set("Content-Type", "audio/wav");
-            // 声明远大于注入上限的体积；写到一半客户端即中止，服务端异常可忽略
             exchange.sendResponseHeaders(200, 64L * 1024 * 1024);
             try (var output = exchange.getResponseBody()) {
                 while (true) output.write(chunk);
             } catch (java.io.IOException ignored) {
-                // 客户端断开后写出失败，属预期
             }
         });
         server.start();

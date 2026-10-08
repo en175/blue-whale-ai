@@ -10,9 +10,6 @@ import java.util.function.Function;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * TOS 传输层超时配置（IKFS5W）：默认放宽 + env 覆盖 + 非法值快速失败。
- */
 class TosTransportConfigTest {
 
     private static Function<String, String> env(Map<String, String> values) {

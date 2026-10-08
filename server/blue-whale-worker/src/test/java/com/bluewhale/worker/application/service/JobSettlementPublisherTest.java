@@ -15,18 +15,10 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
-/**
- * 终态结算事件测试。
- *
- * <p>钉的是**钱路径上的一次性动作**：job 到终态时那条事件发不发得出去、发到哪个
- * topic、带什么字段。发错或漏发都不会有任何自动补偿——用户的钱一直冻着。
- * 所以这里的断言比一般单测细（连 topic 名都钉）。
- */
 class JobSettlementPublisherTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** 记录每次发布的 (topic, body)。 */
     private final List<String[]> sent = new ArrayList<>();
 
     private final BillingEventPublisher producer =
@@ -43,7 +35,6 @@ class JobSettlementPublisherTest {
         return job;
     }
 
-    /** 建任务时冻结了 input 的 job —— 用量行要靠 job.input 里的 model_id 与规格。 */
     private static GenerationJobEntity job(long id, long userId, String status,
                                            String type, String inputJson) {
         GenerationJobEntity job = job(id, userId, status);
@@ -56,7 +47,6 @@ class JobSettlementPublisherTest {
         return JSON.readTree(sent.get(index)[1]);
     }
 
-    // ========== 成功 → 结算 ==========
 
     @Test
     @DisplayName("★ succeeded 发到 completed topic，成功槽数 = 产物数，并带上按槽用量")
@@ -74,13 +64,11 @@ class JobSettlementPublisherTest {
         assertThat(json.get("status").asText()).isEqualTo("succeeded");
         assertThat(json.get("succeededSlots").asInt()).isEqualTo(3);
 
-        // ★ 用量行：billing 拿它去**冻结目录**里计价（worker 只报原始量，不报积分）
         assertThat(json.get("usage")).hasSize(1);
         JsonNode line = json.get("usage").get(0);
         assertThat(line.get("modelId").asText()).isEqualTo("doubao-seedance-2-5-260628");
         assertThat(line.get("taskType").asText()).isEqualTo("video");
         assertThat(line.get("quantities").get("usage.succeededSlots").asLong()).isEqualTo(3);
-        // 规格与 Hold 侧同源：prompt 是内容字段不进规格，model_id / duration 进
         assertThat(line.get("specs").get("prompt")).isNull();
         assertThat(line.get("specs").get("model_id").asText())
                 .isEqualTo("doubao-seedance-2-5-260628");
@@ -99,8 +87,6 @@ class JobSettlementPublisherTest {
         JsonNode json = body(0);
         assertThat(json.get("status").asText()).isEqualTo("partially_succeeded");
         assertThat(json.get("succeededSlots").asInt()).isEqualTo(1);
-        // ★ 报的是**实际成功的槽数**（1），不是这张单本来要出几张 ——
-        //   这个数就是 billing 算 actualCredits 的基数，报错了就是收错钱
         assertThat(json.get("usage").get(0).get("quantities").get("usage.succeededSlots").asLong())
                 .isEqualTo(1);
     }
@@ -117,10 +103,8 @@ class JobSettlementPublisherTest {
 
         JsonNode specs = body(0).get("usage").get(0).get("specs");
         assertThat(specs.get("resolution").asText()).isEqualTo("1080p");
-        // 5.0 经 MySQL JSON 列往返回来仍是 5.0，而 TS 侧 String(5.0) === "5" —— 必须对齐
         assertThat(specs.get("duration").asText()).isEqualTo("5");
         assertThat(specs.get("generate_audio").asText()).isEqualTo("true");
-        // 数组不是标量、null 不是标量、title 是内容字段 —— 三者都不进规格
         assertThat(specs.has("references")).isFalse();
         assertThat(specs.has("target_node_id")).isFalse();
         assertThat(specs.has("title")).isFalse();
@@ -129,11 +113,6 @@ class JobSettlementPublisherTest {
     @Test
     @DisplayName("★ 视频：参考素材数只认 references —— 旧分字段路径一律不计入")
     void 视频参考素材数只认references() throws Exception {
-        // 这个 job 的 input 里**同时**有单数组 references（2 项）与旧分字段路径的参考
-        // （reference_asset_ids 2 项 + 首尾帧 1 项）。预扣侧 billing-specs.ts 的
-        // extractSpecs 对**视频**只把 `references` 的长度折算成 reference_count
-        // （旧字段不进那个数），结算侧必须**只有同一个数**——
-        // 统计得更宽就会出现「预扣按 2 个参考加价、结算按 5 个收回」，比不加价更糟。
         publisher.publishTerminal(
                 job(106, 42, "succeeded", "video",
                         "{\"model_id\":\"m\",\"references\":["
@@ -144,24 +123,14 @@ class JobSettlementPublisherTest {
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
 
         JsonNode quantities = body(0).get("usage").get(0).get("quantities");
-        // ⚠️ 键名是字面量，必须是 UsageDim.REFERENCE_COUNT 的 key（billing 侧
-        // ReferenceCountSurchargeTest 钉住了那个枚举值与 "usage.referenceCount" 相等）：
-        // 写错一个字母 billing 会以 UnknownUsageDimException 拒绝计价，整单结算不出去
         assertThat(quantities.get("usage.referenceCount").asLong()).isEqualTo(2);
-        // 只是长度，不是别的数组的长度
         assertThat(quantities).hasSize(2);
-        // 数组不进规格（与 extractSpecs 一致），所以规格里也不该冒出这个键
         assertThat(body(0).get("usage").get(0).get("specs").has("references")).isFalse();
     }
 
     @Test
     @DisplayName("★ 图片：参考素材数认 input_asset_ids（图片的参考落这个键，不是 references）")
     void 图片参考素材数认inputAssetIds() throws Exception {
-        // 建任务时 imageStrategy.composeInput 把合并去重后的参考图落 input.input_asset_ids，
-        // 图片路径**从不写** input.references（执行期的 ImageJobProcessor 读的也是这个键）。
-        // 改造前这里只数 references ⇒ **所有图片单的参考数一直是 0**。
-        // 而 Seedream 5.0 Pro 的参考图按张收费（首张免费、第 2 张起 0.02 元/张），
-        // 那个 0 会让加价永远不生效 —— 一次 10 张参考图的单子少收 0.18 元。
         publisher.publishTerminal(
                 job(107, 42, "succeeded", "image",
                         "{\"model_id\":\"doubao-seedream-5-0-pro-260628\","
@@ -175,8 +144,6 @@ class JobSettlementPublisherTest {
     @Test
     @DisplayName("★ 视频不认 input_asset_ids —— 那个键对视频不是参考列表")
     void 视频不认inputAssetIds() throws Exception {
-        // 若哪天有人把媒介分支去掉（两个媒介都数 input_asset_ids），这条会红。
-        // 后果是把老客户端（走 reference_asset_ids 等旧字段）的单子突然算上参考费。
         publisher.publishTerminal(
                 job(109, 42, "succeeded", "video",
                         "{\"model_id\":\"m\",\"input_asset_ids\":[\"1\",\"2\",\"3\"]}"),
@@ -189,9 +156,6 @@ class JobSettlementPublisherTest {
     @Test
     @DisplayName("参考素材数恒上报（含 0）—— 账面上看得出「这个量我们算过，就是 0」")
     void 无参考素材时报零() throws Exception {
-        // 没有参考的图片单：两个键都不存在 ⇒ 0。
-        // 报 0（而不是**不报**）与预扣侧折算出的 reference_count="0" 一致，
-        // 也与 UsageDim.quantityOf「取不到也是 0」两不冲突。
         publisher.publishTerminal(
                 job(110, 42, "succeeded", "image", "{\"model_id\":\"m\",\"size\":\"2k\"}"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
@@ -203,8 +167,6 @@ class JobSettlementPublisherTest {
     @Test
     @DisplayName("references 为空数组时也报 0 —— 与 extractSpecs 的 Array.isArray 分支一致")
     void 空references报零() throws Exception {
-        // { references: [] } 在 TS 侧折算出的 reference_count 是 "0"（长度 0），
-        // 不是「没这个键」——两侧都取 0，倍率都 ×1.0
         publisher.publishTerminal(
                 job(108, 42, "succeeded", "image",
                         "{\"model_id\":\"m\",\"references\":[]}"),
@@ -217,16 +179,13 @@ class JobSettlementPublisherTest {
     @Test
     @DisplayName("报不出 model_id 时 usage 发空数组，billing 退回按预扣额结算")
     void 报不出用量时发空数组() throws Exception {
-        // 没有 input（历史 job / input 损坏）→ 不敢猜一个模型去计价
         publisher.publishTerminal(job(105, 42, "succeeded", "video", null),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
 
         assertThat(body(0).get("usage")).isEmpty();
-        // 槽数照发：标量本身不依赖模型
         assertThat(body(0).get("succeededSlots").asInt()).isEqualTo(1);
     }
 
-    // ========== 音频按产出秒数计价：上游真实时长 ==========
 
     @Test
     @DisplayName("★ 音频上报产出秒数（usage.seconds）—— 官方「0.3 元/分钟、精确至秒」的权威用量")
@@ -237,11 +196,8 @@ class JobSettlementPublisherTest {
                 null, 42L);
 
         JsonNode quantities = body(0).get("usage").get(0).get("quantities");
-        // 键名是字面量，必须与 UsageDim.SECONDS.key() 逐字一致：
-        // 写错一个字母 billing 会以 UnknownUsageDimException 拒绝计价，整单结算不出去
         assertThat(quantities.get("usage.seconds").asLong()).isEqualTo(42L);
         assertThat(quantities.get("usage.succeededSlots").asLong()).isEqualTo(1);
-        // 音频不按 token 计价 —— 不要顺手把 usage.c 也带上（那是视频的基准维度）
         assertThat(quantities.has("usage.c")).isFalse();
     }
 
@@ -255,12 +211,8 @@ class JobSettlementPublisherTest {
 
         JsonNode quantities = body(0).get("usage").get(0).get("quantities");
         assertThat(quantities.has("usage.seconds")).isFalse();
-        // ⚠️ 这条与上面那条的区别是**钱的去向**：这里 billing 的基准维度守卫会拒单
-        //    （MQ 重投 → 死信 → 红灯），那笔预扣一直冻着等人处理；
-        //    而如果这里填 0，billing 会当成「报过、且真的是 0 秒」→ 这次生成免费，且静默。
     }
 
-    // ========== 视频按 token 计价：上游真值 + 单价档 ==========
 
     @Test
     @DisplayName("★ 上报**上游返回**的真实 token（usage.c）—— 结算的权威用量，不是我们估的")
@@ -270,14 +222,10 @@ class JobSettlementPublisherTest {
                         "{\"model_id\":\"doubao-seedance-2-0-fast-260128\",\"resolution\":\"480p\","
                                 + "\"aspect_ratio\":\"16:9\",\"duration\":4}"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1")),
-                // 实测值：task_FIwJhbur… 480p 16:9 4s 带音频，上游 usage.total_tokens
                 40_594L);
 
         JsonNode quantities = body(0).get("usage").get(0).get("quantities");
-        // 键名是字面量，必须与 UsageDim.COMPLETION_TOKENS.key() 逐字一致：
-        // 写错一个字母 billing 会以 UnknownUsageDimException 拒绝计价，整单结算不出去
         assertThat(quantities.get("usage.c").asLong()).isEqualTo(40_594L);
-        // 槽数与参考数照旧
         assertThat(quantities.get("usage.succeededSlots").asLong()).isEqualTo(1);
     }
 
@@ -292,14 +240,12 @@ class JobSettlementPublisherTest {
 
         JsonNode quantities = body(0).get("usage").get(0).get("quantities");
         assertThat(quantities.has("usage.c")).isFalse();
-        // 缺维度 ⇒ billing 走「按预扣额结算」那条路；填 0 则会被当成「报过、且真的是 0」
         assertThat(quantities.get("usage.succeededSlots").asLong()).isEqualTo(1);
     }
 
     @Test
     @DisplayName("★ 视频输入档（video=0 / video=1）按 references 里的 video 条目折算 —— 决定视频 token 的单价档")
     void 含视频输入折算() throws Exception {
-        // 含视频参考 → video=1（走火山「含视频输入」那一档更便宜的单价）
         publisher.publishTerminal(
                 job(113, 42, "succeeded", "video",
                         "{\"model_id\":\"m\",\"references\":["
@@ -309,7 +255,6 @@ class JobSettlementPublisherTest {
         assertThat(body(0).get("usage").get(0).get("specs").get("video").asText())
                 .isEqualTo("1");
 
-        // 只有图片参考 → video=0
         publisher.publishTerminal(
                 job(114, 42, "succeeded", "video",
                         "{\"model_id\":\"m\",\"references\":["
@@ -318,8 +263,6 @@ class JobSettlementPublisherTest {
         assertThat(body(1).get("usage").get(0).get("specs").get("video").asText())
                 .isEqualTo("0");
 
-        // 没有 references 键（旧分字段路径）→ video=0。与 reference_count 同一条边界：
-        // 旧路径的参考素材不进这套口径，两侧都不进 ⇒ 预扣与结算取到同一个值
         publisher.publishTerminal(
                 job(115, 42, "succeeded", "video",
                         "{\"model_id\":\"m\",\"reference_asset_ids\":[\"21\"]}"),
@@ -336,7 +279,6 @@ class JobSettlementPublisherTest {
         assertThat(body(0).get("succeededSlots").asInt()).isZero();
     }
 
-    // ========== 失败 → 全额返还 ==========
 
     @Test
     @DisplayName("★ failed 发到 failed topic，reason 取自 status_changed 的 error.message")
@@ -372,7 +314,6 @@ class JobSettlementPublisherTest {
         assertThat(body(1).get("reason").asText()).isEqualTo("未提供原因");
     }
 
-    // ========== 守卫 ==========
 
     @Test
     @DisplayName("★ 非终态一条都不发 —— 发早了等于在任务还没干完时就解冻了钱")
@@ -400,9 +341,6 @@ class JobSettlementPublisherTest {
     @Test
     @DisplayName("★ 默认 topic 名不含点号 —— RocketMQ 只收 [%|a-zA-Z0-9_-]，含点会让消费者起不来")
     void 默认topic名合法() {
-        // 契约里原本叫 generation.job.completed / .failed（点号分隔，读起来很自然），
-        // 2026-09-25 本地起服务时以 BadRequestException 当场炸出来 ——
-        // 编译器不会说、单测不会红，只有进程真去连 broker 才知道。
         String allowed = "^[%|a-zA-Z0-9_-]+$";
         assertThat(sent).isEmpty();
         publisher.publishTerminal(job(1, 1, "succeeded"), Map.of("status", "succeeded"));
@@ -427,7 +365,6 @@ class JobSettlementPublisherTest {
 
         assertThat(captured.get(0)[0]).isEqualTo("custom.completed");
         assertThat(captured.get(1)[0]).isEqualTo("custom.failed");
-        // 默认值（上面那些测试用的）与 billing 的 billing.mq.topic-* 默认值成对
         assertThat(sent).isEmpty();
     }
 }

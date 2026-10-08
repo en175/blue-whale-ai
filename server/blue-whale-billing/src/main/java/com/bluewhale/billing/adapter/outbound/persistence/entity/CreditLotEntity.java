@@ -6,16 +6,6 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/**
- * 积分批次行（对应 Flyway {@code V3__ledger.sql} 的 {@code billing_credit_lots}）。
- *
- * <p>⚠️ 本类与迁移脚本必须同步演进。改字段先改迁移——schema 权威在 Flyway，
- * 实体只是它的映射（ADR-0113 数据主权）。
- *
- * <p>枚举列（{@code source}）在实体里用 String 承载，由 Repository 转成
- * {@link com.bluewhale.billing.domain.ledger.CreditSource}。**不给领域枚举挂 MyBatis 注解**：
- * 那会让「积分来源」这个领域概念反向依赖持久化框架。
- */
 @TableName("billing_credit_lots")
 public class CreditLotEntity {
 
@@ -24,29 +14,22 @@ public class CreditLotEntity {
 
     private Long userId;
 
-    /** 见 {@code CreditSource}。 */
     private String source;
 
-    /** 扣减优先级的冗余列，专供 ORDER BY（见迁移脚本注释）。 */
     private Integer sourcePriority;
 
-    /** 发放总量（mc），发放后不变。 */
     private Long amount;
 
-    /** 剩余总量（mc），含冻结。 */
     private Long remaining;
 
-    /** 冻结中（mc）。 */
     private Long frozen;
 
-    /** NULL = 永久。 */
     private LocalDateTime expiresAt;
 
     private String bizType;
 
     private String bizId;
 
-    /** 发放幂等键，唯一索引。 */
     private String grantKey;
 
     private LocalDateTime gmtCreate;

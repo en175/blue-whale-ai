@@ -21,17 +21,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-/**
- * NewApiMediaKitInterpolateVideoClient 接口级 mock 网关测试（IKHLKJ，父需求 IKHLES；
- * 以 {@code NewApiMediaKitEnhanceVideoClientTest} 的 HttpServer 假网关模式为模板）。
- * <p>
- * 覆盖：出站仅 model + video_url + **整型 fps**（无 resolution / bitrate_level / 其余官方可选
- * 参数）、三档帧率整型透传、标准请求头三元组、submit 响应 task_id 解析与缺失兜底、§5 错误分类
- * 与上游原因透传、poll 端点路径与三态解析（completed 解析官方 result 四键 video_url / duration /
- * resolution / fps）、HTTP 错误携带状态（瞬时判定输入）。不连真实网关。
- * <p>
- * 参数名以官方参数级 API 参考页 Body 参数节为准（契约票 IKHLK3 已冻结口径）。
- */
 class NewApiMediaKitInterpolateVideoClientTest {
 
     private HttpServer server;
@@ -82,7 +71,6 @@ class NewApiMediaKitInterpolateVideoClientTest {
                 "sk-token", "https://example.com/src.mp4", fps);
     }
 
-    // ========== submit：出站映射（官方参数级 API 参考页 Body 参数节 + 本仓参数裁剪） ==========
 
     @Test
     @DisplayName("提交：官方逐字路径 + video_url + 整型 fps 透传，不发出任何其他参数")
@@ -95,13 +83,10 @@ class NewApiMediaKitInterpolateVideoClientTest {
         String body = lastBody.get();
         assertThat(body).contains("\"model\":\"mediakit-video-frame-interpolation\"");
         assertThat(body).contains("\"video_url\":\"https://example.com/src.mp4\"");
-        // 整型直传（无小数点）：fps=60 序列化为 60 而非 60.0
         assertThat(body).contains("\"fps\":60");
         assertThat(body).doesNotContain("\"fps\":60.0");
-        // 插帧无档位概念（HD 的 resolution / bitrate_level 不复制）
         assertThat(body).doesNotContain("resolution");
         assertThat(body).doesNotContain("bitrate");
-        // 官方可选参数一律不发（产物存储 / 幂等 / 回调 / 队列）
         assertThat(body).doesNotContain("media_output_destination");
         assertThat(body).doesNotContain("client_token");
         assertThat(body).doesNotContain("callback");
@@ -141,7 +126,6 @@ class NewApiMediaKitInterpolateVideoClientTest {
         }
     }
 
-    // ========== submit：响应与错误分类（§5） ==========
 
     @Test
     @DisplayName("网关 400（官方失败示例逐字：fps 越界）→ 抛错，上游可读原因透传到 message")
@@ -206,7 +190,6 @@ class NewApiMediaKitInterpolateVideoClientTest {
                 .isEqualTo(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED);
     }
 
-    // ========== poll：端点路径与三态解析（官方 query API / result 四键） ==========
 
     @Test
     @DisplayName("poll completed：GET 查询路径拼 taskId，解析 result.video_url / duration / resolution / fps")

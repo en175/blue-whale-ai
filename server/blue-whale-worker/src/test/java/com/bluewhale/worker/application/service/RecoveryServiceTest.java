@@ -19,12 +19,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * recovery 扫描测试（IKF3AT；TS recovery.service.ts:38-106 行为对账）。
- * <p>
- * 覆盖：到点 job 逐条重投（id 字符串 + 1000ms 延迟）、生产者缺失（防御分支）跳过该 tag、
- * 单条投递失败不中断本轮、扫描参数（limit=100 / 窗口分钟数透传）、整轮异常兜底。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class RecoveryServiceTest {
@@ -206,7 +200,7 @@ class RecoveryServiceTest {
         when(jobMapper.listDueVideoJobIds(anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("db down"));
 
-        service.recover(); // 不抛
+        service.recover();
 
         verify(jobMapper, never()).listDueImageJobIds(anyInt(), anyInt());
     }

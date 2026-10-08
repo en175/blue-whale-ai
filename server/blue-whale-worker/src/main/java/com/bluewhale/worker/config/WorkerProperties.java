@@ -2,14 +2,6 @@ package com.bluewhale.worker.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/**
- * worker 运行配置。环境变量名与 TS 版逐一对齐（契约 §5）。
- * <p>
- * 消费者与 processor 全部无条件装配（ADR-0084 修正六）：本类不再持有
- * tag 开关或 consumer group 后缀，只剩各消费者的并发度上限。
- *
- * @param concurrency 各消费者的在制品上限
- */
 @ConfigurationProperties(prefix = "worker")
 public record WorkerProperties(
         Concurrency concurrency) {
@@ -19,7 +11,6 @@ public record WorkerProperties(
                 ? new Concurrency(20, 5, 2, 2, 2, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5) : concurrency;
     }
 
-    /** 各消费者的在制品上限，等价 TS 侧 Semaphore；取值范围与 TS 校验一致。 */
     public record Concurrency(int image, int audio, int mediaExtract, int audioTrim, int audioSpeed,
                               int imageEnhance, int imageErase, int imageCutout, int imageOutpaint,
                               int videoSubtitleErase, int videoEnhance,

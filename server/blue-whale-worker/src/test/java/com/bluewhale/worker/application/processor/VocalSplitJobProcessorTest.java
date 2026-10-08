@@ -39,16 +39,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * VocalSplitJobProcessor 编排测试（IKHA2J；模板 MediaExtractJobProcessorErrorMappingTest）。
- * <p>
- * 覆盖：claim 语义、input 业务键兜底校验（scene / output_format 枚举）、凭证缺失分类、
- * submit 相（scene 出站映射提交 + 存 task_id + 续排 / §5 信号保留 / 归并 1047）、poll 相
- * （processing 续排进度保持 / 轮询超限 / 瞬时错误重排 / 火山 failed 分类 + 上游原因透传）、
- * completed **逐轨转存与多轨资产回填**（二分法两轨 / 三分法三轨、轨序 = 契约 SCENE_TRACKS、
- * 缺任一轨整单失败、官方 duration / 回落源时长）、转存强依赖与瞬时判定。
- * 不连真实 MQ/DB/TOS/网关。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class VocalSplitJobProcessorTest {
@@ -85,7 +75,6 @@ class VocalSplitJobProcessorTest {
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
-    /** 源视频素材（时长供结果 duration 回落）。 */
     private void stubSourceAsset(String type) {
         AssetEntity source = new AssetEntity();
         source.setType(type);
@@ -126,7 +115,6 @@ class VocalSplitJobProcessorTest {
         assertThat(code.getValue()).isEqualTo(expectedCode);
     }
 
-    // ========== claim 语义（沿用家族口径：DB 异常上抛保重投） ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -154,7 +142,6 @@ class VocalSplitJobProcessorTest {
         verify(finalizer, never()).publishVocalSplitResult(any());
     }
 
-    // ========== input 业务键兜底校验（创建入口复核是权威） ==========
 
     @Test
     @DisplayName("缺少 source_asset_id → invalid_input")
@@ -195,7 +182,6 @@ class VocalSplitJobProcessorTest {
                 anyString(), anyString());
     }
 
-    // ========== 源素材 / 凭证 ==========
 
     @Test
     @DisplayName("源素材不可用（图片）→ 1047 兜底 + 可读原因，不提交上游")
@@ -245,7 +231,6 @@ class VocalSplitJobProcessorTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== submit 相：提交成功 + 错误归并（无自动重试） ==========
 
     @Test
     @DisplayName("提交成功：submit 带产品小写 scene + output_format → markProviderSubmitted 存 task_id + scheduleNext(5s)")
@@ -259,7 +244,6 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        // 出站 scene 是产品小写键（客户端内经契约 SCENE_UPSTREAM_MAP 换算官方枚举）
         verify(separateVoiceClient).submit("sk-frozen-token", "https://example.com/src.mp4",
                 true, "drama", "aac");
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
@@ -326,7 +310,6 @@ class VocalSplitJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
 
     @Test
     @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
@@ -347,14 +330,12 @@ class VocalSplitJobProcessorTest {
         verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(),
                 details.capture(), eq("worker-1"), eq(5L));
         assertThat(code.getValue()).isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
-        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
         assertThat(message.getValue()).doesNotContain("401").contains("上游凭证被拒绝");
         assertThat(details.getValue())
                 .containsEntry("raw", "人声背景分离任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
                 .containsEntry("http_status", 401);
     }
 
-    // ========== parent-reuse 重试收割（IKI89R / ADR-0114；平移家族定型票先例）==========
 
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且轨数组齐全 → 不提交，直接逐轨转存发布（payload 与正常完成同型）")
@@ -470,7 +451,6 @@ class VocalSplitJobProcessorTest {
     void parentReuseIncompleteResult_fallThrough() {
         when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("drama"), null, 0, 0, "amk-parent-empty")));
-        // 三分法场景但父任务 result 只带两轨（缺 sfx）
         Map<String, String> trackUrls = new LinkedHashMap<>();
         trackUrls.put("voice", "https://volc/voice.aac");
         trackUrls.put("music", "https://volc/music.aac");
@@ -526,8 +506,6 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
-        // 任务保持 processing 由新 worker 重新领取继续收割
         verify(separateVoiceClient, never()).submit(anyString(), anyString(), anyBoolean(),
                 anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -535,7 +513,6 @@ class VocalSplitJobProcessorTest {
                 anyString(), anyLong());
     }
 
-    // ========== poll 相：状态机 + 进度口径（对齐家族） ==========
 
     @Test
     @DisplayName("poll processing → rescheduleProviderPoll(进度保持不倒退) + scheduleNext(5s)")
@@ -625,7 +602,6 @@ class VocalSplitJobProcessorTest {
                 .isEqualTo("人声背景分离轮询超时（超过 "
                         + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
                         + " 次），上游持续错误: MediaKit 人声背景分离任务查询超时");
-        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
         assertThat(details.getValue()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -649,7 +625,6 @@ class VocalSplitJobProcessorTest {
                 details.capture(), eq("worker-1"), eq(5L));
         assertThat(code.getValue())
                 .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
-        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
         assertThat(message.getValue())
                 .isEqualTo("人声背景分离轮询超时（超过 "
                         + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
@@ -695,7 +670,6 @@ class VocalSplitJobProcessorTest {
         assertFailCode(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
     }
 
-    // ========== poll 相：火山任务 failed（错误归并） ==========
 
     @Test
     @DisplayName("poll failed → 1047 + 上游可读原因透传（前端投影）")
@@ -747,9 +721,7 @@ class VocalSplitJobProcessorTest {
         assertThat(message.getValue()).isEqualTo("人声背景分离任务失败");
     }
 
-    // ========== completed：逐轨转存与多轨资产回填（两轨 / 三轨） ==========
 
-    /** 两轨结果（二分法 audio/music 场景：voice + background）。 */
     private SeparateVoiceTaskObservation twoTrackObservation(Double durationSec) {
         Map<String, String> trackUrls = new LinkedHashMap<>();
         trackUrls.put("voice", "https://volc/voice.aac?auth_key=...");
@@ -757,7 +729,6 @@ class VocalSplitJobProcessorTest {
         return new SeparateVoiceTaskObservation("succeeded", trackUrls, durationSec, null, null);
     }
 
-    /** 三轨结果（三分法 drama/narrate 场景：voice + music + sfx）。 */
     private SeparateVoiceTaskObservation threeTrackObservation(Double durationSec) {
         Map<String, String> trackUrls = new LinkedHashMap<>();
         trackUrls.put("voice", "https://volc/voice.aac");
@@ -787,7 +758,6 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        // URL 24h 有效：completed 后立即逐轨转存（同步链路，无续排）
         verify(mediaRelay).persist("https://volc/voice.aac?auth_key=...", "9", "aac");
         verify(mediaRelay).persist("https://volc/background.aac?auth_key=...", "9", "aac");
         ArgumentCaptor<PublishVocalSplitDto> captor =
@@ -862,7 +832,6 @@ class VocalSplitJobProcessorTest {
     @DisplayName("completed 缺轨（drama 场景只回两轨）→ 1047 兜底整单失败，不发布不转存")
     void pollCompletedMissingTrack_fails() {
         stubPollClaim(input("drama"), 3, 7);
-        // 三分法场景但 result 只带两轨（缺 sfx）
         Map<String, String> trackUrls = new LinkedHashMap<>();
         trackUrls.put("voice", "https://volc/voice.aac");
         trackUrls.put("music", "https://volc/music.aac");
@@ -939,7 +908,6 @@ class VocalSplitJobProcessorTest {
                 anyString(), anyLong());
     }
 
-    // ========== 瞬时轮询错误判定（家族同语义） ==========
 
     @Test
     @DisplayName("瞬时判定：provider_timeout / 网络不可达 / HTTP 429/5xx → 瞬时；4xx / 业务失败 → 非瞬时")

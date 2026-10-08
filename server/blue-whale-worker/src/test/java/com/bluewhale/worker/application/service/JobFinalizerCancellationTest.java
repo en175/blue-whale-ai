@@ -18,22 +18,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/**
- * 取消路径的预扣解冻测试。
- *
- * <h2>它钉的是一个真实缺口</h2>
- *
- * 取消走的是 `GenerationJobMapper` 里 `cancelVideoBeforeDispatch` /
- * `cancelVideoAfterDispatch` 两条 CAS SQL，**完全不经过 {@link JobFinalizer}
- * 的 8 个终态路径**。在接上解冻之前，那条路上没有任何人告诉 billing——
- * job 落到终态了，而那笔预扣永远冻着：用户看不到它，也没有任何报表会亮红灯。
- *
- * <p>三条断言分别对应三个会让这个修复失效的改法：
- * 「取消不发返还事件」「发了但发错 topic」「普通用户 job 也照样发」。
- */
 class JobFinalizerCancellationTest {
 
-    /** 记录每次发布的 (topic, body)。 */
     private final List<String[]> sent = new ArrayList<>();
 
     private final GenerationJobMapper jobMapper = mock(GenerationJobMapper.class);
@@ -47,7 +33,6 @@ class JobFinalizerCancellationTest {
             mock(SceneCardGenerationRecordSync.class),
             mock(StoryboardPreviewSync.class),
             new ProjectEventPublisher(mock(ProjectEventMapper.class)),
-            // 真的 JobSettlementPublisher + 记录型生产者：走的是与生产同一条发事件代码路径
             new JobSettlementPublisher(
                     (topic, body) -> sent.add(new String[]{topic, body}),
                     new MockEnvironment()));
@@ -92,8 +77,6 @@ class JobFinalizerCancellationTest {
 
         finalizer.releaseHoldForCancelled("803");
 
-        // 真被误调时它按 succeeded 结算 —— 与「取消却发了返还」相比，
-        // 这条至少不会让平台白送一笔。断言它落在 completed 而不是 failed。
         assertThat(sent.get(0)[0]).isEqualTo("generation-job-completed");
     }
 }

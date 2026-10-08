@@ -4,11 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
-/**
- * 契约文档 §1（消息契约）的可执行切片。
- * TS 生产端若改动消息形状，本测试必须在同一次双侧评审中同步改动——
- * 这就是 IKEL4L 承诺的契约测试门。
- */
 class GenerationMessageContractTest {
 
     @Test
@@ -37,7 +32,6 @@ class GenerationMessageContractTest {
 
     @Test
     void 数字型jobId必须视为毒丸对齐TS的typeof字符串判定() {
-        // Jackson 默认强转 42 → "42"，曾在此漂移；禁止回退到 readValue 直解。
         assertThat(GenerationMessage.parse("{\"jobId\":42}".getBytes(), false)).isNull();
     }
 

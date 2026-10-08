@@ -6,12 +6,6 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/**
- * 账本分录行（对应 Flyway {@code V3__ledger.sql} 的 {@code billing_ledger_entries}）。
- *
- * <p><b>append-only</b>：只有插入与查询，没有更新与删除。冲正靠反向分录。
- * 所以本实体虽由 MyBatis-Plus 管理，却从不走 {@code updateById}。
- */
 @TableName("billing_ledger_entries")
 public class LedgerEntryEntity {
 
@@ -20,23 +14,18 @@ public class LedgerEntryEntity {
 
     private Long userId;
 
-    /** 见 {@code Account}：wallet | frozen | revenue | cost | receivable。 */
     private String account;
 
-    /** debit | credit。 */
     private String direction;
 
-    /** 恒正；方向由 direction 表达。 */
     private Long amount;
 
     private String bizType;
 
     private String bizId;
 
-    /** 幂等键，唯一索引。格式为「凭证基础键:科目名」（见 Voucher）。 */
     private String idempotencyKey;
 
-    /** 该科目变动后余额快照——对账时逐笔可验证的依据。 */
     private Long balanceAfter;
 
     private String remark;

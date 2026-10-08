@@ -39,24 +39,6 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * IKIZQD 真库集成：提交结果不明的核对与锁定（契约 §六 JOB_STATUS_CHECKING）。
- *
- * <p>父规格「提交与恢复」的真库断言：
- * <ol>
- *   <li>Worker 调网关前持久「提交中」（processing→checking，owner+fence+provider_task_id
- *       IS NULL 的 CAS）——失租/已提交的迟到写入被 fence 挡住（0 行）；</li>
- *   <li>checking 行**不被 claim 候选选中**（即使租约已过期、provider_task_id 为空）——
- *       这是「不按空 provider_task_id 重新提交」的 SQL 层保证：同键重放/并发/重启后
- *       至多一次已发上游的尝试；</li>
- *   <li>明确成功恢复原任务：markProviderSubmitted 从 checking 回 processing 并落
- *       轮询句柄，claim 重新可领取（走 poll 相位）；</li>
- *   <li>明确失败释放本阶段预扣：failVideoJob 从 checking 落 failed 且
- *       charge_state='released'（两阶段任务）。</li>
- * </ol>
- * 接线方式与 {@link JobStateMachineMySqlIntegrationTest} 同款：最小 Spring 上下文
- * （Hikari→MyBatis→Mapper→Service），无 MQ / scheduled。
- */
 @Testcontainers(disabledWithoutDocker = true)
 @DisplayName("提交结果不明核对与锁定真库测试（IKIZQD）")
 class SubmissionCheckingMySqlIntegrationTest {
@@ -139,7 +121,6 @@ class SubmissionCheckingMySqlIntegrationTest {
             return factory(StoryboardPreviewMapper.class, sf).getObject();
         }
 
-        /** IKJCOE：任务特有列的扩展位表 mapper（video_stage / charge_state 的读写落点）。 */
         @Bean
         GenerationJobExtraMapper extraMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationJobExtraMapper.class, sf).getObject();
@@ -154,7 +135,6 @@ class SubmissionCheckingMySqlIntegrationTest {
             return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
         }
 
-        /** 真库 JobFinalizer（IKIWP8 ③ 终态收口直连）：装配对齐 JobStateMachineMySqlIntegrationTest 同名 bean。 */
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
@@ -202,7 +182,6 @@ class SubmissionCheckingMySqlIntegrationTest {
         jdbc.execute("SET FOREIGN_KEY_CHECKS = 1");
     }
 
-    /** 已领取的提交相 job 行：processing + 租约 + fence；两阶段身份与预扣住在扩展位表（IKJCOE）。 */
     private long seedClaimedSubmitJob(String videoStage, String workerId, long token,
                                       Long sourceSampleJobId, String chargeState) {
         jdbc.update("""
@@ -216,7 +195,6 @@ class SubmissionCheckingMySqlIntegrationTest {
                 workerId, WorkerClock.now().plusMinutes(10), token, sourceSampleJobId);
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         long jobId = id != null ? id : -1;
-        // IKJCOE：video_stage / charge_state 已搬进 generation_job_extras（缺键 = 缺省）。
         if (videoStage != null) {
             upsertExtra(jobId, "video_stage", "string", videoStage);
         }
@@ -226,7 +204,6 @@ class SubmissionCheckingMySqlIntegrationTest {
         return jobId;
     }
 
-    /** 写一个扩展位（与 GenerationJobExtraMapper.upsert 同款唯一键语义）。 */
     private void upsertExtra(long jobId, String extraKey, String valueType, String valueText) {
         jdbc.update("""
                 INSERT INTO generation_job_extras
@@ -238,8 +215,6 @@ class SubmissionCheckingMySqlIntegrationTest {
     }
 
     private Map<String, Object> row(long id) {
-        // IKJCOE：charge_state 已搬进 generation_job_extras——按同名字段拼回同一张视图，
-        // 断言口径（键名与存在性）保持不变。
         Map<String, Object> out = new java.util.HashMap<>(jdbc.queryForMap(
                 "SELECT status, provider_task_id, lease_owner "
                         + "FROM generation_jobs WHERE id = ?", id));
@@ -258,7 +233,6 @@ class SubmissionCheckingMySqlIntegrationTest {
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId), "w1", 5L)).isTrue();
         assertThat(row(jobId)).containsEntry("status", "checking");
 
-        // 迟到写入三连拒：错误 owner、错误 fence、已提交（provider_task_id 非空）。
         long jobId2 = seedClaimedSubmitJob("final", "w1", 5L, null, "held");
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId2), "other", 5L)).isFalse();
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId2), "w1", 9L)).isFalse();
@@ -272,7 +246,6 @@ class SubmissionCheckingMySqlIntegrationTest {
     void checkingRowIsNotClaimableEvenWithExpiredLease() {
         long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "held");
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId), "w1", 5L)).isTrue();
-        // 模拟 Worker 崩溃：租约早已过期、next_action_at 已到、句柄仍为空。
         jdbc.update("""
                 UPDATE generation_jobs
                 SET lease_expires_at = ?, next_action_at = NOW() - INTERVAL 1 MINUTE
@@ -282,8 +255,6 @@ class SubmissionCheckingMySqlIntegrationTest {
         Optional<ClaimedVideoJobDto> reclaimed = service.claimVideoJobById(
                 String.valueOf(jobId), "recovery-worker");
 
-        // ★ 空 provider_task_id 不能触发自动重提（IKIZQC 指出的窗口在此关闭）：
-        //   任务保持 checking 锁定，等待人工核对，不由恢复扫描接管。
         assertThat(reclaimed).isEmpty();
         assertThat(row(jobId)).containsEntry("status", "checking");
     }
@@ -301,7 +272,6 @@ class SubmissionCheckingMySqlIntegrationTest {
         assertThat(after.get("status")).isEqualTo("processing");
         assertThat(after.get("provider_task_id")).isEqualTo("task-final-77");
         assertThat(after.get("lease_owner")).isNull();
-        // 恢复后可重新领取（next_poll_at 已排），claim 携带句柄 → 轮询相位而非重发 finalize。
         jdbc.update("UPDATE generation_jobs SET next_action_at = NOW() - INTERVAL 1 SECOND WHERE id = ?", jobId);
         Optional<ClaimedVideoJobDto> reclaimed = service.claimVideoJobById(
                 String.valueOf(jobId), "w2");
@@ -327,13 +297,11 @@ class SubmissionCheckingMySqlIntegrationTest {
     @Test
     @DisplayName("重启后仍锁定：checking 状态跨「重启」持久（无内存态参与），普通视频同规")
     void checkingPersistsAcrossRestartForAnyStage() {
-        // 样片（video_stage='sample'）draft 提交与普通视频共用同一提交相标记。
         long sampleJob = seedClaimedSubmitJob("sample", "w1", 3L, null, "held");
         long plainJob = seedClaimedSubmitJob(null, "w1", 3L, null, null);
         assertThat(service.markSubmissionAttempt(String.valueOf(sampleJob), "w1", 3L)).isTrue();
         assertThat(service.markSubmissionAttempt(String.valueOf(plainJob), "w1", 3L)).isTrue();
 
-        // 「重启」在此即另一 worker 实例按 id 领取——两行都不可被接管。
         assertThat(service.claimVideoJobById(String.valueOf(sampleJob), "w2")).isEmpty();
         assertThat(service.claimVideoJobById(String.valueOf(plainJob), "w2")).isEmpty();
         assertThat(row(sampleJob)).containsEntry("status", "checking");

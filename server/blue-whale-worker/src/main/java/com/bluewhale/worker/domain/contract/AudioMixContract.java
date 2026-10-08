@@ -2,7 +2,6 @@ package com.bluewhale.worker.domain.contract;
 
 import java.util.List;
 
-/** IKI68N: 与 backend/libs/contracts/audio-mix.ts 对齐的跨进程常量。 */
 public final class AudioMixContract {
     private AudioMixContract() {}
 

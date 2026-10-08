@@ -1,22 +1,3 @@
--- Blue-Whale 集成测试用全量 MySQL DDL（刀1 Testcontainers 安全网）。
--- 来源：backend/prisma/schema.prisma（权威 schema，勿手改）。
--- 再生成：cd backend && sed 's|provider = "mysql"|& url = env("DATABASE_URL")|' \
---   prisma/schema.prisma > /tmp/schema-diff.prisma && \
---   DATABASE_URL=... npx prisma@6.5.0 migrate diff --from-empty --to-schema-datamodel /tmp/schema-diff.prisma --script
--- 生成日期：2026-09-12
--- 2026-09-15（IKFYHJ）手工追加 material_assets 表——追加内容逐字取自
---   backend/prisma/migrations/20260915170000_ikfyhj_material_compliance/migration.sql
---   （该 DDL 已由 backend 侧 ikfyhj-parity.test.ts 与 schema.prisma 对账）。
---   按上面命令全量再生成时，该表会按 prisma 的模型顺序重新出现在文件中间，不冲突。
--- 2026-09-24（IKI8AZ）手工追加 assets.name 列——取自
---   backend/prisma/migrations/20260923153000_iki8az_asset_name/migration.sql。
--- 2026-09-25（ADR-0114）：同批追加的**用户凭证表**已从本夹具删除——worker 侧不再按 userId 取
---   上游凭证，本夹具只服务 worker 测试，没有 worker 代码访问的表不必留。该表在生产库仍由
---   backend/prisma 持有，故全量再生成时它会照原样回来——回来也不必管，与 worker 无关。
--- 2026-09-25（IKC 上游 key 入配置表）：`system_settings` **没有**加进本夹具。本夹具只服务
---   不启动 Spring 上下文的单元测试，没有任何用例经真实 DB 走 SystemSettingMapper；
---   若将来出现起容器的集成用例，须按 backend/prisma 的 DDL 逐字补上该表。
--- CreateTable
 CREATE TABLE `assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
@@ -56,7 +37,6 @@ CREATE TABLE `assets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `material_groups` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
@@ -78,7 +58,6 @@ CREATE TABLE `material_groups` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `shared_assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
@@ -100,7 +79,6 @@ CREATE TABLE `shared_assets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `canvas` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -116,7 +94,6 @@ CREATE TABLE `canvas` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `generation_jobs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NULL,
@@ -145,11 +122,6 @@ CREATE TABLE `generation_jobs` (
     `is_delete` BOOLEAN NOT NULL DEFAULT false,
     `input` JSON NULL,
     `source_sample_job_id` BIGINT NULL,
-    -- 2026-09-29（IKIZQC）成片来源唯一约束——逐字取自
-    --   backend/prisma/migrations/20260929130000_generation_jobs_finalize_source_unique/migration.sql。
-    -- ⚠️ 2026-09-30（IKJCOE）本表 DROP 了 15 列（7 死列 + 8 列搬进 generation_job_extras，
-    --   含 idx_status_next_poll 索引）；本副本必须与 backend/prisma/migrations/
-    --   20260930150000_generation_job_extras/migration.sql 的删列段保持一致。
     UNIQUE INDEX `uk_generation_jobs__source_sample_job_id`(`source_sample_job_id`),
 
     INDEX `idx_project_id`(`project_id`),
@@ -159,8 +131,6 @@ CREATE TABLE `generation_jobs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- 2026-09-30（IKJCOE）任务特有字段的扩展位表——建表段逐字取自
---   backend/prisma/migrations/20260930150000_generation_job_extras/migration.sql。
 CREATE TABLE `generation_job_extras` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `generation_job_id` BIGINT NOT NULL,
@@ -174,7 +144,6 @@ CREATE TABLE `generation_job_extras` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `generation_model_capability` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `provider_id` VARCHAR(32) NOT NULL,
@@ -205,7 +174,6 @@ CREATE TABLE `generation_model_capability` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `project` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `owner_id` BIGINT NOT NULL,
@@ -223,7 +191,6 @@ CREATE TABLE `project` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `project_asset` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
@@ -240,7 +207,6 @@ CREATE TABLE `project_asset` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `conversations` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -253,7 +219,6 @@ CREATE TABLE `conversations` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `conversation_messages` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `conversation_id` BIGINT NOT NULL,
@@ -274,7 +239,6 @@ CREATE TABLE `conversation_messages` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `scene_cards` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -290,7 +254,6 @@ CREATE TABLE `scene_cards` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `agent_runs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -324,7 +287,6 @@ CREATE TABLE `agent_runs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `command_idempotency` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -335,8 +297,6 @@ CREATE TABLE `command_idempotency` (
     `agent_run_id` BIGINT NULL,
     `generation_job_id` BIGINT NULL,
     `resource_id` BIGINT NULL,
-    -- 2026-10-03（IKJJQU）新协议保存（SAVE_CANVAS_RECOVERY_V1）的紧凑回执列——
-    --   逐字取自 backend/prisma/migrations/20261003000000_ikjjqu_canvas_recovery_v1/migration.sql 的增列段。
     `result_payload` JSON NULL,
     `accepted_cursor` BIGINT NOT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
@@ -348,7 +308,6 @@ CREATE TABLE `command_idempotency` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `project_event_stream` (
     `project_id` BIGINT NOT NULL,
     `high_watermark` BIGINT NOT NULL DEFAULT 0,
@@ -356,7 +315,6 @@ CREATE TABLE `project_event_stream` (
     PRIMARY KEY (`project_id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `project_events` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -381,7 +339,6 @@ CREATE TABLE `project_events` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `skill` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(255) NOT NULL,
@@ -408,7 +365,6 @@ CREATE TABLE `skill` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `template_card` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
@@ -427,7 +383,6 @@ CREATE TABLE `template_card` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `template_card_image` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `card_id` BIGINT NOT NULL,
@@ -443,7 +398,6 @@ CREATE TABLE `template_card_image` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `template_tag` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
@@ -458,7 +412,6 @@ CREATE TABLE `template_tag` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `user_skill` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
@@ -475,7 +428,6 @@ CREATE TABLE `user_skill` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `homepage_hero` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `media_type` VARCHAR(16) NOT NULL DEFAULT 'video',
@@ -493,7 +445,6 @@ CREATE TABLE `homepage_hero` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `creative_skill` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `creative_skill_id` VARCHAR(80) NOT NULL,
@@ -514,7 +465,6 @@ CREATE TABLE `creative_skill` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `creative_skill_version` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `creative_skill_version_id` VARCHAR(80) NOT NULL,
@@ -532,7 +482,6 @@ CREATE TABLE `creative_skill_version` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `users` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `phone` VARCHAR(20) NOT NULL,
@@ -549,7 +498,6 @@ CREATE TABLE `users` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `verification_codes` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `phone` VARCHAR(20) NOT NULL,
@@ -565,7 +513,6 @@ CREATE TABLE `verification_codes` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `topup_tiers` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(100) NOT NULL DEFAULT '',
@@ -587,7 +534,6 @@ CREATE TABLE `topup_tiers` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `admin_operation_logs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `category` VARCHAR(32) NOT NULL DEFAULT '',
@@ -607,7 +553,6 @@ CREATE TABLE `admin_operation_logs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `cost_reservations` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `generation_job_id` BIGINT NOT NULL,
@@ -633,7 +578,6 @@ CREATE TABLE `cost_reservations` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `cost_adjustments` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `batch_no` VARCHAR(64) NOT NULL,
@@ -655,7 +599,6 @@ CREATE TABLE `cost_adjustments` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `generation_job_logs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `generation_job_id` BIGINT NOT NULL,
@@ -669,8 +612,6 @@ CREATE TABLE `generation_job_logs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
--- CreateTable
 CREATE TABLE `scene_card_generation_presets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `scene_card_id` BIGINT NOT NULL,
@@ -689,7 +630,6 @@ CREATE TABLE `scene_card_generation_presets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `scene_card_generation_records` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `scene_card_id` BIGINT NOT NULL,
@@ -709,7 +649,6 @@ CREATE TABLE `scene_card_generation_records` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `generation_output_slots` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -730,7 +669,6 @@ CREATE TABLE `generation_output_slots` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `storyboard_previews` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `scene_card_id` BIGINT NOT NULL,
@@ -750,7 +688,6 @@ CREATE TABLE `storyboard_previews` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `prompt_preview_snapshots` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -765,7 +702,6 @@ CREATE TABLE `prompt_preview_snapshots` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `conversation_quote_snapshots` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -780,7 +716,6 @@ CREATE TABLE `conversation_quote_snapshots` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `legacy_card_history` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -796,7 +731,6 @@ CREATE TABLE `legacy_card_history` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `material_assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `material_id` VARCHAR(128) NOT NULL,
@@ -816,8 +750,6 @@ CREATE TABLE `material_assets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- 2026-10-03（IKJJQU）生成任务恢复契约 v1 的三张关系表——建表段逐字取自
---   backend/prisma/migrations/20261003000000_ikjjqu_canvas_recovery_v1/migration.sql。
 CREATE TABLE `generation_canvas_submissions` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,

@@ -24,11 +24,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * 音频处理器错误映射测试（generation-worker.ts:367-446 + 686-728 逐字移植）。
- * <p>
- * 验证各错误路径正确映射到 failJob 的 code/message。
- */
 @ExtendWith(MockitoExtension.class)
 class AudioJobProcessorErrorMappingTest {
 
@@ -163,7 +158,7 @@ class AudioJobProcessorErrorMappingTest {
                 "100", "42", "9", "audio",
                 Map.of("prompt", "hello", "model_id", "m"),
                 0,
-                true, // cancelRequested = true
+                true,
                 5L
         );
         when(stateMachine.claimAudioJobById(eq("100"), anyString()))

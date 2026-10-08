@@ -21,17 +21,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-/**
- * NewApiMediaKitTrimAudioClient 接口级 mock 网关测试（IKHB6S，父单 IKHB08；模板
- * NewApiMediaKitExtractAudioClientTest 一对一平移）。
- * <p>
- * 覆盖：出站映射（官方 PDF Body 参数节：audio_url + start_time / end_time 可选 +
- * format 透传、对客模型名、契约 SUBMIT_PATH 路径——**≠火山上游 /api/v1/tools/trim-audio**，
- * IKH67T 404 教训）、标准请求头三元组、submit 响应 task_id 解析与缺失兜底、官方错误
- * 结构 error{code,type,message,param} 的 §5 分类与上游原因透传、poll 端点路径与三态解析
- * （completed / failed / 中间态，result.audio_url / result.duration）、HTTP 错误携带状态
- * （瞬时判定输入）。不连真实网关。参数名以火山官方 PDF「提交音频裁剪任务 API」为准。
- */
 class NewApiMediaKitTrimAudioClientTest {
 
     private HttpServer server;
@@ -47,7 +36,6 @@ class NewApiMediaKitTrimAudioClientTest {
 
     @BeforeEach
     void startServer() throws Exception {
-        // 官方「任务提交成功响应」示例形状（PDF「响应说明」节逐字，task_id 换 trim-audio 前缀）
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-trim-audio-1399300\","
                 + "\"request_id\":\"20260324140000B9CF8E68B9A4F28F1EC0\"}");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -83,7 +71,6 @@ class NewApiMediaKitTrimAudioClientTest {
                 "sk-token", "https://example.com/full_podcast.mp3", startTime, endTime, outputFormat);
     }
 
-    // ========== submit：出站映射（官方 PDF Body 参数节） ==========
 
     @Test
     @DisplayName("官方示例形态：契约 SUBMIT_PATH 路径 + 对客模型名 + audio_url + start_time/end_time/format 同名透传")
@@ -91,7 +78,6 @@ class NewApiMediaKitTrimAudioClientTest {
         String taskId = callSubmit(60.5, 180.75, "mp3");
 
         assertThat(taskId).isEqualTo("amk-tool-trim-audio-1399300");
-        // 网关对客路径独立常量，≠火山上游 /api/v1/tools/trim-audio（IKH67T 404 教训）
         assertThat(lastPath.get()).isEqualTo(AudioTrimContract.SUBMIT_PATH);
         assertThat(lastPath.get()).isNotEqualTo("/api/v1/tools/trim-audio");
         String body = lastBody.get();
@@ -100,7 +86,6 @@ class NewApiMediaKitTrimAudioClientTest {
         assertThat(body).contains("\"start_time\":60.5");
         assertThat(body).contains("\"end_time\":180.75");
         assertThat(body).contains("\"format\":\"mp3\"");
-        // 不发 media_output_destination（默认临时链接 + 自家转存）与其余可选参数
         assertThat(body).doesNotContain("media_output_destination");
         assertThat(body).doesNotContain("client_token");
         assertThat(body).doesNotContain("callback");
@@ -137,13 +122,11 @@ class NewApiMediaKitTrimAudioClientTest {
                 .isEqualTo(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== submit：响应与错误分类（官方错误结构 error{code,message,param,type}） ==========
 
     @Test
     @DisplayName("网关 400（官方同步错误结构）→ 抛错，上游可读原因透传到 message")
     void gateway400TransportsUpstreamReason() {
         lastStatus.set(400);
-        // 官方 PDF「错误处理」节示例逐字（InvalidParameter end_time 形态）
         responseJson.set("{\"success\":false,\"task_id\":\"\",\"request_id\":\"20240520153500XYZW54321\","
                 + "\"error\":{\"code\":\"InvalidParameter\",\"message\":\"The parameter `end_time` must be"
                 + " greater than `start_time`.\",\"param\":\"end_time\",\"type\":\"BadRequest\"}}");
@@ -203,13 +186,10 @@ class NewApiMediaKitTrimAudioClientTest {
                 .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
     }
 
-    // ========== poll：端点路径与三态解析（官方「异步任务结果」节） ==========
 
     @Test
     @DisplayName("poll completed：GET 查询路径拼 taskId，解析 result.audio_url 与 duration 秒")
     void pollCompletedParsesResult() {
-        // 官方 PDF「最终的完整任务信息示例」节逐字形状（result.audio_url / result.duration）
-        // + 查询端点的 status 字段（官方 PDF 无查询端点文档，status 按家族先例容错解析）
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-trim-audio-1399300\","
                 + "\"request_id\":\"20260324140000B9CF8E68B9A4F28F1EC0\","
                 + "\"status\":\"completed\","
@@ -233,9 +213,6 @@ class NewApiMediaKitTrimAudioClientTest {
     @Test
     @DisplayName("poll completed 示例 JSON 形态（output.*）：result 缺失时 output 兜底双读，不误判")
     void pollCompletedReadsOutputFallback() {
-        // 官方 PDF 正文表格写 result、「最终的完整任务信息示例」JSON 却是 output.*（文档
-        // 自相矛盾）——网关若按示例形状返回，result 读取落空须兜底 output，防 completed
-        // 被读成无 audio_url 的成功
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-trim-audio-1399300\","
                 + "\"request_id\":\"20260324140000B9CF8E68B9A4F28F1EC0\","
                 + "\"status\":\"completed\","

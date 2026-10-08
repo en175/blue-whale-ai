@@ -23,14 +23,10 @@
     <okhttp.version>4.12.0</okhttp.version>
     <mybatis-plus.version>3.5.7</mybatis-plus.version>
     <ve-tos-java-sdk.version>2.9.19</ve-tos-java-sdk.version>
-    <!-- 覆盖 Spring Boot 管理的 Testcontainers 版本：docker-java 3.4.0 与
-         Docker Desktop 4.81 (API 1.55) 存在 /info 400 兼容性问题；
-         Testcontainers 1.21.0 升级 docker-java 修复此问题。 -->
     <testcontainers.version>1.21.0</testcontainers.version>
   </properties>
 
   <dependencies>
-    <!-- Java 侧共享基础设施（ADR-0114）。只放 DB/MQ/HTTP/错误体系，不放领域规则。 -->
     <dependency>
       <groupId>com.bluewhale</groupId>
       <artifactId>blue-whale-common</artifactId>

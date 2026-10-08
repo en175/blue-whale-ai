@@ -21,13 +21,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-/**
- * NewApiMediaKitOutpaintClient 接口级 mock 网关测试（IKGOQW）。
- * <p>
- * 覆盖：请求映射（model / image_url / 四个 expand 比例 / 不带 queue_id）、标准请求头三元组、
- * 错误分类（网关 400 且不扣费 → §5 分类 + 上游原因透传）、result.image_url 解析与缺失兜底。
- * 不连真实网关。
- */
 class NewApiMediaKitOutpaintClientTest {
 
     private HttpServer server;
@@ -76,7 +69,6 @@ class NewApiMediaKitOutpaintClientTest {
                 0.1, 0.25, 0.4, 0.0);
     }
 
-    // ========== 请求映射（AC：image_url 为源素材公网地址、四值与冻结输入一致、不带 queue_id） ==========
 
     @Test
     @DisplayName("全字段：路径 /v1/mediakit/sync/expand-image-canvas + model + image_url + 四个 expand 比例")
@@ -111,7 +103,6 @@ class NewApiMediaKitOutpaintClientTest {
         assertThat(lastTraceId.get()).isNotBlank();
     }
 
-    // ========== 响应与错误分类（网关 success=false 返 400 且不扣费） ==========
 
     @Test
     @DisplayName("成功：解析 result.image_url（火山托管 URL，24h 有效）")

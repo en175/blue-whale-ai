@@ -15,29 +15,9 @@ import org.apache.ibatis.annotations.Update;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * 生成作业 Mapper（契约 §3 / 附录 B：领取与终态写入）。
- * <p>
- * SQL 逐字移植自 TS Prisma 调用，注释标注 TS 源码行号。
- */
 @Mapper
 public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
 
-    /**
-     * 按 type 领取候选，**不套 source 白名单**（claim-ops.ts:450-467）。
-     * <p>
-     * media_extract / audio / audio_trim / audio_speed 四个原有专属查询 SQL 逐字同形、仅
-     * type 字面量不同，IKIWP8 收敛为参数化本方法。
-     * <p>
-     * 与 {@link #findCandidateByTypeAndSources} 的分工是**类型层面的**：本方法没有 source
-     * 参数，「不套白名单」这件事由「调用了没有 source 的方法」表达，而不是靠传空列表。
-     * IKHPK9 的坏 SQL（MyBatis 对空集合连括号都不输出，渲染成
-     * {@code ... AND source IN       AND is_delete = false ...} → MySQL 1064，claim 恒抛语法
-     * 错误、任务永久卡 queued）因此在类型上不再可能发生——空列表这个值不再有表达位置。
-     * <p>
-     * WHERE id=? AND type=? AND is_delete=false AND next_action_at&lt;=now
-     * AND (queued OR processing+孤儿)
-     */
     @Select("""
             SELECT * FROM generation_jobs
             WHERE id = #{jobId}
@@ -58,19 +38,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("jobId") Long jobId,
             @Param("type") String type);
 
-    /**
-     * 领取 media_extract 作业：CAS 更新（claim-ops.ts:472-486 + 租约复核）。
-     * <p>
-     * SET status='processing', lease_owner=?, lease_expires_at=now+120s,
-     *     last_polled_at=now, fencing_token=fencing_token+1, version=version+1
-     * WHERE id = ? AND fencing_token = ? AND status = ?
-     *   AND (status = 'queued' OR lease_expires_at IS NULL OR lease_expires_at &lt; now)
-     * <p>
-     * WHERE 末行是租约复核（claimImageCas 同款）：候选快照读取与 CAS 之间租约被续期时，
-     * 旧快照不得接管仍在租约内的任务。
-     * <p>
-     * 返回受影响行数（0 = 守卫失败）。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'processing',
@@ -92,12 +59,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("candidateStatus") String candidateStatus
     );
 
-    /**
-     * 更新 media_extract 进度：CAS 更新 + 续租（media-extract-ops.ts:28-41）。
-     * <p>
-     * SET progress=clamp(0,99,round(?)), last_polled_at=now, lease_expires_at=now+120s, version=version+1
-     * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
-     */
     @Update("""
             UPDATE generation_jobs
             SET progress = #{progress},
@@ -117,7 +78,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
     );
 
-    /** 混音大产物转存期续租：仅当前未过期的 owner/fence 可延期。 */
     @Update("""
             UPDATE generation_jobs
             SET lease_expires_at = #{leaseExpiresAt}, version = version + 1
@@ -130,18 +90,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                            @Param("fencingToken") Long fencingToken,
                            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
 
-    /**
-     * 探测 generation_jobs 行写锁是否空闲（IKIN8Z，SELECT … FOR UPDATE NOWAIT，读到即瞬时
-     * 持锁并在本语句结束时释放，不改任何数据）。
-     * <p>
-     * 守卫写事务（publishResultGuard / failMediaExtractGuard / 续租 / 取消 CAS）的第一条语句
-     * 就是对本行的 CAS UPDATE，行 X 锁自那一刻起持有至事务提交/回滚结束——「可能发布某次
-     * 转存对象键的事务」若仍在服务端进行（如 commit 窗口断连后的未决事务），本行锁必被其
-     * 占用。行锁空闲即该类事务已全部结束。
-     * <p>
-     * 返回行 id（锁空闲）；行不存在返回 null（无从发布，同视为空闲）；行锁被其他事务持有时
-     * 抛 MySQL 3572（NOWAIT）/ 1205（锁等待超时），由调用方按「事务仍在进行」识别。
-     */
     @Select("""
             SELECT id FROM generation_jobs
             WHERE id = #{jobId}
@@ -149,7 +97,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     Long probeJobRowWriteLock(@Param("jobId") Long jobId);
 
-    /** 音视频合成大产物转存期续租（IKIHPJ）：仅当前未过期的 owner/fence 可延期。 */
     @Update("""
             UPDATE generation_jobs
             SET lease_expires_at = #{leaseExpiresAt}, version = version + 1
@@ -162,13 +109,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                                 @Param("fencingToken") Long fencingToken,
                                 @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
 
-    /**
-     * 更新 video_scene_split 进度：CAS 更新 + 续租（IKH8BP 审查修复；SQL 语义与
-     * updateMediaExtractProgress 同款，仅租约时长由调用侧按场景切分的单段转存窗口传入）。
-     * <p>
-     * SET progress=clamp(0,99,round(?)), last_polled_at=now, lease_expires_at=?, version=version+1
-     * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
-     */
     @Update("""
             UPDATE generation_jobs
             SET progress = #{progress},
@@ -188,13 +128,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
     );
 
-    /**
-     * 更新 video_matting 进度：CAS 更新 + 续租（IKHK99；updateVideoSceneSplitProgress 的
-     * 单产物形态——completed 相结果转存前的心跳续租通道，租约时长由调用侧传入）。
-     * <p>
-     * SET progress=clamp(0,99,round(?)), last_polled_at=now, lease_expires_at=?, version=version+1
-     * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
-     */
     @Update("""
             UPDATE generation_jobs
             SET progress = #{progress},
@@ -214,22 +147,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
     );
 
-    /**
-     * 发布 media_extract 结果：CAS 守卫（media-extract-ops.ts:47-63）。
-     * <p>
-     * SET status='succeeded', progress=100, next_action_at=null,
-     *     lease_owner=null, lease_expires_at=null, version=version+1
-     * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
-     * <p>
-     * <b>取消登记与结果发布的并发口径（IKIHGR，audio_mix 复审补记；与 video 家族同口径）</b>：
-     * 取消登记（backend {@code requestCancel} 仅 queued/processing 可登记，置
-     * {@code cancel_requested_at}）与本发布在最后窗口并发时，先生效的终态获胜——本 CAS
-     * 先落 succeeded，取消登记即因任务已终态而落空，任务保持成功（succeeded 优先）；
-     * 产物已真实生成，属已接受取舍而非丢取消缺陷，同款表述见
-     * {@link #cancelVideoAfterDispatch}。用户删卡触发取消时若任务已抢先成功，前端
-     * CanvasPage {@code deleteGeneratingNode} 有「任务已完成，已停止删除」兜底提示
-     * （{@code stopWithCompleted}）。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'succeeded',
@@ -249,9 +166,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken
     );
 
-    /**
-     * 发布 media_extract 结果：更新 output_asset_ids（media-extract-ops.ts:85-88）。
-     */
     @Update("""
             UPDATE generation_jobs
             SET output_asset_ids = #{outputAssetIdsJson}
@@ -262,13 +176,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("outputAssetIdsJson") String outputAssetIdsJson
     );
 
-    /**
-     * 失败 media_extract 作业：CAS 守卫（media-extract-ops.ts:140-160）。
-     * <p>
-     * SET status='failed', error=?, next_action_at=null,
-     *     lease_owner=null, lease_expires_at=null, version=version+1
-     * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'failed',
@@ -289,15 +196,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("errorJson") String errorJson
     );
 
-    // ========== 音频路径（blade-② IKCR78） ==========
 
-    /**
-     * 领取音频作业：候选查询（claim-ops.ts:395-413）。
-     * <p>
-     * 镜像 claimImageJobById 但不套 source 白名单（IKCR78/IKC9EJ 教训对齐 media_extract）。
-     * WHERE id=? AND type='audio' AND is_delete=false AND next_action_at&lt;=now
-     * AND (queued OR processing+孤儿)
-     */
     @Select("""
             SELECT * FROM generation_jobs
             WHERE id = #{jobId}
@@ -316,11 +215,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     GenerationJobEntity findAudioCandidate(@Param("jobId") Long jobId);
 
-    /**
-     * 领取音频作业：CAS 更新（claim-ops.ts:417-431）。
-     * <p>
-     * 与 claimMediaExtractCas 逐字一致（同 CAS 模式）。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'processing',
@@ -341,32 +235,8 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("candidateStatus") String candidateStatus
     );
 
-    // ========== 音频截取路径（IKHPK9） ==========
-    // 候选查询已收敛到 findCandidateByTypeOnly（IKIWP8）：audio_trim / audio_speed 的专属
-    // type-only 查询与 media_extract / audio 的 SQL 逐字同形，仅 type 字面量不同。
-    // 下方是各自的 CAS（UPDATE 的 WHERE 与媒体类型无关，仅 fencing_token / status / 租约复核）。
 
-    // ========== 图片路径（blade-③ IKELJA） ==========
 
-    /**
-     * 按媒体类型 + source 白名单领取候选（claim-ops.ts:335-354 的参数化通用形态）。
-     * <p>
-     * image 路径：type='image'，source 白名单 = CLAIMABLE_JOB_SOURCES
-     * ['bottom_dock','plan_apply','storyboard_preview']（-internals.ts:12-16）；
-     * image_enhance 路径（契约 §14）：type='image_enhance'，白名单单源 ['image_enhance']
-     * （唯一创建入口 = 画布图片卡工具条，media_extract 的 source="dock" 同款专属来源值模式）。
-     * 两路径仅 type / source 差异，其余条件逐字同 TS——故参数化共用，防逐字复制漂移。
-     * <p>
-     * ⚠️ {@code sources} **必须非空**。MyBatis 对空集合**什么都不输出**（连 {@code open} /
-     * {@code close} 的括号都不输出），渲染成
-     * {@code ... AND source IN       AND is_delete = false ...} 的坏 SQL → MySQL 1064。
-     * 想表达「不套 source 白名单」**不要传 {@code List.of()}**，改用无 source 参数的
-     * {@link #findCandidateByTypeOnly}（IKHPK9 教训：audio_trim 曾传空列表，claim 恒抛语法
-     * 错误、recovery 无限重投，任务永久卡 queued）。
-     * <p>
-     * 本方法**不加** {@code <if>} 兜空：那会让「空列表 = 静默不过滤」成为隐藏语义，误传空列表时
-     * source 过滤无声消失（漏真卡任务，IKC9EJ 同族风险）。
-     */
     @Select("""
             <script>
             SELECT * FROM generation_jobs
@@ -392,13 +262,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("type") String type,
             @Param("sources") List<String> sources);
 
-    /**
-     * 领取图片 / image_enhance 作业：CAS 更新（claim-ops.ts:358-372）。
-     * <p>
-     * CAS UPDATE 的 WHERE 含 id / fencing_token / status 与租约复核（status='queued' 或
-     * 租约空/过期，防旧候选快照接管已续租任务），与媒体类型和 source 白名单无关，
-     * 故 image 与 image_enhance（契约 §14）共用本方法；租约时长由 JobClaimService 按媒体类型传入。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'processing',
@@ -420,13 +283,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("candidateStatus") String candidateStatus
     );
 
-    /**
-     * 瞬态重试：图片作业回 queued（claim-ops.ts:561-578 requeueImageJobForRetry）。
-     * <p>
-     * WHERE id=? AND status='processing'（无 fence 入参——与 TS 逐字一致）。
-     * SET status='queued', lease_owner=null, lease_expires_at=null,
-     *     next_action_at=?, retry_count+1, fencing_token+1, version+1
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'queued',
@@ -444,15 +300,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("nextActionAt") LocalDateTime nextActionAt
     );
 
-    // ========== 通用终态写入（settle-ops.ts:53-206 / 233-336） ==========
 
-    /**
-     * completeJob CAS 守卫（settle-ops.ts:65-77）。
-     * <p>
-     * SET status='succeeded', progress=100, output_asset_ids=?, next_action_at=null,
-     *     lease_owner=null, lease_expires_at=null, version=version+1
-     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'succeeded',
@@ -474,10 +322,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("outputAssetIdsJson") String outputAssetIdsJson
     );
 
-    /**
-     * completeJob 槽位聚合后修正状态（settle-ops.ts:116-121）。
-     * 仅当聚合态 ≠ 'succeeded' 时调用（partially_succeeded / failed）。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = #{finalStatus}
@@ -485,13 +329,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     int updateJobStatus(@Param("jobId") Long jobId, @Param("finalStatus") String finalStatus);
 
-    /**
-     * failJob CAS 守卫（settle-ops.ts:238-253）。
-     * <p>
-     * SET status='failed', error=?, next_action_at=null,
-     *     lease_owner=null, lease_expires_at=null, version=version+1
-     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'failed',
@@ -512,12 +349,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("errorJson") String errorJson
     );
 
-    /**
-     * createAsset fence CAS 守卫（asset-ops.ts:156-165）。
-     * <p>
-     * 用 version 自增做无业务副作用的原子占位（不改 status，job 仍是 processing）。
-     * count≠1 即 stale worker，返回 0。
-     */
     @Update("""
             UPDATE generation_jobs
             SET version = version + 1
@@ -532,15 +363,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken
     );
 
-    // ========== 视频路径（blade-④ IKEL9A） ==========
 
-    /**
-     * 领取视频作业：候选查询（claim-ops.ts:261-290 视频 source 白名单）。
-     * <p>
-     * 视频 source 白名单 = [bottom_dock, plan_apply, plan, scene_card]（契约 §2）。
-     * WHERE id=? AND type='video' AND source IN 白名单 AND is_delete=false
-     * AND next_action_at&lt;=now AND (queued OR processing+孤儿)
-     */
     @Select("""
             SELECT * FROM generation_jobs
             WHERE id = #{jobId}
@@ -560,11 +383,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     GenerationJobEntity findVideoCandidate(@Param("jobId") Long jobId);
 
-    /**
-     * 领取视频作业：CAS 更新（claim-ops.ts:295-315）。
-     * <p>
-     * 与 claimAudioCas 逐字一致（同 CAS 模式）。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'processing',
@@ -585,17 +403,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("candidateStatus") String candidateStatus
     );
 
-    /**
-     * IKIZQD：调网关前持久「提交中」标记——status processing → checking（CAS）。
-     * <p>
-     * 契约 §六（video-sample-mode.ts JOB_STATUS_CHECKING）：Worker 在发出 submit / finalize
-     * 前先落此标记；调用超时、响应丢失、落库失败或失租时任务停留在 checking——
-     * 不按空 provider_task_id 重新提交、不自动退款，保持锁定供人工核对。
-     * 只有仍持租约与 fence 且未提交过（provider_task_id IS NULL）的 Worker 能落标记；
-     * 守卫未命中（失租 / 已终态 / 已提交）返回 0，调用方必须停止、不得发网关。
-     * checking 不被 {@link #findVideoCandidate} 与恢复扫描选中——这是「空
-     * provider_task_id 不触发自动重提」的 SQL 层保证。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'checking',
@@ -612,19 +419,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken
     );
 
-    /**
-     * 标记生成任务已提交（generation-worker-video-ops.ts markProviderSubmitted 逐字）。
-     * <p>
-     * 评审修复 C1：补 provider='new-api'、progress=1；
-     * **去掉 fencing_token+1**（TS 不 bump——fence 只在 claim/requeue 递增，契约 §3.1）。
-     * 时刻值由 Java 计算传入（原 DATE_ADD ... MILLISECOND 为非法 MySQL 单位，潜伏语法炸点）。
-     * 金标 G09 pin 全 SET 列。
-     * <p>
-     * IKIZQD：守卫放宽到 checking 且 SET 补 {@code status='processing'}——提交相统一先落
-     * {@link #markSubmissionAttempt}（checking）再发网关，网关明确受理后由此从 checking
-     * 恢复 processing 并落轮询句柄（「明确成功恢复原任务」；不写回 status 会让任务卡在
-     * checking，轮询/终态守卫全部失明——真库验证发现，见 SubmissionCheckingMySqlIntegrationTest）。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'processing',
@@ -648,23 +442,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("nextActionAt") java.time.LocalDateTime nextActionAt
     );
 
-    /**
-     * 重试收割回退提交前的原子续租（IKIDEE 引入守卫；IKIHKH 放行过期租约）。
-     * <p>
-     * SET lease_expires_at=now+420s, version=version+1
-     * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
-     *   AND provider_task_id IS NULL
-     * <p>
-     * 执行权口径与 {@link #updateMediaExtractProgress} 等进度续租统一：owner+fence 定执行权，
-     * 租约过期不褫夺——不再要求 {@code lease_expires_at > NOW()}。收割转存（父产物下载 + TOS
-     * 转存）可长于 420 秒租约；若回退提交前因租约恰好耗尽被拒，IKICD0 停止语义下恢复扫描会
-     * 在接手期内循环重投（全量重新下载）、接手期外永久卡 processing。
-     * <p>
-     * 安全前提：收割家族领取 CAS（claimImageCas / claimMediaExtractCas）均带租约复核行，
-     * 本写复活的过期租约挡得住旧候选快照接管（真库用例
-     * parentReuseSubmitReservationBlocksStaleCandidateClaim /
-     * mediaExtractStaleCandidateCannotTakeOverRenewedLease）。
-     */
     @Update("""
             UPDATE generation_jobs
             SET lease_expires_at = #{leaseExpiresAt},
@@ -682,13 +459,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
     );
 
-    /**
-     * 重排生成任务轮询（generation-worker-video-ops.ts rescheduleProviderPoll 逐字）。
-     * <p>
-     * 评审修复 C2：progress 由 service 端钳制（Math.max(0,Math.min(99,round))）后传入；
-     * 补 last_polled_at、next_action_at；**去掉 fencing_token+1**（TS 不 bump）。
-     * 时刻值 Java 计算（原 DATE_ADD MILLISECOND 非法语法一并消除）。金标 G10 pin 全列。
-     */
     @Update("""
             UPDATE generation_jobs
             SET poll_count = COALESCE(poll_count, 0) + 1,
@@ -712,22 +482,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("nextActionAt") java.time.LocalDateTime nextActionAt
     );
 
-    /**
-     * 发布视频结果 CAS 守卫（video-ops.ts:60-100 publishVideoResult）。
-     * <p>
-     * SET status='succeeded', progress=100, next_action_at=null,
-     *     lease_owner=null, lease_expires_at=null, version+1
-     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
-     * <p>
-     * <b>修正一</b>：actual_amount_fen 不在范围（settle 段整体省略）。
-     * <p>
-     * <b>IKJCOE</b>：本守卫原来同条 SQL 里还写 upstream_created_at_ms /
-     * finalize_deadline_ms（COALESCE）与 charge_state（IF video_stage IS NOT NULL）——
-     * 这三列已搬进 {@code generation_job_extras}，改由调用方（{@code JobFinalizer}，
-     * 同一 {@code @Transactional} 内）在本守卫返回 affected==1 **之后**写扩展位。
-     * 原子性靠事务而非单条 SQL 保住：守卫 0 行则整个事务回滚，不会留下
-     * 「已 succeeded 但费用状态没落」的半成品。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'succeeded',
@@ -747,18 +501,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken
     );
 
-    /**
-     * 失败视频作业 CAS 守卫（video-ops.ts:209-221 failVideoJob 独立 SQL）。
-     * <p>
-     * <b>IKJCOE</b>：charge_state 的 'released' 原在守卫 SQL 里按
-     * （video_stage IS NOT NULL）条件写；两列都搬进 {@code generation_job_extras} 后，
-     * 该条件由调用方按两阶段标志决定要不要写扩展位（守卫本身不再碰费用状态）。
-     * <p>
-     * <b>IKIZQD</b>：守卫放宽到 checking——提交相已落「提交中」标记后收到网关**明确拒绝**
-     * （带 HTTP 状态的业务回绝）按「明确失败释放本阶段预扣」落失败终态；仍持 owner+fence
-     * 的唯一写者仍是当前 Worker（checking 不可被领取，不存在并发改写）。结果不明路径
-     * （超时 / 响应丢失 / 落库失败）不经本守卫——任务留在 checking 锁定，不退款。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'failed',
@@ -779,17 +521,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("errorJson") String errorJson
     );
 
-    /**
-     * 取消视频作业（video-ops.ts:306-343 cancelVideoBeforeDispatch）。
-     * <p>
-     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
-     *       AND provider_task_id IS NULL（未提交上游才可取消，契约 §3.3）
-     * <p>
-     * SET status='cancelled', progress=0, next_action_at=null,
-     *     lease_owner=null, lease_expires_at=null, version+1
-     * <p>
-     * <b>修正一</b>：release refund_confirmed 段整体省略。
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'cancelled',
@@ -810,19 +541,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken
     );
 
-    /**
-     * 取消**已提交上游**的视频作业（IKHLKJ；与 {@link #cancelVideoBeforeDispatch} 同款 CAS，
-     * 唯一差异 = 不带 {@code provider_task_id IS NULL} 限定）。
-     * <p>
-     * 语义：官方无取消端点（规格 Out of Scope：上游任务发出即不撤），故本 SQL 撤销不了上游任务，
-     * 它做的是**本仓侧停止接纳该任务结果**——把 job 落到确定终态 cancelled，此后任何迟到结果都
-     * 过不了 publish 守卫（{@code WHERE status='processing'}），卡片不会被复活为成功
-     * （平台同款口径见 backend cancelImageJob 注释「已停止接纳本任务结果」；先生效的终态获胜）。
-     * <p>
-     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
-     * SET status='cancelled', progress=0, next_action_at=null,
-     *     lease_owner=null, lease_expires_at=null, version+1
-     */
     @Update("""
             UPDATE generation_jobs
             SET status = 'cancelled',
@@ -842,7 +560,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken
     );
 
-    /** audio_mix 软取消：仅当前 owner/fence 可消费取消请求，已提交上游时停止本地轮询和结果接纳。 */
     @Update("""
             UPDATE generation_jobs
             SET status = 'cancelled', progress = 0,
@@ -858,7 +575,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                                   @Param("workerId") String workerId,
                                   @Param("fencingToken") Long fencingToken);
 
-    /** audio_video_mux 软取消（IKIHPJ）：仅当前 owner/fence 可消费取消请求，已提交上游时停止本地轮询和结果接纳。 */
     @Update("""
             UPDATE generation_jobs
             SET status = 'cancelled', progress = 0,
@@ -874,38 +590,13 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                                        @Param("workerId") String workerId,
                                        @Param("fencingToken") Long fencingToken);
 
-    /**
-     * 按 id 查 provider_task_id（IKEA26 parent-reuse 用：retry job 查父 job 的上游 task）。
-     */
     @Select("""
             SELECT provider_task_id FROM generation_jobs WHERE id = #{jobId}
             """)
     String findProviderTaskId(@Param("jobId") Long jobId);
 
-    // ========== 高清放大路径（契约 §14 / IKGM9D） ==========
-    // 候选查询与 CAS 均复用图片路径的参数化通用方法（findCandidateByTypeAndSources /
-    // claimImageCas，见上「图片路径」段注释）：两路径仅 type / source 白名单差异，
-    // CAS UPDATE 与媒体类型无关——不保留逐字复制的专属方法（审查修复 S2）。
 
-    // ========== recovery 到点/孤儿扫描（IKF3AT；claim-ops.ts:134-230 逐字移植） ==========
-    // 共同条件：is_delete=false + 默认 gmt_create 在 RECOVERY_MAX_AGE 窗口内；audio_mix
-    // 传 maxAgeMinutes=0 跳过年龄过滤，长任务由 execution_deadline_at 收敛。
-    // + next_action_at<=now + （queued ∨ processing 且租约空/过期——孤儿由 claim-by-id 的过期租约接管语义接走）。
-    // 注：TS 的 resetStalledImageJobs 无活调用方（死代码），不移植（edits 死代码教训）。
-    // 六路径仅 type / source 白名单差异（audio / media_extract 不套白名单），其余条件逐字同 TS——
-    // 仿 claim 侧 findCandidateByTypeAndSources 参数化共用一份 SQL，防逐字复制漂移（IKGOQ0 审查修复）。
 
-    /**
-     * 到点/孤儿 id 扫描：按媒体类型 + 可选 source 白名单的参数化通用形态
-     * （claim-ops.ts:134-230 六条同形 SQL 的收敛）。
-     * <p>
-     * sources 为空 → 不套 source 白名单（audio / media_extract 形态：专属来源值
-     * 不在白名单，套了漏真卡任务，IKC9EJ 教训）；非空 → source IN 白名单（与该媒体类型
-     * claim 候选查询同源）。
-     * IKIDEK：八个收割家族中可复用父上游任务、尚未提交自身上游任务的 processing 重试 job
-     * 保留租约感知的恢复接手期：接手期限 = max(创建后 maxAgeMinutes+10 分钟（默认 130 分钟）,
-     * 租约到期后 10 分钟)，期限外不自动复活；其余任务仍走原有条件。
-     */
     @Select("""
             <script>
             SELECT id FROM generation_jobs
@@ -949,79 +640,60 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("limit") int limit,
             @Param("maxAgeMinutes") int maxAgeMinutes);
 
-    /** 视频到点/孤儿（claim-ops.ts:134-160）：限 4 源白名单。 */
     default List<Long> listDueVideoJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("video",
                 List.of("bottom_dock", "plan_apply", "plan", "scene_card"), limit, maxAgeMinutes);
     }
 
-    /** 图片到点/孤儿（claim-ops.ts:163-195）：限 CLAIMABLE_JOB_SOURCES。 */
     default List<Long> listDueImageJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("image",
                 List.of("bottom_dock", "plan_apply", "storyboard_preview"), limit, maxAgeMinutes);
     }
 
-    /** 音频到点/孤儿（claim-ops.ts:198-230）：**不套 source 白名单**（IKC9EJ 教训，防漏捞）。 */
     default List<Long> listDueAudioJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("audio", List.of(), limit, maxAgeMinutes);
     }
 
-    /** 媒体提取到点/孤儿：**不套 source 白名单**（source="dock" 不在白名单，套了漏真卡任务）。 */
     default List<Long> listDueMediaExtractJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("media_extract", List.of(), limit, maxAgeMinutes);
     }
 
-    /** 音频截取到点/孤儿（IKHB6S，父单 IKHB08）：**不套 source 白名单**（claim 同形态——
-     *  任务来源值随接线票定死后补录，套了漏真卡任务，IKC9EJ 教训；轮询自投消息丢失时
-     *  由本扫描兜底重投，复用视频骨架语义）。 */
     default List<Long> listDueAudioTrimJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("audio_trim", List.of(), limit, maxAgeMinutes);
     }
 
-    /** 音频混合到点/孤儿：处理可超过通用 2h 扫描窗；由处理器的轮询预算收敛终态。 */
     default List<Long> listDueAudioMixJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("audio_mix", List.of("dock"), limit, maxAgeMinutes);
     }
 
-    /** 音视频合成到点/孤儿（IKIHPJ）：maxAge=0 不按龄期过滤（audio_mix 特例同款，长任务由
-     *  execution_deadline_at 收敛）。 */
     default List<Long> listDueAudioVideoMuxJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("audio_video_mux", List.of("dock"), limit, maxAgeMinutes);
     }
 
-    /** 音频调速到点/孤儿（IKHW5A，父单 IKHVYO）：**不套 source 白名单**（claim 同形态
-     *  ——audio_trim 同款；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
     default List<Long> listDueAudioSpeedJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("audio_speed", List.of(), limit, maxAgeMinutes);
     }
 
-    /** 高清放大到点/孤儿（契约 §14）：套 source 白名单（与 claim 同源，单源 image_enhance）。 */
     default List<Long> listDueImageEnhanceJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("image_enhance",
                 List.of("image_enhance"), limit, maxAgeMinutes);
     }
 
-    /** 图片擦除到点/孤儿（契约 §15）：套 source 白名单（与 claim 同源，单源 image_erase）。 */
     default List<Long> listDueImageEraseJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("image_erase",
                 List.of("image_erase"), limit, maxAgeMinutes);
     }
 
-    /** 智能扩图到点/孤儿（IKGOQW）：套 source 白名单（与 claim 同源，单源 image_outpaint）。 */
     default List<Long> listDueImageOutpaintJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("image_outpaint",
                 List.of("image_outpaint"), limit, maxAgeMinutes);
     }
 
-    /** 图片抠图到点/孤儿（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）：
-     *  套 source 白名单（与 claim 同源，单源 image_cutout）。 */
     default List<Long> listDueImageCutoutJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("image_cutout",
                 List.of("image_cutout"), limit, maxAgeMinutes);
     }
 
-    /** 视频去字幕到点/孤儿（迁移契约 §17 / IKGZ81）：套 source 白名单（与 claim 同源，
-     *  单源 video_subtitle_erase；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
     default List<Long> listDueVideoSubtitleEraseJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources(
                 VideoSubtitleEraseContract.TAG,
@@ -1029,8 +701,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 limit, maxAgeMinutes);
     }
 
-    /** 视频 HD 高清到点/孤儿（IKH3VF，父规格 IKH3VB）：套 source 白名单（与 claim 同源，
-     *  单源 video_enhance；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
     default List<Long> listDueVideoEnhanceJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources(
                 VideoEnhanceContract.TAG,
@@ -1038,8 +708,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 limit, maxAgeMinutes);
     }
 
-    /** 人声背景分离到点/孤儿（IKHA2J）：套 source 白名单（与 claim 同源，单源 vocal_split；
-     *  轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
     default List<Long> listDueVocalSplitJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources(
                 VocalSplitContract.TAG,
@@ -1047,8 +715,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 limit, maxAgeMinutes);
     }
 
-    /** 视频场景切分到点/孤儿（IKH8BP，父规格 IKH86V）：套 source 白名单（与 claim 同源，
-     *  单源 video_scene_split；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
     default List<Long> listDueVideoSceneSplitJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources(
                 com.bluewhale.worker.domain.contract.VideoSceneSplitContract.TAG,
@@ -1056,8 +722,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 limit, maxAgeMinutes);
     }
 
-    /** 智能抠像到点/孤儿（IKHK99，父规格 IKHJRC，契约 IKHK7F）：套 source 白名单（与 claim
-     *  同源，单源 video_matting；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
     default List<Long> listDueVideoMattingJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources(
                 com.bluewhale.worker.domain.contract.VideoMattingContract.TAG,
@@ -1065,9 +729,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 limit, maxAgeMinutes);
     }
 
-    /** 视频插帧到点/孤儿（IKHLKJ，父需求 IKHLES）：套 source 白名单（与 claim 同源，
-     *  单源 video_frame_interpolation；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。
-     *  已取消（status='cancelled'）的任务不在扫描条件内，取消后不再被重投。 */
     default List<Long> listDueVideoFrameInterpolationJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources(
                 VideoFrameInterpolationContract.TAG,

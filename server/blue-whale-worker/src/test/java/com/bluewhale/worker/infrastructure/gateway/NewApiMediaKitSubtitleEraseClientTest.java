@@ -24,15 +24,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-/**
- * NewApiMediaKitSubtitleEraseClient 接口级 mock 网关测试（迁移契约 §17 / IKGZ81）。
- * <p>
- * 覆盖：四种请求形态出站映射（无框/有框 × subtitle_smart/text_full——mode 映射、空框不发
- * erase_ratio_location 键、固定 model_version=v5 / output_encode_mode=Quality、对客模型名）、
- * 标准请求头三元组、submit 响应 task_id 解析与缺失兜底、§5 错误分类与上游原因透传、
- * poll 端点路径与三态解析（completed / failed / 中间态）、HTTP 错误携带状态（瞬时判定输入）。
- * 不连真实网关。参数名以火山官方 PDF「提交字幕擦除（精细化版）任务 API」为准。
- */
 class NewApiMediaKitSubtitleEraseClientTest {
 
     private HttpServer server;
@@ -46,7 +37,6 @@ class NewApiMediaKitSubtitleEraseClientTest {
     private final AtomicReference<String> responseJson = new AtomicReference<>();
     private String baseUrl;
 
-    /** 官方 Location 同构框（[0,1] 归一化，键名与官方 PDF「Location 对象」节一致）。 */
     private static Map<String, Object> box(double x1, double y1, double x2, double y2) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put(VideoSubtitleEraseContract.BOX_KEY_TOP_LEFT_X, x1);
@@ -93,7 +83,6 @@ class NewApiMediaKitSubtitleEraseClientTest {
                 "sk-token", "https://example.com/src.mp4", detectMode, boxes);
     }
 
-    // ========== submit：四种请求形态出站映射（§17.3；官方 PDF Body 参数节） ==========
 
     @Test
     @DisplayName("无框 subtitle_smart：路径 + 对客模型名 + mode=Subtitle + 固定 v5/Quality，不发 erase_ratio_location 键")
@@ -108,9 +97,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
         assertThat(body).contains("\"mode\":\"Subtitle\"");
         assertThat(body).contains("\"model_version\":\"v5\"");
         assertThat(body).contains("\"output_encode_mode\":\"Quality\"");
-        // 空框 = 智能默认（官方默认行为），出站不发该键（§17.3）
         assertThat(body).doesNotContain("erase_ratio_location");
-        // time_segment_filter 本期不实现，恒不发
         assertThat(body).doesNotContain("time_segment_filter");
         assertThat(body).doesNotContain("subtitle_filter");
     }
@@ -166,7 +153,6 @@ class NewApiMediaKitSubtitleEraseClientTest {
                 .isEqualTo(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== submit：响应与错误分类（§5） ==========
 
     @Test
     @DisplayName("网关 400（success=false 且不扣费）→ 抛错，上游可读原因透传到 message")
@@ -232,7 +218,6 @@ class NewApiMediaKitSubtitleEraseClientTest {
                 .isEqualTo(VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED);
     }
 
-    // ========== poll：端点路径与三态解析（官方「异步任务结果」节） ==========
 
     @Test
     @DisplayName("poll completed：GET 查询路径拼 taskId，解析 result.video_url 与 duration 秒")

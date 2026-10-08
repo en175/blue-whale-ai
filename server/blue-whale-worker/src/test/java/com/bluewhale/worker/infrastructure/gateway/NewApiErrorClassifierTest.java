@@ -6,18 +6,8 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * new-api 共享错误分类表测试（new-api-audio-provider.ts:119-163 + §5 IKDAJN 逐字移植）。
- * <p>
- * 本测试原挂于 NewApiAudioClient（刀②影子实现）；audio 分类收敛到共享
- * {@link NewApiErrorClassifier} 后随迁至此——图片/音频/视频三路共用同一分类真值表。
- * <p>
- * 优先级：content_rejected > quota_exhausted > provider_failed。
- * 中文正则与 TS error-codes.ts isContentPolicySignal / isQuotaSignal 逐字一致。
- */
 class NewApiErrorClassifierTest {
 
-    // ---- content_rejected（最高优先级） ----
 
     @Test
     @DisplayName("copyright → content_rejected_reference(1038, IKFL53)")
@@ -58,13 +48,11 @@ class NewApiErrorClassifierTest {
     @Test
     @DisplayName("输入图敏感/真实人物（InputImageSensitiveContentDetected.PrivacyInformation）→ content_rejected(1018)")
     void inputImageSensitiveRealPerson() {
-        // IKFL53：输入图含真实人物/隐私信息 → 安全审核 1018（非版权 1038）
         assertThat(NewApiErrorClassifier.classifyError(
                 "InputImageSensitiveContentDetected.PrivacyInformation: The request failed because the input image 'content[0]' may contain real person. Request id: req-1", 400))
                 .isEqualTo(GenerationError.ERROR_CONTENT_REJECTED);
     }
 
-    // ---- quota_exhausted（中优先级） ----
 
     @Test
     @DisplayName("HTTP 402 → quota_exhausted")
@@ -94,7 +82,6 @@ class NewApiErrorClassifierTest {
                 .isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
     }
 
-    // ---- provider_failed（兜底） ----
 
     @Test
     @DisplayName("无关错误 → provider_failed")
@@ -110,12 +97,10 @@ class NewApiErrorClassifierTest {
                 .isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);
     }
 
-    // ---- 优先级验证 ----
 
     @Test
     @DisplayName("优先级: 参考版权1038 > 输出/敏感1018（同时含版权+敏感 → 1038 优先，IKFL53）")
     void priorityCopyrightOverSensitive() {
-        // 同时包含 copyright 和 sensitive → copyright 1038 优先于敏感 1018
         assertThat(NewApiErrorClassifier.classifyError("copyright violation 内容敏感", 402))
                 .isEqualTo(GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
     }
@@ -123,12 +108,10 @@ class NewApiErrorClassifierTest {
     @Test
     @DisplayName("优先级: content > quota（同时命中 content 和 quota 正则 → content_rejected 优先）")
     void priorityContentOverQuota() {
-        // 同时包含 copyright 和 余额不足 → 1038 优先（copyright 先判）
         assertThat(NewApiErrorClassifier.classifyError("copyright violation 余额不足", 402))
                 .isEqualTo(GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
     }
 
-    // ---- 成功态错误信封（无 HTTP 状态入参，content > quota > provider_failed） ----
 
     @Test
     @DisplayName("classifySuccessEnvelope: content 优先于 quota")
@@ -151,7 +134,6 @@ class NewApiErrorClassifierTest {
                 .isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);
     }
 
-    // ---- 信号谓词 null 安全 ----
 
     @Test
     @DisplayName("isContentPolicySignal: null → false")

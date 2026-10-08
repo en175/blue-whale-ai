@@ -25,26 +25,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/**
- * 音频媒体转存（迁移契约 §18 / IKH28W；以 {@link TosVideoMediaRelay} 为模板的 audio/ 变体）。
- * <p>
- * 为什么不复用视频件：视频 relay 的 mime 校验是 {@code video/} 前缀专用（:122），音频产物
- * 会被直接拒收——按「不改动视频 relay 既有行为」口径单独成件，结构逐字对齐视频先例：
- * fetch 源 URL → 校验产物像音频 → TOS PUT → putObjectAcl public-read。
- * <p>
- * key 格式：{@code generated/{userId}/audio/{uuid去横线}.{ext}}（视频先例
- * {@code generated/{userId}/video/...} 的音频同构位；区别于 ffmpeg 本地链路的
- * {@code media-extract/audio/{uuid}.mp3}——本件只承接火山异步产物转存）。
- * <b>扩展名与 mime 都以任务所选 output_format 为单源</b>（m4a / mp3 / ogg / flac / wav，
- * MediaExtractContract 五值枚举），不从响应 content-type 推——官方/CDN 常把 m4a 标成
- * {@code audio/mpeg} 或 {@code video/mp4}，抄头会导致前端下载扩展名错成 .mp3/.mp4
- * （IKHCW9）。旧本地链路 TosMediaStorage.upload 恒 .mp3 硬编码即此问题的 ffmpeg
- * 单格式特例，本件随任务格式扩展。
- * <p>
- * 大产物先流式落临时文件，再用文件流上传；不会把供应商产物整份载入堆，也不将输入建议大小
- * 擅自变成用户可见的硬上限（异常流的磁盘防护上限见 {@link #MAX_RELAY_BYTES}）。磁盘、下载
- * 或 TOS 上传失败均由调用方记录失败终态。
- */
 public class TosAudioMediaRelay {
 
     private static final Logger log = LoggerFactory.getLogger(TosAudioMediaRelay.class);
@@ -55,15 +35,8 @@ public class TosAudioMediaRelay {
         return thread;
     });
 
-    /** 转存 key 的产物目录段（视频先例 "video" 的音频同构位）。 */
     static final String KEY_TYPE_SEGMENT = "audio";
 
-    /**
-     * 转存字节上限（10 GiB，对齐供应商「单文件不建议超过 10 GB」）。这是防异常/劫持上游在
-     * 6h watchdog 窗口内无限流写满 worker 磁盘的内部护栏，不是用户可见的产品容量限制——
-     * 后者按 IKI5ZC Further Notes 须先修订规格与 UI 才能引入。IKI696 移除旧 1 GiB 上限
-     * 是为放行超大合法产物（>1 GiB 用例见 TosAudioMediaRelayMixTest），本护栏不收紧该语义。
-     */
     static final long MAX_RELAY_BYTES = 10L << 30;
 
     private final TOSV2 client;
@@ -76,7 +49,6 @@ public class TosAudioMediaRelay {
         this(client, bucket, endpoint, MAX_RELAY_BYTES);
     }
 
-    /** 测试注入小上限用；生产路径走 {@link #TosAudioMediaRelay(TOSV2, String, String)}。 */
     TosAudioMediaRelay(TOSV2 client, String bucket, String endpoint, long maxRelayBytes) {
         this.client = client;
         this.bucket = bucket;
@@ -88,11 +60,6 @@ public class TosAudioMediaRelay {
                 .build();
     }
 
-    /**
-     * 从环境变量构建 TOS 音频转存。
-     * 5 个 env 全必需（与 TosVideoMediaRelay / TosMediaStorage 同源）；缺一返回 null
-     * （processor 判 null → 终态失败：火山结果 URL 仅 24h 有效，强依赖不降级直存）。
-     */
     public static TosAudioMediaRelay fromEnv() {
         String accessKeyId = System.getenv("VOLC_ACCESS_KEY_ID");
         String secretAccessKey = System.getenv("VOLC_SECRET_ACCESS_KEY");
@@ -102,7 +69,7 @@ public class TosAudioMediaRelay {
 
         if (isBlank(accessKeyId) || isBlank(secretAccessKey)
                 || isBlank(endpointEnv) || isBlank(bucketEnv) || isBlank(region)) {
-            return null; // TOS 未配置 → 调用方按强依赖口径终态失败（不降级直存）
+            return null;
         }
 
         String normalizedEndpoint = endpointEnv.replaceFirst("^https?://", "").replaceFirst("/$", "");
@@ -110,18 +77,6 @@ public class TosAudioMediaRelay {
         return new TosAudioMediaRelay(client, bucketEnv, normalizedEndpoint);
     }
 
-    /**
-     * 转存音频：流式下载 → 按 output_format 落 mime →
-     * 弱校验响应头像音频（m4a 允许被标成 video/mp4）→ PUT → makePublic。
-     * <p>
-     * 错误统一抛 {@link MediaExtractError}（1044 兜底码由 processor 归并，§18.4 第三类：
-     * 转存失败归并工具兜底码）。
-     *
-     * @param sourceUrl     火山 result.audio_url（24h 有效临时链接，调用方须立即转存）
-     * @param userId        归属用户（key 路径用）
-     * @param outputFormat  任务所选输出格式（扩展名与 mime 的单源，五值枚举）
-     * @return 转存结果
-     */
     public StoredAudio persist(String sourceUrl, String userId, String outputFormat) {
         Path tempFile = null;
         try {
@@ -191,9 +146,6 @@ public class TosAudioMediaRelay {
         }
     }
 
-    /** 按任务所选格式推导 mime（扩展名与 TOS Content-Type / assets.mime 的单源；
-     *  aac 供 vocal_split 五值枚举——该工具枚举含 aac 而 media_extract 无，
-     *  回退表补 aac 分支对既有调用无影响）。 */
     static String mimeForOutputFormat(String outputFormat) {
         return switch (outputFormat) {
             case "aac" -> "audio/aac";
@@ -205,7 +157,6 @@ public class TosAudioMediaRelay {
         };
     }
 
-    /** 流式落盘并累计字节数，超过 {@code maxRelayBytes} 立即中止（超限写满磁盘的护栏）。 */
     private long copyWithLimit(InputStream body, Path target) throws IOException {
         try (var out = Files.newOutputStream(target,
                 java.nio.file.StandardOpenOption.CREATE,
@@ -227,7 +178,6 @@ public class TosAudioMediaRelay {
         }
     }
 
-    /** 转存结果（视频先例 StoredVideo 形态的音频同构，md5 供 assets.md5 落库 IKGS73）。 */
     public record StoredAudio(String url, String storageKey, String mime, Long size, String md5) {}
 
     private static boolean isBlank(String s) {

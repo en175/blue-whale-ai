@@ -25,17 +25,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/**
- * claim 侧父任务投影直测（IKI8GN 收敛票补测；IKIWP8 起改走统一 {@link ClaimSpec} 管道）。
- * <p>
- * 覆盖：retry job（retry_of_job_id 非空）claim 时经共享私有方法
- * {@code projectParentProviderTaskId} 二次查询父任务 provider_task_id 并投影进
- * {@link ClaimedJob}；非重试 job 不触发父任务查询（投影恒 null）。
- * <p>
- * 路径交叉验证：IKIWP8 之后两条路径的差异只剩 spec 数据——不套白名单的 media_extract
- * （typeOnly + 专属 claimMediaExtractCas）与套白名单的 video_matting（bySources +
- * claimImageCas）都经过同一管道、同一投影实现。
- */
 @ExtendWith(MockitoExtension.class)
 class JobClaimServiceParentReuseTest {
 
@@ -44,7 +33,6 @@ class JobClaimServiceParentReuseTest {
     @Mock
     private GenerationJobMapper jobMapper;
 
-    /** IKJCOE：claim 投影读扩展位表的依赖（工具族管道不读，占位即可）。 */
     @Mock
     private GenerationJobExtraMapper extraMapper;
 
@@ -62,13 +50,11 @@ class JobClaimServiceParentReuseTest {
         return entity;
     }
 
-    /** media_extract：不套 source 白名单的家族，走专属 CAS。 */
     private ClaimSpec mediaExtractSpec() {
         return ClaimSpec.typeOnly(MediaExtractContract.TAG, LEASE_SECONDS, jobMapper,
                 jobMapper::claimMediaExtractCas);
     }
 
-    /** video_matting：套单源白名单的家族，走默认 CAS。 */
     private ClaimSpec videoMattingSpec() {
         return ClaimSpec.bySources(VideoMattingContract.TAG, LEASE_SECONDS,
                 List.of(VideoMattingContract.SOURCE), jobMapper);

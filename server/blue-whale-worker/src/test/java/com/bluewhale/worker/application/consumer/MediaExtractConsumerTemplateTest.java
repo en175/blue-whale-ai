@@ -9,22 +9,8 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
-/**
- * Consumer template method 毒丸 / ack 语义测试（契约 §1：与 TS 一致）。
- * <p>
- * 测试 processBody（消息体处理逻辑），不连真实 MQ。
- * <ul>
- *   <li>毒丸（坏 JSON / jobId 非字符串 / 空 jobId）→ 返回 true（应 ack 丢弃）</li>
- *   <li>handler 成功 → 返回 true（应 ack）</li>
- *   <li>handler 抛错 → 返回 false（不 ack → broker 30s 重投）</li>
- *   <li>digitGuard=false（extract 不做纯数字守卫）</li>
- * </ul>
- */
 class MediaExtractConsumerTemplateTest {
 
-    /**
-     * 构建可测试的 consumer（不启动 MQ 连接，仅用 processBody）。
-     */
     private MediaExtractConsumer buildTestConsumer(JobProcessor processor) {
         return new MediaExtractConsumer(processor, "test-topic", null, "test-group", 2);
     }
@@ -39,7 +25,7 @@ class MediaExtractConsumerTemplateTest {
         assertThat(consumer.processBody("{}".getBytes())).isTrue();
         assertThat(consumer.processBody("{\"jobId\":\"\"}".getBytes())).isTrue();
         assertThat(consumer.processBody("{\"jobId\":null}".getBytes())).isTrue();
-        assertThat(consumer.processBody("{\"jobId\":42}".getBytes())).isTrue(); // 数字型 → 毒丸
+        assertThat(consumer.processBody("{\"jobId\":42}".getBytes())).isTrue();
 
         verify(processor, never()).handle(any());
     }
@@ -50,10 +36,9 @@ class MediaExtractConsumerTemplateTest {
         JobProcessor processor = mock(JobProcessor.class);
         var consumer = buildTestConsumer(processor);
 
-        // extract 接受任意字符串 jobId（与 TS rocketmq-extract.consumer.ts:143 一致）
         boolean result = consumer.processBody("{\"jobId\":\"abc-123\"}".getBytes());
 
-        assertThat(result).isTrue(); // handler 成功 → ack
+        assertThat(result).isTrue();
         verify(processor).handle("abc-123");
     }
 

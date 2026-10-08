@@ -12,17 +12,10 @@ import java.util.Map;
 @Component
 public class NewApiMediaKitEraseClient extends NewApiMediaKitSyncClient {
 
-    /** 网关同步路由路径（blue-whale-api 网关侧 MediaKit 渠道）。 */
     static final String ERASE_PATH = "/v1/mediakit/sync/erase-image";
 
-    /** 对客模型名（契约 §15.5：网关渠道路由 + model_price 配 0 免费口径）。 */
     static final String MODEL = "mediakit-erase-image";
 
-    /**
-     * 默认读超时 300s（同步 erase 实测秒级返回，取与高清放大同窗口的保守值；
-     * env NEW_API_IMAGE_ERASE_TIMEOUT_MS 可覆盖）。配套：claim 租约 420s（JobClaimService），
-     * 必须 > 超时 + 下载转存余量，否则 recovery 把在跑任务当孤儿重投 → 双跑。
-     */
     private static final int DEFAULT_TIMEOUT_MS = 300_000;
 
     public NewApiMediaKitEraseClient(UpstreamBaseUrl baseUrl) {
@@ -66,8 +59,5 @@ public class NewApiMediaKitEraseClient extends NewApiMediaKitSyncClient {
         return NewApiUpstreamConfig.timeoutMs("NEW_API_IMAGE_ERASE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
     }
 
-    /**
-     * 图片擦除结果：火山托管的结果图 URL（仅 24h 有效，processor 必须立即下载转存 TOS）。
-     */
     public record EraseResult(String imageUrl) {}
 }

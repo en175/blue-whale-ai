@@ -1,7 +1,3 @@
--- IKCH05：首页背景图/视频后台动态配置条目。
--- 与 prisma/migrations/20260901142500_ikch05_homepage_hero/migration.sql 双轨同步。
--- 母工单 IKCH01 接口草稿：media_type=image|video；视频必须有 poster_url；
--- enabled=1 进首页轮播，按 sort_order 升序；上限 8 条（应用层校验）。
 SET NAMES utf8mb4;
 CREATE TABLE `homepage_hero` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,

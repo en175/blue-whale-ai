@@ -38,16 +38,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * AudioSpeedJobProcessor 错误码映射与异步链编排测试（IKHW5A，父单 IKHVYO；火山 MediaKit
- * adjust-audio-speed 执行面，模板 AudioTrimJobProcessorErrorMappingTest 一对一平移）。
- * <p>
- * 覆盖：claim 语义、input 业务键兜底校验（含 speed 可选与脏值形态）、凭证缺失分类、
- * submit 相（提交成功存 task_id + 续排 / §5 信号保留 / 归并 1051）、poll 相
- * （processing 续排进度保持 / 轮询超限 / 瞬时错误重排 / 火山 failed 分类 + 上游原因透传）、
- * completed 立即转存发布（固定 m4a 转存格式 / 官方 duration 直取不回落 / md5 穿透）、
- * 转存强依赖与瞬时判定。不连真实 MQ/DB/TOS/网关。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class AudioSpeedJobProcessorErrorMappingTest {
@@ -80,7 +70,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
     }
 
-    /** 源音频素材（worker 不消费其时长——调速产物时长只取官方 duration，不回落）。 */
     private void stubSourceAsset() {
         AssetEntity source = new AssetEntity();
         source.setType("audio");
@@ -115,7 +104,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         assertThat(captor.getValue().code()).isEqualTo(expectedCode);
     }
 
-    // ========== claim 语义（家族同构：DB 异常上抛保重投） ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -141,7 +129,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         verify(finalizer, never()).publishAudioSpeedResult(any());
     }
 
-    // ========== input 业务键兜底校验（权威复核在创建入口） ==========
 
     @Test
     @DisplayName("缺少 source_asset_id → invalid_input")
@@ -188,7 +175,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
-    // ========== 源素材 / 凭证 ==========
 
     @Test
     @DisplayName("源素材不可用（非 audio）→ 1051 兜底 + 可读原因，不提交上游")
@@ -220,7 +206,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== submit 相：提交成功 + 错误归并（§5 分类；无自动重试） ==========
 
     @Test
     @DisplayName("提交成功：submit 带 audio_url + speed → markProviderSubmitted 存 task_id + scheduleNext(5s)")
@@ -298,7 +283,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
 
     @Test
     @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
@@ -317,14 +301,12 @@ class AudioSpeedJobProcessorErrorMappingTest {
         verify(finalizer).failAudioSpeedJob(captor.capture());
         com.bluewhale.worker.domain.dto.FailAudioSpeedDto failure = captor.getValue();
         assertThat(failure.code()).isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
-        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
         assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
         assertThat(failure.details())
                 .containsEntry("raw", "音频调速任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
                 .containsEntry("http_status", 401);
     }
 
-    // ========== poll 相：状态机 + 进度口径（家族对齐） ==========
 
     @Test
     @DisplayName("poll processing → rescheduleProviderPoll(进度保持不倒退) + scheduleNext(5s)")
@@ -409,7 +391,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
                 .isEqualTo("音频调速轮询超时（超过 "
                         + AudioSpeedJobProcessor.MAX_AUDIO_SPEED_POLLS
                         + " 次），上游持续错误: MediaKit 音频调速任务查询超时");
-        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
         assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -431,7 +412,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         verify(finalizer).failAudioSpeedJob(gatewayCaptor.capture());
         assertThat(gatewayCaptor.getValue().code())
                 .isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
-        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
         assertThat(gatewayCaptor.getValue().message())
                 .isEqualTo("音频调速轮询超时（超过 "
                         + AudioSpeedJobProcessor.MAX_AUDIO_SPEED_POLLS
@@ -476,7 +456,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         assertFailCode(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
     }
 
-    // ========== poll 相：火山任务 failed（§5 分类映射） ==========
 
     @Test
     @DisplayName("poll failed（speed 越界官方约束拒绝）→ 1051 + 上游可读原因透传（前端投影）")
@@ -527,7 +506,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         assertThat(captor.getValue().message()).isEqualTo("音频调速任务失败");
     }
 
-    // ========== poll 相：completed → 立即转存 + 终态发布（URL 24h 有效） ==========
 
     @Test
     @DisplayName("poll completed → persist 固定 m4a 转存（不传官方 format，产物跟随默认）→ 发布 payload：官方 duration 秒 + md5 穿透")
@@ -546,8 +524,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        // URL 24h 有效：completed 后立即转存（同步链路，无续排）；扩展名/mime 固定契约
-        // TRANSFER_OUTPUT_FORMAT（本产品不传官方 format，产物跟随默认 m4a）
         verify(mediaRelay).persist("https://volc/out.m4a?auth_key=...", "9",
                 AudioSpeedContract.TRANSFER_OUTPUT_FORMAT);
         ArgumentCaptor<PublishAudioSpeedDto> captor =
@@ -655,7 +631,6 @@ class AudioSpeedJobProcessorErrorMappingTest {
         verify(finalizer, never()).publishAudioSpeedResult(any());
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架同语义） ==========
 
     @Test
     @DisplayName("瞬时判定：provider_timeout / 网络不可达 / HTTP 429/5xx → 瞬时；4xx / 业务失败 → 非瞬时")

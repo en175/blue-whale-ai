@@ -39,19 +39,10 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * ImageEnhanceJobProcessor 单测（契约 §14.5 / IKGM9D）。
- * <p>
- * 覆盖：input 冻结六键兜底校验、源素材/凭证缺失分类、错误码归一（§5 信号保留、
- * 其余归 image_enhance_failed，无自动重试）、成功链（经 mock 客户端拿到本地结果图 URL →
- * 下载 → TOS 转存 → publishImageEnhanceResult payload）、claim 异常上抛语义。
- * 不连真实 MQ/DB/TOS/网关（结果图用本地 HttpServer 桩）。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class ImageEnhanceJobProcessorTest {
 
-    /** 1x1 PNG（ImageIO 可解析，宽高断言用）。 */
     private static final byte[] PNG_1X1 = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
@@ -76,7 +67,6 @@ class ImageEnhanceJobProcessorTest {
         when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
-        // 结果图桩（24h 有效的火山 URL 用本地 HttpServer 模拟）
         resultServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         resultServer.createContext("/enhanced.png", exchange -> {
             exchange.getResponseHeaders().add("Content-Type", "image/png");
@@ -130,7 +120,6 @@ class ImageEnhanceJobProcessorTest {
                 any(), eq("worker-1"), eq(5L));
     }
 
-    // ========== claim 语义（IKC9EJ 同构） ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -157,7 +146,6 @@ class ImageEnhanceJobProcessorTest {
         verify(finalizer, never()).publishImageEnhanceResult(any());
     }
 
-    // ========== input 冻结六键兜底校验（§14.2；权威复核在创建入口 IKGM99） ==========
 
     @Test
     @DisplayName("缺 source_asset_id → invalid_input")
@@ -195,7 +183,6 @@ class ImageEnhanceJobProcessorTest {
         assertFailCode(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== 源素材与凭证 ==========
 
     @Test
     @DisplayName("源素材不可用 → image_enhance_failed + 可读原因")
@@ -242,7 +229,6 @@ class ImageEnhanceJobProcessorTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== 错误码归一（§14.5：§5 信号保留，其余归 image_enhance_failed；无自动重试） ==========
 
     @Test
     @DisplayName("客户端 content_rejected → 保留既有码投影（§5 信号）")
@@ -301,7 +287,6 @@ class ImageEnhanceJobProcessorTest {
         assertFailCode(ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED);
     }
 
-    // ========== 成功链（下载落库 + Asset 创建 + 终态事件） ==========
 
     @Test
     @DisplayName("成功链：版本档映射与能力裁剪出站 → 下载结果图 → TOS 转存 → 发布 payload 带宽高")
@@ -318,7 +303,6 @@ class ImageEnhanceJobProcessorTest {
 
         processor.handle("100");
 
-        // 出站映射：max→max，max 档两高级参数都发（精确 matcher 的 stub 未命中会返回 null → NPE，故等价于断言）
         verify(mediaKitClient).enhance(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("max"), eq(4), eq("fidelity_first"), eq(false));
         ArgumentCaptor<PublishImageEnhanceDto> captor = ArgumentCaptor.forClass(PublishImageEnhanceDto.class);
@@ -330,8 +314,6 @@ class ImageEnhanceJobProcessorTest {
         assertThat(published.size()).isEqualTo(PNG_1X1.length);
         assertThat(published.width()).isEqualTo(1);
         assertThat(published.height()).isEqualTo(1);
-        // IKGS73：md5 必须从 stored 穿透到发布入参。没有这条，processor 哪天传了 null，
-        // 全套测试照样绿，而 assets.md5 会静默变空 —— 正是本单要消灭的那类失效。
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
         verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -355,7 +337,6 @@ class ImageEnhanceJobProcessorTest {
 
         processor.handle("100");
 
-        // lite→standard + 能力矩阵裁剪（TIERS_WITH_ENHANCE_MODE / TIERS_WITH_CORRECT_COLOR 均不含 lite）
         verify(mediaKitClient).enhance(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("standard"), eq(4), isNull(), isNull());
     }

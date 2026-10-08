@@ -21,20 +21,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-/**
- * NewApiMediaKitMatteVideoClient 接口级 mock 网关测试（IKHK99，父规格 IKHJRC，契约 IKHK7F）。
- * <p>
- * 覆盖：**双端点按模式分流**（portrait → 契约 SUBMIT_PATHS.portrait、greenscreen →
- * SUBMIT_PATHS.greenscreen——IKH67T 红线：网关路径 ≠ 火山上游路径）、模式 → 模型名映射
- * （契约 MODEL_NAMES 单源）、出站参数形状（video_url / format 透传；**background_color 仅
- * MP4 时显式携带**——两端点官方默认底色不同，本仓冻结 white 防歧义；WEBM 不带）、
- * 幂等与回调参数不出站（client_token / callback_url / callback_args / queue_id /
- * media_output_destination——家族轮询口径 + worker 转存自家 TOS，ADR-0112）、标准请求头
- * 三元组、submit 响应 task_id 解析与缺失兜底、官方错误结构 error{code,type,message,param}
- * 的 §5 分类与上游原因透传、poll 端点路径（契约 POLL_PATH_PREFIX 拼 taskId）与三态解析
- * （completed 含 result 三键 / failed / running 中间态）。不连真实网关。参数名以火山官方
- * 开发指南 PDF 为准。
- */
 class NewApiMediaKitMatteVideoClientTest {
 
     private HttpServer server;
@@ -50,7 +36,6 @@ class NewApiMediaKitMatteVideoClientTest {
 
     @BeforeEach
     void startServer() throws Exception {
-        // 官方「提交成功响应」示例形状（开发指南 PDF 同构）
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-matte-portrait-video-123456789\","
                 + "\"request_id\":\"20240521100000ABCDEFG12345\"}");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -87,7 +72,6 @@ class NewApiMediaKitMatteVideoClientTest {
                 mode, format, backgroundColor);
     }
 
-    // ========== submit：双端点按模式分流 + 出站映射（官方开发指南 PDF「快速入门」节） ==========
 
     @Test
     @DisplayName("portrait/WEBM：契约 SUBMIT_PATHS 分流 + 按模式模型名 + video_url/format 透传，无 background_color")
@@ -95,7 +79,6 @@ class NewApiMediaKitMatteVideoClientTest {
         String taskId = callSubmit("portrait", "WEBM", null);
 
         assertThat(taskId).isEqualTo("amk-tool-matte-portrait-video-123456789");
-        // IKH67T 红线：网关对客路由（契约常量映射），不是火山上游 /api/v1/tools/matte-portrait-video
         assertThat(lastPath.get())
                 .isEqualTo(VideoMattingContract.SUBMIT_PATHS.get("portrait"));
         assertThat(lastMethod.get()).isEqualTo("POST");
@@ -103,9 +86,7 @@ class NewApiMediaKitMatteVideoClientTest {
         assertThat(body).contains("\"model\":\"" + VideoMattingContract.MODEL_NAMES.get("portrait") + "\"");
         assertThat(body).contains("\"video_url\":\"https://example.com/your_portrait_video.mp4\"");
         assertThat(body).contains("\"format\":\"WEBM\"");
-        // WEBM 透明：不带 background_color（官方两端点默认底色不同，仅 MP4 显式携带）
         assertThat(body).doesNotContain("background_color");
-        // 幂等与回调参数一律不出站（家族轮询口径 + worker 转存自家 TOS，ADR-0112）
         assertThat(body).doesNotContain("client_token");
         assertThat(body).doesNotContain("callback");
         assertThat(body).doesNotContain("queue_id");
@@ -172,7 +153,6 @@ class NewApiMediaKitMatteVideoClientTest {
                 .isEqualTo(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== submit：响应与错误分类（官方错误结构 error{code,message,param,type}） ==========
 
     @Test
     @DisplayName("网关 400（官方同步错误结构）→ 抛错，上游可读原因透传到 message")
@@ -233,7 +213,6 @@ class NewApiMediaKitMatteVideoClientTest {
                 .isEqualTo(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
     }
 
-    // ========== poll：查询路径与三态解析（两工具共用同一条查询路由） ==========
 
     @Test
     @DisplayName("poll completed：GET 契约 POLL_PATH_PREFIX 拼 taskId，解析 result 三键")

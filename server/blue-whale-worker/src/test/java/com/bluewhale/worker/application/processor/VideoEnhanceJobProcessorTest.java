@@ -38,15 +38,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * VideoEnhanceJobProcessor 单测（IKH3VF，父规格 IKH3VB）。
- * <p>
- * 覆盖：异步两段式状态机（submit 存 task_id → markProviderSubmitted + scheduleNext / poll
- * processing 续排 / 轮询超限 / completed 立即转存发布——官方 duration、档位推导宽高、
- * resolution/fps 随发布 payload / failed 归 1045 + 上游原因透传〔含 SDR 限制场景〕）、
- * input 业务键兜底校验、凭证缺失分类、§5 信号保留与兜底归并、瞬时轮询错误判定、
- * 输出宽高推导（横竖屏 / 三档位 / 源宽高缺失容忍）。不连真实 MQ/DB/TOS/网关。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class VideoEnhanceJobProcessorTest {
@@ -82,7 +73,6 @@ class VideoEnhanceJobProcessorTest {
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
-    /** 源视频素材（横屏 1920x1080 / 65s：宽高供输出推导、时长供回落）。 */
     private void stubSourceAsset(Integer width, Integer height) {
         AssetEntity source = new AssetEntity();
         source.setType("video");
@@ -122,7 +112,6 @@ class VideoEnhanceJobProcessorTest {
                 any(), eq("worker-1"), eq(5L));
     }
 
-    // ========== claim 语义 ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -150,7 +139,6 @@ class VideoEnhanceJobProcessorTest {
         verify(finalizer, never()).publishVideoEnhanceResult(any());
     }
 
-    // ========== input 业务键兜底校验（权威复核在创建入口 IKH3VE） ==========
 
     @Test
     @DisplayName("缺 source_asset_id → invalid_input")
@@ -174,7 +162,6 @@ class VideoEnhanceJobProcessorTest {
         assertFailCode(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== 源素材 / 凭证 ==========
 
     @Test
     @DisplayName("源素材不可用（非 video）→ 1045 兜底 + 可读原因，不提交上游")
@@ -207,7 +194,6 @@ class VideoEnhanceJobProcessorTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== submit 相：参数 + 状态机（出站 JSON 映射在客户端测试钉） ==========
 
     @Test
     @DisplayName("submit：resolution 透传 → markProviderSubmitted 存 task_id + scheduleNext(5s)")
@@ -243,7 +229,6 @@ class VideoEnhanceJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== submit 相：错误归并（§5 信号保留，其余归 1045；无自动重试） ==========
 
     @Test
     @DisplayName("submit content_rejected → 保留既有码投影（§5 信号）")
@@ -288,7 +273,6 @@ class VideoEnhanceJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
 
     @Test
     @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
@@ -307,14 +291,12 @@ class VideoEnhanceJobProcessorTest {
         verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED), messageCaptor.capture(),
                 detailsCaptor.capture(), eq("worker-1"), eq(5L));
-        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
         assertThat(messageCaptor.getValue()).doesNotContain("401").contains("上游凭证被拒绝");
         assertThat(detailsCaptor.getValue())
                 .containsEntry("raw", "画质增强任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
                 .containsEntry("http_status", 401);
     }
 
-    // ========== parent-reuse 重试收割（IKI89S / ADR-0114；平移 VideoJobProcessorTest 先例）==========
 
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
@@ -344,7 +326,6 @@ class VideoEnhanceJobProcessorTest {
         assertThat(published.mime()).isEqualTo("video/mp4");
         assertThat(published.size()).isEqualTo(123_456L);
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        // 源横屏 1920x1080 → 2k 档推导 2560x1440，档位推导与正常完成路径同型
         assertThat(published.width()).isEqualTo(2560);
         assertThat(published.height()).isEqualTo(1440);
         assertThat(published.durationSec()).isEqualTo(65.5);
@@ -488,16 +469,12 @@ class VideoEnhanceJobProcessorTest {
 
         processor.handle("100");
 
-        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：当前 worker 已无执行权，回退提交只会
-        // 先白付一次上游 submit 再被 markProviderSubmitted 守卫丢弃（孤儿上游任务）；任务
-        // 保持 processing，由新 worker 重新领取后重新检查父任务继续收割
         verify(enhanceVideoClient, never()).submit(anyString(), anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
-    // ========== poll 相：状态机 ==========
 
     @Test
     @DisplayName("poll processing → rescheduleProviderPoll + scheduleNext(5s)")
@@ -584,7 +561,6 @@ class VideoEnhanceJobProcessorTest {
                 eq("画质增强轮询超时（超过 " + VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS
                         + " 次），上游持续错误: MediaKit 画质增强任务查询超时"),
                 detailsCaptor.capture(), eq("worker-1"), eq(5L));
-        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
         assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -601,8 +577,6 @@ class VideoEnhanceJobProcessorTest {
 
         processor.handle("100");
 
-        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：状态落 details，message 剥
-        // 「: HTTP 503」片段（冒号保留），上游可读原因保留
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(finalizer).failVideoJob(eq("100"),
@@ -678,7 +652,6 @@ class VideoEnhanceJobProcessorTest {
         assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
     }
 
-    // ========== poll 相：completed → 立即下载转存 + 终态发布（URL 24h 有效） ==========
 
     @Test
     @DisplayName("poll completed → persist 转存 → 发布 payload：官方 duration + 档位推导宽高 + resolution/fps + md5 穿透")
@@ -696,7 +669,6 @@ class VideoEnhanceJobProcessorTest {
 
         processor.handle("100");
 
-        // URL 24h 有效：completed 后立即转存（同步链路，无续排）
         verify(mediaRelay).persist("https://volc/out.mp4?auth_key=...", "9");
         ArgumentCaptor<PublishVideoEnhanceDto> captor =
                 ArgumentCaptor.forClass(PublishVideoEnhanceDto.class);
@@ -707,7 +679,6 @@ class VideoEnhanceJobProcessorTest {
         assertThat(published.mime()).isEqualTo("video/mp4");
         assertThat(published.size()).isEqualTo(123_456L);
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        // 源横屏 1920x1080 → 2k 档：短边 1440、长边 1920*1440/1080=2560 → 宽 2560 高 1440
         assertThat(published.width()).isEqualTo(2560);
         assertThat(published.height()).isEqualTo(1440);
         assertThat(published.durationSec()).isEqualTo(65.5);
@@ -736,9 +707,7 @@ class VideoEnhanceJobProcessorTest {
         ArgumentCaptor<PublishVideoEnhanceDto> captor =
                 ArgumentCaptor.forClass(PublishVideoEnhanceDto.class);
         verify(finalizer).publishVideoEnhanceResult(captor.capture());
-        // 官方 duration 也缺失 → 回落源 duration_ms 换算秒
         assertThat(captor.getValue().durationSec()).isEqualTo(65.0);
-        // 4k 档短边 2160、长边 1920*2160/1080=3840
         assertThat(captor.getValue().width()).isEqualTo(3840);
         assertThat(captor.getValue().height()).isEqualTo(2160);
         assertThat(captor.getValue().resolution()).isEqualTo("4k");
@@ -813,7 +782,6 @@ class VideoEnhanceJobProcessorTest {
         verify(finalizer, never()).publishVideoEnhanceResult(any());
     }
 
-    // ========== 输出宽高推导（官方仅返回档位字符串，短边 = 码率参考表档位口径） ==========
 
     @Test
     @DisplayName("推导：横屏 1920x1080 → 1080p 档 = 1920x1080（源已是 1080P）")
@@ -846,7 +814,6 @@ class VideoEnhanceJobProcessorTest {
                 .isNull();
     }
 
-    /** 独立构造源 Asset（不动 mock 桩，供静态推导测试直用）。 */
     private static AssetEntity sourceAsset(Integer width, Integer height) {
         AssetEntity source = new AssetEntity();
         source.setWidth(width);
@@ -854,7 +821,6 @@ class VideoEnhanceJobProcessorTest {
         return source;
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架同语义） ==========
 
     @Test
     @DisplayName("瞬时判定：provider_timeout / 网络不可达 / HTTP 429/5xx → 瞬时；4xx / 业务失败 → 非瞬时")

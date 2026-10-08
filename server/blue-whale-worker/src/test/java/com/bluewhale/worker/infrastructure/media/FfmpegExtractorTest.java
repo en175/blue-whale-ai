@@ -10,11 +10,6 @@ import java.util.regex.Matcher;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * FfmpegExtractor 参数解析 / regex 单元测试（无需真实 ffmpeg）。
- * <p>
- * 测试 Duration regex、no-stream 检测、进度计算公式（与 ffmpeg.ts 逐字一致）。
- */
 class FfmpegExtractorTest {
 
     @Test
@@ -28,11 +23,10 @@ class FfmpegExtractorTest {
         assertThat(m.group(2)).isEqualTo("02");
         assertThat(m.group(3)).isEqualTo("35.42");
 
-        // 计算毫秒（与 ffmpeg.ts:73-76 一致）
         long ms = (long) ((Long.parseLong(m.group(1)) * 3600
                 + Long.parseLong(m.group(2)) * 60
                 + Double.parseDouble(m.group(3))) * 1000);
-        assertThat(ms).isEqualTo(155420); // 2m35.42s = 155420ms
+        assertThat(ms).isEqualTo(155420);
     }
 
     @Test
@@ -45,7 +39,7 @@ class FfmpegExtractorTest {
         long ms = (long) ((Long.parseLong(m.group(1)) * 3600
                 + Long.parseLong(m.group(2)) * 60
                 + Double.parseDouble(m.group(3))) * 1000);
-        assertThat(ms).isEqualTo(5400000); // 1h30m = 5400000ms
+        assertThat(ms).isEqualTo(5400000);
     }
 
     @Test
@@ -85,19 +79,16 @@ class FfmpegExtractorTest {
     @Test
     @DisplayName("进度计算：out_time_ms / durationMs × 100 封顶 100（ffmpeg.ts:62）")
     void progressCalculation() {
-        long durationMs = 155420; // 2m35.42s
+        long durationMs = 155420;
 
-        // out_time_ms = 50000 → 32.2%
         double outTimeMs1 = 50000;
         double percent1 = Math.min(100, (outTimeMs1 / durationMs) * 100);
         assertThat(percent1).isCloseTo(32.2, org.assertj.core.data.Offset.offset(0.1));
 
-        // out_time_ms = 200000 → 封顶 100（超过 duration）
         double outTimeMs2 = 200000;
         double percent2 = Math.min(100, (outTimeMs2 / durationMs) * 100);
         assertThat(percent2).isEqualTo(100.0);
 
-        // out_time_ms = 0 → 0%
         double outTimeMs3 = 0;
         double percent3 = Math.min(100, (outTimeMs3 / durationMs) * 100);
         assertThat(percent3).isEqualTo(0.0);
@@ -127,26 +118,22 @@ class FfmpegExtractorTest {
     @Test
     @DisplayName("out_time_ms 行解析（ffmpeg.ts:57-64）")
     void outTimeMsParsing() {
-        // 模拟 stdout 行
         String line1 = "out_time_ms=5000000";
         assertThat(line1.startsWith("out_time_ms=")).isTrue();
         double value = Double.parseDouble(line1.substring("out_time_ms=".length()));
         assertThat(value).isEqualTo(5000000.0);
 
-        // 非数字行跳过
         String line2 = "out_time_ms=N/A";
         try {
             Double.parseDouble(line2.substring("out_time_ms=".length()));
-            assertThat(true).isFalse(); // should not reach
+            assertThat(true).isFalse();
         } catch (NumberFormatException ignored) {
-            // 预期行为
         }
     }
 
     @Test
     @DisplayName("ffmpeg 参数列表验证（ffmpeg.ts:32-44 逐字一致）")
     void ffmpegArgs_areCorrect() {
-        // 验证参数顺序和值与 TS 完全一致
         List<String> expectedArgs = List.of(
                 "-i", "<input>",
                 "-vn",
@@ -158,7 +145,6 @@ class FfmpegExtractorTest {
                 "<output>"
         );
 
-        // 验证参数格式
         assertThat(expectedArgs).containsExactly(
                 "-i", "<input>",
                 "-vn",

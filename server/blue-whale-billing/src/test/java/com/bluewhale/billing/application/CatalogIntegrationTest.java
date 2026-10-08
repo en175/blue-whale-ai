@@ -18,26 +18,6 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * 定价目录的**真库集成测试**。
- *
- * <p>为什么必须真库跑：目录文档要经 MySQL 的 JSON 列往返（读回来是它自己的规范化文本），
- * 而老行里还留着规则搬走之前的 {@code models} 段——那一段能不能被容错解析、
- * 表建得对不对，单测覆盖不到。
- *
- * <p>⚠️ <b>目录里没有计价规则</b>（规则住在模型能力行，随 Hold / Quote 以快照进出 billing），
- * 所以本类考的是「目录读得出来、校验得了、老行不用迁移」；
- * 「规则 JSON → 引擎算得出价」在 {@link CatalogCompilerTest} 与
- * {@code TokenEstimatorTest} 里考（规则不再经过库）。
- *
- * <p>门控：未设 {@code BILLING_DB_PASSWORD} 时整体跳过（与仓库里
- * {@code *_DATABASE_URL} 门控的既有做法一致）。本地跑：
- * <pre>
- *   export BILLING_DB_PASSWORD=$(docker inspect bw-mysql \
- *     --format '{{range .Config.Env}}{{println .}}{{end}}' | grep MYSQL_ROOT_PASSWORD | cut -d= -f2)
- *   mvn -f server/pom.xml -pl blue-whale-billing -am test
- * </pre>
- */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "BILLING_DB_PASSWORD", matches = ".+")
 class CatalogIntegrationTest {
@@ -55,10 +35,8 @@ class CatalogIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        // 清成已知状态。用 DELETE 不用 TRUNCATE：TRUNCATE 在 Flyway 管的表上会隐式提交，
-        // 且与测试事务语义冲突。
         jdbc.update("DELETE FROM billing_pricing_catalogs");
-        holder.reload();  // 清空后 reload → 无 active 版本，换算率读成 -1
+        holder.reload();
     }
 
     private void publish(int version, String document, String status) {
@@ -70,7 +48,6 @@ class CatalogIntegrationTest {
                 """, version, status, document, version + ":" + document);
     }
 
-    /** 一份最小目录：只有换算率与折扣策略。 */
     private static String catalogJson(int creditsPerYuan) {
         return """
                 {
@@ -88,7 +65,6 @@ class CatalogIntegrationTest {
 
         assertThat(holder.reload()).isTrue();
         assertThat(holder.currentVersion()).isEqualTo(1);
-        // ★ 管理端与充值都靠它：换算率只能从目录读，不能硬编码
         assertThat(holder.currentCreditsPerYuan()).isEqualTo(15);
         assertThat(holder.currentDiscountPolicy().stackModeOrDefault()).isEqualTo("multiply");
         assertThat(holder.currentDiscountPolicy().floorFactorBpOrDefault()).isEqualTo(3_000);
@@ -96,8 +72,6 @@ class CatalogIntegrationTest {
 
     @Test
     void 老目录行里的models段被忽略_不需要数据迁移() {
-        // 规则搬进模型能力行之前发布的目录行就长这样：带一个 models 段。
-        // 它必须能被照常解析（FAIL_ON_UNKNOWN_PROPERTIES=false），否则线上老行一读就炸。
         publish(1, """
                 {
                   "schemaVersion": 1,
@@ -127,7 +101,6 @@ class CatalogIntegrationTest {
         holder.reload();
         assertThat(holder.currentVersion()).isEqualTo(1);
 
-        // 运营改口径：1 元 = 20 积分
         publish(2, catalogJson(20), "active");
         jdbc.update("UPDATE billing_pricing_catalogs SET status='retired' WHERE catalog_version=1");
 
@@ -142,23 +115,17 @@ class CatalogIntegrationTest {
         holder.reload();
         assertThat(holder.currentVersion()).isEqualTo(1);
 
-        // 发布一份坏目录：换算率 0 —— 那是「多少元都换不到积分」
         publish(2, catalogJson(0), "active");
         jdbc.update("UPDATE billing_pricing_catalogs SET status='retired' WHERE catalog_version=1");
 
-        // reload 失败 → 保持 v1，而非清空
         assertThat(holder.reload()).isFalse();
         assertThat(holder.currentVersion()).isEqualTo(1);
 
-        // 换算率仍可用（用旧版本）—— 一次配置错误不该放大成全站不可用
         assertThat(holder.currentCreditsPerYuan()).isEqualTo(15);
     }
 
     @Test
     void 没有生效目录时_换算率读成负一而不是编一个数() {
-        // ⚠️ 必须用**全新的 holder**：@SpringBootTest 的 holder 是单例，
-        //    而它的 reload() 失败时**保持旧版本**（这正是设计要的行为）——
-        //    共用它会带着上一个测试加载的版本，测不到「从未加载过」这个分支。
         var freshHolder = new CatalogHolder(repository);
 
         assertThat(freshHolder.currentVersion()).isEqualTo(-1);
@@ -168,8 +135,6 @@ class CatalogIntegrationTest {
 
     @Test
     void 规则快照_表键大小写被规范化后能算出价() {
-        // 本仓的定价轴写法是「轴=值」，运营常写成 "Size=2K"；编译期重拼成 "size=2k"。
-        // 这条钉的是「配 JSON → 引擎算价」这一段——规则不再经过库，快照直接编译。
         var rule = CatalogCompiler.compileRuleSnapshot("""
                 {"baseUnit":"usage.succeededSlots",
                  "basePrice":{"kind":"table","by":["size"],
@@ -178,7 +143,6 @@ class CatalogIntegrationTest {
                 """);
         var engine = PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE);
 
-        // 规格里故意写 "SIZE"/"1k"（未规范化），值取自那条 Size=1K（即 2000 mc = 2 积分）
         long credits = engine.compute(
                 new PricingRequest(42L, "seedream-4.0", "text2image", Map.of("SIZE", "1k"), "free"),
                 Usage.of(UsageDim.SUCCEEDED_SLOTS, 1), T).credits();

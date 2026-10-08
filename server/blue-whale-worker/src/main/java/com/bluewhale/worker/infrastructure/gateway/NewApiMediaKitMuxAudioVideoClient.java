@@ -10,12 +10,10 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** MediaKit 音视频合成网关客户端。网关路由由独立网关票实现；此处按冻结对客契约调用（迁移契约 §21.3）。 */
 @Component
 public class NewApiMediaKitMuxAudioVideoClient extends NewApiMediaKitAsyncTaskClient {
     static final String MODEL = "mediakit-mux-audio-video";
 
-    /** 地址的唯一读取点是 {@link UpstreamBaseUrl}（装配在 {@code NewApiUpstreamConfig}），与同族客户端同姿势。 */
     public NewApiMediaKitMuxAudioVideoClient(UpstreamBaseUrl baseUrl) { super(baseUrl); }
 
     @Override protected String submitPath() { return AudioVideoMuxContract.SUBMIT_PATH; }
@@ -24,13 +22,6 @@ public class NewApiMediaKitMuxAudioVideoClient extends NewApiMediaKitAsyncTaskCl
     @Override protected String fallbackCode() { return AudioVideoMuxContract.ERROR_AUDIO_VIDEO_MUX_FAILED; }
     @Override protected RuntimeException error(String code, String message) { return new MediaExtractError(code, message); }
 
-    /**
-     * 出站 payload 组装（§21.3 映射钉死）：冻结快照 camel 命名不出网，出站恒为供应商 snake_case；
-     * {@code sync="none"} 不传 is_video_audio_sync/sync_mode/sync_method，
-     * {@code sync="video"/"audio"} 传 is_video_audio_sync=true + sync_mode=<值> + sync_method="trim"
-     * （总是显式 trim，永不 speed）；is_audio_reserve 与 client_token 总是显式；
-     * 不传 media_output_destination / callback_* / queue_id（默认队列、不回调）。
-     */
     static Map<String, Object> submitPayload(String videoUrl, String audioUrl, boolean isAudioReserve,
                                              String sync, String clientToken) {
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -86,7 +77,6 @@ public class NewApiMediaKitMuxAudioVideoClient extends NewApiMediaKitAsyncTaskCl
         return new MuxAudioVideoTaskObservation("processing", null, null, null, null, null, requestId);
     }
 
-    /** 音视频合成任务查询投影：durationSec=result.duration（秒）、resolution=result.resolution（"WxH"）。 */
     public record MuxAudioVideoTaskObservation(String status, String videoUrl, Double durationSec,
                                                String resolution, String upstreamCode,
                                                String upstreamMessage, String requestId) {

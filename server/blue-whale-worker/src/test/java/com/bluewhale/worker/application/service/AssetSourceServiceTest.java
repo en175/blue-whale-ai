@@ -14,10 +14,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * AssetSourceService 移植测试（generation-worker-asset-ops.ts:81-101）。
- * 钉两件事：IKDD4Z linked 分支传参完整；storage_key 为 null 一律判不可用。
- */
 @ExtendWith(MockitoExtension.class)
 class AssetSourceResolverTest {
 
@@ -63,7 +59,6 @@ class AssetSourceResolverTest {
         assertThat(new AssetSourceService(assetMapper).resolve(555L, 9L, 42L)).isNull();
     }
 
-    // ========== Blade-② resolveInputAssets tests ==========
 
     @Test
     @DisplayName("resolveInputAssets: 空列表 → 空映射")
@@ -100,7 +95,7 @@ class AssetSourceResolverTest {
     void resolveInputAssets_missingNotInMap() {
         when(assetMapper.findLinkedAssetIds(anyLong(), anyLong())).thenReturn(List.of());
         when(assetMapper.resolveInputAssetsWithLinked(anyList(), anyLong(), anyLong(), anyList()))
-                .thenReturn(List.of()); // 无命中
+                .thenReturn(List.of());
 
         var result = new AssetSourceService(assetMapper)
                 .resolveInputAssets(List.of("100", "101"), "9", "42");

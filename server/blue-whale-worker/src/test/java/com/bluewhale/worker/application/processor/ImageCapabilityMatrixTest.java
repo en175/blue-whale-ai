@@ -6,21 +6,9 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * 图片渠道映射矩阵测试（image-channel-parser.ts + seedream-image-size.ts 逐字对齐）。
- * <p>
- * 覆盖：
- * - seedream 代码表（hasSeedreamSizeTable / resolveSeedreamImageSize）
- * - gpt 矩阵查表（mapImageChannelRequest gpt parser）
- * - banana 双映射（quality × size）
- * - features JSON 解析（imageReferenceMax）
- * - supported_sizes 匹配（matchSupportedSize）
- */
 class ImageCapabilityMatrixTest {
 
-    // ========== seedream 尺寸矩阵（IK629：数据源=能力行 request_mapping，原为代码表） ==========
 
-    /** 与迁移后 doubao-seedream-5-0-pro-260628 行 request_mapping 同形（取代表性子集）。 */
     private static final String SEEDREAM_MAPPING =
             "{\"matrix\":{\"1K\":{\"1:1\":\"1024x1024\",\"16:9\":\"1424x800\"},"
                     + "\"2K\":{\"1:1\":\"2048x2048\",\"16:9\":\"2816x1584\"}}}";
@@ -75,7 +63,6 @@ class ImageCapabilityMatrixTest {
         }
     }
 
-    // ========== gpt 矩阵 ==========
 
     @Nested
     @DisplayName("gpt 矩阵查表（image-channel-parser.ts:108-117）")
@@ -100,9 +87,9 @@ class ImageCapabilityMatrixTest {
             var mapping = ImageChannelMapper.parseStoredMapping(
                     ImageChannel.GPT_IMAGE, mappingJson, "1K", "1:1");
             var result = ImageChannelMapper.mapImageChannelRequest(
-                    mapping, "2K", "4:3"); // 2K 不在矩阵
+                    mapping, "2K", "4:3");
             assertThat(result.ok()).isTrue();
-            assertThat(result.size()).isEqualTo("1024x1024"); // 回退到 default
+            assertThat(result.size()).isEqualTo("1024x1024");
         }
 
         @Test
@@ -129,7 +116,6 @@ class ImageCapabilityMatrixTest {
         }
     }
 
-    // ========== banana 双映射 ==========
 
     @Nested
     @DisplayName("banana 双映射（image-channel-parser.ts:119-128）")
@@ -157,7 +143,7 @@ class ImageCapabilityMatrixTest {
             var result = ImageChannelMapper.mapImageChannelRequest(
                     mapping, "2K", "1:1");
             assertThat(result.ok()).isTrue();
-            assertThat(result.quality()).isEqualTo("hd"); // 回退 default
+            assertThat(result.quality()).isEqualTo("hd");
         }
 
         @Test
@@ -172,7 +158,6 @@ class ImageCapabilityMatrixTest {
         }
     }
 
-    // ========== features 解析 ==========
 
     @Nested
     @DisplayName("features imageReferenceMax（asset-ops.ts:127-139）")
@@ -209,7 +194,6 @@ class ImageCapabilityMatrixTest {
         }
     }
 
-    // ========== supported_sizes 匹配 ==========
 
     @Nested
     @DisplayName("supported_sizes 匹配（asset-ops.ts:111-126）")

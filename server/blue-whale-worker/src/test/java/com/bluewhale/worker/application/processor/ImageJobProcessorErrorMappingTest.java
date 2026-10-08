@@ -52,7 +52,6 @@ class ImageJobProcessorErrorMappingTest {
                 imageClient, capabilityMapper, tosService);
     }
 
-    // ========== invalid_input（:303） ==========
 
     @Test
     @DisplayName("G27: 缺少 prompt → invalid_input")
@@ -74,7 +73,6 @@ class ImageJobProcessorErrorMappingTest {
         verifyFailWithCode(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== model_unavailable（:338） ==========
 
     @Test
     @DisplayName("G28: capability 缺失 → model_unavailable")
@@ -87,7 +85,6 @@ class ImageJobProcessorErrorMappingTest {
         verifyFailWithCode(GenerationError.ERROR_MODEL_UNAVAILABLE);
     }
 
-    // ========== invalid_reference（:349） ==========
 
     @Test
     @DisplayName("G29: 参考图数量超限 → invalid_reference")
@@ -106,7 +103,6 @@ class ImageJobProcessorErrorMappingTest {
         verifyFailWithCode(GenerationError.ERROR_INVALID_REFERENCE);
     }
 
-    // ========== invalid_reference（:362） ==========
 
     @Test
     @DisplayName("G30: 参考素材不存在 → invalid_reference")
@@ -118,7 +114,6 @@ class ImageJobProcessorErrorMappingTest {
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
-        // 只解析到 1 个（另一个不存在）
         when(assetSource.resolveInputAssets(anyList(), anyString(), anyString()))
                 .thenReturn(Map.of("1", mockAsset("1", "image")));
 
@@ -142,7 +137,6 @@ class ImageJobProcessorErrorMappingTest {
         verifyFailWithCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== invalid_reference_type（:537） ==========
 
     @Test
     @DisplayName("G32: gpt 渠道映射失败 → invalid_reference_type")
@@ -165,7 +159,6 @@ class ImageJobProcessorErrorMappingTest {
         verifyFailWithCode(GenerationError.ERROR_INVALID_REFERENCE_TYPE);
     }
 
-    // ========== no_result（:600） ==========
 
     @Test
     @DisplayName("G33: provider 返回 0 张 → no_result")
@@ -186,11 +179,6 @@ class ImageJobProcessorErrorMappingTest {
         verifyFailWithCode(GenerationError.ERROR_NO_RESULT);
     }
 
-    // ========== IKGS73：成功路径的 md5 透传 ==========
-    //
-    // 放在本类而不是新建测试类：走到 createAsset 所需的 stub 链（claim / capability / credential /
-    // provider）全在这里，另起一个类要么复制这套 helper、要么把它抽成共享基类，代价都比收益大。
-    // 本类名里的「ErrorMapping」因此不再完全准确——但测试的归属该由 stub 复杂度决定，不由类名决定。
 
     @Test
     @DisplayName("G40: 成功路径把 TOS 出口的 md5 透传进 createAsset（IKGS73）")
@@ -215,15 +203,12 @@ class ImageJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        // image 是生成量最大的类型，而它的 createAsset 入参此前没有任何断言——md5 在这一层
-        // 被吞掉时全套测试仍然绿。这条把它钉住。
         ArgumentCaptor<JobStateMachineService.CreateAssetInput> captor =
                 ArgumentCaptor.forClass(JobStateMachineService.CreateAssetInput.class);
         verify(stateMachine).createAsset(captor.capture());
         assertThat(captor.getValue().md5()).isEqualTo("0123456789abcdef0123456789abcdef");
     }
 
-    // ========== 瞬态重试（:705-725） ==========
 
     @Test
     @DisplayName("G34: provider_failed + retry<3 → requeue 30s backoff")
@@ -247,15 +232,12 @@ class ImageJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        // 验证 requeue 被调用（30s backoff for retry_count=0）
         ArgumentCaptor<LocalDateTime> captor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
-        // nextActionAt ≈ now + 30s
         assertThat(nextActionAt).isAfter(WorkerClock.now().plusSeconds(25));
         assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(35));
 
-        // 不应调用 failJob
         verify(finalizer, never()).failJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
@@ -285,7 +267,6 @@ class ImageJobProcessorErrorMappingTest {
         ArgumentCaptor<LocalDateTime> captor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
-        // nextActionAt ≈ now + 60s
         assertThat(nextActionAt).isAfter(WorkerClock.now().plusSeconds(55));
         assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(65));
     }
@@ -315,7 +296,6 @@ class ImageJobProcessorErrorMappingTest {
         ArgumentCaptor<LocalDateTime> captor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
-        // nextActionAt ≈ now + 120s
         assertThat(nextActionAt).isAfter(WorkerClock.now().plusSeconds(115));
         assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(125));
     }
@@ -340,9 +320,7 @@ class ImageJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        // 不调用 requeue（max exceeded）
         verify(stateMachine, never()).requeueImageJobForRetry(anyString(), any(LocalDateTime.class));
-        // 调用 failJob
         verifyFailWithCode(GenerationError.ERROR_PROVIDER_FAILED);
     }
 
@@ -370,7 +348,6 @@ class ImageJobProcessorErrorMappingTest {
         verifyFailWithCode(GenerationError.ERROR_CONTENT_REJECTED);
     }
 
-    // ========== 退避公式测试 ==========
 
     @Test
     @DisplayName("imageRetryBackoffMs: 30/60/120 封顶 300")
@@ -379,11 +356,10 @@ class ImageJobProcessorErrorMappingTest {
         assertThat(ImageJobProcessor.imageRetryBackoffMs(1)).isEqualTo(60_000L);
         assertThat(ImageJobProcessor.imageRetryBackoffMs(2)).isEqualTo(120_000L);
         assertThat(ImageJobProcessor.imageRetryBackoffMs(3)).isEqualTo(240_000L);
-        assertThat(ImageJobProcessor.imageRetryBackoffMs(4)).isEqualTo(300_000L); // 封顶
+        assertThat(ImageJobProcessor.imageRetryBackoffMs(4)).isEqualTo(300_000L);
         assertThat(ImageJobProcessor.imageRetryBackoffMs(10)).isEqualTo(300_000L);
     }
 
-    // ========== positiveDimension ==========
 
     @Test
     @DisplayName("positiveDimension: 正有限数 round，否则 null")
@@ -394,7 +370,6 @@ class ImageJobProcessorErrorMappingTest {
         assertThat(ImageJobProcessor.positiveDimension(-1)).isNull();
     }
 
-    // ========== 辅助方法 ==========
 
     private void mockClaim(Map<String, Object> input) {
         ClaimedJobDto job = new ClaimedJobDto(

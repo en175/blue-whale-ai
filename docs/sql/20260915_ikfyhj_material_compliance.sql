@@ -1,5 +1,3 @@
--- IKFYHJ：素材校验状态镜像 + 网关执行凭证。见 docs/adr/0087-material-compliance-status-mirror-and-generation-gate.md。
--- 快照日期：2026-09-15。历史快照，与 prisma/migrations/20260915170000_ikfyhj_material_compliance 同源。
 CREATE TABLE `material_assets` (
   `id`                BIGINT NOT NULL AUTO_INCREMENT,
   `material_id`       VARCHAR(128) NOT NULL COMMENT '上游素材ID（asset-...）',

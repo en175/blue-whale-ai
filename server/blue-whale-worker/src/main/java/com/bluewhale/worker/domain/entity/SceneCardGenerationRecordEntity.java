@@ -5,12 +5,6 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
-/**
- * 场景卡生成记录行（对应 Prisma model scene_card_generation_records）。
- * <p>
- * syncRecordSummary 用：仅消费 id / project_id / summary_status / version 四列。
- * 其余列由 NestJS 产品侧维护，Java worker 不读写。
- */
 @TableName("scene_card_generation_records")
 public class SceneCardGenerationRecordEntity {
     @TableId(type = IdType.AUTO)
@@ -19,7 +13,6 @@ public class SceneCardGenerationRecordEntity {
     @TableField("project_id")
     private Long projectId;
 
-    /** 聚合摘要状态：generating / partial / success / failed（spec §4.4）。 */
     @TableField("summary_status")
     private String summaryStatus;
 

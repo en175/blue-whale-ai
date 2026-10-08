@@ -18,23 +18,12 @@ import static com.bluewhale.worker.config.SystemSettingEnvelopeVectors.ROTATED_K
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * `system_settings` 密文信封的 Java 端解封 + 上游凭证读点测试。
- *
- * <p><b>为什么要有跨语言测试向量</b>：信封由 TS 侧
- * `backend/libs/shared/system-settings/credentials-crypto.ts` 封（管理端保存时），
- * 由本侧解（worker 读上游 key 时）。同一个格式两份实现，是「配置在库里、两端都要读」的
- * 必然代价——代价就得有人看着。向量见 {@link SystemSettingEnvelopeVectors}，
- * 任何一端改了格式（分隔符、段序、base64 变体、tag 长度），下面的用例都会红。
- */
 class SystemSettingEnvelopeTest {
 
-    /** 只回一行的 stub：把「库里有什么」从 MyBatis/Schema 里摘出来。 */
     private static SystemSettingMapper mapperReturning(String rowValue) {
         return key -> rowValue;
     }
 
-    /** 可变的「库」：验读点是否真的每次现查，而不是把第一次的值记住了。 */
     private static final class FakeRow implements SystemSettingMapper {
         private String value;
 
@@ -48,7 +37,6 @@ class SystemSettingEnvelopeTest {
         }
     }
 
-    /* ---------- 解封 ---------- */
 
     @Test
     @DisplayName("★ 解 TS 侧封的信封：格式对齐，跨语言不漂")
@@ -107,7 +95,6 @@ class SystemSettingEnvelopeTest {
                 .hasMessageContaining("须为 32 字节");
     }
 
-    /* ---------- 读点：UpstreamCredential ---------- */
 
     @Test
     @DisplayName("★ 配了 → 取到 key（走完整链路：行 → 解封 → 取字段）")

@@ -97,21 +97,10 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.never;
 
-/**
- * JobStateMachineService 真库集成测试（blade-1：Testcontainers 安全网）。
- * <p>
- * 覆盖金标：G03/G05/G06/G08/G09/G10/G12/G13/G14/G15/G17/G18/G19/G22/G23/G24/G25/G39/G41。
- * <p>
- * 接线方式：手动 AnnotationConfigApplicationContext（不扫 autoconfig），
- * 仅注册 HikariDataSource→MybatisSqlSessionFactory→7 个 Mapper→JobStateMachineService→TxManager。
- * MQ consumer / scheduled recovery 完全不启动——靠「只注册 TestConfig、不做组件扫描」保证，
- * 与已退役的 worker.enabled-tags 开关无关。
- */
 @Testcontainers(disabledWithoutDocker = true)
 @DisplayName("JobStateMachine 真库集成测试（MySQL Testcontainers）")
 class JobStateMachineMySqlIntegrationTest {
 
-    // ========== 容器与上下文 ==========
 
     @Container
     static final MySQLContainer<?> mysql = new MySQLContainer<>(DockerImageName.parse("mysql:8.0"))
@@ -128,7 +117,6 @@ class JobStateMachineMySqlIntegrationTest {
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService service;
     static JobFinalizer finalizer;
-    /** 工具族领取管道（IKIWP8）：与 service 共用同一个真库 jobMapper。 */
     static JobClaimService claimService;
     static JdbcTemplate jdbc;
     static GenerationJobMapper jobMapper;
@@ -136,10 +124,8 @@ class JobStateMachineMySqlIntegrationTest {
     static GenerationJobLogMapper jobLogMapper;
     static ProjectEventMapper projectEventMapper;
     static GenerationOutputSlotMapper slotMapper;
-    /** IKJCOE：任务特有列的扩展位表 mapper（claim 投影 / 终态写路径读它）。 */
     static GenerationJobExtraMapper extraMapper;
 
-    /** 最小 Spring 上下文：不含 autoconfig / MQ / scheduled。 */
     @Configuration
     static class TestConfig {
 
@@ -150,9 +136,6 @@ class JobStateMachineMySqlIntegrationTest {
             cfg.setUsername(mysql.getUsername());
             cfg.setPassword(mysql.getPassword());
             cfg.setMaximumPoolSize(5);
-            // 时间口径（IKHJ0Q）：与生产 DataSourceConfig 同款。集成测试手工装配 Hikari，不扫 autoconfig——
-            // 不补这一条就会在 UTC 会话下跑而生产跑在 +08:00，而所有到期判断都在 SQL 里对 NOW()，
-            // 「窗口静默失效」这类 bug 一条都测不出来。容器默认时区仍留 +00:00 是刻意的：正好证明它能覆盖服务端默认值。
             cfg.setConnectionInitSql("SET time_zone='+08:00'");
             return new HikariDataSource(cfg);
         }
@@ -161,7 +144,6 @@ class JobStateMachineMySqlIntegrationTest {
         SqlSessionFactory sqlSessionFactory(DataSource ds) throws Exception {
             MybatisSqlSessionFactoryBean f = new MybatisSqlSessionFactoryBean();
             f.setDataSource(ds);
-            // MybatisSqlSessionFactoryBean 默认用 MybatisConfiguration（mapUnderscoreToCamelCase=true）
             return f.getObject();
         }
 
@@ -170,7 +152,6 @@ class JobStateMachineMySqlIntegrationTest {
             return new DataSourceTransactionManager(ds);
         }
 
-        // --- 7 个 Mapper Bean（手动注册，避开 @MapperScan 拉起无关 Mapper） ---
 
         @Bean
         GenerationJobMapper jobMapper(SqlSessionFactory sf) throws Exception {
@@ -207,7 +188,6 @@ class JobStateMachineMySqlIntegrationTest {
             return factory(StoryboardPreviewMapper.class, sf).getObject();
         }
 
-        /** IKJCOE：任务特有列的扩展位表 mapper。 */
         @Bean
         GenerationJobExtraMapper extraMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationJobExtraMapper.class, sf).getObject();
@@ -222,10 +202,6 @@ class JobStateMachineMySqlIntegrationTest {
             return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
         }
 
-        /**
-         * 真库 JobFinalizer（IKIWP8 ③）：终态收口方法已从 JobStateMachineService 删除，
-         * 测试直连 finalizer；本方法按 7-mapper 兼容构造的内部装配逐项复制，共用同一批真库 mapper。
-         */
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
@@ -273,7 +249,6 @@ class JobStateMachineMySqlIntegrationTest {
         if (ctx != null) ctx.close();
     }
 
-    /** 截断所有表，保留结构；每个测试隔离。 */
     @BeforeEach
     void cleanup() {
         List<String> tables = jdbc.queryForList(
@@ -284,9 +259,7 @@ class JobStateMachineMySqlIntegrationTest {
         jdbc.execute("SET FOREIGN_KEY_CHECKS = 1");
     }
 
-    // ========== 测试数据种子 ==========
 
-    /** 通过 JdbcTemplate 插 job 行（可控全部列，避免 Entity 缺字段）。 */
     private long seedJob(long userId, String type, String source, String status,
                          long fencingToken, LocalDateTime nextActionAt) {
         return seedJob(userId, type, source, status, fencingToken, nextActionAt, 99L, null);
@@ -308,7 +281,6 @@ class JobStateMachineMySqlIntegrationTest {
         return id != null ? id : -1;
     }
 
-    /** 插 processing + 已领取态 job（用于测 fence guard / 终态写入）。 */
     private long seedClaimedJob(long userId, String type, String source,
                                 String workerId, long token) {
         LocalDateTime future = WorkerClock.now().plusMinutes(10);
@@ -324,7 +296,6 @@ class JobStateMachineMySqlIntegrationTest {
         return id != null ? id : -1;
     }
 
-    /** 插 slot 行（含 project_id，绕开 Entity 缺字段问题——见 blade-4 TODO）。 */
     private long seedSlot(long jobId, long projectId, int slotIndex, String status) {
         return seedSlot(jobId, projectId, slotIndex, status, null);
     }
@@ -374,7 +345,6 @@ class JobStateMachineMySqlIntegrationTest {
                         .eq(AssetEntity::getGenerationJobId, jobId));
     }
 
-    // ========== 1. claim 两段式 CAS（G03/G07） ==========
 
     @Nested
     @DisplayName("claim 两段式 CAS")
@@ -395,8 +365,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(dto.id()).isEqualTo(String.valueOf(id));
             assertThat(dto.type()).isEqualTo("image");
             assertThat(dto.retry_count()).isEqualTo(0);
-            // IKJCOE：expected_output_count 主表列已删、claim 投影不再承载该字段（权威是建行时冻结的
-            // input.expected_output_count）。原「投影带出该列」的断言改为整体逐字段钉住投影本身。
             assertThat(dto).isEqualTo(new ClaimedJobDto(
                     String.valueOf(id), "99", "7", "image", Map.of(), 0, false, 1L));
             GenerationJobEntity row = readJob(id);
@@ -426,7 +394,6 @@ class JobStateMachineMySqlIntegrationTest {
         void claim_wrongStatus_empty() {
             long id = seedJob(7L, "image", "bottom_dock", "processing", 0L,
                     WorkerClock.now().minusSeconds(10));
-            // 设置未过期租约，使其不构成孤儿
             jdbc.update("""
                     UPDATE generation_jobs SET lease_owner='other', lease_expires_at=?
                     WHERE id=?
@@ -467,7 +434,6 @@ class JobStateMachineMySqlIntegrationTest {
         @Test
         @DisplayName("source 不在白名单 → 图片候选排除 → empty（音频无此限制）")
         void claim_imageSourceNotWhitelisted_empty() {
-            // source='dock' 不在图片白名单 [bottom_dock, plan_apply, storyboard_preview]
             long id = seedJob(7L, "image", "dock", "queued", 0L,
                     WorkerClock.now().minusSeconds(10));
 
@@ -475,14 +441,7 @@ class JobStateMachineMySqlIntegrationTest {
         }
     }
 
-    // ========== 1b. audio_trim claim 真库路径（IKHPK9） ==========
 
-    /**
-     * IKHPK9：audio_trim 的 claim 此前传 {@code List.of()} 给参数化
-     * {@code findCandidateByTypeAndSources}，而 MyBatis 对空集合什么都不输出，渲染出
-     * {@code ... AND source IN       AND is_delete = false ...} 的坏 SQL——语法错误只在
-     * **真执行 SQL** 时暴露，golden mirror（Mockito 桩）永远拦不住，故本组必须跑真库。
-     */
     @Nested
     @DisplayName("audio_trim claim 真库路径")
     class AudioTrimClaimTests {
@@ -615,7 +574,6 @@ class JobStateMachineMySqlIntegrationTest {
         }
     }
 
-    // ========== 2. 孤儿接管（G05/G06） ==========
 
     @Nested
     @DisplayName("孤儿接管")
@@ -626,7 +584,6 @@ class JobStateMachineMySqlIntegrationTest {
         void orphan_video_nullLease() {
             long id = seedJob(9L, "video", "bottom_dock", "processing", 4L,
                     WorkerClock.now().minusSeconds(10));
-            // lease_expires_at 留 null（种子默认 null），lease_owner 设为旧 worker
             jdbc.update("UPDATE generation_jobs SET lease_owner='old-worker' WHERE id=?", id);
 
             Optional<ClaimedVideoJobDto> result = service.claimVideoJobById(
@@ -675,7 +632,6 @@ class JobStateMachineMySqlIntegrationTest {
         }
     }
 
-    // ========== 3. fence guard 静默 false（G08/G11/G12） ==========
 
     @Nested
     @DisplayName("fence guard 静默 false")
@@ -687,11 +643,11 @@ class JobStateMachineMySqlIntegrationTest {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
 
             boolean result = service.markProviderSubmitted(
-                    String.valueOf(id), "worker-1", 3L /* stale */, "task-1");
+                    String.valueOf(id), "worker-1", 3L            , "task-1");
 
             assertThat(result).isFalse();
             GenerationJobEntity row = readJob(id);
-            assertThat(row.getLeaseOwner()).isEqualTo("worker-1"); // 未变更
+            assertThat(row.getLeaseOwner()).isEqualTo("worker-1");
             assertThat(row.getProviderTaskId()).isNull();
         }
 
@@ -701,7 +657,7 @@ class JobStateMachineMySqlIntegrationTest {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
 
             boolean result = service.rescheduleProviderPoll(
-                    String.valueOf(id), "worker-2" /* wrong */, 5L, 42);
+                    String.valueOf(id), "worker-2"            , 5L, 42);
 
             assertThat(result).isFalse();
         }
@@ -715,14 +671,13 @@ class JobStateMachineMySqlIntegrationTest {
                     "9", "99", String.valueOf(id), "image",
                     "https://example.com/img.png", "k", "image/png",
                     100L, "0123456789abcdef0123456789abcdef", 100, 100, null,
-                    "worker-1", 3L /* stale */));
+                    "worker-1", 3L            ));
 
             assertThat(assetId).isNull();
             assertThat(countAssets(id)).isEqualTo(0);
         }
     }
 
-    // ========== 4. terminal 不可逆（G17/G24/G25 侧面） ==========
 
     @Nested
     @DisplayName("terminal 不可逆")
@@ -732,10 +687,8 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("completeJob 在已 succeeded 行 → false（guard 要求 processing）")
         void completeJob_alreadySucceeded_false() {
             long id = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
-            // 先正常 complete
             finalizer.completeJob(String.valueOf(id), List.of("1001"), "worker-1", 1L);
 
-            // 再次 complete → false
             boolean second = finalizer.completeJob(
                     String.valueOf(id), List.of("1001"), "worker-1", 1L);
             assertThat(second).isFalse();
@@ -753,7 +706,6 @@ class JobStateMachineMySqlIntegrationTest {
         }
     }
 
-    // ========== 5. updateMediaExtractProgress 钳制 + 续租（G18/G19） ==========
 
     @Nested
     @DisplayName("updateMediaExtractProgress")
@@ -798,14 +750,12 @@ class JobStateMachineMySqlIntegrationTest {
 
             GenerationJobEntity row = readJob(id);
             assertThat(row.getProgress()).isEqualTo(50);
-            // lease_expires_at ∈ [before+120s − 10s, after+120s + 10s]
             LocalDateTime lower = before.plusSeconds(110);
             LocalDateTime upper = after.plusSeconds(130);
             assertThat(row.getLeaseExpiresAt()).isBetween(lower, upper);
         }
     }
 
-    // ========== 6. completeJob 事务（G17/G24/G39/G40/G41） ==========
 
     @Nested
     @DisplayName("completeJob 事务")
@@ -826,7 +776,6 @@ class JobStateMachineMySqlIntegrationTest {
                     "worker-1", 1L);
 
             assertThat(ok).isTrue();
-            // 1. job 状态
             GenerationJobEntity row = readJob(jobId);
             assertThat(row.getStatus()).isEqualTo("succeeded");
             assertThat(row.getProgress()).isEqualTo(100);
@@ -834,14 +783,12 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getLeaseExpiresAt()).isNull();
             assertThat(row.getNextActionAt()).isNull();
             assertThat(row.getOutputAssetIds()).contains("2001").contains("2002");
-            // 2. slot
             GenerationOutputSlotEntity s0 = slotMapper.selectById(slot0);
             GenerationOutputSlotEntity s1 = slotMapper.selectById(slot1);
             assertThat(s0.getStatus()).isEqualTo("succeeded");
             assertThat(s0.getAssetId()).isEqualTo(assetA);
             assertThat(s1.getStatus()).isEqualTo("succeeded");
             assertThat(s1.getAssetId()).isEqualTo(assetB);
-            // 3. 事件：status_changed + output_attached×2 + storyboard_preview.summary_changed = 4
             assertThat(countEvents(99L)).isEqualTo(4);
         }
 
@@ -861,7 +808,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(slotMapper.selectById(slot0).getAssetId()).isEqualTo(3001L);
             assertThat(slotMapper.selectById(slot1).getStatus()).isEqualTo("failed");
             assertThat(slotMapper.selectById(slot1).getAssetId()).isNull();
-            // 事件：status_changed + output_attached + output_updated = 3
             assertThat(countEvents(99L)).isEqualTo(3);
         }
 
@@ -879,7 +825,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(readJob(jobId).getStatus()).isEqualTo("failed");
             assertThat(slotMapper.selectById(slot0).getStatus()).isEqualTo("failed");
             assertThat(slotMapper.selectById(slot1).getStatus()).isEqualTo("failed");
-            // 事件：status_changed + output_updated×2 = 3
             assertThat(countEvents(99L)).isEqualTo(3);
         }
 
@@ -893,7 +838,7 @@ class JobStateMachineMySqlIntegrationTest {
                     String.valueOf(jobId), List.of("4001"), "worker-1", 999L);
 
             assertThat(ok).isFalse();
-            assertThat(readJob(jobId).getStatus()).isEqualTo("processing"); // 未变更
+            assertThat(readJob(jobId).getStatus()).isEqualTo("processing");
             assertThat(countEvents(99L)).isEqualTo(0);
         }
 
@@ -911,7 +856,6 @@ class JobStateMachineMySqlIntegrationTest {
         }
     }
 
-    // ========== 7. failJob（G25） ==========
 
     @Nested
     @DisplayName("failJob 事务")
@@ -933,17 +877,13 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getError()).contains("provider_failed").contains("上游挂了");
             assertThat(row.getLeaseOwner()).isNull();
             assertThat(row.getNextActionAt()).isNull();
-            // slot
             assertThat(slotMapper.selectById(slot0).getStatus()).isEqualTo("failed");
             assertThat(slotMapper.selectById(slot1).getStatus()).isEqualTo("failed");
-            // log
             assertThat(countLogs(jobId)).isEqualTo(1);
-            // IKFL53：失败日志保留 payload（code/message/details）
             GenerationJobLogEntity failedLog = jobLogMapper.selectList(
                     new LambdaQueryWrapper<GenerationJobLogEntity>()
                             .eq(GenerationJobLogEntity::getGenerationJobId, jobId)).get(0);
             assertThat(failedLog.getPayload()).contains("provider_failed").contains("上游挂了");
-            // 事件：status_changed + output_updated×2 = 3
             assertThat(countEvents(99L)).isEqualTo(3);
         }
 
@@ -960,7 +900,6 @@ class JobStateMachineMySqlIntegrationTest {
         }
     }
 
-    // ========== 8. requeueImageJobForRetry（G14/G15） ==========
 
     @Nested
     @DisplayName("requeueImageJobForRetry")
@@ -970,7 +909,6 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G15: processing→queued, next_action_at 设置, retry_count+1, fencing_token+1")
         void requeue_happy() {
             long jobId = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
-            // 秒级对齐 + 预留 ≥1s 余量（MySQL DATETIME 截秒，避免 now+30 恰好落在下一秒造成毫秒进位）
             LocalDateTime next = WorkerClock.now().plusSeconds(29).truncatedTo(ChronoUnit.SECONDS);
 
             boolean ok = service.requeueImageJobForRetry(String.valueOf(jobId), next);
@@ -982,7 +920,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getLeaseExpiresAt()).isNull();
             assertThat(row.getRetryCount()).isEqualTo(1);
             assertThat(row.getFencingToken()).isEqualTo(2L);
-            // next_action_at 与传入值秒级一致（MySQL 截到秒）
             assertThat(row.getNextActionAt()).isEqualTo(next.truncatedTo(ChronoUnit.SECONDS));
         }
 
@@ -1000,7 +937,6 @@ class JobStateMachineMySqlIntegrationTest {
         }
     }
 
-    // ========== 9. video 路径（G09/G10/G12/G13/G71/G72/G73） ==========
 
     @Nested
     @DisplayName("视频路径")
@@ -1023,11 +959,9 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getProgress()).isEqualTo(1);
             assertThat(row.getLeaseOwner()).isNull();
             assertThat(row.getLeaseExpiresAt()).isNull();
-            // next_action_at ≈ now+5s（±10s 容差）
             LocalDateTime lower = before.plusSeconds(5).minusSeconds(2);
             LocalDateTime upper = after.plusSeconds(5).plusSeconds(2);
             assertThat(row.getNextActionAt()).isBetween(lower, upper);
-            // G71 pin：fencing_token 不 bump
             assertThat(row.getFencingToken()).isEqualTo(5L);
         }
 
@@ -1045,7 +979,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getPollCount()).isEqualTo(4);
             assertThat(row.getProgress()).isEqualTo(42);
             assertThat(row.getLeaseOwner()).isNull();
-            // G72 pin：fencing_token 不 bump
             assertThat(row.getFencingToken()).isEqualTo(5L);
         }
 
@@ -1071,14 +1004,13 @@ class JobStateMachineMySqlIntegrationTest {
                     String.valueOf(id), "worker-1", 5L);
 
             assertThat(ok).isFalse();
-            assertThat(readJob(id).getStatus()).isEqualTo("processing"); // 未变更
+            assertThat(readJob(id).getStatus()).isEqualTo("processing");
         }
 
         @Test
         @DisplayName("G12: cancelVideoBeforeDispatch 未提交 → cancelled, progress=0")
         void cancel_beforeDispatch_ok() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
-            // provider_task_id 默认 null
 
             boolean ok = service.cancelVideoBeforeDispatch(
                     String.valueOf(id), "worker-1", 5L);
@@ -1088,7 +1020,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getStatus()).isEqualTo("cancelled");
             assertThat(row.getProgress()).isEqualTo(0);
             assertThat(row.getLeaseOwner()).isNull();
-            // G73：无日志写入
             assertThat(countLogs(id)).isEqualTo(0);
         }
 
@@ -1126,7 +1057,6 @@ class JobStateMachineMySqlIntegrationTest {
         }
     }
 
-    // ========== 10. createAsset（G22/G23） ==========
 
     @Nested
     @DisplayName("createAsset")
@@ -1152,7 +1082,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(asset.getUserId()).isEqualTo(9L);
             assertThat(asset.getProjectId()).isEqualTo(99L);
             assertThat(asset.getGenerationJobId()).isEqualTo(jobId);
-            // 事件：asset.created
             assertThat(countEvents(99L)).isEqualTo(1);
         }
 
@@ -1173,7 +1102,6 @@ class JobStateMachineMySqlIntegrationTest {
         }
     }
 
-    // ========== 11. publishMediaExtractResult / failMediaExtractJob ==========
 
     @Test
     @DisplayName("audio_mix 软取消真库行为：提交前及已提交任务均落 cancelled，停止轮询且迟到结果不可发布")
@@ -1345,12 +1273,9 @@ class JobStateMachineMySqlIntegrationTest {
                 WorkerClock.now().minusSeconds(10));
         long missedRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
                 WorkerClock.now().minusSeconds(10));
-        // 创建 132 分钟前（超出 gmt_create 创建+130 分钟分支）、租约 5 分钟前到期：
-        // 停止点晚于创建后 122 分钟但落在租约到期+10 分钟接管期内 → 应收
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
                 + "gmt_create=DATE_SUB(NOW(), INTERVAL 132 MINUTE), "
                 + "lease_expires_at=DATE_SUB(NOW(), INTERVAL 5 MINUTE) WHERE id=?", parentId, handoffRetryId);
-        // 创建 132 分钟前、租约 20 分钟前到期：超出租约到期+10 分钟接管期 → 不收
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
                 + "gmt_create=DATE_SUB(NOW(), INTERVAL 132 MINUTE), "
                 + "lease_expires_at=DATE_SUB(NOW(), INTERVAL 20 MINUTE) WHERE id=?", parentId, missedRetryId);
@@ -1377,20 +1302,17 @@ class JobStateMachineMySqlIntegrationTest {
         var spiedService = spy(service);
         var spiedFinalizer = spy(finalizer);
 
-        // 旧 Worker 真实领取（不打桩）：fencing token 0→1，携父任务上游 taskId
         var staleClaim = spiedService.claimVideoJobById(retry, "video-worker-old");
         assertThat(staleClaim).isPresent();
         assertThat(staleClaim.get().fencingToken()).isEqualTo(1L);
         assertThat(staleClaim.get().workerId()).isEqualTo("video-worker-old");
         assertThat(staleClaim.get().parentProviderTaskId()).isEqualTo("video-parent-task");
 
-        // 租约未到期不进 due 名单；到期后落入恢复扫描窗口（同型参考断言）
         assertThat(jobMapper.listDueVideoJobIds(100, 120)).doesNotContain(retryId);
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
                 retryId);
         assertThat(jobMapper.listDueVideoJobIds(100, 120)).contains(retryId);
 
-        // 恢复扫描重投
         @SuppressWarnings("unchecked")
         ObjectProvider<GenerationMessageProducer> recoveryProvider = mock(ObjectProvider.class);
         GenerationMessageProducer recoveryProducer = mock(GenerationMessageProducer.class);
@@ -1404,7 +1326,6 @@ class JobStateMachineMySqlIntegrationTest {
         recovery.recover();
         verify(recoveryProducer).enqueue(retry, 1000L);
 
-        // 新 Worker 真实领取接手（token 1→2），沿父结果收割路径发布成功
         UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
         NewApiVideoClient client = mock(NewApiVideoClient.class);
         TosVideoMediaRelay relay = mock(TosVideoMediaRelay.class);
@@ -1428,7 +1349,6 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(countAssets(retryId)).isEqualTo(1);
         assertThat(countLogs(retryId)).isEqualTo(1);
 
-        // 旧 Worker 携旧领取身份/旧 fencing token 的迟到收割发布 → publishVideoGuard CAS 拒绝，零迟到 Finalize 写入
         assertThat(spiedFinalizer.publishVideoResult(retry, "99", "9",
                 "video-worker-old", 1L,
                 "http://cdn/video.mp4", "gen/video.mp4", "video/mp4", 500L,
@@ -1437,12 +1357,10 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(countAssets(retryId)).isEqualTo(1);
         assertThat(countLogs(retryId)).isEqualTo(1);
 
-        // 全程零上游 submit、零 MQ 自投
         verify(client, never()).submit(anyString(), any());
         verify(client).poll("sk-frozen-token", "video-parent-task");
         verify(producer, never()).enqueue(anyString(), anyLong());
 
-        // 两次发布分别携带对应领取身份与 fencing token（两次领取均走真实实现先后落库）
         var handoff = inOrder(spiedService, spiedFinalizer);
         handoff.verify(spiedService).claimVideoJobById(retry, "video-worker-old");
         handoff.verify(spiedService).claimVideoJobById(retry, "video-worker-new");
@@ -1464,8 +1382,6 @@ class JobStateMachineMySqlIntegrationTest {
 
         GenerationJobEntity row = readJob(jobId);
         assertThat(row.getNextActionAt()).isBetween(before.plusSeconds(38), after.plusSeconds(42));
-        // IKJCOE：next_poll_at 列已删——轮询到期时刻只剩 next_action_at 一个落点，
-        // 「两列同值」的旧断言失去对象；改为在真库上钉住该列确实不存在（schema 回退即红）。
         assertThat(jdbc.queryForList(
                 "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
                         + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'generation_jobs' "
@@ -1499,16 +1415,12 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, NOW(), lease_expires_at) "
                 + "FROM generation_jobs WHERE id=?", Integer.class, jobId)).isGreaterThan(400);
 
-        // 新 worker 先前读到的候选仍带相同 status/fence；CAS 必须重新检查到期条件。
         assertThat(jobMapper.claimImageCas(jobId, "new-worker", WorkerClock.now().plusSeconds(420),
                 5L, "processing")).isZero();
         assertThat(readJob(jobId).getLeaseOwner()).isEqualTo("old-worker");
 
-        // 执行权以 owner+fence 为准：owner 不符一律拒绝
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "new-worker", 5L)).isFalse();
 
-        // IKIHKH：收割转存耗尽租约（过期）但 owner+fence 未变 → reserve 放行并复活租约；
-        // 复活后持过期时旧候选快照的领取仍被复核行挡住，不双跑。
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "old-worker", 5L)).isTrue();
         assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, NOW(), lease_expires_at) "
@@ -1521,7 +1433,6 @@ class JobStateMachineMySqlIntegrationTest {
     @Test
     @DisplayName("收割慢转存耗尽租约后仍能收口：reserve 放行回退提交，脱离重投循环不双提交")
     void parentReuseSlowTransferRecoversAfterLeaseExhaustion() {
-        // 父任务已提交上游；重试 job 在收割转存中耗尽 420 秒租约（转存 >420s 场景）。
         long parentId = seedJob(9L, "video", "bottom_dock", "processing", 0L,
                 WorkerClock.now().minusMinutes(200));
         jdbc.update("UPDATE generation_jobs SET provider_task_id='provider-parent-1' WHERE id=?", parentId);
@@ -1534,23 +1445,16 @@ class JobStateMachineMySqlIntegrationTest {
                 WHERE id=?
                 """, parentId, jobId);
 
-        // IKIDEK 接手期内（租约到期后 10 分钟内）恢复扫描仍会重投——修复前这一步之后
-        // reserve 因租约过期被拒、按 IKICD0 停止执行，形成全量重新下载的循环。
         assertThat(jobMapper.listDueVideoMattingJobIds(100, 120)).contains(jobId);
 
-        // IKIHKH：owner+fence 未变 → reserve 放行，回退提交不再被拒。
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "harvest-worker", 7L)).isTrue();
-        // 回退提交完成：provider_task_id 落库、租约释放，任务进入轮询相。
         assertThat(service.markProviderSubmitted(String.valueOf(jobId), "harvest-worker", 7L,
                 "provider-retry-1")).isTrue();
         assertThat(readJob(jobId).getProviderTaskId()).isEqualTo("provider-retry-1");
         assertThat(readJob(jobId).getLeaseOwner()).isNull();
 
-        // 已提交后 reserve 不放行（provider_task_id IS NULL 守卫）——不产生第二个上游任务。
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "harvest-worker", 7L)).isFalse();
 
-        // 脱离收割接手重投：即使到点，接手条款（要求 provider_task_id IS NULL）不再命中；
-        // 接手期外的收割循环与永久卡 processing 形态同源消除。
         jdbc.update("UPDATE generation_jobs SET next_action_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
         assertThat(jobMapper.listDueVideoMattingJobIds(100, 120)).doesNotContain(jobId);
     }
@@ -1558,8 +1462,6 @@ class JobStateMachineMySqlIntegrationTest {
     @Test
     @DisplayName("media_extract 旧候选快照不能接管已续租任务；孤儿租约过期仍可接管")
     void mediaExtractStaleCandidateCannotTakeOverRenewedLease() {
-        // 场景一（应拒绝）：领取（fence=F）→ 租约过期 → 读到旧候选快照 → 回退提交前 reserve
-        // 复活租约（IKIHKH：owner+fence 未变即放行，真实通道）→ 旧快照参数 CAS 必须拒绝。
         long renewedId = seedJob(9L, "media_extract", "dock", "queued", 0L,
                 WorkerClock.now().minusSeconds(10));
         var claimed = claimService.claim(
@@ -1578,7 +1480,6 @@ class JobStateMachineMySqlIntegrationTest {
                 stale.getFencingToken(), stale.getStatus())).isZero();
         assertThat(readJob(renewedId).getLeaseOwner()).isEqualTo("worker-old");
 
-        // 场景二（对照，孤儿接管语义保持）：领取 → 租约过期 → 读候选快照 → 不续租 → 同参数 CAS 成功
         long orphanId = seedJob(9L, "media_extract", "dock", "queued", 0L,
                 WorkerClock.now().minusSeconds(10));
         assertThat(claimService.claim(
@@ -1809,7 +1710,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getOutputAssetIds()).isNotNull();
             assertThat(countAssets(jobId)).isEqualTo(1);
             assertThat(countLogs(jobId)).isEqualTo(1);
-            // 事件：asset.created + generation_job.status_changed = 2
             assertThat(countEvents(99L)).isEqualTo(2);
         }
 
@@ -1827,7 +1727,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getStatus()).isEqualTo("failed");
             assertThat(row.getError()).contains("video_has_no_audio_track");
             assertThat(countLogs(jobId)).isEqualTo(1);
-            // 事件：generation_job.status_changed = 1
             assertThat(countEvents(99L)).isEqualTo(1);
         }
     }

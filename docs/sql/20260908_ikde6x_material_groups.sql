@@ -1,5 +1,3 @@
--- IKDE6X：素材库组落地。虚拟人像库组 + 真人像库组，本地为组主、上游备份、双向维护。
--- 快照日期：2026-09-08。历史快照，与 prisma/migrations/20260908090000_ikde6x_material_groups 同源。
 CREATE TABLE `material_groups` (
   `id` BIGINT NOT NULL AUTO_INCREMENT,
   `user_id` BIGINT NOT NULL,

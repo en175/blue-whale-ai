@@ -39,19 +39,10 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * ImageOutpaintJobProcessor 单测（IKGOQW，以 ImageEnhanceJobProcessorTest 为模板）。
- * <p>
- * 覆盖：input 冻结键兜底校验（source_asset_id / 四个 expand 值域）、源素材/凭证缺失分类、
- * 错误码归一（§5 信号保留、其余归 image_outpaint_failed，无自动重试）、成功链
- * （mock 客户端拿到本地结果图 URL → 下载 → TOS 转存 → publishImageOutpaintResult payload）、
- * claim 异常上抛语义。不连真实 MQ/DB/TOS/网关（结果图用本地 HttpServer 桩）。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class ImageOutpaintJobProcessorTest {
 
-    /** 1x1 PNG（ImageIO 可解析，宽高断言用）。 */
     private static final byte[] PNG_1X1 = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
@@ -76,7 +67,6 @@ class ImageOutpaintJobProcessorTest {
         when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
-        // 结果图桩（24h 有效的火山 URL 用本地 HttpServer 模拟）
         resultServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         resultServer.createContext("/expanded.png", exchange -> {
             exchange.getResponseHeaders().add("Content-Type", "image/png");
@@ -130,7 +120,6 @@ class ImageOutpaintJobProcessorTest {
                 any(), eq("worker-1"), eq(5L));
     }
 
-    // ========== claim 语义（IKC9EJ 同构） ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -157,7 +146,6 @@ class ImageOutpaintJobProcessorTest {
         verify(finalizer, never()).publishImageOutpaintResult(any());
     }
 
-    // ========== input 冻结键兜底校验（创建入口复核是权威，worker 兜底防御） ==========
 
     @Test
     @DisplayName("缺 source_asset_id → invalid_input")
@@ -207,7 +195,6 @@ class ImageOutpaintJobProcessorTest {
         assertFailCode(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== 源素材与凭证 ==========
 
     @Test
     @DisplayName("源素材不可用 → image_outpaint_failed + 可读原因")
@@ -254,7 +241,6 @@ class ImageOutpaintJobProcessorTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== 错误码归一（§5 信号保留，其余归 image_outpaint_failed；无自动重试） ==========
 
     @Test
     @DisplayName("客户端 content_rejected → 保留既有码投影（§5 信号）")
@@ -316,7 +302,6 @@ class ImageOutpaintJobProcessorTest {
         assertFailCode(ImageOutpaintContract.ERROR_IMAGE_OUTPAINT_FAILED);
     }
 
-    // ========== 成功链（下载落库 + Asset 创建 + 终态事件） ==========
 
     @Test
     @DisplayName("成功链：四个 expand 值原样出站 → 下载结果图 → TOS 转存 → 发布 payload 带宽高")
@@ -334,8 +319,6 @@ class ImageOutpaintJobProcessorTest {
 
         processor.handle("100");
 
-        // 出站映射：image_url = 源素材公网地址；四值与冻结输入一致（精确 matcher 的 stub
-        // 未命中会返回 null → NPE，故等价于断言）
         verify(mediaKitClient).expandImageCanvas(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq(0.1), eq(0.0), eq(0.25), eq(0.4));
         ArgumentCaptor<PublishImageOutpaintDto> captor =
@@ -346,7 +329,6 @@ class ImageOutpaintJobProcessorTest {
         assertThat(published.storageKey()).isEqualTo("uploads/9/image/expanded.png");
         assertThat(published.mime()).isEqualTo("image/png");
         assertThat(published.size()).isEqualTo(PNG_1X1.length);
-        // IKGS73：产物 md5 自 TOS 上传出口透传进发布 DTO（落 assets.md5 供去重）
         assertThat(published.md5()).isEqualTo("md5-expanded");
         assertThat(published.width()).isEqualTo(1);
         assertThat(published.height()).isEqualTo(1);

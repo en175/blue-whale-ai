@@ -8,11 +8,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * MQ 生产者测试（验证 message shape + delay 钳制）。
- * <p>
- * 通过 RecordingProducer（mock seam）断言 send 参数。
- */
 class GenerationMessageProducerTest {
 
     @Test
@@ -55,7 +50,6 @@ class GenerationMessageProducerTest {
         assertThat(producer.calls.get(0).body).isEqualTo("{\"jobId\":\"999\"}");
     }
 
-    /** 记录型生产者（测试 seam，断言 send 参数）。 */
     static class RecordingProducer implements GenerationMessageProducer {
         final List<EnqueueCall> calls = new ArrayList<>();
 

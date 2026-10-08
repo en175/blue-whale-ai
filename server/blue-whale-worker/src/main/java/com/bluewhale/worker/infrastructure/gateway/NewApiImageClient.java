@@ -26,37 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * new-api 图片生成客户端。
- * <p>
- * <b>端点与请求形态由 {@link ImageProtocol} 决定</b>（能力行 {@code features.image_protocol}，
- * IKF4LI），不按模型名特判：
- * <ul>
- *   <li>{@link ImageProtocol#OPENAI_IMAGES}（gpt-image-2）：无参考图 →
- *       {@code POST /v1/images/generations}（JSON）；有参考图 → {@code POST /v1/images/edits}
- *       （multipart，参考图先下载成字节）。只发官方字段。</li>
- *   <li>{@link ImageProtocol#INLINE_IMAGE}（banana / seedream，现状）：恒
- *       {@code POST /v1/images/generations}（JSON），参考图以 URL 进 body {@code image}。</li>
- * </ul>
- * <p>
- * 2026-09-11 上游改造（gpt-image-2 切官方协议）实测：generations 带 {@code image} 字段与
- * 带 {@code response_format} 均被上游 400（{@code Unknown parameter}）；图生图必须走
- * {@code /v1/images/edits} multipart，且模型名恒为 {@code gpt-image-2} 不换名。旧的建桥
- * 渠道（模型名拼 URL 路径）已废弃，不保留兼容分支。
- * <p>
- * 请求头（契约 §5 / ADR-0080）：
- * <ul>
- *   <li>Authorization: Bearer per-job 解封凭证</li>
- *   <li>X-Trace-Id：请求追踪</li>
- *   <li>X-Client-System: bluewhale（ADR-0080 白名单头）</li>
- * </ul>
- * <p>
- * 响应：{@code {data:[{url|b64_json}]}}——两种形态都支持（官方 GPT Image 系只回 b64_json）。
- * <p>
- * 错误分类复用 NewApiErrorClassifier（blade-② audio 同构，blade-③ 提取为共享类）。
- * <p>
- * 修正三：ARK provider（ark-image-provider.ts）不移植——new-api 网关是唯一 provider。
- */
 @Component
 public class NewApiImageClient {
 
@@ -64,34 +33,19 @@ public class NewApiImageClient {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
-    /** 默认读超时 300s（banana2/Gemini 系 i2i 实测 >240s 仍未返回，本地 job 1822 实证；
-     *  env NEW_API_IMAGE_TIMEOUT_MS 可覆盖）。配套：image claim 租约默认 420s
-     *  （JobStateMachineService），必须 > 超时 + 转存余量，否则 recovery 把在跑的 job
-     *  当孤儿重投 → 双跑双扣（比超时重试更糟）。 */
     private static final int DEFAULT_TIMEOUT_MS = 300_000;
 
-    /** 参考图下载读超时（官方协议上传前取素材；与生成超时分开，避免一次卡死的下载吃掉
-     *  整个生成预算）。下载失败发生在 POST 上游**之前**——零扣费风险，故归 provider_failed
-     *  瞬态可重试。 */
     private static final long SOURCE_IMAGE_TIMEOUT_MS = 30_000L;
 
     private final OkHttpClient httpClient;
     private final OkHttpClient sourceImageClient;
     private final String baseUrl;
 
-    /**
-     * 装配用构造器：地址来自唯一出口（{@code NewApiUpstreamConfig#newApiBaseUrl}）。
-     * <p>
-     * ⚠️ 必须显式 {@code @Autowired}：本类另有一个包内可见的超时注入构造器，Spring 对「多个
-     * 构造器且都未注解」的类会退回默认构造器——本类没有，于是装配期直接
-     * {@code No default constructor found}（{@code NewApiUpstreamWiringTest} 钉住）。
-     */
     @Autowired
     public NewApiImageClient(UpstreamBaseUrl baseUrl) {
         this(baseUrl, loadTimeoutMs());
     }
 
-    /** 注入读/写超时（毫秒）：测试用（毫秒级窗口验超时语义）。 */
     NewApiImageClient(UpstreamBaseUrl baseUrl, int timeoutMs) {
         this.baseUrl = baseUrl.normalized();
 
@@ -99,22 +53,6 @@ public class NewApiImageClient {
         this.sourceImageClient = NewApiHttpSupport.buildClient(10_000, SOURCE_IMAGE_TIMEOUT_MS, SOURCE_IMAGE_TIMEOUT_MS);
     }
 
-    /**
-     * 图片生成。
-     *
-     * @param token         per-job Bearer 凭证
-     * @param protocol      出站协议（能力行 features.image_protocol）
-     * @param model         上游模型名（= 能力行 model_id，不再做别名分流）
-     * @param prompt        提示词
-     * @param n             生成数量（1-4）
-     * @param size          尺寸（provider 级别，经渠道映射后）
-     * @param quality       质量（banana 渠道才有，可选）
-     * @param webSearch     是否启用网络搜索（仅 INLINE_IMAGE 生效；官方协议无此字段）
-     * @param sequential    是否顺序生成（仅 INLINE_IMAGE 生效；官方协议无此字段）
-     * @param sourceImages  参考图 URL 列表（OPENAI_IMAGES 下由本类下载为字节走 multipart）
-     * @return 生成结果列表
-     * @throws ImageProviderError 按错误分类抛错
-     */
     public List<GeneratedImage> generate(
             String token, ImageProtocol protocol, String model, String prompt, int n,
             String size, String quality, boolean webSearch, boolean sequential,
@@ -139,11 +77,6 @@ public class NewApiImageClient {
         try {
             response = httpClient.newCall(request).execute();
         } catch (java.net.SocketTimeoutException e) {
-            // 2026-09-11 政策修订（IKF12J 讨论，用户拍板）：**读超时不重试**——请求已到达上游，
-            // 可能已出图扣费，重试=双扣；归 provider_timeout 终态，靠拉大超时窗口（300s）消化慢上游。
-            // 连接超时（请求未送达，零扣费风险）仍归 provider_failed 瞬态可重试。
-            // 注意：TS 旧行为把超时混进 provider_failed 一并重试，属其双扣隐患——Node 退役中不改，
-            // Java 侧按本政策执行（契约 §11 政策条款）。
             String msg = String.valueOf(e.getMessage()).toLowerCase();
             if (msg.contains("connect")) {
                 throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -152,12 +85,9 @@ public class NewApiImageClient {
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                     "new-api 图片生成超时");
         } catch (java.net.ConnectException | java.net.UnknownHostException e) {
-            // 连接被拒 / DNS 失败：POST 未达上游、零扣费风险 → 瞬态可重试。
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "new-api 图片生成失败: " + e.getMessage());
         } catch (Exception e) {
-            // 其余 IO（连接重置 / 流中断 / SSL 中途失败等）**可能发生在 POST 之后**，上游或已出图扣费
-            // → 终态不重试（宁可不重试也不双扣；评审 Important#1）。异常类名入 message 便于排查。
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                     "new-api 图片生成失败（可能已扣费，不重试）: "
                             + e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -199,15 +129,7 @@ public class NewApiImageClient {
         }
     }
 
-    // ========== 官方 OpenAI Images 协议 ==========
 
-    /**
-     * 官方协议·纯文生图：{@code POST /v1/images/generations}（JSON）。
-     * <p>
-     * 只发官方字段。**不发 {@code response_format}**（上游 400 Unknown parameter，旧代码
-     * 每次调用都因此失败），也不发 {@code stream}/{@code tools}/
-     * {@code sequential_image_generation}（非官方字段，官方协议不依赖）。
-     */
     private Request buildOpenAiGenerationsRequest(
             String token, String model, String prompt, int n,
             String size, String quality, String traceId
@@ -227,14 +149,6 @@ public class NewApiImageClient {
         return requestBuilder.build();
     }
 
-    /**
-     * 官方协议·图生图：{@code POST /v1/images/edits}（multipart/form-data）。
-     * <p>
-     * 参考图必须作为**文件字节**上传（官方契约：generations 不接受参考图），故先按 URL
-     * 下载，再以 {@code image} 字段逐个追加（官方支持多图，追加次序即数组次序）。
-     * <p>
-     * <b>不手动设置 Content-Type</b>——okhttp 的 MultipartBody 需自带 boundary。
-     */
     private Request buildOpenAiEditsRequest(
             String token, String model, String prompt, int n,
             String size, String quality, List<String> sourceImages, String traceId
@@ -258,12 +172,6 @@ public class NewApiImageClient {
         return requestBuilder.build();
     }
 
-    /**
-     * 下载参考图（官方协议 multipart 上传前取素材）。
-     * <p>
-     * 失败归 {@code provider_failed}（瞬态可重试）：下载发生在 POST 上游**之前**，
-     * 零扣费风险，重试不违反「已可能扣费就不重试」政策。
-     */
     private DownloadedImage downloadSourceImage(String url, int index) {
         Response response;
         try {
@@ -296,13 +204,7 @@ public class NewApiImageClient {
         }
     }
 
-    // ========== 旧形态（inline） ==========
 
-    /**
-     * 构建 JSON 请求 /v1/images/generations（new-api-generation-ops.ts:28-60）。
-     * body 字段序与 TS 逐字（model/prompt/response_format/stream/size/quality/image/n/tools/…），
-     * image：单张=URL 字符串、多张=URL 数组（ark-image-provider.ts referenceImageField 同形）。
-     */
     private Request buildInlineGenerationsRequest(
             String token, String model, String prompt, int n,
             String size, String quality, boolean webSearch, boolean sequential,
@@ -334,18 +236,7 @@ public class NewApiImageClient {
         return requestBuilder.build();
     }
 
-    // ========== 响应解析 ==========
 
-    /**
-     * 从信封 data 提取图片列表。
-     * <p>
-     * 支持两种元素形态（**无条件**，与协议无关）：
-     * <ul>
-     *   <li>{@code url}（网关托管 URL，banana/seedream 现用）</li>
-     *   <li>{@code b64_json}（官方 GPT Image 系唯一形态）→ 解码为字节，mime 按魔数嗅探</li>
-     * </ul>
-     * 两者皆无的元素丢弃（与 TS filter 一致）；b64 解不开的也丢弃，不炸整批。
-     */
     private List<GeneratedImage> parseImageList(JsonNode dataNode, String requestId) {
         List<GeneratedImage> result = new ArrayList<>();
         if (dataNode == null || !dataNode.isArray()) return result;
@@ -377,7 +268,6 @@ public class NewApiImageClient {
         return result;
     }
 
-    // ========== 内部工具 ==========
 
     private String serialize(Map<String, Object> payload) {
         try {
@@ -388,12 +278,6 @@ public class NewApiImageClient {
         }
     }
 
-    /**
-     * 图片 MIME 嗅探：优先魔数（b64_json 响应没有 Content-Type 头），
-     * 魔数不认识才回退响应头，最后兜底 image/png（官方 GPT Image 默认输出格式）。
-     * <p>
-     * public：ImageEnhanceJobProcessor（跨包）转存结果图时复用同一嗅探逻辑。
-     */
     public static String sniffImageMime(byte[] data, String contentTypeHeader) {
         if (startsWith(data, 0x89, 'P', 'N', 'G')) return "image/png";
         if (startsWith(data, 0xFF, 0xD8, 0xFF)) return "image/jpeg";
@@ -409,7 +293,6 @@ public class NewApiImageClient {
         return "image/png";
     }
 
-    /** MIME → 文件扩展名（multipart 文件名用，上游据此判类型）。 */
     static String extForMime(String mime) {
         if ("image/jpeg".equals(mime)) return "jpg";
         if ("image/webp".equals(mime)) return "webp";
@@ -429,15 +312,8 @@ public class NewApiImageClient {
         return NewApiUpstreamConfig.timeoutMs("NEW_API_IMAGE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
     }
 
-    /** 下载好的参考图（字节 + 类型 + multipart 文件名）。 */
     private record DownloadedImage(byte[] content, String mime, String fileName) {}
 
-    /**
-     * 图片生成结果（对齐 TS NewApiImage / GeneratedImage，image-provider.ts:29-35）。
-     * <p>
-     * {@code url} 与 {@code content} 互斥：网关托管 URL（inline 形态）或已解码字节
-     * （b64_json 形态，mime 由魔数嗅探）。
-     */
     public record GeneratedImage(
             String url,
             byte[] content,
