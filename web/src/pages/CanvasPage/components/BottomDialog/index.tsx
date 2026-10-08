@@ -81,10 +81,12 @@ import AtMentionMenu from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import {
+  defaultVideoModeFor,
   enabledVideoModes,
   hasVideoReference,
   nextVideoModeOnRefsChange,
   normalizeStoredVideoMode,
+  resolveVideoMode,
   videoModeRefsSignature,
 } from '../../videoModes';
 import {
@@ -419,10 +421,26 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const ratioLocked = lockedRatioOf(currentModel?.features, selectedMode);
   const durationLocked = lockedDurationOf(currentModel?.features, selectedMode);
 
+  const fallbackDurationOf = (model: GenerationModel | null | undefined): number => {
+    const range = model?.supported_durations;
+    if (!range) return 5;
+    const base = typeof model?.default_duration === 'number' ? model.default_duration : range.min;
+    return Math.min(Math.max(base, range.min), range.max);
+  };
+
   useEffect(() => {
     if (ratioLocked && selectedRatio !== ratioLocked) setSelectedRatio(ratioLocked);
-    if (durationLocked != null && duration !== durationLocked) setDuration(durationLocked);
-  }, [ratioLocked, durationLocked, selectedRatio, duration]);
+    if (durationLocked != null) {
+      if (duration !== durationLocked) setDuration(durationLocked);
+      return;
+    }
+    if (duration < 0) {
+      const next = fallbackDurationOf(currentModel);
+      setDuration(next);
+      syncDraftParams({ duration: next });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ratioLocked, durationLocked, selectedRatio, duration, currentModel]);
   const isImageReference = selectedMode === 'image_reference';
   const showOmniFollowHint = selectedMode === 'omni'
     && supportsAdaptiveRatio
@@ -580,8 +598,22 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     if (lockedDuration != null) {
       setDuration(lockedDuration);
       patch.duration = lockedDuration;
+    } else if (duration < 0) {
+      const nextDuration = fallbackDurationOf(currentModel);
+      setDuration(nextDuration);
+      patch.duration = nextDuration;
     }
     syncDraftParams(patch);
+  };
+
+  const syncModeToModel = (model: GenerationModel) => {
+    if (isFrameMode(selectedMode)) return;
+    const enabled = enabledVideoModes(videoMediaRefs, configuredVideoModes(model.features));
+    const target = resolveVideoMode(defaultVideoModeFor(videoMediaRefs), enabled);
+    if (!target || target === selectedMode) return;
+    setSelectedMode(target);
+    syncDraftParams({ mode: target });
+    onToast?.('warn', '已根据当前素材切换生成模式');
   };
 
   const configurationError = !modelsLoaded ? '正在加载模型配置'
@@ -1043,7 +1075,10 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
                       className={`${styles.selectOption} ${m.key === selectedModel ? styles.selectOptionActive : ''}`}
                       onClick={() => {
                         const gen = modelList.find((x) => x.model_id === m.key);
-                        if (gen) syncDraftParams(applyModelDefaults(gen));
+                        if (gen) {
+                          syncDraftParams(applyModelDefaults(gen));
+                          syncModeToModel(gen);
+                        }
                         setModelOpen(false);
             }}
                     >

@@ -11,8 +11,10 @@ import RatioIcon from '@/components/RatioIcon';
 import AssetsPickerModal from '@/pages/CanvasPage/components/AssetsPickerModal';
 import { PANEL_REF_MEDIA_TYPES } from '@/pages/CanvasPage/refSourceTypes';
 import {
+  defaultVideoModeFor,
   enabledVideoModes,
   nextVideoModeOnRefsChange,
+  resolveVideoMode,
   videoModeRefsSignature,
 } from '@/pages/CanvasPage/videoModes';
 import type { VideoMediaRef, VideoMediaRefs } from '@/pages/CanvasPage/videoMediaRefs';
@@ -246,7 +248,25 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       });
     }
     const lockedDuration = lockedDurationOf(m.features, videoMode);
-    if (lockedDuration != null) setDuration(lockedDuration);
+    if (lockedDuration != null) {
+      setDuration(lockedDuration);
+    } else {
+      setDuration((prev) => {
+        if (prev > 0) return prev;
+        const d = m.supported_durations;
+        if (!d) return prev;
+        const base = typeof m.default_duration === 'number' ? m.default_duration : d.min;
+        return Math.min(Math.max(base, d.min), d.max);
+      });
+    }
+    if (!isFrameMode(videoMode)) {
+      const enabled = enabledVideoModes(videoRefsProjection, configuredVideoModes(m.features));
+      const target = resolveVideoMode(defaultVideoModeFor(videoRefsProjection), enabled);
+      if (target && target !== videoMode) {
+        setVideoMode(target);
+        showToast('已根据当前素材切换生成模式');
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoModelList, videoModel, isKeyframe, videoMode]);
 
@@ -742,7 +762,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     } else if (aspectRatio === 'adaptive' && selectedVideoModel && !hasAspectRatio(selectedVideoModel.supported_aspect_ratios, 'adaptive')) {
       setAspectRatio(pickDefaultVideoRatio(selectedVideoModel.supported_aspect_ratios, selectedVideoModel.default_aspect_ratio));
     }
-    if (lockedDuration != null) setDuration(lockedDuration);
+    if (lockedDuration != null) {
+      setDuration(lockedDuration);
+    } else if (duration < 0) {
+      const range = selectedVideoModel?.supported_durations;
+      const base = typeof selectedVideoModel?.default_duration === 'number'
+        ? selectedVideoModel.default_duration
+        : (range?.min ?? 5);
+      setDuration(range ? Math.min(Math.max(base, range.min), range.max) : base);
+    }
   };
 
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {

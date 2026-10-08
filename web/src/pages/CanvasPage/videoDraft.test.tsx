@@ -1109,6 +1109,51 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
     });
   });
 
+  it('离开视频编辑切到其他模式：时长不再留在 -1，提交值回到正常时长', async () => {
+    apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+    await expectMode('视频编辑');
+    expect(container.textContent).toContain('跟随原视频');
+
+    await openModeMenu();
+    await act(async () => { modeOption('全能参考')!.click(); });
+    await expectMode('全能参考');
+    expect(container.textContent).not.toContain('跟随原视频');
+    expect(container.textContent).not.toContain('-1s');
+
+    await typePrompt('换成夜晚');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.parameters).toMatchObject({ mode: 'omni' });
+    expect((payload.parameters as { duration: number }).duration).toBeGreaterThan(0);
+  });
+
+  it('模型切到 2.5：原先因不开放而落到全能参考的「只有视频」应回到视频编辑', async () => {
+    const editModel = editCapableModel();
+    const { edit: _edit, extend: _extend, ...modes20 } = editModel.features.task_types;
+    apiMocks.fetchGenerationModels.mockResolvedValue([
+      { ...editModel, model_id: 'seedance-2', model_label: '测试视频模型 20', features: { ...editModel.features, task_types: modes20 } },
+      { ...editModel, model_id: 'seedance-2.5', model_label: '测试视频模型 25' },
+    ]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+    await expectMode('全能参考');
+
+    const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('测试视频模型 20'))!;
+    await act(async () => { configBtn.click(); });
+    const modelTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('测试视频模型 20'))!;
+    await act(async () => { modelTrigger.click(); });
+    const option = [...container.querySelectorAll('button')].find((b) => b.textContent === '测试视频模型 25')!;
+    await act(async () => { option.click(); });
+    await expectMode('视频编辑');
+  });
+
   it('视频编辑时撤掉唯一参考视频：模式收不下 → 自动切走，不留冲突', async () => {
     apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
     await renderPage();
