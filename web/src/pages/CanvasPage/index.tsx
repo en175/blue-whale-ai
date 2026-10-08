@@ -1346,7 +1346,7 @@ export default function CanvasPage() {
       return;
     }
     if (fromQuery) setCurrentId(fromQuery);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedByPendingCanvasReview 每次渲染重建，判定仅读跨渲染稳定的 ref
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search, location.pathname, location.state, navigate]);
 
 

@@ -84,6 +84,8 @@ TS 端必须带 `import_extension=js`（见 `buf.gen.yaml`）——本仓 tsconf
 | **CI 强制 breaking 检测** | `buf breaking --against '.git#branch=release/2026.09.29'`，规则集 `WIRE`（见 `buf.yaml` 里为什么由 `FILE` 改过来） |
 | **服务端先行** | 新字段服务端先支持，客户端再消费 |
 
+`ListTransactionsRequest` 为旧的单值 `type_filter` 保留字段号 `2` 和名称，新版 `type_filters` 使用字段号 `4` 的 `repeated string`。`AdminListTransactionsRequest` 为旧的 `page_token` 保留字段号 `4` 和名称，当前页码 `page` 使用字段号 `5`。这些形状可在 `billing/v1/billing.proto` 核对，兼容性决策沿用上面的字段保留规则。
+
 ## 关联文档
 
 - [架构设计 §11 跨进程契约](../docs/specs/2026-09-24-用户与计费体系架构设计.md)
