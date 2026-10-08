@@ -3,6 +3,8 @@
  *  仅用于**展示**。state / 草稿 / 提交参数 / 发给上游的报文里 `ratio` 仍必须是 `adaptive`：
  *  火山侧强制要求 `ratio=adaptive`（见 NewApiVideoClient），把展示名回写进请求会让视频直接失败。
  *  故展示名与内部名不同，两者不可互换。 */
+import { aspectRatioOptions } from './image-size-ratios';
+
 const VIDEO_RATIO_DISPLAY_LABEL: Record<string, string> = {
   adaptive: 'auto',
 };
@@ -13,8 +15,9 @@ export function videoRatioLabel(ratio: string): string {
 }
 
 /** 支持 adaptive 的模型默认选这一档（界面显示 auto）；否则用能力行默认值，再否则用列表第一项。 */
-export function pickDefaultVideoRatio(supported: string[], defaultRatio?: string | null): string {
-  if (supported.includes('adaptive')) return 'adaptive';
-  if (defaultRatio && supported.includes(defaultRatio)) return defaultRatio;
-  return supported[0] ?? '';
+export function pickDefaultVideoRatio(supported: unknown, defaultRatio?: string | null): string {
+  const ratioIds = aspectRatioOptions(supported).map((ratio) => ratio.id);
+  if (ratioIds.includes('adaptive')) return 'adaptive';
+  if (defaultRatio && ratioIds.includes(defaultRatio)) return defaultRatio;
+  return ratioIds[0] ?? '';
 }

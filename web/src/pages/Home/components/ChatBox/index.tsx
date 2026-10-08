@@ -15,7 +15,7 @@ import { getCurrentUser, subscribe } from '@/utils/auth';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
+import { aspectRatioOptions, hasAspectRatio, pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { pickDefaultVideoRatio, videoRatioLabel } from '@/lib/video-aspect-ratio';
 import { type SkillRecord } from '@/api/skills';
 import { createProject } from '@/api/projects';
@@ -215,9 +215,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     if (!m) return;
     // IKFQ5S：首尾帧仅在**支持 adaptive 的模型**（2.5）内置该档；2.0 上游不接受 adaptive
     // （实测 400 unsupported ratio），走其固定比例档。
-    if (isKeyframe && m.supported_aspect_ratios.includes('adaptive')) {
+    if (isKeyframe && hasAspectRatio(m.supported_aspect_ratios, 'adaptive')) {
       setAspectRatio('adaptive');
-    } else if (m.supported_aspect_ratios.length && !m.supported_aspect_ratios.includes(aspectRatio)) {
+    } else if (aspectRatioOptions(m.supported_aspect_ratios).length && !hasAspectRatio(m.supported_aspect_ratios, aspectRatio)) {
       setAspectRatio(pickDefaultVideoRatio(m.supported_aspect_ratios, m.default_aspect_ratio));
     }
     if (m.supported_sizes.length && !m.supported_sizes.some((s) => s.id === resolution)) {
@@ -583,9 +583,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   // AI图片 比例/清晰度选项：取自所选模型能力（接口为唯一数据源）
   const selectedImageModel = imageModelList.find((m) => m.model_id === imageModel);
-  const imageRatioKeys = selectedImageModel
+  const imageRatioOptions = selectedImageModel
     ? ratiosForSelectedSize(selectedImageModel, imageResolution)
     : [];
+  const imageRatioLabel =
+    imageRatioOptions.find((ratio) => ratio.id === imageAspectRatio)?.label ?? imageAspectRatio;
   const imageSizeItems =
     selectedImageModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
   const currentImageResolution =
@@ -593,7 +595,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   // AI视频 比例/清晰度/时长范围：取自所选模型能力（接口为唯一数据源）
   const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
-  const videoRatioKeys = selectedVideoModel?.supported_aspect_ratios ?? [];
+  const videoRatioOptions = aspectRatioOptions(selectedVideoModel?.supported_aspect_ratios);
+  const videoRatioText = (id: string) =>
+    videoRatioLabel(videoRatioOptions.find((ratio) => ratio.id === id)?.label ?? id);
   const videoSizeItems =
     selectedVideoModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
   const videoDurationRange = selectedVideoModel?.supported_durations ?? null;
@@ -650,7 +654,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
    *  全能参考模式 + 模型支持 adaptive（Seedance 2.5，与 IKFQ5S 同锚）+ 已挂 ≥1 参考视频；
    *  纯条件渲染（零关键词判定），首尾帧 / 2.0 系列 / 未挂视频均不显示。 */
   const showOmniFollowHint = videoMode === 'omni'
-    && !!selectedVideoModel?.supported_aspect_ratios?.includes('adaptive')
+    && !!hasAspectRatio(selectedVideoModel?.supported_aspect_ratios, 'adaptive')
     && videoRefVideoCount > 0;
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
@@ -677,7 +681,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       }
       // IKFQ5S：仅支持 adaptive 的模型才内置该档；2.0 保持用户可选固定比例。
       const km = videoModelList.find((x) => x.model_id === videoModel);
-      if (km?.supported_aspect_ratios.includes('adaptive')) setAspectRatio('adaptive');
+      if (hasAspectRatio(km?.supported_aspect_ratios, 'adaptive')) setAspectRatio('adaptive');
     } else if (videoMode === 'firstlast') {
       // 切离首尾帧：首帧/尾帧转回普通参考（图片），清空槽位
       const restored = [keyframeRefs.first, keyframeRefs.last].filter(Boolean) as KeyframeRefItem[];
@@ -685,7 +689,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       setKeyframeRefs({});
       // 离开首尾帧：adaptive 内置值若新模型比例列表不含，回落模型默认/首个比例。
       const m = videoModelList.find((x) => x.model_id === videoModel);
-      if (aspectRatio === 'adaptive' && m && !m.supported_aspect_ratios.includes('adaptive')) {
+      if (aspectRatio === 'adaptive' && m && !hasAspectRatio(m.supported_aspect_ratios, 'adaptive')) {
         setAspectRatio(pickDefaultVideoRatio(m.supported_aspect_ratios, m.default_aspect_ratio));
       }
     }
@@ -1148,7 +1152,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 </div>
 
                 {/* 宽高比下拉（ADR-0086：首尾帧任务官方强制 adaptive、比例内置不暴露，整块不渲染） */}
-                {!(isKeyframe && !!selectedVideoModel?.supported_aspect_ratios?.includes('adaptive')) && (
+                {!(isKeyframe && !!hasAspectRatio(selectedVideoModel?.supported_aspect_ratios, 'adaptive')) && (
                   <div className={styles.dropdownWrap} ref={ratioRef}>
                     <button
                       className={styles.paramBtn}
@@ -1156,20 +1160,20 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     >
                       <RatioIcon ratio={aspectRatio} size={22} />
                       {/* IKJ4W6：内部键 adaptive 展示为 auto；state/提交值仍是 adaptive。 */}
-                      <span>{videoRatioLabel(aspectRatio)}</span>
+                      <span>{videoRatioText(aspectRatio)}</span>
                       <ChevronDown size={12} strokeWidth={2} />
                     </button>
                     {showRatioDrop && (
                       <div className={styles.dropdownMenuDown}>
-                        {videoRatioKeys.map((key) => (
+                        {videoRatioOptions.map((ratio) => (
                           <button
-                            key={key}
-                            className={`${styles.dropdownItem} ${aspectRatio === key ? styles.dropdownItemActive : ''}`}
-                            onClick={() => { setAspectRatio(key); setShowRatioDrop(false); }}
+                            key={ratio.id}
+                            className={`${styles.dropdownItem} ${aspectRatio === ratio.id ? styles.dropdownItemActive : ''}`}
+                            onClick={() => { setAspectRatio(ratio.id); setShowRatioDrop(false); }}
                           >
-                            <RatioIcon ratio={key} size={22} />
+                            <RatioIcon ratio={ratio.id} size={22} />
                             {/* IKJ4W6：内部键 adaptive 展示为 auto；选中/提交值仍是 adaptive。 */}
-                            <span>{videoRatioLabel(key)}</span>
+                            <span>{videoRatioLabel(ratio.label)}</span>
                           </button>
                         ))}
                       </div>
@@ -1354,19 +1358,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     onClick={() => setShowImgRatioDrop(!showImgRatioDrop)}
                   >
                     <RatioIcon ratio={imageAspectRatio} size={22} />
-                    <span>{imageAspectRatio}</span>
+                    <span>{imageRatioLabel}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
                   {showImgRatioDrop && (
                     <div className={styles.dropdownMenuDown}>
-                      {imageRatioKeys.map((key) => (
+                      {imageRatioOptions.map((ratio) => (
                         <button
-                          key={key}
-                          className={`${styles.dropdownItem} ${imageAspectRatio === key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setImageAspectRatio(key); setShowImgRatioDrop(false); }}
+                          key={ratio.id}
+                          className={`${styles.dropdownItem} ${imageAspectRatio === ratio.id ? styles.dropdownItemActive : ''}`}
+                          onClick={() => { setImageAspectRatio(ratio.id); setShowImgRatioDrop(false); }}
                         >
-                          <RatioIcon ratio={key} size={22} />
-                          <span>{key}</span>
+                          <RatioIcon ratio={ratio.id} size={22} />
+                          <span>{ratio.label}</span>
                         </button>
                       ))}
                     </div>

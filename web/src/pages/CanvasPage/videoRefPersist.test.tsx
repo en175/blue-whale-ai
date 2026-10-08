@@ -156,7 +156,7 @@ function videoModel(
     model_label: label,
     icon: null,
     supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }, { id: '1080p', label: '1080p', api_value: '1080p' }],
-    supported_aspect_ratios: ['16:9'],
+    supported_aspect_ratios: [{ id: '16:9', label: '16:9' }],
     supported_formats: [],
     supported_durations: { min: 4, max: 12, step: 1 },
     default_size: '720p',

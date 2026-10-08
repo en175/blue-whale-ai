@@ -329,10 +329,24 @@ function durationInRange(
   return duration >= range.min && duration <= range.max;
 }
 
+export function aspectRatioIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      if (item) out.push(item);
+      continue;
+    }
+    if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+      const id = (item as { id?: unknown }).id;
+      if (typeof id === "string" && id) out.push(id);
+    }
+  }
+  return out;
+}
+
 function ratios(capability: CapabilityLimitInput): string[] {
-  return Array.isArray(capability.supported_aspect_ratios)
-    ? capability.supported_aspect_ratios
-    : [];
+  return aspectRatioIds(capability.supported_aspect_ratios);
 }
 
 /** 校验提交参数是否落在能力目录支持范围。

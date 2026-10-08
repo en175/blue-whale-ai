@@ -12,6 +12,7 @@ export {
   normalizeSpecKey,
   parsePixels,
   resolveOutputPixels,
+  aspectRatioIds,
   type CapabilityLimitInput,
   type CapabilityParamFailure,
   type GenerationParamCheckInput,

@@ -68,12 +68,14 @@ import {
   parseBananaMaps,
   parseGptMatrix,
   pickTaskTypeRatios,
+  ratiosFromModel,
   readFeature,
   sizesFromModel,
   type ChannelId,
   type FormSnapshot,
   type GptMatrix,
   type ModelType,
+  type RatioForm,
   type SizeForm,
 } from './model-form';
 import {
@@ -129,13 +131,11 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     if (stored.length) return stored;
     return type === 'image' ? DEFAULT_IMAGE_SIZES : [];
   });
-  const [ratios, setRatios] = useState<string[]>(
-    initial?.supported_aspect_ratios?.length
-      ? initial.supported_aspect_ratios
-      : type === 'image'
-        ? DEFAULT_IMAGE_RATIOS
-        : [],
-  );
+  const [ratios, setRatios] = useState<RatioForm[]>(() => {
+    const stored = ratiosFromModel(initial?.supported_aspect_ratios);
+    if (stored.length) return stored;
+    return type === 'image' ? DEFAULT_IMAGE_RATIOS : [];
+  });
   const initialDurations = durationsFromModel(initial);
   const [durationMin, setDurationMin] = useState(initialDurations.min);
   const [durationMax, setDurationMax] = useState(initialDurations.max);
@@ -257,7 +257,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
           width: null,
           height: null,
         })),
-      ratios: ratios.filter(Boolean),
+      ratios: ratios.filter((ratio) => ratio.id.trim()).map((ratio) => ratio.id.trim()),
       defaultRatio: defaultRatio.trim(),
       matrix: parser === 'seedream' ? seedreamMatrix : parser === 'gpt' ? gptMatrix : {},
     }),
@@ -270,11 +270,8 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const applySource = (src: AdminModel, nextType: ModelType) => {
     const srcSizes = sizesFromModel(src.supported_sizes);
     const nextSizes = srcSizes.length ? srcSizes : nextType === 'image' ? DEFAULT_IMAGE_SIZES : [];
-    const nextRatios = src.supported_aspect_ratios?.length
-      ? src.supported_aspect_ratios
-      : nextType === 'image'
-        ? DEFAULT_IMAGE_RATIOS
-        : [];
+    const nextRatios = ratiosFromModel(src.supported_aspect_ratios);
+    if (!nextRatios.length && nextType === 'image') nextRatios.push(...DEFAULT_IMAGE_RATIOS);
     setSizes(nextSizes);
     setRatios(nextRatios);
     const d = durationsFromModel(src);
@@ -341,11 +338,30 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setSeedreamMatrix((prev) => mergeMatrix(prev, next, ratios));
   };
 
-  const removeRatio = (ratio: string) => {
-    const next = ratios.filter((item) => item !== ratio);
+  const removeRatio = (ratioId: string) => {
+    const next = ratios.filter((item) => item.id !== ratioId);
     setRatios(next);
     setGptMatrix((prev) => mergeMatrix(prev, sizes, next));
     setSeedreamMatrix((prev) => mergeMatrix(prev, sizes, next));
+  };
+
+  const addRatio = () => {
+    const id = ratioDraft.trim();
+    if (!id || ratios.some((ratio) => ratio.id === id)) return;
+    const next = [...ratios, { id }];
+    setRatios(next);
+    setRatioDraft('');
+    setGptMatrix((prev) => mergeMatrix(prev, sizes, next));
+    setSeedreamMatrix((prev) => mergeMatrix(prev, sizes, next));
+  };
+
+  const updateRatio = (index: number, patch: Partial<RatioForm>) => {
+    const next = ratios.map((ratio, i) => (i === index ? { ...ratio, ...patch } : ratio));
+    setRatios(next);
+    if (patch.id !== undefined) {
+      setGptMatrix((matrix) => mergeMatrix(matrix, sizes, next));
+      setSeedreamMatrix((matrix) => mergeMatrix(matrix, sizes, next));
+    }
   };
 
   const addChip = (
@@ -353,17 +369,11 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     list: string[],
     setList: (v: string[]) => void,
     setDraft: (v: string) => void,
-    kind?: 'ratio' | 'format',
   ) => {
     const value = draft.trim();
     if (!value || list.includes(value)) return;
-    const next = [...list, value];
-    setList(next);
+    setList([...list, value]);
     setDraft('');
-    if (kind === 'ratio') {
-      setGptMatrix((prev) => mergeMatrix(prev, sizes, next));
-      setSeedreamMatrix((prev) => mergeMatrix(prev, sizes, next));
-    }
   };
 
   const addTaskRatio = (taskType: string) => {
@@ -550,10 +560,11 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
           sizes={{ rows: sizes, add: addSizeRow, update: updateSize, remove: removeSize }}
           ratios={{
             rows: ratios,
+            update: updateRatio,
             remove: removeRatio,
             draft: ratioDraft,
             setDraft: setRatioDraft,
-            add: () => addChip(ratioDraft, ratios, setRatios, setRatioDraft, 'ratio'),
+            add: addRatio,
           }}
           dimensions={{ rows: videoDimensions, candidates: dimensionCandidates, set: setVideoDimensions }}
           defaults={{
@@ -572,7 +583,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             remove: (item) => setFormats(formats.filter((x) => x !== item)),
             draft: formatDraft,
             setDraft: setFormatDraft,
-            add: () => addChip(formatDraft, formats, setFormats, setFormatDraft, 'format'),
+            add: () => addChip(formatDraft, formats, setFormats, setFormatDraft),
           }}
           features={{
             flags: featureFlags,

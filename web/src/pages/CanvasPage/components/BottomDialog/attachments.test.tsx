@@ -26,7 +26,7 @@ fetchGenerationModels.mockImplementation(async () => [
     model_label: '测试视频模型',
     icon: null,
     supported_sizes: [{ id: '720p', label: '720P', api_value: '720p' }],
-    supported_aspect_ratios: ['16:9'],
+    supported_aspect_ratios: [{ id: '16:9', label: '16:9' }],
     supported_formats: [],
     supported_durations: { min: 5, max: 10, step: 1 },
     default_size: '720p',

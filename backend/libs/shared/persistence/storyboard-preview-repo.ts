@@ -6,6 +6,7 @@ import type {
   StoryboardFrameView,
   StoryboardPreviewParameters,
 } from "@lib/contracts";
+import { aspectRatioIds } from "@lib/contracts";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
 import {
@@ -76,9 +77,7 @@ function checkImageCapabilityLimit(
     features: unknown;
   },
 ): string | null {
-  const ratios = Array.isArray(capability.supported_aspect_ratios)
-    ? capability.supported_aspect_ratios
-    : [];
+  const ratios = aspectRatioIds(capability.supported_aspect_ratios);
   if (!ratios.includes(parameters.aspect_ratio))
     return `aspect_ratio ${parameters.aspect_ratio} 不在能力支持范围`;
   const sizes = Array.isArray(capability.supported_sizes)

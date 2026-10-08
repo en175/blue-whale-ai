@@ -73,7 +73,7 @@ const fullModel: GenerationModel = {
   model_label: '全能力模型',
   icon: null,
   supported_sizes: [{ id: '720p', label: '720p', api_value: '720p', width: null, height: null }],
-  supported_aspect_ratios: ['16:9'],
+  supported_aspect_ratios: [{ id: '16:9', label: '16:9' }],
   supported_formats: ['mp4'],
   supported_durations: { min: 4, max: 15, step: 1 },
   default_size: '720p',

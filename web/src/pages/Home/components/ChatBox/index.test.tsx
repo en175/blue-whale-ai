@@ -70,7 +70,7 @@ const seedance25: GenerationModel = {
   model_label: 'Seedance 2.5',
   icon: null,
   supported_sizes: [{ id: '720p', label: '720p', api_value: '720p', width: null, height: null }],
-  supported_aspect_ratios: ['adaptive', '16:9', '9:16'],
+  supported_aspect_ratios: [{ id: 'adaptive', label: 'adaptive' }, { id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }],
   supported_formats: ['mp4'],
   supported_durations: { min: 4, max: 15, step: 1 },
   default_size: '720p',
@@ -88,7 +88,7 @@ const seedance20: GenerationModel = {
   ...seedance25,
   model_id: 'seedance-2.0',
   model_label: 'Seedance 2.0',
-  supported_aspect_ratios: ['16:9', '9:16'],
+  supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }],
 };
 
 const videoAsset = { id: 1, type: 'video', url: 'http://x/v.mp4', width: null, height: null, duration: 5, size: null, source: 'uploaded' };

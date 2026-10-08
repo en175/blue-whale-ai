@@ -2,7 +2,13 @@ import type { PrismaClient } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { capabilityDigest } from "./capability-digest.js";
+import { getModelCapabilityList } from "./model-capability-cache.js";
 import { createModelCapabilityRepo } from "./model-capability-repo.js";
+
+vi.mock("./model-capability-cache.js", () => ({
+  getModelCapabilityList: vi.fn().mockResolvedValue(null),
+  setModelCapabilityList: vi.fn().mockResolvedValue(undefined),
+}));
 
 // 与 scene-card-generation-repo.test.ts / plan-application-facts 同源的 8 字段集——
 // digest 只覆盖这 8 个参数字段，features 明确不在内（改字段集会让历史快照全部误判漂移）。
@@ -87,6 +93,48 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
       false,
       false,
     ]);
+  });
+
+  it("★ 裸字符串（存量行）投影成 { id, label }（ADR-0123）", async () => {
+    const { repo } = repoWith([buildRow()]);
+    const [view] = await repo.listEnabledByType("image");
+    expect(view.supported_aspect_ratios).toEqual([
+      { id: "1:1", label: "1:1" },
+      { id: "16:9", label: "16:9" },
+    ]);
+  });
+
+  it("★ 对象与裸字符串混在一行里都认，label 空白回落 id（ADR-0123）", async () => {
+    const { repo } = repoWith([
+      buildRow({
+        supported_aspect_ratios: [
+          { id: "16:9", label: "横屏" },
+          { id: "9:16", label: "   " },
+          "1:1",
+        ],
+      }),
+    ]);
+    const [view] = await repo.listEnabledByType("image");
+    expect(view.supported_aspect_ratios).toEqual([
+      { id: "16:9", label: "横屏" },
+      { id: "9:16", label: "9:16" },
+      { id: "1:1", label: "1:1" },
+    ]);
+  });
+
+  it("★ 缓存命中的是旧形态（滚动发布窗口）时，读侧照样归一", async () => {
+    vi.mocked(getModelCapabilityList).mockResolvedValueOnce([
+      {
+        ...buildRow(),
+        supported_aspect_ratios: ["1:1"],
+      },
+    ] as never);
+    const { repo, prisma } = repoWith([buildRow()]);
+
+    const [view] = await repo.listEnabledByType("image");
+
+    expect(view.supported_aspect_ratios).toEqual([{ id: "1:1", label: "1:1" }]);
+    expect(prisma.generation_model_capability.findMany).not.toHaveBeenCalled();
   });
 
   it("digest === capabilityDigest(同一 8 字段输入)——用真实函数交叉断言，不写死", async () => {

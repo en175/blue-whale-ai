@@ -69,7 +69,7 @@ const SEEDREAM_PRO = model({
     { id: '1.5k', label: '1.5K', api_value: '1.5K' },
     { id: '2k', label: '2K', api_value: '2K' },
   ],
-  supported_aspect_ratios: ['1:1', '16:9', '9:16'],
+  supported_aspect_ratios: [{ id: '1:1', label: '1:1' }, { id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }],
   default_aspect_ratio: '1:1',
   request_mapping: {
     matrix: {
@@ -91,7 +91,7 @@ const seedance25 = buildCapabilityIndex([
       { id: '480p', label: '480P', api_value: '480p' },
       { id: '720p', label: '720P', api_value: '720p' },
     ],
-    supported_aspect_ratios: ['16:9', '9:16'],
+    supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }],
   }),
 ]).get('doubao-seedance-2-5-260628')!;
 

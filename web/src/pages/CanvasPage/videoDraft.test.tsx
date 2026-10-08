@@ -117,7 +117,7 @@ const apiMocks = vi.hoisted(() => ({
       model_label: '测试视频模型',
       icon: null,
       supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
-      supported_aspect_ratios: ['16:9'],
+      supported_aspect_ratios: [{ id: '16:9', label: '16:9' }],
       supported_formats: [],
       supported_durations: { min: 4, max: 12, step: 1 },
       default_size: '720p',
@@ -672,18 +672,18 @@ describe('IKDMQS 提交推导与组合约束', () => {
 
 describe('IKFQ5S 首尾帧 adaptive 按模型门控', () => {
   /** 构造视频模型能力项（IKFQ5S：比例档按参数给，用于区分支持/不支持 adaptive 的模型）。 */
-  const videoModelWith = (ratios: string[]) => ({
+  const videoModelWith = (ratioIds: string[]) => ({
     model_id: 'seedance-2',
     provider_id: 'prov',
     model_label: '测试视频模型',
     icon: null,
     supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
-    supported_aspect_ratios: ratios,
+    supported_aspect_ratios: ratioIds.map((id) => ({ id, label: id })),
     supported_formats: [],
     supported_durations: { min: 4, max: 12, step: 1 },
     default_size: '720p',
     default_format: null,
-    default_aspect_ratio: ratios[0],
+    default_aspect_ratio: ratioIds[0],
     default_duration: 5,
     features: {
       reference_image: true,
@@ -735,7 +735,7 @@ describe('IKG0LP 视频是否带音频开关', () => {
     model_label: '测试视频模型',
     icon: null,
     supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
-    supported_aspect_ratios: ['16:9'],
+    supported_aspect_ratios: [{ id: '16:9', label: '16:9' }],
     supported_formats: [],
     supported_durations: { min: 4, max: 12, step: 1 },
     default_size: '720p',
@@ -1114,7 +1114,7 @@ describe('IKJ4W6 画布视频比例显示 auto 并默认选中', () => {
     model_label: '测试视频模型',
     icon: null,
     supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
-    supported_aspect_ratios: ['16:9', '9:16', 'adaptive'],
+    supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }, { id: 'adaptive', label: 'adaptive' }],
     supported_formats: [],
     supported_durations: { min: 4, max: 12, step: 1 },
     default_size: '720p',
@@ -1167,7 +1167,7 @@ describe('IKJ4W6 画布视频比例显示 auto 并默认选中', () => {
       {
         ...adaptiveModel,
         model_id: 'seedance-2',
-        supported_aspect_ratios: ['16:9', '9:16'],
+        supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }],
         default_aspect_ratio: '16:9',
       },
     ]);
@@ -1281,7 +1281,7 @@ function sampleCapableModel() {
       { id: '720p', label: '720p', api_value: '720p' },
       { id: '1080p', label: '1080p', api_value: '1080p' },
     ],
-    supported_aspect_ratios: ['16:9'],
+    supported_aspect_ratios: [{ id: '16:9', label: '16:9' }],
     supported_formats: [],
     supported_durations: { min: 4, max: 12, step: 1 },
     default_size: '1080p',

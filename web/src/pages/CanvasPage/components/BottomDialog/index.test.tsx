@@ -26,7 +26,7 @@ const seedance: GenerationModel = {
   model_label: 'Seedance 2.0',
   icon: null,
   supported_sizes: [{ id: '720p', label: '720p', api_value: '720p', width: null, height: null }],
-  supported_aspect_ratios: ['16:9', '9:16'],
+  supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }],
   supported_formats: ['mp4'],
   supported_durations: { min: 4, max: 15, step: 1 },
   default_size: '720p',
@@ -248,7 +248,7 @@ describe('IKJ4W6 画布比例显示 auto', () => {
     ...seedance,
     model_id: 'seedance-2-5',
     model_label: 'Seedance 2.5',
-    supported_aspect_ratios: ['16:9', '9:16', 'adaptive'],
+    supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }, { id: 'adaptive', label: 'adaptive' }],
     default_aspect_ratio: '16:9',
   };
 
@@ -288,7 +288,7 @@ describe('IKJ4W6 画布比例显示 auto', () => {
 
   it('点选 auto 档：界面选中但写回草稿的仍是 adaptive', async () => {
     fetchGenerationModels.mockResolvedValue([
-      { ...adaptiveModel, supported_aspect_ratios: ['16:9', 'adaptive'], default_aspect_ratio: '16:9' },
+      { ...adaptiveModel, supported_aspect_ratios: [{ id: '16:9', label: '16:9' }, { id: 'adaptive', label: 'adaptive' }], default_aspect_ratio: '16:9' },
     ]);
     await renderDialog();
     await openConfig();

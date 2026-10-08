@@ -16,7 +16,7 @@ const fetchGenerationModels = vi.hoisted(() =>
       model_label: '测试图片模型',
       icon: null,
       supported_sizes: [{ id: '2k', label: '2K', api_value: '2k', width: null, height: null }],
-      supported_aspect_ratios: ['1:1'],
+      supported_aspect_ratios: [{ id: '1:1', label: '1:1' }],
       supported_formats: ['png'],
       supported_durations: null,
       default_size: '2k',

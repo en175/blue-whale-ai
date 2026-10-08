@@ -115,60 +115,81 @@ describe("mapImageChannelRequest banana", () => {
 });
 
 describe("availableAspectRatiosForSize", () => {
-  const configured = ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4", "21:9"];
+  const configured = ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4", "21:9"].map(
+    (id) => ({ id, label: id }),
+  );
+  const ids = (list: { id: string }[]) => list.map((ratio) => ratio.id);
+  const GPT = {
+    parser: "gpt" as const,
+    matrix: GPT_FULL_MATRIX,
+    defaultSizeId: "1k",
+    defaultRatioId: "1:1",
+  };
 
   it("GPT 全量 1K 不露出未填的 16:9 / 9:16", () => {
-    expect(
-      availableAspectRatiosForSize(
-        {
-          parser: "gpt",
-          matrix: GPT_FULL_MATRIX,
-          defaultSizeId: "1k",
-          defaultRatioId: "1:1",
-        },
-        "1k",
-        configured,
-      ),
-    ).toEqual(["1:1", "3:2", "2:3", "4:3", "3:4"]);
+    expect(ids(availableAspectRatiosForSize(GPT, "1k", configured))).toEqual([
+      "1:1",
+      "3:2",
+      "2:3",
+      "4:3",
+      "3:4",
+    ]);
   });
 
   it("GPT 全量 2K 露出已填的 16:9", () => {
-    expect(
-      availableAspectRatiosForSize(
-        {
-          parser: "gpt",
-          matrix: GPT_FULL_MATRIX,
-          defaultSizeId: "1k",
-          defaultRatioId: "1:1",
-        },
-        "2k",
-        configured,
-      ),
-    ).toContain("16:9");
+    expect(ids(availableAspectRatiosForSize(GPT, "2k", configured))).toContain(
+      "16:9",
+    );
   });
 
   it("GPT light 格子填 auto 仍按已填组合展示", () => {
     expect(
-      availableAspectRatiosForSize(
-        {
-          parser: "gpt",
-          matrix: { "1k": { "1:1": "auto", "16:9": "auto" } },
-          defaultSizeId: "1k",
-          defaultRatioId: "1:1",
-        },
-        "1k",
-        configured,
+      ids(
+        availableAspectRatiosForSize(
+          {
+            parser: "gpt",
+            matrix: { "1k": { "1:1": "auto", "16:9": "auto" } },
+            defaultSizeId: "1k",
+            defaultRatioId: "1:1",
+          },
+          "1k",
+          configured,
+        ),
       ),
     ).toEqual(["1:1", "16:9"]);
   });
 
   it("seedream 不读目录交叉格，配置过的比例全部可用", () => {
     expect(
-      availableAspectRatiosForSize({ parser: "seedream" }, "1k", [
-        "1:1",
-        "16:9",
-      ]),
+      ids(
+        availableAspectRatiosForSize({ parser: "seedream" }, "1k", [
+          { id: "1:1", label: "1:1" },
+          { id: "16:9", label: "16:9" },
+        ]),
+      ),
     ).toEqual(["1:1", "16:9"]);
+  });
+
+  it("★ 展示名随子集一起过滤出来，不需要回查（ADR-0123）", () => {
+    expect(
+      availableAspectRatiosForSize(
+        {
+          parser: "gpt",
+          matrix: { "1k": { "1:1": "1024x1024", "16:9": "1024x576" } },
+          defaultSizeId: "1k",
+          defaultRatioId: "1:1",
+        },
+        "1k",
+        [
+          { id: "1:1", label: "方形" },
+          { id: "16:9", label: "横屏" },
+          { id: "9:16", label: "竖屏" },
+        ],
+      ),
+    ).toEqual([
+      { id: "1:1", label: "方形" },
+      { id: "16:9", label: "横屏" },
+    ]);
   });
 });
 

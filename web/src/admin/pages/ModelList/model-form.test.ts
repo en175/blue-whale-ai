@@ -14,11 +14,17 @@ import {
   mergeMatrix,
   parseGptMatrix,
   pickTaskTypeRatios,
+  ratiosFromModel,
   readFeature,
   sizesFromModel,
   type FormSnapshot,
+  type RatioForm,
 } from './model-form';
 import type { AdminModel } from '@/api/adminModels';
+
+function ratioRows(...ids: string[]): RatioForm[] {
+  return ids.map((id) => ({ id }));
+}
 
 function snapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {
   return {
@@ -30,7 +36,7 @@ function snapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {
       { id: '1K', label: '1K' },
       { id: '2K', label: '2K' },
     ],
-    ratios: ['1:1', '16:9', '9:16'],
+    ratios: ratioRows('1:1', '16:9', '9:16'),
     durationMin: '',
     durationMax: '',
     durationStep: '',
@@ -64,7 +70,7 @@ const modelRow = (overrides: Partial<AdminModel> = {}): AdminModel => ({
   model_label: 'Seedream 4.0',
   icon: null,
   supported_sizes: [{ id: '1K', label: '1K' }],
-  supported_aspect_ratios: ['1:1'],
+  supported_aspect_ratios: [{ id: '1:1', label: '1:1' }],
   supported_durations: null,
   supported_formats: [],
   default_size: '1K',
@@ -372,8 +378,8 @@ describe('gpt / banana mapping', () => {
         channel: 'seedream-image',
         originalChannel: 'seedream-image',
         sizes,
-        ratios: ['1:1'],
-        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ['1:1']),
+        ratios: ratioRows('1:1'),
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratioRows('1:1')),
       }),
     );
     expect(result.ok).toBe(true);
@@ -381,6 +387,63 @@ describe('gpt / banana mapping', () => {
     const changes = diffUpdateParams(stored, result.value);
     expect(changes.supported_sizes).toEqual([{ id: '1k', api_value: '1k', label: '1K' }]);
     expect(changes.request_mapping).toEqual({ matrix: { '1k': { '1:1': '2048x2048' } } });
+  });
+
+  it('★ 存量裸字符串行：原样保存不提交 supported_aspect_ratios（ADR-0123）', () => {
+    const stored = modelRow({ supported_aspect_ratios: ['1:1'] });
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const ratios = ratiosFromModel(stored.supported_aspect_ratios);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios,
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratios),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(stored, result.value);
+    expect('supported_aspect_ratios' in changes).toBe(false);
+    expect('request_mapping' in changes).toBe(false);
+  });
+
+  it('★ 展示名改动会提交，且只写 label 键（ADR-0123）', () => {
+    const stored = modelRow();
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const ratios = ratiosFromModel(stored.supported_aspect_ratios);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios: ratios.map((ratio) => ({ ...ratio, label: '方形' })),
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratios),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(stored, result.value);
+    expect(changes.supported_aspect_ratios).toEqual([{ id: '1:1', label: '方形' }]);
+  });
+
+  it('★ 展示名与 id 相同不写 label 键（ADR-0123）', () => {
+    const stored = modelRow({ supported_aspect_ratios: ['1:1'] });
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const ratios = ratiosFromModel(stored.supported_aspect_ratios);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios: ratios.map((ratio) => ({ ...ratio, label: ratio.id })),
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratios),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.supported_aspect_ratios).toEqual([{ id: '1:1' }]);
   });
 
   it('从别的解析器切到 seedream：显式提交 null 清掉旧族矩阵', () => {
@@ -426,8 +489,8 @@ describe('gpt / banana mapping', () => {
         originalChannel: 'seedream-image',
         originalHadRequestMapping: true,
         sizes,
-        ratios: initial.supported_aspect_ratios,
-        seedreamMatrix: parseGptMatrix(initial.request_mapping, sizes, initial.supported_aspect_ratios),
+        ratios: ratiosFromModel(initial.supported_aspect_ratios),
+        seedreamMatrix: parseGptMatrix(initial.request_mapping, sizes, ratiosFromModel(initial.supported_aspect_ratios)),
       }),
     );
     expect(result.ok).toBe(true);
@@ -629,13 +692,13 @@ describe('mergeMatrix：集合变化时保住其它格（IKHBDO）', () => {
   };
 
   it('删一个尺寸行 → 其余行保留', () => {
-    expect(mergeMatrix(prev, [{ id: '1K', label: '1K' }], ['1:1', '16:9'])).toEqual({
+    expect(mergeMatrix(prev, [{ id: '1K', label: '1K' }], ratioRows('1:1', '16:9'))).toEqual({
       '1K': { '1:1': '1024x1024', '16:9': '1536x864' },
     });
   });
 
   it('删一个比例 chip → 其余列保留，被删列不复活', () => {
-    expect(mergeMatrix(prev, [{ id: '1K' }, { id: '2K' }], ['1:1'])).toEqual({
+    expect(mergeMatrix(prev, [{ id: '1K' }, { id: '2K' }], ratioRows('1:1'))).toEqual({
       '1K': { '1:1': '1024x1024' },
       '2K': { '1:1': '2048x2048' },
     });
@@ -651,7 +714,7 @@ describe('parseGptMatrix：库中键大小写与表单 id 不一致（IKHTL0）'
     { id: '1k', label: '1K' },
     { id: '2k', label: '2K' },
   ];
-  const ratios = ['1:1'];
+  const ratios = ratioRows('1:1');
 
   it('库里键大写、表单 id 小写 → 归一到表单 id，格子有值', () => {
     expect(parseGptMatrix({ matrix: { '1K': { '1:1': '1024x1024' } } }, sizes, ratios)).toEqual({
@@ -671,7 +734,7 @@ describe('parseGptMatrix：库中键大小写与表单 id 不一致（IKHTL0）'
   });
 
   it('比例键大小写不同也归一', () => {
-    expect(parseGptMatrix({ matrix: { '1k': { auto: '1024x1024' } } }, sizes, ['Auto'])).toEqual({
+    expect(parseGptMatrix({ matrix: { '1k': { auto: '1024x1024' } } }, sizes, ratioRows('Auto'))).toEqual({
       '1k': { Auto: '1024x1024' },
       '2k': { Auto: '' },
     });

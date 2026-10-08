@@ -38,6 +38,11 @@ export interface ModelSizeOption {
   api_value: string;
 }
 
+export interface ModelAspectRatioOption {
+  id: string;
+  label: string;
+}
+
 /** 视频时长档（DB supported_durations JSON：{min,max,step}）。图片模型为 null。 */
 export interface ModelDurationRange {
   min: number;
@@ -111,7 +116,7 @@ export interface ModelCapabilityView {
   model_label: string;
   icon: string | null;
   supported_sizes: ModelSizeOption[];
-  supported_aspect_ratios: string[];
+  supported_aspect_ratios: ModelAspectRatioOption[];
   supported_formats: string[];
   supported_durations: ModelDurationRange | null;
   default_size: string;
@@ -304,6 +309,23 @@ function asStringArray(json: unknown): string[] {
   return Array.isArray(json) ? json.filter((v): v is string => typeof v === "string") : [];
 }
 
+function toAspectRatios(json: unknown): ModelAspectRatioOption[] {
+  if (!Array.isArray(json)) return [];
+  const out: ModelAspectRatioOption[] = [];
+  for (const item of json) {
+    if (typeof item === "string") {
+      if (item.length > 0) out.push({ id: item, label: item });
+      continue;
+    }
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const o = item as { id?: unknown; label?: unknown };
+    if (typeof o.id !== "string" || o.id.length === 0) continue;
+    const label = typeof o.label === "string" && o.label.trim().length > 0 ? o.label : o.id;
+    out.push({ id: o.id, label });
+  }
+  return out;
+}
+
 /** 解析 supported_durations JSON，兼容两种形态并统一归一为 {min,max,step}：
  *  - 数组 [min, max] / [min, max, step] —— seed 数据与管理端编辑（constants.ts 校验为 numberArray）；
  *  - 对象 {min,max,step} —— 历史消费端契约。
@@ -339,7 +361,12 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
       // 而配置极低频——缓存把热路径从「每次查库」降成「每 5 分钟查一次」。
       // 失效由管理端各写方法显式触发（见 model-capability-admin-repo）。
       const cached = await getModelCapabilityList(capabilityType);
-      if (cached) return cached;
+      if (cached) {
+        return cached.map((view) => ({
+          ...view,
+          supported_aspect_ratios: toAspectRatios(view.supported_aspect_ratios),
+        }));
+      }
       const rows = await prisma.generation_model_capability.findMany({
         where: { capability_type: capabilityType, enabled: true, is_delete: false },
         orderBy: { sort_order: "asc" },
@@ -350,7 +377,7 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
         model_label: cap.model_label,
         icon: cap.icon,
         supported_sizes: toSizes(cap.supported_sizes),
-        supported_aspect_ratios: asStringArray(cap.supported_aspect_ratios),
+        supported_aspect_ratios: toAspectRatios(cap.supported_aspect_ratios),
         supported_formats: asStringArray(cap.supported_formats),
         supported_durations: toDurationRange(cap.supported_durations),
         default_size: cap.default_size,

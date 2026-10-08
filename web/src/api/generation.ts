@@ -6,6 +6,11 @@ import { apiRequest } from './http';
 /** 模型能力类型 */
 export type ModelCapability = 'text' | 'video' | 'image' | 'audio';
 
+export interface AspectRatioOption {
+  id: string;
+  label: string;
+}
+
 /** 分辨率档位 */
 export interface ModelSize {
   /** 档位 ID，发送请求时传此值 */
@@ -13,7 +18,7 @@ export interface ModelSize {
   /** 显示名称 */
   label: string;
   /** 当前尺寸下已填、可供选择的比例（消费端不返调用值） */
-  available_aspect_ratios?: string[];
+  available_aspect_ratios?: AspectRatioOption[];
   /** 旧接口调用值；新契约已剥离，只作兼容回退 */
   api_value?: string;
   width?: number | null;
@@ -66,7 +71,7 @@ export interface GenerationModel {
   /** 模型图标 URL，null 表示无图标 */
   icon: string | null;
   supported_sizes: ModelSize[];
-  supported_aspect_ratios: string[];
+  supported_aspect_ratios: AspectRatioOption[];
   supported_formats: string[];
   /** 视频时长范围 {min,max,step}，图片模型为 null */
   supported_durations: { min: number; max: number; step: number } | null;
