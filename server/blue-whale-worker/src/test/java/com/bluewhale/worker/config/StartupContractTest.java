@@ -15,7 +15,6 @@ import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.contract.JobTypeEnum;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mapper.SystemSettingMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
@@ -255,7 +254,7 @@ class StartupContractTest {
                 mock(JobStateMachineService.class),
                 mock(JobFinalizer.class),
                 mock(AssetSourceService.class),
-                mock(GenerationCredentialService.class),
+                mock(UpstreamCredential.class),
                 mock(NewApiVideoClient.class),
                 mock(TosVideoMediaRelay.class),
                 mock(GenerationMessageProducer.class));

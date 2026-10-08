@@ -35,7 +35,7 @@ describe("AudioVideoMuxesService.create", () => {
 
   it("freezes camel identities, explicit defaults and server-resolved URLs with the video duration", async () => {
     const { service, create } = makeService();
-    const result = await service.create("9", "5", input, { providerCredential: "sk-live" });
+    const result = await service.create("9", "5", input);
     expect(result).toMatchObject({ code: 200, data: { job_id: "70", status: "queued", enqueue_required: true } });
     expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({
       type: "audio_video_mux", source: "dock", status: "queued", user_id: 9n, project_id: 5n,
@@ -46,7 +46,6 @@ describe("AudioVideoMuxesService.create", () => {
         sync: "none",
         estimated_duration_ms: 12_500,
         submit_attempt: 1,
-        provider_credential: "sk-live",
       },
     }) });
   });

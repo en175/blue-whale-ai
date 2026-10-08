@@ -288,22 +288,6 @@ export function billingEndpoint(env: NodeJS.ProcessEnv = process.env): string {
   return url;
 }
 
-/**
- * 启动期断言：计费依赖齐备。
- *
- * <p>放在启动而不是首次请求：一个扣不了钱的进程**不该开始接受生成请求**。
- * 等到第一个用户提交才报错，那段时间里已经在白跑了。
- *
- * <p>⚠️ **上游凭证曾经也在这里，现在不在了**。它当时被算进来的理由是「缺它登录就签发不出
- *    会话」——那把 key 现在配在 `system_settings`（管理端可配），不在环境变量里；而
- *    「还没配」是**数据没填**，不是**部署配错**。把它留在启动门禁里会把新部署卡成死循环：
- *    key 要在管理端填，管理端要先登得进来，而进程根本不起。
- *    它的 fail-closed 改落在**真正打上游的地方**（下游 `parseBearerToken` 拿到 null 即 401、
- *    调用点抛 `UpstreamCredentialMissingError` 503），拿不到 key 绝不发空串出去。
- *
- * @returns 缺的东西（空数组 = 齐备）。返回而不是抛，是因为调用方
- *          （bootstrap）要先把它和别的启动检查汇总成一条日志再决定退不退。
- */
 export function missingBillingConfig(env: NodeJS.ProcessEnv = process.env): string[] {
   const missing: string[] = [];
   if (!(env[BILLING_URL_ENV] ?? "").trim()) missing.push(BILLING_URL_ENV);

@@ -8,7 +8,6 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
-import { NewApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import { isSuperAdmin } from "@lib/core/identity/roles.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -31,7 +30,6 @@ import {
   USER_STATUS_DISABLED,
   USER_STATUS_NORMAL,
 } from "@lib/shared/identity/index.js";
-import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 const USER_MANAGE_ACTIONS = new Set([
@@ -70,12 +68,8 @@ export class AdminUsersController {
   @Get()
   async list(
     @CurrentUser() user: AuthenticatedUser,
-    @Headers("authorization") authorization?: string,
     @Query() query: Record<string, string> = {},
   ) {
-    const token = parseBearerToken(authorization);
-    if (!token) throw new NewApiError("缺少登录凭证", 401, "unauthorized");
-
     const keyword = query.keyword?.trim() || undefined;
     const statusParam = query.status;
     const status =
@@ -112,13 +106,9 @@ export class AdminUsersController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("userId") rawUserId: string,
     @Body() body: Record<string, unknown>,
-    @Headers("authorization") authorization?: string,
     @Headers("x-forwarded-for") xForwardedFor?: string,
     @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    const token = parseBearerToken(authorization);
-    if (!token) throw new NewApiError("缺少登录凭证", 401, "unauthorized");
-
     const userId = Number(rawUserId);
     if (!Number.isInteger(userId) || userId <= 0) {
       throw new AdminException(400, "userId 须为正整数");

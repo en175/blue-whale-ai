@@ -51,10 +51,6 @@ function createController(overrides: {
 }
 
 const USER = { userId: "42", username: "alice" } as never;
-/**
- * 模拟 req：兜底吊销取的是 **AuthGuard 存下的 `loginToken`**（IKJAZM）。
- * 既不是 cookie（迁移期通道，迟早撤掉），也不是请求头（那一刻已被回注成上游 sk-）。
- */
 const REQ = { loginToken: "sess_current" } as unknown as Request;
 /** 模拟 res：记录 clearCookie 调用（passthrough 响应，控制器不发送）。 */
 const RES = { clearCookie: vi.fn() } as unknown as Response;

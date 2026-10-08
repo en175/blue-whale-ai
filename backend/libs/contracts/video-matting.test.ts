@@ -276,7 +276,6 @@ describe("video_matting 契约不变量（官方 PDF 口径，TS 侧）", () => 
         background_color: VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR,
       }).success,
     ).toBe(false);
-    // strict：多余键拒（client_token / provider_credential 是基础设施键，不进本 zod）。
     expect(
       videoMattingInputSchema.safeParse({
         source_asset_id: "88",

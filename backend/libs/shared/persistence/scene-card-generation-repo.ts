@@ -46,8 +46,6 @@ export interface RegenerateSceneCardInput {
   reference_mode: VideoReferenceMode;
   reference_assets: ProviderPromptAsset[];
   capability_snapshot_version: CapabilitySnapshotVersion;
-  /** 明文供应商 sk token（修正四：去密，与 Dock 生成链路一致）；worker 直接取用调网关。 */
-  provider_credential?: string;
   /**
    * IKF YHJ（ADR-0087）：素材校验门。
    * <p>
@@ -640,9 +638,6 @@ async function regenerateSceneCardInTransaction(
       // 配了 video_reference_max=5 的模型第 4 条参考视频会被「参考视频最多 3 个」拒掉。
       reference_limits: frozenLimits,
       ...flatReferences,
-      ...(input.provider_credential
-        ? { provider_credential: input.provider_credential }
-        : {}),
     },
   });
   // IKJJQU：该路径不携带 canvasRecovery，返回值恒为 CreatedJob；窄化仅为类型收束。

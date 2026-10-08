@@ -3,10 +3,10 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.audio.NewApiAudioClient;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,7 +46,7 @@ class AudioJobProcessorTextAttachmentTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiAudioClient audioClient;
     @Mock private TosMediaStorage tosService;
 
@@ -54,12 +54,12 @@ class AudioJobProcessorTextAttachmentTest {
 
     @BeforeEach
     void setUp() {
-        processor = new AudioJobProcessor(stateMachine, finalizer, assetSource, credentialService, audioClient, tosService);
+        processor = new AudioJobProcessor(stateMachine, finalizer, assetSource, upstreamCredential, audioClient, tosService);
     }
 
     /** 走通成功路径：generate 返回 data → TOS 转存 → createAsset → completeJob。 */
     private void stubSuccessPath() {
-        when(credentialService.open("v1.aaa.bbb.ccc")).thenReturn("sk-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-token");
         // 时长给一个真实值：它同时决定 assets.duration_ms 与结算的 usage.seconds
         // （官方按输出时长计费，精确至秒）——12.4s → 12 秒
         when(audioClient.generate(anyString(), anyString(), anyString(), any()))
@@ -87,7 +87,6 @@ class AudioJobProcessorTextAttachmentTest {
                 "prompt", "生成环境音",
                 "composed_prompt", composed,
                 "model_id", "seed-audio-1.0",
-                "provider_credential", "v1.aaa.bbb.ccc",
                 "text_attachments", List.of(
                         Map.of("node_id", "n1", "title", "场景", "text", "雨夜街道，两个人争吵"),
                         Map.of("node_id", "n2", "title", "空白附件", "text", "   "),
@@ -122,8 +121,7 @@ class AudioJobProcessorTextAttachmentTest {
     void legacyJobWithoutAttachments() {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "海浪",
-                "model_id", "seed-audio-1.0",
-                "provider_credential", "v1.aaa.bbb.ccc"
+                "model_id", "seed-audio-1.0"
         ));
         when(stateMachine.claimAudioJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
@@ -141,7 +139,6 @@ class AudioJobProcessorTextAttachmentTest {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "海浪",
                 "model_id", "seed-audio-1.0",
-                "provider_credential", "v1.aaa.bbb.ccc",
                 "text_attachments", List.of(
                         Map.of("node_id", "n1", "title", "缺正文字段")
                 )
@@ -162,7 +159,6 @@ class AudioJobProcessorTextAttachmentTest {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "",
                 "model_id", "seed-audio-1.0",
-                "provider_credential", "v1.aaa.bbb.ccc",
                 "text_attachments", List.of(
                         Map.of("node_id", "n1", "title", "场景", "text", "雨夜街道，两个人争吵")
                 )

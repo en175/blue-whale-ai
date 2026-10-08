@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -12,7 +13,6 @@ import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoEnhanceError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitEnhanceVideoClient;
@@ -32,43 +32,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * video_enhance（视频 HD 高清，火山 MediaKit 画质增强大模型版）作业处理器（IKH3VF，
- * 父规格 IKH3VB，附录 C 触点③）。编排与去字幕 / 音视频分离同构（视频轮询骨架，每步 =
- * 一次 MQ 消费，fencing / 租约 / claim-by-id 全部走视频件）：
- * <ol>
- *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
- *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（video_url +
- *       resolution + bitrate_level 恒 medium，fps 不传，返 task_id）→ markProviderSubmitted
- *       （存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
- *       processing 共享 720 轮询预算，超限同归 1045）；processing →
- *       续排（超限 1045）；failed → 分类终态；completed → **立即下载转存（火山 video_url
- *       仅 24h 有效）** → 建 Asset（type=video / source='generated'）→ 终态 succeeded</li>
- * </ol>
- * 下载与转存复用 {@link TosVideoMediaRelay}（视频家族同套：fetch → video/ mime 校验 →
- * TOS 公开读 → md5）；结果 URL 24h 失效故**强依赖 TOS，不降级直存**（对齐去字幕口径）。
- * <p>
- * 结果元数据（官方 result 仅返回 resolution 档位 / duration 秒 / fps，不返回输出宽高像素）：
- * 宽高按档位短边（{@link VideoEnhanceContract#RESOLUTION_SHORT_SIDE_PX}）+ 源宽高比推导
- * 入库（源宽高缺失 → null，静默容忍，去字幕同款口径），推导值支撑前端链式 HD 置灰判断
- * （ADR-0105：输出 2K/4K 卡短边超 1080 输入上限即置灰）；时长优先官方精确值、缺失回落源
- * duration_ms 换算；resolution / fps 落终态日志 payload（assets 无对应列）。
- * <p>
- * 错误码口径（数值 1045，无 worker 级自动重试，用户手动重试沿用冻结 input）：
- * <ul>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与视频/去字幕同构；凭证冻结在
- *       创建入口 IKH3VE）</li>
- *   <li>invalid_input：业务键缺失 / resolution 枚举外（创建入口复核是权威，worker 兜底防御）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
- *       §5 分类信号（网关错误与火山 failed 双路），保留既有码投影</li>
- *   <li>video_enhance_failed（1045）：其余一律归并兜底——网关 provider_failed / 提交超时 /
- *       轮询超时 / 火山任务 failed（**含 SDR 限制、短边/长边超限等供应商侧官方门槛拒绝**，
- *       宽高缺失放行的存量由上游拒，ADR-0105 任务失败口径兜底）/ 源素材不可用 / 结果下载
- *       转存失败（超时也归并是家族口径：宁可不重试也不双跑），上游可读原因随 message
- *       透传前端投影</li>
- * </ul>
- */
 @Component
 public class VideoEnhanceJobProcessor implements JobProcessor {
 
@@ -96,7 +59,7 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitEnhanceVideoClient enhanceVideoClient;
     private final TosVideoMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
@@ -108,7 +71,7 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitEnhanceVideoClient enhanceVideoClient,
             TosVideoMediaRelay mediaRelay,
             @Qualifier("videoEnhanceMessageProducer")
@@ -120,7 +83,7 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.bySources(
                 VideoEnhanceContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.enhanceVideoClient = enhanceVideoClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
@@ -181,20 +144,12 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
      * 分相主逻辑（视频骨架 runVideoStep 同构）：凭证 → submit 相 / poll 相。
      */
     private void runStep(ClaimedJob claim) {
-        // 取明文凭证（基础设施键；与视频/去字幕同构，冻结在创建入口 IKH3VE）
-        Object credentialObj = claim.input().get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "画质增强任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[video_enhance] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "画质增强任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[video_enhance] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

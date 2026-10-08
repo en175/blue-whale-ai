@@ -133,9 +133,6 @@ export class MeController {
     if (userId == null) {
       throw new NewApiError("缺少登录凭证", 401, "unauthorized");
     }
-    // ⚠️ 令牌取 `req.loginToken`（**AuthGuard 存的那一份**）。不要读 cookie，也不要读
-    //    请求头：前者只是迁移期的过渡通道，只带请求头的客户端在这里会静默跳过吊销；
-    //    后者此刻已被回注成**上游 sk-**，拿它 revoke 等于删一个不存在的键。
     const currentToken = (req as Request & { loginToken?: string }).loginToken;
     let wasForced = false;
     try {

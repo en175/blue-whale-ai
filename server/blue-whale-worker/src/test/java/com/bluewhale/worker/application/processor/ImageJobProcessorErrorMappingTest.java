@@ -3,11 +3,11 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient.GeneratedImage;
@@ -32,26 +32,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * 图片处理器错误映射测试（generation-worker.ts 附录 A image 行号逐字对齐）。
- * <p>
- * 覆盖：
- * - invalid_input（:303）：缺少 prompt 或 model_id
- * - model_unavailable（:338）：capability 缺失
- * - invalid_reference（:349/362）：参考图数量超限 / 素材不存在
- * - invalid_reference_type（:537/550）：渠道映射失败
- * - provider_credential_missing（:502）：凭证缺失
- * - unsupported_input（:558）：参考图无 URL
- * - no_result（:600）：provider 返回 0 张
- * - provider_failed（:687）：provider 抛错 → 瞬态重试或终态
- */
 @ExtendWith(MockitoExtension.class)
 class ImageJobProcessorErrorMappingTest {
 
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiImageClient imageClient;
     @Mock private GenerationModelCapabilityMapper capabilityMapper;
     @Mock private TosMediaStorage tosService;
@@ -61,7 +48,7 @@ class ImageJobProcessorErrorMappingTest {
     @BeforeEach
     void setUp() {
         processor = new ImageJobProcessor(
-                stateMachine, finalizer, assetSource, credentialService,
+                stateMachine, finalizer, assetSource, upstreamCredential,
                 imageClient, capabilityMapper, tosService);
     }
 
@@ -140,14 +127,16 @@ class ImageJobProcessorErrorMappingTest {
         verifyFailWithCode(GenerationError.ERROR_INVALID_REFERENCE);
     }
 
-    // ========== provider_credential_missing（:502） ==========
 
     @Test
-    @DisplayName("G31: 缺少凭证 → provider_credential_missing")
+    @DisplayName("G31: 上游凭证未配置 → provider_credential_missing")
     void missingCredential() {
         mockClaim(Map.of("prompt", "hello", "model_id", "gpt-image-1"));
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(mockCapability("gpt-image-1"));
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         verifyFailWithCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
@@ -160,8 +149,7 @@ class ImageJobProcessorErrorMappingTest {
     void channelMappingFailed() {
         Map<String, Object> input = new HashMap<>(Map.of(
                 "prompt", "hello", "model_id", "gpt-image-1",
-                "size", "nonexistent", "aspect_ratio", "99:1",
-                "provider_credential", "sealed-token"));
+                "size", "nonexistent", "aspect_ratio", "99:1"));
         mockClaim(input);
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
@@ -170,7 +158,7 @@ class ImageJobProcessorErrorMappingTest {
         cap.setDefaultSize("default-size");
         cap.setDefaultAspectRatio("1:1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
-        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(upstreamCredential.requireKey()).thenReturn("token");
 
         processor.handle("100");
 
@@ -183,13 +171,12 @@ class ImageJobProcessorErrorMappingTest {
     @DisplayName("G33: provider 返回 0 张 → no_result")
     void noResult() {
         Map<String, Object> input = new HashMap<>(Map.of(
-                "prompt", "hello", "model_id", "gpt-image-1",
-                "provider_credential", "sealed-token"));
+                "prompt", "hello", "model_id", "gpt-image-1"));
         mockClaim(input);
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
-        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
                 anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(List.of());
@@ -209,13 +196,12 @@ class ImageJobProcessorErrorMappingTest {
     @DisplayName("G40: 成功路径把 TOS 出口的 md5 透传进 createAsset（IKGS73）")
     void successCarriesMd5() {
         Map<String, Object> input = new HashMap<>(Map.of(
-                "prompt", "hello", "model_id", "gpt-image-1",
-                "provider_credential", "sealed-token"));
+                "prompt", "hello", "model_id", "gpt-image-1"));
         mockClaim(input);
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
-        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
                 anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(List.of(new GeneratedImage(
@@ -243,8 +229,7 @@ class ImageJobProcessorErrorMappingTest {
     @DisplayName("G34: provider_failed + retry<3 → requeue 30s backoff")
     void transientRetry_requeue30s() {
         Map<String, Object> input = new HashMap<>(Map.of(
-                "prompt", "hello", "model_id", "gpt-image-1",
-                "provider_credential", "sealed-token"));
+                "prompt", "hello", "model_id", "gpt-image-1"));
         ClaimedJobDto job = new ClaimedJobDto(
                 "100", "1", "1", "image", input, 0, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
@@ -252,7 +237,7 @@ class ImageJobProcessorErrorMappingTest {
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
-        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
                 anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
@@ -279,8 +264,7 @@ class ImageJobProcessorErrorMappingTest {
     @DisplayName("G35: provider_failed + retry_count=1 → requeue 60s backoff")
     void transientRetry_requeue60s() {
         Map<String, Object> input = new HashMap<>(Map.of(
-                "prompt", "hello", "model_id", "gpt-image-1",
-                "provider_credential", "sealed-token"));
+                "prompt", "hello", "model_id", "gpt-image-1"));
         ClaimedJobDto job = new ClaimedJobDto(
                 "100", "1", "1", "image", input, 1, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
@@ -288,7 +272,7 @@ class ImageJobProcessorErrorMappingTest {
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
-        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
                 anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
@@ -310,8 +294,7 @@ class ImageJobProcessorErrorMappingTest {
     @DisplayName("G36: provider_failed + retry_count=2 → requeue 120s backoff")
     void transientRetry_requeue120s() {
         Map<String, Object> input = new HashMap<>(Map.of(
-                "prompt", "hello", "model_id", "gpt-image-1",
-                "provider_credential", "sealed-token"));
+                "prompt", "hello", "model_id", "gpt-image-1"));
         ClaimedJobDto job = new ClaimedJobDto(
                 "100", "1", "1", "image", input, 2, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
@@ -319,7 +302,7 @@ class ImageJobProcessorErrorMappingTest {
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
-        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
                 anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
@@ -341,8 +324,7 @@ class ImageJobProcessorErrorMappingTest {
     @DisplayName("G37: provider_failed + retry_count>=3 → fail (max exceeded)")
     void transientRetry_maxExceeded_fail() {
         Map<String, Object> input = new HashMap<>(Map.of(
-                "prompt", "hello", "model_id", "gpt-image-1",
-                "provider_credential", "sealed-token"));
+                "prompt", "hello", "model_id", "gpt-image-1"));
         ClaimedJobDto job = new ClaimedJobDto(
                 "100", "1", "1", "image", input, 3, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
@@ -350,7 +332,7 @@ class ImageJobProcessorErrorMappingTest {
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
-        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
                 anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
@@ -368,8 +350,7 @@ class ImageJobProcessorErrorMappingTest {
     @DisplayName("G38: content_rejected（非瞬态）→ fail 不 requeue")
     void contentRejected_noRequeue() {
         Map<String, Object> input = new HashMap<>(Map.of(
-                "prompt", "hello", "model_id", "gpt-image-1",
-                "provider_credential", "sealed-token"));
+                "prompt", "hello", "model_id", "gpt-image-1"));
         ClaimedJobDto job = new ClaimedJobDto(
                 "100", "1", "1", "image", input, 0, false, 1L);
         when(stateMachine.claimImageJobById(eq("100"), anyString()))
@@ -377,7 +358,7 @@ class ImageJobProcessorErrorMappingTest {
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
-        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
                 anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(

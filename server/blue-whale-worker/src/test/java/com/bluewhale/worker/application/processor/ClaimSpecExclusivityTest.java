@@ -5,12 +5,12 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.contract.VideoMattingContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.audio.NewApiAudioClient;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitAdjustAudioSpeedClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitClient;
@@ -305,8 +305,8 @@ class ClaimSpecExclusivityTest {
                 .withBean(JobFinalizer.class, () -> mock(JobFinalizer.class))
                 .withBean(GenerationJobMapper.class, () -> jobMapper)
                 .withBean(AssetSourceService.class, () -> mock(AssetSourceService.class))
-                .withBean(GenerationCredentialService.class,
-                        () -> mock(GenerationCredentialService.class))
+                .withBean(UpstreamCredential.class,
+                        () -> mock(UpstreamCredential.class))
                 .withBean(TosMediaStorage.class, () -> mock(TosMediaStorage.class))
                 .withBean(TosAudioMediaRelay.class, () -> mock(TosAudioMediaRelay.class))
                 .withBean(TosVideoMediaRelay.class, () -> mock(TosVideoMediaRelay.class))

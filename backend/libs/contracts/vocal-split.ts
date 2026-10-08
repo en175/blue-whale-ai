@@ -21,9 +21,6 @@ export const VOCAL_SPLIT_JOB_TYPE = "vocal_split";
  *  media_extract 的 "dock" 是 ADR-0103 存量迁移特例，新工具不沿用）。 */
 export const VOCAL_SPLIT_SOURCE = "vocal_split";
 
-/** input 冻结键名（三键恒在、值恒为合法枚举，创建时定死，重试原样沿用）。
- *  基础设施键 provider_credential 在业务键之上由创建侧冻结落库（同 media_extract /
- *  video-subtitle-erase 先例，不进本 zod——它校验的是客户端 payload，凭证来自请求头冻结）。 */
 export const VOCAL_SPLIT_INPUT_KEYS = {
   /** 源素材身份（被分离音轨的视频/音频 Asset id；命名沿用 media_extract 的 source_asset_id）。 */
   sourceAssetId: "source_asset_id",

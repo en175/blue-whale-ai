@@ -8,9 +8,9 @@ import com.bluewhale.worker.application.service.ProjectEventPublisher;
 import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
 import com.bluewhale.worker.application.service.StoryboardPreviewSync;
 import com.bluewhale.worker.application.service.WorkerClock;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient.MuxAudioVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
@@ -270,8 +270,7 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
                 WorkerClock.now().minusSeconds(30),
                 "{\"audio\":{\"assetId\":\"11\",\"nodeId\":\"source-node\",\"url\":\"https://tos/a.mp3\"},"
                         + "\"video\":{\"assetId\":\"12\",\"url\":\"https://tos/v.mp4\"},"
-                        + "\"is_audio_reserve\":true,\"sync\":\"none\",\"submit_attempt\":1,"
-                        + "\"provider_credential\":\"sk-frozen\"}");
+                        + "\"is_audio_reserve\":true,\"sync\":\"none\",\"submit_attempt\":1}");
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         return id != null ? id : -1;
     }
@@ -307,8 +306,8 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
     private WiredProcessor wireProcessor(ConcurrentHashMap<String, byte[]> objects, String storageKey) {
         JobStateMachineService spyService = spy(realService);
         JobFinalizer spyFinalizer = spy(realFinalizer);
-        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
@@ -328,7 +327,7 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         }).when(relay).deleteUnpublishedObject(anyString());
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         var processor = new AudioVideoMuxJobProcessor(spyService, claimService, realJobMapper, spyFinalizer,
-                credentials, gateway, relay, producer);
+                upstreamCredential, gateway, relay, producer);
         return new WiredProcessor(processor, spyService, spyFinalizer, objects);
     }
 
@@ -469,14 +468,14 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         TosVideoMediaRelay relay = new TosVideoMediaRelay(realTosStandin(objects, realKey), "bkt", "tos.example.com");
         JobStateMachineService spyService = spy(realService);
         JobFinalizer spyFinalizer = spy(realFinalizer);
-        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
         var processor = new AudioVideoMuxJobProcessor(spyService, claimService, realJobMapper, spyFinalizer,
-                credentials, gateway, relay, mock(GenerationMessageProducer.class));
+                upstreamCredential, gateway, relay, mock(GenerationMessageProducer.class));
         throwOnPostTransferCancelQuery(spyService, jobId);
 
         processor.handle(String.valueOf(jobId));

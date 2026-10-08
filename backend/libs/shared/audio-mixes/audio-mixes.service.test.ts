@@ -38,12 +38,12 @@ describe("AudioMixesService.create", () => {
 
   it("freezes ordered audio identities and server-resolved URLs with an explicit MP3 default", async () => {
     const { service, create } = makeService();
-    const result = await service.create("9", "5", input, { providerCredential: "sk-live" });
+    const result = await service.create("9", "5", input);
     expect(result).toMatchObject({ code: 200, data: { job_id: "70", status: "queued" } });
     expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({
       type: "audio_mix", status: "queued", user_id: 9n, project_id: 5n,
       input: {
-        source_node_id: "node-source", output_format: "mp3", provider_credential: "sk-live",
+        source_node_id: "node-source", output_format: "mp3",
         estimated_duration_ms: 12_500,
         inputs: [
           { asset_id: "11", node_id: "node-source", url: "https://public-tos.example/11.mp3" },

@@ -11,43 +11,6 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * new-api 网关 MediaKit 音频提取（音视频分离）客户端（迁移契约 §18 / IKH28W；以
- * {@link NewApiMediaKitSubtitleEraseClient} 为模板——家族内第二个 MediaKit 异步任务：
- * 提交返 task_id + 查询端点轮询取 result.audio_url / result.duration。HTTP 骨架自
- * IKHKMK 起收敛入 {@link NewApiMediaKitAsyncTaskClient}，本类只保留契约枚举校验、
- * 出站 payload 构造与 completed 结果解析）。
- * <p>
- * 端点（网关**对客**路径；网关内部转发火山上游 POST /api/v1/tools/extract-audio.
- * 路径常量单源在 {@link MediaExtractContract}，契约票 IKH28T 已冻结）：
- * <ul>
- *   <li>submit：POST {SUBMIT_PATH}（30s 超时，异步提交秒级入队）</li>
- *   <li>poll：GET {POLL_PATH_PREFIX}{task_id}（10s 超时）——三个 MediaKit 异步工具共用
- *       同一条查询路由，路径不含 async 段（IKH67T 实测校准）</li>
- * </ul>
- * ⚠️ 网关路径 ≠ 火山上游路径：混用即 404 Invalid URL，任务卡在提交相（IKH67T）。
- * 鉴权与家族同构（契约 §5 / ADR-0080）：Authorization: Bearer 任务冻结的用户 sk-
- * （processor 从 job.input.provider_credential 取出传入）+ X-Trace-Id +
- * X-Client-System: bluewhale。
- * <p>
- * 出站请求映射（官方 PDF Body 参数节）：model（对客模型名，网关按模型名路由 MediaKit 渠道，
- * 本期 model_price 配 0）+ video_url（源视频公网对象存储地址）+ format（= 任务冻结的
- * output_format，五值枚举同名同值透传，缺省 m4a 由创建入口落定）。
- * 不发 media_output_destination（走默认临时链接 + 自家 TOS 转存，去字幕家族口径）、
- * client_token / callback_* / queue_id（无幂等与回调需求）。
- * <p>
- * 响应形状（官方 PDF「响应说明」+「异步任务结果」节逐字）：submit =
- * {success, task_id, request_id}（success=false 时带 error{code,type,message,param}）；
- * poll 顶层含 task_id / status（轮询至 completed 或 failed）与 result{audio_url, duration}——
- * result.audio_url 是 24h 有效 HTTPS 临时下载链接（官方「请及时下载保存」），processor 须
- * 立即转存自家 TOS。status 大小写与中间态枚举官方 PDF 未逐字冻结，按小写归一容错解析
- * （completed→succeeded、failed→failed、其余→processing）。
- * <p>
- * 错误分类复用 NewApiErrorClassifier（content &gt; quota &gt; provider_failed，§5 优先级，
- * §18.4 第一类：网关错误不透传英文）；poll 的网络超时 / 连接失败 / HTTP 429/5xx 抛错时以
- * cause 携带状态（{@link NewApiVideoClient.HttpStatusException} 复用），供 processor 按
- * isTransientPollError 语义判定瞬时重排。
- */
 @Component
 public class NewApiMediaKitExtractAudioClient extends NewApiMediaKitAsyncTaskClient {
 
@@ -86,15 +49,6 @@ public class NewApiMediaKitExtractAudioClient extends NewApiMediaKitAsyncTaskCli
         return new MediaExtractError(code, message);
     }
 
-    /**
-     * 提交音频提取异步任务（官方「响应说明」：成功返回 task_id）。
-     *
-     * @param token        per-job Bearer 凭证（任务冻结的用户 sk-）
-     * @param videoUrl     源视频公网对象存储地址
-     * @param outputFormat 任务冻结的输出格式（§18.2 五值枚举，出站映射官方 format 参数）
-     * @return 上游任务 id（processor 存 provider_task_id 后转轮询）
-     * @throws MediaExtractError 按错误分类抛错
-     */
     public String submit(String token, String videoUrl, String outputFormat) {
         if (outputFormat == null || !MediaExtractContract.SUPPORTED_OUTPUT_FORMATS.contains(outputFormat)) {
             // processor 已按契约枚举校验，此处兜底防御（retry 冻结快照可能带历史脏值）

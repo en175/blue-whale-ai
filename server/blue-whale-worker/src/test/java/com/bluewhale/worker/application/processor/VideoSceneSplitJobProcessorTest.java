@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto;
@@ -12,7 +13,6 @@ import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.VideoSceneSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSceneSplitError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient.SceneSplitTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient.SegmentObservation;
@@ -59,7 +59,7 @@ class VideoSceneSplitJobProcessorTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiMediaKitSegmentScenesClient segmentScenesClient;
     @Mock private TosVideoMediaRelay mediaRelay;
     @Mock private GenerationMessageProducer producer;
@@ -70,7 +70,6 @@ class VideoSceneSplitJobProcessorTest {
         Map<String, Object> input = new HashMap<>();
         input.put("source_asset_id", "555");
         input.put("granularity", granularity);
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -78,10 +77,10 @@ class VideoSceneSplitJobProcessorTest {
     void setUp() {
         processor = new VideoSceneSplitJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
-                credentialService, segmentScenesClient, mediaRelay, producer);
+                upstreamCredential, segmentScenesClient, mediaRelay, producer);
         when(finalizer.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
         // 段转存心跳续租默认放行（守卫命中）；中止路径由专项用例覆写
         when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
@@ -206,12 +205,14 @@ class VideoSceneSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("缺冻结凭证 → provider_credential_missing")
+    @DisplayName("上游凭证未配置 → provider_credential_missing")
     void missingCredential_credentialMissing() {
         Map<String, Object> input = input("standard");
-        input.remove("provider_credential");
         stubSubmitClaim(input);
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
@@ -915,7 +916,7 @@ class VideoSceneSplitJobProcessorTest {
     void tosMissing_failsWithoutPassthrough() {
         VideoSceneSplitJobProcessor noRelayProcessor = new VideoSceneSplitJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
-                credentialService, segmentScenesClient, null, producer);
+                upstreamCredential, segmentScenesClient, null, producer);
         stubPollClaim(input("standard"), 3);
         when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(

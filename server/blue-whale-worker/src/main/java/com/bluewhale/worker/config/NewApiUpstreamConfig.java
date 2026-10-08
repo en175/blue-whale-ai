@@ -55,23 +55,6 @@ public class NewApiUpstreamConfig {
         return new UpstreamBaseUrl(env.getProperty(ENV_BASE_URL));
     }
 
-    /**
-     * 上游统一 key：**项目级**（ADR-0114），现在配在**管理端**而不是环境变量里。
-     * <p>
-     * new-api 从「我们的用户体系」降级为「带一把统一 key 的上游供应商」后，调用它的凭证不再是
-     * 某个用户登录的产物，而是全项目共用的**一个配置项**。它原先走 {@code NEW_API_UPSTREAM_KEY}
-     * 环境变量，于是「换一把 key」等于「改三处部署 + 全部重启」；现在它是
-     * {@code system_settings} 的一行（管理端「系统设置 → 上游凭证」维护），改完在一轮定时内生效。
-     * <p>
-     * <b>启动期只守部署配置（{@code SYSTEM_SETTINGS_SECRET} = 解信封的主密钥），不守 key 本身。</b>
-     * key 是**数据**，可以在系统起来之后由运营补填，拿它拒启会让 worker 在「还没配」的窗口里
-     * crash-loop——而那个窗口的生产者正是管理端，不是这里。主密钥不一样：它是**部署配置**，
-     * 缺了连信封都打不开，且没有任何界面能补，属于 ADR-0084 决策 2「缺配置即启动失败」那一类。
-     * <p>
-     * 谁在用：{@code MaterialStatusPoller}。定时跟进发生在任何 job 之外（那些走
-     * {@code job.input.provider_credential} 的进程内冻结值），没有 job 可借、也没有会话可借，
-     * 只能取这把配置里的 key。
-     */
     @Bean
     public UpstreamCredential newApiUpstreamCredential(
             SystemSettingMapper systemSettingMapper, Environment env) {

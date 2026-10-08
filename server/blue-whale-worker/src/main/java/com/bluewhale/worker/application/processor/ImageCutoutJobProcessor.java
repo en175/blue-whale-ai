@@ -4,13 +4,13 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageCutoutDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageCutoutContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageCutoutError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitCutoutClient;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
@@ -33,41 +33,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * image_cutout（图片抠图）作业处理器（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md /
- * IKGXM2；以 ImageEraseJobProcessor 为模板，差异 = 场景三值 + 增强四键出站映射 +
- * 宽高优先取官方响应）。
- * <p>
- * 编排流程：claim → 解析冻结 input 业务键 → 解析源素材（公网 url 即 image_url）→
- * 取任务冻结的用户 sk- → 经网关调 MediaKit 同步 remove-image-background（场景映射见
- * NewApiMediaKitCutoutClient）→ 立即下载结果图（火山 URL 仅 24h 有效）→
- * TOS 公开读转存 → 建 Asset（type=image, source=generated）→ 终态 succeeded 收口
- * （publishImageEraseResult 同形态）。前端经 GET /api/jobs/:id 拿 Asset 按
- * input.target_node_id 回填抠图结果卡（抠图是发送时才建卡，node id 由前端生成传入；
- * worker 不消费画布拓扑）。
- * <p>
- * 场景出站映射（规格故事 29）：general 只发 scene（官方在 general 场景忽略描边与裁剪
- * 四参，出站不携带接口会忽略的字段）；human / product 四键恒随请求携带
- * （need_contour=false 时官方忽略 contour_color/contour_size，仍随请求携带）。
- * 固定参数：output_format=png（透明 png 进下游加工链）；无 tool_version（官方 PDF 无此
- * 参数，区别于擦除）；queue_id 不传。
- * <p>
- * 错误码口径（无 worker 级自动重试，用户在结果卡手动重试并沿用冻结 input）：
- * <ul>
- *   <li>invalid_input：业务键缺失 / 场景枚举非法 / 增强键与场景组合违反契约
- *       （创建入口 IKGXM1 复核是权威，worker 兜底防御）</li>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与 image/imageErase 同构）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：
- *       NewApiErrorClassifier §5 分类信号，保留既有码投影</li>
- *   <li>image_cutout_failed：其余一律归并兜底（调用失败 / 超时 / 供应商错误
- *       （网关 success=false 返 400 且不扣费）/ 源素材不可用 / 结果下载转存失败 /
- *       空产物（IKHGJI：结果图整幅 alpha 全 0，scene=human 检不出主体时的假成功）），
- *       上游可读原因随 message 透传</li>
- * </ul>
- * <p>
- * 进度投影与图片任务同构：终态事件（status_changed，成功 progress=100 / 失败 error 投影），
- * 同步接口秒级返回无中间进度带。
- */
 @Component
 public class ImageCutoutJobProcessor implements JobProcessor {
 
@@ -87,7 +52,7 @@ public class ImageCutoutJobProcessor implements JobProcessor {
     private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitCutoutClient mediaKitCutoutClient;
     private final TosMediaStorage tosService;
     private final String workerId;
@@ -98,7 +63,7 @@ public class ImageCutoutJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitCutoutClient mediaKitCutoutClient,
             TosMediaStorage tosService
     ) {
@@ -107,7 +72,7 @@ public class ImageCutoutJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.bySources(
                 ImageCutoutContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.mediaKitCutoutClient = mediaKitCutoutClient;
         this.tosService = tosService;
         this.workerId = "cutout-" + hostname() + "-" + ProcessHandle.current().pid();
@@ -227,20 +192,12 @@ public class ImageCutoutJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 取任务冻结的用户 sk-（与图片生成同构，修正四：明文直通）
-        Object credentialObj = input.get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "图片抠图任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[image_cutout] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "图片抠图任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[image_cutout] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

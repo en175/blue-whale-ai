@@ -48,7 +48,6 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
       sync: "video",
       estimated_duration_ms: 7_200_000,
       submit_attempt: 1,
-      provider_credential: "frozen-secret",
     };
     service = new AudioVideoMuxesService(prisma, {} as never, {} as never, {} as never);
     Reflect.defineMetadata("design:paramtypes", [AudioVideoMuxesService], AudioVideoMuxesController);

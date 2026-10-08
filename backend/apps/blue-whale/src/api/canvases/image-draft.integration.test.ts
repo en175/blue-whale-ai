@@ -16,6 +16,7 @@ import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
@@ -85,7 +86,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
       // 造素材校验门（IKFYHJ / ADR-0087）自 MaterialService 取仓库面、自 AssetService 解析本地素材绑定。
-      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: IdentityService, useValue: new IdentityService(prisma) },
     ] })(HarnessModule);

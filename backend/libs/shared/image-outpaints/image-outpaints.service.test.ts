@@ -349,27 +349,3 @@ describe("ImageOutpaintsService.create：落任务与免费口径", () => {
     expect(Object.keys(data)).not.toContain("provider");
   });
 });
-
-describe("ImageOutpaintsService.create：请求方凭证冻结（断链防护）", () => {
-  // 断链背景：worker（ImageOutpaintJobProcessor，IKGOQW）只从 input.provider_credential 取请求方 sk-，
-  // 创建链路不冻结则必落 provider_credential_missing（先例：图片生成/高清放大）。
-  it("freezes the requester sk- token into job input (provider_credential)", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_BODY, {
-      providerCredential: "sk-live-token",
-    });
-    expect(result.code).toBe(200);
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: { ...VALID_BODY, provider_credential: "sk-live-token" },
-      }),
-    });
-  });
-
-  it("omits provider_credential when the requester carries no sk- token", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_BODY);
-    expect(result.code).toBe(200);
-    expect(create.mock.calls[0][0].data.input).toEqual(VALID_BODY);
-  });
-});

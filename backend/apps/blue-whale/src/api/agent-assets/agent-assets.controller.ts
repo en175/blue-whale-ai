@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { DomainError, RESOURCE_NOT_FOUND_CODE, ok } from "@lib/contracts";
 import { assetDurationSeconds } from "@lib/shared/persistence/index.js";
@@ -64,13 +64,12 @@ export class AgentAssetsController {
   })
   async uploadsDedup(
     @CurrentUser() user: AuthenticatedUser,
-    @Headers("authorization") authorization: string | undefined,
     @Body() body: DedupAssetInput,
   ) {
     return handleDedupAsset(user.userId, body, {
       projects: this.projects,
       uploads: this.assets,
-      materialGate: this.material.uploadMaterialGate(authorization),
+      materialGate: this.material.uploadMaterialGate(),
       materialStatus: this.material.materialStatusReader(),
     });
   }
@@ -81,14 +80,13 @@ export class AgentAssetsController {
   })
   async uploadsComplete(
     @CurrentUser() user: AuthenticatedUser,
-    @Headers("authorization") authorization: string | undefined,
     @Body() body: CompleteAssetInput,
   ) {
     return handleCompleteAsset(user.userId, body, {
       projects: this.projects,
       uploads: this.assets,
       storage: this.storage.uploads,
-      materialGate: this.material.uploadMaterialGate(authorization),
+      materialGate: this.material.uploadMaterialGate(),
       materialStatus: this.material.materialStatusReader(),
     });
   }

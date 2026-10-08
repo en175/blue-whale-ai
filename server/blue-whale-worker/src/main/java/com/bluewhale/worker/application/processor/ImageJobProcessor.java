@@ -4,13 +4,13 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient.GeneratedImage;
@@ -35,27 +35,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * 图片作业处理器（generation-worker.ts:499-685 image 分支逐字移植）。
- * <p>
- * 编排流程：claim → 校验输入 → 查能力 → 校验参考图 → 取明文凭证 → 渠道映射 →
- * 调 provider（支持批量循环）→ 转存 → createAsset 循环 → completeJob。
- * <p>
- * 错误码映射（附录 A image + generation-worker.ts）：
- * <ul>
- *   <li>unsupported_type:288 / invalid_input:303 / model_unavailable:338</li>
- *   <li>invalid_reference:349/362 / provider_credential_missing:502</li>
- *   <li>invalid_reference_type:537/550 / unsupported_input:558 / no_result:600</li>
- *   <li>catch-all:687-692 / provider 分类（content > quota > provider_failed）</li>
- * </ul>
- * <p>
- * 瞬态重试（generation-worker.ts:705-725）：
- * TRANSIENT={provider_failed} 且 retry_count&lt;3 → requeueImageJobForRetry，
- * 退避 30/60/120s 封顶 300s（caller 计算 :84-87），return WITHOUT ack-fail。
- * <p>
- * 修正三：ARK provider（ark-image-provider.ts）不移植——new-api 网关是唯一 provider。
- * 修正一：cost_reservations 结算不在实现范围（settle-ops.ts:228 整块省略）。
- */
 @Component
 public class ImageJobProcessor implements JobProcessor {
 
@@ -71,7 +50,7 @@ public class ImageJobProcessor implements JobProcessor {
     private final JobStateMachineService stateMachine;
     private final JobFinalizer finalizer;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiImageClient imageClient;
     private final GenerationModelCapabilityMapper capabilityMapper;
     private final TosMediaStorage tosService;
@@ -82,7 +61,7 @@ public class ImageJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiImageClient imageClient,
             GenerationModelCapabilityMapper capabilityMapper,
             TosMediaStorage tosService
@@ -90,7 +69,7 @@ public class ImageJobProcessor implements JobProcessor {
         this.stateMachine = stateMachine;
         this.finalizer = finalizer;
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.imageClient = imageClient;
         this.capabilityMapper = capabilityMapper;
         this.tosService = tosService;
@@ -272,20 +251,12 @@ public class ImageJobProcessor implements JobProcessor {
             }
         }
 
-        // 5. 取明文凭证（修正四：去密，generation-worker.ts:500-507）
-        Object credentialObj = input.get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "图片任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[image] 凭证无效 jobId={}: {}", job.id(), e.getMessage(), e);
-            failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "图片任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[image] 生成服务凭证未配置 jobId={}: {}", job.id(), e.getMessage());
+            failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

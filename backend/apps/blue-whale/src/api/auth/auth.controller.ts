@@ -137,30 +137,6 @@ export class AuthController {
     );
   }
 
-  /**
-   * 会话签发：**只记身份，不记上游凭证**。
-   *
-   * <h2>这里存过什么</h2>
-   *
-   * 最早存用户自己的 `sk-`（一用户一把）。new-api 改成项目级统一 key 之后，这里变成
-   * **给每个用户存同一把 key**：既是一份 7 天不过期的密钥副本，也是「管理端改了 key
-   * 对已登录用户不生效」的来源——会话是登录那一刻的快照。现在会话不再带凭证，
-   * 上游 key 由 AuthGuard 按**当前配置**回注（`SystemSettingsService.requireUpstreamKey()`），
-   * 轮换对全部在线会话立即生效。
-   *
-   * <p>⚠️ **登录不再依赖上游配置**。以前缺 key 时这里抛 503，于是「还没配 key 的部署
-   * 谁也登不进去」——**包括要进去配它的管理员**，成死锁。凭证缺失的 fail-closed 落在
-   * 真正打上游的地方（AuthGuard 不注入 → 下游 `parseBearerToken` 拿到 null 即 401，
-   * 直接调用点抛 `UpstreamCredentialMissingError`），不在「进门」这一步。
-   *
-   * <p>⚠️ **过渡期的已知后果**：new-api 的 per-user 数据（消费流水、充值记录）
-   * 返回的是**项目维度**的数。这不是 bug，是「上游不再认识我们的用户」的必然结果，
-   * 也正是必须建自己计费体系的原因。计费域接过来之后，这些接口改走 billing。
-   *
-   * <p>IKJAZL：**签 JWT → 存进会话存储**。两道校验是刻意分工——**JWT 自证**
-   * （没被篡改、没过期），**Redis 记注销**（登出、改密踢设备、冻结）。只剩 JWT 的话，
-   * 登出之后它还能一路用到过期；只剩 Redis 的话，每个请求都得查一次库。
-   */
   private async establishSession(result: LocalLoginResult): Promise<string> {
     if (result.userId == null || !result.username) {
       throw new NewApiError("账户服务响应异常", 502, "invalid_identity");

@@ -20,7 +20,6 @@ import type { FinalizeSourceJob } from "@lib/shared/persistence/index.js";
 
 const DEADLINE_PAST = BigInt(Date.now() - 1_000);
 
-/** 样片冻结输入（含参考视频时长与全部样片/画布/凭证专属键）。 */
 const SAMPLE_INPUT = {
   provider_credential: "sealed-sample-cred",
   prompt: "人物走过街角",
@@ -186,8 +185,6 @@ describe("deriveSampleRegenerateBody（IKIZQF）", () => {
       sample_mode: true,
     });
     expect(body.references).toEqual(SAMPLE_INPUT.references);
-    // 旧截止 / 旧 Draft ID / 样片期凭证 / 画布快照 / 能力行冻结值一概不进新请求：
-    // 截止由新任务自己的上游 created_at 重算，凭证用本次请求的新凭证，limits/像素现查现冻。
     expect(body.finalize_deadline_at).toBeUndefined();
     expect(body.finalize_deadline_ms).toBeUndefined();
     expect(body.provider_task_id).toBeUndefined();
@@ -220,7 +217,6 @@ describe("handleRegenerateSampleQuote（IKIZQF）", () => {
 
     expect(res.code).toBe(200);
     expect(res.data).toEqual(quotedViewOf(sampleJob(), S25_CAPABILITY as never, result));
-    // 报价输入是派生后的创建形态：无样片期凭证，480p（不是成片的 1080p）。
     const call = quote.mock.calls[0]![0];
     expect(call.input.resolution).toBe("480p");
     expect(call.input.provider_credential).toBeUndefined();

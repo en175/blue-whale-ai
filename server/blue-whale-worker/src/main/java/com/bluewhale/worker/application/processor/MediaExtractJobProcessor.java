@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
@@ -13,7 +14,6 @@ import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.MediaExtractError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient;
@@ -32,44 +32,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * media_extract（音视频分离）作业处理器——火山 MediaKit 异步链（迁移契约 §18 / IKH28W）。
- * <p>
- * 执行面从本地 ffmpeg 单步同步流（IKARDY 时代）整体切换为火山异步任务，编排复用视频
- * 轮询骨架（每步 = 一次 MQ 消费，去字幕 {@link VideoSubtitleEraseJobProcessor} 同构）：
- * <ol>
- *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
- *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（带 output_format，
- *       返 task_id）→ markProviderSubmitted（存 provider_task_id + 释放租约 + next+5s）→
- *       scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
- *       processing 共享 720 轮询预算，超限同归 1044）；processing →
- *       续排（超限 1044）；failed → 分类终态（§18.4）；completed → **立即下载转存自家 TOS
- *       （火山 audio_url 仅 24h 有效）** → 发布音频 Asset（type=audio）→ 终态 succeeded</li>
- * </ol>
- * 输入上限随火山口径（官方 PDF：建议 ≤10GB、最高 4K），旧 200MiB 本地判定
- * （TosMediaStorage.download 内）仅存活于 ffmpeg 链路，本路径不经过。
- * <b>本地 ffmpeg 链路代码零改动保留</b>（FfmpegExtractor 及其测试、Dockerfile ffmpeg
- * 安装、backend ffmpeg-static，ADR-0103 双执行路径并存），本类不再调用。
- * <p>
- * 错误码口径（§18.4 三类映射，无 worker 级自动重试，用户手动重试沿用冻结 input）：
- * <ul>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与视频/去字幕同构；凭证冻结在
- *       创建入口 IKH28V）</li>
- *   <li>invalid_input：业务键缺失 / output_format 枚举外（创建入口复核是权威，worker
- *       兜底防御）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
- *       §5 分类信号（网关错误与火山 failed 双路），保留既有码投影</li>
- *   <li>media_extract_provider_failed（1044）：其余一律归并兜底——网关 provider_failed /
- *       提交超时 / 轮询超时 / 火山任务 failed（含无音轨，契约定稿不单独识别）/
- *       源素材不可用 / 结果下载转存失败（超时也归并是家族口径：宁可不重试也不双跑），
- *       上游可读原因随 message 透传前端投影</li>
- * </ul>
- * <p>
- * 进度口径对齐去字幕：markProviderSubmitted 落 progress=1（SQL 侧）、轮询 rescheduleProviderPoll
- * 保持不倒退、publishResultGuard 终态 progress=100；旧 ffmpeg 链路的
- * updateMediaExtractProgress 心跳（下载带 21-90 映射）不再使用。
- */
 @Component
 public class MediaExtractJobProcessor implements JobProcessor {
 
@@ -96,7 +58,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
     private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitExtractAudioClient extractAudioClient;
     private final TosAudioMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
@@ -108,7 +70,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitExtractAudioClient extractAudioClient,
             TosAudioMediaRelay mediaRelay,
             @Qualifier("mediaExtractMessageProducer")
@@ -120,7 +82,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.typeOnly(
                 MediaExtractContract.TAG, LEASE_SECONDS, jobMapper, jobMapper::claimMediaExtractCas);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.extractAudioClient = extractAudioClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
@@ -183,20 +145,12 @@ public class MediaExtractJobProcessor implements JobProcessor {
      * 分相主逻辑（去字幕 runStep 同构）：凭证 → submit 相 / poll 相。
      */
     private void runStep(ClaimedJob claim) {
-        // 取明文凭证（与视频/去字幕同构，修正四：明文直通；冻结在创建入口 IKH28V）
-        Object credentialObj = claim.input().get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failMediaExtract(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "音视频分离任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[media_extract] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failMediaExtract(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "音视频分离任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[media_extract] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failMediaExtract(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

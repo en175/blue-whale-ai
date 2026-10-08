@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailAudioTrimDto;
 import com.bluewhale.worker.domain.dto.PublishAudioTrimDto;
@@ -13,7 +14,6 @@ import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.AudioTrimContract;
 import com.bluewhale.worker.domain.error.AudioTrimError;
 import com.bluewhale.worker.domain.error.GenerationError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitTrimAudioClient;
@@ -32,43 +32,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * audio_trim（音频截取，画布音频卡「截取」，火山 MediaKit trim-audio）作业处理器
- * （IKHB6S，父单 IKHB08；编排一对一抄 {@link MediaExtractJobProcessor}——火山异步链
- * 复用视频轮询骨架，每步 = 一次 MQ 消费，fencing / 租约 / claim-by-id 全部走视频件）：
- * <ol>
- *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
- *   <li>providerTaskId==null → 解析冻结 input + 源音频素材 → 网关提交（audio_url +
- *       start_time / end_time 贴边省略可选 + format，返 task_id）→ markProviderSubmitted
- *       （存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
- *       processing 共享 720 轮询预算，超限同归 1048）；processing →
- *       续排（超限 1048）；failed → 分类终态（§5）；completed → **立即下载转存自家 TOS
- *       （火山 audio_url 仅 24h 有效）** → 发布音频 Asset（type=audio）→ 终态 succeeded</li>
- * </ol>
- * 下载与转存复用 {@link TosAudioMediaRelay}（音视频分离同套：fetch → audio/ mime 校验 →
- * TOS 公开读 → md5）；结果 URL 24h 失效故**强依赖 TOS，不降级直存**（家族口径）。
- * <p>
- * 产物时长：duration_ms 取官方 result.duration 秒换算（ADR-0111「产物时长以火山返回
- * duration 写回服务端权威时长」）。**不做源时长回落**——media_extract 的回落口径建立在
- * 「整轨提取 ≈ 源时长」之上，截取片段 ≠ 源全长，回落会把全长写成片段时长，语义不成立；
- * 官方值缺失即 null（assets.duration_ms 可空）。
- * <p>
- * 错误码口径（数值 1048，无 worker 级自动重试，用户手动重试沿用冻结 input）：
- * <ul>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与视频/去字幕同构；凭证冻结在
- *       创建入口）</li>
- *   <li>invalid_input：业务键缺失 / output_format 枚举外 / start_time / end_time 非数字
- *       形态（创建入口复核是权威，worker 兜底防御）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
- *       §5 分类信号（网关错误与火山 failed 双路），保留既有码投影</li>
- *   <li>audio_trim_failed（1048）：其余一律归并兜底——网关 provider_failed / 提交超时 /
- *       轮询超时 / 火山任务 failed（**含 end_time 超真实片尾、start_time ≥ end_time 等
- *       供应商侧官方约束拒绝**，契约口径不单独识别）/ 源素材不可用 / 结果下载转存失败
- *       （超时也归并是家族口径：宁可不重试也不双跑），上游可读原因随 message 透传
- *       前端投影</li>
- * </ul>
- */
 @Component
 public class AudioTrimJobProcessor implements JobProcessor {
 
@@ -95,7 +58,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitTrimAudioClient trimAudioClient;
     private final TosAudioMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
@@ -107,7 +70,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitTrimAudioClient trimAudioClient,
             TosAudioMediaRelay mediaRelay,
             @Qualifier("audioTrimMessageProducer")
@@ -118,7 +81,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
         this.claimService = claimService;
         this.claimSpec = ClaimSpec.typeOnly(AudioTrimContract.TAG, LEASE_SECONDS, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.trimAudioClient = trimAudioClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
@@ -180,20 +143,12 @@ public class AudioTrimJobProcessor implements JobProcessor {
      * 分相主逻辑（家族 runStep 同构）：凭证 → submit 相 / poll 相。
      */
     private void runStep(ClaimedJob claim) {
-        // 取明文凭证（基础设施键；与视频/去字幕同构，冻结在创建入口）
-        Object credentialObj = claim.input().get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failAudioTrim(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "音频截取任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[audio_trim] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failAudioTrim(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "音频截取任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[audio_trim] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failAudioTrim(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

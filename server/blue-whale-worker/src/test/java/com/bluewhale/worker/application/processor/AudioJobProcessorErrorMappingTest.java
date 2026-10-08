@@ -3,11 +3,11 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.error.AudioProviderError;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.audio.NewApiAudioClient;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -35,7 +35,7 @@ class AudioJobProcessorErrorMappingTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiAudioClient audioClient;
     @Mock private TosMediaStorage tosService;
 
@@ -43,20 +43,22 @@ class AudioJobProcessorErrorMappingTest {
 
     @BeforeEach
     void setUp() {
-        processor = new AudioJobProcessor(stateMachine, finalizer, assetSource, credentialService, audioClient, tosService);
+        processor = new AudioJobProcessor(stateMachine, finalizer, assetSource, upstreamCredential, audioClient, tosService);
     }
 
     @Test
-    @DisplayName("缺少 provider_credential → provider_credential_missing")
+    @DisplayName("上游凭证未配置 → provider_credential_missing")
     void missingCredential() {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "hello",
                 "model_id", "seed-audio-1.0"
-                // 无 provider_credential
         ));
         when(stateMachine.claimAudioJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         verify(finalizer).failJob(eq("100"),
@@ -68,12 +70,10 @@ class AudioJobProcessorErrorMappingTest {
     @DisplayName("缺少 prompt → invalid_input")
     void missingPrompt() {
         ClaimedJobDto job = claimWithInput(Map.of(
-                "model_id", "seed-audio-1.0",
-                "provider_credential", "v1.aaa.bbb.ccc"
+                "model_id", "seed-audio-1.0"
         ));
         when(stateMachine.claimAudioJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
-        // 不 stub credentialService.open：prompt 检查在凭证解封前，不会到达
 
         processor.handle("100");
 
@@ -88,12 +88,10 @@ class AudioJobProcessorErrorMappingTest {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "hello",
                 "model_id", "seed-audio-1.0",
-                "provider_credential", "v1.aaa.bbb.ccc",
                 "reference_asset_ids", java.util.List.of("100")
         ));
         when(stateMachine.claimAudioJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
-        // 不 stub credentialService.open：旧参考字段检查在凭证解封前，不会到达
 
         processor.handle("100");
 
@@ -107,12 +105,11 @@ class AudioJobProcessorErrorMappingTest {
     void providerTimeout() {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "hello",
-                "model_id", "seed-audio-1.0",
-                "provider_credential", "v1.aaa.bbb.ccc"
+                "model_id", "seed-audio-1.0"
         ));
         when(stateMachine.claimAudioJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
-        when(credentialService.open("v1.aaa.bbb.ccc")).thenReturn("sk-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-token");
         when(audioClient.generate(anyString(), anyString(), anyString(), any()))
                 .thenThrow(new AudioProviderError(
                         GenerationError.ERROR_PROVIDER_TIMEOUT, "new-api 音频生成超时"));
@@ -130,12 +127,11 @@ class AudioJobProcessorErrorMappingTest {
     void quotaExhausted() {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "hello",
-                "model_id", "seed-audio-1.0",
-                "provider_credential", "v1.aaa.bbb.ccc"
+                "model_id", "seed-audio-1.0"
         ));
         when(stateMachine.claimAudioJobById(eq("100"), anyString()))
                 .thenReturn(Optional.of(job));
-        when(credentialService.open("v1.aaa.bbb.ccc")).thenReturn("sk-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-token");
         when(audioClient.generate(anyString(), anyString(), anyString(), any()))
                 .thenThrow(new AudioProviderError(
                         GenerationError.ERROR_QUOTA_EXHAUSTED, "余额不足"));
@@ -165,8 +161,7 @@ class AudioJobProcessorErrorMappingTest {
     void cancelRequested() {
         ClaimedJobDto job = new ClaimedJobDto(
                 "100", "42", "9", "audio",
-                Map.of("prompt", "hello", "model_id", "m",
-                        "provider_credential", "v1.aaa.bbb.ccc"),
+                Map.of("prompt", "hello", "model_id", "m"),
                 0,
                 true, // cancelRequested = true
                 5L

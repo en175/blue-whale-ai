@@ -5,13 +5,13 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoFrameInterpolationDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoFrameInterpolationError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitInterpolateVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitInterpolateVideoClient.InterpolateVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -57,7 +57,7 @@ class VideoFrameInterpolationJobProcessorTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiMediaKitInterpolateVideoClient interpolateVideoClient;
     @Mock private TosVideoMediaRelay mediaRelay;
     @Mock private GenerationMessageProducer producer;
@@ -69,7 +69,6 @@ class VideoFrameInterpolationJobProcessorTest {
         input.put("source_asset_id", "555");
         input.put("target_node_id", "node-abc");
         input.put("fps", fps);
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -77,10 +76,10 @@ class VideoFrameInterpolationJobProcessorTest {
     void setUp() {
         processor = new VideoFrameInterpolationJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
-                credentialService, interpolateVideoClient, mediaRelay, producer);
+                upstreamCredential, interpolateVideoClient, mediaRelay, producer);
         when(finalizer.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
@@ -266,12 +265,14 @@ class VideoFrameInterpolationJobProcessorTest {
     }
 
     @Test
-    @DisplayName("缺冻结凭证 → provider_credential_missing")
+    @DisplayName("上游凭证未配置 → provider_credential_missing")
     void missingCredential_credentialMissing() {
         Map<String, Object> input = input(60);
-        input.remove("provider_credential");
         stubSubmitClaim(input);
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
@@ -296,38 +297,6 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(producer).enqueue("100", VideoFrameInterpolationJobProcessor.VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-    }
-
-    @Test
-    @DisplayName("凭证隔离：两个 job 各自用自己冻结的 sk- 调网关（不串号）")
-    void credentialsAreIsolatedPerJob() {
-        // job 100：冻结 sk-frozen-token
-        stubSubmitClaim(input(60));
-        stubSourceAsset(1920, 1080);
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
-        when(interpolateVideoClient.submit("sk-frozen-token", "https://example.com/src.mp4", 60))
-                .thenReturn("amk-task-1");
-        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
-                .thenReturn(true);
-        processor.handle("100");
-
-        // job 200：另一份冻结凭证
-        Map<String, Object> input2 = input(30);
-        input2.put("provider_credential", "sk-other-token");
-        when(credentialService.open("sk-other-token")).thenReturn("sk-other-token");
-        when(claimService.claim(any(ClaimSpec.class), eq("200"), anyString()))
-                .thenReturn(Optional.of(new ClaimedJob(
-                        "200", "42", "9", input2, "video_frame_interpolation", "amk-task-2", false,
-                        "worker-1", 6L, 2, 0, null, null, null)));
-        when(interpolateVideoClient.poll("sk-other-token", "amk-task-2"))
-                .thenReturn(new InterpolateVideoTaskObservation("processing", null, null, null, null,
-                        null, null));
-        when(stateMachine.rescheduleProviderPoll(eq("200"), eq("worker-1"), eq(6L), anyInt()))
-                .thenReturn(true);
-        processor.handle("200");
-
-        verify(interpolateVideoClient, never()).poll(eq("sk-frozen-token"), anyString());
-        verify(interpolateVideoClient).poll("sk-other-token", "amk-task-2");
     }
 
     @Test
@@ -975,7 +944,7 @@ class VideoFrameInterpolationJobProcessorTest {
     void tosMissing_failsWithoutPassthrough() {
         VideoFrameInterpolationJobProcessor noRelayProcessor = new VideoFrameInterpolationJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
-                credentialService, interpolateVideoClient, null, producer);
+                upstreamCredential, interpolateVideoClient, null, producer);
         stubPollClaim(input(60), 3);
         when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new InterpolateVideoTaskObservation("succeeded",

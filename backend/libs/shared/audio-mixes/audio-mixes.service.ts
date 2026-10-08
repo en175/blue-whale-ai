@@ -19,7 +19,6 @@ import type { CanvasRecoveryPlan } from "@lib/shared/persistence/generation-canv
 import {
   AUDIO_MIX_JOB_TYPE,
   AUDIO_MIX_SOURCE,
-  GENERATION_ERROR_DETAIL_HTTP_STATUS,
   PARAM_MISSING_CODE,
   RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
@@ -47,7 +46,7 @@ export class AudioMixesService {
     userId: string,
     projectId: string,
     body: unknown,
-    internal: { providerCredential?: string; idempotencyKey?: string } = {},
+    internal: { idempotencyKey?: string } = {},
   ) {
     const parsed = audioMixCreateSchema.safeParse(body);
     if (!parsed.success) throw new DomainError(PARAM_MISSING_CODE, parsed.error.issues[0]?.message ?? "音频混合参数非法");
@@ -196,7 +195,6 @@ export class AudioMixesService {
         inputs: frozenInputs,
         output_format: parsed.data.output_format,
         estimated_duration_ms: estimatedDurationMs,
-        ...(internal.providerCredential ? { provider_credential: internal.providerCredential } : {}),
       },
       next_action_at: new Date(Date.now() - 60_000),
       execution_deadline_at: audioMixDeadline(estimatedDurationMs),
@@ -257,7 +255,6 @@ export class AudioMixesService {
     projectId: string,
     jobId: string,
     idempotencyKey: string,
-    providerCredential?: string,
     canvasBindingBody?: unknown,
   ) {
     if (!/^[!-~]{1,128}$/.test(idempotencyKey)) {
@@ -343,11 +340,6 @@ export class AudioMixesService {
         if (job.status !== "failed") throw new DomainError(409, "只有失败的音频混合任务可重试");
         const frozen = job.input as { estimated_duration_ms?: unknown } | null;
         const duration = typeof frozen?.estimated_duration_ms === "number" ? frozen.estimated_duration_ms : null;
-        const previousError = job.error;
-        const unauthorized = isUpstreamUnauthorized(previousError);
-        const refreshedInput = unauthorized && providerCredential && frozen
-          ? { ...frozen, provider_credential: providerCredential } as Prisma.InputJsonValue
-          : undefined;
         const updated = await tx.generation_jobs.updateMany({
           where: { id: jid, status: "failed", fencing_token: job.fencing_token },
           data: {
@@ -356,7 +348,6 @@ export class AudioMixesService {
             next_action_at: new Date(Date.now() - 60_000),
             execution_deadline_at: audioMixDeadline(duration),
             lease_owner: null, lease_expires_at: null,
-            ...(refreshedInput ? { input: refreshedInput } : {}),
             fencing_token: { increment: 1 }, retry_count: { increment: 1 }, version: { increment: 1 },
           },
         });
@@ -456,17 +447,4 @@ async function verifyDedicatedMixRetryTarget(
     422, "专属重试目标与原受理关联不符，不能改绑同 jobId 的承接目标",
     RECOVERY_REASONS.documentMismatch,
   );
-}
-
-/** 上游 401 判定（IKIHGQ）：error.details 的结构化 HTTP 状态（worker 写入）存在即以它为准；
- *  仅旧任务数据（无数值状态）回退 message 文案正则——文案措辞变化不影响换凭证重试。 */
-function isUpstreamUnauthorized(previousError: unknown): boolean {
-  if (!previousError || typeof previousError !== "object" || Array.isArray(previousError)) return false;
-  const record = previousError as Record<string, unknown>;
-  const details = record.details;
-  if (details && typeof details === "object" && !Array.isArray(details)) {
-    const status = (details as Record<string, unknown>)[GENERATION_ERROR_DETAIL_HTTP_STATUS];
-    if (typeof status === "number") return status === 401;
-  }
-  return typeof record.message === "string" && /\bHTTP 401\b/.test(record.message);
 }

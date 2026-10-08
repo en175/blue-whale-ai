@@ -27,6 +27,7 @@ import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueAudioMixJob: vi.fn(async () => {}),
@@ -136,7 +137,7 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
         deleteMultiObjects: async (keys: string[]) => { keys.forEach((key) => uploadedObjects.delete(key)); },
       } } as unknown as AssetStorageService;
       const assets = new AssetService(prisma, storage);
-      const material = new MaterialService(prisma);
+      const material = new MaterialService(prisma, new SystemSettingsService(prisma));
       const mixes = new AudioMixesService(prisma, projects, assets, storage);
       Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
       Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);

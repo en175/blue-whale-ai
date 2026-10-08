@@ -5,12 +5,12 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.VideoMattingContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoMattingDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto;
 import com.bluewhale.worker.domain.error.GenerationError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMatteVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMatteVideoClient.MatteVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
@@ -83,7 +83,7 @@ class VideoMattingTransferCleanupTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiMediaKitMatteVideoClient matteVideoClient;
     @Mock private GenerationMessageProducer producer;
 
@@ -106,7 +106,6 @@ class VideoMattingTransferCleanupTest {
         input.put("target_node_id", "node-abc");
         input.put("mode", "portrait");
         input.put("format", "WEBM");
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -116,8 +115,8 @@ class VideoMattingTransferCleanupTest {
         relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
         processor = new VideoMattingJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
-                credentialService, matteVideoClient, relay, producer);
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+                upstreamCredential, matteVideoClient, relay, producer);
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
         when(finalizer.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))

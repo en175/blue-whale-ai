@@ -4,13 +4,13 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageOutpaintDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageOutpaintError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitOutpaintClient;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
@@ -33,31 +33,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * image_outpaint（智能扩图）作业处理器（IKGOQW，以 ImageEnhanceJobProcessor 为模板）。
- * <p>
- * 编排流程：claim → 解析冻结 input（source_asset_id + 四个 expand 比例）→
- * 解析源素材（公网 url 即 image_url）→ 取任务冻结的用户 sk- →
- * 经网关调 MediaKit 同步 expand-image-canvas → 立即下载结果图（火山 URL 仅 24h 有效）→
- * TOS 公开读转存 → 建 Asset（type=image, source=generated）→ 终态 succeeded 收口。
- * 前端经 GET /api/jobs/:id 拿 Asset 按 input.target_node_id 回填扩图结果卡
- * （源卡不动；worker 不消费画布拓扑）。
- * <p>
- * 错误码口径（无 worker 级自动重试，用户在结果卡手动重试并沿用冻结 input）：
- * <ul>
- *   <li>invalid_input：source_asset_id 缺失 / 四个 expand 比例缺失或超 [0, 0.4] 值域
- *       （创建入口复核是权威，worker 兜底防御）</li>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与 image/audio 同构）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：
- *       NewApiErrorClassifier §5 分类信号，保留既有码投影</li>
- *   <li>image_outpaint_failed：其余一律归并兜底（调用失败 / 超时 / 供应商错误
- *       （网关 success=false 返 400 且不扣费）/ 源素材不可用 / 结果下载转存失败），
- *       上游可读原因随 message 透传</li>
- * </ul>
- * <p>
- * 进度投影与图片任务同构：终态事件（status_changed，成功 progress=100 / 失败 error 投影），
- * 同步接口秒级返回无中间进度带。
- */
 @Component
 public class ImageOutpaintJobProcessor implements JobProcessor {
 
@@ -77,7 +52,7 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
     private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitOutpaintClient mediaKitClient;
     private final TosMediaStorage tosService;
     private final String workerId;
@@ -88,7 +63,7 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitOutpaintClient mediaKitClient,
             TosMediaStorage tosService
     ) {
@@ -97,7 +72,7 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.bySources(
                 ImageOutpaintContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.mediaKitClient = mediaKitClient;
         this.tosService = tosService;
         this.workerId = "outpaint-" + hostname() + "-" + ProcessHandle.current().pid();
@@ -153,7 +128,6 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
     private void processClaimedJob(ClaimedJob claim) {
         Map<String, Object> input = claim.input();
 
-        // 1. 解析冻结 input（六键之上加 provider_credential；创建入口复核是权威，此处为 worker 兜底防御）
         //    target_node_id 是前端回填定位键，worker 不消费，不解析。
         String sourceAssetId = parseSourceAssetId(input);
         if (sourceAssetId == null) {
@@ -181,20 +155,12 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 取任务冻结的用户 sk-（与图片生成同构，明文直通）
-        Object credentialObj = input.get(ImageOutpaintContract.INPUT_KEY_PROVIDER_CREDENTIAL);
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "智能扩图任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[image_outpaint] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "智能扩图任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[image_outpaint] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

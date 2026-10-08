@@ -5,13 +5,13 @@ import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.MediaExtractError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient.MuxAudioVideoTaskObservation;
@@ -61,7 +61,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
     private final JobClaimService claimService;
     private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
-    private final GenerationCredentialService credentials;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitMuxAudioVideoClient gateway;
     private final TosVideoMediaRelay relay;
     private final GenerationMessageProducer producer;
@@ -75,7 +75,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
                                      JobClaimService claimService,
                                      GenerationJobMapper jobMapper,
                                      JobFinalizer finalizer,
-                                     GenerationCredentialService credentials,
+                                     UpstreamCredential upstreamCredential,
                                      NewApiMediaKitMuxAudioVideoClient gateway,
                                      TosVideoMediaRelay relay,
                                      @Qualifier("audioVideoMuxMessageProducer") GenerationMessageProducer producer) {
@@ -84,7 +84,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.bySources(
                 AudioVideoMuxContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
-        this.credentials = credentials;
+        this.upstreamCredential = upstreamCredential;
         this.gateway = gateway;
         this.relay = relay;
         this.producer = producer;
@@ -128,16 +128,12 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
 
     private void runStep(ClaimedJob job) {
         if (cancelIfRequested(job)) return;
-        Object credential = job.input().get("provider_credential");
-        if (!(credential instanceof String frozen) || frozen.isBlank()) {
-            fail(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "音视频合成任务缺少供应商凭证");
-            return;
-        }
         String token;
         try {
-            token = credentials.open(frozen);
-        } catch (Exception error) {
-            fail(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "音视频合成任务凭证无效");
+            token = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[audio_video_mux] 生成服务凭证未配置 jobId={}: {}", job.id(), e.getMessage());
+            fail(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
         if (job.providerTaskId() == null) submit(job, token);

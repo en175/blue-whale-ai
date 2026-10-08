@@ -3,13 +3,13 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.error.AudioProviderError;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.audio.NewApiAudioClient;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,23 +22,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/**
- * 音频作业处理器（generation-worker.ts:367-446 processClaimedJob audio 分支逐字移植）。
- * <p>
- * 编排流程：claim → 取明文凭证 → 校验模型 → 解析参考素材 → 调 TTS → 转存 → createAsset → completeJob。
- * <p>
- * 错误码映射（附录 A audio + generation-worker.ts:370-395）：
- * <ul>
- *   <li>provider_credential_missing：缺少密封凭证 (:370)</li>
- *   <li>model_unavailable：模型不受支持 (:381)</li>
- *   <li>reference_asset_unavailable：参考素材不可用 (:395)</li>
- *   <li>provider_timeout / no_result / quota_exhausted / content_rejected / provider_failed：
- *       provider 层分类（new-api-audio-provider.ts:99-163）</li>
- * </ul>
- * <p>
- * 转存路径：data-direct（base64 audio → PUT），mime 恒 audio/mpeg（契约 §8）。
- * 降级模式：TOS 未配置 → 硬失败「音频转存存储未配置」（generation-worker.ts:749-751）。
- */
 @Component
 public class AudioJobProcessor implements JobProcessor {
 
@@ -47,7 +30,7 @@ public class AudioJobProcessor implements JobProcessor {
     private final JobStateMachineService stateMachine;
     private final JobFinalizer finalizer;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiAudioClient audioClient;
     private final TosMediaStorage tosService;
     private final String workerId;
@@ -56,14 +39,14 @@ public class AudioJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiAudioClient audioClient,
             TosMediaStorage tosService
     ) {
         this.stateMachine = stateMachine;
         this.finalizer = finalizer;
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.audioClient = audioClient;
         this.tosService = tosService;
         // workerId = audio-{hostname}-{pid}（与 extract 同构）
@@ -136,20 +119,12 @@ public class AudioJobProcessor implements JobProcessor {
             return;
         }
 
-        // 2. 取明文凭证（修正四：去密，generation-worker.ts:368-376）
-        Object credentialObj = input.get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "音频任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[audio] 凭证无效 jobId={}: {}", job.id(), e.getMessage(), e);
-            failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "音频任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[audio] 生成服务凭证未配置 jobId={}: {}", job.id(), e.getMessage());
+            failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

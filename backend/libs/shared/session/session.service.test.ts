@@ -145,7 +145,6 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     const raw = [...redis.store.values()][0];
     // 会话只记身份。它曾存过每个用户的 sk-，统一 key 之后变成「给每个用户存同一把 key」——
     // 一份 7 天不过期的密钥副本，且「管理端改了 key」对已登录用户不生效。
-    // 现在 key 由 AuthGuard 按当前配置回注，Redis 里不该再有它的任何形态。
     expect(JSON.parse(raw)).not.toHaveProperty("sk");
     // 会话键 + 按用户索引键各一条
     expect(redis.store.size).toBe(2);

@@ -11,7 +11,7 @@
 //
 // 求和只能发生在本层：agent 与后端之间用的是服务令牌，它手里没有用户凭证，调不了
 // /api/log/self；而浏览器请求带着用户 token 到达这里。agent 因此完全不碰钱。
-import { Controller, Get, Headers, Param, Query } from "@nestjs/common";
+import { Controller, Get, Param, Query } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { ok } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -19,7 +19,7 @@ import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { quotaToCredits } from "@lib/shared/credits/credits.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
-import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "@lib/shared/agent/agent-service-env.js";
 
@@ -55,6 +55,7 @@ export class AgentSessionCreditsController {
   constructor(
     private readonly project: ProjectService,
     private readonly account: AccountService,
+    private readonly settings: SystemSettingsService,
   ) {}
 
   /**
@@ -67,10 +68,7 @@ export class AgentSessionCreditsController {
     @Param("sessionId") sessionId: string,
     @Query("project_id") projectId: string,
     @CurrentUser() user: AuthenticatedUser,
-    @Headers("authorization") authorization?: string,
   ) {
-    const token = parseBearerToken(authorization);
-    if (!token) throw new NewApiError("未提供有效令牌", 401, "unauthorized");
     if (!projectId) throw new NewApiError("缺少 project_id", 400, "invalid_request");
 
     const owned = await this.project.findOwnedById(projectId, user.userId);
@@ -117,7 +115,11 @@ export class AgentSessionCreditsController {
       window.endTimestamp = Math.max(...ends) + WINDOW_SLACK_SECONDS;
     }
 
-    const summed = await this.account.sumAgentRunQuota(token, agentRunIds, window);
+    const summed = await this.account.sumAgentRunQuota(
+      await this.settings.requireUpstreamKey(),
+      agentRunIds,
+      window,
+    );
     // 只有一部分 Run 读到了号：剩下那些的花费查不到，求和必然偏小。Run 号理应永远存在，所以
     // 这一条如今只是防御——但它守的失真是真的，与翻页到顶同一种，走同一个字段告诉前端。
     const partiallyAttributed = agentRunIds.length < runs.length;

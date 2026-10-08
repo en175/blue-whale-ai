@@ -1,4 +1,3 @@
-// 素材库对接服务：产品登录会话 → AuthGuard 回注的 sk- key → 网关 /api/material/{Action}。
 // 归属与状态以网关/上游为权威；本地仅三处持久化：
 //   - 素材关联镜像 assets.material_id/material_group_id（IKDJNZ）；
 //   - 素材库组 material_groups（IKDE6X/IKEXX8 契约 v2：只维护虚拟组镜像，
@@ -25,7 +24,7 @@ import {
 } from "@lib/shared/persistence/index.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
-import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { newApiBaseUrl } from "@lib/shared/upstream/new-api-egress.js";
 import { createUploadMaterialGate } from "./material-upload-gate.js";
 
@@ -67,7 +66,10 @@ export class MaterialService {
   private materialAssetRepoInstance?: MaterialAssetRepo;
   private assetClearRepoInstance?: AssetRepo;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SystemSettingsService,
+  ) {}
 
   private get client(): MaterialLibraryClient {
     if (!this.clientInstance) {
@@ -109,19 +111,14 @@ export class MaterialService {
     return this.assetClearRepoInstance;
   }
 
-  /** 透传调用：鉴权取 AuthGuard 回注的 Bearer sk-；上游状态码与信封原样返回。 */
   async callAction(
-    authorization: string | undefined,
     action: string,
     body: unknown,
   ): Promise<MaterialLibraryResponse> {
-    const token = parseBearerToken(authorization);
-    if (!token) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
-    }
     if (!(MATERIAL_ACTIONS as readonly string[]).includes(action)) {
       throw new NewApiError("不支持的素材操作", 400, "InvalidAction");
     }
+    const token = await this.settings.requireUpstreamKey();
     return this.client.callAction(action, body, token);
   }
 
@@ -133,7 +130,6 @@ export class MaterialService {
    *  upload 侧后续读取稳定收敛，无数据丢失。已按当前契约（虚拟组每用户 1 个）尽力缩短窗口并
    *  在本地落表失败时补偿删除上游组；若后续要求严格一次一个，需再加 per-user 锁。 */
   async ensureVirtualDefaultGroup(
-    authorization: string | undefined,
     userId: string,
   ): Promise<string> {
     // 1. 先查本地虚拟默认组（未删）。命中直接复用。
@@ -141,7 +137,7 @@ export class MaterialService {
     if (existing) return existing.materialGroupId;
 
     // 2. 上游建虚拟组（组名：默认分组：<userId>；GroupType=AIGC 网关必填，显式携带不赌默认值）。
-    const upstream = await this.callAction(authorization, "CreateAssetGroup", {
+    const upstream = await this.callAction("CreateAssetGroup", {
       Name: `默认分组：${userId}`,
       GroupType: "AIGC",
     });
@@ -183,7 +179,7 @@ export class MaterialService {
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      await this.callAction(authorization, "DeleteAssetGroup", {
+      await this.callAction("DeleteAssetGroup", {
         Id: materialGroupId,
       }).catch(() => undefined);
       throw error;
@@ -245,22 +241,14 @@ export class MaterialService {
     return this.materialAssetRepo;
   }
 
-  /** IKGQWR：**上传口**的素材闸（ADR-0093 决策 3）。
-   *
-   *  与生成门共用同一套判定规则、同一套文案与同一套上游信封解析（见 material-upload-gate.ts），
-   *  差别只有两处：它会用上 `GetAsset` 的 `Result.GroupId`（上传口要往 `assets.material_group_id`
-   *  落列），以及能在无记录时**补建行**——后者是生成门做不到的（造行需要 group id）。
-   *
-   *  按调用构造：闭包捕获本次请求的 authorization，闸的生命周期不跨请求。 */
-  uploadMaterialGate(authorization: string | undefined) {
+  uploadMaterialGate() {
     return createUploadMaterialGate({
       repo: this.materialAssetRepo,
-      callAction: (action, body) => this.callAction(authorization, action, body),
+      callAction: (action, body) => this.callAction(action, body),
       onMaterialFailure: (input) =>
         this.handleUpstreamMaterialFailure({
           userId: input.userId,
           materialId: input.materialId,
-          authorization,
           errorCode: input.errorCode,
           errorMessage: input.errorMessage,
           deleteUpstream: input.deleteUpstream,
@@ -323,8 +311,6 @@ export class MaterialService {
   async handleUpstreamMaterialFailure(input: {
     userId: string;
     materialId: string;
-    /** 代打上游 DeleteAsset 用；缺失则跳过 ③（例如无会话的后台路径）。 */
-    authorization: string | undefined;
     errorCode?: string | null;
     errorMessage?: string | null;
     /** 上游**已经**没有这个素材（NotFound / id 非法）时传 false，省一次注定 404 的往返。 */
@@ -341,16 +327,15 @@ export class MaterialService {
 
     if (input.deleteUpstream === false) return;
     // 刻意不 await：见方法头 ③。
-    void this.deleteUpstreamMaterial(input.authorization, input.materialId);
+    void this.deleteUpstreamMaterial(input.materialId);
   }
 
   /** 删上游素材（best-effort）：任何失败只记日志，绝不外抛。 */
   private async deleteUpstreamMaterial(
-    authorization: string | undefined,
     materialId: string,
   ): Promise<void> {
     try {
-      const response = await this.callAction(authorization, "DeleteAsset", {
+      const response = await this.callAction("DeleteAsset", {
         Id: materialId,
       });
       if (response.status < 200 || response.status >= 300) {

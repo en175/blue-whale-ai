@@ -87,22 +87,6 @@ export function newApiUrl(path: string, env: NodeJS.ProcessEnv = process.env): s
   return `${newApiBaseUrl(env)}${path}`;
 }
 
-/* ────────────────────────────────────────────────────────────────────────────
- * 项目统一凭证的**错误形态**
- *
- * **项目里只能有一把上游凭证**，所有以「蓝鲸自己」身份打 new-api 的调用都用它
- * （AuthGuard 回注、技能格式化、worker 的素材跟进）。它不管是哪个用户在操作、
- * 也不管调的是哪个模型。
- *
- * 它的**值**住在 `system_settings` 的 `upstream` 模块（管理端可配），唯一解析点
- * 是 `SystemSettingsService.requireUpstreamKey()`。本文件只保留「拿不到时抛什么」——
- * 那是 new-api 错误面的一部分（`upstream_credential_missing`），与「上游不认这把 key」
- * 是两回事，不该混成一个 401。
- *
- * <p>与之并列的 `bwsvc_` 服务令牌**不是第二把项目 key**——它是 Agent 计费面的
- * **服务身份**，走 new-api 的另一套鉴权模型（按前缀分流的 `AgentBillingAuth`），
- * 换成统一 key 会静默把账记到别人头上。见文件头那段说明。
- * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
  * 上游凭证未配置。

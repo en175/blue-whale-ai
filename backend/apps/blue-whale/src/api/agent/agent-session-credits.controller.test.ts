@@ -76,7 +76,14 @@ function createProject(owned: boolean) {
 }
 
 const USER = { userId: "42" } as never;
-const BEARER = "Bearer sk-user-token";
+
+const UPSTREAM_KEY = "sk-upstream-key";
+const SETTINGS = { requireUpstreamKey: async () => UPSTREAM_KEY } as never;
+const SETTINGS_UNCONFIGURED = {
+  requireUpstreamKey: async () => {
+    throw new Error("上游凭证未配置");
+  },
+} as never;
 
 /** 结果信封只有 code/data/msg 三个字段，断言直接看 data。 */
 function dataOf(envelope: unknown): Record<string, unknown> {
@@ -104,17 +111,18 @@ describe("AgentSessionCreditsController", () => {
   });
 
   describe("入口校验", () => {
-    it("没有 Bearer 令牌就 401，不去打扰上游", async () => {
+    it("上游凭证未配置 → 当场抛（不拿空串去打扰上游）", async () => {
+      behaviour = { kind: "runs", items: [{ run_id: "r1", created_at: "2026-08-23T07:00:00Z" }] };
       const account = createAccount({ quota: 0, matched: 0, truncated: false });
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS_UNCONFIGURED,
       );
 
-      await expect(controller.sessionCredits("s1", "p1", USER, undefined)).rejects.toMatchObject({
-        status: 401,
-        code: "unauthorized",
-      });
+      await expect(controller.sessionCredits("s1", "p1", USER)).rejects.toThrow(
+        "上游凭证未配置",
+      );
       expect(account.calls).toEqual([]);
     });
 
@@ -123,9 +131,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await expect(controller.sessionCredits("s1", "", USER, BEARER)).rejects.toMatchObject({
+      await expect(controller.sessionCredits("s1", "", USER)).rejects.toMatchObject({
         status: 400,
         code: "invalid_request",
       });
@@ -136,9 +145,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(false) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await expect(controller.sessionCredits("s1", "p1", USER, BEARER)).rejects.toMatchObject({
+      await expect(controller.sessionCredits("s1", "p1", USER)).rejects.toMatchObject({
         status: 403,
         code: "forbidden",
       });
@@ -154,9 +164,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await expect(controller.sessionCredits("s1", "p1", USER, BEARER)).rejects.toMatchObject({
+      await expect(controller.sessionCredits("s1", "p1", USER)).rejects.toMatchObject({
         status: 404,
         code: "session_not_found",
       });
@@ -168,9 +179,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await expect(controller.sessionCredits("s1", "p1", USER, BEARER)).rejects.toMatchObject({
+      await expect(controller.sessionCredits("s1", "p1", USER)).rejects.toMatchObject({
         status: 502,
         code: "agent_error",
       });
@@ -183,9 +195,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await expect(controller.sessionCredits("s1", "p1", USER, BEARER)).rejects.toMatchObject({
+      await expect(controller.sessionCredits("s1", "p1", USER)).rejects.toMatchObject({
         status: 502,
         code: "agent_error",
       });
@@ -209,9 +222,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER));
       expect(data).toEqual({
         credits: null,
         quota: null,
@@ -237,9 +251,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER));
       expect(data).toMatchObject({ credits: null, quota: null, runCount: 5 });
     });
 
@@ -249,15 +264,16 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER));
       expect(data).toMatchObject({ credits: 0, quota: 0, matched: 0, runCount: 0 });
     });
   });
 
   describe("有 Run 号时", () => {
-    it("按 Run 号求和，用户令牌原样转给上游，并按 50000 换算成积分", async () => {
+    it("按 Run 号求和，项目统一 key 转给上游，并按 50000 换算成积分", async () => {
       behaviour = {
         kind: "runs",
         items: [
@@ -269,12 +285,13 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER));
       expect(data).toMatchObject({ quota: 125_000, matched: 2, runCount: 2, credits: 2.5 });
       expect(account.calls).toHaveLength(1);
-      expect(account.calls[0]?.token).toBe("sk-user-token");
+      expect(account.calls[0]?.token).toBe(UPSTREAM_KEY);
       expect(account.calls[0]?.agentRunIds).toEqual(["r1", "r2"]);
     });
 
@@ -290,9 +307,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await controller.sessionCredits("s1", "p1", USER, BEARER);
+      await controller.sessionCredits("s1", "p1", USER);
       expect(account.calls[0]?.agentRunIds).toEqual(["r2"]);
     });
 
@@ -309,9 +327,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER));
       // 上游自己没截断，但我们知道只查了 2 个 Run 里的 1 个。
       expect(data).toMatchObject({ credits: 1, matched: 1, runCount: 2, truncated: true });
     });
@@ -331,9 +350,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER));
       expect(data).toMatchObject({ credits: null, quota: null, matched: 0, runCount: 2, truncated: true });
     });
 
@@ -348,9 +368,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER));
       expect(data).toMatchObject({ credits: 0, quota: 0, matched: 1, truncated: false });
     });
 
@@ -363,9 +384,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER));
       expect(data).toMatchObject({ truncated: true, credits: 1 });
     });
   });
@@ -386,9 +408,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await controller.sessionCredits("s1", "p1", USER, BEARER);
+      await controller.sessionCredits("s1", "p1", USER);
       expect(account.calls[0]?.window).toEqual({
         maxPages: 10,
         budgetMs: 15_000,
@@ -410,9 +433,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await controller.sessionCredits("s1", "p1", USER, BEARER);
+      await controller.sessionCredits("s1", "p1", USER);
       expect(account.calls[0]?.window).toEqual({
         maxPages: 10,
         budgetMs: 15_000,
@@ -434,9 +458,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await controller.sessionCredits("s1", "p1", USER, BEARER);
+      await controller.sessionCredits("s1", "p1", USER);
       expect(account.calls[0]?.window?.startTimestamp).toBe(
         Math.floor(Date.parse(earlier) / 1000) - SLACK,
       );
@@ -451,9 +476,10 @@ describe("AgentSessionCreditsController", () => {
       const controller = new AgentSessionCreditsController(
         createProject(true) as never,
         account.service as never,
+        SETTINGS,
       );
 
-      await controller.sessionCredits("s1", "p1", USER, BEARER);
+      await controller.sessionCredits("s1", "p1", USER);
       expect(account.calls[0]?.window).toEqual({ maxPages: 10, budgetMs: 15_000 });
     });
   });

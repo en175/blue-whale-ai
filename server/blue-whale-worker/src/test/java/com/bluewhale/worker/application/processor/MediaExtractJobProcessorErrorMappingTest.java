@@ -5,12 +5,12 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.MediaExtractError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient.ExtractAudioTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -60,7 +60,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiMediaKitExtractAudioClient extractAudioClient;
     @Mock private TosAudioMediaRelay mediaRelay;
     @Mock private GenerationMessageProducer producer;
@@ -71,7 +71,6 @@ class MediaExtractJobProcessorErrorMappingTest {
         Map<String, Object> input = new HashMap<>();
         input.put("source_asset_id", "555");
         input.put("output_format", "mp3");
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -80,10 +79,10 @@ class MediaExtractJobProcessorErrorMappingTest {
         processor = new MediaExtractJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
-                credentialService, extractAudioClient, mediaRelay, producer);
+                upstreamCredential, extractAudioClient, mediaRelay, producer);
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
@@ -203,12 +202,14 @@ class MediaExtractJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("缺冻结凭证 → provider_credential_missing（不臆造兜底 token）")
+    @DisplayName("上游凭证未配置 → provider_credential_missing（不臆造兜底 token）")
     void missingCredential_credentialMissing() {
         Map<String, Object> input = input();
-        input.remove("provider_credential");
         stubSubmitClaim(input);
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
@@ -845,7 +846,7 @@ class MediaExtractJobProcessorErrorMappingTest {
         MediaExtractJobProcessor noRelayProcessor = new MediaExtractJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
-                credentialService, extractAudioClient, null, producer);
+                upstreamCredential, extractAudioClient, null, producer);
         stubPollClaim(input(), 3, 7);
         when(extractAudioClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new ExtractAudioTaskObservation("succeeded",

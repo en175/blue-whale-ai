@@ -4,7 +4,6 @@ import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { DomainError, ERROR_ENQUEUE_FAILED, FAILURE_CODE } from "@lib/contracts";
 import { enqueueAudioVideoMuxJob } from "@lib/shared/generation/generation-queue.js";
-import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import { AudioVideoMuxesService } from "@lib/shared/audio-video-muxes/audio-video-muxes.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 // IKJKUA：受控错误判定收敛到共享适配器（原 IKJJQZ B.8 本地同款副本已删）。
@@ -19,7 +18,6 @@ export class AudioVideoMuxesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
     @Body() body: unknown,
-    @Headers("authorization") authorization?: string,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Res({ passthrough: true }) res?: Response,
   ) {
@@ -27,7 +25,7 @@ export class AudioVideoMuxesController {
       user.userId,
       projectId,
       body ?? {},
-      { ...sealProviderCredential(authorization), idempotencyKey: idempotencyKey ?? "" },
+      { idempotencyKey: idempotencyKey ?? "" },
     );
     if (isRecoveryControlledEnvelope(result)) {
       res?.status(result.code).json(result);

@@ -9,46 +9,6 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * new-api 网关 MediaKit 音频调速客户端（IKHW5A，父单 IKHVYO；以
- * {@link NewApiMediaKitTrimAudioClient} 为模板——家族内又一个 MediaKit 异步任务：
- * 提交返 task_id + 查询端点轮询取 result.audio_url / result.duration。HTTP 骨架复用
- * {@link NewApiMediaKitAsyncTaskClient}，本类只保留出站 payload 构造与 completed
- * 结果解析——调速无格式参数与时间区间，出站仅 audio_url + 可选 speed）。
- * <p>
- * 端点（网关**对客**路径；网关内部转发火山上游 POST /api/v1/tools/adjust-audio-speed.
- * 路径常量单源在 {@link AudioSpeedContract}，契约票 IKHW48 已冻结）：
- * <ul>
- *   <li>submit：POST {SUBMIT_PATH}（30s 超时，异步提交秒级入队）</li>
- *   <li>poll：GET {POLL_PATH_PREFIX}{task_id}（10s 超时）——MediaKit 异步工具共用
- *       同一条查询路由，路径不含 async 段（IKH67T 实测校准）</li>
- * </ul>
- * ⚠️ 网关路径 ≠ 火山上游路径：混用即 404 Invalid URL，任务卡在提交相（IKH67T）。
- * 鉴权与家族同构（契约 §5 / ADR-0080）：Authorization: Bearer 任务冻结的用户 sk-
- * （processor 从 job.input.provider_credential 取出传入）+ X-Trace-Id +
- * X-Client-System: bluewhale。
- * <p>
- * 出站请求映射（官方 CLI 参考文档 submit 参数节）：model（对客模型名，网关按模型名路由
- * MediaKit 渠道，本期 model_price 配 0）+ audio_url（源音频公网对象存储地址）+ speed
- * （**可选**：贴原速省略口径 ADR-0113——恰为 1.0 原速时创建入口已省略冻结，本客户端
- * null 即不出键，走官方默认 1；范围 [0.1, 4.0]、最多两位小数由创建入口复核，出站原样
- * 透传）。不发 format（父单决策无格式下拉，产物跟随官方默认 m4a）、
- * media_output_destination（走默认临时链接 + 自家 TOS 转存，家族口径）、
- * client_token / callback_* / queue_id（无幂等与回调需求）。
- * <p>
- * 响应形状（官方 CLI 参考文档「提交音频调速任务」节）：submit =
- * {success, task_id, request_id}（success=false 时带 error{code,type,message,param}）；
- * poll 顶层含 task_id / status（轮询至 completed 或 failed）与
- * result{audio_url, duration}——result.audio_url 是 24h 有效 HTTPS 临时下载链接，
- * processor 须立即转存自家 TOS；result.duration 是输出音频时长（秒）。status 大小写与
- * 中间态枚举官方文档未逐字冻结，按小写归一容错解析（completed→succeeded、
- * failed→failed、其余→processing）。
- * <p>
- * 错误分类复用 NewApiErrorClassifier（content &gt; quota &gt; provider_failed，§5 优先级，
- * 兜底归并 audio_speed_failed 1051；网关错误不透传英文）；poll 的网络超时 / 连接失败 /
- * HTTP 429/5xx 抛错时以 cause 携带状态（{@link NewApiVideoClient.HttpStatusException}
- * 复用），供 processor 按 isTransientPollError 语义判定瞬时重排。
- */
 @Component
 public class NewApiMediaKitAdjustAudioSpeedClient extends NewApiMediaKitAsyncTaskClient {
 
@@ -87,16 +47,6 @@ public class NewApiMediaKitAdjustAudioSpeedClient extends NewApiMediaKitAsyncTas
         return new AudioSpeedError(code, message);
     }
 
-    /**
-     * 提交音频调速异步任务（官方「提交音频调速任务」节：成功返回 task_id）。
-     *
-     * @param token    per-job Bearer 凭证（任务冻结的用户 sk-）
-     * @param audioUrl 源音频公网对象存储地址
-     * @param speed    播放倍速（[0.1, 4.0]、最多两位小数；**可 null**——贴原速省略口径下
-     *                 创建入口已省略，null 即不出键，走官方默认 1）
-     * @return 上游任务 id（processor 存 provider_task_id 后转轮询）
-     * @throws AudioSpeedError 按错误分类抛错
-     */
     public String submit(String token, String audioUrl, Double speed) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", MODEL);

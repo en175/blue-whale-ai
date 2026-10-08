@@ -132,7 +132,6 @@ describe("deriveFinalizeInput（IKIZQC）", () => {
     // G13：输入视频时长取原样片参考素材（3 秒视频参考原样冻结），样片视频本体不在其中。
     expect(derived.references).toEqual(SAMPLE_INPUT.references);
     expect(derived.reference_limits).toEqual(SAMPLE_INPUT.reference_limits);
-    // 样片标记、画布目标、样片期凭证不入成片快照。
     expect(derived.sample_mode).toBeUndefined();
     expect(derived.target_node_id).toBeUndefined();
     expect(derived.text_attachments).toBeUndefined();
@@ -162,7 +161,6 @@ describe("handleFinalizeGenerationJobQuote（IKIZQC）", () => {
 
     expect(res.code).toBe(200);
     expect(res.data).toEqual({ credits: 76, quote_revision: confirmationOf(sampleJob(), S25_CAPABILITY as never, result).quote_revision });
-    // 报价输入是派生后的 1080p 快照（不携带样片期凭证/画布键）。
     const call = quote.mock.calls[0]![0];
     expect(call.input.resolution).toBe("1080p");
     expect(call.input.provider_credential).toBeUndefined();
@@ -380,12 +378,12 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
     ).toBe(1030);
   });
 
-  it("★ 幸福路径：派生 1080p 输入建任务 + 成片阶段预扣；凭证来自本次请求（报价复算之后挂上）", async () => {
+  it("★ 幸福路径：派生 1080p 输入建任务 + 成片阶段预扣", async () => {
     const { result, quote } = quoteStub();
     const { deps, createFinalizeJob } = buildDeps({ quote });
 
     const res = await handleFinalizeGenerationJobCreate(
-      "42", "1", "302", happyBody(), "key-1", deps, { providerCredential: "sealed-now" },
+      "42", "1", "302", happyBody(), "key-1", deps,
     );
 
     expect(res.code).toBe(200);
@@ -397,12 +395,8 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
       sourceSampleJobId: "302",
       actionType: "generate_video",
     });
-    // 派生输入：1080p、无样片键、本次请求的新凭证。
     expect(createInput.input.resolution).toBe("1080p");
     expect(createInput.input.sample_mode).toBeUndefined();
-    expect(createInput.input.provider_credential).toBe("sealed-now");
-    // ★ 报价复算输入不含凭证（指纹与报价入口同源），Hold 输入含（specs 自动排除凭证键）。
-    expect(quote.mock.calls[0]![0].input.provider_credential).toBeUndefined();
     expect(options.billing).toBeDefined();
     // Hold 的 commandId 与 actionIdentity 同源（带 Date.now，防 billing 永久幂等死锁）。
     expect(options.billing.hold).toBeTypeOf("function");

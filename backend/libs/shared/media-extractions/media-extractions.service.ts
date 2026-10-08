@@ -2,8 +2,6 @@
 // IKFS5W：不写画布——占位节点由前端建任务前本地插入，产物经 GET /api/jobs/:id 的 asset 回给前端落库。
 // IKH28T：output_format 枚举/默认值/拒绝口径单源到契约 @lib/contracts/media-extract（m4a 默认、
 // 非法值明确拒绝，静默回退口径随契约废除）。
-// IKH28V：切火山网关前的创建入口行为补齐（契约 §18.5）——资产归属读法对齐去字幕
-// （findOwnedSource）、请求方 sk- 凭证冻结进 input.provider_credential（worker IKH28W 取用）。
 // 免费口径（同去字幕 / image-erasures）：不写成本预留、不接成本估算、不走余额拦截门。
 // IKJJQW（B.3）：创建入口接入恢复协议 v1——canvas_binding 随 body 提交（剥离后不进业务校验），
 // Idempotency-Key 头承载 submission_id；受理走共享受理段（media-tool-recovery）。
@@ -55,9 +53,6 @@ export class MediaExtractionsService {
     userId: string,
     projectId: string,
     body: { source_asset_id?: unknown; output_format?: unknown; canvas_binding?: unknown },
-    // 与去字幕同构（video-subtitle-erasures.service.ts 的 internal 形参）：请求方 sk- 凭证
-    // 冻结进 job input.provider_credential，worker 切网关后（IKH28W）直接取用；未携带/非 sk- 时不写键。
-    internal: { providerCredential?: string } = {},
     // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
     idempotencyKey?: string,
   ) {
@@ -133,11 +128,6 @@ export class MediaExtractionsService {
             input: {
               [MEDIA_EXTRACT_INPUT_KEYS.sourceAssetId]: sourceAssetId,
               [MEDIA_EXTRACT_INPUT_KEYS.outputFormat]: outputFormat,
-              // provider_credential 是业务键之上的基础设施键（不进契约 zod——去字幕同构）：
-              // 请求方 sk- 明文冻结，worker 切网关后（IKH28W）直接取用；未携带/非 sk- 时不写键。
-              ...(internal.providerCredential
-                ? { provider_credential: internal.providerCredential }
-                : {}),
             },
             // 过去 60s：media_extract 即时消费无延迟，next_action_at 必须 ≤ now 才能被 claim。
             // DATETIME(0) 秒精度会把 new Date() 进位到下一秒 → 同秒 claim 的 lte now 判 false，任务悬挂（media_extract 无恢复扫描）。

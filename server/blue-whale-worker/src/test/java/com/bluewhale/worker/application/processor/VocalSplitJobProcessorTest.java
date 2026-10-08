@@ -5,13 +5,13 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVocalSplitDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VocalSplitError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSeparateVoiceClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSeparateVoiceClient.SeparateVoiceTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -58,7 +58,7 @@ class VocalSplitJobProcessorTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiMediaKitSeparateVoiceClient separateVoiceClient;
     @Mock private TosAudioMediaRelay mediaRelay;
     @Mock private GenerationMessageProducer producer;
@@ -70,7 +70,6 @@ class VocalSplitJobProcessorTest {
         input.put("source_asset_id", "555");
         input.put("scene", scene);
         input.put("output_format", "aac");
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -79,10 +78,10 @@ class VocalSplitJobProcessorTest {
         processor = new VocalSplitJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
-                credentialService, separateVoiceClient, mediaRelay, producer);
+                upstreamCredential, separateVoiceClient, mediaRelay, producer);
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
@@ -233,12 +232,14 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("缺冻结凭证 → provider_credential_missing（不臆造兜底 token）")
+    @DisplayName("上游凭证未配置 → provider_credential_missing（不臆造兜底 token）")
     void missingCredential_credentialMissing() {
         Map<String, Object> input = input("audio");
-        input.remove("provider_credential");
         stubSubmitClaim(input);
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
@@ -888,7 +889,7 @@ class VocalSplitJobProcessorTest {
         VocalSplitJobProcessor noRelayProcessor = new VocalSplitJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
-                credentialService, separateVoiceClient, null, producer);
+                upstreamCredential, separateVoiceClient, null, producer);
         stubPollClaim(input("audio"), 3, 7);
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(twoTrackObservation(65.5));

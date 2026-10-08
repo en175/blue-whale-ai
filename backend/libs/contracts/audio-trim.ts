@@ -25,10 +25,6 @@ export const AUDIO_TRIM_JOB_TYPE = "audio_trim";
  *  audio_trim 不套 claim source 白名单（media_extract 同款口径，claim 只按 type 过滤）。 */
 export const AUDIO_TRIM_SOURCE = "dock";
 
-/** input 冻结键名（创建时定死，重试原样沿用）。
- *  基础设施键 provider_credential 在业务键之上由创建侧冻结落库（同 media-extract /
- *  video-subtitle-erase 先例，不进本 zod——它校验的是客户端 payload，凭证来自请求头冻结）。
- *  start_time / end_time 是**可选键**：贴边省略口径（见 buildAudioTrimTimeParams）下不传。 */
 export const AUDIO_TRIM_INPUT_KEYS = {
   /** 源素材身份（被截取的音频 Asset id）。 */
   sourceAssetId: "source_asset_id",

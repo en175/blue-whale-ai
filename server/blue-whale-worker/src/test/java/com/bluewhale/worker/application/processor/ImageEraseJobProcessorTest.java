@@ -4,13 +4,13 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEraseDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEraseError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitEraseClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
@@ -59,7 +59,7 @@ class ImageEraseJobProcessorTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiMediaKitEraseClient mediaKitEraseClient;
     @Mock private TosMediaStorage tosService;
 
@@ -72,7 +72,7 @@ class ImageEraseJobProcessorTest {
         processor = new ImageEraseJobProcessor(
                 claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
-                credentialService, mediaKitEraseClient, tosService);
+                upstreamCredential, mediaKitEraseClient, tosService);
         when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
@@ -104,7 +104,6 @@ class ImageEraseJobProcessorTest {
         input.put("source_asset_id", "555");
         input.put("target_node_id", "node-abc");
         input.put("erase_scene", "full_screen_text_erase");
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -114,7 +113,6 @@ class ImageEraseJobProcessorTest {
         input.put("target_node_id", "node-abc");
         input.put("erase_scene", "selected_area_erase");
         input.put("mask_asset_id", "777");
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -139,7 +137,7 @@ class ImageEraseJobProcessorTest {
     private void stubClaim(Map<String, Object> input) {
         when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input)));
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
     }
 
     private void stubPublish() {
@@ -261,13 +259,15 @@ class ImageEraseJobProcessorTest {
     }
 
     @Test
-    @DisplayName("缺冻结凭证 → provider_credential_missing（与 image/imageEnhance 同构）")
+    @DisplayName("上游凭证未配置 → provider_credential_missing（与 image/imageEnhance 同构）")
     void missingCredential_credentialMissing() {
         Map<String, Object> input = textSceneInput();
-        input.remove("provider_credential");
         stubClaim(input);
         stubSourceAsset();
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);

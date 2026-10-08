@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoMattingDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto;
@@ -13,7 +14,6 @@ import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoMattingContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoMattingError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMatteVideoClient;
@@ -37,63 +37,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-/**
- * video_matting（智能抠像，火山 MediaKit 双端点人像/绿幕抠像）作业处理器（IKHK99，父规格
- * IKHJRC，契约 IKHK7F，附录 C 触点③）。编排与去字幕 / HD 高清 / 场景切分同构（视频轮询
- * 骨架，每步 = 一次 MQ 消费，fencing / 租约 / claim-by-id 全部走视频件）：
- * <ol>
- *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
- *   <li>providerTaskId==null → 解析冻结 input（mode / format / background_color）+ 源视频
- *       素材 → 网关按模式分流提交（portrait → matte-portrait-video、greenscreen →
- *       matte-greenscreen-video，路径与模型名走契约常量；出站 model / video_url / format /
- *       background_color〔仅 MP4 显式携带——两端点官方默认底色不同，本仓冻结 white 防歧义〕，
- *       不发 client_token / callback_* / queue_id / media_output_destination——家族轮询口径 +
- *       worker 转存自家 TOS，ADR-0112），返 task_id）→ markProviderSubmitted（存
- *       provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务（两工具共用 tasks 查询）→ 瞬时错误
- *       rescheduleProviderPoll 续排（**同样受轮询上限约束**，超限归 1050——上游持续故障
- *       不得无限续排）；processing → 续排（超限 1050）；failed → 分类终态；
- *       completed → **转存前续租 + 转存全程心跳续租 60s（IKHSFD，防大文件下载+上传跨
- *       420s 租约窗被 recovery 孤儿重领；心跳未命中即中止传输静默退出）→ 立即下载
- *       转存自家 TOS（火山 video_url 仅 24h 有效）** → 建 Asset（type=video /
- *       source='generated'）→ 契约 result 三键回传 → 终态 succeeded</li>
- * </ol>
- * 重试收割（IKI89Z / ADR-0114，视频 IKEA26 先例推广、IKI89P 定型形态平移）：手动重试
- * job（claim 投影带 parentProviderTaskId）submit 相先查父任务的上游任务——已成功且结果
- * 齐全（videoUrl+resolution 双非空，对齐轮询相成功口径）则不重新提交，直接以父任务
- * observation 走既有 publishResult 发布（转存期租约心跳一并继承，收割期间租约由本
- * worker 心跳续）；父失败 / 不存在 / 查询异常 / 仍持有执行权的收割发布失败回退正常
- * 重新提交，收割发布期间失租或守卫未命中则停止本次执行不回退提交（IKICD0）。
- * <p>
- * 下载与转存复用 {@link TosVideoMediaRelay}（同套校验：fetch → video/ mime 校验 → TOS
- * 公开读 → md5），但走**流式** {@code persistStreaming} 并带本工具上限（审查修复 P2：
- * 家族字节数组路径 200MB 上限与堆绑死，本工具 10 分钟档成品可超）；结果 URL 24h 失效故
- * **强依赖 TOS，不降级直存**（去字幕家族口径）。
- * 转存失败 = 整体失败（归并 1050）：无 Asset 行落库、不留半成品资产悬挂，已上传的 TOS
- * 孤儿对象与家族先例同口径（无 Asset 引用即无悬挂）。
- * <p>
- * 结果元数据：抠像不改变分辨率 → 宽高取源 Asset 近似值（官方不返回输出像素；源宽高缺失
- * → null 静默容忍，去字幕同款口径）；时长优先官方 result.duration 精确值、缺失回落源
- * duration_ms 换算；resolution 档位官方 result.resolution 同名同值透传，与转存后
- * video_url、duration 一并按契约 RESULT_KEY_* 三键进终态日志 payload 与 status_changed
- * 事件 payload 的 result 键跨进程回传（双通道承载，video_scene_split 同款；video_url
- * 语义 = 转存自有存储后的公开读地址，官方 24h 临时链接不跨进程落库）。completed 未返回
- * 结果视频或分辨率档位 → 1050 兜底失败（转存前判定，无 TOS 孤儿）。
- * <p>
- * 错误码口径（契约：数值 1050，双模式共享一码、错误信息透传区分，无 worker 级自动重试，
- * 用户在任务占位卡手动重试沿用冻结 input）：
- * <ul>
- *   <li>provider_credential_missing：任务缺少冻结凭证（与视频/去字幕同构）</li>
- *   <li>invalid_input：业务键缺失 / 模式或格式枚举外 / MP4 缺背景色 / WEBM 带背景色
- *       （创建入口复核是权威，worker 兜底防御）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
- *       §5 分类信号，保留既有码投影</li>
- *   <li>video_matting_failed（1050）：其余一律归并兜底——提交失败 / 轮询超时 / 供应商任务
- *       failed（error 对象 code / message / param / type——TaskError / ApiError）/ 源素材
- *       不可用 / 结果形态缺失 / 下载转存失败（超时也归并是家族口径：宁可不重试也不双跑），
- *       上游可读原因随 message 透传前端投影</li>
- * </ul>
- */
 @Component
 public class VideoMattingJobProcessor implements JobProcessor {
 
@@ -139,7 +82,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitMatteVideoClient matteVideoClient;
     private final TosVideoMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
@@ -158,7 +101,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitMatteVideoClient matteVideoClient,
             TosVideoMediaRelay mediaRelay,
             @Qualifier("videoMattingMessageProducer")
@@ -170,7 +113,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.bySources(
                 VideoMattingContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.matteVideoClient = matteVideoClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
@@ -231,20 +174,12 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 分相主逻辑（视频骨架 runVideoStep 同构）：凭证 → submit 相 / poll 相。
      */
     private void runStep(ClaimedJob claim) {
-        // 取明文凭证（基础设施键；与视频/去字幕同构，冻结在创建入口 IKHK98）
-        Object credentialObj = claim.input().get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "智能抠像任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[video_matting] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "智能抠像任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[video_matting] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failClaimed(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

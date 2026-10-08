@@ -70,9 +70,6 @@ export class VocalSplitsService {
     userId: string,
     projectId: string,
     body: { source_asset_id?: unknown; scene?: unknown; output_format?: unknown; canvas_binding?: unknown },
-    // 与去字幕 / media-extractions 同构（internal 形参）：请求方 sk- 凭证冻结进
-    // job input.provider_credential，worker 处理时直接取用；未携带/非 sk- 时不写键。
-    internal: { providerCredential?: string } = {},
     // IKJJQY（B.3）：canvas_binding 的幂等承载（请求头 Idempotency-Key，无既有 client_token）。
     idempotencyKey?: string,
   ) {
@@ -194,9 +191,6 @@ export class VocalSplitsService {
               progress: 0,
               input: {
                 ...input,
-                ...(internal.providerCredential
-                  ? { provider_credential: internal.providerCredential }
-                  : {}),
               },
               next_action_at: new Date(Date.now() - 60_000),
             },
@@ -244,13 +238,8 @@ export class VocalSplitsService {
         // scene 决定轨数（audio/music→2、drama/narrate→3），契约 VOCAL_SPLIT_SCENE_TRACKS 单源。
         // IKJCOE：轨数不再落主表 expected_output_count（列已删）——Worker 按 scene 自推轨序，
         // 该值此前无任何读方（仅记录）。
-        // 冻结三业务键 = 画布占位身份（前端 lastInput 数据源，重试原样沿用）；
-        // provider_credential 是业务键之上的基础设施键（不进契约 zod——去字幕同构）。
         input: {
           ...input,
-          ...(internal.providerCredential
-            ? { provider_credential: internal.providerCredential }
-            : {}),
         },
         // 过去 60s：回拨口径同 media_extract / 去字幕——DATETIME(0) 秒精度进位会让同秒
         // claim 的 lte now 判 false，任务悬挂。

@@ -14,6 +14,7 @@ import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
@@ -82,7 +83,7 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       // IKIPWT：业务失败经 DomainError → AllExceptionsFilter 统一投影（与 app.module 的 APP_FILTER 同款），
       // 台架不挂过滤器时 DomainError 落 Nest 默认 500 处理，信封 code/msg 均不可见。
       { provide: APP_FILTER, useClass: AllExceptionsFilter },
-      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
@@ -90,7 +91,7 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       { provide: SnapshotService, useValue: new SnapshotService(prisma) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: IdentityService, useValue: new IdentityService(prisma) },
     ] })(HarnessModule);

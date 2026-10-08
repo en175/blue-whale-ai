@@ -5,11 +5,11 @@ import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.domain.error.MediaExtractError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient.MuxAudioVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
@@ -44,7 +44,7 @@ class AudioVideoMuxJobProcessorTest {
     @Mock JobClaimService claimService;
     @Mock GenerationJobMapper jobMapper;
     @Mock JobFinalizer finalizer;
-    @Mock GenerationCredentialService credentials;
+    @Mock UpstreamCredential upstreamCredential;
     @Mock NewApiMediaKitMuxAudioVideoClient gateway;
     @Mock TosVideoMediaRelay relay;
     @Mock GenerationMessageProducer producer;
@@ -59,8 +59,7 @@ class AudioVideoMuxJobProcessorTest {
                 "video", Map.of("assetId", "12", "url", "https://tos/v.mp4"),
                 "is_audio_reserve", true,
                 "sync", sync,
-                "submit_attempt", submitAttempt,
-                "provider_credential", "sk-frozen");
+                "submit_attempt", submitAttempt);
     }
 
     private ClaimedJob claim(String providerTaskId) {
@@ -73,7 +72,7 @@ class AudioVideoMuxJobProcessorTest {
     private AudioVideoMuxJobProcessor transferCompletedProcessor() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -82,7 +81,7 @@ class AudioVideoMuxJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
                         "video/mp4", 100L, "md5"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer);
         processor.publishSettleProbeDelayMs = 5;
         return processor;
     }
@@ -109,12 +108,12 @@ class AudioVideoMuxJobProcessorTest {
     void submitPersistsProviderTaskIdWithDerivedClientTokenAndSchedulesPoll() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.submit("sk-frozen", "https://tos/v.mp4", "https://tos/a.mp3", true, "none", "bwmux-70-1"))
                 .thenReturn("provider-1");
         when(stateMachine.markProviderSubmitted(eq("70"), anyString(), eq(3L), eq("provider-1"))).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(producer).enqueue("70", 5_000L);
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
@@ -124,12 +123,12 @@ class AudioVideoMuxJobProcessorTest {
     void crashResubmitReusesTheSameClientTokenWhileRetryAttemptChangesIt() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.submit(eq("sk-frozen"), anyString(), anyString(), anyBoolean(), anyString(), anyString()))
                 .thenReturn("provider-1");
         when(stateMachine.markProviderSubmitted(eq("70"), anyString(), eq(3L), anyString())).thenReturn(true);
 
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer);
         processor.handle("70");
         // 崩溃重提：provider_task_id 未持久化前重入 submit，同 token 由供应商去重。
         processor.handle("70");
@@ -151,12 +150,12 @@ class AudioVideoMuxJobProcessorTest {
                         "70", "5", "9", input("video", 1L), "audio_video_mux", null, false, "worker-1", 3L,
                         0, 0, null, null, null)));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.submit("sk-frozen", "https://tos/v.mp4", "https://tos/a.mp3", true, "video", "bwmux-70-1"))
                 .thenReturn("provider-1");
         when(stateMachine.markProviderSubmitted(eq("70"), anyString(), eq(3L), eq("provider-1"))).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(gateway).submit("sk-frozen", "https://tos/v.mp4", "https://tos/a.mp3", true, "video", "bwmux-70-1");
     }
@@ -170,11 +169,11 @@ class AudioVideoMuxJobProcessorTest {
                         "70", "5", "9", dirty, "audio_video_mux", null, false, "worker-1", 3L, 0, 0, null,
                         null, null)));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer).failMediaExtractJob(eq("70"), argThat(code -> code.equals("invalid_input")),
                 anyString(), any(), eq("worker-1"), anyLong());
@@ -190,12 +189,12 @@ class AudioVideoMuxJobProcessorTest {
                 WorkerClock.now().minusHours(25), null, null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(longJob));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("processing", null, null, null, null, null));
         when(stateMachine.rescheduleProviderPoll(eq("70"), anyString(), eq(3L), eq(0), eq(60_000L))).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(producer).enqueue("70", 60_000L);
         verify(stateMachine).rescheduleProviderPoll(eq("70"), anyString(), eq(3L), eq(0), eq(60_000L));
@@ -212,13 +211,13 @@ class AudioVideoMuxJobProcessorTest {
                 WorkerClock.now().minusHours(25), null, null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(stale));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("processing", null, null, null, null, null));
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer).failMediaExtractJob(eq("70"), anyString(),
                 argThat(message -> message.contains("查询超时")), any(), eq("worker-1"), anyLong());
@@ -234,13 +233,13 @@ class AudioVideoMuxJobProcessorTest {
                 WorkerClock.now().minusDays(366), null, null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(ancient));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("processing", null, null, null, null, null));
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer).failMediaExtractJob(eq("70"), anyString(),
                 argThat(message -> message.contains("查询超时")), any(), eq("worker-1"), anyLong());
@@ -255,12 +254,12 @@ class AudioVideoMuxJobProcessorTest {
                 WorkerClock.now().minusDays(3), WorkerClock.now().plusHours(23), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(retry));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(9L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-2"))
                 .thenReturn(new MuxAudioVideoTaskObservation("processing", null, null, null, null, null));
         when(stateMachine.rescheduleProviderPoll(eq("70"), anyString(), eq(9L), eq(0), eq(5_000L))).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(producer).enqueue("70", 5_000L);
         verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
@@ -271,7 +270,7 @@ class AudioVideoMuxJobProcessorTest {
     void relayFailureIncludesPollRequestId() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, "request-relay-1"));
@@ -282,7 +281,7 @@ class AudioVideoMuxJobProcessorTest {
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer).failMediaExtractJob(eq("70"), anyString(), argThat(message ->
                 message.contains("TOS 转存失败") && message.contains("request-relay-1")),
@@ -293,7 +292,7 @@ class AudioVideoMuxJobProcessorTest {
     void largeResultWithinCapacityIsTransferredAndPublished() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "3840x2160", null, null, null));
@@ -304,7 +303,7 @@ class AudioVideoMuxJobProcessorTest {
                         "video/mp4", 5L << 30, "md5"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<PublishAudioVideoMuxDto> result = ArgumentCaptor.forClass(PublishAudioVideoMuxDto.class);
         verify(finalizer).publishAudioVideoMuxResult(result.capture());
@@ -318,7 +317,7 @@ class AudioVideoMuxJobProcessorTest {
     void completedTaskPublishesStoredUrlProviderDurationAndResolution() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -328,7 +327,7 @@ class AudioVideoMuxJobProcessorTest {
                         "video/mp4", 100L, "md5"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<PublishAudioVideoMuxDto> result = ArgumentCaptor.forClass(PublishAudioVideoMuxDto.class);
         verify(finalizer).publishAudioVideoMuxResult(result.capture());
@@ -342,7 +341,7 @@ class AudioVideoMuxJobProcessorTest {
     void missingDurationOrResolutionStillPublishesForSourceFallback() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         null, null, null, null, "request-min"));
@@ -352,7 +351,7 @@ class AudioVideoMuxJobProcessorTest {
                         "video/mp4", 100L, "md5"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<PublishAudioVideoMuxDto> result = ArgumentCaptor.forClass(PublishAudioVideoMuxDto.class);
         verify(finalizer).publishAudioVideoMuxResult(result.capture());
@@ -364,7 +363,7 @@ class AudioVideoMuxJobProcessorTest {
     void longResultTransferKeepsItsLeaseAndStopsHeartbeatsAfterPublishing() throws Exception {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -381,7 +380,7 @@ class AudioVideoMuxJobProcessorTest {
                     return new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
                             "video/mp4", 100L, "md5");
                 });
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 20;
 
         processor.handle("70");
@@ -397,7 +396,7 @@ class AudioVideoMuxJobProcessorTest {
     void lostLeaseDuringTransferCannotPublishAnAsset() throws Exception {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -421,7 +420,7 @@ class AudioVideoMuxJobProcessorTest {
                     assertThat(handle.reason()).contains("租约未命中");
                     throw new TosVideoMediaRelay.TransferAbortedException(handle.reason());
                 });
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 20;
 
         processor.handle("70");
@@ -437,7 +436,7 @@ class AudioVideoMuxJobProcessorTest {
         // 转存前三次取消检查（runStep 入口 + poll 观察后 + 续租前）都未命中；心跳里第四次命中取消
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false, true, true);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -454,7 +453,7 @@ class AudioVideoMuxJobProcessorTest {
                     assertThat(handle.reason()).contains("取消");
                     throw new TosVideoMediaRelay.TransferAbortedException(handle.reason());
                 });
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 20;
 
         processor.handle("70");
@@ -469,7 +468,7 @@ class AudioVideoMuxJobProcessorTest {
     void abortedTransferReturningAResultCleansUpWithoutPublishingOrFailing() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -484,7 +483,7 @@ class AudioVideoMuxJobProcessorTest {
                             "video/mp4", 100L, "md5");
                 });
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
         verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
@@ -500,7 +499,7 @@ class AudioVideoMuxJobProcessorTest {
         // 转存前三段取消检查未命中；转存返回后命中取消（cancelled 终态由取消检查落）
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false, true);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -510,7 +509,7 @@ class AudioVideoMuxJobProcessorTest {
                         "video/mp4", 100L, "md5"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
         verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
@@ -523,7 +522,7 @@ class AudioVideoMuxJobProcessorTest {
     void leaseMissedAfterSuccessfulTransferCleansUpTheUnpublishedObject() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -534,7 +533,7 @@ class AudioVideoMuxJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
                         "video/mp4", 100L, "md5"));
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
         verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
@@ -547,7 +546,7 @@ class AudioVideoMuxJobProcessorTest {
     void leaseRenewalErrorAfterSuccessfulTransferCleansUpAndKeepsFailSemantics() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -562,7 +561,7 @@ class AudioVideoMuxJobProcessorTest {
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
         verify(finalizer).failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
@@ -575,7 +574,7 @@ class AudioVideoMuxJobProcessorTest {
     void guardRejectionCleansUpWhenAuthorityConfirmsUnpublished() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -588,7 +587,7 @@ class AudioVideoMuxJobProcessorTest {
         // 删除前先核实权威状态（此处确认未被 Asset 引用）才清理。
         when(finalizer.publishAudioVideoMuxResult(any())).thenReturn(false);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -600,7 +599,7 @@ class AudioVideoMuxJobProcessorTest {
     void guardRejectionKeepsObjectWhenAuthorityConfirmsAssetReference() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -614,7 +613,7 @@ class AudioVideoMuxJobProcessorTest {
         // 或本执行者事务已提交）→ 保留对象，不删。
         when(finalizer.hasPublishedAsset("70", "generated/9/video/out.mp4")).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -625,7 +624,7 @@ class AudioVideoMuxJobProcessorTest {
     void publishExceptionCleansUpOnlyAfterAuthorityConfirmsUnpublished() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -638,7 +637,7 @@ class AudioVideoMuxJobProcessorTest {
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         // 不能仅凭本地异常直接删除：先核实权威状态，确认未被 Asset 引用才清理
         verify(finalizer).hasPublishedAsset("70", "generated/9/video/out.mp4");
@@ -652,7 +651,7 @@ class AudioVideoMuxJobProcessorTest {
     void publishExceptionKeepsObjectWhenAuthorityConfirmsPublishedAsset() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -667,7 +666,7 @@ class AudioVideoMuxJobProcessorTest {
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(relay, never()).deleteUnpublishedObject(anyString());
         verify(finalizer).failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
@@ -809,7 +808,7 @@ class AudioVideoMuxJobProcessorTest {
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false)
                 .thenThrow(new RuntimeException("取消状态查询 DB 断连"));
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -821,7 +820,7 @@ class AudioVideoMuxJobProcessorTest {
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         // 发布从未开始：不产生引用该键的 Asset
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
@@ -844,7 +843,7 @@ class AudioVideoMuxJobProcessorTest {
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false)
                 .thenThrow(new RuntimeException("取消状态查询 DB 断连"));
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -859,7 +858,7 @@ class AudioVideoMuxJobProcessorTest {
         doThrow(new RuntimeException("TOS 删除 5xx")).when(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
 
         List<String> logs = formatted(captureProcessorLogs(() ->
-                new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70")));
+                new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70")));
 
         verify(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
         assertThat(logs.stream().filter(message -> message.contains("[pending-cleanup]")).toList())
@@ -878,7 +877,7 @@ class AudioVideoMuxJobProcessorTest {
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false)
                 .thenThrow(new RuntimeException("取消状态查询 DB 断连"));
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -891,7 +890,7 @@ class AudioVideoMuxJobProcessorTest {
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenThrow(new RuntimeException("fail 落库断连"));
 
-        AudioVideoMuxJobProcessor processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer);
+        AudioVideoMuxJobProcessor processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer);
         List<String> logs = formatted(captureProcessorLogs(() ->
                 assertThatThrownBy(() -> processor.handle("70")).hasMessageContaining("取消状态查询 DB 断连")));
 
@@ -907,7 +906,7 @@ class AudioVideoMuxJobProcessorTest {
     void successfulPublishKeepsTheTosObject() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -918,7 +917,7 @@ class AudioVideoMuxJobProcessorTest {
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(finalizer.publishAudioVideoMuxResult(any())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         // Finalize 成功：TOS 对象保留为已发布成品，绝不进入清理
         verify(finalizer).publishAudioVideoMuxResult(any());
@@ -931,7 +930,7 @@ class AudioVideoMuxJobProcessorTest {
     void tosCleanupFailureIsRecordedWithoutTurningIntoJobFailure() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -944,7 +943,7 @@ class AudioVideoMuxJobProcessorTest {
         // TOS 删除失败（如 5xx）：留可定位的对象身份与错误记录，不改变主语义、不落失败终态
         doThrow(new RuntimeException("TOS 删除 5xx")).when(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
 
-        assertThatCode(() -> new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer)
+        assertThatCode(() -> new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer)
                 .handle("70")).doesNotThrowAnyException();
 
         // 守卫拒绝（published=false）本就未生成 Asset；清理失败不把任务写成失败终态
@@ -956,7 +955,7 @@ class AudioVideoMuxJobProcessorTest {
     void authorityCheckFailureSkipsCleanupWithoutFailingTheJob() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -970,7 +969,7 @@ class AudioVideoMuxJobProcessorTest {
         when(finalizer.hasPublishedAsset("70", "generated/9/video/out.mp4"))
                 .thenThrow(new RuntimeException("核实查询断连"));
 
-        assertThatCode(() -> new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer)
+        assertThatCode(() -> new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer)
                 .handle("70")).doesNotThrowAnyException();
 
         verify(relay, never()).deleteUnpublishedObject(anyString());
@@ -982,14 +981,14 @@ class AudioVideoMuxJobProcessorTest {
     void leaseMissedBeforeTransferSkipsTheRelayEntirely() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
         // 转存前续租未命中（已被接管/终态）：不进转存，静默退出
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(false);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verifyNoInteractions(relay);
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
@@ -1002,7 +1001,7 @@ class AudioVideoMuxJobProcessorTest {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verifyNoInteractions(gateway, relay, producer);
         verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
@@ -1014,11 +1013,11 @@ class AudioVideoMuxJobProcessorTest {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, true);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.submit("sk-frozen", "https://tos/v.mp4", "https://tos/a.mp3", true, "none", "bwmux-70-1"))
                 .thenReturn("provider-1");
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -1028,14 +1027,14 @@ class AudioVideoMuxJobProcessorTest {
     void providerFailurePersistsRequestIdAndDoesNotCreateAsset() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("failed", null, null, null,
                         "provider_error", "上游合成失败", "request-42"));
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
@@ -1051,14 +1050,14 @@ class AudioVideoMuxJobProcessorTest {
     void missingProviderResultFailsBeforeStorage() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", null, 227.0,
                         "1920x1080", null, null, "request-43"));
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
         verify(finalizer).failMediaExtractJob(eq("70"), anyString(), message.capture(), any(),
@@ -1072,7 +1071,7 @@ class AudioVideoMuxJobProcessorTest {
     void relayFailureMarksJobFailedWithoutPublishingTemporaryUrl() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
@@ -1083,7 +1082,7 @@ class AudioVideoMuxJobProcessorTest {
         when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong())).thenReturn(true);
 
-        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70");
+        new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
         verify(finalizer).failMediaExtractJob(eq("70"),
                 argThat(code -> code.equals("audio_video_mux_failed")),
@@ -1095,14 +1094,14 @@ class AudioVideoMuxJobProcessorTest {
     void lostFollowUpEnqueueReturnsWhenFenceIsNoLongerOwned() {
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
-        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
         when(gateway.submit("sk-frozen", "https://tos/v.mp4", "https://tos/a.mp3", true, "none", "bwmux-70-1"))
                 .thenReturn("provider-1");
         when(stateMachine.markProviderSubmitted(eq("70"), anyString(), eq(3L), eq("provider-1")))
                 .thenReturn(true);
         doThrow(new IllegalStateException("MQ 不可用")).when(producer).enqueue("70", 5_000L);
 
-        assertThatCode(() -> new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, credentials, gateway, relay, producer).handle("70"))
+        assertThatCode(() -> new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer).handle("70"))
                 .doesNotThrowAnyException();
         verify(finalizer).failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
                 anyLong());

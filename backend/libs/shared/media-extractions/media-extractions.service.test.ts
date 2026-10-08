@@ -137,38 +137,3 @@ describe("MediaExtractionsService.create", () => {
     expect(Object.keys(data)).not.toContain("provider");
   });
 });
-
-describe("MediaExtractionsService.create：请求方凭证冻结（断链防护）", () => {
-  // 断链背景：worker 切网关后（IKH28W）经 input.provider_credential 取请求方 sk- 调网关，
-  // 创建链路不冻结则任务必落 provider_credential_missing（先例：去字幕 / 图片生成）。
-  it("freezes the requester sk- token into job input (provider_credential)", async () => {
-    const { service, create } = makeService();
-    const result = await service.create(
-      "9",
-      "55",
-      { source_asset_id: "88", output_format: "m4a" },
-      { providerCredential: "sk-live-token" },
-    );
-    expect(result.code).toBe(200);
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: {
-          source_asset_id: "88",
-          output_format: "m4a",
-          provider_credential: "sk-live-token",
-        },
-      }),
-    });
-  });
-
-  it("omits provider_credential when the requester carries no sk- token", async () => {
-    // 未携带凭证时 input 保持既有两键结构不变（ADR-0103：业务字段结构恒定）。
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", { source_asset_id: "88" });
-    expect(result.code).toBe(200);
-    expect(create.mock.calls[0][0].data.input).toEqual({
-      source_asset_id: "88",
-      output_format: "m4a",
-    });
-  });
-});

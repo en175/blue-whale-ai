@@ -33,25 +33,6 @@ describe("VideoFrameInterpolationsController.create", () => {
   beforeEach(() => {
     vi.mocked(enqueueVideoFrameInterpolationJob).mockReset();
   });
-
-  it("seals the requester sk- token and passes it to the service as internal", async () => {
-    const { controller, service } = makeController();
-    const result = await controller.create(
-      { userId: "9" } as never,
-      "55",
-      { source_asset_id: "88", target_node_id: "node-1", fps: 60 },
-      "Bearer sk-live-token",
-    );
-    expect(result.code).toBe(200);
-    expect(service.create).toHaveBeenCalledWith("9", "55", {
-      source_asset_id: "88",
-      target_node_id: "node-1",
-      fps: 60,
-    }, {
-      providerCredential: "sk-live-token",
-    }, undefined);
-  });
-
   it("enqueues the created job and returns the result unchanged", async () => {
     const { controller, service } = makeController();
     vi.mocked(enqueueVideoFrameInterpolationJob).mockResolvedValue(undefined);

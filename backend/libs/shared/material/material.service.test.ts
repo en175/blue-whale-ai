@@ -3,7 +3,17 @@ import { NewApiError } from "@lib/core";
 
 import { MATERIAL_ACTIONS, MaterialService } from "./material.service.js";
 
-const AUTH = "Bearer sk-test-key";
+const UPSTREAM_KEY = "sk-test-key";
+const AUTH = `Bearer ${UPSTREAM_KEY}`;
+
+function settingsStub(key: string | null = UPSTREAM_KEY) {
+  return {
+    requireUpstreamKey: async () => {
+      if (key === null) throw new Error("上游凭证未配置");
+      return key;
+    },
+  } as never;
+}
 
 function stubFetch(responder: (url: string, init: RequestInit) => Response) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -27,9 +37,7 @@ function json(body: unknown, status = 200): Response {
 
 /** 构造 MaterialService：mock PrismaService（groupRepo 未用时传哑对象），隔离数据库。 */
 function makeService(prisma?: unknown) {
-  return new MaterialService(
-    prisma as never,
-  );
+  return new MaterialService(prisma as never, settingsStub());
 }
 
 describe("MaterialService —— 纯过境调用", () => {
@@ -58,20 +66,18 @@ describe("MaterialService —— 纯过境调用", () => {
     const calls = stubFetch(() => json({}));
     const service = makeService();
     await expect(
-      service.callAction(AUTH, "GetModerationResult", {}),
+      service.callAction("GetModerationResult", {}),
     ).rejects.toMatchObject({ status: 400, code: "InvalidAction" });
     expect(calls).toHaveLength(0);
   });
 
-  it("缺少上游执行凭证拒绝（401）", async () => {
-    stubFetch(() => json({}));
-    const service = makeService();
+  it("未配置上游凭证时 requireUpstreamKey 抛，且不发起请求", async () => {
+    const calls = stubFetch(() => json({}));
+    const service = new MaterialService({} as never, settingsStub(null));
     await expect(
-      service.callAction(undefined, "ListAssetGroups", {}),
-    ).rejects.toMatchObject({ status: 401 });
-    await expect(
-      service.callAction("Bearer not-sk", "ListAssetGroups", {}),
-    ).rejects.toMatchObject({ status: 401 });
+      service.callAction("ListAssetGroups", {}),
+    ).rejects.toThrow("上游凭证未配置");
+    expect(calls).toHaveLength(0);
   });
 
   it("上游信封与状态码原样透传（404 不抛错）", async () => {
@@ -81,14 +87,14 @@ describe("MaterialService —— 纯过境调用", () => {
     };
     stubFetch(() => json(errorBody, 404));
     const service = makeService();
-    const res = await service.callAction(AUTH, "GetAsset", { Id: "Asset-x" });
+    const res = await service.callAction("GetAsset", { Id: "Asset-x" });
     expect(res).toEqual({ status: 404, body: errorBody });
   });
 
   it("请求以 Bearer sk- 打网关 /api/material/{Action}", async () => {
     const calls = stubFetch(() => json({ Result: { Id: "group-1" } }));
     const service = makeService();
-    await service.callAction(AUTH, "CreateAssetGroup", {
+    await service.callAction("CreateAssetGroup", {
       Name: "g",
       GroupType: "AIGC",
     });
@@ -105,7 +111,7 @@ describe("MaterialService —— 纯过境调用", () => {
   it("CreateVisualValidateSession 纯透传（前端传入的 CallbackURL 原样保留）", async () => {
     const calls = stubFetch(() => json({ BytedToken: "bt-1", H5Link: "https://h5" }));
     const service = makeService();
-    await service.callAction(AUTH, "CreateVisualValidateSession", {
+    await service.callAction("CreateVisualValidateSession", {
       Name: "真人组",
       CallbackURL: "https://web.test/auth-success",
       ProjectName: "p",
@@ -120,7 +126,7 @@ describe("MaterialService —— 纯过境调用", () => {
   it("CreateVisualValidateSession 未传 CallbackURL 时也纯透传", async () => {
     const calls = stubFetch(() => json({ BytedToken: "bt-1", H5Link: "https://h5" }));
     const service = makeService();
-    await service.callAction(AUTH, "CreateVisualValidateSession", {
+    await service.callAction("CreateVisualValidateSession", {
       Name: "真人组",
     });
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
@@ -131,7 +137,7 @@ describe("MaterialService —— 纯过境调用", () => {
   it("其他 Action 请求体原样透传（含任意自定义字段）", async () => {
     const calls = stubFetch(() => json({ Result: {} }));
     const service = makeService();
-    await service.callAction(AUTH, "CreateAsset", {
+    await service.callAction("CreateAsset", {
       GroupId: "group-1",
       URL: "https://cdn.test/a.jpg",
       Name: "a",
@@ -152,10 +158,10 @@ describe("MaterialService —— 纯过境调用", () => {
     stubFetch(() => json({}));
     const service = makeService();
     await expect(
-      service.callAction(AUTH, "ListAssetGroups", {}),
+      service.callAction("ListAssetGroups", {}),
     ).rejects.toBeInstanceOf(NewApiError);
     await expect(
-      service.callAction(AUTH, "ListAssetGroups", {}),
+      service.callAction("ListAssetGroups", {}),
     ).rejects.toMatchObject({ status: 503 });
   });
 });
@@ -208,7 +214,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     });
     const service = makeService(prisma as never);
 
-    const groupId = await service.ensureVirtualDefaultGroup(AUTH, "9");
+    const groupId = await service.ensureVirtualDefaultGroup("9");
 
     expect(groupId).toBe("group-virt-1");
     // 上游建组：组名 默认分组：<uid>。
@@ -251,7 +257,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     });
     const service = makeService(prisma as never);
 
-    const groupId = await service.ensureVirtualDefaultGroup(AUTH, "9");
+    const groupId = await service.ensureVirtualDefaultGroup("9");
 
     expect(groupId).toBe("group-virt-1");
     expect(calls).toHaveLength(0); // 未调上游
@@ -266,7 +272,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     const service = makeService(prisma as never);
 
     await expect(
-      service.ensureVirtualDefaultGroup(AUTH, "9"),
+      service.ensureVirtualDefaultGroup("9"),
     ).rejects.toMatchObject({ status: 502, code: "create_default_material_group_failed" });
     expect(calls).toHaveLength(1);
     expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled();
@@ -280,7 +286,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     const service = makeService(prisma as never);
 
     await expect(
-      service.ensureVirtualDefaultGroup(AUTH, "9"),
+      service.ensureVirtualDefaultGroup("9"),
     ).rejects.toMatchObject({ status: 400 });
     expect(calls).toHaveLength(1);
     expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled();
@@ -295,7 +301,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     const service = makeService(prisma as never);
 
     await expect(
-      service.ensureVirtualDefaultGroup(AUTH, "9"),
+      service.ensureVirtualDefaultGroup("9"),
     ).rejects.toThrow("db down");
     // 上游：先建组，再补偿删组。
     expect(calls[0].url).toBe("http://gateway.test/api/material/CreateAssetGroup");
@@ -470,10 +476,9 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     const { prisma, mirrorStatus, clearMany } = makePrisma(null);
     const calls = stubFetch(() => json({ Result: {} }));
 
-    await new MaterialService(prisma as never).handleUpstreamMaterialFailure({
+    await new MaterialService(prisma as never, settingsStub()).handleUpstreamMaterialFailure({
       userId: "9",
       materialId: "asset-a",
-      authorization: AUTH,
       errorCode: "Sensitive",
       errorMessage: "命中审核",
     });
@@ -500,10 +505,9 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     const { prisma, mirrorStatus, clearMany } = makePrisma(null);
     const calls = stubFetch(() => json({ Result: {} }));
 
-    await new MaterialService(prisma as never).handleUpstreamMaterialFailure({
+    await new MaterialService(prisma as never, settingsStub()).handleUpstreamMaterialFailure({
       userId: "9",
       materialId: "asset-gone",
-      authorization: AUTH,
       deleteUpstream: false,
     });
     await new Promise((r) => setTimeout(r, 0));
@@ -518,11 +522,10 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     stubFetch(() => json({ ResponseError: { Code: "InternalError" } }, 500));
 
     await expect(
-      new MaterialService(prisma as never).handleUpstreamMaterialFailure({
+      new MaterialService(prisma as never, settingsStub()).handleUpstreamMaterialFailure({
         userId: "9",
         materialId: "asset-a",
-        authorization: AUTH,
-      }),
+        }),
     ).resolves.toBeUndefined();
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -531,7 +534,7 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     const { prisma } = makePrisma({ status: "Failed", errorCode: "Sensitive", errorMessage: "命中审核" });
     const calls = stubFetch(() => json({}));
 
-    const served = await new MaterialService(prisma as never).tryServeLocalFailedAsset(
+    const served = await new MaterialService(prisma as never, settingsStub()).tryServeLocalFailedAsset(
       "9", "GetAsset", { Id: "asset-a" },
     );
 
@@ -547,21 +550,21 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     async (status) => {
       const { prisma } = makePrisma({ status });
       await expect(
-        new MaterialService(prisma as never).tryServeLocalFailedAsset("9", "GetAsset", { Id: "asset-a" }),
+        new MaterialService(prisma as never, settingsStub()).tryServeLocalFailedAsset("9", "GetAsset", { Id: "asset-a" }),
       ).resolves.toBeNull();
     },
   );
 
   it("tryServeLocalFailedAsset：无本地行 / 非 GetAsset / id 非法 → 都放行走透传", async () => {
     const none = makePrisma(null);
-    const svc = new MaterialService(none.prisma as never);
+    const svc = new MaterialService(none.prisma as never, settingsStub());
     await expect(svc.tryServeLocalFailedAsset("9", "GetAsset", { Id: "asset-a" })).resolves.toBeNull();
     await expect(
-      new MaterialService(makePrisma({ status: "Failed" }).prisma as never)
+      new MaterialService(makePrisma({ status: "Failed" }).prisma as never, settingsStub())
         .tryServeLocalFailedAsset("9", "ListAssets", { Id: "asset-a" }),
     ).resolves.toBeNull();
     await expect(
-      new MaterialService(makePrisma({ status: "Failed" }).prisma as never)
+      new MaterialService(makePrisma({ status: "Failed" }).prisma as never, settingsStub())
         .tryServeLocalFailedAsset("9", "GetAsset", { Id: "not-an-asset" }),
     ).resolves.toBeNull();
   });
@@ -592,7 +595,7 @@ describe("MaterialService —— 上传口回显素材状态的读口（IKI65H�
   it("有状态行：原样回该行的 status（不推断、不归一）", async () => {
     const { prisma, findFirst } = makeStatusPrisma({ status: "Failed" });
     await expect(
-      new MaterialService(prisma as never).materialStatusReader().load("9", "asset-a"),
+      new MaterialService(prisma as never, settingsStub()).materialStatusReader().load("9", "asset-a"),
     ).resolves.toBe("Failed");
     // 归属谓词必须带上——与仓库层其余读一致，纵深防御。
     expect(findFirst).toHaveBeenCalledWith({
@@ -603,7 +606,7 @@ describe("MaterialService —— 上传口回显素材状态的读口（IKI65H�
   it("无状态行：回 null（存量素材可能从未建过行）", async () => {
     const { prisma } = makeStatusPrisma(null);
     await expect(
-      new MaterialService(prisma as never).materialStatusReader().load("9", "asset-a"),
+      new MaterialService(prisma as never, settingsStub()).materialStatusReader().load("9", "asset-a"),
     ).resolves.toBeNull();
   });
 
@@ -614,7 +617,7 @@ describe("MaterialService —— 上传口回显素材状态的读口（IKI65H�
   it("查库失败：不抛，按无状态行回 null", async () => {
     const { prisma } = makeStatusPrisma(null, new Error("db down"));
     await expect(
-      new MaterialService(prisma as never).materialStatusReader().load("9", "asset-a"),
+      new MaterialService(prisma as never, settingsStub()).materialStatusReader().load("9", "asset-a"),
     ).resolves.toBeNull();
   });
 });

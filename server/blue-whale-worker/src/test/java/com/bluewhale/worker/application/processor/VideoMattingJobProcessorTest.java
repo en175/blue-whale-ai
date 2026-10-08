@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoMattingDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto;
@@ -12,7 +13,6 @@ import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.VideoMattingContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoMattingError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMatteVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMatteVideoClient.MatteVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -68,7 +68,7 @@ class VideoMattingJobProcessorTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
-    @Mock private GenerationCredentialService credentialService;
+    @Mock private UpstreamCredential upstreamCredential;
     @Mock private NewApiMediaKitMatteVideoClient matteVideoClient;
     @Mock private TosVideoMediaRelay mediaRelay;
     @Mock private GenerationMessageProducer producer;
@@ -82,7 +82,6 @@ class VideoMattingJobProcessorTest {
         input.put("target_node_id", "node-abc");
         input.put("mode", mode);
         input.put("format", "WEBM");
-        input.put("provider_credential", "sk-frozen-token");
         return input;
     }
 
@@ -100,10 +99,10 @@ class VideoMattingJobProcessorTest {
     void setUp() {
         processor = new VideoMattingJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
-                credentialService, matteVideoClient, mediaRelay, producer);
+                upstreamCredential, matteVideoClient, mediaRelay, producer);
         when(finalizer.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
-        when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
         // 结果转存心跳续租默认放行（守卫命中）；中止路径由专项用例覆写
         when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
                 .thenReturn(true);
@@ -258,12 +257,14 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("缺冻结凭证 → provider_credential_missing")
+    @DisplayName("上游凭证未配置 → provider_credential_missing")
     void missingCredential_credentialMissing() {
         Map<String, Object> input = webmInput("portrait");
-        input.remove("provider_credential");
         stubSubmitClaim(input);
 
+        when(upstreamCredential.requireKey())
+                .thenThrow(new IllegalStateException(
+                        "上游凭证未配置：请在管理端「系统设置 → 上游凭证」填入 new-api 的项目统一 key"));
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
@@ -1146,7 +1147,7 @@ class VideoMattingJobProcessorTest {
     void tosMissing_failsWithoutPassthrough() {
         VideoMattingJobProcessor noRelayProcessor = new VideoMattingJobProcessor(
                 stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
-                credentialService, matteVideoClient, null, producer);
+                upstreamCredential, matteVideoClient, null, producer);
         stubPollClaim(webmInput("portrait"), 3);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",

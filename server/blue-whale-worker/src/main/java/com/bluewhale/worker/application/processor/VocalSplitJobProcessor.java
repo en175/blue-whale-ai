@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishVocalSplitDto;
@@ -14,7 +15,6 @@ import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VocalSplitError;
-import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSeparateVoiceClient;
@@ -35,43 +35,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * vocal_split（人声背景分离）作业处理器——火山 MediaKit 异步链（IKHA2J；契约 =
- * backend/libs/contracts/vocal-split.ts）。编排骨架对齐 {@link MediaExtractJobProcessor}
- * （每步 = 一次 MQ 消费，视频轮询骨架复用）：
- * <ol>
- *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
- *   <li>providerTaskId==null → 解析冻结 input + 源素材（视频或音频 Asset，官方双协议输入）→
- *       网关提交（scene 出站映射官方首字母大写枚举 + output_format 同名同值，**不是
- *       extract-audio 的 format**）→ markProviderSubmitted（存 provider_task_id + 释放租约 +
- *       next+5s + progress=1）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
- *       processing 共享 720 轮询预算，超限同归 1047）；processing →
- *       续排（超限 1047）；failed → 分类终态；completed → **逐轨立即下载转存自家 TOS
- *       （火山各轨 URL 仅 24h 有效）** → 按 scene 轨序发布 2/3 条音频 Asset → 终态 succeeded
- *       （轨数组回填终态日志 payload，getStatus 投影见契约 VocalSplitTrackResult）</li>
- * </ol>
- * 多轨发布面（与单轨先例的契约差异）：scene 二分法（audio/music）两轨 voice+background、
- * 三分法（drama/narrate）三轨 voice+music+sfx；轨序单源 {@link VocalSplitContract#SCENE_TRACKS}，
- * 按轨序逐轨 persist + 单事务发布，output_asset_ids 按轨序拼 JSON 数组；官方 result 缺任一
- * 轨 URL 或任一轨转存失败 → 整单失败（1047，无部分成功口径）。
- * <p>
- * 错误码口径（契约尾注三类映射，无 worker 级自动重试，用户手动重试沿用冻结 input）：
- * <ul>
- *   <li>provider_credential_missing：任务缺少冻结凭证（家族同构；凭证冻结在创建入口）</li>
- *   <li>invalid_input：业务键缺失 / scene / output_format 枚举外（创建入口复核是权威，
- *       worker 兜底防御）</li>
- *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
- *       §5 分类信号（网关错误与火山 failed 双路），保留既有码投影</li>
- *   <li>vocal_split_failed（1047）：其余一律归并兜底——网关 provider_failed / 提交超时 /
- *       轮询超时 / 火山任务 failed（含 scene 门槛等供应商侧拒绝）/ 源素材不可用 / 结果缺轨 /
- *       转存失败（超时也归并是家族口径：宁可不重试也不双跑），上游可读原因随 message
- *       透传前端投影</li>
- * </ul>
- * <p>
- * 进度口径对齐家族：markProviderSubmitted 落 progress=1（SQL 侧）、轮询 rescheduleProviderPoll
- * 保持不倒退、publishVocalSplitResult 终态 progress=100。
- */
 @Component
 public class VocalSplitJobProcessor implements JobProcessor {
 
@@ -99,7 +62,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
-    private final GenerationCredentialService credentialService;
+    private final UpstreamCredential upstreamCredential;
     private final NewApiMediaKitSeparateVoiceClient separateVoiceClient;
     private final TosAudioMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
@@ -111,7 +74,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
             AssetSourceService assetSource,
-            GenerationCredentialService credentialService,
+            UpstreamCredential upstreamCredential,
             NewApiMediaKitSeparateVoiceClient separateVoiceClient,
             TosAudioMediaRelay mediaRelay,
             @Qualifier("vocalSplitMessageProducer")
@@ -123,7 +86,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
         this.claimSpec = ClaimSpec.bySources(
                 VocalSplitContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
-        this.credentialService = credentialService;
+        this.upstreamCredential = upstreamCredential;
         this.separateVoiceClient = separateVoiceClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
@@ -186,20 +149,12 @@ public class VocalSplitJobProcessor implements JobProcessor {
      * 分相主逻辑（家族 runStep 同构）：凭证 → submit 相 / poll 相。
      */
     private void runStep(ClaimedJob claim) {
-        // 取明文凭证（家族同构；冻结在创建入口）
-        Object credentialObj = claim.input().get("provider_credential");
-        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
-            failVocalSplit(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "人声背景分离任务缺少供应商凭证");
-            return;
-        }
         String providerToken;
         try {
-            providerToken = credentialService.open(providerCredential);
-        } catch (Exception e) {
-            log.debug("[vocal_split] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
-            failVocalSplit(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "人声背景分离任务凭证无效");
+            providerToken = upstreamCredential.requireKey();
+        } catch (IllegalStateException e) {
+            log.warn("[vocal_split] 生成服务凭证未配置 jobId={}: {}", claim.id(), e.getMessage());
+            failVocalSplit(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置");
             return;
         }
 

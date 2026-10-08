@@ -25,9 +25,6 @@ export const VIDEO_SUBTITLE_ERASE_JOB_TYPE = "video_subtitle_erase";
  *  source 白名单仅含本值（image_erase / image_cutout 的专属来源值同款模式）。 */
 export const VIDEO_SUBTITLE_ERASE_SOURCE = "video_subtitle_erase";
 
-/** input 冻结键名（四键恒在、值恒为合法枚举，创建时定死，重试原样沿用）。
- *  基础设施键 provider_credential 在业务键之上由创建侧冻结落库（同 image_erase 先例，
- *  不进本 zod——它校验的是客户端 payload，凭证来自请求头冻结）。 */
 export const VIDEO_SUBTITLE_ERASE_INPUT_KEYS = {
   /** 源素材身份（被去字幕的视频 Asset id；命名沿用 media_extract 的 source_asset_id）。 */
   sourceAssetId: "source_asset_id",

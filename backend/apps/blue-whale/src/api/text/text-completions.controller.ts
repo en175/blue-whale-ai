@@ -2,14 +2,13 @@ import { Readable } from "node:stream";
 import {
   Body,
   Controller,
-  Headers,
   Post,
   Req,
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
-import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { newApiFetch } from "@lib/shared/upstream/new-api-egress.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import {
@@ -22,17 +21,17 @@ import {
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
-/** POST /api/text/completions —— OpenAI 兼容文生文薄代理（IK6ZEH；加固 IK707U）。
- *  鉴权 + text 白名单闸，body 全透传 Go new-api /v1/chat/completions；stream=true 时 raw SSE 透传。 */
 @Controller("text")
 export class TextCompletionsController {
-  constructor(private readonly models: ModelCapabilityReadService) {}
+  constructor(
+    private readonly models: ModelCapabilityReadService,
+    private readonly settings: SystemSettingsService,
+  ) {}
 
   @Post("completions")
   async completions(
     @CurrentUser() _user: AuthenticatedUser,
     @Body() body: unknown,
-    @Headers("authorization") authorization: string | undefined,
     @Req() req: Request,
     @Res() res: Response,
   ) {
@@ -43,12 +42,7 @@ export class TextCompletionsController {
       return;
     }
 
-    const token = parseBearerToken(authorization);
-    if (!token) {
-      const err = openAiError(401, "缺少有效的 sk- 令牌", "invalid_token");
-      res.status(err.status).json(err.body);
-      return;
-    }
+    const token = await this.settings.requireUpstreamKey();
 
     const contentLength = Number(req.headers["content-length"] ?? 0);
     if (contentLength > TEXT_MAX_BODY_BYTES) {

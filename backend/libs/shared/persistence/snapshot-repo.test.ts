@@ -5,7 +5,7 @@ import { createSnapshotRepo } from "./snapshot-repo.js";
 import { capabilityDigest } from "./capability-digest.js";
 
 describe("SnapshotRepo.loadJobsAndAssets", () => {
-  it("does not expose the encrypted provider credential in snapshot input", async () => {
+  it("快照投影剥掉 input 里的 provider_credential", async () => {
     const prisma = {
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([

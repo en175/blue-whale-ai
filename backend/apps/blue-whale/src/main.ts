@@ -101,9 +101,6 @@ async function bootstrap(): Promise<void> {
   //          拿它去查 `process.env` 只会永远查不到，门禁就变成一句恒真的废话。
   //       2. 「**数据还没填**」与「**部署配错**」是两回事，前者不该拒启。配置要在管理端填，
   //          管理端要先登得进来——在这里拒启，新部署永远起不来，没人能进去把它配上。
-  //    它的 fail-closed 落在真正打上游的地方：下游 `parseBearerToken` 拿到 null 即 401，
-  //    调用点抛 `UpstreamCredentialMissingError`（503 + 指名道姓的文案）。没有哪条路径
-  //    会把空串发给上游。
   const missingBilling = missingBillingConfig();
   if (missingBilling.length > 0) {
     logger.error(
