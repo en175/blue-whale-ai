@@ -782,12 +782,9 @@ export function buildTaskTypes(
   enabled: Record<string, boolean>,
   followDuration: Record<string, boolean>,
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...base };
+  const out: Record<string, unknown> = {};
   for (const taskType of TASK_TYPE_KEYS) {
-    if (!enabled[taskType]) {
-      delete out[taskType];
-      continue;
-    }
+    if (!enabled[taskType]) continue;
     const list = (ratios[taskType] ?? []).map((s) => s.trim()).filter(Boolean);
     const entry = base[taskType];
     const rest =
