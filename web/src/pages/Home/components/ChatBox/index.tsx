@@ -3,6 +3,7 @@
 
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useDismissOnOutside } from '@/pages/CanvasPage/hooks/useDismissOnOutside';
 import { createPortal } from 'react-dom';
 import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
 import SkillModal from '../SkillModal';
@@ -121,10 +122,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const agentFileInputRef = useRef<HTMLInputElement>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
 
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const toggleDropdown = (key: string) => setOpenDropdown((cur) => (cur === key ? null : key));
   const [creationModel, setCreationModel] = useState('');
   const [reasoningModel, setReasoningModel] = useState('');
-  const [showCreationDropdown, setShowCreationDropdown] = useState(false);
-  const [showReasoningDropdown, setShowReasoningDropdown] = useState(false);
   const [underlineStyle, setUnderlineStyle] = useState<React.CSSProperties>({});
 
 
@@ -135,11 +136,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [duration, setDuration] = useState(0);
 
   const [generateAudio, setGenerateAudio] = useState(true);
-  const [showVideoModelDrop, setShowVideoModelDrop] = useState(false);
-  const [showVideoModeDrop, setShowVideoModeDrop] = useState(false);
-  const [showRatioDrop, setShowRatioDrop] = useState(false);
-  const [showResDrop, setShowResDrop] = useState(false);
-  const [showDurationDrop, setShowDurationDrop] = useState(false);
 
   const [refFiles, setRefFiles] = useState<
     { file?: File; preview: string; type: 'image' | 'video'; assetId?: string | number }[]
@@ -172,9 +168,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [imageModel, setImageModel] = useState('');
   const [imageAspectRatio, setImageAspectRatio] = useState('');
   const [imageResolution, setImageResolution] = useState('');
-  const [showImgModelDrop, setShowImgModelDrop] = useState(false);
-  const [showImgRatioDrop, setShowImgRatioDrop] = useState(false);
-  const [showImgResDrop, setShowImgResDrop] = useState(false);
 
   const [imageRefFiles, setImageRefFiles] = useState<
     { file?: File; preview: string; name?: string; assetId?: string | number }[]
@@ -316,49 +309,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   }, [updateUnderline]);
 
 
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (creationRef.current && !creationRef.current.contains(e.target as Node)) {
-        setShowCreationDropdown(false);
-      }
-      if (reasoningRef.current && !reasoningRef.current.contains(e.target as Node)) {
-        setShowReasoningDropdown(false);
-      }
-      if (videoModelRef.current && !videoModelRef.current.contains(e.target as Node)) {
-        setShowVideoModelDrop(false);
-      }
-      if (videoModeRef.current && !videoModeRef.current.contains(e.target as Node)) {
-        setShowVideoModeDrop(false);
-      }
-      if (ratioRef.current && !ratioRef.current.contains(e.target as Node)) {
-        setShowRatioDrop(false);
-      }
-      if (resRef.current && !resRef.current.contains(e.target as Node)) {
-        setShowResDrop(false);
-      }
-      if (durationRef.current && !durationRef.current.contains(e.target as Node)) {
-        setShowDurationDrop(false);
-      }
-      if (imgModelRef.current && !imgModelRef.current.contains(e.target as Node)) {
-        setShowImgModelDrop(false);
-      }
-      if (imgRatioRef.current && !imgRatioRef.current.contains(e.target as Node)) {
-        setShowImgRatioDrop(false);
-      }
-      if (imgResRef.current && !imgResRef.current.contains(e.target as Node)) {
-        setShowImgResDrop(false);
-      }
-
-      if (
-        refMenuRef.current && !refMenuRef.current.contains(e.target as Node) &&
-        (!refCardRef.current || !refCardRef.current.contains(e.target as Node))
-      ) {
-        setRefMenu(null);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
+  useDismissOnOutside([
+    { open: openDropdown === 'creation', ref: creationRef, dismiss: () => setOpenDropdown(null) },
+    { open: openDropdown === 'reasoning', ref: reasoningRef, dismiss: () => setOpenDropdown(null) },
+    { open: openDropdown === 'videoModel', ref: videoModelRef, dismiss: () => setOpenDropdown(null) },
+    { open: openDropdown === 'videoMode', ref: videoModeRef, dismiss: () => setOpenDropdown(null) },
+    { open: openDropdown === 'ratio', ref: ratioRef, dismiss: () => setOpenDropdown(null) },
+    { open: openDropdown === 'res', ref: resRef, dismiss: () => setOpenDropdown(null) },
+    { open: openDropdown === 'duration', ref: durationRef, dismiss: () => setOpenDropdown(null) },
+    { open: openDropdown === 'imgModel', ref: imgModelRef, dismiss: () => setOpenDropdown(null) },
+    { open: openDropdown === 'imgRatio', ref: imgRatioRef, dismiss: () => setOpenDropdown(null) },
+    { open: openDropdown === 'imgRes', ref: imgResRef, dismiss: () => setOpenDropdown(null) },
+    { open: refMenu !== null, ref: [refMenuRef, refCardRef], dismiss: () => setRefMenu(null) },
+  ]);
 
 
 
@@ -731,7 +694,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
 
   const handleVideoModeChange = (key: VideoMode) => {
-    setShowVideoModeDrop(false);
+    setOpenDropdown(null);
     if (key === videoMode) return;
     const slots = frameSlotCountOf(key);
     if (slots > 0) {
@@ -1179,12 +1142,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <div className={styles.dropdownWrap} ref={videoModelRef}>
                   <button
                     className={styles.paramBtn}
-                    onClick={() => setShowVideoModelDrop(!showVideoModelDrop)}
+                    onClick={() => toggleDropdown('videoModel')}
                   >
                     <span>{currentVideoModel}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showVideoModelDrop && (
+                  {openDropdown === 'videoModel' && (
                     <div className={styles.dropdownMenuDown}>
                       {videoModelOptions.map((m) => (
                         <button
@@ -1192,7 +1155,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                           className={`${styles.dropdownItem} ${videoModel === m.key ? styles.dropdownItemActive : ''}`}
                           onClick={() => {
                             setVideoModel(m.key);
-                            setShowVideoModelDrop(false);
+                            setOpenDropdown(null);
                             const full = videoModelList.find((x) => x.model_id === m.key);
                             if (full) setAspectRatio(pickDefaultVideoRatio(full.supported_aspect_ratios, full.default_aspect_ratio));
                           }}
@@ -1208,12 +1171,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <div className={styles.dropdownWrap} ref={videoModeRef}>
                   <button
                     className={styles.paramBtn}
-                    onClick={() => setShowVideoModeDrop(!showVideoModeDrop)}
+                    onClick={() => toggleDropdown('videoMode')}
                   >
                     <span>{currentVideoMode}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showVideoModeDrop && (
+                  {openDropdown === 'videoMode' && (
                     <div className={styles.dropdownMenuDown}>
                       {videoModeOptions.map((m) => (
                         <button
@@ -1234,20 +1197,20 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   <div className={styles.dropdownWrap} ref={ratioRef}>
                     <button
                       className={styles.paramBtn}
-                      onClick={() => setShowRatioDrop(!showRatioDrop)}
+                      onClick={() => toggleDropdown('ratio')}
                     >
                       <RatioIcon ratio={aspectRatio} size={22} />
                       { }
                       <span>{videoRatioText(aspectRatio)}</span>
                       <ChevronDown size={12} strokeWidth={2} />
                     </button>
-                    {showRatioDrop && (
+                    {openDropdown === 'ratio' && (
                       <div className={styles.dropdownMenuDown}>
                         {videoRatioOptions.map((ratio) => (
                           <button
                             key={ratio.id}
                             className={`${styles.dropdownItem} ${aspectRatio === ratio.id ? styles.dropdownItemActive : ''}`}
-                            onClick={() => { setAspectRatio(ratio.id); setShowRatioDrop(false); }}
+                            onClick={() => { setAspectRatio(ratio.id); setOpenDropdown(null); }}
                           >
                             <RatioIcon ratio={ratio.id} size={22} />
                             { }
@@ -1263,18 +1226,18 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <div className={styles.dropdownWrap} ref={resRef}>
                   <button
                     className={styles.paramBtn}
-                    onClick={() => setShowResDrop(!showResDrop)}
+                    onClick={() => toggleDropdown('res')}
                   >
                     <span>{resolution}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showResDrop && (
+                  {openDropdown === 'res' && (
                     <div className={styles.dropdownMenuDown}>
                       {videoSizeItems.map((r) => (
                         <button
                           key={r.key}
                           className={`${styles.dropdownItem} ${resolution === r.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setResolution(r.key); setShowResDrop(false); }}
+                          onClick={() => { setResolution(r.key); setOpenDropdown(null); }}
                         >
                           {r.label}
                         </button>
@@ -1288,12 +1251,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   <button
                     className={styles.paramBtn}
                     disabled={videoDurationLocked != null}
-                    onClick={() => setShowDurationDrop(!showDurationDrop)}
+                    onClick={() => toggleDropdown('duration')}
                   >
                     <span>{videoDurationLocked != null ? '⏱ 跟随原视频' : `⏱ ${duration}s`}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showDurationDrop && videoDurationLocked == null && videoDurationRange && (
+                  {openDropdown === 'duration' && videoDurationLocked == null && videoDurationRange && (
                     <div className={`${styles.dropdownMenuDown} ${styles.durationDropdown}`}>
                       <DurationSlider
                         value={duration}
@@ -1405,12 +1368,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <div className={styles.dropdownWrap} ref={imgModelRef}>
                   <button
                     className={styles.paramBtn}
-                    onClick={() => setShowImgModelDrop(!showImgModelDrop)}
+                    onClick={() => toggleDropdown('imgModel')}
                   >
                     <span>{currentImageModel}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showImgModelDrop && (
+                  {openDropdown === 'imgModel' && (
                     <div className={styles.dropdownMenuDown}>
                       {imageModelOptions.map((m) => (
                         <button
@@ -1420,7 +1383,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                             const full = imageModelList.find((x) => x.model_id === m.key);
                             if (full) applyImageModel(full);
                             else setImageModel(m.key);
-                            setShowImgModelDrop(false);
+                            setOpenDropdown(null);
                           }}
                         >
                           {m.label}
@@ -1434,19 +1397,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <div className={styles.dropdownWrap} ref={imgRatioRef}>
                   <button
                     className={styles.paramBtn}
-                    onClick={() => setShowImgRatioDrop(!showImgRatioDrop)}
+                    onClick={() => toggleDropdown('imgRatio')}
                   >
                     <RatioIcon ratio={imageAspectRatio} size={22} />
                     <span>{imageRatioLabel}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showImgRatioDrop && (
+                  {openDropdown === 'imgRatio' && (
                     <div className={styles.dropdownMenuDown}>
                       {imageRatioOptions.map((ratio) => (
                         <button
                           key={ratio.id}
                           className={`${styles.dropdownItem} ${imageAspectRatio === ratio.id ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setImageAspectRatio(ratio.id); setShowImgRatioDrop(false); }}
+                          onClick={() => { setImageAspectRatio(ratio.id); setOpenDropdown(null); }}
                         >
                           <RatioIcon ratio={ratio.id} size={22} />
                           <span>{ratio.label}</span>
@@ -1460,12 +1423,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <div className={styles.dropdownWrap} ref={imgResRef}>
                   <button
                     className={styles.paramBtn}
-                    onClick={() => setShowImgResDrop(!showImgResDrop)}
+                    onClick={() => toggleDropdown('imgRes')}
                   >
                     <span>{currentImageResolution}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showImgResDrop && (
+                  {openDropdown === 'imgRes' && (
                     <div className={styles.dropdownMenuDown}>
                       {imageSizeItems.map((r) => (
                         <button
@@ -1476,7 +1439,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                             if (selectedImageModel) {
                               setImageAspectRatio(pickRatioForSize(selectedImageModel, r.key, imageAspectRatio));
                             }
-                            setShowImgResDrop(false);
+                            setOpenDropdown(null);
                           }}
                         >
                           {r.label}
@@ -1615,12 +1578,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <div className={styles.dropdownWrap} ref={creationRef}>
                   <button
                     className={styles.modelBtn}
-                    onClick={() => setShowCreationDropdown(!showCreationDropdown)}
+                    onClick={() => toggleDropdown('creation')}
                   >
                     <span>{currentCreationModel}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showCreationDropdown && (
+                  {openDropdown === 'creation' && (
                     <div className={styles.dropdownMenu}>
                       {creationModelOptions.map((m) => (
                         <button
@@ -1628,7 +1591,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                           className={`${styles.dropdownItem} ${creationModel === m.key ? styles.dropdownItemActive : ''}`}
                           onClick={() => {
                             setCreationModel(m.key);
-                            setShowCreationDropdown(false);
+                            setOpenDropdown(null);
                           }}
                         >
                           {m.label}
@@ -1645,12 +1608,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <div className={styles.dropdownWrap} ref={reasoningRef}>
                   <button
                     className={styles.modelBtn}
-                    onClick={() => setShowReasoningDropdown(!showReasoningDropdown)}
+                    onClick={() => toggleDropdown('reasoning')}
                   >
                     <span>{currentReasoningModel}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showReasoningDropdown && (
+                  {openDropdown === 'reasoning' && (
                     <div className={styles.dropdownMenu}>
                       {agentModelOptions.map((m) => (
                         <button
@@ -1658,7 +1621,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                           className={`${styles.dropdownItem} ${reasoningModel === m.key ? styles.dropdownItemActive : ''}`}
                           onClick={() => {
                             setReasoningModel(m.key);
-                            setShowReasoningDropdown(false);
+                            setOpenDropdown(null);
                           }}
                         >
                           {m.label}
