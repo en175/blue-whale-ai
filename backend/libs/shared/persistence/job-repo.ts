@@ -503,7 +503,6 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
     async listUserJobIds(filter) {
       const where = {
         user_id: BigInt(filter.userId),
-        is_delete: false,
         ...(filter.type ? { type: filter.type } : {}),
         ...(filter.modelId
           ? { input: { path: "$.model_id", equals: filter.modelId } }

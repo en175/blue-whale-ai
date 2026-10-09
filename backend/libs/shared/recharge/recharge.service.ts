@@ -52,6 +52,8 @@ const GATEWAY_ORDER_TTL_MS = 2 * 60 * 60 * 1000;
 
 const RECONCILE_INTERVAL_MS = 30 * 1000;
 
+export const RECHARGE_LOT_BIZ_TYPE = "recharge";
+
 export interface RechargeTierOffer {
   id: string;
   name: string;
@@ -463,6 +465,7 @@ export class RechargeService {
       userId: Number(order.userId),
       credits: order.credits,
       bizId: order.tradeNo,
+      bizType: RECHARGE_LOT_BIZ_TYPE,
       ...(expiresAt ? { expiresAt } : {}),
     });
 
@@ -492,6 +495,7 @@ export class RechargeService {
       credits: settled.bonusCredits,
       source: "bonus",
       bizId: settled.tradeNo,
+      bizType: RECHARGE_LOT_BIZ_TYPE,
       grantKey: `bonus:tier:${settled.userId}:${settled.tierId}`,
       ...(expiresAt ? { expiresAt } : {}),
     });

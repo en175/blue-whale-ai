@@ -122,6 +122,7 @@
       FROM billing_ledger_entries e
       LEFT JOIN billing_credit_lots l2
              ON l2.id = CAST(e.biz_id AS UNSIGNED) AND l2.user_id = e.user_id
+            AND e.biz_type = 'expire'
       WHERE e.account IN ('wallet', 'frozen')
         AND e.idempotency_key LIKE CONCAT('%:', e.account)
         AND e.biz_type IN ('expire', 'adjust')

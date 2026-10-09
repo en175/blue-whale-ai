@@ -56,7 +56,7 @@ describe("buildExportWorkbook", () => {
     ]);
     expect(sheet.getRow(2).getCell(3).value).toBe(40);
     expect(sheet.getRow(2).getCell(4).value).toBe(600);
-    expect(sheet.getRow(3).getCell(4).value).toBe("");
+    expect(sheet.getRow(3).getCell(4).value).toBe("—");
     expect(sheet.getRow(2).getCell(5).value).toBe("已到账");
   });
 
@@ -77,7 +77,7 @@ describe("buildExportWorkbook", () => {
 
     expect(sheet.getRow(2).getCell(4).value).toBe(3300);
     expect(sheet.getRow(2).getCell(5).value).toBe("已到账");
-    expect(sheet.getRow(3).getCell(4).value).toBe("");
+    expect(sheet.getRow(3).getCell(4).value).toBe("—");
     expect(sheet.getRow(3).getCell(5).value).toBe("已取消");
     expect(headersOf(sheet)).not.toContain("订单编号");
   });
@@ -165,7 +165,7 @@ describe("buildExportWorkbook", () => {
     expect(sheet.getRow(2).getCell(4).value).toBe("一只鲸鱼跃出水面");
     expect(sheet.getRow(2).getCell(2).value).toBe("text2video");
     expect(sheet.getRow(3).getCell(2).value).toBe("过期核销");
-    expect(sheet.getRow(3).getCell(4).value).toBe("2024-12-01T09:12:00+08:00 充值到账批次");
+    expect(sheet.getRow(3).getCell(4).value).toBe("2024-12-01 充值到账批次");
     expect(sheet.getRow(3).getCell(5).value).toBe(1200);
     expect(headersOf(sheet)).not.toContain("任务 ID");
   });

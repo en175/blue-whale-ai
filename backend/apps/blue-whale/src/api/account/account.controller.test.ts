@@ -379,7 +379,7 @@ describe("AccountController.creditLots（批次台账）", () => {
           remaining: 1200,
           createdAt: "2024-12-01T09:12:00+08:00",
           expiresAt: "",
-          bizType: "order",
+          bizType: "recharge",
           bizId: "BW20241201091200555",
         },
       ],
@@ -404,7 +404,7 @@ describe("AccountController.creditLots（批次台账）", () => {
     expect(response.data.items[0]).not.toHaveProperty("biz_id");
   });
 
-  it("非充值批次不打订单表：biz_type 不是 order 时 product_name 为 null", async () => {
+  it("非充值批次不打订单表：biz_type 不是 recharge 时 product_name 为 null", async () => {
     listCreditLots.mockResolvedValue({
       items: [
         {
@@ -630,7 +630,7 @@ describe("AccountController.export（导出 xlsx）", () => {
           remaining: 1200,
           createdAt: "2024-12-01T09:12:00+08:00",
           expiresAt: "",
-          bizType: "order",
+          bizType: "recharge",
           bizId: "BW20241201091200555",
         },
       ],

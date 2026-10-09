@@ -42,7 +42,7 @@ const ORDERS: ExportSpec<ExportOrderRow> = {
     {
       key: "credits",
       header: "到账积分",
-      value: (r) => (r.status === "paid" ? r.credits + r.bonus_credits : ""),
+      value: (r) => (r.status === "paid" ? r.credits + r.bonus_credits : "—"),
       width: 14,
     },
     {
@@ -121,10 +121,16 @@ export interface ExportConsumeRow {
 
 const EXPIRE_TYPE = "expire";
 
+const DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
+
+function dateOnly(value: string): string {
+  return DATE_PREFIX.exec(value)?.[0] ?? value;
+}
+
 function consumeDetail(row: ExportConsumeRow): string {
   if (row.type === EXPIRE_TYPE) {
     if (row.lot_source === null || row.lot_created_at === null) return "—";
-    return `${row.lot_created_at} ${lotSourceText(row.lot_source)}批次`;
+    return `${dateOnly(row.lot_created_at)} ${lotSourceText(row.lot_source)}批次`;
   }
   return row.prompt ?? row.title;
 }

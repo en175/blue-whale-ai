@@ -16,7 +16,7 @@ import {
   type BillingTransaction,
 } from "@lib/shared/billing/billing-client.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
-import { RechargeService } from "@lib/shared/recharge/recharge.service.js";
+import { RechargeService, RECHARGE_LOT_BIZ_TYPE } from "@lib/shared/recharge/recharge.service.js";
 import {
   USER_ORDER_STATUSES,
   isUserOrderStatus,
@@ -39,8 +39,6 @@ import {
 const EXPORT_PAGE_SIZE = 100;
 
 const MAX_FILTER_JOB_IDS = 10_000;
-
-const LOT_BIZ_TYPE_ORDER = "order";
 
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
@@ -197,7 +195,7 @@ export class AccountController {
     items: BillingCreditLot[],
   ): Promise<Map<string, string>> {
     const tradeNos = items
-      .filter((item) => item.bizType === LOT_BIZ_TYPE_ORDER && item.bizId !== "")
+      .filter((item) => item.bizType === RECHARGE_LOT_BIZ_TYPE && item.bizId !== "")
       .map((item) => item.bizId);
     if (tradeNos.length === 0) return new Map();
     const orders = await this.recharge.loadOrdersByTradeNos(tradeNos);
