@@ -7,9 +7,8 @@ import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import { replaceImageMentionsWithAssetTokens, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { toast as globalToast } from 'sonner';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
 import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
@@ -54,8 +53,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, compliancePatchFromMaterialStatus, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
-import { mediaContentBox } from './components/MediaNode/mediaContentSize';
-import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
+import { mediaContentBox, type MediaDims } from './components/MediaNode/mediaContentSize';
 import type { MediaNodeData } from './components/MediaNode';
 
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
@@ -63,7 +61,6 @@ import NodeFollowToolbar from './components/NodeFollowToolbar';
 import AssetCardToolbar from './components/AssetCardNode/Toolbar';
 import { assetCardToolbarVisible } from './components/AssetCardNode/toolbarVisibility';
 import { mediaCardToolbarVisible } from './components/MediaNode/toolbarVisibility';
-import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
   MEDIA_EXTRACT_EDGE_ORIGIN,
   MEDIA_EXTRACT_NODE_PREFIX,
@@ -124,7 +121,7 @@ import {
   type FrameInterpolationFps,
   type FrameInterpolationIdentity,
 } from './frameInterpolation';
-import { IMAGE_ERASE_EDGE_ORIGIN } from './imageErase';
+import { IMAGE_ERASE_EDGE_ORIGIN, rasterizeMaskToPngFile } from './imageErase';
 import { VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN } from '@lib/contracts/video-subtitle-erase';
 
 import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
@@ -137,7 +134,6 @@ import { IMAGE_OUTPAINT_EDGE_ORIGIN, buildImageOutpaintInput, type ImageOutpaint
 import { type OutpaintFrozenInput, type OutpaintTaskSubmission, type CutoutSubmission } from './imageToolSessions';
 import { type SmartMattingSubmission } from './smartMattingSession';
 import { type SubtitleEraseTaskSubmission, type ImageEraseTaskSubmission } from './maskToolSessions';
-import { rasterizeMaskToPngFile } from './imageErase';
 
 
 
@@ -188,7 +184,7 @@ import {
   projectKeys,
   type SnapshotAsset,
 } from '@/api/projects';
-import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
+import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/assetUrlCache';
 import { referencePromptPlan, applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, readCanvasConflictVersion, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
@@ -200,11 +196,7 @@ import {
   fetchJobStatus,
  } from '@/api/jobs';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
-import {
-  saveSharedAsset,
-  type SaveSharedAssetRequest,
-  type SharedAssetView,
-} from '@/api/sharedAssets';
+import { type SharedAssetView } from '@/api/sharedAssets';
 import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
@@ -243,6 +235,7 @@ import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
 import { useCanvasPickers } from './hooks/useCanvasPickers';
 import { useCanvasGenerationTerminal } from './hooks/useCanvasGenerationTerminal';
 import { useCanvasGenerationSubmission } from './hooks/useCanvasGenerationSubmission';
+import { useCanvasAssetActions } from './hooks/useCanvasAssetActions';
 import {
   applyIndependentGroupDrag,
   bringGroupToFront,
@@ -263,7 +256,6 @@ import {
   type GroupFrameDragResult,
 } from './canvasGroups';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
-import { blobToUint8Array, buildStoreZip, sniffMediaMime, uniqueDownloadName } from './groupDownloadZip';
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
 import {
   canvasLocationSearch,
@@ -911,9 +903,6 @@ export default function CanvasPage() {
   const [showAssetsModal, setShowAssetsModal] = useState(false);
   const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
   const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<string | undefined>(undefined);
-  const [assetDetailTarget, setAssetDetailTarget] = useState<AssetRecord | null>(null);
-  const [assetDetailLoading, setAssetDetailLoading] = useState(false);
-  const assetDetailRequestIdRef = useRef(0);
   /** label 有值时是生成卡引用（侧边栏渲染成胶囊）；无 label 是普通 @ 文本预填；mediaBlocks 携带媒体元数据 */
   const [agentContext, setAgentContext] = useState<{
     text: string;
@@ -4490,6 +4479,24 @@ export default function CanvasPage() {
   /** 商品节点最新列表（避免闭包陈旧） */
   const productNodesRef = useRef<Node[]>([]);
   productNodesRef.current = productNodes;
+  const {
+    assetDetailTarget,
+    assetDetailLoading,
+    handleCloseAssetDetail,
+    handleNodeShowDetails,
+    handleNodeDownload,
+    handleDownloadGroupNodes,
+    handleSaveMediaToAssets,
+    handleSaveTextToAssets,
+    handleSaveCardToAssets,
+    handleSaveGoodsToAssets,
+  } = useCanvasAssetActions({
+    mediaNodesRef,
+    textNodesRef,
+    productNodesRef,
+    assetNodesRef,
+    showToast,
+  });
   /** 撤销/重做栈（IKD0JT A2）：覆盖移动/删除/复制/连线/删边；生成任务不登记（PRD §7.2），工具栏新建草稿卡由调用方登记 */
   const canvasHistory = useCanvasHistory({
     getTextNodes: () => textNodesRef.current,
@@ -6363,182 +6370,6 @@ export default function CanvasPage() {
     error: (message) => globalToast.error(message),
   };
 
-  /** 触发浏览器文件下载 */
-  const triggerFileDownload = (href: string, filename: string, revokeObjectUrl = false) => {
-    const a = document.createElement('a');
-    a.href = href;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    if (revokeObjectUrl) window.setTimeout(() => URL.revokeObjectURL(href), 1000);
-  };
-
-  /** 拉取远程素材为 blob；失败则 null（组下载不再 window.open，避免只弹出第一个）。
-   *  开发模式走 Vite /__tos-fetch；测试/生产直连 TOS 时绕开 <img> 无 CORS 缓存以免报跨域 */
-  const fetchAssetBlob = async (src: string): Promise<Blob | null> => {
-    try {
-      const res = await fetchRemoteMedia(src);
-      if (!res.ok) return null;
-      return await res.blob();
-    } catch {
-      return null;
-    }
-  };
-
-  /** 下载单个媒体节点：成功返回 true，无素材则 false。
-   *  文件名以当前卡片名称为基础，扩展名经 resolveDownloadMime 纠正 M4A 错标后再取（IKFA8Y） */
-  const downloadMediaById = async (id: string, notifyMissing: boolean): Promise<boolean> => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (node?.data?.assetMissing) {
-      if (notifyMissing) showToast('warn', '素材已被删除');
-      return false;
-    }
-    const src = node?.data?.src as string | undefined;
-    if (!src) return false;
-    const name = (node?.data?.fileName as string) || id;
-    const nodeMime = node?.data?.mime as string | undefined;
-    const mediaType = node?.data?.mediaType as string | undefined;
-    const blob = await fetchAssetBlob(src);
-    if (blob) {
-      const sniffed = await sniffMediaMime(blob, mediaType);
-      const type = resolveDownloadMime({
-        sniffed,
-        blobType: blob.type,
-        nodeMime,
-        src,
-        fileName: name,
-        mediaType,
-      });
-      triggerFileDownload(URL.createObjectURL(blob), downloadFileNameOf(name, type, src), true);
-      return true;
-    }
-    window.open(src, '_blank', 'noopener');
-    return true;
-  };
-
-  type GroupDownloadItem = { filename: string; blob: Blob };
-
-  /** 收集组内全部可下载素材（媒体原件 + 文本 txt），按节点顺序 */
-  const collectGroupDownloadItems = async (ids: string[]): Promise<GroupDownloadItem[]> => {
-    const items: GroupDownloadItem[] = [];
-    const usedNames = new Set<string>();
-    for (const id of ids) {
-      const media = mediaNodesRef.current.find((n) => n.id === id);
-      const src = media?.data?.src as string | undefined;
-      if (media && !media.data?.assetMissing && src) {
-        const blob = await fetchAssetBlob(src);
-        if (blob) {
-          const cardName = (media.data?.fileName as string) || id;
-          const mediaType = media.data?.mediaType as string | undefined;
-          const sniffed = await sniffMediaMime(blob, mediaType);
-          const mime = resolveDownloadMime({
-            sniffed,
-            blobType: blob.type,
-            nodeMime: media.data?.mime as string | undefined,
-            src,
-            fileName: cardName,
-            mediaType,
-          });
-          items.push({
-            filename: uniqueDownloadName(downloadFileNameOf(cardName, mime, src), usedNames),
-            blob,
-          });
-        }
-        continue;
-      }
-      const textNode = textNodesRef.current.find((n) => n.id === id);
-      if (textNode) {
-        const text = extractTextNodeText(textNode.data);
-        if (!text.trim()) continue;
-        const title =
-          typeof textNode.data.title === 'string' && textNode.data.title.trim()
-            ? (textNode.data.title as string)
-            : '文本';
-        items.push({
-          filename: uniqueDownloadName(`${title}.txt`, usedNames),
-          blob: new Blob([text], { type: 'text/plain;charset=utf-8' }),
-        });
-      }
-    }
-    return items;
-  };
-
-  /** 组下载：浏览器会拦截同一次点击的多次 a.click，故打成一份 zip 一次保存全部素材 */
-  const handleDownloadGroupNodes = async (ids: string[]) => {
-    const items = await collectGroupDownloadItems(ids);
-    if (items.length === 0) {
-      showToast('warn', '组内没有可下载的素材');
-      return;
-    }
-    const zipParts = await Promise.all(
-      items.map(async (item) => ({ name: item.filename, data: await blobToUint8Array(item.blob) })),
-    );
-    const zipBlob = await buildStoreZip(zipParts);
-    triggerFileDownload(URL.createObjectURL(zipBlob), '组素材.zip', true);
-  };
-
-  /** 下载：优先 fetch blob 触发下载，跨域失败回退新标签页打开 */
-  const handleNodeDownload = async (id: string) => {
-    await downloadMediaById(id, true);
-  };
-
-  /** 查看媒体详情：先展示节点快照，再按 assetId 补全完整资产字段。 */
-  const handleNodeShowDetails = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    const data = (node?.data ?? {}) as Record<string, unknown>;
-    if (node?.data?.assetMissing) {
-      showToast('warn', '素材已被删除');
-      return;
-    }
-    const type = data.mediaType;
-    const url = data.src;
-    if (!node || (type !== 'image' && type !== 'video' && type !== 'audio') || typeof url !== 'string') {
-      showToast('warn', '当前媒体暂无可展示的详情');
-      return;
-    }
-
-    const assetId = data.assetId ?? data.asset_id ?? data.assetID;
-    const fallbackAsset: AssetRecord = {
-      id: typeof assetId === 'string' || typeof assetId === 'number' ? assetId : node.id,
-      type,
-      url,
-      width: typeof data.width === 'number' ? data.width : null,
-      height: typeof data.height === 'number' ? data.height : null,
-      duration: typeof data.duration === 'number' ? data.duration : null,
-      size: typeof data.size === 'number' ? data.size : null,
-      source: null,
-      model: null,
-      created_at: null,
-    };
-
-    setAssetDetailTarget(fallbackAsset);
-    const requestId = ++assetDetailRequestIdRef.current;
-    if (typeof assetId !== 'string' && typeof assetId !== 'number') {
-      setAssetDetailLoading(false);
-      return;
-    }
-    setAssetDetailLoading(true);
-
-    void fetchAssetDetail(assetId)
-      .then((asset) => {
-        // 请求结束前用户可能关闭或切换到其他资产，避免用旧响应覆盖当前弹框。
-        if (requestId !== assetDetailRequestIdRef.current) return;
-        setAssetDetailTarget((current) =>
-          current && String(current.id) === String(fallbackAsset.id) ? asset : current,
-        );
-        setAssetDetailLoading(false);
-      })
-      .catch(() => {
-        if (requestId === assetDetailRequestIdRef.current) setAssetDetailLoading(false);
-      });
-  };
-
-  const handleCloseAssetDetail = () => {
-    assetDetailRequestIdRef.current += 1;
-    setAssetDetailTarget(null);
-    setAssetDetailLoading(false);
-  };
 
   toolDepsRef.current = buildToolSessionDeps();
   actionsRef.current.download = handleNodeDownload;
@@ -7108,142 +6939,6 @@ export default function CanvasPage() {
             }
           : n,
       ),
-    );
-  };
-
-  /** 通用保存请求 + toast 反馈 */
-  const doSaveSharedAsset = async (req: SaveSharedAssetRequest, successMsg: string) => {
-    console.log('[SaveAssets] doSaveSharedAsset 请求', req);
-    try {
-      const result = await saveSharedAsset(req);
-      console.log('[SaveAssets] 保存结果', result);
-      // created:false = 后端判定已存在（幂等/去重），未写入新快照——不能提示「已保存」误导用户
-      if (result.created) {
-        showToast('success', successMsg);
-      } else {
-        showToast('warn', '该内容已在共享资产中，未重复创建；如需更新请先删除旧条目');
-      }
-      return result;
-    } catch (e) {
-      console.warn('[SaveAssets] 保存失败', e);
-      if (!isApiError(e)) showToast('error', '保存失败，请重试');
-      return null;
-    }
-  };
-
-  /** 媒体节点保存到共享资产（画布右键 → 保存到共享资产） */
-  const handleSaveMediaToAssets = async (nodeId: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    if (!node) {
-      console.warn('[SaveAssets] 未找到媒体节点', nodeId);
-      showToast('error', '节点不存在');
-      return;
-    }
-    const nd = node.data as Record<string, unknown>;
-    const mediaType = (nd.mediaType || nd.type) as 'image' | 'video' | 'audio' | undefined;
-    const assetId = nd.assetId ?? nd.asset_id ?? nd.assetID;
-    const fileName = (nd.fileName || nd.name) as string | undefined;
-    const src = nd.src as string | undefined;
-    console.log('[SaveAssets] handleSaveMediaToAssets', { nodeId, assetId, mediaType, src });
-    if (!mediaType) {
-      console.warn('[SaveAssets] 无 mediaType，无法保存', { nodeId, data: nd });
-      showToast('error', '节点类型异常，无法保存');
-      return;
-    }
-    let sourceAssetId = assetId ? String(assetId) : '';
-    if (!sourceAssetId && src) {
-      // 共享资产加回画布的节点无 assetId：按 URL 反查资产库拿源素材 ID
-      try {
-        const records = await fetchAllAssets(mediaType);
-        const hit = records.find((r) => r.url === src);
-        if (hit) sourceAssetId = String(hit.id);
-      } catch (err) {
-        console.warn('[SaveAssets] 按 URL 反查资产失败', err);
-      }
-    }
-    if (!sourceAssetId) {
-      console.warn('[SaveAssets] 无 assetId，无法保存', { nodeId, data: nd });
-      showToast('error', '请先上传素材后再保存');
-      return;
-    }
-    const name = fileName || `媒体-${mediaType}`;
-    await doSaveSharedAsset(
-      {
-        assetType: 'media',
-        kind: mediaType,
-        sourceAssetId,
-        name,
-      },
-      `已保存「${name}」到共享资产`,
-    );
-  };
-
-  /** 文本节点保存到共享资产（正文为 Markdown 源；存量 html 资产回读时升级） */
-  const handleSaveTextToAssets = async (nodeId: string) => {
-    const node = textNodesRef.current.find((n) => n.id === nodeId);
-    if (!node) return;
-    const text = unifiedTextNodeText(node.data ?? {});
-    if (!text) {
-      showToast('error', '文本内容为空，无法保存');
-      return;
-    }
-    await doSaveSharedAsset(
-      { assetType: 'text', snapshot: { text } },
-      '已保存文本到共享资产',
-    );
-  };
-
-  /** 资产卡节点保存到共享资产 */
-  const handleSaveCardToAssets = async (nodeId: string) => {
-    const node = assetNodesRef.current.find((n) => n.id === nodeId);
-    if (!node) return;
-    const data = node.data as {
-      kind: AssetCardKind;
-      initialRefs?: Array<{ id: string; src: string }>;
-      initialDesc?: string;
-      voice?: { name: string; src: string };
-    };
-    // 仅保存可识别的卡片类型
-    if (data.kind === 'generation' || !data.kind) {
-      showToast('error', '生成卡暂不支持保存到共享资产');
-      return;
-    }
-    const refs = data.initialRefs ?? [];
-    const desc = data.initialDesc ?? '';
-    if (refs.length === 0 && !desc) {
-      showToast('error', '请先为卡片补充参考图或描述');
-      return;
-    }
-    await doSaveSharedAsset(
-      {
-        assetType: 'card',
-        kind: data.kind as 'style' | 'character' | 'object' | 'environment' | 'custom',
-        snapshot: {
-          referenceImages: refs,
-          description: desc,
-          ...(data.kind === 'character' && data.voice ? { voice: data.voice } : {}),
-        },
-      },
-      `已保存「${({ style: '风格卡', character: '角色卡', object: '物体卡', environment: '环境卡', custom: '自定义卡' } as const)[data.kind]}」到共享资产`,
-    );
-  };
-
-  /** 商品节点保存到共享资产 */
-  const handleSaveGoodsToAssets = async (nodeId: string) => {
-    const node = productNodesRef.current.find((n) => n.id === nodeId);
-    if (!node) return;
-    const data = node.data as { name?: string; detail?: string; images?: Array<{ id: string; src: string; enabled: boolean }> };
-    const name = data.name || '商品';
-    await doSaveSharedAsset(
-      {
-        assetType: 'goods',
-        snapshot: {
-          name,
-          detail: data.detail || '',
-          images: (data.images || []).map((img) => ({ id: img.id, src: img.src, enabled: img.enabled })),
-        },
-      },
-      `已保存「${name}」到共享资产`,
     );
   };
 
