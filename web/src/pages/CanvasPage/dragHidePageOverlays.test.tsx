@@ -236,7 +236,6 @@ const apiMocks = vi.hoisted(() => ({
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
   fetchCredits: vi.fn(async () => ({ credits: 0 })),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
@@ -267,7 +266,6 @@ vi.mock('@/api/projects', () => ({
 
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
   fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
@@ -469,6 +467,7 @@ async function clickCardStill(id: string, x: number, y: number) {
 }
 
 beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(() => { throw new Error('页面测试禁止真实出网'); }));
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   sessionStorage.clear();
@@ -497,6 +496,7 @@ afterEach(async () => {
   container?.remove();
   document.querySelectorAll('[role="dialog"]').forEach((el) => el.remove());
   Reflect.deleteProperty(document, 'elementsFromPoint');
+  expect(fetch).not.toHaveBeenCalled();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
