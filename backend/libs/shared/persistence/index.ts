@@ -36,6 +36,8 @@ export {
   type JobStatusView,
   type JobPage,
   type JobListFilter,
+  type UserJobIdFilter,
+  type UserJobIdResult,
   type AdminJobListItem,
   type AdminJobPage,
   type AdminJobListFilter,

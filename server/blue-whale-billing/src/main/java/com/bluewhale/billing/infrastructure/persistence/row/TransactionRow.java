@@ -30,6 +30,10 @@ public class TransactionRow {
 
     private Long srcId;
 
+    private String lotSource;
+
+    private LocalDateTime lotCreatedAt;
+
     public String getTxId() { return txId; }
     public void setTxId(String txId) { this.txId = txId; }
     public Long getUserId() { return userId; }
@@ -56,4 +60,8 @@ public class TransactionRow {
     public void setKind(String kind) { this.kind = kind; }
     public Long getSrcId() { return srcId; }
     public void setSrcId(Long srcId) { this.srcId = srcId; }
+    public String getLotSource() { return lotSource; }
+    public void setLotSource(String lotSource) { this.lotSource = lotSource; }
+    public LocalDateTime getLotCreatedAt() { return lotCreatedAt; }
+    public void setLotCreatedAt(LocalDateTime lotCreatedAt) { this.lotCreatedAt = lotCreatedAt; }
 }

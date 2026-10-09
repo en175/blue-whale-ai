@@ -399,8 +399,16 @@ public class BillingApplicationService {
 
     public TransactionView.Page listTransactions(Long userId, List<String> typeFilter,
                                                  int pageSize, int page) {
+        return listTransactions(userId, typeFilter, null, null, null, pageSize, page);
+    }
+
+    public TransactionView.Page listTransactions(Long userId, List<String> typeFilter,
+                                                 Instant createdFrom, Instant createdTo,
+                                                 List<Long> generationJobIds,
+                                                 int pageSize, int page) {
         int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
-        return transactions.listPage(userId, normalizeTypes(typeFilter), size, page);
+        return transactions.listPage(userId, normalizeTypes(typeFilter), createdFrom, createdTo,
+                generationJobIds, size, page);
     }
 
 
@@ -442,9 +450,10 @@ public class BillingApplicationService {
 
 
 
-    public CreditLotRepository.UserLotPage listCreditLots(long userId, int pageSize, int page) {
+    public CreditLotRepository.UserLotPage listCreditLots(long userId, int pageSize, int page,
+                                                          Instant createdFrom, Instant createdTo) {
         int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
-        return lots.listUserLots(userId, size, page);
+        return lots.listUserLots(userId, createdFrom, createdTo, size, page);
     }
 
 

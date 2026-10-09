@@ -136,11 +136,27 @@ export interface JobListFilter {
   size: number;
 }
 
+export interface UserJobIdFilter {
+  userId: string;
+  type?: string;
+  modelId?: string;
+  createdFrom?: Date;
+  createdTo?: Date;
+  limit: number;
+}
+
+export interface UserJobIdResult {
+  ids: string[];
+  truncated: boolean;
+}
+
 export interface JobRepo {
   listByUser(userId: string, filter: JobListFilter): Promise<JobPage>;
   findByIdForUser(jobId: string, userId: string): Promise<JobStatusView | null>;
 
   listForAdmin(filter: AdminJobListFilter): Promise<AdminJobPage>;
+
+  listUserJobIds(filter: UserJobIdFilter): Promise<UserJobIdResult>;
 
 
 
@@ -482,6 +498,35 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
           },
         ]),
       );
+    },
+
+    async listUserJobIds(filter) {
+      const where = {
+        user_id: BigInt(filter.userId),
+        is_delete: false,
+        ...(filter.type ? { type: filter.type } : {}),
+        ...(filter.modelId
+          ? { input: { path: "$.model_id", equals: filter.modelId } }
+          : {}),
+        ...(filter.createdFrom || filter.createdTo
+          ? {
+              gmt_create: {
+                ...(filter.createdFrom ? { gte: filter.createdFrom } : {}),
+                ...(filter.createdTo ? { lte: filter.createdTo } : {}),
+              },
+            }
+          : {}),
+      };
+      const rows = await prisma.generation_jobs.findMany({
+        where,
+        select: { id: true },
+        orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+        take: filter.limit + 1,
+      });
+      return {
+        ids: rows.slice(0, filter.limit).map((r) => r.id.toString()),
+        truncated: rows.length > filter.limit,
+      };
     },
 
     async findByIdForUser(jobId, userId) {

@@ -7,6 +7,7 @@ import com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Mapper
@@ -33,10 +34,14 @@ public interface CreditLotMapper extends BaseMapper<CreditLotEntity> {
                                        @Param("limit") int limit);
 
     List<CreditLotEntity> listUserLots(@Param("userId") long userId,
+                                       @Param("createdFrom") LocalDateTime createdFrom,
+                                       @Param("createdTo") LocalDateTime createdTo,
                                        @Param("offset") long offset,
                                        @Param("limit") int limit);
 
-    long countUserLots(@Param("userId") long userId);
+    long countUserLots(@Param("userId") long userId,
+                       @Param("createdFrom") LocalDateTime createdFrom,
+                       @Param("createdTo") LocalDateTime createdTo);
 
     int addFrozen(@Param("lotId") long lotId, @Param("amount") long amount);
 

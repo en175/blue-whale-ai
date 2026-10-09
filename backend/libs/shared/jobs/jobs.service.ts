@@ -13,6 +13,8 @@ import {
   type AdminJobListItem,
   type AdminJobListFilter,
   type ChargeTaskSummary,
+  type UserJobIdFilter,
+  type UserJobIdResult,
 } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -111,6 +113,10 @@ export class JobsService {
     const ids = [...new Set(jobIds)].filter((id) => VALID_ID.test(id));
     if (ids.length === 0) return new Map();
     return this.repo.loadChargeTaskSummaries(ids);
+  }
+
+  async listJobIds(filter: UserJobIdFilter): Promise<UserJobIdResult> {
+    return this.repo.listUserJobIds(filter);
   }
 
   async getStatus(userId: string, jobId: string) {

@@ -5,6 +5,7 @@ import com.bluewhale.billing.infrastructure.persistence.mapper.TransactionMapper
 import com.bluewhale.billing.infrastructure.persistence.row.TransactionRow;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
@@ -16,13 +17,19 @@ public class TransactionRepository {
         this.mapper = mapper;
     }
 
-    public TransactionView.Page listPage(Long userId, List<String> typeFilter, int size, int page) {
+    public TransactionView.Page listPage(Long userId, List<String> typeFilter,
+                                         LocalDateTime createdFrom, LocalDateTime createdTo,
+                                         List<Long> generationJobIds, int size, int page) {
         List<String> filter = typeFilter == null || typeFilter.isEmpty() ? null : List.copyOf(typeFilter);
+        List<Long> jobIds = generationJobIds == null || generationJobIds.isEmpty()
+                ? null
+                : List.copyOf(generationJobIds);
 
         long offset = (long) (Math.max(page, 1) - 1) * size;
 
-        List<TransactionRow> rows = mapper.selectPage(userId, filter, offset, size);
-        long total = mapper.countPage(userId, filter);
+        List<TransactionRow> rows = mapper.selectPage(userId, filter,
+                createdFrom, createdTo, jobIds, offset, size);
+        long total = mapper.countPage(userId, filter, createdFrom, createdTo, jobIds);
 
         return new TransactionView.Page(
                 rows.stream().map(TransactionRepository::toView).toList(),
@@ -41,6 +48,8 @@ public class TransactionRepository {
                 row.getGenerationJobId(),
                 row.getStatus(),
                 row.getCreatedAt(),
-                row.getSettledAt());
+                row.getSettledAt(),
+                row.getLotSource(),
+                row.getLotCreatedAt());
     }
 }

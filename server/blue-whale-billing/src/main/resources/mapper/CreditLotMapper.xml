@@ -172,7 +172,11 @@
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at,
            biz_type, biz_id, version, gmt_create
     FROM billing_credit_lots
-    WHERE user_id = #{userId}
+    <where>
+      user_id = #{userId}
+      <if test="createdFrom != null">AND gmt_create &gt;= #{createdFrom}</if>
+      <if test="createdTo != null">AND gmt_create &lt;= #{createdTo}</if>
+    </where>
     ORDER BY gmt_create DESC, id DESC
     LIMIT #{limit} OFFSET #{offset}
   </select>
@@ -186,7 +190,11 @@
   <select id="countUserLots" resultType="long">
     SELECT COUNT(*)
     FROM billing_credit_lots
-    WHERE user_id = #{userId}
+    <where>
+      user_id = #{userId}
+      <if test="createdFrom != null">AND gmt_create &gt;= #{createdFrom}</if>
+      <if test="createdTo != null">AND gmt_create &lt;= #{createdTo}</if>
+    </where>
   </select>
 
 </mapper>

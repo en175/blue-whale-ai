@@ -272,6 +272,13 @@ export class RechargeService {
     return this.repo.list(filter);
   }
 
+  async loadOrdersByTradeNos(
+    tradeNos: readonly string[],
+  ): Promise<Map<string, RechargeOrderView>> {
+    const rows = await this.repo.listByTradeNos(tradeNos);
+    return new Map(rows.map((row) => [row.tradeNo, row]));
+  }
+
 
   async getOrderStatus(input: {
     userId: number;

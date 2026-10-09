@@ -77,6 +77,8 @@ export interface BillingTransaction {
   createdAt: string;
   settledAt: string;
   generationJobId: string | null;
+  lotSource: string;
+  lotCreatedAt: string;
 }
 
 export interface BillingTransactionPage {
@@ -87,6 +89,9 @@ export interface BillingTransactionPage {
 export interface BillingListTransactionsQuery {
   userId: number;
   typeFilters?: string[];
+  createdFrom?: string;
+  createdTo?: string;
+  generationJobIds?: string[];
   pageSize?: number;
   page?: number;
 }
@@ -117,6 +122,8 @@ export interface BillingCreditLotPage {
 
 export interface BillingListLotsQuery {
   userId: number;
+  createdFrom?: string;
+  createdTo?: string;
   pageSize?: number;
   page?: number;
 }
@@ -216,6 +223,9 @@ export function createBillingClient(baseUrl: string): BillingClient {
         create(ListTransactionsRequestSchema, {
           userId: BigInt(query.userId),
           typeFilters: query.typeFilters ?? [],
+          createdFrom: query.createdFrom ?? '',
+          createdTo: query.createdTo ?? '',
+          generationJobIds: (query.generationJobIds ?? []).map((id) => BigInt(id)),
           ...(query.pageSize === undefined && query.page === undefined
             ? {}
             : {
@@ -238,6 +248,8 @@ export function createBillingClient(baseUrl: string): BillingClient {
           settledAt: item.settledAt,
           generationJobId:
             item.generationJobId === undefined ? null : String(item.generationJobId),
+          lotSource: item.lotSource,
+          lotCreatedAt: item.lotCreatedAt,
         })),
         total: Number(response.page?.total ?? 0),
       };
@@ -247,6 +259,8 @@ export function createBillingClient(baseUrl: string): BillingClient {
       const response = await client.listLots(
         create(ListLotsRequestSchema, {
           userId: BigInt(query.userId),
+          createdFrom: query.createdFrom ?? '',
+          createdTo: query.createdTo ?? '',
           page: {
             pageSize: query.pageSize ?? 0,
             page: query.page ?? 0,

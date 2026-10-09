@@ -36,6 +36,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 
@@ -119,6 +120,9 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
             TransactionView.Page page = billing.listTransactions(
                     request.getUserId(),
                     types,
+                    parseInstant(request.getCreatedFrom(), "created_from"),
+                    parseInstant(request.getCreatedTo(), "created_to"),
+                    request.getGenerationJobIdsList(),
                     request.getPage().getPageSize(),
                     request.getPage().getPage());
 
@@ -138,6 +142,12 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                                 : RFC3339.format(item.settledAt().atZone(ZoneId.systemDefault())));
                 if (item.generationJobId() != null) {
                     row.setGenerationJobId(item.generationJobId());
+                }
+                if (item.lotSource() != null) {
+                    row.setLotSource(item.lotSource());
+                }
+                if (item.lotCreatedAt() != null) {
+                    row.setLotCreatedAt(RFC3339.format(item.lotCreatedAt().atZone(DbTime.ZONE)));
                 }
                 response.addItems(row.build());
             }
@@ -162,7 +172,9 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
             CreditLotRepository.UserLotPage page = billing.listCreditLots(
                     userId,
                     request.getPage().getPageSize(),
-                    request.getPage().getPage());
+                    request.getPage().getPage(),
+                    parseInstant(request.getCreatedFrom(), "created_from"),
+                    parseInstant(request.getCreatedTo(), "created_to"));
 
             ListLotsResponse.Builder response = ListLotsResponse.newBuilder()
                     .setPage(PageResponse.newBuilder().setTotal(page.total()));
@@ -236,6 +248,17 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
 
     private static Usage toUsage(com.bluewhale.contracts.billing.v1.UsageLine line) {
         return Usage.ofKeys(line.getModelId(), line.getTaskType(), line.getQuantitiesMap());
+    }
+
+    private static Instant parseInstant(String raw, String field) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        try {
+            return Instant.from(RFC3339.parse(raw));
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("时间参数须为 RFC3339（" + field + "）：" + raw);
+        }
     }
 
     private static String ruleSnapshotForLine(QuoteRequest request,
