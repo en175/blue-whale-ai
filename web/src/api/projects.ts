@@ -128,7 +128,6 @@ export interface SnapshotAsset {
   width: number | null;
   height: number | null;
   material_id?: string | null;
-  material_group_id?: string | null;
   material_status?: 'Active' | 'Processing' | 'Failed' | null;
   material_status_checked_at?: string | null;
 }

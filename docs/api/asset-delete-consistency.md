@@ -111,6 +111,8 @@ GET /api/assets/:assetId/references
 
 后端删除素材 = 软删 `assets` + 软删 `project_asset` 关联，**画布节点不动**。前端删除素材后无需改画布——下次进画布时，被删素材的节点因 `snapshot.assets` 查不到而显示占位图。
 
+> **2026-10-09 增补（ADR-0126）**：若该资产**已入库素材库**（`material_id` 非空），后端会**先删上游素材库里的那条素材**，成功才软删本地；上游删不掉则接口报 400（`code 2013`）且本地一行不动。前端删除前要弹框提示「会一并删除素材库素材，不可恢复」，详见 [`2026-10-09-material-binding-and-delete-cascade-api.md`](./2026-10-09-material-binding-and-delete-cascade-api.md) §2。
+
 **前端删除素材**：仍调用 `DELETE /api/assets/:assetId`（后端软删+清关联），删除成功后前端清理资产库中的该项即可，**不触碰画布数组**。
 
 ---

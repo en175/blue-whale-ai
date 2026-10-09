@@ -17,7 +17,8 @@ function makeController(assetMock: {
     clearMaterialStatus: vi.fn().mockResolvedValue(undefined),
     clearMaterialStatusByGroup: vi.fn().mockResolvedValue(undefined),
     tryServeLocalFailedAsset: vi.fn().mockResolvedValue(null),
-    handleUpstreamMaterialFailure: vi.fn().mockResolvedValue(undefined),
+    ingestUpstreamMaterialStatuses: vi.fn().mockResolvedValue(undefined),
+    preflightCreateAsset: vi.fn().mockResolvedValue(null),
   } as unknown as MaterialService;
   const assets = {
     linkAssetToMaterial: assetMock.linkAssetToMaterial ?? vi.fn(),
@@ -75,7 +76,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
       userId: "9",
       assetId: "10086",
       materialId: "asset-new-1",
-      materialGroupId: "group-1",
     });
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
@@ -143,6 +143,11 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
 
     expect(assets.clearMaterialGroupLink).toHaveBeenCalledWith("9", "group-del-1");
     expect(material.softDeleteLocalGroup).toHaveBeenCalledWith("9", "group-del-1");
+    expect(
+      assets.clearMaterialGroupLink.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      material.clearMaterialStatusByGroup.mock.invocationCallOrder[0],
+    );
   });
 
   it("DeleteAssetGroup 上游失败（4xx）：不透传后不软删本地组（IKEXX8 负向守卫）", async () => {
@@ -259,7 +264,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
       userId: "9",
       assetId: "88",
       materialId: "asset-virt-1",
-      materialGroupId: "group-virt-1",
     });
   });
 
@@ -287,7 +291,6 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
       userId: "9",
       assetId: "77",
       materialId: "asset-real-1",
-      materialGroupId: "group-real-1",
     });
   });
 
@@ -461,44 +464,10 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
       USER,
     );
 
-    expect(material.mirrorMaterialStatuses).toHaveBeenCalledWith("9", [
-      { materialId: "asset-ok", status: "Active", errorCode: null, errorMessage: null },
-      {
-        materialId: "asset-bad",
-        status: "Failed",
-        errorCode: "Sensitive",
-        errorMessage: "命中审核",
-      },
-    ]);
+    expect(material.ingestUpstreamMaterialStatuses).toHaveBeenCalledTimes(1);
   });
 
-  it("GetAsset 透传成功：镜像单条（Result 本体，含 Error 原文）", async () => {
-    const { controller, material } = makeController({});
-    material.callAction.mockResolvedValue({
-      status: 200,
-      body: {
-        ResponseMetadata: {},
-        Result: {
-          Id: "asset-one",
-          Status: "Failed",
-          Error: { Code: "URLUnreachable", Message: "URL 不可达" },
-        },
-      },
-    });
-
-    await controller.callAction("GetAsset", { Id: "asset-one" }, okRes(), USER);
-
-    expect(material.mirrorMaterialStatuses).toHaveBeenCalledWith("9", [
-      {
-        materialId: "asset-one",
-        status: "Failed",
-        errorCode: "URLUnreachable",
-        errorMessage: "URL 不可达",
-      },
-    ]);
-  });
-
-  it("GetAsset 上游非 2xx：不镜像（旁路只在 2xx 执行）", async () => {
+  it("上游非 2xx：不在旁路里收状态（旁路只在 2xx 执行）", async () => {
     const { controller, material } = makeController({});
     material.callAction.mockResolvedValue({
       status: 404,
@@ -507,36 +476,7 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
 
     await controller.callAction("GetAsset", { Id: "asset-missing" }, okRes(), USER);
 
-    expect(material.mirrorMaterialStatuses).not.toHaveBeenCalled();
-  });
-
-  it("ListAssets 里的脏项被丢弃，不污染镜像", async () => {
-    const { controller, material } = makeController({});
-    material.callAction.mockResolvedValue({
-      status: 200,
-      body: {
-        ResponseMetadata: {},
-        Result: {
-          Items: [
-            { Id: "not-an-asset", Status: "Active" },
-            { Id: "asset-good", Status: "Processing" },
-            { Id: "asset-no-status" },
-            "garbage",
-          ],
-        },
-      },
-    });
-
-    await controller.callAction(
-      "ListAssets",
-      { Filter: { GroupIds: ["group-9"], GroupType: "AIGC" } },
-      okRes(),
-      USER,
-    );
-
-    expect(material.mirrorMaterialStatuses).toHaveBeenCalledWith("9", [
-      { materialId: "asset-good", status: "Processing", errorCode: null, errorMessage: null },
-    ]);
+    expect(material.ingestUpstreamMaterialStatuses).not.toHaveBeenCalled();
   });
 });
 
@@ -545,7 +485,7 @@ describe("MaterialController —— 素材失败处置与本地优先（IKFYHJ�
   const okRes = () =>
     ({ status: vi.fn().mockReturnThis(), json: vi.fn() }) as unknown as Response;
 
-  it("ListAssets 里有 Failed 条目：只对失败的那条触发统一处置（带原文）", async () => {
+  it("ListAssets 2xx：上游响应整份交给 ingestUpstreamMaterialStatuses（处置按状态在 service 里分流）", async () => {
     const { controller, material } = makeController({});
     material.callAction.mockResolvedValue({
       status: 200,
@@ -568,30 +508,12 @@ describe("MaterialController —— 素材失败处置与本地优先（IKFYHJ�
       USER,
     );
 
-    expect(material.handleUpstreamMaterialFailure).toHaveBeenCalledTimes(1);
-    expect(material.handleUpstreamMaterialFailure).toHaveBeenCalledWith({
-      userId: "9",
-      materialId: "asset-bad",
-      errorCode: "Sensitive",
-      errorMessage: "命中审核",
-    });
-  });
-
-  it("上游全 Active：不触发处置（别把正常素材删了）", async () => {
-    const { controller, material } = makeController({});
-    material.callAction.mockResolvedValue({
-      status: 200,
-      body: { Result: { Items: [{ Id: "asset-ok", Status: "Active" }] } },
-    });
-
-    await controller.callAction(
-      "ListAssets",
-      { Filter: { GroupIds: ["group-9"], GroupType: "AIGC" }, PageNumber: 1, PageSize: 10 },
-      okRes(),
-      USER,
+    expect(material.ingestUpstreamMaterialStatuses).toHaveBeenCalledWith(
+      "9",
+      expect.objectContaining({
+        Result: expect.objectContaining({ TotalCount: 2 }),
+      }),
     );
-
-    expect(material.handleUpstreamMaterialFailure).not.toHaveBeenCalled();
   });
 
   it("GetAsset 本地已 Failed：直接回本地结论，不透传上游", async () => {

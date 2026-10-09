@@ -224,21 +224,20 @@ class MaterialAssetMapperMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("clearMaterialLink：两列一起清（只清 material_id 会留下悬空组关联）")
-    void clearMaterialLinkClearsBothColumns() {
+    @DisplayName("clearMaterialLink：清掉 material_id 关联")
+    void clearMaterialLinkClearsLink() {
         jdbc.update("""
                 INSERT INTO assets (id, user_id, project_id, type, url, status,
-                                    material_id, material_group_id, is_delete, gmt_create, gmt_modified)
+                                    material_id, is_delete, gmt_create, gmt_modified)
                 VALUES (880001, 9, 55, 'image', 'u', 'normal',
-                        'asset-linked', 'group-linked', 0, NOW(), NOW())
+                        'asset-linked', 0, NOW(), NOW())
                 """);
 
         assertThat(assetMapper.clearMaterialLink(9L, "asset-linked")).isEqualTo(1);
 
         Map<String, Object> row = jdbc.queryForMap(
-                "SELECT material_id, material_group_id, version FROM assets WHERE id = 880001");
+                "SELECT material_id, version FROM assets WHERE id = 880001");
         assertThat(row.get("material_id")).isNull();
-        assertThat(row.get("material_group_id")).isNull();
         assertThat(((Number) row.get("version")).intValue()).isEqualTo(1);
     }
 
@@ -247,9 +246,9 @@ class MaterialAssetMapperMySqlIntegrationTest {
     void clearMaterialLinkIsScopedByUserId() {
         jdbc.update("""
                 INSERT INTO assets (id, user_id, project_id, type, url, status,
-                                    material_id, material_group_id, is_delete, gmt_create, gmt_modified)
+                                    material_id, is_delete, gmt_create, gmt_modified)
                 VALUES (880002, 9, 55, 'image', 'u', 'normal',
-                        'asset-linked2', 'group-linked2', 0, NOW(), NOW())
+                        'asset-linked2', 0, NOW(), NOW())
                 """);
 
         assertThat(assetMapper.clearMaterialLink(77L, "asset-linked2")).isZero();

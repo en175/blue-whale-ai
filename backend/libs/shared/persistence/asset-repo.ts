@@ -21,7 +21,6 @@ export interface AssetView {
   mime: string | null;
   model: string | null;
   material_id: string | null;
-  material_group_id: string | null;
   material_status: string | null;
   material_status_checked_at: string | null;
   video_stage: string;
@@ -132,7 +131,6 @@ export interface AssetRepo {
     userId: string;
     assetId: string;
     materialId: string;
-    materialGroupId: string | null;
   }): Promise<boolean>;
   createUploadedAsset(input: {
     userId: string;
@@ -148,18 +146,21 @@ export interface AssetRepo {
     duration?: number;
     md5?: string;
     materialId?: string;
-    materialGroupId?: string | null;
     source?: string;
   }): Promise<PendingUploadAsset>;
   linkAssetToMaterial(input: {
     userId: string;
     assetId: string;
     materialId: string;
-    materialGroupId: string;
   }): Promise<boolean>;
   clearMaterialLink(userId: string, materialId: string): Promise<void>;
   clearMaterialGroupLink(userId: string, materialGroupId: string): Promise<void>;
   findBoundMaterialIds(userId: string, assetIds: readonly string[]): Promise<string[]>;
+  findOwnedByMaterialIds(
+    userId: string,
+    materialIds: readonly string[],
+  ): Promise<Array<{ materialId: string; assetId: string; url: string }>>;
+  findOwnedMaterialLink(userId: string, assetId: string): Promise<string | null>;
 }
 
 const uploadAssetSelect = {
@@ -344,7 +345,6 @@ function toAssetView(
     project_id: bigint | null;
     mime: string | null;
     material_id?: string | null;
-    material_group_id?: string | null;
   },
   modelByJobId: Map<string, string>,
   nameByJobId: Map<string, string>,
@@ -376,7 +376,6 @@ function toAssetView(
         ? null
         : (modelByJobId.get(a.generation_job_id.toString()) ?? null),
     material_id: a.material_id ?? null,
-    material_group_id: a.material_group_id ?? null,
     material_status:
       a.material_id == null
         ? null
@@ -681,7 +680,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       });
       return row ? toUploadAsset(row) : null;
     },
-    async bindMaterialId({ userId, assetId, materialId, materialGroupId }) {
+    async bindMaterialId({ userId, assetId, materialId }) {
       const uid = BigInt(userId);
       const owned = await prisma.assets.findFirst({
         where: {
@@ -689,13 +688,10 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           user_id: uid,
           is_delete: false,
         },
-        select: { id: true, material_id: true, material_group_id: true },
+        select: { id: true, material_id: true },
       });
       if (!owned) return false;
-      if (
-        owned.material_id === materialId &&
-        owned.material_group_id === materialGroupId
-      ) {
+      if (owned.material_id === materialId) {
         return true;
       }
       const apply = () =>
@@ -708,7 +704,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
             },
             data: {
               material_id: null,
-              material_group_id: null,
               version: { increment: 1 },
               gmt_modified: new Date(),
             },
@@ -717,7 +712,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
             where: { id: owned.id },
             data: {
               material_id: materialId,
-              material_group_id: materialGroupId,
               version: { increment: 1 },
               gmt_modified: new Date(),
             },
@@ -742,7 +736,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
             },
             data: {
               material_id: null,
-              material_group_id: null,
               version: { increment: 1 },
               gmt_modified: new Date(),
             },
@@ -765,9 +758,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
               : { duration_ms: Math.round(input.duration * 1000) }),
             ...(input.md5 ? { md5: input.md5 } : {}),
             ...(input.materialId ? { material_id: input.materialId } : {}),
-            ...(input.materialGroupId
-              ? { material_group_id: input.materialGroupId }
-              : {}),
             source: input.source ?? "uploaded",
             status: "normal",
           },
@@ -813,7 +803,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       if (!asset) throw new Error("Committed upload is missing storage_key");
       return asset;
     },
-    async linkAssetToMaterial({ userId, assetId, materialId, materialGroupId }) {
+    async linkAssetToMaterial({ userId, assetId, materialId }) {
       const owned = await prisma.assets.findFirst({
         where: {
           id: BigInt(assetId),
@@ -827,7 +817,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         where: { id: owned.id },
         data: {
           material_id: materialId,
-          material_group_id: materialGroupId,
           version: { increment: 1 },
           gmt_modified: new Date(),
         },
@@ -839,22 +828,61 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         where: { material_id: materialId, user_id: BigInt(userId) },
         data: {
           material_id: null,
-          material_group_id: null,
           version: { increment: 1 },
           gmt_modified: new Date(),
         },
       });
     },
     async clearMaterialGroupLink(userId, materialGroupId) {
+      const uid = BigInt(userId);
+      const rows = await prisma.material_assets.findMany({
+        where: { user_id: uid, material_group_id: materialGroupId },
+        select: { material_id: true },
+      });
+      const materialIds = rows.map((row) => row.material_id);
+      if (materialIds.length === 0) return;
       await prisma.assets.updateMany({
-        where: { material_group_id: materialGroupId, user_id: BigInt(userId) },
+        where: { user_id: uid, material_id: { in: materialIds } },
         data: {
           material_id: null,
-          material_group_id: null,
           version: { increment: 1 },
           gmt_modified: new Date(),
         },
       });
+    },
+    async findOwnedByMaterialIds(userId, materialIds) {
+      if (materialIds.length === 0) return [];
+      const rows = await prisma.assets.findMany({
+        where: {
+          user_id: BigInt(userId),
+          material_id: { in: [...materialIds] },
+          status: "normal",
+          is_delete: false,
+        },
+        select: { id: true, material_id: true, url: true },
+      });
+      const out: Array<{ materialId: string; assetId: string; url: string }> = [];
+      for (const row of rows) {
+        if (row.material_id === null) continue;
+        out.push({
+          materialId: row.material_id,
+          assetId: row.id.toString(),
+          url: row.url,
+        });
+      }
+      return out;
+    },
+    async findOwnedMaterialLink(userId, assetId) {
+      if (!/^\d+$/.test(assetId)) return null;
+      const row = await prisma.assets.findFirst({
+        where: {
+          id: BigInt(assetId),
+          user_id: BigInt(userId),
+          is_delete: false,
+        },
+        select: { material_id: true },
+      });
+      return row?.material_id ?? null;
     },
     async findBoundMaterialIds(userId, assetIds) {
       if (assetIds.length === 0) return [];

@@ -287,8 +287,8 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
     md5: VALID_MD5,
   };
 
-  const allow = (materialGroupId: string | null = GROUP) => ({
-    check: vi.fn().mockResolvedValue({ ok: true, materialGroupId }),
+  const allow = () => ({
+    check: vi.fn().mockResolvedValue({ ok: true }),
   });
   const deny = (message: string) => ({
     check: vi.fn().mockResolvedValue({ ok: false, message }),
@@ -368,7 +368,7 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
     expect(error.message).toBe(UNAVAILABLE);
   });
 
-  it("dedup：闸通过 + md5 命中 → 两列一起绑（material_id 与 material_group_id）", async () => {
+  it("dedup：闸通过 + md5 命中 → 绑上 material_id", async () => {
     const bindMaterialId = vi.fn().mockResolvedValue(true);
     const gate = allow();
     const result = await handleDedupAsset(
@@ -389,7 +389,6 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
       userId: "9",
       assetId: "526",
       materialId: MATERIAL,
-      materialGroupId: GROUP,
     });
     expect((result as { data: { dedup: boolean } }).data.dedup).toBe(true);
   });
@@ -459,7 +458,6 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
     ).toHaveBeenCalledWith(
       expect.objectContaining({
         materialId: MATERIAL,
-        materialGroupId: GROUP,
       }),
     );
   });
@@ -594,7 +592,7 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
       ...overrides,
     },
     materialGate: {
-      check: vi.fn().mockResolvedValue({ ok: true, materialGroupId: GROUP }),
+      check: vi.fn().mockResolvedValue({ ok: true }),
     },
     materialStatus: statusReader(status),
   });
@@ -671,7 +669,7 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
       deleteMultiObjects: vi.fn(),
     },
     materialGate: {
-      check: vi.fn().mockResolvedValue({ ok: true, materialGroupId: GROUP }),
+      check: vi.fn().mockResolvedValue({ ok: true }),
     },
     materialStatus: statusReader(status),
   });

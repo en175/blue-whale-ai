@@ -16,11 +16,16 @@ import {
   type MaterialGroupRepo,
   type MaterialGroupView,
 } from "@lib/shared/persistence/index.js";
+import { ASSET_ERROR_SPECS, DomainError } from "@lib/contracts";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import { isMaterialLevelRejection } from "@lib/shared/generation/material-compliance-gate.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { newApiBaseUrl } from "@lib/shared/upstream/new-api-egress.js";
-import { createUploadMaterialGate } from "./material-upload-gate.js";
+import {
+  createUploadMaterialGate,
+  readResponseError,
+} from "./material-upload-gate.js";
 
 export const MATERIAL_ACTIONS = [
   "CreateAssetGroup",
@@ -40,6 +45,10 @@ export const MATERIAL_ACTIONS = [
 export type MaterialAction = (typeof MATERIAL_ACTIONS)[number];
 
 const MATERIAL_ID_PATTERN = /^asset-.{1,128}$/i;
+
+const MATERIAL_DELETE_FAILED_MESSAGE = "素材库服务不可用，删除失败，请稍后重试";
+
+const MATERIAL_ID_FIELD = "Id";
 
 
 @Injectable()
@@ -85,7 +94,10 @@ export class MaterialService {
     return this.materialAssetRepoInstance;
   }
 
-  private get assetRepo(): Pick<AssetRepo, "clearMaterialLink"> {
+  private get assetRepo(): Pick<
+    AssetRepo,
+    "clearMaterialLink" | "findOwnedByMaterialIds" | "findOwnedMaterialLink"
+  > {
     if (!this.assetClearRepoInstance) {
       this.assetClearRepoInstance = createAssetRepo(this.prisma.client);
     }
@@ -163,12 +175,18 @@ export class MaterialService {
     if (action === "ListAssetGroups") {
       const filter = body.Filter;
       const groupType = isRecord(filter) ? filter.GroupType : undefined;
-      if (groupType !== "AIGC") return null;
+      const kind =
+        groupType === "AIGC"
+          ? ("virtual" as const)
+          : groupType === "LivenessFace"
+            ? ("real" as const)
+            : null;
+      if (kind === null) return null;
       const page = readPositiveInt(body.PageNumber) ?? 1;
       const size = readPositiveInt(body.PageSize) ?? 10;
       const { total, rows } = await this.groupRepo.pageByUser(
         userId,
-        "virtual",
+        kind,
         page,
         size,
       );
@@ -348,6 +366,159 @@ export class MaterialService {
   ): Promise<void> {
     await this.materialAssetRepo.deleteByGroupId(userId, materialGroupId);
   }
+
+  async ingestUpstreamMaterialStatuses(
+    userId: string,
+    upstreamBody: unknown,
+  ): Promise<void> {
+    const entries = readAssetStatusEntries(upstreamBody);
+    if (entries.length === 0) return;
+    await this.mirrorMaterialStatuses(userId, entries);
+    for (const entry of entries) {
+      if (entry.status !== "Failed") continue;
+      await this.handleUpstreamMaterialFailure({
+        userId,
+        materialId: entry.materialId,
+        errorCode: entry.errorCode,
+        errorMessage: entry.errorMessage,
+      });
+    }
+  }
+
+  async listLibraryAssets(input: {
+    userId: string;
+    body: unknown;
+  }): Promise<Record<string, unknown>> {
+    const response = await this.callAction("ListAssets", input.body);
+    if (response.status < 200 || response.status >= 300) {
+      throw new NewApiError(
+        "素材库列表获取失败，请稍后重试",
+        response.status >= 500 ? 503 : response.status,
+        "list_library_assets_failed",
+      );
+    }
+    await this.ingestUpstreamMaterialStatuses(input.userId, response.body);
+    const result = isRecord(response.body) ? response.body.Result : undefined;
+    if (!isRecord(result)) return {};
+    const items = Array.isArray(result.Items)
+      ? result.Items.filter(isRecord)
+      : [];
+    const local = await this.assetRepo.findOwnedByMaterialIds(
+      input.userId,
+      items
+        .map((item) => item[MATERIAL_ID_FIELD])
+        .filter((id): id is string => typeof id === "string"),
+    );
+    const byMaterialId = new Map(local.map((row) => [row.materialId, row]));
+    return {
+      ...result,
+      Items: items.map((item) => {
+        const rawId = item[MATERIAL_ID_FIELD];
+        const hit = typeof rawId === "string" ? byMaterialId.get(rawId) : undefined;
+        return {
+          ...item,
+          asset_id: hit?.assetId ?? null,
+          url: hit?.url ?? null,
+        };
+      }),
+    };
+  }
+
+  async cascadeDeleteUpstreamMaterial(input: {
+    userId: string;
+    materialId: string;
+  }): Promise<void> {
+    const response = await this.callAction("DeleteAsset", {
+      Id: input.materialId,
+    });
+    if (response.status < 200 || response.status >= 300) {
+      const code = readResponseError(response.body)?.Code;
+      if (!isMaterialLevelRejection(typeof code === "string" ? code : null)) {
+        logger.warn(
+          `material 删除素材失败 materialId=${input.materialId} HTTP ${response.status}`,
+        );
+        throw new DomainError(
+          ASSET_ERROR_SPECS.ASSET_MATERIAL_UNAVAILABLE.code,
+          MATERIAL_DELETE_FAILED_MESSAGE,
+        );
+      }
+    }
+    await this.assetRepo.clearMaterialLink(input.userId, input.materialId);
+    await this.clearMaterialStatus(input.userId, input.materialId);
+  }
+
+  async preflightCreateAsset(input: {
+    userId: string;
+    sourceAssetId: string | undefined;
+  }): Promise<MaterialLibraryResponse | null> {
+    if (!input.sourceAssetId) return null;
+    const linked = await this.assetRepo.findOwnedMaterialLink(
+      input.userId,
+      input.sourceAssetId,
+    );
+    if (linked === null) return null;
+
+    const outcome = await this.uploadMaterialGate().check(
+      input.userId,
+      linked,
+    );
+    if (outcome.ok) {
+      return localEnvelope("CreateAsset", { Id: linked, AlreadyLinked: true });
+    }
+    if (outcome.reason !== "not_approved") return null;
+
+    await this.discardMaterialHistory(input.userId, linked);
+    return null;
+  }
+
+  private async discardMaterialHistory(
+    userId: string,
+    materialId: string,
+  ): Promise<void> {
+    await this.assetRepo.clearMaterialLink(userId, materialId);
+    await this.clearMaterialStatus(userId, materialId);
+    void this.deleteUpstreamMaterial(materialId);
+  }
+}
+
+function readAssetStatusEntries(upstreamBody: unknown): Array<{
+  materialId: string;
+  status: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+}> {
+  if (!isRecord(upstreamBody)) return [];
+  const result = upstreamBody.Result;
+  if (!isRecord(result)) return [];
+  const rawItems = Array.isArray(result.Items) ? result.Items : [result];
+  const entries: Array<{
+    materialId: string;
+    status: string;
+    errorCode: string | null;
+    errorMessage: string | null;
+  }> = [];
+  for (const raw of rawItems) {
+    if (!isRecord(raw)) continue;
+    const id = raw[MATERIAL_ID_FIELD];
+    const status = raw.Status;
+    if (
+      typeof id !== "string" ||
+      !MATERIAL_ID_PATTERN.test(id) ||
+      typeof status !== "string"
+    ) {
+      continue;
+    }
+    const error = isRecord(raw.Error) ? raw.Error : undefined;
+    const code = error?.Code;
+    const message = error?.Message;
+    entries.push({
+      materialId: id,
+      status,
+      errorCode: typeof code === "string" ? code : null,
+      errorMessage: typeof message === "string" ? message : null,
+    });
+  }
+  return entries;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -369,7 +540,8 @@ function toUpstreamGroupItem(
   return {
     Id: view.materialGroupId,
     Name: view.name,
-    GroupType: "AIGC",
+    GroupType: view.kind === "real" ? "LivenessFace" : "AIGC",
+    CoverUrl: view.coverUrl,
     CreateTime: toIsoSeconds(view.createdAt),
     UpdateTime: toIsoSeconds(view.updatedAt),
   };

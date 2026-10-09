@@ -37,7 +37,6 @@ export interface SnapshotAssetSummary {
   access_url: string;
   type: string;
   material_id: string | null;
-  material_group_id: string | null;
   material_status: string | null;
   material_status_checked_at: string | null;
   md5: string | null;
@@ -116,7 +115,6 @@ export async function handleGetSnapshot(
       access_url: asset.url,
       type: asset.type,
       material_id: asset.material_id ?? null,
-      material_group_id: asset.material_group_id ?? null,
       material_status: asset.material_status ?? null,
       material_status_checked_at: asset.material_status_checked_at ?? null,
       md5: asset.md5 ?? null,

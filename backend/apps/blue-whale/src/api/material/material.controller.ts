@@ -44,6 +44,16 @@ export class MaterialController {
         const { [SOURCE_ASSET_ID_FIELD]: _stripped, ...rest } = body;
         payload = rest;
       }
+      if (user && sourceAssetId) {
+        const alreadyLinked = await this.material.preflightCreateAsset({
+          userId: user.userId,
+          sourceAssetId,
+        });
+        if (alreadyLinked) {
+          res.status(alreadyLinked.status).json(alreadyLinked.body);
+          return;
+        }
+      }
       if (user && !(payload as Record<string, unknown>).GroupId) {
         const groupId = await this.material.ensureVirtualDefaultGroup(
           user.userId,
@@ -121,7 +131,6 @@ export class MaterialController {
               userId,
               assetId: sourceAssetId,
               materialId,
-              materialGroupId: groupId,
             });
           }
         } else {
@@ -150,19 +159,7 @@ export class MaterialController {
       return;
     }
     if (action === "ListAssets" || action === "GetAsset") {
-      const entries = readAssetStatusEntries(upstreamBody);
-      if (entries.length > 0) {
-        await this.material.mirrorMaterialStatuses(userId, entries);
-        for (const entry of entries) {
-          if (entry.status !== "Failed") continue;
-          await this.material.handleUpstreamMaterialFailure({
-            userId,
-            materialId: entry.materialId,
-            errorCode: entry.errorCode ?? null,
-            errorMessage: entry.errorMessage ?? null,
-          });
-        }
-      }
+      await this.material.ingestUpstreamMaterialStatuses(userId, upstreamBody);
       return;
     }
   }
@@ -178,44 +175,4 @@ function readResultId(upstreamBody: unknown): string | undefined {
   if (!isRecord(result)) return undefined;
   const id = result[MATERIAL_ID_FIELD];
   return typeof id === "string" ? id : undefined;
-}
-
-function readAssetStatusEntries(upstreamBody: unknown): Array<{
-  materialId: string;
-  status: string;
-  errorCode: string | null;
-  errorMessage: string | null;
-}> {
-  if (!isRecord(upstreamBody)) return [];
-  const result = upstreamBody.Result;
-  if (!isRecord(result)) return [];
-  const rawItems = Array.isArray(result.Items) ? result.Items : [result];
-  const entries: Array<{
-    materialId: string;
-    status: string;
-    errorCode: string | null;
-    errorMessage: string | null;
-  }> = [];
-  for (const raw of rawItems) {
-    if (!isRecord(raw)) continue;
-    const id = raw[MATERIAL_ID_FIELD];
-    const status = raw.Status;
-    if (
-      typeof id !== "string" ||
-      !MATERIAL_ID_PATTERN.test(id) ||
-      typeof status !== "string"
-    ) {
-      continue;
-    }
-    const error = isRecord(raw.Error) ? raw.Error : undefined;
-    const code = error?.Code;
-    const message = error?.Message;
-    entries.push({
-      materialId: id,
-      status,
-      errorCode: typeof code === "string" ? code : null,
-      errorMessage: typeof message === "string" ? message : null,
-    });
-  }
-  return entries;
 }

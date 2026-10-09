@@ -17,7 +17,6 @@ CREATE TABLE `assets` (
     `source` VARCHAR(32) NOT NULL DEFAULT 'generated',
     `status` VARCHAR(32) NOT NULL DEFAULT 'normal',
     `material_id` VARCHAR(128) NULL,
-    `material_group_id` VARCHAR(128) NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
@@ -32,7 +31,6 @@ CREATE TABLE `assets` (
     INDEX `idx_asset_storage_live`(`storage_key`, `is_delete`),
     INDEX `idx_asset_gc_candidates`(`is_delete`, `deleted_at`),
     INDEX `idx_asset_user_md5`(`user_id`, `md5`, `is_delete`),
-    INDEX `idx_asset_material_group`(`material_group_id`),
     UNIQUE INDEX `uq_asset_material_id`(`material_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
