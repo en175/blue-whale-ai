@@ -16,7 +16,8 @@ import {
   type BillingTransaction,
 } from "@lib/shared/billing/billing-client.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
-import { RechargeService, RECHARGE_LOT_BIZ_TYPE } from "@lib/shared/recharge/recharge.service.js";
+import { RECHARGE_LOT_BIZ_TYPE } from "@lib/shared/billing/lot-biz-type.js";
+import { RechargeService } from "@lib/shared/recharge/recharge.service.js";
 import {
   USER_ORDER_STATUSES,
   isUserOrderStatus,

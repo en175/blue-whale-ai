@@ -3,6 +3,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { createLogger, type Logger } from "@lib/core/logging";
 import { fetchCreditsPerYuan, grantCredits } from "@lib/shared/billing/billing-admin-client.js";
+import { RECHARGE_LOT_BIZ_TYPE } from "@lib/shared/billing/lot-biz-type.js";
 import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
 import {
   createRechargeOrderRepo,
@@ -51,8 +52,6 @@ import { TOPUP_TIER_REPO_TOKEN } from "@lib/shared/topup-tier/topup-tier.tokens.
 const GATEWAY_ORDER_TTL_MS = 2 * 60 * 60 * 1000;
 
 const RECONCILE_INTERVAL_MS = 30 * 1000;
-
-export const RECHARGE_LOT_BIZ_TYPE = "recharge";
 
 export interface RechargeTierOffer {
   id: string;
