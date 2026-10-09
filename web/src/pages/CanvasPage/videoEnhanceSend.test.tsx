@@ -12,8 +12,10 @@ import { VIDEO_ENHANCE_EDGE_ORIGIN } from './videoEnhance';
 import { toast } from 'sonner';
 import type { GenerationModel } from '@/api/generation';
 import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
+import { installFetchGuard } from './testing/fetchGuard';
 
 silenceApiConsoleInfo();
+const fetchGuard = installFetchGuard();
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -690,9 +692,9 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       apiMocks.createVideoEnhancement.mockImplementation(actual.createVideoEnhancement);
       fetchMock.mockReset();
       fetchMock.mockImplementation(async () => jsonEnvelope(200, 'ok', 200));
-      vi.stubGlobal('fetch', fetchMock);
+      fetchGuard.stub(fetchMock, [['POST', '/api/projects/p1/video-enhancements']]);
     });
-    afterEach(() => { vi.unstubAllGlobals(); });
+    afterEach(() => { fetchGuard.unstubGlobals(); });
     return { fetchMock, jsonEnvelope, settle };
   }
 
@@ -1347,7 +1349,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       syncRealFlow = null;
       measureSpies.forEach((spy) => spy.mockRestore());
       measureSpies = [];
-      vi.unstubAllGlobals();
+      fetchGuard.unstubGlobals();
     });
 
     it('初值 4K 改 2K 发送 B 等待，真实点击当前可见同卡：B 失败仍显示原有原因，参数保留、创建仅一次、失败后恢复操作', async () => {

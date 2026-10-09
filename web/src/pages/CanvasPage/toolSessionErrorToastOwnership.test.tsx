@@ -11,8 +11,16 @@ import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
+import { installFetchGuard } from './testing/fetchGuard';
 
 silenceApiConsoleInfo();
+const fetchGuard = installFetchGuard([
+  ['POST', '/api/projects/p1/audio-trims'],
+  ['POST', '/api/projects/p1/audio-mixes'],
+  ['POST', '/api/projects/p1/video-scene-splits'],
+  ['POST', '/api/projects/p1/video-mattings'],
+  ['POST', '/api/projects/p1/image-outpaints'],
+]);
 
 
 export const flowProps: { current: Record<string, any> } = { current: {} };
@@ -318,14 +326,14 @@ beforeEach(() => {
   seedProjectA();
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => jsonOk(null));
-  vi.stubGlobal('fetch', fetchMock);
+  fetchGuard.stub(fetchMock);
   jobMocks.fetchJobStatus.mockReset();
   jobMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
 });
 
 afterEach(async () => {
   await unmountPage();
-  vi.unstubAllGlobals();
+  fetchGuard.unstubGlobals();
   vi.clearAllMocks();
   useAuthPromptStore.getState().reset();
   useAuthStore.setState({ user: null, isNewUser: false, credits: null });

@@ -8,8 +8,10 @@ import BottomDialog from './index';
 import styles from './index.module.css';
 import { typePromptRefText } from '../../testing/promptRefEditor';
 import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
+import { installFetchGuard } from '../../testing/fetchGuard';
 
 silenceApiConsoleInfo();
+const fetchGuard = installFetchGuard([['POST', '/api/projects/p1/generation-jobs/quote']]);
 
 const { fetchGenerationModels } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
@@ -399,7 +401,7 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     fetchGenerationModels.mockResolvedValue([seedance25, kling]);
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' })));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
     await renderSampleDialog({ projectId: 'p1' });
     await openSampleConfig();
 
@@ -427,7 +429,7 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('false');
     expect(sizeButton()!.textContent).toContain('1080p');
     expect(sizeButton()!.disabled).toBe(false);
-    vi.unstubAllGlobals();
+    fetchGuard.unstubGlobals();
   });
 
   it('切换模型即关闭；再选回放行模型也不自动开启（父规格用户故事 3）', async () => {
@@ -483,7 +485,7 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
 
   it('样片无有效报价（credits null）→ 禁止提交并提示确认中（不按未知金额提交）', async () => {
     fetchGenerationModels.mockResolvedValue([seedance25]);
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+    fetchGuard.stub(vi.fn().mockImplementation(() =>
       Promise.resolve(quoteResponse({ credits: null, quote_revision: null }))));
     await renderSampleDialog({ projectId: 'p1' });
     await openSampleConfig();
@@ -491,12 +493,12 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     await typePrompt('样片内容');
     await vi.waitFor(() => expect(sendButton().disabled).toBe(true));
     expect(mountNode.textContent).toContain('样片价格确认中');
-    vi.unstubAllGlobals();
+    fetchGuard.unstubGlobals();
   });
 
   it('报价就绪 → 可发送，onSend 携带 480p 与提交确认两字段（expectedCredits/quoteRevision）', async () => {
     fetchGenerationModels.mockResolvedValue([seedance25]);
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+    fetchGuard.stub(vi.fn().mockImplementation(() =>
       Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' }))));
     const onSend = vi.fn();
     await renderSampleDialog({ projectId: 'p1', onSend });
@@ -511,14 +513,14 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     expect(opts.resolution).toBe('480p');
     expect(opts.expectedCredits).toBe(60);
     expect(opts.quoteRevision).toBe('rev-1');
-    vi.unstubAllGlobals();
+    fetchGuard.unstubGlobals();
   });
 
   it('报价刷新期间（参数变化后新报价未落地）→ 禁止以旧金额提交', async () => {
     fetchGenerationModels.mockResolvedValue([seedance25]);
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(quoteResponse({ credits: 60, quote_revision: 'rev-1' })));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
     await renderSampleDialog({ projectId: 'p1' });
     await openSampleConfig();
     await act(async () => { sampleSwitch()!.click(); });
@@ -534,7 +536,7 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     });
     expect(sendButton().disabled).toBe(true);
     expect(mountNode.textContent).toContain('样片价格确认中');
-    vi.unstubAllGlobals();
+    fetchGuard.unstubGlobals();
   });
 });
 
@@ -572,12 +574,12 @@ describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
   }
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    fetchGuard.unstubGlobals();
   });
 
   it('初问无 prompt 键；停笔 600ms 后带 prompt 重问一次', async () => {
     const quoteFetch = vi.fn().mockResolvedValue(quoteResponse());
-    vi.stubGlobal('fetch', quoteFetch);
+    fetchGuard.stub(quoteFetch);
     await renderDialogWithProject('把背景替换成海边沙滩');
 
     await vi.waitFor(() => expect(quoteFetch).toHaveBeenCalledTimes(1));
@@ -600,7 +602,7 @@ describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
 
   it('空提示词面板：报价请求恒不带 prompt 键', async () => {
     const quoteFetch = vi.fn().mockResolvedValue(quoteResponse());
-    vi.stubGlobal('fetch', quoteFetch);
+    fetchGuard.stub(quoteFetch);
     await renderDialogWithProject('');
 
     await vi.waitFor(() => expect(quoteFetch).toHaveBeenCalledTimes(1));
@@ -639,7 +641,7 @@ describe('IKJIVN 样片报价 payload 携带 target_node_id', () => {
 
   it('草稿绑定模式：样片报价查询 payload 的 target_node_id = 当前绑定节点 id（与提交同源）', async () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponseReady());
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
 
     const bodies = await openSampleAndCollectQuoteBodies(fetchMock, { targetNodeId: 'media-draft-9' });
     const sampleBodies = bodies.filter((body) => body.parameters?.sample_mode === true);
@@ -649,17 +651,17 @@ describe('IKJIVN 样片报价 payload 携带 target_node_id', () => {
     }
     const previewBody = bodies.find((body) => body.parameters?.sample_mode !== true)!;
     expect(previewBody.target_node_id).toBe('media-draft-9');
-    vi.unstubAllGlobals();
+    fetchGuard.unstubGlobals();
   });
 
   it('自由模式（无绑定节点）：报价请求不携带 target_node_id（行为同旧）', async () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponseReady());
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
 
     const bodies = await openSampleAndCollectQuoteBodies(fetchMock);
     for (const body of bodies) {
       expect(body).not.toHaveProperty('target_node_id');
     }
-    vi.unstubAllGlobals();
+    fetchGuard.unstubGlobals();
   });
 });

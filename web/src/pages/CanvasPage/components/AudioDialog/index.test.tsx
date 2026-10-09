@@ -10,8 +10,10 @@ import { INSERT_REF_AT_SELECTION_TITLE } from '../RefThumbnail';
 import { readPromptRefText, typePromptRefText, typePromptRefRaw, promptRefEditorInstance } from '../../testing/promptRefEditor';
 import type { AtMentionItem } from '../../atMention';
 import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
+import { installFetchGuard } from '../../testing/fetchGuard';
 
 silenceApiConsoleInfo();
+const fetchGuard = installFetchGuard([['POST', '/api/projects/p1/generation-jobs/quote']]);
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -518,7 +520,7 @@ describe('IKJIVN 音频面板报价不带 target_node_id', () => {
       JSON.stringify({ code: 200, msg: null, data: { credits: 3 } }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     ));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
 
     await renderDialog({ projectId: 'p1' });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -526,7 +528,7 @@ describe('IKJIVN 音频面板报价不带 target_node_id', () => {
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body.type).toBe('audio');
     expect(body).not.toHaveProperty('target_node_id');
-    vi.unstubAllGlobals();
+    fetchGuard.unstubGlobals();
   });
 });
 

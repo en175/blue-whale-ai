@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationRefItem } from '@/api/jobs';
 import GenerationQuoteBadge from './index';
 import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
+import { installFetchGuard } from '../../testing/fetchGuard';
 
 silenceApiConsoleInfo();
+const fetchGuard = installFetchGuard([['POST', '/api/projects/p1/generation-jobs/quote']]);
 
 
 let root: Root;
@@ -77,7 +79,7 @@ async function settle() {
 }
 
 beforeEach(() => {
-  vi.unstubAllGlobals();
+  fetchGuard.unstubGlobals();
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
 
@@ -85,13 +87,13 @@ afterEach(() => {
   act(() => root?.unmount());
   root = undefined as unknown as Root;
   container?.remove();
-  vi.unstubAllGlobals();
+  fetchGuard.unstubGlobals();
 });
 
 describe('GenerationQuoteBadge', () => {
   it('有报价 → 显示「本次预计消耗 N 积分」，请求带的是定价维度', async () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponse(42));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
 
     await renderBadge({});
 
@@ -110,7 +112,7 @@ describe('GenerationQuoteBadge', () => {
 
   it('有参考 → 参考原样进请求体（张数交后端数，前端不自报个数）', async () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponse(48));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
 
     await renderBadge({ references: [imageRef('a'), imageRef('b')] });
 
@@ -124,7 +126,7 @@ describe('GenerationQuoteBadge', () => {
 
   it('★ 参考列表变了 → 重新报价（键含参考，不吃旧价缓存）', async () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponse(42));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
 
     await renderBadge({ references: [imageRef('a')] });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -136,7 +138,7 @@ describe('GenerationQuoteBadge', () => {
   });
 
   it('★ 无报价（credits: null）→ 什么都不显示，尤其**不显示 0**', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(quoteResponse(null)));
+    fetchGuard.stub(vi.fn().mockResolvedValue(quoteResponse(null)));
 
     await renderBadge({});
     await settle();
@@ -146,8 +148,7 @@ describe('GenerationQuoteBadge', () => {
   });
 
   it('★ 报价请求失败 → 什么都不显示（预览失败不阻断、不打扰）', async () => {
-    vi.stubGlobal(
-      'fetch',
+    fetchGuard.stub(
       vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
     );
 
@@ -159,7 +160,7 @@ describe('GenerationQuoteBadge', () => {
 
   it('项目或模型未定 → 不发请求', async () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponse(42));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
 
     await renderBadge({ projectId: '' });
 
@@ -167,7 +168,7 @@ describe('GenerationQuoteBadge', () => {
   });
 
   it('★ IKJ797 标记 duration_basis=source_video → 徽标旁标注「按源视频时长预估」', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(quoteResponseWithBasis(58)));
+    fetchGuard.stub(vi.fn().mockResolvedValue(quoteResponseWithBasis(58)));
 
     await renderBadge({});
 
@@ -180,7 +181,7 @@ describe('GenerationQuoteBadge', () => {
 
   it('★ IKJGE6 草稿目标 → 请求体带 target_node_id（后端据此做画布文本带入合并）；换目标重新报价', async () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponse(42));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
 
     await renderBadge({ targetNodeId: 'media-1' });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -192,7 +193,7 @@ describe('GenerationQuoteBadge', () => {
   });
 
   it('★ 无标记（延长/参考单）→ 只显积分，不出现口径标注', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(quoteResponse(58)));
+    fetchGuard.stub(vi.fn().mockResolvedValue(quoteResponse(58)));
 
     await renderBadge({});
 
