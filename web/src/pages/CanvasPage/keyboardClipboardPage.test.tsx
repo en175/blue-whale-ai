@@ -42,18 +42,11 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
   })),
 }));
 
-/* IKGBPA 画布内部剪贴板（页面级）：C 快照定格（删/改名/编辑原卡不影响副本）、
-   V 视口中心落位 + 多卡原相对位置 + 连续粘贴阶梯、新卡自动选中、@ 派生索引线重建、
-   手拉连线不复制、粘贴可撤销（真实 Ctrl+Z）、切项目清空、与 Ctrl/Cmd+D 立即复制并存。
-   共享夹具见 canvasPageTestHarness（FlowCanvas 打桩透出 props）；撤销监听在页面级
-   document，派发真实 KeyboardEvent。本文件特有：双项目列表（切项目用例）与
-   生成完成链路的 fetchJobStatus 手动闸门。 */
 
 beforeEach(() => {
   enableReactActEnvironment();
   localStorage.clear();
   sessionStorage.clear();
-  // 切项目用例需要两个项目（harness 默认单项目）
   apiMocks.fetchProjects.mockResolvedValue([{ id: 'p1', name: '项目一' }, { id: 'p2', name: '项目二' }]);
   seedClipboardDoc();
 });
@@ -63,12 +56,6 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-/**
- * 验收画布文档：
- * - t1：文本卡（title/正文/正文 @ 引用 m1 的派生索引 + 会话性 prompt 字段）
- * - m1：图片媒体卡
- * - e-hand：t1 → m1 手拉连线（验证不随粘贴复制）
- */
 function seedClipboardDoc() {
   canvasDocMock.current = {
     doc: {
@@ -100,8 +87,6 @@ function seedClipboardDoc() {
   };
 }
 
-/** 本用例专属画布：一张生成中的媒体卡 m-gen（水合恢复任务 99 的轮询）。
- *  fetchJobStatus 以手动闸门控制在「复制动作之后」才返回成功，驱动真实任务完成链路。 */
 function seedGeneratingDoc() {
   canvasDocMock.current = {
     doc: {
@@ -127,14 +112,12 @@ describe('IKGBPA 快照定格', () => {
     await renderPage();
     await copySelected(['t1']);
 
-    // 复制后原卡改名 + 改正文（页面真实回调）
     await act(async () => {
       (textNodes().find((n) => n.id === 't1')!.data as Record<string, any>).onTitleChange('t1', '改名后');
     });
     await act(async () => {
       (textNodes().find((n) => n.id === 't1')!.data as Record<string, any>).onTextChange('t1', '新正文');
     });
-    // 删除原卡
     await act(async () => {
       flowProps.current.onDeleteNode(['t1']);
     });
@@ -171,7 +154,6 @@ describe('IKGBPA 视口中心落位与连续粘贴阶梯', () => {
     await copySelected(['t1', 'm1']);
     await pasteClipboard();
 
-    // 原相对位置 (400,100) - (0,0) 保持
     expect(textCopies()[0].position).toEqual({ x: 300, y: 200 });
     expect(mediaCopies()[0].position).toEqual({ x: 700, y: 300 });
   });
@@ -192,7 +174,7 @@ describe('IKGBPA 视口中心落位与连续粘贴阶梯', () => {
     await renderPage();
     await copySelected(['t1']);
     await pasteClipboard();
-    await copySelected(['t1']); // 重新复制：偏移归零
+    await copySelected(['t1']);
     await pasteClipboard();
     const copies = textCopies();
     expect(copies).toHaveLength(2);
@@ -225,12 +207,10 @@ describe('IKGBPA 连线语义', () => {
     const copyM = mediaCopies()[0];
     const edges = flowProps.current.edges as Array<{ id: string; source: string; target: string; data?: Record<string, unknown> }>;
 
-    // 派生索引线：来源媒体卡 m1（仍在画布）→ 副本文本卡
     const derived = edges.find((e) => e.source === 'm1' && e.target === copyT.id);
     expect(derived, '副本获得有效 media 索引（IKFM3Q 契约 §4）').toBeTruthy();
     expect(derived!.data?.textIndex).toBe(true);
 
-    // 手拉连线不复制：副本之间、原卡与副本之间均无手拉线；原线保留
     expect(edges.some((e) => e.source === copyT.id)).toBe(false);
     expect(edges.some((e) => e.source === 't1' && e.target === copyM.id)).toBe(false);
     expect(edges.some((e) => e.id === 'e-hand')).toBe(true);
@@ -245,13 +225,11 @@ describe('IKGBPA 粘贴可撤销', () => {
     expect(textCopies()).toHaveLength(1);
     expect(mediaCopies()).toHaveLength(1);
 
-    // 第一次 Z：撤派生索引线（对齐立即复制 addNodes + addEdges 两条既有登记形态）
     await pressUndo(modifier as 'ctrl' | 'meta');
     expect(textCopies(), '先撤线不撤卡').toHaveLength(1);
     const edgesAfterLineUndo = flowProps.current.edges as Array<{ source: string; target: string }>;
     expect(edgesAfterLineUndo.every((e) => !e.target.startsWith('text-'))).toBe(true);
 
-    // 第二次 Z：撤整组副本
     await pressUndo(modifier as 'ctrl' | 'meta');
     expect(textCopies()).toHaveLength(0);
     expect(mediaCopies()).toHaveLength(0);
@@ -271,7 +249,6 @@ describe('IKGBPA 切换项目清空画布剪贴板', () => {
     });
     await pasteClipboard();
 
-    // 粘贴副本 id 由 newNodeId 生成（text- 前缀）；seed 节点无该前缀
     expect(textNodes().some((n) => n.id.startsWith('text-'))).toBe(false);
   });
 });
@@ -280,7 +257,6 @@ describe('IKGBPA 与 Ctrl/Cmd+D 立即复制并存', () => {
   it('D 立即复制落旁边 (+40/+40)，C/V 快照贴视口中心，两路副本共存互不干扰', async () => {
     await renderPage();
 
-    // Ctrl/Cmd+D 既有路径：副本出现在原卡右下 40,40
     await act(async () => {
       flowProps.current.onDuplicateSelected(['t1']);
     });
@@ -288,7 +264,6 @@ describe('IKGBPA 与 Ctrl/Cmd+D 立即复制并存', () => {
     expect(dup.data?.title).toBe('标题A');
     expect(dup.position).toEqual({ x: 40, y: 40 });
 
-    // C/V 快照路径：贴视口中心
     await copySelected(['t1']);
     await pasteClipboard();
     const pasted = textNodes().filter((n) => n.data?.title === '标题A' && n.id !== 't1' && n.id !== dup.id);
@@ -300,7 +275,6 @@ describe('IKGBPA 与 Ctrl/Cmd+D 立即复制并存', () => {
 
 describe('IKGBPA 快照定格（生成完成场景）', () => {
   it('复制生成中的媒体卡后任务完成：粘贴副本仍是复制时刻的生成中形态', async () => {
-    // 手动闸门：复制完成后才放行任务成功响应（模拟任务在复制之后完成）
     let resolveStatus!: (detail: unknown) => void;
     apiMocks.fetchJobStatus.mockImplementation(
       () => new Promise((resolve) => { resolveStatus = resolve; }),
@@ -312,7 +286,6 @@ describe('IKGBPA 快照定格（生成完成场景）', () => {
     expect((mediaNodes().find((n) => n.id === 'm-gen')!.data as Record<string, unknown>).genStatus)
       .toBe('generating');
 
-    // 任务完成链路（水合轮询 → applyJobTerminal succeeded）：原卡转成品
     await act(async () => {
       resolveStatus({
         job_id: 99, status: 'succeeded', progress: 100,
@@ -326,7 +299,6 @@ describe('IKGBPA 快照定格（生成完成场景）', () => {
     expect(finished.src).toBe('http://img/done.png');
     expect(finished.fileName).toBe('生成-99');
 
-    // 粘贴：副本定格在复制时刻的生成中形态，不吃任务完成结果
     await pasteClipboard();
     const copy = mediaCopies()[0];
     expect((copy.data as Record<string, unknown>).genStatus).toBe('generating');

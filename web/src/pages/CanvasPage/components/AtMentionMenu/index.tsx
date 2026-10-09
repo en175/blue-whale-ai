@@ -1,4 +1,3 @@
-/* 输入 @ 后的素材引用菜单：搜索 + 类型分组，悬停右侧展开当前画布节点 */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlignJustify, AudioLines, ChevronRight, Image as ImageIcon, Search, Video } from 'lucide-react';
@@ -44,19 +43,15 @@ export interface ReferencedMentionItem extends AtMentionItem {
 }
 
 interface AtMentionMenuProps {
-  /** 定位锚点（输入框容器） */
   anchorRef: React.RefObject<HTMLElement | null>;
   items: AtMentionItem[];
   renderInline?: boolean;
   referencedItems?: ReferencedMentionItem[];
   onSelectReferenced?: (item: ReferencedMentionItem) => void;
-  /** 编辑器 @ 后已输入的检索词 */
   editorQuery: string;
   disabledKinds?: AtMentionKind[];
   onSelect: (item: AtMentionItem) => void;
   onClose: () => void;
-  /** Esc 取消的单独回调（IKFXOR）：调用方借此把焦点还回编辑器（光标落 @ 后）；
-   *  点外关闭仍走 onClose 不抢焦。不传时 Esc 与点外同走 onClose（文本节点/音频面板现状）。 */
   onEscapeClose?: () => void;
 }
 
@@ -83,8 +78,6 @@ export default function AtMentionMenu({
   const searching = query.trim().length > 0;
   const matched = filterAtMentionItems(items, query);
   const normalizedQuery = query.trim().toLowerCase();
-  // 两个分区独立过滤，不跨区去重。IKIQGR：已引用文本附件按名称/编号/正文全文匹配——全文走基类
-  // searchText（与画布分区同一通道，忽略大小写只 includes）；仅用于匹配，菜单行不展示正文片段。
   const matchedRefs = referencedItems.filter(item => !normalizedQuery
     || item.name.toLowerCase().includes(normalizedQuery)
     || item.badge.toLowerCase().includes(normalizedQuery)
@@ -105,7 +98,6 @@ export default function AtMentionMenu({
     const width = 228;
     const estHeight = Math.min(rootRef.current?.offsetHeight || 300, window.innerHeight - 16);
     let left = rect.left;
-    // IKFR6A：菜单优先出现在锚点上方，上方放不下才翻到锚点下方（全产品统一）
     let top = rect.top - estHeight - 6;
     if (top < 8) top = rect.bottom + 6;
     if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
@@ -115,7 +107,6 @@ export default function AtMentionMenu({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      // IKFXOR：Esc 取消需还焦编辑器、点外关闭不抢焦，两条路径分开回调
       if (onEscapeClose) onEscapeClose();
       else onClose();
     };
@@ -134,8 +125,6 @@ export default function AtMentionMenu({
 
   const flyoutItems = hovered ? items.filter((item) => item.kind === hovered) : [];
 
-  // IKFO27：子菜单必须覆盖触发行，鼠标从分类行水平移过去即可到达。
-  // IKGMAF：子菜单绝对定位，优先吸附对话框底部，高度变化不再撑走一级菜单。
   useLayoutEffect(() => {
     const wrap = flyoutWrapRef.current;
     const panel = rootRef.current?.querySelector<HTMLElement>('[data-mention-main]');
@@ -167,7 +156,6 @@ export default function AtMentionMenu({
       data-gen-panel-territory
       onFocus={(e) => {
         const target = e.target as HTMLElement;
-        // 焦点回到一级素材或搜索框时，结束上一个分类的展开状态。
         if (target.closest('[data-mention-main]') && !target.closest('[data-mention-kind]')) {
           setHovered(null);
         }

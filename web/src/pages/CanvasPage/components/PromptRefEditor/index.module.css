@@ -1,4 +1,3 @@
-/* PromptRefEditor（IKFA1M）：正文素材标签编辑器与 @ 菜单 */
 
 .editorWrapper {
   position: relative;
@@ -35,10 +34,7 @@
   user-select: none;
 }
 
-/* 素材标签胶囊（.mediaChip 系列）已提为两处共享的视觉定义（IKG7NH）：
-   见 ../mediaChip.module.css，文本卡正文标签与生成面板标签同源。 */
 
-/* @ 菜单：已引用 + 添加新参考 */
 .mentionMenu {
   width: 280px;
   max-height: 260px;

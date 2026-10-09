@@ -1,7 +1,3 @@
-// IKIQGQ：场景卡再生成 / 分镜预览两个 POST 入口的 controller 单测——业务拒绝改抛
-// DomainError 走统一投影后，「拒绝不写 200 信封、成功仍写 202」成了本文件的职责。
-// 台架抄 canvases.controller.test.ts：直接 new Controller + 假 Response 捕获实际写出，
-// handler 与入队边界 vi.mock 掉，不挂 Nest、不连库、不碰 MQ（先例：video-scene-splits.controller.test.ts）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Response } from "express";
 import {
@@ -46,10 +42,10 @@ const { SceneCardGenerateController } = await import(
 
 function makeController() {
   const controller = new SceneCardGenerateController(
-    { repo: {} } as never, // sceneCard：handler 已 mock，repo 不触达
-    { repo: {} } as never, // storyboard：同上
-    { materialStatusRepo: {} } as never, // material：门只接线不判定
-    {} as never, // assets
+    { repo: {} } as never,
+    { repo: {} } as never,
+    { materialStatusRepo: {} } as never,
+    {} as never,
   );
   const res = {
     status: vi.fn().mockReturnThis(),
@@ -62,7 +58,7 @@ function makeController() {
 }
 
 const USER = { userId: "9" } as never;
-const INVALID_REFERENCE_CODE = errorCodeToNumeric(ERROR_INVALID_REFERENCE); // 1034
+const INVALID_REFERENCE_CODE = errorCodeToNumeric(ERROR_INVALID_REFERENCE);
 
 beforeEach(() => {
   vi.mocked(handleSceneCardGenerate).mockReset();
@@ -132,8 +128,6 @@ describe("SceneCardGenerateController.generate 响应写出（IKIQGQ）", () => 
     expect(res.json).toHaveBeenCalledWith(envelope);
   });
 
-  // IKJ80Q：回退路径（catch 后仅记日志，任务由 worker 恢复扫描捞起）的日志分级——
-  // 环境缺配 → WARN + 写明任务仍会派发；真派发失败 → ERROR。
   it("环境缺配（未配置 ROCKETMQ_ENDPOINTS）→ enqueue 失败降 WARN 说明恢复扫描兜底，不打 ERROR，仍写 202（IKJ80Q）", async () => {
     const { controller, res } = makeController();
     const envelope = ok({
@@ -240,8 +234,6 @@ describe("SceneCardGenerateController.storyboardPreview 响应写出（IKIQGQ）
     expect(res.json).toHaveBeenCalledWith(envelope);
   });
 
-  // IKJ80Q：fire-and-forget 的 catch 分支同款分级——真派发失败保持 ERROR（缺配分支
-  // 已由 generate video 用例覆盖，判别函数共享同一处收口）。
   it("真派发失败（其他错误）→ fire-and-forget catch 保持 ERROR（IKJ80Q）", async () => {
     const { controller, res } = makeController();
     const envelope = ok({
@@ -256,7 +248,6 @@ describe("SceneCardGenerateController.storyboardPreview 响应写出（IKIQGQ）
     );
 
     await controller.storyboardPreview(USER, "523", "12", {}, "idem-4", res);
-    // fire-and-forget：让出一个宏任务，等 .catch 回调落地。
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(res.status).toHaveBeenCalledWith(202);
@@ -267,6 +258,3 @@ describe("SceneCardGenerateController.storyboardPreview 响应写出（IKIQGQ）
     expect(logger.warn).not.toHaveBeenCalled();
   });
 });
-
-// DomainError 本身不写响应：投影由 AllExceptionsFilter 负责（唯一投影出入口），
-// 每个拒绝用例里 res.status/res.json 未被调用即是「控制器把失败交出去」的断言。

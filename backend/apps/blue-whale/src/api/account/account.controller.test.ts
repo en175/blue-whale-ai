@@ -3,15 +3,12 @@ import ExcelJS from "exceljs";
 import type { Response } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-/** 导出的 xlsx 必须**真读回来**断言：写坏了服务端不报错，只有用户下载才发现。 */
 async function readBackWorkbook(buffer: Buffer): Promise<ExcelJS.Worksheet> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
   return workbook.worksheets[0];
 }
 
-// 只替换 client 的来源，`toBillingError` 用真实现——错误映射是这条端点对外的一部分，
-// 换成假的就等于把「billing 挂了会回什么」这条断言删掉了。
 const { listTransactions, listCreditLots, sharedBillingClient } = vi.hoisted(() => {
   const listTransactions = vi.fn();
   const listCreditLots = vi.fn();
@@ -35,8 +32,6 @@ import { AccountController } from "./account.controller.js";
 
 const USER = { userId: "42", username: "alice" } as never;
 
-// JobsService 用桩：这条端点该负责的是「把两个来源合并成什么形状」，不是「怎么查任务」——
-// 查询本身归它自己的单测。这里只在边界上钉住合并行为（与积分记录页同款）。
 const { loadTaskSummaries } = vi.hoisted(() => ({ loadTaskSummaries: vi.fn() }));
 const { listOrdersForAdmin } = vi.hoisted(() => ({ listOrdersForAdmin: vi.fn() }));
 const controller = new AccountController(
@@ -61,8 +56,6 @@ describe("AccountController.consumptions（billing 账本）", () => {
 
     await controller.consumptions(USER, {});
 
-    // 没有 typeFilters 这个键（不是 typeFilters: undefined）：exactOptionalPropertyTypes 下
-    // 传 undefined 与「不传」在契约上是两回事。
     expect(listTransactions).toHaveBeenCalledWith({
       userId: 42,
       pageSize: 20,
@@ -90,7 +83,6 @@ describe("AccountController.consumptions（billing 账本）", () => {
   it("type 逗号分隔 = 多值：用户的「已消耗」页签要一次取 consume + expire", async () => {
     listTransactions.mockResolvedValue(page());
 
-    // 多余的空格与空段都要滤掉，否则会把 "" 当成一个类型送去校验、被 billing 拒成 400
     await controller.consumptions(USER, { type: " consume , expire ,, " });
 
     expect(listTransactions).toHaveBeenCalledWith(
@@ -103,8 +95,6 @@ describe("AccountController.consumptions（billing 账本）", () => {
 
     for (const raw of ["0", "-3", "abc"]) {
       await controller.consumptions(USER, { page: raw });
-      // 不夹的话 (page-1)*page_size 会算出负 OFFSET，MySQL 直接语法错、整请求 500 ——
-      // 而调用方只是传了个 0（客户端从 0 起算是常见写法）
       expect(listTransactions).toHaveBeenLastCalledWith(
         expect.objectContaining({ page: 1 }),
       );
@@ -195,7 +185,6 @@ describe("AccountController.consumptions（billing 账本）", () => {
           generationJobId: "7",
         },
         {
-          // 发放行 / 过期行没有任务：job id 为 null，不该被塞进批量查询（7 行就是 7 次库往返）
           id: "lot:3",
           type: "recharge",
           direction: "in",
@@ -231,7 +220,6 @@ describe("AccountController.consumptions（billing 账本）", () => {
         },
       ]),
     );
-    // loadTaskSummaries 缺省返回空 Map = 查不到
 
     const item = (await controller.consumptions(USER, {})).data.items[0];
 
@@ -267,8 +255,6 @@ describe("AccountController.creditLots（批次台账）", () => {
   it("★ 用户 id 只来自会话，query 里的 user_id 一个字都不认", async () => {
     listCreditLots.mockResolvedValue({ items: [], total: 0 });
 
-    // 传了 user_id / userId 也不该改变行为 —— 这条路由压根没有「查别人的台账」这个入参。
-    // 上游 billing 对 user_id <= 0 直接拒，所以这里**绝不能**把它透传下去
     await controller.creditLots(USER, { user_id: "999", userId: "999" });
 
     expect(listCreditLots).toHaveBeenCalledWith({
@@ -304,7 +290,6 @@ describe("AccountController.creditLots（批次台账）", () => {
       amount: 3000,
       remaining: 1200,
       created_at: "2024-12-01T09:12:00+08:00",
-      // 空串而不是 null：对外只留一种「没有」，与 settled_at 同一条收敛
       expires_at: "",
       biz_type: "recharge",
       biz_id: "BW20241201091200555",
@@ -334,8 +319,6 @@ describe("AccountController.orders（用户侧充值订单）", () => {
       keyword: "别人的手机号",
     });
 
-    // 关键：userId 是 42（会话里的），不是 999。管理端那条可以不传 userId = 全站订单，
-    // 这条路由永远不许走到那个分支
     expect(listOrdersForAdmin).toHaveBeenCalledWith({
       page: 1,
       pageSize: 20,
@@ -351,7 +334,6 @@ describe("AccountController.orders（用户侧充值订单）", () => {
   });
 
   it("status 非法 → 当场 400，不是静默回空列表", async () => {
-    // 空列表与「真的没有」长得一模一样，运营/用户都分不出来
     await expect(controller.orders(USER, { status: "refunded" })).rejects.toMatchObject({
       status: 400,
     });
@@ -395,16 +377,7 @@ describe("AccountController.orders（用户侧充值订单）", () => {
   });
 });
 
-/**
- * 导出这一层**必须**有测试。
- *
- * <p>⚠️ 上一版这里一条都没有，于是漏掉了一整类事故：`collectExportRows` 把 repo 的
- * camelCase 原始对象（`createdAt` / `amountFen`）直接塞给读 snake_case 的列定义，
- * 键全对不上 —— 服务端一声不响，用户下载下来才发现大半格子是空的。
- * 所以下面第一条用例**真的把 xlsx 读回来**，而不是断言中间产物。
- */
 describe("AccountController.export（导出 xlsx）", () => {
-  /** `@Res({ passthrough: true })` 的最小替身：只记头。 */
   function fakeRes() {
     const headers: Record<string, string> = {};
     return {
@@ -415,7 +388,6 @@ describe("AccountController.export（导出 xlsx）", () => {
     } as unknown as Response;
   }
 
-  /** 把 StreamableFile 的流读成 Buffer —— 这样才能交给 exceljs 回读。 */
   async function toBuffer(file: StreamableFile): Promise<Buffer> {
     const chunks: Buffer[] = [];
     for await (const chunk of file.getStream()) chunks.push(Buffer.from(chunk as Buffer));
@@ -434,7 +406,6 @@ describe("AccountController.export（导出 xlsx）", () => {
     listOrdersForAdmin.mockResolvedValue({
       items: [
         {
-          // 这是 `RechargeOrderView` 的真实形状 —— 键与导出的列定义**不同名**
           tradeNo: "BW-1",
           productName: "自定义充值 · 600 积分",
           amountFen: 4000,
@@ -451,7 +422,6 @@ describe("AccountController.export（导出 xlsx）", () => {
     const file = await controller.export(USER, { scope: "orders" }, fakeRes());
     const sheet = await readBackWorkbook(await toBuffer(file));
 
-    // 直接塞原始对象的话，这三格会是 undefined / NaN，而服务端不会报错
     expect(sheet.getRow(2).getCell(1).value).toBe("2026-09-29T14:32:00+08:00");
     expect(sheet.getRow(2).getCell(3).value).toBe("BW-1");
     expect(sheet.getRow(2).getCell(4).value).toBe(40);
@@ -478,7 +448,6 @@ describe("AccountController.export（导出 xlsx）", () => {
     const sheet = await readBackWorkbook(await toBuffer(file));
 
     expect(sheet.getRow(2).getCell(1).value).toBe("2024-12-01T09:12:00+08:00");
-    // 空串 = 永久有效。投影漏了的话这里是空白，而 §3.3 明写**不要**渲染成空白
     expect(sheet.getRow(2).getCell(4).value).toBe("永久有效");
     expect(sheet.getRow(2).getCell(6).value).toBe(1200);
   });
@@ -528,7 +497,6 @@ describe("AccountController.export（导出 xlsx）", () => {
     expect(res.headers["Content-Type"]).toBe(
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    // 中文文件名必须走 filename*，否则 Chrome 之外的浏览器会渲染成乱码
     expect(res.headers["Content-Disposition"]).toContain("filename*=UTF-8''");
     expect(res.headers["Content-Disposition"]).toContain(encodeURIComponent("订单记录"));
   });

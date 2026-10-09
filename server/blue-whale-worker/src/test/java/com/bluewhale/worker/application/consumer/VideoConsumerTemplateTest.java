@@ -13,16 +13,6 @@ import java.nio.charset.StandardCharsets;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
-/**
- * 视频消费者模板测试（对齐 AudioConsumerTemplateTest）。
- * <p>
- * 验证 VideoConsumer 的 SEQUENTIAL 派发行为（rocketmq-video.consumer.ts:76-101）：
- * <ul>
- *   <li>tag = "video"</li>
- *   <li>digitGuard = false（视频不做纯数字守卫）</li>
- *   <li>毒丸 ack / handler 成功 ack / handler 抛错不 ack</li>
- * </ul>
- */
 @ExtendWith(MockitoExtension.class)
 class VideoConsumerTemplateTest {
 

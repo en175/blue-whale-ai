@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise implement-spec child integration with real Git worktrees."""
 
 from __future__ import annotations
 

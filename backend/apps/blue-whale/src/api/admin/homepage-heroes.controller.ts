@@ -31,10 +31,6 @@ import {
   type HomepageHeroForm,
 } from "@lib/shared/homepage-hero/homepage-hero-validation.js";
 
-/**
- * 首页背景图/视频后台动态配置管理端（IKCH05，接口对齐母工单 IKCH01 草稿）。
- * 路径前缀 api/admin/site-config/homepage-heroes。
- */
 
 @Controller("admin/site-config/homepage-heroes")
 @UseGuards(AdminGuard)
@@ -81,7 +77,6 @@ export class AdminHomepageHeroesController {
     try {
       const before = await this.hero.getById(id);
       if (!before) throw new AdminException(404, "配置不存在");
-      // 合并补丁字段到现存条目形成完整表单：跨字段规则（视频必须有封面）在合并后仍成立
       const merged: HomepageHeroForm = {
         media_type: body.media_type ?? before.media_type,
         media_url: body.media_url ?? before.media_url,
@@ -180,7 +175,6 @@ export class AdminHomepageHeroesController {
   }
 }
 
-/** 编辑审计：对比 before/after 输出变更字段名（与模板 diffFields 同款）。 */
 function diffFields(
   before: { media_type: string; media_url: string; poster_url: string | null; sort_order: number; enabled: number },
   after: CreateHomepageHeroInput,

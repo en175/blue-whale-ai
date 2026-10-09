@@ -338,7 +338,6 @@ describe("ModelCapabilityAdminRepo.setDefault（IKE0VX）", () => {
     const row = await createModelCapabilityAdminRepo(prisma).setDefault("2");
 
     expect(row).toMatchObject({ id: "2", is_default: true });
-    // 清除只扫同类未软删的已标记行，并排除自己——否则会把刚置上的位又清掉。
     expect(updateMany).toHaveBeenCalledWith({
       where: {
         capability_type: "text",
@@ -354,7 +353,6 @@ describe("ModelCapabilityAdminRepo.setDefault（IKE0VX）", () => {
         data: expect.objectContaining({ is_default: true }),
       }),
     );
-    // 两条写在同一个 $transaction 里：清了旧的却没置上新的，会让整类没有默认。
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.$transaction.mock.calls[0][0]).toHaveLength(2);
   });

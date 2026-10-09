@@ -22,7 +22,6 @@ export interface SceneSplitHost {
   error(message: string): void;
 }
 
-/** 发送先退出，宿主再预建卡并发请求；任务在途锁与失败卡不归编辑会话清理。 */
 export function createSceneSplitSession(getHost: () => SceneSplitHost): ToolSessionDefinition<SceneSplitState, string, SceneSplitSubmission> {
   return {
     kind: 'sceneSplit',

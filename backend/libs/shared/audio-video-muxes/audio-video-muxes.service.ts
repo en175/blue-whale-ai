@@ -7,7 +7,6 @@ import { loadTosStorageConfig } from "@lib/shared/assets/tos-storage.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
-// IKJJQZ：恢复契约受理锁内核复用（深路径导入，不改 QU 共享 index 导出面）。
 import {
   RecoveryContractError,
   canvasBindingView,
@@ -33,7 +32,6 @@ import {
   type RecoveryErrorEnvelope,
 } from "@lib/contracts";
 
-/** 冻结快照里的单输入（对象内 camel 命名 + 服务端解析 URL；迁移契约 §21.2）。 */
 type FrozenMuxInput = { assetId: string; nodeId?: string; url: string };
 
 @Injectable()
@@ -45,11 +43,6 @@ export class AudioVideoMuxesService {
     private readonly storage: AssetStorageService,
   ) {}
 
-  /** 创建入口（IKIHPJ，免费任务：无积分冻结、无成本预留、无余额拦截）。
-   *  权威复核两份资产归属/媒体类型/URL 协议白名单/公开可读后冻结输入快照；拒绝时不留任务。
-   *  幂等双轨（IKILVF）：Idempotency-Key + command_idempotency 表（operation
-   *  audio_video_mux.create），同键同内容重放原任务、同键异内容 409；创建任务与幂等
-   *  记录同事务落库，唯一约束冲突回落重放（与 audio_mix.create 同一套口径）。 */
   async create(
     userId: string,
     projectId: string,
@@ -62,8 +55,6 @@ export class AudioVideoMuxesService {
     if (idempotencyKey && !/^[!-~]{1,128}$/.test(idempotencyKey)) {
       throw new DomainError(PARAM_MISSING_CODE, "Idempotency-Key 必须为 1–128 个可打印非空白字符");
     }
-    // IKJJQZ（B.3 第 1 步）：canvas_binding 纯载荷校验——Idempotency-Key 必须等于 submission_id，
-    // 携带绑定时强制要求幂等键；未携带走历史路径零变化。
     const canvasBinding = parsed.data.canvas_binding ?? null;
     if (canvasBinding && (!idempotencyKey || idempotencyKey !== canvasBinding.submission_id)) {
       return recoveryError(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", RECOVERY_REASONS.invalidPayload);
@@ -130,15 +121,11 @@ export class AudioVideoMuxesService {
       if (asset.project_id !== BigInt(projectId) && asset.project_id !== 0n && !linkedIds.has(input.assetId)) {
         throw new DomainError(RESOURCE_NOT_FOUND_CODE);
       }
-      // 协议白名单与迁移契约 §21.1 冻结一致（https/mediakit/vod/tos，不含 http）：http URL
-      // 即使 storage_key 存在也不放行——冻结 url 恒取 inspectObject 的 https publicUrl，
-      // http 的 asset.url 从来不能成为任务输入（无 storage_key 时 TOS origin 还原也只认 https）。
       if (asset.type !== expectedType || !/^(https:\/\/|mediakit:\/\/|vod:\/\/|tos:\/\/)/i.test(asset.url)) {
         throw new DomainError(FAILURE_CODE, `${label}资产不可用`);
       }
       let storageKey = asset.storage_key;
       if (!storageKey) {
-        // 兼容历史 TOS Asset：可能仅保留公网 URL，仍须限制在我方桶后还原 key 验对象。
         const config = loadTosStorageConfig();
         const endpoint = config?.endpoint.replace(/^https?:\/\//, "").replace(/\/$/, "");
         const origin = config ? `https://${config.bucket}.${endpoint}` : null;
@@ -196,7 +183,6 @@ export class AudioVideoMuxesService {
     } finally {
       clearTimeout(deadlineTimer);
     }
-    // 估算时长取源视频资产时长毫秒（IKIHPJ 拍板⑥）；缺失走未知 7d 预算。
     const estimatedDurationMs = videoSlot.durationMs;
 
     const data = {
@@ -225,8 +211,6 @@ export class AudioVideoMuxesService {
     let replayed = false;
     try {
       const result = await this.prisma.client.$transaction(async (tx) => {
-        // IKJJQZ（B.3 步骤 2-3）：受理锁序先于任务写入——锁内幂等回读（命中同摘要=重放原关联）
-        // → 节点归属版本比对（冲突在 job 写入前拒绝）→ 提交关联/归属行随 job 同一事务提交。
         let plan: CanvasRecoveryPlan | null = null;
         if (canvasBinding) {
           const locked = await lockCanvasRecoveryForAcceptance(tx, {
@@ -256,7 +240,6 @@ export class AudioVideoMuxesService {
       throw error;
     }
     if (replayed) return this.withBindingView((await replay())!, projectId, canvasBinding);
-    // IKJJQZ：成功 data 追加 canvas_binding 视图（重放与首次受理同形；is_current 现查 owner）。
     return this.withBindingView(
       ok({ job_id: jobIdOfCreated, status: "queued", replayed: false, enqueue_required: true }),
       projectId,
@@ -264,13 +247,6 @@ export class AudioVideoMuxesService {
     );
   }
 
-  /** 重试入口（IKIHPL）：读冻结快照重放，不读画布当前选中态、不重新解析资产 URL；
-   *  快照缺失或输入资产已删除时给出明确拒绝原因。仅 failed 态可重试，其他状态拒绝。
-   *  幂等双轨：Idempotency-Key + command_idempotency 表（operation audio_video_mux.retry），
-   *  同事务 CAS failed→queued；免费任务同创建：无积分冻结、无成本预留、无余额拦截。
-   *  IKJJQZ（B.3）：专属重试可携带 canvas_binding（新 submission_id = 独立提交意图，同 jobId
-   *  不等于同提交意图）。任务重置与归属版本推进在同一最外层事务；绑定冲突在任务重置前
-   *  拒绝。未携带走历史路径零变化。 */
   async retry(
     userId: string,
     projectId: string,
@@ -281,7 +257,6 @@ export class AudioVideoMuxesService {
     if (!/^[!-~]{1,128}$/.test(idempotencyKey)) {
       throw new DomainError(PARAM_MISSING_CODE, "Idempotency-Key 必须为 1–128 个可打印非空白字符");
     }
-    // IKJJQZ（B.3 第 1 步）：canvas_binding 纯载荷校验（Idempotency-Key 必须等于 submission_id）。
     const canvasBinding = parseDedicatedRetryBinding(canvasBindingBody, idempotencyKey);
     if (canvasBinding !== null && "code" in canvasBinding) return canvasBinding;
     if (!/^[1-9][0-9]*$/.test(jobId) || !/^[1-9][0-9]*$/.test(projectId)) {
@@ -295,7 +270,6 @@ export class AudioVideoMuxesService {
       select: { id: true },
     });
     if (!owned) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
-    // IKJJQZ（B.3）：请求摘要覆盖完整 canvas_binding（zod 输出按 schema 键序，stringify 即规范化）。
     const hash = createHash("sha256").update(
       `POST:audio_video_mux.retry:${projectId}:${jobId}${canvasBinding ? `:${JSON.stringify(canvasBinding)}` : ""}`,
     ).digest("hex");
@@ -324,8 +298,6 @@ export class AudioVideoMuxesService {
     };
     try {
       const result = await this.prisma.client.$transaction(async (tx) => {
-        // IKJJQZ：受理锁序先于任务重置——锁内幂等回读（命中同摘要=重放原关联）→
-        // 节点归属版本比对（冲突在 CAS 前拒绝、零写入）→ 专属重试关联校验（不得改绑）。
         let plan: CanvasRecoveryPlan | null = null;
         if (canvasBinding) {
           const locked = await lockCanvasRecoveryForRetry(tx, {
@@ -372,7 +344,6 @@ export class AudioVideoMuxesService {
           && typeof videoAssetId === "string" && /^[1-9][0-9]*$/.test(videoAssetId)
           && typeof attempt === "number" && Number.isInteger(attempt) && attempt >= 1;
         if (!frozen || !snapshotUsable) throw new DomainError(409, "冻结快照缺失，无法重试音视频合成");
-        // 冻结输入资产仍须存活：软删（is_delete）或物理删除都视为已删除，明确拒绝。
         const living = await tx.assets.findMany({
           where: { id: { in: [BigInt(audioAssetId), BigInt(videoAssetId)] }, is_delete: false },
           select: { id: true },
@@ -387,8 +358,6 @@ export class AudioVideoMuxesService {
             next_action_at: new Date(Date.now() - 60_000),
             execution_deadline_at: audioVideoMuxDeadline(duration),
             lease_owner: null, lease_expires_at: null,
-            // 冻结快照不动：仅递增 submit_attempt。worker 的 client_token 从 (jobId, submit_attempt)
-            // 派生（契约 audioVideoMuxClientToken），递增即换新 token，不被供应商按旧 token 去重。
             input: { ...frozen, submit_attempt: attempt + 1 } as Prisma.InputJsonValue,
             fencing_token: { increment: 1 }, retry_count: { increment: 1 }, version: { increment: 1 },
           },
@@ -397,7 +366,6 @@ export class AudioVideoMuxesService {
         await tx.command_idempotency.create({
           data: { ...key, request_hash: hash, generation_job_id: jid, accepted_cursor: 0n },
         });
-        // IKJJQZ：归属版本推进（owner 指向新提交、旧承接项 transferred）与任务重置同一事务。
         if (plan) await writeCanvasRecoveryRows(tx, plan, jid);
         return { replayed: false };
       });
@@ -416,8 +384,6 @@ export class AudioVideoMuxesService {
   }
 
 
-  /** IKJJQZ：携带绑定时在响应 data 上追加 canvas_binding 视图（首次受理与重放同形，
-   *  is_current 现查 owner、不将旧关联重新设为当前）。 */
   private async withBindingView<T extends { data: unknown }>(
     result: T,
     projectId: string,
@@ -439,7 +405,6 @@ export class AudioVideoMuxesService {
   }
 }
 
-/** 超时预算（迁移契约 §21.1）：max(1d, 4×估算+6h)、未知 7d、上限 365d。 */
 function audioVideoMuxDeadline(estimatedDurationMs: number | null): Date {
   const day = 24 * 60 * 60 * 1000;
   const budget = estimatedDurationMs !== null && Number.isFinite(estimatedDurationMs) && estimatedDurationMs > 0
@@ -448,8 +413,6 @@ function audioVideoMuxDeadline(estimatedDurationMs: number | null): Date {
   return new Date(Date.now() + Math.min(budget, 365 * day));
 }
 
-/** IKJJQZ（B.3）：专属重试的 canvas_binding 解析。无 binding 返回 null；
- *  非法或与 Idempotency-Key 不一致返回 400 受控信封。 */
 function parseDedicatedRetryBinding(
   canvasBindingBody: unknown,
   idempotencyKey: string,
@@ -465,10 +428,6 @@ function parseDedicatedRetryBinding(
   return parsed.data;
 }
 
-/** IKJJQZ（B.3 末段）：原卡专属重试从原受理关联解析目标并核对客户端值——
- *  有原关联则目标必须一致（不得把同 jobId 改绑新目标）；历史任务首次加入新协议
- *  只接受 job 冻结 input 的音频草稿卡（audio.nodeId，合成在原草稿卡生成）作可信
- *  原卡关联，不能证明关联就按历史规则拒绝迁移。返回非空即 422 拒绝信封。 */
 async function verifyDedicatedMuxRetryTarget(
   tx: Prisma.TransactionClient,
   pid: bigint,

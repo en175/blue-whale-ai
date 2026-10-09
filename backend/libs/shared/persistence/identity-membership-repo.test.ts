@@ -5,7 +5,6 @@ import { createIdentityMembershipRepo } from "./identity-membership-repo.js";
 const NOW = new Date("2026-09-24T12:00:00+08:00");
 const FUTURE = new Date("2026-10-24T12:00:00+08:00");
 
-/** 只实现本 repo 用到的那一个方法——不引真库，也不起 Prisma 客户端。 */
 function fakePrisma(rows: Array<{ tier: string; status: string; expires_at: Date | null }>) {
   const findMany = vi.fn().mockResolvedValue(rows);
   return {
@@ -32,8 +31,6 @@ describe("identity-membership-repo", () => {
     const resolution = await createIdentityMembershipRepo(prisma).resolveTier("9001", NOW);
 
     expect(resolution.tier).toBe("max");
-    // 永久会员被 NULL 条件漏掉是个很容易犯的错：`gt` 遇到 NULL 是 false。
-    // 这里直接断言查询里带了显式的 NULL 分支。
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({

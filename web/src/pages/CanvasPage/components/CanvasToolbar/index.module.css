@@ -1,6 +1,3 @@
-/* ============================================
- * CanvasToolbar - 画布左侧工具栏
- * ============================================ */
 
 .toolbar {
   position: fixed;
@@ -38,7 +35,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* 自定义 tooltip：鼠标悬停立即显示，替代浏览器原生 title 延迟 */
 .toolBtn[data-tooltip] {
   position: relative;
 }
@@ -65,7 +61,6 @@
   z-index: 100;
 }
 
-/* 左侧小三角箭头 */
 .toolBtn[data-tooltip]::before {
   content: '';
   position: absolute;
@@ -101,12 +96,10 @@
   display: none;
 }
 
-/* ============ 扩展工具侧弹菜单 ============ */
 .menuWrap {
   position: relative;
 }
 
-/* 菜单打开时的外部点击遮罩（透明） */
 .menuOverlay {
   position: fixed;
   inset: 0;
@@ -114,7 +107,6 @@
   background: transparent;
 }
 
-/* 侧弹面板：出现在工具按钮右侧 */
 .popup {
   position: absolute;
   left: calc(100% + 10px);

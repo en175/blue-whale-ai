@@ -1,7 +1,3 @@
-/**
- * 真人人像库素材落入画布前，先转成本地普通资产：
- * md5 → /api/agent/assets/uploads/dedup；未命中再走 presign → PUT → complete（带 materialId）。
- */
 import {
   UPLOAD_SIZE_LIMIT,
   completeUpload,
@@ -16,7 +12,6 @@ import { computeFileMd5, probeMediaMeta } from '@/utils/upload';
 import { fetchRemoteMedia } from './fetchRemoteMedia';
 import { isMaterialLibraryId } from './mediaRefs';
 
-/** 选择弹窗里尚未转成本地资产的真人人像库条目 */
 export function isPendingLivenessLibraryAsset(asset: AssetRecord): boolean {
   return asset.source === 'liveness' && isMaterialLibraryId(String(asset.id));
 }
@@ -32,7 +27,6 @@ function fileNameOf(asset: AssetRecord): string {
     const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
     if (last) return decodeURIComponent(last);
   } catch {
-    /* 非法 URL 时用素材库 id 兜底 */
   }
   return String(asset.id);
 }
@@ -68,7 +62,6 @@ function toLocalAssetRecord(
   };
 }
 
-/** 单条真人人像库素材：去重命中复用本地 asset_id，未命中则按资产页三步上传并带 materialId */
 export async function importLivenessLibraryAsset(
   asset: AssetRecord,
   projectId: string,
@@ -117,7 +110,6 @@ export async function importLivenessLibraryAsset(
   return toLocalAssetRecord(asset, uploaded, libraryId);
 }
 
-/** 批量导入：非真人人像库条目原样返回；失败条目跳过并由 onError 汇报 */
 export async function importLivenessLibraryAssets(
   assets: AssetRecord[],
   projectId: string,

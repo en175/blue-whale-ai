@@ -86,10 +86,8 @@ describe("textIndexOfTarget", () => {
       { source: "media-4", target: "text-1" },
     ];
     const index = textIndexOfTarget(nodes, edges, "gen-1");
-    // 三个身份全部失效：media-1 节点缺失、media-2 素材不可及、media-4 无 textIndex 线
     expect(index.refs).toEqual([]);
     expect(index.inputs[0]!.identities).toEqual([]);
-    // media-4 有快照但无 textIndex 线 → 失效；media-1 节点缺失 → 失效（快照 name 兜底）；media-2 素材不可及 → 失效
     expect(index.invalid).toEqual([
       { textNodeId: "text-1", sourceNodeId: "media-1", name: "素材名" },
       { textNodeId: "text-1", sourceNodeId: "media-2", name: "素材名" },
@@ -379,7 +377,6 @@ describe("checkAudioTextIndexSyncInput（契约 §11 音频校验）", () => {
         acceptedMediaTypes: AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
       }),
     ).toEqual({ kind: "unsupported_media_type", mediaTypes: ["video"] });
-    // audio 与 image 并存不在本函数拦截——混用是 seed-audio 模型限制，走合并后容量校验
     expect(
       checkAudioTextIndexSyncInput({
         index: { refs: [ref("audio"), ref("image")], invalid: [] },

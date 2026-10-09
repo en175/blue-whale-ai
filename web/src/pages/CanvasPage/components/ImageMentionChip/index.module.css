@@ -1,4 +1,3 @@
-/* 与对话历史里的图片提及胶囊同一套：小图在胶囊内，大图悬浮预览。 */
 .chip {
   position: relative;
   display: inline-flex;

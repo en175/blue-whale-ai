@@ -17,8 +17,6 @@ import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 
-// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
-// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
   return {
@@ -32,13 +30,6 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   };
 });
 
-// IKG57P「素材软删后提交生成未拦截、HTTP 201 与信封 400 分裂」公开接口集成：
-// 真 NestFactory 挂载生产 GenerationJobsController + AllExceptionsFilter（与 app.module 的
-// APP_FILTER 同款，保证「code、msg、HTTP 状态同出一张码表」的生产投影被测到）+ 隔离 MySQL
-// （IKG57P_DATABASE_URL 门控）。断言口径 = IKE5G8 实现决定 7.1/7.2/7.4：提交被拒、不创建
-// 任务、状态行与信封一致。
-// IKG6EK / ADR-0088：prompt_doc 退役后，缺失素材不再按 doc 声明细化「索引 #N」文案，
-// 统一走通用信封「参考素材不存在或无权访问」。
 describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
   "Generation job soft-deleted asset rejection (IKG57P)",
   () => {
@@ -70,7 +61,6 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
           default_size: "1024x1024",
           default_aspect_ratio: "1:1",
           features: { reference_image: true },
-          // channel 为必填封闭枚举，取迁移的默认渠道 seedream-image
           channel: "seedream-image",
         },
         update: {
@@ -80,7 +70,6 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
         },
       });
       class HarnessModule {}
-      // vitest（esbuild）不 emit design:paramtypes，Nest DI 需要手工补构造参数元数据
       Reflect.defineMetadata(
         "design:paramtypes",
         [
@@ -202,7 +191,6 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
         data: unknown;
       };
       expect(body.code).toBe(1034);
-      // IKG6EK / ADR-0088：prompt_doc 退役后不再按 doc 声明细化索引文案，统一走通用信封
       expect(body.msg).toBe("参考素材不存在或无权访问");
       expect(await jobCount(projectId)).toBe(0);
     });
@@ -256,7 +244,6 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
       const rejected = await submit(projectId, body);
       expect(rejected.status).toBe(400);
 
-      // 补齐素材（恢复软删）后，同一提交路径重新校验放行
       await prisma.client.assets.update({
         where: { id: BigInt(assetId) },
         data: { is_delete: false },

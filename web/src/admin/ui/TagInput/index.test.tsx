@@ -75,7 +75,6 @@ describe('TagInput', () => {
     });
 
     expect(current).toEqual(['seedance-*']);
-    // 不清空的话，下一次点添加会把同一个值再加一遍（然后被去重掉，看起来像按钮坏了）
     expect(input().value).toBe('');
   });
 

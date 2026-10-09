@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Probe the real ZCode PreToolUse write hook path without writing any file.
 
 set -u
 

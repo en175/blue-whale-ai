@@ -1,6 +1,5 @@
 SET NAMES utf8mb4;
 
--- IKDLQK: immutable legacy generation-card migration history — card content captured before conversion to an ordinary text node.
 CREATE TABLE `legacy_card_history` (
   `id` BIGINT NOT NULL AUTO_INCREMENT,
   `project_id` BIGINT NOT NULL,

@@ -1,4 +1,3 @@
-/* 组框节点：淡色底 + 虚线边。pointer-events 由节点 style 关闭，点击穿透到 pane 再做组命中。 */
 
 :global(.react-flow__node-groupFrame) {
   padding: 0;

@@ -1,6 +1,5 @@
 SET NAMES utf8mb4;
 
--- IKDLQJ: immutable conversation quote snapshots — text captured when a Canvas node is added to the conversation.
 CREATE TABLE `conversation_quote_snapshots` (
   `id` BIGINT NOT NULL AUTO_INCREMENT,
   `project_id` BIGINT NOT NULL,

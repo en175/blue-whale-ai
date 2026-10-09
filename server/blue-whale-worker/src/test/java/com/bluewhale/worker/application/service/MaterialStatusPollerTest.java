@@ -20,23 +20,11 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * 素材状态定时跟进测试（ADR-0087 决策 4）。
- * <p>
- * 覆盖：窗口内 Processing 行逐条实时查并回写、上游未知不写库（保持 Processing）、
- * 认不出的状态收敛成 Processing、单条失败不中断本轮、扫描参数透传、
- * 回写落空（行被删）不视为错误。
- * <p>
- * 凭证口径（ADR-0114 之后的形态）：跟进用的是**项目级统一 key**，与行归属哪个用户无关。
- * 本类钉住这一点——任何人把它改回「按 userId 查凭证」，构造签名与
- * {@link #unifiedKeyIsUsedRegardlessOfRowUserId()} 会同时红。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class MaterialStatusPollerTest {
 
     private static final int MAX_AGE_MINUTES = 10;
-    /** 项目级统一 key（不是任何用户的 sk-）——跨语言测试向量里的假值。 */
     private static final String UNIFIED_KEY = SystemSettingEnvelopeVectors.FAKE_KEY;
 
     @Mock private MaterialAssetMapper assetMapper;
@@ -59,7 +47,6 @@ class MaterialStatusPollerTest {
                 MAX_AGE_MINUTES);
     }
 
-    /** 上游凭证读点：stub 掉「库里的那一行」，走真实的解封路径取到假 key。 */
     private static UpstreamCredential upstreamCredential() {
         return new UpstreamCredential(
                 key -> SystemSettingEnvelopeVectors.ENVELOPE,
@@ -79,10 +66,6 @@ class MaterialStatusPollerTest {
         verify(assetMapper).mirrorStatus(9L, "asset-abc", "Active", null, null);
     }
 
-    /**
-     * 钉住 ADR-0114 之后的凭证口径：跟进只认部署注入的统一 key，**不按素材归属用户换 key**——
-     * new-api 那边已经没有我们的用户，逐用户密钥既取不到、也不该存在。
-     */
     @Test
     @DisplayName("统一 key 与行归属用户无关：不同 userId 的行都用同一把 key 查上游")
     void unifiedKeyIsUsedRegardlessOfRowUserId() {
@@ -95,7 +78,6 @@ class MaterialStatusPollerTest {
 
         verify(client).getAsset(UNIFIED_KEY, "asset-a");
         verify(client).getAsset(UNIFIED_KEY, "asset-b");
-        // 只认这一把：没有第二条别的凭证路径。
         verify(client, times(2)).getAsset(eq(UNIFIED_KEY), anyString());
     }
 
@@ -153,7 +135,7 @@ class MaterialStatusPollerTest {
         when(client.getAsset(UNIFIED_KEY, "asset-ok2"))
                 .thenReturn(new MaterialStatusResult("Active", null, null));
 
-        poller.poll(); // 不抛
+        poller.poll();
 
         verify(assetMapper).mirrorStatus(9L, "asset-ok2", "Active", null, null);
     }
@@ -208,7 +190,7 @@ class MaterialStatusPollerTest {
         when(assetMapper.mirrorStatus(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(0);
 
-        poller.poll(); // 不抛
+        poller.poll();
 
         verify(assetMapper).mirrorStatus(9L, "asset-abc", "Active", null, null);
     }
@@ -227,7 +209,7 @@ class MaterialStatusPollerTest {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("db down"));
 
-        poller.poll(); // 不抛
+        poller.poll();
 
         verifyNoInteractions(client);
     }

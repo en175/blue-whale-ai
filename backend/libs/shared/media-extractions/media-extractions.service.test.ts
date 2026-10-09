@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MediaExtractionsService } from "./media-extractions.service.js";
 
-// IKH28V：资产归属读法对齐去字幕（findOwnedSource）；免费口径哨兵（cost_reservations.create）
-// 与凭证冻结断言对齐 video-subtitle-erasures.service.test.ts 先例。
 function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
@@ -20,7 +18,6 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
@@ -47,7 +44,6 @@ describe("MediaExtractionsService.create", () => {
   });
 
   it("rejects a source asset not owned by the user", async () => {
-    // IKH28V：归属口径对齐去字幕——findOwnedSource 按 user_id 过滤，非本人素材一律 404。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(null) },
     });
@@ -81,8 +77,6 @@ describe("MediaExtractionsService.create", () => {
     });
   });
 
-  // IKH28T 契约口径（@lib/contracts/media-extract）：缺省补默认 m4a，非法值明确拒绝
-  // （静默回退 mp3 的旧口径废除）。
   it("defaults output_format to m4a when omitted", async () => {
     const { service, create } = makeService();
     const result = await service.create("9", "55", { source_asset_id: "88" });
@@ -125,7 +119,6 @@ describe("MediaExtractionsService.create", () => {
   );
 
   it("is free-tier: no cost reservation, no provider row", async () => {
-    // 免费口径哨兵（网关零价模型族，同去字幕先例）：本工具不写成本预留、不落 provider 行。
     const { service, create, costCreate } = makeService();
     const result = await service.create("9", "55", {
       source_asset_id: "88",

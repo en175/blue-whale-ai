@@ -25,7 +25,6 @@ interface AudioMixBarProps {
   onClose: () => void;
   submitting: boolean;
   anchor: FollowDialogAnchor | null;
-  /** IKJR9J 拖拽隐藏：锚定卡被拖时 visibility 级隐藏（不卸载） */
   dragHidden?: boolean;
 }
 

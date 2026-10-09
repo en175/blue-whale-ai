@@ -1,14 +1,8 @@
-/* ============================================
- * Tabs —— 页签
- *
- * 受控组件：选中态由调用方持有（很多页面要按页签重新拉数据，内部管理反而不便）。
- * ============================================ */
 import styles from './index.module.css';
 
 export interface TabItem {
   key: string;
   label: string;
-  /** 可选计数角标，如「图片 12」 */
   count?: number;
 }
 

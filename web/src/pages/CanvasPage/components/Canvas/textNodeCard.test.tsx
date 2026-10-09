@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowCanvas from './index';
 
 vi.hoisted(() => {
-  // 开发期代码定位插件在导入时探测 Canvas；本测试不绘制位图。
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 });
 
@@ -41,8 +40,6 @@ function editor() {
   return content().querySelector<HTMLElement>('[contenteditable]')!;
 }
 
-/** 节点内可见操作（按钮文案或 title），用于断言操作条与格式工具栏的并存关系。
- *  IKGYYE 钉屏幕迁移后两条工具栏 portal 出节点卡；!782 起宿主改为 document.body */
 function actions() {
   const buttons = [
     ...node().querySelectorAll('button'),
@@ -57,7 +54,6 @@ async function mouse(type: string, target: EventTarget, x = 100, y = 100) {
       bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' ? 0 : 1,
       clientX: x, clientY: y,
     });
-    // Vitest 的 window 代理不通过 jsdom 构造器的 Window 身份检查。
     Object.defineProperty(event, 'view', { value: window });
     target.dispatchEvent(event);
   });
@@ -68,10 +64,6 @@ async function finishGesture() {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
 }
 
-/**
- * 挂载真实画布与真实文本节点。
- * 每个用例只挂载一次：画布对同 id 文本节点只同步新增与移除，重复渲染不会替换已注入的回调。
- */
 async function renderText(
   overrides: { text?: string; html?: string; title?: string; toolMode?: 'drag' | 'select'; selected?: boolean; zoom?: number } = {},
 ): Promise<TextCallbacks> {
@@ -94,7 +86,6 @@ async function renderText(
       type: 'textNode',
       position: { x: 50, y: 60 },
       selected: overrides.selected ?? false,
-      // IKFM3L：正文统一为 Markdown 源（text 权威），html 仅存量兼容兜底
       data: { ...(overrides.text !== undefined ? { text: overrides.text } : { html: overrides.html ?? '' }), ...(overrides.title !== undefined ? { title: overrides.title } : {}), toolMode, ...callbacks },
     }],
   };
@@ -102,7 +93,6 @@ async function renderText(
   return callbacks;
 }
 
-/** 双击进入编辑（浏览器随后聚焦编辑器，jsdom 下 React 的委托焦点由 focusin 复现） */
 async function startEditing() {
   await act(async () => {
     editor().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
@@ -112,9 +102,6 @@ async function startEditing() {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // jsdom 不做布局；只补浏览器测量 API，React Flow 与文本卡片均使用真实实现。
-  // ResizeObserver 需在 observe 时即刻回调（同 edgesControl.test.tsx）：React Flow 靠它
-  // 测量容器与节点，否则 IKGYYE 钉屏幕层（订阅 width/measured）不渲染。
   vi.stubGlobal('ResizeObserver', class {
     callback: ResizeObserverCallback;
     constructor(cb: ResizeObserverCallback) { this.callback = cb; }
@@ -124,8 +111,6 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   });
-  // jsdom 无 DOMMatrixReadOnly（ResizeObserver 即刻回调后 React Flow 走 d3-zoom transform
-  // 解析）；React Flow 仅从 m22 读取缩放倍率（xyflow 官方测试同款替身，同 edgesControl.test.tsx）
   vi.stubGlobal('DOMMatrixReadOnly', class {
     m22: number;
     constructor(transform?: string) {
@@ -136,15 +121,11 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1000);
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(800);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    // !834 chromeHitGuard 用矩形判定指针是否压在画布上层控件（data-canvas-chrome）上：
-    // jsdom 无布局，全量 1000×800 的替身会让「任意点都在控件上」成立，节点拖动的
-    // mousedown 被当穿透吞掉。控件子树保持零矩形（不含手势坐标），测量仍用大矩形。
     if (this.closest('[data-canvas-chrome], .react-flow__minimap')) {
       return { x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) };
     }
     return { x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800, toJSON: () => ({}) };
   });
-  // jsdom 未实现富文本命令；替身只放在这一层浏览器能力边界。
   (document as Document & { execCommand: (...args: unknown[]) => boolean }).execCommand = vi.fn(() => true);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -173,7 +154,6 @@ describe('Canvas 文本节点卡片', () => {
     await renderText();
     expect(node().textContent).toContain('文本节点');
     expect(node().textContent!.split('文本节点').length - 1).toBe(1);
-    // 标题在正文容器之前（上方），空文本时正文为空
     expect(title().compareDocumentPosition(content()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(editor().textContent).toBe('');
   });
@@ -189,7 +169,6 @@ describe('Canvas 文本节点卡片', () => {
     await renderText({ html: long });
     expect(content().textContent).toContain('开篇第一句');
     expect(content().textContent).toContain('结尾最后一句');
-    // 正文不得撑大外形：内容全在编辑区内，容器不追加正文高度
     expect(content().contains(editor())).toBe(true);
     expect(editor().querySelectorAll('p').length).toBe(62);
   });
@@ -197,7 +176,6 @@ describe('Canvas 文本节点卡片', () => {
   it('选中时“添加到对话”可达并触发原有回调', async () => {
     const callbacks = await renderText({ selected: true });
     expect(actions()).toContain('添加到对话');
-    // IKGYYE / !782：操作条按钮 portal 在 document.body（节点卡 DOM 外）
     const button = [...document.querySelectorAll('button')]
       .find((b) => (b.textContent ?? '').includes('添加到对话'))!;
     await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
@@ -221,10 +199,8 @@ describe('Canvas 文本节点卡片', () => {
 
     await startEditing();
     await vi.waitFor(() => expect(actions()).toContain('加粗'));
-    // 编辑时节点操作并入同一层操作位置，保持可达
     expect(actions()).toContain('添加到对话');
 
-    // 退出编辑：焦点离开编辑器与工具栏后，格式按钮收起
     await act(async () => {
       editor().dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
     });
@@ -232,7 +208,6 @@ describe('Canvas 文本节点卡片', () => {
     expect(actions()).not.toContain('加粗');
   });
 
-  // IKDLQE: truncation was retired; complete paste and over-limit drafts are covered by real-browser integration.
 
   it('非编辑态滚轮在正文上平移画布', async () => {
     await renderText({ html: '<p>需要滚动才能读完的正文</p>' });
@@ -283,8 +258,6 @@ describe('Canvas 文本节点卡片', () => {
     await act(async () => {
       content().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 90 }));
     });
-    // 标题行操作条「添加到对话」按钮 + 右键菜单四项（添加到聊天/创建副本/粘贴/删除）
-    // （c220ade0 画布交互优化：「复制」改为「创建副本」，新增「粘贴」；标题行常驻「添加到对话」） */
     const menuItems = [...document.body.querySelectorAll('button')].map((b) => b.textContent?.trim());
     expect(menuItems).toEqual(expect.arrayContaining(['添加到聊天', '创建副本', '粘贴', '删除']));
     const remove = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === '删除')!;
@@ -298,7 +271,6 @@ describe('Canvas 文本节点标题改名（IKFA8X）', () => {
     return title().querySelector('input');
   }
 
-  /** React 受控输入框填值：绕过 value tracker 后派发 input 事件 */
   async function typeTitle(value: string) {
     const input = titleInput()!;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -434,13 +406,11 @@ describe('Canvas 文本节点标题改名（IKFA8X）', () => {
     await startRename();
     await typeTitle('鲸'.repeat(101));
     await keyOnTitle('Enter');
-    // 名称超长是产品层提示，不进 onDraftError（不阻断画布自动保存）
     expect(callbacks.onDraftError).not.toHaveBeenCalledWith(TEXT_ID, expect.stringContaining('100'));
   });
 });
 
 describe('Canvas 文本节点标题分段缩放', () => {
-  /** 节点根元素（titleRow 的父级）内联样式携带的分段缩放变量（局部值 = 屏幕目标值 ÷ 倍率） */
   function titleVar(name: '--node-title-name' | '--node-title-icon') {
     const wrapper = title().parentElement as HTMLElement;
     return parseFloat(wrapper.style.getPropertyValue(name));
@@ -453,7 +423,6 @@ describe('Canvas 文本节点标题分段缩放', () => {
     await renderText({ zoom, html: '<p>一段正文</p>' });
     expect(titleVar('--node-title-name') * zoom).toBeCloseTo(nameScreen, 2);
     expect(titleVar('--node-title-icon') * zoom).toBeCloseTo(iconScreen, 2);
-    // 名称与正文大小策略独立：正文编辑区不随标题变量缩放；统一后标题行含「展开全文」入口
     expect(title().textContent).toContain('文本节点');
   });
 

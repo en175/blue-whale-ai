@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/**
- * 方案卡在对话里的形态（IKF3KE）。
- *
- * 这几条钉的是「用户点得到、也看得懂」：卡在对话流里、三个按钮各有去向、没聊到的项不占位、
- * 已表态的版本留在原处置灰。门只认用户在这张卡上的动作——所以这张卡渲染不出来，首卡就永远
- * 出不来，这不是样式问题。
- */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -145,21 +138,10 @@ describe('方案卡在对话里', () => {
     expect(text).toContain('我替你定的几项');
     expect(text).toContain('你没说时长，我按 15 秒');
     expect(text).toContain('Seedance 2.0');
-    // 没写的项连小标题都不出现——空壳标题比没有更糟。
     expect(text).not.toContain('创意方向');
     expect(text).not.toContain('你给的素材各起什么作用');
   });
 
-  /**
-   * 出片路线 2026-09-12 起是可选项：模型不再凭记忆写它，改由服务端按平台模型目录填。
-   * 在绑目录做完之前，卡上很可能就是没有这一项——那时整项不显示，不能留一个空的小标题，
-   * 更不能因为读不到 `execution_route.model_family` 整张卡白屏（门只认这张卡上的按钮，
-   * 卡渲染不出来首卡就永远出不来）。
-   */
-  /**
-   * 出片参数是用户**真能判断对错**的那几项（他判断不了「5.0 Pro 还是 4.5」，但判断得了
-   * 「30 秒」）。值由服务端按平台目录的值域核过，所以卡上出现什么就是平台给得了什么。
-   */
   it('出片参数一行显示，没聊到的项不占位', () => {
     sessionMock.turns = turnWith(
       understanding({ solution_card: { ...card!, delivery_spec: { aspect_ratio: '9:16', duration_seconds: 25 } } }),
@@ -171,7 +153,6 @@ describe('方案卡在对话里', () => {
     expect(text).toContain('9:16 · 25 秒');
   });
 
-  /** 续写的卡只管接下来追加的那一段（决策十六）：用户得看见这张卡不是整条；整条是默认，不占位。 */
   it('续写的卡显示「这张卡管的范围：第 2 段」，整条的卡不显示这一行', () => {
     sessionMock.turns = turnWith(
       understanding({ solution_card: { ...card!, scope: { kind: 'continuation', label: '第 2 段' } } }),
@@ -182,7 +163,6 @@ describe('方案卡在对话里', () => {
     expect(text).toContain('第 2 段');
   });
 
-  /** 另开一件事的卡（IKG793 / IKG78Y）：用户得看见这张是另一张、接的是哪张。 */
   it('另开一件事的卡显示范围与承接', () => {
     sessionMock.turns = turnWith(
       understanding({
@@ -198,7 +178,6 @@ describe('方案卡在对话里', () => {
     expect(text).toContain('〈咖啡产地信息图〉');
   });
 
-  /** 「接下来怎么做」是模型接着要说的话，不是方案的一部分：放在卡外，和正文一样读（IKGH1Y 追加）。 */
   it('「接下来怎么做」在卡外面，按正文显示，卡里没有这一项', () => {
     sessionMock.turns = turnWith(understanding({ solution_card: { ...card!, next_steps: '确认后我写卡。' } }));
     mount();
@@ -220,7 +199,6 @@ describe('方案卡在对话里', () => {
     expect(solutionCard()!.textContent ?? '').not.toContain('出片参数');
   });
 
-  /** 推荐理由不上卡：它在对话正文里说更清楚，卡上只留用户能核对的那一层（拍板一）。 */
   it('出片路线只显示家族与版本，不显示推荐理由', () => {
     sessionMock.turns = turnWith(
       understanding({

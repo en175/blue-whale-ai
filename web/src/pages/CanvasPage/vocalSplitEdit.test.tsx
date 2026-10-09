@@ -1,13 +1,4 @@
 // @vitest-environment jsdom
-/* IKHA2W 人声背景分离编辑态与占位卡（画布链路）：「音视频分离 ▾」下拉第二项派发
-   onVocalBackgroundSplit 进入第七工具编辑会话；splitEditing/soloToolbarHidden 渲染期
-   注入（视频暂停与播放控制锁定由 MediaNode 承担）；上条仅 X + 下条发送条（场景下拉/
-   格式下拉/本期免费/发送钮）；与既有六会话互斥（去字幕/音视频分离先例口径）；四退出
-   （X/Esc/点其他卡/点画布空白）未发送无痕迹。发送闭环：按所选场景与格式建任务、
-   先退编辑态再建占位卡（vocal-split-{job_id}）、来源边 origin=vocal-split、立即落盘
-   （刷新不丢）、轮询终态收敛（failed 可读文案/成功停生成中，扇出归 IKHA30）、失败带
-   身份卡按 lastInput 三键原样重试、参数不跨会话记忆、同一视频可连续多次发送。
-   渲染模式沿用 audioVideoSplitEdit.test.tsx（FlowCanvas 打桩透出 props）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -30,7 +21,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -160,7 +150,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪视频节点 v1（1920×1080 mp4，assetId 满足置灰门槛；无连线） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -210,7 +199,6 @@ async function renderPage() {
   });
 }
 
-/** 进入人声背景分离编辑态（「音视频分离 ▾」下拉第二项派发的回调，IKHA2E 挂点/IKHA2W 接线） */
 async function enterVocal() {
   const video = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
   await act(async () => {
@@ -233,7 +221,6 @@ async function click(testId: string) {
   });
 }
 
-/** 编辑态单条探针（单条化后上方工具条退役；X 关闭随单条卸载——出现=会话活跃、消失=已退出） */
 function toolbar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="vocal-split-close"]');
 }
@@ -242,7 +229,6 @@ function sendBar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="vocal-split-send-bar"]');
 }
 
-/** 编辑态内选场景/选格式（展开下拉点选项） */
 async function selectScene(scene: string) {
   await click('vocal-split-scene-trigger');
   await click(`vocal-split-scene-item-${scene}`);
@@ -253,7 +239,6 @@ async function selectFormat(format: string) {
   await click(`vocal-split-format-item-${format}`);
 }
 
-/** 编辑态内点发送（startVocalSplitJob 含 await 创建，等 50ms 让建卡与轮询首 tick 发起） */
 async function sendVocal() {
   await click('vocal-split-send-btn');
   await act(async () => {
@@ -261,7 +246,6 @@ async function sendVocal() {
   });
 }
 
-/** IKJJR5：占位卡 id 预分配（vocal-split- 前缀 + 随机后缀），按前缀取当前占位卡 */
 function placeholderNode(): Node | undefined {
   return (flowProps.current.mediaNodes as Node[]).find((n) => isVocalSplitNodeId(n.id) && n.id !== 'v1');
 }
@@ -289,17 +273,14 @@ describe('IKHA2W 编辑态呈现（进入不建任务）', () => {
     await enterVocal();
     const close = bodyBtn('vocal-split-close');
     const bar = sendBar()!;
-    // 单条化后 X 在 sendBar 内且是第一个元素（对齐抠图/音视频分离单条先例）
     expect(bar.contains(close)).toBe(true);
     expect(bar.querySelector('button')).toBe(close);
     expect(bodyBtn('vocal-split-scene-trigger').textContent).toBe('通用');
     expect(bodyBtn('vocal-split-format-trigger').textContent).toBe('AAC');
     expect(bar.textContent).toContain('本期免费');
     expect(bodyBtn('vocal-split-send-btn')).toBeTruthy();
-    // 源视频卡注入 splitEditing（视频暂停+锁定层）与 soloToolbarHidden（会话模态口径）
     expect(v1Data().splitEditing).toBe(true);
     expect(v1Data().soloToolbarHidden).toBe(true);
-    // 进入即编辑态：不创建任务、不建占位卡、不连边
     expect(apiMocks.createVocalSplit).not.toHaveBeenCalled();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
     expect(flowProps.current.edges).toEqual([]);
@@ -316,7 +297,6 @@ describe('IKHA2W 编辑态呈现（进入不建任务）', () => {
     expect(document.body.querySelector('[data-testid="audio-video-split-send-bar"]')).toBeNull();
     expect(sendBar()).toBeTruthy();
     expect(v1Data().splitEditing).toBe(true);
-    // 反向互斥：人声态中点音视频分离，人声浮条退出、分离浮条接管
     await act(async () => {
       video.data.onAudioVideoSplit('v1');
     });
@@ -392,7 +372,6 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     await renderPage();
     await enterVocal();
     await sendVocal();
-    // 建任务带三键 + canvas_binding（IKJJR5：Idempotency-Key = submission_id）
     const [sentProject, sentPayload, sentInit] = apiMocks.createVocalSplit.mock.calls[0] as unknown as [
       string, { source_asset_id: string; scene: string; output_format: string; canvas_binding?: { submission_id: string } }, { silent: boolean; idempotencyKey?: string },
     ];
@@ -400,7 +379,6 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     expect(sentPayload).toMatchObject({ source_asset_id: '5', scene: 'audio', output_format: 'aac' });
     expect(sentPayload.canvas_binding).toMatchObject({ protocol_version: 1, target_node_id: expect.stringMatching(/^vocal-split-/) });
     expect(sentInit?.idempotencyKey).toBe(sentPayload.canvas_binding!.submission_id);
-    // 先退编辑态再建卡：浮条卸载、splitEditing 移除、占位卡已上画布（id 预分配）
     expect(toolbar()).toBeNull();
     expect(v1Data().splitEditing).toBeUndefined();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
@@ -410,17 +388,14 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     expect(audio.data.mediaType).toBe('audio');
     expect(audio.data.genStatus).toBe('generating');
     expect(audio.data.jobId).toBe('j701');
-    // 占位卡带身份（lastInput 三键冻结源素材+场景+格式，失败重试原样重发）
     expect(audio.data.vocalSplit).toEqual({
       sourceAssetId: '5',
       lastInput: { source_asset_id: '5', scene: 'audio', output_format: 'aac' },
     });
-    // 来源边：参考推导跳过口径（origin 标记）
     const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
       .find((e) => e.target === audio.id)!;
     expect(edge.source).toBe('v1');
     expect(edge.data).toEqual({ origin: VOCAL_SPLIT_EDGE_ORIGIN });
-    // IKJJR5：result-placeholder 占位卡受理前不落盘（B.3；关页由恢复协议按种子补卡）
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
   });
 
@@ -433,12 +408,10 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     expect(bodyBtn('vocal-split-scene-trigger').textContent).toBe('短剧');
     await selectFormat('flac');
     expect(bodyBtn('vocal-split-format-trigger').textContent).toBe('FLAC');
-    // 未发送退出重进：参数不跨会话记忆，复位 通用/aac
     await click('vocal-split-close');
     await enterVocal();
     expect(bodyBtn('vocal-split-scene-trigger').textContent).toBe('通用');
     expect(bodyBtn('vocal-split-format-trigger').textContent).toBe('AAC');
-    // 重选 drama/flac 后发送：任务参数所见即所得
     await selectScene('drama');
     await selectFormat('flac');
     await sendVocal();
@@ -459,7 +432,6 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     await enterVocal();
     await sendVocal();
     expect(apiMocks.createVocalSplit).toHaveBeenCalledTimes(1);
-    // IKJJR5（对齐场景切分 IKH8BO）：占位卡保留转失败态——卡上重试按 lastInput 原样重发
     const failed = placeholderNode()!;
     expect(failed.data.genStatus).toBe('failed');
     expect(failed.data.errorText).toBe('人声背景分离任务创建失败，请重试');
@@ -495,7 +467,6 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
       sourceAssetId: '5',
       lastInput: { source_asset_id: '5', scene: 'music', output_format: 'wav' },
     });
-    // 两张占位卡各自一条来源边
     const targets = (flowProps.current.edges as Array<{ source: string; target: string }>)
       .filter((e) => e.source === 'v1').map((e) => e.target);
     expect(targets).toEqual(expect.arrayContaining(placeholders.map((n) => n.id)));
@@ -515,10 +486,8 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     await sendVocal();
     const failed = placeholderNode()!;
     expect(failed.data.genStatus).toBe('failed');
-    // W 票错误码面：vocal_split_failed（1047）→「人声背景分离失败，请重试」
     expect(failed.data.errorText).toBe('人声背景分离失败，请重试');
 
-    // 重试：lastInput（源素材+场景+格式）原样重发创建接口（新 job），回到生成中并续轮询
     apiMocks.createVocalSplit.mockResolvedValueOnce({ job_id: 'j721', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValueOnce({ job_id: 'j721', status: 'processing', progress: 2, asset: null });
     await act(async () => {
@@ -527,12 +496,11 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    // 历史兼容重试（服务端无 canvas_binding 回执）：不带绑定与幂等头原样重发，行为零变化
     expect(apiMocks.createVocalSplit).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', scene: 'narrate', output_format: 'aac',
     }, { silent: true });
     const retried = placeholderNode()!;
-    expect(retried.id).toBe(failed.id); // 原地承接（同卡）
+    expect(retried.id).toBe(failed.id);
     expect(retried.data.jobId).toBe('j721');
     expect(retried.data.genStatus).toBe('generating');
     expect(retried.data.errorText).toBe('');
@@ -564,7 +532,6 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     const settled = placeholderNode()!;
     expect(settled.data.genStatus).toBeUndefined();
     expect(settled.data.progress).toBe(100);
-    // 不提前实现扇出：占位卡保留原地，src/assetId 不回填
     expect(settled.data.src).toBe('');
     expect(settled.data.assetId).toBeUndefined();
   });
@@ -580,7 +547,6 @@ it.each(['success', 'failure'] as const)('同卡关闭重开后的旧 %s 不改�
   await renderPage();
   await enterVocal();
   await click('vocal-split-send-btn');
-  // IKJJR5：发送即退会话（浮条已卸载）——直接重开新会话配置新参数
   await enterVocal();
   await selectScene('drama'); await selectFormat('flac');
   await click('vocal-split-send-btn');
@@ -588,8 +554,6 @@ it.each(['success', 'failure'] as const)('同卡关闭重开后的旧 %s 不改�
     if (outcome === 'success') acceptOld({ job_id: 'old', status: 'queued' });
     else rejectOld(new Error('old request failure'));
   });
-  // IKJJR5：人声分离发送即退会话——旧创建定夺时第二次会话参数已冻结不受影响；
-  // 旧失败提示不弹（反馈身份已随第一次发送退出而失效）
   expect(document.body.textContent).not.toContain('人声背景分离任务创建失败');
   const placeholdersAfterOld = (flowProps.current.mediaNodes as Node[]).filter((n) => isVocalSplitNodeId(n.id));
   if (outcome === 'success') expect(placeholdersAfterOld.some((n) => n.data.jobId === 'old')).toBe(true);

@@ -1,10 +1,3 @@
-/* ============================================
- * text-node-media-index 验收取证（IKFM3Q）
- * 真实浏览器（Playwright Chromium）验证正文媒体索引契约 v1：
- * @ 插入三类媒体、编号复用与重排、删部分/最后标签与关系线联动、
- * 删线/删源节点置失效（不自动补回）、重新绑定修复、悬停预览、点击定位、刷新恢复。
- * 业务 API 侧核对 PUT body 的 nodes+edges；数据库侧由 backend 集成测试覆盖。
- * ============================================ */
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -34,7 +27,6 @@ interface GeneratedMedia {
 
 let mediaCache: GeneratedMedia | null = null;
 
-/** 生成验收用媒体：两图（cat/dog）、一段视频（sample.webm）、一段音频（tone.wav） */
 async function ensureMedia(page: Page): Promise<GeneratedMedia> {
   if (mediaCache) return mediaCache;
   mediaCache = await page.evaluate(async () => {
@@ -91,7 +83,6 @@ async function ensureMedia(page: Page): Promise<GeneratedMedia> {
       contentType: 'video/webm',
     };
 
-    // 音频：手写编码 1.2s 440Hz 单声道 16bit PCM WAV
     const sampleRate = 48000;
     const frames = Math.floor(sampleRate * 1.2);
     const wav = new DataView(new ArrayBuffer(44 + frames * 2));
@@ -180,7 +171,6 @@ async function setupPage(page: Page): Promise<Tracking> {
     });
   });
 
-  // 画布文档动态化：PUT 记录请求体并更新内存态（含 edges），GET 返回最新态（验证 编辑→保存→刷新 闭环）
   const initialDoc = (
     fixture['GET /api/canvases?projectId=project-1'].body as { data: { viewport: string; nodes: string; edges?: string } }
   ).data;
@@ -195,7 +185,6 @@ async function setupPage(page: Page): Promise<Tracking> {
         if (typeof parsed.nodes === 'string') canvasState.nodes = parsed.nodes;
         if (typeof parsed.edges === 'string') canvasState.edges = parsed.edges;
       } catch {
-        /* 保持旧态 */
       }
       canvasState.version += 1;
     }
@@ -231,7 +220,6 @@ const editor = (page: Page, id: string) => node(page, id).locator('[data-placeho
 const mediaChip = (page: Page, textId: string, mediaId: string) =>
   node(page, textId).locator(`[data-media-node="${mediaId}"]`);
 
-/** 光标置于编辑器末尾（@ 触发与插入都需要确定的光标位置） */
 async function placeCaretAtEnd(loc: Locator) {
   await loc.evaluate((el) => {
     el.focus();
@@ -244,7 +232,6 @@ async function placeCaretAtEnd(loc: Locator) {
   });
 }
 
-/** @ 菜单选素材：搜索框（autoFocus）输入名称过滤，点选面板内匹配项（避开 flyout 悬停桥接） */
 async function pickFromMentionMenu(page: Page, name: string) {
   const menu = page.locator('[data-testid="mention-menu"]');
   await expect(menu).toBeVisible();
@@ -258,7 +245,6 @@ interface PutDoc {
   edges: Array<{ id: string; source: string; target: string; data?: Record<string, unknown> }>;
 }
 
-/** 解析一次 PUT body 的 nodes/edges */
 function parsePut(raw: string): PutDoc {
   const parsed = JSON.parse(raw) as { nodes?: string; edges?: string };
   return {
@@ -271,7 +257,6 @@ function lastPut(tracking: Tracking): PutDoc {
   return parsePut(tracking.putBodies[tracking.putBodies.length - 1] ?? '{}');
 }
 
-/** 等到出现一次满足条件的 PUT（自动保存 800ms 防抖，轮询放宽到 6s） */
 async function waitPut(tracking: Tracking, predicate: (doc: PutDoc) => boolean, _label: string) {
   await expect
     .poll(
@@ -306,7 +291,6 @@ test('@ 插入三类媒体：分类型编号、PUT 携带区间/refs/textIndex �
   await insertMedia(page, 'text-1', '配乐.wav');
   await expect(mediaChip(page, 'text-1', 'media-aud-1')).toHaveAttribute('data-media-label', '音频1');
 
-  // PUT 契约：正文含派生标签；区间锚定三类身份；refs 快照；三条 textIndex 关系线
   await waitPut(tracking, doc => hasEdge(doc, 'media-aud-1', 'text-1'), '三类关系线落盘');
   const doc = lastPut(tracking);
   const text = doc.nodes.find(n => n.id === 'text-1')!;
@@ -325,7 +309,6 @@ test('@ 插入三类媒体：分类型编号、PUT 携带区间/refs/textIndex �
     expect(hasEdge(doc, source, 'text-1'), `${source} 关系线`).toBe(true);
   }
 
-  // 刷新恢复：编号与关系线原样（不得只有正文或只有连线的半恢复）
   await page.reload();
   await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveAttribute('data-media-label', '图片1');
   await expect(mediaChip(page, 'text-1', 'media-vid-1')).toHaveAttribute('data-media-label', '视频1');
@@ -346,7 +329,6 @@ test('重复索引复用编号；删部分保留索引与关系线；删最后�
   await page.keyboard.type('参考 ');
   await insertMedia(page, 'text-1', '猫咪.png');
   await insertMedia(page, 'text-1', '猫咪.png');
-  // 同素材重复标签复用编号；关系线仍一条
   await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveCount(2);
   for (const chip of await mediaChip(page, 'text-1', 'media-img-1').all()) {
     await expect(chip).toHaveAttribute('data-media-label', '图片1');
@@ -354,17 +336,13 @@ test('重复索引复用编号；删部分保留索引与关系线；删最后�
   await waitPut(tracking, doc => hasEdge(doc, 'media-img-1', 'text-1'), '首次索引关系线落盘');
   expect(lastPut(tracking).edges.filter(e => e.source === 'media-img-1' && e.target === 'text-1')).toHaveLength(1);
 
-  // 删部分重复标签：索引与关系线保留，编号不变
   await mediaChip(page, 'text-1', 'media-img-1').first().click();
-  // chip 菜单按钮的 handler 挂在 onPointerDown；Playwright 真实 click 在此场景未可靠触发该通路，
-  // 显式派发 pointerdown 与产品事件通路一致（产品行为正常，属测试驱动方式适配）
   await page.locator('[data-testid="media-chip-menu"] button', { hasText: '删除标签' }).dispatchEvent('pointerdown');
   await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveCount(1);
   await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveAttribute('data-media-label', '图片1');
   await waitPut(tracking, doc => (doc.nodes.find(n => n.id === 'text-1')!.data.mediaMentions as unknown[]).length === 1, '删部分标签落盘');
   expect(hasEdge(lastPut(tracking), 'media-img-1', 'text-1')).toBe(true);
 
-  // 删最后一个标签：索引解除、关系线删除
   await mediaChip(page, 'text-1', 'media-img-1').click();
   await page.locator('[data-testid="media-chip-menu"] button', { hasText: '删除标签' }).dispatchEvent('pointerdown');
   await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveCount(0);
@@ -387,12 +365,8 @@ test('直接删关系线：标签置失效不自动补回；重新绑定到新�
   await insertMedia(page, 'text-1', '猫咪.png');
   await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveAttribute('data-media-label', '图片1');
   await waitPut(tracking, doc => hasEdge(doc, 'media-img-1', 'text-1'), '关系线落盘');
-  // 退出编辑态，避免删线被编辑器内状态干扰
   await page.locator('.react-flow__pane').click({ position: { x: 900, y: 700 } });
 
-  // 剪刀删除媒体→文本卡关系线：标签保留为已失效：原素材名
-  // （IKGUVG/IKGUVK：指针在连线停稳 1s 剪刀才出现，圆心与指针沿连线错开 30px——
-  //   悬停停稳后点剪刀圆盘本身，而非在指针位置 down/up）
   const hitPath = page.locator('.react-flow__edge [class*="hitPath"]').first();
   const hitBox = (await hitPath.boundingBox())!;
   await page.mouse.move(hitBox.x + hitBox.width / 2, hitBox.y + hitBox.height / 2);
@@ -403,7 +377,6 @@ test('直接删关系线：标签置失效不自动补回；重新绑定到新�
   await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveAttribute('data-media-label', '已失效：猫咪.png');
   await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveAttribute('data-media-invalid', '1');
 
-  // 编辑正文后保存：失效身份快照保留，关系线不自动补回
   await editor(page, 'text-1').dblclick();
   await placeCaretAtEnd(editor(page, 'text-1'));
   await page.keyboard.type('改');
@@ -415,7 +388,6 @@ test('直接删关系线：标签置失效不自动补回；重新绑定到新�
   ]);
   await page.screenshot({ path: join(evidenceDir, 'edge-cut-invalid.png') });
 
-  // 重新绑定：失效标签点击 → 重新绑定 → 选狗狗.png → 有效索引 + 新关系线
   await page.locator('.react-flow__pane').click({ position: { x: 900, y: 700 } });
   await mediaChip(page, 'text-1', 'media-img-1').click();
   await page.locator('[data-testid="media-chip-menu"] button', { hasText: '重新绑定' }).dispatchEvent('pointerdown');
@@ -443,7 +415,6 @@ test('直接删关系线：重新绑定同一素材补回关系线', async ({ pa
   await waitPut(tracking, doc => hasEdge(doc, 'media-img-1', 'text-1'), '关系线落盘');
   await page.locator('.react-flow__pane').click({ position: { x: 900, y: 700 } });
 
-  // IKGUVG/IKGUVK：停稳 1s 出现、与指针错开——悬停后点剪刀圆盘
   const hitPath = page.locator('.react-flow__edge [class*="hitPath"]').first();
   const hitBox = (await hitPath.boundingBox())!;
   await page.mouse.move(hitBox.x + hitBox.width / 2, hitBox.y + hitBox.height / 2);
@@ -478,7 +449,6 @@ test('删除来源媒体节点：标签置失效；刷新后失效态与无连�
   await waitPut(tracking, doc => hasEdge(doc, 'media-img-1', 'text-1'), '关系线落盘');
   await page.locator('.react-flow__pane').click({ position: { x: 900, y: 700 } });
 
-  // 删除来源媒体节点（连线随节点级联删除，标签置失效）
   await node(page, 'media-img-1').click();
   await page.keyboard.press('Backspace');
   await expect(node(page, 'media-img-1')).toHaveCount(0);
@@ -486,7 +456,6 @@ test('删除来源媒体节点：标签置失效；刷新后失效态与无连�
   await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveAttribute('data-media-label', '已失效：猫咪.png');
   await waitPut(tracking, doc => doc.nodes.every(n => n.id !== 'media-img-1'), '节点删除落盘');
 
-  // 刷新恢复：失效标签、身份快照与「无连线」一致恢复（只有正文或只有连线的半恢复不允许）
   await page.reload();
   await expect(node(page, 'media-img-1')).toHaveCount(0);
   await expect(page.locator('.react-flow__edge')).toHaveCount(0);
@@ -511,7 +480,6 @@ test('删除身份后有效编号紧凑重排；视频/音频悬停预览', asyn
   await expect(mediaChip(page, 'text-1', 'media-vid-1')).toHaveAttribute('data-media-label', '视频1');
   await expect(mediaChip(page, 'text-1', 'media-aud-1')).toHaveAttribute('data-media-label', '音频1');
 
-  // 删除「猫咪」（图片1）身份：狗狗 重排为 图片1，写回 PUT 正文与区间
   await mediaChip(page, 'text-1', 'media-img-1').click();
   await page.locator('[data-testid="media-chip-menu"] button', { hasText: '删除标签' }).dispatchEvent('pointerdown');
   await expect(mediaChip(page, 'text-1', 'media-img-2')).toHaveAttribute('data-media-label', '图片1');
@@ -525,7 +493,6 @@ test('删除身份后有效编号紧凑重排；视频/音频悬停预览', asyn
   expect(hasEdge(doc, 'media-img-1', 'text-1')).toBe(false);
   expect(hasEdge(doc, 'media-img-2', 'text-1')).toBe(true);
 
-  // 视频悬停预览：video 元素；音频悬停预览：类型标识与名称
   await mediaChip(page, 'text-1', 'media-vid-1').hover();
   const videoPreview = page.locator('[data-testid="media-chip-preview"]');
   await expect(videoPreview).toBeVisible();
@@ -550,7 +517,6 @@ test('悬停预览素材；点击有效标签定位来源节点', async ({ page 
   await insertMedia(page, 'text-1', '猫咪.png');
   await page.locator('.react-flow__pane').click({ position: { x: 900, y: 700 } });
 
-  // 悬停标签：约 150ms 后出图片预览
   await mediaChip(page, 'text-1', 'media-img-1').hover();
   const preview = page.locator('[data-testid="media-chip-preview"]');
   await expect(preview).toBeVisible();
@@ -560,15 +526,12 @@ test('悬停预览素材；点击有效标签定位来源节点', async ({ page 
   await page.locator('.react-flow__pane').hover({ position: { x: 900, y: 700 } });
   await expect(preview).toHaveCount(0);
 
-  // 点击有效标签：画布平移定位到来源节点（视口 transform 变化）。
-  // 产品改为弹层后经菜单项定位（防偶发直飞）；「定位来源」handler 在 onPointerDown，须派发
   const before = await page.locator('.react-flow__viewport').evaluate(el => (el as HTMLElement).style.transform);
   await mediaChip(page, 'text-1', 'media-img-1').click();
   await page.locator('[data-testid="media-chip-menu"] button', { hasText: '定位来源' }).dispatchEvent('pointerdown');
   await expect
     .poll(() => page.locator('.react-flow__viewport').evaluate(el => (el as HTMLElement).style.transform), { timeout: 3000 })
     .not.toBe(before);
-  // 来源节点进入视口中央区域（等 300ms 平移动画结束）
   await page.waitForTimeout(600);
   const box = await node(page, 'media-img-1').boundingBox();
   expect(box).toBeTruthy();

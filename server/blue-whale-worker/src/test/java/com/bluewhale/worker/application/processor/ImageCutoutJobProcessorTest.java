@@ -47,20 +47,10 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * ImageCutoutJobProcessor 单测（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）。
- * <p>
- * 覆盖：input 业务键与场景-增强键组合兜底校验、源素材与凭证缺失分类、错误码归一
- * （§5 信号保留、其余归 image_cutout_failed，无自动重试）、两场景成功链（出站参数映射 →
- * 经 mock 客户端拿到本地结果图 URL → 下载 → TOS 转存 → publishImageCutoutResult payload；
- * 宽高优先取官方响应、缺失时 ImageIO 兜底）、claim 异常上抛语义。
- * 不连真实 MQ/DB/TOS/网关（结果图用本地 HttpServer 桩）。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class ImageCutoutJobProcessorTest {
 
-    /** 1x1 PNG（ImageIO 可解析，宽高兜底断言用）。 */
     private static final byte[] PNG_1X1 = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
@@ -85,7 +75,6 @@ class ImageCutoutJobProcessorTest {
         when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
-        // 结果图桩（24h 有效的火山 URL 用本地 HttpServer 模拟）
         resultServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         resultServer.createContext("/cutout.png", exchange -> {
             exchange.getResponseHeaders().add("Content-Type", "image/png");
@@ -155,31 +144,18 @@ class ImageCutoutJobProcessorTest {
                 any(), eq("worker-1"), eq(5L));
     }
 
-    /**
-     * 造带指定像素的 PNG 字节（IKHGJI 空产物闸门夹具）。
-     * <p>
-     * {@code TYPE_INT_ARGB} 造出的 PNG 与火山抠图产物同形（color type 6，带透明通道）；
-     * 换成 {@code TYPE_INT_RGB} 即模拟上游误回不带 alpha 的产物。像素为行优先的 ARGB。
-     */
     private static byte[] png(int imageType, int width, int height, int... argb) {
         BufferedImage img = new BufferedImage(width, height, imageType);
         img.setRGB(0, 0, width, height, argb, 0, width);
         return writePng(img);
     }
 
-    /**
-     * 造索引色 + tRNS 的 PNG 字节：透明信息挂在调色板上，没有独立 alpha band
-     * （{@code getAlphaRaster()} 对它是 null）。钉住闸门走批量 {@code getRGB} 而非 {@code getAlphaRaster}
-     * 的理由——换成后者并把 null 当「非空」，这类全透明图就会被放行，正是本单要修的假成功。
-     */
     private static byte[] indexedTransparentPng(int width, int height) {
-        // 调色板两格都是 alpha=0（RGB 取不同值，避免退化成一个颜色被编码器改写形态）
         IndexColorModel cm = new IndexColorModel(1, 2,
                 new byte[]{0, (byte) 0xFF}, new byte[]{0, 0}, new byte[]{0, 0}, new byte[]{0, 0});
         BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_INDEXED, cm);
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                // 直接写调色板下标，绕开 setRGB 的颜色匹配
                 img.getRaster().setSample(x, y, 0, 0);
             }
         }
@@ -195,7 +171,6 @@ class ImageCutoutJobProcessorTest {
         }
     }
 
-    /** 把结果图桩换成任意字节（沿用 resultDownloadFails 那条用例的 remove + 重建手法）。 */
     private void stubResultBytes(byte[] bytes) {
         resultServer.removeContext("/cutout.png");
         resultServer.createContext("/cutout.png", exchange -> {
@@ -207,7 +182,6 @@ class ImageCutoutJobProcessorTest {
         });
     }
 
-    // ========== claim 语义（IKC9EJ 同构） ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -234,7 +208,6 @@ class ImageCutoutJobProcessorTest {
         verify(finalizer, never()).publishImageCutoutResult(any());
     }
 
-    // ========== input 业务键与场景-增强键组合兜底校验（权威复核在创建入口 IKGXM1） ==========
 
     @Test
     @DisplayName("缺 source_asset_id → invalid_input")
@@ -308,7 +281,6 @@ class ImageCutoutJobProcessorTest {
         assertFailCode(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== 源素材 / 凭证 ==========
 
     @Test
     @DisplayName("源素材不可用 → image_cutout_failed + 可读原因")
@@ -339,7 +311,6 @@ class ImageCutoutJobProcessorTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== 错误码归一（§5 信号保留，其余归 image_cutout_failed；无自动重试） ==========
 
     @Test
     @DisplayName("客户端 content_rejected → 保留既有码投影（§5 信号）")
@@ -401,7 +372,6 @@ class ImageCutoutJobProcessorTest {
         assertFailCode(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
     }
 
-    // ========== 两场景成功链（出站映射 + 回填：下载 → TOS → 发布 payload 带宽高） ==========
 
     @Test
     @DisplayName("general 成功链：出站最小 payload（增强四参 null）→ 宽高取官方响应 → 发布 payload")
@@ -415,7 +385,6 @@ class ImageCutoutJobProcessorTest {
 
         processor.handle("100");
 
-        // 出站映射：general 增强四参全 null（客户端不发 need_contour 等四键，规格故事 29）
         verify(mediaKitCutoutClient).cutout(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("general"), isNull(), isNull(), isNull(), isNull());
         ArgumentCaptor<PublishImageCutoutDto> captor = ArgumentCaptor.forClass(PublishImageCutoutDto.class);
@@ -425,11 +394,8 @@ class ImageCutoutJobProcessorTest {
         assertThat(published.storageKey()).isEqualTo("uploads/9/image/cutout.png");
         assertThat(published.mime()).isEqualTo("image/png");
         assertThat(published.size()).isEqualTo(PNG_1X1.length);
-        // 宽高优先取官方响应 result.image_width/image_height（与擦除走 ImageIO 的差异；
-        // 桩图是 1x1，若误走 ImageIO 会得到 1——这两条断言即防漂移）
         assertThat(published.width()).isEqualTo(800);
         assertThat(published.height()).isEqualTo(600);
-        // IKGS73：md5 必须从 stored 穿透到发布入参（assets.md5 去重依赖）。
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
         verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -447,12 +413,10 @@ class ImageCutoutJobProcessorTest {
 
         processor.handle("100");
 
-        // 出站映射：human 增强四参成组携带（need_contour/contour_color/contour_size/need_crop_background）
         verify(mediaKitCutoutClient).cutout(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("human"), eq(true), eq("#FFFFFF"), eq(10), eq(true));
         ArgumentCaptor<PublishImageCutoutDto> captor = ArgumentCaptor.forClass(PublishImageCutoutDto.class);
         verify(finalizer).publishImageCutoutResult(captor.capture());
-        // 官方响应缺宽高 → 结果图 ImageIO 解析兜底（1x1 PNG）
         assertThat(captor.getValue().width()).isEqualTo(1);
         assertThat(captor.getValue().height()).isEqualTo(1);
         verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
@@ -499,7 +463,6 @@ class ImageCutoutJobProcessorTest {
                 anyString(), anyLong());
     }
 
-    // ========== 空产物闸门（IKHGJI：火山 scene 硬过滤档返回 200 + alpha 全 0 的假成功） ==========
 
     @Test
     @DisplayName("全透明结果图 → 判空拦截：不转存、不发布、落 image_cutout_failed")
@@ -511,15 +474,11 @@ class ImageCutoutJobProcessorTest {
         when(mediaKitCutoutClient.cutout(anyString(), anyString(), anyString(),
                 any(), any(), any(), any()))
                 .thenReturn(new NewApiMediaKitCutoutClient.CutoutResult(resultUrl, 800, 600));
-        // 成功链一并桩上：闸门若不生效，job 会一路走到成功，assertFailCode 才会真的失败。
-        // 不桩的话未打桩的 uploadImageBytes 返回 null → NPE 被 handle 兜住 → 同样落
-        // image_cutout_failed，断言就成了摆设（只有下面的 never() 还能拦住）。
         stubPublish();
 
         processor.handle("100");
 
         assertFailCode(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
-        // 闸门拦在 uploadImageBytes 之前：既不落脏资产，也不留终态 succeeded
         verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
         verify(finalizer, never()).publishImageCutoutResult(any());
     }
@@ -536,7 +495,6 @@ class ImageCutoutJobProcessorTest {
 
         processor.handle("100");
 
-        // setUp 的桩图 PNG_1X1 解出来是 alpha=127：判据若写成「非 255 即空」会在这里误杀
         verify(tosService).uploadImageBytes(eq(PNG_1X1), anyString(), eq("9"));
         verify(finalizer).publishImageCutoutResult(any());
         verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
@@ -567,8 +525,6 @@ class ImageCutoutJobProcessorTest {
     @DisplayName("索引色 + tRNS 的全透明结果图 → 同样判空拦截（透明不在独立 alpha band 上）")
     void indexedTransparentResult_cutoutFailed() throws Exception {
         byte[] bytes = indexedTransparentPng(2, 2);
-        // 先钉住夹具本身：索引色 + tRNS 的图 hasAlpha() 为 true 却没有独立 alpha band。
-        // 这两条断言一旦挂了，说明 JDK 的 PNG 解码行为变了，闸门换 getAlphaRaster() 的前提也随之作废。
         BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(bytes));
         assertThat(decoded.getColorModel().hasAlpha()).isTrue();
         assertThat(decoded.getAlphaRaster()).isNull();
@@ -641,7 +597,6 @@ class ImageCutoutJobProcessorTest {
 
         processor.handle("100");
 
-        // 魔数认不出 → sniffImageMime 兜底 image/png，mime 照常带过去（不是 null）
         verify(tosService).uploadImageBytes(eq(garbage), eq("image/png"), eq("9"));
         verify(finalizer).publishImageCutoutResult(any());
         verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),

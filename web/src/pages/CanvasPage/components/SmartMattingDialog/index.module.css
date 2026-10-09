@@ -1,10 +1,3 @@
-/* ============================================
- * SmartMattingDialog 智能抠像编辑态单条（IKHK9N）
- * 跟随源视频卡下方浮出的唯一一条：容器视觉 = 浮层容器三令牌（背景/描边/阴影）+
- * 24px 胶囊圆角（对齐去字幕/场景切分家族形态，无令牌档由 overlayContainer.test.ts
- * 白名单锁 24px 字面量）；输出格式菜单浮层入 IKGZ8C 浮层菜单家族（12px 档，
- * overlayContainer.test.ts 断言）。条内控件全走令牌，不复制体系外硬编码字面量写法。
- * ============================================ */
 
 .toolBtn {
   width: 28px;
@@ -30,15 +23,12 @@
   cursor: not-allowed;
 }
 
-/* ---- 会话标题（工具身份跟随所选模式：人像抠像/绿幕抠像，纯文字无图标） ---- */
 .barTitle {
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
   white-space: nowrap;
 }
 
-/* ---- 输出格式下拉（触发钮显当前格式；菜单向上弹出避开发送条下方视口边缘，
- *    形态同构 VideoAudioSplitDialog formatMenu） ---- */
 .formatWrap {
   position: relative;
 }
@@ -103,14 +93,11 @@
   background-color: var(--color-bg-hover);
 }
 
-/* 当前所选格式：主色底白字指示（对齐音视频分离格式菜单激活态） */
 .formatMenuItemActive {
   color: var(--color-accent-text);
   background-color: var(--color-accent-primary);
 }
 
-/* ---- 背景色分段控件（白色/黑色/绿色，仅 MP4 纯色显示；形态同构场景切分
- *    粒度三档分段） ---- */
 .segmentGroup {
   display: flex;
   align-items: center;
@@ -147,7 +134,6 @@
   cursor: not-allowed;
 }
 
-/* ---- 源视频卡下方单条 ---- */
 .sendBar {
   position: absolute;
   left: 50%;
@@ -165,15 +151,11 @@
   white-space: nowrap;
 }
 
-/* 跟随锚定（IKH25A 中心点锚，inline left/top 生效）：解除默认 bottom 定位避免 top/bottom
-   双侧拉伸；left: 0 兜底 inline 缺失；transform 不覆盖，继承基础态 translateX(-50%)
-   以锚点（源卡中心 x）真居中。口径同去字幕/场景切分单条 .sendBarFollow */
 .sendBarFollow {
   bottom: auto;
   left: 0;
 }
 
-/* ---- ⚡0 积分徽标（「本期免费」语义，title 保留）：绿色胶囊基调 ---- */
 .freeBadge {
   display: flex;
   align-items: center;
@@ -185,8 +167,6 @@
   padding: 2px 8px;
 }
 
-/* ---- 发送钮：Dock 主发送钮同款（灰底圆角方形 + 白 ↑ 图标，口径同
- *    SceneSplitDialog .sendBtn——置灰态即默认灰，无额外 disabled 透明度） ---- */
 .sendBtn {
   width: 30px;
   height: 30px;

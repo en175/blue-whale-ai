@@ -7,11 +7,6 @@ import {
   type QuoteJobPayload,
 } from './generationQuote';
 
-/* 报价（价格预览）的定价输入里现在含**参考素材**：参考图是定价维度（Seedream 5.0 Pro
-   首张免费、第 2 张起 0.02 元/张），所以「参考换了」必须让查询键也换 —— 键不换就吃缓存，
-   用户会拿着旧价往下走（预览价与实扣价分叉）。
-
-   这里刻意**不数张数**：载荷就是「哪些参考」，张数由后端 resolveReferenceAssets 数。 */
 
 function imageRef(assetId: string) {
   return { role: 'reference' as const, type: 'image' as const, asset_id: assetId };
@@ -26,7 +21,6 @@ function payload(overrides: Partial<QuoteJobPayload> = {}): QuoteJobPayload {
   };
 }
 
-/** 真正参与缓存的不是数组本身而是它的哈希值，所以断言哈希（数组 toEqual 说明不了会不会重查）。 */
 function keyHash(projectId: string, p: QuoteJobPayload): string {
   return hashKey(generationQuoteKeys.quote(projectId, p));
 }
@@ -93,8 +87,6 @@ describe('quoteGenerationJob', () => {
   });
 });
 
-/* IKIZQB：报价响应即契约 StageQuoteView（credits + quote_revision 同出同缺），
-   sample_mode 是定价输入之一（键随开关变化，不互吃缓存）。 */
 describe('样片报价（IKIZQB）', () => {
   it('响应透传 quote_revision（提交确认字段的来源）', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>

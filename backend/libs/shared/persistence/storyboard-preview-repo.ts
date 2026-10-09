@@ -23,11 +23,6 @@ import { transactionWithUniqueRetry } from "./conversation-repo.js";
 
 const OPERATION = "scene_card.storyboard_preview";
 
-/** StoryboardPreview 创建入参（CONTEXT L43-47）：User 从 SceneCard 显式触发的旁路操作。
- *  idempotencyKey 即 CommandId（Idempotency-Key header）；requestHash 由 handler 按 method/path/body 计算。
- *  base_scene_card_version 用于乐观并发；parameters 为本次画格参数快照。
- *  canvasRecovery（IKJJR0，B.3）：携带 canvas_binding 时由 handler 组装；受理锁序与
- *  关联行写入随本事务执行（锁在业务校验之后、job 写入之前——冲突零写入零预扣）。 */
 export interface CreateStoryboardPreviewInput {
   userId: string;
   projectId: string;
@@ -37,9 +32,7 @@ export interface CreateStoryboardPreviewInput {
   base_scene_card_version: number;
   parameters: StoryboardPreviewParameters;
   capability_snapshot_version: CapabilitySnapshotVersion;
-  /** 余额预检回调（与 plan apply 图片分支一致）；缺失视为不检查。 */
   quotaCheck?: () => Promise<{ sufficient: boolean }>;
-  /** IKJJR0：新协议恢复绑定（operation=scene_card.storyboard_preview，与幂等行同一键）。 */
   canvasRecovery?: CanvasRecoveryAcceptance;
 }
 
@@ -65,8 +58,6 @@ export type CreateStoryboardPreviewResult =
   | { kind: "quota_insufficient" }
   | { kind: "forbidden" };
 
-/** 图片能力上限校验（AC#1 能力约束）：当前图片能力无统一 checker，这里按 features.quantity_max
- *  校验 count，并校验 size / aspect_ratio 在支持范围内。未知能力按不支持处理。 */
 function checkImageCapabilityLimit(
   parameters: StoryboardPreviewParameters,
   capability: {
@@ -97,8 +88,6 @@ function checkImageCapabilityLimit(
   return null;
 }
 
-/** 单事务原子创建（AC#2 零副作用前置 / AC#6 恢复）：前置检查全部通过才建 image job + 预览行 + 事件。
- *  任一前置失败零写入；同 CommandId 重放首次结果；版本冲突零写入。 */
 async function createStoryboardPreviewInTransaction(
   tx: Prisma.TransactionClient,
   input: CreateStoryboardPreviewInput,
@@ -107,14 +96,12 @@ async function createStoryboardPreviewInTransaction(
   const userId = BigInt(input.userId);
   const sceneCardId = BigInt(input.sceneCardId);
 
-  // 0. 前置授权：校验项目归属当前用户，不泄漏存在性。
   const project = await tx.project.findFirst({
     where: { id: projectId, owner_id: userId, is_delete: 0 },
     select: { id: true },
   });
   if (!project) return { kind: "forbidden" } as const;
 
-  // 1. CommandId 幂等：命中则比对 request_hash，相同重放首次结果，不同冲突。
   const existing = await tx.command_idempotency.findUnique({
     where: {
       project_id_operation_idempotency_key: {
@@ -142,14 +129,12 @@ async function createStoryboardPreviewInTransaction(
     };
   }
 
-  // 2. 读 SceneCard（校验项目归属 + 未删除）。
   const sceneCard = await tx.scene_cards.findFirst({
     where: { id: sceneCardId, project_id: projectId, is_delete: 0 },
     select: { id: true, content_markdown: true, version: true },
   });
   if (!sceneCard) return { kind: "scene_card_not_found" } as const;
 
-  // 3. 版本冲突（AC#6 乐观并发）：base 版本与当前不一致零写入。
   if (sceneCard.version !== input.base_scene_card_version) {
     return {
       kind: "version_conflict",
@@ -159,8 +144,6 @@ async function createStoryboardPreviewInTransaction(
 
   const snapshot = input.capability_snapshot_version;
 
-  // 4. 能力漂移检测（AC#4）：按提交的 model_id/provider_id 查当前 image 行，比对 row_version + digest。
-  //    digest 与 model-capability-repo / agent-run 冻结同源（全 8 字段），客户端从能力端点拿 digest。
   const capability = await tx.generation_model_capability.findUnique({
     where: {
       provider_id_model_id: {
@@ -192,26 +175,18 @@ async function createStoryboardPreviewInTransaction(
   )
     return { kind: "capability_drift" } as const;
 
-  // 5. 图片能力上限（AC#1）：count/size/aspect_ratio 必须在当前能力支持范围内。
   const limitReason = checkImageCapabilityLimit(input.parameters, capability);
   if (limitReason) return { kind: "capability_limit", reason: limitReason };
 
-  // 6. 余额预检（与 plan apply 图片分支一致）：不足零写入。
   if (input.quotaCheck) {
     const quota = await input.quotaCheck();
     if (!quota.sufficient) return { kind: "quota_insufficient" } as const;
   }
 
-  // 6.5 IKJJR0（B.3 受理事务顺序 2-4 步）：新协议关联受理锁段——锁项目/画布 →
-  //     锁内幂等回读（并发同键命中 → 重放原 preview，不重复建 job；异摘要 → 冲突）→
-  //     锁节点归属行 → 比对 expected_binding_revision（不匹配在 job 写入前抛
-  //     canvas_binding_conflict，零写入零预扣）→ 捕获原目标快照。
-  //     锁不跨上方素材/能力/余额前置查询（先校验后进锁）。
   let recoveryPlan: CanvasRecoveryPlan | null = null;
   if (input.canvasRecovery) {
     const locked = await lockCanvasRecoveryForAcceptance(tx, input.canvasRecovery);
     if (locked.kind === "replay") {
-      // 锁内并发胜者已受理：回读其 preview 聚合根（resource_id），本事务零写入。
       const winner = await tx.command_idempotency.findUnique({
         where: {
           project_id_operation_idempotency_key: {
@@ -235,10 +210,7 @@ async function createStoryboardPreviewInTransaction(
     recoveryPlan = locked.plan;
   }
 
-  // === 前置检查全部通过，开始原子写入（AC#2 不碰 Preset / 不切媒体类型）===
 
-  // 7. 创建 image GenerationJob（source=storyboard_preview，expected_output_count=count）。
-  //    画格 = 其 N 个 output_slot（按 slot_index 升序 = 镜头顺序）；不设 scene_card_generation_record_id（图片路径）。
   const actionIdentity = createHash("sha256")
     .update(
       `${input.projectId}\0storyboard_preview\0${sceneCardId}\0${input.idempotencyKey}`,
@@ -264,14 +236,11 @@ async function createStoryboardPreviewInTransaction(
       scene_card_id: sceneCardId.toString(),
     },
   });
-  // IKJJQU：该路径不携带 canvasRecovery，返回值恒为 CreatedJob；窄化仅为类型收束。
   if ("kind" in createdJob) throw new Error("unreachable: storyboard job creation never conflicts idempotency");
-  // IKJJR0：提交关联与归属行随 job 行同事务提交（任务、关联、目标项、幂等结果一体，B.3 步骤 3）。
   if (recoveryPlan) {
     await writeCanvasRecoveryRows(tx, recoveryPlan, BigInt(createdJob.generation_job_id));
   }
 
-  // 8. INSERT storyboard_previews（聚合根 + SceneCard 绑定；summary_status=generating）。
   const preview = await tx.storyboard_previews.create({
     data: {
       scene_card_id: sceneCardId,
@@ -284,7 +253,6 @@ async function createStoryboardPreviewInTransaction(
     },
   });
 
-  // 9. INSERT command_idempotency（operation=scene_card.storyboard_preview，resource_id=preview_id）。
   await tx.command_idempotency.create({
     data: {
       project_id: projectId,
@@ -297,7 +265,6 @@ async function createStoryboardPreviewInTransaction(
     },
   });
 
-  // 10. project_events：storyboard_preview.created（同 tx，AC#6 恢复）。
   const event = await appendProjectEvent(tx, {
     projectId: input.projectId,
     eventType: "storyboard_preview.created",
@@ -322,10 +289,6 @@ async function createStoryboardPreviewInTransaction(
   };
 }
 
-/** IK70LQ：画格角色绑定前置校验（CONTEXT L53-57）。逐个确认 submitted 画格属于本 SceneCard 的
- *  StoryboardPreview（同 scene_card）、slot 已 succeeded、Asset 可访问（同 project、status=normal、
- *  is_delete=false）。画格无 mention_id，不走 validateDerivedReferences，在 mention 组校验前单独成组调用。
- *  任一不满足 → validation_failed 零写入。 */
 export async function validateStoryboardFrames(
   tx: Prisma.TransactionClient,
   projectId: bigint,
@@ -344,7 +307,6 @@ export async function validateStoryboardFrames(
   const jobIds = Array.from(
     new Set(slots.map((slot) => slot.generation_job_id)),
   );
-  // 限定同 scene_card：只接受其 job 属于本 SceneCard 的 StoryboardPreview 的画格。
   const previews =
     jobIds.length === 0
       ? []
@@ -379,7 +341,6 @@ export async function validateStoryboardFrames(
   return { ok: true };
 }
 
-/** 查可访问 Asset（本项目、normal、未删除）的 id 集合——画格前置校验与画格列表共用同一过滤口径。 */
 async function findAccessibleAssetIds(
   client: Pick<Prisma.TransactionClient, "assets">,
   projectId: bigint,
@@ -417,18 +378,15 @@ export interface StoryboardPreviewRepo {
   createStoryboardPreview(
     input: CreateStoryboardPreviewInput,
   ): Promise<CreateStoryboardPreviewResult>;
-  /** IKJJR0：受理响应/重放的 canvas_binding 视图（is_current 现查 owner 表，与生成任务入口同源）。 */
   canvasBindingView(
     projectId: string,
     submissionId: string,
   ): Promise<CanvasBindingView | null>;
-  /** GET 只读端点：返回某 SceneCard 下所有未删除预览（按 id 升序）。 */
   listStoryboardPreviews(
     projectId: string,
     sceneCardId: string,
     userId: string,
   ): Promise<ListStoryboardPreviewsResult>;
-  /** IK70LQ：编辑器画格候选——返回该 SceneCard 下 succeeded 且 Asset 可访问的画格（slot_index 升序）。 */
   listStoryboardFrames(
     projectId: string,
     sceneCardId: string,

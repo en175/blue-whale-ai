@@ -1,10 +1,3 @@
-/* ============================================
- * 建 job 时冻结产出卡片的落位锚点（geometry，与命令/计费无关）
- *
- * 从 generation-command-repo 拆出来：建任务接入幂等之后那个文件贴上了 800 行硬线
- * （eslint.config.mjs 的 max-lines 无豁免），而落位是一个自成一块的算法——输入是画布快照与
- * 场景卡 id，输出是 `input.placement_anchor`，不碰任何行、不碰计费。
- * ============================================ */
 import {
   findPlacement,
   SCENE_CARD_FALLBACK_HEIGHT,
@@ -31,8 +24,6 @@ function validAnchor(value: unknown): value is {
   );
 }
 
-/** 把本次提交的落位锚点冻结进 input（已带合法锚点则原样放行）；画布上找不到那张场景卡时，
- *  按现有节点算一个不重叠的位置。锚点是**冻结值**——提交之后画布怎么变都不再影响这个任务。 */
 export async function freezePlacementAnchor(
   tx: Prisma.TransactionClient,
   input: CreateJobInput,

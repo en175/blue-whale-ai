@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/* IKFA1O：BottomDialog 生视频正文素材标签——多媒体索引/首尾帧角色/模式失效/发送携带 prompt_doc */
+
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -119,7 +119,7 @@ describe('IKFA1O @ 菜单多媒体索引（A2）', () => {
     const items = mentionMenuItems();
     expect(items.map((b) => b.textContent)).toEqual(['素材101图片1', '素材301视频1', '素材401音频1']);
     await act(async () => {
-      items[1]!.click(); // 选择视频参考
+      items[1]!.click();
     });
     expect(readPromptRefText(container)).toBe('结合视频1');
   });
@@ -128,7 +128,7 @@ describe('IKFA1O @ 菜单多媒体索引（A2）', () => {
     await renderDialog({ videoMediaRefs: ALL_REFS });
     const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')!;
     await act(async () => { atBtn.click(); });
-    // 无记忆光标（未输入过正文）→ 追加末尾，chip 文案与手动 @ 选择一致（首个缩略图为图片1）
+
     expect(readPromptRefText(container)).toBe('图片1');
     await typePromptRefRaw(container, '结尾');
     expect(readPromptRefText(container)).toBe('图片1结尾');
@@ -214,7 +214,7 @@ describe('IKFA1O 角色与模式同步（C1/C2/C5）', () => {
       initialDoc: invalidDoc,
     });
     expect(readPromptRefText(container)).toBe('已失效：原尾帧');
-    // 重开仍不兼容 → 保持失效
+
     await rerender({
       videoMediaRefs: frames,
       initialParams: { mode: 'first_frame' },
@@ -244,7 +244,7 @@ describe('IKFA1O 发送与草稿（快照/双写）', () => {
         ],
       },
     });
-    // 触发一次编辑（草稿双写发生在编辑时）
+
     await typePromptRefRaw(container, '！');
     await act(async () => {
       sendButton().click();
@@ -273,8 +273,8 @@ describe('IKFA1O 发送与草稿（快照/双写）', () => {
   });
 });
 
-/* IKIQ88：缩略图 @ 按钮启用「当前选区」回落——光标置于文本中间时 chip 原位插入；
-   无光标记录（未聚焦过输入框）仍追加末尾，插入后编辑器聚焦、光标落在 chip 之后 */
+
+
 describe('IKIQ88 缩略图 @ 光标处插入', () => {
   it('光标置于文本中间：点击缩略图 @ 按钮，chip 插入光标处而非末尾', async () => {
     const { onParamsChange } = await renderDialog({ videoMediaRefs: ALL_REFS });
@@ -285,10 +285,10 @@ describe('IKIQ88 缩略图 @ 光标处插入', () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(readPromptRefText(container)).toBe('让图片1衣服');
-    // 光标落在 chip 之后：继续输入接在标签后
+
     await typePromptRefRaw(container, '！');
     expect(readPromptRefText(container)).toBe('让图片1衣服！');
-    // 与手动 @ 菜单选择同一种 chip：asset_ref 绑定 101、文案 图片1
+
     const patch = onParamsChange.mock.calls.filter((c) => c[0]?.promptDoc !== undefined).pop()?.[0];
     expect(patch.promptDoc.segments).toEqual([
       { kind: 'text', text: '让' },
@@ -305,11 +305,11 @@ describe('IKIQ88 缩略图 @ 光标处插入', () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(readPromptRefText(container)).toBe('图片1');
-    // 插入后编辑器聚焦
+
     await vi.waitFor(() => {
       expect(document.activeElement?.hasAttribute('contenteditable')).toBe(true);
     });
-    // 光标落在 chip 之后：继续输入接在标签后
+
     await typePromptRefRaw(container, '尾巴');
     expect(readPromptRefText(container)).toBe('图片1尾巴');
   });
@@ -325,7 +325,7 @@ describe('IKFXOR @ 菜单关闭后的焦点与光标', () => {
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull());
     expect(focusSpy).toHaveBeenCalledTimes(1);
-    // 光标落在「@猫」之后（@ 保留）：Lexical 选区恢复随 focus 提交异步写回
+
     await vi.waitFor(() => expect(promptRefCaretOffset(container)).toBe(3));
     await act(async () => {
       editor.update(() => {
@@ -345,7 +345,7 @@ describe('IKFXOR @ 菜单关闭后的焦点与光标', () => {
     await act(async () => document.body.dispatchEvent(new Event('pointerdown')));
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull());
     expect(focusSpy).not.toHaveBeenCalled();
-    // @ 查询保留为普通文本
+
     expect(readPromptRefText(container)).toBe('让@猫');
   });
 });

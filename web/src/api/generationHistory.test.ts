@@ -8,9 +8,6 @@ import {
 } from './generationHistory';
 import type { JobRecord } from './jobs';
 
-/* IKIZQI：画布外生成历史的数据组装——「拉项目列表 + 逐项目任务查询」拼项目归属，
-   合并成一条时间倒序历史流。按真实 fetch 打桩（envelope），验证：
-   跨项目合并、时间倒序、单项目失败不阻塞、查询参数携带 type=video。 */
 
 function jobRecord(partial: Partial<JobRecord> & Pick<JobRecord, 'job_id' | 'created_at'>): JobRecord {
   return {

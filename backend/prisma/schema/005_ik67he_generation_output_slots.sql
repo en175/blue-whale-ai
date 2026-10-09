@@ -1,6 +1,3 @@
--- IK67HE (T14)：输出槽重试与 Canvas 放置恢复（spec §4.4 / ADR-0026）。
--- 每次生成在提交时固定数量的输出槽，身份与顺序稳定（slot_index）。
--- 成功 Asset 永久占据原槽；重试只补 failed/missing 槽，不覆盖成功输出。
 SET NAMES utf8mb4;
 CREATE TABLE `generation_output_slots` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,

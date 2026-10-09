@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/* IKHA30 人声背景分离完成轨卡扇出与状态恢复（页面级 mock 终态驱动）。
-   锁定：成功终态移除占位卡、按 tracks 扇出普通音频成品卡（两轨=人声+背景音、三轨=人声+音乐+音效）、
-   轨卡命名（括号词随轨类型、后缀随所选格式）、各轨卡对源卡拉来源边（origin=vocal-split）、
-   扇出后立刻落库；刷新恢复三态——生成中续轮询（IKHA2W 既有）、失败可重试（IKHA2W 既有测试
-   vocalSplitEdit.test.tsx 锁定）、已完成水合首 tick 直接扇出无占位残留；重复水合按轨卡
-   确定性 id 判重不重复建卡。真实端到端在 worker/网关就绪后联调补验，本文件不阻塞。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -28,7 +22,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -128,8 +121,6 @@ vi.mock('@/api/jobs', () => ({
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 vi.mock('@/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
 
-/** IKJJR5：运行时扇出经恢复页投影取规范 track node_id；保存走新协议原子保存。
- *  回执按动作映射状态（replaceTarget→replaced、其余→present），供运行时台账确认。 */
 const recoveryMocks = vi.hoisted(() => ({
   fetchGenerationRecoveryPage: vi.fn(async (): Promise<GenerationRecoveryPage> => ({
     protocol_version: 1, canvas_version: null, records: [], next_cursor: null,
@@ -163,7 +154,6 @@ vi.mock('@/api/canvasRecovery', () => ({
   })),
 }));
 
-/** 受理回执视图（submission_id 固定，扇出投影按它构造规范 node_id）。 */
 const VOCAL_SUBMISSION = 'vocal-sub-1';
 const bindingView = (jobId: string, targetNodeId: string) => ({
   protocol_version: 1,
@@ -174,7 +164,6 @@ const bindingView = (jobId: string, targetNodeId: string) => ({
   is_current: true,
 });
 
-/** 恢复页投影（B.4/B.5）：track:<type> → generation-result:<submission_id>:track:<type>。 */
 function projectionPage(
   jobId: string,
   tracks: ReadonlyArray<{ track_type: string; asset_id: string }>,
@@ -198,7 +187,6 @@ function projectionPage(
   };
 }
 
-/** 创建受理 mock（回执 canvas_binding；target_node_id 回显请求绑定）。 */
 function mockCreateAccepted(jobId: string) {
   apiMocks.createVocalSplit.mockImplementation(async (_projectId: string, payload: { canvas_binding?: { target_node_id?: string } }) => ({
     job_id: jobId, status: 'queued',
@@ -216,7 +204,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪视频节点 v1（1920×1080，assetId 5；无连线） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -247,21 +234,18 @@ function seedDoc() {
   };
 }
 
-/** 追加轨产物资产字典条目（恢复态轨卡水合按 assetId 解析 src 用） */
 function pushTrackAssets(jobId: string) {
   const assets = canvasDocMock.current.assets as Record<string, unknown>;
   assets[`t-${jobId}-voice`] = { asset_id: `t-${jobId}-voice`, type: 'audio', access_url: `http://tos/${jobId}-voice.aac` };
   assets[`t-${jobId}-bg`] = { asset_id: `t-${jobId}-bg`, type: 'audio', access_url: `http://tos/${jobId}-bg.aac` };
 }
 
-/** 快照直接含生成中占位卡（模拟「IKHA2W 期间发送后刷新」的落库现场：占位卡与来源边同落库） */
 function seedDocWithPlaceholder(jobId: string, outputFormat = 'aac') {
   seedDoc();
   pushTrackAssets(jobId);
   (canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes.push({
     id: `vocal-split-${jobId}`,
     type: 'mediaNode',
-    // 占位卡位置 = 源卡 400 + 源内容宽 497.78 + 60 ≈ 958（round 后 958）
     position: { x: 958, y: 0 },
     data: {
       src: '',
@@ -307,7 +291,6 @@ async function renderPage() {
   });
 }
 
-/** 进入人声背景分离编辑态（源视频卡工具条回调挂点） */
 async function enterVocal() {
   const video = (flowProps.current.mediaNodes as Array<Record<string, any>>).find((n) => n.id === 'v1')!;
   await act(async () => {
@@ -322,7 +305,6 @@ async function click(testId: string) {
   });
 }
 
-/** 编辑态内点发送（startVocalSplitJob 含 await 创建，等 60ms 让建卡、轮询首 tick 与扇出落库发起） */
 async function sendVocal() {
   await click('vocal-split-send-btn');
   await act(async () => {
@@ -330,14 +312,12 @@ async function sendVocal() {
   });
 }
 
-/** 水合后等一轮（轮询首 tick mock 立即 resolve，60ms 足够扇出 + flush 发起） */
 async function settle() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
   });
 }
 
-/** 等过轮询 tick 间隔（pollJob 间 2500ms），驱动下一轮 tick 返回新 mock 的终态 */
 async function terminalTick() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 2600));
@@ -352,7 +332,6 @@ function edges(): Array<{ source: string; target: string; data?: Record<string, 
   return flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>;
 }
 
-/** 落库调用中含轨卡的那一次（IKJJR5：扇出走新协议原子保存 putCanvasDocWithRecovery）。 */
 type SavePayload = { nodes: Array<{ id: string }>; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }> };
 function fanoutSaveCall(): SavePayload | undefined {
   return (recoveryMocks.putCanvasDocWithRecovery.mock.calls as unknown as Array<[string, SavePayload, unknown, unknown]>)
@@ -382,13 +361,10 @@ afterEach(async () => {
 describe('IKHA30 成功扇出（发送→成功终态）', () => {
   it('两轨场景（通用/aac）：移除占位卡，按投影规范 node_id 扇出 源名(人声|背景音).aac 两张，各拉来源边，一笔原子保存', async () => {
     mockCreateAccepted('j701');
-    // 首轮 tick 返回进行中：真实轮询建卡与成功扇出相隔数秒、分属两轮提交——拆开批次
-    // 才能让占位卡先进级联清理登记，「占位卡来源边随移除被清理」按既有机制真实发生
     apiMocks.fetchJobStatus.mockResolvedValueOnce({ job_id: 'j701', status: 'processing', progress: 1, asset: null });
     await renderPage();
     await enterVocal();
     await sendVocal();
-    // IKJJR5：占位卡预分配 id（vocal-split- 前缀 + 随机后缀），按前缀断言在场
     expect((flowProps.current.mediaNodes as Node[]).some((n) => isVocalSplitNodeId(n.id) && n.id !== 'v1')).toBe(true);
     apiMocks.fetchJobStatus.mockResolvedValue({
       job_id: 'j701', status: 'succeeded', progress: 100, asset: null, tracks: twoTracksOf('j701'),
@@ -401,10 +377,7 @@ describe('IKHA30 成功扇出（发送→成功终态）', () => {
       { track_type: 'background', asset_id: 't-j701-bg' },
     ]));
     await terminalTick();
-    // 占位卡移除，无残留（占位卡 id 预分配随机，按前缀查）
     expect((flowProps.current.mediaNodes as Node[]).some((n) => isVocalSplitNodeId(n.id) && n.id !== 'v1')).toBe(false);
-    // 两张轨卡：规范 node_id（generation-result:<submission_id>:track:<type>，B.4）+
-    // marker + 普通音频成品卡形态（src/assetId/duration 回填，无 genStatus——水合不再为其开轮询）
     const voice = nodeById(`generation-result:${VOCAL_SUBMISSION}:track:voice`)!;
     const bg = nodeById(`generation-result:${VOCAL_SUBMISSION}:track:background`)!;
     expect(voice.data.fileName).toBe('素材视频(人声).aac');
@@ -419,20 +392,15 @@ describe('IKHA30 成功扇出（发送→成功终态）', () => {
     expect(voice.data.assetId).toBe('t-j701-voice');
     expect(voice.data.duration).toBe(15.5);
     expect(voice.data.generationRecovery).toEqual({ protocolVersion: 1, submissionId: VOCAL_SUBMISSION, outputKey: 'track:voice' });
-    // 轨序：voice 首轨在上，纵向步长 = 内容区高 240 + 间距 60；横向顶替占位卡列位（958）
     expect(voice.position).toEqual({ x: 958, y: 0 });
     expect(bg.position).toEqual({ x: 958, y: 300 });
-    // 各拉来源边（origin=vocal-split，参考推导跳过）
     const trackEdges = edges().filter((e) => e.target.startsWith('generation-result:'));
     expect(trackEdges.map((e) => `${e.source}->${e.target}`)).toEqual([
       `v1->generation-result:${VOCAL_SUBMISSION}:track:voice`,
       `v1->generation-result:${VOCAL_SUBMISSION}:track:background`,
     ]);
     for (const edge of trackEdges) expect(edge.data).toEqual({ origin: VOCAL_SPLIT_EDGE_ORIGIN });
-    // 占位卡旧来源边随占位卡移除级联清理
     expect(edges().some((e) => e.target === 'vocal-split-j701')).toBe(false);
-    // 扇出一笔原子保存（B.6）：目标与全部未决输出同笔处理——replaceTarget($target) +
-    // 逐轨 apply；占位移除 + 轨卡 + 来源边同一次 PUT
     const saved = fanoutSaveCall()!;
     expect(saved.nodes.map((n) => n.id)).toEqual(
       expect.arrayContaining([`generation-result:${VOCAL_SUBMISSION}:track:voice`, `generation-result:${VOCAL_SUBMISSION}:track:background`]),
@@ -489,13 +457,11 @@ describe('IKHA30 成功扇出（发送→成功终态）', () => {
     expect(voice.data.fileName).toBe('素材视频(人声).flac');
     expect(music.data.fileName).toBe('素材视频(音乐).flac');
     expect(sfx.data.fileName).toBe('素材视频(音效).flac');
-    // 三轨纵向排布；duration 为 null 的轨不写时长字段（浏览器实测兜底）
     expect(voice.position).toEqual({ x: 958, y: 0 });
     expect(music.position).toEqual({ x: 958, y: 300 });
     expect(sfx.position).toEqual({ x: 958, y: 600 });
     expect('duration' in sfx.data).toBe(false);
     expect(music.data.src).toBe('http://tos/j702-music.flac');
-    // 三条来源边
     expect(edges().filter((e) => e.target.startsWith('generation-result:')).length).toBe(3);
   }, 20000);
 
@@ -506,7 +472,6 @@ describe('IKHA30 成功扇出（发送→成功终态）', () => {
     await enterVocal();
     await sendVocal();
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j703', status: 'succeeded', progress: 100, asset: null });
-    // 恢复页无该提交的输出投影（beforeEach 默认 records: []）
     await terminalTick();
     const stale = (flowProps.current.mediaNodes as Node[]).find((n) => isVocalSplitNodeId(n.id) && n.id !== 'v1')!;
     expect(stale).toBeTruthy();
@@ -528,7 +493,6 @@ describe('IKHA30 刷新恢复三态', () => {
     expect(placeholder.data.genStatus).toBe('generating');
     expect(placeholder.data.progress).toBe(40);
     expect(nodeById('vocal-track-j704-voice')).toBeUndefined();
-    // 水合恢复轮询确实发生
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j704');
   });
 
@@ -539,7 +503,6 @@ describe('IKHA30 刷新恢复三态', () => {
     });
     await renderPage();
     await settle();
-    // 直接呈现轨卡，无占位残留
     expect(nodeById('vocal-split-j705')).toBeUndefined();
     const voice = nodeById('vocal-track-j705-voice')!;
     expect(voice.data.fileName).toBe('素材视频(人声).aac');
@@ -559,8 +522,6 @@ describe('IKHA30 刷新恢复三态', () => {
     expect(nodeById('vocal-split-j706')).toBeUndefined();
     const firstVoicePosition = nodeById('vocal-track-j706-voice')!.position;
 
-    // 关页重开（新页面实例，内存收敛登记清零），服务端快照仍是含占位卡的旧 doc——
-    // 确定性 id（vocal-track-{jobId}-{track}）让重复扇出落回同一组卡，不产生第二套
     await act(async () => {
       root.unmount();
     });

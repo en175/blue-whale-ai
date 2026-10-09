@@ -4,7 +4,6 @@ import { createBillingHold, type BillingHoldContext } from './billing-hold.js';
 import { createBillingQuote, type BillingQuoteContext } from './billing-quote.js';
 import type { BillingClient } from './billing-client.js';
 
-/** 造一个把两个 RPC 都记下来的假客户端（另有余额查询的探针：报价**不该**碰它）。 */
 function fakeClient(quoteResult: unknown = { credits: 100n, catalogVersion: 3 }) {
   const hold = vi.fn().mockResolvedValue({ reservedCredits: 100, catalogVersion: 3, duplicated: false });
   const quote = vi.fn().mockResolvedValue(quoteResult);
@@ -29,7 +28,6 @@ describe('createBillingQuote', () => {
     const { client, hold, quote } = fakeClient();
 
     await createBillingQuote({ client, resolveTier: vi.fn().mockResolvedValue('pro') })(CTX);
-    // 同一份 ctx 喂 Hold（报价不写东西，所以不需要 jobId/commandId）
     await createBillingHold({ client, resolveTier: vi.fn().mockResolvedValue('pro') })(
       CTX as unknown as BillingHoldContext,
     );
@@ -37,8 +35,6 @@ describe('createBillingQuote', () => {
     const quoteCall = quote.mock.calls[0]?.[0] as { specs?: Record<string, string> } | undefined;
     const holdCall = hold.mock.calls[0]?.[0] as { specs?: Record<string, string> } | undefined;
     expect(quoteCall?.specs).toEqual(holdCall?.specs);
-    // 值本身也要对：只取标量、键小写、值小写；数组与 null 不是规格
-    //（reference_count 是数组**长度**折算的标量，两边取到同一个数）
     expect(quoteCall?.specs).toEqual({
       size: '2k',
       duration: '5',
@@ -68,9 +64,7 @@ describe('createBillingQuote', () => {
     })(CTX);
 
     expect(quote).toHaveBeenCalledWith(expect.objectContaining({ tier: 'free' }));
-    // 少给折扣是钱漏，不能静默
     expect(warn).toHaveBeenCalled();
-    // IKIZQ7：结果附报价侧实际生效的 tier（quote_revision 组成要素），等级解析失败时为 free
     expect(result).toEqual({ credits: 100n, catalogVersion: 3, tier: 'free' });
   });
 
@@ -85,7 +79,6 @@ describe('createBillingQuote', () => {
       logger: { warn },
     })(CTX);
 
-    // 降级成「这次没有估算」——调用方照常建任务；但要在日志里留下漏配的痕迹
     expect(result).toBeNull();
     expect(warn).toHaveBeenCalled();
   });
@@ -114,7 +107,6 @@ describe('createBillingQuote', () => {
       resolveTier: vi.fn().mockResolvedValue('free'),
     })(CTX);
 
-    // 余额为 0 也照样报得出价：契约里报价与余额无关（余额是 Hold 的职责）
     expect(result).toEqual({ credits: 9_999n, catalogVersion: 4, tier: 'free' });
     expect(queryBalance).not.toHaveBeenCalled();
   });

@@ -1,7 +1,3 @@
-/* ============================================
- * CharacterLibraryModal - 角色库弹窗
- * 与 SharedAssetsModal 同尺寸
- * ============================================ */
 
 .overlay {
   position: fixed;
@@ -33,7 +29,6 @@
   box-sizing: border-box;
 }
 
-/* ---- 头部 ---- */
 .head {
   display: flex;
   align-items: center;
@@ -85,7 +80,6 @@
   color: var(--color-text-primary);
 }
 
-/* ---- Tab 栏 ---- */
 .tabs {
   display: flex;
   gap: 4px;
@@ -119,7 +113,6 @@
   border-bottom-color: var(--color-text-primary);
 }
 
-/* ---- 内容区 ---- */
 .content {
   flex: 1;
   overflow-y: auto;
@@ -146,9 +139,6 @@
   font-size: var(--font-size-md);
 }
 
-/* ============================================
- * 分组列表视图
- * ============================================ */
 .groupListView {
   padding: 8px 0;
 }
@@ -159,7 +149,6 @@
   gap: 16px;
 }
 
-/* 分组卡片 */
 .groupCard {
   position: relative;
   cursor: pointer;
@@ -198,7 +187,6 @@
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.4));
 }
 
-/* 底部信息栏（覆盖在图片上） */
 .groupInfo {
   position: absolute;
   bottom: 0;
@@ -235,9 +223,6 @@
   margin-top: 2px;
 }
 
-/* ============================================
- * 分组详情视图
- * ============================================ */
 .detailView {
   display: flex;
   flex-direction: column;
@@ -281,7 +266,6 @@
 }
 
 .detailView .assetGrid {
-  /* 瀑布流：图片按真实宽高比渲染，列优先排布 */
   columns: 140px;
   column-gap: 12px;
   overflow-y: auto;
@@ -296,7 +280,6 @@
   overflow: hidden;
   background-color: var(--color-bg-secondary);
   transition: all var(--transition-fast);
-  /* 瀑布流防断裂：卡片不被拆到两列，行距由 margin 提供 */
   break-inside: avoid;
   margin-bottom: 12px;
 }
@@ -357,7 +340,6 @@
   object-fit: cover;
 }
 
-/* 图片加载完成后解除 1:1 占位，按真实宽高比撑开（视频/音频保持 1:1） */
 .detailView .assetThumbMeasured {
   aspect-ratio: auto;
 }
@@ -398,9 +380,6 @@
   z-index: 1;
 }
 
-/* ============================================
- * 真人人像库：多选素材卡片 / 确认栏 / 空状态引导
- * ============================================ */
 .detailView .assetCardDisabled {
   cursor: not-allowed;
 }
@@ -430,7 +409,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* 勾选标记（右上角）；存在勾选标记时类型徽章左移避让 */
 .detailView .checkToggle {
   position: absolute;
   top: 8px;
@@ -456,7 +434,6 @@
   background-color: #7c7c88;
 }
 
-/* 空状态引导按钮（去资产页建档） */
 .emptyHint .emptyActionBtn {
   margin-top: 16px;
   padding: 8px 20px;
@@ -475,9 +452,6 @@
   border-color: var(--color-text-secondary);
 }
 
-/* ============================================
- * 弹窗级底部确认栏（虚拟/真人选择跨 tab 累加）
- * ============================================ */
 .confirmBar {
   display: flex;
   align-items: center;
@@ -520,9 +494,6 @@
   cursor: not-allowed;
 }
 
-/* ============================================
- * 通用按钮（确认栏取消/清空按钮等）
- * ============================================ */
 .modalCancelBtn {
   padding: 8px 18px;
   border-radius: var(--radius-md);
@@ -545,7 +516,6 @@
   cursor: not-allowed;
 }
 
-/* 滚动条样式 */
 .content::-webkit-scrollbar,
 .detailView .assetGrid::-webkit-scrollbar {
   width: 6px;
@@ -562,11 +532,7 @@
   background: transparent;
 }
 
-/* ============================================
- * 素材状态徽章 / 错误提示
- * ============================================ */
 
-/* 素材状态徽章 */
 .detailView .statusBadge {
   position: absolute;
   top: 8px;
@@ -584,7 +550,6 @@
   background-color: rgba(220, 38, 38, 0.85);
 }
 
-/* ---- 加载骨架屏 ---- */
 .loadingSpinner {
   display: flex;
   flex-direction: column;

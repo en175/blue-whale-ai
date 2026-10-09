@@ -53,9 +53,7 @@ function stub(body: unknown, status = 200) {
   return calls;
 }
 
-/* ---------- gRPC 侧：内存 transport ---------- */
 
-// 只做转发，「装哪个 router」在 billing-admin-grpc-stub.testlib.ts 里（三个测试文件同一套）。
 vi.mock("@connectrpc/connect-node", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@connectrpc/connect-node")>();
   return {
@@ -64,7 +62,6 @@ vi.mock("@connectrpc/connect-node", async (importOriginal) => {
   };
 });
 
-/** 一个完整的活动写请求体：PUT 是整条覆盖，每一列都要给。 */
 const PROMOTION_INPUT = {
   code: "night-70",
   name: "夜间 7 折",
@@ -128,7 +125,6 @@ describe("billing-admin-client", () => {
     await expect(grantCredits({ userId: 1, credits: 1500, bizId: "RC1" })).resolves.toEqual({
       lotId: "",
       duplicated: true,
-      // 老版本 billing 不带这个字段 → null = 「拿不到归属」，不是「没有归属」
       existingBizId: null,
     });
   });
@@ -138,8 +134,6 @@ describe("billing-admin-client", () => {
 
     const result = await grantCredits({ userId: 1, credits: 1000, bizId: "RC-SECOND" });
 
-    // 两者在 wire 上都是 409、duplicated 都是 true，差别只在这个字段。
-    // 丢了它，调用方就只能把两种情况混成一个结论 —— 而它们的业务含义正好相反。
     expect(result).toEqual({ lotId: "", duplicated: true, existingBizId: "RC-FIRST" });
   });
 
@@ -150,7 +144,6 @@ describe("billing-admin-client", () => {
     );
   });
 
-  /* ---------- 定价目录：读 / 发布 ---------- */
 
   it("读当前目录：连文档原文一起带回来（管理端页面的编辑起点）", async () => {
     freshGrpcUrl();
@@ -161,9 +154,6 @@ describe("billing-admin-client", () => {
       documentJson: '{"schemaVersion":1}',
     });
 
-    // 逐字段对：proto 侧的名字（version / documentJson / documentHash / creditsPerYuan）
-    // 与这里返回的 HTTP 时代命名（catalogVersion / document）**不一样**，
-    // 映射错了管理端就会拿到一个「看着对但读不到」的目录
     await expect(fetchActiveCatalog()).resolves.toEqual({
       catalogVersion: 3,
       documentHash: "abc",
@@ -182,23 +172,16 @@ describe("billing-admin-client", () => {
       creditsPerYuan: -1,
       document: "",
     });
-    // 同一份数据，充值那条路径仍然必须抛 —— 换算率取不到就不该给用户报价
     await expect(fetchCreditsPerYuan()).rejects.toThrow(BillingAdminConfigError);
   });
 
-  /* ---------- 流水：presence 与全站哨兵 ---------- */
 
   it("流水：预扣额没设 → null（**不是 0，也不是 undefined**）", async () => {
-    // ⚠️ 这条钉的是 2026-09-26 那次整页白屏的根：
-    //    proto3 `optional` 没设 ⇒ protobuf-es 给 `undefined`，而本文件的契约是 `null`。
-    //    不收敛成一种形态，前端 `!== null` 就会把「没有预扣」当成「有值」渲染。
-    //    `0n` 与「没设」在**这条路上**必须能分开：0 是「冻了 0 分」。
     freshGrpcUrl();
     grpcAdminService({
       adminListTransactions: () =>
         create(AdminListTransactionsResponseSchema, {
           items: [
-            // 发放行：**不设** reservedCredits
             create(AdminTransactionItemSchema, {
               id: "lot:1",
               userId: 7n,
@@ -209,7 +192,6 @@ describe("billing-admin-client", () => {
               status: "done",
               createdAt: "2026-09-26T10:00:00+08:00",
             }),
-            // 消费行：设了预扣额
             create(AdminTransactionItemSchema, {
               id: "res:9",
               userId: 7n,
@@ -232,17 +214,12 @@ describe("billing-admin-client", () => {
   });
 
   it("流水：生成任务 id 没设 → null；设了 → **字符串**，且大 id 不丢精度", async () => {
-    // ⚠️ 这一列是 join key（拿它回自己库查任务、取提示词），所以**不能过 `Number()`**：
-    //    int64 在 protobuf-es 里是 bigint，超过 2^53 时 Number 会**静默**丢精度——
-    //    查不到还好，查到**另一个任务**就是把别人的提示词给运营看了。
-    //    下面这个 id 特意取在 2^53 之上。
     const HUGE_JOB_ID = 9_007_199_254_740_993n;
     freshGrpcUrl();
     grpcAdminService({
       adminListTransactions: () =>
         create(AdminListTransactionsResponseSchema, {
           items: [
-            // 发放行：**不设** generationJobId（presence 缺席，不是「任务 0」）
             create(AdminTransactionItemSchema, {
               id: "lot:1",
               userId: 7n,
@@ -253,7 +230,6 @@ describe("billing-admin-client", () => {
               status: "done",
               createdAt: "2026-09-26T10:00:00+08:00",
             }),
-            // 消费行：设了任务 id
             create(AdminTransactionItemSchema, {
               id: "res:9",
               userId: 7n,
@@ -273,7 +249,6 @@ describe("billing-admin-client", () => {
 
     expect(page.items[0]?.generationJobId).toBeNull();
     expect(page.items[1]?.generationJobId).toBe("9007199254740993");
-    // 走 Number 会得到 9007199254740992 —— 少 1，且**不报错**
     expect(page.items[1]?.generationJobId).not.toBe("9007199254740992");
   });
 
@@ -290,7 +265,6 @@ describe("billing-admin-client", () => {
     await listAdminTransactions({});
     await listAdminTransactions({ userId: 42 });
 
-    // 用户 id 从 1 起，0 占用不到 —— 服务端据此判断「不过滤」
     expect(seen).toEqual([0n, 42n]);
   });
 
@@ -313,15 +287,12 @@ describe("billing-admin-client", () => {
     expect(calls[0]?.url).toBe(
       "http://billing.internal:4003/admin/catalogs?publishedBy=42&note=%E6%94%B9%E4%BB%B7",
     );
-    // 逐字节等于原文：中间没有任何人重新序列化它（包一层就会多一次转义再解析）
     expect(calls[0]?.raw).toBe(document);
   });
 
   it("发布：文档被拒（400）→ 抛 CatalogRejectedError 并带上 billing 的原话", async () => {
     stub({ code: "INVALID_ARGUMENT", message: "baseUnit 指向不存在的维度 usage.x" }, 400);
 
-    // 这是「改文档」而不是「等服务恢复」，所以类型必须与 BillingAdminError 分开：
-    // 否则调用方只能靠状态码猜处置方向
     await expect(
       publishCatalog({ document: "{}", publishedBy: "42" }),
     ).rejects.toThrow(CatalogRejectedError);
@@ -338,7 +309,6 @@ describe("billing-admin-client", () => {
     ).rejects.toThrow(BillingAdminError);
   });
 
-  /* ---------- 折扣（会员折扣 / 营销活动） ---------- */
 
   it("会员折扣：列 / 建 / 改 / 删各打对端点", async () => {
     const listCalls = stub([{ id: 1, tier: "pro", discountBp: 9000 }]);
@@ -347,8 +317,6 @@ describe("billing-admin-client", () => {
       "http://billing.internal:4003/admin/member-discounts?tier=pro&status=enabled",
     );
 
-    // ⚠️ 省略过滤条件时**不带查询串**：带上 `tier=` 会让 billing 收到一个空值，
-    //    而「不过滤」与「过滤一个空等级」是两件事
     const bareCalls = stub([]);
     await listMemberDiscounts();
     expect(bareCalls[0]?.url).toBe("http://billing.internal:4003/admin/member-discounts");
@@ -405,8 +373,6 @@ describe("billing-admin-client", () => {
     );
 
     expect(calls[0]?.url).toBe("http://billing.internal:4003/admin/promotions?operator=42");
-    // null 必须原样外发：它是「不限 / 全天」这个状态，被 JSON.stringify 丢掉就变成了
-    // 「没填」—— billing 那一侧会按默认值处理，界面上看到的和库里存的就对不上了
     expect(calls[0]?.body).toMatchObject({ taskTypes: null, daysOfWeek: [1, 5] });
   });
 

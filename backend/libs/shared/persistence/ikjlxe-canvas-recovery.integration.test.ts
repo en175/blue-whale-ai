@@ -1,6 +1,6 @@
-// IKJLXE：公开 CanvasService.save 的首次 primary 转换与同状态重放。
-// IKJLXE_DATABASE_URL 指向独立 MySQL 测试库；未配置时跳过不算通过。
-// 项目权限使用受控替身，受理关联、产物与保存事务均为真实数据库操作。
+
+
+
 import { randomUUID } from "node:crypto";
 
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";

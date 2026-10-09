@@ -4,9 +4,9 @@ import subprocess
 import tempfile
 import unittest
 
-try:  # 作为 scripts.tests.* 命名空间包导入
+try:
     from .bash_helper import BASH
-except ImportError:  # 经 discover -s scripts/tests 顶层导入
+except ImportError:
     from bash_helper import BASH
 
 
@@ -98,7 +98,6 @@ class TestIk50gbCTestsiteProbe(unittest.TestCase):
             encoding="utf-8",
             check=False,
         )
-        # URL 闸门放行后会在网络层失败（域名不可解析），但不得是 HTTPS 拒绝。
         self.assertNotEqual(result.returncode, 2)
         self.assertNotIn("must use HTTPS", result.stderr)
 

@@ -8,12 +8,10 @@ import {
 import { quoteRevisionOf } from "./handle-quote-generation-job.js";
 import type { FinalizeSourceJob } from "@lib/shared/persistence/index.js";
 
-/** IKIZQC：成片报价与提交（契约 §3/§4，金标 G02/G03/G04/G05/G06/G08/G13）。 */
 
 const DEADLINE_FUTURE = BigInt(Date.now() + 24 * 60 * 60 * 1000);
 const DEADLINE_PAST = BigInt(Date.now() - 1_000);
 
-/** 样片冻结输入：含参考视频时长（G13——成片计价的输入视频维度）与样片专属键。 */
 const SAMPLE_INPUT = {
   provider_credential: "sealed-sample-cred",
   prompt: "人物走过街角",
@@ -94,13 +92,11 @@ function buildDeps(args: {
   return { deps, findFinalizeSourceJob, createFinalizeJob, lookupFinalizeIdempotency };
 }
 
-/** 报价桩：与提交复算同形（credits 为 bigint）。 */
 function quoteStub(overrides: Partial<{ credits: bigint; catalogVersion: number; tier: string }> = {}) {
   const result = { credits: 76n, catalogVersion: 12, tier: "free", ...overrides };
   return { result, quote: vi.fn().mockResolvedValue(result) };
 }
 
-/** 按「报价入口同一套」复算提交确认两字段。 */
 function confirmationOf(
   sample: FinalizeSourceJob,
   capability: Record<string, unknown>,
@@ -119,9 +115,6 @@ function confirmationOf(
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-// deriveFinalizeInput（G02/G13）
-// ═══════════════════════════════════════════════════════════════
 describe("deriveFinalizeInput（IKIZQC）", () => {
   it("★ G02/G13: 同模型 1080p；references（含视频时长）原样保留；样片/画布/凭证键剥除", () => {
     const derived = deriveFinalizeInput(SAMPLE_INPUT, S25_CAPABILITY as never)!;
@@ -129,7 +122,6 @@ describe("deriveFinalizeInput（IKIZQC）", () => {
     expect(derived.model_id).toBe("doubao-seedance-2-5-260628");
     expect(derived.resolution).toBe("1080p");
     expect(derived.expected_output_count).toBe(1);
-    // G13：输入视频时长取原样片参考素材（3 秒视频参考原样冻结），样片视频本体不在其中。
     expect(derived.references).toEqual(SAMPLE_INPUT.references);
     expect(derived.reference_limits).toEqual(SAMPLE_INPUT.reference_limits);
     expect(derived.sample_mode).toBeUndefined();
@@ -139,7 +131,6 @@ describe("deriveFinalizeInput（IKIZQC）", () => {
     expect(derived.text_input_signature).toBeUndefined();
     expect(derived.placement_anchor).toBeUndefined();
     expect(derived.provider_credential).toBeUndefined();
-    // 480p 像素按 1080p 重算。
     expect(derived.output_width).toBe(1920);
     expect(derived.output_height).toBe(1080);
   });
@@ -149,9 +140,6 @@ describe("deriveFinalizeInput（IKIZQC）", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// 成片报价（fail open，金标 G06/G08 折空报价）
-// ═══════════════════════════════════════════════════════════════
 describe("handleFinalizeGenerationJobQuote（IKIZQC）", () => {
   it("★ 前置全满足 → 返回整数积分与 quote_revision（与提交复算同源）", async () => {
     const { result, quote } = quoteStub();
@@ -211,9 +199,6 @@ describe("handleFinalizeGenerationJobQuote（IKIZQC）", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// 成片提交（fail closed，金标 G02/G03/G04/G05/G06/G08）
-// ═══════════════════════════════════════════════════════════════
 describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
   const happyBody = () => confirmationOf(sampleJob(), S25_CAPABILITY as never, quoteStub().result);
 
@@ -295,7 +280,6 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
 
     const res = await handleFinalizeGenerationJobCreate("42", "1", "302", happyBody(), "key-2", deps);
 
-    // 契约 §六：核对锁定期间再次提交被拒（1014）——不发第二条上游尝试，预扣不动。
     expect(res.code).toBe(1014);
     expect(res.msg).toBe("无法确认视频任务是否已提交");
     expect(createFinalizeJob).not.toHaveBeenCalled();
@@ -329,7 +313,6 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
 
   it("★ G03/G04: 确认字段缺失/非法 → 400；变价（credits 不一致）→ 1056；revision 失效 → 1056；算不出价 → 1056；未接报价依赖 → 1056", async () => {
     const quote = quoteStub().quote;
-    // 缺字段：strict 校验拒绝（expected_credits 非正数同理）。
     const missing = buildDeps({ quote });
     expect(
       (await handleFinalizeGenerationJobCreate("42", "1", "302", { expected_credits: 76 }, "k", missing.deps)).code,
@@ -339,20 +322,17 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
       (await handleFinalizeGenerationJobCreate("42", "1", "302", { ...happyBody(), expected_credits: 0 }, "k", zero.deps)).code,
     ).toBe(1002);
 
-    // 变价：服务端复算 99，用户仍提交 76。
     const bumped = buildDeps({ quote: quoteStub({ credits: 99n }).quote });
     expect(
       (await handleFinalizeGenerationJobCreate("42", "1", "302", happyBody(), "k", bumped.deps)).code,
     ).toBe(1056);
 
-    // revision 失效：能力行版本跳变。
     const bumpedCap = { ...S25_CAPABILITY, version: 345 };
     const revisionStale = buildDeps({ capability: bumpedCap, quote: quoteStub().quote });
     expect(
       (await handleFinalizeGenerationJobCreate("42", "1", "302", happyBody(), "k", revisionStale.deps)).code,
     ).toBe(1056);
 
-    // 算不出价 / 未接依赖：fail closed。
     const unpriceable = buildDeps({ quote: vi.fn().mockResolvedValue(null) });
     expect(
       (await handleFinalizeGenerationJobCreate("42", "1", "302", happyBody(), "k", unpriceable.deps)).code,
@@ -398,7 +378,6 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
     expect(createInput.input.resolution).toBe("1080p");
     expect(createInput.input.sample_mode).toBeUndefined();
     expect(options.billing).toBeDefined();
-    // Hold 的 commandId 与 actionIdentity 同源（带 Date.now，防 billing 永久幂等死锁）。
     expect(options.billing.hold).toBeTypeOf("function");
     expect(result.credits).toBe(76n);
   });

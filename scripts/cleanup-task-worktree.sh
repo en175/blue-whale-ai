@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# Remove a task worktree after its recorded release branch contains the task HEAD.
 
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
-# Git Bash on Windows：git rev-parse 返回 `D:/...`（大写盘符），pwd 返回 `/d/...`（小写 posix）。
-# case 比较大小写敏感会误判，统一走 pwd 风格。
 ROOT="$(cd "$ROOT" && pwd)"
 # shellcheck source=lib/worktree-paths.sh
 source "$ROOT/scripts/lib/worktree-paths.sh"
@@ -48,8 +45,6 @@ if ! git -C "$ROOT" merge-base --is-ancestor "$task_sha" "$fetched_sha"; then
   fail "远端目标 ${target_branch} 尚未包含任务提交 ${task_sha}，未清理。"
 fi
 
-# Fetch proves the target commit existed remotely. Check it again before local deletion
-# so a target branch moved during cleanup does not turn a stale fetch into proof.
 remote_line="$(git -C "$ROOT" ls-remote --exit-code --heads origin "refs/heads/$target_branch")" \
   || fail "无法复核远端目标 ${target_branch}，未清理。"
 remote_sha="${remote_line%%[[:space:]]*}"
@@ -57,9 +52,6 @@ if [ "$remote_sha" != "$fetched_sha" ]; then
   fail "远端目标 ${target_branch} 在校验期间发生变化，未清理。"
 fi
 
-# 主 checkout = 不在 $WORKTREE_BASE 下的那个 worktree。
-# 不依赖主 checkout 当前的分支状态（它可能 detached 或临时切到别的分支）；
-# 用 substr 整行截取路径，兼容含空格的路径（awk 按字段切会把空格后的路径截断）。
 main_root="$(git -C "$ROOT" worktree list --porcelain | awk -v base="$WORKTREE_BASE/" '
   /^worktree / {
     path = substr($0, 10)
@@ -71,7 +63,6 @@ main_root="$(git -C "$ROOT" worktree list --porcelain | awk -v base="$WORKTREE_B
 
 cd "$main_root"
 
-# The remote task branch is retained. Remove only the local worktree and ref.
 git worktree remove "$ROOT"
 
 git update-ref -d "refs/heads/$branch" "$task_sha"

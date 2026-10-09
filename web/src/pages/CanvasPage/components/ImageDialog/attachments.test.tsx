@@ -6,9 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment, type UploadedFile } from './index';
 import thumbStyles from '../RefThumbnail/index.module.css';
 
-/* IKDLQF/IKFCKN：ImageDialog 文本附件——以 FileText 图标缩略图进入参考栏统一序列，
-   参与「文本N」独立编号（角标仅数字），× 断开当前连线、悬停 200ms 正文预览；
-   契约限长规则在面板侧的落点——附件正文有效时允许空提示词提交。 */
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -62,21 +59,17 @@ async function renderDialog(props: {
       ),
     );
   });
-  // 等模型能力加载完成（发送门依赖 currentGen）
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
   return { onSend };
 }
 
-/** 参考栏内文本缩略图（dock-text-ref）与媒体缩略图（本地模式默认 ref-thumb） */
 const textThumbs = () => [...container.querySelectorAll('[data-testid="dock-text-ref"]')];
 const mediaThumbs = () => [...container.querySelectorAll('[data-testid="ref-thumb"]:not([data-testid="dock-text-ref"])')];
-/** 参考栏子节点的 testid 序列（校验媒体在前、文本在后；栏尾旧「+」入口随 IKGB7U 操作条退役） */
 const rowTestids = () =>
   [...(container.querySelector('[class*="previewRow"]')?.children ?? [])].map((el) =>
     el.getAttribute('data-testid') ?? '?',
   );
 
-// React 的 onMouseEnter/Leave 由根委托的 mouseover/mouseout 合成派发（与 RefThumbnail 组件测试同法）
 function hover(el: Element) {
   act(() => {
     el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
@@ -126,16 +119,13 @@ describe('IKFCKN 文本附件进参考栏', () => {
     expect(mediaThumbs()).toHaveLength(1);
     const thumbs = textThumbs();
     expect(thumbs).toHaveLength(2);
-    // FileText 图标形态：无媒体节点（img/video），以 kindIcon 图标承载
     for (const el of thumbs) {
       expect(el.querySelector('img')).toBeNull();
       expect(el.querySelector('video')).toBeNull();
       expect(el.querySelector(`.${thumbStyles.kindIcon}`)).toBeTruthy();
     }
-    // 编号圆钮仅显示数字：与附件顺序同源（文本1/文本2 → 1/2）
     expect(thumbs[0].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
     expect(thumbs[1].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('2');
-    // 同排顺序：媒体在前、文本在后（栏尾旧「+」占位随 IKGB7U 操作条退役）
     expect(rowTestids()).toEqual(['ref-thumb', 'dock-text-ref', 'dock-text-ref']);
   });
 
@@ -181,7 +171,6 @@ describe('IKFCKN 文本附件进参考栏', () => {
     });
     expect(preview()).toBeTruthy();
     expect(preview()!.textContent).toContain('一只蓝鲸在海里');
-    // 预览无标题：来源名称不进浮层（图标本体的 title 提示不属于浮层内容）
     expect(preview()!.textContent).not.toContain('故事文案');
     await act(async () => {
       unhover(el);

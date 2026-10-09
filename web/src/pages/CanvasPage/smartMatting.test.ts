@@ -25,7 +25,6 @@ describe('smartMattingGateReason（智能抠像门槛预检，IKHK7N）', () => 
     expect(smartMattingGateReason({})).toBe(SMART_MATTING_MISSING_ASSET_REASON);
     expect(smartMattingGateReason({ assetId: null })).toBe(SMART_MATTING_MISSING_ASSET_REASON);
     expect(smartMattingGateReason({})).toContain('尚未关联资产');
-    // 未关联资产且超长：仍归资产原因（先资产后时长的判定顺序）
     expect(
       smartMattingGateReason({ assetId: null, duration: 600 + 1 }),
     ).toBe(SMART_MATTING_MISSING_ASSET_REASON);
@@ -42,7 +41,6 @@ describe('smartMattingGateReason（智能抠像门槛预检，IKHK7N）', () => 
 
   it('时长数据缺失（undefined/null）放行不置灰（存量视频交后端按权威数据复核）', () => {
     expect(smartMattingGateReason({ assetId: '5' })).toBeNull();
-    // 持久化快照可能带 null（JSON 形态），运行时与 undefined 同走 typeof 守卫放行
     expect(smartMattingGateReason({ assetId: '5', duration: null as unknown as number })).toBeNull();
   });
 

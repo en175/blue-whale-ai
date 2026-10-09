@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-/* IKFCKT：AudioDialog 参考栏拖拽换位——参考音频（面板本地序）与文本附件（连入边序）混排统一序列；
-   参考音频换位重排本地 refs、文本按新相对序回传 onReorderAttachments；生成中只读禁拖 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -118,7 +116,6 @@ describe('AudioDialog 参考栏拖拽换位（IKFCKT）', () => {
       onReorderAttachments,
     });
     wideRect();
-    // 统一序列 [n1, t1, t2]：拖 t2(index 2) 到 t1(index 1) 前半 → 文本 [t2, t1]
     dragAndDrop(textThumbs()[1]!, textThumbs()[0]!, 'before');
     expect(onReorderAttachments).toHaveBeenCalledTimes(1);
     expect(onReorderAttachments).toHaveBeenCalledWith(['t2', 't1']);
@@ -131,12 +128,9 @@ describe('AudioDialog 参考栏拖拽换位（IKFCKT）', () => {
       onReorderAttachments,
     });
     wideRect();
-    // 统一序列 [n1, t1, t2]：拖 t2(index 2) 到 n1(index 0) 前半 → 新统一序 [t2, n1, t1]
-    // → 音频 [n1] 不变、文本 [t2, t1]
     dragAndDrop(textThumbs()[1]!, audioThumbs()[0]!, 'before');
     expect(onReorderAttachments).toHaveBeenCalledWith(['t2', 't1']);
     expect([...container.querySelectorAll('[data-testid="audio-ref-thumb"], [data-testid="dock-text-ref"]')].map(el => el.getAttribute('title'))).toEqual(['文本二', REF.name, '文本一']);
-    // 音频编号不受文本换位影响（音频N 独立编号）
     expect(badgeOf(audioThumbs()[0]!)).toBe('1');
     expect(textThumbs().map(badgeOf)).toEqual(['1', '2']);
   });

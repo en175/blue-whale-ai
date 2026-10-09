@@ -8,7 +8,6 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IKIHPJ：sync 单字段 → 出站键映射钉死（迁移契约 §21.3）。 */
 class NewApiMediaKitMuxAudioVideoClientTest {
 
     @Test

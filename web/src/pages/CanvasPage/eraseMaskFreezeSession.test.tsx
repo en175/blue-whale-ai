@@ -1,12 +1,4 @@
 // @vitest-environment jsdom
-/* IKI8L7 擦除涂抹发送：会话身份与发送输入在遮罩首个异步编码步骤（canvas.toBlob）之前
-   冻结。修订前 capture('erase')、目标卡 nodeId、源资产 assetId 全在编码完成后才读取——
-   用户发送后编码在途时退出并重开同一卡片的擦除会话，旧编码回调拿到新会话纪元与目标卡，
-   全链 isCurrent 恒真，旧任务以新会话名义创建并在成功后关闭新会话（新涂抹被清掉）。
-   本文件用受控 toBlob（回调扣下、手动放行）构造「编码在途」窗口，复用真实 CanvasPage +
-   真实 ImageEraseDialog 页面链路（夹具沿用 eraseEdit.test.tsx，不复制业务状态模型）。
-   错误提示归属的真实 API/HTTP 链版本（真实 upload/assets/jobs/http，只替换 fetch）
-   见 eraseMaskFreezeErrorChain.test.tsx。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -44,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -160,7 +151,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪图片节点 i1（1600×900 png，assetId 数字串满足擦除契约） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -209,7 +199,6 @@ async function renderPage() {
   });
 }
 
-/** 进入擦除编辑态（画质工具横排「擦除」按钮派发的回调，IKH3XZ） */
 async function eraseImage() {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
   await act(async () => {
@@ -217,7 +206,6 @@ async function eraseImage() {
   });
 }
 
-/** 目标源图卡上注入的遮罩编辑回调（渲染期派生，不持久化） */
 function eraseEditing() {
   const image = (flowProps.current.mediaNodes as Node[]).find((n) => n.id === 'i1')!;
   return (image.data as Record<string, unknown>).eraseEditing as {
@@ -228,7 +216,6 @@ function eraseEditing() {
   };
 }
 
-/** 经遮罩层回调涂抹一笔（画笔：两点折线） */
 async function paintStroke() {
   const editing = eraseEditing();
   await act(async () => {
@@ -254,8 +241,6 @@ function toolbar(): HTMLElement | null {
 
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
 
-/** 受控 canvas 编码：getContext 桩 2d；toBlob 把回调扣下不执行（编码在途），
- *  release(blob) 手动放行全部挂起回调——blob=null 即「编码完成但没有产物」。 */
 function stubControlledToBlob() {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     fillStyle: '',
@@ -307,7 +292,6 @@ beforeEach(() => {
     size: 100,
   });
   apiMocks.createImageErase.mockResolvedValue({ job_id: 'j77', status: 'queued' });
-  // 轮询一次拍即终态：断言「轮询已启动」用，不在测试里挂续拍 timer
   apiMocks.fetchJobStatus.mockResolvedValue({
     job_id: 'j77',
     status: 'succeeded',
@@ -329,20 +313,17 @@ describe('IKI8L7 涂抹发送：遮罩编码前冻结会话身份', () => {
     await renderPage();
     await eraseImage();
     await paintStroke();
-    await click('erase-send-btn'); // 旧会话发送 → 编码挂起（窗口开启）
+    await click('erase-send-btn');
     expect(encode.pendingCount()).toBe(1);
-    expect(apiMocks.uploadAssetFile).not.toHaveBeenCalled(); // 编码未完成不进上传
-    await click('erase-close'); // X 关旧会话（编码仍在途）
-    await eraseImage(); // 同卡重开新会话
-    await paintStroke(); // 新会话新涂抹
-    encode.release(new Blob(['old-mask'], { type: 'image/png' })); // 旧编码完成
+    expect(apiMocks.uploadAssetFile).not.toHaveBeenCalled();
+    await click('erase-close');
+    await eraseImage();
+    await paintStroke();
+    encode.release(new Blob(['old-mask'], { type: 'image/png' }));
     await flush();
-    // 新会话保持打开，新涂抹不被旧回调清掉（修订前：旧回调以新会话身份 exitEraseEditing）
     expect(toolbar()).not.toBeNull();
     expect(eraseEditing().ops.length).toBe(1);
-    // 旧编码结果不把新会话设为提交中：新会话可再次发送
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
-    // 旧任务按原输入收尾：遮罩上传 → 创建（冻结的源资产身份）→ 建卡 → 连线 → 轮询
     expect(apiMocks.uploadAssetFile).toHaveBeenCalledTimes(1);
     const [file, opts] = apiMocks.uploadAssetFile.mock.calls[0]! as [File, { assetSource?: string }];
     expect(file).toBeInstanceOf(File);
@@ -379,11 +360,9 @@ describe('IKI8L7 涂抹发送：遮罩编码前冻结会话身份', () => {
     await paintStroke();
     encode.release(new Blob(['old-mask'], { type: 'image/png' }));
     await flush();
-    // 旧回调在上传中：新会话不被设为提交中（修订前：setEraseSubmitting(true) 锁死新会话控件）
     expect(apiMocks.uploadAssetFile).toHaveBeenCalledTimes(1);
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
     expect(bodyBtn('erase-clear-text').disabled).toBe(false);
-    // 释放旧上传（成功）：任务收尾完成，新会话不动
     await act(async () => {
       resolveUpload({
         asset_id: '901', status: 'ready', type: 'image', url: 'http://img/mask.png',
@@ -430,7 +409,7 @@ describe('IKI8L7 涂抹发送：遮罩编码前冻结会话身份', () => {
     await flush();
     expect(toolbar()).not.toBeNull();
     expect(document.body.textContent).not.toContain('擦除服务繁忙');
-    expect((flowProps.current.mediaNodes as Node[]).length).toBe(1); // 失败不建卡
+    expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
   });
 
   it('迟到编码无产物（toBlob 回调 null）：旧失败不向新会话提示、不进上传', async () => {
@@ -451,17 +430,14 @@ describe('IKI8L7 涂抹发送：遮罩编码前冻结会话身份', () => {
   });
 
   it('迟到编码失败（2d 上下文不可用）：同口径静默', async () => {
-    // context null：栅格化在离屏 canvas 创建即失败、同步 resolve(null)——回调在首个微任务
-    // 返回（窗口比 toBlob 窄得多）。把退出+重开压进同一轮同步栈（微任务放行前），验证
-    // 旧失败仍按编码前捕获的快照静默，不向新会话提示。
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
     await renderPage();
     await eraseImage();
     await paintStroke();
     await act(async () => {
-      bodyBtn('erase-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true })); // 捕获旧纪元 → 栅格化挂起（微任务后 resolve(null)）
-      bodyBtn('erase-close').dispatchEvent(new MouseEvent('click', { bubbles: true })); // 退出：纪元 +1
-      flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!.data.onEraseImage('i1'); // 同卡重开：纪元再 +1
+      bodyBtn('erase-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      bodyBtn('erase-close').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!.data.onEraseImage('i1');
     });
     await flush();
     expect(toolbar()).not.toBeNull();
@@ -481,13 +457,13 @@ describe('IKI8L7 当前有效会话：发送/退出/重试行为不变', () => {
     encode.release(null);
     await flush();
     expect(document.body.textContent).toContain('遮罩生成失败，请重试');
-    expect(toolbar()).not.toBeNull(); // 停留编辑态
+    expect(toolbar()).not.toBeNull();
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
-    await click('erase-send-btn'); // 可重试：同涂抹再次发送
+    await click('erase-send-btn');
     encode.release(new Blob(['mask2'], { type: 'image/png' }));
     await flush();
     expect(apiMocks.createImageErase).toHaveBeenCalledTimes(1);
-    expect(toolbar()).toBeNull(); // 成功退出编辑态
+    expect(toolbar()).toBeNull();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
   });
 
@@ -502,7 +478,7 @@ describe('IKI8L7 当前有效会话：发送/退出/重试行为不变', () => {
     await flush();
     expect(document.body.textContent).toContain('遮罩上传失败，请重试');
     expect(toolbar()).not.toBeNull();
-    expect(bodyBtn('erase-send-btn').disabled).toBe(false); // 提交锁复位可重试
+    expect(bodyBtn('erase-send-btn').disabled).toBe(false);
     await click('erase-send-btn');
     encode.release(new Blob(['mask'], { type: 'image/png' }));
     await flush();
@@ -554,16 +530,16 @@ describe('IKI8L7 一键清除文字（无编码步骤路）：发送瞬间身份
     apiMocks.createImageErase.mockImplementationOnce(() => new Promise((resolve) => { resolveCreate = resolve; }));
     await renderPage();
     await eraseImage();
-    await click('erase-clear-text'); // 一键发送，创建挂起
-    expect(toolbar()).not.toBeNull(); // 创建在途，编辑态保持（成功 settle 才退出）
-    await click('erase-close'); // X 关旧会话
-    await eraseImage(); // 同卡重开新会话
-    await paintStroke(); // 新会话涂抹
+    await click('erase-clear-text');
+    expect(toolbar()).not.toBeNull();
+    await click('erase-close');
+    await eraseImage();
+    await paintStroke();
     await act(async () => { resolveCreate({ job_id: 'j77', status: 'queued' }); });
     await flush();
-    expect(toolbar()).not.toBeNull(); // 新会话存活
+    expect(toolbar()).not.toBeNull();
     expect(eraseEditing().ops.length).toBe(1);
-    expect((flowProps.current.mediaNodes as Node[]).length).toBe(2); // 旧任务建卡收尾
+    expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j77');
   });
 });

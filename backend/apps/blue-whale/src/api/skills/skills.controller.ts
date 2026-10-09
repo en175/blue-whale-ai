@@ -57,7 +57,6 @@ export class SkillsController {
     private readonly settings: SystemSettingsService,
   ) {}
 
-  /** IKA64P：用户侧分类列表（后台维护的现有分类，旧码由前端映射中文） */
   @Get("categories")
   async categories() {
     const cats = await this.skillAdmin.listCategories();
@@ -138,7 +137,6 @@ export class SkillsController {
     return handleAddSkill(user.userId, id, this.skills);
   }
 
-  /** IKA64P：官方技能全文（「直接使用」填入首页对话框） */
   @Get("library/:id/content")
   async libraryContent(@Param("id") id: string) {
     const content = await this.skills.getOfficialContent(id);

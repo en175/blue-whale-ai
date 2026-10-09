@@ -23,8 +23,6 @@ const toastApi = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
-// 页面走 Query（IKJ058），所以**工厂本身**也要桩：`vi.mock` 换的是模块导出的绑定，
-// 而 `topupTiersOptions` 内部引用的仍是模块自己的 `fetchTopupTiers` —— 只桩 fetch 不生效。
 vi.mock('@/api/adminTopupTiers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/adminTopupTiers')>();
   return {
@@ -54,7 +52,6 @@ async function renderPage() {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
-  // 页面走 Query（IKJ058），必须给一棵带 client 的树
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -66,8 +63,6 @@ async function renderPage() {
   await act(async () => {
     await Promise.resolve();
   });
-  // 再等一个宏任务：Query 拿到数据后还要走几跳内部调度才会把行渲染出来，
-  // 只冲一个微任务的话，紧接着断言表格内容的用例会看到空表。
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -97,7 +92,6 @@ async function fillAndSave(price: string, ratio: string) {
   });
 }
 
-/** 填一个 aria-label 命中的输入框（卡片字段那批都用它；卡片说明是多行框）。 */
 async function fillInput(ariaLabel: string, value: string) {
   const el = document.body.querySelector<HTMLInputElement | HTMLTextAreaElement>(
     `input[aria-label="${ariaLabel}"], textarea[aria-label="${ariaLabel}"]`
@@ -113,7 +107,6 @@ async function fillInput(ariaLabel: string, value: string) {
   });
 }
 
-/** 自绘 Select：点触发器展开，再点 role=option 的那一项。 */
 async function selectOption(ariaLabel: string, optionText: string) {
   await act(async () => {
     document.body
@@ -127,12 +120,10 @@ async function selectOption(ariaLabel: string, optionText: string) {
   });
 }
 
-/** 当前创建请求的入参。 */
 function createPayload() {
   return adminApi.createTopupTier.mock.calls[0][0] as Record<string, unknown>;
 }
 
-/** 一条原始档位记录 —— 缓存里存的就是这个形状，不是页面用的 `Plan`。 */
 function tier(id: string, sortOrder: number, name = ''): TopupTier {
   return {
     id,
@@ -160,19 +151,16 @@ function tier(id: string, sortOrder: number, name = ''): TopupTier {
   };
 }
 
-/** 数据行 —— 跳过加载/空态那种只有一个 td 的整行。 */
 function dataRows(): HTMLTableRowElement[] {
   return [...document.body.querySelectorAll<HTMLTableRowElement>('tbody tr')].filter(
     (tr) => tr.querySelectorAll('td').length > 1
   );
 }
 
-/** 表格当前的行顺序（第一格是档位 ID）。 */
 function rowIds(): string[] {
   return dataRows().map((tr) => tr.querySelector('td')?.textContent?.trim() ?? '');
 }
 
-/** 点某一行里的操作按钮（上移 / 下移 / 编辑 / 删除）。 */
 async function clickRowButton(rowIndex: number, label: string) {
   const button = dataRows()[rowIndex]?.querySelector<HTMLButtonElement>(
     `button[aria-label="${label}"]`
@@ -183,7 +171,6 @@ async function clickRowButton(rowIndex: number, label: string) {
   });
 }
 
-/** 按文案点按钮（弹窗里的「保存」「确认删除」）。 */
 async function clickButtonByText(text: string) {
   const button = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.textContent === text
@@ -254,8 +241,6 @@ describe('baseCreditsFormError — 基础积分是配置值，只校验形态', 
   });
 
   it('★ 不与原价做任何一致性校验：积分不是原价的整数倍也要放行', () => {
-    // ¥499 → 7,500 积分（499 × 15 = 7,485）：对不上是**对的**。
-    // 校验器只收一个参数，物理上就没法拿它跟原价比 —— 这条守着别哪天又给它接回一个价格参数。
     expect(baseCreditsFormError('7500')).toBeNull();
     expect(baseCreditsFormError('90000')).toBeNull();
   });
@@ -268,7 +253,6 @@ describe('RechargePlans 档位边界值 toast', () => {
     await fillAndSave('0', '1');
     expect(toastApi.error).toHaveBeenCalledWith('原价须为正整数');
     expect(adminApi.createTopupTier).not.toHaveBeenCalled();
-    // 校验错误只走 toast，不落到表单里（本页已无私有样式类，改为断言文案未渲染）
     expect(document.body.textContent).not.toContain('原价须为正整数');
   });
 
@@ -312,19 +296,12 @@ describe('RechargePlans 档位边界值 toast', () => {
       await Promise.resolve();
     });
     expect(toastApi.error).not.toHaveBeenCalled();
-    // 上游错误文案不渲染到表单里（本页已无私有样式类，改为断言文案未渲染）
     expect(document.body.textContent).not.toContain('每个原价只能有一个档位');
   });
 });
 
 describe('RechargePlans 基础积分是配置值（不是派生量）', () => {
   it('★ 基础积分是**输入框**（配置值），填多少就提交多少 —— 不做「原价 × 换算率」联动', async () => {
-    // ⚠️ 这条钉的是 2026-09-27 的口径反转：这个框**曾经**是只读的派生预览
-    //    （「积分 = 原价 × 换算率」，还因此让列表接口带回 creditsPerYuan）。
-    //    现在基础积分是**配置值**：充值常有折扣，运营填的 7,500 就是用户到账的数
-    //    （499 × 15 = 7,485 只是巧合，不是公式）。
-    //
-    //    故意填一个**不是原价整数倍**的数：任何「还在按原价算积分」的实现都会把它改成 1500。
     await renderPage();
     await openCreateModal();
 
@@ -332,7 +309,6 @@ describe('RechargePlans 基础积分是配置值（不是派生量）', () => {
       'input[aria-label="基础积分"]',
     );
     expect(creditsInput).not.toBeNull();
-    // 可输入：不再是 readOnly 的派生预览框
     expect(creditsInput?.readOnly).toBe(false);
 
     await fillInput('基础积分', '7500');
@@ -412,8 +388,6 @@ describe('tierCardFormError', () => {
 
 describe('RechargePlans 卡片字段（PRD §10.2 / §10.4 / §10.5）', () => {
   it('★ 新建默认草稿：状态预选「草稿」，提交时送 status=draft', async () => {
-    // PRD §10.5「新建卡片默认草稿，不展示给用户」。表单若默认「上架」，
-    // 运营一点保存就把价格、赠送、标签都还没配的卡片卖给用户了。
     await renderPage();
     await openCreateModal();
 
@@ -470,7 +444,6 @@ describe('RechargePlans 卡片字段（PRD §10.2 / §10.4 / §10.5）', () => {
         bonusCredits: 3750,
         creditsValidMonths: 24,
         permissionDeniedHint: '该档位暂不对外开放',
-        // 按钮文案没动过 → 默认值（PRD §10.2「默认『立享加赠』」）
         buttonText: '立享加赠',
         firstPurchaseEligible: false,
       })
@@ -478,16 +451,12 @@ describe('RechargePlans 卡片字段（PRD §10.2 / §10.4 / §10.5）', () => {
   });
 
   it('★ 实付价格仍由服务端算（不发）；基础积分是配置值（要发）', async () => {
-    // 2026-09-27 起 `amount`（遗留 quota 列）与基础积分不再是同一个东西：
-    // 后者是运营的输入（`baseCredits`），必须随请求送出；
-    // 「实付 = 原价 × 折扣」仍是派生量，送出去会被服务端忽略，真送就意味着某天有人会拿它当输入。
     await renderPage();
     await openCreateModal();
     await fillAndSave('100', '1');
 
     expect(createPayload()).not.toHaveProperty('price');
     expect(createPayload()).not.toHaveProperty('amount');
-    // 新建表单的起点值（运营可按活动口径改写）
     expect(createPayload().baseCredits).toBe(1000);
   });
 
@@ -521,14 +490,6 @@ describe('RechargePlans 卡片字段（PRD §10.2 / §10.4 / §10.5）', () => {
   });
 });
 
-/**
- * IKJ69L：给「写操作 → 原始缓存」这层翻译补护栏。
- *
- * <p>本页展示的是 `toPlan()` 映射过的 `Plan[]` 视图，而缓存里存的是**原始 `{tiers}`**，
- * 两者**没有反向映射** —— 所以每处写操作都得拿原始记录去更新缓存（页面里的 `setTiers`）。
- * 这是 IKJ058 整个 diff 里唯一的非机械代码，此前一条用例都没有：
- * 谁哪天顺手把它改回「在视图空间里替换」，页面看起来照样能跑，只是数据会悄悄错位。
- */
 describe('RechargePlans 写操作 → 原始缓存（IKJ69L）', () => {
   it('★ 下移：请求还没回来界面就已重排（乐观），提交全量重编号，成功后失效用户端预览', async () => {
     adminApi.fetchTopupTiers.mockResolvedValue({
@@ -547,15 +508,12 @@ describe('RechargePlans 写操作 → 原始缓存（IKJ69L）', () => {
 
     await clickRowButton(0, '下移');
 
-    // 请求还挂着，顺序已经变了 —— 「上下移点下去要立刻动」就是这一条。
-    // 断言的是**立即**生效：上面那次 act 没有等排序请求，它也永远不会自己 resolve。
     expect(rowIds()).toEqual(['2', '1', '3']);
     expect(adminApi.sortTopupTiers).toHaveBeenCalledWith([
       { id: '2', sortOrder: 1 },
       { id: '1', sortOrder: 2 },
       { id: '3', sortOrder: 3 },
     ]);
-    // 还没成功，预览缓存不该被动
     expect(invalidate).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -600,7 +558,6 @@ describe('RechargePlans 写操作 → 原始缓存（IKJ69L）', () => {
     await fillInput('基础积分', '7500');
     await fillAndSave('10', '1');
 
-    // 追加而不是替换；顺序按 sortOrder 排，所以新的那条排在后面
     expect(rowIds()).toEqual(['1', '9']);
     expect(document.body.textContent).toContain('新档');
   });

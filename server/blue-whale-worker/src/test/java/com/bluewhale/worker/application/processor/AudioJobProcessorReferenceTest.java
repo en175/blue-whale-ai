@@ -19,17 +19,6 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
-/**
- * 音频参考素材解析测试（generation-worker.ts:148-207 resolveAudioSeedReferences）。
- * <p>
- * 验证：
- * - null references → 空列表（纯文本生成）
- * - 非数组 → 失败 "参考素材引用无效"
- * - asset 不存在 → 失败 "参考素材不存在或无权访问"
- * - 非 audio/image 类型 → 失败 "参考素材类型不适用"
- * - 同一 URL 重复 → 去重
- * - audio → {audio_url}，image → {image_url}
- */
 @ExtendWith(MockitoExtension.class)
 class AudioJobProcessorReferenceTest {
 
@@ -68,7 +57,7 @@ class AudioJobProcessorReferenceTest {
     @DisplayName("asset 不存在 → fail '参考素材不存在或无权访问'")
     void missingAsset() {
         when(assetSource.resolveInputAssets(List.of("100"), "9", "42"))
-                .thenReturn(Map.of()); // 空映射 = asset 不存在
+                .thenReturn(Map.of());
 
         AudioJobProcessor proc = createProcessor();
         AudioJobProcessor.AudioRefsResult result = proc.resolveAudioSeedReferences(
@@ -83,7 +72,7 @@ class AudioJobProcessorReferenceTest {
     void wrongType() {
         AssetEntity videoAsset = new AssetEntity();
         videoAsset.setId(100L);
-        videoAsset.setType("video"); // video 不适用于音频参考
+        videoAsset.setType("video");
         videoAsset.setUrl("https://example.com/video.mp4");
 
         when(assetSource.resolveInputAssets(List.of("100"), "9", "42"))
@@ -148,7 +137,7 @@ class AudioJobProcessorReferenceTest {
         AssetEntity audio2 = new AssetEntity();
         audio2.setId(101L);
         audio2.setType("audio");
-        audio2.setUrl("https://example.com/same.mp3"); // 同一 URL
+        audio2.setUrl("https://example.com/same.mp3");
 
         when(assetSource.resolveInputAssets(List.of("100", "101"), "9", "42"))
                 .thenReturn(Map.of("100", audio1, "101", audio2));
@@ -161,7 +150,7 @@ class AudioJobProcessorReferenceTest {
                 ), "9", "42");
 
         assertThat(result.ok()).isTrue();
-        assertThat(result.refs()).hasSize(1); // 去重后仅 1 条
+        assertThat(result.refs()).hasSize(1);
     }
 
     @Test
@@ -200,7 +189,7 @@ class AudioJobProcessorReferenceTest {
         AudioJobProcessor.AudioRefsResult result = proc.resolveAudioSeedReferences(
                 List.of(
                         Map.of("asset_id", ""),
-                        Map.of("role", "vocal") // 无 asset_id
+                        Map.of("role", "vocal")
                 ), "9", "42");
 
         assertThat(result.ok()).isTrue();

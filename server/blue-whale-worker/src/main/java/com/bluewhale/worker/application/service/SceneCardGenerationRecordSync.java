@@ -10,12 +10,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 
-/**
- * SceneCardGenerationRecord 摘要同步（刀④ 拆分自 JobStateMachineService syncRecordSummary）。
- * <p>
- * 聚合 record 下全部输出槽状态 → summary_status 回写 + summary_changed 事件
- * （generation-worker-internals.ts:21-62）。在 complete/fail 事务内调用，保证原子一致。
- */
 @Service
 public class SceneCardGenerationRecordSync {
 
@@ -33,10 +27,6 @@ public class SceneCardGenerationRecordSync {
         this.eventPublisher = eventPublisher;
     }
 
-    /**
-     * 回写 record summary_status（internals.ts:21-62 syncRecordSummary 逐字移植）。
-     * null-guard：无槽 / 无 record FK 时不调用。
-     */
     public void sync(Long recordId) {
         List<GenerationOutputSlotEntity> slots = slotMapper.findBySceneCardRecordId(recordId);
         if (slots.isEmpty()) return;

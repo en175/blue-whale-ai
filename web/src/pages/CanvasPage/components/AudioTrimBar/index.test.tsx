@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKHB7A AudioTrimBar 截取发送条组件测试（仿 VideoAudioSplitDialog 先例）：五要素
-   （X/标题/时间范围只读实时/格式下拉五档向上弹/⚡0 徽标 + 发送钮）、submitting 只读、
-   点外关闭菜单、锚样式透传。渲染模式沿用 VideoAudioSplitDialog 测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -63,7 +60,6 @@ describe('五要素呈现', () => {
     expect(container!.querySelector('[data-testid="audio-trim-range"]')!.textContent).toBe('00:00 - 00:15');
     expect(container!.querySelector('[data-testid="audio-trim-free"]')!.getAttribute('title')).toBe('本期免费');
     expect(btn('audio-trim-send-btn')).toBeTruthy();
-    // 原型走查拍板：无格式说明小字
     expect(sendBar.textContent).not.toContain('输出');
     expect(sendBar.textContent).not.toContain('格式说明');
   });
@@ -113,7 +109,6 @@ describe('格式下拉（默认跟随源格式、五档、向上弹）', () => {
     await click('audio-trim-format-trigger');
     const menu = container!.querySelector('[data-testid="audio-trim-format-menu"]') as HTMLElement;
     expect(menu.className).toContain('formatMenu');
-    // CSS module 类名混淆，向上弹语义由 .formatMenu bottom: calc(100% + 6px) 规则承担
     expect(menu.className).not.toContain('undefined');
   });
 

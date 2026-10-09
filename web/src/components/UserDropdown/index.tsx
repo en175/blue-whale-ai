@@ -1,8 +1,3 @@
-/* ============================================
- * UserDropdown 右上角用户下拉菜单：账号信息/积分充值入口
- * 未登录时渲染「登录」按钮并弹出登录弹窗
- * IKBL2I：个人资料入口暂时隐藏，ProfileModal 保留以便恢复
- * ============================================ */
 import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -40,7 +35,6 @@ export default function UserDropdown() {
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // 登录后拉取可用余额写入全局存储（下拉余额/账号弹窗/画布顶栏共用）
   useEffect(() => {
     if (!user) {
       setUsage(null);
@@ -59,7 +53,6 @@ export default function UserDropdown() {
     };
   }, [user, setUsage]);
 
-  // 点击外部关闭
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -70,7 +63,6 @@ export default function UserDropdown() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // 鼠标移出关闭（宽限 120ms，避免指针移向面板途中误关）
   const closeTimer = useRef<number | null>(null);
   const cancelClose = () => {
     if (closeTimer.current !== null) {
@@ -84,7 +76,6 @@ export default function UserDropdown() {
   };
   useEffect(() => cancelClose, []);
 
-  // 未登录：展示「登录」按钮，点击弹出登录弹窗
   if (!user) {
     return (
       <div className={styles.wrapper} ref={ref}>
@@ -96,7 +87,6 @@ export default function UserDropdown() {
     );
   }
 
-  // 退出登录：调用退出接口后清空会话
   const handleLogout = async () => {
     setOpen(false);
     closeRecharge();
@@ -116,15 +106,15 @@ export default function UserDropdown() {
       }}
       onMouseLeave={scheduleClose}
     >
-      {/* 触发按钮：仅头像，悬停展开下拉 */}
+      {}
       <button className={styles.trigger} aria-label={user.username}>
         <div className={styles.triggerAvatar}>{user.username.charAt(0).toUpperCase()}</div>
       </button>
 
-      {/* 下拉面板 */}
+      {}
       {open && (
         <div className={styles.dropdown}>
-          {/* 用户头部：用户名 + 用户ID + 邮箱（/api/me） */}
+          {}
           <div className={styles.userHeader}>
             <div className={styles.avatar}>{user.username.charAt(0).toUpperCase()}</div>
             <div className={styles.userHeaderInfo}>
@@ -134,14 +124,13 @@ export default function UserDropdown() {
             </div>
           </div>
 
-          {/* 分隔线 */}
+          {}
           <div className={styles.divider} />
 
-          {/* 菜单列表 */}
+          {}
           <div className={styles.menuList}>
             {USER_DROPDOWN_MENU_ITEMS.map((item) => {
               const Icon = menuIcons[item.key];
-              // 系统设置仅管理员可见
               if (item.key === 'settings' && !isAdmin()) return null;
               return (
                 <button
@@ -164,10 +153,10 @@ export default function UserDropdown() {
             })}
           </div>
 
-          {/* 分隔线 */}
+          {}
           <div className={styles.divider} />
 
-          {/* 退出登录 */}
+          {}
           <button
             className={`${styles.menuItem} ${styles.logoutItem}`}
             onClick={handleLogout}
@@ -179,8 +168,8 @@ export default function UserDropdown() {
         </div>
       )}
 
-      {/* IKBL2I：个人资料弹窗暂不挂载，入口隐藏后无法打开 */}
-      {/* 账号信息弹窗 */}
+      {}
+      {}
       {showAccount && (
         <AccountModal
           userId={user.userId}
@@ -191,7 +180,7 @@ export default function UserDropdown() {
           onClose={() => setShowAccount(false)}
         />
       )}
-      {/* 积分充值弹窗（用户菜单与生成前余额拦截共用） */}
+      {}
       {showRecharge && <RechargeModal onClose={closeRecharge} />}
     </div>
   );

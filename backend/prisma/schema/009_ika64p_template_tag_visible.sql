@@ -1,4 +1,3 @@
--- IKA64P：首页模板标签可见性开关（隐藏原五栏，新增视频/图片两栏）。
 SET NAMES utf8mb4;
 ALTER TABLE `template_tag` ADD COLUMN `visible` TINYINT NOT NULL DEFAULT 1;
 

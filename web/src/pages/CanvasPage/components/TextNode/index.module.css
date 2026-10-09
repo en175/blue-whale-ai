@@ -1,18 +1,12 @@
-/* ============================================
- * TextNode - 画布富文本编辑节点
- * ============================================ */
 
 .wrapper {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  /* 保留原标题占位（11px × 1.5 行高 + 6px 间距），缩放不推移正文和连接点。 */
   padding-top: 22.5px;
 }
 
-/* ---- 节点操作条：唯一选中/悬停可见（IKGYYE 迁入钉屏幕层，由 FollowToolbarLayer
-   定位与显隐；此处仅保留条体布局，hover 显示语义由 JS 指针事件等价保持） ---- */
 .nodeBar {
   display: flex;
   align-items: center;
@@ -43,10 +37,6 @@
   background-color: rgba(255, 255, 255, 0.08);
 }
 
-/* ============================================
- * 浮动工具栏（IKGYYE 迁入钉屏幕层：定位/跟随由 FollowToolbarLayer 承担，
- * 此处仅保留条体外观）
- * ============================================ */
 .toolbar {
   display: flex;
   align-items: center;
@@ -82,7 +72,6 @@
   background-color: rgba(255, 255, 255, 0.08);
 }
 
-/* ---- 文字颜色按钮 ---- */
 .colorWrap {
   position: relative;
   display: inline-flex;
@@ -119,7 +108,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  width: 132px; /* 6列 * 20px + 5gap * 4px + padding: 2*8px = ~132px */
+  width: 132px;
 }
 
 .colorSwatch {
@@ -148,9 +137,6 @@
   margin: 0 4px;
 }
 
-/* ============================================
- * 外置标题行 + 固定正文容器
- * ============================================ */
 .titleRow {
   position: absolute;
   bottom: calc(100% - 22.5px);
@@ -189,8 +175,6 @@
   user-select: none;
 }
 
-/* 正文容器：100% 缩放下固定 360×270（4:3），该尺寸含内边距与边框，标题与工具栏另算。
- * 不用 overflow:hidden（会裁掉探出边缘的连接点并吃掉其命中），滚动交给内部编辑区 */
 .contentCard {
   position: relative;
   box-sizing: border-box;
@@ -234,12 +218,9 @@
   transform: none;
 }
 
-/* 连接点：平时隐藏，悬停/选中/连接中可见（Handle 在 .contentCard 内，锚定其左右中点） */
 .handle {
   opacity: 0;
   transition: opacity 0.15s ease;
-  /* 覆盖 react-flow__handle-left/right 的 translate(-50%, -50%)：
-     水平定位交给 inline left/right（锚定正文左右中点），仅保留垂直居中 */
   top: 50%;
   transform: translate(0, -50%);
 }
@@ -252,9 +233,6 @@
   opacity: 1;
 }
 
-/* ============================================
- * 右键菜单
- * ============================================ */
 .contextMenu {
   position: fixed;
   min-width: 200px;
@@ -302,9 +280,6 @@
   background-color: rgba(229, 72, 77, 0.12);
 }
 
-/* ============================================
- * 富文本编辑区（填满固定正文容器，超出部分内部上下滚动）
- * ============================================ */
 .editor {
   height: 100%;
   overflow-y: hidden;
@@ -325,14 +300,12 @@
   user-select: text;
 }
 
-/* 占位符 */
 .editor:empty::before {
   content: attr(data-placeholder);
   color: #555;
   pointer-events: none;
 }
 
-/* 富文本格式样式 */
 .editor h1 {
   font-size: 22px;
   font-weight: 700;
@@ -365,12 +338,10 @@
   font-style: italic;
 }
 
-/* execCommand foreColor 生成的 font 标签和 span 颜色 */
 .editor font[color] {
   color: currentColor;
 }
 
-/* 颜色选择器包裹的 span 直接用 inline style 生效 */
 
 .editor ul,
 .editor ol {
@@ -378,7 +349,6 @@
   padding-left: 22px;
 }
 
-/* IKFZW7：global.css 的 ul/ol reset 会抹掉列表标记，编辑器作用域内恢复 */
 .editor ul {
   list-style: disc;
 }
@@ -397,7 +367,6 @@
   margin: 12px 0;
 }
 
-/* 滚动条 */
 .editor::-webkit-scrollbar {
   width: 4px;
 }
@@ -422,9 +391,6 @@
   font-size: 12px;
 }
 
-/* ============================================
- * IKFM3Q media 标签：操作层 / 悬停预览 / 定位高亮
- * ============================================ */
 .chipMenu {
   position: fixed;
   transform: translateY(calc(-100% - 8px));
@@ -470,10 +436,7 @@
   background-color: rgba(229, 72, 77, 0.12);
 }
 
-/* chipPreview 悬停预览浮层系列（.chipPreview/.chipPreviewBelow/.chipPreviewAudio/
-   .chipPreviewName 及 img/video 规则）已随 IKGABW 迁入 ../mediaChip.module.css 共享 */
 
-/* 点击定位来源：目标节点短暂高亮（1.2s 后由 JS 移除） */
 .locateFlash {
   animation: locate-flash 1.2s ease-out;
 }
@@ -487,15 +450,7 @@
   }
 }
 
-/* ============================================
- * IKG7NH 正文素材标签：文本卡侧差异类
- * 胶囊视觉与生成面板共用 ../mediaChip.module.css，此处只放文本卡特有差异。
- * IKGABW 后文本卡仅剩整块选中差异；音频图标占位与缩略图包裹已迁入共享模块。
- * ============================================ */
 
-/* 文本卡 chip 需整块选中（服务整体删除/替换），覆盖共享胶囊的 user-select:none（拍板 6）。
-   挂 .editor 后代组合把优先级抬到 0-2-0，稳定压过共享 .mediaChip 的 0-1-0，
-   不再依赖两份 CSS 的打包先后顺序 */
 .editor .mediaChipSelectable {
   user-select: all;
 }

@@ -1,16 +1,16 @@
-// IKIZQC（金标 G05/G08）：generation_jobs 成片来源唯一约束的真 MySQL 并发验证。
-//
-// 与 tz-caliber.integration.test.ts 同款门控：需要本地 MySQL（如 Docker 暴露的 3307）：
-//   IKIZQC_DATABASE_URL='mysql://root:<pw>@127.0.0.1:3307/ikizqc_probe' \
-//     pnpm exec vitest run backend/libs/shared/persistence/ikizqc-finalize-unique.integration.test.ts
-// 未配置该变量时整组跳过；跳过不算通过。Worker 侧同款断言见
-// GenerationJobsFinalizeSourceUniqueMySqlIntegrationTest（Testcontainers）。
-//
-// 断言（数据库级）：
-//   1. 并发插入同一 source_sample_job_id → 恰一行成功（真实链路 = 至多一条成片任务与
-//      一笔预扣——Hold 发生在行插入之后，输家根本走不到）；
-//   2. source 为 NULL 的行不受唯一索引影响（MySQL 不去重 NULL）；
-//   3. 失败占位行保留 → 其后再次插入仍被拒（首版不复用同 Draft ID 重试）。
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
@@ -27,7 +27,7 @@ describe.skipIf(!databaseUrl)("成片来源唯一约束真库并发（IKIZQC G05
   beforeAll(async () => {
     adapter = await new PrismaMariaDb(buildPoolConfig(databaseUrl!)).connect();
     raw = adapter.underlyingDriver();
-    // 与迁移 20260929130000 完全同款的一列唯一索引（probe 表只留相关列）。
+
     await adapter.executeRaw({ sql: `DROP TABLE IF EXISTS ${TABLE}`, args: [], argTypes: [] });
     await adapter.executeRaw({
       sql: `CREATE TABLE ${TABLE} (

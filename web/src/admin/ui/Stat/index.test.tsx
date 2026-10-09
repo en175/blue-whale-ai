@@ -36,8 +36,6 @@ describe('Stat', () => {
   });
 
   it('★ 数值原样显示 —— 单位与千分位是页面的业务知识，组件不重排', async () => {
-    // 组件自己格式化就得为「积分 / 笔 / 人 / 秒」各开一个分支，
-    // 而且页面传 1234 与传 '1,234 人' 会得到不同结果——规则有了两个来源
     const el = await render({ label: '今日充值', value: '0 积分' });
     expect(el.textContent).toContain('0 积分');
   });

@@ -7,71 +7,48 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/**
- * 生成模型能力行（对应 Prisma model generation_model_capability）。
- * <p>
- * 图片刀用：findImageCapability（asset-ops.ts:103-149）读取模型 ID、API 尺寸、
- * 宽高、参考图上限、渠道解析器与请求映射。
- * <p>
- * 字段名与 schema.prisma 完全一致（snake_case），MyBatis-Plus 自动驼峰转换。
- */
 @TableName("generation_model_capability")
 public class GenerationModelCapabilityEntity {
     @TableId(type = IdType.AUTO)
-    /** 主键 */
     private Long id;
 
     @TableField("model_id")
-    /** 模型标识（如 gpt-image-1、doubao-seedream-5-0-pro-260628） */
     private String modelId;
 
     @TableField("enabled")
-    /** 是否启用（findImageCapability WHERE 条件，asset-ops.ts:105） */
     private Boolean enabled;
 
     @TableField("is_delete")
-    /** 软删标记（findImageCapability WHERE 条件，asset-ops.ts:105） */
     private Boolean isDelete;
 
     @TableField("api_size")
-    /** 默认 API 尺寸（能力行级别，当无 sizeId 匹配时回退） */
     private String apiSize;
 
     @TableField("width")
-    /** 默认宽度 */
     private Integer width;
 
     @TableField("height")
-    /** 默认高度 */
     private Integer height;
 
     @TableField("supported_sizes")
-    /** 支持的尺寸列表 JSON（Array of {id, api_value/apiValue, width, height}） */
-    private String supportedSizes; // JSON
+    private String supportedSizes;
 
     @TableField("features")
-    /** 特性 JSON（含 imageReferenceMax / image_reference_max） */
-    private String features; // JSON
+    private String features;
 
     @TableField("capability_type")
-    /** 媒介（image / video / text / audio）。渠道列为 NULL 时的回落口径要看它。 */
     private String capabilityType;
 
     @TableField("channel")
-    /** 渠道（`<家族>-<媒介>[-<协议>]`，封闭枚举，见 {@link com.bluewhale.worker.application.processor.ImageChannel}）。
-     *  取值认不出时按媒介回落，见 ImageChannelMapper.parseChannel。 */
     private String channel;
 
     @TableField("request_mapping")
-    /** 请求映射 JSON（gpt: {matrix}; banana: {quality, size}） */
-    private String requestMapping; // JSON
+    private String requestMapping;
 
     @TableField("default_size")
-    /** 默认尺寸 ID（gpt/banana 回退键） */
     private String defaultSize;
 
     @TableField("default_aspect_ratio")
-    /** 默认宽高比 ID（gpt/banana 回退键） */
     private String defaultAspectRatio;
 
     @TableField("gmt_create")

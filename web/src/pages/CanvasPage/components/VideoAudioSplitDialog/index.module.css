@@ -1,12 +1,3 @@
-/* ============================================
- * VideoAudioSplitDialog 音视频分离编辑态单条（IKH28U 骨架 / IKH28X 三要素）
- * 跟随源视频卡下方浮出的唯一一条，X 关闭在最左（对齐抠图/去字幕单条先例，
- * 上方仅 X 的独立工具条随单条化退役）：容器视觉 = 浮层容器三令牌（背景/描边/
- * 阴影）+ 24px 胶囊圆角（对齐 VideoSubtitleEraseDialog 家族形态，无令牌档由
- * overlayContainer.test.ts 白名单锁 24px 字面量）；分离格式菜单浮层入 IKGZ8C
- * 浮层菜单家族（12px 档，overlayContainer.test.ts 断言）。条内控件全走令牌，
- * 不复制体系外硬编码字面量写法。
- * ============================================ */
 
 .divider {
   width: 1px;
@@ -34,7 +25,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 源视频卡下方单条 ---- */
 .sendBar {
   position: absolute;
   left: 50%;
@@ -52,15 +42,11 @@
   white-space: nowrap;
 }
 
-/* 跟随锚定（IKH25A 中心点锚口径，inline left/top 生效）：解除默认 bottom 定位避免
-   top/bottom 双侧拉伸；left: 0 兜底 inline 缺失；transform 不覆盖，继承基础态
-   translateX(-50%) 以锚点（源卡中心 x）真居中。口径同去字幕 sendBarFollow。 */
 .sendBarFollow {
   bottom: auto;
   left: 0;
 }
 
-/* ---- 分离格式下拉（触发钮显当前所选格式；菜单向上弹出避开发送条下方视口边缘） ---- */
 .formatWrap {
   position: relative;
 }
@@ -124,13 +110,11 @@
   background-color: var(--color-bg-hover);
 }
 
-/* 当前所选格式：主色底白字指示（对齐 .toolBtnActive 激活先例；触发钮同步显示该值） */
 .formatMenuItemActive {
   color: var(--color-accent-text);
   background-color: var(--color-accent-primary);
 }
 
-/* ---- 「本期免费」标注（对齐去字幕 freeHint；音频无分辨率降级概念，无「输出最高」后缀） ---- */
 .freeHint {
   font-size: var(--font-size-xs);
   color: var(--color-success);
@@ -139,8 +123,6 @@
   padding: 2px 8px;
 }
 
-/* ---- 发送钮：Dock 主发送钮同款（灰底圆角方形 + 白 ↑ 图标，口径同
- *    VideoSubtitleEraseDialog .sendBtn——置灰态即默认灰，无额外 disabled 透明度） ---- */
 .sendBtn {
   width: 30px;
   height: 30px;

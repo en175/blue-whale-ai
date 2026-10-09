@@ -1,9 +1,7 @@
-/** 首页时长滑条取值，与原 range input 的 4–15、步进 1 保持一致。 */
 export const HOME_DURATION_MIN = 4;
 export const HOME_DURATION_MAX = 15;
 export const HOME_DURATION_STEP = 1;
 
-/** 略欠阻尼弹簧：拖动时滑块滞后于指针，松手后带一点惯性贴合目标。 */
 export const SPRING_STIFFNESS = 110;
 export const SPRING_DAMPING = 16;
 

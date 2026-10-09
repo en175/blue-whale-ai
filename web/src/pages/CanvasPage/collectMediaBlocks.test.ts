@@ -23,7 +23,6 @@ describe('collectMediaBlocks', () => {
 
     expect(blocks.some((b) => b.resource_id === 'revision-old')).toBe(false);
     expect(blocks.some((b) => b.shot_no === 1)).toBe(false);
-    // 显式挂在卡上的参考图仍然随引用走
     expect(blocks).toContainEqual(expect.objectContaining({ asset_id: 'ast_ref_1', source: 'card-ref' }));
   });
 

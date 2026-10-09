@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKH3VG 视频 HD 高清面板组件测试：三档渲染与默认 1080P、切换即时回传、免费文案、
-   发送钮悬停「最高可至 4K」、关闭、参数回填、只读态（generating/submitting 冻结）。
-   渲染模式沿用 ImageEnhanceDialog/index.test.tsx（createRoot + act，不用 testing-library）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,7 +36,7 @@ async function click(node: Element | null) {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  sendMock = vi.fn(() => false); // 本票父级发送占位恒返回 false（面板保持打开）
+  sendMock = vi.fn(() => false);
   paramsChangeMock = vi.fn();
   closeMock = vi.fn();
 });
@@ -58,7 +55,6 @@ describe('IKH3VG 面板三档渲染与默认值', () => {
     expect(btn('video-enhance-resolution-1080p').className).toMatch(/Active/);
     expect(btn('video-enhance-resolution-2k')).toBeTruthy();
     expect(btn('video-enhance-resolution-4k')).toBeTruthy();
-    // 标题极简骨架（ADR-0105）：「HD 高清」，无供应商/模型下拉、无高级参数
     expect(container!.textContent).toContain('HD 高清');
     expect(container!.textContent).not.toContain('供应商');
     expect(container!.textContent).not.toContain('模型');
@@ -102,7 +98,6 @@ describe('IKH3VG 本期免费与发送钮', () => {
     await click(btn('video-enhance-send-btn'));
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(sendMock).toHaveBeenCalledWith('2k');
-    // 返回 false → 父级不关面板，面板仍在 DOM（可再次点击）
     expect(btn('video-enhance-send-btn')).toBeTruthy();
   });
 

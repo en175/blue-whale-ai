@@ -1,16 +1,9 @@
 // @vitest-environment jsdom
-/* IKJR9J 工具会话层：16 种工具的锚定浮层按「锚定卡 id ∈ 被拖集合（view.dragHiddenIds）」
- * 收到 dragHidden=true（visibility 级隐藏的接线）；拖别的卡（锚定卡不在集合中）一律
- * false——面板/发送条原地不动不隐藏。裁切/扩图的画布层（cropFrame/outpaintFrame）
- * 同口径携带 dragHidden。dialog 组件内部把 dragHidden 落到根 style 由
- * followDialog.anchoredOverlayStyle 单测与各组件渲染先例兜底。 */
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 import { canvasToolSessionFixture } from './testing/canvasToolSessionFixture';
 import type { CanvasToolKind } from './canvasToolSessions';
 
-/** 各工具的锚定卡 id（fixture 画布口径）：多数为 state.nodeId，
- *  混合为 sourceNodeId、合成为草稿卡 draftId（open 后从会话状态读取）。 */
 const ANCHOR_ID: Record<CanvasToolKind, string> = {
   erase: 'image',
   cutout: 'image',
@@ -30,7 +23,6 @@ const ANCHOR_ID: Record<CanvasToolKind, string> = {
   frameInterpolation: 'frameInterpolation',
 };
 
-/** render() 输出中唯一非空工具界面（与 canvasToolSessions.test.tsx 同口径拾取） */
 function renderedDialog(elements: ReactNode[]): ReactElement<{ dragHidden?: boolean }> {
   const entry = elements.find(
     (el) => isValidElement<{ children: ReactNode }>(el) && el.props.children,

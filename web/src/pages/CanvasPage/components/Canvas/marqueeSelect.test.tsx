@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowCanvas from './index';
 
 vi.hoisted(() => {
-  // 开发期代码定位插件在导入时探测 Canvas；本测试不绘制位图。
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 });
 
@@ -30,7 +29,6 @@ async function key(type: 'keydown' | 'keyup', code = 'Space', keyValue = ' ') {
   await act(async () => { document.body.dispatchEvent(event); });
 }
 
-/** React Flow 框选走 pointer 事件；jsdom 没有 PointerEvent 构造器，用 MouseEvent 补指针属性。 */
 async function pointer(type: 'pointerdown' | 'pointermove' | 'pointerup', target: EventTarget, x: number, y: number) {
   await act(async () => {
     const event = new MouseEvent(type, {
@@ -55,10 +53,8 @@ async function mouse(type: string, target: EventTarget, x = 100, y = 100) {
   });
 }
 
-/** 从 (x1,y1) 拖选框到 (x2,y2) 并松开。 */
 async function marquee(x1: number, y1: number, x2: number, y2: number) {
   await pointer('pointerdown', pane(), x1, y1);
-  // 先小位移越过 paneClickDistance（库默认 1px）启动框选，再移到终点。
   await pointer('pointermove', pane(), x1 + 4, y1 + 3);
   await pointer('pointermove', pane(), x2, y2);
   await pointer('pointerup', pane(), x2, y2);
@@ -76,7 +72,6 @@ async function finishMouseGesture() {
 
 beforeEach(async () => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // jsdom 不做布局；只补浏览器测量 API，React Flow 与卡片均使用真实实现。
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     unobserve() {}
@@ -129,7 +124,6 @@ describe('Canvas marquee select', () => {
 
     expect(node('image-1').classList.contains('selected')).toBe(true);
     expect(node('image-2').classList.contains('selected')).toBe(true);
-    // 框选手势结束不触发 pane click，选中态不会被随后的 click 清掉。
     expect(props.onPaneClick).not.toHaveBeenCalled();
   });
 
@@ -185,7 +179,6 @@ describe('Canvas marquee select', () => {
     expect(node('image-1').classList.contains('selected')).toBe(true);
     expect(node('image-2').classList.contains('selected')).toBe(true);
 
-    // 左上角小选框：节点 measured 区域（50,60 起）与之不相交，新框选替换旧选中为空集。
     await marquee(2, 2, 12, 10);
 
     expect(node('image-1').classList.contains('selected')).toBe(false);
@@ -205,9 +198,7 @@ describe('Canvas marquee select', () => {
     await key('keyup');
   });
 
-  // 用户故事 7 固化：Cmd（macOS）/ Ctrl + 点击逐张加选不变。jsdom UA 不含 Mac，库内修饰键为 Control。
   it('adds cards one by one with Ctrl + click', async () => {
-    // jsdom 中 d3-drag 在首个移动事件才进入拖拽并选中；用小幅来回位移模拟「原地点击」。
     await mouse('mousedown', node('image-1'));
     await mouse('mousemove', window, 104, 103);
     await mouse('mousemove', window, 100, 100);
@@ -226,9 +217,6 @@ describe('Canvas marquee select', () => {
     expect(node('image-2').classList.contains('selected')).toBe(true);
   });
 
-  // 用户故事 12 固化：Delete / Backspace 批量删除选中卡片不变。
-  // IKDMQW 起 Canvas 内部不再直接移除节点（生成中卡片先取消后移除的异步流程由父级驱动）：
-  // Delete 一次回调全部选中 id（IKFO73），节点消失由父级列表移除后的合并 effect 同步。
   it('deletes all selected cards with Delete', async () => {
     await marquee(800, 600, 100, 100);
     expect(node('image-1').classList.contains('selected')).toBe(true);
@@ -240,7 +228,6 @@ describe('Canvas marquee select', () => {
 
     expect(props.onDeleteNode).toHaveBeenCalledTimes(1);
     expect(props.onDeleteNode).toHaveBeenCalledWith(['image-1', 'image-2']);
-    // 模拟父级列表响应删除（CanvasPage 中各列表 setState filter）
     await act(async () => {
       root.render(createElement(FlowCanvas, { ...props, mediaNodes: [] }));
     });

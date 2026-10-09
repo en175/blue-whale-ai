@@ -33,14 +33,10 @@
     <java.version>21</java.version>
     <mybatis-plus.version>3.5.7</mybatis-plus.version>
     <rocketmq-client.version>5.0.7</rocketmq-client.version>
-    <!-- ⚠️ 必须与 server/blue-whale-common 的 grpc.version 一致：
-         common 生成 stub，billing 提供 server 端实现，两端版本错配会在运行时
-         抛 NoSuchMethodError 而不是编译期报错。 -->
     <grpc.version>1.68.1</grpc.version>
   </properties>
 
   <dependencies>
-    <!-- Java 侧共享基础设施（ADR-0114）。只放 DB/MQ/HTTP/错误体系，不放领域规则。 -->
     <dependency>
       <groupId>com.bluewhale</groupId>
       <artifactId>blue-whale-common</artifactId>
@@ -56,14 +52,11 @@
       <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
 
-    <!-- 自有库访问。billing 直连自己的 DB（ADR-0113 数据主权：禁止跨服务直连）。 -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-jdbc</artifactId>
     </dependency>
 
-    <!-- ORM：与 worker 同款同版本（ADR-0114「技术栈逐项对齐」）。
-         SQL 的落位约定（哪类写 XML、哪类用 Wrapper）见 application.yml 的 mybatis-plus 段。 -->
     <dependency>
       <groupId>com.baomidou</groupId>
       <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
@@ -76,33 +69,23 @@
       <scope>runtime</scope>
     </dependency>
 
-    <!-- 契约的 server 端（contracts/proto/billing/v1/billing.proto）。
-         stub 由 common 生成（grpc-stub / grpc-protobuf 是它的传递依赖），
-         这里补上**传输层**——common 只生成代码，不跑服务。 -->
     <dependency>
       <groupId>io.grpc</groupId>
       <artifactId>grpc-netty-shaded</artifactId>
       <version>${grpc.version}</version>
     </dependency>
-    <!-- 反射服务：本地用 grpcurl 验证时不必带 .proto 文件，直接列服务与消息。 -->
     <dependency>
       <groupId>io.grpc</groupId>
       <artifactId>grpc-services</artifactId>
       <version>${grpc.version}</version>
     </dependency>
 
-    <!-- MQ 客户端：结算 / 返还走事件不走 RPC（不该阻塞用户请求，且必须能重投）。
-         与 worker 同款同版本（ADR-0114 技术栈逐项对齐）。 -->
     <dependency>
       <groupId>org.apache.rocketmq</groupId>
       <artifactId>rocketmq-client-java</artifactId>
       <version>${rocketmq-client.version}</version>
     </dependency>
 
-    <!-- ⚠️ schema 权威在 billing 自己手里（Flyway），**不走 backend 的 Prisma**。
-         理由：ADR-0113 定的是「每个服务数据私有」——若 billing 的表由 Prisma 管，
-         它的 schema 就绑死在 backend 的迁移节奏上，「私有」只剩口号。
-         跨服务的关联（如 jobId）走 proto 契约，不走共享表。 -->
     <dependency>
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-core</artifactId>
@@ -117,8 +100,6 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
-    <!-- 集成测试用：真库跑（本地 docker bw-mysql）。
-         与 worker 同一套 Testcontainers 版本覆盖，保持两端一致。 -->
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>mysql</artifactId>
@@ -141,15 +122,7 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <systemPropertyVariables>
-            <!-- ⚠️ 测试**默认不启 gRPC server**：真实端口的绑定会让每个 @SpringBootTest
-                 都去抢 4004，冲突与否跟测试内容毫无关系，失败起来还很难看出根因。
-                 需要走真实链路的用例在 @SpringBootTest(properties=...) 里显式打开并
-                 把端口设为 0（内核分配空闲端口，绝不冲突）。
-                 这里用系统属性而不是测试 profile：一行覆盖全部用例，
-                 且**优先级低于** @SpringBootTest 的 properties，用例可以逐条覆盖。 -->
             <billing.grpc.enabled>false</billing.grpc.enabled>
-            <!-- 测试也不连 MQ：单元/集成测试各自直接调 SettlementService，
-                 走真实 RocketMQ 只会让测试依赖一个外部进程。 -->
             <billing.mq.enabled>false</billing.mq.enabled>
           </systemPropertyVariables>
         </configuration>

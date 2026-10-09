@@ -78,23 +78,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
-/**
- * 音视频合成「转存返回后、发布尝试前取消状态查询异常」的真库收口测试（IKIN91）。
- * <p>
- * 夹具复用 {@code AudioVideoMuxPublishUncertaintyMySqlIntegrationTest}（IKIN8Z）模式：手动
- * AnnotationConfigApplicationContext + MySQL Testcontainers + 每测试 TRUNCATE 隔离 +
- * {@code spy(service)} 挂钩子。交错控制：真实状态机跑全程，仅在第 4 次
- * {@code cancelAudioVideoMuxIfRequested}（转存成功返回后的首次取消状态查询）注入 DB 异常。
- * <p>
- * 钉的行为（验收硬口径）：
- * <ol>
- *   <li>DB 短暂故障（仅取消查询这一下）恢复后：该次上传对象安全收口（真删、无 Asset 引用），
- *       GenerationJob 按既有失败语义收口（fail 守卫命中落 failed 终态并清租约）。</li>
- *   <li>DB 持续不可用（fail 落库也失败）：原异常原样上抛（不吞、不伪装主动取消），对象仍先
- *       安全收口；任务不声称已写入终态（真库核对仍为 processing 且租约在），留未完成收口
- *       事实日志，交既有恢复扫描/消息重投。</li>
- * </ol>
- */
 @Testcontainers(disabledWithoutDocker = true)
 @DisplayName("音视频合成取消状态查询异常的安全收口真库测试（MySQL Testcontainers，IKIN91）")
 class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
@@ -113,14 +96,11 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
 
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService realService;
-    /** 真库终态收口（IKIWP8 ③）：发布/失败/探测直连。 */
     static JobFinalizer realFinalizer;
-    /** 工具族领取管道（IKIWP8）：与 realService 共用同一个真库 jobMapper（取自同一 Spring 上下文）。 */
     static JobClaimService claimService;
     static GenerationJobMapper realJobMapper;
     static JdbcTemplate jdbc;
 
-    /** 最小 Spring 上下文：与金标夹具同款（Hikari +08:00 会话、7 Mapper、直连 service）。 */
     @Configuration
     static class TestConfig {
 
@@ -182,7 +162,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
             return factory(StoryboardPreviewMapper.class, sf).getObject();
         }
 
-        /** IKJCOE：任务特有列的扩展位表 mapper。 */
         @Bean
         GenerationJobExtraMapper extraMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationJobExtraMapper.class, sf).getObject();
@@ -197,10 +176,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
             return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
         }
 
-        /**
-         * 真库 JobFinalizer（IKIWP8 ③）：终态收口方法已从 JobStateMachineService 删除，
-         * 测试直连 finalizer；按 7-mapper 兼容构造的内部装配逐项复制，共用同一批真库 mapper。
-         */
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
@@ -242,7 +217,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         if (ctx != null) ctx.close();
     }
 
-    /** 截断所有表，保留结构；每个测试隔离（容器 withReuse 防污染）。 */
     @BeforeEach
     void cleanup() {
         List<String> tables = jdbc.queryForList(
@@ -253,11 +227,9 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         jdbc.execute("SET FOREIGN_KEY_CHECKS = 1");
     }
 
-    // ========== 种子与夹具（IKIN8Z 同款） ==========
 
     private static final byte[] PAYLOAD = "mux-result-payload".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
-    /** 可领取的 audio_video_mux 冻结任务（provider_task_id 已持久化 → handle 直接进 poll 相）。 */
     private long seedClaimableMuxJob() {
         jdbc.update("""
                 INSERT INTO generation_jobs
@@ -296,7 +268,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         return count != null ? count : 0;
     }
 
-    /** 有状态 TOS 替身 + 全链处理器（真实状态机 spy）：转存落 objects 表，deleteUnpublishedObject 真删。 */
     private record WiredProcessor(
             AudioVideoMuxJobProcessor processor,
             JobStateMachineService spyService,
@@ -331,7 +302,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         return new WiredProcessor(processor, spyService, spyFinalizer, objects);
     }
 
-    /** 转存成功返回后的首次取消状态查询（第 4 次）注入 DB 异常；前三段真跑（未命中取消）。 */
     private static final String CANCEL_QUERY_ERROR = "取消状态查询 DB 断连（IKIN91）";
 
     private void throwOnPostTransferCancelQuery(JobStateMachineService spyService, long jobId) {
@@ -345,7 +315,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
                 .cancelAudioVideoMuxIfRequested(eq(String.valueOf(jobId)), anyString(), anyLong());
     }
 
-    /** 捕获 processor WARN 日志（未完成收口事实断言用）。 */
     private static List<String> captureProcessorLogs(Runnable action) {
         Logger logger = (Logger) LoggerFactory.getLogger(AudioVideoMuxJobProcessor.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -359,12 +328,10 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         }
     }
 
-    // ========== 真实 relay 组合线法（IKIN8V：处理器级组合用例，复用 StreamingTransferTest 线法） ==========
 
     private HttpServer sourceServer;
     private HttpServer uploadServer;
 
-    /** 受控源分块参数：4×64KiB、块间 20ms——真实 HTTP 流式下载（持续有进度），转存亚秒完成。 */
     private static final int SOURCE_BLOCK_BYTES = 64 * 1024;
     private static final int SOURCE_BLOCK_COUNT = 4;
 
@@ -374,7 +341,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         if (sourceServer != null) sourceServer.stop(0);
     }
 
-    /** 本地受控视频源（真实 relay 线法，AudioVideoMuxStreamingTransferTest 同款缩小版）。 */
     private String serveControlledSource() throws IOException {
         byte[] block = new byte[SOURCE_BLOCK_BYTES];
         for (int i = 0; i < SOURCE_BLOCK_BYTES; i++) block[i] = (byte) (i % 251);
@@ -396,8 +362,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         return "http://127.0.0.1:" + sourceServer.getAddress().getPort() + "/out.mp4";
     }
 
-    /** 真实 relay 的有状态 TOS 替身：preSignedURL 走 mock 指向本地上传桩（key 可经 sink 捕获），
-     *  上传字节真实流式送达并按 key 落对象表；deleteObject 查表真删——对象存在性断言以此为准。 */
     private TOSV2 realTosStandin(ConcurrentHashMap<String, byte[]> objects,
                                  AtomicReference<String> keySink) throws IOException {
         uploadServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -426,7 +390,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         return client;
     }
 
-    // ========== 用例 ==========
 
     @Test
     @Timeout(90)
@@ -440,24 +403,14 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
 
         wired.processor().handle(String.valueOf(jobId));
 
-        // 该次上传对象安全收口：真删（有状态替身）且不产生引用该键的 Asset（发布从未开始）
         assertThat(objects).doesNotContainKey(key);
         assertThat(countAssets(jobId, key)).isZero();
-        // DB 短暂故障恢复后按既有失败语义收口：fail 守卫命中落 failed 终态并清租约
         GenerationJobEntity job = readJob(jobId);
         assertThat(job.getStatus()).isEqualTo("failed");
         assertThat(job.getError()).contains("audio_video_mux_failed").contains(CANCEL_QUERY_ERROR);
         assertThat(job.getLeaseOwner()).isNull();
     }
 
-    /**
-     * 处理器级组合用例（IKIN8V，规格 Testing Decisions「Worker 处理器使用真实 relay、隔离
-     * MySQL、受控租约与提交时序，并复用同一有状态 TOS 替身」）：与
-     * {@link #transientCancelQueryErrorCleansObjectAndClosesJobAsFailed} 同一收口语义，但
-     * 转存换**真实 relay**——本地 HttpServer 受控源 + mock TOSV2 仅签名 + 上传真实流式落
-     * 对象表（真实 key 含本次执行独有 uuid）后取消查询抛 DB 异常：断言真实上传对象被替身
-     * 真删（非仅删除接口被调用）、真库不产生引用该键的 Asset、任务按失败语义落终态。
-     */
     @Test
     @Timeout(90)
     @DisplayName("组合（真实 relay）：取消查询 DB 异常——真实上传对象被真删、真库无该键 Asset、任务按失败语义落 failed 终态")
@@ -480,13 +433,10 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
 
         processor.handle(String.valueOf(jobId));
 
-        // 真实上传（完整 4×64KiB 送达替身）的对象被替身真删：对象表无残留、无孤儿
         assertThat(realKey.get()).startsWith("generated/9/video/");
         assertThat(objects).doesNotContainKey(realKey.get());
         assertThat(objects).isEmpty();
-        // 真库不产生引用该键的 Asset（发布从未开始）
         assertThat(countAssets(jobId, realKey.get())).isZero();
-        // 任务按既有失败语义收口：fail 守卫命中落 failed 终态并清租约
         GenerationJobEntity job = readJob(jobId);
         assertThat(job.getStatus()).isEqualTo("failed");
         assertThat(job.getError()).contains("audio_video_mux_failed").contains(CANCEL_QUERY_ERROR);
@@ -502,7 +452,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         ConcurrentHashMap<String, byte[]> objects = new ConcurrentHashMap<>();
         WiredProcessor wired = wireProcessor(objects, key);
         throwOnPostTransferCancelQuery(wired.spyService(), jobId);
-        // fail 落库自身也失败（DB 持续不可用）
         doAnswer(invocation -> {
             throw new RuntimeException("fail 落库断连");
         }).when(wired.spyFinalizer())
@@ -512,14 +461,11 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
                 assertThatThrownBy(() -> wired.processor().handle(String.valueOf(jobId)))
                         .hasMessageContaining(CANCEL_QUERY_ERROR));
 
-        // 对象已在放弃路径安全收口（清理先于 fail 落库，不受 fail 失败影响），无 Asset 引用
         assertThat(objects).doesNotContainKey(key);
         assertThat(countAssets(jobId, key)).isZero();
-        // 不声称已写入终态：真库核对任务仍为 processing（租约仍在），交既有恢复扫描/消息重投
         GenerationJobEntity job = readJob(jobId);
         assertThat(job.getStatus()).isEqualTo("processing");
         assertThat(job.getLeaseOwner()).isNotNull();
-        // 未完成的任务收口事实留痕（含 job 身份与失败原因）
         assertThat(logs.stream().filter(message -> message.contains("失败终态落库未完成")).toList())
                 .anySatisfy(message -> assertThat(message)
                         .contains("jobId=" + jobId)

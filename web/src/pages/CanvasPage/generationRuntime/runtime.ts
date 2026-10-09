@@ -1,9 +1,3 @@
-/* ============================================
- * 生成任务运行时（IKJJR1）：从提交开始统一管理任务后续生命周期。
- * 共同任务锁（按卡操作轮次）、轮询调度、归属检查（项目/文档加载身份/当前承接/删除状态）、
- * 保存确认（recoveryChanges 显式状态推导）与恢复扫描对账集中在此；任务差异在类型定义。
- * 复用画布宿主（GenerationRuntimeHost）与既有 API 客户端，不复制画布状态。
- * ============================================ */
 import type { GenerationRuntime, GenerationRuntimeHost, InFlightTaskState } from './types';
 import {
   createContext, resetContext,

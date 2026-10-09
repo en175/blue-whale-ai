@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKGOQX 扩图模式页面级测试：进入（会话建立、零扩展、refPickActive 禁框选禁拖动）、
-   门槛拒绝、四种退出（面板 X / Esc / 点其他卡 / 点画布空白）均无残留（不建卡、不连线、
-   不产生任务）、再次进入从零开始、预设联动驱动扩展框。渲染打桩同 imageEnhance.test.tsx。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -39,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -155,7 +151,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：图片 i1（1600×900，16:9 → 内容盒 497.78×280）与 i2（点其他卡退出用） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -205,7 +200,6 @@ async function renderPage() {
   });
 }
 
-/** 走图片卡画质工具横排「扩图」按钮的入口（回调挂在节点 data 上，IKH3XZ） */
 async function enterOutpaint(nodeId = 'i1') {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === nodeId)!;
   await act(async () => {
@@ -220,15 +214,14 @@ const frameProps = () => flowProps.current.outpaintFrame as
 const nodeCount = () => (flowProps.current.mediaNodes as Node[]).length;
 
 const noResidue = () => {
-  expect(nodeCount()).toBe(2); // 不建卡
-  expect(flowProps.current.edges).toEqual([]); // 不连线
-  expect(apiMocks.createGenerationJob).not.toHaveBeenCalled(); // 不产生任务
+  expect(nodeCount()).toBe(2);
+  expect(flowProps.current.edges).toEqual([]);
+  expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   expect(apiMocks.createImageOutpaint).not.toHaveBeenCalled();
 };
 
 const dialogEl = () => document.body.querySelector('[data-testid="outpaint-dialog"]');
 
-/** 打开比例上拉菜单（改版横条后预设项收在菜单内） */
 async function openRatioMenu() {
   const trigger = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-ratio-trigger"]')!;
   await act(async () => {
@@ -262,19 +255,15 @@ describe('IKGOQX 进入扩图模式', () => {
     await enterOutpaint();
     const frame = frameProps()!;
     expect(frame).toBeTruthy();
-    // 内容区矩形：i1 位置 (400,0) + 标题偏移 22.5；1600×900 → 短边 280 → 内容盒 497.78×280
     expect(frame.rect.x).toBe(400);
     expect(frame.rect.y).toBeCloseTo(22.5, 6);
     expect(frame.rect.width).toBeCloseTo((280 * 16) / 9, 4);
     expect(frame.rect.height).toBeCloseTo(280, 6);
-    // 进入默认零扩展（框与原图重合、默认原图比例）
     expect(frame.expands).toEqual(ZERO_EXPANDS);
-    // 扩图工具栏浮现（比例菜单默认收起，展开后命中原图比例）
     expect(dialogEl()).toBeTruthy();
     await openRatioMenu();
     const original = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-preset-original"]')!;
     expect(original.className).toMatch(/menuItemActive/);
-    // 模式期间禁用框选与他卡拖动（refPickActive 同语义），平移缩放保留
     expect(flowProps.current.refPickActive).toBe(true);
     noResidue();
   });
@@ -364,14 +353,12 @@ describe('IKGOQX 再次进入从零开始', () => {
   it('退出后扩展量清零；拖出的扩展不残留到下一次进入', async () => {
     await renderPage();
     await enterOutpaint();
-    // 拖出扩展（模拟扩展框回调）
     await act(async () => {
       frameProps()!.onExpandChange({ top: 30, right: 60, bottom: 0, left: 0 });
     });
     expect(frameProps()!.expands).toEqual({ top: 30, right: 60, bottom: 0, left: 0 });
     await pressEscape();
     expect(frameProps()).toBeNull();
-    // 再次进入：从零开始
     await enterOutpaint();
     expect(frameProps()!.expands).toEqual(ZERO_EXPANDS);
     await openRatioMenu();
@@ -392,8 +379,6 @@ describe('IKGOQX 面板预设联动驱动扩展框', () => {
     const expands = frameProps()!.expands;
     const rect = frameProps()!.rect;
     const boxW = rect.width + expands.left + expands.right;
-    // 16:9 高定宽：280×16/9 ≈ 497.78 == 内容盒宽（16:9 原图）→ 零扩展命中 16:9 也等于原图比例
-    // 该图本身 16:9：16:9 预设最小包含框就是原图 → 零扩展（原比例命中优先级见纯函数测试）
     expect(boxW / (rect.height + expands.top + expands.bottom)).toBeCloseTo(16 / 9, 4);
     noResidue();
   });
@@ -408,7 +393,6 @@ describe('IKGOQX 面板预设联动驱动扩展框', () => {
     await act(async () => {
       btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    // 置灰不触发：保持零扩展
     expect(frameProps()!.expands).toEqual(ZERO_EXPANDS);
   });
 
@@ -425,7 +409,6 @@ describe('IKGOQX 面板预设联动驱动扩展框', () => {
     expect(expands.right).toBeCloseTo(0, 6);
     expect(expands.top).toBeCloseTo(46.6667, 3);
     expect(expands.bottom).toBeCloseTo(46.6667, 3);
-    // 1:1 预设命中高亮（重新展开菜单查看）
     await openRatioMenu();
     const active = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-preset-1-1"]')!;
     expect(active.className).toMatch(/menuItemActive/);

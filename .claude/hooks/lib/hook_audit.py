@@ -1,25 +1,4 @@
 #!/usr/bin/env python3
-"""Append-only audit log for blocking PreToolUse hooks.
-
-Records one structured JSON line per hook invocation, capturing only the
-metadata needed to answer "was this hook actually called?" plus a bounded
-stable operation category chosen by the gate — never file contents, commands,
-tool parameter values, tokens, or credentials.
-
-Design contract (IK10CW):
-  - Audit success or failure MUST NOT change the hook's exit code, stdout,
-    or existing stderr block message.
-  - On audit failure, a short degradation notice is written to stderr only.
-  - Active log rotates at 10 MiB, keeping at most one archive.
-  - Concurrent appends are serialized via a platform lock (fcntl.flock on
-    POSIX, msvcrt.locking on Windows); each record stays a complete single
-    line.
-
-The log lives under the shared git common dir (``.git/hook-audit/``), so
-the main checkout and all task worktrees write to the same physical file.
-Git never tracks anything under ``.git/``, satisfying the "not in version
-control" requirement without an extra .gitignore entry.
-"""
 
 from __future__ import annotations
 
@@ -29,25 +8,20 @@ import subprocess
 import sys
 try:
     import fcntl
-except ImportError:  # Windows 原生 Python（Anaconda）无此 POSIX 模块
+except ImportError:
     fcntl = None
 try:
     import msvcrt
-except ImportError:  # POSIX 平台无 msvcrt；fcntl 分支已覆盖
+except ImportError:
     msvcrt = None
 from datetime import datetime, timezone
 from pathlib import Path
 
-MAX_BYTES = 10 * 1024 * 1024  # 10 MiB
+MAX_BYTES = 10 * 1024 * 1024
 LOG_DIR_NAME = "hook-audit"
 
 
 def git_common_dir(project_dir: str) -> Path:
-    """Resolve the shared git common dir for project_dir.
-
-    Worktrees share one common dir, so the main checkout and all task
-    worktrees write to the same physical audit log.
-    """
     root = Path(project_dir).resolve()
     result = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
@@ -67,7 +41,6 @@ def git_common_dir(project_dir: str) -> Path:
 
 
 def log_paths(project_dir: str, hook_name: str) -> tuple[Path, Path, Path]:
-    """Return (active_log, archive, lock_file) under the shared git common dir."""
     base = git_common_dir(project_dir) / LOG_DIR_NAME
     safe_name = hook_name.replace("/", "_")
     active = base / f"{safe_name}.log"
@@ -77,13 +50,6 @@ def log_paths(project_dir: str, hook_name: str) -> tuple[Path, Path, Path]:
 
 
 def _scalar_str(value: object) -> str:
-    """Coerce a value to a bounded audit field, dropping non-strings.
-
-    Only plain strings are recorded verbatim; booleans/numbers become their
-    text form. Objects, arrays, and anything that could embed file contents,
-    commands, or credentials are reduced to an empty string — never ``str()``,
-    which would serialize nested structures and leak their payloads.
-    """
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
@@ -94,13 +60,6 @@ def _scalar_str(value: object) -> str:
 
 
 def read_upstream_fields(include_file_context: bool) -> dict[str, str]:
-    """Parse safe top-level correlation fields from stdin JSON.
-
-    ``file_path`` is read only for the master Edit/Write gate, which opts in
-    explicitly. Other Bash/MCP gates never copy any ``tool_input`` value into
-    the audit record. Missing identifiers are kept as empty strings and
-    non-string values are coerced to empty strings.
-    """
     try:
         data = json.load(sys.stdin)
     except Exception:
@@ -112,10 +71,8 @@ def read_upstream_fields(include_file_context: bool) -> dict[str, str]:
         tool_input = {}
     return {
         "tool": _scalar_str(data.get("tool_name")),
-        # Kimi CLI 的关联 id 字段是 tool_call_id；Claude 系平台是 tool_use_id。
         "tool_use_id": _scalar_str(data.get("tool_use_id") or data.get("tool_call_id")),
         "session_id": _scalar_str(data.get("session_id")),
-        # Kimi CLI 的 Write/Edit 参数名是 path；Claude 系平台是 file_path。
         "file_path": _scalar_str(
             tool_input.get("file_path") or tool_input.get("path") or data.get("file_path")
         )
@@ -125,7 +82,6 @@ def read_upstream_fields(include_file_context: bool) -> dict[str, str]:
 
 
 def maybe_rotate(active: Path, archive: Path) -> None:
-    """Rename active -> archive if active exceeds MAX_BYTES; drop old archive."""
     try:
         size = active.stat().st_size
     except FileNotFoundError:
@@ -143,18 +99,6 @@ def append_record(
     lock: Path,
     record: dict,
 ) -> None:
-    """Append one JSON line under an exclusive lock, rotating when needed.
-
-    Rotation runs both before (handles a log already at/over threshold from a
-    prior append) and after (handles this append crossing the threshold) the
-    write, so the active log never settles at or above MAX_BYTES.
-
-    Locking is best-effort and platform-specific: ``fcntl.flock`` on POSIX,
-    ``msvcrt.locking`` on Windows, no lock if neither exists. Without a real
-    lock, concurrent hooks racing the same log may still write intact single
-    lines on Linux ``O_APPEND``-style semantics, but interleaving is not
-    guaranteed — serialization only holds where the platform lock exists.
-    """
     active.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
     with open(lock, "a+") as lock_fd:
@@ -164,18 +108,14 @@ def append_record(
                 fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
                 locked = True
             elif msvcrt is not None:
-                # 锁 1 字节（Windows msvcrt 不锁 0 长度区域）。锁区间不可超过
-                # 文件实际大小 + 写入中——共享锁文件 1 字节足够串行化 append。
                 try:
                     msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
                     locked = True
                 except OSError:
-                    pass  # 文件尚未扩展时锁 1 字节可能失败；走无锁追加
+                    pass
             maybe_rotate(active, archive)
             with open(active, "a") as log_fd:
                 log_fd.write(line)
-            # Post-append rotation: if this write crossed the threshold, rotate
-            # now so the active log never rests at >= MAX_BYTES.
             maybe_rotate(active, archive)
         finally:
             if locked:
@@ -229,13 +169,8 @@ def main() -> int:
     try:
         return run()
     except SystemExit:
-        # argparse raises SystemExit on bad args; let it propagate so the
-        # developer sees the usage error during testing. The calling hook
-        # guards with ``|| true``.
         raise
     except Exception as exc:
-        # Degraded: audit must not change the hook's exit code or stdout.
-        # Only a short notice is left on stderr.
         print(f"hook-audit: degraded ({type(exc).__name__})", file=sys.stderr)
         return 0
 

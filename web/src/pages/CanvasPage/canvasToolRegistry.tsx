@@ -42,7 +42,6 @@ export interface CanvasToolRenderActions<Request> {
   submit(request: Request): boolean;
   updateDraft?(nodeId: string, request: Request): void;
 }
-/** 类型明确的句柄封在闭包里，公共遍历不擦除异构参数。 */
 export function registerCanvasTool<State, Entry, Input, Request = void>(
   runtime: Runtime,
   definition: ToolSessionDefinition<State, Entry, Input, Request>,

@@ -40,21 +40,16 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(VocalSplitJobProcessor.class);
 
-    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 vocal_split_failed(1047)。 */
     private static final Set<String> PRESERVED_ERROR_CODES = Set.of(
             GenerationError.ERROR_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
-    /** 领取规格（IKIWP8 / ADR-0119）。 */
     private static final int LEASE_SECONDS = 420;
     private static final List<String> CLAIM_SOURCES = List.of(VocalSplitContract.SOURCE);
 
-    /** 轮询步调 5s（家族 MEDIA_EXTRACT_POLL_INTERVAL_MS / 去字幕同值）。 */
     public static final long VOCAL_SPLIT_POLL_INTERVAL_MS = 5_000;
 
-    /** 轮询上限 720 次 ≈ 60 分钟（家族 MAX_MEDIA_EXTRACT_POLLS 同值：人声分离为音频
-     *  分离型任务，耗时上界与抽轨转换同量级，60 分钟窗口覆盖产品上限内最长任务）。 */
     public static final int MAX_VOCAL_SPLIT_POLLS = 720;
 
     private final JobStateMachineService stateMachine;
@@ -90,7 +85,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
         this.separateVoiceClient = separateVoiceClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
-        // workerId = vocal-split-{hostname}-{pid}（家族 extract- 前缀同款）
         this.workerId = "vocal-split-" + hostname() + "-" + ProcessHandle.current().pid();
     }
 
@@ -99,20 +93,11 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return VocalSplitContract.TAG;
     }
 
-    /**
-     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
-     */
     @Override
     public Optional<ClaimSpec> claimSpec() {
         return Optional.of(claimSpec);
     }
 
-    /**
-     * 处理一个 vocal_split job step（每步 = 一次 MQ 消费）。
-     * <p>
-     * claim 在 try 外（家族口径：DB 异常上抛 → consumer 不 ack → 重投）；
-     * 业务失败一律落终态 failed（无自动重试）。
-     */
     @Override
     public void handle(String jobId) {
         Optional<ClaimedJob> claimOpt;
@@ -121,9 +106,9 @@ public class VocalSplitJobProcessor implements JobProcessor {
         } catch (Exception error) {
             log.error("[vocal_split] claim 失败 jobId={}: {}",
                     jobId, error.getMessage(), error);
-            throw error; // 保持不 ack → RocketMQ 重投
+            throw error;
         }
-        if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒
+        if (claimOpt.isEmpty()) return;
 
         ClaimedJob claim = claimOpt.get();
         log.info("[vocal_split] 已领取 jobId={} token={} providerTaskId={} pollCount={}",
@@ -136,8 +121,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
             Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "人声背景分离失败";
             if (httpStatus != null) {
-                // 状态已结构化落 details（IKIMS3），message 不再重复携带状态码字样：只剥网关
-                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
                 message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
             }
             log.error("[vocal_split] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
@@ -145,9 +128,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
         }
     }
 
-    /**
-     * 分相主逻辑（家族 runStep 同构）：凭证 → submit 相 / poll 相。
-     */
     private void runStep(ClaimedJob claim) {
         String providerToken;
         try {
@@ -165,16 +145,8 @@ public class VocalSplitJobProcessor implements JobProcessor {
         }
     }
 
-    // ========== submit 相 ==========
 
-    /**
-     * 提交相：解析冻结 input + 源素材 → 网关提交（scene 出站映射 + output_format）→
-     * markProviderSubmitted → 续排轮询。
-     */
     private void submitPhase(ClaimedJob claim, String providerToken) {
-        // 0. IKI89R（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
-        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
-        //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VocalSplitContract.TAG, claim, providerToken,
                     separateVoiceClient::poll,
@@ -186,8 +158,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
         Map<String, Object> input = claim.input();
 
-        // 1. 解析冻结 input 业务键（三键恒在、值恒为合法枚举，创建时定死；此处为
-        //    worker 兜底防御，权威复核在创建入口）
         String sourceAssetId = parseAssetId(input.get(VocalSplitContract.INPUT_KEY_SOURCE_ASSET_ID));
         if (sourceAssetId == null) {
             failVocalSplit(claim, GenerationError.ERROR_INVALID_INPUT, "缺少源素材资产 id");
@@ -206,8 +176,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
             return;
         }
 
-        // 2. 解析源素材：人声分离输入支持视频与纯音频（官方双协议 video_url / audio_url，
-        //    Asset url 落库即公网 public-read，家族同构）
         AssetEntity source = assetSource.resolve(
                 Long.parseLong(sourceAssetId),
                 Long.parseLong(claim.userId()),
@@ -220,8 +188,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 网关提交异步任务（scene 经契约 SCENE_UPSTREAM_MAP 换算官方首字母大写枚举，
-        //    出站键是 scene + output_format，客户端单处定义）
         if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
                 claim.id(), claim.workerId(), claim.fencingToken())) {
             return;
@@ -231,8 +197,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
         log.info("[vocal_split] 上游已提交 jobId={} providerTaskId={} scene={} format={}",
                 claim.id(), taskId, scene, outputFormat);
 
-        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s +
-        //    progress=1；SQL 无 type 过滤，家族直接复用）
         boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
@@ -240,11 +204,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
         }
     }
 
-    /**
-     * 收割齐全判定（IKI8GN 家族差异参数）：轨数组齐全口径对齐轮询相成功判据——scene 轨序内
-     * 每轨 URL 都在（客户端只装非空 URL，containsKey 即齐全；缺任一轨 = 不齐全，不部分复用）。
-     * 返回 null=齐全；非空=未齐原因短句（嵌进共享骨架「未命中(父任务{})」日志）。
-     */
     private String vocalSplitResultIncomplete(ClaimedJob claim,
                                               SeparateVoiceTaskObservation observation) {
         Map<String, String> trackUrls = observation.trackUrls() != null
@@ -257,28 +216,16 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return null;
     }
 
-    // ========== poll 相 ==========
 
-    /**
-     * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（含超限）/ failed 终态 /
-     * completed 逐轨立即下载转存发布。
-     */
     private void pollPhase(ClaimedJob claim, String providerToken) {
         SeparateVoiceTaskObservation observation;
         try {
             observation = separateVoiceClient.poll(providerToken, claim.providerTaskId());
         } catch (VocalSplitError pollError) {
             if (isTransientPollError(pollError)) {
-                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
-                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
-                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
-                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
-                // 生成中。与 processing 分支同一判定、同一兜底码，文案附上游错误摘要（IKIHKR）。
                 if (claim.pollCount() >= MAX_VOCAL_SPLIT_POLLS) {
                     log.warn("[vocal_split] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6W，IKIMN8 契约）：有状态
-                    // cause 即写 details.http_status 并剥「: HTTP <code>」片段；无 cause 不写键、文案不动
                     Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
                     String message = "人声背景分离轮询超时（超过 " + MAX_VOCAL_SPLIT_POLLS + " 次），上游持续错误: "
                             + pollError.getMessage();
@@ -302,7 +249,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
         if ("processing".equals(observation.status())) {
             if (claim.pollCount() >= MAX_VOCAL_SPLIT_POLLS) {
-                // 轮询超时归并兜底码（家族口径：宁可不重试也不双跑；用户手动重试会重新提交）
                 failVocalSplit(claim, VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED,
                         "人声背景分离轮询超时（超过 " + MAX_VOCAL_SPLIT_POLLS + " 次）");
                 return;
@@ -316,7 +262,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
         }
 
         if ("failed".equals(observation.status())) {
-            // 上游可读原因透传（契约兜底码口径）；额度/内容政策信号按 §5 保留既有码（家族分类链）
             String message = observation.upstreamMessage() != null && !observation.upstreamMessage().isEmpty()
                     ? observation.upstreamMessage() : "人声背景分离任务失败";
             String code = classifyUpstreamFailure(observation.upstreamCode(), observation.upstreamMessage());
@@ -326,34 +271,20 @@ public class VocalSplitJobProcessor implements JobProcessor {
             return;
         }
 
-        // completed（succeeded）
         log.info("[vocal_split] 上游状态终态=completed jobId={} providerTaskId={} pollCount={} trackUrls={}",
                 claim.id(), claim.providerTaskId(), claim.pollCount(),
                 observation.trackUrls() != null ? observation.trackUrls().keySet() : null);
         publishResult(claim, observation);
     }
 
-    /**
-     * 结果发布：按 scene 轨序逐轨立即下载转存（火山各轨 URL 仅 24h 有效，官方明确
-     * 「有效期 24 小时」）→ 单事务发布 2/3 条音频 Asset（type=audio / source='generated'）→
-     * 终态 succeeded（轨数组回填终态日志 payload，字段 = 契约 VocalSplitTrackResult）。
-     * <p>
-     * 缺任一轨 URL / 任一轨转存失败 → 整单失败（契约口径：无部分成功；已转存的 TOS 对象
-     * 随失败留弃，与家族单轨转存失败的孤儿口径一致）。
-     * <p>
-     * 返回发布守卫结果（IKI89R：重试收割据此判定复用是否成立；false = 守卫未命中，
-     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
-     */
     private boolean publishResult(ClaimedJob claim,
                                   SeparateVoiceTaskObservation observation) {
-        // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（家族强依赖口径）
         if (mediaRelay == null) {
             throw new VocalSplitError(
                     VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED,
                     "音频转存存储未配置");
         }
 
-        // 轨序单源契约 SCENE_TRACKS（voice 恒首轨）；官方 result 缺任一轨 → 整单失败
         List<String> trackOrder = resolveTrackOrder(claim);
         Map<String, String> trackUrls = observation.trackUrls() != null
                 ? observation.trackUrls() : Map.of();
@@ -366,12 +297,9 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
         String outputFormat = resolveOutputFormat(claim);
 
-        // 时长优先官方 result.duration 精确值，缺失回落源 duration_ms 换算（家族同构；
-        // 官方 duration 是单值，逐轨冗余同一值，契约结构自包含）
         Double durationSec = observation.durationSec() != null
                 ? observation.durationSec() : resolveSourceDurationSec(claim);
 
-        // 逐轨转存（轨序展开；任一失败整单失败——由 handle 统一归并 1047）
         List<PublishVocalSplitTrackDto> tracks = new ArrayList<>(trackOrder.size());
         for (String trackType : trackOrder) {
             TosAudioMediaRelay.StoredAudio stored =
@@ -399,12 +327,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return published;
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架 isTransientPollError 同语义） ==========
 
-    /**
-     * 瞬时轮询错误判定（家族同语义）：网络超时 / 不可达 → 瞬时；HTTP 429/5xx（cause 携带
-     * 状态）→ 瞬时；4xx 与业务失败 → 非瞬时。
-     */
     static boolean isTransientPollError(VocalSplitError error) {
         String code = error.getCode();
 
@@ -425,16 +348,13 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return false;
     }
 
-    // ========== 工具方法 ==========
 
-    /** Asset id 容忍数字形态（Jackson 数字 JSON 值），家族解析同构。 */
     private static String parseAssetId(Object obj) {
         if (obj instanceof String s && !s.isEmpty()) return s;
         if (obj instanceof Number n) return String.valueOf(n.longValue());
         return null;
     }
 
-    /** 轨序取任务冻结 scene 的契约轨序（2/3 轨；scene 非法回落默认场景，创建入口已复核）。 */
     private static List<String> resolveTrackOrder(ClaimedJob claim) {
         Object sceneObj = claim.input().get(VocalSplitContract.INPUT_KEY_SCENE);
         String scene = sceneObj instanceof String s ? s : null;
@@ -444,7 +364,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return VocalSplitContract.SCENE_TRACKS.get(scene);
     }
 
-    /** 转存扩展名取任务所选 output_format（提交相已校验枚举；poll 相冻结 input 原样沿用）。 */
     private static String resolveOutputFormat(ClaimedJob claim) {
         Object formatObj = claim.input().get(VocalSplitContract.INPUT_KEY_OUTPUT_FORMAT);
         if (formatObj instanceof String format
@@ -454,7 +373,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return VocalSplitContract.DEFAULT_OUTPUT_FORMAT;
     }
 
-    /** 源素材时长回落（官方 duration 缺失时用源 duration_ms 换算秒；解析失败回 null）。 */
     private Double resolveSourceDurationSec(ClaimedJob claim) {
         String sourceAssetId = parseAssetId(
                 claim.input().get(VocalSplitContract.INPUT_KEY_SOURCE_ASSET_ID));
@@ -471,10 +389,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return null;
     }
 
-    /**
-     * 失败码归一（契约尾注）：§5 分类信号（额度/内容政策）保留既有码，其余一律归并兜底
-     * vocal_split_failed（1047）。
-     */
     private static String resolveFailCode(Exception e) {
         if (e instanceof VocalSplitError vse && PRESERVED_ERROR_CODES.contains(vse.getCode())) {
             return vse.getCode();
@@ -482,10 +396,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED;
     }
 
-    /**
-     * 上游任务 failed 的错误码分类（§5 优先级；家族分类链同款：
-     * 版权 → 内容政策 → 额度 → 兜底 1047）。
-     */
     private static String classifyUpstreamFailure(String upstreamCode, String upstreamMessage) {
         String text = (upstreamCode != null ? upstreamCode : "") + " "
                 + (upstreamMessage != null ? upstreamMessage : "");
@@ -501,16 +411,10 @@ public class VocalSplitJobProcessor implements JobProcessor {
         return VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED;
     }
 
-    /** 失败处理（复用家族 failMediaExtractJob 守卫：SET 清 next_action_at，
-     *  轮询型任务语义完备；details.raw 透传原始原因——跨工具复用同款守卫，video_enhance
-     *  复用 failVideoJob 同例）。 */
     private void failVocalSplit(ClaimedJob claim, String code, String message) {
         failVocalSplit(claim, code, message, null);
     }
 
-    /** details 落结构化上游 HTTP 状态（IKIMS3，音频提取 IKIMS2 同款）：backend 换凭证
-     *  判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；
-     *  非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。 */
     private void failVocalSplit(ClaimedJob claim, String code, String message,
                                 Integer httpStatus) {
         log.warn("vocal_split job 失败 jobId={} code={} message={}", claim.id(), code, message);
@@ -532,7 +436,6 @@ public class VocalSplitJobProcessor implements JobProcessor {
                 input.workerId(), input.fencingToken());
     }
 
-    /** MQ 自投延迟消息（视频骨架 scheduleNext 同款；错误上抛保持不 ack 由 broker 重投兜底）。 */
     private void scheduleNext(String jobId, long delayMs) {
         try {
             producer.enqueue(jobId, delayMs);

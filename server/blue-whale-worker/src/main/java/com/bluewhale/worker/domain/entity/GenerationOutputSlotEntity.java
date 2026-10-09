@@ -7,39 +7,27 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/**
- * 生成输出槽行（对应 Prisma model generation_output_slots）。
- * <p>
- * 用于 completeJob 的槽位聚合（settle-ops.ts:79-121）——部分成功 → partially_succeeded。
- */
 @TableName("generation_output_slots")
 public class GenerationOutputSlotEntity {
     @TableId(type = IdType.AUTO)
-    /** 主键 */
     private Long id;
 
     @TableField("generation_job_id")
-    /** 关联任务 */
     private Long generationJobId;
 
     @TableField("slot_index")
-    /** 槽位序号（0-based） */
     private Integer slotIndex;
 
     @TableField("status")
-    /** 槽位状态：pending / succeeded / failed */
     private String status;
 
     @TableField("asset_id")
-    /** 绑定资产 id（succeeded 时填充） */
     private Long assetId;
 
     @TableField("retry_of_slot_id")
-    /** 重试来源槽 id */
     private Long retryOfSlotId;
 
     @TableField("scene_card_generation_record_id")
-    /** 关联的场景卡生成记录 id（视频路径回写用） */
     private Long sceneCardGenerationRecordId;
 
     @TableField("gmt_create")
@@ -48,8 +36,6 @@ public class GenerationOutputSlotEntity {
     @TableField("gmt_modified")
     private LocalDateTime gmtModified;
 
-    // 表无此二列（schema.prisma 权威）：仅占位保持与其余 Entity 形状一致，MyBatis-Plus 忽略映射。
-    // 暴露字段会诱导 SQL 误引用，故标 @TableField(exist=false) 不参与 select/insert/update。
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private Integer version;
 

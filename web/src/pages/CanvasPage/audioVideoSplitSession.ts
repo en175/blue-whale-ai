@@ -21,13 +21,11 @@ export interface AudioVideoSplitSubmission {
 export interface AudioVideoSplitHost {
   getProjectId(): string | null;
   getSourceNode(nodeId: string): Node | undefined;
-  /** IKJJR3：建音频占位卡 + 来源边后交生成任务运行时受理；返回 false = 未发出。 */
   startTask(input: AudioVideoSplitSubmission): boolean;
   warn(message: string): void;
   error(message: string): void;
 }
 
-/** 工具差异只声明初始化、冻结输入和受理后的退出顺序；任务建卡/轮询/落盘留在宿主。 */
 export function createAudioVideoSplitSession(
   getHost: () => AudioVideoSplitHost,
 ): ToolSessionDefinition<AudioVideoSplitState, string, AudioVideoSplitSubmission> {
@@ -48,7 +46,6 @@ export function createAudioVideoSplitSession(
       };
     },
     async submit(input, context) {
-      // IKJJR3：提交点先退出会话再交运行时受理（受理失败归失败卡，冻结输入重试走运行时）。
       const host = getHost();
       context.close();
       if (!host.startTask(input)) {

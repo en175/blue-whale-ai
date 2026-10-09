@@ -2,9 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CostSettlementInternalController } from "./cost-settlement.controller.js";
 
-// IK9VZ0：internal/cost-settlements 接收接口校验单测。
-// 关键回归：JSON 无 bigint，amountFen 以整数 number（分）传输——此前误用 typeof bigint
-// 导致所有合法请求 400（internal 接口不可用），已修复为 number 校验 + BigInt 转换。
 
 function createController() {
   const consume = vi.fn().mockResolvedValue({ status: "applied" });

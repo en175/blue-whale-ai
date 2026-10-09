@@ -26,7 +26,6 @@ async function render(overrides: { onClose?: () => void; onEscapeClose?: () => v
 }
 afterEach(async () => { if (root) await act(async () => root.unmount()); host?.remove(); });
 
-/** 在搜索框输入检索词（原生 value setter + input 事件触发 React onChange） */
 async function search(text: string) {
   const input = document.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
   await act(async () => {
@@ -75,23 +74,18 @@ it('IKIPWV：无标题文本附件按正文关键词命中，既有标题/编号
     { id: 'ta2', kind: 'text', name: '分镜草稿', badge: '文本2', searchText: '开场：城市夜景空镜' },
   ] });
   const refRows = () => [...document.querySelectorAll('[data-testid="mention-ref-item"]')];
-  // 正文关键词 → 命中无标题文本附件（标题与编号均不含该词）
   await search('蓝鲸');
   expect(refRows()).toHaveLength(1);
   expect(refRows()[0].textContent).toContain('文本1');
-  // 画布素材分区不误报（画布节点名不含该词）
   expect([...document.querySelectorAll('[data-testid="at-mention-canvas-item"]')]).toHaveLength(0);
-  // 既有编号匹配不变
   await search('文本2');
   expect(refRows()).toHaveLength(1);
   expect(refRows()[0].textContent).toContain('文本2');
-  // 既有标题匹配不变
   await search('分镜');
   expect(refRows()).toHaveLength(1);
   expect(refRows()[0].textContent).toContain('文本2');
 });
 
-/** IKIQGR：正文检索通道为全文（不截断），构造 >200 字正文验证尾段命中 */
 const LONG_BODY_TAIL = '深海观测日志';
 const LONG_BODY = `${'雾'.repeat(220)}OceanWhale ${LONG_BODY_TAIL}`;
 
@@ -101,13 +95,10 @@ it('IKIQGR：已引用文本附件按全文检索——超过前 200 字的尾�
     { id: 'ta-long', kind: 'text', name: '', badge: '文本1', searchText: LONG_BODY },
   ] });
   const refRows = () => [...document.querySelectorAll('[data-testid="mention-ref-item"]')];
-  // 尾段关键词（第 200 字之后）命中无标题文本附件
   await search(LONG_BODY_TAIL);
   expect(refRows()).toHaveLength(1);
   expect(refRows()[0].textContent).toContain('文本1');
-  // 菜单只显示名称+编号，不展示正文片段
   expect(refRows()[0].textContent).not.toContain(LONG_BODY_TAIL);
-  // 忽略大小写：正文 OceanWhale 与查询互为大小写变体仍命中
   await search('oceanwhale');
   expect(refRows()).toHaveLength(1);
   await search('OCEANWHALE');
@@ -126,9 +117,7 @@ it('IKIQGR：画布分区无标题文本节点按正文全文命中；媒体项�
   await search(LONG_BODY_TAIL);
   expect(canvasRows()).toHaveLength(1);
   expect(canvasRows()[0].textContent).toContain('文本节点');
-  // 媒体项不携带正文检索字段：名称不含关键词即不出现
   expect(canvasRows().some((row) => row.textContent?.includes('图片节点 1'))).toBe(false);
-  // 大小写不敏感同样命中画布文本节点
   await search('oceanwhale');
   expect(canvasRows()).toHaveLength(1);
 });
@@ -199,7 +188,6 @@ it('从末尾分类循环回已引用时清除分类高亮并关闭子菜单', a
   expect(document.querySelector('[data-mention-flyout]')).toBeTruthy();
 });
 
-/** IKFR6A：菜单定位优先锚点上方，上方放不下才翻到下方（全产品统一） */
 function rectOf(top: number, bottom: number, left = 100): DOMRect {
   return { top, bottom, left, right: left + 20, width: 20, height: bottom - top, x: left, y: top, toJSON: () => '' } as DOMRect;
 }
@@ -219,7 +207,6 @@ async function renderWithAnchorRect(rect: DOMRect) {
 it('锚点在屏幕中下部时菜单优先出现在锚点上方', async () => {
   await renderWithAnchorRect(rectOf(400, 410));
   const menu = document.querySelector('[data-testid="mention-menu"]') as HTMLElement;
-  // estHeight=300（jsdom offsetHeight=0 回退），top = 400 - 300 - 6
   expect(menu.style.top).toBe('94px');
 });
 
@@ -229,14 +216,12 @@ it('锚点贴近屏幕顶部放不下时菜单翻到锚点下方', async () => {
   expect(menu.style.top).toBe('116px');
 });
 
-/** IKFO27：子菜单与触发它的分类行顶部对齐。jsdom 没有布局，按元素角色注入几何。 */
 const KIND_ORDER = ['image', 'video', 'audio', 'text'];
 
 function stubMenuLayout(flyoutHeight: number) {
   return vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
     if (this.hasAttribute('data-mention-main')) return rectOf(300, 542);
     const kind = this.getAttribute('data-mention-kind');
-    // 面板顶部 300 + 内边距 10 + 搜索框 36 + 间距 8 + 小标题 18，每行 38
     if (kind) return rectOf(372 + KIND_ORDER.indexOf(kind) * 38, 372 + KIND_ORDER.indexOf(kind) * 38 + 38);
     if (this.firstElementChild?.hasAttribute('data-mention-flyout')) return rectOf(300, 300 + flyoutHeight);
     return rectOf(0, 0);
@@ -253,7 +238,6 @@ it('子菜单跟随触发它的分类行下移', async () => {
     await render();
     await key('ArrowUp');
     expect(document.activeElement?.textContent).toBe('文本');
-    // 「文本」行顶部相对面板 72 + 3×38 = 186
     expect(flyoutWrapEl().style.top).toBe('186px');
   } finally { spy.mockRestore(); }
 });
@@ -295,7 +279,6 @@ it('鼠标从分类行移到子菜单后子菜单仍在且位置不变', async (
   } finally { spy.mockRestore(); }
 });
 
-/** IKFXOR：区分关闭来源——Esc 走 onEscapeClose（调用方借此还焦编辑器），点外仍走 onClose 不抢焦 */
 it('Esc 走 onEscapeClose、点外仍走 onClose（区分关闭来源）', async () => {
   const onClose = vi.fn();
   const onEscapeClose = vi.fn();

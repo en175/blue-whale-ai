@@ -17,17 +17,7 @@ class RecoveryError(RuntimeError):
 
 
 def _restrict_to_owner(path: Path) -> None:
-    """把恢复点文件权限收窄为仅属主可读写。
-
-    POSIX 直接用 os.chmod 设 0o600；Windows 的 os.chmod 无法设置 Unix 权限位
-    （NTFS 无 mode bits），改用 icacls 显式撤销 Everyone/Users 并授予当前用户，
-    效果等价于"仅属主私有"。两种实现都只在成功时静默，失败交由调用方兜底。
-    """
     if os.name == "nt":
-        # icacls 的 grant 目标是「账户 SID 映射后的规范名」：字面量 CURRENT_USER
-        # 不是有效标识（实测 rc=52 "安全标识符无法映射"）。getpass.getuser() 返回
-        # 可 round-trip 的账户名（本机实测 = USERNAME，icacls 可识别）；USERNAME
-        # 在非英文 Windows 上可能返回本地化名，故优先 getpass。
         owner = getpass.getuser() or os.environ.get("USERNAME") or os.environ.get("USER")
         try:
             subprocess.run(
@@ -80,9 +70,6 @@ def set_push_state(path: Path, head: str, state: str) -> None:
         data.pop("pushed_head", None)
         data.pop("push_state", None)
     else:
-        # pushed_head 在 in_flight 与 pushed 两阶段均写入，仅靠 push_state 区分阶段：
-        # in_flight 表示推送结果未确认，pushed 表示已确认推送成功。
-        # 单看 pushed_head 不能判定是否真已推送，须配合 push_state。
         data["pushed_head"] = head
         data["push_state"] = state
     write_recovery(path, data)

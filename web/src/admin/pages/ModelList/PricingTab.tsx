@@ -1,27 +1,3 @@
-/* ============================================
- * 「定价」tab —— 一条能力行的计价规则（`generation_model_capability.pricing`）
- *
- * 从 `ModelBilling/RuleEditorModal.tsx` 搬过来（那一页已删除，定价编辑收进模型列表）。
- * 与旧版的两处结构性差别：
- *
- *   1. **不再是整份目录发布**：规则现在长在能力行上，保存就是一次 `PUT /api/admin/models/:id`
- *      ——没有「目录与能力行两个存储」的半失败问题；
- *   2. **模型 / 任务类型不再是可填的键**：`model_id` 与 `capability_type` 就是这一行的身份
- *      （一个能力行恰好对应一条规则），只读展示。
- *
- * ── 这一面要同时说清三件事 ────────────────────────────────────────────────────
- *
- * 1. **单价按「元」填**（官方价目表的单位：元 / 百万 token、元 / 张、元 / 次），
- *    写回库里的仍是 mc —— 换算在 `lib/billing-catalog/catalogDraft.ts` 里；
- * 2. **不编辑的字段原样带回去**（`usageSemantic` / `by` 等，见 `ruleFromForm` 的入参 `original`）；
- * 3. **「单价待配」（unset）是显式的空位**，不是「先不收费」——它是最容易误判的一处。
- *
- * ── 规格键不手敲：候选集派生自本行的尺寸 / 比例 ────────────────────────────────
- *
- * 价格表与尺寸表的**键**一律派生（`lib/billing-catalog/sizeCandidates.ts`），这里只填**数**
- * （宽高 / 单价）。库里有、本行档位里没有的键作为**孤儿**标出来——那是两份配置漂了的证据，
- * 不能静默丢掉。派生不出来时退回自由编辑并在界面上说明（**不猜**一份档位清单）。
- * ============================================ */
 import { useMemo } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import {
@@ -65,19 +41,12 @@ const ROUNDING_OPTIONS = [
 ];
 
 interface PricingTabProps {
-  /** 该能力行的计价规则；`null` = 还没配 —— **提交会被拒**（billing 拿不到规则就算不出价）。 */
   rule: CatalogRuleView | null;
-  /** 1 元 = 多少积分（换算率住定价目录里，这里只读它做换算） */
   creditsPerYuan: number | null;
-  /** 换算率读不到时的原因；读得到时为空串 */
   rateNotice: string;
-  /** 这一行的两个身份键（一个能力行恰好对应一条规则） */
   modelId: string;
   taskType: string;
-  /** 渠道：**决定这条规则该有哪些字段**（只有视频渠道按 token 估算预扣）。
-   *  后端 `pricingFieldErr` 按同一个判据收窄写闸门——这里少渲染一块，那里就会拒一次保存。 */
   channel: ChannelId;
-  /** 本行的能力视图（档位 × 比例）—— 规格键候选集从这里派生 */
   capability: ModelCapabilityView | null;
   form: RuleForm;
   onChange: (next: RuleForm) => void;
@@ -96,17 +65,12 @@ export default function PricingTab({
 }: PricingTabProps) {
   const patch = (next: Partial<RuleForm>) => onChange({ ...form, ...next });
 
-  /** 按 token 估算预扣**只对视频媒介成立**（基准维度 usage.c、提交时刻没有真实 token）。
-   *  与后端 `pricingFieldErr` 的渠道规则同一个判据：非视频渠道配了它，保存会被拒。 */
   const tokenEstimateApplies = channelOf(channel).media === 'video';
 
-  /** 基准维度可能是库里的老值（新维度、文本类维度）：不在候选里就补一条，别显示成空白 */
   const baseUnitOptions = BASE_UNIT_OPTIONS.some((o) => o.value === form.baseUnit)
     ? BASE_UNIT_OPTIONS
     : [...BASE_UNIT_OPTIONS, { value: form.baseUnit, label: `${form.baseUnit}（库里的现值）` }];
 
-  /** 维度绝对加价的维度候选：与基准维度**同一份白名单**（后端是同一个 `PRICING_BASE_UNITS`）。
-   *  库里已有的、不在候选里的键同样补一条 —— 否则它会显示成空白，而一保存就没了。 */
   const dimPriceOptions = useMemo(() => {
     const extra = [
       ...new Set(
@@ -120,16 +84,12 @@ export default function PricingTab({
       : [...BASE_UNIT_OPTIONS, ...extra.map((key) => ({ value: key, label: `${key}（库里的现值）` }))];
   }, [form.dimPrices]);
 
-  /** 单价栏的量纲（「百万 token」/「次」/「张」）：表单还没保存，直接从当前编辑值推 */
   const unitLabel = priceUnitLabel({
     baseUnit: form.baseUnit,
     unitDenominator: Number(form.unitDenominator.trim() || '1'),
   });
 
-  /* ── 规格键的候选集：来自本行的档位 × 比例（见 sizeCandidates.ts 的文件头） ───── */
 
-  /** 价格表的定价轴：库里已有的规则以它自己声明的 `basePrice.by` 为准（那是事实），
-   *  新规则（还没有 by）按基准维度给一个初值。 */
   const priceAxes = useMemo(() => {
     const declared = rule?.basePrice?.by;
     if (Array.isArray(declared)) {
@@ -143,7 +103,6 @@ export default function PricingTab({
 
   const originalPriceKeys = useMemo(() => Object.keys(rule?.basePrice?.table ?? {}), [rule]);
 
-  /** `null` = 派生不出来（档位/比例没配）→ 退回自由编辑 */
   const priceCandidates = useMemo(
     () => (capability === null ? null : priceTableCandidates(capability, priceAxes, originalPriceKeys)),
     [capability, priceAxes, originalPriceKeys],
@@ -160,8 +119,7 @@ export default function PricingTab({
 
   return (
     <>
-      {/* 「现在是什么」保持可见：这一行的身份键，藏起来就得去别处找。
-          用 MetaRow 而不是蓝色色块 —— 色块是装饰，这里要表达的是状态。 */}
+      {}
       <MetaRow
         items={[
           { label: '模型', value: modelId || '（还没填 model_id）' },
@@ -212,9 +170,6 @@ export default function PricingTab({
             value={form.priceKind}
             onChange={(v) => {
               const kind = v === 'table' ? 'table' : v === 'unset' ? 'unset' : 'const';
-              // ⚠️ 从「单价待配」切到「按规格查表」时价格表是**空的**（待配形态下不存价），
-              //    空表连一行输入框都没有，人会以为界面坏了。补一行空行，与人新建规则时一致。
-              //    这里补的不是价、也不猜档位键 —— 只是给一个能打字的地方。
               patch({
                 priceKind: kind,
                 ...(kind === 'table' && form.priceTable.length === 0
@@ -276,9 +231,7 @@ export default function PricingTab({
       </div>
 
       <div style={{ ...GRID3, marginTop: 'var(--admin-space-4)' }}>
-        {/* `unitDenominator ≠ 1` 只在「每百万 token」这个口径下有意义（分母就是为它存在的）。
-            其余渠道的分母恒为 1，写成别的会把单价整体缩小若干倍——所以非 token 渠道直接不渲染，
-            让这个字段只有一个合法值。后端同判据（`unitDenominator ≠ 1` 必须与 tokenEstimate 同时出现）。 */}
+        {}
         {tokenEstimateApplies && (
           <Field label="单位分母" hint="每多少个单位收这份单价：1 = 每秒/每张，1000000 = 每百万 token">
             <Input
@@ -315,12 +268,7 @@ export default function PricingTab({
         </Field>
       </div>
 
-      {/* ── token 预扣估算参数 ──────────────────────────────────────────────
-          为什么单独一块：视频按 token 计价的规则<b>没有它就算不出预扣</b>
-          （基准维度是 usage.c，而提交时刻没有真实 token），提交会被拒绝。
-          而它是「预扣用什么公式」的参数，不是结算口径 —— 结算永远按上游返回的真值。
-          ⚠️ <b>只对视频渠道渲染</b>：别的渠道不按 token 估（后端同判据，配了会被拒），
-          给他们看这块只会让人以为「勾上就能按 token 算」。 */}
+      {}
       {tokenEstimateApplies && (
         <>
           <div style={{ marginTop: 'var(--admin-space-5)', borderTop: '1px solid var(--admin-border)', paddingTop: 'var(--admin-space-4)' }}>
@@ -365,11 +313,7 @@ export default function PricingTab({
                   />
                 </Field>
               </div>
-              {/* ── 最低 token 用量（官方明文规则）────────────────────────────────
-                  火山：「当输入包含视频时，如果估算 token 用量 ＜ 最低 token 用量，
-                  则按最低 token 用量计算视频价格」。官方原页只给了两张表格的飞书链接，
-                  没有公开可抄的形态 —— 所以这是一块<b>留空即不做下限</b>的配置位。
-                  留空不是「还没配」，是一个明确的状态，界面上要说清楚。 */}
+              {}
               <div style={{ marginTop: 'var(--admin-space-3)' }}>
                 <Field
                   label="最低 token 用量表（规格键 → 最低 token 数，选填）"
@@ -415,10 +359,7 @@ export default function PricingTab({
         </Field>
       </div>
 
-      {/* ── 维度绝对加价（`dimPrices`）─────────────────────────────────────────────
-          与上面两块「相对量」并列但不同性质：`dims` 是万分比 × 基准单价、`multipliers` 是整单连乘，
-          而这里是**每个单位固定多少钱**，与基准单价无关 —— 单价分档的规则（输出图 0.3/0.6 两档）
-          只有它能表达「参考图每张 0.02 元在两档下是同一个数」。 */}
+      {}
       <div style={{ marginTop: 'var(--admin-space-4)' }}>
         <Field
           label="维度绝对加价（元 / 每个单位）"
@@ -451,14 +392,6 @@ export default function PricingTab({
   );
 }
 
-/**
- * 候选行下面那行小字：这个档位在本行里是多少像素。
- *
- * 图片按像素分档定价时（如 5.0 Pro 的 261 万像素分界），运营得看得见 2K = 419 万
- * 这种数才判得对档 —— 而那个数就记在本行的尺寸矩阵里，不该让人去别处找。
- *
- * 本行里没有这一档（孤儿行）时不给小字：那种行已经戴了徽标，再写一句是同义重复。
- */
 function specKeyHint(capability: ModelCapabilityView, row: KeyValueRow): string {
   const size = sizeOfSpecKey(capability, row.key);
   if (size === null) return '';
@@ -466,13 +399,6 @@ function specKeyHint(capability: ModelCapabilityView, row: KeyValueRow): string 
   return pixels ? `本行尺寸：${pixels}` : '';
 }
 
-/**
- * 维度绝对加价表（维度 + 单价(元) + 首张免费）的行编辑器。
- *
- * <p>为什么不复用 `KeyValueEditor`：它的一行只有「键 + 值」两个输入，而这里的维度必须落在
- * 白名单里（用下拉），并且每行还多一个「首张免费」。行的骨架（删除 / 添加一行）与它保持一致，
- * 免得同一页里出现两种表格。
- */
 function DimPriceEditor({
   rows,
   options,
@@ -489,8 +415,7 @@ function DimPriceEditor({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--admin-space-2)' }}>
       {rows.map((row, index) => (
         <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 'var(--admin-space-3)' }}>
-          {/* 列方向的弹性容器：自绘 Select 的根是 inline-block，只有列方向拉伸能让它撑满这一格
-              （`flex: 1` 的块级包裹在行方向上不会把 inline-block 的子元素拉宽） */}
+          {}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             <Select
               aria-label={`维度绝对加价第 ${index + 1} 行维度`}
@@ -527,13 +452,10 @@ function DimPriceEditor({
         <Button
           size="sm"
           icon={<Plus size={15} strokeWidth={2} />}
-          // 一页上有好几组可增删的表，每组的「添加一行」长得一模一样 ——
-          // 不带 aria-label 时读屏与自动化都分不出点的是哪一组（与 KeyValueEditor 同一条理由）
           aria-label="给维度绝对加价添加一行"
           onClick={() =>
             onChange([
               ...rows,
-              // 新建的行没有任何原值可依（`originalMc` / `originalSpec` 都是空）
               { key: '', value: '', originalMc: null, firstFree: false, originalSpec: null },
             ])
           }

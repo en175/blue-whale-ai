@@ -3,9 +3,6 @@ import type { AddressInfo } from "node:net";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// IKCGDX：计费主体不再由 Agent 自报，改由本层拿项目号查库解出。
-// 这组测试钉死三件事：解不出主体就不许打上游、Agent 伪造的主体头必须死在网关、
-// 上游看到的凭证是蓝鲸自己那把而不是 Agent 带来的任何东西。
 
 const AGENT_TOKEN = "agent-service-token-for-test";
 const BILLING_TOKEN = "bwsvc_test_billing_credential";
@@ -20,7 +17,6 @@ function close(server: Server | undefined): Promise<void> {
   return new Promise(resolve => (server ? server.close(() => resolve()) : resolve()));
 }
 
-/** 假 NewAPI：记下每次收到的请求头，回一个固定 JSON。 */
 function createFakeNewApi(seen: IncomingHttpHeaders[]) {
   return createServer((req, res) => {
     seen.push(req.headers);
@@ -31,7 +27,6 @@ function createFakeNewApi(seen: IncomingHttpHeaders[]) {
 
 type Captured = { status: number; body: unknown };
 
-/** 把控制器挂进真实 HTTP 栈，补齐 express 的 status/set/json 三个便捷方法。 */
 function createGateway(controller: { proxy: (...args: never[]) => Promise<void> }) {
   return createServer((req, res) => {
     const shim = res as typeof res & {
@@ -51,9 +46,6 @@ function createGateway(controller: { proxy: (...args: never[]) => Promise<void> 
       shim.setHeader("content-type", "application/json");
       shim.end(JSON.stringify(body));
     };
-    // 真的把请求体读出来，而不是塞一个固定的。控制器会把 `req.body` 重新序列化后转给上游，
-    // 同时透传原始的 content-length——写死一个体，只要测试发的不是同一串字节，undici 就会
-    // 以 `RequestContentLengthMismatchError` 拒发，而报出来的是一句「NewAPI 不可用」。
     const chunks: Buffer[] = [];
     req.on("data", chunk => chunks.push(chunk as Buffer));
     req.on("end", () => {
@@ -62,7 +54,6 @@ function createGateway(controller: { proxy: (...args: never[]) => Promise<void> 
       try {
         if (raw) body = JSON.parse(raw);
       } catch {
-        /* 保持默认体 */
       }
       Object.assign(req, { originalUrl: req.url, body });
       void controller.proxy(
@@ -109,7 +100,6 @@ describe("AgentModelGatewayController 计费归属", () => {
     process.env.NEW_API_AGENT_BILLING_TOKEN = BILLING_TOKEN;
     process.env.NEW_API_BASE_URL = `http://127.0.0.1:${upstreamPort}`;
 
-    // NEW_API_BASE_URL 在模块加载时读取，必须先设好环境再导入。
     vi.resetModules();
     const module = await import("./agent-model-gateway.controller.js");
     const controller = new module.AgentModelGatewayController({
@@ -165,7 +155,6 @@ describe("AgentModelGatewayController 计费归属", () => {
     expect(seen[0]!["x-bw-subject-user-id"]).toBe("37");
     expect(seen[0]!.authorization).toBe(`Bearer ${BILLING_TOKEN}`);
     expect(seen[0]!["x-bw-agent-run-id"]).toBe("run_abc");
-    // Agent 的服务凭证不该继续往上游走
     expect(seen[0]!["x-agent-service-token"]).toBeUndefined();
   });
 
@@ -173,7 +162,6 @@ describe("AgentModelGatewayController 计费归属", () => {
     const result = await post(port, {
       "x-agent-service-token": AGENT_TOKEN,
       "x-blue-whale-project-id": "214",
-      // 冒充别人记账 + 自带一把模型凭证，两样都必须不生效
       "x-bw-subject-user-id": "1",
       "x-bw-agent-run-id": "run_forged",
       authorization: "Bearer sk-someone-elses-key",
@@ -181,7 +169,6 @@ describe("AgentModelGatewayController 计费归属", () => {
     expect(result.status).toBe(200);
     expect(seen[0]!["x-bw-subject-user-id"]).toBe("37");
     expect(seen[0]!.authorization).toBe(`Bearer ${BILLING_TOKEN}`);
-    // 没声明 run 号时不该继承伪造的那个
     expect(seen[0]!["x-bw-agent-run-id"]).toBeUndefined();
   });
 
@@ -197,8 +184,6 @@ describe("AgentModelGatewayController 计费归属", () => {
   });
 });
 
-// 缓存淘汰按插入序取最旧的，而 `Map.set` 对**已存在**的键不刷新插入序。不先 delete 就重设，
-// 一个每 60 秒续期一次的热点项目会永远停在它第一次写入的位置，到上限时反倒是它先被踢掉。
 describe("项目→主体缓存的淘汰顺序", () => {
   it("续期过的热点项目不会因为「插入序最旧」而被淘汰", async () => {
     vi.resetModules();
@@ -214,19 +199,16 @@ describe("项目→主体缓存的淘汰顺序", () => {
       },
     } as never);
 
-    // resolveSubject 是私有的，从实例上取；这条用例要验的就是缓存本身的行为。
     const resolve = (id: string) =>
       (controller as unknown as { resolveSubject(id: string): Promise<string | null> }).resolveSubject(id);
 
-    await resolve("hot");                      // 首次写入，插入序最旧
-    for (let i = 0; i < 2_100; i += 1) await resolve(`cold-${i}`);  // 冲过 2000 条上限
-    await resolve("hot");                      // 若已被淘汰，这次会回库
+    await resolve("hot");
+    for (let i = 0; i < 2_100; i += 1) await resolve(`cold-${i}`);
+    await resolve("hot");
 
     const hotLookups = lookups.filter(id => id === "hot").length;
-    // 修复前：hot 停在插入序最旧的位置，被冷数据挤掉，这里是 2。
     expect(hotLookups).toBe(2);
 
-    // 真正要守的是「续期之后不再被踢」：再灌一轮冷数据，hot 应当活下来。
     const before = lookups.filter(id => id === "hot").length;
     for (let i = 0; i < 1_500; i += 1) await resolve(`cold2-${i}`);
     await resolve("hot");
@@ -234,7 +216,6 @@ describe("项目→主体缓存的淘汰顺序", () => {
   });
 });
 
-// 凭证配错的两种形态都表现为「Agent 不回话」，且都不会在任何地方变红。启动时就得叫。
 describe("网关凭证的启动校验", () => {
   afterEach(() => {
     vi.resetModules();
@@ -261,9 +242,6 @@ describe("网关凭证的启动校验", () => {
   });
 });
 
-// IKD7AS：上游超时改成按「空闲」计。此前是二选一——非流式按总时长砍 60 秒，流式完全不砍。
-// 前者误杀正常但慢的调用（实测 155 秒的需求抽取每次都死在精确 60.018s），后者一旦上游卡住
-// 就可以永远挂着。这组用例钉的正是这两头。
 describe("AgentModelGatewayController 上游空闲超时", () => {
   const AGENT_TOKEN_2 = "agent-service-token-for-test";
   const IDLE_MS = 300;
@@ -299,9 +277,7 @@ describe("AgentModelGatewayController 上游空闲超时", () => {
   });
 
   it("上游一个字节都不吐，在空闲窗口内断开并说明原因", async () => {
-    // 连上了、响应头也不发——改成流式之后这正是唯一还没有闸的形状。
     await boot(() => {
-      /* 故意什么都不做 */
     });
 
     const started = Date.now();
@@ -312,12 +288,10 @@ describe("AgentModelGatewayController 上游空闲超时", () => {
 
     expect(result.status).toBe(502);
     expect((result.body as { msg?: string })?.msg).toContain("没有任何响应");
-    // 断得掉，而且是被这道闸断的，不是被别的什么慢慢拖死的。
     expect(Date.now() - started).toBeLessThan(IDLE_MS * 10);
   });
 
   it("持续吐字节的慢调用不被误杀——总时长早已超过空闲窗口", async () => {
-    // 每 100ms 一段，一共 900ms：总时长是空闲窗口的三倍，但从来没有静默超过它。
     await boot((_req, res) => {
       res.writeHead(200, { "content-type": "text/event-stream" });
       let sent = 0;
@@ -347,7 +321,6 @@ describe("AgentModelGatewayController 上游空闲超时", () => {
 
     expect(response.status).toBe(200);
     expect(Date.now() - started).toBeGreaterThan(IDLE_MS);
-    // 九段全到齐：中途被砍的话这里会短一截。
     expect(text).toContain('data: {"n":8}');
     expect(text).toContain("[DONE]");
   });
@@ -356,7 +329,6 @@ describe("AgentModelGatewayController 上游空闲超时", () => {
     await boot((_req, res) => {
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.write('data: {"n":0}\n\n');
-      // 之后永远不再写，也不 end。
     });
 
     const started = Date.now();
@@ -372,7 +344,6 @@ describe("AgentModelGatewayController 上游空闲超时", () => {
         body: JSON.stringify({ model: "test-model", stream: true }),
       },
     );
-    // 响应头早已发出，此刻只能断开连接——读到一半抛错正是它诚实的样子。
     await expect(response.text()).rejects.toBeDefined();
     expect(Date.now() - started).toBeLessThan(IDLE_MS * 10);
   });

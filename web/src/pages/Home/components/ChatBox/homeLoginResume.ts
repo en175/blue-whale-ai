@@ -1,7 +1,3 @@
-/* ============================================
- * 首页未登录动作续接：Skill / 发送共用单一 pending
- * 模板卡只填输入框，不拦登录。
- * ============================================ */
 import type { SkillRecord } from '@/api/skills';
 
 export type HomePendingAction =
@@ -16,7 +12,6 @@ export type HomeLoginResume =
   | { action: 'send'; text: string }
   | { action: 'restore-text'; text: string };
 
-/** 登录窗关闭后根据 pending 与当前登录态决定续接或清理。 */
 export function resolveHomeLoginResume(
   pending: HomePendingAction | null,
   loggedIn: boolean,

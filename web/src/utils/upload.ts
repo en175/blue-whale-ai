@@ -1,6 +1,3 @@
-/* ============================================
- * upload 工具：md5 查重 → presign → PUT 直传 → complete 上传封装
- * ============================================ */
 import SparkMD5 from 'spark-md5';
 import {
   UPLOAD_SIZE_LIMIT,
@@ -14,8 +11,6 @@ import {
 import { silentInit } from '@/api/http';
 import { FileRejectedError, checkFileBeforeUpload } from './fileSignature';
 
-/** 流式计算文件 MD5（32 位小写 hex）：4MB 分块增量计算，避免大文件一次性读入内存。
- *  SubtleCrypto 不支持 MD5 算法，这里使用 spark-md5 实现。 */
 export async function computeFileMd5(file: File): Promise<string> {
   const CHUNK_SIZE = 4 * 1024 * 1024;
   const spark = new SparkMD5.ArrayBuffer();
@@ -26,7 +21,6 @@ export async function computeFileMd5(file: File): Promise<string> {
   return spark.end().toLowerCase();
 }
 
-/** 探测媒体宽高/时长（失败返回空对象，不阻断上传；用于 complete 可选参数） */
 export function probeMediaMeta(
   file: File,
   type: AssetType
@@ -71,7 +65,6 @@ export function probeMediaMeta(
   });
 }
 
-/** 由 MIME 推断资产类型，不支持返回 null */
 export function fileToAssetType(file: File): AssetType | null {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type.startsWith('video/')) return 'video';
@@ -79,16 +72,6 @@ export function fileToAssetType(file: File): AssetType | null {
   return null;
 }
 
-/** 单文件上传：返回 complete 登记结果（含永久 url）
- *
- * IKCNLS md5 去重：presign 前先算 md5 调 dedup 预检——命中直接复用已有资产，跳过
- * TOS 三步上传；未命中走三步，并在 complete 时带上 md5 落库，供后续同内容文件查重。
- *
- * 体积超限在发请求之前就挡掉（IKAL46）：presign 那一侧也会拒，但那要等一次网络往返，而且回来
- * 的是通用错误码，用户看不出是文件太大。本地先判一次，报得准也报得快。
- * opts.silent（IKI8L4 错误提示归属）：工具会话内的上传（擦除遮罩/裁切成品）由持有发送
- * 身份的页面 catch 决定是否提示——silent 透传 presign/complete 两条 HTTP 传输
- * （dedup 已 silent、PUT 直传不经 http 层），迟到失败不在 http 层抢弹；缺省口径不变。 */
 export async function uploadAssetFile(
   file: File,
   opts?: { projectId?: string; assetSource?: 'mask_erase'; silent?: boolean },
@@ -100,15 +83,9 @@ export async function uploadAssetFile(
     throw new FileRejectedError(`${file.name} 超过 ${Math.floor(limit / 1024 / 1024)}MB 上限，请换一份小一些的。`);
   }
 
-  // 读一眼文件开头，认不出是媒体就不发请求（IKE53Z）。理由与上面的体积门一样，只是判据换成了
-  // 内容：type 是从 file.type 推的，而 file.type 来自后缀，后缀是别人说的。测试站 2026-09-08
-  // 那份 524 字节的假 JPEG 就是这么一路走到 Agent 读图才被发现的。
   const rejection = await checkFileBeforeUpload(file, type);
-  // 抛 FileRejectedError 而不是普通 Error：调用点一律把上传失败套成「请重试」，而这一类
-  // 重试没有意义，那句话得原样端到用户面前。
   if (rejection) throw new FileRejectedError(rejection);
 
-  // md5 计算或查重请求失败都不阻断上传：静默降级走原三步
   const md5 = await computeFileMd5(file).catch(() => undefined);
   if (md5) {
     const dedup = await dedupUpload({
@@ -124,8 +101,6 @@ export async function uploadAssetFile(
     }
   }
 
-  // IKI8KZ 审查修订：silent 透传两步 HTTP（presign/complete）共用 silentInit 单源
-  // （此前局部名 presignInit 同时喂给 complete，名不副实）。
   const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size }, silentInit(opts));
   console.log('[upload] presign 返回:', {
     storage_key: presign.storage_key,
@@ -143,7 +118,6 @@ export async function uploadAssetFile(
     storage_key: presign.storage_key,
     project_id: opts?.projectId,
     md5,
-    // IKGOTB：遮罩中间素材带来源标记（资产列表不可见）；普通上传不传（后端缺省 uploaded）
     ...(opts?.assetSource ? { source: opts.assetSource } : {}),
     ...meta,
   }, silentInit(opts));

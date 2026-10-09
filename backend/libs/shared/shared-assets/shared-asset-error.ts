@@ -1,7 +1,6 @@
 import { SHARED_ASSET_TYPE_UNSUPPORTED_CODE } from "@lib/contracts";
 import type { SharedAssetKind, SharedAssetType } from "@lib/contracts";
 
-/** 共享资产领域错误：携带契约错误码，由 API 层捕获转为 fail(code, msg)。 */
 export class SharedAssetError extends Error {
   constructor(
     readonly code: number,
@@ -12,7 +11,6 @@ export class SharedAssetError extends Error {
   }
 }
 
-/** 不支持的共享资产类型组合（判别联合兜底，防枚举漂移/越权传值）。 */
 export class SharedAssetUnsupportedTypeError extends SharedAssetError {
   constructor(assetType: SharedAssetType, kind?: SharedAssetKind | null) {
     super(

@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/* IKGOTB 擦除编辑态闭环（画布链路）：工具互斥、涂抹/框选/橡皮经 eraseMask 纯逻辑落栈、
-   撤销重做、四退出（X/Esc/点其他卡/点空白）未发送无痕迹、清除文字直发三键、
-   涂抹发送四键+遮罩上传（source=mask_erase 不进资产列表）、发送时才建卡+纯视觉来源线
-   （origin=image-erase）、mediaRefs 推导跳过、终态回填与失败重试（冻结 input 原样重发）。
-   渲染模式沿用 eraseEntry/imageEnhance.test.tsx（FlowCanvas 打桩透出 props，
-   遮罩层指针经注入的 data.eraseEditing 回调驱动；DOM 指针换算由 EraseMaskLayer 组件测试覆盖）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -42,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -158,8 +151,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪图片节点 i1（1600×900 png，assetId 数字串满足擦除契约）。
- *  withDims=false 模拟存量老图宽高缺失（资产字典同样无尺寸，防水合回填）。 */
 function seedDoc(withDims = true) {
   canvasDocMock.current = {
     doc: {
@@ -209,7 +200,6 @@ async function renderPage() {
   });
 }
 
-/** 进入擦除编辑态（画质工具横排「擦除」按钮派发的回调，IKH3XZ） */
 async function eraseImage() {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
   await act(async () => {
@@ -217,7 +207,6 @@ async function eraseImage() {
   });
 }
 
-/** 目标源图卡上注入的遮罩编辑回调（渲染期派生，不持久化） */
 function eraseEditing() {
   const image = (flowProps.current.mediaNodes as Node[]).find((n) => n.id === 'i1')!;
   return (image.data as Record<string, unknown>).eraseEditing as {
@@ -228,7 +217,6 @@ function eraseEditing() {
   };
 }
 
-/** 经遮罩层回调涂抹一笔（画笔：两点折线） */
 async function paintStroke() {
   const editing = eraseEditing();
   await act(async () => {
@@ -252,7 +240,6 @@ function toolbar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="erase-toolbar"]');
 }
 
-/** canvas stub：jsdom 无 2d context，遮罩栅格化链路（toBlob→File）打桩 */
 function stubCanvas() {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     fillStyle: '',
@@ -284,7 +271,6 @@ beforeEach(() => {
   apiMocks.uploadAssetFile.mockReset();
   apiMocks.createImageErase.mockReset();
   apiMocks.fetchJobStatus.mockReset();
-  // IKJJR2：受理后统一运行时立即开始轮询——reset 后需有默认进行中实现（防 undefined.then）
   apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j77', status: 'processing', progress: 0, asset: null });
   apiMocks.uploadAssetFile.mockResolvedValue({
     asset_id: '901',
@@ -360,7 +346,6 @@ describe('IKGOTB 编辑态工具与遮罩编辑', () => {
     expect(ops[1]).toMatchObject({ kind: 'stroke', erase: true, radius: 20 });
     const range = document.body.querySelector<HTMLInputElement>('[data-testid="erase-brush-size"]')!;
     await act(async () => {
-      // React valueTracker 守卫：先赋原生值、再清 tracker、再派发 input，onChange 才会触发
       range.value = '40';
       const tracker = (range as unknown as { _valueTracker?: { setValue(v: string): void } })._valueTracker;
       tracker?.setValue('');
@@ -425,7 +410,6 @@ describe('IKGOTB 四退出：未发送退出画布无痕迹', () => {
     expect(flowProps.current.edges).toEqual([]);
     expect(apiMocks.createImageErase).not.toHaveBeenCalled();
     expect(apiMocks.uploadAssetFile).not.toHaveBeenCalled();
-    // 遮罩已丢弃：重进编辑态撤销不可用
     await eraseImage();
     expect(bodyBtn('erase-undo').disabled).toBe(true);
   });
@@ -450,7 +434,6 @@ describe('IKGOTB 四退出：未发送退出画布无痕迹', () => {
       flowProps.current.onSelectionChange({ nodes: [{ id: 'other' }] });
     });
     expect(toolbar()).toBeNull();
-    // 空选中不退出（真空白由 PaneClick 承担）
     await eraseImage();
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [] });
@@ -483,9 +466,7 @@ describe('IKGOTB 发送与结果闭环', () => {
     expect(payload.source_asset_id).toBe('5');
     expect(payload.target_node_id).toBeTruthy();
     expect(Object.keys(payload).sort()).toEqual(['erase_scene', 'source_asset_id', 'target_node_id']);
-    // 发送即退出编辑态
     expect(toolbar()).toBeNull();
-    // 发送时才建卡：结果卡在源卡右侧、generating、带擦除身份（lastInput 供重试）
     const nodes = flowProps.current.mediaNodes as Node[];
     expect(nodes.length).toBe(2);
     const result = nodes.find((n) => n.id !== 'i1')!;
@@ -495,12 +476,10 @@ describe('IKGOTB 发送与结果闭环', () => {
     expect(data.fileName).toBe('擦除');
     expect((data.imageErase as Record<string, unknown>).sourceAssetId).toBe('5');
     expect(result.position.x).toBeGreaterThan(400);
-    // 纯视觉来源线：origin=image-erase
     const edges = flowProps.current.edges as Array<{ source: string; target: string; data?: { origin?: string } }>;
     expect(edges.length).toBe(1);
     expect(edges[0]).toMatchObject({ source: 'i1', target: result.id });
     expect(edges[0]!.data?.origin).toBe('image-erase');
-    // 参考推导跳过该连线：源图不占参考位
     expect(imageMediaRefsOf(result.id, flowProps.current.edges, flowProps.current.mediaNodes)).toEqual([]);
   });
 
@@ -546,7 +525,7 @@ describe('IKGOTB 发送与结果闭环', () => {
     await renderPage();
     await eraseImage();
     await click('erase-clear-text');
-    await act(async () => {}); // 轮询首拍（tick 立即执行）回填终态
+    await act(async () => {});
     const nodes = flowProps.current.mediaNodes as Node[];
     const result = nodes.find((n) => n.id !== 'i1')!;
     const data = result.data as Record<string, unknown>;
@@ -556,13 +535,11 @@ describe('IKGOTB 发送与结果闭环', () => {
     expect(data.width).toBe(1600);
     expect(data.height).toBe(900);
     expect(data.draft).toBeUndefined();
-    // 源卡不动
     const source = nodes.find((n) => n.id === 'i1')!;
     expect((source.data as Record<string, unknown>).src).toBe('http://img/i1.png');
   });
 
   it('失败可重试：重试=冻结 input 原样重发创建接口（同参数），重试链路回填成品', async () => {
-    // 首个任务 failed；重试创建的新任务 succeeded（fetchJobStatus 按调用次序返回）
     apiMocks.fetchJobStatus
       .mockResolvedValueOnce({
         job_id: 'j77',
@@ -585,15 +562,13 @@ describe('IKGOTB 发送与结果闭环', () => {
     const nodes = flowProps.current.mediaNodes as Node[];
     const result = nodes.find((n) => n.id !== 'i1')!;
     expect((result.data as Record<string, unknown>).genStatus).toBe('failed');
-    // 结果卡重试按钮（MediaNode onRetryJob）→ handleRetryJob 擦除分流
     await act(async () => {
       ((result.data as Record<string, unknown>).onRetryJob as (id: string) => void)(result.id);
     });
     expect(apiMocks.createImageErase).toHaveBeenCalledTimes(2);
     const first = (apiMocks.createImageErase.mock.calls[0] as [string, Record<string, string>])[1];
     const second = (apiMocks.createImageErase.mock.calls[1] as [string, Record<string, string>])[1];
-    expect(second).toEqual(first); // 同参数（含 target_node_id=同一张结果卡）
-    // 重试任务轮询回填成品（同分辨率 png）
+    expect(second).toEqual(first);
     const settled = (flowProps.current.mediaNodes as Node[]).find((n) => n.id === result.id)!;
     const data = settled.data as Record<string, unknown>;
     expect(data.genStatus).toBeUndefined();
@@ -612,11 +587,7 @@ describe('IKGOTB 发送与结果闭环', () => {
   });
 });
 
-/* ===== IKH1WI 擦除发送条中心点跟随锚：left = 源卡中心 x（发送条自身 translateX(-50%) 真居中，
-   口径同 cutoutToolbarAnchor）。旧缺陷（估宽左上角语义）left = round(400 + 248.89 − 120) = 529，
-   恒偏左 120px；top 口径不变（节点下方 + 16）。上方工具条（走中心点锚的既有实现）位置防回归。 ===== */
 
-/** jsdom 无布局：stub 视口尺寸让 wrapperSize 生效（跟随锚计算依赖 containerWidth） */
 function stubWrapperSize(width: number, height: number) {
   vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(width);
   vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(height);
@@ -628,9 +599,7 @@ describe('IKH1WI 擦除发送条中心点跟随锚', () => {
     await renderPage();
     await eraseImage();
     const sendBar = document.body.querySelector('[data-testid="erase-send-bar"]') as HTMLElement;
-    // 独立手算：screenLeft 400 + 内容宽 497.78/2 = 648.89 → round 649（旧缺陷值 529）
     expect(sendBar.style.left).toBe('649px');
-    // 垂直行为不变：nodeBoxOf 高 280+44 → 下方 top = 324 + 16 = 340
     expect(sendBar.style.top).toBe('340px');
   });
 
@@ -648,7 +617,6 @@ describe('IKH1WI 擦除发送条中心点跟随锚', () => {
     await renderPage();
     await eraseImage();
     const sendBar = document.body.querySelector('[data-testid="erase-send-bar"]') as HTMLElement;
-    // 独立手算：右界 = 700 − 钳制半宽 120 − FOLLOW_PAD 12 = 568；center 649 > 568 → 钳 568
     expect(sendBar.style.left).toBe('568px');
   });
 });

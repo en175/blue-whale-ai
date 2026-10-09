@@ -13,14 +13,6 @@ import java.nio.charset.StandardCharsets;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
-/**
- * 图片消费者模板测试（对齐 AudioConsumerTemplateTest）。
- * <p>
- * 验证 ImageConsumer 的 TEMPLATE METHOD 行为：
- * - tag = "image"
- * - digitGuard = true（纯数字守卫）
- * - 毒丸 ack / handler 成功 ack / handler 抛错不 ack
- */
 @ExtendWith(MockitoExtension.class)
 class ImageConsumerTemplateTest {
 

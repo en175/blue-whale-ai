@@ -1,6 +1,3 @@
-/* IKGGCT T1：画布拖拽对齐吸附纯函数——六种对齐关系、屏幕阈值与 zoom 换算、
- * 双轴独立、多目标取最近、参考块收集（排除被拖集合、组框整体、尺寸回退）、
- * 对齐线区间（两块投影联合跨度的贯穿长线） */
 import { describe, expect, it } from 'vitest';
 import {
   collectSnapTargets,
@@ -19,7 +16,6 @@ function target(id: string, x: number, y: number, width: number, height: number)
   return { id, rect: rect(x, y, width, height) };
 }
 
-/** 主拖卡基准：100×80，左上角在原点（中心 (50,40)，右边 100，下边 80） */
 const MAIN = rect(0, 0, 100, 80);
 
 describe('computeSnapAlignment：六种对齐关系', () => {
@@ -161,7 +157,6 @@ describe('computeSnapAlignment：多目标命中', () => {
 
 describe('computeSnapAlignment：对齐线区间', () => {
   it('区间 = 正交方向两块投影的联合跨度：贯穿两块的长线（09-17 人工回归拍板）', () => {
-    // y 向命中（centerY）：线段沿 x，主拖卡 [0,100] 与参考块 [40,140] 联合 [0,140]
     const res = computeSnapAlignment(MAIN, [target('ref', 40, -3, 100, 80)]);
     expect(res.guides).toEqual([
       { orientation: 'horizontal', pos: 37, from: 0, to: 140, targetId: 'ref', relation: 'centerY' },
@@ -169,7 +164,6 @@ describe('computeSnapAlignment：对齐线区间', () => {
   });
 
   it('正交方向无重叠（两卡错开）时区间跨越两卡之间全部间隙，两端贴两卡外侧边缘', () => {
-    // x 投影 [0,100] 与 [150,250] 无重叠：区间 = 联合跨度 [0,250]
     const res = computeSnapAlignment(MAIN, [target('ref', 150, -3, 100, 80)]);
     expect(res.guides).toEqual([
       { orientation: 'horizontal', pos: 37, from: 0, to: 250, targetId: 'ref', relation: 'centerY' },
@@ -216,7 +210,6 @@ describe('collectSnapTargets：参考块收集', () => {
       { id: 'g1', rect: rect(10, 20, 200, 150) },
     ]);
 
-    // 主拖卡左边距组框左边 3px（≤8px）→ 吸附到组框，对齐线归属 g1
     const res = computeSnapAlignment(rect(7, 300, 60, 50), targets);
     expect(res.dx).toBe(3);
     expect(res.guides[0].targetId).toBe('g1');

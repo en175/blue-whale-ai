@@ -12,21 +12,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * 账本自检的真库集成测试（《计费逻辑详细设计》§9 层次①）。
- *
- * <h2>本文件最重要的不是「平的没问题」，而是「不平能被抓到、能定位」</h2>
- *
- * 恒等式平时永远成立（两侧由同一段代码在同一事务里写），所以「平」的用例只能证明
- * 自检不会误报——它证明不了自检有用。真正的价值在**故意造一个不平**：
- * 批次被绕过账本直接改过（ADR-0115 决策 9 明文禁止的那件事），
- * 或者账本被账本之外的写法改过。两条用例分别钉这两种情形，
- * 并断言自检能说出**差在谁身上、差在哪条分录上**——
- * 「总数不平」是最难查的错误，只知道整体错了、不知道错在哪。
- *
- * <p>门控同其它集成测试：设置 {@code BILLING_DB_PASSWORD} 才跑，且只落在
- * {@code bw_billing_test*}（{@code BillingTestDatabaseGate}）。
- */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "BILLING_DB_PASSWORD", matches = ".+")
 class LedgerSelfCheckIntegrationTest {
@@ -46,13 +31,9 @@ class LedgerSelfCheckIntegrationTest {
         jdbc.update("DELETE FROM billing_credit_lots");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // 平：不该误报
-    // ─────────────────────────────────────────────────────────────
 
     @Test
     void 平的账本_自检通过() {
-        // 发放 + 预扣（钱从可用挪到冻结）走一遍真实路径
         credits.grant(USER, CreditSource.GIFT, 100, null, "grant", "self-check", "self-check-a");
         credits.hold(USER, "cmd-a", 701L, 40, CATALOG_VERSION, NO_DISCOUNT, null, "视频生成 · 自检");
 
@@ -64,14 +45,10 @@ class LedgerSelfCheckIntegrationTest {
         assertThat(report.truncated()).isFalse();
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // 不平之一：批次侧被动过（账本自洽）
-    // ─────────────────────────────────────────────────────────────
 
     @Test
     void 批次被绕过账本改动_检出用户且指出差异在批次侧() {
         long lot = grant("self-check-break-lot", 100);
-        // 模拟「有人直接改了批次余量」：扣掉 7 分却不记账
         jdbc.update("UPDATE billing_credit_lots SET remaining = remaining - 7 WHERE id = ?", lot);
 
         LedgerSelfCheck.Report report = selfCheck.check();
@@ -94,9 +71,6 @@ class LedgerSelfCheckIntegrationTest {
                 .isEmpty();
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // 不平之二：账本侧被改过（按 balance_after 断裂点定位）
-    // ─────────────────────────────────────────────────────────────
 
     @Test
     void 分录被改过_按balance_after断裂点定位到具体分录并落成ERROR明细() {
@@ -104,14 +78,11 @@ class LedgerSelfCheckIntegrationTest {
         long walletLeg = jdbc.queryForObject(
                 "SELECT id FROM billing_ledger_entries WHERE idempotency_key = 'grant:self-check-b:wallet'",
                 Long.class);
-        // 模拟「账本被账本之外的写法改过」：把 wallet 那一笔的余额快照改大 7 分
         jdbc.update("UPDATE billing_ledger_entries SET balance_after = balance_after + 7 WHERE id = ?", walletLeg);
         int entriesBefore = entryCount();
 
         String errors;
         try (LogCapture logs = LogCapture.of(LedgerSelfCheck.class)) {
-            // ★ 走定时入口（报告 → 日志）。检查的产物就是这条 ERROR：
-            //   人要拿它去接手，所以「差多少、差在谁身上、断在哪条分录」一个都不能少
             selfCheck.runDaily();
             errors = logs.text(Level.ERROR);
         }
@@ -140,18 +111,12 @@ class LedgerSelfCheckIntegrationTest {
                 .contains("balance_after 断裂")
                 .contains("分录 id=" + walletLeg);
 
-        // 只报不动：自检**不得**写下任何「调平分录」，否则证据被抹掉、差额怎么来的不可考
         assertThat(entryCount()).isEqualTo(entriesBefore);
         assertThat(remainingOf()).isEqualTo(100);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // 夹具与断言工具
-    // ─────────────────────────────────────────────────────────────
 
     private long grant(String grantKey, long amount) {
-        // bizId 与 grantKey 逐字相同（同 LedgerIntegrationTest 的写法）：
-        // 凭证的幂等基础键是 grant:{grantKey}，测试要按它去点某一条分录
         return credits.grant(USER, CreditSource.GIFT, amount, null, "grant", grantKey, grantKey);
     }
 

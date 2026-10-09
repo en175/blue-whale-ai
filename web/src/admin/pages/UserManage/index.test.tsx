@@ -11,9 +11,6 @@ const adminApi = vi.hoisted(() => ({
   fetchOperationLogs: vi.fn(),
 }));
 
-// 页面走 Query（IKJ058）：mock 目标换成域模块，且**工厂本身也要桩** ——
-// `vi.mock` 换的是模块导出的绑定，而 `adminUsersOptions` 内部引用的仍是模块自己的
-// `fetchAdminUsers`，只桩 fetch 不生效。
 vi.mock('@/api/adminUsers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/adminUsers')>();
   return {
@@ -26,8 +23,6 @@ vi.mock('@/api/adminUsers', async (importOriginal) => {
   };
 });
 
-// 详情弹窗的审计日志也走 Query（IKJ058）—— 一并桩掉，
-// 否则单测会**真的往外发请求**（页面从 `@/api/adminOperationLogs` 取它）。
 vi.mock('@/api/adminOperationLogs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/adminOperationLogs')>();
   return {
@@ -65,7 +60,6 @@ async function renderPage() {
 }
 
 beforeEach(() => {
-  // 页面走 Query（IKJ058）：让 Query 的更新同步落地，否则读完一次 Promise 列表还是空的
   notifyManager.setScheduler((cb) => cb());
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   adminApi.fetchAdminUsers.mockResolvedValue({
@@ -98,11 +92,6 @@ afterEach(async () => {
   mountNode?.remove();
 });
 
-/**
- * 断言口径说明：本页已迁到 @/admin/ui 且**没有私有 CSS 文件**，
- * 测试不能再靠 `index.module.css` 的类名定位元素——改为按**可见文案与结构**定位，
- * 这样断言的仍是「渲染出来的内容」，而不是某个样式类是否存在。
- */
 describe('UserManage 用户 ID 展示', () => {
   it('列表用户 ID 与接口字段一致，不带 # 前缀', async () => {
     await renderPage();
@@ -122,8 +111,6 @@ describe('UserManage 用户 ID 展示', () => {
     await act(async () => {
       await Promise.resolve();
     });
-    // 基本信息用 Stat 基元：label 在 .top 里，value 是其兄弟节点，
-    // 所以取 label 的上两层容器文本 = 「用户ID」+ 值
     const idLabel = [...document.body.querySelectorAll('span')].find(
       (el) => el.textContent === '用户ID',
     );
@@ -131,17 +118,12 @@ describe('UserManage 用户 ID 展示', () => {
   });
 });
 
-/**
- * 发放积分：这一组钉的是**钱路径上的两条硬性质**——只加不减、一次意图一把幂等键。
- * 它们错了都不会报错：前者会让管理员以为加了钱其实没加，后者会在超时重发时发两笔。
- */
 describe('UserManage 发放积分', () => {
   async function openGrantModal() {
     await renderPage();
     await clickGrantButton();
   }
 
-  /** 只点按钮，不重新渲染页面 —— 用于「关掉再开」这种同一页内的往返。 */
   async function clickGrantButton() {
     await act(async () => {
       document.querySelector<HTMLButtonElement>('button[aria-label="发放积分 Alice"]')?.click();
@@ -155,7 +137,6 @@ describe('UserManage 发放积分', () => {
     });
   }
 
-  /** React 受控输入：直接改 `value` 不触发 onChange，得走原生 setter 再派发 input 事件。 */
   async function fill(placeholder: string, value: string) {
     const input = [...document.querySelectorAll<HTMLInputElement>('input')].find(
       (i) => i.placeholder === placeholder,
@@ -216,7 +197,6 @@ describe('UserManage 发放积分', () => {
     await fill('请输入原因（必填）', '补偿');
     await act(async () => confirmButton().click());
 
-    // 发放成功后弹窗关闭；同一页内再点一次按钮 = 一次新的意图
     await clickGrantButton();
     await fill('请输入积分数量', '20');
     await fill('请输入原因（必填）', '再发一笔');
@@ -232,8 +212,6 @@ describe('UserManage 发放积分', () => {
 
   it('0 / 负数 / 小数 / 超出安全整数范围都是非法值：按钮禁用，一笔都不提交', async () => {
     for (const bad of ['0', '-5', '1.5', '1e21']) {
-      // 每一轮都要**换一张干净的页面**：afterEach 只在 it 之间跑，同一个 it 里
-      // 多次 openGrantModal 会叠出多个 root，querySelector 永远命中第一个。
       if (root) await act(async () => root.unmount());
       mountNode?.remove();
       vi.clearAllMocks();
@@ -268,12 +246,6 @@ describe('UserManage 发放积分', () => {
   });
 });
 
-/**
- * IKJ5M7：筛选与分页下沉到服务端。
- *
- * 这一组钉的是「**请求里真的带了什么**」。本地筛选改服务端之后，「界面上看着筛过了」
- * 与「请求里带了条件」是两件事 —— 页面不再自己过滤，只有后者算数。
- */
 describe('UserManage 服务端筛选与分页', () => {
   const KEYWORD_PLACEHOLDER = '搜索昵称/手机号/用户ID...';
 
@@ -292,7 +264,6 @@ describe('UserManage 服务端筛选与分页', () => {
     await settle();
   }
 
-  /** React 受控输入：直接改 `value` 不触发 onChange，得走原生 setter 再派发 input 事件。 */
   async function fill(placeholder: string, value: string) {
     const input = [...document.querySelectorAll<HTMLInputElement>('input')].find(
       (i) => i.placeholder === placeholder,
@@ -305,7 +276,6 @@ describe('UserManage 服务端筛选与分页', () => {
     });
   }
 
-  /** 最后一次发给服务端的查询参数。 */
   function lastQuery() {
     const calls = adminApi.fetchAdminUsers.mock.calls;
     return calls[calls.length - 1]?.[0] as Record<string, unknown>;
@@ -314,10 +284,6 @@ describe('UserManage 服务端筛选与分页', () => {
   it('首屏不带任何筛选：「空串 = 全部」不会把哨兵发给后端', async () => {
     await renderPage();
 
-    // ⚠️ 这条不是废话：本仓真出过「`'all'` 被当成真值发下去、列表静默为空」的事
-    //    （见 `useQueryFilters` 的文件头）。断言的是**键不存在**而不是「值为空串」：
-    //    服务端拿到 `status=''` 会当成一个没见过的状态。
-    //    先确认真有一次请求（否则下面两条断言会在「没请求」时静默通过）。
     expect(lastQuery()).toMatchObject({ page: 1, pageSize: 20 });
     expect(lastQuery()).not.toHaveProperty('keyword');
     expect(lastQuery()).not.toHaveProperty('status');
@@ -332,7 +298,6 @@ describe('UserManage 服务端筛选与分页', () => {
   });
 
   it('翻页把页码发给服务端；换筛选条件后回到第 1 页', async () => {
-    // total > pageSize 才有下一页
     adminApi.fetchAdminUsers.mockResolvedValue({ list: [], total: 41 });
     await renderPage();
 
@@ -341,17 +306,9 @@ describe('UserManage 服务端筛选与分页', () => {
 
     await fill(KEYWORD_PLACEHOLDER, 'ali');
     await clickButton('查询');
-    // 换了条件还停在第 2 页，看到的会是一份**莫名其妙的空列表**（明明有匹配）
     expect(lastQuery()).toMatchObject({ page: 1, keyword: 'ali' });
   });
 
-  /**
-   * 累计充值的「？」说明（用户明确要的那一条）。
-   *
-   * <p>它解释的是「这一列算的是什么」——而这一列的数与运营脑子里的「充值」很可能
-   * 不是一个东西（赠送算不算、花掉的还算不算）。说明丢了不会有任何报错，
-   * 只会让下一个人按自己的理解读那个数。
-   */
   it('累计充值列表头带口径说明', async () => {
     await renderPage();
 

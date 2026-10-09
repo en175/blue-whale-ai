@@ -1,14 +1,3 @@
-/* ============================================
- * RechargeModal 积分充值弹窗：档位选择 / 自定义充值 / 扫码支付 / 轮询到账 / 充值协议
- * 拉起档位 → 创建订单 → 渲染真实收银台二维码 → 轮询支付结果
- *
- * ⚠️ 只有一个支付渠道（杭州银行聚合主扫）：二维码指向银行统一收银台，
- *    微信/支付宝/云闪付由**用户在银行页面上自选**，我们这边没有渠道可切。
- *
- * ⚠️ 两种购买方式（固定积分卡 / 自定义充值）**共用同一条支付链路**：
- *    下单 → 出码 → 轮询 → 到账。切换只换「买什么」，不换「怎么付」——
- *    所以它们不各写一套二维码与轮询。
- * ============================================ */
 import { useEffect, useState } from 'react';
 import { Check, CreditCard, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -34,57 +23,25 @@ interface RechargeModalProps {
   onClose: () => void;
 }
 
-/**
- * 套餐权益。
- *
- * ⚠️ 这里**刻意不写有效期**：有效期是**按商品可配**的（`topup_tiers.credits_valid_months`），
- *    写在这一组「所有档位共有」的权益里就成了一句对所有档位都成立的话 —— 而它对配了
- *    6 个月的那一档就不成立。它标在**每张卡片自己**的那一行（见下方 `planValidity`），
- *    值从接口来。
- *    （原先那句「积分永久有效」是旧策略留下的假话，早已删。）
- */
 const PERKS = ['积分即时到账', '支持全部模型调用'];
 
-/**
- * 到账异常（`grant_failed`）时给用户看的话 —— **不是**「发放中」。
- *
- * <p>两者的差别是「还会不会自己好」：`paid_pending` 还有人会重试（扫描器 / 用户轮询都在推），
- * 而 `grant_failed` 是重试也失败、需要**人工介入**的状态（PRD §11.1「展示处理中或联系客服」）。
- * 继续写「发放中…」等于让用户一直等一件不会自己发生的事。
- *
- * <p>⚠️ 本仓**没有**统一的客服入口（没有可跳转的客服页/工单链接），所以这里**如实写一句话**，
- * 不编一个假链接、也不编一个不存在的页面 —— 一个点了没用的「联系客服」比不写更糟。
- * 它集中在这一个常量里：将来有了真实入口，或者要改成后台可配（照 `permission_denied_hint`
- * 那套：代码里有默认值、后台可覆盖），改的是这一处，不是散在模板里的字符串。
- */
 const GRANT_FAILED_HINT = '积分发放异常，请联系客服';
 
-/** 支付流程状态：idle 未下单 / creating 下单中 / waiting 待支付 / paid / expired / failed */
 type Phase = 'idle' | 'creating' | 'waiting' | 'paid' | 'expired' | 'failed';
 
-/**
- * 购买方式：`tier` 固定积分卡（默认，保持原有形态）/ `custom` 自定义充值（PRD §7.2）。
- *
- * <p>默认落在固定积分卡：它是有明确档位的推荐路径，自定义是「量不够用」时的补充。
- */
 type Mode = 'tier' | 'custom';
 
-/** 静态站托管的充值协议，跨域打开以免被 SPA catch-all 打回首页。 */
 const RECHARGE_AGREEMENT_HREF =
   'https://static-bluewhale.yunjizi.cn/agreement/recharge-agreement.html';
 
-/** 价格格式化 */
 const fmtPrice = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
-/** 折扣率 → 文案：0.01 → "现价 1%"；1/缺失 = 无折扣。
- *  用「现价 X%」替代「X 折」避免折数语义歧义（0.1折=1% 常被误读为 ×0.1，引发纠纷）。 */
 function fmtDiscount(discount?: number | null) {
   if (!discount || discount >= 1) return '';
   const pct = Math.round(discount * 100);
   return `现价 ${pct}%`;
 }
 
-/** ISO 过期时间 → HH:mm 后过期 */
 function fmtExpiry(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -93,36 +50,18 @@ function fmtExpiry(iso: string) {
   return `${hh}:${mm} 后过期`;
 }
 
-/**
- * 有效期月数 → 卡片上的那句话（PRD §6.2「适用说明」）。
- *
- * <p>⚠️ **一律从接口给的那个数派生**，组件里不出现任何一个写死的年数：有效期是
- * 按商品可配的，写死任何一个数都会对某些档位变成假话（运营把某档配成 6 个月，
- * 「2 年」当场就不成立）。整年才说「年」，否则如实说「个月」——
- * 12 的整数倍才换单位，免得把 6 个月说成「0.5 年」这种没人这么讲的数。
- */
 function fmtValidMonths(months: number) {
   if (!Number.isFinite(months) || months <= 0) return '';
   return months % 12 === 0 ? `${months / 12} 年` : `${months} 个月`;
 }
 
-/** 元 → 分：两个金额只在这里比一次（浮点直接比会把 ¥0.1 与 ¥0.10 判成不同） */
 const toFen = (yuan: number) => Math.round(yuan * 100);
 
-/**
- * 拉一次余额写回全局 store（顶栏与其它页面读的就是它）。
- *
- * ⚠️ 必须 `fresh`：`/api/usage/token` 是 GET，http 层对在途同路径请求去重，
- *    而支付成功那一刻很可能还有一次旧请求在途——把旧值拿回来，
- *    用户就会看到「+1000 积分已到账」而顶栏余额纹丝不动。
- *    余额只是展示值，拉取失败不覆盖支付结果提示，下次进页面会自行纠正。
- */
 async function refreshCredits() {
   try {
     const d = await fetchCredits({ fresh: true });
     useAuthStore.getState().setUsage(d);
   } catch {
-    /* 保持原余额，不打断成功提示 */
   }
 }
 
@@ -134,78 +73,26 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [order, setOrder] = useState<RechargeOrder | null>(null);
   const [orderError, setOrderError] = useState('');
-  /** 当前购买方式（固定积分卡 / 自定义充值） */
   const [mode, setMode] = useState<Mode>('tier');
-  /**
-   * 自定义充值的后台配置；`null` = 还没拿到（或拉失败）。
-   *
-   * <p>⚠️ 本弹窗只拿它判**入口是否存在**（`enabled`），并把同一份**注入**给面板 ——
-   * 面板不再自己拉一次，否则「入口按 A 显示、面板按 B 渲染」迟早出现。
-   */
   const [customConfig, setCustomConfig] = useState<RechargeCustomConfig | null>(null);
-  /** 自定义充值下单中：防重复提交（PRD §7.5），由面板的按钮呈现 */
   const [customSubmitting, setCustomSubmitting] = useState(false);
-  /** 自定义充值下单失败：展示在面板里（与 orderError 一样，就地、不弹 toast） */
   const [customError, setCustomError] = useState('');
-  /**
-   * 后端已确认「钱到了、积分还在发」（`paid_pending` / `grant_failed`）。
-   *
-   * <p>与「等待支付结果…」分开：那时用户**可能还没付钱**，这时他已经付了。
-   * 两种情况都继续轮询（不是终态），但说的话不一样。
-   */
   const [creditsPending, setCreditsPending] = useState(false);
-  /**
-   * 后端说的是 `grant_failed`（重试也没发出去、要人工介入）—— 与「发放中」再分一层。
-   *
-   * <p>⚠️ 它不是终态：扫描器还在窗口内重试，补发成功后会回到 `paid`，所以轮询不停。
-   * 但用户此刻看到的话必须是「异常，请联系客服」——继续显示「发放中…」是在让他
-   * 等一件不会自己发生的事（PRD §11.1）。
-   */
   const [grantFailed, setGrantFailed] = useState(false);
-  /**
-   * 下单回来发现**服务端算的价与页面上显示的不一致**（运营在这中间改了价）。
-   *
-   * <p>⚠️ 这里选「提示」而不是「下单后重拉目录」：重拉是一次额外请求，它自己失败时
-   * 卡片会**静默**留着旧价、而二维码面板显示新价 —— 那个双金额的现象原样回来，且更难查。
-   * 比对只依赖手上已有的两个数（下单前显示的、下单回来的），没有第二处会漏。
-   * 自定义充值那条同理：它的展示价由配置反算，比对同样覆盖（重拉目录覆盖不到那条路）。
-   * 见 PRD §6.7「若前端展示过期，需要刷新或提示」。
-   */
   const [priceChanged, setPriceChanged] = useState(false);
 
-  /** 可用余额（billing 账本的整数积分）；未拉取到为 null，显示 -- */
   const credits = useAuthStore((s) => s.credits);
 
   const tiers = catalog?.tiers ?? [];
   const selected = tiers.find((t) => t.id === selectedId) ?? null;
   const paying = phase === 'creating' || phase === 'waiting';
-  /**
-   * 选中的这一档没有购买权限（后台把它限到了白名单，而当前用户不在名单里）。
-   *
-   * ⚠️ 判定与后端**同一个来源**（`can_purchase`，服务端用 `canPurchaseTier` 算的）：
-   *    前端自己拿白名单再算一遍，就会出现「界面可点、下单被拒」或反过来。
-   *    `null`（游客）**不算无权限** —— 那是「未判定」，价格表本来就该看得见。
-   */
   const selectedDenied = selected?.can_purchase === false;
-  /** 仅 order 成功后出右侧支付码；下单中不出「正在创建订单…」 */
   const showQrPanel =
     phase === 'waiting' || phase === 'paid' || phase === 'expired' || phase === 'failed';
-  /**
-   * 一次性订单是否还允许切换购买方式。
-   *
-   * <p>`waiting` 期间**锁住**：两个方式各自下单会同时存在两张待付订单，用户付哪张都
-   * 只算一张，「我付了怎么没到账」十有八九是这么来的。与档位卡片在支付中被锁住同一条规矩。
-   */
   const locked = paying;
-  /** 后台开了自定义充值才给这个入口（拉不到配置一律当没开） */
   const customAvailable = customConfig?.enabled === true;
-  /** 当前展示的是自定义充值面板（配置在手才是真能买的状态） */
   const showCustomPanel = mode === 'custom' && customConfig !== null;
 
-  // 打开弹窗拉取档位目录（按 sort_order 升序；服务端顺序不做承诺，客户端定一次）
-  // ⚠️ 回包里那条 `credits_per_yuan`（定价目录的**消费锚点**）保留在 state 里但**不展示**：
-  //    档位到账积分是后台配的，与它不成比例（见下方 unitHint 处的说明）。删掉它就得改
-  //    这个接口的返回形状，而它是有用的契约信息，留着但不渲染是代价最小的做法。
   useEffect(() => {
     let alive = true;
     fetchRechargeTierCatalog()
@@ -227,9 +114,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     };
   }, []);
 
-  // 自定义充值配置：只用来判「有没有这个入口」，以及把同一份配置注入给面板。
-  // ⚠️ 拉不到 / 后台关掉（enabled=false）就不出现入口 —— 一个点开是空白的页签
-  //    比没有页签更糟。这与面板「拉不到配置就整块不渲染」是同一条处置。
   useEffect(() => {
     let alive = true;
     fetchRechargeCustomConfig()
@@ -242,12 +126,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     };
   }, []);
 
-  // 待支付态轮询订单状态（立即一次 + 每 3s），直到落成 paid / expired / failed
-  // ⚠️ `paid_pending`（钱到了、积分还没发）**不是终态**：后端会重试发放，界面继续等，
-  //    提前报成功等于骗用户。但它的**话**与「还没付钱」必须不一样 ——
-  //    钱已经收了，用户此刻该看到的不是「等待支付结果…」（他付过了），而是「发放中」。
-  // ⚠️ `grant_failed` 再分一层（不再是「发放中」）：它是**重试也失败**、要人工介入的状态，
-  //    后端超窗之后也不再自动重试。继续转圈等于让用户等一件不会自己发生的事（PRD §11.1）。
   useEffect(() => {
     if (phase !== 'waiting' || !order) return;
     let alive = true;
@@ -266,7 +144,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
             setCreditsPending(true);
             setGrantFailed(false);
           } else if (st.status === 'grant_failed') {
-            // 补发成功会回到 paid（上面的分支把这一位清掉），所以它跟着状态走、不是单向的
             setCreditsPending(true);
             setGrantFailed(true);
           }
@@ -281,19 +158,13 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     };
   }, [phase, order]);
 
-  /** 确认支付 / 重新支付：接口成功后再展开二维码；失败就地提示，不出码区 */
   const handleConfirm = () => {
-    // 无权限的档位不该下单：按钮那个 `disabled` 只是界面，这里才是真正的闸
-    // （服务端也会再判一次 —— 两层都要有，前端的错在于「点了没反应」而不是安全）
     if (!selected || paying || phase === 'paid' || selectedDenied) return;
     setOrderError('');
-    // 新订单从干净的状态开始：三位都是**上一笔**的结论，跟着新单走就会说谎
-    // （比如上一笔是发放异常，新单一出码就顶着「积分发放异常」）
     setPriceChanged(false);
     setCreditsPending(false);
     setGrantFailed(false);
     setPhase('creating');
-    // 下单前用户看到的那个价：服务端回来的若与它不同，说明运营在这中间改了价
     const shownFen = toFen(selected.price);
     createRechargeOrder(selected.id)
       .then((o) => {
@@ -307,24 +178,15 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
       });
   };
 
-  /**
-   * 自定义充值点「购买」：面板只交出**修正过的积分数**（价格由服务端重新算）。
-   *
-   * <p>⚠️ 这里只传 `credits`，不传价格 —— 前端那个价是展示值（PRD §7.5）。
-   *    下单成功后与档位单走完全相同的二维码面板与轮询。
-   */
   const handleCustomConfirm = (customCredits: number) => {
     if (paying) return;
     setCustomError('');
     setOrderError('');
-    // 同 `handleConfirm`：上一笔的结论不能跟着新单走
     setPriceChanged(false);
     setCreditsPending(false);
     setGrantFailed(false);
     setCustomSubmitting(true);
     setPhase('creating');
-    // 展示价与服务端**同一个式子**（`customPriceFen`），所以两者只会在运营改了配置时不同。
-    // 拿不到配置就不比对：宁可不说，也不要报一个自己没验证过的「价变了」
     const shownFen = customConfig
       ? customPriceFen(customCredits, customConfig.credits_per_yuan)
       : null;
@@ -335,16 +197,12 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
         setPhase('waiting');
       })
       .catch((e) => {
-        // 服务端对不在格点上的值会拒绝（它不替用户改数），文案原样展示
         setCustomError(e instanceof Error ? e.message : '创建订单失败');
         setPhase('idle');
       })
       .finally(() => setCustomSubmitting(false));
   };
 
-  /** 关闭弹窗。
-   *  ⚠️ 不撤单：支付网关侧没有关单接口，本地订单自然过期（撤单只会是个骗人的空壳）。
-   *  waiting 态下用户可能刚扫完码付掉，补拉一次余额，免得关掉弹窗后顶栏还是旧值。 */
   const handleClose = () => {
     if (phase === 'waiting') void refreshCredits();
     onClose();
@@ -375,17 +233,14 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
       }}
     >
       <div className={styles.content}>
-        {/* 左侧主区域 */}
+        {}
         <div className={styles.main}>
           <h2 className={styles.title}>积分充值</h2>
           <p className={styles.subtitle}>
             {customAvailable ? '请选择充值方式' : '请选择充值套餐'}
           </p>
 
-          {/* 购买方式切换：固定积分卡（默认）/ 自定义充值。
-              ⚠️ 两者**共用**右侧二维码与轮询那一条链路，切换只决定「买什么」，
-                 所以这里没有第二套支付 UI。支付进行中锁住，避免同时开出两张待付订单。
-              ⚠️ 后台关掉自定义充值时整个切换器都不渲染：只剩一种方式，「选方式」是废话。 */}
+          {}
           {customAvailable && (
             <div className={styles.modeTabs} role="tablist" aria-label="充值方式">
               <button
@@ -413,22 +268,12 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
 
           {!showCustomPanel ? (
             <>
-              {/*
-                ⚠️ 这里**不再**写「1 元 = N 积分」。
-                那条换算率是定价目录里的**消费锚点**（生成任务按它计价），而档位到账积分
-                2026-09-27 起是后台按活动配的**配置值**（PRD §6.1 的 6 档都高于该比例，
-                如 ¥499 到账 7,500 而 499 × 15 = 7,485）。摆在卡片上方只会让人拿它去核算，
-                一遇到有折扣的档位就像「少给了」。现在统一说「以各档位标注为准」。
-
-                ⚠️ 同理**不写具体年数**：有效期自 2026-09-27 起也是按商品可配的
-                （C 把 `credits_valid_months` 接通之后，配了是真的生效）。页面级写死
-                「2 年」在运营把某档配成 6 个月时就是假话 —— 它现在标在每张卡片自己那行。
-              */}
+              {}
               <p className={styles.unitHint}>
                 到账积分与有效期以各档位标注为准
               </p>
 
-              {/* 套餐卡片（真实档位） */}
+              {}
               {tiersLoading ? (
                 <div className={styles.emptyHint}>档位加载中…</div>
               ) : tiersError ? (
@@ -437,9 +282,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                 <div className={`${styles.planRow} ${showQrPanel ? styles.planRowPaying : ''}`}>
                   {tiers.map((t) => {
                     const discount = fmtDiscount(t.discount);
-                    // 无权限的档位（后台把它限到了白名单，而当前用户不在名单里）：
-                    // 置灰 + 不可选 + 展示后台配的提示（PRD §6.3），做法与自定义充值面板一致。
-                    // `null`（游客未判定）**不算**无权限 —— 价格表本来就该看得见
                     const denied = t.can_purchase === false;
                     return (
                       <button
@@ -469,12 +311,10 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                           </span>
                         )}
                         {denied ? (
-                          // 无权限时不列权益：这张卡现在买不了，列一堆权益等于在推销一个买不到的东西
                           <span className={styles.planDeniedHint}>{t.denied_hint}</span>
                         ) : (
                           <>
-                            {/* ⚠️ 有效期**标在这一档自己身上**（PRD §6.2「适用说明」）：
-                                它按商品可配，卡片之外的任何一句话都覆盖不了所有档位 */}
+                            {}
                             <span className={styles.planValidity}>
                               有效期 {fmtValidMonths(t.credits_valid_months)}
                             </span>
@@ -495,15 +335,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
               )}
             </>
           ) : (
-            /*
-              自定义充值面板（PRD §7.2「与固定积分卡并列展示」）。
-              它自带「买多少 / 多少钱」与购买按钮，所以这一支下**不渲染底部结算栏** ——
-              两处各写一次价格，用户会怀疑哪个是真的。
-
-              ⚠️ 不传 onRequireLogin：本弹窗的入口（用户菜单、生成前余额拦截）都在登录态之后，
-                 `can_purchase === null`（游客）走不到这里。将来若放开游客入口，必须在这里接上
-                 登录弹窗，别让它变成一个点了没反应的「登录后购买」。
-            */
             <CustomRecharge
               config={customConfig}
               onConfirm={handleCustomConfirm}
@@ -512,7 +343,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
             />
           )}
 
-          {/* 底部结算栏（仅固定积分卡）：自定义充值面板自带价格与购买按钮 */}
+          {}
           {!showCustomPanel && (
             <div className={styles.bottomBar}>
               {!selected ? (
@@ -541,7 +372,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                 </div>
               )}
               <div className={styles.barRight}>
-                {/* 确认支付（未选套餐 / 选中的档位无购买权限时禁用）。渠道没法选：银行收银台统一收单 */}
+                {}
                 <button
                   className={`${styles.confirmBtn} ${!selected || paying || phase === 'paid' || selectedDenied ? styles.confirmBtnDisabled : ''}`}
                   onClick={handleConfirm}
@@ -554,7 +385,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
           )}
         </div>
 
-        {/* 右侧二维码面板：仅 order 成功后出现 */}
+        {}
         {showQrPanel && (
           <div className={styles.qrPanel}>
             {order && phase === 'waiting' && (
@@ -567,11 +398,9 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                   )}
                 </div>
                 <span className={styles.qrExpiry}>{fmtExpiry(order.expire_time)}</span>
-                {/* 银行统一收银台：渠道由用户在银行页面上选，我们这边提示到「都能扫」为止 */}
+                {}
                 <span className={styles.qrHint}>请用微信 / 支付宝 / 云闪付 扫码支付</span>
-                {/* ⚠️ 下单回来的金额若与页面上原来显示的不同（运营刚改过价），必须说一声：
-                    否则用户看到的是「卡片上的价 vs 这里的价」两个数，而不知道该照哪个付。
-                    提示而不是静默——支付订单已经是按服务端算的价建的（PRD §7.5）。 */}
+                {}
                 {priceChanged && (
                   <span className={styles.qrPriceChanged}>
                     价格已更新为 ¥{fmtPrice(order.amount)}，请确认后再支付
@@ -623,7 +452,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
         )}
       </div>
 
-      {/* 协议 */}
+      {}
       <div className={styles.agreement}>
         <span>充值即视为同意</span>
         <a

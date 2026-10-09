@@ -14,7 +14,6 @@ describe('createBillingRelease', () => {
 
     expect(publish).toHaveBeenCalledWith({
       jobId: 501,
-      // proto 的 user_id 是 int64：wire 上是数字，别把字符串透传过去
       userId: 42,
       reason: '写库失败',
     });
@@ -29,14 +28,11 @@ describe('createBillingRelease', () => {
       release({ userId: '42', jobId: 501, reason: '写库失败' }),
     ).resolves.toBeUndefined();
 
-    // 钱还在 billing 那边冻着，且返还事件没发出去：日志必须带 jobId（运维据此人工释放）
     expect(error).toHaveBeenCalledWith(expect.stringContaining('jobId=501'));
     expect(error).toHaveBeenCalledWith(expect.stringContaining('仍冻着'));
   });
 
   it('topic 是契约值（与 billing 的 topic-failed / worker 的默认值同名）', () => {
-    // ⚠️ 三处（这里、billing application.yml、worker-java JobSettlementPublisher）必须同名：
-    //    只改一处就是「事件发出去了但没人消费」——静默且致命。
     expect(BILLING_JOB_FAILED_TOPIC).toBe('generation-job-failed');
   });
 });

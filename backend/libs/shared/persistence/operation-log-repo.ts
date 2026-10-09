@@ -1,8 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
 
-/** 管理后台操作审计 repo（Prisma-backed），blue_whale 侧。
- *  只记录改变系统状态的写操作（档位/定价/用户/订单等管理变更），查询不记。
- *  operator_id / target_user_id / ip_address 为 spec 预留列，鉴权落地前可空。 */
 
 export interface OperationLogView {
   id: string;
@@ -18,15 +15,10 @@ export interface OperationLogView {
 }
 
 export interface OperationLogFilter {
-  /** 类别；缺省或 "all" 表示不过滤 */
   category?: string;
-  /** 对 target / detail / operator 做包含匹配 */
   searchText?: string;
-  /** gmt_create 下界（含） */
   from?: Date;
-  /** gmt_create 上界（含） */
   to?: Date;
-  /** 返回上限，缺省 500 */
   limit?: number;
 }
 
@@ -46,7 +38,6 @@ export interface OperationLogRepo {
   create(input: CreateOperationLogInput): Promise<OperationLogView>;
 }
 
-/* ---------- helpers ---------- */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toView(row: any): OperationLogView {
@@ -64,7 +55,6 @@ function toView(row: any): OperationLogView {
   };
 }
 
-/* ---------- factory ---------- */
 
 export function createOperationLogRepo(prisma: PrismaClient): OperationLogRepo {
   return {

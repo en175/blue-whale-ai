@@ -1,9 +1,6 @@
--- Node-owned fresh baseline. Generated from packages/persistence/prisma/schema.prisma.
--- No compatibility or data migration from the retired Java V1-V18 chain.
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 
--- CreateTable
 CREATE TABLE `assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
@@ -33,7 +30,6 @@ CREATE TABLE `assets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `canvas` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -48,7 +44,6 @@ CREATE TABLE `canvas` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `generation_jobs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NULL,
@@ -93,7 +88,6 @@ CREATE TABLE `generation_jobs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `generation_model_capability` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `provider_id` VARCHAR(32) NOT NULL,
@@ -125,7 +119,6 @@ CREATE TABLE `generation_model_capability` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `project` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `owner_id` BIGINT NOT NULL,
@@ -143,7 +136,6 @@ CREATE TABLE `project` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `conversations` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -156,7 +148,6 @@ CREATE TABLE `conversations` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `conversation_messages` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `conversation_id` BIGINT NOT NULL,
@@ -177,7 +168,6 @@ CREATE TABLE `conversation_messages` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `scene_cards` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -193,7 +183,6 @@ CREATE TABLE `scene_cards` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `agent_runs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -227,7 +216,6 @@ CREATE TABLE `agent_runs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `plan_messages` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `message_id` BIGINT NOT NULL,
@@ -258,7 +246,6 @@ CREATE TABLE `plan_messages` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `command_idempotency` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -279,7 +266,6 @@ CREATE TABLE `command_idempotency` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `project_event_stream` (
     `project_id` BIGINT NOT NULL,
     `high_watermark` BIGINT NOT NULL DEFAULT 0,
@@ -287,7 +273,6 @@ CREATE TABLE `project_event_stream` (
     PRIMARY KEY (`project_id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `project_events` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -312,7 +297,6 @@ CREATE TABLE `project_events` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `skill` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(255) NOT NULL,
@@ -339,7 +323,6 @@ CREATE TABLE `skill` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `template_card` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
@@ -358,7 +341,6 @@ CREATE TABLE `template_card` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `template_card_image` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `card_id` BIGINT NOT NULL,
@@ -374,7 +356,6 @@ CREATE TABLE `template_card_image` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable（IK764F：首页模板标签，原硬编码枚举落库；tag_code 与顺序固定，仅 label 可改名；IKA64P：visible 可见性开关）
 CREATE TABLE `template_tag` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
@@ -389,7 +370,6 @@ CREATE TABLE `template_tag` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- SeedData（IK764F：与兜底枚举对齐；IKA64P：原五栏隐藏，新增视频/图片两栏）
 INSERT INTO `template_tag` (`tag_code`, `label`, `sort_order`, `visible`) VALUES
     ('marketing', '营销视频', 0, 0),
     ('short', '微短片', 1, 0),
@@ -399,7 +379,6 @@ INSERT INTO `template_tag` (`tag_code`, `label`, `sort_order`, `visible`) VALUES
     ('video', '视频', 5, 1),
     ('picture', '图片', 6, 1);
 
--- CreateTable
 CREATE TABLE `user_skill` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
@@ -416,7 +395,6 @@ CREATE TABLE `user_skill` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `users` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `phone` VARCHAR(20) NOT NULL,
@@ -433,7 +411,6 @@ CREATE TABLE `users` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `verification_codes` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `phone` VARCHAR(20) NOT NULL,
@@ -449,7 +426,6 @@ CREATE TABLE `verification_codes` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `cost_reservations` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `generation_job_id` BIGINT NOT NULL,
@@ -474,7 +450,6 @@ CREATE TABLE `cost_reservations` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `generation_job_logs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `generation_job_id` BIGINT NOT NULL,
@@ -488,7 +463,6 @@ CREATE TABLE `generation_job_logs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `creative_skill` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `creative_skill_id` VARCHAR(80) NOT NULL,
@@ -509,7 +483,6 @@ CREATE TABLE `creative_skill` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `creative_skill_version` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `creative_skill_version_id` VARCHAR(80) NOT NULL,
@@ -527,7 +500,6 @@ CREATE TABLE `creative_skill_version` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `admin_operation_logs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `category` VARCHAR(32) NOT NULL DEFAULT '',
@@ -547,7 +519,6 @@ CREATE TABLE `admin_operation_logs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
 CREATE TABLE `topup_tiers` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(100) NOT NULL DEFAULT '',
@@ -568,7 +539,6 @@ CREATE TABLE `topup_tiers` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- IK67H9 (T11)：PlanMessage 应用闭环三表。双写自 migration 20260805130000。
 CREATE TABLE `plan_application_receipts` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `message_id` BIGINT NOT NULL,
@@ -668,8 +638,6 @@ CREATE TABLE `storyboard_previews` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- IKCH05：首页背景图/视频后台动态配置条目。
--- 与 prisma/migrations/20260901142500_ikch05_homepage_hero/migration.sql 双轨同步。
 CREATE TABLE `homepage_hero` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `media_type` VARCHAR(16) NOT NULL DEFAULT 'video',

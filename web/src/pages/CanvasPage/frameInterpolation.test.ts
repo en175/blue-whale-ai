@@ -1,7 +1,3 @@
-/* IKHLKR 视频插帧纯逻辑测试：入口门槛（未关联资产唯一前置，不做时长/源帧率前置）、
-   帧率恢复（缺键/非法值回落契约默认档 60）、草稿卡出生位（源卡实际内容宽 + 60）、
-   卡名纯函数与切档跟随（hasCustomName 保护口径）、契约三键组装（zod strict 校验）与
-   失败文案家族映射（1049 兜底，IKHLKX 消费）。 */
 import { describe, expect, it } from 'vitest';
 import {
   FRAME_INTERPOLATION_DEFAULT_FPS,
@@ -29,7 +25,6 @@ describe('frameInterpolationGateReason（插帧入口门槛预检）', () => {
 
   it('关联资产后恒放行：宽高缺失、超 HD 上限、超 2 小时都不拦（无时长/分辨率/源帧率前置）', () => {
     expect(frameInterpolationGateReason({ assetId: '7' })).toBeNull();
-    // 超 HD 输入上限（长边 3840）——HD 项置灰而插帧可用（ADR-0113 触发钮直启被拦口径）
     const overHdLimit = { assetId: '7', width: 3840, height: 2160 };
     expect(frameInterpolationGateReason(overHdLimit)).toBeNull();
     const belowHdFloor = { assetId: '7', width: 640, height: 359 };
@@ -131,14 +126,10 @@ describe('frameInterpolationErrorText（失败文案家族映射，IKHLKX 消费
   });
 
   it('入队失败（enqueue_failed / 1028）恒为逐字全文「任务入队失败，请重试」，不让后端半句 msg 透传', () => {
-    // 后端 1028 落库 msg 是「任务入队失败」（contracts/error-codes.ts 码表）——票面 IKHLKX
-    // 验收 5 要求逐字全文，故入队失败码优先于「后端 msg 优先」的既有口径
     expect(frameInterpolationErrorText({ code: 1028, msg: '任务入队失败' })).toBe('任务入队失败，请重试');
     expect(frameInterpolationErrorText({ code: 'enqueue_failed', msg: '任务入队失败' })).toBe('任务入队失败，请重试');
-    // msg 是别的可读原因或内部调试原文时同样固定全文（入队失败不对客透传上游原文）
     expect(frameInterpolationErrorText({ code: 1028, msg: '输入视频时长超出限制' })).toBe('任务入队失败，请重试');
     expect(frameInterpolationErrorText({ code: 'enqueue_failed', message: 'RocketMQ 入队失败' })).toBe('任务入队失败，请重试');
-    // 数值与字符串两形态同源同句；msg 缺失亦同
     expect(frameInterpolationErrorText({ code: 1028 })).toBe('任务入队失败，请重试');
   });
 

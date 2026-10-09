@@ -17,9 +17,9 @@ import {
   type JobExtras,
 } from "./generation-jobs-extra-repo.js";
 
-/** GenerationJob 读路径的 db port（Prisma-backed），复用部署的 generation_jobs / assets 表。
- *  对齐 Java GenerationJobService：只读（列表分页 + 状态单查），写入仍由 Java 队列路径负责。
- *  字段 snake_case 对齐 Jackson SNAKE_CASE wire 格式。 */
+
+
+
 
 export interface JobListItem {
   job_id: string;
@@ -30,10 +30,10 @@ export interface JobListItem {
   created_at: string;
   output_assets: JobOutputAsset[];
   canvas_card_state?: string;
-  /** Node handler projects this internal field into a public error envelope. */
+
   stored_error?: Record<string, unknown> | null;
-  /** IKIZQ8：两阶段视频投影增量（契约 videoStageJobProjectionSchema，金标 G11/G12）。
-   *  旧任务缺列时 video_stage 缺省 video、来源/费用/截止为 null。 */
+
+
   video_stage: string;
   source_sample_job_id: string | null;
   final_job_id: string | null;
@@ -56,23 +56,23 @@ export interface JobStatusView {
   type: string;
   status: string;
   progress: number;
-  /** 成功时的首个产出资源；无则 null。 */
+
   asset: { id: string; url: string; type: string; duration?: number } | null;
-  /** 成功时的全部产出资源（按 output_asset_ids 顺序）；一对一工具与 asset 首元素等价，
-   *  一对多工具（场景切分扇出）按序消费（IKH8C1）。 */
+
+
   output_assets: JobOutputAsset[];
-  /** 一对多任务的契约 result（当前仅 video_scene_split：duration + segments[] 起止秒与段资产引用），
-   *  取自终态日志 payload；非该形态任务或无日志时为 null。 */
+
+
   result: Record<string, unknown> | null;
-  /** 失败时 DB 存的原始 error map；无则 null。投影成公开信封是 handler 层职责。 */
+
   stored_error: Record<string, unknown> | null;
-  /** IKFM3S §4：快照里的文本输入签名投影（前端轮询成功后回写目标 usedInputSignature）；无则 null。 */
+
   text_input_signature: string | null;
-  /** IKHA2J：vocal_split 成功时的逐轨结果（契约 VocalSplitTrackResult 结构，轨序 = 契约
-   *  SCENE_TRACKS[scene]，与 output_asset_ids 写入顺序一致）；非 vocal_split / 未成功为 null。
-   *  asset（首个产出）保持不动——既有单 asset 消费者不受影响。 */
+
+
+
   tracks: JobVocalSplitTrack[] | null;
-  /** IKIZQ8：两阶段视频投影增量（契约 videoStageJobProjectionSchema，金标 G11/G12）。 */
+
   video_stage: string;
   source_sample_job_id: string | null;
   final_job_id: string | null;
@@ -81,12 +81,12 @@ export interface JobStatusView {
   actual_credits: number | null;
 }
 
-/** IKIZQ8：generation_jobs 行 → 契约阶段投影（详情/列表共用）。
- *  缺键（旧任务/普通视频）按普通视频语义兜底：video_stage=video，其余 null。
- *
- *  <p>IKJCOE：阶段字段已从主表列搬到 generation_job_extras，**wire 键名一个没变**
- *  （video_stage / final_job_id / finalize_deadline_at / charge_state / actual_credits）
- *  ——存储搬家不改变契约。source_sample_job_id 仍留在主表（它扛唯一索引）。 */
+
+
+
+
+
+
 function videoStageProjection(
   row: { source_sample_job_id: bigint | null },
   extras: JobExtras | undefined,
@@ -105,14 +105,14 @@ function videoStageProjection(
     source_sample_job_id:
       row.source_sample_job_id != null ? row.source_sample_job_id.toString() : null,
     final_job_id: finalJobId != null ? String(finalJobId) : null,
-    // 契约：RFC3339 带时区字符串；存的是 epoch 毫秒（跨语言金标对账无时区漂移）。
+
     finalize_deadline_at: deadlineMs != null ? new Date(deadlineMs).toISOString() : null,
     charge_state: extraString(extras, "charge_state"),
     actual_credits: extraNumber(extras, "actual_credits"),
   };
 }
 
-/** vocal_split 单轨投影（契约 VocalSplitTrackResult 逐字段：轨类型 + 资产 id + url + 时长秒）。 */
+
 export interface JobVocalSplitTrack {
   track_type: string;
   asset_id: string;
@@ -139,45 +139,45 @@ export interface JobListFilter {
 export interface JobRepo {
   listByUser(userId: string, filter: JobListFilter): Promise<JobPage>;
   findByIdForUser(jobId: string, userId: string): Promise<JobStatusView | null>;
-  /** 管理端列表（offset 分页，全站）。**不供用户端使用**——那条路是 listByUser。 */
+
   listForAdmin(filter: AdminJobListFilter): Promise<AdminJobPage>;
-  /**
-   * 按一批 job id 批量取「这个任务是什么」——任务类型 + 模型 + 提示词。
-   *
-   * <p>给**积分记录页**用：那一页的行来自 billing 账本（消费行的 id 形如 {@code res:7}），
-   * billing 只存 {@code generation_job_id}，任务的语义全在这儿。
-   *
-   * <p>键是 job id **字符串**；**查不到的 id 不会出现在 Map 里**（不是塞一个空对象）——
-   * 「没有这个任务」与「有任务但没提示词」是两回事，调用方要能分开处理。
-   */
+
+
+
+
+
+
+
+
+
   loadChargeTaskSummaries(ids: readonly string[]): Promise<Map<string, ChargeTaskSummary>>;
 }
 
-/** {@link JobRepo.loadChargeTaskSummaries} 的一行。 */
+
 export interface ChargeTaskSummary {
-  /** `generation_jobs.type`（text2video / audio_mix / …）。自由文本，后端不写死白名单。 */
+
   type: string;
-  /** `input.model_id`；免费工具族没有模型，为 `null`。 */
+
   modelId: string | null;
-  /** 能力表的展示名；查不到为 `null`（**不要在这里编一个名字**，口径同 {@link AdminJobListItem.model_label}）。 */
+
   modelLabel: string | null;
-  /** `input.prompt`；没有提示词的任务为 `null`。 */
+
   prompt: string | null;
   specs: Record<string, string> | null;
 }
 
-/**
- * 管理端任务记录的一行。
- *
- * <p>与 {@link JobListItem} 的差别只有三处，都是有意的：
- * <ul>
- *   <li>带 {@code user_id} / {@code project_id}——管理端必须能回答「这是谁的任务」，
- *       用户端不需要（他自己就是那个人）</li>
- *   <li>带 {@code model_id} / {@code model_label}——见下方字段注释</li>
- *   <li>**不带产出资料**——管理端看的是任务的状态，去拉一遍 assets 只是多一轮
- *       查询与 N+1，而列表里那一列缩略图没人看。要看产出请按 job_id 走详情。</li>
- * </ul>
- */
+
+
+
+
+
+
+
+
+
+
+
+
 export interface AdminJobListItem {
   job_id: string;
   user_id: string;
@@ -186,30 +186,30 @@ export interface AdminJobListItem {
   status: string;
   progress: number;
   provider: string | null;
-  /**
-   * 这次任务用的模型（`generation_jobs.input.model_id`）。
-   *
-   * <p>⚠️ **只取 input 里的这一个键**，不把整份 input 搬上列表：input 里有提示词、素材 id、
-   * 规格参数，列表一次 20 行，为了一列把它整份带出去，接口体积会随 input 的结构一起长。
-   *
-   * <p>为空是**正常情况**：免费工具族（抠图、混音一类）没有模型，历史任务用的模型也可能已下架。
-   */
+
+
+
+
+
+
+
+
   model_id: string | null;
-  /**
-   * 模型的展示名（`generation_model_capability.model_label`）。
-   *
-   * <p>`null` = 能力表里查不到这个 model_id —— 由调用方决定怎么显示，**不要在这里编一个名字**。
-   * 前端的口径是「有展示名用展示名，否则原样显示 {@link #model_id}」。
-   */
+
+
+
+
+
+
   model_label: string | null;
   retry_count: number;
   created_at: string;
   updated_at: string;
-  /**
-   * 库里存的原始 error map。**本层不投影**——投影（→ {@code {code,message}}）在
-   * `JobsService` 那一层做，因为投影器住在 jobs 模块，persistence 反向引它会成环。
-   * 与 `listByUser` 的 `stored_error` 同一口径。
-   */
+
+
+
+
+
   stored_error: Record<string, unknown> | null;
 }
 
@@ -220,9 +220,9 @@ export interface AdminJobPage {
   current: number;
 }
 
-/** 管理端任务列表的筛选条件。 */
+
 export interface AdminJobListFilter {
-  /** 按用户过滤；不传 = 全部用户 */
+
   userId?: string;
   projectId?: string;
   type?: string;
@@ -237,7 +237,7 @@ type AssetRow = {
   type: string;
   width: number | null;
   height: number | null;
-  /** IKHA2J：vocal_split 轨投影的时长秒换算源（findMany 全列天然带上，其余消费方不读）。 */
+
   duration_ms: number | null;
 };
 
@@ -248,29 +248,29 @@ function parseAssetIds(json: unknown): bigint[] {
     .filter((v): v is bigint => v !== null);
 }
 
-/**
- * 任务 input 里的模型 id；没有就是 `null`。
- *
- * <p>宽容读取（不是 strict schema）：老任务、免费工具族的 input 形态各不相同，
- * 管理端列表要能显示它们，不该因为一个字段的形状不认识就整页报错。
- * `null` 的语义是「这个任务没有模型」——**不等于**「读不出来」。
- */
+
+
+
+
+
+
+
 function modelIdOf(input: unknown): string | null {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
   const raw = (input as { model_id?: unknown }).model_id;
   return typeof raw === "string" && raw.trim() ? raw : null;
 }
 
-/**
- * 任务 input 里的提示词；没有就是 `null`。
- *
- * <p>与 {@link modelIdOf} 同一套宽容读取、同一个理由：任务类型五花八门，input 形态各异，
- * 读不出来只该让**那一格**空着，不该整页报错。空白串按「没有」处理。
- *
- * <p>⚠️ **只取这一个键，不把整份 input 带出去**——与 {@link AdminJobListItem.model_id}
- *    那条纪律同款：input 里还有素材 id、规格参数、逐类型的额外字段，整份带上列表，
- *    接口体积就会随 input 的结构一起长。这里抽完两个标量就把 input 丢掉。
- */
+
+
+
+
+
+
+
+
+
+
 function promptOf(input: unknown): string | null {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
   const raw = (input as { prompt?: unknown }).prompt;
@@ -282,17 +282,17 @@ function specsOf(input: unknown, taskType: string): Record<string, string> | nul
   return extractSpecs(input as Record<string, unknown>, taskType);
 }
 
-/**
- * 一批 model_id → 展示名。
- *
- * <p>一次批量查，不逐行查（列表 20 行就是 20 次往返，正是这种 N+1 让列表页越用越慢）。
- *
- * <p>⚠️ **不过滤 `enabled` / `is_delete`**：与用户面（`asset-repo` 只认在架模型）不同，
- *    管理端看的是**已经发生过的事**——一个模型下架了、停用了，历史任务那一列仍该显示
- *    「当时用的是哪个模型」，退化成内部 id 只会让人更看不懂。
- *    `model_id` 在能力表里按 (provider, model_id) 唯一，同一 model_id 可能有多个 provider
- *    各给一个名字；按 id 升序取第一条，让同一批数据每次显示同一个名字。
- */
+
+
+
+
+
+
+
+
+
+
+
 async function loadModelLabels(
   prisma: PrismaClient,
   modelIds: readonly string[],
@@ -339,10 +339,10 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         }),
       ]);
 
-      // 一次性批量查产出 assets，避免 N+1（对齐 Java selectBatchIds）。
+
       const allIds = rows.flatMap((r) => parseAssetIds(r.output_asset_ids));
       const assetMap = await loadAssets([...new Set(allIds)]);
-      // 同上：本页的扩展位一次查完，不在 map 里逐行查（IKJCOE）。
+
       const extrasByJob = await loadJobExtras(
         prisma,
         rows.map((r) => r.id.toString()),
@@ -356,7 +356,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
           status: r.status,
           progress: r.progress,
           input: publicGenerationInput(r.input ?? null),
-          // canvas_card_state 缺键 = 'pending'（列默认值搬到扩展位后由缺键表达）。
+
           ...(r.type === "audio_mix"
             ? { canvas_card_state: extraString(extras, "canvas_card_state") ?? "pending" }
             : {}),
@@ -394,15 +394,15 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         prisma.generation_jobs.count({ where }),
         prisma.generation_jobs.findMany({
           where,
-          // 次级键 id 与 listByUser 同款：DATETIME 只到秒，同一秒建多个任务很常见，
-          // 只按时间排序时翻页会跳行或重复行。
+
+
           orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
           skip: (filter.page - 1) * filter.size,
           take: filter.size,
         }),
       ]);
 
-      // 先把这一页用到的 model_id 收齐再一次性查展示名（见 loadModelLabels 的注释）
+
       const modelIds = new Set<string>();
       for (const r of rows) {
         const modelId = modelIdOf(r.input);
@@ -422,8 +422,8 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
             progress: r.progress,
             provider: r.provider,
             model_id: modelId,
-            // 查得到展示名就给展示名（中文名是能力表里维护的，别在这里另造一个）；
-            // 查不到就给 null，由前端原样显示 model_id
+
+
             model_label: modelId === null ? null : (labelByModel.get(modelId) ?? null),
             retry_count: r.retry_count,
             created_at: r.gmt_create.toISOString(),
@@ -445,16 +445,16 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       if (unique.length === 0) return new Map();
 
       const rows = await prisma.generation_jobs.findMany({
-        // ⚠️ **不过滤 is_delete、也不加 user_id 作用域**：管理端看的是**已经发生过的事**——
-        //    任务被软删了，那笔消费仍然发生过，那一行仍然该答得出「这是什么任务」。
-        //    （与 loadModelLabels 的「不过滤 enabled / is_delete」是同一条立场。）
-        //    也因此**不能**复用 listByUser 的 ids 过滤：那条硬绑 user_id，是用户面的路，
-        //    而积分记录页默认是**全站**流水。
+
+
+
+
+
         where: { id: { in: unique.map((id) => BigInt(id)) } },
         select: { id: true, type: true, input: true },
       });
 
-      // 与 listForAdmin 同款：先把这一批的 model_id 收齐，再一次性查展示名（不 N+1）
+
       const modelIds = new Set<string>();
       const parsed = rows.map((r) => {
         const modelId = modelIdOf(r.input);
@@ -469,7 +469,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       });
       const labelByModel = await loadModelLabels(prisma, [...modelIds]);
 
-      // 查不到的 id 不在 Map 里 —— 「没有这个任务」与「有任务但没提示词」由调用方分开处理
+
       return new Map(
         parsed.map((p) => [
           p.id,
@@ -489,7 +489,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
       });
       if (!row) return null;
-      // IKJCOE：阶段/费用字段在扩展位（原主表列已删）。
+
       const extras = await loadJobExtrasOne(prisma, row.id.toString());
 
       let outputAssets: JobOutputAsset[] = [];
@@ -521,8 +521,8 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
           }
         : null;
 
-      // 一对多 result（IKH8C1 场景切分扇出）：终态日志 payload 承载 duration + segments，
-      // 仅该形态任务查询，其余任务不多付一次 log 查询。
+
+
       let result: JobStatusView["result"] = null;
       if (row.status === "succeeded" && row.type === VIDEO_SCENE_SPLIT_JOB_TYPE) {
         const logRow = await prisma.generation_job_logs.findFirst({
@@ -539,10 +539,10 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         }
       }
 
-      // IKHA2J：vocal_split 多轨投影（契约 VocalSplitTrackResult）。轨类型不落库（assets 无
-      // 轨类型列）——按 output_asset_ids 写入顺序（= worker 终态按契约 SCENE_TRACKS 轨序拼的
-      // 数组）与 input.scene 的契约轨序逐下标 zip 组装；脏数据（长度不齐 / scene 非法）按短侧
-      // 截断安全降级，不影响 asset 单对象投影。
+
+
+
+
       let tracks: JobStatusView["tracks"] = null;
       if (row.status === "succeeded" && row.type === VOCAL_SPLIT_JOB_TYPE) {
         const ids = parseAssetIds(row.output_asset_ids);

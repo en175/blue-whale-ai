@@ -1,7 +1,5 @@
-/* @ 素材引用菜单：主面板 + 右侧类型浮层 */
 
 .portal {
-  /* IKGMAF：外壳只包一级面板；二级菜单绝对定位，避免撑高后把一级菜单顶走 */
   position: fixed;
   z-index: 80;
   width: max-content;
@@ -51,7 +49,6 @@
   padding: 0 12px;
   border-radius: 10px;
   border: 1px solid #3f3f3f;
-  /* IKGZ8C：容器统一 #1e1e1e 后原 #1f1f1f 失去对比度，调暗到 --color-bg-secondary 恢复层级 */
   background: var(--color-bg-secondary);
   color: #9a9a9a;
 }
@@ -180,9 +177,7 @@
   padding-top: 2px;
 }
 
-/* 固定菜单外壳与滚动内容分离，列表使用实色背景。 */
 .panel { max-height: calc(100vh - 16px); }
-/* 面板自身带 transform，内嵌时由原 mentionDock 定位，不能再套视口坐标。 */
 .inline { position: relative; }
 .inline .panel { max-height: inherit; }
 .search { flex-shrink: 0; }

@@ -47,7 +47,6 @@
   border-color: var(--admin-accent);
 }
 
-/* 勾：两段边框旋转 45°。比塞一个 SVG 少一个 DOM 节点，且随字号缩放 */
 .on::after {
   content: '';
   width: 3.5px;
@@ -58,7 +57,6 @@
   transform: rotate(45deg);
 }
 
-/* 中间态：只有横杠，没有勾 —— 勾会让人以为「全选了」 */
 .mixed::after {
   content: '';
   width: 7px;
@@ -69,8 +67,6 @@
   transform: none;
 }
 
-/* ⚠️ 必须带 .box 前缀：CSS Modules 只给**类名**加哈希，属性选择器会原样输出成全局规则，
-   写成裸的 [aria-disabled='true'] 会把这个样式糊到页面上每一个带该属性的元素上 */
 .box[aria-disabled='true'] {
   cursor: not-allowed;
   opacity: 0.5;

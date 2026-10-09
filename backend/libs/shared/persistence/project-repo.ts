@@ -1,22 +1,16 @@
 import type { PrismaClient } from "@prisma/client";
 
-/** Project CRUD 的 db port（Prisma-backed）。
- * 普通项目接口只暴露 purpose=canvas；GenerationInbox 由专用 repo 管理。 */
 
 export interface ProjectView {
   id: string;
   name: string;
   thumb: string | null;
-  /** 本项目画布上还挂着的最近 3 张 image URL（可用素材 ∩ nodes_json；按 gmt_create 倒序）。不足 3 张为实际张数，无图为空数组。 */
   previews: string[];
   created_at: string;
-  /** 上次打开时间（进入画布时服务端记录，IKH1YI）；从未打开为 null。 */
   last_opened_at: string | null;
-  /** 置顶时间（IKH1YI）；非空即已置顶，置顶组内按此倒序；未置顶为 null。 */
   pinned_at: string | null;
 }
 
-/** 对齐 GET /api/assets 分页壳：{ records, total, size, current }。 */
 export interface ProjectPage {
   records: ProjectView[];
   total: number;
@@ -26,7 +20,6 @@ export interface ProjectPage {
 
 export interface ProjectRepo {
   listByOwner(ownerId: string): Promise<ProjectView[]>;
-  /** 当前用户 canvas 项目分页；过滤条件与 listByOwner 相同。 */
   listByOwnerPaged(
     ownerId: string,
     page: number,
@@ -34,20 +27,13 @@ export interface ProjectRepo {
   ): Promise<ProjectPage>;
   create(ownerId: string, name: string): Promise<ProjectView>;
   findOwnedById(id: string, ownerId: string): Promise<ProjectView | null>;
-  /**
-   * 按项目号解出主人（New API 用户号），不要求调用方先知道主人是谁。
-   * 计费归属专用：模型网关拿 Agent 声明的项目号来这里换计费主体，Agent 因此无法自报记谁的账。
-   * 逻辑删除的项目返回 null——已删项目不该再产生花费。
-   */
   findOwnerId(id: string): Promise<string | null>;
   rename(
     id: string,
     ownerId: string,
     name: string,
   ): Promise<ProjectView | null>;
-  /** 记一笔「上次打开」（IKH1YI）：last_opened_at 置当前时间；非本人/不存在返回 false。 */
   touchLastOpened(id: string, ownerId: string): Promise<boolean>;
-  /** 置顶/取消置顶（IKH1YI）：pinned=true 写当前时间，false 清空；成功回读投影，非本人/不存在返回 null。 */
   setPinned(
     id: string,
     ownerId: string,
@@ -79,7 +65,6 @@ function toView(row: {
   };
 }
 
-/** 空名创建时使用当前日期时间作为默认项目名（PRD E5）。 */
 function defaultProjectName(now: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
@@ -99,7 +84,6 @@ function readUrl(value: unknown): string | null {
   return value;
 }
 
-/** 从 canvas.nodes_json 收 image 的 assetId / src，跳过 video/audio 与未启用的商品图。 */
 function collectCanvasImageRefs(nodes: unknown): { ids: Set<string>; urls: Set<string> } {
   const ids = new Set<string>();
   const urls = new Set<string>();
@@ -131,7 +115,6 @@ function collectCanvasImageRefs(nodes: unknown): { ids: Set<string>; urls: Set<s
 }
 
 export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
-  /** 名称撞名时自动追加序号（PRD E4/E6，如「名称 (2)」）。excludeId 用于重命名时排除自身。 */
   async function uniqueName(
     ownerId: bigint,
     desired: string,
@@ -157,7 +140,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
     return `${desired} (${n})`;
   }
 
-  /** 批量取每个项目画布上还挂着的最近 3 张 image URL。可用素材 ∩ nodes_json。 */
   async function attachPreviews(
     ownerId: string,
     rows: { id: bigint }[],
@@ -234,8 +216,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
           purpose: "canvas",
           is_delete: 0,
         },
-        // 置顶组在前（置顶时间倒序），其余按创建时间倒序（IKH1YI）；
-        // MySQL DESC 下 NULL 排最后，未置顶组天然在后，无需 nulls 参数。
         orderBy: [{ pinned_at: "desc" }, { gmt_create: "desc" }],
       });
       const views = rows.map(toView);
@@ -252,8 +232,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
         prisma.project.count({ where }),
         prisma.project.findMany({
           where,
-          // 置顶组在前（置顶时间倒序），其余按创建时间倒序（IKH1YI）；
-          // id desc 兜底：gmt_create 秒级并列时跨页不重复（对齐 assets 列表）。
           orderBy: [{ pinned_at: "desc" }, { gmt_create: "desc" }, { id: "desc" }],
           skip: (page - 1) * size,
           take: size,
@@ -285,7 +263,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       try {
         key = BigInt(id);
       } catch {
-        // 非数字项目号：调用方是网关而非受控前端，坏输入按查不到处理，不要抛到 500。
         return null;
       }
       const row = await prisma.project.findFirst({
@@ -321,8 +298,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       return row ? toView(row) : null;
     },
     async touchLastOpened(id, ownerId) {
-      // 只写 last_opened_at 单列（IKH1YI）：gmt_modified 无 ON UPDATE、schema 无
-      // @updatedAt，data 不含 gmt_modified/version 即天然不动二者。
       const updated = await prisma.project.updateMany({
         where: {
           id: BigInt(id),
@@ -335,7 +310,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       return updated.count === 1;
     },
     async setPinned(id, ownerId, pinned) {
-      // 同 touch：只写 pinned_at 两态（置顶=当前时间 / 取消=null），不动 gmt_modified/version。
       const updated = await prisma.project.updateMany({
         where: {
           id: BigInt(id),
@@ -357,7 +331,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       return row ? toView(row) : null;
     },
     async delete(id, ownerId) {
-      // 逻辑删除（对齐 Java is_delete）。先验归属；级联逻辑删该项目关联资产（PRD O3/E8，不可逆）。
       const owned = await prisma.project.findFirst({
         where: {
           id: BigInt(id),
@@ -371,7 +344,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       await prisma.$transaction([
         prisma.assets.updateMany({
           where: { project_id: BigInt(id), is_delete: false },
-          // 级联软删同样盖 deleted_at，否则延迟 GC 永远扫不到这批资产（IKBMDM F1）。
           data: { is_delete: true, deleted_at: new Date() },
         }),
         prisma.project.update({
@@ -382,7 +354,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       return true;
     },
     async batchDelete(ownerId, ids) {
-      // 一次删除多个项目，各自级联删资产（不可逆）；非本人/不存在的 ID 记为失败项（PRD E14，已删除不回滚）。
       const idNums = ids.map((id) => BigInt(id));
       const owned = await prisma.project.findMany({
         where: {
@@ -399,7 +370,6 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
         await prisma.$transaction([
           prisma.assets.updateMany({
             where: { project_id: { in: toDelete }, is_delete: false },
-            // 级联软删同样盖 deleted_at，否则延迟 GC 永远扫不到这批资产（IKBMDM F1）。
             data: { is_delete: true, deleted_at: new Date() },
           }),
           prisma.project.updateMany({

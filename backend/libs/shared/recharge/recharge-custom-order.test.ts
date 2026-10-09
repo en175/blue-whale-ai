@@ -22,16 +22,6 @@ import { creditsExpireAt } from "./credits-validity.js";
 import { buildCustomOrderPlan } from "@lib/shared/recharge-custom/order-spec.js";
 import { GRANT_RETRY_WINDOW_MS } from "./recharge-grant-sweeper.js";
 import { RechargeService } from "./recharge.service.js";
-/* ============================================
- * 自定义充值下单（模块 B，PRD §7）：从「用户点了买 N 积分」到「订单落库 + 交给网关」。
- *
- * ⚠️ 这一组用例**不装定价目录的 gRPC 桩**（`grpcActiveCatalog`）：自定义充值的价格用
- *    配置表自己那条换算率（`recharge_custom_config.credits_per_yuan`），**不读消费锚点**。
- *    装了反而是把「不依赖目录」这件事测没。
- *
- * 夹具与档位/回调用例共用一套（`recharge.testlib.ts`）—— 到账那条链路两种商品是**同一个**，
- * 各自搭一份假库就会各自漏一处。
- * ============================================ */
 
 vi.mock("@connectrpc/connect-node", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@connectrpc/connect-node")>();
@@ -54,40 +44,26 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     vi.unstubAllGlobals();
   });
 
-  /**
-   * ⚠️ 自定义充值**不看定价目录**（`fetchCreditsPerYuan`）：它用配置表自己那条换算率
-   * （PRD §7.1「与现有展示口径 1 元 = 10 积分不一致」）。
-   * 所以这些用例**不装 gRPC 目录桩** —— 装了反而是把「不依赖目录」这件事测没。
-   */
   it("★ 默认 600 积分 = ¥40，订单快照按 PRD §7.4/§9.3 写全，且 tier_id 为 NULL", async () => {
     makeHttp();
     const { service, orders } = await makeService();
 
     const created = await service.createOrder({ userId: 9001, credits: 600 });
 
-    // PRD §7.6「默认值」：600 积分 → ¥40（600 ÷ 15 = 40，整元）
     expect(created.amount).toBe(40);
     expect(created.credits).toBe(600);
 
     const order = orders.get(created.tradeNo);
     expect(order?.amount_fen).toBe(4_000n);
     expect(order?.credits).toBe(600n);
-    // 快照四项（§7.4「记录积分数量、换算比例、价格、有效期」）
     expect(order?.credits_per_yuan).toBe(15);
     expect(order?.config_version).toBe(5);
-    // ⚠️ 有效期快照的是**月数**（配置表里那个数），不是算好的时刻：起算点是支付成功
-    // 时刻（§9.5），下单这一刻还不知道它 —— 到期时刻由发放那一步按钱到的时刻折出来
     expect(order?.credits_valid_months).toBe(24);
     expect(order?.credits_expire_at).toBeNull();
-    // 商品类型与名称快照（§9.3「商品类型：自定义充值」「商品名称：自定义充值」）
     expect(order?.product_type).toBe("custom");
     expect(order?.product_name).toBe("自定义充值");
-    // ⚠️ 自定义充值**没有档位**：NULL，不是 0/1（编出来的数会被按 tier_id 聚合的对账当成真档位）
     expect(order?.tier_id).toBeNull();
-    // §7.1「第一版默认不对自定义充值发放首购赠送积分」
     expect(order?.bonus_credits).toBe(0n);
-    // ⚠️ 权限结果与档位那条**同一个口径**（M-3）：它是判出来的 allowed，不是 repo 的
-    // 默认常量。此前只有档位那条传真值，同一列在两条购买路径上口径不同
     expect(order?.permission_result).toBe("allowed");
   });
 
@@ -106,9 +82,6 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
 
   it("★ 取整以积分为准：价格四舍五入到分，到账积分仍是用户要的那个整数", async () => {
     makeHttp();
-    // 615 ÷ 15 = 41，整元；换成每元 7 积分时 616 ÷ 7 = 88 元整。
-    // 这里要钉的是「半分钱零头由平台承担，绝不动到账积分」：
-    // 601 ÷ 15 = 40.0666… → ¥40.07（4007 分），到账仍是 601 积分
     const { service, orders, setCustomConfig } = await makeService();
     setCustomConfig({ min_credits: BigInt(1), default_credits: BigInt(1), step_credits: BigInt(1) });
 
@@ -116,7 +89,6 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
 
     expect(orders.get(created.tradeNo)?.amount_fen).toBe(4_007n);
     expect(created.credits).toBe(601);
-    // 价格是「分」的整数倍（能被支付网关收），不是 40.0666…
     expect(created.amount).toBe(40.07);
   });
 
@@ -131,7 +103,6 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
       service.createOrder({ userId: 9001, credits: 500_000 }),
     ).rejects.toThrow(/须在 600 ~ 499995 之间/);
 
-    // 一笔都没落库、一次网关都没调 —— 「拒绝」必须是**什么都没发生**
     expect(orders.size).toBe(0);
     expect(http.calls.some((c) => c.url.endsWith("/api/pay/unifiedOrder"))).toBe(false);
   });
@@ -181,7 +152,6 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     await expect(service.createOrder({ userId: 7007, credits: 600 })).rejects.toThrow(
       /该活动仅限内测用户/,
     );
-    // 拒绝 = 不建单（PRD §7.5「用户无购买权限 → 展示提示，不创建订单」）
     expect(orders.size).toBe(0);
 
     const created = await service.createOrder({ userId: 9001, credits: 600 });
@@ -203,8 +173,6 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     const { service, setCustomConfig } = await makeService();
     setCustomConfig({ permission: "member_tier", permission_allowlist: null });
 
-    // 会员体系还没有，按它拒绝等于把所有人都挡在门外，且现场表现是
-    // 「配置看着没问题、人人都买不了」—— 那比「暂时不生效」难查得多
     const created = await service.createOrder({ userId: 9001, credits: 600 });
     expect(created.credits).toBe(600);
   });
@@ -214,10 +182,7 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     const { service, orders, setCustomConfig } = await makeService();
 
     const before = await service.createOrder({ userId: 9001, credits: 600 });
-    // ⚠️ 第一笔要先离开 `pending`：下单防重（PRD §7.5）会把「同一商品 + 同一用户 + 尚未支付」
-    //    的第二次下单复用成同一笔，那样就没有第二单可比价格了（用户付完再买才是真实路径）
     orders.get(before.tradeNo)!.status = "paid";
-    // 运营把换算率从 15 改成 5（600 积分从 ¥40 变成 ¥120）
     setCustomConfig({ credits_per_yuan: 5 });
     const after = await service.createOrder({ userId: 9001, credits: 600 });
 
@@ -231,7 +196,6 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     const http = makeHttp();
     const { service } = await makeService();
 
-    // 调用方多塞一个 amount/price 也没有用：`createOrder` 的输入里根本没有价格这一项
     const created = await service.createOrder({
       userId: 9001,
       credits: 600,
@@ -283,15 +247,11 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
       ),
     );
 
-    // 状态机两步（先「钱到了」后「积分也发了」），与档位单完全一致
     expect(statusWrites).toEqual(["paid_pending", "paid"]);
     const order = orders.get(created.tradeNo);
     expect(order?.status).toBe("paid");
-    // 到账积分 = 订单里的积分（§9.4「自定义充值：发放用户购买的积分数量」）
     expect(order?.credits).toBe(1200n);
-    // 赠送恒 0：§7.1「第一版默认不对自定义充值发放首购赠送积分」
     expect(order?.bonus_credits).toBe(0n);
-    // 首购两列仍是默认值 —— 「占用首购资格」刻意没做，理由见 recharge.service.ts 文件头
     expect(order?.first_purchase_state).toBe("unknown");
     expect(order?.first_purchase_eligible).toBe(0);
   });
@@ -319,12 +279,6 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
 });
 
 describe("buildCustomOrderPlan — 权限结果快照（M-3）", () => {
-  /**
-   * ⚠️ 为什么单独钉在**纯函数**这一层：`RECHARGE_ORDER_SNAPSHOT_DEFAULTS.permissionResult`
-   * 恰好也是 `allowed`，所以「落库那一列是 allowed」这条断言在**没接上判定**时同样是绿的。
-   * 真正要钉的是「这个字段由 plan 给出」，而不是留给 repo 的默认常量 ——
-   * 这一列回答的是「这单当时到底判过权限没有」，写死常量就是一句假话。
-   */
   const baseConfig = {
     enabled: true,
     minCredits: 600,
@@ -342,8 +296,6 @@ describe("buildCustomOrderPlan — 权限结果快照（M-3）", () => {
   it("★ plan 自己带上判定结果（不是留给 repo 的默认常量）", () => {
     const plan = buildCustomOrderPlan(baseConfig, 9001, 600);
     expect(plan.permissionResult).toBe("allowed");
-    // 键**存在**才算带上了：`undefined` 会被 repo 兜成默认值，
-    // 于是「判定过没有」这个问题又回到答不上来的状态
     expect(Object.keys(plan)).toContain("permissionResult");
   });
 

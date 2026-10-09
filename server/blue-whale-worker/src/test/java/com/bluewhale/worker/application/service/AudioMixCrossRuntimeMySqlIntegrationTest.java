@@ -44,7 +44,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-/** 只消费外层 Node 验收新建的隔离库；普通金标类始终使用自己持有的 Testcontainers。 */
 class AudioMixCrossRuntimeMySqlIntegrationTest {
     private static AudioMixCrossRuntimeDbGuard.Target target;
     private static HikariDataSource dataSource;
@@ -59,7 +58,6 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
         var env = System.getenv();
         Assumptions.assumeTrue(AudioMixCrossRuntimeDbGuard.requested(env), "未请求 IKI68N 跨端验收");
         target = AudioMixCrossRuntimeDbGuard.validate(env);
-        // 所有写路径之前只读核对随机标记，错库/错端口立即失败。
         AudioMixCrossRuntimeDbGuard.verifyMarker(target);
 
         HikariConfig config = new HikariConfig();
@@ -85,7 +83,6 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
                 mapper(StoryboardPreviewMapper.class, session),
                 extraMapper);
 
-        // IKIWP8 ③：终态收口直连 JobFinalizer（与 service 同库同 SqlSessionFactory）。
         var assetMapper = mapper(AssetMapper.class, session);
         var jobLogMapper = mapper(GenerationJobLogMapper.class, session);
         var slotMapper = mapper(GenerationOutputSlotMapper.class, session);

@@ -1,12 +1,8 @@
-/* ============================================
- * UserDropdown 用户下拉菜单样式
- * ============================================ */
 .wrapper {
   position: relative;
   display: inline-flex;
 }
 
-/* ---- 触发按钮：仅头像，无外壳 ---- */
 .trigger {
   display: flex;
   align-items: center;
@@ -36,7 +32,6 @@
   flex-shrink: 0;
 }
 
-/* ---- 未登录登录按钮 ---- */
 .loginBtn {
   height: 40px;
   padding: 0 var(--spacing-lg);
@@ -58,7 +53,6 @@
   border-color: rgba(255, 255, 255, 0.28);
 }
 
-/* ---- 下拉面板 ---- */
 .dropdown {
   position: absolute;
   top: calc(100% + 8px);
@@ -86,7 +80,6 @@
   }
 }
 
-/* ---- 用户头部 ---- */
 .userHeader {
   display: flex;
   align-items: center;
@@ -129,14 +122,12 @@
   white-space: nowrap;
 }
 
-/* ---- 分隔线 ---- */
 .divider {
   height: 1px;
   background-color: rgba(255, 255, 255, 0.12);
   margin: 4px 0;
 }
 
-/* ---- 菜单列表 ---- */
 .menuList {
   display: flex;
   flex-direction: column;

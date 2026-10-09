@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# 一键全流程：build → push → remote-build → restart。
-# 用法: deploy.sh   （new-api 单服务，无参数）
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"

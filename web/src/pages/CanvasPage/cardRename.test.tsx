@@ -8,10 +8,6 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { typePromptRefText } from './testing/promptRefEditor';
 
-/* IKFA8X 卡片名称：四类卡片改名接线（名称 + 显式 customName 标记）/ 新建文本立即可改 /
-   复制继承与独立 / 生成生命周期（首次生成、重新生成、失败重试、取消回退）保留自定义名、
-   未自定义卡片沿用自动命名。FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；
-   ImageDialog 用真实实现（沿用 imageDraft/failureRetry 组织方式）。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -41,7 +37,6 @@ vi.mock('./components/AgentPanel', () => ({
     createElement('div', { 'data-testid': 'agent-panel-stub' }, initialCardLabel),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -50,7 +45,6 @@ vi.mock('./components/Canvas', () => ({
   },
 }));
 
-/** CanvasToolbar 打桩：透出文本/图片入口 */
 const toolbarProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/CanvasToolbar', () => ({
   default: (props: Record<string, any>) => {
@@ -89,9 +83,7 @@ const apiMocks = vi.hoisted(() => ({
     _version: number | null,
   ) => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   createGenerationJob: vi.fn(async (_projectId: string, _payload: Record<string, any>) => ({ generation_job_id: 'j-new', cursor: 1 })),
-  /** 任务状态覆盖表：用例可钉住 processing/cancelled/failed 观察中间态与失败态，默认 succeeded */
   statusOverrides: { current: {} as Record<string, string> },
-  /** 按 jobId 分发终态：覆盖表优先；j-cancel 默认取消，其余默认成功 */
   fetchJobStatus: vi.fn(async (jobId: number | string) => {
     const id = String(jobId);
     const status = apiMocks.statusOverrides.current[id] ?? (id === 'j-cancel' ? 'cancelled' : 'succeeded');
@@ -111,7 +103,6 @@ const apiMocks = vi.hoisted(() => ({
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
-  /** 按能力返回模型目录：图片面板取 image，视频面板取 video（IKFA8Y 视频参考用例需要视频模型） */
   fetchGenerationModels: vi.fn(async (capability: string) => capability === 'video'
     ? [{
         model_id: 'seedance-2',
@@ -239,18 +230,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/**
- * 验收画布文档：
- * - img-a / img-b：同一素材 a1 的两张图片卡（独立性用例）
- * - vid / aud：视频卡、音频卡
- * - t1：文本卡（无 title，沿用默认显示）
- * - d1：待生成图片草稿卡
- * - gen-custom：已自定义名称的生成中卡（customName 显式标记）
- * - gen-auto：未自定义的生成中卡（自动命名回归基线）
- * - fail-custom：已自定义名称的首生成失败卡（重试用例）
- * - cancel-custom：已自定义名称的生成中草稿卡（取消回退用例）
- * - vd1：待生成视频草稿卡（IKFA8Y 视频参考显示同步用例）
- */
 function seedRenameDoc() {
   canvasDocMock.current = {
     doc: {
@@ -338,7 +317,6 @@ function textNode(id: string): Node {
   return flowProps.current.textNodes.find((n: Node) => n.id === id)!;
 }
 
-/** 节点标题编辑保存路径的真实回调（MediaNode/TextNode 提交时调用） */
 async function renameVia(id: string, kind: 'media' | 'text', name: string) {
   const node = kind === 'media' ? mediaNode(id) : textNode(id);
   const onTitleChange = (node.data as Record<string, unknown>).onTitleChange as ((id: string, name: string) => void) | undefined;
@@ -354,7 +332,6 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-/** 下载捕获：拦下 <a download> 的点击，读回浏览器将要保存的文件名（同组下载既有做法） */
 let downloadedName = '';
 function stubDownloadCapture() {
   downloadedName = '';
@@ -370,14 +347,11 @@ function stubDownloadCapture() {
   }) as typeof document.createElement);
 }
 
-/** 媒体节点下载回调（节点工具条/右键菜单的下载入口），返回下载后的文件名 */
 async function downloadVia(id: string, type: string): Promise<string> {
   const onDownload = mediaNode(id).data.onDownload as ((id: string) => Promise<void>) | undefined;
   expect(typeof onDownload, `${id} 应已接入下载回调`).toBe('function');
   const blob = new Blob(['x'], { type });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, blob: async () => blob })));
-  // IKJJR7 测试自足性修复：{ ...URL } 会把构造器 spread 成普通对象，泄漏到后续用例的
-  // new URL() 直接崩（URL is not a constructor）；保留构造器，只替换两个静态工厂方法。
   const StubURL = class extends URL {};
   (StubURL as unknown as { createObjectURL: () => string }).createObjectURL = () => 'blob:stub';
   (StubURL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = () => {};
@@ -388,21 +362,18 @@ async function downloadVia(id: string, type: string): Promise<string> {
   return downloadedName;
 }
 
-/** 图片草稿面板参考缩略项图片 alt（ImageDialog 按来源节点身份渲染，alt = 参考名称） */
 function dockRefNames(): string[] {
   return [...container.querySelectorAll<HTMLImageElement>('[data-testid="dock-media-ref"] img')].map(
     (img) => img.alt,
   );
 }
 
-/** 视频面板参考缩略项标题（BottomDialog 按来源节点身份渲染，title = 参考名称） */
 function dockVideoRefNames(): string[] {
   return [...container.querySelectorAll<HTMLElement>('[data-testid="dock-video-ref"]')].map(
     (el) => el.getAttribute('title') ?? '',
   );
 }
 
-/** 打开图片草稿卡 d1 的绑定生成面板 */
 async function openImageDraftPanel(): Promise<string> {
   await act(async () => {
     flowProps.current.onNodeClick(mediaNode('d1'));
@@ -411,7 +382,6 @@ async function openImageDraftPanel(): Promise<string> {
   return 'd1';
 }
 
-/** 打开视频草稿卡 vd1 的绑定生成面板 */
 async function openVideoDraftPanel(): Promise<string> {
   await act(async () => {
     flowProps.current.onNodeClick(mediaNode('vd1'));
@@ -419,7 +389,6 @@ async function openVideoDraftPanel(): Promise<string> {
   return 'vd1';
 }
 
-/** 从 d1 绑定面板发起一次生成，直到原位转生成中（IKIQ7M 生成中改名三用例共用前置） */
 async function sendImageDraftUntilGenerating(prompt: string) {
   await openImageDraftPanel();
   await typePrompt(prompt);
@@ -429,9 +398,7 @@ async function sendImageDraftUntilGenerating(prompt: string) {
   await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBe('generating'));
 }
 
-/** 视频草稿面板内「从节点添加素材」（IKGB7W 附件操作条）：点操作条「+ 参考」pill 进入选取模式后点画布节点作为普通参考（同画布连线语义） */
 async function pickNodeIntoVideoPanel(nodeId: string, _role: '图片' | '视频' = '图片') {
-  // IKGB7W：普通参考入口 = 操作条「+ 参考」直达（栏尾旧「+」退役，role 仅保留调用签名兼容）
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.textContent === '参考',
   )!;
@@ -571,12 +538,10 @@ describe('IKFA8X 改名接线与独立性', () => {
 
 describe('IKFA8X 生成生命周期保留自定义名', () => {
   it('待生成草稿先改名，原位转生成中保留自定义名；成功回填不覆盖（同卡身份）', async () => {
-    // 钉住新任务为 processing：稳定观察生成中状态（imageDraft 先例：succeeded 替身瞬时推进，中间态须钉住）
     apiMocks.statusOverrides.current['j-new'] = 'processing';
     await renderPage();
     await renameVia('d1', 'media', '我的封面图');
 
-    // 点击草稿卡打开绑定面板并发送
     await act(async () => {
       flowProps.current.onNodeClick(mediaNode('d1'));
     });
@@ -588,12 +553,10 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     expect(apiMocks.createGenerationJob.mock.calls[0]![1].target_node_id).toBe('d1');
 
-    // 原位转生成中：名称不被「图片生成中」覆盖，节点身份不变
     await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBe('generating'));
     expect(mediaNode('d1').data.fileName).toBe('我的封面图');
     expect(mediaNode('d1').data.customName).toBe(true);
 
-    // 放行成功：回填保留自定义名与自定义状态（成功回填守卫另由 gen-custom 水合用例覆盖）
     apiMocks.statusOverrides.current['j-new'] = 'succeeded';
     await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBeUndefined(), { timeout: 8000 });
     expect(mediaNode('d1').data.fileName).toBe('我的封面图');
@@ -604,7 +567,6 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
 
   it('水合恢复的生成中自定义卡：成功回填保留名称与自定义状态', async () => {
     await renderPage();
-    // gen-custom 水合即恢复轮询，j-custom 成功
     await vi.waitFor(() => expect(mediaNode('gen-custom').data.genStatus).toBeUndefined(), { timeout: 5000 });
     expect(mediaNode('gen-custom').data.fileName).toBe('我的封面');
     expect(mediaNode('gen-custom').data.customName).toBe(true);
@@ -619,19 +581,15 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
   });
 
   it('失败重试保留自定义名：重试转生成中与成功回填均不覆盖', async () => {
-    // 钉住重试任务为 processing：稳定观察重试后的生成中状态
     apiMocks.statusOverrides.current['j-retry-new'] = 'processing';
     await renderPage();
     await act(async () => {
       (mediaNode('fail-custom').data.onRetryJob as (id: string) => void)('fail-custom');
     });
-    // 重试沿用失败任务快照发起：旧 jobId 作为重试入参，并带调用方持有的幂等键
     await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j-fail', expect.any(String)));
-    // 重试进入生成中：名称保持
     await vi.waitFor(() => expect(mediaNode('fail-custom').data.genStatus).toBe('generating'));
     expect(mediaNode('fail-custom').data.fileName).toBe('我的草稿');
 
-    // 重试任务成功回填：名称与自定义状态保持，草稿身份结束
     apiMocks.statusOverrides.current['j-retry-new'] = 'succeeded';
     await vi.waitFor(() => expect(mediaNode('fail-custom').data.genStatus).toBeUndefined(), { timeout: 8000 });
     expect(mediaNode('fail-custom').data.fileName).toBe('我的草稿');
@@ -641,31 +599,22 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
 
   it('取消生成回退待生成：自定义名保留，不被「图片草稿」覆盖', async () => {
     await renderPage();
-    // cancel-custom 水合即恢复轮询，j-cancel 返回 cancelled → 回退待生成
     await vi.waitFor(() => expect(mediaNode('cancel-custom').data.genStatus).toBe('draft'), { timeout: 5000 });
     expect(mediaNode('cancel-custom').data.fileName).toBe('等待中的草稿');
     expect(mediaNode('cancel-custom').data.customName).toBe(true);
   });
 
-  /* IKIQ7M：生成进行中（genStatus='generating'）当刻执行改名动作本身。
-     此前覆盖的都是「改名已存在后各终态是否保留」，双击这个动作在生成中从未被测到。
-     入口可用性口径：MediaNode 标题行双击只判断改名回调是否存在（不读 genStatus），
-     renameCard 也不读 genStatus——本组用例锁住这条链路不被加门禁。 */
   it('生成进行中双击改名：入口可用并保存成功，成功回填保留该名称', async () => {
-    // 钉住 processing：稳定停在生成中，才能在 genStatus='generating' 当刻执行改名
     apiMocks.statusOverrides.current['j-new'] = 'processing';
     await renderPage();
     await sendImageDraftUntilGenerating('画一只蓝鲸');
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    // 对照基线：未自定义的生成中草稿仍是自动名
     expect(mediaNode('d1').data.fileName).toBe('图片生成中');
 
-    // 生成中双击改名：回调在位即可原位编辑提交，保存写入名称并置自定义标记
     await renameVia('d1', 'media', '生成中起的名');
     expect(mediaNode('d1').data.fileName).toBe('生成中起的名');
     expect(mediaNode('d1').data.customName).toBe(true);
 
-    // 放行成功：回填保留该名称
     apiMocks.statusOverrides.current['j-new'] = 'succeeded';
     await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBeUndefined(), { timeout: 8000 });
     expect(mediaNode('d1').data.fileName).toBe('生成中起的名');
@@ -679,21 +628,17 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
     await sendImageDraftUntilGenerating('画一只蓝鲸');
     await renameVia('d1', 'media', '生成中起的名');
 
-    // 失败终态：只改状态与错误文案，不回写名称
     apiMocks.statusOverrides.current['j-new'] = 'failed';
     await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBe('failed'), { timeout: 8000 });
     expect(mediaNode('d1').data.fileName).toBe('生成中起的名');
     expect(mediaNode('d1').data.customName).toBe(true);
 
-    // 再次生成开始：失败后草稿身份仍在，面板原位重发走 in-place 分支——
-    // 自定义标记已置位，自动名不覆盖（生成中面板只读，故从失败态发起）
     apiMocks.statusOverrides.current['j-new'] = 'processing';
     await sendImageDraftUntilGenerating('再画一只蓝鲸');
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(2));
     expect(mediaNode('d1').data.fileName).toBe('生成中起的名');
     expect(mediaNode('d1').data.customName).toBe(true);
 
-    // 再次生成的成功回填同样保留
     apiMocks.statusOverrides.current['j-new'] = 'succeeded';
     await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBeUndefined(), { timeout: 8000 });
     expect(mediaNode('d1').data.fileName).toBe('生成中起的名');
@@ -710,17 +655,14 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
     await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBe('failed'), { timeout: 8000 });
     expect(mediaNode('d1').data.fileName).toBe('生成中起的名');
 
-    // 重试沿用失败任务快照发起：钉 processing 观察重试后的生成中态，名称不覆盖
     apiMocks.statusOverrides.current['j-retry-new'] = 'processing';
     await act(async () => {
       (mediaNode('d1').data.onRetryJob as (id: string) => void)('d1');
     });
-    // 第三参 = 每次用户意图一把的幂等键（建任务幂等），与同文件其它重试断言同口径。
     await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j-new', expect.any(String)));
     await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBe('generating'));
     expect(mediaNode('d1').data.fileName).toBe('生成中起的名');
 
-    // 重试任务成功回填：名称与自定义状态保持
     apiMocks.statusOverrides.current['j-retry-new'] = 'succeeded';
     await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBeUndefined(), { timeout: 8000 });
     expect(mediaNode('d1').data.fileName).toBe('生成中起的名');
@@ -732,7 +674,6 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
   it.each(['列表选择', '画布点击'])('音频参考经%s选入后随源卡改名更新', async (entry) => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleAudioDialog(); });
-    // IKGB82：操作条「+ 参考」pill 直达（等价旧菜单项「从节点添加素材」），面板内画布列表照常打开
     const fromCanvas = container.querySelector<HTMLButtonElement>('button[title="从节点添加素材"]')!;
     await act(async () => { fromCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => {
@@ -742,7 +683,6 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
         source.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       }
     });
-    // IKFCKS：参考音频以共享缩略图展示（播放 chip 下线），名称承载在缩略图 title
     const audioThumb = () => container.querySelector('[data-testid="audio-ref-thumb"]') as HTMLElement | null;
     expect(audioThumb()?.getAttribute('title')).toBe('配乐.mp3');
 
@@ -756,25 +696,20 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
   });
 
   it('图片自由面板的文本附件随源卡改名更新，连线和正文保持不变', async () => {
-    // 已完成的生成卡保留其原始文本输入连线。
     const doc = canvasDocMock.current.doc as { edges: unknown[]; nodes: Array<{ id: string; data: Record<string, unknown> }> };
     doc.edges = [{ id: 'text-ref', source: 't1', target: 'img-a' }];
-    // IKFZ9W 起「图片节点生成图片」改为新建草稿卡，成品图不再是面板绑定目标；
-    // 验证带文本附件的图片面板须走草稿卡（与 canvasEdges 同口径）
     doc.nodes.find((n) => n.id === 'img-a')!.data.draft = true;
     await renderPage();
     await renameVia('t1', 'text', '原附件标题');
     await act(async () => {
       flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'img-a'));
     });
-    // IKFCKN：进栏后附件标题承载在文本缩略图 title（正文在悬停预览）
     const textThumb = () => container.querySelector('[data-testid="dock-text-ref"]') as HTMLElement | null;
     await vi.waitFor(() => expect(textThumb()?.getAttribute('title')).toBe('原附件标题'));
     const edges = flowProps.current.edges;
 
     await renameVia('t1', 'text', '新附件标题');
     await vi.waitFor(() => expect(textThumb()?.getAttribute('title')).toBe('新附件标题'));
-    // 正文快照不随改名变化：悬停预览仍展示原文
     await act(async () => {
       textThumb()!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
     });
@@ -789,17 +724,14 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
     await renderPage();
     const draftId = await openImageDraftPanel();
 
-    // 画布连线建立图片参考：img-a（a1）→ 草稿
     await act(async () => {
       flowProps.current.onConnect({ source: 'img-a', target: draftId, sourceHandle: null, targetHandle: null });
     });
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['上传图.png']));
 
-    // 改名来源卡片：参考显示同步新名称
     await renameVia('img-a', 'media', '海边日落');
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['海边日落']));
 
-    // 引用对象与连线不变：仍是同一节点、同一素材
     expect(flowProps.current.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`))
       .toEqual([`img-a->${draftId}`]);
     expect(mediaNode('img-a').data.assetId).toBe('a1');
@@ -809,7 +741,6 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
   it('同素材多张卡只更新改名节点的参考显示', async () => {
     await renderPage();
     const draftId = await openImageDraftPanel();
-    // img-a 与 img-b 同素材 a1：仅改名 img-a
     await act(async () => {
       flowProps.current.onConnect({ source: 'img-a', target: draftId, sourceHandle: null, targetHandle: null });
     });
@@ -822,7 +753,6 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
     await renderPage();
     const draftId = await openVideoDraftPanel();
 
-    // 连线来源：改名后按来源节点身份取当前名称（连线用视频素材，暂存选取用图片素材，避免同素材去重）
     await act(async () => {
       flowProps.current.onConnect({ source: 'vid', target: draftId, sourceHandle: null, targetHandle: null });
     });
@@ -830,7 +760,6 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
     await renameVia('vid', 'media', '连线改名');
     await vi.waitFor(() => expect(dockVideoRefNames()).toEqual(['连线改名']));
 
-    // 选取当刻缓存路径：先选取并入暂存参考，再改名
     await pickNodeIntoVideoPanel('img-a');
     await vi.waitFor(() => expect(dockVideoRefNames()).toEqual(['连线改名', '上传图.png']));
     await renameVia('img-a', 'media', '暂存改名');
@@ -840,7 +769,6 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
   it('改名后新选参考使用当前名称；已提交的生成记录保持当次输入', async () => {
     await renderPage();
     const draftId = await openImageDraftPanel();
-    // 连线建立参考后改名：参考显示用当前名称，提交输入仍是同一素材身份
     await act(async () => {
       flowProps.current.onConnect({ source: 'img-a', target: draftId, sourceHandle: null, targetHandle: null });
     });
@@ -854,7 +782,6 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
     });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
-    // 历史生成请求冻结当次输入：素材身份不随后续改名变化，也不会重复提交
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.input_asset_ids).toBeUndefined();
     expect(payload.references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a1' }]);
@@ -866,7 +793,6 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
 
   it('拖线落空白经类型菜单建图片草稿：面板参考同步改名后的名称', async () => {
     await renderPage();
-    // jsdom 无 elementsFromPoint：空栈 = 松手点不命中任何节点 → 落空白弹类型菜单
     document.elementsFromPoint = () => [];
     await act(async () => {
       flowProps.current.onConnectEnd(
@@ -901,9 +827,7 @@ describe('IKFA8Y 下载以当前卡片名称命名', () => {
 
   it('卡片名称自带扩展名时不重复追加，扩展名与真实类型不一致时按真实类型纠正', async () => {
     await renderPage();
-    // 未改名的上传卡本身带 .png：不重复追加
     expect(await downloadVia('img-a', 'image/png')).toBe('上传图.png');
-    // 用户改名保留了旧扩展名：按真实类型替换，不产生「视频名.mp4.png」这类名实不符的文件
     await renameVia('img-a', 'media', '海边日落.mp4');
     expect(await downloadVia('img-a', 'image/png')).toBe('海边日落.png');
   });

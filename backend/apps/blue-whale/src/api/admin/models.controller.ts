@@ -41,11 +41,6 @@ export class AdminModelsController {
     }
   }
 
-  /** 手动清空消费端模型能力缓存（IKH BDO）。
-   *
-   *  正常路径由各写方法自动失效；这个入口兜的是「绕过应用的改动」——迁移脚本、直改库，
-   *  或 Redis 短暂失联期间漏掉的失效。没有它就只能干等 5 分钟 TTL。
-   *  必须声明在 `@Post()` 之外：路径含斜杠，不会被 create 抢。 */
   @Post("cache/flush")
   async flushCache() {
     await invalidateModelCapabilityCache();
@@ -70,7 +65,6 @@ export class AdminModelsController {
       try {
         await this.modelAudit.logCreate(result.row, user.username);
       } catch {
-        // best-effort 审计，失败不阻断
       }
       return { success: true, data: result.row };
     } catch (error) {
@@ -119,7 +113,6 @@ export class AdminModelsController {
           user.username,
         );
       } catch {
-        // best-effort 审计，失败不阻断
       }
       return { success: true, data: await this.modelCapability.listAll() };
     } catch (error) {
@@ -135,9 +128,6 @@ export class AdminModelsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     try {
-      // IKH BDO：先读库中那一行，再做请求体校验——更新是 diff 提交，没改过的
-      // channel 不在 body 里，映射表校验与**计价形状的渠道判定**都必须按库中那一行。
-      // 这里必须读库、不得读缓存：拿旧值校验等于没校验。
       const before = await this.modelCapability.getById(id);
       if (!before) throw new AdminException(404, "模型不存在");
       const parsed = parseModelUpdateBody(body, before);
@@ -147,7 +137,6 @@ export class AdminModelsController {
       try {
         await this.modelAudit.logUpdate(before, after, user.username);
       } catch {
-        // best-effort 审计，失败不阻断
       }
       return { success: true, data: after };
     } catch (error) {
@@ -167,7 +156,6 @@ export class AdminModelsController {
       try {
         await this.modelAudit.logToggle(after, user.username);
       } catch {
-        // best-effort 审计，失败不阻断
       }
       return { success: true, data: after };
     } catch (error) {
@@ -176,13 +164,6 @@ export class AdminModelsController {
     }
   }
 
-  /** 设为该能力类型的默认模型（IKE0VX）。
-   *
-   *  为什么不复用 PUT :id：那个方法是单行全字段写，而这件事必然要动同类的**其它**行。
-   *  把跨行副作用藏进一个看起来只改一行的接口里，是下一个人看不懂 diff 的起点。
-   *
-   *  为什么不做成 toggle：取消默认之后就没有默认了，消费端回落到列表第一条——正是本单
-   *  要消灭的那个状态。它可以由「改设别的模型」达成，不该由一次误点达成。 */
   @Patch(":id/default")
   async setDefault(
     @Param("id") id: string,
@@ -194,7 +175,6 @@ export class AdminModelsController {
       try {
         await this.modelAudit.logSetDefault(after, user.username);
       } catch {
-        // best-effort 审计，失败不阻断
       }
       return { success: true, data: await this.modelCapability.listAll() };
     } catch (error) {
@@ -216,7 +196,6 @@ export class AdminModelsController {
         try {
           await this.modelAudit.logDelete(before, user.username);
         } catch {
-          // best-effort 审计，失败不阻断
         }
       }
       return { success: true };

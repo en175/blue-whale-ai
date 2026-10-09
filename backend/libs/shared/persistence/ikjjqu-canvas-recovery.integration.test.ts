@@ -1,26 +1,26 @@
-// IKJJQU（IKIXK9-SPEC-20261002 B 节）：恢复契约 v1 的真 MySQL 验证。
-//
-// 与 ikizqc-finalize-unique.integration.test.ts 同款门控：需要本地 MySQL（如 Docker 暴露的 3307）：
-//   # 容器与建库（一次）：
-//   docker run -d --name ikjjqu-mysql -e MYSQL_ROOT_PASSWORD=ikjjqu \
-//     -e MYSQL_DATABASE=bw_gate_ikjjqu -p 3307:3306 mysql:8
-//   cd backend && DATABASE_URL='mysql://root:ikjjqu@127.0.0.1:3307/bw_gate_ikjjqu' \
-//     npx prisma db push --accept-data-loss
-//   # 跑测试：
-//   IKJJQU_DATABASE_URL='mysql://root:ikjjqu@127.0.0.1:3307/bw_gate_ikjjqu' \
-//     pnpm exec vitest run backend/libs/shared/persistence/ikjjqu-canvas-recovery.integration.test.ts
-// 未配置该变量时整组跳过；跳过不算通过。
-//
-// 验收场景（工单第 9 条）：
-//   1. 首次画布竞争（两路并发首次保存 → 恰一胜，输家 412）
-//   2. 双提交竞争（同节点同承接版本并发受理 → 恰一胜，输家 409 在任务写入/预扣前）
-//   3. 节点唯一归属（owner 唯一约束 + 版本推进 + 旧承接 transferred）
-//   4. 受理断连（受理成功但响应未达 → 同意图重放返回原关联）
-//   5. 结果未落盘（job 成功但 outputs 无行 → 恢复页返回 pending/0 项）
-//   6. 保存回执丢失（保存成功后重放同 commandId → replayed=true 且不递增版本）
-//   7. 版本冲突（412 带当前版本）
-//   8. 整笔回滚（保存失败 → 画布/恢复项/回执全部不变）
-//   9. 五动作（apply/remove/restore/replaceTarget+primary/settleTarget）
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
@@ -84,7 +84,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     };
   }
 
-  /** 完整受理：锁序核对 + 建 job 行 + 关联行 + 幂等行，一个事务（与受理链路同构）。 */
+
   async function accept(acceptanceInput: CanvasRecoveryAcceptance) {
     return prisma.$transaction(async (tx) => {
       const locked = await lockCanvasRecoveryForAcceptance(tx, acceptanceInput);
@@ -110,7 +110,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
 
   beforeAll(async () => {
     prisma = getPrismaClient(databaseUrl!);
-    // raw 连接用于直接断言/操纵任务终态（绕过 repo 语义）：与 ikizqc 同款 adapter.connect 后取底层驱动。
+
     const adapter = await new PrismaMariaDb(buildPoolConfig(databaseUrl!)).connect();
     raw = adapter.underlyingDriver();
     await prisma.project.create({ data: { id: BigInt(PROJECT_ID), owner_id: BigInt(USER_ID), name: "ikjjqu" } });
@@ -137,7 +137,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
 
   it("★ 4. 受理断连：受理成功但响应未达 → 同意图重放返回原关联（不重复建任务）", async () => {
     const first = await accept(acceptance(UUID_A, "node-1", 0));
-    // 网络重放：同 submission_id、同摘要再走一次受理事务（锁内幂等回读命中）。
+
     const replay = await accept(acceptance(UUID_A, "node-1", 0));
     expect(replay).toEqual({ kind: "replay", result: first });
     const jobs = await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } });
@@ -161,7 +161,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       code: 409,
       data: { reason: RECOVERY_REASONS.bindingConflict, currentBindingRevision: 1 },
     });
-    // 输家零写入：任务/关联/归属各恰一行。
+
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
     const owner = await prisma.generation_canvas_node_owners.findUnique({
@@ -171,8 +171,8 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
   });
 
   it("★ 3. 节点唯一归属：新提交接管推进版本，旧承接项转 transferred", async () => {
-    // 旧提交先落一个持久输出（replaceTarget+apply primary），再被新意图接管——
-    // 接管后旧关联 is_current=false 但仍拥有自己的输出节点（恢复页可见、job=null）。
+
+
     const created = await accept(acceptance(UUID_A, "node-own", 0));
     await raw.query("UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST('[\"12\"]' AS JSON) WHERE id = ?", [Number(created.generation_job_id)]);
     await saveCanvasWithRecovery(prisma, {
@@ -184,7 +184,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
         { recoveryItemId: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), expectedRevision: 0, action: "apply" },
       ],
     });
-    // 第二个新意图（新 submission_id）携当前版本接管。
+
     await accept(acceptance(UUID_B, "node-own", 1));
     const owners = await prisma.generation_canvas_node_owners.findMany({
       where: { project_id: BigInt(PROJECT_ID), node_id: "node-own" },
@@ -195,9 +195,9 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_A } },
     });
     expect(old?.target_state).toBe("transferred");
-    // 受理 pending/1 → replaceTarget replaced/2 → 接管 transferred/3。
+
     expect(Number(old?.target_revision)).toBe(3);
-    // 恢复页：旧关联 is_current=false（job=null，但有持久 primary 输出项）；新关联 is_current=true。
+
     const page = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
     const oldRecord = page.records.find(r => r.submission_id === UUID_A)!;
     const newRecord = page.records.find(r => r.submission_id === UUID_B)!;
@@ -218,7 +218,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     expect(target.state).toBe("pending");
     expect(target.revision).toBe(1);
     expect(primary).toMatchObject({ state: "pending", revision: 0, node_binding_revision: 0 });
-    // outputs 表无行（GET 不写库）。
+
     expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
   });
 
@@ -229,7 +229,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       data: { generationRecovery: { protocolVersion: 1, submissionId: UUID_A, outputKey }, mediaType: "image" },
     });
     const doc = JSON.stringify([markedNode(TARGET_OUTPUT_KEY)]);
-    // 首次画布竞争：两路并发首次保存（expectedVersion=null）→ 恰一胜，输家 412。
+
     const barrier = () => Promise.allSettled([
       saveCanvasWithRecovery(prisma, baseSave(UUID_D, null, doc, [{ id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "apply" }])),
       saveCanvasWithRecovery(prisma, baseSave(UUID_E, null, doc, [{ id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "apply" }])),
@@ -245,19 +245,19 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       data: { reason: RECOVERY_REASONS.versionConflict, version: 0 },
     });
     expect(won[0]!.value.version).toBe(0);
-    // apply：目标项 pending → present，revision 1→2。
+
     expect(won[0]!.value.recoveryReceipt.changes[0]).toMatchObject({
       state: "present", revision: 2, nodeBindingRevision: 1,
     });
-    // 版本冲突：过期版本 → 412 带当前版本。
+
     const stale = await saveCanvasWithRecovery(prisma, baseSave("0a1b2c3d-0000-4000-8000-00000000f006", 5, doc, [])).catch(e => e as RecoveryContractError);
     expect(stale.envelope).toMatchObject({ code: 412, data: { reason: RECOVERY_REASONS.versionConflict, version: 0 } });
-    // resolve：按恢复项身份定向读取。
+
     const resolved = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [recoveryItemId(UUID_A, TARGET_OUTPUT_KEY)]);
     expect(resolved).toHaveLength(1);
     expect(resolved[0]!.items).toHaveLength(1);
     expect(resolved[0]!.items[0]).toMatchObject({ state: "present", revision: 2 });
-    // resolve：查询不到的项整体 404（不猜测补建）。
+
     const missing = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, ["gcr:0a1b2c3d-0000-4000-8000-00000000ffff:primary"]).catch(e => e as RecoveryContractError);
     expect(missing).toBeInstanceOf(RecoveryContractError);
     expect(missing.envelope).toMatchObject({ code: 404, data: { reason: RECOVERY_REASONS.resourceNotFound } });
@@ -272,14 +272,14 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     ]));
     expect(first.recoveryReceipt.replayed).toBe(false);
     const versionAfterFirst = await canvasVersion();
-    // 回执丢失重放：同 commandId 同载荷 → 原回执，replayed=true，版本不递增。
+
     const replay = await saveCanvasWithRecovery(prisma, baseSave(commandId, null, doc, [
       { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "apply" },
     ]));
     expect(replay.recoveryReceipt.replayed).toBe(true);
     expect(replay.version).toBe(first.version);
     expect(await canvasVersion()).toBe(versionAfterFirst);
-    // 异载荷复用命令 → 409 recovery_command_reused。
+
     const reused = await saveCanvasWithRecovery(prisma, baseSave(commandId, null, JSON.stringify([]), [])).catch(e => e as RecoveryContractError);
     expect(reused.envelope).toMatchObject({ code: 409, data: { reason: RECOVERY_REASONS.commandReused } });
   });
@@ -291,14 +291,14 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "apply" },
     ]));
     const version = await canvasVersion();
-    // 动作与文档不一致：文档中节点缺正确标记却要求 remove 之外的 apply 幂等。
+
     const bad = await saveCanvasWithRecovery(prisma, baseSave(UUID_E, version, JSON.stringify([
       { id: "other", type: "textNode", data: {} },
     ]), [
-      { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 2, action: "restore" }, // restore 只接受 removed
+      { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 2, action: "restore" },
     ])).catch(e => e as RecoveryContractError);
     expect(bad.envelope).toMatchObject({ code: 409, data: { reason: RECOVERY_REASONS.itemConflict, currentState: "present" } });
-    // 整笔回滚：版本不变、回执行不存在、目标项状态未被推进。
+
     expect(await canvasVersion()).toBe(version);
     const receipt = await prisma.command_idempotency.findUnique({
       where: { project_id_operation_idempotency_key: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1", idempotency_key: UUID_E } },
@@ -313,9 +313,9 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
   });
 
   it("★ 9五动作. remove/restore 与 replaceTarget+primary 及 settleTarget", async () => {
-    // — remove：空占位移除（文档不含标记）→ removed；restore 恢复为 present —
+
     const createdActions = await accept(acceptance(UUID_A, "node-actions", 0));
-    // B.6 remove 守护：目标删除只在任务终态（取消/失败）后放行——先置失败再删。
+
     await raw.query("UPDATE generation_jobs SET status='failed' WHERE id = ?", [Number(createdActions.generation_job_id)]);
     const empty = JSON.stringify([]);
     let version = await saveCanvasWithRecovery(prisma, baseSave(UUID_D, null, empty, [
@@ -326,7 +326,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 2, action: "restore" },
     ]));
     expect(restored.recoveryReceipt.changes[0]).toMatchObject({ state: "present", revision: 3 });
-    // — replaceTarget + primary：任务成功后一对一转换 —
+
     const submission = await prisma.generation_canvas_submissions.findUnique({
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_A } },
     });
@@ -341,28 +341,28 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       expect.objectContaining({ state: "replaced", revision: 4 }),
       expect.objectContaining({ state: "present", revision: 1, nodeBindingRevision: 1 }),
     ]));
-    // owner 从 $target 切到 primary，不推进版本。
+
     const owner = await prisma.generation_canvas_node_owners.findUnique({
       where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-actions" } },
     });
     expect(owner?.output_key).toBe(PRIMARY_OUTPUT_KEY);
     expect(Number(owner?.binding_revision)).toBe(1);
-    // outputs 行建立（primary present）。
+
     const outputs = await prisma.generation_canvas_outputs.findMany({});
     expect(outputs).toHaveLength(1);
     expect(outputs[0]).toMatchObject({ output_key: PRIMARY_OUTPUT_KEY, state: "present", revision: 1 });
 
-    // — settleTarget：cancelled + draft 角色回草稿 —
+
     await accept(acceptance(UUID_B, "node-settle", 0));
     const subB = await prisma.generation_canvas_submissions.findUnique({
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_B } },
     });
     await raw.query("UPDATE generation_jobs SET status='cancelled' WHERE id = ?", [Number(subB!.generation_job_id)]);
-    // draft 角色需要画布上存在目标节点（受理时核对）——重设种子为 draft 重新受理一单。
+
     await prisma.generation_canvas_submissions.deleteMany({ where: { submission_id: UUID_B } });
     await prisma.generation_canvas_node_owners.deleteMany({ where: { node_id: "node-settle" } });
     await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    // 画布放一个草稿节点再受理（draft 角色）。
+
     await prisma.canvas.create({
       data: { project_id: BigInt(PROJECT_ID), version: 0, nodes_json: [{ id: "node-settle", type: "mediaNode", position: { x: 0, y: 0 }, data: { mediaType: "image" } }] as never },
     });
@@ -381,7 +381,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       { id: recoveryItemId(UUID_C, TARGET_OUTPUT_KEY), rev: 1, action: "settleTarget" },
     ]));
     expect(settledSave.recoveryReceipt.changes[0]).toMatchObject({ state: "present", revision: 2 });
-    // 归属保留在本次（已取消）提交，可携该版本再次生成。
+
     const ownerAfter = await prisma.generation_canvas_node_owners.findUnique({
       where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-settle" } },
     });
@@ -391,7 +391,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
   it("★ B.6 remove 守护：运行中/抢先成功的目标拒绝删除（409 带现状），取消终态后放行", async () => {
     const created = await accept(acceptance(UUID_A, "node-guard", 0));
     const removeChange = [{ id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "remove" }];
-    // 运行中（受理即 queued）：$target 占位不能绕过取消被删 → 409 recovery_item_conflict（现状随错误返回）
+
     const running = await saveCanvasWithRecovery(prisma, baseSave(UUID_B, null, JSON.stringify([]), removeChange))
       .catch(e => e as RecoveryContractError);
     expect(running).toBeInstanceOf(RecoveryContractError);
@@ -399,26 +399,26 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       code: 409,
       data: { reason: RECOVERY_REASONS.itemConflict, currentState: "pending", currentRevision: 1 },
     });
-    // 抢先成功：仍停止删除（成功产物的收口走 replaceTarget 转换，不删目标）
+
     await raw.query("UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST('[\"12\"]' AS JSON) WHERE id = ?", [Number(created.generation_job_id)]);
     const succeeded = await saveCanvasWithRecovery(prisma, baseSave(UUID_C, null, JSON.stringify([]), removeChange))
       .catch(e => e as RecoveryContractError);
     expect(succeeded.envelope).toMatchObject({ code: 409, data: { reason: RECOVERY_REASONS.itemConflict } });
-    // 两轮拒绝均零写入：目标项保持受理态、画布未建、无回执
+
     const submission = await prisma.generation_canvas_submissions.findUnique({
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_A } },
     });
     expect(submission?.target_state).toBe("pending");
     expect(Number(submission?.target_revision)).toBe(1);
     expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
-    // 取消终态：放行删除
+
     await raw.query("UPDATE generation_jobs SET status='cancelled' WHERE id = ?", [Number(created.generation_job_id)]);
     const removed = await saveCanvasWithRecovery(prisma, baseSave(UUID_D, null, JSON.stringify([]), removeChange));
     expect(removed.recoveryReceipt.changes[0]).toMatchObject({ state: "removed", revision: 2 });
   });
 
   it("★ 同 jobId 重试迁移边界：历史任务无可信关联 → 拒绝迁移（422）", async () => {
-    // 无 canvas_binding 的历史 job（不经受理直接造行）。
+
     const legacyJob = await prisma.generation_jobs.create({
       data: { project_id: BigInt(PROJECT_ID), user_id: BigInt(USER_ID), type: "image", status: "failed", source: "bottom_dock", progress: 0, input: { prompt: "x" } as never, fencing_token: 0 },
     });
@@ -447,7 +447,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     };
   }
 
-  // IKJLTS：补 assetId（apply(primary) 场景产物清单为 ["12"]，需与可信产物一致）。
+
   function markerNode(id: string, submissionId: string, outputKey: string) {
     return { id, type: "mediaNode", position: { x: 0, y: 0 }, data: { generationRecovery: { protocolVersion: 1, submissionId, outputKey }, mediaType: "image", assetId: "12" } };
   }

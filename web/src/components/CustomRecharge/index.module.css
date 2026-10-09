@@ -1,7 +1,3 @@
-/* ============================================
- * CustomRecharge 自定义充值面板（模块 B）
- * 配色沿用 RechargeModal 的深色底 + 蓝色强调，嵌进那一页时不用再调
- * ============================================ */
 
 .section {
   display: flex;
@@ -27,7 +23,6 @@
   color: #fff;
 }
 
-/* 「600 – 499,995 积分」这类范围提示：最低/最高由后台配，文案不写死常量 */
 .rangeHint {
   font-size: var(--font-size-sm);
   color: #888;
@@ -69,7 +64,6 @@
   cursor: not-allowed;
 }
 
-/* 手动输入：滑杆之外的第二个精确入口（PRD §7.2「至少需要一种精确输入方式」） */
 .inputWrap {
   display: flex;
   align-items: center;
@@ -106,7 +100,6 @@
   color: #888;
 }
 
-/* 修正提示：告诉用户「刚才那个数被改成了什么」，而不是默默改掉 */
 .correction {
   font-size: var(--font-size-sm);
   color: #d8a33a;

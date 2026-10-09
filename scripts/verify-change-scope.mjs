@@ -226,11 +226,8 @@ function execute(command, { asJson }) {
   const arguments_ = webBuild ? [resolve(command[1]), ...command.slice(2)] : command.slice(1);
   const result = spawnSync(command[0], arguments_, {
     cwd: webBuild ? resolve("web") : undefined,
-    // Windows 上 spawnSync 无法直接执行 .cmd/.bat（pnpm 是 pnpm.cmd），走 cmd.exe 才可解析
     shell: process.platform === "win32" && command[0] !== "node",
     encoding: "utf8",
-    // IKD1T2：vitest 结构化日志输出约 1MB，spawnSync 默认 maxBuffer=1MB 会把子进程
-    // 以 ENOBUFS/SIGTERM 杀掉（result.status=null → 误记 exit 1，测试全绿却门禁失败）。
     maxBuffer: 64 * 1024 * 1024,
     env: stageLog
       ? { ...process.env, BW_VERIFICATION_STAGE_LOG: stageLog }

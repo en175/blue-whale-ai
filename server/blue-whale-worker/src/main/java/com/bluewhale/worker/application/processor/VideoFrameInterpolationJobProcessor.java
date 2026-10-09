@@ -37,19 +37,15 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(VideoFrameInterpolationJobProcessor.class);
 
-    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 video_frame_interpolation_failed(1049)。 */
     private static final Set<String> PRESERVED_ERROR_CODES = Set.of(
             GenerationError.ERROR_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
-    /** 轮询步调 5s（HD / 去字幕 / 音视频分离同值）。 */
     public static final long VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS = 5_000;
 
-    /** 轮询上限 720 次 ≈ 60 分钟（家族 MAX_*_POLLS 同值：60 分钟窗口，超限归并 1049）。 */
     public static final int MAX_VIDEO_FRAME_INTERPOLATION_POLLS = 720;
 
-    /** 领取规格（IKIWP8 / ADR-0119）。 */
     private static final int LEASE_SECONDS = 420;
     private static final List<String> CLAIM_SOURCES = List.of(VideoFrameInterpolationContract.SOURCE);
 
@@ -94,20 +90,11 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         return VideoFrameInterpolationContract.TAG;
     }
 
-    /**
-     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
-     */
     @Override
     public Optional<ClaimSpec> claimSpec() {
         return Optional.of(claimSpec);
     }
 
-    /**
-     * 处理一个 video_frame_interpolation step。
-     * <p>
-     * claim 在 try 外（视频骨架同构：DB 异常上抛 → consumer 不 ack → 重投）；
-     * 业务失败一律落终态 failed（无自动重试）。
-     */
     @Override
     public void handle(String jobId) {
         Optional<ClaimedJob> claimOpt;
@@ -115,9 +102,9 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             claimOpt = claimService.claim(claimSpec, jobId, workerId);
         } catch (Exception error) {
             log.error("[video_frame_interpolation] claim 失败 jobId={}: {}", jobId, error.getMessage(), error);
-            throw error; // 保持不 ack → RocketMQ 重投
+            throw error;
         }
-        if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒 / 已终态（含已取消）
+        if (claimOpt.isEmpty()) return;
 
         ClaimedJob claim = claimOpt.get();
         log.info("[video_frame_interpolation] 已领取 jobId={} token={} providerTaskId={} pollCount={}",
@@ -130,8 +117,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "视频插帧失败";
             if (httpStatus != null) {
-                // 状态已结构化落 details（IKIMS4），message 不再重复携带状态码字样：只剥网关
-                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
                 message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
             }
             log.error("[video_frame_interpolation] 终态失败 jobId={} code={}: {}",
@@ -140,12 +125,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         }
     }
 
-    /**
-     * 分相主逻辑（HD 骨架 runStep 同构）：取消 → 凭证 → submit 相 / poll 相。
-     */
     private void runStep(ClaimedJob claim) {
-        // 取消优先于一切（用户名下 queued/processing 任务的软取消对本类型生效）：落确定终态
-        // cancelled，不再提交 / 轮询，也不再发布结果（迟到结果过不了终态守卫）。
         if (claim.cancelRequested()) {
             log.info("[video_frame_interpolation] 取消已执行 jobId={} providerTaskId={}",
                     claim.id(), claim.providerTaskId());
@@ -170,15 +150,8 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         }
     }
 
-    // ========== submit 相 ==========
 
-    /**
-     * 提交相：解析冻结 input + 源视频 → 网关提交 → markProviderSubmitted → 续排轮询。
-     */
     private void submitPhase(ClaimedJob claim, String providerToken) {
-        // 0. IKI8A0（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
-        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
-        //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VideoFrameInterpolationContract.TAG, claim, providerToken,
                     interpolateVideoClient::poll,
@@ -190,8 +163,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
 
         Map<String, Object> input = claim.input();
 
-        // 1. 解析冻结 input 业务键（三键恒在、值恒为合法帧率；此处为 worker 兜底防御，
-        //    权威复核在创建入口。target_node_id 是前端回填定位键，worker 不消费，不解析）。
         String sourceAssetId = parseAssetId(
                 input.get(VideoFrameInterpolationContract.INPUT_KEY_SOURCE_ASSET_ID));
         if (sourceAssetId == null) {
@@ -204,9 +175,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             return;
         }
 
-        // 2. 解析源视频素材：Asset url 落库即公网 public-read，直接作 video_url（HD 同构）；
-        //    插帧**不设输入门槛**（官方未明确输入分辨率上下限与文件大小 / 时长限制，规格「官方
-        //    未明确不臆造」），越界交上游按官方限制拒，失败归任务口径。
         AssetEntity source = assetSource.resolve(
                 Long.parseLong(sourceAssetId),
                 Long.parseLong(claim.userId()),
@@ -218,7 +186,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 网关提交异步任务（出站仅 model + video_url + 整型 fps，见客户端 payload 注释）
         if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
                 claim.id(), claim.workerId(), claim.fencingToken())) {
             return;
@@ -227,7 +194,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         log.info("[video_frame_interpolation] 上游已提交 jobId={} providerTaskId={} fps={}",
                 claim.id(), taskId, fps);
 
-        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s）
         boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
@@ -235,30 +201,18 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         }
     }
 
-    // ========== poll 相 ==========
 
-    /**
-     * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（两路**共用 pollCount 轮询预算**，
-     * 超限一律 1049 终态并停止续排，IKHSFI）/ failed 终态 / completed 立即下载转存发布。
-     */
     private void pollPhase(ClaimedJob claim, String providerToken) {
         InterpolateVideoTaskObservation observation;
         try {
             observation = interpolateVideoClient.poll(providerToken, claim.providerTaskId());
         } catch (VideoFrameInterpolationError pollError) {
             if (isTransientPollError(pollError)) {
-                // IKHSFI：瞬时错误续排与 processing 续排共用同一预算——pollCount 由
-                // rescheduleProviderPoll 单点累计（两条路径同一条 SQL），claim 读到的即
-                // 此前已续排次数；耗尽即落可读失败终态，不派发下一次轮询（防上游持续
-                // 超时 / 连接失败 / 503 时无限轮询打爆网关与 MQ）。
                 if (claim.pollCount() >= MAX_VIDEO_FRAME_INTERPOLATION_POLLS) {
                     String reason = pollError.getMessage() != null
                             ? pollError.getMessage() : "上游持续瞬时错误";
                     log.warn("[video_frame_interpolation] 轮询瞬时错误且预算耗尽 jobId={} pollCount={} err={}，落终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X / 父单 IKIN6H「有 cause
-                    // 即透传」）：当次错误 cause 链携带上游 HTTP 状态即写 details.http_status
-                    // 并剥文案「: HTTP <code>」片段，无 cause（超时 / 连接失败）不写键。
                     failPollBudgetExhausted(claim, "持续瞬时错误: " + reason,
                             NewApiHttpSupport.upstreamHttpStatus(pollError));
                     return;
@@ -277,7 +231,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
 
         if ("processing".equals(observation.status())) {
             if (claim.pollCount() >= MAX_VIDEO_FRAME_INTERPOLATION_POLLS) {
-                // 轮询超时归并兜底码（家族口径：宁可不重试也不双跑；用户手动重试会重新提交）
                 failPollBudgetExhausted(claim, "");
                 return;
             }
@@ -290,8 +243,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         }
 
         if ("failed".equals(observation.status())) {
-            // 上游可读原因透传（目标帧率越界 / 输入规格不符 / 文件大小或时长超限等官方门槛拒绝走这里）；
-            // 额度 / 内容政策信号按 §5 保留既有码（HD / 去字幕同款分类链）
             String message = observation.upstreamMessage() != null && !observation.upstreamMessage().isEmpty()
                     ? observation.upstreamMessage() : "视频插帧任务失败";
             String code = classifyUpstreamFailure(observation.upstreamCode(), observation.upstreamMessage());
@@ -301,7 +252,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             return;
         }
 
-        // completed（succeeded）
         log.info("[video_frame_interpolation] 上游状态终态=completed jobId={} providerTaskId={} pollCount={}",
                 claim.id(), claim.providerTaskId(), claim.pollCount());
         if (observation.videoUrl() == null || observation.videoUrl().isEmpty()) {
@@ -312,16 +262,8 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         publishResult(claim, observation);
     }
 
-    /**
-     * 结果发布：立即下载转存（火山 video_url 仅 24h 有效，官方明确「须及时下载保存」）→
-     * 建 Asset（type=video / source='generated' / generation_job_id）→ 终态 succeeded。
-     * <p>
-     * 返回发布守卫结果（IKI8A0：重试收割据此判定复用是否成立；false = 守卫未命中，
-     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
-     */
     private boolean publishResult(ClaimedJob claim,
                                   InterpolateVideoTaskObservation observation) {
-        // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（对齐 HD / 去字幕的强依赖口径）
         if (mediaRelay == null) {
             throw new VideoFrameInterpolationError(
                     VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
@@ -332,13 +274,10 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         log.info("[video_frame_interpolation] 转存完成 jobId={} storageKey={} size={}",
                 claim.id(), stored.storageKey(), stored.size());
 
-        // 官方明示「插帧不改变分辨率，跟随原片」→ 宽高取源 Asset 近似值（官方不返回输出像素，
-        // 也不做档位推导；源宽高缺失 → null，§8 静默容忍）
         AssetEntity source = resolveSource(claim);
         Integer width = source != null ? source.getWidth() : null;
         Integer height = source != null ? source.getHeight() : null;
 
-        // 时长优先官方 result.duration 精确值，缺失回落源 duration_ms 换算（HD / 去字幕同构）
         Double sourceDurationSec = null;
         if (source != null && source.getDurationMs() != null) {
             sourceDurationSec = source.getDurationMs() / 1000.0;
@@ -346,8 +285,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         Double durationSec = observation.durationSec() != null
                 ? observation.durationSec() : sourceDurationSec;
 
-        // 输出帧率：官方 result.fps 与提交时目标帧率一致；缺失回落冻结 input fps
-        // （只作结果契约字段随终态日志 payload 承载，不落库不上卡）
         Double fps = observation.fps() != null ? observation.fps() : frozenFps(claim);
 
         boolean published = finalizer.publishVideoFrameInterpolationResult(
@@ -376,12 +313,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         return published;
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架 isTransientPollError 同语义） ==========
 
-    /**
-     * 瞬时轮询错误判定（HD isTransientPollError 同语义）：网络超时 / 不可达 → 瞬时；
-     * HTTP 429/5xx（cause 携带状态）→ 瞬时；4xx 与业务失败 → 非瞬时。
-     */
     static boolean isTransientPollError(VideoFrameInterpolationError error) {
         String code = error.getCode();
 
@@ -402,20 +334,13 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         return false;
     }
 
-    // ========== 工具方法 ==========
 
-    /** Asset id 容忍数字形态（Jackson 数字 JSON 值），与 HD / 去字幕解析同构。 */
     private static String parseAssetId(Object obj) {
         if (obj instanceof String s && !s.isEmpty()) return s;
         if (obj instanceof Number n) return String.valueOf(n.longValue());
         return null;
     }
 
-    /**
-     * 解析冻结 input 的目标帧率（**整型**）：只接受整数形态的 JSON 数字（契约「整型直传」
-     * ——字符串 "60" 与小数 60.5 在创建入口 zod 已被拒，此处同样拒，兜底防御不放松口径），
-     * 且必须落在契约三档（30 / 60 / 120）内。
-     */
     static Integer parseFps(Object obj) {
         if (!(obj instanceof Number n)) return null;
         double d = n.doubleValue();
@@ -424,13 +349,11 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         return VideoFrameInterpolationContract.SUPPORTED_FPS.contains(value) ? value : null;
     }
 
-    /** 冻结 input 的目标帧率（发布期回落用：解析失败返回 null，静默容忍）。 */
     private static Double frozenFps(ClaimedJob claim) {
         Integer fps = parseFps(claim.input().get(VideoFrameInterpolationContract.INPUT_KEY_FPS));
         return fps != null ? fps.doubleValue() : null;
     }
 
-    /** 解析源 Asset（宽高取近似值、时长供回落；归属三元组与提交相同构）。 */
     private AssetEntity resolveSource(ClaimedJob claim) {
         String sourceAssetId = parseAssetId(
                 claim.input().get(VideoFrameInterpolationContract.INPUT_KEY_SOURCE_ASSET_ID));
@@ -441,10 +364,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
                 Long.parseLong(claim.projectId()));
     }
 
-    /**
-     * 失败码归一：§5 分类信号（额度 / 内容政策）保留既有码，其余一律归并兜底
-     * video_frame_interpolation_failed（1049）。
-     */
     private static String resolveFailCode(Exception e) {
         if (e instanceof VideoFrameInterpolationError vfie
                 && PRESERVED_ERROR_CODES.contains(vfie.getCode())) {
@@ -453,10 +372,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         return VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED;
     }
 
-    /**
-     * 上游任务 failed 的错误码分类（§5 优先级；HD / 去字幕分类链同款：
-     * 版权 → 内容政策 → 额度 → 兜底 1049）。
-     */
     private static String classifyUpstreamFailure(String upstreamCode, String upstreamMessage) {
         String text = (upstreamCode != null ? upstreamCode : "") + " "
                 + (upstreamMessage != null ? upstreamMessage : "");
@@ -472,16 +387,10 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         return VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED;
     }
 
-    /** 轮询预算耗尽的统一终态落点（IKHSFI）：瞬时错误续排与 processing 续排两路共用，
-     *  一律归并兜底 1049 并停止续排（不 reschedule / 不 enqueue）。detail 为空串时即
-     *  processing 超限原文案；非空时追加瞬时错误原因（上游可读，随 message 透传投影）。
-     *  无上游 HTTP 状态的重载（processing 耗尽 / 瞬时错误无 HTTP cause）不写状态键。 */
     private void failPollBudgetExhausted(ClaimedJob claim, String detail) {
         failPollBudgetExhausted(claim, detail, null);
     }
 
-    /** 带上游 HTTP 状态重载（IKIN6X）：预算耗尽分支与顶层 catch 同一透传口径——cause 链
-     *  携带状态即写 details.http_status，并剥文案「: HTTP <code>」片段（上游原因保留）。 */
     private void failPollBudgetExhausted(ClaimedJob claim, String detail,
                                          Integer httpStatus) {
         String message = "视频插帧轮询超时（超过 " + MAX_VIDEO_FRAME_INTERPOLATION_POLLS
@@ -493,19 +402,10 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
                 message, httpStatus);
     }
 
-    /** 失败处理：走视频版 failVideoJob（插帧无输出槽位，
-     *  槽位段天然空转；details.raw 透传原始原因）。守卫要求 status='processing'，故已取消 /
-     *  已终态任务的失败写入同样不会生效（终态权威）。 */
     private void failClaimed(ClaimedJob claim, String code, String msg) {
         failClaimed(claim, code, msg, null);
     }
 
-    /** details 落结构化上游 HTTP 状态（IKIMS4，对齐音频提取 IKIMS2 / 音频混合 IKIHGQ 样板）：
-     *  backend 换凭证判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS}
-     *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。轮询预算耗尽
-     *  分支同样按 cause 透传（IKIN6X，父单 IKIN6H「有 cause 即透传」与迁移契约 §20 口径）：
-     *  瞬时错误耗尽预算且 cause 携带状态即写（failPollBudgetExhausted 带状态重载），
-     *  processing 耗尽无 cause 不写。 */
     private void failClaimed(ClaimedJob claim, String code, String msg,
                              Integer httpStatus) {
         log.warn("video_frame_interpolation job 失败 jobId={} code={} message={}", claim.id(), code, msg);
@@ -518,7 +418,6 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
                 claim.workerId(), claim.fencingToken());
     }
 
-    /** MQ 自投延迟消息（视频骨架 scheduleNext 同款；错误上抛保持不 ack 由 broker 重投兜底）。 */
     private void scheduleNext(String jobId, long delayMs) {
         try {
             producer.enqueue(jobId, delayMs);

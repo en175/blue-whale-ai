@@ -14,10 +14,6 @@ import {
 } from './components/AttachmentActionBar';
 import dialogStyles from './components/ImageDialog/index.module.css';
 
-/* IKF5KE 自由生图面板参考选取事件的一次消费语义：
-   从节点添加素材/从资产中选择注入的参考在删除并关闭（或工具栏直接重建）后不得随旧事件重放；
-   本轮主动重选仍可加入；生成请求只携带本轮实际保留的参考。
-   FlowCanvas/CanvasToolbar/AssetsPickerModal 打桩透出 props；ImageDialog 用真实实现。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -46,7 +42,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布点击 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -55,7 +50,6 @@ vi.mock('./components/Canvas', () => ({
   },
 }));
 
-/** CanvasToolbar 打桩：透出图片入口（工具栏打开/重建自由生图面板） */
 const toolbarProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/CanvasToolbar', () => ({
   default: (props: Record<string, any>) => {
@@ -64,7 +58,6 @@ vi.mock('./components/CanvasToolbar', () => ({
   },
 }));
 
-/** AssetsPickerModal 打桩：透出 onSelect 直接回填「从资产中选择」的确认结果 */
 const assetsPickerProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/AssetsPickerModal', () => ({
   default: (props: Record<string, any>) => {
@@ -183,7 +176,6 @@ vi.mock('@/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 
-/* useCanvasDoc 打桩须保持引用稳定；内容经 current 按用例注入 */
 const canvasDocMock = vi.hoisted(() => ({
   current: {
     doc: null as unknown,
@@ -197,7 +189,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 最小场景：仅一张就绪图片 m1（assetId a1），无连线 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -235,7 +226,6 @@ async function renderPage() {
   });
 }
 
-/** 面板参考区预览图 alt 列表（自由面板渲染面板本地 files；IKFCKK 起为共享缩略图，挂参考行内） */
 function refImages(): string[] {
   return [...container.querySelectorAll<HTMLImageElement>(`.${dialogStyles.previewRow} img`)].map(
     (img) => img.alt,
@@ -246,7 +236,6 @@ function panelOpen(): boolean {
   return container.querySelector('[contenteditable]') !== null;
 }
 
-/** 工具栏打开/重建自由生图面板 */
 async function openFreePanel() {
   await act(async () => {
     toolbarProps.current.onToggleImageDialog();
@@ -254,7 +243,6 @@ async function openFreePanel() {
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 }
 
-/** IKGB7U 附件操作条：点「+ 参考」直达旧「从节点添加素材」链路——进入画布选取模式（旧「+」菜单已退役） */
 async function enterPickMode() {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
@@ -264,7 +252,6 @@ async function enterPickMode() {
   });
 }
 
-/** 画布点击图片节点 m1（从节点添加素材命中） */
 async function pickNodeM1() {
   const m1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!;
   await act(async () => {
@@ -272,7 +259,6 @@ async function pickNodeM1() {
   });
 }
 
-/** IKGB7U 附件操作条：点「资产库」直达旧「从资产中选择」链路——打开资产库弹窗后确认回填 */
 async function pickFromAssets(assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
@@ -285,7 +271,6 @@ async function pickFromAssets(assets: AssetRecord[]) {
   });
 }
 
-/** 移除参考区第一个附件 */
 async function removeFirstRef() {
   const btn = container.querySelector<HTMLButtonElement>('button[title="移除"]')!;
   await act(async () => {
@@ -293,7 +278,6 @@ async function removeFirstRef() {
   });
 }
 
-/** 关闭当前面板 */
 async function closePanel() {
   const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === '关闭',
@@ -303,7 +287,6 @@ async function closePanel() {
   });
 }
 
-/** IKFR4X 结束持续选取会话：点击提示条「完成选取」按钮（编辑/发送须先结束会话） */
 async function finishPick() {
   const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.textContent === '完成选取',
@@ -331,7 +314,6 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   seedDoc();
-  // 面板会话/选取事件均以 ts 区分：单测节拍内保证单调递增，避免同毫秒 ts 撞 key
   let now = 1_000;
   vi.spyOn(Date, 'now').mockImplementation(() => ++now);
 });
@@ -374,7 +356,6 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
     await removeFirstRef();
     expect(refImages()).toEqual([]);
 
-    // 不关闭面板，直接经工具栏重建
     await openFreePanel();
     expect(refImages()).toEqual([]);
   });
@@ -401,12 +382,10 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
     await removeFirstRef();
     expect(refImages()).toEqual([]);
 
-    // 删除后主动重选同一节点：正常加入一次
     await enterPickMode();
     await pickNodeM1();
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
 
-    // 未删除重复选择同一节点：既有去重规则不变
     await enterPickMode();
     await pickNodeM1();
     expect(refImages()).toEqual(['素材图一']);
@@ -415,7 +394,6 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
   it('从资产中选择加入草稿参考，删除后重开不重放', async () => {
     await renderPage();
     await openFreePanel();
-    // 绑定模式经父级建立参考连线；删除后不能由旧选取事件再次注入。
     await pickFromAssets([
       { id: 7, type: 'image', url: 'http://img/asset7.png', width: 100, height: 100, duration: null, source: null, model: null, created_at: null },
     ]);
@@ -425,7 +403,6 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
 
     await closePanel();
     await openFreePanel();
-    // 已消费的选择事件在新挂载上不重放（IKF5KE）
     expect(refImages()).toEqual([]);
   });
 
@@ -436,15 +413,12 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
     await renderPage();
     await openFreePanel();
 
-    // 批量内同一资产重复：按 id 去重，只入一次
     await pickFromAssets([asset(7), asset(8), asset(7)]);
     await vi.waitFor(() => expect(refImages()).toEqual(['asset7.png', 'asset8.png']));
 
-    // 跨批次重复选择同一资产：仍不重复入列
     await pickFromAssets([asset(7)]);
     expect(refImages()).toEqual(['asset7.png', 'asset8.png']);
 
-    // 一次批量 10 张新图：已有 2 张，补满 9 张后拒绝剩余并提示上限
     await pickFromAssets([10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map(asset));
     await vi.waitFor(() => expect(refImages()).toHaveLength(9));
     expect(container.textContent).toContain('图片最多 9 张');
@@ -453,7 +427,6 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
   it('生成请求只包含本轮实际保留的参考：删除后不携带，保留时携带', async () => {
     await renderPage();
 
-    // 选取后删空：发送不携带任何参考（IKFR4X：编辑/发送前先完成持续会话）
     await openFreePanel();
     await enterPickMode();
     await pickNodeM1();
@@ -465,7 +438,6 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     expect(apiMocks.createGenerationJob.mock.calls[0]![1].input_asset_ids).toBeUndefined();
 
-    // 重开新面板主动选择：发送仅携带本轮保留的参考
     await openFreePanel();
     await enterPickMode();
     await pickNodeM1();

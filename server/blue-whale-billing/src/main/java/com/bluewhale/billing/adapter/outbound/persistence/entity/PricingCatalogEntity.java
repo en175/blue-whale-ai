@@ -6,30 +6,20 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/**
- * 定价目录版本行（对应 Flyway {@code V1__pricing_catalog.sql}）。
- *
- * <p>一行 = 一个版本。{@code document} 是完整规则文档的 JSON 文本，
- * 解析与编译在 {@code CatalogCompiler}，本实体只负责搬运。
- */
 @TableName("billing_pricing_catalogs")
 public class PricingCatalogEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 版本号单调递增；job 提交时冻结它。 */
     private Integer catalogVersion;
 
-    /** draft | active（全表至多一条）| retired。 */
     private String status;
 
-    /** 完整规则文档（JSON 列）。 */
     private String document;
 
     private Integer schemaVersion;
 
-    /** 内容 SHA-256，job 上也冻结它——版本号可被人为复用，hash 不会。 */
     private String documentHash;
 
     private LocalDateTime effectiveFrom;

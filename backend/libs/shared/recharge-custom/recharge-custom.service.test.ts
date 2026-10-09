@@ -2,12 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RechargeCustomService } from "./recharge-custom.service.js";
 
-// 自定义充值配置的读写（模块 B）。
-// 关键的两条：
-//   1. 保存时校验的是**合并后的整份配置** —— 只改换算率同样会让上下限不再整分
-//      （PRD §7.1「需能被换算比例整除」+ 比例可配 = 只校验改动字段发现不了）；
-//   2. 配置行缺失 → 503，**不回退到代码里的默认值** —— 那会让「后台配了多少」
-//      与「用户实际按多少算」有两个可能的答案（PRD §6.1「不在代码中写死」）。
 
 const ROW = {
   id: 1,
@@ -84,7 +78,6 @@ describe("RechargeCustomService.saveConfig", () => {
   it("★ 只改换算率，也要按**整份配置**校验（PRD §7.1 整除要求）", async () => {
     const { service, upsert } = makeService();
 
-    // 比例 4：600 % 4 === 0 过，499995 % 4 === 3 不过 —— 上限那一条必须响
     await expect(service.saveConfig({ creditsPerYuan: 4 })).rejects.toMatchObject({
       status: 400,
     });
@@ -114,8 +107,6 @@ describe("RechargeCustomService.saveConfig", () => {
   it("★ 配置行缺失时保存**会把它建出来**（不是静默什么都不做）", async () => {
     const { service, upsert } = makeService(null);
 
-    // 行缺失 → requireConfig 抛 503，保存也拒绝：合并校验没有基准可依，
-    // 凭空造一份配置出来等于替运营决定商品口径
     await expect(service.saveConfig({ defaultCredits: 900 })).rejects.toMatchObject({
       status: 503,
     });

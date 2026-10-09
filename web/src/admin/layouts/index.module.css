@@ -1,11 +1,4 @@
-/* ============================================
- * AdminLayout 后台布局样式（浅色）
- *
- * 全部走 --admin-* token（见 styles/admin.css）。这里不出现任何字面量色值。
- * ============================================ */
 
-/* ⚠️ 校验态是**独立渲染**的（那时 .adminRoot 还没挂上），所以这里必须自带背景：
- *    全局 body 是产品前台的深色，不设背景会变成浅灰字悬在纯黑上——看不见。 */
 .guardLoading {
   display: flex;
   align-items: center;
@@ -23,9 +16,6 @@
   background-color: var(--admin-bg);
 }
 
-/* ---- 侧边栏 ----
- * 白底 + 一条描边，与冷灰的页面底分开。深处：白卡片浮在潜灰上，
- * 靠的是明度差，不是投影——侧栏是固定结构，给它投影会让「窗口里还浮着一块」。 */
 .sidebar {
   width: 224px;
   flex-shrink: 0;
@@ -43,8 +33,6 @@
   border-bottom: 1px solid var(--admin-border);
 }
 
-/* 品牌图标：**柔和底 + 描边**，不是实心色块。
-   实心大色块是最容易显廉价的元素——它把强调色用量堆到了最大。 */
 .brandIcon {
   width: 30px;
   height: 30px;
@@ -71,7 +59,6 @@
   margin-top: 1px;
 }
 
-/* ---- 菜单 ---- */
 .nav {
   flex: 1;
   display: flex;
@@ -105,9 +92,6 @@
   box-shadow: var(--admin-focus);
 }
 
-/* 选中：淡靛蓝底 + 靛蓝字。
-   浅色下这对比已经够了，**不加左侧指示条**——那在深色里是用来补救
-   「一块亮色浮在黑底上很突兀」的，浅色里再加就是多余的装饰。 */
 .navActive,
 .navActive:hover {
   background: var(--admin-accent-soft);
@@ -115,7 +99,6 @@
   font-weight: 500;
 }
 
-/* ---- 底部管理员 ---- */
 .footer {
   display: flex;
   align-items: center;
@@ -156,20 +139,12 @@
   white-space: nowrap;
 }
 
-/* ---- 内容区 ----
- * padding 只在这里设一次：页面级再设就是双重内边距，
- * 而两边不一致时表现为「这个页面比那个窄一截」，很难看出根因。 */
 .content {
   flex: 1;
   overflow-y: auto;
   padding: var(--spacing-xl) var(--spacing-xl) var(--spacing-2xl);
 }
 
-/* ---- 收起态 ----
- * 只留一列图标。三条要点：
- *   ① 宽度只够图标 + 内边距，不能留白
- *   ② 品牌区与底部都改成居中，否则图标会贴在左边一条线上
- *   ③ 切换动画只做 width —— 做 padding/gap 会让文字在收起过程中被挤压变形 */
 .sidebar {
   transition: width 0.18s ease;
 }
@@ -200,8 +175,6 @@
   padding: 12px 8px;
 }
 
-/* 收起开关：常驻在品牌区右侧，不要做成 hover 才出现——
-   那样每次想收起都要先找到它，而这是个高频动作 */
 .collapseBtn {
   display: inline-flex;
   align-items: center;
@@ -232,7 +205,6 @@
   margin-left: 0;
 }
 
-/* 收起时品牌名会被隐藏，brandText 不该再占位 */
 .collapsed .brandText {
   display: none;
 }

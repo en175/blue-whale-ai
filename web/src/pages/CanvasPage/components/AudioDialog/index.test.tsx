@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKFCKS：AudioDialog 新建参考缩略图条——参考音频 chip（点击播放形态）替换为共享参考缩略图、
- *  画布文本卡连线附件以 FileText 缩略图进栏（× 仅断开连线）、@ 与手动 @ 选择同一入口、
- *  生成中只读不渲染 × / @、发送参数回归 */
 import { $getRoot, $isTextNode, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -47,8 +44,6 @@ let container: HTMLDivElement;
 const CANVAS_REF: AudioRefItem = {
   id: 'n1',
   kind: 'audio',
-  // 批次分支给 AudioDialog 加了出站归一化（audioRefItemMediaTypeOf）：画布来的音频
-  // 参考现在会带上 mediaType。fixture 跟着补，否则断言差这一个字段。
   mediaType: 'audio',
   name: '雨声白噪音',
   src: 'https://x/rain.mp3',
@@ -132,7 +127,6 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     expect(list).toHaveLength(1);
     expect(list[0]!.getAttribute('title')).toBe('雨声白噪音');
     expect(list[0]!.querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
-    // 播放按钮不再渲染（放大预览为图标+名称+时长卡片，属 RefThumbnail 组件行为）
     expect(container.querySelector('button[title^="播放"]')).toBeNull();
   });
 
@@ -142,7 +136,6 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     const list = textThumbs();
     expect(list).toHaveLength(1);
     expect(list[0]!.getAttribute('title')).toBe('旁白文案');
-    // 文本附件独立编号（文本N，不与音频参考混排编号）
     expect(list[0]!.querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
     await act(async () => {
       removeButton('旁白文案')!.click();
@@ -302,7 +295,6 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
   });
  });
 
-/* IKIQGR：音频面板 @ 菜单文本附件按正文全文命中（同一 AtMentionItem.searchText 通道），选择后插入 文本N 标签 */
 describe('IKIQGR 音频面板文本附件全文检索', () => {
   const ATT_LONG: ImageTextAttachment = {
     nodeId: 't-long',
@@ -316,7 +308,6 @@ describe('IKIQGR 音频面板文本附件全文检索', () => {
     await vi.waitFor(() => expect(document.querySelector('[data-testid="mention-menu"]')).not.toBeNull());
     const rows = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')];
     expect(rows.map((b) => b.textContent)).toEqual(['观浪笔记']);
-    // 菜单行不展示正文片段
     expect(rows[0].textContent).not.toContain('深海观测');
     await act(async () => rows[0].click());
     expect(readPromptRefText(container)).toBe('结合文本1');
@@ -359,7 +350,6 @@ describe('IKIQGR 音频面板文本附件全文检索', () => {
         { client: new QueryClient() },
         createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), canvasMedia: [{ id: 'n1', src: CANVAS_REF.src, name: '雨声', mediaType: 'audio', assetId: '601' }] } as Parameters<typeof AudioDialog>[0])
       )));
-    // IKGB82：操作条「+ 参考」直达（等价旧菜单项「从节点添加素材」），面板内画布列表照常打开
     await act(async () => container.querySelector<HTMLButtonElement>('[title="从节点添加素材"]')!.click());
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '雨声')!.click());
     expect(atButton('雨声')).not.toBeNull();
@@ -522,8 +512,6 @@ describe('IKFR51 音频文本参考', () => {
   });
 });
 
-/* IKJIVN：音频面板报价请求不携带 target_node_id——草稿目标合并是视频端契约
- * （IKJGE6），非视频端不进入该逻辑，报价行为同旧（面板不传目标，Badge 不带键）。 */
 describe('IKJIVN 音频面板报价不带 target_node_id', () => {
   it('报价请求体为音频定价维度，且无 target_node_id 键', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(

@@ -1,8 +1,8 @@
-/* ============================================
- * SharedAssetsModal 共享资产弹框：真实 API 联调版
- * 列表：GET /api/shared-assets（双维过滤 + 分页）
- * 操作：添加回画布 / 删除 / 场景卡加入项目
- * ============================================ */
+
+
+
+
+
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { markdownToSanitizedHtml, unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
@@ -42,7 +42,7 @@ import { isApiError } from '@/api/http';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
-/** Tab 定义（对齐现有画布卡片类型） */
+
 const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: SharedAssetKind; icon: typeof ImageIcon }[] = [
   { key: 'image', label: '图片', assetType: 'media', kind: 'image', icon: ImageIcon },
   { key: 'video', label: '视频', assetType: 'media', kind: 'video', icon: Video },
@@ -51,7 +51,7 @@ const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: Sh
   { key: 'goods', label: '商品', assetType: 'goods', icon: Box },
 ];
 
-/** 资产子类型下拉（card 种类筛选） */
+
 type CardKind = 'style' | 'character' | 'object' | 'environment';
 type CardFilter = 'all' | 'all-assets' | CardKind;
 const CARD_KINDS: CardKind[] = ['style', 'character', 'object', 'environment'];
@@ -62,7 +62,7 @@ const CARD_KIND_LABEL: Record<CardKind, string> = {
   environment: '环境',
 };
 
-/** 类型 → 图标 */
+
 const TYPE_ICON: Record<string, typeof ImageIcon> = {
   card: ImageIcon,
   media: ImageIcon,
@@ -74,7 +74,7 @@ const TYPE_ICON: Record<string, typeof ImageIcon> = {
   audio: AudioLines,
 };
 
-/** 类型 → 渐变封面（无缩略图时的占位） */
+
 const TYPE_GRADIENT: Record<string, { from: string; to: string }> = {
   card: { from: '#5b2a86', to: '#8e2f66' },
   media: { from: '#31307a', to: '#6b2f8e' },
@@ -86,30 +86,30 @@ const TYPE_GRADIENT: Record<string, { from: string; to: string }> = {
   audio: { from: '#1f3a5a', to: '#2f5a6b' },
 };
 
-/** 完整列表项（含后端数据 + UI 状态） */
+
 interface AssetListItem extends SharedAssetView {
-  /** 是否正在删除 */
+
   deleting?: boolean;
 }
 
-/** Toast 回调类型 */
+
 type ToastFn = (type: 'success' | 'error' | 'warn', msg: string) => void;
 
 interface SharedAssetsModalProps {
   onClose: () => void;
-  /** 当前项目 ID（场景卡 add-to-project 需要） */
+
   projectId: string;
-  /** 添加资产到画布（由父组件实现具体节点构造） */
+
   onAddItem: (item: SharedAssetView) => Promise<boolean>;
-  /** Toast 提示回调 */
+
   onToast: ToastFn;
-  /** 初始 tab（用于指定打开时显示的分类） */
+
   defaultTab?: string;
-  /** 初始资产筛选（'all-assets' 展示全部资产，或具体 CardKind） */
+
   defaultCardFilter?: CardFilter;
 }
 
-/** 构建标题（从快照提取） */
+
 function titleFromAsset(item: SharedAssetView): string {
   if (item.name) return item.name;
   switch (item.assetType) {
@@ -141,10 +141,10 @@ function titleFromAsset(item: SharedAssetView): string {
   }
 }
 
-/** 构建封面 URL */
+
 function coverUrl(item: SharedAssetView): string | undefined {
   if (item.assetType === 'media') {
-    // 仅图片类型可作 <img> 封面；视频/音频的 thumbnailUrl 是媒体文件本身，不能当图片渲染
+
     if (item.kind !== 'image') return undefined;
     const snap = item.snapshot as { url: string };
     return item.thumbnailUrl ?? snap.url;
@@ -161,7 +161,7 @@ function coverUrl(item: SharedAssetView): string | undefined {
   return undefined;
 }
 
-/** 构建徽章文案 */
+
 function badgeText(item: SharedAssetView): string {
   if (item.kind) {
     if (item.assetType === 'card') return CARD_KIND_LABEL[item.kind as CardKind] || item.kind;
@@ -171,7 +171,7 @@ function badgeText(item: SharedAssetView): string {
       if (item.kind === 'audio') return '音频';
     }
   }
-  // 查找对应 tab label
+
   const tabKey = item.assetType === 'media'
     ? (item.kind === 'video' ? 'video' : item.kind === 'audio' ? 'audio' : 'image')
     : item.assetType === 'text' ? 'text'
@@ -189,7 +189,7 @@ export default function SharedAssetsModal({
   defaultCardFilter,
 }: SharedAssetsModalProps) {
   const [tab, setTab] = useState(defaultTab ?? 'image');
-  /** 资产子类型筛选（'all' 表示主 Tab 筛选；'all-assets' 表示查询所有资产；具体 CardKind 查询 card + kind） */
+
   const [cardFilter, setCardFilter] = useState<CardFilter>(defaultCardFilter ?? 'all');
   const [cardOpen, setCardOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -201,20 +201,20 @@ export default function SharedAssetsModal({
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [addItemId, setAddItemId] = useState<string | null>(null);
-  /** 预览弹窗当前资产 */
+
   const [previewItem, setPreviewItem] = useState<AssetListItem | null>(null);
 
-  /** 构建查询参数 */
+
   const buildQuery = useCallback((): SharedAssetListQuery => {
     const q: SharedAssetListQuery = { page: 1, size: 50 };
     if (cardFilter === 'all-assets') {
-      // 全部资产：不加任何过滤条件，查询所有类型
+
     } else if (cardFilter !== 'all') {
-      // 资产子类型筛选：只查 card 类型 + 指定 kind
+
       q.assetType = 'card';
       q.kind = cardFilter;
     } else {
-      // 主 Tab 筛选
+
       const tabDef = TABS.find((t) => t.key === tab);
       if (tabDef?.assetType) q.assetType = tabDef.assetType;
       if (tabDef?.kind) q.kind = tabDef.kind;
@@ -222,7 +222,7 @@ export default function SharedAssetsModal({
     return q;
   }, [tab, cardFilter]);
 
-  /** 加载列表 */
+
   const loadList = useCallback(async (reset = false) => {
     if (reset) {
       setLoading(true);
@@ -242,10 +242,10 @@ export default function SharedAssetsModal({
       setHasMore(data.current * data.size < data.total);
     } catch {
       if (reset) {
-        // 首次/切换 tab 加载失败：弹窗内已展示完整失败卡片，不再额外 toast
+
         setLoadError(true);
       } else {
-        // 加载更多失败：网格里还有旧数据，toast 提示一下即可
+
         onToast('error', '加载共享资产失败');
       }
     } finally {
@@ -254,13 +254,13 @@ export default function SharedAssetsModal({
     }
   }, [buildQuery, page, onToast]);
 
-  /** tab 或筛选变化时重新加载 */
+
   useEffect(() => {
     setPage(1);
     loadList(true);
   }, [tab, cardFilter, loadList]);
 
-  /** 搜索过滤（前端本地过滤） */
+
   const filteredItems = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
     if (!kw) return items;
@@ -270,19 +270,19 @@ export default function SharedAssetsModal({
     });
   }, [items, keyword]);
 
-  /** 加载更多 */
+
   const handleLoadMore = () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     setPage((p) => {
       const next = p + 1;
-      // 用 setTimeout 避免 state 闭包问题
+
       setTimeout(() => loadList(false), 0);
       return next;
     });
   };
 
-  /** 删除共享资产 */
+
   const handleDelete = async (id: string) => {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, deleting: true } : it)));
     try {
@@ -295,10 +295,10 @@ export default function SharedAssetsModal({
     }
   };
 
-  /** 添加到画布 */
+
   const handleAddToCanvas = async (item: AssetListItem) => {
     if (addItemId) return;
-    // 场景卡需要走 add-to-project 接口
+
     if (item.assetType === 'scene') {
       if (!projectId) {
         onToast('error', '请先选择项目');
@@ -307,7 +307,7 @@ export default function SharedAssetsModal({
       setAddItemId(item.id);
       try {
         const result = await addSceneToProject(item.id, projectId);
-        // 成功后通知父组件创建 scene_card 节点
+
         onToast('success', `场景卡已添加（ID: ${result.sceneCardId}）`);
         onClose();
       } catch (e) {
@@ -317,7 +317,7 @@ export default function SharedAssetsModal({
       }
       return;
     }
-    // 其他类型走统一 onAddItem
+
     setAddItemId(item.id);
     try {
       await onAddItem(item);
@@ -328,7 +328,7 @@ export default function SharedAssetsModal({
     }
   };
 
-  /** 卡片点击：图片/卡片直接添加到画布，其他类型打开预览 */
+
   const handleCardClick = (item: AssetListItem) => {
     if (item.deleting || addItemId) return;
     const directAdd =
@@ -343,14 +343,14 @@ export default function SharedAssetsModal({
   return createPortal(
     <>
     <div className={styles.overlay} onClick={onClose}>
-      {/* ESC 守卫靠这两个属性识别弹层，见 ConfirmModal 里的说明（审查 W·A3）。 */}
+      { }
       <div
         className={styles.panel}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 头部 */}
+        { }
         <div className={styles.head}>
           <div className={styles.headTitle}>
             <BarChart3 size={18} strokeWidth={2} />
@@ -361,10 +361,10 @@ export default function SharedAssetsModal({
           </button>
         </div>
 
-        {/* tabs + 搜索 */}
+        { }
         <div className={styles.tabRow}>
           <div className={styles.tabs}>
-            {/* 资产子类型下拉（独立筛选 card 种类，放在最前面） */}
+            { }
             <button
               className={`${styles.tab} ${cardFilter !== 'all' ? styles.tabActive : ''}`}
               onClick={() => setCardOpen((v) => !v)}
@@ -434,7 +434,7 @@ export default function SharedAssetsModal({
           </div>
         </div>
 
-        {/* 资产网格 */}
+        { }
         <div className={styles.gridWrap}>
           {loading ? (
             <div className={styles.empty}>
@@ -518,7 +518,7 @@ export default function SharedAssetsModal({
                       <div className={styles.cardMeta}>
                         <span className={styles.badge}>{badgeText(item)}</span>
                         <span className={styles.date}>{(item.createdAt || '').slice(0, 10)}</span>
-                        {/* 删除按钮 */}
+                        { }
                         <button
                           className={styles.moreBtn}
                           onClick={(e) => {
@@ -534,7 +534,7 @@ export default function SharedAssetsModal({
                             <Trash2 size={12} strokeWidth={2} />
                           )}
                         </button>
-                        {/* 添加按钮 */}
+                        { }
                         <button
                           className={styles.moreBtn}
                           onClick={(e) => {
@@ -555,7 +555,7 @@ export default function SharedAssetsModal({
                   );
                 })}
               </div>
-              {/* 加载更多 */}
+              { }
               {hasMore && (
                 <div className={styles.loadMore}>
                   <button
@@ -576,7 +576,7 @@ export default function SharedAssetsModal({
         </div>
       </div>
     </div>
-    {/* 预览弹窗 */}
+    { }
     {previewItem && (
       <div className={styles.previewOverlay} onClick={() => setPreviewItem(null)}>
         <div className={styles.previewPanel} onClick={(e) => e.stopPropagation()}>
@@ -613,7 +613,7 @@ export default function SharedAssetsModal({
   );
 }
 
-/** 预览内容：按资产类型渲染 */
+
 function PreviewContent({ item }: { item: SharedAssetView }) {
   switch (item.assetType) {
     case 'media': {
@@ -674,7 +674,7 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
       return (
         <div
           className={styles.previewText}
-          // 统一正文契约 v1：统一入口取正文（存量 html 快照升级），渲染白名单 HTML
+
           dangerouslySetInnerHTML={{ __html: markdownToSanitizedHtml(unifiedTextNodeText(snap)) }}
         />
       );

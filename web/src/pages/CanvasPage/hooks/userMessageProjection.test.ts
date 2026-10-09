@@ -53,7 +53,6 @@ describe('quote text hydration (IKDLQJ)', () => {
     const blocks = patched[0]!.blocks!;
     expect(blocks[1]).toMatchObject({ resource_id: '42', resource_text: '回读正文\n第二行' });
     expect(blocks[2]).toMatchObject({ resource_id: '43', resource_text: '已在' });
-    // 原消息不被改写
     expect(messages[0]!.blocks![1]).not.toHaveProperty('resource_text');
   });
 });

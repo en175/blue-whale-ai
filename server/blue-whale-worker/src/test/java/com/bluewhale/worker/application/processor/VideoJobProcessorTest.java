@@ -38,20 +38,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * 视频作业处理器测试（video-job-runner.ts 全路径覆盖）。
- * <p>
- * 测试矩阵：
- * <ul>
- *   <li>cancel-before-dispatch：cancelRequested + providerTaskId==null → cancel</li>
- *   <li>submit 路径：providerTaskId==null → buildSubmit → submit → markSubmitted → scheduleNext</li>
- *   <li>poll 路径：providerTaskId!=null → poll → transient/timeout/succeeded/failed</li>
- *   <li>parent-reuse 防双扣：parentProviderTaskId → poll parent → SUCCESS publish without submit</li>
- *   <li>参考校验：视频物理边界（2s/200MB 包含性）+ 参考数量/时长上限（读能力行冻结值）</li>
- * </ul>
- * <p>
- * 修正一：无 cost_reservations / actual_amount_fen / release_note 测试。
- */
 @ExtendWith(MockitoExtension.class)
 class VideoJobProcessorTest {
 
@@ -70,12 +56,10 @@ class VideoJobProcessorTest {
         processor = new VideoJobProcessor(
                 stateMachine, finalizer, assetSource, upstreamCredential,
                 videoClient, mediaRelay, producer);
-        // IKIZQD：提交相统一先落「提交中」标记——默认放行，个别用例覆写为 false 测失租停止。
         lenient().doReturn(true).when(stateMachine)
                 .markSubmissionAttempt(anyString(), anyString(), anyLong());
     }
 
-    // ========== cancel-before-dispatch ==========
 
     @Test
     @DisplayName("G49: cancelRequested + providerTaskId==null → cancelVideoBeforeDispatch")
@@ -112,7 +96,6 @@ class VideoJobProcessorTest {
         verify(stateMachine, never()).cancelVideoBeforeDispatch(anyString(), anyString(), anyLong());
     }
 
-    // ========== submit 路径 ==========
 
     @Test
     @DisplayName("G51: submit → markProviderSubmitted + scheduleNext(5000ms)")
@@ -159,10 +142,6 @@ class VideoJobProcessorTest {
                 baseInput().get("prompt"), captor.getValue().prompt());
     }
 
-    // ========== IKJ80P：提交超时孤儿治理 ==========
-    // IKIZQD 规则迁移：submit 阶段超时 / 响应丢失 / 非超时异常统一「留 checking 锁定」
-    // （dispatchSubmission 内消化，不上抛终态），IKJ80P 的 submit 孤儿终态断言由
-    // 「IKIZQD: 普通视频 submit 超时 → 同骨架留 checking」等用例接管（见 IKIZQD 分节）。
 
     @Test
     @DisplayName("IKJ80P: poll 阶段错误即使带超时 cause 也不打孤儿标记（provider_task_id 已落库）")
@@ -183,7 +162,6 @@ class VideoJobProcessorTest {
                 anyString(), anyLong());
     }
 
-    // ========== IKFCXC：文本附件确定性组合（供应商边界，packages/core 契约移植）==========
 
     @Test
     @DisplayName("IKG6EK: prompt 为空不再由附件兜底 → invalid_input（拼装已移交前端）")
@@ -271,7 +249,6 @@ class VideoJobProcessorTest {
                 anyString(), any(), anyString(), eq(1L));
     }
 
-    // ========== parent-reuse 防双扣 ==========
 
     @Test
     @DisplayName("G53: parent-reuse SUCCESS → publishVideo without submit（IKEA26 防双扣）")
@@ -436,8 +413,8 @@ class VideoJobProcessorTest {
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
 
-        staleProcessor.handle("115");   // 旧 Worker：守卫未命中 → 失去执行权，静默停止
-        newProcessor.handle("115");     // 新 Worker：重新领取同一 GenerationJob → 收割发布成功
+        staleProcessor.handle("115");
+        newProcessor.handle("115");
 
         verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
         var publishOrder = inOrder(stateMachine, finalizer);
@@ -456,7 +433,6 @@ class VideoJobProcessorTest {
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
-    // ========== poll 路径 ==========
 
     @Test
     @DisplayName("G55: poll processing → rescheduleProviderPoll + scheduleNext(5000ms)")
@@ -495,7 +471,6 @@ class VideoJobProcessorTest {
         var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
         verify(finalizer).failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
-        // processing 达上限无 cause → 文案不变、不写 http_status 键（IKIN6Y 反例）
         assertThat(messageCaptor.getValue())
                 .isEqualTo("视频生成轮询超时（超过 " + VideoJobProcessor.MAX_VIDEO_POLLS + " 次）");
         @SuppressWarnings("unchecked")
@@ -544,7 +519,6 @@ class VideoJobProcessorTest {
         var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
         verify(finalizer).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
-        // 超时形态（无状态 cause）达上限 → 文案保持现状、不写 http_status 键（IKIN6Y 反例）
         assertThat(messageCaptor.getValue()).isEqualTo("视频生成轮询超时（超过 "
                 + VideoJobProcessor.MAX_VIDEO_POLLS + " 次），上游持续错误: 查询超时");
         @SuppressWarnings("unchecked")
@@ -575,7 +549,6 @@ class VideoJobProcessorTest {
         var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
         verify(finalizer).failVideoJob(eq("111"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
-        // 网关文案无「: HTTP <code>」字样 → 剥离无命中、文案原样；状态照写 details（IKIN6Y）
         assertThat(messageCaptor.getValue()).isEqualTo("视频生成轮询超时（超过 "
                 + VideoJobProcessor.MAX_VIDEO_POLLS + " 次），上游持续错误: 网关繁忙");
         @SuppressWarnings("unchecked")
@@ -606,8 +579,6 @@ class VideoJobProcessorTest {
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
         @SuppressWarnings("unchecked")
         Map<String, Object> details = detailsCaptor.getValue();
-        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6Y）：状态入 details，message/raw 不含
-        // 状态码字样，body / request_id 等排查信息原样保留；错误码保持 provider_timeout 不变
         assertThat(messageCaptor.getValue()).doesNotContain("429")
                 .contains("Requests too fast").contains("request_id=req-882");
         assertThat(details)
@@ -664,7 +635,7 @@ class VideoJobProcessorTest {
     @DisplayName("ADR-0086 回归：adaptive 比例（无固定宽高）生成成功后仍能发布，width/height 传 null")
     void adaptivePublishSucceedsWithNullDimensions() {
         Map<String, Object> input = baseInput();
-        input.put("aspect_ratio", "adaptive");   // adaptive → resolveDimensions 返回 null
+        input.put("aspect_ratio", "adaptive");
         ClaimedVideoJobDto claim = videoClaim("109a", false, "task-109a", 1, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("109a"), anyString());
@@ -679,7 +650,6 @@ class VideoJobProcessorTest {
 
         processor.handle("109a");
 
-        // 发布被调用且尺寸为 null（不因「视频尺寸无效」失败）
         verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(), anyString(),
                 anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"), eq(1024L), eq("0123456789abcdef0123456789abcdef"),
                 isNull(), isNull(), anyDouble(), any(), any(), any());
@@ -714,7 +684,6 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("109a"), anyString());
         doReturn("token").when(upstreamCredential).requireKey();
-        // IKFL53：new-api tasks 表 FAILURE 状态把终端错误放顶层 fail_reason，无 data.error。
         doReturn(new VideoTaskObservation("failed", 100, null, null,
                 new TaskError("content_rejected_reference",
                         "The request failed because the output video may be related to copyright restrictions. Request id: req-2048"), null))
@@ -750,7 +719,6 @@ class VideoJobProcessorTest {
                 anyString(), any(), anyString(), eq(1L));
     }
 
-    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS5；对齐音频提取 IKIMS2 样板）==========
 
     @Test
     @DisplayName("IKIMS5: poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
@@ -759,8 +727,6 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("119"), anyString());
         doReturn("token").when(upstreamCredential).requireKey();
-        // 401 不在瞬时白名单（429/500/502/503/504）→ 非瞬时直进失败终态；submit !2xx 不带
-        // cause 是已知现状，故本族透传用例走 poll（poll !2xx 挂 HttpStatusException cause）
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                 "new-api 视频轮询失败: HTTP 401 body={\"error\":{\"message\":\"Incorrect API key\"}}",
                 new NewApiVideoClient.HttpStatusException(401)))
@@ -774,7 +740,6 @@ class VideoJobProcessorTest {
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
         @SuppressWarnings("unchecked")
         Map<String, Object> details = detailsCaptor.getValue();
-        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因原样保留
         assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
         assertThat(details)
                 .containsEntry("raw", "new-api 视频轮询失败: body={\"error\":{\"message\":\"Incorrect API key\"}}")
@@ -802,13 +767,10 @@ class VideoJobProcessorTest {
                 messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
         @SuppressWarnings("unchecked")
         Map<String, Object> details = detailsCaptor.getValue();
-        // 纯排查文案（TosVideoMediaRelay 下载失败不带状态 cause）：保留状态码字样、不写键
-        // ——该路径永远无判定读取，缺键 = 无非 HTTP 状态可读
         assertThat(messageCaptor.getValue()).contains("HTTP 404");
         assertThat(details).doesNotContainKey("http_status").containsKey("raw");
     }
 
-    // ========== isTransientPollError ==========
 
     @Nested
     @DisplayName("瞬时轮询错误判定")
@@ -866,7 +828,6 @@ class VideoJobProcessorTest {
         }
     }
 
-    // ========== 参考校验边界 ==========
 
     @Nested
     @DisplayName("参考视频物理校验边界")
@@ -876,7 +837,7 @@ class VideoJobProcessorTest {
         @DisplayName("G60: 200MB 恰好通过（>200MB 失败，边界包含）")
         void videoSize_200MB_exactlyPasses() {
             AssetEntity asset = videoAsset(200L * 1024 * 1024, null, null, null, "video/mp4");
-            processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC); // 不抛异常
+            processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC);
         }
 
         @Test
@@ -912,7 +873,6 @@ class VideoJobProcessorTest {
         @Test
         @DisplayName("G65: 单边 300px 恰好通过（需满足像素/比例约束：854x480 = 409,920px > 409,600）")
         void videoSide_300px_exactlyPasses() {
-            // 854x480: side ≥300 ✓, pixels=409,920 ∈ [409600,8295044] ✓, ratio=1.779 ∈ [0.4,2.5] ✓
             AssetEntity asset = videoAsset(1024L, 5000, 854, 480, "video/mp4");
             processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC);
         }
@@ -920,15 +880,6 @@ class VideoJobProcessorTest {
         @Test
         @DisplayName("G66: 单边 6000px 恰好通过（需满足像素/比例约束：3304x2490 ≈ 8,226,960px < 8,295,044）")
         void videoSide_6000px_exactlyPasses() {
-            // 6000x2500: pixels=15,000,000 > 8,295,044 ✗
-            // 3304x2490: side 3304 not 6000 ✗ — 需要一边=6000 且满足像素约束
-            // 6000x1366: pixels=8,196,000 ✓, ratio=4.39 > 2.5 ✗
-            // 使用 2490x3304: side 2490 ≥ 300 ✓, pixels=8,226,960 ✓, ratio=0.754 ✓
-            // 但单边非 6000。6000 单边与像素上限矛盾（6000×1382=8,292,000 但 ratio=4.34>2.5）。
-            // 修正：使用 2720x2490（ratio=1.09，pixels=6,772,800）——单边非 6000。
-            // 6000 单边在像素上限 8,295,044 下无法同时满足 ratio ≤2.5（6000/2400=2.5 但 pixels=14,400,000）。
-            // 结论：6000px 单边在 Seedance 2.0 约束下不可达，此测试改为验证上限侧的合理最大尺寸。
-            // 2880x2490: pixels=7,171,200 ✓, ratio=1.157 ✓, 两边均 ∈ [300,6000] ✓
             AssetEntity asset = videoAsset(1024L, 5000, 2880, 2490, "video/mp4");
             processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC);
         }
@@ -950,7 +901,6 @@ class VideoJobProcessorTest {
         }
     }
 
-    // ========== videoDimensions ==========
 
     @Nested
     @DisplayName("视频尺寸换算")
@@ -996,7 +946,6 @@ class VideoJobProcessorTest {
         }
     }
 
-    // ========== 参考上限（IKHBDO：全部读能力行冻结值，程序不含模型知识）==========
 
     @Test
     @DisplayName("旧 job（快照无 reference_limits）→ 回落旧常量，在途任务不被上线打断")
@@ -1033,7 +982,6 @@ class VideoJobProcessorTest {
     @Test
     @DisplayName("能力行 video_reference_max=5：5 个参考视频放行、6 个拒绝")
     void maxVideosFromConfig() {
-        // maxDurationSec=null（能力行未配）→ 只验数量，时长不参与
         VideoJobProcessor.ReferenceLimits limits =
                 new VideoJobProcessor.ReferenceLimits(14, 5, 5, null);
 
@@ -1055,7 +1003,6 @@ class VideoJobProcessorTest {
         assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED);
         assertThat(error.getMessage()).contains("参考音频最多 0 个");
 
-        // 同一份素材，能力行配 3 → 放行：行为差异只能来自配置
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(
                 () -> processor.validateReferences(
                         new VideoJobProcessor.ReferenceLimits(9, 3, 3, 15),
@@ -1076,7 +1023,6 @@ class VideoJobProcessorTest {
         assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE_MEDIA);
         assertThat(error.getMessage()).contains("参考视频已知总时长不能超过 30 秒");
 
-        // 旧 15s 口径下同样两条就超限：差异同样只来自配置
         org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
                 () -> processor.validateReferences(
                         VideoJobProcessor.LEGACY_REFERENCE_LIMITS,
@@ -1086,11 +1032,9 @@ class VideoJobProcessorTest {
     @Test
     @DisplayName("referenceLimitsOf：读冻结值；整字段/单字段缺失回落旧常量；显式 null = 不限")
     void referenceLimitsOfParsing() {
-        // 旧 job：input 里没有 reference_limits → 全回落旧常量
         assertThat(VideoJobProcessor.referenceLimitsOf(baseInput()))
                 .isEqualTo(VideoJobProcessor.LEGACY_REFERENCE_LIMITS);
 
-        // 单字段缺失 → 该字段回落，其余读冻结值
         Map<String, Object> partial = baseInput();
         partial.put("reference_limits", Map.of("image_reference_max", 14));
         VideoJobProcessor.ReferenceLimits parsed = VideoJobProcessor.referenceLimitsOf(partial);
@@ -1099,7 +1043,6 @@ class VideoJobProcessorTest {
         assertThat(parsed.maxDurationSec())
                 .isEqualTo(VideoJobProcessor.LEGACY_MAX_REFERENCE_VIDEO_SECONDS);
 
-        // 显式 null（能力行未配上限）≠ 缺失 → 不限，不回落旧 15
         Map<String, Object> explicitNull = new HashMap<>();
         explicitNull.put("image_reference_max", 14);
         explicitNull.put("video_reference_max", 3);
@@ -1113,7 +1056,6 @@ class VideoJobProcessorTest {
     @Test
     @DisplayName("冻结上限经 buildSubmitRequest 全链路生效（旧硬编码 9 不再拦得住 14 张）")
     void frozenLimitsDriveSubmitRequest() {
-        // 归属查询按请求 id 返回同 id 图片素材（数量必须与请求一致，否则被判「素材不存在」）
         doAnswer(inv -> {
             List<String> ids = inv.getArgument(0);
             Map<String, AssetEntity> map = new HashMap<>();
@@ -1136,7 +1078,6 @@ class VideoJobProcessorTest {
     @Test
     @DisplayName("scene_card 路径冻结的 video_reference_max 决定执行期上限（旧常量 3 拦不住第 4 条）")
     void frozenVideoLimitDrivesSceneCardPath() {
-        // scene_card job 的参考走扁平 reference_asset_ids（无单数组 references），素材是视频。
         doAnswer(inv -> {
             List<String> ids = inv.getArgument(0);
             Map<String, AssetEntity> map = new HashMap<>();
@@ -1146,12 +1087,10 @@ class VideoJobProcessorTest {
             return map;
         }).when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
 
-        // 冻结 video_reference_max=5：4 条参考视频必须放行（旧 LEGACY 3 会把第 4 条拒掉）
         assertThat(processor.buildSubmitRequest(
                 videoClaim("501", false, null, 0, 0, null, inputWithFlatVideoRefs(4, 5)))
                 .references()).hasSize(4);
 
-        // 同一份请求，冻结值配 3 → 执行期按配置拒，判词带配置值
         VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
                 () -> processor.buildSubmitRequest(
                         videoClaim("502", false, null, 0, 0, null, inputWithFlatVideoRefs(4, 3))));
@@ -1159,21 +1098,14 @@ class VideoJobProcessorTest {
         assertThat(error.getMessage()).contains("参考视频最多 3 个");
     }
 
-    // ========== IKHBDO 回归：参考视频校验不含模型名知识 ==========
 
     @Test
     @DisplayName("IKHBDO 回归：带参考视频的 job 不再按模型名前缀放行——2.5（非 seedance-2 / 非 doubao-seedance-2-0）照常提交")
     void referenceVideoAcceptedForNonSeedance2Model() {
-        // 症状：曾有一道 `isSeedance2Model(SEEDANCE2_PATTERN)` 前缀门控，把能力行为
-        // features.video_reference=true 的 Seedance 2.5 拒成 unsupported_input，却给 2.0 放行。
-        // 本用例的 model_id 是真实已配置型号且**不匹配** `^seedance-2$|^doubao-seedance-2-0(?:-|$)`。
         Map<String, Object> input = baseInput();
         input.put("model_id", "doubao-seedance-2-5-260628");
         input.put("references", List.of(Map.of(
                 "role", "reference", "type", "video", "asset_id", "9")));
-        // 物理约束全部满足，断言不可能「因先被某条边界拦下」而误绿：
-        // size 1024B ∈ (0,200MB]、时长 5s ≥ 2s、单边 1280/720 ∈ [300,6000]、
-        // 总像素 921,600 ∈ [409600,8295044]、宽高比 1.78 ∈ [0.4,2.5]、mime video/mp4。
         doReturn(Map.of("9", videoAsset(1024L, 5000, 1280, 720, "video/mp4")))
                 .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
         ClaimedVideoJobDto claim = videoClaim("601", false, null, 0, 0, null, input);
@@ -1187,8 +1119,6 @@ class VideoJobProcessorTest {
 
         processor.handle("601");
 
-        // 断言的是不变式「这个 job 没被判失败」，不是「没抛被删门控的那个错误码」——
-        // 后者只钉住 unsupported_input，将来若有谁重加一道名字门控换了错误码就漏过去了。
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
         verify(videoClient).submit(eq("token"), captor.capture());
@@ -1200,16 +1130,10 @@ class VideoJobProcessorTest {
     @Test
     @DisplayName("IKHBDO 回归：带参考音频的 job 同样不再按模型名放行——2.5（非 seedance-2 / 非 doubao-seedance-2-0）照常提交")
     void referenceAudioAcceptedForNonSeedance2Model() {
-        // 被删的门控是 `(videoCount > 0 || audioCount > 0) && !isSeedance2Model(model)`——
-        // 视频与音频两半一起拒。上面那条只钉住视频半：音频夹具全都用 baseInput()，其
-        // model_id="seedance-2" 恰好**匹配**旧前缀，所以重加一道「只对音频生效」的名字门控
-        // 完全不会红。本用例改用同一真实型号（不匹配旧前缀）+ 参考音频。
         Map<String, Object> input = baseInput();
         input.put("model_id", "doubao-seedance-2-5-260628");
         input.put("references", List.of(Map.of(
                 "role", "reference", "type", "audio", "asset_id", "9")));
-        // 音频参考没有物理边界校验（validateReferenceVideo 只对视频生效），放行的唯一前提是
-        // 数量不超上限：这里无冻结快照 → 回落旧常量 audio_reference_max=3，实际 1 条。
         doReturn(Map.of("9", audioAsset()))
                 .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
         ClaimedVideoJobDto claim = videoClaim("602", false, null, 0, 0, null, input);
@@ -1223,7 +1147,6 @@ class VideoJobProcessorTest {
 
         processor.handle("602");
 
-        // 同上：只断言「没被判失败」，不绑定任何具体错误码。
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
         verify(videoClient).submit(eq("token"), captor.capture());
@@ -1232,7 +1155,6 @@ class VideoJobProcessorTest {
                 .containsExactly(new VideoReference("audio", "http://audio.mp3", null));
     }
 
-    // ========== IKFFWH：素材库引用（material_id → asset:// 载体）==========
 
     @Nested
     @DisplayName("素材库引用透传（IKFFWH）")
@@ -1471,7 +1393,6 @@ class VideoJobProcessorTest {
             assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE);
         }
 
-        // ===== 快照结构校验（worker 侧不信任冻结快照，对齐 TS readReferences）=====
 
         @Test
         @DisplayName("references 非数组 → invalid_reference（不得静默退化成无参考提交）")
@@ -1536,7 +1457,6 @@ class VideoJobProcessorTest {
         }
     }
 
-    // ========== IKFPYX：任务类型判定与 duration=-1 收窄 ==========
 
     @org.junit.jupiter.api.Nested
     @DisplayName("IKFPYX 任务类型判定与 duration=-1 收窄")
@@ -1581,9 +1501,6 @@ class VideoJobProcessorTest {
                     .isEqualTo("default");
         }
 
-        // 关键词表逐字对齐火山方舟 Seedance 2.5 提示词指南。以下两条钉住**曾经放宽过的词**：
-        // 放宽会让「用户没要求编辑/延长」的提示词也落进 edit/prolong，进而被按编辑任务的锁定额处理。
-        // 与 backend capability-param-validation.test.ts 逐条对应。
 
         @Test
         @DisplayName("裸「编辑」不算编辑意图（官方那条是「编辑视频」）")
@@ -1612,8 +1529,6 @@ class VideoJobProcessorTest {
                     .isEqualTo("prolong");
         }
 
-        // IKJ78C：否定防护——与 backend capability-param-validation.test.ts 逐条对应
-        //（default 即官方 reference）。
 
         @Test
         @DisplayName("IKJ78C 否定约束句不判编辑（六词闭集逐一覆盖）")
@@ -1712,7 +1627,6 @@ class VideoJobProcessorTest {
                     videoClaim("304", false, null, 0, 0, null, withTrue)).generateAudio())
                     .isTrue();
 
-            // 能力位不允许 / 旧快照：字段缺失 → null → 出站不下发，维持上游默认
             assertThat(processor.buildSubmitRequest(
                     videoClaim("305", false, null, 0, 0, null, baseInput())).generateAudio())
                     .isNull();
@@ -1732,12 +1646,9 @@ class VideoJobProcessorTest {
         }
     }
 
-    // ========== 工具方法 ==========
 
-    /** 边界用例里的参考时长上限（等同于能力行 Seedance 2.0 的配置值，IKHBDO 后由能力行注入）。 */
     private static final int REF_MAX_DURATION_SEC = 15;
 
-    /** n 条本地图片参考（无 mime/size/尺寸，只验数量上限）。 */
     private List<AssetEntity> imageAssets(int n) {
         List<AssetEntity> images = new java.util.ArrayList<>();
         for (int i = 0; i < n; i++) {
@@ -1749,7 +1660,6 @@ class VideoJobProcessorTest {
         return images;
     }
 
-    /** 单个合法参考视频（1280x720 / mp4 / 指定秒数）。 */
     private AssetEntity videoRefAsset(int seconds) {
         return videoAsset(1024L, seconds * 1000, 1280, 720, "video/mp4");
     }
@@ -1769,7 +1679,6 @@ class VideoJobProcessorTest {
         return a;
     }
 
-    /** baseInput + n 条图片参考 + 冻结的参考上限快照（image_reference_max = configuredMax）。 */
     private Map<String, Object> inputWithImageRefs(int n, int configuredMax) {
         Map<String, Object> input = baseInput();
         List<Map<String, Object>> refs = new java.util.ArrayList<>();
@@ -1785,7 +1694,6 @@ class VideoJobProcessorTest {
         return input;
     }
 
-    /** scene_card 路径的 job 形态：扁平 reference_asset_ids + 冻结的 video_reference_max。 */
     private Map<String, Object> inputWithFlatVideoRefs(int n, int configuredVideoMax) {
         Map<String, Object> input = baseInput();
         List<String> ids = new java.util.ArrayList<>();
@@ -1801,11 +1709,8 @@ class VideoJobProcessorTest {
         return input;
     }
 
-    // ========== IKIZQ8：样片（Draft）提交 / 截止 / 转存无降级 ==========
 
-    /** 金标 G06 输入：上游 Draft created_at=2026-09-29T02:00:00Z（epoch 毫秒）。 */
     private static final long G06_UPSTREAM_CREATED_AT_MS = 1_790_647_200_000L;
-    /** 金标 G06 期望：截止=2026-10-06T01:00:00Z（created_at+7天−1小时）。 */
     private static final long G06_FINALIZE_DEADLINE_MS = 1_791_248_400_000L;
 
     private Map<String, Object> sampleInput() {
@@ -1854,7 +1759,6 @@ class VideoJobProcessorTest {
 
         processor.handle("131");
 
-        // 可信 created_at 与截止（=created_at+7d−1h）随终态落列——与 TS 契约同一公式（G06）。
         verify(finalizer).publishVideoResult(eq("131"), eq("1"), eq("42"),
                 anyString(), eq(1L), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"),
                 eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(),
@@ -1920,7 +1824,6 @@ class VideoJobProcessorTest {
         doReturn("token").when(upstreamCredential).requireKey();
         doReturn(new VideoTaskObservation("succeeded", 100, "http://provider-temp.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-normal"));
-        // 降级直存路径的 storageKey/mime/size/md5 均为 null——字符串槽用 any()（anyString() 不匹配 null）。
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), any(), any(), any(), any(),
@@ -1935,9 +1838,7 @@ class VideoJobProcessorTest {
                 any(), anyString(), anyLong());
     }
 
-    // ========== IKIZQ9：样片快照 × 带参考素材（三模式 Draft 组装） ==========
 
-    /** IKIZQ9：样片 job 的 input 快照——sample_mode + 480p + adaptive + 首帧与三类普通参考 + 冻结上限。 */
     private Map<String, Object> sampleInputWithReferences() {
         Map<String, Object> input = baseInput();
         input.put("sample_mode", true);
@@ -1971,8 +1872,6 @@ class VideoJobProcessorTest {
         VideoSubmitInput request = processor.buildSubmitRequest(
                 videoClaim("135", false, null, 0, 0, null, sampleInputWithReferences()));
 
-        // 样片增量（draft/480p）与参考组装互不干扰。单数组语义：帧不落独立字段，
-        // 而是作为带 role 的 reference 条目保序并入（NewApiVideoClient 按 role 出站）。
         assertThat(request.draft()).isTrue();
         assertThat(request.resolution()).isEqualTo("480p");
         assertThat(request.firstFrameImage()).isNull();
@@ -1986,9 +1885,7 @@ class VideoJobProcessorTest {
         assertThat(request.references().get(3).type()).isEqualTo("audio");
     }
 
-    // ========== IKIZQC：成片（finalize）提交 / 轮询 / 转存无降级 ==========
 
-    /** 成片 claim：video_stage='final' + 来源样片公开任务 ID（13 参形态）。 */
     private ClaimedVideoJobDto finalClaim(String id, String providerTaskId,
                                           String sourceSampleProviderTaskId) {
         Map<String, Object> input = baseInput();
@@ -2014,8 +1911,6 @@ class VideoJobProcessorTest {
 
         processor.handle("140");
 
-        // ★ 不走普通 submit：成片不重放提示词/参考/时长（金标 G02），上游输入由网关从
-        //   Draft 派生；本仓只携带样片保存的网关公开任务 ID。
         verify(videoClient, never()).submit(anyString(), any());
         verify(videoClient).finalize(eq("token"), eq("task-sample-9"));
         verify(stateMachine).markProviderSubmitted(eq("140"), anyString(), eq(1L), eq("task-final-77"));
@@ -2059,9 +1954,6 @@ class VideoJobProcessorTest {
 
         processor.handle("142");
 
-        // ★ 成功终态：totalTokens=118000（成片阶段真实用量，Settle 权威输入）；
-        //   upstream_created_at/finalize_deadline 传 null——那是样片阶段的语义，
-        //   COALESCE 不覆盖样片已落的截止（两阶段费用与任务关系互不回滚，金标 G09）。
         verify(finalizer).publishVideoResult(eq("142"), anyString(), anyString(), anyString(),
                 anyLong(), eq("https://tos/final.mp4"), eq("storage/final.mp4"), eq("video/mp4"),
                 eq(5L), eq("md5f"), anyInt(), anyInt(), anyDouble(),
@@ -2112,7 +2004,6 @@ class VideoJobProcessorTest {
                 anyInt(), anyInt(), anyDouble(), any(), any(), any());
     }
 
-    // ========== IKIZQD：提交结果不明 → checking 锁定（超时/响应丢失/落库失败/失租） ==========
 
     @Test
     @DisplayName("IKIZQD: finalize 超时（无可用响应）→ 留 checking：不 failVideo、不落句柄、不重排、记 submission_unknown")
@@ -2126,9 +2017,6 @@ class VideoJobProcessorTest {
 
         processor.handle("145");
 
-        // ★ 调网关前先落「提交中」标记；超时 = 结果不明 → checking 锁定：
-        //   不按空 provider_task_id 重提（markProviderSubmitted 零调用）、不自动退款
-        //   （failVideoJob 零调用——它会把 charge_state 置 released）。
         verify(stateMachine).markSubmissionAttempt(eq("145"), anyString(), eq(1L));
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
@@ -2144,7 +2032,6 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("146"), anyString());
         doReturn("token").when(upstreamCredential).requireKey();
-        // 网关已受理但响应不可用（无 HTTP 状态 cause）——与超时同为「结果不明」。
         doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "new-api 视频提交响应缺少 task_id"))
                 .when(videoClient).finalize(eq("token"), eq("task-sample-9"));
 
@@ -2170,8 +2057,6 @@ class VideoJobProcessorTest {
 
         processor.handle("147");
 
-        // ★ 落库失败 = 网关已受理但句柄未落——结果不明：failVideo 守卫此刻能命中 checking 行，
-        //   一旦放行就是「提前退款」，必须截在 processor 里。
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         verifyNoInteractions(producer);
         verify(stateMachine).appendLog(eq("147"), eq("submission_unknown"), eq("checking"),
@@ -2190,7 +2075,6 @@ class VideoJobProcessorTest {
 
         processor.handle("148");
 
-        // ★ 迟到 Worker 的 fence：核对标记未落 = 失租/已提交/已终态——绝不发网关。
         verify(videoClient, never()).finalize(anyString(), anyString());
         verify(videoClient, never()).submit(anyString(), any());
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
@@ -2211,8 +2095,6 @@ class VideoJobProcessorTest {
 
         processor.handle("149");
 
-        // ★ 网关已答复业务回绝 = 明确失败（未建任务）→ 顶层 catch → failVideoJob
-        //   （failVideoGuard 已放宽到 checking，落 failed + charge released）。
         verify(finalizer).failVideoJob(eq("149"), eq(GenerationError.ERROR_QUOTA_EXHAUSTED),
                 anyString(), any(), eq("video-worker"), eq(1L));
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
@@ -2264,7 +2146,6 @@ class VideoJobProcessorTest {
 
         processor.handle("152");
 
-        // ★ 仅本地前置校验且未发网关 → 直接失败释放，不进入 checking（不占尝试）。
         verify(stateMachine, never()).markSubmissionAttempt(anyString(), anyString(), anyLong());
         verify(finalizer).failVideoJob(eq("152"), eq(GenerationError.ERROR_INVALID_INPUT),
                 anyString(), any(), eq("video-worker"), eq(1L));
@@ -2320,7 +2201,6 @@ class VideoJobProcessorTest {
         return a;
     }
 
-    /** 已关联素材库的本地图片素材（assets.material_id 非空 → 生成走 asset://）。 */
     private AssetEntity linkedImageAsset(String id, String url, String materialId) {
         AssetEntity a = imageAsset(id, url);
         a.setMaterialId(materialId);

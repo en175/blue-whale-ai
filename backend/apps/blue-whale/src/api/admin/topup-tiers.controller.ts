@@ -37,17 +37,6 @@ const BIGINT_ID_RE = /^\d{1,19}$/;
 const STATUS_HINT = TOPUP_TIER_STATUSES.join(" | ");
 const PERMISSION_HINT = TOPUP_TIER_PERMISSIONS.join(" | ");
 
-/**
- * PRD §10.2 里「名称 / 原价 / 折扣 / 状态 / 时间窗 / 推荐 / 排序」之外的那批字段。
- *
- * <p>⚠️ **基础积分（`baseCredits`）曾是「不在这里」的那一类**（2026-09-27 改）：
- * 那时它由 `原价 × 换算率` 派生，收下它就等于允许「原价 100、积分写 999999」。
- * 现在它是**配置值** —— 充值常有折扣，「元 → 积分」与消费锚点「1 元 = 15 积分」
- * 不是一回事（¥499 到账 7,500，而 499×15=7,485）。运营填的就是用户到手的那一个数，
- * 所以它回到本表单，**由运营直接输入**。
- *
- * <p>仍然不在这里的是**实付价格（price）**：它依旧是 `原价 × 折扣`，由 repo 派生。
- */
 interface TierCardFields {
   description: string;
   bonusCredits: number;
@@ -60,7 +49,6 @@ interface TierCardFields {
   permissionDeniedHint: string;
 }
 
-/** 选填文本：必须是字符串，且不超过列宽（超了 MySQL 严格模式会 500，这里提前 400）。 */
 function requireText(raw: unknown, label: string, maxLength: number): string {
   if (typeof raw !== "string") throw new AdminException(400, `${label}须为文本`);
   const text = raw.trim();
@@ -70,19 +58,12 @@ function requireText(raw: unknown, label: string, maxLength: number): string {
   return text;
 }
 
-/** 状态：不认得的 → 400。**不做「非法值当草稿」的兜底**——那会让人以为自己改成功了。 */
 function requireStatus(raw: unknown): TopupTierStatus {
   const status = parseTierStatus(raw);
   if (status === null) throw new AdminException(400, `状态须为 ${STATUS_HINT}`);
   return status;
 }
 
-/**
- * 读 PRD §10.2 的卡片字段，**只返回显式传了的键**。
- *
- * <p>新建与编辑共用这一个函数：新建时缺的键由 repo 落默认值，
- * 编辑时缺的键保持不变。非法值一律 400，不静默回退到默认值。
- */
 function readCardFields(body: Record<string, unknown>): Partial<TierCardFields> {
   const out: Partial<TierCardFields> = {};
 
@@ -124,7 +105,6 @@ function readCardFields(body: Record<string, unknown>): Partial<TierCardFields> 
     out.permission = permission;
   }
   if (body.permissionAllowlist !== undefined) {
-    // null = 显式清空；数组 = 覆盖成这份名单（空数组 = 名单为空，两者物理落点不同）
     if (body.permissionAllowlist === null) {
       out.permissionAllowlist = null;
     } else {
@@ -151,13 +131,6 @@ export class AdminTopupTiersController {
   async list() {
     try {
       const tiers = await this.topupTier.listAll();
-      // ⚠️ 这里**曾经**读时重新派生（`deriveCredits(原价, 换算率)`），因为那时
-      // `topup_tiers.amount` 的存量行是 new-api 记账时代写进去的 quota（¥100 档存 5,000,000）。
-      // 2026-09-27 起不再派生：到账积分是**配置值** `base_credits`，存的什么就是什么。
-      //   · 原价 × 折扣仍保留，但**只为展示划线价**，与积分再无数学关系；
-      //   · 因此 `creditsPerYuan` 也不再回给管理端 —— 它此前唯一的用途是让表单
-      //     「边输价格边显示会到账多少积分」。留着它只会诱导下一个人在表单里重新乘一遍，
-      //     而那个乘法的结果在充值有折扣时（¥499 → 7,500）本来就是错的。
       return {
         success: true,
         data: {
@@ -206,9 +179,6 @@ export class AdminTopupTiersController {
     if (discount === null) {
       throw new AdminException(400, "折扣比例须在 (0, 1] 之间");
     }
-    // 基础积分是**必填的配置值**（用户下单到手的就是它）。缺了 / 非法就 400，
-    // **不替运营猜一个** —— 猜「原价 × 换算率」正是本次废掉的那条公式，
-    // 且充值有折扣时它算出来就是错的数（¥499 会得到 7,485 而不是 7,500）。
     const baseCredits = parseBaseCredits(body.baseCredits);
     if (baseCredits === null) {
       throw new AdminException(400, "基础积分须为 1 以上的整数（0 积分的档位无法下单）");
@@ -226,7 +196,6 @@ export class AdminTopupTiersController {
     }
 
     const name = typeof body.name === "string" ? body.name : "";
-    // PRD §10.5：**新建卡片默认草稿**，不展示给用户。运营配齐字段后再显式上架。
     const status = body.status === undefined ? "draft" : requireStatus(body.status);
     const cardFields = readCardFields(body);
     try {
@@ -249,7 +218,6 @@ export class AdminTopupTiersController {
       try {
         await this.tierAudit.logCreate(tier);
       } catch {
-        // best-effort 审计，失败不阻断
       }
 
       return { success: true, data: tier };
@@ -303,7 +271,6 @@ export class AdminTopupTiersController {
         throw new AdminException(400, "折扣比例须在 (0, 1] 之间");
       }
     }
-    // 基础积分是配置值：传了才改（部分更新），值非法一律 400
     let baseCredits: number | undefined;
     if (body.baseCredits !== undefined) {
       baseCredits = parseBaseCredits(body.baseCredits) ?? undefined;
@@ -337,8 +304,6 @@ export class AdminTopupTiersController {
 
     try {
       const tier = await this.topupTier.update(id, {
-        // ⚠️ 原价与基础积分是**互相独立**的两项：改原价不再连带改积分
-        //（曾经的 `amount: deriveCredits(原价, 换算率)` 已废 —— 见 list() 的注释）。
         ...(originalPrice !== null && { originalPrice }),
         ...(baseCredits !== undefined && { baseCredits }),
         ...(discount !== undefined && { discount }),
@@ -369,7 +334,6 @@ export class AdminTopupTiersController {
       try {
         await this.tierAudit.logUpdate(before, tier);
       } catch {
-        // best-effort 审计，失败不阻断
       }
 
       return { success: true, data: tier };
@@ -390,7 +354,6 @@ export class AdminTopupTiersController {
       try {
         await this.tierAudit.logDelete(before);
       } catch {
-        // best-effort 审计，失败不阻断
       }
     }
     return { success: true };

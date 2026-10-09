@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Black-box cleanup tests with a bare remote and real Git worktrees."""
 
 import shutil
 import subprocess

@@ -77,7 +77,6 @@ describe('HD 面板通过运行时的提交契约', () => {
       expect(errors).toEqual([]);
       expect(video.getSnapshot().visible).toBe(change !== 'close');
       expect(video.getSnapshot().submitting).toBe(change !== 'close');
-      // 受理输入序列直接证明重发被受理（close 分支无第二次受理）
       expect(inputs.map((input) => input.payload.resolution)).toEqual(change === 'close' ? ['2k'] : ['2k', '4k']);
     }
   });
@@ -95,17 +94,14 @@ describe('HD 面板通过运行时的提交契约', () => {
     };
     video.open('a', deps);
     expect(video.send('2k')).toBe(true);
-    // 选中其它卡：面板隐藏、submitting 被 select 复位（回归路径），宿主在途不受影响
     runtime.onSelectionChange({ soloId: 'b', multiSelect: false });
     expect(video.getSnapshot().visible).toBe(false);
     expect(video.getSnapshot().submitting).toBe(false);
-    // 选回同卡：面板重现，提交锁以宿主在途重算上锁，重发被拒、不重复受理
     runtime.onSelectionChange({ soloId: 'a', multiSelect: false });
     expect(video.getSnapshot().visible).toBe(true);
     expect(video.getSnapshot().submitting).toBe(true);
     expect(video.send('4k')).toBe(false);
     expect(inFlight.size).toBe(1);
-    // 原任务落地：旧响应不关新界面（纪元已失效），reconcile 随在途落地解锁后可再发
     settle(); await flush();
     expect(video.getSnapshot().visible).toBe(true);
     expect(video.getSnapshot().submitting).toBe(false);
@@ -130,10 +126,6 @@ it('高清发送即退出仍接收有效失败；同卡重开后旧失败不提�
   }
 });
 
-/* IKJPM5 open 隐藏返回传 previous 的 15 工具核对钉住（imageEnhance）：面板无参数编辑
-   写卡（VideoEnhanceDialog 有 onParamsChange 即时写卡、ImageEnhanceDialog 无）、
-   lastParams 仅发送成功更新且成功即关面板——会话期间快照数据源不可变，previous 与
-   实时重读等值，隐藏返回恢复原会话不回退（与改前重读行为一致）。 */
 it('imageEnhance 选择隐藏返回恢复原会话：seed 与 initialParams 保持打开时恢复值', () => {
   const { runtime, host, nodes } = setup();
   nodes[0]!.data.imageEnhance = {
@@ -149,7 +141,6 @@ it('imageEnhance 选择隐藏返回恢复原会话：seed 与 initialParams 保�
   expect(image.getSnapshot().visible).toBe(false);
   expect(image.getSnapshot().state).not.toBeNull();
 
-  // 真实点回原卡（open resume 路径）：恢复原会话，seed 引用不变（面板 key 稳定）
   expect(image.open('a', deps)).toBe(true);
   expect(image.getSnapshot().visible).toBe(true);
   expect(image.getSnapshot().state!.seed).toBe(seed);
@@ -200,7 +191,6 @@ it('三个面板身份删除即解绑；来源素材删除保留目标', () => {
     nodes.pop();
     runtime.reconcileSources(new Set(['a']));
     expect(request.getSnapshot().visible).toBe(true);
-    // 源资产只在冻结输入中，运行时按派生目标的身份判断解绑。
     delete nodes[0]!.data.imageEnhance; delete nodes[0]!.data.videoEnhance; delete nodes[0]!.data.frameInterpolation;
     runtime.reconcileSources(new Set(['a']));
     expect(request.getSnapshot().state).toBeNull();

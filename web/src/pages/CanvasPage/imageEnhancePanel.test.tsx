@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* IKGM9O 高清放大面板闭环链路测试：建卡后自动开高清面板、发送创建任务（六键冻结 + lastParams
-   写入 + 原地转生成中 + 面板自动关闭）、「重新编辑」分流回填 lastParams、失败重试走 lastParams
-   原样重发（不走通用 retry 接口）、生成中重开面板只读、成品高清卡链式放大。
-   渲染模式沿用 imageEnhance.test.tsx（FlowCanvas 打桩透出 props）。 */
 import { dockActions } from './testing/dockActionsRecorder';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -41,7 +37,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -80,7 +75,6 @@ const apiMocks = vi.hoisted(() => ({
     }),
   ),
   createGenerationJob: vi.fn(),
-  // IKJJR2：受理后统一运行时立即开始轮询——需默认进行中实现（防 undefined.then）
   fetchJobStatus: vi.fn(async () => ({ job_id: '88', status: 'processing', progress: 0, asset: null })),
   cancelGenerationJob: vi.fn(),
   retryGenerationJob: vi.fn(),
@@ -118,7 +112,6 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn(),
 }));
 
-/* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
@@ -160,8 +153,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪图片节点 i1（assetId '5'，契约形态数字字符串）+ 可选成品高清卡 h1。
- *  withFinishedEnhance：true 正常成品卡；'failed' 失败态成品卡（重试链路） */
 function seedDoc(withFinishedEnhance: boolean | 'failed' = false) {
   const nodes: Array<Record<string, unknown>> = [
     {
@@ -237,7 +228,6 @@ async function renderPage() {
   });
 }
 
-/** 走图片节点工具栏的「高清放大」入口（回调挂在节点 data 上） */
 async function enhanceImage() {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
   await act(async () => {
@@ -267,10 +257,8 @@ describe('IKGM9O 建卡后自动开高清面板', () => {
     await enhanceImage();
 
     const draftId = (flowProps.current.mediaNodes as Node[]).find((n) => n.id !== 'i1')!.id;
-    // 面板已渲染（发送按钮存在）且面板领土标记在（点外关闭豁免链）
     expect(panelSend()).toBeTruthy();
     expect(document.body.querySelector('[data-gen-panel-territory]')).toBeTruthy();
-    // 面板绑定新卡：选中切到源卡（onSelectionChange）时面板隐藏（绑定目标失配）
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [mediaNode('i1')], edges: [] });
     });
@@ -301,13 +289,11 @@ describe('IKGM9O 发送创建任务闭环', () => {
     await act(async () => {
       panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    // 创建请求已发出 → 面板自动关闭
     expect(panelSend()).toBeNull();
     expect(dockActions.submit).toHaveBeenCalledWith('imageEnhance', { version_tier: 'pro', multiple: 2, generative_enhance_mode: 'generative_first', enable_correct_color: false });
     expect(apiMocks.createImageEnhancement).toHaveBeenCalledTimes(1);
     const [projectId, payload] = apiMocks.createImageEnhancement.mock.calls[0];
     expect(projectId).toBe('p1');
-    // 六键冻结（默认档 Pro：色彩校正冻结 false）
     expect(payload).toEqual({
       source_asset_id: '5',
       target_node_id: draftId,
@@ -316,19 +302,16 @@ describe('IKGM9O 发送创建任务闭环', () => {
       generative_enhance_mode: 'generative_first',
       enable_correct_color: false,
     });
-    // 原地转生成中 + lastParams 随提交写入
     const draft = mediaNode(draftId);
     const data = draft.data as Record<string, unknown>;
     expect(data.genStatus).toBe('generating');
     expect(data.progress).toBe(0);
     expect((data.imageEnhance as Record<string, unknown>).lastParams).toEqual(payload);
-    // 创建成功后 jobId 回填并启动轮询
     await act(async () => {
       await Promise.resolve();
     });
     expect((mediaNode(draftId).data as Record<string, unknown>).jobId).toBe('88');
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('88');
-    // 源卡全程不变
     expect((mediaNode('i1').data as Record<string, unknown>).src).toBe('http://img/i1.png');
   });
 
@@ -371,7 +354,6 @@ describe('IKGM9O 重新编辑分流与回填（IKH3WE 起入口 = 点卡片开�
       flowProps.current.onNodeClick(mediaNode('h1'));
     });
     expect(panelSend()).toBeTruthy();
-    // lastParams 回填：Max / 4x / 保真度优先 / 色彩校正开
     expect(document.body.querySelector('[data-testid="enhance-model-btn"]')!.textContent).toContain('Max');
     expect(
       document.body.querySelector<HTMLButtonElement>('[data-testid="enhance-multiple-4"]')!.className,
@@ -394,25 +376,22 @@ describe('IKGM9O 重新编辑分流与回填（IKH3WE 起入口 = 点卡片开�
     await act(async () => {
       panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    // 卡片数量不变（无新建占位卡）
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
     const data = mediaNode('h1').data as Record<string, unknown>;
     expect(data.genStatus).toBe('generating');
-    expect(data.src).toBe('http://img/hd.png'); // 旧素材保留显示（重新生成中叠加状态角标）
+    expect(data.src).toBe('http://img/hd.png');
     expect(apiMocks.createImageEnhancement.mock.calls[0][1]).toMatchObject({ target_node_id: 'h1', version_tier: 'max' });
   });
 
   it('失败重试走 lastParams 原样重发：不经通用 retry 接口', async () => {
     seedDoc('failed');
     await renderPage();
-    // 经真实 state 链路走 onRetryJob 回调：直接用当前节点 data 上的回调
     const retryCb = (mediaNode('h1').data as Record<string, unknown>).onRetryJob as (id: string) => void;
     await act(async () => {
       retryCb('h1');
     });
     expect(apiMocks.createImageEnhancement).toHaveBeenCalledTimes(1);
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
-    // lastParams 原样重发（含 max/4/fidelity_first/true 冻结值）
     expect(apiMocks.createImageEnhancement.mock.calls[0][1]).toMatchObject({
       source_asset_id: '5',
       target_node_id: 'h1',
@@ -436,7 +415,6 @@ describe('IKGM9O 生成中重开面板只读', () => {
     });
     expect((mediaNode(draftId).data as Record<string, unknown>).genStatus).toBe('generating');
 
-    // 点生成中的高清卡重开面板
     await act(async () => {
       flowProps.current.onNodeClick(mediaNode(draftId));
     });
@@ -459,11 +437,8 @@ describe('IKGM9O 链式放大', () => {
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(3);
     const chained = (flowProps.current.mediaNodes as Node[]).find((n) => n.id !== 'i1' && n.id !== 'h1')!;
     const data = chained.data as Record<string, unknown>;
-    // 链式新卡的源素材身份 = 高清卡自身 assetId（a9）
     expect(data.imageEnhance).toEqual({ sourceAssetId: '9' });
-    // 建卡即弹面板
     expect(panelSend()).toBeTruthy();
-    // 源边从高清卡连到新卡
     const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
       .find((e) => e.target === chained.id)!;
     expect(edge.source).toBe('h1');

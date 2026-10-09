@@ -44,15 +44,12 @@ describe('videoSubtitleEraseGateReason（智能去字幕门槛预检，IKGZ82）
 
   it('宽高或时长缺失（null 放行）：存量数据不误拦，交后端按权威数据复核', () => {
     expect(videoSubtitleEraseGateReason({})).toBeNull();
-    expect(videoSubtitleEraseGateReason({ width: 4096 })).toBeNull(); // 仅一边实测回填前不拦
+    expect(videoSubtitleEraseGateReason({ width: 4096 })).toBeNull();
     expect(videoSubtitleEraseGateReason({ duration: 120 })).toBeNull();
-    expect(videoSubtitleEraseGateReason({ width: 4096, duration: 7200 })).toContain('10 分钟'); // 时长仍独立判定
+    expect(videoSubtitleEraseGateReason({ width: 4096, duration: 7200 })).toContain('10 分钟');
   });
 });
 
-/* IKH3OU（ADR-0104）：模式前置到入口下拉后，发送钮只服务一种语义——detect_mode 两模式
-   恒 subtitle_smart（智能模式自动擦画面下半字幕，框选模式在其上叠加检测框）；
-   旧「全画面文字」开关推导（text_full）随开关废除，契约枚举保留但本期无 UI 入口。 */
 describe('buildVideoSubtitleEraseInput（发送参数推导，IKH3OU：detect_mode 恒 subtitle_smart）', () => {
   const base = {
     sourceAssetId: '5',
@@ -86,7 +83,6 @@ describe('buildVideoSubtitleEraseInput（发送参数推导，IKH3OU：detect_mo
     const box = buildVideoSubtitleEraseInput({ ...base, boxes: [oneBox] });
     expect(smart.detect_mode).toBe('subtitle_smart');
     expect(box.detect_mode).toBe(smart.detect_mode);
-    // text_full（全画面检测）本期无任何推导路径（ADR-0104 Out of Scope）
     expect(smart.detect_mode).not.toBe('text_full');
   });
 

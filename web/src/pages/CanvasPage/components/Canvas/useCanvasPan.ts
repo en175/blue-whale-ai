@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { isEditableKeyboardTarget } from './keyboardDelete';
 
-/** 空格临时平移；从鼠标按下到松开，固定本次手势的操作。 */
 export function useCanvasPan(toolMode: 'drag' | 'select') {
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [gesturePan, setGesturePan] = useState<boolean | null>(null);
@@ -20,7 +19,6 @@ export function useCanvasPan(toolMode: 'drag' | 'select') {
     };
     const onMouseUp = (event: globalThis.MouseEvent) => {
       if (event.button !== 0) return;
-      // 等 mouseup 后的 click 结束，避免先松空格时误选节点/清空选择。
       clearTimeout(releaseTimer.current);
       releaseTimer.current = setTimeout(() => setGesturePan(null), 0);
     };

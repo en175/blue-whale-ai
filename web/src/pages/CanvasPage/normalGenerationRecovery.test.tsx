@@ -1,17 +1,10 @@
 // @vitest-environment jsdom
-/* IKJLTQ（PR981-REVIEW2-20261003-R1）页面级实际入口回归：一对一普通生成「刷新恢复」
-   全链路——真实运行时 + 真实 normalGenerationTask + 真实恢复扫描接线（Query 取页），
-   服务端真实协议投影（一对一 primary 项 asset_id 为空）。锁死：
-   1. 原素材卡原位取得产物身份（src 与 assetId 同源产物 11，不沿用旧素材 5），
-      用户已保存的名称/尺寸保留；转换经同笔恢复保存（replaceTarget + apply）落盘确认。
-   2. 保存后再次刷新（记录已推进 replaced/present）：身份稳定、不再拉详情、零恢复写入。 */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   apiMocks, canvasDocMock, mediaNodes, renderPage, unmountPage,
 } from './testing/canvasPageTestHarness';
 
-/** 恢复扫描页与恢复保存打桩（同 audioMixRecovery 模式：queryFn 注入，key 工厂保留真实行为）。 */
 const recoveryApi = vi.hoisted(() => ({
   page: { current: null as null | { records: unknown[] } },
   putWithRecovery: vi.fn(),
@@ -41,7 +34,6 @@ vi.mock('@/api/canvasRecovery', async (importOriginal) => {
   };
 });
 
-/** 原素材卡（已保存编辑：改名 + 自定义尺寸），待恢复的一对一任务以其为目标。 */
 const originalCard = {
   id: 'n1', type: 'mediaNode', position: { x: 42, y: 24 },
   data: {
@@ -50,7 +42,6 @@ const originalCard = {
   },
 };
 
-/** 真实协议投影：一对一 primary 项 asset_id 为空（R1 复现形态）。 */
 const nullAssetRecord = (targetState: string, targetRevision: number, primaryState: string, primaryRevision: number) => ({
   submission_id: 'sub-1', target_node_id: 'n1', job_id: '501', task_type: 'image',
   binding_revision: 1, is_current: true,
@@ -79,7 +70,6 @@ function seed(nodes: Array<Record<string, unknown>>, version = 3) {
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   recoveryApi.page.current = null;
-  // 恢复保存回执：回声 commandId，按请求动作逐项确认（replaceTarget→replaced / apply→present）
   recoveryApi.putWithRecovery.mockImplementation(async (
     _projectId: string, _payload: unknown, _version: number | null,
     recovery: { commandId: string; recoveryChanges: Array<{ recoveryItemId: string; action: string }> },
@@ -102,7 +92,6 @@ describe('IKJLTQ 一对一恢复同步真实产物身份（实际入口）', () 
     seed([originalCard]);
     recoveryApi.page.current = { records: [nullAssetRecord('pending', 1, 'pending', 0)] };
     await renderPage();
-    // 恢复扫描 → 任务详情 → 原位写回（不重建卡）
     await vi.waitFor(() => {
       const card = mediaNodes().find((node) => node.id === 'n1');
       expect(card?.data).toMatchObject({ src: 'https://a/11.png', assetId: '11' });
@@ -110,13 +99,12 @@ describe('IKJLTQ 一对一恢复同步真实产物身份（实际入口）', () 
     const card = mediaNodes().find((node) => node.id === 'n1')!;
     expect(card.data).toMatchObject({
       jobId: '501',
-      fileName: '用户素材改名', // 普通编辑保留
+      fileName: '用户素材改名',
       width: 640, height: 480,
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
     });
-    expect(card.position).toEqual({ x: 42, y: 24 }); // 位置保留
-    expect(mediaNodes().filter((node) => node.id === 'n1')).toHaveLength(1); // 不重建卡
-    // 转换经同笔恢复保存落盘：replaceTarget($target) + apply(primary)
+    expect(card.position).toEqual({ x: 42, y: 24 });
+    expect(mediaNodes().filter((node) => node.id === 'n1')).toHaveLength(1);
     await vi.waitFor(() => expect(recoveryApi.putWithRecovery).toHaveBeenCalled());
     const saveCall = recoveryApi.putWithRecovery.mock.calls[0]!;
     expect(saveCall[3].recoveryChanges).toEqual([
@@ -126,7 +114,6 @@ describe('IKJLTQ 一对一恢复同步真实产物身份（实际入口）', () 
   });
 
   it('保存后再次刷新（记录已推进 replaced/present）：产物身份稳定，零恢复写入、不再拉任务详情', async () => {
-    // 上一次保存已落盘的卡形态：产物身份 + primary marker + 用户编辑
     seed([{
       ...originalCard,
       data: {
@@ -145,7 +132,7 @@ describe('IKJLTQ 一对一恢复同步真实产物身份（实际入口）', () 
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
     });
     expect(mediaNodes().filter((node) => node.id === 'n1')).toHaveLength(1);
-    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled(); // 已应用成品卡：不再扇出拉详情
-    expect(recoveryApi.putWithRecovery).not.toHaveBeenCalled(); // 无待确认恢复动作
+    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
+    expect(recoveryApi.putWithRecovery).not.toHaveBeenCalled();
   });
 });

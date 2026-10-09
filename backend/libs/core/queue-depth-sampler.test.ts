@@ -92,13 +92,13 @@ describe("createQueueDepthSampler（IK7G9Y）", () => {
     });
 
     sampler.start();
-    sampler.start(); // 幂等：第二次不得叠加定时器
+    sampler.start();
     let stopped = false;
     const stopPromise = sampler.stop().then(() => {
       stopped = true;
     });
     await vi.advanceTimersByTimeAsync(0);
-    expect(stopped).toBe(false); // 采样未 resolve，stop 必须等
+    expect(stopped).toBe(false);
     resolveSample!([]);
     await stopPromise;
     expect(stopped).toBe(true);

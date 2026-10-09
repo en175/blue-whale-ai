@@ -1,9 +1,3 @@
-/* ============================================
- * Projects 项目页：局部玻璃变量 + 图文卡片网格
- *
- * --glass-* 是设计系统正在提炼的全局变量；当前分支尚未合入时，
- * 每项都使用同视觉语言的兜底值，避免页面依赖未合并分支。
- * ============================================ */
 
 .page {
   --project-glass-surface: var(--glass-surface-card, rgba(8, 8, 8, 0.68));
@@ -41,7 +35,6 @@
   padding: var(--spacing-xl);
   background: linear-gradient(180deg, rgba(10, 10, 13, 0.68), rgba(10, 10, 13, 0.42));
   border-bottom: 1px solid var(--project-glass-border);
-  /* 粘性标题栏脱离项目卡片滚动层，可保留玻璃以区分操作区。 */
   backdrop-filter: blur(18px) saturate(1.08);
   -webkit-backdrop-filter: blur(18px) saturate(1.08);
 }
@@ -234,7 +227,6 @@
   box-shadow: none;
 }
 
-/* 对齐资产库图片 item：卡片壳稳定，shimmer 只覆盖图片预览区。 */
 .projectSkeletonPreview {
   position: relative;
   flex: none;
@@ -278,7 +270,6 @@
 }
 
 .card {
-  /* 滚动列表项使用静态表面；禁止 backdrop-filter，避免主题背景合成残影。 */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -381,7 +372,6 @@
   box-shadow: 0 2px 7px rgba(0, 0, 0, 0.7);
 }
 
-/* 置顶项目图钉角标：与 selectionToggle 同视觉语言，纯标识无交互。 */
 .pinBadge {
   position: absolute;
   top: var(--spacing-md);

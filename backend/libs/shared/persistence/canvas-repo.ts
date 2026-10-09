@@ -4,10 +4,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { extraString, loadJobExtras, setJobExtras } from "./generation-jobs-extra-repo.js";
 
-/** Canvas db port（Prisma-backed），复用部署的 canvas 表（project_id 唯一 / viewport_json / nodes_json / edges_json）。
- *  对齐 Java CanvasDto：{id, project_id, viewport, nodes}——viewport/nodes 是 JSON 字符串（前端 JSON.parse）。
- *  edges（IKDLQF）同构：JSON 字符串，缺省 null 由调用侧视为空数组。
- *  repo 负责 Json 列 ↔ 字符串转换。 */
 
 export interface CanvasView {
   id: string | null;
@@ -28,8 +24,6 @@ export interface CanvasRepo {
     viewport: string | null,
     nodes: string | null,
   ): Promise<CanvasView>;
-  /** 仅当 Canvas 仍是调用方读取的版本时保存；冲突返回 null，由调用方重读并重算。
-   *  edges 与 nodes 同一次条件写入（IKDLQF）；调用方须显式传入（保留旧值或新值）。 */
   saveIfVersion(
     projectId: string,
     expectedVersion: number | null,
@@ -44,8 +38,6 @@ export class PromptMaterialUnavailableError extends Error {
   constructor(readonly assetId: string) { super("Prompt material unavailable"); }
 }
 
-/** IKJJQU：画布保存事务的既有素材关联副作用（项目素材行 upsert）。
- *  原为模块私有；新协议原子保存（generation-canvas-recovery-repo）与画布同一事务复用。 */
 export async function linkPromptMaterials(tx: Prisma.TransactionClient, projectId: bigint, context?: { ownerId: string; items: PromptMaterial[] }) {
   if (!context) return;
   for (const material of [...context.items].sort((a, b) => a.assetId.localeCompare(b.assetId))) {
@@ -93,7 +85,6 @@ function outputSlotIds(nodes: unknown): bigint[] {
     if (!node || typeof node !== "object" || Array.isArray(node)) continue;
     const id = (node as Record<string, unknown>).id;
     if (typeof id !== "string") continue;
-    // 普通生成输出与分镜画格都映射回 output_slot，复用 initial_placement_status 标 placed。
     const match =
       /^(?:generation-output|storyboard-frame):([1-9][0-9]*)$/.exec(id);
     if (match?.[1]) ids.add(BigInt(match[1]));
@@ -113,7 +104,6 @@ function audioMixCardIds(nodes: unknown): bigint[] {
   return [...ids];
 }
 
-/** IKJJQU：画布保存事务的既有 audio_mix 卡状态副作用（导出原因同 linkPromptMaterials）。 */
 export async function markAudioMixCards(
   tx: Prisma.TransactionClient,
   projectId: bigint,
@@ -124,11 +114,6 @@ export async function markAudioMixCards(
   const ids = audioMixCardIds(nodes);
   const scope = { project_id: projectId, user_id: BigInt(ownerId), type: "audio_mix", is_delete: false };
   if (ids.length > 0) {
-    // IKJCOE：canvas_card_state 已搬进 generation_job_extras（原主表列已删）。
-    // ⚠️ 必须先过归属过滤再写：卡号来自请求体里的画布节点（node.id 与 node.data.jobId
-    // 都由客户端构造），直接按 id 写扩展位就成了跨用户写——旧实现是一条
-    // `updateMany({ where: { ...scope, id: { in: ids } } })`，作用域在 SQL 的 where 里，
-    // 下面这次 findMany 是它的等价物（作用域必须在写之前生效）。
     const owned = await tx.generation_jobs.findMany({
       where: { ...scope, id: { in: ids } },
       select: { id: true },
@@ -137,11 +122,6 @@ export async function markAudioMixCards(
       await setJobExtras(tx, row.id, { canvas_card_state: "present" });
     }
   }
-  // 本轮不在画布上的、此前被标 'present' 的任务要改回 'removed'。
-  // 原先是主表列上的 where（`canvas_card_state = 'present'`）；搬进扩展位后改成
-  // 「本项目的 audio_mix 任务 → 读各自的扩展位 → 内存筛」，两次查询变成三次，
-  // 但单个项目的 audio_mix 任务量很小（画布上的卡片数级）。缺键 = 'pending'，
-  // 不是 'present'，故从未上过卡的任务不会被这一轮扫到。
   const candidates = await tx.generation_jobs.findMany({
     where: ids.length > 0 ? { ...scope, id: { notIn: ids } } : scope,
     select: { id: true },
@@ -159,7 +139,6 @@ export async function markAudioMixCards(
   }
 }
 
-/** IKJJQU：画布保存事务的既有输出槽首次放置副作用（导出原因同 linkPromptMaterials）。 */
 export async function markOutputSlotsPlaced(
   tx: Prisma.TransactionClient,
   projectId: bigint,

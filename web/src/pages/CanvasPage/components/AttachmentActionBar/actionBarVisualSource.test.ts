@@ -2,12 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-/* IKGB1X 附件操作条视觉同源锁（源断言 + 源唯一性）：图片/视频/音频三面板的
-   附件操作条共用 AttachmentActionBar/index.module.css 一份定义，各面板样式表
-   不保留第二份操作条/pill 规则。源断言须在 node 环境跑
-   （jsdom 会改写 import.meta.url 的 scheme）。 */
 
-/** 取指定选择器命中的规则体；选择器按精确匹配，避免误中更长选择器。 */
 function ruleBodiesOf(css: string, selector: string): string[] {
   const bodies: string[] = [];
   const rulePattern = /([^{}]+)\{([^{}]*)\}/g;

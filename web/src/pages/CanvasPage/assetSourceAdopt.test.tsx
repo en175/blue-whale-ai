@@ -10,11 +10,6 @@ import { ATTACHMENT_ACTION_PICK_ASSETS_TITLE } from './components/AttachmentActi
 import type { GenerationModel, ModelFeatures } from '@/api/generation';
 import type { AssetRecord } from '@/api/assets';
 
-/* IKFDG2 画布外参考建来源卡片并持久关联：
-   资产库选择的持久素材——画布已有同身份节点时复用来源卡片不重复建卡，无明确来源时建卡并连线，
-   连线随既有自动保存落盘（无需发送）；同名不同身份不误用。
-   IKFE8V：音频改为从资产选择，取消不建卡建线；保存失败仍保留未保存提示并阻止发送。
-   FlowCanvas/CanvasToolbar/CanvasHeader/AssetsPickerModal 打桩透出 props；三类面板用真实实现。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -105,7 +100,6 @@ const apiMocks = vi.hoisted(() => ({
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
 }));
 
-/** 画布外素材持久接纳的上传封装（本地上传换取 assetId）——按用例注入成功/失败/md5 命中 */
 const uploadMocks = vi.hoisted(() => ({
   uploadAssetFile: vi.fn(),
 }));
@@ -142,7 +136,6 @@ vi.mock('@/api/canvas', () => ({
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
-  // !779 起保存 catch 会调这个函数对齐 412 version；缺省则 throw，失败提示出不来
   readCanvasConflictVersion: () => undefined,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
@@ -279,7 +272,6 @@ function audioModel(): GenerationModel {
   };
 }
 
-/** 默认画布：图片成品 m1(a1) + 音频成品 au1(aud1) + 图片草稿 d1 + 视频草稿 dv1 + 音频草稿 da1 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -328,7 +320,6 @@ async function renderPage() {
   });
 }
 
-/** 点击画布媒体节点（打开绑定面板） */
 async function clickNode(id: string) {
   const node = flowProps.current.mediaNodes.find((n: Node) => n.id === id)!;
   await act(async () => {
@@ -341,13 +332,11 @@ const edgePairs = () =>
 
 const mediaNodeCount = () => flowProps.current.mediaNodes.length;
 
-/** 最近一次自动保存载荷 */
 const lastSaved = () => apiMocks.saveCanvasDoc.mock.calls.at(-1)![1] as {
   nodes: Node[];
   edges: Array<{ id: string; source: string; target: string; data?: Record<string, unknown> }>;
 };
 
-/** 关闭当前绑定面板（右上角 ×） */
 async function closePanel() {
   const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === '关闭',
@@ -357,7 +346,6 @@ async function closePanel() {
   });
 }
 
-/** 构造资产库素材记录（placeAssetsOnCanvas 输入形态） */
 function assetOf(id: number | string, type: 'image' | 'video' | 'audio', url: string): AssetRecord {
   return {
     id,
@@ -373,7 +361,6 @@ function assetOf(id: number | string, type: 'image' | 'video' | 'audio', url: st
   } as AssetRecord;
 }
 
-/** 图片面板「资产库」（IKGB7U 附件操作条直达，旧「+」菜单已退役）：点 pill → 桩 onSelect 回调 */
 async function pickImagePanelAssets(assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
@@ -386,7 +373,6 @@ async function pickImagePanelAssets(assets: AssetRecord[]) {
   });
 }
 
-/** 音频面板「资产库」（IKGB82 附件操作条直达，旧「+」菜单已退役）：点 pill → 桩 onSelect 回调 */
 async function pickAudioPanelAssets(assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
@@ -399,7 +385,6 @@ async function pickAudioPanelAssets(assets: AssetRecord[]) {
   });
 }
 
-/** 视频面板「资产库」（IKGB7W 附件操作条直达，栏尾旧「+」菜单退役）：点 pill → 桩 onSelect 回调 */
 async function pickVideoPanelAssets(assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
@@ -412,12 +397,10 @@ async function pickVideoPanelAssets(assets: AssetRecord[]) {
   });
 }
 
-/** 音频统一入口：从资产选择已有持久身份，接纳与画布保存沿用原链路。 */
 async function pickAudioAsset() {
   await pickAudioPanelAssets([{ id: 'au9', type: 'audio', url: 'http://audio/au9.mp3', width: null, height: null, duration: 25, source: 'uploaded', model: null, created_at: null } as AssetRecord]);
 }
 
-/** 面板参考缩略图名称列表（audio-ref-thumb / dock-media-ref） */
 function refNames(testid: string): string[] {
   return [...container.querySelectorAll<HTMLElement>(`[data-testid="${testid}"]`)].map((el) => el.textContent ?? '');
 }
@@ -452,7 +435,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     const before = mediaNodeCount();
     await pickImagePanelAssets([assetOf('a1', 'image', 'http://img/m1.png')]);
 
-    // 复用已有 m1：不新建节点，直接建 m1->d1 连线
     expect(mediaNodeCount()).toBe(before);
     expect(edgePairs()).toEqual(['m1->d1']);
     await vi.waitFor(() => {
@@ -488,7 +470,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
     const before = mediaNodeCount();
-    // URL 与 m1 同路径（展示名相同）但 id 不同：身份不同，不复用 m1
     await pickImagePanelAssets([assetOf('a99', 'image', 'http://img/m1.png')]);
 
     expect(mediaNodeCount()).toBe(before + 1);
@@ -501,7 +482,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
   });
 
   it('图片面板资产库接纳后 A→B→A 切换：A 的参考完整恢复，B 不串入', async () => {
-    // 补第二个图片草稿 d2 作为切换目标 B
     (canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes.push({
       id: 'd2', type: 'mediaNode', position: { x: 560, y: 160 },
       data: { src: '', mediaType: 'image', fileName: '图片草稿二', genStatus: 'draft', draft: true, prompt: '' },
@@ -514,13 +494,11 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await pickImagePanelAssets([assetOf('a5', 'image', 'http://img/m5.png')]);
     await vi.waitFor(() => expect(refNames('dock-media-ref').length).toBe(2), { timeout: 3000 });
 
-    // 切到 B：B 面板打开但无 A 的参考（连线只属于 A）
     await closePanel();
     await clickNode('d2');
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     expect(refNames('dock-media-ref')).toEqual([]);
 
-    // 返回 A：两项参考（复用节点 + 新建来源卡）完整恢复
     await closePanel();
     await clickNode('d1');
     await vi.waitFor(() => expect(refNames('dock-media-ref').length).toBe(2));
@@ -533,12 +511,10 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'));
 
     const before = mediaNodeCount();
-    // IKGB7W：入口形态平移到操作条「资产库」pill，落地行为不变——复用：a1 已有画布节点 m1
     await pickVideoPanelAssets([assetOf('a1', 'image', 'http://img/m1.png')]);
     expect(mediaNodeCount()).toBe(before);
     expect(edgePairs()).toEqual(['m1->dv1']);
 
-    // 新素材：建来源卡并连线
     await pickVideoPanelAssets([assetOf('a6', 'image', 'http://img/m6.png')]);
     expect(mediaNodeCount()).toBe(before + 1);
     const newNode = flowProps.current.mediaNodes.find(
@@ -550,10 +526,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     }, { timeout: 3000 });
   });
 
-  /* 边界说明（非用例）：视频面板首帧槽从零添加受 IKFC1T 模式门控不可达（keyframe 模式需
-     imageCount≥2 启用，而首帧入口又要求首帧槽空闲——互锁），IKFE6E 已立 P1 跟踪，本票不新增
-     入口。首帧角色的连线持久化与发送路由由 videoRefPersist「首尾帧草稿保存恢复」「首帧生成请求
-     角色校验」既有用例覆盖，本票改动对 refRole 仅透传不改变语义。 */
 
   it('音频草稿资产选择成功：复用持久身份，建来源卡片并连线，节点与边随自动保存落盘且面板显示', async () => {
     await renderPage();
@@ -568,7 +540,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     expect(newNode).toBeTruthy();
     expect((newNode.data as Record<string, unknown>).mediaType).toBe('audio');
     expect(edgePairs()).toEqual([`${newNode.id}->da1`]);
-    // 面板参考经连线推导显示（不进入面板本地上传暂存）
     await vi.waitFor(() => expect(refNames('audio-ref-thumb').length).toBe(1));
     await vi.waitFor(() => {
       const saved = lastSaved();
@@ -628,7 +599,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
       (n: Node) => (n.data as Record<string, unknown>)?.assetId === 'au9',
     );
 
-    // 第二次选择同一持久资产：不重复建卡，查重提示不建线
     await pickAudioAsset();
     await vi.waitFor(() => expect(container.textContent).toContain('重复的素材已跳过'), { timeout: 3000 });
     expect(edgePairs().length).toBe(1);
@@ -640,7 +610,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
   });
 
   it('音频参考已满 3 段：添加入口常显置灰并悬停说明已达上限，点击无接纳发起（IKGB82 替代旧「入口消失」）', async () => {
-    // 画布补齐 3 个音频成品并全部连到 da1
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
     for (const id of ['au2', 'au3']) {
       doc.nodes.push({
@@ -661,8 +630,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await clickNode('da1');
     await vi.waitFor(() => expect(refNames('audio-ref-thumb').length).toBe(3));
 
-    // 满 3 段：「已达上限」文案保留在附件栏原位；操作条两按钮常显但 aria-disabled 置灰，
-    // 悬停说明已达上限，点击不发起资产/节点选择（无上传无新线）
     await vi.waitFor(() => expect(container.textContent).toContain('已达上限'));
     const fullPills = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(
       (b) => b.textContent === '参考' || b.textContent === '资产库',
@@ -681,7 +648,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
   });
 
   it('接纳复用已有来源后画布保存失败：连线保留并显示未保存，阻止发送；重试成功后落盘且不重复创建来源', async () => {
-    // 画布预置与上传产物同身份（au9）的音频成品：资产选择后复用该节点建线
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
     doc.nodes.push({
       id: 'au9', type: 'mediaNode', position: { x: 650, y: 100 },
@@ -690,7 +656,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     (canvasDocMock.current.assets as Record<string, unknown>).au9 = {
       asset_id: 'au9', type: 'audio', access_url: 'http://audio/au9.mp3', duration: 25,
     };
-    // 仅对「含接纳连线」的保存失败一次（模型默认值写回等早于接纳的保存不受影响；重试成功），用例内恢复实现
     let failAdoptSave = true;
     apiMocks.saveCanvasDoc.mockImplementation(async (
       _projectId: string,
@@ -712,11 +677,9 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
       await vi.waitFor(() => expect(edgePairs()).toEqual(['au9->da1']), { timeout: 3000 });
       expect(mediaNodeCount()).toBe(before);
 
-      // 保存失败：未保存提示出现，复用建线的连线保留（无新增节点，不触发回滚）
       await vi.waitFor(() => expect(container.textContent).toContain('保存失败'), { timeout: 3000 });
       expect(edgePairs()).toEqual(['au9->da1']);
 
-      // 重试保存成功：连线落盘，来源不重复创建
       await act(async () => {
         const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
           (b) => b.textContent === '重试保存',

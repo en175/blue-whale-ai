@@ -12,8 +12,6 @@ import { ProjectsController } from "../projects/projects.controller.js";
 import { AgentV1ProxyController } from "../agent/agent-v1-proxy.controller.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 
-// Public HTTP seam, real production Canvas/Project services and disposable MySQL.
-// Authentication middleware supplies the already-authenticated identity; no Canvas API mocks.
 describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -23,7 +21,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
   const source = { sessionId: "session-quote", revisionId: "revision-one", shotNo: 1 };
   const quotedText = "雪夜的城市\n保留换行与 <光影> & 细节。";
   const revisedPreviewText = "改写后的正文\n换行保留";
-  // 浏览器/API 用例共享的 Agent 替身状态：应用与引用都以当前 active revision 为准
   let activeRevision = source.revisionId;
   let lastRunId = "";
   const revisionShots: Record<string, unknown[]> = {
@@ -34,7 +31,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
     { message_id: "user-1", sequence: 1, role: "user", content: [{ type: "text", text: "请整理 Prompt" }] },
     { message_id: "assistant-1", sequence: 2, role: "assistant", content: [{ type: "text", text: "已整理，请预览。" }] },
   ];
-  /** POST /messages 收到的请求体（字节级证据：引用正文随消息上线） */
   const messageBodies: Array<Record<string, unknown>> = [];
   let rejectNextMessage = false;
   let showOtherSession = false;
@@ -74,7 +70,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
           recordedMessages.push(userMessage);
           recordedMessages.push({ message_id: `assistant-${seq}`, sequence: seq + 1, role: "assistant", content: [{ type: "text", text: "已按引用改好，见新预览。" }], source_run_id: lastRunId });
           res.end(JSON.stringify({ message: userMessage, run: { run_id: lastRunId, status: "running", input_batch_id: `batch-${seq}` } }));
-          // 与真实 Agent 同序：先 run.completed 终态，再发 revision_committed 加法事件
           const now = new Date().toISOString();
           const frames = [
             `event: run.completed\nid: ${seq}-a\ndata: ${JSON.stringify({ run_id: lastRunId, occurred_at: now, payload: { run: { run_id: lastRunId, status: "succeeded" } } })}\n\n`,
@@ -284,7 +279,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await send.click();
       await browserExpect(page.getByRole('alert').filter({ hasText: '请先确认或取消待确认引用' })).toBeVisible();
       expect(messageBodies).toHaveLength(0);
-      // 程序聚焦不是确认；Enter 也必须走同一发送阻断。
       await composer.focus();
       await page.keyboard.press('Enter');
       await browserExpect(composer.getByText('待确认引用')).toBeVisible();
@@ -300,8 +294,7 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await page.keyboard.press('ArrowLeft');
       await page.locator('.react-flow__node[data-id="image-a"]').click();
       await browserExpect(composer.getByText('待确认引用')).toBeVisible();
-      // 真实点击第一段开头：引用留在第二段原光标处，新文字写在点击位置。
-      await page.waitForTimeout(1100); // 跨过 Lexical 历史合并窗口，独立验证确认与文字编辑的撤销。
+      await page.waitForTimeout(1100);
       const start = await composer.evaluate(element => {
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
         let text: Node | null;
@@ -329,7 +322,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await page.locator('.react-flow__node[data-id="image-a"]').click();
       await browserExpect(composer.getByText('待确认引用')).toHaveCount(0);
       await browserExpect(composer.getByRole('button', { name: '移除 图片 A' })).toHaveCount(1);
-      // 同名不同节点可以确认；删除标签后允许重选，取消后不得残留发送附件。
       await page.locator('.react-flow__node[data-id="image-c"]').click();
       await composer.click({ position: { x: 350, y: 10 } });
       await browserExpect(composer.getByRole('button', { name: '移除 图片 A' })).toHaveCount(2);
@@ -394,7 +386,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
     } });
     await vite.listen();
     const browser = await chromium.launch({ headless: true });
-    // 本地媒体服务只提供可解码的素材字节，业务 API 仍由真实 Nest 服务承载。
     const fixturePage = await browser.newPage();
     const videoBytes = await fixturePage.evaluate(async () => {
       const canvas = document.createElement('canvas'); canvas.width = 120; canvas.height = 120;
@@ -483,7 +474,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await browserExpect(pending).toBeVisible();
       await page.keyboard.press('Escape');
       await browserExpect(pending).toHaveCount(0);
-      // 每次确认回到输入末尾，出站顺序必须遵循编辑器，而非资产类型排序。
       await composer.fill('开始');
       for (const type of ['video', 'audio', 'image']) {
         await node(type).getByTestId('media-title').click();
@@ -513,7 +503,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         await composer.press('ControlOrMeta+End');
         await browserExpect(pending).toHaveCount(0);
       }
-      // 已确认素材静默去重；删除音频后重选作为候选，发送不能绕过确认。
       await node('video').click();
       await browserExpect(pending).toHaveCount(0);
       await composer.getByRole('button', { name: '移除 同名素材' }).nth(1).click();
@@ -541,7 +530,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         { type: 'asset_ref', asset_id: String(assets[2].id), node_id: 'image', media_type: 'image' },
       ]);
       await browserExpect(composer).toHaveText('');
-      // 原编辑路径覆盖有生成记录的成品卡；上传卡没有原生成参数。
       const beforeEdit = await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json();
       const generatedNodes = JSON.parse(beforeEdit.data.nodes).map((item: { id: string; data: Record<string, unknown> }) =>
         item.id === 'video' || item.id === 'audio' ? { ...item, data: { ...item.data, jobId: `fixture-${item.id}`, prompt: '原生成描述' } } : item);
@@ -560,7 +548,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         await node(type).getByRole('button', { name: '重新编辑', exact: true }).click();
         if (type === 'audio') await browserExpect(page.getByTestId('audio-input')).toBeVisible();
         else await browserExpect(page.locator('[contenteditable][aria-placeholder^="描述你希望生成的视频"]')).toBeVisible();
-        // 重新编辑仍打开对应生成面板，引用仍是候选，不能被工具栏隐式确认。
         await browserExpect(pending).toBeVisible();
         await page.locator('.react-flow__pane').click({ position: { x: 1200, y: 150 } });
         const rect = (await node(type).getByTestId('media-title').boundingBox())!;
@@ -630,7 +617,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await composer.click({ position: { x: 8, y: 8 } });
       expect((await listQuotes([quote.quoteId]))[0].text).toBe("确认前保存的新版\n保留第二行");
       await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(1);
-      // 同节点静默去重；删除标签重引才采用编辑后的版本。
       await node.getByTestId("text-title").click();
       await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
       await composer.getByRole("button", { name: "移除引用", exact: true }).click();
@@ -651,14 +637,12 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       expect(newQuote.quoteId).not.toBe(quote.quoteId);
       expect(newQuote.text).toBe("确认后编辑的版本");
       await browserExpect(composer).toHaveText("已有输入正文版本后文");
-      // 点击位置在开头，异步确认不得将后续输入拉回引用位置。
       await page.keyboard.type("起");
       await browserExpect(composer).toHaveText("起已有输入正文版本后文");
       await composer.click(); await page.keyboard.press("ControlOrMeta+End");
       await page.locator('.react-flow__node[data-id="image-mixed"]').click();
       await composer.click({ position: { x: 8, y: 8 } });
       await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
-      // 删除源节点不会删除已确认引用，公开接口仍返回冻结正文。
       const deleted = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
       await node.getByTestId("text-title").click({ button: "right" });
       await page.getByRole("button", { name: "删除", exact: true }).click();
@@ -707,7 +691,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       const a = page.locator('.react-flow__node[data-id="text-a"]').getByTestId("text-title");
       const b = page.locator('.react-flow__node[data-id="text-b"]').getByTestId("text-title");
       await composer.fill("保留输入");
-      // 在公开 HTTP 边界注入不合法请求，响应仍由真实业务 API 校验生成。
       await page.route("**/conversation-quotes", async route => {
         const response = await route.fetch({ postData: JSON.stringify({ ...route.request().postDataJSON(), title: "题".repeat(201) }) });
         expect(response.status()).toBe(400);
@@ -725,7 +708,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         let release: (() => void) | undefined;
         const gate = new Promise<void>(resolve => { release = resolve; });
         let responseReady = false;
-        // 只延迟真实快照 API 的响应，保留真实持久化与响应内容。
         await page.route("**/conversation-quotes", async route => {
           const response = await route.fetch();
           expect(response.status()).toBeLessThan(300);
@@ -757,7 +739,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(action === "cancel" ? 0 : 1);
         await browserExpect(composer).toContainText("保留输入");
       }
-      // 同名不同节点仍可确认，删除 B 标签后实际出站只含 A。
       await a.click();
       await composer.click({ position: { x: 350, y: 10 } });
       await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(2);
@@ -827,7 +808,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
       } }, version: 0 })));
       await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
-      // 等待媒体元数据的既有自动保存完成，再比较引用操作是否额外写画布。
       await browserExpect.poll(async () => {
         const canvas = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
         return JSON.parse(canvas.nodes).find((node: { id: string }) => node.id === "video").data.duration;
@@ -863,7 +843,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await browserExpect(composer).toHaveText(mixedDraft);
       await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
       const candidate = page.locator('.react-flow__node[data-id="text-pending"]').getByTestId("text-title");
-      // IKDXP1：重复点击已确认节点不使另一候选正在返回的有效快照失效。
       let releaseDuplicate!: () => void;
       const duplicateGate = new Promise<void>(resolve => { releaseDuplicate = resolve; });
       let duplicateReady = false;
@@ -885,7 +864,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(2);
       await composer.getByRole("button", { name: "移除引用", exact: true }).last().click();
       await browserExpect(composer).toHaveText(mixedDraft);
-      // 延迟真实 API 响应：分别在关闭期间和重开选好新候选后返回。
       for (const reopenFirst of [false, true]) {
         let release!: () => void;
         const gate = new Promise<void>(resolve => { release = resolve; });
@@ -949,7 +927,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       expect(secondParts.filter(part => part.type !== "text")).toEqual([
         expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
       ]);
-      // 切换会话不能携带上一会话未发送的文字或冻结引用。
       await composer.fill("旧会话草稿");
       await candidate.click();
       await confirm();
@@ -958,7 +935,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await page.getByRole("button", { name: "引用对话", exact: true }).click();
       await page.getByRole("button", { name: "另一会话", exact: true }).click();
       await browserExpect(composer).toHaveText("");
-      // 旧会话的成功回执晚到，不能清空已经开始编辑的新会话草稿。
       await composer.fill("其他会话消息");
       holdNextMessage = true;
       const oldAccepted = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("session-other/messages"));
@@ -979,7 +955,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         { type: "text", text: "新会话草稿" },
         expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
       ]);
-      // IKDXP1：发送回执只能清理本次内容，显式入口在等待期间新加的引用属于下一条。
       await composer.fill("本次发送文字");
       holdNextMessage = true;
       const submissionIndex = messageBodies.length;
@@ -1001,7 +976,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       expect(messageBodies[submissionIndex + 1].content).toEqual([
         expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
       ]);
-      // 已忽略的点选不能因随后删除 A 的引用而重新生效。
       await page.locator('.react-flow__node[data-id="text-kept"]').getByTestId("text-title").click();
       await confirm();
       await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
@@ -1034,7 +1008,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       const canvasAfter = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
       expect(canvasAfter.version).toBe(canvasBefore.version);
       expect(canvasAfter.nodes).toBe(canvasBefore.nodes);
-      // 对比面板开/关：引用不能接管画布编辑、拖动、连线或滚轮操作。
       const node = (id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
       const pane = page.locator(".react-flow__pane");
       const viewport = page.locator(".react-flow__viewport");
@@ -1085,7 +1058,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         await page.mouse.wheel(0, process.platform === "darwin" ? 12 : 120);
         await page.keyboard.up("Control");
         await browserExpect.poll(() => viewport.evaluate(el => new DOMMatrix(getComputedStyle(el).transform).a)).toBeLessThan(beforeZoom);
-        // Esc 维持取消候选/退出编辑的原行为，不留下已确认附件。
         await node("text-pending").getByTestId("text-title").click();
         if (enabled) await browserExpect(composer.getByText("待确认引用")).toBeVisible();
         await page.keyboard.press("Escape");
@@ -1127,7 +1099,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await editor.waitFor();
       expect(await editor.innerText()).toBe(quotedText);
 
-      // 画布上编辑正文并落盘
       await editor.dblclick();
       const editSaved = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
       await editor.fill("引用前的画布编辑\n第二行");
@@ -1135,7 +1106,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       expect((await editSaved).status()).toBe(200);
       await page.getByText(/^已保存 /).waitFor();
 
-      // 添加到对话：点击当刻正文冻结为服务端引用快照
       const nodeId = JSON.parse((await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data.nodes)[0].id;
       const quoteSaved = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
       await node.click();
@@ -1144,7 +1114,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       const composer = page.locator("[contenteditable][aria-placeholder]");
       await composer.getByText("雪夜").waitFor();
 
-      // 发送：Agent 收到引用当时的实际编辑内容，不含任何媒体部件
       await composer.click();
       await page.keyboard.type("请基于它改一版");
       const messageSent = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/messages"));
@@ -1162,14 +1131,12 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       });
       expect(parts.some(part => part.type === "asset_ref")).toBe(false);
 
-      // Agent 修改产生新预览：手动应用为新节点，原节点不动
       await page.getByRole("button", { name: "手动应用", exact: true }).click();
       await node.nth(1).waitFor();
       expect(await node.count()).toBe(2);
       expect(await node.first().locator('[data-placeholder="输入内容..."]').innerText()).toBe("引用前的画布编辑\n第二行");
       expect(await node.nth(1).locator('[data-placeholder="输入内容..."]').innerText()).toBe(revisedPreviewText);
 
-      // 引用后继续编辑来源：对话依据不改写
       await node.first().locator('[data-placeholder="输入内容..."]').dblclick();
       const reeditSaved = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
       await page.keyboard.type("——引用后又改写");
@@ -1179,7 +1146,6 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       const quotesAfterEdit = await (await fetch(`${base}/api/canvases/${projectId}/conversation-quotes?ids=${quoteId}`)).json();
       expect(quotesAfterEdit.data.items[0].text).toBe("引用前的画布编辑\n第二行");
 
-      // 刷新后回读：引用胶囊仍在，正文事实完整
       await page.reload();
       await page.getByRole("button", { name: "Agent", exact: true }).click();
       const bubbleChip = page.locator("[title*='引用前的画布编辑']");

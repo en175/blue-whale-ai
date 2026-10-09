@@ -32,10 +32,6 @@ describe('cardsOfRevision', () => {
     expect(card!.visual).toBe('黄昏海边');
   });
 
-  /**
-   * F32：每张生成卡标注它是按哪套写法编的。批次级的一项，每张卡都带——用户手动应用的是单张卡，
-   * 他在那张卡上就该看得见它。只做展示与核对：按 F34 这个标注不下传生成面板。
-   */
   it('目标模型标注：批次级的一项，每张卡都带', () => {
     const withModel = revision(4, {});
     withModel.payload.target_model = { family: 'Seedance', version: '2.5' };

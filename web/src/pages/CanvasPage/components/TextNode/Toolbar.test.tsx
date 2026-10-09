@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/* IKGYYE 文本卡两条工具栏（格式工具栏 / 操作条）钉屏幕迁移测试：渲染模式沿用
-   floatPosition.test.tsx（mock @xyflow/react + createRoot/act 渲染 TextNode）。
-   断言口径：两条工具条渲染在钉屏幕层（portal 到 document.body、不在节点卡 DOM 内），
-   层根带 data-gen-panel-territory、锚点 = computeFollowAnchorAbove 换算值；
-   出现时机与迁移前一致（格式栏=编辑聚焦、操作条=唯一选中或悬停卡片、非编辑）；
-   按钮构成/顺序/回调不变；编辑态点工具条（焦点移入层内）不触发 blur 退出编辑。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +7,6 @@ import { computeFollowAnchorAbove } from '../../followDialog';
 import styles from './index.module.css';
 
 beforeAll(() => {
-  // jsdom 未实现 Range 几何 API 与 execCommand（格式化命令点击路径用）
   if (!Range.prototype.getBoundingClientRect) {
     Range.prototype.getBoundingClientRect = function () { return zeroRect(); };
   }
@@ -31,7 +24,6 @@ function zeroRect(): DOMRect {
   return { top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => '' } as DOMRect;
 }
 
-/** store 状态（可变：锚定跟随用例直接改写后受控重渲染） */
 const storeState = vi.hoisted(() => {
   const nodes = [
     { id: 't1', type: 'textNode', position: { x: 100, y: 200 }, data: {}, selected: false },
@@ -43,7 +35,6 @@ const storeState = vi.hoisted(() => {
     transform: [0, 0, 1] as [number, number, number],
     width: 1200,
     height: 800,
-    /** 画布容器（FollowToolbarLayer 用 getBoundingClientRect 换算 fixed 偏移） */
     domNode: null as HTMLElement | null,
     nodeLookup: new Map(
       nodes.map((n) => [
@@ -68,7 +59,6 @@ vi.mock('@xyflow/react', () => ({
 
 let root: Root;
 let container: HTMLDivElement;
-/** 画布容器 mock：定位仍依赖其 getBoundingClientRect，工具条 portal 到 document.body */
 let flowRoot: HTMLDivElement;
 
 interface RenderOptions {
@@ -109,7 +99,6 @@ async function renderTextNode({ selected = false, data = {} }: RenderOptions = {
   return container.querySelector<HTMLElement>('[data-placeholder="输入内容..."]')!;
 }
 
-/** 受控重渲染（同 prop 再渲染一次：锚定跟随用例改 storeState 后驱动 selector 重读） */
 async function rerenderTextNode({ selected = false, data = {} }: RenderOptions = {}) {
   await act(async () => root.render(createElement(TextNode, {
     id: 't1',
@@ -134,12 +123,10 @@ async function rerenderTextNode({ selected = false, data = {} }: RenderOptions =
   } as never)));
 }
 
-/** 双击编辑器进入编辑（editing=true → effect 聚焦 → isFocused=true） */
 async function enterEditing(editor: HTMLElement) {
   await act(async () => editor.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
 }
 
-/** 悬停卡片（React onMouseEnter 由 mouseover 派生） */
 async function hoverCard() {
   const wrapper = container.firstElementChild as HTMLElement;
   await act(async () => wrapper.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
@@ -150,12 +137,10 @@ async function leaveCard() {
   await act(async () => wrapper.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
 }
 
-/** 钉屏幕层根（data-gen-panel-territory 打在层根上，portal 在 document.body） */
 function layer(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-gen-panel-territory]');
 }
 
-/** 层内按钮 title 序列（divider 为 div 不计入） */
 function layerButtonTitles(): string[] {
   return [...(layer()?.querySelectorAll('button[title]') ?? [])].map(b => b.getAttribute('title')!);
 }
@@ -163,9 +148,7 @@ function layerButtonTitles(): string[] {
 beforeEach(() => {
   storeState.transform = [0, 0, 1];
   storeState.width = 1200;
-  // 多选用例会改写 nodes 的 selected 标记，逐用例恢复原始态
   storeState.nodes.forEach((n) => { n.selected = false; });
-  // 连线同样逐用例清空，防用例间泄漏
   storeState.edges = [];
 });
 
@@ -183,7 +166,6 @@ describe('IKGYYE 钉屏幕层渲染与出现时机', () => {
     const bar = layer();
     expect(bar).toBeTruthy();
     expect(bar!.textContent).toContain('添加到对话');
-    // 不在节点卡 DOM 内（迁移前渲染在 wrapper 里）
     expect(container.querySelector('[data-gen-panel-territory]')).toBeNull();
     const anchor = computeFollowAnchorAbove({
       nodeX: 100, nodeY: 200, nodeWidth: 360,
@@ -270,12 +252,10 @@ describe('格式工具栏（编辑聚焦）', () => {
   it('编辑器 blur 且焦点移入钉屏幕层（relatedTarget 在层内）不退出编辑；blur 到层外才退出', async () => {
     const editor = await renderTextNode();
     await enterEditing(editor);
-    // 焦点移到层内按钮（closest 白名单含层根 data-gen-panel-territory）：保持编辑
     const toolbarBtn = layer()!.querySelector<HTMLButtonElement>('button[title="加粗"]')!;
     await act(async () => editor.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: toolbarBtn })));
     expect(layer()).toBeTruthy();
     expect(editor.getAttribute('contenteditable')).toBe('true');
-    // 对照：焦点移到层外：退出编辑，格式工具栏消失
     await act(async () => editor.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body })));
     expect(layer()).toBeNull();
   });
@@ -311,7 +291,6 @@ describe('操作条（唯一选中、非编辑）', () => {
   });
 
   it('点击卡内素材标签弹出定位/替换/删除，不出现顶部「删除标签 #n」', async () => {
-    // 有效性契约（契约 §3）：有效 = 画布存在该节点 + m1→本文本卡的 textIndex 连线，缺一判失效
     storeState.edges = [{ id: 'e-m1-t1', source: 'm1', target: 't1', data: { textIndex: true } }];
     await renderTextNode({
       selected: true,
@@ -330,9 +309,6 @@ describe('操作条（唯一选中、非编辑）', () => {
     const menu = document.querySelector('[data-testid="media-chip-menu"]');
     expect(menu).toBeTruthy();
     const labels = [...menu!.querySelectorAll('button')].map(b => b.textContent);
-    // 本场景按 IKFM3S 有效性契约补了 textIndex 连线，标签**有效**：菜单为「定位来源 / 替换来源 /
-    // 删除标签」（TextNode/index.tsx:1026-1053）。release `db34e668c` 的「重新绑定」两键形态
-    // 是标签**失效**（mediaInvalid=1）时的渲染，由 mentionTrigger.test.tsx 覆盖，不适用于本场景。
     expect(labels).toEqual(['定位来源', '替换来源', '删除标签']);
   });
 
@@ -375,12 +351,10 @@ describe('IKGYYB hover 间隙桥接（卡与钉屏幕工具条间 ~10px 间隙�
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  /** 鼠标进入工具条层（React onMouseEnter 由 mouseover 派生） */
   async function enterLayer() {
     await act(async () => layer()!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
   }
 
-  /** 鼠标离开工具条层到卡外（mouseout + relatedTarget 在层外派生 onMouseLeave） */
   async function leaveLayer() {
     await act(async () => layer()!.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
   }
@@ -390,7 +364,6 @@ describe('IKGYYB hover 间隙桥接（卡与钉屏幕工具条间 ~10px 间隙�
     await hoverCard();
     expect(layer()).toBeTruthy();
     await leaveCard();
-    // 桥接窗口内（指针正穿间隙）不闪卸——修复前此处立即卸载、按钮点不到
     expect(layer()).toBeTruthy();
     await act(async () => { vi.advanceTimersByTime(120); });
     expect(layer()).toBeNull();
@@ -415,7 +388,6 @@ describe('IKGYYB hover 间隙桥接（卡与钉屏幕工具条间 ~10px 间隙�
     expect(layer()).toBeTruthy();
     await act(async () => { vi.advanceTimersByTime(120); });
     expect(layer()).toBeNull();
-    // 对照：层 leave 后窗口内移回卡，清除被取消
     await hoverCard();
     await leaveCard();
     await enterLayer();

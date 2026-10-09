@@ -21,16 +21,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-/**
- * NewApiMediaKitEnhanceVideoClient 接口级 mock 网关测试（IKH3VF，父规格 IKH3VB）。
- * <p>
- * 覆盖：三档分辨率出站映射（resolution 透传 + bitrate_level 恒 medium + fps 不发）、
- * 标准请求头三元组、submit 响应 task_id 解析与缺失兜底、§5 错误分类与上游原因透传、
- * poll 端点路径与三态解析（completed 含 duration/resolution/fps / failed / 中间态）、
- * HTTP 错误携带状态（瞬时判定输入）。不连真实网关。参数名以火山官方 PDF
- * 「提交画质增强（大模型版）任务 API」为准（文档失败示例报错 resolution 仅 [720p,1080p]
- * 系内部矛盾，以参数表与码率参考表为准——契约票 IKH3VE 已冻结该口径）。
- */
 class NewApiMediaKitEnhanceVideoClientTest {
 
     private HttpServer server;
@@ -81,7 +71,6 @@ class NewApiMediaKitEnhanceVideoClientTest {
                 "sk-token", "https://example.com/src.mp4", resolution);
     }
 
-    // ========== submit：出站映射（官方 PDF Body 参数节 + ADR-0105 参数裁剪） ==========
 
     @Test
     @DisplayName("提交：官方逐字路径 + video_url + resolution 透传 + bitrate_level 恒 medium，fps 不发")
@@ -95,9 +84,7 @@ class NewApiMediaKitEnhanceVideoClientTest {
         assertThat(body).contains("\"video_url\":\"https://example.com/src.mp4\"");
         assertThat(body).contains("\"resolution\":\"1080p\"");
         assertThat(body).contains("\"bitrate_level\":\"medium\"");
-        // ADR-0105：帧率保持原片（官方：未指定时输出保持原始片源帧率）——出站不发 fps 键
         assertThat(body).doesNotContain("\"fps\"");
-        // 精确码率 / 产物存储 / 幂等与回调 / 队列：家族口径一律不发
         assertThat(body).doesNotContain("\"bitrate\"");
         assertThat(body).doesNotContain("media_output_destination");
         assertThat(body).doesNotContain("client_token");
@@ -135,7 +122,6 @@ class NewApiMediaKitEnhanceVideoClientTest {
         }
     }
 
-    // ========== submit：响应与错误分类（§5） ==========
 
     @Test
     @DisplayName("网关 400（success=false 且不创建任务）→ 抛错，上游可读原因透传到 message")
@@ -201,12 +187,10 @@ class NewApiMediaKitEnhanceVideoClientTest {
                 .isEqualTo(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED);
     }
 
-    // ========== poll：端点路径与三态解析（官方「异步任务结果」节） ==========
 
     @Test
     @DisplayName("poll completed：GET 查询路径拼 taskId，解析 result.video_url / duration / resolution / fps")
     void pollCompletedParsesResult() {
-        // 官方 PDF「异步任务结果」节完整任务信息示例逐字（expires_at / created_at / finished_at 也在）
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-enhance-video-generative-987654\","
                 + "\"request_id\":\"20240522110000ABCDEFG67890\",\"status\":\"completed\","
                 + "\"result\":{\"video_url\":\"https://example.volcvideo.com/gen_enhanced_output.mp4?auth_key=...\","

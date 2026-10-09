@@ -9,11 +9,6 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
-/* IKIMQJ 确认清空版本前置（父规格 IKIMPQ 契约 §9）：
-   已有非空画布的破坏性清空只认明确的数值 If-Match——
-   缺头 428、"missing" 哨兵与过期数值版本 412（带回当前版本），零写入不消耗版本；
-   当前数值版本放行。全程经真实 HTTP + 隔离 MySQL（IKIMQJ_DATABASE_URL 门控），
-   每步回读持久行核对节点与版本，不以事务 mock 代替持久状态。 */
 describe.skipIf(!process.env.IKIMQJ_DATABASE_URL)("Confirm-empty version guard (IKIMQJ)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -88,29 +83,24 @@ describe.skipIf(!process.env.IKIMQJ_DATABASE_URL)("Confirm-empty version guard (
     const version = ((await created.json()) as { data: { version: number } }).data.version;
     expect(version).toBe(0);
 
-    // 确认清空缺 If-Match → 428，节点与版本原样
     const noHeader = await putCanvas(project.id, confirmedEmptyBody);
     expect(noHeader.status).toBe(428);
     await expectPersisted(project.id, SEED, version);
 
-    // "missing" 哨兵只用于首次创建，不得充当已有非空画布的清空许可 → 412 带当前版本
     const sentinel = await putCanvas(project.id, confirmedEmptyBody, '"missing"');
     expect(sentinel.status).toBe(412);
     expect(((await sentinel.json()) as { data: unknown }).data).toEqual({ version });
     await expectPersisted(project.id, SEED, version);
 
-    // 过期数值版本 → 412 带当前版本
     const stale = await putCanvas(project.id, confirmedEmptyBody, `"${version + 5}"`);
     expect(stale.status).toBe(412);
     expect(((await stale.json()) as { data: unknown }).data).toEqual({ version });
     await expectPersisted(project.id, SEED, version);
 
-    // 未确认的非空到空提交（IKIIWN 回归）→ 422，零写入
     const unconfirmed = await putCanvas(project.id, emptyBody, `"${version}"`);
     expect(unconfirmed.status).toBe(422);
     await expectPersisted(project.id, SEED, version);
 
-    // 当前数值版本 + confirmEmpty → 成功清空，版本前进一步
     const cleared = await putCanvas(project.id, confirmedEmptyBody, `"${version}"`);
     expect(cleared.status).toBe(200);
     await expectPersisted(project.id, [], version + 1);

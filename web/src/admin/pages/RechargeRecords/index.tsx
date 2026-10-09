@@ -1,13 +1,3 @@
-/* ============================================
- * RechargeRecords 充值记录：全站充值订单查询
- * 数据源 GET /api/admin/recharge-records（我们自己的 recharge_orders）
- *
- * 骨架（筛选状态机 / 三态 / 分页接线）在 `../../components/AdminQueryTable`；
- * 本页只**声明**筛选、列、空态，以及人工补发那条页面独有的横幅。
- *
- * 与 UserManage / SiteConfig 同一条纪律：页面只描述结构，样式一处定义在套件里 ——
- * **本页没有自己的样式文件**。
- * ============================================ */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Search } from 'lucide-react';
@@ -34,17 +24,8 @@ const fmt = (n: number) => n.toLocaleString('en-US');
 const fmtTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('zh-CN', { hour12: false }) : '—';
 
-/** 单位是**分**（后端 `amount_fen` 如此），展示才换成元。 */
 const fmtYuan = (fen: number) => `¥${(fen / 100).toFixed(2)}`;
 
-/**
- * 六态的中文名。顺序 = 筛选下拉里的顺序（`STATUS_OPTIONS` 由它派生），
- * 所以按「钱还没到 → 钱到了 → 出问题」排，不是按字母。
- *
- * ⚠️ 这两个状态必须**各有各的文案**：`STATUS_LABELS[row.status]` 取不到值时
- * 徽标会渲染成空白 —— 而空白的恰好是「钱收到了、积分没发出去」这种
- * 运营最需要一眼看见的单（见下方 subtitle）。
- */
 const STATUS_LABELS: Record<AdminRechargeStatus, string> = {
   pending: '待支付',
   paid_pending: '支付成功待到账',
@@ -56,19 +37,13 @@ const STATUS_LABELS: Record<AdminRechargeStatus, string> = {
 
 const STATUS_TONES: Record<AdminRechargeStatus, BadgeTone> = {
   pending: 'warning',
-  // 钱已收、积分未发：不是错误（会自愈重试），但绝不能与「待支付」同色
   paid_pending: 'accent',
   paid: 'success',
   expired: 'neutral',
   failed: 'danger',
-  // 需人工介入，与「支付失败」（用户没付钱，平台没损失）区分开
   grant_failed: 'danger',
 };
 
-/**
- * 下拉选项。**空串 = 全部**（本地口径，不发给后端），其余逐字对应后端白名单 ——
- * 与另外两张记录页同一套哨兵口径，见 `useQueryFilters` 里那段说明。
- */
 const STATUS_OPTIONS = [
   { value: '', label: '全部状态' },
   ...(Object.keys(STATUS_LABELS) as AdminRechargeStatus[]).map((value) => ({
@@ -77,7 +52,6 @@ const STATUS_OPTIONS = [
   })),
 ];
 
-/** `type` 而不是 `interface`：见 JobRecords 里的同一条说明。 */
 type Filters = {
   keyword: string;
   status: string;
@@ -86,25 +60,8 @@ type Filters = {
 
 const EMPTY_FILTERS: Filters = { keyword: '', status: '', tradeNo: '' };
 
-/**
- * 哪些状态的单值得给「重试发放」（E-1 的那条出口）。
- *
- * ⚠️ 只有 `paid_pending` / `grant_failed`：这两种才是「**钱收到了、积分没发出去**」。
- * 给每一行都摆一个按钮是错的 —— 对 `pending`（用户还没付钱）点它等于无中生有地发积分，
- * 对 `paid`（早就到账了）点它是纯粹的噪声。**判据与后端 `retryGrantForAdmin` 的那道闸
- * 必须一致**：前端多放一个按钮，运营就会撞上一次 400。
- */
 const RETRYABLE: readonly AdminRechargeStatus[] = ['paid_pending', 'grant_failed'];
 
-/**
- * 首购加赠那一格：显示**这一单挂着多少赠送**与**实际发没发**。
- *
- * <p>⚠️ 两者缺一不可。只看额度会把「用户已经用过了」误读成「发了」；
- * 只看结果则看不出「这一单本来该有多少」。这正是本工单要修的那类事——
- * 运营配了赠送、界面上却无处确认它生没生效。
- *
- * <p>没有赠送的单显示「—」而不是「0」：「送 0 分」与「没有赠送」是两件事。
- */
 function BonusCell({ row }: { row: AdminRechargeRecord }) {
   if (row.firstPurchaseEligible !== 1 || row.bonusCredits <= 0) return <>—</>;
   const amount = fmt(row.bonusCredits);
@@ -114,7 +71,6 @@ function BonusCell({ row }: { row: AdminRechargeRecord }) {
   if (row.firstPurchaseState === 'repeat') {
     return <Badge tone="neutral">{amount} 未发 · 该档位已用过</Badge>;
   }
-  // unknown：还没走到发放那一步（未支付），或撞了幂等键但拿不到归属
   return <Badge tone="warning">{amount} 未判定</Badge>;
 }
 
@@ -123,12 +79,6 @@ export default function RechargeRecords() {
   const paging = usePagedQuery(filters.epoch);
   const { applied, draft, setDraft, apply, reset } = filters;
 
-  /**
-   * 人工补发的结果横幅（成功/失败都在这一处说）。
-   *
-   * <p>用页面级横幅而不是 toast：补发是一次**明确的操作**，它的结果要留在屏幕上让人
-   * 对照着那一行看（尤其是失败时——运营往往要连着再点一次别的单）。
-   */
   const [retryNotice, setRetryNotice] = useState('');
   const [retryError, setRetryError] = useState('');
 
@@ -140,7 +90,6 @@ export default function RechargeRecords() {
       setRetryNotice(
         result.status === 'paid'
           ? `${result.tradeNo} 补发成功，积分已到账`
-          // 补发**不代表**一定成：服务端回的是回读后的真实状态。说成成功就是骗人
           : `${result.tradeNo} 补发已执行，但订单仍停在「${STATUS_LABELS[result.status]}」，`
             + '需继续排查（详见服务端日志）',
       );
@@ -156,7 +105,6 @@ export default function RechargeRecords() {
     page: paging.page,
     pageSize: PAGE_SIZE,
     ...(applied.keyword ? { keyword: applied.keyword } : {}),
-    // Select 只提供上面那几个值，所以这里的收窄是安全的（不是任意字符串）
     ...(applied.status ? { status: applied.status as AdminRechargeStatus } : {}),
     ...(applied.tradeNo ? { tradeNo: applied.tradeNo } : {}),
   };
@@ -167,16 +115,11 @@ export default function RechargeRecords() {
     {
       key: 'nickname',
       header: '用户名',
-      // 用户名 / 手机号来自**我们自己库**的 `bw_users`：`recharge_orders` 里只有 user_id，
-      // 认不出人。BFF 拿这一页的 user_id 批量查一次补回来。
-      //
-      // ⚠️ 判空 `?? '—'`，不是真值判断：后端把「查不到用户」与「用户没有手机号」都收敛成 `null`。
       render: (row) => row.nickname ?? '—',
     },
     {
       key: 'phone',
       header: '手机号',
-      // 存量用户没手机号是**常态**（`bw_users.phone` 可空），不是加载没完成
       render: (row) => row.phone ?? '—',
     },
     { key: 'amountFen', header: '支付金额', render: (row) => fmtYuan(row.amountFen) },
@@ -202,11 +145,6 @@ export default function RechargeRecords() {
       key: 'actions',
       header: '操作',
       render: (row) => (
-        // ⚠️ 这是「钱收到了、积分始终发不出去」的单**唯一**的人工出口：
-        // 自动重试窗口用尽之后，没有任何别的路径会再碰它（E-1）。
-        // 只对这两种状态出现 —— 别的状态点了没有意义，服务端也会拒。
-        // 不做二次确认：补发是幂等的（billing 的 purchased:{tradeNo} 幂等键），
-        // 点错一行不会多发积分，弹一个确认框只会让救火时多一步。
         RETRYABLE.includes(row.status) ? (
           <Button
             size="sm"
@@ -299,7 +237,6 @@ export default function RechargeRecords() {
           />
           <Input
             style={{ width: 220 }}
-            // 「需完整」四个字不能省：用户管理页那个框是**模糊**匹配，这个框是**精确**匹配。
             placeholder="用户 ID / 手机号 / 用户名（需完整，留空 = 全站）"
             value={draft.keyword}
             onChange={(e) => setDraft((d) => ({ ...d, keyword: e.target.value }))}

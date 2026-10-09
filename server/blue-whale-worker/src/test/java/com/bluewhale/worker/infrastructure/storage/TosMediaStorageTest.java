@@ -18,13 +18,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/**
- * 下载心跳（IKFS5W）：读超时放宽到 5min 后，单次下载可能超过 120s 任务租约，
- * 下载过程中必须按心跳续租，否则任务会被判定过期、被另一个 worker 抢走重跑。
- */
 class TosMediaStorageTest {
 
-    /** 每个分块先 sleep 再吐数据，模拟慢速下载。 */
     private static final class SlowStream extends InputStream {
         private final int chunks;
         private final long gapMs;
@@ -90,11 +85,6 @@ class TosMediaStorageTest {
         assertThat(Files.size(output)).isEqualTo(2);
     }
 
-    // ========== IKGS73：三个上传出口必须真的算 md5 ==========
-    //
-    // 这三条盯的是本单的承重行（`ContentDigest.md5Hex(...)` 的三处调用点）。只测 ContentDigest
-    // 本身是不够的——把这里任意一处调用删掉，helper 的测试照样绿，而 assets.md5 会静默变空，
-    // 去重静默失效。用 RFC 1321 里 "abc" 的向量，同时钉住「算的是上传的那份字节」和「编码是小写 hex」。
 
     private static final String MD5_OF_ABC = "900150983cd24fb0d6963f7d28e17f72";
 

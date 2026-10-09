@@ -1,4 +1,3 @@
-/** 账户积分与订单页的数据形状。接接口时保持这些字段，页面不用跟着改。 */
 
 export interface CreditsLotPreview {
   remaining: number | null;

@@ -1,6 +1,5 @@
 import type { CSSProperties } from 'react';
 
-/** 外部标题共用的局部尺寸：屏幕目标值除以 Canvas 倍率，三类元素独立封顶。 */
 export function nodeTitleSizing(zoom: number): CSSProperties {
   const localSize = (base: number, maximum: number) => {
     if (zoom < 0.75) return base / 0.75;

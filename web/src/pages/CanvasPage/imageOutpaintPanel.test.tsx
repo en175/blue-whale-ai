@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* IKGOR6 扩图面板发送闭环页面级测试：发送 payload 冻结（六键 + 四比例换算自扩展框）且过契约
-   zod 校验、发送后建结果草稿卡 + 纯视觉来源线（不占参考位）并退出扩图模式、源卡全程不动、
-   轮询三态回填（生成中进度 / 成品含新分辨率 / 失败可读原因）、失败重试沿用 lastParams 原样重发
-   （不走通用 retry 接口）。渲染模式沿用 imageEnhancePanel.test.tsx（FlowCanvas 打桩透出 props）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -42,7 +38,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -124,7 +119,6 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn(),
 }));
 
-/* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
@@ -167,7 +161,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 上次提交参数（失败重试链路种子用）：i1 源、top 0.1 / right 0.2 */
 const LAST_PARAMS = {
   source_asset_id: '5',
   target_node_id: 'o1',
@@ -177,7 +170,6 @@ const LAST_PARAMS = {
   expand_right: 0.2,
 };
 
-/** 画布：一个就绪图片节点 i1（assetId '5'，契约形态数字字符串）+ 可选失败扩图结果卡 o1。 */
 function seedDoc(withFailedOutpaint = false) {
   const nodes: Array<Record<string, unknown>> = [
     {
@@ -224,7 +216,6 @@ function seedDoc(withFailedOutpaint = false) {
 let root: Root;
 let container: HTMLDivElement;
 
-/** 轮询状态默认替身：进行中（个别用例 mockResolvedValue 覆盖后须在 afterEach 复位） */
 const defaultJobStatus = apiMocks.fetchJobStatus.getMockImplementation()!;
 
 async function renderPage() {
@@ -242,7 +233,6 @@ async function renderPage() {
   });
 }
 
-/** 走图片卡画质工具横排「扩图」按钮的入口（回调挂在节点 data 上，IKH3XZ） */
 async function enterOutpaint(nodeId = 'i1') {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === nodeId)!;
   await act(async () => {
@@ -257,7 +247,6 @@ const frameProps = () => flowProps.current.outpaintFrame as
   | { rect: { width: number; height: number }; expands: Record<string, number>; onExpandChange: (e: never) => void }
   | null;
 
-/** 拖出固定扩展并点发送（1600×900 → 内容盒短边 280：top 28→0.1、right 56→0.2） */
 async function dragAndSend(top = 28, right = 56) {
   await act(async () => {
     frameProps()!.onExpandChange({ top, right, bottom: 0, left: 0 } as never);
@@ -267,7 +256,6 @@ async function dragAndSend(top = 28, right = 56) {
   });
 }
 
-/** 新建的扩图结果卡 id（i1 之外的第一个新节点） */
 const outpaintResultId = () =>
   (flowProps.current.mediaNodes as Node[]).find((n) => n.id !== 'i1' && n.id !== 'o1')!.id;
 
@@ -281,7 +269,6 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
   vi.clearAllMocks();
-  // clearAllMocks 不清除实现：轮询态替身会污染后续用例，统一恢复默认（先例 mediaReEdit.test.tsx）
   apiMocks.fetchJobStatus.mockReset().mockImplementation(defaultJobStatus);
 });
 
@@ -317,7 +304,6 @@ describe('IKGOR6 发送创建任务闭环', () => {
       expand_bottom: 0,
       expand_left: 0,
     });
-    // 提交 payload 过契约校验（前后端同源 schema）
     expect(imageOutpaintInputSchema.parse(payload)).toEqual(payload);
   });
 
@@ -329,22 +315,18 @@ describe('IKGOR6 发送创建任务闭环', () => {
     await dragAndSend();
 
     const draftId = outpaintResultId();
-    // 结果卡：扩图身份标记 + lastParams 随提交写入 + 转生成中
     expect(nodeData(draftId).imageOutpaint).toEqual({ sourceAssetId: '5', lastParams: payload() });
     expect(nodeData(draftId).genStatus).toBe('generating');
     expect(nodeData(draftId).progress).toBe(0);
     expect(nodeData(draftId).fileName).toBe('扩图生成中');
-    // 纯视觉来源线：源卡 → 结果卡，仅 origin 标记；不参与参考推导（不占参考位、不参与 @ 编号）
     const edges = flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>;
     const edge = edges.find((e) => e.target === draftId)!;
     expect(edge.source).toBe('i1');
     expect(edge.data).toEqual({ origin: IMAGE_OUTPAINT_EDGE_ORIGIN });
     expect(imageMediaRefsOf(draftId, edges as never[], flowProps.current.mediaNodes)).toEqual([]);
-    // 退出扩图模式：扩展框与面板消失、解除框选与他卡拖动隔离
     expect(frameProps()).toBeNull();
     expect(document.body.querySelector('[data-testid="outpaint-dialog"]')).toBeNull();
     expect(flowProps.current.refPickActive).toBe(false);
-    // 源卡全程不动
     expect(nodeData('i1').src).toBe('http://img/i1.png');
     expect(nodeData('i1').fileName).toBe('素材图');
   });
@@ -395,7 +377,6 @@ describe('IKGOR6 轮询三态回填', () => {
     expect(nodeData(draftId).height).toBe(1400);
     expect(nodeData(draftId).genStatus).toBeUndefined();
     expect(nodeData(draftId).assetId).toBe('9');
-    // 源卡不动
     expect(nodeData('i1').src).toBe('http://img/i1.png');
     expect(nodeData('i1').width).toBe(1600);
   });
@@ -430,7 +411,6 @@ describe('IKGOR6 失败重试沿用上次参数', () => {
     });
     expect(apiMocks.createImageOutpaint).toHaveBeenCalledTimes(1);
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
-    // 上次参数原样重发（六键冻结值，target 仍是本卡）
     expect(apiMocks.createImageOutpaint.mock.calls[0][1]).toEqual(LAST_PARAMS);
     expect(nodeData('o1').genStatus).toBe('generating');
   });

@@ -2,26 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createAuthRepo } from "./auth-repo.js";
 
-/**
- * 自动注册的用户名重试。
- *
- * <p>背景：`bw_users.username` 变成唯一索引之后，随机用户名（`randomInt(0, 10000)`）
- * 的撞车从「静默产生两个同名用户」变成了「注册直接失败」。这个文件钉住修复。
- */
 
-/** 唯一约束冲突的错误形状（Prisma P2002）。 */
 function uniqueViolation(): Error {
   return Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
 }
 
 type CreateImpl = (args: unknown) => Promise<{ id: bigint; username: string }>;
 
-/**
- * 只暴露**新表名**的假 Prisma。
- *
- * ⚠️ 这不是省事，是一条断言：repo 里若还残留 `prisma.users` / `prisma.verification_codes`，
- * 这里会直接是 undefined 而炸掉——表改名这件事靠它才测得到。
- */
 function fakePrisma(create?: CreateImpl) {
   const findFirst = vi.fn().mockResolvedValue(null);
   const createMock = vi.fn(create ?? (async () => ({ id: 1n, username: "用户0001" })));
@@ -75,8 +62,6 @@ describe("auth-repo 自动注册的用户名撞车重试", () => {
   });
 
   it("撞车后换一个名字重试，最终成功", async () => {
-    // ★ 这条是本次修复的核心：username 唯一之后，1 万个取值的随机空间
-    //   约 120 个用户就有一半概率撞上。不重试的话，用户看到的是「注册失败」。
     let calls = 0;
     const { prisma } = fakePrisma(async () => {
       calls++;
@@ -102,7 +87,6 @@ describe("auth-repo 自动注册的用户名撞车重试", () => {
   });
 
   it("非唯一约束的错误直接抛出，不重试", async () => {
-    // 重试解不了的问题（比如并发建号撞 phone）重试只是把错误变成超时。
     const { prisma, createMock } = fakePrisma(async () => {
       throw Object.assign(new Error("connection lost"), { code: "P1001" });
     });
@@ -124,8 +108,6 @@ describe("auth-repo 自动注册的用户名撞车重试", () => {
   });
 
   it("新建号时 created=true —— 它就是响应里的 is_new_user", async () => {
-    // 少了这个标记，`is_new_user` 只能写死：写死 true 会让**每个老用户每次登录**
-    // 都被当成新注册（前端据此弹欢迎），写死 false 则新用户永远等不到引导。
     const { prisma, findFirst, createMock } = fakePrisma();
     findFirst.mockResolvedValue(null);
     createMock.mockResolvedValue({ id: 8n, username: "用户0001" });

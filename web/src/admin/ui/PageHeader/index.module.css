@@ -13,7 +13,6 @@
   margin: 0;
   font-size: var(--admin-font-lg);
   font-weight: 600;
-  /* 大字号加一点负字距——「看起来是设计与调过的」最便宜的一招 */
   letter-spacing: -0.02em;
   color: var(--admin-text);
 }

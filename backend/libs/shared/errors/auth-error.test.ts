@@ -1,5 +1,3 @@
-// 登录隔离（ADR-0080）：上游 HTTP 200+success:false 业务失败透传投影单测。
-// login(401)/register(400) 共用，避免 toAuthError 的 status 映射吞掉业务文案。
 import { describe, expect, it } from "vitest";
 
 import { NewApiError } from "@lib/core";

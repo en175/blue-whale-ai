@@ -1,6 +1,5 @@
 .editorWrapper {
   position: relative;
-  /* 父级给定高度时填满（如底部对话窗固定高度场景）；父级高度 auto 时等同 auto，无副作用 */
   height: 100%;
 }
 
@@ -30,7 +29,6 @@
   user-select: none;
 }
 
-/* 引用胶囊：原子节点，跟正文文字同一行流动，紧凑图标胶囊，中性色 */
 .chip {
   display: inline-flex;
   align-items: center;

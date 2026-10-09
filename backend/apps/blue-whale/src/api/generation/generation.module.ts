@@ -5,7 +5,6 @@ import { SceneCardGenerateController } from "./scene-card-generate.controller.js
 import { MaterialApiModule } from "../material/material.module.js";
 
 @Module({
-  // IKF YHJ：素材校验门需要 MaterialService（GetAsset 实时查询 + material_assets 状态仓库面）。
   imports: [MaterialApiModule],
   controllers: [
     GenerationJobsController,

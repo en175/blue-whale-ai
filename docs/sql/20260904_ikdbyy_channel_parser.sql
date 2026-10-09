@@ -1,6 +1,3 @@
--- IKDBYY：generation_model_capability 增加生成渠道解析器与请求映射。
--- 历史快照（docs/sql）：面向可读性的库变更记录，权威 DDL 见 packages/persistence/schema/ + prisma/migrations/。
--- 日期：2026-09-04
 ALTER TABLE `generation_model_capability`
   ADD COLUMN `channel_parser` VARCHAR(32) NOT NULL DEFAULT 'seedream' AFTER `features`,
   ADD COLUMN `request_mapping` JSON NULL AFTER `channel_parser`;

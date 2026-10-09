@@ -7,21 +7,11 @@ import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * IKIZQ8 金标对账：样片两阶段契约的 Java 侧实现与 TS 契约
- * （{@code backend/libs/contracts/video-sample-mode.ts}，IKIZQ5 冻结）逐值对齐。
- *
- * <p>期望值逐字取自金标用例 {@code docs/specs/2026-09-29-ikizq5-video-sample-mode-golden-cases.json}
- * 的 G06（可信截止时间）—— 不是从 Java 实现反推：两端任何一侧改了公式或常量，
- * 这里的字面量就红（ADR-0084 跨语言防漂移）。
- */
 class VideoSampleContractGoldenTest {
 
-    /** 金标 G06：网关回传样片上游 Draft created_at=2026-09-29T02:00:00Z。 */
     private static final long G06_CREATED_AT_MS =
             Instant.parse("2026-09-29T02:00:00Z").toEpochMilli();
 
-    /** 金标 G06 期望：finalize_deadline_at=2026-10-06T01:00:00Z（严格早于 created_at+7 天）。 */
     private static final long G06_EXPECTED_DEADLINE_MS =
             Instant.parse("2026-10-06T01:00:00Z").toEpochMilli();
 
@@ -30,7 +20,6 @@ class VideoSampleContractGoldenTest {
     void g06_finalizeDeadlineMatchesTsContract() {
         assertThat(VideoSampleContract.finalizeDeadlineMs(G06_CREATED_AT_MS))
                 .isEqualTo(G06_EXPECTED_DEADLINE_MS);
-        // 严格早于 created_at+7 天（余量 > 0 是方向性不变式，不钉具体值）
         assertThat(VideoSampleContract.finalizeDeadlineMs(G06_CREATED_AT_MS))
                 .isLessThan(G06_CREATED_AT_MS + 7L * 24 * 60 * 60 * 1000);
     }

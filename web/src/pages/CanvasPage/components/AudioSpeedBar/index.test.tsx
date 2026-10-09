@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* IKHW5S AudioSpeedBar 调速发送条组件测试（对齐 AudioTrimBar 测试接缝）：六要素
-   （X/标题/倍速滑杆/当前值/⚡0 徽标 + 发送钮，无格式下拉）、发送守卫（1.00x 置灰、
-   滑离点亮、滑回置灰）、滑杆位置↔倍速派发走契约映射、submitting 只读、锚样式透传。
-   渲染模式沿用 AudioTrimBar 测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,8 +37,6 @@ async function click(testId: string) {
   });
 }
 
-/** 滑杆拖到指定位置（0~1000 整数）：经原生 value setter 绕过 React 受控 tracker 后
- *  派发 input 事件（React onChange 通道；直接赋值 DOM 会被 tracker 判定值未变而吞掉） */
 async function dragSliderTo(pos: number) {
   const slider = container!.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!;
   await act(async () => {
@@ -52,7 +46,6 @@ async function dragSliderTo(pos: number) {
   });
 }
 
-/** 滑杆上按键（React onKeyDown 通道）；返回事件以便断言 preventDefault / 冒泡阻断 */
 async function pressKeyOnSlider(key: string) {
   const slider = container!.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!;
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
@@ -88,7 +81,6 @@ describe('六要素呈现（无格式下拉）', () => {
     expect(container!.querySelector('[data-testid="audio-speed-value"]')!.textContent).toBe('1.00x');
     expect(container!.querySelector('[data-testid="audio-speed-free"]')!.getAttribute('title')).toBe('本期免费');
     expect(btn('audio-speed-send-btn')).toBeTruthy();
-    // 调速 API 无格式参数（父单决策）：发送条无任何格式控件与格式文案
     expect(sendBar.textContent).not.toContain('格式');
     expect(container!.querySelector('[data-testid^="audio-speed-format"]')).toBeNull();
   });
@@ -103,7 +95,6 @@ describe('六要素呈现（无格式下拉）', () => {
     expect(tickText('2')).toBe('2.0x');
     expect(tickText('last')).toBe('4.0x');
     expect(container!.querySelector('[class*="notch"]')).toBeTruthy();
-    // 受控滑杆位置 = 契约 speedToPos：1.0 → 500（中点）、1.35 → 558
     const slider = () => container!.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!;
     expect(slider().value).toBe('500');
     renderBar({ speed: 1.35 });
@@ -156,7 +147,6 @@ describe('发送守卫（1.00x 置灰、滑离点亮、滑回置灰）', () => {
 
 describe('滑杆派发（位置↔倍速走契约映射）', () => {
   it('滑到右端 1000 派发 4.00x；拖回中点 500 派发 1.00x；左端 0 派发 0.10x', async () => {
-    // 各位置独立渲染断言（受控组件值未变化不触发 onChange——位置 500 须自其他初速拖回）
     renderBar();
     await dragSliderTo(1000);
     expect(speedChangeMock).toHaveBeenLastCalledWith(4);
@@ -173,7 +163,6 @@ describe('滑杆派发（位置↔倍速走契约映射）', () => {
   it('非网格位置按契约量化（0.05 步进）：位置 123 派发 0.30x', async () => {
     renderBar();
     await dragSliderTo(123);
-    // posToSpeed(123)：raw = 0.1 + (123/500)*0.9 ≈ 0.3214 → 量化 0.05 网格 → 0.30
     expect(speedChangeMock).toHaveBeenLastCalledWith(0.3);
   });
 });
@@ -272,7 +261,6 @@ describe('滑杆键盘操作（IKI4M6：方向键 0.05 步进 + Esc 退出）', 
     const slider = container!.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!;
     expect(slider.value).toBe(String(speedToPos(1.05)));
     expect(container!.querySelector('[data-testid="audio-speed-value"]')!.textContent).toBe('1.05x');
-    // 鼠标拖动通道不受影响：仍走 onChange + 契约 posToSpeed
     await dragSliderTo(123);
     expect(speedChangeMock).toHaveBeenLastCalledWith(0.3);
   });

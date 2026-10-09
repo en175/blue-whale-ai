@@ -23,13 +23,11 @@ describe("IK67HF incremental migration", () => {
     expect(migrationSql).toContain(
       "`capability_snapshot_version` JSON NOT NULL",
     );
-    // command_id 幂等（operation=scene_card.storyboard_preview）
     expect(migrationSql).toContain(
       "UNIQUE INDEX `uk_storyboard_command`(`project_id`, `command_id`)",
     );
     expect(migrationSql).toContain("INDEX `idx_storyboard_scene`(`scene_card_id`)");
     expect(migrationSql).toContain("INDEX `idx_storyboard_project`(`project_id`)");
-    // 可变附属表：带 version/is_delete
     expect(migrationSql).toContain("`version` INTEGER NOT NULL DEFAULT 1");
     expect(migrationSql).toContain("`is_delete` TINYINT NOT NULL DEFAULT 0");
   });

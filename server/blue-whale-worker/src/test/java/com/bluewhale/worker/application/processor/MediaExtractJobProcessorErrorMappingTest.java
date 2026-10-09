@@ -37,20 +37,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * MediaExtractJobProcessor 错误码映射与异步链编排测试（迁移契约 §18 / IKH28W；火山
- * MediaKit 执行面，模板 VideoSubtitleEraseJobProcessorTest）。
- * <p>
- * 覆盖：claim 语义、input 业务键兜底校验、凭证缺失分类、submit 相（提交成功存 task_id +
- * 续排 / §5 信号保留 / 归并 1044）、poll 相（processing 续排进度保持 / 轮询超限 / 瞬时错误
- * 重排 / 火山 failed 分类 + 上游原因透传）、completed 立即转存发布（官方 duration / 回落源
- * 时长 / md5 穿透）、转存强依赖与瞬时判定。不连真实 MQ/DB/TOS/网关。
- * <p>
- * 历史：ffmpeg 本地链路时代的细分码用例（video_download_failed / video_too_large /
- * video_has_no_audio_track / extract_failed / upload_failed）随处理器执行面切换移除——
- * 那些码锁定的保留代码（FfmpegExtractor / TosMediaStorage）由各自测试文件锁定（不动）；
- * §18.4 定稿：火山路径无音轨等上游失败一律归并 1044，不单独识别。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class MediaExtractJobProcessorErrorMappingTest {
@@ -86,7 +72,6 @@ class MediaExtractJobProcessorErrorMappingTest {
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
-    /** 源视频素材（时长供结果 duration 回落）。 */
     private void stubSourceAsset() {
         AssetEntity source = new AssetEntity();
         source.setType("video");
@@ -127,7 +112,6 @@ class MediaExtractJobProcessorErrorMappingTest {
         assertThat(code.getValue()).isEqualTo(expectedCode);
     }
 
-    // ========== claim 语义（沿用 IKC9EJ：DB 异常上抛保重投） ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -156,7 +140,6 @@ class MediaExtractJobProcessorErrorMappingTest {
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), any(), any());
     }
 
-    // ========== input 业务键兜底校验（§18.2；权威复核在创建入口） ==========
 
     @Test
     @DisplayName("缺少 source_asset_id → invalid_input")
@@ -183,7 +166,6 @@ class MediaExtractJobProcessorErrorMappingTest {
         verify(extractAudioClient, never()).submit(anyString(), anyString(), anyString());
     }
 
-    // ========== 源素材 / 凭证 ==========
 
     @Test
     @DisplayName("源素材不可用（非 video）→ 1044 兜底 + 可读原因，不提交上游")
@@ -215,7 +197,6 @@ class MediaExtractJobProcessorErrorMappingTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== submit 相：提交成功 + 错误归并（§18.4 第一/二类；无自动重试） ==========
 
     @Test
     @DisplayName("提交成功：submit 带 output_format → markProviderSubmitted 存 task_id + scheduleNext(5s)")
@@ -293,7 +274,6 @@ class MediaExtractJobProcessorErrorMappingTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== parent-reuse 重试收割（IKI89P / ADR-0114；平移 VideoJobProcessorTest 先例）==========
 
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
@@ -469,15 +449,12 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
-        // 任务保持 processing 由新 worker 重新领取继续收割
         verify(extractAudioClient, never()).submit(anyString(), anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
-    // ========== poll 相：状态机 + 进度口径（对齐去字幕） ==========
 
     @Test
     @DisplayName("poll processing → rescheduleProviderPoll(进度保持不倒退) + scheduleNext(5s)")
@@ -567,7 +544,6 @@ class MediaExtractJobProcessorErrorMappingTest {
                 .isEqualTo("音频提取轮询超时（超过 "
                         + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS
                         + " 次），上游持续错误: MediaKit 音频提取任务查询超时");
-        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
         assertThat(details.getValue()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -591,7 +567,6 @@ class MediaExtractJobProcessorErrorMappingTest {
                 details.capture(), eq("worker-1"), eq(5L));
         assertThat(code.getValue())
                 .isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
-        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
         assertThat(message.getValue())
                 .isEqualTo("音频提取轮询超时（超过 "
                         + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS
@@ -637,7 +612,6 @@ class MediaExtractJobProcessorErrorMappingTest {
         assertFailCode(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
     }
 
-    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS2；对齐音频混合 IKIHGQ 样板） ==========
 
     @Test
     @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
@@ -657,7 +631,6 @@ class MediaExtractJobProcessorErrorMappingTest {
         verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(),
                 details.capture(), eq("worker-1"), eq(5L));
         assertThat(code.getValue()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
-        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
         assertThat(message.getValue()).doesNotContain("401").contains("上游凭证被拒绝");
         assertThat(details.getValue())
                 .containsEntry("raw", "音频提取任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
@@ -705,11 +678,9 @@ class MediaExtractJobProcessorErrorMappingTest {
         verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), anyString(),
                 details.capture(), eq("worker-1"), eq(5L));
         assertThat(code.getValue()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
-        // 反例钉住缺键语义：非 HTTP 失败（超时/连接失败/业务异常）不写 http_status，只留 raw
         assertThat(details.getValue()).doesNotContainKey("http_status").containsKey("raw");
     }
 
-    // ========== poll 相：火山任务 failed（§18.4 第二类映射） ==========
 
     @Test
     @DisplayName("poll failed → 1044 + 上游可读原因透传（前端投影）")
@@ -761,7 +732,6 @@ class MediaExtractJobProcessorErrorMappingTest {
         assertThat(message.getValue()).isEqualTo("音频提取任务失败");
     }
 
-    // ========== poll 相：completed → 立即转存 + 终态发布（URL 24h 有效） ==========
 
     @Test
     @DisplayName("poll completed → persist 按任务格式转存 → 发布 payload：官方 duration 秒 + md5 穿透")
@@ -781,7 +751,6 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        // URL 24h 有效：completed 后立即转存（同步链路，无续排）
         verify(mediaRelay).persist("https://volc/out.mp3?auth_key=...", "9", "mp3");
         ArgumentCaptor<String> url = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> storageKey = ArgumentCaptor.forClass(String.class);
@@ -904,7 +873,6 @@ class MediaExtractJobProcessorErrorMappingTest {
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), any(), any());
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架同语义） ==========
 
     @Test
     @DisplayName("瞬时判定：provider_timeout / 网络不可达 / HTTP 429/5xx → 瞬时；4xx / 业务失败 → 非瞬时")

@@ -1,9 +1,3 @@
-/** 火山方舟（Ark）图片生成客户端。
- *  对齐 Java VolcEngineImageGenerationProvider：POST {base}/api/v3/images/generations，
- *  Bearer {ARK_API_KEY}。MVP 用 response_format=url 直接拿临时 URL（TOS 永久化后续补）。
- *  注：本文件属于 packages/core，而共享错误信号在 @lib/contracts（contracts 运行期
- *  依赖 core/readiness，core 不能再反向依赖 contracts，否则成环）。故信号判定在此局部拷贝，
- *  与 contracts 的 CONTENT_POLICY_SIGNAL / NEW_API_QUOTA_SIGNAL 保持同构（IKDAJN）。 */
 
 export interface ArkImageConfig {
   baseUrl: string;
@@ -23,11 +17,9 @@ export interface ArkImageResult {
   urls: string[];
 }
 
-/** 内容安全策略信号（与 @lib/contracts 的 CONTENT_POLICY_SIGNAL 同构，见头注释）。 */
 const CONTENT_POLICY_SIGNAL =
   /(copyright|sensitive|版权|敏感|policy violation|policyviolation|content policy)/i;
 
-/** 欠费信号（与 @lib/contracts 的 NEW_API_QUOTA_SIGNAL 同构，见头注释）。 */
 const QUOTA_SIGNAL =
   /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required|(^|\D)402(\D|$))/i;
 
@@ -41,7 +33,6 @@ export class ArkImageError extends Error {
   }
 }
 
-/** 调 Ark 图片生成。失败抛 ArkImageError(code, message)，由 worker 转 job failed。 */
 export async function generateImages(
   config: ArkImageConfig,
   req: ArkImageRequest,
@@ -76,10 +67,6 @@ export async function generateImages(
   }
 
   if (!res.ok) {
-    // IKDAJN：HTTP 错误按正文信号分类（content-policy > quota > provider_failed），
-    // 与 new-api relay 端 provider 行为对齐，避免版权/敏感被 provider_failed 吞语义。
-    // 上游原文只用于分类判定，不写入 error.message——对外固定中文，原文由 failClaimed
-    // 落 error.details.raw（ADR-0078「message 不泄漏 provider 原文」）。
     const text = await res.text().catch(() => "");
     const code = CONTENT_POLICY_SIGNAL.test(text)
       ? "content_rejected"

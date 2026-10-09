@@ -1,7 +1,3 @@
-/* ============================================
- * CanvasHeader 画布页顶栏：项目名 / Agent 入口
- * IKBN0G：右侧去掉个人信息下拉，只保留 Agent
- * ============================================ */
 import { useNavigate } from 'react-router-dom';
 import { Bot, History } from 'lucide-react';
 import RechargeModal from '@/components/UserDropdown/RechargeModal';
@@ -15,13 +11,10 @@ interface CanvasHeaderProps {
   onSelectProject: (id: string) => void;
   onRenameProject: (id: string, newName: string) => void;
   onDeleteProject: (id: string) => void;
-  /** 置顶/取消置顶（IKH1YL）：透传 ProjectSelector，缺省时下拉仍渲染按钮但不生效 */
   onTogglePinProject?: (id: string, pinned: boolean) => void;
   onNewProject: () => void;
   onToggleAgent: () => void;
-  /** 旧生成卡迁移历史入口（IKDLQK）：仅项目存在迁移历史时提供，缺省不渲染 */
   onShowLegacyHistory?: () => void;
-  /** 面板展开时隐藏 Agent 入口（IKDLD4）：入口与面板内关闭按钮冗余，收起后自动恢复 */
   hideAgentEntry?: boolean;
 }
 
@@ -43,7 +36,7 @@ export default function CanvasHeader({
 
   return (
     <header className={styles.header}>
-      {/* 左侧：Logo（点击返回首页） + 项目选择器 */}
+      {}
       <div className={styles.left}>
         <button
           className={styles.logoBtn}
@@ -63,7 +56,7 @@ export default function CanvasHeader({
         />
       </div>
 
-      {/* 右侧：迁移历史（有历史时）+ Agent；充值弹窗仍挂在此，供生成前余额拦截打开 */}
+      {}
       <div className={styles.right}>
         {onShowLegacyHistory && (
           <button

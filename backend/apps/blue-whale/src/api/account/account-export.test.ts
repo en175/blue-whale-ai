@@ -8,23 +8,12 @@ import {
   type ExportOrderRow,
 } from "./account-export.js";
 
-/**
- * 导出 xlsx 的**真产出**测试：真的把 buffer 交回 exceljs 读一遍。
- *
- * <p>⚠️ 为什么不只看「函数没抛异常」：xlsx 是二进制容器，写坏一列、行错位、金额单位写错，
- * 在服务端都**不会报错** —— 只有用户下载下来打开才发现。所以这里一律回读断言。
- *
- * <p>⚠️ 本文件的夹具是**已投影之后**的行（snake_case）。「投影做了没有」由
- * `account.controller.test.ts` 的路由层用例盯着 —— 上一版就是漏了那一层，
- * 让 camelCase 原始对象混进来、导出大半空格子而无人发现。
- */
 async function readBack(buffer: Buffer) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
   return workbook.worksheets[0];
 }
 
-/** exceljs 的 `row.values` 是 1-based，第 0 位恒为 undefined —— 抹掉它再断言。 */
 function headersOf(sheet: ExcelJS.Worksheet): unknown[] {
   return (sheet.getRow(1).values as unknown[]).slice(1);
 }
@@ -50,7 +39,6 @@ describe("buildExportWorkbook", () => {
         scope: "orders",
         rows: [
           orderRow(),
-          // 待到账：钱收了、积分还没发。到账积分必须是**空**，不是 0
           orderRow({ trade_no: "BW-2", amount_fen: 20000, credits: 3000, status: "paid_pending" }),
         ],
         total: 2,
@@ -67,12 +55,9 @@ describe("buildExportWorkbook", () => {
       "到账积分",
       "状态",
     ]);
-    // 4000 分 = 40 元。写成 4000 就是 100 倍的错，而服务端不会报错
     expect(sheet.getRow(2).getCell(4).value).toBe(40);
     expect(sheet.getRow(2).getCell(5).value).toBe(600);
-    // ★ 查不到 ≠ 0：未到账那一行的到账积分是空串
     expect(sheet.getRow(3).getCell(5).value).toBe("");
-    // 状态用中文，且 `expired` 不是「已过期」
     expect(sheet.getRow(2).getCell(6).value).toBe("已到账");
   });
 
@@ -110,7 +95,6 @@ describe("buildExportWorkbook", () => {
     expect(sheet.getRow(2).getCell(4).value).toBe("2026-12-01T00:00:00+08:00");
     expect(sheet.getRow(2).getCell(5).value).toBe(3000);
     expect(sheet.getRow(2).getCell(6).value).toBe(1200);
-    // 空串到期时间 = 永久有效；写成空白会让人以为这一列没读到
     expect(sheet.getRow(3).getCell(4).value).toBe("永久有效");
   });
 
@@ -148,10 +132,8 @@ describe("buildExportWorkbook", () => {
     );
 
     const sheet = await readBack(buffer);
-    // 任务查不到提示词 → 回落 title，不是留空
     expect(sheet.getRow(2).getCell(4).value).toBe("视频生成 · seedance-2.5");
     expect(sheet.getRow(2).getCell(2).value).toBe("text2video");
-    // 过期核销不是任务：类型由 type 决定，任务 ID 留空
     expect(sheet.getRow(3).getCell(2).value).toBe("过期核销");
     expect(sheet.getRow(3).getCell(5).value).toBe("");
     expect(sheet.getRow(3).getCell(6).value).toBe(1200);
@@ -165,7 +147,6 @@ describe("buildExportWorkbook", () => {
       ),
     );
 
-    // 传的是 status 在前，出来的仍是「订单编号, 状态」——表头顺序不该由查询串里逗号的先后决定
     expect(headersOf(sheet)).toEqual(["订单编号", "状态"]);
     expect(sheet.getRow(2).getCell(1).value).toBe("BW-1");
   });
@@ -179,7 +160,6 @@ describe("buildExportWorkbook", () => {
     );
 
     expect(sheet.getRow(3).getCell(1).value).toBe("⚠️ 仅导出前 1 条，共 5 条");
-    // 没有截断时**不该**有这一行 —— 否则每个正常文件末尾都多一行噪音
     const clean = await readBack(
       await buildExportWorkbook({ scope: "orders", rows: [], total: 0 }, []),
     );

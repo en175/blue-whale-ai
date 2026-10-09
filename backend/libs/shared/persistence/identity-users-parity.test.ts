@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// 自建用户体系：账号主体改造（users → identity_users，username 唯一、phone 可空）。
-// 镜像 identity_memberships-parity 的三轨核对结构。
 
 const migrationSql = readFileSync(
   new URL("../../../prisma/migrations/20260924180000_identity_users/migration.sql", import.meta.url),
@@ -30,8 +28,6 @@ describe("identity_users 三轨迁移", () => {
   });
 
   it("有失败风险的那一步（加唯一索引）排在改名之前", () => {
-    // MySQL 的 DDL 不是事务性的：若先改名再发现用户名重复，会停在
-    // 「表已改名、索引没加上」的半途，而 RENAME 不可重入、重跑会失败。
     const addIndex = migrationSql.indexOf("ADD UNIQUE INDEX `uk_identity_users__username`");
     const rename = migrationSql.indexOf("RENAME TABLE `users` TO `identity_users`");
 
@@ -58,17 +54,13 @@ describe("identity_users 三轨迁移", () => {
   });
 
   it("Prisma 模型与迁移同源", () => {
-    // 模型名与索引名都是**当前态**（被 20260928100000 收敛过前缀）；
-    // 本文件只钉住该迁移的冻结内容，当前态以 bw-prefix-rename-parity.test.ts 为准。
     expect(schemaPrisma).toContain("model bw_users {");
     expect(schemaPrisma).toContain("model bw_verification_codes {");
     expect(schemaPrisma).toContain('map: "uk_bw_users__username"');
-    // phone 可空：Prisma 侧漏了 `?` 会让下一次 migrate 试图把列改回 NOT NULL
     expect(schemaPrisma).toMatch(/phone\s+String\?\s+@unique\(map: "idx_phone"\)/);
   });
 
   it("TS 侧不再引用旧表名", () => {
-    // 表改了名而代码没跟上，是最典型的「编译过、运行时炸」。
     expect(authRepo).toContain("prisma.bw_users");
     expect(authRepo).toContain("prisma.bw_verification_codes");
     expect(authRepo).not.toMatch(/prisma\.users\b/);

@@ -22,18 +22,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
-/**
- * NewApiMediaKitSegmentScenesClient 接口级 mock 网关测试（IKH8BP，父规格 IKH86V）。
- * <p>
- * 覆盖：出站映射（官方 PDF「提交任务」+「调整切分粒度」节：video_url 透传、granularity →
- * 契约 SEGMENT_THRESHOLD 数值、对客模型名、契约 SUBMIT_PATH 路由——IKH67T 红线：网关
- * 路径 ≠ 火山上游路径）、高级参数不暴露（min_duration / max_duration / enable_clip_fade /
- * return_segment_videos 不出站）、标准请求头三元组、submit 响应 task_id 解析与缺失兜底、
- * 官方错误结构 error{code,type,message,param} 的 §5 分类与上游原因透传、poll 端点路径
- * （契约 POLL_PATH_PREFIX 拼 taskId）与三态解析（completed 含 result.segments[] 一对多 /
- * failed / running 中间态）。不连真实网关。参数名以火山官方 PDF
- * 「提交场景切分任务 API」为准。
- */
 class NewApiMediaKitSegmentScenesClientTest {
 
     private HttpServer server;
@@ -49,7 +37,6 @@ class NewApiMediaKitSegmentScenesClientTest {
 
     @BeforeEach
     void startServer() throws Exception {
-        // 官方「任务提交成功响应」示例形状（PDF「响应说明」节同构）
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-segment-scenes-1400500\","
                 + "\"request_id\":\"20260325160000A8DE7F57A9B3E17A0DD2\"}");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -85,7 +72,6 @@ class NewApiMediaKitSegmentScenesClientTest {
                 "sk-token", "https://example.com/source_video.mp4", granularity);
     }
 
-    // ========== submit：出站映射（官方 PDF「提交任务」+「调整切分粒度」节） ==========
 
     @Test
     @DisplayName("standard：契约 SUBMIT_PATH 网关路由 + 对客模型名 + video_url + threshold=10")
@@ -93,14 +79,12 @@ class NewApiMediaKitSegmentScenesClientTest {
         String taskId = callSubmit("standard");
 
         assertThat(taskId).isEqualTo("amk-tool-segment-scenes-1400500");
-        // IKH67T 红线：网关对客路由（契约常量），不是火山上游 /api/v1/tools/segment-scenes
         assertThat(lastPath.get()).isEqualTo(VideoSceneSplitContract.SUBMIT_PATH);
         assertThat(lastMethod.get()).isEqualTo("POST");
         String body = lastBody.get();
         assertThat(body).contains("\"model\":\"" + VideoSceneSplitContract.MODEL_NAME + "\"");
         assertThat(body).contains("\"video_url\":\"https://example.com/source_video.mp4\"");
         assertThat(body).contains("\"segment_threshold\":10");
-        // 高级参数一律不暴露（规格「高级参数不暴露」：走服务端默认）
         assertThat(body).doesNotContain("min_duration");
         assertThat(body).doesNotContain("max_duration");
         assertThat(body).doesNotContain("enable_clip_fade");
@@ -138,7 +122,6 @@ class NewApiMediaKitSegmentScenesClientTest {
                 .isEqualTo(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== submit：响应与错误分类（官方错误结构 error{code,message,param,type}） ==========
 
     @Test
     @DisplayName("网关 400（官方同步错误结构）→ 抛错，上游可读原因透传到 message")
@@ -199,7 +182,6 @@ class NewApiMediaKitSegmentScenesClientTest {
                 .isEqualTo(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED);
     }
 
-    // ========== poll：查询路径与三态解析 ==========
 
     @Test
     @DisplayName("poll completed：GET 契约 POLL_PATH_PREFIX 拼 taskId，解析 duration + segments[]")

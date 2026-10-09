@@ -10,15 +10,9 @@ import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
-/**
- * 生成输出槽 Mapper（settle-ops.ts:79-121 槽位聚合）。
- */
 @Mapper
 public interface GenerationOutputSlotMapper extends BaseMapper<GenerationOutputSlotEntity> {
 
-    /**
-     * 查任务全部槽位，按 slot_index asc（settle-ops.ts:79-82）。
-     */
     @Select("""
             SELECT * FROM generation_output_slots
             WHERE generation_job_id = #{jobId}
@@ -26,9 +20,6 @@ public interface GenerationOutputSlotMapper extends BaseMapper<GenerationOutputS
             """)
     List<GenerationOutputSlotEntity> findByJobId(@Param("jobId") Long jobId);
 
-    /**
-     * 查任务 pending 态槽位（failJob 路径，settle-ops.ts:255-257）。
-     */
     @Select("""
             SELECT * FROM generation_output_slots
             WHERE generation_job_id = #{jobId}
@@ -36,9 +27,6 @@ public interface GenerationOutputSlotMapper extends BaseMapper<GenerationOutputS
             """)
     List<GenerationOutputSlotEntity> findPendingByJobId(@Param("jobId") Long jobId);
 
-    /**
-     * 更新槽位状态 + 绑定 asset_id（settle-ops.ts:88-92）。
-     */
     @Update("""
             UPDATE generation_output_slots
             SET status = #{status}, asset_id = #{assetId}
@@ -50,9 +38,6 @@ public interface GenerationOutputSlotMapper extends BaseMapper<GenerationOutputS
             @Param("assetId") Long assetId
     );
 
-    /**
-     * 更新槽位状态（无 asset_id，settle-ops.ts:98-101 / 258-261）。
-     */
     @Update("""
             UPDATE generation_output_slots
             SET status = #{status}
@@ -60,12 +45,6 @@ public interface GenerationOutputSlotMapper extends BaseMapper<GenerationOutputS
             """)
     int updateSlotStatus(@Param("slotId") Long slotId, @Param("status") String status);
 
-    /**
-     * 按 scene_card_generation_record_id 查槽位（internals.ts:25-29 syncRecordSummary）。
-     * <p>
-     * 返回全列，按 id asc（与 TS orderBy: {id: "asc"} 逐字一致）。
-     * 聚合在 Java 侧做（resolveLogicalSlots + aggregateSlotStatus）。
-     */
     @Select("""
             SELECT * FROM generation_output_slots
             WHERE scene_card_generation_record_id = #{recordId}

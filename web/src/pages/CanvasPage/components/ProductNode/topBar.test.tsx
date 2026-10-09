@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKGZ86 审查修复：spec 第 6 条组件级断言补齐——商品卡顶栏 topBar 渲染出浮层容器底类，
-   「添加到对话」挂 addToChatBtn 透明底类（胶囊已退役）。CSS 源断言在
-   src/styles/overlayContainer.test.ts，这里只补渲染层，不测交互。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

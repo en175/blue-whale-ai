@@ -1,11 +1,9 @@
-/* 连线创作能力集：素材能连哪种生成节点、组交集如何投影到菜单 */
 import type { Edge, Node } from '@xyflow/react';
 
 export type ConnectGenKind = 'image' | 'video' | 'text' | 'audio';
 
 export type ConnectSourceKind = 'image' | 'video' | 'audio' | 'text';
 
-/** 图片/视频/文本生成仍按素材能力集交集；音频生成单独按组内介质组合判定 */
 type AbilityGenKind = Exclude<ConnectGenKind, 'audio'>;
 
 const ABILITY: Record<ConnectSourceKind, ReadonlySet<AbilityGenKind>> = {
@@ -19,7 +17,6 @@ function dataOf(node: Node): Record<string, unknown> {
   return (node.data ?? {}) as Record<string, unknown>;
 }
 
-/** 空壳 / 生成中 / 待生成 / 失败草稿不能当上游素材 */
 export function isConnectableSource(node: Node | undefined): boolean {
   if (!node) return false;
   if (sourceKindOf(node) == null) return false;
@@ -48,7 +45,6 @@ export function sourceKindOf(node: Node | undefined): ConnectSourceKind | null {
   return null;
 }
 
-/** 媒体生成宿主：草稿、生成中/失败，以及带 jobId 的成品生成卡（上传素材卡不算） */
 function isMediaGenHost(d: Record<string, unknown>): boolean {
   if (d.draft === true) return true;
   const status = d.genStatus;
@@ -57,7 +53,6 @@ function isMediaGenHost(d: Record<string, unknown>): boolean {
   return typeof jobId === 'string' || typeof jobId === 'number';
 }
 
-/** 目标是否为生成节点（待生成 / 生成中 / 成品生成卡 / 文本生成宿主） */
 export function genKindOf(node: Node | undefined): ConnectGenKind | null {
   if (!node) return null;
   const d = dataOf(node);
@@ -70,11 +65,6 @@ export function genKindOf(node: Node | undefined): ConnectGenKind | null {
   return null;
 }
 
-/** 音频生成是否可选（IKGRE3 能力集收敛为 5 组合）：组内不含视频，且图片与音频不同时出现。
- *  可用组合仅五种：单图片 / 单音频 / 单文本 / 图片+文本 / 音频+文本，其余全部不可用。
- *  旧结论作废：图+视频、音频+图、音频+视频、三者混合可选全部取消；
- *  IKFCKS 文本上下文收窄为仅「单文本」「图片+文本」「音频+文本」三种；
- *  IKFDFZ 纯音频仍可选（音频参考走画布连线），新增纯图片单独放行。 */
 export function isAudioGenEnabled(sourceKinds: ConnectSourceKind[]): boolean {
   const hasImage = sourceKinds.includes('image');
   const hasVideo = sourceKinds.includes('video');
@@ -107,7 +97,6 @@ export function availableGenKinds(sourceNodes: Node[]): Set<ConnectGenKind> {
   }
   const result = new Set<ConnectGenKind>(acc ?? []);
   if (isAudioGenEnabled(kinds)) result.add('audio');
-  // 组内任一素材合规未通过：视频生成参考能力失效（不可挂边、菜单置灰）
   if (sourceNodes.some((node) => dataOf(node).complianceFailed === true)) {
     result.delete('video');
   }
@@ -118,7 +107,6 @@ export function canConnectSourcesToGen(sourceNodes: Node[], targetKind: ConnectG
   return availableGenKinds(sourceNodes).has(targetKind);
 }
 
-/** 从 target 沿出边能否走到 source（再加 source→target 会成环） */
 export function wouldCreateCycle(sourceId: string, targetId: string, edges: Edge[]): boolean {
   const outgoing = new Map<string, string[]>();
   for (const edge of edges) {

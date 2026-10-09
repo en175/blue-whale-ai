@@ -1,6 +1,3 @@
-/* ============================================
- * ProfileModal 个人资料弹窗：昵称编辑与首字占位头像
- * ============================================ */
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
@@ -19,7 +16,6 @@ export default function ProfileModal({ nickname, phone, onClose, onSave, error, 
   const [name, setName] = useState(nickname);
   const [saving, setSaving] = useState(false);
 
-  /** 昵称非空且与当前不同才允许保存 */
   const canSave = name.trim().length > 0 && name.trim() !== nickname;
 
   const handleSave = async () => {
@@ -33,7 +29,7 @@ export default function ProfileModal({ nickname, phone, onClose, onSave, error, 
   return createPortal(
     <div className={styles.overlay} onClick={() => { if (!saving) onClose(); }}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        {/* 头部 */}
+        {}
         <div className={styles.header}>
           <h3 className={styles.title}>个人资料</h3>
           <button className={styles.closeBtn} onClick={() => { if (!saving) onClose(); }} title="关闭">
@@ -41,13 +37,13 @@ export default function ProfileModal({ nickname, phone, onClose, onSave, error, 
           </button>
         </div>
 
-        {/* 头像：昵称首字占位 */}
+        {}
         <div className={styles.avatarRow}>
           <div className={styles.avatar}>{(name.trim() || nickname).charAt(0).toLowerCase() || 'u'}</div>
           <span className={styles.avatarHint}>昵称首字占位头像</span>
         </div>
 
-        {/* 昵称 */}
+        {}
         <div className={styles.field}>
           <span className={styles.label}>昵称</span>
           <input
@@ -60,7 +56,7 @@ export default function ProfileModal({ nickname, phone, onClose, onSave, error, 
           />
         </div>
 
-        {/* 手机号码（不可编辑） */}
+        {}
         <div className={styles.field}>
           <span className={styles.label}>手机号码</span>
           <input
@@ -71,12 +67,12 @@ export default function ProfileModal({ nickname, phone, onClose, onSave, error, 
           />
         </div>
 
-        {/* 错误提示 */}
+        {}
         {error && (
           <div className={styles.errorMsg}>{error}</div>
         )}
 
-        {/* 底部按钮 */}
+        {}
         <div className={styles.footer}>
           <button className={styles.cancelBtn} onClick={() => { if (!saving) onClose(); }} disabled={saving}>
             取消

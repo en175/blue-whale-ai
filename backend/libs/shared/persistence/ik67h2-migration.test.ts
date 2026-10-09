@@ -10,7 +10,6 @@ const migrationSql = readFileSync(
 );
 describe("IK67H2 incremental migration", () => {
   it("creates immutable ordered mention facts and the minimal SceneCard resource", () => {
-    // 迁移 SQL 是本增量新增的权威；baseline 是前置基础快照，不含本增量表。
     expect(migrationSql).toContain("CREATE TABLE `conversation_message_mentions`");
     expect(migrationSql).toContain("CREATE TABLE `scene_cards`");
     expect(migrationSql).toContain(

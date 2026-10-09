@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKIHP M 音视频合成提交、占位与终态回填页面级链路测试：草稿卡绑好视频后点发送——
-   载荷与冻结快照契约恒等（audio/video/is_audio_reserve/sync）、受理即原地转生成中视频占位
-   （不新建卡/线、面板关闭、工具条恢复、连点只发一次）；终态走通用回填分支（按产物资产
-   类型翻 mediaType、命名「视频名(音视频合成).mp4」、时长分辨率取供应商值缺失回落源资产、
-   清合成身份）；失败卡展示原因并接重试入口（原卡重新进入生成中，同键复用、双击一次）。
-   创建未被接受（409/网络）留在面板、展示可读错误、不留假卡/假线。
-   渲染沿用 testing/canvasPageTestHarness（页面级共享夹具）。 */
 import { act, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ReactFlowProvider } from '@xyflow/react';
@@ -55,7 +48,6 @@ type WireState = {
   toHandle?: { nodeId?: string | null } | null;
 };
 
-/** 画布：音频成品卡 a1（固定源）+ 视频成品卡 v1（候选）；可选既绑好的合成草稿卡 m1 */
 function seedDoc(opts?: { withDraft?: boolean; withBound?: boolean; videoDims?: boolean }) {
   const nodes: Array<Record<string, unknown>> = [
     {
@@ -140,14 +132,12 @@ async function click(node: Element | null) {
   });
 }
 
-/** 走音频卡工具条「音视频合成」（回调挂在节点 data 上，同 IKIHPK 口径） */
 async function compose(id = 'a1') {
   await act(async () => {
     (dataOf(id).onComposeAudioVideo as (nodeId: string) => void)(id);
   });
 }
 
-/** 拖线绑定：从视频卡右侧加号拖出、松手落到草稿卡 */
 async function dropWire(sourceId: string, targetId: string) {
   document.elementsFromPoint = () => [];
   await act(async () => {
@@ -161,15 +151,12 @@ async function dropWire(sourceId: string, targetId: string) {
   });
 }
 
-/** 会话期工具条整条不渲染的观测标记（soloToolbarHidden 注入 = 会话模态生效；
- *  发送退出会话后消失 = 工具条恢复，IKIHPK 同口径） */
 function toolbarHiddenIds(): string[] {
   return mediaNodes()
     .filter((n) => (n.data as Record<string, unknown>).soloToolbarHidden === true)
     .map((n) => n.id);
 }
 
-/** 卡面静态渲染（可播放性/取消钮断言，同 audioMixRecovery 先例） */
 function cardHtml(id: string): string {
   const card = mediaNode(id);
   return renderToStaticMarkup(createElement(ReactFlowProvider, null, createElement(MediaNode, {
@@ -199,7 +186,6 @@ describe('IKIHPM 提交：载荷契约、占位卡与面板关闭', () => {
     await compose();
     const draftId = muxCard().id;
     await dropWire('v1', draftId);
-    // 会话期媒体卡工具条整条不渲染（IKIHPK 同口径的观测标记）
     expect(toolbarHiddenIds()).toEqual(mediaNodes().map((n) => n.id));
 
     await click(sendBtn());
@@ -207,8 +193,6 @@ describe('IKIHPM 提交：载荷契约、占位卡与面板关闭', () => {
 
     expect(apiMocks.createAudioVideoMux).toHaveBeenCalledTimes(1);
     expect(apiMocks.createAudioVideoMux.mock.calls[0]?.[0]).toBe('p1');
-    // IKJJR4：载荷业务字段原样冻结，另携 canvas_binding（submission_id = 幂等键、
-    // 目标 = 原草稿卡、角色 draft、来源线快照为固定音频 + 绑定视频）
     expect(apiMocks.createAudioVideoMux.mock.calls[0]?.[1]).toEqual({
       audio: { assetId: '8', nodeId: 'a1' },
       video: { assetId: '5', nodeId: 'v1' },
@@ -230,7 +214,6 @@ describe('IKIHPM 提交：载荷契约、占位卡与面板关闭', () => {
     });
     expect(apiMocks.createAudioVideoMux.mock.calls[0]?.[2]).toMatchObject({ silent: true });
 
-    // 草稿卡原地转生成中占位：同一张卡、视频型、不可播放、记住合成身份
     const card = muxCard();
     expect(card.id).toBe(draftId);
     const data = card.data as Record<string, unknown>;
@@ -240,16 +223,12 @@ describe('IKIHPM 提交：载荷契约、占位卡与面板关闭', () => {
     expect(data.mediaType).toBe('video');
     expect(data.audioVideoMux).toMatchObject({ sourceNodeId: 'a1', reserveAudio: true, sync: 'none' });
     const html = cardHtml(draftId);
-    // 不可播放（无素材层）；画布工具卡不开放取消（族内口径）
     expect(html).not.toContain('mediaVideoPoster');
     expect(html).not.toContain('取消生成');
-    // 不新建卡、不新建来源线（固定音频线 + 绑定线原样两条）
     expect(mediaNodes()).toHaveLength(3);
     expect(edges()).toHaveLength(2);
-    // 面板关闭、工具条恢复
     expect(panel()).toBeNull();
     expect(toolbarHiddenIds()).toEqual([]);
-    // IKIHMX 审查修复 1：源音频卡工具条「音视频合成」保留高亮（在途注入标记）
     expect(dataOf('a1').audioVideoMuxInFlight).toBe(true);
   });
 
@@ -315,7 +294,6 @@ describe('IKIHPM 提交：载荷契约、占位卡与面板关闭', () => {
     expect(dataOf('m1').jobId).toBeUndefined();
     expect(mediaNodes()).toHaveLength(3);
     expect(edges()).toHaveLength(2);
-    // 面板留在原会话，可改正后重发（同载荷沿用同幂等键）
     apiMocks.createAudioVideoMux.mockResolvedValueOnce({ job_id: '76', status: 'queued', enqueue_required: true });
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '76', status: 'queued', progress: 0, asset: null });
     await click(sendBtn());
@@ -355,11 +333,8 @@ describe('IKIHPM 终态回填：原地变视频成品卡', () => {
     expect(data.audioVideoMux).toBeUndefined();
     expect(data.jobId).toBe('77');
     const html = cardHtml('m1');
-    // 素材层出现 = 成品卡可播放（非生成中占位）
     expect(html).toContain('mediaVideoPoster');
-    // 来源线保留（成品卡不重画、不新增）
     expect(edges().filter((e) => e.target === 'm1')).toHaveLength(2);
-    // IKIHMX 审查修复 1：终态回填清身份后，源卡「音视频合成」高亮随之消失
     expect(dataOf('a1').audioVideoMuxInFlight).toBeUndefined();
   });
 
@@ -399,7 +374,6 @@ describe('IKIHPM 终态回填：原地变视频成品卡', () => {
     await click(sendBtn());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 80)); });
 
-    // 删除两张输入卡（固定音频源 + 绑定视频）
     await act(async () => {
       flowProps.current.onDeleteNode(['a1', 'v1']);
       await new Promise((resolve) => setTimeout(resolve, 40));
@@ -407,7 +381,6 @@ describe('IKIHPM 终态回填：原地变视频成品卡', () => {
     expect(mediaNodes().map((node) => node.id)).toContain('m1');
     expect(dataOf('m1').src).toBe('http://vid/out.mp4');
     expect(dataOf('m1').assetId).toBe('88');
-    // 不留悬空线：来源线随输入卡一并清理
     expect(edges().some((edge) => edge.source === 'a1' || edge.source === 'v1')).toBe(false);
   });
 
@@ -427,11 +400,9 @@ describe('IKIHPM 终态回填：原地变视频成品卡', () => {
 
     expect(dataOf('m1').genStatus).toBe('failed');
     expect(dataOf('m1').errorText).toBe('音视频合成失败，请重试');
-    // 合成身份保留（重试按冻结快照重放）；失败卡渲染重试钮
     expect(dataOf('m1').audioVideoMux).toBeTruthy();
     expect(cardHtml('m1')).toContain('重试');
 
-    // 重试：走 :jobId/retry + Idempotency-Key，同卡回生成中，卡与来源线都不复制
     apiMocks.retryAudioVideoMux.mockResolvedValue({ job_id: '79', status: 'queued', replayed: false });
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '79', status: 'queued', progress: 0, asset: null });
     const retry = dataOf('m1').onRetryJob as (id: string) => void;
@@ -464,7 +435,6 @@ describe('IKIHPM 终态回填：原地变视频成品卡', () => {
     const retry = dataOf('m1').onRetryJob as (id: string) => void;
     await act(async () => { retry('m1'); await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(dataOf('m1').genStatus).toBe('failed');
-    // IKJJR4：重试失败文案归运行时统一口径（非 ApiError 兜底「重试失败」）
     expect(dataOf('m1').errorText).toBe('重试失败');
     await act(async () => { retry('m1'); await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(apiMocks.retryAudioVideoMux.mock.calls.map((call) => call.slice(0, 3))).toEqual([

@@ -19,12 +19,10 @@ function fmtDiscount(discount: number): string {
   return `${zhe}折`;
 }
 
-/** 空文本在审计里记成「无」：`「」→「」` 这种 diff 让人看不出改了什么。 */
 function fmtText(v: string): string {
   return v === "" ? "无" : v;
 }
 
-/** 白名单：空名单记「无」；非空时列出 userId（超过 5 个折成 `…等 N 人`，日志不是名单本身）。 */
 function fmtAllowlist(list: string[]): string {
   if (list.length === 0) return "无";
   if (list.length <= 5) return list.join(",");
@@ -58,7 +56,6 @@ export function describeTierChanges(
     changes.push(
       `失效时间：${fmtAuditTime(before.endTime)}→${fmtAuditTime(after.endTime)}`,
     );
-  // ── PRD §10.2 卡片与首购活动字段（迁移 047）──
   if (before.description !== after.description)
     changes.push(
       `卡片说明：${fmtText(before.description)}→${fmtText(after.description)}`,

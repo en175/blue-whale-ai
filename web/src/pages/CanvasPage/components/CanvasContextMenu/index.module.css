@@ -60,7 +60,6 @@
   box-shadow: var(--shadow-overlay);
 }
 
-/* 透明桥接主菜单与子菜单，鼠标斜向移入时不会掉出热区 */
 .subMenu::before {
   content: '';
   position: absolute;
@@ -70,7 +69,6 @@
   height: 100%;
 }
 
-/* 子菜单右侧超出时向左翻 */
 .subMenuFlipX {
   left: auto;
   right: calc(100% - 2px);
@@ -81,7 +79,6 @@
   right: -10px;
 }
 
-/* 子菜单底部超出时向上翻 */
 .subMenuFlipY {
   top: auto;
   bottom: 0;

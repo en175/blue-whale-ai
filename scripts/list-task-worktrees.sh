@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Read-only report for managed task worktrees.
 
 set -euo pipefail
 

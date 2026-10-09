@@ -1,13 +1,4 @@
 // @vitest-environment jsdom
-/* IKIHPK 音视频合成草稿卡会话与拖线绑定页面级链路测试：点工具条「音视频合成」从源音频卡拉出
-   视频型草稿卡（默认音频输入线 + 合成身份 + 参数默认档），拖线落点按目标卡身份分流
-   （落到未绑定/绑定中的合成草稿卡 → 绑定边 origin=audio-video-mux；落其他卡维持普通参考连线；
-   落空白不绑定），素材库浮层单列表选中即绑定且不拉线，视频槽三态（引导/绑定中跟手/已绑定信息条：
-   缩略图、文件名、时长、来源标注、× 移除重绑），固定音频输入线不可单独删而绑定线删除即解绑，
-   面板参数写卡持久化、未绑定发送置灰，会话注册进第 13 种工具会话（互斥/Esc/选中规范化/点空白
-   四退出 + 工具条整条不渲染模态）。
-   发送的真实提交与占位回填归 IKIHP M（本票发送钮只做 UI 态：点击不建任务、不改卡态）。
-   渲染沿用 testing/canvasPageTestHarness（页面级共享夹具）。 */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
@@ -58,8 +49,6 @@ type WireState = {
   toHandle?: { nodeId?: string | null } | null;
 };
 
-/** 画布：音频成品卡 a1（固定源）+ 视频成品卡 v1/v2（候选）+ 可选既有合成草稿卡 m1
- *  + 可选 HD 身份草稿卡 hd1（生成面板准入用例用） */
 function seedDoc(opts?: { audioUnlinked?: boolean; withMuxDraft?: boolean; withBound?: boolean; withHdDraft?: boolean }) {
   const nodes: Array<Record<string, unknown>> = [
     {
@@ -181,7 +170,6 @@ async function click(node: Element | null) {
   });
 }
 
-/** 走音频卡工具条「音视频合成」（回调挂在节点 data 上，同插帧/混合先例） */
 async function compose(id = 'a1') {
   const dispatch = (mediaNode(id).data as Record<string, unknown>).onComposeAudioVideo as
     | ((nodeId: string) => void)
@@ -191,8 +179,6 @@ async function compose(id = 'a1') {
   });
 }
 
-/** 拖线：从 source 卡右侧加号拖出、松手落到 target 卡（真实手势进浏览器人工回归，
- *  本接缝直接驱动落点判定；未传 target 即落空白） */
 async function dropWire(sourceId: string, targetId?: string, state?: WireState) {
   document.elementsFromPoint = () => [];
   await act(async () => {
@@ -206,7 +192,6 @@ async function dropWire(sourceId: string, targetId?: string, state?: WireState) 
   });
 }
 
-/** 钉屏幕媒体卡工具条容器 show 门（同插帧面板测试读取） */
 function mediaFollowToolbarShow(): boolean | undefined {
   const frag = flowProps.current.followToolbarLayer as { props?: { children?: unknown } } | undefined;
   const children = frag?.props?.children;
@@ -238,26 +223,21 @@ describe('IKIHPK 点「音视频合成」建草稿卡与面板跟随', () => {
     const draft = muxDraftNode()!;
     expect(draft).toBeTruthy();
     const data = draft.data as Record<string, unknown>;
-    // 草稿卡从创建起即视频型并标注「音视频合成」（不是音频型占位卡）
     expect(data.mediaType).toBe('video');
     expect(data.fileName).toBe(AUDIO_VIDEO_MUX_TITLE);
     expect(data.draft).toBe(true);
     expect(data.genStatus).toBe('draft');
-    // 合成身份：固定源节点/资产 + 默认参数（保留原声 + 保持原长）
     expect(identityOf(draft)).toEqual({
       sourceNodeId: 'a1',
       sourceAssetId: '8',
       reserveAudio: true,
       sync: 'none',
     });
-    // 出生位在源音频卡右侧
     expect((draft.position as { x: number }).x).toBeGreaterThan(0);
-    // 默认音频输入线：origin=audio-video-mux 语义边
     const audioEdge = edges().find((e) => e.target === draft.id)!;
     expect(audioEdge.source).toBe('a1');
     expect(audioEdge.data).toEqual({ origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN });
 
-    // 面板跟随渲染：标题/两档/三档/免费徽标；未绑定发送置灰并提示
     expect(panel()).toBeTruthy();
     expect(document.body.textContent).toContain('原声处理');
     expect(reserveBtn(true)!.className).toMatch(/Active/);
@@ -268,7 +248,6 @@ describe('IKIHPK 点「音视频合成」建草稿卡与面板跟随', () => {
     expect(document.body.textContent).toContain('本期免费');
     expect(sendBtn()!.disabled).toBe(true);
     expect(sendBtn()!.getAttribute('title')).toBe('先选择视频');
-    // 未绑定视频槽显示拖线引导与素材库次级入口
     expect(slot()!.textContent).toContain('拖线到本卡');
     expect(document.body.querySelector('[data-testid="audio-video-mux-library-open"]')).toBeTruthy();
   });
@@ -303,10 +282,8 @@ describe('IKIHPK 面板参数写卡与发送 UI 态', () => {
     const identity = identityOf(mediaNode(draftId))!;
     expect(identity.reserveAudio).toBe(false);
     expect(identity.sync).toBe('video');
-    // 未绑定视频：发送仍置灰
     expect(sendBtn()!.disabled).toBe(true);
 
-    // 关闭面板后点草稿卡重开：参数从卡上恢复（持久化口径）
     await click(document.body.querySelector('[data-testid="audio-video-mux-close"]'));
     expect(panel()).toBeNull();
     await act(async () => {
@@ -328,7 +305,7 @@ describe('IKIHPK 面板参数写卡与发送 UI 态', () => {
     const data = mediaNode('m1').data as Record<string, unknown>;
     expect(data.genStatus).toBe('draft');
     expect(data.jobId).toBeUndefined();
-    expect(edges()).toHaveLength(2); // 固定音频线 + 绑定线，未新增任务卡/边
+    expect(edges()).toHaveLength(2);
     expect(mediaNode('m1')).toBeTruthy();
   });
 });
@@ -345,7 +322,7 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
     const bindEdges = edges().filter((e) => e.target === draftId && e.source === 'v1');
     expect(bindEdges).toHaveLength(1);
     expect(bindEdges[0]!.data).toEqual({ origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN });
-    expect(edges().filter((e) => e.target === draftId)).toHaveLength(2); // 固定音频线 + 绑定线
+    expect(edges().filter((e) => e.target === draftId)).toHaveLength(2);
     expect(identityOf(mediaNode(draftId))!.video).toEqual({
       assetId: '5',
       nodeId: 'v1',
@@ -355,12 +332,9 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
       height: 720,
       src: 'http://vid/v1.mp4',
     });
-    // 视频槽转入已绑定信息条：文件名 + 时长 + 来源标注「· 画布」
     expect(boundBar()).toBeTruthy();
     expect(boundBar()!.textContent).toContain('城市夜景.mp4');
     expect(boundBar()!.textContent).toContain('· 画布');
-    // IKIHMX 审查修复 2：绑定信息条显真实视频首帧缩略图（preload=metadata 小 video，
-    //     绑定时刻冻结视频卡 src），不再是无信息图标占位
     const thumbVideo = boundBar()!.querySelector('video');
     expect(thumbVideo).not.toBeNull();
     expect(thumbVideo!.getAttribute('src')).toBe('http://vid/v1.mp4');
@@ -389,7 +363,6 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
       height: 1080,
       src: 'http://vid/v2.mp4',
     });
-    // 固定音频输入线不受影响
     expect(edges().some((e) => e.source === 'a1' && e.target === 'm1')).toBe(true);
   });
 
@@ -415,13 +388,11 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
     seedDoc({ withMuxDraft: true });
     await renderPage();
 
-    // 音频成品卡 → 视频成品卡：既有普通参考连线路径不变
     await dropWire('a1', 'v1');
     const plain = edges().find((e) => e.source === 'a1' && e.target === 'v1');
     expect(plain).toBeTruthy();
     expect(plain!.data).toBeUndefined();
 
-    // 视频成品卡 → 合成草稿卡：只有绑定边（无双份普通参考线）
     await act(async () => {
       flowProps.current.onNodeClick(mediaNode('m1'));
     });
@@ -437,7 +408,6 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
       flowProps.current.onNodeClick(mediaNode('m1'));
     });
     await dropWire('a1', 'm1');
-    // a1 → m1 只有既有固定音频线，未新增绑定线，草稿卡身份未写 video
     expect(edges().filter((e) => e.source === 'a1' && e.target === 'm1')).toHaveLength(1);
     expect(identityOf(mediaNode('m1'))!.video).toBeUndefined();
     expect(document.body.textContent).toContain('仅支持绑定视频卡');
@@ -495,15 +465,12 @@ describe('IKIHPK 视频槽三态与素材库浮层', () => {
     await click(document.body.querySelector('[data-testid="audio-video-mux-library-open"]'));
     const pop = libraryPop()!;
     expect(pop).toBeTruthy();
-    // 素材库分页查询异步落地后渲染单列表
     await vi.waitFor(() => {
       expect(libraryPop()!.textContent).toContain('素材库视频 #10241');
     });
-    // 单列表：无页签/无上传
     expect(pop.querySelectorAll('[role="tab"]')).toHaveLength(0);
     expect(pop.querySelector('input[type="file"]')).toBeNull();
 
-    // 点外部关闭（再开一次继续走绑定）
     await act(async () => {
       document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     });
@@ -516,7 +483,6 @@ describe('IKIHPK 视频槽三态与素材库浮层', () => {
     const before = edges().length;
     await click(document.body.querySelector('[data-testid="audio-video-mux-library-10241"]'));
     expect(libraryPop()).toBeNull();
-    // 素材库来源不拉线
     expect(edges()).toHaveLength(before);
     expect(identityOf(mediaNode(draftId))!.video).toEqual({
       assetId: '10241',
@@ -527,7 +493,6 @@ describe('IKIHPK 视频槽三态与素材库浮层', () => {
       src: 'http://vid/lib1.mp4',
     });
     expect(boundBar()!.textContent).toContain('· 素材库');
-    // IKIHMX 审查修复 2：素材库绑定冻结资产 URL，信息条同样显真实首帧缩略图
     const libThumbVideo = boundBar()!.querySelector('video');
     expect(libThumbVideo).not.toBeNull();
     expect(libThumbVideo!.getAttribute('src')).toBe('http://vid/lib1.mp4');
@@ -566,7 +531,6 @@ describe('IKIHPK 视频槽三态与素材库浮层', () => {
     expect(edges().some((e) => e.source === 'a1' && e.target === 'm1')).toBe(true);
     expect(sendBtn()!.disabled).toBe(true);
 
-    // 可重新绑定
     await dropWire('v2', 'm1');
     expect(identityOf(mediaNode('m1'))!.video).toEqual({
       assetId: '6',
@@ -588,14 +552,12 @@ describe('IKIHPK 语义边守卫（固定音频线不可单独删、绑定线删
       flowProps.current.onNodeClick(mediaNode('m1'));
     });
 
-    // 固定音频线：删边被拦
     await act(async () => {
       flowProps.current.onEdgesChange([{ id: 'e-mux-audio', type: 'remove' }]);
     });
     expect(edges().some((e) => e.id === 'e-mux-audio')).toBe(true);
     expect(document.body.textContent).toContain('不可移除');
 
-    // 绑定线：删边即解绑（卡上身份同步清除）
     await act(async () => {
       flowProps.current.onEdgesChange([{ id: 'e-mux-bind', type: 'remove' }]);
     });
@@ -624,7 +586,6 @@ describe('IKIHPK 会话注册、四退出与模态', () => {
       expect((node.data as Record<string, unknown>).soloToolbarHidden).toBeUndefined();
     }
     expect(mediaFollowToolbarShow()).toBe(true);
-    // 草稿卡与身份保留（未发送不自动清理）
     expect(muxDraftNode()).toBeTruthy();
   });
 
@@ -684,14 +645,11 @@ describe('IKIHPK 会话注册、四退出与模态', () => {
       width: 1280,
       height: 720,
     });
-    // 再进合成会话：绑定与参数恢复（合成身份记住直到回填）
     await act(async () => {
       flowProps.current.onNodeClick(mediaNode('m1'));
     });
     expect(panel()).toBeTruthy();
     expect(boundBar()!.textContent).toContain('城市夜景.mp4');
-    // IKIHMX 审查修复 2：存量绑定身份无冻结 src（本种子未写）时回落图标占位，
-    //     不渲染无信息 video 元素
     expect(boundBar()!.querySelector('video')).toBeNull();
   });
 
@@ -714,7 +672,6 @@ describe('IKIHPK 会话注册、四退出与模态', () => {
       flowProps.current.onNodeClick(mediaNode('m1'));
     });
     expect(panel()).toBeTruthy();
-    // HD 身份卡（既有面板准入链路：点卡 → openVideoEnhanceDraftDialog → exitEditSessionForGenPanel）
     await act(async () => {
       flowProps.current.onNodeClick(mediaNode('hd1'));
     });

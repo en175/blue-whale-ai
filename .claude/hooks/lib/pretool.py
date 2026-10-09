@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""Helpers for Claude Code PreToolUse hooks.
-
-The shell hooks stay as small bash entrypoints, but security-sensitive parsing
-belongs here: JSON strings can contain escaped quotes, and git commands can use
-global options before the subcommand, e.g. `git -C ../wt push`.
-"""
 
 from __future__ import annotations
 
@@ -22,9 +16,6 @@ from typing import Any
 
 SEPARATORS = {";", "&", "&&", "|", "||", "(", ")"}
 WORK_BRANCH_PREFIXES = ("feature/", "fix/", "hotfix/", "docs/", "chore/")
-# 测试基建桥：test-hooks.sh 在 Windows 注入 fake git（git.bat）后，把该全路径
-# 经此环境变量交给 pretool 的 git 子进程，使 current_branch / configured_git_alias
-# 命中假分支而非真实仓库（POSIX 不导出此变量，走原 git PATH 解析，行为不变）。
 PRETOOL_GIT_BIN = os.environ.get("PRETOOL_GIT_BIN") or "git"
 NON_ALIAS_SUBCOMMANDS = {
     "add",
@@ -50,8 +41,6 @@ NON_ALIAS_SUBCOMMANDS = {
     "worktree",
 }
 UNSAFE_ALIAS_SUBCOMMANDS = {"unsafe-alias", "alias-cycle"}
-# 顶层 key 白名单：命中则读 data 顶层元数据，其余 key 只读 tool_input。
-# 最小权限——避免让任意 key 误读顶层元数据。tool_name 仍保留 tool_input 回退以兼容旧测试夹具。
 TOP_LEVEL_KEYS = {"tool_name", "hook_event_name", "tool_use_id"}
 GIT_GLOBAL_OPTS_WITH_ARG = {
     "-C",
@@ -98,17 +87,13 @@ def value(key: str) -> int:
     if not isinstance(tool_input, dict):
         tool_input = data
     if key in TOP_LEVEL_KEYS:
-        # tool_name 保留 tool_input 回退以兼容旧测试夹具。
         if key == "tool_name":
             result = data.get("tool_name", tool_input.get("tool_name"))
         elif key == "tool_use_id":
-            # Kimi CLI 载荷的关联 id 字段是 tool_call_id（无 tool_use_id）；
-            # Claude Code / Codex / ZCode 均带 tool_use_id，优先取之。
             result = data.get("tool_use_id") or data.get("tool_call_id")
         else:
             result = data.get(key)
     elif key == "file_path":
-        # Kimi CLI 的 Write/Edit 参数名是 path（无 file_path）。
         result = tool_input.get("file_path") or tool_input.get("path")
     else:
         result = tool_input.get(key)
@@ -122,7 +107,6 @@ def value(key: str) -> int:
 
 
 def is_posix_style(path: str) -> bool:
-    """判断路径是否为 POSIX 风格（MSYS/Git Bash 路径，以 / 开头且非盘符）。"""
     return bool(path) and path.startswith("/")
 
 
@@ -154,11 +138,6 @@ def normalize_codex_apply_patch() -> int:
         if not target:
             return 2
         if is_posix_style(cwd):
-            # MSYS/Git Bash 的 session cwd 是 POSIX 形式（/tmp/...、/e/IDEA_Programme/...）。
-            # 这里必须用 posixpath 拼接并保留 POSIX 形式：若用 os.path.abspath（Windows 原生
-            # Python 下是 ntpath），/tmp/... 会被翻译成盘符 E:\tmp\...，而 MSYS bash 的 dirname
-            # 对 E:\... 不收敛，会让 block-master-edit.sh 的祖先遍历死循环（IK10D1 gate 卡死）。
-            # POSIX 平台上 posixpath 即 os.path，行为不变。
             targets.append(posixpath.normpath(posixpath.join(cwd, target)))
         else:
             targets.append(os.path.abspath(os.path.join(cwd, target)))
@@ -355,8 +334,6 @@ def git_invocations(command: str) -> list[GitInvocation]:
     try:
         tokens = shell_tokens(command)
     except ValueError:
-        # Fail closed for release-sensitive checks: a malformed shell string that
-        # still mentions git push should be treated as a push by callers.
         if re.search(r"\bgit\b", command) and re.search(r"\bpush\b", command):
             return [GitInvocation(subcommand="push", args=[], cwd=None)]
         return []
@@ -449,10 +426,6 @@ def resolve_git_alias(invocation: GitInvocation, seen: tuple[str, ...] = ()) -> 
         return [GitInvocation(subcommand="unsafe-alias", args=invocation.args, cwd=invocation.cwd)]
     if not tokens:
         return [GitInvocation(subcommand="unsafe-alias", args=invocation.args, cwd=invocation.cwd)]
-    # Git aliases may expand to global options before the real subcommand, for
-    # example ``-c foo.bar=baz push``.  Treat that shape as unsafe instead of
-    # mistaking the option for a harmless subcommand; this hook is a safety
-    # boundary, so an alias whose effective command is not direct is fail-closed.
     if tokens[0].startswith("-"):
         return [GitInvocation(subcommand="unsafe-alias", args=invocation.args, cwd=invocation.cwd)]
     expanded = GitInvocation(
@@ -646,7 +619,6 @@ def mode_task_acceptance_git(command: str) -> int:
 
 
 def mode_unmanaged_task_commit(command: str) -> int:
-    """Block Agent Git commits on task-named branches without valid task worktrees."""
     changes_directory = any(
         posixpath.basename(item.executable) in {"cd", "pushd"}
         for item in command_invocations(command)
@@ -655,8 +627,6 @@ def mode_unmanaged_task_commit(command: str) -> int:
         if invocation.subcommand != "commit":
             continue
         if changes_directory and invocation.cwd is None:
-            # The Git scanner cannot associate a shell cd with a later bare
-            # commit reliably. Require an explicit git -C or a task-worktree cwd.
             print("目录切换后的提交目标无法核对")
             return 0
         cwd = invocation.cwd or os.getcwd()

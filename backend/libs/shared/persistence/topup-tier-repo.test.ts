@@ -2,9 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createTopupTierRepo } from "./topup-tier-repo.js";
 
-// 档位保存要 bump `version`：下单时把它快照进 `recharge_orders.config_version`，
-// 用来回答「这单是改价前还是改价后下的」。版本不动 = 快照分不出配置变过没有，
-// 那一列就成了一个永远相等的摆设。
 
 const ROW = {
   id: 7n,
@@ -19,7 +16,6 @@ const ROW = {
   start_time: null,
   end_time: null,
   sort_order: 1,
-  // 保存后的行：版本已经从 3 涨到 4（Prisma 的 increment 会把新值带在返回行里）
   version: 4,
   gmt_create: new Date("2026-09-01T00:00:00Z"),
   gmt_modified: new Date("2026-09-26T00:00:00Z"),
@@ -58,10 +54,7 @@ describe("createTopupTierRepo.updateSortOrder — 排序不是配置变更", () 
   });
 });
 
-/* ── 卡片字段扩展 + 三态（PRD §10.2 / §10.5）────────────────────────────── */
 
-/** 带全部新列的库行。白名单里故意混进数字、前导零、重复项和垃圾：
- *  存量行与手改过的行就可能长这样，读路径要能扛住。 */
 const FULL_ROW = {
   ...ROW,
   description: "适合轻量体验",
@@ -85,8 +78,6 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
 
     await repo.create({ baseCredits: 1500, originalPrice: 100, discount: 1 });
 
-    // 默认值错的方向必须保守：落成 active 等于「新建即开卖」，
-    // 而 PRD 要的是「新建是草稿，运营配齐再上架」。
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         status: "draft",
@@ -135,7 +126,6 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
         permission_denied_hint: "",
       }),
     });
-    // 没给白名单时写 SQL NULL（不是 JSON 里的 null）——两者读出来含义不同
     const data = create.mock.calls[0][0].data as Record<string, unknown>;
     expect(data.permission_allowlist).not.toBeInstanceOf(Array);
   });
@@ -147,14 +137,10 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
       topup_tiers: { create, aggregate },
     } as never);
 
-    // 2026-09-27：积分不再从原价派生（充值常有折扣），传进来多少就是多少。
-    // 故意用 7,500 / 原价 100 这组**不成整数倍**的数：任何「原价 × 换算率」的残留实现都对不上。
     await repo.create({ baseCredits: 7_500, originalPrice: 100, discount: 1 });
 
     const data = create.mock.calls[0][0].data as Record<string, unknown>;
     expect(data.base_credits).toBe(7500n);
-    // 遗留 quota 列：读路径不看它了，但它 NOT NULL 必须给值 —— 写同一个数，
-    // 免得漏改的读方读到 0 或 5,000,000 那种量级。
     expect(data.amount).toBe(7500n);
   });
 });
@@ -166,8 +152,6 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
 
     const [view] = await repo.listAll();
 
-    // "007" 与 42 都要归一成十进制串：`007` 与 `7` 是同一个用户，
-    // 不归一就会在名单里存两条、且永远匹配不上（比对的是字符串）。
     expect(view.permissionAllowlist).toEqual(["9001", "42", "7"]);
   });
 
@@ -190,7 +174,6 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
 
     expect(view.firstPurchaseEligible).toBe(true);
     expect(view.bonusCredits).toBe(3750);
-    // 基础积分出库成 number（BIGINT → number）：读路径拿到的是**配置值**本身
     expect(view.baseCredits).toBe(1500);
     expect(view.permission).toBe("user_group");
     expect(view.creditsValidMonths).toBe(24);
@@ -216,7 +199,6 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
       "permission",
       "permission_allowlist",
       "permission_denied_hint",
-      // 基础积分同样是「传了才改」：改标签不该顺手把积分写一遍
       "base_credits",
       "amount",
     ]) {

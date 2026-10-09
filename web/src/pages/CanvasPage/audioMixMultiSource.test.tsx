@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-/* IKI68X 三来源和多段选材的 CanvasPage 集成验收。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -37,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 type FlowProps = { mediaNodes: Node[]; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }>; onDeleteNode?: (ids: string[]) => void; onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void };
 const flowProps: { current: FlowProps } = { current: { mediaNodes: [], edges: [] } };
 vi.mock('./components/Canvas', () => ({
@@ -160,8 +158,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪音频节点 a1（15 秒 mp3，assetId 满足置灰门槛；无连线）+ 一个视频卡
- *  v1（互斥用例的分离会话源卡） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -224,7 +220,6 @@ async function renderPage() {
   });
 }
 
-/** 从音频卡工具栏进入混合编辑态。 */
 async function enterMix() {
   const audio = flowProps.current.mediaNodes.find((n: Node) => n.id === 'a1')!;
   await act(async () => {
@@ -246,7 +241,6 @@ function sendBar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="audio-mix-send-bar"]');
 }
 
-/** 等创建请求与首轮轮询完成。 */
 async function sendMix() {
   await click('audio-mix-send');
   await act(async () => {
@@ -306,8 +300,6 @@ describe('IKI68X 三来源与多段提交', () => {
     await sendMix();
     expect(apiMocks.linkAssetToProject).toHaveBeenCalledWith('p1', '7', { silent: true });
     expect(apiMocks.linkAssetToProject).toHaveBeenCalledWith('p1', '9', { silent: true });
-    // IKJJR4：创建经生成任务运行时——载荷合并 canvas_binding（submission_id = 幂等键，
-    // 目标 = 预分配占位卡节点 id），业务字段原样冻结
     expect(apiMocks.createAudioMix).toHaveBeenCalledWith('p1', {
       source_node_id: 'a1',
       inputs: [
@@ -331,7 +323,6 @@ describe('IKI68X 三来源与多段提交', () => {
         },
       },
     }, { silent: true, idempotencyKey: expect.any(String) });
-    // 结果卡与来源线：预分配 id 承接（jobId 受理后回填），只连接被选中的画布卡
     const mixCard = flowProps.current.mediaNodes.find((node) => /^audio-mix-/.test(node.id) && node.id !== 'audio-mix-a1');
     expect(mixCard?.data).toMatchObject({ jobId: 'j1', genStatus: 'generating', mediaType: 'audio' });
     expect(flowProps.current.edges.filter((edge) => edge.target === mixCard!.id)

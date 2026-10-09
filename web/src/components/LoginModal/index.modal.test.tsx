@@ -34,7 +34,6 @@ async function renderLoginModal(props: Partial<Parameters<typeof LoginModal>[0]>
   return { onClose };
 }
 
-/** 按可见文案取按钮——弹窗里两个态的按钮文案不同，只能这么找。 */
 function buttonByText(text: string): HTMLButtonElement | null {
   return (
     Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(
@@ -47,12 +46,6 @@ function agreementCheckbox(): HTMLInputElement | null {
   return document.body.querySelector<HTMLInputElement>('input[type="checkbox"]');
 }
 
-/**
- * 给**受控** input 赋值。
- *
- * <p>直接 `input.value = x` 不生效：React 自己维护一份 value tracker 判「值变没变」，
- * 绕过它的事件不会触发 onChange。必须走原生 setter 再手动派发 input 事件。
- */
 function setInputValue(input: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(
     window.HTMLInputElement.prototype,
@@ -81,7 +74,6 @@ describe('LoginModal（IKJA4R 账号密码 / 手机号验证码 双态）', () =
     expect(document.body.querySelector('[data-semantic="mask"]')).not.toBeNull();
     expect(document.body.querySelector('input[placeholder="请输入账号"]')).not.toBeNull();
     expect(document.body.querySelector('input[placeholder="请输入密码"]')).not.toBeNull();
-    // 已经没有「创建账号」那一步了：手机号验证码登录对没绑过的号当场建号
     expect(document.body.textContent).not.toContain('创建账号');
   });
 
@@ -114,11 +106,9 @@ describe('LoginModal（IKJA4R 账号密码 / 手机号验证码 双态）', () =
 
     await act(async () => buttonByText('手机号登录')?.click());
 
-    // 手机号态：手机号 + 验证码 + 同行的「发送验证码」
     expect(document.body.querySelector('input[placeholder="请输入手机号"]')).not.toBeNull();
     expect(document.body.querySelector('input[placeholder="请输入验证码"]')).not.toBeNull();
     expect(buttonByText('发送验证码')).not.toBeNull();
-    // 账号密码那两个框不在了
     expect(document.body.querySelector('input[placeholder="请输入账号"]')).toBeNull();
 
     await act(async () => buttonByText('账号密码登录')?.click());
@@ -152,7 +142,6 @@ describe('LoginModal（IKJA4R 账号密码 / 手机号验证码 双态）', () =
     expect(sendCode).toHaveBeenCalledWith('13800001234');
     expect(buttonByText('60 秒后重发')?.disabled).toBe(true);
 
-    // 冷却期内再点：不发第二次
     await act(async () => buttonByText('60 秒后重发')?.click());
     expect(sendCode).toHaveBeenCalledTimes(1);
   });
@@ -170,9 +159,8 @@ describe('LoginModal（IKJA4R 账号密码 / 手机号验证码 双态）', () =
     await act(async () => agreementCheckbox()?.click());
     expect(buttonByText('登录')?.disabled).toBe(false);
 
-    // 切到手机号态，同样要勾协议
     await act(async () => buttonByText('手机号登录')?.click());
-    await act(async () => agreementCheckbox()?.click()); // 取消勾选
+    await act(async () => agreementCheckbox()?.click());
     const phoneInput = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入手机号"]')!;
     const codeInput = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入验证码"]')!;
     await act(async () => {

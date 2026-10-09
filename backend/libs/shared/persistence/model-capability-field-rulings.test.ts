@@ -4,35 +4,14 @@ import { describe, expect, it } from "vitest";
 
 import { toFeatures } from "./model-capability-repo.js";
 
-/* ============================================
- * 能力行字段裁决表（ADR-0110）
- *
- * 这条规则以前只活在会话与注释里，四个独立副本照样长了出来——因为违反它不会让任何东西变红。
- * 本文件把它变成机械检查：`toFeatures` 恒返回**全字段**对象（缺省补齐），
- * 所以 `Object.keys(toFeatures({}))` 就是「当前已知的全部能力字段」。断言这个集合与下面的
- * RULINGS 精确相等，于是：
- *   - 新增字段而没留裁决 → 红；
- *   - 删字段而表没同删 → 红；
- *   - 裁决指向的测试文件没了（指向腐烂）→ 红；
- *   - 一个字段既没有「配置赢」的证明、又没登记为已知缺口 → 红。
- *
- * 每行回答四件事：谁读它、缺省是多少、哪条测试证明「配置在场时配置赢」、是否根本不驱动行为。
- * `configWinsTest: null` 是**显式登记的缺口**（配 `gapReason`），不是省略——
- * 一行「消费方是 X，暂无配置驱动行为的测试」比留个洞有用。
- * ============================================ */
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
 interface Ruling {
-  /** 消费方：读这个字段的代码 + 它门控什么。无消费方就写明「当前无读取点」。 */
   consumer: string;
-  /** 未配置时生效的值（`DEFAULT_*` 常量或语义缺省）。 */
   fallback: string;
-  /** 证明「配置在场时配置赢」的测试（仓库相对路径）；null = 已知缺口，必须同时给 gapReason。 */
   configWinsTest: string | null;
-  /** `configWinsTest` 为 null 且非 inert 时必填：缺口登记（缺在哪、为什么还没补）。 */
   gapReason?: string;
-  /** 非空 = 该字段当前不驱动任何行为，此处写明原因（纯目录透出 / 无读取点）。 */
   inert?: string;
 }
 
@@ -221,14 +200,8 @@ const RULINGS: Record<string, Ruling> = {
   },
 };
 
-/** 能力行里存在、但 `toFeatures` 不产出的字段：上面的枚举机制**看不见**它们，改动不会被拦。
- *  逐个列出，避免留下「以为覆盖了」的错觉：
- *  - `image_protocol`（出站图片协议，ADR-0085 / 023 迁移）：由 worker-java `ImageChannelMapper`
- *    直接从库中 features JSON 读，TS 侧不归一、也不下发消费端。
- *  断言方向是双向的——这些字段一旦被接进 `toFeatures`，用例即红，逼它搬进 RULINGS 走同一条裁决。 */
 const FIELDS_OUTSIDE_NORMALISER = ["image_protocol"] as const;
 
-/** `toFeatures` 的产出键集 = 当前已知的全部能力字段。 */
 const NORMALISED_FIELDS: string[] = Object.keys(toFeatures({})).sort();
 
 describe("模型能力字段裁决表（ADR-0110）", () => {

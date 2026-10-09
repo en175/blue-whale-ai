@@ -187,17 +187,10 @@ message ExpiringLot {
   int64  credits    = 1; // 整数积分
   string expires_at = 2; // RFC3339
   string source     = 3; // register | daily | invite | redeem | purchased | bonus
-                         // | subscription | gift | compensation —— 决定展示文案
 }
 
 message ListTransactionsRequest {
   int64  user_id     = 1;
-  // 旧的单值过滤。**删掉并 reserve**：新调用方一律用 `type_filters`，
-  //    留一个没有读者的字段只会被误当成活契约（见 `common/v1/types.proto` 同款处理）。
-  //
-  // ⚠️ 它原来是 `string`，新字段是 `repeated`。**不能原地改** —— 那是同一字段号上的
-  //    cardinality 变更，`buf breaking` 会拦；而且这个方向的兼容性靠不住：
-  //    旧端发一个值、新端当多值读是安全的，反过来旧端把多值读成单值就会**静默少给行**。
   reserved 2;
   reserved "type_filter";
   common.v1.PageRequest page = 3;
@@ -381,7 +374,6 @@ message AdminListTransactionsRequest {
                          // ⚠️ 运营面这个字面量与用户面 `UserTransaction.type` **不是一套**
                          //    （`grant`/`ledger` 是分区名，不是流水类型），所以它是单值、也不跟着改多值
   int32  page_size  = 3; // 0 = 默认页大小
-  // 旧的游标。**删掉并 reserve**（同 `PageRequest.page_token`）。
   reserved 4;
   reserved "page_token";
   // 页码，从 1 起。**offset 分页**：翻页期间新增的行会把后面的行整体下移，

@@ -37,20 +37,15 @@ public class AudioTrimJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(AudioTrimJobProcessor.class);
 
-    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 audio_trim_failed(1048)。 */
     private static final Set<String> PRESERVED_ERROR_CODES = Set.of(
             GenerationError.ERROR_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
-    /** 领取规格（IKIWP8 / ADR-0119）。 */
     private static final int LEASE_SECONDS = 420;
 
-    /** 轮询步调 5s（音视频分离 MEDIA_EXTRACT_POLL_INTERVAL_MS 同值）。 */
     public static final long AUDIO_TRIM_POLL_INTERVAL_MS = 5_000;
 
-    /** 轮询上限 720 次 ≈ 60 分钟（家族 MAX_*_POLLS 同值：音频截取为裁剪转封装型任务，
-     *  耗时上界低于重渲染，60 分钟窗口覆盖产品上限内最长任务）。 */
     public static final int MAX_AUDIO_TRIM_POLLS = 720;
 
     private final JobStateMachineService stateMachine;
@@ -93,20 +88,11 @@ public class AudioTrimJobProcessor implements JobProcessor {
         return AudioTrimContract.TAG;
     }
 
-    /**
-     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
-     */
     @Override
     public Optional<ClaimSpec> claimSpec() {
         return Optional.of(claimSpec);
     }
 
-    /**
-     * 处理一个 audio_trim job step（每步 = 一次 MQ 消费）。
-     * <p>
-     * claim 在 try 外（家族同构：DB 异常上抛 → consumer 不 ack → 重投）；
-     * 业务失败一律落终态 failed（无自动重试）。
-     */
     @Override
     public void handle(String jobId) {
         Optional<ClaimedJob> claimOpt;
@@ -115,9 +101,9 @@ public class AudioTrimJobProcessor implements JobProcessor {
         } catch (Exception error) {
             log.error("[audio_trim] claim 失败 jobId={}: {}",
                     jobId, error.getMessage(), error);
-            throw error; // 保持不 ack → RocketMQ 重投
+            throw error;
         }
-        if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒
+        if (claimOpt.isEmpty()) return;
 
         ClaimedJob claim = claimOpt.get();
         log.info("[audio_trim] 已领取 jobId={} token={} providerTaskId={} pollCount={}",
@@ -130,8 +116,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
             Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "音频截取失败";
             if (httpStatus != null) {
-                // 状态已结构化落 details（IKIMS3），message 不再重复携带状态码字样：只剥网关
-                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
                 message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
             }
             log.error("[audio_trim] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
@@ -139,9 +123,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
         }
     }
 
-    /**
-     * 分相主逻辑（家族 runStep 同构）：凭证 → submit 相 / poll 相。
-     */
     private void runStep(ClaimedJob claim) {
         String providerToken;
         try {
@@ -159,16 +140,8 @@ public class AudioTrimJobProcessor implements JobProcessor {
         }
     }
 
-    // ========== submit 相 ==========
 
-    /**
-     * 提交相：解析冻结 input + 源音频 → 网关提交（贴边省略口径下 start_time / end_time
-     * 可选）→ markProviderSubmitted → 续排轮询。
-     */
     private void submitPhase(ClaimedJob claim, String providerToken) {
-        // 0. IKI89Q（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
-        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
-        //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(AudioTrimContract.TAG, claim, providerToken,
                     trimAudioClient::poll,
@@ -180,10 +153,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
 
         Map<String, Object> input = claim.input();
 
-        // 1. 解析冻结 input 业务键（source_asset_id / output_format 恒在、值恒为合法枚举，
-        //    start_time / end_time 可选〔贴边省略，ADR-0111〕；创建时定死，此处为 worker
-        //    兜底防御，权威复核在创建入口。值域（非负 / 两位小数 / start < end）是官方
-        //    约束，违反由供应商侧拒、失败归任务口径（契约 audio-trim.ts 失败段）。
         String sourceAssetId = parseAssetId(input.get(AudioTrimContract.INPUT_KEY_SOURCE_ASSET_ID));
         if (sourceAssetId == null) {
             failAudioTrim(claim, GenerationError.ERROR_INVALID_INPUT, "缺少源音频资产 id");
@@ -206,7 +175,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
             return;
         }
 
-        // 2. 解析源音频素材：Asset url 落库即公网 public-read，直接作 audio_url（家族同构）
         AssetEntity source = assetSource.resolve(
                 Long.parseLong(sourceAssetId),
                 Long.parseLong(claim.userId()),
@@ -218,7 +186,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 网关提交异步任务（start_time / end_time null 即不出键，走官方默认片头片尾）
         if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
                 claim.id(), claim.workerId(), claim.fencingToken())) {
             return;
@@ -228,8 +195,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
         log.info("[audio_trim] 上游已提交 jobId={} providerTaskId={} format={} start={} end={}",
                 claim.id(), taskId, outputFormat, startTime, endTime);
 
-        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
-        //    SQL 无 type 过滤，audio_trim 直接复用）
         boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
@@ -237,28 +202,16 @@ public class AudioTrimJobProcessor implements JobProcessor {
         }
     }
 
-    // ========== poll 相 ==========
 
-    /**
-     * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（含超限）/ failed 终态 /
-     * completed 立即下载转存发布。
-     */
     private void pollPhase(ClaimedJob claim, String providerToken) {
         TrimAudioTaskObservation observation;
         try {
             observation = trimAudioClient.poll(providerToken, claim.providerTaskId());
         } catch (AudioTrimError pollError) {
             if (isTransientPollError(pollError)) {
-                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
-                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
-                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
-                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
-                // 生成中。与 processing 分支同一判定、同一兜底码，文案附上游错误摘要（IKIHKR）。
                 if (claim.pollCount() >= MAX_AUDIO_TRIM_POLLS) {
                     log.warn("[audio_trim] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6W，IKIMN8 契约）：有状态
-                    // cause 即写 details.http_status 并剥「: HTTP <code>」片段；无 cause 不写键、文案不动
                     Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
                     String message = "音频截取轮询超时（超过 " + MAX_AUDIO_TRIM_POLLS + " 次），上游持续错误: "
                             + pollError.getMessage();
@@ -282,7 +235,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
 
         if ("processing".equals(observation.status())) {
             if (claim.pollCount() >= MAX_AUDIO_TRIM_POLLS) {
-                // 轮询超时归并兜底码（家族口径：宁可不重试也不双跑；用户手动重试会重新提交）
                 failAudioTrim(claim, AudioTrimContract.ERROR_AUDIO_TRIM_FAILED,
                         "音频截取轮询超时（超过 " + MAX_AUDIO_TRIM_POLLS + " 次）");
                 return;
@@ -296,8 +248,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
         }
 
         if ("failed".equals(observation.status())) {
-            // 上游可读原因透传（end_time 超真实片尾等官方约束拒绝走这里）；
-            // 额度/内容政策信号按 §5 保留既有码（家族同款分类链）
             String message = observation.upstreamMessage() != null && !observation.upstreamMessage().isEmpty()
                     ? observation.upstreamMessage() : "音频截取任务失败";
             String code = classifyUpstreamFailure(observation.upstreamCode(), observation.upstreamMessage());
@@ -307,7 +257,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
             return;
         }
 
-        // completed（succeeded）
         log.info("[audio_trim] 上游状态终态=completed jobId={} providerTaskId={} pollCount={}",
                 claim.id(), claim.providerTaskId(), claim.pollCount());
         if (observation.audioUrl() == null || observation.audioUrl().isEmpty()) {
@@ -318,16 +267,8 @@ public class AudioTrimJobProcessor implements JobProcessor {
         publishResult(claim, observation);
     }
 
-    /**
-     * 结果发布：立即下载转存（火山 audio_url 仅 24h 有效，官方明确「请及时下载保存」）→
-     * 发布音频 Asset（type=audio / source='generated'）→ 终态 succeeded。
-     * <p>
-     * 返回发布守卫结果（IKI89Q：重试收割据此判定复用是否成立；false = 守卫未命中，
-     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
-     */
     private boolean publishResult(ClaimedJob claim,
                                   TrimAudioTaskObservation observation) {
-        // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（家族强依赖口径）
         if (mediaRelay == null) {
             throw new AudioTrimError(
                     AudioTrimContract.ERROR_AUDIO_TRIM_FAILED,
@@ -339,8 +280,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
         log.info("[audio_trim] 转存完成 jobId={} storageKey={} size={}",
                 claim.id(), stored.storageKey(), stored.size());
 
-        // 时长只取官方 result.duration 精确值（秒→ms；宽高恒 null——音频无画面维度，
-        // publishAudioTrimResult 内部落定）；不做源时长回落（截取片段 ≠ 源全长，见类注释）
         boolean published = finalizer.publishAudioTrimResult(new PublishAudioTrimDto(
                 claim.id(),
                 claim.projectId(),
@@ -362,12 +301,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
         return published;
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架 isTransientPollError 同语义） ==========
 
-    /**
-     * 瞬时轮询错误判定（家族同语义）：网络超时 / 不可达 → 瞬时；
-     * HTTP 429/5xx（cause 携带状态）→ 瞬时；4xx 与业务失败 → 非瞬时。
-     */
     static boolean isTransientPollError(AudioTrimError error) {
         String code = error.getCode();
 
@@ -388,26 +322,18 @@ public class AudioTrimJobProcessor implements JobProcessor {
         return false;
     }
 
-    // ========== 工具方法 ==========
 
-    /** Asset id 容忍数字形态（Jackson 数字 JSON 值），与家族解析同构。 */
     private static String parseAssetId(Object obj) {
         if (obj instanceof String s && !s.isEmpty()) return s;
         if (obj instanceof Number n) return String.valueOf(n.longValue());
         return null;
     }
 
-    /**
-     * 时间键解析（秒，Double）：**可 null**（贴边省略口径——键不在或值为 null 都走官方
-     * 默认片头/片尾）。Jackson 数字 JSON 值可能是 Integer / Double / BigDecimal，统一
-     * {@code Number.doubleValue()}；非数字形态返回 null 由调用方区分「省略」与「脏值」。
-     */
     private static Double parseSeconds(Object obj) {
         if (obj instanceof Number n) return n.doubleValue();
         return null;
     }
 
-    /** 转存扩展名取任务所选 output_format（提交相已校验枚举；poll 相冻结 input 原样沿用）。 */
     private static String resolveOutputFormat(ClaimedJob claim) {
         Object formatObj = claim.input().get(AudioTrimContract.INPUT_KEY_OUTPUT_FORMAT);
         if (formatObj instanceof String format
@@ -417,10 +343,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
         return AudioTrimContract.FALLBACK_OUTPUT_FORMAT;
     }
 
-    /**
-     * 失败码归一：§5 分类信号（额度/内容政策）保留既有码，其余一律归并兜底
-     * audio_trim_failed（1048）。
-     */
     private static String resolveFailCode(Exception e) {
         if (e instanceof AudioTrimError ate && PRESERVED_ERROR_CODES.contains(ate.getCode())) {
             return ate.getCode();
@@ -428,10 +350,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
         return AudioTrimContract.ERROR_AUDIO_TRIM_FAILED;
     }
 
-    /**
-     * 上游任务 failed 的错误码分类（§5 优先级；家族分类链同款：
-     * 版权 → 内容政策 → 额度 → 兜底 1048）。
-     */
     private static String classifyUpstreamFailure(String upstreamCode, String upstreamMessage) {
         String text = (upstreamCode != null ? upstreamCode : "") + " "
                 + (upstreamMessage != null ? upstreamMessage : "");
@@ -447,15 +365,10 @@ public class AudioTrimJobProcessor implements JobProcessor {
         return AudioTrimContract.ERROR_AUDIO_TRIM_FAILED;
     }
 
-    /** 失败处理（沿用家族 fail 守卫：SET 清 next_action_at，轮询型任务
-     *  语义完备；details.raw 透传原始原因）。 */
     private void failAudioTrim(ClaimedJob claim, String code, String message) {
         failAudioTrim(claim, code, message, null);
     }
 
-    /** details 落结构化上游 HTTP 状态（IKIMS3，音频提取 IKIMS2 同款）：backend 换凭证
-     *  判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；
-     *  非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。 */
     private void failAudioTrim(ClaimedJob claim, String code, String message,
                                Integer httpStatus) {
         log.warn("audio_trim job 失败 jobId={} code={} message={}", claim.id(), code, message);
@@ -474,7 +387,6 @@ public class AudioTrimJobProcessor implements JobProcessor {
         ));
     }
 
-    /** MQ 自投延迟消息（视频骨架 scheduleNext 同款；错误上抛保持不 ack 由 broker 重投兜底）。 */
     private void scheduleNext(String jobId, long delayMs) {
         try {
             producer.enqueue(jobId, delayMs);

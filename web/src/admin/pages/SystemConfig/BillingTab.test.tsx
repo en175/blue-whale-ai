@@ -31,14 +31,7 @@ vi.mock('@/api/adminBillingCatalog', async (importOriginal) => {
 let root: Root;
 let mountNode: HTMLDivElement;
 
-/* ---------- 夹具 ---------- */
 
-/**
- * 目录文档里**上一版残留的 `models` 段**（模型计价规则已搬进能力行，这段是迁移期留在库里的旧数据）。
- *
- * 刻意做厚：多个模型 × 多个任务类型、未知字段（顶层与规则里各一处）、查表价、
- * token 估算参数、null 值 —— 发布出去时它整段都不该跟着走（★ 那一组钉的就是这件事）。
- */
 const MODELS = {
   'seedance-2.5': {
     text2video: {
@@ -90,7 +83,6 @@ const DOC_OBJ = {
   discountPolicy: { stackMode: 'multiply', floorFactorBp: 3000 },
 };
 
-/** 发布出去的文档长什么样：**只有站点级那 4 个键**（页面白名单重建的结果）。 */
 const PUBLISHED_KEYS = ['creditsPerYuan', 'currency', 'discountPolicy', 'schemaVersion'];
 
 const CATALOG = {
@@ -100,7 +92,6 @@ const CATALOG = {
   document: JSON.stringify(DOC_OBJ),
 };
 
-/** 发布换算率 15 → 20 之后服务端会落到的那一版（内容 = 我们重建出去那份）。 */
 const CATALOG_V4 = {
   catalogVersion: 4,
   documentHash: 'hash-v4',
@@ -123,7 +114,6 @@ const RATE_LABEL = '换算率：1 元 = 多少积分';
 const FLOOR_LABEL = '折扣底线（万分比）';
 const STACK_LABEL = '折扣叠加方式';
 
-/* ---------- 渲染工具 ---------- */
 
 function withQuery(node: ReactElement) {
   const client = new QueryClient({
@@ -168,7 +158,6 @@ function publishButton(): HTMLButtonElement {
   return found;
 }
 
-/** 选下拉项：Select 不是原生控件（见 ui/Select），点开触发器再点 role=option。 */
 async function choose(label: string, optionIncludes: string) {
   const trigger = document.body.querySelector<HTMLElement>(`[aria-label="${label}"]`);
   if (!trigger) throw new Error(`没有找到下拉框：${label}`);
@@ -190,7 +179,6 @@ async function renderTab() {
   await settle();
 }
 
-/** 目录是异步到的：等表单被对齐（换算率的输入框填上 15）再动手。 */
 async function waitForForm() {
   for (let i = 0; i < 25; i += 1) {
     const input = document.body.querySelector<HTMLInputElement>(`input[aria-label="${RATE_LABEL}"]`);
@@ -200,7 +188,6 @@ async function waitForForm() {
   throw new Error(`表单没被目录对齐（页面上有：${document.body.textContent}）`);
 }
 
-/** 最近一次发布的请求体（没发过就报错）。 */
 function lastPublishInput(): { document: string; note?: string } {
   const call = api.publishBillingCatalog.mock.calls.at(-1);
   if (!call) throw new Error('一次发布请求都没有发出去');
@@ -222,7 +209,6 @@ afterEach(async () => {
   mountNode?.remove();
 });
 
-/* ---------- 校验函数 ---------- */
 
 describe('站点级参数校验', () => {
   it('换算率越界时逐字复述 billing 编译器的拒绝口径', () => {
@@ -248,7 +234,6 @@ describe('站点级参数校验', () => {
   });
 });
 
-/* ---------- ★ 发布出去的是重建的文档（旧 models 段不该跟着走） ---------- */
 
 describe('★ 保存 = 白名单重建一份只有站点级字段的目录', () => {
   it('只改换算率：发出去的文档里没有 models 段，也没有别的历史残留键', async () => {
@@ -260,11 +245,8 @@ describe('★ 保存 = 白名单重建一份只有站点级字段的目录', () 
 
     const posted = JSON.parse(lastPublishInput().document) as Record<string, unknown>;
 
-    // ① 旧 models 段整段不跟着走 —— 目录现在只装站点级参数（规则在能力行上，不在这份文档里）
     expect(posted).not.toHaveProperty('models');
-    // ② 顶层那个本页不认识的历史键同样不在（重建是白名单，不是「展开原对象」）
     expect(posted).not.toHaveProperty('futureTopLevel');
-    // ③ 逐字比：发出去的文档就是这 4 个键、这两个值
     expect(Object.keys(posted).sort()).toEqual(PUBLISHED_KEYS);
     expect(posted).toEqual({
       schemaVersion: 1,
@@ -304,14 +286,12 @@ describe('★ 保存 = 白名单重建一份只有站点级字段的目录', () 
   });
 });
 
-/* ---------- 保存语义 ---------- */
 
 describe('整份发布的保存语义', () => {
   it('保存前就明说「会发布一版新目录」，按钮上写着新版本号', async () => {
     await renderTab();
     await waitForForm();
 
-    // 「现在是什么」可见：按钮上直接写着版本跃迁；解释（为什么整份发布）收进「?」
     expect(publishButton().textContent).toContain('v3 → v4');
     expect(document.body.textContent).not.toContain('保存会发布一版新的定价目录');
   });
@@ -327,7 +307,6 @@ describe('整份发布的保存语义', () => {
     await click(publishButton());
 
     expect(document.body.textContent).toContain('已发布 v4');
-    // 重取回来的 v4 里换算率已是 20：表单被对齐后就没有未保存的改动了
     expect(inputByLabel(RATE_LABEL).value).toBe('20');
     expect(publishButton().textContent).toContain('v4 → v5');
     expect(publishButton().disabled).toBe(true);
@@ -338,8 +317,6 @@ describe('整份发布的保存语义', () => {
     await renderTab();
     await waitForForm();
 
-    // 读回来那份里明明有 models / futureTopLevel，而发布出去的文档一定没有 —— 若拿原文当基线，
-    // 这里会永远显示成「改过了」，每点一次保存就白占一个版本
     expect(JSON.parse(CATALOG.document)).toHaveProperty('models');
     expect(publishButton().disabled).toBe(true);
     expect(api.publishBillingCatalog).not.toHaveBeenCalled();
@@ -361,8 +338,6 @@ describe('整份发布的保存语义', () => {
   });
 
   it('发布失败：说清改动没生效、目录仍是当前版本', async () => {
-    // 后端的拒绝是 400 + 一句中文（CatalogRejectedError → AdminException）：
-    // 那句话要原样给用户，而不是被换成「发布失败」这种什么也没说的兜底
     api.publishBillingCatalog.mockRejectedValueOnce(
       new ApiError(400, 'creditsPerYuan=0 不合法：它表示「1 元等于多少积分」'),
     );

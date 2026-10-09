@@ -1,7 +1,3 @@
-/* ============================================
- * ConfirmModal 确认弹窗样式
- * ============================================ */
-/* ---- 遮罩层 ---- */
 .overlay {
   position: fixed;
   inset: 0;
@@ -18,7 +14,6 @@
   to   { opacity: 1; }
 }
 
-/* ---- 模态框 ---- */
 .modal {
   width: 420px;
   max-width: 90vw;
@@ -79,7 +74,6 @@
   margin-bottom: var(--spacing-xl);
 }
 
-/* ---- 按钮区 ---- */
 .actions {
   display: flex;
   justify-content: flex-end;

@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-/* 裁切面板组件测试（IKGW1N）：六选项（自由 + 五预设）按 CROP_PRESET_ORDER 渲染、
-   比例项视觉复用共享 RatioIcon；点击预设派发 onPresetChange、当前项高亮；
-   确认派发 onConfirm、取消派发 onClose；确认钮为 Dock 主发送钮同款图标钮
-   （IKGZ5Q：白 ↑ 图标，title 保留「确认」文案）；根元素带 data-gen-panel-territory
-   领土豁免标记；跟随锚定 inline left/top 生效。选项数据源自 imageCrop.ts 单源，不另造。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
@@ -56,7 +51,6 @@ describe('IKGW1N 裁切面板渲染', () => {
     for (const key of CROP_PRESET_ORDER) {
       expect(presetBtn(key), `preset ${key}`).toBeTruthy();
     }
-    // 五个比例项各渲染一个 RatioIcon span；16:9 图标按真实比例 16×9
     const icons = mountNode.querySelectorAll('.ratioIcon, span[style*="width"]');
     expect(icons.length).toBeGreaterThan(0);
     const wide = presetBtn('16:9').querySelector('span') as HTMLElement;
@@ -123,10 +117,6 @@ describe('IKGW1N 裁切面板交互', () => {
   });
 });
 
-/* ===== IKH1WI 跟随态 CSS 中心点锚（CSS 源断言，先例 mediaChipVisualSource.test.ts）：
-   跟随锚 left 是源卡中心 x，真居中由基础 .panel 的 translateX(-50%) 完成；
-   .panelFollow 对齐 CutoutToolbar .dialogWrapFollow 先例（left:0 兜底 inline 缺失，
-   transform 不覆盖 → 继承基础态完成真居中，不再对中心点锚二次左移）。 ===== */
 describe('IKH1WI 跟随态 CSS 中心点锚', () => {
   const css = readFileSync(resolve('src/pages/CanvasPage/components/CropDialog/index.module.css'), 'utf-8');
   const block = (selector: string) => css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';

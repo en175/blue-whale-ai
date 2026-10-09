@@ -6,9 +6,6 @@ import { NewApiError } from "@lib/core";
 import { DATA_NOT_EXIST_CODE, DomainError } from "@lib/contracts";
 import type { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 
-// 控制器层专项：save 改写为 @Res() 手动写出后，成功/冲突两条分支的**状态码 + 响应体**
-// 都成了本文件的职责——服务层单测只看得到返回值，看不到它们怎么落到 HTTP 上。
-// 这里用假 Response 捕获实际写出的内容，不挂 Nest、不连库，任何环境都能跑。
 
 type SaveResult = Record<string, unknown>;
 
@@ -65,7 +62,6 @@ describe("CanvasesController.save 响应写出", () => {
     });
   });
 
-  // IKIMQJ：确认清空缺 If-Match 的 428 信封也走真实 HTTP 状态码（Precondition Required）。
   it("确认清空缺 If-Match → HTTP 428，信封原样写出（IKIMQJ）", async () => {
     const { controller, res } = makeController({
       code: 428,
@@ -101,8 +97,6 @@ describe("CanvasesController.save 响应写出", () => {
     });
   });
 
-  // save() 现在可能回「成功信封」「412」或「422」——not-found 已改成抛 DomainError 走统一投影
-  // （见 canvas.service.ts）；422 是空覆盖防护（IKIIWN）。这条只剩防御性：其余信封照原样按 200 写出。
   it("非 412 的信封（防御分支）→ 原样 200 写出，不擅自改状态码", async () => {
     const { controller, res } = makeController({
       code: 100100,
@@ -152,8 +146,6 @@ describe("CanvasesController.save 响应写出", () => {
   });
 });
 
-// IKJKUA：受控错误判定已收敛到共享适配器（canvases 域传入画布保存冲突白名单集合）。
-// 本用例锚住收敛后的直写行为：code 即 HTTP 状态、信封（含 data.reason）原样写出。
 describe("CanvasesController.listGenerationRecovery 受控信封直写（IKJKUA）", () => {
   it("受控错误（409 + data.reason）→ 按信封 code 直写状态码，信封原样透传", async () => {
     const envelope = {

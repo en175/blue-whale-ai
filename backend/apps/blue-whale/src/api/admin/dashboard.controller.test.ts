@@ -2,11 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AdminDashboardController } from "./dashboard.controller.js";
 
-/* 仪表盘入参解析与错误映射。
- *
- * ⚠️ 这里钉的重点是**状态码不被压成 500**：`toAdminError` 只认 `NewApiError` 的状态码，
- *    把 400 的 `AdminException` 直接喂给它，`resolveDashboardRange` 精心抛出的 400
- *    会变成 500 —— 前端既没法按状态码分辨，用户也拿不到「区间超了」那句可操作的文案。 */
 
 function createController(stats = vi.fn().mockResolvedValue({ totalUsers: 1 })) {
   return { controller: new AdminDashboardController({ stats } as never), stats };
@@ -22,7 +17,6 @@ describe("AdminDashboardController.stats", () => {
     const range = stats.mock.calls[0]?.[0];
     const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
     expect(range).toMatchObject({ from: today, to: today });
-    // service 收的必须是**算好的瞬时区间**，不是原始字符串
     expect(range.start).toBeInstanceOf(Date);
     expect(range.endExclusive).toBeInstanceOf(Date);
   });

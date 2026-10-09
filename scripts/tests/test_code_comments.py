@@ -97,6 +97,24 @@ class CodeCommentsTest(unittest.TestCase):
         self.stage('main.py', 'text = """fixture"""\n')
         self.assert_status(0)
 
+    def test_rejects_new_todo_comments(self):
+        for path, prefix in [('main.py', '#'), ('main.ts', '//')]:
+            for body in ['@todo ordinary explanation', 'TODO(ABCD): ordinary explanation',
+                         'TODO(IKIZNS): ordinary explanation']:
+                with self.subTest(path=path, body=body):
+                    self.stage(path, f'{prefix} {body}\n')
+                    self.assert_status(1)
+            self.git('reset', '--', path)
+
+    def test_preserves_old_todo_sentinels_without_allowing_new_ones(self):
+        source = '// @todo sentinel\n// TODO(IKIZNS): sentinel\nexport const value = 1;\n'
+        self.stage('main.ts', source)
+        self.git('commit', '-m', 'test: old todo sentinels')
+        self.stage('main.ts', source.replace('value = 1', 'value = 2'))
+        self.assert_status(0)
+        self.stage('main.ts', source + '// TODO(IKIZNS): sentinel\n')
+        self.assert_status(1)
+
     def test_allows_tools_licenses_encoding_and_shebang(self):
         self.stage('main.ts', '// @ts-expect-error required type-error fixture\n'
                               'const value: number = "text";\n'

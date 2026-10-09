@@ -1,9 +1,3 @@
-/* ============================================
- * PasswordModal 修改 / 设置密码弹窗（IKJA4R）
- *
- * 有口令 → 「修改密码」，要旧密码；无口令（手机号验证码建号）→ 「设置密码」，
- * **不渲染旧密码框**。区别只在账号当下有没有口令，见 GLOSSARY「账号与密码」。
- * ============================================ */
 import { useEffect, useState } from 'react';
 import Modal from '@/components/Modal';
 import { changePassword } from '@/api/auth';
@@ -19,7 +13,6 @@ interface PasswordModalProps {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
-  /** 账号当前有没有口令；`false` 时是「设置密码」，不渲染旧密码框（IKJA4R）。默认 true。 */
   hasPassword?: boolean;
 }
 
@@ -90,8 +83,7 @@ export default function PasswordModal({
     >
       <h2 className={styles.title}>{heading}</h2>
 
-      {/* 旧密码只在**有口令**时才有意义。没有口令的账号走的是「设置密码」——
-          渲染一个永远填不对的框，等于把人挡在门外。 */}
+      {}
       {hasPassword && (
         <>
           <div className={styles.label}>旧密码</div>

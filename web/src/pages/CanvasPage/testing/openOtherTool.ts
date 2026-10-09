@@ -3,7 +3,6 @@ import { createAudioTrimSession } from '../audioToolSessions';
 import type { createToolSessionRuntime } from '../toolSessionRuntime';
 import type { ToolSessionDeps } from '../toolSessionCoordinator';
 
-/** 身份测试仍经过真实定义；完整跨工具矩阵由 canvasToolSessions.test 守护。 */
 export function openOtherTool(
   runtime: ReturnType<typeof createToolSessionRuntime>,
   deps: ToolSessionDeps,

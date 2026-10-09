@@ -7,15 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 
-/* IKJ79D 失败卡片「改为跟随视频并重试」一键修复（父单 IKJ6DK）：
-   画布视频失败卡按 task_type_param_constraint 错误码（数值 1060 / 字符串信封同码）识别，
-   点击后仅把比例改为 adaptive（Auto）重交——提示词/素材/时长原样，走 create 新任务
-   （retry 沿用冻结快照改不了比例，不可用）；原卡原位承接。
-   前端零关键词判定副本（识别只认码，不认文案）。FlowCanvas 等打桩透出 props；
-   视频模型 mock 带全比例 + 视频参考能力位。
-   IKJFGQ 降级项（draftRatio 已 adaptive 时隐藏修复钮）：本 harness 把 Canvas 打桩成 div、
-   不渲染 MediaNode 按钮，渲染断言不可观测（回调经 attachCallbacks 无条件注入），该项由
-   MediaNode/index.test.tsx「比例已 adaptive → 降级普通重试」两条单测覆盖。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -174,9 +165,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 默认画布：失败视频草稿卡 v1（编辑意图 + 手选 9:16 被比例约束码拒单，参数与参考保留）
- *  + 9:16 参考视频卡 ref1（经 reference 边连入）+ 普通素材卡 ref2（图片参考）。
- *  errorCode 走数值信封 1060（rebase 前为 1056，撞 IKIZQ5/IKJ8J8 已落号改取）；字符串信封形态由用例覆盖。 */
 function seedFixDoc(errorCode: number | string) {
   canvasDocMock.current = {
     doc: {
@@ -266,7 +254,6 @@ function nodeOf(id: string): Node {
   return (flowProps.current.mediaNodes as Node[]).find((n: Node) => n.id === id)!;
 }
 
-/** 触发失败卡「改为跟随视频并重试」（MediaNode 失败角标按钮的真实回调，经 attachCallbacks 注入） */
 async function clickFixFollow(id: string) {
   await act(async () => {
     const onFixFollowVideo = (nodeOf(id).data as Record<string, unknown>).onFixFollowVideo as (id: string) => void;
@@ -298,7 +285,6 @@ describe('IKJ79D 一键修复：按码识别 + 仅改比例重交', () => {
     const payload = apiMocks.createGenerationJob.mock.calls[0][1] as Record<string, unknown>;
     expect(payload.type).toBe('video');
     expect(payload.target_node_id).toBe('v1');
-    // 唯一被改的参数：比例 → adaptive（Auto）
     expect(payload.parameters).toMatchObject({
       prompt: '把背景替换成海边沙滩',
       model_id: 'm-video',
@@ -307,12 +293,10 @@ describe('IKJ79D 一键修复：按码识别 + 仅改比例重交', () => {
       duration: 5,
       generate_audio: false,
     });
-    // 素材不动：两路参考原样（视频参考带时长）
     expect(payload.references).toEqual([
       { role: 'reference', type: 'video', asset_id: 'a77', duration: 9 },
       { role: 'reference', type: 'image', asset_id: 'a78' },
     ]);
-    // 原卡原位承接成功，节点数不变
     await vi.waitFor(() => expect(nodeOf('v1').data.src).toBe('http://img/out.mp4'));
     expect(flowProps.current.mediaNodes).toHaveLength(3);
   });

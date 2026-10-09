@@ -1,4 +1,3 @@
-"""Nonblocking repository CBM reminder; client adapters contain no policy."""
 from __future__ import annotations
 
 import json
@@ -28,7 +27,7 @@ def main() -> None:
     event = payload.get('hook_event_name')
     kimi = payload.get('client_type') == 'kimi_code_cli' or event == 'UserPromptSubmit'
     if kimi and event != 'UserPromptSubmit':
-        return  # Kimi lifecycle events are observation-only; use its prompt context seam.
+        return
     if event == 'PreToolUse':
         tool = payload.get('tool_name', '')
         args = payload.get('tool_input', {})
@@ -59,4 +58,4 @@ if __name__ == '__main__':
     try:
         main()
     except (OSError, ValueError, TypeError, subprocess.SubprocessError):
-        pass  # Reminders never interrupt work or emit data from failing commands.
+        pass

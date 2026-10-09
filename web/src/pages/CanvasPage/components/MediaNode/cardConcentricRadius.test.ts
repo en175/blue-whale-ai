@@ -3,9 +3,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-// 锁定「全幅内容子元素圆角 = 卡片半径 − 1px 边框」同心不变量（几何解释见 index.module.css .contentCard 注释）。
-// 防两类回归：子元素圆角硬编码像素（audioCard 16px 配硬编码 11px 曾致四角边框弧段全缺，PR !989）、
-// 全幅子元素类被移出共享规则后裸奔（emptyShell 曾因此盖住两种卡片的弧段）。
 
 const css = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), 'index.module.css'),
@@ -31,7 +28,6 @@ function* cssRules(): Generator<{ selector: string; body: string }> {
   }
 }
 
-/** 找到选择器列表中包含给定选择器的规则块声明体；找不到即抛错让测试变红（漏挂共享规则也是缺陷） */
 function ruleBody(selector: string): string {
   for (const rule of cssRules()) {
     if (rule.selector.split(',').map((s) => s.trim()).includes(selector)) {

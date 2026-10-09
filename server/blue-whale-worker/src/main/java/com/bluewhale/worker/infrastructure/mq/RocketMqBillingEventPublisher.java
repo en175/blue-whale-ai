@@ -9,12 +9,6 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 
-/**
- * RocketMQ 实现（rocketmq-client-java 5.x）。
- *
- * <p>一个 Producer 实例可发多个 topic，所以在构造时建一次、之后按调用传入 topic。
- * 这与生成队列那边的生产者（一个实例绑一个 topic/tag）不同——那个的 topic 是从路由表派生的。
- */
 public class RocketMqBillingEventPublisher implements BillingEventPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(RocketMqBillingEventPublisher.class);
@@ -46,13 +40,11 @@ public class RocketMqBillingEventPublisher implements BillingEventPublisher {
         try {
             producer.send(message);
         } catch (Exception e) {
-            // ⚠️ 不吞：调用方需要知道结算事件有没有发出去。这里包成非受检异常往上抛。
             throw new IllegalStateException(
                     "billing 事件发送失败 topic=" + topic + "：" + e.getMessage(), e);
         }
     }
 
-    /** 与生成队列生产者同款收口。 */
     public void close() {
         try {
             producer.close();

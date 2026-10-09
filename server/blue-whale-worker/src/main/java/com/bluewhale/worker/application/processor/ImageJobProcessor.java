@@ -40,11 +40,9 @@ public class ImageJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(ImageJobProcessor.class);
 
-    /** 瞬时失败码集合（generation-worker.ts:76 TRANSIENT_IMAGE_ERROR_CODES）。 */
     private static final Set<String> TRANSIENT_IMAGE_ERROR_CODES =
             Set.of(GenerationError.ERROR_PROVIDER_FAILED);
 
-    /** 图片任务最大重试次数（generation-worker.ts:78 MAX_IMAGE_RETRIES）。 */
     private static final int MAX_IMAGE_RETRIES = 3;
 
     private final JobStateMachineService stateMachine;
@@ -85,11 +83,6 @@ public class ImageJobProcessor implements JobProcessor {
         return GenerationMqRouteEnum.IMAGE.tag();
     }
 
-    /**
-     * 处理一个图片 job（generation-worker.ts:127-135 processImageJobById）。
-     * <p>
-     * claim 在 try 外（与 audio 同构：DB 异常上抛 → consumer 不 ack → 重投）。
-     */
     @Override
     public void handle(String jobId) {
         Optional<ClaimedJobDto> claimOpt;
@@ -104,7 +97,6 @@ public class ImageJobProcessor implements JobProcessor {
         ClaimedJobDto job = claimOpt.get();
         log.info("[image] 已领取 jobId={} type={} token={}", job.id(), job.type(), job.fencingToken());
 
-        // cancelRequested → 取消（generation-worker.ts:237-241）
         if (job.cancelRequested()) {
             log.info("[image] 取消已执行(cancelRequested) jobId={}", job.id());
             finalizer.failJob(job.id(), GenerationError.ERROR_PROVIDER_FAILED,
@@ -112,12 +104,11 @@ public class ImageJobProcessor implements JobProcessor {
             return;
         }
 
-        // 处理并捕获异常（generation-worker.ts:686-728）
         String errorCode = null;
         String errorMsg = null;
         try {
             processClaimedImageJob(job);
-            return; // 成功完成
+            return;
         } catch (Exception e) {
             if (e instanceof ImageProviderError ipe) {
                 errorCode = ipe.getCode();
@@ -128,7 +119,6 @@ public class ImageJobProcessor implements JobProcessor {
             }
         }
 
-        // 瞬态重试（generation-worker.ts:705-725）
         if (isTransientImageError(errorCode) && job.retry_count() < MAX_IMAGE_RETRIES) {
             long backoffMs = imageRetryBackoffMs(job.retry_count());
             java.time.LocalDateTime nextActionAt = WorkerClock.now()
@@ -141,12 +131,10 @@ public class ImageJobProcessor implements JobProcessor {
                         "瞬时失败第 " + (job.retry_count() + 1) + "/" + MAX_IMAGE_RETRIES
                                 + " 次重试已排队: " + errorCode + ": " + errorMsg,
                         null);
-                // return WITHOUT ack-fail（generation-worker.ts:723-724）
                 return;
             }
         }
 
-        // 终态失败（generation-worker.ts:726）
         log.error("[image] 终态失败 jobId={} code={}: {}", job.id(), errorCode, errorMsg);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", errorMsg);
@@ -154,14 +142,8 @@ public class ImageJobProcessor implements JobProcessor {
                 workerId, job.fencingToken());
     }
 
-    /**
-     * 处理已领取的图片作业（generation-worker.ts:499-685）。
-     */
     private void processClaimedImageJob(ClaimedJobDto job) {
         Map<String, Object> input = job.input();
-        // IKG6EK / ADR-0088：正文唯一来源是冻结的 input.prompt——接纳侧已完成引用标记转移
-        // （&asset_id& → @图片N）。方案快照仍然要用：下方按它的 images 解析参考素材，
-        // 只是不再提供正文（providerPrompt 已退役）。
         Map<?, ?> planSnapshot = input.get("prompt_plan_snapshot") instanceof Map<?, ?> snapshot ? snapshot : null;
         if (input.containsKey("prompt_plan_snapshot")
                 && (planSnapshot == null || !(planSnapshot.get("images") instanceof List<?>))) {
@@ -171,17 +153,13 @@ public class ImageJobProcessor implements JobProcessor {
         String prompt = strOrEmpty(input, "prompt");
         String modelId = strOrEmpty(input, "model_id");
 
-        // 1. 校验输入（generation-worker.ts:295-305）
-        // IKDLQF：图片允许空 prompt 仅凭附件驱动——Java 侧简化：空 prompt 且无 model_id → fail
         if (prompt.isEmpty() || modelId.isEmpty()) {
             failClaimed(job, GenerationError.ERROR_INVALID_INPUT, "缺少 prompt 或 model_id");
             return;
         }
 
-        // 2. 图片参考图字段 = input_asset_ids（IKA72G :309-310）
         List<String> referenceIds = extractStringList(input, "input_asset_ids");
 
-        // 3. 查能力行（generation-worker.ts:330-346）
         String sizeId = input.get("size") instanceof String s ? s : null;
         GenerationModelCapabilityEntity cap = capabilityMapper.findByModelId(modelId);
         if (cap == null) {
@@ -190,9 +168,6 @@ public class ImageJobProcessor implements JobProcessor {
             return;
         }
 
-        // 匹配 supported_sizes（asset-ops.ts:111-126）
-        // IKHTVR：原先还读出该档位的 width / height 存在 capWidth / capHeight 里，但此后
-        // 全文件再没读过（出站像素由 request_mapping 矩阵决定），随条目宽高字段一并收敛掉。
         String providerSize = cap.getApiSize();
         if (sizeId != null) {
             String matched = ImageChannelMapper.matchSupportedSize(
@@ -200,7 +175,6 @@ public class ImageJobProcessor implements JobProcessor {
             if (matched != null) providerSize = matched;
         }
 
-        // 参考图上限（asset-ops.ts:131-139）
         int maxReferenceCount = ImageChannelMapper.parseMaxReferenceImages(cap.getFeatures());
         if (referenceIds.size() > maxReferenceCount) {
             failClaimed(job, GenerationError.ERROR_INVALID_REFERENCE,
@@ -208,7 +182,6 @@ public class ImageJobProcessor implements JobProcessor {
             return;
         }
 
-        // 4. 解析参考素材（generation-worker.ts:354-364）
         Map<String, AssetEntity> sourceAssetsMap;
         if (planSnapshot != null) {
             List<?> images = (List<?>) planSnapshot.get("images");
@@ -234,7 +207,6 @@ public class ImageJobProcessor implements JobProcessor {
             sourceAssetsMap = referenceIds.isEmpty() ? Map.of()
                     : assetSource.resolveInputAssets(referenceIds, job.user_id(), job.project_id());
         }
-        // 校验完整性和类型（generation-worker.ts:358-364）
         if (sourceAssetsMap.size() != referenceIds.size()) {
             failClaimed(job, GenerationError.ERROR_INVALID_REFERENCE,
                     "参考素材不存在或无权访问");
@@ -260,9 +232,7 @@ public class ImageJobProcessor implements JobProcessor {
             return;
         }
 
-        // 6. 渠道映射（generation-worker.ts:521-553）
         String aspectRatio = input.get("aspect_ratio") instanceof String s ? s : null;
-        // 渠道是解析与出站的**唯一来源**（取代原先各读各的 channel_parser 列 + features.image_protocol）。
         ImageChannel channel = ImageChannelMapper.parseChannel(cap.getChannel(), cap.getCapabilityType());
         String parser = channel.parser() != null ? channel.parser() : "seedream";
 
@@ -295,11 +265,6 @@ public class ImageJobProcessor implements JobProcessor {
             finalSize = resolved;
         }
 
-        // 7. 生成数量（generation-worker.ts:554）
-        // IKJCOE：主表 expected_output_count 列已删——权威是建行时冻结的 **input 快照**。
-        // createJobWithinTx（以及 handle-create-generation-job）在落库前把这个键写进 input，
-        // 所以这里读到的就是「这次要出几个」。缺失/非法按单输出兜底，与旧列缺省 1 同义。
-        // 数字与数字串都接（TS 侧 readInputCount 同样宽容）——同一字段两套口径迟早对不上。
         Object countRaw = job.input().get("expected_output_count");
         int requested = 1;
         if (countRaw instanceof Number num) {
@@ -313,7 +278,6 @@ public class ImageJobProcessor implements JobProcessor {
         }
         int n = Math.max(1, Math.min(4, requested));
 
-        // 8. 收集参考图 URL（generation-worker.ts:555-561）
         List<String> sourceImageUrls = new ArrayList<>();
         for (AssetEntity source : sourceAssets) {
             if (source.getUrl() == null || source.getUrl().isEmpty()) {
@@ -323,16 +287,6 @@ public class ImageJobProcessor implements JobProcessor {
             sourceImageUrls.add(source.getUrl());
         }
 
-        // 9. 调用 provider（generation-worker.ts:583-598 批量循环）
-        // 契约 §12：出站形态由**渠道**声明，不按模型名特判。
-        //  - gpt-image-openai（协议 openai-images）：无参考图走 generations(JSON)、有参考图走 edits(multipart)；
-        //    模型名恒为 model_id，文生图/图生图同一档位，**不换名**。
-        //  - 其余渠道（协议 inline-image）：恒 generations + body.image；
-        //    仅此形态下，行配了 i2i_model_name 且本 job 带参考图时换上游模型名（ADR-0085，banana）。
-        // 无论哪种形态，job.input.model_id 恒为 canonical（计费/重试/恢复不受影响）。
-        //
-        // ⚠️ 非图片渠道的 protocol() 为 null（它们的请求不走本链路）。本进程只跑图片任务，
-        //    真拿到 null 说明渠道配错了媒介——按最保守的内联形态走，行为与迁移前一致。
         ImageProtocol protocol = channel.protocol() != null
                 ? channel.protocol() : ImageProtocol.INLINE_IMAGE;
         String i2iAlias = ImageChannelMapper.parseI2iModelName(cap.getFeatures());
@@ -355,26 +309,22 @@ public class ImageJobProcessor implements JobProcessor {
         }
         log.info("[image] 上游已返回 jobId={} count={} expected={}", job.id(), allImages.size(), n);
 
-        // 10. 无结果 → no_result（generation-worker.ts:599-601）
         if (allImages.isEmpty()) {
             failClaimed(job, GenerationError.ERROR_NO_RESULT, "生成服务未返回结果");
             return;
         }
 
-        // 11. 部分成功日志（generation-worker.ts:605-612）
         if (allImages.size() != n) {
             stateMachine.appendLog(job.id(), "partial_output", "processing",
                     "生成服务返回 " + allImages.size() + " 张，期望 " + n + " 张，按部分成功处理",
                     null);
         }
 
-        // 12. 逐张转存 + createAsset（generation-worker.ts:613-638）
         List<String> assetIds = new ArrayList<>();
         for (GeneratedImage img : allImages) {
             StoredImage stored = persistProviderImage(img, job.user_id());
             log.info("[image] 转存完成 jobId={} storageKey={} size={} w={} h={}",
                     job.id(), stored.storageKey(), stored.size(), stored.width(), stored.height());
-            // 宽度优先取 provider 返回值，回退 persistProviderImage 解析值
             Integer width = positiveDimension(img.width());
             if (width == null) width = stored.width();
             Integer height = positiveDimension(img.height());
@@ -392,19 +342,17 @@ public class ImageJobProcessor implements JobProcessor {
                     stored.md5(),
                     width,
                     height,
-                    null, // duration
+                    null,
                     workerId,
                     job.fencingToken()
             ));
             if (assetId == null) {
                 log.warn("[image] 终态失败(createAsset 守卫未命中) jobId={}", job.id());
-                return; // 守卫失败 → 退出（generation-worker.ts:637）
+                return;
             }
             assetIds.add(assetId);
         }
 
-        // 13. completeJob（generation-worker.ts:684 finishJob）
-        // 修正一：不传 actualAmountFen（结算不在范围）
         boolean completed = finalizer.completeJob(
                 job.id(), assetIds, workerId, job.fencingToken());
         if (completed) {
@@ -417,24 +365,7 @@ public class ImageJobProcessor implements JobProcessor {
         }
     }
 
-    // ========== persistProviderMedia image 路径（:731-818） ==========
 
-    /**
-     * 图片转存（generation-worker.ts:731-818 persistProviderMedia image 路径）。
-     * <p>
-     * 两种结果形态（IKF4LI）：
-     * <ul>
-     *   <li><b>b64_json</b>（官方 GPT Image 系唯一形态）：字节已在客户端解码，直接落 TOS。
-     *       没有托管 URL 可降级 → TOS 未配置即硬失败（对齐音频 data-direct 的
-     *       「转存存储未配置」语义）。</li>
-     *   <li><b>url</b>（inline 形态现用）：fetch 字节 → TOS 上传；TOS 未配置 → 降级直存 URL
-     *       （storageKey=null，generation-worker.ts:752-761）。</li>
-     * </ul>
-     * <p>
-     * 图像元数据等价标准（契约 §8）：仅消费 width/height，round(正有限数) 否则 null；
-     * 解析失败静默、资产照常落库。Java ImageIO 不支持 webp → width/height null 回退，
-     * 资产照常落库（等价标准满足 per §8，TS 也只消费 w/h 且容忍 null）。
-     */
     private StoredImage persistProviderImage(GeneratedImage image, String userId) {
         if (image.content() != null) {
             if (tosService == null) {
@@ -446,16 +377,12 @@ public class ImageJobProcessor implements JobProcessor {
         return persistProviderImageFromUrl(image.url(), userId);
     }
 
-    /** url 形态转存：fetch 字节 → TOS 上传；TOS 未配置 → 降级直存 URL（:752-761）。 */
     private StoredImage persistProviderImageFromUrl(String sourceUrl, String userId) {
-        // 降级模式：TOS 未配置 → 直存 URL（generation-worker.ts:752-761）
         if (tosService == null) {
-            // IKGS73：降级直存 URL，手上没字节 → assets.md5 留空。
             log.warn("[image] TOS 未配置，降级直存供应商 URL：assets.md5 将为空（IKGS73 已知边界）");
             return new StoredImage(sourceUrl, null, null, null, null, null, null);
         }
 
-        // fetch 字节（generation-worker.ts:765-776）
         byte[] content;
         String mime;
         try {
@@ -489,7 +416,6 @@ public class ImageJobProcessor implements JobProcessor {
                     "生成结果为空");
         }
 
-        // mime 校验（generation-worker.ts:779-781）
         if (!mime.startsWith("image/")) {
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "生成结果媒体类型不匹配");
@@ -498,10 +424,7 @@ public class ImageJobProcessor implements JobProcessor {
         return uploadImageContent(content, mime, userId, sourceUrl);
     }
 
-    /** 字节 → TOS：ImageIO 解析宽高（失败静默 null）+ uploadImageBytes，两条转存路径共用。 */
     private StoredImage uploadImageContent(byte[] content, String mime, String userId, String source) {
-        // ImageIO 解析宽高（generation-worker.ts:785-794）
-        // 契约 §8：解析失败静默 null，资产照常落库
         Integer width = null;
         Integer height = null;
         try {
@@ -511,7 +434,6 @@ public class ImageJobProcessor implements JobProcessor {
                 height = positiveDimension(img.getHeight());
             }
         } catch (Exception ignored) {
-            // 静默：webp 等不支持格式 → null，资产照常落库（契约 §8 等价标准满足）
             log.debug("[image] ImageIO 解析宽高失败(非关键，降级 null) source={}", source);
         }
 
@@ -525,23 +447,15 @@ public class ImageJobProcessor implements JobProcessor {
         }
     }
 
-    // ========== 工具方法 ==========
 
-    /** 瞬时失败判断（generation-worker.ts:80-82 isTransientImageError）。 */
     private static boolean isTransientImageError(String code) {
         return TRANSIENT_IMAGE_ERROR_CODES.contains(code);
     }
 
-    /**
-     * 指数退避（generation-worker.ts:84-87 imageRetryBackoffMs）。
-     * 30s → 60s → 120s，封顶 300s（5min）。
-     * 调用方负责计算 nextActionAt。
-     */
     static long imageRetryBackoffMs(int retryCount) {
         return Math.min(30_000L * (1L << retryCount), 300_000L);
     }
 
-    /** 正有限数 → round，否则 null（generation-worker.ts:820-824 positiveDimension）。 */
     static Integer positiveDimension(Integer value) {
         if (value == null) return null;
         if (value > 0) return value;
@@ -579,7 +493,6 @@ public class ImageJobProcessor implements JobProcessor {
         }
     }
 
-    /** 转存结果（对齐 TS persistProviderMedia 返回形状）。 */
     record StoredImage(
             String url, String storageKey, String mime,
             Long size, String md5, Integer width, Integer height

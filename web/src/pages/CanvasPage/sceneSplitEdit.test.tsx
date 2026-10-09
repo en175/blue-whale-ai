@@ -1,19 +1,4 @@
 // @vitest-environment jsdom
-/* IKH8BR 场景切分编辑态与任务卡（画布链路）：点击「场景切分」进入第七工具会话——源卡
-   锁定（splitEditing/soloToolbarHidden 渲染期注入，视频暂停与播放控制锁定由 MediaNode
-   承担）、卡下方 24px 胶囊单条（X/标题「场景切分」/粒度三档分段控件 standard 默认/
-   ⚡0 徽标/发送钮，对齐去字幕单条家族）；接入集中工具会话协调器——四路退出（X/Esc/
-   点其他卡/点画布空白）未发送无痕迹（无卡无边无任务）、与既有六会话互斥、会话期
-   Dock 面板准入与工具条隐藏走协调器口径。发送闭环：先退会话再建任务占位卡
-   （target_node_id 取占位卡、粒度标注展示名、生成中骨架、sceneSplit 身份）、
-   client_token 每次发送/重试新生成、job_id 回写后轮询、飞行期发送钮防重复提交；
-   任务失败占位卡转失败态，重试按钮按冻结参数原粒度重发。完成扇出（IKH8C1）：
-   succeeded 移除占位卡、按 result.segments 返回顺序在源卡右侧网格建 N 张普通视频
-   段卡（「第 N 段 起止时间」标注、assetId 关联段资产、无生成态工具条立即可用）、
-   逐卡拉来源连线（origin=scene-split）、扇出即落盘；1 段不特判；跨会话恢复一致性
-   ——水合的 generating 占位卡恢复轮询（任务已完成时照常扇出），已扇出的画布无占位卡
-   天然幂等不重开轮询。渲染模式沿用 audioVideoSplitEdit.test.tsx
-   （FlowCanvas 打桩透出 props）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -51,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -171,8 +155,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：就绪视频卡 v1（1920×1080 mp4，assetId 满足置灰门槛；场景切分/去字幕/分离源卡）+
- *  就绪图片卡 i1（1600×900 png，擦除/抠图/裁切/扩图源卡）；无连线。 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -245,7 +227,6 @@ function fullNode(id: string): Node {
   return found;
 }
 
-/** 进入场景切分编辑态（视频卡工具条「场景切分」按钮派发的回调，IKH8BJ 挂点） */
 async function enterSceneSplit() {
   const video = fullNode('v1').data as Record<string, (nodeId: string) => void>;
   await act(async () => {
@@ -271,12 +252,10 @@ function sendBar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="scene-split-send-bar"]');
 }
 
-/** 编辑态内选粒度（分段控件按钮） */
 async function selectGranularity(granularity: string) {
   await click(`scene-split-granularity-${granularity}`);
 }
 
-/** 编辑态内点发送（startSceneSplitJob 含 await 创建，等 50ms 让建卡与轮询首 tick 发起） */
 async function sendSceneSplit() {
   await click('scene-split-send-btn');
   await act(async () => {
@@ -313,13 +292,11 @@ describe('IKH8BR 编辑态呈现（进入不建任务）', () => {
     expect(sendBar()).toBeTruthy();
     expect(bodyBtn('scene-split-close')).toBeTruthy();
     expect(bodyBtn('scene-split-title').textContent).toBe('场景切分');
-    // 粒度三档分段控件：三档齐全、默认 standard 激活（不跨会话记忆口径）
     expect(bodyBtn('scene-split-granularity-fine')).toBeTruthy();
     expect(bodyBtn('scene-split-granularity-standard').getAttribute('aria-checked')).toBe('true');
     expect(bodyBtn('scene-split-granularity-coarse')).toBeTruthy();
     expect(bodyBtn('scene-split-free-badge').textContent).toBe('0');
     expect(bodyBtn('scene-split-send-btn')).toBeTruthy();
-    // 控件次序自左至右：X → 标题 → 粒度 → ⚡0 → 发送（对齐去字幕单条家族）
     const bar = sendBar()!;
     const el = (testId: string) => bar.querySelector(`[data-testid="${testId}"]`)!;
     const before = (a: Element, b: Element) =>
@@ -328,10 +305,8 @@ describe('IKH8BR 编辑态呈现（进入不建任务）', () => {
     expect(before(el('scene-split-title'), el('scene-split-granularity-standard'))).toBe(true);
     expect(before(el('scene-split-granularity-standard'), el('scene-split-free-badge'))).toBe(true);
     expect(before(el('scene-split-free-badge'), el('scene-split-send-btn'))).toBe(true);
-    // 源视频卡注入 splitEditing（视频暂停+锁定层）与 soloToolbarHidden（会话模态口径）
     expect(v1Data().splitEditing).toBe(true);
     expect(v1Data().soloToolbarHidden).toBe(true);
-    // 进入即编辑态：不创建任务、不建占位卡、不连边
     expect(apiMocks.createVideoSceneSplit).not.toHaveBeenCalled();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
     expect(flowProps.current.edges).toEqual([]);
@@ -343,7 +318,6 @@ describe('IKH8BR 编辑态呈现（进入不建任务）', () => {
     await selectGranularity('fine');
     expect(bodyBtn('scene-split-granularity-fine').getAttribute('aria-checked')).toBe('true');
     expect(bodyBtn('scene-split-granularity-standard').getAttribute('aria-checked')).toBe('false');
-    // 退出重进：粒度不跨会话记忆，复位 standard
     await click('scene-split-close');
     await enterSceneSplit();
     expect(bodyBtn('scene-split-granularity-standard').getAttribute('aria-checked')).toBe('true');
@@ -388,7 +362,6 @@ describe('IKH8BR 与既有六会话互斥（集中协调器口径）', () => {
   };
   const KINDS: Kind[] = ['erase', 'cutout', 'crop', 'outpaint', 'subtitleErase', 'audioVideoSplit'];
 
-  /** 进入既有会话（图片工具经图片卡 handler，视频工具经视频卡 handler） */
   async function enterSession(kind: Kind) {
     const image = fullNode('i1').data as Record<string, (nodeId: string) => void>;
     const video = fullNode('v1').data as Record<string, (nodeId: string, mode?: string) => void>;
@@ -423,7 +396,6 @@ describe('IKH8BR 与既有六会话互斥（集中协调器口径）', () => {
     expect(sendBar()).toBeTruthy();
     await enterSession(kind);
     expect(sendBar()).toBeNull();
-    // 音视频分离接管时同样向 v1 注入 splitEditing（同款源卡锁定标记），不作 undefined 断言
     if (kind !== 'audioVideoSplit') expect(v1Data().splitEditing).toBeUndefined();
     expect(sessionUi(kind)).toBeTruthy();
   });
@@ -436,7 +408,6 @@ describe('IKH8BR 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     await renderPage();
     await enterSceneSplit();
     await sendSceneSplit();
-    // 建任务：契约四键（source_asset_id/target_node_id/granularity/client_token——token 每次新生成）
     expect(apiMocks.createVideoSceneSplit).toHaveBeenCalledTimes(1);
     const [projectId, payload] = apiMocks.createVideoSceneSplit.mock.calls[0]!;
     expect(projectId).toBe('p1');
@@ -446,7 +417,6 @@ describe('IKH8BR 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     expect((payload.client_token as string).length).toBeGreaterThan(0);
     const targetNodeId = payload.target_node_id as string;
     expect(targetNodeId).toContain('scene-split');
-    // 先退会话再建卡：单条卸载、splitEditing 移除、占位卡已上画布
     expect(sendBar()).toBeNull();
     expect(v1Data().splitEditing).toBeUndefined();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(3);
@@ -455,7 +425,6 @@ describe('IKH8BR 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     expect(placeholder.data.genStatus).toBe('generating');
     expect(placeholder.data.mediaType).toBe('video');
     expect(placeholder.data.fileName).toBe('场景切分 · 标准');
-    // 占位卡带身份（lastInput 冻结源素材+绑定+粒度，失败重试原参数原粒度重发）
     expect(placeholder.data.sceneSplit).toEqual({
       sourceAssetId: '6',
       lastInput: {
@@ -464,16 +433,12 @@ describe('IKH8BR 发送闭环（先退会话 → 占位卡 → job_id → 轮询
         granularity: 'standard',
       },
     });
-    // job_id 已回写占位卡并进入轮询
     expect(placeholder.data.jobId).toBe('j1');
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
-    // 来源边 origin=scene-split（参考推导跳过口径）
     const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
       .find((e) => e.target === targetNodeId)!;
     expect(edge.source).toBe('v1');
     expect(edge.data).toEqual({ origin: SCENE_SPLIT_EDGE_ORIGIN });
-    // IKJJR5：result-placeholder 占位卡受理前不落盘（B.3 不伪造恢复标记；关页由恢复
-    // 协议按 canvas_binding 种子补卡），发送不再触发即时 flush
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
   });
 
@@ -496,11 +461,9 @@ describe('IKH8BR 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     await renderPage();
     await enterSceneSplit();
     await act(async () => {
-      // 同步双击（React 尚未重渲染、发送钮未被 disabled 前的第二击）
       bodyBtn('scene-split-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
       bodyBtn('scene-split-send-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    // POST 尚未受理时，发送条已经退出，冻结目标卡及来源边已经存在。
     expect(sendBar()).toBeNull();
     const pendingPayload = apiMocks.createVideoSceneSplit.mock.calls[0]![1];
     expect(placeholderNode()!.id).toBe(pendingPayload.target_node_id);
@@ -524,7 +487,6 @@ describe('IKH8BR 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     expect(sendBar()).toBeNull();
     const placeholder = placeholderNode()!;
     expect(placeholder.data.genStatus).toBe('failed');
-    // 非 ApiError 的网络异常走家族兜底文案（口径同音视频分离创建失败 toast/卡态）
     expect(placeholder.data.errorText).toBe('场景切分任务创建失败，请重试');
   });
 });
@@ -541,10 +503,8 @@ describe('IKH8BR 轮询终态与失败重试', () => {
     await sendSceneSplit();
     const failed = placeholderNode()!;
     expect(failed.data.genStatus).toBe('failed');
-    // W 票错误码面：1046 →「场景切分失败，请重试」（msg 缺失走本地兜底）
     expect(failed.data.errorText).toBe('场景切分失败，请重试');
 
-    // 重试：lastInput（源素材+绑定+粒度）原样重发创建接口（新 job、新 client_token）
     apiMocks.createVideoSceneSplit.mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValue({
       job_id: 'j2', status: 'processing', progress: 10, asset: null,
@@ -558,22 +518,18 @@ describe('IKH8BR 轮询终态与失败重试', () => {
     expect(apiMocks.createVideoSceneSplit).toHaveBeenCalledTimes(2);
     const [, firstPayload] = apiMocks.createVideoSceneSplit.mock.calls[0]! as [string, Record<string, unknown>];
     const [, retryPayload] = apiMocks.createVideoSceneSplit.mock.calls[1]! as [string, Record<string, unknown>];
-    // 原参数原粒度（业务键冻结），client_token 新生成（同 token 只会重放旧任务）
     expect(retryPayload.source_asset_id).toBe(firstPayload.source_asset_id);
     expect(retryPayload.target_node_id).toBe(firstPayload.target_node_id);
     expect(retryPayload.granularity).toBe(firstPayload.granularity);
     expect(retryPayload.client_token).not.toBe(firstPayload.client_token);
-    // 重试后占位卡原地承接新任务（jobId 更新、回到生成中、轮询重启）
     const retried = placeholderNode()!;
     expect(retried.id).toBe(failed.id);
     expect(retried.data.jobId).toBe('j2');
     expect(retried.data.genStatus).toBe('generating');
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j2');
-    // completed 分支的行为断言（段卡扇出）归 IKH8C1，本文件不对 succeeded 终态断言
   });
 });
 
-/* ===== IKH8C1 完成扇出与跨会话恢复 ===== */
 
 function segmentNodes(): Node[] {
   return ((flowProps.current.mediaNodes as Node[]) ?? []).filter((n) =>
@@ -603,7 +559,6 @@ function sceneSplitSuccessDetail() {
   };
 }
 
-/** 发送后首个轮询 tick 即返回给定终态（扇出在首 tick 收敛，无需等待续轮询） */
 async function sendThenSucceed(detail: Record<string, unknown>) {
   apiMocks.createVideoSceneSplit.mockResolvedValue({ job_id: 'j1', status: 'queued' });
   apiMocks.fetchJobStatus.mockResolvedValue(detail);
@@ -618,9 +573,7 @@ describe('IKH8C1 完成扇出（succeeded → 移除占位卡 + N 张段卡 + �
     const nodes = flowProps.current.mediaNodes as Node[];
     const segments = segmentNodes();
     expect(segments).toHaveLength(3);
-    // 任务占位卡移除
     expect(nodes.find((n) => n.id.startsWith('scene-split-'))).toBeUndefined();
-    // 「第 N 段 起止时间」按 result.segments 返回顺序
     expect(segments.map((n) => (n.data as Record<string, unknown>).fileName)).toEqual([
       '第 1 段 00:00-00:15',
       '第 2 段 00:15-00:46',
@@ -628,26 +581,20 @@ describe('IKH8C1 完成扇出（succeeded → 移除占位卡 + N 张段卡 + �
     ]);
     segments.forEach((n, i) => {
       const d = n.data as Record<string, unknown>;
-      // 普通视频素材卡：段资产 url + assetId 关联 + 无 genStatus（悬浮工具条立即可用，
-      // 门槛走 BJ 已有 gate——assetId 已关联，全量工具含链式再切分自然成立）
       expect(d.mediaType).toBe('video');
       expect(d.src).toBe(`http://tos/seg${i + 1}.mp4`);
       expect(d.assetId).toBe(String(101 + i));
       expect(d.genStatus).toBeUndefined();
-      // jobId 保留（家族口径：成品卡不清 jobId）——MediaNode 生成宿主判定（target Handle）
-      // 依赖它，否则来源连线无法渲染
       expect(d.jobId).toBe('j1');
       expect(d.width).toBe(1920);
       expect(d.height).toBe(1080);
     });
-    // 每张段卡与源卡之间拉来源连线（纯视觉 origin=scene-split）
     const edges = flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>;
     segments.forEach((n) => {
       const edge = edges.find((e) => e.target === n.id);
       expect(edge?.source).toBe('v1');
       expect(edge?.data).toEqual({ origin: SCENE_SPLIT_EDGE_ORIGIN });
     });
-    // 网格落位：都在源卡右侧、彼此不重叠、不压既有图卡 i1
     const boxes = segments.map((n) => ({
       x: n.position.x,
       y: n.position.y,
@@ -655,7 +602,7 @@ describe('IKH8C1 完成扇出（succeeded → 移除占位卡 + N 张段卡 + �
       height: 324,
     }));
     boxes.forEach((b) => {
-      expect(b.x).toBeGreaterThanOrEqual(400 + 498); // v1 右缘（400 + 内容宽 497.78）之后
+      expect(b.x).toBeGreaterThanOrEqual(400 + 498);
       const i1 = { x: 0, y: 0, width: 320, height: 340 };
       const noOverlap =
         b.x >= i1.x + i1.width + 8 || i1.x >= b.x + b.width + 8 || b.y >= i1.y + i1.height + 8 || i1.y >= b.y + b.height + 8;
@@ -670,7 +617,6 @@ describe('IKH8C1 完成扇出（succeeded → 移除占位卡 + N 张段卡 + �
         expect(separated).toBe(true);
       }
     }
-    // 扇出即落盘（不等 800ms 防抖，防完成即关页丢段卡）
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
   });
 
@@ -705,7 +651,6 @@ describe('IKH8C1 完成扇出（succeeded → 移除占位卡 + N 张段卡 + �
 });
 
 describe('IKH8C1 跨会话恢复一致性（水合 → 恢复轮询 → 终态收敛）', () => {
-  /** 已保存画布（刷新/换设备回来）： generating 占位卡（jobId + sceneSplit 身份随画布保存） */
   function seedDocWithGeneratingPlaceholder() {
     seedDoc();
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
@@ -734,15 +679,12 @@ describe('IKH8C1 跨会话恢复一致性（水合 → 恢复轮询 → 终态�
       .mockResolvedValueOnce({ job_id: 'j9', status: 'processing', progress: 80, asset: null })
       .mockResolvedValue({ ...sceneSplitSuccessDetail(), job_id: 'j9' });
     await renderPage();
-    // 水合恢复轮询：j9 被查询
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j9');
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
     });
-    // 首 tick processing：占位卡仍在生成中
     const kept = (flowProps.current.mediaNodes as Node[]).find((n) => n.id === 'scene-split-kept');
     expect(kept?.data.genStatus).toBe('generating');
-    // 续 tick succeeded：扇出（mock 直接给 succeeded——第二次查询即终态）
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 2600));
     });

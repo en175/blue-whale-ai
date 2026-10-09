@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# 远程：mirror fallback pull alpine:3.20 + tag + docker compose build。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 ensure_key
 
 echo "▶ 确保 alpine:3.20（mirror fallback）"
-# 远程块：已有则跳过；无则逐 mirror 试 pull+tag（MIRRORS 本地展开传入）
 "${SSH[@]}" "set -e
 if docker image inspect alpine:3.20 >/dev/null 2>&1; then
   echo '  alpine:3.20 已存在'

@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-/* IKI68W 画布音频混合：固定首源、挑第二张资产音频、拒绝保留编辑态，
-   POST 受理后才建结果卡和双来源边；终态在原卡回填。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -38,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 type FlowProps = { mediaNodes: Node[]; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }>; onDeleteNode?: (ids: string[]) => void; onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void };
 const flowProps: { current: FlowProps } = { current: { mediaNodes: [], edges: [] } };
 vi.mock('./components/Canvas', () => ({
@@ -158,8 +155,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪音频节点 a1（15 秒 mp3，assetId 满足置灰门槛；无连线）+ 一个视频卡
- *  v1（互斥用例的分离会话源卡） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -229,7 +224,6 @@ async function renderPage() {
   });
 }
 
-/** 从音频卡工具栏进入混合编辑态。 */
 async function enterMix() {
   const audio = flowProps.current.mediaNodes.find((n: Node) => n.id === 'a1')!;
   await act(async () => {
@@ -251,7 +245,6 @@ function sendBar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="audio-mix-send-bar"]');
 }
 
-/** 等创建请求与首轮轮询完成。 */
 async function sendMix() {
   await click('audio-mix-send');
   await act(async () => {
@@ -263,14 +256,12 @@ function nodeById(id: string): Node | undefined {
   return (flowProps.current.mediaNodes as Node[]).find((n) => n.id === id);
 }
 
-/** IKJJR4：混合占位卡节点 id 预分配（非 jobId 派生），按前缀/jobId 定位。 */
 function mixCardByJobId(jobId: string): Node | undefined {
   return (flowProps.current.mediaNodes as Node[]).find(
     (n) => n.id.startsWith('audio-mix-') && String(n.data?.jobId) === jobId,
   );
 }
 
-/** 断言用创建载荷匹配（业务字段 + canvas_binding 形状）。 */
 function mixCreatePayload(overrides: Record<string, unknown> = {}) {
   return {
     canvas_binding: expect.objectContaining({
@@ -345,7 +336,6 @@ describe('IKI68W 画布双音频混合', () => {
     expect(placeholder.position.y).toBeGreaterThan(0);
     const lines = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>).filter(e => e.target === placeholder.id);
     expect(lines.map(e => [e.source, e.data?.origin])).toEqual([['a1', AUDIO_MIX_EDGE_ORIGIN], ['a2', AUDIO_MIX_EDGE_ORIGIN]]);
-    // IKJJR4：无首保存骨架——占位卡经防抖自动保存落盘、受理回执丢失由恢复扫描兜底
     expect((flowProps.current.mediaNodes as Node[]).filter((n) => n.id.startsWith('audio-mix-'))).toHaveLength(1);
   });
 
@@ -398,7 +388,6 @@ describe('IKI68W 画布双音频混合', () => {
     }
     const attempts = apiMocks.createAudioMix.mock.calls as Array<[string, unknown, { idempotencyKey: string }]>;
     expect(attempts).toHaveLength(2);
-    // 受理即作废提交意图：第二次发送是新 submission_id（新卡新意图）
     expect(attempts[1]?.[2].idempotencyKey).not.toBe(attempts[0]?.[2].idempotencyKey);
     expect(mixCardByJobId('j1')).toBeDefined();
     expect(mixCardByJobId('j2')).toBeDefined();
@@ -459,7 +448,6 @@ describe('IKI68W 画布双音频混合', () => {
     await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
     expect(mixCardByJobId('j1')).toBeDefined();
     expect(bodyBtn('switch-p2').textContent).toBe('p1');
-    // IKJJR4：无首保存骨架——仅切换闸门这一笔保存；结果卡经防抖自动保存与恢复扫描兜底
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     expect(apiMocks.saveCanvasDoc).toHaveBeenNthCalledWith(1, 'p1', expect.anything(), expect.anything());
   });

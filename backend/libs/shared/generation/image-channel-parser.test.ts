@@ -6,7 +6,6 @@ import {
   validateRequestMapping,
 } from "./image-channel-parser.js";
 
-/** 工单 IKDBYY 灌数：GPT 全量交叉格。空串 = 未填。 */
 const GPT_FULL_MATRIX = {
   "1k": {
     "1:1": "1024x1024",
@@ -193,15 +192,7 @@ describe("availableAspectRatiosForSize", () => {
   });
 });
 
-/* ── seedream 矩阵键的写侧闸门 ────────────────────────────────────────────────
- *
- * worker 的查找链是「按 id 命中 supported_sizes 条目 → 取 api_value 当 providerSize
- * → 用它当矩阵查找键」，所以键的拼写错了这一档就解不出尺寸（上游 400 Invalid size），
- * 而界面上看不出异常。实测漏过一次（`2` / `1.5` 这种既不是 id 也不是 api_value 的陈旧键），
- * 根因是本函数此前对 seedream 直接 `return null` —— 完全不校验。
- */
 describe("validateRequestMapping seedream 矩阵键", () => {
-  /** 5.0 Pro 的能力行形态：id 与 api_value 只有大小写差异。 */
   const SIZES = [
     { id: "1k", label: "1K", api_value: "1K" },
     { id: "1.5k", label: "1.5K", api_value: "1.5K" },

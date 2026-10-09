@@ -2,13 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { assetDurationSeconds, createAssetRepo } from "./asset-repo";
 
-/** 扩展位行（IKJCOE）：阶段身份已从 generation_jobs 主表列搬进 generation_job_extras
- *  （extra_key 沿用原列名，值见迁移的回填段）。 */
 function extraRow(jobId: bigint, extra_key: string, value_type: string, value_text: string) {
   return { generation_job_id: jobId, extra_key, value_type, value_text };
 }
 
-/** 扩展位假件：默认无键（缺键 = 缺省语义 → 普通视频兜底）。 */
 function extrasDelegate(rows: ReturnType<typeof extraRow>[] = []) {
   return {
     findMany: vi.fn().mockResolvedValue(rows),
@@ -184,9 +181,7 @@ describe("createAssetRepo.listByUser", () => {
       },
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([
-          // 8n：input 无 model_id（顶层与 parameters 都没有）
           { id: 8n, input: { prompt: "x" } },
-          // 9n：有 model_id，但 capability 表无对应展示名
           { id: 9n, input: { prompt: "y", model_id: "unknown-model" } },
         ]),
       },
@@ -199,9 +194,9 @@ describe("createAssetRepo.listByUser", () => {
 
     const page = await repo.listByUser("9", { page: 1, size: 24 });
 
-    expect(page.records[0].model).toBeNull(); // 上传资产无生成任务
-    expect(page.records[1].model).toBeNull(); // 任务 input 无 model_id
-    expect(page.records[2].model).toBe("unknown-model"); // 无展示名回退 model_id
+    expect(page.records[0].model).toBeNull();
+    expect(page.records[1].model).toBeNull();
+    expect(page.records[2].model).toBe("unknown-model");
   });
 
   it("分页稳定：orderBy 含 id 兜底，避免 gmt_create 秒级并列导致跨页重复", async () => {
@@ -395,7 +390,6 @@ describe("createAssetRepo.findOwnedById", () => {
     const asset = await repo.findOwnedById("42", "9");
 
     expect(asset).toMatchObject({ id: "42", prompt: "一只白鲸穿过蓝色鲸落" });
-    // 提示词与模型展示名共用一次 generation_jobs 查询，不额外回表。
     expect(generationJobs.findMany).toHaveBeenCalledTimes(1);
   });
 
@@ -426,7 +420,6 @@ describe("createAssetRepo.findOwnedById", () => {
 
     const asset = await repo.findOwnedById("6019", "9");
 
-    // 提取音频同样是 source=generated，但没有提示词——不能靠 source 判定。
     expect(asset).toMatchObject({ id: "6019", source: "generated", prompt: null });
   });
 
@@ -505,7 +498,6 @@ describe("createAssetRepo.findOwnedById", () => {
     const prisma = {
       assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: {
-        // scene-card-generation-repo 建 job 时的真实形状：只有 prompt_text。
         findMany: vi.fn().mockResolvedValue([
           {
             id: 12n,
@@ -548,7 +540,6 @@ describe("createAssetRepo.findOwnedById", () => {
     };
     const prisma = {
       assets: { findFirst: vi.fn().mockResolvedValue(row) },
-      // 查得到 0 行：本地库里这个 job 确实不存在（真实数据里踩到过）。
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
     };
@@ -702,7 +693,7 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
 
     const count = await repo.countReferencingProjects("42", "9");
 
-    expect(count).toBe(3); // {55, 66, 77}
+    expect(count).toBe(3);
     expect(prisma.assets.groupBy).toHaveBeenCalledWith({
       by: ["project_id"],
       where: { id: 42n, user_id: 9n, is_delete: false, project_id: { not: 0n } },
@@ -725,14 +716,14 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
         groupBy: vi.fn().mockResolvedValue([{ project_id: 77n }]),
       },
       project: {
-        findMany: vi.fn().mockResolvedValue([{ id: 55n }]), // 66/77 已删
+        findMany: vi.fn().mockResolvedValue([{ id: 55n }]),
       },
     };
     const repo = createAssetRepo(prisma as never);
 
     const count = await repo.countReferencingProjects("42", "9");
 
-    expect(count).toBe(1); // 仅 55 存活
+    expect(count).toBe(1);
     expect(prisma.project.findMany).toHaveBeenCalledWith({
       where: { id: { in: [55n, 66n, 77n] }, is_delete: 0 },
       select: { id: true },
@@ -770,17 +761,6 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
 });
 
 describe("createAssetRepo.findAccessible", () => {
-  /**
-   * 归属按人算，不按项目算。
-   *
-   * 这条守的是一次真实故障：md5 去重（IKCNLS）跨项目复用素材时只写 `project_asset` 关联行，
-   * `assets.project_id` 仍是第一次上传的那个项目。当时这里的 where 带着 `project_id`，于是
-   * 同一张图传进第二个项目后 agent 一律读不到——画布上看得见、resolve 返回 404，用户看到的
-   * 错话是「服务端打开文件失败」，像文件坏了。
-   *
-   * 断言 where **不含** `project_id`，而不只是断言查得到：查得到可以靠 mock 蒙对，
-   * 少一个过滤条件才是这条修复的实质。
-   */
   it("只按素材号与用户查，不带项目号", async () => {
     const findFirst = vi.fn().mockResolvedValue({
       storage_key: "uploads/49/image/a.jpg",
@@ -818,8 +798,6 @@ describe("createAssetRepo.findAccessible", () => {
   });
 });
 
-// IKFYHJ（ADR-0087）：列表/详情带上素材校验状态。
-// 性能是本组的重点——控制器对 ?size= 没有上限，前端 fetchAllAssets 又是并发翻页全量拉取。
 describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
   const baseRow = (over: Record<string, unknown>) => ({
     id: 1n,
@@ -838,7 +816,6 @@ describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
     material_group_id: null,
     ...over,
   });
-  /** 无生成任务的 prisma 骨架（本组不关心 model 溯源）。 */
   const basePrisma = (rows: unknown[], findMaterial: ReturnType<typeof vi.fn>) => ({
     assets: {
       count: vi.fn().mockResolvedValue(rows.length),
@@ -862,8 +839,8 @@ describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
       [
         baseRow({ id: 1n, material_id: "asset-a" }),
         baseRow({ id: 2n, material_id: "asset-b" }),
-        baseRow({ id: 3n, material_id: "asset-norow" }), // 关联了但无状态行
-        baseRow({ id: 4n }), // 未关联素材库
+        baseRow({ id: 3n, material_id: "asset-norow" }),
+        baseRow({ id: 4n }),
       ],
       findMaterial,
     );
@@ -873,7 +850,6 @@ describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
       size: 24,
     });
 
-    // 关键：整页只发一条 IN，不是每条一次（无 N+1）。
     expect(findMaterial).toHaveBeenCalledTimes(1);
     expect(findMaterial).toHaveBeenCalledWith({
       where: { user_id: 9n, material_id: { in: ["asset-a", "asset-b", "asset-norow"] } },
@@ -915,7 +891,7 @@ describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
 
     await createAssetRepo(prisma as never).listByUser("9", { page: 1, size: 1200 });
 
-    expect(findMaterial).toHaveBeenCalledTimes(3); // 500 + 500 + 200
+    expect(findMaterial).toHaveBeenCalledTimes(3);
     const sizes = findMaterial.mock.calls.map(
       (c) => (c[0].where.material_id.in as string[]).length,
     );
@@ -976,7 +952,6 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
             id: 305n,
             type: "video",
             input: { model_id: "seedance-2.5" },
-            // source_sample_job_id 仍留主表（它扛唯一索引）；阶段身份在扩展位。
             source_sample_job_id: 302n,
           },
         ]),
@@ -1009,7 +984,6 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
         ]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
-      // 互指 final_job_id 读自扩展位（原主表列已删）。
       generation_job_extras: extrasDelegate([
         extraRow(302n, "video_stage", "string", "sample"),
         extraRow(302n, "final_job_id", "number", "305"),
@@ -1035,7 +1009,6 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
         findMany: vi.fn().mockResolvedValue([legacyRow, uploadedRow]),
       },
       generation_jobs: {
-        // 旧任务行没有视频阶段键（历史数据；扩展表里也没有它的行）。
         findMany: vi.fn().mockResolvedValue([{ id: 7n, type: "video", input: {} }]),
       },
       generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
@@ -1068,7 +1041,6 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
     };
     const prisma = { $transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)) };
 
-    // 删样片资产 61（其成片资产 88 与两阶段任务行都必须原地不动）。
     const ok = await createAssetRepo(prisma as never).softDeleteOwned("61", "9");
 
     expect(ok).toBe(true);

@@ -23,7 +23,6 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueAudioMixJob: vi.fn(async () => {}) }));
 
-// IKI68N: true Nest HTTP + MySQL + Java Worker, with only MediaKit/MQ/object storage replaced locally.
 describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runtime acceptance", () => {
   it("freezes inputs through HTTP, survives worker failure/restart and double-click retry, then publishes durable audio", async () => {
     const repo = resolve(import.meta.dirname, "../../../../../..");
@@ -93,7 +92,6 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       }
       expect(ready).toBe(true);
       process.env.DATABASE_URL = `mysql://test:test@127.0.0.1:${port}/${databaseName}`;
-      // 建库走金标 DDL（含手工追加列）；只在此临时库补执行金标尚未收录的 09-19 纯新增列迁移。
       const additiveSql = readFileSync(join(repo,
         "backend/prisma/migrations/20260919190000_ikh1yi_project_last_opened_pinned/migration.sql"));
       execFileSync("docker", ["exec", "-i", mysqlId, "mysql", "-utest", "-ptest", databaseName],
@@ -163,10 +161,7 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
           "-v", `${repo}:/workspace`, "-w", "/workspace/server",
           "-v", `${process.env.HOME}/.m2:/root/.m2`,
           "maven:3.9-eclipse-temurin-21", "mvn", "-q",
-          // 从聚合根跑并带 -pl/-am：worker 依赖同 reactor 的 server/blue-whale-common，
-          // 直接进模块目录 `mvn test` 解析不到该依赖（verification-policy 同款约束）。
           "-pl", "blue-whale-worker", "-am", "-DfailIfNoSpecifiedTests=false",
-          // surefire 3.5.x 只认带插件前缀的属性名；旧名保留是为了兼容更老的 surefire。
           "-Dsurefire.failIfNoSpecifiedTests=false",
           "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"],
         { cwd: repo });

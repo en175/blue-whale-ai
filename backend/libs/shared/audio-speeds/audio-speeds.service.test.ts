@@ -2,9 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AudioSpeedsService } from "./audio-speeds.service.js";
 
-// IKHW59：一对一仿 audio-trims.service.test 先例（IKHB6N）。资产归属读法同 findOwnedSource；
-// 免费口径哨兵（cost_reservations.create）与凭证冻结断言同款；调速特有面（贴原速省略键不落、
-// speed 域与两位小数精度服务端复核）覆盖契约 audio-speed.ts 口径。
 function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
@@ -25,7 +22,6 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
@@ -52,7 +48,6 @@ describe("AudioSpeedsService.create", () => {
   });
 
   it("rejects a source asset not owned by the user", async () => {
-    // 归属口径同 audio_trim——findOwnedSource 按 user_id 过滤，非本人素材一律 404。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(null) },
     });
@@ -94,8 +89,6 @@ describe("AudioSpeedsService.create", () => {
     });
   });
 
-  // 贴原速省略口径（契约 audio-speed.ts / buildAudioSpeedInput）：speed 缺省不补键，
-  // undefined = 走官方默认 1——创建入口原样落库（键不写，toEqual 精确匹配钉死）。
   it("omits the speed key when not sent (贴原速省略原样落库)", async () => {
     const { service, create } = makeService();
     const result = await service.create("9", "55", { source_asset_id: "88" });
@@ -116,8 +109,6 @@ describe("AudioSpeedsService.create", () => {
     expect(create.mock.calls[1][0].data.input).toEqual({ source_asset_id: "88", speed: 4 });
   });
 
-  // 服务端复核契约枚举（audioSpeedInputSchema）：speed ∈ [0.1, 4.0]、最多两位小数、
-  // 必须为 number 类型（契约层精度收口，超精度在创建入口即拒）。
   it.each([
     ["低于下界", 0.09],
     ["高于上界", 4.01],
@@ -137,7 +128,6 @@ describe("AudioSpeedsService.create", () => {
   });
 
   it("is free-tier: no cost reservation, no provider row", async () => {
-    // 免费口径哨兵（网关零价模型族，同 audio_trim 先例）：本工具不写成本预留、不落 provider 行。
     const { service, create, costCreate } = makeService();
     const result = await service.create("9", "55", {
       source_asset_id: "88",

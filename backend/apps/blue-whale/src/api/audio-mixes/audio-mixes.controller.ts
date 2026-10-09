@@ -6,7 +6,6 @@ import { DomainError, ERROR_ENQUEUE_FAILED, FAILURE_CODE } from "@lib/contracts"
 import { enqueueAudioMixJob } from "@lib/shared/generation/generation-queue.js";
 import { AudioMixesService } from "@lib/shared/audio-mixes/audio-mixes.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
-// IKJKUA：受控错误判定收敛到共享适配器（原 IKJJQZ B.8 本地同款副本已删）。
 import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
 @Controller("projects/:projectId/audio-mixes")
@@ -52,7 +51,6 @@ export class AudioMixesController {
     @Body() body?: unknown,
     @Res({ passthrough: true }) res?: Response,
   ) {
-    // IKJJQZ：专属重试可携带 canvas_binding（body 为对象时取其 canvas_binding 字段）。
     const canvasBindingBody = typeof body === "object" && body !== null
       ? (body as { canvas_binding?: unknown }).canvas_binding
       : undefined;

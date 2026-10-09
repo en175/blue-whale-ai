@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// IKG4UR：视频时长收敛为**单一权威来源**（基础行 supported_durations 的区间对象）。
-// 镜像 ikfyhj/ikeefv-parity 的双轨核对结构：prisma migration、schema 独立文件、docs/sql 快照三处同源。
 
 const migrationSql = readFileSync(
   new URL(
@@ -49,10 +47,6 @@ describe("IKG4UR 双轨迁移（视频时长收敛为单一来源）", () => {
   });
 
   it("数组→对象转换带守卫：长度、数值类型、非负、序关系、步长", () => {
-    // 负数会被 CAST(... AS UNSIGNED) 回绕成 18446744073709551615；min>max 会让
-    // toDurationRange 返回 null（滑杆消失）而 durationInRange 恒 false（任何时长 400）；
-    // 长度 <2 无法表达区间（[] 会让该模型所有时长被拒）；step<=0 会把滑杆钉死在 min。
-    // 五种形态都挡在守卫外，由 pre-flight 交人工处置。
     expect(migrationSql).toContain("JSON_LENGTH(`supported_durations`) >= 2");
     expect(migrationSql).toContain("CAST(`supported_durations` ->> '$[0]' AS SIGNED) >= 0");
     expect(migrationSql).toContain("CAST(`supported_durations` ->> '$[1]' AS SIGNED) >= 0");
@@ -64,7 +58,6 @@ describe("IKG4UR 双轨迁移（视频时长收敛为单一来源）", () => {
   });
 
   it("不按 provider_id 过滤（线上存量行是 volcengine，非 seed 写的 new-api）", () => {
-    // 加了该过滤会静默漏改真实行——这是本地实测暴露出来的坑，钉住它。
     expect(migrationSql).not.toMatch(/provider_id\s*=\s*'new-api'/);
   });
 

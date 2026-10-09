@@ -42,7 +42,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** audio_mix 独立 MQ 步进：提交、持久化 task_id、查询、转存、发布长期音频 Asset。 */
 @Component
 public class AudioMixJobProcessor implements JobProcessor {
     private static final Logger log = LoggerFactory.getLogger(AudioMixJobProcessor.class);
@@ -58,7 +57,6 @@ public class AudioMixJobProcessor implements JobProcessor {
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
-    /** 领取规格（IKIWP8 / ADR-0119）：候选 = type + 单源白名单；租约 420s。 */
     private static final int LEASE_SECONDS = 420;
     private static final List<String> CLAIM_SOURCES = List.of(AudioMixContract.SOURCE);
 
@@ -95,9 +93,6 @@ public class AudioMixJobProcessor implements JobProcessor {
 
     @Override public String tag() { return AudioMixContract.TAG; }
 
-    /**
-     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
-     */
     @Override
     public Optional<ClaimSpec> claimSpec() {
         return Optional.of(claimSpec);
@@ -116,12 +111,9 @@ public class AudioMixJobProcessor implements JobProcessor {
             Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(error);
             String message = error.getMessage() != null ? error.getMessage() : "音频混合失败";
             if (httpStatus != null) {
-                // 状态已结构化落 details（IKIMS6），message 不再重复携带状态码字样：只剥网关
-                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
                 message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
             }
             if (!fail(job, code, message, httpStatus)) {
-                // 守卫未命中表示租约已释放或被其他执行者接管；由到点恢复扫描接续。
                 log.info("[audio_mix] 失败守卫未命中，交由恢复扫描 jobId={} token={}", job.id(), job.fencingToken());
             }
         }
@@ -160,7 +152,6 @@ public class AudioMixJobProcessor implements JobProcessor {
         }
     }
 
-    /** 防御历史脏快照：有序 URL、assetId 唯一、固定源首项身份均须成立。 */
     private static List<String> frozenUrls(Map<String, Object> input) {
         Object raw = input.get(AudioMixContract.INPUT_KEY_INPUTS);
         Object sourceNode = input.get(AudioMixContract.INPUT_KEY_SOURCE_NODE_ID);
@@ -269,7 +260,6 @@ public class AudioMixJobProcessor implements JobProcessor {
         return Math.min(60_000L, POLL_INTERVAL_MS << Math.min(4, Math.max(0, pollCount / 3)));
     }
 
-    /** 平均 RTF≈1 只作预算依据：已知最长源给四倍处理余量加六小时，至少一天；未知给七天。 */
     private static boolean timedOut(ClaimedJob job) {
         if (job.executionDeadlineAt() != null) {
             return !WorkerClock.now().isBefore(job.executionDeadlineAt());
@@ -304,7 +294,6 @@ public class AudioMixJobProcessor implements JobProcessor {
         return fail(job, code, message, null);
     }
 
-    /** details 落结构化上游 HTTP 状态（IKIHGQ）：backend 401 换凭证判定读它，不依赖文案。 */
     private boolean fail(ClaimedJob job, String code, String message, Integer httpStatus) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);

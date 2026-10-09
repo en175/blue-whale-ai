@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { handleRetryGenerationJob } from "./handle-retry-generation-job.js";
 
-// IKF YHJ（ADR-0087 决策 7）：重试期的素材状态门在 repo 内、幂等重放之后触发；
-// 这里只钉住握手——门的拒绝原因必须以 invalid_reference（1034）信封返回，不落成 404/500。
 
 function makeDeps(overrides: {
   retryResult: unknown;
@@ -69,7 +67,6 @@ describe("handleRetryGenerationJob 素材状态门（IKF YHJ）", () => {
     );
 
     expect(result).toEqual({ code: 200, msg: null, data: CREATED });
-    // 第三参起是 guardInput：由 repo 决定何时调（幂等重放不调），并把原 job 的类型一并带过来。
     const guardInput = retryJob.mock.calls[0]![5];
     expect(guardInput).toBeTypeOf("function");
 
@@ -109,7 +106,6 @@ describe("handleRetryGenerationJob 素材状态门（IKF YHJ）", () => {
   });
 });
 
-// IKIPWU：同为「点重试失败」必须可区分真实原因；任务存在但不可重试不再并成「资源不存在」。
 describe("handleRetryGenerationJob 不可重试原因外显（IKIPWU）", () => {
   it("任务存在但状态不可重试 → 1054 + 专用文案", async () => {
     const { deps } = makeDeps({

@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-/* IKFA1P：ImageDialog 文本附件正文标签——@ 菜单文本索引/插入/失效恢复/附件区编号/发送携带 prompt_doc */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -121,7 +120,6 @@ describe('IKFA1P 生图文本附件索引（A2 文本部分）', () => {
 
   it('文本项可按标题搜索；参考栏文本缩略图展示同源编号（角标仅数字）', async () => {
     await renderDialog({ attachments: [ATT_STYLE, ATT_POSE] });
-    // IKFCKN：文本附件进参考栏，编号圆钮仅显示数字（与 @ 菜单「文本N」同源）
     const badges = [...container.querySelectorAll('[data-testid="dock-text-ref"] [data-testid="ref-thumb-badge"]')].map((e) => e.textContent);
     expect(badges).toEqual(['1', '2']);
     await typePromptRefRaw(container, '@姿势');
@@ -140,7 +138,6 @@ describe('IKFA1P 生图文本附件索引（A2 文本部分）', () => {
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
     await act(async () => mentionMenuItems()[0]!.click());
     expect(readPromptRefText(container)).toBe('先文本1再文本1');
-    // 参考栏文本缩略图仍只有一份
     expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
   });
 });
@@ -159,12 +156,10 @@ describe('IKFA1P 生图文本失效与恢复（B 类文本场景）', () => {
       },
     });
     expect(readPromptRefText(container)).toBe('按文本2调整');
-    // 移除姿势附件：剩余 [风格] → 姿势身份不在集合，失效保留原编号
     await rerender([ATT_STYLE]);
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('按已失效：原文本2调整'));
     expect(sendButton().disabled).toBe(true);
     expect(container.textContent).toContain('正文有已失效的素材标签');
-    // 同身份重新加入（重排序后编号跟随新顺序）
     await rerender([ATT_POSE]);
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('按文本1调整'));
     expect(sendButton().disabled).toBe(false);
@@ -210,7 +205,6 @@ describe('IKFA1P 生图发送携带（D2/D5）', () => {
       { kind: 'text_ref', node_id: 'text-1-style', label: '文本1' },
       { kind: 'text', text: '生成' },
     ]);
-    // 拍平镜像作为正文上送（服务端以结构为权威重新编译）
     expect(onSend.mock.calls[0][0]).toBe('按文本1生成');
   });
 });

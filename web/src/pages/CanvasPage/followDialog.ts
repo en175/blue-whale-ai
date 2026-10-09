@@ -9,10 +9,10 @@ export const FOLLOW_DIALOG_WIDTH = 740;
 export const FOLLOW_GAP = 16;
 export const FOLLOW_PAD = 12;
 
-/** IKJR9J 锚定浮层根样式统一入口：定位与拖拽隐藏合并到同一个 style 对象。
- *  隐藏走 visibility 级（组件不卸载、布局不改——草稿、参数与焦点保留；无过渡动画），
- *  dragStop 取消隐藏时锚点已是新坐标，浮层直接在新位置重现。
- *  anchor 为 null 且不隐藏时返回 undefined（沿用调用方原行为，不落 style 对象）。 */
+
+
+
+
 export function anchoredOverlayStyle(
   anchor: FollowDialogAnchor | null,
   dragHidden?: boolean,
@@ -23,7 +23,7 @@ export function anchoredOverlayStyle(
     : { left: anchor.left, top: anchor.top };
 }
 
-/** 将节点 flow 坐标换算为画布容器内的对话框左上角，始终落在节点下方 */
+
 export function computeFollowAnchor(opts: {
   nodeX: number;
   nodeY: number;
@@ -47,26 +47,26 @@ export function computeFollowAnchor(opts: {
   return { left: Math.round(left), top: Math.round(nodeBottom + FOLLOW_GAP) };
 }
 
-/** 上方锚定默认抬升量（屏幕像素）：工具条估高约 42 + 与卡片顶边间距 10（口径同擦除上方工具条的 52） */
+
 export const FOLLOW_ABOVE_LIFT = 52;
-/** 上方锚定水平视口钳制默认估半宽（屏幕像素）：仅用于钳制边界，不参与居中。
- *  IKH3XZ 五画质工具横排后工具条实测 473px；IKH8BJ 视频卡追加「场景切分」后视频工具条
- *  记 528px（真实半宽约 264），250→270 保证贴边不被裁。
- *  IKHLKR 首位「HD」单按钮升为「高清 ▾」下拉触发钮后**重新实测**：视频卡工具条 564px
- *  （headless chromium + 仓内 global.css 渲染真实工具条；同环境复核图片卡工具条 473px，
- *  与 ADR-0107 记录一致，测量口径可信），真实半宽约 282，270→288 维持同一 6px 余量。
- *  新增宽度来自触发钮的下拉箭头（ChevronDown 12px + toolBtn gap 6px = +18px）。
- *  IKHK7N 视频卡再追加「智能抠像 ▾」（图标+文字+chevron，形状同「智能去字幕 ▾」约 106px），
- *  与「高清 ▾」并存后估约 670px（真实半宽约 335），288→341 维持同一 6px 余量。 */
+
+
+
+
+
+
+
+
+
 export const FOLLOW_ABOVE_HALF_WIDTH = 341;
-/** 上方锚定垂直钳顶保底（屏幕像素）：卡片顶到视口上方时工具条不被容器裁掉 */
+
 export const FOLLOW_ABOVE_MIN_TOP = 8;
 
-/** 卡片上方居中锚定（IKGYYD 钉屏幕工具栏基建）：将节点 flow 坐标换算为画布容器内的
- *  工具栏屏幕坐标——left 是工具栏中心点 x（消费方容器 translateX(-50%) 完成真居中，
- *  估半宽只用于视口钳制，不参与居中：工具条宽度随按钮显隐动态变化，估宽居中会跳位）；
- *  top 是工具栏顶边 y（卡片顶边屏幕坐标 - 抬升量），垂直仅钳顶部保底、向下不钳制；
- *  zoom 只参与位置换算，抬升量/半宽恒为屏幕像素（工具栏尺寸不随缩放变化）。 */
+
+
+
+
+
 export function computeFollowAnchorAbove(opts: {
   nodeX: number;
   nodeY: number;

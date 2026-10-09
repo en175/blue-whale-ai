@@ -1,7 +1,5 @@
 SET NAMES utf8mb4;
 
--- IKCNLP（方案C）：素材-项目关联表（1 素材可跨多项目）。
--- 与 prisma/migrations/20260902000000_ikcnlp_project_asset/migration.sql 双轨同步。
 CREATE TABLE `project_asset` (
   `id`           BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
   `user_id`      BIGINT NOT NULL COMMENT '用户 id',

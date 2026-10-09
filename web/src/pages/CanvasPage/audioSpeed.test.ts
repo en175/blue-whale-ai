@@ -80,14 +80,12 @@ describe('audioSpeed 会话身份与占位卡（IKHW5S，audioTrim 同族先例�
     });
     expect(node.id).toBe('audio-speed-j1');
     expect(node.type).toBe('mediaNode');
-    // 音频卡内容宽恒 480：x = 100 + 480 + 60 = 640，y 与源同排
     expect(node.position).toEqual({ x: 640, y: 20 });
     expect(node.data.mediaType).toBe('audio');
     expect(node.data.genStatus).toBe('generating');
     expect(node.data.progress).toBe(0);
     expect(node.data.jobId).toBe('j1');
     expect(node.data.fileName).toBe('播客片头(调速1.35x).m4a');
-    // lastInput 冻结：契约 buildAudioSpeedInput 构造（键名 source_asset_id/speed）
     expect(node.data.audioSpeed).toEqual({
       sourceAssetId: '5',
       lastInput: { source_asset_id: '5', speed: 1.35 },
@@ -110,7 +108,6 @@ describe('audioSpeed 会话身份与占位卡（IKHW5S，audioTrim 同族先例�
     });
     expect(oneSpeed.data.audioSpeed).toEqual({
       sourceAssetId: '7',
-      // 1.0 走契约贴原速省略：speed 键不出现
       lastInput: { source_asset_id: '7' },
     });
   });
@@ -157,7 +154,6 @@ describe('audioSpeed 终态补丁（轮询收敛，IKHW5S）', () => {
     expect(keep('https://bucket.ep.com/generated/7/audio/uuid')).toBe('a(调速2.00x).m4a');
     expect(keep('https://bucket.ep.com/generated/7/audio/uuid?x=1.m4a')).toBe('a(调速2.00x).m4a');
     expect(keep('https://bucket.ep.com/.m4a/')).toBe('a(调速2.00x).m4a');
-    // URL 缺失（asset null / url 空）同样保持占位名
     expect(
       audioSpeedTerminalPatch({ status: 'succeeded', asset: null }, 'a(调速2.00x).m4a')?.fileName,
     ).toBe('a(调速2.00x).m4a');

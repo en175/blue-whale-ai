@@ -1,13 +1,8 @@
-/* ============================================
- * 连线几何纯函数：指针投影 + 沿连线错开定剪刀圆心
- * 断言只落在几何结果上（圆心是否在连线上、错开多远、朝哪一侧），不读内部采样表
- * ============================================ */
 import { describe, expect, it } from 'vitest';
 import { placeScissorsOnEdge, type Point } from './edgeGeometry';
 
 type Cubic = [Point, Point, Point, Point];
 
-/** 与组件同形的两条连线：S 形曲线（左右手柄）与一条 20 单位长的直线 */
 const S_CURVE: Cubic = [
   { x: 0, y: 0 },
   { x: 50, y: 0 },
@@ -21,7 +16,6 @@ const SHORT_LINE: Cubic = [
   { x: 20, y: 0 },
 ];
 
-/** 按 getBezierPath 的模板拼路径串：解析出问题会直接表现为圆心不在线上 */
 function asPath([p0, c1, c2, p3]: Cubic): string {
   return `M${p0.x},${p0.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${p3.x},${p3.y}`;
 }
@@ -46,7 +40,6 @@ function distanceToSegment(point: Point, from: Point, to: Point): number {
   return Math.hypot(point.x - (from.x + (to.x - from.x) * ratio), point.y - (from.y + (to.y - from.y) * ratio));
 }
 
-/** 点到连线的最近距离：用折线逼近曲线，段数足够密，容差 0.05 画布单位 */
 function distanceToCurve(curve: Cubic, point: Point): number {
   const segments = 200;
   let nearest = Number.POSITIVE_INFINITY;
@@ -81,7 +74,6 @@ describe('placeScissorsOnEdge 剪刀圆心落点', () => {
     const pointer = at(S_CURVE, 0.5);
     const center = placeScissorsOnEdge(asPath(S_CURVE), pointer, 30);
 
-    // 弧长 ≥ 弦长：实测距离落在 [gap - 1, gap] 之间
     expect(distance(pointer, center)).toBeGreaterThan(29);
     expect(distance(pointer, center)).toBeLessThanOrEqual(30);
   });
@@ -97,12 +89,10 @@ describe('placeScissorsOnEdge 剪刀圆心落点', () => {
   });
 
   it('连线比错开量还短：贴到更长的那一端，仍落在连线上', () => {
-    // 20 单位长的连线，两侧剩余各 10、都不够 30
     const toEnd = placeScissorsOnEdge(asPath(SHORT_LINE), { x: 10, y: 0 }, 30);
     expect(distance(toEnd, { x: 20, y: 0 })).toBeLessThan(0.05);
     expect(distanceToCurve(SHORT_LINE, toEnd)).toBeLessThan(0.05);
 
-    // 指针偏后段：更长的一侧是起点那一端
     const toStart = placeScissorsOnEdge(asPath(SHORT_LINE), { x: 15, y: 0 }, 30);
     expect(distance(toStart, { x: 0, y: 0 })).toBeLessThan(0.05);
   });

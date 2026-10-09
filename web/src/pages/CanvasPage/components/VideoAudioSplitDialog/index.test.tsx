@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/* IKH28U 骨架 / IKH28X 三要素：音视频分离编辑态单条组件测试。X 关闭在单条最左（对齐
-   抠图/去字幕单条先例——上方仅 X 退出的独立工具条随单条化退役；无框选/开关/撤销重做
-   ——本工具无画布操作）；三要素 = 分离格式下拉（触发钮显当前格式、展开五选一、当前项
-   高亮）+「本期免费」标注（无「输出最高」后缀）+ 发送钮（submitting 置灰与回调透传）；
-   单条 territory 标记、sendBar 锚样式透传。渲染模式沿用 VideoSubtitleEraseDialog
-   测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -60,7 +54,6 @@ describe('IKH28U 单条呈现', () => {
     renderDialog();
     const sendBar = container!.querySelector('[data-testid="audio-video-split-send-bar"]')!;
     const close = btn('audio-video-split-close');
-    // 单条化后 X 在 sendBar 内且是第一个元素（对齐抠图/去字幕单条先例）
     expect(sendBar.contains(close)).toBe(true);
     expect(sendBar.querySelector('button')).toBe(close);
     expect(sendBar.textContent).not.toContain('全画面文字');
@@ -89,10 +82,8 @@ describe('IKH28X 发送条三要素', () => {
     const sendBar = container!.querySelector('[data-testid="audio-video-split-send-bar"]')!;
     expect(btn('audio-video-split-format-trigger').textContent).toBe('M4A');
     expect(sendBar.textContent).toContain('本期免费');
-    // 音频无分辨率降级概念：不带去字幕的「输出最高」后缀
     expect(sendBar.textContent).not.toContain('输出最高');
     expect(btn('audio-video-split-send-btn')).toBeTruthy();
-    // 占位文案已随三要素移除
     expect(sendBar.textContent).not.toContain('发送功能即将可用');
   });
 
@@ -108,12 +99,10 @@ describe('IKH28X 发送条三要素', () => {
     const menu = container!.querySelector('[data-testid="audio-video-split-format-menu"]')!;
     const items = menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]');
     expect(Array.from(items).map((el) => el.textContent)).toEqual(['M4A', 'MP3', 'OGG', 'FLAC', 'WAV']);
-    // 当前项 mp3 高亮（aria-checked + 激活样式）
     expect(btn('audio-video-split-format-item-mp3').getAttribute('aria-checked')).toBe('true');
     expect(btn('audio-video-split-format-item-m4a').getAttribute('aria-checked')).toBe('false');
     await click('audio-video-split-format-item-wav');
     expect(formatChangeMock).toHaveBeenCalledWith('wav');
-    // 选择后菜单收起
     expect(container!.querySelector('[data-testid="audio-video-split-format-menu"]')).toBeNull();
   });
 
@@ -152,7 +141,7 @@ describe('锚样式透传', () => {
     const sendBar = container!.querySelector('[data-testid="audio-video-split-send-bar"]') as HTMLElement;
     expect(sendBar.style.left).toBe('100px');
     expect(sendBar.style.top).toBe('300px');
-    expect(sendBar.className).toContain('sendBarFollow'); // 跟随锚解除默认 bottom 定位
+    expect(sendBar.className).toContain('sendBarFollow');
     renderDialog({ sendBarAnchor: null });
     const unanchoredBar = container!.querySelector('[data-testid="audio-video-split-send-bar"]') as HTMLElement;
     expect(unanchoredBar.className).not.toContain('sendBarFollow');

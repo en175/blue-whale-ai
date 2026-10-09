@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* IKHB7A AudioTrimOverlay 组件测试（仿 SubtitleEraseBoxesLayer 先例）：四件套渲染、
-   左右抓手拖拽换算与最小 0.1 秒钳制、两侧暗区点击无行为、选区内定位条三段 seek
-   序列与钳制、层内 click 不冒泡（防开音频面板退出编辑态，先例回归）。
-   渲染模式沿用 SubtitleEraseBoxesLayer.test.tsx（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,8 +15,6 @@ const callbacks = {
   onSeekEnd: vi.fn(),
 };
 
-/** 渲染 15 秒全长、默认全选的遮罩层（jsdom 布局恒零，盒由 stub 提供：left 100 / 宽 300）；
- *  重复调用先卸载旧根再挂新根（单实例保证）。 */
 function renderOverlay(props: Partial<Parameters<typeof AudioTrimOverlay>[0]> = {}) {
   if (root) act(() => root!.unmount());
   container?.remove();
@@ -41,20 +35,17 @@ function renderOverlay(props: Partial<Parameters<typeof AudioTrimOverlay>[0]> = 
 
 const overlayEl = () => container!.querySelector<HTMLElement>('[data-testid="audio-trim-overlay"]')!;
 
-/** jsdom 无 PointerEvent：MouseEvent 带 bubbles 触发 React 合成指针事件 */
 function pointer(target: Element, type: string, clientX: number, button = 0) {
   target.dispatchEvent(
     new MouseEvent(type, { bubbles: true, cancelable: true, clientX, button }),
   );
 }
 
-/** stub 遮罩层屏幕盒：left 100 / top 50 / 宽 300（1px = 0.05s） */
 function stubRect() {
   overlayEl().getBoundingClientRect = () =>
     ({ left: 100, top: 50, width: 300, height: 158, right: 400, bottom: 208, x: 100, y: 50, toJSON: () => ({}) }) as DOMRect;
 }
 
-/** setPointerCapture stub（jsdom 无该 API，组件 optional call 直通） */
 function stubCapture(el: Element) {
   (el as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture = () => {};
 }
@@ -74,19 +65,15 @@ afterEach(() => {
 describe('四件套渲染', () => {
   it('渲染两侧暗区 + 白色选区框 + 中央胶囊 + 左右抓手，几何随选区联动', () => {
     renderOverlay({ selection: { start: 3, end: 12 }, duration: 15 });
-    // 暗区两块：左 [0,20%]、右 [80%,100%]
     const dims = overlayEl().querySelectorAll<HTMLElement>('div');
     const dimEls = Array.from(dims).filter((el) => el.className.includes('dim'));
     expect(dimEls).toHaveLength(2);
     expect(dimEls[0]!.style.width).toBe('20%');
     expect(dimEls[1]!.style.left).toBe('80%');
-    // 选区框：left 20%、宽 60%
     const selection = container!.querySelector<HTMLElement>('[data-testid="audio-trim-selection"]')!;
     expect(selection.style.left).toBe('20%');
     expect(selection.style.width).toBe('60%');
-    // 胶囊实时秒数一位小数
     expect(container!.querySelector('[data-testid="audio-trim-pill"]')!.textContent).toBe('9.0 s');
-    // 抓手分别钉在选区两缘
     expect((container!.querySelector('[data-testid="audio-trim-handle-start"]') as HTMLElement)!.style.left).toBe('20%');
     expect((container!.querySelector('[data-testid="audio-trim-handle-end"]') as HTMLElement)!.style.left).toBe('80%');
   });
@@ -94,7 +81,6 @@ describe('四件套渲染', () => {
   it('抓手拖拽实时联动胶囊与暗区（选区 state 受控由父级回填）', () => {
     renderOverlay({ selection: { start: 0, end: 15 }, duration: 15 });
     expect(container!.querySelector('[data-testid="audio-trim-pill"]')!.textContent).toBe('15.0 s');
-    // 父级按 onSelectionChange 回填新选区后重渲染
     renderOverlay({ selection: { start: 0, end: 5 }, duration: 15 });
     expect(container!.querySelector('[data-testid="audio-trim-pill"]')!.textContent).toBe('5.0 s');
   });
@@ -121,7 +107,6 @@ describe('抓手拖拽：换算与钳制', () => {
     stubCapture(handle);
     act(() => {
       pointer(handle, 'pointerdown', 130);
-      // 300px/15s：13s 处 clientX = 100 + 13*20 = 360，越过右缘
       pointer(overlayEl(), 'pointermove', 360);
     });
     expect(callbacks.onSelectionChange).toHaveBeenLastCalledWith({
@@ -143,7 +128,6 @@ describe('抓手拖拽：换算与钳制', () => {
     expect(callbacks.onSelectionChange).toHaveBeenLastCalledWith({ start: 2, end: 15 });
     act(() => {
       pointer(handle, 'pointerdown', 360);
-      // 2s 处 clientX = 140，2.1s 处 = 142：钳回 start+0.1
       pointer(overlayEl(), 'pointermove', 141);
     });
     expect(callbacks.onSelectionChange).toHaveBeenLastCalledWith({
@@ -199,9 +183,8 @@ describe('定位条（选区内）：点按定位与按住拖拽', () => {
     const selection = container!.querySelector('[data-testid="audio-trim-selection"]')!;
     stubCapture(selection);
     act(() => {
-      // clientX 200 → (200-100)/300*15 = 5s，在选区内
       pointer(selection, 'pointerdown', 200);
-      pointer(overlayEl(), 'pointermove', 260); // 8s
+      pointer(overlayEl(), 'pointermove', 260);
       pointer(overlayEl(), 'pointerup', 260);
     });
     expect(callbacks.onSeekStart).toHaveBeenCalledTimes(1);
@@ -216,7 +199,6 @@ describe('定位条（选区内）：点按定位与按住拖拽', () => {
     const selection = container!.querySelector('[data-testid="audio-trim-selection"]')!;
     stubCapture(selection);
     act(() => {
-      // 选区框左缘 clientX 140 → 2s（钳下界）
       pointer(selection, 'pointerdown', 135);
       pointer(overlayEl(), 'pointerup', 135);
     });

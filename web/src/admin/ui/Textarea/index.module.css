@@ -7,10 +7,8 @@
   background: var(--admin-surface);
   color: var(--admin-text);
   font-size: var(--admin-font-sm);
-  /* 等宽 + 允许换行：这里装的多半是 JSON / 模板正文，逐行对照比连排好读 */
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   line-height: 1.6;
-  /* 只允许纵向拉伸：横向会让它撑破所在栅格 */
   resize: vertical;
   transition:
     border-color 0.15s ease,

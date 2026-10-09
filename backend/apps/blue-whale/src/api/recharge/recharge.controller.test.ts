@@ -5,10 +5,6 @@ import { IS_PUBLIC_KEY } from "@lib/infra/decorators/public.decorator.js";
 import { SESSION_COOKIE_NAME } from "@lib/shared/session/cookie.js";
 import { RechargeController } from "./recharge.controller.js";
 
-// 充值接口层（模块 B 的自定义充值 + 原有的档位下单）。
-// 这里钉的是**入参解析与路由鉴权姿态**，不是业务（业务在 RechargeService 里测）：
-//   · 「游客不建单」靠的是这条路由**没有 @Public** —— AuthGuard 在进 handler 之前就 401 了；
-//   · `/recharge/custom` 恰恰相反，游客必须能拿到展示项（PRD §7.4「游客可见不可买」）。
 
 const OFFER = {
   enabled: true,
@@ -73,8 +69,6 @@ const user = { userId: "9001" } as never;
 
 describe("RechargeController — 路由鉴权姿态", () => {
   it("★ 下单**不是**公开路由：游客点击购买会被 AuthGuard 401 挡在 handler 之外（§7.6「游客购买」）", () => {
-    // 公开与否写在装饰器元数据上：这条断言等价于「没登录的人根本执行不到这段业务代码」，
-    // 也就是「游客只能进入登录/注册，不创建订单」
     expect(Reflect.getMetadata(IS_PUBLIC_KEY, RechargeController.prototype.order)).toBeFalsy();
   });
 
@@ -108,8 +102,6 @@ describe("RechargeController.tiers — 档位目录 + 权限信号（PRD §6.3�
           original_price: 500,
           can_purchase: null,
           denied_hint: "当前账号暂不可购买该档位",
-          // ⚠️ 有效期**逐档**回给前端（C-1）：卡片上要标这一档自己的那个数，
-          // 页面级写死任何一个年数都会对某些档位变成假话
           credits_valid_months: 6,
         },
       ],
@@ -129,8 +121,6 @@ describe("RechargeController.tiers — 档位目录 + 权限信号（PRD §6.3�
       reqWith({ [SESSION_COOKIE_NAME]: "tok" }) as never,
     );
 
-    // 判定必须按**这个人**来：@Public 路由上 AuthGuard 不填 request.user，
-    // 所以这里靠会话 cookie 自己解析（与 customOffer 同一条做法）
     expect(listTiers).toHaveBeenCalledWith(9001);
     expect(res.data).toMatchObject({
       tiers: [{ can_purchase: false, denied_hint: "该档位仅限内测用户" }],
@@ -152,7 +142,6 @@ describe("RechargeController.tiers — 档位目录 + 权限信号（PRD §6.3�
     const tiers = (res.data as { tiers: { id: string; credits_valid_months: number }[] })
       .tiers;
 
-    // 配 6 个月的那一档回 6，配 24 的回 24 —— 前端据此标在各自的卡片上
     expect(tiers.map((t) => [t.id, t.credits_valid_months])).toEqual([
       ["7", 6],
       ["8", 24],

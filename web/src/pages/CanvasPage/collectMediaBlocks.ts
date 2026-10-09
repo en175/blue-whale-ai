@@ -1,12 +1,10 @@
 import type { SessionContentBlock } from '@/api/agentSessions';
 
-/** 画布图集 / 参考图条目。上传完成后必须带 `assetId`，@ 提及才能发成 `asset_ref`。 */
 export type CanvasGalleryRef = {
   id: string;
   src: string;
   type?: 'image' | 'video';
   assetId?: string;
-  /** 派生标记：资产在 snapshot 字典中查不到（素材已被删除），保存时剥离 */
   missing?: boolean;
 };
 
@@ -26,18 +24,10 @@ function galleryAssetId(item: { assetId?: unknown; asset_id?: unknown }): string
   return readAssetId(item.assetId ?? item.asset_id);
 }
 
-/**
- * 把画布节点上的媒体收成会话内容块，供 Agent 输入框 @ 提及发送。
- *
- * 图集条目若带着资产库身份，块上必须留下 `asset_id`：发送时才能走 `asset_ref`，
- * 用户气泡和对话历史才能按同一份身份还原缩略图（IKBCV3）。
- */
 export function collectMediaBlocks(node: CollectableNode, chipId: string): SessionContentBlock[] {
   const blocks: SessionContentBlock[] = [];
   const d = node.data ?? {};
 
-  // IKDLQJ：textNode 与生成卡正文不再经这里进对话——正文统一走「对话引用快照」（quoteConversation.ts），
-  // 这里只继续收集显式挂在节点/卡上的媒体引用。
 
   if (node.type === 'mediaNode') {
     const src = d.src as string | undefined;
@@ -117,8 +107,6 @@ export function collectMediaBlocks(node: CollectableNode, chipId: string): Sessi
       } | undefined;
 
       if (gc) {
-        // IKDLQJ：不再把旧 revision 指针（cardId/shotNo）当引用内容发出去；
-        // 卡的当前提示词由「对话引用快照」捕获发送，这里只保留显式挂载的素材引用。
         if (gc.assetRefItems && gc.assetRefItems.length > 0) {
           for (const ref of gc.assetRefItems) {
             blocks.push({

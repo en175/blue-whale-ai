@@ -30,21 +30,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * 出站协议 + 图生图别名分流测试（契约 §11 / ADR-0085 / IKF4LI）。
- * <p>
- * 规格：
- * <ul>
- *   <li>{@code image_protocol=inline-image}（含缺省）——行配了 {@code features.i2i_model_name}
- *       <strong>且</strong>本 job 带参考图时，出站 model 用别名（banana 现用）。</li>
- *   <li>{@code image_protocol=openai-images}——官方协议，模型名恒为 canonical，
- *       <strong>别名不生效</strong>（文生图/图生图同一档位，端点分流代替换名）。</li>
- * </ul>
- * canonical 不变量：只换出站请求字段，{@code job.input.model_id} 不动（计费/重试/恢复不受影响）。
- * <p>
- * 断言方式：generate stub 抛 provider_failed（retry_count=0 → requeue，不触发转存），
- * 用 ArgumentCaptor 钉住出站 protocol 与 model 实参。
- */
 @ExtendWith(MockitoExtension.class)
 class ImageJobProcessorI2iAliasTest {
 
@@ -61,7 +46,6 @@ class ImageJobProcessorI2iAliasTest {
 
     private ImageJobProcessor processor;
 
-    /** 出站实参快照（protocol + model）。 */
     private record Outbound(ImageProtocol protocol, String model) {}
 
     @BeforeEach
@@ -75,9 +59,6 @@ class ImageJobProcessorI2iAliasTest {
         return captureOutbound(refs, featuresJson, "seedream-image", "{}");
     }
 
-    /** @param channel 能力行的 {@code channel} 列——出站协议与解析器都由它决定（不再读 features 键）。
-     *  @param requestMapping gpt / banana 渠道必须给一张能解出尺寸的映射表（空表会先落到
-     *         `empty_mapping` 而根本走不到 provider，那时断言 protocol 只会看到「零次调用」）。 */
     private Outbound captureOutbound(List<String> refs, String featuresJson, String channel) {
         return captureOutbound(refs, featuresJson, channel, "{}");
     }
@@ -134,7 +115,6 @@ class ImageJobProcessorI2iAliasTest {
         return new Outbound(protocolCaptor.getValue(), modelCaptor.getValue());
     }
 
-    // ========== 缺省 / inline 形态 ==========
 
     @Test
     @DisplayName("未声明协议（缺省）+ 别名 + 参考图 → 走 inline，出站 model 用别名")
@@ -183,9 +163,7 @@ class ImageJobProcessorI2iAliasTest {
                 .isEqualTo(ALIAS);
     }
 
-    // ========== 官方协议（渠道 gpt-image-openai） ==========
 
-    /** 一张能解出尺寸的 gpt 交叉格（渠道是 gpt 系时必须给，否则先落 empty_mapping）。 */
     private static final String GPT_MATRIX = "{\"matrix\":{\"1024x1024\":{\"1:1\":\"2048x2048\"}}}";
 
     @Test

@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-/* IKHHW8 连线类型菜单点外关闭回归锁：监听随挂载同步挂上且只挂一次，父级重渲染换 onClose
-   引用不脱离；弹出当次交互（pointerup/click）不关闭；菜单容器内按下与禁用项不触发关闭。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,8 +37,6 @@ function rerenderMenu(onClose: () => void, enabled: Set<ConnectGenKind>) {
   });
 }
 
-/** flush 挂载 effect。注意：jsdom 下异步 act 收尾会顺带执行宏任务（setTimeout(0) 也会被跑掉），
- *  故「监听同步挂载、无 setTimeout 空窗」由下面 rerender 用例的同步 act 锁定，本函数单独锁不住。 */
 async function flushEffects() {
   await act(async () => {
     await Promise.resolve();
@@ -71,7 +67,6 @@ describe('ConnectTypeMenu 点外关闭监听生命周期（IKHHW8）', () => {
     const { enabled } = await renderMenu();
     await flushEffects();
     const nextOnClose = vi.fn();
-    // 修复前：引用一变立即摘监听、setTimeout(0) 后才重挂，此刻同步按下落进脱离窗口
     rerenderMenu(nextOnClose, enabled);
     pointerDownOutside();
     expect(nextOnClose, '重渲染后的同步 pointerdown 仍应触发关闭（新 onClose）').toHaveBeenCalledTimes(1);

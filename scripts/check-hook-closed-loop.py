@@ -19,8 +19,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 QUERY_SCRIPT = REPO_ROOT / "scripts" / "query-hook-audit.py"
 KIMI_SHIM_SRC = REPO_ROOT / ".kimi-code" / "hooks" / "blue-whale-hook.sh"
 TASK_BRANCH = "feature/ik10dx-audit"
-# 解析真实 bash（Windows Git Bash 在 E:\Git\usr\bin\bash.exe，POSIX 为 /bin/bash 或 /usr/bin/bash）。
-# 硬编码 /bin/bash 在 Windows 原生 Python 下必挂（Bug：MSYS 挂载不构成原生可执行路径）。
 BASH = shutil.which("bash")
 
 
@@ -84,9 +82,6 @@ def run_git(repo: Path, *args: str) -> str:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
-        # 显式 utf-8：Windows 原生 Python 默认 cp936，与 subprocess text 模式的默认本地
-        # 编码解码（与 sync/start-task 同根因）；POSIX 本就 UTF-8，no-op。errors=replace
-        # 兜底防止任一非 UTF-8 字节让读线程抛 UnicodeDecodeError（result 变 None）。
         encoding="utf-8",
         errors="replace",
     )
@@ -140,7 +135,6 @@ def load_chain(platform: Platform) -> ConfigChain:
 
 
 def load_kimi_chain(platform: Platform) -> ConfigChain:
-    """Load the Kimi CLI chain from the TOML snippet ([[hooks]] flat list)."""
     try:
         import tomllib
     except ModuleNotFoundError:
@@ -243,8 +237,6 @@ def native_input(
             "Write",
         )
     if chain.platform.kimi:
-        # Kimi CLI 0.26 实测载荷：关联 id 字段是 tool_call_id（无 tool_use_id），
-        # Write/Edit 目标路径参数是 path（无 file_path）。
         tool = "Write" if operation == "create" else "Edit"
         return (
             {
@@ -282,9 +274,6 @@ def execute(
     env["CLAUDE_PROJECT_DIR"] = str(REPO_ROOT)
     if env_extra:
         env.update(env_extra)
-    # 命令写入临时 .sh 再让 bash 直接执行，避免 Windows argv 传输阶段
-    # MSYS 对 `"$CLAUDE_PROJECT_DIR"/…` 内嵌引号的破坏（bash -c 报
-    # 「unexpected EOF while looking for matching '"'」）。POSIX 下等价。
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8"
     ) as script:
@@ -299,9 +288,6 @@ def execute(
             input=json.dumps(payload, ensure_ascii=False),
             capture_output=True,
             text=True,
-            # 显式 utf-8：Windows 原生 Python 默认 cp936，解码 Git Bash 的 UTF-8 中文
-            # BLOCKED 消息必抛 UnicodeDecodeError（读线程异常 → result.stderr=None →
-            # verify 里 `not in None` TypeError）。POSIX 本就 UTF-8，no-op。
             encoding="utf-8",
             errors="replace",
         )
@@ -314,7 +300,6 @@ def query(project_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
         [sys.executable, str(QUERY_SCRIPT), "--project-dir", str(project_dir), *args],
         capture_output=True,
         text=True,
-        # 显式 utf-8：与 execute/run_git 同根因（subprocess text 模式默认 cp936）。
         encoding="utf-8",
         errors="replace",
     )
@@ -367,8 +352,6 @@ def verify(platforms: tuple[Platform, ...]) -> None:
     expected_ids: set[str] = set()
     with tempfile.TemporaryDirectory() as temp:
         master, release, task = setup_fixture(Path(temp), platforms)
-        # Kimi CLI shim 安装到临时 HOME：command 中的 $HOME 指向它，
-        # shim 再按会话 cwd(REPO_ROOT) 的 opt-in 标记路由到权威 Gate。
         kimi_home = Path(temp) / "kimi-home"
         if any(platform.kimi for platform in platforms):
             shim_dst = kimi_home / ".kimi-code" / "hooks" / "blue-whale-hook.sh"
@@ -486,9 +469,6 @@ def configured_platforms(args: argparse.Namespace) -> tuple[Platform, ...]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Windows 原生 Python 默认 stdout/stderr 为 cp936（GBK），中文/方块字符 print
-    # 输出 GBK 字节，被 test-hooks.sh 的 UTF-8 needle grep 断言漏配（与 sync/start-task
-    # 同根因的输出方向）。强制改 UTF-8；POSIX 本就 UTF-8，reconfigure 为 no-op。
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

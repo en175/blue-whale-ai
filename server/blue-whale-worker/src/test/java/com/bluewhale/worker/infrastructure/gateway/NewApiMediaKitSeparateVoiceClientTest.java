@@ -21,18 +21,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-/**
- * NewApiMediaKitSeparateVoiceClient 接口级 mock 网关测试（IKHA2J；模板
- * NewApiMediaKitExtractAudioClientTest）。
- * <p>
- * 覆盖：出站映射（官方 PDF「第 1 步：提交任务」+「进阶使用：选择分离场景」节：scene 四档
- * 出站换算官方首字母大写枚举 + output_format 同名同值——**不是 extract-audio 的 format**、
- * video_url / audio_url 按源类型分叉、对客模型名、契约 SUBMIT_PATH 路径）、标准请求头
- * 三元组、submit 响应 task_id 解析与缺失兜底、官方错误结构 error{code,type,message,param}
- * 的 §5 分类与上游原因透传、poll 端点路径与三态解析（completed 两轨 / 三轨结果字段、
- * failed、中间态，result.duration）、HTTP 错误携带状态（瞬时判定输入）。不连真实网关。
- * 参数名以火山官方 PDF「人声背景音分离」节为准。
- */
 class NewApiMediaKitSeparateVoiceClientTest {
 
     private HttpServer server;
@@ -48,7 +36,6 @@ class NewApiMediaKitSeparateVoiceClientTest {
 
     @BeforeEach
     void startServer() throws Exception {
-        // 官方「请求成功后」示例形状（PDF「第 1 步：提交任务」节逐字，task_id 前缀 separate-voice）
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-separate-voice-12345678\","
                 + "\"request_id\":\"20260417110000A1B2C3D4E5F6G7H8\"}");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -84,12 +71,10 @@ class NewApiMediaKitSeparateVoiceClientTest {
                 "sk-token", "https://example.com/source_video.mp4", true, scene, outputFormat);
     }
 
-    // ========== submit：出站映射（官方 PDF「第 1 步」+「选择分离场景」节） ==========
 
     @Test
     @DisplayName("契约 SUBMIT_PATH 路径 + 对客模型名 + video_url + scene 四档出站映射 + output_format 同名透传")
     void submitMapsOfficialParamsAllScenes() {
-        // 四档产品小写键全部出站映射官方首字母大写枚举（契约 SCENE_UPSTREAM_MAP 单源）
         String[][] cases = {
                 {"audio", "Audio"}, {"music", "Music"}, {"drama", "Drama"}, {"narrate", "Narrate"}};
         for (String[] c : cases) {
@@ -102,7 +87,6 @@ class NewApiMediaKitSeparateVoiceClientTest {
             assertThat(body).contains("\"video_url\":\"https://example.com/source_video.mp4\"");
             assertThat(body).contains("\"scene\":\"" + c[1] + "\"");
             assertThat(body).contains("\"output_format\":\"aac\"");
-            // 出站键是 output_format（不是 extract-audio 的 format）；不发可选参数
             assertThat(body).doesNotContain("\"format\":");
             assertThat(body).doesNotContain("media_output_destination");
             assertThat(body).doesNotContain("client_token");
@@ -150,7 +134,6 @@ class NewApiMediaKitSeparateVoiceClientTest {
                 .isEqualTo(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== submit：响应与错误分类（官方错误结构 error{code,message,param,type}） ==========
 
     @Test
     @DisplayName("网关 400（官方同步错误结构）→ 抛错，上游可读原因透传到 message")
@@ -216,12 +199,10 @@ class NewApiMediaKitSeparateVoiceClientTest {
                 .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
     }
 
-    // ========== poll：端点路径与三态解析（官方「第 2 步：获取结果」节） ==========
 
     @Test
     @DisplayName("poll completed 二分法（Audio/Music）：GET 查询路径拼 taskId，解析两轨 URL 与 duration")
     void pollCompletedParsesTwoTracks() {
-        // 官方 PDF「第 2 步」示例逐字形状（二分法 result 仅 voice/background 两键）
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-separate-voice-12345678\","
                 + "\"task_type\":\"separate-voice\",\"status\":\"completed\","
                 + "\"result\":{\"voice_audio_url\":\"https://example.volcvideo.com/voice.aac?auth_key=...\","
@@ -249,7 +230,6 @@ class NewApiMediaKitSeparateVoiceClientTest {
     @Test
     @DisplayName("poll completed 三分法（Drama/Narrate）：解析 voice/music/sfx 三轨 URL")
     void pollCompletedParsesThreeTracks() {
-        // 官方 PDF「选择分离场景」节：三分法 result 含 voice/music/sfx 三键（无 background）
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-separate-voice-8\","
                 + "\"task_type\":\"separate-voice\",\"status\":\"completed\","
                 + "\"result\":{\"voice_audio_url\":\"https://volc/voice.aac\","

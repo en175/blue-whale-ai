@@ -4,14 +4,11 @@ import type { VideoHoverPreviewInput } from './hoverPreview';
 import type { MediaGenStatus } from './index';
 import { isMultiNodeSelection } from '../../useSoloNodeSelected';
 
-/** IKJEI0 类型同源守卫：genStatus 与 MediaGenStatus 必须双向可赋值，
- *  防字段被改回手写并集（漏跟新态，IKIZQB 发作模式）——回退即本文件编译红 */
 const _genStatusCoversMediaGenStatus: VideoHoverPreviewInput['genStatus'] = undefined as MediaGenStatus | undefined;
 const _mediaGenStatusCoveredByGenStatus: MediaGenStatus | undefined = undefined as VideoHoverPreviewInput['genStatus'];
 void _genStatusCoversMediaGenStatus;
 void _mediaGenStatusCoveredByGenStatus;
 
-/** 未选中成品视频卡基准样本：满足起播门的全部条件 */
 const eligibleBase = {
   mediaType: 'video' as const,
   src: 'https://x/main.mp4',

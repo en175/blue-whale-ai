@@ -29,9 +29,6 @@ function childEnvironment() {
   return environment;
 }
 
-// Windows 上 node spawnSync(shell:false) 无法执行 .cmd/.bash shim（pnpm 是 pnpm.cmd）。
-// 给假 pnpm 所在的 bin 补一个 pnpm.cmd，委托 Git Bash 的 bash 跑同目录的 bash 假脚本，并透传退出码。
-// 注意必须多行写 if errorlevel（单行 `& if errorlevel 1` 链不会在 bash 后取到 errorlevel）。
 function installPnpmCmdShim(bin) {
   if (process.platform !== "win32") return;
   writeFileSync(
@@ -40,7 +37,6 @@ function installPnpmCmdShim(bin) {
   );
 }
 
-// PATH 拼接：Windows 用 `;`（cmd.exe/CreateProcess），POSIX 用 `:`。走 CLI（node→cmd）的 fixture 必须用本函数。
 function withFakePnpmOnPath(fakeBin) {
   return `${fakeBin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH}`;
 }
@@ -152,8 +148,6 @@ test("previous changed-only receipts cannot satisfy complete application verific
 });
 
 test("classifies backend BFF sources as scoped/backend", async () => {
-  // 整棵 backend/ 树此前没有任何归类规则：NODE_SOURCE 只认 `^(?:apps|packages)/`，
-  // 于是改 BFF 的 controller 落进「未归类」，门禁一条 backend 的 typecheck 或测试都不跑。
   const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
   const classification = classifyChanges([
@@ -176,9 +170,6 @@ test("classifies backend BFF sources as scoped/backend", async () => {
 });
 
 test("classifies the Java worker as its own area and actually runs Maven", async () => {
-  // 整棵 server/blue-whale-worker/ 树此前没有任何归类规则：改它会落进「未归类」兜底升为 full，
-  // 看似安全，但计划里一条 Java 命令都没有——TS 侧有门禁、Java 侧静默裸奔。
-  // 与 backend / web/scripts 那两个洞同形：有验证手段，只是选择器够不着。
   const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
   const classification = classifyChanges([
@@ -196,17 +187,12 @@ test("classifies the Java worker as its own area and actually runs Maven", async
       (command) =>
         command.startsWith("mvn ") &&
         command.includes("server/pom.xml") &&
-        // ⚠️ 必须**从聚合根**跑并带 -pl worker -am：worker 依赖 server/blue-whale-common，
-        //    直接 `mvn -f server/blue-whale-worker/pom.xml` 会解析不到模块内依赖。
-        //    这条断言就是在钉住这一点——否则门禁会静默跑不起来。
         command.includes("-pl blue-whale-worker") &&
         command.includes("-am"),
     ),
     "worker-java 必须从聚合根用 -pl worker -am 跑（它依赖 server/blue-whale-common）",
   );
 
-  // worker-java 是产品生成运行时：PR 阶段按产品影响路径升 full。
-  // 补归类前它靠「未归类」兜底才升 full——归类后必须仍升 full，不能被这次修复顺带降级。
   const prClassification = classifyChanges(
     ["server/blue-whale-worker/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java"],
     { stage: "pr" },
@@ -215,8 +201,6 @@ test("classifies the Java worker as its own area and actually runs Maven", async
 });
 
 test("classifies the agent route manifest copy as web, not unclassified", async () => {
-  // web/src/api/agent-rest-routes.v1.json 是 agent 路由清单的副本，agentRoutes.test.ts 正在断言它。
-  // WEB_SOURCE 原来只认 ts|tsx|css，改了副本却不跑 web 测试，等于没有守卫。
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   const classification = classifyChanges(["web/src/api/agent-rest-routes.v1.json"]);
@@ -225,8 +209,6 @@ test("classifies the agent route manifest copy as web, not unclassified", async 
 });
 
 test("no path in a mixed real-world change set falls through unclassified", async () => {
-  // 兜底那条分支不会失败，只会把 reason 写成「change scope is not classified」并照常放行——
-  // 所以「有没有漏网」必须由这条测试盯着，而不是靠人读 reason。
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   const files = [
@@ -324,8 +306,6 @@ test("classifies skill Markdown as documentation (docs) at completion and PR sta
   });
 });
 
-// !905 发布复盘：`.agents/commands/*.md` 此前没有任何归类规则，PR 阶段被「未归类」兜底升为
-// full，治理类改动误升全量验证。slash command 与技能 SKILL.md 同为入口文档，分类必须一致。
 test("classifies slash command Markdown as documentation like skill Markdown", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
@@ -343,7 +323,6 @@ test("classifies slash command Markdown as documentation like skill Markdown", a
       tier: "docs",
       reasons: ["only documentation files changed"],
     });
-    // 与技能 SKILL.md 的分类逐字段一致，且不再落「未归类」兜底。
     assert.deepEqual(
       classification,
       classifyChanges([".agents/skills/ponytail/SKILL.md"], { stage: "pr" }),
@@ -477,7 +456,6 @@ test("classifies operational scripts without product acceptance", async () => {
     },
   );
 
-  // IK9VZ0：对账脚本归 operations 分类（只读运维工具）。
   assert.deepEqual(
     classifyChanges(["scripts/reconcile-cost-reservations.mjs"], { stage: "pr" }),
     {
@@ -487,7 +465,6 @@ test("classifies operational scripts without product acceptance", async () => {
     },
   );
 
-  // IKAXDT：画廊图片压缩换链脚本归 operations 分类（一次性维护工具，管理员会话鉴权）。
   assert.deepEqual(
     classifyChanges(["scripts/compress-gallery-images.mjs"], { stage: "pr" }),
     {
@@ -507,12 +484,6 @@ test("rejects unknown executable paths instead of escalating to full", async () 
   );
 });
 
-// IKACK2：`web/scripts/` 是本轮新开的目录，此前没有任何规则覆盖，于是它命中 EXECUTABLE_FILE
-// 却分不了类，`--stage pr` 必抛 UNCLASSIFIED_PATH。补分类而不是放宽那条规矩——「归不了类就停下」
-// 本身是对的，缺的是这一条归属。
-// IKDIDO：web/e2e 的 Playwright 规格与 fixture 此前没有归类规则，提交后 PR 阶段必被兜底升级为
-// full（`unclassified scope requires full verification`）。补分类而不是接受升级——它们的题材是
-// web 产品行为，定向验证就是 web 那套（typecheck + lint + vitest）。
 test("classifies web e2e specs and fixtures as web", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
@@ -530,7 +501,6 @@ test("classifies web e2e specs and fixtures as web", async () => {
     expected,
   );
 
-  // 与 web 源码同区：一起改时不该分裂出第二个 area。
   assert.deepEqual(
     classifyChanges(["web/e2e/media-node-layout.e2e.ts", "web/src/pages/CanvasPage/index.tsx"], {
       stage: "pr",
@@ -551,7 +521,6 @@ test("classifies web tooling scripts as web", async () => {
     },
   );
 
-  // 与 web 源码同区：一起改时不该分裂出第二个 area。
   assert.deepEqual(
     classifyChanges(["web/scripts/check-agent-routes.mjs", "web/src/api/agentRoutes.ts"], {
       stage: "pr",
@@ -563,7 +532,6 @@ test("classifies web tooling scripts as web", async () => {
     },
   );
 
-  // 归类只覆盖 web 自己的脚本目录，不是「凡叫 scripts 就放行」。
   assert.throws(
     () => classifyChanges(["web/tools/some-new-tool.mjs"], { stage: "pr" }),
     /UNCLASSIFIED_PATH: web\/tools\/some-new-tool\.mjs/,
@@ -913,8 +881,6 @@ test("full verification reports each existing stage without changing the command
   try {
     const fakeBin = join(directory, "bin");
     const stageLog = join(directory, "stages.jsonl");
-    // 契约产物 backend/libs/contracts/gen/ 不入库，脚本在缺失时已改为提前指路退出；
-    // 该用例必须在自带产物目录的受控 cwd 里跑，不依赖本机是否恰好生成过契约。
     const worktree = join(directory, "worktree");
     mkdirSync(fakeBin);
     mkdirSync(join(worktree, "backend", "libs", "contracts", "gen", "billing"), {

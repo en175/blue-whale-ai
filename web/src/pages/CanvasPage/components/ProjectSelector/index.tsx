@@ -1,16 +1,11 @@
-/* ============================================
- * ProjectSelector 项目选择器：项目列表下拉切换
- * ============================================ */
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Trash2, FolderOpen, SquarePen, FolderPlus, Pin, PinOff } from 'lucide-react';
 import { defaultProjectName } from '@/lib/projectName';
 import styles from './index.module.css';
 
-/** 项目数据 */
 export interface CanvasProject {
   id: string;
   name: string;
-  /** 已置顶（pinned_at 非空）；缺省视为未置顶 */
   pinned?: boolean;
 }
 
@@ -54,7 +49,6 @@ export default function ProjectSelector({
     setEditingName('');
   };
 
-  /** 保存重命名；名称为空时回落到当前时间 */
   const saveRename = () => {
     const id = editingIdRef.current;
     if (!id) return;
@@ -70,7 +64,6 @@ export default function ProjectSelector({
     setEditingName(project.name);
   };
 
-  // 点击外部关闭；重命名中途收起时一并提交（空名用当前时间）
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -82,7 +75,6 @@ export default function ProjectSelector({
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  /** 确认删除 */
   const confirmDelete = () => {
     if (deleteTarget) {
       onDelete(deleteTarget.id);
@@ -92,7 +84,7 @@ export default function ProjectSelector({
 
   return (
     <div className={styles.wrapper} ref={ref}>
-      {/* 触发按钮 */}
+      {}
       <button
         className={styles.trigger}
         onClick={() => {
@@ -100,7 +92,7 @@ export default function ProjectSelector({
           setOpen(!open);
         }}
       >
-        {/* 当前项目名 */}
+        {}
         <span className={styles.currentName}>
           {current?.name ?? '未命名项目'}
         </span>
@@ -111,10 +103,10 @@ export default function ProjectSelector({
         />
       </button>
 
-      {/* 下拉面板 */}
+      {}
       {open && (
         <div className={styles.dropdown}>
-          {/* 项目列表 */}
+          {}
           <div className={styles.projectList}>
             {projects.map((project) => (
               <div
@@ -154,7 +146,7 @@ export default function ProjectSelector({
                   <span className={styles.projectName}>{project.name}</span>
                 )}
 
-                {/* 置顶项目常显图钉标记 */}
+                {}
                 {project.pinned && (
                   <Pin
                     size={12}
@@ -164,7 +156,7 @@ export default function ProjectSelector({
                   />
                 )}
 
-                {/* 悬停显示置顶按钮；点击不关闭下拉，可连续操作 */}
+                {}
                 <button
                   className={styles.pinBtn}
                   onClick={(e) => {
@@ -180,7 +172,7 @@ export default function ProjectSelector({
                   )}
                 </button>
 
-                {/* 悬停显示删除按钮 */}
+                {}
                 <button
                   className={styles.deleteBtn}
                   onClick={(e) => {
@@ -195,10 +187,10 @@ export default function ProjectSelector({
             ))}
           </div>
 
-          {/* 分隔线 */}
+          {}
           <div className={styles.divider} />
 
-          {/* 底部操作按钮 */}
+          {}
           <div className={styles.actions}>
             <button
               className={styles.actionBtn}
@@ -215,10 +207,10 @@ export default function ProjectSelector({
         </div>
       )}
 
-      {/* 删除确认弹窗 */}
+      {}
       {deleteTarget && (
         <div className={styles.modalOverlay} onClick={() => setDeleteTarget(null)}>
-          {/* ESC 守卫靠这两个属性识别弹层，见 ConfirmModal 里的说明（审查 W·A3）。 */}
+          {}
           <div
             className={styles.modal}
             role="dialog"

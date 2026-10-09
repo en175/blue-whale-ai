@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* IKGW1H 图片卡画质工具横排「裁切」入口（IKH3XZ）与模式进出骨架：点「裁切」把目标图片卡置为裁切
-   编辑态（CanvasPage cropTargetNodeId state + 源卡渲染期注入 cropEditing 标记）、进入时关闭
-   生成面板、单目标、与擦除互斥；Esc / 点画布空白 / 点其他卡三路退出丢弃不留痕（面板取消路由
-   面板 UI 由 IKGW1N 接 exitCropMode）。渲染模式沿用 genPanelDismiss.test.tsx（可真实开面板）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -62,7 +58,6 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** PromptRefEditor 打桩：textarea 输入透传结构化 onChange（与 genPanelDismiss 同款） */
 vi.mock('./components/PromptRefEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
@@ -295,8 +290,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 组合夹具：普通素材 m1（门槛内正常图 1600×900 / png，可擦除可裁切）/ 第二素材 m2 /
- *  图片草稿 d1 / 视频草稿 v1 / 音频草稿 au1 / 文生文卡 tg1 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -405,7 +398,6 @@ async function clickNode(id: string) {
   });
 }
 
-/** 走图片节点画质工具横排「裁切」按钮的入口（回调挂在节点 data 上，IKH3XZ） */
 async function cropImage(id: string) {
   const node = fullNode(id);
   await act(async () => {
@@ -413,26 +405,22 @@ async function cropImage(id: string) {
   });
 }
 
-/** 裁切编辑态标记（渲染期注入，不持久化）：目标源图卡 data.cropEditing === true */
 function cropEditing(id: string): boolean {
   const node = (flowProps.current.mediaNodes as Node[] | undefined)?.find((n) => n.id === id);
   return (node?.data as Record<string, unknown> | undefined)?.cropEditing === true;
 }
 
-/** 退出后丢弃不留痕 + 源卡保留：无新卡、无连线、媒体节点数不变（tg1 为文本节点在 textNodes） */
 function expectDiscardClean() {
   expect(cropEditing('m1')).toBe(false);
   expect((flowProps.current.mediaNodes as Node[]).length).toBe(5);
   expect(flowProps.current.edges).toEqual([]);
 }
 
-/** 面板开关标记（各面板模型选择器/标题文案仅在该面板打开时渲染） */
 const imageOpen = () => container.textContent!.includes('测试生图模型');
 const videoOpen = () => container.textContent!.includes('测试视频模型');
 const audioOpen = () => container.textContent!.includes('测试音频模型');
 const textGenOpen = () => container.textContent!.includes('文本生成 · 文生文');
 
-/** 擦除编辑态工具条（IKGOTB）：出现即擦除编辑态在 */
 const eraseToolbar = () => document.body.querySelector('[data-testid="erase-toolbar"]');
 
 async function pressEscape() {
@@ -445,7 +433,6 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   sessionStorage.clear();
-  // jsdom 无 scrollTo 实现：面板切换时调用，补空实现
   Element.prototype.scrollTo = () => {};
   seedDoc();
   apiMocks.fetchGenerationModels.mockImplementation(async (type?: string) => {
@@ -469,7 +456,6 @@ describe('IKGW1H 点「裁切」进入裁切编辑态（模式进出骨架）', 
 
     await cropImage('m1');
     expect(cropEditing('m1')).toBe(true);
-    // 源卡保留（无建卡、无连线）
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(5);
     expect(flowProps.current.edges).toEqual([]);
   });
@@ -477,7 +463,6 @@ describe('IKGW1H 点「裁切」进入裁切编辑态（模式进出骨架）', 
   it('进入裁切关闭生成面板：图片/视频/音频/文本逐一打开后被进入裁切关闭', async () => {
     await renderPage();
 
-    // 图片面板
     await clickNode('d1');
     await vi.waitFor(() => expect(imageOpen()).toBe(true));
     await cropImage('m1');
@@ -485,7 +470,6 @@ describe('IKGW1H 点「裁切」进入裁切编辑态（模式进出骨架）', 
     expect(cropEditing('m1')).toBe(true);
     await pressEscape();
 
-    // 视频面板
     await clickNode('v1');
     await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
     await cropImage('m1');
@@ -493,7 +477,6 @@ describe('IKGW1H 点「裁切」进入裁切编辑态（模式进出骨架）', 
     expect(cropEditing('m1')).toBe(true);
     await pressEscape();
 
-    // 音频面板
     await clickNode('au1');
     await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: 3000 });
     await cropImage('m1');
@@ -501,7 +484,6 @@ describe('IKGW1H 点「裁切」进入裁切编辑态（模式进出骨架）', 
     expect(cropEditing('m1')).toBe(true);
     await pressEscape();
 
-    // 文本生成面板
     await clickNode('tg1');
     await vi.waitFor(() => expect(textGenOpen()).toBe(true));
     await cropImage('m1');
@@ -568,13 +550,11 @@ describe('IKGW1H 退出裁切：丢弃不留痕，源卡保留', () => {
     await renderPage();
     await cropImage('m1');
 
-    // 空选中：不退出
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [] });
     });
     expect(cropEditing('m1')).toBe(true);
 
-    // 单选其他卡：退出并丢弃
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [fullNode('m2')] });
     });
@@ -593,13 +573,10 @@ describe('IKGW1H 退出裁切：丢弃不留痕，源卡保留', () => {
   });
 });
 
-/* ============ IKGW1N 裁切框与比例面板接线（状态提升在 CanvasPage） ============ */
 
-/** m1：1600×900 源图 → 内容盒 280×(280*16/9)，bounds 顶偏移 22.5（独立手算期望，不对拍组件侧函数） */
 const M1_DISPLAY_W = 280 * (16 / 9);
 const M1_BOUNDS = { x: 0, y: 22.5, width: M1_DISPLAY_W, height: 280 };
 
-/** 当前传给 FlowCanvas 的裁切框覆盖层 props 形态（Canvas 打桩透出） */
 interface CropFramePropShape {
   bounds: { x: number; y: number; width: number; height: number };
   rect: { x: number; y: number; width: number; height: number };
@@ -632,7 +609,6 @@ describe('IKGW1N 裁切框挂载与默认态', () => {
     expect(frame.bounds.width).toBeCloseTo(M1_BOUNDS.width, 6);
     expect(frame.bounds.height).toBeCloseTo(M1_BOUNDS.height, 6);
     expect(frame.rect).toEqual(frame.bounds);
-    // 64 × (显示宽 497.78 / 自然宽 1600) ≈ 19.91 显示像素
     expect(frame.minSide).toBeCloseTo(64 * (M1_DISPLAY_W / 1600), 6);
   });
 
@@ -671,7 +647,6 @@ describe('IKGW1N 比例面板接线（面板真实渲染）', () => {
 
     const frame = cropFrameProp()!;
     expect(frame.preset).toBe('4:3');
-    // 最大内接：高取满 280，宽 = 280×4/3，水平居中
     expect(frame.rect.width).toBeCloseTo(280 * (4 / 3), 6);
     expect(frame.rect.height).toBeCloseTo(280, 6);
     expect(frame.rect.x).toBeCloseTo((M1_DISPLAY_W - 280 * (4 / 3)) / 2, 6);
@@ -696,8 +671,6 @@ describe('IKGW1N 比例面板接线（面板真实渲染）', () => {
     expectDiscardClean();
   });
 
-  /* 面板确认（IKGW1N 占位用例随 IKGW1S 实装退役）：确认按钮的执行链路断言
-     （裁切→上传→建卡→连线→退出、不抢选中、失败留模式）由 cropEdit.test.tsx 完整接管。 */
 
   it('退出后重进：框回到全幅、比例回到自由（不记忆上次状态）', async () => {
     await renderPage();

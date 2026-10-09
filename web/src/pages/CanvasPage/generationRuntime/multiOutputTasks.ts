@@ -1,16 +1,3 @@
-/* ============================================
- * 多结果家族类型定义（IKJJR5，IKIXK9-SPEC-20261002 B.4）：场景切分 + 人声分离。
- *
- * 差异承载：
- *  - 身份识别：占位卡（sceneSplit 身份 / vocal-split- 前缀）+ 规范结果卡
- *    （generation-result:<submission_id>:segment:<n> / :track:<type>，B.4 规范 node_id）。
- *  - 冻结输入：契约无 retry 端点，失败卡按 identity.lastInput 原参数重发创建接口；
- *    恢复补出的失败卡无业务参数（不可信）→ 保留卡片提示重新编辑。
- *  - 成功多结果判定（isMultiOutputSuccess）：按可信终态数据——场景切分 1 段仍为
- *    segment:1 多结果路径，不落入一对一 primary 转换。
- *  - 扇出落卡（planFanoutCards）：沿用两家族既有排列规则（场景切分网格避让 + 段起止
- *    命名；人声分离纵向轨列 + 源名(轨词).格式 命名）与来源线（origin 标记）。
- * ============================================ */
 import { createVocalSplit, createVideoSceneSplit, cancelGenerationJob } from '@/api/jobs';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import type { JobDetail } from '@/api/jobs';
@@ -33,12 +20,10 @@ import type {
 } from './types';
 
 const TARGET_OUTPUT_KEY = '$target';
-/** 多结果规范节点前缀（与后端 GENERATION_RESULT_NODE_PREFIX 同源，B.4）。 */
 const GENERATION_RESULT_NODE_PREFIX = 'generation-result:';
 const SEGMENT_OUTPUT_PREFIX = 'segment:';
 const TRACK_OUTPUT_PREFIX = 'track:';
 
-/** 恢复项 marker 读数（data.generationRecovery，B.4）。 */
 function readMarkerOf(nodeData: Record<string, unknown>): { submissionId: string; outputKey: string } | null {
   const marker = nodeData.generationRecovery;
   if (marker == null || typeof marker !== 'object') return null;
@@ -47,9 +32,7 @@ function readMarkerOf(nodeData: Record<string, unknown>): { submissionId: string
   return { submissionId, outputKey };
 }
 
-// ── 身份识别 ──────────────────────────────────────────────────────────────────
 
-/** 场景切分卡：占位卡（sceneSplit 身份）或规范段卡（marker outputKey = segment:<n>）。 */
 export function isSceneSplitCard(nodeId: string, nodeData: Record<string, unknown>): boolean {
   if (nodeId.startsWith(GENERATION_RESULT_NODE_PREFIX)) {
     return readMarkerOf(nodeData)?.outputKey.startsWith(SEGMENT_OUTPUT_PREFIX) ?? false;
@@ -57,8 +40,6 @@ export function isSceneSplitCard(nodeId: string, nodeData: Record<string, unknow
   return nodeData.sceneSplit != null;
 }
 
-/** 人声分离卡：占位卡（vocal-split- 前缀或 vocalSplit 身份）或规范轨卡（track:<type>）。
- *  旧轨卡（vocal-track-*，无 marker）不认领——继续按普通生成通用重试承接（历史口径）。 */
 export function isVocalSplitCard(nodeId: string, nodeData: Record<string, unknown>): boolean {
   if (nodeId.startsWith(GENERATION_RESULT_NODE_PREFIX)) {
     return readMarkerOf(nodeData)?.outputKey.startsWith(TRACK_OUTPUT_PREFIX) ?? false;
@@ -66,26 +47,21 @@ export function isVocalSplitCard(nodeId: string, nodeData: Record<string, unknow
   return isVocalSplitNodeId(nodeId) || nodeData.vocalSplit != null;
 }
 
-// ── 业务载荷 ──────────────────────────────────────────────────────────────────
 
-/** 场景切分创建载荷（业务键；canvas_binding/client_token 由运行时与 create 注入）。 */
 export interface SceneSplitTaskPayload {
   source_asset_id: string;
   target_node_id: string;
   granularity: SceneSplitGranularity;
 }
 
-/** 人声分离创建载荷（业务键）。 */
 export interface VocalSplitTaskPayload {
   source_asset_id: string;
   scene: VocalSplitScene;
   output_format: VocalSplitFormat;
 }
 
-/** 创建响应的 canvas_binding 回执视图（QY 后端；类型宽松读取，不改共享 API 形状）。 */
 type CreatedWithBinding = { job_id: string; canvas_binding?: CreateJobOutcome['canvasBinding'] };
 
-/** 场景切分任务类型定义（恢复记录 task_type = video_scene_split）。 */
 export const sceneSplitTask: GenerationTaskDefinition<SceneSplitTaskPayload> = {
   taskTypes: ['video_scene_split'],
 
@@ -93,12 +69,10 @@ export const sceneSplitTask: GenerationTaskDefinition<SceneSplitTaskPayload> = {
 
   frozenInput(_nodeId, nodeData) {
     const identity = nodeData.sceneSplit as SceneSplitIdentity | undefined;
-    return identity?.lastInput ?? null; // 恢复补卡无业务参数 → 不可信，保留卡片提示重新编辑
+    return identity?.lastInput ?? null;
   },
 
   async create(projectId, input: TaskSubmissionInput<SceneSplitTaskPayload>, binding, key) {
-    // client_token 幂等承载 = submission_id（QY 契约一致性）；canvas_binding 走 body 协议键
-    //（服务端剥离后再做业务 strict 校验）；历史兼容提交不带绑定、token 每次新生成
     const created = await createVideoSceneSplit(projectId, {
       ...input.payload,
       ...(binding ? { target_node_id: binding.target_node_id, canvas_binding: binding } : {}),
@@ -121,8 +95,6 @@ export const sceneSplitTask: GenerationTaskDefinition<SceneSplitTaskPayload> = {
   },
 
   isMultiOutputSuccess(detail: JobDetail) {
-    // 契约校验后 1 段也照常扇出（第 1 段全程时间轴）；result 缺失（畸形/契约前）同样走
-    // 投影路径——服务端投影 invalid 时保留占位卡，不落入一对一 primary 转换
     return detail.result == null || (detail.result.segments?.length ?? 0) > 0;
   },
 
@@ -135,7 +107,6 @@ export const sceneSplitTask: GenerationTaskDefinition<SceneSplitTaskPayload> = {
   planFanoutCards: planSceneSplitFanoutCards,
 };
 
-/** 人声分离任务类型定义（恢复记录 task_type = vocal_split）。 */
 export const vocalSplitTask: GenerationTaskDefinition<VocalSplitTaskPayload> = {
   taskTypes: ['vocal_split'],
 
@@ -147,7 +118,6 @@ export const vocalSplitTask: GenerationTaskDefinition<VocalSplitTaskPayload> = {
   },
 
   async create(projectId, input: TaskSubmissionInput<VocalSplitTaskPayload>, binding, key) {
-    // 幂等承载 = Idempotency-Key 头（须等于 submission_id）；历史兼容不带（行为零变化）
     const created = await createVocalSplit(projectId,
       binding ? { ...input.payload, canvas_binding: binding } : input.payload,
       { silent: true, ...(binding ? { idempotencyKey: key } : {}) },
@@ -181,11 +151,9 @@ export const vocalSplitTask: GenerationTaskDefinition<VocalSplitTaskPayload> = {
   planFanoutCards: planVocalSplitFanoutCards,
 };
 
-// ── 恢复落卡规划（两家族共用心智：投影/续轮询/补占位，镜像 normalGeneration） ──────
 
 interface MultiResultPlanOptions {
   mediaType: 'video' | 'audio';
-  /** 占位卡补建时写入的家族身份键（无业务参数，仅占位；null 不写）。 */
   identityKey: 'sceneSplit' | null;
   edgeOrigin: string;
 }
@@ -209,7 +177,7 @@ function multiResultPlanRecovery(
           outputKey: item.output_key,
           nodeId: item.node_id,
           assetId: item.asset_id ?? '',
-          url: '', // 产物 URL 由运行时拉任务详情补齐
+          url: '',
           mediaType: options.mediaType,
         })),
       },
@@ -220,13 +188,11 @@ function multiResultPlanRecovery(
     return { kind: 'resume-polling' };
   }
   if (jobStatus === 'failed' && !targetExists) {
-    // 受理回执丢失 + 已失败：补失败卡（恢复卡无业务参数，重试提示重新编辑）
     return { kind: 'restore-target', node: buildMultiResultTargetNode(record, options), edges: recoverySourceEdges(record, host, options.edgeOrigin) };
   }
   return { kind: 'none' };
 }
 
-/** 受理回执丢失补占位卡：按恢复种子几何 + 家族媒体形态（不伪造业务参数/恢复项标记）。 */
 function buildMultiResultTargetNode(record: GenerationRecoveryRecord, options: MultiResultPlanOptions) {
   const seed = record.recovery_seed?.target;
   const failed = record.job?.status === 'failed';
@@ -252,7 +218,6 @@ function buildMultiResultTargetNode(record: GenerationRecoveryRecord, options: M
   };
 }
 
-/** 补占位卡的来源线：种子来源快照中仍在画布的源卡（不伪造悬空边）。 */
 function recoverySourceEdges(record: GenerationRecoveryRecord, host: GenerationRuntimeHost, origin: string) {
   const sources = record.recovery_seed?.sources ?? [];
   return sources
@@ -260,9 +225,7 @@ function recoverySourceEdges(record: GenerationRecoveryRecord, host: GenerationR
     .map((source) => ({ source: source.node_id, target: record.target_node_id, origin }));
 }
 
-// ── 扇出落卡（既有排列规则与来源线；规范 node_id 与 marker 由运行时写入） ──────────
 
-/** 媒体节点占位盒（内容区 + 标题 44，口径同页面 nodeBoxOf 媒体分支）。 */
 function nodeBoxOf(node: { position: { x: number; y: number }; data?: Record<string, unknown> }): {
   x: number; y: number; width: number; height: number;
 } {
@@ -274,7 +237,6 @@ function numberOf(value: unknown): number | undefined {
   return typeof value === 'number' && value > 0 ? value : undefined;
 }
 
-/** 占位卡入边的源卡（发送时拉的 origin 来源线；扇出后改拉 源卡→结果卡）。 */
 function fanoutSourceNode(ctx: FanoutContext) {
   const anchorId = ctx.anchor?.id;
   if (anchorId == null) return null;
@@ -282,7 +244,6 @@ function fanoutSourceNode(ctx: FanoutContext) {
   return sourceEdge ? ctx.host.findNode(sourceEdge.source) : null;
 }
 
-/** 场景切分扇出：源卡右侧网格避让布局 + 「第 N 段 起止时间」命名 + 段资产宽高（IKH8C1 口径）。 */
 function planSceneSplitFanoutCards(ctx: FanoutContext): FanoutCardPlan {
   const segments = ctx.detail.result?.segments ?? [];
   const segmentByOutputKey = new Map(segments.map((seg) => [`${SEGMENT_OUTPUT_PREFIX}${seg.segment_index}`, seg]));
@@ -315,7 +276,7 @@ function planSceneSplitFanoutCards(ctx: FanoutContext): FanoutCardPlan {
         mediaType: 'video' as const,
         width: output.width ?? fallbackWidth,
         height: output.height ?? fallbackHeight,
-        jobId: ctx.jobId, // 段卡保留 jobId（MediaNode 生成宿主 target Handle 渲染来源线）
+        jobId: ctx.jobId,
       },
     };
   });
@@ -325,7 +286,6 @@ function planSceneSplitFanoutCards(ctx: FanoutContext): FanoutCardPlan {
   return { nodes, edges };
 }
 
-/** 人声分离扇出：占位卡列位纵向轨列（内容区高 240 + 间距 60）+ 「源名(轨词).格式」命名（IKHA30 口径）。 */
 function planVocalSplitFanoutCards(ctx: FanoutContext): FanoutCardPlan {
   const identity = ctx.anchor?.data?.vocalSplit as VocalSplitIdentity | undefined;
   const outputFormat = identity?.lastInput.output_format ?? VOCAL_SPLIT_DEFAULT_FORMAT;
@@ -344,7 +304,6 @@ function planVocalSplitFanoutCards(ctx: FanoutContext): FanoutCardPlan {
       progress: 100,
       ...(output.duration != null ? { duration: output.duration } : {}),
       toolMode: 'select',
-      // 轨卡不带 jobId（IKHA30 口径：水合不为轨卡开轮询；marker 承担恢复身份）
     },
   }));
   const source = fanoutSourceNode(ctx);

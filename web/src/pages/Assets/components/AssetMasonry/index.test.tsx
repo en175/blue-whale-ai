@@ -111,8 +111,6 @@ describe('AssetMedia', () => {
   });
 });
 
-/* IKGHZ3 选择弹窗悬浮操作：多选（picker）模式卡片右下角渲染删除+放大预览按钮，
-   点按钮不误触勾选；资产页（非多选）不加放大按钮（范围外），删除按钮保留。 */
 describe('AssetCard 悬浮操作（IKGHZ3）', () => {
   const imageAsset: AssetRecord = {
     id: 'a1',

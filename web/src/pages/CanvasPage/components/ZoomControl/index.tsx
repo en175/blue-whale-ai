@@ -1,6 +1,3 @@
-/* ============================================
- * ZoomControl 画布缩放控制器：放大/缩小/百分比
- * ============================================ */
 import { useReactFlow, useViewport } from '@xyflow/react';
 import { Plus, Minus, Maximize } from 'lucide-react';
 import styles from './index.module.css';

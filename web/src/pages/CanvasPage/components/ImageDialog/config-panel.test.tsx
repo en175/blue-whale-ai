@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog from './index';
 import styles from './index.module.css';
 
-/* IKEOLP：配置面板挂在 .dialog 滚动框之外的定位外壳 .dialogWrap 上——
-   若面板回到 overflow 容器内部，顶部会再次被裁剪（与 BottomDialog 同构修复） */
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -49,7 +47,6 @@ async function renderDialog() {
       ),
     );
   });
-  // 等模型能力加载完成（底栏参数摘要按钮依赖 currentModel）
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 }
 
@@ -83,7 +80,6 @@ describe('ImageDialog 配置面板裁剪（IKEOLP）', () => {
   });
 });
 
-/* IKGBTV：宽高比示意图标接入共享 RatioIcon——竖屏比例必须渲染为竖向矩形（16px 上限） */
 describe('ImageDialog 宽高比图标（IKGBTV）', () => {
   it('竖屏比例 3:4 的图标为 12×16 竖向矩形，横竖不反且不超 16px 上限', async () => {
     await renderDialog();

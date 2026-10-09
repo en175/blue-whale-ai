@@ -1,22 +1,3 @@
-/* ============================================
- * MemberDiscounts 会员折扣：按等级配折扣（billing_member_discounts）
- *
- * 数据源 GET/POST/PUT/DELETE /api/admin/billing-discounts（后端转发 billing 的管理端接口）。
- * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**。
- *
- * ── 这一页最要紧的一句话：改折扣不影响已提交未结算的任务 ──────────────────────────
- *
- * job 提交时把**命中的结果**（万分比系数）冻进 `billing_cost_reservations.discount_bp`，
- * 结算按冻结值复现、**不重新解析**这张表。所以运营改完折扣后发现某笔还按老的算时，
- * 答案不是「系统没生效」，而是「那笔在改之前就提交了」。
- * 这一条写在页面最上方那条提示里 —— 不说清，它会被反复当成 bug 报上来。
- *
- * ── 等级是下拉，不是输入框 ───────────────────────────────────────────────────
- *
- * 库里 `tier` 认不出时按 `free` 处理（`libs/core/identity/tier.ts` 的口径）——
- * 手打一个 `PRO` 会让这条折扣**静默不生效**：界面上看着配了，用户却享受不到。
- * 所以这里只能从下拉里选，且新建时**不预选**任何等级（预选哪个都是猜）。
- * ============================================ */
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
@@ -58,15 +39,11 @@ import {
   formGrid,
 } from '../../ui';
 
-/** 表单状态：数字与折都存**文字**，提交时才解析成整数。 */
 interface FormState {
-  /** 空串 = 还没选（新建时不预选等级） */
   tier: string;
   modelPattern: string;
   taskPattern: string;
-  /** 折，例如 `9` / `8.5` */
   discountZhe: string;
-  /** 展示优先级，整数 */
   priority: string;
   status: string;
 }
@@ -85,14 +62,12 @@ function formFrom(row: MemberDiscount): FormState {
     tier: row.tier,
     modelPattern: row.modelPattern,
     taskPattern: row.taskPattern,
-    // 9000 → `9`，8500 → `8.5`（去掉多余的 0，人看着才是「9 折」）
     discountZhe: String(Number((row.discountBp / 1000).toFixed(3))),
     priority: String(row.priority),
     status: row.status,
   };
 }
 
-/** 表单 → 接口入参；返回错误文案（`error` 存在就是没通过）。 */
 function toInput(form: FormState): { input: MemberDiscountInput } | { error: string } {
   if (!form.tier) return { error: '请选择会员等级' };
   const discountBp = parseZheToBp(form.discountZhe);
@@ -120,9 +95,7 @@ export default function MemberDiscounts() {
 
   const [editor, setEditor] = useState<{ id: number | null; form: FormState } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MemberDiscount | null>(null);
-  /** 页面级错误（加载 / 删除） */
   const [actionError, setActionError] = useState('');
-  /** 弹窗内的错误（校验 / 保存）：留在弹窗里，别关掉它让人把填的内容重来一遍 */
   const [formError, setFormError] = useState('');
   const [saved, setSaved] = useState('');
 
@@ -141,7 +114,6 @@ export default function MemberDiscounts() {
       void invalidate();
     },
     onError: (error) => {
-      // 「你配得不对」（400）与「billing 不可用」（503）的文案都由后端给出，原样呈现
       setFormError(isApiError(error) ? error.message : '保存失败，请稍后重试');
     },
   });
@@ -215,9 +187,7 @@ export default function MemberDiscounts() {
       {actionError && <Alert tone="danger">{actionError}</Alert>}
       {saved && <Alert tone="success">{saved}</Alert>}
 
-      {/* 两条页面级规矩收在标题旁的一个 ? 里。
-          ⚠️ 之前它们是两个**独立成行**的 ?，悬在标题下方各占一行 —— 图标没有锚点，
-          读者根本不知道它在说哪一块。说明挂在它说明的东西旁边，不是排在页面里。 */}
+      {}
       <DiscountPolicyNotice />
 
       <Card padded={false}>
@@ -316,7 +286,6 @@ export default function MemberDiscounts() {
 
       {editor !== null && (
         <DiscountEditorModal
-          // 换一条编辑时重建弹窗：否则草稿会沿用上一条的内容
           key={editor.id ?? 'new'}
           form={editor.form}
           isNew={editor.id === null}
@@ -353,7 +322,6 @@ export default function MemberDiscounts() {
   );
 }
 
-/* ============ 新建 / 编辑弹窗 ============ */
 
 function DiscountEditorModal({
   form,

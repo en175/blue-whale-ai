@@ -4,15 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CustomRecharge from './index';
 
-// 自定义充值面板（模块 B，PRD §7.2 / §7.3 / §7.5 / §7.6）。
-// 钉住的是**用户看得到的行为**：默认值、实时价格、超范围修正、游客与无权限的分叉。
-// 支付不在这里（下单与二维码在调用方那一侧）。
 
 const rechargeApi = vi.hoisted(() => ({ fetchRechargeCustomConfig: vi.fn() }));
 
 vi.mock('@/api/recharge', () => rechargeApi);
 
-/** PRD §7.1 的默认配置（游客视角）。 */
 const CONFIG = {
   enabled: true,
   min_credits: 600,
@@ -69,7 +65,6 @@ function type(value: string): void {
 
 async function blur(): Promise<void> {
   await act(async () => {
-    // React 的 onBlur 走的是委托的 `focusout`（会冒泡），不是原生 `blur`
     numberInput().dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
   });
 }

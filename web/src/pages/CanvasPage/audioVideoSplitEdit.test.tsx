@@ -1,12 +1,4 @@
 // @vitest-environment jsdom
-/* IKH28U 骨架 / IKH28X 发送闭环（画布链路）：点击「音视频分离」（原提取音频一键直发入口
-   退役）进入编辑态而非建任务；splitEditing/soloToolbarHidden 渲染期注入（视频暂停与播放
-   控制锁定由 MediaNode 承担，见 MediaNode/index.test.tsx）；上条仅 X + 下条三要素发送条
-   （格式下拉/本期免费/发送钮）；与其他工具编辑会话互斥（去字幕先例口径）；四退出
-   （X/Esc/点其他卡/点画布空白）未发送无痕迹——无卡无边无任务。发送闭环（IKH28X）：
-   按所选格式建任务、先退编辑态再建占位卡、来源边 origin=media-extract、轮询终态收敛
-   （成功成卡/失败可读文案）、失败带身份卡原参数重试、格式不跨会话。渲染模式沿用
-   videoSubtitleEraseEdit.test.tsx（FlowCanvas 打桩透出 props）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -44,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -160,7 +151,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪视频节点 v1（1920×1080 mp4，assetId 满足置灰门槛；无连线） */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -210,7 +200,6 @@ async function renderPage() {
   });
 }
 
-/** 进入音视频分离编辑态（视频卡工具条「音视频分离」按钮派发的回调，IKH28U 挂点） */
 async function enterSplit() {
   const video = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
   await act(async () => {
@@ -233,18 +222,15 @@ async function click(testId: string) {
   });
 }
 
-/** 编辑态单条探针（单条化后上方工具条退役；X 关闭随单条卸载——出现=会话活跃、消失=已退出） */
 function toolbar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="audio-video-split-close"]');
 }
 
-/** 编辑态内选格式（展开下拉点选项） */
 async function selectFormat(format: string) {
   await click('audio-video-split-format-trigger');
   await click(`audio-video-split-format-item-${format}`);
 }
 
-/** 编辑态内点发送（startAudioVideoSplitJob 含 await 创建，等 50ms 让建卡与轮询首 tick 发起） */
 async function sendSplit() {
   await click('audio-video-split-send-btn');
   await act(async () => {
@@ -252,7 +238,6 @@ async function sendSplit() {
   });
 }
 
-/** IKJJR3：占位卡 id 预分配（media-extract-{uuid}），不再按受理 jobId 命名——按家族卡查找 */
 function splitCard(): Node | undefined {
   return (flowProps.current.mediaNodes as Node[]).find((n) => n.id !== 'v1' && n.id.startsWith('media-extract-'));
 }
@@ -279,17 +264,13 @@ describe('IKH28U 编辑态呈现（进入不建任务）', () => {
     await enterSplit();
     const close = bodyBtn('audio-video-split-close');
     const sendBar = document.body.querySelector('[data-testid="audio-video-split-send-bar"]')!;
-    // 单条化后 X 在 sendBar 内且是第一个元素（对齐抠图/去字幕单条先例）
     expect(sendBar.contains(close)).toBe(true);
     expect(sendBar.querySelector('button')).toBe(close);
-    // 三要素（IKH28X）：格式触发钮显当前格式（默认 M4A）+ 本期免费 + 发送钮
     expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('M4A');
     expect(sendBar.textContent).toContain('本期免费');
     expect(bodyBtn('audio-video-split-send-btn')).toBeTruthy();
-    // 源视频卡注入 splitEditing（视频暂停+锁定层）与 soloToolbarHidden（会话模态口径）
     expect(v1Data().splitEditing).toBe(true);
     expect(v1Data().soloToolbarHidden).toBe(true);
-    // 进入即编辑态：不创建任务、不建占位卡、不连边
     expect(apiMocks.createMediaExtraction).not.toHaveBeenCalled();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
     expect(flowProps.current.edges).toEqual([]);
@@ -306,7 +287,6 @@ describe('IKH28U 编辑态呈现（进入不建任务）', () => {
     expect(document.body.querySelector('[data-testid="subtitle-erase-send-bar"]')).toBeNull();
     expect(toolbar()).toBeTruthy();
     expect(v1Data().splitEditing).toBe(true);
-    // 去字幕未发送无痕迹：反向互斥——分离态中点去字幕，分离浮条退出、去字幕单条接管
     await act(async () => {
       video.data.onVideoSubtitleErase('v1', 'smart');
     });
@@ -347,7 +327,6 @@ describe('IKH28U 四退出：未发送退出画布无痕迹', () => {
       flowProps.current.onSelectionChange({ nodes: [{ id: 'other' }] });
     });
     expect(toolbar()).toBeNull();
-    // 空选中不退出（真空白由 PaneClick 承担）
     await enterSplit();
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [] });
@@ -386,20 +365,16 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await renderPage();
     await enterSplit();
     await sendSplit();
-    // 建任务带所选格式（默认 m4a）
     expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' }, expect.objectContaining({ silent: true }));
-    // 先退编辑态再建卡：浮条卸载、splitEditing 移除、占位卡已上画布
     expect(toolbar()).toBeNull();
     expect(v1Data().splitEditing).toBeUndefined();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
     const audio = splitCard()!;
     expect(audio.data.fileName).toBe('素材视频(audio).m4a');
-    // 占位卡带身份（lastInput 冻结源素材+格式，失败重试原样重发）
     expect(audio.data.mediaExtract).toEqual({
       sourceAssetId: '5',
       lastInput: { source_asset_id: '5', output_format: 'm4a' },
     });
-    // 来源边：参考推导跳过口径（origin 标记）
     const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
       .find((e) => e.target === audio.id)!;
     expect(edge.source).toBe('v1');
@@ -413,11 +388,9 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await enterSplit();
     await selectFormat('wav');
     expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('WAV');
-    // 未发送退出重进：格式不跨会话记忆，复位 m4a
     await click('audio-video-split-close');
     await enterSplit();
     expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('M4A');
-    // 重选 wav 后发送：任务参数与占位卡展示名所见即所得
     await selectFormat('wav');
     await sendSplit();
     expect(apiMocks.createMediaExtraction).toHaveBeenCalledTimes(1);
@@ -432,7 +405,6 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await sendSplit();
     await act(async () => {});
     expect(apiMocks.createMediaExtraction).toHaveBeenCalledTimes(1);
-    // IKJJR3：提交点建卡 + 退会话；受理失败落失败卡（冻结输入可重试）
     expect(toolbar()).toBeNull();
     const failed = splitCard()!;
     expect(failed.data.genStatus).toBe('failed');
@@ -455,9 +427,7 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     expect(audio.data.progress).toBe(100);
     expect(audio.data.src).toBe('http://tos/x.m4a');
     expect(audio.data.assetId).toBe('a88');
-    // 时长取服务端权威值（story 15，火山返回 duration 经终态补丁落卡）
     expect(audio.data.duration).toBe(65.5);
-    // 展示名保留建卡所选格式的后缀（不被「生成-{jobId}」自动命名覆盖）
     expect(audio.data.fileName).toBe('素材视频(audio).m4a');
   });
 
@@ -472,10 +442,8 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await sendSplit();
     const failed = splitCard()!;
     expect(failed.data.genStatus).toBe('failed');
-    // W 票错误码面：media_extract_provider_failed（1044）→「音频提取失败，请重试」
     expect(failed.data.errorText).toBe('音频提取失败，请重试');
 
-    // 重试：lastInput（源素材+格式）原样重发创建接口（新 job），轮询 succeeded 收敛成品
     apiMocks.createMediaExtraction.mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValueOnce({
       job_id: 'j2', status: 'succeeded', progress: 100,
@@ -502,13 +470,11 @@ it('提交在途同卡再入会话：submitting 防重只受理一次，受理�
   await renderPage();
   await enterSplit();
   await click('audio-video-split-send-btn');
-  // IKJJR3：提交点即交接（会话退、占位卡上画布）；submitting 窗口内重进再发被统一防重（故事 5）
   expect(toolbar()).toBeNull();
   expect(splitCard()!.data.mediaExtract).toEqual({
     sourceAssetId: '5', lastInput: { source_asset_id: '5', output_format: 'm4a' },
   });
   await act(async () => { accept({ job_id: 'old', status: 'queued' }); });
-  // 受理落定（processing）后可再入新会话（生成中新任务提交为接管语义）
   expect(splitCard()!.data.jobId).toBe('old');
 });
 
@@ -520,7 +486,6 @@ it.each(['success', 'failure'] as const)('提交后关闭重开：旧 %s 不污�
   await renderPage();
   await enterSplit();
   await click('audio-video-split-send-btn');
-  // IKJJR3：提交点即交接——面板已关、占位卡上画布；重开为新会话，旧受理落定不干扰
   expect(toolbar()).toBeNull();
   await enterSplit();
   await selectFormat('wav');
@@ -528,7 +493,6 @@ it.each(['success', 'failure'] as const)('提交后关闭重开：旧 %s 不污�
     if (outcome === 'success') acceptOld({ job_id: 'old', status: 'queued' });
     else rejectOld(new Error('旧请求失败'));
   });
-  // 旧受理失败收敛到旧占位卡（不弹会话错误、不关新会话）；新会话与所选格式不受污染
   expect(toolbar()).not.toBeNull();
   expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('WAV');
   expect(document.body.textContent).not.toContain('音视频分离任务创建失败');

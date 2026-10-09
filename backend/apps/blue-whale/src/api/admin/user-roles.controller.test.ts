@@ -3,12 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminUserRolesController } from "./user-roles.controller.js";
 
-/**
- * 角色授予 / 撤销的管理端接口。
- *
- * <p>重点在**超管锁死保护**：撤销最后一个超管的角色必须被拦成 409，
- * 而且要带一句人能看懂的话——运维看到「参数错误」只会换个参数再试。
- */
 
 const OPERATOR = { userId: "1", username: "admin" } as never;
 
@@ -101,7 +95,7 @@ describe("AdminUserRolesController", () => {
       expect.objectContaining({
         action: "user.role_grant",
         targetUserId: "7",
-        ipAddress: "203.0.113.9", // 只取第一跳
+        ipAddress: "203.0.113.9",
       }),
     );
     expect(operationLog.create).toHaveBeenCalledWith(

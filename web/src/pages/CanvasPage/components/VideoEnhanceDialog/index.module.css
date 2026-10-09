@@ -1,11 +1,4 @@
-/* ============================================
- * VideoEnhanceDialog 视频 HD 高清参数面板（IKH3VG）
- * 极简面板：无下拉/无高级参数；分段按钮与发送钮视觉模式沿用 ImageEnhanceDialog
- * （multipleGroup/multipleBtn/sendBtn 同源 token：#1e1e1e 系浮层、圆角分段、灰底↑），
- * 跟随定位同 dialogWrapFollow。
- * ============================================ */
 
-/* 定位外壳：与 ImageEnhanceDialog 同构（跟随锚定时绝对定位到 HD 卡下方） */
 .dialogWrap {
   position: absolute;
   bottom: var(--spacing-lg);
@@ -46,7 +39,6 @@
   box-shadow: var(--shadow-overlay);
 }
 
-/* ---- 标题行 ---- */
 .headerRow {
   display: flex;
   align-items: center;
@@ -78,14 +70,12 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 生成中只读提示（同 ImageEnhanceDialog readOnlyHint） ---- */
 .readOnlyHint {
   font-size: 12px;
   color: var(--color-text-tertiary);
   line-height: 1.4;
 }
 
-/* ---- 字段区 ---- */
 .fieldWrap {
   display: flex;
   flex-direction: column;
@@ -99,7 +89,6 @@
   color: var(--color-text-secondary);
 }
 
-/* ---- 分段按钮（视觉模式沿用 ImageEnhanceDialog multipleGroup/multipleBtn，单行文本变体） ---- */
 .resolutionGroup {
   display: flex;
   gap: 4px;
@@ -143,7 +132,6 @@
   color: #666;
 }
 
-/* ---- 底部栏：免费提示 + 发送按钮（视觉模式沿用 ImageEnhanceDialog sendBtn：灰底↑ 圆角方形） ---- */
 .bottomBar {
   display: flex;
   align-items: center;

@@ -11,7 +11,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** MediaKit 音频混合网关客户端。网关路由由独立 IKI69C 实现；此处按冻结对客契约调用。 */
 @Component
 public class NewApiMediaKitMixAudioClient extends NewApiMediaKitAsyncTaskClient {
     static final String MODEL = "mediakit-mix-audio";

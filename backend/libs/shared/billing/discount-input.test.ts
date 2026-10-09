@@ -10,13 +10,6 @@ import {
 import { BillingAdminError, DiscountNotFoundError, DiscountRejectedError } from "./billing-admin-client.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
 
-/**
- * 形状层（`unknown` → 有类型的写请求）。
- *
- * <p>语义校验不在这里（那在 billing 的 `DiscountRules`），所以这里的用例只关心
- * 「类型不对 / 缺字段」与「`null` 与没给是两件事」这两件事 —— 后者是这一层最容易被
- * 写错、且错了最难发现的地方：一次漏字段的保存会把「限 3 个模型」悄悄改成「不限」。
- */
 const MEMBER = {
   tier: "pro",
   modelPattern: "*",
@@ -118,7 +111,6 @@ describe("toDiscountAdminError", () => {
     expect(toDiscountAdminError(new DiscountRejectedError("折扣被拒"))).toMatchObject({ status: 400 });
     expect(toDiscountAdminError(new DiscountNotFoundError("不存在"))).toMatchObject({ status: 404 });
     expect(toDiscountAdminError(new BillingAdminError("HTTP 502"))).toMatchObject({ status: 503 });
-    // 未知异常仍然是 500：不能把一个没见过的错自动变成「你填错了」
     expect(toDiscountAdminError(new Error("boom"))).toMatchObject({ status: 500 });
   });
 

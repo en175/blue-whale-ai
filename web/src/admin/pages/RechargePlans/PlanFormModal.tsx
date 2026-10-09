@@ -1,17 +1,3 @@
-/* ============================================
- * 新建 / 编辑固定积分卡档位弹窗（PRD §10.2 / §10.4 / §10.5）。
- *
- * ⚠️ 这里唯一只读的派生量是**实付价格**（`实付 = 原价 × 折扣`），它不当输入框。
- *
- * 「基础积分」**是输入框**（2026-09-27 起）：基础积分是**配置值**，不是派生值 ——
- * 充值的「元 → 积分」与消费锚点「1 元 = 15 积分」不是一回事（充值常有折扣）。
- * 运营填的这个数就是用户下单到账的数：PRD §6.1 的 ¥499 档给 7,500 积分，
- * 而 499 × 15 = 7,485 —— 对不上是**对的**。
- *
- * 原价与折扣保留，但**只为展示划线价**，与积分再无数学关系。所以这里：
- *   · 不做任何「积分 = 原价 × 什么」的联动预览；
- *   · 也不校验积分是不是原价的整数倍（那是在恢复一条已经废掉的公式）。
- * ============================================ */
 import { useState } from 'react';
 import { toast } from 'sonner';
 import type { TopupTierPermission, TopupTierStatus } from '@/api/adminTopupTiers';
@@ -53,16 +39,11 @@ export default function PlanFormModal({
   const [name, setName] = useState(initial?.name ?? '');
   const [price, setPrice] = useState(initial ? String(initial.price) : '10');
   const [ratio, setRatio] = useState(initial ? String(initial.ratio) : '1');
-  // 基础积分是**配置值**（运营的输入），不是从原价算出来的。
-  // 编辑时带出存档值；新建时留一个能用的起点，由运营按活动口径改写（PRD §6.1 是 7,500 起）。
   const [credits, setCredits] = useState(initial ? String(initial.baseCredits) : '1000');
   const [start, setStart] = useState(initial?.start ?? '');
   const [end, setEnd] = useState(initial?.end ?? '');
   const [recommended, setRecommended] = useState(initial?.recommended ?? false);
-  // ⚠️ 新建落在**草稿**（PRD §10.5「新建卡片默认草稿，不展示给用户」），
-  // 与服务端默认值同口径：这里若默认「上架」，运营一点保存就把没配齐的卡片卖给用户了
   const [status, setStatus] = useState<TopupTierStatus>(initial?.status ?? 'draft');
-  // ── PRD §10.2 卡片字段 ──
   const [description, setDescription] = useState(initial?.description ?? '');
   const [bonusCredits, setBonusCredits] = useState(initial ? String(initial.bonusCredits) : '0');
   const [activityTag, setActivityTag] = useState(initial?.activityTag ?? '');
@@ -78,15 +59,9 @@ export default function PlanFormModal({
 
   const priceNum = parseFloat(price) || 0;
   const ratioNum = parseFloat(ratio) || 0;
-  // 实付 = 原价 × 折扣 —— **本页唯一的派生量**，所以它只读。
-  // ⚠️ 积分不在这条公式里：它现在是运营填的**配置值**（见文件头）。
-  //    曾经这里按「原价 × 换算率」联动预览，那个说法已经废掉：
-  //    充值常有折扣，¥499 的档到账 7,500，而 499 × 15 = 7,485。
   const pay = priceNum * ratioNum;
-  // 空数字格先标成 NaN 交给校验去判：`Number('')` 是 0，会悄悄通过「非负整数」这一关
   const bonusNum = bonusCredits.trim() === '' ? NaN : Number(bonusCredits);
   const monthsNum = validMonths.trim() === '' ? NaN : Number(validMonths);
-  // 赠送积分留空就是 0（不赠送），不是「非法」——唯一一个空值有自然含义的数字格
   const normalizedBonus = Number.isNaN(bonusNum) ? 0 : bonusNum;
 
   const handleSave = async () => {
@@ -96,7 +71,6 @@ export default function PlanFormModal({
       toast.error(err);
       return;
     }
-    // 基础积分是配置值，但「填了没有」仍然是必填项：0 / 空 / 非整数都拦在提交前
     const creditsErr = baseCreditsFormError(credits);
     if (creditsErr) {
       toast.error(creditsErr);
@@ -123,7 +97,6 @@ export default function PlanFormModal({
           name: name.trim(),
           price: priceNum,
           ratio: ratioNum,
-          // 基础积分：运营填的整数（已过 baseCreditsFormError），不是派生值
           baseCredits: Number(credits),
           recommended,
           status,
@@ -163,7 +136,7 @@ export default function PlanFormModal({
         </>
       }
     >
-      {/* 字段统一走套件的 Field（标签 + 控件 + 微文案 + 段落说明），页面不再手写间距 */}
+      {}
       <div style={formGrid(2)}>
         <Field label="档位名称（选填）">
           <Input
@@ -246,7 +219,7 @@ export default function PlanFormModal({
         </Field>
       </div>
 
-      {/* ── 卡片展示（PRD §6.2 用户侧看到的就是这几项）── */}
+      {}
       <div style={formGrid(1)}>
         <Field label="卡片说明（选填）" hint={`最长 ${TIER_TEXT_LIMITS.description} 字`}>
           <Textarea
@@ -281,7 +254,7 @@ export default function PlanFormModal({
         </Field>
       </div>
 
-      {/* ── 首购与有效期（PRD §10.2）── */}
+      {}
       <div style={formGrid(2)}>
         <Field
           label="赠送积分"
@@ -304,7 +277,7 @@ export default function PlanFormModal({
           label="积分有效期（月）"
           hint={`${MIN_CREDITS_VALID_MONTHS}–${MAX_CREDITS_VALID_MONTHS}，默认 ${DEFAULT_CREDITS_VALID_MONTHS} = 2 年`}
         >
-          {/* 口径是**月**不是年：年表达不了 6/18 个月这类档位，而月向上兼容 */}
+          {}
           <Input
             value={validMonths}
             aria-label="积分有效期（月）"
@@ -317,7 +290,7 @@ export default function PlanFormModal({
         <Checkbox checked={firstPurchase} onChange={setFirstPurchase} label="参与首购加赠" />
       </div>
 
-      {/* ── 购买权限（PRD §10.4）── */}
+      {}
       <div style={formGrid(2)}>
         <Field
           label="购买权限"
@@ -376,7 +349,7 @@ export default function PlanFormModal({
         </div>
       )}
 
-      {/* ── 时间窗（限时上下架）── */}
+      {}
       <div style={formGrid(2)}>
         <Field
           label="生效时间（选填）"
@@ -402,7 +375,7 @@ export default function PlanFormModal({
         </Field>
       </div>
 
-      {/* 推荐档位：原来的自绘开关在套件里没有对应基元，改用勾选框（语义相同：一个布尔量） */}
+      {}
       <div style={{ marginTop: 16 }}>
         <Checkbox checked={recommended} onChange={setRecommended} label="推荐档位" />
       </div>

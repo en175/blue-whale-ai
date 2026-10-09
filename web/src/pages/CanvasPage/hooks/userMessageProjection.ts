@@ -1,7 +1,6 @@
 import type { SessionContentBlock, SessionMessage } from '@/api/agentSessions';
 import type { ChatMessage } from './useAgentSession';
 
-/** content 块数组拼为纯文本。思考段（IKFLB9）也带 `text`，但那是模型的草稿，不是正文。 */
 export const textOf = (blocks: SessionMessage['content'] | undefined): string =>
   (blocks ?? [])
     .map((b) => (b?.type !== 'reasoning' && typeof b?.text === 'string' ? b.text : ''))
@@ -25,7 +24,6 @@ function isVisualMention(block: SessionContentBlock): boolean {
   return block.media_type === 'image' || block.media_type === 'video';
 }
 
-/** 文本引用快照部件（IKDLQJ）：契约 resource_type 或 quote_id 任一命中即认。 */
 function isQuoteMention(block: SessionContentBlock): boolean {
   return block.type === 'resource_ref' && (block.resource_type === 'text_quote' || Boolean(block.quote_id));
 }
@@ -34,13 +32,6 @@ function quoteMentionId(block: SessionContentBlock): string | undefined {
   return block.quote_id || block.resource_id || block.node_id;
 }
 
-/**
- * 从落库的 content 部件还原 @ 提及胶囊。
- *
- * chips 是前端渲染态，快照不会原样送回来；身份在 `asset_ref` / `resource_ref` 里。
- * 不还原的话，刷新或切历史会话后 @ 图片会从对话里消失（IKBCV3）。
- * 文本引用（IKDLQJ）同理：部件里的 quote_id 即快照身份，正文由 hydrate 按它补齐。
- */
 export function chipsFromContent(blocks: SessionContentBlock[] | undefined): ChatMessage['chips'] {
   const chips: NonNullable<ChatMessage['chips']> = [];
   const seen = new Set<string>();
@@ -61,7 +52,6 @@ export function chipsFromContent(blocks: SessionContentBlock[] | undefined): Cha
   return chips.length > 0 ? chips : undefined;
 }
 
-/** 历史消息里缺正文的文本引用快照 id（agent 未 round-trip resource_text 时按它回读补齐）。 */
 export function collectMissingQuoteIds(messages: ChatMessage[]): string[] {
   const ids = new Set<string>();
   for (const message of messages) {
@@ -75,7 +65,6 @@ export function collectMissingQuoteIds(messages: ChatMessage[]): string[] {
   return [...ids];
 }
 
-/** 把回读到的快照正文并入消息块；原消息不被改写（返回新数组）。 */
 export function patchQuoteTexts(
   messages: ChatMessage[],
   quotes: { quoteId: string; text: string }[],
@@ -98,7 +87,6 @@ export function patchQuoteTexts(
   });
 }
 
-/** 快照消息 → UI 消息 */
 export function projectMessage(m: SessionMessage): ChatMessage {
   const blocks = m.content ?? [];
   return {
@@ -113,11 +101,6 @@ export function projectMessage(m: SessionMessage): ChatMessage {
   };
 }
 
-/**
- * 用服务端回执替换乐观用户气泡，但必须留下本地携带的提及块。
- *
- * 回执的 text 投影不含缩略图；若丢掉 `blocks` / `chips`，发送成功的瞬间图就从对话框消失（IKBCV3）。
- */
 export function mergeConfirmedUser(prev: ChatMessage[], msg: SessionMessage): ChatMessage[] {
   const content = textOf(msg.content);
   const idx = prev.findIndex((m) => m.id === msg.message_id);
@@ -131,7 +114,6 @@ export function mergeConfirmedUser(prev: ChatMessage[], msg: SessionMessage): Ch
         role: 'user',
         content,
         sequence_no: msg.sequence,
-        // 批次 id 只有回执才有：它是这条消息进哪一轮的依据（IKDK5I）。
         inputBatchId: msg.input_batch_id ?? null,
         skill_ref: optimistic.skill_ref,
         resource_ref: optimistic.resource_ref,

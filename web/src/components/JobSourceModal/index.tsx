@@ -1,10 +1,3 @@
-/* ============================================
- * JobSourceModal — 两阶段任务来源弹层（IKIZQI）
- * 历史（/history 行内来源链接）与资产库（详情弹窗来源按钮）共用：
- * 按 jobId 拉 GET /api/jobs/:id，展示阶段/状态/费用与成功产物（预览 + 下载）。
- * 失败任务同样可查——后端失败信封 data 带全阶段投影（jobs.service getStatus 失败分支），
- * 从 ApiError.data 收敛，不丢阶段与费用。
- * ============================================ */
 import { useQuery } from '@tanstack/react-query';
 import Modal from '@/components/Modal';
 import Skeleton from '@/components/Skeleton';
@@ -13,19 +6,15 @@ import { readJobFailText, type JobDetail, type JobStatus } from '@/api/jobs';
 import { chargeLabel, jobStatusLabel, stageBadgeLabel } from './labels';
 import styles from './index.module.css';
 
-/** 弹层目标：jobId + 语境标题（「来源样片任务」/「成片任务」）。null = 关闭。 */
 export interface JobSourceTarget {
   jobId: string;
-  /** 语境标题：调用方知道链接方向（样片→成片 / 成片→样片 / 历史行）。 */
   title: string;
 }
-/** 成功/失败信封收敛后的展示视图（失败时阶段投影来自 ApiError.data）。 */
 type JobSourceView = Pick<
   JobDetail,
   'status' | 'video_stage' | 'finalize_deadline_at' | 'charge_state' | 'actual_credits' | 'output_assets' | 'asset'
 > & { failText: string };
 
-/** 拉单任务详情并对失败信封收敛（ApiError.data 携带失败任务的阶段投影六件套）。 */
 async function fetchJobSourceView(jobId: string): Promise<JobSourceView> {
   const fromFailureData = (data: unknown): Partial<JobSourceView> | null =>
     data && typeof data === 'object' ? (data as Partial<JobSourceView>) : null;
@@ -36,7 +25,6 @@ async function fetchJobSourceView(jobId: string): Promise<JobSourceView> {
     return { ...detail, failText: '' };
   } catch (e) {
     if (isApiError(e)) {
-      // 失败信封：code/msg 顶层 + data 带任务字段（含阶段投影）。HTTP 200、业务码 1xxx。
       const partial = fromFailureData(e.data) ?? {};
       return {
         status: (partial.status as JobStatus) ?? 'failed',

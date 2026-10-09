@@ -6,33 +6,22 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/**
- * 会员等级折扣行（对应 Flyway {@code V2__discounts.sql} 的 {@code billing_member_discounts}）。
- *
- * <p>长期契约、低频变更。「同等级命中多条取最优惠」的裁决在
- * {@code DiscountProvider}，本实体只承载行数据。
- */
 @TableName("billing_member_discounts")
 public class MemberDiscountEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** free | basic | pro | max。 */
     private String tier;
 
-    /** 模型匹配：{@code seedance-*} | {@code *} | {@code gpt-4o}。 */
     private String modelPattern;
 
-    /** 任务匹配：{@code text2video} | {@code *}。 */
     private String taskPattern;
 
-    /** 折扣，万分比（9000 = 9 折）。 */
     private Integer discountBp;
 
     private Integer priority;
 
-    /** enabled | disabled。 */
     private String status;
 
     private LocalDateTime gmtCreate;

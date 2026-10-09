@@ -8,9 +8,6 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { promptRefReadOnly, readPromptRefText, typePromptRefText } from './testing/promptRefEditor';
 
-/* IKDMQQ 图片生成草稿：侧栏建卡 / 重复创建 / 参数同步与水合恢复 / 原位提交回填 /
-   生成中只读（面板 + 连线）/ 保存失败阻断生成与项目切换 / 失败保留卡片与原因。
-   FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；ImageDialog 用真实实现。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -39,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -48,7 +44,6 @@ vi.mock('./components/Canvas', () => ({
   },
 }));
 
-/** CanvasToolbar 打桩：透出侧栏图片入口 */
 const toolbarProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/CanvasToolbar', () => ({
   default: (props: Record<string, any>) => {
@@ -57,7 +52,6 @@ vi.mock('./components/CanvasToolbar', () => ({
   },
 }));
 
-/** CanvasHeader 打桩：透出项目切换入口与当前项目 id */
 const headerProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/CanvasHeader', () => ({
   default: (props: Record<string, any>) => {
@@ -149,14 +143,11 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn(),
 }));
 
-/* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
-  // IKDLQK 起 CanvasPage 还引入这两个调用：mock 补齐，否则组件挂载即抛错（IKDLQK 合入时的既有欠账）
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
-  // !779 起保存 catch 会调这个函数对齐 412 version；缺省则 throw，失败提示出不来
   readCanvasConflictVersion: () => undefined,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
@@ -184,7 +175,6 @@ vi.mock('@/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 
-/* useCanvasDoc 打桩须保持引用稳定；内容经 current 按用例注入 */
 const canvasDocMock = vi.hoisted(() => ({
   current: {
     doc: null as unknown,
@@ -198,7 +188,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 默认画布文档：文本节点 t1 + 成品图片节点 m1，连线 e1: t1 → m1 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -224,7 +213,6 @@ function seedDoc() {
   };
 }
 
-/** 含已保存草稿 d1 的画布文档：t1 → d1 连线与草稿参数一并恢复 */
 function seedDraftDoc() {
   canvasDocMock.current = {
     doc: {
@@ -259,7 +247,6 @@ function seedDraftDoc() {
   };
 }
 
-/** 含空白图片草稿 d1 的画布文档（无参数无连线）：绑定面板首开默认参数落值与提交链路的测试基线 */
 function seedEmptyDraftDoc() {
   canvasDocMock.current = {
     doc: {
@@ -321,12 +308,10 @@ function promptTextarea(): HTMLElement {
   return el as HTMLElement;
 }
 
-/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
   await typePromptRefText(container, text);
 }
 
-/** 点击侧栏图片入口后，画布上最新加入的草稿节点 */
 function draftNodes(): Node[] {
   return flowProps.current.mediaNodes.filter((n: Node) => n.data?.draft === true);
 }
@@ -337,7 +322,6 @@ async function clickSidebarImage() {
   });
 }
 
-/** 点击画布草稿卡 d1 打开绑定面板（草稿绑定路径），返回草稿节点 id */
 async function openDraftPanel(): Promise<string> {
   const draft = flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1')!;
   await act(async () => {
@@ -366,12 +350,9 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
 
     await clickSidebarImage();
 
-    // 工具栏入口先建图片草稿卡再打开跟随输入框
     expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
     expect(draftNodes()).toHaveLength(1);
-    // 仅点击入口不创建任务
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    // 面板打开（模型能力加载后空提示词、无附件时发送禁用）
     expect(promptTextarea()).toBeTruthy();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     expect(sendButton().disabled).toBe(true);
@@ -390,13 +371,10 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.type).toBe('image');
-    // 发送绑定入口新建的草稿卡，在原卡生成
     expect(typeof payload.target_node_id).toBe('string');
     expect(payload.parameters.prompt).toBe('自由模式画图');
     expect(payload.parameters.model_id).toBe('m-test');
-    // seed m1 + 入口建的 1 张草稿卡；生成发生在原卡，不新增节点
     expect(flowProps.current.mediaNodes).toHaveLength(2);
-    // IKFXZD：创建请求发出即隐藏面板（提交前校验/落盘/上传失败则保持打开）
     expect(container.querySelector('[contenteditable]')).toBeNull();
   });
 
@@ -406,7 +384,7 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
     await clickSidebarImage();
     await clickSidebarImage();
 
-    expect(flowProps.current.mediaNodes).toHaveLength(3); // seed m1 + 两次点击各建一张
+    expect(flowProps.current.mediaNodes).toHaveLength(3);
     expect(draftNodes()).toHaveLength(2);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(promptTextarea()).toBeTruthy();
@@ -427,7 +405,6 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
     expect(draft().data.draftRatio).toBe('1:1');
     expect(draft().data.targetRatio).toBe('1:1');
 
-    // 参数随自动保存落盘
     await vi.waitFor(
       () => {
         const last = apiMocks.saveCanvasDoc.mock.calls.at(-1);
@@ -453,9 +430,7 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
     });
 
     expect(readPromptRefText(container)).toBe('恢复的提示词');
-    // 连线文本附件按当前画布实时展示（IKFCKN：FileText 缩略图进参考栏）
     await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
-    // 模型/比例/分辨率按草稿参数恢复
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     expect(container.textContent).toContain('1:1');
     expect(container.textContent).toContain('2K');
@@ -483,17 +458,13 @@ describe('IKDMQQ 原位提交与首次生成', () => {
     expect(payload.parameters.prompt).toBe('画一只蓝鲸');
     expect(payload.parameters.model_id).toBe('m-test');
 
-    // 保存串行化：先落盘再创建任务
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
     expect(apiMocks.saveCanvasDoc.mock.invocationCallOrder.at(-1)!).toBeLessThan(
       apiMocks.createGenerationJob.mock.invocationCallOrder[0]!,
     );
 
-    // 原位生成：不新建 media-gen 占位卡（节点数不变；生成中态由「生成中只读」用例覆盖，
-    // 本用例默认 succeeded 替身会瞬时推进到成功，不断言中间态）
     expect(flowProps.current.mediaNodes).toHaveLength(2);
 
-    // 成功结果填回同一张卡：身份、位置不变，草稿标记清除
     await vi.waitFor(() => {
       const node = flowProps.current.mediaNodes.find((n: Node) => n.id === draftId)!;
       expect(node.data.genStatus).toBeUndefined();
@@ -517,7 +488,6 @@ describe('IKDMQQ 原位提交与首次生成', () => {
     await openDraftPanel();
     const draftId = 'd1';
 
-    // 草稿态可连线：t1 → draft
     await act(async () => {
       flowProps.current.onConnect({ source: 't1', target: draftId, sourceHandle: null, targetHandle: null });
     });
@@ -534,21 +504,17 @@ describe('IKDMQQ 原位提交与首次生成', () => {
       expect(node.data.genStatus).toBe('generating');
     });
 
-    // IKFXZD：发送成功即隐藏面板
     expect(container.querySelector('[contenteditable]')).toBeNull();
 
-    // 生成中点卡片重开只读面板（IKFXZD 口径：自动关闭不动只读入口）：输入与发送禁用
     await openDraftPanel();
     expect(promptRefReadOnly(container)).toBe(true);
     expect(sendButton().disabled).toBe(true);
 
-    // 向生成中节点新建连线被拦截
     await act(async () => {
       flowProps.current.onConnect({ source: 'm1', target: draftId, sourceHandle: null, targetHandle: null });
     });
     expect(flowProps.current.edges.some((e: { source: string; target: string }) => e.source === 'm1' && e.target === draftId)).toBe(false);
 
-    // 删除生成中节点的入边被拦截
     await act(async () => {
       flowProps.current.onEdgesChange([{ type: 'remove', id: draftEdgeId }]);
     });
@@ -608,7 +574,6 @@ describe('IKDMQQ 原位提交与首次生成', () => {
     expect(failed.data.prompt).toBe('画一只蓝鲸');
     expect(flowProps.current.mediaNodes).toHaveLength(2);
 
-    // 失败卡可重开面板（非只读）
     await act(async () => {
       flowProps.current.onNodeClick(failed);
     });
@@ -625,7 +590,6 @@ describe('IKDMQQ 保存失败暂停生成与项目切换', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await typePrompt('画一只蓝鲸');
 
-    // 保存持续失败：提交被阻断、不创建任务、草稿不回滚
     apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('boom')));
     await act(async () => {
       sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -633,16 +597,13 @@ describe('IKDMQQ 保存失败暂停生成与项目切换', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'));
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === draftId)).toBe(true);
-    // IKFXZD：失败分支面板保持打开（成功才关）
     expect(promptTextarea()).toBeTruthy();
 
-    // 项目切换被阻断
     await act(async () => {
       await headerProps.current.onSelectProject('p2');
     });
     expect(headerProps.current.currentProjectId).toBe('p1');
 
-    // 保存恢复：切换放行
     apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
     await act(async () => {
       const retry = [...container.querySelectorAll('button')].find(button => button.textContent === '重试保存');

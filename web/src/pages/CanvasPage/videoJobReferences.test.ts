@@ -14,8 +14,6 @@ function ref(partial: Partial<VideoMediaRef> & Pick<VideoMediaRef, 'assetId' | '
 
 describe('buildVideoJobReferences —— 视频参考时长要带上', () => {
   it('★ 视频参考带上 duration：视频按 token 计费，官方公式含视频输入时要加输入时长', () => {
-    // 不带时长 → 服务端对素材库引用（material_id，本地零表）就量不到输入时长 →
-    // billing 判「含视频输入却量不到」→ 拒绝提交。带上是划算得到价的前提。
     const refs: VideoMediaRefs = {
       reference: [ref({ assetId: '12', mediaType: 'video', duration: 5 })],
     };

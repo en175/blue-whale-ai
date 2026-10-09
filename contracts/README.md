@@ -53,6 +53,12 @@ Java 侧 `QuantityRegistry` **必须是同一套值**。
 
 这是「**配了某个维度但没人上报**」的结构性防线 —— 不是靠人检查。
 
+| 事件 | topic（代码默认值） | 消费方动作 |
+|---|---|---|
+| `JobCompletedEvent` | `generation-job-completed` | billing → Settle（按成功 slot 计费） |
+| `JobFailedEvent` | `generation-job-failed` | billing → Refund（全额返还） |
+| `CatalogActivated` | `pricing.catalog.activated` | 各服务重载内存副本（生产者尚未落地） |
+
 ## 生成
 
 ```bash
@@ -61,6 +67,7 @@ buf generate          # 需先装 buf：brew install bufbuild/buf/buf
 ```
 
 **生成物不入仓**（避免 TS / Java 两端生成物漂移），构建时生成：
+TS 端必须带 `import_extension=js`（见 `buf.gen.yaml`）——本仓 tsconfig 是 node16/nodenext 解析，裸相对导入会报 TS2835。
 
 | 端 | 输出 |
 |---|---|
@@ -76,6 +83,8 @@ buf generate          # 需先装 buf：brew install bufbuild/buf/buf
 | 不能原地改类型 / 改字段号 | 同一号码上换类型，滚动发布期间老的一侧会解出错值。要改就换新号 |
 | **CI 强制 breaking 检测** | `buf breaking --against '.git#branch=release/2026.09.29'`，规则集 `WIRE`（见 `buf.yaml` 里为什么由 `FILE` 改过来） |
 | **服务端先行** | 新字段服务端先支持，客户端再消费 |
+
+`ListTransactionsRequest` 为旧的单值 `type_filter` 保留字段号 `2` 和名称，新版 `type_filters` 使用字段号 `4` 的 `repeated string`。`AdminListTransactionsRequest` 为旧的 `page_token` 保留字段号 `4` 和名称，当前页码 `page` 使用字段号 `5`。这些形状可在 `billing/v1/billing.proto` 核对，兼容性决策沿用上面的字段保留规则。
 
 ## 关联文档
 

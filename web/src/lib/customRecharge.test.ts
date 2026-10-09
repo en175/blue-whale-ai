@@ -9,11 +9,7 @@ import {
   validateCredits,
 } from './customRecharge';
 
-// 自定义充值的取数与换算（模块 B，PRD §7.2 / §7.3）。
-// ⚠️ 价格公式必须与服务端 `customPriceFen` 逐字同口径 —— 这里的第一组用例
-// 就是照着后端 `constants.test.ts` 的那组数抄下来的，两边对不上就在这条红。
 
-/** PRD §7.1 的默认配置。 */
 const RULE = {
   min_credits: 600,
   max_credits: 499_995,
@@ -80,11 +76,8 @@ describe('snapCredits — 修正到合法格点（PRD §7.3「自动修正为合
   });
 
   it('★ 吸附到最近的格点（不是向零取整，也不是向上取整）', () => {
-    // (4996-600)/15 = 293.07 → 293 格 → 4995（离 4996 更近）
     expect(snapCredits(4_996, RULE)).toBe(4_995);
-    // (5000-600)/15 = 293.33 → 293 格 → 4995
     expect(snapCredits(5_000, RULE)).toBe(4_995);
-    // (5009-600)/15 = 293.93 → 294 格 → 5010（离 5009 更近）
     expect(snapCredits(5_009, RULE)).toBe(5_010);
   });
 

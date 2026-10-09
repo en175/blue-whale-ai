@@ -10,7 +10,6 @@ import {
   type CreateJobResult,
 } from "./generation-job-idempotency.js";
 
-/** 一次扩展位 upsert 的入参形状（与 setJobExtras 逐字对齐）。 */
 interface ExtraUpsertArg {
   where: {
     generation_job_id_extra_key: { generation_job_id: bigint; extra_key: string };
@@ -24,9 +23,6 @@ interface ExtraUpsertArg {
   update: { value_type: string; value_text: string; gmt_modified: Date };
 }
 
-/** 扩展位假件（IKJCOE）：strategy_version / video_stage / charge_state 等任务特有字段
- *  已从 generation_jobs 主表列搬进 generation_job_extras，建任务与重试路径改调它。
- *  默认无键、不记账；写入断言直接读 calls。 */
 function extrasDelegate(rows: unknown[] = []) {
   return {
     upsert: vi.fn(async (_arg: ExtraUpsertArg) => ({})),
@@ -35,7 +31,6 @@ function extrasDelegate(rows: unknown[] = []) {
   };
 }
 
-/** 逐字钉住一次扩展位 upsert（where 复合键 / create / update 三段都断言）。 */
 function expectExtraWrite(
   upsert: ReturnType<typeof vi.fn>,
   jobId: bigint,
@@ -103,9 +98,6 @@ describe("generation command placement anchor", () => {
 
     expect(createJob).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        // IKJCOE：输出数冻进 input 快照（主表 expected_output_count 列已删，Worker 从
-        // 这里读「这次要出几个」）。storyboard_preview 只把 count 当参数传、不写 input 字面量，
-        // 少了这一条它会在 Worker 侧退化成 1 —— 出图数比槽位数少。
         input: {
           prompt: "whale",
           placement_anchor: { x: 100, y: 200, width: 400, height: 320 },
@@ -237,8 +229,6 @@ describe("generation command repo retry", () => {
           source: "scene_card",
           status: "failed",
           input: {},
-          // IKJCOE：expected_output_count / strategy_version 主表列已删
-          //（输出数以输出槽行为权威；策略版本改从扩展位继承，拿不到才按 type 重算）。
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
@@ -264,9 +254,7 @@ describe("generation command repo retry", () => {
         create: createSlot,
       },
       scene_card_generation_records: { update: updateRecord },
-      // IKJCOE：扩展位（重试路径读原 job 的阶段身份、写重试 job 的策略版本）。
       generation_job_extras: extrasDelegate(),
-      // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
       cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
@@ -385,7 +373,6 @@ describe("generation command repo retry", () => {
           source: "bottom_dock",
           status: "partially_succeeded",
           input: {},
-          // IKJCOE：主表 expected_output_count / strategy_version 列已删。
         }),
         create: createJob,
       },
@@ -407,7 +394,6 @@ describe("generation command repo retry", () => {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
       cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
@@ -438,8 +424,6 @@ describe("generation command repo retry", () => {
     expect(createJob).toHaveBeenCalledWith({
       data: expect.objectContaining({ retry_of_job_id: 300n }),
     });
-    // IKJCOE：重试行的任务特有字段进扩展位（原主表 expected_output_count / strategy_version
-    // 列已删）。类型是 image → 策略版本按当前常量重算，不复制原行。
     expectExtraWrite(tx.generation_job_extras.upsert, 302n, "strategy_version", "string", "image-sync-v1");
     expect(createSlot).toHaveBeenCalledTimes(1);
     expect(createSlot).toHaveBeenCalledWith({
@@ -460,7 +444,6 @@ describe("generation command repo retry", () => {
           source: "bottom_dock",
           status: "failed",
           input: {},
-          // IKJCOE：主表 expected_output_count 列已删（输出数以输出槽行为权威）。
         }),
         create: createJob,
       },
@@ -488,7 +471,6 @@ describe("generation command repo retry", () => {
         create: createSlot,
       },
       generation_job_extras: extrasDelegate(),
-      // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
       cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
@@ -534,7 +516,6 @@ describe("generation command repo retry", () => {
           source: "bottom_dock",
           status: "succeeded",
           input: {},
-          // IKJCOE：主表 expected_output_count 列已删。
         }),
         create: createJob,
       },
@@ -572,7 +553,6 @@ describe("generation command repo retry", () => {
       source: "scene_card",
       status: "failed",
       input: {},
-      // IKJCOE：expected_output_count / strategy_version 主表列已删。
     };
     const firstTx = {
       generation_jobs: {
@@ -591,7 +571,6 @@ describe("generation command repo retry", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       generation_job_extras: extrasDelegate(),
-      // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
       cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
@@ -665,9 +644,7 @@ describe("generation command repo retry", () => {
     expect(secondTx.command_idempotency.findUnique).toHaveBeenCalledOnce();
   });
 
-  // IKF YHJ（ADR-0087 决策 7）：重试复用原 job 的参数快照，但素材校验状态可能在那之后变了。
   describe("retryJob 素材状态门（IKF YHJ）", () => {
-    /** 能走到 create 的最小事务形状：无输出槽 → retryCount 取 input 快照里的 expected_output_count。 */
     function retryTx(original: Record<string, unknown>) {
       const createJob = vi.fn().mockResolvedValue({
         id: 302n,
@@ -724,8 +701,6 @@ describe("generation command repo retry", () => {
       type: "video",
       source: "scene_card",
       status: "failed",
-      // IKJCOE：主表 expected_output_count 列已删——权威快照是 input 里的同名键
-      //（建行时必写；读不出来按 1 兜底，见 readInputCount）。
       input: { references: [{ material_id: "asset-abc" }], expected_output_count: 1 },
       strategy_version: "seedance-2.0-v1",
     };
@@ -850,7 +825,6 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
     actionType: "generate_video",
   };
 
-  /** 能一路走到「日志写入」的事务形状 —— 那一步正是实测炸掉的地方。 */
   function createTx(options: { failAtLog?: boolean } = {}) {
     const tx = {
       generation_jobs: {
@@ -905,10 +879,7 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
       "could not serialize",
     );
 
-    // 预扣在 job 行插入之后（billing 按 job_id 找预留）
     expect(hold).toHaveBeenCalledWith(501);
-    // 事务回滚只撤掉本地行，冻住的积分不会跟着回来；而任务行没了 ⇒ 终态事件永远不会发
-    // ⇒ 这笔钱会永远冻着。所以必须显式退。
     expect(release).toHaveBeenCalledWith(
       501,
       expect.stringContaining("could not serialize"),
@@ -950,9 +921,6 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
     const { hold, release, billing } = billingOf();
     const repo = createGenerationCommandRepo(prisma as never);
 
-    // 函数藏在 input 快照里 —— 那个对象同时是 Prisma 的 create 入参和日志载荷，
-    // 序列化不了就会在落库那一刻抛错（实测的 500）。类型看不穿 Record<string, unknown>，
-    // 所以有一道运行时纵深闸兜底，且刻意在**预扣之前**。
     await expect(
       repo.createJob(
         { ...JOB_INPUT, input: { prompt: "whale", onDone: () => {} } },
@@ -979,8 +947,6 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
   });
 });
 
-// ★ 建任务幂等（command_idempotency，operation=generation.create）：
-//   同一把 Idempotency-Key 只建一个 job、只扣一次钱。
 describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣一次钱", () => {
   const JOB_INPUT: CreateJobInput = {
     projectId: "55",
@@ -1010,7 +976,6 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
     return `${row.project_id}|${row.operation}|${row.idempotency_key}`;
   }
 
-  /** Prisma 的唯一约束冲突（P2002），语义照 `uk_command_idempotency` 写。 */
   function uniqueViolation() {
     return Object.assign(
       new Error("Unique constraint failed: uk_command_idempotency"),
@@ -1018,29 +983,17 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
     );
   }
 
-  /** 期望「建成了任务」的那一支（另一支是幂等冲突）。 */
   function created(result: CreateJobResult) {
     if ("kind" in result) throw new Error("期望建成任务，实际是幂等冲突");
     return result;
   }
 
-  /**
-   * 假件：`command_idempotency`（含唯一索引语义）+ 建 job 事务 + 预扣。
-   *
-   * ⚠️ 唯一索引那部分**必须照真库写**：同键的第二个 INSERT 会等先到的事务结束（真库上是
-   * 索引项的行锁），然后按它提交与否决定是抢到键还是撞唯一索引。少了这一步，两个并发请求
-   * 会双双写进去，测出来的就不是「并发同键」而是两次顺序执行。
-   *
-   * 回滚同样照真语义：写入先进本事务的 pending，**提交才合并**进 committed——事务抛错时
-   * pending 直接随闭包丢掉，job 行与幂等行一起消失。
-   */
   function createHarness() {
     const committed = new Map<string, IdemRow>();
     const inflight = new Map<string, Promise<void>>();
     const committedJobIds: bigint[] = [];
     let nextJobId = 500n;
 
-    // 形参类型只为让 `mock.calls` 能按位取（vi.fn 无参时 calls 是空元组，取不出来）
     const hold = vi.fn(async (_jobId: number) => {});
     const release = vi.fn(async (_jobId: number, _reason: string) => {});
     const billing = { hold, release };
@@ -1158,14 +1111,12 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
       idempotency: IDEMPOTENCY,
     });
 
-    // 响应体（含客户端要的那个 generation_job_id）两次完全一致
     expect(second).toEqual(first);
     expect(created(second).generation_job_id).toBe(
       created(first).generation_job_id,
     );
     expect(h.committedJobIds).toHaveLength(1);
     expect(h.hold).toHaveBeenCalledTimes(1);
-    // 命中幂等这条路径上**不能再扣一次钱**，也不需要退（压根没冻第二笔）
     expect(h.release).not.toHaveBeenCalled();
     const row = h.committed.get(`55|${CREATE_GENERATION_JOB_OPERATION}|key-1`);
     expect(row?.request_hash).toBe("hash-1");
@@ -1189,9 +1140,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
     ]);
 
     expect(a).toEqual(b);
-    // 只有一个事务提交（job 行与幂等行一起），另一个整体回滚
     expect(h.committedJobIds).toHaveLength(1);
-    // 两个都冻过，但输家那笔被补偿退掉了 —— 净额只留一笔预扣
     expect(h.hold).toHaveBeenCalledTimes(2);
     expect(h.release).toHaveBeenCalledTimes(1);
     expect(h.release.mock.calls[0]?.[0]).not.toBe(
@@ -1250,10 +1199,6 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// IKIZQ8：样片阶段落库——videoStage='sample' 时行值带 video_stage + charge_state='held'
-// （创建即预扣，契约 §6）；普通视频（未传 videoStage）两列不写（NULL = 旧语义）。
-// ═══════════════════════════════════════════════════════════════
 describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
   function plainTx(createJob: ReturnType<typeof vi.fn>) {
     return {
@@ -1280,11 +1225,9 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
       actionType: "generate_video",
       videoStage: "sample",
     });
-    // 阶段身份与费用初始态不再进主表行。
     const data = (createJob.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
     expect(data.video_stage).toBeUndefined();
     expect(data.charge_state).toBeUndefined();
-    // 三个键逐字落在扩展位（写入顺序 = setJobExtras 的 Object.entries 顺序）。
     expect(tx.generation_job_extras.upsert.mock.calls.map((call) => call[0].create.extra_key)).toEqual([
       "strategy_version",
       "video_stage",
@@ -1310,7 +1253,6 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
     const data = (createJob.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
     expect(data.video_stage).toBeUndefined();
     expect(data.charge_state).toBeUndefined();
-    // 扩展位只写策略版本快照（缺键 = 旧语义）。
     expect(tx.generation_job_extras.upsert.mock.calls.map((call) => call[0].create.extra_key)).toEqual([
       "strategy_version",
     ]);

@@ -1,9 +1,3 @@
-// IKHK98：智能抠像创建入口复核矩阵与幂等/同事务落库单测（先例：
-// video-scene-splits.service.test.ts + vocal-splits.service.test.ts 的缺省补默认口径）。
-// 只测外部可见行为：拒绝原因可读、mode/format/background_color 组合矩阵（含缺省补默认）、
-// client_token 幂等三态（重放/冲突/新建）、任务行与幂等行同事务原子落库、落库参数冻结
-// （补齐后的 format / background_color 原样冻结）、免费口径无成本预留、凭证冻结。
-// IKJJQW：追加恢复协议 v1 接入分支（client_token==submission_id 承载 / 受理事务 / 受控错误）。
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,7 +40,6 @@ const VALID_BODY = {
   client_token: "tok-001",
 };
 
-/** 默认源素材：1920x1080 mp4、5 分钟；时长权威值齐备且在门槛内。 */
 function makeVideoAsset(overrides: Record<string, unknown> = {}) {
   return {
     type: "video",
@@ -83,11 +76,8 @@ function makeService(overrides: {
       create: overrides.jobCreate ?? vi.fn().mockResolvedValue({ id: 400n }),
       findUnique: overrides.replayedJob ?? vi.fn(),
     },
-    // 免费口径哨兵：任何成本预留写入都会在这里暴露。
     cost_reservations: { create: vi.fn() },
   };
-  // IKJJQW：受理主体（media-tool-recovery）的锁外幂等回读与状态现查直接走 prisma client，
-  // 事务体经 $transaction 拿 tx——两处必须是同一套 mock（同键重放在锁外命中）。
   const client = {
     command_idempotency: tx.command_idempotency,
     generation_jobs: tx.generation_jobs,
@@ -134,7 +124,6 @@ describe("VideoMattingsService.create：契约 schema 复核（mode / format / b
       expect(result.code).not.toBe(200);
       expect(result.msg).toContain("背景色");
     }
-    // null 同样明确拒绝（不静默回退默认）。
     const nullColor = await service.create("9", "55", {
       ...VALID_BODY,
       format: "MP4",
@@ -145,14 +134,12 @@ describe("VideoMattingsService.create：契约 schema 复核（mode / format / b
 
   it("rejects background_color on WEBM (transparent) but accepts MP4 with all three colors", async () => {
     const { service } = makeService();
-    // WEBM 冻结形态不接受背景色（显式传入即拒，补默认逻辑不触碰 WEBM）。
     const webm = await service.create("9", "55", {
       ...VALID_BODY,
       background_color: "white",
     });
     expect(webm.code).not.toBe(200);
     expect(webm.msg).toContain("WEBM");
-    // MP4 三底色全过。
     for (const backgroundColor of ["white", "black", "green"]) {
       const result = await service.create("9", "55", {
         ...VALID_BODY,
@@ -303,8 +290,6 @@ describe("VideoMattingsService.create：输入门槛复核（时长 ≤10 分钟
   });
 
   it("lets a video without recorded duration pass to the supplier gate", async () => {
-    // assets.duration_ms 由前端上报、存量大量为 null：缺权威值不臆造、不拦（前端缺失放行的
-    // 后端兜底口径 = 有值才拦，无值放行交任务失败口径兜底）。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: null })) },
     });
@@ -325,7 +310,6 @@ describe("VideoMattingsService.create：client_token 幂等三态", () => {
     const result = await service.create("9", "55", VALID_BODY);
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ job_id: "400", status: "queued" });
-    // 重放不重复建任务：任务行与幂等行都零写入。
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
     expect(tx.command_idempotency.create).not.toHaveBeenCalled();
   });
@@ -359,7 +343,6 @@ describe("VideoMattingsService.create：client_token 幂等三态", () => {
   it("hashes the filled defaults: an omitted format replays against a frozen WEBM", async () => {
     const { service } = makeService({
       idemFindUnique: vi.fn().mockResolvedValue({
-        // 首次提交未传 format（冻结 WEBM）；同 token 未传 format 重放 = 相同摘要可重放。
         request_hash: hashFor("88", "node-1", "portrait", "WEBM", ""),
         generation_job_id: 400n,
       }),
@@ -379,11 +362,9 @@ describe("VideoMattingsService.create：任务与占位数据同事务落库", (
     const result = await service.create("9", "55", VALID_BODY);
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ job_id: "400", status: "queued" });
-    // 同一事务（单次 $transaction 回调内完成两行写入——「无半创建状态」的载体）。
     expect(client.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.generation_jobs.create).toHaveBeenCalledTimes(1);
     expect(tx.command_idempotency.create).toHaveBeenCalledTimes(1);
-    // 幂等行回指任务行，request_hash 摘要五业务键（WEBM 冻结无背景色位）。
     expect(tx.command_idempotency.create).toHaveBeenCalledWith({
       data: {
         project_id: 55n,
@@ -422,8 +403,6 @@ describe("VideoMattingsService.create：任务与占位数据同事务落库", (
         next_action_at: expect.any(Date),
       }),
     });
-    // 模式 / 格式原样冻结为枚举值；worker 出站按 VIDEO_MATTING_SUBMIT_PATHS[mode] /
-    // VIDEO_MATTING_MODEL_NAMES[mode] 换算，创建入口不落任何路径 / 模型名字面量。
     const input = tx.generation_jobs.create.mock.calls[0][0].data.input;
     expect(Object.keys(input)).not.toContain("model");
     expect(Object.keys(input)).not.toContain("provider_task_id");
@@ -465,7 +444,6 @@ describe("VideoMattingsService.create：恢复协议 v1 接入（IKJJQW）", () 
       status: "queued",
       canvas_binding: { submission_id: SUBMISSION_ID, binding_revision: 1, is_current: true },
     });
-    // canvas_binding 剥离后不进冻结 input；幂等行 key=submission_id。
     expect(tx.generation_jobs.create.mock.calls[0][0].data.input).toEqual({
       source_asset_id: "88",
       target_node_id: "node-1",
@@ -506,8 +484,6 @@ describe("VideoMattingsService.create：恢复协议 v1 接入（IKJJQW）", () 
   });
 });
 
-/** 与服务同算法的请求摘要（重放/冲突用例的基准值）：sha256 定序拼接五业务键
- *  （background_color WEBM 冻结恒无键，空串占位）。 */
 function hashFor(
   sourceAssetId: string,
   targetNodeId: string,

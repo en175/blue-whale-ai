@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-/* IKFCKT：MusicDialog 参考条拖拽换位——面板本地序重排、编号随新序重派生、发送按新序携带 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,7 +14,6 @@ const REF_B: AudioRefItem = { id: 'n2', kind: 'audio', name: '环境音', src: '
 
 const onSend = vi.fn();
 
-/** 依次注入两个画布参考（externalPick 每次 ts 变化消费一次），返回 onSend 供发送断言 */
 async function renderWithRefs() {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -74,7 +72,6 @@ describe('MusicDialog 参考条拖拽换位（IKFCKT）', () => {
     } as DOMRect);
     dragAndDrop(thumbs()[1]!, thumbs()[0]!, 'before');
 
-    // 换位后：环境音=1、鼓点采样=2；标题输入后发送 refs 序随之
     const after = thumbs();
     expect(after.map((el) => el.getAttribute('title'))).toEqual(['环境音', '鼓点采样']);
     expect(after.map(badgeOf)).toEqual(['1', '2']);

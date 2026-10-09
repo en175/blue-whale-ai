@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Machine-verifiable, one-shot authorizations for high-impact Agent actions."""
 
 from __future__ import annotations
 
@@ -116,8 +115,6 @@ def grant(project_dir: str, scope: AuthorizationScope) -> int:
     values["created_at"] = str(int(time.time()))
     fd, tmp_name = tempfile.mkstemp(prefix=".authorization-", dir=path.parent)
     try:
-        # Windows 原生 Python 无 os.fchmod（仅 POSIX）——跳过即可：
-        # 临时文件权限交给 os.replace 后的 os.chmod，非 POSIX 平台静默降级。
         if getattr(os, "fchmod", None) is not None:
             os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -232,9 +229,6 @@ def revoke_all(project_dir: str) -> int:
 
 
 def main() -> int:
-    # Windows 原生 Python 默认 stdout/stderr 为 cp936（GBK），与 Git Bash 的
-    # UTF-8 输出被 test-hooks.sh 的 UTF-8 needle grep 漏配（与 sync/start-task
-    # 同根因的输出方向）。强制改 UTF-8；POSIX 本就 UTF-8，reconfigure 为 no-op。
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

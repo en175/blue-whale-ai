@@ -1,10 +1,3 @@
-/* ============================================
- * SiteConfig 通用配置：首页背景图 / 视频增删改查、排序、启停与 TOS 上传
- * 数据源 /api/admin/site-config/homepage-heroes
- *
- * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**——
- * 与 SkillManage 同一条纪律：页面只描述结构，样式一处定义在套件里。
- * ============================================ */
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -47,7 +40,6 @@ function thumbOf(row: HomepageHeroAdmin): string | null {
   return null;
 }
 
-/** 长地址单元格：单行截断。只有布局属性，颜色/字号交给表格自己的样式 */
 const urlCellStyle = {
   display: 'inline-block',
   maxWidth: 240,
@@ -143,7 +135,7 @@ export default function SiteConfig() {
         }
       />
 
-      {/* 首页默认兜底背景：说明这个接口不返回它，以及它从哪来 */}
+      {}
       <Alert tone="info" title="首页默认兜底背景">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <img
@@ -207,7 +199,6 @@ export default function SiteConfig() {
               <tr
                 key={row.id}
                 data-testid={`hero-row-${row.id}`}
-                // 拖拽中的行淡出（原来由私有样式 .dragging td 给，这里只剩这一个视觉态）
                 style={draggedId === row.id ? { opacity: 0.45 } : undefined}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => moveByDrag(row.id)}

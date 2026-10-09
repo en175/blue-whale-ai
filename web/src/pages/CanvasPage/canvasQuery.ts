@@ -1,12 +1,9 @@
-/** Query key for the current canvas. Product copy says 画布; the API entity is project. */
 export const CANVAS_QUERY_KEY = 'project';
 
-/** Read the canvas id from URL search params. Empty string when absent. */
 export function readCanvasIdFromSearch(searchParams: URLSearchParams): string {
   return searchParams.get(CANVAS_QUERY_KEY)?.trim() ?? '';
 }
 
-/** Return a copy of search params with the canvas id set or removed. */
 export function withCanvasId(searchParams: URLSearchParams, canvasId: string): URLSearchParams {
   const next = new URLSearchParams(searchParams);
   const id = canvasId.trim();
@@ -15,13 +12,11 @@ export function withCanvasId(searchParams: URLSearchParams, canvasId: string): U
   return next;
 }
 
-/** Location.search for a canvas id, preserving other query keys. Empty when nothing remains. */
 export function canvasLocationSearch(searchParams: URLSearchParams, canvasId: string): string {
   const qs = withCanvasId(searchParams, canvasId).toString();
   return qs ? `?${qs}` : '';
 }
 
-/** 恢复落点候选：查询参数 > 上次打开 > 最新创建 > 首项（置顶排序后首项可能是置顶组头，第三级按 created_at 取）。 */
 export function pickCanvasIdAfterLoad(
   queryId: string,
   projectIds: readonly string[],
@@ -34,7 +29,6 @@ export function pickCanvasIdAfterLoad(
   return projectIds[0] ?? '';
 }
 
-/** 从项目列表挑出 last_opened_at 最新的一项 id；全空或空列表返回空串（ISO 字典序即时间序）。 */
 export function findLastOpenedProjectId(
   projects: readonly { id: string | number; last_opened_at: string | null }[],
 ): string {
@@ -48,7 +42,6 @@ export function findLastOpenedProjectId(
   return best ? String(best.id) : '';
 }
 
-/** 从项目列表挑出 created_at 最新的一项 id（三级兜底第三级「最新创建」，与置顶排序无关）；空列表返回空串。 */
 export function findLatestCreatedProjectId(
   projects: readonly { id: string | number; created_at: string | null }[],
 ): string {
@@ -62,7 +55,6 @@ export function findLatestCreatedProjectId(
   return best ? String(best.id) : '';
 }
 
-/** Deleting the current canvas returns the user to the project list. */
 export function shouldReturnToProjectsAfterDelete(currentId: string, deletedId: string): boolean {
   return currentId === deletedId;
 }

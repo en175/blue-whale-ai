@@ -1,4 +1,3 @@
-"""Black-box channel decisions, adapters, repository isolation and audit privacy."""
 import json
 import os
 import subprocess

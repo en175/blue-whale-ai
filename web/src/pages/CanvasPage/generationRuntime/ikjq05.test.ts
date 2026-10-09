@@ -1,4 +1,3 @@
-/* IKJQ05：受理回执未保存时，真实任务与序列化占位经公开 recover/retry 接续可靠失败记录。 */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { canvasBindingSchema } from '@lib/contracts/canvas-recovery';

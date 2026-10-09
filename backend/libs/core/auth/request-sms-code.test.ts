@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { requestSmsCode } from "./request-sms-code.js";
 
-// requestSmsCode 用例：依赖注入 db/sms（core 不直接 import persistence/volcengine）。
-// 行为契约对齐 Java AuthService.sendCode：生成 6 位码 → 写 verification_codes(gmt_expire=now+5min) → 发短信。
 describe("requestSmsCode (happy path)", () => {
   it("生成 6 位码、写 verification_codes、调 SMS 发送（code TTL 5min）", async () => {
     const createVerificationCode = vi.fn().mockResolvedValue(undefined);

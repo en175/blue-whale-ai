@@ -1,11 +1,4 @@
-/* ============================================
- * AudioSpeedBar 调速发送条（IKHW5S）：钉屏幕浮层 24px 胶囊家族单条，容器视觉 =
- * 浮层容器三令牌（背景/描边/阴影）+ 24px 胶囊圆角（逐件对齐 AudioTrimBar 家族
- * 令牌值）。条内控件全走令牌；滑杆区（轨道/拇指/凹槽/刻度）对齐交互原型
- * audio-speed.prototype.html 定稿视觉（原型字面量折算为最近令牌）。
- * ============================================ */
 
-/* ---- 源音频卡下方发送条（单条：X + 标题 + 滑杆 + 当前值 + ⚡0 + 发送钮） ---- */
 .sendBar {
   position: absolute;
   left: 50%;
@@ -23,14 +16,11 @@
   white-space: nowrap;
 }
 
-/* 跟随锚定（IKH25A 中心点锚口径，inline left/top 生效）：解除默认 bottom 定位，
-   transform 继承基础态 translateX(-50%) 以锚点（源卡中心 x）真居中。 */
 .sendBarFollow {
   bottom: auto;
   left: 0;
 }
 
-/* X 退出钮（家族关闭钮：28px 圆形，口径同 AudioTrimBar .closeBtn） */
 .closeBtn {
   width: 28px;
   height: 28px;
@@ -51,14 +41,12 @@
   background-color: var(--color-bg-hover);
 }
 
-/* 标题（只读） */
 .title {
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
   flex: none;
 }
 
-/* ---- 倍速滑杆区（230px 定宽 + 底部刻度行；轨道 4px + 白色拇指 14px） ---- */
 .sliderBox {
   position: relative;
   width: 230px;
@@ -131,7 +119,6 @@
   cursor: not-allowed;
 }
 
-/* 1.0x 原速视觉中点凹槽（分段线性滑杆：左半 0.1~1.0、右半 1.0~4.0，1.0 位于中点） */
 .notch {
   position: absolute;
   left: 50%;
@@ -144,7 +131,6 @@
   pointer-events: none;
 }
 
-/* 刻度行（0.1x / 0.5x / 1.0x 原速 / 2.0x / 4.0x，left 由契约 speedToPos 换算） */
 .ticks {
   position: absolute;
   left: 0;
@@ -163,7 +149,6 @@
   white-space: nowrap;
 }
 
-/* 端点刻度不居中位移（防溢出发送条圆角） */
 .tick.first {
   transform: none;
 }
@@ -172,13 +157,10 @@
   transform: translateX(-100%);
 }
 
-/* 原速刻度提亮一档 */
 .tick.origin {
   color: var(--color-text-secondary);
 }
 
-/* 当前倍速值（纯文字只读参数 = AudioTrimBar .range 同款：font-size-sm + secondary +
-   0.04em + tabular-nums，无底块） */
 .value {
   min-width: 38px;
   text-align: left;
@@ -189,7 +171,6 @@
   flex: none;
 }
 
-/* ---- ⚡0「本期免费」徽标（免费口径同截取/分离家族） ---- */
 .free {
   display: inline-flex;
   align-items: center;
@@ -202,8 +183,6 @@
   flex: none;
 }
 
-/* ---- 发送钮：家族发送钮同款（灰底圆角方形 + 白 ↑ 图标，口径同 AudioTrimBar
- *    .sendBtn——置灰态即默认灰，无额外 disabled 透明度） ---- */
 .sendBtn {
   width: 30px;
   height: 30px;

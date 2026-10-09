@@ -37,8 +37,6 @@ describe("IK67GZ incremental migration", () => {
 
   it("keeps the acceptance baseline in sync (fresh MySQL only loads baseline)", () => {
     expect(baselineSql).toContain("`retry_count` INTEGER NOT NULL DEFAULT 0");
-    // IKCKOW：baseline 已删 6 张旧 Agent 表（含 provisional/provider），
-    // fresh 库不再含其 CREATE —— 历史 migration 文件保留原样仅作升级链记录。
     expect(baselineSql).not.toContain("CREATE TABLE `agent_provisional_deliveries`");
     expect(baselineSql).not.toContain("CREATE TABLE `agent_provisional_chunks`");
     expect(baselineSql).not.toContain("CREATE TABLE `agent_provider_calls`");

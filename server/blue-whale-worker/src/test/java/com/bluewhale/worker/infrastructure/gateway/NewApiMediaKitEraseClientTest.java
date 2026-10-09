@@ -21,15 +21,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-/**
- * NewApiMediaKitEraseClient 接口级 mock 网关测试（契约 §15.3 / §15.5 / IKGOT6）。
- * <p>
- * 覆盖：两场景请求映射（full_screen_text_erase 不含 mask_url / standard_erase_text /
- * selected_area；selected_area_erase 只含 mask_url；固定 tool_version=standard +
- * output_format=png）、标准请求头三元组、错误分类（网关 400 且不扣费 → §5 分类 +
- * 上游原因透传）、result.image_url 解析与缺失兜底。不连真实网关。
- * 请求体字段名以火山官方 PDF 为准（/tmp 精读文本；standard_erase_locations 属未文档化行为不依赖）。
- */
 class NewApiMediaKitEraseClientTest {
 
     private HttpServer server;
@@ -78,7 +69,6 @@ class NewApiMediaKitEraseClientTest {
                 "full_screen_text_erase", null);
     }
 
-    // ========== 两场景请求映射（§15.3） ==========
 
     @Test
     @DisplayName("full_screen_text_erase：路径 erase-image + model + 固定参数，不含 mask_url / standard_erase_text / selected_area")
@@ -92,8 +82,6 @@ class NewApiMediaKitEraseClientTest {
         assertThat(body).contains("\"tool_version\":\"standard\"");
         assertThat(body).contains("\"standard_scene\":\"full_screen_text_erase\"");
         assertThat(body).contains("\"output_format\":\"png\"");
-        // 擦所有文字（官方默认行为）：不发 mask_url / standard_erase_text / selected_area
-        // （键断言带引号——"selected_area" 是 "selected_area_erase" 值的子串，裸串断言会误伤）
         assertThat(body).doesNotContain("\"mask_url\"");
         assertThat(body).doesNotContain("\"standard_erase_text\"");
         assertThat(body).doesNotContain("\"selected_area\"");
@@ -109,10 +97,8 @@ class NewApiMediaKitEraseClientTest {
         String body = lastBody.get();
         assertThat(body).contains("\"standard_scene\":\"selected_area_erase\"");
         assertThat(body).contains("\"mask_url\":\"https://example.com/mask.png\"");
-        // 统一遮罩路径：不依赖文档允许的并传并集行为（键断言带引号，理由同上）
         assertThat(body).doesNotContain("\"selected_area\"");
         assertThat(body).doesNotContain("\"standard_erase_text\"");
-        // 固定参数两场景同值
         assertThat(body).contains("\"tool_version\":\"standard\"");
         assertThat(body).contains("\"output_format\":\"png\"");
     }
@@ -127,7 +113,6 @@ class NewApiMediaKitEraseClientTest {
         assertThat(lastTraceId.get()).isNotBlank();
     }
 
-    // ========== 响应与错误分类（§15.5 / §5） ==========
 
     @Test
     @DisplayName("成功：解析 result.image_url（火山托管 URL，24h 有效）")

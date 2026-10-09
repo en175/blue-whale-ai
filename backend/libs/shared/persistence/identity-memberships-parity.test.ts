@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// 自建用户体系第一刀：会员周期表（identity_memberships）。
-// 镜像 ikhexg/ikg4ur-parity 的三轨核对结构：prisma migration、schema 独立文件、docs/sql 快照三处同源。
 
 const migrationSql = readFileSync(
   new URL(
@@ -39,7 +37,6 @@ describe("identity_memberships 三轨迁移", () => {
   });
 
   it("等级推导的查询条件有对应索引", () => {
-    // 条件 (user_id, status, expires_at) 与索引列序一致；顺序反了就用不上。
     expect(migrationSql).toContain(
       "`idx_identity_memberships__user_status_expiry`(`user_id`, `status`, `expires_at`)",
     );
@@ -50,10 +47,6 @@ describe("identity_memberships 三轨迁移", () => {
   });
 
   it("Prisma 模型与建表语句同源（表名、唯一索引、普通索引三处对齐）", () => {
-    // Prisma 认不出唯一/普通索引的 map 名时，`prisma migrate dev` 会想再改一次 schema——
-    // 那意味着数据库在两套描述之间来回漂移。这里把三处名字钉死。
-    // 模型名与索引名都是**当前态**（被 20260928100000 收敛过前缀）；
-    // 本文件只钉住该迁移的冻结内容，当前态以 bw-prefix-rename-parity.test.ts 为准。
     expect(schemaPrisma).toContain("model bw_memberships {");
     expect(schemaPrisma).toContain('map: "uk_bw_memberships__grant_key"');
     expect(schemaPrisma).toContain('map: "idx_bw_memberships__user_status_expiry"');

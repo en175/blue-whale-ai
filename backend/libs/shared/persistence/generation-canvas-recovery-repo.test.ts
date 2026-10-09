@@ -1,6 +1,3 @@
-// IKJJQU：恢复契约 v1 的纯函数规则测试——B.7 旧客户端守护、游标编码校验、保存请求摘要。
-// 受理/保存的事务性场景（竞争、唯一归属、回滚）在 ikjjqu-canvas-recovery.integration.test.ts
-// 用真实数据库验证（本文件只测无 IO 的判定逻辑）。
 import { describe, expect, it } from "vitest";
 
 import { RECOVERY_REASONS, recoveryItemId, TARGET_OUTPUT_KEY } from "@lib/contracts";
@@ -112,7 +109,6 @@ describe("保存请求摘要（B.6）", () => {
       ...base,
       changes: [{ ...base.changes[0]!, action: "remove" }, { ...base.changes[0]! }],
     });
-    // 同一变更集内部顺序变化：两项不同内容排序后应与逆序一致
     const set1 = canvasRecoverySaveRequestHash({
       ...base,
       changes: [

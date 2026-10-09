@@ -1,4 +1,3 @@
-/* 文本索引下游同步（IKFM3S/IKFM3W/IKFM41）前端同源实现单测：合并参考、提示判定、发送校验、定位来源。 */
 import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import {
@@ -99,9 +98,7 @@ describe('imageTextIndexSendError', () => {
   it('合法图片索引放行；失效索引与不支持类型分别阻止', () => {
     const okNodes = [imageTarget('gen-1'), mediaNode('media-1', '9100'), INDEXED_TEXT];
     expect(imageTextIndexSendError('gen-1', [edge('text-1', 'gen-1'), INDEX_EDGE], okNodes, 10)).toBeNull();
-    // 关系线被删 → 失效索引
     expect(imageTextIndexSendError('gen-1', [edge('text-1', 'gen-1')], okNodes, 10)).toContain('失效');
-    // 文本索引视频素材 → 图片目标不支持
     const videoText = textNode('text-2', {
       text: '带视频1',
       mediaMentions: [{ start: 1, end: 4, nodeId: 'media-2', assetId: '9200' }],
@@ -148,7 +145,6 @@ describe('nextUsedInputState（乱序保护）', () => {
   });
 });
 
-/* ---- 视频目标（IKFM3W 契约 §10）---- */
 
 function videoTarget(id: string, extra: Record<string, unknown> = {}): Node {
   return { id, type: 'mediaNode', position: { x: 0, y: 0 }, data: { mediaType: 'video', draft: true, ...extra } };
@@ -198,7 +194,6 @@ describe('mergedVideoRefsWithTextIndex（IKFM3W §10）', () => {
     const refs = mergedVideoRefsWithTextIndex('gen-v', edges, mediaNodes, [VIDEO_TEXT]);
     expect(refs.first).toMatchObject({ assetId: '9200' });
     expect(refs.reference.map((r) => r.assetId)).toEqual(['9100']);
-    // 同素材直接参考连线（去重后单条、可移除直接来源）
     const dupEdges = [edge('vtext-1', 'gen-v'), edge('vmedia-1', 'gen-v'), VIDEO_INDEX_EDGE];
     const dupRefs = mergedVideoRefsWithTextIndex('gen-v', dupEdges, mediaNodes, [VIDEO_TEXT]);
     expect(dupRefs.reference).toHaveLength(1);
@@ -211,9 +206,7 @@ describe('videoTextIndexSendError（IKFM3W §10）', () => {
     const mediaNodes = [videoSourceNode('vmedia-1', '9100', 'image')];
     const edges = [edge('vtext-1', 'gen-v'), VIDEO_INDEX_EDGE];
     expect(videoTextIndexSendError('gen-v', edges, mediaNodes, [VIDEO_TEXT])).toBeNull();
-    // 关系线被删 → 失效索引
     expect(videoTextIndexSendError('gen-v', [edge('vtext-1', 'gen-v')], mediaNodes, [VIDEO_TEXT])).toContain('失效');
-    // 目标已有首帧 + 文本带入参考 → 帧互斥
     const frameEdges = [edge('vtext-1', 'gen-v'), edge('vmedia-2', 'gen-v', { refRole: 'first' }), VIDEO_INDEX_EDGE];
     const frameNodes = [videoSourceNode('vmedia-2', '9200', 'image'), videoSourceNode('vmedia-1', '9100', 'image')];
     const frameError = videoTextIndexSendError('gen-v', frameEdges, frameNodes, [VIDEO_TEXT]);
@@ -229,7 +222,6 @@ describe('mediaInputStale 视频目标（IKFM3W §10）', () => {
     const signature = imageTargetSignature('gen-v', edges, [...mediaNodes, VIDEO_TEXT, videoTarget('gen-v')]);
     const synced = videoTarget('gen-v', { usedInputSignature: signature });
     expect(mediaInputStale('gen-v', edges, [synced, ...mediaNodes, VIDEO_TEXT], 'video')).toBe(false);
-    // 正文变化 → 签名不一致重新提示
     const edited = textNode('vtext-1', { ...VIDEO_TEXT.data, text: '改用图片1出片吧' } as Record<string, unknown>);
     expect(mediaInputStale('gen-v', edges, [synced, ...mediaNodes, edited], 'video')).toBe(true);
   });
@@ -241,7 +233,6 @@ describe('mediaInputStale 视频目标（IKFM3W §10）', () => {
   });
 });
 
-/* ---- 音频目标（IKFM41 §11）---- */
 
 function audioSourceNode(id: string, assetId: string, mediaType: 'audio' | 'image' = 'audio'): Node {
   return {
@@ -271,7 +262,6 @@ describe('mergedAudioRefsWithTextIndex（IKFM41 §11）', () => {
     expect(refs[0]!.textNodeId).toBeUndefined();
     expect(refs[0]).toMatchObject({ mediaType: 'audio' });
     expect(refs[1]).toMatchObject({ nodeId: 'amedia-1', textNodeId: 'atext-1', mediaType: 'audio' });
-    // 同素材直接参考连线优先显示单条（可移除直接来源，文本来源保留决定锁定态）
     const dupEdges = [edge('atext-1', 'gen-a'), edge('amedia-1', 'gen-a'), AUDIO_INDEX_EDGE];
     const dupRefs = mergedAudioRefsWithTextIndex('gen-a', dupEdges, mediaNodes, [AUDIO_TEXT]).refs;
     expect(dupRefs).toHaveLength(1);
@@ -297,9 +287,7 @@ describe('audioTextIndexSendError（IKFM41 §11）', () => {
     const mediaNodes = [audioSourceNode('amedia-1', '9100')];
     const edges = [edge('atext-1', 'gen-a'), AUDIO_INDEX_EDGE];
     expect(audioTextIndexSendError('gen-a', edges, mediaNodes, [AUDIO_TEXT])).toBeNull();
-    // 关系线被删 → 失效索引
     expect(audioTextIndexSendError('gen-a', [edge('atext-1', 'gen-a')], mediaNodes, [AUDIO_TEXT])).toContain('失效');
-    // 视频素材进音频目标 → 不支持类型（audio/image 混用由后端容量校验文案拦截）
     const videoText = textNode('atext-3', {
       text: '用视频1配音',
       mediaMentions: [{ start: 1, end: 4, nodeId: 'amedia-4', assetId: '9400' }],
@@ -319,7 +307,6 @@ describe('mediaInputStale 音频目标（IKFM41 §11）', () => {
     const signature = imageTargetSignature('gen-a', edges, [...mediaNodes, AUDIO_TEXT, audioTarget('gen-a')]);
     const synced = audioTarget('gen-a', { usedInputSignature: signature });
     expect(mediaInputStale('gen-a', edges, [synced, ...mediaNodes, AUDIO_TEXT], 'audio')).toBe(false);
-    // 正文变化 → 签名不一致重新提示
     const edited = textNode('atext-1', { ...AUDIO_TEXT.data, text: '改用音频1配音吧' } as Record<string, unknown>);
     expect(mediaInputStale('gen-a', edges, [synced, ...mediaNodes, edited], 'audio')).toBe(true);
   });

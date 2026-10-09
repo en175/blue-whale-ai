@@ -172,8 +172,6 @@ export function buildTx(
       }),
       ...overrides.generation_jobs,
     },
-    // IKJCOE：任务特有字段（strategy_version 等）走扩展位（原主表列已删）；
-    // 默认无键 = 缺省语义。
     generation_job_extras: {
       upsert: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),

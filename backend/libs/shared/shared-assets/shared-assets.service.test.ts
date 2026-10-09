@@ -99,7 +99,7 @@ describe("SharedAssetService", () => {
 
   it("save：删除后重存 → 复活软删行，created:true（不再 500）", async () => {
     fakeRepo.create.mockRejectedValue({ code: "P2002" });
-    fakeRepo.findByDedupKey.mockResolvedValueOnce(null); // 存活行不存在
+    fakeRepo.findByDedupKey.mockResolvedValueOnce(null);
     fakeRepo.reviveByDedupKey.mockResolvedValue({ ...cardRow, id: 6n });
     const result = await service.save({ userId: "1" }, styleCardSave);
     expect(result.created).toBe(true);

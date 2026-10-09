@@ -1,10 +1,3 @@
-/* ============================================
- * TextNode 文本节点：外置常驻标题 + 固定 360×270 正文容器（内部滚动）
- * IKFM3L 统一正文契约 v1：普通新增、Agent 应用与历史卡共用 Markdown 编辑
- * 与格式工具栏；正文以受限 Markdown 源（data.text）为唯一权威，html 仅存量兼容。
- * IKFM3Q 正文媒体索引契约 v1：正文 @ 索引画布图片/音频/视频，标签编号与
- * 有效/失效状态由（节点, 带 textIndex 标记的关系线）派生，不持久化。
- * ============================================ */
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, useStore, useReactFlow, type NodeProps } from '@xyflow/react';
@@ -27,26 +20,17 @@ import { renderPromptMentions, readPromptMentions, applyMediaMentionState, creat
 import { applyMarkdownInputRule } from './markdownInputRules';
 import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 
-/** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
 
-/** 操作条顶边相对卡片顶边抬升量（IKGYYE 钉屏幕迁移）：条高约 32（addToChatBtn
- *  padding 8×2 + 内容 14 + 边框 2）+ 与卡片顶边间距 10，口径同迁移前 bottom 公式；
- *  格式工具栏条高 42 + 10 = FOLLOW_ABOVE_LIFT（52）用锚定函数缺省值 */
 const NODE_BAR_LIFT = 42;
 
-/** hover 桥接延迟（IKGYYB 审查修复）：卡与钉屏幕工具条之间的 ~10px 间隙不属于卡 DOM，
- *  卡 leave 不立即清 hover，留 120ms 窗口给指针穿过间隙抵达工具条层（层 enter 取消清除） */
 const HOVER_BRIDGE_CLEAR_MS = 120;
 
-/** 正文双击间隔（毫秒）。选中节点会抬 zIndex 并重绘，原生 dblclick 容易丢失，故按按下间隔识别。 */
 const TEXT_BODY_DOUBLE_PRESS_MS = 350;
 const lastTextBodyPressAt = new Map<string, number>();
 
-/** 连接点统一样式：透明背景（加号图标由 children 渲染） */
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
 
-/** 加号连接点图标 */
 function HandlePlus() {
   return (
     <span className="nodrag nopan" style={{
@@ -66,20 +50,15 @@ function HandlePlus() {
   );
 }
 
-/** media/素材标签编辑后的光标锚点（IKFXDB，契约 §5）：全量重放销毁旧 DOM。
- *  chip 形态按（标签种类 + 身份 + 同身份第几张 + 前/后）在新 DOM 定位——插入/替换落「标签后」用；
- *  caret 形态按 DOM 文本流偏移落位——删除落「被删标签原位置」用（不依赖相邻标签，唯一标签也精确）。 */
 type ChipAnchor =
   | { kind: 'media' | 'prompt'; key: string; occurrence: number; placement: 'before' | 'after' }
   | { kind: 'caret'; offset: number };
 
-/** 编辑器内某身份的全部 chip（按文档序） */
 function chipsOfKey(editor: HTMLElement, kind: Exclude<ChipAnchor, { kind: 'caret' }>['kind'], key: string): HTMLElement[] {
   const selector = kind === 'media' ? `[data-media-node="${CSS.escape(key)}"]` : `[data-prompt-index="${CSS.escape(key)}"]`;
   return [...editor.querySelectorAll<HTMLElement>(selector)];
 }
 
-/** chip 在编辑器里的锚点（种类从 dataset 判；同身份序号按文档序计） */
 function chipAnchorOf(editor: HTMLElement, chip: HTMLElement, placement: 'before' | 'after'): ChipAnchor {
   if (chip.dataset.mediaNode) {
     return { kind: 'media', key: chip.dataset.mediaNode, occurrence: chipsOfKey(editor, 'media', chip.dataset.mediaNode).indexOf(chip) + 1, placement };
@@ -88,7 +67,6 @@ function chipAnchorOf(editor: HTMLElement, chip: HTMLElement, placement: 'before
   return { kind: 'prompt', key, occurrence: chipsOfKey(editor, 'prompt', key).indexOf(chip) + 1, placement };
 }
 
-/** 菜单里保存的 chip 可能已被正文重放换掉：按身份 + 第几张在当前 DOM 找回。 */
 function resolveLiveMentionChip(editor: HTMLElement, chip: HTMLElement, occurrence = 1): HTMLElement | null {
   if (chip.isConnected && editor.contains(chip)) return chip;
   const kind = chip.dataset.mediaNode ? 'media' : 'prompt';
@@ -98,15 +76,12 @@ function resolveLiveMentionChip(editor: HTMLElement, chip: HTMLElement, occurren
   return chips[occurrence - 1] ?? chips[0] ?? null;
 }
 
-/** 正文里可点的引用标签：media chip 或方案 #N 胶囊 */
 const MENTION_CHIP_SELECTOR = '[data-media-node], [data-prompt-index]';
 
-/** 定位/替换用的来源节点：media chip 用自身身份，方案胶囊用 apply 挂上的镜像 */
 function chipSourceNodeId(chip: HTMLElement): string {
   return chip.dataset.mediaNode || chip.dataset.promptMirrorNode || '';
 }
 
-/** 悬停预览用的类型/地址/名称；方案胶囊回落镜像字段或缩略图 DOM */
 function chipPreviewFields(chip: HTMLElement): { mediaType: string; url: string; name: string } {
   const media = chip.querySelector<HTMLImageElement | HTMLVideoElement>('img, video');
   const mediaType = chip.dataset.mediaType || chip.dataset.promptMirrorType
@@ -116,8 +91,6 @@ function chipPreviewFields(chip: HTMLElement): { mediaType: string; url: string;
   return { mediaType, url, name };
 }
 
-/** 被删 chip 在编辑器 DOM 文本流中的起点偏移（不计 chip 内部文本）。
- *  删除重放只移除该 chip 自身，之前的文本流不变，故重放后按此偏移落光标即被删标签原位置。 */
 function domTextOffsetOfChipStart(editor: HTMLElement, chip: HTMLElement): number {
   const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
   let offset = 0;
@@ -128,7 +101,6 @@ function domTextOffsetOfChipStart(editor: HTMLElement, chip: HTMLElement): numbe
   return offset;
 }
 
-/** 按编辑器 DOM 文本流偏移折叠光标；超出文本流（正文无文本）返回 false。 */
 function placeCaretAtTextOffset(editor: HTMLElement, offset: number): boolean {
   const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
   let remaining = offset;
@@ -153,17 +125,13 @@ interface TextNodeData {
   promptMentions?: PromptMention[];
   promptMaterials?: Array<PromptMaterial & { url: string }>;
   onPromptChange?: (id: string, text: string, mentions: PromptMention[], materials?: Array<PromptMaterial & { url: string }>) => void;
-  /** IKFM3Q 正文媒体索引：标签区间与身份展示快照（契约 §1）；有效性/编号派生不存储 */
   mediaMentions?: MediaMention[];
   mediaRefs?: MediaRef[];
-  /** 索引变更回调：delta.added 仅来自显式插入/重绑定（建线），delta.removed 为消失的身份（删线）；
-   *  序列化 diff 不自动补线（契约 §4 事件驱动） */
   onMediaIndexChange?: (id: string, mediaMentions: MediaMention[], mediaRefs: MediaRef[], delta: { added: string[]; removed: string[] }) => void;
   title?: string;
   onTitleChange?: (id: string, title: string) => void;
   onDraftError?: (id: string, error: string) => void;
   onTextChange?: (id: string, text: string) => void;
-  /** 存量兼容：升级前的 HTML 正文，统一后不再写入（契约 §1） */
   html?: string;
   text?: string;
   toolMode?: 'drag' | 'select';
@@ -173,11 +141,8 @@ interface TextNodeData {
   onAddToChat?: (id: string) => void;
   onSaveToAssets?: (id: string) => void;
   onPaste?: (id: string) => void;
-  /** Toast 提示（超字数上限等场景，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
-  /** 文本生成节点：身份保持，可被连入，也可自己编写 */
   textGen?: boolean;
-  /** 点击「自己编写内容」：进入框内编辑，不打开跟随输入框 */
   onWriteSelf?: (id: string) => void;
 }
 
@@ -189,15 +154,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState(data.title ?? '文本节点');
   const [isFocused, setIsFocused] = useState(false);
-  /** 双击进入编辑；单击/拖动为移动节点。文本生成节点仅「自己编写」进入编辑 */
   const [editing, setEditing] = useState(false);
   const [writingSelf, setWritingSelf] = useState(false);
-  /** 悬停本卡（IKGYYE 钉屏幕迁移）：操作条 `.wrapper:hover .nodeBar` 的 hover 显示语义
-   *  由 JS 指针事件等价保持——工具条 DOM 迁出节点卡后 CSS :hover 不再作用于卡外层。
-   *  IKGYYB hover 桥接：卡 leave 延迟 HOVER_BRIDGE_CLEAR_MS 清除，工具条层根 enter
-   *  取消清除——鼠标从卡移向工具条穿过间隙时不闪卸（未选中纯 hover 卡上按钮可达）。
-   *  IKH5FP：enter/leave 在缩放层与 body portal 之间会漏配对，hovered 会卡住；
-   *  悬停期间用屏幕命中兜底，点卡片/工具条以外立即关闭。 */
   const [hovered, setHovered] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
@@ -232,7 +190,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const handleHoverZoneLeave = useCallback(() => {
     scheduleHoverClear(true);
   }, [scheduleHoverClear]);
-  // 卸载清 timer：避免迟到的清除回调打在已卸载组件上
   useEffect(() => clearHoverBridge, [clearHoverBridge]);
   useEffect(() => {
     if (!hovered) return;
@@ -262,8 +219,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
-  /** 编辑器外操作（@菜单/chipMenu/操作条的新增·替换·删除）后的光标锚点：
-   *  非编辑态操作无在位光标，进入编辑时按它落位（契约 §5）；编辑器内操作作废它 */
   const savedAnchorRef = useRef<ChipAnchor | null>(null);
   const initializedRef = useRef(false);
   const draftMaterialsRef = useRef(data.promptMaterials);
@@ -272,7 +227,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const showSoloToolbar = useSoloNodeSelected(selected);
   const canvasNodes = useStore(state => state.nodes);
 
-  /* IKFM3Q 正文媒体索引（契约 §3/§5）：有效性由（来源节点存在 + textIndex 关系线存在）派生 */
   const canvasEdges = useStore(state => state.edges);
   const rf = useReactFlow();
   const mediaValidity = useCallback((nodeId: string) => {
@@ -281,7 +235,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       && (edge.data as Record<string, unknown> | undefined)?.textIndex === true);
   }, [canvasNodes, canvasEdges, id]);
 
-  /** @ 菜单可选素材：画布图片/音频/视频媒体节点（不含文本——不支持文本互引） */
   const mediaMentionItems: AtMentionItem[] = canvasNodes.filter(node => node.type === 'mediaNode' && node.data.assetId && !node.data.assetMissing && node.data.genStatus !== 'generating'
     && ['image', 'video', 'audio'].includes(String(node.data.mediaType)) && typeof node.data.src === 'string')
     .map(node => ({
@@ -292,28 +245,20 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       assetId: String(node.data.assetId),
     }));
 
-  /** @ 菜单：insert=光标处插入新标签；rebind=重绑定失效身份（契约 §3 修复路径）；
-   *  rebindChip=触发重绑定的那张 chip（选中后光标落它替换后的新标签后，契约 §5） */
   const [mentionMenu, setMentionMenu] = useState<{ mode: 'insert' | 'rebind'; rebindNodeId?: string; rebindChip?: HTMLElement; x: number; y: number } | null>(null);
   const mentionAnchorRef = useRef<HTMLSpanElement>(null);
-  /** 标签操作弹层：点击 media 标签弹出（定位/替换来源/删除标签） */
   const [chipMenu, setChipMenu] = useState<{ chip: HTMLElement; x: number; y: number; occurrence: number } | null>(null);
-  /** 悬停预览：有效标签的素材预览（约 150ms 延迟，契约 §5）；固定标签下方 */
   const [chipPreview, setChipPreview] = useState<{ chip: HTMLElement; x: number; y: number; below: boolean } | null>(null);
   const previewTimerRef = useRef<number | null>(null);
-  /** 最近一次已同步的 media 索引（序列化 diff 的基线）：diff 只删线不补线（契约 §4） */
   const mediaIndexRef = useRef<{ mediaMentions: MediaMention[]; mediaRefs: MediaRef[] }>({ mediaMentions: data.mediaMentions ?? [], mediaRefs: data.mediaRefs ?? [] });
   useEffect(() => { mediaIndexRef.current = { mediaMentions: data.mediaMentions ?? [], mediaRefs: data.mediaRefs ?? [] }; }, [data.mediaMentions, data.mediaRefs]);
-  /** 刚提交的正文快照：父级 props 尚未跟上时禁止用旧数据重放，否则删掉的标签会立刻回来 */
   const committedReplayRef = useRef<{ text: string; prompt: string; media: string } | null>(null);
-  /** 同一手势 pointerdown+click 只删一次，避免误删下一张同身份标签 */
   const removingChipRef = useRef(false);
 
   const zoom = useStore((state) => state.transform[2]);
 
   const isSelect = data.toolMode === 'select';
 
-  // 切换到拖动模式时退出编辑状态
   useEffect(() => {
     if (!isSelect) {
       setIsFocused(false);
@@ -322,7 +267,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, [isSelect]);
 
-  // Keep the complete source, including legacy over-limit content. Never truncate on load.
   useEffect(() => {
     if (!initializedRef.current && editorRef.current) {
       if (typeof data.text === 'string') renderPromptMentions(editorRef.current, data.text, data.promptMentions ?? [], data.promptMaterials ?? [], data.mediaMentions ?? [], data.mediaRefs ?? [], mediaValidity);
@@ -331,9 +275,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 非编辑态：权威正文变化时按 Markdown 渲染重放（编辑中的 DOM 是权威，不覆盖）；
-  // mediaValidity 随节点/连线变化，失效态与编号随派生翻转（契约 §3）
-  // 标签操作层或 @ 菜单打开时不重放：关 chip 菜单去开替换/重绑定会卸掉 rebindChip，选中后等于没换
   useEffect(() => {
     if (chipMenu || mentionMenu) return;
     if (!editing && !contentError && editorRef.current && typeof data.text === 'string') {
@@ -349,12 +290,10 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, [editing, contentError, chipMenu, mentionMenu, data.text, data.promptMentions, data.promptMaterials, data.mediaMentions, data.mediaRefs, mediaValidity]);
 
-  // 编辑中连线/来源变化：就地翻转 chip 失效态与编号（不重建 DOM，保住光标）
   useEffect(() => {
     if (editing && editorRef.current) applyMediaMentionState(editorRef.current, mediaValidity);
   }, [editing, mediaValidity]);
 
-  // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
     if (!contextMenu) return;
     const close = () => setContextMenu(null);
@@ -366,7 +305,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     };
   }, [contextMenu]);
 
-  /** 保存当前选区 */
   const saveSelection = useCallback(() => {
     savedAnchorRef.current = null;
     const sel = window.getSelection();
@@ -378,7 +316,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, []);
 
-  /** 恢复选区（仅当保存的 range 仍存活于编辑器——重放销毁后不恢复，避免漂移） */
   const restoreSelection = useCallback(() => {
     const sel = window.getSelection();
     const range = savedRangeRef.current;
@@ -388,8 +325,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, []);
 
-  /** 提交标题（IKFA8X）：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName；
-   *  名称错误仅就地提示，不进 onDraftError——未写入节点数据的名称草稿不阻断画布保存 */
   const commitTitle = useCallback(() => {
     const current = data.title ?? (isTextGen ? '文本生成' : '文本节点');
     const result = commitCardName(titleDraft, current);
@@ -402,19 +337,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     if (result.kind === 'save') data.onTitleChange?.(id, result.value);
   }, [data, id, titleDraft, isTextGen]);
 
-  /** Esc 取消：恢复编辑前名称；输入框随即卸载，不会再有失焦提交 */
   const cancelTitle = useCallback(() => {
     setTitleDraft(data.title ?? (isTextGen ? '文本生成' : '文本节点'));
     setTitleError('');
     setTitleEditing(false);
   }, [data.title, isTextGen]);
 
-  /** 同步 media 索引到父组件：序列化 diff 只删线不补线；建线 delta 仅来自显式插入/重绑定（契约 §4） */
   const notifyMediaIndex = useCallback((next: { mediaMentions: MediaMention[]; mediaRefs: MediaRef[] }, delta: { added: string[]; removed: string[] }) => {
     const prevIds = new Set(mediaIndexRef.current.mediaMentions.map(mention => mention.nodeId));
     const nextIds = new Set(next.mediaMentions.map(mention => mention.nodeId));
     const removed = [...new Set([...delta.removed, ...[...prevIds].filter(nodeId => !nextIds.has(nodeId))])];
-    // 显式插入/重绑定必须建线：剪线后身份仍在索引里，再选同一来源也要补回 textIndex 边
     const added = delta.added.filter(nodeId => nextIds.has(nodeId));
     const changed = JSON.stringify(mediaIndexRef.current.mediaMentions) !== JSON.stringify(next.mediaMentions)
       || JSON.stringify(mediaIndexRef.current.mediaRefs) !== JSON.stringify(next.mediaRefs);
@@ -423,7 +355,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     data.onMediaIndexChange?.(id, next.mediaMentions, next.mediaRefs, { added, removed });
   }, [data, id]);
 
-  /** 同步内容到父组件：编辑器 DOM 序列化为 Markdown 源（契约 §1 权威正文） */
   const syncContent = useCallback(() => {
     if (!editorRef.current) return;
     const content = readPromptMentions(editorRef.current, mediaValidity);
@@ -440,8 +371,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     notifyMediaIndex(content, { added: [], removed: [] });
   }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex]);
 
-  /** 重放后按锚点恢复光标（IKFXDB，契约 §5）：chip 锚点定位同身份第 occurrence 张 chip；
-   *  caret 锚点按 DOM 文本流偏移落位（删除场景=被删标签原位置）。均落不中时兜底编辑器末尾。 */
   const restoreChipAnchor = useCallback((anchor?: ChipAnchor) => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -473,7 +402,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     savedRangeRef.current = window.getSelection()?.getRangeAt(0).cloneRange() ?? null;
   }, []);
 
-  // 进入编辑后聚焦编辑器；编辑器外操作（操作条删除/替换等）留下的光标锚点在此落位（契约 §5）
   useEffect(() => {
     if (!editing) return;
     editorRef.current?.focus();
@@ -482,7 +410,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     else restoreSelection();
   }, [editing, restoreChipAnchor, restoreSelection]);
 
-  // 组叠层把双击穿透到 pane 时，由 GroupOverlay 派发 bw-enter-edit 进入编辑
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -495,12 +422,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     return () => editor.removeEventListener('bw-enter-edit', enterEdit);
   }, [isSelect, isTextGen, writingSelf]);
 
-  /** media 标签 DOM 变更（插入/重绑定/删除）→ 序列化 → 全量重放 → 同步父级与关系线。
-   *  重放销毁旧 DOM、旧选区随之失效：anchor 记录变更前锚点，重放后按它在新 DOM 恢复光标（契约 §5）。 */
   const commitMediaEdit = useCallback((delta: { added: string[]; removed: string[] }, anchor?: ChipAnchor) => {
     const editor = editorRef.current;
     if (!editor) return;
-    // 新插入/重绑定身份的连线在本轮 delta 才建立：序列化与重放按「已建立」派生，避免把新标签写成已失效
     const validity = (nodeId: string) => delta.added.includes(nodeId) || mediaValidity(nodeId);
     const content = readPromptMentions(editor, validity);
     renderPromptMentions(editor, content.text, content.mentions, draftMaterialsRef.current ?? [], content.mediaMentions, content.mediaRefs, validity);
@@ -513,7 +437,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     savedAnchorRef.current = anchor ?? null;
     setChipMenu(null);
     if (content.text.length > MAX_TEXT_LENGTH) {
-      // 草稿超限仅就地提示：正文与索引都不同步
       const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
       setContentError(error);
       data.onDraftError?.(id, error);
@@ -526,7 +449,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     notifyMediaIndex(content, delta);
   }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex, restoreChipAnchor]);
 
-  /** 按下即删：等 click 会偶发被外点关闭或焦点抢走，看起来要点两次 */
   const removeActiveChip = useCallback((event: React.SyntheticEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -551,8 +473,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     commitMediaEdit({ added: [], removed: [] }, { kind: 'caret', offset });
   }, [chipMenu, commitMediaEdit]);
 
-  /** 逐键输入 @ 打开素材菜单（契约 §5：正文任意位置触发——@ 前是汉字/标点/字母/
-   *  数字均弹出，与底部面板编辑器同一口径；粘贴不触发，IKFUTI） */
   const openMentionMenuAtCaret = useCallback(() => {
     const editor = editorRef.current;
     const sel = window.getSelection();
@@ -562,7 +482,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     const container = range.startContainer;
     if (container.nodeType === Node.TEXT_NODE) {
       const text = container.textContent ?? '';
-      // 光标紧跟刚输入的 '@' 即触发，不看 '@' 的前一个字符
       if (text[range.startOffset - 1] !== '@') return;
     } else if (range.startOffset > 0) {
       const prev = container.childNodes[range.startOffset - 1];
@@ -573,7 +492,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     setMentionMenu({ mode: 'insert', x: rect.left, y: rect.bottom });
   }, [saveSelection]);
 
-  /** @ 菜单选中：插入新标签（吞掉触发的 '@'），或对失效身份整体重绑定（契约 §3） */
   const handleMediaSelect = useCallback((item: AtMentionItem) => {
     const editor = editorRef.current;
     if (!editor || !item.assetId || (item.kind !== 'image' && item.kind !== 'video' && item.kind !== 'audio')) return;
@@ -584,15 +502,12 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     if (menu?.mode === 'rebind') {
       const oldNodeId = menu.rebindNodeId ?? '';
       const sameSource = Boolean(oldNodeId && oldNodeId === identity.nodeId);
-      // 剪线后标签仍指向旧身份：再选同一来源只补线，不换 DOM
       if (sameSource) {
         const live = menu.rebindChip?.isConnected ? menu.rebindChip : null;
         commitMediaEdit({ added: [identity.nodeId], removed: [] },
           live ? chipAnchorOf(editor, live, 'after') : undefined);
         return;
       }
-      // 重绑定以身份为单位：该身份全部失效标签一并指向新来源（契约 §3）
-      // 方案胶囊与 media chip 同路径：替换后写成 media 标签，与左侧工具栏文本节点一致
       let clickedNext: HTMLElement | null = null;
       const replaceChip = (chip: HTMLElement) => {
         const next = createMediaMentionChip(identity, identity.name, false);
@@ -605,7 +520,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       }
       if (menu.rebindChip?.isConnected && menu.rebindChip.dataset.promptIndex) replaceChip(menu.rebindChip);
       const removed = oldNodeId && oldNodeId !== identity.nodeId ? [oldNodeId] : [];
-      // 光标落触发重绑定的那张替换后的新标签后（契约 §5 替换落点）
       commitMediaEdit({ added: [identity.nodeId], removed },
         clickedNext ? chipAnchorOf(editor, clickedNext, 'after') : undefined);
       return;
@@ -615,23 +529,19 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     const range = base && editor.contains(base.startContainer)
       ? base
       : (() => { const r = document.createRange(); r.selectNodeContents(editor); r.collapse(false); return r; })();
-    // 吞掉触发菜单的 '@'
     if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0
       && (range.startContainer.textContent ?? '')[range.startOffset - 1] === '@') {
       range.setStart(range.startContainer, range.startOffset - 1);
       range.deleteContents();
     }
-    // 临时以素材名占位：最终编号由 commitMediaEdit 全量重放按序派生（契约 §2）
     const chip = createMediaMentionChip(identity, identity.name, false);
     range.insertNode(chip);
     range.setStartAfter(chip);
     range.collapse(true);
     savedRangeRef.current = range;
-    // 光标落新标签后（契约 §5 插入落点）；已有身份也传 added，剪线后再次 @ 同一来源能补线
     commitMediaEdit({ added: [identity.nodeId], removed: [] }, chipAnchorOf(editor, chip, 'after'));
   }, [mentionMenu, restoreSelection, commitMediaEdit]);
 
-  /** 点击有效标签（非编辑态）定位来源节点：平移居中 + 短暂高亮（契约 §5） */
   const locateSource = useCallback((nodeId: string) => {
     const target = canvasNodes.find(node => node.id === nodeId);
     if (!target) return;
@@ -645,7 +555,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, [canvasNodes, rf, zoom]);
 
-  /** 点击引用标签弹出操作层：锚在鼠标位置，菜单整体在指针上方 */
   const openChipMenu = useCallback((chip: HTMLElement, pointer?: { x: number; y: number }) => {
     const editor = editorRef.current;
     const kind = chip.dataset.mediaNode ? 'media' : 'prompt';
@@ -660,7 +569,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     });
   }, []);
 
-  /** 悬停有效标签 150ms 后出素材预览，固定在图片下方 */
   const handleEditorMouseOver = useCallback((event: React.MouseEvent) => {
     const chip = (event.target as HTMLElement).closest?.(MENTION_CHIP_SELECTOR) as HTMLElement | null;
     if (previewTimerRef.current) { window.clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
@@ -678,7 +586,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     setChipPreview(null);
   }, []);
 
-  // 点菜单外关闭。推迟到下一轮再听：打开菜单的那次 pointer 还在冒泡，立刻监听会把菜单马上关掉。
   useEffect(() => {
     if (!chipMenu) return;
     const close = (event: Event) => {
@@ -692,7 +599,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     };
   }, [chipMenu]);
 
-  /** 执行格式化命令 */
   const execCmd = useCallback((cmd: string, value?: string) => {
     editorRef.current?.focus();
     restoreSelection();
@@ -701,7 +607,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     syncContent();
   }, [restoreSelection, saveSelection, syncContent]);
 
-  /** 设置标题 */
   const setHeading = useCallback((level: string) => {
     editorRef.current?.focus();
     restoreSelection();
@@ -710,7 +615,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     syncContent();
   }, [restoreSelection, saveSelection, syncContent]);
 
-  /** 右键菜单 */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (data.toolMode !== 'select') return;
     if (editing) return;
@@ -724,32 +628,22 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     data.onDelete?.(id);
   }, [data, id]);
 
-  /** 在旁边复制一个相同节点 */
   const handleDuplicate = useCallback(() => {
     setContextMenu(null);
     data.onDuplicate?.(id);
   }, [data, id]);
 
-  /** 添加内容到 Agent 聊天 */
   const handleAddToChat = useCallback(() => {
     setContextMenu(null);
     data.onAddToChat?.(id);
   }, [data, id]);
 
-  /** 保存到共享资产（共享资产概念下线，入口已隐藏） */
-  // const handleSaveToAssets = useCallback(() => {
-  //   setContextMenu(null);
-  //   data.onSaveToAssets?.(id);
-  // }, [data, id]);
 
-  /** 编辑器内鼠标抬起时保存选区。仅编辑态：非编辑态无在位光标可存，且双击进入
-   *  编辑前的 mouseup 会清掉编辑器外操作（删除/替换素材标签）留下的光标锚点（契约 §5）。 */
   const handleEditorMouseUp = useCallback(() => {
     if (!editing) return;
     saveSelection();
   }, [editing, saveSelection]);
 
-  /** 两次短间隔按下进入编辑。多组时选中会重绘节点，原生 dblclick 常丢失（IKG7VR）。 */
   const handleBodyDoublePress = useCallback((e: React.PointerEvent) => {
     if (editing || !isSelect || e.button !== 0) return;
     if ((e.target as HTMLElement).closest('.react-flow__handle')) return;
@@ -757,7 +651,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     const now = performance.now();
     const prev = lastTextBodyPressAt.get(id) ?? 0;
     lastTextBodyPressAt.set(id, now);
-    // 下限避开成组后选中抬 zIndex 重绘触发的连发 pointerdown，避免单击误进编辑
     if (now - prev >= 80 && now - prev < TEXT_BODY_DOUBLE_PRESS_MS) {
       e.stopPropagation();
       setEditing(true);
@@ -779,7 +672,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     if (cut) { document.execCommand('delete'); syncContent(); }
   }, [hasPromptBindings, id, syncContent, mediaValidity]);
 
-  /** Paste Markdown or internal chip content; over-limit drafts remain visible and are not persisted. */
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
     let inserted = false;
@@ -795,14 +687,13 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           document.execCommand('insertHTML', false, fragment.innerHTML);
           inserted = true;
         }
-      } catch { /* External clipboard content is pasted as Markdown. */ }
+      } catch {  }
     }
     if (!inserted) document.execCommand('insertHTML', false, markdownToSanitizedHtml(e.clipboardData.getData('text/plain')));
     saveSelection();
     syncContent();
   }, [saveSelection, syncContent, hasPromptBindings, id, data.promptMaterials]);
 
-  /** 输入后应用 Markdown 语法规则（契约 §2 输入路径），逐键输入 @ 时打开素材菜单，再同步内容 */
   const handleEditorInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
     const native = e.nativeEvent as InputEvent;
     if (native.inputType === 'insertText' && editorRef.current && native.data) {
@@ -812,7 +703,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     syncContent();
   }, [syncContent, openMentionMenuAtCaret]);
 
-  /** 编辑器键盘操作后保存选区并同步 */
   const handleEditorKeyUp = useCallback(() => {
     saveSelection();
     syncContent();
@@ -829,11 +719,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       onMouseLeave={handleHoverZoneLeave}
       style={nodeTitleSizing(zoom)}
     >
-      {/* IKGYYE 钉屏幕迁移：同一层操作位置的两条工具栏（编辑时格式工具栏、其余操作条，
-          两者互斥不叠成多行）迁出节点卡，经 FollowToolbarLayer portal 到 document.body
-          （fixed 钉屏幕，避开 React Flow 托管的 .react-flow 根）——任何缩放级别屏幕尺寸恒定、
-          拖动/平移缩放实时跟随、卡片上方居中。显示门与迁移前一致：格式栏=isFocused；操作条=唯一选中或悬停卡片。
-          IKGYYB hover 桥接：层根 enter/leave 接入桥接 timer（穿间隙不闪卸） */}
+      {}
       <FollowToolbarLayer
         nodeId={id}
         show={isFocused || showSoloToolbar || hovered}
@@ -882,7 +768,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
               <Minus size={14} strokeWidth={2} />
             </button>
 
-            {/* 编辑时节点操作并入同一层操作位置，保持「添加到对话」可达且不叠成多行 */}
+            {}
             <div className={styles.divider} />
             <button className={styles.toolBtn} onClick={() => data.onAddToChat?.(id)} title="添加到对话">
               <AtSign size={14} strokeWidth={2} />
@@ -899,7 +785,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         )}
       </FollowToolbarLayer>
 
-      {/* 常驻标题行：名称编辑与正文展开 */}
+      {}
       <div className={styles.titleRow} data-testid="text-title">
         <div className={styles.titleLeft}>
           <FileText className={styles.titleIcon} strokeWidth={2} color="#888" />
@@ -907,7 +793,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
             onChange={event => setTitleDraft(event.target.value)}
             onBlur={commitTitle}
             onKeyDown={event => {
-              // 名称输入期间隔离画布快捷键；输入法组合中的回车只确认候选词，不提交名称
               event.stopPropagation();
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
                 event.preventDefault();
@@ -928,17 +813,14 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       </div>
 
       {(contentError || titleError) && <div role="alert" className="nodrag nopan">{contentError || titleError}</div>}
-      {/* 固定正文容器：360×270（含内边距）。仅编辑态加 nowheel 拦截滚轮做正文滚动；
-          非编辑态不得成为滚动容器，否则 Ctrl+滚轮/捏合到不了画布（IKFN9H） */}
+      {}
       <div
         className={`${styles.contentCard}${editing ? ' nowheel' : ''}`}
         data-testid="text-content"
         style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}
         onPointerDown={handleBodyDoublePress}
       >
-        {/* IKFM3Q 契约 §4：每张文本卡都可能承接媒体索引关系线，target 连接点常驻
-           （isFirst 首卡与其余卡一致；连接点默认透明，悬停/连接中才可见，无视觉成本；
-           媒体→文本卡手工拖线仍被 connectPair 拒绝，既有规则面不变） */}
+        {}
         <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
           <HandlePlus />
         </Handle>
@@ -967,9 +849,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {
-            // 如果焦点转移到工具栏/操作条/@菜单/标签操作层/素材预览，保持编辑状态。
-            // IKGYYE 钉屏幕迁移后工具条在 FollowToolbarLayer 层内（DOM 已出节点卡），
-            // 白名单须覆盖层根（data-gen-panel-territory），否则点任何格式按钮都退出编辑
             const related = e.relatedTarget as HTMLElement | null;
             if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}, [data-gen-panel-territory], .${styles.chipMenu}, .${chipStyles.chipPreview}, [data-testid="mention-menu"]`)) return;
             setIsFocused(false);
@@ -980,8 +859,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           onClick={event => {
             const chip = (event.target as HTMLElement).closest<HTMLElement>(MENTION_CHIP_SELECTOR);
             if (!chip) return;
-            // 生成卡图片有时是方案胶囊、有时是 media 标签（同区间去重偶发未盖住）。
-            // 一律弹层，定位只走菜单项，避免偶发直接飞到原节点。
             openChipMenu(chip, { x: event.clientX, y: event.clientY });
             setChipPreview(null);
           }}
@@ -1006,8 +883,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       </Handle>
       </div>
 
-      {/* IKFM3Q：@ 素材菜单（光标处插入 / 失效身份重绑定；不含文本互引）。
-          IKFR6A：锚点 portal 到 body——渲染在画布变换层内时 fixed 被劫持、锚点飞移 */}
+      {}
       {mentionMenu && createPortal(
         <span ref={mentionAnchorRef} style={{ position: 'fixed', left: mentionMenu.x, top: mentionMenu.y, width: 0, height: 0 }} />,
         document.body,
@@ -1023,7 +899,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         />
       )}
 
-      {/* 引用标签操作层：定位来源 / 替换来源（失效=重新绑定）/ 删除标签；方案胶囊与 media 标签共用 */}
+      {}
       {chipMenu && createPortal(
         <div
           className={`${styles.chipMenu} nodrag nopan`}
@@ -1059,8 +935,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         document.body,
       )}
 
-      {/* media 标签悬停预览（契约 §5：图片/视频缩略预览，音频出类型标识与名称）；
-          IKFR6A portal 到 body 钉在屏幕上，固定标签下方 */}
+      {}
       {chipPreview && createPortal((() => {
         const preview = chipPreviewFields(chipPreview.chip);
         return (

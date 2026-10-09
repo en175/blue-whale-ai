@@ -1,6 +1,3 @@
-/* ============================================
- * SkillModal - 首页技能弹框
- * ============================================ */
 
 .overlay {
   position: fixed;
@@ -11,7 +8,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 挂到 body 后仍需高于侧栏(--z-sidebar:100) 与顶栏用户菜单所在层 */
   z-index: var(--z-modal);
 }
 
@@ -26,7 +22,6 @@
   overflow: hidden;
 }
 
-/* ---- 头部标签栏 ---- */
 .header {
   display: flex;
   align-items: center;
@@ -84,7 +79,6 @@
   background-color: #2a2a2a;
 }
 
-/* ---- 技能库工具栏 ---- */
 .libToolbar {
   display: flex;
   align-items: center;
@@ -146,7 +140,6 @@
   background-color: #333;
 }
 
-/* 排序下拉 */
 .sortWrap {
   position: relative;
   flex-shrink: 0;
@@ -220,7 +213,6 @@
   background-color: #333;
 }
 
-/* ---- 分类筛选 ---- */
 .catRow {
   display: flex;
   align-items: center;
@@ -250,7 +242,6 @@
   color: #fff;
 }
 
-/* ---- 技能卡片网格 ---- */
 .cardGrid {
   flex: 1;
   min-height: 0;
@@ -263,7 +254,7 @@
 }
 
 .card {
-  position: relative; /* IKD0RJ：三个点菜单与右上角移除/删除按钮的定位基准 */
+  position: relative;
   background-color: #1e1e1e;
   border: 1px solid #2a2a2a;
   border-radius: 12px;
@@ -277,7 +268,6 @@
   border-color: #3a3a3a;
 }
 
-/* 技能封面图（固定 110×110；无封面 skill 不渲染封面区） */
 .coverImg {
   width: 110px;
   height: 110px;
@@ -317,7 +307,6 @@
   border-radius: 4px;
 }
 
-/* ---- 卡片三个点菜单（IKD0RJ：仅「我的技能」tab，浮在封面图左上角） ---- */
 .cardMenu {
   position: absolute;
   top: 16px;
@@ -381,7 +370,6 @@
   background-color: #333;
 }
 
-/* ---- 技能详情弹窗（IKD0RJ：叠在技能弹窗上层） ---- */
 .detailOverlay {
   position: fixed;
   inset: 0;
@@ -462,7 +450,6 @@
   color: #ddd;
 }
 
-/* ---- SKILL.md 正文 markdown 渲染（复用 AgentPanel 同款，适配详情弹窗） ---- */
 .md {
   display: flex;
   flex-direction: column;
@@ -538,7 +525,6 @@
   text-underline-offset: 2px;
 }
 
-/* 表格横向滚动：详情弹窗窄时宽表格不能撑破弹窗 */
 .mdTableWrap {
   overflow-x: auto;
   max-width: 100%;
@@ -564,7 +550,6 @@
   color: #fff;
 }
 
-/* 围栏代码块：整块滚动，不继承行内 code 的胶囊样式 */
 .md pre {
   margin: 0;
   padding: 9px 11px;
@@ -656,7 +641,6 @@
   font-size: var(--font-size-sm);
 }
 
-/* ---- 我的技能 ---- */
 .mineWrap {
   flex: 1;
   min-height: 0;
@@ -676,7 +660,6 @@
   flex-shrink: 0;
 }
 
-/* 自动开关 */
 .autoLabel {
   font-size: 12px;
   color: #ccc;
@@ -714,7 +697,6 @@
   transform: translateX(18px);
 }
 
-/* ---- 创建技能 ---- */
 .createWrap {
   flex: 1;
   min-height: 0;
@@ -782,7 +764,6 @@
   border-color: var(--color-border-hover);
 }
 
-/* 保存按钮：默认灰色禁用 */
 .saveBtn {
   display: flex;
   align-items: center;
@@ -797,7 +778,6 @@
   transition: all var(--transition-fast);
 }
 
-/* 填写完整后：蓝色可点击 */
 .saveBtnActive {
   background-color: #3e63c4;
   color: #fff;
@@ -808,7 +788,6 @@
   background-color: #4a70d8;
 }
 
-/* 编辑器 */
 .skillEditor {
   flex: 1;
   margin: 0;
@@ -823,7 +802,6 @@
   resize: none;
 }
 
-/* 上传区 */
 .uploadZone {
   flex: 1;
   margin: 24px;

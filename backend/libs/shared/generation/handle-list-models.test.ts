@@ -97,8 +97,6 @@ describe("handleListModels 消费端剥调用值", () => {
     expect(gpt.channel).toBeUndefined();
   });
 
-  // IKESD6 / ADR-0085：消费端透出 max_prompt_length（前端动态上限用），
-  // i2i_model_name 属出站调用值，与像素/request_mapping 同哲学剥除。
   it("features：max_prompt_length 透出，i2i_model_name 剥除", async () => {
     const result = await handleListModels("image", {
       models: {
@@ -130,9 +128,6 @@ describe("handleListModels 消费端剥调用值", () => {
     expect(models[0]!.features.i2i_model_name).toBeUndefined();
   });
 
-  // IKH8AU：下发的是**已算好的生效值**——配了用配置，未配置回落缺省，消费端不必知道缺省口径。
-  // 下列用例复用 imageView() 只是当「一条能力行」使：回落档由 handleListModels 的第一个参数
-  // （capability）决定，与夹具的 model_id / 标签无关。
   it("未配置时下发图片缺省上限 4000", async () => {
     const result = await handleListModels("image", {
       models: { listEnabledByType: vi.fn().mockResolvedValue([imageView()]) },

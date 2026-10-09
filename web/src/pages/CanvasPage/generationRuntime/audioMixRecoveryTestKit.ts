@@ -1,7 +1,3 @@
-/* ============================================
- * 音频混合恢复测试共同构造（IKJQ06）：真实请求 Schema 与双层画布/会话宿主。
- * 每次构造独立节点、连线、归属、响应与锁；撤回、身份复用及终态差异由场景声明。
- * ============================================ */
 import { expect, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { createAudioMix, type JobDetail } from '@/api/jobs';
@@ -34,7 +30,6 @@ export type MixCreateResult = Awaited<ReturnType<typeof createAudioMix>>;
 export const mixCreated = (jobId: string, view: ReturnType<typeof bindingView>): MixCreateResult =>
   ({ job_id: jobId, status: 'queued', canvas_binding: view });
 
-/** 受理回执前的真实请求读取：真实 Schema 校验 + 幂等键 = submission_id 口径核对。 */
 const readCreateRequest = ([projectId, body, options]: Parameters<typeof createAudioMix>) => {
   const parsed = audioMixCreateSchema.parse(body);
   const binding = parsed.canvas_binding!;
@@ -44,7 +39,6 @@ const readCreateRequest = ([projectId, body, options]: Parameters<typeof createA
 
 type FakeEdge = { id: string; source: string; target: string; data?: Record<string, unknown> };
 
-/** 画布 + 双层宿主（生成运行时宿主 + 会话宿主共享同一节点/连线表），桥复刻 CanvasPage。 */
 export function setupAudioMixRecovery(options: {
   reuseUnacceptedCard: boolean;
   edgeOrigin?: string;
@@ -68,7 +62,6 @@ export function setupAudioMixRecovery(options: {
   let epoch = {};
   let inFlight = false;
   let nodeSeq = 0;
-  /** audioMixSubmitCardRef：页面 ref，同项目文档重载（存活页面）后仍存活。 */
   let submitCard: { projectId: string; payload: string; nodeId: string; accepted: boolean } | null = null;
   const owners = new Map<string, string>();
   const removed = new Set<string>();
@@ -118,8 +111,6 @@ export function setupAudioMixRecovery(options: {
   });
   runtime.register(audioMixTask);
 
-  // 页面桥同款（index.tsx audioMix.createTask/handoff）：占位身份复用 + 占位卡预建 +
-  // 场景指定的来源线标记 + watcher 桥 + runtime.submit。
   const mixHost: AudioMixHost = {
     getProjectId: () => project,
     getNode: (id) => nodes.get(id),
@@ -127,7 +118,7 @@ export function setupAudioMixRecovery(options: {
     canApply: (projectId) => project === projectId,
     linkAssets: async () => {},
     createTask: async ({ projectId, payload, source }) => {
-      const submitEpoch = epoch; // 页面桥同款：提交时加载身份（docLoadEpochRef 快照）
+      const submitEpoch = epoch;
       const payloadText = JSON.stringify(payload);
       const previousCard = submitCard;
       const nodeId = options.reuseUnacceptedCard && previousCard && previousCard.projectId === projectId
@@ -147,9 +138,6 @@ export function setupAudioMixRecovery(options: {
           }];
         }
       }
-      // 页面桥同款（修复后 index.tsx）：撤回前归属核对——项目/加载身份未变、同 id 卡
-      // 仍是未受理占位形态（无 jobId）、公开运行时无执行接管；连线只删本次提交经
-      // 场景指定标记建的来源边。
       const rollbackPlaceholder = () => {
         if (!options.rollbackOnFailure) return;
         if (project !== projectId) return;
@@ -210,13 +198,10 @@ export function setupAudioMixRecovery(options: {
       .filter(([, body]) => requestNodeIds.has(body.canvas_binding?.target_node_id ?? ''))[index]!),
     edges: () => edges,
     inFlight: () => inFlight,
-    /** 用户拖线建的可靠来源边（无提交标记）。 */
     drawEdge: (source: string, target: string) => {
       edges = [...edges, { id: `e-${source}-${target}`, source, target }];
     },
-    /** 同项目文档重载：加载身份推进 + 运行时重置；画布内容由水合结果决定。 */
     reload: () => { epoch = {}; runtime.reset(); },
-    /** 水合结果无此卡（占位未随保存落盘）：连同其连线一并缺席。 */
     dropFromHydration: (nodeId: string) => {
       nodes.delete(nodeId);
       edges = edges.filter((edge) => edge.target !== nodeId && edge.source !== nodeId);

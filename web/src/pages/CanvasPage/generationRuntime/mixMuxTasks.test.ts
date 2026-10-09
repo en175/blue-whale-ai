@@ -1,17 +1,9 @@
-/* ============================================
- * 混合/合成任务家族契约测试（IKJJR4，测试接缝 = 运行时公开接口 + 类型定义公开形状）。
- * 注入可控 API 响应（vi.mock @/api/jobs）、手动时钟与画布宿主；不测私有变量。
- * 覆盖：五动作接入、创建携 canvas_binding（Idempotency-Key = submission_id）、
- * 同 jobId 专属重试的新 submission_id 隔离、取消 settleTarget 回草稿后再次生成
- * 携承接版本推进、历史卡（无受理关联）重试不带绑定、恢复落卡规划。
- * ============================================ */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGenerationRuntime, type GenerationRuntimeDeps } from './runtime';
 import { audioMixTask, audioVideoMuxTask, watchMixSubmit } from './mixMuxTasks';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 import type { GenerationRecoveryPage } from '@/api/canvasRecovery';
 
-/* ── API 打桩（家族专属端点 + 通用取消/状态） ── */
 const api = vi.hoisted(() => ({
   createAudioMix: vi.fn(),
   retryAudioMix: vi.fn(),
@@ -29,7 +21,6 @@ vi.mock('@/api/jobs', () => ({
   fetchJobStatus: api.fetchJobStatus,
 }));
 
-/* ── 手动时钟（轮询续链只在 fireNext 推进） ── */
 class ManualClock {
   private seq = 0;
   private timers = new Map<number, { fn: () => void }>();
@@ -53,7 +44,6 @@ const flushMicrotasks = async (rounds = 16) => {
   for (let i = 0; i < rounds; i += 1) await Promise.resolve();
 };
 
-/* ── 画布宿主桩 ── */
 function createFakeHost() {
   const nodes = new Map<string, RuntimeNodeView>();
   const edges: Array<{ source: string; target: string }> = [];
@@ -97,7 +87,7 @@ function createFakeHost() {
       const node = nodes.get(nodeId);
       if (!node) return;
       if (node.data.draft === true) nodes.set(nodeId, { ...node, data: { ...node.data, genStatus: 'draft' } });
-      else nodes.delete(nodeId); // 无内容占位：页面收敛器移除
+      else nodes.delete(nodeId);
     },
     saveCanvas: async () => { saveCalls += 1; return true; },
     toast: (kind, message) => { toasts.push({ kind, message }); },
@@ -180,17 +170,16 @@ beforeEach(() => {
 describe('身份识别（claims 分派边界）', () => {
   it('混合卡按节点 id 前缀 + jobId 识别；未受理占位与普通生成卡不归本家族', () => {
     expect(audioMixTask.identify('audio-mix-73', { jobId: '73' })).toBe(true);
-    expect(audioMixTask.identify('audio-mix-1001-2', { jobId: '88' })).toBe(true); // 预分配 id 同前缀
-    expect(audioMixTask.identify('audio-mix-1001-2', {})).toBe(false); // 无 jobId（未受理/纯草稿）
+    expect(audioMixTask.identify('audio-mix-1001-2', { jobId: '88' })).toBe(true);
+    expect(audioMixTask.identify('audio-mix-1001-2', {})).toBe(false);
     expect(audioMixTask.identify('media-draft-1', { jobId: '5' })).toBe(false);
-    // 互斥锁定：混合前缀卡不归合成定义（反向亦然，下句）
     expect(audioVideoMuxTask.identify('audio-mix-73', { jobId: '73', audioMix: { format: 'mp3' } })).toBe(false);
   });
 
   it('合成卡按 data 身份键 + jobId 识别；未发送草稿卡（无 jobId）不归运行时', () => {
     expect(audioVideoMuxTask.identify('m1', { jobId: '79', audioVideoMux: { sourceNodeId: 'a1' } })).toBe(true);
-    expect(audioVideoMuxTask.identify('m1', { audioVideoMux: { sourceNodeId: 'a1' } })).toBe(false); // 未发送草稿
-    expect(audioVideoMuxTask.identify('m1', { jobId: '79' })).toBe(false); // 无身份键
+    expect(audioVideoMuxTask.identify('m1', { audioVideoMux: { sourceNodeId: 'a1' } })).toBe(false);
+    expect(audioVideoMuxTask.identify('m1', { jobId: '79' })).toBe(false);
     expect(audioVideoMuxTask.identify('audio-mix-73', { jobId: '73' })).toBe(false);
   });
 });
@@ -231,7 +220,6 @@ describe('创建请求（canvas_binding 受理契约）', () => {
     await expect(audioMixTask.create('p1', { payload: mixPayload, target: targetFacts('audio-mix-1') } as never, null, 'k2')).rejects.toThrow('网络中断');
     expect(events).toEqual(['accepted:73', 'failed:网络中断']);
     unwatch();
-    // 信号一次性：已结算后不再触发（同一 watcher 不重复回调）
     await expect(audioMixTask.create('p1', { payload: mixPayload, target: targetFacts('audio-mix-1') } as never, null, 'k3')).rejects.toThrow('网络中断');
     expect(events).toHaveLength(2);
   });
@@ -270,15 +258,12 @@ describe('运行时接入：同 jobId 重试的操作轮次隔离', () => {
     expect(fake.nodes.get('audio-mix-1')?.data.jobId).toBe('73');
     expect(runtime.bindingRevisionOf('audio-mix-1')).toBe(1);
 
-    // 终态失败 → 失败卡（首个轮询 tick 已在受理后即时消费 processing 默认态）
     api.fetchJobStatus.mockResolvedValue({ status: 'failed', error: { msg: '供应商失败' } });
     clock.fireNext();
     await flushMicrotasks();
     expect(fake.nodes.get('audio-mix-1')?.data.genStatus).toBe('failed');
     expect(runtime.statusOf('audio-mix-1')).toBeNull();
 
-    // 重试：新 submission_id（key ≠ sub-1）、expected_binding_revision=1、复用 jobId 73；
-    // 受理后首个 tick 即时消费——succeeded 态先于 retry 设置
     api.fetchJobStatus.mockResolvedValue({ status: 'succeeded', asset: { id: 'a-9', url: 'ok.mp3', type: 'audio' }, output_assets: [{ id: 'a-9' }] });
     api.retryAudioMix.mockResolvedValue({ job_id: '73', status: 'queued', replayed: false, canvas_binding: BINDING_VIEW('sub-2', 'audio-mix-1', '73', 2) });
     expect(runtime.retry('audio-mix-1')).toBe(true);
@@ -286,16 +271,15 @@ describe('运行时接入：同 jobId 重试的操作轮次隔离', () => {
     const retryCall = api.retryAudioMix.mock.calls[0];
     expect(retryCall[0]).toBe('p1');
     expect(retryCall[1]).toBe('73');
-    expect(retryCall[2]).not.toBe('sub-1'); // 独立提交身份：同 jobId 重试不接到旧执行状态
+    expect(retryCall[2]).not.toBe('sub-1');
     expect(retryCall[3]).toEqual({ silent: true });
     expect(retryCall[4]).toMatchObject({
       submission_id: retryCall[2],
       target_node_id: 'audio-mix-1',
-      expected_binding_revision: 1, // 携当前承接版本（首次受理 rev=1）
+      expected_binding_revision: 1,
     });
     expect(runtime.bindingRevisionOf('audio-mix-1')).toBe(2);
 
-    // 新轮次轮询已收敛成功：replaceTarget + apply(primary) 显式保存确认
     await flushMicrotasks();
     clock.fireNext();
     await flushMicrotasks();
@@ -310,7 +294,6 @@ describe('运行时接入：同 jobId 重试的操作轮次隔离', () => {
 
   it('历史卡（无受理关联）重试不带 canvas_binding，走原协议路径', async () => {
     const { fake, runtime } = setup();
-    // 历史 audio-mix-<jobId> 失败卡：无 marker、jobId 不在运行时台账（无恢复记录）
     fake.nodes.set('audio-mix-73', { ...mixPlaceholder('audio-mix-73'), data: { ...mixPlaceholder('audio-mix-73').data, genStatus: 'failed', errorText: '旧失败' } });
     api.retryAudioMix.mockResolvedValue({ job_id: '73', status: 'queued', replayed: false });
     expect(runtime.retry('audio-mix-73')).toBe(true);
@@ -327,10 +310,9 @@ describe('运行时接入：取消 settleTarget 回草稿后再次生成', () =>
     api.createAudioVideoMux.mockResolvedValue({ job_id: '79', status: 'queued', canvas_binding: BINDING_VIEW('sub-1', 'm1', '79', 1) });
     expect(runtime.submit(audioVideoMuxTask, { payload: muxPayload, target: targetFacts('m1', 'draft') })).toBe(true);
     await flushMicrotasks();
-    expect(fake.saveCalls()).toBeGreaterThan(0); // draft 角色先落盘再提交（B.3）
+    expect(fake.saveCalls()).toBeGreaterThan(0);
     expect(fake.nodes.get('m1')?.data.jobId).toBe('79');
 
-    // 取消确认 → settleCancelled 回草稿 + 保存带 settleTarget
     api.cancelGenerationJob.mockResolvedValue(null);
     api.fetchJobStatus.mockResolvedValue({ status: 'cancelled' });
     expect(runtime.cancel('m1')).toBe(true);
@@ -342,12 +324,11 @@ describe('运行时接入：取消 settleTarget 回草稿后再次生成', () =>
       { recoveryItemId: 'gcr:sub-1:$target', expectedRevision: 1, action: 'settleTarget' },
     ]);
 
-    // settle 回执（present、归属仍在本次提交 rev=1）→ 同一草稿再次生成携 rev=1
     runtime.onSaveReceipt({
       commandId: 'cmd-1', replayed: false,
       changes: [{ recoveryItemId: 'gcr:sub-1:$target', revision: 2, nodeBindingRevision: 1, state: 'present' }],
     });
-    expect(runtime.composeSaveFields()).toBeNull(); // settle 完成，无待确认状态
+    expect(runtime.composeSaveFields()).toBeNull();
     api.createAudioVideoMux.mockResolvedValue({ job_id: '80', status: 'queued', canvas_binding: BINDING_VIEW('sub-3', 'm1', '80', 2) });
     expect(runtime.submit(audioVideoMuxTask, {
       payload: { ...muxPayload, is_audio_reserve: false },
@@ -356,7 +337,7 @@ describe('运行时接入：取消 settleTarget 回草稿后再次生成', () =>
     await flushMicrotasks();
     expect(api.createAudioVideoMux.mock.calls[1][1].canvas_binding).toMatchObject({
       target_node_id: 'm1',
-      expected_binding_revision: 1, // 取消保留归属，再次生成沿用并推进
+      expected_binding_revision: 1,
       recovery_seed: { target: { role: 'draft' } },
     });
   });
@@ -370,7 +351,7 @@ describe('运行时接入：取消 settleTarget 回草稿后再次生成', () =>
     api.fetchJobStatus.mockResolvedValue({ status: 'cancelled' });
     runtime.cancel('audio-mix-1');
     await flushMicrotasks();
-    expect(fake.nodes.has('audio-mix-1')).toBe(false); // 宿主 settleCancelled 收敛移除
+    expect(fake.nodes.has('audio-mix-1')).toBe(false);
     expect(fake.settles).toEqual(['audio-mix-1']);
     const saveFields = runtime.composeSaveFields();
     expect(saveFields?.recoveryChanges).toEqual([
@@ -412,7 +393,7 @@ describe('恢复落卡规划（planRecovery）', () => {
     }), createFakeHost().host);
     expect(plan).toMatchObject({ kind: 'restore-target' });
     if (plan.kind !== 'restore-target') return;
-    expect(plan.node.position).toEqual({ x: 999, y: 77 }); // 快照位置覆盖种子 (600, 20)
+    expect(plan.node.position).toEqual({ x: 999, y: 77 });
   });
 
   it('succeeded 且 primary present 而卡在画布 → none（一对一已保存成品卡不被扇出重建）', () => {
@@ -442,15 +423,12 @@ describe('恢复落卡规划（planRecovery）', () => {
       target_node_id: 'm1', job_id: '79', task_type: 'audio_video_mux',
       job: { job_id: '79', type: 'audio_video_mux', status: 'failed', progress: 0, output_asset_ids: null, stored_error: { msg: '供应商超时' }, created_at: '2026-10-01T00:00:00Z' },
       recovery_seed: { target: { role: 'draft', x: 1040, y: 0, width: 320, height: 320, name: '音视频合成' }, sources: [] },
-      previous_target_snapshot: { data: {} }, // 快照无身份：buildRestore 不可信
+      previous_target_snapshot: { data: {} },
     });
-    // 缺卡且身份不可信：不为不存在节点建执行/起轮询（IKJPVK 收回，旧行为 none）
     expect(audioVideoMuxTask.planRecovery!(failedRecord, createFakeHost().host)).toEqual({ kind: 'none' });
-    // 在场已收敛终态（历史失败卡，有受理身份）：不重轮询，防权威失败覆盖既有终态
     const settled = createFakeHost().host;
     settled.insertMediaNode(muxDraftNode('m1', 'failed'));
     expect(audioVideoMuxTask.planRecovery!(failedRecord, settled)).toEqual({ kind: 'none' });
-    // 在场未确认占位（生成中/缺 jobId）：接续，首次轮询收敛为可重试失败卡（IKJPVK）
     const placeholder = createFakeHost().host;
     const generating = muxDraftNode('m1', 'generating');
     placeholder.insertMediaNode({ ...generating, data: { ...generating.data, jobId: undefined } });
@@ -492,7 +470,6 @@ describe('恢复落卡规划（planRecovery）', () => {
       id: 'm1', position: { x: 1040, y: 0 },
       data: { mediaType: 'video', genStatus: 'generating', jobId: '79', audioVideoMux: { sourceNodeId: 'a1', reserveAudio: false, sync: 'video' } },
     });
-    // 快照无身份：不猜卡（A.6）
     const untrusted = audioVideoMuxTask.planRecovery!({ ...muxRecord, previous_target_snapshot: { data: {} } }, createFakeHost().host);
     expect(untrusted).toEqual({ kind: 'none' });
     const noSnapshot = audioVideoMuxTask.planRecovery!({ ...muxRecord, previous_target_snapshot: null, recovery_seed: { target: { role: 'result-placeholder', x: 0, y: 0, width: 1, height: 1, name: '' }, sources: [] } }, createFakeHost().host);

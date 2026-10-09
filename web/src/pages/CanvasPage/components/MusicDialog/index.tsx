@@ -1,8 +1,3 @@
-/* ============================================
- * MusicDialog AI 音乐底部对话框：参考音频（本地上传/画布选择）+ 曲风描述 +
- * 歌词（纯伴奏开启时不可填）+ 倍速；底部模式可切换回音频生成对话框
- * IKFCKS：参考预览行替换为共享参考缩略图（三态交互）；曲风描述支持 @ 引用画布音频
- * ============================================ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, Upload, Move, ChevronDown, Music, ArrowUp } from 'lucide-react';
 import { toast } from 'sonner';
@@ -16,20 +11,14 @@ import RefThumbnail from '../RefThumbnail';
 import { arrayMove, useRefStripDrag } from '../RefThumbnail/strip-dnd';
 import styles from './index.module.css';
 
-/** 输入框字数上限 */
 const MAX_INPUT = 1000;
 
-/** AI 音乐生成附加参数 */
 export interface MusicGenOptions {
-  /** 纯伴奏：开启后歌词不生效 */
   instrumental: boolean;
-  /** 倍速（1-4） */
   speed: number;
-  /** 歌词（纯伴奏时为空字符串） */
   lyrics: string;
 }
 
-/** 模型（mock） */
 const MODEL_OPTIONS = [
   { key: 'mock', label: '音乐模型（mock）' },
   { key: 'suno-v1', label: 'Suno v1（mock）' },
@@ -42,15 +31,10 @@ const MAX_REFS = 3;
 interface MusicDialogProps {
   onClose: () => void;
   onSend: (text: string, model: string, opts: MusicGenOptions, refs: AudioRefItem[], promptDoc?: PromptDoc | null) => void;
-  /** 画布媒体节点（从画布选择的数据源） */
   canvasMedia: CanvasPickItem[];
-  /** 底部模式切换 → 音频生成对话框 */
   onSwitchToAudio: () => void;
-  /** 画布 @ 引用候选（IKFCKS：曲风描述 @ 菜单，仅音频可选） */
   mentionItems?: AtMentionItem[];
-  /** 选中 @ 素材后写入参考区（缩略图 @ 与手动 @ 选择同一入口） */
   onMentionCanvas?: (item: AtMentionItem) => void;
-  /** 外部注入的画布选择结果（@ 菜单选中音频 → 父级生成 → 注入参考区） */
   externalPick?: { ts: number; item: AudioRefItem } | null;
 }
 
@@ -83,7 +67,6 @@ export default function MusicDialog({
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const speedWrapRef = useRef<HTMLDivElement>(null);
 
-  /** 参考音频时长探测（放大预览「图标+名称+时长」卡片用） */
   const durationSources = useMemo(
     () => refs.map((r) => ({ key: `${r.source}-${r.id}`, src: r.src })),
     [refs],
@@ -100,19 +83,16 @@ export default function MusicDialog({
 
   const currentModel = MODEL_OPTIONS.find((m) => m.key === model);
 
-  /** 本地上传入口 */
   const startLocalUpload = () => {
     setSourceOpen(false);
     audioInputRef.current?.click();
   };
 
-  /** 从画布选择入口 */
   const startCanvasPick = () => {
     setSourceOpen(false);
     setPickerOpen((v) => !v);
   };
 
-  /** 添加参考项（去重 + 上限） */
   const addRef = (item: AudioRefItem) => {
     setRefs((prev) => {
       if (prev.some((r) => r.id === item.id && r.source === item.source)) return prev;
@@ -122,7 +102,6 @@ export default function MusicDialog({
     setPickerOpen(false);
   };
 
-  /** 本地文件选择 */
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const list = Array.from(e.target.files ?? []);
     if (!list.length) return;
@@ -152,12 +131,10 @@ export default function MusicDialog({
     });
   };
 
-  /** IKFCKT 参考条拖拽换位：顺序为面板本地序（编号随新序重派生，发送按新序携带） */
   const stripDrag = useRefStripDrag({
     onReorder: (from, to) => setRefs((prev) => arrayMove(prev, from, to)),
   });
 
-  /** 外部注入的画布选择结果（@ 菜单选中音频 → 父级生成事件）：去重 + 上限保护 */
   useEffect(() => {
     if (!externalPick) return;
     addRef(externalPick.item);
@@ -174,7 +151,6 @@ export default function MusicDialog({
       {
         instrumental,
         speed,
-        // 纯伴奏开启时歌词不生效
         lyrics: instrumental ? '' : lyrics.trim(),
       },
       refs,
@@ -186,12 +162,12 @@ export default function MusicDialog({
 
   return (
     <div className={styles.dialog} data-gen-panel-territory>
-      {/* 关闭按钮 */}
+      {}
       <button className={styles.closeBtn} onClick={onClose} title="关闭">
         <X size={16} strokeWidth={2} />
       </button>
 
-      {/* 顶部参考音频行 */}
+      {}
       <div className={styles.topRow}>
         <div className={styles.refWrap} ref={sourceWrapRef}>
           <button
@@ -252,7 +228,7 @@ export default function MusicDialog({
         {refs.length > 0 && <span className={styles.refCount}>{refs.length}/{MAX_REFS}</span>}
       </div>
 
-      {/* 隐藏 file input */}
+      {}
       <input
         ref={audioInputRef}
         type="file"
@@ -262,10 +238,7 @@ export default function MusicDialog({
         onChange={handleFileChange}
       />
 
-      {/* 参考预览：IKFCKS 替换为共享参考缩略图（编号圆钮 + 悬停 ×/@ + 200ms 图标名称时长卡片），
-          自绘预览行（常显删除 + 「音频N」文字标签）下线；× 仅移除面板参考（本地上传回收 blob URL），
-          @ 与手动 @ 选择走同一 onMentionCanvas 入口（仅画布来源有素材身份）。
-          IKFCKT：参考条支持拖拽换位（面板本地序；编号随新序重派生） */}
+      {}
       {refs.length > 0 && (
         <div className={styles.previewArea}>
           {refs.map((r, i) => (
@@ -288,7 +261,7 @@ export default function MusicDialog({
         </div>
       )}
 
-      {/* 曲风描述（IKFCKS：支持 @ 引用画布音频素材） */}
+      {}
       <div className={styles.mentionAnchor}>
         <AudioPromptEditor ref={editorRef} refs={refs} className={styles.textarea} onSubmit={handleSend}
           placeholder="描述音乐曲风、情绪、节奏和乐器等... 使用 @ 引用画布素材。"
@@ -300,7 +273,7 @@ export default function MusicDialog({
         {text.length}/{MAX_INPUT}
       </div>
 
-      {/* 歌词（纯伴奏时禁用） */}
+      {}
       <div className={styles.lyricBlock}>
         <span className={`${styles.lyricLabel} ${instrumental ? styles.lyricLabelDisabled : ''}`}>
           歌词（可选）
@@ -319,10 +292,10 @@ export default function MusicDialog({
         </div>
       </div>
 
-      {/* 底部状态栏 */}
+      {}
       <div className={styles.bottomBar}>
         <div className={styles.barLeft}>
-          {/* 模式（AI 音乐 / 音频生成切换） */}
+          {}
           <div className={styles.modeWrap} ref={modeWrapRef}>
             <button className={styles.modeBtn} onClick={() => setModeOpen((v) => !v)}>
               <Music size={14} strokeWidth={2} />
@@ -351,7 +324,7 @@ export default function MusicDialog({
             )}
           </div>
 
-          {/* 模型（mock） */}
+          {}
           <div className={styles.modeWrap} ref={modelWrapRef}>
             <button className={styles.modeBtn} onClick={() => setModelOpen((v) => !v)}>
               <span>{currentModel?.label ?? '音乐模型（mock）'}</span>
@@ -379,7 +352,7 @@ export default function MusicDialog({
             )}
           </div>
 
-          {/* 纯伴奏开关 */}
+          {}
           <div className={styles.toggleGroup}>
             <button
               className={`${styles.switch} ${instrumental ? styles.switchOn : ''}`}
@@ -393,7 +366,7 @@ export default function MusicDialog({
             <span className={styles.toggleLabel}>纯伴奏</span>
           </div>
 
-          {/* 倍速 */}
+          {}
           <div className={styles.modeWrap} ref={speedWrapRef}>
             <button className={styles.modeBtn} onClick={() => setSpeedOpen((v) => !v)}>
               <span>{speed}x</span>

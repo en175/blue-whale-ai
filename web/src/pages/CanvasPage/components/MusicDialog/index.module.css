@@ -1,6 +1,3 @@
-/* ============================================
- * MusicDialog - AI 音乐底部对话框
- * ============================================ */
 
 .dialog {
   position: absolute;
@@ -26,7 +23,6 @@
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
-/* ---- 关闭按钮 ---- */
 .closeBtn {
   position: absolute;
   top: var(--spacing-sm);
@@ -50,7 +46,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 顶部参考音频行 ---- */
 .topRow {
   display: flex;
   align-items: center;
@@ -92,7 +87,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* ---- 来源弹出（本地上传 / 从画布选择） ---- */
 .sourcePopup {
   position: absolute;
   bottom: calc(100% + 10px);
@@ -134,7 +128,6 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 画布选择面板 ---- */
 .pickerPanel {
   position: absolute;
   bottom: calc(100% + 10px);
@@ -229,12 +222,10 @@
   white-space: nowrap;
 }
 
-/* ---- 隐藏文件输入 ---- */
 .hiddenInput {
   display: none;
 }
 
-/* ---- 参考预览区：共享参考缩略图容器（单项样式由 RefThumbnail 组件承载，IKFCKS） ---- */
 .previewArea {
   display: flex;
   flex-wrap: wrap;
@@ -242,12 +233,10 @@
   margin-bottom: var(--spacing-sm);
 }
 
-/* ---- @ 菜单锚点（曲风描述容器，IKFCKS） ---- */
 .mentionAnchor {
   position: relative;
 }
 
-/* ---- 输入框 ---- */
 .textarea {
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
@@ -267,7 +256,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* ---- 字数统计 ---- */
 .charCount {
   align-self: flex-end;
   font-size: 11px;
@@ -286,7 +274,6 @@
   cursor: not-allowed;
 }
 
-/* ---- 歌词区 ---- */
 .lyricBlock {
   margin-top: var(--spacing-md);
 }
@@ -305,7 +292,6 @@
   opacity: 0.5;
 }
 
-/* ---- 底部状态栏 ---- */
 .bottomBar {
   display: flex;
   align-items: center;
@@ -325,7 +311,6 @@
   gap: var(--spacing-md);
 }
 
-/* 发送按钮（与图片对话框统一） */
 .sendBtn {
   width: 36px;
   height: 36px;
@@ -350,7 +335,6 @@
   background-color: #555;
 }
 
-/* ---- 模式/模型/倍速选择器 ---- */
 .modeWrap {
   position: relative;
 }
@@ -420,7 +404,6 @@
   font-weight: 500;
 }
 
-/* ---- 纯伴奏开关 ---- */
 .toggleGroup {
   display: flex;
   align-items: center;

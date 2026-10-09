@@ -3,11 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { NewApiError } from "@lib/core";
 import { AdminRechargeRecordsController } from "./recharge-records.controller.js";
 
-// 充值记录读的是我们自己的 recharge_orders（本地表，offset 分页 + 总数）。
-// 本测试钉住的是**入参解析**：非法筛选条件必须当场 400，而不是静默当成「没有」——
-// 后者在运营拿单号对账时表现为「这单不存在」，是一句查不出来的假话。
 
-/** 用户维度走 bw_users，用桩：本文件管的是入参解析，不管「怎么查用户」。 */
 function identityStub() {
   return {
     findAdminUserIdByKeyword: vi.fn().mockResolvedValue(undefined),
@@ -57,14 +53,10 @@ describe("AdminRechargeRecordsController.list", () => {
     await controller.list({ keyword: " 13800008888 ", status: "paid" });
 
     expect(identity.findAdminUserIdByKeyword).toHaveBeenCalledWith("13800008888");
-    // 送给仓储的是**解析出来的数字**，不是关键词——它那层不认识手机号
     expect(list).toHaveBeenCalledWith({ page: 1, pageSize: 20, userId: 42, status: "paid" });
   });
 
   it("★ 还认着旧的 `userId` 参数 —— 不认它就是静默回一页全站订单", async () => {
-    // 前端与后端不是原子发版（本仓 2026-09-26 实测过：3100 上跑着 4 小时前的构建）。
-    // 一个还没刷新的管理页仍会发 `?userId=42`：不认它的后果不是报错，而是运营以为
-    // 筛了那个人、实际看到所有人的单，而这一页是拿来对账的。
     const { controller, list, identity } = createController();
     identity.findAdminUserIdByKeyword.mockResolvedValue(42);
 
@@ -132,8 +124,6 @@ describe("AdminRechargeRecordsController.list", () => {
   });
 
   it("★ 同时给了查不到人的关键词和非法 status → 仍然是 400，不是 200 空页", async () => {
-    // 校验必须排在查人之前。否则「另一个条件没命中」会把非法条件一起兜成 200 空列表——
-    // 而运营看到的是一句「暂无订单」，不是「你的条件写错了」。
     const { controller, list } = createController();
 
     await expect(
@@ -189,7 +179,6 @@ describe("AdminRechargeRecordsController.retryGrant — 人工补发（E-1 的�
 
     const entry = operationLog.create.mock.calls[0]![0] as Record<string, unknown>;
     expect(entry).toMatchObject({ category: "recharge", action: "重试发放", target: "RC1" });
-    // 成功与「补发后仍卡住」两句话必须不同：只看审计的人分得出这次到底成没成
     expect(String(entry.detail)).toContain("已到账");
   });
 

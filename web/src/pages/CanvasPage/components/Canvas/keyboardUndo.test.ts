@@ -24,7 +24,6 @@ describe('canvasUndoKeyAction', () => {
   it('treats Cmd/Ctrl+Shift+Z as redo, not undo', () => {
     expect(canvasUndoKeyAction(press({ metaKey: true, shiftKey: true }))).toBe('redo');
     expect(canvasUndoKeyAction(press({ ctrlKey: true, shiftKey: true }))).toBe('redo');
-    // Shift 按下时浏览器派发的 key 为大写 Z，同样归一为重做
     expect(canvasUndoKeyAction(press({ metaKey: true, shiftKey: true, key: 'Z' }))).toBe('redo');
   });
 

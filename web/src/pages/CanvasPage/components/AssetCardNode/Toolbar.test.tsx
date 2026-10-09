@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/* IKGYYF 资产卡悬浮工具条（迁出 AssetCardNode、钉屏幕层内容组件 AssetCardToolbar）测试：
-   渲染模式沿用 MediaNode/Toolbar.test.tsx（createRoot + act）；
-   「唯一选中 + hover」显示门在 NodeFollowToolbar 容器（../NodeFollowToolbar/index.test.tsx
-   已覆盖 solo 门），集成级出现时机与屏幕层断言见 ./index.test.tsx；
-   本文件覆盖内容构成（卡类型标签 + 添加到对话）、「添加到对话」回调与
-   HIDE_ASSET_TOP_BAR 开关行为（assetCardToolbarVisible 纯函数，开关参数化可测隐藏分支）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +12,6 @@ let mountNode: HTMLDivElement;
 
 interface RenderExtra {
   id?: string;
-  /** 故意放宽为 string：脏 kind 降级用例需要绕过类型（运行时水合容错场景） */
   kind?: string;
   data?: Record<string, unknown>;
 }

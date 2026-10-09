@@ -2,17 +2,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-/* IKG7NH 共享视觉定义源断言 + 源唯一性锁：文本卡正文 chip 与生成面板 chip
-   共用 mediaChip.module.css 一份定义，promptMentions.ts 不再内联视觉样式，
-   生成面板样式表不再保留第二份胶囊规则。源断言须在 node 环境跑
-   （jsdom 会改写 import.meta.url 的 scheme）。 */
 
 describe('IKG7NH 共享视觉定义源断言', () => {
   const sharedCss = readFileSync(fileURLToPath(new URL('./mediaChip.module.css', import.meta.url)), 'utf-8');
   const promptMentionsSrc = readFileSync(fileURLToPath(new URL('./TextNode/promptMentions.ts', import.meta.url)), 'utf-8');
   const panelCss = readFileSync(fileURLToPath(new URL('./PromptRefEditor/index.module.css', import.meta.url)), 'utf-8');
 
-  /** 取指定选择器命中的规则体；选择器按精确匹配，避免误中更长选择器。 */
   function ruleBodiesOf(css: string, selector: string): string[] {
     const bodies: string[] = [];
     const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
@@ -62,11 +57,9 @@ describe('IKG7NH 共享视觉定义源断言', () => {
 
   it('文本卡差异类：整块选中留在 TextNode 侧；音频图标与缩略图包裹提升共享（IKGABW）', () => {
     const editorCss = readFileSync(fileURLToPath(new URL('./TextNode/index.module.css', import.meta.url)), 'utf-8');
-    // 挂 .editor 后代组合抬优先级，稳定压过共享 .mediaChip 的 user-select:none
     const selectable = ruleBodiesOf(editorCss, '.editor .mediaChipSelectable');
     expect(selectable).toHaveLength(1);
     expect(selectable[0]).toContain('user-select: all');
-    // IKGABW：生成面板补齐音频图标与视频首帧后，两处差异不再是差异，类迁入共享模块
     const audioIcon = ruleBodiesOf(sharedCss, '.mediaChipAudioIcon');
     expect(audioIcon).toHaveLength(1);
     expect(audioIcon[0]).toContain('width: 18px');
@@ -87,7 +80,6 @@ describe('IKG7NH 共享视觉定义源断言', () => {
     expect(name).toHaveLength(1);
     expect(name[0]).toContain('color: #aaa');
     const editorCss = readFileSync(fileURLToPath(new URL('./TextNode/index.module.css', import.meta.url)), 'utf-8');
-    // 用规则匹配而非字面包含：迁移说明注释会提到旧类名，不构成第二份定义
     expect(ruleBodiesOf(editorCss, '.chipPreview')).toHaveLength(0);
     expect(ruleBodiesOf(editorCss, '.chipPreviewName')).toHaveLength(0);
   });

@@ -5,12 +5,6 @@ import {
   createRechargeCustomConfigRepo,
 } from "./recharge-custom-config-repo.js";
 
-// 自定义充值配置是**单行表**（模块 B，迁移 050）。
-// 这里钉住两件事：
-//   1. 读写都落在**同一行**（id 恒为 1）—— 多一行就是两份互相矛盾的配置；
-//   2. 保存让 `version` **走数据库自增**，不是「读出来 +1 再写回」——
-//      后者在并发保存下会丢版本，而 config_version 是订单快照里回答
-//      「这单是哪一版配置」的唯一依据。
 
 const ROW = {
   id: 1,
@@ -24,7 +18,6 @@ const ROW = {
   permission_allowlist: null,
   permission_denied_hint: "",
   credits_valid_months: 24,
-  // 保存后的行：版本已经从 5 涨到 6（Prisma 的 increment 会把新值带在返回行里）
   version: 6,
   gmt_create: new Date("2026-09-27T00:00:00Z"),
   gmt_modified: new Date("2026-09-27T00:00:00Z"),
@@ -76,16 +69,12 @@ describe("createRechargeCustomConfigRepo.get — 单行读", () => {
         findUnique: vi.fn().mockResolvedValue({
           ...ROW,
           permission: "user_group",
-          // 手改过库的人留下的是**数字**。`9007199254740993` 超出 JS 安全整数范围，
-          // 读成 number 会静默变成 …992 —— 白名单错一位就是「放进来一个陌生人」，
-          // 所以宁可不认识它（丢弃）也不猜
           permission_allowlist: [9007199254740993, 42, "007"],
         }),
       },
     } as never);
 
     const view = await repo.get();
-    // 安全整数照常收下；字符串掐前导零（`007` 与 `7` 是同一个用户，不去重就会存两条）
     expect(view?.permissionAllowlist).toEqual(["42", "7"]);
   });
 });

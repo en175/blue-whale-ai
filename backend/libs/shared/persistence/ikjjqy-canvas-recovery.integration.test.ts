@@ -1,28 +1,28 @@
-// IKJJQY（IKIXK9-SPEC-20261002 B 节）：多结果任务逐项恢复与删除的真 MySQL 验证。
-//
-// 与 ikjjqu-canvas-recovery.integration.test.ts 同款门控（容器换端口换库名）：
-//   docker run -d --name ikjjqy-mysql -e MYSQL_ROOT_PASSWORD=ikjjqy \
-//     -e MYSQL_DATABASE=bw_gate_ikjjqy -p 3309:3306 mysql:8
-//   cd backend && DATABASE_URL='mysql://root:ikjjqy@127.0.0.1:3309/bw_gate_ikjjqy' \
-//     npx prisma db push --accept-data-loss
-//   IKJJQY_DATABASE_URL='mysql://root:ikjjqy@127.0.0.1:3309/bw_gate_ikjjqy' \
-//     pnpm exec vitest run backend/libs/shared/persistence/ikjjqy-canvas-recovery.integration.test.ts
-// 未配置该变量时整组跳过；跳过不算通过。QU 容器在 3307，勿动。
-//
-// 验收场景（工单 8 条）：
-//   1. 场景切分受理接线（canvas_binding + client_token=submission_id + 重放原关联）
-//   2. 人声分离受理接线（canvas_binding + Idempotency-Key + 重放原关联）
-//   3. 输出槽投影（expected_output_count>1 → slot:<id>，node=generation-output:<id>）
-//   4. 完整扇出（replaceTarget + 全部 segment apply 同事务，owner 逐项建立）
-//   5. 部分删除（1 apply + 1 remove：removed 项独立，任务/资产不受影响）
-//   6. 首次保存前删除（虚拟 remove 建 owner；restore 恢复；旧 remove 不覆盖新撤销）
-//   7. 重复扫描（恢复页两次结果一致，不写库）
-//   8. 原位接管 + 旧结果独立操作（A transferred 后其 segment 仍可 remove/restore；job=null）
-//   9. 抢先成功后的旧取消意图（job succeeded → settleTarget 422）
-//  10. 版本冲突整笔回滚（扇出保存中一项版本错 → 全部不落）
-//  11. 投影失败（轨数不齐 → 恢复页保留占位不投影输出；replaceTarget 422 projection_invalid）
-//  12. resolve 定向读取旧持久结果
-//  13. 伪造输出键 remove → 422（键必须在投影集内）
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
@@ -74,7 +74,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     };
   }
 
-  /** 直接按受理事务内核建一个已关联的 job（绕过各 service 入口；service 入口另有专线测试）。 */
+
   async function acceptJob(args: {
     submissionId: string;
     node: string;
@@ -111,7 +111,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     });
   }
 
-  /** 场景切分 job 置成功 + 写契约终态日志（worker 的可信终态数据）。 */
+
   async function succeedSceneSplitJob(jobId: string, segments: Array<{ index: number; assetId: string }>) {
     await raw.query(
       "UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST(? AS JSON) WHERE id = ?",
@@ -136,7 +136,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     });
   }
 
-  /** IKJLTS：assetId 须与该输出项可信产物一致（apply/restore 会核对，默认 7 仅占位形态）。 */
+
   function markerNode(id: string, submissionId: string, outputKey: string, assetId = "7") {
     return {
       id,
@@ -187,7 +187,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const adapter = await new PrismaMariaDb(buildPoolConfig(databaseUrl!)).connect();
     raw = adapter.underlyingDriver();
     await prisma.project.create({ data: { id: BigInt(PROJECT_ID), owner_id: BigInt(USER_ID), name: "ikjjqy" } });
-    // 受理 service 专线测试的资产与项目依赖（最小桩：归属校验返回固定可信形状）。
+
   });
 
   afterAll(async () => {
@@ -233,13 +233,13 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
         is_current: true,
       },
     });
-    // 行齐：job + submission + owner + 幂等行。
+
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
     const owner = await prisma.generation_canvas_node_owners.findUnique({
       where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "scene-node-1" } },
     });
     expect(owner && Number(owner.binding_revision)).toBe(1);
-    // 网络重放：同 token 同参数 → 原 job + 原关联（不重复建任务）。
+
     const replay = await service.create(USER_ID, PROJECT_ID, {
       source_asset_id: "88",
       target_node_id: "scene-node-1",
@@ -249,7 +249,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     });
     expect(replay.data?.job_id).toBe(first.data?.job_id);
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
-    // client_token 与 submission_id 不一致 → 400。
+
     const mismatch = await service.create(USER_ID, PROJECT_ID, {
       source_asset_id: "88", target_node_id: "n", granularity: "standard",
       client_token: UUID_B, canvas_binding: binding(UUID_A, "n", 0),
@@ -274,19 +274,19 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       canvas_binding: { submission_id: UUID_A, binding_revision: 1, is_current: true },
     });
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
-    // 重放：同 submission_id 同参数 → 原 job。
+
     const replay = await service.create(USER_ID, PROJECT_ID, {
       source_asset_id: "88", scene: "drama", output_format: "aac",
       canvas_binding: binding(UUID_A, "vocal-node-1", 0),
     }, UUID_A);
     expect(replay.data?.job_id).toBe(first.data?.job_id);
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
-    // Idempotency-Key 与 submission_id 不一致 → 400。
+
     const mismatch = await service.create(USER_ID, PROJECT_ID, {
       source_asset_id: "88", canvas_binding: binding(UUID_B, "n", 0),
     }, UUID_C);
     expect(mismatch.code).toBe(400);
-    // 旧请求（无 canvas_binding）不接幂等，行为零变化：两次直建两个 job。
+
     const legacyA = await service.create(USER_ID, PROJECT_ID, { source_asset_id: "88" });
     const legacyB = await service.create(USER_ID, PROJECT_ID, { source_asset_id: "88" });
     expect(legacyA.data?.job_id).not.toBe(legacyB.data?.job_id);
@@ -298,7 +298,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       type: "image", expectedOutputCount: 2,
     });
     if (!("generation_job_id" in created)) throw new Error("受理失败");
-    // 终态：两槽 succeeded（retry 链一并验证——槽 2 走重试行）。
+
     const jobId = BigInt(created.generation_job_id);
     const slots = await prisma.generation_output_slots.findMany({
       where: { generation_job_id: jobId },
@@ -313,7 +313,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       where: { id: slots[1]!.id },
       data: { status: "failed" },
     });
-    // 重试 job 补 failed 槽（挂在原 submission 的 job 上模拟重试产物归位：直接在同行补成功）。
+
     await prisma.generation_output_slots.update({
       where: { id: slots[1]!.id },
       data: { status: "succeeded", asset_id: 602n },
@@ -349,7 +349,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     ]);
     const seg1 = multiResultNodeId(UUID_A, "segment:1");
     const seg2 = multiResultNodeId(UUID_A, "segment:2");
-    // 重复扫描：两次恢复页结果一致（pending/0、不写库、身份不依赖数组顺序）。
+
     const page1 = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
     const page2 = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
     const pick = (page: typeof page1) => page.records
@@ -361,7 +361,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       ["segment:1", seg1, "pending", 0],
       ["segment:2", seg2, "pending", 0],
     ]);
-    // 完整扇出：占位移除 + 两段卡落位，一笔保存。
+
     const saved = await save({
       commandId: UUID_D, version: null,
       nodes: [markerNode(seg1, UUID_A, "segment:1", "701"), markerNode(seg2, UUID_A, "segment:2", "702")],
@@ -376,14 +376,14 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       expect.objectContaining({ recoveryItemId: recoveryItemId(UUID_A, "segment:1"), state: "present", revision: 1, nodeBindingRevision: 1 }),
       expect.objectContaining({ recoveryItemId: recoveryItemId(UUID_A, "segment:2"), state: "present", revision: 1, nodeBindingRevision: 1 }),
     ]));
-    // 逐项 owner 建立（节点唯一归属，各自 node）。
+
     for (const node of [seg1, seg2]) {
       const owner = await prisma.generation_canvas_node_owners.findUnique({
         where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: node } },
       });
       expect(owner && Number(owner.binding_revision)).toBe(1);
     }
-    // resolve 定向读取：只含请求项及所属关联。
+
     const resolved = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [
       recoveryItemId(UUID_A, "segment:1"),
     ]);
@@ -410,7 +410,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       }) as never,
       422, RECOVERY_REASONS.documentMismatch,
     );
-    // 整笔回滚：无输出行、无画布。
+
     expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
     expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
   });
@@ -429,7 +429,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const seg1 = multiResultNodeId(UUID_A, "segment:1");
     const saved = await save({
       commandId: UUID_D, version: null,
-      nodes: [markerNode(seg1, UUID_A, "segment:1", "701")], // 用户删掉第 2 段卡
+      nodes: [markerNode(seg1, UUID_A, "segment:1", "701")],
       changes: [
         { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
         { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
@@ -441,7 +441,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     ]));
     expect(byKey.get("segment:1")).toMatchObject({ state: "present", revision: 1 });
     expect(byKey.get("segment:2")).toMatchObject({ state: "removed", revision: 1, nodeBindingRevision: 1 });
-    // 任务与资产不受部分删除影响。
+
     const job = await prisma.generation_jobs.findUnique({ where: { id: BigInt(created.generation_job_id) } });
     expect(job?.status).toBe("succeeded");
   });
@@ -458,25 +458,25 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       { index: 2, assetId: "702" },
     ]);
     const seg1 = multiResultNodeId(UUID_A, "segment:1");
-    // 首次保存前直接删一项（无 replaceTarget 配套——多结果虚拟输出独立合法）。
+
     let version = await save({
       commandId: UUID_D, version: null, nodes: [markerNode(seg1, UUID_A, "segment:1", "701")],
       changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 0, action: "remove" }],
     });
     expect(version.recoveryReceipt.changes[0]).toMatchObject({ state: "removed", revision: 1, nodeBindingRevision: 1 });
-    // 删除记录有 owner（不留下无 owner 记录），归属保留供显式撤销核对。
+
     const owner = await prisma.generation_canvas_node_owners.findUnique({
       where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: multiResultNodeId(UUID_A, "segment:2") } },
     });
     expect(owner && Number(owner.binding_revision)).toBe(1);
-    // 显式 restore：恢复为 present，revision 推进；归属仍在本项。
+
     version = await save({
       commandId: UUID_E, version: version.version,
       nodes: [markerNode(seg1, UUID_A, "segment:1", "701"), markerNode(multiResultNodeId(UUID_A, "segment:2"), UUID_A, "segment:2", "702")],
       changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 1, action: "restore" }],
     });
     expect(version.recoveryReceipt.changes[0]).toMatchObject({ state: "present", revision: 2, nodeBindingRevision: 1 });
-    // 旧 remove 重放（expectedRevision 过期）不能覆盖新撤销 → 409。
+
     await expectRejection(
       save({
         commandId: UUID_F, version: version.version,
@@ -485,7 +485,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       }) as never,
       409, RECOVERY_REASONS.itemConflict,
     );
-    // 状态未被旧意图改写。
+
     const output = await prisma.generation_canvas_outputs.findUnique({
       where: {
         generation_canvas_submission_id_output_key: {
@@ -520,7 +520,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
         { id: recoveryItemId(UUID_A, "segment:2"), rev: 0, action: "apply" },
       ],
     });
-    // 新提交原位接管（同 target 节点，版本 +1）。
+
     await acceptJob({
       submissionId: UUID_B, node: "scene-node-6", revision: 1,
       type: "video_scene_split",
@@ -530,21 +530,21 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_A } },
     });
     expect(old?.target_state).toBe("transferred");
-    // 旧关联：is_current=false、job=null（不读取被复用/新任务状态），但持久输出仍可见。
+
     const page = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
     const oldRecord = page.records.find(item => item.submission_id === UUID_A)!;
     expect(oldRecord.is_current).toBe(false);
     expect(oldRecord.job).toBeNull();
     expect(oldRecord.items.filter(item => item.state === "present").map(item => item.output_key))
       .toEqual(["segment:1", "segment:2"]);
-    // 旧提交其余独立节点仍可删除（不要求其原始目标仍是当前关联）。
+
     const version = await prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
     await save({
       commandId: UUID_E, version: version!.version,
       nodes: [markerNode(seg1, UUID_A, "segment:1", "701")],
       changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 1, action: "remove" }],
     });
-    // replaced/transferred 目标项不能 remove 复活。
+
     await expectRejection(
       save({
         commandId: UUID_F, version: version!.version + 1,
@@ -562,7 +562,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       input: { source_asset_id: "5", target_node_id: "scene-node-7", granularity: "fine" },
     });
     if (!("generation_job_id" in created)) throw new Error("受理失败");
-    // 用户发起取消（意图保留原素材），任务抢先成功。
+
     await raw.query("UPDATE generation_jobs SET status='succeeded' WHERE id = ?", [Number(created.generation_job_id)]);
     await expectRejection(
       save({
@@ -571,7 +571,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       }) as never,
       422, RECOVERY_REASONS.documentMismatch,
     );
-    // 占位未被动过（保留当前卡，不自动重发）。
+
     const submission = await prisma.generation_canvas_submissions.findUnique({
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_A } },
     });
@@ -596,7 +596,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
         changes: [
           { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
           { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
-          { id: recoveryItemId(UUID_A, "segment:2"), rev: 9, action: "apply" }, // 过期版本
+          { id: recoveryItemId(UUID_A, "segment:2"), rev: 9, action: "apply" },
         ],
       }) as never,
       409, RECOVERY_REASONS.itemConflict,
@@ -616,14 +616,14 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       input: { source_asset_id: "5", scene: "drama", output_format: "aac" },
     });
     if (!("generation_job_id" in created)) throw new Error("受理失败");
-    // drama 三轨但产物只有两轨（缺产物）。
+
     await raw.query(
       "UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST('[\"801\",\"802\"]' AS JSON) WHERE id = ?",
       [Number(created.generation_job_id)],
     );
     const page = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
     const record = page.records.find(item => item.submission_id === UUID_A)!;
-    // 保留占位：只有 $target 项，无输出投影、无重发。
+
     expect(record.items.map(item => item.output_key)).toEqual([TARGET_OUTPUT_KEY]);
     await expectRejection(
       save({

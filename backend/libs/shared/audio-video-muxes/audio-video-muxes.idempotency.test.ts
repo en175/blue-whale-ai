@@ -47,7 +47,6 @@ describe("audio video mux create idempotency", () => {
     expect(first.data).toMatchObject({ job_id: "70", replayed: false, enqueue_required: true });
     expect(again.data).toMatchObject({ job_id: "70", replayed: true, enqueue_required: false });
     expect(client.generation_jobs.create).toHaveBeenCalledOnce();
-    // 重放在资产复核之前短路：不再探测对象、不再发起公开读取
     expect(storage.uploads.inspectObject.mock.calls).toEqual([["11.mp4"], ["12.mp4"]]);
     await expect(service.create("9", "5", { ...payload, sync: "video" }, { idempotencyKey: "one-click" }))
       .rejects.toMatchObject({ status: 409 });
@@ -89,11 +88,9 @@ describe("audio video mux create idempotency", () => {
 
     const first = await service.create("9", "5", payload, { idempotencyKey: "recover-key" });
     expect(first.data).toMatchObject({ job_id: "70", replayed: false, enqueue_required: true });
-    // 首次响应丢失且入队失败：任务被标记为明确的 enqueue_failed 失败态
     Object.assign(job, { status: "failed", version: 1, error: { code: "enqueue_failed", message: "任务入队失败" } });
     const recovered = await service.create("9", "5", payload, { idempotencyKey: "recover-key" });
     expect(recovered.data).toMatchObject({ job_id: "70", status: "queued", replayed: true, enqueue_required: true });
-    // 恢复后的重放不再入队：返回当前状态
     const replay = await service.create("9", "5", payload, { idempotencyKey: "recover-key" });
     expect(replay.data).toMatchObject({ job_id: "70", status: "queued", replayed: true, enqueue_required: false });
     expect(client.generation_jobs.create).toHaveBeenCalledOnce();

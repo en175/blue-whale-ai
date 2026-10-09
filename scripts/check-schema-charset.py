@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""Verify every schema SQL declares SET NAMES utf8mb4.
-
-Regression guard: backend/prisma/schema/*.sql are imported through
-docker-entrypoint-initdb.d, whose client session defaults to latin1 unless
-the file declares SET NAMES utf8mb4. Without it, UTF-8 Chinese seed data is
-double-encoded into mojibake at insert time (对照组: 001_baseline.sql).
-"""
 
 from __future__ import annotations
 
@@ -19,9 +12,6 @@ REQUIRED = "SET NAMES utf8mb4"
 
 
 def main() -> int:
-    # Windows 原生 Python 默认 stdout 为 cp936（GBK），打印 `✅`（U+2705，非 GBK
-    # 字符）直接抛 UnicodeEncodeError；强制改 UTF-8。POSIX 本就 UTF-8，reconfigure
-    # 为 no-op。
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

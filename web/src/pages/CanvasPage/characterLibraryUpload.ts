@@ -1,5 +1,3 @@
-/* 角色库 / 虚拟人像库本地上传：uploadAssetFile → CreateAsset。
- * 失败必须带回可读原因（TC_DG_209/213/302），禁止静默。 */
 import { toast } from 'sonner';
 import { createAsset } from '@/api/material';
 import { isApiError } from '@/api/http';
@@ -16,7 +14,6 @@ function retryableFailure(fileName: string, detail?: string): string {
   return reason.includes('请重试') ? reason : `${reason}，请重试`;
 }
 
-/** 批量入库虚拟/真人素材库。groupId 为空时不传分组（虚拟库由后端归组）。 */
 export async function uploadMaterialLibraryFiles(
   files: File[],
   groupId: string | null,

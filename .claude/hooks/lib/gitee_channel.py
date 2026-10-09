@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Reject visible Gitee browser/API alternatives without logging request values."""
 from __future__ import annotations
 
 import json
@@ -38,7 +37,6 @@ def browser_reason(payload: dict) -> str | None:
     text = "\n".join(values)
     if GITEE.search(unquote(text)):
         return "blocked-gitee-browser"
-    # Require an actual structured URL or a recognized acquisition/navigation call.
     urls = [payload[k] for k in ("url", "target_url", "page_url") if isinstance(payload.get(k), str)]
     code = payload.get("code", payload.get("script", ""))
     if isinstance(code, str):
@@ -63,14 +61,12 @@ def shell_reason(command: str, cwd: str) -> str | None:
         if interpreter:
             if GITEE.search(unquote(args)) and re.search(r"(?i)requests\.|urllib|urlopen|fetch\s*\(|https?\.|goto\s*\(|cua\.|tabbit", args):
                 return "blocked-gitee-http"
-        # Inspect directly invoked local scripts, not arbitrary project files.
         candidate = Path(cwd) / call.executable
         if interpreter:
             script = next((a for a in call.args if not a.startswith("-")), "")
             if not any(a in {"-c", "-e", "--eval"} for a in call.args):
                 candidate = Path(cwd) / script
         if candidate.is_file() and candidate.suffix in {".sh", ".py", ".js", ".mjs", ".ts"}:
-            # This existing suite contains request strings as inert negative fixtures.
             if candidate.resolve() == ROOT / "scripts/test-hooks.sh":
                 continue
             source = candidate.read_text(encoding="utf-8", errors="replace")
@@ -113,7 +109,6 @@ def main() -> int:
     cwd = event.get("cwd") or str(ROOT)
     if not isinstance(cwd, str):
         return 2
-    # Shared Kimi/global routing must not affect unrelated repositories.
     if common_dir(cwd) != common_dir(str(ROOT)):
         return 0
     tool = event.get("tool_name", "")

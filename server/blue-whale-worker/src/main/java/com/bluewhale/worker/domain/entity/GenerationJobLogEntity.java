@@ -7,37 +7,27 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/**
- * 生成作业日志行（对应 Prisma model generation_job_logs）。
- */
 @TableName("generation_job_logs")
 public class GenerationJobLogEntity {
     @TableId(type = IdType.AUTO)
-    /** 主键（BigInt，对外字符串化承载） */
     private Long id;
 
     @TableField("generation_job_id")
-    /** 产出该资产的任务 id；上传件为 null */
     private Long generationJobId;
 
     @TableField("event")
-    /** 事件名（succeeded/failed/retry_scheduled/cancel_requested） */
     private String event;
 
     @TableField("status")
-    /** 状态（jobs 六枚举见契约 §2；assets：normal/uploading） */
     private String status;
 
     @TableField("payload")
-    /** 事件负载 JSON */
-    private String payload; // JSON
+    private String payload;
 
     @TableField("message")
-    /** 人类可读信息（失败为 code: message） */
     private String message;
 
     @TableField("occurred_at")
-    /** 发生时间 */
     private LocalDateTime occurredAt;
 
     public Long getId() { return id; }

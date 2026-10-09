@@ -184,8 +184,6 @@ export {
   type CreateJobOptions,
   type CreatedJob,
 } from "./generation-command-repo.js";
-// 建任务幂等（command_idempotency，operation=generation.create）：读/写/并发回读都在这里，
-// repo 只负责在正确的时点调用它。
 export {
   CREATE_GENERATION_JOB_OPERATION,
   FINALIZE_GENERATION_JOB_OPERATION,
@@ -193,7 +191,6 @@ export {
   type CreateJobIdempotency,
   type CreateJobResult,
 } from "./generation-job-idempotency.js";
-// IKJJQU：生成任务恢复契约 v1 repo——受理锁序、恢复查询、保护性保存与旧客户端守护。
 export {
   RecoveryContractError,
   canvasBindingView,
@@ -217,8 +214,6 @@ export {
   type CanvasRecoverySaveInput,
   type CanvasRecoverySaveResult,
 } from "./canvas-recovery-save.js";
-// IKIZQC：成片（finalize）命令 repo——来源样片读取、成片任务创建（来源唯一约束裁决并发）、
-// 成片幂等重放查询。
 export {
   createFinalizeCommandRepo,
   createFinalizeJob,
@@ -228,8 +223,6 @@ export {
   type FinalizeJobResult,
   type FinalizeSourceJob,
 } from "./generation-finalize-repo.js";
-// 建 job 的计费依赖（预扣 + 失败补偿）：装配层（handler/controller）经这里取端口类型；
-// 补偿的执行与纯数据闸只在 persistence 内部用（generation-command-repo 直接相对导入）。
 export type { JobBilling } from "./job-billing.js";
 export {
   aggregateSlotStatus,

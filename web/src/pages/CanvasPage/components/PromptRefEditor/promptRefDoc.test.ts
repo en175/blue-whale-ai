@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-/* promptRefDoc 等价性测试（IKFA1M）：doc→节点→doc 往返、@ 查询匹配、查询替换为标签 */
 import { describe, expect, it } from 'vitest';
 import {
   $createRangeSelection,
@@ -89,7 +88,6 @@ describe('@ 查询原位替换为素材标签（A1：保留前后文字）', () 
     const editor = headless();
     editor.update(() => {
       $buildFromPromptDoc(null, '让@猫的衣服');
-      // 模拟 MentionPlugin 记录的锚点：'@' 在文本节点偏移 1，query='猫'，范围 [1, 3)
       const firstParagraph = $getRoot().getFirstChild();
       const textNode = $isElementNode(firstParagraph) ? firstParagraph.getFirstChild() : null;
       if (!textNode) return;
@@ -110,7 +108,6 @@ describe('@ 查询原位替换为素材标签（A1：保留前后文字）', () 
           { kind: 'text', text: '的衣服' },
         ],
       });
-      // 查询锚点节点仍可追溯（未被整体替换）
       expect($getNodeByKey(key)).not.toBeNull();
       expect($nodesOfType(AssetRefNode)).toHaveLength(1);
     });

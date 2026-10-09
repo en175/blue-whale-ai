@@ -5,9 +5,6 @@ import {
   type VideoRefItem,
 } from "./prompt-doc.js";
 
-/* IKG6EK / ADR-0088：`prompt_doc` 已退役——本文件只保留存续的「身份 → 展示编号」派生。
-   doc 的结构 schema、身份复核与正文编译随契约退役（用例见 handle-create-generation-job.test.ts
-   「prompt_doc 已退役」组）。编号规则的历史契约：docs/specs/2026-09-12-ikfa1m-image-prompt-ref-contract.md。 */
 
 const ref = (
   id: string,

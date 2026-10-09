@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKJIVN：图片面板报价请求不携带 target_node_id——草稿目标合并是视频端契约
- * （IKJGE6），图片端不进入该逻辑，报价行为同旧（面板不传目标，Badge 不带键）。
- * 本文件只挂报价 payload 这一条最小渲染面，面板交互由后续工单按需补。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

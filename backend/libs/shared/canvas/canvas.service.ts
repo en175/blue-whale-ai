@@ -27,7 +27,6 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
 import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
 
-/** 应用方案卡时能否复用已有素材卡：空地址、上传中、已标缺失都不能当源，必须新建。 */
 function isReusableApplyMediaNode(item: { type?: string; data?: Record<string, unknown> }): boolean {
   if (item.type !== "mediaNode") return false;
   if (item.data?.assetMissing === true) return false;
@@ -35,7 +34,6 @@ function isReusableApplyMediaNode(item: { type?: string; data?: Record<string, u
   return src.length > 0 && !src.startsWith("blob:");
 }
 
-/** 对话引用快照视图（IKDLQJ）：主键字符串化；来源损坏时按无来源处理，不丢正文。 */
 function toQuoteView(row: ConversationQuoteRow) {
   const source = previewSourceSchema.nullable().safeParse(row.source_json ?? null);
   return {
@@ -48,7 +46,6 @@ function toQuoteView(row: ConversationQuoteRow) {
   };
 }
 
-/** 迁移历史视图（IKDLQK）：主键字符串化；来源损坏按无来源处理，原卡片 JSON 原样返回。 */
 function toHistoryItem(row: LegacyCardHistoryRow): LegacyCardHistoryItem {
   const source = previewSourceSchema.nullable().safeParse(row.source_json ?? null);
   return {
@@ -63,22 +60,10 @@ function toHistoryItem(row: LegacyCardHistoryRow): LegacyCardHistoryItem {
   };
 }
 
-/** 版本冲突（412）信封：data 带回服务端当前 version，前端可据其直接刷新 If-Match。
- *  与成功路径同址同字段（`data.version`），前端一套解析逻辑通吃。
- *  不用 contracts 的 fail()：它命中 `ResultEnvelope<never>` 重载，data 被收窄成 null，
- *  调用方就拿不到 `result.data.version` 了；这里要保住 payload 类型。
- *  version 为 null 是可达的：画布行尚不存在（项目在、canvas 无行）时 getByProject 给 emptyView，
- *  此时客户端若用数字 If-Match（如 "0"）就会走到冲突分支，回 `{ version: null }`，
- *  语义等同「无版本」，客户端应按第一次保存（"missing"）处理。 */
 function canvasVersionConflict(version: number | null) {
   return { code: 412, msg: "Canvas 版本冲突", data: { version } } as const;
 }
 
-/** save() 可能返回的冲突信封码（412 版本冲突 / 422 空覆盖防护 IKIIWN / 428 确认清空缺
- *  If-Match IKIMQJ / IKJJQU 恢复域 400·404·409）：canvases.controller 把命中本集合的信封按
- *  自身 code 透传 HTTP 状态码而非回落 200，此处是「哪些信封码需透传」的单一权威源——
- *  save() 新增冲突信封时在此登记。IKJJQU 的恢复受控信封（data.reason 为字符串）额外
- *  由控制器按 reason 存在性判定，旧 422/428 空 data 信封不受影响。 */
 export const CANVAS_SAVE_CONFLICT_CODES: ReadonlySet<number> = new Set([400, 404, 409, 412, 422, 428]);
 
 @Injectable()
@@ -127,11 +112,6 @@ export class CanvasService {
     return this.repo.getByProject(projectId);
   }
 
-  /**
-   * 打开路径上的旧生成卡迁移（IKDLQK）：先落不可变历史，再条件写画布；
-   * 冲突重读重算最多五次，耗尽返回当前画布原样（不阻断打开，下次打开重试）。
-   * 仅由项目打开入口（snapshot / canvases GET）调用；生成任务接纳等读路径不触发。
-   */
   async migrateLegacyCards(projectId: string): Promise<{ canvas: CanvasView; report: LegacyMigrationReport }> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const canvas = await this.repo.getByProject(projectId);
@@ -153,12 +133,10 @@ export class CanvasService {
         const saved = await this.historyRepo.migrate(projectId, canvas.version!, JSON.stringify(plan.nodes), plan.historyDrafts);
         if (saved) return { canvas: await this.repo.getByProject(projectId), report: { migrated: plan.migrated, failed: plan.failed } };
       } catch (error) {
-        // 并发打开的唯一键 INSERT IGNORE 可能死锁（MySQL 1213 → Prisma P2034）：与版本冲突同等处理，重读重算
         const code = (error as { code?: unknown })?.code;
         if (code !== "P2034") throw error;
       }
     }
-    // 重试耗尽：按最终读到的画布重算报告（并发请求可能已完成迁移，不用过期计划谎报失败）
     const canvas = await this.repo.getByProject(projectId);
     try {
       const parsed = JSON.parse(canvas.nodes ?? "[]") as unknown;
@@ -171,14 +149,12 @@ export class CanvasService {
     }
   }
 
-  /** 迁移历史只读回读（IKDLQK）：本项目全部条目，id 升序。 */
   async listLegacyCardHistory(ownerId: string, projectId: string) {
     if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
     const rows = await this.historyRepo.listByProject(projectId);
     return ok({ items: rows.map(toHistoryItem) });
   }
 
-  /** 添加到对话（IKDLQJ）：冻结点击当刻正文与来源为不可变快照；相同内容复用既有快照。 */
   async createConversationQuote(ownerId: string, projectId: string, body: unknown) {
     if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
     const parsed = conversationQuoteCreateSchema.safeParse(body);
@@ -187,7 +163,6 @@ export class CanvasService {
     return ok({ quote: toQuoteView(row), reused });
   }
 
-  /** 会话刷新后按消息中的 quoteId 批量回读引用事实；不存在的 id 省略。 */
   async listConversationQuotes(ownerId: string, projectId: string, idsParam: string) {
     if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
     const ids = idsParam.split(",").map(id => id.trim()).filter(id => id.length > 0);
@@ -217,10 +192,6 @@ export class CanvasService {
       }
       const additions: typeof nodes = [];
       const materialViews = [];
-      // Agent 方案卡应用到画布时，把方案正文里的素材索引（promptMentions/promptMaterials）
-      // 迁移成画布文本节点正文索引（mediaMentions/mediaRefs），并建 textNode→mediaNode 的
-      // textIndex 关系线——这样下游（textIndexOfTarget / textAttachmentsForSend）与手建文本
-      // 节点走同一套拼接：@图1 → &素材id& → references 推导 → 后端 @图片N 标记转移。
       const newEdges: CanvasEdge[] = [];
       const assetToNode = new Map<string, string>();
       const assetToName = new Map<string, string>();
@@ -236,7 +207,6 @@ export class CanvasService {
         if (!asset) throw new BadRequestException(`素材索引 ${indices} 已删除或无权访问，整次应用未保存`);
         materialViews.push({ ...material, url: asset.url });
         if (existing) continue;
-        // 画布上已有同 assetId 且可播放的媒体节点则复用；没有、或只剩「素材已被删除」空壳则新建
         const existingMedia = nodes.find(item =>
           item.type === "mediaNode"
           && String(item.data?.assetId ?? item.data?.asset_id ?? item.data?.assetID ?? "") === material.assetId
@@ -246,13 +216,11 @@ export class CanvasService {
         if (!existingMedia) additions.push({ id: mediaNodeId, type: "mediaNode", position: { x: position.x + 420, y: position.y + additions.length * 300 },
           data: { assetId: material.assetId, mediaType: material.mediaType, src: asset.url, width: asset.width, height: asset.height } });
         assetToNode.set(material.assetId, mediaNodeId);
-        // 名称优先取已有媒体节点的 fileName，回落节点 id（与 cardNameOfNode 同口径）
         const existingFileName = typeof existingMedia?.data?.fileName === "string" && existingMedia.data.fileName ? existingMedia.data.fileName : mediaNodeId;
         assetToName.set(material.assetId, existingFileName);
         newEdges.push({ id: `edge-${randomUUID()}`, source: textNodeId, target: mediaNodeId, data: { [TEXT_INDEX_EDGE_MARKER]: true } });
       }
       if (existing) return ok({ node: existing, canvas, reused: true });
-      // promptMentions → mediaMentions（补 nodeId），materialViews → mediaRefs（补 nodeId/name）
       const mediaMentions = (content.promptMentions ?? [])
         .map(mention => ({ start: mention.start, end: mention.end, nodeId: assetToNode.get(mention.assetId)!, assetId: mention.assetId }))
         .filter(mention => mention.nodeId);
@@ -264,8 +232,6 @@ export class CanvasService {
       const existingEdges = JSON.parse(canvas.edges ?? "[]") as CanvasEdge[];
       const serializedEdges = JSON.stringify([...existingEdges, ...newEdges]);
       const serialized = JSON.stringify([...nodes, ...additions, node]);
-      // IKJJQU（B.7）：方案应用是画布写入口之一——受保护标记/承接/资产不可经此绕过。
-      // 本写保留全部既有节点（只追加），守护是防御未来演化破坏该不变式。
       guardLegacyCanvasWrite(nodes as Array<Record<string, unknown>>, [...nodes, ...additions, node] as Array<Record<string, unknown>>);
       if (Buffer.byteLength(serialized, "utf8") > limits.canvasBytes) throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
       try {
@@ -290,29 +256,19 @@ export class CanvasService {
       nodes?: unknown;
       edges?: unknown;
       expectedVersion?: number | null;
-      /** IKIIWN：非空画布 → 空文档的破坏性收缩须显式确认（契约 §9） */
       confirmEmpty?: unknown;
-      /** IKJJQU（B.6）：新协议显式恢复保存字段。携带时走原子保存事务。 */
       recoveryProtocolVersion?: unknown;
       commandId?: unknown;
       recoveryChanges?: unknown;
     },
   ) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
-    // 抛而不是 return 信封：信封走不到 AllExceptionsFilter，没人写 HTTP 状态码，
-    // 一次「项目不存在」会回 HTTP 200 + body code 100100（ADR-0083 禁的那类不一致）。
-    // 码与文案沿用原样；HTTP 404 来自码表——`httpStatusForCode` 先查 SPEC_CODE_HTTP_STATUS，
-    // 而 skill 域的 SKILL_NOT_FOUND 已把 100100 登记为 404，故此处不必（也不能）在
-    // GLOBAL_CODE_HTTP_STATUS 再补一条（补了也不会生效，那条分支轮不到）。
     if (!owned) throw new DomainError(DATA_NOT_EXIST_CODE, "项目不存在");
-    // IKJJQU：新协议显式恢复保存（recoveryProtocolVersion=1）走独立原子事务——
-    // 画布、恢复项、素材关联、槽位首次放置与紧凑回执同事务提交。
     if (body.recoveryProtocolVersion !== undefined) {
       return this.saveWithRecovery(ownerId, projectId, body);
     }
     const viewport = typeof body.viewport === "string" ? body.viewport : null;
     const nodes = typeof body.nodes === "string" ? body.nodes : null;
-    // IKDLQF：edges 省略时保留既有连线（旧客户端保存不得清边）；携带时按下文校验后覆盖。
     const edgesProvided = typeof body.edges === "string";
     const edges = edgesProvided ? (body.edges as string) : null;
     let incoming: Array<{ id: string; type: string; data?: Record<string, unknown> }>;
@@ -323,7 +279,6 @@ export class CanvasService {
       throw new BadRequestException("画布节点格式无效，原内容未改动");
     }
     if (Buffer.byteLength(nodes ?? "", "utf8") > limits.canvasBytes) throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
-    // IKDLQF：edges 与 nodes 同构（JSON 数组字符串），校验失败明确拒绝、零写入。
     let incomingEdges: unknown[] = [];
     if (edgesProvided) {
       try {
@@ -340,8 +295,6 @@ export class CanvasService {
     for (const edge of incomingEdges) {
       const parsed = canvasEdgeSchema.safeParse(edge);
       if (!parsed.success) throw new BadRequestException("画布连线格式无效，原内容未改动");
-      // 自环（source === target）合法：素材原卡重新编辑引用自身，按普通连线保存；
-      // 媒体参考消费在前端（连线→Dock 推导、提交时换算 input_asset_ids），服务端快照推导仅消费文本边（契约 IKDLQF 修订）。
       if (!nodeIds.has(parsed.data.source) || !nodeIds.has(parsed.data.target)) throw new BadRequestException("连线端点必须引用本次保存的画布节点，原内容未改动");
       const pair = `${parsed.data.source}\0${parsed.data.target}`;
       if (seenPairs.has(pair)) throw new BadRequestException("同一对节点之间只允许一条连线，原内容未改动");
@@ -352,7 +305,6 @@ export class CanvasService {
         && node.data?.promptSource === undefined) {
         throw new BadRequestException("方案素材身份不可伪造，请使用应用入口");
       }
-      // IKFM3S §4：输入更新状态字段只做形态校验、宽松放行（系统 UX 状态，伪造仅影响本画布提示显示）
       if (node.type === "mediaNode") {
         const signature = node.data?.usedInputSignature;
         const jobId = node.data?.usedInputJobId;
@@ -362,7 +314,6 @@ export class CanvasService {
         }
       }
       if (node.type !== "textNode") continue;
-      // IKFM3L 契约 §1：text 是权威正文（Markdown 源），html 为存量兼容字段，两者同限长
       if ((typeof node.data?.text === "string" && node.data.text.length > limits.text)
         || (typeof node.data?.html === "string" && node.data.html.length > limits.text)
         || (typeof node.data?.title === "string" && node.data.title.length > limits.title)) {
@@ -372,10 +323,6 @@ export class CanvasService {
     const editedMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
     const current = await this.repo.getByProject(projectId);
     const previous = JSON.parse(current.nodes ?? "[]") as typeof incoming;
-    // IKJJQU（B.7 已批准的旧客户端边界）：存在新协议关联的项目，所有整文档写入必须提供
-    // 客户端实际读到的版本——缺 If-Match 不以服务端当前版本替代（428 canvas_version_required）。
-    // 带版本的旧请求可普通编辑，但不能改动承接、受保护标记或结果资产，也不能使受保护卡缺席
-    //（guardLegacyCanvasWrite 抛 RecoveryContractError，由下方 catch 转信封）。
     if (await projectHasRecoverySubmissions(this.prisma.client, projectId)
       && body.expectedVersion === undefined) {
       return {
@@ -390,22 +337,14 @@ export class CanvasService {
       if (error instanceof RecoveryContractError) return error.envelope;
       throw error;
     }
-    // IKIIWN（契约 §9）：非空画布被单次保存替换为空节点文档是破坏性收缩，仅显式确认放行；
-    // 读与写的竞态由下方 saveIfVersion 的版本条件闭环——本检查看到的行与被覆盖的行共用同一 expectedVersion 闸门。
     if (previous.length > 0 && incoming.length === 0) {
       if (body.confirmEmpty !== true) {
         return { code: 422, msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty", data: null } as const;
       }
-      // IKIMQJ（契约 §9 IKIMPQ）：破坏性清空只认明确的数值版本——确认了但缺 If-Match 一律 428，
-      // 不回落到下方「undefined 补 current.version」的宽松写；"missing" 哨兵与过期数字版本则交给
-      // saveIfVersion 条件闸门拦下（create 撞唯一键 / updateMany 不命中）回 412 + 当前版本，零写入。
-      // 必须放在 promptSource 分支之前：含方案卡的画布缺头会先撞 400，破坏性清空的 428 语义优先。
       if (body.expectedVersion === undefined) {
         return { code: 428, msg: "确认清空必须携带 If-Match 数值版本", data: null } as const;
       }
     }
-    // IKFM3Q 正文媒体索引契约 §7：mediaMentions/mediaRefs 同现同缺、区间与覆盖有效；
-    // 新增身份素材真实可及且与来源节点身份一致；存量身份展示元数据不可变（失效身份豁免正文编辑）
     for (const node of incoming) {
       const hasMentions = node.data?.mediaMentions !== undefined;
       const hasRefs = node.data?.mediaRefs !== undefined;
@@ -419,8 +358,6 @@ export class CanvasService {
       if (!mentions.success || !refs.success || !validMediaMentions(text, mentions.data) || !mediaRefsCoverMentions(mentions.data, refs.data)) {
         throw new BadRequestException("正文媒体索引无效，原内容未改动");
       }
-      // 契约 §1（IKH4EF 修订）：media 索引与 Agent 方案绑定区间互不部分重叠；
-      // 同区间同 assetId 放行——applyPreview 把方案绑定派生成同区间的 mediaMentions（IKG6EK）
       const promptMentions = promptMentionSchema.array().safeParse(node.data?.promptMentions ?? []);
       if (!mediaAndPromptMentionsDisjoint(mentions.data, promptMentions.success ? promptMentions.data : [])) {
         throw new BadRequestException("正文媒体索引与方案绑定区间重叠，原内容未改动");
@@ -436,12 +373,10 @@ export class CanvasService {
           }
           continue;
         }
-        // 新增身份：素材真实可及（归属/未删/正常/类型/地址一致），与 promptMaterials 新增校验同口径
         const asset = await this.prisma.client.assets.findFirst({ where: { id: BigInt(ref.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
         if (!asset || asset.type !== ref.mediaType || asset.url !== ref.url) {
           throw new BadRequestException("媒体素材已删除、无权访问或身份不一致，原内容未改动");
         }
-        // 来源节点在本次保存中存在时必须是同身份 mediaNode；节点不存在即来源已删的失效身份，豁免（契约 §7.3）
         const source = incoming.find(item => item.id === ref.nodeId);
         if (source && (source.type !== "mediaNode" || nodeAssetId(source) !== ref.assetId || String(source.data?.mediaType ?? "") !== ref.mediaType)) {
           throw new BadRequestException("媒体素材与来源节点身份不一致，原内容未改动");
@@ -476,7 +411,6 @@ export class CanvasService {
               || new Set(materials.map(m => m.assetId)).size !== materials.length) {
               throw new BadRequestException("方案素材身份无效或重复");
             }
-            // Existing display metadata stays immutable; newly chosen identities must be real, owned Canvas assets.
             if (oldMaterials.some(material => !materials.some(m => m.assetId === material.assetId && m.mediaType === material.mediaType && m.url === material.url))) {
               throw new BadRequestException("方案素材身份不可伪造，请重新选择素材");
             }
@@ -509,14 +443,12 @@ export class CanvasService {
       { ownerId, items: editedMaterials },
     );
     if (!saved) {
-      // 条件写失败说明读与写之间被并发改动：重读一次拿服务端当前 version 回给前端。
       const latest = await this.repo.getByProject(projectId);
       return canvasVersionConflict(latest.version);
     }
     return ok(saved);
   }
 
-  /** IKJJQU（B.5）：恢复页查询。游标由服务端编码校验，跨项目或非法返回 400。 */
   async listGenerationRecovery(ownerId: string, projectId: string, limitParam: string, cursorParam: string) {
     if (!await this.project.findOwnedById(projectId, ownerId)) {
       return { code: 404, msg: "项目不存在", data: { reason: RECOVERY_REASONS.resourceNotFound } } as const;
@@ -545,7 +477,6 @@ export class CanvasService {
     });
   }
 
-  /** IKJJQU（B.5）：resolve 定向读取（只读、可重复、不修改状态；查不到整体 404）。 */
   async resolveGenerationRecovery(ownerId: string, projectId: string, body: unknown) {
     if (!await this.project.findOwnedById(projectId, ownerId)) {
       return { code: 404, msg: "项目不存在", data: { reason: RECOVERY_REASONS.resourceNotFound } } as const;
@@ -565,8 +496,6 @@ export class CanvasService {
     return ok({ protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION, records });
   }
 
-  /** IKJJQU（B.6）：新协议显式恢复保存——画布、恢复项、素材关联、槽位首次放置与
-   *  紧凑回执同事务提交；幂等（SAVE_CANVAS_RECOVERY_V1）先于 If-Match 检查。 */
   private async saveWithRecovery(
     ownerId: string,
     projectId: string,
@@ -589,12 +518,10 @@ export class CanvasService {
     if (!parsedFields.success) {
       return { code: 400, msg: "恢复保存字段无效", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
     }
-    // 同请求的恢复项不得重复（B.6）。
     const itemIds = new Set(parsedFields.data.recoveryChanges.map(change => change.recoveryItemId));
     if (itemIds.size !== parsedFields.data.recoveryChanges.length) {
       return { code: 400, msg: "同请求的恢复项不得重复", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
     }
-    // 三个文档字段必须显式提交（B.6）。
     if (typeof body.viewport !== "string" || typeof body.nodes !== "string" || typeof body.edges !== "string") {
       return { code: 400, msg: "新协议保存必须显式提交 viewport/nodes/edges", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
     }
@@ -613,7 +540,6 @@ export class CanvasService {
       || Buffer.byteLength(edges, "utf8") > CANVAS_EDGE_LIMITS.edgesBytes) {
       return { code: 400, msg: "画布内容超限", data: { reason: RECOVERY_REASONS.invalidPayload } } as const;
     }
-    // 破坏性收缩仍需 confirmEmpty（B.7）。
     const current = await this.repo.getByProject(projectId);
     const previousNodes = JSON.parse(current.nodes ?? "[]") as typeof incoming;
     if (previousNodes.length > 0 && incoming.length === 0 && body.confirmEmpty !== true) {
@@ -633,7 +559,6 @@ export class CanvasService {
       });
       return ok(saved);
     } catch (error) {
-      // B.8：受控错误信封返回（412/409/404/422/428/400），整笔回滚由事务保证。
       if (error instanceof RecoveryContractError) return error.envelope;
       throw error;
     }

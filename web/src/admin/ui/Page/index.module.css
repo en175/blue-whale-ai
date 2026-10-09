@@ -1,5 +1,3 @@
-/* 只管纵向节奏，不加内边距——内边距由壳（.content）提供，
-   两处都设就是双重内边距，改一处不改另一处就会出现「这页比那页窄一截」。 */
 .page {
   display: flex;
   flex-direction: column;

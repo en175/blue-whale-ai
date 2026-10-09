@@ -18,10 +18,6 @@ import { GoodsStrategy } from "./type/goods-strategy.js";
 import { TextStrategy } from "./type/text-strategy.js";
 import { SharedAssetSourceAdapter } from "./shared-asset-source.adapter.js";
 
-/** 共享资产共享层：@Global 使 API 层可直接注入 SharedAssetService。
- *  11 种类型策略由单一工厂组装成数组注册到 SHARED_ASSET_TYPE_STRATEGY token
- *  （Nest 对多个同 token provider 不会自动装数组，单测直接 new Registry 传数组掩盖了该接线坑，
- *  真实启动暴露 strategies is not iterable，故用工厂聚合）。 */
 @Global()
 @Module({
   providers: [

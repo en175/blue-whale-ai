@@ -37,17 +37,12 @@ describe("UsageController.token（billing 余额）", () => {
 
     const response = await controller.token(USER);
 
-    // 展示的余额 = 冻结之外真正可用的那部分：待结算的预扣不该被当成能花的钱。
-    // `by_source` 是**同一笔钱的分项**（Σ 必须等于 credits）—— 前端按它相加得到总数；
-    // `credits` 保留，是为了既有消费端（画布顶栏、额度闸）不必跟着改。
     expect(response.data).toEqual({
       credits: 120,
       by_source: [
         { source: "purchased", credits: 100 },
         { source: "bonus", credits: 20 },
       ],
-      // 临期批次：账户积分页的「最近到期批次」用它。⚠️ 它是**子集**（不是全部批次），
-      // 也**不是第二个金额** —— 这些批次的钱已经算在 credits 里了
       expiring: [
         { credits: 50, expires_at: "2026-12-01T00:00:00+08:00", source: "purchased" },
       ],
@@ -63,8 +58,6 @@ describe("UsageController.token（billing 余额）", () => {
       bySource: [],
     });
 
-    // 空数组与「字段不存在」在前端是两种分支：前者能安全 `.length`，
-    // 后者要判 undefined。对外只留一种
     expect((await controller.token(USER)).data.expiring).toEqual([]);
   });
 

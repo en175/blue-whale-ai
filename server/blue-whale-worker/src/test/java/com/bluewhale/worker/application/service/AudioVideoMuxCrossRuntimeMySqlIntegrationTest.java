@@ -42,9 +42,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-/** 只消费外层 Node 验收新建的隔离库（IKIHPJ）；普通金标类始终使用自己持有的 Testcontainers。 */
 class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
-    /** 与外层 Node 跨端用例共用的源视频资产名夹具（结果命名断言 = 去扩展名 + (音视频合成).mp4）。 */
     private static final String SOURCE_VIDEO_NAME = "my_vlog.mp4";
 
     private static AudioVideoMuxCrossRuntimeDbGuard.Target target;
@@ -85,7 +83,6 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
                 mapper(StoryboardPreviewMapper.class, session),
                 extraMapper);
 
-        // IKIWP8 ③：终态收口直连 JobFinalizer（与 service 同库同 SqlSessionFactory）。
         var assetMapper = mapper(AssetMapper.class, session);
         var jobLogMapper = mapper(GenerationJobLogMapper.class, session);
         var slotMapper = mapper(GenerationOutputSlotMapper.class, session);
@@ -144,7 +141,6 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
         var base = new AtomicReference<String>();
         String oldFence = System.getenv("IKIHPJ_OLD_FENCE");
         if (oldFence != null) {
-            // 陈旧 fence（外层传真实 fence+5）复放不得发布资产。
             assertThat(finalizer.publishAudioVideoMuxResult(new com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto(
                     jobId, "0", "9", "amux-stale", Long.parseLong(oldFence),
                     "https://stale.invalid/out.mp4", "generated/9/video/stale.mp4", "video/mp4",
@@ -178,7 +174,6 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
         try {
             assertThat(readJob(Long.parseLong(jobId)).getType()).isEqualTo("audio_video_mux");
             TosVideoMediaRelay relay = mock(TosVideoMediaRelay.class);
-            // processor 调五参重载（带中止句柄 + 任务截止时间，IKILVH）——stub 必须同参绑定才命中。
             when(relay.persistStreaming(anyString(), eq("9"), anyLong(), any(), any())).thenAnswer(invocation -> {
                 byte[] downloaded = java.net.URI.create((String) invocation.getArgument(0))
                         .toURL().openStream().readAllBytes();
@@ -204,7 +199,6 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
             var frozen = json.readTree(readJob(Long.parseLong(jobId)).getInput());
             var outbound = json.readTree(submitted.get());
 
-            // 出站映射（迁移契约 §21.3）：snake_case 出站、camel 冻结、sync 档钉死、client_token 幂等键。
             assertThat(outbound.path("model").asText()).isEqualTo("mediakit-mux-audio-video");
             assertThat(outbound.path("video_url").asText()).isEqualTo(frozen.path("video").path("url").asText());
             assertThat(outbound.path("audio_url").asText()).isEqualTo(frozen.path("audio").path("url").asText());
@@ -237,7 +231,6 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
             assertThat(countAssets(Long.parseLong(jobId))).isEqualTo(1);
             assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class,
                     Long.parseLong(jobId))).isEqualTo(storagePublicUrl);
-            // 秒→毫秒收口 + 结果命名（拍板⑤）+ resolution 解析。
             assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class,
                     Long.parseLong(jobId))).isEqualTo(227_000);
             assertThat(jdbc.queryForObject("SELECT width FROM assets WHERE generation_job_id=?", Integer.class,

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canvasEdgeSchema } from "./canvas-edges.js";
 
-/* IKDMQS：连线持久形状扩展——可选 data 承载连线关系属性（视频参考角色 refRole），
-   原样存取不解释；其余字段仍 strict 校验。 */
 
 describe("canvasEdgeSchema（IKDMQS 可选 data）", () => {
   it("三字段持久形状照常通过", () => {

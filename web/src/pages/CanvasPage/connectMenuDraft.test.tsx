@@ -37,11 +37,6 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
   })),
 }));
 
-/* IKH3WE 拖线落空白 → 类型菜单 → 新建草稿卡链路（页面级集成）：
-   工具条「重新编辑」「生成图片」「生成视频」按钮撤除后，派生新卡唯一路径 = 从媒体卡
-   拖线、松手落空白弹类型菜单、选类型——断言新建对应草稿卡、自动建立来源卡→新卡参考边、
-   自动打开对应生成面板。共享夹具见 canvasPageTestHarness（FlowCanvas 打桩透出 props，
-   onConnectEnd 可直接调用）；本文件特有：三类生成模型目录与三类来源卡画布。 */
 
 beforeEach(() => {
   enableReactActEnvironment();
@@ -60,7 +55,6 @@ afterEach(async () => {
   Reflect.deleteProperty(document, 'elementsFromPoint');
 });
 
-/** 最小可用模型（面板打开即列目录；参数细节由各面板自身测试覆盖） */
 function model(label: string): GenerationModel {
   return {
     model_id: `m-${label}`,
@@ -94,8 +88,6 @@ function model(label: string): GenerationModel {
   };
 }
 
-/** 画布文档：三张成品上传素材卡（无生成记录，isConnectableSource 放行）。
- *  上传卡必须带 assetId 且在 assets 字典登记，否则水合判「素材已删除」不可作连线来源 */
 function seedSourcesDoc() {
   canvasDocMock.current = {
     doc: {
@@ -123,8 +115,6 @@ function mediaNode(id: string): Node {
   return (mediaNodes() as Node[]).find((n) => n.id === id)!;
 }
 
-/** 模拟从指定卡拖线、松手落在空白：state 无 toHandle/toNode、jsdom 无
- *  elementsFromPoint（stub 空栈）→ handleConnectEnd 走落空白分支弹类型菜单 */
 async function dropFromNodeOnBlank(id: string) {
   document.elementsFromPoint = () => [];
   await act(async () => {
@@ -135,7 +125,6 @@ async function dropFromNodeOnBlank(id: string) {
   });
 }
 
-/** 类型菜单按钮挂在 document.body（createPortal）；label 精确等于菜单项文案 */
 function menuItem(label: string) {
   return [...document.body.querySelectorAll<HTMLButtonElement>('button')]
     .find((b) => b.textContent === label) ?? null;
@@ -148,7 +137,6 @@ async function pickMenuKind(label: string) {
   });
 }
 
-/** 断言面板打开后新建草稿卡与来源参考边 */
 function expectDraftCardAndEdge(sourceId: string, mediaType: 'image' | 'video' | 'audio', fileName: string) {
   const draft = (mediaNodes() as Node[]).find((n) => n.id.startsWith('media-draft'));
   expect(draft).toBeTruthy();
@@ -169,7 +157,6 @@ describe('IKH3WE 拖线落空白经类型菜单派生新卡', () => {
 
     await pickMenuKind('图片生成');
     const draft = expectDraftCardAndEdge('img1', 'image', '图片草稿');
-    // 建卡即自动打开对应生成面板（菜单消失、面板列出模型目录）
     expect(menuItem('图片生成')).toBeNull();
     await vi.waitFor(() => expect(document.body.textContent).toContain('测试生图模型'));
     expect(draft.selected).toBe(true);

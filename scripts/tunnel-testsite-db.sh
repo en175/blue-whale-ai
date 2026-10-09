@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# tunnel-testsite-db.sh —— 测试站数据库 SSH 隧道（唯一应急通道，ADR-0064 / IK65BP）。
-#
-# 原则：不直连、走隧道、用完断。公网 3306 已封禁；本脚本经 SSH 认证建立
-# 本地端口转发，生命周期与终端会话绑定，Ctrl+C 或超时自动断开。
-#
-# 用法：
-#   scripts/tunnel-testsite-db.sh [--local-port N] [--timeout MINUTES]
-# 环境变量覆盖：BW_TESTSITE_HOST / BW_TESTSITE_USER / BW_TESTSITE_DB_PORT
 
 set -euo pipefail
 
@@ -53,7 +45,6 @@ esac
 
 command -v ssh >/dev/null 2>&1 || { echo "❌ 未找到 ssh 命令" >&2; exit 1; }
 
-# Fail closed：本地端口已被占用则拒绝，避免误连到别的进程。
 if (exec 3<>"/dev/tcp/127.0.0.1/$LOCAL_PORT") 2>/dev/null; then
   exec 3>&- 3<&- || true
   echo "❌ 本地端口 $LOCAL_PORT 已被占用；换一个：--local-port <N>" >&2

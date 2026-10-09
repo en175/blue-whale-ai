@@ -13,8 +13,6 @@ import {
   videoRefSourceError,
 } from './videoMediaRefs';
 
-/* IKDMQS 视频参考角色连线：角色随 edge.data.refRole 持久化，
-   首帧/尾帧显式指定不按连入顺序猜测；推导同源保证 Dock 显示 = 提交输入。 */
 
 function mediaNode(id: string, data: Record<string, unknown>): Node {
   return { id, type: 'mediaNode', position: { x: 0, y: 0 }, data };
@@ -175,9 +173,9 @@ describe('readDraftMaterialRefs 角色库草稿参考解析（IKFC1T 修复防�
     expect(readDraftMaterialRefs(mediaNode('d1', { draftMaterialRefs: 'not-array' }))).toEqual([]);
     expect(readDraftMaterialRefs(mediaNode('d1', {
       draftMaterialRefs: [
-        { url: 'http://img/x.png', mediaType: 'image', role: 'reference' }, // 缺 materialId
-        { materialId: 'asset-3', mediaType: 'audio', role: 'reference' },   // 非法类型
-        { materialId: 'asset-4', url: 'http://img/4.png', mediaType: 'image', role: 'hero' }, // 非法角色
+        { url: 'http://img/x.png', mediaType: 'image', role: 'reference' },
+        { materialId: 'asset-3', mediaType: 'audio', role: 'reference' },
+        { materialId: 'asset-4', url: 'http://img/4.png', mediaType: 'image', role: 'hero' },
       ],
     }))).toEqual([]);
   });
@@ -231,7 +229,6 @@ describe('canAddRefRole 角色槽可用性', () => {
     expect(canAddRefRole('last', { reference: [] }, allCaps)).toBe(true);
     expect(canAddRefRole('last', { reference: [], first: ref('f1') }, allCaps)).toBe(true);
     expect(canAddRefRole('last', { reference: [], first: ref('f1'), last: ref('f2') }, allCaps)).toBe(false);
-    // 添加阶段独立占槽；提交时再要求首尾帧齐全。
     expect(canAddRefRole('last', { reference: [], first: ref('f1') }, { ...allCaps, firstLastFrame: false })).toBe(true);
     expect(canAddRefRole('last', { reference: [], first: ref('f1') }, { ...allCaps, lastFrame: false })).toBe(false);
   });

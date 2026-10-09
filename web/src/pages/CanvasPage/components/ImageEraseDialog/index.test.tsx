@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKGOTB 擦除编辑态工具条/发送条组件测试：控件齐全与互斥、发送门（无涂区/分辨率缺失/发送中）、
-   清除文字直发、涂抹发送（运行时栅格化/上传 PNG）、撤销重做置灰透传。
-   渲染模式沿用 ImageEnhanceDialog 测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
@@ -82,7 +79,6 @@ async function click(node: Element | null) {
   });
 }
 
-/** canvas stub：jsdom 无 2d context/toBlob */
 function stubCanvas() {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     fillStyle: '', strokeStyle: '', lineCap: '', lineJoin: '', lineWidth: 0,
@@ -161,7 +157,6 @@ describe('IKGOTB 发送门与两条发送路径', () => {
     renderDialog();
     expect(btn('erase-send-btn').disabled).toBe(true);
     expect(btn('erase-send-btn').getAttribute('title')).toContain('请先用画笔涂抹或框选');
-    // Dock 同款形态：白 ↑ 图标（ArrowUp）；置灰态不带激活类（IKGZ5Q）
     expect(btn('erase-send-btn').querySelector('svg.lucide-arrow-up')).toBeTruthy();
     expect(btn('erase-send-btn').className).not.toMatch(/sendBtnActive/);
     expect(btn('erase-clear-text').disabled).toBe(false);
@@ -216,10 +211,6 @@ describe('IKGOTB 发送门与两条发送路径', () => {
   });
 });
 
-/* ===== IKH1WI 发送条跟随态 CSS 中心点锚（CSS 源断言，先例 mediaChipVisualSource.test.ts）：
-   跟随锚 left 是源卡中心 x，真居中由基础 .sendBar 的 translateX(-50%) 完成；
-   .sendBarFollow 对齐 CutoutToolbar .dialogWrapFollow 先例（left:0 兜底 inline 缺失，
-   transform 不覆盖 → 继承基础态完成真居中，不再对中心点锚二次左移）。 ===== */
 describe('IKH1WI 发送条跟随态 CSS 中心点锚', () => {
   const css = readFileSync(resolve('src/pages/CanvasPage/components/ImageEraseDialog/index.module.css'), 'utf-8');
   const block = (selector: string) => css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';

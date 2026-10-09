@@ -35,8 +35,6 @@ describe('Textarea', () => {
   });
 
   it('★ 默认 6 行而不是原生的 2 行', async () => {
-    // 管理端的 textarea 装的是 JSON 配置、模板正文。原生默认 2 行
-    // 等于让人在一个小窗口里改文档。
     const el = await render({});
     expect(el.rows).toBe(6);
   });
@@ -61,8 +59,6 @@ describe('Textarea', () => {
       },
     });
     await act(async () => {
-      // ⚠️ 必须走原生 value setter：React 在元素上挂了自己的 value 追踪器，
-      // 直接 `el.value = 'x'` 会被它判定为「值没变」从而吞掉这次 input 事件。
       const setValue = Object.getOwnPropertyDescriptor(
         HTMLTextAreaElement.prototype,
         'value',

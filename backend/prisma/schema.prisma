@@ -25,8 +25,6 @@ model assets {
   duration_ms       Int?
   source            String   @default("generated") @db.VarChar(32)
   status            String   @default("normal") @db.VarChar(32)
-  // IKDJNZ：原始素材与素材库（真人/虚拟人像库）素材关联。素材库零本地表，
-  // 仅存上游素材/组 ID 字符串；material_id 唯一索引兜底「一张素材只能关联一张」。
   material_id       String?  @db.VarChar(128)
   material_group_id String?  @db.VarChar(128)
   gmt_create        DateTime @default(now()) @db.DateTime(0)
@@ -40,12 +38,9 @@ model assets {
   @@index([generation_job_id], map: "idx_asset_generation_job")
   @@index([type], map: "idx_type")
   @@index([user_id], map: "idx_user_id")
-  // IKBMDM：findLiveRefs 按 storage_key IN + is_delete=false 做引用核对，需要 storage_key 前缀索引。
   @@index([storage_key, is_delete], map: "idx_asset_storage_live")
   @@index([is_delete, deleted_at], map: "idx_asset_gc_candidates")
-  // IKCNLS：上传 md5 去重按 (user_id, md5) 查未删资产，is_delete 条件支撑查询。
   @@index([user_id, md5, is_delete], map: "idx_asset_user_md5")
-  // IKDJNZ：素材库素材/组删除旁路按 ID 清关联；material_id 唯一索引兜底一对一。
   @@unique([material_id], map: "uq_asset_material_id")
   @@index([material_group_id], map: "idx_asset_material_group")
 }
@@ -57,11 +52,11 @@ model assets {
 model material_groups {
   id                BigInt    @id @default(autoincrement())
   user_id           BigInt
-  material_group_id String    @db.VarChar(128) // 上游组 id（group-...）
-  kind              String    @db.VarChar(16) // virtual | real
+  material_group_id String    @db.VarChar(128)
+  kind              String    @db.VarChar(16)
   name              String    @db.VarChar(128)
-  cover_url         String?   @db.VarChar(512) // 封面图（真人组用，virtual 可空）
-  is_default        Boolean   @default(false) // 每用户虚拟默认组标记
+  cover_url         String?   @db.VarChar(512)
+  is_default        Boolean   @default(false)
   status            String    @default("normal") @db.VarChar(32)
   gmt_create        DateTime  @default(now()) @db.DateTime(0)
   gmt_modified      DateTime  @default(now()) @db.DateTime(0)
@@ -80,12 +75,12 @@ model material_groups {
 /// 无 is_delete/deleted_at：本表行是素材的附属状态，没有独立价值，删除时硬删（ADR-0087 决策 5）。
 model material_assets {
   id                BigInt    @id @default(autoincrement())
-  material_id       String    @unique(map: "uk_material_assets_material") @db.VarChar(128) // 上游素材 id（asset-...）
-  user_id           BigInt // 归属用户（new-api 用户 id）
-  material_group_id String    @db.VarChar(128) // 上游组 id（group-...）
-  status            String    @db.VarChar(16) // Processing | Active | Failed
-  error_code        String?   @db.VarChar(128) // 上游 Error.Code 原文
-  error_message     String?   @db.VarChar(512) // 上游 Error.Message 原文
+  material_id       String    @unique(map: "uk_material_assets_material") @db.VarChar(128)
+  user_id           BigInt
+  material_group_id String    @db.VarChar(128)
+  status            String    @db.VarChar(16)
+  error_code        String?   @db.VarChar(128)
+  error_message     String?   @db.VarChar(512)
   status_checked_at DateTime? @db.DateTime(0)
   gmt_create        DateTime  @default(now()) @db.DateTime(0)
   gmt_modified      DateTime  @default(now()) @db.DateTime(0)
@@ -575,11 +570,11 @@ model user_skill {
 /// enabled=1 进首页轮播（按 sort_order 升序）；上限 8 条（应用层校验，不设 DB 唯一约束）。
 model homepage_hero {
   id           BigInt   @id @default(autoincrement())
-  media_type   String   @default("video") @db.VarChar(16) // image | video
-  media_url    String   @db.VarChar(512) // 视频/图片 URL（TOS 迁移中可暂空）
-  poster_url   String?  @db.VarChar(512) // 视频封面；media_type=video 必填
+  media_type   String   @default("video") @db.VarChar(16)
+  media_url    String   @db.VarChar(512)
+  poster_url   String?  @db.VarChar(512)
   sort_order   Int      @default(0)
-  enabled      Int      @default(1) @db.TinyInt // 1 进轮播 / 0 停用
+  enabled      Int      @default(1) @db.TinyInt
   gmt_create   DateTime @default(now()) @db.DateTime(0)
   gmt_modified DateTime @default(now()) @db.DateTime(0)
   version      Int      @default(0)
@@ -678,11 +673,6 @@ model bw_verification_codes {
   @@index([phone, is_used, gmt_expire], map: "idx_phone_unused")
 }
 
-// ===== 充值档位（blue_whale 侧 CRUD，支付执行走 Go new-api） =====
-//
-// ⚠️ 列序 = 迁移里的物理列序（新列一律 `ALTER TABLE … ADD COLUMN` 追加在末尾，
-// 所以模型里也写在末尾）。**重排这里的顺序不是无害的排版**：下一次
-// `prisma migrate` 会把它识别成一次列重排，生成一串没人读得懂的 MODIFY。
 
 model topup_tiers {
   id             BigInt    @id @default(autoincrement())
@@ -704,7 +694,6 @@ model topup_tiers {
   version        Int       @default(0)
   is_delete      Int       @default(0) @db.TinyInt
 
-  // ── 卡片展示与首购活动（PRD §10.2；2026-09-26 由迁移 047 追加，故排在末尾）──
   description              String  @default("") @db.VarChar(255)
   bonus_credits            BigInt  @default(0)
   activity_tag             String  @default("") @db.VarChar(64)
@@ -718,7 +707,6 @@ model topup_tiers {
   permission_allowlist     Json?
   permission_denied_hint   String  @default("") @db.VarChar(255)
 
-  // ── 基础积分：**配置值**（2026-09-27 由迁移 048 追加，故排在末尾）──
   /// 用户下单到账的基础积分（整数积分）。**配置值，不是派生值**（推翻迁移 047 的派生决定）：
   /// 充值的「元 → 积分」与消费锚点「1 元 = 15 积分」不是一回事 —— 充值常有折扣。
   /// `original_price`/`discount` 只为展示划线价，与积分**再无数学关系**：
@@ -729,19 +717,6 @@ model topup_tiers {
   @@index([status, sort_order], map: "idx_tier_status_sort")
 }
 
-// ===== 充值订单（blue_whale 侧；支付执行在 blue-whale-pay 的杭州银行聚合主扫渠道） =====
-//
-// 到账积分在下单时刻冻结（credits/credits_per_yuan）：换算率是定价目录的配置项、可改，
-// 用户按「N 积分」付了钱之后改口径不能反悔。
-//
-// ⚠️ **`status=paid` 不再是「积分已发放」的唯一判据**（2026-09-26 起）。状态机从 4 态扩到 6 态：
-//   pending 待支付 | paid_pending 支付成功待到账 | paid 已到账 | failed 支付失败
-//   | expired 已取消（用户取消或超时；沿用旧值不改名）| grant_failed 到账异常
-// 拆出 `paid_pending` 是为了让「**钱到了但积分没发成功**」第一次可表达 ——
-// 在此之前那种单停在 `pending`，与「用户还没付钱」长得一模一样，客服分不出来。
-// 判据要写「>= 待到账」，不要写 `= paid`。
-//
-// ⚠️ 刻意**没有**「已退款」状态：退款功能先不做。一个没有出口的状态就是死状态。
 model recharge_orders {
   id               BigInt    @id @default(autoincrement())
   trade_no         String    @unique(map: "uk_recharge_orders__trade_no") @db.VarChar(64)
@@ -760,7 +735,6 @@ model recharge_orders {
   credits_per_yuan Int
   status           String    @default("pending") @db.VarChar(16)
 
-  // ── 快照（PRD §9.3）：下单时刻的商品与活动，后台之后改配置不影响已创建订单 ──
   product_type            String    @default("tier") @db.VarChar(16)
   product_name            String    @default("") @db.VarChar(100)
   /// 本单应发的赠送积分（首购加赠），没有则 0。与 credits 分开记：退款只退本金，
@@ -805,20 +779,6 @@ model recharge_orders {
   @@index([is_delete, user_id, gmt_create], map: "idx_recharge_orders__is_delete_user_gmt_create")
 }
 
-// ===== 自定义充值配置（模块 B，PRD §7 / §10.3）。**单行表**，id 恒为 1 =====
-//
-// ⚠️ 刻意**不塞进 `system_settings`**：那张表存凭证（AES 密文、is_secret 标记、换密钥要
-// 重写全部密文行的轮换语义），而这里存的是商品配置（明文、要按字段查询与校验、
-// 随运营调价高频变更）。混在一张表里，迟早有人给商品配置也套上加密，
-// 或者把凭证当成一份普通 JSON 去解析。
-//
-// 单行（主键钉住）而不是「一个字段一行」：PRD §10.3 的九个字段是一份**完整口径**，
-// 分开存会出现「下限改了、上限还是旧的」那种中间态被读到。
-//
-// ⚠️ `credits_per_yuan` 是**本表自己的**换算率（PRD §7.1 默认 1 元 = 15 积分），
-// 与定价目录里那条**消费锚点**（生成任务扣分用）不是一回事。自定义充值是**唯一**
-// 真的拿这条比例算价格的地方：`价格(分) = round(积分数 × 100 ÷ 每元积分数)`。
-// 档位的到账积分与此无关（读 `topup_tiers.base_credits`，配置值）。
 model recharge_custom_config {
   /// 恒为 1：单行表，主键把「只有一份配置」钉在 schema 上
   id                     Int      @id
@@ -850,10 +810,6 @@ model recharge_custom_config {
   gmt_modified           DateTime @default(now()) @db.DateTime(0)
 }
 
-// ===== 系统设置（管理端可配；按模块整行存一份快照） =====
-//
-// is_secret=1 的行必须是密文（AES-256-GCM），密钥只在进程环境变量里——
-// 库与密钥分开存放，只拿到库也读不出凭证。
 model system_settings {
   setting_key   String   @id @db.VarChar(64)
   setting_value String   @db.Text
@@ -863,7 +819,6 @@ model system_settings {
   version       Int      @default(0)
 }
 
-// ===== 管理后台操作审计（blue_whale 侧，记录管理变更操作；只记写操作，查询不记） =====
 
 model admin_operation_logs {
   id             BigInt   @id @default(autoincrement())
@@ -883,7 +838,6 @@ model admin_operation_logs {
   @@index([category, gmt_create], map: "idx_oplog_category_created")
 }
 
-// ===== 生成子系统（简化版，Node 自有 worker）：流水 + 日志 + 素材关联 + 点数 =====
 
 model cost_reservations {
   id                    BigInt   @id @default(autoincrement())
@@ -896,7 +850,6 @@ model cost_reservations {
   reserved_amount_fen   BigInt
   actual_amount_fen     BigInt?
   status                String   @db.VarChar(32)
-  /** IK9VZ0：释放原因/退款校验结果（如 "refund_confirmed" 已确认无扣费 / "refund_unverified" 未校验或可能已扣）。 */
   release_note          String?  @db.VarChar(255)
   price_catalog_version String   @db.VarChar(64)
   exchange_rate_version String   @db.VarChar(64)
@@ -919,10 +872,10 @@ model cost_adjustments {
   generation_job_id BigInt?
   user_id           BigInt
   project_id        BigInt?
-  action_type       String   @db.VarChar(32) // "refund" | "supplement"（退/补）
+  action_type       String   @db.VarChar(32)
   amount_fen        BigInt
   reason            String   @db.VarChar(255)
-  status            String   @db.VarChar(32) // "applied" | "duplicate"
+  status            String   @db.VarChar(32)
   new_api_snapshot  String?  @db.Text
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
@@ -996,10 +949,10 @@ model generation_output_slots {
   generation_job_id               BigInt
   scene_card_generation_record_id BigInt?
   slot_index                      Int
-  status                          String   @db.VarChar(24) // pending/succeeded/failed/missing
+  status                          String   @db.VarChar(24)
   asset_id                        BigInt?
   retry_of_slot_id                BigInt?
-  initial_placement_status        String   @default("pending") @db.VarChar(16) // pending/placed
+  initial_placement_status        String   @default("pending") @db.VarChar(16)
   gmt_create                      DateTime @default(now()) @db.DateTime(0)
   gmt_modified                    DateTime @default(now()) @db.DateTime(0)
 

@@ -24,9 +24,7 @@ describe('clampPanelWidth', () => {
   });
 
   it('极窄视口（50vw < 400px）下限让位于可用宽度（视口宽 − 左侧工具栏 60px）', () => {
-    // 500px 视口：可用 440 > 400，下限仍是 400；上限让位后不得低于下限
     expect(clampPanelWidth(468, 500)).toBe(400);
-    // 420px 视口：可用 360 < 400，下限让位为 360，宽度被压到 360
     expect(clampPanelWidth(468, 420)).toBe(360);
     expect(clampPanelWidth(200, 420)).toBe(360);
   });
@@ -48,7 +46,6 @@ describe('readPersistedPanelWidth', () => {
   it('读取持久化宽度并回显（经当前视口钳制）', () => {
     localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, '560');
     expect(readPersistedPanelWidth(1440)).toBe(560);
-    // 换到窄视口后读回：存的值不变，展示按新视口收边
     expect(readPersistedPanelWidth(1000)).toBe(500);
   });
 

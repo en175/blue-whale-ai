@@ -6,12 +6,8 @@ import type { Edge } from '@xyflow/react';
 import FlowCanvas from './index';
 import edgeStyles from '../CustomEdge/index.module.css';
 
-/* IKDLQF：连线改为受控 props（父级持有 edges，水合恢复/自动保存签名用）。
-   本测试验证渲染门（showEdges）与剪刀删除经 onEdgesChange 上抛（受控模式唯一通路）。
-   IKGUVG：剪刀改为指针停稳满 1 秒才出现——删除链路按停稳口径驱动（真实计时器）。 */
 
 vi.hoisted(() => {
-  // 开发期代码定位插件在导入时探测 Canvas；本测试不绘制位图。
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 });
 
@@ -21,8 +17,6 @@ let props: ComponentProps<typeof FlowCanvas>;
 
 const EDGE: Edge = { id: 'e1', source: 'text-1', target: 'text-2', type: 'custom' };
 
-/** 停稳门槛（与连线组件同值）：真实计时器下把这段时间的等待包进 act，
-    避免计时器回调在 act 之外更新状态 */
 const DWELL_MS = 1000;
 
 function textNode(id: string, x: number) {
@@ -42,8 +36,6 @@ async function renderCanvas(overrides: Partial<ComponentProps<typeof FlowCanvas>
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // jsdom 不做布局；只补浏览器测量 API（同 textNodeCard.test.tsx）。
-  // ResizeObserver 需在 observe 时即刻回调：React Flow 靠它触发节点测量，否则连线不渲染。
   vi.stubGlobal('ResizeObserver', class {
     callback: ResizeObserverCallback;
     constructor(cb: ResizeObserverCallback) { this.callback = cb; }
@@ -53,7 +45,6 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   });
-  // jsdom 无 DOMMatrixReadOnly；React Flow 仅从 m22 读取缩放倍率（xyflow 官方测试同款替身）
   vi.stubGlobal('DOMMatrixReadOnly', class {
     m22: number;
     constructor(transform?: string) {
@@ -110,7 +101,6 @@ describe('Canvas 受控连线', () => {
       expect(container.querySelector('.react-flow__edge')).not.toBeNull(),
     );
 
-    // 指针进入连线：剪刀默认隐藏，需停稳满 1 秒才出现（真实计时器，放宽等待超时）
     await act(async () => {
       container
         .querySelector(`.${edgeStyles.hitPath}`)!

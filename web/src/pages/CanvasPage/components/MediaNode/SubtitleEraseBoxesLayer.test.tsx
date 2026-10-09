@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKGZ83 SubtitleEraseBoxesLayer 组件测试：检测框 SVG 渲染、
-   指针事件→显示坐标换算与按下拖动抬起回调序列（对齐 EraseMaskLayer 家族结构）。
-   关键回归（IKH3NP 录屏 bug）：落笔后的 click 不得冒泡出层——真实画布中层的 click
-   冒泡会命中 React Flow NodeWrapper 的 onClick（onSelectNodeHandler → onNodeClick），
-   对有生成记录的源视频卡触发 openVideoDraftDialog → exitEditSessionForGenPanel，
-   编辑态被退、框选丢失、视频生成面板弹出；层须 stopPropagation click 接管。
-   渲染模式沿用 EraseMaskLayer.test.tsx（createRoot + act + ReactFlowProvider）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
@@ -48,7 +41,6 @@ function renderLayer(props: Partial<Parameters<typeof SubtitleEraseBoxesLayer>[0
 
 const layerEl = () => container!.querySelector<HTMLElement>('[data-testid="subtitle-erase-boxes-layer"]')!;
 
-/** 指针事件（jsdom 无 PointerEvent，用 MouseEvent 带 pointer 类型触发 React 合成指针事件） */
 function pointer(type: string, clientX: number, clientY: number) {
   layerEl().dispatchEvent(
     new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY }),
@@ -71,7 +63,6 @@ afterEach(() => {
 describe('IKGZ83 SubtitleEraseBoxesLayer 指针交互', () => {
   it('pointerdown/move/up 回调序列完整，坐标换算为相对内容区左上的显示坐标', () => {
     renderLayer();
-    // jsdom 布局恒零：stub 内容区屏幕盒（left 100 / top 50），zoom=1（ReactFlowProvider 默认）
     layerEl().getBoundingClientRect = () =>
       ({ left: 100, top: 50, width: 280, height: 158, right: 380, bottom: 208, x: 100, y: 50, toJSON: () => ({}) }) as DOMRect;
     act(() => {
@@ -99,8 +90,6 @@ describe('IKGZ83 SubtitleEraseBoxesLayer 指针交互', () => {
     renderLayer();
     layerEl().getBoundingClientRect = () =>
       ({ left: 100, top: 50, width: 280, height: 158, right: 380, bottom: 208, x: 100, y: 50, toJSON: () => ({}) }) as DOMRect;
-    // 父级 click 监听模拟 React Flow NodeWrapper 的 onClick（onSelectNodeHandler）：
-    // 挂在 body 上（React root 容器之外），层的 stopPropagation 生效时此处收不到
     const outerClick = vi.fn();
     document.body.addEventListener('click', outerClick);
     try {
@@ -108,7 +97,6 @@ describe('IKGZ83 SubtitleEraseBoxesLayer 指针交互', () => {
         pointer('pointerdown', 150, 100);
         pointer('pointermove', 260, 150);
         pointer('pointerup', 260, 150);
-        // 浏览器在 pointerup 后派发 click（target=层，pointer capture 保证落点仍在层上）
         layerEl().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       });
       expect(callbacks.onBoxEnd).toHaveBeenCalledTimes(1);

@@ -28,7 +28,6 @@ async function renderIcon(ratio: string, size?: number): Promise<HTMLElement> {
   return mountNode.querySelector('span') as HTMLElement;
 }
 
-/** 合法比例用例：[比例字符串, 期望宽, 期望高]（默认 size=16，最长边固定 16，另一边按真实比例等比缩放） */
 const RATIO_CASES: Array<[string, number, number]> = [
   ['1:1', 16, 16],
   ['4:3', 16, 12],
@@ -91,8 +90,6 @@ describe('RatioIcon 共享组件（IKGBTV）', () => {
   });
 });
 
-/* 接入点静态断言（IKGBTV）：三处实现收敛为共享组件，接入点统一引用；
-   首页 22px 经 size 参数传入，画布沿用默认 16px；本地实现与查表法全部拆除 */
 describe('RatioIcon 接入点收敛', () => {
   const readSrc = (rel: string) => readFileSync(join(__dirname, '../..', rel), 'utf8');
   const imageDialog = readSrc('pages/CanvasPage/components/ImageDialog/index.tsx');

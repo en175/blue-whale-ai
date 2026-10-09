@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-/* IKH28X 音视频分离：画布落盘串行化回归（IKFS5W 旧直发入口退役后以编辑态发送形态重建）。
-   修复前 flushCanvasSave 只“等”在途保存、不登记自己，800ms 防抖自动保存会在 flush 在途时
-   再发一个 PUT——两个请求共用同一个 If-Match（后到的 412，且先到的可能带旧节点数组把刚插入的
-   占位节点抹掉）。本用例锁死：flush 在途期间自动保存必须跳过，且节点+连线由同一次 PUT 落库。
-   入口 = 音视频分离编辑态发送（进入会话不建任务，点发送条发送钮才建卡）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -41,7 +36,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -119,7 +113,6 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn(),
 }));
 
-/* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
@@ -161,7 +154,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪视频节点 v1（assetId a9），无连线 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -186,7 +178,6 @@ function seedDoc() {
   };
 }
 
-/** 追加一个就绪视频节点（含资产快照） */
 function pushVideoNode(id: string, assetId: string) {
   (canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes.push({
     id,
@@ -217,7 +208,6 @@ async function renderPage() {
   });
 }
 
-/** 进入音视频分离编辑态（源视频卡工具条回调挂点，IKH28U） */
 async function enterSplit() {
   const video = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
   await act(async () => {
@@ -225,8 +215,6 @@ async function enterSplit() {
   });
 }
 
-/** 编辑态内点发送条发送钮（IKH28X 闭环入口；startAudioVideoSplitJob 含 await 创建，
- *  等 50ms 让建卡与 flush 发起但不等 flush 收尾——flush 挂在在途 PUT 上时 handler 不会 resolve） */
 async function sendSplit() {
   await act(async () => {
     document.body.querySelector<HTMLButtonElement>('[data-testid="audio-video-split-send-btn"]')!
@@ -259,20 +247,15 @@ describe('IKH28X 音视频分离发送落盘', () => {
     await enterSplit();
     await sendSplit();
 
-    // IKJJR3：受理后经 800ms 防抖落库（原受理后立即 flush 已由运行时统一；关页窗口由
-    // canvas_binding 服务端关联兜底）。占位卡 id 预分配（media-extract-{uuid}）
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     const audioId = savedNodeIds(0).find((id) => id.startsWith('media-extract-'))!;
     expect(savedEdgePairs(0)).toContain(`v1->${audioId}`);
-    // 来源边必须带标记：否则音频卡重新编辑时该视频会被判成非法参考、卡住发送
     const edge = apiMocks.saveCanvasDoc.mock.calls[0][1].edges.find((e) => e.target === audioId)!;
     expect(edge.data).toEqual({ origin: MEDIA_EXTRACT_EDGE_ORIGIN });
-    // 16:9 源视频内容宽 280×16/9≈497.78 → x = 400 + 498 + 60；展示名后缀跟随所选格式（默认 m4a）
     const audio = apiMocks.saveCanvasDoc.mock.calls[0][1].nodes.find((n) => n.id === audioId)!;
     expect(audio.position).toEqual({ x: 958, y: 0 });
     expect((audio.data as Record<string, unknown>).fileName).toBe('素材视频(audio).m4a');
-    // 建任务带所选格式（默认 m4a；canvas_binding 由运行时注入）
     expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: 'a9', output_format: 'm4a' }, expect.objectContaining({ silent: true }));
   });
 
@@ -285,17 +268,14 @@ describe('IKH28X 音视频分离发送落盘', () => {
     await renderPage();
     await enterSplit();
     await sendSplit();
-    // IKJJR3：受理后防抖触发首个 PUT（在途挂起）
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
 
-    // 首个 PUT 仍在途时越过下一轮防抖窗口 → 自动保存必须跳过（不并发）
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 900));
     });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
 
-    // 放行在途请求：版本推进到 4，签名一致 → 不产生补偿性二次保存
     await act(async () => {
       releaseSave?.({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' });
       await new Promise((resolve) => setTimeout(resolve, 900));
@@ -315,7 +295,6 @@ describe('IKH28X 音视频分离发送落盘', () => {
     pushVideoNode('v2', 'a10');
 
     await renderPage();
-    // 两个视频先后进入编辑态并发送（编辑态互斥：第二次进入自动退出第一次的会话）
     const enterAndSend = async (id: string) => {
       await act(async () => {
         flowProps.current.mediaNodes.find((n: Node) => n.id === id).data.onAudioVideoSplit(id);
@@ -328,16 +307,13 @@ describe('IKH28X 音视频分离发送落盘', () => {
     };
     await enterAndSend('v1');
     await enterAndSend('v2');
-    // IKJJR3：两次发送的建卡变化合并经防抖保存落库（原两次受理后 flush 串行）
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 900)); });
 
     const calls = apiMocks.saveCanvasDoc.mock.calls;
-    // IKJJR3：两次发送的建卡变化合并为**同一笔**防抖保存（原子落库，无中间态两笔串行）；
-    // If-Match 恒为当前版本（单笔无并发 412 窗口）
     expect(calls.length).toBeGreaterThanOrEqual(1);
     const last = calls[calls.length - 1][1];
     const extractIds = last.nodes.map((n) => n.id).filter((id) => id.startsWith('media-extract-'));
-    expect(extractIds.length).toBe(2); // 两张预分配占位卡（media-extract-{uuid}）同笔都在
+    expect(extractIds.length).toBe(2);
     expect(last.edges.map((e) => e.target)).toEqual(expect.arrayContaining(extractIds));
   }, 20000);
 });

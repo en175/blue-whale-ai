@@ -1,6 +1,3 @@
-/* IKJQ03：真实音频混合会话与专属重试复用 job501。旧文档里的 A 标记是规格给定的
- * 持久前提；真实 Schema、序列化、audioMixTerminalPatch 与公开运行时参与恢复验证。
- * API、保存、时钟及画布宿主受控，不构成浏览器或数据库验收。 */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node, Edge } from '@xyflow/react';
 import { createAudioMix, retryAudioMix, type JobDetail } from '@/api/jobs';
@@ -85,7 +82,6 @@ async function acceptedRetryBeforeReload(withOldMarker: boolean) {
   expect(binding.submission_id).not.toBe(first.binding.submission_id);
   expect(binding.expected_binding_revision).toBe(1);
   const record = recordOf(binding);
-  // 服务端已受理 B；浏览器尚未收到回执，重新载入实际序列化的旧失败文档。
   ctx.reload();
   ctx.dropFromHydration(nodeId);
   ctx.nodes.clear();
@@ -236,7 +232,7 @@ describe('可靠当前恢复提交归属（IKJQ03）', () => {
     const currentState = ctx.runtime.statusOf(ctx.nodeId);
     const currentRound = ctx.host.getActiveJob(ctx.nodeId);
     expect(currentState).toMatchObject({ submissionId: current!.submission_id, jobId: action === 'retry' ? '501' : '502' });
-    await ctx.runtime.recover('p1'); // 旧 B 页是 C 受理之前的可靠响应快照。
+    await ctx.runtime.recover('p1');
     ctx.runtime.resumeFromHydration(ctx.nodeId, '501', ctx.nodes.get(ctx.nodeId)!.data);
     await flush();
     expect(ctx.runtime.statusOf(ctx.nodeId)).toEqual(currentState);
@@ -274,7 +270,7 @@ describe('可靠当前恢复提交归属（IKJQ03）', () => {
     ctx.advancePolling();
     await flush();
     expect(ctx.runtime.bindingRevisionOf(ctx.nodeId)).toBe(2);
-    ctx.recoveryRecords.splice(0, 1, recordOf(ctx.first.binding, 1)); // A 进行中时取得的旧页。
+    ctx.recoveryRecords.splice(0, 1, recordOf(ctx.first.binding, 1));
     const reply = deferred<JobDetail>();
     ctx.fetchJobStatus.mockImplementation(() => reply.promise);
     const requestsBefore = ctx.fetchJobStatus.mock.calls.length;

@@ -39,19 +39,10 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * ImageEraseJobProcessor 单测（契约 §15.5 / IKGOT6）。
- * <p>
- * 覆盖：input 业务键与场景-遮罩组合兜底校验、源/遮罩素材与凭证缺失分类、错误码归一
- * （§5 信号保留、其余归 image_erase_failed，无自动重试）、两场景成功链（出站参数映射 →
- * 经 mock 客户端拿到本地结果图 URL → 下载 → TOS 转存 → publishImageEraseResult payload）、
- * claim 异常上抛语义。不连真实 MQ/DB/TOS/网关（结果图用本地 HttpServer 桩）。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class ImageEraseJobProcessorTest {
 
-    /** 1x1 PNG（ImageIO 可解析，宽高断言用）。 */
     private static final byte[] PNG_1X1 = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
@@ -76,7 +67,6 @@ class ImageEraseJobProcessorTest {
         when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
-        // 结果图桩（24h 有效的火山 URL 用本地 HttpServer 模拟）
         resultServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         resultServer.createContext("/erased.png", exchange -> {
             exchange.getResponseHeaders().add("Content-Type", "image/png");
@@ -152,7 +142,6 @@ class ImageEraseJobProcessorTest {
                 any(), eq("worker-1"), eq(5L));
     }
 
-    // ========== claim 语义（IKC9EJ 同构） ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -179,7 +168,6 @@ class ImageEraseJobProcessorTest {
         verify(finalizer, never()).publishImageEraseResult(any());
     }
 
-    // ========== input 业务键与场景-遮罩组合兜底校验（§15.2；权威复核在创建入口 IKGOT4） ==========
 
     @Test
     @DisplayName("缺 source_asset_id → invalid_input")
@@ -229,7 +217,6 @@ class ImageEraseJobProcessorTest {
         assertFailCode(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== 源素材 / 遮罩素材与凭证 ==========
 
     @Test
     @DisplayName("源素材不可用 → image_erase_failed + 可读原因")
@@ -273,7 +260,6 @@ class ImageEraseJobProcessorTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== 错误码归一（§15.5：§5 信号保留，其余归 image_erase_failed；无自动重试） ==========
 
     @Test
     @DisplayName("客户端 content_rejected → 保留既有码投影（§5 信号）")
@@ -331,7 +317,6 @@ class ImageEraseJobProcessorTest {
         assertFailCode(ImageEraseContract.ERROR_IMAGE_ERASE_FAILED);
     }
 
-    // ========== 两场景成功链（§15.3 出站映射 + §15.5 回填：下载 → TOS → 发布 payload 带宽高） ==========
 
     @Test
     @DisplayName("full_screen_text_erase 成功链：出站不带 mask → 下载结果图 → TOS 转存 → 发布 payload 带宽高")
@@ -345,7 +330,6 @@ class ImageEraseJobProcessorTest {
 
         processor.handle("100");
 
-        // 出站映射：text 场景 maskUrl=null（客户端不发 mask_url 键）
         verify(mediaKitEraseClient).erase(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("full_screen_text_erase"), isNull());
         ArgumentCaptor<PublishImageEraseDto> captor = ArgumentCaptor.forClass(PublishImageEraseDto.class);
@@ -357,9 +341,6 @@ class ImageEraseJobProcessorTest {
         assertThat(published.size()).isEqualTo(PNG_1X1.length);
         assertThat(published.width()).isEqualTo(1);
         assertThat(published.height()).isEqualTo(1);
-        // IKGS73：md5 必须从 stored 穿透到发布入参。没有这条，processor 哪天传了 null，
-        // 全套测试照样绿，而 assets.md5 会静默变空 —— 正是本单要消灭的那类失效。
-        // （已实测：去掉 ImageEraseJobProcessor 里的 stored.md5() 后，本文件 17 条全绿。）
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
         verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -378,7 +359,6 @@ class ImageEraseJobProcessorTest {
 
         processor.handle("100");
 
-        // 出站映射：area 场景 maskUrl=遮罩 Asset url（落库即 TOS public-read）
         verify(mediaKitEraseClient).erase(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("selected_area_erase"), eq("https://example.com/mask.png"));
         verify(finalizer).publishImageEraseResult(any());

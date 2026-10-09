@@ -1,15 +1,4 @@
 // @vitest-environment jsdom
-/* IKI8L7 擦除涂抹发送错误提示归属（真实 API/HTTP 链）：会话身份在遮罩编码前冻结后，
-   迟到的上传/创建失败必须全链路静默（HTTP 层 sonner 不弹 + 页面 showToast 不弹），
-   当前有效会话的失败由持有发送身份的页面 catch 提示恰一次（IKI8L4「silent 传输 +
-   页面单源」在擦除编码冻结场景的延续）。
-
-   与 eraseMaskFreezeSession.test.tsx 的结构性差异（本文件存在的理由）：那边的
-   vi.mock('@/utils/upload') / vi.mock('@/api/jobs') 整体替换后 http.ts 层不跑，
-   只能断言页面 toast——本文件沿用 IKI8L4 toolSessionErrorToastOwnership 的
-   importOriginal 部分真实：uploadAssetFile / createImageErase 走真实
-   utils/upload.ts → api/assets.ts / api/jobs.ts → api/http.ts doRequest，
-   替身只在外部边界（window.fetch 与 sonner）；遮罩编码用受控 toBlob。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -23,7 +12,6 @@ import { useAuthStore } from '@/stores/auth';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
 
-/* ---------- 打桩：组件（同 harness 口径，Canvas 透出 props） ---------- */
 
 export const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('@/api/generationQuote', async (importActual) => ({
@@ -70,7 +58,6 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/* ---------- 打桩：sonner（HTTP 层 toast 的观测点） ---------- */
 
 vi.mock('sonner', () => ({
   toast: {
@@ -85,7 +72,6 @@ vi.mock('sonner', () => ({
   Toaster: () => null,
 }));
 
-/* ---------- 打桩：非受测 API 模块（真实链只留 upload/assets/jobs/http） ---------- */
 
 const projectMocks = vi.hoisted(() => ({
   fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
@@ -132,10 +118,7 @@ vi.mock('@/api/generation', () => ({
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
 }));
 
-/* 注意：@/api/assets 与 @/utils/upload 不 mock——上传链保持真实
-   （uploadAssetFile → dedup/presign/PUT/complete → http.ts doRequest → 受控 fetch）。 */
 
-/* ---------- 打桩：@/api/jobs 部分真实——createImageErase 走真实 http 层 ---------- */
 
 const jobMocks = vi.hoisted(() => ({
   fetchJobs: vi.fn(async (_params?: FetchJobsParams): Promise<JobListData> => ({ records: [], total: 0, size: 20, current: 1 })),
@@ -151,7 +134,6 @@ vi.mock('@/api/jobs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/jobs')>();
   return {
     ...actual,
-    // 页面水合/轮询/幂等键走 mock，避免真实 fetch 干扰受控用例
     fetchJobs: jobMocks.fetchJobs,
     fetchJobStatus: jobMocks.fetchJobStatus,
     cancelGenerationJob: jobMocks.cancelGenerationJob,
@@ -161,12 +143,9 @@ vi.mock('@/api/jobs', async (importOriginal) => {
     createVideoEnhancement: vi.fn(),
     createFrameInterpolation: vi.fn(),
     fetchFrameInterpolationCurrent: jobMocks.fetchFrameInterpolationCurrent,
-    // createImageErase（及未列出的其余键）保持真实实现：
-    // 真实 jobs.ts → 真实 http.ts doRequest → 受控 window.fetch
   };
 });
 
-/* ---------- 画布文档接缝（同 harness） ---------- */
 
 const canvasDocMock = {
   current: {
@@ -180,7 +159,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/* ---------- 受控 fetch：真实 http 层的唯一外部边界 ---------- */
 
 const fetchMock = vi.fn();
 const jsonOk = (data: unknown) =>
@@ -188,15 +166,12 @@ const jsonOk = (data: unknown) =>
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
-/** 业务失败信封：产品包络 code!==200 + msg（HTTP 200 或 5xx 皆可触发 doRequest 业务错误支） */
 const jsonFail = (msg: string, status = 200) =>
   new Response(JSON.stringify({ code: 1, msg, data: null }), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
 
-/** 上传链 dedup 命中即可一步完成上传（跳过 presign→PUT→complete 与 jsdom 无法加载的
- *  probeMediaMeta）；上传失败注入走 dedup:false → presign 业务失败。 */
 const MASK_ASSET = {
   asset_id: '901',
   status: 'ready',
@@ -209,7 +184,6 @@ const MASK_ASSET = {
   size: 32,
 };
 
-/** 按端点路由的受控 fetch：routes 顺序匹配（首个命中生效），其余默认空信封兜底 */
 function routeFetch(routes: Array<{ match: string; respond: () => Response | Promise<Response> }>) {
   fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -220,7 +194,6 @@ function routeFetch(routes: Array<{ match: string; respond: () => Response | Pro
   });
 }
 
-/** 默认路由：上传链 dedup 命中（一步成功）+ 创建成功；资产列表端点回空页 */
 function defaultRoutes(extra: Array<{ match: string; respond: () => Response | Promise<Response> }> = []) {
   routeFetch([
     ...extra,
@@ -231,7 +204,6 @@ function defaultRoutes(extra: Array<{ match: string; respond: () => Response | P
   ]);
 }
 
-/* ---------- 渲染（动态 import 页面，保证打桩先于模块图） ---------- */
 
 function enableReactActEnvironment() {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -263,9 +235,7 @@ async function unmountPage() {
   container = null;
 }
 
-/* ---------- 画布 seed 与擦除操作助手 ---------- */
 
-/** 项目一画布：图片卡 i1（1600×900 png，assetId='5'） */
 function seedProjectA() {
   canvasDocMock.current = {
     doc: {
@@ -334,14 +304,12 @@ async function click(testId: string) {
 
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
 
-/** 一份最小的真 PNG 头（uploadAssetFile 发请求前会读文件开头认容器，'abcd' 过不去） */
 const pngBytes = () => {
   const head = new Uint8Array(32);
   head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   return head.slice().buffer as ArrayBuffer;
 };
 
-/** 受控 canvas 编码：toBlob 扣下回调手动放行（编码在途窗口） */
 function stubControlledToBlob() {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     fillStyle: '', strokeStyle: '', lineCap: '', lineJoin: '', lineWidth: 0,
@@ -393,20 +361,16 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：迟到失败全链路静默',
     await eraseImage();
     await paintStroke();
     await click('erase-send-btn');
-    await click('erase-close'); // X 关旧会话（编码仍在途）
-    await eraseImage(); // 同卡重开新会话
+    await click('erase-close');
+    await eraseImage();
     await paintStroke();
     encode.release(new Blob([pngBytes()], { type: 'image/png' }));
     await flush();
-    // HTTP 层（sonner）不弹：silent 传输（IKI8L4）+ 迟到静默双守
     expect(toast.error).not.toHaveBeenCalled();
-    // 页面层旧错误同样静默：不向新会话弹「上传服务繁忙」（修订前：编码后 capture 新纪元 → 提示弹出）
     expect(document.body.textContent).not.toContain('上传服务繁忙');
     expect(toolbar()).not.toBeNull();
-    // 未成功受理不伪造成功：无创建请求、不建卡
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/image-erasures'))).toBe(false);
     expect(mediaNodes().length).toBe(1);
-    // 新会话不被旧回调设为提交中
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
   });
 
@@ -419,20 +383,19 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：迟到失败全链路静默',
     await renderPage();
     await eraseImage();
     await paintStroke();
-    await click('erase-send-btn'); // 编码挂起（退出重开发生在编码期间才是缺陷窗口）
-    await click('erase-close'); // 关旧会话（编码仍在途）
-    await eraseImage(); // 同卡重开新会话
+    await click('erase-send-btn');
+    await click('erase-close');
+    await eraseImage();
     await paintStroke();
-    encode.release(new Blob([pngBytes()], { type: 'image/png' })); // 编码完成 → 上传（dedup 命中）→ 创建挂起
+    encode.release(new Blob([pngBytes()], { type: 'image/png' }));
     await flush();
-    expect(toolbar()).not.toBeNull(); // 创建在途：新会话保持打开
+    expect(toolbar()).not.toBeNull();
     await act(async () => { settleCreate(jsonFail('擦除服务维护中')); });
     await flush();
     expect(toast.error).not.toHaveBeenCalled();
-    // 修订前：编码后 capture 拿到新会话纪元 → 旧失败以新会话名义弹出
     expect(document.body.textContent).not.toContain('擦除服务维护中');
     expect(toolbar()).not.toBeNull();
-    expect(mediaNodes().length).toBe(1); // 创建失败不建卡
+    expect(mediaNodes().length).toBe(1);
   });
 
   it('迟到创建成功：旧任务按原输入建卡/连线收尾，新会话不动（真实链全链验证）', async () => {
@@ -444,25 +407,22 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：迟到失败全链路静默',
     await renderPage();
     await eraseImage();
     await paintStroke();
-    await click('erase-send-btn'); // 编码挂起
-    await click('erase-close'); // 关旧会话（编码仍在途）
-    await eraseImage(); // 同卡重开新会话
+    await click('erase-send-btn');
+    await click('erase-close');
+    await eraseImage();
     await paintStroke();
-    encode.release(new Blob([pngBytes()], { type: 'image/png' })); // 编码完成 → 上传 → 创建挂起
+    encode.release(new Blob([pngBytes()], { type: 'image/png' }));
     await flush();
     await act(async () => { settleCreate(jsonOk({ job_id: 'j77', status: 'queued' })); });
     await flush();
-    // 新会话存活、新涂抹不变
     expect(toolbar()).not.toBeNull();
     expect(eraseEditing().ops.length).toBe(1);
-    // 旧任务收尾：结果卡 + image-erase 来源线 + 轮询启动
     expect(mediaNodes().length).toBe(2);
     const edges = flowProps.current.edges as Array<{ source: string; target: string; data?: { origin?: string } }>;
     expect(edges.length).toBe(1);
     expect(edges[0]).toMatchObject({ source: 'i1' });
     expect(edges[0]!.data?.origin).toBe('image-erase');
     expect(jobMocks.fetchJobStatus).toHaveBeenCalledWith('j77');
-    // 上传走的是真实链：dedup 端点收到带 md5 的预检（mask 上传确实发出）
     const dedupCall = fetchMock.mock.calls.find(([input]) => String(input).includes('/uploads/dedup'));
     expect(dedupCall).toBeTruthy();
   });
@@ -478,12 +438,10 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：当前有效会话失败单�
     await click('erase-send-btn');
     encode.release(new Blob([pngBytes()], { type: 'image/png' }));
     await flush();
-    // 页面单源：持有发送身份的 catch 提示一次（silent 传输下 HTTP 层不弹）
     expect(document.body.textContent).toContain('上传服务繁忙，请稍后重试');
     expect(toast.error).not.toHaveBeenCalled();
     expect(toolbar()).not.toBeNull();
-    expect(bodyBtn('erase-send-btn').disabled).toBe(false); // 提交锁复位可重试
-    // 可重试：恢复 dedup 命中后再次发送成功退出
+    expect(bodyBtn('erase-send-btn').disabled).toBe(false);
     defaultRoutes();
     await click('erase-send-btn');
     encode.release(new Blob([pngBytes()], { type: 'image/png' }));
@@ -505,8 +463,7 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：当前有效会话失败单�
     expect(toast.error).not.toHaveBeenCalled();
     expect(toolbar()).not.toBeNull();
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
-    expect(mediaNodes().length).toBe(1); // 失败不建卡
-    // 可重试：恢复创建成功后再次发送退出
+    expect(mediaNodes().length).toBe(1);
     defaultRoutes();
     await click('erase-send-btn');
     encode.release(new Blob([pngBytes()], { type: 'image/png' }));

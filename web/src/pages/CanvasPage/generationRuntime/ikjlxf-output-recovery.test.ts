@@ -7,14 +7,11 @@ import { sceneSplitTask } from './multiOutputTasks';
 import { normalGenerationTask } from './normalGeneration';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 
-// 公开 AssetService.softDeleteOwned 与真实 MySQL JobsService.getStatus 的查询快照。
-// PR981-REVIEW3-20261004 原始记录保留于 deleted-output-fixture.json。
 const SUBMISSION = '4d5e6f7a-0000-4000-8000-00000000a001';
 const TARGET = 'review3-scene-target';
 const resultNode = (key: string) => `generation-result:${SUBMISSION}:${key}`;
 const itemId = (key: string) => `gcr:${SUBMISSION}:${key}`;
 
-// IKJLXE 修复后真实 MySQL 与公开服务回读的来源快照，未执行认证 HTTP 浏览器端到端。
 const captured = JSON.parse(readFileSync(new URL('./ikjlxf-deleted-output.fixture.json', import.meta.url), 'utf8')) as {
   page: { records: GenerationRecoveryRecord[] }; detail: JobDetail;
 };
@@ -198,7 +195,7 @@ describe('IKJLXF 可信产物恢复', () => {
     kit.runtime.onSaveReceipt({ commandId: 'remove-result', replayed: false, changes: [
       { recoveryItemId: itemId('segment:2'), revision: 2, nodeBindingRevision: 1, state: 'removed' },
     ] });
-    kit.nodes.set(original.id, original); // 宿主撤销操作恢复相同结果节点。
+    kit.nodes.set(original.id, original);
     expect(kit.runtime.composeSaveFields()?.recoveryChanges).toEqual([
       { recoveryItemId: itemId('segment:2'), expectedRevision: 2, action: 'restore' },
     ]);

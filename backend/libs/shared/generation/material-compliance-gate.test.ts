@@ -10,7 +10,6 @@ import {
   type MaterialComplianceDeps,
 } from "./material-compliance-gate.js";
 
-// ADR-0087 决策 2 的判定表逐格覆盖。
 function makeDeps(opts: {
   row?: { status: string } | null;
   upstream?: { status: string; errorCode?: string | null; errorMessage?: string | null } | null;
@@ -224,10 +223,6 @@ describe("createMaterialGate（IKFYHJ 接线层）", () => {
     expect(deps.repo.findByMaterialId).not.toHaveBeenCalled();
   });
 
-  // 素材库绑定只有**视频**参考会消费：worker 在视频提交时把已绑本地 Asset 转成
-  // `asset://<material_id>`，而 AudioJobProcessor 压根不看 material 绑定。
-  // 但音频的 references 也带 asset_id（composeInput 原样冻结）——不按类型短路就会拿
-  // 「不能用于视频生成」去拒一个音频任务，纯误伤。
   it.each(["audio", "image"])(
     "%s 任务直接短路：连本地 Asset 解析都不跑（不误伤非视频路径）",
     async (jobType) => {
@@ -253,9 +248,6 @@ describe("createMaterialGate（IKFYHJ 接线层）", () => {
   );
 });
 
-// IKF YHJ：上游「这个素材用不了」与「我们没问出来」必须分开——前者终局，后者可重试。
-// 判据来自 2026-09-15 真网关实测：删掉素材后 GetAsset 回 NotFound.asset_id；
-// 格式非法的 id 回 InvalidParameter.AssetID；坏凭证走另一套信封（无 ResponseError）。
 describe("isMaterialLevelRejection（上游错误码分类）", () => {
   it.each([
     "NotFound.asset_id",
@@ -266,13 +258,12 @@ describe("isMaterialLevelRejection（上游错误码分类）", () => {
   });
 
   it.each([
-    // 鉴权/租户/限流/服务端——都不是素材的错，必须保持「本轮未知」可重试
     "FeatureNotEnabled",
     "LimitExceeded",
     "InternalError",
     "Unauthorized",
     "Forbidden",
-    "NotFound", // 不带 .asset 段的通用 404：可能是链路问题，不认作素材级
+    "NotFound",
     "",
   ])("%s → 不认作素材级，按本轮未知", (code) => {
     expect(isMaterialLevelRejection(code)).toBe(false);

@@ -10,32 +10,12 @@ import {
 } from "@lib/shared/topup-tier/topup-tier.testlib.js";
 import { AdminTopupTiersController } from "./topup-tiers.controller.js";
 
-/**
- * 管理端固定积分卡接口（`/api/admin/topup-tiers`）的几处硬约束：
- *
- * <ul>
- *   <li>**新建默认草稿**（PRD §10.5）：落成 active 就是「新建即开卖」，
- *       而卡片上的价格、赠送、标签在那一刻还没配；</li>
- *   <li>**基础积分是运营的输入**（2026-09-27 改）：它是配置值，用户到账的就是运营填的那个数。
- *       body 里塞 `amount`（遗留列）仍必须被忽略 —— 真正入库的是 `baseCredits`；</li>
- *   <li>**实付价格仍不是输入**：`price = 原价 × 折扣`，由 repo 派生。</li>
- * </ul>
- *
- * 其余是枚举与边界的取值纪律：非法值一律 400，**不静默回退到默认值**
- * （静默回退会让运营以为自己改成功了）。
- */
 
 function createController() {
-  // mock 句柄（读 `mock.calls` 用）与给 controller 的 repo 值分开持有：
-  // `stubTierRepo` 的返回类型是 `TopupTierRepo`，会把 `.mock` 那一面抹掉。
   const repoMocks = {
     listAll: vi.fn(async () => []),
     listActive: vi.fn(async () => []),
-    // 用例只关心 `before` 存不存在（404 那条），给一份**完整**的视图即可 ——
-    // 此前是 `getById: async () => ({ id: "7" })` + `as never`，把「它其实不满足
-    // `TopupTierView`」这件事一并盖掉了
     getById: vi.fn(async () => makeTierView({ id: "7" })),
-    // 返回值没被断言（用例断言的是**入参**），给一份完整视图而不是原样回传入参
     create: vi.fn(async (_input: CreateTopupTierInput) => makeTierView()),
     update: vi.fn(async (_id: string, _input: UpdateTopupTierInput) => makeTierView()),
     remove: vi.fn(async () => true),
@@ -54,7 +34,6 @@ function createController() {
   };
 }
 
-/** create 的调用入参（controller 把它原样交给 service）。 */
 function createInput(topupTier: { create: { mock: { calls: unknown[][] } } }) {
   return topupTier.create.mock.calls[0]![0] as Record<string, unknown>;
 }
@@ -98,8 +77,6 @@ describe("AdminTopupTiersController.create — 基础积分是输入，实付仍
   it("★ 运营填的基础积分原样入库（**不乘换算率、不按原价算**）", async () => {
     const { controller, topupTier } = createController();
 
-    // 7,500 / 原价 100：**刻意不成整数倍**。任何「原价 × 换算率」的残留实现都会给出 1500，
-    // 而充值常有折扣 —— ¥499 的档给 7,500 而不是 7,485，这个数就是运营填的那个。
     await controller.create({
       originalPrice: 100,
       discount: 1,
@@ -139,8 +116,6 @@ describe("AdminTopupTiersController.create — 基础积分是输入，实付仍
       amount: 999_999,
     });
 
-    // `amount` 是 new-api 记账时代遗留的列（读路径已不看它）。若把它当输入收下，
-    // 用户会看到 999999 而实际到账 1500。
     expect(createInput(topupTier).amount).toBeUndefined();
     expect(createInput(topupTier).baseCredits).toBe(1500);
   });
@@ -166,8 +141,6 @@ describe("AdminTopupTiersController — 卡片字段解析（PRD §10.2）", () 
     });
     expect(createInput(topupTier).bonusCredits).toBe(3750);
 
-    // 数字串 "3750" 放行：与原价 / 折扣同口径（表单从 DOM 出来本来就是字符串），
-    // 见 parseTierOriginalPrice / parseTierDiscount 的既有约定
     for (const bad of [-1, 1.5, true, "abc"]) {
       await expect(
         controller.create({ originalPrice: 100, discount: 1, baseCredits: 1500, bonusCredits: bad }),
@@ -278,8 +251,6 @@ describe("AdminTopupTiersController — 购买权限（PRD §10.4）", () => {
       permissionAllowlist: [9001, "007", "9001"],
     });
 
-    // userId 是 BigInt：存成 number 超过安全整数就会静默改值，
-    // 而白名单错一位是「放进来一个陌生人」——所以统一存十进制串并掐前导零。
     expect(createInput(topupTier).permissionAllowlist).toEqual(["9001", "7"]);
   });
 
@@ -333,7 +304,6 @@ describe("AdminTopupTiersController.update — 部分更新", () => {
       "name",
       "discount",
       "originalPrice",
-      // 基础积分同为部分更新：只改标签不该顺手把积分写一遍
       "baseCredits",
     ]) {
       expect(input).not.toHaveProperty(untouched);
@@ -347,8 +317,6 @@ describe("AdminTopupTiersController.update — 部分更新", () => {
 
     const input = updateInput(topupTier);
     expect(input.originalPrice).toBe(200);
-    // 曾经这里是 `amount: deriveCredits(原价, 换算率)`：改价顺手把积分重算一遍。
-    // 现在积分是运营配的值，改原价（只为划线价）不该动它。
     expect(input).not.toHaveProperty("baseCredits");
   });
 

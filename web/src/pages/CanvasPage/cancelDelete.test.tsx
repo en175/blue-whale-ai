@@ -8,12 +8,6 @@ import type { Node } from '@xyflow/react';
 import { ApiError } from '@/api/http';
 import CanvasPage from './index';
 
-/* IKDMQW 取消、删除与任务完成竞态：
-   普通取消经接口确认后按任务权威状态收敛（cancelled → 草稿回待生成保留参数与连线；
-   processing（软取消已登记）→ 保持生成中只读；succeeded 竞态 → 挂载作品不回待生成；
-   成品卡重新生成取消 → 恢复成品态）。删除生成中卡片先请求取消：确认成功且非 succeeded
-   才移除；取消失败保留卡片并提示原因；删除过程中任务抢先成功保留作品提示「任务已完成」。
-   迟到轮询/取消响应不得复活已删除节点。FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props。 */
 
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -184,7 +178,6 @@ const SUCCEEDED: JobDetail = {
 };
 const FAILED: JobDetail = { job_id: 'j1', status: 'failed', progress: 0, asset: null };
 
-/** 默认画布：生成中草稿卡 d1（jobId j1）+ 文本节点 t1 与连线 t1→d1（断言取消后连线保留）。 */
 function seedGeneratingDoc() {
   canvasDocMock.current = {
     doc: {
@@ -220,7 +213,6 @@ function seedGeneratingDoc() {
   };
 }
 
-/** 追加一张重新生成中的成品卡 g1（旧素材保留，取消应恢复成品态）。 */
 function seedRegenCard() {
   const doc = canvasDocMock.current.doc as { nodes: unknown[]; assets?: unknown };
   doc.nodes.push({
@@ -287,7 +279,6 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   seedGeneratingDoc();
-  // 默认：水合轮询首 tick 与取消/删除的权威核对都拿到 processing（测试按需覆盖）
   apiMocks.fetchJobStatus.mockImplementation(async () => ({ ...PROCESSING }));
   apiMocks.cancelGenerationJob.mockImplementation(async () => null);
 });
@@ -301,7 +292,6 @@ afterEach(async () => {
 describe('IKDMQW 普通取消：接口确认后按任务权威状态收敛', () => {
   it('草稿卡取消：cancel 确认 + 权威 cancelled → 回待生成，参数与连线保留', async () => {
     await renderPage();
-    // 水合轮询首 tick（processing）之后，取消核对拿到 cancelled
     apiMocks.fetchJobStatus.mockImplementation(async () => {
       const calls = apiMocks.fetchJobStatus.mock.calls.length;
       return calls <= 1 ? { ...PROCESSING } : { ...CANCELLED };
@@ -318,7 +308,6 @@ describe('IKDMQW 普通取消：接口确认后按任务权威状态收敛', () 
     expect(dataOf('d1').draftModelId).toBe('m-test');
     expect(dataOf('d1').progress).toBeUndefined();
     expect(dataOf('d1').errorText).toBeUndefined();
-    // 连线保留：取消不清输入关系
     expect(flowProps.current.edges.some((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toBe(true);
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(true);
   });
@@ -438,7 +427,6 @@ describe('IKDMQW 删除生成中卡片：先取消，确认后移除；竞态保
 
   it('删除过程中任务抢先成功：停止自动删除，保留作品并提示任务已完成', async () => {
     await renderPage();
-    // 取消失败（任务已终态不可取消）+ 权威状态 succeeded
     apiMocks.cancelGenerationJob.mockRejectedValueOnce(new ApiError(400, '资源不存在'));
     apiMocks.fetchJobStatus.mockImplementation(async () => {
       const calls = apiMocks.fetchJobStatus.mock.calls.length;
@@ -450,7 +438,6 @@ describe('IKDMQW 删除生成中卡片：先取消，确认后移除；竞态保
     await vi.waitFor(() => expect(container.textContent).toContain('任务已完成'));
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(true);
     await vi.waitFor(() => expect(dataOf('d1').src).toBe('http://img/out.png'));
-    // 用户仍可再次删除：此时卡片非生成中，再操作一次直接移除
     await clickDelete('d1');
     await vi.waitFor(() => expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(false));
   });
@@ -470,14 +457,12 @@ describe('IKDMQW 删除生成中卡片：先取消，确认后移除；竞态保
 
   it('删除时任务仍未终态（软取消已登记）：不抢先移除，轮询 cancelled 后才移除', async () => {
     await renderPage();
-    // 全程 processing：删除核对与轮询都拿 processing，卡片保留（等待 worker 停止）
     await clickDelete('d1');
     expect(apiMocks.cancelGenerationJob).toHaveBeenCalledTimes(1);
     await new Promise((r) => setTimeout(r, 50));
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(true);
     expect(dataOf('d1').genStatus).toBe('generating');
 
-    // worker 停止（轮询拿到 cancelled）：删除意图接管，节点移除
     apiMocks.fetchJobStatus.mockImplementation(async () => ({ ...CANCELLED }));
     await vi.waitFor(() =>
       expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(false),
@@ -492,7 +477,6 @@ describe('IKDMQW 删除生成中卡片：先取消，确认后移除；竞态保
     await new Promise((r) => setTimeout(r, 50));
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(true);
 
-    // worker 竞态完成（轮询拿到 succeeded）：挂载作品，不因删除意图丢结果
     apiMocks.fetchJobStatus.mockImplementation(async () => ({ ...SUCCEEDED }));
     await vi.waitFor(() => expect(dataOf('d1').src).toBe('http://img/out.png'), { timeout: 8_000 });
     await vi.waitFor(() => expect(container.textContent).toContain('任务已完成'), { timeout: 3_000 });
@@ -505,16 +489,13 @@ describe('IKDMQW 删除生成中卡片：先取消，确认后移除；竞态保
       () => new Promise<JobDetail>((resolve) => { resolvers.push(resolve); }),
     );
     await renderPage();
-    // resolvers[0] = 水合轮询首 tick（保持 pending 构造迟到）
 
     await clickDelete('d1');
     expect(apiMocks.cancelGenerationJob).toHaveBeenCalledTimes(1);
-    // resolvers[1] = 删除流程的权威核对
     await vi.waitFor(() => expect(resolvers.length).toBeGreaterThanOrEqual(2));
     await act(async () => { resolvers[1]({ ...CANCELLED }); });
     await vi.waitFor(() => expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(false));
 
-    // 迟到的轮询响应（任务实际已成功）：不得重建节点
     await act(async () => { resolvers[0]({ ...SUCCEEDED }); });
     await new Promise((r) => setTimeout(r, 30));
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(false);

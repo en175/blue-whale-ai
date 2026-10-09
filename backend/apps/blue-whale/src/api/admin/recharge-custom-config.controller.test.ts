@@ -3,10 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { NewApiError } from "@lib/core";
 import { AdminRechargeCustomConfigController } from "./recharge-custom-config.controller.js";
 
-// 自定义充值配置的管理端接口（模块 B，PRD §10.3）。
-// 入参解析必须**当场 400**，不能静默落默认值：
-// 运营把「指定用户群」写成错的值、系统却存成 `all`，现场表现是
-// 「名单配了，但所有人都能买」—— 一句查不出来的假话。
 
 const VIEW = {
   minCredits: 600,
@@ -158,7 +154,6 @@ describe("AdminRechargeCustomConfigController.update — 部分更新", () => {
     const entry = operationLog.create.mock.calls[0]?.[0] as { detail: string; category: string };
     expect(entry.category).toBe("recharge_custom");
     expect(entry.detail).toContain("每元积分数：15→5");
-    // 换算是**价格算法**的输入：改它等于改所有新订单的价格，审计里必须单独看得见
     expect(entry.detail).toContain("影响新订单价格");
   });
 

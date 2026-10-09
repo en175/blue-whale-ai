@@ -1,9 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// IKJCOE：generation_jobs 任务特有列收敛到 generation_job_extras 扩展表。
-// 镜像 identity-memberships-parity 的三轨核对结构：prisma migration、schema 独立文件、
-// docs/sql 快照三处同源（逐字相同，shasum 必须一致）。
 
 const migrationSql = readFileSync(
   new URL(
@@ -59,7 +56,6 @@ describe("generation_job_extras 三轨迁移", () => {
       "actual_credits",
     ]) {
       expect(migrationSql).toContain(`SELECT \`id\`, '${key}',`);
-      // 每一列都必须有对应的 DROP —— 漏删会留下两处真相
       expect(migrationSql).toContain(`DROP COLUMN \`${key}\``);
     }
   });
@@ -84,11 +80,8 @@ describe("generation_job_extras 三轨迁移", () => {
   });
 
   it("Prisma 模型与建表语句同源（表名、唯一索引两处对齐）", () => {
-    // Prisma 认不出索引 map 名时 `prisma migrate dev` 会想再改一次 schema，
-    // 数据库就在两套描述之间来回漂移。这里把名字钉死。
     expect(schemaPrisma).toContain("model generation_job_extras {");
     expect(schemaPrisma).toContain('map: "uk_generation_job_extras__job_key"');
-    // 主表侧：被删的索引不能在 schema.prisma 里留着
     expect(schemaPrisma).not.toContain('map: "idx_status_next_poll"');
   });
 });

@@ -114,13 +114,11 @@ describe('SkillModal', () => {
       await Promise.resolve();
     });
 
-    // 点开卡片左上角三个点菜单
     await act(async () => {
       (document.body.querySelector('button[title="更多操作"]') as HTMLButtonElement).click();
     });
     expect(document.body.textContent).toContain('查看');
 
-    // 点「查看」→ 拉取官方技能正文并展示详情弹窗
     await act(async () => {
       (document.body.querySelector('button[title="查看技能详情"]') as HTMLButtonElement).click();
       await Promise.resolve();
@@ -128,7 +126,6 @@ describe('SkillModal', () => {
     expect(api.fetchSkillContent).toHaveBeenCalledWith('official-skill');
     expect(document.body.textContent).toContain('这是一个测试技能');
 
-    // 详情弹窗右上角「使用」→ 走与卡片「直接使用」同一出口
     await act(async () => {
       [...document.body.querySelectorAll('button')]
         .findLast((button) => button.textContent === '使用')
@@ -149,16 +146,13 @@ describe('SkillModal', () => {
       root.render(createElement(SkillModal, { open: true, onClose: vi.fn(), onUseSkill }));
     });
 
-    // 默认落在技能库 tab，显示技能库卡片
     expect(document.body.textContent).toContain('分镜脚本');
 
-    // 点开技能库卡片左上角三个点菜单
     await act(async () => {
       (document.body.querySelector('button[title="更多操作"]') as HTMLButtonElement).click();
     });
     expect(document.body.textContent).toContain('查看');
 
-    // 点「查看」→ 拉取官方技能正文并展示详情弹窗
     await act(async () => {
       (document.body.querySelector('button[title="查看技能详情"]') as HTMLButtonElement).click();
       await Promise.resolve();
@@ -166,7 +160,6 @@ describe('SkillModal', () => {
     expect(api.fetchSkillContent).toHaveBeenCalledWith('lib-skill');
     expect(document.body.textContent).toContain('这是一个测试技能');
 
-    // 详情弹窗右上角「使用」→ 走与卡片「直接使用」同一出口
     await act(async () => {
       [...document.body.querySelectorAll('button')]
         .findLast((button) => button.textContent === '使用')

@@ -78,7 +78,6 @@ describe('Checkbox', () => {
   });
 
   it('★ indeterminate 走 aria-checked=mixed，而不是 checked=true', async () => {
-    // 「部分选中」当成「全选」会让读屏用户以为整页都选上了
     const el = await render({ checked: false, indeterminate: true, onChange: vi.fn() });
     expect(el.getAttribute('aria-checked')).toBe('mixed');
   });
@@ -91,13 +90,10 @@ describe('Checkbox', () => {
     root = createRoot(mountNode);
     const noLabel = await render({ checked: false, onChange: vi.fn(), 'aria-label': '选这一行' });
     expect(noLabel.tagName).toBe('SPAN');
-    // 没有可见文案时必须有 aria-label，否则读屏只念出一个「复选框」
     expect(noLabel.getAttribute('aria-label')).toBe('选这一行');
   });
 
   it('★ 点 label 文字也切换（且只切一次）', async () => {
-    // `<span role="checkbox">` 不是 labelable 元素，浏览器不会把「点文字」转发给它 ——
-    // 只把 onClick 挂在方框上时，点「周一」这两个字没有任何反应，而用户几乎总是点文字
     const onChange = vi.fn();
     const el = await render({ checked: false, onChange, label: '周一' });
     await click(el.querySelector('span:last-child') as Element);

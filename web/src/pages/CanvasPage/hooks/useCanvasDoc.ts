@@ -1,14 +1,8 @@
-/* ============================================
- * useCanvasDoc 钩子：画布水合 —— GET /api/projects/:id/snapshot
- * 一次拉取项目快照，提取画布（节点 + 视口 + 版本号）与资产字典；
- * 加载失败静默降级为空画布，不阻断画布操作
- * ============================================ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import { fetchProjectSnapshot, type SnapshotAsset } from '@/api/projects';
 import { fetchCanvasDoc, type CanvasDoc, type LegacyMigrationReport } from '@/api/canvas';
 
-/** 空画布文档（无记录/加载失败时使用） */
 const EMPTY_DOC: CanvasDoc = {
   id: null,
   version: null,
@@ -17,7 +11,6 @@ const EMPTY_DOC: CanvasDoc = {
   edges: [],
 };
 
-/** 安全解析 JSON：兼容后端直接返回已解析对象/数组的情况，失败返回 fallback */
 function safeParse<T>(raw: unknown, fallback: T): T {
   if (raw == null || raw === '') return fallback;
   if (typeof raw === 'object') return raw as T;
@@ -29,7 +22,6 @@ function safeParse<T>(raw: unknown, fallback: T): T {
   }
 }
 
-/** 原始 nodes/viewport 字段 → 画布文档字段（兼容字符串与已解析结构） */
 function parseNodes(raw: unknown): Node[] {
   return safeParse<Node[]>(raw, []).map((n) => ({
     ...n,
@@ -38,25 +30,17 @@ function parseNodes(raw: unknown): Node[] {
   }));
 }
 
-/**
- * 水合指定项目的画布
- * - projectId 变化时重新拉取快照；切换期间先清空（避免旧节点残留）
- * - 无画布记录或请求失败均返回空文档
- */
 export function useCanvasDoc(projectId: string) {
   const [doc, setDoc] = useState<CanvasDoc | null>(null);
   const [docProjectId, setDocProjectId] = useState<string | null>(null);
-  /** 快照资产字典（key 为 assetId），供节点还原资产 URL */
   const [assets, setAssets] = useState<Record<string, SnapshotAsset>>({});
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
-  /** 旧生成卡迁移报告（IKDLQK）：随本次打开响应透传，无迁移为 null */
   const [legacyMigration, setLegacyMigration] = useState<LegacyMigrationReport | null>(null);
   const activeProjectRef = useRef(projectId);
   activeProjectRef.current = projectId;
   const loadSerialRef = useRef(0);
 
-  /** 拉取快照并水合；手动刷新时保留现有画布，避免节点短暂清空。返回本次读到的节点，供调用方在 React 提交前判断注入结果。 */
   const load = useCallback((preserveCurrent = false): Promise<Node[]> => {
     if (activeProjectRef.current !== projectId) return Promise.resolve([]);
     const serial = ++loadSerialRef.current;
@@ -93,8 +77,6 @@ export function useCanvasDoc(projectId: string) {
                 : canvas?.nodes ?? null,
           });
         }
-        // 快照未携带节点内容（仅版本号等元数据）：回退独立画布接口拉完整节点，
-        // 否则版本号缺失还会导致保存永远 412
         if (!canvas || canvas.nodes == null) {
           try {
             const rec = await fetchCanvasDoc(projectId);
@@ -144,14 +126,12 @@ export function useCanvasDoc(projectId: string) {
       });
   }, [projectId]);
 
-  // projectId 变化时重新水合（StrictMode 双挂载由快照在途去重兜底）
   useEffect(() => {
     load();
   }, [load]);
 
   const refetch = useCallback(() => load(true), [load]);
 
-  /** 回写快照资产上的 material_id / material_status，二次校验只读这份字典 */
   const patchAsset = useCallback((assetId: string, patch: Partial<SnapshotAsset>) => {
     if (!assetId) return;
     setAssets((prev) => {
@@ -161,10 +141,6 @@ export function useCanvasDoc(projectId: string) {
     });
   }, []);
 
-  /** 增量并入资产字典（IKFPOT）：应用方案卡等本地写入新素材后，服务端已把资产关联进项目，
-   *  但前端字典仍停留在打开画布时的旧快照——水合 resolveNodeAssets 查不到会误标「素材已被删除」。
-   *  这里把调用方从节点 data 提取的资产信息直接并入字典，避免一次全量 refetch 与中间闪烁。
-   *  已存在且关键字段一致则跳过，避免无谓重渲染。 */
   const upsertAssets = useCallback((items: SnapshotAsset[]) => {
     if (items.length === 0) return;
     setAssets((prev) => {

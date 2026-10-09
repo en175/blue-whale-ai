@@ -4,7 +4,6 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createStoryboardPreviewRepo>;
 
-/** StoryboardPreview repo 封装（SceneCard 显式分镜预览旁路）。 */
 @Injectable()
 export class StoryboardPreviewService {
   private repoInstance?: Repo;

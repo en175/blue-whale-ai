@@ -2,15 +2,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-/* IKGZ86 画布浮层容器视觉统一：测试锁基架。三个浮层容器令牌值已在 ADR-0100 定稿（不许改），
-   这里锁全局令牌表（./variables.css）中的定义值，并锁圆角复用前提——不新增圆角令牌，
-   大容器档 --radius-xl 与浮条档 --radius-lg 必须保持既有值。
-   后续子票（IKGZ8B/8C/8D/8E）往此文件补 21 个成员断言（成员容器必须引用令牌、不得硬编码）。
-   渲染效果由人工浏览器回归验证。 */
 
 const variablesCss = readFileSync(fileURLToPath(new URL('./variables.css', import.meta.url)), 'utf-8');
 
-/** 从 CSS 源提取指定自定义属性（--xxx）的值；先剥离注释再匹配，未定义时返回 null。 */
 function customPropertyOf(css: string, name: string): string | null {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const match = stripped.match(new RegExp(`${name}\\s*:\\s*([^;]+)`));
@@ -41,9 +35,7 @@ describe('浮层容器圆角复用前提（不新增圆角令牌，锁既有档�
   });
 });
 
-/* ---- IKGZ8B 卡悬浮工具条家族（5 成员，浮条档 12px） ---- */
 
-/** 从 CSS 源剥离注释后提取指定类选择器（如 `.toolbar`）的规则块声明；未找到时抛错。 */
 function ruleBlockOf(css: string, className: string): string {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -52,7 +44,6 @@ function ruleBlockOf(css: string, className: string): string {
   return match[1];
 }
 
-/** 成员容器四件套必须全引用令牌（浮条档 --radius-lg）。 */
 function expectOverlayContainer(block: string) {
   expect(block).toContain('background-color: var(--color-bg-overlay)');
   expect(block).toContain('border: 1px solid var(--color-border-overlay)');
@@ -60,10 +51,8 @@ function expectOverlayContainer(block: string) {
   expect(block).toContain('box-shadow: var(--shadow-overlay)');
 }
 
-/** 容器四件套位置不允许的硬编码背景/描边色值与胶囊残迹。 */
 const HARDCODED_CONTAINER_COLORS = ['#2a2a2a', '#3a3a3a', '#333', 'rgba(24, 24, 24'];
 
-/** 断言规则块不含给定硬编码色值黑名单（默认容器色值黑名单，可传家族扩展名单）。 */
 const expectNoHardcoded = (block: string, colors: readonly string[] = HARDCODED_CONTAINER_COLORS) => {
   for (const hardcoded of colors) {
     expect(block).not.toContain(hardcoded);
@@ -127,7 +116,6 @@ describe('IKGZ8B 卡悬浮工具条家族（ADR-0100：5 成员统一到浮层�
     expect(block).not.toContain('999px');
     expect(block).not.toContain('#2a2a2a');
     expect(ruleBlockOf(css, '.addToChatBtn:hover')).toContain('background-color: rgba(255, 255, 255, 0.08)');
-    // IKGZ86 审查修复锁定：字号/文字色/过渡沿用基线令牌写法，不得回退 #ddd/12px/0.12s 字面量
     expect(block).toContain('color: var(--color-text-primary)');
     expect(block).toContain('font-size: var(--font-size-sm)');
     expect(block).toContain('transition: background-color var(--transition-fast)');
@@ -142,14 +130,7 @@ describe('IKGZ8B 卡悬浮工具条家族（ADR-0100：5 成员统一到浮层�
   });
 });
 
-/* ---- IKGZ8D 底部面板家族十成员断言 ----
-   容器四件套必须引用令牌、规则体内不得残留硬编码容器背景/描边/阴影值。
-   圆角口径：七个大容器（dialog/panel）锁 --radius-xl；擦除工具条与裁切面板是
-   浮条形态，锁 --radius-lg；擦除发送条（999px）与扩图工具栏（24px）是验收拍板的
-   胶囊/异形圆角，无对应令牌档，仅锁背景/描边/阴影三令牌。 */
 
-/** 从 CSS 源提取顶层类选择器规则体（先剥离注释）；未找到时返回 null。
-    ruleBlockOf 的 null 容错薄壳：入参不带点（8D 成员清单风格），解析语义与 ruleBlockOf 单一实现。 */
 function ruleBodyOf(css: string, className: string): string | null {
   try {
     return ruleBlockOf(css, `.${className}`);
@@ -161,7 +142,6 @@ function ruleBodyOf(css: string, className: string): string | null {
 describe('IKGZ8D 底部面板家族十成员（容器四件套引用令牌、无硬编码容器色值）', () => {
   const componentsRoot = new URL('../pages/CanvasPage/components/', import.meta.url);
 
-  /** 成员容器清单；radius 为 null 表示胶囊/异形圆角无令牌档，不锁圆角。 */
   const members: Array<{ component: string; container: string; radius: string | null }> = [
     { component: 'ImageDialog', container: 'dialog', radius: 'var(--radius-xl)' },
     { component: 'BottomDialog', container: 'dialog', radius: 'var(--radius-xl)' },
@@ -196,8 +176,6 @@ describe('IKGZ8D 底部面板家族十成员（容器四件套引用令牌、无
   }
 });
 
-/* ---- IKH3OU 去字幕会话单条家族（1 成员，24px 胶囊对齐 OutpaintDialog 统一后形态）：
-   IKGZ83 的「上方工具条 + 下方发送条」双条随 ADR-0104 单条化退役，成员数由 2 降为 1。 ---- */
 
 describe('IKH3OU 去字幕会话单条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
   const dialogCss = readFileSync(
@@ -217,8 +195,6 @@ describe('IKH3OU 去字幕会话单条（容器三令牌 + 24px 胶囊，无硬�
   });
 });
 
-/* ---- IKH28U 音视频分离编辑态单条家族（1 成员，24px 胶囊对齐去字幕家族形态）：
-   IKH28U 的「上方工具条 + 下方发送条」双条随本次单条化退役，成员数由 2 降为 1。 ---- */
 
 describe('IKH28U 音视频分离编辑态单条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
   const splitDialogCss = readFileSync(
@@ -238,8 +214,6 @@ describe('IKH28U 音视频分离编辑态单条（容器三令牌 + 24px 胶囊�
   });
 });
 
-/* ---- IKHB7A 音频截取编辑态发送条（1 成员，24px 胶囊家族单条对齐分离形态：
-   X/截取/时间范围/格式下拉/⚡0 徽标/发送钮五要素单条承载） ---- */
 
 describe('IKHB7A 音频截取发送条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
   const trimBarCss = readFileSync(
@@ -262,7 +236,6 @@ describe('IKHB7A 音频截取发送条（容器三令牌 + 24px 胶囊，无硬�
   });
 });
 
-/* ---- IKH8BR 场景切分会话单条家族（1 成员，24px 胶囊对齐去字幕家族形态） ---- */
 
 describe('IKH8BR 场景切分会话单条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
   const sceneSplitCss = readFileSync(
@@ -282,8 +255,6 @@ describe('IKH8BR 场景切分会话单条（容器三令牌 + 24px 胶囊，无�
   });
 });
 
-/* ---- IKHK9N 智能抠像编辑态单条（1 成员，24px 胶囊对齐去字幕/场景切分家族形态：
-   X/模式标题/格式下拉/背景色分段（仅 MP4）/⚡0 徽标/发送钮六要素单条承载） ---- */
 
 describe('IKHK9N 智能抠像编辑态单条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
   const mattingCss = readFileSync(
@@ -309,14 +280,12 @@ describe('IKHK9N 智能抠像编辑态单条（容器三令牌 + 24px 胶囊，�
   });
 });
 
-/* ---- IKGZ8C 浮层菜单家族（7 成员，浮条档 12px） ---- */
 describe('IKGZ8C 浮层菜单家族（ADR-0100：7 成员统一到浮层容器令牌）', () => {
   const memberCss = (component: string) =>
     readFileSync(
       fileURLToPath(new URL(`../pages/CanvasPage/components/${component}/index.module.css`, import.meta.url)),
       'utf-8',
     );
-  // 菜单容器不允许的硬编码背景/描边色值（8B 基础上补本家族旧值 #262626/#363636）
   const menuHardcodedColors = [...HARDCODED_CONTAINER_COLORS, '#262626', '#363636'];
 
   it.each([

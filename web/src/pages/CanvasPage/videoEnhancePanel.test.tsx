@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-/* IKH3VG 视频 HD 高清面板闭环链路测试：点 HD 建草稿卡（标题/身份/来源连线）与面板跟随弹出、
-   分辨率切换即时写卡（lastParams 持久化）、HD 面板打开不藏上方操作条（IKHFUF，对齐普通
-   生成面板）、关闭再点 HD 草稿卡重开参数恢复、「重新编辑」分流回 HD 面板、
-   四路退出（X/Esc/点外/点其他卡）不建任务不丢参数草稿保留、与去字幕会话互斥。
-   渲染模式沿用 imageEnhancePanel.test.tsx（FlowCanvas 打桩透出 props）。 */
 import { dockActions } from './testing/dockActionsRecorder';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -42,7 +37,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -115,7 +109,6 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn(),
 }));
 
-/* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
@@ -157,8 +150,6 @@ const canvasDocMock = vi.hoisted(() => ({
 }));
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
-/** 画布：一个就绪视频节点 v1（assetId '5'，1280×720 达标）+ 可选成品 HD 卡 h1。
- *  withFinishedHd：true 正常成品卡（lastParams 4k） */
 function seedDoc(withFinishedHd = false) {
   const nodes: Array<Record<string, unknown>> = [
     {
@@ -224,7 +215,6 @@ async function renderPage() {
   });
 }
 
-/** 走视频节点工具条的「HD」入口（回调挂在节点 data 上） */
 async function videoEnhance(id = 'v1') {
   const video = flowProps.current.mediaNodes.find((n: Node) => n.id === id)!;
   await act(async () => {
@@ -241,7 +231,6 @@ const panelResolution = (value: string) =>
 const identityOf = (node: Node | undefined) =>
   ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as Record<string, unknown> | undefined;
 
-/** 四路退出工具：X / Esc / 点外 / 点其他卡 */
 async function closeViaX() {
   await act(async () => {
     document.body.querySelector<HTMLButtonElement>('[data-testid="video-enhance-close-btn"]')!
@@ -290,16 +279,13 @@ describe('IKH3VG 点 HD 建草稿卡与面板跟随', () => {
     expect(data.fileName).toBe('HD');
     expect(data.genStatus).toBe('draft');
     expect(identityOf(draft)).toEqual({ sourceAssetId: '5' });
-    // 出生位在源卡右侧（x 大于源卡，y 同高）
     expect((draft.position as { x: number }).x).toBeGreaterThan(400);
 
-    // 纯视觉来源连线（origin 标记）
     const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
       .find((e) => e.target === draft.id)!;
     expect(edge.source).toBe('v1');
     expect(edge.data).toEqual({ origin: VIDEO_ENHANCE_EDGE_ORIGIN });
 
-    // 面板已渲染（发送钮存在）且面板领土标记在（点外关闭豁免链），默认档 1080P
     expect(panelSend()).toBeTruthy();
     expect(document.body.querySelector('[data-gen-panel-territory]')).toBeTruthy();
     expect(panelResolution('1080p')!.className).toMatch(/Active/);
@@ -313,7 +299,6 @@ describe('IKH3VG 点 HD 建草稿卡与面板跟随', () => {
     await act(async () => {
       panelResolution('4k')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    // patchMediaNode 产出新节点对象：重新读取（点击前引用已过期）
     expect(identityOf(hdDraft())).toEqual({ sourceAssetId: '5', lastParams: { resolution: '4k' } });
     expect(dockActions.updateDraft).toHaveBeenCalledWith('videoEnhance', { nodeId: hdDraft()!.id, value: '4k' });
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
@@ -325,7 +310,6 @@ describe('IKH3VG 会话模态：全局工具条门与互斥', () => {
   it('HD 面板打开期间：不注入 soloToolbarHidden，钉屏幕工具条容器 show 保持（IKHFUF）', async () => {
     seedDoc();
     await renderPage();
-    // 模拟唯一选中源卡（soloMediaToolbarNode 非空，容器挂载）
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')], edges: [] });
     });
@@ -355,11 +339,10 @@ describe('IKH3VG 会话模态：全局工具条门与互斥', () => {
       enterSubtitleErase?.('v1', 'smart');
     });
     expect(panelSend()).toBeNull();
-    expect(hdDraft()).toBeTruthy(); // 草稿卡保留
+    expect(hdDraft()).toBeTruthy();
   });
 });
 
-/** 钉屏幕媒体卡工具条容器 show 门（toolSessionModal.test.tsx 同款读取） */
 function mediaFollowToolbarShow(): boolean | undefined {
   const frag = flowProps.current.followToolbarLayer as { props?: { children?: unknown } } | undefined;
   const children = frag?.props?.children;
@@ -380,7 +363,6 @@ describe('IKH3VG 关闭再开与四路退出', () => {
     await closeViaX();
     expect(panelSend()).toBeNull();
 
-    // 点 HD 草稿卡重开（onNodeClick 分流，不落视频生成面板）
     await act(async () => {
       flowProps.current.onNodeClick(hdDraft()!);
     });
@@ -400,12 +382,10 @@ describe('IKH3VG 关闭再开与四路退出', () => {
     for (const exit of exits) {
       expect(panelSend()).toBeTruthy();
       await exit();
-      // 面板关闭、草稿卡保留、参数保留、无创建调用
       expect(panelSend()).toBeNull();
       expect(hdDraft()).toBeTruthy();
       expect(identityOf(hdDraft())).toEqual({ sourceAssetId: '5', lastParams: { resolution: '4k' } });
       expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-      // 重开面板继续（下一路退出的起点）
       await act(async () => {
         flowProps.current.onNodeClick(hdDraft()!);
       });
@@ -414,7 +394,6 @@ describe('IKH3VG 关闭再开与四路退出', () => {
 });
 
 describe('IKH3VG 重新编辑分流与参数恢复', () => {
-  // IKH3WE 后「重新编辑」不再有工具栏按钮，行为入口收敛为点卡片（下方用例即该入口）
   it('成品 HD 卡点卡（重新编辑口径）打开 HD 面板并回填 lastParams（不进视频生成面板）', async () => {
     seedDoc(true);
     await renderPage();

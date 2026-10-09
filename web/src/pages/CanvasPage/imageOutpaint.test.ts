@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-/* IKGOQX/IKGOR6 扩图纯函数测试：门槛预检、拖拽换算（拖边/拖角/Shift 锁比例/40% 钳制/只许外扩）、
-   比例预设联动（默认原图比例、最小包含框、不可达置灰、命中判定）、像素→比例换算、
-   提交 payload 组装与前后端同源防漂移断言（门槛数值/文案/键名/值域与契约单处同源）。 */
 import { describe, expect, it } from 'vitest';
 import {
   IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS,
@@ -29,16 +26,14 @@ import {
   type SourceRect,
 } from './imageOutpaint';
 
-/** 400×300 原图（flow 单位同比例）：短边 300，单方向上限 120 */
 const rect: SourceRect = { x: 1000, y: 500, width: 400, height: 300 };
-const max = maxExpandPerSide(rect); // 120
+const max = maxExpandPerSide(rect);
 
 describe('IKGOR6 前后端同源防漂移（契约单处定义，本模块只许引用不得本地重写）', () => {
   it('门槛数值与预检文案与契约恒等：门槛判定委托 imageOutpaintSourceGate', () => {
     expect(IMAGE_OUTPAINT_LONG_SIDE_LIMIT).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.maxLongSide);
     expect(IMAGE_OUTPAINT_FILE_SIZE_LIMIT).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.maxFileSizeBytes);
     expect(IMAGE_OUTPAINT_MAX_EXPAND_RATIO).toBe(IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS.max);
-    // 预检返回的拒绝文案 = 契约单处定义文案（菜单置灰提示与服务端 fail msg 同源）
     expect(outpaintGateReason(undefined, 300, 1000)).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.missingDimensionsText);
     expect(outpaintGateReason(4161, 300, 1000)).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.longSideRejectionText);
     expect(outpaintGateReason(400, 300, 10 * 1024 * 1024 + 1)).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.fileSizeRejectionText);
@@ -107,10 +102,8 @@ describe('IKGOQX 扩展几何', () => {
   });
 
   it('拖角自由改比例：两边独立跟随鼠标', () => {
-    // se 角：右扩 60、下扩 40
     const next = dragExpandCorner('se', rect, { x: 1000 + 400 + 60, y: 500 + 300 + 40 }, ZERO_EXPANDS, max, false);
     expect(next).toEqual({ top: 0, right: 60, bottom: 40, left: 0 });
-    // nw 角：左扩 25、上扩 70
     const nw = dragExpandCorner('nw', rect, { x: 1000 - 25, y: 500 - 70 }, ZERO_EXPANDS, max, false);
     expect(nw).toEqual({ top: 70, right: 0, bottom: 0, left: 25 });
   });
@@ -123,21 +116,18 @@ describe('IKGOQX 扩展几何', () => {
   });
 
   it('Shift 拖角锁开始那一刻比例：从零扩展 400×300 起拖，等比外扩保持 4:3', () => {
-    // 锚（框左上）=(1000,500)；鼠标 (1500,920) 期望框 500×420（比例≠4:3）→ 等比内切 500×375
     const next = dragExpandCorner('se', rect, { x: 1500, y: 920 }, ZERO_EXPANDS, max, true);
     expect(next.right).toBeCloseTo(100, 6);
     expect(next.bottom).toBeCloseTo(75, 6);
-    // 等比校验：框 400+right × 300+bottom 保持 4:3
     const boxW = 400 + next.right;
     const boxH = 300 + next.bottom;
     expect(boxW / boxH).toBeCloseTo(4 / 3, 6);
   });
 
   it('Shift 拖角以开始那一刻（非当前帧）比例为基准', () => {
-    const start = { top: 0, right: 50, bottom: 50, left: 0 }; // 框 450×350 → 比例 9:7
+    const start = { top: 0, right: 50, bottom: 50, left: 0 };
     const ratio0 = (400 + 50) / (300 + 50);
     const next = dragExpandCorner('se', rect, { x: 1500, y: 900 }, start, max, true);
-    // 锚 (1000,500)；鼠标期望框 500×400 → 等比内切 500×500÷(9/7)≈388.9
     const boxW = 400 + next.right;
     const boxH = 300 + next.bottom;
     expect(boxW / boxH).toBeCloseTo(ratio0, 6);
@@ -172,7 +162,6 @@ describe('IKGOQX 比例预设联动', () => {
     expect(next.bottom).toBeCloseTo(0, 6);
     expect(next.left).toBeCloseTo((300 * (16 / 9) - 400) / 2, 6);
     expect(next.right).toBeCloseTo(next.left, 6);
-    // 命中判定回环：预设生成的框命中该预设
     expect(matchOutpaintPreset(next, rect)).toBe('16:9');
   });
 
@@ -184,15 +173,10 @@ describe('IKGOQX 比例预设联动', () => {
   });
 
   it('不可达预设返回 null：极端窄长图 4:3 需左右各扩 (2400×4/3? )', () => {
-    // 800×100：短边 100、上限 40。4:3 → 高定宽 100×4/3≈133，左右各扩 (133-800)/2 <0 → 宽定 800? 不：
-    // boxW = max(800, 100*4/3)=800, boxH=800/(4/3)=600 → 上下各扩 (600-100)/2=250 > 40 不可达
     const tall = { width: 800, height: 100 };
     expect(presetExpands(tall, '4:3', 40)).toBeNull();
-    // 同图 1:1：boxW=max(800,100)=800, boxH=800 → 上下各扩 350 > 40 不可达
     expect(presetExpands(tall, '1:1', 40)).toBeNull();
-    // 9:16：boxW=max(800,100*9/16=56.25)=800, boxH=800*16/9≈1422 → 更不可达
     expect(presetExpands(tall, '9:16', 40)).toBeNull();
-    // 原图比例恒可达
     expect(presetExpands(tall, 'original', 40)).toEqual(ZERO_EXPANDS);
   });
 
@@ -202,17 +186,13 @@ describe('IKGOQX 比例预设联动', () => {
     expect(av.original).toBeNull();
     expect(av['1:1']).toContain('40%');
     expect(av['1:1']).toContain('1:1');
-    // 方图 300×300：全部可达（各预设最大扩展 150? 1:1 全零；16:9 左右 (533-300)/2=116.67 < 120）
     const sq = outpaintPresetAvailability({ width: 300, height: 300 }, 120);
     expect(Object.values(sq).every((r) => r === null)).toBe(true);
   });
 
   it('matchOutpaintPreset：等比外扩仍命中原图比例；非标准比例返回 null（自定义）', () => {
-    // 保持 4:3 的等比外扩：左右各 40、上下各 30 → 框 480×360 = 4:3 原比例
     expect(matchOutpaintPreset({ top: 30, right: 40, bottom: 30, left: 40 }, rect)).toBe('original');
-    // 400×300 框右扩 60：框 460×300 ≈ 1.533 非标准 → 自定义
     expect(matchOutpaintPreset({ top: 0, right: 60, bottom: 0, left: 0 }, rect)).toBeNull();
-    // 恰好命中 16:9：宽 = 300*16/9 → 左右各 66.67
     const half = (300 * (16 / 9) - 400) / 2;
     expect(matchOutpaintPreset({ top: 0, right: half, bottom: 0, left: half }, rect)).toBe('16:9');
   });

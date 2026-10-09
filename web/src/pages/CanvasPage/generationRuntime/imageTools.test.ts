@@ -1,8 +1,3 @@
-/* ============================================
- * 图像工具类型定义契约测试（IKJJR2）：四键身份识别（排除姊妹家族）、冻结输入可信判定、
- * 创建/重试/取消协议（四专属端点 + 通用取消）、恢复规划（复用普通生成 + 来源线补边）、
- * 与运行时的组合冒烟（受理台账 → 轮询成功 → primary marker）。
- * ============================================ */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
@@ -184,7 +179,6 @@ describe('图像工具类型定义：恢复规划', () => {
 });
 
 describe('图像工具类型定义：与运行时组合冒烟（真实 def 接 runtime）', () => {
-  /** 手动时钟：轮询续链只在 fireNext 时推进（口径同 runtime.test.ts）。 */
   class ManualClock {
     private seq = 0;
     private timers = new Map<number, { fn: () => void; at: number }>();
@@ -272,8 +266,7 @@ describe('图像工具类型定义：与运行时组合冒烟（真实 def 接 r
     });
     expect(dispatched).toBe(true);
     await flushMicrotasks();
-    expect(pollCount).toBe(1); // 首轮 processing：受理后卡未建，进度 patch no-op
-    // 受理后建卡（handoff 时机）：卡在此补上（jobId 由 handoff 建卡写入），续链照常收敛
+    expect(pollCount).toBe(1);
     nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { imageErase: { sourceAssetId: '5' }, jobId: 'e2', genStatus: 'generating', progress: 0 } });
     clock.fireNext();
     await flushMicrotasks();

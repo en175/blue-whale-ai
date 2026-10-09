@@ -1,19 +1,4 @@
 #!/usr/bin/env bash
-# deploy-blue-whale-api：image tag 绑定源码 commit 的契约测试（IK6RG8 / ADR-0063）。
-#
-# 设计契约（与 scripts/test-hooks.sh 一致）：
-#   - 零测试框架依赖（不引 bats）；纯 bash + PATH 注入 stub + mktemp -d 隔离。
-#   - 不 clone 真实仓、不连网、不 ssh 真服、不 docker build/up。
-#   - seam = 子脚本对外部命令（git/bun/go/file/ssh/scp）的调用边界。
-#   - 退出码：全用例过 → 0；任一失败 → 非 0。
-#
-# 设计决策：compose yml 形如 image: blue-whale-api:${NEW_API_IMAGE_TAG:-latest}，
-# env 变量 NEW_API_IMAGE_TAG 持【短 SHA】（不带 blue-whale-api: 前缀，避免双前缀）。
-# resolve_image_tag() 返回【完整 tag】（blue-whale-api:<short>，用于日志/回滚记录）。
-#
-# 跑法：
-#   bash .claude/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh
-#   bash .qoder/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh   （等价性）
 
 set -u
 
@@ -22,7 +7,6 @@ SCRIPTS_DIR="$SKILL_DIR/scripts"
 COMPOSE_YML="$SKILL_DIR/docker/docker-compose.yml"
 NEW_API_BIN="new-api"
 
-# 固定 fake SHA（40 hex）；short = 前 12。
 FAKE_SHA="1234567890abcdef1234567890abcdef12345678"
 FAKE_SHORT="${FAKE_SHA:0:12}"
 FAKE_TAG="blue-whale-api:$FAKE_SHORT"
@@ -32,9 +16,6 @@ FAIL=0
 FAILURES=()
 SAVED_PATH="$PATH"
 
-# ── 真实 .build 保护（防 fresh_home 的 rm -rf 毁掉本地真实构建）──────
-# 首次 fresh_home 把 $SKILL_DIR/.build 移到备份；后续调用照旧 rm -rf 清测试产物。
-# EXIT trap 把真实 .build 还原（与 scripts/test-hooks.sh 的 save/restore 隔离范式一致）。
 BUILD_BACKUP=""
 restore_build() {
   if [ -n "$BUILD_BACKUP" ]; then
@@ -46,11 +27,9 @@ restore_build() {
 }
 trap restore_build EXIT
 
-# ── 计数 / 断言 ──────────────────────────────────────────────────
 record_pass() { PASS=$((PASS + 1)); }
 record_fail() { FAIL=$((FAIL + 1)); FAILURES+=("$1"); }
 
-# run <cmd...> → RUN_EXIT / RUN_STDOUT / RUN_STDERR
 run() {
   local tmp_out tmp_err
   tmp_out="$(mktemp)"; tmp_err="$(mktemp)"
@@ -93,7 +72,6 @@ assert_file_equals() {
   else record_fail "[${label}] ${path}=\"${actual}\" 期望=\"${expected}\""; fi
 }
 
-# ── stub 工厂 ────────────────────────────────────────────────────
 STUB_DIR=""
 BUN_STUB=""
 SSH_CAPTURE=""
@@ -103,7 +81,6 @@ setup_stubs() {
   SSH_CAPTURE="$(mktemp)"
   BUN_STUB="$STUB_DIR/bun"
 
-  # git：剥 -C <dir> 前缀；fetch 建 web/default 目录树；rev-parse FETCH_HEAD → 固定 SHA。
   cat >"$STUB_DIR/git" <<EOF
 #!/usr/bin/env bash
 git_dir=""
@@ -116,7 +93,6 @@ esac
 exit 0
 EOF
 
-  # bun：install noop；run build 在 cwd 建 dist/index.html 撑 go:embed 检查。
   cat >"$BUN_STUB" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1" = "run" ]; then
@@ -126,7 +102,6 @@ fi
 exit 0
 EOF
 
-  # go：解析 -o <path>，写假二进制占位。
   cat >"$STUB_DIR/go" <<'EOF'
 #!/usr/bin/env bash
 out=""
@@ -140,14 +115,12 @@ done
 exit 0
 EOF
 
-  # file：恒报 ELF 64-bit x86-64 撑 build.sh 的 file|grep 校验。
   cat >"$STUB_DIR/file" <<'EOF'
 #!/usr/bin/env bash
 echo "ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked"
 exit 0
 EOF
 
-  # ssh：记录全部调用到 SSH_CAPTURE；按命令内容给模式化响应（不连真服）。
   cat >"$STUB_DIR/ssh" <<EOF
 #!/usr/bin/env bash
 args="\$*"
@@ -166,7 +139,6 @@ fi
 exit 0
 EOF
 
-  # scp：记录即可。
   cat >"$STUB_DIR/scp" <<EOF
 #!/usr/bin/env bash
 printf 'scp %s\\n' "\$*" >>"$SSH_CAPTURE"
@@ -186,7 +158,6 @@ teardown_stubs() {
   STUB_DIR=""
 }
 
-# 独立 HOME（隔离 API_CACHE_DIR / 锁）+ DEPLOY_KEY + 清 .build。
 fresh_home() {
   local home_tmp key_tmp
   home_tmp="$(mktemp -d)"
@@ -202,11 +173,7 @@ fresh_home() {
   fi
 }
 
-# ════════════════════════════════════════════════════════════════
-# 用例
-# ════════════════════════════════════════════════════════════════
 
-# ── 用例 1：build.sh 派生 short SHA 并落盘 ──────────────────────
 setup_stubs
 fresh_home
 run bash "$SCRIPTS_DIR/build.sh"
@@ -218,12 +185,10 @@ assert_contains "$RUN_STDOUT" "$FAKE_TAG" "build: echo 含 image tag"
 assert_contains "$RUN_STDOUT" "$FAKE_SHA" "build: echo 含完整 source SHA"
 teardown_stubs
 
-# ── 用例 2：docker-compose.yml 引用变量、不写死 latest ───────────
 yml_text="$(cat "$COMPOSE_YML")"
 assert_contains "$yml_text" 'image: blue-whale-api:${NEW_API_IMAGE_TAG:-latest}' "compose: image 字段引用 NEW_API_IMAGE_TAG 变量"
 assert_not_contains "$yml_text" 'image: blue-whale-api:latest' "compose: 不再写死 blue-whale-api:latest"
 
-# ── 用例 3：push.sh 把 tag 注入远端 .env ────────────────────────
 setup_stubs
 fresh_home
 mkdir -p "$SKILL_DIR/.build"
@@ -238,7 +203,6 @@ assert_contains "$push_cap" "NEW_API_IMAGE_TAG=$FAKE_SHORT" "push: 远端 .env �
 assert_not_contains "$push_cap" "NEW_API_IMAGE_TAG=$FAKE_TAG" "push: env 值是短 SHA 不带前缀（避免 compose 双前缀）"
 teardown_stubs
 
-# ── 用例 4：restart 记录 prev tag + rollback 行为 ───────────────
 setup_stubs
 fresh_home
 mkdir -p "$SKILL_DIR/.build"
@@ -246,7 +210,6 @@ printf '%s\n' "$FAKE_TAG" >"$SKILL_DIR/.build/image-tag"
 printf '%s\n' "$FAKE_SHA" >"$SKILL_DIR/.build/source-commit"
 : >"$SKILL_DIR/.build/$NEW_API_BIN"
 
-# 4a: restart.sh 记录远端 .image-tag.prev（容器 image tag → prev 文件）
 : >"$SSH_CAPTURE"
 run bash "$SCRIPTS_DIR/restart.sh"
 assert_exit 0 "restart: stub ssh exit 0"
@@ -255,7 +218,6 @@ assert_contains "$restart_cap" ".image-tag.prev" "restart: 记录远端 .image-t
 assert_contains "$restart_cap" "docker inspect" "restart: 经 docker inspect 读当前容器 image"
 assert_contains "$RUN_STDOUT" "$FAKE_TAG" "restart: 部署后 echo 含运行 image tag"
 
-# 4b: rollback.sh prev 存在 → NEW_API_IMAGE_TAG=<prev-short> compose up --no-build
 : >"$SSH_CAPTURE"
 export FAKE_PREV_TAG="$FAKE_TAG"
 run bash "$SCRIPTS_DIR/rollback.sh"
@@ -264,13 +226,11 @@ rb_cap="$(cat "$SSH_CAPTURE")"
 assert_contains "$rb_cap" "NEW_API_IMAGE_TAG=$FAKE_SHORT" "rollback: 用 prev short SHA 起 compose"
 assert_contains "$rb_cap" "--no-build" "rollback: --no-build 复用存活 prev 镜像"
 
-# 4c: rollback.sh prev 缺失 → 非零退出（不静默回退 latest）
 unset FAKE_PREV_TAG
 run bash "$SCRIPTS_DIR/rollback.sh"
 assert_exit_nonzero "rollback: prev 缺失非零退出"
 teardown_stubs
 
-# ── 汇总 ────────────────────────────────────────────────────────
 echo ""
 echo "PASS=$PASS FAIL=$FAIL"
 if [ "$FAIL" -ne 0 ]; then

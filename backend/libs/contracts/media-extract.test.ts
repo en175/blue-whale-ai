@@ -1,11 +1,3 @@
-// IKH28T：media_extract（音视频分离）跨进程契约双端一致性断言。
-// 防漂移约定（沿用 video-subtitle-erase.test.ts 读种子文本的同源断言模式）：TS 侧常量直接
-// import 断言值；worker-java 无法 import TS 常量，本测试直接读 Java 源码文本逐值对账——
-// 任一侧改动未同步即红。
-// 契约权威章节：docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md §18（冻结增量）；
-// 官方 API 口径 = 火山引擎 AI MediaKit「提交音频提取任务 API」官方 PDF（format 枚举
-// mp3/m4a/ogg/flac/wav、默认 m4a——表格示例值列写 mp3 但描述文字明确「默认值为 m4a」，以描述文字为准）。
-// 后续票（IKH28V 创建入口 / IKH28W worker 执行 / 前端）照抄本契约与 media-extract.ts，不得发明字段名。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -27,7 +19,6 @@ import {
   mediaExtractInputSchema,
 } from "./media-extract.js";
 
-// 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const contractJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/MediaExtractContract.java",
@@ -49,7 +40,6 @@ const jobTypeJava = readFileSync(
   ),
   "utf8",
 );
-// tag 字面量单处定义在 GenerationMqRoute（MediaExtractContract.TAG 只做转发），故 tag 的对账基准读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
     "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
@@ -72,7 +62,6 @@ describe("media_extract 契约不变量（官方 PDF 口径，TS 侧）", () => 
 
   it("网关端点：提交 /v1/mediakit/{tool}、查询 /v1/mediakit/tasks/（IKH67T 实测校准）", () => {
     expect(MEDIA_EXTRACT_SUBMIT_PATH).toBe("/v1/mediakit/extract-audio");
-    // 三个 MediaKit 异步工具共用同一条查询路由；网关路径 ≠ 火山上游路径（混用即 404）。
     expect(MEDIA_EXTRACT_POLL_PATH_PREFIX).toBe("/v1/mediakit/tasks/");
   });
 
@@ -111,7 +100,6 @@ describe("media_extract 契约不变量（官方 PDF 口径，TS 侧）", () => 
     expect(ERROR_MEDIA_EXTRACT_PROVIDER_FAILED).toBe("media_extract_provider_failed");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_MEDIA_EXTRACT_PROVIDER_FAILED]).toBe(1044);
     expect(ERROR_CODES[1044]).toBeTruthy();
-    // 与本地 ffmpeg 链路兜底 1020 双码并存（ADR-0103 双执行路径），各自独立用位。
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_MEDIA_EXTRACT_FAILED]).toBe(1020);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_MEDIA_EXTRACT_FAILED]).not.toBe(
       GENERATION_ERROR_NUMERIC_CODES[ERROR_MEDIA_EXTRACT_PROVIDER_FAILED],

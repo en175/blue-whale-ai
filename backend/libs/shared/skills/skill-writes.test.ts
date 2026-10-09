@@ -15,12 +15,6 @@ import {
   handleRemoveSkill,
 } from "./skill-writes.js";
 
-/**
- * 这几条链路此前**一个测试都没有**，而它们刚从 `return fail(...)` 改成 `throw`。
- *
- * 断言必须同时钉住 `code` 与 `status`：只钉 code 的话，「信封说失败、HTTP 说成功」这个
- * bug 明天可以原样再来一次而测试全绿——它正是本次要修的东西（ADR-0083「落地记录」）。
- */
 async function rejection(run: () => Promise<unknown>): Promise<DomainError> {
   await expect(run()).rejects.toBeInstanceOf(DomainError);
   return (await run().catch((e: unknown) => e)) as DomainError;
@@ -96,7 +90,6 @@ describe("SKILL.md 不合法 → 400，且文案要点名缺了哪一格", () =>
         code: SKILL_ERROR_SPECS.SKILL_FORMAT_INVALID.code,
         status: 400,
       });
-      // 码相同、话不同：用户得知道该改哪一格。
       expect(error.message).toContain(expected);
     });
   }

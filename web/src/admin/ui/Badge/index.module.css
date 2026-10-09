@@ -9,7 +9,6 @@
   white-space: nowrap;
 }
 
-/* 色点继承当前文字色，所以不用为每个调子各写一条 */
 .dot {
   width: 5px;
   height: 5px;

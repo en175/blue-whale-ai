@@ -1,4 +1,3 @@
-/** 登录/注册勾选区打开的平台协议 */
 export const USER_SERVICES_AGREEMENT_HREF =
   'https://static-bluewhale.yunjizi.cn/agreement/user-services.html';
 export const PLATFORM_PRIVACY_POLICY_HREF =

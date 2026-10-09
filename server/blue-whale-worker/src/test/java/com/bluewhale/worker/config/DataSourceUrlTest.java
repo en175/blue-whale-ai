@@ -5,11 +5,6 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * DATABASE_URL 解析测试（契约 §8：环境变量名与 TS worker 同名）。
- * <p>
- * 覆盖：基础解析、特殊字符、默认端口、异常路径。
- */
 class DataSourceUrlTest {
 
     @Test
@@ -22,7 +17,6 @@ class DataSourceUrlTest {
 
     @Test
     void parseUrlWithSpecialChars() {
-        // URL 编码的特殊字符（如密码含 @/:）
         var result = DataSourceConfig.parseDatabaseUrl("mysql://user%40host:p%40ss%3Aword@db.example.com:3307/prod_db");
         assertThat(result.jdbcUrl()).isEqualTo("jdbc:mysql://db.example.com:3307/prod_db");
         assertThat(result.username()).isEqualTo("user@host");

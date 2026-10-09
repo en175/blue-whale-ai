@@ -1,18 +1,12 @@
-/* ============================================
- * OutpaintFrame 扩图扩展框覆盖层样式（IKGOQX）
- * 屏幕空间层：pointer-events 由各元素自行声明；手柄尺寸恒为屏幕像素。
- * ============================================ */
 
-/* 覆盖层根：铺满画布不拦截交互，仅手柄可点（GroupOverlay uiLayer 同做法） */
 .frameLayer {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 6; /* 节点层(z4)之上、面板(z20)之下，不挡节点标题与工具条交互 */
+  z-index: 6;
   overflow: visible;
 }
 
-/* 框本体：边线 + 扩展区微填充（纯视觉） */
 .frameBox {
   position: absolute;
   border: 1.5px solid rgba(90, 170, 255, 0.9);
@@ -22,9 +16,6 @@
   pointer-events: none;
 }
 
-/* 边手柄 = 命中带 + 视觉把柄两层：
-   命中带透明、贯穿整条边、厚 12px 居中在线上——用户拖的是"边框线"本身；
-   中点蓝条只是视觉提示（pointer-events: none 不拦截） */
 .edgeHit {
   position: absolute;
   pointer-events: auto;
@@ -70,7 +61,6 @@
   background-color: #7cb8ff;
 }
 
-/* 角手柄 = 20×20 透明命中区 + 10×10 视觉点；与边带交汇处角优先（z-index: 1） */
 .cornerHit {
   position: absolute;
   width: 20px;
@@ -100,7 +90,6 @@
   background-color: #7cb8ff;
 }
 
-/* 对角方向：nw/se 与 ne/sw 光标相反 */
 .cornerNwse {
   cursor: nwse-resize;
 }

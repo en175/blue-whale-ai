@@ -1,6 +1,6 @@
-/* ============================================
- * ChatBox 首页对话输入框：模型/技能/附件配置与发送
- * ============================================ */
+
+
+
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
@@ -48,24 +48,24 @@ import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
 
-/** 选项卡定义 */
+
 const tabItems = [
   { key: 'agent', label: '视频智能体' },
   { key: 'video', label: 'AI 视频' },
   { key: 'image', label: 'AI 图片' },
 ];
 
-/** AI视频首尾帧槽位素材项（仅图片；普通参考与槽位互转时复用） */
+
 type KeyframeRefItem = { file?: File; preview: string; type: 'image'; assetId?: string | number };
 
-/** 生成时间戳项目名（与画布新建项目命名一致） */
+
 function makeProjectName(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** 创建新项目并跳转画布（失败时降级为直接跳转） */
+
 async function navigateToNewProject(navigate: ReturnType<typeof useNavigate>, state: unknown) {
   try {
     const created = await createProject(makeProjectName());
@@ -81,24 +81,24 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
-  /** 未登录点击发送时弹登录框 */
+
   const [showLogin, setShowLogin] = useState(false);
-  /** 从资产中选择弹窗打开来源（agent/video/image，null 关闭）：决定 mediaTypes 过滤与确认后的注入目标 */
+
   const [assetsPickerTarget, setAssetsPickerTarget] = useState<'agent' | 'video' | 'image' | null>(null);
-  /** 参考卡上传菜单开关（本地上传 / 从资产中选择） */
+
   const [refMenu, setRefMenu] = useState<'agent' | 'video' | 'image' | null>(null);
-  /** 菜单 fixed 定位（portal 到 body，避免被 refArea 滚动容器裁切） */
+
   const [refMenuPos, setRefMenuPos] = useState<{ top: number; left: number } | null>(null);
   const refMenuRef = useRef<HTMLDivElement>(null);
-  /** 当前 tab 的参考/附件卡（定位锚点；三个 tab 同时只渲染一个） */
+
   const refCardRef = useRef<HTMLDivElement>(null);
-  /** 登录成功后续接的原动作（Skill / 发送最后一次点击为准） */
+
   const pendingAction = useRef<HomePendingAction | null>(null);
-  /** IKA64P：「直接使用」武装的技能气泡（发送时随消息作为强制技能生效） */
+
   const [armedSkill, setArmedSkill] = useState<{ id: string; name: string } | null>(null);
 
-  /** 画廊卡片点击：只填输入框并切 tab，不拦登录；真正发送时再校验。
-   *  用 ts 驱动重复点击同一张卡也能注入，不把 text/mediaType 放进依赖。 */
+
+
   useEffect(() => {
     if (draft?.ts) {
       setInputValue(draft.text);
@@ -113,47 +113,47 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     textarea.style.height = 'auto';
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [activeTab, inputValue]);
-  /** 智能体 tab 附件（+ 上传 图片/视频/音频、从资产中选择 图片/视频）——
-   *  本地上传保留原始 File，资产选择项带 assetId（发送时经 handoff 免重复上传） */
+
+
   const [agentFiles, setAgentFiles] = useState<
     { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string; file?: File; assetId?: string | number }[]
   >([]);
   const agentFileInputRef = useRef<HTMLInputElement>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
-  /** 创作/推理模型初始值为空：接口加载完成后由 effect 选中第一个，不写死任何模型 id */
+
   const [creationModel, setCreationModel] = useState('');
   const [reasoningModel, setReasoningModel] = useState('');
   const [showCreationDropdown, setShowCreationDropdown] = useState(false);
   const [showReasoningDropdown, setShowReasoningDropdown] = useState(false);
   const [underlineStyle, setUnderlineStyle] = useState<React.CSSProperties>({});
 
-  // AI视频专属状态（模型/比例/清晰度/时长初始均为空，接口加载完成后由校准 effect 套用模型默认值）
+
   const [videoModel, setVideoModel] = useState('');
   const [videoMode, setVideoMode] = useState<VideoMode>('text2video');
   const [aspectRatio, setAspectRatio] = useState('');
   const [resolution, setResolution] = useState('');
   const [duration, setDuration] = useState(0);
-  /** IKG0LP：是否带音频（用户选择，缺省 true = 与上游默认及改动前行为一致） */
+
   const [generateAudio, setGenerateAudio] = useState(true);
   const [showVideoModelDrop, setShowVideoModelDrop] = useState(false);
   const [showVideoModeDrop, setShowVideoModeDrop] = useState(false);
   const [showRatioDrop, setShowRatioDrop] = useState(false);
   const [showResDrop, setShowResDrop] = useState(false);
   const [showDurationDrop, setShowDurationDrop] = useState(false);
-  /** AI视频 参考素材：本地上传带 File，资产选择项带 assetId（type 字段区分图片/视频） */
+
   const [refFiles, setRefFiles] = useState<
     { file?: File; preview: string; type: 'image' | 'video'; assetId?: string | number }[]
   >([]);
-  /** 当前是否首尾帧模式（对齐画布：首尾帧为两个独立槽位，各一张图片） */
+
   const isKeyframe = isFrameMode(videoMode);
-  /** 首尾帧模式专用：首帧/尾帧各一张图片。提交按 first→last 拼进 refs，保证顺序兼容画布映射 */
+
   const [keyframeRefs, setKeyframeRefs] = useState<{
     first?: { file?: File; preview: string; type: 'image'; assetId?: string | number };
     last?: { file?: File; preview: string; type: 'image'; assetId?: string | number };
   }>({});
-  /** 首尾帧槽位当前的添加目标（从资产中选择分流） */
+
   const [slotTarget, setSlotTarget] = useState<'first' | 'last' | null>(null);
-  /** 校验类轻提示（顶部弹出，自动消失） */
+
   const [toast, setToast] = useState('');
   const toastTimer = useRef<number | null>(null);
   const showToast = useCallback((msg: string) => {
@@ -168,14 +168,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     [],
   );
 
-  // AI图片专属状态（初始为空，接口加载完成后 applyImageModel 套用默认值）
+
   const [imageModel, setImageModel] = useState('');
   const [imageAspectRatio, setImageAspectRatio] = useState('');
   const [imageResolution, setImageResolution] = useState('');
   const [showImgModelDrop, setShowImgModelDrop] = useState(false);
   const [showImgRatioDrop, setShowImgRatioDrop] = useState(false);
   const [showImgResDrop, setShowImgResDrop] = useState(false);
-  /** AI图片 参考图：本地上传带 File，资产选择项带 assetId（preview 为永久 URL，免 revoke） */
+
   const [imageRefFiles, setImageRefFiles] = useState<
     { file?: File; preview: string; name?: string; assetId?: string | number }[]
   >([]);
@@ -197,12 +197,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const firstSlotRef = useRef<HTMLButtonElement>(null);
   const lastSlotRef = useRef<HTMLButtonElement>(null);
 
-  // 模型能力列表（首页并发调用 text/video/image；失败保留本地兜底选项）
+
   const [textModels, setTextModels] = useState<GenerationModel[]>([]);
   const [videoModelList, setVideoModelList] = useState<GenerationModel[]>([]);
   const [imageModelList, setImageModelList] = useState<GenerationModel[]>([]);
 
-  /** 选中 AI图片 模型并套用其默认比例/清晰度 */
+
   const applyImageModel = (model: GenerationModel) => {
     setImageModel(model.model_id);
     const nextSize =
@@ -213,14 +213,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setImageAspectRatio(pickRatioForSize(model, nextSize, model.default_aspect_ratio));
   };
 
-  // 首尾帧模式校验：至少上传一张图片（首帧或尾帧）即可，不再强制成对
+
   useEffect(() => {
     if (!isKeyframe) return;
     const ok = keyframeRefs.first || keyframeRefs.last;
     if (!ok) showToast('首尾帧模式需至少上传一张图片（首帧或尾帧）');
   }, [isKeyframe, keyframeRefs, showToast]);
 
-  // 视频模型列表加载 / 切换模型后：当前参数若不在新模型能力内，套用该模型默认值（接口为唯一数据源）
+
   useEffect(() => {
     const m = videoModelList.find((x) => x.model_id === videoModel);
     if (!m) return;
@@ -270,7 +270,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoModelList, videoModel, isKeyframe, videoMode]);
 
-  // 并发加载三种能力的模型列表
+
   useEffect(() => {
     fetchGenerationModels('text')
       .then((list) => {
@@ -297,7 +297,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       .catch(() => undefined);
   }, []);
 
-  // 更新下划线位置
+
   const updateUnderline = useCallback(() => {
     const activeEl = tabRefs.current.get(activeTab);
     const barEl = tabBarRef.current;
@@ -315,7 +315,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     updateUnderline();
   }, [updateUnderline]);
 
-  // 点击外部关闭弹出层
+
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (creationRef.current && !creationRef.current.contains(e.target as Node)) {
@@ -348,7 +348,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       if (imgResRef.current && !imgResRef.current.contains(e.target as Node)) {
         setShowImgResDrop(false);
       }
-      // 上传菜单：点击菜单与参考卡以外区域时关闭（参考卡由自身 click 切换开合）
+
       if (
         refMenuRef.current && !refMenuRef.current.contains(e.target as Node) &&
         (!refCardRef.current || !refCardRef.current.contains(e.target as Node))
@@ -360,12 +360,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  /** 跳转画布页并携带草稿（经 location.state 注入 Agent 弹框）与武装技能；
-   *  附件经模块变量 handoff 带入（File 无法序列化进 navigate state） */
+
+
   const goCanvasWithText = (text: string, skillId?: string, skillName?: string) => {
     setInputValue('');
-    if (skillId) setArmedSkill(null); // 携带后清除气泡
-    // 附件交接：仅 image/video（画布 Agent 弹框同规则），音频 toast 提示后丢弃
+    if (skillId) setArmedSkill(null);
+
     if (agentFiles.length > 0) {
       const media = agentFiles.filter((f) => f.kind !== 'audio');
       const audioCount = agentFiles.length - media.length;
@@ -386,7 +386,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     navigateToNewProject(navigate, { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' });
   };
 
-  /** 按当前 tab 分发：智能体→Agent 对话；AI视频/AI图片→画布直接生成节点并唤起对应对话框 */
+
   const dispatchByTab = (text: string) => {
     if (activeTab === 'video') {
       if (!selectedVideoModel) {
@@ -397,7 +397,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         showToast('当前模型未配置视频模式，请更换模型');
         return;
       }
-      // 后端视频任务 resolution 期望 api_value（如 720p），此处由所选档位 id 换算
+
       const sizeEntry = selectedVideoModel.supported_sizes.find((s) => s.id === resolution);
       const handoffParams = effectiveVideoParams(selectedVideoModel.features, videoMode, {
         aspectRatio,
@@ -411,7 +411,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         resolution: sizeEntry?.api_value ?? sizeEntry?.id ?? resolution,
         duration: handoffParams.duration,
         mode: videoMode,
-        // IKG0LP：音频选择必须进交接结构，否则跳到画布就丢了
+
         generateAudio,
         refs: isKeyframe
           ? ([keyframeRefs.first, keyframeRefs.last].filter(Boolean) as (
@@ -463,10 +463,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     goCanvasWithText(text, armedSkill?.id, armedSkill?.name);
   };
 
-  /** IKA64P：「直接使用」= 关闭弹窗并武装技能气泡（不再填全文；发送时随消息作为强制技能生效） */
+
   const handleUseSkill = (skill: SkillRecord) => {
     setShowSkillModal(false);
-    // 登录成功回调与当前渲染可能同拍，必须读 store 而不是闭包里的 user
+
     if (!getCurrentUser()) {
       pendingAction.current = { kind: 'use-skill', skill };
       setShowLogin(true);
@@ -479,12 +479,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const handleSend = () => {
     const text = inputValue.trim();
     if (!text) return;
-    // 首尾帧模式：发送时必须首帧与尾帧齐全
+
     if (keyframeSendHint) {
       showToast(keyframeSendHint);
       return;
     }
-    // 首页不发送：先校验登录，未登录弹登录框
+
     if (!user) {
       pendingAction.current = { kind: 'send', text };
       setShowLogin(true);
@@ -493,7 +493,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     dispatchByTab(text);
   };
 
-  /** 关闭登录框：登录成功则续接最后一次动作；放弃则清理（发送稿回填输入框）。 */
+
   const handleLoginClose = () => {
     setShowLogin(false);
     const pending = pendingAction.current;
@@ -517,7 +517,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
   };
 
-  /** + 上传：点击直接选取图片/视频/音频（分类型上限：图片随创作模型能力、视频/音频固定 3），超限按类型 toast */
+
   const handleAgentFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     let imgRoom = Math.max(0, agentMaxImages - agentImageCount);
@@ -564,7 +564,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     e.target.value = '';
   };
 
-  /** 移除附件并释放 objectURL（资产选择项为永久 URL，不释放） */
+
   const removeAgentFile = (id: string) => {
     setAgentFiles((prev) => {
       const target = prev.find((f) => f.id === id);
@@ -573,11 +573,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     });
   };
 
-  /** IME 输入组合状态跟踪（中文输入法回车确认不应触发发送） */
+
   const composingRef = useRef(false);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // IME 组合输入中：回车仅确认候选词，不触发发送
+
     if (composingRef.current || e.nativeEvent.isComposing) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -591,15 +591,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     if (next.reachedLimit && activePromptCap != null) showToast(`输入内容最多 ${activePromptCap} 个字符`);
   };
 
-  /** 三个 textarea 共用的 composition 事件处理 */
+
   const handleCompositionStart = () => { composingRef.current = true; };
   const handleCompositionEnd = () => { composingRef.current = false; };
 
-  // 模型下拉选项：全部取自接口（fetchGenerationModels），无本地写死兜底
+
   const agentModelOptions = textModels.map((m) => ({ key: m.model_id, label: m.model_label }));
   const videoModelOptions = videoModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
   const imageModelOptions = imageModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
-  // 智能体 tab 创作模型下拉：与 AI视频 模型同源（video capability）
+
   const creationModelOptions = videoModelOptions;
 
   const currentCreationModel =
@@ -616,7 +616,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const currentImageModel =
     imageModelOptions.find((m) => m.key === imageModel)?.label ?? '';
 
-  // AI图片 比例/清晰度选项：取自所选模型能力（接口为唯一数据源）
+
   const selectedImageModel = imageModelList.find((m) => m.model_id === imageModel);
   const imageRatioOptions = selectedImageModel
     ? ratiosForSelectedSize(selectedImageModel, imageResolution)
@@ -628,7 +628,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const currentImageResolution =
     imageSizeItems.find((s) => s.key === imageResolution)?.label ?? imageResolution;
 
-  // AI视频 比例/清晰度/时长范围：取自所选模型能力（接口为唯一数据源）
+
   const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
 
   const videoRefsProjection = useMemo<VideoMediaRefs>(() => {
@@ -673,12 +673,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const videoSizeItems =
     selectedVideoModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
   const videoDurationRange = selectedVideoModel?.supported_durations ?? null;
-  /** IKG0LP：该模型是否允许生成带音频（能力位 features.audio）。不允许则不提供用户选择。 */
+
   const supportsVideoAudio = selectedVideoModel?.features?.audio === true;
 
-  // 上传上限（与画布弹窗同规则）：图片/视频/音频均读能力行（ADR-0086），能力未加载完时图片为 0、视频/音频回落缺省
-  /** 智能体 tab 附件分类型上限：随所选创作模型（video capability）读能力行
-   *  （image_reference_max / video_reference_max / audio_reference_max） */
+
+
+
   const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
   const selectedPromptModel = isImageTab
     ? selectedImageModel
@@ -702,13 +702,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const videoMaxImages =
     frameSlotCountOf(videoMode) > 0
       ? frameSlotCountOf(videoMode)
-      // 能力未加载时用不阻断的宽松兜底（IKHBO 口径），而非能力缺省 1。
+
       : (selectedVideoModel?.features?.image_reference_max ?? UNRESOLVED_IMAGE_REFERENCE_LIMIT);
   const videoMaxVideos = videoReferenceMaxOf(selectedVideoModel?.features);
   const videoImagesFull = videoRefImageCount >= videoMaxImages;
   const videoVideosFull = videoRefVideoCount >= videoMaxVideos;
-  /** 首尾帧模式发送校验：添加阶段允许先只传一个（首帧/尾帧），但发送时必须首帧与尾帧齐全。
-   *  keyframeSendHint 非空表示不完整，用于发送按钮 title 与点击时的 toast 提示缺项。 */
+
+
   const keyframeSendHint = isKeyframe
     ? !keyframeRefs.first && !keyframeRefs.last
       ? '请补充首帧/尾帧'
@@ -718,18 +718,18 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           ? '请补充尾帧'
           : ''
     : '';
-  /** AI 图片参考图上限（ADR-0086：读能力行 image_reference_max；缺省 10，与后端图片/视频口径一致，
-   *  不再 min 到旧写死 9）。 */
+
+
   const imageMaxImages = imageReferenceMaxOf(selectedImageModel?.features);
 
-  /** IKJ794：全能参考被动提示——与画布 BottomDialog 同条件同文案：
-   *  全能参考模式 + 模型支持 adaptive（Seedance 2.5，与 IKFQ5S 同锚）+ 已挂 ≥1 参考视频；
-   *  纯条件渲染（零关键词判定），首尾帧 / 2.0 系列 / 未挂视频均不显示。 */
+
+
+
   const showOmniFollowHint = videoMode === 'omni'
     && !!hasAspectRatio(selectedVideoModel?.supported_aspect_ratios, 'adaptive')
     && videoRefVideoCount > 0;
 
-  // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
+
   const handleVideoModeChange = (key: VideoMode) => {
     setShowVideoModeDrop(false);
     if (key === videoMode) return;
@@ -822,14 +822,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const removeRefFile = (index: number) => {    setRefFiles((prev) => {
       const copy = [...prev];
-      // 资产选择项的 preview 是永久 URL，仅释放本地上传的 objectURL
+
       if (copy[index].file) URL.revokeObjectURL(copy[index].preview);
       copy.splice(index, 1);
       return copy;
     });
   };
 
-  // 处理AI图片参考文件上传（按接口上限截断，超限 toast）
+
   const handleImageRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     const remaining = Math.max(0, imageMaxImages - imageRefFiles.length);
@@ -846,16 +846,16 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const removeImageRefFile = (index: number) => {
     setImageRefFiles((prev) => {
       const copy = [...prev];
-      // 资产选择项的 preview 是永久 URL，仅释放本地上传的 objectURL
+
       if (copy[index].file) URL.revokeObjectURL(copy[index].preview);
       copy.splice(index, 1);
       return copy;
     });
   };
 
-  /* ---- 从资产中选择（IKC3RY 模块D：三个 tab 的参考/附件卡 → 资产库选择弹窗） ---- */
 
-  /** 资产 URL 兜底展示名（AssetRecord 无 name 字段） */
+
+
   const assetPickName = (asset: AssetRecord): string => {
     try {
       const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
@@ -865,7 +865,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
   };
 
-  /** 打开资产选择弹窗（未登录先弹登录框，与 Skill 按钮等入口一致） */
+
   const openAssetsPicker = (target: 'agent' | 'video' | 'image') => {
     if (!user) {
       setShowLogin(true);
@@ -874,7 +874,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setAssetsPickerTarget(target);
   };
 
-  /** 参考/附件卡点击：切换上传菜单（按卡片位置 fixed 定位） */
+
   const toggleRefMenu = (key: 'agent' | 'video' | 'image') => {
     if (refMenu === key) {
       setRefMenu(null);
@@ -886,7 +886,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setRefMenu(key);
   };
 
-  /** 首尾帧槽位添加：打开来源菜单（本地上传 / 从资产中选择） */
+
   const openKeyframeSlotMenu = (slot: 'first' | 'last') => {
     const el = slot === 'first' ? firstSlotRef.current : lastSlotRef.current;
     if (!el) return;
@@ -896,13 +896,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setRefMenu('video');
   };
 
-  /** 首尾帧槽位移除：只清对应槽 */
+
   const removeKeyframeSlot = (slot: 'first' | 'last') => {
     setKeyframeRefs((prev) => (slot === 'first' ? { last: prev.last } : { first: prev.first }));
   };
 
-  /** 资产选择确认：按来源注入对应 tab 的参考/附件列表
-   *  （assetId 直接复用免重复上传；上限与去重规则和本地上传入口一致） */
+
+
   const handleAssetsPickerSelect = (assets: AssetRecord[]) => {
     const target = assetsPickerTarget;
     setAssetsPickerTarget(null);
@@ -957,7 +957,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         showToast(VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
       }
       if (approvedAssets.length === 0) return;
-      // 首尾帧模式：仅取一张图片写入目标槽
+
       if (isKeyframe) {
         const image = approvedAssets.find((a) => a.type === 'image');
         if (image && slotTarget) {
@@ -973,7 +973,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       );
       let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
       let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
-      // ADR-0086：模型不接受视频素材参考时跳过视频（与本地上传路径同口径，不静默加入）
+
       const videoRefUnsupported = !supportsVideoReferenceOf(selectedVideoModel?.features);
       const eligible = approvedAssets
         .filter((a) => a.type === 'image' || a.type === 'video')
@@ -1005,7 +1005,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       return;
     }
 
-    // AI 图片 tab：仅图片，受接口/约定上限约束，重复资产去重
+
     const existing = new Set(
       imageRefFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
     );
@@ -1026,7 +1026,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   return (
     <>
       <div className={styles.chatBox}>
-        {/* 顶部选项卡 */}
+        { }
         <div className={styles.tabBar} ref={tabBarRef}>
           {tabItems.map((tab) => (
             <button
@@ -1044,14 +1044,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         </div>
 
         {isVideoTab ? (
-          /* ========== AI 视频 专属布局 ========== */
+
           <>
-            {/* 内容区域 */}
+            { }
             <div className={styles.videoContent}>
-              {/* 参考文件预览 + 上传（顶部行） */}
+              { }
               <div className={styles.refArea}>
                 {isKeyframe ? (
-                  /* 首尾帧模式：首帧 + 尾帧两个独立槽位同一行（对齐画布） */
+
                   <div className={styles.refSlotRow}>
                     {keyframeRefs.first ? (
                       <div className={styles.refSlot}>
@@ -1140,7 +1140,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   </>
                 )}
               </div>
-              {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
+              { }
               <div className={styles.textareaWrap}>
                 <textarea
                   ref={textareaRef}
@@ -1167,15 +1167,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               onChange={handleRefFiles}
             />
 
-            {/* IKJ794：全能参考被动提示（条件见 showOmniFollowHint，与画布 BottomDialog 同条件同文案） */}
+            { }
             {showOmniFollowHint && (
               <div className={styles.followHint}>{OMNI_REFERENCE_FOLLOW_HINT}</div>
             )}
 
-            {/* 参数按钮行 */}
+            { }
             <div className={styles.videoParamBar}>
               <div className={styles.videoParamsLeft}>
-                {/* 模型下拉 */}
+                { }
                 <div className={styles.dropdownWrap} ref={videoModelRef}>
                   <button
                     className={styles.paramBtn}
@@ -1204,7 +1204,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   )}
                 </div>
 
-                {/* 模式下拉 */}
+                { }
                 <div className={styles.dropdownWrap} ref={videoModeRef}>
                   <button
                     className={styles.paramBtn}
@@ -1229,7 +1229,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   )}
                 </div>
 
-                {/* 宽高比下拉（ADR-0086：首尾帧任务官方强制 adaptive、比例内置不暴露，整块不渲染） */}
+                { }
                 {!videoRatioLocked && (
                   <div className={styles.dropdownWrap} ref={ratioRef}>
                     <button
@@ -1237,7 +1237,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                       onClick={() => setShowRatioDrop(!showRatioDrop)}
                     >
                       <RatioIcon ratio={aspectRatio} size={22} />
-                      {/* IKJ4W6：内部键 adaptive 展示为 auto；state/提交值仍是 adaptive。 */}
+                      { }
                       <span>{videoRatioText(aspectRatio)}</span>
                       <ChevronDown size={12} strokeWidth={2} />
                     </button>
@@ -1250,7 +1250,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                             onClick={() => { setAspectRatio(ratio.id); setShowRatioDrop(false); }}
                           >
                             <RatioIcon ratio={ratio.id} size={22} />
-                            {/* IKJ4W6：内部键 adaptive 展示为 auto；选中/提交值仍是 adaptive。 */}
+                            { }
                             <span>{videoRatioLabel(ratio.label)}</span>
                           </button>
                         ))}
@@ -1259,7 +1259,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   </div>
                 )}
 
-                {/* 分辨率下拉 */}
+                { }
                 <div className={styles.dropdownWrap} ref={resRef}>
                   <button
                     className={styles.paramBtn}
@@ -1283,7 +1283,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   )}
                 </div>
 
-                {/* 时长下拉 */}
+                { }
                 <div className={styles.dropdownWrap} ref={durationRef}>
                   <button
                     className={styles.paramBtn}
@@ -1306,7 +1306,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   )}
                 </div>
 
-                {/* IKG0LP：是否带音频——仅模型能力位 features.audio 允许时提供；缺省开 */}
+                { }
                 {supportsVideoAudio && (
                   <button
                     className={styles.paramBtn}
@@ -1333,11 +1333,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             </div>
           </>
         ) : isImageTab ? (
-          /* ========== AI 图片 专属布局 ========== */
+
           <>
-            {/* 内容区域 */}
+            { }
             <div className={styles.videoContent}>
-              {/* 参考文件预览 + 上传（顶部行） */}
+              { }
               <div className={styles.refArea}>
                 {imageRefFiles.map((item, idx) => (
                   <div key={idx} className={styles.refThumbWrap}>
@@ -1370,7 +1370,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   <span>参考</span>
                 </div>
               </div>
-              {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
+              { }
               <div className={styles.textareaWrap}>
                 <textarea
                   ref={textareaRef}
@@ -1388,7 +1388,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               </div>
             </div>
 
-            {/* 隐藏的文件输入 */}
+            { }
             <input
               ref={imageFileInputRef}
               type="file"
@@ -1398,10 +1398,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               onChange={handleImageRefFiles}
             />
 
-            {/* 参数按钮行 */}
+            { }
             <div className={styles.videoParamBar}>
               <div className={styles.videoParamsLeft}>
-                {/* 模型下拉 */}
+                { }
                 <div className={styles.dropdownWrap} ref={imgModelRef}>
                   <button
                     className={styles.paramBtn}
@@ -1430,7 +1430,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   )}
                 </div>
 
-                {/* 宽高比下拉 */}
+                { }
                 <div className={styles.dropdownWrap} ref={imgRatioRef}>
                   <button
                     className={styles.paramBtn}
@@ -1456,7 +1456,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   )}
                 </div>
 
-                {/* 分辨率下拉 */}
+                { }
                 <div className={styles.dropdownWrap} ref={imgResRef}>
                   <button
                     className={styles.paramBtn}
@@ -1499,9 +1499,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             </div>
           </>
         ) : (
-          /* ========== 视频智能体：媒体在上、文字在下，与 AI视频/AI图片 排版一致 ========== */
+
           <>
-            {/* IKA64P：直接使用武装的技能气泡（与画布 Agent 风格一致） */}
+            { }
             {armedSkill && (
               <div className={styles.armedSkill}>
                 <BookText size={13} strokeWidth={2} />
@@ -1517,9 +1517,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               </div>
             )}
 
-            {/* 内容区域：媒体在上、文字在下 */}
+            { }
             <div className={styles.videoContent}>
-              {/* 附件预览 + 上传（顶部行） */}
+              { }
               <div className={styles.refArea}>
                 {agentFiles.map((f, idx) => (
                   <div key={f.id} className={styles.refThumbWrap}>
@@ -1563,7 +1563,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 </div>
               </div>
 
-              {/* 提示词输入框 */}
+              { }
               <div className={styles.textareaWrap}>
                 <textarea
                   ref={textareaRef}
@@ -1581,7 +1581,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               </div>
             </div>
 
-            {/* 隐藏文件输入 */}
+            { }
             <input
               ref={agentFileInputRef}
               type="file"
@@ -1591,11 +1591,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               onChange={handleAgentFilePick}
             />
 
-            {/* 底部工具栏 */}
+            { }
             <div className={styles.toolbar}>
-              {/* 左侧工具 */}
+              { }
               <div className={styles.toolbarLeft}>
-                {/* Skill 按钮 */}
+                { }
                 <button
                   className={styles.skillBtn}
                   onClick={() => {
@@ -1611,7 +1611,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   <span>Skill</span>
                 </button>
 
-                {/* 创作模型下拉 */}
+                { }
                 <div className={styles.dropdownWrap} ref={creationRef}>
                   <button
                     className={styles.modelBtn}
@@ -1639,9 +1639,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 </div>
               </div>
 
-              {/* 右侧工具 */}
+              { }
               <div className={styles.toolbarRight}>
-                {/* 推理模型下拉 */}
+                { }
                 <div className={styles.dropdownWrap} ref={reasoningRef}>
                   <button
                     className={styles.modelBtn}
@@ -1668,7 +1668,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   )}
                 </div>
 
-                {/* 发送按钮 */}
+                { }
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
@@ -1682,24 +1682,24 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         )}
       </div>
 
-      {/* Skill 遮罩层 */}
+      { }
       <SkillModal
         open={showSkillModal}
         onClose={() => setShowSkillModal(false)}
         onUseSkill={(s) => handleUseSkill(s)}
       />
 
-      {/* 未登录拦截弹窗 */}
+      { }
       {showLogin && <LoginModal onClose={handleLoginClose} />}
 
-      {/* 校验轻提示（顶部居中弹出） */}
+      { }
       {toast && (
         <div className={styles.toast} role="alert">
           {toast}
         </div>
       )}
 
-      {/* 参考/附件卡上传菜单：本地上传 + 从资产中选择（AI 视频无角色库） */}
+      { }
       {refMenu && refMenuPos && createPortal(
         <div ref={refMenuRef} className={styles.refMenu} style={refMenuPos}>
           <button
@@ -1732,7 +1732,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         document.body,
       )}
 
-      {/* 从资产中选择：视频入口 tab/类型过滤与画布视频 dock 一致 */}
+      { }
       {assetsPickerTarget && (
         <AssetsPickerModal
           onClose={() => setAssetsPickerTarget(null)}

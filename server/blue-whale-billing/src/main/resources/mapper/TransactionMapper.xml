@@ -2,99 +2,27 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<!--
-  用户可见流水的投影（一个业务动作一行，契约见 contracts/proto/billing/v1/billing.proto）。
 
-  ── 为什么不直接用账本分录 ────────────────────────────────────────────────
 
-  账本是**复式**的：一个业务动作有好几腿（预扣 = 借 wallet + 贷 frozen；
-  结算 = 解冻 + 消耗 + 退差额）。直接暴露分录，用户会看到「同一个操作扣了两次」，
-  而且「这一行到底是收入还是支出」得先读懂借贷方向才能判断。
-  所以这里按**业务动作**（一张凭证）折成一行。
 
-  ── 三类来源，各自由自己的权威表出 ──────────────────────────────────────
 
-  ① 发放 / 充值（in）      ← billing_credit_lots
-     每个批次恰好对应一次发放（uk_lots__grant_key 唯一），金额就是发放量。
-     展示类型来自批次上的 source —— 这是**唯一**记录「这 500 分是怎么来的」的地方，
-     所以这一族不能从账本出（账本分录只有 biz_type='grant'，看不出 daily 还是 invite）。
 
-  ② 消费 / 退回（out / in）← billing_cost_reservations
-     每个 job 恰好一条预留（uk_reservation__job 唯一）。**一个 job 恒一行**，形态随状态变：
-     held     → consume / pending（金额 = 预扣额，即用户提交时看到的「预计消耗」），
-     settled  → consume / done   （金额 = actual_credits，结算定下的**最终值**），
-     released → refund  / done   （金额 = reserved_credits，全额退回当初冻的那个数）。
-     ⚠️ 三态共用同一个主键 `res:{预留 id}`——退回是那一行**变了**，不是多出一行。
-     ⚠️ 预扣额另出一列 `reserved_credits`（**管理面独用**）：结算后金额换成实际值，
-        「当初冻了多少」就只剩这一列能答——详见下面 ② 分支的注释。
 
-  ③ 其余资金动作（in/out） ← billing_ledger_entries，一凭证一行
-     过期核销、人工调账这类「不是发放也不是消费」的动作用它。
-     白名单（expire / adjust）而不是黑名单：黑名单（NOT IN）会让将来新加的业务类型
-     静默漏进用户流水，而它多半还没有对应的展示类型。
 
-  ── 为什么这样合并不漏也不重 ────────────────────────────────────────────
 
-  · 不漏：一次业务动作必然留下批次行、预留行或账本凭证三者之一——
-    钱只可能从批次表进来（余额的唯一权威），消费只可能经预留冻结（Hold 是唯一出口），
-    其余动作按 Voucher 记进账本。三类都查了，就没有第四处。
-  · 不重：每个动作只从**它自己那一处**取，没有任何一个动作被两处同时取到——
-      · hold 凭证不出现在 ③（它不改用户总资产：wallet 减、frozen 等量增，净变化 0；
-        它对应的是 ② 里那条 pending 行）
-      · settle 凭证不出现在 ③（它的用户可见形态就是 ② 里那条转为 done 的行——
-        同一 job 出两行才是真正的重复）
-      · grant / recharge 凭证不出现在 ③（它们在 ① 里，且带着 ③ 拿不到的来源）
-      · refund 凭证也不出现在 ③（净变化 0）——**但退回这件事并没有因此消失**：
-        它的用户可见形态是 ② 里那条转为 refund 的行（那一行**同时也不再是消费**了，
-        所以这里再出一行是平白多一行，而不是「两行都在」）。另有更硬的一道闸：
-        ③ 的白名单只有 expire / adjust，refund 压根不在其列
-    一句话：三类按「动作类型」互斥分工，合起来恰好覆盖全部动作。
 
-  ── 排序键 ──────────────────────────────────────────────────────────────
 
-  ORDER BY created_at DESC, kind ASC, src_id DESC —— 三级全用不可变量：
-  created_at 是行的产生时刻（批次与凭证 append-only，预留也只有 gmt_create 不变），
-  kind + src_id 是同一个 action 的稳定身份。
 
-  ⚠️ 2026-09-30 分页由**游标**改为 **offset**（`common/v1/types.proto` 的 PageRequest）。
-  「三级键都不可变」这条要求**没有变松，反而更硬**：offset 翻页途中若某行的排序键变了，
-  它会从原位消失、在别处重现 —— 第 2 页漏一行、第 3 页重复一行，而且不报错。
-  所以下面 ② 里「状态转换时 kind 不许改」那条依然必须守。
 
-  ⚠️ offset 的代价是明摆着的：翻页途中新插入的行会把后面的行整体下移，用户可能看到重复行。
-  这是「要总数与页码」换来的，留痕见前端对接文档 §6.2。原游标实现的理由是「账本持续新增，
-  offset 会漏行」—— **那条理由仍然成立**，只是被接受为交换，不是被证伪。
 
-  次级键仍然不是可选项：DATETIME 只到秒，同一秒内多行是常态（一次 hold 与一次 grant
-  常常落在同一秒），只按时间排序会让同秒内的顺序不稳定。
--->
 <mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.TransactionMapper">
 
-  <!--
-    ⚠️ `userId` 可空：**非空 = 用户面**（只看自己那份，gRPC ListTransactions），
-    **为 null = 管理面**（全站流水，billing 的 /admin/transactions）。
-    两种调用共用这条语句，所以三个分支各自用 <if> 决定要不要过滤 user_id ——
-    **过滤条件写在分支内部**（而不是提到 UNION 外面包一层），这样「给 userId」时
-    生成的 SQL 与加管理面之前逐字相同，用户面走的是同一条执行计划，不受这次改动影响。
 
-    ⚠️ `user_id` 进投影是为了管理面能回答「这行是谁的」；用户面不读它。
-  -->
-  <!--
-    三路 UNION 的**唯一一份**：`selectPage` 与 `countPage` 都 include 它。
 
-    抽出来不是为了复用好看，是为了**总数与当页必须出自同一套谓词** ——
-    两个 select 各写一遍时，改了一边忘了另一边，「共 N 条」就会与翻出来的行数对不上，
-    而这种不一致不会报错。
-  -->
   <sql id="transactionUnion">
 
-      <!-- ① 发放 / 充值：批次表。金额是发放量，方向恒为 in，落地即完成。 -->
       SELECT CONCAT('lot:', l.id) AS tx_id,
 
-             <!-- 类型与文案都由 source 决定：用户关心的是「什么名义给的」。
-                  ⚠️ 未列出的来源落到 ELSE。新增 CreditSource 时这里必须表态——
-                  TransactionsIntegrationTest 逐条断言每个来源的展示类型，漏配会红。
-                  register（注册赠送）在契约的类型枚举里没有对应值，归入 gift。 -->
              CASE l.source
                WHEN 'purchased'    THEN 'recharge'
                WHEN 'compensation' THEN 'compensation'
@@ -121,11 +49,7 @@
                ELSE '积分发放'
              END AS title,
              l.amount     AS amount,
-             <!-- 发放没有「预扣」这回事：钱是直接进来的，不存在先冻后结算。
-                  用 NULL 而不是 0 —— 0 是「冻了 0 分」，与「没有这个概念」是两回事，
-                  界面上后者不该显示任何预扣文案。 -->
              NULL         AS reserved_credits,
-             <!-- 发放不是任务，没有 job 可关联（与上面 reserved_credits 同一种「不适用」） -->
              NULL         AS generation_job_id,
              'done'       AS status,
              l.gmt_create AS created_at,
@@ -140,95 +64,26 @@
 
       UNION ALL
 
-      <!--
-        ② 消费：预留表。**一个 job 恒一行**，行的形态随状态变。
 
-        amount 随 status 取不同的列，是「一个金额」这条硬规则在 SQL 里的落点：
-          held     → reserved_credits（预计消耗，用户提交时看到的那个数）
-          终态     → actual_credits  （settled = 结算定下的最终值；released = 0）
-        两个值不会同时出现——它们先后占同一列，所以界面上永远只有一个金额。
 
-        reserved_credits 另出一列（**管理面独用**）：settled 之后 amount 已经换成实际值，
-        「当初冻了多少」就再也无处可读了 —— 而用户余额先降后回的差额恰恰要靠它解释
-        （实测：某任务冻 12、实扣 1，用户在流水里只看到 -1，那 11 的来回无人交代）。
-        一行的两列都在同一张表上，**不需要 join**：这一行的身份就是那条预留。
-        ⚠️ 用户面（gRPC ListTransactions）**不投影**这一列，见 BillingGrpcService
-           与 {@code TransactionView} 的说明——「用户界面永远只出现一个金额」不受影响。
-        held 行的这两个数是同一个值（amount 就是预扣额），由调用方决定要不要重复展示。
 
-        ★ **退回不是另一种流水，是「结算到 0」** —— 与「多退少补」同一条口径：
-        行里永远取终态实际值，预扣额另走 reserved_credits（管理面注解）。
-        全额退回只是「实际 = 0」这个极端，于是失败单在流水里读作「消费 0（预扣 N）」
-        而不是「退款 +N」：一行同时交代扣与退两腿，列表的入出净和也等于余额变化
-        （退回单贡献 0；出成 refund/in、金额取预扣额的话，列表会自己加不出余额 ——
-        流水里凭空多出一笔无对应支出的进账）。
 
-        ★ released（任务失败全额返，**或超时兜底释放**）**不消失**：
-        曾经那种「把 status = 'released' 的行直接滤掉」的写法有两个说不通的地方：
-          · 用户**已经看到过**那条 pending 行（可用余额也真的降过），随后它凭空消失。
-            这不是「一笔从未发生的消费」，是流水在用户眼皮底下少了一行 ——
-            与上面那条「冻 12、实扣 1，那 11 的来回无人交代」是同一个问题的更重版本
-            （那条至少还留了一行，这条一行都不留）。
-          · released 还有**第二条来源**：ReservationSweeper 按时间兜底释放跑超阈值的预留
-            （它看不到 job 终态 —— billing 与 backend 不共享库）。那种单**平台没收到钱**
-            （SettlementService 里「终态事件晚于兜底释放」那条 WARN 说的就是它），
-            却同样在用户流水里不留痕迹，比「任务失败退回」更该被看见。
 
-        ⚠️ **不会出现两行**：同一 job 只有一条预留（uk_reservation__job 唯一），
-           而 tx_id 恒为 res:{预留 id} —— 一行从 pending「-12」变成 done「0」，id 不变。
-        ⚠️ kind 保持 'consume' 不动：它是 ORDER BY 三元组 (created_at, kind, src_id)
-           的一员，改了会让这行在翻页途中换位置，而排序键必须是不可变量
-           —— offset 分页下这条更硬，见文件头「排序键」。
-           —— 也正因为这三个键在状态转换时都不变，客户端翻页途中那行换形态不会重复、
-           也不会被跳过（ListTransactionsIntegrationTest 里跨状态转换那条用例钉住）。
 
-        ⚠️ **这一改会让存量数据「多出」行来**：已经 released 的历史预留，从上线那一刻起
-           开始出现在用户（与管理端）流水里；它们的时间显示的是**预扣时刻**
-           （created_at = gmt_create），不是退回时刻 —— 兜底释放那类两个时刻可能差几天。
-           它们落在用户早已翻过去的旧位置、不在顶部；形态是「消费 0 + 预扣注解」，
-           与今天的失败单一致。这是预期效果（那些动作真实发生过），
-           但没有任何别的痕迹提示这件事，所以记在这里。
 
-        ⚠️ V7__reservation_user_index.sql 的头部注释里还写着旧的谓词
-           （WHERE r.status != 'released'）。那份迁移**改不动**（Flyway 校验 checksum，
-           改已执行的迁移会让每个存量库起不来）；索引本身仍然对 —— 去掉一个非等值谓词
-           只会让优化器更自由，只是那段论证针对的语句已经不存在了。
-      -->
       SELECT CONCAT('res:', r.id) AS tx_id,
-             <!-- 退回不另立类型：一行永远是消费，金额才是「扣了多少」的答案（见上面 ★）。 -->
              'consume' AS type,
              'out'     AS direction,
-             <!-- 提交方没给文案时兜一个通用词；空标题在下拉列表里是「一行空白」。
-                  退回行以预扣行的快照作前缀 + 「 · 退回」后缀 —— 金额是 0，
-                  得有一处说明这个 0 是怎么来的，用户也认得出是「哪一单」退回来的。
-                  ⚠️ **不要拿 Reservation.releaseNote 来填**：那列可能装着
-                     「超时兜底释放」这类内部话术，用户不该看到「兜底」「未收费」。 -->
              CASE WHEN r.status = 'released'
                   THEN CASE WHEN r.title = '' THEN '生成退回'
                             ELSE CONCAT(r.title, ' · 退回') END
                   ELSE CASE WHEN r.title = '' THEN '生成消费' ELSE r.title END
              END AS title,
-             <!-- 两个状态共用这一个金额列（「一个金额」那条硬规则）。
-                  ★ 终态统一取 actual_credits —— 退回是「结算到 0」，不是另一种形态。
-                     released 落在 ELSE 上是安全的：markReleased 恒把 actual_credits 写成 0
-                     （CostReservationMapper 的 update），不存在 NULL 或残值。
-                  ⚠️ 判据是「= held 的补集」：冒出第四个状态时它会静默按 actual_credits 出数，
-                     新增状态时这里必须表态。 -->
              CASE WHEN r.status = 'held' THEN r.reserved_credits ELSE r.actual_credits END AS amount,
              r.reserved_credits AS reserved_credits,
-             <!-- ★ 关联的生成任务。**这一列是给 backend 用的 join key，不是给人看的**：
-                  billing 只存 id，任务的类型 / 模型 / 提示词都在 backend 自己的库里
-                  （ADR-0114 不共享库），由调用方拿这批 id 回自己库批量查后合并。
-                  列在预留表上、NOT NULL，所以消费行「有就是有」——投影它不需要 join。 -->
              r.generation_job_id AS generation_job_id,
-             <!-- 两个终态（settled / released）都已落地，只有 held 还在处理中。
-                  ⚠️ 判据写成「= held 的补集」而不是「= settled」：后者会把 released 漏成
-                     pending。合法取值只有 Reservation.Status 那三个（库里没有 CHECK 约束），
-                     真冒出第四个时它会落到 done —— 那是个**错的**结论，只是至少吵得响
-                     （settled_at 也会被一起填上）。新增状态时这里必须表态。 -->
              CASE WHEN r.status = 'held' THEN 'pending' ELSE 'done' END AS status,
              r.gmt_create AS created_at,
-             <!-- 与 status 同一个补集口径：没落地就没有结算时刻 -->
              CASE WHEN r.status = 'held' THEN NULL ELSE r.gmt_modified END AS settled_at,
              'consume' AS kind,
              r.id AS src_id,
@@ -240,30 +95,9 @@
 
       UNION ALL
 
-      <!--
-        ③ 其余资金动作：账本凭证，**一凭证一行**。
 
-        分组键是凭证基础键（voucher base）——它由分录的幂等键去掉末尾的
-        ":<科目>" 得到，而科目就在同一行上（idempotency_key LIKE '%:account' 保证
-        末尾确实是它）。这是 Voucher.legKey 的逆运算，不是猜格式：
-        改成按位置切割（如 SUBSTRING_INDEX）会在 key 里本身带冒号时切错
-        （grantKey 形如 daily:9:2026-09-25，自带两个冒号），那样切出来的「一行」
-        会既漏又重，而且不报错。
 
-        金额 = 该凭证对**用户资产**（wallet + frozen）的净变化：
-          · wallet 与 frozen 都是贷方为正的科目（Account.normalDebit 均为 false），
-            所以贷方 +amount、借方 -amount（见 LedgerRepository 的 balance_delta 口径）
-          · 平台侧科目（revenue / cost / receivable）不参与——它们不是用户的钱
-        net 为 0 的凭证被 HAVING 丢掉：那种动作只把钱在用户的两个口袋之间挪了一下。
-        hold 与 refund 都是这样 —— 但「凭证不出行」不等于「那件事看不见」：
-        它们的用户可见形态在 ② 里（hold 是那条 pending 行，refund 是**同一条**行
-        后来转成的 refund 行），所以这里丢掉不会让任何一个业务动作消失。
-        见文件头的「不重」说明。
 
-        ⚠️ 'wallet' / 'frozen' 与 'credit' 是 Account / LedgerEntry.Direction 的落库字面值，
-           改名时必须同步这里；TransactionsIntegrationTest 会经真实凭证路径把这条钉住。
-           白名单与下面两个 CASE 必须同步：白名单里有、CASE 里没有的类型会得到 NULL 类型。
-      -->
       SELECT CONCAT('led:', LEFT(e.idempotency_key,
                                  CHAR_LENGTH(e.idempotency_key) - CHAR_LENGTH(e.account) - 1)) AS tx_id,
              CASE e.biz_type WHEN 'expire' THEN 'expire' ELSE 'compensation' END AS type,
@@ -271,16 +105,13 @@
                   THEN 'in' ELSE 'out' END AS direction,
              CASE e.biz_type WHEN 'expire' THEN '积分过期' ELSE '人工调账' END AS title,
              ABS(SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END)) AS amount,
-             <!-- 账本动作（过期核销 / 人工调账）不经预留，同样没有预扣 -->
              NULL AS reserved_credits,
-             <!-- 账本动作（过期核销 / 人工调账）不是任务，没有 job 可关联 -->
              NULL AS generation_job_id,
              'done' AS status,
              MIN(e.gmt_create) AS created_at,
              MIN(e.gmt_create) AS settled_at,
              'ledger' AS kind,
              MIN(e.id) AS src_id,
-             <!-- 一个凭证只属于一个用户，MIN 只是为了让它在 GROUP BY 下合法 -->
              MIN(e.user_id) AS user_id
       FROM billing_ledger_entries e
       WHERE e.account IN ('wallet', 'frozen')
@@ -291,15 +122,8 @@
       HAVING SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END) != 0
   </sql>
 
-  <!--
-    类型过滤。空集合 = 全部。
 
-    ⚠️ 它只能放在 UNION **外面**：`type` 是各分支里的 CASE 算出来的投影列，
-    UNION 内部那张表上还没有这个字段。
 
-    ⚠️ 用 IN 而不是 `=`：用户的「已消耗」页签要把 consume 与 expire 合成一张表
-    （原型口径②「已过期并入已消耗」）。单值调用方传一个元素的集合，行为与从前一致。
-  -->
   <sql id="transactionTypeFilter">
     <if test="typeFilter != null and typeFilter.size() > 0">
       AND t.type IN
@@ -320,14 +144,7 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
-  <!--
-    总数。与 `selectPage` **共用同一份 UNION 与同一个类型过滤**（两个 include），
-    所以「共 N 条」与翻出来的行必然同源。
 
-    ⚠️ 代价：每次列表查询多扫一遍派生表。账本是全表增长最快的一张，
-       这条 COUNT 的成本随数据量线性上涨 —— 接受它是在「产品要总数」与
-       「列表不扫全表」之间做的交换，留痕见前端对接文档 §6.2。
-  -->
   <select id="countPage" resultType="long">
     SELECT COUNT(*)
     FROM (

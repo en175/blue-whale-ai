@@ -2,18 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 
 import { swapSequence, type MoveDirection } from "./template-admin-repo.js";
 
-/**
- * 首页背景图/视频后台动态配置 repo（IKCH05，Prisma-backed）。
- *
- * 复用 homepage_hero 表：
- * - 删除一律软删（is_delete=1），查询端（公开列表 + admin 列表）都按 is_delete=0 过滤。
- * - enabled=1 才进首页轮播（listEnabled），按 (sort_order, id) 升序。
- * - 上限 8 条（enabled=1 的存活条数）应用层校验，不设 DB 唯一约束。
- * - create 的 sort_order 缺省取 max+1；调序与模板一致走 swapSequence 整体重排。
- * 业务字段校验（media_type/URL 格式/enabled 取值）属 validation 层，不在此处。
- */
 
-/** 入参业务错误（如上限超限）：路由层映射 409。 */
 export class HomepageHeroLimitError extends Error {
   constructor(message: string) {
     super(message);
@@ -21,7 +10,6 @@ export class HomepageHeroLimitError extends Error {
   }
 }
 
-/** 首页轮播上限（母工单 IKCH01 产品规则）。 */
 export const HOMEPAGE_HERO_MAX_ENABLED = 8;
 
 export interface HomepageHeroAdminView {
@@ -35,7 +23,6 @@ export interface HomepageHeroAdminView {
   updated_at: Date;
 }
 
-/** 公开列表只暴露这 5 个字段（不带 enabled）。 */
 export interface HomepageHeroPublicView {
   id: string;
   media_type: string;
@@ -55,22 +42,18 @@ export interface CreateHomepageHeroInput {
 export type UpdateHomepageHeroInput = Partial<CreateHomepageHeroInput>;
 
 export interface HomepageHeroRepo {
-  /** admin 列表：全部存活条目（含禁用），按 sort_order 升序 */
   listAll(): Promise<HomepageHeroAdminView[]>;
-  /** 公开列表：仅 enabled=1 存活条目，按 sort_order 升序 */
   listEnabled(): Promise<HomepageHeroPublicView[]>;
   getById(id: bigint): Promise<HomepageHeroAdminView | null>;
   create(input: CreateHomepageHeroInput): Promise<string>;
   update(id: bigint, input: UpdateHomepageHeroInput): Promise<boolean>;
   softDelete(id: bigint): Promise<boolean>;
-  /** 调序：与上/下一位交换 sort_order（整体重排归一化） */
   move(id: bigint, direction: MoveDirection): Promise<MoveResult>;
   countEnabled(): Promise<number>;
 }
 
 export interface MoveResult {
   ok: boolean;
-  /** 失败原因：not_found（目标不存在/已删）| boundary（已在边缘）| limit（启用数超上限） */
   reason?: "not_found" | "boundary" | "limit";
 }
 
@@ -136,7 +119,6 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
 
     async create(input) {
       return prisma.$transaction(async (tx) => {
-        // 上限校验：新增默认 enabled=1（未显式传 0），启用数 + 1 不得超过上限
         const enabling = input.enabled ?? 1;
         if (enabling === 1) {
           const enabledCount = await tx.homepage_hero.count({
@@ -148,7 +130,6 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
             );
           }
         }
-        // sort_order 缺省取 max+1（存活条目中）
         let sortOrder = input.sort_order;
         if (sortOrder === undefined) {
           const agg = await tx.homepage_hero.aggregate({
@@ -179,7 +160,6 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
         });
         if (!existing) return false;
 
-        // 从禁用改为启用时校验上限（已是启用态不算新增）
         const targetEnabled = input.enabled ?? existing.enabled;
         if (existing.enabled === 0 && targetEnabled === 1) {
           const enabledCount = await tx.homepage_hero.count({
@@ -230,7 +210,6 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
         const idx = siblings.findIndex((r) => r.id === id);
         const swapped = swapSequence(siblings, idx, direction);
         if (!swapped) return { ok: false, reason: "boundary" as const };
-        // 整体重排为连续值，归一化历史重复 sort_order
         await Promise.all(
           swapped.map((row, i) =>
             row.sort_order === i

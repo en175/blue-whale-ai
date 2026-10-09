@@ -36,7 +36,6 @@ describe("素材域码表（2xxx）", () => {
   });
 
   it("「格式不支持」和「文件打不开」是两条不同的话，不许合并", () => {
-    // 合成一句会让人白白重传三次：一条该换格式，一条该换文件。
     expect(ASSET_ERROR_SPECS.ASSET_FORMAT_UNSUPPORTED.message).not.toBe(
       ASSET_ERROR_SPECS.ASSET_BYTES_UNRECOGNIZED.message,
     );
@@ -64,14 +63,10 @@ describe("httpStatusForCode", () => {
   });
 
   it("生成域的余额不足（quota_exhausted）投影成 402，不是兜底的 400", () => {
-    // 400 只会被当成一次普通的参数错误；402 才让前端的余额门弹出充值框
-    // （web/src/utils/creditsGate.ts 按 `status === 402` 判）。这条同时钉住了
-    // 「name→数值」与「数值→状态」两张表对同一个码的结论一致。
     expect(httpStatusForCode(errorCodeToNumeric(ERROR_QUOTA_EXHAUSTED))).toBe(402);
   });
 
   it("认不出的码兜底 400——**绝不能兜到 2xx**", () => {
-    // 兜成 2xx 就是把一次失败回成成功，只看状态码的客户端会照单全收。
     const status = httpStatusForCode(999999);
     expect(status).toBe(400);
     expect(status).toBeGreaterThanOrEqual(400);

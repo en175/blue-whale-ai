@@ -1,5 +1,3 @@
-/* IKJR1S：保留任务 3268 诊断的原反例和两个对照，验证可信失败卡恢复来源线。
- * 实际任务定义、请求 Schema、终态适配与序列化参与；API、画布、保存和时钟受控。 */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import { retryAudioMix } from '@/api/jobs';

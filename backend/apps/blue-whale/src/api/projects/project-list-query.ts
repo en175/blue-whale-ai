@@ -1,4 +1,3 @@
-/** GET /api/projects：无参全量；page+size 成对分页；缺一非法。非法数字软夹到 ≥1。 */
 export function resolveProjectListQuery(
   query: Record<string, string>,
 ):

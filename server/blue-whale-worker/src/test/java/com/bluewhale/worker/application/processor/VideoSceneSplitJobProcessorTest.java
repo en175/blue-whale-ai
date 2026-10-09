@@ -41,15 +41,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * VideoSceneSplitJobProcessor 单测（IKH8BP，父规格 IKH86V）。
- * <p>
- * 覆盖：异步两段式状态机（submit 存 task_id → markProviderSubmitted + scheduleNext / poll
- * processing 续排 / 轮询超限 / completed 逐段转存发布 / failed 分类终态 + 上游原因透传）、
- * segments 一对多解析与逐段持久化（段序 / 起止秒 / 官方 duration / 源宽高近似 / 1 段不特判）、
- * **部分段转存失败 → 整体失败且不发布（无半成品资产悬挂）**、input 业务键兜底校验、凭证缺失
- * 分类、§5 信号保留与兜底归并（1046）、瞬时轮询错误判定。不连真实 MQ/DB/TOS/网关。
- */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class VideoSceneSplitJobProcessorTest {
@@ -82,12 +73,10 @@ class VideoSceneSplitJobProcessorTest {
                 anyString(), anyLong())).thenReturn(true);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
-        // 段转存心跳续租默认放行（守卫命中）；中止路径由专项用例覆写
         when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
                 .thenReturn(true);
     }
 
-    /** 源视频素材（宽高/时长供段 Asset 近似回填）。 */
     private void stubSourceAsset() {
         AssetEntity source = new AssetEntity();
         source.setType("video");
@@ -133,7 +122,6 @@ class VideoSceneSplitJobProcessorTest {
                 "video/mp4", 1000L + seq, "md5-seg-" + seq);
     }
 
-    // ========== claim 语义 ==========
 
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
@@ -161,7 +149,6 @@ class VideoSceneSplitJobProcessorTest {
         verify(finalizer, never()).publishVideoSceneSplitResult(any());
     }
 
-    // ========== input 业务键兜底校验（权威复核在创建入口） ==========
 
     @Test
     @DisplayName("缺 source_asset_id → invalid_input")
@@ -185,7 +172,6 @@ class VideoSceneSplitJobProcessorTest {
         assertFailCode(GenerationError.ERROR_INVALID_INPUT);
     }
 
-    // ========== 源素材 / 凭证 ==========
 
     @Test
     @DisplayName("源素材不可用（非 video）→ 1046 兜底 + 可读原因，不提交上游")
@@ -218,7 +204,6 @@ class VideoSceneSplitJobProcessorTest {
         assertFailCode(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING);
     }
 
-    // ========== submit 相：状态机与错误归并（出站 JSON 映射在客户端测试钉） ==========
 
     @Test
     @DisplayName("submit：granularity 透传 → markProviderSubmitted 存 task_id + scheduleNext(5s)")
@@ -310,7 +295,6 @@ class VideoSceneSplitJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== parent-reuse 重试收割（IKI89T / ADR-0114；平移家族定型票先例）==========
 
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且切片数组非空 → 不提交，直接逐段转存发布（payload 与正常完成同型）")
@@ -484,8 +468,6 @@ class VideoSceneSplitJobProcessorTest {
 
         processor.handle("100");
 
-        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
-        // 任务保持 processing 由新 worker 重新领取继续收割
         verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
@@ -503,15 +485,12 @@ class VideoSceneSplitJobProcessorTest {
                         new SegmentObservation(45.0, 95.0, "https://volc/old-seg2.mp4")),
                         null, null));
         when(mediaRelay.persist("https://volc/old-seg1.mp4", "9")).thenReturn(stored(1));
-        // 第 1 段续租放行、第 2 段续租守卫未命中（转存中途被接管）→ 收割发布中止
         when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
                 .thenReturn(true, false);
         stubSourceAsset();
 
         processor.handle("100");
 
-        // 逐段转存中续租未命中 = 失租（IKICD0）：与守卫未命中同一停止语义，不因共享
-        // 回退逻辑提交新上游任务；新 worker 领取后从头重新检查父任务并完成收割
         verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(mediaRelay, times(1)).persist(anyString(), anyString());
@@ -520,7 +499,6 @@ class VideoSceneSplitJobProcessorTest {
                 any(), anyString(), anyLong());
     }
 
-    // ========== poll 相：状态机 ==========
 
     @Test
     @DisplayName("poll processing（running）→ rescheduleProviderPoll + scheduleNext(5s)")
@@ -605,7 +583,6 @@ class VideoSceneSplitJobProcessorTest {
                 eq("场景切分轮询超时（超过 " + VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS
                         + " 次），上游持续错误: MediaKit 场景切分任务查询超时"),
                 detailsCaptor.capture(), eq("worker-1"), eq(5L));
-        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
         assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -622,8 +599,6 @@ class VideoSceneSplitJobProcessorTest {
 
         processor.handle("100");
 
-        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：状态落 details，message 剥
-        // 「: HTTP 503」片段（冒号保留），上游可读原因保留
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(finalizer).failVideoJob(eq("100"),
@@ -699,7 +674,6 @@ class VideoSceneSplitJobProcessorTest {
         assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
     }
 
-    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS4；对齐音频提取 IKIMS2 样板） ==========
 
     @Test
     @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
@@ -719,7 +693,6 @@ class VideoSceneSplitJobProcessorTest {
         verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
-        // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
         assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
         assertThat(detailsCaptor.getValue())
                 .containsEntry("raw", "MediaKit 场景切分任务查询失败:"
@@ -727,7 +700,6 @@ class VideoSceneSplitJobProcessorTest {
                 .containsEntry("http_status", 401);
     }
 
-    // ========== poll 相：completed → 逐段转存 + 终态发布（链接 24h 有效） ==========
 
     @Test
     @DisplayName("poll completed 多段 → 逐段 persist（官方顺序）→ 发布段序/起止秒/官方 duration/源宽高")
@@ -747,7 +719,6 @@ class VideoSceneSplitJobProcessorTest {
 
         processor.handle("100");
 
-        // 24h 有效链接：completed 后立即逐段转存（同步链路，无续排）
         verify(mediaRelay).persist("https://volc/seg1.mp4", "9");
         verify(mediaRelay).persist("https://volc/seg2.mp4", "9");
         verify(mediaRelay).persist("https://volc/seg3.mp4", "9");
@@ -875,7 +846,6 @@ class VideoSceneSplitJobProcessorTest {
         ArgumentCaptor<UpdateVideoSceneSplitProgressDto> renewCaptor =
                 ArgumentCaptor.forClass(UpdateVideoSceneSplitProgressDto.class);
         verify(stateMachine, times(3)).updateVideoSceneSplitProgress(renewCaptor.capture());
-        // 续租请求携带 claim 的 worker/fencing；进度 = 转存前已完成段占比（终态 100 由 publish 置）
         renewCaptor.getAllValues().forEach(dto -> {
             assertThat(dto.jobId()).isEqualTo("100");
             assertThat(dto.workerId()).isEqualTo("worker-1");
@@ -898,7 +868,6 @@ class VideoSceneSplitJobProcessorTest {
                         new SegmentObservation(31.2, 95.0, "https://volc/seg2.mp4")),
                         null, null));
         when(mediaRelay.persist("https://volc/seg1.mp4", "9")).thenReturn(stored(1));
-        // 第 1 段续租放行、第 2 段续租守卫未命中
         when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
                 .thenReturn(true, false);
 
@@ -949,7 +918,6 @@ class VideoSceneSplitJobProcessorTest {
                 anyString(), anyLong());
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架同语义） ==========
 
     @Test
     @DisplayName("瞬时判定：provider_timeout / 网络不可达 / HTTP 429/5xx → 瞬时；4xx / 业务失败 → 非瞬时")

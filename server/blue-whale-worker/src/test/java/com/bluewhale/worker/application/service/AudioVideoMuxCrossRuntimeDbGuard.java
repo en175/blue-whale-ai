@@ -5,7 +5,6 @@ import java.sql.SQLException;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-/** 音视频合成跨进程验收专用数据库门禁（IKIHPJ）；普通 MySQL 金标始终只连自身 Testcontainers。 */
 final class AudioVideoMuxCrossRuntimeDbGuard {
     private static final Pattern JDBC_URL = Pattern.compile(
             "^jdbc:mysql://host\\.docker\\.internal:([0-9]{1,5})/(ikihpj_test_[0-9a-f]{12})"

@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-/* IKFE8T 统一附件来源入口组件：单「+」展开「从资产中选择 / 从节点添加素材」两项菜单，
-   回调触发后菜单关闭；外点（遮罩）关闭；pickMode 进行中「+」高亮。 */
 import { act } from 'react';
 import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

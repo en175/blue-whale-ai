@@ -10,12 +10,6 @@ import type { SkillService } from "./skills.service.js";
 
 const CREATIVE_SKILL_ID_PATTERN = /^[a-z][a-z0-9_]{2,79}$/;
 
-/**
- * id 不合规就当「不存在」抛掉——**抛，不再返回信封**。
- *
- * 返回的信封走不到 `AllExceptionsFilter`，没人写 HTTP 状态码，于是一次「技能不存在」
- * 在 POST 上回 201、在 GET 上回 200，body 里却写着 100100。见 ADR-0083「落地记录」。
- */
 function assertCreativeSkillId(creativeSkillId: string): void {
   if (!CREATIVE_SKILL_ID_PATTERN.test(creativeSkillId)) {
     throw skillError("SKILL_NOT_FOUND", `Skill 不存在: ${creativeSkillId}`);
@@ -66,8 +60,6 @@ export async function handleCreateSkill(
   skills: SkillService,
 ) {
   const parsed = parseSkillMd(content);
-  // 四条都是同一类「SKILL.md 不合法」，但文案各自点名缺了哪一格——码相同、话不同，
-  // 用户才知道该改哪里。
   if (!parsed) throw skillError("SKILL_FORMAT_INVALID", "SKILL.md 格式不合法：缺少 frontmatter");
   if (!parsed.name.trim()) throw skillError("SKILL_FORMAT_INVALID", "名称不能为空");
   if (!parsed.description.trim()) throw skillError("SKILL_FORMAT_INVALID", "简介不能为空");

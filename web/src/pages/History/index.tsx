@@ -1,8 +1,3 @@
-/* ============================================
- * History 生成历史页（IKIZQI）：画布外找回两阶段任务
- * 项目、阶段、运行/失败/核对状态、来源与各阶段费用；失败任务留历史、
- * 样片过期不消失、删除画布卡后仍可找回（数据全部来自服务端任务列表，刷新即恢复）。
- * ============================================ */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Skeleton from '@/components/Skeleton';
@@ -17,7 +12,6 @@ import { isApiError } from '@/api/http';
 import { readJobFailText } from '@/api/jobs';
 import styles from './index.module.css';
 
-/** 来源跳转目标：final → 来源样片任务；sample → 其唯一成片任务（无则不渲染链接）。 */
 function sourceTargetOf(entry: HistoryJobEntry): JobSourceTarget | null {
   const { job } = entry;
   if (job.video_stage === 'final' && job.source_sample_job_id) {
@@ -29,7 +23,6 @@ function sourceTargetOf(entry: HistoryJobEntry): JobSourceTarget | null {
   return null;
 }
 
-/** 样片是否已过转成片截止（无效时间不判过期；过期只影响成片资格，记录保留）。 */
 function sampleExpired(job: HistoryJobEntry['job']): boolean {
   if (job.video_stage !== 'sample' || !job.finalize_deadline_at) return false;
   const deadline = Date.parse(job.finalize_deadline_at);
@@ -99,7 +92,6 @@ function HistoryRow({
 export default function History() {
   const [sourceTarget, setSourceTarget] = useState<JobSourceTarget | null>(null);
   const history = useQuery(videoHistoryOptions());
-  // 单项目拉满单页封顶（HISTORY_JOBS_PER_PROJECT）即可能被截断，列表末尾提示，避免「少了」被当成「没有」。
   const perProjectCounts = new Map<string, number>();
   (history.data ?? []).forEach((entry) => {
     perProjectCounts.set(entry.projectId, (perProjectCounts.get(entry.projectId) ?? 0) + 1);

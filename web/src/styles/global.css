@@ -1,10 +1,6 @@
-/* ============================================
- * 全局样式重置与基础配置
- * ============================================ */
 
 @import './variables.css';
 
-/* ---- CSS Reset ---- */
 *,
 *::before,
 *::after {
@@ -28,7 +24,6 @@ body,
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ---- 滚动条样式 ---- */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -47,7 +42,6 @@ body,
   background: var(--color-border-hover);
 }
 
-/* ---- 链接 ---- */
 a {
   color: var(--color-accent-primary);
   text-decoration: none;
@@ -58,7 +52,6 @@ a:hover {
   color: var(--color-accent-hover);
 }
 
-/* ---- 按钮基础 ---- */
 button {
   cursor: pointer;
   border: none;
@@ -73,7 +66,6 @@ button:disabled {
   opacity: 0.5;
 }
 
-/* ---- 输入框基础 ---- */
 input,
 textarea,
 select {
@@ -94,19 +86,16 @@ select:focus {
   border-color: var(--color-border-hover);
 }
 
-/* ---- 列表 ---- */
 ul,
 ol {
   list-style: none;
 }
 
-/* ---- 图片 ---- */
 img {
   max-width: 100%;
   display: block;
 }
 
-/* ---- 通用工具类 ---- */
 .flex-center {
   display: flex;
   align-items: center;
@@ -125,14 +114,12 @@ img {
   white-space: nowrap;
 }
 
-/* 点在左侧工具栏等上层控件时，禁止画布节点/空白接手指针 */
 html.canvas-chrome-lock .react-flow__node,
 html.canvas-chrome-lock .react-flow__node *,
 html.canvas-chrome-lock .react-flow__pane {
   pointer-events: none !important;
 }
 
-/* ---- React Flow 覆盖样式 ---- */
 .react-flow__background {
   background-color: var(--color-bg-primary) !important;
 }
@@ -146,7 +133,6 @@ html.canvas-chrome-lock .react-flow__pane {
   pointer-events: auto;
 }
 
-/* 小地图全局内容等对比度展示；视口用白框标示，不靠压暗非视口区域 */
 .react-flow__minimap-mask {
   fill: transparent !important;
   stroke: #ffffff !important;
@@ -171,7 +157,6 @@ html.canvas-chrome-lock .react-flow__pane {
   fill: var(--color-text-primary) !important;
 }
 
-/* Sonner toast：顶部弹出，颜色对齐当前暗色主题 */
 [data-sonner-toaster] {
   font-family: var(--font-family);
   --z-index: calc(var(--z-modal) + 40);

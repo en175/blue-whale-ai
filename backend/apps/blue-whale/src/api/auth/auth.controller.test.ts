@@ -73,7 +73,6 @@ import { LoginFailureTracker } from "@lib/shared/rate-limit/login-failure-tracke
 import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
 import { AuthController } from "./auth.controller.js";
 
-/** 口令校验失败。登录已经切到我们自己的库，所以不再是「上游 200 + success:false」那种形状。 */
 function credentialFailure(): InvalidCredentialsError {
   return new InvalidCredentialsError();
 }
@@ -95,16 +94,12 @@ function setup() {
   const limiter = new RateLimiter();
   const tracker = new LoginFailureTracker(limiter);
   const sessions = {
-    // IKJAZL：签发与存储分了家——令牌由会话服务签（密钥收敛在它构造期），再由它存。
     issueToken: vi.fn(async () => "jwt-token"),
     createSession: vi.fn(async () => undefined),
   };
   const prisma = { client: {} };
-  // 登录日志同样走旁路（写失败不阻断登录），所以它必须是**可注入的 mock**——
-  // 否则「日志到底写没写」这件事在测试里永远看不出来。
   const identity = {
     recordLogin: vi.fn(async () => undefined),
-    // ★ 口令校验现在在这里，不在 account 上
     login: vi.fn(),
     register: vi.fn(),
     loginWithPhoneCode: vi.fn(),
@@ -140,7 +135,6 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
       status: 429,
       code: ACCOUNT_LOCKED,
     });
-    // 锁定期内不再打 new-api
     expect(identity.login).toHaveBeenCalledTimes(5);
   });
 
@@ -169,7 +163,6 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
     expect(success).toMatchObject({ data: { username: "alice", is_new_user: false } });
     expect(res.cookie).toHaveBeenCalledTimes(1);
 
-    // 成功后再连败 4 次（未达阈值 5）：全部 401，不得出现 429
     for (const _ of [1, 2, 3, 4]) {
       await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
         status: 401,
@@ -190,7 +183,6 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
         status: 503,
       });
     }
-    // 每次都要真实打到上游（未被锁定跳过）
     expect(identity.login).toHaveBeenCalledTimes(6);
   });
 });
@@ -235,8 +227,6 @@ describe("AuthController 限流声明（IKDR4J）", () => {
   });
 
   it("★ login-by-code 的账号桶用 phone 维度，不是 account", () => {
-    // `account` 维度写死读 `body.username`，而这条路由的入参是 `body.phone`。
-    // 配成 account 不会报错，只会**静默跳过**——看着有撞码防护，实际为零。
     const buckets = bucketsOf(
       AuthController.prototype.loginByCode as (...args: never[]) => unknown,
     );
@@ -248,8 +238,6 @@ describe("AuthController 限流声明（IKDR4J）", () => {
   });
 
   it("send-code 声明短信四个桶：号/分、号/天、IP/分、IP/天", () => {
-    // 短信按条计费，四个桶缺一不可——只按 IP 挡不住换 IP 刷同一个号，
-    // 只按号码挡不住换号刷爆账单。日上限就是真正兜住账单的那两条。
     const buckets = bucketsOf(
       AuthController.prototype.sendCode as (...args: never[]) => unknown,
     );
@@ -284,8 +272,6 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
         has_password: false,
       },
     });
-    // ★ 走的是我们自己的会话签发（`sess_` + HttpOnly cookie），
-    //   不是 `loginWithCode` 那支没人认的 JWT——接错了用户点完登录立刻 401。
     expect(sessions.createSession).toHaveBeenCalled();
     expect(res.cookie).toHaveBeenCalled();
   });
@@ -303,13 +289,10 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
       code: 200,
       data: { is_new_user: false, has_password: true },
     });
-    // IKJABH：登录响应带出「必须改密」，前端据此在登录那一刻就弹强制改密窗口
     expect(out).toMatchObject({ data: { must_change_password: false } });
   });
 
   it("★ 被管理员重置过：登录响应带 must_change_password=true", async () => {
-    // 前端要在**登录那一刻**决定跳不跳强制改密流程，所以这个标记得跟响应一起回来，
-    // 而不是等前端再打一次 /api/me。
     const { controller, identity, res } = setup();
     identity.loginWithPhoneCode.mockResolvedValue({
       result: phoneResult({ mustChangePassword: true }),
@@ -364,7 +347,6 @@ describe("AuthController 会话内容（凭证已移出会话）", () => {
 
     await controller.login(LOGIN_BODY, res);
 
-    // IKJAZL：createSession 的入参现在是 (令牌, 载荷) —— 令牌由会话服务签发。
     expect(sessions.createSession).toHaveBeenCalledWith("jwt-token", {
       userId: 42,
       username: "alice",
@@ -388,14 +370,10 @@ describe("AuthController 会话内容（凭证已移出会话）", () => {
     const out = await controller.login(LOGIN_BODY, res);
 
     expect(out).toMatchObject({ code: 200, data: { token: "jwt-token" } });
-    // 兼容期**仍然写一份 cookie**：老浏览器不该在上线那一刻被登出。
-    // 这条断言是那次迁移的护栏，cookie 通道下线时可以一并删掉。
     expect(res.cookie).toHaveBeenCalled();
   });
 
   it("★ 登录**不依赖**上游配置 —— 否则「还没配 key」就把要进去配它的人挡在门外", async () => {
-    // 以前缺 key 时这里抛 503：key 要在管理端填，管理端要先登得进来，而登录又要求先有 key，
-    // 新部署谁也进不去。凭证缺失的 fail-closed 现在落在真正打上游的地方。
     const { controller, identity, res } = setup();
     identity.login.mockResolvedValue(loginResult());
     const before = process.env.NEW_API_UPSTREAM_KEY;
@@ -430,9 +408,6 @@ describe("AuthController 登录日志", () => {
 
   it("账密错误记一条 success=false 并带原因", async () => {
     const { controller, identity, res } = setup();
-    // ⚠️ status 必须是 200：上游「HTTP 200 + success:false」才算业务失败
-    // （projectAccountBusinessFailure 判的就是这个），401 会被归到「服务异常」分支，
-    // 那条路径不记失败日志——上游挂了不是撞库信号。
     identity.login.mockRejectedValue(
       new NewApiError("用户名或密码错误", 200, "invalid_credentials"),
     );
@@ -477,7 +452,6 @@ describe("AuthController 登录日志", () => {
   });
 
   it("日志写失败不阻断登录", async () => {
-    // 日志是旁路：一个坏掉的日志表不该让所有人都登不上。
     const { controller, identity, res } = setup();
     identity.login.mockResolvedValue(loginResult());
     identity.recordLogin.mockRejectedValue(new Error("db down"));
@@ -489,7 +463,6 @@ describe("AuthController 登录日志", () => {
 
 describe("AuthController capabilities（本地常量）", () => {
   it("口令登录/注册恒支持、邮箱验证恒不支持——不再探测上游开关", async () => {
-    // 这两种能力现在都由我们自己的库承载，上游挂了也不该让登录入口从页面消失。
     const { controller } = setup();
     await expect(controller.capabilities()).resolves.toEqual({
       code: 200,
@@ -505,9 +478,6 @@ describe("AuthController capabilities（本地常量）", () => {
 
 describe("AuthController 上游凭证缺失", () => {
   it("★ 再没人写 user_info 凭证行 —— 全仓零读取者的写入已随本轮删除", async () => {
-    // 那行是「登录即把统一 key 按 userId 写一份」的遗留：全项目共用一把 key 之后它
-    // 只是把同一个密文抄 N 份，而且 **Java 侧从来不读 user_info**（迁移后素材跟进走
-    // job 凭证 + 配置表）。没有读取者的密钥副本不该继续产生。
     const { controller, identity, prisma, res } = setup();
     identity.login.mockResolvedValue(loginResult());
 

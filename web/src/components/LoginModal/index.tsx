@@ -1,12 +1,3 @@
-/* ============================================
- * LoginModal 登录弹窗：**账号密码 / 手机号验证码 双态**（IKJA4R）
- *
- * 两个状态在同一个弹窗内原地切换，「其他登录方式」是唯一入口，按钮文案跟着当前态变
- * （以后加微信 / 飞书就是那一排多一个入口，不动布局）。
- *
- * ⚠️ 没有「注册」态了：手机号验证码登录对没绑过的号**当场建号**，
- * 新人点「手机号登录」就是注册，不需要再走一遍「创建账号」表单。
- * ============================================ */
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import {
@@ -30,17 +21,13 @@ import {
 
 interface LoginModalProps {
   onClose: () => void;
-  /** 登录成功后、关闭弹窗前调用（会话过期续接用） */
   onSuccess?: () => void;
-  /** 初始态：'password' 账号密码（默认）| 'phone' 手机号验证码 */
   initialMode?: Mode;
 }
 
 type Mode = 'password' | 'phone';
 
-/** 与后端同一条口径（`libs/core/auth/phone.ts`）。 */
 const PHONE_RE = /^1[3-9]\d{9}$/;
-/** 发送成功后的冷却秒数。后端还有一层按号/按 IP 的频控，这里只是让按钮别被连点。 */
 const SEND_CODE_COOLDOWN_SECONDS = 60;
 
 function AgreementLinks() {
@@ -68,7 +55,6 @@ function AgreementLinks() {
   );
 }
 
-/** 协议勾选行。两个态共用——不勾选时两边的登录按钮都点不动。 */
 function AgreementRow({
   agreed,
   onChange,
@@ -127,7 +113,7 @@ function PasswordField({
         aria-pressed={visible}
         onClick={onToggleVisible}
       >
-        {/* 图标跟当前状态走：密文划掉眼睛，明文睁开眼睛 */}
+        {}
         {visible ? <Eye size={20} /> : <EyeOff size={20} />}
       </button>
     </div>
@@ -151,19 +137,16 @@ export default function LoginModal({
   const [sendingCode, setSendingCode] = useState(false);
   const [cooldown, setCooldown] = useState(0);
 
-  /* ---------- 发送验证码冷却 ---------- */
   useEffect(() => {
     if (cooldown <= 0) return undefined;
     const timer = window.setInterval(() => setCooldown((n) => Math.max(0, n - 1)), 1000);
     return () => window.clearInterval(timer);
   }, [cooldown]);
 
-  /* ---------- 表单校验 ---------- */
   const phoneValid = PHONE_RE.test(phone.trim());
   const passwordValid = username.trim().length > 0 && password.length > 0 && agreed;
   const phoneLoginValid = phoneValid && code.trim().length > 0 && agreed;
 
-  /* ---------- 登录态写入（两个态共用） ---------- */
   const applyAuth = async (login: LoginData) => {
     const me = await fetchMe().catch(() => null);
     const user: SessionUser = me
@@ -184,7 +167,6 @@ export default function LoginModal({
     onClose();
   };
 
-  /* ---------- 账号密码登录 ---------- */
   const submitPasswordLogin = async () => {
     if (!passwordValid || loading) return;
     setLoading(true);
@@ -198,7 +180,6 @@ export default function LoginModal({
     }
   };
 
-  /* ---------- 发送验证码 ---------- */
   const handleSendCode = async () => {
     if (!phoneValid || cooldown > 0 || sendingCode) return;
     setSendingCode(true);
@@ -213,14 +194,11 @@ export default function LoginModal({
     }
   };
 
-  /* ---------- 手机号验证码登录 ---------- */
   const submitPhoneLogin = async () => {
     if (!phoneLoginValid || loading) return;
     setLoading(true);
     setError('');
     try {
-      // 没绑过该手机号的账号在这一步当场建号（`is_new_user`）——**刻意不提示**，
-      // 对用户来说「填手机号 → 收码 → 进来」本来就只有一步。
       await applyAuth(await loginWithCode(phone.trim(), code.trim()));
     } catch (e) {
       setError(isApiError(e) ? e.message : '登录失败，请稍后重试');
@@ -229,7 +207,6 @@ export default function LoginModal({
     }
   };
 
-  /* ---------- 切换登录方式 ---------- */
   const switchMode = (target: Mode) => {
     setMode(target);
     setPasswordVisible(false);
@@ -260,7 +237,6 @@ export default function LoginModal({
       <h2 className={styles.title}>登录</h2>
 
       {mode === 'password' ? (
-        /* ========== 账号密码 ========== */
         <>
           <input
             className={styles.input}
@@ -293,7 +269,6 @@ export default function LoginModal({
           </button>
         </>
       ) : (
-        /* ========== 手机号验证码 ========== */
         <>
           <input
             className={styles.input}
@@ -339,7 +314,7 @@ export default function LoginModal({
         </>
       )}
 
-      {/* 其他登录方式：**唯一**的切换入口，按钮文案跟着当前态变。 */}
+      {}
       <div className={styles.divider}>其他登录方式</div>
       <button
         className={styles.createBtn}

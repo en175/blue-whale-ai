@@ -37,7 +37,6 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
 const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
   default: (props: Record<string, any>) => {
@@ -46,7 +45,6 @@ vi.mock('./components/Canvas', () => ({
   },
 }));
 
-/** CanvasToolbar 打桩：透出侧栏图片入口 */
 const toolbarProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/CanvasToolbar', () => ({
   default: (props: Record<string, any>) => {
@@ -144,14 +142,11 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn(),
 }));
 
-/* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
-  // IKDLQK 起 CanvasPage 还引入这两个调用：mock 补齐，否则组件挂载即抛错（IKDLQK 合入时的既有欠账）
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
-  // !779 起保存 catch 会调这个函数对齐 412 version；缺省则 throw，失败提示出不来
   readCanvasConflictVersion: () => undefined,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
@@ -179,7 +174,6 @@ vi.mock('@/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 
-/* useCanvasDoc 打桩须保持引用稳定；内容经 current 按用例注入 */
 const canvasDocMock = vi.hoisted(() => ({
   current: {
     doc: null as unknown,
@@ -193,7 +187,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 默认画布：文本节点 t1 + 就绪图片 m1（assetId a1）+ 视频节点 v1 + 图片草稿 d1 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -241,12 +234,10 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
   await typePromptRefText(container, text);
 }
 
-/** 点击画布草稿卡 d1 打开绑定面板（草稿绑定路径），返回草稿节点 id */
 async function createDraft(): Promise<string> {
   const draft = flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1')!;
   await act(async () => {
@@ -258,14 +249,12 @@ async function createDraft(): Promise<string> {
 const edgePairs = () =>
   flowProps.current.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`);
 
-/** Dock 参考图预览项的图片 alt 列表（草稿绑定面板按连线推导渲染） */
 function dockRefImages(): string[] {
   return [...container.querySelectorAll<HTMLImageElement>('[data-testid="dock-media-ref"] img')].map(
     (img) => img.alt,
   );
 }
 
-/** IKGB7U 附件操作条：点「+ 参考」直达旧「从节点添加素材」链路——进入画布选取模式（旧「+」菜单已退役） */
 const enterPickMode = async () => {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
@@ -275,7 +264,6 @@ const enterPickMode = async () => {
   });
 };
 
-/** 追加一个就绪图片素材节点（含资产快照） */
 function pushImageNode(id: string, assetId: string, name: string) {
   (canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes.push({
     id, type: 'mediaNode', position: { x: 240, y: 0 },
@@ -286,7 +274,6 @@ function pushImageNode(id: string, assetId: string, name: string) {
   };
 }
 
-/** 追加一个图片草稿节点 */
 function pushDraftNode(id: string) {
   (canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes.push({
     id, type: 'mediaNode', position: { x: 440, y: 160 },
@@ -307,11 +294,7 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-/* IKFDFT 图片节点参考即时保存与编辑恢复：选中即连线并随既有自动保存落盘（不再等发送）；
-   关闭/切换/重开经连线推导恢复；保存失败保留选择与阻断；模型不兼容保留并说明原因。
-   FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；ImageDialog 用真实实现。 */
 describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
-  /** 关闭当前绑定面板（右上角 ×） */
   async function closePanel() {
     const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => b.getAttribute('title') === '关闭',
@@ -321,7 +304,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     });
   }
 
-  /** 点击画布媒体节点（打开/切换绑定面板） */
   async function clickNode(id: string) {
     const node = flowProps.current.mediaNodes.find((n: Node) => n.id === id)!;
     await act(async () => {
@@ -329,13 +311,11 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     });
   }
 
-  /** 从节点添加素材：进入持续选取会话（IKFR4X：会话绑定进入时的目标，一次进入可连续选择） */
   async function pickFromCanvas(sourceId: string) {
     await enterPickMode();
     await clickNode(sourceId);
   }
 
-  /** 结束持续选取会话：点击提示条「完成选取」按钮 */
   async function finishPick() {
     const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => b.textContent === '完成选取',
@@ -349,8 +329,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     return container.querySelector('[contenteditable="true"]') !== null;
   }
 
-  /** 配置面板切换模型：底栏摘要按钮（模型名+比例+分辨率）展开配置面板（已展开则不重复点，
-   *  避免 toggle 收起）→ 模型选择器（精确当前名）→ 目标选项；选项点击只收下拉不收配置面板 */
   async function switchModel(currentLabel: string, targetLabel: string) {
     let selectBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => b.textContent === currentLabel,
@@ -369,14 +347,12 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
       (b) => b.textContent === targetLabel,
     )!;
     await act(async () => { option.click(); });
-    // 收起配置面板（选项点击只收下拉不收面板；避免面板的关闭按钮与对话框关闭按钮重名歧义）
     const toggle = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => (b.textContent ?? '').includes(targetLabel) && (b.textContent ?? '').includes(':'),
     )!;
     await act(async () => { toggle.click(); });
   }
 
-  /** 无参考/限量/高清模型（能力项与 m-test 同形，features 按需覆盖默认值） */
   function modelVariant(
     modelId: string,
     label: string,
@@ -415,7 +391,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    // IKFR4X：一次进入持续会话，连续点击三个来源均即时建线，模式不退出
     await enterPickMode();
     await clickNode('m1');
     expect(edgePairs()).toEqual([`m1->${draftId}`]);
@@ -425,7 +400,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     expect(edgePairs()).toEqual([`m1->${draftId}`, `m2->${draftId}`, `m3->${draftId}`]);
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一', '素材图二', '素材图三']));
 
-    // 自动保存载荷：三条连线按边序完整上送（未发送生成）
     await vi.waitFor(() => {
       const saved = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
       expect(saved.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`))
@@ -444,23 +418,19 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    // 会话中连续选取两张（IKFR4X：一次进入持续选择），再切换模型验证配置写回
     await enterPickMode();
     await clickNode('m1');
     await clickNode('m2');
     await finishPick();
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一', '素材图二']));
     await typePrompt('保留我的编辑');
-    // 切换非默认模型（其默认分辨率档位 4k）：配置随草稿节点写回
     await switchModel('测试生图模型', '高清模型');
     await vi.waitFor(() => expect(container.textContent).toContain('高清模型'));
 
-    // 关闭按钮：面板消失，画布连线保留
     await closePanel();
     expect(panelVisible()).toBe(false);
     expect(edgePairs()).toEqual([`m1->${draftId}`, `m2->${draftId}`]);
 
-    // 重新点击草稿卡：参考、提示词与生成配置（模型/分辨率/比例）恢复
     await clickNode(draftId);
     await vi.waitFor(() => expect(panelVisible()).toBe(true));
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一', '素材图二']));
@@ -482,14 +452,12 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     await typePrompt('空白隐藏保留');
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一', '素材图二']));
 
-    // 普通模式点击画布空白：面板隐藏，连线与写回内容保留
     await act(async () => {
       flowProps.current.onPaneClick();
     });
     expect(panelVisible()).toBe(false);
     expect(edgePairs()).toEqual([`m1->${draftId}`, `m2->${draftId}`]);
 
-    // 重开草稿卡：恢复；不恢复选取模式（无持续会话提示与完成按钮）
     await clickNode(draftId);
     await vi.waitFor(() => expect(panelVisible()).toBe(true));
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一', '素材图二']));
@@ -504,7 +472,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     const aId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    // 会话中连续选取两张后先结束（IKFR4X：切换编辑目标须先完成选取）
     await enterPickMode();
     await clickNode('m1');
     await clickNode('m2');
@@ -512,13 +479,11 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     await typePrompt('A 的提示词');
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一', '素材图二']));
 
-    // 切到 B：B 不出现 A 的参考与提示词
     await clickNode('d2');
     await vi.waitFor(() => expect(dockRefImages()).toEqual([]));
     expect(readPromptRefText(container)).toBe('');
     await typePrompt('B 的提示词');
 
-    // 切回 A：A 的参考与提示词完整恢复，B 的编辑不串入
     await clickNode(aId);
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一', '素材图二']));
     expect(readPromptRefText(container)).toBe('A 的提示词');
@@ -531,7 +496,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await typePrompt('保存前编辑');
 
-    // 保存持续失败：选取仍立即建线并保留在页面；会话不受保存失败影响（IKFR4X AC5：保留本地参考和模式）
     apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('boom')));
     await enterPickMode();
     await clickNode('m1');
@@ -540,24 +504,20 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     await finishPick();
     expect(edgePairs()).toEqual([`m1->${draftId}`]);
 
-    // 自动保存失败：显示未保存；连线与 Dock 参考保留
     await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'), { timeout: 3000 });
     expect(edgePairs()).toEqual([`m1->${draftId}`]);
     expect(dockRefImages()).toEqual(['素材图一']);
 
-    // 阻止切换其他编辑目标；阻止发送（提示词非空，仅因未保存被禁）
     await clickNode('d2');
     expect(dockRefImages()).toEqual(['素材图一']);
     expect(readPromptRefText(container)).toBe('保存前编辑');
     expect(sendButton().disabled).toBe(true);
 
-    // 允许关闭并重开原目标：编辑仍在
     await closePanel();
     expect(panelVisible()).toBe(false);
     await clickNode(draftId);
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
 
-    // 重试成功：落盘载荷含参考连线，恢复可切换可发送
     apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
     const retry = [...container.querySelectorAll('button')].find((b) => b.textContent === '重试保存')!;
     await act(async () => { retry.click(); });
@@ -578,7 +538,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    // 会话中选取后结束，再验证模型兼容切换（IKFR4X：会话中模型入口禁用）
     await enterPickMode();
     await clickNode('m1');
     await finishPick();
@@ -586,14 +545,12 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     await typePrompt('参考绘制');
     expect(sendButton().disabled).toBe(false);
 
-    // 切换不支持参考的模型：参考保留不删除，原因明确，发送被阻止
     await switchModel('测试生图模型', '无参考模型');
     await vi.waitFor(() => expect(container.textContent).toContain('当前模型不支持图片参考，请调整模型或参考'));
     expect(sendButton().disabled).toBe(true);
     expect(dockRefImages()).toEqual(['素材图一']);
     expect(edgePairs()).toEqual([`m1->${draftId}`]);
 
-    // 换回兼容模型：恢复可发送
     await switchModel('无参考模型', '测试生图模型');
     await vi.waitFor(() => expect(container.textContent).not.toContain('当前模型不支持图片参考'));
     expect(sendButton().disabled).toBe(false);
@@ -609,7 +566,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    // 会话中连续选取两张后结束，再切换上限不足模型（IKFR4X：会话中模型入口禁用）
     await enterPickMode();
     await clickNode('m1');
     await clickNode('m2');
@@ -619,13 +575,11 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     await typePrompt('两张参考');
     expect(sendButton().disabled).toBe(false);
 
-    // 上限不足：参考保留不截断，说明原因并阻止发送
     await switchModel('测试生图模型', '单参考模型');
     await vi.waitFor(() => expect(container.textContent).toContain('参考图片数量超过模型支持上限，请调整参考'));
     expect(sendButton().disabled).toBe(true);
     expect(dockRefImages()).toEqual(['素材图一', '素材图二']);
 
-    // 用户主动删除超限项：恢复发送
     const removeBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="移除"]')!;
     await act(async () => {
       removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -643,7 +597,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     await pickFromCanvas('m1');
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
 
-    // Dock 移除引用：断开连线
     const removeBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="移除"]')!;
     await act(async () => {
       removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -651,7 +604,6 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     await vi.waitFor(() => expect(dockRefImages()).toEqual([]));
     expect(edgePairs()).toEqual([]);
 
-    // 关闭重开：引用不复活
     await closePanel();
     await clickNode(draftId);
     await vi.waitFor(() => expect(panelVisible()).toBe(true));
@@ -663,25 +615,19 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    // IKFA1J 起 @ 检索直接弹出 AtMentionMenu（原「引用画布素材」二级入口已随素材菜单改版移除）
     await typePromptRefRaw(container, '参考@素');
-    // AtMentionMenu 经 portal 挂在 body；带检索词时直接列匹配项（无检索词则按类型分组悬停展开）
     await vi.waitFor(() => expect(document.body.querySelector('[data-testid="mention-menu"] button')).toBeTruthy());
     const item = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="mention-menu"] button')].find(
       (b) => b.textContent?.includes('素材图一'),
     )!;
     await act(async () => { item.click(); });
 
-    // 立即建立连线（不等待发送）；Dock 显示同一参考；正文落「图片1」标签
     expect(edgePairs()).toEqual([`m1->${draftId}`]);
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('参考图片1'));
   });
 });
 
-/* IKFR4X 图片参考持续选取与完整退出闭环：一次进入连续选择、拒绝保持模式、
-   操作隔离、完成/Esc/关闭退出与目标失效结束。FlowCanvas 打桩透出 props，
-   会话与勾选断言走 pickInteractionLock / pickMarks 透出值。 */
 describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
   async function clickNode(id: string) {
     const node = flowProps.current.mediaNodes.find((n: Node) => n.id === id)!;
@@ -698,7 +644,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     return (flowProps.current.refPickMarkedIds ?? []) as string[];
   }
 
-  /** 图片面板（Dock）在本页是否可见：会话中编辑器只读（contenteditable=false），以发送按钮为准 */
   function panelOpen(): boolean {
     return [...container.querySelectorAll<HTMLButtonElement>('button')].some(
       (b) => b.getAttribute('title') === '发送',
@@ -711,14 +656,12 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     });
   }
 
-  /** 结束持续选取会话：点击提示条「完成选取」按钮 */
   async function finishPick() {
     await act(async () => {
       finishButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
   }
 
-  /** 完成选取按钮是否存在（会话提示条专属，普通模式无） */
   function finishButton(): HTMLButtonElement | undefined {
     return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => b.textContent === '完成选取',
@@ -770,14 +713,12 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
     await enterPickMode();
-    // 视频节点：图片面板类型边界（IKFE8T 同口径文案）
     await clickNode('v1');
     expect(edgePairs()).toEqual([]);
     expect(pickLock()).toBe(true);
     expect(panelOpen()).toBe(true);
     expect(container.textContent).toContain('图片参考仅支持图片素材');
 
-    // 改选合法来源仍然生效，模式继续
     await clickNode('m1');
     expect(edgePairs()).toEqual(['m1->d1']);
     expect(pickMarks()).toEqual(['m1']);
@@ -792,7 +733,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     await clickNode('m1');
     expect(pickMarks()).toEqual(['m1']);
 
-    // 会话中 Dock 移除仍可用：断开当前目标对应连线，勾选同步
     const removeBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="移除"]')!;
     expect(removeBtn.disabled).toBe(false);
     await act(async () => {
@@ -803,7 +743,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     expect(pickMarks()).toEqual([]);
     expect(pickLock()).toBe(true);
 
-    // 同一模式内立即再次选择
     await clickNode('m1');
     expect(edgePairs()).toEqual(['m1->d1']);
     expect(pickMarks()).toEqual(['m1']);
@@ -817,7 +756,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
 
     await enterPickMode();
     await clickNode('m1');
-    // 第一次空白点击：退出持续选取会话，面板与已选参考保留
     await act(async () => {
       flowProps.current.onPaneClick();
     });
@@ -825,7 +763,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     expect(panelOpen()).toBe(true);
     expect(edgePairs()).toEqual(['m1->d1']);
 
-    // 第二次空白点击：关闭面板（隐藏不丢内容，连线保留）
     await act(async () => {
       flowProps.current.onPaneClick();
     });
@@ -841,7 +778,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
 
     await enterPickMode();
     await clickNode('m1');
-    // 会话内普通选中变化不关闭/切换原目标 Dock（选取进行中 selection 被隔离）
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!], edges: [] });
     });
@@ -849,14 +785,11 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     await finishPick();
     expect(pickLock()).toBe(false);
     expect(finishButton()).toBeUndefined();
-    // 原目标 Dock 保持、参考保留
     expect(panelOpen()).toBe(true);
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
     expect(edgePairs()).toEqual(['m1->d1']);
-    // 未触发生成
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
 
-    // 恢复普通编辑：点击其他草稿卡可正常切换面板
     await clickNode('d2');
     await vi.waitFor(() => expect(dockRefImages()).toEqual([]));
   });
@@ -892,7 +825,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     expect(pickLock()).toBe(false);
     expect(edgePairs()).toEqual([`m1->${draftId}`]);
 
-    // 重开：参考恢复，普通模式（无会话提示与完成按钮）
     await clickNode(draftId);
     await vi.waitFor(() => expect(panelOpen()).toBe(true));
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
@@ -908,7 +840,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     await clickNode('m1');
     expect(pickLock()).toBe(true);
 
-    // 删除活动目标：模式与 Dock 一并结束（旧会话不得写向其他目标）
     await act(async () => {
       flowProps.current.onDeleteNode(['d1']);
     });
@@ -916,7 +847,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     expect(pickLock()).toBe(false);
     expect(finishButton()).toBeUndefined();
 
-    // 后续点击来源节点走普通分支，不产生指向已删目标的连线
     await clickNode('m1');
     expect(edgePairs().some((p: string) => p.endsWith('->d1'))).toBe(false);
   });
@@ -928,23 +858,18 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     await typePrompt('会话前输入');
 
     await enterPickMode();
-    // 会话中先选取一张：Dock 出现参考项后验证移除入口仍可用
     await clickNode('m1');
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
-    // 提示词编辑被隔离（Lexical readOnly → contenteditable=false）
     const editor = container.querySelector('[contenteditable]')!;
     expect(editor.getAttribute('contenteditable')).toBe('false');
-    // 模型入口与发送被隔离（底栏摘要按钮含模型名+比例+分辨率，用 includes 定位）
     const configBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => (b.textContent ?? '').includes('测试生图模型') && (b.textContent ?? '').includes(':'),
     )!;
     expect(configBtn.disabled).toBe(true);
     expect(sendButton().disabled).toBe(true);
-    // Dock 移除与退出仍可用
     expect(finishButton()!.disabled).toBe(false);
     expect(container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="移除"]')).toBeTruthy();
 
-    // 退出后恢复编辑
     await finishPick();
     const restored = container.querySelector('[contenteditable]')!;
     expect(restored.getAttribute('contenteditable')).toBe('true');
@@ -959,7 +884,6 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
 
     await enterPickMode();
     await clickNode('m1');
-    // 点击另一草稿卡：仍为原目标选参考（草稿卡不是合法图片来源，提示后保持）
     await clickNode('d2');
     expect(pickLock()).toBe(true);
     expect(edgePairs()).toEqual(['m1->d1']);

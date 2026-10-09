@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise one release task against a temporary bare Git remote."""
 
 import json
 import os
@@ -61,7 +60,6 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
             self.configure(actor)
             command("git", "-C", actor, "switch", "--track", f"origin/{line}", cwd=root)
 
-            # The remote advances. A read-only code task must synchronize first.
             (actor / "teammate.txt").write_text("shared\n", encoding="utf-8")
             command("git", "-C", actor, "add", "teammate.txt", cwd=root)
             command("git", "-C", actor, "commit", "-m", "test: teammate change", cwd=root)
@@ -72,7 +70,6 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
             self.assertEqual(json.loads(synchronized.stdout)["hooks_path"], ".githooks")
             self.assertEqual(command("git", "-C", release, "rev-parse", "HEAD", cwd=root).stdout.strip(), teammate_sha)
 
-            # A local release commit is preserved as the task start, but blocks PR publication.
             (release / "local.txt").write_text("unshared baseline\n", encoding="utf-8")
             command("git", "-C", release, "add", "local.txt", cwd=root)
             command("git", "-C", release, "commit", "-m", "test: local release commit", cwd=root)
@@ -109,7 +106,6 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
             receipt = json.loads((common / "blue-whale/verification" / f"{task_head}.json").read_text(encoding="utf-8"))
             self.assertEqual("passed", receipt["status"])
 
-            # Gitee merge is the external boundary: Git performs the same no-ff merge in actor.
             command("git", "-C", actor, "fetch", "origin", cwd=root)
             command("git", "-C", actor, "merge", "--ff-only", f"origin/{line}", cwd=root)
             command("git", "-C", actor, "merge", "--no-ff", "--no-edit", f"origin/{task_branch}", cwd=root)

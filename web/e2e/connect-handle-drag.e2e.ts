@@ -1,9 +1,3 @@
-/* ============================================
- * connect-handle-drag 回归（Kim 09-21 报障：生成图片卡右侧 + 连线拉不出来）
- * 真实浏览器锁定既有卡片（带既有入边的生成完成卡）手柄全链路：
- * 左右 + 拖出预览线 / 落空白弹类型菜单 / 落目标卡建边 / 选中态拖线 / 二次拖线。
- * 夹具对齐用户现场：竖版生成完成卡（带 jobId、左 + 可见）+ 既有入边 + 目标卡。
- * ============================================ */
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -85,7 +79,6 @@ const edges = (page: Page) => page.locator('.react-flow__edge');
 async function gotoCanvas(page: Page): Promise<void> {
   await page.goto('/canvas?project=project-1');
   await expect(node(page, 'm-gen')).toBeVisible();
-  // 既有入边已随夹具水合（对齐用户现场左侧虚线）
   await expect(edges(page)).toHaveCount(1);
 }
 
@@ -93,10 +86,7 @@ function handleBox(page: Page, nodeId: string, kind: 'source' | 'target') {
   return node(page, nodeId).locator(`.react-flow__handle.${kind}`).boundingBox();
 }
 
-/** 落空白后弹出的类型菜单：点画布空白真实触发点外关闭，断言菜单从 DOM 消失（IKHHW8 回归锁）。
- *  空白点由运行时 pane 尺寸推导（右下角内缩），与夹具节点布局解耦。 */
 async function closeMenuByOutsideClick(page: Page): Promise<void> {
-  // 先确认菜单已弹出再点外：慢环境下点击早于挂载会偶发落空，菜单不弹则点外断言假绿
   await expect(page.getByRole('button', { name: '图片生成' })).toBeVisible();
   const pane = (await page.locator('.react-flow__pane').boundingBox())!;
   await page.mouse.click(pane.x + pane.width - 60, pane.y + pane.height - 60);
@@ -116,7 +106,6 @@ test('对照组：左右 + 都能拖出连线预览（带既有入边）', async
     await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2, { steps: 8 });
     await expect(connectionLine(page), `${kind === 'source' ? '右' : '左'} + 应拖出预览线`).toBeVisible();
     await page.mouse.up();
-    // 松手落空白弹类型菜单；点画布空白点外关闭收口（同会话继续）
     await closeMenuByOutsideClick(page);
   }
   expect(smokeFailures(tracking)).toEqual([]);
@@ -153,7 +142,6 @@ test('选中态（框选）下右侧 + 拖出预览线', async ({ page }) => {
   const tracking = await setupPage(page);
   await gotoCanvas(page);
 
-  // 框选选中 m-gen（不点卡，避免触发生成面板）
   const card = (await node(page, 'm-gen').boundingBox())!;
   await page.mouse.move(card.x - 30, card.y - 30);
   await page.mouse.down();
@@ -174,7 +162,6 @@ test('二次拖线：先拖左侧弹菜单点外关闭，右侧仍能拖出预�
   const tracking = await setupPage(page);
   await gotoCanvas(page);
 
-  // 第一次：左侧 + 拖空白 → 类型菜单 → 点画布空白点外关闭
   const left = (await handleBox(page, 'm-gen', 'target'))!;
   await page.mouse.move(left.x + left.width / 2, left.y + left.height / 2);
   await page.mouse.down();
@@ -183,7 +170,6 @@ test('二次拖线：先拖左侧弹菜单点外关闭，右侧仍能拖出预�
   await expect(page.getByRole('button', { name: '图片生成' })).toBeVisible();
   await closeMenuByOutsideClick(page);
 
-  // 第二次：右侧 + 仍应拖出预览线
   const right = (await handleBox(page, 'm-gen', 'source'))!;
   await page.mouse.move(right.x + right.width / 2, right.y + right.height / 2);
   await page.mouse.down();

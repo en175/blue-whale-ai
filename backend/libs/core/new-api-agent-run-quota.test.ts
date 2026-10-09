@@ -1,14 +1,8 @@
-// IKAFPC / IKCGE7：按 Agent Run 号汇总本会话消费（券退役前认的是券号）。
-//
-// 这里锁住的是全案的正确性核心——**归属只认 Run 号，不认时间窗**。new-api 只有「用户」这一个
-// 维度，同一个账号可能同时跑两个 Agent 会话、也可能一边对话一边出图；按时间窗求和会把这些
-// 全算进来，而按 Run 号筛是逐笔精确的。
 import { describe, expect, it } from "vitest";
 
 import { createNewApiClient } from "./new-api-client.js";
 import { jsonResponse } from "./new-api-client.testlib.js";
 
-/** 造一条账单。`other` 是 new-api 写的 JSON 字符串。 */
 function log(quota: number, agentRunId?: string) {
   return {
     id: Math.trunc(quota),
@@ -50,7 +44,6 @@ describe("sumAgentRunQuota", () => {
   });
 
   it("出图出片的账没有 Run 号，天然被排除", async () => {
-    // dock 栏出图不走 Agent 链路，账单 other 里根本没有 agent_run_id。
     const client = clientReturning([[log(100, "run_a"), log(5000)]]);
     const result = await client.sumAgentRunQuota("sk-user", ["run_a"]);
     expect(result.quota).toBe(100);
@@ -96,7 +89,6 @@ describe("sumAgentRunQuota", () => {
     });
     expect(urls[0]).toContain("start_timestamp=1700000000");
     expect(urls[0]).toContain("end_timestamp=1700000600");
-    // type=2 是消费日志；不带这个会把充值记录也拉回来。
     expect(urls[0]).toContain("type=2");
   });
 });

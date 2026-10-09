@@ -1,6 +1,5 @@
 import { NewApiError } from "@lib/core";
 
-/** 管理端失败异常：过滤器映射为 { success: false, error }（契约第 2 节）。 */
 export class AdminException extends Error {
   constructor(
     public readonly status: number,
@@ -11,7 +10,6 @@ export class AdminException extends Error {
   }
 }
 
-/** new-api/未知错误 → AdminException；new-api 状态码 400–599 透传，其余 500。 */
 export function toAdminError(error: unknown): AdminException {
   const status = error instanceof NewApiError ? error.status : 500;
   const safeStatus =

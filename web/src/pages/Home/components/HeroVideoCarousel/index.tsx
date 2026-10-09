@@ -108,7 +108,6 @@ function safePlay(video: HTMLVideoElement): void {
     const result = video.play();
     void result?.catch(() => undefined);
   } catch {
-    // 浏览器拒绝自动播放时保留静态封面，不让背景能力影响首页主流程。
   }
 }
 
@@ -131,7 +130,6 @@ function rewindToStart(video: HTMLVideoElement): void {
   try {
     if (video.currentTime !== 0) video.currentTime = 0;
   } catch {
-    // metadata 未就绪时无法seek，交给随后的 load / canplay。
   }
 }
 
@@ -144,7 +142,6 @@ function pauseAndUnload(video: HTMLVideoElement): void {
   }
 }
 
-/** 片源时长未就绪或仍在片头时不预加载/切换，避免 metadata 抖动把三条片子连着切完。 */
 function isNearEnd(video: HTMLVideoElement, leadSeconds: number): boolean {
   const duration = video.duration;
   const currentTime = video.currentTime;

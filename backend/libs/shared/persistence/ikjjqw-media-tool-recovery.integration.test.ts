@@ -1,22 +1,22 @@
-// IKJJQW（IKIXK9-SPEC-20261002 B 节）：单结果媒体工具接入恢复协议 v1 的真 MySQL 验证。
-//
-// 与 ikjjqu-canvas-recovery.integration.test.ts 同款门控：需要本地 MySQL（本票用 3308，勿动 QU 的 3307）：
-//   # 容器与建库（一次）：
-//   docker run -d --name ikjjqw-mysql -e MYSQL_ROOT_PASSWORD=ikjjqw \
-//     -e MYSQL_DATABASE=bw_gate_ikjjqw -p 3308:3306 mysql:8
-//   cd backend && DATABASE_URL='mysql://root:ikjjqw@127.0.0.1:3308/bw_gate_ikjjqw' \
-//     npx prisma db push --accept-data-loss
-//   # 跑测试：
-//   IKJJQW_DATABASE_URL='mysql://root:ikjjqw@127.0.0.1:3308/bw_gate_ikjjqw' \
-//     pnpm exec vitest run backend/libs/shared/persistence/ikjjqw-media-tool-recovery.integration.test.ts
-// 未配置该变量时整组跳过；跳过不算通过。
-//
-// 验收场景（工单第 6 条，11 个接入类型表驱动，各四查）：
-//   1. 受理回执丢失后查询（恢复页找回已受理任务）
-//   2. 完成未落卡（succeeded + 无 outputs 行 → 恢复页返回 pending/0 的 primary 虚拟项）
-//   3. 重试幂等（通用重试带 canvas_binding → 新 job + 新关联；同 submission_id 重放同 job）
-//   4. 归属冲突不预扣（承接版本过期 → 409 在任务写入前，零 job 零关联）
-//   5. 重试拒绝迁移（无受理关联的原任务带 canvas_binding 重试 → 422 明确拒绝）
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -42,7 +42,7 @@ import type { AssetStorageService } from "@lib/shared/assets/storage.service.js"
 
 const databaseUrl = process.env.IKJJQW_DATABASE_URL;
 
-/** 各工具最小合规资产形状（service 层校验用；权限/归属校验由 stub 恒返回通过）。 */
+
 function assetOf(kind: "image" | "video" | "audio") {
   const base = { url: "https://tos.example.com/uploads/9/x/a.bin", storage_key: null, mime: null, size: 1_000_000n, width: null, height: null, duration_ms: null };
   if (kind === "image") return { ...base, type: "image", url: "https://tos.example.com/uploads/9/x/a.png", mime: "image/png", width: 1080, height: 1920 };
@@ -50,7 +50,7 @@ function assetOf(kind: "image" | "video" | "audio") {
   return { ...base, type: "audio", url: "https://tos.example.com/uploads/9/x/a.mp3", mime: "audio/mp3", duration_ms: 60_000 };
 }
 
-/** 11 个单结果媒体工具的受理形态（入口验收清单的测试化身）。 */
+
 const TOOLS = [
   { name: "擦除", op: "image_erase.create", path: "/image-erasures", kind: "image" as const,
     make: (c: unknown) => new ImageErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never),
@@ -69,7 +69,7 @@ const TOOLS = [
     body: () => ({ source_asset_id: "88", speed: 1.5 }) },
   { name: "抠像", op: "video_matting.create", path: "/video-mattings", kind: "video" as const,
     make: (c: unknown) => new VideoMattingsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never),
-    // 抠像的幂等承载是 client_token（= submission_id），不是 Idempotency-Key 头。
+
     body: (submissionId: string) => ({ source_asset_id: "88", target_node_id: "node-1", mode: "portrait", client_token: submissionId }) },
   { name: "抠图", op: "image_cutout.create", path: "/image-cutouts", kind: "image" as const,
     make: (c: unknown) => new ImageCutoutsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never),
@@ -92,7 +92,7 @@ const PROJECT_ID = "920001";
 const USER_ID = "920009";
 
 function submissionId(seed: number): string {
-  // 确定性小写 UUID（每用例唯一即可，v4 形态合法：段长 8-4-4-4-12）。
+
   const hex = seed.toString(16).padStart(12, "0").slice(-12);
   return `${hex.slice(0, 8)}-1111-4222-8333-${hex.slice(4)}0000`;
 }
@@ -110,7 +110,7 @@ function bindingOf(sid: string, node: string, revision: number): CanvasBinding {
   };
 }
 
-/** 各工具 service 的受理调用（video-mattings 无头、其余走 Idempotency-Key 头）。 */
+
 async function submit(
   tool: (typeof TOOLS)[number],
   prisma: PrismaClient,
@@ -163,7 +163,7 @@ describe.skipIf(!databaseUrl)("单结果媒体工具恢复协议真库验证（I
   const retryHash = (sid: string) =>
     createHash("sha256").update(`POST:generation.retry:/projects/${PROJECT_ID}/generation-jobs/x/retry:${sid}`).digest("hex");
 
-  /** 通用重试（generation-command-repo.retryJob）带 canvas_binding——与 handle-retry 同参形态。 */
+
   async function retryWithBinding(originalJobId: string, sid: string, node: string, revision: number) {
     return createGenerationCommandRepo(prisma).retryJob(
       originalJobId,
@@ -199,7 +199,7 @@ describe.skipIf(!databaseUrl)("单结果媒体工具恢复协议真库验证（I
           job_id: data.job_id,
           is_current: true,
         });
-        // 回执丢失后：恢复页按项目找回该提交（含运行中 job 投影）。
+
         const page = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
         expect(page.records).toHaveLength(1);
         expect(page.records[0]).toMatchObject({
@@ -242,7 +242,7 @@ describe.skipIf(!databaseUrl)("单结果媒体工具恢复协议真库验证（I
         expect(retry && "generation_job_id" in retry).toBe(true);
         const retryJobId = (retry as { generation_job_id: string }).generation_job_id;
         expect(retryJobId).not.toBe(jobId);
-        // 新关联随重试事务落库；owner 版本推进到 2。
+
         const page = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
         expect(page.records.map((r) => r.submission_id)).toContain(retrySid);
         const owner = await prisma.generation_canvas_node_owners.findUnique({
@@ -250,7 +250,7 @@ describe.skipIf(!databaseUrl)("单结果媒体工具恢复协议真库验证（I
         });
         expect(owner?.binding_revision).toBe(2);
 
-        // 同 submission_id 同摘要重试重放同一 job（重试幂等）。
+
         const replay = await retryWithBinding(jobId, retrySid, "node-3", 1);
         expect((replay as { generation_job_id: string }).generation_job_id).toBe(retryJobId);
         expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(2);
@@ -260,7 +260,7 @@ describe.skipIf(!databaseUrl)("单结果媒体工具恢复协议真库验证（I
         const first = await submit(tool, prisma, submissionId(501 + TOOLS.indexOf(tool)), "node-4");
         expect(first.code).toBe(200);
         const jobsBefore = await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } });
-        // 第二意图携带过期版本（实际已是 1）→ 409 canvas_binding_conflict，零 job 零关联零预扣行。
+
         const second = await submit(tool, prisma, submissionId(601 + TOOLS.indexOf(tool)), "node-4", 0);
         expect(second.code).toBe(409);
         expect(second.data).toMatchObject({ reason: RECOVERY_REASONS.bindingConflict, currentBindingRevision: 1 });
@@ -269,7 +269,7 @@ describe.skipIf(!databaseUrl)("单结果媒体工具恢复协议真库验证（I
       });
 
       it("★ 5. 重试拒绝迁移：无受理关联的原任务带 canvas_binding → 422", async () => {
-        // 直接落一个无关联 job（历史任务形态：不携 canvas_binding 建行）。
+
         const legacy = await prisma.generation_jobs.create({
           data: {
             user_id: BigInt(USER_ID),

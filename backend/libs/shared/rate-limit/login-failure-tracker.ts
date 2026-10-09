@@ -17,7 +17,6 @@ const DEFAULT_OPTIONS: LoginFailureTrackerOptions = {
   blockMs: 15 * 60 * 1000,
 };
 
-/** 登录失败计数；达阈值后 block，并通知订阅方（登录工单接入）。 */
 @Injectable()
 export class LoginFailureTracker extends EventEmitter {
   private options: LoginFailureTrackerOptions = DEFAULT_OPTIONS;
@@ -26,7 +25,6 @@ export class LoginFailureTracker extends EventEmitter {
     super();
   }
 
-  /** 登录工单可覆盖默认阈值 / 窗口 / 锁定时长。 */
   configure(options: LoginFailureTrackerOptions): void {
     this.options = options;
   }
@@ -39,7 +37,6 @@ export class LoginFailureTracker extends EventEmitter {
     const result = await this.limiter.take({
       scope: LOGIN_FAILURE_SCOPE,
       key: account,
-      // take 在 count > limit 时拒绝：limit=threshold-1 → 第 threshold 次失败锁定。
       limit: Math.max(0, this.options.threshold - 1),
       windowMs: this.options.windowMs,
     });

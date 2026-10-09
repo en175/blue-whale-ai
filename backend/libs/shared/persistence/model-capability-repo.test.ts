@@ -10,8 +10,6 @@ vi.mock("./model-capability-cache.js", () => ({
   setModelCapabilityList: vi.fn().mockResolvedValue(undefined),
 }));
 
-// 与 scene-card-generation-repo.test.ts / plan-application-facts 同源的 8 字段集——
-// digest 只覆盖这 8 个参数字段，features 明确不在内（改字段集会让历史快照全部误判漂移）。
 const CAP_FIELDS = {
   supported_sizes: [{ id: "2k", label: "2K", api_value: "2K" }],
   supported_aspect_ratios: ["1:1", "16:9"],
@@ -64,7 +62,6 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     expect(view.features.last_frame).toBe(false);
   });
 
-  // IKIZQ7：样片放行位缺省 false = 默认关闭；两键形显式 true 才放行（与 last_frame 同一条归一）。
   it("sample_mode 缺省关闭；camelCase / snake_case 显式 true 才放行", async () => {
     const { repo } = repoWith([
       buildRow(),
@@ -140,15 +137,10 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
   it("digest === capabilityDigest(同一 8 字段输入)——用真实函数交叉断言，不写死", async () => {
     const { repo } = repoWith([buildRow()]);
     const [view] = await repo.listEnabledByType("image");
-    // 若 repo 误用 toSizes()/toFeatures() 转换后的 View 字段算 digest，
-    // 对象形状会多出 width/height 等键 → canonical JSON 不同 → 此处断言失败。
     expect(view.digest).toBe(capabilityDigest(CAP_FIELDS));
   });
 
   it("跨 repo 一致性：与 scene-card 漂移检测复算的 digest 同源（同输入同输出）", async () => {
-    // scene-card-generation-repo.regenerateSceneCard 用同一 capabilityDigest + 同一 8 字段集
-    // 从 DB 原始行复算漂移；本 repo 投影的 digest 必须与之逐字一致，
-    // 否则前端本地预判与后端事务复算错位，全部模型误判漂移。
     const { repo } = repoWith([buildRow()]);
     const [view] = await repo.listEnabledByType("image");
     const recomputed = capabilityDigest({
@@ -173,8 +165,8 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     const [a] = await repoA.listEnabledByType("image");
     const [b] = await repoB.listEnabledByType("image");
     const [c] = await repoC.listEnabledByType("image");
-    expect(a.digest).toBe(b.digest); // 同内容 → 同 digest
-    expect(c.digest).not.toBe(a.digest); // 内容变 → digest 变
+    expect(a.digest).toBe(b.digest);
+    expect(c.digest).not.toBe(a.digest);
   });
 
   it("features 不进 digest（features 变更不改变 digest）", async () => {
@@ -185,8 +177,6 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     expect(a.digest).toBe(b.digest);
   });
 
-  // IKHEXG：`image_reference_max` 一把键服务三种生成，官方缺省按生成类型分叉——
-  // 图片/视频 10（网关 maxImageEditImages / 方舟 Seedream 复合编辑），音频 1（官方音频接口只收 1 张）。
   it("features 缺 image_reference_max 时按行类型兜底：图片行 10", async () => {
     const { repo } = repoWith([
       buildRow({ features: { reference_image: true, watermark: true, quantity_max: 4 } }),
@@ -199,7 +189,6 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
   });
 
   it("features 缺 image_reference_max 时按行类型兜底：音频行 1（IKHEXG）", async () => {
-    // 类型来自查询参数（listEnabledByType 的入参），不是行上的字段——归一按前者选缺省。
     const { repo } = repoWith([buildRow({ features: { watermark: true } })]);
 
     const [view] = await repo.listEnabledByType("audio");
@@ -243,7 +232,6 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     expect(view.features.image_reference_max).toBe(10);
   });
 
-  // IKESD6 / ADR-0085：i2i_model_name / max_prompt_length 读侧归一（snake+camel 双收，脏值降级 null）。
   it("i2i_model_name 与 max_prompt_length 正常解析（snake_case）", async () => {
     const { repo } = repoWith([
       buildRow({
@@ -360,7 +348,7 @@ describe("ModelCapabilityRepo.listEnabledByType 时长归一化", () => {
     expect(image.supported_durations).toBeNull();
 
     const [reversed] = await repoWith([
-      makeRow({ supported_durations: [10, 5] }), // max < min
+      makeRow({ supported_durations: [10, 5] }),
     ]).listEnabledByType("video");
     expect(reversed.supported_durations).toBeNull();
 
@@ -410,8 +398,6 @@ describe("显式默认标记（IKE0VX）", () => {
     const { repo: repo2 } = repoWith([buildRow({ is_default: true })]);
     const isDefault = (await repo2.listEnabledByType("text"))[0].digest;
 
-    // 这条比「digest 没变」更重要：digest 是冻结快照的比对口径，把一个运营开关
-    // 算进去，会让所有历史快照在有人点一次「设为默认」之后集体误判漂移。
     expect(isDefault).toBe(notDefault);
     expect(isDefault).toBe(capabilityDigest(CAP_FIELDS));
   });

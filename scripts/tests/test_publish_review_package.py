@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Black-box tests for explicit create/update publication modes."""
 
 from __future__ import annotations
 
@@ -13,9 +12,9 @@ import time
 import unittest
 from pathlib import Path
 
-try:  # 作为 scripts.tests.* 命名空间包导入
+try:
     from .bash_helper import BASH
-except ImportError:  # 经 discover -s scripts/tests 顶层导入
+except ImportError:
     from bash_helper import BASH
 
 
@@ -58,10 +57,6 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         fake_node.chmod(0o755)
         self.base_env = os.environ.copy()
-        # os.pathsep：POSIX 为 ":"（行为与原来一致）；Windows 为 ";"。
-        # 若在 Git Bash 下用 ":" 拼接 Windows 盘符路径，MSYS 会把 `C:\...` 拦腰
-        # 拆成 "C" + 相对路径，导致 fake-verification-bin 从 PATH 中消失，
-        # 真实 node 顶替运行 verify-change-scope.mjs（rc 11）。
         self.base_env["PATH"] = str(self.fake_bin) + os.pathsep + self.base_env["PATH"]
         self.base_env["REAL_NODE"] = self.real_node
         self.base_env["VERIFICATION_LOG"] = str(self.verification_log)
@@ -1222,8 +1217,6 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         fake_git.chmod(0o755)
         env = self.base_env.copy()
-        # os.pathsep：POSIX 为 ":"（与原来一致）；Windows 为 ";"，避免 MSYS
-        # 把 `C:\...` 拦腰拆成 "C"+相对路径而让前置目录从 PATH 中丢失。
         env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
 
         result = subprocess.run(
@@ -1289,8 +1282,6 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         fake_git.chmod(0o755)
         env = self.base_env.copy()
-        # os.pathsep：POSIX 为 ":"（与原来一致）；Windows 为 ";"，避免 MSYS
-        # 把 `C:\...` 拦腰拆成 "C"+相对路径而让前置目录从 PATH 中丢失。
         env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
         env["FAIL_RECOVERY_TMP"] = str(recovery_file) + ".tmp"
 
@@ -1334,8 +1325,6 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         fake_git.chmod(0o755)
         env = self.base_env.copy()
-        # os.pathsep：POSIX 为 ":"（与原来一致）；Windows 为 ";"，避免 MSYS
-        # 把 `C:\...` 拦腰拆成 "C"+相对路径而让前置目录从 PATH 中丢失。
         env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
 
         published = self.invoke_update(env=env)
@@ -1400,8 +1389,6 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         py_launcher.chmod(0o755)
         env = self.base_env.copy()
-        # os.pathsep：POSIX 为 ":"（与原来一致）；Windows 为 ";"，避免 MSYS
-        # 把 `C:\...` 拦腰拆成 "C"+相对路径而让前置目录从 PATH 中丢失。
         env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
 
         result = subprocess.run(

@@ -6,10 +6,6 @@ export interface DismissOnOutsideLayer {
   dismiss: () => void;
 }
 
-/**
- * 画布对话框内的下拉 / 浮层：在根节点外按下时收起该层。
- * 不触碰宿主对话框（IKBO6M：点画布空白关下拉和「模型与质量」等配置浮层，不关底部对话框）。
- */
 export function useDismissOnOutside(layers: DismissOnOutsideLayer[]): void {
   const layersRef = useRef(layers);
   layersRef.current = layers;

@@ -12,11 +12,6 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 
-// IKFCX4「图片文本附件完整预览与关系一致性」公开接口集成（IKFCVS 规格「测试决策」节）：
-// 真 NestFactory 挂载生产控制器 + 隔离 MySQL（IKFCX4_DATABASE_URL 门控）；
-// 浏览器段（IKFCX4_BROWSER=1：完整正文浮层 → 长文滚动 → 移入保持/移出关闭 →
-// 多目标移除断边 → 来源更新预览当前正文 → 刷新恢复）在同 describe 尾部。
-// 本切片不触发任何上游供应商调用，不挂 HTTP 替身。
 describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consistency (IKFCX4)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -40,7 +35,6 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: {},
-        // channel 为必填封闭枚举；取本行 capability_type 对应的默认渠道
         channel: "seedream-image",
       },
       update: { supported_sizes: sizes, default_size: "1024x1024" },
@@ -96,7 +90,6 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
       body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: JSON.stringify(edges), viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
     });
     expect(saved.status).toBe(200);
-    // 两目标关系独立存在：断开其一（面板移除的持久化形态）不影响另一目标
     const canvas = await getCanvas(projectId);
     const pruned = await fetch(`${base}/api/canvases/${projectId}`, {
       method: "PUT",
@@ -116,7 +109,6 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKFCX4 browser")).id;
-    // 长正文：多段落撑出滚动（textCard 上限 280px 高）；末尾标记用于断言滚动到底
     const longBody = Array.from({ length: 24 }, (_, i) => `第${i + 1}段落：蓝鲸在深海里缓慢游动，霓虹灯映在浪尖。`).join("\n");
     const LONG_TAIL_MARK = "末尾标记-XY7";
     const asset = await prisma.client.assets.create({
@@ -141,8 +133,6 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
           { id: "media-1", type: "mediaNode", position: { x: 880, y: 120 }, data: { mediaType: "image", fileName: "目标图一", assetId, width: 1024, height: 1024 } },
           { id: "media-2", type: "mediaNode", position: { x: 880, y: 460 }, data: { mediaType: "image", fileName: "目标图二", assetId, width: 1024, height: 1024 } },
         ]),
-        // 播种三边：text-1 同时服务两目标（多目标移除验收的持久关系基线），text-2 只进 media-1；
-        // 拖线建立连线的行为已由 IKDLQF 浏览器段覆盖，本片聚焦面板侧交互与关系一致性
         edges: JSON.stringify([
           { id: "e-t1-m1", source: "text-1", target: "media-1" },
           { id: "e-t1-m2", source: "text-1", target: "media-2" },
@@ -174,13 +164,11 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
       await media2.waitFor();
       await vi.waitFor(async () => expect(await page.locator(".react-flow__edge").count()).toBe(3));
 
-      // 打开 media-1 面板：文本附件以图标进参考栏（两枚），无旧独立正文块
       await media1.locator('[data-testid="media-content"]').click();
       await media1.getByRole("button", { name: "生成图片" }).click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(2));
       expect(await page.getByText("文本附件（").count()).toBe(0);
 
-      // 悬浮 text-1 图标：浮层显示完整正文（含末尾标记）、无来源标题
       const textThumbs = page.locator('[data-testid="dock-text-ref"]');
       const longThumb = textThumbs.first();
       await longThumb.hover();
@@ -195,7 +183,6 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
       });
       expect(scrollable, "长文超出浮层上限形成滚动区").not.toBeNull();
       expect(scrollable!.scrollHeight).toBeGreaterThan(scrollable!.clientHeight);
-      // 滚动至末尾：底部标记进入视口
       await overlay.evaluate((el) => {
         const inner = el.firstElementChild as HTMLElement;
         inner.scrollTop = inner.scrollHeight;
@@ -207,18 +194,14 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
       });
       expect(tailVisible, "长文本可滚动至末尾").toBe(true);
 
-      // 移入浮层保持打开：鼠标从图标移到浮层内停留，超过关闭延迟浮层仍在
       const overlayBox = (await overlay.boundingBox())!;
       await page.mouse.move(overlayBox.x + overlayBox.width / 2, overlayBox.y + overlayBox.height / 2);
       await page.waitForTimeout(400);
       expect(await overlay.count(), "鼠标移入浮层保持打开").toBe(1);
-      // 移出浮层（图标与浮层之外）后关闭
       await page.mouse.move(120, 60);
       await page.waitForTimeout(400);
       expect(await overlay.count(), "移出图标与浮层后关闭").toBe(0);
 
-      // 多目标移除：media-1 面板移除 text-1 → 仅断 text-1→media-1；
-      // text-1→media-2 与 text-2→media-1 保留，画布来源卡仍在
       const removeSaved = page.waitForResponse((response) =>
         response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
       await longThumb.locator('button[title="移除"]').click();
@@ -231,13 +214,11 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
       expect(await text1.count(), "来源文本卡保留").toBe(1);
       expect(await page.locator(".react-flow__edge").count()).toBe(2);
 
-      // 来源更新：编辑 text-2 正文后返回目标面板，预览显示当前正文（IKFCX4）
       await text2.locator('[data-testid="text-title"]').click();
       const editor = text2.locator('[data-placeholder="输入内容..."]');
       await editor.dblclick();
       await editor.fill("雨后的巷子，猫在檐下躲雨");
       await page.locator(".react-flow__pane").click({ position: { x: 80, y: 900 } });
-      // 返回 media-1（切换目标后返回）：图标与已保存关系一致
       await media1.locator('[data-testid="media-content"]').click();
       await media1.getByRole("button", { name: "生成图片" }).click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
@@ -245,7 +226,6 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
       await overlay.waitFor();
       expect(await overlay.innerText(), "来源正文修改后再次预览使用当前正文").toContain("雨后的巷子，猫在檐下躲雨");
 
-      // 刷新画布：关系随保存恢复，media-2 面板图标与连线一致
       await page.reload();
       await text1.waitFor();
       await media2.waitFor();

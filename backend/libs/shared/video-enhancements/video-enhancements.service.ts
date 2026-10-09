@@ -1,9 +1,3 @@
-// IKH3VE：视频 HD 高清（火山 MediaKit 画质增强大模型版）建任务服务（仿 video-subtitle-erasures
-// 的免费轻量入口，契约 @lib/contracts/video-enhance）。校验源视频资产归属 → 复核输入门槛
-// （短边 [360,1080] / 长边 ≤1920，宽高 null 放行）→ 插 generation_jobs(type=video_enhance)。
-// 免费口径（同去字幕 / media-extractions）：不写成本预留、不接成本估算、不走余额拦截门。
-// 不写画布——HD 高清卡由前端进入工具时本地建卡（ADR-0105 建卡口径照抄图片高清放大），
-// 产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填（源卡不动，结果回填本卡）。
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
@@ -31,11 +25,9 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
-/** IKJJQW：恢复协议受理的幂等域（先例命名「领域.动作」）。 */
 const IDEMPOTENCY_OPERATION = "video_enhance.create";
 const REQUEST_PATH = "/video-enhancements";
 
-/** zod 校验失败 → 人能读懂的原因（按首个出错键名映射；前端置灰只是体验层，这里返回可读文案）。 */
 const PARSE_ERROR_MESSAGES: Record<string, string> = {
   [VIDEO_ENHANCE_INPUT_KEYS.sourceAssetId]: "缺少或非法的源素材 ID（source_asset_id）",
   [VIDEO_ENHANCE_INPUT_KEYS.targetNodeId]: "缺少目标节点 ID（target_node_id）",
@@ -64,17 +56,12 @@ export class VideoEnhancementsService {
     userId: string,
     projectId: string,
     body: Record<string, unknown>,
-    // IKJJQW（B.3）：新协议承载——Idempotency-Key 头必须等于 canvas_binding.submission_id。
     idempotencyKey?: string,
   ) {
-    // IKJJQW：canvas_binding 是业务键之上的基础设施键（同 client_token 口径）：先行剥离再过
-    // 契约 schema；携带但非法 / 与 Idempotency-Key 承载不一致 → 400 invalid_recovery_payload
-    // （IKJLTZ：三段校验收敛至 stripCanvasBinding，头承载的 trim 口径留在调用方）。
     const gate = stripCanvasBinding(body ?? {}, "Idempotency-Key", (idempotencyKey ?? "").trim());
     if (gate.error) return gate.error;
     const { binding, rest } = gate;
 
-    // 契约 schema 复核（strict 三键）：resolution 枚举（720p 已被产品裁掉）在此拦截。
     const parsed = videoEnhanceInputSchema.safeParse(rest);
     if (!parsed.success) {
       return fail(PARAM_MISSING_CODE, readableParseError(parsed.error.issues));
@@ -84,9 +71,6 @@ export class VideoEnhancementsService {
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
-    // IKJLTX（R5，B.3 受理事务顺序）：同身份同载荷的原意图幂等回读先于素材/门槛等可变状态
-    // 校验——已受理重放返回原 job 与原关联，不因此刻素材已删除/门槛不过而重新拒绝或重复受理。
-    // 摘要只依赖请求载荷与 canvas_binding，与可变状态无关（门本体见 replayAcceptedMediaTool）。
     const { recovery, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
       projectId,
       userId,
@@ -98,7 +82,6 @@ export class VideoEnhancementsService {
     });
     if (replayed) return replayed;
 
-    // findOwnedSource 按 user_id 归属过滤（status=normal 且未删除）：非本人素材一律 404，不泄露存在性。
     const asset = await this.assets.findOwnedSource(
       input[VIDEO_ENHANCE_INPUT_KEYS.sourceAssetId],
       userId,
@@ -108,11 +91,6 @@ export class VideoEnhancementsService {
       return fail(FAILURE_CODE, "仅支持对视频资产发起 HD 高清");
     }
 
-    // 输入门槛复核（官方 PDF 输入视频限制：短边 [360,1080]、长边 [360,1920]；短边/长边语义：
-    // 取宽高较小者为短边、较大者为长边，竖屏 1080x1920 合法；常量单源在契约 video-enhance.ts，
-    // web 按钮门槛预检同源）。长边下限 360 由短边下限蕴含（长边 ≥ 短边），不单独判。
-    // assets.width/height 由前端上报、存量大量为 null：缺权威值不臆造、不拦——放行交供应商按
-    // 官方门槛拒（与去字幕 / 擦除 / 高清同口径）；仅 SDR 的限制无前置元数据，同由任务失败口径兜底。
     if (asset.width != null && asset.height != null) {
       const longSide = Math.max(asset.width, asset.height);
       const shortSide = Math.min(asset.width, asset.height);
@@ -128,12 +106,8 @@ export class VideoEnhancementsService {
       }
     }
 
-    // 契约 schema parse 后原样冻结（重试原样沿用）。
     const frozenInput: VideoEnhanceInput = { ...input };
 
-    // IKJJQW：受理主体走共享段（B.3）——有 canvas_binding 时「恢复锁序核对 → 建行 → 关联行 →
-    // 幂等行」一个事务；无 canvas_binding 时建行路径与接入前一致。前置回读 miss 后此处
-    // 事务内仍有锁内回读兜底（并发赢家在锁外 miss 与事务开始之间提交的情形）。
     const outcome = await createMediaToolJobWithRecovery(
       this.prisma.client,
       recovery,
@@ -147,8 +121,6 @@ export class VideoEnhancementsService {
             status: "queued",
             progress: 0,
             input: frozenInput,
-            // 过去 60s：回拨口径同 media_extract / 去字幕——DATETIME(0) 秒精度进位会让同秒
-            // claim 的 lte now 判 false。
             next_action_at: new Date(Date.now() - 60_000),
           },
         });
@@ -166,8 +138,6 @@ export class VideoEnhancementsService {
     });
   }
 
-  /** 入队失败兜底：queued 任务直接置 failed，避免 HD 高清任务在 worker 领取前静默悬挂。
-   *  IKBQEE / ADR-0078：details 落调试原文，禁展示用户。逻辑在 repo.markFailedQueued（IKDZGH 收敛）。 */
   async markFailed(
     jobId: string,
     code: string,

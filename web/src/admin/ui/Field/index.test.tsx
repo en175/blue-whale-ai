@@ -39,7 +39,6 @@ describe('Field', () => {
     expect(el.textContent).toContain('基准单价');
     expect(el.querySelector('input')).not.toBeNull();
     expect(el.textContent).toContain('单位 mc：1 积分 = 1000 mc');
-    // 内联的字段不该长出一个「?」——那会退化成「每行一个问号」的表单生成器样子
     expect(el.querySelector('button[aria-label="说明"]')).toBeNull();
   });
 

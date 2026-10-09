@@ -1,7 +1,3 @@
-// IKHW59：调速创建入口 controller 单测——凭证密封透传 + MQ 发送断言 + 入队失败回拨。
-// audio-trims（IKHB6N）未建 controller 测试；本票按任务口径（MQ 发送断言）对齐
-// image-cutouts.controller.test.ts 接缝（IKGXM1 先例，零新增测试设施：vi.mock + 直接构造）。
-// service 复核矩阵见 libs/shared/audio-speeds/audio-speeds.service.test.ts。
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ERROR_ENQUEUE_FAILED, ok } from "@lib/contracts";
 
@@ -54,7 +50,6 @@ describe("AudioSpeedsController.create", () => {
     const { controller, service } = makeController();
     vi.mocked(enqueueAudioSpeedJob).mockRejectedValue(new Error("rocketmq down"));
     const result = await controller.create({ userId: "9" } as never, "55", {}, undefined);
-    // 回拨失败不影响响应形状（任务已建，失败态由 GET /api/jobs/:id 呈现）。
     expect(result.code).toBe(200);
     expect(service.markFailed).toHaveBeenCalledWith(
       "400",

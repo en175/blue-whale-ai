@@ -1,5 +1,3 @@
-// web/src/utils/ref-overflow.ts
-/** 参考素材超限归因：图片/视频各自按「选中数 − 接受数」判丢弃，供上传处理复用（toast 文案分层）。 */
 export type RefOverflowType = 'image' | 'video';
 
 export function classifyRefOverflow(params: {
@@ -15,7 +13,6 @@ export function classifyRefOverflow(params: {
   return null;
 }
 
-/** 返回超限的种类数组，支持同时有 image 和 video 超出的场景。 */
 export function classifyRefOverflows(params: {
   selectedImages: number;
   selectedVideos: number;
@@ -28,12 +25,6 @@ export function classifyRefOverflows(params: {
   return out;
 }
 
-/**
- * 上传数量超限 toast 文案（ADR-0086：上限由调用方传能力行值，不再依赖固定常量）：
- *  - 单种超出：「图片最多 9 张已超出」
- *  - 图片+视频同时超出：「图片最多 9 张，视频3条已超出」
- *  - 首尾帧图片超 2：由调用方传 limit
- */
 export function refOverflowToast(
   kinds: ('image' | 'video' | 'audio')[],
   limits: Partial<Record<'image' | 'video' | 'audio', number>> = {},

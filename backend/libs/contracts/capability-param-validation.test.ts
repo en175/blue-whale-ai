@@ -1,6 +1,6 @@
-// IKE7JP：生成参数对能力目录的结构性校验测试（纯函数）。
-// 覆盖视频（resolution + aspect_ratio + duration）与图片（size + aspect_ratio）两条提交路径，
-// 以及时长档位数组 / {min,max,step} 范围两种 DB 形态。
+
+
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -18,7 +18,7 @@ import {
   type CapabilityLimitInput,
 } from "./capability-param-validation.js";
 
-/** 视频能力行（分辨率档 id + api_value，时长范围）。 */
+
 const videoCapability: CapabilityLimitInput = {
   supported_sizes: [
     { id: "1k", api_value: "720p" },
@@ -29,7 +29,7 @@ const videoCapability: CapabilityLimitInput = {
   supported_durations: { min: 5, max: 10, step: 5 },
 };
 
-/** 图片能力行（尺寸档 id + api_value，无时长）。 */
+
 const imageCapability: CapabilityLimitInput = {
   supported_sizes: [
     { id: "1k", api_value: "1024x1024" },
@@ -209,10 +209,10 @@ describe("toGenerationParamCheckInput", () => {
   });
 });
 
-// IKFPYX：任务类型约束闭环——features.task_types 命中时覆盖基础比例/时长校验，
-// 并放行 duration=-1（自动时长，仅 edit/prolong 合法）；未命中回落基础能力行。
+
+
 describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
-  /** 2.5 形态：基础比例含 adaptive，任务类型各有约束。 */
+
   const taskCapability: CapabilityLimitInput = {
     supported_sizes: [{ id: "1080p", api_value: "1080p" }],
     supported_aspect_ratios: ["16:9", "9:16", "adaptive"],
@@ -337,7 +337,7 @@ describe("编辑/延长比例拒单换结构化码（IKJ795）", () => {
     });
     expect(err?.code).toBe("task_type_param_constraint");
     expect(err?.reason).toBe(TASK_TYPE_PARAM_CONSTRAINT_MESSAGE);
-    // 用户向文案不出现内部词（前端直接展示）
+
     expect(err?.reason).not.toContain("edit");
     expect(err?.reason).not.toContain("adaptive");
   });
@@ -421,8 +421,8 @@ describe("resolveVideoMode（IKFPYX）", () => {
     expect(resolveVideoMode([ref("reference", "image")], "修改一下")).toBe("image_reference");
   });
 
-  /* 关键词表逐字对齐火山方舟 Seedance 2.5 提示词指南。以下两条钉住**曾经放宽过的词**：
-     放宽会让「用户没要求编辑/延长」的提示词也落进 edit/prolong，进而被按编辑任务的锁定额处理。 */
+
+
 
   it("裸「编辑」不算编辑意图（官方那条是「编辑视频」）", () => {
     expect(resolveVideoMode([ref("reference", "video")], "编辑一下这个镜头")).toBe("omni");
@@ -435,11 +435,11 @@ describe("resolveVideoMode（IKFPYX）", () => {
   it("官方延长词是完整词组「向前延长 / 向后延长」", () => {
     expect(resolveVideoMode([ref("reference", "video")], "向前延长 3 秒")).toBe("extend");
     expect(resolveVideoMode([ref("reference", "video")], "向后延长这个视频")).toBe("extend");
-    // 官方的另外两个词仍然保留
+
     expect(resolveVideoMode([ref("reference", "video")], "续写这段")).toBe("extend");
   });
 
-  /* IKJ78C：否定防护——裸子串匹配会把「禁止修改」这类约束句误判成编辑意图（default 即官方 reference）。 */
+
 
   it("IKJ78C 否定约束句不判编辑（六词闭集逐一覆盖）", () => {
     expect(resolveVideoMode([ref("reference", "video")], "禁止修改人物形象")).toBe("omni");
@@ -492,9 +492,9 @@ describe("task_types 空对象 = 开放且无额外约束（IKK1T4）", () => {
   });
 });
 
-/* 输出像素表：键/值解析，以及按 (分辨率, 比例) 查宽高。
-   这张表原先住在定价目录（`tokenEstimate.dimensions`），本轮搬进能力行——
-   测试要同时钉住「搬迁没改语义」这件事，所以键格式与 adaptive 的行为都逐条钉。 */
+
+
+
 describe("输出像素表（video_dimensions）", () => {
   it("parseSpecKey 认两个轴、且顺序无关", () => {
     expect(parseSpecKey("resolution=480p|aspect_ratio=16:9")).toEqual({
@@ -508,11 +508,11 @@ describe("输出像素表（video_dimensions）", () => {
   });
 
   it("parseSpecKey 对形态不对的一律返回 null（不勉强认出来）", () => {
-    // 少一个轴：永远匹配不上，留着只会让人以为配了
+
     expect(parseSpecKey("resolution=480p")).toBeNull();
-    // 多一个轴：那是另一种表，悄悄忽略会按错的像素预扣
+
     expect(parseSpecKey("resolution=480p|aspect_ratio=16:9|video=1")).toBeNull();
-    // 空值 / 无等号 / 重复轴
+
     expect(parseSpecKey("resolution=|aspect_ratio=16:9")).toBeNull();
     expect(parseSpecKey("resolution480p|aspect_ratio=16:9")).toBeNull();
     expect(parseSpecKey("resolution=480p|resolution=720p|aspect_ratio=16:9")).toBeNull();
@@ -521,7 +521,7 @@ describe("输出像素表（video_dimensions）", () => {
   it("parsePixels 只认 宽x高（正整数）", () => {
     expect(parsePixels("864x496")).toEqual({ width: 864, height: 496 });
     expect(parsePixels("0x496")).toBeNull();
-    expect(parsePixels("864X496")).toBeNull(); // 分隔符是小写 x
+    expect(parsePixels("864X496")).toBeNull();
     expect(parsePixels("864 x 496")).toBeNull();
     expect(parsePixels("")).toBeNull();
   });
@@ -535,34 +535,34 @@ describe("输出像素表（video_dimensions）", () => {
   it("resolveOutputPixels 命中 / 未配返回 null", () => {
     const table = { "resolution=480p|aspect_ratio=16:9": "864x496" };
     expect(resolveOutputPixels(table, "480p", "16:9")).toEqual({ width: 864, height: 496 });
-    // 档位存在但这一格没配 → null（调用方据此走「预扣算不出」的拒绝路径）
+
     expect(resolveOutputPixels(table, "480p", "9:16")).toBeNull();
     expect(resolveOutputPixels(table, "720p", "16:9")).toBeNull();
-    // 表本身没配 / 形态不对
+
     expect(resolveOutputPixels(null, "480p", "16:9")).toBeNull();
     expect(resolveOutputPixels([], "480p", "16:9")).toBeNull();
     expect(resolveOutputPixels(table, "480p", "16:9")).toEqual({ width: 864, height: 496 });
   });
 
   it("adaptive 走**显式键**，不在代码里做「取该档位 16:9」的推断", () => {
-    // 目录时代就是显式键，搬迁不改行为：配了才命中
+
     const table = {
       "resolution=480p|aspect_ratio=16:9": "864x496",
       "resolution=480p|aspect_ratio=adaptive": "864x496",
     };
     expect(resolveOutputPixels(table, "480p", "adaptive")).toEqual({ width: 864, height: 496 });
 
-    // 只配了 16:9、没配 adaptive → adaptive 查不到，**不是**悄悄拿了 16:9 那格
+
     const only169 = { "resolution=480p|aspect_ratio=16:9": "864x496" };
     expect(resolveOutputPixels(only169, "480p", "adaptive")).toBeNull();
   });
 });
 
-/* ⚠️ 回归：档位大小写两处不一致是**常态**，不是脏数据。
-   能力行的 `api_value` 写 `4K`，而像素表的键是从定价目录搬来的 `resolution=4k|...`。
-   搬迁时漏了 billing 原有的 `trim().toLowerCase()` 归一，实测后果：
-   **`2.0 + 4K/16:9` 从 379 积分变成「算不出价」**（宽高冻不上 → billing 估不出 token）。
-   下面两条钉住这个行为，别再退回去。 */
+
+
+
+
+
 describe("规格键归一（大小写 / 空白不敏感）", () => {
   it("normalizeSpecKey 小写化并按轴名排序", () => {
     expect(normalizeSpecKey("resolution=4K|aspect_ratio=16:9")).toBe("aspect_ratio=16:9|resolution=4k");

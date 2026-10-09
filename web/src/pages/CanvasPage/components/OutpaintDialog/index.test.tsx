@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* 扩图工具栏组件测试（验收拍板改版横条：比例预设收进上拉菜单）：
-   工具栏控件清单与默认命中、菜单开合（触发按钮 toggle / 选完即关 / 点外关闭）、
-   预设点选回调、不可达置灰与悬停原因、自定义被动状态（菜单顶部 + 触发按钮文案跟随）、
-   关闭 X；字段矩阵（张数禁用展示、本期免费文案、零扩展发送置灰、拖出扩展后发送可点）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,7 +11,6 @@ let presetMock: ReturnType<typeof vi.fn>;
 let closeMock: ReturnType<typeof vi.fn>;
 let sendMock: ReturnType<typeof vi.fn>;
 
-/** 400×300 源图：短边 300、单方向上限 120。16:9 需左右各扩 66.67 可达。 */
 const SOURCE = { width: 400, height: 300 };
 
 function renderPanel(props: Partial<Parameters<typeof OutpaintDialog>[0]> = {}) {
@@ -44,7 +39,6 @@ async function click(node: Element | null) {
   });
 }
 
-/** 打开比例上拉菜单（预设项均在菜单内渲染） */
 async function openMenu() {
   await click(btn('outpaint-ratio-trigger'));
 }
@@ -74,7 +68,6 @@ describe('工具栏骨架渲染', () => {
     expect(btn('outpaint-count').textContent).toBe('1张');
     expect(container!.textContent).toContain('本期免费');
     expect(btn('outpaint-send-btn')).toBeTruthy();
-    // 菜单默认收起，预设项不渲染
     expect(container!.querySelector('[data-testid="outpaint-ratio-menu"]')).toBeNull();
   });
 
@@ -98,7 +91,6 @@ describe('比例上拉菜单', () => {
     expect(btn('outpaint-preset-1-1').className).not.toMatch(/menuItemActive/);
     const custom = container!.querySelector('[data-testid="outpaint-preset-custom"]')!;
     expect(custom.className).not.toMatch(/menuChipActive/);
-    // 再点触发按钮收起
     await openMenu();
     expect(container!.querySelector('[data-testid="outpaint-ratio-menu"]')).toBeNull();
   });
@@ -132,7 +124,6 @@ describe('字段矩阵（张数 / 免费文案 / 发送钮）', () => {
     expect(count.textContent).toBe('1张');
     expect(count.disabled).toBe(true);
     expect(count.getAttribute('title')).toContain('多张');
-    // 无多张选项：张数控件只有这一个按钮
     expect(container!.textContent).not.toContain('2张');
     expect(container!.textContent).not.toContain('4张');
   });
@@ -151,7 +142,6 @@ describe('字段矩阵（张数 / 免费文案 / 发送钮）', () => {
     const send = btn('outpaint-send-btn');
     expect(send.disabled).toBe(true);
     expect(send.title).toContain('拖动扩展框');
-    // Dock 同款形态：白 ↑ 图标（ArrowUp）；置灰态不带激活类（IKGZ5Q）
     expect(send.querySelector('svg.lucide-arrow-up')).toBeTruthy();
     expect(send.className).not.toMatch(/sendBtnActive/);
     await click(send);
@@ -171,14 +161,12 @@ describe('字段矩阵（张数 / 免费文案 / 发送钮）', () => {
 
 describe('预设联动与命中显示', () => {
   it('手动拖拽后的非标准比例：自定义被动项高亮（非按钮不可点选），触发钮文案切「自定义」', async () => {
-    // 框 460×300 ≈ 1.533 非标准比例
     renderPanel({ expands: { top: 0, right: 60, bottom: 0, left: 0 } });
     expect(btn('outpaint-ratio-trigger').textContent).toBe('自定义');
     await openMenu();
     const custom = container!.querySelector('[data-testid="outpaint-preset-custom"]')!;
     expect(custom.className).toMatch(/menuChipActive/);
     expect(custom.tagName).toBe('SPAN');
-    // 无预设高亮
     for (const key of ['original', '1-1', '4-3', '3-4', '16-9', '9-16']) {
       expect(btn(`outpaint-preset-${key}`).className).not.toMatch(/menuItemActive/);
     }
@@ -195,7 +183,6 @@ describe('预设联动与命中显示', () => {
 
 describe('不可达预设置灰', () => {
   it('极端窄长图（800×100）：非原图比例预设置灰并悬停原因，点击不触发', async () => {
-    // 短边 100、上限 40：1:1 需上下各扩 350 不可达；原图比例恒可达
     renderPanel({ sourceSize: { width: 800, height: 100 } });
     await openMenu();
     const r11 = btn('outpaint-preset-1-1');
@@ -204,7 +191,6 @@ describe('不可达预设置灰', () => {
     expect(r11.getAttribute('title')).toContain('1:1');
     await click(r11);
     expect(presetMock).not.toHaveBeenCalled();
-    // 原图比例恒可达且命中（零扩展）
     const original = btn('outpaint-preset-original');
     expect(original.getAttribute('aria-disabled')).toBeNull();
     expect(original.className).toMatch(/menuItemActive/);

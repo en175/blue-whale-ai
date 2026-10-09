@@ -69,7 +69,6 @@ const kling: GenerationModel = {
 
 let root: Root;
 let mountNode: HTMLDivElement;
-/** 草稿参数回写 spy（每次 renderDialog 重置）——IKJ4W6 断言提交/落盘值仍是内部键 adaptive */
 let paramsSpy: ReturnType<typeof vi.fn>;
 
 async function renderDialog(onClose = vi.fn()) {
@@ -164,8 +163,6 @@ describe('BottomDialog nested overlays (IKBO6M)', () => {
   });
 });
 
-/* IKEOLP：配置面板挂在 .dialog 滚动框之外的定位外壳 .dialogWrap 上——
-   若面板回到 overflow 容器内部，顶部会再次被裁剪（滚动容器顶部负向溢出不可滚动到达） */
 describe('BottomDialog 配置面板裁剪（IKEOLP）', () => {
   it('配置面板不是滚动对话框 .dialog 的后代，而是挂在定位外壳上', async () => {
     await renderDialog();
@@ -186,7 +183,6 @@ describe('BottomDialog 配置面板裁剪（IKEOLP）', () => {
   });
 });
 
-/* IKGBTV：宽高比示意图标接入共享 RatioIcon——竖屏比例必须渲染为竖向矩形（16px 上限） */
 describe('BottomDialog 宽高比图标（IKGBTV）', () => {
   it('竖屏比例 9:16 的图标为 9×16 竖向矩形，横竖不反且不超 16px 上限', async () => {
     await renderDialog();
@@ -207,9 +203,6 @@ describe('BottomDialog 宽高比图标（IKGBTV）', () => {
   });
 });
 
-/* IKI61N：时长滑杆键盘操作——原生 range 命中画布公共 Esc 链的 INPUT 豁免会被吞键，
-   Esc 在组件内自闭环（直调 onClose + 阻断冒泡），不改公共 helper 与公共 Esc 链；
-   方向键步进语义与 min/max/step 原生属性一致，由原生行为承担不拦截。 */
 describe('IKI61N 时长滑杆键盘操作（Esc 关闭对话框，组件内自闭环）', () => {
   async function openDurationSlider() {
     const configBtn = [...mountNode.querySelectorAll('button')].find((button) =>
@@ -249,11 +242,7 @@ describe('IKI61N 时长滑杆键盘操作（Esc 关闭对话框，组件内自�
   });
 });
 
-/* IKJ4W6：视频比例内部键 `adaptive`（跟随输入）界面统一显示 `auto`。
-   展示名与内部名必须分离——写回 draft/提交的仍是 adaptive，否则上游火山拒单。
-   默认选中由前端 pickDefaultVideoRatio 完成，不依赖后端 default_aspect_ratio。 */
 describe('IKJ4W6 画布比例显示 auto', () => {
-  /** 2.5 形态：支持 adaptive；后端默认仍可能是 16:9，前端应默认选中 adaptive。 */
   const adaptiveModel: GenerationModel = {
     ...seedance,
     model_id: 'seedance-2-5',
@@ -316,13 +305,7 @@ describe('IKJ4W6 画布比例显示 auto', () => {
   });
 });
 
-/* ============================================
- * IKIZQB 样片模式开关：能力位门控 / 480p 锁定与恢复 / 切模型关闭 /
- * 四模式共用 / 草稿恢复 / 报价门控与提交确认两字段。
- * 报价走全局 fetch 桩（generationQuoteOptions → apiRequest）。
- * ============================================ */
 
-/** Seedance 2.5：样片放行能力位 + 480p 档（IKIZQ7 后端透出的 features.sample_mode）。 */
 const seedance25: GenerationModel = {
   ...seedance,
   model_id: 'seedance-25',
@@ -348,11 +331,9 @@ interface SampleDialogProps {
   initialParams?: { modelId?: string; resolution?: string; aspectRatio?: string; sampleMode?: boolean };
   restoreExisting?: boolean;
   onSend?: ReturnType<typeof vi.fn>;
-  /** IKJIVN：草稿绑定模式由父级传入当前绑定节点 id；自由模式不传（行为同旧） */
   targetNodeId?: string;
 }
 
-/** 带样片场景 props 的渲染（projectId 传入才会挂报价查询与徽标）。 */
 async function renderSampleDialog(props: SampleDialogProps = {}) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
@@ -380,7 +361,6 @@ async function renderSampleDialog(props: SampleDialogProps = {}) {
   await act(async () => { await Promise.resolve(); });
 }
 
-/** 打开「模型与质量」配置面板（底部状态栏 SlidersHorizontal 配置按钮，含比例文案定位）。 */
 async function openSampleConfig() {
   const configBtn = [...mountNode.querySelectorAll('button')].find((button) =>
     button.textContent?.includes('16:9'),
@@ -394,12 +374,10 @@ function sampleSwitch(): HTMLButtonElement | null {
   return mountNode.querySelector<HTMLButtonElement>('[data-testid="sample-mode-switch"]');
 }
 
-/** 当前生效清晰度按钮（configRow 第二个 selectBtn）与文案。 */
 function sizeButton(): HTMLButtonElement | undefined {
   return [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectBtn}`)][1];
 }
 
-/** 正文输入走 PromptRefEditor 测试接缝（jsdom 无法驱动 contentEditable）。 */
 async function typePrompt(text: string) {
   await typePromptRefText(mountNode, text);
 }
@@ -428,11 +406,9 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     const sw = sampleSwitch();
     expect(sw).toBeTruthy();
     expect(sw!.getAttribute('aria-checked')).toBe('false');
-    // 默认档 1080p、清晰度可选
     expect(sizeButton()!.textContent).toContain('1080p');
     expect(sizeButton()!.disabled).toBe(false);
 
-    // 开启：锁 480p + 禁切换 + 条款说明 + 报价请求按样片规格（sample_mode + 480p）
     await act(async () => { sw!.click(); });
     expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('true');
     expect(sizeButton()!.textContent).toContain('480p');
@@ -447,7 +423,6 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     expect(sampleReq.parameters).toMatchObject({ sample_mode: true, resolution: '480p' });
     expect(sampleReq.type).toBe('video');
 
-    // 关闭：恢复开启前的普通档位（1080p = 模型默认），清晰度重新可选
     await act(async () => { sampleSwitch()!.click(); });
     expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('false');
     expect(sizeButton()!.textContent).toContain('1080p');
@@ -463,7 +438,6 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     await act(async () => { sampleSwitch()!.click(); });
     expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('true');
 
-    // 切到未放行模型：开关消失（模型下拉第一项 Kling）
     const modelBtn = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectBtn}`)][0]!;
     await act(async () => { modelBtn.click(); });
     const klingOption = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectDropdown} button`)]
@@ -471,7 +445,6 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     await act(async () => { klingOption.click(); });
     expect(sampleSwitch()).toBeNull();
 
-    // 切回放行模型：开关回来但保持关闭
     await act(async () => { modelBtn.click(); });
     const backOption = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectDropdown} button`)]
       .find((b) => b.textContent?.includes('Seedance 2.5'))!;
@@ -486,7 +459,6 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     await openSampleConfig();
     await act(async () => { sampleSwitch()!.click(); });
 
-    // 底部模式选择器依次切：全能参考 → 首尾帧 → 图生视频 → 文生视频
     for (const label of ['全能参考', '首尾帧', '图生视频', '文生视频']) {
       const modeBtn = [...mountNode.querySelectorAll('button')]
         .find((b) => ['文生视频', '全能参考', '图片参考', '首尾帧', '图生视频', '视频编辑', '视频延长'].includes(b.textContent ?? ''));
@@ -553,7 +525,6 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     await typePrompt('样片内容');
     await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
 
-    // 目录/规格变化（时长变化改变定价输入）：新报价挂起未落地 → 旧金额不可再提交
     fetchMock.mockImplementation(() => new Promise(() => {}));
     const slider = mountNode.querySelector<HTMLInputElement>('input[type="range"]')!;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -609,13 +580,11 @@ describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
     vi.stubGlobal('fetch', quoteFetch);
     await renderDialogWithProject('把背景替换成海边沙滩');
 
-    // 模型就位后首问：提示词防抖未到，不带 prompt 键
     await vi.waitFor(() => expect(quoteFetch).toHaveBeenCalledTimes(1));
     const firstBody = JSON.parse((quoteFetch.mock.calls[0]![1] as RequestInit).body as string);
     expect(firstBody.parameters).not.toHaveProperty('prompt');
     expect(String(quoteFetch.mock.calls[0]![0])).toBe('/api/projects/p1/generation-jobs/quote');
 
-    // 停笔 600ms：带提示词重问（编辑单判定输入）
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 750));
     });
@@ -623,7 +592,6 @@ describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
     const secondBody = JSON.parse((quoteFetch.mock.calls[1]![1] as RequestInit).body as string);
     expect(secondBody.parameters.prompt).toBe('把背景替换成海边沙滩');
 
-    // 防抖收敛：不再继续问价
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     });
@@ -647,12 +615,6 @@ describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
   });
 });
 
-/* ============================================
- * IKJIVN：样片报价查询 payload 携带 target_node_id（PR !968 / IKJGE6 契约面）。
- * 提交侧草稿绑定模式按 target_node_id 做画布文本带入合并（服务端复算 quote_stale 的
- * 判定输入），报价与提交不同源就会被误拒——样片报价查询必须与提交同源带上该键；
- * 自由模式（无绑定节点）不带，行为同旧。
- * ============================================ */
 describe('IKJIVN 样片报价 payload 携带 target_node_id', () => {
   function quoteResponseReady() {
     return new Response(
@@ -661,7 +623,6 @@ describe('IKJIVN 样片报价 payload 携带 target_node_id', () => {
     );
   }
 
-  /** 开启样片并等样片规格报价请求落地，返回全部报价请求体（props 透传 renderSampleDialog）。 */
   async function openSampleAndCollectQuoteBodies(
     fetchMock: ReturnType<typeof vi.fn>,
     props: SampleDialogProps = {},
@@ -670,7 +631,6 @@ describe('IKJIVN 样片报价 payload 携带 target_node_id', () => {
     await renderSampleDialog({ projectId: 'p1', ...props });
     await openSampleConfig();
     await act(async () => { sampleSwitch()!.click(); });
-    // 先确保样片规格请求真的发出（负向断言的前提：请求存在才谈得上「不带某键」）
     await vi.waitFor(() =>
       expect(fetchMock.mock.calls.some(([, req]) =>
         (JSON.parse((req as RequestInit).body as string)).parameters?.sample_mode === true)).toBe(true));
@@ -681,17 +641,12 @@ describe('IKJIVN 样片报价 payload 携带 target_node_id', () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponseReady());
     vi.stubGlobal('fetch', fetchMock);
 
-    // 草稿绑定模式：父级传入当前绑定节点 id（经 helper 透传 renderSampleDialog）
     const bodies = await openSampleAndCollectQuoteBodies(fetchMock, { targetNodeId: 'media-draft-9' });
-    // 样片报价查询（提交门控的唯一金额来源）必须带同一目标。正常路径徽标与样片查询共用
-    // 同一 queryKey 只发一次；若两出口任一漏带 target_node_id，键分叉会发出多份样片规格
-    // 请求且漏带的那份在此现形——所以断言「每一份」而不是「找到一份」。
     const sampleBodies = bodies.filter((body) => body.parameters?.sample_mode === true);
     expect(sampleBodies.length).toBeGreaterThanOrEqual(1);
     for (const body of sampleBodies) {
       expect(body.target_node_id).toBe('media-draft-9');
     }
-    // 报价徽标（预览价）与样片查询共用提交同源口径，同样带目标节点
     const previewBody = bodies.find((body) => body.parameters?.sample_mode !== true)!;
     expect(previewBody.target_node_id).toBe('media-draft-9');
     vi.unstubAllGlobals();

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Black-box release-line tests against a temporary bare Git remote."""
 
 import datetime as dt
 import json
@@ -46,8 +45,6 @@ class ReleaseLineFixture:
         for name in ("python3-command.sh", "release-line-state.py", "release_line_sync.py", "task_metadata.py"):
             shutil.copy2(SCRIPTS / "lib" / name, self.repo / "scripts" / "lib" / name)
         (self.repo / "base.txt").write_text("base\n", encoding="utf-8")
-        # 夹具与真实仓库同款忽略规则：sync 脚本 import scripts/lib 会生成
-        # __pycache__，缺失忽略会让 dirty_paths 断言误报夹具污染。
         (self.repo / ".gitignore").write_text("__pycache__/\n*.pyc\n", encoding="utf-8")
         hooks = self.repo / ".githooks"
         hooks.mkdir()
@@ -590,10 +587,6 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         created = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
         self.assertEqual(0, created.returncode, created.stderr)
         old = json.loads(created.stdout)["branch"]
-        # ⚠️ 新线的日期必须**相对今天**算：`create` 按 datetime.now() 命名（release/<今天>_旧版发布验证），
-        # 而下面这行原本硬编码成 release/2026.09.29_…——两者会在「今天正好是 2026.09.29」那天撞成
-        # 同日两条线，脚本按日期归类不了会提前报「新出现的发布线无法按日期归类」，
-        # 测试就断言不到真正要验的「脏工作树 / 未共享本地提交」分支。
         new = f"release/{dt.date.today() + dt.timedelta(days=14):%Y.%m.%d}_新版发布验证"
         self.release(new)
         old_worktree = self.root / "old-release"
@@ -614,8 +607,6 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         created = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
         self.assertEqual(0, created.returncode, created.stderr)
         old = json.loads(created.stdout)["branch"]
-        # 同 test_switch_rejects_unshared_local_release_commit_and_dirty_file：日期相对今天算，
-        # 否则「今天 == 硬编码日期」那天会撞成同日两条线而提前失败。
         new = f"release/{dt.date.today() + dt.timedelta(days=14):%Y.%m.%d}_新版发布验证"
         self.release(new)
         old_worktree = self.root / "old-release"

@@ -46,7 +46,6 @@ describe("CostSettlementConsumer（IK9VZ0 多退少补接收/记账）", () => {
       "9",
       expect.objectContaining({ action: "refund", amountFen: 100n }),
     );
-    // createBatch 收到按分/action 归一化的载荷
     expect(repo.createBatch).toHaveBeenCalledWith(
       expect.objectContaining({
         batchNo: "B2",

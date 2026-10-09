@@ -20,7 +20,6 @@ interface AssetDetailModalProps {
   asset: AssetRecord | null;
   loading?: boolean;
   onClose: () => void;
-  /** IKIZQI：双向来源查看（样片 ↔ 成片）。点击后由页面打开 JobSourceModal 拉任务详情。 */
   onOpenSource?: (target: JobSourceTarget) => void;
 }
 
@@ -119,7 +118,7 @@ export default function AssetDetailModal({ asset, loading = false, onClose, onOp
               <span className={styles.typeBadge}>
                 {asset.type === 'image' ? '图片' : asset.type === 'video' ? '视频' : asset.type === 'audio' ? '音频' : '虚拟人像'}
               </span>
-              {/* IKIZQI：两阶段视频资产标注（样片/成片）；旧普通视频不渲染。 */}
+              {}
               {asset.type === 'video' && asset.video_stage && asset.video_stage !== 'video' && (
                 <span className={styles.stageBadge}>
                   {asset.video_stage === 'sample' ? '样片 480P' : '成片 1080P'}
@@ -134,8 +133,7 @@ export default function AssetDetailModal({ asset, loading = false, onClose, onOp
                 <dt>来源</dt>
                 <DetailValue loading={loading}>{formatAssetSource(asset.source)}</DetailValue>
               </div>
-              {/* IKIZQI：双向来源身份——样片的成片任务 / 成片的来源样片任务（契约
-                  videoStageAssetProjectionSchema；无来源链路不渲染整行）。 */}
+              {}
               {asset.type === 'video' && asset.video_stage === 'final' && asset.source_sample_job_id && (
                 <div className={styles.detailItem}>
                   <dt>视频阶段</dt>
@@ -188,8 +186,7 @@ export default function AssetDetailModal({ asset, loading = false, onClose, onOp
                 <dt>生成模型</dt>
                 <DetailValue loading={loading}>{asset.model || EMPTY_ASSET_DETAIL}</DetailValue>
               </div>
-              {/* IKFSSO/IKFTQW：无提示词的素材（上传的、视频提取出来的音频、生成时 prompt
-                  为空串的）整行不渲染——不占位，也不显示「暂无数据」，免得一排空字段。 */}
+              {}
               {asset.prompt && (
                 <div className={styles.detailItem}>
                   <dt>提示词</dt>

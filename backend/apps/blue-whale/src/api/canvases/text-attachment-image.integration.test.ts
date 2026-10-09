@@ -20,8 +20,6 @@ import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
-// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
-// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
   return {
@@ -35,12 +33,6 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   };
 });
 
-// IKDLQF「单个文本附件驱动图片生成」公开接口集成（契约「验证」节服务端项）：
-// 真 NestFactory 挂载生产 Canvas/Generation 控制器与服务 + 隔离 MySQL（IKDLQF_DATABASE_URL 门控）。
-// 本切片的 API 链路不产生任何上游 HTTP 调用（无 Agent 读、供应商调用在 worker 切片），
-// 故不挂内存 HTTP 替身；生成入队（RocketMQ）未配置时由控制器捕获记日志，不影响断言。
-// 浏览器段（IKDLQF_BROWSER=1：连线 → 面板见附件 → 生成 → 刷新恢复）在同 describe 尾部，
-// 另挂 ProjectsController（快照水合）与 GenerationModelsController（面板模型目录）。
 describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public API (IKDLQF)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -51,8 +43,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
   const previousDatabase = process.env.DATABASE_URL;
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDLQF_DATABASE_URL;
-    // supported_sizes 用前端原生 {id,label} 形态：浏览器段 ImageDialog 按此渲染清晰度选项
-    //（API 段不读模型目录；创建链路不校验 size 取值，只透传）
     const sizes = [{ id: "1024x1024", label: "1024x1024" }];
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdlqf-test", model_id: MODEL_ID } },
@@ -67,12 +57,10 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: {},
-        // channel 为必填封闭枚举；取本行 capability_type 对应的默认渠道
         channel: "seedream-image",
       },
       update: { supported_sizes: sizes, default_size: "1024x1024" },
     });
-    // 视频模型（IKDLQG 起 target_node_id 支持视频）：「视频类型携带」用例需要合法视频模型走到目标类型校验
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdlqf-test", model_id: VIDEO_MODEL_ID } },
       create: {
@@ -88,7 +76,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
         default_aspect_ratio: "16:9",
         default_duration: 5,
         features: {},
-        // channel 为必填封闭枚举；取本行 capability_type 对应的默认渠道
         channel: "seedream-video",
       },
       update: {},
@@ -100,8 +87,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
     Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController], providers: [
-      // IKIPWT：业务失败经 DomainError → AllExceptionsFilter 统一投影（与 app.module 的 APP_FILTER 同款），
-      // 台架不挂过滤器时 DomainError 落 Nest 默认 500 处理，信封 code/msg 均不可见。
       { provide: APP_FILTER, useClass: AllExceptionsFilter },
       { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
@@ -175,7 +160,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
 
   it("连线随 PUT 保存并在 GET 读取时恢复（缺省为空数组）", async () => {
     const projectId = (await projects.create("987654", "IKDLQF edges roundtrip")).id;
-    // e2 为媒体卡自环（素材原卡重新编辑引用自身）：合法保存并随 GET 原样恢复（契约 2026-09-11 修订）
     const edges = [
       { id: "e1", source: "text-1", target: "media-1" },
       { id: "e2", source: "media-1", target: "media-1" },
@@ -184,7 +168,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(saved.status).toBe(200);
     const canvas = await getCanvas(projectId);
     expect(JSON.parse(canvas.edges)).toEqual(edges);
-    // 重新读取（等价刷新/重开）连线仍在；创建路径版本从 0 起（首次条件更新才递增）
     const reloaded = await getCanvas(projectId);
     expect(JSON.parse(reloaded.edges)).toEqual(edges);
     expect(reloaded.version).toBe(canvas.version);
@@ -243,7 +226,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(job).not.toBeNull();
     expect(job!.input.target_node_id).toBe("media-1");
     expect(job!.input.prompt).toBe("暮色");
-    // 与当时画布一致：仅 target=media-1 且 source 为 textNode 的边，按 edges 数组顺序；title 缺省 ""
     expect(job!.input.text_attachments).toEqual([
       { node_id: "text-b", title: "", text: "雨夜" },
       { node_id: "text-a", title: "风格", text: "赛博朋克" },
@@ -264,7 +246,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(videoTarget.code).toBe(1002);
     expect(videoTarget.msg).toBe("目标节点不存在或不是图片媒体节点");
 
-    // IKDLQG 起 target_node_id 支持视频；此处图片节点作为视频目标 → 目标类型不匹配明确失败
     const videoType = await createJob(projectId, {
       type: "video",
       target_node_id: "media-1",
@@ -282,8 +263,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(await jobCount(otherProject)).toBe(0);
   });
 
-  // IKH4B8：正文由提交方给全（ADR-0088），服务端不再组合——附件照实冻结供审计，
-  // 但长度与有效性都只看提交上来的正文全文。
   it("正文由提交方给全：附件照实冻结，正文即提交内容", async () => {
     const projectId = (await projects.create("987654", "IKDLQF empty prompt")).id;
     const nodes = [mediaNode("media-1", "image"), textNode("text-1", "独立正文", "附件")];
@@ -352,7 +331,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(first.code).toBe(200);
     const originalJobId = first.data.generation_job_id as string;
 
-    // 接纳后改写正文并断开连线：重试不得回读这些变更
     const canvas = await getCanvas(projectId);
     const edited = await saveCanvas(projectId, [mediaNode("media-1", "image"), textNode("text-1", "改写后正文", "风格")], [], canvas.version);
     expect(edited.status).toBe(200);
@@ -378,14 +356,10 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(retry!.input.text_attachments).toEqual([{ node_id: "text-1", title: "风格", text: "原始正文" }]);
   });
 
-  // 浏览器段（契约「验证」节）：真实浏览器 + 真实业务 API + 隔离 MySQL 走完整生图路径。
-  // 模式仿 IKDLQE prompt-preview 浏览器段；断言以「请求体 + 库内冻结快照」为准——
-  // harness 未挂 jobs 查询控制器，创建后前端轮询 GET /api/jobs/:id 得 404，页面 toast 报错属预期。
   it.runIf(process.env.IKDLQF_BROWSER)("browser: connect → panel attachment → generate → reload restores", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKDLQF browser")).id;
-    // 播种素材：快照资产字典是前端还原 mediaNode src 的唯一来源（无 assetId 会渲染「素材已被删除」）
     const asset = await prisma.client.assets.create({
       data: {
         user_id: BigInt(987654),
@@ -398,8 +372,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       },
     });
     const assetId = asset.id.toString();
-    // 先建节点不带边（连线由浏览器拖线产生）；viewport 须为合法 {x,y,zoom}，"{}" 会让前端视口 NaN。
-    // media-1 置于右下：选中态工具条在节点上方（须避开视口上沿），且避开出生点（视口中心 ±80）的生成占位节点。
     const seeded = await saveCanvas(projectId, [
       { id: "text-1", type: "textNode", position: { x: 140, y: 160 }, data: { title: "雨夜", text: "赛博朋克" } },
       { id: "media-1", type: "mediaNode", position: { x: 900, y: 120 }, data: { mediaType: "image", fileName: "目标图", assetId, width: 1024, height: 1024 } },
@@ -413,7 +385,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-      // 只捕获创建调用（不含 retry/cancel 子路径），用于断言「连接/编辑不自动执行」与请求体
       const generationRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
       page.on("request", (request) => {
         if (request.method() === "POST" && /\/api\/projects\/\d+\/generation-jobs$/.test(request.url())) {
@@ -429,9 +400,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       await text.waitFor();
       await media.waitFor();
 
-      // 拖线：文本节点 source handle（右）→ 图片节点 target handle（左）。
-      // 命中证据用行为级断言（边渲染 + PUT 落库 + GET 边形状），不用 RF 内部 hover 类名
-      // （IKFCVS 测试决策：样式类名不作为业务正确性证据；类名随 RF 版本与节点形态漂移）
       await text.locator('[data-testid="text-title"]').click();
       const connectSaved = page.waitForResponse((response) =>
         response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
@@ -450,11 +418,8 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       expect(JSON.parse(connected.edges)).toEqual([
         expect.objectContaining({ source: "text-1", target: "media-1" }),
       ]);
-      // 连线与到此为止的编辑均不触发任何生成
       expect(generationRequests).toEqual([]);
 
-      // 从图片节点工具条打开面板：文本附件以图标进参考栏（IKFCKN 起旧独立正文块下线），
-      // 悬浮浮层显示来源完整正文，目标提示词留白
       await media.locator('[data-testid="media-content"]').click();
       await media.getByRole("button", { name: "生成图片" }).click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
@@ -464,7 +429,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       expect(await overlay.innerText()).toContain("赛博朋克");
       expect(await page.locator("textarea").inputValue(), "目标提示词留白").toBe("");
 
-      // 第一次发送：请求体携带 target_node_id，库内冻结附件快照与当时画布一致，prompt 冻结为 ""
       await page.locator('button[title="发送"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
       expect(generationRequests[0].body.target_node_id).toBe("media-1");
@@ -478,7 +442,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       expect(firstInput.prompt).toBe("");
       expect(firstInput.text_attachments).toEqual([{ node_id: "text-1", title: "雨夜", text: "赛博朋克" }]);
 
-      // 编辑正文 → 自动保存；编辑本身不触发第二次生成
       const editor = text.locator('[data-placeholder="输入内容..."]');
       await editor.dblclick();
       const editSaved = page.waitForResponse((response) =>
@@ -488,7 +451,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       expect((await editSaved).status()).toBe(200);
       expect(generationRequests, "编辑正文不自动执行").toHaveLength(1);
 
-      // 再次从面板发送：新任务读取最新正文，历史任务快照不改写
       await media.locator('[data-testid="media-content"]').click();
       await media.getByRole("button", { name: "生成图片" }).click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
@@ -509,7 +471,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
         { node_id: "text-1", title: "雨夜", text: "赛博朋克" },
       ]);
 
-      // 刷新：连线恢复渲染，GET edges 仍为该边
       await page.reload();
       await text.waitFor();
       await media.waitFor();

@@ -40,7 +40,7 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
       storage_key: "uploads/9/video/source.mp4", url: "https://our-tos/video.mp4", duration_ms: 7_200_000,
     } });
     createdAssets.push(audio.id, video.id);
-    // 冻结快照（迁移契约 §21.2）：对象内 camel 身份 + 服务端解析 URL，顶层 snake 参数。
+
     snapshot = {
       audio: { assetId: String(audio.id), nodeId: "node-audio", url: "https://our-tos/audio.mp3" },
       video: { assetId: String(video.id), nodeId: "node-video", url: "https://our-tos/video.mp4" },
@@ -78,7 +78,7 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
     else process.env.DATABASE_URL = previousDatabaseUrl;
   });
 
-  /** frozenInput 传 null 表「快照缺失」（input 列留空）；缺省用完整冻结快照。 */
+
   async function failedJob(frozenInput: object | null = snapshot) {
     const job = await prisma.client.generation_jobs.create({ data: {
       project_id: BigInt(projectId), user_id: 9n, type: "audio_video_mux", source: "dock",
@@ -99,14 +99,14 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
 
     expect(first).toMatchObject({ code: 200, data: { job_id: String(original.id), status: "queued", replayed: false } });
     expect(replay).toMatchObject({ code: 200, data: { job_id: String(original.id), replayed: true } });
-    // 冻结快照不动，仅递增 submit_attempt（worker client_token 换新不被供应商去重）。
+
     expect(row.input).toEqual({ ...snapshot, submit_attempt: 2 });
     expect(row.provider_task_id).toBeNull();
     expect(row.error).toBeNull();
     expect(row.poll_count).toBe(0);
     expect(row.retry_count).toBe(1);
     expect(row.fencing_token).toBe(8n);
-    // deadline 按冻结 estimated_duration_ms 重算：max(1d, 4×2h+6h)=1d。
+
     const [{ seconds_to_deadline }] = await prisma.client.$queryRaw<[{ seconds_to_deadline: number }]>
       `SELECT TIMESTAMPDIFF(SECOND, NOW(), execution_deadline_at) AS seconds_to_deadline FROM generation_jobs WHERE id = ${original.id}`;
     expect(seconds_to_deadline).toBeGreaterThan(86_300);
@@ -211,7 +211,7 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
     const row = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: original.id } });
     expect(row.retry_count).toBe(1);
     expect(row.fencing_token).toBe(8n);
-    // 入队失败恢复不重复递增 submit_attempt：仍为首次重试递增后的 2。
+
     expect(row.input).toEqual({ ...snapshot, submit_attempt: 2 });
     expect(row.error).toBeNull();
   });

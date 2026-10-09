@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-/* IKHLKR 视频插帧页面级链路测试：点「高清 ▾」下拉次项「插帧」建插帧草稿卡（标题/身份/来源连线）
-   与面板跟随弹出、切档即时改名与 lastParams 持久化、关闭后再点草稿卡重开档位恢复、
-   刷新（水合）后档位与来源边恢复、面板打开全局工具条门（soloToolbarHidden + 钉屏幕容器 show 门）、
-   门槛兜底（未关联资产不建卡）、跟随锚定接通、自定义卡名保护（hasCustomName 口径）。
-   发送闭环（创建请求三键 / 提交期只读 / 关面板时序 / 终态回填）归 IKHLKX：其页面级用例见
-   frameInterpolationSend.test.tsx；本文件只保留「切档不建任务」与「创建失败不制造受理假象」两条。
-   渲染沿用 testing/canvasPageTestHarness（页面级共享夹具）。 */
 import { dockActions } from './testing/dockActionsRecorder';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,7 +39,6 @@ vi.mock('@/api/canvasRecovery', async (importActual) => ({
   })),
 }));
 
-/** 画布：一个就绪视频节点 v1（assetId '5'，1280×720 达标）+ 可选带插帧身份的卡 i1 */
 function seedDoc(opts?: { withDraftCard?: boolean; unlinked?: boolean }) {
   const nodes: Array<Record<string, unknown>> = [
     {
@@ -96,7 +88,6 @@ function seedDoc(opts?: { withDraftCard?: boolean; unlinked?: boolean }) {
   };
 }
 
-/** 走视频节点工具条「高清 ▾」下拉第二项「插帧」（回调挂在节点 data 上） */
 async function frameInterpolation(id = 'v1') {
   const video = mediaNodes().find((n) => n.id === id)!;
   const dispatch = (video.data as Record<string, unknown>).onFrameInterpolation as ((nodeId: string) => void) | undefined;
@@ -105,7 +96,6 @@ async function frameInterpolation(id = 'v1') {
   });
 }
 
-/** 走视频节点工具条首项「HD 高清」（回归对照） */
 async function videoEnhance(id = 'v1') {
   const video = mediaNodes().find((n) => n.id === id)!;
   const dispatch = (video.data as Record<string, unknown>).onVideoEnhance as ((nodeId: string) => void) | undefined;
@@ -142,7 +132,6 @@ async function clickCard(id: string) {
   });
 }
 
-/** 钉屏幕媒体卡工具条容器 show 门（videoEnhancePanel.test.tsx 同款读取） */
 function mediaFollowToolbarShow(): boolean | undefined {
   const frag = flowProps.current.followToolbarLayer as { props?: { children?: unknown } } | undefined;
   const children = frag?.props?.children;
@@ -176,19 +165,15 @@ describe('IKHLKR 点插帧建草稿卡与面板跟随', () => {
     expect(data.mediaType).toBe('video');
     expect(data.draft).toBe(true);
     expect(data.genStatus).toBe('draft');
-    // 草稿默认名「插帧 · 60fps」（父单文案）与身份（源 assetId + lastParams.fps）
     expect(data.fileName).toBe('插帧 · 60fps');
     expect(identityOf(draft)).toEqual({ sourceAssetId: '5', lastParams: { fps: 60 } });
-    // 出生位在源卡右侧（源卡实际内容宽 + 60，x 大于源卡；y 同高）
     expect((draft.position as { x: number }).x).toBeGreaterThan(400);
     expect((draft.position as { y: number }).y).toBe(0);
 
-    // 来源边带 origin 标记（不参与参考推导与 @ 编号的纯来源记录）
     const edge = edges().find((e) => e.target === draft.id)!;
     expect(edge.source).toBe('v1');
     expect(edge.data).toEqual({ origin: FRAME_INTERPOLATION_EDGE_ORIGIN });
 
-    // 面板渲染（领土标记 + 三档 + 发送钮），默认 60fps active，标题/免费文案
     expect(panelSend()).toBeTruthy();
     expect(document.body.querySelector('[data-testid="frame-interpolation-dialog"]')).toBeTruthy();
     expect(document.body.querySelector('[data-gen-panel-territory]')).toBeTruthy();
@@ -199,7 +184,6 @@ describe('IKHLKR 点插帧建草稿卡与面板跟随', () => {
     expect(document.body.textContent).toContain('目标帧率');
     expect(document.body.textContent).toContain('本期免费');
     expect(panelSend()!.getAttribute('title')).toBe('智能补帧，最高可至 120fps');
-    // 源卡不变（未关联/未改名/未加身份），每次点击独立建卡由下个用例覆盖
     expect(fileNameOf(mediaNode('v1'))).toBe('素材视频');
     expect(identityOf(mediaNode('v1'))).toBeUndefined();
   });
@@ -248,7 +232,6 @@ describe('IKHLKR 切档即时改名与持久化', () => {
     const draftId = draftNode()!.id;
 
     await click(panelFps(120));
-    // patchMediaNode 产出新节点对象：重新读取（点击前引用已过期）
     expect(panelFps(120)!.className).toMatch(/Active/);
     expect(panelFps(60)!.className).not.toMatch(/Active/);
     expect(fileNameOf(mediaNode(draftId))).toBe('插帧 · 120fps');
@@ -258,7 +241,6 @@ describe('IKHLKR 切档即时改名与持久化', () => {
     await click(panelFps(30));
     expect(fileNameOf(mediaNode(draftId))).toBe('插帧 · 30fps');
     expect(identityOf(mediaNode(draftId))).toEqual({ sourceAssetId: '5', lastParams: { fps: 30 } });
-    // 本票发送控件不制造受理假象：无任务创建、卡态不变
     expect((mediaNode(draftId).data as Record<string, unknown>).genStatus).toBe('draft');
     expect((mediaNode(draftId).data as Record<string, unknown>).jobId).toBeUndefined();
   });
@@ -290,7 +272,6 @@ describe('IKHLKR 切档即时改名与持久化', () => {
     expect(dockActions.submit).toHaveBeenCalledWith('frameInterpolation', 60);
     await act(async () => {});
     expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
-    // 提交点即交接（面板关）；受理失败草稿回配置态、无 jobId（点卡可重开重发）
     expect(panelSend()).toBeNull();
     expect((mediaNode(draftId).data as Record<string, unknown>).genStatus).toBe('draft');
     expect((mediaNode(draftId).data as Record<string, unknown>).jobId).toBeUndefined();
@@ -318,7 +299,6 @@ describe('IKHLKR 关闭重开与刷新恢复', () => {
   it('刷新（水合）后档位与来源边恢复：点带插帧身份的草稿卡开面板即 120fps，来源边仍在', async () => {
     seedDoc({ withDraftCard: true });
     await renderPage();
-    // 水合后来源边（带 origin）已恢复
     const restoredEdge = edges().find((e) => e.target === 'i1')!;
     expect(restoredEdge.source).toBe('v1');
     expect(restoredEdge.data).toEqual({ origin: FRAME_INTERPOLATION_EDGE_ORIGIN });
@@ -327,7 +307,6 @@ describe('IKHLKR 关闭重开与刷新恢复', () => {
     expect(panelSend()).toBeTruthy();
     expect(panelFps(120)!.className).toMatch(/Active/);
     expect(panelFps(60)!.className).not.toMatch(/Active/);
-    // 身份未被覆盖，卡名仍是持久化的自动名
     expect(fileNameOf(mediaNode('i1'))).toBe('插帧 · 120fps');
     expect(identityOf(mediaNode('i1'))).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 } });
   });
@@ -346,7 +325,6 @@ describe('IKHLKR 关闭重开与刷新恢复', () => {
     expect(mediaNode(draftId)).toBeTruthy();
     expect(identityOf(mediaNode(draftId))).toEqual({ sourceAssetId: '5', lastParams: { fps: 30 } });
 
-    // Esc / 点外同样关闭面板且不丢参数（重开继续）
     await clickCard(draftId);
     expect(panelSend()).toBeTruthy();
     await act(async () => {
@@ -367,7 +345,6 @@ describe('IKHLKR 会话模态与跟随锚定', () => {
   it('插帧面板打开期间：全部媒体卡注入 soloToolbarHidden，钉屏幕工具条容器 show 关闭；关闭后恢复', async () => {
     seedDoc();
     await renderPage();
-    // 模拟唯一选中源卡（soloMediaToolbarNode 非空，容器挂载）
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [mediaNode('v1')], edges: [] });
     });
@@ -386,7 +363,6 @@ describe('IKHLKR 会话模态与跟随锚定', () => {
   });
 
   it('跟随锚定接通：容器有尺寸时面板按插帧卡锚定定位（left/top 由锚计算注入）', async () => {
-    // 页面容器尺寸来自 clientWidth/Height：jsdom 恒为 0，显式打桩以验证锚定链路
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1200);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(800);
     seedDoc();
@@ -396,7 +372,6 @@ describe('IKHLKR 会话模态与跟随锚定', () => {
     const panel = document.body.querySelector<HTMLElement>('[data-testid="frame-interpolation-dialog"]')!;
     expect(panel.style.left).not.toBe('');
     expect(panel.style.top).not.toBe('');
-    // 插帧卡（v1 右侧 +738）在源卡下方锚定：left 落在容器内、top 在卡片下方
     expect(Number.parseInt(panel.style.left, 10)).toBeGreaterThan(0);
     expect(Number.parseInt(panel.style.top, 10)).toBeGreaterThanOrEqual(0);
   });
@@ -413,7 +388,7 @@ describe('IKHLKR 会话模态与跟随锚定', () => {
       enterSubtitleErase?.('v1', 'smart');
     });
     expect(panelSend()).toBeNull();
-    expect(draftNode()).toBeTruthy(); // 草稿卡保留
+    expect(draftNode()).toBeTruthy();
   });
 });
 

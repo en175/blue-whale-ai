@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { commitCardName, downloadFileNameOf, mediaExtensionOf } from './cardName';
 
-/* IKFA8X 名称提交规则 + IKFA8Y 下载文件名规则：
-   扩展名由真实文件类型决定，名称已带同一类型扩展名时不重复追加，类型未知时原样使用名称。
-   浏览器内行为（下载触发、参考显示同步）由 cardRename.test.tsx 的页面级用例覆盖。 */
 
 describe('commitCardName 名称提交归一化', () => {
   it('去首尾空格后保存；空白与全空格回退原名', () => {

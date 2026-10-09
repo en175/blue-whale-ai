@@ -43,21 +43,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
-/**
- * 流式转存（IKHJRC 审查修复 P2）：家族的字节数组路径把结果整段读进堆，上限 200MB 是与堆绑死的
- * 常量；抠像工具成品是 10 分钟档重编码视频（WEBM 带 alpha 可大于源），而源素材上限本身就是
- * 200MB——成品超 200MiB 撞上本地转存即失败、原参数重试救不回来。本套件钉三件事：
- * <ol>
- *   <li>超过 200MiB 的成品**能**转存（上限按调用方工具口径，不是家族常量）</li>
- *   <li>超过调用方上限即拒（错误信息带 MB），且失败路径不留临时文件</li>
- *   <li>与字节数组路径同契约：mime 校验 / 空内容拒 / HTTP 错误透传 / key 与 ACL 同款 /
- *       md5 两种算法逐字节相等（分块算 md5 不得偏离 {@code computeFileMd5} 口径）</li>
- * </ol>
- * 桩服务用 JDK 自带 HttpServer（网关客户端测试同款），签名用 mock，上传/下载走本地 HTTP/TCP——不连接真实供应商。
- */
 class TosVideoMediaRelayTest {
 
-    /** 桩服务块大小 1MiB：body 由同一个块重复而成，测试侧不占大内存。 */
     private static final int BLOCK_BYTES = 1024 * 1024;
 
     private HttpServer server;
@@ -66,10 +53,6 @@ class TosVideoMediaRelayTest {
     private volatile String uploadedMime;
     private volatile String uploadedAcl;
     private final java.util.concurrent.CountDownLatch releaseStall = new java.util.concurrent.CountDownLatch(1);
-    /**
-     * 有状态 TOS 替身的对象表（IKIN90）：上传对端保存 key→字节，{@code deleteObject} 查表
-     * 真删——测试断言对象存在性（删后真没了 / 失败后还在），不以删除调用次数代替结果。
-     */
     private final java.util.concurrent.ConcurrentHashMap<String, byte[]> tosObjects =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -81,7 +64,6 @@ class TosVideoMediaRelayTest {
         return block;
     }
 
-    /** 本地桩服务：固定响应头 + 重复块 body（固定 Content-Length，不缓冲整段）。 */
     private String serve(String contentType, int status, long bodyBytes, byte[] block) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
@@ -108,11 +90,6 @@ class TosVideoMediaRelayTest {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/out.bin";
     }
 
-    /**
-     * 停流桩（IKHSFC）：发响应头 + 可选首块后挂住连接——连接保持、正文停止发送、不关闭，
-     * 模拟上游「已返回响应头但停流」的真实阻塞输入（不是 mock 探针）。首块取 64KiB（超内核
-     * socket 缓冲必已送达），保证客户端确实进入「读过头块、阻塞在下一个 read」的状态。
-     */
     private String serveStalled(String contentType, int status, long declaredLength, int firstBytes)
             throws IOException {
         byte[] block = patternBlock();
@@ -133,10 +110,6 @@ class TosVideoMediaRelayTest {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/out.bin";
     }
 
-    /**
-     * 受控慢速源桩（IKILVH）：块间 sleep 控制持续吞吐——连接持续有进度但速率受限，模拟
-     * 「合法慢传输」（与停流桩相对：不是不吐数据，只是吐得慢）。真实 HTTP/TCP 流式读写。
-     */
     private String serveSlow(String contentType, int blockBytes, int blockCount, long blockDelayMs)
             throws IOException {
         byte[] block = patternBlock();
@@ -158,11 +131,6 @@ class TosVideoMediaRelayTest {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/out.bin";
     }
 
-    /**
-     * 停顿后恢复桩（IKIN01）：响应头 + 首块（64KiB，超内核 socket 缓冲必已送达）后静默
-     * {@code pauseMs} 再发完剩余——模拟四参旧口径下合法的「正文短暂停顿后恢复」，与无限
-     * 挂住的停流桩相对：停顿有界且总时长可预知，用于判别「停顿窗口内不杀 + 固定窗到点才杀」。
-     */
     private String servePauseThenResume(String contentType, int firstBytes, long pauseMs, long totalBytes)
             throws IOException {
         byte[] block = patternBlock();
@@ -188,7 +156,6 @@ class TosVideoMediaRelayTest {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/out.bin";
     }
 
-    /** 仅替代 SDK 本地签名；上传走真实 HTTP 流，服务端校验实际收到的字节和元数据。 */
     private List<PreSignedURLInput> captureUploads(TOSV2 client, AtomicLong uploadedBytes) throws IOException {
         List<PreSignedURLInput> uploads = new ArrayList<>();
         uploadServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -223,10 +190,6 @@ class TosVideoMediaRelayTest {
         return uploads;
     }
 
-    /**
-     * 有状态 TOS 替身的删除通道（IKIN90）：{@code deleteObject} 查对象表真删——key 不存在
-     * 静默通过（幂等口径同真实 TOS），测试据此断言对象存在性而非仅 verify 调用次数。
-     */
     private void deleteObjectsFromState(TOSV2 client) {
         doAnswer(invocation -> {
             com.volcengine.tos.model.object.DeleteObjectInput input = invocation.getArgument(0);
@@ -235,10 +198,6 @@ class TosVideoMediaRelayTest {
         }).when(client).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
     }
 
-    /**
-     * 手写 socket 上传对端的签名 stub（IKIN90）：签名 URL 的 path 携带真实 storageKey，
-     * 对端从请求行即可取回 key——「PUT 的对象」与「deleteObject 清理的对象」可核对同一身份。
-     */
     private void stubPresignedUrlToSocket(TOSV2 client, java.net.ServerSocket socketServer) {
         doAnswer(invocation -> {
             PreSignedURLInput input = invocation.getArgument(0);
@@ -248,10 +207,8 @@ class TosVideoMediaRelayTest {
         }).when(client).preSignedURL(any(PreSignedURLInput.class));
     }
 
-    /** 手写对端读到的 PUT 请求（IKIN90）：请求行提取的 storageKey + 完整 body。 */
     private record SocketPut(String key, byte[] body) {}
 
-    /** 读 PUT 请求头（逐字节到空行）并按 Content-Length 读满 body：path 去前导 '/' 即 storageKey。 */
     private static SocketPut readPut(java.net.Socket socket, int bodyBytes) throws IOException {
         InputStream in = socket.getInputStream();
         var header = new java.io.ByteArrayOutputStream();
@@ -260,17 +217,12 @@ class TosVideoMediaRelayTest {
             header.write(next);
             if (header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) break;
         }
-        // "PUT /generated/9/video/xxx.mp4 HTTP/1.1" → path 去前导 '/' 即 storageKey
         String requestLine = header.toString(StandardCharsets.US_ASCII).split("\r\n", 2)[0];
         String key = requestLine.split(" ")[1].substring(1);
         byte[] body = in.readNBytes(bodyBytes);
         return new SocketPut(key, body);
     }
 
-    /**
-     * 系统临时目录里本转存器留下的文件。{@code java.io.tmpdir} 在 JVM 启动即冻结（探针实证：
-     * 运行时改属性不改变落点），故清理只能「前后对比」验证。
-     */
     private static List<String> relayTempFiles() throws IOException {
         Path tmp = Path.of(System.getProperty("java.io.tmpdir"));
         try (var files = Files.list(tmp)) {
@@ -312,7 +264,6 @@ class TosVideoMediaRelayTest {
         TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                 .persistStreaming(url, "9", VideoMattingContract.MAX_RESULT_BYTES);
 
-        // 前提钉死：这段成品确实超过家族上限，且抠像口径容得下
         assertThat(payloadBytes).isGreaterThan(TosVideoMediaRelay.MAX_VIDEO_BYTES);
         assertThat(VideoMattingContract.MAX_RESULT_BYTES).isGreaterThan(payloadBytes);
         assertThat(stored.size()).isEqualTo(payloadBytes);
@@ -321,14 +272,12 @@ class TosVideoMediaRelayTest {
         assertThat(uploadedMd5).isEqualTo(expectedMd5(block, 201));
         assertThat(uploads.get(0).getKey()).startsWith("generated/9/video/").endsWith(".webm");
         assertThat(stored.md5()).isEqualTo(expectedMd5(block, 201));
-        // 成功路径同样不留临时文件（201MiB 落盘再上传，最后必须删干净）
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
 
     @Test
     @DisplayName("超过调用方上限即拒（错误信息带 MB 值），不上传、不留临时文件")
     void persistStreaming_rejectsResultOverCallerCap() throws Exception {
-        // 2MiB 成品对 1MiB 上限：超限判定发生在落盘途中，不是读完才判
         String url = serve("video/mp4", 200, 2L * 1024 * 1024, patternBlock());
         TOSV2 client = mock(TOSV2.class);
         List<String> tempBefore = relayTempFiles();
@@ -360,7 +309,6 @@ class TosVideoMediaRelayTest {
     @Test
     @DisplayName("空内容即拒（0 字节成品不建对象）")
     void persistStreaming_rejectsEmptyBody() throws Exception {
-        // -1 = 无响应体（Content-Length 缺席），客户端读到 EOF 即 0 字节
         String url = serve("video/mp4", 200, -1, patternBlock());
         TOSV2 client = mock(TOSV2.class);
 
@@ -400,7 +348,6 @@ class TosVideoMediaRelayTest {
         TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                 .persistStreaming(url, "9", VideoMattingContract.MAX_RESULT_BYTES);
 
-        // quicktime → .mov（videoExtension 同款）；mime 去参数后落库
         assertThat(stored.mime()).isEqualTo("video/quicktime");
         assertThat(stored.storageKey()).startsWith("generated/9/video/").endsWith(".mov");
         assertThat(stored.url()).isEqualTo("https://bkt.tos.example.com/" + stored.storageKey());
@@ -408,7 +355,6 @@ class TosVideoMediaRelayTest {
         assertThat(uploads.get(0).getBucket()).isEqualTo("bkt");
         assertThat(uploads.get(0).getHeader())
                 .containsEntry("Content-Type", "video/quicktime");
-        // 分块算的 md5 必须与整段算的相等——否则上传件与生成件命不中 assets.md5 去重
         assertThat(stored.md5()).isEqualTo(ContentDigest.md5Hex(payload));
 
         assertThat(uploadedAcl).isEqualTo("public-read");
@@ -418,7 +364,6 @@ class TosVideoMediaRelayTest {
         verify(client, never()).putObjectAcl(any());
     }
 
-    // ========== IKHSFC：停流主动中止（截止时间只在 read 返回后检查 → 停流挂死） ==========
 
     @Test
     @DisplayName("成功响应停流（头已到、正文停发、连接保持）→ 停流超时到点主动中止读取，不等对端发数据或断连")
@@ -436,7 +381,6 @@ class TosVideoMediaRelayTest {
                 .hasMessageContaining("下载停流")
                 .hasMessageContaining("无进度");
 
-        // 及时性即证明：中止是主动触发（停流 200ms 即止），不是等对端超时/断连
         assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
                 .isLessThan(Duration.ofSeconds(5));
         verify(client, never()).putObject(any(PutObjectInput.class));
@@ -492,7 +436,6 @@ class TosVideoMediaRelayTest {
         aborter.join(5_000);
         assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
                 .isLessThan(Duration.ofSeconds(5));
-        // 下载阶段中止：PUT 未发起，无对象可清理
         verify(client, never()).putObject(any(PutObjectInput.class));
         verify(client, never()).deleteObject(any());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
@@ -528,7 +471,6 @@ class TosVideoMediaRelayTest {
                     assertThat(headers.toLowerCase()).contains("content-length: 4096");
                     assertThat(in.readNBytes(4096)).hasSize(4096);
                     received.countDown();
-                    // 服务端保持连接且不发响应；取消必须真正关闭客户端 socket。
                     return in.read();
                 }
             });
@@ -544,8 +486,6 @@ class TosVideoMediaRelayTest {
                 assertThat(peer.get(2, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
                 assertThat(relayTempFiles()).isEqualTo(before);
                 verify(client, never()).putObjectAcl(any());
-                // IKILVH：PUT 已发起且 body 已完整送达（对象可能已在上游落地成无 Asset 引用
-                // 的孤儿）→ 中止退出前必须 deleteObject 清理未发布对象
                 var deleted = org.mockito.ArgumentCaptor.forClass(
                         com.volcengine.tos.model.object.DeleteObjectInput.class);
                 verify(client).deleteObject(deleted.capture());
@@ -560,17 +500,7 @@ class TosVideoMediaRelayTest {
         }
     }
 
-    // ========== IKILVH：总时限除名——停流超时 + 任务截止时间 + 容量上限三限界 ==========
 
-    /**
-     * 缩比模型说明（IKILVH）：注入的 stallTimeout（500ms）正是旧 {@code copyDeadline} 参数位
-     * ——若实现仍按「总时限」语义，本用例总时长 ~1.2s > 500ms 必失败；按「停流超时」语义
-     * （块间隔 100ms < 500ms，持续有进度）必完成。同一注入参数的两种语义由本用例判别。
-     * <p>
-     * 受控吞吐与时长记录：慢流桩 64KiB/100ms ≈ 0.6MiB/s 持续吞吐，总转存时长 ~1.2s（>
-     * 2× 停流超时缩比值）；对应真实参数（60s 停流 / 10GiB 上限）线上能否完成取决于实际
-     * 吞吐与任务截止时间（10GiB@2MiB/s ≈ 85 分钟），本测试不宣称线上任意速率均可完成。
-     */
     @Test
     @Timeout(30)
     @DisplayName("受控慢流持续有进度：总时长超过注入时限 2 倍仍完成转存（固定总时限已除名，停流超时才计时）")
@@ -589,9 +519,6 @@ class TosVideoMediaRelayTest {
                         null, null, null, Duration.ofMillis(500), Duration.ofSeconds(5));
 
         long elapsedMs = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
-        // 前提钉死：传输确实持续了 ~1.2s（真慢流），且超过注入时限（500ms）2 倍——旧总时限
-        // 语义下此传输必被中止；停流语义下块间隔 100ms 持续重置基准，全程无中止
-        // 慢流块是 patternBlock 的前 blockBytes 切片（桩按块截断发送），期望 md5 按同切片重复
         byte[] slice = java.util.Arrays.copyOf(patternBlock(), blockBytes);
         assertThat(elapsedMs).isGreaterThan(1_000);
         assertThat(stored.size()).isEqualTo((long) blockBytes * blocks);
@@ -609,7 +536,6 @@ class TosVideoMediaRelayTest {
         TOSV2 client = mock(TOSV2.class);
         List<String> tempBefore = relayTempFiles();
         long startNanos = System.nanoTime();
-        // 停流超时给足（慢流持续有进度本就不会触发），确保中止只能来自任务截止
         java.time.Instant deadline = java.time.Instant.now().plusMillis(300);
 
         assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
@@ -618,7 +544,6 @@ class TosVideoMediaRelayTest {
                 .isInstanceOf(VideoProviderError.class)
                 .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE);
 
-        // 及时性即证明：截止 300ms 即止，不是等 1.2s 慢流自然结束，也不是 10 分钟停流超时
         assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
                 .isLessThan(Duration.ofSeconds(3));
         verify(client, never()).putObject(any(PutObjectInput.class));
@@ -674,14 +599,7 @@ class TosVideoMediaRelayTest {
         assertThat(uploadedBytes.get()).isEqualTo(payload.length);
     }
 
-    // ========== IKIN01：四参兼容入口恢复 IKILVH 前旧口径（下载段 10 分钟固定窗，无停流，上传段无截止） ==========
 
-    /**
-     * 四参兜底的验证方式（IKIN01 修订）：不真等 10 分钟——spy 打桩 {@code persistStreamingInternal}
-     * 捕获四参入口注入的时限参数，钉住「下载正文段 10 分钟固定窗（copyWindow）+ 不布防停流 +
-     * 不布防任务截止」的形态；各时限的行为语义（窗到点中止、停流不杀四参、上传段无截止）由
-     * 本节行为用例分别钉死，两段组合即四参兼容口径的完整证明。
-     */
     @Test
     @DisplayName("四参入口注入下载段 10 分钟固定窗兜底：不布防停流、不布防任务截止（旧口径形态）")
     void persistStreaming_fourArgs_fallsBackToLegacyTotalDeadline() {
@@ -698,10 +616,8 @@ class TosVideoMediaRelayTest {
         verify(relay).persistStreamingInternal(eq("https://volc/out.mp4"), eq("9"), eq(1024L),
                 isNull(), taskDeadline.capture(), copyWindow.capture(),
                 stallTimeout.capture(), any());
-        // 四参旧口径：任务截止不受限（不进 armDeadline 全程布防）、停流不受限（60s 停流只属五参）
         assertThat(taskDeadline.getValue()).isNull();
         assertThat(stallTimeout.getValue()).isNull();
-        // 兜底 = 下载正文段固定总窗 10 分钟（STREAM_COPY_DEADLINE，进度不重置）
         assertThat(copyWindow.getValue()).isEqualTo(Duration.ofMinutes(10));
     }
 
@@ -713,7 +629,6 @@ class TosVideoMediaRelayTest {
                 .when(relay).persistStreamingInternal(any(), any(), anyLong(),
                         any(), any(), any(), any(), any());
 
-        // AudioVideoMux 无 execution_deadline_at 时传 null：不得强加 10 分钟兜底（慢流不受总时限）
         relay.persistStreaming("https://volc/out.mp4", "9", 1024, null, null);
         verify(relay).persistStreamingInternal(eq("https://volc/out.mp4"), eq("9"), eq(1024L),
                 isNull(), isNull(), isNull(), any(), any());
@@ -724,12 +639,6 @@ class TosVideoMediaRelayTest {
                 isNull(), same(callerDeadline), isNull(), any(), any());
     }
 
-    /**
-     * 四参形态的注入方式（IKIN01）：直调包级 internal，把 10 分钟窗缩比为亚秒级 copyWindow，
-     * stallTimeout / taskDeadline 传 null——正是四参公开入口注入的形态（上一用例钉死）。本用例
-     * 钉「正文短暂停顿后恢复，在旧总时限内完成」：停顿 700ms 若被误布防 60s 停流（或任何进度
-     * 基准重置模型之外的杀流规则）不可能出现在 null 语义下；窗 2s 容得下停顿 + 传输。
-     */
     @Test
     @Timeout(15)
     @DisplayName("四参口径：正文短暂停顿后在旧总时限内恢复可完成（停流规则不适用于本入口）")
@@ -748,7 +657,6 @@ class TosVideoMediaRelayTest {
 
         long elapsedMs = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
         byte[] slice = java.util.Arrays.copyOf(patternBlock(), blockBytes);
-        // 停顿真实发生（桩在服务端 sleep 700ms）且没有触发任何中止
         assertThat(elapsedMs).isGreaterThan(600);
         assertThat(stored.size()).isEqualTo((long) blockBytes * 2);
         assertThat(uploadedBytes.get()).isEqualTo((long) blockBytes * 2);
@@ -757,11 +665,6 @@ class TosVideoMediaRelayTest {
         verify(client, never()).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
     }
 
-    /**
-     * 固定窗 vs 停流的语义判别（IKIN01）：同一慢流（持续有进度、总时长 ~1.2s）在 copyWindow
-     * 500ms 下必须失败——窗是固定总窗（从正文开始读取起算、进度不重置），与五参停流模型
-     * （块间隔 100ms 持续重置基准、总时长不限）互斥。若四参被误接停流语义，本用例会完成而红。
-     */
     @Test
     @Timeout(15)
     @DisplayName("四参口径：正文真正超时（慢流总时长超过固定窗）即失败，文案独立命名")
@@ -778,19 +681,12 @@ class TosVideoMediaRelayTest {
                 .hasMessageContaining("生成视频下载超时")
                 .hasMessageContaining("500ms");
 
-        // 及时性即证明：500ms 窗到点主动中止，不是等 1.2s 慢流自然结束
         assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
                 .isLessThan(Duration.ofSeconds(3));
         verify(client, never()).putObject(any(PutObjectInput.class));
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
 
-    /**
-     * 上传段不受四参兜底窗约束（IKIN01）：下载在缩比窗（300ms）内完成后，上传服务端收完
-     * body 延迟 1.5s 才回响应——窗早已过期但上传段必须照常完成（旧口径：固定窗只管下载
-     * 正文段，正文结束即撤销）。若窗被误接任务截止语义（armDeadline 全程布防），过期即
-     * cancel 上传连接，本用例会以「任务执行截止时间已到」失败而红。
-     */
     @Test
     @Timeout(15)
     @DisplayName("四参口径：下载完成后的慢上传可完成（兜底窗不约束上传段）")
@@ -818,7 +714,6 @@ class TosVideoMediaRelayTest {
                     }
                     assertThat(in.readNBytes(4096)).hasSize(4096);
                     received.countDown();
-                    // 收完 body 后延迟 1.5s 才回 200：copyWindow 300ms 早已过期，上传必须不受其约束
                     Thread.sleep(1500);
                     socket.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
                             .getBytes(StandardCharsets.US_ASCII));
@@ -843,14 +738,6 @@ class TosVideoMediaRelayTest {
         }
     }
 
-    /**
-     * 上传段截止归因（IKILU5）+ 截止清理（IKIN90）：下载快速完成后上传 body 送达服务端、对象
-     * 先在替身落地、连接挂住等响应——此窗口任务截止到点只能靠看门狗 cancel 上传请求，抛出的
-     * IOException 若不先做截止归因会被误包成「生成视频转存网络失败」。截止中止是普通失败口径
-     * （与外部中止的静默退出不同、processor 侧仍按普通失败终态处理），但转存未成功返回前 PUT
-     * 已落地，无 Asset 引用即孤儿（IKIN90）：与外部中止同等清理未发布对象。有状态替身断言
-     * 「对象先存在、截止清理后真没了」，不以删除调用次数代替结果。
-     */
     @Test
     @Timeout(15)
     @DisplayName("上传段任务截止到点：归因「任务执行截止时间已到」不误报网络失败，已落地未发布对象被清理")
@@ -869,10 +756,8 @@ class TosVideoMediaRelayTest {
                 try (var socket = socketServer.accept()) {
                     socket.setSoTimeout(5000);
                     SocketPut put = readPut(socket, 4096);
-                    // 有状态替身：对象先落地（key→字节入库），再挂住不回响应——延迟上传响应窗口
                     tosObjects.put(put.key(), put.body());
                     received.countDown();
-                    // 服务端收完 body 挂住不回响应：上传停在等响应窗口，截止只能靠看门狗取消连接
                     return socket.getInputStream().read();
                 }
             });
@@ -880,7 +765,6 @@ class TosVideoMediaRelayTest {
                     .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES,
                             null, java.time.Instant.now().plusMillis(2500)));
             try {
-                // 对象必须在截止到点前已在替身落地（2500ms 截止给足本地回环下载+上传+落地的余量）
                 assertThat(received.await(5, java.util.concurrent.TimeUnit.SECONDS))
                         .as("上传 body 必须先完整送达并在替身落地").isTrue();
                 assertThat(tosObjects).isNotEmpty();
@@ -889,15 +773,12 @@ class TosVideoMediaRelayTest {
                         .hasCauseInstanceOf(VideoProviderError.class)
                         .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE)
                         .hasMessageNotContaining("转存网络失败");
-                // 截止取消连接后服务端读到 EOF；截止是普通失败口径，但 PUT 已落地 → 与外部中止
-                // 同等清理（IKIN90：转存未成功返回的已落地对象不留无主孤儿）
                 assertThat(peer.get(3, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
                 var deleted = org.mockito.ArgumentCaptor.forClass(
                         com.volcengine.tos.model.object.DeleteObjectInput.class);
                 verify(client).deleteObject(deleted.capture());
                 assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
                 assertThat(deleted.getValue().getKey()).startsWith("generated/9/video/");
-                // 有状态断言：deleteObject 查表真删——对象不再存在，替身无残留
                 assertThat(tosObjects).doesNotContainKey(deleted.getValue().getKey());
                 assertThat(tosObjects).isEmpty();
                 assertThat(relayTempFiles()).isEqualTo(before);
@@ -909,12 +790,6 @@ class TosVideoMediaRelayTest {
         }
     }
 
-    /**
-     * 成功响应与截止交错（IKIN90）：上传 body 送达、对象已在替身落地后**延迟**回 200——只要
-     * 上传响应在截止前返回、转存成功返回，对象就已交给调用方（processor 侧发布流程负责），
-     * relay 成功返回路径绝不删对象。与上一用例相对：同一「先落地、延迟响应」替身，交错结果
-     * 由「成功返回先于截止」翻转，钉住不误删已发布（成功交接）对象的边界。
-     */
     @Test
     @Timeout(15)
     @DisplayName("上传成功响应先于截止返回：转存成功返回，对象保留（成功路径绝不删对象）")
@@ -935,7 +810,6 @@ class TosVideoMediaRelayTest {
                     SocketPut put = readPut(socket, 4096);
                     tosObjects.put(put.key(), put.body());
                     received.countDown();
-                    // 对象落地后延迟 1.2s 才回 200：等响应窗口内截止（5s）尚未到点，交错但成功
                     Thread.sleep(1200);
                     socket.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
                             .getBytes(StandardCharsets.US_ASCII));
@@ -951,7 +825,6 @@ class TosVideoMediaRelayTest {
                         .as("上传 body 必须先完整送达并在替身落地").isTrue();
                 TosVideoMediaRelay.StoredVideo stored =
                         transfer.get(7, java.util.concurrent.TimeUnit.SECONDS);
-                // 成功返回：对象交由调用方负责，relay 不得删除（替身对象保留、deleteObject 未发生）
                 assertThat(stored.size()).isEqualTo(4096L);
                 verify(client, never()).deleteObject(
                         any(com.volcengine.tos.model.object.DeleteObjectInput.class));
@@ -970,12 +843,6 @@ class TosVideoMediaRelayTest {
         }
     }
 
-    /**
-     * 截止清理失败留痕（IKIN90）：上传已落地、截止中止落在等响应窗口时清理必须执行且对象身份
-     * 进入清理调用；清理本身失败（deleteObject 抛错）只留日志记录（storageKey + err，运维可
-     * 定位），不得吞掉或改写截止失败语义：仍以「任务执行截止时间已到」的 VideoProviderError
-     * 退出（普通失败口径照旧），本地临时文件照常清理。
-     */
     @Test
     @Timeout(15)
     @DisplayName("上传响应窗口截止且清理失败：仍以截止失败口径退出，对象身份进入清理调用，临时文件不残留")
@@ -997,7 +864,6 @@ class TosVideoMediaRelayTest {
                     SocketPut put = readPut(socket, 4096);
                     tosObjects.put(put.key(), put.body());
                     received.countDown();
-                    // 服务端收完 body 挂住不回响应：截止落在「body 已送达、对象已落地」的窗口
                     return socket.getInputStream().read();
                 }
             });
@@ -1007,20 +873,17 @@ class TosVideoMediaRelayTest {
             try {
                 assertThat(received.await(5, java.util.concurrent.TimeUnit.SECONDS))
                         .as("上传 body 必须先完整送达并在替身落地").isTrue();
-                // 清理失败不得吞掉/改写截止失败语义：仍是「任务执行截止时间已到」的普通失败口径
                 assertThatThrownBy(() -> transfer.get(8, java.util.concurrent.TimeUnit.SECONDS))
                         .isInstanceOf(java.util.concurrent.ExecutionException.class)
                         .hasCauseInstanceOf(VideoProviderError.class)
                         .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE)
                         .hasMessageNotContaining("转存网络失败");
                 assertThat(peer.get(3, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
-                // 清理确实执行过且对象身份传入（失败详情由 log.warn 记录 storageKey 与 err）
                 var deleted = org.mockito.ArgumentCaptor.forClass(
                         com.volcengine.tos.model.object.DeleteObjectInput.class);
                 verify(client).deleteObject(deleted.capture());
                 assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
                 assertThat(deleted.getValue().getKey()).startsWith("generated/9/video/");
-                // 删除失败未生效：替身对象仍在（不能报告清理成功）
                 assertThat(tosObjects).containsKey(deleted.getValue().getKey());
                 assertThat(relayTempFiles()).isEqualTo(before);
             } finally {
@@ -1031,11 +894,6 @@ class TosVideoMediaRelayTest {
         }
     }
 
-    /**
-     * 四参入口失败不清理（IKIN90 防回归）：清理条件扩展到截止口径后，四参（无任务截止布防，
-     * VideoMatting 生产路径）的普通失败——上传 503——必须维持现状不清理。条件若误扩成
-     * 「任何失败都清」，本用例即红（该入口失败语义与现状偏离）。
-     */
     @Test
     @Timeout(15)
     @DisplayName("四参口径：上传失败（HTTP 503）维持不清理，不上传成功自然无孤儿，临时文件不残留")
@@ -1063,21 +921,12 @@ class TosVideoMediaRelayTest {
                 .isInstanceOf(VideoProviderError.class)
                 .hasMessageContaining("生成视频转存失败: HTTP 503");
 
-        // 四参失败路径维持不清理；503 上传未成功，替身无对象，无孤儿产生
         verify(client, never()).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
         assertThat(tosObjects).isEmpty();
         assertThat(relayTempFiles()).isEqualTo(before);
     }
 
-    // ========== IKIN01：响应头等待期的可取消等待责任 + 中止清理失败口径 ==========
 
-    /**
-     * 响应头等待期接线（IKIN01）：外部中止信号先于响应头到达也必须立即停止下载请求——此前
-     * 中止句柄只在拿到正文流后才接线（StreamWatchdog 构造），阻塞在响应头等待里的传输只能
-     * 等 60s 响应头超时、且被误归因为普通下载失败。及时性即证明：记录 abort → 异常抛出的
-     * 实际延迟并断言远小于 60s 响应头超时；服务端观察到连接被真关（请求真正停止，不只是
-     * 调用方放弃等待）。走四参公开入口（真实 60s 响应头超时在跑，证明不等请求超时）。
-     */
     @Test
     @Timeout(15)
     @DisplayName("响应头未返回时外部中止：立即取消下载请求（延迟远小于 60s 响应头超时），连接真关")
@@ -1102,7 +951,6 @@ class TosVideoMediaRelayTest {
                         if (header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) break;
                     }
                     headerReceived.countDown();
-                    // 连接保持、响应头永不返回：等待只能靠客户端主动取消打断
                     return in.read();
                 }
             });
@@ -1135,11 +983,6 @@ class TosVideoMediaRelayTest {
         }
     }
 
-    /**
-     * 任务截止约束响应头等待（IKIN01，五参）：execution_deadline_at 到点时响应头尚未返回，
-     * 请求也必须被立即取消并归因为「任务执行截止时间已到」——此前截止只从正文读取开始布防，
-     * 响应头窗口内到点同样要等 60s 超时误报网络失败。走五参公开入口，截止缩比 500ms。
-     */
     @Test
     @Timeout(15)
     @DisplayName("响应头未返回时任务截止到点：立即取消下载请求并归因截止，不误报网络失败")
@@ -1195,12 +1038,6 @@ class TosVideoMediaRelayTest {
         }
     }
 
-    /**
-     * 清理失败口径（IKIN01）：上传已发出、中止落在等响应窗口时对象可能已落地为无 Asset 引用
-     * 的孤儿——清理必须执行且对象身份进入清理调用；清理本身失败（deleteObject 抛错）只留
-     * 日志记录（storageKey + 错误），不得吞掉或改写中止语义：仍以 TransferAbortedException
-     * 退出，本地临时文件照常清理。
-     */
     @Test
     @Timeout(15)
     @DisplayName("上传响应窗口中止且清理失败：仍以中止语义退出，对象身份进入清理调用，临时文件不残留")
@@ -1231,7 +1068,6 @@ class TosVideoMediaRelayTest {
                     }
                     assertThat(in.readNBytes(4096)).hasSize(4096);
                     received.countDown();
-                    // 服务端保持连接且不发响应：中止落在「body 已送达、对象可能已落地」的窗口
                     return in.read();
                 }
             });
@@ -1240,13 +1076,11 @@ class TosVideoMediaRelayTest {
             try {
                 assertThat(received.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
                 handle.abort("lease lost");
-                // 清理失败不得吞掉/改写中止语义：仍是 TransferAbortedException、原因透传
                 assertThatThrownBy(() -> transfer.get(2, java.util.concurrent.TimeUnit.SECONDS))
                         .isInstanceOf(java.util.concurrent.ExecutionException.class)
                         .hasCauseInstanceOf(TosVideoMediaRelay.TransferAbortedException.class)
                         .hasMessageContaining("lease lost");
                 assertThat(peer.get(2, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
-                // 清理确实执行过且对象身份传入（失败详情由 log.warn 记录 storageKey 与 err）
                 var deleted = org.mockito.ArgumentCaptor.forClass(
                         com.volcengine.tos.model.object.DeleteObjectInput.class);
                 verify(client).deleteObject(deleted.capture());
@@ -1262,31 +1096,20 @@ class TosVideoMediaRelayTest {
         }
     }
 
-    /**
-     * 裸取消路径（IKIN01 二轮复审）：{@code CompletableFuture.cancel} 之后的 {@code join()}
-     * 按规范直接抛裸 {@link java.util.concurrent.CancellationException}（不包 CompletionException）
-     * ——当前 JDK HttpClient sendAsync 实测走包装形态，但这是实现细节非规范保证；一旦 JDK 行为
-     * 落到裸抛路径，只接包装形态的 await() 会让取消逃逸成未归因异常，中止语义（外部中止 →
-     * TransferAbortedException / 任务截止归因）被破坏。本用例绕开 HttpClient 直接构造已取消的
-     * future 钉住裸抛路径的两条归因。
-     */
     @Test
     @Timeout(15)
     @DisplayName("裸 CancellationException（cancel 后 join 的规范路径）：按外部中止/任务截止归因，不逃逸")
     void headerWait_bareCancellation_attributedNotEscaped() {
-        // 场景一：外部中止取消 → 裸抛归因为 TransferAbortedException，原因透传
         CompletableFuture<HttpResponse<InputStream>> aborted = new CompletableFuture<>();
         var handle = new TosVideoMediaRelay.TransferAbortHandle();
         TosVideoMediaRelay.HeaderWait abortWait = new TosVideoMediaRelay.HeaderWait(aborted, handle, null);
         handle.abort("结果转存租约丢失");
-        // 前提钉死：本用例的 cancel 后 join() 抛的是裸 CancellationException（非包装形态）
         assertThatThrownBy(aborted::join)
                 .isInstanceOf(java.util.concurrent.CancellationException.class);
         assertThatThrownBy(abortWait::await)
                 .isInstanceOf(TosVideoMediaRelay.TransferAbortedException.class)
                 .hasMessageContaining("结果转存租约丢失");
 
-        // 场景二：任务截止到点取消 → 裸抛归因为「任务执行截止时间已到」，不误报网络失败
         CompletableFuture<HttpResponse<InputStream>> expired = new CompletableFuture<>();
         TosVideoMediaRelay.HeaderWait deadlineWait =
                 new TosVideoMediaRelay.HeaderWait(expired, null, java.time.Instant.now().plusMillis(100));

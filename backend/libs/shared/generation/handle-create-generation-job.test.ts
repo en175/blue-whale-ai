@@ -9,14 +9,14 @@ import {
 } from "./handle-create-generation-job.js";
 import { quoteRevisionOf } from "./handle-quote-generation-job.js";
 
-// IK9ILQ：音频生成接入 —— 校验分支单测。
-// 通过公开入口 handleCreateGenerationJob 打私有 validate()（对齐 Java CreateGenerationJobRequest 约束）：
-// 音频任务无 aspect_ratio 校验、prompt≤3000、单输出、一期不支持参考素材、model_id 白名单。
+
+
+
 
 type HandlerDeps = Parameters<typeof handleCreateGenerationJob>[4];
 
-/** 建任务幂等查询（command 端口）。缺省「无行」——没带 Idempotency-Key 的用例走的就是
- *  与加幂等表之前完全相同的路径（这个函数根本不会被调用）。 */
+
+
 function idempotencyLookup(result: unknown = null) {
   return vi.fn().mockResolvedValue(result);
 }
@@ -35,8 +35,8 @@ function buildDeps() {
         model_id: "seed-audio-1.0",
         features: {
           audio_reference_max: 3,
-          // IKHEXG：音频行的图参考上限 1（原夹具同时带 max_reference_images:10 与
-          // image_reference_max:1——两键合并后只剩这一个，取音频链路原本生效的 1）。
+
+
           image_reference_max: 1,
         },
       },
@@ -140,7 +140,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
 
   it("音频 + 音频参考（references type:audio）→ 200，job.input 冻结 references", async () => {
     const { deps, createJob } = buildDeps();
-    // IKG6EK：references 的归属/类型复核现在无条件执行（原先只在携带 prompt_doc 时跑）
+
     vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
       ids.map((id) => ({ id, type: "audio" as const })));
 
@@ -165,7 +165,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
 
   it("音频 + 图片参考（references type:image）→ 200", async () => {
     const { deps, createJob } = buildDeps();
-    // IKG6EK：references 的归属/类型复核现在无条件执行（原先只在携带 prompt_doc 时跑）
+
     vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
       ids.map((id) => ({ id, type: "image" as const })));
 
@@ -311,7 +311,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
 
   it("音频 + references + 空旧字段 input_asset_ids:[] → 200（空数组不误判为旧字段，IKE4GC）", async () => {
     const { deps, createJob } = buildDeps();
-    // IKG6EK：references 的归属/类型复核现在无条件执行（原先只在携带 prompt_doc 时跑）
+
     vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
       ids.map((id) => ({ id, type: "audio" as const })));
 
@@ -352,8 +352,8 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
   });
 });
 
-// IKA72G：图片参考图上限读取模型能力配置（features.image_reference_max），
-// 不再写死 4；无配置时回退与网关/ARK 一致的 10；字段统一 input_asset_ids。
+
+
 function buildImageDeps(imageReferenceMax?: number) {
   const findOwnedById = vi.fn().mockResolvedValue({
     id: "1",
@@ -374,8 +374,8 @@ function buildImageDeps(imageReferenceMax?: number) {
     generation_job_id: "1",
     cursor: 1,
   });
-  // IKE7JP：参考素材前置——resolveInputAssets 返回与请求等长的正常素材（图片参考路径。
-  //  非图片参考场景各测试自 mock 覆盖）。
+
+
   const resolveInputAssets = vi.fn().mockImplementation(async (ids: string[]) =>
     ids.map((id) => ({
       id,
@@ -432,7 +432,7 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
         }),
       }),
     );
-    // 字段统一：job.input 不再写 reference_asset_ids
+
     const cmdArg = createJob.mock.calls[0]![0] as {
       input: Record<string, unknown>;
     };
@@ -471,8 +471,8 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  // IKHEXG：图片/视频链路的缺省仍是 10（网关 maxImageEditImages / 方舟 Seedream 复合编辑），
-  // 按行类型选的缺省只在音频链路上是 1（见 model-capability-repo 的两个 DEFAULT_* 常量）。
+
+
   it("能力未配置 → 回退图片/视频缺省 10：10 张通过、11 张 400", async () => {
     const { deps: okDeps, createJob: okCreate } = buildImageDeps();
     const ok = await handleCreateGenerationJob(
@@ -505,7 +505,7 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
   });
 });
 
-// IKG6EK / ADR-0088：图片端也认单数组 references（三端统一），旧字段 input_asset_ids 保留兼容。
+
 describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG6EK）", () => {
   const refsOf = (ids: string[]) =>
     ids.map((id) => ({ role: "reference" as const, asset_id: id, type: "image" as const }));
@@ -620,8 +620,8 @@ describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG
   });
 });
 
-// IKG6EK / ADR-0088：编号表与冻结的文本附件必须来自**同一次**画布读取——
-// 两次读会拿到不同版本，与「同次画布读取」的不变式冲突（原 IKFA1J 并发用例随 doc 退役删除，此处补回）。
+
+
 describe("handleCreateGenerationJob 同次画布读取（IKG6EK）", () => {
   it("目标路径：文本索引派生与目标快照复用同一次读取，画布只读一次", async () => {
     const { deps, createJob, getByProject } = buildTargetDeps(TARGET_CANVAS);
@@ -634,8 +634,8 @@ describe("handleCreateGenerationJob 同次画布读取（IKG6EK）", () => {
   });
 });
 
-// IKG6EK / ADR-0088：引用标记转移的端到端接线——references 的身份 → 编号表 → input.prompt。
-// （删掉 reference-marker-transfer.ts 之后，这条链只剩这里能钉住；纯替换由 core 的用例覆盖。）
+
+
 describe("handleCreateGenerationJob 引用标记转移（IKG6EK / ADR-0088）", () => {
   it("视频：素材库身份（material_id 提交）→ 正文 &asset-x& 出 @图片1", async () => {
     const { deps, createJob } = buildVideoDeps();
@@ -654,7 +654,7 @@ describe("handleCreateGenerationJob 引用标记转移（IKG6EK / ADR-0088）", 
 
     expect(result.code).toBe(200);
     const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
-    // 标记里的身份与 references 元素身份同源（asset_id ?? material_id），直接查表，不做互认
+
     expect(cmdArg.input.prompt).toBe("角色参考@图片1 出场");
   });
 
@@ -702,7 +702,7 @@ describe("handleCreateGenerationJob 引用标记转移（IKG6EK / ADR-0088）", 
   });
 });
 
-// 素材库引用（MaterialReference）：仅视频生成；格式校验 + 与本地 Asset 引用按并集互斥/配对。
+
 function buildVideoDeps(modelRow: Record<string, unknown> = {}, quote?: unknown) {
   const findOwnedById = vi.fn().mockResolvedValue({
     id: "1",
@@ -710,8 +710,8 @@ function buildVideoDeps(modelRow: Record<string, unknown> = {}, quote?: unknown)
     thumb: null,
     created_at: "2026-08-18T00:00:00.000Z",
   });
-  // IKHBDO：可选 modelRow 覆盖能力行（如 features.image_reference_max）——参考上限只认配置，
-  // 用例需要能给出「配到 12 / 配到 30」的行；缺省保持原先的无 features 行。
+
+
   const listEnabledByType = vi.fn().mockResolvedValue([
     { model_id: "doubao-seedance-2-0-260128", ...modelRow },
   ]);
@@ -723,9 +723,9 @@ function buildVideoDeps(modelRow: Record<string, unknown> = {}, quote?: unknown)
     projects: { findOwnedById },
     models: { listEnabledByType },
     command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
-    // IKFA1O：prompt_doc 复核对 references 本地 asset 查存在性与类型——按传入 id 动态返回（默认 image）
+
     assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: "image" }))) },
-    // IKIZQ8：样片提交确认的复算依赖——只有样片用例注入。
+
     ...(quote !== undefined ? { quote } : {}),
   } as unknown as HandlerDeps;
   return { deps, createJob };
@@ -915,8 +915,8 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
     ]);
   });
 
-  // IKHBDO：原先此处断言写死的「参考素材最多 12 个」。上限改由能力行判定后，同一条请求的
-  // 判词随配置走（12 上限 → 「参考图最多 12 张」），故断言改成配置口径，兼作「能力行生效」的证据。
+
+
   it("素材库参考超能力行上限（image_reference_max=12）→ 400 参考图最多 12 张", async () => {
     const { deps, createJob } = buildVideoDeps({
       features: { image_reference_max: 12 },
@@ -1084,7 +1084,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     );
     expect(result.code).toBe(200);
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-    // 单数组原样冻结（保序），旧字段不再落。
+
     expect(cmdArg.input.references).toEqual([
       { role: "first_frame", asset_id: "11", type: "image" },
       { role: "reference", asset_id: "12", type: "image" },
@@ -1149,9 +1149,9 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  // 视频输出像素：能力行的像素表按 (resolution, aspect_ratio) 查一次，冻成两个**标量**。
-  // 它是 billing 估 token 的输入（经 specs 随 Hold 过去），也是 `video_dimensions` 那条
-  // 字段裁决表登记的「配置赢」证明。
+
+
+
   describe("输出像素按能力行冻结（video_dimensions）", () => {
     const DIMENSIONS = {
       "resolution=720p|aspect_ratio=16:9": "1280x720",
@@ -1205,15 +1205,15 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     });
   });
 
-  // 首帧/首尾帧的比例闸：**按模型读能力行**，不再写死「有首帧就必须 adaptive」。
-  //
-  // 官方《创建视频生成任务》「不同模型的取值限制和 adaptive 适配规则」：
-  //   首帧或首尾帧生视频 · Seedance 2.5     = 默认且仅支持 adaptive
-  //   首帧或首尾帧生视频 · Seedance 2.0 系列 = 支持 adaptive 或指定宽高比
-  //
-  // 所以**同一条请求**（首帧 + 16:9）在一个模型上必须 400、在另一个上必须放行，
-  // 而差别**只来自能力行配置**——下面两个用例的能力行只差 `features.task_types` 一项，
-  // 代码里没有任何模型名/前缀判断。
+
+
+
+
+
+
+
+
+
   describe("首帧/首尾帧比例按能力行判定（不写死）", () => {
     const FRAME_REF = [{ role: "first_frame", asset_id: "11", type: "image" }];
     const FRAME_BODY = (aspect: string) => ({
@@ -1252,7 +1252,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       const { deps, createJob } = buildVideoDeps({
         supported_aspect_ratios: ["16:9", "adaptive"],
         features: {
-          // 只锁首尾帧；first_frame 未配 → 单帧那条请求应放行
+
           task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
         },
       });
@@ -1297,10 +1297,10 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     });
   });
 
-  // IKJ795：任务类型冻结进快照 + 编辑/延长比例结构化拒单（task_type_param_constraint）。
-  //
-  // 能力行是 Seedance 2.5 形态（task_types 配了 edit/prolong 锁 adaptive，default 放开全部比例）；
-  // 行为由配置驱动、与模型名无关——与上面首帧组同一口径。
+
+
+
+
   describe("任务类型冻结与结构化拒单（IKJ795）", () => {
     const SEEDANCE_2_5_ROW = {
       supported_sizes: [{ id: "720p", api_value: "720p" }],
@@ -1332,7 +1332,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       expect(result.code).toBe(1060);
       expect(result.data?.code).toBe("task_type_param_constraint");
       expect(result.msg).toBe(TASK_TYPE_PARAM_CONSTRAINT_MESSAGE);
-      // 文案不出现内部词（用户直接可见）
+
       expect(result.msg).not.toContain("edit");
       expect(result.msg).not.toContain("adaptive");
       expect(createJob).not.toHaveBeenCalled();
@@ -1435,10 +1435,10 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     });
   });
 
-  // IKJFGQ：视频任务类型判定输入统一到文本带入合并后的引用集合——冻结值与报价口径
-  // （applyEditSourceDurationBasis 对合并后集合现场重判）同请求一致；编辑/延长比例闸对
-  // 「视频参考仅来自画布文本带入」的提交同样生效（原先读合并前 body.references 时冻结值是
-  // default，比例不拦、计价却按编辑口径改写时长，两处分叉）。
+
+
+
+
   describe("视频任务类型判定输入统一（IKJFGQ）", () => {
     const SEEDANCE_2_5_TEXT_REF_ROW = {
       supported_sizes: [{ id: "720p", api_value: "720p" }],
@@ -1457,8 +1457,8 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
         },
       },
     };
-    // 画布：目标视频卡 media-1 ← 文本卡 text-a（正文提及 media-2 的视频素材，mediaMentions/
-    // mediaRefs 快照齐备）+ 关系线 media-2 → text-a（textIndex 标记）——文本带入参考由此派生。
+
+
     const TEXT_REF_CANVAS = {
       nodes: JSON.stringify([
         { id: "media-1", type: "mediaNode", data: { mediaType: "video" } },
@@ -1494,7 +1494,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
             edges: TEXT_REF_CANVAS.edges,
           }),
         },
-        // 文本带入的本地 asset（id=2）按声明返回 video + 权威时长 7s（时长冻结与编辑计价都吃它）
+
         assets: {
           resolveInputAssets: vi.fn(async (ids: string[]) =>
             ids.map((id) => ({ id, type: "video", duration: 7 }))),
@@ -1522,7 +1522,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       expect(result.code).toBe(200);
       const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
       expect(cmdArg.input.video_mode).toBe("edit");
-      // applyEditSourceDurationBasis 按源视频时长（7s）改写——与冻结值同一请求同口径
+
       expect(cmdArg.input.duration).toBe(-1);
       expect(cmdArg.input.duration_basis_seconds).toBe(7);
     });
@@ -1537,17 +1537,17 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     });
   });
 
-  // IKJIVB：图片端「预览价 = 实扣价」同构回归。参考图张数是定价维度（Seedream 按张计价），
-  // 后端会把画布文本带入的参考追加进实扣集合（body 缺失项追加 input_asset_ids 尾部）；
-  // 前端 ImageDialog 的报价 references 与提交 references 在草稿绑定模式共用同一份
-  // mergedImageRefsOf 推导（直接参考在前、文本带入追加、同 assetId 去重）——所以两端张数
-  // 必须一致。用例 1 复刻产品真实提交形态断言「报价张数 = 实扣冻结张数」；用例 2 是反事实
-  // 对照（references 漏带文本带入），证明若前端口径漂移，后端不会替报价兜底——分叉会真实发生。
+
+
+
+
+
+
   describe("图片端预览价与实扣价同构（IKJIVB）", () => {
-    // 画布：图片草稿 media-1 ← 文本卡 text-a（正文提及 media-2 的图片素材，mediaMentions/
-    // mediaRefs 快照齐备）+ 关系线 media-2 → text-a（textIndex 标记）+ 直接参考 media-4。
-    // 前端 mergedImageRefsOf 在等价画布上输出 assetId ["4", "2"]（见 textIndexSync.test.ts
-    // 「直接参考在前、文本带入追加」用例），即报价与提交共用的那份数组。
+
+
+
+
     const IMAGE_TEXT_REF_CANVAS = {
       nodes: JSON.stringify([
         { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
@@ -1588,7 +1588,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       } as unknown as HandlerDeps;
       return { deps, createJob: base.createJob };
     }
-    // 与前端 buildImageJobReferences 同形状（role=reference / type=image / asset_id）
+
     const imageTextRefBody = (ids: string[]) => ({
       type: "image",
       expected_output_count: 1,
@@ -1599,14 +1599,14 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
 
     it("前端同源提交（references 已含文本带入）→ 冻结原样、报价张数 = 实扣张数", async () => {
       const { deps, createJob } = buildImageTextRefDeps();
-      // 前端 mergedImageRefsOf 输出：直接参考 ["4"] + 文本带入 ["2"]
+
       const submitted = imageTextRefBody(["4", "2"]);
       const result = await handleCreateGenerationJob("u1", "p1", submitted, null, deps);
       expect(result.code).toBe(200);
       const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
-      // body 已含全部画布参考 → 后端权威追加为空，冻结与提交同序同张
+
       expect(cmdArg.input.input_asset_ids).toEqual(["4", "2"]);
-      // 报价投影（同 body 两路）：参考张数一致 —— 「预览价 = 实扣价」的张数前提
+
       const quote = projectQuoteInput("image", submitted);
       expect((quote?.input_asset_ids as string[]).length).toBe(
         (cmdArg.input.input_asset_ids as string[]).length,
@@ -1615,15 +1615,15 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
 
     it("对照组：references 漏带文本带入 → 后端追加实扣参考，报价张数 < 实扣张数（前端口径漂移时无兜底）", async () => {
       const { deps, createJob } = buildImageTextRefDeps();
-      // 反事实：模拟「报价/提交只按面板直接参考，未含画布文本提及素材」
+
       const submitted = imageTextRefBody(["4"]);
       const result = await handleCreateGenerationJob("u1", "p1", submitted, null, deps);
       expect(result.code).toBe(200);
       const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
-      // 实扣侧后端权威追加 body 缺失的文本带入项
+
       expect(cmdArg.input.input_asset_ids).toEqual(["4", "2"]);
       const quote = projectQuoteInput("image", submitted);
-      // 报价只按请求携带的 references 数张 → 1 < 2：分叉机制真实存在，唯有前端同源可消除
+
       expect((quote?.input_asset_ids as string[]).length).toBe(1);
       expect((cmdArg.input.input_asset_ids as string[]).length).toBe(2);
     });
@@ -1643,7 +1643,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  // IKHBDO：同上一「素材库参考」用例——单数组 references 分支的判词同样只认能力行。
+
   it("references 普通参考超能力行上限（image_reference_max=12）→ 400 参考图最多 12 张", async () => {
     const { deps, createJob } = buildVideoDeps({
       features: { image_reference_max: 12 },
@@ -1699,8 +1699,8 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
 
   it("references 参考音频（type=audio, role=reference）→ 200 冻结进 input 且不占图/视频额度", async () => {
     const { deps, createJob } = buildVideoDeps();
-    // IKG6EK：references 的归属/类型复核现在无条件执行（原先只在携带 prompt_doc 时跑），
-    // 本地 asset 的声明类型必须与素材实际类型一致——本用例声明 audio，固按 audio 返回。
+
+
     vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
       ids.map((id) => ({ id, type: "audio" as const })));
     const result = await handleCreateGenerationJob(
@@ -1747,9 +1747,9 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
   });
 });
 
-// IKDLQF：target_node_id 文本附件（单个文本附件驱动图片生成）。
-// canvas repo 以 mock 表达：合法路径断言冻结进 input 的快照与当时画布一致（edges 数组顺序），
-// 非法路径断言明确失败且不建任务；无 target_node_id 时不读画布、行为完全不变。
+
+
+
 function buildTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
   const findOwnedById = vi.fn().mockResolvedValue({
     id: "1",
@@ -1823,8 +1823,8 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
     expect(cmdArg.input.target_node_id).toBe("media-1");
     expect(cmdArg.input.prompt).toBe("海边日落");
-    // 顺序即 edges 数组顺序；缺 title 缺省 ""；空白正文照实冻结（长度闸只量提交上来的正文，不影响冻结）；
-    // 指向其他目标的 e4 与非 textNode 来源的 e5 不进入快照。
+
+
     expect(cmdArg.input.text_attachments).toEqual([
       { node_id: "text-b", title: "", text: "雨夜" },
       { node_id: "text-a", title: "风格", text: "赛博朋克" },
@@ -1868,8 +1868,8 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  // IKH4B8：长度闸只看提交上来的正文全文——附件正文已由前端拼进 prompt（ADR-0088），
-  // 服务端不再二次叠加（原组合闸把它算了两遍）。所以「空 prompt + 长附件」不再是有效请求。
+
+
   it("正文为空 → 400 prompt 无效，附件不再由服务端补正文", async () => {
     const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
 
@@ -1951,11 +1951,11 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
   });
 });
 
-// IKDLQG：target_node_id 文本附件扩展到生视频目标（mediaType 为 video 的 mediaNode）。
-// 快照形状与图片同构；视频既有冻结字段（resolution/duration/参考引用）保持。
+
+
 function buildVideoTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
   const { deps, createJob, getByProject } = buildTargetDeps(canvasView);
-  // 白名单按请求里的真实目录 id 校验（旧 seedance-2 别名已删除）
+
   (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
     .fn()
     .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128" }]);
@@ -1977,7 +1977,7 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
     expect(cmdArg.input.target_node_id).toBe("media-2");
     expect(cmdArg.input.prompt).toBe("人物走过街角");
-    // TARGET_CANVAS 中仅 e4（text-a → media-2）指向视频目标
+
     expect(cmdArg.input.text_attachments).toEqual([
       { node_id: "text-a", title: "风格", text: "赛博朋克" },
     ]);
@@ -2010,7 +2010,7 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  // IKH4B8：视频同口径——正文由提交方给全，空正文即无效请求，附件不额外计数。
+
   it("正文为空 → 400 prompt 无效，附件不再由服务端补正文", async () => {
     const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
 
@@ -2070,9 +2070,9 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
   });
 });
 
-// IKDMQT：target_node_id 扩展到生音频目标（mediaType 为 audio 的 mediaNode）。
-// 音频无文本附件能力：文本连线不推导不冻结；空 prompt 无附件兜底直接 400；
-// 快照落 { prompt, model_id, target_node_id }，执行与重试只读。
+
+
+
 function buildAudioTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
   const { deps, createJob, getByProject } = buildTargetDeps(canvasView);
   (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
@@ -2096,7 +2096,7 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
 
     expect(result.code).toBe(200);
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-    // IKFCXE：e6（text-a → media-4）按画布边序推导冻结——附件正文与主提示词共同进入任务快照
+
     expect(cmdArg.input.target_node_id).toBe("media-4");
     expect(cmdArg.input.prompt).toBe("哼一段轻快的旋律");
     expect(cmdArg.input.model_id).toBe("audio-model");
@@ -2131,7 +2131,7 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  // IKH4B8：音频上限同样「模型配置优先」，且只量正文全文（附件不额外计数）。
+
   it("模型配 2000：正文 2001 字 → 400", async () => {
     const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
     (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
@@ -2202,8 +2202,8 @@ describe("IKDL9U review: ordinary text and provenance", () => {
   });
 });
 
-// IKE7JP：Dock 视频/图片参数前置校验——resolution/size/aspect_ratio/duration 对能力目录合法性，
-// 越界在提交时 400（capability_unsupported_param + 可用值文案），不创建任务。
+
+
 function buildCapabilityDeps(capabilityRows: Array<Record<string, unknown>>) {
   const findOwnedById = vi.fn().mockResolvedValue({
     id: "1",
@@ -2321,8 +2321,8 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
     expect(createJob).toHaveBeenCalled();
   });
 
-  // IKG0FR：上游档位命名不遵循 <N>p 时（火山 Seedance 2.0 的 4k），本地换算不出像素，
-  // 但值本身在能力行白名单里——合法性由白名单负责，像素只回写资产（列可空），不得拒单。
+
+
   it("分辨率命中能力行但本地算不出像素（4k）→ 200 建任务，不误拦", async () => {
     const { deps, createJob } = buildCapabilityDeps([
       {
@@ -2346,13 +2346,13 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
     );
     expect(result.code).toBe(200);
     expect(createJob).toHaveBeenCalled();
-    // IKG0FR 的保证是「值原样到达 worker」，不只是「没被拒」——冻结进快照的必须是 4k 本身
+
     const frozen = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
     expect(frozen.resolution).toBe("4k");
   });
 
-  // IKG0LP：视频带音频——能力位 features.audio 允许时冻结用户选择（缺省 true）；
-  // 不允许（false/未配）时快照不写该字段，worker 不下发，维持上游默认。
+
+
   it("能力位 features.audio=true → 冻结用户选择，缺省 true", async () => {
     const row = { ...VIDEO_CAPABILITY_ROW, features: { audio: true } };
 
@@ -2409,8 +2409,8 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
   });
 });
 
-// IKE7JP：图片 size×ratio 交叉格前置——GPT 交叉格未填 / banana 一维映射缺失的组合
-// 在提交时 400（invalid_input），与 worker mapImageChannelRequest 同码同文案。
+
+
 const GPT_IMAGE_CAPABILITY = {
   model_id: "gpt-image-1",
   supported_sizes: [{ id: "1k", api_value: "1024x1024" }],
@@ -2418,7 +2418,7 @@ const GPT_IMAGE_CAPABILITY = {
   supported_durations: null,
   channel: "gpt-image",
   request_mapping: {
-    matrix: { "1k": { "1:1": "1024x1024" } }, // 16:9 交叉格未填
+    matrix: { "1k": { "1:1": "1024x1024" } },
   },
   default_size: "1k",
   default_aspect_ratio: "1:1",
@@ -2452,7 +2452,7 @@ describe("handleCreateGenerationJob 图片交叉格前置（IKE7JP）", () => {
   });
 
   it("GPT 交叉格与默认格都缺失 → 400 invalid_reference_type（模型、分辨率与宽高比组合不受支持）", async () => {
-    // 请求组合 1k×16:9 未填；默认格也缺失（default_size 不在 matrix）→ 无回退，400。
+
     const badCapability = {
       ...GPT_IMAGE_CAPABILITY,
       default_size: "2k",
@@ -2486,7 +2486,7 @@ describe("handleCreateGenerationJob 图片交叉格前置（IKE7JP）", () => {
   });
 });
 
-// IKE7JP：参考素材前置——提交时复用 worker resolveInputAssets 查存在性/类型。
+
 describe("handleCreateGenerationJob 参考素材前置（IKE7JP）", () => {
   it("参考素材存在且类型匹配 → 200 建任务", async () => {
     const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
@@ -2545,10 +2545,10 @@ describe("handleCreateGenerationJob 参考素材前置（IKE7JP）", () => {
   });
 });
 
-// IKG57P：素材软删后提交未被方案级校验拦截——8453e04a 把 freezePromptPlans（planError：
-// 规格 7.2 文案 + #N 索引，抛 BadRequestException）挪到通用存在性检查之后，软删素材先命中
-// 通用检查的信封 fail 被短路。修复为合并语义：通用检查发现缺失且正文标签引用了缺失素材时，
-// 按 planError 同源形态抛规格文案与具体索引；纯参考清单维持通用文案信封（HTTP 投影在 controller）。
+
+
+
+
 describe("handleCreateGenerationJob 素材软删提交拦截（IKG57P）", () => {
   it("纯参考清单（无正文标签）素材软删 → 维持通用文案信封 400 invalid_reference", async () => {
     const { deps, createJob, resolveInputAssets } = buildImageDeps();
@@ -2580,7 +2580,7 @@ describe("handleCreateGenerationJob 素材软删提交拦截（IKG57P）", () =>
       null,
       deps,
     );
-    // IKG6EK：doc 退役后不再按 doc 声明细化索引文案，视频与图片同口径走通用信封
+
     expect(result.code).toBe(1034);
     expect(result.data?.code).toBe("invalid_reference");
     expect(result.msg).toBe("参考素材不存在或无权访问");
@@ -2588,8 +2588,8 @@ describe("handleCreateGenerationJob 素材软删提交拦截（IKG57P）", () =>
   });
 });
 
-// IKESD6 / ADR-0085：raw prompt 上限跟随模型目录 features.max_prompt_length，
-// 缺省回落旧硬编码（image/video 4000 / audio 3000）；错误码与文案不变。
+
+
 describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () => {
   function promptOf(len: number) {
     return "a".repeat(len);
@@ -2661,9 +2661,9 @@ describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () =>
   });
 });
 
-/* IKG6EK / ADR-0088：`prompt_doc` 已退役——提交方给正文全文（`parameters.prompt` 一律权威），
-   引用标记转移在接纳管线完成（用例见本文件「引用标记转移」组）。
-   IKFA1M / IKFA1O / IKFA1P / IKFCJG 四套「doc 权威编译 + 身份复核」用例随契约一并退役。 */
+
+
+
 
 describe("handleCreateGenerationJob prompt_doc 已退役（IKG6EK / ADR-0088）", () => {
   it("图片：携带 prompt_doc 不报错、不生效——正文取 parameters.prompt，input 不冻结该字段", async () => {
@@ -2723,7 +2723,7 @@ describe("handleCreateGenerationJob prompt_doc 已退役（IKG6EK / ADR-0088）"
   });
 });
 
-// IKG6EK / ADR-0088：正文一律取 parameters.prompt，长度闸也量它（不再有 doc 编译结果）。
+
 it.each([32000, 32001])("正文遵循模型 32000 字边界：%i", async (length) => {
   const { deps, createJob } = buildCapabilityDeps([
     { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 32000 } },
@@ -2748,7 +2748,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
             supported_aspect_ratios: ['16:9', '9:16', '1:1', 'adaptive'],
             features: {
               reference_image: true,
-              // IKHEXG：两键合并后只剩一个图参考上限，取视频链路原本生效的 10。
+
               image_reference_max: 10,
               quantity_max: 1,
               video_reference: false,
@@ -2818,8 +2818,8 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  // IKHBDO：参考上限由接纳侧按能力行冻结进 job.input.reference_limits —— worker 不含模型知识，
-  // 执行期只读这份快照（对齐 generate_audio 的冻结口径）。
+
+
   it('参考上限按能力行冻结进 job.input.reference_limits', async () => {
     const { deps, createJob } = videoDepsWithFeatures({
       image_reference_max: 14,
@@ -2862,9 +2862,9 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
     expect(loose.createJob).toHaveBeenCalledTimes(1);
   });
 
-  // IKHBDO：**配置必须赢**。白名单解析前的预检拿不到能力行，绝不能自带一个数量上限——
-  // 写死 12 会让「13 张 + 配 30」的模型永久卡死（本用例前半段就是该场景的回归）。
-  // 后半段是反向证据：上限确实随配置收紧，不是「一律放行」。
+
+
+
   it('参考上限完全随能力行走：配 30 收下 13 张参考，配 5 在第 6 张拒绝', async () => {
     const loose = videoDepsWithFeatures({ image_reference_max: 30 });
     const accepted = await handleCreateGenerationJob('u1', 'p1', {
@@ -2885,11 +2885,11 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
   });
 });
 
-// IKHBDO：模型 id **原样取用**，只认运营配置的目录行。
-// 这里曾有一张 `VIDEO_MODEL_ALIASES = { "seedance-2": "doubao-seedance-2-0-260128" }` 的旧前端
-// 兼容表，在**白名单查询之前**改写 model_id。按「配置永远第一」这是个反例：别名表是写死的，
-// 而它抢在配置之前生效——运营若真配一行 model_id 就叫 `seedance-2`，请求会被改写成 2.0 那行，
-// 那一行永远赢不了。故删除，改为原样取用：非目录 id 一律以 400 明确失败，而不是被静默改写。
+
+
+
+
+
 describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）', () => {
   const videoDepsWithCatalogue = (modelIds: string[]) => {
     const createJob = vi.fn().mockResolvedValue({ generation_job_id: '1', cursor: 1 });
@@ -2902,8 +2902,8 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
             supported_aspect_ratios: ['16:9', '9:16', '1:1', 'adaptive'],
             features: {
               reference_image: true,
-              // IKHEXG：视频行的图参考上限 10（原夹具同时带 max_reference_images:10 与
-              // image_reference_max:1——两键合并后只剩这一个，取视频链路原本生效的 10）。
+
+
               image_reference_max: 10,
               quantity_max: 1,
               video_reference: true,
@@ -2922,8 +2922,8 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
   };
 
   it('旧别名 seedance-2 不在启用目录 → 400 model_unavailable（不再被改写成 2.0 那行）', async () => {
-    // 目录里只有真实型号 `doubao-seedance-2-0-260128`——恰是旧别名表的目标。
-    // 若别名改写恢复，`seedance-2` 会被改写成该行从而 200；本用例把它钉成 400。
+
+
     const { deps, createJob } = videoDepsWithCatalogue(['doubao-seedance-2-0-260128']);
 
     const result = await handleCreateGenerationJob('u1', 'p1', {
@@ -2938,8 +2938,8 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
   });
 });
 
-// ★ 计费接线（IK 计费切换）：预扣与补偿必须**成对**下传给 repo —— 少了 release，
-//   事务回滚后那笔冻结没人退，就是一笔永远冻着、没有对应任务的预留。
+
+
 describe("handleCreateGenerationJob 计费接线", () => {
   it("hold 与 release 一起交给 repo；release 带上本次 userId 与失败原因", async () => {
     const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
@@ -2959,7 +2959,7 @@ describe("handleCreateGenerationJob 计费接线", () => {
     );
     expect(result.code).toBe(200);
 
-    // 计费依赖是**第二个参数**（行为不进数据），不在任务入参上
+
     const [jobInput, options] = createJob.mock.calls.at(-1)!;
     expect(jobInput).not.toHaveProperty("billing");
     expect(jobInput).not.toHaveProperty("billingHold");
@@ -2984,8 +2984,8 @@ describe("handleCreateGenerationJob 计费接线", () => {
   });
 });
 
-// ★ 建任务幂等（command_idempotency，operation=generation.create）：带 Idempotency-Key 的
-//   重复提交返回**第一次的结果**，而不是再建一个 job。
+
+
 describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
   const REPLAY = { generation_job_id: "777", cursor: 42 };
 
@@ -3022,7 +3022,7 @@ describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
     );
 
     expect(result.code).toBe(200);
-    // 响应体就是第一次那次的形状与数值——客户端拿到的 generation_job_id 没变
+
     expect(result.data).toEqual(REPLAY);
     expect(lookupCreateIdempotency).toHaveBeenCalledWith("p1", {
       key: "key-1",
@@ -3032,8 +3032,8 @@ describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
   });
 
   it("★ 重放先于状态校验：模型此刻已不在白名单，命中重放仍返回首次结果", async () => {
-    // 「同一个请求被重试」的答案在第一次提交时就定了，不该被此刻的模型目录改写
-    // （白名单、素材门、画布快照都在幂等查询**之后**）。
+
+
     const { deps, createJob } = buildIdempotentDeps(REPLAY);
 
     const result = await handleCreateGenerationJob(
@@ -3133,20 +3133,20 @@ describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
     expect(generationCreateRequestHash("p1", reordered)).toBe(
       generationCreateRequestHash("p1", body),
     );
-    // 载荷真的不同则摘要必须不同（否则「同键异载荷」永远判不出来）
+
     expect(
       generationCreateRequestHash("p1", {
         ...body,
         parameters: { ...body.parameters, prompt: "换一句" },
       }),
     ).not.toBe(generationCreateRequestHash("p1", body));
-    // 定长 64 hex：正好落进 request_hash 的 VarChar(64)
+
     expect(generationCreateRequestHash("p1", body)).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 
-// 视频按 token 计费：含视频输入时官方公式要把**输入时长**算进 token，
-// 而时长只能从参考素材上拿 —— 本地素材查 assets.duration，其余靠调用方带。
+
+
 describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）", () => {
   it("本地视频参考：时长取自 assets.duration 并冻结进 input.references", async () => {
     const { deps, createJob } = buildVideoDeps();
@@ -3271,9 +3271,9 @@ describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）",
     ]);
   });
 
-  // IKJIV8：references 全为素材库引用（material_id，本地零表）时共享管线筛选为空——
-  // 服务端没做任何回填，不改写 effectiveBody.references（IKJIVA 重构曾以 parsed 副本
-  // 覆盖，属行为漂移）。钉住旧语义：零本地资产查询、调用方带的时长原样冻结。
+
+
+
   it("素材库-only 引用（无本地 asset）：不查本地资产，调用方带的时长原样冻结", async () => {
     const { deps, createJob } = buildVideoDeps();
 
@@ -3297,10 +3297,10 @@ describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）",
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// IKIZQ7：样片增量门控（fail closed）——能力未放行 / 形态不合契约一律 400 明确拒绝；
-// 未传或 false 零影响（普通视频创建语义）。与报价入口共用 ruleSampleMode 一条判定。
-// ═══════════════════════════════════════════════════════════════
+
+
+
+
 describe("handleCreateGenerationJob 样片门控（IKIZQ7）", () => {
   const SAMPLE_BODY = (parameters: Record<string, unknown> = {}) => ({
     ...VIDEO_BODY,
@@ -3416,14 +3416,14 @@ describe("handleCreateGenerationJob 样片门控（IKIZQ7）", () => {
   });
 });
 
-/** IKIZQ8：样片报价桩——返回与报价入口同形的 Quote 结果（credits 为 bigint）。 */
+
 function sampleQuoteStub(overrides: Partial<{ credits: bigint; catalogVersion: number; tier: string }> = {}) {
   const result = { credits: 19n, catalogVersion: 12, tier: "free", ...overrides };
   return { result, quote: vi.fn().mockResolvedValue(result) };
 }
 
-/** IKIZQ8：按「报价入口同一套」复算 body 应携带的提交确认两字段。
- *  capability 即夹具注入能力目录的那一行——handler 侧用 whitelist.find 取到同一对象。 */
+
+
 function sampleConfirmationOf(
   body: Record<string, unknown>,
   capability: Record<string, unknown>,
@@ -3446,11 +3446,11 @@ function sampleConfirmationOf(
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-// IKIZQ8：样片提交确认 + 阶段落库（契约 §1/§2，金标 G01/G03/G04）。
-// 服务端核对 expected_credits 与 quote_revision：变价或无报价 → 1056 quote_stale，
-// 零创建、零扣费；接纳后冻结 sample_mode 进 input、video_stage='sample' 落库。
-// ═══════════════════════════════════════════════════════════════
+
+
+
+
+
 describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8）", () => {
   const SAMPLE_CAPABILITY = { model_id: "doubao-seedance-2-0-260128", features: { sample_mode: true } };
 
@@ -3473,9 +3473,9 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
       input: Record<string, unknown>;
       videoStage?: string;
     };
-    // 契约 §1：样片增量冻结进 input 快照（Worker 读它走 Draft/禁 URL 直存降级/算截止）。
+
     expect(cmdArg.input.sample_mode).toBe(true);
-    // 阶段身份落库：G01「服务端把该请求受理为 video_stage=sample 的独立 GenerationJob」。
+
     expect(cmdArg.videoStage).toBe("sample");
   });
 
@@ -3509,13 +3509,13 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
   });
 
   it("★ G04：报价变动（credits 不一致）→ 1056 quote_stale，零创建、零扣费", async () => {
-    // 服务端复算得 21，用户提交的还是 19——按未确认金额拒绝。
+
     const { quote } = sampleQuoteStub({ credits: 21n });
     const staleCapability = { ...SAMPLE_CAPABILITY, version: 345 };
     const { deps, createJob } = buildVideoDeps(staleCapability, quote);
 
     const body = SAMPLE_BODY();
-    // 用户看到的报价来自旧目录（credits=19），提交时目录已变。
+
     const staleConfirmation = sampleConfirmationOf(body, SAMPLE_CAPABILITY, { credits: 19n, catalogVersion: 12, tier: "free" });
     const result = await handleCreateGenerationJob("u1", "p1", { ...body, ...staleConfirmation }, null, deps);
 
@@ -3526,7 +3526,7 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
 
   it("★ G04：quote_revision 失效（能力行版本跳变）→ 1056，零创建", async () => {
     const { result: quoteResult, quote } = sampleQuoteStub();
-    // 提交时的能力行 version=345（用户报价时是 undefined/none）——revision 指纹不同。
+
     const bumpedCapability = { ...SAMPLE_CAPABILITY, version: 345 };
     const { deps, createJob } = buildVideoDeps(bumpedCapability, quote);
 
@@ -3582,17 +3582,17 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// IKIZQ9：样片 × 其余三模式（图生首帧 / 首尾帧 / 全能参考）。
-// 机制本身模式无关（ruleSampleMode 只判 video/480p/单输出/能力位；references 的
-// role 结构、比例闸与分类上限由 validateVideo 复核对样片请求照常执行）——本组钉
-// 的是**组合证据**：三模式样片请求被受理为 video_stage=sample 且 references 原样
-// 冻结；各自素材数量/类型限制在样片下同样 fail closed；入口默认关闭对三模式生效；
-// 同一能力行的普通模式与既有参考素材规则零变化。不创建第五种视频模式。
-// ═══════════════════════════════════════════════════════════════
+
+
+
+
+
+
+
+
 describe("handleCreateGenerationJob 样片 × 其余三模式（IKIZQ9）", () => {
-  /** Seedance 2.5 形态能力行：样片位放行（测试注入，运营目录默认仍关闭）+ 首帧/首尾帧
-   *  锁 adaptive + 图/视频/音频参考全开（数量上限对齐官方全能参考边界）。 */
+
+
   const S25_FEATURES = {
     sample_mode: true,
     image_reference_max: 30,
@@ -3608,7 +3608,7 @@ describe("handleCreateGenerationJob 样片 × 其余三模式（IKIZQ9）", () =
   };
   const S25_CAPABILITY = { features: S25_FEATURES };
 
-  /** 样片化视频 body：480p + sample_mode + 可覆盖比例。 */
+
   const sampleBodyWith = (
     references: unknown,
     aspectRatio = "adaptive",
@@ -3625,7 +3625,7 @@ describe("handleCreateGenerationJob 样片 × 其余三模式（IKIZQ9）", () =
     },
   });
 
-  /** 按 asset_id 返回对应类型资产（R 组三类素材都能解析出 url 与时长）。 */
+
   const typedAssets = vi.fn(async (ids: string[]) =>
     ids.map((id) => {
       if (id === "31") return { id, type: "video", url: "https://tos.test/ref.mp4", mime: "video/mp4", size: 100, width: 1280, height: 720, duration: 4, material_id: null };
@@ -3659,7 +3659,7 @@ describe("handleCreateGenerationJob 样片 × 其余三模式（IKIZQ9）", () =
     expect(cmdArg.input.sample_mode).toBe(true);
     expect(cmdArg.input.resolution).toBe("480p");
     expect(cmdArg.videoStage).toBe("sample");
-    // 不创建第五种模式：沿用既有 references 结构，首帧冻结原样（Worker 按同一 role 组装 Draft）。
+
     expect(cmdArg.input.references).toEqual([
       { role: "first_frame", asset_id: "11", type: "image" },
     ]);
@@ -3810,8 +3810,8 @@ describe("handleCreateGenerationJob 样片 × 其余三模式（IKIZQ9）", () =
   });
 
   it("样片 + 首帧与普通参考并存（单数组 references 现有语义）→ 200 原样冻结，样片分支不新增拦截", async () => {
-    // 现有行为：单数组 references 路径不设「帧 vs 普通参考」互斥（那是旧字段路径的闸）；
-    // 样片分支沿用同一语义——本票只做组合扩展，不在样片下收紧或放宽任何参考规则。
+
+
     const { result: quoteResult, quote } = sampleQuoteStub();
     const { deps, createJob } = buildSampleVideoDeps(S25_CAPABILITY, quote);
 

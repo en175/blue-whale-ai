@@ -1,14 +1,3 @@
-/* ============================================
- * 「本次预计消耗 N 积分」—— 生成面板上的价格预览
- *
- * 价格来自我们自己的 billing（`Quote`，只算不扣），与提交时冻结的预扣（`Hold`）同源：
- * 同一份规格归一、同一个用户等级，所以预览价就是实扣价（见后端
- * `handle-quote-generation-job.ts`）。
- *
- * ⚠️ **没有报价就什么都不显示**（`credits: null` / 查询失败 / 加载中）——
- *    绝不显示 0：0 会被读成「免费」，而那是另一件事。报价失败也不弹提示：
- *    它只是「这次没价格」，与「能不能提交」无关，不该挡住任何操作。
- * ============================================ */
 import { useQuery } from '@tanstack/react-query';
 import { Zap } from 'lucide-react';
 import {
@@ -20,25 +9,14 @@ import type { GenerationRefItem } from '@/api/jobs';
 import styles from './index.module.css';
 
 interface GenerationQuoteBadgeProps {
-  /** 报价挂在项目下（与创建任务的路径一致） */
   projectId: string;
   type: GenerationJobType;
-  /** 定价维度（model_id + 规格）；必须与面板发送时组装的参数同源 */
   parameters: QuoteJobParameters;
-  /** 参考素材（与面板发送时**同一份**列表，不是另数一遍的个数）：
-   *  参考图是定价维度（Seedream 5.0 Pro「首张免费、第 2 张起按张加价」），
-   *  张数交后端 `resolveReferenceAssets` 去重后自己数，前端只负责如实带上「哪些参考」。
-   *  缺省 = 这次没有参考（价格同旧口径）。 */
   references?: GenerationRefItem[];
-  /** IKJGE6：视频草稿目标节点 id——后端报价据此做画布文本带入合并（编辑单按源视频时长
-   *  预估的判定输入）。仅草稿绑定模式传；不传则报价不读画布，行为同旧。 */
   targetNodeId?: string;
 }
 
 export default function GenerationQuoteBadge(props: GenerationQuoteBadgeProps) {
-  // 没有项目上下文（空串：未进项目的面板、面板单测）就**不挂载内层**：既不显示价格，
-  // 也不去问价 —— 报价本来就挂在项目下，缺了项目这个请求没有意义。
-  // ⚠️ 必须用「不挂载」而不是「enabled: false」：后者仍会先执行 queryOptions 工厂。
   if (!props.projectId) return null;
   return <QuoteBadge {...props} />;
 }
@@ -48,16 +26,10 @@ function QuoteBadge({ projectId, type, parameters, references, targetNodeId }: G
     ...generationQuoteOptions(projectId, {
       type,
       parameters,
-      // 画布三个生成面板都只生成一个产物（多图按张计价的场景还没进画布）；
-      // 这里必须与提交时那个 expected_output_count 是同一个数，否则价就不是那个价。
       expected_output_count: 1,
-      // 空列表视为「没有参考」：与创建任务同口径（那边也是 length > 0 才带这个键），
-      // 免得报价请求带上一个后端不认的参考字段。
       ...(references && references.length > 0 ? { references } : {}),
-      // IKJGE6：草稿目标带上，后端才能把画布文本带入的参考算进报价（与提交时同一合并）。
       ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
     }),
-    // 模型还没定下来之前不问价：它是定价的输入之一，缺了问不出有意义的结果
     enabled: parameters.model_id !== '',
   });
 
@@ -68,7 +40,7 @@ function QuoteBadge({ projectId, type, parameters, references, targetNodeId }: G
     <span className={styles.badge} data-testid="generation-quote">
       <Zap size={12} strokeWidth={2} />
       <span>本次预计消耗 {credits} 积分</span>
-      {/* IKJ797：编辑单预估按源参考视频最长时长计（用户所选时长不参与），标记旁注明口径 */}
+      {}
       {data?.duration_basis === 'source_video' && (
         <span className={styles.basisTag} data-testid="generation-quote-basis">按源视频时长预估</span>
       )}

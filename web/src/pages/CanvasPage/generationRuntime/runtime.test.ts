@@ -1,7 +1,3 @@
-/* ============================================
- * 生成任务运行时公开接口测试（IKJJR1，测试接缝 = 五动作 + 保存差分 + 恢复扫描）。
- * 注入可控 API 响应、手动时钟与画布宿主；不断言私有变量/Hook 顺序。
- * ============================================ */
 import { describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/api/http';
@@ -10,7 +6,6 @@ import { normalGenerationTask } from './normalGeneration';
 import type { GenerationRuntimeHost, GenerationTaskDefinition, RuntimeNodeView } from './types';
 import { generationRecoveryKeys, generationRecoveryPageOptions, type GenerationRecoveryPage, type GenerationRecoveryRecord } from '@/api/canvasRecovery';
 
-/** 手动时钟：轮询续链只在 flush 时推进。 */
 class ManualClock {
   now = 0;
   private seq = 0;
@@ -21,7 +16,6 @@ class ManualClock {
     return id;
   };
   clearTimeout = (id: unknown) => { this.timers.delete(id as number); };
-  /** 推进到最近的定时器并触发（无定时器返回 false）。 */
   fireNext(): boolean {
     let targetId: number | null = null;
     let targetAt = Infinity;
@@ -126,7 +120,6 @@ function createFakeHost(scanPage?: GenerationRuntimeHost['fetchRecoveryPage']): 
   };
 }
 
-/** 测试用任务定义：记录请求，响应可控。 */
 function createFakeDef() {
   const calls = {
     create: [] as Array<{ projectId: string; payload: unknown; binding: unknown; key: string }>,
@@ -159,13 +152,11 @@ function createFakeDef() {
         return cancelResponse();
       },
       planRecovery: normalGenerationTask.planRecovery,
-      /** 重试登记保留 def 回归用（IKJKU6）：用例按需注入类型特有的多结果判定。 */
       isMultiOutputSuccess: undefined as undefined | ((detail: unknown) => boolean),
     } as unknown as GenerationTaskDefinition,
   };
 }
 
-/** 可编程任务状态序列（每次 fetchJobStatus 消费一项；耗尽重复最后一项）。 */
 function statusScript(script: Array<Record<string, unknown>>) {
   const calls: Array<unknown> = [];
   let index = 0;
@@ -265,14 +256,14 @@ describe('生成任务运行时：submit', () => {
     const onCreateFailure = vi.fn(() => false);
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') }, { onCreateFailure });
     await flushMicrotasks(20);
-    expect(kit.calls.create).toHaveLength(1); // 一次用户操作只发一次创建请求，无自动重发
-    expect(onCreateFailure).toHaveBeenCalledTimes(1); // 按创建失败收敛
+    expect(kit.calls.create).toHaveLength(1);
+    expect(onCreateFailure).toHaveBeenCalledTimes(1);
     expect(fake.data('n1')).toMatchObject({ genStatus: 'failed', errorText: '卡片归属已变化，请复核后再发送' });
-    expect(fake.data('n1').jobId).toBeUndefined(); // 无受理回执
-    expect(fake.data('n1').fileName).toBe('用户输入'); // 用户输入与画布内容保留
+    expect(fake.data('n1').jobId).toBeUndefined();
+    expect(fake.data('n1').fileName).toBe('用户输入');
     expect(fake.removes).toHaveLength(0);
-    expect(clock.pendingCount()).toBe(0); // 不接续轮询
-    expect(runtime.bindingRevisionOf('n1')).toBe(4); // 服务端版本进台账：复核后重试从服务端版本起步
+    expect(clock.pendingCount()).toBe(0);
+    expect(runtime.bindingRevisionOf('n1')).toBe(4);
   });
 
   it('非冲突失败后同载荷重发复用同 submission_id（网络重试幂等重放不受影响）', async () => {
@@ -285,7 +276,7 @@ describe('生成任务运行时：submit', () => {
     runtime.submit(kit.def, { payload: { type: 'image' }, target: targetFacts('n1') });
     await flushMicrotasks();
     expect(kit.calls.create).toHaveLength(2);
-    expect(kit.calls.create[1]!.key).toBe(kit.calls.create[0]!.key); // 同意图同一把（幂等重放）
+    expect(kit.calls.create[1]!.key).toBe(kit.calls.create[0]!.key);
   });
 
   it('创建失败落失败卡，不启动轮询', async () => {
@@ -306,7 +297,6 @@ describe('生成任务运行时：轮询归属与乱序', () => {
     kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
     await flushMicrotasks();
-    // 首轮轮询在途（processing）——同卡再提交（新意图接管）
     const callsOf501BeforeTakeover = status.calls.filter((id) => id === '501').length;
     kit.respond.create(async () => ({ jobId: '502', canvasBinding: BINDING_VIEW('uuid-0002', 'n1', '502', 2) }));
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
@@ -315,7 +305,6 @@ describe('生成任务运行时：轮询归属与乱序', () => {
     await flushMicrotasks();
     clock.fireNext();
     await flushMicrotasks();
-    // 旧 501 的轮询链不续（接管后只有 502 在轮询）
     expect(status.calls.filter((id) => id === '501')).toHaveLength(callsOf501BeforeTakeover);
     expect(status.calls.filter((id) => id === '502').length).toBeGreaterThan(0);
     expect(fake.data('n1').jobId).toBe('502');
@@ -327,7 +316,7 @@ describe('生成任务运行时：轮询归属与乱序', () => {
     let resolveCreate: (value: unknown) => void = () => {};
     kit.respond.create(() => new Promise((resolve) => { resolveCreate = resolve; }));
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
-    fake.advanceEpoch(); // 同项目重载
+    fake.advanceEpoch();
     resolveCreate({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') });
     await flushMicrotasks();
     expect(fake.data('n1').jobId).toBeUndefined();
@@ -342,7 +331,7 @@ describe('生成任务运行时：轮询归属与乱序', () => {
     kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
     await flushMicrotasks();
-    expect(clock.pendingCount()).toBe(0); // 终态后无续链
+    expect(clock.pendingCount()).toBe(0);
     expect(fake.data('n1').generationRecovery).toEqual({ protocolVersion: 1, submissionId: 'uuid-0001', outputKey: 'primary' });
     const fields = runtime.composeSaveFields();
     expect(fields).not.toBeNull();
@@ -353,7 +342,7 @@ describe('生成任务运行时：轮询归属与乱序', () => {
       { recoveryItemId: 'gcr:uuid-0001:$target', revision: 2, nodeBindingRevision: 1, state: 'replaced' },
       { recoveryItemId: 'gcr:uuid-0001:primary', revision: 1, nodeBindingRevision: 1, state: 'present' },
     ] });
-    expect(runtime.composeSaveFields()).toBeNull(); // 回执确认后无待确认状态
+    expect(runtime.composeSaveFields()).toBeNull();
   });
 
   it('回执重放（replayed）仅确认，不重复确认也不覆盖', async () => {
@@ -392,7 +381,6 @@ describe('生成任务运行时：retry', () => {
       id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 },
       data: { jobId: '401', genStatus: 'failed', generationRecovery: { protocolVersion: 1, submissionId: 'sub-old', outputKey: '$target' } },
     });
-    // 台账经恢复扫描注入：$target nodeBindingRevision = 3
     const page = pageScript([{ protocol_version: 1, canvas_version: 1, records: [{
       submission_id: 'sub-old', target_node_id: 'n1', job_id: '401', task_type: 'image',
       binding_revision: 3, is_current: true,
@@ -401,7 +389,7 @@ describe('生成任务运行时：retry', () => {
       previous_target_snapshot: null,
       items: [{ recovery_item_id: 'gcr:sub-old:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 1, node_binding_revision: 3, asset_id: null, slot_id: null }],
     }], next_cursor: null }]);
-    fake.host.fetchRecoveryPage = page as never; // 扫描取页走宿主接缝（IKJKU9）
+    fake.host.fetchRecoveryPage = page as never;
     const rt2Status = statusScript([{ status: 'failed', progress: 0, asset: null }]);
     const rt2 = createGenerationRuntime(fake.host, {
       fetchJobStatus: rt2Status.fn as never,
@@ -429,13 +417,12 @@ describe('生成任务运行时：retry', () => {
     expect(kit.calls.retry).toHaveLength(0);
   });
 
-  // IKJKU6：重试登记保留任务类型定义——多结果家族重试成功终态经 isMultiOutputSuccess 分发
   const retryFanoutSetup = (script: Array<Record<string, unknown>> = [
     { status: 'succeeded', progress: 100, asset: null, output_assets: [{ id: '31', url: 'https://a/31.png', type: 'image' }] },
   ]) => {
     const { fake, runtime, kit, page } = setup({ script });
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '401', genStatus: 'failed' } });
-    kit.def.isMultiOutputSuccess = () => true; // 类型特有判定：单输出仍为多结果（场景切分 1 段同款）
+    kit.def.isMultiOutputSuccess = () => true;
     kit.respond.retry(async () => ({ jobId: '402', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '402') }));
     page.mockImplementation(async () => ({
       protocol_version: 1, canvas_version: 1, next_cursor: null,
@@ -455,7 +442,7 @@ describe('生成任务运行时：retry', () => {
     const { fake, runtime } = retryFanoutSetup();
     expect(runtime.retry('n1')).toBe(true);
     await flushMicrotasks(30);
-    expect(fake.removes).toContain('n1'); // 占位卡扇出移除（非一对一保留）
+    expect(fake.removes).toContain('n1');
     expect(fake.data('generation-output:31').generationRecovery).toEqual({
       protocolVersion: 1, submissionId: 'uuid-0001', outputKey: 'seg:1',
     });
@@ -468,16 +455,16 @@ describe('生成任务运行时：retry', () => {
 
   it('重试在途执行被取消复用：def.cancel 可用，抢先成功 1 输出仍经类型定义扇出', async () => {
     const { fake, runtime, kit } = retryFanoutSetup([
-      { status: 'processing', progress: 10, asset: null }, // retry 首轮轮询：续链
-      { status: 'succeeded', progress: 100, asset: null, output_assets: [{ id: '31', url: 'https://a/31.png', type: 'image' }] }, // cancel 后权威状态抢先成功
+      { status: 'processing', progress: 10, asset: null },
+      { status: 'succeeded', progress: 100, asset: null, output_assets: [{ id: '31', url: 'https://a/31.png', type: 'image' }] },
     ]);
     expect(runtime.retry('n1')).toBe(true);
-    await flushMicrotasks(); // 受理 + 首轮 processing（轮询在途）
+    await flushMicrotasks();
     expect(runtime.cancel('n1')).toBe(true);
     await flushMicrotasks(30);
-    expect(kit.calls.cancel).toHaveLength(1); // 取消差异（def.cancel）在重试后的执行上可用
-    expect(fake.removes).toContain('n1'); // 抢先成功 1 输出：仍按类型定义扇出（非 primary 保留）
-    expect(fake.settles).toHaveLength(0); // 成功抢先：不回退卡
+    expect(kit.calls.cancel).toHaveLength(1);
+    expect(fake.removes).toContain('n1');
+    expect(fake.settles).toHaveLength(0);
   });
 });
 
@@ -568,7 +555,7 @@ describe('生成任务运行时：recover', () => {
     }) as never);
     await runtime.recover('p1');
     expect(status.calls).toHaveLength(1);
-    await runtime.recover('p1'); // 重复扫描：active 判重
+    await runtime.recover('p1');
     expect(status.calls).toHaveLength(1);
   });
 
@@ -595,7 +582,7 @@ describe('生成任务运行时：recover', () => {
     }) as never);
     await runtime.recover('p1');
     expect(fake.inserts).toHaveLength(0);
-    expect(status.calls).toHaveLength(0); // 不复活轮询
+    expect(status.calls).toHaveLength(0);
   });
 
   it('succeeded 且有未应用输出：拉详情取产物，扇出输出槽卡并差分 replaceTarget + apply', async () => {
@@ -619,7 +606,7 @@ describe('生成任务运行时：recover', () => {
     }) as never);
     await runtime.recover('p1');
     await flushMicrotasks(20);
-    expect(fake.removes).toContain('n1'); // 占位移除
+    expect(fake.removes).toContain('n1');
     expect(fake.nodes.has('generation-output:77')).toBe(true);
     expect(fake.nodes.has('generation-output:78')).toBe(true);
     expect(fake.data('generation-output:77')).toMatchObject({ assetId: '11', generationRecovery: { submissionId: 'sub-1', outputKey: 'slot:77' } });
@@ -657,14 +644,13 @@ describe('生成任务运行时：recover', () => {
     expect(fake.data('generation-output:92')).toMatchObject({ assetId: '22' });
     const actions = runtime.composeSaveFields()!.recoveryChanges.map((change) => change.action).sort();
     expect(actions).toEqual(['apply', 'apply', 'replaceTarget']);
-    expect(runtime.statusOf('n1')).toBeNull(); // 扇出收尾后清理在途
+    expect(runtime.statusOf('n1')).toBeNull();
   });
 
   it('一对一已保存成品卡（primary present 且卡在）：恢复零动作，不移除不重建不重复确认', async () => {
     const { fake, runtime, status, page } = setup({ script: [
       { status: 'succeeded', progress: 100, asset: { id: '9', url: 'https://a/9.png', type: 'image' } },
     ] });
-    // 已保存的一对一成品卡（marker 已切 primary，用户已改名）——恢复扫描不得扇出移除重建
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 30, y: 40 }, data: {
       jobId: '501', fileName: '用户改名', assetId: '9',
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
@@ -683,16 +669,15 @@ describe('生成任务运行时：recover', () => {
     await flushMicrotasks(20);
     expect(fake.removes).toHaveLength(0);
     expect(fake.inserts).toHaveLength(0);
-    expect(fake.data('n1').fileName).toBe('用户改名'); // 用户编辑保留
-    expect(runtime.composeSaveFields()).toBeNull(); // 全部确认态：无待确认动作
-    expect(status.calls).toHaveLength(0); // 不拉详情不扇出
+    expect(fake.data('n1').fileName).toBe('用户改名');
+    expect(runtime.composeSaveFields()).toBeNull();
+    expect(status.calls).toHaveLength(0);
   });
 
   it('一对一恢复扇出：primary pending 复用目标 node_id → 不移除卡，差分 replaceTarget+apply', async () => {
     const { fake, runtime, status, page } = setup({ script: [
       { status: 'succeeded', progress: 100, asset: { id: '9', url: 'https://a/9.png', type: 'image' } },
     ] });
-    // converge 已写 primary marker 但保存差分未确认（刷新窗口）——卡在场、项仍 pending
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 30, y: 40 }, data: {
       jobId: '501', fileName: '用户改名',
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
@@ -709,7 +694,6 @@ describe('生成任务运行时：recover', () => {
     }) as never);
     await runtime.recover('p1');
     await flushMicrotasks(20);
-    // 扇出判定 primary node_id = 目标卡：不 removeMediaNode、不 insertMediaNode，编辑保留
     expect(fake.removes).toHaveLength(0);
     expect(fake.inserts).toHaveLength(0);
     expect(fake.data('n1').fileName).toBe('用户改名');
@@ -719,7 +703,7 @@ describe('生成任务运行时：recover', () => {
       { recoveryItemId: 'gcr:sub-1:$target', expectedRevision: 1, action: 'replaceTarget' },
       { recoveryItemId: 'gcr:sub-1:primary', expectedRevision: 0, action: 'apply' },
     ]);
-    expect(status.calls).toContain('501'); // 拉详情补产物 URL
+    expect(status.calls).toContain('501');
   });
 
   it('A→B→A：扫描期间项目切换即中止分页', async () => {
@@ -751,13 +735,7 @@ describe('生成任务运行时：recover', () => {
   });
 });
 
-/* ============================================
- * IKJKU7 恢复扫描互斥按加载身份隔离：实例跨项目切换存活，新加载（项目切换/
- * 同项目重载，loadEpoch 推进）不被旧在途扫描的互斥状态挡住；旧扫描晚到的
- * 收尾不清新扫描的锁、不写入新画布；同一加载内重复扫描仍不重入。
- * ============================================ */
 describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJKU7）', () => {
-  /** 受理回执丢失形态：job processing、卡不在场 → 扫描对账后补一张目标卡。 */
   const lostReceiptRecord = (): GenerationRecoveryRecord => ({
     submission_id: 'sub-1', target_node_id: 'n1', job_id: '501', task_type: 'image',
     binding_revision: 1, is_current: true,
@@ -775,19 +753,19 @@ describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJK
     let pageCalls = 0;
     page.mockImplementation(() => {
       pageCalls += 1;
-      if (pageCalls === 1) return new Promise((resolve) => { releaseA = resolve; }); // A 的分页挂起
+      if (pageCalls === 1) return new Promise((resolve) => { releaseA = resolve; });
       return Promise.resolve(emptyPage());
     });
     const requestedProjects = () => page.mock.calls.map((call) => (call as unknown as [string])[0]);
-    const pendingA = runtime.recover('p1'); // 项目 A 恢复扫描在途
-    fake.switchProject('p2'); // 宿主切 B（页面完整序列含 reset）
+    const pendingA = runtime.recover('p1');
+    fake.switchProject('p2');
     runtime.reset();
-    await runtime.recover('p2'); // B 的恢复扫描——不得被 A 的在途互斥挡住
-    expect(requestedProjects()).toEqual(['p1', 'p2']); // 对账请求序列包含 B
-    releaseA({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null }); // A 的迟到响应（补卡形态）
+    await runtime.recover('p2');
+    expect(requestedProjects()).toEqual(['p1', 'p2']);
+    releaseA({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null });
     await pendingA;
     await flushMicrotasks(20);
-    expect(fake.inserts).toHaveLength(0); // A 的迟到响应零 B 画布写入
+    expect(fake.inserts).toHaveLength(0);
     expect(fake.saves).toHaveLength(0);
   });
 
@@ -797,23 +775,23 @@ describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJK
     let pageCalls = 0;
     page.mockImplementation(() => {
       pageCalls += 1;
-      if (pageCalls <= 2) return new Promise((resolve) => { deferred.push(resolve); }); // A1、B 分页挂起
+      if (pageCalls <= 2) return new Promise((resolve) => { deferred.push(resolve); });
       return Promise.resolve(emptyPage());
     });
     const requestedProjects = () => page.mock.calls.map((call) => (call as unknown as [string])[0]);
-    const pendingA1 = runtime.recover('p1'); // A 首次加载扫描在途
+    const pendingA1 = runtime.recover('p1');
     fake.switchProject('p2');
     runtime.reset();
-    const pendingB = runtime.recover('p2'); // B 扫描在途
-    fake.switchProject('p1'); // 两次切换后回到 A（加载身份再推进）
+    const pendingB = runtime.recover('p2');
+    fake.switchProject('p1');
     runtime.reset();
-    await runtime.recover('p1'); // 最新加载的 A 扫描：不被 A1/B 在途挡住
+    await runtime.recover('p1');
     expect(requestedProjects()).toEqual(['p1', 'p2', 'p1']);
-    deferred[0]!({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null }); // A1 迟到响应
-    deferred[1]!(emptyPage()); // B 迟到响应
+    deferred[0]!({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null });
+    deferred[1]!(emptyPage());
     await Promise.all([pendingA1, pendingB]);
     await flushMicrotasks(20);
-    expect(fake.inserts).toHaveLength(0); // 两条迟到链零写入
+    expect(fake.inserts).toHaveLength(0);
     expect(fake.saves).toHaveLength(0);
   });
 
@@ -823,23 +801,23 @@ describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJK
     let pageCalls = 0;
     page.mockImplementation(() => {
       pageCalls += 1;
-      if (pageCalls === 1) return new Promise((resolve) => { releaseOld = resolve; }); // 旧加载分页挂起
+      if (pageCalls === 1) return new Promise((resolve) => { releaseOld = resolve; });
       if (pageCalls === 2) {
         return Promise.resolve({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null });
       }
       return Promise.resolve(emptyPage());
     });
-    const pendingOld = runtime.recover('p1'); // 旧加载扫描在途
-    fake.advanceEpoch(); // 同项目重载（loadEpoch 推进）
+    const pendingOld = runtime.recover('p1');
+    fake.advanceEpoch();
     runtime.reset();
-    await runtime.recover('p1'); // 新加载扫描：同项目但不继承旧加载的互斥状态
+    await runtime.recover('p1');
     expect(pageCalls).toBe(2);
-    expect(fake.inserts).toHaveLength(1); // 受理回执丢失任务在新加载中补卡
-    releaseOld({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null }); // 旧扫描迟到响应（同为补卡形态）
+    expect(fake.inserts).toHaveLength(1);
+    releaseOld({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null });
     await pendingOld;
     await flushMicrotasks(20);
-    expect(fake.inserts).toHaveLength(1); // 旧扫描收尾零写入：无双补卡
-    await runtime.recover('p1'); // 旧收尾后再扫：锁未被晚到的 finally 卡死或污染
+    expect(fake.inserts).toHaveLength(1);
+    await runtime.recover('p1');
     expect(pageCalls).toBe(3);
   });
 
@@ -849,28 +827,27 @@ describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJK
     let pageCalls = 0;
     page.mockImplementation(() => {
       pageCalls += 1;
-      if (pageCalls === 1) return new Promise((_resolve, reject) => { rejectA = reject; }); // A 的请求将失败
+      if (pageCalls === 1) return new Promise((_resolve, reject) => { rejectA = reject; });
       if (pageCalls === 2) {
         return Promise.resolve({ protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null });
       }
       return Promise.resolve(emptyPage());
     });
-    const pendingA = runtime.recover('p1'); // A 扫描在途
+    const pendingA = runtime.recover('p1');
     fake.switchProject('p2');
     runtime.reset();
-    rejectA(new Error('network')); // A 的请求失败（收尾尚未发生）
-    await runtime.recover('p2'); // B 不等 A 收尾即发出，受理回执丢失任务补卡
+    rejectA(new Error('network'));
+    await runtime.recover('p2');
     expect(fake.inserts).toHaveLength(1);
     await pendingA;
     await flushMicrotasks(20);
-    expect(fake.inserts).toHaveLength(1); // A 失败收尾不影响新加载补卡成果
-    await runtime.recover('p2'); // 失败收尾后同加载下一轮对账可再发出（锁未卡死/未污染）
+    expect(fake.inserts).toHaveLength(1);
+    await runtime.recover('p2');
     expect(pageCalls).toBe(3);
   });
 
   it('同一加载内并发重复 recover 仍不重入；完成后重新对账不双链', async () => {
     const { fake, runtime, page, status } = setup();
-    // 卡在场的进行中记录：扫描对账走续轮询路径（防双轮询观察点）
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
     const lostReceiptPage = (): GenerationRecoveryPage => ({
       protocol_version: 1, canvas_version: 1, records: [lostReceiptRecord()], next_cursor: null,
@@ -883,27 +860,21 @@ describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJK
       return Promise.resolve(lostReceiptPage());
     });
     const first = runtime.recover('p1');
-    const second = runtime.recover('p1'); // 同一加载内并发重复：直接返回，不重入
+    const second = runtime.recover('p1');
     await flushMicrotasks();
-    expect(pageCalls).toBe(1); // 未发出第二次分页
+    expect(pageCalls).toBe(1);
     releaseFirst(lostReceiptPage());
     await Promise.all([first, second]);
     await flushMicrotasks(20);
-    expect(status.calls).toHaveLength(1); // 一条轮询链（无双轮询）
-    await runtime.recover('p1'); // 扫描完成后（锁已释放）重新对账：正常发出，在途判重仍不双链
+    expect(status.calls).toHaveLength(1);
+    await runtime.recover('p1');
     await flushMicrotasks(20);
     expect(pageCalls).toBe(2);
     expect(status.calls).toHaveLength(1);
   });
 });
 
-/* ============================================
- * IKJKU9 恢复扫描数据源 Query 化：宿主接缝以独立 QueryClient（queries.retry: false）
- * + generationRecoveryPageOptions 实现（queryFn 以脚本覆写，key/缓存/去重走真实
- * Query 生命周期），证明互斥/判重/项目与 loadEpoch 隔离/游标对账在 Query 驱动下不变。
- * ============================================ */
 describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => {
-  /** 受理回执丢失形态（restore-target 补卡）：job processing、目标卡不在场。 */
   const lostReceipt = (nodeId: string, submissionId: string): GenerationRecoveryRecord => ({
     submission_id: submissionId, target_node_id: nodeId, job_id: `j-${nodeId}`, task_type: 'image',
     binding_revision: 1, is_current: true,
@@ -915,8 +886,6 @@ describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => 
 
   const emptyPage = (): GenerationRecoveryPage => ({ protocol_version: 1, canvas_version: 1, records: [], next_cursor: null });
 
-  /** 独立 QueryClient（retry: false）驱动的宿主接缝：queryFn 按脚本覆写，其余走
-   *  generationRecoveryPageOptions 的真实 key/缓存行为。fetches 记录 (项目, 游标)。 */
   const wireQueryHost = (
     fake: ReturnType<typeof createFakeHost>,
     script: (projectId: string, cursor: string | null) => Promise<GenerationRecoveryPage>,
@@ -947,7 +916,7 @@ describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => 
     const runtime = createGenerationRuntime(fake.host, { fetchJobStatus: queryStatus.fn as never });
     runtime.register(normalGenerationTask);
     await runtime.recover('p1');
-    expect(fetches).toEqual([['p1', null], ['p1', 'c2']]); // 游标推进整本对账
+    expect(fetches).toEqual([['p1', null], ['p1', 'c2']]);
     expect(fake.inserts.map((node) => node.id).sort()).toEqual(['qa-1', 'qa-2']);
     expect(client.getQueryData(generationRecoveryKeys.page('p1'))).toEqual(pageOne);
     expect(client.getQueryData(generationRecoveryKeys.page('p1', { cursor: 'c2' }))).toEqual(pageTwo);
@@ -963,21 +932,21 @@ describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => 
     let calls = 0;
     const { client, fetches } = wireQueryHost(fake, async (_projectId, _cursor) => {
       calls += 1;
-      if (calls === 1) return new Promise((resolve) => { releaseFirst = resolve; }); // 首轮在途挂起
+      if (calls === 1) return new Promise((resolve) => { releaseFirst = resolve; });
       return lostPage();
     });
     const queryStatus = statusScript([{ status: 'failed', progress: 0, asset: null }]);
     const runtime = createGenerationRuntime(fake.host, { fetchJobStatus: queryStatus.fn as never });
     runtime.register(normalGenerationTask);
     const first = runtime.recover('p1');
-    const second = runtime.recover('p1'); // 同一加载并发重入：被互斥挡住
+    const second = runtime.recover('p1');
     await flushMicrotasks();
-    expect(fetches).toEqual([['p1', null]]); // 未发出第二次分页
+    expect(fetches).toEqual([['p1', null]]);
     releaseFirst(lostPage());
     await Promise.all([first, second]);
     await flushMicrotasks(20);
     expect(fake.inserts).toHaveLength(1);
-    await runtime.recover('p1'); // 扫描完成后重新对账：staleTime 0 重新取页，判重不双补卡
+    await runtime.recover('p1');
     await flushMicrotasks(20);
     expect(fetches).toEqual([['p1', null], ['p1', null]]);
     expect(fake.inserts).toHaveLength(1);
@@ -996,15 +965,15 @@ describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => 
     const queryStatus = statusScript([{ status: 'failed', progress: 0, asset: null }]);
     const runtime = createGenerationRuntime(fake.host, { fetchJobStatus: queryStatus.fn as never });
     runtime.register(normalGenerationTask);
-    const pendingA = runtime.recover('p1'); // A 扫描在途
+    const pendingA = runtime.recover('p1');
     fake.switchProject('p2');
     runtime.reset();
-    await runtime.recover('p2'); // B 不被 A 的在途互斥挡住
-    expect(fetches).toEqual([['p1', null], ['p2', null]]); // 请求序列包含 B（不同 key 不串页）
+    await runtime.recover('p2');
+    expect(fetches).toEqual([['p1', null], ['p2', null]]);
     releaseA({ protocol_version: 1, canvas_version: 1, next_cursor: null, records: [lostReceipt('qa-1', 'sub-qa1')] });
     await pendingA;
     await flushMicrotasks(20);
-    expect(fake.inserts).toHaveLength(0); // A 迟到响应零 B 画布写入
+    expect(fake.inserts).toHaveLength(0);
     expect(fake.saves).toHaveLength(0);
     client.clear();
   });
@@ -1019,10 +988,10 @@ describe('生成任务运行时：恢复扫描 Query 驱动（IKJKU9）', () => 
     const queryStatus = statusScript([{ status: 'failed', progress: 0, asset: null }]);
     const runtime = createGenerationRuntime(fake.host, { fetchJobStatus: queryStatus.fn as never });
     runtime.register(normalGenerationTask);
-    await runtime.recover('p1'); // 查询错误不外抛（等下轮水合重试）
-    expect(fake.toasts).toHaveLength(0); // 错误单一呈现：无第二处错误面
+    await runtime.recover('p1');
+    expect(fake.toasts).toHaveLength(0);
     expect(fake.inserts).toHaveLength(0);
-    await runtime.recover('p1'); // 锁已释放：下轮扫描正常补卡
+    await runtime.recover('p1');
     await flushMicrotasks(20);
     expect(fake.inserts).toHaveLength(1);
     client.clear();
@@ -1043,14 +1012,12 @@ describe('生成任务运行时：保存差分与撤销', () => {
       { recoveryItemId: 'gcr:uuid-0001:$target', revision: 2, nodeBindingRevision: 1, state: 'replaced' },
       { recoveryItemId: 'gcr:uuid-0001:primary', revision: 1, nodeBindingRevision: 1, state: 'present' },
     ] });
-    // 用户删除结果卡（确认 removed）：差分出 remove，回执确认 removed
     fake.nodes.delete('n1');
     const removed = runtime.composeSaveFields()!;
     expect(removed.recoveryChanges).toEqual([{ recoveryItemId: 'gcr:uuid-0001:primary', expectedRevision: 1, action: 'remove' }]);
     runtime.onSaveReceipt({ commandId: removed.commandId, replayed: false, changes: [
       { recoveryItemId: 'gcr:uuid-0001:primary', revision: 2, nodeBindingRevision: 1, state: 'removed' },
     ] });
-    // 撤销：卡带 marker 回画布
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { assetId: '9', generationRecovery: { protocolVersion: 1, submissionId: 'uuid-0001', outputKey: 'primary' } } });
     expect(runtime.composeSaveFields()?.recoveryChanges).toEqual([
       { recoveryItemId: 'gcr:uuid-0001:primary', expectedRevision: 2, action: 'restore' },
@@ -1065,21 +1032,13 @@ describe('生成任务运行时：保存差分与撤销', () => {
     kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
     await flushMicrotasks();
-    runtime.reset(); // 模拟重载：台账清空，扫描未完成
-    fake.nodes.delete('n1'); // 卡缺席
+    runtime.reset();
+    fake.nodes.delete('n1');
     expect(runtime.composeSaveFields()).toBeNull();
   });
 });
 
-/* ============================================
- * IKJKU3 一对一结果原位写回原卡：受理回执丢失、原卡已在服务端保存的一对一
- * 普通生成任务成功后，恢复扇出对「卡在场且未应用」的原卡原位写入可信素材
- * （src/assetId）、任务身份（jobId）与 primary 标记——不重建卡、不覆盖用户已
- * 保存的名称/位置/尺寸（B.3/B.6 普通编辑优先），转换以同笔 replaceTarget/apply
- * 保存确认完成。
- * ============================================ */
 describe('生成任务运行时：一对一原位写回原卡（IKJKU3）', () => {
-  /** 一对一 succeeded 恢复记录：$target pending + primary pending（受理回执丢失形态）。 */
   const oneToOneRecord = (role: 'draft' | 'existing-media' | 'result-placeholder'): GenerationRecoveryRecord => ({
     submission_id: 'sub-1', target_node_id: 'n1', job_id: '501', task_type: 'image',
     binding_revision: 1, is_current: true,
@@ -1098,7 +1057,6 @@ describe('生成任务运行时：一对一原位写回原卡（IKJKU3）', () =
     output_assets: [{ id: '9', url: 'https://a/9.png', type: 'image' }],
   };
 
-  /** 原卡在场（受理回执丢失：无 jobId/marker）+ 一次恢复扫描（含扇出收尾）。 */
   const recoverWithCard = async (nodeData: Record<string, unknown>, record: GenerationRecoveryRecord) => {
     const { fake, runtime, page } = setup({ script: [succeededDetail] });
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 42, y: 24 }, data: nodeData });
@@ -1112,27 +1070,26 @@ describe('生成任务运行时：一对一原位写回原卡（IKJKU3）', () =
 
   it('受理回执丢失（draft 原卡在场）：原位写入素材/任务身份/primary 标记，不重建卡、编辑保留，差分 replaceTarget+apply', async () => {
     const { fake, runtime } = await recoverWithCard(
-      { fileName: '用户草稿改名', draft: true, mediaType: 'image' }, // src 空、无 jobId/marker
+      { fileName: '用户草稿改名', draft: true, mediaType: 'image' },
       oneToOneRecord('draft'),
     );
-    expect(fake.inserts).toHaveLength(0); // 不重建卡
+    expect(fake.inserts).toHaveLength(0);
     expect(fake.removes).toHaveLength(0);
     expect(fake.data('n1')).toMatchObject({
-      src: 'https://a/9.png', // 修复前保持空（F4 核心）
+      src: 'https://a/9.png',
       assetId: '9',
       jobId: '501',
-      fileName: '用户草稿改名', // B.3/B.6：普通编辑保留
+      fileName: '用户草稿改名',
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
     });
-    expect(fake.data('n1').genStatus).toBeUndefined(); // 成功占位清理
-    expect(fake.nodes.get('n1')?.position).toEqual({ x: 42, y: 24 }); // 位置保留
-    expect(fake.saves).toContain('p1'); // 扇出同笔落盘
+    expect(fake.data('n1').genStatus).toBeUndefined();
+    expect(fake.nodes.get('n1')?.position).toEqual({ x: 42, y: 24 });
+    expect(fake.saves).toContain('p1');
     const fields = runtime.composeSaveFields();
     expect(fields?.recoveryChanges).toEqual([
       { recoveryItemId: 'gcr:sub-1:$target', expectedRevision: 1, action: 'replaceTarget' },
       { recoveryItemId: 'gcr:sub-1:primary', expectedRevision: 0, action: 'apply' },
     ]);
-    // 保存回执确认（$target replaced + primary present）后：转换完成，无待确认动作
     runtime.onSaveReceipt({ commandId: fields!.commandId, replayed: false, changes: [
       { recoveryItemId: 'gcr:sub-1:$target', revision: 2, nodeBindingRevision: 1, state: 'replaced' },
       { recoveryItemId: 'gcr:sub-1:primary', revision: 1, nodeBindingRevision: 1, state: 'present' },
@@ -1147,11 +1104,11 @@ describe('生成任务运行时：一对一原位写回原卡（IKJKU3）', () =
     );
     expect(fake.inserts).toHaveLength(0);
     expect(fake.data('n1')).toMatchObject({
-      src: 'https://a/9.png', // 原素材 → 新产物
+      src: 'https://a/9.png',
       assetId: '9',
       jobId: '501',
       fileName: '用户素材改名',
-      width: 640, height: 480, // 用户尺寸保留
+      width: 640, height: 480,
     });
   });
 
@@ -1178,7 +1135,6 @@ describe('生成任务运行时：一对一原位写回原卡（IKJKU3）', () =
       src: 'https://a/9.png', assetId: '9',
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
     });
-    // present 项已确认在场：无重复 apply，仅 $target 转换
     expect(runtime.composeSaveFields()?.recoveryChanges).toEqual([
       { recoveryItemId: 'gcr:sub-1:$target', expectedRevision: 1, action: 'replaceTarget' },
     ]);
@@ -1189,33 +1145,23 @@ describe('生成任务运行时：一对一原位写回原卡（IKJKU3）', () =
       { fileName: '用户草稿改名', draft: true, mediaType: 'image' },
       oneToOneRecord('draft'),
     );
-    // 保存差分未确认（项仍 pending）窗口内：用户再改名 + 重载（active 清空）
     fake.host.patchNode('n1', { fileName: '再次改名' });
     runtime.reset();
     await runtime.recover('p1');
     await flushMicrotasks(20);
-    expect(fake.inserts).toHaveLength(0); // 不重复建卡
+    expect(fake.inserts).toHaveLength(0);
     expect(fake.removes).toHaveLength(0);
     expect(fake.data('n1')).toMatchObject({
-      fileName: '再次改名', // 已应用的 primary 成品卡零破坏：不覆盖普通编辑
+      fileName: '再次改名',
       src: 'https://a/9.png', assetId: '9',
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
     });
-    // 转换仍未确认（$target pending）：差分继续出 replaceTarget+apply 直到保存确认
     const fields = runtime.composeSaveFields();
     expect(fields?.recoveryChanges.map((c) => c.action)).toEqual(['replaceTarget', 'apply']);
   });
 });
 
-/* ============================================
- * IKJLTQ（PR981-REVIEW2-20261003-R1）：恢复同步真实产物身份。真实服务端一对一
- * primary 投影的资产引用为空（asset_id: null）；原位写回只补了 URL（IKJKU3），
- * assetId 仍沿用旧素材——URL 与 assetId 不一致。本块锁死：投影 asset_id 缺失时
- * 产物身份（URL 与 assetId 同源）从可信任务结果 output_assets 取得；草稿卡同样
- * 取得产物身份；保存确认后刷新重扫身份稳定、零写入零差分。
- * ============================================ */
 describe('生成任务运行时：恢复同步真实产物身份（IKJLTQ）', () => {
-  /** 真实协议投影：一对一 primary 项 asset_id 为空（服务端一对一投影不填资产引用）。 */
   const nullAssetRecord = (role: 'draft' | 'existing-media' | 'result-placeholder'): GenerationRecoveryRecord => ({
     submission_id: 'sub-1', target_node_id: 'n1', job_id: '501', task_type: 'image',
     binding_revision: 1, is_current: true,
@@ -1228,14 +1174,12 @@ describe('生成任务运行时：恢复同步真实产物身份（IKJLTQ）', (
     ],
   } as GenerationRecoveryRecord);
 
-  /** 可信任务结果：产物 11（output_assets 权威来源）。 */
   const nullAssetDetail = {
     status: 'succeeded', progress: 100,
     asset: { id: '11', url: 'https://a/11.png', type: 'image' },
     output_assets: [{ id: '11', url: 'https://a/11.png', type: 'image' }],
   };
 
-  /** 原卡在场 + 一次恢复扫描（公开 recover 接口 + 实际任务定义 planRecovery）。 */
   const recoverNullAsset = async (nodeData: Record<string, unknown>, record: GenerationRecoveryRecord) => {
     const { fake, runtime, page } = setup({ script: [nullAssetDetail] });
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 42, y: 24 }, data: nodeData });
@@ -1252,12 +1196,12 @@ describe('生成任务运行时：恢复同步真实产物身份（IKJLTQ）', (
       { fileName: '用户素材改名', src: 'https://old/5.png', assetId: '5', mediaType: 'image', width: 640, height: 480 },
       nullAssetRecord('existing-media'),
     );
-    expect(fake.inserts).toHaveLength(0); // 不重建卡
+    expect(fake.inserts).toHaveLength(0);
     expect(fake.data('n1')).toMatchObject({
-      src: 'https://a/11.png', // 产物 11
-      assetId: '11', // R1：不再沿用旧素材 5
+      src: 'https://a/11.png',
+      assetId: '11',
       jobId: '501',
-      fileName: '用户素材改名', // 普通编辑保留
+      fileName: '用户素材改名',
       width: 640, height: 480,
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
     });
@@ -1266,14 +1210,14 @@ describe('生成任务运行时：恢复同步真实产物身份（IKJLTQ）', (
 
   it('投影 asset_id 为空（draft 草稿卡在场）：取得产物身份（src/assetId），不重建卡', async () => {
     const { fake } = await recoverNullAsset(
-      { fileName: '用户草稿改名', draft: true, mediaType: 'image' }, // 无 src/assetId
+      { fileName: '用户草稿改名', draft: true, mediaType: 'image' },
       nullAssetRecord('draft'),
     );
     expect(fake.inserts).toHaveLength(0);
     expect(fake.removes).toHaveLength(0);
     expect(fake.data('n1')).toMatchObject({
       src: 'https://a/11.png',
-      assetId: '11', // 草稿卡同样取得新产物身份
+      assetId: '11',
       jobId: '501',
       fileName: '用户草稿改名',
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-1', outputKey: 'primary' },
@@ -1285,7 +1229,6 @@ describe('生成任务运行时：恢复同步真实产物身份（IKJLTQ）', (
       { fileName: '用户素材改名', src: 'https://old/5.png', assetId: '5', mediaType: 'image', width: 640, height: 480 },
       nullAssetRecord('existing-media'),
     );
-    // 保存：同笔 replaceTarget + apply，回执确认（$target replaced / primary present）
     const fields = runtime.composeSaveFields();
     expect(fields?.recoveryChanges).toEqual([
       { recoveryItemId: 'gcr:sub-1:$target', expectedRevision: 1, action: 'replaceTarget' },
@@ -1296,7 +1239,6 @@ describe('生成任务运行时：恢复同步真实产物身份（IKJLTQ）', (
       { recoveryItemId: 'gcr:sub-1:primary', revision: 1, nodeBindingRevision: 1, state: 'present' },
     ] });
     expect(runtime.composeSaveFields()).toBeNull();
-    // 刷新：重载（台账清空）+ 重扫到服务端已推进的记录
     runtime.reset();
     const advanced = nullAssetRecord('existing-media');
     advanced.items[0] = { ...advanced.items[0]!, state: 'replaced', revision: 2 };
@@ -1307,7 +1249,6 @@ describe('生成任务运行时：恢复同步真实产物身份（IKJLTQ）', (
     const patchesBefore = fake.patches.length;
     await runtime.recover('p1');
     await flushMicrotasks(20);
-    // 已应用成品卡零破坏：无新写入、无建卡删卡、无待确认差分，身份稳定
     expect(fake.patches.length).toBe(patchesBefore);
     expect(fake.inserts).toHaveLength(0);
     expect(fake.removes).toHaveLength(0);
@@ -1328,7 +1269,6 @@ describe('生成任务运行时：resolve 定向对账', () => {
     kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
     await flushMicrotasks();
-    // 保存撞 409 后的定向对账：resolve 读回 primary 已 present/revision 5、$target replaced
     const resolveFn = vi.fn(async (_projectId: string, ids: string[]) => {
       expect(ids).toContain('gcr:uuid-0002:$target');
       return {
@@ -1343,7 +1283,6 @@ describe('生成任务运行时：resolve 定向对账', () => {
         }],
       };
     });
-    // 主 runtime 的 resolve 依赖经 reconcileConflictItems 走（默认真客户端会失败——用注入法重验）
     const rt2 = createGenerationRuntime(fake.host, {
       resolveItems: resolveFn as never,
       fetchJobStatus: async () => ({ status: 'succeeded', progress: 100, asset: null }) as never,
@@ -1355,7 +1294,6 @@ describe('生成任务运行时：resolve 定向对账', () => {
     await flushMicrotasks();
     await rt2.reconcileConflictItems('p1');
     expect(resolveFn).toHaveBeenCalled();
-    // 对账后：$target 终置态跳过、primary present 且 marker 在场 → 无待确认动作
     expect(rt2.composeSaveFields()).toBeNull();
   });
 });
@@ -1374,13 +1312,7 @@ describe('生成任务运行时：资源清理', () => {
   });
 });
 
-/* ============================================
- * IKJJR7 跨类型组合场景：两个不同家族定义并存于同一运行时，验证共同规则
- * （恢复分派/归属检查/差分确认）跨家族一致——单家族场景由各 describe 与
- * 各家族定义测试覆盖（规格 Testing Decisions 10：先等价覆盖再收敛）。
- * ============================================ */
 
-/** 家族 def 的恢复规划：复用普通生成规划，补卡写家族身份键（videoTools 补卡先例）。 */
 function familyPlanRecovery(identityKey: 'kindA' | 'kindB') {
   return (record: GenerationRecoveryRecord, host: GenerationRuntimeHost) => {
     const plan = normalGenerationTask.planRecovery!(record, host);
@@ -1389,7 +1321,6 @@ function familyPlanRecovery(identityKey: 'kindA' | 'kindB') {
   };
 }
 
-/** 家族 A/B def：同 createFakeDef 骨架 + 家族身份识别与恢复规划（复用其 respond/calls）。 */
 function createFamilyDef(kit: ReturnType<typeof createFakeDef>, identityKey: 'kindA' | 'kindB', taskTypes: string[]) {
   const def = {
     taskTypes,
@@ -1402,12 +1333,10 @@ function createFamilyDef(kit: ReturnType<typeof createFakeDef>, identityKey: 'ki
   return { ...kit, def: def as unknown as ReturnType<typeof createFakeDef>['def'] };
 }
 
-/** 家族 A：普通生成形态（kindA 身份键；task_type=image）。 */
 function createFamilyADef() {
   return createFamilyDef(createFakeDef(), 'kindA', ['image']);
 }
 
-/** 家族 B：视频处理工具形态（kindB 身份键；task_type=video_enhance，一对一同款）。 */
 function createFamilyBDef() {
   return createFamilyDef(createFakeDef(), 'kindB', ['video_enhance']);
 }
@@ -1465,12 +1394,9 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     const { fake, runtime, familyA, familyB, clock } = setupCrossFamily({ pages, script: [{ status: 'processing', progress: 20, asset: null }] });
     await runtime.recover('p1');
     await flushMicrotasks();
-    // 两个受理回执丢失的目标各按恢复种子补一张卡（卡不在画布），不重复建卡
     expect([...fake.nodes.keys()].sort()).toEqual(['node-a', 'node-b']);
     expect(fake.data('node-a').jobId).toBe('601');
     expect(fake.data('node-b').jobId).toBe('602');
-    // IKJPVK：补卡即接续——首轮恢复各建立一条轮询链（无需第二次扫描）；
-    // 两家族创建请求不被触发（恢复不重发）
     expect(runtime.statusOf('node-a')?.jobId).toBe('601');
     expect(runtime.statusOf('node-b')?.jobId).toBe('602');
     expect(fake.host.getActiveJob('node-a')).toBeTruthy();
@@ -1478,20 +1404,17 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     expect(clock.pendingCount()).toBe(2);
     expect(familyA.calls.create).toHaveLength(0);
     expect(familyB.calls.create).toHaveLength(0);
-    // 第二轮扫描对账：在途判重不双链
     await runtime.recover('p1');
     await flushMicrotasks();
     expect(runtime.statusOf('node-a')?.jobId).toBe('601');
     expect(runtime.statusOf('node-b')?.jobId).toBe('602');
     expect(clock.pendingCount()).toBe(2);
-    // 第三轮扫描按在途判重：不双链
     await runtime.recover('p1');
     await flushMicrotasks();
     expect(clock.pendingCount()).toBe(2);
   });
 
   it('完成未落盘 × 多结果与一对一并存：present 已在卡判重不重建，pending 补出并差分 apply', async () => {
-    // 家族 A 多结果：slot:11 已扇出且确认 present（卡在，用户已改名）；slot:12 pending（完成未落盘）
     const pages: GenerationRecoveryPage[] = [{
       protocol_version: 1,
       canvas_version: 3,
@@ -1504,7 +1427,6 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
             { recovery_item_id: 'gcr:sub-m:slot:12', output_key: 'slot:12', node_id: 'generation-output:12', state: 'pending', revision: 0, node_binding_revision: 0, asset_id: '9002', slot_id: '12' },
           ],
         }),
-        // 家族 B 一对一：primary pending + 卡不在（完成未落盘的受理回执丢失形态）
         recoveryRecord('video_enhance', 'sub-1', 'node-1', '702', {
           jobStatus: 'succeeded',
           items: [
@@ -1519,18 +1441,14 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
       { status: 'succeeded', progress: 100, asset: { id: '9001', url: 'u1', type: 'image' }, output_assets: [{ id: '9001', url: 'u1', type: 'image' }, { id: '9002', url: 'u2', type: 'image' }, { id: '9003', url: 'u3', type: 'image' }] },
     ];
     const { fake, runtime } = setupCrossFamily({ pages, script });
-    // slot:11 卡已在画布（带用户改名）——恢复不得重建
     fake.nodes.set('generation-output:11', { id: 'generation-output:11', type: 'mediaNode', position: { x: 0, y: 0 }, data: { fileName: '用户改名', generationRecovery: { protocolVersion: 1, submissionId: 'sub-m', outputKey: 'slot:11' } } });
     await runtime.recover('p1');
     await flushMicrotasks();
-    // pending 的 slot:12 与一对一 primary 各补出；present 的 slot:11 判重不重建、名称保留
     expect(fake.nodes.has('generation-output:12')).toBe(true);
     expect(fake.nodes.has('node-1')).toBe(true);
     expect(fake.data('generation-output:11').fileName).toBe('用户改名');
     const fields = runtime.composeSaveFields();
     const applied = fields?.recoveryChanges.filter((c) => c.action === 'apply') ?? [];
-    // 扇出保持台账项的服务端状态：pending 项（slot:12/primary）差分 apply；
-    // present 项（slot:11）已确认在场，无重复 apply（B.6）
     expect(applied.map((c) => c.recoveryItemId).sort()).toEqual(['gcr:sub-1:primary', 'gcr:sub-m:slot:12']);
     const replaced = fields?.recoveryChanges.filter((c) => c.action === 'replaceTarget') ?? [];
     expect(replaced.map((c) => c.recoveryItemId).sort()).toEqual(['gcr:sub-1:$target', 'gcr:sub-m:$target']);
@@ -1539,7 +1457,6 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
   it('双标签页冲突 × 跨家族节点版本：撞 409 后仅一次创建、失败卡保留，复核后新意图用新 submission_id', async () => {
     const { fake, runtime, familyB, clock } = setupCrossFamily({ script: [{ status: 'processing', progress: 1, asset: null }] });
     fake.nodes.set('node-x', { id: 'node-x', type: 'mediaNode', position: { x: 0, y: 0 }, data: { kindB: {} } });
-    // 另一标签页（家族 A）已把 node-x 归属推进到 revision 3；本端仍按 0 提交
     let createCalls = 0;
     familyB.respond.create(async () => {
       createCalls += 1;
@@ -1548,21 +1465,19 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     const issued = runtime.submit(familyB.def, { payload: { b: 1 }, target: { ...targetFacts('node-x'), expectedBindingRevision: 0 } });
     expect(issued).toBe(true);
     await flushMicrotasks(20);
-    // 竞争失败方：一次用户操作只发一次创建请求——无自动重发、无受理接续、无轮询
     expect(createCalls).toBe(1);
     expect(runtime.statusOf('node-x')).toBeNull();
     expect(clock.pendingCount()).toBe(0);
     expect(fake.data('node-x')).toMatchObject({ genStatus: 'failed', errorText: '卡片归属已变化，请复核后再发送' });
     expect(fake.data('node-x').jobId).toBeUndefined();
-    expect(fake.nodes.has('node-x')).toBe(true); // 画布内容保留
-    // 服务端归属版本（3）进台账：复核后的新提交按服务端版本携带，且为独立意图（新 submission_id）
+    expect(fake.nodes.has('node-x')).toBe(true);
     expect(runtime.bindingRevisionOf('node-x')).toBe(3);
     familyB.respond.create(async () => ({ jobId: '801', canvasBinding: BINDING_VIEW('xuuid-0002', 'node-x', '801', 3) }));
     runtime.submit(familyB.def, { payload: { b: 1 }, target: { ...targetFacts('node-x'), expectedBindingRevision: 3 } });
     await flushMicrotasks(20);
     expect(familyB.calls.create).toHaveLength(2);
     expect(familyB.calls.create[1].binding).toMatchObject({ expected_binding_revision: 3 });
-    expect(familyB.calls.create[1]!.key).not.toBe(familyB.calls.create[0]!.key); // 新意图 = 新 submission_id
+    expect(familyB.calls.create[1]!.key).not.toBe(familyB.calls.create[0]!.key);
     expect(fake.data('node-x').jobId).toBe('801');
     expect(runtime.statusOf('node-x')?.phase).toBe('generating');
   });
@@ -1570,15 +1485,12 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
   it('同 jobId 专属重试 × 独立提交身份：旧意图被他端替代（is_current=false）不接旧 jobId 新状态', async () => {
     const { fake, runtime, familyA, clock } = setupCrossFamily({ script: [{ status: 'processing', progress: 2, asset: null }] });
     fake.nodes.set('node-r', { id: 'node-r', type: 'mediaNode', position: { x: 0, y: 0 }, data: { kindA: {}, genStatus: 'failed', jobId: '901' } });
-    // 专属重试响应：复用同 jobId（901）但 is_current=false——另一标签页同 jobId 的新重试已接管
     familyA.respond.retry(async () => ({ jobId: '901', canvasBinding: { ...BINDING_VIEW('xuuid-0009', 'node-r', '901', 2), is_current: false } }));
     const issued = runtime.retry('node-r');
     expect(issued).toBe(true);
     await flushMicrotasks();
-    // 旧意图不开轮询不落台账——卡由新承接收敛，本地不接旧执行状态
     expect(runtime.statusOf('node-r')).toBeNull();
     expect(clock.pendingCount()).toBe(0);
-    // 不落新受理的失败覆盖（被替代的意图不写失败卡）
     expect(fake.patches.filter((p) => p.patch.genStatus === 'failed')).toHaveLength(0);
   });
 
@@ -1591,16 +1503,14 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     runtime.submit(familyA.def, { payload: {}, target: targetFacts('na') });
     runtime.submit(familyB.def, { payload: {}, target: targetFacts('nb') });
     await flushMicrotasks();
-    expect(clock.pendingCount()).toBe(2); // 两家族各一条轮询链
+    expect(clock.pendingCount()).toBe(2);
     const patchesBefore = fake.patches.length;
-    // 同项目重载（doc 更替）：loadEpoch 推进，旧链在下次 tick 归属检查时消亡（不续链不写卡）
     fake.advanceEpoch();
     clock.fireNext();
     clock.fireNext();
     await flushMicrotasks();
     expect(clock.pendingCount()).toBe(0);
-    expect(fake.patches.length).toBe(patchesBefore); // 两条旧链都不再写卡（进度/终态均不落）
-    // 重载后的水合恢复扫描按新身份重新对账（恢复页无记录：不残留旧链）
+    expect(fake.patches.length).toBe(patchesBefore);
     await runtime.recover('p1');
     await flushMicrotasks();
     expect(clock.pendingCount()).toBe(0);
@@ -1626,16 +1536,13 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     await runtime.recover('p1');
     await flushMicrotasks();
     expect(fake.nodes.has('generation-output:21')).toBe(true);
-    // 用户删除其中一张结果卡（未首次保存前删除）：差分出 remove（虚拟输出与 owner 一同建立）
     fake.nodes.delete('generation-output:21');
     const removed = runtime.composeSaveFields()?.recoveryChanges.find((c) => c.action === 'remove');
     expect(removed?.recoveryItemId).toBe('gcr:sub-d:slot:21');
-    // 保存成功但回执丢失 → 重放（replayed=true）同命令：只进台账确认，不重复确认不覆盖
     runtime.onSaveReceipt({ commandId: 'cmd-1', replayed: false, changes: [{ recoveryItemId: 'gcr:sub-d:slot:21', revision: 1, nodeBindingRevision: 1, state: 'removed' }] });
     const fields1 = runtime.composeSaveFields();
-    expect(fields1?.recoveryChanges.find((c) => c.recoveryItemId === 'gcr:sub-d:slot:21')).toBeUndefined(); // removed 已确认：无重复动作
+    expect(fields1?.recoveryChanges.find((c) => c.recoveryItemId === 'gcr:sub-d:slot:21')).toBeUndefined();
     runtime.onSaveReceipt({ commandId: 'cmd-1', replayed: true, changes: [{ recoveryItemId: 'gcr:sub-d:slot:21', revision: 1, nodeBindingRevision: 1, state: 'removed' }] });
-    // 撤销（卡带回画布 + marker）：差分 restore 恢复同一结果
     fake.nodes.set('generation-output:21', { id: 'generation-output:21', type: 'mediaNode', position: { x: 0, y: 0 }, data: { generationRecovery: { protocolVersion: 1, submissionId: 'sub-d', outputKey: 'slot:21' } } });
     const restored = runtime.composeSaveFields()?.recoveryChanges.find((c) => c.action === 'restore');
     expect(restored?.recoveryItemId).toBe('gcr:sub-d:slot:21');
@@ -1647,17 +1554,14 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     });
     fake.nodes.set('node-t', { id: 'node-t', type: 'mediaNode', position: { x: 0, y: 0 }, data: { kindA: {} } });
     familyA.respond.create(async () => ({ jobId: '921', canvasBinding: BINDING_VIEW('xuuid-0021', 'node-t', '921') }));
-    // A 家族先提交（在途轮询中）
     runtime.submit(familyA.def, { payload: {}, target: targetFacts('node-t') });
     await flushMicrotasks();
     expect(runtime.statusOf('node-t')?.jobId).toBe('921');
-    // 同节点被 B 家族新提交接管（卡片身份切换为 kindB——原位换工具重做）
     fake.nodes.set('node-t', { id: 'node-t', type: 'mediaNode', position: { x: 0, y: 0 }, data: { kindB: {}, genStatus: 'generating' } });
     familyB.respond.create(async () => ({ jobId: '922', canvasBinding: BINDING_VIEW('xuuid-0022', 'node-t', '922', 2) }));
     runtime.submit(familyB.def, { payload: {}, target: { ...targetFacts('node-t'), expectedBindingRevision: 1 } });
     await flushMicrotasks();
     expect(runtime.statusOf('node-t')?.jobId).toBe('922');
-    // A 家族旧执行（jobId 921）的轮询响应到达失败：因在途登记已是 B 的执行而丢弃，不清 B 的锁
     status.fn.mockImplementation(async (jobId: unknown) => (
       String(jobId) === '921'
         ? { status: 'failed', error: { code: 1, message: 'A 家族失败' } }
@@ -1666,23 +1570,17 @@ describe('生成任务运行时：IKJJR7 跨类型组合场景', () => {
     const patchesBefore = fake.patches.length;
     const tokenOfB = fake.host.getActiveJob('node-t');
     expect(tokenOfB).toBeTruthy();
-    clock.fireNext(); // A 的续链定时器（登记更早、id 更小）先触发：迟到失败响应
+    clock.fireNext();
     await flushMicrotasks();
-    // B 的锁未被 A 清除、轮询链仍在、A 的失败不落卡
     expect(fake.host.getActiveJob('node-t')).toBe(tokenOfB);
     expect(runtime.statusOf('node-t')?.jobId).toBe('922');
     expect(fake.patches.filter((p) => p.patch.genStatus === 'failed')).toHaveLength(0);
     expect(clock.pendingCount()).toBe(1);
-    expect(fake.patches.length).toBeGreaterThan(patchesBefore); // B 的 tick 照常写进度（续链健康）
+    expect(fake.patches.length).toBeGreaterThan(patchesBefore);
   });
 });
 
-/* ============================================
- * IKJKU0 恢复扇出详情间隙归属复核：任务详情请求（fanOutOutputs 第二个 await）
- * 返回前后归属可能过期（切项目/重载/删除/新任务接管），迟到结果零宿主写入。
- * ============================================ */
 describe('生成任务运行时：恢复扇出详情间隙归属复核（IKJKU0）', () => {
-  /** succeeded 多输出恢复记录：恢复扇出走详情请求路径（无 knownDetail）。 */
   const fanOutDetailRecord = (): GenerationRecoveryRecord => ({
     submission_id: 'sub-1', target_node_id: 'n1', job_id: '501', task_type: 'image',
     binding_revision: 1, is_current: true,
@@ -1704,8 +1602,6 @@ describe('生成任务运行时：恢复扇出详情间隙归属复核（IKJKU0�
     ],
   });
 
-  /** 驱动恢复扇出停在任务详情间隙：恢复扫描直供已核验记录（IKJKU4），扇出不再
-   *  重拉投影页，直接发出详情请求（挂起点）后等待释放。 */
   async function suspendAtFanOutDetail() {
     const { fake, runtime, status, page, kit } = setup({ script: [succeededDetail()] });
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
@@ -1717,9 +1613,9 @@ describe('生成任务运行时：恢复扇出详情间隙归属复核（IKJKU0�
       return Promise.resolve({ status: 'processing', progress: 5, asset: null });
     });
     let detailRelease!: (detail: Record<string, unknown>) => void;
-    await runtime.recover('p1'); // 恢复扫描（page 第 1 次）→ 扇出直供记录 → 停在详情间隙
+    await runtime.recover('p1');
     await flushMicrotasks();
-    expect(status.fn.mock.calls.filter(([id]) => String(id) === '501')).toHaveLength(1); // 已停在详情间隙
+    expect(status.fn.mock.calls.filter(([id]) => String(id) === '501')).toHaveLength(1);
     return { fake, runtime, kit, releaseDetail: (detail: Record<string, unknown>) => detailRelease(detail) };
   }
 
@@ -1740,14 +1636,14 @@ describe('生成任务运行时：恢复扇出详情间隙归属复核（IKJKU0�
     ctx.fake.switchProject('p2');
     ctx.releaseDetail(succeededDetail());
     await flushMicrotasks(20);
-    expectZeroHostWrites(ctx.fake, base); // 旧项目结果不进新画布、不触发 p2 保存
+    expectZeroHostWrites(ctx.fake, base);
   });
 
   it('A→B→A：切回同项目也不得写入——加载身份兜底拦截', async () => {
     const ctx = await suspendAtFanOutDetail();
     const base = writeBaseline(ctx.fake);
     ctx.fake.switchProject('p2');
-    ctx.fake.switchProject('p1'); // 项目 id 回到原值，但加载身份已推进
+    ctx.fake.switchProject('p1');
     ctx.releaseDetail(succeededDetail());
     await flushMicrotasks(20);
     expectZeroHostWrites(ctx.fake, base);
@@ -1779,15 +1675,14 @@ describe('生成任务运行时：恢复扇出详情间隙归属复核（IKJKU0�
     expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' });
     const base = writeBaseline(ctx.fake);
     const tokenOfNew = ctx.fake.host.getActiveJob('n1');
-    ctx.releaseDetail(succeededDetail()); // 旧执行（501）的迟到详情
+    ctx.releaseDetail(succeededDetail());
     await flushMicrotasks(20);
-    expectZeroHostWrites(ctx.fake, base); // 不移除新执行占用的目标卡、不插旧结果卡、不保存
-    expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' }); // 新执行不受影响
-    expect(ctx.fake.host.getActiveJob('n1')).toBe(tokenOfNew); // 新执行的锁不被清
+    expectZeroHostWrites(ctx.fake, base);
+    expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' });
+    expect(ctx.fake.host.getActiveJob('n1')).toBe(tokenOfNew);
   });
 
   it('投影请求失败且归属已过期：catch 分支不向当前画布 patch', async () => {
-    // 轮询终态扇出（无已核验记录 → 扇出自查恢复页）：按提交找回请求在途期间归属失效
     const { fake, runtime, kit, page } = setup({ script: [
       { status: 'succeeded', progress: 100, asset: null, output_assets: [
         { id: '11', url: 'https://a/11.png', type: 'image' },
@@ -1797,25 +1692,18 @@ describe('生成任务运行时：恢复扇出详情间隙归属复核（IKJKU0�
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
     kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
     let rejectProjection!: (reason: Error) => void;
-    page.mockImplementation(() => new Promise((_resolve, reject) => { rejectProjection = reject; })); // 扇出找回请求挂起
+    page.mockImplementation(() => new Promise((_resolve, reject) => { rejectProjection = reject; }));
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
     await flushMicrotasks();
     const base = writeBaseline(fake);
-    fake.switchProject('p2'); // 投影等待期间归属失效
+    fake.switchProject('p2');
     rejectProjection(new Error('network'));
     await flushMicrotasks(20);
-    expect(fake.patches).toHaveLength(base.patches); // 异常路径不 patch 当前画布
+    expect(fake.patches).toHaveLength(base.patches);
   });
 });
 
-/* ============================================
- * IKJKU4 后续恢复页结果正常落卡（PR981 审查 F5）：目标提交不在恢复页首屏时，
- * 结果应用不再把首屏查询当成按提交查询——恢复扫描直供已核验记录；轮询终态
- * 扇出按游标遍历后续页找回该提交。恢复页排序与游标编码是契约行为，不改。
- * ============================================ */
 describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
-  /** 契约忠实分页替身：无 cursor = 首页，按 next_cursor 取后续页（后端提交内部 id
-   *  升序游标 + B.5 可见性过滤；旧扇出以空参数重拉首页即本 bug 的复现基础）。 */
   const cursorPages = (pages: GenerationRecoveryPage[]) => {
     const byCursor = new Map<string | null, GenerationRecoveryPage>();
     let key: string | null = null;
@@ -1832,7 +1720,6 @@ describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
     protocol_version: 1, canvas_version: 1, records, next_cursor: nextCursor,
   });
 
-  /** 第二页目标提交：双输出待应用，slot:79 已删除（不落卡不差分动作）。 */
   const lateRecord = (submissionId: string, nodeId: string): GenerationRecoveryRecord => ({
     submission_id: submissionId, target_node_id: nodeId, job_id: '501', task_type: 'image',
     binding_revision: 1, is_current: true,
@@ -1847,7 +1734,6 @@ describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
     ],
   } as GenerationRecoveryRecord);
 
-  /** 首屏填充记录（历史关联 is_current=false，扫描对账无画布动作）。 */
   const fillerRecord = (i: number): GenerationRecoveryRecord => ({
     submission_id: `sub-old-${i}`, target_node_id: `old-${i}`, job_id: String(9100 + i), task_type: 'image',
     binding_revision: 1, is_current: false, job: null, recovery_seed: null, previous_target_snapshot: null,
@@ -1866,29 +1752,27 @@ describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
     const { fake, runtime, status, page } = setup({ script: [succeededMulti] });
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { jobId: '501', genStatus: 'generating' } });
     const pages = cursorPages([
-      pageOf(Array.from({ length: 50 }, (_, i) => fillerRecord(i)), 'c2'), // 首屏满页无目标，游标前进
+      pageOf(Array.from({ length: 50 }, (_, i) => fillerRecord(i)), 'c2'),
       pageOf([lateRecord('sub-late', 'n1')], null),
     ]);
     page.mockImplementation(pages as never);
     await runtime.recover('p1');
     await flushMicrotasks(30);
-    expect(pages.mock.calls).toHaveLength(2); // 仅恢复扫描两页：扇出不再重拉首页
-    expect(fake.removes).toContain('n1'); // 占位扇出移除
-    // 第二页结果的规范身份：node_id 判重建卡、marker/assetId 协议权威字段
+    expect(pages.mock.calls).toHaveLength(2);
+    expect(fake.removes).toContain('n1');
     expect(fake.data('generation-output:77')).toMatchObject({
       assetId: '11', src: 'https://a/11.png',
       generationRecovery: { protocolVersion: 1, submissionId: 'sub-late', outputKey: 'slot:77' },
     });
     expect(fake.data('generation-output:78')).toMatchObject({ assetId: '12', src: 'https://a/12.png' });
-    expect(fake.nodes.has('generation-output:79')).toBe(false); // removed 项不落卡
-    // 保存动作按已核验记录的 recovery_item_id 与 revision
+    expect(fake.nodes.has('generation-output:79')).toBe(false);
     const fields = runtime.composeSaveFields();
     expect(fields!.recoveryChanges.map((c) => `${c.action}:${c.recoveryItemId}:${c.expectedRevision}`).sort()).toEqual([
       'apply:gcr:sub-late:slot:77:0',
       'apply:gcr:sub-late:slot:78:0',
       'replaceTarget:gcr:sub-late:$target:1',
     ]);
-    expect(status.calls).toContain('501'); // 详情取产物 URL 照常
+    expect(status.calls).toContain('501');
   });
 
   it('轮询终态：首屏过滤后为空但游标仍前进 → 按游标找回提交并落卡', async () => {
@@ -1896,13 +1780,13 @@ describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
     kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
     const pages = cursorPages([
-      pageOf([], 'c2'), // 首屏可见记录为空但 next_cursor 非空（B.5 可见性过滤）
+      pageOf([], 'c2'),
       pageOf([lateRecord('uuid-0001', 'n1')], null),
     ]);
     page.mockImplementation(pages as never);
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
     await flushMicrotasks(30);
-    expect(pages.mock.calls).toHaveLength(2); // {cursor:null} → {cursor:'c2'}：追游标而非止步首屏
+    expect(pages.mock.calls).toHaveLength(2);
     expect(fake.removes).toContain('n1');
     expect(fake.data('generation-output:77')).toMatchObject({
       generationRecovery: { protocolVersion: 1, submissionId: 'uuid-0001', outputKey: 'slot:77' },
@@ -1915,7 +1799,7 @@ describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
     kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
     const pages = cursorPages([
-      pageOf([fillerRecord(0), fillerRecord(1)], 'c2'), // 首屏有他人记录但无本提交
+      pageOf([fillerRecord(0), fillerRecord(1)], 'c2'),
       pageOf([lateRecord('uuid-0001', 'n1')], null),
     ]);
     page.mockImplementation(pages as never);
@@ -1924,23 +1808,23 @@ describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
     expect(fake.removes).toContain('n1');
     expect(fake.nodes.has('generation-output:77')).toBe(true);
     expect(fake.nodes.has('generation-output:78')).toBe(true);
-    expect(runtime.statusOf('n1')).toBeNull(); // 扇出收尾后清理在途
+    expect(runtime.statusOf('n1')).toBeNull();
   });
 
   it('真投影缺失（遍历完毕仍无该提交）：占位卡保留不丢卡，不建结果卡不写 marker', async () => {
     const { fake, runtime, kit, page } = setup({ script: [succeededMulti] });
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { genStatus: 'generating' } });
     kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
-    const pages = cursorPages([pageOf([fillerRecord(0), fillerRecord(1)], null)]); // 无该提交且无后续页
+    const pages = cursorPages([pageOf([fillerRecord(0), fillerRecord(1)], null)]);
     page.mockImplementation(pages as never);
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
     await flushMicrotasks(30);
-    expect(fake.nodes.has('n1')).toBe(true); // 占位卡保留（不丢卡）
+    expect(fake.nodes.has('n1')).toBe(true);
     expect(fake.removes).toHaveLength(0);
-    expect(fake.inserts).toHaveLength(0); // 不建结果卡
-    expect(fake.data('n1').progress).toBe(100); // 成功占位收敛
-    expect(fake.data('n1').generationRecovery).toBeUndefined(); // 不写恢复 marker
-    expect(runtime.composeSaveFields()).toBeNull(); // 无输出台账：无待确认动作
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.data('n1').progress).toBe(100);
+    expect(fake.data('n1').generationRecovery).toBeUndefined();
+    expect(runtime.composeSaveFields()).toBeNull();
   });
 
   it('重复恢复（重载后）：第二页结果卡已应用 → 幂等零重建，无双卡无双链', async () => {
@@ -1955,27 +1839,17 @@ describe('生成任务运行时：后续页结果落卡（IKJKU4）', () => {
     await flushMicrotasks(30);
     const firstRound = [...fake.nodes.keys()].filter((id) => id.startsWith('generation-output:')).sort();
     expect(firstRound).toEqual(['generation-output:77', 'generation-output:78']);
-    runtime.reset(); // 重载：在途清空（下一轮扫描按服务端事实重新对账）
+    runtime.reset();
     await runtime.recover('p1');
     await flushMicrotasks(30);
     const secondRound = [...fake.nodes.keys()].filter((id) => id.startsWith('generation-output:')).sort();
-    expect(secondRound).toEqual(firstRound); // 无双卡：已应用成品卡零写入
-    expect(fake.nodes.has('n1')).toBe(false); // 占位不复活
-    expect(fake.edges).toHaveLength(0); // 无双链
+    expect(secondRound).toEqual(firstRound);
+    expect(fake.nodes.has('n1')).toBe(false);
+    expect(fake.edges).toHaveLength(0);
   });
 });
 
-/* ============================================
- * IKJLTU（PR981 审查 R4）：保存冲突定向对账（resolve）的迟到响应隔离。
- * 对账发起时固定项目与加载身份；响应返回时身份失效（切项目/A→B→A/重载——页面
- * reset 序列必伴随加载身份推进，index.tsx 水合点先推进 epoch 再 reset）整体丢弃，
- * 不改新加载的卡片/台账/归属登记/保存状态。同项目内目标卡已删除或已被新执行接管：
- * 只回台账逐项状态（保存差分按新 revision 推导），不补卡、不续旧轮询、不清新资源。
- * 测试接缝 = 公开 reconcileConflictItems + 实际任务定义 + 受控宿主/延迟响应
- * （与 IKJKU0 扇出详情间隙保护同模式）。
- * ============================================ */
 describe('生成任务运行时：冲突对账隔离迟到响应（IKJLTU）', () => {
-  /** 工单复现形态：旧失败记录（job failed + is_current）——目标缺席时 restore-target 补卡并触发保存。 */
   const failedRecord = (): GenerationRecoveryRecord => ({
     submission_id: 'sub-a', target_node_id: 'n1', job_id: '501', task_type: 'image',
     binding_revision: 1, is_current: true,
@@ -1985,13 +1859,11 @@ describe('生成任务运行时：冲突对账隔离迟到响应（IKJLTU）', (
     items: [{ recovery_item_id: 'gcr:sub-a:$target', output_key: '$target', node_id: 'n1', state: 'pending', revision: 3, node_binding_revision: 1, asset_id: null, slot_id: null }],
   } as GenerationRecoveryRecord);
 
-  /** 旧任务仍在 processing：plan = resume-polling——迟到处理会劫持同卡新执行的在途登记。 */
   const processingRecord = (): GenerationRecoveryRecord => ({
     ...failedRecord(),
     job: { job_id: '501', type: 'image', status: 'processing', progress: 40, output_asset_ids: [], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
   } as GenerationRecoveryRecord);
 
-  /** 驱动对账停在 resolve 响应间隙：提交受理（台账 $target pending）→ 发起对账挂起。 */
   async function suspendAtResolve() {
     const page = pageScript([{ protocol_version: 1, canvas_version: 3, records: [], next_cursor: null }]);
     const fake = createFakeHost((projectId, options) => page(projectId, options));
@@ -2018,9 +1890,9 @@ describe('生成任务运行时：冲突对账隔离迟到响应（IKJLTU）', (
     kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('sub-a', 'n1', '501') }));
     runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
     await flushMicrotasks();
-    void runtime.reconcileConflictItems('p1'); // 保存撞 409 后的定向对账：停在响应间隙
+    void runtime.reconcileConflictItems('p1');
     await flushMicrotasks();
-    expect(resolveFn).toHaveBeenCalledWith('p1', ['gcr:sub-a:$target']); // 定向 ids = 当前台账未终置项
+    expect(resolveFn).toHaveBeenCalledWith('p1', ['gcr:sub-a:$target']);
     return { fake, runtime, clock, status, kit, release, reject };
   }
 
@@ -2037,20 +1909,20 @@ describe('生成任务运行时：冲突对账隔离迟到响应（IKJLTU）', (
 
   it('A→B：响应等待期间切项目并 reset，迟到失败记录不补卡、不保存 B、不污染新台账与归属登记', async () => {
     const ctx = await suspendAtResolve();
-    ctx.fake.switchProject('p2'); // 页面切项目序列：宿主切 B（epoch 推进）+ 运行时 reset
+    ctx.fake.switchProject('p2');
     ctx.runtime.reset();
     const base = writeBaseline(ctx.fake);
     ctx.release([failedRecord()]);
     await flushMicrotasks(20);
-    expectZeroHostWrites(ctx.fake, base); // A 卡不补入 B、不触发 p2 保存
-    expect(ctx.runtime.composeSaveFields()).toBeNull(); // 旧对账不污染新台账（B 保存不携带 A 的差分）
-    expect(ctx.runtime.bindingRevisionOf('n1')).toBe(0); // 归属登记不回填
+    expectZeroHostWrites(ctx.fake, base);
+    expect(ctx.runtime.composeSaveFields()).toBeNull();
+    expect(ctx.runtime.bindingRevisionOf('n1')).toBe(0);
   });
 
   it('A→B→A：切回同项目也不得写入——加载身份兜底拦截', async () => {
     const ctx = await suspendAtResolve();
     ctx.fake.switchProject('p2');
-    ctx.fake.switchProject('p1'); // 项目 id 回到原值，但加载身份已推进
+    ctx.fake.switchProject('p1');
     ctx.runtime.reset();
     const base = writeBaseline(ctx.fake);
     ctx.release([failedRecord()]);
@@ -2062,9 +1934,9 @@ describe('生成任务运行时：冲突对账隔离迟到响应（IKJLTU）', (
 
   it('同项目重载（epoch 推进 + reset）：迟到失败记录零写入、不污染台账与归属登记', async () => {
     const ctx = await suspendAtResolve();
-    ctx.fake.advanceEpoch(); // 重载：加载身份推进（页面序列：epoch 推进 → reset → 重新水合）
+    ctx.fake.advanceEpoch();
     ctx.runtime.reset();
-    ctx.fake.nodes.clear(); // 重新水合前的空画布：旧对账若生效会把 A 卡补回并触发保存
+    ctx.fake.nodes.clear();
     const base = writeBaseline(ctx.fake);
     ctx.release([failedRecord()]);
     await flushMicrotasks(20);
@@ -2086,13 +1958,12 @@ describe('生成任务运行时：冲突对账隔离迟到响应（IKJLTU）', (
 
   it('响应等待期间目标卡被删除：迟到记录只回台账不补卡不保存，差分按新 revision 发 remove', async () => {
     const ctx = await suspendAtResolve();
-    ctx.fake.host.markLocallyRemoved('n1'); // 用户删除（页面删除序列：登记本地移除 + 撤卡）
+    ctx.fake.host.markLocallyRemoved('n1');
     ctx.fake.host.removeMediaNode('n1');
     const base = writeBaseline(ctx.fake);
     ctx.release([failedRecord()]);
     await flushMicrotasks(20);
-    expectZeroHostWrites(ctx.fake, base); // 不复活已删卡、不触发保存
-    // 台账照回（revision 推进到服务端现状）：删除差分按新 revision 推导，不再撞旧冲突
+    expectZeroHostWrites(ctx.fake, base);
     expect(ctx.runtime.composeSaveFields()?.recoveryChanges).toEqual([
       { recoveryItemId: 'gcr:sub-a:$target', expectedRevision: 3, action: 'remove' },
     ]);
@@ -2106,20 +1977,20 @@ describe('生成任务运行时：冲突对账隔离迟到响应（IKJLTU）', (
     expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' });
     const tokenOfNew = ctx.fake.host.getActiveJob('n1');
     const base = writeBaseline(ctx.fake);
-    ctx.release([processingRecord()]); // 旧任务 processing：plan = resume-polling（修复前劫持同卡新执行）
+    ctx.release([processingRecord()]);
     await flushMicrotasks(20);
     expectZeroHostWrites(ctx.fake, base);
-    expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' }); // 新执行登记不被旧记录覆盖
-    expect(ctx.fake.host.getActiveJob('n1')).toBe(tokenOfNew); // 新执行的在途锁不被抢
-    expect(ctx.runtime.bindingRevisionOf('n1')).toBe(2); // 新承接的归属登记不被旧记录回写
+    expect(ctx.runtime.statusOf('n1')).toMatchObject({ jobId: '502' });
+    expect(ctx.fake.host.getActiveJob('n1')).toBe(tokenOfNew);
+    expect(ctx.runtime.bindingRevisionOf('n1')).toBe(2);
   });
 
   it('同项目正常对账不被隔离误伤：目标卡非本地删除的缺席仍补失败卡并落盘', async () => {
     const ctx = await suspendAtResolve();
-    ctx.fake.nodes.delete('n1'); // 卡缺席但非本地删除（如他端删除/水合丢失）
+    ctx.fake.nodes.delete('n1');
     ctx.release([failedRecord()]);
     await flushMicrotasks(20);
-    expect(ctx.fake.inserts.map((node) => node.id)).toContain('n1'); // 补回失败卡（重试入口）
-    expect(ctx.fake.saves).toContain('p1'); // 补卡落盘（恢复场景本因卡不在服务端）
+    expect(ctx.fake.inserts.map((node) => node.id)).toContain('n1');
+    expect(ctx.fake.saves).toContain('p1');
   });
 });

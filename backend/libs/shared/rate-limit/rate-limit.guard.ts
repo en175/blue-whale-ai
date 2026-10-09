@@ -13,7 +13,6 @@ import {
 
 type RequestWithUser = Request & { user?: { userId?: string } };
 
-/** account key 是攻击者可控的请求体字段：截断 + 去换行，防日志注入与洪泛。 */
 function sanitizeForLog(key: string): string {
   const stripped = key.replace(/[\r\n]/g, "");
   return stripped.length > 64 ? `${stripped.slice(0, 64)}…` : stripped;
@@ -38,12 +37,6 @@ export class RateLimitGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<RequestWithUser>();
 
-    // 请求级豁免（IKEBOY 终审）：命中 IP / username 任一名单即整个请求跳过全部频率桶
-    // （含 user 维度桶），不消耗 Redis 计数。IP 只认反向代理覆写的 `X-Real-IP`——
-    // `X-Forwarded-For` 首值是 nginx 追加式透传、客户端可伪造，作为豁免凭证即送分题；
-    // 缺该头按未命中处理（不回落 request.ip，nginx 部署下它是容器地址）。
-    // 登录失败锁定（rlblock）不豁免：其封锁检查由 AuthController 在 guard 之外独立
-    // 执行（isBlocked），不受本短路影响；限流桶自身的 take 取键行为（XFF 首值）不变。
     const realIp = extractRealIp(request);
     const username = extractKey(request, "account");
     const hit =
@@ -76,7 +69,6 @@ export class RateLimitGuard implements CanActivate {
   }
 }
 
-/** 豁免判定专用真实 IP：只认 nginx `$remote_addr` 覆写的 `X-Real-IP`，无兜底（IKEBOY）。 */
 function extractRealIp(request: RequestWithUser): string | null {
   const header = request.headers["x-real-ip"];
   const raw = typeof header === "string" ? header.trim() : "";
@@ -95,9 +87,6 @@ export function extractKey(request: RequestWithUser, kind: RateLimitKey): string
     if (raw) return raw;
     return request.ip && request.ip.length > 0 ? request.ip : null;
   }
-  // account / phone 都取自请求体，只是字段名不同：登录用 `username`，发码用 `phone`。
-  // ⚠️ 少了 phone 这一支，发码的「同号 60 秒 1 条」桶会取不到键而**静默跳过**——
-  //    桶配了、看着有防护，实际一条都没拦。
   if (kind === "account" || kind === "phone") {
     const field = kind === "account" ? "username" : "phone";
     const value = (request.body as Record<string, unknown> | undefined)?.[field];

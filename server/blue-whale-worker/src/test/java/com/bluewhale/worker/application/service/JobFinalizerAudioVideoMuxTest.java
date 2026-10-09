@@ -24,19 +24,16 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** IKIHPJ：结果资产命名（拍板⑤）+ 秒→毫秒收口 + 元数据回落（迁移契约 §21.4）。 */
 @ExtendWith(MockitoExtension.class)
 class JobFinalizerAudioVideoMuxTest {
     @Mock GenerationJobMapper jobMapper;
     @Mock AssetMapper assetMapper;
     @Mock GenerationJobLogMapper jobLogMapper;
     @Mock GenerationOutputSlotMapper slotMapper;
-    /** IKJCOE：任务特有列搬进键值扩展表（本用例走的非视频路径不写扩展位）。 */
     @Mock GenerationJobExtraMapper extraMapper;
     @Mock SceneCardGenerationRecordSync recordSync;
     @Mock StoryboardPreviewSync previewSync;
     @Mock ProjectEventPublisher eventPublisher;
-    /** 终态事件收口新增的结算发布器（积分商品化的 billing 联动）：本用例只发布资产，打桩即可。 */
     @Mock JobSettlementPublisher settlementPublisher;
 
     private JobFinalizer finalizer;
@@ -45,7 +42,6 @@ class JobFinalizerAudioVideoMuxTest {
     void setUp() {
         finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
                 recordSync, previewSync, eventPublisher, settlementPublisher);
-        // 模拟 MyBatis-Plus insert 回填自增 id（publishSingleAssetResult 用 id 拼 output_asset_ids）。
         lenient().when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
             ((AssetEntity) invocation.getArgument(0)).setId(99L);
             return 1;

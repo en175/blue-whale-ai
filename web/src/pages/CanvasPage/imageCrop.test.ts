@@ -1,9 +1,3 @@
-/* IKGW1G 裁切换算纯函数测试（vitest 纯 node 环境，无 jsdom）：
- * 内收拖边单边换算、拖角自由换算、锁比例对角锚等比缩放（面板锁定与 Shift 临时锁同一算法）、
- * 框内整体平移钳制、64 像素自然分辨率下限换算、内容区内最大内接指定比例矩形（居中）、
- * 显示坐标→自然分辨率换算（取整/钳位）、产出格式决策（JPEG 0.92 / PNG / 判不出 PNG 兜底）、
- * 公共常量防漂移断言（裁切无后端契约，后续组件票对接面以本文件常量为单源锁死）。
- * 规格见 docs/specs/2026-09-18-image-crop-frontend.md「Implementation Decisions 前端」。 */
 import { describe, expect, it } from 'vitest';
 import {
   CROP_PRESET_LABELS,
@@ -25,10 +19,9 @@ import {
   type CropRect,
 } from './imageCrop';
 
-/** 内容区 400×300（flow 坐标，位置任意），对齐扩图测试 fixture；源图自然分辨率 800×600（2 倍显示） */
 const bounds: CropRect = { x: 1000, y: 500, width: 400, height: 300 };
 const space: CropCoordinateSpace = { displayWidth: 400, displayHeight: 300, naturalWidth: 800, naturalHeight: 600 };
-const minSide = minCropSideDisplay(space); // 64 × 400/800 = 32
+const minSide = minCropSideDisplay(space);
 
 describe('IKGW1G 公共常量与预设防漂移（后续组件票对接面，本文件即单源）', () => {
   it('短边下限恒 64 自然分辨率像素、JPEG 质量恒 0.92（规格 Implementation Decisions）', () => {
@@ -73,7 +66,6 @@ describe('IKGW1G 64 像素自然分辨率下限换算 minCropSideDisplay', () =>
 
   it('1 倍显示：显示下限 = 64；显示盒大于自然分辨率时按横轴比例放大', () => {
     expect(minCropSideDisplay({ displayWidth: 300, displayHeight: 400, naturalWidth: 300, naturalHeight: 400 })).toBe(64);
-    // 显示盒放大场景（内容盒短边 280 恒定，小图自然分辨率 128）：64 × 280/128 = 140
     expect(minCropSideDisplay({ displayWidth: 280, displayHeight: 280, naturalWidth: 128, naturalHeight: 128 })).toBeCloseTo(140, 10);
   });
 });
@@ -85,13 +77,11 @@ describe('IKGW1G 内收拖边 dragCropEdge（单边跟随、对边不动）', ()
   });
 
   it('拖边不越过对边：指针拉过「底边 - 最小短边」时钳到最小框，对边仍不动', () => {
-    // 底边 800，最小框顶 = 800 - 32 = 768；指针 790 越过 → 钳回 768
     const next = dragCropEdge('top', fullCropRect(bounds), bounds, { x: 1200, y: 790 }, minSide);
     expect(next).toEqual({ x: 1000, y: 768, width: 400, height: 32 });
   });
 
   it('拖边不超出内容区：指针拖到内容区外时钳回边界', () => {
-    // 指针 y=450 < bounds.y=500 → 顶边钳到 500（全幅）
     const next = dragCropEdge('top', fullCropRect(bounds), bounds, { x: 1200, y: 450 }, minSide);
     expect(next).toEqual(bounds);
   });
@@ -110,9 +100,7 @@ describe('IKGW1G 内收拖边 dragCropEdge（单边跟随、对边不动）', ()
   });
 
   it('clampCropRect 兜底：负尺寸/超界框归位到内容区内且短边不小于下限', () => {
-    // 负宽钳到最小短边、超高钳到全高、位置钳回内容区原点侧
     expect(clampCropRect({ x: 900, y: 450, width: -50, height: 1000 }, bounds, minSide)).toEqual({ x: 1000, y: 500, width: 32, height: 300 });
-    // 右下越界 + 过小：位置停在右下边界内侧
     expect(clampCropRect({ x: 1390, y: 790, width: 10, height: 10 }, bounds, minSide)).toEqual({ x: 1368, y: 768, width: 32, height: 32 });
   });
 });
@@ -136,13 +124,11 @@ describe('IKGW1G 拖角自由换算 dragCropCorner（lockedRatio=null，对角�
   });
 
   it('指针越过对角（负宽高期望）钳到最小短边，不翻负', () => {
-    // se 角锚 (1000,500)，指针 (1020,510) 期望 20×10 → 均小于 32 → 钳 32×32
     const next = dragCropCorner('se', fullCropRect(bounds), bounds, { x: 1020, y: 510 }, minSide, null);
     expect(next).toEqual({ x: 1000, y: 500, width: 32, height: 32 });
   });
 
   it('指针拖出内容区：框钳制在内容区内（锚随墙让位，框不出界）', () => {
-    // se 角指针 (1500,900) 越右下界 → 框收进 bounds，底右不越界
     const next = dragCropCorner('se', fullCropRect(bounds), bounds, { x: 1500, y: 900 }, minSide, null);
     expect(next).toEqual(bounds);
   });
@@ -150,27 +136,23 @@ describe('IKGW1G 拖角自由换算 dragCropCorner（lockedRatio=null，对角�
 
 describe('IKGW1G 锁比例对角锚等比缩放 dragCropCorner（lockedRatio）', () => {
   it('面板锁定 1:1：以对角为锚等比缩放，宽高恒相等', () => {
-    // 锚 (1000,500)；指针期望 250×330 → 等比内切 250×250
     const next = dragCropCorner('se', fullCropRect(bounds), bounds, { x: 1250, y: 830 }, minSide, cropPresetRatio('1:1'));
     expect(next).toEqual({ x: 1000, y: 500, width: 250, height: 250 });
   });
 
   it('Shift 临时锁比例：锁拖动开始那一刻的框比例（非当前指针位置比例）', () => {
-    // 开始框 200×300（2:3）非全幅：传 start 比例；指针期望 400×200 → 等比内切 133.33×200
     const start: CropRect = { x: 1000, y: 500, width: 200, height: 300 };
     const ratio0 = start.width / start.height;
     const next = dragCropCorner('se', start, bounds, { x: 1400, y: 700 }, minSide, ratio0);
     expect(next.width).toBeCloseTo((200 / 300) * 200, 6);
     expect(next.height).toBeCloseTo(200, 6);
     expect(next.width / next.height).toBeCloseTo(ratio0, 6);
-    // 锚定对角不动
     expect(next.x).toBe(1000);
     expect(next.y).toBe(500);
   });
 
   it('等比内切不越过指针期望框：boxW ≤ 期望宽且 boxH ≤ 期望高', () => {
     const next = dragCropCorner('se', fullCropRect(bounds), bounds, { x: 1250, y: 830 }, minSide, cropPresetRatio('16:9'));
-    // 期望 250×330；16:9 → boxW=min(250, 330×16/9=586.67)=250, boxH=250×9/16=140.63
     expect(next.width).toBeLessThanOrEqual(250);
     expect(next.height).toBeLessThanOrEqual(330);
     expect(next.width / next.height).toBeCloseTo(16 / 9, 6);
@@ -178,12 +160,10 @@ describe('IKGW1G 锁比例对角锚等比缩放 dragCropCorner（lockedRatio）'
 
   it('nw 角锁比例：以右下对角为锚向左上等比缩放', () => {
     const next = dragCropCorner('nw', fullCropRect(bounds), bounds, { x: 1150, y: 625 }, minSide, cropPresetRatio('1:1'));
-    // 锚 (1400,800)；期望 250×175 → 1:1 内切 175×175 → 框 (1225,625,175,175)
     expect(next).toEqual({ x: 1225, y: 625, width: 175, height: 175 });
   });
 
   it('锁比例缩到最小短边以下时钳住下限（比例让位于 64 像素硬下限）', () => {
-    // 1:1 指针期望 10×10 → 钳 32×32（仍近似方形）
     const next = dragCropCorner('se', fullCropRect(bounds), bounds, { x: 1010, y: 510 }, minSide, 1);
     expect(next).toEqual({ x: 1000, y: 500, width: 32, height: 32 });
   });
@@ -252,7 +232,6 @@ describe('IKGW1G 显示坐标 → 自然分辨率换算 cropRectToNatural（裁�
   });
 
   it('小数显示矩形四舍五入到整数像素（先乘比例再取整两端，宽高为差；口径同擦除 displayRectToNatural）', () => {
-    // 显示 (100.4, 60.5) 起 199.7×119.8 → x1=round(100.4×2)=201、x2=round(300.1×2)=600；y1=round(121)=121、y2=round(360.6)=361
     const next = cropRectToNatural({ x: 1100.4, y: 560.5, width: 199.7, height: 119.8 }, bounds, space);
     expect(next).toEqual({ x: 201, y: 121, width: 399, height: 240 });
   });
@@ -260,7 +239,6 @@ describe('IKGW1G 显示坐标 → 自然分辨率换算 cropRectToNatural（裁�
   it('内接比例框回环：16:9 内接框换算后短边 = 800×600 图上 16:9 的最大内接短边', () => {
     const rect = inscribeCropRect(bounds, cropPresetRatio('16:9')!);
     const natural = cropRectToNatural(rect, bounds, space);
-    // 自然分辨率 800×600 内最大内接 16:9 = 800×450
     expect(natural).toEqual({ x: 0, y: 75, width: 800, height: 450 });
   });
 

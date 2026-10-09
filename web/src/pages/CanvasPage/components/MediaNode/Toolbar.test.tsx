@@ -1,34 +1,4 @@
 // @vitest-environment jsdom
-/* IKGYYD 媒体卡悬浮工具条（迁出 MediaNode/index.tsx、钉屏幕层内容组件 MediaNodeToolbar）测试：
-   用例自 MediaNode/index.test.tsx 迁移；渲染模式沿用该文件（createRoot + act）；
-   「唯一选中」门在 NodeFollowToolbar 容器（index.test.tsx 已覆盖），本文件覆盖数据条件
-   （生成中/素材缺失/空壳不显）与工具条本体。IKH3WE 撤除「重新编辑」「生成图片」「生成视频」
-   三按钮：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片开绑定面板。
-   IKH3XZ 五画质工具横排常显：高清/扩图/裁切/擦除/抠图离开「高清 ▾」下拉直接排上工具条，
-   「高清」图标换 ZoomIn，触发钮最近工具记忆与悬浮展开整套退役（ADR-0107）。
-   IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支改功能钮（截取/调速/混合/
-   音视频合成）+ 分隔线 + 下载，详情对音频退役；ADR-0109 原五钮中的「转码」已按需求撤除。
-   IKHB6Y 首位「截取」点亮：门槛见 audioTrim.ts（音频 URL 缺失或时长缺失/为 0 置灰，
-   悬停「音频时长缺失，无法截取」，不照搬家族「数据缺失不拦」口径），达标可点并
-   派发 onTrimAudio（编辑态行为归 IKHB7A）。
-   IKHW5C（父单 IKHVYO）第二钮「调速」点亮：自占位数组移出单独渲染（形态同「截取」
-   先例），门槛见 audioSpeed.ts（音频 URL 或 assetId 缺失即置灰，悬停「音频不可用，
-   无法调速」；时长缺失不拦，无截取的时长门槛），达标可点派发 onAudioSpeed（编辑态
-   本体归 IKHW5S）。
-   IKIHPK（父规格 IKIHMX/ADR-0115）第四钮「音视频合成」点亮：自占位数组移出单独渲染
-   （形态同「截取」「调速」先例），门槛见 audioVideoMux.ts（已完成音频成品卡 + 仅源
-   音频 URL 缺失置灰，悬停唯一原因），达标可点派发 onComposeAudioVideo（草稿卡会话
-   与拖线绑定归 IKIHPK，提交回填归 IKIHP M）；音频分支四功能钮自此全部点亮，
-   占位项清空。
-   IKHA2E：视频卡「音视频分离」自单按钮改「音视频分离 ▾」下拉触发钮（同构 SubtitleEraseMenu
-   独立实例），第二项「人声背景分离」仅派发挂接点（编辑态本体归后续票）。
-   IKH8BJ 视频卡追加「场景切分」单按钮：落「音视频分离」之后、分隔线之前，仅视频卡显示，
-   置灰门槛与悬停原因断言同族（门槛纯逻辑另见 sceneSplit.test.ts）。
-   IKHK7N 视频卡追加「智能抠像 ▾」下拉入口（ADR-0112 模式前置）：落「场景切分」之后、
-   分隔线之前，两项纯文字「人像抠像」「绿幕抠像」分别派发 onSmartMatting(id, mode)
-   进入编辑态（编辑态本体归 IKHK9N），触发钮点击直启首项「人像抠像」；置灰门槛
-   （未关联资产 / 时长超 10 分钟且有时长数据，缺失放行）断言同族，门槛纯逻辑另见
-   smartMatting.test.ts。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -153,18 +123,6 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
   });
 });
 
-/* IKHB6Y（父单 IKHB08）：音频卡首位「截取」从占位点亮——门槛见 audioTrim.ts（音频 URL
-   缺失、或时长缺失/为 0 置灰并悬停「音频时长缺失，无法截取」；截取手柄时间换算硬性
-   依赖时长，缺失即拦，不照搬家族「数据缺失不拦」口径）；达标可点派发 onTrimAudio，
-   点击后的编辑态行为归 IKHB7A，本套只验收回调被正确调用。
-   IKHW5C（父单 IKHVYO）：第二钮「调速」自占位点亮——形态与置灰口径同「截取」先例
-   （aria-disabled 置灰沿用画质横排先例，见 .toolBtn[aria-disabled='true']），门槛见
-   audioSpeed.ts（音频 URL 或 assetId 缺失即置灰，悬停「音频不可用，无法调速」；
-   时长缺失不拦），达标可点派发 onAudioSpeed（编辑态本体归 IKHW5S，本套只验收回调被
-   正确调用）。「混合」也已点亮；「音视频合成」已点亮（IKIHPK，见上文注释）；
-   ADR-0109 原五钮中的「转码」已按需求撤除（占位连同入口一并删除，
-   不渲染）；竖直分隔线后「下载」在最右且可正常下载；详情钮随改版对音频退役，
-   不出现「替换」入口。 */
 describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」「音视频合成」点亮（IKHB6Y/IKHW5C/IKH8Q3）', () => {
   const audioTool = (id: string) =>
     mountNode.querySelector<HTMLButtonElement>(`[data-testid="audio-tool-${id}"]`)!;
@@ -182,7 +140,6 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」「音�
       expect(b.querySelector('span')).not.toBeNull();
       expect(b.classList.contains(styles.toolBtn)).toBe(true);
     });
-    // 「截取」「调速」「混合」「音视频合成」全部点亮单独渲染：data-testid 全序 = trim → speed → mix → compose
     expect([...mountNode.querySelectorAll('[data-testid^="audio-tool-"]')]
       .map((b) => b.getAttribute('data-testid')))
       .toEqual(audioToolIds.map((id) => `audio-tool-${id}`));
@@ -206,7 +163,6 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」「音�
 
   it('门槛矩阵之 URL 缺失（undefined/null/空串）：截取置灰、悬停唯一原因、点击不派发', async () => {
     const onTrimAudio = vi.fn();
-    // 默认 fixture 自带 src: 'blob:test'，须显式覆盖才能隔离「URL 缺失」单一条件
     const cases: Array<Record<string, unknown>> = [
       { src: undefined, duration: 12 },
       { src: null, duration: 12 },
@@ -269,9 +225,6 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」「音�
     expect(onDownload).not.toHaveBeenCalled();
   });
 
-  /* IKIHPK（父规格 IKIHMX/ADR-0115）第四钮「音视频合成」点亮：门槛见 audioVideoMux.ts——
-     已完成音频成品卡 + 仅源音频 URL 缺失置灰（悬停唯一原因「音频不可用，无法合成」），
-     达标可点派发 onComposeAudioVideo（草稿卡会话与拖线绑定归 IKIHPK）。 */
   it('达标态「音视频合成」可点：无 aria-disabled 且点击派发 onComposeAudioVideo（携带节点 id）', async () => {
     const onComposeAudioVideo = vi.fn();
     const onMixAudio = vi.fn();
@@ -306,9 +259,6 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」「音�
     expect(onComposeAudioVideo).not.toHaveBeenCalled();
   });
 
-  /* IKIHMX 审查修复 1：源卡有在途合成任务（CanvasPage 渲染期注入 audioVideoMuxInFlight）
-     时「音视频合成」按钮保留高亮（toolBtnActive + aria-pressed，规格：发送后面板关闭、
-     工具条恢复且高亮保留）；无标记时为普通态。 */
   it('在途合成（audioVideoMuxInFlight）按钮保留高亮：toolBtnActive + aria-pressed；无标记为普通态', async () => {
     await renderToolbar('audio', { data: { src: 'https://example.test/a.mp3', audioVideoMuxInFlight: true } });
     const active = audioTool('compose');
@@ -372,10 +322,6 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」「音�
   });
 });
 
-/* IKHW5C（父单 IKHVYO）：音频卡第二钮「调速」点亮断言（对齐「截取」钮 IKHB6Y 先例）。
-   音频 URL 或资产 ID 缺失即置灰并悬停「音频不可用，无法调速」；
-   时长缺失不拦（用户故事 4，无截取的时长门槛）。达标可点派发
-   onAudioSpeed（编辑态本体归 IKHW5S，本套只验收回调被正确调用）。 */
 describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
   const speedBtn = () =>
     mountNode.querySelector<HTMLButtonElement>('[data-testid="audio-tool-speed"]')!;
@@ -398,7 +344,6 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
 
   it('置灰唯一矩阵之音频 URL 缺失：调速置灰、悬停「音频不可用，无法调速」、点击不派发', async () => {
     const onAudioSpeed = vi.fn();
-    // 默认 fixture 自带 src: 'blob:test'，须显式覆盖才能隔离「URL 缺失」单一条件
     const cases: Array<Record<string, unknown>> = [
       { src: undefined },
       { src: null },
@@ -418,7 +363,6 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
 
   it('有 URL 无 assetId 或有 assetId 无 URL 均置灰', async () => {
     const onAudioSpeed = vi.fn();
-    // 仅有 URL（blob 直传未关联资产）
     await renderToolbar('audio', { data: { onAudioSpeed, assetId: undefined } });
     expect(speedBtn().getAttribute('aria-disabled')).toBe('true');
     expect(speedBtn().getAttribute('title')).toBe('音频不可用，无法调速');
@@ -427,7 +371,6 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
     });
     expect(onAudioSpeed).not.toHaveBeenCalled();
 
-    // 仅有 assetId（URL 缺失）：无 src 无从试听
     await renderToolbar('audio', { id: 'asset-node', data: { onAudioSpeed, src: '', assetId: 'a1' } });
     expect(speedBtn().getAttribute('aria-disabled')).toBe('true');
     expect(speedBtn().getAttribute('title')).toBe('音频不可用，无法调速');
@@ -461,7 +404,6 @@ describe('MediaNodeToolbar 画质工具横排按钮（IKH3XZ：五工具离开�
       expect(b.querySelector('svg')).not.toBeNull();
       expect(b.querySelector('span')).not.toBeNull();
     });
-    // 复用透明底 toolBtn（与详情/下载同款家族口径）
     rendered.forEach((b) => expect(b.classList.contains(styles.toolBtn)).toBe(true));
   });
 
@@ -515,7 +457,6 @@ describe('MediaNodeToolbar 画质工具横排按钮（IKH3XZ：五工具离开�
 
   it('点「擦除」派发 onEraseImage（携带节点 id）', async () => {
     const onEraseImage = vi.fn();
-    // mime 补 png：默认 fixture 文件名 .bin 在擦除格式白名单外（png/jpg/jpeg/heic）会被置灰
     await renderToolbar('image', { data: { onEraseImage, mime: 'image/png' } });
     await act(async () => {
       tool('erase').click();
@@ -526,7 +467,6 @@ describe('MediaNodeToolbar 画质工具横排按钮（IKH3XZ：五工具离开�
   it('裁切无置灰门槛：超尺寸/超大小/webp 的图也不置灰（与擦除门槛对照）', async () => {
     await renderToolbar('image', { data: { width: 3000, height: 1440, size: 10 * 1024 * 1024 + 1, mime: 'image/webp' } });
     expect(tool('crop').getAttribute('aria-disabled')).toBeNull();
-    // 擦除项按门槛置灰，裁切不受影响
     expect(tool('erase').getAttribute('aria-disabled')).toBe('true');
   });
 
@@ -537,7 +477,6 @@ describe('MediaNodeToolbar 画质工具横排按钮（IKH3XZ：五工具离开�
     expect(erase.getAttribute('title')).toContain('长边超过 2560');
     expect(tool('enhance').getAttribute('aria-disabled')).toBeNull();
 
-    // 短边>1440 同样置灰（横图 2000×1441：短边 1441 超上限；竖图 1440×2560 合法另测于 imageErase.test）
     await renderToolbar('image', { id: 'tall-node', data: { width: 2000, height: 1441, mime: 'image/png', onEraseImage: vi.fn() } });
     expect(tool('erase').getAttribute('title')).toContain('短边超过 1440');
   });
@@ -589,7 +528,6 @@ describe('MediaNodeToolbar 画质工具横排按钮（IKH3XZ：五工具离开�
   });
 
   it('扩图置灰矩阵：长边超 4160 / 文件超 10MB / 真实宽高缺失，悬停说明原因且点击不派发', async () => {
-    // 长边超限
     const overLong = { onOutpaintImage: vi.fn(), width: 4161, height: 2000, size: 1000 };
     await renderToolbar('image', { data: overLong });
     const item1 = tool('outpaint');
@@ -600,7 +538,6 @@ describe('MediaNodeToolbar 画质工具横排按钮（IKH3XZ：五工具离开�
     });
     expect(overLong.onOutpaintImage).not.toHaveBeenCalled();
 
-    // 文件超限
     const overSize = { onOutpaintImage: vi.fn(), width: 2000, height: 1000, size: 10 * 1024 * 1024 + 1 };
     await renderToolbar('image', { data: overSize });
     const item2 = tool('outpaint');
@@ -611,12 +548,10 @@ describe('MediaNodeToolbar 画质工具横排按钮（IKH3XZ：五工具离开�
     });
     expect(overSize.onOutpaintImage).not.toHaveBeenCalled();
 
-    // 真实宽高缺失
     const noDims = { onOutpaintImage: vi.fn(), size: 1000 };
     await renderToolbar('image', { data: noDims });
     const item3 = tool('outpaint');
     expect(item3.getAttribute('aria-disabled')).toBe('true');
-    // 拒绝文案与契约单处定义同源（IKGOR6 切契约后不再是本地「尺寸未知」措辞）
     expect(item3.getAttribute('title')).toContain('缺少真实尺寸信息');
     await act(async () => {
       item3.click();
@@ -648,10 +583,6 @@ describe('MediaNodeToolbar 画质工具横排按钮（IKH3XZ：五工具离开�
   });
 });
 
-/* IKH3OU（ADR-0104）：入口从单按钮改「智能去字幕 ▾」下拉触发钮，交互口径同图片画质工具
-   家族旧下拉形态（悬停自动展开、移出 120ms 延迟关闭、Esc/点外立即关闭、整钮 aria-disabled
-   置灰但 hover 仍展开菜单看原因），差异是菜单项纯文字无图标。图片侧已随 IKH3XZ 横排退役
-   下拉，本家族仅剩视频卡这一处下拉。合成事件口径：mouseover/mouseout + relatedTarget 在 wrap 外。 */
 describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', () => {
   const trigger = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="subtitle-erase-menu-trigger"]')!;
   const menu = () => mountNode.querySelector('[data-testid="subtitle-erase-menu"]');
@@ -670,7 +601,6 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
     });
   }
 
-  /** 推进 hover 延迟关闭的等待时间（120ms 窗口 + 余量） */
   async function settleHoverClose() {
     await act(async () => {
       vi.advanceTimersByTime(200);
@@ -689,7 +619,6 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
     await renderToolbar('video');
     const order = labels();
     expect(order.indexOf('智能去字幕')).toBeLessThan(order.indexOf('音视频分离'));
-    // 图片卡/音频卡不显示（精确数组用例「图片卡全显」「音频卡隐藏」已覆盖，此处再断不冗余出现）
     await renderToolbar('image');
     expect(labels().includes('智能去字幕')).toBe(false);
   });
@@ -698,12 +627,10 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
     await renderToolbar('video', { data: { onVideoSubtitleErase: vi.fn() } });
     expect(trigger().textContent).toContain('智能去字幕');
     expect(trigger().getAttribute('aria-haspopup')).toBe('menu');
-    // 默认收起
     expect(menu()).toBeNull();
     await hoverIn();
     const rendered = [...mountNode.querySelectorAll('[data-testid^="subtitle-erase-menu-item-"]')];
     expect(rendered.map((b) => b.textContent)).toEqual(['智能去字幕', '框选去字幕']);
-    // 纯文字：菜单项内不渲染图标（svg）
     expect(rendered.every((b) => b.querySelector('svg') === null)).toBe(true);
   });
 
@@ -711,7 +638,6 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
     await renderToolbar('video', { data: { onVideoSubtitleErase: vi.fn() } });
     await hoverIn();
     await hoverOut();
-    // 延迟窗口内菜单保持（指针可从触发钮滑向菜单项）
     expect(menu()).not.toBeNull();
     await settleHoverClose();
     expect(menu()).toBeNull();
@@ -746,7 +672,6 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
       item('box')!.click();
     });
     expect(onVideoSubtitleErase).toHaveBeenCalledWith('video-node', 'box');
-    // 选择后菜单收起
     expect(menu()).toBeNull();
 
     await hoverIn();
@@ -770,14 +695,13 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
     await renderToolbar('video', { data: { onVideoSubtitleErase, width: 2561, height: 1440 } });
     const long = trigger();
     expect(long.getAttribute('aria-disabled')).toBe('true');
-    expect(long.disabled).toBe(false); // aria-disabled 而非原生 disabled：hover 仍需可展开
+    expect(long.disabled).toBe(false);
     expect(long.getAttribute('title')).toContain('长边超过 2560');
     await act(async () => {
       long.click();
     });
     expect(onVideoSubtitleErase).not.toHaveBeenCalled();
 
-    // 竖屏短长边语义：1440×2560 合法；短边 1441 超上限（横屏 2560×1441）
     await renderToolbar('video', { id: 'tall-node', data: { onVideoSubtitleErase, width: 1440, height: 2560 } });
     expect(trigger().getAttribute('aria-disabled')).toBeNull();
     await renderToolbar('video', { id: 'wide-node', data: { onVideoSubtitleErase, width: 2560, height: 1441 } });
@@ -803,7 +727,6 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
     await renderToolbar('video');
     const btn = trigger();
     expect(btn.getAttribute('aria-disabled')).toBeNull();
-    // 旧可用态效果边界句随「全画面文字」开关废除（ADR-0104），可用态不再有默认 title
     expect(btn.getAttribute('title')).toBeNull();
   });
 
@@ -816,7 +739,6 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
     const box = item('box')!;
     expect(smart.getAttribute('aria-disabled')).toBe('true');
     expect(box.getAttribute('aria-disabled')).toBe('true');
-    // 故事 7：置灰时仍能看两项说明——title 恒为自己的 hint，不替换成整卡原因
     expect(smart.getAttribute('title')).toBe('自动擦除画面下半字幕');
     expect(box.getAttribute('title')).toBe('拉框指定要擦的区域');
     await act(async () => {
@@ -839,13 +761,6 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
   });
 });
 
-/* IKHA2E：「音视频分离」自单按钮改「音视频分离 ▾」下拉触发钮，交互口径与「智能去字幕 ▾」
-   同构但独立实例（悬停自动展开、移出 120ms 延迟关闭、Esc/点外立即关闭、点击触发钮直启首项）。
-   家族差异：触发钮可用态 title 保留入口效果边界说明（去字幕可用态无 title，ADR-0104）；
-   第二项「人声背景分离」仅派发挂接点（编辑态本体由后续票实现，未注入回调时安全 no-op）。
-   门槛=视频未关联资产唯一置灰（ADR-0103 决策四，无时长/分辨率/大小前置拦截）：整钮
-   aria-disabled 置灰、点击无效，hover 仍展开菜单看两项说明与置灰原因。
-   合成事件口径同上：mouseover/mouseout + relatedTarget 在 wrap 外。 */
 describe('MediaNodeToolbar 「音视频分离 ▾」下拉入口（IKHA2E）', () => {
   const trigger = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="audio-video-split-menu-trigger"]')!;
   const menu = () => mountNode.querySelector('[data-testid="audio-video-split-menu"]');
@@ -864,7 +779,6 @@ describe('MediaNodeToolbar 「音视频分离 ▾」下拉入口（IKHA2E）', (
     });
   }
 
-  /** 推进 hover 延迟关闭的等待时间（120ms 窗口 + 余量） */
   async function settleHoverClose() {
     await act(async () => {
       vi.advanceTimersByTime(200);
@@ -913,7 +827,6 @@ describe('MediaNodeToolbar 「音视频分离 ▾」下拉入口（IKHA2E）', (
     await renderToolbar('video', { data: { onAudioVideoSplit: vi.fn(), assetId: 'a1' } });
     await hoverIn();
     await hoverOut();
-    // 延迟窗口内菜单保持（指针可从触发钮滑向菜单项）
     expect(menu()).not.toBeNull();
     await settleHoverClose();
     expect(menu()).toBeNull();
@@ -960,7 +873,6 @@ describe('MediaNodeToolbar 「音视频分离 ▾」下拉入口（IKHA2E）', (
     });
     expect(onVocalBackgroundSplit).toHaveBeenCalledWith('video-node');
     expect(onAudioVideoSplit).not.toHaveBeenCalled();
-    // 选择后菜单收起
     expect(menu()).toBeNull();
 
     await hoverIn();
@@ -987,14 +899,13 @@ describe('MediaNodeToolbar 「音视频分离 ▾」下拉入口（IKHA2E）', (
     await renderToolbar('video', { data: { onAudioVideoSplit, onVocalBackgroundSplit } });
     const btn = trigger();
     expect(btn.getAttribute('aria-disabled')).toBe('true');
-    expect(btn.disabled).toBe(false); // aria-disabled 而非原生 disabled：hover 仍需可展开
+    expect(btn.disabled).toBe(false);
     expect(btn.getAttribute('title')).toContain('尚未关联资产');
     await act(async () => {
       btn.click();
     });
     expect(onAudioVideoSplit).not.toHaveBeenCalled();
 
-    // hover 仍可展开看说明与原因：两项 title 恒为自己的 hint，点击均不派发
     await hoverIn();
     expect(menu()).not.toBeNull();
     const split = item('split')!;
@@ -1015,16 +926,10 @@ describe('MediaNodeToolbar 「音视频分离 ▾」下拉入口（IKHA2E）', (
     await renderToolbar('video', { data: { assetId: 'a1' } });
     const btn = trigger();
     expect(btn.getAttribute('aria-disabled')).toBeNull();
-    expect(btn.getAttribute('title')).toContain('仅音频'); // AUDIO_VIDEO_SPLIT_ENTRY_HINT
+    expect(btn.getAttribute('title')).toContain('仅音频');
   });
 });
 
-/* IKH3VG 原有 HD 入口 + IKHLKR 改造：视频卡首位「HD」单按钮升为「高清 ▾」悬停下拉
-   （FrameInterpolationMenu，ADR-0113）——首项「HD 高清」直启原链路零变化，次项「插帧」
-   建插帧草稿卡。**两层门槛分开**（家族差异）：整钮 aria-disabled 只看未关联资产
-   （trigger gate，hover 仍可展开看说明），HD 的分辨率上下限从整钮降为菜单项级
-   （item gate）；源视频超上限时 HD 项置灰而插帧可用，触发钮文字是「高清」故点击不派发。
-   合成事件口径同「音视频分离 ▾」段：mouseover/mouseout + relatedTarget 在 wrap 外。 */
 describe('MediaNodeToolbar 「高清 ▾」下拉入口（IKH3VG 原链路 / IKHLKR 改造）', () => {
   const trigger = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="video-enhance-menu-trigger"]')!;
   const menu = () => mountNode.querySelector('[data-testid="video-enhance-menu"]');
@@ -1043,7 +948,6 @@ describe('MediaNodeToolbar 「高清 ▾」下拉入口（IKH3VG 原链路 / IKH
     });
   }
 
-  /** 推进 hover 延迟关闭的等待时间（120ms 窗口 + 余量） */
   async function settleHoverClose() {
     await act(async () => {
       vi.advanceTimersByTime(200);
@@ -1099,7 +1003,6 @@ describe('MediaNodeToolbar 「高清 ▾」下拉入口（IKH3VG 原链路 / IKH
     await renderToolbar('video', { data: { assetId: 'a1' } });
     await hoverIn();
     await hoverOut();
-    // 延迟窗口内菜单保持（指针可从触发钮滑向菜单项）
     expect(menu()).not.toBeNull();
     await settleHoverClose();
     expect(menu()).toBeNull();
@@ -1163,14 +1066,13 @@ describe('MediaNodeToolbar 「高清 ▾」下拉入口（IKH3VG 原链路 / IKH
     await renderToolbar('video', { data: { onVideoEnhance, onFrameInterpolation } });
     const btn = trigger();
     expect(btn.getAttribute('aria-disabled')).toBe('true');
-    expect(btn.disabled).toBe(false); // aria-disabled 而非原生 disabled：hover 仍需可展开
+    expect(btn.disabled).toBe(false);
     expect(btn.getAttribute('title')).toContain('尚未关联资产');
     await act(async () => {
       btn.click();
     });
     expect(onVideoEnhance).not.toHaveBeenCalled();
 
-    // hover 仍可展开看说明：两项置灰、title 为置灰原因，点击均不派发
     await hoverIn();
     expect(menu()).not.toBeNull();
     const hd = item('hd')!;
@@ -1202,21 +1104,17 @@ describe('MediaNodeToolbar 「高清 ▾」下拉入口（IKH3VG 原链路 / IKH
     const onFrameInterpolation = vi.fn();
     const over = { onVideoEnhance, onFrameInterpolation, assetId: 'a1', width: 2561, height: 1440 };
     await renderToolbar('video', { data: over });
-    // 整钮只看未关联资产：超上限不置灰整钮
     expect(trigger().getAttribute('aria-disabled')).toBeNull();
     await hoverIn();
     expect(item('hd')!.getAttribute('aria-disabled')).toBe('true');
     expect(item('hd')!.getAttribute('title')).toContain('1920');
-    // 插帧不受 HD 分辨率门槛限制
     expect(item('interpolation')!.getAttribute('aria-disabled')).toBeNull();
     expect(item('interpolation')!.getAttribute('title')).toBe('提升视频帧率，画面更流畅');
-    // 触发钮文字是「高清」：HD 项被拦时点击不派发（不自动改派插帧）
     await act(async () => {
       trigger().click();
     });
     expect(onVideoEnhance).not.toHaveBeenCalled();
     expect(onFrameInterpolation).not.toHaveBeenCalled();
-    // 从菜单可选插帧
     await hoverIn();
     await act(async () => {
       item('interpolation')!.click();
@@ -1225,20 +1123,16 @@ describe('MediaNodeToolbar 「高清 ▾」下拉入口（IKH3VG 原链路 / IKH
   });
 
   it('HD 项置灰时触发钮带该项原因 title（ADR-0113 决策四）：点击不派发，用户知道「高清」为什么点不动', async () => {
-    // 超输入上限：整钮不置灰（只看未关联资产），但触发钮直启的 HD 项已被拦——原因须挂到触发钮
     await renderToolbar('video', { data: { assetId: 'a1', width: 2561, height: 1440 } });
     expect(trigger().getAttribute('aria-disabled')).toBeNull();
     expect(trigger().getAttribute('title')).toContain('1920');
 
-    // 低于输入下限（短边 < 360）同款
     await renderToolbar('video', { id: 'floor', data: { assetId: 'a1', width: 640, height: 359 } });
     expect(trigger().getAttribute('title')).toContain('360');
 
-    // 两项都可用：触发钮维持无 title（可用态原因通道为空，菜单项仍各自的 hint）
     await renderToolbar('video', { id: 'ok', data: { assetId: 'a1', width: 1280, height: 720 } });
     expect(trigger().getAttribute('title')).toBeNull();
 
-    // 未关联资产：整钮原因优先（触发钮与两项同句，通道由 aria-disabled 区分）
     await renderToolbar('video', { id: 'noasset', data: {} });
     expect(trigger().getAttribute('aria-disabled')).toBe('true');
     expect(trigger().getAttribute('title')).toContain('尚未关联资产');
@@ -1271,10 +1165,6 @@ describe('MediaNodeToolbar 「高清 ▾」下拉入口（IKH3VG 原链路 / IKH
   });
 });
 
-/* IKH8BJ：视频卡「场景切分」入口——形态同「音视频分离」（图标+文字单按钮、native disabled
-   置灰 + title 悬停原因/可用态 hint），落「音视频分离」之后、分隔线之前；置灰门槛两条
-   （未关联资产 / 时长超 2 小时且有时长数据，缺失放行）与 Toolbar 侧断言同族，
-   门槛纯逻辑另见 sceneSplit.test.ts；点击派发 onSceneSplit 进入编辑态（IKH8BR 交付）。 */
 describe('MediaNodeToolbar 场景切分入口（IKH8BJ）', () => {
   const btn = () => [...mountNode.querySelectorAll('button')]
     .find((b) => b.textContent?.includes('场景切分'))!;
@@ -1287,7 +1177,6 @@ describe('MediaNodeToolbar 场景切分入口（IKH8BJ）', () => {
         ? 'divider'
         : (el.textContent?.trim() || el.getAttribute('title') || ''),
     );
-    // IKHK7N 起「智能抠像 ▾」插在「场景切分」之后、分隔线之前
     expect(seq).toEqual(['HD高清', '智能去字幕', '音视频分离', '场景切分', '智能抠像', 'divider', '详情', '下载', '添加到 Agent 聊天']);
   });
 
@@ -1349,15 +1238,6 @@ describe('MediaNodeToolbar 场景切分入口（IKH8BJ）', () => {
   });
 });
 
-/* IKHK7N（ADR-0112）：视频卡「智能抠像 ▾」下拉入口，交互口径与「智能去字幕 ▾」/
-   「音视频分离 ▾」同构但独立实例（悬停自动展开、移出 120ms 延迟关闭、Esc/点外立即关闭、
-   点击触发钮直启首项）。家族差异：模式选择前置到入口下拉——两项纯文字「人像抠像」
-   （任意视频只识别人物主体）+「绿幕抠像」（绿幕/纯色背景素材，主体可为人、物品、动物），
-   各自派发 onSmartMatting(id, mode) 进入编辑态（编辑态本体归 IKHK9N，本套只验收回调
-   被正确调用）；触发钮可用态 title 保留入口效果边界说明（同音视频分离 triggerHint 口径）。
-   门槛两条（未关联资产 / 时长超 10 分钟且有时长数据，缺失放行，ADR-0112 对齐去字幕）：
-   整钮 aria-disabled 置灰、点击无效，hover 仍展开菜单看两项说明与置灰原因。
-   合成事件口径同上：mouseover/mouseout + relatedTarget 在 wrap 外。 */
 describe('MediaNodeToolbar 「智能抠像 ▾」下拉入口（IKHK7N）', () => {
   const trigger = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="smart-matting-menu-trigger"]')!;
   const menu = () => mountNode.querySelector('[data-testid="smart-matting-menu"]');
@@ -1376,7 +1256,6 @@ describe('MediaNodeToolbar 「智能抠像 ▾」下拉入口（IKHK7N）', () =
     });
   }
 
-  /** 推进 hover 延迟关闭的等待时间（120ms 窗口 + 余量） */
   async function settleHoverClose() {
     await act(async () => {
       vi.advanceTimersByTime(200);
@@ -1417,7 +1296,6 @@ describe('MediaNodeToolbar 「智能抠像 ▾」下拉入口（IKHK7N）', () =
     await hoverIn();
     const rendered = [...mountNode.querySelectorAll('[data-testid^="smart-matting-menu-item-"]')];
     expect(rendered.map((b) => b.textContent)).toEqual(['人像抠像', '绿幕抠像']);
-    // 纯文字：菜单项内不渲染图标（svg）
     expect(rendered.every((b) => b.querySelector('svg') === null)).toBe(true);
     expect(item('portrait')!.getAttribute('title')).toContain('人物');
     expect(item('greenscreen')!.getAttribute('title')).toContain('纯色背景');
@@ -1427,7 +1305,6 @@ describe('MediaNodeToolbar 「智能抠像 ▾」下拉入口（IKHK7N）', () =
     await renderToolbar('video', { data: { onSmartMatting: vi.fn(), assetId: 'a1' } });
     await hoverIn();
     await hoverOut();
-    // 延迟窗口内菜单保持（指针可从触发钮滑向菜单项）
     expect(menu()).not.toBeNull();
     await settleHoverClose();
     expect(menu()).toBeNull();
@@ -1472,7 +1349,6 @@ describe('MediaNodeToolbar 「智能抠像 ▾」下拉入口（IKHK7N）', () =
       item('greenscreen')!.click();
     });
     expect(onSmartMatting).toHaveBeenCalledWith('video-node', 'greenscreen');
-    // 选择后菜单收起
     expect(menu()).toBeNull();
 
     await hoverIn();
@@ -1487,14 +1363,13 @@ describe('MediaNodeToolbar 「智能抠像 ▾」下拉入口（IKHK7N）', () =
     await renderToolbar('video', { data: { onSmartMatting } });
     const btn = trigger();
     expect(btn.getAttribute('aria-disabled')).toBe('true');
-    expect(btn.disabled).toBe(false); // aria-disabled 而非原生 disabled：hover 仍需可展开
+    expect(btn.disabled).toBe(false);
     expect(btn.getAttribute('title')).toContain('尚未关联资产');
     await act(async () => {
       btn.click();
     });
     expect(onSmartMatting).not.toHaveBeenCalled();
 
-    // hover 仍可展开看说明与原因：两项 title 恒为自己的 hint，点击均不派发
     await hoverIn();
     expect(menu()).not.toBeNull();
     const portrait = item('portrait')!;
@@ -1530,7 +1405,7 @@ describe('MediaNodeToolbar 「智能抠像 ▾」下拉入口（IKHK7N）', () =
     await renderToolbar('video', { data: { onSmartMatting, assetId: 'a1' } });
     const btn = trigger();
     expect(btn.getAttribute('aria-disabled')).toBeNull();
-    expect(btn.getAttribute('title')).toContain('背景'); // SMART_MATTING_ENTRY_HINT
+    expect(btn.getAttribute('title')).toContain('背景');
     await act(async () => {
       btn.click();
     });

@@ -30,17 +30,6 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * 素材状态跟进 SQL 真库集成测试（ADR-0087 决策 4）。
- * <p>
- * 为什么必须有这一层：{@code MaterialStatusPollerTest} 把 mapper 全 mock 掉了——
- * `listProcessingWithin` 的窗口表达式（`DATE_SUB(NOW(), INTERVAL ? MINUTE)`）或
- * `mirrorStatus` 的 WHERE 谓词写错，单测一条都不会红，而表现是「跟进器静默什么都不做」。
- * 这里跑真 MySQL，把 DDL 与 SQL 一起钉住。
- * <p>
- * 接线沿用 {@code JobStateMachineMySqlIntegrationTest}：手动 ApplicationContext，
- * 只注册本测试需要的 Mapper（不扫 autoconfig / 不起 MQ / 不起 @Scheduled）。
- */
 @Testcontainers(disabledWithoutDocker = true)
 @DisplayName("素材状态跟进 SQL 真库集成测试（MySQL Testcontainers）")
 class MaterialAssetMapperMySqlIntegrationTest {
@@ -70,9 +59,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
             cfg.setUsername(mysql.getUsername());
             cfg.setPassword(mysql.getPassword());
             cfg.setMaximumPoolSize(5);
-            // 时间口径（IKHJ0Q）：与生产 DataSourceConfig 同款。集成测试手工装配 Hikari，不扫 autoconfig——
-            // 不补这一条就会在 UTC 会话下跑而生产跑在 +08:00，而所有到期判断都在 SQL 里对 NOW()，
-            // 「窗口静默失效」这类 bug 一条都测不出来。容器默认时区仍留 +00:00 是刻意的：正好证明它能覆盖服务端默认值。
             cfg.setConnectionInitSql("SET time_zone='+08:00'");
             return new HikariDataSource(cfg);
         }
@@ -81,7 +67,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
         SqlSessionFactory sqlSessionFactory(DataSource ds) throws Exception {
             MybatisSqlSessionFactoryBean f = new MybatisSqlSessionFactoryBean();
             f.setDataSource(ds);
-            // 默认 MybatisConfiguration（mapUnderscoreToCamelCase=true）——与生产同款
             return f.getObject();
         }
 
@@ -118,7 +103,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
         jdbc.execute("DELETE FROM assets WHERE id IN (880001, 880002)");
     }
 
-    /** 直接插一行，可控 gmt_create（跟随窗口的判据就是它）。 */
     private void insert(String materialId, long userId, String status, int ageMinutes) {
         jdbc.update("""
                 INSERT INTO material_assets
@@ -206,8 +190,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM material_assets", Integer.class)).isZero();
     }
 
-    // 评审补强：Failed 是吸收态。拦截点信任本地 Active 就不再查上游，所以一次陈旧的
-    // ListAssets 镜像若能把它翻回 Active，整条闸门就被过期响应打开了。真库验这条 SQL。
     @Test
     @DisplayName("mirrorStatus：Failed 是吸收态，不被 Active/Processing 覆写")
     void failedIsAbsorbing() {
@@ -240,7 +222,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
         assertThat(read("asset-flip").get("status")).isEqualTo("Processing");
     }
 
-    // 步骤②（清关联）的关键路径，跟进器会走它、且完全绕开 TS 侧，此前无真库覆盖。
     @Test
     @DisplayName("clearMaterialLink：两列一起清（只清 material_id 会留下悬空组关联）")
     void clearMaterialLinkClearsBothColumns() {

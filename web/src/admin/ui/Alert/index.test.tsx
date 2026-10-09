@@ -49,7 +49,6 @@ describe('Alert', () => {
     const withoutTitle = await render({ children: 'x' });
     const bodyClass = withoutTitle.firstElementChild?.firstElementChild?.className;
 
-    // 空标题会占一行高度，让一条单行提示变成两行
     expect(bodyClass).not.toBe(titleClass);
   });
 
@@ -62,7 +61,6 @@ describe('Alert', () => {
       await act(async () => root.unmount());
       root = createRoot(mountNode);
     }
-    // 四种调子必须互相区分，否则「配色表达严重程度」就是空话
     expect(new Set(classes).size).toBe(tones.length);
   });
 

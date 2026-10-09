@@ -44,8 +44,6 @@ export class AuthGuard implements CanActivate {
     }
     (request as RequestWithUser).loginToken = token;
 
-    // 第一道：验签与有效期（IKJAZL）。篡改过 / 过期的令牌在**碰 Redis 之前**就被挡掉——
-    // 否则每一次伪造请求都要打一次 Redis，而鉴权是最容易被刷的那条路径。
     try {
       await this.sessions.verifyToken(token);
     } catch {
@@ -63,11 +61,8 @@ export class AuthGuard implements CanActivate {
       throw new NewApiError("登录已过期，请重新登录", 401, "unauthorized");
     }
 
-    // role/status 定期复核（冻结/降权近实时生效；我方身份库不可达时沿用缓存身份，不阻断请求）
     if (session.needsRecheck) {
       try {
-        // ⚠️ 复核的是**会话里的 userId**，不是会话里的 sk——那把 key 是项目级统一
-        //    key，拿它去问上游只会问出统一 key 属主一个人的 role/status。
         const { role, status } = await this.identity.resolveAccessState(
           session.userId,
         );
@@ -79,14 +74,12 @@ export class AuthGuard implements CanActivate {
         };
         await this.sessions.updateSessionIdentity(token, { role, status });
       } catch {
-        // 身份库不可达：沿用缓存 role/status
       }
     }
     if (session.status !== ENABLED_STATUS) {
       throw new NewApiError("账户已停用", 403, "account_disabled");
     }
 
-    // 滑动续期：刷新 HttpOnly cookie maxAge，与 Redis TTL 对齐（活跃用户不被 7 天硬踢）
     response.cookie(SESSION_COOKIE_NAME, token, sessionCookieOptions());
 
     (request as RequestWithUser).user = {

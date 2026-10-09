@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeFlyoutOffset } from './flyoutAnchor';
 
-/** 主面板：视口顶部 300，高 242（搜索框 36 + 间距 + 小标题 + 四行分类 + 内边距） */
 const panel = { panelTop: 300, panelHeight: 242 };
-/** 「文本」行是最后一行，顶部相对面板 72 + 3×38 = 186 */
 const textRow = { ...panel, rowTop: 486 };
 
 describe('computeFlyoutOffset', () => {

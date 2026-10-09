@@ -1,5 +1,3 @@
-// IKJJQW：媒体工具共享受理段的单测（先例：handle-create-generation-job.test.ts 的 mock 口径）。
-// 只测外部可见行为：剥离/摘要纯函数、受理主体的事务编排次序、重放/冲突/受控错误分支。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { lockMock, writeRowsMock, bindingViewMock, readIdemMock, writeIdemMock } = vi.hoisted(() => ({
@@ -18,7 +16,6 @@ vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
     writeCanvasRecoveryRows: writeRowsMock,
     canvasBindingView: bindingViewMock,
     readCreateIdempotency: readIdemMock,
-    // 事务直通（媒体工具事务内无外部等待，测试只验编排次序）。
     transactionWithUniqueRetry: (_prisma: unknown, fn: (tx: unknown) => Promise<unknown>) =>
       fn(_prisma),
   };
@@ -135,8 +132,6 @@ describe("stripCanvasBinding：三段校验收敛（IKJLTZ）", () => {
   });
 
   it("compares the carrier value strictly without trimming", () => {
-    // 防抹平契约：trim 口径归调用方（头形态 trim / client_token 严格原值——其 pattern 允许
-    // 空白），helper 内统一 trim 会放行带空白 client_token，行为变化。
     const gate = stripCanvasBinding(
       { canvas_binding: BINDING },
       "client_token",
@@ -196,7 +191,6 @@ describe("createMediaToolJobWithRecovery：受理主体编排", () => {
     expect(out.kind).toBe("ok");
     if (out.kind !== "ok") return;
     expect(out.bindingView?.is_current).toBe(true);
-    // 编排次序：锁 → 建行 → 恢复行 → 幂等行；建行拿到的是事务 client。
     expect(lockMock).toHaveBeenCalledTimes(1);
     expect(createJob).toHaveBeenCalledTimes(1);
     const txArg = createJob.mock.calls[0][0];
@@ -222,7 +216,6 @@ describe("createMediaToolJobWithRecovery：受理主体编排", () => {
       status: "processing",
       bindingView: null,
     });
-    // 重放回原关联（现查视图），零建行零恢复行零幂等行写入。
     expect(bindingViewMock).toHaveBeenCalledWith(prisma, "55", BINDING.submission_id);
     expect(createJob).not.toHaveBeenCalled();
     expect(lockMock).not.toHaveBeenCalled();
@@ -252,7 +245,6 @@ describe("createMediaToolJobWithRecovery：受理主体编排", () => {
     if (out.kind !== "envelope") return;
     expect(out.envelope.code).toBe(409);
     expect(out.envelope.data.reason).toBe("canvas_binding_conflict");
-    // 冲突在任务写入与恢复行之前（B.3 步骤 2-4）。
     expect(writeRowsMock).not.toHaveBeenCalled();
   });
 
@@ -296,7 +288,6 @@ describe("readAcceptedMediaToolReplay / renderMediaToolReplay：前置幂等回�
       status: "processing",
       bindingView: expect.objectContaining({ job_id: "400", is_current: true }),
     });
-    // 渲染与各服务建行成功响应同口径（job_id / status / canvas_binding）。
     const rendered = renderMediaToolReplay(replay!);
     expect(rendered.code).toBe(200);
     expect(rendered.data).toMatchObject({
@@ -331,7 +322,6 @@ describe("readAcceptedMediaToolReplay / renderMediaToolReplay：前置幂等回�
       key: "token-1",
     });
     expect(replay).toEqual({ kind: "ok", jobId: "401", status: "queued", bindingView: null });
-    // legacy 冲突口径：video-mattings 传入既有码与文案的 fail 工厂。
     const conflict = renderMediaToolReplay({ kind: "idempotency_conflict" }, () => ({
       code: 100302,
       msg: "client_token 已被使用（同 token 仅可重放相同参数）",

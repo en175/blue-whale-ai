@@ -1,4 +1,3 @@
-/* 拖线落到不能连接的加号时，跟在指针上方的灰底提示 */
 .hint {
   position: fixed;
   z-index: 80;

@@ -1,6 +1,3 @@
-/* ============================================
- * CardGallery 首页作品卡片画廊：模板展示与复用
- * ============================================ */
 import { useEffect, useState } from 'react';
 import {
   Megaphone,
@@ -26,7 +23,6 @@ import {
   type GalleryMediaKind,
 } from './galleryCardModel';
 
-/** 图标映射：按 tag_code / label 对应现有图标，无匹配返回默认图标 */
 const TAG_ICON_BY_CODE: Record<string, LucideIcon> = {
   marketing: Megaphone,
   short: Clapperboard,
@@ -52,24 +48,20 @@ const DEFAULT_TAG_ICON = Sparkles;
 const iconForTag = (tag: TemplateTag): LucideIcon =>
   TAG_ICON_BY_CODE[tag.tag_code] ?? TAG_ICON_BY_LABEL[tag.label] ?? DEFAULT_TAG_ICON;
 
-/** 接口失败时的兜底标签（IKA64P：双栏） */
 const FALLBACK_TAGS: TemplateTag[] = [
   { tag_code: 'video', label: '视频' },
   { tag_code: 'picture', label: '图片' },
 ];
 
-/** layout 样式映射：wide 为当前默认卡片样式，social 为竖版卡片，其他布局后续扩展 */
 const LAYOUT_CLASS: Record<string, string> = {
   wide: '',
   social: styles.cardSocial,
 };
 
-/** 截断文字：超过30字展示省略号 */
 function truncate(text: string, max = 30) {
   return text.length > max ? text.slice(0, max) + '...' : text;
 }
 
-/** 单张画廊卡片：形态由 tagCode 决定；图片卡即使 images 为空也不走视频壳 */
 function GalleryCard({
   record,
   mediaKind,
@@ -134,11 +126,9 @@ function GalleryCard({
 
 export default function CardGallery({ onCardClick }: { onCardClick?: (text: string, mediaType: 'video' | 'image') => void }) {
   const [tags, setTags] = useState<TemplateTag[]>(FALLBACK_TAGS);
-  /** IKA64P：初始空值，加载后取接口返回首个可见标签 */
   const [activeTag, setActiveTag] = useState('');
   const [records, setRecords] = useState<TemplateRecord[]>([]);
 
-  // 加载画廊标签；失败保留兜底列表并落到兜底首标签（IKA64P 修复：避免空 activeTag 导致卡片永久空白）
   useEffect(() => {
     fetchTemplateTags()
       .then((list) => {
@@ -151,7 +141,6 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
       .catch(() => setActiveTag((prev) => prev || FALLBACK_TAGS[0].tag_code));
   }, []);
 
-  // 加载当前标签下的卡片列表（默认 page=1, size=50；IKA64P：标签未定时不发请求）
   useEffect(() => {
     if (!activeTag) return;
     let alive = true;
@@ -169,7 +158,7 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
 
   return (
     <div className={styles.gallery}>
-      {/* Tab 栏 */}
+      {}
       <div className={styles.tabBar}>
         {tags.map((tag) => {
           const Icon = iconForTag(tag);
@@ -186,7 +175,7 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
         })}
       </div>
 
-      {/* 卡片网格：视频 / 图片同一行 4 张 */}
+      {}
       <div className={styles.cardGrid} data-testid="gallery-card-grid">
         {records.map((record, idx) => {
           const mediaKind = mediaKindFromTagCode(activeTag);

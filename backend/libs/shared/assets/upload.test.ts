@@ -7,12 +7,6 @@ import {
   handlePresignAsset,
 } from "./upload.js";
 
-/**
- * 拒绝要**抛**，而且抛出来的错误必须同时钉住 `code` 与 `status`。
- *
- * 只断言 code 是不够的——这次修的正是「信封里 code=400，HTTP 却回 201」。少了 status 这一格，
- * 同样的 bug 明天可以原样再来一次而测试全绿。
- */
 async function expectRejected(
   run: () => Promise<unknown>,
   expected: { code: number; status: number },
@@ -37,10 +31,6 @@ const ASSET = {
 
 const VALID_MD5 = "aabbccddeeff00112233445566778899";
 
-/**
- * IKI65H：上传接口回显素材审核状态用的只读口。默认 `Active`——绝大多数用例不关心它，
- * 关心状态的用例自己换返回值。
- */
 const statusReader = (status: string | null = "Active") => ({
   load: vi.fn().mockResolvedValue(status),
 });
@@ -74,7 +64,6 @@ describe("handleDedupAsset（IKCNLS）", () => {
           duration: null,
           mime: "video/mp4",
           size: 100,
-          // IKI65H：两个字段恒在，这条资产没绑素材 → 都是 null。
           material_id: null,
           material_status: null,
         },
@@ -156,11 +145,8 @@ describe("presign 的格式门（2026-09-05 深度回归）", () => {
     deleteMultiObjects: vi.fn(),
   });
 
-  // TOS 对 SVG 做图片处理会挂死（测试站实测 25 秒零字节），所以不让它进库。
-  // 挡在上传口，用户拖文件的当下就知道要换格式。
   it("SVG 在上传口就被挡下，且没有向存储要过预签名", async () => {
     const s = storage();
-    // 2003 = 格式读不了。HTTP 必须也是 400——此前这里回的是 201，信封说失败、传输层说创建成功。
     await expectRejected(
       () => handlePresignAsset("7", { type: "image", mime: "image/svg+xml", size: 4096 }, s),
       { code: 2003, status: 400 },
@@ -183,7 +169,6 @@ describe("presign 的格式门（2026-09-05 深度回归）", () => {
     });
   });
 
-  // HEIC 是 iPhone 拍照的默认格式，TOS 转得动、模型读得了，不该被挡。
   it("HEIC 放行——TOS 会把它转成 JPEG 给模型读", async () => {
     const s = storage();
     const outcome = await handlePresignAsset(
@@ -196,13 +181,6 @@ describe("presign 的格式门（2026-09-05 深度回归）", () => {
 });
 
 
-/**
- * IKE53U：上传口读一次文件本身。
- *
- * 此前 complete 校验的全是声明值——type、mime、size，以及对象存储上的 size 与 Content-Type
- * 是否与声明一致。而 Content-Type 正是客户端 PUT 时自己写的，两边天然自洽。测试站
- * 2026-09-08 的 asset_id=6012 就这么进了库：524 字节随机数据、声明 image/jpeg、一路畅通。
- */
 describe("complete 的文件头校验（IKE53U）", () => {
   const head = (...values: number[]) => {
     const buffer = new Uint8Array(32);
@@ -245,8 +223,6 @@ describe("complete 的文件头校验（IKE53U）", () => {
     );
 
   it("拒收时把刚直传上去的那份字节删掉，不在桶里留孤儿", async () => {
-    // 字节比这道门先落地：前端拿预签名地址直传对象存储，后端不在那条路上。被拒的上传如果
-    // 不清理，桶里就留下一个谁也不引用的对象，而素材 GC 至今没跑。
     const deps = completeDeps(head(0xab, 0xcd, 0xef, 0x12));
     await expect(complete(deps)).rejects.toBeInstanceOf(DomainError);
     expect(
@@ -263,9 +239,7 @@ describe("complete 的文件头校验（IKE53U）", () => {
   });
 
   it("字节认不出任何容器就拒收，不落库", async () => {
-    // 那份坏文件的真实头：AB CD EF 12，而 JPEG 该是 FF D8 FF。
     const deps = completeDeps(head(0xab, 0xcd, 0xef, 0x12, 0x00, 0x10, 0x4a, 0x46));
-    // 2010 = 文件打不开。与 2003「格式不支持」是两条不同的话，措辞和码都不许混。
     await expectRejected(() => complete(deps), { code: 2010, status: 400 });
     expect(
       (deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
@@ -289,19 +263,12 @@ describe("complete 的文件头校验（IKE53U）", () => {
   });
 
   it("认出来但不是声明的那一类也拒——按字节说的算", async () => {
-    // 声明 image，字节是 MP4：ftyp 盒子的 brand 是 isom。
     const mp4 = new Uint8Array(32);
     mp4.set(new TextEncoder().encode("ftypisom"), 4);
     const deps = completeDeps(mp4);
-    // 认得出、但不是声明的那一类：请求合法而内容不符语义，归 422。
     await expectRejected(() => complete(deps), { code: 2012, status: 422 });
   });
 
-  /**
-   * 读不到和认不出要分开。取字节失败（存储抖动、适配器没实现）时放行——这道门是为了挡住
-   * 明显不是媒体的文件，不该因为一次网络抖动把正常上传拒掉，那是最容易让人白白重传三次的
-   * 一种错话。
-   */
   it("读不到文件头时放行，不把一次抖动说成「你的文件坏了」", async () => {
     await expect(complete(completeDeps(null))).resolves.toMatchObject({ code: 200 });
   });
@@ -327,7 +294,6 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
     check: vi.fn().mockResolvedValue({ ok: false, message }),
   });
 
-  /** complete 的正常路径：对象在、文件头读不到（放行）、没有已存在的行。 */
   const completeDeps = (materialGate: unknown, overrides: Record<string, unknown> = {}) => ({
     projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "313" }) } as never,
     uploads: {
@@ -381,7 +347,6 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
     );
     expect(error.message).toBe(NOT_APPROVED);
     expect(gate.check).toHaveBeenCalledWith("9", MATERIAL);
-    // 被拒的素材，查到可复用资产也不该关联出去——查都别查。
     expect(findOwnedByMd5).not.toHaveBeenCalled();
   });
 
@@ -400,7 +365,6 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
         ),
       { code: 2013, status: 400 },
     );
-    // 一个码两条 msg 是刻意的（与生成门同款口径）；拆成两个码会让前端维护两套分流规则。
     expect(error.message).toBe(UNAVAILABLE);
   });
 
@@ -476,8 +440,6 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
       { code: 2013, status: 400 },
     );
     expect(error.message).toBe(NOT_APPROVED);
-    // 返回 400 却把行建出来，只会留下一个前端拿不到 id、谁也引用不到的孤儿行——
-    // 比桶里那份孤儿对象更脏。所以「拒绝」必须同时意味着「不落本地痕迹」。
     expect(
       (deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
         .createUploadedAsset,
@@ -600,19 +562,12 @@ describe("complete 的来源标记（IKGOTB 遮罩中间素材不进资产列表
   });
 });
 
-/**
- * IKI65H：上传接口回显这条资产绑的素材（`material_id`）与它的审核状态（`material_status`）。
- *
- * 动因是 ADR-0093 决策 6 末句那句「改由服务端返回值决定」——前端 `toLocalAssetRecord` 至今
- * 硬编码 `material_status: 'Active'`，而服务端根本没返回过这个值。
- */
 describe("上传接口回显素材关联与状态（IKI65H）", () => {
   const MATERIAL = "asset-20260820153209-6c9z8";
   const OLD_MATERIAL = "asset-20260701090000-oldoldoldold";
   const GROUP = "group-20260827113901-cbkmf";
   const NOT_APPROVED = "该素材未审核通过，不能用于视频生成";
 
-  /** 一条已绑素材的资产行。 */
   const boundAsset = (materialId: string = MATERIAL) => ({
     ...ASSET,
     material_id: materialId,
@@ -620,11 +575,9 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
 
   type MaterialFields = { material_id: string | null; material_status: string | null };
 
-  /** dedup 响应的 data.asset。 */
   const dedupAsset = (result: unknown) =>
     (result as { data: { asset: MaterialFields } }).data.asset;
 
-  /** complete 响应的 data（它本身就是资产，不像 dedup 那样套一层）。 */
   const completeData = (result: unknown) =>
     (result as { data: MaterialFields }).data;
 
@@ -670,13 +623,10 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
       material_id: null,
       material_status: null,
     });
-    // 没绑素材就没有可查的 id——不该白发一次查询。
     expect(deps.materialStatus.load).not.toHaveBeenCalled();
   });
 
   it("dedup 命中并当场改嫁：回显刚绑上的那个，不是行上的旧值", async () => {
-    // `reusable` 是 bindMaterialId **之前**读出来的行，它的 material_id 还是旧值。
-    // 照行上原值回显就会给出一个已经不成立的关联。
     const deps = dedupDeps(boundAsset(OLD_MATERIAL));
     const result = await handleDedupAsset(
       "9",
@@ -693,7 +643,6 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
   it("dedup 未命中：响应里没有 asset，也就没有这两个字段", async () => {
     const deps = dedupDeps(null, "Active", { findOwnedByMd5: vi.fn().mockResolvedValue(null) });
     const result = await handleDedupAsset("9", DEDUP_INPUT, deps as never);
-    // toEqual 而非 toMatchObject：多出任何字段都算破坏既有形状。
     expect(result).toEqual({ code: 200, data: { dedup: false }, msg: null });
     expect(deps.materialStatus.load).not.toHaveBeenCalled();
   });
@@ -767,14 +716,6 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
     expect(deps.materialStatus.load).not.toHaveBeenCalled();
   });
 
-  /**
-   * 这条是这个字段真正值钱的地方。
-   *
-   * 幂等重放分支**不重新过闸**（理由见 upload.ts 里的注释：一次重放不该按此刻的素材状态改写
-   * 既有结果，何况重放命中时若因闸不过去删对象，删的正是既有资产行引用的那一份）。于是资产
-   * 可能挂着一个**后来**被判 Failed 的素材，而接口照回 200——除了读响应里的 `material_status`，
-   * 调用方没有别的办法知道这件事。
-   */
   it("complete 幂等重放：行上绑着已 Failed 的素材、闸也不过 → 照实回 Failed", async () => {
     const deps = completeDeps("Failed", {
       findCommittedUpload: vi.fn().mockResolvedValue(boundAsset()),
@@ -787,7 +728,6 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
       material_id: MATERIAL,
       material_status: "Failed",
     });
-    // 不被重放分支的闸结论影响：这里仍然成功返回，没有抛 2013。
     expect(result).toMatchObject({ code: 200 });
   });
 
@@ -807,12 +747,6 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
     );
   });
 
-  /**
-   * 过闸这一步**带副作用**：`assertMaterialLinkable` 在「本地行非终态 + 上游判 Failed」时走
-   * `handleUpstreamMaterialFailure`，那里面有一步 `clearMaterialLink`，会把这条资产上的
-   * `material_id` 清成 NULL（ADR-0087 的统一处置）。而 `existing` 是**过闸之前**读的行——
-   * 照它回显，响应会给出一个库里已经不存在的关联，同一资产在 `GET /api/assets` 那边却是 null。
-   */
   it("complete 幂等重放：闸不过且顺手清了关联 → 回读库，不撒谎", async () => {
     const deps = completeDeps("Failed", {
       findCommittedUpload: vi
@@ -828,7 +762,6 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
       material_id: null,
       material_status: null,
     });
-    // 关联没了就不该再白查一次状态。
     expect(deps.materialStatus.load).not.toHaveBeenCalled();
   });
 });

@@ -14,9 +14,6 @@ const billing = vi.hoisted(() => ({
   deleteMemberDiscount: vi.fn(),
 }));
 
-// billing 的管理端 HTTP 面没有鉴权、只在内部网络 —— 这条路由是唯一入口，
-// 所以「参数怎么外发」与「错误怎么分类」都要在这里钉住。
-// 只替换网络调用，错误类型仍用真实实现（分类逻辑依赖 instanceof，替身会让它失真）。
 vi.mock("@lib/shared/billing/billing-admin-client.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, ...billing };
@@ -77,7 +74,6 @@ describe("AdminBillingDiscountsController.create", () => {
   it("形状不对 → 400，且不打扰 billing", async () => {
     billing.createMemberDiscount.mockClear();
 
-    // 字符串形式的折扣：billing 那边会报一句关于 JSON 类型的话，而真正的问题是界面上那个框
     for (const body of [{}, { ...VALID_BODY, discountBp: "9000" }, { ...VALID_BODY, tier: "  " }]) {
       await expect(createController().create(body)).rejects.toMatchObject({ status: 400 });
     }

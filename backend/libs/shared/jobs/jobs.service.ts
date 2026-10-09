@@ -30,7 +30,6 @@ export interface ListJobsQuery {
   size: number;
 }
 
-/** 管理端任务记录的一行：与仓库层相比，把 `stored_error` 换成了投影后的 `error`。 */
 export type AdminJobRecord = Omit<AdminJobListItem, "stored_error"> & {
   error: PublicGenerationError | null;
 };
@@ -95,43 +94,17 @@ export class JobsService {
     });
   }
 
-  /**
-   * 管理端任务列表（全站，offset 分页）。
-   *
-   * <p>与 {@link list} 的差别只有「谁的」：那条按登录用户过滤（用户只看自己的），
-   * 这条可以不过滤（管理端要看全站）或指定某个用户。投影口径一致——
-   * 失败原因用的是**同一份** {@link projectPublicError}，所以管理端看到的文案
-   * 与用户申诉时看到的是同一句，不必再去猜「他说的那个报错是哪个码」。
-   *
-   * <p>⚠️ 不做归属校验（那是 user 面的 `getStatus` 才需要的）：能进这个方法的调用者
-   *    已经过了 `AdminGuard`。
-   */
   async listForAdmin(filter: AdminJobListFilter): Promise<AdminJobListResult> {
     const page = await this.repo.listForAdmin(filter);
     return {
       ...page,
       records: page.records.map(({ stored_error: storedError, ...record }) => ({
         ...record,
-        // 与 listByUser 同一个投影器：管理端与用户端看到的是同一句话
         error: projectPublicError(storedError ?? null, record.type),
       })),
     };
   }
 
-  /**
-   * 一批 job id → 「这个任务是什么」（类型 / 模型 / 提示词）。
-   *
-   * <p>调用方是**积分记录页的 BFF**：那一页的行来自 billing 账本，而 billing 只存
-   * `generation_job_id`——任务的语义全在我们自己的库里（ADR-0114 不共享库，它读不到）。
-   * 所以由 BFF 收了 id 再回这里批量取，合并进同一个响应。
-   *
-   * <p>⚠️ **本层不设条数上限**：调用方一页最多 `MAX_PAGE_SIZE`(100) 行，条数天然被页大小
-   *    框住。在这里再截一刀只会**静默**少 enrich 几行——上限该由分页那条约束表达，
-   *    不该由这里暗中丢数据。
-   *
-   * <p>⚠️ 非法 id 与重复 id 在这里滤掉：前者会让 `BigInt()` 抛（一条脏 id 不该带塌整页），
-   *    后者是白白多查。全部滤空则**不发查询**。
-   */
   async loadTaskSummaries(
     jobIds: readonly string[],
   ): Promise<Map<string, ChargeTaskSummary>> {
@@ -146,25 +119,17 @@ export class JobsService {
     const owned = await this.project.findOwnedById(job.project_id, userId);
     if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
-    // ADR-0078 二期：失败响应结构 —— { code: 数值码, msg: 中文, data: 纯任务字段 }。
-    // 成功保持 code=200；失败不再用 data.error 子对象，错误码提升到顶层。
     if (job.status === "failed") {
       const projected = projectPublicError(job.stored_error, job.type);
-      // stored_error 为 null（历史数据/非对象 error）时 code 与 msg 同步走类型兜底，
-      // 避免 code=1000 与 msg 类型文案脱节。
       const fallback = fallbackErrorCode(job.type);
       const code = projected?.code ?? errorCodeToNumeric(fallback);
       const msg = projected?.message ?? messageFor(fallback, job.type);
       return fail(code, msg, {
-        // IKJFGQ：失败信封 data 携带 canonical 字符串码（与创建侧 4xx 拒单的 data.code 同形）——
-        // 前端失败卡识别优先读它（撞号重排不失效），数值信封码留兜底。
         code: projected?.reason ?? fallback,
         job_id: job.job_id,
         status: job.status,
         progress: job.progress,
         asset: job.asset,
-        // IKIZQ8：失败任务的阶段/来源/截止/费用投影（失败卡按阶段退回冻结积分，
-        // 用户要知道这是哪个阶段失败了）。
         video_stage: job.video_stage,
         source_sample_job_id: job.source_sample_job_id,
         final_job_id: job.final_job_id,
@@ -179,9 +144,6 @@ export class JobsService {
       status: job.status,
       progress: job.progress,
       asset: job.asset,
-      // 一对多产物（IKH8C1 场景切分扇出）：全部产出资源 + 契约 result。result 从终态日志
-      // payload 按契约键挑子集再过 strict schema（payload 另带 asset_ids 等入库字段，不外发），
-      // 校验不过即 null，不向下游投影畸形日志。
       output_assets: job.output_assets,
       result: (() => {
         if (job.result === null) return null;
@@ -190,14 +152,8 @@ export class JobsService {
         const parsed = videoSceneSplitResultSchema.safeParse({ duration, segments });
         return parsed.success ? parsed.data : null;
       })(),
-      // IKFM3S §4：签名投影随详情返回（仅成功路径消费；input 其余字段不下发）。
       text_input_signature: job.text_input_signature,
-      // IKHA2J：vocal_split 多轨结果（契约 VocalSplitTrackResult：track_type / asset_id /
-      // url / duration，轨序 = 契约 SCENE_TRACKS[scene]）；其他任务类型恒 null，asset 单对象
-      // 投影不动（既有单 asset 消费者不受影响）。
       tracks: job.tracks,
-      // IKIZQ8：两阶段视频的阶段/来源/截止/费用投影（契约 videoStageJobProjectionSchema，
-      // 金标 G11——任务详情返回阶段、素材、费用和截止信息；旧任务按普通视频兜底）。
       video_stage: job.video_stage,
       source_sample_job_id: job.source_sample_job_id,
       final_job_id: job.final_job_id,

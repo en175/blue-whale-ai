@@ -31,8 +31,6 @@
   cursor: not-allowed;
 }
 
-/* 数字输入去掉原生 spinner：管理端的排序号这类字段靠手输，spinner 又小又难点，
-   而且它在浅色主题下经常渲染成突兀的灰块。 */
 .input[type='number']::-webkit-outer-spin-button,
 .input[type='number']::-webkit-inner-spin-button {
   appearance: none;

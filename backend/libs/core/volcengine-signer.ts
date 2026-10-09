@@ -1,10 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
 
-/**
- * Volcengine API V4 (HMAC-SHA256) 签名器 —— Node 端口。
- * 与退役的 Java SMS 签名算法保持协议一致，
- * 用于火山 SMS（及后续 TOS/Ark）。仅负责签名，不发请求。
- */
 export interface SignVolcengineRequestInput {
   method: string;
   body: string;
@@ -35,7 +30,6 @@ function hmacSha256(key: Buffer, data: string): Buffer {
   return createHmac("sha256", key).update(data, "utf8").digest();
 }
 
-/** Java SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'") in UTC 的等价实现。 */
 function formatXDate(date: Date): string {
   const pad = (n: number): string => String(n).padStart(2, "0");
   return (

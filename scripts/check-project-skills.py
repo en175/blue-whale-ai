@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Read-only check of the repository's project skill entry points."""
 
 import os
 import subprocess

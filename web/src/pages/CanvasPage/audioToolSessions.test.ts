@@ -29,7 +29,6 @@ it('截取契约：初始化全选/跟随源格式；发送按独立期望冻结
   const inputs: AudioToolSubmission<AudioTrimInput>[] = [];
   const tasks: string[] = [];
   const runtime = createToolSessionRuntime();
-  // IKJJR3：会话提交 = 退会话后同步 startTask（受理归生成任务运行时，无在途受理窗口）
   const trim = runtime.register(createAudioTrimSession(() => ({
     ...host<AudioTrimInput>(node), getProjectId: () => projectId,
     startTask: (input) => {
@@ -72,7 +71,6 @@ it('人声分离契约：通用/aac 默认，冻结所选场景与格式，发�
   const runtime = createToolSessionRuntime();
   const vocal = runtime.register(createVocalSplitSession(() => ({
     getProjectId: () => 'p1', getSourceNode: () => node,
-    // IKJJR5：发送即退会话，任务链路（预建卡 + runtime.submit）整体归宿主 runTask
     runTask: async (input) => {
       expect(vocal.getSnapshot().state).toBeNull();
       inputs.push(input);
@@ -95,9 +93,6 @@ function delayedSession(kind: 'audioTrim' | 'audioSpeed' | 'vocalSplit') {
   const errors: string[] = [];
   const warnings: string[] = [];
   const tasks: string[] = [];
-  // IKJJR3：截取/调速提交为同步 startTask（受理归运行时，无旧响应概念）；
-  // IKJJR5：人声分离会话为 runTask 型（发送即退会话，任务链路归宿主）——迟到/失败
-  // 语义与 createTask+handoff 桩同构：runTask 的 pending promise 由测试手动定夺。
   const vocalBoundary: VocalSplitSessionHost = {
     getProjectId: () => 'p1', getSourceNode: () => node,
     runTask: () => new Promise<void>((resolve, reject) => {
@@ -137,7 +132,7 @@ it.each(['audioTrim', 'audioSpeed'] as const)('%s：提交点同步交接（关�
   for (const change of ['close', 'reopen', 'switch', 'project']) {
     const { runtime, tool, edit, errors, tasks } = delayedSession(kind);
     tool.open('a1', deps); edit(); tool.send();
-    expect(tasks).toEqual(['sync']); // IKJJR3：startTask 同步发出即交接，无旧响应窗口
+    expect(tasks).toEqual(['sync']);
     expect(errors).toEqual([]);
     if (change === 'switch') openOtherTool(runtime, deps);
     else if (change === 'project') runtime.setProject('p2');
@@ -186,7 +181,6 @@ it.each(['audioTrim', 'audioSpeed'] as const)('%s：未发出提示一次并保�
   runtime.reconcileSources(new Set());
   expect(tool.getSnapshot()).toEqual({ state: null, submitting: false });
   expect(errors).toEqual([]);
-  // startTask 返回 false（无项目/提交防重窗口）时警告一次，会话保留可重发
   void params; void warnings; void runtime;
 });
 
@@ -212,5 +206,3 @@ it.each(['audioTrim', 'audioSpeed', 'vocalSplit'] as const)('%s：素材身份�
   expect(pending).toEqual([]);
   expect(warnings).toEqual([kind === 'audioTrim' ? '当前音频尚未关联资产，无法截取' : kind === 'audioSpeed' ? '当前音频尚未关联资产，无法调速' : '当前视频尚未关联资产，无法人声背景分离']);
 });
-
-// 与全部真实编辑工具的双向切换由 canvasToolSessions.test.tsx 的156组公开注册矩阵覆盖。

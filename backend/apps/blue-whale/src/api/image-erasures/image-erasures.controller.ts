@@ -1,6 +1,3 @@
-// IKGOT4：POST /projects/:projectId/image-erasures — 图片擦除建任务端点。
-// IKJJQW（B.3/B.8）：新协议承载——Idempotency-Key 头透传 service（须等于
-// canvas_binding.submission_id）；受控错误（canvas_binding_conflict 等）信封直写 HTTP 状态。
 import { Body, Controller, Headers, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -29,7 +26,6 @@ export class ImageErasuresController {
       body ?? {},
       idempotencyKey,
     );
-    // IKJJQW（B.8 局部适配器）：新协议受控错误信封直写 HTTP 状态与 data.reason。
     if (isRecoveryControlledEnvelope(result)) {
       writeRecoveryControlled(result, res);
       return;

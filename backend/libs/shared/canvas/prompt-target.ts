@@ -9,11 +9,8 @@ export function nodeAssetId(node: PromptTargetNode | undefined): string {
   return String(node?.data?.assetId ?? node?.data?.asset_id ?? node?.data?.assetID ?? "");
 }
 
-/** IKE5G8 实现决定 7.2 的素材缺失文案（规格权威源；勿在调用点另写一份）。 */
 export const MISSING_PROMPT_REF_REASON = "提示词引用的素材缺失或不完整，请补充素材或移除对应引用后再生成";
 
-/** 方案索引消息拼接（「索引 #N、#M：reason」）——只服务方案冻结（planError）的缺失项文案；
- *  通用存在性检查自 IKG6EK / ADR-0088 起走通用信封，不再复用本格式。 */
 export function planIndicesMessage(indices: readonly string[], reason: string): string {
   return `索引 ${indices.join("、") || "（正文）"}：${reason}`;
 }
@@ -45,7 +42,6 @@ export function validatePlanModel(nodeId: string, bindings: PromptBinding[], cou
   if (count > model.features.image_reference_max) planError(nodeId, bindings, `参考图最多 ${model.features.image_reference_max} 张，请调整引用或模型`);
 }
 
-/** Video reference validation uses the existing execution constraints before accepting any edges/job. */
 export function validateVideoPlan(nodeId: string, bindings: PromptBinding[], refs: Array<{ type: string; role: string }>, model: ModelCapabilityView | undefined, mode?: unknown) {
   if (!model) planError(nodeId, bindings, "请选择可用视频模型");
   const videoMode = normalizeVideoMode(mode);

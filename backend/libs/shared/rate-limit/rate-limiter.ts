@@ -15,7 +15,6 @@ export type RateLimitTakeResult = {
   retryAfter?: number;
 };
 
-/** 原子 INCR；首次写入时 EXPIRE。窗口粒度秒。 */
 const INCR_EXPIRE = `
 local n = redis.call('INCR', KEYS[1])
 if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
@@ -60,7 +59,6 @@ export class RateLimiter implements OnModuleDestroy {
     }
   }
 
-  /** 清锁定；传入 windowMs 时同时删当前窗口计数，不 SCAN。 */
   async reset(scope: string, key: string, windowMs?: number): Promise<void> {
     try {
       const keys = [this.blockKey(scope, key)];
@@ -71,7 +69,6 @@ export class RateLimiter implements OnModuleDestroy {
       }
       await this.redis.del(...keys);
     } catch {
-      // fail-open
     }
   }
 
@@ -80,7 +77,6 @@ export class RateLimiter implements OnModuleDestroy {
       const ttlSec = Math.max(1, Math.ceil(durationMs / 1000));
       await this.redis.set(this.blockKey(scope, key), "1", "EX", ttlSec);
     } catch {
-      // fail-open
     }
   }
 

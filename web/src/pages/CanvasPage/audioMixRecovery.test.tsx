@@ -1,17 +1,10 @@
 // @vitest-environment jsdom
-/* IKJJR4 混合任务运行时接入后的页面级回归：
-   - 刷新恢复：历史在卡任务经水合即时续轮询（claims 分派）；新协议受理回执丢失经恢复扫描补卡。
-   - 失败重试：历史卡（无受理关联）走原协议不带绑定；新协议卡（marker）携 canvas_binding
-     新 submission_id（同 jobId 复用、独立提交身份）。
-   - 删除生成中卡：取消确权后移除卡片与来源线。 */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   apiMocks, canvasDocMock, flowProps, mediaNodes, renderPage, unmountPage,
 } from './testing/canvasPageTestHarness';
 
-/** 恢复扫描页（B.5）：按用例注入 records；默认空页。IKJKU9：扫描经 Query 生命周期
- *  取页——mock 提供点换到 queryOptions 的 queryFn（保留真实 key 工厂行为）。 */
 const recoveryPageMock = vi.hoisted(() => ({ current: null as null | { records: unknown[] } }));
 vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
@@ -81,7 +74,7 @@ describe('IKJJR4 混合任务：刷新恢复与失败重试', () => {
   });
 
   it('受理回执丢失的新协议任务经恢复扫描补卡（种子定位/家族卡形态）并续轮询', async () => {
-    seed([sourceCard]); // 任务卡不在画布（回执未落盘）
+    seed([sourceCard]);
     recoveryPageMock.current = {
       records: [{
         submission_id: '11111111-1111-4111-8111-111111111111',
@@ -105,12 +98,11 @@ describe('IKJJR4 混合任务：刷新恢复与失败重试', () => {
       audioMix: { format: 'flac' },
     });
     expect(card.position).toEqual({ x: 640, y: 80 });
-    // 补卡落盘（恢复场景本因卡不在服务端）
     await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled());
   });
 
   it('恢复记录中卡已在画布：直接续轮询（重复扫描不双链、不重复建卡）', async () => {
-    seed(); // audio-mix-73 已在画布（历史在卡）
+    seed();
     recoveryPageMock.current = {
       records: [{
         submission_id: '11111111-1111-4111-8111-111111111111',
@@ -126,7 +118,7 @@ describe('IKJJR4 混合任务：刷新恢复与失败重试', () => {
     await renderPage();
     await vi.waitFor(() => expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('73'));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
-    expect(mediaNodes().filter((node) => node.id === 'audio-mix-73')).toHaveLength(1); // 不重复建卡
+    expect(mediaNodes().filter((node) => node.id === 'audio-mix-73')).toHaveLength(1);
     expect(apiMocks.fetchJobStatus.mock.calls.filter((call) => call[0] === '73').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -139,7 +131,7 @@ describe('IKJJR4 混合任务：刷新恢复与失败重试', () => {
     await act(async () => { onRetry('audio-mix-73'); await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(apiMocks.retryAudioMix).toHaveBeenCalledTimes(1);
     expect(apiMocks.retryAudioMix.mock.calls[0]?.slice(0, 2)).toEqual(['p1', '73']);
-    expect(apiMocks.retryAudioMix.mock.calls[0]?.[4]).toBeUndefined(); // 无绑定 = 历史路径
+    expect(apiMocks.retryAudioMix.mock.calls[0]?.[4]).toBeUndefined();
     expect(mediaNodes().find((node) => node.id === 'audio-mix-73')?.data.genStatus).toBe('generating');
     expect(mediaNodes().filter((node) => node.id === 'audio-mix-73')).toHaveLength(1);
   });
@@ -163,13 +155,13 @@ describe('IKJJR4 混合任务：刷新恢复与失败重试', () => {
     expect(apiMocks.retryAudioMix).toHaveBeenCalledTimes(1);
     const call = apiMocks.retryAudioMix.mock.calls[0];
     expect(call?.[0]).toBe('p1');
-    expect(call?.[1]).toBe('73'); // 专属重试复用同 jobId
+    expect(call?.[1]).toBe('73');
     expect(call?.[2]).toMatch(/^[a-z0-9-]+$/);
-    expect(call?.[2]).not.toBe('11111111-1111-4111-8111-111111111111'); // 新 submission_id ≠ 原受理身份
+    expect(call?.[2]).not.toBe('11111111-1111-4111-8111-111111111111');
     expect(call?.[4]).toMatchObject({
       protocol_version: 1,
-      submission_id: call?.[2], // Idempotency-Key = submission_id
-      target_node_id: 'audio-mix-73', // 原目标由服务端关联校验，前端不换卡
+      submission_id: call?.[2],
+      target_node_id: 'audio-mix-73',
       expected_binding_revision: 0,
     });
     expect(mediaNodes().find((node) => node.id === 'audio-mix-73')?.data.genStatus).toBe('generating');
@@ -186,7 +178,6 @@ describe('IKJJR4 混合任务：刷新恢复与失败重试', () => {
     await vi.waitFor(() => expect(apiMocks.fetchJobStatus).toHaveBeenCalledTimes(1));
     await act(async () => { flowProps.current.onDeleteNode(['audio-mix-73']); await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(apiMocks.cancelGenerationJob).toHaveBeenCalledWith('p1', '73');
-    // 删除登记时任务仍在途（processing）：登记删除意图，轮询终态（2.5s 拍）驱动移除
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2700)); });
     expect(mediaNodes().map((node) => node.id)).not.toContain('audio-mix-73');
     expect(flowProps.current.edges.some((edge: { target: string }) => edge.target === 'audio-mix-73')).toBe(false);

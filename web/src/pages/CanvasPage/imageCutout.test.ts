@@ -43,28 +43,22 @@ describe('imageCutoutGateReason（抠图门槛预检，通用档，IKGXLT）', (
   });
 
   it('恰在边界放行（长边恰 10240 / 短边恰 6000 / 竖图对调 / 30MB / 总像素恰 40MP）', () => {
-    // 三上限不可同时取边界（10240×6000=61.4MP>40MP），逐维取边界验证
     expect(imageCutoutGateReason({ width: 10240, height: 3906 })).toBeNull();
     expect(imageCutoutGateReason({ width: 6666, height: 6000 })).toBeNull();
-    // 竖图长短边对调同样合法（短边/长边语义，不是宽高绑定）
     expect(imageCutoutGateReason({ width: 3906, height: 10240 })).toBeNull();
     expect(imageCutoutGateReason({ width: 6000, height: 6666 })).toBeNull();
-    // 大小恰 30MB 放行
     expect(imageCutoutGateReason({ size: IMAGE_CUTOUT_MAX_FILE_BYTES, mime: 'image/png' })).toBeNull();
-    // 总像素恰 40MP（8000×5000）放行
     expect(imageCutoutGateReason({ width: 8000, height: 5000 })).toBeNull();
   });
 
   it('长边超 10240 或短边超 6000 置灰并给出原因（横竖图同判）', () => {
     expect(imageCutoutGateReason({ width: 10241, height: 6000 })).toContain('10240');
     expect(imageCutoutGateReason({ width: 10240, height: 6001 })).toContain('6000');
-    // 竖图：宽 6000 高 10241 长边超；宽 6001 高 8000 短边超
     expect(imageCutoutGateReason({ width: 6000, height: 10241 })).toContain('10240');
     expect(imageCutoutGateReason({ width: 6001, height: 8000 })).toContain('6000');
   });
 
   it('长短边合规但总像素超 40MP 置灰并给出原因', () => {
-    // 5000×8001：长边 8001 ≤10240、短边 5000 ≤6000，总像素 40,005,000 > 40MP
     const reason = imageCutoutGateReason({ width: 5000, height: 8001 });
     expect(reason).toContain('4000 万');
     expect(reason).not.toContain('无法擦除');
@@ -125,7 +119,6 @@ describe('imageCutoutSceneGateReason（按场景两档精校，规格故事 15�
     for (const scene of ['human', 'product'] as const) {
       expect(imageCutoutSceneGateReason({ width: 7681, height: 4320 }, scene)).toContain('7680');
       expect(imageCutoutSceneGateReason({ width: 7680, height: 4321 }, scene)).toContain('4320');
-      // 竖图对调同判
       expect(imageCutoutSceneGateReason({ width: 4320, height: 7681 }, scene)).toContain('7680');
       expect(imageCutoutSceneGateReason({ width: 4321, height: 4321 }, scene)).toContain('4320');
     }
@@ -156,10 +149,7 @@ describe('buildImageCutoutRequest（发送参数组装，规格故事 29）', ()
     const request = buildImageCutoutRequest({ sourceAssetId: '123', targetNodeId: 'node-1', scene: 'general' });
     expect(Object.keys(request).sort()).toEqual(['cutout_scene', 'source_asset_id', 'target_node_id']);
     expect(request.cutout_scene).toBe('general');
-    // output_format 不进创建请求体：契约 strict schema 按场景三键/七键冻结，
-    // 固定 png 由 worker 出站携带（IKGXMT 对齐后端创建入口复核口径）
     expect('output_format' in request).toBe(false);
-    // 即使误传增强入参，通用场景也不携带（接口对 general 忽略，请求体不带忽略字段）
     const withExtras = buildImageCutoutRequest({
       sourceAssetId: '123',
       targetNodeId: 'node-1',

@@ -14,7 +14,6 @@ function envelope(body: unknown) {
   });
 }
 
-/** dedup（未命中）→ presign → PUT → complete 四段的顺序桩 */
 function stubUploadFlow() {
   const fetchMock = vi
     .fn()
@@ -47,7 +46,6 @@ function stubUploadFlow() {
   return fetchMock;
 }
 
-/** 一份最小的真 PNG 头（IKE53Z 之后，上传前会读文件开头认容器，'abcd' 这种占位字节过不去）。 */
 const pngBytes = () => {
   const head = new Uint8Array(32);
   head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -56,8 +54,6 @@ const pngBytes = () => {
 
 describe('uploadAssetFile', () => {
   beforeEach(() => {
-    // jsdom 不真的加载图片，probeMediaMeta 的 onload/onerror 都不会自己触发。
-    // 用一个当场报错的 Image 桩让它确定性地落到「没探到元数据」那一支。
     vi.stubGlobal('URL', {
       ...URL,
       createObjectURL: () => 'blob:stub',
@@ -90,12 +86,9 @@ describe('uploadAssetFile', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    // dedup 预检须携带 md5 与 project_id，供后端建项目关联
     const dedupBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
     expect(dedupBody).toMatchObject({ type: 'image', mime: 'image/png', size: 32, project_id: 'project-9' });
     expect(dedupBody.md5).toMatch(/^[a-f0-9]{32}$/);
-    // complete 必须回传与 presign 完全一致的 storage_key/type/mime/size，否则后端拒收；
-    // 并带上 md5 落库，供下次同内容文件查重。
     const completeBody = JSON.parse(String((fetchMock.mock.calls[3] as [string, RequestInit])[1].body));
     expect(completeBody).toMatchObject({
       storage_key: 'uploads/7/image/a.png',
@@ -132,14 +125,12 @@ describe('uploadAssetFile', () => {
       material_id: 'asset-20260820153209-6c9z8',
       material_status: 'Active',
     });
-    // 命中后只发生一次 dedup 请求，TOS 三步全部跳过
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to the three-step upload when the dedup request fails (IKCNLS fail-open)', async () => {
     const fetchMock = vi
       .fn()
-      // dedup 网络失败 → 静默降级
       .mockRejectedValueOnce(new Error('dedup down'))
       .mockResolvedValueOnce(
         envelope({
@@ -172,7 +163,6 @@ describe('uploadAssetFile', () => {
   });
 
   it('rejects an oversized file before touching the network (IKAL46)', async () => {
-    // presign 那侧也会拒，但要等一次网络往返、且回来的是通用错误码，用户看不出是文件太大。
     const fetchMock = stubUploadFlow();
     const huge = new File([''], 'huge.mp4', { type: 'video/mp4' });
     Object.defineProperty(huge, 'size', { value: 500 * 1024 * 1024 });
@@ -190,14 +180,10 @@ describe('uploadAssetFile', () => {
   });
 
   it('throws instead of resolving, so a caller can show the reason', async () => {
-    // Agent 面板要把失败原因显示出来：用户刚选完文件，静默失败会让他以为图已经带上了。
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
     await expect(uploadAssetFile(new File([pngBytes()], 'a.png', { type: 'image/png' }))).rejects.toBeTruthy();
   });
 
-  /* IKI8L4 上传链错误提示归属：工具会话（擦除遮罩上传/裁切成品上传）由持有发送身份的
-     页面 catch 决定是否提示——uploadAssetFile opts.silent 透传 presign/complete 两条
-     HTTP 传输（dedup 已 silent、PUT 直传不经 http 层），迟到失败不在 http 层抢弹。 */
   it('opts.silent: presign business failure does not pop a toast at the http layer (IKI8L4)', async () => {
     vi.stubGlobal(
       'fetch',
@@ -244,7 +230,6 @@ describe('uploadAssetFile', () => {
   });
 
   it('missing silent: default toast behavior of the upload chain remains unchanged (IKI8L4)', async () => {
-    // Non-tool-session upload callers (e.g., asset page uploads) still enjoy the http layer's default toast
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(envelope({ dedup: false })).mockResolvedValueOnce(
@@ -264,8 +249,6 @@ describe('uploadAssetFile', () => {
 
 describe('fileToAssetType', () => {
   it('reads the real MIME rather than trusting which button was clicked (IKAL46)', () => {
-    // 在「上传图片」里挑了个视频（某些平台允许）时，真实类型才是对的——asset_ref 的
-    // media_type 由它决定，报错也要报得准。
     expect(fileToAssetType(new File([], 'a.mp4', { type: 'video/mp4' }))).toBe('video');
     expect(fileToAssetType(new File([], 'a.png', { type: 'image/png' }))).toBe('image');
     expect(fileToAssetType(new File([], 'a.pdf', { type: 'application/pdf' }))).toBeNull();

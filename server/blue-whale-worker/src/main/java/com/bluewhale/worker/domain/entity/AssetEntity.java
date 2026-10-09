@@ -7,105 +7,78 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/**
- * 资产行（对应 Prisma model assets）。
- */
 @TableName("assets")
 public class AssetEntity {
     @TableId(type = IdType.AUTO)
-    /** 主键（BigInt，对外字符串化承载） */
     private Long id;
 
     @TableField("user_id")
-    /** 归属用户 */
     private Long userId;
 
     @TableField("project_id")
-    /** 归属项目（assets：0=全局素材） */
     private Long projectId;
 
     @TableField("generation_job_id")
-    /** 产出该资产的任务 id；上传件为 null */
     private Long generationJobId;
 
     @TableField("type")
-    /** 类型：image/video/audio（assets）；image/video/audio/media_extract（jobs，契约 §2） */
     private String type;
 
     @TableField("name")
-    /** 展示名（可空）；音视频合成结果 = 视频名(音视频合成).mp4（IKIHPJ，迁移契约 §21.4） */
     private String name;
 
     @TableField("storage_key")
-    /** TOS 对象键；null=上游直存 passthrough 残留行（源资产解析视为不可用） */
     private String storageKey;
 
     @TableField("content_sha256")
-    /** 预留列：现行代码从不写入（契约 §2 死列，不参与对账） */
     private String contentSha256;
 
     @TableField("md5")
-    /** 内容 md5 去重键（IKCNLS） */
     private String md5;
 
     @TableField("url")
-    /** 公网访问 URL https://{bucket}.{endpoint}/{key} */
     private String url;
 
     @TableField("mime")
-    /** MIME；生成音频恒 audio/mpeg（契约 §8） */
     private String mime;
 
     @TableField("size")
-    /** 字节数（BigInt→Long） */
     private Long size;
 
     @TableField("width")
-    /** 宽；解析失败为 null 且资产照常落库（契约 §8 等价标准） */
     private Integer width;
 
     @TableField("height")
-    /** 高；同 width，round 正有限数否则 null */
     private Integer height;
 
     @TableField("duration_ms")
-    /** 时长毫秒（对外展示 /1000 换算为秒） */
     private Integer durationMs;
 
     @TableField("source")
-    /** uploaded/generated（jobs：入口来源，受领取白名单约束 契约 §2） */
     private String source;
 
     @TableField("status")
-    /** 状态（jobs 六枚举见契约 §2；assets：normal/uploading） */
     private String status;
 
     @TableField("material_id")
-    /** 素材库关联 id（IKDJNZ，命中走 asset://） */
     private String materialId;
 
     @TableField("material_group_id")
-    /** 素材库分组 id（IKDJNZ） */
     private String materialGroupId;
 
     @TableField("gmt_create")
-    /** 创建时间 */
     private LocalDateTime gmtCreate;
 
     @TableField("gmt_modified")
-    /** 修改时间 */
     private LocalDateTime gmtModified;
 
     @TableField("version")
-    /** 乐观锁版本（每次写 +1，契约 §3.1） */
     private Integer version;
 
     @TableField("is_delete")
-    /** 软删标记（GC/领取均过滤） */
     private Boolean isDelete;
 
     @TableField("deleted_at")
-    /** 软删时间（asset-GC cutoff 扫描依据，契约 §7） */
     private LocalDateTime deletedAt;
 
     public Long getId() { return id; }

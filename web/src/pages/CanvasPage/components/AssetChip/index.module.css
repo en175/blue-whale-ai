@@ -1,4 +1,3 @@
-/* 素材引用胶囊：左缩略图 + 右标题。卡片内与输入框内共用同一套视觉。 */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -13,7 +12,6 @@
   white-space: nowrap;
 }
 
-/* 有缩略图可看时给个可交互的暗示，纯文字降级态就不给——那种情况悬浮上去什么都不会发生。 */
 .chipLinked {
   cursor: zoom-in;
 }
@@ -27,7 +25,6 @@
   background-color: var(--color-bg-secondary);
 }
 
-/* 查不到素材时的占位：一个中性色点，不显示破图。 */
 .chipThumbFallback {
   flex-shrink: 0;
   width: 18px;
@@ -65,10 +62,7 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 悬浮预览 ---- */
 .preview {
-  /* 走 FloatingPortal 渲染进 body，#root 不产生层叠上下文，因此直接和侧栏（100）竞争。
-     原来写死的 60 压不住它。悬浮预览是 tooltip 语义，用同一档。 */
   z-index: var(--z-tooltip);
   display: flex;
   flex-direction: column;

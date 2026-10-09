@@ -217,7 +217,6 @@ describe('createVideoMatting', () => {
       }),
     ).rejects.toBeInstanceOf(ApiError);
 
-    // 不传 silent = 失败提示由 HTTP 层承担且只承担一次；页面只落占位卡失败态
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith('智能抠像失败，请重试');
   });
@@ -300,7 +299,6 @@ describe('createFrameInterpolation', () => {
     const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
     expect(url).toBe('/api/projects/project%2F1/video-frame-interpolations');
     expect(init.method).toBe('POST');
-    // 免费口径（ADR-0113 同 HD 高清）：无幂等头，body 也不带 client_token
     expect(init.headers).not.toHaveProperty('Idempotency-Key');
     expect(JSON.parse(init.body as string)).toEqual({
       source_asset_id: '3985',
@@ -327,7 +325,6 @@ describe('createFrameInterpolation', () => {
       }, { silent: true }),
     ).rejects.toThrow('任务入队失败');
 
-    // silent：http 层不弹（面板保留可重发的错误由 CanvasPage catch 提示，全链路只一次）
     expect(toast.error).not.toHaveBeenCalled();
   });
 
@@ -357,7 +354,6 @@ describe('createFrameInterpolation', () => {
 describe('createAudioTrim', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  /** 统一 200 信封桩（键名与 backend/libs/contracts/audio-trim.ts 契约恒等断言用） */
   function stubCreated(jobId = '1130') {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -394,7 +390,6 @@ describe('createAudioTrim', () => {
   });
 
   it('贴边省略：选区贴 0 省略 start_time 键、贴全长省略 end_time 键（走官方默认片头片尾）', async () => {
-    // 每次调用构造新 Response（同一实例 body 只能消费一次）
     const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(
         JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '1131', status: 'queued' } }),
@@ -403,15 +398,12 @@ describe('createAudioTrim', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    // 左缘贴 0：只有 end_time
     await expect(
       createAudioTrim('p1', { source_asset_id: '5', end_time: 8.25, output_format: 'wav' }),
     ).resolves.toEqual({ job_id: '1131', status: 'queued' });
-    // 右缘贴全长：只有 start_time
     await expect(
       createAudioTrim('p1', { source_asset_id: '5', start_time: 3, output_format: 'wav' }),
     ).resolves.toEqual({ job_id: '1131', status: 'queued' });
-    // 双贴边（全选）：起止键都不出现
     await expect(
       createAudioTrim('p1', { source_asset_id: '5', output_format: 'wav' }),
     ).resolves.toEqual({ job_id: '1131', status: 'queued' });
@@ -591,18 +583,13 @@ describe('fetchJobStatus', () => {
   });
 });
 
-/* IKI8L4 工具会话创建函数 silent 透传：错误提示归属持有发送身份的调用方——
-   创建传输走 silent（http 层不 toast），迟到失败不抢在会话纪元判断之前弹出，
-   当前会话失败由页面 catch 统一提示一次（audioSpeed IKI4LX / 插帧 IKHSFH 先例推广）。 */
 describe('IKI8L4 工具会话创建 silent 透传', () => {
-  // 前序 describe 的 afterEach 不清 toast spy，进入本组用例前先清零计数
   beforeEach(() => vi.mocked(toast.error).mockClear());
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.mocked(toast.error).mockClear();
   });
 
-  /** 统一业务失败桩：HTTP 200 + 信封 code!==200 + msg */
   function stubCreateFail(msg = '服务繁忙，请稍后重试') {
     vi.stubGlobal(
       'fetch',
@@ -648,7 +635,6 @@ describe('IKI8L4 工具会话创建 silent 透传', () => {
 describe('建任务/重试的幂等头由调用方持有', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  // 每次调用返回**新的** Response：响应体只能消费一次，复用同一个实例会让第二次请求解析失败
   const okCreated = () =>
     vi.fn(async (_url: string, _init?: RequestInit) => new Response(
       JSON.stringify({ code: 200, msg: 'ok', data: { generation_job_id: '9', cursor: 1 } }),
@@ -672,7 +658,6 @@ describe('建任务/重试的幂等头由调用方持有', () => {
     expect(url).toBe('/api/projects/project%2F1/generation-jobs');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual(createdPayload);
-    // 调用方复用同一把钥匙 → 两次请求同一个头，服务端据此重放首次结果而不是再建一个 job
     expect(new Headers(init.headers).get('Idempotency-Key')).toBe('submit-key-1');
     expect(new Headers((fetchMock.mock.calls[1]![1] as RequestInit).headers).get('Idempotency-Key')).toBe('submit-key-1');
   });
@@ -738,7 +723,6 @@ describe('IKJJR2 图像工具创建端点的恢复协议 v1 承载（canvas_bind
     expect(JSON.parse(init.body as string)).toMatchObject({ source_asset_id: '3985', canvas_binding: BINDING });
     expect(new Headers(init.headers).get('Idempotency-Key')).toBe(BINDING.submission_id);
 
-    // 历史兼容（无绑定）：body 不带 canvas_binding、无幂等头（请求形态与接入前一致）
     await expect(invoke({ silent: true })).resolves.toEqual({ job_id: '9', status: 'queued', canvas_binding: bindingView });
     [url, init] = fetchMock.mock.calls[1]! as [string, RequestInit];
     expect(JSON.parse(init.body as string)).not.toHaveProperty('canvas_binding');

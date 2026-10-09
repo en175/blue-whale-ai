@@ -1,4 +1,3 @@
-/** Canonical model text. Rich text stays editable; only its text projection is consumed. */
 export function extractTextNodeText(data: Record<string, unknown> | undefined): string {
   if (typeof data?.text === "string") return data.text;
   if (typeof data?.html !== "string") return "";

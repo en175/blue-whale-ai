@@ -1,4 +1,3 @@
-/* 组下载打包：无压缩 ZIP（STORE），避免多文件 a.click 被浏览器拦截 */
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -66,9 +65,6 @@ function isoFtypBrand(head: Uint8Array): string {
   return String.fromCharCode(head[8]!, head[9]!, head[10]!, head[11]!).toLowerCase().trim();
 }
 
-/** 从文件头识别真实媒体 MIME，避免 zip 内条目扩展名与内容不符导致「格式错误」。
- *  ftyp 盒子既装 M4A 也装 MP4：brand 为 m4a/m4b，或调用方已标明这是音频卡，都认成 audio/mp4
- *  （真实 M4A 的 major brand 经常是 isom/mp42，而不是 m4a）。 */
 export async function sniffMediaMime(
   blob: Blob,
   mediaType?: string,
@@ -89,7 +85,6 @@ export async function sniffMediaMime(
   return undefined;
 }
 
-/** 把若干文件打成无压缩 zip，一次下载即可带出全部素材 */
 export async function buildStoreZip(files: { name: string; data: Uint8Array }[]): Promise<Blob> {
   const locals: Uint8Array[] = [];
   const centrals: Uint8Array[] = [];

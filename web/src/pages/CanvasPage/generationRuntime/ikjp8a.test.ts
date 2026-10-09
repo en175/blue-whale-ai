@@ -31,7 +31,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
     vi.mocked(retryAudioMix).mockRejectedValueOnce(conflict(3));
     expect(ctx.runtime.retry(NODE_ID)).toBe(true);
     await flush();
-    expect(vi.mocked(retryAudioMix).mock.calls).toHaveLength(1); // 未经用户复核不自动重发
+    expect(vi.mocked(retryAudioMix).mock.calls).toHaveLength(1);
     expect(ctx.runtime.statusOf(NODE_ID)).toBeNull();
     expect(ctx.runtime.bindingRevisionOf(NODE_ID)).toBe(3);
     expect(ctx.nodes.get(NODE_ID)?.data).toMatchObject({
@@ -60,7 +60,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
       projectId: '1', jobId: '501', key: SID_C,
       binding: { submission_id: SID_C, target_node_id: NODE_ID, expected_binding_revision: 3 },
     });
-    expect(call.key).toBe(call.binding.submission_id); // 幂等键 = submission_id（新意图身份）
+    expect(call.key).toBe(call.binding.submission_id);
     expect(vi.mocked(retryAudioMix).mock.calls).toHaveLength(2);
     expect(ctx.nodes.get(NODE_ID)?.data).toMatchObject({ jobId: '501', genStatus: 'generating' });
     expect(ctx.runtime.statusOf(NODE_ID)).toMatchObject({ phase: 'generating', jobId: '501', submissionId: SID_C });
@@ -75,15 +75,15 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
     await flush();
     expect(ctx.nodes.get(NODE_ID)?.data).toMatchObject({ genStatus: 'failed', errorText: '重试失败' });
     vi.mocked(retryAudioMix).mockResolvedValueOnce({
-      job_id: '501', status: 'queued', replayed: true, // 服务端按幂等键重放同一任务
+      job_id: '501', status: 'queued', replayed: true,
       canvas_binding: bindingView(SID_B, NODE_ID, '501', 2),
     });
     expect(ctx.runtime.retry(NODE_ID)).toBe(true);
     await flush();
     const first = ctx.retryCall(0);
     const replay = ctx.retryCall(1);
-    expect(replay.key).toBe(SID_B); // 同一意图：不换 submission_id
-    expect(replay.binding).toEqual(first.binding); // 完整绑定载荷原样重放
+    expect(replay.key).toBe(SID_B);
+    expect(replay.binding).toEqual(first.binding);
     expect(vi.mocked(retryAudioMix).mock.calls).toHaveLength(2);
     expect(ctx.runtime.statusOf(NODE_ID)).toMatchObject({ phase: 'generating', jobId: '501', submissionId: SID_B });
   });
@@ -148,7 +148,7 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
     const pending = deferred<Awaited<ReturnType<typeof retryAudioMix>>>();
     vi.mocked(retryAudioMix).mockImplementation(() => pending.promise);
     expect(ctx.runtime.retry(NODE_ID)).toBe(true);
-    expect(ctx.runtime.retry(NODE_ID)).toBe(true); // 防重吞下连点
+    expect(ctx.runtime.retry(NODE_ID)).toBe(true);
     await flush();
     expect(vi.mocked(retryAudioMix).mock.calls).toHaveLength(1);
   });

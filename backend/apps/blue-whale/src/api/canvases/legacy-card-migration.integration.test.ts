@@ -12,8 +12,6 @@ import { ProjectsController } from "../projects/projects.controller.js";
 import { AgentV1ProxyController } from "../agent/agent-v1-proxy.controller.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 
-// Public HTTP seam, real production Canvas/Project services and disposable MySQL (IKDLQK).
-// Authentication middleware supplies the already-authenticated identity; no Canvas API mocks.
 describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migration public API", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -22,7 +20,6 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
 
   const SOURCE = { sessionId: "session-legacy", revisionId: "revision-1", shotNo: 1 };
 
-  /** 浏览器用例的 Agent 替身：只提供会话列表/快照/SSE 骨架，迁移从不回读 Agent。 */
   const agent = createServer((req, res) => {
     res.setHeader("content-type", "application/json");
     if (req.url?.includes("/events")) {
@@ -122,7 +119,6 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
       id: "card-1", type: "textNode", position: { x: 100, y: 100 },
       data: { title: "镜头 1", text: "用户编辑后的提示词\n第二行", promptSource: SOURCE },
     });
-    // 连线与其他节点不动
     expect(JSON.parse(canvas.edges)).toEqual([{ id: "e1", source: "card-1", target: "media-1" }]);
     expect(nodes.find((node: { id: string }) => node.id === "media-1")).toMatchObject({ type: "mediaNode" });
 
@@ -147,7 +143,6 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
     expect(JSON.parse(again.nodes)).toHaveLength(1);
     expect(await historyCount(projectId)).toBe(1);
 
-    // 迁移后按普通文本编辑并保存：历史与正文都不被迁移覆盖
     const edited = JSON.parse(again.nodes).map((node: { id: string; data: Record<string, unknown> }) =>
       node.id === "card-1" ? { ...node, data: { ...node.data, text: "迁移后的编辑" } } : node);
     const saved = await fetch(`${base}/api/canvases/${projectId}`, {
@@ -203,7 +198,6 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
       { nodeId: "card-over-title", title: "长".repeat(201), reason: "标题超过存储限长" },
     ]);
     const nodes = JSON.parse(canvas.nodes) as Array<{ id: string; type: string; data: Record<string, unknown> }>;
-    // 原资料保留：失败卡仍是旧生成卡，不用 visual 顶替提示词
     for (const id of ["card-missing", "card-noblock", "card-over-prompt", "card-over-title"]) {
       expect(nodes.find(n => n.id === id)!.type).toBe("assetNode");
     }
@@ -213,7 +207,6 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
     expect(okNode.data.text).toBe("正常提示词");
     expect(await historyCount(projectId)).toBe(1);
 
-    // 失败是无状态的：再次打开重新评估，报告一致且仍不落历史
     const second = await getCanvas(projectId);
     expect(second.legacy_migration.failed).toHaveLength(4);
     expect(await historyCount(projectId)).toBe(1);
@@ -222,7 +215,6 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
   it("preserves both versions when stranded history conflicts with the current card", async () => {
     const projectId = await createProject("IKDLQK recovery");
     await seedCanvas(projectId, [legacyCardNode("card-1", { shotTitle: "现值标题", visual: "现值画面", prompt: "现值提示词" })]);
-    // 模拟上次迁移：历史已落库、画布写入失败
     await prisma.client.legacy_card_history.create({
       data: {
         project_id: BigInt(projectId), node_id: "card-1",
@@ -277,7 +269,6 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
     expect(snapshot.legacy_migration).toEqual({ migrated: ["card-1"], failed: [] });
     const nodes = JSON.parse(snapshot.canvas.nodes);
     expect(nodes[0]).toMatchObject({ id: "card-1", type: "textNode", data: { title: "镜头 1", text: "快照路径提示词" } });
-    // 再次打开：幂等，不再携带报告
     const second = (await (await fetch(`${base}/api/projects/${projectId}/snapshot`)).json()).data;
     expect(second.legacy_migration).toBeUndefined();
   });
@@ -302,12 +293,10 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
       } }, version: 0 })));
       await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
 
-      // 打开即迁移：旧卡成为普通文本节点；损坏卡保留原样（仍渲染旧画面描述）
       const node = page.locator(".react-flow__node-textNode");
       await node.getByText("浏览器迁移提示词").waitFor();
       await page.getByText("只有画面的坏卡").waitFor();
 
-      // 迁移后节点按普通文本编辑并落盘
       const editor = node.locator('[data-placeholder="输入内容..."]');
       await editor.dblclick();
       const editSaved = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
@@ -315,7 +304,6 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
       await page.locator(".react-flow__pane").click({ position: { x: 900, y: 700 } });
       expect((await editSaved).status()).toBe(200);
 
-      // 迁移历史只读入口：画面描述与迁移时提示词可查阅
       await page.getByRole("button", { name: "迁移历史" }).click();
       const modal = page.locator('[data-semantic="container"]');
       await modal.getByText("暮色街道的画面").waitFor();
@@ -323,10 +311,8 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
       expect(await modal.locator("input, textarea, [contenteditable]").count()).toBe(0);
       await page.keyboard.press("Escape");
 
-      // 服务端事实：坏卡无历史，历史只有一条且不可变
       expect(await historyCount(projectId)).toBe(1);
 
-      // 刷新恢复：编辑后的正文、保留的坏卡与历史入口都在
       await page.reload();
       await page.locator(".react-flow__node-textNode").getByText("浏览器编辑后的正文").waitFor();
       await page.getByText("只有画面的坏卡").waitFor();

@@ -7,7 +7,6 @@ import {
 import { SystemSettingsService } from "./system-settings.service.js";
 import { UpstreamCredentialMissingError } from "@lib/shared/upstream/new-api-egress.js";
 
-/** 内存假 Prisma：只实现 system_settings 的两个方法（够 system-settings 用）。 */
 function makePrisma() {
   const rows = new Map<string, Record<string, unknown>>();
   const prisma = {
@@ -89,16 +88,13 @@ describe("SystemSettingsService — 支付凭证", () => {
     expect(stored).not.toContain("M0001");
 
     const view = await service.read();
-    // 非密字段明文回显（把商户号打成 **** 是错的：运营核对不了）
     expect(view.credentials.hccb_mch_no).toBe("M0001");
     expect(view.credentials.hccb_app_id).toBe("app-1");
     expect(view.credentials.hccb_notify_url).toBe(
       "https://api.example.com/api/recharge/notify/pay",
     );
-    // 密字段只给尾 4 位
     expect(view.credentials.hccb_app_secret).toBe(maskSecret("super-secret-value"));
     expect(view.credentials.hccb_app_secret).not.toContain("super");
-    // 内部读取能拿到真值（下单要用）
     const config = await service.requirePayMerchantConfig();
     expect(config.appSecret).toBe("super-secret-value");
   });
@@ -229,18 +225,13 @@ describe("SystemSettingsService — 上游凭证（new-api 项目统一 key）",
   });
 
   it("★ 脱敏回显被原样提交回来 → 当「没改」，真值不被 `****1234` 覆盖", async () => {
-    // 脱敏回显最容易踩的坑：管理端把 GET 到的 `****1234` 原样 PUT 回来，
-    // 「合并语义」把它当新值存下——真 key 变成一串星号，而且当场看不出来，
-    // 要等下一次打上游才炸，报错点离原因很远。
     const { service, rows } = serviceWith();
     await service.update({ upstream: { new_api_key: "sk-fake-live-key-1234" } });
 
     const view = await service.read();
     expect(view.upstream.new_api_key).toBe("****1234");
-    // 把 GET 到的回显原样 PUT 回来
     await service.update({ upstream: { new_api_key: view.upstream.new_api_key } });
 
-    // 真值仍在（若被当成新值存下，这里会取到 "****1234"，而库里是一串星号的密文）
     expect(await service.requireUpstreamKey()).toBe("sk-fake-live-key-1234");
     expect(rows.get("upstream")!.is_secret).toBe(true);
   });
@@ -264,7 +255,6 @@ describe("SystemSettingsService — 上游凭证（new-api 项目统一 key）",
   });
 
   it("真·新值与回显恰好同形时不误判：值本来就短/以星号开头，照样能改", async () => {
-    // 只有「等于当前真值的脱敏形态」才按未改处理。用户真想换成别的值，一律照存。
     const { service } = serviceWith();
     await service.update({ upstream: { new_api_key: "sk-aaaa-1111" } });
     await service.update({ upstream: { new_api_key: "sk-bbbb-2222" } });
@@ -297,7 +287,6 @@ describe("SystemSettingsService — 上游凭证（new-api 项目统一 key）",
     rows.get("upstream")!.setting_value = "v1.AAAA.BBBB.CCCC";
 
     await expect(service.requireUpstreamKey()).rejects.toThrow(SystemSettingsConfigError);
-    // 管理端页面仍按「未配置」回显，运营进得去改
     expect((await service.read()).upstream.new_api_key).toBe("");
   });
 });

@@ -1,42 +1,14 @@
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
-/** 充值档位 repo（Prisma-backed），blue_whale 侧 CRUD。
- *  支付执行逻辑在 Go new-api，本 repo 只管档位数据。 */
 
-/**
- * 上架状态三态（PRD §10.5）。
- *
- * <p>`draft` 是本次新增的**默认值**：新建卡片落在草稿，不上用户侧
- * （{@link TopupTierRepo.listActive} 只认 `active`），运营把字段配齐再上架。
- * 存量行一律不动 —— 它们已经是上架/下架，没有理由回退成草稿。
- */
 export type TopupTierStatus = "draft" | "active" | "inactive";
 
-/**
- * 购买权限（PRD §10.4）。
- *
- * <p>⚠️ `member_tier`（指定会员等级）是**阶段 2** 的事，本阶段只在枚举里占位、
- * 不做判断 —— 先写进列定义，将来接会员模块时加的是逻辑，不是 DDL。
- * 本阶段真正生效的是 `all` 与 `user_group`。
- */
 export type TopupTierPermission = "all" | "user_group" | "member_tier";
 
 export interface TopupTierView {
   id: string;
   name: string;
-  /**
-   * **基础积分**（用户下单到账的那个数，单位整数积分）。
-   *
-   * <p>⚠️ 这是**配置值**，不是派生值（2026-09-27 起，推翻迁移 047 的 `原价 × 换算率`）。
-   * 充值常有折扣，`original_price`/`discount` 只为展示划线价，**与积分再无数学关系** ——
-   * ¥499 的档给 7,500 积分（499×15=7,485 只是巧合）。不要拿积分去除原价。
-   *
-   * <p>0 = 还没配过：下单路径会拒绝（宁可下不了单，也不发 0 积分）。
-   *
-   * <p>⚠️ 库里另有一列 `amount`（new-api 时代的遗留 quota），**读路径一律不看它**：
-   * 写入侧把它与 `base_credits` 写成同一个数，只是为了万一还有没改到的读方不会读到 0。
-   */
   baseCredits: number;
   originalPrice: number;
   discount: number;
@@ -46,59 +18,27 @@ export interface TopupTierView {
   startTime: string | null;
   endTime: string | null;
   sortOrder: number;
-  /**
-   * 档位配置版本。**每保存一次 +1**（不是自增主键，也不跟 gmt_modified 等价：
-   * 后者是「什么时候动的」，它是「口径变到第几版了」）。
-   *
-   * <p>下单时把它快照进 `recharge_orders.config_version`，用来回答
-   * 「这单是改价前还是改价后下的」——订单只冻结了价格与积分数，没冻结「当时是哪一版配置」。
-   */
   version: number;
   createdAt: string;
   updatedAt: string;
 
-  /* ── PRD §10.2 卡片展示与首购活动（迁移 047）── */
-  /** 卡片说明。选填 → 空串表示未填 */
   description: string;
-  /** 首购/活动赠送积分；0 = 不赠送。只有参与首购且用户满足首购条件时才发放 */
   bonusCredits: number;
-  /** 活动标签，如「首购加赠 50%」；空串 = 无标签。已首购用户侧隐藏 */
   activityTag: string;
-  /** 购买按钮文案，默认「立享加赠」 */
   buttonText: string;
-  /** 是否参与首购。与 `recharge_orders.first_purchase_eligible` 同义：下单时快照进订单 */
   firstPurchaseEligible: boolean;
-  /**
-   * 到账积分有效期，单位**月**（默认 24 = 2 年）。
-   *
-   * <p>口径钉死为月：`年` 表达不了 6/18 个月这类档位，而月向上兼容。
-   */
   creditsValidMonths: number;
-  /** 购买权限。`all` / `user_group` 本阶段生效，`member_tier` 阶段 2 */
   permission: TopupTierPermission;
-  /**
-   * 权限白名单（userId 列表）。**读出恒为数组**：存量行的列是 NULL，归一成 `[]`。
-   *
-   * <p>元素是**十进制字符串**而不是 number —— userId 是 BigInt，
-   * 超过 JS 安全整数范围后 number 会静默改值（`9007199254740993` → `…992`），
-   * 而白名单错一位就是「放进来一个陌生人」。
-   */
   permissionAllowlist: string[];
-  /** 无权限提示文案；空串 = 用前端默认文案 */
   permissionDeniedHint: string;
 }
 
 export interface CreateTopupTierInput {
   name?: string;
-  /**
-   * 基础积分（用户下单到账的积分）。**运营的输入值**，不是从原价算出来的
-   * （原价 × 折扣只为展示划线价 —— 见 {@link TopupTierView.baseCredits}）。
-   */
   baseCredits: number;
   originalPrice: number;
   discount: number;
   isRecommended?: boolean;
-  /** 不传 = `draft`（PRD §10.5：新建卡片默认草稿） */
   status?: TopupTierStatus;
   startTime?: string | null;
   endTime?: string | null;
@@ -115,7 +55,6 @@ export interface CreateTopupTierInput {
 
 export interface UpdateTopupTierInput {
   name?: string;
-  /** 基础积分（配置值，见 {@link TopupTierView.baseCredits}） */
   baseCredits?: number;
   originalPrice?: number;
   discount?: number;
@@ -136,40 +75,20 @@ export interface UpdateTopupTierInput {
 }
 
 export interface TopupTierRepo {
-  /** 管理端：列出全部档位（含停用），按 sort_order 排序 */
   listAll(): Promise<TopupTierView[]>;
-  /** 用户端：列出有效档位（active + 时间窗口内），按 sort_order 排序 */
   listActive(): Promise<TopupTierView[]>;
   getById(id: string): Promise<TopupTierView | null>;
   create(input: CreateTopupTierInput): Promise<TopupTierView>;
   update(id: string, input: UpdateTopupTierInput): Promise<TopupTierView | null>;
   remove(id: string): Promise<boolean>;
-  /** 批量更新排序 */
   updateSortOrder(items: { id: string; sortOrder: number }[]): Promise<void>;
 }
 
-/* ---------- helpers ---------- */
 
-/**
- * 可空 JSON 列：null → **SQL NULL** 用 `Prisma.DbNull` 表达。
- *
- * <p>Prisma 不允许对 Json 列裸传 `null`——裸 `null` 在它那里是「JSON 里放一个 null」，
- * 列本身非空，与存量行的 SQL NULL 不是一回事。写进去的是哪种，读出来就得按哪种判断。
- */
 function nullableJson(v: unknown): Prisma.InputJsonValue | typeof Prisma.DbNull {
   return v == null ? Prisma.DbNull : (v as Prisma.InputJsonValue);
 }
 
-/**
- * 读白名单：**宽的读、严的写**。
- *
- * <p>列里理论上有三种东西：我们写进去的十进制 userId 串、存量行的 NULL、
- * 和手改过库的人留下的数字。读路径不该因为看不懂某一行就抛错，
- * 所以这里跳过无法识别的元素而不是报错；识别不了的一律丢掉。
- *
- * <p>掐前导零与写路径同口径（`007` → `7`）：不掐的话，「同一个用户在名单里存了两条」
- * 与「名单里有个谁也匹配不上的 id」会同时发生——比对是字符串比对。
- */
 function toAllowlist(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const out: string[] = [];
@@ -221,7 +140,6 @@ function parseDateTime(v: string | null | undefined): Date | null {
   return new Date(v);
 }
 
-/** id 守卫：仅接受十进制正整数串。BigInt("abc") 会抛错，不能让路径参数直接炸成 500。 */
 function parseId(id: string): bigint | null {
   if (typeof id !== "string" || !/^\d{1,19}$/.test(id)) return null;
   try {
@@ -231,7 +149,6 @@ function parseId(id: string): bigint | null {
   }
 }
 
-/* ---------- factory ---------- */
 
 export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
   return {
@@ -280,18 +197,12 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       const row = await prisma.topup_tiers.create({
         data: {
           name: input.name || `${input.baseCredits}积分`,
-          // 基础积分是**配置值**（运营填的数），不是从原价派生的；用户下单到账的就是它。
           base_credits: baseCredits,
-          // 遗留 quota 列：读路径不看它了，写入侧只做同值镜像
-          // （见 TopupTierView.baseCredits 的注释），免得漏改的读方读到 0 或 5,000,000。
           amount: baseCredits,
           original_price: input.originalPrice,
           discount: input.discount,
           price,
           is_recommended: input.isRecommended ?? false,
-          // ⚠️ 默认 **draft**，不是 active（PRD §10.5「新建卡片默认草稿，不展示给用户」）。
-          // 这里与列默认值同口径：即使有人绕过本 repo 直接 INSERT（漏写 status），
-          // 落下来的也是草稿而不是「上线了」——错的方向必须是保守的那一边。
           status: input.status ?? "draft",
           start_time: parseDateTime(input.startTime),
           end_time: parseDateTime(input.endTime),
@@ -324,9 +235,6 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
 
       const data: Record<string, unknown> = {
         price,
-        // 口径版本 +1。写在**保存**这一步（而不是只在改价时）：保存是运营唯一能改商品配置的
-        // 入口，版本号要能覆盖名字 / 折扣 / 上下架 / 时间窗 —— 这些都会改变用户下单时看到的东西。
-        // 排序不算配置（见 updateSortOrder：它只动 sort_order，不碰 version）。
         version: { increment: 1 },
         gmt_modified: new Date(),
       };
@@ -334,7 +242,6 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       if (input.baseCredits !== undefined) {
         const credits = BigInt(Math.round(input.baseCredits));
         data.base_credits = credits;
-        // 遗留列同值镜像（读路径不看它，见 TopupTierView.baseCredits）
         data.amount = credits;
       }
       if (input.originalPrice !== undefined) data.original_price = input.originalPrice;
@@ -357,7 +264,6 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
         data.credits_valid_months = input.creditsValidMonths;
       }
       if (input.permission !== undefined) data.permission = input.permission;
-      // 显式 null = 清空白名单；[] = 名单为空（两者语义由调用方定，物理落点见 nullableJson）
       if (input.permissionAllowlist !== undefined) {
         data.permission_allowlist = nullableJson(input.permissionAllowlist);
       }

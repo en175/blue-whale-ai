@@ -37,20 +37,15 @@ public class MediaExtractJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(MediaExtractJobProcessor.class);
 
-    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 media_extract_provider_failed(1044)。 */
     private static final Set<String> PRESERVED_ERROR_CODES = Set.of(
             GenerationError.ERROR_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
-    /** 领取规格（IKIWP8 / ADR-0119）：候选 = 仅 type（不套 source 白名单）+ 专属 CAS；租约 420s。 */
     private static final int LEASE_SECONDS = 420;
 
-    /** 轮询步调 5s（去字幕 SUBTITLE_ERASE_POLL_INTERVAL_MS / 视频骨架同值）。 */
     public static final long MEDIA_EXTRACT_POLL_INTERVAL_MS = 5_000;
 
-    /** 轮询上限 720 次 ≈ 60 分钟（去字幕 MAX_SUBTITLE_ERASE_POLLS 同值：音频提取为
-     *  抽轨转换型任务，耗时上界低于去字幕的重渲染，60 分钟窗口覆盖产品上限内最长任务）。 */
     public static final int MAX_MEDIA_EXTRACT_POLLS = 720;
 
     private final JobStateMachineService stateMachine;
@@ -86,7 +81,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
         this.extractAudioClient = extractAudioClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
-        // workerId = extract-{hostname}-{pid}（media-extract-worker.service.ts:18，沿用）
         this.workerId = "extract-" + hostname() + "-" + ProcessHandle.current().pid();
     }
 
@@ -95,20 +89,11 @@ public class MediaExtractJobProcessor implements JobProcessor {
         return MediaExtractContract.TAG;
     }
 
-    /**
-     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
-     */
     @Override
     public Optional<ClaimSpec> claimSpec() {
         return Optional.of(claimSpec);
     }
 
-    /**
-     * 处理一个 media_extract job step（每步 = 一次 MQ 消费）。
-     * <p>
-     * claim 在 try 外（IKC9EJ：DB 异常上抛 → consumer 不 ack → 重投）；
-     * 业务失败一律落终态 failed（无自动重试，§18.4）。
-     */
     @Override
     public void handle(String jobId) {
         Optional<ClaimedJob> claimOpt;
@@ -117,9 +102,9 @@ public class MediaExtractJobProcessor implements JobProcessor {
         } catch (Exception error) {
             log.error("[media_extract] claim 失败 jobId={}: {}",
                     jobId, error.getMessage(), error);
-            throw error; // 保持不 ack → RocketMQ 重投
+            throw error;
         }
-        if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒
+        if (claimOpt.isEmpty()) return;
 
         ClaimedJob claim = claimOpt.get();
         log.info("[media_extract] 已领取 jobId={} token={} providerTaskId={} pollCount={}",
@@ -132,8 +117,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
             Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "音视频分离失败";
             if (httpStatus != null) {
-                // 状态已结构化落 details（IKIMS2），message 不再重复携带状态码字样：只剥网关
-                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
                 message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
             }
             log.error("[media_extract] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
@@ -141,9 +124,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
         }
     }
 
-    /**
-     * 分相主逻辑（去字幕 runStep 同构）：凭证 → submit 相 / poll 相。
-     */
     private void runStep(ClaimedJob claim) {
         String providerToken;
         try {
@@ -161,16 +141,8 @@ public class MediaExtractJobProcessor implements JobProcessor {
         }
     }
 
-    // ========== submit 相 ==========
 
-    /**
-     * 提交相：解析冻结 input + 源视频 → 网关提交（带 output_format）→ markProviderSubmitted →
-     * 续排轮询。
-     */
     private void submitPhase(ClaimedJob claim, String providerToken) {
-        // 0. IKI89P（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
-        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
-        //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(MediaExtractContract.TAG, claim, providerToken,
                     extractAudioClient::poll,
@@ -182,8 +154,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
 
         Map<String, Object> input = claim.input();
 
-        // 1. 解析冻结 input 业务键（§18.2 两键恒在、值恒为合法枚举，创建时定死；此处为
-        //    worker 兜底防御，权威复核在创建入口）
         String sourceAssetId = parseAssetId(input.get(MediaExtractContract.INPUT_KEY_SOURCE_ASSET_ID));
         if (sourceAssetId == null) {
             failMediaExtract(claim, GenerationError.ERROR_INVALID_INPUT, "缺少源视频资产 id");
@@ -196,7 +166,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
             return;
         }
 
-        // 2. 解析源视频素材：Asset url 落库即公网 public-read，直接作 video_url（去字幕同构）
         AssetEntity source = assetSource.resolve(
                 Long.parseLong(sourceAssetId),
                 Long.parseLong(claim.userId()),
@@ -208,7 +177,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 网关提交异步任务（format 出站映射官方参数，客户端单处定义）
         if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
                 claim.id(), claim.workerId(), claim.fencingToken())) {
             return;
@@ -217,8 +185,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
         log.info("[media_extract] 上游已提交 jobId={} providerTaskId={} format={}",
                 claim.id(), taskId, outputFormat);
 
-        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
-        //    SQL 无 type 过滤，media_extract 直接复用）
         boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
@@ -226,28 +192,16 @@ public class MediaExtractJobProcessor implements JobProcessor {
         }
     }
 
-    // ========== poll 相 ==========
 
-    /**
-     * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（含超限）/ failed 终态 /
-     * completed 立即下载转存发布。
-     */
     private void pollPhase(ClaimedJob claim, String providerToken) {
         ExtractAudioTaskObservation observation;
         try {
             observation = extractAudioClient.poll(providerToken, claim.providerTaskId());
         } catch (MediaExtractError pollError) {
             if (isTransientPollError(pollError)) {
-                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
-                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
-                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
-                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
-                // 生成中。与 processing 分支同一判定、同一兜底码，文案附上游错误摘要（IKIHKR）。
                 if (claim.pollCount() >= MAX_MEDIA_EXTRACT_POLLS) {
                     log.warn("[media_extract] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6W，IKIMN8 契约）：有状态
-                    // cause 即写 details.http_status 并剥「: HTTP <code>」片段；无 cause 不写键、文案不动
                     Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
                     String message = "音频提取轮询超时（超过 " + MAX_MEDIA_EXTRACT_POLLS + " 次），上游持续错误: "
                             + pollError.getMessage();
@@ -272,7 +226,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
 
         if ("processing".equals(observation.status())) {
             if (claim.pollCount() >= MAX_MEDIA_EXTRACT_POLLS) {
-                // 轮询超时归并兜底码（家族口径：宁可不重试也不双跑；用户手动重试会重新提交）
                 failMediaExtract(claim, MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED,
                         "音频提取轮询超时（超过 " + MAX_MEDIA_EXTRACT_POLLS + " 次）");
                 return;
@@ -286,7 +239,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
         }
 
         if ("failed".equals(observation.status())) {
-            // 上游可读原因透传（§18.4）；额度/内容政策信号按 §5 保留既有码（去字幕同款分类链）
             String message = observation.upstreamMessage() != null && !observation.upstreamMessage().isEmpty()
                     ? observation.upstreamMessage() : "音频提取任务失败";
             String code = classifyUpstreamFailure(observation.upstreamCode(), observation.upstreamMessage());
@@ -296,7 +248,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
             return;
         }
 
-        // completed（succeeded）
         log.info("[media_extract] 上游状态终态=completed jobId={} providerTaskId={} pollCount={}",
                 claim.id(), claim.providerTaskId(), claim.pollCount());
         if (observation.audioUrl() == null || observation.audioUrl().isEmpty()) {
@@ -307,16 +258,8 @@ public class MediaExtractJobProcessor implements JobProcessor {
         publishResult(claim, observation);
     }
 
-    /**
-     * 结果发布：立即下载转存（火山 audio_url 仅 24h 有效，官方明确「请及时下载保存」）→
-     * 发布音频 Asset（type=audio / source='generated'）→ 终态 succeeded。
-     * <p>
-     * 返回发布守卫结果（IKI89P：重试收割据此判定复用是否成立；false = 守卫未命中，
-     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
-     */
     private boolean publishResult(ClaimedJob claim,
                                   ExtractAudioTaskObservation observation) {
-        // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（对齐去字幕的强依赖口径）
         if (mediaRelay == null) {
             throw new MediaExtractError(
                     MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED,
@@ -328,8 +271,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
         log.info("[media_extract] 转存完成 jobId={} storageKey={} size={}",
                 claim.id(), stored.storageKey(), stored.size());
 
-        // 时长优先官方 result.duration 精确值，缺失回落源 duration_ms 换算（去字幕同构；
-        // 宽高恒 null——音频无画面维度，publishMediaExtractResult 内部落定）
         Double sourceDurationSec = null;
         String sourceAssetId = parseAssetId(
                 claim.input().get(MediaExtractContract.INPUT_KEY_SOURCE_ASSET_ID));
@@ -371,12 +312,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
         return published;
     }
 
-    // ========== 瞬时轮询错误判定（视频骨架 isTransientPollError 同语义） ==========
 
-    /**
-     * 瞬时轮询错误判定（去字幕 isTransientPollError 同语义）：网络超时 / 不可达 → 瞬时；
-     * HTTP 429/5xx（cause 携带状态）→ 瞬时；4xx 与业务失败 → 非瞬时。
-     */
     static boolean isTransientPollError(MediaExtractError error) {
         String code = error.getCode();
 
@@ -397,16 +333,13 @@ public class MediaExtractJobProcessor implements JobProcessor {
         return false;
     }
 
-    // ========== 工具方法 ==========
 
-    /** Asset id 容忍数字形态（Jackson 数字 JSON 值），与去字幕解析同构。 */
     private static String parseAssetId(Object obj) {
         if (obj instanceof String s && !s.isEmpty()) return s;
         if (obj instanceof Number n) return String.valueOf(n.longValue());
         return null;
     }
 
-    /** 转存扩展名取任务所选 output_format（提交相已校验枚举；poll 相冻结 input 原样沿用）。 */
     private static String resolveOutputFormat(ClaimedJob claim) {
         Object formatObj = claim.input().get(MediaExtractContract.INPUT_KEY_OUTPUT_FORMAT);
         if (formatObj instanceof String format
@@ -416,10 +349,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
         return MediaExtractContract.DEFAULT_OUTPUT_FORMAT;
     }
 
-    /**
-     * 失败码归一（§18.4）：§5 分类信号（额度/内容政策）保留既有码，其余一律归并兜底
-     * media_extract_provider_failed（1044，与本地 ffmpeg 兜底 1020 区分——ADR-0103）。
-     */
     private static String resolveFailCode(Exception e) {
         if (e instanceof MediaExtractError mee && PRESERVED_ERROR_CODES.contains(mee.getCode())) {
             return mee.getCode();
@@ -427,10 +356,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
         return MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED;
     }
 
-    /**
-     * 上游任务 failed 的错误码分类（§5 优先级；去字幕分类链同款：
-     * 版权 → 内容政策 → 额度 → 兜底 1044）。
-     */
     private static String classifyUpstreamFailure(String upstreamCode, String upstreamMessage) {
         String text = (upstreamCode != null ? upstreamCode : "") + " "
                 + (upstreamMessage != null ? upstreamMessage : "");
@@ -446,15 +371,10 @@ public class MediaExtractJobProcessor implements JobProcessor {
         return MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED;
     }
 
-    /** 失败处理（沿用既有 failMediaExtractJob 守卫：SET 清 next_action_at，
-     *  轮询型任务语义完备；details.raw 透传原始原因）。 */
     private void failMediaExtract(ClaimedJob claim, String code, String message) {
         failMediaExtract(claim, code, message, null);
     }
 
-    /** details 落结构化上游 HTTP 状态（IKIMS2，音频混合 IKIHGQ 同款）：backend 换凭证判定读
-     *  {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；非 HTTP 失败
-     *  （超时 / 连接失败 / 业务信封失败）不写该键。 */
     private void failMediaExtract(ClaimedJob claim, String code, String message,
                                   Integer httpStatus) {
         log.warn("media_extract job 失败 jobId={} code={} message={}", claim.id(), code, message);
@@ -476,7 +396,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
                 failInput.workerId(), failInput.fencingToken());
     }
 
-    /** MQ 自投延迟消息（视频骨架 scheduleNext 同款；错误上抛保持不 ack 由 broker 重投兜底）。 */
     private void scheduleNext(String jobId, long delayMs) {
         try {
             producer.enqueue(jobId, delayMs);

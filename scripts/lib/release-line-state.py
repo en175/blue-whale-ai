@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Manage one team-wide active release line through a remote Git branch."""
 
 import argparse
 import datetime as dt

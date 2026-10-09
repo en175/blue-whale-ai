@@ -57,24 +57,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/**
- * 音视频合成结果转存的**真实流式**集成测试（IKILVH）：Worker 处理器 + 真实
- * {@link TosVideoMediaRelay}（仅 TOS 签名走 mock、上传走本地 HTTP 桩）+ 受控慢速/停滞源 +
- * 失租/取消信号——不复刻「模拟转存函数返回值」的单测口径，端到端钉四条路径：
- * <ol>
- *   <li>受控慢流持续有进度 → 转存完成并发布**长期 Asset**（供应商临时 URL 不充当最终产物）</li>
- *   <li>停滞源 + 心跳失租 → 转存及时中止：不发布、不落普通失败终态（recovery 兜底）</li>
- *   <li>停滞源 + 用户取消 → 转存及时中止（cancelled 终态由取消检查落，不写失败）</li>
- *   <li>任务截止时间（execution_deadline_at）到点 → 明确失败终态，文案独立命名</li>
- * </ol>
- * 容量超限（> maxBytes）路径在本规模无法真实化（本家族上限 10 GiB 常量，源桩发不完），由
- * {@code TosVideoMediaRelayTest#persistStreaming_rejectsResultOverCallerCap} 以注入小上限
- * 真实流式覆盖。
- * <p>
- * 缩比口径说明：受控慢流 64KiB/100ms ≈ 0.6MiB/s、总转存时长 ~1.2s——「持续有进度且未过
- * 截止时间即可完成」的语义已端到端验证；线上 10 GiB 能否在任务截止时间内完成取决于实际
- * 吞吐（10GiB@2MiB/s ≈ 85 分钟），本套件不宣称线上任意速率均可完成 10 GiB。
- */
 class AudioVideoMuxStreamingTransferTest {
 
     private static final int BLOCK_BYTES = 64 * 1024;
@@ -84,7 +66,6 @@ class AudioVideoMuxStreamingTransferTest {
     private HttpServer uploadServer;
     private final CountDownLatch releaseStall = new CountDownLatch(1);
     private final AtomicLong uploadedBytes = new AtomicLong();
-    /** 有状态 TOS 替身的对象表（IKIN8Z）：key → 字节；deleteObject 查表真删，断言以对象存在性为准。 */
     private final ConcurrentHashMap<String, byte[]> tosObjects = new ConcurrentHashMap<>();
     private final JobClaimService claimService = mock(JobClaimService.class);
     private final GenerationJobMapper jobMapper = mock(GenerationJobMapper.class);
@@ -104,7 +85,6 @@ class AudioVideoMuxStreamingTransferTest {
                 "submit_attempt", 1L);
     }
 
-    /** 受控慢速源：块间 sleep——持续有进度但速率受限（真实 HTTP/TCP 流式读写）。 */
     private String serveSlow() throws IOException {
         byte[] block = patternBlock();
         sourceServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -125,7 +105,6 @@ class AudioVideoMuxStreamingTransferTest {
         return "http://127.0.0.1:" + sourceServer.getAddress().getPort() + "/out.webm";
     }
 
-    /** 停滞源：响应头 + 64KiB 首块后挂住连接（转存必然阻塞在下一个 read 上）。 */
     private String serveStalled() throws IOException {
         byte[] block = patternBlock();
         sourceServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -144,9 +123,6 @@ class AudioVideoMuxStreamingTransferTest {
         return "http://127.0.0.1:" + sourceServer.getAddress().getPort() + "/out.webm";
     }
 
-    /** TOS 替身（有状态）：preSignedURL 走 mock 指向本地上传桩，上传字节真实流式送达并按
-     *  key 落对象表；deleteObject 查表真删——发布异常系列的清理断言以对象存在性为准，
-     *  不再只 verify 删除接口调用次数。 */
     private TOSV2 tosStandin() throws IOException {
         uploadServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         uploadServer.createContext("/", exchange -> {
@@ -204,7 +180,6 @@ class AudioVideoMuxStreamingTransferTest {
         UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        // 截止时间给足（10 分钟）：慢流合法传输不受总时限约束，heartbeat 50ms 全程续租命中
         ClaimedJob claim = new ClaimedJob(
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
                 WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
@@ -225,8 +200,6 @@ class AudioVideoMuxStreamingTransferTest {
 
         processor.handle("70");
 
-        // 真实流式端到端：下载 768KiB 慢流 + 上传全部送达 TOS 替身；发布的 url 是自有 bucket
-        // 公开地址（供应商临时链接只作下载源，不充当最终产物）
         assertThat(Duration.ofNanos(System.nanoTime() - startNanos).toMillis()).isGreaterThan(1_000);
         ArgumentCaptor<PublishAudioVideoMuxDto> published = ArgumentCaptor.forClass(PublishAudioVideoMuxDto.class);
         verify(finalizer).publishAudioVideoMuxResult(published.capture());
@@ -235,7 +208,6 @@ class AudioVideoMuxStreamingTransferTest {
         assertThat(published.getValue().size()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
         assertThat(published.getValue().sourceVideoAssetId()).isEqualTo("12");
         assertThat(uploadedBytes.get()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
-        // 转存时长跨多个心跳窗（~1.2s / 50ms 心跳），所有权全程保持
         verify(stateMachine, atLeast(3)).renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L));
         verify(finalizer, never()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
@@ -261,7 +233,6 @@ class AudioVideoMuxStreamingTransferTest {
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", sourceUrl,
                         227.0, "1920x1080", null, null, null));
-        // 转存前续租命中；心跳里失租（recovery 已重新领取）→ abort 打断停滞中的真实下载
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true, false);
         when(finalizer.publishAudioVideoMuxResult(any())).thenReturn(true);
         var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, finalizer, upstreamCredential, gateway, relay, producer);
@@ -271,11 +242,9 @@ class AudioVideoMuxStreamingTransferTest {
 
         processor.handle("70");
 
-        // 及时性即证明：失租后一个心跳窗（50ms）内中止，不是等停流超时（60s）或对端断连
         assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
                 .isLessThan(Duration.ofSeconds(5));
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
-        // 失租不写成普通失败终态：任务由新执行者 / recovery 按既有 fencing 规则接管
         verify(finalizer, never()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
         assertThat(uploadedBytes.get()).isEqualTo(0);
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
@@ -296,7 +265,6 @@ class AudioVideoMuxStreamingTransferTest {
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
                 WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
-        // runStep 入口 + poll 观察后 + 续租前共三次未命中；心跳里第四次命中取消
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false, true, true);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
@@ -331,7 +299,6 @@ class AudioVideoMuxStreamingTransferTest {
         UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        // 截止 300ms：慢流总长 ~1.2s，中途必撞截止 → 明确失败（区别于失租/取消的静默退出）
         ClaimedJob claim = new ClaimedJob(
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
                 WorkerClock.now(), WorkerClock.now().plusNanos(300_000_000), null);
@@ -349,8 +316,6 @@ class AudioVideoMuxStreamingTransferTest {
 
         processor.handle("70");
 
-        // 截止到点 = 明确结果（任务预算耗尽落失败终态），不发布
-        // failMediaExtractJob 实参顺序 = jobId, code, message, details, workerId, fencingToken
         verify(finalizer).failMediaExtractJob(any(), any(),
                 org.mockito.ArgumentMatchers.argThat(message ->
                         message != null && message.contains("任务执行截止时间已到")),
@@ -360,9 +325,7 @@ class AudioVideoMuxStreamingTransferTest {
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
 
-    // ========== IKIN03：转存成功返回后 → 发布前的未发布对象清理（真实 relay + TOS 替身） ==========
 
-    /** 真实转存 + 发布链的受控替身夹具：慢流源完整转存（768KiB 真实送达 TOS 替身）。 */
     private TOSV2 fullyTransferredFixture(JobStateMachineService stateMachine,
                                           UpstreamCredential upstreamCredential,
                                           NewApiMediaKitMuxAudioVideoClient gateway,
@@ -381,7 +344,6 @@ class AudioVideoMuxStreamingTransferTest {
         return tosClient;
     }
 
-    /** 心跳窗拉长到 5s（转存 ~1.2s 内不触发）：让「转存后」分支由打桩的续租/发布返回值确定性控制。 */
     private AudioVideoMuxJobProcessor quietHeartbeatProcessor(JobStateMachineService stateMachine,
                                                               JobFinalizer finalizer,
                                                               UpstreamCredential upstreamCredential,
@@ -405,13 +367,11 @@ class AudioVideoMuxStreamingTransferTest {
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         TOSV2 tosClient = fullyTransferredFixture(stateMachine, upstreamCredential, gateway, producer, sourceUrl);
         TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
-        // 转存前续租命中；转存成功返回后续租未命中（已被接管/终态）→ 发布前放弃并清理
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true, false);
         List<String> tempBefore = relayTempFiles();
 
         quietHeartbeatProcessor(stateMachine, finalizer, upstreamCredential, gateway, relay, producer).handle("70");
 
-        // 该次上传真实完整送达过 TOS 替身（对象确实存在），清理必须精确指向本次上传的 key
         assertThat(uploadedBytes.get()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
         var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
         verify(tosClient).preSignedURL(uploaded.capture());
@@ -420,9 +380,7 @@ class AudioVideoMuxStreamingTransferTest {
         assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
         assertThat(deleted.getValue().getKey()).isEqualTo(uploaded.getValue().getKey());
         assertThat(deleted.getValue().getKey()).startsWith("generated/9/video/");
-        // 对象存在性（有状态替身真删）：该次上传对象清理后确实不存在
         assertThat(tosObjects).doesNotContainKey(uploaded.getValue().getKey());
-        // 旧执行者 fencing：不生成 Asset、不把失租写成普通失败终态（hasPublishedAsset 默认未引用）
         verify(finalizer).hasPublishedAsset("70", uploaded.getValue().getKey());
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
         verify(finalizer, never()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
@@ -450,13 +408,11 @@ class AudioVideoMuxStreamingTransferTest {
         var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
         verify(tosClient).preSignedURL(uploaded.capture());
         verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
-        // Asset 与 GenerationJob 结果一致：发布的 storageKey 即本次真实上传的 key
         ArgumentCaptor<PublishAudioVideoMuxDto> published = ArgumentCaptor.forClass(PublishAudioVideoMuxDto.class);
         verify(finalizer).publishAudioVideoMuxResult(published.capture());
         assertThat(published.getValue().storageKey()).isEqualTo(uploaded.getValue().getKey());
         assertThat(published.getValue().size()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
         assertThat(uploadedBytes.get()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
-        // 对象存在性：已发布成品完整保留在 TOS 替身
         assertThat(tosObjects).containsKey(uploaded.getValue().getKey());
         assertThat(tosObjects.get(uploaded.getValue().getKey())).hasSize(BLOCK_BYTES * BLOCK_COUNT);
         verify(finalizer, never()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
@@ -477,7 +433,6 @@ class AudioVideoMuxStreamingTransferTest {
         TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(finalizer.publishAudioVideoMuxResult(any())).thenReturn(false);
-        // 权威核实替身：该 job 的转存对象已被 Asset 引用（发布事务已提交）→ 保留
         when(finalizer.hasPublishedAsset(eq("70"), anyString())).thenReturn(true);
         List<String> tempBefore = relayTempFiles();
 
@@ -488,7 +443,6 @@ class AudioVideoMuxStreamingTransferTest {
         verify(finalizer).hasPublishedAsset("70", uploaded.getValue().getKey());
         verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
         verify(finalizer, never()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
-        // 成品完整保留在 TOS 替身（对象存在性，非仅删除接口未调用）
         assertThat(tosObjects).containsKey(uploaded.getValue().getKey());
         assertThat(uploadedBytes.get()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
@@ -509,7 +463,6 @@ class AudioVideoMuxStreamingTransferTest {
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(finalizer.publishAudioVideoMuxResult(any()))
                 .thenThrow(new RuntimeException("发布事务结果不明"));
-        // 提交结果不明：先核实权威状态——已被 Asset 引用（事务实际已提交）则保留
         when(finalizer.hasPublishedAsset(eq("70"), anyString())).thenReturn(true);
         List<String> tempBefore = relayTempFiles();
 
@@ -519,9 +472,7 @@ class AudioVideoMuxStreamingTransferTest {
         verify(tosClient).preSignedURL(uploaded.capture());
         verify(finalizer).hasPublishedAsset("70", uploaded.getValue().getKey());
         verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
-        // 对象存在性：提交后 Asset 引用的对象仍存在（迟到清理不删已发布成品）
         assertThat(tosObjects).containsKey(uploaded.getValue().getKey());
-        // 异常继续上抛走既有 fail 终态路径（守卫仍 fencing），不吞异常
         verify(finalizer).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
@@ -550,7 +501,6 @@ class AudioVideoMuxStreamingTransferTest {
         var deleted = ArgumentCaptor.forClass(DeleteObjectInput.class);
         verify(tosClient).deleteObject(deleted.capture());
         assertThat(deleted.getValue().getKey()).isEqualTo(uploaded.getValue().getKey());
-        // 对象存在性（有状态替身真删）：确认不会再被提交且无引用 → 该次上传对象清理后确实不存在
         assertThat(tosObjects).doesNotContainKey(uploaded.getValue().getKey());
         verify(finalizer).hasPublishedAsset("70", uploaded.getValue().getKey());
         verify(finalizer).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
@@ -572,8 +522,6 @@ class AudioVideoMuxStreamingTransferTest {
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(finalizer.publishAudioVideoMuxResult(any()))
                 .thenThrow(new RuntimeException("发布事务提交窗口断连"));
-        // 受控交错：首轮探测 = 发布事务仍在服务端进行（Asset 行尚不可见）；短延时重查 =
-        // 事务已提交结束，权威查询命中 Asset 引用 → 保留对象
         when(finalizer.hasInFlightJobWriteTransaction("70")).thenReturn(true, false);
         when(finalizer.hasPublishedAsset(eq("70"), anyString())).thenReturn(true);
         when(finalizer.failMediaExtractJob(any(), any(), any(), any(), any(), anyLong())).thenReturn(true);
@@ -586,7 +534,6 @@ class AudioVideoMuxStreamingTransferTest {
         verify(finalizer, org.mockito.Mockito.times(2)).hasInFlightJobWriteTransaction("70");
         verify(finalizer, org.mockito.Mockito.times(1)).hasPublishedAsset("70", uploaded.getValue().getKey());
         verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
-        // 对象存在性：发布事务随后提交成功，被 Asset 引用的对象仍存在
         assertThat(tosObjects).containsKey(uploaded.getValue().getKey());
         assertThat(tosObjects.get(uploaded.getValue().getKey())).hasSize(BLOCK_BYTES * BLOCK_COUNT);
         verify(finalizer).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
@@ -613,18 +560,15 @@ class AudioVideoMuxStreamingTransferTest {
                 quietHeartbeatProcessor(stateMachine, finalizer, upstreamCredential, gateway, relay, producer).handle("70"))
                 .doesNotThrowAnyException();
 
-        // 删除尝试确实发生（relay 内部记录 storageKey + 错误后吞掉异常），主语义不变
         verify(tosClient).deleteObject(any(DeleteObjectInput.class));
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
         verify(finalizer, never()).failMediaExtractJob(any(), any(), any(), any(), any(), anyLong());
-        // 对象存在性：删除失败不得记为成功——对象仍完整保留在 TOS 替身（留待处理清理责任）
         var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
         verify(tosClient).preSignedURL(uploaded.capture());
         assertThat(tosObjects).containsKey(uploaded.getValue().getKey());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
 
-    // ========== IKIN91：转存成功返回后、发布尝试前，取消状态查询异常的安全收口（真实 relay） ==========
 
     @Test
     @Timeout(30)
@@ -636,13 +580,11 @@ class AudioVideoMuxStreamingTransferTest {
         UpstreamCredential upstreamCredential = mock(UpstreamCredential.class);
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        // fullyTransferredFixture 同款前置，但取消检查改为链式打桩（夹具打桩会被覆盖，触发严格模式）
         TOSV2 tosClient = tosStandin();
         ClaimedJob claim = new ClaimedJob(
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
                 WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
-        // 转存前三段取消检查未命中；转存返回后首次取消状态查询抛异常（发布调用尚未发出）
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false)
                 .thenThrow(new RuntimeException("取消状态查询 DB 断连"));
@@ -661,17 +603,13 @@ class AudioVideoMuxStreamingTransferTest {
         verify(tosClient).preSignedURL(uploaded.capture());
         var deleted = ArgumentCaptor.forClass(DeleteObjectInput.class);
         verify(tosClient).deleteObject(deleted.capture());
-        // 清理精确指向本次上传的唯一对象键，且确实删除（有状态替身真删）
         assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
         assertThat(deleted.getValue().getKey()).isEqualTo(uploaded.getValue().getKey());
         assertThat(tosObjects).doesNotContainKey(uploaded.getValue().getKey());
         assertThat(uploadedBytes.get()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
-        // 不产生引用该键的 Asset：发布从未开始；未尝试发布 → 单次核实即删，不走在飞事务保守探测
         verify(finalizer, never()).publishAudioVideoMuxResult(any());
         verify(finalizer).hasPublishedAsset("70", uploaded.getValue().getKey());
         verify(finalizer, never()).hasInFlightJobWriteTransaction(anyString());
-        // 原 DB 异常按既有语义上抛走 fail（不吞、不伪装主动取消），本地临时文件由 relay finally 清理
-        // failMediaExtractJob 实参顺序 = jobId, code, message, details, workerId, fencingToken
         ArgumentCaptor<String> failCode = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> failMessage = ArgumentCaptor.forClass(String.class);
         verify(finalizer).failMediaExtractJob(any(), failCode.capture(), failMessage.capture(),

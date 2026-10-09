@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IKIHPJ：跨进程常量行为钉死（client_token 派生 + 转存容量）。 */
 class AudioVideoMuxContractTest {
 
     @Test

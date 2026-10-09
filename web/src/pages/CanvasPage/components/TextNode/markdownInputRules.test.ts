@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { matchBlockRule, matchInlineRule } from './markdownInputRules';
 
-/* IKFM3L 输入规则匹配层：行首块级规则与行内闭合规则（执行层由真实浏览器验证） */
 
 describe('matchBlockRule（空格触发）', () => {
   it.each([

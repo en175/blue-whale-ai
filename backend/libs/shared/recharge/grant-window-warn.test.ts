@@ -4,13 +4,6 @@ import {
   GRANT_WINDOW_WARN_COOLDOWN_MS,
 } from "./grant-window-warn.js";
 
-/* ============================================
- * 「补发已超出重试窗口」那条 WARN 的频次闸（M-1）。
- *
- * 背景：那条 WARN 由**用户轮询**触发，而同一条路上的名额是 30 秒 —— 用户开着充值页
- * 且账上有一笔超窗单时就是 ≈2880 条/天/副本，比主动对账扫描器高两个量级。
- * 一条只会重复自己、且不会自愈的 WARN 被刷爆之后，真正的信号反而读不出来。
- * ============================================ */
 
 describe("createGrantWindowWarnGate — 超窗 WARN 的频次闸", () => {
   beforeEach(() => {
@@ -23,7 +16,6 @@ describe("createGrantWindowWarnGate — 超窗 WARN 的频次闸", () => {
   it("★ 同一笔单在冷却窗口内只放行一次（这就是「2880 条/天」的解法）", () => {
     const gate = createGrantWindowWarnGate();
 
-    // 模拟用户每 30 秒轮询一次：头一小时内 120 次调用
     let allowed = 0;
     for (let i = 0; i < 120; i += 1) {
       if (gate.shouldWarn("RC1")) allowed += 1;
@@ -66,7 +58,6 @@ describe("createGrantWindowWarnGate — 超窗 WARN 的频次闸", () => {
     for (let i = 0; i < 50; i += 1) gate.shouldWarn(`RC${i}`);
     expect(gate.size()).toBe(50);
 
-    // 全部冷却完 + 再问一个，旧条目应当被清走而不是一直留着
     vi.advanceTimersByTime(61_000);
     gate.shouldWarn("RC-new");
 
@@ -74,7 +65,6 @@ describe("createGrantWindowWarnGate — 超窗 WARN 的频次闸", () => {
   });
 
   it("默认冷却明显大于扫描器的一轮（5 分钟）：它不该成为新的噪声源", () => {
-    // 反向钉住默认值：如果谁把它调到「一轮」（5 分钟）那个量级，这条会红
     expect(GRANT_WINDOW_WARN_COOLDOWN_MS).toBeGreaterThanOrEqual(60 * 60 * 1000);
   });
 });

@@ -10,11 +10,6 @@ import type { GenerationDockDefinition } from './generationDockCoordinator';
 import { createTextGenerationDock } from './textGenerationDock';
 import TextGenerationDockPanel from './textGenerationDockPanel';
 
-/* IKFYH6 生成面板「点面板外 / Esc」统一关闭：五面板（视频/图片/音频/文本生成/音乐）同口径。
-   覆盖拍板口径：空白 PaneClick 统一关、选中变化补自由面板、document 捕获 click 管画布外 UI
-   （拖拽位移抑制、.react-flow 与「面板领土」豁免）、Esc 优先级链（@菜单→选取→输入框→关面板）、
-   持续选取会话中空白点击只退选取（推翻 IKFR4X/Y/Z 空白不退出旧口径）。
-   FlowCanvas/CanvasToolbar 打桩透出 props；面板真实渲染（PromptRefEditor 打桩 textarea）。 */
 
 const addedDock = vi.hoisted(() => {
   const nodes: Node[] = [];
@@ -112,7 +107,6 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** PromptRefEditor 打桩：textarea 输入透传结构化 onChange（与 videoDraft 同款） */
 vi.mock('./components/PromptRefEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
@@ -263,14 +257,12 @@ vi.mock('@/api/assets', () => ({
   fetchAllAssets: vi.fn(async () => []),
   fetchAssetDetail: vi.fn(),
   linkAssetToProject: vi.fn(),
-  // 资产选择弹窗（AssetsPickerModal）useInfiniteQuery 数据源：空列表
   assetPageQueryOptions: vi.fn((type: string, size: number) => ({
     queryKey: ['asset-pages', type, size],
     initialPageParam: 1,
     queryFn: () => Promise.resolve({ records: [], total: 0, current: 1 }),
     getNextPageParam: () => undefined,
   })),
-  // IKGHZ3 弹窗内放大预览：详情补拉（usePreviewAsset）查询配置
   assetDetailQueryOptions: vi.fn((id: unknown) => ({
     queryKey: ['asset-detail', id],
     queryFn: () => Promise.resolve(null),
@@ -326,7 +318,6 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 组合夹具：普通素材 m1 / 图片草稿 d1 / 视频草稿 v1 / 音频草稿 au1 / 文生文卡 tg1 / 资产卡 c1 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -437,7 +428,6 @@ async function selectNodes(ids: string[]) {
   });
 }
 
-/** 面板开关标记（各面板模型选择器/标题文案仅在该面板打开时渲染） */
 const imageOpen = () => container.textContent!.includes('测试生图模型');
 const videoOpen = () => container.textContent!.includes('测试视频模型');
 const audioOpen = () => container.textContent!.includes('测试音频模型');
@@ -459,7 +449,6 @@ async function openTextGenPanel() {
   await clickNode('tg1');
   await vi.waitFor(() => expect(textGenOpen()).toBe(true));
 }
-/** 自由图片面板（资产卡「生成图片」入口，无绑定草稿） */
 async function openFreeImagePanel() {
   const card = (flowProps.current.assetNodes as Node[]).find((n) => n.id === 'c1')!;
   await act(async () => {
@@ -468,14 +457,12 @@ async function openFreeImagePanel() {
   await vi.waitFor(() => expect(imageOpen()).toBe(true));
 }
 
-/** 小地图按钮：面板领土与画布区域之外的中立 UI 元素 */
 function mapButton(): HTMLButtonElement {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.title === '显示小地图' || b.title === '隐藏小地图',
   )!;
 }
 
-/** 原地点击元素（先 mousedown 后 click，无位移） */
 async function clickElement(el: Element) {
   await act(async () => {
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
@@ -489,8 +476,6 @@ async function pressEscape(target: EventTarget = window) {
   });
 }
 
-/** 进入图片面板持续选取会话（会话提示条「完成选取」出现即活跃）；
- *  IKGB7U 起经附件操作条「+ 参考」直达（旧「+」菜单已退役） */
 async function startImagePickSession() {
   await act(async () => {
     [...container.querySelectorAll('button')].find((b) => b.title === '从节点添加素材')!.click();
@@ -508,7 +493,6 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   sessionStorage.clear();
-  // jsdom 无 scrollTo 实现：资产选择弹窗切换 tab 时调用，补空实现
   Element.prototype.scrollTo = () => {};
   seedDoc();
   apiMocks.fetchGenerationModels.mockImplementation(async (type?: string) => {
@@ -572,11 +556,9 @@ describe('IKFYH6 空白点击统一关闭五面板', () => {
   });
 
   it('生成中只读面板：点画布空白关闭，生成任务不受影响（验收 7）', async () => {
-    // 任务持续进行中（不完成），卡片保持「生成中」只读（asset 字段仅为满足 mock 签名，running 态不消费）
     apiMocks.fetchJobStatus.mockImplementation(async () => ({ job_id: 'j1', status: 'running', progress: 40, asset: { id: '', url: '', type: 'image' } }));
     await renderPage();
     await clickNode('g1');
-    // 只读视图不渲染模型名摘要，以编辑器存在判定面板打开
     const editorPresent = () => container.querySelector('[data-testid="chip-editor"]') !== null;
     await vi.waitFor(() => expect(editorPresent()).toBe(true));
 
@@ -660,7 +642,6 @@ describe('IKFYH6 画布外 UI 点击关闭（document click）', () => {
     });
     expect(imageOpen()).toBe(true);
 
-    // 中键 click 同样不触发关闭
     await act(async () => {
       mapButton().dispatchEvent(new MouseEvent('click', { bubbles: true, button: 1 }));
     });
@@ -687,7 +668,6 @@ describe('IKFYH6 画布外 UI 点击关闭（document click）', () => {
     await renderPage();
     await openFreeImagePanel();
 
-    // IKGB7U 起经附件操作条「资产库」pill 直达资产库弹窗（旧「+」菜单已退役）
     await act(async () => {
       [...container.querySelectorAll('button')].find((b) => b.title === '从资产中选择')!.click();
     });
@@ -726,7 +706,6 @@ describe('IKFYH6 Esc 优先级链', () => {
   it('时长滑杆（原生 range）聚焦按 Esc 关闭视频底部对话框（IKI61N：组件内自闭环，不被 INPUT 豁免吞键）', async () => {
     await renderPage();
     await openVideoDraftPanel();
-    // 时长滑杆在「配置」面板内（showConfig 展开才渲染）
     const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
     await act(async () => {
       configBtn.click();

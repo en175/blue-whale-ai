@@ -20,8 +20,6 @@ import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
-// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
-// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
   return {
@@ -35,12 +33,6 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   };
 });
 
-// IKDLQG「文本附件驱动视频生成」公开接口集成（契约「验证」节服务端项）：
-// 真 NestFactory 挂载生产 Canvas/Generation 控制器与服务 + 隔离 MySQL（IKDLQG_DATABASE_URL 门控）。
-// 本切片的 API 链路不产生任何上游 HTTP 调用（供应商调用在 worker 切片，由 video-job-runner 单测覆盖），
-// 故不挂内存 HTTP 替身；生成入队（RocketMQ）未配置时由控制器捕获记日志，不影响断言。
-// 浏览器段（IKDLQG_BROWSER=1：连线 → 面板见附件 → 生成 → 刷新恢复）在同 describe 尾部，
-// 另挂 ProjectsController（快照水合）与 GenerationModelsController（面板模型目录）。
 describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public API (IKDLQG)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -50,8 +42,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
   const previousDatabase = process.env.DATABASE_URL;
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDLQG_DATABASE_URL;
-    // supported_sizes 带 api_value：浏览器段 BottomDialog 按 api_value 上送 resolution；
-    // supported_durations 提供时长刻度（API 段不读模型目录；创建链路不校验取值，只透传）
     const sizes = [{ id: "720p", label: "720P", api_value: "720p" }];
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdlqg-test", model_id: MODEL_ID } },
@@ -68,7 +58,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
         default_aspect_ratio: "16:9",
         default_duration: 5,
         features: {},
-        // channel 为必填封闭枚举；video 行的渠道就是媒介本身（无解析器/协议之分）
         channel: "seedream-video",
       },
       update: { supported_sizes: sizes, default_size: "720p" },
@@ -80,8 +69,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
     Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController], providers: [
-      // IKIPWT：业务失败经 DomainError → AllExceptionsFilter 统一投影（与 app.module 的 APP_FILTER 同款），
-      // 台架不挂过滤器时 DomainError 落 Nest 默认 500 处理，信封 code/msg 均不可见。
       { provide: APP_FILTER, useClass: AllExceptionsFilter },
       { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
@@ -174,7 +161,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     expect(job).not.toBeNull();
     expect(job!.input.target_node_id).toBe("media-1");
     expect(job!.input.prompt).toBe("人物走过街角");
-    // 与当时画布一致：仅 target=media-1 且 source 为 textNode 的边，按 edges 数组顺序；title 缺省 ""
     expect(job!.input.text_attachments).toEqual([
       { node_id: "text-b", title: "", text: "雨夜" },
       { node_id: "text-a", title: "风格", text: "赛博朋克" },
@@ -185,8 +171,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
 
   it("目标缺失 / 图片 mediaNode / 音频类型携带 / 他人项目 → 明确失败不建任务", async () => {
     const projectId = (await projects.create("987654", "IKDLQG bad target")).id;
-    // 音频类型用例的模型须在白名单内（IKDLQG 后新增的模型白名单校验先于类型校验），
-    // 否则报“model_id 不在可用模型白名单”而非本用例关注的 target_node_id 类型拒绝
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdlqg-test", model_id: "any-audio-model" } },
       create: {
@@ -200,7 +184,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
         default_size: "",
         default_aspect_ratio: "",
         features: {},
-        // channel 为必填封闭枚举；audio 行的渠道就是媒介本身（无解析器/协议之分）
         channel: "seedream-audio",
       },
       update: {},
@@ -224,7 +207,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       parameters: { prompt: "哼一段旋律", model_id: "any-audio-model" },
     });
     expect(audioType.code).toBe(1002);
-    // 音频类型现已支持音频目标（IKDLQG 后演进）：携带视频目标按「不是音频媒体节点」明确拒绝
     expect(audioType.msg).toBe("目标节点不存在或不是音频媒体节点");
 
     expect(await jobCount(projectId)).toBe(0);
@@ -235,7 +217,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     expect(await jobCount(otherProject)).toBe(0);
   });
 
-  // IKH8AU：正文由提交方给全，空正文即无效请求（附件不再由服务端补正文）。
   it("正文为空 → 400 prompt 无效，不创建任务", async () => {
     const projectId = (await projects.create("987654", "IKDLQG empty prompt rejected")).id;
     const nodes = [mediaNode("media-1", "video"), textNode("text-1", "独立正文", "附件")];
@@ -291,7 +272,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     expect(first.code).toBe(200);
     const originalJobId = first.data.generation_job_id as string;
 
-    // 接纳后改写正文并断开连线：重试不得回读这些变更
     const canvas = await getCanvas(projectId);
     const edited = await saveCanvas(projectId, [mediaNode("media-1", "video"), textNode("text-1", "改写后正文", "风格")], [], canvas.version);
     expect(edited.status).toBe(200);
@@ -319,14 +299,10 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     expect(retry!.input.resolution).toBe("720p");
   });
 
-  // 浏览器段（契约「验证」节）：真实浏览器 + 真实业务 API + 隔离 MySQL 走完整生视频路径。
-  // 模式仿 IKDLQF 图片浏览器段；断言以「请求体 + 库内冻结快照」为准——
-  // harness 未挂 jobs 查询控制器，创建后前端轮询 GET /api/jobs/:id 得 404，页面 toast 报错属预期。
   it.runIf(process.env.IKDLQG_BROWSER)("browser: connect → panel attachment → generate → reload restores", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKDLQG browser")).id;
-    // 播种素材：快照资产字典是前端还原 mediaNode src 的唯一来源（无 assetId 会渲染「素材已被删除」）
     const asset = await prisma.client.assets.create({
       data: {
         user_id: BigInt(987654),
@@ -339,9 +315,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       },
     });
     const assetId = asset.id.toString();
-    // 直接播种连线（IKFCXC 起改）：拖线交互由 IKDLQF 图片浏览器段覆盖，本段聚焦面板→生成→刷新闭环；
-    // 生成目标须为草稿/成品卡身份（成品卡带 jobId 原位打开草稿面板，draft 参数避免恢复出空模型配置错误）。
-    // viewport 须为合法 {x,y,zoom}，"{}" 会让前端视口 NaN。
     const seeded = await saveCanvas(projectId, [
       { id: "text-1", type: "textNode", position: { x: 140, y: 160 }, data: { title: "雨夜", text: "赛博朋克" } },
       { id: "media-1", type: "mediaNode", position: { x: 900, y: 120 }, data: { mediaType: "video", fileName: "目标视频", assetId, width: 1280, height: 720, jobId: "ikdlqg-seed-job", draftModelId: MODEL_ID, draftSize: "720p", draftRatio: "16:9", draftDuration: 5 } },
@@ -357,7 +330,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-      // 只捕获创建调用（不含 retry/cancel 子路径），用于断言「连接/编辑不自动执行」与请求体
       const generationRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
       page.on("request", (request) => {
         if (request.method() === "POST" && /\/api\/projects\/\d+\/generation-jobs$/.test(request.url())) {
@@ -373,7 +345,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       await text.waitFor();
       await media.waitFor();
 
-      // 播种连线恢复渲染（水合后 GET 边形状与库内一致）；页面加载不触发任何生成
       await vi.waitFor(async () => {
         expect(await page.locator(".react-flow__edge").count(), "连线应渲染（showEdges 默认可见）").toBe(1);
       });
@@ -383,8 +354,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       ]);
       expect(generationRequests).toEqual([]);
 
-      // 从视频节点工具条打开面板：文本附件以图标进参考栏（IKFCKQ 起旧独立正文块下线），
-      // 悬浮浮层显示来源完整正文，目标提示词留白
       await media.locator('[data-testid="media-content"]').click();
       await media.getByRole("button", { name: "生成视频" }).click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
@@ -393,7 +362,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       await overlay.waitFor();
       expect(await overlay.innerText()).toContain("赛博朋克");
 
-      // 第一次发送：请求体携带 target_node_id 且 type=video，库内冻结附件快照与当时画布一致，prompt 冻结为 ""
       await page.locator('button[title="发送"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
       expect(generationRequests[0].body.type).toBe("video");
@@ -410,8 +378,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       expect(firstInput.duration).toBe(5);
       expect(firstInput.resolution).toBe("720p");
 
-      // 编辑正文 → 自动保存；编辑本身不触发第二次生成（发送后目标进入生成中，
-      // 面板只读、工具条隐藏，「再次发送消费新正文」由 IKFCXC 浏览器段的发送冻结闭环覆盖）
       const editor = text.locator('[data-placeholder="输入内容..."]');
       await editor.dblclick();
       const editSaved = page.waitForResponse((response) =>
@@ -421,7 +387,6 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       expect((await editSaved).status()).toBe(200);
       expect(generationRequests, "编辑正文不自动执行").toHaveLength(1);
 
-      // 刷新：连线恢复渲染，GET edges 仍为该边；历史任务快照不被编辑改写
       await page.reload();
       await text.waitFor();
       await media.waitFor();

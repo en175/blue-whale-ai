@@ -74,7 +74,6 @@ describe('Pagination', () => {
   });
 
   it('没有下一页时禁用「下一页」——由 hasNext 决定，不由 total 推', async () => {
-    // 游标分页拿不到 total，能回答「还能不能翻」的只有服务端给的游标
     const pager = await render({ page: 2, hasNext: false });
     expect(button(pager, '下一页').disabled).toBe(true);
     expect(button(pager, '上一页').disabled).toBe(false);

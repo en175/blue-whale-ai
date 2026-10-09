@@ -1,5 +1,3 @@
-/* IKGRE3：音频生成能力集收敛为 5 组合——组内不含视频，且图片与音频不同时出现。
- * 可用组合仅：单图片 / 单音频 / 单文本 / 图片+文本 / 音频+文本，其余全部不可用。 */
 import { describe, expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import {
@@ -23,7 +21,6 @@ function mediaNode(id: string, mediaType: 'image' | 'video' | 'audio'): Node {
   };
 }
 
-/** 成品素材卡（非草稿、带有效 src），可作为连线上游素材 */
 function sourceMediaNode(id: string, mediaType: 'image' | 'video' | 'audio'): Node {
   return {
     id,

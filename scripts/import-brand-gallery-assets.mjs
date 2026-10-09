@@ -1,14 +1,4 @@
 #!/usr/bin/env node
-/* ============================================
- * 一次性：品牌素材（视频库图库）→ 首页模板画廊入库（IKA64P）
- * 环境变量：
- *   BLUEWHALE_API_BASE  后端基址（默认 http://localhost:3000）
- *   BLUEWHALE_ADMIN_TOKEN  管理端 Bearer token
- *     （浏览器登录后台后控制台：JSON.parse(localStorage.getItem('bw-auth')).state.accessToken）
- *   BRAND_GALLERY_ROOT  素材根目录（默认 E:\IDEA_Programme\new\品牌素材\视频库图库）
- * 用法：node scripts/import-brand-gallery-assets.mjs --dry-run   仅校验文件与打印计划
- *       node scripts/import-brand-gallery-assets.mjs            实际入库（同标题卡片跳过，幂等）
- * ============================================ */
 import { readFile, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -54,8 +44,6 @@ async function api(method, p, body, opts = {}) {
 
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.mp4': 'video/mp4' };
 
-/** IKA64P 联调兼容：后端未配 TOS（presign 503）时，脚本用本地 .env 凭据直连 TOS 上传并设公共读。
- *  键前缀/公网 URL 拼法与后端 tos-storage.ts 完全一致（admin/templates/<type>/<uuid>.<ext>）。 */
 function loadTosConfig() {
   const vars = {};
   try {
@@ -63,7 +51,7 @@ function loadTosConfig() {
       const m = line.match(/^\s*([A-Z0-9_]+)=(.*)\s*$/);
       if (m) vars[m[1]] = m[2];
     }
-  } catch { /* 无 .env 时纯环境变量模式 */ }
+  } catch {  }
   const get = (k) => process.env[k] ?? vars[k];
   const cfg = {
     accessKeyId: get('VOLC_ACCESS_KEY_ID'),
@@ -108,7 +96,6 @@ async function directUploadMedia(file) {
   return `https://${cfg.bucket}.${cfg.endpoint}/${key}`;
 }
 
-/** 三步上传：presign → PUT 直传 TOS → complete 得公网 URL；后端未配 TOS（503）时自动降级直连 */
 async function presignUploadMedia(file) {
   const buf = await readFile(file);
   const ext = path.extname(file).toLowerCase();
@@ -144,7 +131,6 @@ async function uploadMedia(file) {
   throw lastErr;
 }
 
-/** 提取 md 的「完整提示词」+「负面要求」两节正文 */
 function extractPrompt(md) {
   const pick = (title) => {
     const m = md.match(new RegExp(`##\\s*${title}[\\s\\S]*?\\n([\\s\\S]*?)(?=\\n##\\s|$)`));
@@ -153,7 +139,6 @@ function extractPrompt(md) {
   return [pick('完整提示词'), pick('负面要求')].filter(Boolean).join('\n\n');
 }
 
-/** 图片卡构造器（IKA64P 产品校准）：一文件夹一卡，三张编号结果图堆叠（与视频卡同），content 取第一份提示词 */
 const picSet = (folder, files, contentFile) => ({
   tag: 'picture',
   title: folder,
@@ -161,9 +146,7 @@ const picSet = (folder, files, contentFile) => ({
   images: files.map((f) => `图片/${folder}/${f}`),
 });
 
-/** manifest：14 卡（视频 8 一文件夹一卡 + 图片 6 一文件夹一卡），images 顺序即展示序 */
 const manifest = [
-  // ── 视频标签：一文件夹一卡 ──
   { tag: 'video', title: '3c-键盘', content: '视频/3c-键盘/3c-键盘-提示词.md', images: ['视频/3c-键盘/3c-键盘-参考图-01.jpg', '视频/3c-键盘/3c-键盘-参考图-02.jpeg', '视频/3c-键盘/3c-键盘-参考图-03.jpeg'], video: '视频/3c-键盘/3c-键盘-视频.mp4' },
   { tag: 'video', title: '小红书-香薰', content: '视频/小红书-香薰/小红书-香薰-提示词.md', images: ['视频/小红书-香薰/小红书-香薰-参考图-01.jpg', '视频/小红书-香薰/小红书-香薰-参考图-02.jpg', '视频/小红书-香薰/小红书-香薰-参考图-03.jpg'], video: '视频/小红书-香薰/小红书-香薰-视频.mp4' },
   { tag: 'video', title: '抖音千川-端午礼盒', content: '视频/抖音千川-端午礼盒/抖音千川-端午礼盒-提示词.md', images: ['视频/抖音千川-端午礼盒/抖音千川-端午礼盒-参考图-01.jpg', '视频/抖音千川-端午礼盒/抖音千川-端午礼盒-参考图-02.jpg', '视频/抖音千川-端午礼盒/抖音千川-端午礼盒-参考图-03.jpg'], video: '视频/抖音千川-端午礼盒/抖音千川-端午礼盒-视频.mp4' },
@@ -172,7 +155,6 @@ const manifest = [
   { tag: 'video', title: '美妆-香水', content: '视频/美妆-香水/美妆-香水-提示词.md', images: ['视频/美妆-香水/美妆-香水-参考图-01.png', '视频/美妆-香水/美妆-香水-参考图-02.jpg', '视频/美妆-香水/美妆-香水-参考图-03.jpg', '视频/美妆-香水/美妆-香水-参考图-04.jpg'], video: '视频/美妆-香水/美妆-香水-视频.mp4' },
   { tag: 'video', title: '腾讯视频号-黄桃', content: '视频/腾讯视频号-黄桃/腾讯视频号-黄桃-提示词.md', images: ['视频/腾讯视频号-黄桃/腾讯视频号-黄桃-封面-01-人物手持黄桃.jpg', '视频/腾讯视频号-黄桃/腾讯视频号-黄桃-封面-02-盘中黄桃静物.jpg', '视频/腾讯视频号-黄桃/腾讯视频号-黄桃-封面-03-近景展示黄桃.jpg'], video: '视频/腾讯视频号-黄桃/腾讯视频号-黄桃-视频.mp4' },
   { tag: 'video', title: '食物-塔可', content: '视频/食物-塔可/食物-塔可-提示词.md', images: ['视频/食物-塔可/食物-塔可-参考图-01.png', '视频/食物-塔可/食物-塔可-参考图-02.jpg', '视频/食物-塔可/食物-塔可-参考图-03.jpg'], video: '视频/食物-塔可/食物-塔可-视频.mp4' },
-  // ── 图片标签：一文件夹一卡（产品校准：六组三图堆叠） ──
   picSet('YouTube缩略图', ['YouTube缩略图-参考图-01.jpeg', 'YouTube缩略图-参考图-02.jpeg', 'YouTube缩略图-参考图-03.jpeg']),
   picSet('为这款产品设计包装', ['为这款产品设计包装-参考图-01.jpeg', '为这款产品设计包装-参考图-02.jpeg', '为这款产品设计包装-参考图-03.jpeg']),
   picSet('创作现代品牌logo', ['创作现代品牌logo-参考图-01.jpeg', '创作现代品牌logo-参考图-02.jpeg', '创作现代品牌logo-参考图-03.jpeg']),
@@ -181,7 +163,6 @@ const manifest = [
   picSet('高级产品主图-石斛原浆', ['高级产品主图-石斛原浆-产品图-01.jpeg', '高级产品主图-石斛原浆-产品图-02.jpeg', '高级产品主图-石斛原浆-产品图-03.jpeg']),
 ];
 
-// sort_order：manifest 顺序按标签内 0..N-1 预排（重跑跳过不影响既有排序）
 {
   const counter = {};
   for (const c of manifest) {
@@ -198,7 +179,6 @@ async function main() {
   const existing = DRY_RUN ? [] : await api('GET', '/api/admin/templates');
   const existingKeys = new Set(existing.map((c) => `${c.tag_code}|${c.title}`));
 
-  // 产品校准收敛：picture 标签下不在 manifest 的残留旧卡软删（幂等可重跑）
   if (!DRY_RUN) {
     const pictureTitles = new Set(manifest.filter((c) => c.tag === 'picture').map((c) => c.title));
     for (const c of existing.filter((x) => x.tag_code === 'picture' && !pictureTitles.has(x.title))) {
@@ -209,7 +189,7 @@ async function main() {
 
   for (const card of manifest) {
     const files = [...card.images, ...(card.video ? [card.video] : [])];
-    for (const f of files) await stat(path.join(ROOT, f)); // 文件缺失即抛错中断
+    for (const f of files) await stat(path.join(ROOT, f));
     const content = extractPrompt(await readFile(path.join(ROOT, card.content), 'utf8'));
     if (!content) throw new Error(`提示词提取为空: ${card.content}`);
 

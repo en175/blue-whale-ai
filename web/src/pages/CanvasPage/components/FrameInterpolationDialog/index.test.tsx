@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-/* IKHLKR 视频插帧面板组件测试：三档渲染与默认 60fps（契约默认档单源）、切换即时回传、
-   免费文案、发送钮悬停「智能补帧，最高可至 120fps」、关闭、参数回填、只读态
-   （generating/submitting 冻结）。渲染模式沿用 VideoEnhanceDialog/index.test.tsx
-   （createRoot + act，不用 testing-library）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,7 +37,7 @@ async function click(node: Element | null) {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  sendMock = vi.fn(() => false); // IKHLKX 接线前父级发送空实现恒返回 false（面板保持打开）
+  sendMock = vi.fn(() => false);
   paramsChangeMock = vi.fn();
   closeMock = vi.fn();
 });
@@ -62,7 +58,6 @@ describe('IKHLKR 插帧面板三档渲染与默认值', () => {
     expect(btn('frame-interpolation-fps-120').textContent).toBe('120fps');
     expect(container!.textContent).toContain('视频插帧');
     expect(container!.textContent).toContain('目标帧率');
-    // 极简骨架：无供应商/模型下拉、无高级参数
     expect(container!.textContent).not.toContain('供应商');
     expect(container!.textContent).not.toContain('高级参数');
   });
@@ -110,7 +105,6 @@ describe('IKHLKR 本期免费与发送钮（IKHLKX 接线点）', () => {
     await click(btn('frame-interpolation-send-btn'));
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(sendMock).toHaveBeenCalledWith(30);
-    // 返回 false → 父级不关面板，面板仍在 DOM（未进入生成中，可继续调档）
     expect(btn('frame-interpolation-send-btn')).toBeTruthy();
     expect(container!.textContent).not.toContain('生成中，参数只读');
   });

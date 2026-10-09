@@ -1,8 +1,3 @@
-/* ============================================
- * 测试助手：驱动 PromptRefEditor（IKFA1M）
- * jsdom 无法向 contentEditable 注入原生输入；测试经根元素上的编辑器实例
- * （EditorRefBridge 挂的 __promptRefEditor 测试接缝）直接 editor.update。
- * ============================================ */
 import { act } from 'react';
 import {
   $createParagraphNode,
@@ -17,7 +12,6 @@ import {
 } from 'lexical';
 type EditorHost = HTMLElement & { __promptRefEditor?: LexicalEditor };
 
-// jsdom 垫片：Range/Text 缺 getBoundingClientRect（Lexical 选区同步的滚动计算需要）
 if (typeof window !== 'undefined' && !window.Range.prototype.getBoundingClientRect) {
   const rect = { x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, toJSON: () => ({}) };
   window.Range.prototype.getBoundingClientRect = () => rect as DOMRect;
@@ -31,7 +25,6 @@ export function promptRefEditorInstance(container: ParentNode): LexicalEditor {
   return el.__promptRefEditor;
 }
 
-/** 用纯文本整体替换编辑器内容（等价旧 textarea 赋值） */
 export async function typePromptRefText(container: ParentNode, text: string): Promise<void> {
   const editor = promptRefEditorInstance(container);
   await act(async () => {
@@ -45,22 +38,18 @@ export async function typePromptRefText(container: ParentNode, text: string): Pr
   });
 }
 
-/** 编辑器当前纯文本投影（等价旧 textarea.value） */
 export function readPromptRefText(container: ParentNode): string {
   return promptRefEditorInstance(container).read(() => $getRoot().getTextContent());
 }
 
-/** 只读状态（等价旧 textarea.disabled） */
 export function promptRefReadOnly(container: ParentNode): boolean {
   return !promptRefEditorInstance(container).isEditable();
 }
 
-/** 把光标折叠在首个文本节点 offset 处（等价点击定位光标） */
 export async function collapseCaretAt(editor: ReturnType<typeof promptRefEditorInstance>, offset: number) {
   await act(async () => {
     editor.update(() => {
       const text = $getRoot().getFirstDescendant();
-      // 前置条件：编辑器已有文本（先调 typePromptRefText 写入），否则报可读错误而非 TypeError
       if (!text) throw new Error('collapseCaretAt 需要编辑器已有文本节点（先调 typePromptRefText）');
       const sel = $createRangeSelection();
       sel.anchor.set(text.getKey(), offset, 'text');
@@ -70,7 +59,6 @@ export async function collapseCaretAt(editor: ReturnType<typeof promptRefEditorI
   });
 }
 
-/** 在末尾光标处逐段插入原始文本（模拟键入；用于触发 @ 查询检测） */
 export async function typePromptRefRaw(container: ParentNode, text: string): Promise<void> {
   const editor = promptRefEditorInstance(container);
   await act(async () => {
@@ -82,7 +70,6 @@ export async function typePromptRefRaw(container: ParentNode, text: string): Pro
   });
 }
 
-/** 折叠选区的锚点偏移（IKFXOR 光标落点断言用）；无折叠选区时返回 -1 */
 export function promptRefCaretOffset(container: ParentNode): number {
   const editor = promptRefEditorInstance(container);
   let offset = -1;

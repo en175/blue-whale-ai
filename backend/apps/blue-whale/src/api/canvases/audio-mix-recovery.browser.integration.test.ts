@@ -38,8 +38,6 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   closeGenerationQueue: vi.fn(async () => {}),
 }));
 
-// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
-// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
   return {
@@ -53,7 +51,6 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   };
 });
 
-/** 浏览器→Nest→隔离 MySQL→Java Worker→本地 MediaKit/存储替身→浏览器播放。 */
 describe.skipIf(process.env.IKI697_BROWSER !== "1")(
   "IKI697 browser audio mix recovery",
   () => {
@@ -76,7 +73,6 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
     const guardToken = randomBytes(16).toString("hex");
     const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
-    // 有效 1 秒 PCM WAV，Chromium 可真实解码，供输入播放和成功结果播放/下载。
     const wav = (() => {
       const samples = 8000;
       const bytes = Buffer.alloc(44 + samples * 2);
@@ -90,8 +86,6 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
 
     beforeAll(async () => {
       temp = mkdtempSync(join(tmpdir(), "iki697-browser-"));
-      // 混合结果夹具 = 检入的 1 秒 440Hz mp3（生成命令见 fixtures/README.md）。
-      // worker 只读取/转发这些字节、不解析音频，容器内仍要求挂成 /fixture/result.mp3。
       copyFileSync(resolve(import.meta.dirname, "fixtures/sine-440-1s.mp3"), join(temp, "result.mp3"));
       expectedOutput = readFileSync(join(temp, "result.mp3"));
       const schema = join(repo, "server/blue-whale-worker/src/test/resources/db/bluewhale-schema.sql");
@@ -250,7 +244,6 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         const url = `${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`;
         await page.goto(url);
         await page.locator('.react-flow__node-mediaNode[data-id="source"]').waitFor();
-        // 浏览器收到 POST 受理后立即离开：原页面还没有机会写结果卡。
         const created = await page.evaluate(async ({ projectId, firstAsset, secondAsset }) => {
           const response = await fetch(`/api/projects/${projectId}/audio-mixes`, {
             method: "POST", headers: { "content-type": "application/json" },
@@ -292,8 +285,6 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
             "-v", `${repo}:/workspace`, "-w", "/workspace/server",
             "-v", `${temp}:/fixture:ro`, "-v", `${process.env.HOME}/.m2:/root/.m2`,
             "maven:3.9-eclipse-temurin-21", "mvn", "-q",
-            // 从聚合根跑并带 -pl/-am：worker 依赖同 reactor 的 server/blue-whale-common，
-            // 直接进模块目录 `mvn test` 解析不到该依赖（verification-policy 同款约束）。
             "-pl", "blue-whale-worker", "-am", "-DfailIfNoSpecifiedTests=false",
             "-Dsurefire.failIfNoSpecifiedTests=false",
             "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"], { cwd: repo });
@@ -337,7 +328,6 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         });
         expect(servedOutputHashes).toContain(hash(storedOutput!));
         expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(1);
-        // 删除其中一张来源卡只收该悬空线，产物卡与独立 Asset 继续存在。
         await page.locator('.react-flow__node-mediaNode[data-id="source"]').click();
         await page.keyboard.press("Delete");
         await vi.waitFor(async () => {
@@ -432,8 +422,6 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
           "-v", `${repo}:/workspace`, "-w", "/workspace/server",
           "-v", `${process.env.HOME}/.m2:/root/.m2`,
           "maven:3.9-eclipse-temurin-21", "mvn", "-q",
-          // 从聚合根跑并带 -pl/-am：worker 依赖同 reactor 的 server/blue-whale-common，
-          // 直接进模块目录 `mvn test` 解析不到该依赖（verification-policy 同款约束）。
           "-pl", "blue-whale-worker", "-am", "-DfailIfNoSpecifiedTests=false",
           "-Dsurefire.failIfNoSpecifiedTests=false",
           "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"], { cwd: repo });

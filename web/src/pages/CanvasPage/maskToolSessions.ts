@@ -125,8 +125,6 @@ export interface SubtitleEraseHost {
   getProjectId(): string | null;
   getSourceNode(nodeId: string): Node | undefined;
   newTargetId(): string;
-  /** IKJJR3：建结果卡 + 来源边后交生成任务运行时受理（canvas_binding/轮询/归属/恢复归运行时）。
-   *  返回 false = 未发出（无项目/提交防重窗口）。 */
   startTask(input: SubtitleEraseTaskSubmission, skipSelect: boolean): boolean;
   warn(message: string): void;
   error(message: string): void;
@@ -163,8 +161,6 @@ export function createSubtitleEraseSession(
       };
     },
     async submit(input, context) {
-      // IKJJR3：提交点先退出会话再交运行时受理（场景切分先例）；受理失败归失败卡，
-      // 冻结输入重试走运行时，不在编辑界面再次发送。
       const host = getHost();
       const skipSelect = !context.isCurrent();
       context.close();

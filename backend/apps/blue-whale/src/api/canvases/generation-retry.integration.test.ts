@@ -22,8 +22,8 @@ import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
-// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
-// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
+
+
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
   return {
@@ -37,10 +37,10 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   };
 });
 
-// IKDMQV「失败重试与修改后重新生成」公开接口集成（契约沿用 IKDMQQ/QR/QS/QT）：
-// 直接重试沿用失败任务冻结快照（来源正文变化不隐式替换原输入、历史任务不被改写）；
-// 修改参数或引用后的新生成按现行规则冻结新输入。真 NestFactory 挂载生产控制器 +
-// 隔离 MySQL（IKDMQV_DATABASE_URL 门控）。浏览器段（IKDMQV_BROWSER=1）在同 describe 尾部。
+
+
+
+
 describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry public API (IKDMQV)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -66,7 +66,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: {},
-        // channel 为必填封闭枚举，取默认渠道 seedream-image
+
         channel: "seedream-image",
       },
       update: { features: {} },
@@ -86,7 +86,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         default_duration: 5,
         supported_durations: { min: 4, max: 12, step: 1 },
         features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true },
-        // channel 为必填封闭枚举；video 行的渠道就是媒介本身
+
         channel: "seedream-video",
       },
       update: { features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true } },
@@ -104,7 +104,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         default_size: "mp3",
         default_aspect_ratio: "1:1",
         features: {},
-        // channel 为必填封闭枚举；audio 行的渠道就是媒介本身
+
         channel: "seedream-audio",
       },
       update: { features: {} },
@@ -124,7 +124,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       { provide: JobsService, useValue: new JobsService(prisma, projects) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      // 造素材校验门（IKFYHJ / ADR-0087）自 MaterialService 取仓库面、自 AssetService 解析本地素材绑定。
+
       { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: IdentityService, useValue: new IdentityService(prisma) },
@@ -217,7 +217,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     const row = await prisma.client.generation_jobs.findUnique({ where: { id: BigInt(jobId) } });
     return row ? { ...row, input: row.input as Record<string, unknown> } : null;
   }
-  /** 直接落库把任务置为终态 failed（job + 输出槽），模拟供应商执行失败 */
+
   async function failJob(jobId: string) {
     await prisma.client.generation_output_slots.updateMany({
       where: { generation_job_id: BigInt(jobId) },
@@ -234,7 +234,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       { id: "e-media", source: "m0", target: "d1" },
       { id: "e-text", source: "t1", target: "d1" },
     ];
-    // m0 来源节点（就绪图片，连线输入用）
+
     const sourceNode = {
       id: "m0",
       type: "mediaNode",
@@ -258,7 +258,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     expect(original!.input.text_attachments).toEqual([{ node_id: "t1", title: "雨夜", text: "赛博朋克" }]);
     expect(original!.input.input_asset_ids).toEqual([assetId]);
 
-    // 任务失败后修改来源正文与连线（断开参考图）
+
     await failJob(originalJobId);
     const canvas = await getCanvas(projectId);
     expect(
@@ -270,7 +270,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       )).status,
     ).toBe(200);
 
-    // 直接重试：新任务沿用失败任务冻结快照——正文与参考都是提交时冻结的旧值
+
     const retried = await retryJob(projectId, originalJobId);
     expect(retried.code).toBe(200);
     const retryJobId = retried.data.generation_job_id as string;
@@ -282,11 +282,11 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     expect(retryRow!.input.input_asset_ids, "重试沿用旧参考快照").toEqual([assetId]);
     expect(retryRow!.input.prompt).toBe(original!.input.prompt);
 
-    // 历史失败任务输入保持不变（重试不改写原任务）
+
     const originalAfter = await readJob(originalJobId);
     expect(originalAfter!.input).toEqual(original!.input);
 
-    // 修改后新生成：按现行规则（最新画布）冻结新输入——新正文、断线后无参考
+
     const regenerated = await createJob(projectId, {
       type: "image",
       target_node_id: "d1",
@@ -300,7 +300,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     ]);
     expect(regenRow!.input.input_asset_ids).toBeUndefined();
 
-    // 两条历史任务输入仍不被改写
+
     expect((await readJob(originalJobId))!.input).toEqual(original!.input);
     expect((await readJob(retryJobId))!.input).toEqual(retryRow!.input);
   });
@@ -326,7 +326,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     const retryJobId = retried.data.generation_job_id as string;
     const retryInput = (await readJob(retryJobId))!.input;
 
-    // 原任务「迟到成功」（例如取消/失败判定与供应商终态竞态）：仅改原任务自身
+
     const lateAsset = await createAsset(projectId, "image", "https://example.com/late.png");
     await prisma.client.generation_output_slots.updateMany({
       where: { generation_job_id: BigInt(originalJobId) },
@@ -337,11 +337,11 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       data: { status: "succeeded", output_asset_ids: [lateAsset] },
     });
 
-    // 新任务的输入与状态不被迟到的原任务变化覆盖
+
     const retryAfter = await readJob(retryJobId);
     expect(retryAfter!.input).toEqual(retryInput);
     expect(retryAfter!.status).not.toBe("succeeded");
-    // 原任务与新任务状态各自独立可查
+
     expect((await readJob(originalJobId))!.status).toBe("succeeded");
   });
 
@@ -413,14 +413,14 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     const retryRow = await readJob(retried.data.generation_job_id as string);
     expect(retryRow!.input.prompt).toBe("轻快的海浪声");
     expect(retryRow!.input.model_id).toBe(AUDIO_MODEL);
-    // IKFCXE 起音频与图片/视频同源推导文本附件，无附件时冻结为空数组（不再是缺字段）
+
     expect(retryRow!.input.text_attachments).toEqual([]);
   });
 
-  // 浏览器段（工单「范围与测试约定」）：真实浏览器 + 真实 Canvas/生成业务 API + 隔离 MySQL。
-  // 图片链：三类失败恢复的代表主链——失败可见 → 来源正文变化 → 直接重试沿用快照 → 成功原卡承接 →
-  // 编辑后新生成冻结新输入（历史任务不改写）。音频链：enqueue 失败即真实失败（IKCR78 fail-fast），
-  // 失败保留草稿与原因、刷新恢复。视频链：DB 置失败后失败可见、重试入口可用。
+
+
+
+
   it.runIf(process.env.IKDMQV_BROWSER)("browser: failure recovery, retry with frozen snapshot, edit-then-regenerate", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
@@ -453,18 +453,18 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       const mediaNodes = page.locator(".react-flow__node-mediaNode");
       const nodeById = (id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
 
-      // 等画布水合完成（t1 就位）再操作：doc 到达前建草稿会被水合 effect 清空（IKDMQQ 已知 race）
+
       await nodeById("t1").waitFor({ timeout: 15_000 });
 
-      // ── 图片链 ─────────────────────────────────────────────
-      // 1) 建图片草稿 + 文本附件连线 → 提交
+
+
       await page.locator('button[aria-label="图片对话"]').click();
       const draft = page.locator(".react-flow__node-mediaNode", { hasText: "待生成" });
       const draftId = (await draft.getAttribute("data-id"))!;
       await page.locator("textarea").waitFor();
       await page.getByText("IKDMQV Image").waitFor();
       await page.locator("textarea").fill("画一只蓝鲸");
-      // 文本附件连线（画布拖线 t1 → 草稿）
+
       const srcHandle = page.locator('.react-flow__node[data-id="t1"] .react-flow__handle-right');
       const dstHandle = page.locator(`.react-flow__node[data-id="${draftId}"] .react-flow__handle-left`);
       const sb = (await srcHandle.boundingBox())!;
@@ -483,15 +483,15 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       await vi.waitFor(async () => expect((await jobRows()).length).toBe(1));
       const firstJob = (await jobRows())[0]!;
 
-      // 2) 失败：卡片与失败原因可见，参数与草稿身份保留
+
       await failJob(firstJob.id.toString());
       const failedCard = nodeById(draftId);
       await failedCard.getByText("生成失败").waitFor({ timeout: 15_000 });
       expect(await failedCard.getByRole("button", { name: "重试" }).count()).toBe(1);
       expect(await mediaNodes.count(), "失败不丢草稿卡").toBe(1);
 
-      // 3) 来源正文变化（直接改已保存画布）后刷新恢复：失败态与参数原样回来（验收「已保存状态可恢复」），
-      //    刷新同时同步前端乐观锁版本——外部改画布后前端旧 If-Match 会持续版本冲突
+
+
       const canvas = await getCanvas(projectId);
       const savedNodes = JSON.parse(canvas.nodes) as unknown[];
       const editedNodes = savedNodes.map((n) =>
@@ -506,7 +506,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         expect(await nodeById(draftId).innerText()).toContain("生成失败"),
       );
 
-      // 4) 不改输入直接重试：走 retry 接口，新任务快照 = 旧正文
+
       await failedCard.getByRole("button", { name: "重试" }).click();
       await vi.waitFor(() => expect(retryRequests).toHaveLength(1), { timeout: 10_000 });
       await vi.waitFor(async () => expect((await jobRows()).length).toBe(2));
@@ -521,7 +521,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         { node_id: "t1", title: "雨夜", text: "赛博朋克" },
       ]);
 
-      // 5) 重试成功：原失败卡承接结果（不重复建卡、身份不变）
+
       const outputAsset = await prisma.client.assets.create({
         data: {
           user_id: BigInt(987654),
@@ -551,7 +551,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         expect(done?.data.genStatus).toBeUndefined();
       });
 
-      // 6) 编辑后新生成（成品卡路径）：面板改提示词发送 → 新任务冻结新输入，历史任务不改写
+
       await failedCard.locator('[data-testid="media-content"]').click();
       await page.locator("textarea").waitFor();
       await vi.waitFor(async () => expect(await page.locator("textarea").inputValue()).toBe("画一只蓝鲸"));
@@ -568,12 +568,12 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
           { node_id: "t1", title: "雨夜", text: "霓虹都市" },
         ]);
       }, { timeout: 10_000 });
-      // 历史两条任务输入保持原样
+
       const rows = await jobRows();
       expect((await readJob(rows[0]!.id.toString()))!.input.prompt).toBe("画一只蓝鲸");
       expect((await readJob(rows[1]!.id.toString()))!.input.prompt).toBe("画一只蓝鲸");
 
-      // ── 音频链（enqueue 失败即真实失败：IKCR78 fail-fast）──────────
+
       await page.locator('button[aria-label="音频生成"]').click();
       const audioDraft = page.locator(".react-flow__node-mediaNode", { hasText: "待生成" });
       const audioDraftId = (await audioDraft.getAttribute("data-id"))!;
@@ -587,12 +587,12 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       }, { timeout: 10_000 });
       await page.locator('[data-testid="audio-send"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(3), { timeout: 10_000 });
-      // 无 RocketMQ 环境：音频任务入队失败被置 failed——真实失败路径，失败原因与重试入口可见
+
       const audioCard = nodeById(audioDraftId);
       await audioCard.getByText("任务入队失败").waitFor({ timeout: 15_000 });
       expect(await audioCard.getByRole("button", { name: "重试" }).count()).toBe(1);
       expect(await mediaNodes.count(), "音频失败保留草稿卡").toBe(2);
-      // 等失败态随画布落盘（800ms 防抖），刷新恢复才有可恢复的已保存状态
+
       await vi.waitFor(async () => {
         const doc = await getCanvas(projectId);
         const nodes = JSON.parse(doc.nodes) as Array<{ id: string; data: Record<string, unknown> }>;
@@ -600,7 +600,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         expect(audioSaved?.data.genStatus, "音频失败态随画布落盘").toBe("failed");
         expect(audioSaved?.data.prompt, "描述随画布落盘").toBe("轻快的海浪声");
       }, { timeout: 10_000 });
-      // 刷新恢复：失败态与描述恢复，可继续编辑重发
+
       await page.reload();
       await vi.waitFor(async () => expect(await mediaNodes.count()).toBe(2));
       await vi.waitFor(async () =>
@@ -612,7 +612,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         expect(await page.locator('[data-testid="audio-input"]').inputValue()).toBe("轻快的海浪声"),
       );
 
-      // ── 视频链：失败可见 + 重试入口 ─────────────────────────
+
       await page.locator('button[aria-label="视频对话"]').click();
       const videoDraft = page.locator(".react-flow__node-mediaNode", { hasText: "待生成" });
       const videoDraftId = (await videoDraft.getAttribute("data-id"))!;
@@ -622,7 +622,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       await page.keyboard.type("追逐镜头");
       await page.locator('[data-testid="video-send"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(4), { timeout: 10_000 });
-      // 等视频任务真实入库（create 在途时按序号取会拿到前一条音频任务）
+
       await vi.waitFor(async () => {
         const rows = await prisma.client.generation_jobs.findMany({
           where: { project_id: BigInt(projectId), type: "video" },

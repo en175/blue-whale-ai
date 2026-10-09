@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AssetsController } from "./assets.controller.js";
 
-// IKCZAT：GET /api/assets/:assetId/references 引用计数端点单测。
-// 归属校验（findOwnedById 命中才计）→ 100301；归属通过 → 转发 countReferencingProjects 返回计数。
 
 function createController(overrides: {
   findOwnedById?: ReturnType<typeof vi.fn>;

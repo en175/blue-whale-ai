@@ -44,24 +44,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * 金标用例镜像测试（docs/specs/2026-09-10-ikensz-golden-cases.json）。
- * <p>
- * 用 mocked Mappers 驱动服务，断言生成的 SQL 参数（where 字段、SET 字段、钳制、token 投影等）。
- * <p>
- * 覆盖用例：
- * - G05：孤儿接管（processing + lease_expires_at=null）
- * - G18：进度钳制 150→99 与 -5→0
- * - G19：进度续租 lease_expires_at≈now+120s
- * <p>
- * 延迟用例（刀① 覆盖）：
- * - G01-G04：claimNextJob/claimJobById 通用模式（video/image 路径）
- * - G07：claimNextJob catch-swallow（TS-only，by-id 变体无 catch 按契约 §3.1 不对称）
- * - G08-G11：markProviderSubmitted/rescheduleProviderPoll（video 路径）
- * - G12-G13：cancelVideoBeforeDispatch（video 路径）
- * - G14-G16：requeueImageJobForRetry（image 路径）
- * - G17：completeJob（通用模式，publishMediaExtractResult 已覆盖事务模式）
- */
 @ExtendWith(MockitoExtension.class)
 class JobStateMachineServiceGoldenMirrorTest {
 
@@ -88,20 +70,13 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Mock
     private StoryboardPreviewMapper storyboardPreviewMapper;
 
-    /** IKJCOE：任务特有列搬进键值扩展表，claim / 终态写路径经此 mapper 读写。 */
     @Mock
     private GenerationJobExtraMapper extraMapper;
 
     private JobStateMachineService service;
 
-    /**
-     * 终态收口（IKIWP8 / ADR-0119 commit ③）：门面上的 complete/fail/publish 零逻辑转发方法已
-     * 删除，测试改为直呼真实的 {@link JobFinalizer}。7-mapper 构造器不暴露内部 finalizer，
-     * 故此处按生产 7-mapper 构造器的**逐字相同**表达式自建一份（同一个被 mock 的 mapper 集合）。
-     */
     private JobFinalizer finalizer;
 
-    /** 工具族领取管道（IKIWP8）：与 service 共用同一个被 mock 的 jobMapper。 */
     private JobClaimService claimService;
 
     @BeforeEach
@@ -122,7 +97,6 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("G05: 孤儿接管（processing + lease_expires_at=null）")
     void g05_orphanTakeover() {
-        // given: 候选行 status='processing', lease_expires_at=null, fencing_token=4
         GenerationJobEntity candidate = new GenerationJobEntity();
         candidate.setId(300L);
         candidate.setProjectId(42L);
@@ -130,7 +104,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setType("media_extract");
         candidate.setStatus("processing");
         candidate.setFencingToken(4L);
-        candidate.setLeaseExpiresAt(null); // 孤儿
+        candidate.setLeaseExpiresAt(null);
         candidate.setInput("{\"videoUrl\":\"https://example.com/video.mp4\"}");
 
         when(jobMapper.findCandidateByTypeOnly(300L, "media_extract")).thenReturn(candidate);
@@ -142,36 +116,32 @@ class JobStateMachineServiceGoldenMirrorTest {
                 eq("processing")
         )).thenReturn(1);
 
-        // when
         Optional<ClaimedJob> result = claimService.claim(
                 ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
                         jobMapper::claimMediaExtractCas),
                 "300", "worker-1");
 
-        // then
         assertThat(result).isPresent();
         ClaimedJob claimed = result.get();
-        assertThat(claimed.fencingToken()).isEqualTo(5L); // 增后 token = 4 + 1
+        assertThat(claimed.fencingToken()).isEqualTo(5L);
 
-        // 断言 CAS where 含 status='processing'（不强制 queued）
         verify(jobMapper).claimMediaExtractCas(
                 eq(300L),
                 eq("worker-1"),
                 any(LocalDateTime.class),
                 eq(4L),
-                eq("processing") // G05 关键断言：孤儿接管用 processing 而非 queued
+                eq("processing")
         );
     }
 
     @Test
     @DisplayName("G18: 进度钳制 150→99 与 -5→0")
     void g18_progressClamping() {
-        // given: input progress=150 和 progress=-5 各一次; updateMany 返回 count=1
         when(jobMapper.updateMediaExtractProgress(
                 eq(300L),
                 eq("worker-1"),
                 eq(5L),
-                eq(99), // 钳制后
+                eq(99),
                 any(LocalDateTime.class)
         )).thenReturn(1);
 
@@ -179,25 +149,21 @@ class JobStateMachineServiceGoldenMirrorTest {
                 eq(300L),
                 eq("worker-1"),
                 eq(5L),
-                eq(0), // 钳制后
+                eq(0),
                 any(LocalDateTime.class)
         )).thenReturn(1);
 
-        // when: progress=150
         boolean result1 = service.updateMediaExtractProgress(
                 new UpdateMediaExtractProgressDto("300", "worker-1", 5L, 150)
         );
 
-        // when: progress=-5
         boolean result2 = service.updateMediaExtractProgress(
                 new UpdateMediaExtractProgressDto("300", "worker-1", 5L, -5)
         );
 
-        // then
         assertThat(result1).isTrue();
         assertThat(result2).isTrue();
 
-        // 断言 data.progress 分别被钳制为 99 和 0
         ArgumentCaptor<Integer> progressCaptor = ArgumentCaptor.forClass(Integer.class);
         verify(jobMapper, times(2)).updateMediaExtractProgress(
                 anyLong(),
@@ -213,7 +179,6 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("G19: 进度续租 lease_expires_at≈now+120s")
     void g19_progressLeaseRenewal() {
-        // given: input progress=50; IMAGE_JOB_LEASE_SECONDS=120
         when(jobMapper.updateMediaExtractProgress(
                 eq(300L),
                 eq("worker-1"),
@@ -222,17 +187,14 @@ class JobStateMachineServiceGoldenMirrorTest {
                 any(LocalDateTime.class)
         )).thenReturn(1);
 
-        // when
         LocalDateTime before = WorkerClock.now().plusSeconds(119);
         boolean result = service.updateMediaExtractProgress(
                 new UpdateMediaExtractProgressDto("300", "worker-1", 5L, 50)
         );
         LocalDateTime after = WorkerClock.now().plusSeconds(121);
 
-        // then
         assertThat(result).isTrue();
 
-        // 断言 data.lease_expires_at≈now+120s（窗口断言）
         ArgumentCaptor<LocalDateTime> leaseCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(jobMapper).updateMediaExtractProgress(
                 anyLong(),
@@ -275,7 +237,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                 any(LocalDateTime.class),
                 eq(4L),
                 eq("queued")
-        )).thenReturn(0); // CAS rejected
+        )).thenReturn(0);
 
         Optional<ClaimedJob> result = claimService.claim(
                 ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
@@ -294,7 +256,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                 anyLong(),
                 anyInt(),
                 any(LocalDateTime.class)
-        )).thenReturn(0); // guard fail
+        )).thenReturn(0);
 
         boolean result = service.updateMediaExtractProgress(
                 new UpdateMediaExtractProgressDto("300", "worker-1", 5L, 50)
@@ -306,12 +268,11 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("publishMediaExtractResult: happy path with asset + logs + events")
     void publishMediaExtractResult_happyPath() {
-        // given
         when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
 
         when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
             AssetEntity asset = (AssetEntity) invocation.getArgument(0);
-            asset.setId(999L); // 模拟 DB 自增
+            asset.setId(999L);
             return 1;
         });
 
@@ -324,33 +285,27 @@ class JobStateMachineServiceGoldenMirrorTest {
                 "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef", 12.5
         );
 
-        // when
         boolean result = finalizer.publishMediaExtractResult(
                 input.jobId(), input.projectId(), input.userId(), input.workerId(),
                 input.fencingToken(), input.url(), input.storageKey(), input.mime(),
                 input.size(), input.md5(), input.duration());
 
-        // then
         assertThat(result).isTrue();
 
-        // 断言 asset 插入
         ArgumentCaptor<AssetEntity> assetCaptor = ArgumentCaptor.forClass(AssetEntity.class);
         verify(assetMapper).insert(assetCaptor.capture());
         AssetEntity capturedAsset = assetCaptor.getValue();
         assertThat(capturedAsset.getType()).isEqualTo("audio");
-        assertThat(capturedAsset.getDurationMs()).isEqualTo(12500); // 12.5s * 1000
+        assertThat(capturedAsset.getDurationMs()).isEqualTo(12500);
 
-        // 断言 output_asset_ids 更新
         verify(jobMapper).updateOutputAssetIds(300L, "[999]");
 
-        // 断言 log 插入
         ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
         verify(jobLogMapper).insert(logCaptor.capture());
         GenerationJobLogEntity capturedLog = logCaptor.getValue();
         assertThat(capturedLog.getEvent()).isEqualTo("succeeded");
         assertThat(capturedLog.getMessage()).isEqualTo("音频已提取");
 
-        // 断言 project_events 插入（asset.created + generation_job.status_changed）
         ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
         verify(projectEventMapper, times(2)).insert(eventCaptor.capture());
     }
@@ -378,7 +333,6 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("failMediaExtractJob: happy path with logs + events")
     void failMediaExtractJob_happyPath() {
-        // given
         when(jobMapper.failMediaExtractGuard(anyLong(), anyString(), anyLong(), anyString())).thenReturn(1);
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "media_extract", "failed", 0));
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
@@ -389,15 +343,12 @@ class JobStateMachineServiceGoldenMirrorTest {
                 Map.of("stderr", "some error")
         );
 
-        // when
         boolean result = finalizer.failMediaExtractJob(
                 input.jobId(), input.code(), input.message(), input.details(),
                 input.workerId(), input.fencingToken());
 
-        // then
         assertThat(result).isTrue();
 
-        // 断言 error JSON 含 details
         ArgumentCaptor<String> errorJsonCaptor = ArgumentCaptor.forClass(String.class);
         verify(jobMapper).failMediaExtractGuard(
                 anyLong(),
@@ -410,14 +361,12 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(errorJson).contains("\"message\":\"FFmpeg 退出码 1\"");
         assertThat(errorJson).contains("\"details\"");
 
-        // 断言 log 插入
         ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
         verify(jobLogMapper).insert(logCaptor.capture());
         GenerationJobLogEntity capturedLog = logCaptor.getValue();
         assertThat(capturedLog.getEvent()).isEqualTo("failed");
         assertThat(capturedLog.getMessage()).isEqualTo("media_extract_failed: FFmpeg 退出码 1");
 
-        // 断言 project_events 插入（generation_job.status_changed）
         ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
         verify(projectEventMapper, times(1)).insert(eventCaptor.capture());
     }
@@ -441,7 +390,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         verify(jobLogMapper, never()).insert(any(GenerationJobLogEntity.class));
     }
 
-    // ========== audio_trim golden mirrors（IKHB6S；media_extract 条目一对一平移） ==========
 
     @Test
     @DisplayName("claimAudioTrim: no candidate → empty")
@@ -470,7 +418,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                 any(LocalDateTime.class),
                 eq(4L),
                 eq("queued")
-        )).thenReturn(0); // CAS rejected
+        )).thenReturn(0);
 
         Optional<ClaimedJob> result = claimService.claim(
                 ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
@@ -482,12 +430,11 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("publishAudioTrimResult: happy path with asset + logs + events（duration 取官方秒换算 ms）")
     void publishAudioTrimResult_happyPath() {
-        // given
         when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
 
         when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
             AssetEntity asset = (AssetEntity) invocation.getArgument(0);
-            asset.setId(999L); // 模拟 DB 自增
+            asset.setId(999L);
             return 1;
         });
 
@@ -501,30 +448,24 @@ class JobStateMachineServiceGoldenMirrorTest {
                         "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef", 120.25
                 );
 
-        // when
         boolean result = finalizer.publishAudioTrimResult(input);
 
-        // then
         assertThat(result).isTrue();
 
-        // 断言 asset 插入（type=audio、duration_ms = 官方 120.25 秒换算）
         ArgumentCaptor<AssetEntity> assetCaptor = ArgumentCaptor.forClass(AssetEntity.class);
         verify(assetMapper).insert(assetCaptor.capture());
         AssetEntity capturedAsset = assetCaptor.getValue();
         assertThat(capturedAsset.getType()).isEqualTo("audio");
-        assertThat(capturedAsset.getDurationMs()).isEqualTo(120250); // 120.25s * 1000
+        assertThat(capturedAsset.getDurationMs()).isEqualTo(120250);
 
-        // 断言 output_asset_ids 更新
         verify(jobMapper).updateOutputAssetIds(300L, "[999]");
 
-        // 断言 log 插入
         ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
         verify(jobLogMapper).insert(logCaptor.capture());
         GenerationJobLogEntity capturedLog = logCaptor.getValue();
         assertThat(capturedLog.getEvent()).isEqualTo("succeeded");
         assertThat(capturedLog.getMessage()).isEqualTo("音频已截取");
 
-        // 断言 project_events 插入（asset.created + generation_job.status_changed）
         ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
         verify(projectEventMapper, times(2)).insert(eventCaptor.capture());
     }
@@ -550,7 +491,6 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("failAudioTrimJob: happy path with logs + events")
     void failAudioTrimJob_happyPath() {
-        // given
         when(jobMapper.failMediaExtractGuard(anyLong(), anyString(), anyLong(), anyString())).thenReturn(1);
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio_trim", "failed", 0));
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
@@ -562,13 +502,10 @@ class JobStateMachineServiceGoldenMirrorTest {
                         Map.of("raw", "The parameter `end_time` must be less than audio duration.")
                 );
 
-        // when
         boolean result = finalizer.failAudioTrimJob(input);
 
-        // then
         assertThat(result).isTrue();
 
-        // 断言 error JSON 含 details
         ArgumentCaptor<String> errorJsonCaptor = ArgumentCaptor.forClass(String.class);
         verify(jobMapper).failMediaExtractGuard(
                 anyLong(),
@@ -580,7 +517,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(errorJson).contains("\"code\":\"audio_trim_failed\"");
         assertThat(errorJson).contains("\"details\"");
 
-        // 断言 log 插入
         ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
         verify(jobLogMapper).insert(logCaptor.capture());
         GenerationJobLogEntity capturedLog = logCaptor.getValue();
@@ -588,7 +524,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(capturedLog.getMessage())
                 .isEqualTo("audio_trim_failed: The parameter `end_time` must be less than audio duration.");
 
-        // 断言 project_events 插入（generation_job.status_changed）
         ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
         verify(projectEventMapper, times(1)).insert(eventCaptor.capture());
     }
@@ -611,12 +546,10 @@ class JobStateMachineServiceGoldenMirrorTest {
         verify(jobLogMapper, never()).insert(any(GenerationJobLogEntity.class));
     }
 
-    // ========== Blade-② audio golden mirrors ==========
 
     @Test
     @DisplayName("G06-audio: 音频孤儿接管（processing + 过期租约）")
     void g06_audioOrphanTakeover() {
-        // given: 候选行 status='processing', lease_expires_at < now, fencing_token=2
         GenerationJobEntity candidate = new GenerationJobEntity();
         candidate.setId(400L);
         candidate.setProjectId(42L);
@@ -624,7 +557,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setType("audio");
         candidate.setStatus("processing");
         candidate.setFencingToken(2L);
-        candidate.setLeaseExpiresAt(WorkerClock.now().minusSeconds(10)); // 过期租约
+        candidate.setLeaseExpiresAt(WorkerClock.now().minusSeconds(10));
         candidate.setInput("{\"prompt\":\"hello\",\"model_id\":\"seed-audio-1.0\"}");
         candidate.setRetryCount(0);
 
@@ -637,18 +570,15 @@ class JobStateMachineServiceGoldenMirrorTest {
                 eq("processing")
         )).thenReturn(1);
 
-        // when
         Optional<ClaimedJobDto> result = service.claimAudioJobById("400", "worker-1");
 
-        // then
         assertThat(result).isPresent();
         ClaimedJobDto claimed = result.get();
-        assertThat(claimed.fencingToken()).isEqualTo(3L); // 增后 token = 2 + 1
+        assertThat(claimed.fencingToken()).isEqualTo(3L);
         assertThat(claimed.type()).isEqualTo("audio");
         assertThat(claimed.project_id()).isEqualTo("42");
         assertThat(claimed.user_id()).isEqualTo("9");
 
-        // 断言 CAS where 含 status='processing'（孤儿接管）
         verify(jobMapper).claimAudioCas(
                 eq(400L),
                 eq("worker-1"),
@@ -702,17 +632,14 @@ class JobStateMachineServiceGoldenMirrorTest {
 
         assertThat(result).isEqualTo("888");
 
-        // 断言 asset 字段
         ArgumentCaptor<AssetEntity> captor = ArgumentCaptor.forClass(AssetEntity.class);
         verify(assetMapper).insert(captor.capture());
         AssetEntity asset = captor.getValue();
         assertThat(asset.getType()).isEqualTo("audio");
         assertThat(asset.getMime()).isEqualTo("audio/mpeg");
-        assertThat(asset.getDurationMs()).isEqualTo(12500); // 12.5 * 1000
+        assertThat(asset.getDurationMs()).isEqualTo(12500);
         assertThat(asset.getSource()).isEqualTo("generated");
         assertThat(asset.getStatus()).isEqualTo("normal");
-        // IKGS73：入参的 md5 必须原样落到 assets.md5。这条断言是「生成产物也能被 md5 去重」
-        // 这个需求的最小证据——没有它，md5 在某一层被吞掉时全部测试仍然全绿。
         assertThat(asset.getMd5()).isEqualTo("0123456789abcdef0123456789abcdef");
     }
 
@@ -735,20 +662,15 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("G17-audio: completeJob happy path (minus reservations, 修正一)")
     void completeJob_happy() {
-        // given
         when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of()); // 无槽位
+        when(slotMapper.findByJobId(300L)).thenReturn(List.of());
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "succeeded", 100));
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
-        // when
         boolean result = finalizer.completeJob("300", List.of("888"), "worker-1", 5L);
 
-        // then
         assertThat(result).isTrue();
         verify(jobMapper).completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString());
-        // 按修正一省略：无 settleReservation 调用
-        // 断言 project_event（generation_job.status_changed）
         verify(projectEventMapper, atLeastOnce()).insert(any(ProjectEventEntity.class));
     }
 
@@ -766,23 +688,18 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("failJob: happy path with log + events (minus releaseReservation, 修正一)")
     void failJob_happy() {
-        // given
         when(jobMapper.failJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
         when(slotMapper.findPendingByJobId(300L)).thenReturn(List.of());
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "failed", 0));
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
-        // when
         boolean result = finalizer.failJob("300", "provider_failed", "TTS 调用失败",
                 Map.of("raw", "connection refused"), "worker-1", 5L);
 
-        // then
         assertThat(result).isTrue();
-        // 断言 log
         ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
         verify(jobLogMapper).insert(logCaptor.capture());
         assertThat(logCaptor.getValue().getMessage()).isEqualTo("provider_failed: TTS 调用失败");
-        // 按修正一省略：无 releaseReservationInTx 调用
     }
 
     @Test
@@ -797,7 +714,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         verify(jobLogMapper, never()).insert(any(GenerationJobLogEntity.class));
     }
 
-    // ========== Blade-③ image golden mirrors ==========
 
     @Test
     @DisplayName("G06-image: 图片孤儿接管（processing + 过期租约）+ source 白名单")
@@ -830,9 +746,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(claimed.fencingToken()).isEqualTo(3L);
         assertThat(claimed.type()).isEqualTo("image");
         assertThat(claimed.retry_count()).isEqualTo(1);
-        // IKJCOE：expected_output_count 主表列已删、claim 投影不再承载该字段（权威是建行时冻结的
-        // input.expected_output_count）。原「投影带出该列」的断言改为整体逐字段钉住投影本身，
-        // 覆盖不缩水：任何字段漏投影 / 多投影 / 取值错位都会红。
         assertThat(claimed).isEqualTo(new ClaimedJobDto(
                 "500", "42", "9", "image",
                 Map.of("prompt", "hello", "model_id", "gpt-image-1"),
@@ -879,8 +792,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         boolean result = service.requeueImageJobForRetry("300", nextAction);
 
         assertThat(result).isTrue();
-        // G15 exact data: status='queued', lease_owner=null, lease_expires_at=null,
-        // next_action_at=入参, retry_count+1, fencing_token+1, version+1
         verify(jobMapper).requeueImageCas(300L, nextAction);
     }
 
@@ -908,7 +819,6 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("G39: completeJob 多图槽位聚合 → partially_succeeded")
     void completeJob_multiSlotPartiallySucceeded() {
-        // given: 4 个槽位，只产出 2 个 asset
         when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
 
         GenerationOutputSlotEntity slot0 = new GenerationOutputSlotEntity();
@@ -923,19 +833,15 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
-        // when: 只产出 2 张图
         boolean result = finalizer.completeJob("300", List.of("100", "101"), "worker-1", 5L);
 
-        // then
         assertThat(result).isTrue();
 
-        // 断言槽位：前 2 个 succeeded + asset_id，后 2 个 failed
         verify(slotMapper).updateSlot(10L, "succeeded", 100L);
         verify(slotMapper).updateSlot(11L, "succeeded", 101L);
         verify(slotMapper).updateSlotStatus(12L, "failed");
         verify(slotMapper).updateSlotStatus(13L, "failed");
 
-        // 断言状态修正为 partially_succeeded
         verify(jobMapper).updateJobStatus(300L, "partially_succeeded");
     }
 
@@ -957,7 +863,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(result).isTrue();
         verify(slotMapper).updateSlot(10L, "succeeded", 100L);
         verify(slotMapper).updateSlot(11L, "succeeded", 101L);
-        // 全成功 → 不调用 updateJobStatus（保持 guard 设置的 succeeded）
         verify(jobMapper, never()).updateJobStatus(anyLong(), anyString());
     }
 
@@ -974,7 +879,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
         when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
-        // 0 个 asset → 全槽失败
         boolean result = finalizer.completeJob("300", List.of(), "worker-1", 5L);
 
         assertThat(result).isTrue();
@@ -983,7 +887,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         verify(jobMapper).updateJobStatus(300L, "failed");
     }
 
-    // ========== syncRecordSummary / syncStoryboardPreviewSummary golden mirrors ==========
 
     @Test
     @DisplayName("G42: completeJob 全槽成功 + record 关联 → summary_status='success'")
@@ -992,14 +895,12 @@ class JobStateMachineServiceGoldenMirrorTest {
 
         GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
         GenerationOutputSlotEntity slot1 = makeSlot(11L, 1, "succeeded", 98L);
-        // 关联 record
         slot0.setSceneCardGenerationRecordId(500L);
         slot1.setSceneCardGenerationRecordId(500L);
         when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0, slot1));
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
         when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
 
-        // syncRecordSummary 依赖
         when(slotMapper.findBySceneCardRecordId(500L)).thenReturn(List.of(slot0, slot1));
         when(sceneCardRecordMapper.updateSummaryStatus(500L, "success")).thenReturn(1);
         SceneCardGenerationRecordEntity record = new SceneCardGenerationRecordEntity();
@@ -1010,7 +911,6 @@ class JobStateMachineServiceGoldenMirrorTest {
 
         assertThat(result).isTrue();
         verify(sceneCardRecordMapper).updateSummaryStatus(500L, "success");
-        // 全成功 → 不调用 updateJobStatus
         verify(jobMapper, never()).updateJobStatus(anyLong(), anyString());
     }
 
@@ -1045,14 +945,12 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
 
         GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        // scene_card_generation_record_id = null（音频/普通图片场景）
         when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0));
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "succeeded", 100));
         when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
 
         finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
 
-        // record mapper 不应被调用
         verify(sceneCardRecordMapper, never()).updateSummaryStatus(anyLong(), anyString());
         verify(slotMapper, never()).findBySceneCardRecordId(anyLong());
     }
@@ -1067,7 +965,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
         when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
 
-        // storyboard_preview 反查命中
         StoryboardPreviewEntity preview = new StoryboardPreviewEntity();
         preview.setId(700L); preview.setProjectId(42L); preview.setVersion(1);
         when(storyboardPreviewMapper.findByFirstGenerationJobId(300L)).thenReturn(preview);
@@ -1092,7 +989,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
         when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
 
-        // storyboard_preview 反查无命中
         when(storyboardPreviewMapper.findByFirstGenerationJobId(300L)).thenReturn(null);
 
         finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
@@ -1101,7 +997,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         verify(storyboardPreviewMapper, never()).updateSummaryStatus(anyLong(), anyString());
     }
 
-    // ========== aggregateSlotStatus / resolveLogicalSlots 纯函数测试 ==========
 
     @Test
     @DisplayName("aggregateSlotStatus: 全 succeeded → 'success'")
@@ -1144,7 +1039,6 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("resolveLogicalSlots: 同 slot_index 重试 → succeeded 优先")
     void resolveSlots_succeededWins() {
-        // slot_index=0 有两次尝试：先 failed(id=1)，后 succeeded(id=2)
         var s1 = makeSlot(1L, 0, "failed", null);
         var s2 = makeSlot(2L, 0, "succeeded", null);
         var resolved = JobStateMachineService.resolveLogicalSlots(List.of(s1, s2));
@@ -1164,13 +1058,12 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("publishVideoSceneSplitResult: 多段资产落库 + 契约 result 跨进程回传（IKH8BP）")
     void publishVideoSceneSplitResult_happyPath() {
-        // given
         when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
 
         final long[] seq = {900L};
         when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
             AssetEntity asset = (AssetEntity) invocation.getArgument(0);
-            asset.setId(seq[0]++); // 模拟 DB 自增：900 / 901
+            asset.setId(seq[0]++);
             return 1;
         });
 
@@ -1187,26 +1080,21 @@ class JobStateMachineServiceGoldenMirrorTest {
                                 "https://tos/seg2.mp4", "generated/9/video/seg2.mp4",
                                 "video/mp4", 2048L, "md5-2", 1920, 1080)));
 
-        // when
         boolean result = finalizer.publishVideoSceneSplitResult(input);
 
-        // then
         assertThat(result).isTrue();
 
-        // 断言逐段 asset 插入：type=video / duration_ms = 段时长
         ArgumentCaptor<AssetEntity> assetCaptor = ArgumentCaptor.forClass(AssetEntity.class);
         verify(assetMapper, times(2)).insert(assetCaptor.capture());
         AssetEntity first = assetCaptor.getAllValues().get(0);
         assertThat(first.getType()).isEqualTo("video");
         assertThat(first.getSource()).isEqualTo("generated");
-        assertThat(first.getDurationMs()).isEqualTo(31200); // (31.2 - 0.0) * 1000
+        assertThat(first.getDurationMs()).isEqualTo(31200);
         AssetEntity second = assetCaptor.getAllValues().get(1);
-        assertThat(second.getDurationMs()).isEqualTo(64300); // (95.5 - 31.2) * 1000
+        assertThat(second.getDurationMs()).isEqualTo(64300);
 
-        // 断言 output_asset_ids 更新（全部段资产 id 数组，1 段与 N 段同构）
         verify(jobMapper).updateOutputAssetIds(300L, "[900,901]");
 
-        // 断言终态日志 payload 带契约 result 形态（段序/起止秒/段资产引用/总时长）
         ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
         verify(jobLogMapper).insert(logCaptor.capture());
         GenerationJobLogEntity capturedLog = logCaptor.getValue();
@@ -1221,7 +1109,6 @@ class JobStateMachineServiceGoldenMirrorTest {
                 .contains("\"segment_asset_id\":\"901\"")
                 .contains("\"duration\":95.5");
 
-        // 断言 project_events 插入：每段一条 asset.created + 一条 status_changed（payload 带 result）
         ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
         verify(projectEventMapper, times(3)).insert(eventCaptor.capture());
         ProjectEventEntity statusChanged = eventCaptor.getAllValues().stream()
@@ -1253,11 +1140,10 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("publishVideoFrameInterpolationResult: asset + 终态日志 payload 带官方 result 键（IKHLKJ）")
     void publishVideoFrameInterpolationResult_happyPath() {
-        // given
         when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
         when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
             AssetEntity asset = (AssetEntity) invocation.getArgument(0);
-            asset.setId(910L); // 模拟 DB 自增
+            asset.setId(910L);
             return 1;
         });
         when(jobMapper.selectById(300L)).thenReturn(
@@ -1269,13 +1155,10 @@ class JobStateMachineServiceGoldenMirrorTest {
                 "https://tos/out.mp4", "generated/9/video/out.mp4", "video/mp4", 123_456L, "md5-x",
                 1920, 1080, 65.5, "1080p", 60.0);
 
-        // when
         boolean result = finalizer.publishVideoFrameInterpolationResult(input);
 
-        // then
         assertThat(result).isTrue();
 
-        // 单槽单 asset：type=video / source=generated / 宽高取源近似 / duration 官方秒换算 ms
         ArgumentCaptor<AssetEntity> assetCaptor = ArgumentCaptor.forClass(AssetEntity.class);
         verify(assetMapper).insert(assetCaptor.capture());
         AssetEntity asset = assetCaptor.getValue();
@@ -1287,7 +1170,6 @@ class JobStateMachineServiceGoldenMirrorTest {
 
         verify(jobMapper).updateOutputAssetIds(300L, "[910]");
 
-        // 终态日志 payload 引用契约结果键（duration / resolution / fps——assets 无对应列）
         ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
         verify(jobLogMapper).insert(logCaptor.capture());
         GenerationJobLogEntity capturedLog = logCaptor.getValue();
@@ -1299,7 +1181,6 @@ class JobStateMachineServiceGoldenMirrorTest {
                 .contains("\"resolution\":\"1080p\"")
                 .contains("\"fps\":60.0");
 
-        // 双事件：asset.created + generation_job.status_changed（前端按 target_node_id 回填结果卡）
         ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
         verify(projectEventMapper, times(2)).insert(eventCaptor.capture());
         assertThat(eventCaptor.getAllValues())

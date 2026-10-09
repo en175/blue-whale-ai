@@ -36,7 +36,6 @@ describe('Badge', () => {
 
   it('默认不加色点', async () => {
     const badge = await render({ children: '正常' });
-    // 色点是给「状态」用的；纯分类标签加上它就是噪声
     expect(badge.querySelectorAll('[aria-hidden="true"]')).toHaveLength(0);
   });
 
@@ -45,8 +44,6 @@ describe('Badge', () => {
 
     const dot = badge.querySelector('[aria-hidden="true"]');
     expect(dot).not.toBeNull();
-    // 圆点只是视觉强化，状态已由文字表达——必须对辅助技术隐藏，
-    // 否则读屏会念出一个没有意义的空元素。
     expect(badge.textContent).toBe('正常');
   });
 
