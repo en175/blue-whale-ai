@@ -203,15 +203,15 @@ public class CreditLotRepository {
 
 
 
-    public UserLotPage listUserLots(long userId, Instant createdFrom, Instant createdTo,
+    public UserLotPage listUserLots(long userId, LocalDateTime createdFrom, LocalDateTime createdTo,
                                     int size, int page) {
         long offset = (long) (Math.max(page, 1) - 1) * size;
-        List<UserLot> items = mapper.listUserLots(userId, DbTime.toDb(createdFrom),
-                        DbTime.toDb(createdTo), offset, size).stream()
+        List<UserLot> items = mapper.listUserLots(userId, createdFrom,
+                        createdTo, offset, size).stream()
                 .map(CreditLotRepository::toUserLot)
                 .toList();
         return new UserLotPage(items,
-                mapper.countUserLots(userId, DbTime.toDb(createdFrom), DbTime.toDb(createdTo)));
+                mapper.countUserLots(userId, createdFrom, createdTo));
     }
 
     private static UserLot toUserLot(CreditLotEntity entity) {
