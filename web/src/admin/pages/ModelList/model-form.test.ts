@@ -14,6 +14,7 @@ import {
   mergeMatrix,
   parseGptMatrix,
   pickTaskTypeRatios,
+  pickTaskTypeFollowDuration,
   ratiosFromModel,
   readFeature,
   sizesFromModel,
@@ -669,26 +670,49 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
     expect(ratios.extend).toEqual([]);
   });
 
-  it('写回只动 allowed_ratios：其它子键与未知任务类型原样保留', () => {
+  it('写回只动 allowed_ratios / allowed_durations：其它子键与未知任务类型原样保留', () => {
     const base = {
-      first_frame: { allowed_ratios: ['1:1'], allowed_durations: [5, 10] },
+      first_frame: { allowed_ratios: ['1:1'], allowed_durations: [5, 10], note: 'x' },
       custom_type: { allowed_ratios: ['4:3'] },
     };
-    expect(buildTaskTypes(base, { first_frame: ['16:9'] }, { first_frame: true })).toEqual({
-      first_frame: { allowed_ratios: ['16:9'], allowed_durations: [5, 10] },
+    expect(buildTaskTypes(base, { first_frame: ['16:9'] }, { first_frame: true }, {})).toEqual({
+      first_frame: { allowed_ratios: ['16:9'], note: 'x' },
       custom_type: { allowed_ratios: ['4:3'] },
     });
   });
 
+  it('时长跟随原视频：勾选写 [-1]，取消删该键', () => {
+    expect(
+      buildTaskTypes({ edit: { allowed_ratios: ['adaptive'] } }, { edit: ['adaptive'] }, { edit: true }, { edit: true }),
+    ).toEqual({ edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] } });
+    expect(
+      buildTaskTypes({ edit: { allowed_durations: [-1] } }, { edit: [] }, { edit: true }, { edit: false }),
+    ).toEqual({ edit: {} });
+  });
+
+  it('读：allowed_durations 恰为 [-1] 才算「跟随原视频」，其它值一律不算', () => {
+    const flags = pickTaskTypeFollowDuration({
+      task_types: {
+        edit: { allowed_durations: [-1] },
+        extend: { allowed_durations: [5] },
+        omni: { allowed_durations: [-1, 5] },
+      },
+    });
+    expect(flags.edit).toBe(true);
+    expect(flags.extend).toBe(false);
+    expect(flags.omni).toBe(false);
+    expect(flags.text2video).toBe(false);
+  });
+
   it('取消勾选某模式 → 该键被移除（键不在 = 该模式不开放）', () => {
     expect(
-      buildTaskTypes({ text2video: { allowed_ratios: ['1:1'] } }, { text2video: [] }, {}),
+      buildTaskTypes({ text2video: { allowed_ratios: ['1:1'] } }, { text2video: [] }, {}, {}),
     ).toEqual({});
   });
 
   it('勾选但比例留空 → 保留空对象（键在 = 开放且无额外约束）', () => {
     expect(
-      buildTaskTypes({}, { text2video: [] }, { text2video: true }),
+      buildTaskTypes({}, { text2video: [] }, { text2video: true }, {}),
     ).toEqual({ text2video: {} });
   });
 });

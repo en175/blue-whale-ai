@@ -33,10 +33,9 @@ export const SIZE_ROW: CSSProperties = {
   alignItems: 'center',
   marginBottom: 8,
 };
-/** 任务类型行：任务名 / 已配比例 / 输入 / 添加。 */
 export const TASK_ROW: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '120px 1fr 1fr auto',
+  gridTemplateColumns: '132px 180px 1fr 1fr auto',
   gap: 10,
   alignItems: 'center',
   marginBottom: 8,

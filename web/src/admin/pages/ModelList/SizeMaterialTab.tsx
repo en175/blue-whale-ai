@@ -103,6 +103,8 @@ interface SizeMaterialTabProps {
     setDraft: (value: Record<string, string>) => void;
     add: (taskType: string) => void;
     remove: (taskType: string, ratio: string) => void;
+    followDuration: Record<string, boolean>;
+    toggleFollowDuration: (taskType: string) => void;
   };
 }
 
@@ -495,13 +497,19 @@ export default function SizeMaterialTab({
       {/* ADR-0086：按任务类型的比例约束——原先只能在整个 features 的 JSON 里手写。 */}
       {type === 'video' && (
         <>
-          <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。</Hint></h3>
+          <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。勾「时长跟随原视频」= 该模式的时长由上游按源素材决定、用户不可选（只对消费源素材的模式有意义）。</Hint></h3>
           {TASK_TYPE_KEYS.map((taskType) => (
             <div style={TASK_ROW} key={taskType}>
               <Checkbox
                 checked={!!taskTypes.enabled[taskType]}
                 onChange={() => taskTypes.toggle(taskType)}
                 label={taskType}
+              />
+              <Checkbox
+                checked={!!taskTypes.followDuration[taskType]}
+                disabled={!taskTypes.enabled[taskType]}
+                onChange={() => taskTypes.toggleFollowDuration(taskType)}
+                label="时长跟随原视频"
               />
               <div style={CHIP_LIST}>
                 {(taskTypes.ratios[taskType] ?? []).map((ratio) => (
