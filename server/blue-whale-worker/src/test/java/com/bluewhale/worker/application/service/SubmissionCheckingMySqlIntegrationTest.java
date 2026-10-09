@@ -36,6 +36,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -70,7 +71,8 @@ class SubmissionCheckingMySqlIntegrationTest {
             cfg.setUsername(mysql.getUsername());
             cfg.setPassword(mysql.getPassword());
             cfg.setMaximumPoolSize(5);
-            cfg.setConnectionInitSql("SET time_zone='+08:00'");
+            cfg.addDataSourceProperty("connectionTimeZone", "Asia/Shanghai");
+            cfg.addDataSourceProperty("forceConnectionTimeZoneToSession", "true");
             return new HikariDataSource(cfg);
         }
 
@@ -192,7 +194,7 @@ class SubmissionCheckingMySqlIntegrationTest {
                 VALUES (42, 'video', 'bottom_dock', 'processing', ?, ?, ?, 1, '{}', ?,
                         NOW(), NOW(), 0, false)
                 """,
-                workerId, WorkerClock.now().plusMinutes(10), token, sourceSampleJobId);
+                workerId, LocalDateTime.now().plusMinutes(10), token, sourceSampleJobId);
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         long jobId = id != null ? id : -1;
         if (videoStage != null) {
@@ -250,7 +252,7 @@ class SubmissionCheckingMySqlIntegrationTest {
                 UPDATE generation_jobs
                 SET lease_expires_at = ?, next_action_at = NOW() - INTERVAL 1 MINUTE
                 WHERE id = ?
-                """, WorkerClock.now().minusMinutes(5), jobId);
+                """, LocalDateTime.now().minusMinutes(5), jobId);
 
         Optional<ClaimedVideoJobDto> reclaimed = service.claimVideoJobById(
                 String.valueOf(jobId), "recovery-worker");

@@ -4,7 +4,7 @@ import com.bluewhale.billing.application.CatalogCompiler;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,7 +20,7 @@ class SeedAudioPerSecondPricingTest {
              "maxCredits":12}
             """;
 
-    private static final Instant T = Instant.parse("2026-09-26T15:00:00+08:00");
+    private static final LocalDateTime T = LocalDateTime.parse("2026-09-26T15:00:00");
 
     private static final double OFFICIAL_YUAN_PER_MINUTE = 0.3;
     private static final double CREDITS_PER_YUAN = 15.0;

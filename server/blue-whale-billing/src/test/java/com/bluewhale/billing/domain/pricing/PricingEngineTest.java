@@ -3,7 +3,7 @@ package com.bluewhale.billing.domain.pricing;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PricingEngineTest {
 
-    private static final Instant T = Instant.parse("2026-10-15T22:30:00+08:00");
+    private static final LocalDateTime T = LocalDateTime.parse("2026-10-15T22:30:00");
 
 
     private static CompiledRule seedream() {

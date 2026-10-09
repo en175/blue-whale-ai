@@ -1,6 +1,6 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五 + 修正六 + 修正七**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；修正六：2026-09-18 退役标签开关与命名对齐（详见 §16）——删除 `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX`，服务启动即消费全部 6 个 tag，topic `generation-video`→`generation-task`、tag `step`→`video`；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U；冻结增量 §15：2026-09-18 新增第 6 个生成类型 image_erase 图片擦除的跨进程字段冻结，IKGOT3；冻结增量 §17：2026-09-19 新增第 8 个生成类型 video_subtitle_erase 视频智能去字幕的跨进程字段冻结，IKGZ7Z——第 7 个 image_outpaint 契约独立在 `backend/libs/contracts/image-outpaint.ts`，未单开本文章节）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五 + 修正六 + 修正七 + 修正八**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；修正六：2026-09-18 退役标签开关与命名对齐（详见 §16）——删除 `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX`，服务启动即消费全部 6 个 tag，topic `generation-video`→`generation-task`、tag `step`→`video`；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U；冻结增量 §15：2026-09-18 新增第 6 个生成类型 image_erase 图片擦除的跨进程字段冻结，IKGOT3；冻结增量 §17：2026-09-19 新增第 8 个生成类型 video_subtitle_erase 视频智能去字幕的跨进程字段冻结，IKGZ7Z——第 7 个 image_outpaint 契约独立在 `backend/libs/contracts/image-outpaint.ts`，未单开本文章节）；修正八：2026-10-09 取消 Java 侧时区概念（IKKBZW）——删 `WorkerClock`/`DbTime`、`Instant` 撤出 `server/`、会话时区改由连接串参数设定，详见 §23。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
 - 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEF1K），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
@@ -274,7 +274,8 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 - **不引入 Lombok**；手写访问器维持现状一致性。
 - 状态 / 类型 / MIME / 参考角色字符串一律枚举或常量表收口（`JobStatus`、`JobType`、`MediaMime`、`ReferenceRole` 等），禁止跨层裸字符串（§2 合法值清单为权威枚举来源）。
 - 禁裸 `RuntimeException`，抛领域 Error；消费者 catch-log-continue 统一收进基类模板方法。
-- 时间读取一律经单一入口 `WorkerClock.now()`，禁散落 `LocalDateTime.now()`（2026-09-21 修订，IKHJ0Q：口径由 UTC 改为北京时间 +08:00，修订同时删掉了此前两份重复的 `nowUtc()` 私有副本）。
+- ~~时间读取一律经单一入口 `WorkerClock.now()`，禁散落 `LocalDateTime.now()`~~（2026-09-21 修订，IKHJ0Q）。
+  - **⚠️ 本条已被本文件 §23 修正八作废**：`WorkerClock` 类已删除，时间读取改为直接 `LocalDateTime.now()`；时区不再由 Java 代码持有，改由容器 `TZ` 与连接串参数提供。
   - **未满足原文的「注入 `Clock`」**：实现是静态工具类而非注入 bean，理由是本模块无 Spring 上下文依赖的测试（processor 单测直接 new）也调用它。代价是租约/重试测试仍然无法冻结时钟、只能靠 ±N 秒的窗口夹逼。若要彻底消除这类 flake，需另立一刀改成可注入——登记为已知偏离，不假装已满足。
 
 ### 13.4 重构期行为变更上界（整备批次纪律，后续整备刀同样适用）
@@ -698,3 +699,15 @@ common 零改动（它只有 `common/http` 一个共享基础设施类，本就�
      「领域层依赖框架」问题另立工单解决。
   2. `domain/dto` 保留原位，不迁入 `api/dto`。其 25 个类含 MQ 契约投影（`ClaimedJobDto`、`Publish*Dto`），
      被 application 与 infrastructure 共享；迁入 `api/` 会造出 application → api 的反向依赖。
+
+## 23. 修正八（2026-10-09，IKKBZW）：取消 Java 侧时区概念
+
+背景与决策见 [ADR-0111 修正一](../adr/0111-datetime-caliber-beijing-wall-clock.md)。本修正覆盖 §13.3 的「时间读取一律经单一入口 `WorkerClock.now()`」一条，并显式放行 §13.4 的「不动 DB 写入内容」。
+
+- `WorkerClock` 类删除（它持有 `ZoneOffset.ofHours(8)`）。时间读取改为直接 `LocalDateTime.now()`，时区由容器 `TZ=Asia/Shanghai` 提供。
+- `DbTime` 类删除（它持有 `ZoneId.of("Asia/Shanghai")`）。`Instant` 从 `server/` 全部撤出，领域与持久化一律 `LocalDateTime`。
+- 会话时区不再由 `DataSourceConfig` 的 `connectionInitSql` 设定，改由 `DATABASE_URL` 的 `connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true` 设定（billing 的 `BILLING_DB_URL` 本就是此形态）。
+- billing gRPC 时间串改用 `ZoneId.systemDefault()` 还原 `+08:00` 偏移，**wire 格式不变**。
+- §13.4 放行项：`gmt_create` / `gmt_modified` 从 Java 赋值改为只由列默认值 `DEFAULT CURRENT_TIMESTAMP` 写，写入结果不变。
+- 促销 `tz` 能力（跨零点时段按活动自带时区判定）**删除**，判定一律按北京时间；`promotions.tz` 列保留为死列，删列另开 DDL。字段删除穿透 Java / NestJS / web 三层。存量 `tz != 'Asia/Shanghai'` 的促销行判定随之从「按该行时区」变为「按北京时间」——已批准的行为变更；此后新插入的行持续吃该列的 `DEFAULT 'Asia/Shanghai'`，不再由应用写入。
+- 验收：`grep -rn "ofHours(8)\|Asia/Shanghai" server/*/src/main --include='*.java'` 返回空；`ZoneId` 仅剩 gRPC 边界的 `ZoneId.systemDefault()`。

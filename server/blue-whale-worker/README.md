@@ -50,7 +50,7 @@ curl localhost:4002/ready
 
 | 变量名 | 必需 | 说明 | 默认值 |
 |---|---|---|---|
-| `DATABASE_URL` | 是 | `mysql://user:pass@host:port/db` | — |
+| `DATABASE_URL` | 是 | `mysql://user:pass@host:port/db?connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true`——**查询串必带**：库里 `DATETIME` 存的是北京墙钟字面量，会话时区不设成 `+08:00` 就会与 Java 写出的墙钟错开 8 小时（租约立刻过期或永不释放，且不报错）。装配期 `DataSourceConfig.requireClockAgreement` 会核对两边的钟，不一致直接终止启动 | — |
 | `ROCKETMQ_ENDPOINTS` | 是 | gRPC proxy 端点 | — |
 | `ROCKETMQ_ACCESS_KEY` | 否 | RocketMQ 认证 | — |
 | `ROCKETMQ_SECRET_KEY` | 否 | RocketMQ 认证 | — |
@@ -83,13 +83,14 @@ curl localhost:4002/ready
 - 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `NEW_API_BASE_URL` + `SYSTEM_SETTINGS_SECRET` + `VOLC_*` 5 个 TOS env（共四套配置），缺一在 bean 装配期抛错终止启动（不再有「空 tags → 不连 MQ、不连 DB，只起 `/ready`」形态）。
 - 上游统一 key **不在 env 里**：管理端「系统设置 → 上游凭证」配一次，全项目共用（backend 与 worker 都读 `system_settings` 的 `upstream` 行）。改动在一轮素材跟进（默认 5s）内生效。
 - ffmpeg 运行时依赖：`FFMPEG_PATH` 指向的二进制必须存在（Dockerfile 已 apt install）。
+- **容器时区**：镜像带 `ENV TZ=Asia/Shanghai`（ADR-0111 修正一）。Java 侧不再持有任何时区字面量，写库时刻取 JVM 默认时区；覆盖 `TZ` 或漏掉 `DATABASE_URL` 的时区参数都会让两边的钟错开——装配期守卫会拦，不要绕过它。
 
 ### Docker 部署
 
 ```bash
 # 构建（多阶段 Dockerfile：镜像内完成 mvn package，无需外部预构建 jar）
 docker build -t worker-java .
-docker run -e DATABASE_URL=mysql://... \
+docker run -e DATABASE_URL='mysql://user:pass@host:port/db?connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true' \
            -e ROCKETMQ_ENDPOINTS=... \
            -e NEW_API_BASE_URL=... \
            -e SYSTEM_SETTINGS_SECRET=... \

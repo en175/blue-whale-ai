@@ -14,7 +14,7 @@ import com.bluewhale.billing.domain.pricing.MediaPricingCalculator;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -71,7 +71,7 @@ class HoldSettlePricingEquivalenceTest {
                 mock(ReservationRepository.class));
 
         service.hold(new HoldCommand(USER, "cmd-equiv", JOB, MODEL, TASK, SPECS, "free",
-                "生成任务", Instant.now(), RULE_SNAPSHOT));
+                "生成任务", LocalDateTime.now(), RULE_SNAPSHOT));
 
         ArgumentCaptor<Long> reserved = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Integer> frozenBp = ArgumentCaptor.forClass(Integer.class);

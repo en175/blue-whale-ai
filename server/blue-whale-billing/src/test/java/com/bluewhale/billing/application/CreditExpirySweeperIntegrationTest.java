@@ -13,7 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,8 +29,8 @@ class CreditExpirySweeperIntegrationTest {
     private static final int CATALOG_VERSION = 1;
     private static final int NO_DISCOUNT = 10_000;
 
-    private static final Instant PAST = Instant.now().minus(1, ChronoUnit.HOURS);
-    private static final Instant FUTURE = Instant.now().plus(30, ChronoUnit.DAYS);
+    private static final LocalDateTime PAST = LocalDateTime.now().minus(1, ChronoUnit.HOURS);
+    private static final LocalDateTime FUTURE = LocalDateTime.now().plus(30, ChronoUnit.DAYS);
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private CreditService credits;
@@ -210,7 +210,7 @@ class CreditExpirySweeperIntegrationTest {
     }
 
 
-    private long grant(CreditSource source, long amount, Instant expiresAt, String grantKey) {
+    private long grant(CreditSource source, long amount, LocalDateTime expiresAt, String grantKey) {
         return credits.grant(USER, source, amount, expiresAt, "grant", grantKey, grantKey);
     }
 

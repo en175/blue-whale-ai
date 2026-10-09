@@ -3,7 +3,6 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -28,6 +27,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -121,7 +121,7 @@ public class ImageJobProcessor implements JobProcessor {
 
         if (isTransientImageError(errorCode) && job.retry_count() < MAX_IMAGE_RETRIES) {
             long backoffMs = imageRetryBackoffMs(job.retry_count());
-            java.time.LocalDateTime nextActionAt = WorkerClock.now()
+            java.time.LocalDateTime nextActionAt = LocalDateTime.now()
                     .plusNanos(backoffMs * 1_000_000L);
             boolean requeued = stateMachine.requeueImageJobForRetry(job.id(), nextActionAt);
             if (requeued) {

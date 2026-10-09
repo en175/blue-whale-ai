@@ -1,7 +1,6 @@
 package com.bluewhale.billing.infrastructure.persistence.repository;
 
 import com.bluewhale.billing.application.view.TransactionView;
-import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.infrastructure.persistence.mapper.TransactionMapper;
 import com.bluewhale.billing.infrastructure.persistence.row.TransactionRow;
 import org.springframework.stereotype.Repository;
@@ -41,7 +40,7 @@ public class TransactionRepository {
                 row.getReservedCredits(),
                 row.getGenerationJobId(),
                 row.getStatus(),
-                DbTime.fromDb(row.getCreatedAt()),
-                DbTime.fromDb(row.getSettledAt()));
+                row.getCreatedAt(),
+                row.getSettledAt());
     }
 }

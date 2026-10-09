@@ -18,7 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfEnvironmentVariable(named = "BILLING_DB_PASSWORD", matches = ".+")
 class AdminDiscountApiIntegrationTest {
 
-    private static final Instant NIGHT = Instant.parse("2026-10-15T22:30:00+08:00");
+    private static final LocalDateTime NIGHT = LocalDateTime.parse("2026-10-15T22:30:00");
 
     @Autowired private MockMvc mvc;
     @Autowired private JdbcTemplate jdbc;
@@ -129,7 +129,6 @@ class AdminDiscountApiIntegrationTest {
                 .andExpect(jsonPath("$.modelIds[0]").value("seedance-*"))
                 .andExpect(jsonPath("$.tierScope[1]").value("max"))
                 .andExpect(jsonPath("$.daysOfWeek[0]").value(1))
-                .andExpect(jsonPath("$.tz").value("Asia/Shanghai"))
                 .andExpect(jsonPath("$.dailyTimeStart").value("22:00:00"));
     }
 
@@ -141,7 +140,7 @@ class AdminDiscountApiIntegrationTest {
                                 {"code":"all-day","name":"全天 9 折","discountBp":9000,
                                  "modelIds":["*"],"taskTypes":[],"tierScope":[],
                                  "startAt":"2026-10-01T00:00","endAt":"2026-11-01T00:00",
-                                 "tz":"Asia/Shanghai","status":"enabled"}
+                                 "status":"enabled"}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.taskTypes").doesNotExist())
@@ -165,7 +164,7 @@ class AdminDiscountApiIntegrationTest {
                                  "modelIds":["*"],"taskTypes":null,"tierScope":null,
                                  "startAt":"2026-10-01T00:00","endAt":"2026-11-01T00:00",
                                  "dailyTimeStart":null,"dailyTimeEnd":null,
-                                 "daysOfWeek":null,"tz":"Asia/Shanghai","status":"enabled"}
+                                 "daysOfWeek":null,"status":"enabled"}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.dailyTimeStart").doesNotExist());
@@ -195,15 +194,6 @@ class AdminDiscountApiIntegrationTest {
                         .content(promotionJson(7000).replace("[\"seedance-*\"]", "[]")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("模型范围必填")));
-    }
-
-    @Test
-    void 活动_时区名拼错被拒_否则预扣路径会抛异常() throws Exception {
-        mvc.perform(post("/admin/promotions")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(promotionJson(7000).replace("Asia/Shanghai", "Asia/Shangahi")))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("时区名不合法")));
     }
 
     @Test
@@ -260,7 +250,7 @@ class AdminDiscountApiIntegrationTest {
         assertThat(promotionProvider.resolve(ctx("free", "seedance-2.5", "text2video", NIGHT)))
                 .isEmpty();
         assertThat(promotionProvider.resolve(
-                ctx("pro", "seedance-2.5", "text2video", Instant.parse("2026-10-15T15:00:00+08:00"))))
+                ctx("pro", "seedance-2.5", "text2video", LocalDateTime.parse("2026-10-15T15:00:00"))))
                 .isEmpty();
     }
 
@@ -271,7 +261,7 @@ class AdminDiscountApiIntegrationTest {
                  "modelIds":["seedance-*"],"taskTypes":["text2video"],"tierScope":["pro","max"],
                  "startAt":"2026-10-01T00:00","endAt":"2026-11-01T00:00",
                  "dailyTimeStart":"22:00","dailyTimeEnd":"06:00","daysOfWeek":[1,4,5],
-                 "tz":"Asia/Shanghai","status":"enabled","priority":5}
+                 "status":"enabled","priority":5}
                 """.formatted(bp);
     }
 
@@ -288,7 +278,7 @@ class AdminDiscountApiIntegrationTest {
         return com.jayway.jsonpath.JsonPath.parse(json).read("$.id", Long.class);
     }
 
-    private static PricingContext ctx(String tier, String model, String task, Instant at) {
+    private static PricingContext ctx(String tier, String model, String task, LocalDateTime at) {
         return new PricingContext(
                 CompiledRule.of(UsageDim.CONSTANT_ONE, new BasePriceResolver.Constant(10_000L), 1L),
                 new PricingRequest(42L, model, task, Map.of(), tier),

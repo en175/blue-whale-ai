@@ -15,7 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 @Service
 public class SettlementService {
@@ -50,7 +50,7 @@ public class SettlementService {
 
         FrozenRules frozen = rulesAtHoldTime(reservation);
         PricingEngine frozenEngine = engineAtHoldTime(frozen, reservation);
-        Instant completedAt = Instant.now();
+        LocalDateTime completedAt = LocalDateTime.now();
 
         long actualCredits;
         if (event.usage().isEmpty()) {

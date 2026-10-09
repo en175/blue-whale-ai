@@ -29,7 +29,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
@@ -183,13 +183,13 @@ public class TosVideoMediaRelay {
     }
 
     public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes,
-                                        TransferAbortHandle abortHandle, Instant taskDeadline) {
+                                        TransferAbortHandle abortHandle, LocalDateTime taskDeadline) {
         return persistStreamingInternal(sourceUrl, userId, maxBytes, abortHandle, taskDeadline,
                 null, STREAM_STALL_TIMEOUT, STREAM_ERROR_BODY_TIMEOUT);
     }
 
     StoredVideo persistStreamingInternal(String sourceUrl, String userId, long maxBytes,
-                                         TransferAbortHandle abortHandle, Instant taskDeadline,
+                                         TransferAbortHandle abortHandle, LocalDateTime taskDeadline,
                                          Duration copyWindow, Duration stallTimeout,
                                          Duration errorBodyTimeout) {
         Path tempFile = null;
@@ -377,7 +377,7 @@ public class TosVideoMediaRelay {
         private volatile boolean deadlineAbort;
 
         HeaderWait(CompletableFuture<HttpResponse<InputStream>> pending,
-                   TransferAbortHandle handle, Instant taskDeadline) {
+                   TransferAbortHandle handle, LocalDateTime taskDeadline) {
             this.pending = pending;
             this.handle = handle;
             if (handle != null) {
@@ -385,7 +385,7 @@ public class TosVideoMediaRelay {
             }
             if (taskDeadline != null) {
                 deadlineTask = WATCHDOG_SCHEDULER.schedule(this::abortFromDeadline,
-                        Math.max(0, Duration.between(Instant.now(), taskDeadline).toNanos()), TimeUnit.NANOSECONDS);
+                        Math.max(0, Duration.between(LocalDateTime.now(), taskDeadline).toNanos()), TimeUnit.NANOSECONDS);
             }
         }
 
@@ -463,9 +463,9 @@ public class TosVideoMediaRelay {
                     stallTimeout.toNanos(), TimeUnit.NANOSECONDS);
         }
 
-        void armDeadline(Instant deadline) {
+        void armDeadline(LocalDateTime deadline) {
             if (deadline == null) return;
-            long nanos = System.nanoTime() + Duration.between(Instant.now(), deadline).toNanos();
+            long nanos = System.nanoTime() + Duration.between(LocalDateTime.now(), deadline).toNanos();
             deadlineNanos = nanos;
             deadlineTask = WATCHDOG_SCHEDULER.schedule(this::abortFromDeadline,
                     Math.max(0, nanos - System.nanoTime()), TimeUnit.NANOSECONDS);

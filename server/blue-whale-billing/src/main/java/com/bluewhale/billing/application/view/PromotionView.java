@@ -17,7 +17,6 @@ public record PromotionView(
         LocalTime dailyTimeStart,
         LocalTime dailyTimeEnd,
         List<Integer> daysOfWeek,
-        String tz,
         String status,
         int priority,
         String createdBy,

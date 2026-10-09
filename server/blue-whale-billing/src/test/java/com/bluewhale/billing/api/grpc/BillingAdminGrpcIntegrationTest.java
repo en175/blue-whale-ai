@@ -33,8 +33,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Instant;
-import java.time.OffsetDateTime;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
@@ -268,8 +268,8 @@ class BillingAdminGrpcIntegrationTest {
 
     @Test
     void 消耗合计_只算已结算的_在途的预扣不算() {
-        Instant from = Instant.now().minus(1, ChronoUnit.HOURS);
-        Instant to = Instant.now().plus(1, ChronoUnit.HOURS);
+        LocalDateTime from = LocalDateTime.now().minus(1, ChronoUnit.HOURS);
+        LocalDateTime to = LocalDateTime.now().plus(1, ChronoUnit.HOURS);
 
         userFacing.hold(hold(USER, "adm-cc-1", 9_207L));
         assertThat(consumed(from, to)).isZero();
@@ -280,14 +280,14 @@ class BillingAdminGrpcIntegrationTest {
         userFacing.hold(hold(OTHER_USER, "adm-cc-2", 9_208L));
         assertThat(consumed(from, to)).isEqualTo(30);
 
-        assertThat(consumed(Instant.now().minus(2, ChronoUnit.DAYS),
-                Instant.now().minus(1, ChronoUnit.DAYS))).isZero();
+        assertThat(consumed(LocalDateTime.now().minus(2, ChronoUnit.DAYS),
+                LocalDateTime.now().minus(1, ChronoUnit.DAYS))).isZero();
     }
 
     @Test
     void 消耗合计_半开区间且只算已结算() {
-        Instant from = OffsetDateTime.parse("2026-09-25T00:00:00+08:00").toInstant();
-        Instant to = OffsetDateTime.parse("2026-09-26T00:00:00+08:00").toInstant();
+        LocalDateTime from = LocalDateTime.parse("2026-09-25T00:00:00");
+        LocalDateTime to = LocalDateTime.parse("2026-09-26T00:00:00");
 
         insertReservation(9_301L, "settled", 1L, "2026-09-24 23:59:59");
         insertReservation(9_302L, "settled", 2L, "2026-09-25 00:00:00");
@@ -301,7 +301,7 @@ class BillingAdminGrpcIntegrationTest {
 
     @Test
     void 消耗合计_缺参数或区间反了_报INVALID_ARGUMENT而不是当0() {
-        Instant now = Instant.now();
+        LocalDateTime now = LocalDateTime.now();
 
         assertThatThrownBy(() -> admin.adminConsumedCredits(
                 AdminConsumedCreditsRequest.newBuilder()
@@ -477,9 +477,11 @@ class BillingAdminGrpcIntegrationTest {
                 jobId, USER, actualCredits, status, at, at);
     }
 
-    private long consumed(Instant from, Instant to) {
+    private long consumed(LocalDateTime from, LocalDateTime to) {
         return admin.adminConsumedCredits(AdminConsumedCreditsRequest.newBuilder()
-                        .setFrom(from.toString()).setTo(to.toString()).build())
+                        .setFrom(from.atZone(ZoneId.systemDefault()).toOffsetDateTime().toString())
+                        .setTo(to.atZone(ZoneId.systemDefault()).toOffsetDateTime().toString())
+                        .build())
                 .getConsumedCredits();
     }
 

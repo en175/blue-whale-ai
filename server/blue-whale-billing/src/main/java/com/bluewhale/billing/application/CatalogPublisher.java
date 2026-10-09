@@ -62,7 +62,7 @@ public class CatalogPublisher {
         entity.setSchemaVersion(document.schemaVersion());
         entity.setDocumentHash(hash);
         entity.setPublishedBy(publishedBy);
-        entity.setPublishedAt(LocalDateTime.now(com.bluewhale.billing.domain.DbTime.ZONE));
+        entity.setPublishedAt(LocalDateTime.now());
         entity.setNote(note == null ? "" : note);
         mapper.insert(entity);
 

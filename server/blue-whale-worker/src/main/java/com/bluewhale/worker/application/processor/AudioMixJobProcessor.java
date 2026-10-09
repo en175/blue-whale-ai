@@ -4,7 +4,6 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
 import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
@@ -29,6 +28,7 @@ import org.springframework.stereotype.Component;
 import java.net.ConnectException;
 import java.net.UnknownHostException;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -262,7 +262,7 @@ public class AudioMixJobProcessor implements JobProcessor {
 
     private static boolean timedOut(ClaimedJob job) {
         if (job.executionDeadlineAt() != null) {
-            return !WorkerClock.now().isBefore(job.executionDeadlineAt());
+            return !LocalDateTime.now().isBefore(job.executionDeadlineAt());
         }
         if (job.createdAt() == null) return false;
         Object estimated = job.input().get("estimated_duration_ms");
@@ -270,7 +270,7 @@ public class AudioMixJobProcessor implements JobProcessor {
                 ? Duration.ofHours(6).plus(Duration.ofMillis(number.longValue()).multipliedBy(4))
                 : Duration.ofDays(7);
         if (budget.compareTo(Duration.ofDays(1)) < 0) budget = Duration.ofDays(1);
-        return Duration.between(job.createdAt(), WorkerClock.now()).compareTo(budget) >= 0;
+        return Duration.between(job.createdAt(), LocalDateTime.now()).compareTo(budget) >= 0;
     }
 
     private static boolean transientPollError(MediaExtractError error) {

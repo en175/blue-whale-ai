@@ -136,7 +136,8 @@ class JobStateMachineMySqlIntegrationTest {
             cfg.setUsername(mysql.getUsername());
             cfg.setPassword(mysql.getPassword());
             cfg.setMaximumPoolSize(5);
-            cfg.setConnectionInitSql("SET time_zone='+08:00'");
+            cfg.addDataSourceProperty("connectionTimeZone", "Asia/Shanghai");
+            cfg.addDataSourceProperty("forceConnectionTimeZoneToSession", "true");
             return new HikariDataSource(cfg);
         }
 
@@ -283,7 +284,7 @@ class JobStateMachineMySqlIntegrationTest {
 
     private long seedClaimedJob(long userId, String type, String source,
                                 String workerId, long token) {
-        LocalDateTime future = WorkerClock.now().plusMinutes(10);
+        LocalDateTime future = LocalDateTime.now().plusMinutes(10);
         jdbc.update("""
                 INSERT INTO generation_jobs
                   (user_id, type, source, status, lease_owner, lease_expires_at,
@@ -354,7 +355,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G03: 图片 claim CAS 成功 → 投影 fencingToken=old+1，DB 状态 processing")
         void claimImage_success() {
             long id = seedJob(7L, "image", "bottom_dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
                     String.valueOf(id), "worker-1");
@@ -378,7 +379,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G07: 并发第二次 claim 同一 job → Optional.empty（CAS 0 行守卫）")
         void claimImage_concurrentSecond_null() {
             long id = seedJob(7L, "image", "bottom_dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
 
             Optional<ClaimedJobDto> first = service.claimImageJobById(
                     String.valueOf(id), "worker-1");
@@ -393,12 +394,12 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("错误状态（processing 且未过期）→ 候选查询无命中 → empty")
         void claim_wrongStatus_empty() {
             long id = seedJob(7L, "image", "bottom_dock", "processing", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("""
                     UPDATE generation_jobs SET lease_owner='other', lease_expires_at=?
                     WHERE id=?
                     """,
-                    WorkerClock.now().plusMinutes(5), id);
+                    LocalDateTime.now().plusMinutes(5), id);
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
                     String.valueOf(id), "worker-1");
@@ -410,7 +411,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("next_action_at 未来 → 候选过滤排除 → empty")
         void claim_futureNextAction_empty() {
             long id = seedJob(7L, "image", "bottom_dock", "queued", 0L,
-                    WorkerClock.now().plusMinutes(5));
+                    LocalDateTime.now().plusMinutes(5));
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
                     String.valueOf(id), "worker-1");
@@ -422,7 +423,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("is_delete=true → 候选过滤排除 → empty")
         void claim_deleted_empty() {
             long id = seedJob(7L, "image", "bottom_dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("UPDATE generation_jobs SET is_delete=true WHERE id=?", id);
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
@@ -435,7 +436,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("source 不在白名单 → 图片候选排除 → empty（音频无此限制）")
         void claim_imageSourceNotWhitelisted_empty() {
             long id = seedJob(7L, "image", "dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
 
             assertThat(service.claimImageJobById(String.valueOf(id), "w")).isEmpty();
         }
@@ -450,7 +451,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("queued 行 → claim 成功，token+1，DB 转 processing")
         void claimAudioTrim_queued_success() {
             long id = seedJob(7L, "audio_trim", "dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
 
             Optional<ClaimedJob> result = claimService.claim(
                     ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
@@ -468,7 +469,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("source 非 dock（无白名单）→ 仍能 claim（锁死不套 source 白名单语义）")
         void claimAudioTrim_anySource_success() {
             long id = seedJob(7L, "audio_trim", "unexpected_source", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
 
             Optional<ClaimedJob> result = claimService.claim(
                     ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
@@ -482,7 +483,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("processing + lease null → 孤儿接管，token+1")
         void claimAudioTrim_orphanNullLease_success() {
             long id = seedJob(7L, "audio_trim", "dock", "processing", 4L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("UPDATE generation_jobs SET lease_owner='old' WHERE id=?", id);
 
             Optional<ClaimedJob> result = claimService.claim(
@@ -497,7 +498,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("type 不匹配（audio）→ 候选排除 → empty")
         void claimAudioTrim_wrongType_empty() {
             long id = seedJob(7L, "audio", "dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
 
             assertThat(claimService.claim(
                     ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
@@ -508,12 +509,12 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("processing + 租约未过期 → 非孤儿 → empty")
         void claimAudioTrim_validLease_empty() {
             long id = seedJob(7L, "audio_trim", "dock", "processing", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("""
                     UPDATE generation_jobs SET lease_owner='other', lease_expires_at=?
                     WHERE id=?
                     """,
-                    WorkerClock.now().plusMinutes(5), id);
+                    LocalDateTime.now().plusMinutes(5), id);
 
             assertThat(claimService.claim(
                     ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
@@ -524,12 +525,12 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("processing + 租约已过期 → 孤儿接管，token+1")
         void claimAudioTrim_expiredLease_success() {
             long id = seedJob(7L, "audio_trim", "dock", "processing", 2L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("""
                     UPDATE generation_jobs SET lease_owner='stale', lease_expires_at=?
                     WHERE id=?
                     """,
-                    WorkerClock.now().minusMinutes(1), id);
+                    LocalDateTime.now().minusMinutes(1), id);
 
             Optional<ClaimedJob> result = claimService.claim(
                     ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
@@ -543,7 +544,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("富投影：providerTaskId / pollCount / progress 如实带回")
         void claimAudioTrim_projection() {
             long id = seedJob(7L, "audio_trim", "dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("""
                     UPDATE generation_jobs SET poll_count=7, progress=33,
                       provider_task_id='pt-42', input='{"start_time":"1.5"}'
@@ -566,7 +567,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("next_action_at 未来 → 候选过滤排除 → empty")
         void claimAudioTrim_futureNextAction_empty() {
             long id = seedJob(7L, "audio_trim", "dock", "queued", 0L,
-                    WorkerClock.now().plusMinutes(5));
+                    LocalDateTime.now().plusMinutes(5));
 
             assertThat(claimService.claim(
                     ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
@@ -583,7 +584,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G05: video processing + lease_expires_at=null → 孤儿接管，token+1")
         void orphan_video_nullLease() {
             long id = seedJob(9L, "video", "bottom_dock", "processing", 4L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("UPDATE generation_jobs SET lease_owner='old-worker' WHERE id=?", id);
 
             Optional<ClaimedVideoJobDto> result = service.claimVideoJobById(
@@ -600,13 +601,13 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G06: image processing + lease 已过期 → 孤儿接管，token+1")
         void orphan_image_expiredLease() {
             long id = seedJob(9L, "image", "bottom_dock", "processing", 2L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("""
                     UPDATE generation_jobs
                     SET lease_owner='stale', lease_expires_at=?
                     WHERE id=?
                     """,
-                    WorkerClock.now().minusMinutes(1), id);
+                    LocalDateTime.now().minusMinutes(1), id);
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
                     String.valueOf(id), "worker-fresh");
@@ -619,7 +620,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("media_extract 孤儿（processing + lease null）→ claim 接管")
         void orphan_mediaExtract() {
             long id = seedJob(9L, "media_extract", "dock", "processing", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("UPDATE generation_jobs SET lease_owner='old' WHERE id=?", id);
 
             Optional<ClaimedJob> result = claimService.claim(
@@ -742,11 +743,11 @@ class JobStateMachineMySqlIntegrationTest {
         void leaseRenewal() {
             long id = seedClaimedJob(9L, "media_extract", "dock", "worker-1", 1L);
 
-            LocalDateTime before = WorkerClock.now();
+            LocalDateTime before = LocalDateTime.now();
             service.updateMediaExtractProgress(
                     new UpdateMediaExtractProgressDto(
                             String.valueOf(id), "worker-1", 1L, 50));
-            LocalDateTime after = WorkerClock.now();
+            LocalDateTime after = LocalDateTime.now();
 
             GenerationJobEntity row = readJob(id);
             assertThat(row.getProgress()).isEqualTo(50);
@@ -909,7 +910,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G15: processing→queued, next_action_at 设置, retry_count+1, fencing_token+1")
         void requeue_happy() {
             long jobId = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
-            LocalDateTime next = WorkerClock.now().plusSeconds(29).truncatedTo(ChronoUnit.SECONDS);
+            LocalDateTime next = LocalDateTime.now().plusSeconds(29).truncatedTo(ChronoUnit.SECONDS);
 
             boolean ok = service.requeueImageJobForRetry(String.valueOf(jobId), next);
 
@@ -927,11 +928,11 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G14: 非 processing（queued）→ false")
         void requeue_notProcessing_false() {
             long jobId = seedJob(9L, "image", "bottom_dock", "queued", 1L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
 
             boolean ok = service.requeueImageJobForRetry(
                     String.valueOf(jobId),
-                    WorkerClock.now().plusSeconds(30));
+                    LocalDateTime.now().plusSeconds(30));
 
             assertThat(ok).isFalse();
         }
@@ -947,10 +948,10 @@ class JobStateMachineMySqlIntegrationTest {
         void markProviderSubmitted_happy() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
 
-            LocalDateTime before = WorkerClock.now();
+            LocalDateTime before = LocalDateTime.now();
             boolean ok = service.markProviderSubmitted(
                     String.valueOf(id), "worker-1", 5L, "provider-task-1");
-            LocalDateTime after = WorkerClock.now();
+            LocalDateTime after = LocalDateTime.now();
 
             assertThat(ok).isTrue();
             GenerationJobEntity row = readJob(id);
@@ -1038,7 +1039,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("claimVideoJobById → 投影含 pollCount/progress/providerTaskId")
         void claimVideo_projection() {
             long id = seedJob(9L, "video", "bottom_dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10));
+                    LocalDateTime.now().minusSeconds(10));
             jdbc.update("""
                     UPDATE generation_jobs SET poll_count=7, progress=33,
                       provider_task_id='pt-42', input='{"prompt":"hi"}'
@@ -1115,7 +1116,7 @@ class JobStateMachineMySqlIntegrationTest {
                 upstreamCredential, gateway, relay, producer);
         for (String providerTaskId : new String[] { null, "provider-already-submitted" }) {
             long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10), 99L, "{}");
+                    LocalDateTime.now().minusSeconds(10), 99L, "{}");
             jdbc.update("UPDATE generation_jobs SET cancel_requested_at=NOW(), provider_task_id=? WHERE id=?",
                     providerTaskId, jobId);
 
@@ -1138,7 +1139,7 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("audio_mix 恢复扫描包含创建超过两小时的待处理任务")
     void audioMixRecoveryDoesNotLoseLongProcessingJob() {
         long jobId = seedJob(9L, "audio_mix", "dock", "processing", 7L,
-                WorkerClock.now().minusSeconds(10), 99L,
+                LocalDateTime.now().minusSeconds(10), 99L,
                 "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"inputs\":[]}");
         jdbc.update("UPDATE generation_jobs SET gmt_create=DATE_SUB(NOW(), INTERVAL 3 HOUR), "
                 + "lease_owner=NULL, lease_expires_at=NULL, next_action_at=DATE_SUB(NOW(), INTERVAL 10 SECOND) "
@@ -1152,10 +1153,10 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("重试收割跨 120 分钟：恢复重投后重新领取父结果，发布一次且不重新提交")
     void retryHarvestHandoffAcrossRecoveryWindow() {
         long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
-                WorkerClock.now().minusMinutes(130));
+                LocalDateTime.now().minusMinutes(130));
         jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
         long retryId = seedJob(9L, "media_extract", "dock", "processing", 4L,
-                WorkerClock.now().minusSeconds(10), 99L,
+                LocalDateTime.now().minusSeconds(10), 99L,
                 "{\"source_asset_id\":\"555\",\"output_format\":\"mp3\"}");
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, lease_owner='worker-old', "
                 + "lease_expires_at=DATE_ADD(NOW(), INTERVAL 7 MINUTE), "
@@ -1215,28 +1216,28 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("重试收割超过 130 分钟不复活；非重试与终态仍受原有条件约束")
     void retryHarvestHandoffHasBoundedDeadline() {
         long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
-                WorkerClock.now().minusMinutes(140));
+                LocalDateTime.now().minusMinutes(140));
         jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
         long expiredRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         long lastChanceRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         long submittedRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         long queuedRetryId = seedJob(9L, "media_extract", "dock", "queued", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         long parentWithoutTaskId = seedJob(9L, "media_extract", "dock", "failed", 1L,
-                WorkerClock.now().minusMinutes(140));
+                LocalDateTime.now().minusMinutes(140));
         long retryWithoutParentTaskId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         long oldNonRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         long terminalRetryId = seedJob(9L, "media_extract", "dock", "succeeded", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         long videoParentId = seedJob(9L, "video", "bottom_dock", "failed", 1L,
-                WorkerClock.now().minusMinutes(140));
+                LocalDateTime.now().minusMinutes(140));
         long videoRetryId = seedJob(9L, "video", "bottom_dock", "processing", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         jdbc.update("UPDATE generation_jobs SET provider_task_id='video-parent' WHERE id=?", videoParentId);
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
                 + "gmt_create=DATE_SUB(NOW(), INTERVAL 131 MINUTE) WHERE id=?", parentId, expiredRetryId);
@@ -1267,12 +1268,12 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("重试收割停止点晚于创建后 122 分钟仍被接手；超出租约接管期不收")
     void retryHarvestHandoffIsLeaseAwareBeyondCreateDeadline() {
         long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
-                WorkerClock.now().minusMinutes(140));
+                LocalDateTime.now().minusMinutes(140));
         jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
         long handoffRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         long missedRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
                 + "gmt_create=DATE_SUB(NOW(), INTERVAL 132 MINUTE), "
                 + "lease_expires_at=DATE_SUB(NOW(), INTERVAL 5 MINUTE) WHERE id=?", parentId, handoffRetryId);
@@ -1289,10 +1290,10 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("视频重试收割跨窗接手：旧领取迟到发布被 publishVideoGuard 拒绝，新 Worker 收割发布一次且不重新提交")
     void videoRetryHarvestHandoffAcrossRecoveryWindow() {
         long parentId = seedJob(9L, "video", "bottom_dock", "failed", 1L,
-                WorkerClock.now().minusMinutes(130));
+                LocalDateTime.now().minusMinutes(130));
         jdbc.update("UPDATE generation_jobs SET provider_task_id='video-parent-task' WHERE id=?", parentId);
         long retryId = seedJob(9L, "video", "bottom_dock", "queued", 0L,
-                WorkerClock.now().minusSeconds(10), 99L,
+                LocalDateTime.now().minusSeconds(10), 99L,
                 "{\"prompt\":\"一只猫在跑步\","
                         + "\"model_id\":\"seedance-2\",\"duration\":5.0,"
                         + "\"resolution\":\"720p\",\"aspect_ratio\":\"16:9\"}");
@@ -1376,9 +1377,9 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("audio_mix 退避期间恢复扫描不提前重投，DB 与 MQ 使用同一延迟")
     void audioMixRecoveryRespectsPersistedPollBackoff() {
         long jobId = seedClaimedJob(9L, "audio_mix", "dock", "mix-worker", 5L);
-        LocalDateTime before = WorkerClock.now();
+        LocalDateTime before = LocalDateTime.now();
         assertThat(service.rescheduleProviderPoll(String.valueOf(jobId), "mix-worker", 5L, 0, 40_000L)).isTrue();
-        LocalDateTime after = WorkerClock.now();
+        LocalDateTime after = LocalDateTime.now();
 
         GenerationJobEntity row = readJob(jobId);
         assertThat(row.getNextActionAt()).isBetween(before.plusSeconds(38), after.plusSeconds(42));
@@ -1415,7 +1416,7 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, NOW(), lease_expires_at) "
                 + "FROM generation_jobs WHERE id=?", Integer.class, jobId)).isGreaterThan(400);
 
-        assertThat(jobMapper.claimImageCas(jobId, "new-worker", WorkerClock.now().plusSeconds(420),
+        assertThat(jobMapper.claimImageCas(jobId, "new-worker", LocalDateTime.now().plusSeconds(420),
                 5L, "processing")).isZero();
         assertThat(readJob(jobId).getLeaseOwner()).isEqualTo("old-worker");
 
@@ -1425,7 +1426,7 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "old-worker", 5L)).isTrue();
         assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, NOW(), lease_expires_at) "
                 + "FROM generation_jobs WHERE id=?", Integer.class, jobId)).isGreaterThan(400);
-        assertThat(jobMapper.claimImageCas(jobId, "new-worker", WorkerClock.now().plusSeconds(420),
+        assertThat(jobMapper.claimImageCas(jobId, "new-worker", LocalDateTime.now().plusSeconds(420),
                 5L, "processing")).isZero();
         assertThat(readJob(jobId).getLeaseOwner()).isEqualTo("old-worker");
     }
@@ -1434,7 +1435,7 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("收割慢转存耗尽租约后仍能收口：reserve 放行回退提交，脱离重投循环不双提交")
     void parentReuseSlowTransferRecoversAfterLeaseExhaustion() {
         long parentId = seedJob(9L, "video", "bottom_dock", "processing", 0L,
-                WorkerClock.now().minusMinutes(200));
+                LocalDateTime.now().minusMinutes(200));
         jdbc.update("UPDATE generation_jobs SET provider_task_id='provider-parent-1' WHERE id=?", parentId);
         long jobId = seedClaimedJob(9L, "video_matting", "video_matting", "harvest-worker", 7L);
         jdbc.update("""
@@ -1463,7 +1464,7 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("media_extract 旧候选快照不能接管已续租任务；孤儿租约过期仍可接管")
     void mediaExtractStaleCandidateCannotTakeOverRenewedLease() {
         long renewedId = seedJob(9L, "media_extract", "dock", "queued", 0L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         var claimed = claimService.claim(
                 ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
                         jobMapper::claimMediaExtractCas),
@@ -1476,12 +1477,12 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(service.reserveParentReuseSubmit(String.valueOf(renewedId), "worker-old",
                 stale.getFencingToken())).isTrue();
         assertThat(jobMapper.claimMediaExtractCas(renewedId, "new-worker",
-                WorkerClock.now().plusSeconds(420),
+                LocalDateTime.now().plusSeconds(420),
                 stale.getFencingToken(), stale.getStatus())).isZero();
         assertThat(readJob(renewedId).getLeaseOwner()).isEqualTo("worker-old");
 
         long orphanId = seedJob(9L, "media_extract", "dock", "queued", 0L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         assertThat(claimService.claim(
                 ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
                         jobMapper::claimMediaExtractCas),
@@ -1491,7 +1492,7 @@ class JobStateMachineMySqlIntegrationTest {
         GenerationJobEntity orphanSnap = jobMapper.findCandidateByTypeOnly(orphanId, "media_extract");
         assertThat(orphanSnap).isNotNull();
         assertThat(jobMapper.claimMediaExtractCas(orphanId, "new-worker",
-                WorkerClock.now().plusSeconds(420),
+                LocalDateTime.now().plusSeconds(420),
                 orphanSnap.getFencingToken(), orphanSnap.getStatus())).isOne();
         assertThat(readJob(orphanId).getLeaseOwner()).isEqualTo("new-worker");
     }
@@ -1500,7 +1501,7 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("audio_mix 真库闭环：领取→保存 task_id→转存后发布自家音频资产和精确时长")
     void audioMixTaskPersistsProviderIdentityAndLongLivedAsset() {
         long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
-                WorkerClock.now().minusSeconds(10), 99L,
+                LocalDateTime.now().minusSeconds(10), 99L,
                 "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"inputs\":[{\"asset_id\":\"11\",\"node_id\":\"source\",\"url\":\"https://tos/a.mp3\"},{\"asset_id\":\"12\",\"url\":\"https://tos/b.mp3\"}]}");
         var first = claimService.claim(
                 ClaimSpec.bySources(AudioMixContract.TAG, 420, List.of(AudioMixContract.SOURCE), jobMapper),
@@ -1512,7 +1513,7 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(readJob(jobId).getProviderTaskId()).isEqualTo("provider-mix-1");
 
         jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
-                WorkerClock.now().minusSeconds(10), jobId);
+                LocalDateTime.now().minusSeconds(10), jobId);
         assertThat(jobMapper.listDueAudioMixJobIds(100, 120)).contains(jobId);
         var second = claimService.claim(
                 ClaimSpec.bySources(AudioMixContract.TAG, 420, List.of(AudioMixContract.SOURCE), jobMapper),
@@ -1573,7 +1574,7 @@ class JobStateMachineMySqlIntegrationTest {
         base.set("http://127.0.0.1:" + gateway.getAddress().getPort());
         try {
             long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
-                    WorkerClock.now().minusSeconds(10), 99L,
+                    LocalDateTime.now().minusSeconds(10), 99L,
                     "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"estimated_duration_ms\":12500,"
                     + "\"inputs\":["
                     + "{\"asset_id\":\"11\",\"node_id\":\"source\",\"url\":\"https://tos/a.mp3\"},"
@@ -1599,7 +1600,7 @@ class JobStateMachineMySqlIntegrationTest {
                     .contains("\"format\":\"mp3\"");
             verify(producer).enqueue(String.valueOf(jobId), 5_000L);
             jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
-                    WorkerClock.now().minusSeconds(10), jobId);
+                    LocalDateTime.now().minusSeconds(10), jobId);
 
             processor.handle(String.valueOf(jobId));
             assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
@@ -1619,7 +1620,7 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("audio_mix 真库并发领取：同一 job 仅一个 worker 获得租约")
     void audioMixConcurrentClaimAllowsOneWinner() throws Exception {
         long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         var originalNextActionAt = readJob(jobId).getNextActionAt();
         var candidatesRead = new CountDownLatch(2);
         var seenTokens = new CopyOnWriteArrayList<Long>();
@@ -1660,12 +1661,12 @@ class JobStateMachineMySqlIntegrationTest {
     @DisplayName("audio_mix 真库迟到 token：旧 worker 不能失败或发布新 worker 的任务")
     void audioMixLateFenceCannotOverwriteNewOwner() {
         long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
-                WorkerClock.now().minusSeconds(10));
+                LocalDateTime.now().minusSeconds(10));
         var first = claimService.claim(
                 ClaimSpec.bySources(AudioMixContract.TAG, 420, List.of(AudioMixContract.SOURCE), jobMapper),
                 String.valueOf(jobId), "mix-worker-a").orElseThrow();
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=?, next_action_at=? WHERE id=?",
-                WorkerClock.now().minusSeconds(10), WorkerClock.now().minusSeconds(10), jobId);
+                LocalDateTime.now().minusSeconds(10), LocalDateTime.now().minusSeconds(10), jobId);
         var second = claimService.claim(
                 ClaimSpec.bySources(AudioMixContract.TAG, 420, List.of(AudioMixContract.SOURCE), jobMapper),
                 String.valueOf(jobId), "mix-worker-b").orElseThrow();

@@ -6,7 +6,6 @@ import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.domain.ledger.TransactionType;
 import com.bluewhale.billing.application.view.TransactionView;
 import com.bluewhale.billing.application.view.UserStatsView;
-import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.Account;
 import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
 import com.bluewhale.billing.domain.ledger.CreditSource;
@@ -24,7 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -94,10 +93,10 @@ public class BillingApplicationService {
 
 
     public long grant(long userId, CreditSource source, long amount,
-                      String bizType, String bizId, String grantKey, Instant expiresAt) {
-        Instant effectiveExpiry = expiresAt != null
+                      String bizType, String bizId, String grantKey, LocalDateTime expiresAt) {
+        LocalDateTime effectiveExpiry = expiresAt != null
                 ? expiresAt
-                : grantPolicy.expiryFor(source, Instant.now());
+                : grantPolicy.expiryFor(source, LocalDateTime.now());
         return credits.grant(userId, source, amount, effectiveExpiry, bizType, bizId, grantKey);
     }
 
@@ -259,7 +258,7 @@ public class BillingApplicationService {
 
 
     private PricingResult priceAtSubmit(PricingRequest request, PricingEngine engine,
-                                        CompiledRule rule, Instant at) {
+                                        CompiledRule rule, LocalDateTime at) {
         try {
             return engine.compute(request, Usage.contractFrom(rule, request.specs()), at);
         } catch (Usage.ContractQuantityUnavailableException e) {
@@ -309,7 +308,7 @@ public class BillingApplicationService {
 
 
     private PricingResult priceAtCap(PricingRequest request, PricingEngine engine,
-                                     Usage.ContractQuantityUnavailableException cause, Instant at) {
+                                     Usage.ContractQuantityUnavailableException cause, LocalDateTime at) {
         PricingResult priced = engine.computeAtCap(request, at);
         log.info("契约用量取不到，改按规则上限冻结：{}/{} 的基准维度 {} 在本次规格里取不到"
                         + "（specs={}）→ 冻结上限 {} 积分。"
@@ -464,7 +463,7 @@ public class BillingApplicationService {
 
 
 
-    public long consumedCredits(Instant from, Instant to) {
+    public long consumedCredits(LocalDateTime from, LocalDateTime to) {
         if (from == null || to == null) {
             throw new IllegalArgumentException("统计区间必须同时给出 from 与 to");
         }
@@ -473,7 +472,7 @@ public class BillingApplicationService {
                     "统计区间的起点必须早于终点：from=" + from + " to=" + to);
         }
 
-        return reservations.sumSettledActualCredits(DbTime.toDb(from), DbTime.toDb(to));
+        return reservations.sumSettledActualCredits(from, to);
     }
 
 

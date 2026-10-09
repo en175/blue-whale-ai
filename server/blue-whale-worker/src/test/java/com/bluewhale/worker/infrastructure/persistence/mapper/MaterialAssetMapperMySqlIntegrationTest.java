@@ -59,7 +59,8 @@ class MaterialAssetMapperMySqlIntegrationTest {
             cfg.setUsername(mysql.getUsername());
             cfg.setPassword(mysql.getPassword());
             cfg.setMaximumPoolSize(5);
-            cfg.setConnectionInitSql("SET time_zone='+08:00'");
+            cfg.addDataSourceProperty("connectionTimeZone", "Asia/Shanghai");
+            cfg.addDataSourceProperty("forceConnectionTimeZoneToSession", "true");
             return new HikariDataSource(cfg);
         }
 

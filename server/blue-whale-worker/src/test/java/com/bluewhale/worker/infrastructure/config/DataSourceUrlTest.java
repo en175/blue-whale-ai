@@ -32,6 +32,28 @@ class DataSourceUrlTest {
     }
 
     @Test
+    void parseUrlPreservingQuery() {
+        var result = DataSourceConfig.parseDatabaseUrl(
+                "mysql://user:pass@localhost:3306/mydb?connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true");
+        assertThat(result.jdbcUrl()).isEqualTo(
+                "jdbc:mysql://localhost:3306/mydb?connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true");
+    }
+
+    @Test
+    void parseUrlWithEmptyQuery() {
+        var result = DataSourceConfig.parseDatabaseUrl("mysql://user:pass@localhost:3306/mydb?");
+        assertThat(result.jdbcUrl()).isEqualTo("jdbc:mysql://localhost:3306/mydb");
+    }
+
+    @Test
+    void parseUrlPreservingEncodedQuery() {
+        var result = DataSourceConfig.parseDatabaseUrl(
+                "mysql://user:pass@localhost:3306/mydb?password=a%26b&zeroTimezone=false");
+        assertThat(result.jdbcUrl()).isEqualTo(
+                "jdbc:mysql://localhost:3306/mydb?password=a%26b&zeroTimezone=false");
+    }
+
+    @Test
     void rejectNonMysqlScheme() {
         assertThatThrownBy(() -> DataSourceConfig.parseDatabaseUrl("postgres://user:pass@host/db"))
                 .isInstanceOf(IllegalArgumentException.class)

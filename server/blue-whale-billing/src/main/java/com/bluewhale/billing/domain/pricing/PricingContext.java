@@ -1,12 +1,12 @@
 package com.bluewhale.billing.domain.pricing;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 public record PricingContext(
         CompiledRule rule,
         PricingRequest request,
         Usage usage,
-        Instant submitAt
+        LocalDateTime submitAt
 ) {
 
     public PricingContext {

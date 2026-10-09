@@ -4,7 +4,6 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
@@ -27,6 +26,7 @@ import org.springframework.stereotype.Component;
 import java.net.ConnectException;
 import java.net.UnknownHostException;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -234,7 +234,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
             stored = relay.persistStreaming(observed.videoUrl(), job.userId(),
                     AudioVideoMuxContract.MAX_RESULT_BYTES, abortHandle,
                     job.executionDeadlineAt() == null ? null
-                            : job.executionDeadlineAt().toInstant(WorkerClock.BEIJING));
+                            : job.executionDeadlineAt());
         } catch (TosVideoMediaRelay.TransferAbortedException e) {
             log.warn("[audio_video_mux] 结果转存被中止，本执行者静默退出 jobId={}: {}", job.id(), e.getMessage());
             return;
@@ -367,7 +367,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
 
     private static boolean timedOut(ClaimedJob job) {
         if (job.executionDeadlineAt() != null) {
-            return !WorkerClock.now().isBefore(job.executionDeadlineAt());
+            return !LocalDateTime.now().isBefore(job.executionDeadlineAt());
         }
         if (job.createdAt() == null) return false;
         Object estimated = job.input().get("estimated_duration_ms");
@@ -376,7 +376,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
                 : Duration.ofDays(7);
         if (budget.compareTo(Duration.ofDays(1)) < 0) budget = Duration.ofDays(1);
         if (budget.compareTo(Duration.ofDays(365)) > 0) budget = Duration.ofDays(365);
-        return Duration.between(job.createdAt(), WorkerClock.now()).compareTo(budget) >= 0;
+        return Duration.between(job.createdAt(), LocalDateTime.now()).compareTo(budget) >= 0;
     }
 
     private static boolean transientPollError(MediaExtractError error) {

@@ -1,6 +1,4 @@
 package com.bluewhale.billing.infrastructure.persistence.repository;
-
-import com.bluewhale.billing.domain.DbTime;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity;
 import com.bluewhale.billing.infrastructure.persistence.mapper.CreditLotMapper;
@@ -8,7 +6,7 @@ import com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import org.springframework.stereotype.Repository;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -41,7 +39,7 @@ public class CreditLotRepository {
 
 
     public record Lot(long id, long userId, CreditSource source, long amount,
-                      long remaining, long frozen, Instant expiresAt, int version) {
+                      long remaining, long frozen, LocalDateTime expiresAt, int version) {
         public long available() {
             return remaining - frozen;
         }
@@ -179,7 +177,7 @@ public class CreditLotRepository {
 
 
     public record UserLot(long id, CreditSource source, long amount, long remaining,
-                          Instant createdAt, Instant expiresAt,
+                          LocalDateTime createdAt, LocalDateTime expiresAt,
                           String bizType, String bizId) {}
 
 
@@ -222,8 +220,8 @@ public class CreditLotRepository {
                 entity.getAmount() == null ? 0L : entity.getAmount(),
 
                 remaining - frozen,
-                DbTime.fromDb(entity.getGmtCreate()),
-                DbTime.fromDb(entity.getExpiresAt()),
+                entity.getGmtCreate(),
+                entity.getExpiresAt(),
 
 
                 entity.getBizType() == null ? "" : entity.getBizType(),
@@ -272,7 +270,7 @@ public class CreditLotRepository {
 
 
 
-    public long grant(long userId, CreditSource source, long amount, Instant expiresAt,
+    public long grant(long userId, CreditSource source, long amount, LocalDateTime expiresAt,
                       String bizType, String bizId, String grantKey) {
         CreditLotEntity entity = new CreditLotEntity();
         entity.setUserId(userId);
@@ -282,7 +280,7 @@ public class CreditLotRepository {
         entity.setAmount(amount);
         entity.setRemaining(amount);
         entity.setFrozen(0L);
-        entity.setExpiresAt(DbTime.toDb(expiresAt));
+        entity.setExpiresAt(expiresAt);
         entity.setBizType(bizType);
         entity.setBizId(bizId);
         entity.setGrantKey(grantKey);
@@ -319,7 +317,7 @@ public class CreditLotRepository {
                 entity.getAmount(),
                 entity.getRemaining(),
                 entity.getFrozen(),
-                DbTime.fromDb(entity.getExpiresAt()),
+                entity.getExpiresAt(),
 
 
                 entity.getVersion() == null ? 0 : entity.getVersion());

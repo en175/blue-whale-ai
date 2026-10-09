@@ -58,7 +58,6 @@ interface FormState {
   dailyTimeStart: string;
   dailyTimeEnd: string;
   daysOfWeek: number[];
-  tz: string;
   status: string;
   priority: string;
 }
@@ -75,7 +74,6 @@ const EMPTY_FORM: FormState = {
   dailyTimeStart: '',
   dailyTimeEnd: '',
   daysOfWeek: [],
-  tz: 'Asia/Shanghai',
   status: 'draft',
   priority: '0',
 };
@@ -93,7 +91,6 @@ function formFrom(row: Promotion): FormState {
     dailyTimeStart: shortTime(row.dailyTimeStart) ?? '',
     dailyTimeEnd: shortTime(row.dailyTimeEnd) ?? '',
     daysOfWeek: [...(row.daysOfWeek ?? [])],
-    tz: row.tz,
     status: row.status,
     priority: String(row.priority),
   };
@@ -112,7 +109,6 @@ function inputFrom(row: Promotion): PromotionInput {
     dailyTimeStart: shortTime(row.dailyTimeStart),
     dailyTimeEnd: shortTime(row.dailyTimeEnd),
     daysOfWeek: row.daysOfWeek,
-    tz: row.tz,
     status: row.status,
     priority: row.priority,
   };
@@ -135,7 +131,6 @@ function toInput(form: FormState): { input: PromotionInput } | { error: string }
   if ((form.dailyTimeStart === '') !== (form.dailyTimeEnd === '')) {
     return { error: '每日时段要么都填、要么都留空（都留空 = 全天）' };
   }
-  if (!form.tz.trim()) return { error: '时区必填（跨零点时段靠它算对）' };
   if (!/^\d+$/.test(form.priority.trim())) return { error: '优先级要是非负整数' };
 
   return {
@@ -151,7 +146,6 @@ function toInput(form: FormState): { input: PromotionInput } | { error: string }
       dailyTimeStart: form.dailyTimeStart === '' ? null : form.dailyTimeStart,
       dailyTimeEnd: form.dailyTimeEnd === '' ? null : form.dailyTimeEnd,
       daysOfWeek: form.daysOfWeek.length > 0 ? [...form.daysOfWeek].sort((a, b) => a - b) : null,
-      tz: form.tz.trim(),
       status: form.status,
       priority: Number(form.priority.trim()),
     },
@@ -418,9 +412,6 @@ export default function Promotions() {
   );
 }
 
-
-const TZ_HINT = '活动自己的时区（默认 Asia/Shanghai）。下面的时间都按它理解，跨零点时段尤其依赖它';
-
 function PromotionEditorModal({
   form,
   isNew,
@@ -536,8 +527,8 @@ function PromotionEditorModal({
         </Field>
       </div>
 
-      <div style={{ ...formGrid(3), marginTop: 16 }}>
-        <Field label="起始时间（含）" hint="按活动时区的墙钟填写，不是浏览器时区">
+      <div style={{ ...formGrid(2), marginTop: 16 }}>
+        <Field label="起始时间（含）" hint="按北京时间填写">
           <Input
             type="datetime-local"
             aria-label="起始时间"
@@ -551,14 +542,6 @@ function PromotionEditorModal({
             aria-label="结束时间"
             value={draft.endAt}
             onChange={(e) => patch({ endAt: e.target.value })}
-          />
-        </Field>
-        <Field label="时区" hint={TZ_HINT}>
-          <Input
-            aria-label="时区"
-            value={draft.tz}
-            placeholder="Asia/Shanghai"
-            onChange={(e) => patch({ tz: e.target.value })}
           />
         </Field>
       </div>

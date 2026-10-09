@@ -16,7 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -95,7 +95,7 @@ public class CreditService {
     }
 
     @Transactional
-    public long grant(long userId, CreditSource source, long amount, Instant expiresAt,
+    public long grant(long userId, CreditSource source, long amount, LocalDateTime expiresAt,
                       String bizType, String bizId, String grantKey) {
         if (amount <= 0) {
             throw new IllegalArgumentException("发放量必须为正：" + amount);
@@ -217,7 +217,7 @@ public class CreditService {
         if (lot == null) {
             return 0;
         }
-        if (lot.expiresAt() == null || lot.expiresAt().isAfter(Instant.now())) {
+        if (lot.expiresAt() == null || lot.expiresAt().isAfter(LocalDateTime.now())) {
             return 0;
         }
         long amount = lot.available();

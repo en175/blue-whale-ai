@@ -99,7 +99,6 @@ export function describeSchedule(p: {
   daysOfWeek: readonly number[] | null;
   dailyTimeStart: string | null;
   dailyTimeEnd: string | null;
-  tz: string;
 }): string {
   const days =
     p.daysOfWeek === null || p.daysOfWeek.length === 0
@@ -108,7 +107,7 @@ export function describeSchedule(p: {
   const start = shortTime(p.dailyTimeStart);
   const end = shortTime(p.dailyTimeEnd);
   const hours = start === null || end === null ? '全天' : `${start}–${end}`;
-  return `${days} ${hours}（${p.tz}）`;
+  return `${days} ${hours}`;
 }
 
 export function shortTime(value: string | null): string | null {

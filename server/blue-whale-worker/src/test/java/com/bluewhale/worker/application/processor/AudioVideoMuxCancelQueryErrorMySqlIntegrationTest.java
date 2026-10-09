@@ -7,7 +7,6 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.ProjectEventPublisher;
 import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
 import com.bluewhale.worker.application.service.StoryboardPreviewSync;
-import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
@@ -66,6 +65,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -111,7 +111,8 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
             cfg.setUsername(mysql.getUsername());
             cfg.setPassword(mysql.getPassword());
             cfg.setMaximumPoolSize(5);
-            cfg.setConnectionInitSql("SET time_zone='+08:00'");
+            cfg.addDataSourceProperty("connectionTimeZone", "Asia/Shanghai");
+            cfg.addDataSourceProperty("forceConnectionTimeZoneToSession", "true");
             return new HikariDataSource(cfg);
         }
 
@@ -239,7 +240,7 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
                 VALUES (9, 99, 'audio_video_mux', 'dock', 'queued', 0, ?,
                         'mux-task-1', ?, 0, NOW(), NOW(), 0, false)
                 """,
-                WorkerClock.now().minusSeconds(30),
+                LocalDateTime.now().minusSeconds(30),
                 "{\"audio\":{\"assetId\":\"11\",\"nodeId\":\"source-node\",\"url\":\"https://tos/a.mp3\"},"
                         + "\"video\":{\"assetId\":\"12\",\"url\":\"https://tos/v.mp4\"},"
                         + "\"is_audio_reserve\":true,\"sync\":\"none\",\"submit_attempt\":1}");

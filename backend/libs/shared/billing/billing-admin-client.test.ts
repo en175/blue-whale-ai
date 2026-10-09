@@ -74,7 +74,6 @@ const PROMOTION_INPUT = {
   dailyTimeStart: null,
   dailyTimeEnd: null,
   daysOfWeek: null,
-  tz: "Asia/Shanghai",
   status: "enabled",
   priority: 0,
 };
@@ -365,7 +364,6 @@ describe("billing-admin-client", () => {
         dailyTimeStart: "22:00",
         dailyTimeEnd: "06:00",
         daysOfWeek: [1, 5],
-        tz: "Asia/Shanghai",
         status: "draft",
         priority: 0,
       },

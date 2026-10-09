@@ -31,7 +31,6 @@ const PROMOTION = {
   dailyTimeStart: "22:00",
   dailyTimeEnd: "06:00",
   daysOfWeek: [1, 5],
-  tz: "Asia/Shanghai",
   status: "draft",
   priority: 0,
 };
@@ -84,7 +83,6 @@ describe("parsePromotionInput", () => {
 
   it("时间字段必须是文本：缺字段就是缺字段，不替它兜一个默认值", () => {
     expect(() => parsePromotionInput({ ...PROMOTION, startAt: "" })).toThrow(/起始时间必填/);
-    expect(() => parsePromotionInput({ ...PROMOTION, tz: undefined })).toThrow(/时区必填/);
   });
 
   it("每日时段给 null 是「全天」这个状态，不是「没填」", () => {

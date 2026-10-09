@@ -5,7 +5,6 @@ import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepo
 import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
 import com.bluewhale.billing.infrastructure.persistence.repository.ReservationRepository;
 import com.bluewhale.billing.application.view.BalanceView;
-import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.Account;
 import com.bluewhale.billing.domain.ledger.Allocation;
 import com.bluewhale.billing.domain.ledger.CreditSource;
@@ -21,7 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,9 +40,9 @@ class LedgerIntegrationTest {
     private static final String TITLE = "视频生成 · 测试";
     private static final String NO_SNAPSHOT = null;
 
-    private static final Instant SOON = Instant.now().plus(1, ChronoUnit.DAYS);
-    private static final Instant LATER = Instant.now().plus(30, ChronoUnit.DAYS);
-    private static final Instant PAST = Instant.now().minus(30, ChronoUnit.DAYS);
+    private static final LocalDateTime SOON = LocalDateTime.now().plus(1, ChronoUnit.DAYS);
+    private static final LocalDateTime LATER = LocalDateTime.now().plus(30, ChronoUnit.DAYS);
+    private static final LocalDateTime PAST = LocalDateTime.now().minus(30, ChronoUnit.DAYS);
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private CreditService credits;
@@ -288,7 +287,7 @@ class LedgerIntegrationTest {
     @Test
     void 返还_批次原封不动_有效期不被重置() {
         long lot = grant(CreditSource.DAILY, 100, LATER, "g7");
-        Instant expiresBefore = expiresOf(lot);
+        LocalDateTime expiresBefore = expiresOf(lot);
 
         credits.hold(USER, "cmd-9", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
         credits.refund(JOB, "上游任务失败");
@@ -326,15 +325,15 @@ class LedgerIntegrationTest {
     void 会话时区已钉成北京时间() {
         assertThat(jdbc.queryForObject(
                 "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW())", Integer.class))
-                .as("NOW() 必须比 UTC_TIMESTAMP() 快 8 小时，与 DbTime.ZONE 一致；"
+                .as("NOW() 必须比 UTC_TIMESTAMP() 快 8 小时；"
                         + "否则 DATETIME 的写入口径与 NOW() 的判定口径相差整小时")
                 .isEqualTo(8);
     }
 
     @Test
     void 到期边界_一小时内到期的批次判定正确() {
-        long expiring = grant(CreditSource.GIFT, 100, Instant.now().plus(1, ChronoUnit.HOURS), "tz-a");
-        long expired = grant(CreditSource.GIFT, 100, Instant.now().minus(1, ChronoUnit.HOURS), "tz-b");
+        long expiring = grant(CreditSource.GIFT, 100, LocalDateTime.now().plus(1, ChronoUnit.HOURS), "tz-a");
+        long expired = grant(CreditSource.GIFT, 100, LocalDateTime.now().minus(1, ChronoUnit.HOURS), "tz-b");
 
         credits.hold(USER, "cmd-tz", JOB, 60, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
 
@@ -347,8 +346,8 @@ class LedgerIntegrationTest {
     @Test
     void 可用积分按来源拆分_各分量之和等于总额() {
         grant(CreditSource.PURCHASED, 1_500, null, "bs-purchased");
-        grant(CreditSource.BONUS, 1_000, Instant.now().plus(30, ChronoUnit.DAYS), "bs-bonus");
-        grant(CreditSource.DAILY, 777, Instant.now().minus(1, ChronoUnit.HOURS), "bs-expired");
+        grant(CreditSource.BONUS, 1_000, LocalDateTime.now().plus(30, ChronoUnit.DAYS), "bs-bonus");
+        grant(CreditSource.DAILY, 777, LocalDateTime.now().minus(1, ChronoUnit.HOURS), "bs-expired");
 
         BalanceView balance = billing.balance(USER);
 
@@ -369,7 +368,7 @@ class LedgerIntegrationTest {
     }
 
 
-    private long grant(CreditSource source, long amount, Instant expiresAt, String grantKey) {
+    private long grant(CreditSource source, long amount, LocalDateTime expiresAt, String grantKey) {
         return credits.grant(USER, source, amount, expiresAt, "grant", grantKey, grantKey);
     }
 
@@ -484,11 +483,10 @@ class LedgerIntegrationTest {
                 "SELECT frozen FROM billing_credit_lots WHERE id = ?", Long.class, lotId);
     }
 
-    private Instant expiresOf(long lotId) {
-        var timestamp = jdbc.queryForObject(
+    private LocalDateTime expiresOf(long lotId) {
+        return jdbc.queryForObject(
                 "SELECT expires_at FROM billing_credit_lots WHERE id = ?",
-                java.sql.Timestamp.class, lotId);
-        return timestamp == null ? null : timestamp.toInstant();
+                LocalDateTime.class, lotId);
     }
 
     private long totalRemaining() {
