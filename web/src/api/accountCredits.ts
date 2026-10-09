@@ -59,7 +59,7 @@ export interface ConsumptionRow {
   model_id: string | null;
   model_label: string | null;
   prompt: string | null;
-  specs: Record<string, string> | null;
+  detail: string | null;
 }
 
 export interface PageQuery {
