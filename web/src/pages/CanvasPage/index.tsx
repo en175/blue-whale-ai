@@ -196,7 +196,6 @@ import {
   fetchJobStatus,
  } from '@/api/jobs';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
-import { type SharedAssetView } from '@/api/sharedAssets';
 import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
@@ -236,6 +235,7 @@ import { useCanvasPickers } from './hooks/useCanvasPickers';
 import { useCanvasGenerationTerminal } from './hooks/useCanvasGenerationTerminal';
 import { useCanvasGenerationSubmission } from './hooks/useCanvasGenerationSubmission';
 import { useCanvasAssetActions } from './hooks/useCanvasAssetActions';
+import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import {
   applyIndependentGroupDrag,
   bringGroupToFront,
@@ -5091,6 +5091,38 @@ export default function CanvasPage() {
     }
   };
 
+  const {
+    handleCreateProduct,
+    handleCreateAssetCard,
+    handleProductChange,
+    handleCardChange,
+    handleAddSharedAsset,
+  } = useCanvasNodeFactories({
+    newNodeId,
+    spawnPosition,
+    toolMode,
+    currentId,
+    productSeq,
+    pendingNodeIdsRef,
+    actionsRef,
+    setTextNodes,
+    setMediaNodes,
+    setProductNodes,
+    setAssetNodes,
+    removeCanvasNodes,
+    handleMediaIndexChange,
+    handleMediaDims,
+    handleAssetHoverChange,
+    handleSaveMediaToAssets,
+    handleSaveTextToAssets,
+    handleSaveCardToAssets,
+    handleSaveGoodsToAssets,
+    dockToolCallbacks,
+    showToast,
+    pickers: { setPickMode, setPickTarget, setPickProductId, setPickAssetId },
+  });
+
+  /* ============ 成组交互（IKD0JT A3/A4） ============ */
 
 
 
@@ -6834,286 +6866,6 @@ export default function CanvasPage() {
     console.log('Tool menu select:', menu, item);
   };
 
-
-  const handleCreateProduct = () => {
-    productSeq.current += 1;
-    const node: Node = {
-      id: newNodeId('product'),
-      type: 'productNode',
-      position: spawnPosition(),
-      data: {
-        name: `商品 ${productSeq.current}`,
-        detail: '',
-        images: [],
-        toolMode,
-
-        projectId: currentId,
-        onDelete: (id: string) => {
-          setProductNodes((prev) => prev.filter((n) => n.id !== id));
-        },
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
-        onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string }>; detail?: string }) => handleProductChange(id, patch),
-        onPickFromCanvas: (id: string) => {
-          setPickMode('product');
-          setPickTarget('product');
-          setPickProductId(id);
-        },
-        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-      },
-    };
-    pendingNodeIdsRef.current.add(node.id);
-    setProductNodes((prev) => [...prev, node]);
-  };
-
-
-  const handleCreateAssetCard = (kind: AssetCardKind) => {
-    const node: Node = {
-      id: newNodeId(`asset-${kind}`),
-      type: 'assetNode',
-      position: spawnPosition(),
-      data: {
-        kind,
-        toolMode,
-
-        projectId: currentId,
-        onHoverChange: handleAssetHoverChange,
-        onDelete: (id: string) => {
-          setAssetNodes((prev) => prev.filter((n) => n.id !== id));
-        },
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onGenerateImage: () => actionsRef.current.openImageDialog(),
-        onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
-        onCardChange: (id: string, patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
-        onPickFromCanvas: (id: string) => {
-          setPickMode('asset');
-          setPickTarget('asset');
-          setPickAssetId(id);
-        },
-        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-      },
-    };
-    pendingNodeIdsRef.current.add(node.id);
-    setAssetNodes((prev) => [...prev, node]);
-  };
-
-
-
-
-  const handleProductChange = (
-    nodeId: string,
-    patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string }>; detail?: string },
-  ) => {
-    setProductNodes((prev) =>
-      prev.map((n) =>
-        n.id === nodeId
-          ? {
-              ...n,
-              data: {
-                ...n.data,
-                ...(patch.images !== undefined ? { images: patch.images } : {}),
-                ...(patch.detail !== undefined ? { detail: patch.detail } : {}),
-              },
-            }
-          : n,
-      ),
-    );
-  };
-
-
-  const handleCardChange = (
-    nodeId: string,
-    patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null },
-  ) => {
-    setAssetNodes((prev) =>
-      prev.map((n) =>
-        n.id === nodeId
-          ? {
-              ...n,
-              data: {
-                ...n.data,
-                ...(patch.refs !== undefined ? { initialRefs: patch.refs } : {}),
-                ...(patch.desc !== undefined ? { initialDesc: patch.desc } : {}),
-                ...(patch.voice !== undefined ? { voice: patch.voice } : {}),
-              },
-            }
-          : n,
-      ),
-    );
-  };
-
-
-  const handleAddSharedAsset = async (item: SharedAssetView): Promise<boolean> => {
-    if (!currentId) return false;
-    try {
-      switch (item.assetType) {
-        case 'media': {
-
-
-
-
-          const snapshot = item.snapshot as { url: string };
-          const kind = item.kind as 'image' | 'video' | 'audio';
-          const mediaType = kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'image';
-          const node: Node = {
-            id: newNodeId('media'),
-            type: 'mediaNode',
-            position: spawnPosition(),
-            data: {
-              src: snapshot.url,
-              fileName: item.name || `资产-${Date.now()}`,
-              mediaType,
-              toolMode,
-              onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-              onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-              onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-              onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-              onDownload: (id: string) => actionsRef.current.download(id),
-              ...dockToolCallbacks,
-              onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-              onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-              onMediaDims: handleMediaDims,
-            },
-          };
-          pendingNodeIdsRef.current.add(node.id);
-          setMediaNodes((prev) => [...prev, node]);
-          return true;
-        }
-        case 'card': {
-
-          const snapshot = item.snapshot as {
-            referenceImages: Array<{ id: string; src: string }>;
-            description?: string;
-            voice?: { name: string; src: string };
-          };
-          const kind = item.kind as AssetCardKind;
-          const node: Node = {
-            id: newNodeId('asset'),
-            type: 'assetNode',
-            position: spawnPosition(),
-            data: {
-              kind,
-              initialRefs: snapshot.referenceImages,
-              initialDesc: snapshot.description,
-              toolMode,
-
-              projectId: currentId,
-              onHoverChange: handleAssetHoverChange,
-              onDelete: (id: string) => {
-                setAssetNodes((prev) => prev.filter((n) => n.id !== id));
-              },
-              onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-              onGenerateImage: () => actionsRef.current.openImageDialog(),
-              onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
-              onCardChange: (id: string, patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
-              onPickFromCanvas: (id: string) => {
-                setPickMode('asset');
-                setPickTarget('asset');
-                setPickAssetId(id);
-              },
-              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-            },
-          };
-          if (snapshot.voice) {
-            (node.data as Record<string, unknown>).voice = snapshot.voice;
-          }
-          pendingNodeIdsRef.current.add(node.id);
-          setAssetNodes((prev) => [...prev, node]);
-          return true;
-        }
-        case 'goods': {
-
-          const snapshot = item.snapshot as {
-            name: string;
-            detail?: string;
-            images: Array<{ id: string; src: string; enabled?: boolean }>;
-          };
-          const node: Node = {
-            id: newNodeId('product'),
-            type: 'productNode',
-            position: spawnPosition(),
-            data: {
-              name: snapshot.name,
-              detail: snapshot.detail || '',
-              images: snapshot.images.map((img) => ({ ...img, enabled: img.enabled ?? true })),
-              toolMode,
-
-              projectId: currentId,
-              onDelete: (id: string) => {
-                setProductNodes((prev) => prev.filter((n) => n.id !== id));
-              },
-              onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-              onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
-              onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string }>; detail?: string }) => handleProductChange(id, patch),
-              onPickFromCanvas: (id: string) => {
-                setPickMode('product');
-                setPickTarget('product');
-                setPickProductId(id);
-              },
-              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-            },
-          };
-          pendingNodeIdsRef.current.add(node.id);
-          setProductNodes((prev) => [...prev, node]);
-          return true;
-        }
-        case 'text': {
-
-          const snapshot = item.snapshot as { html?: string; text?: string };
-          const node: Node = {
-            id: newNodeId('text'),
-            type: 'textNode',
-            position: spawnPosition(),
-            data: {
-              text: unifiedTextNodeText(snapshot),
-              toolMode,
-              onDelete: (id: string) => removeCanvasNodes([id]),
-              onTextChange: (id: string, text: string) => {
-                setTextNodes((prev) =>
-                  prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n))
-                );
-              },
-              onMediaIndexChange: handleMediaIndexChange,
-              onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-              onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-              onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-              onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
-              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-            },
-          };
-          pendingNodeIdsRef.current.add(node.id);
-          setTextNodes((prev) => [...prev, node]);
-          return true;
-        }
-        case 'scene': {
-
-          showToast('warn', '场景卡需通过场景卡面板添加');
-          return false;
-        }
-        default:
-          return false;
-      }
-    } catch (e) {
-      console.warn('添加共享资产到画布失败:', e);
-      return false;
-    }
-  };
 
 
   const canvasMedia: CanvasPickItem[] = useMemo(
