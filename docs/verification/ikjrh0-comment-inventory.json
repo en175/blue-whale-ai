@@ -1,13 +1,13 @@
 {
   "scope_base": "3e689cf6fc77edff58573fb137349024ebcecfa2",
-  "tracked_files": 3364,
-  "parsed_code_files": 2602,
+  "tracked_files": 3367,
+  "parsed_code_files": 2604,
   "language_file_counts": {
     "yaml": 49,
     "ignore_rules": 9,
     "docker": 6,
     "bash": 65,
-    "javascript": 1647,
+    "javascript": 1649,
     "python": 43,
     "toml": 2,
     "mysql": 212,
@@ -23,8 +23,8 @@
   "js_parse_errors": 0,
   "unexplained_ordinary_comments": [],
   "source_snapshot_type": "working_tree_before_commit",
-  "source_snapshot_parent_sha": "c2b28b005321d7a0fdcea2d78d91b2e8ac2a5816",
-  "release_sha": "8c43ea43fc372ce086c5f1807576d7e882578784",
+  "source_snapshot_parent_sha": "2b05a23bcc3ebfcb996a8d9a95ff320099eaf1b1",
+  "release_sha": "634b93e3254d290107cec4188652a9898e29f050",
   "retained_reason_counts": {
     "tool_directive_or_license": 409,
     "hook_audit_source_marker": 1,
@@ -8071,7 +8071,7 @@
       "language": "javascript",
       "comment_count": 1,
       "consumers": [],
-      "sha256": "132420e4da806c6f2d2f305e2e4012f328329460dce71ef452e8ac69cd31c67a",
+      "sha256": "da41a3f6ceef32baa230a460c64319f73e242aa8de0f5100b4d0a4f0761bd5d5",
       "retained_lines_by_reason": {
         "tool_directive_or_license": [
           1
@@ -10713,22 +10713,22 @@
       "language": "javascript",
       "comment_count": 13,
       "consumers": [],
-      "sha256": "e8e5d11348e5910667913997316e0a2b587e08bcde0e4f97a1a430678081696b",
+      "sha256": "6d817480f1b604935ab7e3db966a59cef97835ec32802cca7096d49275c6ca09",
       "retained_lines_by_reason": {
         "tool_directive_or_license": [
-          809,
-          820,
-          831,
-          971,
-          1086,
-          1388,
-          1404,
-          1747,
-          1826,
-          3027,
-          3054,
-          4568,
-          8945
+          781,
+          792,
+          803,
+          943,
+          1058,
+          1360,
+          1376,
+          1719,
+          1798,
+          2999,
+          3026,
+          4540,
+          8250
         ]
       }
     },
