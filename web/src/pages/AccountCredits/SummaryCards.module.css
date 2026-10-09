@@ -1,6 +1,6 @@
 .row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
 }
 
@@ -26,17 +26,4 @@
   color: #f5f5f5;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
-}
-
-.hint {
-  margin-top: 10px;
-  font-size: 12px;
-  color: #7a7a7a;
-  line-height: 1.4;
-}
-
-@media (max-width: 900px) {
-  .row {
-    grid-template-columns: 1fr;
-  }
 }

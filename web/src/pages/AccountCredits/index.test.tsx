@@ -144,11 +144,18 @@ afterEach(async () => {
 });
 
 describe('AccountCredits', () => {
-  it('汇总卡展示余额与最近到期批次', async () => {
+  it('顶部只保留当前积分余额一个卡片', async () => {
     await renderPage();
     expect(document.body.textContent).toContain('账户积分与订单');
+    expect(document.body.textContent).toContain('当前积分余额');
     expect(document.body.textContent).toContain('12,345');
-    expect(document.body.textContent).toContain('剩余 1,200 积分');
+    expect(document.body.textContent).not.toContain('积分有效期');
+    expect(document.body.textContent).not.toContain('最近到期批次');
+  });
+
+  it('去掉「一个业务动作一行」冗余说明', async () => {
+    await renderPage();
+    expect(document.body.textContent).not.toContain('一个业务动作一行');
   });
 
   it('只保留已获取/已消耗两个子页签', async () => {

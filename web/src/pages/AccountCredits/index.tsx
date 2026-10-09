@@ -163,23 +163,13 @@ export default function AccountCredits() {
   const safePage = Math.min(page, pageCount);
   const pagerVisible = activeQuery.isSuccess && total > 0;
 
-  const nearestLot = token.data?.expiring?.[0];
-
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <h1 className={styles.title}>账户积分与订单</h1>
       </header>
 
-      <SummaryCards
-        summary={{
-          balance: token.data?.credits ?? null,
-          validityMonths: null,
-          nearestLot: nearestLot
-            ? { remaining: nearestLot.credits, expiresAt: nearestLot.expires_at }
-            : null,
-        }}
-      />
+      <SummaryCards balance={token.data?.credits ?? null} />
 
       <section className={styles.panel}>
         <div className={styles.panelHead}>
@@ -211,7 +201,6 @@ export default function AccountCredits() {
                 </button>
               ))}
             </div>
-            <span className={styles.subNote}>一个业务动作一行</span>
           </div>
         )}
 
