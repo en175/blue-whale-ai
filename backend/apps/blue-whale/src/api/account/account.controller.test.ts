@@ -244,7 +244,68 @@ describe("AccountController.consumptions（billing 账本）", () => {
       specs: { resolution: "1080p", duration: "5" },
       lot_source: null,
       lot_created_at: null,
+      detail: "—",
     });
+  });
+
+  it("★ 任务详情由后端拼好：取提示词 / 任务在但无提示词取「—」/ 查不到任务回落 title", async () => {
+    listTransactions.mockResolvedValue(
+      page([
+        {
+          id: "res:1",
+          type: "consume",
+          direction: "out",
+          title: "T1",
+          credits: 1,
+          status: "done",
+          createdAt: "2026-09-25T10:00:00+08:00",
+          settledAt: "2026-09-25T10:01:00+08:00",
+          generationJobId: "1",
+          lotSource: "",
+          lotCreatedAt: "",
+        },
+        {
+          id: "res:2",
+          type: "consume",
+          direction: "out",
+          title: "T2",
+          credits: 1,
+          status: "done",
+          createdAt: "2026-09-25T10:00:00+08:00",
+          settledAt: "2026-09-25T10:01:00+08:00",
+          generationJobId: "2",
+          lotSource: "",
+          lotCreatedAt: "",
+        },
+        {
+          id: "res:3",
+          type: "consume",
+          direction: "out",
+          title: "T3",
+          credits: 1,
+          status: "done",
+          createdAt: "2026-09-25T10:00:00+08:00",
+          settledAt: "2026-09-25T10:01:00+08:00",
+          generationJobId: "9",
+          lotSource: "",
+          lotCreatedAt: "",
+        },
+      ]),
+    );
+    loadTaskSummaries.mockResolvedValue(
+      new Map([
+        ["1", { type: "video", modelId: "m", modelLabel: "M", prompt: "一只鲸鱼跃出水面", specs: null }],
+        ["2", { type: "video", modelId: "m", modelLabel: "M", prompt: null, specs: null }],
+      ]),
+    );
+
+    const items = (await controller.consumptions(USER, {})).data.items;
+
+    expect(items.map((item: { detail: string }) => item.detail)).toEqual([
+      "一只鲸鱼跃出水面",
+      "—",
+      "T3",
+    ]);
   });
 
   it("★ 过期核销行带出批次来源与获取时间（用户侧不出现任务 ID / 订单号）", async () => {
@@ -270,6 +331,7 @@ describe("AccountController.consumptions（billing 账本）", () => {
 
     expect(item.lot_source).toBe("purchased");
     expect(item.lot_created_at).toBe("2024-12-01T09:12:00+08:00");
+    expect(item.detail).toBe("2024-12-01 充值到账批次");
     expect(item).not.toHaveProperty("job_id");
   });
 

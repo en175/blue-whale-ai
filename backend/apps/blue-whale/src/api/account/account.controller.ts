@@ -27,6 +27,7 @@ import {
 } from "@lib/shared/recharge/user-order-status.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import type { Response } from "express";
+import { consumeDetail } from "./consumption-detail.js";
 import {
   EXPORT_SCOPES,
   MAX_EXPORT_ROWS,
@@ -136,7 +137,7 @@ export class AccountController {
     return items.map((item) => {
       const summary =
         item.generationJobId == null ? undefined : summaries.get(item.generationJobId);
-      return {
+      const row = {
         id: item.id,
         type: item.type,
         direction: item.direction,
@@ -153,6 +154,7 @@ export class AccountController {
         lot_source: item.lotSource === "" ? null : item.lotSource,
         lot_created_at: item.lotCreatedAt === "" ? null : item.lotCreatedAt,
       };
+      return { ...row, detail: consumeDetail(row) };
     });
   }
 

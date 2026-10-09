@@ -125,28 +125,22 @@ describe("buildExportWorkbook", () => {
     expect(headersOf(sheet)).not.toContain("剩余");
   });
 
-  it("已消耗：过期核销的详情取批次上下文，任务行取提示词", async () => {
+  it("已消耗：任务详情直接取后端拼好的 detail，过期核销行取批次上下文", async () => {
     const rows: ExportConsumeRow[] = [
       {
         type: "consume",
-        title: "视频生成 · seedance-2.5",
         credits: 30,
         task_type: "text2video",
         model_label: "Seedance 2.5",
-        prompt: "一只鲸鱼跃出水面",
-        lot_source: null,
-        lot_created_at: null,
+        detail: "一只鲸鱼跃出水面",
         created_at: "2026-09-29T15:02:00+08:00",
       },
       {
         type: "expire",
-        title: "积分过期",
         credits: 1200,
         task_type: null,
         model_label: null,
-        prompt: null,
-        lot_source: "purchased",
-        lot_created_at: "2024-12-01T09:12:00+08:00",
+        detail: "2024-12-01 充值到账批次",
         created_at: "2026-09-29T09:00:00+08:00",
       },
     ];
@@ -170,7 +164,9 @@ describe("buildExportWorkbook", () => {
     expect(headersOf(sheet)).not.toContain("任务 ID");
   });
 
-  it("已消耗：任务查不到时详情回落 title，任务没有提示词时不为空串", async () => {
+  it("已消耗：detail 是后端唯一拼接口径（长提示词原样出，不截断）", async () => {
+    const longPrompt = "一只长毛蓬松的布偶猫安静地坐在窗边，蓝眼睛清澈明亮，奶油色毛发，柔和自然光";
+
     const sheet = await readBack(
       await buildExportWorkbook(
         {
@@ -178,24 +174,22 @@ describe("buildExportWorkbook", () => {
           rows: [
             {
               type: "consume",
-              title: "生成消费",
               credits: 0,
-              task_type: null,
-              model_label: null,
-              prompt: null,
-              lot_source: null,
-              lot_created_at: null,
+              task_type: "image",
+              model_label: "Seedream 5.0 Lite",
+              detail: longPrompt,
               created_at: "2026-09-29T15:02:00+08:00",
             },
           ],
           total: 1,
         },
-        [],
+        ["detail", "credits"],
       ),
     );
 
-    expect(sheet.getRow(2).getCell(4).value).toBe("生成消费");
-    expect(sheet.getRow(2).getCell(5).value).toBe(0);
+    expect(headersOf(sheet)).toEqual(["任务详情", "消耗积分"]);
+    expect(sheet.getRow(2).getCell(1).value).toBe(longPrompt);
+    expect(sheet.getRow(2).getCell(2).value).toBe(0);
   });
 
   it("勾选字段后只出那几列，且**按定义顺序**而不是传入顺序", async () => {

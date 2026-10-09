@@ -3,6 +3,7 @@ import {
   USER_ORDER_STATUS_LABEL,
   type UserOrderStatus,
 } from "@lib/shared/recharge/user-order-status.js";
+import { EXPIRE_TYPE, lotSourceText } from "./consumption-detail.js";
 
 export const EXPORT_SCOPES = ["orders", "gain", "consume"] as const;
 export type ExportScope = (typeof EXPORT_SCOPES)[number];
@@ -63,22 +64,6 @@ export interface ExportLotRow {
   product_name: string | null;
 }
 
-const LOT_SOURCE_TEXT: Record<string, string> = {
-  purchased: "充值到账",
-  bonus: "充值赠送",
-  gift: "赠送",
-  compensation: "补偿",
-  daily: "每日赠送",
-  invite: "邀请奖励",
-  register: "注册赠送",
-  redeem: "兑换",
-  subscription: "订阅",
-};
-
-function lotSourceText(source: string): string {
-  return LOT_SOURCE_TEXT[source] ?? source;
-}
-
 function lotDetail(row: ExportLotRow): string {
   const head = row.product_name ?? `${lotSourceText(row.source)} ${row.amount} 积分`;
   return row.remaining < row.amount ? `${head} · 剩余 ${row.remaining}` : head;
@@ -109,30 +94,11 @@ const GAIN: ExportSpec<ExportLotRow> = {
 
 export interface ExportConsumeRow {
   type: string;
-  title: string;
   credits: number;
   task_type: string | null;
   model_label: string | null;
-  prompt: string | null;
-  lot_source: string | null;
-  lot_created_at: string | null;
+  detail: string;
   created_at: string;
-}
-
-const EXPIRE_TYPE = "expire";
-
-const DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
-
-function dateOnly(value: string): string {
-  return DATE_PREFIX.exec(value)?.[0] ?? value;
-}
-
-function consumeDetail(row: ExportConsumeRow): string {
-  if (row.type === EXPIRE_TYPE) {
-    if (row.lot_source === null || row.lot_created_at === null) return "—";
-    return `${dateOnly(row.lot_created_at)} ${lotSourceText(row.lot_source)}批次`;
-  }
-  return row.prompt ?? row.title;
 }
 
 const CONSUME: ExportSpec<ExportConsumeRow> = {
@@ -147,7 +113,7 @@ const CONSUME: ExportSpec<ExportConsumeRow> = {
       width: 16,
     },
     { key: "model_label", header: "模型", value: (r) => r.model_label ?? "", width: 20 },
-    { key: "detail", header: "任务详情", value: consumeDetail, width: 48 },
+    { key: "detail", header: "任务详情", value: (r) => r.detail, width: 48 },
     { key: "credits", header: "消耗积分", value: (r) => r.credits, width: 12 },
   ],
 };
