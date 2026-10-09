@@ -676,8 +676,9 @@ media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继�
 ## 22. 修正七（2026-10-09）：包结构对齐 `api/` + `infrastructure/`
 
 背景：`server/` 下的 Java 模块此前各持一套包命名——worker 用 `web`（健康检查）与顶层 `config`（装配），
-billing 用 ports-and-adapters 的 `adapter/inbound` + `adapter/outbound`。本次按团队 Java 编码规范把三个模块
-（worker / billing / common）的包结构统一为 `api/` + `infrastructure/`。本节覆盖 §13.1 的「分层」一句与后缀表的
+billing 用 ports-and-adapters 的 `adapter/inbound` + `adapter/outbound`。本次按团队 Java 编码规范把这三个模块
+（worker / billing / common）的包结构统一为 `api/` + `infrastructure/`——worker 与 billing 各有一批包搬动，
+common 零改动（它只有 `common/http` 一个共享基础设施类，本就是该形态，五层分层对其不适用）。本节覆盖 §13.1 的「分层」一句与后缀表的
 `*Mapper` 行；§13.1 其余条款（`*Entity` 在 `domain/entity`、`*Dto` 在 `domain/dto`、`*Service` 在
 `application/service`）**不变**。
 
