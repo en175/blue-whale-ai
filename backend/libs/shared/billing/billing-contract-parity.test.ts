@@ -206,7 +206,7 @@ describe("★ 计费契约对账：错误码", () => {
     const adapters = [
       `${JAVA_BILLING}api/grpc/BillingGrpcService.java`,
       `${JAVA_BILLING}api/grpc/BillingAdminGrpcService.java`,
-      `${JAVA_BILLING}api/AdminExceptionHandler.java`,
+      `${JAVA_BILLING}common/error/AdminExceptionHandler.java`,
     ];
 
     for (const path of adapters) {
