@@ -198,6 +198,7 @@ export {
   encodeRecoveryCursor,
   listCanvasRecoveryPage,
   lockCanvasRecoveryForAcceptance,
+  projectCanvasNodeOwnerKeys,
   projectHasRecoverySubmissions,
   resolveCanvasRecoveryItems,
   writeCanvasRecoveryRows,
@@ -209,6 +210,7 @@ export {
 export {
   canvasRecoverySaveRequestHash,
   guardLegacyCanvasWrite,
+  recoveryMarkerOfNode,
   saveCanvasWithRecovery,
   type CanvasRecoveryReceiptChange,
   type CanvasRecoverySaveInput,

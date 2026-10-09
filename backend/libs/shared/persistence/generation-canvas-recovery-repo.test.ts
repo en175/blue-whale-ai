@@ -60,6 +60,49 @@ describe("guardLegacyCanvasWrite（B.7 旧客户端守护）", () => {
     const edited = [{ id: "text-1", type: "textNode", data: { text: "b" } }];
     expect(() => guardLegacyCanvasWrite(plain as never, edited as never)).not.toThrow();
   });
+
+  it("文档标记已陈旧：来件推进到该节点当前持有者 → 放行", () => {
+    const successor = "0a1b2c3d-0000-4000-8000-0000000000ff";
+    const advanced = markedNode("n1", { generationRecovery: { ...MARKER, submissionId: successor } });
+    expect(() => guardLegacyCanvasWrite([markedNode("n1")], [advanced])).toThrow(RecoveryContractError);
+    expect(() => guardLegacyCanvasWrite(
+      [markedNode("n1")], [advanced], new Set([`n1:${successor}:${TARGET_OUTPUT_KEY}`]),
+    )).not.toThrow();
+  });
+
+  it("文档标记已陈旧：来件既非旧标记也非当前持有者 → 仍拒绝", () => {
+    const successor = "0a1b2c3d-0000-4000-8000-0000000000ff";
+    const third = "0a1b2c3d-0000-4000-8000-0000000000ee";
+    const advanced = markedNode("n1", { generationRecovery: { ...MARKER, submissionId: successor } });
+    expect(() => guardLegacyCanvasWrite(
+      [markedNode("n1")], [advanced], new Set([`n1:${third}:${TARGET_OUTPUT_KEY}`]),
+    )).toThrow(RecoveryContractError);
+  });
+
+  it("文档标记已陈旧不代表可缺席：旧协议路径无声明机制 → 仍拒绝", () => {
+    const successor = "0a1b2c3d-0000-4000-8000-0000000000ff";
+    expect(() => guardLegacyCanvasWrite(
+      [markedNode("n1")], [], new Set([`n1:${successor}:${TARGET_OUTPUT_KEY}`]),
+    )).toThrow(RecoveryContractError);
+  });
+
+  it("标记未推进（旧标记即持有者）时资产/类型改动仍被拒：命中持有者不等于可放宽", () => {
+    const ownerKeys = new Set([`n1:${MARKER.submissionId}:${TARGET_OUTPUT_KEY}`]);
+    expect(() => guardLegacyCanvasWrite([markedNode("n1")], [markedNode("n1")], ownerKeys)).not.toThrow();
+    expect(() => guardLegacyCanvasWrite(
+      [markedNode("n1")], [markedNode("n1", { assetId: "8" })], ownerKeys,
+    )).toThrow(RecoveryContractError);
+    const retyped = { ...markedNode("n1"), type: "textNode" };
+    expect(() => guardLegacyCanvasWrite([markedNode("n1")], [retyped], ownerKeys)).toThrow(RecoveryContractError);
+  });
+
+  it("文档标记已陈旧：来件推进到持有者时资产一并变动也放行", () => {
+    const successor = "0a1b2c3d-0000-4000-8000-0000000000ff";
+    const advanced = markedNode("n1", { generationRecovery: { ...MARKER, submissionId: successor }, assetId: "999" });
+    expect(() => guardLegacyCanvasWrite(
+      [markedNode("n1")], [advanced], new Set([`n1:${successor}:${TARGET_OUTPUT_KEY}`]),
+    )).not.toThrow();
+  });
 });
 
 describe("恢复页游标（B.5）", () => {

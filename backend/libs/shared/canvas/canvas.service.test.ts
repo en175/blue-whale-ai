@@ -34,7 +34,8 @@ function buildService(current: CanvasRow | null = null) {
   };
   const client = {
     canvas: { findFirst: vi.fn().mockResolvedValue(current) },
-    generation_canvas_submissions: { findFirst: vi.fn().mockResolvedValue(null) },
+    generation_canvas_submissions: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
+    generation_canvas_node_owners: { findMany: vi.fn().mockResolvedValue([]) },
     $transaction: vi.fn(
       async (callback: (client: typeof tx) => Promise<unknown>) =>
         callback(tx),

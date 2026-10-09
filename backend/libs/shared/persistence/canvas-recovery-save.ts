@@ -240,7 +240,11 @@ export async function saveCanvasWithRecovery(
 
 
 
-    const involvedNodes = [...new Set(itemStates.map(item => item.nodeId))].sort();
+    const previousNodes = parsePreviousNodes(canvasRow?.nodes_json);
+    const involvedNodes = [...new Set([
+      ...itemStates.map(item => item.nodeId),
+      ...previousNodes.filter(node => markerOf(node) !== null).map(node => String(node.id)),
+    ])].sort();
     const ownerRows = involvedNodes.length > 0
       ? await tx.$queryRaw<
         Array<{ node_id: string; generation_canvas_submission_id: bigint; output_key: string; binding_revision: number }>
@@ -249,6 +253,19 @@ export async function saveCanvasWithRecovery(
       AND node_id IN (${Prisma.join(involvedNodes)}) FOR UPDATE`
       : [];
     const ownerByNode = new Map(ownerRows.map(owner => [owner.node_id, owner]));
+    const ownerSubmissionRows = ownerRows.length > 0
+      ? await tx.generation_canvas_submissions.findMany({
+          where: { id: { in: ownerRows.map(owner => owner.generation_canvas_submission_id) } },
+          select: { id: true, submission_id: true },
+        })
+      : [];
+    const ownerSubmissionIdByRowId = new Map(ownerSubmissionRows.map(row => [row.id.toString(), row.submission_id]));
+    const ownerOfNode = (nodeId: string): { submissionId: string; outputKey: string } | null => {
+      const owner = ownerByNode.get(nodeId);
+      if (owner === undefined) return null;
+      const ownerSubmissionId = ownerSubmissionIdByRowId.get(owner.generation_canvas_submission_id.toString());
+      return ownerSubmissionId === undefined ? null : { submissionId: ownerSubmissionId, outputKey: owner.output_key };
+    };
     const changes: CanvasRecoveryReceiptChange[] = [];
 
 
@@ -547,7 +564,6 @@ export async function saveCanvasWithRecovery(
 
 
     const declaredKeys = new Set(itemStates.map(item => `${item.submissionRow.submission_id}:${item.outputKey}`));
-    const previousNodes = parsePreviousNodes(canvasRow?.nodes_json);
     const undeclaredAbsent: Array<{ submissionId: string; outputKey: string }> = [];
     for (const previousNode of previousNodes) {
       const marker = markerOf(previousNode);
@@ -555,14 +571,24 @@ export async function saveCanvasWithRecovery(
       const submissionId = String(marker.submissionId);
       const outputKey = String(marker.outputKey);
       if (declaredKeys.has(`${submissionId}:${outputKey}`)) continue;
+      const owner = ownerOfNode(String(previousNode.id));
+      const supersededOwner = owner !== null && !(owner.submissionId === submissionId && owner.outputKey === outputKey)
+        ? owner
+        : null;
       const node = incomingByNode.get(String(previousNode.id));
       if (node === undefined) {
-        undeclaredAbsent.push({ submissionId, outputKey });
+        if (supersededOwner === null) {
+          undeclaredAbsent.push({ submissionId, outputKey });
+        } else if (!declaredKeys.has(`${supersededOwner.submissionId}:${supersededOwner.outputKey}`)) {
+          undeclaredAbsent.push({ submissionId: supersededOwner.submissionId, outputKey: supersededOwner.outputKey });
+        }
         continue;
       }
       const tampered = () => new RecoveryContractError(
         recoveryError(422, "未声明的受保护项被改动，须以显式恢复动作变更", RECOVERY_REASONS.documentMismatch),
       );
+      if (supersededOwner !== null
+        && markerMatches(markerOf(node), supersededOwner.submissionId, supersededOwner.outputKey)) continue;
       if (!markerMatches(markerOf(node), submissionId, outputKey) || !protectedCardKept(previousNode, node)) throw tampered();
     }
 
@@ -786,6 +812,7 @@ export function recoveryMarkerOfNode(node: Record<string, unknown>): Record<stri
 export function guardLegacyCanvasWrite(
   previous: Array<Record<string, unknown>>,
   incoming: Array<Record<string, unknown>>,
+  currentOwnerKeys: ReadonlySet<string> = new Set(),
 ): void {
   const previousMarkers = new Map<string, Record<string, unknown>>();
   for (const node of previous) {
@@ -803,6 +830,11 @@ export function guardLegacyCanvasWrite(
   for (const nodeId of previousMarkers.keys()) {
     const node = incomingById.get(nodeId) ?? reject();
 
+    const previousMarker = previousMarkers.get(nodeId)!;
+    const incomingMarker = markerOf(node);
+    const stale = !currentOwnerKeys.has(`${nodeId}:${String(previousMarker.submissionId)}:${String(previousMarker.outputKey)}`);
+    if (stale && incomingMarker !== null
+      && currentOwnerKeys.has(`${nodeId}:${String(incomingMarker.submissionId)}:${String(incomingMarker.outputKey)}`)) continue;
     if (!protectedCardKept(previousById.get(nodeId)!, node)) reject();
   }
 
