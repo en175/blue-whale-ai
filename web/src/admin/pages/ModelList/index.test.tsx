@@ -644,6 +644,46 @@ describe('ModelList 定价 tab', () => {
  * 这里钉住三件运营真会做的事：看得见（元）、改得动（写回 mc）、以及配不成非法组合
  * （unitMc 必须 > 0、与积分上限互斥 —— 两条都是后端写闸门同一口径）。
  */
+describe('ModelList 视频模式「时长跟随原视频」（IKK7QC）', () => {
+  const withEdit = {
+    ...videoPriced,
+    features: { task_types: { edit: { allowed_ratios: ['adaptive'] } } },
+  };
+
+  function followBoxes(): HTMLElement[] {
+    return [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')].filter((el) =>
+      el.closest('label')?.textContent?.includes('时长跟随原视频'),
+    );
+  }
+
+  it('★ 勾上「时长跟随原视频」保存 → task_types 带 allowed_durations: [-1]', async () => {
+    api.fetchAdminModels.mockResolvedValue([withEdit]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    expect(followBoxes()).toHaveLength(7);
+    await click(followBoxes()[5]);
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
+    expect(payload.features.task_types).toEqual({
+      edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
+    });
+  });
+
+  it('未开放的模式上该勾选框置灰：勾了也会被整条删掉，不该让它看起来能勾', async () => {
+    api.fetchAdminModels.mockResolvedValue([withEdit]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    const boxes = followBoxes();
+    expect(boxes[0]?.getAttribute('aria-disabled')).toBe('true');
+    expect(boxes[5]?.getAttribute('aria-disabled')).toBeNull();
+  });
+});
+
 describe('ModelList 维度绝对加价 dimPrices', () => {
   /** 「首张免费」这类带中文 label 的复选框（点击处理挂在 label 上，见 ui/Checkbox）。 */
   function checkboxByLabel(label: string): HTMLElement {

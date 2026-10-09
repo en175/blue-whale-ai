@@ -736,8 +736,6 @@ export function featureValueTypeOk(key: string, value: unknown): boolean {
   return typeof value === 'boolean';
 }
 
-/** `features.task_types` → 每个任务类型的 allowed_ratios（表单态）。
- *  其它子键（如已退役的 allowed_durations）与未列出的任务类型不进表单，由 `buildTaskTypes` 原样带回。 */
 export function pickTaskTypeRatios(features: Record<string, unknown> | undefined): Record<string, string[]> {
   const raw = readFeature(features, 'task_types');
   const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -778,13 +776,11 @@ export function pickTaskTypeEnabled(features: Record<string, unknown> | undefine
   return out;
 }
 
-/** 表单的 task_types 编辑态 + 原对象 → 提交用的 task_types。
- *  只动 `allowed_ratios`：其它子键、其它任务类型原样保留（整包替换会把它们抹掉）。 */
 export function buildTaskTypes(
   base: Record<string, unknown>,
   ratios: Record<string, string[]>,
   enabled: Record<string, boolean>,
-  followDuration: Record<string, boolean> = {},
+  followDuration: Record<string, boolean>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
   for (const taskType of TASK_TYPE_KEYS) {
