@@ -29,6 +29,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -50,6 +52,8 @@ class ListTransactionsIntegrationTest {
     private static final String MODEL = "seedance-2.5";
     private static final String TASK = "text2video";
     private static final String TITLE = "视频生成 · seedance-2.5 1080p 5s";
+
+    private static final DateTimeFormatter RFC3339 = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private static final String CATALOG = """
             {"schemaVersion":1,"currency":"CNY","creditsPerYuan":15,
@@ -429,6 +433,82 @@ class ListTransactionsIntegrationTest {
     }
 
 
+    @Test
+    void 时间区间过滤_只留窗口内的流水() {
+        long seed = lotIdOf("seed-1");
+        long old = credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "win-old");
+        long middle = credits.grant(USER, CreditSource.INVITE, 20, null, "grant", "i", "win-mid");
+        long recent = credits.grant(USER, CreditSource.REDEEM, 30, null, "grant", "r", "win-new");
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 6 HOUR WHERE id = ?",
+                seed);
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 3 HOUR WHERE id = ?",
+                old);
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 2 HOUR WHERE id = ?",
+                middle);
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 1 HOUR WHERE id = ?",
+                recent);
+
+        assertThat(idsOf(listWindow(LocalDateTime.now().minus(90, ChronoUnit.MINUTES), null, null)))
+                .containsExactly("lot:" + recent);
+
+        assertThat(idsOf(listWindow(null, LocalDateTime.now().minus(150, ChronoUnit.MINUTES), null)))
+                .containsExactly("lot:" + old, "lot:" + seed);
+
+        assertThat(idsOf(listWindow(LocalDateTime.now().minus(150, ChronoUnit.MINUTES),
+                LocalDateTime.now().minus(90, ChronoUnit.MINUTES), null)))
+                .containsExactly("lot:" + middle);
+    }
+
+    @Test
+    void 任务id过滤_只取指定任务的流水() {
+        stub.hold(hold("cmd-j1", 9_301L));
+        stub.hold(hold("cmd-j2", 9_302L));
+
+        assertThat(list(newPageRequest(20, 1), USER).getItemsList()).hasSize(3);
+
+        List<UserTransaction> picked = listWindow(null, null, List.of(9_301L)).getItemsList();
+
+        assertThat(picked).hasSize(1);
+        assertThat(picked.get(0).getType()).isEqualTo("consume");
+        assertThat(listWindow(null, null, List.of(9_301L)).getPage().getTotal()).isEqualTo(1);
+    }
+
+    @Test
+    void 过期核销行_带上批次来源与发放时刻() {
+        long lot = credits.grant(USER, CreditSource.PURCHASED, 700,
+                LocalDateTime.now().minus(1, ChronoUnit.HOURS), "recharge", "BW-exp", "exp-ctx");
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 5 DAY WHERE id = ?",
+                lot);
+
+        assertThat(expirySweeper.sweepOnce().expiredCredits()).isEqualTo(700);
+
+        UserTransaction expired = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "expire");
+        assertThat(expired.getLotSource()).isEqualTo("purchased");
+        assertThat(expired.getLotCreatedAt()).isNotBlank();
+
+        UserTransaction grant = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "recharge");
+        assertThat(grant.getLotSource()).as("批次行没有过期上下文").isEmpty();
+        assertThat(grant.getLotCreatedAt()).isEmpty();
+        assertThat(grant.getCreatedAt())
+                .as("核销行给出的发放时刻与该批次自己的获取时间同源")
+                .isEqualTo(expired.getLotCreatedAt());
+    }
+
+    @Test
+    void 人工调账行_拿不到批次上下文也不会掉行() {
+        ledger.insert(Voucher.base("adjust:user-9501:manual", USER, BizType.ADJUST, "manual-1")
+                .debit(Account.COST, 120, "人工调账")
+                .credit(Account.WALLET, 120, "人工调账")
+                .build());
+
+        UserTransaction row = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "compensation");
+
+        assertThat(row.getAmount()).isEqualTo(120);
+        assertThat(row.getLotSource()).isEmpty();
+        assertThat(row.getLotCreatedAt()).isEmpty();
+    }
+
+
     private ListTransactionsResponse list(PageRequest page, long userId) {
         return list("", page, userId);
     }
@@ -442,11 +522,31 @@ class ListTransactionsIntegrationTest {
     }
 
     private ListTransactionsResponse list(List<String> typeFilters, PageRequest page, long userId) {
-        return stub.listTransactions(ListTransactionsRequest.newBuilder()
+        return listWindow(typeFilters, page, null, null, null, userId);
+    }
+
+    private ListTransactionsResponse listWindow(LocalDateTime createdFrom, LocalDateTime createdTo,
+                                                List<Long> jobIds) {
+        return listWindow(List.of(), newPageRequest(20, 1), createdFrom, createdTo, jobIds, USER);
+    }
+
+    private ListTransactionsResponse listWindow(List<String> typeFilters, PageRequest page,
+                                                LocalDateTime createdFrom, LocalDateTime createdTo,
+                                                List<Long> jobIds, long userId) {
+        ListTransactionsRequest.Builder request = ListTransactionsRequest.newBuilder()
                 .setUserId(userId)
                 .addAllTypeFilters(typeFilters)
-                .setPage(page)
-                .build());
+                .setPage(page);
+        if (createdFrom != null) {
+            request.setCreatedFrom(RFC3339.format(createdFrom.atZone(ZoneId.systemDefault())));
+        }
+        if (createdTo != null) {
+            request.setCreatedTo(RFC3339.format(createdTo.atZone(ZoneId.systemDefault())));
+        }
+        if (jobIds != null) {
+            request.addAllGenerationJobIds(jobIds);
+        }
+        return stub.listTransactions(request.build());
     }
 
     private static PageRequest newPageRequest(int size, int page) {

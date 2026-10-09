@@ -14,7 +14,9 @@ public record TransactionView(
         Long generationJobId,
         String status,
         LocalDateTime createdAt,
-        LocalDateTime settledAt
+        LocalDateTime settledAt,
+        String lotSource,
+        LocalDateTime lotCreatedAt
 ) {
 
     public record Page(List<TransactionView> items, long total) {

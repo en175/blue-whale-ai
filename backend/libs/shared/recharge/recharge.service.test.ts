@@ -310,6 +310,8 @@ describe("RechargeService — 回调到账", () => {
     expect(await service.handleNotify(await signed(notifyParams(created.tradeNo)))).toBe(true);
 
     expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
+    const grant = http.calls.find((c) => c.url.endsWith("/admin/credits/grants"));
+    expect(grant?.body.bizType).toBe("recharge");
     const order = orders.get(created.tradeNo);
     expect(order?.status).toBe("paid");
     expect(order?.paid_at).toBeInstanceOf(Date);

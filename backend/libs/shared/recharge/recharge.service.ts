@@ -3,6 +3,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { createLogger, type Logger } from "@lib/core/logging";
 import { fetchCreditsPerYuan, grantCredits } from "@lib/shared/billing/billing-admin-client.js";
+import { RECHARGE_LOT_BIZ_TYPE } from "@lib/shared/billing/lot-biz-type.js";
 import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
 import {
   createRechargeOrderRepo,
@@ -272,6 +273,13 @@ export class RechargeService {
     return this.repo.list(filter);
   }
 
+  async loadOrdersByTradeNos(
+    tradeNos: readonly string[],
+  ): Promise<Map<string, RechargeOrderView>> {
+    const rows = await this.repo.listByTradeNos(tradeNos);
+    return new Map(rows.map((row) => [row.tradeNo, row]));
+  }
+
 
   async getOrderStatus(input: {
     userId: number;
@@ -456,6 +464,7 @@ export class RechargeService {
       userId: Number(order.userId),
       credits: order.credits,
       bizId: order.tradeNo,
+      bizType: RECHARGE_LOT_BIZ_TYPE,
       ...(expiresAt ? { expiresAt } : {}),
     });
 
@@ -485,6 +494,7 @@ export class RechargeService {
       credits: settled.bonusCredits,
       source: "bonus",
       bizId: settled.tradeNo,
+      bizType: RECHARGE_LOT_BIZ_TYPE,
       grantKey: `bonus:tier:${settled.userId}:${settled.tierId}`,
       ...(expiresAt ? { expiresAt } : {}),
     });

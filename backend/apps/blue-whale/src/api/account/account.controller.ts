@@ -10,18 +10,24 @@ import {
 import {
   sharedBillingClient,
   toBillingError,
+  type BillingCreditLot,
   type BillingListLotsQuery,
   type BillingListTransactionsQuery,
   type BillingTransaction,
 } from "@lib/shared/billing/billing-client.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
+import { RECHARGE_LOT_BIZ_TYPE } from "@lib/shared/billing/lot-biz-type.js";
 import { RechargeService } from "@lib/shared/recharge/recharge.service.js";
 import {
-  RECHARGE_ORDER_STATUSES,
-  type RechargeOrderStatus,
-} from "@lib/shared/persistence/index.js";
+  USER_ORDER_STATUSES,
+  isUserOrderStatus,
+  toStoredOrderStatuses,
+  toUserOrderStatus,
+  type UserOrderStatus,
+} from "@lib/shared/recharge/user-order-status.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import type { Response } from "express";
+import { consumeDetail } from "./consumption-detail.js";
 import {
   EXPORT_SCOPES,
   MAX_EXPORT_ROWS,
@@ -34,6 +40,10 @@ import {
 
 const EXPORT_PAGE_SIZE = 100;
 
+const MAX_FILTER_JOB_IDS = 10_000;
+
+const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 function parseTypes(raw: string | undefined): string[] {
   return (raw ?? "")
     .split(",")
@@ -41,7 +51,23 @@ function parseTypes(raw: string | undefined): string[] {
     .filter((token) => token.length > 0);
 }
 
-const STATUSES = RECHARGE_ORDER_STATUSES;
+function parseInstant(raw: string | undefined, field: string): string | undefined {
+  const value = (raw ?? "").trim();
+  if (!value) return undefined;
+  if (!RFC3339.test(value) || Number.isNaN(Date.parse(value))) {
+    throw new NewApiError(`${field} 须为带时区的 RFC3339 时间`, 400);
+  }
+  return value;
+}
+
+function parseUserStatus(raw: string | undefined): UserOrderStatus | undefined {
+  const value = (raw ?? "").trim();
+  if (!value) return undefined;
+  if (!isUserOrderStatus(value)) {
+    throw new NewApiError(`status 须为 ${USER_ORDER_STATUSES.join("/")}`, 400);
+  }
+  return value;
+}
 
 @Controller("account")
 export class AccountController {
@@ -56,11 +82,41 @@ export class AccountController {
     @Query() query: Record<string, string> = {},
   ) {
     const types = parseTypes(query.type);
+    const createdFrom = parseInstant(query.created_from, "created_from");
+    const createdTo = parseInstant(query.created_to, "created_to");
+    const taskType = (query.task_type ?? "").trim();
+    const model = (query.model ?? "").trim();
+
+    let generationJobIds: string[] | undefined;
+    if (taskType || model) {
+      const resolved = await this.jobs.listJobIds({
+        userId: user.userId,
+        ...(taskType ? { type: taskType } : {}),
+        ...(model ? { modelId: model } : {}),
+        ...(createdFrom ? { createdFrom: new Date(createdFrom) } : {}),
+        ...(createdTo ? { createdTo: new Date(createdTo) } : {}),
+        limit: MAX_FILTER_JOB_IDS,
+      });
+      if (resolved.truncated) {
+        throw new NewApiError(
+          `按任务类型/模型命中的任务超过 ${MAX_FILTER_JOB_IDS} 条，请先缩小日期范围`,
+          400,
+        );
+      }
+      if (resolved.ids.length === 0) {
+        return ok({ items: [], total: 0 });
+      }
+      generationJobIds = resolved.ids;
+    }
+
     const request: BillingListTransactionsQuery = {
       userId: Number(user.userId),
       pageSize: parsePageSizeParam(query.page_size),
       page: parsePageParam(query.page),
       ...(types.length ? { typeFilters: types } : {}),
+      ...(createdFrom ? { createdFrom } : {}),
+      ...(createdTo ? { createdTo } : {}),
+      ...(generationJobIds ? { generationJobIds } : {}),
     };
 
     try {
@@ -81,7 +137,7 @@ export class AccountController {
     return items.map((item) => {
       const summary =
         item.generationJobId == null ? undefined : summaries.get(item.generationJobId);
-      return {
+      const row = {
         id: item.id,
         type: item.type,
         direction: item.direction,
@@ -90,13 +146,15 @@ export class AccountController {
         status: item.status,
         created_at: item.createdAt,
         settled_at: item.settledAt,
-        job_id: item.generationJobId,
         task_type: summary?.type ?? null,
         model_id: summary?.modelId ?? null,
         model_label: summary?.modelLabel ?? null,
         prompt: summary?.prompt ?? null,
         specs: summary?.specs ?? null,
+        lot_source: item.lotSource === "" ? null : item.lotSource,
+        lot_created_at: item.lotCreatedAt === "" ? null : item.lotCreatedAt,
       };
+      return { ...row, detail: consumeDetail(row) };
     });
   }
 
@@ -105,14 +163,20 @@ export class AccountController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: Record<string, string> = {},
   ) {
+    const createdFrom = parseInstant(query.created_from, "created_from");
+    const createdTo = parseInstant(query.created_to, "created_to");
+
     const request: BillingListLotsQuery = {
       userId: Number(user.userId),
       pageSize: parsePageSizeParam(query.page_size),
       page: parsePageParam(query.page),
+      ...(createdFrom ? { createdFrom } : {}),
+      ...(createdTo ? { createdTo } : {}),
     };
 
     try {
       const page = await sharedBillingClient().listCreditLots(request);
+      const productNames = await this.loadLotProductNames(page.items);
       return ok({
         items: page.items.map((item) => ({
           lot_id: item.lotId,
@@ -121,8 +185,7 @@ export class AccountController {
           remaining: item.remaining,
           created_at: item.createdAt,
           expires_at: item.expiresAt,
-          biz_type: item.bizType,
-          biz_id: item.bizId,
+          product_name: productNames.get(item.bizId) ?? null,
         })),
         total: page.total,
       });
@@ -131,32 +194,43 @@ export class AccountController {
     }
   }
 
+  private async loadLotProductNames(
+    items: BillingCreditLot[],
+  ): Promise<Map<string, string>> {
+    const tradeNos = items
+      .filter((item) => item.bizType === RECHARGE_LOT_BIZ_TYPE && item.bizId !== "")
+      .map((item) => item.bizId);
+    if (tradeNos.length === 0) return new Map();
+    const orders = await this.recharge.loadOrdersByTradeNos(tradeNos);
+    return new Map([...orders].map(([tradeNo, order]) => [tradeNo, order.productName]));
+  }
+
   @Get("orders")
   async orders(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: Record<string, string> = {},
   ) {
-    const status = (query.status ?? "").trim();
-    if (status && !STATUSES.includes(status as RechargeOrderStatus)) {
-      throw new NewApiError(`status 须为 ${STATUSES.join("/")}`, 400);
-    }
+    const status = parseUserStatus(query.status);
+    const createdFrom = parseInstant(query.created_from, "created_from");
+    const createdTo = parseInstant(query.created_to, "created_to");
 
     const { items, total } = await this.recharge.listOrdersForAdmin({
       page: parsePageParam(query.page),
       pageSize: parsePageSizeParam(query.page_size),
       userId: Number(user.userId),
-      ...(status ? { status: status as RechargeOrderStatus } : {}),
+      ...(createdFrom ? { createdFrom: new Date(createdFrom) } : {}),
+      ...(createdTo ? { createdTo: new Date(createdTo) } : {}),
+      ...(status ? { statuses: toStoredOrderStatuses(status) } : {}),
     });
 
     return ok({
       items: items.map((order) => ({
-        trade_no: order.tradeNo,
         product_name: order.productName,
         product_type: order.productType,
         amount_fen: order.amountFen,
         credits: order.credits,
         bonus_credits: order.bonusCredits,
-        status: order.status,
+        status: toUserOrderStatus(order.status),
         created_at: order.createdAt,
         paid_at: order.paidAt,
         credits_valid_months: order.creditsValidMonths,
@@ -185,7 +259,7 @@ export class AccountController {
       throw new NewApiError(`未知导出字段：${unknown.join("/")}`, 400);
     }
 
-    const collected = await this.collectExportRows(scope, Number(user.userId), query);
+    const collected = await this.collectExportRows(scope, user, query);
     const buffer = await buildExportWorkbook(collected, fields);
 
     const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -203,30 +277,32 @@ export class AccountController {
 
   private async collectExportRows(
     scope: ExportScope,
-    userId: number,
+    user: AuthenticatedUser,
     query: Record<string, string>,
   ): Promise<ExportRows> {
+    const createdFrom = parseInstant(query.created_from, "created_from");
+    const createdTo = parseInstant(query.created_to, "created_to");
+    const userId = Number(user.userId);
+
     if (scope === "orders") {
-      const status = (query.status ?? "").trim();
-      if (status && !STATUSES.includes(status as RechargeOrderStatus)) {
-        throw new NewApiError(`status 须为 ${STATUSES.join("/")}`, 400);
-      }
+      const status = parseUserStatus(query.status);
       const { rows, total } = await this.paged(
         (page) =>
           this.recharge.listOrdersForAdmin({
             page,
             pageSize: EXPORT_PAGE_SIZE,
             userId,
-            ...(status ? { status: status as RechargeOrderStatus } : {}),
+            ...(createdFrom ? { createdFrom: new Date(createdFrom) } : {}),
+            ...(createdTo ? { createdTo: new Date(createdTo) } : {}),
+            ...(status ? { statuses: toStoredOrderStatuses(status) } : {}),
           }),
         (orders) =>
           orders.map((order) => ({
-            trade_no: order.tradeNo,
             product_name: order.productName,
             amount_fen: order.amountFen,
             credits: order.credits,
             bonus_credits: order.bonusCredits,
-            status: order.status,
+            status: toUserOrderStatus(order.status),
             created_at: order.createdAt,
             paid_at: order.paidAt,
           })),
@@ -236,23 +312,55 @@ export class AccountController {
 
     if (scope === "gain") {
       const { rows, total } = await this.paged(
-        (page) => sharedBillingClient().listCreditLots({ userId, page, pageSize: EXPORT_PAGE_SIZE }),
-        (lots) =>
-          lots.map((lot) => ({
-            lot_id: lot.lotId,
+        (page) =>
+          sharedBillingClient().listCreditLots({
+            userId,
+            page,
+            pageSize: EXPORT_PAGE_SIZE,
+            ...(createdFrom ? { createdFrom } : {}),
+            ...(createdTo ? { createdTo } : {}),
+          }),
+        async (lots) => {
+          const productNames = await this.loadLotProductNames(lots);
+          return lots.map((lot) => ({
             source: lot.source,
             amount: lot.amount,
             remaining: lot.remaining,
             created_at: lot.createdAt,
             expires_at: lot.expiresAt,
-            biz_type: lot.bizType,
-            biz_id: lot.bizId,
-          })),
+            product_name: productNames.get(lot.bizId) ?? null,
+          }));
+        },
       );
       return { scope: "gain", rows, total };
     }
 
     const types = parseTypes(query.type);
+    const taskType = (query.task_type ?? "").trim();
+    const model = (query.model ?? "").trim();
+
+    let generationJobIds: string[] | undefined;
+    if (taskType || model) {
+      const resolved = await this.jobs.listJobIds({
+        userId: user.userId,
+        ...(taskType ? { type: taskType } : {}),
+        ...(model ? { modelId: model } : {}),
+        ...(createdFrom ? { createdFrom: new Date(createdFrom) } : {}),
+        ...(createdTo ? { createdTo: new Date(createdTo) } : {}),
+        limit: MAX_FILTER_JOB_IDS,
+      });
+      if (resolved.truncated) {
+        throw new NewApiError(
+          `按任务类型/模型命中的任务超过 ${MAX_FILTER_JOB_IDS} 条，请先缩小日期范围`,
+          400,
+        );
+      }
+      if (resolved.ids.length === 0) {
+        return { scope: "consume", rows: [], total: 0 };
+      }
+      generationJobIds = resolved.ids;
+    }
+
     const { rows, total } = await this.paged(
       (page) =>
         sharedBillingClient().listTransactions({
@@ -260,6 +368,9 @@ export class AccountController {
           page,
           pageSize: EXPORT_PAGE_SIZE,
           ...(types.length ? { typeFilters: types } : {}),
+          ...(createdFrom ? { createdFrom } : {}),
+          ...(createdTo ? { createdTo } : {}),
+          ...(generationJobIds ? { generationJobIds } : {}),
         }),
       (items) => this.mergeTaskSummaries(items),
     );

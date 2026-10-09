@@ -77,7 +77,10 @@ export interface RechargeOrderListFilter {
   pageSize: number;
   userId?: number;
   status?: RechargeOrderStatus;
+  statuses?: readonly RechargeOrderStatus[];
   tradeNo?: string;
+  createdFrom?: Date;
+  createdTo?: Date;
 }
 
 export interface ActiveOrderIdentity {
@@ -102,6 +105,7 @@ export interface RechargeOrderRepo {
   create(input: CreateRechargeOrderInput): Promise<RechargeOrderView>;
   getByTradeNo(tradeNo: string): Promise<RechargeOrderView | null>;
   list(filter: RechargeOrderListFilter): Promise<RechargeOrderPage>;
+  listByTradeNos(tradeNos: readonly string[]): Promise<RechargeOrderView[]>;
   findActiveOrder(identity: ActiveOrderIdentity): Promise<RechargeOrderView | null>;
   findUnsettledPaidOrder(userId: number): Promise<RechargeOrderView | null>;
   listGrantsToRetry(
@@ -212,7 +216,16 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
         is_delete: 0,
         ...(filter.userId !== undefined ? { user_id: BigInt(filter.userId) } : {}),
         ...(filter.status !== undefined ? { status: filter.status } : {}),
+        ...(filter.statuses !== undefined ? { status: { in: [...filter.statuses] } } : {}),
         ...(filter.tradeNo !== undefined ? { trade_no: filter.tradeNo } : {}),
+        ...(filter.createdFrom || filter.createdTo
+          ? {
+              gmt_create: {
+                ...(filter.createdFrom ? { gte: filter.createdFrom } : {}),
+                ...(filter.createdTo ? { lte: filter.createdTo } : {}),
+              },
+            }
+          : {}),
       };
       const [total, rows] = await Promise.all([
         prisma.recharge_orders.count({ where }),
@@ -224,6 +237,15 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
         }),
       ]);
       return { items: rows.map(toView), total };
+    },
+
+    async listByTradeNos(tradeNos) {
+      const unique = [...new Set(tradeNos)].filter((tradeNo) => tradeNo !== "");
+      if (unique.length === 0) return [];
+      const rows = await prisma.recharge_orders.findMany({
+        where: { is_delete: 0, trade_no: { in: unique } },
+      });
+      return rows.map(toView);
     },
 
     async findActiveOrder(identity) {

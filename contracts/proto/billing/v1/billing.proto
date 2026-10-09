@@ -197,6 +197,9 @@ message ListTransactionsRequest {
   // 多值类型过滤。空 = 全部。用户的「已消耗」页签要一次取 `consume` 与 `expire`
   // （原型口径②「已过期并入已消耗」）。
   repeated string type_filters = 4;
+  string created_from = 5;
+  string created_to   = 6;
+  repeated int64 generation_job_ids = 7;
 }
 
 message ListTransactionsResponse {
@@ -239,6 +242,8 @@ message UserTransaction {
   //
   // ⚠️ 这里是 **id**，不是把四个字段投影进账本契约：账本不该长成一个任务表。
   optional int64 generation_job_id = 9;
+  string lot_source     = 10;
+  string lot_created_at = 11;
 }
 
 message ListLotsRequest {
@@ -249,6 +254,8 @@ message ListLotsRequest {
   //    传 0 要么是调用方写错了，要么是在试探越权，两种都该吵得响。
   int64 user_id = 1;
   common.v1.PageRequest page = 2;
+  string created_from = 3;
+  string created_to   = 4;
 }
 
 message ListLotsResponse {

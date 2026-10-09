@@ -56,7 +56,9 @@
              l.gmt_create AS settled_at,
              'grant'      AS kind,
              l.id         AS src_id,
-             l.user_id    AS user_id
+             l.user_id    AS user_id,
+             NULL         AS lot_source,
+             NULL         AS lot_created_at
       FROM billing_credit_lots l
       <where>
         <if test="userId != null">l.user_id = #{userId}</if>
@@ -87,7 +89,9 @@
              CASE WHEN r.status = 'held' THEN NULL ELSE r.gmt_modified END AS settled_at,
              'consume' AS kind,
              r.id AS src_id,
-             r.user_id AS user_id
+             r.user_id AS user_id,
+             NULL AS lot_source,
+             NULL AS lot_created_at
       FROM billing_cost_reservations r
       <where>
         <if test="userId != null">r.user_id = #{userId}</if>
@@ -112,8 +116,13 @@
              MIN(e.gmt_create) AS settled_at,
              'ledger' AS kind,
              MIN(e.id) AS src_id,
-             MIN(e.user_id) AS user_id
+             MIN(e.user_id) AS user_id,
+             MIN(l2.source) AS lot_source,
+             MIN(l2.gmt_create) AS lot_created_at
       FROM billing_ledger_entries e
+      LEFT JOIN billing_credit_lots l2
+             ON l2.id = CAST(e.biz_id AS UNSIGNED) AND l2.user_id = e.user_id
+            AND e.biz_type = 'expire'
       WHERE e.account IN ('wallet', 'frozen')
         AND e.idempotency_key LIKE CONCAT('%:', e.account)
         AND e.biz_type IN ('expire', 'adjust')
@@ -131,14 +140,25 @@
     </if>
   </sql>
 
+  <sql id="transactionWindowFilter">
+    <if test="createdFrom != null">AND t.created_at &gt;= #{createdFrom}</if>
+    <if test="createdTo != null">AND t.created_at &lt;= #{createdTo}</if>
+    <if test="generationJobIds != null and generationJobIds.size() > 0">
+      AND t.generation_job_id IN
+      <foreach item="item" collection="generationJobIds" open="(" separator="," close=")">#{item}</foreach>
+    </if>
+  </sql>
+
   <select id="selectPage" resultType="com.bluewhale.billing.infrastructure.persistence.row.TransactionRow">
     SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
-           t.status, t.created_at, t.settled_at, t.generation_job_id, t.kind, t.src_id
+           t.status, t.created_at, t.settled_at, t.generation_job_id, t.kind, t.src_id,
+           t.lot_source, t.lot_created_at
     FROM (
       <include refid="transactionUnion"/>
     ) t
     <where>
       <include refid="transactionTypeFilter"/>
+      <include refid="transactionWindowFilter"/>
     </where>
     ORDER BY t.created_at DESC, t.kind ASC, t.src_id DESC
     LIMIT #{limit} OFFSET #{offset}
@@ -152,6 +172,7 @@
     ) t
     <where>
       <include refid="transactionTypeFilter"/>
+      <include refid="transactionWindowFilter"/>
     </where>
   </select>
 
