@@ -34,7 +34,7 @@ export default function SummaryCards({ summary }: SummaryCardsProps) {
       <article className={styles.card}>
         <div className={styles.label}>积分有效期</div>
         <div className={styles.value}>
-          {summary.validityYears == null ? '—' : `${summary.validityYears} 年`}
+          {summary.validityMonths == null ? '—' : `${summary.validityMonths} 个月`}
         </div>
         <div className={styles.hint}>自订单支付成功起算 · 按批次过期核销</div>
       </article>

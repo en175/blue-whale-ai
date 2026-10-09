@@ -9,7 +9,7 @@ export async function fetchAccountCreditsPage(): Promise<AccountCreditsPageData>
 export const PLACEHOLDER_PAGE_DATA: AccountCreditsPageData = {
   summary: {
     balance: 12345,
-    validityYears: 2,
+    validityMonths: 24,
     nearestLot: { remaining: 1200, expiresAt: '2026-12-01' },
   },
   orders: [
@@ -26,8 +26,8 @@ export const PLACEHOLDER_PAGE_DATA: AccountCreditsPageData = {
     { id: 'a3', acquiredAt: '2024-12-01 09:12', source: '充值到账', detail: '自定义充值 3,000 积分 · 订单 BW…555 · 剩余 1,200', effectiveAt: '2024-12-01 09:12', expiresAt: '2026-12-01', credits: 3000, remaining: 1200 },
   ],
   consumed: [
-    { id: 'c1', consumedAt: '2026-09-29 15:02', kind: 'consume', taskType: '视频生成', model: 'seedance-2.5', detail: '1080p 5s', taskId: '9104', credits: 40 },
-    { id: 'c2', consumedAt: '2026-12-01 00:00', kind: 'expire', taskType: '过期核销', model: null, detail: '批次到期', taskId: null, credits: 1200 },
+    { id: 'c1', consumedAt: '2026-09-29 15:02', kind: 'consume', taskType: 'video', model: 'seedance-2.5', specs: { resolution: '1080p', duration: '5' }, taskId: '9104', credits: 40 },
+    { id: 'c2', consumedAt: '2026-12-01 00:00', kind: 'expire', taskType: 'video', model: null, specs: null, taskId: null, credits: 1200 },
   ],
   refunded: [],
 };

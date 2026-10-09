@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { taskTypeLabel } from '@/admin/taskTypeLabels';
 import { useDocumentTitle } from '@/seo/useDocumentTitle';
+import { formatSpecs } from './format';
 import SummaryCards from './SummaryCards';
 import { fetchAccountCreditsPage, PLACEHOLDER_PAGE_DATA } from './data';
 import type {
@@ -46,6 +48,16 @@ function formatCredits(value: number | null): string {
 function formatYuan(value: number | null): string {
   if (value == null) return '—';
   return `¥${value.toFixed(2)}`;
+}
+
+const EXPIRE_SOON_DAYS = 30;
+
+function isExpireSoon(expiresAt: string | null): boolean {
+  if (!expiresAt) return false;
+  const ms = Date.parse(expiresAt);
+  if (Number.isNaN(ms)) return false;
+  const days = (ms - Date.now()) / 86_400_000;
+  return days >= 0 && days <= EXPIRE_SOON_DAYS;
 }
 
 function copyText(text: string) {
@@ -349,7 +361,7 @@ function AcquiredTable({ rows }: { rows: AcquiredRecord[] }) {
             <td><span className={styles.tag}>{row.source}</span></td>
             <td>{row.detail}</td>
             <td>{dash(row.effectiveAt)}</td>
-            <td className={row.remaining != null ? styles.expireSoon : undefined}>{dash(row.expiresAt)}</td>
+            <td className={isExpireSoon(row.expiresAt) ? styles.expireSoon : undefined}>{dash(row.expiresAt)}</td>
             <td className={styles.plus}>{row.credits == null ? '—' : `+${formatCredits(row.credits)}`}</td>
           </tr>
         ))}
@@ -376,10 +388,10 @@ function ConsumedTable({ rows }: { rows: ConsumedRecord[] }) {
           <tr key={row.id}>
             <td>{row.consumedAt}</td>
             <td>
-              <span className={styles.tag}>{row.kind === 'expire' ? '过期核销' : row.taskType}</span>
+              <span className={styles.tag}>{row.kind === 'expire' ? '过期核销' : taskTypeLabel(row.taskType)}</span>
             </td>
             <td>{dash(row.model)}</td>
-            <td>{dash(row.detail)}</td>
+            <td>{formatSpecs(row.specs)}</td>
             <td className={styles.mono}>{dash(row.taskId)}</td>
             <td className={styles.minus}>{row.credits == null ? '—' : `-${formatCredits(row.credits)}`}</td>
           </tr>
@@ -406,9 +418,9 @@ function RefundedTable({ rows }: { rows: RefundedRecord[] }) {
         {rows.length === 0 ? <EmptyRow cols={6} /> : rows.map((row) => (
           <tr key={row.id}>
             <td>{row.refundedAt}</td>
-            <td>{row.taskType}</td>
+            <td>{taskTypeLabel(row.taskType)}</td>
             <td>{dash(row.model)}</td>
-            <td>{dash(row.detail)}</td>
+            <td>{formatSpecs(row.specs)}</td>
             <td className={styles.mono}>{dash(row.taskId)}</td>
             <td className={styles.plus}>{row.credits == null ? '—' : `+${formatCredits(row.credits)}`}</td>
           </tr>

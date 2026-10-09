@@ -6,7 +6,7 @@ export interface CreditsLotPreview {
 
 export interface CreditsSummary {
   balance: number | null;
-  validityYears: number | null;
+  validityMonths: number | null;
   nearestLot: CreditsLotPreview | null;
 }
 
@@ -46,7 +46,7 @@ export interface ConsumedRecord {
   kind: ConsumeKind;
   taskType: string;
   model: string | null;
-  detail: string | null;
+  specs: Record<string, string> | null;
   taskId: string | null;
   credits: number | null;
 }
@@ -56,7 +56,7 @@ export interface RefundedRecord {
   refundedAt: string;
   taskType: string;
   model: string | null;
-  detail: string | null;
+  specs: Record<string, string> | null;
   taskId: string | null;
   credits: number | null;
 }

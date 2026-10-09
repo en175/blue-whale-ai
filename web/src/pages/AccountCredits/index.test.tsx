@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountCredits from './index';
+import { formatSpecs } from './format';
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -40,7 +41,7 @@ describe('AccountCredits', () => {
     await renderPage();
     expect(document.body.textContent).toContain('账户积分与订单');
     expect(document.body.textContent).toContain('12,345');
-    expect(document.body.textContent).toContain('2 年');
+    expect(document.body.textContent).toContain('24 个月');
     expect(document.body.textContent).toContain('剩余 1,200 积分');
     expect(document.body.textContent).toContain('已获取');
     expect(document.body.textContent).toContain('充值到账');
@@ -68,5 +69,22 @@ describe('AccountCredits', () => {
       clickByText('已退回');
     });
     expect(document.body.textContent).toContain('暂无记录');
+  });
+});
+
+describe('formatSpecs 任务规格拼串', () => {
+  it('按白名单顺序取键，duration 补 s', () => {
+    expect(formatSpecs({ resolution: '1080p', duration: '5' })).toBe('1080p · 5s');
+    expect(formatSpecs({ size: '1024x1024' })).toBe('1024x1024');
+  });
+
+  it('duration 非正数整项不显示（edit 冻结 -1）', () => {
+    expect(formatSpecs({ resolution: '1080p', duration: '-1' })).toBe('1080p');
+  });
+
+  it('忽略计费派生键，全空回退 —', () => {
+    expect(formatSpecs({ reference_count: '0', video: '0' })).toBe('—');
+    expect(formatSpecs({})).toBe('—');
+    expect(formatSpecs(null)).toBe('—');
   });
 });
