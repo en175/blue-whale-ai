@@ -87,7 +87,7 @@ export default function ExportDialog({ open, scope, status, type, onClose }: Exp
       width={440}
       okText="导出"
       confirmLoading={exporting}
-      okButtonProps={{ disabled: selected.size === 0 }}
+      okButtonProps={{ disabled: selected.size === 0, className: styles.okButtonGray }}
       onOk={onExport}
       onCancel={onClose}
     >

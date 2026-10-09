@@ -191,6 +191,7 @@ describe('AccountCredits', () => {
     expect(document.body.textContent).toContain('视频');
     expect(document.body.textContent).toContain('1080p · 5s');
     expect(document.body.textContent).toContain('Seedance 2.5');
+    expect(document.body.textContent).not.toContain('任务 ID');
   });
 
   it('订单记录：六态含支付成功待到账，金额分换算，可复制订单号', async () => {
@@ -201,10 +202,25 @@ describe('AccountCredits', () => {
     await flush();
     expect(document.body.textContent).toContain('支付成功待到账');
     expect(document.body.textContent).toContain('¥40.00');
+    expect(document.body.textContent).not.toContain('订单编号');
     await act(async () => {
       clickByText('复制订单号');
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('BW20260929143200801');
+  });
+
+  it('导出弹层：已消耗不带任务 ID 选项', async () => {
+    await renderPage();
+    await act(async () => {
+      clickByText('已消耗');
+    });
+    await flush();
+    await act(async () => {
+      clickByText('导出明细');
+    });
+    await flush();
+    expect(document.body.textContent).toContain('导出已消耗');
+    expect(document.body.textContent).not.toContain('任务 ID');
   });
 
   it('导出弹层：按当前页签 scope 与勾选字段请求导出', async () => {
@@ -214,6 +230,8 @@ describe('AccountCredits', () => {
     });
     await flush();
     expect(document.body.textContent).toContain('导出已获取');
+    expect(document.body.textContent).toContain('积分生效时间');
+    expect(document.body.textContent).not.toContain('剩余');
     await act(async () => {
       clickByText('导出');
     });
@@ -222,7 +240,7 @@ describe('AccountCredits', () => {
     const exportUrl = urls.find((url) => url.includes('/api/account/export'));
     expect(exportUrl).toBeDefined();
     expect(decodeURIComponent(exportUrl!)).toContain('scope=gain');
-    expect(decodeURIComponent(exportUrl!)).toContain('created_at');
+    expect(decodeURIComponent(exportUrl!)).toContain('activated_at');
   });
 });
 
