@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement, type ReactElement } from 'react';
+import { act, createElement, type ComponentProps, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -7,6 +7,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Node } from '@xyflow/react';
 import type { GenerationQuote } from '@/api/generationQuote';
 import type { GenerationRecoveryPage } from '@/api/canvasRecovery';
+import type { ProjectRecord } from '@/api/projects';
 
 
 
@@ -37,7 +38,9 @@ vi.mock('./components/CanvasToolbar', () => ({
 }));
 
 vi.mock('./components/CanvasHeader', () => ({
-  default: () => createElement('div', { 'data-testid': 'canvas-header' }),
+  default: ({ projects, currentProjectId }: ComponentProps<typeof import('./components/CanvasHeader').default>) =>
+    createElement('div', { 'data-testid': 'canvas-header', 'data-project-id': currentProjectId },
+      projects.find((project) => project.id === currentProjectId)?.name),
 }));
 
 vi.mock('./components/ProjectSelector', () => ({
@@ -169,7 +172,15 @@ const audioModel = {
 
 const apiMocks = vi.hoisted(() => ({
   fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一', thumb: null, previews: [], created_at: '2026-01-01T00:00:00Z', last_opened_at: null, pinned_at: null }]),
-  createProject: vi.fn(),
+  createProject: vi.fn(async () => ({
+    id: 'p2',
+    name: '未命名项目',
+    thumb: null,
+    previews: [],
+    created_at: '2026-01-01T00:00:00Z',
+    last_opened_at: null,
+    pinned_at: null,
+  }) satisfies ProjectRecord),
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   fetchMe: vi.fn(async () => null),
@@ -421,6 +432,7 @@ function expectNoUpdateDepthLoop() {
 }
 
 beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(() => { throw new Error('页面测试禁止真实出网'); }));
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   sessionStorage.clear();
@@ -456,9 +468,24 @@ afterEach(async () => {
   if (root) await act(async () => { root.unmount(); });
   container?.remove();
   document.querySelectorAll('[role="dialog"]').forEach((el) => el.remove());
+  expect(fetch).not.toHaveBeenCalled();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe('IKK792 空项目自动新建', () => {
+  it('项目列表为空时显示新建项目名称并选中其 id', async () => {
+    apiMocks.fetchProjects.mockResolvedValueOnce([]);
+    await renderPage();
+
+    await vi.waitFor(() => {
+      const header = container.querySelector('[data-testid="canvas-header"]');
+      expect(header?.textContent).toBe('未命名项目');
+      expect(header?.getAttribute('data-project-id')).toBe('p2');
+    });
+    expect(apiMocks.createProject).toHaveBeenCalledWith('未命名项目');
+  });
 });
 
 describe('IKIJ60 草稿面板切换崩溃回归（真实画布选中通报路径）', () => {
