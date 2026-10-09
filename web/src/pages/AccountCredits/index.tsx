@@ -15,6 +15,7 @@ import {
 import { taskTypeLabel } from '@/admin/taskTypeLabels';
 import { useDocumentTitle } from '@/seo/useDocumentTitle';
 import { formatBeijingDateTime } from './format';
+import ExportDialog from './ExportDialog';
 import SummaryCards from './SummaryCards';
 import styles from './index.module.css';
 
@@ -134,6 +135,7 @@ export default function AccountCredits() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(20);
   const [statusFilter, setStatusFilter] = useState('');
+  const [exportOpen, setExportOpen] = useState(false);
 
   useEffect(() => {
     setPage(1);
@@ -163,6 +165,8 @@ export default function AccountCredits() {
   const safePage = Math.min(page, pageCount);
   const pagerVisible = activeQuery.isSuccess && total > 0;
 
+  const exportScope = mainTab === 'orders' ? 'orders' : ledgerTab === 'acquired' ? 'gain' : 'consume';
+
   return (
     <div className={styles.page}>
       <header className={styles.header}>
@@ -181,7 +185,9 @@ export default function AccountCredits() {
               积分明细
             </button>
           </div>
-          <button type="button" className={styles.exportBtn}>导出明细</button>
+          <button type="button" className={styles.exportBtn} onClick={() => setExportOpen(true)}>
+            导出明细
+          </button>
         </div>
 
         {mainTab === 'ledger' && (
@@ -238,6 +244,14 @@ export default function AccountCredits() {
           </span>
         </div>
       </section>
+
+      <ExportDialog
+        open={exportOpen}
+        scope={exportScope}
+        {...(mainTab === 'orders' && statusFilter ? { status: statusFilter } : {})}
+        {...(exportScope === 'consume' ? { type: 'consume,expire' } : {})}
+        onClose={() => setExportOpen(false)}
+      />
     </div>
   );
 }
