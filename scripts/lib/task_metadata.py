@@ -20,6 +20,7 @@ class TaskMetadataError(RuntimeError):
 
 def git(root, *args, check=True):
     result = subprocess.run(["git", "-C", str(root), *args], text=True, encoding="utf-8",
+                            env={**os.environ, "LC_ALL": "C"},
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if check and result.returncode:
         raise TaskMetadataError((result.stderr or result.stdout).strip())
