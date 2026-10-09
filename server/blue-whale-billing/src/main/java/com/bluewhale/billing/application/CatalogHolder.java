@@ -1,6 +1,6 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.adapter.outbound.persistence.repository.CatalogRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.CatalogRepository;
 import com.bluewhale.billing.domain.catalog.CatalogDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

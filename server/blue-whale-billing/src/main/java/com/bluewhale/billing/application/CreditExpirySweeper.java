@@ -1,6 +1,6 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

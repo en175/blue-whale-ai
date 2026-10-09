@@ -1,9 +1,9 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.TransactionRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.TransactionRepository;
 import com.bluewhale.billing.application.command.HoldCommand;
 import com.bluewhale.billing.application.command.SettlementCommand;
 import com.bluewhale.billing.application.command.SettlementUsageLine;

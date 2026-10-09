@@ -1,7 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobSettlementPublisher;
@@ -9,16 +9,16 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.ProjectEventPublisher;
 import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
 import com.bluewhale.worker.application.service.StoryboardPreviewSync;
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
-import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
-import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtraMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.zaxxer.hikari.HikariDataSource;
@@ -39,7 +39,7 @@ import static org.mockito.Mockito.when;
 class PromptPlanVideoIntegrationTest {
     @Configuration
     @EnableTransactionManagement
-    @MapperScan("com.bluewhale.worker.infrastructure.mapper")
+    @MapperScan("com.bluewhale.worker.infrastructure.persistence.mapper")
     @Import({JobStateMachineService.class, AssetSourceService.class})
     static class Database {
         @Bean(destroyMethod = "close")

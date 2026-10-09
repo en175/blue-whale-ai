@@ -40,6 +40,7 @@
 | `scoped/node` | `apps/*/src`、`packages/*/src|test` | 增量 TypeScript build + 所属 Node 应用完整 Vitest |
 | `scoped/backend` | `backend/apps/*`、`backend/libs/*` 下的 TypeScript（NestJS BFF） | backend typecheck（自带 tsconfig 与 `@lib/*` 别名）+ 全部 backend Vitest |
 | `scoped/worker-java` | `server/blue-whale-worker/` 下的 Java 源码与构建配置（独立 Maven 工程，不在 pnpm workspace） | `mvn -f server/pom.xml -pl blue-whale-worker -am -q test` |
+| `scoped/billing-java` | `server/blue-whale-billing/` 下的 Java 源码与构建配置（独立 Maven 工程，不在 pnpm workspace；验证命令与 worker 不同，故单列） | `mvn -f server/pom.xml -pl blue-whale-billing -am -q test` |
 | `scoped/web` | 前端源码、静态资源、共享依赖和构建配置，具体范围由选择器判定 | 一次 Web typecheck + Web lint + 全部 Web Vitest + test/release 两次 Vite 打包 |
 | `scoped/governance` | 本策略、选择器、发布门禁及关联技能 | 规则、选择器和发布门禁定向测试 |
 | `scoped/control-plane` | Hook、Git、worktree、PR、授权、审计和工程技能校验 | Hook 黑盒测试 + Git/PR/worktree 脚本单测 |

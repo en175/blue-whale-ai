@@ -1,11 +1,11 @@
 package com.bluewhale.worker.application.service;
 
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
-import com.bluewhale.worker.config.SystemSettingEnvelopeVectors;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
+import com.bluewhale.worker.infrastructure.config.SystemSettingEnvelopeVectors;
 import com.bluewhale.worker.domain.entity.MaterialAssetEntity;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient.MaterialStatusResult;
-import com.bluewhale.worker.infrastructure.mapper.MaterialAssetMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.MaterialAssetMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

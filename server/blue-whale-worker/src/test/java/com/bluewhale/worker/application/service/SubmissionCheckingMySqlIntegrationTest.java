@@ -1,14 +1,14 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
-import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
-import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtraMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;

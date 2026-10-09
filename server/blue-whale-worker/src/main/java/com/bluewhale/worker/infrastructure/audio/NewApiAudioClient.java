@@ -1,7 +1,7 @@
 package com.bluewhale.worker.infrastructure.audio;
 
-import com.bluewhale.worker.config.NewApiUpstreamConfig;
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.error.AudioProviderError;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;

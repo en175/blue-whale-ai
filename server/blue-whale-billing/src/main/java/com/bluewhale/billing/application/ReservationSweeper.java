@@ -1,7 +1,7 @@
 package com.bluewhale.billing.application;
 
 import com.bluewhale.billing.domain.ledger.Reservation;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.ReservationRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

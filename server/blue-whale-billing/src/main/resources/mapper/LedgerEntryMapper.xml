@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.LedgerEntryMapper">
+<mapper namespace="com.bluewhale.billing.infrastructure.persistence.mapper.LedgerEntryMapper">
 
 
 
@@ -31,7 +31,7 @@
 
 
 
-  <select id="listRecentForAudit" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.LedgerEntryEntity">
+  <select id="listRecentForAudit" resultType="com.bluewhale.billing.infrastructure.persistence.po.LedgerEntryEntity">
     SELECT *
     FROM (
       SELECT id, user_id, account, direction, amount, biz_type, biz_id,

@@ -1,8 +1,8 @@
 package com.bluewhale.billing.domain.pricing;
 
-import com.bluewhale.billing.adapter.inbound.BillingErrorTaxonomy;
-import com.bluewhale.billing.adapter.inbound.BillingErrorTaxonomy.Code;
-import com.bluewhale.billing.adapter.inbound.BillingErrorTaxonomy.Surface;
+import com.bluewhale.billing.common.error.BillingErrorTaxonomy;
+import com.bluewhale.billing.common.error.BillingErrorTaxonomy.Code;
+import com.bluewhale.billing.common.error.BillingErrorTaxonomy.Surface;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

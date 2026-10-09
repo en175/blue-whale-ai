@@ -2,7 +2,7 @@ package com.bluewhale.worker.infrastructure.gateway;
 
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.application.service.JobClaimService;
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;

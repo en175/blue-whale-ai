@@ -1,8 +1,8 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.ReservationRepository;
 import com.bluewhale.billing.domain.ledger.Account;
 import org.slf4j.Logger;
 import com.bluewhale.billing.domain.ledger.Allocation;

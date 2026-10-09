@@ -144,7 +144,7 @@ describe("★ 计费契约对账：MQ topic", () => {
 
 
 const JAVA_ERROR_CODE_ROWS = (() => {
-  const src = stripComments(read(`${JAVA_BILLING}adapter/inbound/BillingErrorTaxonomy.java`));
+  const src = stripComments(read(`${JAVA_BILLING}common/error/BillingErrorTaxonomy.java`));
   const body = src.slice(src.indexOf("public enum Code"));
   return [...body.matchAll(/^\s*([A-Z][A-Z0-9_]*)\(\s*"([^"]+)"\s*,\s*Status\.Code\.([A-Z_]+)/gm)].map(
     (m) => ({ name: m[1], wire: m[2], grpc: m[3] }),
@@ -204,9 +204,9 @@ describe("★ 计费契约对账：错误码", () => {
 
   it("码表只在 BillingErrorTaxonomy 一处定义：三处传输层不再自持", () => {
     const adapters = [
-      `${JAVA_BILLING}adapter/inbound/grpc/BillingGrpcService.java`,
-      `${JAVA_BILLING}adapter/inbound/grpc/BillingAdminGrpcService.java`,
-      `${JAVA_BILLING}adapter/inbound/http/AdminExceptionHandler.java`,
+      `${JAVA_BILLING}api/grpc/BillingGrpcService.java`,
+      `${JAVA_BILLING}api/grpc/BillingAdminGrpcService.java`,
+      `${JAVA_BILLING}api/AdminExceptionHandler.java`,
     ];
 
     for (const path of adapters) {

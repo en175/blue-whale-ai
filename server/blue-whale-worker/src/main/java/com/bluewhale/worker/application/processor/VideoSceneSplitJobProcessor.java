@@ -5,7 +5,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto;
@@ -20,7 +20,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesCl
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient.SceneSplitTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient.SegmentObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import org.slf4j.Logger;

@@ -1,7 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -2,11 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.CostReservationMapper">
+<mapper namespace="com.bluewhale.billing.infrastructure.persistence.mapper.CostReservationMapper">
 
 
 
-  <select id="lockByJobId" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CostReservationEntity">
+  <select id="lockByJobId" resultType="com.bluewhale.billing.infrastructure.persistence.po.CostReservationEntity">
     SELECT id, generation_job_id, user_id, reserved_credits, actual_credits, receivable_credits,
            status, allocations, catalog_version, discount_bp, rule_snapshot, title, release_note,
            gmt_create, gmt_modified, version
@@ -50,7 +50,7 @@
 
 
 
-  <select id="sumSettledActualByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
+  <select id="sumSettledActualByUser" resultType="com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow">
     SELECT user_id, COALESCE(SUM(actual_credits), 0) AS amount
     FROM billing_cost_reservations
     WHERE user_id IN
@@ -64,7 +64,7 @@
 
 
 
-  <select id="listStaleHeld" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.StaleReservationRow">
+  <select id="listStaleHeld" resultType="com.bluewhale.billing.infrastructure.persistence.row.StaleReservationRow">
     SELECT id,
            generation_job_id,
            user_id,

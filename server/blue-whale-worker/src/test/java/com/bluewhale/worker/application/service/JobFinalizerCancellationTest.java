@@ -1,12 +1,12 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
-import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtraMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;

@@ -1,10 +1,10 @@
 package com.bluewhale.worker.application.service;
 
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.entity.MaterialAssetEntity;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient.MaterialStatusResult;
-import com.bluewhale.worker.infrastructure.mapper.MaterialAssetMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.MaterialAssetMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

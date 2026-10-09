@@ -1,6 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.AudioSpeedContract;
 import com.bluewhale.worker.domain.error.AudioSpeedError;
 import com.bluewhale.worker.domain.error.GenerationError;

@@ -1,8 +1,8 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.adapter.outbound.persistence.repository.ReconciliationRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.ReconciliationRepository;
 import com.bluewhale.billing.domain.ledger.Account;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

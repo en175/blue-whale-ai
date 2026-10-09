@@ -15,7 +15,7 @@
 
 
 
-<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.TransactionMapper">
+<mapper namespace="com.bluewhale.billing.infrastructure.persistence.mapper.TransactionMapper">
 
 
 
@@ -131,7 +131,7 @@
     </if>
   </sql>
 
-  <select id="selectPage" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.TransactionRow">
+  <select id="selectPage" resultType="com.bluewhale.billing.infrastructure.persistence.row.TransactionRow">
     SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
            t.status, t.created_at, t.settled_at, t.generation_job_id, t.kind, t.src_id
     FROM (

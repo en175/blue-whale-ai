@@ -1,6 +1,6 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五 + 修正六**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；修正六：2026-09-18 退役标签开关与命名对齐（详见 §16）——删除 `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX`，服务启动即消费全部 6 个 tag，topic `generation-video`→`generation-task`、tag `step`→`video`；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U；冻结增量 §15：2026-09-18 新增第 6 个生成类型 image_erase 图片擦除的跨进程字段冻结，IKGOT3；冻结增量 §17：2026-09-19 新增第 8 个生成类型 video_subtitle_erase 视频智能去字幕的跨进程字段冻结，IKGZ7Z——第 7 个 image_outpaint 契约独立在 `backend/libs/contracts/image-outpaint.ts`，未单开本文章节）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五 + 修正六 + 修正七**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；修正六：2026-09-18 退役标签开关与命名对齐（详见 §16）——删除 `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX`，服务启动即消费全部 6 个 tag，topic `generation-video`→`generation-task`、tag `step`→`video`；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U；冻结增量 §15：2026-09-18 新增第 6 个生成类型 image_erase 图片擦除的跨进程字段冻结，IKGOT3；冻结增量 §17：2026-09-19 新增第 8 个生成类型 video_subtitle_erase 视频智能去字幕的跨进程字段冻结，IKGZ7Z——第 7 个 image_outpaint 契约独立在 `backend/libs/contracts/image-outpaint.ts`，未单开本文章节）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
 - 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEF1K），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
@@ -672,3 +672,27 @@ media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继�
 - Java：`AudioVideoMuxContract` + `JobTypeEnum.AUDIO_VIDEO_MUX` + `GenerationMqRouteEnum.AUDIO_VIDEO_MUX` + Consumer/Processor/Client + RocketMqConfig 三 bean + Recovery `maxAge=0` + Mapper 续租/取消/扫描登记。
 - 对账：`audio-video-mux.test.ts`（读 Java 源码逐值对账）、`mq-route-parity.test.ts`、`StartupContractTest`、`ConsumerRouteWiringTest`；跨运行时贯通 = `audio-video-muxes.cross-runtime.integration.test.ts` + `AudioVideoMuxCrossRuntimeMySqlIntegrationTest`（DbGuard 门禁）。
 - 工单分工：IKIHPJ 创建入口 + worker 执行链（本票）；IHPL 重试（`Idempotency-Key` + `command_idempotency` 双轨 + `submit_attempt` 递增）；IHPK/IHPM 前端草稿卡与提交回填。
+
+## 22. 修正七（2026-10-09）：包结构对齐 `api/` + `infrastructure/`
+
+背景：`server/` 下的 Java 模块此前各持一套包命名——worker 用 `web`（健康检查）与顶层 `config`（装配），
+billing 用 ports-and-adapters 的 `adapter/inbound` + `adapter/outbound`。本次按团队 Java 编码规范把三个模块
+（worker / billing / common）的包结构统一为 `api/` + `infrastructure/`。本节覆盖 §13.1 的「分层」一句与后缀表的
+`*Mapper` 行；§13.1 其余条款（`*Entity` 在 `domain/entity`、`*Dto` 在 `domain/dto`、`*Service` 在
+`application/service`）**不变**。
+
+- 分层改为：`api`（HTTP 入口，健康检查 `ReadyController` 自 `web` 迁入）、
+  `application`（processor / consumer / service）、`domain`（contract / dto / entity / error）、
+  `infrastructure`（`config` 装配、`persistence/mapper`、gateway / storage / media / audio / mq）。
+- 后缀表 `*Mapper` 行所在层：`infrastructure/mapper` → `infrastructure/persistence/mapper`。
+- 双端同步：本改动不触 §13.4 的三类不动项（状态机迁移语义、MQ 消息字段、DB 写入内容）——包名与 MyBatis
+  mapper namespace 的改动不改变任何跨进程字段，也不改变写入内容。后端对账套件按 Java 源码路径读取的
+  worker 包（`domain/contract`、`domain/error`、`application/processor`、`infrastructure/gateway`）本次均未
+  改动，TS 侧无需同步。
+- **未随规范调整的两处**（各有硬约束，登记为已知偏离，不假装已满足）：
+  1. `domain/entity` 保留原位，不迁入 `infrastructure/persistence/po`。`domain/contract` 的 `JobStatusEnum`
+     与 `SettlementUsageLines` 引用 `domain.entity.*`，外移会造出 domain → infrastructure 的反向依赖；
+     后者还是后端金标对账的基准（`billing-contract-parity.test.ts`）。实体类带 MyBatis 注解这一
+     「领域层依赖框架」问题另立工单解决。
+  2. `domain/dto` 保留原位，不迁入 `api/dto`。其 25 个类含 MQ 契约投影（`ClaimedJobDto`、`Publish*Dto`），
+     被 application 与 infrastructure 共享；迁入 `api/` 会造出 application → api 的反向依赖。

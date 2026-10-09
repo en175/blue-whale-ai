@@ -10,8 +10,8 @@ import com.bluewhale.worker.application.processor.ImageJobProcessor;
 import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import com.bluewhale.worker.application.processor.VideoJobProcessor;
 import com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor;
-import com.bluewhale.worker.config.RocketMqConfig;
-import com.bluewhale.worker.config.WorkerProperties;
+import com.bluewhale.worker.infrastructure.config.RocketMqConfig;
+import com.bluewhale.worker.infrastructure.config.WorkerProperties;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 
 import org.apache.rocketmq.client.apis.ClientConfiguration;
