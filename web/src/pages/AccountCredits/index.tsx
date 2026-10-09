@@ -1,32 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ORDER_STATUS_LABEL,
+  accountConsumptionsOptions,
+  creditLotsOptions,
+  ordersOptions,
+  sourceLabel,
+  usageTokenOptions,
+  type ConsumptionRow,
+  type CreditLotRow,
+  type OrderRow,
+  type OrderStatus,
+} from '@/api/accountCredits';
+import { taskTypeLabel } from '@/admin/taskTypeLabels';
 import { useDocumentTitle } from '@/seo/useDocumentTitle';
+import { formatSpecs } from './format';
 import SummaryCards from './SummaryCards';
-import { fetchAccountCreditsPage, PLACEHOLDER_PAGE_DATA } from './data';
-import type {
-  AccountCreditsPageData,
-  AcquiredRecord,
-  ConsumedRecord,
-  OrderRecord,
-  OrderStatus,
-  RefundedRecord,
-} from './types';
 import styles from './index.module.css';
 
 type MainTab = 'orders' | 'ledger';
-type LedgerTab = 'acquired' | 'consumed' | 'refunded';
+type LedgerTab = 'acquired' | 'consumed';
 
 const PAGE_SIZES = [10, 20, 50] as const;
 
-const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
-  pending: '待支付',
-  paid: '已到账',
-  failed: '支付失败',
-  expired: '已取消',
-  grant_failed: '到账异常',
-};
-
 const ORDER_STATUS_CLASS: Record<OrderStatus, string> = {
   pending: styles.statusMuted,
+  paid_pending: styles.statusWarn,
   paid: styles.statusOk,
   failed: styles.statusBad,
   expired: styles.statusMuted,
@@ -43,21 +42,32 @@ function formatCredits(value: number | null): string {
   return value.toLocaleString('zh-CN');
 }
 
-function formatYuan(value: number | null): string {
-  if (value == null) return '—';
-  return `¥${value.toFixed(2)}`;
-}
+const fenToYuan = (fen: number | null): string =>
+  fen == null ? '—' : `¥${(fen / 100).toFixed(2)}`;
 
 function copyText(text: string) {
   void navigator.clipboard.writeText(text);
 }
 
-const SOURCE_OPTIONS = [
-  { value: '', label: '获取来源' },
-  { value: '充值到账', label: '充值到账' },
+const PAGE_SIZE_OPTIONS = PAGE_SIZES.map((size) => ({ value: String(size), label: `${size} 条` }));
+
+const ORDER_STATUS_OPTIONS = [
+  { value: '', label: '全部状态' },
+  ...(Object.keys(ORDER_STATUS_LABEL) as OrderStatus[]).map((key) => ({
+    value: key,
+    label: ORDER_STATUS_LABEL[key],
+  })),
 ];
 
-const PAGE_SIZE_OPTIONS = PAGE_SIZES.map((size) => ({ value: String(size), label: `${size} 条` }));
+const EXPIRE_SOON_DAYS = 30;
+
+function isExpireSoon(expiresAt: string): boolean {
+  if (!expiresAt) return false;
+  const ms = Date.parse(expiresAt);
+  if (Number.isNaN(ms)) return false;
+  const days = (ms - Date.now()) / 86_400_000;
+  return days >= 0 && days <= EXPIRE_SOON_DAYS;
+}
 
 function FilterSelect({
   value,
@@ -119,69 +129,41 @@ function FilterSelect({
 
 export default function AccountCredits() {
   useDocumentTitle();
-  const [data, setData] = useState<AccountCreditsPageData>(PLACEHOLDER_PAGE_DATA);
   const [mainTab, setMainTab] = useState<MainTab>('ledger');
   const [ledgerTab, setLedgerTab] = useState<LedgerTab>('acquired');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(20);
-  const [dateFrom, setDateFrom] = useState('');
-  const [sourceFilter, setSourceFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'' | OrderStatus>('');
-
-  useEffect(() => {
-    let alive = true;
-    fetchAccountCreditsPage().then((next) => {
-      if (alive) setData(next);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const [statusFilter, setStatusFilter] = useState('');
 
   useEffect(() => {
     setPage(1);
-  }, [mainTab, ledgerTab, pageSize, dateFrom, sourceFilter, statusFilter]);
+  }, [mainTab, ledgerTab, pageSize, statusFilter]);
 
-  const filteredOrders = useMemo(() => {
-    return data.orders.filter((row) => {
-      if (dateFrom && !row.orderedAt.startsWith(dateFrom)) return false;
-      if (statusFilter && row.status !== statusFilter) return false;
-      return true;
-    });
-  }, [data.orders, dateFrom, statusFilter]);
+  const token = useQuery(usageTokenOptions());
+  const orders = useQuery({
+    ...ordersOptions({ page, pageSize, ...(statusFilter ? { status: statusFilter } : {}) }),
+    enabled: mainTab === 'orders',
+    placeholderData: keepPreviousData,
+  });
+  const lots = useQuery({
+    ...creditLotsOptions({ page, pageSize }),
+    enabled: mainTab === 'ledger' && ledgerTab === 'acquired',
+    placeholderData: keepPreviousData,
+  });
+  const consumptions = useQuery({
+    ...accountConsumptionsOptions({ page, pageSize, type: 'consume,expire' }),
+    enabled: mainTab === 'ledger' && ledgerTab === 'consumed',
+    placeholderData: keepPreviousData,
+  });
 
-  const filteredAcquired = useMemo(() => {
-    return data.acquired.filter((row) => {
-      if (dateFrom && !row.acquiredAt.startsWith(dateFrom)) return false;
-      if (sourceFilter && row.source !== sourceFilter) return false;
-      return true;
-    });
-  }, [data.acquired, dateFrom, sourceFilter]);
-
-  const filteredConsumed = useMemo(() => {
-    return data.consumed.filter((row) => !dateFrom || row.consumedAt.startsWith(dateFrom));
-  }, [data.consumed, dateFrom]);
-
-  const filteredRefunded = useMemo(() => {
-    return data.refunded.filter((row) => !dateFrom || row.refundedAt.startsWith(dateFrom));
-  }, [data.refunded, dateFrom]);
-
-  const currentRows =
-    mainTab === 'orders'
-      ? filteredOrders
-      : ledgerTab === 'acquired'
-        ? filteredAcquired
-        : ledgerTab === 'consumed'
-          ? filteredConsumed
-          : filteredRefunded;
-  const total = currentRows.length;
+  const activeQuery =
+    mainTab === 'orders' ? orders : ledgerTab === 'acquired' ? lots : consumptions;
+  const total = activeQuery.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / pageSize) || 1);
   const safePage = Math.min(page, pageCount);
-  const start = (safePage - 1) * pageSize;
-  const pagedOrders = filteredOrders.slice(start, start + pageSize);
-  const pagedAcquired = filteredAcquired.slice(start, start + pageSize);
-  const pagedConsumed = filteredConsumed.slice(start, start + pageSize);
-  const pagedRefunded = filteredRefunded.slice(start, start + pageSize);
+  const pagerVisible = activeQuery.isSuccess && total > 0;
+
+  const nearestLot = token.data?.expiring?.[0];
 
   return (
     <div className={styles.page}>
@@ -189,7 +171,15 @@ export default function AccountCredits() {
         <h1 className={styles.title}>账户积分与订单</h1>
       </header>
 
-      <SummaryCards summary={data.summary} />
+      <SummaryCards
+        summary={{
+          balance: token.data?.credits ?? null,
+          validityMonths: null,
+          nearestLot: nearestLot
+            ? { remaining: nearestLot.credits, expiresAt: nearestLot.expires_at }
+            : null,
+        }}
+      />
 
       <section className={styles.panel}>
         <div className={styles.panelHead}>
@@ -210,7 +200,6 @@ export default function AccountCredits() {
               {([
                 ['acquired', '已获取'],
                 ['consumed', '已消耗'],
-                ['refunded', '已退回'],
               ] as const).map(([key, label]) => (
                 <button
                   key={key}
@@ -222,48 +211,30 @@ export default function AccountCredits() {
                 </button>
               ))}
             </div>
-            <span className={styles.subNote}>四类流水 · 一个业务动作一行</span>
+            <span className={styles.subNote}>一个业务动作一行</span>
           </div>
         )}
 
         <div className={styles.toolbar}>
-          <label className={styles.filter}>
-            <span>请选择日期</span>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          </label>
           {mainTab === 'orders' ? (
-            <FilterSelect
-              value={statusFilter}
-              onChange={(next) => setStatusFilter(next as '' | OrderStatus)}
-              options={[
-                { value: '', label: '全部状态' },
-                ...(Object.keys(ORDER_STATUS_LABEL) as OrderStatus[]).map((key) => ({
-                  value: key,
-                  label: ORDER_STATUS_LABEL[key],
-                })),
-              ]}
-            />
-          ) : ledgerTab === 'acquired' ? (
-            <FilterSelect value={sourceFilter} onChange={setSourceFilter} options={SOURCE_OPTIONS} />
+            <FilterSelect value={statusFilter} onChange={setStatusFilter} options={ORDER_STATUS_OPTIONS} />
           ) : null}
         </div>
 
         {mainTab === 'orders' ? (
-          <OrdersTable rows={pagedOrders} />
+          <OrdersTable query={orders} />
         ) : ledgerTab === 'acquired' ? (
-          <AcquiredTable rows={pagedAcquired} />
-        ) : ledgerTab === 'consumed' ? (
-          <ConsumedTable rows={pagedConsumed} />
+          <AcquiredTable query={lots} />
         ) : (
-          <RefundedTable rows={pagedRefunded} />
+          <ConsumedTable query={consumptions} />
         )}
 
         <div className={styles.pager}>
-          <button type="button" className={styles.pageBtn} disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+          <button type="button" className={styles.pageBtn} disabled={!pagerVisible || safePage <= 1} onClick={() => setPage(safePage - 1)}>
             上一页
           </button>
           <span className={styles.pageCurrent}>{safePage}</span>
-          <button type="button" className={styles.pageBtn} disabled={safePage >= pageCount} onClick={() => setPage(safePage + 1)}>
+          <button type="button" className={styles.pageBtn} disabled={!pagerVisible || safePage >= pageCount} onClick={() => setPage(safePage + 1)}>
             下一页
           </button>
           <span className={styles.pageSize}>
@@ -290,7 +261,31 @@ function EmptyRow({ cols }: { cols: number }) {
   );
 }
 
-function OrdersTable({ rows }: { rows: OrderRecord[] }) {
+function ErrorRow({ cols }: { cols: number }) {
+  return (
+    <tr>
+      <td colSpan={cols} className={styles.empty}>加载失败</td>
+    </tr>
+  );
+}
+
+function LoadingRow({ cols }: { cols: number }) {
+  return (
+    <tr>
+      <td colSpan={cols} className={styles.empty}>加载中…</td>
+    </tr>
+  );
+}
+
+function rowState<T>(query: { isPending: boolean; isError: boolean; data?: { items: T[] } }) {
+  if (query.isPending) return 'loading' as const;
+  if (query.isError) return 'error' as const;
+  return (query.data?.items.length ?? 0) === 0 ? 'empty' as const : 'rows' as const;
+}
+
+function OrdersTable({ query }: { query: { isPending: boolean; isError: boolean; data?: { items: OrderRow[] } } }) {
+  const state = rowState(query);
+  const rows = query.data?.items ?? [];
   return (
     <table className={styles.table}>
       <thead>
@@ -305,31 +300,36 @@ function OrdersTable({ rows }: { rows: OrderRecord[] }) {
         </tr>
       </thead>
       <tbody>
-        {rows.length === 0 ? <EmptyRow cols={7} /> : rows.map((row) => (
-          <tr key={row.id}>
-            <td>{row.orderedAt}</td>
-            <td>{row.productName}</td>
-            <td className={styles.mono}>{row.tradeNo}</td>
-            <td>{formatYuan(row.amountYuan)}</td>
-            <td>{formatCredits(row.creditsGranted)}</td>
-            <td>
-              <span className={`${styles.badge} ${ORDER_STATUS_CLASS[row.status]}`}>
-                {ORDER_STATUS_LABEL[row.status]}
-              </span>
-            </td>
-            <td>
-              <button type="button" className={styles.copyBtn} onClick={() => copyText(row.tradeNo)}>
-                复制订单号
-              </button>
-            </td>
-          </tr>
-        ))}
+        {state === 'loading' ? <LoadingRow cols={7} />
+          : state === 'error' ? <ErrorRow cols={7} />
+          : state === 'empty' ? <EmptyRow cols={7} />
+          : rows.map((row) => (
+            <tr key={row.trade_no}>
+              <td>{dash(row.created_at)}</td>
+              <td>{row.product_name}</td>
+              <td className={styles.mono}>{row.trade_no}</td>
+              <td>{fenToYuan(row.amount_fen)}</td>
+              <td>{row.status === 'paid' ? formatCredits(row.credits + row.bonus_credits) : '—'}</td>
+              <td>
+                <span className={`${styles.badge} ${ORDER_STATUS_CLASS[row.status] ?? styles.statusMuted}`}>
+                  {ORDER_STATUS_LABEL[row.status] ?? row.status}
+                </span>
+              </td>
+              <td>
+                <button type="button" className={styles.copyBtn} onClick={() => copyText(row.trade_no)}>
+                  复制订单号
+                </button>
+              </td>
+            </tr>
+          ))}
       </tbody>
     </table>
   );
 }
 
-function AcquiredTable({ rows }: { rows: AcquiredRecord[] }) {
+function AcquiredTable({ query }: { query: { isPending: boolean; isError: boolean; data?: { items: CreditLotRow[] } } }) {
+  const state = rowState(query);
+  const rows = query.data?.items ?? [];
   return (
     <table className={styles.table}>
       <thead>
@@ -343,22 +343,34 @@ function AcquiredTable({ rows }: { rows: AcquiredRecord[] }) {
         </tr>
       </thead>
       <tbody>
-        {rows.length === 0 ? <EmptyRow cols={6} /> : rows.map((row) => (
-          <tr key={row.id}>
-            <td>{row.acquiredAt}</td>
-            <td><span className={styles.tag}>{row.source}</span></td>
-            <td>{row.detail}</td>
-            <td>{dash(row.effectiveAt)}</td>
-            <td className={row.remaining != null ? styles.expireSoon : undefined}>{dash(row.expiresAt)}</td>
-            <td className={styles.plus}>{row.credits == null ? '—' : `+${formatCredits(row.credits)}`}</td>
-          </tr>
-        ))}
+        {state === 'loading' ? <LoadingRow cols={6} />
+          : state === 'error' ? <ErrorRow cols={6} />
+          : state === 'empty' ? <EmptyRow cols={6} />
+          : rows.map((row) => (
+            <tr key={row.lot_id}>
+              <td>{dash(row.created_at)}</td>
+              <td><span className={styles.tag}>{sourceLabel(row.source)}</span></td>
+              <td className={styles.mono}>{dash(row.biz_id)}</td>
+              <td>{dash(row.created_at)}</td>
+              <td className={isExpireSoon(row.expires_at) ? styles.expireSoon : undefined}>
+                {row.expires_at ? row.expires_at : '永久有效'}
+              </td>
+              <td className={styles.plus}>{row.amount == null ? '—' : `+${formatCredits(row.amount)}`}</td>
+            </tr>
+          ))}
       </tbody>
     </table>
   );
 }
 
-function ConsumedTable({ rows }: { rows: ConsumedRecord[] }) {
+function consumedTypeLabel(row: ConsumptionRow): string {
+  if (row.task_type) return taskTypeLabel(row.task_type);
+  return row.type === 'expire' ? '过期核销' : '—';
+}
+
+function ConsumedTable({ query }: { query: { isPending: boolean; isError: boolean; data?: { items: ConsumptionRow[] } } }) {
+  const state = rowState(query);
+  const rows = query.data?.items ?? [];
   return (
     <table className={styles.table}>
       <thead>
@@ -372,47 +384,19 @@ function ConsumedTable({ rows }: { rows: ConsumedRecord[] }) {
         </tr>
       </thead>
       <tbody>
-        {rows.length === 0 ? <EmptyRow cols={6} /> : rows.map((row) => (
-          <tr key={row.id}>
-            <td>{row.consumedAt}</td>
-            <td>
-              <span className={styles.tag}>{row.kind === 'expire' ? '过期核销' : row.taskType}</span>
-            </td>
-            <td>{dash(row.model)}</td>
-            <td>{dash(row.detail)}</td>
-            <td className={styles.mono}>{dash(row.taskId)}</td>
-            <td className={styles.minus}>{row.credits == null ? '—' : `-${formatCredits(row.credits)}`}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function RefundedTable({ rows }: { rows: RefundedRecord[] }) {
-  return (
-    <table className={styles.table}>
-      <thead>
-        <tr>
-          <th>返还时间</th>
-          <th>任务类型</th>
-          <th>模型</th>
-          <th>任务详情</th>
-          <th>任务 ID</th>
-          <th>返还积分</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 ? <EmptyRow cols={6} /> : rows.map((row) => (
-          <tr key={row.id}>
-            <td>{row.refundedAt}</td>
-            <td>{row.taskType}</td>
-            <td>{dash(row.model)}</td>
-            <td>{dash(row.detail)}</td>
-            <td className={styles.mono}>{dash(row.taskId)}</td>
-            <td className={styles.plus}>{row.credits == null ? '—' : `+${formatCredits(row.credits)}`}</td>
-          </tr>
-        ))}
+        {state === 'loading' ? <LoadingRow cols={6} />
+          : state === 'error' ? <ErrorRow cols={6} />
+          : state === 'empty' ? <EmptyRow cols={6} />
+          : rows.map((row) => (
+            <tr key={row.id}>
+              <td>{dash(row.created_at)}</td>
+              <td><span className={styles.tag}>{consumedTypeLabel(row)}</span></td>
+              <td>{row.model_label ?? row.model_id ?? '—'}</td>
+              <td>{formatSpecs(row.specs)}</td>
+              <td className={styles.mono}>{dash(row.job_id)}</td>
+              <td className={styles.minus}>{row.credits == null ? '—' : `-${formatCredits(row.credits)}`}</td>
+            </tr>
+          ))}
       </tbody>
     </table>
   );

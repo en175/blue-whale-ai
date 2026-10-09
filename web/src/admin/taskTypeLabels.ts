@@ -9,8 +9,13 @@ export const TASK_TYPE_LABELS: Record<string, string> = {
   image_outpaint: '智能扩图',
   image_cutout: '图片抠图',
   video_subtitle_erase: '视频去字幕',
+  video_enhance: 'HD 高清',
+  vocal_split: '人声背景分离',
+  video_scene_split: '场景切分',
   audio_trim: '音频截取',
   audio_mix: '音频混合',
+  audio_video_mux: '音视频合成',
+  audio_speed: '音频调速',
   video_frame_interpolation: '视频插帧',
   video_matting: '视频抠像',
 };
