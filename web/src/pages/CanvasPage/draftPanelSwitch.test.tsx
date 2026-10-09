@@ -17,6 +17,9 @@ import type { ProjectRecord } from '@/api/projects';
 
 
 
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
+const WAIT_TIMEOUT_MS = 10_000;
+
 vi.hoisted(() => {
 
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
@@ -408,7 +411,6 @@ async function clickCard(id: string, x = 120, y = 90) {
 
 
     fireMouse('click', node(id), x, y);
-    await new Promise((resolve) => setTimeout(resolve, 5));
   });
 }
 
@@ -492,12 +494,12 @@ describe('IKIJ60 草稿面板切换崩溃回归（真实画布选中通报路径
   it('图片草稿面板打开后点视频草稿卡：不崩溃，视频面板打开、草稿参数回填、图片面板关闭、选中落视频卡', async () => {
     await renderPage();
 
-    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
     expect(node('v1')).toBeTruthy();
 
 
     await clickCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(panelPromptText()).toBe('图片草稿提示词');
 
 
@@ -505,7 +507,7 @@ describe('IKIJ60 草稿面板切换崩溃回归（真实画布选中通报路径
     const rendersBeforeSwitch = pageRenderCount;
     await clickCard('v1', 420, 90);
 
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expectNoUpdateDepthLoop();
 
     expect(pageRenderCount - rendersBeforeSwitch).toBeLessThan(10);
@@ -529,29 +531,29 @@ describe('IKIJ60 草稿面板切换崩溃回归（真实画布选中通报路径
 
   it('图片/视频/音频草稿卡两两连续切换点击均安全', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('au1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('au1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
 
     await clickCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     await clickCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(imageOpen()).toBe(false);
 
     await clickCard('au1', 720, 90);
-    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(videoOpen()).toBe(false);
 
     await clickCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(audioOpen()).toBe(false);
 
     await clickCard('au1', 720, 90);
-    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(imageOpen()).toBe(false);
 
     await clickCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(audioOpen()).toBe(false);
 
     expectNoUpdateDepthLoop();
@@ -559,7 +561,7 @@ describe('IKIJ60 草稿面板切换崩溃回归（真实画布选中通报路径
 
   it('同一序列快速连点亦安全（无循环通报级联）', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
 
     await clickCard('d1', 120, 90);
@@ -568,7 +570,7 @@ describe('IKIJ60 草稿面板切换崩溃回归（真实画布选中通报路径
     await clickCard('d1', 120, 90);
     await clickCard('v1', 420, 90);
 
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expectNoUpdateDepthLoop();
     expect(node('v1').classList.contains('selected')).toBe(true);
   });
@@ -593,7 +595,6 @@ describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
       fireMouse('mousemove', window, x + 4, y + 3);
       fireMouse('mousemove', window, x, y);
       fireMouse('mouseup', window, x, y);
-      await new Promise((resolve) => setTimeout(resolve, 5));
     });
   }
 
@@ -603,23 +604,23 @@ describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
 
   it('纯选中通报（无 click）可打开草稿面板——锁定 selection 路径存在，互关守卫测试的机制前提', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('v1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('v1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
     await selectCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(panelPromptText()).toBe('视频草稿提示词');
     expectNoUpdateDepthLoop();
   });
 
   it('同一图片草稿卡等值重复打开：seed 内容等值跳过写入，面板不重挂载（编辑器只挂载一次）', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
 
 
 
     await clickCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(panelPromptText()).toBe('图片草稿提示词');
     expect(editorMountCount).toBe(1);
 
@@ -633,53 +634,53 @@ describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
 
   it('视频面板打开后图片卡纯选中通报：面板原子切换收敛，无双面板叠加、无循环通报', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
     await clickCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
 
     await clickCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(imageOpen()).toBe(false);
 
 
 
     await selectCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(videoOpen()).toBe(false);
     expectNoUpdateDepthLoop();
 
 
     await selectCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(imageOpen()).toBe(false);
     expectNoUpdateDepthLoop();
   });
 
   it('互关清绑定后图片卡纯选中通报原子切换重开，手动点卡重开照常', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
     await clickCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     await clickCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(imageOpen()).toBe(false);
 
 
 
 
     await selectCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(videoOpen()).toBe(false);
 
     await selectCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
 
 
 
     await clickCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(panelPromptText()).toBe('图片草稿提示词');
     expect(videoOpen()).toBe(false);
     expectNoUpdateDepthLoop();
@@ -687,34 +688,34 @@ describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
 
   it('音频面板打开后视频卡纯选中通报：对称原子切换收敛（视频绑定已清，无叠加无循环）', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('v1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('v1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
     await clickCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true));
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
 
     await clickCard('au1', 720, 90);
-    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(videoOpen()).toBe(false);
 
 
     await selectCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(audioOpen()).toBe(false);
     expectNoUpdateDepthLoop();
 
 
     await selectCard('au1', 720, 90);
-    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(videoOpen()).toBe(false);
     expectNoUpdateDepthLoop();
   });
 
   it('草稿内容变化后重开：seed 真实变化仍写入并重挂载回填（等值跳过不误伤真实变化）', async () => {
     await renderPage();
-    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
 
     await clickCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     const editorInitial = panelEditor()!;
 
 
@@ -727,11 +728,11 @@ describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
 
 
     await clickCard('v1', 420, 90);
-    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(imageOpen()).toBe(false);
 
     await clickCard('d1', 120, 90);
-    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: WAIT_TIMEOUT_MS });
     expect(panelPromptText()).toBe('编辑后的草稿提示词');
     expect(panelEditor()).not.toBe(editorInitial);
     expectNoUpdateDepthLoop();

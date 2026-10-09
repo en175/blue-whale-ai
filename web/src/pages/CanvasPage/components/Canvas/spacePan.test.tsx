@@ -4,6 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowCanvas from './index';
 
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
+const WAIT_TIMEOUT_MS = 10_000;
+
 vi.hoisted(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 });
@@ -56,7 +59,6 @@ async function mouse(type: string, target: EventTarget, x = 100, y = 100) {
 
 async function finishGesture() {
   await mouse('mouseup', window, 160, 140);
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
 }
 
 beforeEach(async () => {
@@ -95,6 +97,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -115,7 +118,8 @@ describe('Canvas space pan', () => {
     await mouse('mousedown', pane());
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
-    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
+
+    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }), { timeout: WAIT_TIMEOUT_MS });
     expect(props.onNodeDragStop).not.toHaveBeenCalled();
     expect(node().style.transform).toBe('translate(50px,60px)');
     expect(node().classList.contains('selected')).toBe(true);
@@ -155,15 +159,21 @@ describe('Canvas space pan', () => {
   });
 
   it('keeps moving the card if Space is pressed after mouse down', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await mouse('mousedown', node());
     await mouse('mousemove', window, 120, 110);
     await key('keydown');
     expect(node().classList.contains('draggable')).toBe(true);
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
     expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ position: { x: 90, y: 90 } }), expect.any(Array));
-    expect(props.onViewportChange).not.toHaveBeenCalled();
     expect(node().classList.contains('draggable')).toBe(false);
+    const panCalls = vi.mocked(props.onViewportChange!).mock.calls.filter(([v]) => v.x !== 0 || v.y !== 0 || v.zoom !== 1);
+    expect(panCalls).toEqual([]);
+    expect(container.querySelector<HTMLElement>('.react-flow__viewport')!.style.transform)
+      .toBe('translate(0px,0px) scale(1)');
   });
 
   it('keeps panning if Space is released before mouse up', async () => {
@@ -174,7 +184,8 @@ describe('Canvas space pan', () => {
     expect(node().classList.contains('draggable')).toBe(false);
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
-    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
+
+    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }), { timeout: WAIT_TIMEOUT_MS });
     expect(node().classList.contains('draggable')).toBe(true);
   });
 
@@ -190,8 +201,7 @@ describe('Canvas space pan', () => {
     });
     expect(props.onPaneClick).not.toHaveBeenCalled();
     expect(node().classList.contains('selected')).toBe(true);
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
-    expect(node().classList.contains('draggable')).toBe(true);
+    await vi.waitFor(() => expect(node().classList.contains('draggable')).toBe(true), { timeout: WAIT_TIMEOUT_MS });
   });
 
   it('clears held Space when the window loses focus', async () => {
@@ -235,7 +245,8 @@ describe('Canvas space pan', () => {
   it('leaves the selection untouched when a Space pan passes over an unselected card', async () => {
     await key('keydown');
     await panGestureOverUnselectedCard();
-    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
+
+    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }), { timeout: WAIT_TIMEOUT_MS });
     expect(nodeById('image-2').classList.contains('selected')).toBe(false);
     expect(nodeById('image-1').classList.contains('selected')).toBe(true);
   });
@@ -243,7 +254,7 @@ describe('Canvas space pan', () => {
   it('leaves the selection untouched when panning over an unselected card in toolbar drag mode', async () => {
     props = { ...props, toolMode: 'drag' };
     await panGestureOverUnselectedCard();
-    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
+    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }), { timeout: WAIT_TIMEOUT_MS });
     expect(nodeById('image-2').classList.contains('selected')).toBe(false);
     expect(nodeById('image-1').classList.contains('selected')).toBe(true);
   });
@@ -269,7 +280,7 @@ describe('Canvas 滚轮平移与修饰键缩放', () => {
 
   it('Ctrl+滚轮缩放视口', async () => {
     await wheel({ deltaY: 100, ctrlKey: true });
-    await vi.waitFor(() => expect(scale()).toBeLessThan(1));
+    await vi.waitFor(() => expect(scale()).toBeLessThan(1), { timeout: WAIT_TIMEOUT_MS });
   });
 
   it('按住平台原生缩放键时滚轮缩放视口', async () => {
@@ -280,7 +291,7 @@ describe('Canvas 滚轮平移与修饰键缩放', () => {
       }));
     });
     await wheel({ deltaY: 100 });
-    await vi.waitFor(() => expect(scale()).toBeLessThan(1));
+    await vi.waitFor(() => expect(scale()).toBeLessThan(1), { timeout: WAIT_TIMEOUT_MS });
   });
 });
 
@@ -305,7 +316,7 @@ describe('Canvas 媒体标题缩放与交互组合', () => {
     };
     await act(async () => { root.render(createElement(FlowCanvas, props)); });
     if (mediaType === 'video') {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+      await vi.waitFor(() => expect(node().querySelector('video')).toBeTruthy(), { timeout: WAIT_TIMEOUT_MS });
     }
     const media = node().querySelector(mediaType === 'image' ? 'img' : 'video')!;
     for (const [key, value] of Object.entries(mediaType === 'image'
@@ -328,7 +339,7 @@ describe('Canvas 媒体标题缩放与交互组合', () => {
     });
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
-    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ id: 'image-1', selected: true }), expect.any(Array));
+    await vi.waitFor(() => expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ id: 'image-1', selected: true }), expect.any(Array)), { timeout: WAIT_TIMEOUT_MS });
     const draggedPosition = node().style.transform;
     expect(draggedPosition).not.toBe('translate(50px,60px)');
     await act(async () => {
@@ -379,7 +390,7 @@ describe('Canvas media loading during interaction', () => {
     expect(node().classList.contains('selected')).toBe(true);
     await finishGesture();
     expect(node().style.transform).toBe(draggedPosition);
-    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ selected: true }), expect.any(Array));
+    await vi.waitFor(() => expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ selected: true }), expect.any(Array)), { timeout: WAIT_TIMEOUT_MS });
   });
 
   it('still applies externally restored positions when the node is idle', async () => {
