@@ -244,67 +244,63 @@ describe("AccountController.consumptions（billing 账本）", () => {
       specs: { resolution: "1080p", duration: "5" },
       lot_source: null,
       lot_created_at: null,
-      detail: "—",
+      detail: "1080p · 5s",
     });
   });
 
-  it("★ 任务详情由后端拼好：取提示词 / 任务在但无提示词取「—」/ 查不到任务回落 title", async () => {
+  it("★ 任务详情由后端拼好：规格 + 提示词，缺哪段留哪段", async () => {
+    const consumeRow = (
+      id: string,
+      jobId: string | null,
+      title: string,
+    ) => ({
+      id,
+      type: "consume",
+      direction: "out",
+      title,
+      credits: 1,
+      status: "done",
+      createdAt: "2026-09-25T10:00:00+08:00",
+      settledAt: "2026-09-25T10:01:00+08:00",
+      generationJobId: jobId,
+      lotSource: "",
+      lotCreatedAt: "",
+    });
     listTransactions.mockResolvedValue(
       page([
-        {
-          id: "res:1",
-          type: "consume",
-          direction: "out",
-          title: "T1",
-          credits: 1,
-          status: "done",
-          createdAt: "2026-09-25T10:00:00+08:00",
-          settledAt: "2026-09-25T10:01:00+08:00",
-          generationJobId: "1",
-          lotSource: "",
-          lotCreatedAt: "",
-        },
-        {
-          id: "res:2",
-          type: "consume",
-          direction: "out",
-          title: "T2",
-          credits: 1,
-          status: "done",
-          createdAt: "2026-09-25T10:00:00+08:00",
-          settledAt: "2026-09-25T10:01:00+08:00",
-          generationJobId: "2",
-          lotSource: "",
-          lotCreatedAt: "",
-        },
-        {
-          id: "res:3",
-          type: "consume",
-          direction: "out",
-          title: "T3",
-          credits: 1,
-          status: "done",
-          createdAt: "2026-09-25T10:00:00+08:00",
-          settledAt: "2026-09-25T10:01:00+08:00",
-          generationJobId: "9",
-          lotSource: "",
-          lotCreatedAt: "",
-        },
+        consumeRow("res:1", "1", "T1"),
+        consumeRow("res:2", "2", "T2"),
+        consumeRow("res:3", "3", "T3"),
+        consumeRow("res:4", "4", "T4"),
+        consumeRow("res:5", "9", "T5"),
       ]),
     );
     loadTaskSummaries.mockResolvedValue(
       new Map([
-        ["1", { type: "video", modelId: "m", modelLabel: "M", prompt: "一只鲸鱼跃出水面", specs: null }],
-        ["2", { type: "video", modelId: "m", modelLabel: "M", prompt: null, specs: null }],
+        [
+          "1",
+          {
+            type: "video",
+            modelId: "m",
+            modelLabel: "M",
+            prompt: "一只鲸鱼跃出水面",
+            specs: { resolution: "1080p", duration: "5", size: "1024x1024" },
+          },
+        ],
+        ["2", { type: "video", modelId: "m", modelLabel: "M", prompt: null, specs: { size: "1024x1024" } }],
+        ["3", { type: "video", modelId: "m", modelLabel: "M", prompt: "只有提示词", specs: null }],
+        ["4", { type: "video", modelId: "m", modelLabel: "M", prompt: null, specs: null }],
       ]),
     );
 
     const items = (await controller.consumptions(USER, {})).data.items;
 
     expect(items.map((item: { detail: string }) => item.detail)).toEqual([
-      "一只鲸鱼跃出水面",
+      "1080p · 1024x1024 · 5s · 一只鲸鱼跃出水面",
+      "1024x1024",
+      "只有提示词",
       "—",
-      "T3",
+      "T5",
     ]);
   });
 
