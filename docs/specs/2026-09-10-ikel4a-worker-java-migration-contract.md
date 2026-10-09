@@ -248,6 +248,7 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 ### 13.1 包分层与类名后缀
 
 - 分层：`application`（processor / consumer / service）、`domain`（entity / dto / error）、`infrastructure`（mapper / gateway / storage / media / audio / credential / mq）、`config`（装配）、`web`（健康检查）。
+- **⚠️ 上一行已被本文件 §22 修正七覆盖**：`config` → `infrastructure/config`、`web` → `api`、`infrastructure/mapper` → `infrastructure/persistence/mapper`。读本节分层前先看 §22。
 - 后缀统一表：
 
   | 后缀 | 所在层 | 含义与禁令 |
