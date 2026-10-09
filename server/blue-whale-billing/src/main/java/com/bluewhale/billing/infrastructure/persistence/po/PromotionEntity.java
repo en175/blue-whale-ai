@@ -35,7 +35,6 @@ public class PromotionEntity {
 
     private String daysOfWeek;
 
-    private String tz;
 
     private String status;
 
@@ -73,8 +72,6 @@ public class PromotionEntity {
     public void setDailyTimeEnd(LocalTime dailyTimeEnd) { this.dailyTimeEnd = dailyTimeEnd; }
     public String getDaysOfWeek() { return daysOfWeek; }
     public void setDaysOfWeek(String daysOfWeek) { this.daysOfWeek = daysOfWeek; }
-    public String getTz() { return tz; }
-    public void setTz(String tz) { this.tz = tz; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public Integer getPriority() { return priority; }

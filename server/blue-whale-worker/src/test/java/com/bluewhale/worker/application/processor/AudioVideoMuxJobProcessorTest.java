@@ -4,7 +4,6 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
@@ -31,6 +30,7 @@ import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -182,7 +182,7 @@ class AudioVideoMuxJobProcessorTest {
         frozen.put("estimated_duration_ms", 20L * 60 * 60 * 1000);
         ClaimedJob longJob = new ClaimedJob(
                 "70", "5", "9", frozen, "audio_video_mux", "provider-1", false, "worker-1", 3L, 18000, 0,
-                WorkerClock.now().minusHours(25), null, null);
+                LocalDateTime.now().minusHours(25), null, null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(longJob));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
@@ -204,7 +204,7 @@ class AudioVideoMuxJobProcessorTest {
         frozen.put("estimated_duration_ms", 60L * 60 * 1000);
         ClaimedJob stale = new ClaimedJob(
                 "70", "5", "9", frozen, "audio_video_mux", "provider-1", false, "worker-1", 3L, 300, 0,
-                WorkerClock.now().minusHours(25), null, null);
+                LocalDateTime.now().minusHours(25), null, null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(stale));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
@@ -226,7 +226,7 @@ class AudioVideoMuxJobProcessorTest {
         frozen.put("estimated_duration_ms", 400L * 24 * 60 * 60 * 1000);
         ClaimedJob ancient = new ClaimedJob(
                 "70", "5", "9", frozen, "audio_video_mux", "provider-1", false, "worker-1", 3L, 300, 0,
-                WorkerClock.now().minusDays(366), null, null);
+                LocalDateTime.now().minusDays(366), null, null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(ancient));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
@@ -247,7 +247,7 @@ class AudioVideoMuxJobProcessorTest {
         frozen.put("estimated_duration_ms", 60L * 60 * 1000);
         ClaimedJob retry = new ClaimedJob(
                 "70", "5", "9", frozen, "audio_video_mux", "provider-2", false, "worker-1", 9L, 1, 0,
-                WorkerClock.now().minusDays(3), WorkerClock.now().plusHours(23), null);
+                LocalDateTime.now().minusDays(3), LocalDateTime.now().plusHours(23), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(retry));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(9L))).thenReturn(false);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen");

@@ -1,6 +1,6 @@
 package com.bluewhale.billing.api.dto;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 public record GrantRequest(
         long userId,
@@ -9,7 +9,7 @@ public record GrantRequest(
         String bizId,
         String bizType,
         String grantKey,
-        Instant expiresAt
+        LocalDateTime expiresAt
 ) {
     public GrantRequest {
         if (bizId == null || bizId.isBlank()) {

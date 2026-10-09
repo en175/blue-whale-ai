@@ -13,7 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIfEnvironmentVariable(named = "BILLING_DB_PASSWORD", matches = ".+")
 class CatalogIntegrationTest {
 
-    private static final Instant T = Instant.parse("2026-10-15T22:30:00+08:00");
+    private static final LocalDateTime T = LocalDateTime.parse("2026-10-15T22:30:00");
 
     @Autowired
     private JdbcTemplate jdbc;

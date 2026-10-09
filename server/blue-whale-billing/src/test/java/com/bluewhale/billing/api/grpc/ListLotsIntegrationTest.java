@@ -21,7 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
@@ -109,7 +109,7 @@ class ListLotsIntegrationTest {
     void 用光与已过期的批次依然在台账里() {
         long usedUp = credits.grant(USER, CreditSource.GIFT, 500, null, "grant", "g1", "lot-used");
         long expired = credits.grant(USER, CreditSource.DAILY, 300,
-                Instant.now().minus(1, ChronoUnit.DAYS), "grant", "g2", "lot-expired");
+                LocalDateTime.now().minus(1, ChronoUnit.DAYS), "grant", "g2", "lot-expired");
 
         jdbc.update("UPDATE billing_credit_lots SET remaining = 0 WHERE id = ?", usedUp);
 
@@ -139,7 +139,7 @@ class ListLotsIntegrationTest {
     @Test
     void 有效期批次_到期时间非空() {
         credits.grant(USER, CreditSource.PURCHASED, 600,
-                Instant.now().plus(730, ChronoUnit.DAYS), "recharge", "BW-4", "lot-dated");
+                LocalDateTime.now().plus(730, ChronoUnit.DAYS), "recharge", "BW-4", "lot-dated");
 
         assertThat(list(USER, 20, 1).getItemsList().get(0).getExpiresAt()).isNotBlank();
     }

@@ -145,7 +145,7 @@ public class JobStateMachineService {
     public boolean updateMediaExtractProgress(UpdateMediaExtractProgressDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
         int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.updateMediaExtractProgress(
                 jobIdLong, input.workerId(), input.fencingToken(),
                 clampedProgress, leaseExpiresAt);
@@ -154,19 +154,19 @@ public class JobStateMachineService {
 
     public boolean renewAudioMixLease(String jobId, String workerId, long fencingToken) {
         return jobMapper.renewAudioMixLease(Long.parseLong(jobId), workerId,
-                fencingToken, WorkerClock.now().plusSeconds(420)) == 1;
+                fencingToken, LocalDateTime.now().plusSeconds(420)) == 1;
     }
 
     public boolean renewAudioVideoMuxLease(String jobId, String workerId, long fencingToken) {
         return jobMapper.renewAudioVideoMuxLease(Long.parseLong(jobId), workerId,
-                fencingToken, WorkerClock.now().plusSeconds(420)) == 1;
+                fencingToken, LocalDateTime.now().plusSeconds(420)) == 1;
     }
 
     public boolean updateVideoSceneSplitProgress(
             com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
         int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
-        LocalDateTime leaseExpiresAt = WorkerClock.now()
+        LocalDateTime leaseExpiresAt = LocalDateTime.now()
                 .plusSeconds(VIDEO_SCENE_SPLIT_PROGRESS_LEASE_SECONDS);
         int affected = jobMapper.updateVideoSceneSplitProgress(
                 jobIdLong, input.workerId(), input.fencingToken(),
@@ -178,7 +178,7 @@ public class JobStateMachineService {
             com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
         int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
-        LocalDateTime leaseExpiresAt = WorkerClock.now()
+        LocalDateTime leaseExpiresAt = LocalDateTime.now()
                 .plusSeconds(VIDEO_MATTING_PROGRESS_LEASE_SECONDS);
         int affected = jobMapper.updateVideoMattingProgress(
                 jobIdLong, input.workerId(), input.fencingToken(),
@@ -200,7 +200,7 @@ public class JobStateMachineService {
     public boolean markProviderSubmitted(String jobId, String workerId,
                                       long fencingToken, String providerTaskId) {
         Long jobIdLong = Long.parseLong(jobId);
-        LocalDateTime nextPollAt = WorkerClock.now().plusNanos(5_000L * 1_000_000);
+        LocalDateTime nextPollAt = LocalDateTime.now().plusNanos(5_000L * 1_000_000);
         int affected = jobMapper.markProviderSubmitted(jobIdLong, workerId, fencingToken, providerTaskId, nextPollAt);
         if (affected != 1) {
             log.warn("[video] markProviderSubmitted 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -221,7 +221,7 @@ public class JobStateMachineService {
 
     public boolean reserveParentReuseSubmit(String jobId, String workerId, long fencingToken) {
         try {
-            LocalDateTime leaseExpiresAt = WorkerClock.now()
+            LocalDateTime leaseExpiresAt = LocalDateTime.now()
                     .plusSeconds(PARENT_REUSE_SUBMIT_LEASE_SECONDS);
             boolean reserved = jobMapper.reserveParentReuseSubmit(
                     Long.parseLong(jobId), workerId, fencingToken, leaseExpiresAt) == 1;
@@ -245,7 +245,7 @@ public class JobStateMachineService {
                                        long fencingToken, int progress, long delayMs) {
         Long jobIdLong = Long.parseLong(jobId);
         int clamped = Math.max(0, Math.min(99, progress));
-        LocalDateTime now = WorkerClock.now();
+        LocalDateTime now = LocalDateTime.now();
         LocalDateTime nextPollAt = now.plusNanos(delayMs * 1_000_000);
         int affected = jobMapper.rescheduleProviderPoll(jobIdLong, workerId, fencingToken, clamped, now, nextPollAt);
         if (affected != 1) {
@@ -291,7 +291,7 @@ public class JobStateMachineService {
         if (payload != null) {
             logEntry.setPayload(toJson(payload));
         }
-        logEntry.setOccurredAt(WorkerClock.now());
+        logEntry.setOccurredAt(LocalDateTime.now());
         jobLogMapper.insert(logEntry);
     }
 

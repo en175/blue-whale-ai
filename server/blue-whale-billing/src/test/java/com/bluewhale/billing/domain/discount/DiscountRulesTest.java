@@ -108,17 +108,6 @@ class DiscountRulesTest {
 
 
     @Test
-    void 时区真的解析一次_不是看它非空就放行() {
-        assertThat(DiscountRules.timezone("Asia/Shanghai")).isEqualTo("Asia/Shanghai");
-        assertThatThrownBy(() -> DiscountRules.timezone("Asia/Shangahi"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("时区名不合法");
-        assertThatThrownBy(() -> DiscountRules.timezone(null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("时区必填");
-    }
-
-    @Test
     void 时间窗必须严格递增_区间是左闭右开() {
         LocalDateTime start = LocalDateTime.of(2026, 9, 25, 0, 0);
         DiscountRules.window(start, start.plusHours(1));

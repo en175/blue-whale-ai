@@ -65,18 +65,16 @@ describe('条件的人话', () => {
         daysOfWeek: null,
         dailyTimeStart: null,
         dailyTimeEnd: null,
-        tz: 'Asia/Shanghai',
       }),
-    ).toBe('每天 全天（Asia/Shanghai）');
+    ).toBe('每天 全天');
 
     expect(
       describeSchedule({
         daysOfWeek: [1, 5],
         dailyTimeStart: '22:00:00',
         dailyTimeEnd: '06:00:00',
-        tz: 'Asia/Shanghai',
       }),
-    ).toBe('周一、周五 22:00–06:00（Asia/Shanghai）');
+    ).toBe('周一、周五 22:00–06:00');
   });
 
   it('库里的 22:00:00 在界面上说成 22:00', () => {

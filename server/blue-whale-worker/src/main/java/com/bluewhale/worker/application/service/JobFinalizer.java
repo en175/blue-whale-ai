@@ -979,9 +979,6 @@ public class JobFinalizer {
         }
         asset.setSource("generated");
         asset.setStatus("normal");
-        LocalDateTime now = WorkerClock.now();
-        asset.setGmtCreate(now);
-        asset.setGmtModified(now);
         asset.setVersion(0);
         asset.setIsDelete(false);
         return asset;
@@ -997,7 +994,7 @@ public class JobFinalizer {
         if (payload != null) {
             logEntry.setPayload(toJson(payload));
         }
-        logEntry.setOccurredAt(WorkerClock.now());
+        logEntry.setOccurredAt(LocalDateTime.now());
         jobLogMapper.insert(logEntry);
     }
 

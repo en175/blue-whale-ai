@@ -1,6 +1,6 @@
 package com.bluewhale.billing.application.view;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public record TransactionView(
@@ -13,8 +13,8 @@ public record TransactionView(
         Long reservedCredits,
         Long generationJobId,
         String status,
-        Instant createdAt,
-        Instant settledAt
+        LocalDateTime createdAt,
+        LocalDateTime settledAt
 ) {
 
     public record Page(List<TransactionView> items, long total) {

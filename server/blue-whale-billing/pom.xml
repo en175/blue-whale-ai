@@ -121,6 +121,7 @@
       <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
+          <argLine>-Duser.timezone=Asia/Shanghai</argLine>
           <systemPropertyVariables>
             <billing.grpc.enabled>false</billing.grpc.enabled>
             <billing.mq.enabled>false</billing.mq.enabled>

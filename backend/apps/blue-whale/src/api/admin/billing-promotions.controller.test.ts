@@ -29,7 +29,6 @@ const VALID_BODY = {
   dailyTimeStart: "22:00",
   dailyTimeEnd: "06:00",
   daysOfWeek: [1, 5],
-  tz: "Asia/Shanghai",
   status: "draft",
   priority: 0,
 };

@@ -48,7 +48,8 @@ class PromptPlanVideoIntegrationTest {
             source.setJdbcUrl(System.getenv("IKETSX_JDBC_URL"));
             source.setUsername("root");
             source.setMaximumPoolSize(3);
-            source.setConnectionInitSql("SET time_zone='+08:00'");
+            source.addDataSourceProperty("connectionTimeZone", "Asia/Shanghai");
+            source.addDataSourceProperty("forceConnectionTimeZoneToSession", "true");
             return source;
         }
         @Bean

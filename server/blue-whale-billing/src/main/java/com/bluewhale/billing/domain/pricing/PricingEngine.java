@@ -1,6 +1,6 @@
 package com.bluewhale.billing.domain.pricing;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 public final class PricingEngine {
 
@@ -21,17 +21,17 @@ public final class PricingEngine {
         return new PricingEngine(catalog, new MediaPricingCalculator(discounts));
     }
 
-    public PricingResult compute(PricingRequest request, Usage usage, Instant submitAt) {
+    public PricingResult compute(PricingRequest request, Usage usage, LocalDateTime submitAt) {
         var outcome = calculator.computeDetailed(context(request, usage, submitAt));
         return resultOf(request, outcome);
     }
 
-    public PricingResult computeAtCap(PricingRequest request, Instant submitAt) {
+    public PricingResult computeAtCap(PricingRequest request, LocalDateTime submitAt) {
         var outcome = calculator.capDetailed(context(request, Usage.empty(), submitAt));
         return resultOf(request, outcome);
     }
 
-    private PricingContext context(PricingRequest request, Usage usage, Instant submitAt) {
+    private PricingContext context(PricingRequest request, Usage usage, LocalDateTime submitAt) {
         CompiledRule rule = catalog.lookup(request.modelId(), request.taskType());
         if (rule == null) {
             throw new RuleNotFoundException(request.modelId(), request.taskType());

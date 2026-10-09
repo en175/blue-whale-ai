@@ -93,6 +93,12 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <argLine>-Duser.timezone=Asia/Shanghai</argLine>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>

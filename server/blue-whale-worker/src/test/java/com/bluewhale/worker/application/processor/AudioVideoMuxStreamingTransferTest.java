@@ -4,7 +4,6 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
@@ -42,6 +41,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -182,7 +182,7 @@ class AudioVideoMuxStreamingTransferTest {
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         ClaimedJob claim = new ClaimedJob(
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
-                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+                LocalDateTime.now(), LocalDateTime.now().plusMinutes(10), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
@@ -226,7 +226,7 @@ class AudioVideoMuxStreamingTransferTest {
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         ClaimedJob claim = new ClaimedJob(
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
-                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+                LocalDateTime.now(), LocalDateTime.now().plusMinutes(10), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
@@ -263,7 +263,7 @@ class AudioVideoMuxStreamingTransferTest {
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         ClaimedJob claim = new ClaimedJob(
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
-                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+                LocalDateTime.now(), LocalDateTime.now().plusMinutes(10), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false, true, true);
@@ -301,7 +301,7 @@ class AudioVideoMuxStreamingTransferTest {
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         ClaimedJob claim = new ClaimedJob(
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
-                WorkerClock.now(), WorkerClock.now().plusNanos(300_000_000), null);
+                LocalDateTime.now(), LocalDateTime.now().plusNanos(300_000_000), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
@@ -334,7 +334,7 @@ class AudioVideoMuxStreamingTransferTest {
         TOSV2 tosClient = tosStandin();
         ClaimedJob claim = new ClaimedJob(
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
-                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+                LocalDateTime.now(), LocalDateTime.now().plusMinutes(10), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(upstreamCredential.requireKey()).thenReturn("sk-frozen");
@@ -583,7 +583,7 @@ class AudioVideoMuxStreamingTransferTest {
         TOSV2 tosClient = tosStandin();
         ClaimedJob claim = new ClaimedJob(
                 "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
-                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+                LocalDateTime.now(), LocalDateTime.now().plusMinutes(10), null);
         when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false)

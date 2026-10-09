@@ -28,7 +28,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -410,7 +410,7 @@ class ListTransactionsIntegrationTest {
     @Test
     void 过期核销_走真实核销路径_流水里出一行积分过期() {
         long lot = credits.grant(USER, CreditSource.GIFT, 700,
-                Instant.now().minus(1, ChronoUnit.HOURS), "grant", "exp-live", "exp-live");
+                LocalDateTime.now().minus(1, ChronoUnit.HOURS), "grant", "exp-live", "exp-live");
 
         CreditExpirySweeper.SweepResult result = expirySweeper.sweepOnce();
         assertThat(result.expiredCredits()).as("到期的 700 分应被核销").isEqualTo(700);

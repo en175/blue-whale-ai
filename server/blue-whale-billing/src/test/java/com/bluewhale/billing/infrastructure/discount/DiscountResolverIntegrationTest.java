@@ -16,7 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,9 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIfEnvironmentVariable(named = "BILLING_DB_PASSWORD", matches = ".+")
 class DiscountResolverIntegrationTest {
 
-    private static final Instant NIGHT = Instant.parse("2026-10-15T22:30:00+08:00");
-    private static final Instant AFTERNOON = Instant.parse("2026-10-15T15:00:00+08:00");
-    private static final Instant WEEKEND_NIGHT = Instant.parse("2026-10-17T22:30:00+08:00");
+    private static final LocalDateTime NIGHT = LocalDateTime.parse("2026-10-15T22:30:00");
+    private static final LocalDateTime AFTERNOON = LocalDateTime.parse("2026-10-15T15:00:00");
+    private static final LocalDateTime WEEKEND_NIGHT = LocalDateTime.parse("2026-10-17T22:30:00");
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private CatalogHolder catalog;
@@ -51,7 +51,7 @@ class DiscountResolverIntegrationTest {
         catalog.reload();
     }
 
-    private PricingContext ctx(String tier, String model, String task, Instant at) {
+    private PricingContext ctx(String tier, String model, String task, LocalDateTime at) {
         return new PricingContext(
                 CompiledRule.of(UsageDim.CONSTANT_ONE,
                         new com.bluewhale.billing.domain.pricing.BasePriceResolver.Constant(10_000L), 1L),

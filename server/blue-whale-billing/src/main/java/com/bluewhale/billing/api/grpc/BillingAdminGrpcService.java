@@ -6,7 +6,6 @@ import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.view.TransactionView;
 import com.bluewhale.billing.application.CatalogCompiler;
 import com.bluewhale.billing.application.CatalogHolder;
-import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.contracts.billing.v1.AdminConsumedCreditsRequest;
 import com.bluewhale.contracts.billing.v1.AdminConsumedCreditsResponse;
 import com.bluewhale.contracts.billing.v1.AdminExpiringLot;
@@ -28,8 +27,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -83,10 +83,10 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
                 .setTitle(view.title())
                 .setAmount(view.amount())
                 .setStatus(view.status())
-                .setCreatedAt(RFC3339.format(view.createdAt().atZone(DbTime.ZONE)))
+                .setCreatedAt(RFC3339.format(view.createdAt().atZone(ZoneId.systemDefault())))
                 .setSettledAt(view.settledAt() == null
                         ? ""
-                        : RFC3339.format(view.settledAt().atZone(DbTime.ZONE)));
+                        : RFC3339.format(view.settledAt().atZone(ZoneId.systemDefault())));
         if (view.reservedCredits() != null) {
             item.setReservedCredits(view.reservedCredits());
         }
@@ -109,7 +109,7 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
             for (BalanceView.ExpiringLot lot : balance.expiring()) {
                 response.addExpiring(AdminExpiringLot.newBuilder()
                         .setCredits(lot.credits())
-                        .setExpiresAt(RFC3339.format(lot.expiresAt().atZone(DbTime.ZONE)))
+                        .setExpiresAt(RFC3339.format(lot.expiresAt().atZone(ZoneId.systemDefault())))
                         .setSource(lot.source())
                         .build());
             }
@@ -144,8 +144,8 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
         try {
             observer.onNext(AdminConsumedCreditsResponse.newBuilder()
                     .setConsumedCredits(billing.consumedCredits(
-                            parseInstant("from", request.getFrom()),
-                            parseInstant("to", request.getTo())))
+                            parseLocalDateTime("from", request.getFrom()),
+                            parseLocalDateTime("to", request.getTo())))
                     .build());
             observer.onCompleted();
         } catch (RuntimeException e) {
@@ -169,12 +169,12 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
         }
     }
 
-    private static Instant parseInstant(String field, String raw) {
+    private static LocalDateTime parseLocalDateTime(String field, String raw) {
         if (raw == null || raw.isBlank()) {
             throw new IllegalArgumentException("统计区间参数缺失：from 与 to 都是必填的（缺 " + field + "）");
         }
         try {
-            return OffsetDateTime.parse(raw).toInstant();
+            return OffsetDateTime.parse(raw).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime();
         } catch (DateTimeParseException e) {
             throw new IllegalArgumentException(
                     "无法解析时间参数（须为带偏移的 RFC3339）：" + field + "=" + raw);

@@ -1,6 +1,6 @@
 # 全链路时间口径统一为北京时间（+08:00 墙钟字面量）
 
-**状态**：accepted（2026-09-21，IKHJ0Q）
+**状态**：accepted（2026-09-21，IKHJ0Q；含**修正一**：取消 Java 侧时区概念，见文末）
 
 规则一句话：**库里 `DATETIME` 列存的是北京时间墙钟字面量；保证它的三处机制必须同批次上线；上线必须停机切换，不能滚动发布。**
 
@@ -14,13 +14,14 @@
 
 ## 决定
 
-口径由三处**互不相干**的机制共同保证，**缺一不可**：
+口径由下列**互不相干**的机制共同保证，**缺一不可**：
 
 | 机制 | 位置 | 管什么 |
 | --- | --- | --- |
 | `@prisma/adapter-mariadb` 补丁 | `backend/patches/@prisma__adapter-mariadb@7.9.0.patch` | Node 侧 `DATETIME` 字面量的**读写偏移** |
 | `timezone: "+08:00"` | `backend/libs/shared/persistence/db.ts` `buildPoolConfig` | Node 侧连接**会话时区**（`NOW()` / `DEFAULT CURRENT_TIMESTAMP`） |
-| `WorkerClock` + `connectionInitSql` | `worker-java/.../WorkerClock`、`DataSourceConfig` | Java 侧写库时刻 + 会话时区 |
+| 容器 `TZ=Asia/Shanghai` | `server/blue-whale-worker/Dockerfile`、`server/blue-whale-billing/Dockerfile` | Java 侧写库时刻（`LocalDateTime.now()` 取 JVM 默认时区） |
+| `connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true` | worker 的 `DATABASE_URL` 查询串、billing 的 `BILLING_DB_URL` | Java 侧连接**会话时区**（`NOW()` / `DEFAULT CURRENT_TIMESTAMP`） |
 
 **只做一半会造成同一行内 8 小时撕裂**：`gmt_create` 走 DDL 默认值（会话时区生效）写北京，而 `gmt_modified` 走应用侧 `new Date()`（补丁生效）写 UTC。已实测复现。
 
@@ -92,7 +93,7 @@ T+10m  MATERIAL_STATUS_POLL_MAX_AGE_MINUTES 回原值
 
 - **历史数据不迁移**：切换前写入的行读回**整体偏早 8 小时**（实测 `2026-09-21 06:30:34` → `2026-09-20T22:30:34Z`）。这是既定口径，不按 bug 报；判据是看行的时间是否接近「现在」。
 - **接口响应仍是 UTC**，日志对齐的是库不是接口。Node 侧 `.toISOString()` 与 `JSON.stringify` 恒产 `Z` 结尾，改动面 20+ 处，本次不动。取舍与理由写在 `backend/libs/core/logger.ts` 的文档块里。
-- **Java 容器日志仍是 UTC**：JVM 默认时区，容器未设 `TZ`。与 `WorkerClock` 无关，排查时注意差 8 小时。
+- **Java 容器日志曾是 UTC**（JVM 默认时区、容器未设 `TZ`）。**修正一后已改**：两个 Java 镜像都带 `ENV TZ=Asia/Shanghai`，容器日志与库同口径。
 - **跨服务日志的字符串排序性质，本次不保证。** 2026-09-03 把日志改成 UTC 的另一半理由是「跨服务日志按字符串排序」——`+08:00` 与 `Z` 混排时字典序不等于时间序（`+` < `Z`），所有新行会排在所有旧行之前。本次只把本仓日志改成 `+08:00`；另外两仓（agent 侧等）若未同批改，这条性质即失效。**本次的取舍**：日志对齐**库**（排查时先看库、再对接口）优先于对齐其它服务的日志。若跨服务排序仍被依赖，需另立工单把另外两仓同批改掉——不要只改本仓就宣布该性质还在。
 - `assets.deleted_at` 的 GC 在本批次线上**不存在**（`asset-gc.service.ts` 随 node generation-worker 在 `1312c474` 一并退役，只在 master 上有）。**因此 `ASSET_GC_DELAY_DAYS` 不需要在发布时调整**——工单正文与 PR 正文里「唯一不可逆点，必须提前调该变量」的说法是照着 master 代码写的，已作废。若将来恢复 GC，其 `deleted_at` 比较需要同样的窗口处理。
 
@@ -100,9 +101,26 @@ T+10m  MATERIAL_STATUS_POLL_MAX_AGE_MINUTES 回原值
 
 - `backend/libs/shared/persistence/tz-caliber.test.ts` —— 不连库，守两处机制的**存在性**（配置取值正确、补丁确实落在安装副本上）。默认门禁就能拦住。
 - `backend/libs/shared/persistence/tz-caliber.integration.test.ts` —— DB 门控（`IKHJ0Q_DATABASE_URL`），守核心不变量「**DB 默认值与显式写入落在同一个钟**」。变异验证：删会话时区 → 报 28801 秒差；删补丁 → 报 28799 秒差。
-- `worker-java` `WorkerClockTest` + 既有集成测试。变异 `WorkerClock` 回 UTC → `ClaimCasTests` 3 例失败（任务被提前认领）。
+- `worker-java` 既有集成测试（原 `WorkerClockTest` 随修正一删除）。测试 JVM 时区由两个 pom 的 surefire `-Duser.timezone=Asia/Shanghai` 对齐容器 `TZ`；会话时区由连接串参数而非 `connectionInitSql` 提供。
 - 镜像构建必须实测：补丁文件此前不在 `.dockerignore` 白名单里，`pnpm install` 会 ENOENT（已修）。
 
+## 修正一（2026-10-09，IKKBZW）：取消 Java 侧时区概念
+
+**决定**：Java 源码不再持有任何时区字面量。上表里由 `WorkerClock`（`ZoneOffset.ofHours(8)`）+ `DataSourceConfig` 的 `connectionInitSql` 承担的那一侧，拆成两处**部署配置**（见上表后两行）。
+
+连带改动：`WorkerClock` 与 `DbTime` 两个类删除；`Instant` 从 `server/` 全部撤出（一律 `LocalDateTime`）；促销的 `tz` 列/字段/校验从 Java、NestJS、web 三层删除（判定改按北京时间）；`gmt_create` / `gmt_modified` 改为只由列默认值写。
+
+**为什么不需要按上面的「发布程序」停机切换**：本节不改**口径**（库里仍是北京墙钟字面量），只换**由谁产生**这个字面量；切换前后写入结果逐字相同。因此 `T-0` 那套停投递 / 停 writer / 放大窗口不适用。
+
+**新引入的部署约束**：`TZ` 与连接串参数必须同时正确，否则 Java 写出的墙钟与 DB 会话时区错开 8 小时——这是原 `WorkerClock` 用代码钉死时不存在的新失败模式。代价换来「Java 源码零时区」。
+
+**保住的 wire 格式**：billing gRPC 的时间串改用 `ZoneId.systemDefault()` 还原 `+08:00` 偏移，字符串形态不变（NestJS 侧 `billing-client.ts` 原样透传给前端的假设继续成立）。
+
+**新增的两条装配期守卫**（把「配错了会尖叫」补上，见 worker 的 `DataSourceConfig.requireClockAgreement` 与 billing 的 `ClockAgreementCheck`）：两侧各在启动时查 `TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())`，与 JVM 默认时区偏移比对，不一致直接终止启动。覆盖两种现实错配——漏了连接串参数（会话回落到库的全局时区）、漏了容器 `TZ`。
+
+**仍未闭合的残余**：守卫断言的是「Java 的钟 == 库的钟」，不是「== `+08:00`」。若容器 `TZ` 与连接串参数**同时**缺省、且库的全局时区也是 UTC（测试站即如此），两者仍自洽，守卫不会拦——此时 Java 与库一起偏离 Node（Node 侧 `db.ts` 与适配器补丁钉死北京）与历史数据。钉死 `+08:00` 本身需要重新在源码里放一个时区常量，与本节目标冲突，故登记为已知残余；防线是部署清单与上表。
+
+**另一处随本修正改动的行为**：`LedgerSelfCheck` 的 `@Scheduled` 去掉了 `zone = "Asia/Shanghai"`（账本自检，默认 03:00），改取 JVM 默认时区。容器 `TZ` 缺失时它会在 03:00 UTC（北京 11:00）跑——与上一条同源，靠容器 `TZ` 保证。
 ## 相关
 
 - [ADR-0074](0074-frontend-backend-separation-nestjs-product-api.md)（NestJS 产品 API）

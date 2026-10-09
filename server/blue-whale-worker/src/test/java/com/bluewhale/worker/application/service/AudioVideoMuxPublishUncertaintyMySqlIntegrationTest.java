@@ -1,7 +1,6 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.application.processor.AudioVideoMuxJobProcessor;
-import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
@@ -70,6 +69,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -117,7 +117,8 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             cfg.setUsername(mysql.getUsername());
             cfg.setPassword(mysql.getPassword());
             cfg.setMaximumPoolSize(5);
-            cfg.setConnectionInitSql("SET time_zone='+08:00'");
+            cfg.addDataSourceProperty("connectionTimeZone", "Asia/Shanghai");
+            cfg.addDataSourceProperty("forceConnectionTimeZoneToSession", "true");
             return new HikariDataSource(cfg);
         }
 
@@ -246,7 +247,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                 VALUES (9, 99, 'audio_video_mux', 'dock', 'queued', 0, ?,
                         'mux-task-1', ?, 0, NOW(), NOW(), 0, false)
                 """,
-                WorkerClock.now().minusSeconds(30),
+                LocalDateTime.now().minusSeconds(30),
                 "{\"audio\":{\"assetId\":\"11\",\"nodeId\":\"source-node\",\"url\":\"https://tos/a.mp3\"},"
                         + "\"video\":{\"assetId\":\"12\",\"url\":\"https://tos/v.mp4\"},"
                         + "\"is_audio_reserve\":true,\"sync\":\"none\",\"submit_attempt\":1}");
@@ -534,7 +535,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             oldToken.set(dto.fencingToken());
             assertThat(dto.storageKey()).isEqualTo(oldKey);
             jdbc.update("UPDATE generation_jobs SET lease_owner='amux-new', fencing_token=fencing_token+1, "
-                    + "lease_expires_at=? WHERE id=?", WorkerClock.now().plusMinutes(5), jobId);
+                    + "lease_expires_at=? WHERE id=?", LocalDateTime.now().plusMinutes(5), jobId);
             Long newToken = jdbc.queryForObject("SELECT fencing_token FROM generation_jobs WHERE id=?",
                     Long.class, jobId);
             boolean published = realFinalizer.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
@@ -729,7 +730,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
 
             ClaimedJob jobDto = new ClaimedJob(String.valueOf(jobId),
                     "99", "9", Map.of(), "audio_video_mux", "mux-task-1", false, "amux-recheck",
-                    job.getFencingToken(), 0, 0, WorkerClock.now(), null, null);
+                    job.getFencingToken(), 0, 0, LocalDateTime.now(), null, null);
             TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay.StoredVideo(
                     "https://bkt.tos.example.com/" + realKey.get(), realKey.get(), "video/mp4",
                     (long) SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT, "md5");

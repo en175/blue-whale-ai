@@ -3,10 +3,8 @@ package com.bluewhale.billing.domain.discount;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.time.DateTimeException;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -162,19 +160,6 @@ public final class DiscountRules {
         return value;
     }
 
-
-    public static String timezone(String raw) {
-        String value = raw == null ? "" : raw.trim();
-        if (value.isEmpty()) {
-            throw new IllegalArgumentException("时区必填：跨零点时段（22:00→06:00）没有时区必然算错");
-        }
-        try {
-            ZoneId.of(value);
-        } catch (DateTimeException e) {
-            throw new IllegalArgumentException("时区名不合法（如 Asia/Shanghai）：" + value);
-        }
-        return value;
-    }
 
     public static void window(LocalDateTime startAt, LocalDateTime endAt) {
         if (startAt == null || endAt == null) {

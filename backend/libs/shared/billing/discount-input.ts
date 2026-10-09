@@ -63,7 +63,6 @@ export function parsePromotionInput(body: unknown): PromotionInput {
     dailyTimeStart: optionalText(raw, "dailyTimeStart", "每日时段起"),
     dailyTimeEnd: optionalText(raw, "dailyTimeEnd", "每日时段止"),
     daysOfWeek: optionalIntArray(raw, "daysOfWeek", "生效星期"),
-    tz: requireText(raw, "tz", "时区"),
     status: requireText(raw, "status", "状态"),
     priority: requireInt(raw, "priority", "优先级"),
   };

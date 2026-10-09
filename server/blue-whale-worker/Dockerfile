@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl \
 WORKDIR /app
 COPY --from=build /build/server/blue-whale-worker/target/blue-whale-worker-*.jar app.jar
 
+ENV TZ=Asia/Shanghai
 ENV GENERATION_WORKER_PORT=4002
 
 EXPOSE 4002

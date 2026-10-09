@@ -62,7 +62,6 @@ const NIGHT = {
   dailyTimeStart: '22:00:00',
   dailyTimeEnd: '06:00:00',
   daysOfWeek: [1, 5],
-  tz: 'Asia/Shanghai',
   status: 'enabled',
   priority: 5,
   createdBy: '42',
@@ -176,7 +175,7 @@ describe('限时活动页', () => {
     expect(text).toContain('任务：text2video');
     expect(text).toContain('专业、旗舰');
     expect(text).toContain('2026-10-01 00:00');
-    expect(text).toContain('周一、周五 22:00–06:00（Asia/Shanghai）');
+    expect(text).toContain('周一、周五 22:00–06:00');
   });
 
   it('★ 冻结语义写在最上面：改活动不影响已提交未结算的任务', async () => {
@@ -271,7 +270,6 @@ describe('限时活动页', () => {
       dailyTimeStart: null,
       dailyTimeEnd: null,
       daysOfWeek: [1],
-      tz: 'Asia/Shanghai',
       status: 'draft',
       priority: 0,
     });
@@ -310,7 +308,6 @@ describe('限时活动页', () => {
       dailyTimeStart: '22:00',
       dailyTimeEnd: '06:00',
       daysOfWeek: [1, 5],
-      tz: 'Asia/Shanghai',
       status: 'disabled',
       priority: 5,
     });
@@ -337,7 +334,6 @@ describe('限时活动页', () => {
 
     expect(inputByLabel('折扣').value).toBe('7');
     expect(inputByLabel('每日时段起').value).toBe('22:00');
-    expect(inputByLabel('时区').value).toBe('Asia/Shanghai');
     expect(inputByLabel('起始时间').value).toBe('2026-10-01T00:00');
   });
 });

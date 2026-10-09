@@ -371,7 +371,6 @@ export interface BillingPromotion {
   dailyTimeStart: string | null;
   dailyTimeEnd: string | null;
   daysOfWeek: number[] | null;
-  tz: string;
   status: string;
   priority: number;
   createdBy: string;
@@ -391,7 +390,6 @@ export interface PromotionInput {
   dailyTimeStart: string | null;
   dailyTimeEnd: string | null;
   daysOfWeek: number[] | null;
-  tz: string;
   status: string;
   priority: number;
 }

@@ -36,11 +36,9 @@ public class ProjectEventPublisher {
         event.setAggregateId(aggregateId);
         event.setAggregateVersion(aggregateVersion);
         event.setCorrelationId(correlationId);
-        LocalDateTime now = WorkerClock.now();
+        LocalDateTime now = LocalDateTime.now();
         event.setOccurredAt(now);
         event.setPayload(toJson(payload));
-        event.setGmtCreate(now);
-        event.setGmtModified(now);
         event.setVersion(0);
         event.setIsDelete(0);
         projectEventMapper.insert(event);

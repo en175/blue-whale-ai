@@ -536,7 +536,7 @@ class TosVideoMediaRelayTest {
         TOSV2 client = mock(TOSV2.class);
         List<String> tempBefore = relayTempFiles();
         long startNanos = System.nanoTime();
-        java.time.Instant deadline = java.time.Instant.now().plusMillis(300);
+        java.time.LocalDateTime deadline = java.time.LocalDateTime.now().plusNanos(300_000_000);
 
         assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                 .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
@@ -610,7 +610,7 @@ class TosVideoMediaRelayTest {
 
         relay.persistStreaming("https://volc/out.mp4", "9", 1024, null);
 
-        var taskDeadline = org.mockito.ArgumentCaptor.forClass(java.time.Instant.class);
+        var taskDeadline = org.mockito.ArgumentCaptor.forClass(java.time.LocalDateTime.class);
         var copyWindow = org.mockito.ArgumentCaptor.forClass(Duration.class);
         var stallTimeout = org.mockito.ArgumentCaptor.forClass(Duration.class);
         verify(relay).persistStreamingInternal(eq("https://volc/out.mp4"), eq("9"), eq(1024L),
@@ -633,7 +633,7 @@ class TosVideoMediaRelayTest {
         verify(relay).persistStreamingInternal(eq("https://volc/out.mp4"), eq("9"), eq(1024L),
                 isNull(), isNull(), isNull(), any(), any());
 
-        java.time.Instant callerDeadline = java.time.Instant.now().plusSeconds(7);
+        java.time.LocalDateTime callerDeadline = java.time.LocalDateTime.now().plusSeconds(7);
         relay.persistStreaming("https://volc/out.mp4", "9", 1024, null, callerDeadline);
         verify(relay).persistStreamingInternal(eq("https://volc/out.mp4"), eq("9"), eq(1024L),
                 isNull(), same(callerDeadline), isNull(), any(), any());
@@ -763,7 +763,7 @@ class TosVideoMediaRelayTest {
             });
             var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                     .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES,
-                            null, java.time.Instant.now().plusMillis(2500)));
+                            null, java.time.LocalDateTime.now().plusNanos(2_500_000_000L)));
             try {
                 assertThat(received.await(5, java.util.concurrent.TimeUnit.SECONDS))
                         .as("上传 body 必须先完整送达并在替身落地").isTrue();
@@ -819,7 +819,7 @@ class TosVideoMediaRelayTest {
             });
             var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                     .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES,
-                            null, java.time.Instant.now().plusSeconds(5)));
+                            null, java.time.LocalDateTime.now().plusSeconds(5)));
             try {
                 assertThat(received.await(4, java.util.concurrent.TimeUnit.SECONDS))
                         .as("上传 body 必须先完整送达并在替身落地").isTrue();
@@ -869,7 +869,7 @@ class TosVideoMediaRelayTest {
             });
             var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                     .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES,
-                            null, java.time.Instant.now().plusMillis(2500)));
+                            null, java.time.LocalDateTime.now().plusNanos(2_500_000_000L)));
             try {
                 assertThat(received.await(5, java.util.concurrent.TimeUnit.SECONDS))
                         .as("上传 body 必须先完整送达并在替身落地").isTrue();
@@ -1012,7 +1012,7 @@ class TosVideoMediaRelayTest {
             long startNanos = System.nanoTime();
             var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                     .persistStreaming(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
-                            null, java.time.Instant.now().plusMillis(500)));
+                            null, java.time.LocalDateTime.now().plusNanos(500_000_000)));
             try {
                 assertThat(headerReceived.await(5, java.util.concurrent.TimeUnit.SECONDS))
                         .as("下载请求必须到达真实 HTTP 传输层").isTrue();
@@ -1112,7 +1112,7 @@ class TosVideoMediaRelayTest {
 
         CompletableFuture<HttpResponse<InputStream>> expired = new CompletableFuture<>();
         TosVideoMediaRelay.HeaderWait deadlineWait =
-                new TosVideoMediaRelay.HeaderWait(expired, null, java.time.Instant.now().plusMillis(100));
+                new TosVideoMediaRelay.HeaderWait(expired, null, java.time.LocalDateTime.now().plusNanos(100_000_000));
         assertThatThrownBy(deadlineWait::await)
                 .isInstanceOf(VideoProviderError.class)
                 .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE)

@@ -75,7 +75,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(spec.leaseSeconds());
+        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(spec.leaseSeconds());
         int affected = spec.claimCas(jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
         if (affected == 0) {
@@ -114,7 +114,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.claimAudioCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -146,7 +146,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(imageLeaseSeconds());
+        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(imageLeaseSeconds());
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -177,7 +177,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(VIDEO_LEASE_SECONDS);
         int affected = jobMapper.claimVideoCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());

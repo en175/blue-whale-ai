@@ -4,7 +4,6 @@ import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.command.HoldCommand;
 import com.bluewhale.billing.application.CatalogHolder;
 import com.bluewhale.billing.application.CreditService;
-import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,7 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -232,16 +231,16 @@ class AdminApiIntegrationTest {
 
 
 
-        java.sql.Timestamp expiresAt = jdbc.queryForObject(
+        LocalDateTime expiresAt = jdbc.queryForObject(
                 "SELECT expires_at FROM billing_credit_lots WHERE user_id = 9311",
-                java.sql.Timestamp.class);
+                LocalDateTime.class);
         assertThat(expiresAt).as("本金批次必须带有效期（永久 = expires_at 为 NULL）").isNotNull();
 
 
 
 
-        Instant expected = Instant.now().atZone(DbTime.ZONE).plusYears(2).toInstant();
-        assertThat(expiresAt.toInstant())
+        LocalDateTime expected = LocalDateTime.now().plusYears(2);
+        assertThat(expiresAt)
                 .as("到期时刻应≈2 年后（日历口径，不是 730 天）")
                 .isBetween(expected.minusSeconds(60), expected.plusSeconds(60));
     }
@@ -320,7 +319,7 @@ class AdminApiIntegrationTest {
         seedHoldable();
         long jobId = 9_500L;
         billing.hold(new HoldCommand(USER_HOLD, "cmd-lost", jobId, MODEL, TASK,
-                Map.of(), "free", TITLE, Instant.now(), RULE));
+                Map.of(), "free", TITLE, LocalDateTime.now(), RULE));
 
         mvc.perform(post("/admin/credits/jobs/" + jobId + "/refund")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -341,7 +340,7 @@ class AdminApiIntegrationTest {
         seedHoldable();
         long jobId = 9_501L;
         billing.hold(new HoldCommand(USER_HOLD, "cmd-stuck", jobId, MODEL, TASK,
-                Map.of(), "free", TITLE, Instant.now(), RULE));
+                Map.of(), "free", TITLE, LocalDateTime.now(), RULE));
 
         mvc.perform(post("/admin/credits/jobs/" + jobId + "/settle")
                         .contentType(MediaType.APPLICATION_JSON)

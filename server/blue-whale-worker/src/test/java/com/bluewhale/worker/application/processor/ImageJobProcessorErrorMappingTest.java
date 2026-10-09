@@ -13,7 +13,6 @@ import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient.GeneratedImage;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationModelCapabilityMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
-import com.bluewhale.worker.application.service.WorkerClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -235,8 +234,8 @@ class ImageJobProcessorErrorMappingTest {
         ArgumentCaptor<LocalDateTime> captor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
-        assertThat(nextActionAt).isAfter(WorkerClock.now().plusSeconds(25));
-        assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(35));
+        assertThat(nextActionAt).isAfter(LocalDateTime.now().plusSeconds(25));
+        assertThat(nextActionAt).isBefore(LocalDateTime.now().plusSeconds(35));
 
         verify(finalizer, never()).failJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
@@ -267,8 +266,8 @@ class ImageJobProcessorErrorMappingTest {
         ArgumentCaptor<LocalDateTime> captor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
-        assertThat(nextActionAt).isAfter(WorkerClock.now().plusSeconds(55));
-        assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(65));
+        assertThat(nextActionAt).isAfter(LocalDateTime.now().plusSeconds(55));
+        assertThat(nextActionAt).isBefore(LocalDateTime.now().plusSeconds(65));
     }
 
     @Test
@@ -296,8 +295,8 @@ class ImageJobProcessorErrorMappingTest {
         ArgumentCaptor<LocalDateTime> captor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
-        assertThat(nextActionAt).isAfter(WorkerClock.now().plusSeconds(115));
-        assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(125));
+        assertThat(nextActionAt).isAfter(LocalDateTime.now().plusSeconds(115));
+        assertThat(nextActionAt).isBefore(LocalDateTime.now().plusSeconds(125));
     }
 
     @Test

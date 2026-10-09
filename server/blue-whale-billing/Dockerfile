@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 WORKDIR /app
 COPY --from=build /build/server/blue-whale-billing/target/blue-whale-billing-*.jar app.jar
 
+ENV TZ=Asia/Shanghai
 ENV BILLING_PORT=4003
 
 EXPOSE 4003

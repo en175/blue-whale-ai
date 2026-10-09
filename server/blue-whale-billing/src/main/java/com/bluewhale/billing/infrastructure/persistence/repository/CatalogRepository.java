@@ -2,7 +2,6 @@ package com.bluewhale.billing.infrastructure.persistence.repository;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bluewhale.billing.application.CatalogCompiler;
-import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.infrastructure.persistence.po.PricingCatalogEntity;
 import com.bluewhale.billing.infrastructure.persistence.mapper.PricingCatalogMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -10,7 +9,7 @@ import com.bluewhale.billing.domain.catalog.CatalogDocument;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Repository;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 @Repository
 public class CatalogRepository {
@@ -46,7 +45,7 @@ public class CatalogRepository {
                 row.getDocumentHash(),
                 row.getDocument(),
                 document,
-                DbTime.fromDb(row.getPublishedAt()));
+                row.getPublishedAt());
     }
 
     public record LoadedCatalog(
@@ -54,7 +53,7 @@ public class CatalogRepository {
             String documentHash,
             String documentJson,
             CatalogDocument document,
-            Instant publishedAt
+            LocalDateTime publishedAt
     ) {
 
         public int creditsPerYuan() {

@@ -67,7 +67,6 @@ public class PromotionAdminService {
                 .set(PromotionEntity::getDailyTimeStart, command.dailyTimeStart())
                 .set(PromotionEntity::getDailyTimeEnd, command.dailyTimeEnd())
                 .set(PromotionEntity::getDaysOfWeek, DiscountRules.toJson(command.daysOfWeek()))
-                .set(PromotionEntity::getTz, command.tz())
                 .set(PromotionEntity::getStatus, command.status())
                 .set(PromotionEntity::getPriority, command.priority()));
         return toView(requireExists(id));
@@ -105,7 +104,6 @@ public class PromotionAdminService {
         entity.setDailyTimeStart(command.dailyTimeStart());
         entity.setDailyTimeEnd(command.dailyTimeEnd());
         entity.setDaysOfWeek(DiscountRules.toJson(command.daysOfWeek()));
-        entity.setTz(command.tz());
         entity.setStatus(command.status());
         entity.setPriority(command.priority());
     }
@@ -124,7 +122,6 @@ public class PromotionAdminService {
                 entity.getDailyTimeStart(),
                 entity.getDailyTimeEnd(),
                 nullIfEmpty(PatternJson.intList(entity.getDaysOfWeek())),
-                entity.getTz(),
                 entity.getStatus(),
                 entity.getPriority(),
                 entity.getCreatedBy(),

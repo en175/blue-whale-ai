@@ -2,7 +2,7 @@ package com.bluewhale.billing.application.command;
 
 import com.bluewhale.billing.domain.pricing.Usage;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 public record QuoteQuery(
@@ -12,7 +12,7 @@ public record QuoteQuery(
         Map<String, String> specs,
         String tier,
         Usage usage,
-        Instant pricedAt,
+        LocalDateTime pricedAt,
         String ruleSnapshot
 ) {
 

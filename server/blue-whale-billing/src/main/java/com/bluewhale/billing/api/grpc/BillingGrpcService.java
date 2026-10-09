@@ -7,7 +7,6 @@ import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.command.HoldCommand;
 import com.bluewhale.billing.application.command.QuoteQuery;
 import com.bluewhale.billing.application.view.TransactionView;
-import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.HoldResult;
 import com.bluewhale.billing.domain.pricing.PricingResult;
 import com.bluewhale.billing.domain.pricing.Usage;
@@ -34,7 +33,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +56,7 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
     @Override
     public void hold(HoldRequest request, StreamObserver<HoldResponse> observer) {
         try {
-            Instant submittedAt = Instant.now();
+            LocalDateTime submittedAt = LocalDateTime.now();
 
             HoldResult result = billing.hold(new HoldCommand(
                     request.getUserId(),
@@ -92,7 +92,7 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
             for (BalanceView.ExpiringLot lot : balance.expiring()) {
                 response.addExpiring(ExpiringLot.newBuilder()
                         .setCredits(lot.credits())
-                        .setExpiresAt(RFC3339.format(lot.expiresAt().atZone(DbTime.ZONE)))
+                        .setExpiresAt(RFC3339.format(lot.expiresAt().atZone(ZoneId.systemDefault())))
                         .setSource(lot.source())
                         .build());
             }
@@ -132,10 +132,10 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                         .setTitle(item.title())
                         .setAmount(item.amount())
                         .setStatus(item.status())
-                        .setCreatedAt(RFC3339.format(item.createdAt().atZone(DbTime.ZONE)))
+                        .setCreatedAt(RFC3339.format(item.createdAt().atZone(ZoneId.systemDefault())))
                         .setSettledAt(item.settledAt() == null
                                 ? ""
-                                : RFC3339.format(item.settledAt().atZone(DbTime.ZONE)));
+                                : RFC3339.format(item.settledAt().atZone(ZoneId.systemDefault())));
                 if (item.generationJobId() != null) {
                     row.setGenerationJobId(item.generationJobId());
                 }
@@ -172,10 +172,10 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                         .setSource(item.source().key())
                         .setAmount(item.amount())
                         .setRemaining(item.remaining())
-                        .setCreatedAt(RFC3339.format(item.createdAt().atZone(DbTime.ZONE)))
+                        .setCreatedAt(RFC3339.format(item.createdAt().atZone(ZoneId.systemDefault())))
                         .setExpiresAt(item.expiresAt() == null
                                 ? ""
-                                : RFC3339.format(item.expiresAt().atZone(DbTime.ZONE)))
+                                : RFC3339.format(item.expiresAt().atZone(ZoneId.systemDefault())))
                         .setBizType(item.bizType())
                         .setBizId(item.bizId());
                 response.addItems(row.build());
@@ -190,7 +190,7 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
     @Override
     public void quote(QuoteRequest request, StreamObserver<QuoteResponse> observer) {
         try {
-            Instant pricedAt = Instant.now();
+            LocalDateTime pricedAt = LocalDateTime.now();
             List<com.bluewhale.contracts.billing.v1.UsageLine> lines = request.getUsageList();
 
             PricingResult priced;

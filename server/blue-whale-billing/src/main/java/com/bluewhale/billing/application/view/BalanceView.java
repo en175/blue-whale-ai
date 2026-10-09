@@ -1,6 +1,6 @@
 package com.bluewhale.billing.application.view;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public record BalanceView(long availableCredits, long frozenCredits,
@@ -16,7 +16,7 @@ public record BalanceView(long availableCredits, long frozenCredits,
         return availableCredits + frozenCredits;
     }
 
-    public record ExpiringLot(long credits, Instant expiresAt, String source) {}
+    public record ExpiringLot(long credits, LocalDateTime expiresAt, String source) {}
 
     public record SourceCredits(String source, long credits) {}
 }

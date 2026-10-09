@@ -1,10 +1,8 @@
 package com.bluewhale.billing.application;
-
-import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 
@@ -71,13 +69,10 @@ public class GrantPolicy {
 
 
 
-    public Instant expiryFor(CreditSource source, Instant grantedAt) {
+    public LocalDateTime expiryFor(CreditSource source, LocalDateTime grantedAt) {
         return switch (source) {
-            case DAILY -> grantedAt.atZone(DbTime.ZONE)
-                    .toLocalDate()
-                    .atTime(END_OF_DAY)
-                    .atZone(DbTime.ZONE)
-                    .toInstant();
+            case DAILY -> grantedAt.toLocalDate()
+                    .atTime(END_OF_DAY);
 
             case BONUS, GIFT, INVITE, REDEEM, SUBSCRIPTION ->
                     grantedAt.plus(DEFAULT_GIFT_DAYS, ChronoUnit.DAYS);
@@ -86,9 +81,7 @@ public class GrantPolicy {
 
 
 
-            case PURCHASED -> grantedAt.atZone(DbTime.ZONE)
-                    .plusYears(PURCHASED_YEARS)
-                    .toInstant();
+            case PURCHASED -> grantedAt.plusYears(PURCHASED_YEARS);
 
 
 

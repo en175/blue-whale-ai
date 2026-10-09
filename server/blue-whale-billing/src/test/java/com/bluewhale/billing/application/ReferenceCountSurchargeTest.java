@@ -17,7 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -112,7 +112,7 @@ class ReferenceCountSurchargeTest {
 
     private long frozenCredits() {
         billing.hold(new HoldCommand(USER, CMD, JOB, MODEL, TASK, SPECS, "free",
-                "生成任务", Instant.now(), RULE));
+                "生成任务", LocalDateTime.now(), RULE));
 
         ArgumentCaptor<Long> amount = ArgumentCaptor.forClass(Long.class);
         verify(credits).hold(eq(USER), eq(CMD), eq(JOB), amount.capture(),

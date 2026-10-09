@@ -1,7 +1,6 @@
 package com.bluewhale.billing.infrastructure.discount;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.infrastructure.persistence.po.PromotionEntity;
 import com.bluewhale.billing.infrastructure.persistence.mapper.PromotionMapper;
 import com.bluewhale.billing.domain.discount.DiscountProvider;
@@ -11,8 +10,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Set;
 
@@ -39,19 +36,14 @@ public class PromotionDiscountProvider extends DiscountProvider.Abstract<Promoti
             Set<Integer> daysOfWeek,
             LocalTime dailyStart,
             LocalTime dailyEnd,
-            String tz,
             Set<String> tierScope
     ) implements Candidate {
         @Override public boolean enabled() { return true; }
-
-        String tzOrDefault() {
-            return tz == null || tz.isBlank() ? "Asia/Shanghai" : tz;
-        }
     }
 
     @Override
     protected List<Row> loadCandidates(PricingContext ctx) {
-        LocalDateTime submitAt = DbTime.toDb(ctx.submitAt());
+        LocalDateTime submitAt = ctx.submitAt();
         List<PromotionEntity> rows = mapper.selectList(new LambdaQueryWrapper<PromotionEntity>()
                 .eq(PromotionEntity::getStatus, "enabled")
                 .le(PromotionEntity::getStartAt, submitAt)
@@ -67,7 +59,6 @@ public class PromotionDiscountProvider extends DiscountProvider.Abstract<Promoti
                         parseIntSet(entity.getDaysOfWeek()),
                         entity.getDailyTimeStart(),
                         entity.getDailyTimeEnd(),
-                        entity.getTz(),
                         parseStringSet(entity.getTierScope())))
                 .toList();
     }
@@ -77,7 +68,7 @@ public class PromotionDiscountProvider extends DiscountProvider.Abstract<Promoti
         if (Patterns.isRestricted(row.tierScope()) && !row.tierScope().contains(ctx.request().tier())) {
             return false;
         }
-        ZonedDateTime local = ctx.submitAt().atZone(ZoneId.of(row.tzOrDefault()));
+        LocalDateTime local = ctx.submitAt();
         if (Patterns.isRestricted(row.daysOfWeek())
                 && !row.daysOfWeek().contains(local.getDayOfWeek().getValue())) {
             return false;

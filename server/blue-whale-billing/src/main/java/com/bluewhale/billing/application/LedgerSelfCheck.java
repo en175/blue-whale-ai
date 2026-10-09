@@ -17,8 +17,6 @@ public class LedgerSelfCheck {
 
     private static final Logger log = LoggerFactory.getLogger(LedgerSelfCheck.class);
 
-    static final String CRON_ZONE = "Asia/Shanghai";
-
     private final ReconciliationRepository audit;
     private final LedgerRepository ledger;
 
@@ -40,7 +38,7 @@ public class LedgerSelfCheck {
         this.entryWindow = entryWindow;
     }
 
-    @Scheduled(cron = "${billing.reconciliation.self-check.cron:0 0 3 * * *}", zone = CRON_ZONE)
+    @Scheduled(cron = "${billing.reconciliation.self-check.cron:0 0 3 * * *}")
     void runDaily() {
         try {
             report(check());

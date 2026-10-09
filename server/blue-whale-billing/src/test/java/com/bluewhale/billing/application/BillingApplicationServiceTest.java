@@ -17,7 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -219,7 +219,7 @@ class BillingApplicationServiceTest {
 
 
         long preview = service.quote(new QuoteQuery(USER, MODEL, TASK, specs, "free",
-                Usage.empty(), Instant.now(), rule)).credits();
+                Usage.empty(), LocalDateTime.now(), rule)).credits();
         hold(specs, rule);
 
         assertThat(preview).isEqualTo(50L).isEqualTo(reservedCredits());
@@ -273,7 +273,7 @@ class BillingApplicationServiceTest {
 
 
         long preview = service.quote(new QuoteQuery(USER, MODEL, TASK, specs, "free",
-                Usage.empty(), Instant.now(), rule)).credits();
+                Usage.empty(), LocalDateTime.now(), rule)).credits();
         hold(specs, rule);
 
         assertThat(preview).isEqualTo(reservedCredits());
@@ -301,7 +301,7 @@ class BillingApplicationServiceTest {
         String snapshot = snapshotJson("usage.succeededSlots", 5_000L);
 
         long preview = service.quote(new QuoteQuery(USER, MODEL, TASK, specs, "free",
-                Usage.empty(), Instant.now(), snapshot)).credits();
+                Usage.empty(), LocalDateTime.now(), snapshot)).credits();
         hold(specs, snapshot);
 
 
@@ -323,7 +323,7 @@ class BillingApplicationServiceTest {
                 anyInt(), anyInt(), anyString(), anyString());
 
         assertThatThrownBy(() -> service.quote(new QuoteQuery(USER, MODEL, TASK,
-                Map.of("expected_output_count", "4"), "free", Usage.empty(), Instant.now(), "")))
+                Map.of("expected_output_count", "4"), "free", Usage.empty(), LocalDateTime.now(), "")))
                 .isInstanceOf(CatalogCompiler.CompileException.class)
                 .hasMessageContaining("规则快照");
     }
@@ -462,6 +462,6 @@ class BillingApplicationServiceTest {
 
     private void hold(Map<String, String> specs, String ruleSnapshot) {
         service.hold(new HoldCommand(USER, CMD, JOB, MODEL, TASK, specs, "free",
-                "生成任务", Instant.now(), ruleSnapshot));
+                "生成任务", LocalDateTime.now(), ruleSnapshot));
     }
 }

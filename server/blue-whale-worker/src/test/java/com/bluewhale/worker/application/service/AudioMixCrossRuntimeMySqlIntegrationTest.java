@@ -35,6 +35,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -65,7 +66,8 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
         config.setUsername("test");
         config.setPassword("test");
         config.setMaximumPoolSize(5);
-        config.setConnectionInitSql("SET time_zone='+08:00'");
+        config.addDataSourceProperty("connectionTimeZone", "Asia/Shanghai");
+        config.addDataSourceProperty("forceConnectionTimeZoneToSession", "true");
         dataSource = new HikariDataSource(config);
         jdbc = new JdbcTemplate(dataSource);
         MybatisSqlSessionFactoryBean factory = new MybatisSqlSessionFactoryBean();
@@ -216,7 +218,7 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
             assertThat(outbound.path("format").asText()).isEqualTo("mp3");
             verify(producer).enqueue(jobId, 5_000L);
             jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
-                    WorkerClock.now().minusSeconds(10), Long.parseLong(jobId));
+                    LocalDateTime.now().minusSeconds(10), Long.parseLong(jobId));
             processor.handle(jobId);
             assertThat(readJob(Long.parseLong(jobId)).getStatus()).isEqualTo(failPhase ? "failed" : "succeeded");
             if (failPhase) {

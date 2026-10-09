@@ -9,6 +9,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -160,7 +161,7 @@ class TokenEstimatorTest {
             PricingEngine engine = PricingEngine.forMedia((modelId, taskType) -> rule(), DiscountResolver.NONE);
 
             assertThat(engine.compute(request, Usage.contractFrom(rule(), specs),
-                    java.time.Instant.now()).credits()).isEqualTo(57L);
+                    java.time.LocalDateTime.now()).credits()).isEqualTo(57L);
         }
 
         @Test
@@ -173,7 +174,7 @@ class TokenEstimatorTest {
             Usage upstream = Usage.ofKeys("m", "video",
                     Map.of("usage.c", 216_900L, "usage.succeededSlots", 1L));
 
-            assertThat(engine.compute(request, upstream, java.time.Instant.now()).credits())
+            assertThat(engine.compute(request, upstream, java.time.LocalDateTime.now()).credits())
                     .isEqualTo(120L);
         }
 
@@ -186,7 +187,7 @@ class TokenEstimatorTest {
 
             assertThat(engine.compute(request,
                     Usage.ofKeys("m", "video", Map.of("usage.c", 216_900L)),
-                    java.time.Instant.now()).credits()).isEqualTo(72L);
+                    java.time.LocalDateTime.now()).credits()).isEqualTo(72L);
         }
 
         @Test
@@ -364,7 +365,7 @@ class TokenEstimatorTest {
             PricingEngine engine = PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE);
             Usage contract = Usage.contractFrom(rule, request.specs());
 
-            assertThatThrownBy(() -> engine.compute(request, contract, java.time.Instant.now()))
+            assertThatThrownBy(() -> engine.compute(request, contract, java.time.LocalDateTime.now()))
                     .isInstanceOf(BasePriceResolver.UnpriceableSpecException.class)
                     .hasMessageContaining("单价");
         }
@@ -383,7 +384,7 @@ class TokenEstimatorTest {
             PricingEngine engine = PricingEngine.forMedia((m, t) -> priced, DiscountResolver.NONE);
 
             assertThat(engine.compute(request, Usage.contractFrom(priced, specs),
-                    java.time.Instant.now()).credits()).isEqualTo(127L);
+                    java.time.LocalDateTime.now()).credits()).isEqualTo(127L);
         }
     }
 
@@ -494,7 +495,7 @@ class TokenEstimatorTest {
 
             PricingRequest request = new PricingRequest(1L, "m", "video", specs, "free");
             PricingEngine engine = PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE);
-            assertThat(engine.compute(request, contract, java.time.Instant.now()).credits())
+            assertThat(engine.compute(request, contract, java.time.LocalDateTime.now()).credits())
                     .isEqualTo(111L);
         }
 

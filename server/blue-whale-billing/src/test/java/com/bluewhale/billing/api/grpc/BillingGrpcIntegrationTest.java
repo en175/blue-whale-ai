@@ -25,7 +25,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -164,7 +164,7 @@ class BillingGrpcIntegrationTest {
     @Test
     void 查余额_返回可用冻结与临期批次() {
         credits.grant(USER, CreditSource.DAILY, 300,
-                Instant.now().plus(5, ChronoUnit.DAYS), "grant", "d1", "d1");
+                LocalDateTime.now().plus(5, ChronoUnit.DAYS), "grant", "d1", "d1");
         stub.hold(hold("cmd-6", 9_006L, "free"));
 
         QueryBalanceResponse balance = stub.queryBalance(
@@ -183,7 +183,7 @@ class BillingGrpcIntegrationTest {
     void 查余额_按来源拆分的分项之和等于总额() {
         credits.grant(USER, CreditSource.PURCHASED, 1_500, null, "grant", "bs-p", "bs-p");
         credits.grant(USER, CreditSource.BONUS, 1_000,
-                Instant.now().plus(30, ChronoUnit.DAYS), "grant", "bs-b", "bs-b");
+                LocalDateTime.now().plus(30, ChronoUnit.DAYS), "grant", "bs-b", "bs-b");
 
         QueryBalanceResponse balance = stub.queryBalance(
                 QueryBalanceRequest.newBuilder().setUserId(USER).build());

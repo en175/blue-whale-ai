@@ -17,7 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
@@ -148,7 +148,7 @@ class SettlementIntegrationTest {
 
     @Test
     void 返还_全额解冻且批次有效期不被重置() {
-        Instant expiresBefore = expiresOf(lot);
+        LocalDateTime expiresBefore = expiresOf(lot);
         hold("cmd-4", 9_405L, "free", ruleSnapshot(100_000L));
 
         settlement.refund(9_405L, "上游任务失败");
@@ -188,7 +188,7 @@ class SettlementIntegrationTest {
     private HoldResult hold(String commandId, long jobId, String tier, String ruleSnapshot) {
         return billing.hold(new HoldCommand(
                 USER, commandId, jobId, MODEL, TASK, Map.of("resolution", "1080p"),
-                tier, "视频生成 · 测试", Instant.now(), ruleSnapshot));
+                tier, "视频生成 · 测试", LocalDateTime.now(), ruleSnapshot));
     }
 
     private static String ruleSnapshot(long basePrice) {
@@ -213,11 +213,10 @@ class SettlementIntegrationTest {
                 "SELECT frozen FROM billing_credit_lots WHERE id = ?", Long.class, lotId);
     }
 
-    private Instant expiresOf(long lotId) {
-        var ts = jdbc.queryForObject(
+    private LocalDateTime expiresOf(long lotId) {
+        return jdbc.queryForObject(
                 "SELECT expires_at FROM billing_credit_lots WHERE id = ?",
-                java.sql.Timestamp.class, lotId);
-        return ts == null ? null : ts.toInstant();
+                LocalDateTime.class, lotId);
     }
 
     private int ledgerEntryCount() {

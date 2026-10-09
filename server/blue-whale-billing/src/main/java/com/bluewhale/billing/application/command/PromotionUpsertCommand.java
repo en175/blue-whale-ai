@@ -17,7 +17,6 @@ public record PromotionUpsertCommand(
         LocalTime dailyTimeStart,
         LocalTime dailyTimeEnd,
         List<Integer> daysOfWeek,
-        String tz,
         String status,
         Integer priority
 ) {
@@ -31,7 +30,6 @@ public record PromotionUpsertCommand(
         DiscountRules.window(startAt, endAt);
         DiscountRules.dailyWindow(dailyTimeStart, dailyTimeEnd);
         daysOfWeek = DiscountRules.daysOfWeek(daysOfWeek);
-        tz = DiscountRules.timezone(tz);
         status = DiscountRules.promotionStatus(status);
         priority = DiscountRules.priority(priority);
     }

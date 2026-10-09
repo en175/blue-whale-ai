@@ -1,6 +1,6 @@
 package com.bluewhale.billing.application.command;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 public record HoldCommand(
@@ -12,7 +12,7 @@ public record HoldCommand(
         Map<String, String> specs,
         String tier,
         String title,
-        Instant submittedAt,
+        LocalDateTime submittedAt,
         String ruleSnapshot
 ) {
 
