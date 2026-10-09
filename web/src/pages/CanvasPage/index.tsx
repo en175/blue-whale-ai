@@ -9,7 +9,8 @@ import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
-import { nextDraftPosition, type SpawnBox } from './draftSpawn';
+import { nextDraftPosition } from './draftSpawn';
+import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
 import { defaultVideoModeFor, draftVideoModeOf } from './videoModes';
 import {
@@ -49,7 +50,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, compliancePatchFromMaterialStatus, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
-import { mediaContentBox, type MediaDims } from './components/MediaNode/mediaContentSize';
+import { type MediaDims } from './components/MediaNode/mediaContentSize';
 import type { MediaNodeData } from './components/MediaNode';
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
 import NodeFollowToolbar from './components/NodeFollowToolbar';
@@ -175,7 +176,6 @@ import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
-import { fetchRemoteMedia } from './fetchRemoteMedia';
 import { COMPLIANCE_SUCCESS_TOAST, COMPLIANCE_FAILED_TOAST, depositCanvasAssetToCharacterLibrary, isComplianceFailedError, resolveCharacterLibraryMaterialId, waitComplianceAssetReady } from './characterLibraryDeposit';
 import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from './livenessLibraryImport';
 import { buildImageJobReferences, buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
@@ -833,19 +833,6 @@ export default function CanvasPage() {
     return nextDraftPosition({ center, dockTop: center.y + 2000, nodes: nodes.map(nodeBoxOf) });
   };
   const DOCK_RESERVE_PX = 300;
-  const nodeBoxOf = (n: Node): SpawnBox => {
-    const d = (n.data ?? {}) as Record<string, unknown>;
-    if (n.type === 'mediaNode') {
-      const box = mediaContentBox({
-        mediaType: d.mediaType as 'image' | 'video' | 'audio' | undefined,
-        width: typeof d.width === 'number' ? d.width : undefined,
-        height: typeof d.height === 'number' ? d.height : undefined,
-        ratio: d.targetRatio as string | undefined,
-      });
-      return { x: n.position.x, y: n.position.y, width: box.width, height: box.height + 44 };
-    }
-    return { x: n.position.x, y: n.position.y, width: 320, height: 340 };
-  };
   const followTargetId = showImageDialog && imageDraftId
     ? imageDraftId
     : showBottomDialog && videoDraftId
@@ -1379,11 +1366,6 @@ export default function CanvasPage() {
     if (recovered === undefined) return false;
     versionRef.current = recovered;
     return true;
-  };
-  const readRecoveryErrorReason = (e: unknown): string | null => {
-    if (!isApiError(e)) return null;
-    const reason = (e.data as { reason?: unknown } | null | undefined)?.reason;
-    return typeof reason === 'string' ? reason : null;
   };
   const trackCanvasSave = <T,>(promise: Promise<T>): Promise<T> => {
     savePromiseRef.current = promise;
@@ -1938,16 +1920,6 @@ export default function CanvasPage() {
     }
     addCanvasEdge(node.id, targetId, role);
     return true;
-  };
-  const videoFreeRefItemOf = (node: Node): VideoMediaRef => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    return {
-      nodeId: node.id,
-      url: String(data.src ?? ''),
-      name: typeof data.fileName === 'string' && data.fileName ? data.fileName : node.id,
-      assetId: String(readAssetId(data)),
-      mediaType: asVideoRefMediaType(data.mediaType),
-    };
   };
   const replaceVideoFreeFrameRef = (node: Node, role: 'first' | 'last') => {
     if (!checkVideoFrameReplace(node, videoFreeRefs, role)) return;
@@ -3253,14 +3225,6 @@ export default function CanvasPage() {
     complianceCheck: (id) => { void handleComplianceCheck(id); },
     fillEmptyShell: handleFillEmptyShell,
   };
-  const assetDisplayName = (asset: AssetRecord): string => {
-    try {
-      const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
-      return last ? decodeURIComponent(last) : `资产-${asset.id}`;
-    } catch {
-      return `资产-${asset.id}`;
-    }
-  };
   const placeAssetsOnCanvas = (
     selectedAssets: AssetRecord[],
     opts?: { reuseExisting?: boolean },
@@ -3722,24 +3686,6 @@ export default function CanvasPage() {
       targetNodeId: nodeId,
       seedTarget: seedTargetOfNode(node as unknown as RuntimeNodeView),
       seedSources: host ? seedSourcesOfNode(nodeId, host) : [],
-    };
-  };
-  const imageToolTargetBesideSource = (source: Node, fileName: string, targetNodeId: string) => {
-    const position = imageEnhanceDraftPosition(source);
-    const d = (source.data ?? {}) as Record<string, unknown>;
-    const width = typeof d.width === 'number' && d.width > 0 ? Math.round(d.width) : 320;
-    const height = typeof d.height === 'number' && d.height > 0 ? Math.round(d.height) : 320;
-    return {
-      targetNodeId,
-      seedTarget: { role: 'result-placeholder' as const, x: position.x, y: position.y, width, height, name: fileName },
-      seedSources: [{
-        node_id: source.id,
-        x: Math.round(source.position.x),
-        y: Math.round(source.position.y),
-        width,
-        height,
-        name: typeof d.fileName === 'string' ? d.fileName : '',
-      }],
     };
   };
   const dispatchImageToolTask = (
@@ -5717,17 +5663,6 @@ export default function CanvasPage() {
       return complete;
     } catch (e) {
       console.warn('上传文件失败:', e);
-      return null;
-    }
-  };
-  const fetchUrlAsFile = async (url: string, name: string, _type: string): Promise<File | null> => {
-    try {
-      const res = await fetchRemoteMedia(url);
-      if (!res.ok) return null;
-      const blob = await res.blob();
-      const mimeType = blob.type || _type || 'image/png';
-      return new File([blob], name, { type: mimeType });
-    } catch {
       return null;
     }
   };
