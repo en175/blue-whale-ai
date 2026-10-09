@@ -11,15 +11,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-final class ImageChannelMapper {
+final class ImageChannelParser {
 
-    private static final Logger log = LoggerFactory.getLogger(ImageChannelMapper.class);
+    private static final Logger log = LoggerFactory.getLogger(ImageChannelParser.class);
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
     static final int DEFAULT_IMAGE_REFERENCE_MAX = 10;
 
-    private ImageChannelMapper() {}
+    private ImageChannelParser() {}
 
 
     static boolean hasSizeMatrix(String requestMappingJson) {

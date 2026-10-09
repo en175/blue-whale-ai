@@ -1,4 +1,4 @@
-package com.bluewhale.billing.application.view;
+package com.bluewhale.billing.domain.ledger;
 
 public enum TransactionType {
 

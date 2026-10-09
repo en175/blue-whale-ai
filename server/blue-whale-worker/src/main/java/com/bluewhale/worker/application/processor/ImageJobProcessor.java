@@ -170,12 +170,12 @@ public class ImageJobProcessor implements JobProcessor {
 
         String providerSize = cap.getApiSize();
         if (sizeId != null) {
-            String matched = ImageChannelMapper.matchSupportedSize(
+            String matched = ImageChannelParser.matchSupportedSize(
                     cap.getSupportedSizes(), sizeId);
             if (matched != null) providerSize = matched;
         }
 
-        int maxReferenceCount = ImageChannelMapper.parseMaxReferenceImages(cap.getFeatures());
+        int maxReferenceCount = ImageChannelParser.parseMaxReferenceImages(cap.getFeatures());
         if (referenceIds.size() > maxReferenceCount) {
             failClaimed(job, GenerationError.ERROR_INVALID_REFERENCE,
                     "当前模型最多支持 " + maxReferenceCount + " 张参考图");
@@ -233,19 +233,19 @@ public class ImageJobProcessor implements JobProcessor {
         }
 
         String aspectRatio = input.get("aspect_ratio") instanceof String s ? s : null;
-        ImageChannel channel = ImageChannelMapper.parseChannel(cap.getChannel(), cap.getCapabilityType());
+        ImageChannel channel = ImageChannelParser.parseChannel(cap.getChannel(), cap.getCapabilityType());
         String parser = channel.parser() != null ? channel.parser() : "seedream";
 
         String finalSize = providerSize;
         String finalQuality = null;
 
         if ("gpt".equals(parser) || "banana".equals(parser)) {
-            ImageChannelMapper.ImageRequestMapping mapping =
-                    ImageChannelMapper.parseStoredMapping(
+            ImageChannelParser.ImageRequestMapping mapping =
+                    ImageChannelParser.parseStoredMapping(
                             channel, cap.getRequestMapping(),
                             cap.getDefaultSize(), cap.getDefaultAspectRatio());
-            ImageChannelMapper.MappedRequest mapped =
-                    ImageChannelMapper.mapImageChannelRequest(mapping, sizeId, aspectRatio);
+            ImageChannelParser.MappedRequest mapped =
+                    ImageChannelParser.mapImageChannelRequest(mapping, sizeId, aspectRatio);
             if (!mapped.ok()) {
                 failClaimed(job, GenerationError.ERROR_INVALID_REFERENCE_TYPE,
                         "模型、分辨率与宽高比组合不受支持");
@@ -254,8 +254,8 @@ public class ImageJobProcessor implements JobProcessor {
             finalSize = mapped.size();
             finalQuality = mapped.quality();
         } else if (providerSize != null && aspectRatio != null
-                && ImageChannelMapper.hasSizeMatrix(cap.getRequestMapping())) {
-            String resolved = ImageChannelMapper.resolveSeedreamSize(
+                && ImageChannelParser.hasSizeMatrix(cap.getRequestMapping())) {
+            String resolved = ImageChannelParser.resolveSeedreamSize(
                     cap.getRequestMapping(), providerSize, aspectRatio);
             if (resolved == null) {
                 failClaimed(job, GenerationError.ERROR_INVALID_REFERENCE_TYPE,
@@ -289,7 +289,7 @@ public class ImageJobProcessor implements JobProcessor {
 
         ImageProtocol protocol = channel.protocol() != null
                 ? channel.protocol() : ImageProtocol.INLINE_IMAGE;
-        String i2iAlias = ImageChannelMapper.parseI2iModelName(cap.getFeatures());
+        String i2iAlias = ImageChannelParser.parseI2iModelName(cap.getFeatures());
         String requestModel = (protocol == ImageProtocol.INLINE_IMAGE
                 && i2iAlias != null && !sourceImageUrls.isEmpty())
                 ? i2iAlias : cap.getModelId();

@@ -3,7 +3,7 @@ package com.bluewhale.billing.application;
 import com.bluewhale.billing.application.command.HoldCommand;
 import com.bluewhale.billing.application.command.QuoteQuery;
 import com.bluewhale.billing.application.view.BalanceView;
-import com.bluewhale.billing.application.view.TransactionType;
+import com.bluewhale.billing.domain.ledger.TransactionType;
 import com.bluewhale.billing.application.view.TransactionView;
 import com.bluewhale.billing.application.view.UserStatsView;
 import com.bluewhale.billing.domain.DbTime;
