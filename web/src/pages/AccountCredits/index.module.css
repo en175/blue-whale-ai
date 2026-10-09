@@ -317,3 +317,40 @@
   gap: 6px;
   margin-left: 8px;
 }
+
+.checkAll {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #2a2a2e;
+  font-weight: 600;
+  color: #f0f0f0;
+}
+
+.checkList {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.checkItem,
+.checkAll {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.checkItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c8c8c8;
+}
+
+.checkItem input,
+.checkAll input {
+  width: 15px;
+  height: 15px;
+  accent-color: #5a5a5e;
+}

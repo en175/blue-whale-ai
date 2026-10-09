@@ -85,6 +85,12 @@ const PAGES: Record<string, unknown> = {
 function mockFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
     const raw = typeof input === 'string' ? input : input.toString();
+    if (raw.startsWith('/api/account/export')) {
+      return new Response(new Blob(['xlsx']), {
+        status: 200,
+        headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+      });
+    }
     const key = Object.keys(PAGES).find((k) => raw.startsWith(k));
     const body = key ? PAGES[key] : { code: 404, data: null, msg: 'not found' };
     return new Response(JSON.stringify(body), {
@@ -134,6 +140,10 @@ function clickByText(text: string) {
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => undefined) } });
+  Object.assign(URL, {
+    createObjectURL: vi.fn(() => 'blob:stub'),
+    revokeObjectURL: vi.fn(),
+  });
   vi.stubGlobal('fetch', mockFetch());
 });
 
@@ -195,6 +205,24 @@ describe('AccountCredits', () => {
       clickByText('复制订单号');
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('BW20260929143200801');
+  });
+
+  it('导出弹层：按当前页签 scope 与勾选字段请求导出', async () => {
+    await renderPage();
+    await act(async () => {
+      clickByText('导出明细');
+    });
+    await flush();
+    expect(document.body.textContent).toContain('导出已获取');
+    await act(async () => {
+      clickByText('导出');
+    });
+    await flush();
+    const urls = vi.mocked(globalThis.fetch).mock.calls.map((call) => String(call[0]));
+    const exportUrl = urls.find((url) => url.includes('/api/account/export'));
+    expect(exportUrl).toBeDefined();
+    expect(decodeURIComponent(exportUrl!)).toContain('scope=gain');
+    expect(decodeURIComponent(exportUrl!)).toContain('created_at');
   });
 });
 

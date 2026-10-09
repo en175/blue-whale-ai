@@ -1,5 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
-import { apiRequest } from './http';
+import { ApiError, API_PREFIX, apiRequest, readApiErrorMessage } from './http';
+import { getSessionToken } from './sessionToken';
 
 export interface UsageTokenLot {
   credits: number;
@@ -108,6 +109,64 @@ export function fetchAccountConsumptions(q: ConsumptionsQuery) {
     `/api/account/consumptions?${qs.toString()}`,
     { silent: true },
   );
+}
+
+export type ExportScope = 'orders' | 'gain' | 'consume';
+
+export interface ExportFieldOption {
+  key: string;
+  label: string;
+}
+
+export const EXPORT_FIELDS: Record<ExportScope, ExportFieldOption[]> = {
+  orders: [
+    { key: 'created_at', label: '下单时间' },
+    { key: 'product_name', label: '商品名称' },
+    { key: 'trade_no', label: '订单编号' },
+    { key: 'amount_yuan', label: '支付金额' },
+    { key: 'credits', label: '到账积分' },
+    { key: 'status', label: '状态' },
+  ],
+  gain: [
+    { key: 'created_at', label: '获取时间' },
+    { key: 'source', label: '获取来源' },
+    { key: 'detail', label: '获取详情' },
+    { key: 'expires_at', label: '积分到期时间' },
+    { key: 'amount', label: '积分值' },
+    { key: 'remaining', label: '剩余' },
+  ],
+  consume: [
+    { key: 'created_at', label: '消耗时间' },
+    { key: 'task_type', label: '任务类型' },
+    { key: 'model_label', label: '模型' },
+    { key: 'detail', label: '任务详情' },
+    { key: 'job_id', label: '任务 ID' },
+    { key: 'credits', label: '消耗积分' },
+  ],
+};
+
+export interface ExportQuery {
+  scope: ExportScope;
+  fields: string[];
+  status?: string;
+  type?: string;
+}
+
+export async function fetchAccountExport(q: ExportQuery): Promise<Blob> {
+  const qs = new URLSearchParams({ scope: q.scope, fields: q.fields.join(',') });
+  if (q.status) qs.set('status', q.status);
+  if (q.type) qs.set('type', q.type);
+
+  const headers = new Headers();
+  const token = getSessionToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  const res = await fetch(`${API_PREFIX}/account/export?${qs.toString()}`, { headers });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => undefined)) as { msg?: string } | undefined;
+    throw new ApiError(res.status, readApiErrorMessage(body, res.status), body?.msg ?? res.status);
+  }
+  return res.blob();
 }
 
 export const accountCreditsKeys = {
