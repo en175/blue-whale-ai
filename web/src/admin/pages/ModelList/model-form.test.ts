@@ -636,15 +636,29 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
     expect(ratios.extend).toEqual([]);
   });
 
-  it('写回只动 allowed_ratios / allowed_durations：其它子键与未知任务类型原样保留', () => {
+  it('写回只动 allowed_ratios / allowed_durations：模式内的其它子键保留', () => {
     const base = {
       first_frame: { allowed_ratios: ['1:1'], allowed_durations: [5, 10], note: 'x' },
-      custom_type: { allowed_ratios: ['4:3'] },
     };
     expect(buildTaskTypes(base, { first_frame: ['16:9'] }, { first_frame: true }, {})).toEqual({
       first_frame: { allowed_ratios: ['16:9'], note: 'x' },
-      custom_type: { allowed_ratios: ['4:3'] },
     });
+  });
+
+  it('未知模式键不再带回：带退役键的行保存一次就恢复合法', () => {
+    const base = {
+      prolong: { allowed_ratios: ['adaptive'] },
+      edit: { allowed_ratios: ['adaptive'] },
+    };
+    expect(buildTaskTypes(base, { edit: ['adaptive'] }, { edit: true }, { edit: true })).toEqual({
+      edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
+    });
+  });
+
+  it('未勾选已知模式：该键被移除（键不在 = 该模式不开放）', () => {
+    expect(
+      buildTaskTypes({ text2video: { allowed_ratios: ['1:1'] } }, { text2video: [] }, {}, {}),
+    ).toEqual({});
   });
 
   it('时长跟随原视频：勾选写 [-1]，取消删该键', () => {
@@ -668,12 +682,6 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
     expect(flags.extend).toBe(false);
     expect(flags.omni).toBe(false);
     expect(flags.text2video).toBe(false);
-  });
-
-  it('取消勾选某模式 → 该键被移除（键不在 = 该模式不开放）', () => {
-    expect(
-      buildTaskTypes({ text2video: { allowed_ratios: ['1:1'] } }, { text2video: [] }, {}, {}),
-    ).toEqual({});
   });
 
   it('勾选但比例留空 → 保留空对象（键在 = 开放且无额外约束）', () => {
