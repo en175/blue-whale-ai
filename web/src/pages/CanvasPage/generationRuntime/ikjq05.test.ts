@@ -17,8 +17,10 @@ import { normalGenerationTask } from './normalGeneration';
 import { videoToolsTask, type VideoToolPayload } from './videoTools';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 import { silenceApiConsoleInfo } from '../testing/silenceApiLogs';
+import { installFetchGuard } from '../testing/fetchGuard';
 
 silenceApiConsoleInfo();
+const fetchGuard = installFetchGuard();
 
 const SID = '12345678-0000-4000-8000-000000000001';
 const RETRY_SID = '12345678-0000-4000-8000-000000000002';
@@ -82,10 +84,11 @@ function setup(taskType = 'image') {
   let holdStatus = false;
   const heldCreate = new Promise<void>((resolve) => { releaseCreate = resolve; });
   vi.stubGlobal('window', { setTimeout: () => 0, clearTimeout() {}, localStorage: { getItem: () => null } });
-  vi.stubGlobal('fetch', async (path: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+  fetchGuard.stub(async (input, init) => {
+    const path = String(input);
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     const binding = canvasBindingSchema.parse(body.canvas_binding);
-    const key = new Headers(init.headers).get('Idempotency-Key');
+    const key = new Headers(init?.headers).get('Idempotency-Key');
     requests.push({ path, body, key });
     if (videoCase?.payload.kind === 'smartMatting') expect(body.client_token).toBe(binding.submission_id);
     else expect(key).toBe(binding.submission_id);
@@ -101,7 +104,10 @@ function setup(taskType = 'image') {
         target_node_id: NODE_ID, binding_revision: binding.submission_id === SID ? 1 : 2,
         job_id: jobId, is_current: true },
     });
-  });
+  }, [
+    ['POST', `/api/projects/1/${videoCase?.route ?? 'generation-jobs'}`],
+    ['POST', '/api/projects/1/generation-jobs/501/retry'],
+  ]);
   const patch = (id: string, data: Record<string, unknown>) => {
     const node = nodes.get(id);
     if (node) nodes.set(id, { ...node, data: { ...node.data, ...data } });
@@ -189,7 +195,7 @@ function setup(taskType = 'image') {
   };
 }
 
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { fetchGuard.unstubGlobals(); });
 
 describe('普通生成与视频家族的可靠失败恢复（IKJQ05）', () => {
   it.each(['image', 'video_enhance'])('%s 有当前提交标记但缺受理 jobId 的失败占位仍补足可信身份', async (taskType) => {

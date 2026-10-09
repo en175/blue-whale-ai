@@ -5,8 +5,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog from './index';
 import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
+import { installFetchGuard } from '../../testing/fetchGuard';
 
 silenceApiConsoleInfo();
+const fetchGuard = installFetchGuard([['POST', '/api/projects/p1/generation-jobs/quote']]);
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -63,7 +65,7 @@ beforeEach(() => {
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
-  vi.unstubAllGlobals();
+  fetchGuard.unstubGlobals();
 });
 
 describe('IKJIVN 图片面板报价不带 target_node_id', () => {
@@ -72,7 +74,7 @@ describe('IKJIVN 图片面板报价不带 target_node_id', () => {
       JSON.stringify({ code: 200, msg: null, data: { credits: 5 } }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     ));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchGuard.stub(fetchMock);
 
     await renderDialog();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));

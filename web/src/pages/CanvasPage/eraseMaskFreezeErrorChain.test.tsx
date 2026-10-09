@@ -11,6 +11,9 @@ import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
+import { installFetchGuard } from './testing/fetchGuard';
+
+const fetchGuard = installFetchGuard();
 
 
 export const flowProps: { current: Record<string, any> } = { current: {} };
@@ -184,23 +187,24 @@ const MASK_ASSET = {
   size: 32,
 };
 
-function routeFetch(routes: Array<{ match: string; respond: () => Response | Promise<Response> }>) {
+function routeFetch(routes: Array<{ method: string; match: string; respond: () => Response | Promise<Response> }>) {
   fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input);
     for (const route of routes) {
       if (url.includes(route.match)) return route.respond();
     }
-    return jsonOk(null);
+    throw new Error(`未匹配 fetch 响应：${url}`);
   });
+  fetchGuard.stub(fetchMock, routes.map(({ method, match }) => [method, match]));
 }
 
-function defaultRoutes(extra: Array<{ match: string; respond: () => Response | Promise<Response> }> = []) {
+function defaultRoutes(extra: Array<{ method: string; match: string; respond: () => Response | Promise<Response> }> = []) {
   routeFetch([
     ...extra,
-    { match: '/uploads/dedup', respond: () => jsonOk({ dedup: true, asset: MASK_ASSET }) },
-    { match: '/uploads/presign', respond: () => jsonFail('上传服务繁忙，请稍后重试') },
-    { match: '/image-erasures', respond: () => jsonOk({ job_id: 'j77', status: 'queued' }) },
-    { match: '/api/agent/assets', respond: () => jsonOk({ records: [], total: 0, size: 20, current: 1 }) },
+    { method: 'POST', match: '/api/agent/assets/uploads/dedup', respond: () => jsonOk({ dedup: true, asset: MASK_ASSET }) },
+    { method: 'POST', match: '/api/agent/assets/uploads/presign', respond: () => jsonFail('上传服务繁忙，请稍后重试') },
+    { method: 'POST', match: '/api/projects/p1/image-erasures', respond: () => jsonOk({ job_id: 'j77', status: 'queued' }) },
+    { method: 'GET', match: '/api/agent/assets', respond: () => jsonOk({ records: [], total: 0, size: 20, current: 1 }) },
   ]);
 }
 
@@ -339,14 +343,13 @@ beforeEach(() => {
   seedProjectA();
   fetchMock.mockReset();
   defaultRoutes();
-  vi.stubGlobal('fetch', fetchMock);
   jobMocks.fetchJobStatus.mockReset();
   jobMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j77', status: 'processing', progress: 1, asset: null });
 });
 
 afterEach(async () => {
   await unmountPage();
-  vi.unstubAllGlobals();
+  fetchGuard.unstubGlobals();
   vi.clearAllMocks();
   vi.restoreAllMocks();
   useAuthPromptStore.getState().reset();
@@ -355,7 +358,7 @@ afterEach(async () => {
 
 describe('IKI8L7 擦除（真实 API/HTTP 链）：迟到失败全链路静默', () => {
   it('迟到上传失败（presign 业务失败）：HTTP 层与页面都不弹，新会话存活', async () => {
-    defaultRoutes([{ match: '/uploads/dedup', respond: () => jsonOk({ dedup: false }) }]);
+    defaultRoutes([{ method: 'POST', match: '/api/agent/assets/uploads/dedup', respond: () => jsonOk({ dedup: false }) }]);
     const encode = stubControlledToBlob();
     await renderPage();
     await eraseImage();
@@ -377,7 +380,7 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：迟到失败全链路静默',
   it('迟到创建失败（业务失败信封）：HTTP 层与页面都不弹，新会话存活', async () => {
     let settleCreate!: (value: Response) => void;
     defaultRoutes([
-      { match: '/image-erasures', respond: () => new Promise<Response>((resolve) => { settleCreate = resolve; }) },
+      { method: 'POST', match: '/api/projects/p1/image-erasures', respond: () => new Promise<Response>((resolve) => { settleCreate = resolve; }) },
     ]);
     const encode = stubControlledToBlob();
     await renderPage();
@@ -401,7 +404,7 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：迟到失败全链路静默',
   it('迟到创建成功：旧任务按原输入建卡/连线收尾，新会话不动（真实链全链验证）', async () => {
     let settleCreate!: (value: Response) => void;
     defaultRoutes([
-      { match: '/image-erasures', respond: () => new Promise<Response>((resolve) => { settleCreate = resolve; }) },
+      { method: 'POST', match: '/api/projects/p1/image-erasures', respond: () => new Promise<Response>((resolve) => { settleCreate = resolve; }) },
     ]);
     const encode = stubControlledToBlob();
     await renderPage();
@@ -430,7 +433,7 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：迟到失败全链路静默',
 
 describe('IKI8L7 擦除（真实 API/HTTP 链）：当前有效会话失败单源提示可重试', () => {
   it('当前会话上传失败：页面提示恰一次、HTTP 层不叠加，停留编辑态可重试', async () => {
-    defaultRoutes([{ match: '/uploads/dedup', respond: () => jsonOk({ dedup: false }) }]);
+    defaultRoutes([{ method: 'POST', match: '/api/agent/assets/uploads/dedup', respond: () => jsonOk({ dedup: false }) }]);
     const encode = stubControlledToBlob();
     await renderPage();
     await eraseImage();
@@ -451,7 +454,7 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：当前有效会话失败单�
   });
 
   it('当前会话创建失败：页面提示恰一次、HTTP 层不叠加，停留编辑态可重试', async () => {
-    defaultRoutes([{ match: '/image-erasures', respond: () => jsonFail('擦除服务维护中') }]);
+    defaultRoutes([{ method: 'POST', match: '/api/projects/p1/image-erasures', respond: () => jsonFail('擦除服务维护中') }]);
     const encode = stubControlledToBlob();
     await renderPage();
     await eraseImage();
