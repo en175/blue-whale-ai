@@ -88,6 +88,17 @@ describe("输出键与节点身份（B.4 output_key 表）", () => {
     expect(outputNodeIdForKey("segment:3", ctx)).toBe(`generation-result:${SUBMISSION}:segment:3`);
     expect(outputNodeIdForKey("track:sfx", ctx)).toBe(`generation-result:${SUBMISSION}:track:sfx`);
   });
+
+  it("slot 节点跨提交共享（可陈旧），segment/track 按提交分片（不可陈旧）", () => {
+    const other = "0a1b2c3d-0000-4000-8000-00000000b002";
+    expect(outputSlotNodeId("501")).not.toContain(SUBMISSION);
+    expect(outputNodeIdForKey("slot:501", { submissionId: other, targetNodeId: TARGET }))
+      .toBe(outputNodeIdForKey("slot:501", { submissionId: SUBMISSION, targetNodeId: TARGET }));
+    for (const key of ["segment:3", "track:sfx"]) {
+      expect(multiResultNodeId(SUBMISSION, key)).toContain(SUBMISSION);
+      expect(multiResultNodeId(SUBMISSION, key)).not.toBe(multiResultNodeId(other, key));
+    }
+  });
 });
 
 describe("场景切分投影（segment:<index>，序号来自可信终态 result）", () => {

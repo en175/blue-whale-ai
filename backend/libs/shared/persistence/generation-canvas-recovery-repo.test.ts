@@ -60,6 +60,31 @@ describe("guardLegacyCanvasWrite（B.7 旧客户端守护）", () => {
     const edited = [{ id: "text-1", type: "textNode", data: { text: "b" } }];
     expect(() => guardLegacyCanvasWrite(plain as never, edited as never)).not.toThrow();
   });
+
+  it("文档标记已陈旧：来件推进到该节点当前持有者 → 放行", () => {
+    const successor = "0a1b2c3d-0000-4000-8000-0000000000ff";
+    const advanced = markedNode("n1", { generationRecovery: { ...MARKER, submissionId: successor } });
+    expect(() => guardLegacyCanvasWrite([markedNode("n1")], [advanced])).toThrow(RecoveryContractError);
+    expect(() => guardLegacyCanvasWrite(
+      [markedNode("n1")], [advanced], new Set([`n1:${successor}:${TARGET_OUTPUT_KEY}`]),
+    )).not.toThrow();
+  });
+
+  it("文档标记已陈旧：来件既非旧标记也非当前持有者 → 仍拒绝", () => {
+    const successor = "0a1b2c3d-0000-4000-8000-0000000000ff";
+    const third = "0a1b2c3d-0000-4000-8000-0000000000ee";
+    const advanced = markedNode("n1", { generationRecovery: { ...MARKER, submissionId: successor } });
+    expect(() => guardLegacyCanvasWrite(
+      [markedNode("n1")], [advanced], new Set([`n1:${third}:${TARGET_OUTPUT_KEY}`]),
+    )).toThrow(RecoveryContractError);
+  });
+
+  it("文档标记已陈旧不代表可缺席：旧协议路径无声明机制 → 仍拒绝", () => {
+    const successor = "0a1b2c3d-0000-4000-8000-0000000000ff";
+    expect(() => guardLegacyCanvasWrite(
+      [markedNode("n1")], [], new Set([`n1:${successor}:${TARGET_OUTPUT_KEY}`]),
+    )).toThrow(RecoveryContractError);
+  });
 });
 
 describe("恢复页游标（B.5）", () => {

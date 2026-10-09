@@ -556,3 +556,23 @@ export async function projectHasRecoverySubmissions(prisma: PrismaClient, projec
   });
   return row !== null;
 }
+
+export async function projectCanvasNodeOwnerKeys(prisma: PrismaClient, projectId: string): Promise<Set<string>> {
+  const pid = BigInt(projectId);
+  const owners = await prisma.generation_canvas_node_owners.findMany({
+    where: { project_id: pid },
+    select: { node_id: true, generation_canvas_submission_id: true, output_key: true },
+  });
+  if (owners.length === 0) return new Set();
+  const submissions = await prisma.generation_canvas_submissions.findMany({
+    where: { id: { in: owners.map(owner => owner.generation_canvas_submission_id) } },
+    select: { id: true, submission_id: true },
+  });
+  const submissionIdByRowId = new Map(submissions.map(row => [row.id.toString(), row.submission_id]));
+  const keys = new Set<string>();
+  for (const owner of owners) {
+    const submissionId = submissionIdByRowId.get(owner.generation_canvas_submission_id.toString());
+    if (submissionId !== undefined) keys.add(`${owner.node_id}:${submissionId}:${owner.output_key}`);
+  }
+  return keys;
+}

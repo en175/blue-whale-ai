@@ -13,6 +13,7 @@ import {
   decodeRecoveryCursor,
   guardLegacyCanvasWrite,
   listCanvasRecoveryPage,
+  projectCanvasNodeOwnerKeys,
   projectHasRecoverySubmissions,
   resolveCanvasRecoveryItems,
   saveCanvasWithRecovery,
@@ -323,8 +324,8 @@ export class CanvasService {
     const editedMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
     const current = await this.repo.getByProject(projectId);
     const previous = JSON.parse(current.nodes ?? "[]") as typeof incoming;
-    if (await projectHasRecoverySubmissions(this.prisma.client, projectId)
-      && body.expectedVersion === undefined) {
+    const guardedByRecovery = await projectHasRecoverySubmissions(this.prisma.client, projectId);
+    if (guardedByRecovery && body.expectedVersion === undefined) {
       return {
         code: 428,
         msg: "该项目已启用任务恢复保护，保存必须携带 If-Match 版本",
@@ -332,7 +333,9 @@ export class CanvasService {
       } as const;
     }
     try {
-      guardLegacyCanvasWrite(previous, incoming);
+      guardLegacyCanvasWrite(previous, incoming, guardedByRecovery
+        ? await projectCanvasNodeOwnerKeys(this.prisma.client, projectId)
+        : undefined);
     } catch (error) {
       if (error instanceof RecoveryContractError) return error.envelope;
       throw error;
