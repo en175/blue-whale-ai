@@ -56,8 +56,8 @@ import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, compliancePatchFromMaterialStatus
 import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
-import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
-import { sampleDeadlineExpired } from './components/MediaNode/mediaPlayback';
+import type { MediaNodeData } from './components/MediaNode';
+
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
 import NodeFollowToolbar from './components/NodeFollowToolbar';
 import AssetCardToolbar from './components/AssetCardNode/Toolbar';
@@ -159,7 +159,7 @@ import { composeImageSendPrompt } from './components/ImageDialog/composeImageSen
 import ImageGenerationDockPanel from './imageGenerationDockPanel';
 import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-max-length';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
-import { flattenPromptDocForSend, restorePromptDoc, type PromptDoc } from '@/lib/prompt-doc';
+import { restorePromptDoc } from '@/lib/prompt-doc';
 import { type CanvasPickItem } from './components/AudioDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
 import LegacyHistoryModal from './components/LegacyHistoryModal';
@@ -174,7 +174,7 @@ import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
-import { draftFileNameOf, hasCustomName, planBindingsCoveredBy, readNodeAssetId, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
+import { hasCustomName, planBindingsCoveredBy, readNodeAssetId, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
@@ -192,19 +192,12 @@ import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUploa
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/assetUrlCache';
 import { referencePromptPlan, applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, readCanvasConflictVersion, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
-import { envelopeErrorCode, isApiError } from '@/api/http';
+import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
-import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/utils/creditsGate';
+import { openRechargeForCreditsError } from '@/utils/creditsGate';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
 import {
   fetchJobStatus,
-  quoteVideoFinalize,
-  quoteSampleRegenerate,
-  type CreateJobPayload,
-  type ImageJobParameters,
-  type VideoJobParameters,
-  type AudioJobParameters,
-  type GenerationRefItem,
  } from '@/api/jobs';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import {
@@ -235,7 +228,7 @@ import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
 import { normalGenerationTask } from './generationRuntime/normalGeneration';
-import { storyboardTask, type StoryboardPayload } from './generationRuntime/storyboardTasks';
+import { storyboardTask } from './generationRuntime/storyboardTasks';
 import { createImageToolsTask, isImageToolsCard, imageToolsRetryPayloadOf, type ImageToolsPayload } from './generationRuntime/imageTools';
 import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from './generationRuntime/mixMuxTasks';
 import { sceneSplitTask, vocalSplitTask } from './generationRuntime/multiOutputTasks';
@@ -249,6 +242,7 @@ import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistor
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
 import { useCanvasPickers } from './hooks/useCanvasPickers';
 import { useCanvasGenerationTerminal } from './hooks/useCanvasGenerationTerminal';
+import { useCanvasGenerationSubmission } from './hooks/useCanvasGenerationSubmission';
 import {
   applyIndependentGroupDrag,
   bringGroupToFront,
@@ -415,28 +409,6 @@ export default function CanvasPage() {
   // 项目首帧先使旧响应失效，随后从运行时读取唯一状态。
   toolRuntime.setProject(currentId);
   const audioMixInFlightRef = useRef(false);
-  /** IKIZQE 成片（finalize）链路的页面态：按样片卡 node id 记报价，按样片任务 id 记
-   *  已受理尝试（会话内）；「提交中/结果不明」是渲染期派生 CTA 状态的数据源。
-   *  报价 = 服务端唯一权威门（空报价双 null 即禁用），不随画布持久化——刷新后重新报价。 */
-  const [finalizeQuotes, setFinalizeQuotes] = useState<
-    Record<string, { phase: 'loading' } | { phase: 'ready'; credits: number; revision: string } | { phase: 'empty' }>
-  >({});
-  const finalizeQuoteInflightRef = useRef(new Set<string>());
-  /** 提交窗口同步防重（双击/并发点击至多一次提交）；提交中视觉态由占位成片卡推导（running） */
-  const finalizeInflightRef = useRef(new Set<string>());
-  const [finalizeUnknownSamples, setFinalizeUnknownSamples] = useState<ReadonlySet<string>>(() => new Set());
-  const finalizeAttemptedJobIdsRef = useRef(new Set<string>());
-  /** IKIZQG 重新生成样片（regenerate-sample）链路的页面态：按**原样片任务 id**记报价与
-   *  已受理尝试（会话内）——过期样片卡与成片失败卡两个入口指向同一样片任务时共享一份。
-   *  口径同 finalize：报价 = 服务端唯一权威门（空报价双 null 即禁用），不持久化，刷新后重报价。 */
-  const [sampleRegenQuotes, setSampleRegenQuotes] = useState<
-    Record<string, { phase: 'loading' } | { phase: 'ready'; credits: number; revision: string } | { phase: 'empty' }>
-  >({});
-  const sampleRegenQuoteInflightRef = useRef(new Set<string>());
-  /** 提交窗口同步防重（按样片任务 id 归并：同一样片的两个入口并发点击至多一次提交） */
-  const sampleRegenInflightRef = useRef(new Set<string>());
-  const [sampleRegenUnknownSamples, setSampleRegenUnknownSamples] = useState<ReadonlySet<string>>(() => new Set());
-  const sampleRegenAttemptedJobIdsRef = useRef(new Set<string>());
   /** 合成提交任务在途锁（IKIHPM，同 audioMix 口径）：在途时后来的发送被守卫挡回
    *  （连点不重复建任务），finally 无条件释放。受理/幂等/轮询归生成任务运行时（IKJJR4）。 */
   const audioVideoMuxInFlightRef = useRef(false);
@@ -4637,712 +4609,6 @@ export default function CanvasPage() {
    *  claims 覆盖全部「生成中 + jobId」卡形态；历史兼容任务由运行时按无 submission 关联
    *  口径追踪（不写 marker/不确认）。 */
 
-  /** ═══ IKJJR6 成片/重生样片迁入统一任务运行时：共享提交助手 ═══
-   *  两入口错误收敛同口径（IKIZQE/IKIZQG 原链路语义保持）：服务端已回答（信封错误）→
-   *  撤占位卡，1014 置「状态核对中」禁点，其余 toast + 删报价 entry 触发重报价；
-   *  传输结果不明（408/网络）→ 同意图（同 submission_id，运行时提交窗口）原样重发一次
-   *  ——服务端重放首次结果（只建一个 job、只扣一次钱）；仍不明 → 撤卡 + 核对中禁点
-   *  （刷新后以报价端点恢复一致状态；重生样片另经恢复扫描对账补卡）。
-   *  提交/受理/轮询/终态的归属检查、幂等键（submission_id）与台账在运行时。 */
-  const submitStoryboardTask = (
-    payload: StoryboardPayload,
-    target: { targetNodeId: string; seedTarget: RecoverySeedTarget },
-    ui: {
-      removePlaceholder: () => void;
-      markUnknown: () => void;
-      refreshQuote: () => void;
-      unknownToast: string;
-      /** 本次意图失败收敛（受理前置失败，含将重发）：释放页面同步提交窗口 */
-      onFailure: () => void;
-    },
-  ): boolean => {
-    const runtime = generationRuntimeRef.current;
-    if (!runtime) return false;
-    const dispatch = (retryUnknown: boolean): boolean => runtime.submit(
-      storyboardTask,
-      {
-        payload,
-        target: {
-          targetNodeId: target.targetNodeId,
-          seedTarget: target.seedTarget,
-          seedSources: [],
-          expectedBindingRevision: runtime.bindingRevisionOf(target.targetNodeId),
-        },
-      },
-      {
-        onCreateFailure: (e: unknown): boolean => {
-          ui.onFailure();
-          if (isApiError(e) && e.status !== 408 && e.status !== 0) {
-            // 服务端已回答（信封错误）：占位卡撤回，按钮状态交还报价/截止推导
-            ui.removePlaceholder();
-            if (Number(e.code) === 1014) {
-              // 上次提交结果不明、核对锁定期间——保持禁点（状态核对中）
-              ui.markUnknown();
-              showToast('warn', e.message);
-              return true;
-            }
-            showToast('error', e.message);
-            ui.refreshQuote();
-            return true;
-          }
-          if (retryUnknown) {
-            // 传输结果不明（408 超时/网络失败）：同意图原样重发一次（受理/失败各自收敛，
-            // 不再递归重试）
-            window.setTimeout(() => dispatch(false), 0);
-            return true;
-          }
-          // 仍不明：占位卡撤回（无可核实任务），入口「状态核对中」禁点
-          ui.removePlaceholder();
-          ui.markUnknown();
-          showToast('warn', ui.unknownToast);
-          return true;
-        },
-      },
-    );
-    return dispatch(true);
-  };
-
-  /** ═══ IKIZQE 成片（finalize）提交链路（IKJJR6 迁入统一任务运行时） ═══
-   *  唯一入口 = 样片卡标题行「生成 1080P 成片」：报价就绪（服务端门——空报价双 null 即
-   *  禁用）+ 截止有效才可点；点击直接提交无二次确认。提交即在样片卡右侧 +60px 建关联
-   *  成片占位卡（videoStage=final + sourceSampleJobId 两卡关系），runtime.submit 受理后
-   *  回填 jobId 并接管轮询/终态（final 阶段投影由 applyJobTerminal 回填）。成片端点契约
-   *  不收 canvas_binding——按历史兼容任务追踪（水合 jobId 续轮询）。
-   *  并发/重复防线：inflight ref 同步挡住双击与两页并发（服务端来源唯一约束 1057 兜底）。 */
-  const handleFinalizeSample = (sampleNodeId: string): boolean => {
-    if (!currentId) {
-      showToast('warn', '未选中项目，无法生成成片');
-      return false;
-    }
-    const sample = mediaNodesRef.current.find((n) => n.id === sampleNodeId);
-    const sampleData = (sample?.data ?? {}) as Record<string, unknown>;
-    if (sample == null || sampleData.videoStage !== 'sample' || sampleData.jobId == null) return false;
-    const sampleJobId = String(sampleData.jobId);
-    // 提交结果不明（核对中）：禁止再次点击——服务端 1014 同口径拒再提交
-    if (finalizeUnknownSamples.has(sampleNodeId)) return false;
-    // 同步防重：提交窗口内双击/并发点击直接忽略（至多一次提交）
-    if (finalizeInflightRef.current.has(sampleNodeId)) return false;
-    if (mediaNodesRef.current.some(
-      (n) =>
-        ((n.data ?? {}) as Record<string, unknown>).videoStage === 'final'
-        && String(((n.data ?? {}) as Record<string, unknown>).sourceSampleJobId ?? '') === sampleJobId,
-    )) return false;
-    const quote = finalizeQuotes[sampleNodeId];
-    if (quote?.phase !== 'ready') return false;
-    if (sampleData.finalizeDeadlineAt == null || sampleDeadlineExpired(sampleData.finalizeDeadlineAt as string)) {
-      showToast('warn', '样片已过转成片期限或缺可信截止时间，无法生成成片');
-      return false;
-    }
-    finalizeInflightRef.current.add(sampleNodeId);
-    /** 占位成片卡：样片卡右侧 +60px（同截取/调速落位口径），宽高比沿用样片卡 */
-    const box = mediaContentBox({
-      mediaType: 'video',
-      width: typeof sampleData.width === 'number' ? sampleData.width : undefined,
-      height: typeof sampleData.height === 'number' ? sampleData.height : undefined,
-      ratio: typeof sampleData.targetRatio === 'string' ? sampleData.targetRatio : undefined,
-    });
-    const finalNodeId = newNodeId('media-gen');
-    const placeholder = attachCallbacks({
-      id: finalNodeId,
-      type: 'mediaNode' as const,
-      position: {
-        x: Math.round(sample.position.x + box.width + 60),
-        y: Math.round(sample.position.y),
-      },
-      data: {
-        src: '',
-        fileName: '成片生成中',
-        mediaType: 'video' as const,
-        genStatus: 'generating' as MediaGenStatus,
-        progress: 0,
-        videoStage: 'final' as const,
-        sourceSampleJobId: sampleJobId,
-        targetRatio: typeof sampleData.targetRatio === 'string' ? sampleData.targetRatio : undefined,
-      },
-    } as Node);
-    const current = mediaNodesRef.current;
-    mediaNodesRef.current = [...current, placeholder];
-    setMediaNodes(mediaNodesRef.current);
-    if (currentId) void flushCanvasSave(currentId).catch(() => {});
-
-    const clearSubmitting = () => {
-      finalizeInflightRef.current.delete(sampleNodeId);
-    };
-    const removePlaceholder = () => {
-      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== finalNodeId);
-      setMediaNodes(mediaNodesRef.current);
-      if (currentId) void flushCanvasSave(currentId).catch(() => {});
-    };
-    const markUnknown = () => {
-      setFinalizeUnknownSamples((prev) => new Set(prev).add(sampleNodeId));
-    };
-    /** 报价重取：删 entry 触发报价 effect 重查（1056 变价 → 新价可见后再由用户点击） */
-    const refreshQuote = () => {
-      setFinalizeQuotes((prev) => {
-        if (!(sampleNodeId in prev)) return prev;
-        const next = { ...prev };
-        delete next[sampleNodeId];
-        return next;
-      });
-    };
-    const dispatched = submitStoryboardTask(
-      {
-        kind: 'finalize',
-        sampleJobId,
-        expectedCredits: quote.credits,
-        quoteRevision: quote.revision,
-        // 受理成功收敛（runtime 在 create resolve 内回调，先于 jobId 回填）：
-        // 登记本会话已受理 + 受理后立即落盘 jobId（宏任务排在 patch 之后）+ 成功提示
-        onAccepted: () => {
-          finalizeAttemptedJobIdsRef.current.add(sampleJobId);
-          clearSubmitting();
-          window.setTimeout(() => {
-            if (currentId) void flushCanvasSave(currentId).catch(() => {});
-          }, 0);
-          showToast('success', `已提交成片生成，预计消耗 ${quote.credits} 积分`);
-        },
-      },
-      {
-        targetNodeId: finalNodeId,
-        seedTarget: {
-          role: 'result-placeholder',
-          x: Math.round(sample.position.x + box.width + 60),
-          y: Math.round(sample.position.y),
-          width: Math.round(box.width),
-          height: Math.round(box.height),
-          name: '成片生成中',
-        },
-      },
-      {
-        removePlaceholder,
-        markUnknown,
-        refreshQuote,
-        unknownToast: '无法确认成片任务是否已提交，状态核对中，请勿重复提交',
-        onFailure: clearSubmitting,
-      },
-    );
-    if (!dispatched) {
-      // 运行时未发出（未就绪/防重入）：撤占位卡并释放提交窗口，状态交还报价推导
-      clearSubmitting();
-      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== finalNodeId);
-      setMediaNodes(mediaNodesRef.current);
-    }
-    return dispatched;
-  };
-
-  /** IKIZQE：成片报价获取——成功样片卡（无成片卡在场、截止有效、未受理过）进 CTA 前先问价。
-   *  空报价（双 null）= 服务端判不可提交（已有成片尝试/未转存/模型未放行/算不出价），
-   *  据此禁用按钮；报价失败同样折空报价（无报价不提交，不按未知金额扣费）。 */
-  useEffect(() => {
-    if (!currentId) return;
-    for (const n of mediaNodes) {
-      const d = (n.data ?? {}) as Record<string, unknown>;
-      if (d.videoStage !== 'sample' || d.jobId == null) continue;
-      // 仅成功样片卡提供入口（生成中/失败/草稿无 CTA）
-      if (d.genStatus != null || d.draft === true) continue;
-      const jobId = String(d.jobId);
-      if (finalizeAttemptedJobIdsRef.current.has(jobId)) continue;
-      if (
-        mediaNodes.some(
-          (m) =>
-            ((m.data ?? {}) as Record<string, unknown>).videoStage === 'final'
-            && String(((m.data ?? {}) as Record<string, unknown>).sourceSampleJobId ?? '') === jobId,
-        )
-      ) continue;
-      if (finalizeUnknownSamples.has(n.id)) continue;
-      if (finalizeQuotes[n.id] != null || finalizeQuoteInflightRef.current.has(n.id)) continue;
-      // 缺可信截止 / 已过期：客户端直接判禁用，无需问价
-      if (typeof d.finalizeDeadlineAt !== 'string' || sampleDeadlineExpired(d.finalizeDeadlineAt)) continue;
-      const nodeId = n.id;
-      finalizeQuoteInflightRef.current.add(nodeId);
-      quoteVideoFinalize(currentId, jobId, { silent: true })
-        .then((q) => {
-          setFinalizeQuotes((prev) => ({
-            ...prev,
-            [nodeId]: q.credits != null && q.quote_revision != null
-              ? { phase: 'ready', credits: q.credits, revision: q.quote_revision }
-              : { phase: 'empty' },
-          }));
-        })
-        .catch(() => {
-          setFinalizeQuotes((prev) => ({ ...prev, [nodeId]: { phase: 'empty' } }));
-        })
-        .finally(() => {
-          finalizeQuoteInflightRef.current.delete(nodeId);
-        });
-    }
-  }, [mediaNodes, currentId, finalizeQuotes, finalizeUnknownSamples]);
-
-  /** IKIZQG：重新生成入口身份解析——返回该卡指向的原样片任务 ID（null = 无入口）。
-   *  IKJ7UI（ADR-0119）起唯一入口是成片失败卡失败区（videoStage=final + failed +
-   *  sourceSampleJobId 找回原样片，用户故事 21：按原输入新建样片）；过期样片卡标题行
-   *  入口已随决策移除（过期信息由画面内角标表达，恢复靠重新编辑后从面板重发）。 */
-  const regenEntrySampleJobIdOf = (d: Record<string, unknown>): string | null => {
-    if (d.videoStage === 'final' && d.genStatus === 'failed' && d.sourceSampleJobId != null) {
-      return String(d.sourceSampleJobId);
-    }
-    return null;
-  };
-
-  /** ═══ IKIZQG 重新生成样片（regenerate-sample）提交链路（IKJJR6 迁入统一任务运行时） ═══
-   *  入口：成片失败卡失败区（IKJ7UI 起改形为同款「重试」按钮）。报价就绪（服务端门
-   *  ——空报价双 null 即禁用）才可点；点击直接提交，服务端从原样片**冻结输入**派生新
-   *  任务——**创建新卡不覆盖旧结果**（旧样片/失败成片/费用记录只读不写）。提交即在入口
-   *  卡正下方 +60px 建样片占位卡（videoStage=sample；避开 finalize 在样片右侧 +60px 的
-   *  落位），runtime.submit 以新占位卡为承接目标携 canvas_binding 受理（Idempotency-Key =
-   *  submission_id），受理后回填 jobId 并接管轮询/终态（sample 阶段投影由 applyJobTerminal
-   *  回填，新样片有自己的截止与成片入口）；受理回执丢失经恢复扫描对账补卡。
-   *  并发/重复防线：inflight ref 按**样片任务 id** 归并。 */
-  const handleRegenerateSample = (entryNodeId: string): boolean => {
-    if (!currentId) {
-      showToast('warn', '未选中项目，无法重新生成样片');
-      return false;
-    }
-    const origin = mediaNodesRef.current.find((n) => n.id === entryNodeId);
-    const originData = (origin?.data ?? {}) as Record<string, unknown>;
-    const sampleJobId = regenEntrySampleJobIdOf(originData);
-    if (origin == null || sampleJobId == null) return false;
-    if (sampleRegenUnknownSamples.has(sampleJobId)) return false;
-    if (sampleRegenAttemptedJobIdsRef.current.has(sampleJobId)) return false;
-    if (sampleRegenInflightRef.current.has(sampleJobId)) return false;
-    const quote = sampleRegenQuotes[sampleJobId];
-    if (quote?.phase !== 'ready') return false;
-    sampleRegenInflightRef.current.add(sampleJobId);
-    /** 占位样片卡：入口卡正下方 +60px，宽高比沿入口卡 */
-    const box = mediaContentBox({
-      mediaType: 'video',
-      width: typeof originData.width === 'number' ? originData.width : undefined,
-      height: typeof originData.height === 'number' ? originData.height : undefined,
-      ratio: typeof originData.targetRatio === 'string' ? originData.targetRatio : undefined,
-    });
-    const regenNodeId = newNodeId('media-gen');
-    const placeholder = attachCallbacks({
-      id: regenNodeId,
-      type: 'mediaNode' as const,
-      position: {
-        x: Math.round(origin.position.x),
-        y: Math.round(origin.position.y + box.height + 60),
-      },
-      data: {
-        src: '',
-        fileName: '样片生成中',
-        mediaType: 'video' as const,
-        genStatus: 'generating' as MediaGenStatus,
-        progress: 0,
-        videoStage: 'sample' as const,
-        targetRatio: typeof originData.targetRatio === 'string' ? originData.targetRatio : undefined,
-      },
-    } as Node);
-    mediaNodesRef.current = [...mediaNodesRef.current, placeholder];
-    setMediaNodes(mediaNodesRef.current);
-    if (currentId) void flushCanvasSave(currentId).catch(() => {});
-
-    const clearSubmitting = () => {
-      sampleRegenInflightRef.current.delete(sampleJobId);
-    };
-    const removePlaceholder = () => {
-      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== regenNodeId);
-      setMediaNodes(mediaNodesRef.current);
-      if (currentId) void flushCanvasSave(currentId).catch(() => {});
-    };
-    const markUnknown = () => {
-      setSampleRegenUnknownSamples((prev) => new Set(prev).add(sampleJobId));
-    };
-    /** 报价重取：删 entry 触发报价 effect 重查（1056 变价 → 新价可见后再由用户点击；
-     *  新报价 = 新签名换新 submission_id，不撞同键变价 100409） */
-    const refreshQuote = () => {
-      setSampleRegenQuotes((prev) => {
-        if (!(sampleJobId in prev)) return prev;
-        const next = { ...prev };
-        delete next[sampleJobId];
-        return next;
-      });
-    };
-    const dispatched = submitStoryboardTask(
-      {
-        kind: 'regenerate-sample',
-        sampleJobId,
-        expectedCredits: quote.credits,
-        quoteRevision: quote.revision,
-        // 受理成功收敛（runtime 在 create resolve 内回调，先于 jobId 回填）：
-        // 登记本会话已受理 + 受理后立即落盘 jobId（宏任务排在 patch 之后）+ 成功提示
-        onAccepted: () => {
-          sampleRegenAttemptedJobIdsRef.current.add(sampleJobId);
-          clearSubmitting();
-          window.setTimeout(() => {
-            if (currentId) void flushCanvasSave(currentId).catch(() => {});
-          }, 0);
-          showToast('success', `已提交样片重新生成，预计消耗 ${quote.credits} 积分；已创建新卡，旧结果保留`);
-        },
-      },
-      {
-        targetNodeId: regenNodeId,
-        seedTarget: {
-          role: 'result-placeholder',
-          x: Math.round(origin.position.x),
-          y: Math.round(origin.position.y + box.height + 60),
-          width: Math.round(box.width),
-          height: Math.round(box.height),
-          name: '样片生成中',
-        },
-      },
-      {
-        removePlaceholder,
-        markUnknown,
-        refreshQuote,
-        unknownToast: '无法确认重新生成任务是否已提交，状态核对中，请勿重复提交',
-        onFailure: clearSubmitting,
-      },
-    );
-    if (!dispatched) {
-      // 运行时未发出（未就绪/防重入）：撤占位卡并释放提交窗口，状态交还报价推导
-      clearSubmitting();
-      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== regenNodeId);
-      setMediaNodes(mediaNodesRef.current);
-    }
-    return dispatched;
-  };
-
-  /** IKIZQG：重新生成报价获取——入口卡（成片失败卡，IKJ7UI 起）进 CTA 前先问价（按
-   *  样片任务归并）。空报价（双 null）= 服务端判不可提交（非样片任务/模型未放行/算不出
-   *  价），据此禁用按钮；报价失败同样折空报价。 */
-  useEffect(() => {
-    if (!currentId) return;
-    for (const n of mediaNodes) {
-      const sampleJobId = regenEntrySampleJobIdOf((n.data ?? {}) as Record<string, unknown>);
-      if (sampleJobId == null) continue;
-      if (sampleRegenAttemptedJobIdsRef.current.has(sampleJobId)) continue;
-      if (sampleRegenUnknownSamples.has(sampleJobId)) continue;
-      if (sampleRegenQuotes[sampleJobId] != null || sampleRegenQuoteInflightRef.current.has(sampleJobId)) continue;
-      sampleRegenQuoteInflightRef.current.add(sampleJobId);
-      quoteSampleRegenerate(currentId, sampleJobId, { silent: true })
-        .then((q) => {
-          setSampleRegenQuotes((prev) => ({
-            ...prev,
-            [sampleJobId]: q.credits != null && q.quote_revision != null
-              ? { phase: 'ready', credits: q.credits, revision: q.quote_revision }
-              : { phase: 'empty' },
-          }));
-        })
-        .catch(() => {
-          setSampleRegenQuotes((prev) => ({ ...prev, [sampleJobId]: { phase: 'empty' } }));
-        })
-        .finally(() => {
-          sampleRegenQuoteInflightRef.current.delete(sampleJobId);
-        });
-    }
-  }, [mediaNodes, currentId, sampleRegenQuotes, sampleRegenUnknownSamples]);
-
-  /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询。
-   *  mediaRefs 仅 image/video/audio：单数组 references（保序），与 input_asset_ids 等旧参考字段互斥。
-   *  视频可含首尾帧角色；图片/音频 role 恒 reference。素材库引用（Asset- 前缀）走 material_id。
-   *  targetNodeId 仅图片/视频（IKDLQF/IKDLQG）：从对应媒体节点面板发起时携带，服务端按最新画布推导连线文本附件。
-   *  目标是草稿身份节点时（IKDMQQ）：不再新建占位卡，草稿原地转生成中，结果回填同一张卡。
-   *  返回 true 表示创建请求已发出（IKFXZD：面板据此判定发送成功并自动隐藏）；
-   *  false = 未发出（无项目/无效草稿/配额不足/同步异常）。HTTP 层异步失败不回滚面板，由卡片失败态呈现 */
-  const startGenerationJob = (
-    type: 'image' | 'video' | 'audio',
-    parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters,
-    inputAssetIds?: string[],
-    videoRefs?: {
-      references?: GenerationRefItem[];
-      firstFrameAssetId?: string;
-      lastFrameAssetId?: string;
-      referenceAssetIds?: string[];
-      firstFrameMaterialId?: string;
-      lastFrameMaterialId?: string;
-      referenceMaterials?: Array<{ id: string; type: 'image' | 'video' }>;
-    },
-    targetNodeId?: string,
-    initialDraft?: {
-      mode?: string;
-      references: Array<{
-        assetId: string;
-        url: string;
-        name: string;
-        mediaType: 'image' | 'video';
-        role: VideoRefRole;
-        materialId?: string;
-      }>;
-      /** IKIZQB：样片提交确认两字段（契约 confirmedSubmitFields）——parameters.sample_mode=true
-       *  时随请求顶层携带，服务端按报价同一规则复算，变价即拒（quote_stale）。 */
-      expectedCredits?: number;
-      quoteRevision?: string;
-    },
-    /** IKFA1M/IKFA1O：结构化正文（image/video 含素材标签时携带）；服务端编译并冻结 */
-    promptDoc?: PromptDoc | null,
-  ): boolean => {
-    if (!currentId) {
-      console.warn('未选中项目，无法创建生成任务');
-      return false;
-    }
-    /** IKIZQB：样片任务（parameters.sample_mode=true）——卡身份与提交确认字段按此分流 */
-    const isSampleJob = (parameters as VideoJobParameters).sample_mode === true;
-    if (targetNodeId && blockInvalidDraft(edgesRef.current.filter(e => e.target === targetNodeId).map(e => e.source))) return false;
-    if (blockIfCreditsInsufficient()) return false;
-    // 原位模式（IKDMQQ 草稿 + IKDMQU 成品卡原卡重新生成）：目标节点原地承接任务，身份/位置/连线保持不变。
-    // IKIZQG：两阶段卡（样片/成片）重新编辑是原位重跑规则的**明确例外**（父规格「领域身份」：
-    // 用户故事 25——再次发送新建结果卡），旧卡的身份、截止与两卡关系不被覆盖。
-    const targetNode = targetNodeId ? mediaNodesRef.current.find((n) => n.id === targetNodeId) : undefined;
-    const targetData = (targetNode?.data ?? {}) as Record<string, unknown>;
-    const targetIsTwoStage = targetData.videoStage === 'sample' || targetData.videoStage === 'final';
-    const inPlaceNode = !targetIsTwoStage && targetNodeId
-      ? mediaNodesRef.current.find((n) => n.id === targetNodeId && isInPlaceRegenTarget(n))
-      : undefined;
-    const inPlaceNodeId = inPlaceNode?.id;
-    if (inPlaceNodeId) {
-      const isDraftTarget =
-        ((inPlaceNode!.data ?? {}) as Record<string, unknown>).draft === true;
-      const customNamed = hasCustomName(inPlaceNode);
-      // IKIPSX（IKGUXU D-01）：draftMode 兜底——草稿已保存模式优先；缺失（2026-09-13 前存量
-      // 旧草稿或异常路径）时按当前面板选中模式（initialDraft.mode）补写，保证提交后 draftMode 落盘。
-      const existingDraftMode = draftModeOfNode(inPlaceNodeId, inPlaceNode!.data as Record<string, unknown>);
-      const fallbackDraftMode = existingDraftMode ?? normalizeVideoMode(initialDraft?.mode);
-      patchMediaNode(inPlaceNodeId, {
-        genStatus: 'generating',
-        progress: 0,
-        errorText: undefined,
-        errorCode: undefined,
-        // 草稿无素材可显示，改名提示生成内容（IKDMQQ）；已自定义名称的草稿不覆盖（IKFA8X）；
-        // 成品卡保留原文件名——旧素材继续显示，生成中由状态角标标记（IKDMQU Q5）
-        ...(isDraftTarget && !customNamed
-          ? {
-              fileName:
-                type === 'video' ? (isSampleJob ? '样片生成中' : '视频生成中') : type === 'audio' ? '音频生成中' : '图片生成中',
-            }
-          : {}),
-        prompt: parameters.prompt,
-        targetRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
-        ...(fallbackDraftMode != null ? { draftMode: fallbackDraftMode } : {}),
-        // IKIZQB：卡身份跟随本次提交阶段（样片卡生成中即标样片；普通提交清除旧样片标记）
-        videoStage: isSampleJob ? 'sample' : undefined,
-      });
-    }
-    const nodeId = inPlaceNodeId ?? newNodeId('media-gen');
-    // IKIZQG：两阶段卡重新编辑发送的新建结果卡落在原卡正下方 +60px（旧结果与来源关系保留）
-    const placeholderPosition = targetIsTwoStage && targetNode
-      ? (() => {
-        const box = mediaContentBox({
-          mediaType: 'video',
-          width: typeof targetData.width === 'number' ? targetData.width : undefined,
-          height: typeof targetData.height === 'number' ? targetData.height : undefined,
-          ratio: typeof targetData.targetRatio === 'string' ? targetData.targetRatio : undefined,
-        });
-        return { x: Math.round(targetNode.position.x), y: Math.round(targetNode.position.y + box.height + 60) };
-      })()
-      : spawnPosition();
-    if (!inPlaceNodeId) {
-    const referenceNodes: Node[] = [];
-    for (const ref of initialDraft?.references ?? []) {
-      let source = [...mediaNodesRef.current, ...referenceNodes].find(n =>
-        readAssetId(n.data) === ref.assetId && videoRefSourceError(n, ref.role) === null);
-      if (!source) {
-        source = attachCallbacks({
-          id: newNodeId('media'), type: 'mediaNode', position: spawnPosition(),
-          data: {
-            src: ref.url,
-            fileName: ref.name,
-            mediaType: ref.mediaType,
-            assetId: ref.assetId,
-            ...(ref.materialId ? { materialId: ref.materialId, compliancePassed: true } : {}),
-          },
-        });
-        referenceNodes.push(source);
-      } else if (ref.materialId) {
-        patchMediaNode(source.id, { materialId: ref.materialId, compliancePassed: true });
-      }
-      addCanvasEdge(source.id, nodeId, ref.role);
-    }
-    const node: Node = {
-      id: nodeId,
-      type: 'mediaNode',
-      position: placeholderPosition,
-      data: {
-        genStatus: 'generating',
-        progress: 0,
-        mediaType: type,
-        fileName: type === 'video' ? (isSampleJob ? '样片生成中' : '视频生成中') : type === 'audio' ? '音频生成中' : '图片生成中',
-        prompt: parameters.prompt,
-        draftModelId: parameters.model_id,
-        draftRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
-        draftSize: 'size' in parameters ? parameters.size : 'resolution' in parameters ? parameters.resolution : undefined,
-        draftDuration: 'duration' in parameters ? parameters.duration : undefined,
-        // IKIZQB：样片任务卡身份（生成中/成功卡据此渲染「样片 480P」徽标）
-        videoStage: isSampleJob ? 'sample' : undefined,
-        // IKIPSX：initialDraft.mode 缺失时不得写入 undefined——JSON.stringify 会丢键，
-        // 导致新建生成卡 draftMode 缺失；改成条件展开保证只在有值时落键。
-        ...(initialDraft?.mode != null ? { draftMode: initialDraft.mode } : {}),
-        targetRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
-        toolMode,
-        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-        onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
-        onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
-        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onDownload: (id: string) => actionsRef.current.download(id),
-        ...dockToolCallbacks,
-        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-        onMediaDims: handleMediaDims,
-      },
-    };
-    setMediaNodes((prev) => [...prev, ...referenceNodes, node]);
-    }
-    // 提交立即接管节点，防止 create 返回前旧取消/轮询响应解除本次生成状态。
-    // IKJJR1：普通生成家族的创建/受理/轮询/终态/保存确认统一交生成任务运行时
-    //（含 canvas_binding 受理、submission_id 幂等键与恢复台账）。
-    const jobRefs = videoRefs?.references;
-    const sendPrompt = promptDoc ? flattenPromptDocForSend(promptDoc) : parameters.prompt;
-    const sendAttachments = targetNodeId ? textAttachmentsForSend(targetNodeId) : undefined;
-    const jobPrompt = composeImageSendPrompt(sendAttachments, sendPrompt, promptDoc);
-    try {
-      const payload: CreateJobPayload = {
-        type,
-        expected_output_count: 1,
-        parameters: {
-          ...parameters,
-          prompt: jobPrompt,
-        },
-        ...(inputAssetIds?.length ? { input_asset_ids: inputAssetIds } : {}),
-        ...(jobRefs && jobRefs.length > 0
-          ? { references: jobRefs }
-          : type === 'image' || type === 'audio'
-            ? {}
-            : {
-                first_frame_asset_id: videoRefs?.firstFrameAssetId,
-                last_frame_asset_id: videoRefs?.lastFrameAssetId,
-                reference_asset_ids: videoRefs?.referenceAssetIds?.length
-                  ? videoRefs.referenceAssetIds
-                  : undefined,
-                first_frame_material_id: videoRefs?.firstFrameMaterialId,
-                last_frame_material_id: videoRefs?.lastFrameMaterialId,
-                reference_materials: videoRefs?.referenceMaterials?.length
-                  ? videoRefs.referenceMaterials
-                  : undefined,
-              }),
-        ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
-        // IKIZQB：样片提交确认两字段（请求顶层，契约 confirmedSubmitFieldsSchema）——
-        // 面板已按报价就绪门控；缺失时服务端 fail closed 拒绝（不建任务不扣费）。
-        ...(isSampleJob && initialDraft?.expectedCredits != null && initialDraft?.quoteRevision
-          ? { expected_credits: initialDraft.expectedCredits, quote_revision: initialDraft.quoteRevision }
-          : {}),
-      };
-      /** IKJJR1 恢复种子（B.3）：发送时目标/来源快照。目标 = 结果承接卡（原位卡或新建占位卡，
-       *  注意与业务字段 target_node_id（面板来源目标）区分）；草稿/既有素材角色由运行时先落盘再提交。 */
-      let seedTarget: RecoverySeedTarget;
-      if (inPlaceNode) {
-        const d = (inPlaceNode.data ?? {}) as Record<string, unknown>;
-        seedTarget = {
-          role: d.draft === true
-            ? 'draft'
-            : typeof d.assetId === 'string' && d.assetId.length > 0
-              ? 'existing-media'
-              : 'result-placeholder',
-          x: Math.round(inPlaceNode.position.x),
-          y: Math.round(inPlaceNode.position.y),
-          width: typeof d.width === 'number' && d.width > 0 ? d.width : 320,
-          height: typeof d.height === 'number' && d.height > 0 ? d.height : 320,
-          name: typeof d.fileName === 'string' ? d.fileName : '',
-        };
-      } else {
-        const box = mediaContentBox({
-          mediaType: type,
-          ratio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
-        });
-        seedTarget = {
-          role: 'result-placeholder',
-          x: placeholderPosition.x,
-          y: placeholderPosition.y,
-          width: Math.round(box.width),
-          height: Math.round(box.height),
-          name: type === 'video' ? (isSampleJob ? '样片生成中' : '视频生成中') : type === 'audio' ? '音频生成中' : '图片生成中',
-        };
-      }
-      const seedSources: RecoverySeedSource[] = edgesRef.current
-        .filter((edge) => edge.target === nodeId)
-        .map((edge) => mediaNodesRef.current.find((n) => n.id === edge.source))
-        .filter((n): n is Node => n != null)
-        .map((n) => {
-          const d = (n.data ?? {}) as Record<string, unknown>;
-          return {
-            node_id: n.id,
-            x: Math.round(n.position.x),
-            y: Math.round(n.position.y),
-            width: typeof d.width === 'number' && d.width > 0 ? d.width : 320,
-            height: typeof d.height === 'number' && d.height > 0 ? d.height : 320,
-            name: typeof d.fileName === 'string' ? d.fileName : '',
-          };
-        });
-      const runtime = generationRuntimeRef.current;
-      if (!runtime) {
-        console.warn('[canvas] 生成任务运行时未就绪，提交被拒绝');
-        return false;
-      }
-      return runtime.submit(
-        normalGenerationTask,
-        {
-          payload,
-          target: {
-            targetNodeId: nodeId,
-            seedTarget,
-            seedSources,
-            expectedBindingRevision: runtime.bindingRevisionOf(nodeId),
-          },
-        },
-        {
-          onCreateFailure: (e: unknown) => {
-            /** 原位目标回退：草稿回待生成保留参数（IKDMQQ/IKDMQS/IKDMQT）；
-             *  成品卡恢复成品态保留旧素材与最新编辑（IKDMQU Q5，同取消恢复）。
-             *  归属核对（接管保护）由运行时 owns() 先行完成，此处不再重复判。 */
-            const rollbackInPlace = () => {
-              const rollbackNode = mediaNodesRef.current.find((n) => n.id === nodeId);
-              if (!rollbackNode) return;
-              if (((rollbackNode.data ?? {}) as Record<string, unknown>).draft === true) {
-                patchMediaNode(nodeId, {
-                  genStatus: 'draft',
-                  progress: undefined,
-                  // 已自定义名称的草稿回退时保留名称（IKFA8X）
-                  ...(hasCustomName(rollbackNode) ? {} : { fileName: draftFileNameOf(type) }),
-                });
-              } else {
-                patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
-              }
-            };
-            const removePlaceholder = () => {
-              setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
-              setEdges(prev => prev.filter(edge => edge.target !== nodeId));
-            };
-            if (openRechargeForCreditsError(e)) {
-              if (inPlaceNodeId) rollbackInPlace();
-              else removePlaceholder();
-              return true;
-            }
-            if (isApiError(e) && e.status === 401) {
-              if (inPlaceNodeId) rollbackInPlace();
-              else removePlaceholder();
-              useAuthPromptStore.getState().addResume(() => {
-                startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft);
-              });
-              return true;
-            }
-            return false; // 通用失败：运行时落失败卡（errorText/errorCode 同原口径）
-          },
-        },
-      );
-      // 创建请求已发出（IKFXZD 面板关闭判定点）；HTTP 层异步失败由运行时收敛到卡片
-    } catch (e: unknown) {
-      // 同步异常兜底（如 crypto.randomUUID 在 HTTP 下不可用）
-      patchMediaNode(nodeId, {
-        genStatus: 'failed',
-        errorText: isApiError(e) ? e.message : '创建任务失败',
-        errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
-      });
-      return false;
-    }
-  };
-
   /* ===== 图像工具家族运行时派发（IKJJR2）：擦除/抠图/扩图/高清统一经 runtime.submit ===== */
 
   /** 承接卡已在画布（高清/扩图草稿）的恢复种子：目标/来源从画布现状快照（B.3 发送时事实）。 */
@@ -5695,6 +4961,45 @@ export default function CanvasPage() {
       nodeBoxOf,
       flushCanvasSave: (projectId) => flushCanvasSave(projectId),
     });
+
+  const {
+    startGenerationJob,
+    handleFinalizeSample,
+    handleRegenerateSample,
+    finalizeCtaByNodeId,
+    regenerateCtaByNodeId,
+  } = useCanvasGenerationSubmission({
+    mediaNodesRef,
+    locallyRemovedGenerationNodesRef,
+    pendingDeleteJobNodesRef,
+    settledExtractNodesRef,
+    activeJobByNodeRef,
+    generationRuntimeRef,
+    setMediaNodes,
+    upsertAssets,
+    patchMediaNode,
+    removeAudioMixCardNow,
+    showToast,
+    edgesRef,
+    textNodesRef,
+    productNodesRef,
+    assetNodesRef,
+    currentId,
+    attachCallbacks,
+    addCanvasEdge,
+    nodeBoxOf,
+    flushCanvasSave: (projectId) => flushCanvasSave(projectId),
+    mediaNodes,
+    setEdges,
+    actionsRef,
+    toolMode,
+    blockInvalidDraft,
+    spawnPosition,
+    textAttachmentsForSend: (targetNodeId) => textAttachmentsForSend(targetNodeId),
+    handleMediaDims,
+    handleSaveMediaToAssets: (nodeId) => handleSaveMediaToAssets(nodeId),
+    dockCallbacks: dockToolCallbacks,
+  });
 
   /** 删除生成中卡片（IKDMQW）：先请求取消；任务权威终态非 succeeded 才移除——
    *  cancelled/failed 终态确认后立即移除；仍 processing（软取消已登记、worker 未停）时不
@@ -8959,75 +8264,6 @@ export default function CanvasPage() {
       .map((n) => audioVideoMuxIdentityOf(n)!.sourceNodeId),
   );
 
-  /** IKIZQE：样片卡标题行成片按钮的渲染期派生状态（不持久化，口径同 soloToolbarHidden）。
-   *  推导链（服务端报价 + 截止 + 两卡关系三重门）：成片卡在场且生成中/核对中 → 按钮禁用
-   *  （成片生成中…/状态核对中…）；成片卡已终态（成功/失败/取消）或本会话已受理过 → 不再
-   *  渲染（首版一张样片至多一条成片，服务端 1057/空报价兜底）；其余按报价/截止落
-   *  ready/loading/empty/expired/checking。IKJ7UI：expired（过期/缺可信截止）仅作派生
-   *  标记，MediaNode 对该 phase 整钮不渲染——过期信息由画面内角标表达（ADR-0119）。 */
-  const finalizeCtaByNodeId = new Map<string, NonNullable<MediaNodeData['finalizeCta']>>();
-  if (currentId) {
-    for (const n of mediaNodes) {
-      const d = (n.data ?? {}) as Record<string, unknown>;
-      if (d.videoStage !== 'sample' || d.jobId == null) continue;
-      if (d.genStatus != null || d.draft === true) continue; // 仅成功样片卡提供入口
-      const jobId = String(d.jobId);
-      const finalNode = mediaNodes.find(
-        (m) =>
-          ((m.data ?? {}) as Record<string, unknown>).videoStage === 'final'
-          && String(((m.data ?? {}) as Record<string, unknown>).sourceSampleJobId ?? '') === jobId,
-      );
-      if (finalizeUnknownSamples.has(n.id)) {
-        finalizeCtaByNodeId.set(n.id, { phase: 'checking' });
-        continue;
-      }
-      const finalGen = (finalNode?.data ?? {}) as Record<string, unknown> | undefined;
-      if (finalGen?.genStatus === 'generating') {
-        finalizeCtaByNodeId.set(n.id, { phase: 'running' });
-        continue;
-      }
-      if (finalGen?.genStatus === 'checking') {
-        finalizeCtaByNodeId.set(n.id, { phase: 'checking' });
-        continue;
-      }
-      if (finalNode != null || finalizeAttemptedJobIdsRef.current.has(jobId)) {
-        continue; // 已有成片卡（终态）或本会话已受理过：不再渲染（首版一张样片至多一条成片）
-      }
-      if (typeof d.finalizeDeadlineAt !== 'string' || sampleDeadlineExpired(d.finalizeDeadlineAt)) {
-        finalizeCtaByNodeId.set(n.id, { phase: 'expired' });
-        continue;
-      }
-      const quote = finalizeQuotes[n.id];
-      finalizeCtaByNodeId.set(n.id, quote == null
-        ? { phase: 'loading' }
-        : quote.phase === 'ready'
-          ? { phase: 'ready', credits: quote.credits }
-          : { phase: 'unavailable' });
-    }
-  }
-
-  /** IKIZQG：重新生成样片入口的渲染期派生状态（不持久化，口径同 finalizeCtaByNodeId）。
-   *  IKJ7UI（ADR-0119）起唯一入口是成片失败卡失败区（身份解析见 regenEntrySampleJobIdOf；
-   *  过期样片卡标题行入口已移除）。本会话已受理过重新生成的样片任务不再渲染（新样片卡
-   *  有自己的截止与成片入口）。 */
-  const regenerateCtaByNodeId = new Map<string, NonNullable<MediaNodeData['regenerateCta']>>();
-  if (currentId) {
-    for (const n of mediaNodes) {
-      const sampleJobId = regenEntrySampleJobIdOf((n.data ?? {}) as Record<string, unknown>);
-      if (sampleJobId == null) continue;
-      if (sampleRegenUnknownSamples.has(sampleJobId)) {
-        regenerateCtaByNodeId.set(n.id, { phase: 'checking' });
-        continue;
-      }
-      if (sampleRegenAttemptedJobIdsRef.current.has(sampleJobId)) continue;
-      const quote = sampleRegenQuotes[sampleJobId];
-      regenerateCtaByNodeId.set(n.id, quote == null
-        ? { phase: 'loading' }
-        : quote.phase === 'ready'
-          ? { phase: 'ready', credits: quote.credits }
-          : { phase: 'unavailable' });
-    }
-  }
 
   return (
     <div className={styles.canvasPage}>
