@@ -14,7 +14,7 @@ import {
 } from '@/api/accountCredits';
 import { taskTypeLabel } from '@/admin/taskTypeLabels';
 import { useDocumentTitle } from '@/seo/useDocumentTitle';
-import { formatSpecs } from './format';
+import { formatBeijingDateTime, formatSpecs } from './format';
 import SummaryCards from './SummaryCards';
 import styles from './index.module.css';
 
@@ -305,7 +305,7 @@ function OrdersTable({ query }: { query: { isPending: boolean; isError: boolean;
           : state === 'empty' ? <EmptyRow cols={7} />
           : rows.map((row) => (
             <tr key={row.trade_no}>
-              <td>{dash(row.created_at)}</td>
+              <td>{formatBeijingDateTime(row.created_at)}</td>
               <td>{row.product_name}</td>
               <td className={styles.mono}>{row.trade_no}</td>
               <td>{fenToYuan(row.amount_fen)}</td>
@@ -348,12 +348,12 @@ function AcquiredTable({ query }: { query: { isPending: boolean; isError: boolea
           : state === 'empty' ? <EmptyRow cols={6} />
           : rows.map((row) => (
             <tr key={row.lot_id}>
-              <td>{dash(row.created_at)}</td>
+              <td>{formatBeijingDateTime(row.created_at)}</td>
               <td><span className={styles.tag}>{sourceLabel(row.source)}</span></td>
               <td className={styles.mono}>{dash(row.biz_id)}</td>
-              <td>{dash(row.created_at)}</td>
+              <td>{formatBeijingDateTime(row.created_at)}</td>
               <td className={isExpireSoon(row.expires_at) ? styles.expireSoon : undefined}>
-                {row.expires_at ? row.expires_at : '永久有效'}
+                {row.expires_at ? formatBeijingDateTime(row.expires_at) : '永久有效'}
               </td>
               <td className={styles.plus}>{row.amount == null ? '—' : `+${formatCredits(row.amount)}`}</td>
             </tr>
@@ -389,7 +389,7 @@ function ConsumedTable({ query }: { query: { isPending: boolean; isError: boolea
           : state === 'empty' ? <EmptyRow cols={6} />
           : rows.map((row) => (
             <tr key={row.id}>
-              <td>{dash(row.created_at)}</td>
+              <td>{formatBeijingDateTime(row.created_at)}</td>
               <td><span className={styles.tag}>{consumedTypeLabel(row)}</span></td>
               <td>{row.model_label ?? row.model_id ?? '—'}</td>
               <td>{formatSpecs(row.specs)}</td>

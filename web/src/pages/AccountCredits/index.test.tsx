@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountCredits from './index';
-import { formatSpecs } from './format';
+import { formatBeijingDateTime, formatSpecs } from './format';
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -162,6 +162,7 @@ describe('AccountCredits', () => {
     await renderPage();
     expect(document.body.textContent).toContain('充值到账');
     expect(document.body.textContent).toContain('+600');
+    expect(document.body.textContent).toContain('2026-09-29 14:33:00');
   });
 
   it('已消耗展示任务类型中文名与规格', async () => {
@@ -204,5 +205,30 @@ describe('formatSpecs 任务规格拼串', () => {
     expect(formatSpecs({ reference_count: '0', video: '0' })).toBe('—');
     expect(formatSpecs({})).toBe('—');
     expect(formatSpecs(null)).toBe('—');
+  });
+});
+
+describe('formatBeijingDateTime 北京墙钟字面量', () => {
+  it('取字面量墙钟，不按本地时区换算', () => {
+    expect(formatBeijingDateTime('2026-09-29T14:32:00+08:00')).toBe('2026-09-29 14:32:00');
+    expect(formatBeijingDateTime('2026-12-01T00:00:00+08:00')).toBe('2026-12-01 00:00:00');
+  });
+
+  it('同一字面量在不同进程时区下输出一致', () => {
+    const value = '2026-10-08T15:02:00+08:00';
+    const first = formatBeijingDateTime(value);
+    const original = process.env.TZ;
+    process.env.TZ = 'America/New_York';
+    const second = formatBeijingDateTime(value);
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+    expect(second).toBe(first);
+  });
+
+  it('缺秒补 00，非时间串与空值回退', () => {
+    expect(formatBeijingDateTime('2026-09-29T14:32+08:00')).toBe('2026-09-29 14:32:00');
+    expect(formatBeijingDateTime('')).toBe('—');
+    expect(formatBeijingDateTime(null)).toBe('—');
+    expect(formatBeijingDateTime(undefined)).toBe('—');
   });
 });

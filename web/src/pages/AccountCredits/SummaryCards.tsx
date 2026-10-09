@@ -1,4 +1,5 @@
 import type { CreditsSummary } from './types';
+import { formatBeijingDateTime } from './format';
 import styles from './SummaryCards.module.css';
 
 function dash(value: string | number | null | undefined): string {
@@ -22,7 +23,7 @@ export default function SummaryCards({ summary }: SummaryCardsProps) {
   const nearestHint =
     nearest?.expiresAt == null
       ? '暂无即将到期的批次'
-      : `${nearest.expiresAt} 到期 · 先到期先消耗`;
+      : `${formatBeijingDateTime(nearest.expiresAt)} 到期 · 先到期先消耗`;
 
   return (
     <section className={styles.row}>
