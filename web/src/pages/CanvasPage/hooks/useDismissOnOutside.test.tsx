@@ -73,3 +73,40 @@ describe('useDismissOnOutside', () => {
     expect(mountNode.querySelector('[data-testid="host"]')).not.toBeNull();
   });
 });
+
+function MultiRefHarness() {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(true);
+  useDismissOnOutside([
+    { open: menuOpen, ref: [menuRef, triggerRef], dismiss: () => setMenuOpen(false) },
+  ]);
+  return createElement('div', { 'data-testid': 'multi-host' }, [
+    createElement('button', { key: 'trigger', ref: triggerRef, 'data-testid': 'multi-trigger' }, '触发'),
+    menuOpen
+      ? createElement('div', { key: 'menu', ref: menuRef, 'data-testid': 'multi-menu' }, '菜单')
+      : null,
+  ]);
+}
+
+describe('useDismissOnOutside 多 ref 层', () => {
+  it('点击层内任一 ref 不关闭，层外才关闭', async () => {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(createElement(MultiRefHarness));
+    });
+
+    const column = mountNode.querySelector('[data-testid="multi-trigger"]');
+    await act(async () => {
+      column?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(mountNode.querySelector('[data-testid="multi-menu"]')).not.toBeNull();
+
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(mountNode.querySelector('[data-testid="multi-menu"]')).toBeNull();
+  });
+});
