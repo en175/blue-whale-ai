@@ -30,19 +30,28 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+
+
+
+
+
+
+
+
+
+
 @Service
 public class BillingApplicationService {
 
     private static final Logger log = LoggerFactory.getLogger(BillingApplicationService.class);
 
-<<<<<<< HEAD
-    /** 最多提示几条。 */
-    private static final int EXPIRING_LIMIT = 200;
-=======
-    private static final int EXPIRING_WINDOW_DAYS = 31;
 
-    private static final int EXPIRING_LIMIT = 5;
->>>>>>> b21e3ef7a (fix: 补齐全仓维护范围注释清理)
+    private static final int EXPIRING_LIMIT = 200;
+
+
+
+
+
 
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
@@ -74,6 +83,16 @@ public class BillingApplicationService {
         this.reservations = reservations;
     }
 
+
+
+
+
+
+
+
+
+
+
     public long grant(long userId, CreditSource source, long amount,
                       String bizType, String bizId, String grantKey, Instant expiresAt) {
         Instant effectiveExpiry = expiresAt != null
@@ -82,10 +101,46 @@ public class BillingApplicationService {
         return credits.grant(userId, source, amount, effectiveExpiry, bizType, bizId, grantKey);
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     public HoldResult hold(HoldCommand command) {
         PricingRequest request = new PricingRequest(
                 command.userId(), command.modelId(), command.taskType(),
                 command.specs(), command.tier());
+
+
 
         CompiledRule snapshot = requireSnapshot(command.ruleSnapshot());
         PricingEngine engine = engineFor(snapshot);
@@ -94,6 +149,8 @@ public class BillingApplicationService {
         int catalogVersion = catalog.currentVersion();
 
         if (priced.credits() == 0) {
+
+
             log.info("计价为 0，不冻结：user={} {}/{} specs={}",
                     command.userId(), command.modelId(), command.taskType(), command.specs());
             return HoldResult.fresh(0, catalogVersion);
@@ -101,23 +158,67 @@ public class BillingApplicationService {
 
         return credits.hold(command.userId(), command.commandId(), command.jobId(),
                 priced.credits(), catalogVersion, priced.discount().factorBp(),
+
                 command.ruleSnapshot(), command.title());
     }
+
 
     public int catalogVersion() {
         return catalog.currentVersion();
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     public PricingResult quote(QuoteQuery query) {
         PricingRequest request = new PricingRequest(
                 query.userId(), query.modelId(), query.taskType(), query.specs(), query.tier());
+
+
         CompiledRule snapshot = requireSnapshot(query.ruleSnapshot());
         PricingEngine engine = engineFor(snapshot);
+
         if (!query.usage().quantities().isEmpty()) {
             return engine.compute(request, query.usage(), query.pricedAt());
         }
+
         return priceAtSubmit(request, engine, snapshot, query.pricedAt());
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     private static CompiledRule requireSnapshot(String ruleSnapshot) {
         if (ruleSnapshot == null || ruleSnapshot.isBlank()) {
@@ -128,9 +229,34 @@ public class BillingApplicationService {
         return CatalogCompiler.compileRuleSnapshot(ruleSnapshot);
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
     private PricingEngine engineFor(CompiledRule snapshot) {
         return new PricingEngine((modelId, taskType) -> snapshot, calculator);
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     private PricingResult priceAtSubmit(PricingRequest request, PricingEngine engine,
                                         CompiledRule rule, Instant at) {
@@ -138,11 +264,49 @@ public class BillingApplicationService {
             return engine.compute(request, Usage.contractFrom(rule, request.specs()), at);
         } catch (Usage.ContractQuantityUnavailableException e) {
             if (e.baseUnit().contractSource() == null || rule.maxCredits() == null) {
+
+
+
+
                 throw e;
             }
             return priceAtCap(request, engine, e, at);
         }
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     private PricingResult priceAtCap(PricingRequest request, PricingEngine engine,
                                      Usage.ContractQuantityUnavailableException cause, Instant at) {
@@ -155,8 +319,31 @@ public class BillingApplicationService {
         return priced;
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
     public BalanceView balance(long userId) {
+
+
         long frozen = ledger.balanceOf(userId, Account.FROZEN);
+
+
+
+
+
+
+
+
 
         long receivable = ledger.balanceOf(userId, Account.RECEIVABLE);
 
@@ -165,6 +352,10 @@ public class BillingApplicationService {
                         lot.available(), lot.expiresAt(), lot.source().key()))
                 .toList();
 
+
+
+
+
         var bySource = lots.availableCreditsBySource(userId).stream()
                 .map(item -> new BalanceView.SourceCredits(item.source().key(), item.credits()))
                 .toList();
@@ -172,15 +363,55 @@ public class BillingApplicationService {
         return new BalanceView(lots.availableCredits(userId), frozen, receivable, expiring, bySource);
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
     public String findGrantOwner(String grantKey) {
         return lots.findBizIdByGrantKey(grantKey);
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     public TransactionView.Page listTransactions(Long userId, List<String> typeFilter,
                                                  int pageSize, int page) {
         int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
         return transactions.listPage(userId, normalizeTypes(typeFilter), size, page);
     }
+
+
+
+
+
+
+
+
+
 
     private static List<String> normalizeTypes(List<String> typeFilter) {
         if (typeFilter == null || typeFilter.isEmpty()) {
@@ -197,10 +428,41 @@ public class BillingApplicationService {
         return normalized.isEmpty() ? null : List.copyOf(normalized);
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     public CreditLotRepository.UserLotPage listCreditLots(long userId, int pageSize, int page) {
         int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
         return lots.listUserLots(userId, size, page);
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     public long consumedCredits(Instant from, Instant to) {
         if (from == null || to == null) {
@@ -210,8 +472,27 @@ public class BillingApplicationService {
             throw new IllegalArgumentException(
                     "统计区间的起点必须早于终点：from=" + from + " to=" + to);
         }
+
         return reservations.sumSettledActualCredits(DbTime.toDb(from), DbTime.toDb(to));
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     public Map<Long, UserStatsView> userStats(List<Long> userIds) {
         if (userIds == null || userIds.isEmpty()) {
@@ -219,8 +500,10 @@ public class BillingApplicationService {
         }
 
         Map<Long, Long> available = lots.availableCreditsOf(userIds);
+
         Map<Long, Long> recharged = lots.grantedCreditsOf(userIds, CreditSource.PURCHASED);
         Map<Long, Long> consumed = reservations.sumSettledActualByUser(userIds);
+
 
         Map<Long, UserStatsView> result = new LinkedHashMap<>();
         for (Long userId : userIds) {

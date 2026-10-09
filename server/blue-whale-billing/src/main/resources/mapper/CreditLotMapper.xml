@@ -3,7 +3,28 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 
+
+
+
+
+
 <mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.CreditLotMapper">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -20,12 +41,22 @@
   </select>
 
 
+
+
+
+
   <select id="sumAvailable" resultType="long">
     SELECT COALESCE(SUM(remaining - frozen), 0)
     FROM billing_credit_lots
     WHERE user_id = #{userId}
       AND (expires_at IS NULL OR expires_at > NOW())
   </select>
+
+
+
+
+
+
 
 
   <select id="sumAvailableBySource" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.SourceAvailableRow">
@@ -39,6 +70,17 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
   <select id="sumAvailableByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
     SELECT user_id, COALESCE(SUM(remaining - frozen), 0) AS amount
     FROM billing_credit_lots
@@ -47,6 +89,18 @@
       AND (expires_at IS NULL OR expires_at > NOW())
     GROUP BY user_id
   </select>
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -64,6 +118,23 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   <select id="listDueLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
@@ -75,6 +146,14 @@
   </select>
 
 
+
+
+
+
+
+
+
+
   <select id="lockById" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
@@ -82,11 +161,6 @@
     FOR UPDATE
   </select>
 
-<<<<<<< HEAD
-=======
-
-
->>>>>>> b21e3ef7a (fix: 补齐全仓维护范围注释清理)
   <select id="listExpiring" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, amount, remaining, frozen, expires_at, version
     FROM billing_credit_lots
@@ -99,12 +173,23 @@
   </select>
 
 
+
+
+
+
+
+
   <update id="addFrozen">
     UPDATE billing_credit_lots
     SET frozen = frozen + #{amount},
         version = version + 1
     WHERE id = #{lotId}
   </update>
+
+
+
+
+
 
 
   <update id="releaseFrozen">
@@ -116,6 +201,12 @@
 
 
 
+
+
+
+
+
+
   <update id="settle">
     UPDATE billing_credit_lots
     SET frozen = frozen - #{frozenTake},
@@ -123,6 +214,20 @@
         version = version + 1
     WHERE id = #{lotId}
   </update>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -138,6 +243,20 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   <select id="listUserLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at,
            biz_type, biz_id, version, gmt_create
@@ -146,6 +265,11 @@
     ORDER BY gmt_create DESC, id DESC
     LIMIT #{limit} OFFSET #{offset}
   </select>
+
+
+
+
+
 
 
   <select id="countUserLots" resultType="long">

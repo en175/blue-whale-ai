@@ -12,6 +12,17 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+
+
+
+
+
+
+
+
+
+
+
 @Repository
 public class CreditLotRepository {
 
@@ -21,6 +32,14 @@ public class CreditLotRepository {
         this.mapper = mapper;
     }
 
+
+
+
+
+
+
+
+
     public record Lot(long id, long userId, CreditSource source, long amount,
                       long remaining, long frozen, Instant expiresAt, int version) {
         public long available() {
@@ -28,22 +47,52 @@ public class CreditLotRepository {
         }
     }
 
+
+
+
+
+
     public List<Lot> lockActiveLots(long userId) {
         return mapper.lockActiveLots(userId).stream()
                 .map(CreditLotRepository::toLot)
                 .toList();
     }
 
+
+
+
+
+
+
+
     public Lot lockById(long lotId) {
         CreditLotEntity entity = mapper.lockById(lotId);
         return entity == null ? null : toLot(entity);
     }
+
+
+
+
+
 
     public List<Lot> listDueLots(int limit) {
         return mapper.listDueLots(limit).stream()
                 .map(CreditLotRepository::toLot)
                 .toList();
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     public String findBizIdByGrantKey(String grantKey) {
         CreditLotEntity entity = mapper.selectOne(new LambdaQueryWrapper<CreditLotEntity>()
@@ -52,17 +101,49 @@ public class CreditLotRepository {
         return entity == null ? null : entity.getBizId();
     }
 
+
     public long availableCredits(long userId) {
         return mapper.sumAvailable(userId);
     }
+
+
+
+
+
+
+
+
+
+
 
     public Map<Long, Long> availableCreditsOf(List<Long> userIds) {
         return UserAmountRow.toMap(mapper.sumAvailableByUser(userIds));
     }
 
+
+
+
+
+
+
+
+
+
+
     public Map<Long, Long> grantedCreditsOf(List<Long> userIds, CreditSource source) {
         return UserAmountRow.toMap(mapper.sumGrantedByUser(userIds, source.key()));
     }
+
+
+
+
+
+
+
+
+
+
+
 
     public List<SourceAvailable> availableCreditsBySource(long userId) {
         return mapper.sumAvailableBySource(userId).stream()
@@ -71,17 +152,58 @@ public class CreditLotRepository {
                 .toList();
     }
 
+
+
+
+
+
+
     public record SourceAvailable(CreditSource source, long credits) {}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     public record UserLot(long id, CreditSource source, long amount, long remaining,
                           Instant createdAt, Instant expiresAt,
                           String bizType, String bizId) {}
+
+
+
+
+
+
 
     public record UserLotPage(List<UserLot> items, long total) {
         public UserLotPage {
             items = List.copyOf(items);
         }
     }
+
+
+
+
+
+
+
+
+
+
+
 
     public UserLotPage listUserLots(long userId, int size, int page) {
         long offset = (long) (Math.max(page, 1) - 1) * size;
@@ -98,45 +220,64 @@ public class CreditLotRepository {
                 entity.getId(),
                 CreditSource.of(entity.getSource()),
                 entity.getAmount() == null ? 0L : entity.getAmount(),
+
                 remaining - frozen,
                 DbTime.fromDb(entity.getGmtCreate()),
                 DbTime.fromDb(entity.getExpiresAt()),
+
+
                 entity.getBizType() == null ? "" : entity.getBizType(),
                 entity.getBizId() == null ? "" : entity.getBizId());
     }
 
-<<<<<<< HEAD
     public List<Lot> listExpiring(long userId, int limit) {
         return mapper.listExpiring(userId, limit).stream()
-=======
-    public List<Lot> listExpiring(long userId, int withinDays, int limit) {
-        return mapper.listExpiring(userId, withinDays, limit).stream()
->>>>>>> b21e3ef7a (fix: 补齐全仓维护范围注释清理)
                 .map(CreditLotRepository::toLot)
                 .toList();
     }
+
 
     public void addFrozen(long lotId, long amount) {
         mapper.addFrozen(lotId, amount);
     }
 
+
     public void releaseFrozen(long lotId, long amount) {
         mapper.releaseFrozen(lotId, amount);
     }
+
+
+
+
+
+
 
     public void expire(long lotId, long amount) {
         mapper.expireLot(lotId, amount);
     }
 
+
+
+
+
+
+
     public void settle(long lotId, long frozenTake, long actualTake) {
         mapper.settle(lotId, frozenTake, actualTake);
     }
+
+
+
+
+
+
 
     public long grant(long userId, CreditSource source, long amount, Instant expiresAt,
                       String bizType, String bizId, String grantKey) {
         CreditLotEntity entity = new CreditLotEntity();
         entity.setUserId(userId);
         entity.setSource(source.key());
+
         entity.setSourcePriority(source.priority());
         entity.setAmount(amount);
         entity.setRemaining(amount);
@@ -145,14 +286,22 @@ public class CreditLotRepository {
         entity.setBizType(bizType);
         entity.setBizId(bizId);
         entity.setGrantKey(grantKey);
+
         mapper.insert(entity);
         return entity.getId();
     }
+
 
     public long availableOf(long lotId) {
         CreditLotEntity entity = mapper.selectById(lotId);
         return entity == null ? 0L : entity.getRemaining() - entity.getFrozen();
     }
+
+
+
+
+
+
 
     public CreditSource sourceOf(long lotId) {
         CreditLotEntity entity = mapper.selectById(lotId);
@@ -171,6 +320,8 @@ public class CreditLotRepository {
                 entity.getRemaining(),
                 entity.getFrozen(),
                 DbTime.fromDb(entity.getExpiresAt()),
+
+
                 entity.getVersion() == null ? 0 : entity.getVersion());
     }
 }

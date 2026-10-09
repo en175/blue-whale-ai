@@ -26,30 +26,50 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+
+
+
+
+
+
+
+
+
+
 @SpringBootTest(properties = "billing.admin.enabled=true")
 @AutoConfigureMockMvc
 @EnabledIfEnvironmentVariable(named = "BILLING_DB_PASSWORD", matches = ".+")
 class AdminApiIntegrationTest {
+
 
     private static final String CATALOG = """
             {"schemaVersion":1,"currency":"CNY","creditsPerYuan":15,
              "discountPolicy":{"stackMode":"multiply","floorFactorBp":3000}}
             """;
 
+
     private static final String CATALOG_V2 = CATALOG.replace("\"creditsPerYuan\":15",
             "\"creditsPerYuan\":20");
 
+
     private static final String BAD_CATALOG = CATALOG.replace("\"creditsPerYuan\":15",
             "\"creditsPerYuan\":0");
+
+
+
+
+
 
     private static final String RULE = """
             {"baseUnit":"constant:1","basePrice":{"kind":"const","value":100000},
              "unitDenominator":1,"minCredits":1}
             """;
 
+
     private static final long USER_HOLD = 9306L;
     private static final String MODEL = "seedance-2.5";
     private static final String TASK = "text2video";
+
     private static final String TITLE = "视频生成 · 测试";
 
     @Autowired private MockMvc mvc;
@@ -67,6 +87,9 @@ class AdminApiIntegrationTest {
     }
 
 
+
+
+
     @Test
     void 发布目录_立即生效不必重启() throws Exception {
         mvc.perform(post("/admin/catalogs")
@@ -77,8 +100,14 @@ class AdminApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.catalogVersion").value(1));
 
+
+
         assertThat(catalog.currentVersion()).isEqualTo(1);
     }
+
+
+
+
 
 
     @Test
@@ -88,9 +117,11 @@ class AdminApiIntegrationTest {
 
         assertThat(catalog.currentVersion()).isEqualTo(2);
 
+
         Integer activeCount = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM billing_pricing_catalogs WHERE status = 'active'", Integer.class);
         assertThat(activeCount).isEqualTo(1);
+
         assertThat(statusOf(1)).isEqualTo("retired");
     }
 
@@ -117,16 +148,25 @@ class AdminApiIntegrationTest {
     void 校验不过的目录_发不出去() throws Exception {
         int versionBefore = catalog.currentVersion();
 
+
         mvc.perform(post("/admin/catalogs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(BAD_CATALOG))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
 
+
         assertThat(jdbc.queryForObject(
                 "SELECT COUNT(*) FROM billing_pricing_catalogs", Integer.class)).isZero();
+
+
+
+
         assertThat(catalog.currentVersion()).isEqualTo(versionBefore);
     }
+
+
+
 
 
     @Test
@@ -140,6 +180,8 @@ class AdminApiIntegrationTest {
                 .andExpect(jsonPath("$.lotId").isNumber())
                 .andExpect(jsonPath("$.source").value("purchased"));
 
+
+
         assertThat(latestBalance("wallet")).isEqualTo(1000);
         assertThat(latestBalance("cost")).isEqualTo(1000);
 
@@ -147,16 +189,16 @@ class AdminApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.availableCredits").value(1000))
                 .andExpect(jsonPath("$.frozenCredits").value(0))
-<<<<<<< HEAD
                 .andExpect(jsonPath("$.expiring[0].source").value("purchased"))
                 .andExpect(jsonPath("$.expiring[0].credits").value(1000));
-=======
-                .andExpect(jsonPath("$.expiring").isEmpty());
->>>>>>> b21e3ef7a (fix: 补齐全仓维护范围注释清理)
     }
 
     @Test
     void 幂等键撞车_409要带回既有那一笔的归属() throws Exception {
+
+
+
+
         mvc.perform(post("/admin/credits/grants")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -164,6 +206,7 @@ class AdminApiIntegrationTest {
                                  "grantKey":"bonus:tier:9321:7"}
                                 """))
                 .andExpect(status().isOk());
+
 
         mvc.perform(post("/admin/credits/grants")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -185,10 +228,18 @@ class AdminApiIntegrationTest {
                                 """))
                 .andExpect(status().isOk());
 
+
+
+
+
         java.sql.Timestamp expiresAt = jdbc.queryForObject(
                 "SELECT expires_at FROM billing_credit_lots WHERE user_id = 9311",
                 java.sql.Timestamp.class);
         assertThat(expiresAt).as("本金批次必须带有效期（永久 = expires_at 为 NULL）").isNotNull();
+
+
+
+
         Instant expected = Instant.now().atZone(DbTime.ZONE).plusYears(2).toInstant();
         assertThat(expiresAt.toInstant())
                 .as("到期时刻应≈2 年后（日历口径，不是 730 天）")
@@ -203,6 +254,7 @@ class AdminApiIntegrationTest {
                                 {"userId":9302,"source":"gift","amount":500,"bizId":"g-1"}
                                 """))
                 .andExpect(status().isOk());
+
 
         java.sql.Timestamp expiresAt = jdbc.queryForObject(
                 "SELECT expires_at FROM billing_credit_lots WHERE user_id = 9302",
@@ -226,6 +278,7 @@ class AdminApiIntegrationTest {
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("DUPLICATE"));
+
 
         mvc.perform(get("/admin/credits/balances/9303"))
                 .andExpect(jsonPath("$.availableCredits").value(1000));
@@ -254,8 +307,16 @@ class AdminApiIntegrationTest {
     }
 
 
+
+
+
     @Test
     void 手动返还_能解掉卡住的冻结() throws Exception {
+
+
+
+
+
         seedHoldable();
         long jobId = 9_500L;
         billing.hold(new HoldCommand(USER_HOLD, "cmd-lost", jobId, MODEL, TASK,
@@ -268,6 +329,7 @@ class AdminApiIntegrationTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("released"));
+
 
         mvc.perform(get("/admin/credits/balances/" + USER_HOLD))
                 .andExpect(jsonPath("$.availableCredits").value(1_000))
@@ -289,10 +351,12 @@ class AdminApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("settled"));
 
+
         mvc.perform(get("/admin/credits/balances/" + USER_HOLD))
                 .andExpect(jsonPath("$.availableCredits").value(970))
                 .andExpect(jsonPath("$.frozenCredits").value(0));
     }
+
 
 
     private void publish(String document) throws Exception {
@@ -301,6 +365,7 @@ class AdminApiIntegrationTest {
                         .content(document))
                 .andExpect(status().isOk());
     }
+
 
     private void seedHoldable() throws Exception {
         publish(CATALOG);
@@ -319,6 +384,13 @@ class AdminApiIntegrationTest {
                 "SELECT status FROM billing_pricing_catalogs WHERE catalog_version = ?",
                 String.class, catalogVersion);
     }
+
+
+
+
+
+
+
 
     private long latestBalance(String account) {
         java.math.BigDecimal value = jdbc.queryForObject(
