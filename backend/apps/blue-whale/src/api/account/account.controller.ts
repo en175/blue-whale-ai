@@ -126,9 +126,6 @@ export class AccountController {
       items.map((item) => item.generationJobId).filter((id): id is string => id != null),
     );
     return items.map((item) => {
-      // 查不到任务（跨库历史、已清理）→ summary 为 undefined → 四字段全 null，
-      // 前端回落显示 title。**这不是错误**：那笔钱确实发生过，只是任务查不到了。
-      // 反之 job 在、只是没有提示词（免费工具族）时，prompt 单独是 null——两者可分辨。
       const summary =
         item.generationJobId == null ? undefined : summaries.get(item.generationJobId);
       return {
@@ -146,6 +143,7 @@ export class AccountController {
         model_id: summary?.modelId ?? null,
         model_label: summary?.modelLabel ?? null,
         prompt: summary?.prompt ?? null,
+        specs: summary?.specs ?? null,
       };
     });
   }

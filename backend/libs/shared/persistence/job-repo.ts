@@ -6,6 +6,8 @@ import {
   VOCAL_SPLIT_SCENE_TRACKS,
 } from "@lib/contracts";
 
+import { extractSpecs } from "@lib/shared/billing/billing-specs.js";
+
 import { publicGenerationInput } from "./generation-input.js";
 import {
   extraNumber,
@@ -161,6 +163,7 @@ export interface ChargeTaskSummary {
   modelLabel: string | null;
   /** `input.prompt`；没有提示词的任务为 `null`。 */
   prompt: string | null;
+  specs: Record<string, string> | null;
 }
 
 /**
@@ -272,6 +275,11 @@ function promptOf(input: unknown): string | null {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
   const raw = (input as { prompt?: unknown }).prompt;
   return typeof raw === "string" && raw.trim() ? raw : null;
+}
+
+function specsOf(input: unknown, taskType: string): Record<string, string> | null {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
+  return extractSpecs(input as Record<string, unknown>, taskType);
 }
 
 /**
@@ -443,7 +451,6 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         //    也因此**不能**复用 listByUser 的 ids 过滤：那条硬绑 user_id，是用户面的路，
         //    而积分记录页默认是**全站**流水。
         where: { id: { in: unique.map((id) => BigInt(id)) } },
-        // 只选这三列 —— input 抽完 model_id / prompt 两个标量就丢掉，不进返回值
         select: { id: true, type: true, input: true },
       });
 
@@ -452,7 +459,13 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       const parsed = rows.map((r) => {
         const modelId = modelIdOf(r.input);
         if (modelId !== null) modelIds.add(modelId);
-        return { id: r.id.toString(), type: r.type, modelId, prompt: promptOf(r.input) };
+        return {
+          id: r.id.toString(),
+          type: r.type,
+          modelId,
+          prompt: promptOf(r.input),
+          specs: specsOf(r.input, r.type),
+        };
       });
       const labelByModel = await loadModelLabels(prisma, [...modelIds]);
 
@@ -465,6 +478,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
             modelId: p.modelId,
             modelLabel: p.modelId === null ? null : (labelByModel.get(p.modelId) ?? null),
             prompt: p.prompt,
+            specs: p.specs,
           },
         ]),
       );

@@ -345,6 +345,17 @@ class BillingApplicationServiceTest {
                 anyInt(), anyInt(), anyString(), anyString());
     }
 
+    @Test
+    @DisplayName("★ 临期批次取数不设时间窗，上限 200")
+    void 临期批次_不设时间窗_上限200() {
+        CreditLotRepository lots = mock(CreditLotRepository.class);
+        BillingApplicationService service = service(lots);
+
+        service.balance(USER);
+
+        verify(lots).listExpiring(USER, 200);
+    }
+
     // ========== 夹具 ==========
 
     // ── 规则快照（手写字面量：形态本身就是被测对象，见 SettlementServiceTest 的同名说明） ──
@@ -420,6 +431,10 @@ class BillingApplicationServiceTest {
 
     /** 装配：真引擎 + mock 账本层（本类不考落库）。规则由各用例的快照提供。 */
     private BillingApplicationService service() {
+        return service(mock(CreditLotRepository.class));
+    }
+
+    private BillingApplicationService service(CreditLotRepository lots) {
         when(catalog.currentVersion()).thenReturn(1);
         when(credits.hold(anyLong(), anyString(), anyLong(), anyLong(), anyInt(), anyInt(),
                 any(), any()))
@@ -431,7 +446,7 @@ class BillingApplicationServiceTest {
         service = new BillingApplicationService(
                 calculator,
                 credits,
-                mock(CreditLotRepository.class),
+                lots,
                 mock(LedgerRepository.class),
                 catalog,
                 new GrantPolicy(),

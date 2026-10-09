@@ -432,13 +432,13 @@ describe("createJobRepo.listForAdmin", () => {
 /* ---------- 积分记录页：按 jobId 批量取「这个任务是什么」 ---------- */
 
 describe("createJobRepo.loadChargeTaskSummaries", () => {
-  /** 一条任务：input 里除了要抽的两个键，还有别的东西（那些都不该跟出去）。 */
   const JOB = {
     id: 7n,
     type: "video",
     input: {
       model_id: "doubao-seedance-2-5-260628",
       prompt: "一只猫在草地上跑",
+      provider_credential: "secret",
       parameters: { duration: 5 },
       input_asset_ids: [1, 2],
     },
@@ -460,7 +460,7 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
     };
   }
 
-  it("只抽 type / model_id / prompt 三个标量，input 其余字段不跟着出去", async () => {
+  it("只抽 type / model_id / prompt 三个标量 + 规格，input 其余字段不跟着出去", async () => {
     const { repo } = repoOf([JOB], [{ model_id: JOB.input.model_id, model_label: "豆包 Seedance 2.5" }]);
 
     const map = await repo.loadChargeTaskSummaries(["7"]);
@@ -470,9 +470,38 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
       modelId: "doubao-seedance-2-5-260628",
       modelLabel: "豆包 Seedance 2.5",
       prompt: "一只猫在草地上跑",
+      specs: { model_id: "doubao-seedance-2-5-260628", reference_count: "0", video: "0" },
     });
     // 与任务记录列表同一条纪律：为了一列把整份 input 搬出去，接口体积会随结构一起长
     expect(map.get("7")).not.toHaveProperty("input");
+  });
+
+  it("specs 走 billing 同一份归一：凭证与提示词都不进规格，规格键小写、参考数按媒介取", async () => {
+    const { repo } = repoOf([
+      {
+        id: 11n,
+        type: "video",
+        input: {
+          model_id: "m",
+          prompt: "提示词",
+          provider_credential: "secret",
+          Resolution: "1080P",
+          references: [{ type: "video", duration: 3 }],
+        },
+      },
+    ]);
+
+    const map = await repo.loadChargeTaskSummaries(["11"]);
+
+    expect(map.get("11")?.specs).toEqual({
+      model_id: "m",
+      resolution: "1080p",
+      reference_count: "1",
+      video: "1",
+      video_input_seconds: "3",
+    });
+    expect(map.get("11")?.specs).not.toHaveProperty("provider_credential");
+    expect(map.get("11")?.specs).not.toHaveProperty("prompt");
   });
 
   it("查不到的 id **键缺席**（不是塞一个空对象）——「没这个任务」与「有任务但没提示词」要能分开", async () => {
@@ -496,6 +525,7 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
       modelId: null,
       modelLabel: null,
       prompt: "把背景抠掉",
+      specs: { reference_count: "0", video: "0" },
     });
     // 一个 model_id 都没收到就不该去查能力表
     expect(capFindMany).not.toHaveBeenCalled();
