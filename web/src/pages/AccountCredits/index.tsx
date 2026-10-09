@@ -295,7 +295,6 @@ function OrdersTable({ query }: { query: { isPending: boolean; isError: boolean;
         <tr>
           <th>下单时间</th>
           <th>商品名称</th>
-          <th>订单编号</th>
           <th>支付金额</th>
           <th>到账积分</th>
           <th>状态</th>
@@ -303,14 +302,13 @@ function OrdersTable({ query }: { query: { isPending: boolean; isError: boolean;
         </tr>
       </thead>
       <tbody>
-        {state === 'loading' ? <LoadingRow cols={7} />
-          : state === 'error' ? <ErrorRow cols={7} />
-          : state === 'empty' ? <EmptyRow cols={7} />
+        {state === 'loading' ? <LoadingRow cols={6} />
+          : state === 'error' ? <ErrorRow cols={6} />
+          : state === 'empty' ? <EmptyRow cols={6} />
           : rows.map((row) => (
             <tr key={row.trade_no}>
               <td>{formatBeijingDateTime(row.created_at)}</td>
               <td>{row.product_name}</td>
-              <td className={styles.mono}>{row.trade_no}</td>
               <td>{fenToYuan(row.amount_fen)}</td>
               <td>{row.status === 'paid' ? formatCredits(row.credits + row.bonus_credits) : '—'}</td>
               <td>
@@ -382,21 +380,19 @@ function ConsumedTable({ query }: { query: { isPending: boolean; isError: boolea
           <th>任务类型</th>
           <th>模型</th>
           <th>任务详情</th>
-          <th>任务 ID</th>
           <th>消耗积分</th>
         </tr>
       </thead>
       <tbody>
-        {state === 'loading' ? <LoadingRow cols={6} />
-          : state === 'error' ? <ErrorRow cols={6} />
-          : state === 'empty' ? <EmptyRow cols={6} />
+        {state === 'loading' ? <LoadingRow cols={5} />
+          : state === 'error' ? <ErrorRow cols={5} />
+          : state === 'empty' ? <EmptyRow cols={5} />
           : rows.map((row) => (
             <tr key={row.id}>
               <td>{formatBeijingDateTime(row.created_at)}</td>
               <td><span className={styles.tag}>{consumedTypeLabel(row)}</span></td>
               <td>{row.model_label ?? row.model_id ?? '—'}</td>
               <td>{dash(row.detail)}</td>
-              <td className={styles.mono}>{dash(row.job_id)}</td>
               <td className={styles.minus}>{row.credits == null ? '—' : `-${formatCredits(row.credits)}`}</td>
             </tr>
           ))}

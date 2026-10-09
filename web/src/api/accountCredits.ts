@@ -122,7 +122,6 @@ export const EXPORT_FIELDS: Record<ExportScope, ExportFieldOption[]> = {
   orders: [
     { key: 'created_at', label: '下单时间' },
     { key: 'product_name', label: '商品名称' },
-    { key: 'trade_no', label: '订单编号' },
     { key: 'amount_yuan', label: '支付金额' },
     { key: 'credits', label: '到账积分' },
     { key: 'status', label: '状态' },
@@ -131,16 +130,15 @@ export const EXPORT_FIELDS: Record<ExportScope, ExportFieldOption[]> = {
     { key: 'created_at', label: '获取时间' },
     { key: 'source', label: '获取来源' },
     { key: 'detail', label: '获取详情' },
+    { key: 'activated_at', label: '积分生效时间' },
     { key: 'expires_at', label: '积分到期时间' },
     { key: 'amount', label: '积分值' },
-    { key: 'remaining', label: '剩余' },
   ],
   consume: [
     { key: 'created_at', label: '消耗时间' },
     { key: 'task_type', label: '任务类型' },
     { key: 'model_label', label: '模型' },
     { key: 'detail', label: '任务详情' },
-    { key: 'job_id', label: '任务 ID' },
     { key: 'credits', label: '消耗积分' },
   ],
 };

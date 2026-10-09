@@ -354,3 +354,12 @@
   height: 15px;
   accent-color: #5a5a5e;
 }
+
+.okButtonGray {
+  color: #1a1a1a;
+  background-color: #d4d4d4;
+}
+
+.okButtonGray:hover:not(:disabled) {
+  background-color: #e6e6e6;
+}
