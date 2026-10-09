@@ -23,13 +23,12 @@ import {
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
 import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from './planApplyEdges';
 import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
-import { audioRefItemMediaTypeOf, audioRefMediaTypeOf, audioRefSourceError, audioMergedRefsError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
+import { audioRefItemMediaTypeOf, audioRefMediaTypeOf, audioRefSourceError, checkAddAudioRef } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
 import { hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   asVideoRefMediaType,
   isLibraryOnlyVideoRef,
-  isVideoDraftNode,
   readRefRole,
   readDraftMaterialRefs,
   mergedVideoMediaRefsOf,
@@ -44,8 +43,8 @@ import {
   type VideoRefCapabilities,
   type VideoRefRole,
 } from './videoMediaRefs';
-import { AssetImageRefLimitProvider, videoRefCapsOfModel } from './modelCaps';
-import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
+import { AssetImageRefLimitProvider } from './modelCaps';
+import { imageReferenceMaxOf } from '@/lib/model-reference-limits';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, compliancePatchFromMaterialStatus, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
@@ -146,6 +145,7 @@ import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPasst
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
 import { hasCustomName, planBindingsCoveredBy, readNodeAssetId, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
+import { createConnectValidators } from './canvasConnectValidation';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
@@ -460,131 +460,25 @@ export default function CanvasPage() {
     edgesRef.current = next;
     setEdges(next);
   };
-  const draftModelOf = (nodeId: string | null | undefined, kind: 'video' | 'image'): GenerationModel | undefined => {
-    const data = (mediaNodesRef.current.find((n) => n.id === nodeId)?.data ?? {}) as Record<string, unknown>;
-    const modelId = typeof data.draftModelId === 'string' ? data.draftModelId : '';
-    if (!modelId) return undefined;
-    return (kind === 'video' ? videoModelsRef.current : imageModelsRef.current).find((m) => m.model_id === modelId);
-  };
-  const videoCapsOfDraft = (nodeId: string | null | undefined): VideoRefCapabilities | null =>
-    videoRefCapsOfModel(draftModelOf(nodeId, 'video'));
-  const imageRefMaxOfDraft = (nodeId: string): number =>
-    imageReferenceMaxOf(draftModelOf(nodeId, 'image')?.features);
-  const videoRefUnsupportedByModel = (modelId: string, refs: VideoMediaRefs): string | null => {
-    const model = videoModelsRef.current.find((m) => m.model_id === modelId);
-    if (!model) return null;
-    const f = model.features;
-    const unsupported = refs.reference.some((r) =>
-      r.mediaType === 'video' ? !supportsVideoReferenceOf(f)
-        : r.mediaType === 'audio' ? !supportsAudioReferenceOf(f)
-          : false,
-    );
-    return unsupported ? '当前模型不支持视频或音频参考，请更换模型或调整引用' : null;
-  };
-  const validateImageRefConnect = (sourceId: string, targetId: string): boolean => {
-    const target = mediaNodesRef.current.find((n) => n.id === targetId);
-    if (!isImageDraftNode(target)) return true;
-    const source = mediaNodesRef.current.find((n) => n.id === sourceId);
-    if (!source) return true;
-    const err = imageRefSourceError(source);
-    if (err) {
-      showToast('warn', err);
-      return false;
-    }
-    const refs = imageMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>)!;
-    if (refs.some((r) => r.assetId === assetId)) {
-      const planEdge = edgesRef.current.find(e => e.target === targetId && readAssetId((findCanvasNode(e.source)?.data ?? {}) as Record<string, unknown>) === assetId);
-      if ((planEdge?.data?.inputSources as { manual?: boolean } | undefined)?.manual === false) return true;
-      showToast('warn', '该素材已连入当前草稿');
-      return false;
-    }
-    const imageMax = imageRefMaxOfDraft(targetId);
-    if (refs.length >= imageMax) {
-      showToast('warn', refOverflowToast(['image'], { image: imageMax }));
-      return false;
-    }
-    return true;
-  };
-  const validateVideoRefConnect = (sourceId: string, targetId: string, role: VideoRefRole = 'reference'): boolean => {
-    const target = mediaNodesRef.current.find((n) => n.id === targetId);
-    if (!isVideoDraftNode(target)) return true;
-    const source = mediaNodesRef.current.find((n) => n.id === sourceId);
-    if (!source) return true;
-    const err = videoRefSourceError(source, role);
-    if (err) {
-      showToast('warn', err);
-      return false;
-    }
-    const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    const sourceData = (source.data ?? {}) as Record<string, unknown>;
-    const assetId = readAssetId(sourceData);
-    const mediaType = sourceData.mediaType as 'image' | 'video' | 'audio';
-    const materialId = typeof sourceData.materialId === 'string' && sourceData.materialId
-      ? sourceData.materialId
-      : undefined;
-    const msg = checkAddVideoRef(role, mediaType, assetId, refs, videoCapsOfDraft(targetId), [materialId]);
-    if (msg) {
-      showToast('warn', msg);
-      return false;
-    }
-    return true;
-  };
-  const validateAudioRefConnect = (sourceId: string, targetId: string): boolean => {
-    const target = mediaNodesRef.current.find((n) => n.id === targetId);
-    if (!isAudioDraftNode(target)) return true;
-    if (isGeneratingNode(targetId)) {
-      showToast('warn', '生成中，输入连线只读');
-      return false;
-    }
-    const source = mediaNodesRef.current.find((n) => n.id === sourceId);
-    if (!source) return true;
-    const err = audioRefSourceError(source);
-    if (err) {
-      showToast('warn', err);
-      return false;
-    }
-    const sourceData = (source.data ?? {}) as Record<string, unknown>;
-    const incomingType = audioRefMediaTypeOf(sourceData) ?? 'audio';
-    const refs = mergedAudioRefsWithTextIndex(
-      targetId,
-      edgesRef.current,
-      mediaNodesRef.current,
-      textNodesRef.current,
-    ).refs;
-    const assetId = readAssetId(sourceData);
-    const msg = checkAddAudioRef(assetId, refs, 0, incomingType);
-    if (msg) {
-      showToast('warn', msg);
-      return false;
-    }
-    return true;
-  };
-  const validateAudioTextConnect = (textNodeId: string, targetId: string): boolean => {
-    const target = mediaNodesRef.current.find((n) => n.id === targetId);
-    if (!isAudioDraftNode(target)) return true;
-    if (isGeneratingNode(targetId)) {
-      showToast('warn', '生成中，输入连线只读');
-      return false;
-    }
-    const alreadyLinked = edgesRef.current.some((e) => e.source === textNodeId && e.target === targetId);
-    const hypoEdges = alreadyLinked
-      ? edgesRef.current
-      : [...edgesRef.current, { id: `hypo-audio-text-${textNodeId}`, source: textNodeId, target: targetId }];
-    const msg = audioMergedRefsError(
-      mergedAudioRefsWithTextIndex(
-        targetId,
-        hypoEdges,
-        mediaNodesRef.current,
-        textNodesRef.current,
-      ).refs,
-    );
-    if (msg) {
-      showToast('warn', msg);
-      return false;
-    }
-    return true;
-  };
+  const {
+    validateImageRefConnect,
+    validateVideoRefConnect,
+    validateAudioRefConnect,
+    validateAudioTextConnect,
+    draftModelOf,
+    videoCapsOfDraft,
+    imageRefMaxOfDraft,
+    videoRefUnsupportedByModel,
+  } = createConnectValidators({
+    getMediaNodes: () => mediaNodesRef.current,
+    getTextNodes: () => textNodesRef.current,
+    getEdges: () => edgesRef.current,
+    getVideoModels: () => videoModelsRef.current,
+    getImageModels: () => imageModelsRef.current,
+    findCanvasNode: (id) => findCanvasNode(id),
+    isGeneratingNode: (id) => isGeneratingNode(id),
+    showToast: (type, msg) => showToast(type, msg),
+  });
   const findCanvasNode = (id: string): Node | undefined =>
     mediaNodesRef.current.find((n) => n.id === id)
     ?? textNodesRef.current.find((n) => n.id === id)
