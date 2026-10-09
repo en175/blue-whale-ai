@@ -15,6 +15,7 @@ import {
   listCanvasRecoveryPage,
   projectCanvasNodeOwnerKeys,
   projectHasRecoverySubmissions,
+  recoveryMarkerOfNode,
   resolveCanvasRecoveryItems,
   saveCanvasWithRecovery,
   type CanvasView,
@@ -332,9 +333,12 @@ export class CanvasService {
         data: { reason: RECOVERY_REASONS.versionRequired },
       } as const;
     }
+    const markedNodeIds = guardedByRecovery
+      ? previous.filter(node => recoveryMarkerOfNode(node as Record<string, unknown>) !== null).map(node => String(node.id))
+      : [];
     try {
-      guardLegacyCanvasWrite(previous, incoming, guardedByRecovery
-        ? await projectCanvasNodeOwnerKeys(this.prisma.client, projectId)
+      guardLegacyCanvasWrite(previous, incoming, markedNodeIds.length > 0
+        ? await projectCanvasNodeOwnerKeys(this.prisma.client, projectId, markedNodeIds)
         : undefined);
     } catch (error) {
       if (error instanceof RecoveryContractError) return error.envelope;

@@ -210,6 +210,7 @@ export {
 export {
   canvasRecoverySaveRequestHash,
   guardLegacyCanvasWrite,
+  recoveryMarkerOfNode,
   saveCanvasWithRecovery,
   type CanvasRecoveryReceiptChange,
   type CanvasRecoverySaveInput,

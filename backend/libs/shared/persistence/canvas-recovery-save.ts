@@ -830,8 +830,10 @@ export function guardLegacyCanvasWrite(
   for (const nodeId of previousMarkers.keys()) {
     const node = incomingById.get(nodeId) ?? reject();
 
+    const previousMarker = previousMarkers.get(nodeId)!;
     const incomingMarker = markerOf(node);
-    if (incomingMarker !== null
+    const stale = !currentOwnerKeys.has(`${nodeId}:${String(previousMarker.submissionId)}:${String(previousMarker.outputKey)}`);
+    if (stale && incomingMarker !== null
       && currentOwnerKeys.has(`${nodeId}:${String(incomingMarker.submissionId)}:${String(incomingMarker.outputKey)}`)) continue;
     if (!protectedCardKept(previousById.get(nodeId)!, node)) reject();
   }
