@@ -14,7 +14,7 @@ import {
 } from '@/api/accountCredits';
 import { taskTypeLabel } from '@/admin/taskTypeLabels';
 import { useDocumentTitle } from '@/seo/useDocumentTitle';
-import { formatBeijingDateTime, formatSpecs } from './format';
+import { formatBeijingDateTime } from './format';
 import SummaryCards from './SummaryCards';
 import styles from './index.module.css';
 
@@ -381,7 +381,7 @@ function ConsumedTable({ query }: { query: { isPending: boolean; isError: boolea
               <td>{formatBeijingDateTime(row.created_at)}</td>
               <td><span className={styles.tag}>{consumedTypeLabel(row)}</span></td>
               <td>{row.model_label ?? row.model_id ?? '—'}</td>
-              <td>{formatSpecs(row.specs)}</td>
+              <td>{dash(row.detail)}</td>
               <td className={styles.mono}>{dash(row.job_id)}</td>
               <td className={styles.minus}>{row.credits == null ? '—' : `-${formatCredits(row.credits)}`}</td>
             </tr>

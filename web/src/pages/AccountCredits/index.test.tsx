@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountCredits from './index';
-import { formatBeijingDateTime, formatSpecs } from './format';
+import { formatBeijingDateTime } from './format';
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -55,7 +55,7 @@ const PAGES: Record<string, unknown> = {
           model_id: 'seedance-2.5',
           model_label: 'Seedance 2.5',
           prompt: '一只猫在跑',
-          specs: { resolution: '1080p', duration: '5' },
+          detail: '1080p · 5s',
         },
       ],
     },
@@ -195,23 +195,6 @@ describe('AccountCredits', () => {
       clickByText('复制订单号');
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('BW20260929143200801');
-  });
-});
-
-describe('formatSpecs 任务规格拼串', () => {
-  it('按白名单顺序取键，duration 补 s', () => {
-    expect(formatSpecs({ resolution: '1080p', duration: '5' })).toBe('1080p · 5s');
-    expect(formatSpecs({ size: '1024x1024' })).toBe('1024x1024');
-  });
-
-  it('duration 非正数整项不显示（edit 冻结 -1）', () => {
-    expect(formatSpecs({ resolution: '1080p', duration: '-1' })).toBe('1080p');
-  });
-
-  it('忽略计费派生键，全空回退 —', () => {
-    expect(formatSpecs({ reference_count: '0', video: '0' })).toBe('—');
-    expect(formatSpecs({})).toBe('—');
-    expect(formatSpecs(null)).toBe('—');
   });
 });
 
