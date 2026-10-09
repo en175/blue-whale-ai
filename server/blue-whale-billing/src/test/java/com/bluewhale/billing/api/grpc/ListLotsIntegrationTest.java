@@ -22,6 +22,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
@@ -37,6 +39,8 @@ class ListLotsIntegrationTest {
 
     private static final long USER = 9601L;
     private static final long OTHER_USER = 9602L;
+
+    private static final DateTimeFormatter RFC3339 = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private static final String CATALOG = """
             {"schemaVersion":1,"currency":"CNY","creditsPerYuan":15,
@@ -172,10 +176,43 @@ class ListLotsIntegrationTest {
     }
 
 
+    @Test
+    void 时间区间过滤_只留窗口内的批次() {
+        long old = credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "g-old", "lot-win-old");
+        long recent = credits.grant(USER, CreditSource.INVITE, 20, null, "grant", "g-new", "lot-win-new");
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 3 HOUR WHERE id = ?",
+                old);
+        jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 1 HOUR WHERE id = ?",
+                recent);
+
+        ListLotsResponse window = listWindow(LocalDateTime.now().minus(90, ChronoUnit.MINUTES), null);
+        assertThat(window.getItemsList()).extracting(UserCreditLot::getLotId)
+                .containsExactly(String.valueOf(recent));
+        assertThat(window.getPage().getTotal()).as("总数跟着窗口走，不是全表数").isEqualTo(1);
+
+        assertThat(listWindow(null, LocalDateTime.now().minus(150, ChronoUnit.MINUTES)).getItemsList())
+                .extracting(UserCreditLot::getLotId)
+                .containsExactly(String.valueOf(old));
+    }
+
+
     private ListLotsResponse list(long userId, int pageSize, int page) {
         return stub.listLots(ListLotsRequest.newBuilder()
                 .setUserId(userId)
                 .setPage(PageRequest.newBuilder().setPageSize(pageSize).setPage(page))
                 .build());
+    }
+
+    private ListLotsResponse listWindow(LocalDateTime createdFrom, LocalDateTime createdTo) {
+        ListLotsRequest.Builder request = ListLotsRequest.newBuilder()
+                .setUserId(USER)
+                .setPage(PageRequest.newBuilder().setPageSize(20).setPage(1));
+        if (createdFrom != null) {
+            request.setCreatedFrom(RFC3339.format(createdFrom.atZone(ZoneId.systemDefault())));
+        }
+        if (createdTo != null) {
+            request.setCreatedTo(RFC3339.format(createdTo.atZone(ZoneId.systemDefault())));
+        }
+        return stub.listLots(request.build());
     }
 }
