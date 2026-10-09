@@ -1,6 +1,6 @@
 package com.bluewhale.worker.application.service;
 
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

@@ -5,7 +5,7 @@
 
 
 
-<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.ReconciliationMapper">
+<mapper namespace="com.bluewhale.billing.infrastructure.persistence.mapper.ReconciliationMapper">
 
 
   <sql id="latestLedgerBalance">
@@ -34,7 +34,7 @@
 
 
 
-  <select id="imbalancedUsers" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserImbalanceRow">
+  <select id="imbalancedUsers" resultType="com.bluewhale.billing.infrastructure.persistence.row.UserImbalanceRow">
     SELECT combo.user_id            AS user_id,
            SUM(combo.lots_remaining) AS lots_remaining,
            SUM(combo.ledger_total)   AS ledger_total

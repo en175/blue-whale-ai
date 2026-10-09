@@ -169,7 +169,7 @@ worker/
     - 端点选择：有参考图 → POST /v1/images/edits（multipart）；无 → POST /v1/images/generations（JSON）
     - 请求头：Bearer + X-Trace-Id + X-Client-System: bluewhale（ADR-0080）
     - 响应解析：{data:[{url}]}（parseImageList :333-344）
-  - [x] processor `ImageChannelMapper`：渠道映射工具（image-channel-parser.ts + seedream-image-size.ts）
+  - [x] processor `ImageChannelParser`：渠道映射工具（image-channel-parser.ts + seedream-image-size.ts）
     - seedream 代码表（doubao-seedream-* 族模型尺寸查算）
     - gpt 矩阵查表（matrix[sizeId][ratioId]，大小写不敏感）
     - banana 双映射（quality × size）

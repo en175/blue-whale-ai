@@ -1,11 +1,11 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.application.processor.VideoJobProcessor;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
-import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobExtraEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
@@ -30,13 +30,13 @@ import static org.mockito.Mockito.*;
 class VideoWriteFenceGoldenTest {
 
     @Mock private GenerationJobMapper jobMapper;
-    @Mock private com.bluewhale.worker.infrastructure.mapper.AssetMapper assetMapper;
+    @Mock private com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper assetMapper;
     @Mock private GenerationJobLogMapper jobLogMapper;
-    @Mock private com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper projectEventMapper;
+    @Mock private com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper projectEventMapper;
     @Mock private GenerationOutputSlotMapper slotMapper;
     @Mock private SceneCardGenerationRecordMapper sceneCardRecordMapper;
     @Mock private StoryboardPreviewMapper storyboardPreviewMapper;
-    @Mock private com.bluewhale.worker.infrastructure.mapper.GenerationJobExtraMapper extraMapper;
+    @Mock private com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtraMapper extraMapper;
 
     private JobStateMachineService service;
     private JobFinalizer finalizer;

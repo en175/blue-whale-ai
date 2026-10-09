@@ -1,7 +1,7 @@
 package com.bluewhale.worker.application.claim;
 
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
-import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 
 import java.time.LocalDateTime;
 import java.util.List;

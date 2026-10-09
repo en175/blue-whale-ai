@@ -1,11 +1,11 @@
 package com.bluewhale.billing.application;
 
 import com.bluewhale.billing.domain.ledger.Account;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
 import com.bluewhale.billing.domain.ledger.CreditSource;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
 import com.bluewhale.billing.domain.ledger.Reservation;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.ReservationRepository;
 import com.bluewhale.billing.testsupport.LogCapture;
 import ch.qos.logback.classic.Level;
 import org.junit.jupiter.api.BeforeEach;

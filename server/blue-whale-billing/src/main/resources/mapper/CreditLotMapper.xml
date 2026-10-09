@@ -3,35 +3,14 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 
-
-
-
-
-
-<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.CreditLotMapper">
-
+<mapper namespace="com.bluewhale.billing.infrastructure.persistence.mapper.CreditLotMapper">
 
 
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  <select id="lockActiveLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
+  <select id="lockActiveLots" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
     WHERE user_id = #{userId}
@@ -53,13 +32,7 @@
   </select>
 
 
-
-
-
-
-
-
-  <select id="sumAvailableBySource" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.SourceAvailableRow">
+  <select id="sumAvailableBySource" resultType="com.bluewhale.billing.infrastructure.persistence.row.SourceAvailableRow">
     SELECT source, COALESCE(SUM(remaining - frozen), 0) AS credits
     FROM billing_credit_lots
     WHERE user_id = #{userId}
@@ -70,18 +43,7 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-  <select id="sumAvailableByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
+  <select id="sumAvailableByUser" resultType="com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow">
     SELECT user_id, COALESCE(SUM(remaining - frozen), 0) AS amount
     FROM billing_credit_lots
     WHERE user_id IN
@@ -93,19 +55,7 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-  <select id="sumGrantedByUser" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserAmountRow">
+  <select id="sumGrantedByUser" resultType="com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow">
     SELECT user_id, COALESCE(SUM(amount), 0) AS amount
     FROM billing_credit_lots
     WHERE user_id IN
@@ -118,24 +68,7 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  <select id="listDueLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
+  <select id="listDueLots" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
     WHERE expires_at IS NOT NULL
@@ -146,22 +79,14 @@
   </select>
 
 
-
-
-
-
-
-
-
-
-  <select id="lockById" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
+  <select id="lockById" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
     WHERE id = #{lotId}
     FOR UPDATE
   </select>
 
-  <select id="listExpiring" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
+  <select id="listExpiring" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
     SELECT id, user_id, source, amount, remaining, frozen, expires_at, version
     FROM billing_credit_lots
     WHERE user_id = #{userId}
@@ -243,21 +168,7 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  <select id="listUserLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
+  <select id="listUserLots" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at,
            biz_type, biz_id, version, gmt_create
     FROM billing_credit_lots

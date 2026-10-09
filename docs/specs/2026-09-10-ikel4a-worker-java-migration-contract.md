@@ -1,6 +1,6 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五 + 修正六**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；修正六：2026-09-18 退役标签开关与命名对齐（详见 §16）——删除 `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX`，服务启动即消费全部 6 个 tag，topic `generation-video`→`generation-task`、tag `step`→`video`；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U；冻结增量 §15：2026-09-18 新增第 6 个生成类型 image_erase 图片擦除的跨进程字段冻结，IKGOT3；冻结增量 §17：2026-09-19 新增第 8 个生成类型 video_subtitle_erase 视频智能去字幕的跨进程字段冻结，IKGZ7Z——第 7 个 image_outpaint 契约独立在 `backend/libs/contracts/image-outpaint.ts`，未单开本文章节）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五 + 修正六 + 修正七**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；修正六：2026-09-18 退役标签开关与命名对齐（详见 §16）——删除 `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX`，服务启动即消费全部 6 个 tag，topic `generation-video`→`generation-task`、tag `step`→`video`；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U；冻结增量 §15：2026-09-18 新增第 6 个生成类型 image_erase 图片擦除的跨进程字段冻结，IKGOT3；冻结增量 §17：2026-09-19 新增第 8 个生成类型 video_subtitle_erase 视频智能去字幕的跨进程字段冻结，IKGZ7Z——第 7 个 image_outpaint 契约独立在 `backend/libs/contracts/image-outpaint.ts`，未单开本文章节）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
 - 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEF1K），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
@@ -208,7 +208,7 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 - **`openai-images`**：无参考图 → `POST /v1/images/generations`（JSON）；有参考图 → `POST /v1/images/edits`（multipart，参考图**由 worker 按 URL 下载成字节**后以 `image` 字段逐个追加）。只发官方字段 `model` / `prompt` / `n` / `size` / `quality`；**模型名恒为 `model_id`**——文生图与图生图是同一档位、**不换名**，端点分流代替换名。
 - **`inline-image`（缺省，未声明即此形态，现状零回归）**：恒 `POST /v1/images/generations`（JSON），参考图以 URL 字符串/数组进 body `image`；**仅此形态**下应用 §11 的 `i2i_model_name` 换名。
-- 未知值一律回落 `inline-image`：协议切错的代价是全量调用失败，宁可不切。**「没配」与「配错」必须可区分**：键不存在 = 缺省（常态，静默）；键存在但取值认不出、或 features JSON 损坏 = 配置错误（回落的同时打 WARN）——静默咽掉会让排查从「该模型整个挂了」开始而根因埋在 DB 里。回落决策与告警在 `ImageChannelMapper.parseImageProtocol`，`ImageProtocol.fromWire` 对认不出的值返回 `null` 不做兜底。
+- 未知值一律回落 `inline-image`：协议切错的代价是全量调用失败，宁可不切。**「没配」与「配错」必须可区分**：键不存在 = 缺省（常态，静默）；键存在但取值认不出、或 features JSON 损坏 = 配置错误（回落的同时打 WARN）——静默咽掉会让排查从「该模型整个挂了」开始而根因埋在 DB 里。回落决策与告警在 `ImageChannelParser.parseImageProtocol`，`ImageProtocol.fromWire` 对认不出的值返回 `null` 不做兜底。
 - **⚠️ 交叉约束：`image_protocol=openai-images` 的行必须配 `channel_parser=gpt`。** `channel_parser=banana` 会把 `quality` 映射成 `"1k"` 一类的值，而官方协议只认 `low`/`medium`/`high`/`auto`，且该值会被**原样发出** → 必然 400，且错误来自上游、与真正原因（两个配置轴矛盾）隔了一层。**刻意不在 worker 侧过滤非法 `quality`**：过滤等于静默降级成默认质量，比让上游报错更糟——矛盾配置就该响。`features.image_protocol` 目前**无 backend 写入闸门**（`featuresFieldErr` 只校验 `i2i_model_name` / `max_prompt_length`），交叉校验待另开 backend 单。
 - 读取时效沿用 §11：每次执行按 `model_id` 现查能力行，**禁止进程级缓存 features**。
 - **消费端目录投影**：`image_protocol` 与 `i2i_model_name` 同类（出站调用值）。本次只改 worker-java，backend 的 `handle-list-models` 仍只剥 `i2i_model_name`，`image_protocol` 会随 `features` 透出前端——无害（非密钥），如需与 `i2i_model_name` 一致剥除需另开 backend 单。
@@ -236,7 +236,7 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 承接 §12「协议由能力行声明，不按模型名特判」：**尺寸映射同理，一律读 `generation_model_capability.request_mapping`，禁止在 worker 代码内按模型名写尺寸表。**
 
-- 迁移前盘点：`request_mapping` 三族中 gpt 的 `matrix`、banana 的 `size`/`quality` 均已落能力行；**唯独 seedream 的「分辨率 × 宽高比 → WxH」表硬编码在 `ImageChannelMapper.MODEL_SIZES`**（写死 4 个模型名）。后果：上游新增/调整模型尺寸必须改 Java 并重新发版。
+- 迁移前盘点：`request_mapping` 三族中 gpt 的 `matrix`、banana 的 `size`/`quality` 均已落能力行；**唯独 seedream 的「分辨率 × 宽高比 → WxH」表硬编码在 `ImageChannelParser.MODEL_SIZES`**（写死 4 个模型名）。后果：上游新增/调整模型尺寸必须改 Java 并重新发版。
 - 由此掩盖的一处事实：seedream 行 `supported_sizes[].api_value` 只写档位名（`"1K"`），**上游并不接受**（实测 400 `Invalid size '1K'. Expected WIDTHxHEIGHT`）——真值实际由代码表展开，即「数据库里的值不可用、真值在代码里」。
 - 迁移（2026-09-12，`024_ik629_seedream_size_to_catalog.sql`）：4 个启用中的 seedream 行写入 `request_mapping.matrix`（形状与 gpt 行一致，逐格取自原代码表），worker 改读能力行并删除代码表。
 - **新增图片模型时**：只写能力行（`channel_parser` + `request_mapping`），**不得新增代码内模型名分支或尺寸表**；代码只保留形状解析与查表能力。
@@ -248,6 +248,7 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 ### 13.1 包分层与类名后缀
 
 - 分层：`application`（processor / consumer / service）、`domain`（entity / dto / error）、`infrastructure`（mapper / gateway / storage / media / audio / credential / mq）、`config`（装配）、`web`（健康检查）。
+- **⚠️ 上一行已被本文件 §22 修正七覆盖**：`config` → `infrastructure/config`、`web` → `api`、`infrastructure/mapper` → `infrastructure/persistence/mapper`。读本节分层前先看 §22。
 - 后缀统一表：
 
   | 后缀 | 所在层 | 含义与禁令 |
@@ -672,3 +673,28 @@ media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继�
 - Java：`AudioVideoMuxContract` + `JobTypeEnum.AUDIO_VIDEO_MUX` + `GenerationMqRouteEnum.AUDIO_VIDEO_MUX` + Consumer/Processor/Client + RocketMqConfig 三 bean + Recovery `maxAge=0` + Mapper 续租/取消/扫描登记。
 - 对账：`audio-video-mux.test.ts`（读 Java 源码逐值对账）、`mq-route-parity.test.ts`、`StartupContractTest`、`ConsumerRouteWiringTest`；跨运行时贯通 = `audio-video-muxes.cross-runtime.integration.test.ts` + `AudioVideoMuxCrossRuntimeMySqlIntegrationTest`（DbGuard 门禁）。
 - 工单分工：IKIHPJ 创建入口 + worker 执行链（本票）；IHPL 重试（`Idempotency-Key` + `command_idempotency` 双轨 + `submit_attempt` 递增）；IHPK/IHPM 前端草稿卡与提交回填。
+
+## 22. 修正七（2026-10-09）：包结构对齐 `api/` + `infrastructure/`
+
+背景：`server/` 下的 Java 模块此前各持一套包命名——worker 用 `web`（健康检查）与顶层 `config`（装配），
+billing 用 ports-and-adapters 的 `adapter/inbound` + `adapter/outbound`。本次按团队 Java 编码规范把这三个模块
+（worker / billing / common）的包结构统一为 `api/` + `infrastructure/`——worker 与 billing 各有一批包搬动，
+common 零改动（它只有 `common/http` 一个共享基础设施类，本就是该形态，五层分层对其不适用）。本节覆盖 §13.1 的「分层」一句与后缀表的
+`*Mapper` 行；§13.1 其余条款（`*Entity` 在 `domain/entity`、`*Dto` 在 `domain/dto`、`*Service` 在
+`application/service`）**不变**。
+
+- 分层改为：`api`（HTTP 入口，健康检查 `ReadyController` 自 `web` 迁入）、
+  `application`（processor / consumer / service）、`domain`（contract / dto / entity / error）、
+  `infrastructure`（`config` 装配、`persistence/mapper`、gateway / storage / media / audio / mq）。
+- 后缀表 `*Mapper` 行所在层：`infrastructure/mapper` → `infrastructure/persistence/mapper`。
+- 双端同步：本改动不触 §13.4 的三类不动项（状态机迁移语义、MQ 消息字段、DB 写入内容）——包名与 MyBatis
+  mapper namespace 的改动不改变任何跨进程字段，也不改变写入内容。后端对账套件按 Java 源码路径读取的
+  worker 包（`domain/contract`、`domain/error`、`application/processor`、`infrastructure/gateway`）本次均未
+  改动，TS 侧无需同步。
+- **未随规范调整的两处**（各有硬约束，登记为已知偏离，不假装已满足）：
+  1. `domain/entity` 保留原位，不迁入 `infrastructure/persistence/po`。`domain/contract` 的 `JobStatusEnum`
+     与 `SettlementUsageLines` 引用 `domain.entity.*`，外移会造出 domain → infrastructure 的反向依赖；
+     后者还是后端金标对账的基准（`billing-contract-parity.test.ts`）。实体类带 MyBatis 注解这一
+     「领域层依赖框架」问题另立工单解决。
+  2. `domain/dto` 保留原位，不迁入 `api/dto`。其 25 个类含 MQ 契约投影（`ClaimedJobDto`、`Publish*Dto`），
+     被 application 与 infrastructure 共享；迁入 `api/` 会造出 application → api 的反向依赖。

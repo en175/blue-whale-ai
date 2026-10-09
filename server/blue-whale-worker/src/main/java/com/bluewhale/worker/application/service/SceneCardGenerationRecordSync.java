@@ -3,8 +3,8 @@ package com.bluewhale.worker.application.service;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.bluewhale.worker.domain.entity.SceneCardGenerationRecordEntity;
 import com.bluewhale.worker.domain.contract.JobStatusEnum;
-import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.List;

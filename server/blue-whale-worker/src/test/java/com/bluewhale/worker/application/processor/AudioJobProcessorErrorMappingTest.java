@@ -3,7 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.error.AudioProviderError;
 import com.bluewhale.worker.domain.error.GenerationError;

@@ -1,7 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;

@@ -1,6 +1,6 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.adapter.outbound.persistence.repository.CatalogRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.CatalogRepository;
 import com.bluewhale.billing.domain.pricing.DiscountResolver;
 import com.bluewhale.billing.domain.pricing.PricingEngine;
 import com.bluewhale.billing.domain.pricing.PricingRequest;

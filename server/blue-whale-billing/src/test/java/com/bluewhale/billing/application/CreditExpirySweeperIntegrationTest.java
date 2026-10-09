@@ -1,8 +1,8 @@
 package com.bluewhale.billing.application;
 
 import ch.qos.logback.classic.Level;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
 import com.bluewhale.billing.domain.ledger.Account;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import com.bluewhale.billing.testsupport.LogCapture;

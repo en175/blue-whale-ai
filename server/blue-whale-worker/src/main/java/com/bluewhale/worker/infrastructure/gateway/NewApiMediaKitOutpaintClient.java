@@ -1,7 +1,7 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
-import com.bluewhale.worker.config.NewApiUpstreamConfig;
-import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig;
+import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.error.ImageOutpaintError;
 import org.springframework.stereotype.Component;

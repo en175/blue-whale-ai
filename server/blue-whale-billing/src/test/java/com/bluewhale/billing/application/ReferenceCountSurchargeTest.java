@@ -1,14 +1,14 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
 import com.bluewhale.billing.application.command.HoldCommand;
 import com.bluewhale.billing.application.command.SettlementCommand;
 import com.bluewhale.billing.application.command.SettlementUsageLine;
 import com.bluewhale.billing.domain.ledger.HoldResult;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
 import com.bluewhale.billing.domain.ledger.Reservation;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.TransactionRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.TransactionRepository;
 import com.bluewhale.billing.domain.pricing.ContractSource;
 import com.bluewhale.billing.domain.pricing.DiscountResolver;
 import com.bluewhale.billing.domain.pricing.MediaPricingCalculator;

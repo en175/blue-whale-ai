@@ -1,9 +1,9 @@
 package com.bluewhale.billing.application;
 
 import ch.qos.logback.classic.Level;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
-import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.infrastructure.persistence.repository.ReservationRepository;
 import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.Account;

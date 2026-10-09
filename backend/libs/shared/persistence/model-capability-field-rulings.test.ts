@@ -91,7 +91,7 @@ const RULINGS: Record<string, Ruling> = {
   },
   i2i_model_name: {
     consumer:
-      "worker-java ImageChannelMapper / ImageJobProcessor（有参考图时出站改用该上游模型名，直接从能力行 features 读）；" +
+      "worker-java ImageChannelParser / ImageJobProcessor（有参考图时出站改用该上游模型名，直接从能力行 features 读）；" +
       "handle-list-models 把它从消费端剥除（出站调用值不下发浏览器）",
     fallback: "null（不分流，出站用目录 id 本身）",
     configWinsTest:
@@ -144,7 +144,7 @@ const RULINGS: Record<string, Ruling> = {
       "backend/libs/shared/generation/handle-create-generation-job.ts（resolveReferenceAssets 图片上限）；" +
       "backend/libs/shared/canvas/prompt-target.ts；" +
       "web/src/lib/model-reference-limits.ts（imageReferenceMaxOf / imageReferenceMaxOfForAudio）；" +
-      "worker-java ImageChannelMapper.parseMaxReferenceImages（图片链路镜像缺省）；冻结进 job.input.reference_limits",
+      "worker-java ImageChannelParser.parseMaxReferenceImages（图片链路镜像缺省）；冻结进 job.input.reference_limits",
     fallback:
       "按行类型分（IKHEXG）：图片/视频行 DEFAULT_IMAGE_REFERENCE_MAX = 10" +
       "（与网关 maxImageEditImages / ARK 复合编辑上限对齐，IKA72G）；" +

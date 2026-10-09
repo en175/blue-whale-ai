@@ -1,7 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.entity.ProjectEventEntity;
-import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
