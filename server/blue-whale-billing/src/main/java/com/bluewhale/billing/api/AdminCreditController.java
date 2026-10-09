@@ -1,8 +1,13 @@
 package com.bluewhale.billing.api;
 
-import com.bluewhale.billing.application.view.BalanceView;
+import com.bluewhale.billing.api.dto.GrantRequest;
+import com.bluewhale.billing.api.dto.GrantResponse;
+import com.bluewhale.billing.api.dto.RefundRequest;
+import com.bluewhale.billing.api.dto.SettleRequest;
 import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.CreditService;
+import com.bluewhale.billing.application.view.BalanceView;
+import com.bluewhale.billing.common.error.DuplicateGrantKeyException;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Instant;
 import java.util.Map;
 
 @RestController
@@ -74,25 +78,4 @@ public class AdminCreditController {
         credits.refund(jobId, request.reason() == null ? "人工释放" : request.reason());
         return Map.of("jobId", jobId, "status", "released");
     }
-
-    public record SettleRequest(long actualCredits) {}
-    public record RefundRequest(String reason) {}
-
-    public record GrantRequest(
-            long userId,
-            String source,
-            long amount,
-            String bizId,
-            String bizType,
-            String grantKey,
-            Instant expiresAt
-    ) {
-        public GrantRequest {
-            if (bizId == null || bizId.isBlank()) {
-                throw new IllegalArgumentException("bizId 必填——它是这批积分的来路凭证");
-            }
-        }
-    }
-
-    public record GrantResponse(long lotId, long userId, String source, long amount) {}
 }

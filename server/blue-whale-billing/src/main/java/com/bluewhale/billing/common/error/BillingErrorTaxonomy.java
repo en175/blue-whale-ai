@@ -1,6 +1,5 @@
 package com.bluewhale.billing.common.error;
 
-import com.bluewhale.billing.api.AdminNotFoundException;
 import com.bluewhale.billing.application.CatalogCompiler;
 import com.bluewhale.billing.domain.ledger.InsufficientCreditsException;
 import com.bluewhale.billing.domain.pricing.BasePriceResolver;

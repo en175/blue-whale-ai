@@ -1,6 +1,5 @@
-package com.bluewhale.billing.api;
+package com.bluewhale.billing.common.error;
 
-import com.bluewhale.billing.common.error.BillingErrorTaxonomy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;

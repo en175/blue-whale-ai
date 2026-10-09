@@ -2,7 +2,6 @@ package com.bluewhale.billing.common.error;
 
 import com.bluewhale.billing.common.error.BillingErrorTaxonomy.Code;
 import com.bluewhale.billing.common.error.BillingErrorTaxonomy.Surface;
-import com.bluewhale.billing.api.AdminNotFoundException;
 import com.bluewhale.billing.application.CatalogCompiler;
 import com.bluewhale.billing.domain.ledger.InsufficientCreditsException;
 import com.bluewhale.billing.domain.pricing.PricingEngine;

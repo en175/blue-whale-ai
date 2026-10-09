@@ -1,4 +1,4 @@
-package com.bluewhale.billing.api;
+package com.bluewhale.billing.common.error;
 
 public class AdminNotFoundException extends RuntimeException {
 
