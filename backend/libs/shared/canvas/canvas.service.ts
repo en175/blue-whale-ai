@@ -1,3 +1,4 @@
+import { wallClockRfc3339 } from "@lib/core";
 import { releaseRemovedPromptSources, type CanvasEdge } from "@lib/contracts";
 import { nodeAssetId, planError } from "./prompt-target.js";
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
@@ -44,7 +45,7 @@ function toQuoteView(row: ConversationQuoteRow) {
     title: row.title,
     text: row.text,
     source: source.success ? source.data : null,
-    quotedAt: row.gmt_create.toISOString(),
+    quotedAt: wallClockRfc3339(row.gmt_create),
   };
 }
 
@@ -58,7 +59,7 @@ function toHistoryItem(row: LegacyCardHistoryRow): LegacyCardHistoryItem {
     visualText: row.visual_text ?? null,
     source: source.success ? source.data : null,
     cardJson: row.card_json ?? null,
-    migratedAt: row.gmt_create.toISOString(),
+    migratedAt: wallClockRfc3339(row.gmt_create),
   };
 }
 

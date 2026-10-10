@@ -178,12 +178,13 @@ cd backend && PORT=3100 \
 cd backend
 set -a; source /tmp/bw-remote-agent.env; set +a   # Agent 服务三件套；缺失时见下
 nohup env \
-  DATABASE_URL='mysql://<凭据不落文件>@14.103.43.52:3306/blue_whale' \
+  DATABASE_URL='mysql://<凭据不落文件>@14.103.43.52:3306/blue_whale?timezone=%2B08%3A00' \
   NEW_API_BASE_URL='http://14.103.43.52:3006' \
   REDIS_HOST=127.0.0.1 REDIS_PORT=6379 REDIS_DB=0 \
   PORT=3100 node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
 ```
 
+- ⚠️ `DATABASE_URL` **必须带 `?timezone=%2B08%3A00`**（测试站 MySQL 全局时区是 UTC）。缺它会命中 `assertClockAgreement`，后端拒绝启动并打出「进程时区与数据库会话时区不一致」——那是**配置问题不是代码坏了**。形态 A（本地库）同理。
 - 完整连接串的获取：SSH 到测试站（密钥 `~/Downloads/weitian.pem`，root@14.103.43.52）从 backend 容器 `docker inspect` 提取。连接串只走进程环境变量注入，不落任何入库文件或日志（ADR-0064）。
 - Agent 三件套变量（`AGENT_SERVICE_BASE_URL=http://14.103.43.52:4112` + `AGENT_SERVICE_TOKEN` + `NEW_API_AGENT_BILLING_TOKEN`）同样从远程容器 inspect 提取，存 `/tmp/bw-remote-agent.env`（600 权限）。缺这三项：右侧边栏 Agent 会话 502、模型网关 503。
   - 其中 `NEW_API_AGENT_BILLING_TOKEN` **必须保持 `bwsvc_` 前缀**，且它**不等于管理端配的那把统一 key**：它是 new-api 那边 `AGENT_BILLING_SERVICE_TOKEN` 的同一个值，属于**服务身份**而非项目凭证，new-api 的 relay 入口按前缀分流，换成统一 key 不会报错、只会把账静默记到统一 key 的属主头上。后端启动时会校验前缀，配错直接拒绝启动。

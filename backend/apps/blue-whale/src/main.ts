@@ -7,6 +7,8 @@ import cookieParser from "cookie-parser";
 import { NewApiError } from "@lib/core";
 import { closeDefaultTlsLogWriter } from "@lib/core/logging";
 import { missingBillingConfig } from "@lib/shared/billing/billing-client.js";
+import { assertClockAgreement } from "@lib/shared/persistence/index.js";
+import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AppModule } from "./app.module.js";
@@ -56,6 +58,15 @@ async function bootstrap(): Promise<void> {
     logger.error(
       `启动中止：计费依赖未配置（缺 ${missingBilling.join(" / ")}）。` +
         `new-api 已切断，缺它会让生成不扣费。`,
+    );
+    process.exit(1);
+  }
+
+  try {
+    await assertClockAgreement(app.get(PrismaService).client);
+  } catch (error) {
+    logger.error(
+      `启动中止：${error instanceof Error ? error.message : String(error)}`,
     );
     process.exit(1);
   }

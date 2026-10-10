@@ -1,3 +1,4 @@
+import { wallClockRfc3339 } from "@lib/core";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import type { TopupTierPermission } from "./topup-tier-repo.js";
@@ -74,7 +75,7 @@ function toView(row: any): RechargeCustomConfigView {
     permissionDeniedHint: row.permission_denied_hint,
     creditsValidMonths: row.credits_valid_months,
     version: row.version,
-    updatedAt: new Date(row.gmt_modified).toISOString(),
+    updatedAt: wallClockRfc3339(new Date(row.gmt_modified)),
   };
 }
 

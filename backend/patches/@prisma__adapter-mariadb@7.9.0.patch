@@ -1,52 +1,66 @@
 diff --git a/dist/index.js b/dist/index.js
-index 21a8cf3d85213061cb910139bac00a70aa2c60cf..dbfadce06cd8d7d760ea87d834ba5bcead5dbce8 100644
+index 21a8cf3d85213061cb910139bac00a70aa2c60cf..04befc52cf133ec511a121d7d6a35ccbcedfc98a 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -147,7 +147,7 @@ function mapRow(row, fields) {
+@@ -135,6 +135,8 @@ function mapArg(arg, argType) {
+   }
+   return arg;
+ }
++const BLUE_WHALE_DB_OFFSET = "+08:00";
++const BLUE_WHALE_DB_OFFSET_MS = 8 * 3600e3;
+ function mapRow(row, fields) {
+   const values = Array.isArray(row) ? row : Object.values(row);
+   return values.map((value, i) => {
+@@ -147,7 +149,7 @@ function mapRow(row, fields) {
        case "TIMESTAMP2" /* TIMESTAMP2 */:
        case "DATETIME" /* DATETIME */:
        case "DATETIME2" /* DATETIME2 */:
 -        return (/* @__PURE__ */ new Date(`${value}Z`)).toISOString().replace(/(\.000)?Z$/, "+00:00");
-+        return (/* @__PURE__ */ new Date(`${value}+08:00`)).toISOString().replace(/(\.000)?Z$/, "+00:00");
++        return (/* @__PURE__ */ new Date(`${String(value).replace(" ", "T")}${BLUE_WHALE_DB_OFFSET}`)).toISOString().replace(/(\.000)?Z$/, "+00:00");
      }
      if (typeof value === "bigint") {
        return value.toString();
-@@ -163,8 +163,11 @@ var typeCast = (field, next) => {
+@@ -163,8 +165,9 @@ var typeCast = (field, next) => {
  };
  function formatDateTime(date) {
    const pad = (n, z = 2) => String(n).padStart(z, "0");
 -  const ms = date.getUTCMilliseconds();
 -  return pad(date.getUTCFullYear(), 4) + "-" + pad(date.getUTCMonth() + 1) + "-" + pad(date.getUTCDate()) + " " + pad(date.getUTCHours()) + ":" + pad(date.getUTCMinutes()) + ":" + pad(date.getUTCSeconds()) + (ms ? "." + String(ms).padStart(3, "0") : "");
-+  // blue-whale 口径：库里的 DATETIME 字面量是北京时间。把瞬时偏移到北京墙钟后取 UTC 分量，
-+  // 即得北京字面量；读取侧对称地按 +08:00 解释。只动 formatDateTime —— 全库无 DATE/TIME 列。
-+  const t = new Date(date.getTime() + 8 * 3600e3);
++  const t = new Date(date.getTime() + BLUE_WHALE_DB_OFFSET_MS);
 +  const ms = t.getUTCMilliseconds();
 +  return pad(t.getUTCFullYear(), 4) + "-" + pad(t.getUTCMonth() + 1) + "-" + pad(t.getUTCDate()) + " " + pad(t.getUTCHours()) + ":" + pad(t.getUTCMinutes()) + ":" + pad(t.getUTCSeconds()) + (ms ? "." + String(ms).padStart(3, "0") : "");
  }
  function formatDate(date) {
    const pad = (n, z = 2) => String(n).padStart(z, "0");
 diff --git a/dist/index.mjs b/dist/index.mjs
-index e292810f594bb8a66a7f33c3e7c524781e9281fc..6893531f873c392def9914da5f13cc863cab7a53 100644
+index e292810f594bb8a66a7f33c3e7c524781e9281fc..92322560aee419a04868019c3bc9d62ea8bcaf90 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -111,7 +111,7 @@ function mapRow(row, fields) {
+@@ -99,6 +99,8 @@ function mapArg(arg, argType) {
+   }
+   return arg;
+ }
++const BLUE_WHALE_DB_OFFSET = "+08:00";
++const BLUE_WHALE_DB_OFFSET_MS = 8 * 3600e3;
+ function mapRow(row, fields) {
+   const values = Array.isArray(row) ? row : Object.values(row);
+   return values.map((value, i) => {
+@@ -111,7 +113,7 @@ function mapRow(row, fields) {
        case "TIMESTAMP2" /* TIMESTAMP2 */:
        case "DATETIME" /* DATETIME */:
        case "DATETIME2" /* DATETIME2 */:
 -        return (/* @__PURE__ */ new Date(`${value}Z`)).toISOString().replace(/(\.000)?Z$/, "+00:00");
-+        return (/* @__PURE__ */ new Date(`${value}+08:00`)).toISOString().replace(/(\.000)?Z$/, "+00:00");
++        return (/* @__PURE__ */ new Date(`${String(value).replace(" ", "T")}${BLUE_WHALE_DB_OFFSET}`)).toISOString().replace(/(\.000)?Z$/, "+00:00");
      }
      if (typeof value === "bigint") {
        return value.toString();
-@@ -127,8 +127,11 @@ var typeCast = (field, next) => {
+@@ -127,8 +129,9 @@ var typeCast = (field, next) => {
  };
  function formatDateTime(date) {
    const pad = (n, z = 2) => String(n).padStart(z, "0");
 -  const ms = date.getUTCMilliseconds();
 -  return pad(date.getUTCFullYear(), 4) + "-" + pad(date.getUTCMonth() + 1) + "-" + pad(date.getUTCDate()) + " " + pad(date.getUTCHours()) + ":" + pad(date.getUTCMinutes()) + ":" + pad(date.getUTCSeconds()) + (ms ? "." + String(ms).padStart(3, "0") : "");
-+  // blue-whale 口径：库里的 DATETIME 字面量是北京时间。把瞬时偏移到北京墙钟后取 UTC 分量，
-+  // 即得北京字面量；读取侧对称地按 +08:00 解释。只动 formatDateTime —— 全库无 DATE/TIME 列。
-+  const t = new Date(date.getTime() + 8 * 3600e3);
++  const t = new Date(date.getTime() + BLUE_WHALE_DB_OFFSET_MS);
 +  const ms = t.getUTCMilliseconds();
 +  return pad(t.getUTCFullYear(), 4) + "-" + pad(t.getUTCMonth() + 1) + "-" + pad(t.getUTCDate()) + " " + pad(t.getUTCHours()) + ":" + pad(t.getUTCMinutes()) + ":" + pad(t.getUTCSeconds()) + (ms ? "." + String(ms).padStart(3, "0") : "");
  }

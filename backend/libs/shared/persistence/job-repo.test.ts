@@ -629,7 +629,7 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
     expect(view?.video_stage).toBe("sample");
     expect(view?.source_sample_job_id).toBeNull();
     expect(view?.final_job_id).toBe("305");
-    expect(view?.finalize_deadline_at).toBe("2026-10-06T01:00:00.000Z");
+    expect(view?.finalize_deadline_at).toBe("2026-10-06T09:00:00+08:00");
     expect(view?.charge_state).toBe("settled");
     expect(view?.actual_credits).toBe(4);
   });

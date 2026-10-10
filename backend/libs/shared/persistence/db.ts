@@ -7,8 +7,17 @@ const globalForPrisma = globalThis as unknown as {
 };
 const holder: PrismaHolder = (globalForPrisma.__blueWhalePrisma ??= {});
 
+export const DATABASE_TIMEZONE_PARAM = "timezone";
+
+export function databaseTimezone(u: URL): string | undefined {
+  const raw = u.searchParams.get(DATABASE_TIMEZONE_PARAM);
+  if (raw === null || raw === "") return undefined;
+  return raw.startsWith(" ") ? `+${raw.slice(1)}` : raw;
+}
+
 export function buildPoolConfig(databaseUrl: string) {
   const u = new URL(databaseUrl);
+  const timezone = databaseTimezone(u);
   return {
     host: u.hostname,
     port: Number(u.port || "3306"),
@@ -18,7 +27,7 @@ export function buildPoolConfig(databaseUrl: string) {
     connectionLimit: 25,
     acquireTimeout: 30_000,
     connectTimeout: 30_000,
-    timezone: "+08:00",
+    ...(timezone === undefined ? {} : { timezone }),
   };
 }
 

@@ -204,7 +204,7 @@ describe("VideoFrameInterpolationsService.findCurrent：恢复查询（IKHSFE）
       id: 400n,
       status: "queued",
       progress: 0,
-      gmt_create: new Date("2026-09-22T05:00:00.000Z"),
+      gmt_create: new Date("2026-09-22T13:00:00+08:00"),
       input: { ...VALID_BODY },
       ...overrides,
     };
@@ -262,7 +262,7 @@ describe("VideoFrameInterpolationsService.findCurrent：恢复查询（IKHSFE）
       job_id: "400",
       status: "failed",
       progress: 0,
-      created_at: "2026-09-22T05:00:00.000Z",
+      created_at: "2026-09-22T13:00:00+08:00",
     });
   });
 });

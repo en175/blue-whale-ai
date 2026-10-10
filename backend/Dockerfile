@@ -1,5 +1,6 @@
 
 FROM node:24-alpine
+RUN apk add --no-cache tzdata
 RUN corepack enable
 WORKDIR /app
 
@@ -8,6 +9,7 @@ COPY backend/package.json backend/
 COPY backend/tsconfig.json backend/
 COPY backend/patches backend/patches
 
+ENV TZ=Asia/Shanghai
 ENV npm_config_registry=https://registry.npmmirror.com
 ENV pnpm_config_registry=https://registry.npmmirror.com
 RUN pnpm install --frozen-lockfile --filter "@blue-whale/backend..."

@@ -1,3 +1,4 @@
+import { wallClockRfc3339 } from "@lib/core";
 import { Inject, Injectable } from "@nestjs/common";
 import {
   createSharedAssetRepo,
@@ -171,7 +172,7 @@ export class SharedAssetService {
       thumbnailUrl: row.thumbnail_url,
       snapshot: row.snapshot,
       status: row.status as "normal" | "invalid",
-      createdAt: row.gmt_create.toISOString(),
+      createdAt: wallClockRfc3339(row.gmt_create),
     };
   }
 }

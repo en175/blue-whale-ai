@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 import {
   type ConversationMentionType,
@@ -206,10 +207,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           const row = statusByMaterial.get(asset.material_id);
           if (!row) continue;
           asset.material_status = row.status;
-          asset.material_status_checked_at =
-            row.status_checked_at === null
-              ? null
-              : row.status_checked_at.toISOString();
+          asset.material_status_checked_at = wallClockRfc3339OrNull(row.status_checked_at);
         }
       }
 
@@ -418,7 +416,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           content_type: message.content_type,
           content: message.content,
           sequence_no: message.sequence_no,
-          created_at: message.gmt_create.toISOString(),
+          created_at: wallClockRfc3339(message.gmt_create),
           mentions: mentionsByMessage.get(message.id.toString()) ?? [],
         })),
         scene_cards: sceneCardRows.map((card) => ({

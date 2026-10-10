@@ -57,7 +57,7 @@ describe("ModelCapabilityAdminRepo.listAll", () => {
       capability_type: "image",
       enabled: true,
       sort_order: 1,
-      created_at: "2026-08-01T00:00:00.000Z",
+      created_at: "2026-08-01T08:00:00+08:00",
     });
     expect(rows[1].enabled).toBe(false);
     expect(rows[0].supported_sizes).toEqual([{ id: "1k", label: "1K" }]);

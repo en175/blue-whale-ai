@@ -1,4 +1,4 @@
-import { NewApiError } from "@lib/core";
+import { NewApiError, wallClockDay } from "@lib/core";
 import { Controller, Get, Query, Res, StreamableFile } from "@nestjs/common";
 import { ok } from "@lib/contracts";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
@@ -262,7 +262,7 @@ export class AccountController {
     const collected = await this.collectExportRows(scope, user, query);
     const buffer = await buildExportWorkbook(collected, fields);
 
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const stamp = wallClockDay(new Date()).replace(/-/g, "");
     const name = exportFileName(scope, stamp);
     res.setHeader(
       "Content-Type",

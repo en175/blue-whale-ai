@@ -1,5 +1,6 @@
 import { hostname, networkInterfaces } from "node:os";
 
+import { wallClockMillis } from "./wall-clock.js";
 import { redactLogBody, redactLogValue } from "./redact.js";
 import { getCurrentRequestContext, requestAddressFields } from "./trace.js";
 import { getDefaultTlsLogWriter, type TlsLogWriter } from "./tls-writer.js";
@@ -47,7 +48,7 @@ export interface CreateLoggerOptions {
 }
 
 export function toBlueWhaleTimestamp(epochMs: number): string {
-  return new Date(epochMs + 8 * 3_600_000).toISOString().replace("Z", "+08:00");
+  return wallClockMillis(new Date(epochMs));
 }
 
 function captureCallSite(): {
