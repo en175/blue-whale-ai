@@ -146,6 +146,8 @@
 
 ### 3.3 【新】`GET /api/account/credit-lots` — 积分明细 · 已获取（批次维度）
 
+> **本节的响应形状已作废，以 [`2026-10-09-账户积分页前端对接说明-v2.md`](./2026-10-09-账户积分页前端对接说明-v2.md) §3.3 为准。** 下方 `biz_type` / `biz_id` 先被 `product_name` 取代，现已被后端拼好的 `detail` 取代 —— 按本节实现会让「获取详情」列空白。
+
 **现状**：**没有出口**。批次数据完整躺在 `billing_credit_lots`（`server/blue-whale-billing/src/main/java/com/bluewhale/billing/.../entity/CreditLotEntity.java:22-56`），但用户面和运营面**都没有 `ListLots` RPC**。
 
 **为什么必须是批次维度**：原型 :385 口径③写死「『已获取』为批次维度，每行带积分生效 / 到期时间（落实 PRD 9.5 到期明细可查）」；PRD §9.5 也要求「用户侧可在积分记录中查看到期明细」。现有的 `ListTransactions` 是**流水**维度，且不含到期时间，补不出来。

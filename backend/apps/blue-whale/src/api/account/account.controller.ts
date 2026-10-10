@@ -28,6 +28,7 @@ import {
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import type { Response } from "express";
 import { consumeDetail } from "./consumption-detail.js";
+import { lotDetailText } from "./lot-detail.js";
 import {
   EXPORT_SCOPES,
   MAX_EXPORT_ROWS,
@@ -192,7 +193,12 @@ export class AccountController {
           remaining: item.remaining,
           created_at: item.createdAt,
           expires_at: item.expiresAt,
-          product_name: productNames.get(item.bizId) ?? null,
+          detail: lotDetailText({
+            source: item.source,
+            amount: item.amount,
+            remaining: item.remaining,
+            productName: productNames.get(item.bizId) ?? null,
+          }),
         })),
         total: page.total,
       });

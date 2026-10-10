@@ -351,7 +351,7 @@ function AcquiredTable({ query }: { query: { isPending: boolean; isError: boolea
             <tr key={row.lot_id}>
               <td>{formatBeijingDateTime(row.created_at)}</td>
               <td><span className={styles.tag}>{sourceLabel(row.source)}</span></td>
-              <td className={styles.mono}>{dash(row.biz_id)}</td>
+              <td>{row.detail}</td>
               <td>{formatBeijingDateTime(row.created_at)}</td>
               <td className={isExpireSoon(row.expires_at) ? styles.expireSoon : undefined}>
                 {row.expires_at ? formatBeijingDateTime(row.expires_at) : '永久有效'}
