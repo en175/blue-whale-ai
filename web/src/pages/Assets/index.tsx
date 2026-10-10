@@ -2,13 +2,12 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAssetReferences, type AssetRecord, type AssetType } from '@/api/assets';
+import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, fetchAssetReferences, type AssetRecord } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
-import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
+import { uploadAssetFile } from '@/utils/upload';
 import { isFileRejected } from '@/utils/fileSignature';
 import { toast } from 'sonner';
 import { isApiError } from '@/api/http';
-import { fileToAssetType } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import Skeleton from '@/components/Skeleton';
 import JobSourceModal, { type JobSourceTarget } from '@/components/JobSourceModal';
@@ -110,104 +109,50 @@ export default function Assets() {
     const list = Array.from(files);
     if (fileInputRef.current) fileInputRef.current.value = '';
 
-    if (isMaterialView) {
-      setUploading(true);
-      const errors: string[] = [];
-
-      for (const file of list) {
-        let assetType: 'Image' | 'Video' | 'Audio';
-        if (file.type.startsWith('image/')) assetType = 'Image';
-        else if (file.type.startsWith('video/')) assetType = 'Video';
-        else {
-          errors.push(`${file.name}：仅支持图片和视频`);
-          continue;
-        }
-        try {
-          const uploadResult = await uploadAssetFile(file);
-          const rawName = file.name;
-          const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
-          if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
-          if (activeFilter === 'liveness' && !materialDetailGroupId) {
-            errors.push(`${file.name}：请先进入分组再上传`);
-            continue;
-          }
-          await createMaterialAsset({
-            ...(activeFilter === 'liveness' && materialDetailGroupId
-              ? { GroupId: materialDetailGroupId }
-              : {}),
-            URL: uploadResult.url,
-            Name: finalName,
-            AssetType: assetType,
-            SourceAssetId: String(uploadResult.asset_id),
-          });
-        } catch (err) {
-          if (isFileRejected(err)) errors.push(err.message);
-          else if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
-        }
-      }
-
-      if (errors.length) toast.error(errors.join('；'));
-      setUploading(false);
-      setMaterialRefreshTick((t) => t + 1);
-      return;
-    }
-
     setUploading(true);
     const errors: string[] = [];
-    let assetListChanged = false;
 
     for (const file of list) {
-      const type: AssetType = fileToAssetType(file) as AssetType;
-
-      if (!type) {
-        errors.push(`不支持的文件类型：${file.name}`);
-        continue;
-      }
-      if (activeFilter !== 'all' && activeFilter !== type) {
-        const ext = file.name.split('.').pop()?.toLowerCase() || '';
-        errors.push(`${file.name}：当前「${filterTabs.find((t) => t.key === activeFilter)?.label}」tab 不支持 .${ext || '?'} 格式`);
-        continue;
-      }
-      const limitMb = Math.round(UPLOAD_SIZE_LIMIT[type] / 1024 / 1024);
-      if (file.size > UPLOAD_SIZE_LIMIT[type]) {
-        errors.push(`${file.name} 超过 ${limitMb}MB 上限`);
+      let assetType: 'Image' | 'Video' | 'Audio';
+      if (file.type.startsWith('image/')) assetType = 'Image';
+      else if (file.type.startsWith('video/')) assetType = 'Video';
+      else {
+        errors.push(`${file.name}：仅支持图片和视频`);
         continue;
       }
       try {
-        const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
-        await putToPresignedUrl(presign, file);
-        const meta = await probeMediaMeta(file, type).catch(() => ({}));
-        await completeUpload({
-          type,
-          mime: file.type,
-          size: file.size,
-          name: file.name,
-          storage_key: presign.storage_key,
-          ...meta,
+        const uploadResult = await uploadAssetFile(file);
+        const rawName = file.name;
+        const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
+        if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
+        if (activeFilter === 'liveness' && !materialDetailGroupId) {
+          errors.push(`${file.name}：请先进入分组再上传`);
+          continue;
+        }
+        await createMaterialAsset({
+          ...(activeFilter === 'liveness' && materialDetailGroupId
+            ? { GroupId: materialDetailGroupId }
+            : {}),
+          URL: uploadResult.url,
+          Name: finalName,
+          AssetType: assetType,
+          SourceAssetId: String(uploadResult.asset_id),
         });
-        assetListChanged = true;
       } catch (err) {
-        if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
+        if (isFileRejected(err)) errors.push(err.message);
+        else if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
       }
     }
 
-    if (assetListChanged) {
-      await queryClient.invalidateQueries({ queryKey: assetKeys.all });
-      setLayoutVersion((version) => version + 1);
-    }
     if (errors.length) toast.error(errors.join('；'));
     setUploading(false);
+    setMaterialRefreshTick((t) => t + 1);
   };
 
   const assetItems = useMemo<AssetGridItem[]>(
     () => assets.map((asset) => ({ kind: 'asset' as const, asset })),
     [assets],
   );
-  const gridItems = useMemo<AssetGridItem[]>(
-    () => activeFilter === 'all' ? assetItems : [{ kind: 'upload' }, ...assetItems],
-    [activeFilter, assetItems],
-  );
-  const totalGridItems = assetTotal + (activeFilter === 'all' ? 0 : 1);
 
   useEffect(() => {
     if (!deleteTarget) return undefined;
@@ -276,13 +221,7 @@ export default function Assets() {
             ref={fileInputRef}
             type="file"
             multiple
-            accept={(() => {
-              if (isMaterialView) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
-              if (activeFilter === 'image') return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp';
-              if (activeFilter === 'video') return '.mp4,.webm,.mov,.avi,.mkv';
-              if (activeFilter === 'audio') return '.mp3,.wav,.ogg,.m4a,.aac,.flac';
-              return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.mp4,.webm,.mov,.avi,.mkv,.mp3,.wav,.ogg,.m4a,.aac,.flac';
-            })()}
+            accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm"
             className={styles.hiddenInput}
             onChange={handleFileChange}
           />
@@ -303,21 +242,20 @@ export default function Assets() {
                     <Skeleton key={index} className={styles.cardSkeleton} />
                   ))}
                 </div>}
-              {!loading && gridItems.length > 0 && (
+              {!loading && assetItems.length > 0 && (
                 <AssetMasonry
                   key={`${activeFilter}:${layoutVersion}`}
-                  items={gridItems}
-                  totalItems={hasMore ? totalGridItems : gridItems.length}
+                  items={assetItems}
+                  totalItems={hasMore ? assetTotal : assetItems.length}
                   onLoadMore={loadNextPage}
                   scrollContainerRef={pageRef}
-                  onUpload={handleUpload}
                   onPreview={setPreviewTarget}
                   onDelete={setDeleteTarget}
                   gutter={4}
                   libraryMode
                 />
               )}
-              {!loading && gridItems.length === 0 && (
+              {!loading && assetItems.length === 0 && (
                 <div className={styles.empty}>暂无素材</div>
               )}
               {!loading && loadingMore && (
