@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, type RefObject } from 'react';
 import { useInfiniteLoader, useMasonry, usePositioner, useResizeObserver, type RenderComponentProps } from 'masonic';
-import { Trash2, RotateCw, AlertCircle, Plus, Check, ZoomIn } from 'lucide-react';
+import { Trash2, RotateCw, AlertCircle, Check, ZoomIn } from 'lucide-react';
 import type { AssetRecord } from '@/api/assets';
 import Skeleton from '@/components/Skeleton';
 import AudioPlayer, { type AudioPlayerHandle } from '../AudioPlayer';
@@ -212,8 +212,7 @@ function VideoThumb({
 }
 
 export type AssetGridItem =
-  | { kind: 'asset'; asset: AssetRecord }
-  | { kind: 'upload' };
+  | { kind: 'asset'; asset: AssetRecord };
 
 const EMPTY_ITEMS: AssetGridItem[] = [];
 
@@ -224,7 +223,6 @@ export interface AssetMasonryProps {
   scrollContainerRef: { current: HTMLDivElement | null };
   onPreview?: (asset: AssetRecord) => void;
   onDelete?: (asset: AssetRecord) => void;
-  onUpload?: () => void;
   selectedIds?: ReadonlySet<string>;
   onToggleSelect?: (asset: AssetRecord) => void;
   columnCount?: number;
@@ -349,7 +347,6 @@ const AssetMasonry = memo(function AssetMasonry({
   scrollContainerRef,
   onPreview,
   onDelete,
-  onUpload,
   selectedIds,
   onToggleSelect,
   columnCount = 5,
@@ -442,37 +439,16 @@ const AssetMasonry = memo(function AssetMasonry({
     threshold: 16,
     totalItems,
   });
-  const renderCard = useCallback(({ data }: RenderComponentProps<AssetGridItem>) => {
-    if (data.kind === 'upload') {
-      if (!onUpload) return null;
-      return (
-        <div
-          className={`${styles.card} ${styles.uploadCard} ${libraryMode ? styles.libraryUploadCard : ''}`}
-          onClick={onUpload}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(event) => { if (event.key === 'Enter') onUpload(); }}
-          aria-label="上传素材"
-        >
-          <div className={`${styles.thumbnail} ${styles.uploadThumb}`}>
-            <Plus size={32} strokeWidth={1.5} />
-            <span>上传素材</span>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <AssetCard
-        asset={data.asset}
-        onPreview={onPreview}
-        onDelete={onDelete}
-        selected={!!onToggleSelect && !!selectedIds?.has(String(data.asset.id))}
-        onToggleSelect={onToggleSelect}
-        libraryMode={libraryMode}
-      />
-    );
-  }, [libraryMode, onDelete, onPreview, onUpload, onToggleSelect, selectedIds]);
+  const renderCard = useCallback(({ data }: RenderComponentProps<AssetGridItem>) => (
+    <AssetCard
+      asset={data.asset}
+      onPreview={onPreview}
+      onDelete={onDelete}
+      selected={!!onToggleSelect && !!selectedIds?.has(String(data.asset.id))}
+      onToggleSelect={onToggleSelect}
+      libraryMode={libraryMode}
+    />
+  ), [libraryMode, onDelete, onPreview, onToggleSelect, selectedIds]);
 
   const measured = viewport.width > 1 && viewport.height > 1;
 
@@ -484,7 +460,7 @@ const AssetMasonry = memo(function AssetMasonry({
     onRender,
     className: `${styles.masonry} ${libraryMode ? styles.libraryMasonry : ''}`,
     containerRef: gridRef,
-    itemKey: (item) => (item.kind === 'upload' ? 'upload' : String(item.asset.id)),
+    itemKey: (item) => String(item.asset.id),
     itemHeightEstimate: 240,
     height: viewport.height,
     scrollTop: viewport.scrollTop,
