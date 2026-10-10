@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 import { IMAGE_ERASE_MASK_ASSET_SOURCE } from "@lib/contracts";
 
@@ -254,7 +255,7 @@ async function resolveMaterialStatuses(
     for (const row of statusRows) {
       byMaterialId.set(row.material_id, {
         status: row.status,
-        checkedAt: row.status_checked_at?.toISOString() ?? null,
+        checkedAt: wallClockRfc3339OrNull(row.status_checked_at) ?? null,
       });
     }
   }
@@ -365,7 +366,7 @@ function toAssetView(
     height: a.height,
     duration: assetDurationSeconds(a.duration_ms),
     source: a.source ?? null,
-    created_at: a.gmt_create?.toISOString() ?? null,
+    created_at: wallClockRfc3339OrNull(a.gmt_create) ?? null,
     size: a.size == null ? null : Number(a.size),
     generation_job_id:
       a.generation_job_id == null ? null : a.generation_job_id.toString(),

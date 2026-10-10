@@ -125,3 +125,31 @@ T+10m  MATERIAL_STATUS_POLL_MAX_AGE_MINUTES 回原值
 
 - [ADR-0074](0074-frontend-backend-separation-nestjs-product-api.md)（NestJS 产品 API）
 - `docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md` §10 / §13.3（跨进程契约，已同步修订）
+
+## 修正二（2026-10-10，IKKL9Z）：接口响应口径也改成北京墙钟
+
+**决定**：HTTP 响应体里的时间串从 UTC（`Z` 结尾）改成**北京时间墙钟字面量**（`+08:00`），并顺手取消 TS 侧所有硬编码偏移。本节推翻「后果」节第二条（「接口响应仍是 UTC……改动面 20+ 处，本次不动」）。
+
+**为什么推翻**：那次不动的前提是「页面显示本身是正常的，前端按浏览器时区渲染」。但仓里已经有一批消费方**按字面量渲染**——`web/src/pages/AccountCredits/format.ts` 的 `formatBeijingDateTime`、`web/src/admin/discountRules.ts` 的 `shortTime`/`shortDateTime`、`Promotions` / `MemberDiscounts` / `SharedAssetsModal` 各自的 `slice`。它们拿到 `Z` 就整体早 8 小时；而同一页里来自 billing 的字段又是 `+08:00`（修正一保住的 wire 格式），于是**同一页两种口径**。导出更直接：xlsx 单元格没有浏览器替它换算。
+
+**改成什么**（与修正一的 Java 做法同构：时区只在部署配置里出现一次，源码零时区）：
+
+| 机制 | 位置 | 管什么 |
+| --- | --- | --- |
+| `wallClock*` 一组序列化函数 | `backend/libs/core/wall-clock.ts` | 唯一那处格式化：读**进程本地时区**（`getFullYear()` / `getTimezoneOffset()`），产出 `...+08:00` |
+| 容器 `TZ=Asia/Shanghai` | `backend/Dockerfile`（alpine 另装 `tzdata`） | 进程时区。此前 backend 容器**没有任何 TZ 注入**，跑在 UTC |
+| 会话时区走连接串 | `DATABASE_URL` 的 `timezone` 查询参数 → `backend/libs/shared/persistence/db.ts` | 库会话时区。与 Java 的 `connectionTimeZone=…` 同构；代码里不再写 `"+08:00"` |
+| prisma 适配器补丁 | `backend/patches/@prisma__adapter-mariadb@7.9.0.patch` | 读侧按进程本地时区解释 `DATETIME` 字面量、写侧用本地分量生成；`+08:00` 与 `+ 8 * 3600e3` 双双移除 |
+| 装配期守卫 | `backend/libs/shared/persistence/clock-agreement.ts`，`main.ts` 启动时调用 | 比「进程偏移」与「库会话偏移」（`TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())`），不一致**拒绝启动** |
+
+**为什么会话时区不能从进程推**：守卫比的正是这两个值。若会话时区也从进程偏移派生，两者恒等，守卫等于没做。所以会话时区必须来自**另一个部署输入**（连接串），与 Java 侧一致。
+
+**新引入的部署约束**：每个环境的 `DATABASE_URL` 都必须带 `timezone`（如 `?timezone=%2B08:00`），容器必须有 `TZ`。缺任一个 → 服务起不来并打出是哪一侧不对。这是 Java 侧早就有的要求，Node 侧补上而已。**本地开发同样适用**（本地 `bw-mysql` 全局时区是 UTC）。
+
+**保留精度的例外**：`RechargeOrderView.paidPendingAt` 用 `wallClockMillis`（带毫秒）—— 它是有效期起算时刻，要参与日期运算；其余展示字段用秒精度 `wallClockRfc3339`，与 billing 的 wire 形态对齐。
+
+**仍未改的**：wire 上的「时刻」类字段保持 `Z` —— TOS 签名 URL 的 `expires_at`（`assets/agent-asset-resolver.ts`、`project-assets.ts`）与发给 billing 的 `expiresAt`（`billing-admin-client.ts`）。它们参与比较、没有人读字面量，改成墙钟没有收益。
+
+**残余（与修正一同款）**：守卫断言的是「进程的钟 == 库的钟」，不是「== `+08:00`」。若容器 `TZ` 与连接串参数**同时**缺省、且库全局时区也是 UTC，三者自洽、守卫不拦。防线仍是部署清单。
+
+**测试侧**：`tests/vitest.setup.ts` 把测试进程的 `TZ` 钉成 `Asia/Shanghai`，让断言确定；`backend/libs/shared/persistence/tz-caliber.test.ts` 的两条机制守卫改为断言「会话时区来自连接串」与「补丁按本地时区」，并在 `backend/libs/core/wall-clock.test.ts` 覆盖「同一瞬时换个进程时区就换个墙钟」。

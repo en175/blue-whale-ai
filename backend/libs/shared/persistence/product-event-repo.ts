@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
@@ -61,7 +62,7 @@ function toView(row: ProjectEventRow): ProductEventView {
     aggregate_version: row.aggregate_version,
     correlation_id: row.correlation_id,
     causation_id: row.causation_id,
-    occurred_at: row.occurred_at.toISOString(),
+    occurred_at: wallClockRfc3339(row.occurred_at),
     payload: row.payload,
   };
 }

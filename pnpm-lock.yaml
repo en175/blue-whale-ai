@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@prisma/adapter-mariadb@7.9.0': 2ae7e0140c547d2d13d0a7997f98c8e2a434ba337695ac189de825ac38bda1e9
+  '@prisma/adapter-mariadb@7.9.0': 9411a8976fcba9c497537cedec8144b2e47fa02f20fd01c2072f9532be4c072e
 
 importers:
 
@@ -58,7 +58,7 @@ importers:
         version: 11.1.1(@grpc/grpc-js@1.14.4)(@grpc/proto-loader@0.8.1)(@nestjs/common@11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@11.1.29)(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.4(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@6.0.3))(typescript@6.0.3))(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@prisma/adapter-mariadb':
         specifier: 7.9.0
-        version: 7.9.0(patch_hash=2ae7e0140c547d2d13d0a7997f98c8e2a434ba337695ac189de825ac38bda1e9)
+        version: 7.9.0(patch_hash=9411a8976fcba9c497537cedec8144b2e47fa02f20fd01c2072f9532be4c072e)
       '@prisma/client':
         specifier: ^7.9.0
         version: 7.9.0(prisma@7.9.0(@types/react-dom@19.2.4(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@6.0.3))(typescript@6.0.3)
@@ -4079,7 +4079,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
-  '@prisma/adapter-mariadb@7.9.0(patch_hash=2ae7e0140c547d2d13d0a7997f98c8e2a434ba337695ac189de825ac38bda1e9)':
+  '@prisma/adapter-mariadb@7.9.0(patch_hash=9411a8976fcba9c497537cedec8144b2e47fa02f20fd01c2072f9532be4c072e)':
     dependencies:
       '@prisma/driver-adapter-utils': 7.9.0
       mariadb: 3.4.5

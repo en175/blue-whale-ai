@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 
 
@@ -59,9 +60,9 @@ function toView(row: {
     name: row.name,
     thumb: row.thumb,
     previews: [],
-    created_at: row.gmt_create.toISOString(),
-    last_opened_at: row.last_opened_at?.toISOString() ?? null,
-    pinned_at: row.pinned_at?.toISOString() ?? null,
+    created_at: wallClockRfc3339(row.gmt_create),
+    last_opened_at: wallClockRfc3339OrNull(row.last_opened_at) ?? null,
+    pinned_at: wallClockRfc3339OrNull(row.pinned_at) ?? null,
   };
 }
 

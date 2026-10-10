@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { invalidateModelCapabilityCache } from "./model-capability-cache.js";
@@ -118,8 +119,8 @@ function toRow(row: any): AdminModelCapabilityRow {
     enabled: row.enabled,
     sort_order: row.sort_order,
     is_default: row.is_default === true,
-    created_at: new Date(row.gmt_create).toISOString(),
-    updated_at: new Date(row.gmt_modified).toISOString(),
+    created_at: wallClockRfc3339(new Date(row.gmt_create)),
+    updated_at: wallClockRfc3339(new Date(row.gmt_modified)),
   };
 }
 

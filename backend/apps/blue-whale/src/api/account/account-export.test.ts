@@ -26,7 +26,7 @@ function orderRow(over: Partial<ExportOrderRow> = {}): ExportOrderRow {
     credits: 600,
     bonus_credits: 0,
     status: "paid",
-    created_at: "2026-09-29T14:32:00+08:00",
+    created_at: "2026-09-29 14:32",
     paid_at: "2026-09-29T14:32:41+08:00",
     ...over,
   };
@@ -88,8 +88,8 @@ describe("buildExportWorkbook", () => {
         source: "purchased",
         amount: 3000,
         remaining: 1200,
-        created_at: "2024-12-01T09:12:00+08:00",
-        expires_at: "2026-12-01T00:00:00+08:00",
+        created_at: "2024-12-01 09:12",
+        expires_at: "2026-12-01 00:00",
         product_name: "自定义充值 · 3,000 积分",
       },
       {
@@ -114,11 +114,11 @@ describe("buildExportWorkbook", () => {
       "积分到期时间",
       "积分值",
     ]);
-    expect(sheet.getRow(2).getCell(1).value).toBe("2024-12-01T09:12:00+08:00");
+    expect(sheet.getRow(2).getCell(1).value).toBe("2024-12-01 09:12");
     expect(sheet.getRow(2).getCell(2).value).toBe("充值到账");
     expect(sheet.getRow(2).getCell(3).value).toBe("自定义充值 · 3,000 积分 · 剩余 1200");
-    expect(sheet.getRow(2).getCell(4).value).toBe("2024-12-01T09:12:00+08:00");
-    expect(sheet.getRow(2).getCell(5).value).toBe("2026-12-01T00:00:00+08:00");
+    expect(sheet.getRow(2).getCell(4).value).toBe("2024-12-01 09:12");
+    expect(sheet.getRow(2).getCell(5).value).toBe("2026-12-01 00:00");
     expect(sheet.getRow(2).getCell(6).value).toBe(3000);
     expect(sheet.getRow(3).getCell(3).value).toBe("赠送 100 积分");
     expect(sheet.getRow(3).getCell(5).value).toBe("永久有效");
@@ -141,7 +141,7 @@ describe("buildExportWorkbook", () => {
         task_type: null,
         model_label: null,
         detail: "2024-12-01 充值到账批次",
-        created_at: "2026-09-29T09:00:00+08:00",
+        created_at: "2026-09-29 09:00",
       },
     ];
 

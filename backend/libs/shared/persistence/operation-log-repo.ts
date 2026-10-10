@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 
 
@@ -51,7 +52,7 @@ function toView(row: any): OperationLogView {
     operator: row.operator,
     operatorId: row.operator_id != null ? row.operator_id.toString() : null,
     ipAddress: row.ip_address,
-    createdAt: new Date(row.gmt_create).toISOString(),
+    createdAt: wallClockRfc3339(new Date(row.gmt_create)),
   };
 }
 

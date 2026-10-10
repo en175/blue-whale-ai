@@ -673,7 +673,7 @@ describe("AccountController.export（导出 xlsx）", () => {
     const file = await controller.export(USER, { scope: "orders" }, fakeRes());
     const sheet = await readBackWorkbook(await toBuffer(file));
 
-    expect(sheet.getRow(2).getCell(1).value).toBe("2026-09-29T14:32:00+08:00");
+    expect(sheet.getRow(2).getCell(1).value).toBe("2026-09-29 14:32");
     expect(sheet.getRow(2).getCell(2).value).toBe("自定义充值 · 600 积分");
     expect(sheet.getRow(2).getCell(3).value).toBe(40);
   });
@@ -702,7 +702,7 @@ describe("AccountController.export（导出 xlsx）", () => {
     const sheet = await readBackWorkbook(await toBuffer(file));
 
     expect(sheet.getRow(2).getCell(3).value).toBe("自定义充值 · 3,000 积分 · 剩余 1200");
-    expect(sheet.getRow(2).getCell(4).value).toBe("2024-12-01T09:12:00+08:00");
+    expect(sheet.getRow(2).getCell(4).value).toBe("2024-12-01 09:12");
     expect(sheet.getRow(2).getCell(5).value).toBe("永久有效");
     expect(sheet.getRow(2).getCell(6).value).toBe(3000);
   });

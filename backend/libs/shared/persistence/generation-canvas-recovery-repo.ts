@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import {
   CANVAS_RECOVERY_PROTOCOL_VERSION,
   PRIMARY_OUTPUT_KEY,
@@ -298,7 +299,7 @@ function jobDetailView(row: {
     progress: row.progress,
     output_asset_ids: row.output_asset_ids ?? [],
     stored_error: row.error ?? null,
-    created_at: row.gmt_create.toISOString(),
+    created_at: wallClockRfc3339(row.gmt_create),
   };
 }
 

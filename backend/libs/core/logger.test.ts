@@ -275,14 +275,16 @@ describe("toBlueWhaleTimestamp —— 与库同一个墙上时钟（IKHJ0Q）", 
     expect(toBlueWhaleTimestamp(1756800000000)).toBe("2025-09-02T16:00:00.000+08:00");
   });
 
-  it("不随进程时区变化", () => {
+  it("跟随进程时区：时区由部署给，不再在代码里钉偏移", () => {
     const original = process.env.TZ;
     try {
-      for (const tz of ["UTC", "America/New_York", "Asia/Shanghai"]) {
+      const cases: Array<[string, string]> = [
+        ["UTC", "2025-09-02T08:00:00.000+00:00"],
+        ["Asia/Shanghai", "2025-09-02T16:00:00.000+08:00"],
+      ];
+      for (const [tz, expected] of cases) {
         process.env.TZ = tz;
-        expect(toBlueWhaleTimestamp(1756800000000)).toBe(
-          "2025-09-02T16:00:00.000+08:00",
-        );
+        expect(toBlueWhaleTimestamp(1756800000000)).toBe(expected);
       }
     } finally {
       if (original === undefined) delete process.env.TZ;

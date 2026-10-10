@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 
 import {
@@ -106,7 +107,7 @@ function videoStageProjection(
       row.source_sample_job_id != null ? row.source_sample_job_id.toString() : null,
     final_job_id: finalJobId != null ? String(finalJobId) : null,
 
-    finalize_deadline_at: deadlineMs != null ? new Date(deadlineMs).toISOString() : null,
+    finalize_deadline_at: deadlineMs != null ? wallClockRfc3339(new Date(deadlineMs)) : null,
     charge_state: extraString(extras, "charge_state"),
     actual_credits: extraNumber(extras, "actual_credits"),
   };
@@ -376,7 +377,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
           ...(r.type === "audio_mix"
             ? { canvas_card_state: extraString(extras, "canvas_card_state") ?? "pending" }
             : {}),
-          created_at: r.gmt_create.toISOString(),
+          created_at: wallClockRfc3339(r.gmt_create),
           output_assets: parseAssetIds(r.output_asset_ids)
             .map((id) => assetMap.get(id.toString()))
             .filter((a): a is AssetRow => a !== undefined)
@@ -442,8 +443,8 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
 
             model_label: modelId === null ? null : (labelByModel.get(modelId) ?? null),
             retry_count: r.retry_count,
-            created_at: r.gmt_create.toISOString(),
-            updated_at: r.gmt_modified.toISOString(),
+            created_at: wallClockRfc3339(r.gmt_create),
+            updated_at: wallClockRfc3339(r.gmt_modified),
             stored_error:
               r.error && typeof r.error === "object" && !Array.isArray(r.error)
                 ? (r.error as Record<string, unknown>)

@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 
 import { createLogger } from "@lib/core/logging";
@@ -123,8 +124,8 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
           totalSpend: stat?.totalConsumed ?? 0,
           role: roleRank(codesByUser.get(r.id.toString()) ?? []),
           status: r.status === "NORMAL" ? "active" : "disabled",
-          createdAt: r.gmt_create.toISOString(),
-          updatedAt: r.gmt_modified.toISOString(),
+          createdAt: wallClockRfc3339(r.gmt_create),
+          updatedAt: wallClockRfc3339(r.gmt_modified),
         };
       });
 

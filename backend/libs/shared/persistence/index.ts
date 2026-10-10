@@ -1,4 +1,5 @@
 export { getPrismaClient, type PrismaClient } from "./db.js";
+export { assertClockAgreement } from "./clock-agreement.js";
 export { createAuthRepo, type AuthRepo } from "./auth-repo.js";
 export {
   createMaterialAssetRepo,

@@ -329,8 +329,8 @@ describe("ProjectRepo GenerationInbox isolation", () => {
           name: "C",
           thumb: null,
           previews: ["c1.png"],
-          created_at: "2026-08-23T00:00:00.000Z",
-          last_opened_at: "2026-08-23T10:00:00.000Z",
+          created_at: "2026-08-23T08:00:00+08:00",
+          last_opened_at: "2026-08-23T18:00:00+08:00",
           pinned_at: null,
         },
       ],
@@ -607,9 +607,9 @@ describe("ProjectRepo last_opened_at / pinned_at (IKH1YI)", () => {
       name: "A",
       thumb: null,
       previews: [],
-      created_at: "2026-08-25T00:00:00.000Z",
+      created_at: "2026-08-25T08:00:00+08:00",
       last_opened_at: null,
-      pinned_at: "2026-09-19T10:00:00.000Z",
+      pinned_at: "2026-09-19T18:00:00+08:00",
     });
   });
 
@@ -683,12 +683,12 @@ describe("ProjectRepo last_opened_at / pinned_at (IKH1YI)", () => {
     const views = await createProjectRepo(prisma).listByOwner("100");
 
     expect(views[0]).toMatchObject({
-      last_opened_at: "2026-09-01T08:30:00.000Z",
+      last_opened_at: "2026-09-01T16:30:00+08:00",
       pinned_at: null,
     });
     expect(views[1]).toMatchObject({
       last_opened_at: null,
-      pinned_at: "2026-09-02T09:00:00.000Z",
+      pinned_at: "2026-09-02T17:00:00+08:00",
     });
   });
 });

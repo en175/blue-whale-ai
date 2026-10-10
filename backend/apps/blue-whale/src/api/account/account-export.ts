@@ -1,3 +1,4 @@
+import { wallClockHumanFromIso } from "@lib/core";
 import ExcelJS from "exceljs";
 import {
   USER_ORDER_STATUS_LABEL,
@@ -37,7 +38,12 @@ const ORDERS: ExportSpec<ExportOrderRow> = {
   sheetName: "订单记录",
   filePrefix: "订单记录",
   columns: [
-    { key: "created_at", header: "下单时间", value: (r) => r.created_at, width: 22 },
+    {
+      key: "created_at",
+      header: "下单时间",
+      value: (r) => wallClockHumanFromIso(r.created_at),
+      width: 22,
+    },
     { key: "product_name", header: "商品名称", value: (r) => r.product_name, width: 28 },
     { key: "amount_yuan", header: "支付金额", value: (r) => r.amount_fen / 100, width: 14 },
     {
@@ -73,7 +79,12 @@ const GAIN: ExportSpec<ExportLotRow> = {
   sheetName: "已获取",
   filePrefix: "积分明细-已获取",
   columns: [
-    { key: "created_at", header: "获取时间", value: (r) => r.created_at, width: 22 },
+    {
+      key: "created_at",
+      header: "获取时间",
+      value: (r) => wallClockHumanFromIso(r.created_at),
+      width: 22,
+    },
     {
       key: "source",
       header: "获取来源",
@@ -81,11 +92,16 @@ const GAIN: ExportSpec<ExportLotRow> = {
       width: 14,
     },
     { key: "detail", header: "获取详情", value: lotDetail, width: 40 },
-    { key: "activated_at", header: "积分生效时间", value: (r) => r.created_at, width: 22 },
+    {
+      key: "activated_at",
+      header: "积分生效时间",
+      value: (r) => wallClockHumanFromIso(r.created_at),
+      width: 22,
+    },
     {
       key: "expires_at",
       header: "积分到期时间",
-      value: (r) => (r.expires_at === "" ? "永久有效" : r.expires_at),
+      value: (r) => (r.expires_at === "" ? "永久有效" : wallClockHumanFromIso(r.expires_at)),
       width: 22,
     },
     { key: "amount", header: "积分值", value: (r) => r.amount, width: 12 },
@@ -105,7 +121,12 @@ const CONSUME: ExportSpec<ExportConsumeRow> = {
   sheetName: "已消耗",
   filePrefix: "积分明细-已消耗",
   columns: [
-    { key: "created_at", header: "消耗时间", value: (r) => r.created_at, width: 22 },
+    {
+      key: "created_at",
+      header: "消耗时间",
+      value: (r) => wallClockHumanFromIso(r.created_at),
+      width: 22,
+    },
     {
       key: "task_type",
       header: "任务类型",

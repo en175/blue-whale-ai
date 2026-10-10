@@ -1,6 +1,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createGrpcTransport } from "@connectrpc/connect-node";
+import { wallClockRfc3339 } from "@lib/core";
 import { TRACE_ID_HEADER, getCurrentTraceId } from "@lib/core/logging";
 import {
   AdminConsumedCreditsRequestSchema,
@@ -318,8 +319,7 @@ export async function fetchAdminUserStats(
 }
 
 function rfc3339(instant: Date): string {
-  const beijing = new Date(instant.getTime() + 8 * 60 * 60 * 1000);
-  return `${beijing.toISOString().slice(0, 19)}+08:00`;
+  return wallClockRfc3339(instant);
 }
 
 

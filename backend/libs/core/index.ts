@@ -119,3 +119,13 @@ export {
 } from "./trace.js";
 
 export { extractTextNodeText } from "./text-node-content.js";
+
+export {
+  wallClockOffset,
+  wallClockRfc3339,
+  wallClockRfc3339OrNull,
+  wallClockDay,
+  wallClockHuman,
+  wallClockHumanFromIso,
+  wallClockMillis,
+} from "./wall-clock.js";

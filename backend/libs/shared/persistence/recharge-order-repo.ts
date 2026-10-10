@@ -1,3 +1,4 @@
+import { wallClockMillis, wallClockRfc3339 } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 
 
@@ -154,15 +155,15 @@ function toView(row: any): RechargeOrderView {
     productType: row.product_type,
     productName: row.product_name,
     status,
-    paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
+    paidAt: row.paid_at ? wallClockRfc3339(new Date(row.paid_at)) : null,
     notifyCount: row.notify_count,
-    createdAt: new Date(row.gmt_create).toISOString(),
+    createdAt: wallClockRfc3339(new Date(row.gmt_create)),
     creditsValidMonths:
       row.credits_valid_months === null || row.credits_valid_months === undefined
         ? null
         : Number(row.credits_valid_months),
     paidPendingAt: row.paid_pending_at
-      ? new Date(row.paid_pending_at).toISOString()
+      ? wallClockMillis(new Date(row.paid_pending_at))
       : null,
   };
 }

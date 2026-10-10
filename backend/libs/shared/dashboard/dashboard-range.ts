@@ -1,6 +1,5 @@
+import { wallClockDay } from "@lib/core";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
-
-const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -16,7 +15,7 @@ export interface DashboardRange {
 }
 
 export function beijingDayOf(instant: Date): string {
-  return new Date(instant.getTime() + BEIJING_OFFSET_MS).toISOString().slice(0, 10);
+  return wallClockDay(instant);
 }
 
 function beijingDayStart(day: string): Date | null {
