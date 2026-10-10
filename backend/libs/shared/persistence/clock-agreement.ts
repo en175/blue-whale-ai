@@ -3,9 +3,17 @@ import type { PrismaClient } from "@prisma/client";
 const MAX_SKEW_SECONDS = 60;
 
 export async function assertClockAgreement(prisma: PrismaClient): Promise<void> {
-  const rows = await prisma.$queryRaw<Array<{ skew: bigint | number }>>`
-    SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) AS skew
-  `;
+  let rows: Array<{ skew: bigint | number }>;
+  try {
+    rows = await prisma.$queryRaw<Array<{ skew: bigint | number }>>`
+      SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) AS skew
+    `;
+  } catch (error) {
+    throw new Error(
+      `数据库不可达，无法校验时钟口径：${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   const databaseSkew = Number(rows[0]?.skew ?? 0);
   const processSkew = -new Date().getTimezoneOffset() * 60;
   if (Math.abs(databaseSkew - processSkew) <= MAX_SKEW_SECONDS) return;

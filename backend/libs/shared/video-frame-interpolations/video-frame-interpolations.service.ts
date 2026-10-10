@@ -1,3 +1,4 @@
+import { wallClockRfc3339 } from "@lib/core";
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
@@ -166,7 +167,7 @@ export class VideoFrameInterpolationsService {
       job_id: job.id.toString(),
       status: job.status,
       progress: job.progress,
-      created_at: job.gmt_create.toISOString(),
+      created_at: wallClockRfc3339(job.gmt_create),
     });
   }
 }

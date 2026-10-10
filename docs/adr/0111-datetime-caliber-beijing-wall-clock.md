@@ -148,10 +148,12 @@ T+10m  MATERIAL_STATUS_POLL_MAX_AGE_MINUTES 回原值
 
 **新引入的部署约束**：每个环境的 `DATABASE_URL` 都必须带 `timezone`（如 `?timezone=%2B08:00`），容器必须有 `TZ`。缺任一个 → 服务起不来并打出是哪一侧不对。这是 Java 侧早就有的要求，Node 侧补上而已。**本地开发同样适用**（本地 `bw-mysql` 全局时区是 UTC）。
 
-**保留精度的例外**：`RechargeOrderView.paidPendingAt` 用 `wallClockMillis`（带毫秒）—— 它是有效期起算时刻，要参与日期运算；其余展示字段用秒精度 `wallClockRfc3339`，与 billing 的 wire 形态对齐。
+**保留精度的例外**：`RechargeOrderView.paidPendingAt` 用 `wallClockMillis`（带毫秒）—— 它是有效期起算时刻，会被 `Date.parse` 回读再参与运算，**回程无损**优先于「形态统一」。（列本身是 `@db.DateTime(0)`，生产值不会有亚秒；这里的毫秒只在回环路径上有意义。其余展示字段一律秒精度 `wallClockRfc3339`，与 billing 的 wire 形态对齐。）
+
+**源码里仍有一处 `+08:00` 字面量，且是有意的**：`backend/libs/shared/dashboard/dashboard-range.ts:25` 的 `new Date(`${y}-${mo}-${d}T00:00:00+08:00`)` —— 它是**查询区间的边界时刻**，与上面 prisma 补丁同一类：边界/存储的语义必须自洽，不能跟着进程时区漂。上面那句「源码零时区」指的是**展示层**，边界与存储这两处是刻意的例外。
 
 **仍未改的**：wire 上的「时刻」类字段保持 `Z` —— TOS 签名 URL 的 `expires_at`（`assets/agent-asset-resolver.ts`、`project-assets.ts`）与发给 billing 的 `expiresAt`（`billing-admin-client.ts`）。它们参与比较、没有人读字面量，改成墙钟没有收益。
 
 **残余（与修正一同款）**：守卫断言的是「进程的钟 == 库的钟」，不是「== `+08:00`」。若容器 `TZ` 与连接串参数**同时**缺省、且库全局时区也是 UTC，三者自洽、守卫不拦。防线仍是部署清单。
 
-**测试侧**：`tests/vitest.setup.ts` 把测试进程的 `TZ` 钉成 `Asia/Shanghai`，让断言确定；`backend/libs/shared/persistence/tz-caliber.test.ts` 的两条机制守卫改为断言「会话时区来自连接串」与「补丁按本地时区」，并在 `backend/libs/core/wall-clock.test.ts` 覆盖「同一瞬时换个进程时区就换个墙钟」。
+**测试侧**：`tests/vitest.setup.ts` 把测试进程的 `TZ` 钉成 `Asia/Shanghai`，让断言确定；`backend/libs/shared/persistence/tz-caliber.test.ts` 的两条机制守卫改为断言「会话时区来自连接串」与「补丁按自洽的具名偏移（**不**跟进程时区走）」，并在 `backend/libs/core/wall-clock.test.ts` 覆盖「同一瞬时换个进程时区就换个墙钟」。

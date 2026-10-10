@@ -1,3 +1,4 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
@@ -117,12 +118,12 @@ function toView(row: any): TopupTierView {
     price: Number(row.price),
     isRecommended: row.is_recommended,
     status: row.status,
-    startTime: row.start_time ? new Date(row.start_time).toISOString() : null,
-    endTime: row.end_time ? new Date(row.end_time).toISOString() : null,
+    startTime: wallClockRfc3339OrNull(row.start_time),
+    endTime: wallClockRfc3339OrNull(row.end_time),
     sortOrder: row.sort_order,
     version: row.version,
-    createdAt: new Date(row.gmt_create).toISOString(),
-    updatedAt: new Date(row.gmt_modified).toISOString(),
+    createdAt: wallClockRfc3339(new Date(row.gmt_create)),
+    updatedAt: wallClockRfc3339(new Date(row.gmt_modified)),
     description: row.description,
     bonusCredits: Number(row.bonus_credits),
     activityTag: row.activity_tag,

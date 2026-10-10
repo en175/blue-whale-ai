@@ -105,7 +105,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
   });
 
   it("已关联素材库的 asset 带上本地镜像的校验状态（单次批量查，不打上游）", async () => {
-    const checkedAt = new Date("2026-09-15T10:00:00.000Z");
+    const checkedAt = new Date("2026-09-15T18:00:00+08:00");
     const findMaterialAssets = vi.fn().mockResolvedValue([
       { material_id: "asset-a", status: "Active", status_checked_at: checkedAt },
       { material_id: "asset-b", status: "Failed", status_checked_at: null },
@@ -139,7 +139,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     const byId = new Map(result.assets.map((a) => [a.id, a]));
     expect(byId.get("200")).toMatchObject({
       material_status: "Active",
-      material_status_checked_at: "2026-09-15T10:00:00.000Z",
+      material_status_checked_at: "2026-09-15T18:00:00+08:00",
     });
     expect(byId.get("201")).toMatchObject({
       material_status: "Failed",
