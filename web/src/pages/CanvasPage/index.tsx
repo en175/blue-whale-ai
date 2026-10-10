@@ -10,7 +10,7 @@ import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecov
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
-import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile } from './canvasPureNodeHelpers';
+import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
 import { defaultVideoModeFor, draftVideoModeOf } from './videoModes';
 import {
@@ -176,7 +176,6 @@ import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
-import { COMPLIANCE_SUCCESS_TOAST, COMPLIANCE_FAILED_TOAST, depositCanvasAssetToCharacterLibrary, isComplianceFailedError, resolveCharacterLibraryMaterialId, waitComplianceAssetReady } from './characterLibraryDeposit';
 import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from './livenessLibraryImport';
 import { buildImageJobReferences, buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
@@ -212,6 +211,8 @@ import { useCanvasGenerationSubmission } from './hooks/useCanvasGenerationSubmis
 import { useCanvasAssetActions } from './hooks/useCanvasAssetActions';
 import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import { useCanvasSave, EMPTY_CLEAR_CONFLICT_TOAST, EMPTY_OVERWRITE_REJECTED_TOAST } from './hooks/useCanvasSave';
+import { useCanvasRefStripOrder } from './hooks/useCanvasRefStripOrder';
+import { useCanvasCompliance } from './hooks/useCanvasCompliance';
 import {
   applyIndependentGroupDrag,
   bringGroupToFront,
@@ -1733,6 +1734,7 @@ export default function CanvasPage() {
       setShowAgent(true);
     }
   };
+  const complianceCheckRef = useRef<((id: string) => void) | undefined>(undefined);
   const actionsRef = useRef({
     duplicate: handleDuplicateNode,
     addToChat: handleAddToChatNode,
@@ -3009,125 +3011,6 @@ export default function CanvasPage() {
       showToast('error', '复制图片失败');
     }
   };
-  const patchNodeCompliance = (id: string, patch: Record<string, unknown>) => {
-    setMediaNodes((prev) => {
-      const next = prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
-      mediaNodesRef.current = next;
-      return next;
-    });
-  };
-  const startNodeCompliance = (id: string) => {
-    patchNodeCompliance(id, {
-      complianceBusy: true,
-      compliancePassed: false,
-      complianceFailed: false,
-    });
-  };
-  const toastComplianceError = (err: unknown) => {
-    if (isApiError(err)) return;
-    showToast(
-      'error',
-      isComplianceFailedError(err)
-        ? COMPLIANCE_FAILED_TOAST
-        : err instanceof Error
-          ? err.message
-          : '校验失败，请重试',
-    );
-  };
-  const failNodeCompliance = (id: string, err: unknown) => {
-    patchNodeCompliance(id, {
-      complianceBusy: false,
-      compliancePassed: false,
-      complianceFailed: isComplianceFailedError(err),
-    });
-    toastComplianceError(err);
-  };
-  const ensureMediaNodeCompliance = async (
-    id: string,
-    opts?: { toastSuccess?: boolean },
-  ): Promise<string | undefined> => {
-    const toastSuccess = opts?.toastSuccess !== false;
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node) return undefined;
-    const d = (node.data ?? {}) as Record<string, unknown>;
-    if (d.assetMissing === true) return undefined;
-    const assetId = d.assetId != null ? String(d.assetId) : '';
-    const url = typeof d.src === 'string' ? d.src : '';
-    const mediaType = d.mediaType === 'video' || d.mediaType === 'audio' ? d.mediaType : 'image';
-    const verifiedId = resolveCharacterLibraryMaterialId({
-      mediaType,
-      snapshotMaterialId: snapshotAssetsRef.current[assetId]?.material_id,
-    });
-    if (verifiedId) {
-      startNodeCompliance(id);
-      try {
-        await waitComplianceAssetReady(verifiedId);
-        if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
-        if (assetId) {
-          const current = snapshotAssetsRef.current[assetId];
-          if (current) {
-            snapshotAssetsRef.current = {
-              ...snapshotAssetsRef.current,
-              [assetId]: { ...current, material_id: verifiedId, material_status: 'Active' },
-            };
-          }
-          patchAsset?.(assetId, { material_id: verifiedId, material_status: 'Active' });
-        }
-        patchNodeCompliance(id, {
-          complianceBusy: false,
-          compliancePassed: true,
-          complianceFailed: false,
-          materialId: verifiedId,
-        });
-        return verifiedId;
-      } catch (err) {
-        failNodeCompliance(id, err);
-        return undefined;
-      }
-    }
-    if (!url || url.startsWith('blob:')) {
-      showToast('warn', '素材尚未上传完成，请稍后重试');
-      return undefined;
-    }
-    startNodeCompliance(id);
-    try {
-      const result = await depositCanvasAssetToCharacterLibrary({
-        sourceAssetId: assetId,
-        url,
-        name: typeof d.fileName === 'string' ? d.fileName : '素材',
-        mediaType,
-      });
-      if (!result.materialId) {
-        patchNodeCompliance(id, { complianceBusy: false, compliancePassed: false, complianceFailed: false });
-        showToast('error', '校验失败，请重试');
-        return undefined;
-      }
-      if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
-      if (assetId && result.materialId) {
-        const current = snapshotAssetsRef.current[assetId];
-        if (current) {
-          snapshotAssetsRef.current = {
-            ...snapshotAssetsRef.current,
-            [assetId]: { ...current, material_id: result.materialId, material_status: 'Active' },
-          };
-        }
-        patchAsset?.(assetId, { material_id: result.materialId, material_status: 'Active' });
-      }
-      patchNodeCompliance(id, {
-        complianceBusy: false,
-        compliancePassed: true,
-        complianceFailed: false,
-        materialId: result.materialId,
-      });
-      return result.materialId;
-    } catch (err) {
-      failNodeCompliance(id, err);
-      return undefined;
-    }
-  };
-  const handleComplianceCheck = async (id: string) => {
-    await ensureMediaNodeCompliance(id, { toastSuccess: true });
-  };
   const handleFillEmptyShell = (id: string, file: File) => {
     void placeFileOnCanvas(file, { replaceNodeId: id }).catch((err) => {
       showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
@@ -3146,7 +3029,7 @@ export default function CanvasPage() {
       void applyClipboardAtFlow(position);
     },
     copyImage: (id) => { void handleCopyImage(id); },
-    complianceCheck: (id) => { void handleComplianceCheck(id); },
+    complianceCheck: (id) => { void complianceCheckRef.current?.(id); },
     fillEmptyShell: handleFillEmptyShell,
   };
   const placeAssetsOnCanvas = (
@@ -3608,6 +3491,14 @@ export default function CanvasPage() {
     blockInvalidDraft,
     showToast,
   });
+  const { handleComplianceCheck } = useCanvasCompliance({
+    setMediaNodes,
+    mediaNodesRef,
+    snapshotAssetsRef,
+    patchAsset,
+    showToast,
+  });
+  complianceCheckRef.current = (id) => { void handleComplianceCheck(id); };
   const docLoadEpochRef = useRef<object>({});
   const imageToolsAcceptanceRef = useRef(new Map<string, { resolve: (jobId: string) => void; reject: (e: unknown) => void }>());
   const imageToolsTask = useMemo(() => createImageToolsTask((nodeId, settled) => {
@@ -4252,142 +4143,59 @@ export default function CanvasPage() {
         text: replaceImageMentionsWithAssetTokens(att.text, allMentions, isImage),
       };
     });
-  const reorderTargetEdges = (targetNodeId: string, orderedSources: string[]) => {
-    setEdges((prev) => {
-      const slots = prev
-        .map((e, i) => (e.target === targetNodeId && orderedSources.includes(e.source) ? i : -1))
-        .filter((i) => i >= 0);
-      if (slots.length !== orderedSources.length) return prev;
-      const edgeBySource = new Map(slots.map((i) => [prev[i]!.source, prev[i]!]));
-      const next = [...prev];
-      slots.forEach((slot, k) => {
-        next[slot] = edgeBySource.get(orderedSources[k]!)!;
-      });
-      return next;
-    });
-  };
-  const refStripOrderOf = (targetId: string | null | undefined): string[] | undefined => {
-    const value = mediaNodes.find(node => node.id === targetId)?.data.referenceStripOrder;
-    if (Array.isArray(value) && value.every(key => typeof key === 'string')) return value;
-    if (!targetId) return undefined;
-    return edges.filter(edge => edge.target === targetId).map(edge =>
-      textNodes.some(node => node.id === edge.source) ? `text:${edge.source}` : `media:node:${edge.source}`,
-    );
-  };
-  const handleRefStripOrderChange = (targetId: string, orderedKeys: string[]) => {
-    if (isGeneratingNode(targetId)) return;
-    patchMediaNode(targetId, { referenceStripOrder: orderedKeys });
-    const sources = orderedKeys.flatMap(key => {
-      const source = key.startsWith('text:') ? key.slice(5)
-        : key.startsWith('media:node:') ? key.slice(11)
-        : key.startsWith('media:canvas:') ? key.slice(13) : undefined;
-      return source && edgesRef.current.some(edge => edge.target === targetId && edge.source === source) ? [source] : [];
-    });
-    if (sources.length) reorderTargetEdges(targetId, sources);
-  };
-  const handleReorderAttachments = (targetNodeId: string, orderedNodeIds: string[]) => {
-    const liveIds = textAttachmentsOf(targetNodeId).map((a) => a.nodeId);
-    if (
-      liveIds.length !== orderedNodeIds.length ||
-      !orderedNodeIds.every((id) => liveIds.includes(id))
-    )
-      return;
-    reorderTargetEdges(targetNodeId, orderedNodeIds);
-    generationDock.updateDraft('image', { attachments: { targetNodeId, orderedNodeIds } });
-    generationDock.updateDraft('video', { attachments: { targetNodeId, orderedNodeIds } });
-  };
-  const handleReorderVideoMediaRefs = (draftId: string, orderedKeys: string[]) => {
-    const current = mergedVideoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current);
-    const currentKeys = current.reference.map((r) => r.materialId ?? r.nodeId);
-    if (currentKeys.length !== orderedKeys.length || !orderedKeys.every((k) => currentKeys.includes(k))) return;
-    const materialIds = new Set(current.reference.filter((r) => r.materialId != null).map((r) => r.materialId!));
-    const edgeIds = orderedKeys.filter((k) => !materialIds.has(k));
-    const materialOrdered = orderedKeys.filter((k) => materialIds.has(k));
-    if (edgeIds.length) reorderTargetEdges(draftId, edgeIds);
-    if (materialOrdered.length) {
-      const node = mediaNodesRef.current.find((n) => n.id === draftId);
-      const existing = readDraftMaterialRefs(node);
-      const existingIds = existing.map((m) => m.materialId);
-      if (existingIds.length === materialOrdered.length && materialOrdered.every((id) => existingIds.includes(id))) {
-        const byId = new Map(existing.map((m) => [m.materialId, m]));
-        patchMediaNode(draftId, { draftMaterialRefs: materialOrdered.map((id) => byId.get(id)!) });
-      }
-    }
-  };
-  const reorderVideoFreeRefs = (keys: string[]) => generationDock.updateDraft('video', { freeReference: { operation: 'reorder', keys } });
+  const { reorderTargetEdges, refStripOrderOf, handleRefStripOrderChange, handleReorderAttachments, handleReorderVideoMediaRefs, reorderVideoFreeRefs } = useCanvasRefStripOrder({
+    setEdges,
+    edgesRef,
+    mediaNodesRef,
+    edges,
+    mediaNodes,
+    textNodes,
+    isGeneratingNode,
+    patchMediaNode,
+    textAttachmentsOf,
+    generationDock,
+  });
   const planReferenceErrors = useMemo(() => {
-    const forTarget = (targetId: string | undefined, availableIds: string[]) => {
-      if (!targetId) return undefined;
-      for (const edge of edges.filter(e => e.target === targetId)) {
-        const plan = textNodes.find(n => n.id === edge.source && n.data.promptSource);
-        if (!plan || (plan.data.promptMentions === undefined && edge.data?.promptReference === undefined)) continue;
-        const text = extractTextNodeText(plan.data);
-        const mentions = promptMentionSchema.array().safeParse(plan.data.promptMentions ?? []);
-        if (!mentions.success || !validPromptMentions(text, mentions.data)) return '方案正文素材索引无效，请修正方案';
-        const bindings = promptBindingList(mentions.data);
-        const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length === 0 ? [] : undefined));
-        const label = (confirmed.success ? confirmed.data : bindings).map(b => `#${b.index}`).join('、');
-        if (!confirmed.success || !planBindingsCoveredBy(bindings, confirmed.data)) return `方案索引 ${label} 素材待同步，请先同步素材到目标`;
-        const missing = bindings.filter(b => !availableIds.includes(b.assetId));
-        if (missing.length) return `方案索引 ${missing.map(b => `#${b.index}`).join('、')} 素材缺失，请恢复连线或修正方案`;
-      }
-      return undefined;
-    };
     const videoRefs = videoSeed?.targetNodeId
       ? mergedVideoRefsWithTextIndex(videoSeed.targetNodeId, edges, mediaNodes, textNodes)
       : { reference: [] };
     const videoAvailableIds = [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])]
       .flatMap((ref) => videoRefIdentityIds(ref));
     return {
-      image: forTarget(
+      image: planReferenceErrorFor(
         imageSeed?.targetNodeId,
         imageSeed?.targetNodeId
           ? mergedImageRefsOf(imageSeed.targetNodeId, edges, [...mediaNodes, ...textNodes]).map((ref) => ref.assetId)
           : [],
+        edges,
+        textNodes,
       ),
       videoIndices: edges.filter(e => e.target === videoSeed?.targetNodeId).flatMap(e => {
         const plan = textNodes.find(n => n.id === e.source && n.data.promptSource);
         const mentions = promptMentionSchema.array().safeParse(plan?.data.promptMentions ?? []);
         return mentions.success ? promptBindingList(mentions.data).map(m => `#${m.index}`) : [];
       }).join('、'),
-      video: forTarget(videoSeed?.targetNodeId, videoAvailableIds),
+      video: planReferenceErrorFor(videoSeed?.targetNodeId, videoAvailableIds, edges, textNodes),
     };
   }, [imageSeed?.targetNodeId, videoSeed?.targetNodeId, edges, mediaNodes, textNodes]);
-  const pendingPlanSyncs = (targetId: string | undefined) => edges.filter(edge => edge.target === targetId).flatMap(edge => {
-    const node = textNodes.find(node => node.id === edge.source && node.data.promptSource);
-    if (!node) return [];
-    const mentions = promptMentionSchema.array().safeParse(node.data.promptMentions ?? []);
-    if (!mentions.success || !validPromptMentions(extractTextNodeText(node.data), mentions.data)) return [];
-    const bindings = promptBindingList(mentions.data);
-    const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length ? undefined : []));
-    return confirmed.success && planBindingsCoveredBy(bindings, confirmed.data) ? [] : [{ nodeId: node.id, title: String(node.data.title || '方案'), bindings }];
-  });
+  const pendingPlanSyncs = (targetId: string | undefined) => pendingPlanSyncsOf(targetId, edges, textNodes);
   const syncPlanToTarget = (planNodeId: string, targetId: string | undefined) => {
     const pending = pendingPlanSyncs(targetId).find(plan => plan.nodeId === planNodeId);
     if (pending && targetId) connectPlanToDraft(planNodeId, targetId);
   };
-  const imagePickMarkedIds = useMemo(() => {
-    if (!imagePickSessionActive || typeof imagePickSession !== 'string') return [] as string[];
-    const textIds = new Set(textNodes.map((n) => n.id));
-    return edges.filter((e) => e.target === imagePickSession && !textIds.has(e.source)).map((e) => e.source);
-  }, [imagePickSessionActive, imagePickSession, edges, textNodes]);
-  const videoPickMarkedIds = useMemo(() => {
-    if (!videoPickSessionActive || typeof videoPickSession !== 'string') return [] as string[];
-    const textIds = new Set(textNodes.map((n) => n.id));
-    const role = pickRefRole ?? 'reference';
-    return edges
-      .filter((e) => e.target === videoPickSession && !textIds.has(e.source) && readRefRole(e) === role)
-      .map((e) => e.source);
-  }, [videoPickSessionActive, videoPickSession, pickRefRole, edges, textNodes]);
-  const videoPickBlockedIds = useMemo(
-    () => mediaNodes.filter((n) => ((n.data ?? {}) as Record<string, unknown>).complianceFailed === true).map((n) => n.id),
-    [mediaNodes],
+  const imagePickMarkedIds = useMemo(
+    () => pickMarkedIdsFor(imagePickSession, imagePickSessionActive, edges, textNodes),
+    [imagePickSessionActive, imagePickSession, edges, textNodes],
   );
-  const audioPickMarkedIds = useMemo(() => {
-    if (!audioPickSessionActive || typeof audioPickSession !== 'string') return [] as string[];
-    const textIds = new Set(textNodes.map((n) => n.id));
-    return edges.filter((e) => e.target === audioPickSession && !textIds.has(e.source)).map((e) => e.source);
-  }, [audioPickSessionActive, audioPickSession, edges, textNodes]);
+  const videoPickMarkedIds = useMemo(
+    () => pickMarkedIdsFor(videoPickSession, videoPickSessionActive, edges, textNodes, pickRefRole ?? 'reference'),
+    [videoPickSessionActive, videoPickSession, pickRefRole, edges, textNodes],
+  );
+  const videoPickBlockedIds = useMemo(() => complianceBlockedIds(mediaNodes), [mediaNodes]);
+  const audioPickMarkedIds = useMemo(
+    () => pickMarkedIdsFor(audioPickSession, audioPickSessionActive, edges, textNodes),
+    [audioPickSessionActive, audioPickSession, edges, textNodes],
+  );
   const locateTextSource = useCallback((nodeId: string) => {
     const target = findCanvasNode(nodeId);
     if (!target) return;
