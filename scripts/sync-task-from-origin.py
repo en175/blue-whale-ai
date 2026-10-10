@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from sync_recovery import RecoveryError, load_recovery, write_recovery
+from sync_recovery import RecoveryError, load_record, load_recovery, write_recovery
 from lib.task_metadata import TaskMetadataError, read_task_metadata
 
 
@@ -204,8 +204,6 @@ def read_recovery(path: Path, branch: str) -> dict[str, object]:
         payload = load_recovery(path)
     except RecoveryError as exc:
         raise WorkflowError("同步恢复点无法读取：{}".format(exc)) from exc
-    if "original_head" not in payload:
-        raise WorkflowError("同步恢复点缺少 original_head 键，无法读取。")
     if not _legacy_polluted_branch(str(payload.get("branch", "")), branch):
         raise WorkflowError("同步恢复点属于其他分支，拒绝使用。")
     return payload
@@ -265,8 +263,6 @@ def pending_recovery(root: Path, marker: Path, branch: str, target_branch: str,
     if remote_branch_sha(root, branch) != recovery.get("remote_branch_sha", ""):
         raise WorkflowError("远端源分支变化，拒绝更新同步恢复点。")
     proofs = recovery.get("rebase_proofs", [])
-    if not isinstance(proofs, list) or any(not isinstance(item, dict) for item in proofs):
-        raise WorkflowError("多轮同步证明格式错误，拒绝覆盖恢复点。")
     proofs = list(proofs)
     current_proof = current_rebase_proof(recovery)
     if current_proof:
@@ -730,7 +726,7 @@ def finalize(root: Path, as_json: bool) -> int:
             "child_heads": recovery["child_heads"],
         }
         if lineage_file.exists():
-            if load_recovery(lineage_file) != lineage:
+            if load_record(lineage_file) != lineage:
                 raise WorkflowError("已有不同的 implement-spec 线性化核验记录。")
             if git_output(root, "rev-parse", lineage_ref) != original_head:
                 raise WorkflowError("implement-spec 线性化保留引用与记录不符。")
@@ -744,8 +740,6 @@ def finalize(root: Path, as_json: bool) -> int:
             lineage_file.parent.mkdir(parents=True, exist_ok=True)
             write_recovery(lineage_file, lineage)
     proofs = recovery.get("rebase_proofs", [])
-    if not isinstance(proofs, list) or any(not isinstance(item, dict) for item in proofs):
-        raise WorkflowError("多轮同步证明格式错误，禁止 finalize。")
     current_proof = current_rebase_proof(recovery)
     if current_proof:
         proofs.append(current_proof)
@@ -773,7 +767,7 @@ def finalize(root: Path, as_json: bool) -> int:
             lineage["conflict_files"] = proof["conflict_files"]
             lineage["resolved_files"] = proof["resolved_files"]
         if lineage_file.exists():
-            if load_recovery(lineage_file) != lineage or git_output(root, "rev-parse", lineage_ref) != original_head:
+            if load_record(lineage_file) != lineage or git_output(root, "rev-parse", lineage_ref) != original_head:
                 raise WorkflowError("已有不同的 implement-spec 同步证明，禁止覆盖。")
         else:
             if git(root, "show-ref", "--verify", "--quiet", lineage_ref, check=False).returncode == 0:

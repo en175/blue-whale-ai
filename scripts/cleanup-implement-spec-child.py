@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from lib.task_metadata import read_task_metadata
-from sync_recovery import load_recovery
+from sync_recovery import load_record
 
 
 class CleanupError(RuntimeError):
@@ -58,7 +58,7 @@ def rebase_lineage_proves(root: Path, common_dir: Path, source_branch: str,
         return False
     records = []
     for path in directory.glob("*.json"):
-        record = load_recovery(path)
+        record = load_record(path)
         if (record.get("proof_kind") == "rebase"
                 and record.get("source_branch") == source_branch
                 and record.get("target_branch") == target_branch
@@ -166,7 +166,7 @@ def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
         lineage_ref = "refs/agent-implement-spec-lineage/" + slug
         if not lineage_file.is_file():
             raise CleanupError("远端 PR 源分支尚未包含子任务提交，且无已核验的线性化记录，未清理。")
-        lineage = load_recovery(lineage_file)
+        lineage = load_record(lineage_file)
         child_heads = lineage.get("child_heads")
         if not isinstance(child_heads, dict):
             raise CleanupError("线性化记录缺少子任务提交映射，未清理。")

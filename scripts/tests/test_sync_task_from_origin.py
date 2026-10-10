@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import runpy
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync-task-from-origin.sh"
 COMMIT_SCRIPT = REPO_ROOT / "scripts" / "commit-task-for-review.sh"
+load_recovery = runpy.run_path(str(REPO_ROOT / "scripts/sync_recovery.py"))["load_recovery"]
 
 
 def run(*args: str, cwd: Path, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -310,6 +312,28 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertEqual(self.response(again)["status"], "UP_TO_DATE")
 
+        marker = Path(self.response(completed)["recovery_file"])
+        for field in ("rebase_tree", "rebase_auto_tree", "rebase_conflict_files", "rebase_resolved_files"):
+            with self.subTest(field=field):
+                missing = {key: value for key, value in recovery.items() if key != field}
+                marker.write_text(json.dumps(missing), encoding="utf-8")
+                self.assert_unreadable_sync_preserves_recovery(marker)
+        marker.write_text(json.dumps(recovery), encoding="utf-8")
+
+        self.advance_release("next-release.txt")
+        synced = self.invoke("sync", "--json")
+        self.assertEqual(synced.returncode, 0, synced.stdout + synced.stderr)
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(len(recovery["rebase_proofs"]), 1)
+        for field in ("auto_tree", "conflict_files", "resolved_files"):
+            with self.subTest(proof_field=field):
+                missing = json.loads(json.dumps(recovery))
+                del missing["rebase_proofs"][0][field]
+                marker.write_text(json.dumps(missing), encoding="utf-8")
+                self.assert_unreadable_sync_preserves_recovery(marker)
+        marker.write_text(json.dumps(recovery), encoding="utf-8")
+        self.assertEqual(load_recovery(marker), recovery)
+
     def test_resolved_sync_rejects_changes_outside_conflict(self) -> None:
         (self.worktree / "shared.txt").write_text("task side\n", encoding="utf-8")
         self.git("add", "shared.txt")
@@ -389,7 +413,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         marker = Path(str(payload["recovery_file"]))
         recovery = json.loads(marker.read_text(encoding="utf-8"))
         head = self.git("rev-parse", "HEAD")
-        recovery.update(push_state="pushed", pushed_head=head, verified_head=head)
+        recovery.update(push_state="pushed", pushed_head=head, verified_head=head, verified_pr_iid=65)
         marker.write_text(json.dumps(recovery), encoding="utf-8")
         (self.worktree / "dirty.txt").write_text("dirty\n", encoding="utf-8")
 
@@ -407,7 +431,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         marker = Path(str(payload["recovery_file"]))
         recovery = json.loads(marker.read_text(encoding="utf-8"))
         head = self.git("rev-parse", "HEAD")
-        recovery.update(push_state="pushed", pushed_head=head, verified_head=head)
+        recovery.update(push_state="pushed", pushed_head=head, verified_head=head, verified_pr_iid=65)
         marker.write_text(json.dumps(recovery), encoding="utf-8")
         common = Path(self.git("rev-parse", "--git-common-dir"))
         if not common.is_absolute():
@@ -573,6 +597,134 @@ class SyncTaskFromOriginTest(unittest.TestCase):
                     self.assertNotIn("Traceback", result.stderr)
                     self.assertEqual(self.git("rev-parse", "HEAD"), before_head)
 
+    def assert_unreadable_sync_preserves_recovery(self, marker: Path) -> None:
+        before = marker.read_bytes()
+        head = self.git("rev-parse", "HEAD")
+        backup_ref = "refs/agent-sync-backups/feature%测试已有PR更新流程"
+        backup = self.git("rev-parse", backup_ref)
+
+        result = self.invoke("sync", "--json")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.response(result)["status"], "ERROR")
+        self.assertIn("无法读取", self.response(result)["detail"])
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+        self.assertEqual(self.git("rev-parse", backup_ref), backup)
+        self.assertEqual(marker.read_bytes(), before)
+
+    def test_sync_rejects_each_missing_required_recovery_key(self) -> None:
+        self.commit_task_change()
+        self.advance_release()
+        synced = self.invoke("sync", "--json")
+        self.assertEqual(synced.returncode, 0, synced.stderr)
+        marker = Path(self.response(synced)["recovery_file"])
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+
+        for field in ("version", "branch", "original_head", "upstream_sha",
+                      "target_branch", "remote_branch_sha", "backup_ref", "created_at"):
+            with self.subTest(field=field):
+                missing = {key: value for key, value in recovery.items() if key != field}
+                marker.write_text(json.dumps(missing), encoding="utf-8")
+                self.assert_unreadable_sync_preserves_recovery(marker)
+
+    def test_shared_reader_accepts_real_sync_and_push_stages(self) -> None:
+        self.commit_task_change()
+        self.advance_release()
+        marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        captured = self.root / "before-rebase.json"
+        hook = self.main / ".git/hooks/pre-rebase"
+        hook.write_text("#!/bin/sh\ncp {} {}\n".format(
+            shlex.quote(str(marker)), shlex.quote(str(captured))), encoding="utf-8")
+        hook.chmod(0o755)
+
+        synced = self.invoke("sync", "--json")
+        self.assertEqual(synced.returncode, 0, synced.stdout + synced.stderr)
+        self.assertNotIn("synced_head", load_recovery(captured))
+        recovery = load_recovery(marker)
+        head = recovery["synced_head"]
+        self.assertNotIn("push_state", recovery)
+        self.assertNotIn("verified_head", recovery)
+        helper = REPO_ROOT / "scripts/sync_recovery.py"
+        for state in ("in_flight", "pushed"):
+            updated = run(sys.executable, str(helper), "set-push-state", str(marker),
+                          head, state, cwd=self.worktree)
+            self.assertEqual(updated.returncode, 0, updated.stderr)
+            self.assertEqual(load_recovery(marker)["push_state"], state)
+        verified = run(sys.executable, str(helper), "record-verification", str(marker),
+                       head, "65", cwd=self.worktree)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        self.assertEqual(load_recovery(marker)["verified_pr_iid"], 65)
+        cleared = run(sys.executable, str(helper), "set-push-state", str(marker),
+                      head, "clear", cwd=self.worktree)
+        self.assertEqual(cleared.returncode, 0, cleared.stderr)
+        self.assertNotIn("push_state", load_recovery(marker))
+
+        for field in ("rebase_input_head", "rebase_input_ref", "rollback_safe", "child_heads"):
+            recovery.pop(field)
+        marker.write_text(json.dumps(recovery), encoding="utf-8")
+        self.assertEqual(load_recovery(marker), recovery)
+        again = self.invoke("sync", "--json")
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+
+    def sync_with_child_proofs(self) -> Path:
+        child_head = self.commit_task_change()
+        child = self.worktree.parent / "proof-child"
+        self.git("worktree", "add", "-b", "feature/证明子任务", str(child), child_head)
+        metadata = Path(self.git("rev-parse", "--absolute-git-dir", cwd=child)) / "blue-whale/task-base.json"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text(json.dumps({
+            "version": 1, "task_branch": "feature/证明子任务",
+            "target_branch": "release/prod", "start_sha": child_head,
+        }), encoding="utf-8")
+        for index in range(3):
+            self.advance_release(f"upstream-{index}.txt")
+            synced = self.invoke("sync", "--json")
+            self.assertEqual(synced.returncode, 0, synced.stdout + synced.stderr)
+        return Path(self.response(synced)["recovery_file"])
+
+    def test_sync_rejects_missing_keys_in_every_rebase_proof(self) -> None:
+        marker = self.sync_with_child_proofs()
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(len(recovery["rebase_proofs"]), 2)
+
+        for index in range(2):
+            for field in ("original_head", "upstream_sha", "synced_head", "merged_tree"):
+                with self.subTest(index=index, field=field):
+                    missing = json.loads(json.dumps(recovery))
+                    del missing["rebase_proofs"][index][field]
+                    marker.write_text(json.dumps(missing), encoding="utf-8")
+                    self.assert_unreadable_sync_preserves_recovery(marker)
+
+    def test_sync_rejects_missing_stage_keys_and_invalid_proof_containers(self) -> None:
+        marker = self.sync_with_child_proofs()
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        head = recovery["synced_head"]
+        stages = (
+            ({}, ("synced_head", "child_heads")),
+            ({"manual_rebase": True}, ("rebase_input_head", "rebase_input_ref")),
+            ({"linearized_pr": 65, "frozen_files": ["task.txt"],
+              "original_tree": self.git("rev-parse", "HEAD^{tree}"), "linearized_head": head},
+             ("linearized_pr", "frozen_files", "original_tree", "child_heads", "linearized_head", "synced_head")),
+            ({"push_state": "in_flight", "pushed_head": head},
+             ("push_state", "pushed_head", "synced_head")),
+            ({"push_state": "pushed", "pushed_head": head,
+              "verified_head": head, "verified_pr_iid": 65},
+             ("verified_head", "verified_pr_iid")),
+        )
+        for changes, fields in stages:
+            for field in fields:
+                with self.subTest(stage=changes, field=field):
+                    missing = {**recovery, **changes}
+                    del missing[field]
+                    marker.write_text(json.dumps(missing), encoding="utf-8")
+                    self.assert_unreadable_sync_preserves_recovery(marker)
+
+        for proofs in (None, {}, "invalid", [None], [recovery["rebase_proofs"][0], []]):
+            with self.subTest(proofs=proofs):
+                marker.write_text(json.dumps({**recovery, "rebase_proofs": proofs}), encoding="utf-8")
+                self.assert_unreadable_sync_preserves_recovery(marker)
+
     def test_repeated_sync_preserves_the_original_transaction_recovery_head(self) -> None:
         original_head = self.commit_task_change()
         self.advance_release("upstream-one.txt", "one\n")
@@ -688,7 +840,9 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         marker = Path(str(self.response(first)["recovery_file"]))
         recovery = json.loads(marker.read_text(encoding="utf-8"))
-        recovery.update(linearized_pr=123, frozen_files=["a"])
+        recovery.update(linearized_pr=123, frozen_files=["a"],
+                        original_tree=self.git("rev-parse", "HEAD^{tree}"),
+                        linearized_head=self.git("rev-parse", "HEAD"))
         marker.write_text(json.dumps(recovery), encoding="utf-8")
         synced_head = self.git("rev-parse", "HEAD")
 
