@@ -328,7 +328,6 @@ describe("AssetRepo upload md5 去重（IKCNLS）", () => {
 
 describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
   const MATERIAL = "asset-20260820153209-6c9z8";
-  const GROUP = "group-20260827113901-cbkmf";
 
   function repoWith(overrides: {
     owned?: unknown;
@@ -341,7 +340,6 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
           : {
               id: BigInt(526),
               material_id: null,
-              material_group_id: null,
             },
       ),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -359,14 +357,13 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
     return { repo: createAssetRepo(prisma as never), assets, prisma };
   }
 
-  it("先摘旧主、再写本行，且两列一起写", async () => {
+  it("先摘旧主、再写本行", async () => {
     const { repo, assets } = repoWith();
     await expect(
       repo.bindMaterialId({
         userId: "9",
         assetId: "526",
         materialId: MATERIAL,
-        materialGroupId: GROUP,
       }),
     ).resolves.toBe(true);
 
@@ -378,14 +375,12 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
       },
       data: expect.objectContaining({
         material_id: null,
-        material_group_id: null,
       }),
     });
     expect(assets.update).toHaveBeenCalledWith({
       where: { id: BigInt(526) },
       data: expect.objectContaining({
         material_id: MATERIAL,
-        material_group_id: GROUP,
       }),
     });
   });
@@ -406,7 +401,6 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
         userId: "9",
         assetId: "526",
         materialId: MATERIAL,
-        materialGroupId: GROUP,
       }),
     ).resolves.toBe(true);
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
@@ -424,7 +418,6 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
         userId: "9",
         assetId: "526",
         materialId: MATERIAL,
-        materialGroupId: GROUP,
       }),
     ).rejects.toThrow("db down");
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -435,7 +428,6 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
       owned: {
         id: BigInt(526),
         material_id: MATERIAL,
-        material_group_id: GROUP,
       },
     });
 
@@ -444,7 +436,6 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
         userId: "9",
         assetId: "526",
         materialId: MATERIAL,
-        materialGroupId: GROUP,
       }),
     ).resolves.toBe(true);
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -457,7 +448,6 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
         userId: "9",
         assetId: "526",
         materialId: MATERIAL,
-        materialGroupId: GROUP,
       }),
     ).resolves.toBe(false);
     expect(prisma.$transaction).not.toHaveBeenCalled();

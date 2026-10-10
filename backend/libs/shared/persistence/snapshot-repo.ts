@@ -41,7 +41,6 @@ export interface SnapshotAssetRow {
   md5: string | null;
   project_id: string | null;
   material_id: string | null;
-  material_group_id: string | null;
   material_status: string | null;
   material_status_checked_at: string | null;
 }
@@ -178,7 +177,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           md5: a.md5 ?? null,
           project_id: rowProjectId,
           material_id: a.material_id ?? null,
-          material_group_id: a.material_group_id ?? null,
           material_status: null,
           material_status_checked_at: null,
         });

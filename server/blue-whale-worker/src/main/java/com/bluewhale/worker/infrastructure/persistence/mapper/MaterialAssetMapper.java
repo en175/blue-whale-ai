@@ -49,7 +49,6 @@ public interface MaterialAssetMapper extends BaseMapper<MaterialAssetEntity> {
     @Update("""
             UPDATE assets
             SET material_id = NULL,
-                material_group_id = NULL,
                 gmt_modified = NOW(),
                 version = version + 1
             WHERE material_id = #{materialId}

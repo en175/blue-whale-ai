@@ -16,11 +16,19 @@ export interface UpstreamMaterialAsset {
 
 export interface UploadMaterialGateResult {
   ok: true;
-  materialGroupId: string | null;
 }
 export type UploadMaterialGateOutcome =
   | UploadMaterialGateResult
-  | { ok: false; message: string };
+  | {
+      ok: false;
+      reason: UploadMaterialGateFailureReason;
+      message: string;
+    };
+
+export type UploadMaterialGateFailureReason =
+  | "not_approved"
+  | "pending"
+  | "unavailable";
 
 export interface UploadMaterialGateDeps {
   repo: Pick<
@@ -43,13 +51,21 @@ export async function assertMaterialLinkable(
 
   if (row !== null && row.status !== "Processing") {
     return row.status === "Active"
-      ? { ok: true, materialGroupId: row.materialGroupId }
-      : { ok: false, message: MATERIAL_NOT_APPROVED_MESSAGE };
+      ? { ok: true }
+      : {
+          ok: false,
+          reason: "not_approved",
+          message: MATERIAL_NOT_APPROVED_MESSAGE,
+        };
   }
 
   const upstream = await deps.fetchUpstream(materialId);
   if (upstream === null) {
-    return { ok: false, message: MATERIAL_STATUS_UNAVAILABLE_MESSAGE };
+    return {
+      ok: false,
+      reason: "unavailable",
+      message: MATERIAL_STATUS_UNAVAILABLE_MESSAGE,
+    };
   }
   const status = normalizeStatus(upstream.status);
 
@@ -83,9 +99,13 @@ export async function assertMaterialLinkable(
   }
 
   if (status !== "Active") {
-    return { ok: false, message: MATERIAL_NOT_APPROVED_MESSAGE };
+    return {
+      ok: false,
+      reason: status === "Failed" ? "not_approved" : "pending",
+      message: MATERIAL_NOT_APPROVED_MESSAGE,
+    };
   }
-  return { ok: true, materialGroupId: upstream.groupId ?? row?.materialGroupId ?? null };
+  return { ok: true };
 }
 
 export interface UploadMaterialGateWiringDeps {
@@ -103,7 +123,7 @@ export interface UploadMaterialGateWiringDeps {
   }): Promise<void>;
 }
 
-function readResponseError(body: unknown): Record<string, unknown> | null {
+export function readResponseError(body: unknown): Record<string, unknown> | null {
   if (typeof body !== "object" || body === null) return null;
   const error = (body as Record<string, unknown>).ResponseError;
   return typeof error === "object" && error !== null

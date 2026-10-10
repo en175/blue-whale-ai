@@ -54,17 +54,21 @@ function rowOf(status: "Processing" | "Active" | "Failed") {
 }
 
 describe("assertMaterialLinkable（上传口素材闸）", () => {
-  it("本地行 Active → 放行并给出组 id，且**不打上游**", async () => {
+  it("本地行 Active → 放行，且**不打上游**", async () => {
     const { gateDeps, fetchUpstream } = deps(rowOf("Active"));
     const result = await assertMaterialLinkable(gateDeps, "9", MATERIAL);
-    expect(result).toEqual({ ok: true, materialGroupId: GROUP });
+    expect(result).toEqual({ ok: true });
     expect(fetchUpstream).not.toHaveBeenCalled();
   });
 
   it("本地行 Failed → 拒绝，且不打上游", async () => {
     const { gateDeps, fetchUpstream } = deps(rowOf("Failed"));
     const result = await assertMaterialLinkable(gateDeps, "9", MATERIAL);
-    expect(result).toEqual({ ok: false, message: NOT_APPROVED });
+    expect(result).toEqual({
+      ok: false,
+      reason: "not_approved",
+      message: NOT_APPROVED,
+    });
     expect(fetchUpstream).not.toHaveBeenCalled();
   });
 
@@ -94,7 +98,7 @@ describe("assertMaterialLinkable（上传口素材闸）", () => {
     expect(mirrorStatus).toHaveBeenCalledWith(
       expect.objectContaining({ status: "Active" }),
     );
-    expect(result).toEqual({ ok: true, materialGroupId: GROUP });
+    expect(result).toEqual({ ok: true });
   });
 
   it("无记录 + 上游已经 Failed → 补行后仍然拒绝", async () => {
@@ -106,23 +110,44 @@ describe("assertMaterialLinkable（上传口素材闸）", () => {
     });
     const result = await assertMaterialLinkable(gateDeps, "9", MATERIAL);
     expect(upsertProcessing).toHaveBeenCalled();
-    expect(result).toEqual({ ok: false, message: NOT_APPROVED });
+    expect(result).toEqual({
+      ok: false,
+      reason: "not_approved",
+      message: NOT_APPROVED,
+    });
+  });
+
+  it("本地行 Processing + 上游仍 Processing → 拒绝，reason=pending（未到终态，不是判失败）", async () => {
+    const { gateDeps } = deps(rowOf("Processing"), {
+      status: "Processing",
+      groupId: GROUP,
+    });
+    const result = await assertMaterialLinkable(gateDeps, "9", MATERIAL);
+    expect(result).toEqual({
+      ok: false,
+      reason: "pending",
+      message: NOT_APPROVED,
+    });
   });
 
   it("无记录 + 上游不可达 → 拒绝，且**不造行**（坏响应不配留下痕迹）", async () => {
     const { gateDeps, upsertProcessing } = deps(null, null);
     const result = await assertMaterialLinkable(gateDeps, "9", MATERIAL);
-    expect(result).toEqual({ ok: false, message: UNAVAILABLE });
+    expect(result).toEqual({
+      ok: false,
+      reason: "unavailable",
+      message: UNAVAILABLE,
+    });
     expect(upsertProcessing).not.toHaveBeenCalled();
   });
 
-  it("无记录 + 上游 Active 但没给 GroupId → 放行，组 id 留 null（不为一个附属列拒绝用户）", async () => {
+  it("无记录 + 上游 Active 但没给 GroupId → 放行，只是补不了行（material_assets 那列 NOT NULL）", async () => {
     const { gateDeps, upsertProcessing } = deps(null, {
       status: "Active",
       groupId: null,
     });
     const result = await assertMaterialLinkable(gateDeps, "9", MATERIAL);
-    expect(result).toEqual({ ok: true, materialGroupId: null });
+    expect(result).toEqual({ ok: true });
     expect(upsertProcessing).not.toHaveBeenCalled();
   });
 });

@@ -52,7 +52,6 @@ export class AssetService {
     userId: string;
     assetId: string;
     materialId: string;
-    materialGroupId: string | null;
   }) {
     return this.repo.bindMaterialId(input);
   }
@@ -79,7 +78,6 @@ export class AssetService {
     userId: string;
     assetId: string;
     materialId: string;
-    materialGroupId: string;
   }) {
     return this.repo.linkAssetToMaterial(input);
   }

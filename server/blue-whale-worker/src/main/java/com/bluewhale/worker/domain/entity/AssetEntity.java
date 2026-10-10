@@ -63,9 +63,6 @@ public class AssetEntity {
     @TableField("material_id")
     private String materialId;
 
-    @TableField("material_group_id")
-    private String materialGroupId;
-
     @TableField("gmt_create")
     private LocalDateTime gmtCreate;
 
@@ -117,8 +114,6 @@ public class AssetEntity {
     public void setStatus(String status) { this.status = status; }
     public String getMaterialId() { return materialId; }
     public void setMaterialId(String materialId) { this.materialId = materialId; }
-    public String getMaterialGroupId() { return materialGroupId; }
-    public void setMaterialGroupId(String materialGroupId) { this.materialGroupId = materialGroupId; }
     public LocalDateTime getGmtCreate() { return gmtCreate; }
     public void setGmtCreate(LocalDateTime gmtCreate) { this.gmtCreate = gmtCreate; }
     public LocalDateTime getGmtModified() { return gmtModified; }

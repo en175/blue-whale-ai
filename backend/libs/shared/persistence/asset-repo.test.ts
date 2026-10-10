@@ -1052,3 +1052,41 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
     expect(generationJobs.update).not.toHaveBeenCalled();
   });
 });
+
+describe("AssetRepo.clearMaterialGroupLink（ADR-0126 改走 material_assets）", () => {
+  function repoWith(rows: Array<{ material_id: string }>) {
+    const updateMany = vi.fn().mockResolvedValue({ count: rows.length });
+    const findMany = vi.fn().mockResolvedValue(rows);
+    const prisma = { assets: { updateMany }, material_assets: { findMany } };
+    return { repo: createAssetRepo(prisma as never), updateMany, findMany };
+  }
+
+  it("先按组反查 material_assets，再清这批资产的 material_id", async () => {
+    const { repo, updateMany, findMany } = repoWith([
+      { material_id: "asset-a" },
+      { material_id: "asset-b" },
+    ]);
+
+    await repo.clearMaterialGroupLink("9", "group-1");
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { user_id: BigInt(9), material_group_id: "group-1" },
+      }),
+    );
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { user_id: BigInt(9), material_id: { in: ["asset-a", "asset-b"] } },
+        data: expect.objectContaining({ material_id: null }),
+      }),
+    );
+  });
+
+  it("组内没有状态行 → 一次写都不发", async () => {
+    const { repo, updateMany } = repoWith([]);
+
+    await repo.clearMaterialGroupLink("9", "group-1");
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+});

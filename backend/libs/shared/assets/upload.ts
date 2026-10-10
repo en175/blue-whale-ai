@@ -128,9 +128,7 @@ export interface UploadMaterialGate {
   check(
     userId: string,
     materialId: string,
-  ): Promise<
-    { ok: true; materialGroupId: string | null } | { ok: false; message: string }
-  >;
+  ): Promise<{ ok: true } | { ok: false; message: string }>;
 }
 
 export interface MaterialStatusReader {
@@ -189,7 +187,6 @@ export async function handleDedupAsset(
       userId,
       assetId: reusable.id,
       materialId,
-      materialGroupId: gate.materialGroupId,
     });
   }
   return ok({
@@ -292,7 +289,6 @@ export async function handleCompleteAsset(
           userId,
           assetId: existing.id,
           materialId,
-          materialGroupId: replayGate.materialGroupId,
         });
         boundMaterialId = materialId;
       } else {
@@ -342,7 +338,6 @@ export async function handleCompleteAsset(
         userId,
         assetId: bound.id,
         materialId,
-        materialGroupId: gate.materialGroupId,
       });
       return ok(
         await toAssetResponse(bound, {
@@ -405,9 +400,6 @@ export async function handleCompleteAsset(
     ...(input.duration == null ? {} : { duration: input.duration }),
     ...(input.md5 ? { md5: input.md5 } : {}),
     ...(materialId ? { materialId } : {}),
-    ...(materialId && gate?.ok
-      ? { materialGroupId: gate.materialGroupId }
-      : {}),
     source,
   });
 

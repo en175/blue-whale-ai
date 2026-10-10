@@ -26,7 +26,6 @@ model assets {
   source            String   @default("generated") @db.VarChar(32)
   status            String   @default("normal") @db.VarChar(32)
   material_id       String?  @db.VarChar(128)
-  material_group_id String?  @db.VarChar(128)
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
   version           Int      @default(0)
@@ -42,7 +41,6 @@ model assets {
   @@index([is_delete, deleted_at], map: "idx_asset_gc_candidates")
   @@index([user_id, md5, is_delete], map: "idx_asset_user_md5")
   @@unique([material_id], map: "uq_asset_material_id")
-  @@index([material_group_id], map: "idx_asset_material_group")
 }
 
 /// IKDE6X：素材库组（虚拟人像库 + 真人像库）落地。本地为组主、上游备份、双向维护。
