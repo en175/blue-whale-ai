@@ -237,11 +237,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-}
-
 .tag,
 .badge {
   display: inline-flex;

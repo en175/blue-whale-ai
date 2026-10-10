@@ -174,11 +174,12 @@ describe('AccountCredits', () => {
     expect(document.body.textContent).not.toContain('已退回');
   });
 
-  it('已获取用 source 文案映射展示获取来源', async () => {
+  it('已获取用 source 文案映射展示获取来源，获取详情原样渲染后端拼好的整串', async () => {
     await renderPage();
     expect(document.body.textContent).toContain('充值到账');
     expect(document.body.textContent).toContain('+600');
     expect(document.body.textContent).toContain('2026-09-29 14:33:00');
+    expect(document.body.textContent).toContain('自定义充值 · 600 积分，充值积分：600');
   });
 
   it('已消耗展示任务类型中文名与规格', async () => {
