@@ -16,8 +16,18 @@
 
 ## 禁止
 
-- **禁 `prisma migrate dev` / `prisma migrate deploy`**。`_prisma_migrations` 表要么不存在、要么与手工执行的真实进度不一致 —— 这两条命令会把存量迁移当成**没跑过**，从第一条**重放**。
-- 为防误跑，`prisma.config.ts` 的 `migrations.path` 已指向 `prisma/disabled-prisma-migrations`（不存在），所以这两条命令在这里会报「找不到迁移目录」而不是动手。
+- **禁 `prisma migrate dev` / `prisma migrate deploy`**。`_prisma_migrations` 表要么不存在、要么与手工执行的真实进度不一致 —— `deploy` 会把存量迁移当成**没跑过**、从第一条**重放**。
+
+怎么拦的（两份保险，机制不同，别记混）：
+
+| 命令 | 被谁拦 | 实测表现 |
+| --- | --- | --- |
+| `migrate deploy` / `migrate status` / `migrate resolve` | `prisma.config.ts` 的 `migrations.path` 指到了别处 | `No migration found in prisma/migrations` / `No pending migrations to apply.` |
+| `migrate dev` | **不是**被 `migrations.path` 拦的 —— 它对缺失的迁移目录会**自己建**。拦住它的是「那个路径上放了一个**普通文件**」（本目录的 `disabled-prisma-migrations`），`mkdir` 直接 `ENOTDIR` 失败 | `Error: Failed to create a new migration directory: ENOTDIR`，**不执行任何我们的 DDL** |
+
+`migrate dev` 的残留：它会在目标库建一张 `_prisma_migrations` 记账表（Prisma 自己的表，无业务 DDL）。
+
+⚠️ `prisma migrate diff --from-migrations prisma/migrations …` 是**显式传路径**的，绕过本闸 —— 它只算不执行，但仍能读到那 78 个目录，别把它当「闸也拦得住」的证据。
 
 ## 正常可用
 

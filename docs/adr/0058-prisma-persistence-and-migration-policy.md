@@ -47,7 +47,7 @@
 | `pnpm db:fresh` = `migrate deploy` + 灌 seed | 根 `package.json` 里**没有这个入口** |
 | 迭代中**绝对禁** `db push` | `db push` 是 DB 门控集成测试的**常规建库配方**（适用范围见下） |
 
-全仓调用 `prisma migrate deploy` / `migrate dev` 的地方**为零件**（唯一命中是 parity 测试里的字符串断言与迁移文件里的注释）。
+全仓调用 `prisma migrate deploy` / `migrate dev` 的地方**为零处**（唯一命中是 parity 测试里的字符串断言与迁移文件里的注释）。
 
 **真陷阱（改前的实测输出）**：
 
@@ -62,7 +62,7 @@ To apply migrations in production run prisma migrate deploy.
 
 `_prisma_migrations` 与实际的手工执行进度不一致，所以 Prisma **主动叫人去跑 `migrate deploy`** —— 一跑就把存量当没跑过**重放**。
 
-**处置**：`prisma.config.ts` 的 `migrations.path` 指向**不存在**的 `prisma/disabled-prisma-migrations`，这两条命令因此报「找不到迁移目录」而不动手。改后同一条命令的输出：
+**处置**：`prisma.config.ts` 的 `migrations.path` 指向 `prisma/disabled-prisma-migrations`，且该路径上放了一个**普通文件**。两份机制分别拦 `deploy` 与 `dev`（`migrations.path` 拦前者；后者对缺失目录会自己建，靠普通文件的 `ENOTDIR` 拦）—— 细节与实测输出见 `backend/prisma/README.md`。改后：
 
 ```text
 $ prisma migrate deploy

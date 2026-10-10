@@ -1,0 +1,11 @@
+本仓的 SQL 变更只走「手写 + 人工审批」，不使用 Prisma 的迁移执行。
+
+这个文件挡在 prisma.config.ts 的 migrations.path 上，是为了让 Prisma 的迁移命令在这里跑不起来：
+
+- prisma migrate dev      → 会去创建 migrations 目录；此处是普通文件，直接 ENOTDIR 失败（不执行任何 DDL）
+- prisma migrate deploy   → 找不到迁移目录，报 No migration found / No pending migrations to apply.
+
+⚠️ 不要把本文件改成目录，也不要删它。
+⚠️ prisma migrate diff --from-migrations prisma/migrations 显式传路径，绕过本闸。
+
+口径与三轨说明见同目录 README.md。
