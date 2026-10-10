@@ -278,6 +278,7 @@ vi.mock('@/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
     queryKey: ['generation-quote', 'mock'],
+    staleTime: Infinity,
     queryFn: async () => ({ credits: null, quote_revision: null }) satisfies GenerationQuote,
   })),
 }));
