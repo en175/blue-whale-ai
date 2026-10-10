@@ -176,7 +176,6 @@ import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
-import { COMPLIANCE_SUCCESS_TOAST, COMPLIANCE_FAILED_TOAST, depositCanvasAssetToCharacterLibrary, isComplianceFailedError, resolveCharacterLibraryMaterialId, waitComplianceAssetReady } from './characterLibraryDeposit';
 import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from './livenessLibraryImport';
 import { buildImageJobReferences, buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
@@ -213,6 +212,7 @@ import { useCanvasAssetActions } from './hooks/useCanvasAssetActions';
 import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import { useCanvasSave, EMPTY_CLEAR_CONFLICT_TOAST, EMPTY_OVERWRITE_REJECTED_TOAST } from './hooks/useCanvasSave';
 import { useCanvasRefStripOrder } from './hooks/useCanvasRefStripOrder';
+import { useCanvasCompliance } from './hooks/useCanvasCompliance';
 import {
   applyIndependentGroupDrag,
   bringGroupToFront,
@@ -1734,6 +1734,7 @@ export default function CanvasPage() {
       setShowAgent(true);
     }
   };
+  const complianceCheckRef = useRef<((id: string) => void) | undefined>(undefined);
   const actionsRef = useRef({
     duplicate: handleDuplicateNode,
     addToChat: handleAddToChatNode,
@@ -3010,125 +3011,6 @@ export default function CanvasPage() {
       showToast('error', '复制图片失败');
     }
   };
-  const patchNodeCompliance = (id: string, patch: Record<string, unknown>) => {
-    setMediaNodes((prev) => {
-      const next = prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
-      mediaNodesRef.current = next;
-      return next;
-    });
-  };
-  const startNodeCompliance = (id: string) => {
-    patchNodeCompliance(id, {
-      complianceBusy: true,
-      compliancePassed: false,
-      complianceFailed: false,
-    });
-  };
-  const toastComplianceError = (err: unknown) => {
-    if (isApiError(err)) return;
-    showToast(
-      'error',
-      isComplianceFailedError(err)
-        ? COMPLIANCE_FAILED_TOAST
-        : err instanceof Error
-          ? err.message
-          : '校验失败，请重试',
-    );
-  };
-  const failNodeCompliance = (id: string, err: unknown) => {
-    patchNodeCompliance(id, {
-      complianceBusy: false,
-      compliancePassed: false,
-      complianceFailed: isComplianceFailedError(err),
-    });
-    toastComplianceError(err);
-  };
-  const ensureMediaNodeCompliance = async (
-    id: string,
-    opts?: { toastSuccess?: boolean },
-  ): Promise<string | undefined> => {
-    const toastSuccess = opts?.toastSuccess !== false;
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node) return undefined;
-    const d = (node.data ?? {}) as Record<string, unknown>;
-    if (d.assetMissing === true) return undefined;
-    const assetId = d.assetId != null ? String(d.assetId) : '';
-    const url = typeof d.src === 'string' ? d.src : '';
-    const mediaType = d.mediaType === 'video' || d.mediaType === 'audio' ? d.mediaType : 'image';
-    const verifiedId = resolveCharacterLibraryMaterialId({
-      mediaType,
-      snapshotMaterialId: snapshotAssetsRef.current[assetId]?.material_id,
-    });
-    if (verifiedId) {
-      startNodeCompliance(id);
-      try {
-        await waitComplianceAssetReady(verifiedId);
-        if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
-        if (assetId) {
-          const current = snapshotAssetsRef.current[assetId];
-          if (current) {
-            snapshotAssetsRef.current = {
-              ...snapshotAssetsRef.current,
-              [assetId]: { ...current, material_id: verifiedId, material_status: 'Active' },
-            };
-          }
-          patchAsset?.(assetId, { material_id: verifiedId, material_status: 'Active' });
-        }
-        patchNodeCompliance(id, {
-          complianceBusy: false,
-          compliancePassed: true,
-          complianceFailed: false,
-          materialId: verifiedId,
-        });
-        return verifiedId;
-      } catch (err) {
-        failNodeCompliance(id, err);
-        return undefined;
-      }
-    }
-    if (!url || url.startsWith('blob:')) {
-      showToast('warn', '素材尚未上传完成，请稍后重试');
-      return undefined;
-    }
-    startNodeCompliance(id);
-    try {
-      const result = await depositCanvasAssetToCharacterLibrary({
-        sourceAssetId: assetId,
-        url,
-        name: typeof d.fileName === 'string' ? d.fileName : '素材',
-        mediaType,
-      });
-      if (!result.materialId) {
-        patchNodeCompliance(id, { complianceBusy: false, compliancePassed: false, complianceFailed: false });
-        showToast('error', '校验失败，请重试');
-        return undefined;
-      }
-      if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
-      if (assetId && result.materialId) {
-        const current = snapshotAssetsRef.current[assetId];
-        if (current) {
-          snapshotAssetsRef.current = {
-            ...snapshotAssetsRef.current,
-            [assetId]: { ...current, material_id: result.materialId, material_status: 'Active' },
-          };
-        }
-        patchAsset?.(assetId, { material_id: result.materialId, material_status: 'Active' });
-      }
-      patchNodeCompliance(id, {
-        complianceBusy: false,
-        compliancePassed: true,
-        complianceFailed: false,
-        materialId: result.materialId,
-      });
-      return result.materialId;
-    } catch (err) {
-      failNodeCompliance(id, err);
-      return undefined;
-    }
-  };
-  const handleComplianceCheck = async (id: string) => {
-    await ensureMediaNodeCompliance(id, { toastSuccess: true });
-  };
   const handleFillEmptyShell = (id: string, file: File) => {
     void placeFileOnCanvas(file, { replaceNodeId: id }).catch((err) => {
       showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
@@ -3147,7 +3029,7 @@ export default function CanvasPage() {
       void applyClipboardAtFlow(position);
     },
     copyImage: (id) => { void handleCopyImage(id); },
-    complianceCheck: (id) => { void handleComplianceCheck(id); },
+    complianceCheck: (id) => { void complianceCheckRef.current?.(id); },
     fillEmptyShell: handleFillEmptyShell,
   };
   const placeAssetsOnCanvas = (
@@ -3609,6 +3491,14 @@ export default function CanvasPage() {
     blockInvalidDraft,
     showToast,
   });
+  const { handleComplianceCheck } = useCanvasCompliance({
+    setMediaNodes,
+    mediaNodesRef,
+    snapshotAssetsRef,
+    patchAsset,
+    showToast,
+  });
+  complianceCheckRef.current = (id) => { void handleComplianceCheck(id); };
   const docLoadEpochRef = useRef<object>({});
   const imageToolsAcceptanceRef = useRef(new Map<string, { resolve: (jobId: string) => void; reject: (e: unknown) => void }>());
   const imageToolsTask = useMemo(() => createImageToolsTask((nodeId, settled) => {
