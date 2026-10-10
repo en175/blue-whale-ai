@@ -42,8 +42,7 @@ export interface CreditLotRow {
   remaining: number;
   created_at: string;
   expires_at: string;
-  biz_type: string;
-  biz_id: string | null;
+  detail: string;
 }
 
 export interface ConsumptionRow {

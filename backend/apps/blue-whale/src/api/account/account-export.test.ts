@@ -82,7 +82,7 @@ describe("buildExportWorkbook", () => {
     expect(headersOf(sheet)).not.toContain("订单编号");
   });
 
-  it("已获取：获取详情用商品名称 + 批次剩余，永久批次写「永久有效」", async () => {
+  it("已获取：获取详情按批次角色拼（充值积分 / 赠送积分），无商品名回落来源文案", async () => {
     const rows: ExportLotRow[] = [
       {
         source: "purchased",
@@ -91,6 +91,14 @@ describe("buildExportWorkbook", () => {
         created_at: "2024-12-01T09:12:00+08:00",
         expires_at: "2026-12-01T00:00:00+08:00",
         product_name: "自定义充值 · 3,000 积分",
+      },
+      {
+        source: "bonus",
+        amount: 1000,
+        remaining: 1000,
+        created_at: "2024-12-01T09:12:00+08:00",
+        expires_at: "2026-12-01T00:00:00+08:00",
+        product_name: "白送",
       },
       {
         source: "gift",
@@ -103,7 +111,7 @@ describe("buildExportWorkbook", () => {
     ];
 
     const sheet = await readBack(
-      await buildExportWorkbook({ scope: "gain", rows, total: 2 }, []),
+      await buildExportWorkbook({ scope: "gain", rows, total: 3 }, []),
     );
 
     expect(headersOf(sheet)).toEqual([
@@ -116,12 +124,16 @@ describe("buildExportWorkbook", () => {
     ]);
     expect(sheet.getRow(2).getCell(1).value).toBe("2024-12-01 09:12");
     expect(sheet.getRow(2).getCell(2).value).toBe("充值到账");
-    expect(sheet.getRow(2).getCell(3).value).toBe("自定义充值 · 3,000 积分 · 剩余 1200");
+    expect(sheet.getRow(2).getCell(3).value).toBe(
+      "自定义充值 · 3,000 积分，充值积分：3000 · 剩余 1200",
+    );
     expect(sheet.getRow(2).getCell(4).value).toBe("2024-12-01 09:12");
     expect(sheet.getRow(2).getCell(5).value).toBe("2026-12-01 00:00");
     expect(sheet.getRow(2).getCell(6).value).toBe(3000);
-    expect(sheet.getRow(3).getCell(3).value).toBe("赠送 100 积分");
-    expect(sheet.getRow(3).getCell(5).value).toBe("永久有效");
+    expect(sheet.getRow(3).getCell(2).value).toBe("充值赠送");
+    expect(sheet.getRow(3).getCell(3).value).toBe("白送，赠送积分：1000");
+    expect(sheet.getRow(4).getCell(3).value).toBe("赠送 100 积分");
+    expect(sheet.getRow(4).getCell(5).value).toBe("永久有效");
     expect(headersOf(sheet)).not.toContain("剩余");
   });
 

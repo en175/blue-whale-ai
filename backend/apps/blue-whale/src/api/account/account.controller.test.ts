@@ -427,7 +427,7 @@ describe("AccountController.creditLots（批次台账）", () => {
     });
   });
 
-  it("投影成前端字段：空串到期时间 = 永久有效，且**不含订单号**", async () => {
+  it("投影成前端字段：空串到期时间原样透传、获取详情由后端拼好，且**不含订单号**", async () => {
     listCreditLots.mockResolvedValue({
       items: [
         {
@@ -457,12 +457,51 @@ describe("AccountController.creditLots（批次台账）", () => {
       remaining: 1200,
       created_at: "2024-12-01T09:12:00+08:00",
       expires_at: "",
-      product_name: "自定义充值 · 3,000 积分",
+      detail: "自定义充值 · 3,000 积分，充值积分：3000 · 剩余 1200",
     });
     expect(response.data.items[0]).not.toHaveProperty("biz_id");
+    expect(response.data.items[0]).not.toHaveProperty("product_name");
   });
 
-  it("非充值批次不打订单表：biz_type 不是 recharge 时 product_name 为 null", async () => {
+  it("★ 赠送批次与充值批次各写自己的角色，数字取本批次 amount", async () => {
+    listCreditLots.mockResolvedValue({
+      items: [
+        {
+          lotId: "7",
+          source: "purchased",
+          amount: 1500,
+          remaining: 1500,
+          createdAt: "2026-09-29T16:17:32+08:00",
+          expiresAt: "2028-09-29T16:17:32+08:00",
+          bizType: "recharge",
+          bizId: "RC20260929081624f588efc4",
+        },
+        {
+          lotId: "8",
+          source: "bonus",
+          amount: 1000,
+          remaining: 1000,
+          createdAt: "2026-09-29T16:17:32+08:00",
+          expiresAt: "2028-09-29T16:17:32+08:00",
+          bizType: "recharge",
+          bizId: "RC20260929081624f588efc4",
+        },
+      ],
+      total: 2,
+    });
+    loadOrdersByTradeNos.mockResolvedValue(
+      new Map([["RC20260929081624f588efc4", { tradeNo: "RC20260929081624f588efc4", productName: "白送" }]]),
+    );
+
+    const response = await controller.creditLots(USER, {});
+
+    expect(response.data.items.map((item) => item.detail)).toEqual([
+      "白送，充值积分：1500",
+      "白送，赠送积分：1000",
+    ]);
+  });
+
+  it("非充值批次不打订单表：biz_type 不是 recharge 时回落来源文案", async () => {
     listCreditLots.mockResolvedValue({
       items: [
         {
@@ -482,7 +521,7 @@ describe("AccountController.creditLots（批次台账）", () => {
     const response = await controller.creditLots(USER, {});
 
     expect(loadOrdersByTradeNos).not.toHaveBeenCalled();
-    expect(response.data.items[0].product_name).toBeNull();
+    expect(response.data.items[0].detail).toBe("赠送 100 积分");
   });
 
   it("日期区间下推给 billing 的 ListLots", async () => {
@@ -779,7 +818,9 @@ describe("AccountController.export（导出 xlsx）", () => {
     const file = await controller.export(USER, { scope: "gain" }, fakeRes());
     const sheet = await readBackWorkbook(await toBuffer(file));
 
-    expect(sheet.getRow(2).getCell(3).value).toBe("自定义充值 · 3,000 积分 · 剩余 1200");
+    expect(sheet.getRow(2).getCell(3).value).toBe(
+      "自定义充值 · 3,000 积分，充值积分：3000 · 剩余 1200",
+    );
     expect(sheet.getRow(2).getCell(4).value).toBe("2024-12-01 09:12");
     expect(sheet.getRow(2).getCell(5).value).toBe("永久有效");
     expect(sheet.getRow(2).getCell(6).value).toBe(3000);

@@ -5,6 +5,7 @@ import {
   type UserOrderStatus,
 } from "@lib/shared/recharge/user-order-status.js";
 import { EXPIRE_TYPE, lotSourceText } from "./consumption-detail.js";
+import { lotDetailText } from "./lot-detail.js";
 
 export const EXPORT_SCOPES = ["orders", "gain", "consume"] as const;
 export type ExportScope = (typeof EXPORT_SCOPES)[number];
@@ -71,8 +72,12 @@ export interface ExportLotRow {
 }
 
 function lotDetail(row: ExportLotRow): string {
-  const head = row.product_name ?? `${lotSourceText(row.source)} ${row.amount} 积分`;
-  return row.remaining < row.amount ? `${head} · 剩余 ${row.remaining}` : head;
+  return lotDetailText({
+    source: row.source,
+    amount: row.amount,
+    remaining: row.remaining,
+    productName: row.product_name,
+  });
 }
 
 const GAIN: ExportSpec<ExportLotRow> = {
