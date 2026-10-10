@@ -117,6 +117,19 @@ describe("assertMaterialLinkable（上传口素材闸）", () => {
     });
   });
 
+  it("本地行 Processing + 上游仍 Processing → 拒绝，reason=pending（未到终态，不是判失败）", async () => {
+    const { gateDeps } = deps(rowOf("Processing"), {
+      status: "Processing",
+      groupId: GROUP,
+    });
+    const result = await assertMaterialLinkable(gateDeps, "9", MATERIAL);
+    expect(result).toEqual({
+      ok: false,
+      reason: "pending",
+      message: NOT_APPROVED,
+    });
+  });
+
   it("无记录 + 上游不可达 → 拒绝，且**不造行**（坏响应不配留下痕迹）", async () => {
     const { gateDeps, upsertProcessing } = deps(null, null);
     const result = await assertMaterialLinkable(gateDeps, "9", MATERIAL);

@@ -833,6 +833,25 @@ describe("MaterialService —— ADR-0126 新行为", () => {
       expect(clearMany).not.toHaveBeenCalled();
       expect(deleteMany).not.toHaveBeenCalled();
     });
+
+    it("上游仍 Processing（未到终态）→ 放行且**不清历史**（别把在途素材判成失败并删掉）", async () => {
+      const { prisma, clearMany, deleteMany } = prismaStub({
+        linked: LINKED,
+        rowStatus: "Processing",
+      });
+      const calls = stubFetch(() =>
+        json({ Result: { Id: LINKED, Status: "Processing" } }),
+      );
+
+      await expect(
+        makeService(prisma).preflightCreateAsset({ userId: "9", sourceAssetId: "996239" }),
+      ).resolves.toBeNull();
+      expect(clearMany).not.toHaveBeenCalled();
+      expect(deleteMany).not.toHaveBeenCalled();
+      expect(calls.map((c) => c.url)).toEqual([
+        "http://gateway.test/api/material/GetAsset",
+      ]);
+    });
   });
 
   describe("ingestUpstreamMaterialStatuses", () => {
@@ -876,6 +895,76 @@ describe("MaterialService —— ADR-0126 新行为", () => {
       });
 
       expect(mirrorMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("recordClaimedRealGroup", () => {
+    function groupPrisma(existing: unknown = null) {
+      const upsert = vi.fn().mockResolvedValue({});
+      return {
+        prisma: {
+          client: {
+            material_groups: {
+              findFirst: vi.fn().mockResolvedValue(existing),
+              upsert,
+            },
+          },
+        },
+        upsert,
+      };
+    }
+
+    it("领组时落 kind=real 行，组名取自 ListAssetGroups（GetAssetGroup 对组名回空串）", async () => {
+      const { prisma, upsert } = groupPrisma();
+      const calls = stubFetch(() =>
+        json({
+          Result: {
+            TotalCount: 2,
+            Items: [
+              { Id: "group-other", Name: "别的组", GroupType: "LivenessFace" },
+              { Id: "group-real-1", Name: "我的真人组", GroupType: "LivenessFace" },
+            ],
+          },
+        }),
+      );
+
+      await makeService(prisma).recordClaimedRealGroup("9", "group-real-1");
+
+      expect(calls.map((c) => c.url)).toEqual([
+        "http://gateway.test/api/material/ListAssetGroups",
+      ]);
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            material_group_id: "group-real-1",
+            kind: "real",
+            name: "我的真人组",
+          }),
+        }),
+      );
+    });
+
+    it("列表里找不到该组 → 名字回落成组 id（行照落，不丢）", async () => {
+      const { prisma, upsert } = groupPrisma();
+      stubFetch(() => json({ Result: { TotalCount: 0, Items: [] } }));
+
+      await makeService(prisma).recordClaimedRealGroup("9", "group-real-1");
+
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ name: "group-real-1" }),
+        }),
+      );
+    });
+
+    it("已有本地行 → 跳过（领组后前端会继续轮询）", async () => {
+      const { prisma, upsert } = groupPrisma({ id: 1n });
+      const calls = stubFetch(() => json({}));
+
+      await makeService(prisma).recordClaimedRealGroup("9", "group-real-1");
+
+      expect(calls).toHaveLength(0);
+      expect(upsert).not.toHaveBeenCalled();
     });
   });
 });

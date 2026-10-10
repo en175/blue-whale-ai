@@ -1,4 +1,3 @@
-
 SET NAMES utf8mb4;
 
 DROP INDEX `idx_asset_material_group` ON `assets`;

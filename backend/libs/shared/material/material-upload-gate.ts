@@ -25,7 +25,10 @@ export type UploadMaterialGateOutcome =
       message: string;
     };
 
-export type UploadMaterialGateFailureReason = "not_approved" | "unavailable";
+export type UploadMaterialGateFailureReason =
+  | "not_approved"
+  | "pending"
+  | "unavailable";
 
 export interface UploadMaterialGateDeps {
   repo: Pick<
@@ -98,7 +101,7 @@ export async function assertMaterialLinkable(
   if (status !== "Active") {
     return {
       ok: false,
-      reason: "not_approved",
+      reason: status === "Failed" ? "not_approved" : "pending",
       message: MATERIAL_NOT_APPROVED_MESSAGE,
     };
   }

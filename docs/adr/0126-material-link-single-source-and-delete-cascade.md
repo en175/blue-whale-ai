@@ -14,7 +14,7 @@
 
 **`ListAssetGroups` 两条路都读本地，但 `GroupType` 仍分流。** AIGC→`kind="virtual"`、LivenessFace→`kind="real"`，走 `pageByUser(userId, kind, ...)`；缺失/未知 `GroupType` 沿用旧行为（透传）。**不能**理解成「忽略 `GroupType` 返回该用户全部组」——前端两个 tab 都靠它分流，忽略后两个 tab 会返回同一份。「只显示自己的组」只有本地表能保证：上游返回不带归属，而素材库是「共享、单租户」（`GLOSSARY.md`），透传就会串号。
 
-**真人组镜像只在领组时落行，存量不补偿。** 领组成功（`GetVisualValidateResult` 返回非空 `GroupId`）后补一次 `GetAssetGroup` 取 name/cover，落 `kind="real"` 行。存量真人组用户重走 H5 认证——代价是重新刷脸 + 重新上传素材，旧组留在上游。
+**真人组镜像只在领组时落行，存量不补偿。** 领组成功（`GetVisualValidateResult` 返回非空 `GroupId`）后**补一次 `ListAssetGroups(GroupType="LivenessFace")` 并按 `Id` 命中取组名**，落 `kind="real"` 行；命中不到就回落成组 id（不丢行）。**不用 `GetAssetGroup` 取名字**——2026-10-10 实测上游对该接口回 `"Name": ""`（空串），真名字只在 `ListAssetGroups` 里（同一批组它回 `"Name":"1"`）。上游也**没有封面字段**，故 `cover_url` 恒为 null。存量真人组用户重走 H5 认证——代价是重新刷脸 + 重新上传素材，旧组留在上游。
 
 **`CreateAsset` 加前置判断：同一个资产重复入库不再重复建。** 带 `SourceAssetId` 且该资产已有绑定时，先判一次绑定素材此刻的状态：**就绪 → 幂等短路**（返回上游同款信封，`Result.Id` = 既有素材 id，多一个 `AlreadyLinked: true`，**不打上游、不改绑定**——状态判定复用上传口的素材闸，本地行不在终态时可能顺带刷新一次状态镜像）；**判失败 → 清掉历史的**（上游 + 本地）后放行，让这次重新入库；**上游不可达 → 放行**（判不了就不拦）。失败分类按闸的 `reason` 判别位分流（**不按文案字符串**），未知分支一律走「放行不清」的安全向。放后端而不是前端，是因为**本地资产只能指向一条库素材**（`uq_asset_material_id` 单列唯一 + 覆盖写）：重复入库会把上一条素材在本地变成无人指向的孤儿，只有拦在调用上游之前才堵得死。前置判断**必须排在 `ensureVirtualDefaultGroup` 之前**——建组是上游写 + 落本地行，晚于它就会在短路之前先留下一次建组。
 
@@ -34,7 +34,9 @@
 - `assets` 少一列一索引；`bindMaterialId`/`clearMaterialLink` 的写入从「两列一起清」退化成单列，覆盖语义简化。删列后 `materialGroupId` 在上传链路上没有消费者，整条穿透链（上传闸返回值、`upload.ts` 调用点、`assets.service` 包装）一并摘掉——留它会是一个「传了但没人用」的哑参数。`material_assets` 的结构与 `NOT NULL` 约束**不动**。
 - `GET /api/assets` 与项目快照的响应里不再有 `material_group_id`。前端零消费，但 `docs/api/` 下的契约文档要同步。
 - **删组清关联改走 `material_assets` 后，存量「有 `material_id` 但无状态行」那批在删组旁路上清不掉**——它按 `material_assets.material_group_id` 反查，而那批没有行。**零回归**：改动前同样清不掉（那时按 `assets.material_group_id` 匹配，而那批该列是 NULL）。
-- **入库前置判断的「清历史」是单向的**：清了旧素材之后这次 `CreateAsset` 若仍失败，用户就处在「旧绑定没了、新素材没建」的状态。可接受（被清的本来已 `Failed`、不可用，重传即走全新流程），但要当成明文而不是意外。
+- **入库前置判断的「清历史」是单向的**：清了旧素材之后这次 `CreateAsset` 若仍失败，用户就处在「旧绑定没了、新素材没建」的状态。可接受（被清的本来已 `Failed`、不可用，重传即走全新流程），但要当成明文而不是意外。清上游那半步是 best-effort（不 await，与 `handleUpstreamMaterialFailure` ③ 同口径）。
+- **「组可见」与「素材可见」不同源**：组列表读本地、素材列表仍透传上游，而本地行会**领先于上游删除**（实测：本地那条 `real` 组在上游 `GetAssetGroup`/`ListAssets` 都 404）→ 用户能进组、却看不到素材。只可能来自「存量 + 上游侧删除」；正常路径（先领组落行 → 立刻上传素材）两边都有。
+- **上游凭证形态在批次线上已变**：不再是调用方的 Bearer，而是项目级唯一的一把（`system_settings` 表 `upstream` 行，由 `SYSTEM_SETTINGS_SECRET` 解密）。因此级联删除与前置判断**不需要** `authorization` 形参。上游可见范围随之改变（同一调用方凭证能查到的组，未必仍能被项目 key 查到）。
 - **并发仍是残余窗口**：前置判断是 check-then-act。两条**同时**到达的 `CreateAsset`（双击）在素材尚 `Processing` 时都会放行，各建一条、后者覆盖 `material_id`——本决策治的是顺序重复，不是并发重复。与 `ensureVirtualDefaultGroup` 的同类 tradeoff。
 - 上游删除不可逆，本地删除是软删——不对称是有意的。
 - **破坏性 DDL 的上线顺序**：镜像不做 `migrate deploy`，必须先上不再引用该列的两个镜像（TS backend 与 `server/blue-whale-worker`），再迁库。反了 =「新库 + 旧镜像」全站挂。

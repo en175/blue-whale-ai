@@ -158,6 +158,13 @@ export class MaterialController {
       }
       return;
     }
+    if (action === "GetVisualValidateResult") {
+      const groupId = isRecord(upstreamBody) ? upstreamBody.GroupId : undefined;
+      if (typeof groupId === "string" && MATERIAL_GROUP_ID_PATTERN.test(groupId)) {
+        await this.material.recordClaimedRealGroup(userId, groupId);
+      }
+      return;
+    }
     if (action === "ListAssets" || action === "GetAsset") {
       await this.material.ingestUpstreamMaterialStatuses(userId, upstreamBody);
       return;

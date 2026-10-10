@@ -50,7 +50,6 @@ const MATERIAL_DELETE_FAILED_MESSAGE = "素材库服务不可用，删除失败�
 
 const MATERIAL_ID_FIELD = "Id";
 
-
 @Injectable()
 export class MaterialService {
   private clientInstance?: MaterialLibraryClient;
@@ -212,6 +211,37 @@ export class MaterialService {
     materialGroupId: string,
   ): Promise<void> {
     await this.groupRepo.softDelete(userId, materialGroupId);
+  }
+
+  async recordClaimedRealGroup(
+    userId: string,
+    materialGroupId: string,
+  ): Promise<void> {
+    try {
+      const existing = await this.groupRepo.findByUserAndUpstream(
+        userId,
+        materialGroupId,
+      );
+      if (existing) return;
+      const listed = await this.callAction("ListAssetGroups", {
+        Filter: { GroupType: "LivenessFace" },
+        PageNumber: 1,
+        PageSize: 100,
+      });
+      await this.groupRepo.upsert({
+        userId,
+        materialGroupId,
+        kind: "real",
+        name: readGroupName(listed, materialGroupId) ?? materialGroupId,
+        coverUrl: null,
+      });
+    } catch (error) {
+      logger.warn(
+        `material 真人组落本地镜像失败 groupId=${materialGroupId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   get materialStatusRepo(): Pick<
@@ -399,7 +429,7 @@ export class MaterialService {
     }
     await this.ingestUpstreamMaterialStatuses(input.userId, response.body);
     const result = isRecord(response.body) ? response.body.Result : undefined;
-    if (!isRecord(result)) return {};
+    if (!isRecord(result)) return { TotalCount: 0, Items: [] };
     const items = Array.isArray(result.Items)
       ? result.Items.filter(isRecord)
       : [];
@@ -549,6 +579,22 @@ function toUpstreamGroupItem(
 
 function toIsoSeconds(d: Date | null): string | null {
   return d ? d.toISOString().replace(/\.\d{3}Z$/, "Z") : null;
+}
+
+function readGroupName(
+  response: MaterialLibraryResponse,
+  groupId: string,
+): string | null {
+  if (response.status < 200 || response.status >= 300) return null;
+  const result = isRecord(response.body) ? response.body.Result : undefined;
+  const items =
+    isRecord(result) && Array.isArray(result.Items) ? result.Items : [];
+  for (const item of items) {
+    if (!isRecord(item) || item.Id !== groupId) continue;
+    const name = item.Name;
+    return typeof name === "string" && name.length > 0 ? name : null;
+  }
+  return null;
 }
 
 function localEnvelope(

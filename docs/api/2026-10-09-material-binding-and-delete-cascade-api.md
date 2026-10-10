@@ -159,22 +159,25 @@ DELETE /api/assets/:assetId
 
 ### 3.2 响应字段
 
-返回信封与改动前一致，列表项多一个 **`CoverUrl`**（真人组封面，虚拟组为 `null`）；`GroupType` 现在会如实回 `"LivenessFace"`。
+返回信封与改动前一致；`GroupType` 现在会如实回 `"LivenessFace"`（改动前本地路径只会回 `AIGC`）。
 
 ```json
 { "Id": "group-xxx", "Name": "我的真人组", "GroupType": "LivenessFace",
-  "CoverUrl": "https://…/cover.png", "CreateTime": "…", "UpdateTime": "…" }
+  "CoverUrl": null, "CreateTime": "…", "UpdateTime": "…" }
 ```
+
+> ⚠️ **`CoverUrl` 恒为 `null`**：上游的组信息里**没有封面字段**（`GetAssetGroup` 与 `ListAssetGroups` 的返回体都实测过），本地也没有第二来源。保留该字段只是形状占位，**前端不要依赖它**。
 
 ### 3.3 真人组的本地行从哪来
 
-真人组只有在用户**走完 H5 刷脸领组**（`GetVisualValidateResult` 返回非空 `GroupId`）时才会落到本地表。因此：
+真人组只有在用户**走完 H5 刷脸领组**（`GetVisualValidateResult` 返回非空 `GroupId`）时才会落到本地表；落行时**补一次 `ListAssetGroups(GroupType="LivenessFace")` 按 `Id` 命中取组名**（不用 `GetAssetGroup`——实测它对组名回空串 `""`）。因此：
 
 - **新领的组**：领到即落行，此后 `ListAssetGroups(LivenessFace)` 能查到。
 - **存量真人组**：**不补偿**。上线前已经领过的组，本地表里没有行，列表**看不到它们**；组里的素材也看不到。
   - 处置：让这些用户**重新走一次 H5 认证**。拿到的是**新的组 id**，旧组仍留在上游、原组里的素材不会自动跟过来——需要重新上传。
   - 项目前期用户少，接受这个代价；产品侧要准备好引导文案。
   - 2026-10-09 实测的旁证：改造前 user 66 在列表里拿到了 user 38 的两个组。
+- ⚠️ **组可见 ≠ 素材可见**（两条不同源）：组列表读本地，素材列表（`ListAssets`）仍透传上游。本地行会**领先于上游删除**——实测本地一条 `real` 组在上游 `GetAssetGroup`/`ListAssets` 都回 404，表现为**用户能进组、但看不到任何素材**。**前端应对**：进组后素材为空且 `ListAssets` 报 `NotFound` 时，按「该组已不存在」提示并引导重领，不要当异常上报。
 
 ---
 
