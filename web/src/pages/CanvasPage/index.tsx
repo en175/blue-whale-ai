@@ -10,7 +10,7 @@ import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecov
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
-import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile } from './canvasPureNodeHelpers';
+import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
 import { defaultVideoModeFor, draftVideoModeOf } from './videoModes';
 import {
@@ -4316,78 +4316,46 @@ export default function CanvasPage() {
   };
   const reorderVideoFreeRefs = (keys: string[]) => generationDock.updateDraft('video', { freeReference: { operation: 'reorder', keys } });
   const planReferenceErrors = useMemo(() => {
-    const forTarget = (targetId: string | undefined, availableIds: string[]) => {
-      if (!targetId) return undefined;
-      for (const edge of edges.filter(e => e.target === targetId)) {
-        const plan = textNodes.find(n => n.id === edge.source && n.data.promptSource);
-        if (!plan || (plan.data.promptMentions === undefined && edge.data?.promptReference === undefined)) continue;
-        const text = extractTextNodeText(plan.data);
-        const mentions = promptMentionSchema.array().safeParse(plan.data.promptMentions ?? []);
-        if (!mentions.success || !validPromptMentions(text, mentions.data)) return '方案正文素材索引无效，请修正方案';
-        const bindings = promptBindingList(mentions.data);
-        const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length === 0 ? [] : undefined));
-        const label = (confirmed.success ? confirmed.data : bindings).map(b => `#${b.index}`).join('、');
-        if (!confirmed.success || !planBindingsCoveredBy(bindings, confirmed.data)) return `方案索引 ${label} 素材待同步，请先同步素材到目标`;
-        const missing = bindings.filter(b => !availableIds.includes(b.assetId));
-        if (missing.length) return `方案索引 ${missing.map(b => `#${b.index}`).join('、')} 素材缺失，请恢复连线或修正方案`;
-      }
-      return undefined;
-    };
     const videoRefs = videoSeed?.targetNodeId
       ? mergedVideoRefsWithTextIndex(videoSeed.targetNodeId, edges, mediaNodes, textNodes)
       : { reference: [] };
     const videoAvailableIds = [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])]
       .flatMap((ref) => videoRefIdentityIds(ref));
     return {
-      image: forTarget(
+      image: planReferenceErrorFor(
         imageSeed?.targetNodeId,
         imageSeed?.targetNodeId
           ? mergedImageRefsOf(imageSeed.targetNodeId, edges, [...mediaNodes, ...textNodes]).map((ref) => ref.assetId)
           : [],
+        edges,
+        textNodes,
       ),
       videoIndices: edges.filter(e => e.target === videoSeed?.targetNodeId).flatMap(e => {
         const plan = textNodes.find(n => n.id === e.source && n.data.promptSource);
         const mentions = promptMentionSchema.array().safeParse(plan?.data.promptMentions ?? []);
         return mentions.success ? promptBindingList(mentions.data).map(m => `#${m.index}`) : [];
       }).join('、'),
-      video: forTarget(videoSeed?.targetNodeId, videoAvailableIds),
+      video: planReferenceErrorFor(videoSeed?.targetNodeId, videoAvailableIds, edges, textNodes),
     };
   }, [imageSeed?.targetNodeId, videoSeed?.targetNodeId, edges, mediaNodes, textNodes]);
-  const pendingPlanSyncs = (targetId: string | undefined) => edges.filter(edge => edge.target === targetId).flatMap(edge => {
-    const node = textNodes.find(node => node.id === edge.source && node.data.promptSource);
-    if (!node) return [];
-    const mentions = promptMentionSchema.array().safeParse(node.data.promptMentions ?? []);
-    if (!mentions.success || !validPromptMentions(extractTextNodeText(node.data), mentions.data)) return [];
-    const bindings = promptBindingList(mentions.data);
-    const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length ? undefined : []));
-    return confirmed.success && planBindingsCoveredBy(bindings, confirmed.data) ? [] : [{ nodeId: node.id, title: String(node.data.title || '方案'), bindings }];
-  });
+  const pendingPlanSyncs = (targetId: string | undefined) => pendingPlanSyncsOf(targetId, edges, textNodes);
   const syncPlanToTarget = (planNodeId: string, targetId: string | undefined) => {
     const pending = pendingPlanSyncs(targetId).find(plan => plan.nodeId === planNodeId);
     if (pending && targetId) connectPlanToDraft(planNodeId, targetId);
   };
-  const imagePickMarkedIds = useMemo(() => {
-    if (!imagePickSessionActive || typeof imagePickSession !== 'string') return [] as string[];
-    const textIds = new Set(textNodes.map((n) => n.id));
-    return edges.filter((e) => e.target === imagePickSession && !textIds.has(e.source)).map((e) => e.source);
-  }, [imagePickSessionActive, imagePickSession, edges, textNodes]);
-  const videoPickMarkedIds = useMemo(() => {
-    if (!videoPickSessionActive || typeof videoPickSession !== 'string') return [] as string[];
-    const textIds = new Set(textNodes.map((n) => n.id));
-    const role = pickRefRole ?? 'reference';
-    return edges
-      .filter((e) => e.target === videoPickSession && !textIds.has(e.source) && readRefRole(e) === role)
-      .map((e) => e.source);
-  }, [videoPickSessionActive, videoPickSession, pickRefRole, edges, textNodes]);
-  const videoPickBlockedIds = useMemo(
-    () => mediaNodes.filter((n) => ((n.data ?? {}) as Record<string, unknown>).complianceFailed === true).map((n) => n.id),
-    [mediaNodes],
+  const imagePickMarkedIds = useMemo(
+    () => pickMarkedIdsFor(imagePickSession, imagePickSessionActive, edges, textNodes),
+    [imagePickSessionActive, imagePickSession, edges, textNodes],
   );
-  const audioPickMarkedIds = useMemo(() => {
-    if (!audioPickSessionActive || typeof audioPickSession !== 'string') return [] as string[];
-    const textIds = new Set(textNodes.map((n) => n.id));
-    return edges.filter((e) => e.target === audioPickSession && !textIds.has(e.source)).map((e) => e.source);
-  }, [audioPickSessionActive, audioPickSession, edges, textNodes]);
+  const videoPickMarkedIds = useMemo(
+    () => pickMarkedIdsFor(videoPickSession, videoPickSessionActive, edges, textNodes, pickRefRole ?? 'reference'),
+    [videoPickSessionActive, videoPickSession, pickRefRole, edges, textNodes],
+  );
+  const videoPickBlockedIds = useMemo(() => complianceBlockedIds(mediaNodes), [mediaNodes]);
+  const audioPickMarkedIds = useMemo(
+    () => pickMarkedIdsFor(audioPickSession, audioPickSessionActive, edges, textNodes),
+    [audioPickSessionActive, audioPickSession, edges, textNodes],
+  );
   const locateTextSource = useCallback((nodeId: string) => {
     const target = findCanvasNode(nodeId);
     if (!target) return;

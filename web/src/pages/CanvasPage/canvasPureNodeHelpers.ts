@@ -1,9 +1,17 @@
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import { isApiError } from '@/api/http';
 import type { AssetRecord } from '@/api/assets';
+import {
+  promptBindingList,
+  promptBindingsSchema,
+  type PromptBinding,
+} from '@lib/contracts/prompt-target';
+import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
+import { extractTextNodeText } from '@lib/core/text-node-content';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import { readAssetId } from './mediaRefs';
-import { asVideoRefMediaType, type VideoMediaRef } from './videoMediaRefs';
+import { planBindingsCoveredBy } from './canvasNodeUtils';
+import { asVideoRefMediaType, readRefRole, type VideoMediaRef, type VideoRefRole } from './videoMediaRefs';
 import { imageEnhanceDraftPosition } from './imageEnhance';
 import { fetchRemoteMedia } from './fetchRemoteMedia';
 import type { SpawnBox } from './draftSpawn';
@@ -78,3 +86,64 @@ export const fetchUrlAsFile = async (url: string, name: string, _type: string): 
     return null;
   }
 };
+
+export const planReferenceErrorFor = (
+  targetId: string | undefined,
+  availableIds: string[],
+  edges: Edge[],
+  textNodes: Node[],
+): string | undefined => {
+  if (!targetId) return undefined;
+  for (const edge of edges.filter((e) => e.target === targetId)) {
+    const plan = textNodes.find((n) => n.id === edge.source && n.data.promptSource);
+    if (!plan || (plan.data.promptMentions === undefined && edge.data?.promptReference === undefined)) continue;
+    const text = extractTextNodeText(plan.data);
+    const mentions = promptMentionSchema.array().safeParse(plan.data.promptMentions ?? []);
+    if (!mentions.success || !validPromptMentions(text, mentions.data)) return '方案正文素材索引无效，请修正方案';
+    const bindings = promptBindingList(mentions.data);
+    const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length === 0 ? [] : undefined));
+    const label = (confirmed.success ? confirmed.data : bindings).map((b: PromptBinding) => `#${b.index}`).join('、');
+    if (!confirmed.success || !planBindingsCoveredBy(bindings, confirmed.data)) return `方案索引 ${label} 素材待同步，请先同步素材到目标`;
+    const missing = bindings.filter((b) => !availableIds.includes(b.assetId));
+    if (missing.length) return `方案索引 ${missing.map((b) => `#${b.index}`).join('、')} 素材缺失，请恢复连线或修正方案`;
+  }
+  return undefined;
+};
+
+export const pendingPlanSyncsOf = (
+  targetId: string | undefined,
+  edges: Edge[],
+  textNodes: Node[],
+): { nodeId: string; title: string; bindings: PromptBinding[] }[] =>
+  edges
+    .filter((edge) => edge.target === targetId)
+    .flatMap((edge) => {
+      const node = textNodes.find((n) => n.id === edge.source && n.data.promptSource);
+      if (!node) return [];
+      const mentions = promptMentionSchema.array().safeParse(node.data.promptMentions ?? []);
+      if (!mentions.success || !validPromptMentions(extractTextNodeText(node.data), mentions.data)) return [];
+      const bindings = promptBindingList(mentions.data);
+      const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length ? undefined : []));
+      return confirmed.success && planBindingsCoveredBy(bindings, confirmed.data)
+        ? []
+        : [{ nodeId: node.id, title: String(node.data.title || '方案'), bindings }];
+    });
+
+export const pickMarkedIdsFor = (
+  session: string | boolean | null | undefined,
+  active: boolean,
+  edges: Edge[],
+  textNodes: Node[],
+  role?: VideoRefRole,
+): string[] => {
+  if (!active || typeof session !== 'string') return [];
+  const textIds = new Set(textNodes.map((n) => n.id));
+  return edges
+    .filter((e) => e.target === session && !textIds.has(e.source) && (role === undefined || readRefRole(e) === role))
+    .map((e) => e.source);
+};
+
+export const complianceBlockedIds = (mediaNodes: Node[]): string[] =>
+  mediaNodes
+    .filter((n) => ((n.data ?? {}) as Record<string, unknown>).complianceFailed === true)
+    .map((n) => n.id);
