@@ -3,6 +3,7 @@ import type { GenerationModel } from '@/api/generation';
 import {
   audioReferenceMaxOf,
   imageReferenceMaxOf,
+  maxReferenceDurationSecOf,
   supportsAudioReferenceOf,
   supportsVideoReferenceOf,
   videoReferenceMaxOf,
@@ -23,6 +24,7 @@ export function videoRefCapsOfModel(model?: GenerationModel | null): VideoRefCap
     videoReferenceMax: videoReferenceMaxOf(f),
     audioReferenceMax: audioReferenceMaxOf(f),
     imageMax: imageReferenceMaxOf(f),
+    maxReferenceDurationSec: maxReferenceDurationSecOf(f),
   };
 }
 

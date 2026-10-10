@@ -278,3 +278,32 @@ describe('TC_DG_205 视频参考跨 ID 空间去重', () => {
     expect(merged.reference).toEqual([projectRef]);
   });
 });
+
+describe('checkAddVideoRef 参考素材累计时长上限', () => {
+  const capsWithDuration = { ...allCaps, videoReferenceMax: 10, maxReferenceDurationSec: 15 };
+  const vid = (id: string, duration: number): import('./videoMediaRefs').VideoMediaRef => ({
+    nodeId: id,
+    url: `http://vid/${id}.mp4`,
+    name: id,
+    assetId: `a-${id}`,
+    mediaType: 'video',
+    duration,
+  });
+
+  it('累计未超上限放行', () => {
+    expect(checkAddVideoRef('reference', 'video', 'a-new', { reference: [vid('v1', 6)] }, capsWithDuration, undefined, 8)).toBeNull();
+  });
+
+  it('累计超上限硬拦并提示模型上限', () => {
+    expect(checkAddVideoRef('reference', 'video', 'a-new', { reference: [vid('v1', 10)] }, capsWithDuration, undefined, 6))
+      .toBe('加入后参考素材总时长超过 15 秒，请减少素材');
+  });
+
+  it('上限为 null 时不拦（不限）', () => {
+    expect(checkAddVideoRef('reference', 'video', 'a-new', { reference: [vid('v1', 999)] }, { ...allCaps, maxReferenceDurationSec: null }, undefined, 999)).toBeNull();
+  });
+
+  it('首尾帧不做时长校验', () => {
+    expect(checkAddVideoRef('first', 'image', 'a-new', { reference: [vid('v1', 999)] }, capsWithDuration, undefined, 999)).toBeNull();
+  });
+});

@@ -140,7 +140,7 @@ export function createVideoGenerationDock(getHost: () => VideoGenerationDockHost
       if (ref) {
         const previous = state.freeRefs;
         if (ref.operation === 'add') {
-          const error = checkAddVideoRef(ref.role!, ref.item!.mediaType, ref.item!.assetId, previous, undefined, [ref.item!.materialId]);
+          const error = checkAddVideoRef(ref.role!, ref.item!.mediaType, ref.item!.assetId, previous, undefined, [ref.item!.materialId], ref.item!.duration);
           if (error) { getHost().toast('warn', error); return; }
           change({ freeRefs: ref.role === 'reference' ? { ...previous, reference: [...previous.reference, ref.item!] } : { ...previous, [ref.role!]: ref.item } });
         } else if (ref.operation === 'replace') {

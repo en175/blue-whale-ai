@@ -235,6 +235,7 @@ export interface VideoRefCapabilities {
   audioReferenceMax?: number;
   imageReferenceMax?: number;
   imageMax?: number;
+  maxReferenceDurationSec?: number | null;
 }
 
 export function videoRefConflict(
@@ -274,6 +275,7 @@ export function checkAddVideoRef(
   refs: VideoMediaRefs,
   caps?: VideoRefCapabilities | null,
   relatedIds?: ReadonlyArray<string | undefined>,
+  duration?: number,
 ): string | null {
   if (role !== 'reference' && mediaType !== 'image') return '首尾帧仅支持图片素材';
   if (role === 'first' && refs.first) return '首帧已指定，请先移除现有首帧';
@@ -292,6 +294,11 @@ export function checkAddVideoRef(
       if (refs.reference.filter(r => r.mediaType === 'audio').length >= audioMax) return `参考音频最多 ${audioMax} 个`;
     } else if (refs.reference.filter(r => r.mediaType === 'image').length >= imageMax) {
       return `参考图最多 ${imageMax} 张`;
+    }
+    const maxDuration = caps?.maxReferenceDurationSec ?? null;
+    if (maxDuration != null) {
+      const total = refs.reference.reduce((sum, r) => sum + (r.duration ?? 0), 0) + (duration ?? 0);
+      if (total > maxDuration) return `加入后参考素材总时长超过 ${maxDuration} 秒，请减少素材`;
     }
   }
   return null;
