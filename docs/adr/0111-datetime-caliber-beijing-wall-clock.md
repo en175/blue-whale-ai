@@ -139,8 +139,10 @@ T+10m  MATERIAL_STATUS_POLL_MAX_AGE_MINUTES 回原值
 | `wallClock*` 一组序列化函数 | `backend/libs/core/wall-clock.ts` | 唯一那处格式化：读**进程本地时区**（`getFullYear()` / `getTimezoneOffset()`），产出 `...+08:00` |
 | 容器 `TZ=Asia/Shanghai` | `backend/Dockerfile`（alpine 另装 `tzdata`） | 进程时区。此前 backend 容器**没有任何 TZ 注入**，跑在 UTC |
 | 会话时区走连接串 | `DATABASE_URL` 的 `timezone` 查询参数 → `backend/libs/shared/persistence/db.ts` | 库会话时区。与 Java 的 `connectionTimeZone=…` 同构；代码里不再写 `"+08:00"` |
-| prisma 适配器补丁 | `backend/patches/@prisma__adapter-mariadb@7.9.0.patch` | 读侧按进程本地时区解释 `DATETIME` 字面量、写侧用本地分量生成；`+08:00` 与 `+ 8 * 3600e3` 双双移除 |
+| prisma 适配器补丁 | `backend/patches/@prisma__adapter-mariadb@7.9.0.patch` | 读侧按 `BLUE_WHALE_DB_OFFSET`、写侧按 `BLUE_WHALE_DB_OFFSET_MS` 解释与生成 `DATETIME` 字面量。**这一层刻意不跟进程时区走**：库里存什么**是数据契约**，自洽比「跟部署一致」重要；偏移收敛到补丁顶部两个相邻的具名常量，不再是散落的魔数 |
 | 装配期守卫 | `backend/libs/shared/persistence/clock-agreement.ts`，`main.ts` 启动时调用 | 比「进程偏移」与「库会话偏移」（`TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())`），不一致**拒绝启动** |
+
+**为什么库读写层仍然钉死 `+08:00`**：它与展示层是**两个不同的问题**。展示口径（接口给人看什么）跟部署时区走、有守卫兜底；存储契约（库里存什么）必须自洽 —— 让它跟着 `TZ` 走，等于把「库里的字面量含义」交给环境变量，配错就静默改写了历史数据的含义。所以补丁用一处具名常量钉住 `+08:00`，会话时区仍由连接串给（这样守卫才有两个独立输入）。
 
 **为什么会话时区不能从进程推**：守卫比的正是这两个值。若会话时区也从进程偏移派生，两者恒等，守卫等于没做。所以会话时区必须来自**另一个部署输入**（连接串），与 Java 侧一致。
 
