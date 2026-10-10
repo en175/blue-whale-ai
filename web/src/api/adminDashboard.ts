@@ -70,6 +70,14 @@ export function validateRange(from: string, to: string): string {
   return '';
 }
 
+const BEIJING_DATE = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
 export function beijingToday(now: Date = new Date()): string {
-  return new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const parts = new Map(BEIJING_DATE.formatToParts(now).map((part) => [part.type, part.value]));
+  return `${parts.get('year')}-${parts.get('month')}-${parts.get('day')}`;
 }

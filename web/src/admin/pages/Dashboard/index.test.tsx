@@ -3,6 +3,7 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beijingToday } from '@/api/adminDashboard';
 import Dashboard from './index';
 
 const api = vi.hoisted(() => ({ fetchAdminDashboard: vi.fn() }));
@@ -118,7 +119,7 @@ describe('Dashboard 仪表盘（按区间统计）', () => {
 
     expect(api.fetchAdminDashboard).toHaveBeenCalledTimes(1);
     const range = api.fetchAdminDashboard.mock.calls[0]?.[0];
-    const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    const today = beijingToday();
     expect(range).toEqual({ from: today, to: today });
     expect(input('起始日期').value).toBe(today);
     expect(input('结束日期').value).toBe(today);
@@ -224,7 +225,7 @@ describe('Dashboard 仪表盘（按区间统计）', () => {
     await setDate('起始日期', '2026-09-01');
     await click('今天');
 
-    const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    const today = beijingToday();
     expect(input('起始日期').value).toBe(today);
     expect(input('结束日期').value).toBe(today);
   });
