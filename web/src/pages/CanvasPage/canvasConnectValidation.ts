@@ -97,7 +97,8 @@ export function createConnectValidators(host: ConnectValidatorHost) {
     const materialId = typeof sourceData.materialId === 'string' && sourceData.materialId
       ? sourceData.materialId
       : undefined;
-    const msg = checkAddVideoRef(role, mediaType, assetId, refs, videoCapsOfDraft(targetId), [materialId]);
+    const duration = typeof sourceData.duration === 'number' && sourceData.duration > 0 ? sourceData.duration : undefined;
+    const msg = checkAddVideoRef(role, mediaType, assetId, refs, videoCapsOfDraft(targetId), [materialId], duration);
     if (msg) {
       host.showToast('warn', msg);
       return false;
