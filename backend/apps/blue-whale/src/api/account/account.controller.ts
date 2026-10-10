@@ -69,6 +69,13 @@ function parseUserStatus(raw: string | undefined): UserOrderStatus | undefined {
   return value;
 }
 
+function grantedBonusCredits(order: {
+  bonusCredits: number;
+  firstPurchaseState: string;
+}): number {
+  return order.firstPurchaseState === "first" ? order.bonusCredits : 0;
+}
+
 @Controller("account")
 export class AccountController {
   constructor(
@@ -229,7 +236,7 @@ export class AccountController {
         product_type: order.productType,
         amount_fen: order.amountFen,
         credits: order.credits,
-        bonus_credits: order.bonusCredits,
+        bonus_credits: grantedBonusCredits(order),
         status: toUserOrderStatus(order.status),
         created_at: order.createdAt,
         paid_at: order.paidAt,
@@ -301,7 +308,7 @@ export class AccountController {
             product_name: order.productName,
             amount_fen: order.amountFen,
             credits: order.credits,
-            bonus_credits: order.bonusCredits,
+            bonus_credits: grantedBonusCredits(order),
             status: toUserOrderStatus(order.status),
             created_at: order.createdAt,
             paid_at: order.paidAt,

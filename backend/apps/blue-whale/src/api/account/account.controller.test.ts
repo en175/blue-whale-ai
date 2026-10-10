@@ -611,6 +611,46 @@ describe("AccountController.orders（用户侧充值订单）", () => {
     expect(response.data.items[0]).not.toHaveProperty("trade_no");
   });
 
+  it("★ 赠送按实发给：同档位只有首单非 0，其余单挂着快照也下发 0", async () => {
+    listOrdersForAdmin.mockResolvedValue({
+      items: [
+        {
+          tradeNo: "RC-FIRST",
+          productName: "白送",
+          productType: "tier",
+          amountFen: 1,
+          credits: 1500,
+          bonusCredits: 1000,
+          firstPurchaseState: "first",
+          status: "paid",
+          createdAt: "2026-09-29T16:16:24+08:00",
+          paidAt: "2026-09-29T16:17:32+08:00",
+          creditsValidMonths: 24,
+        },
+        {
+          tradeNo: "RC-REPEAT",
+          productName: "白送",
+          productType: "tier",
+          amountFen: 1,
+          credits: 1500,
+          bonusCredits: 1000,
+          firstPurchaseState: "repeat",
+          status: "paid",
+          createdAt: "2026-09-29T16:21:10+08:00",
+          paidAt: "2026-09-29T16:32:01+08:00",
+          creditsValidMonths: 24,
+        },
+      ],
+      total: 2,
+    });
+
+    const response = await controller.orders(USER, {});
+
+    expect(response.data.items.map((item) => item.bonus_credits)).toEqual([1000, 0]);
+    const credited = response.data.items.map((item) => item.credits + item.bonus_credits);
+    expect(credited).toEqual([2500, 1500]);
+  });
+
   it("★ 内部中间态收敛成用户侧三态", async () => {
     listOrdersForAdmin.mockResolvedValue({
       items: [
