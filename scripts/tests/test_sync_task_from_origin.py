@@ -543,6 +543,36 @@ class SyncTaskFromOriginTest(unittest.TestCase):
                 self.assertNotIn("Traceback", result.stderr)
                 self.assertEqual(self.git("rev-parse", "HEAD"), synced_head)
 
+    def test_recovery_actions_reject_missing_original_head(self) -> None:
+        original_head = self.commit_task_change()
+        self.advance_release()
+        synced = self.invoke("sync", "--json")
+        self.assertEqual(synced.returncode, 0, synced.stderr)
+        synced_head = self.git("rev-parse", "HEAD")
+        self.assertNotEqual(synced_head, original_head)
+        marker = Path(str(self.response(synced)["recovery_file"]))
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(recovery["synced_head"], synced_head)
+        del recovery["original_head"]
+
+        for action in ("rollback", "complete-resolved", "finalize"):
+            for has_synced_head in (False, True):
+                with self.subTest(action=action, has_synced_head=has_synced_head):
+                    corrupted = dict(recovery)
+                    if not has_synced_head:
+                        del corrupted["synced_head"]
+                    marker.write_text(json.dumps(corrupted), encoding="utf-8")
+                    before_head = self.git("rev-parse", "HEAD")
+
+                    result = self.invoke(action, "--json")
+
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    payload = self.response(result)
+                    self.assertEqual(payload["status"], "ERROR")
+                    self.assertIn("无法读取", str(payload["detail"]))
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual(self.git("rev-parse", "HEAD"), before_head)
+
     def test_repeated_sync_preserves_the_original_transaction_recovery_head(self) -> None:
         original_head = self.commit_task_change()
         self.advance_release("upstream-one.txt", "one\n")
