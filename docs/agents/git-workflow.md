@@ -116,6 +116,7 @@
 - `docs/sql/` 是**历史快照 / 可读性变更记录**，与 `backend/prisma/schema/`（Prisma 双轨权威）+ `backend/prisma/migrations/` 共存——后者仍是迁移权威，`docs/sql/` 不替代它。
 - 快照内容 = 本次库变更的具体 DDL（`CREATE TABLE` / `ALTER` 等）；工单号、日期、变更简述记录在工单与提交说明中，遵循 [注释规则](../../agent-rules/code-comments.md)。
 - 目的：让库变更历史集中在 `docs/sql/`，便于回溯「某次变更加了什么表 / 列」，不依赖翻 migration 目录。
+- **执行口径：手写 SQL + 人工审批后手工执行。禁 `prisma migrate dev` / `prisma migrate deploy`**（`_prisma_migrations` 与手工进度不一致，一跑就重放存量）。三轨说明、禁令与「闸怎么拦的」见 [`backend/prisma/README.md`](../../backend/prisma/README.md)；决策与理由见 [ADR-0058](../adr/0058-prisma-persistence-and-migration-policy.md) 修正节。
 
 ## Hook 改动同步检查
 

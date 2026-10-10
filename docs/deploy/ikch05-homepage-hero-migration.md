@@ -1,5 +1,7 @@
 # IKCH05 生产同步：首页背景配置（homepage_hero）迁移文档
 
+> ⚠️ **已作废（2026-10-10，IKKNMZ）**：本文推荐的 `prisma migrate deploy` / `prisma migrate resolve` 已**禁用**（原因与闸的机制见 `backend/prisma/README.md` 与 ADR-0058 修正节）。文中的 `packages/persistence/…` 路径也早已不存在。本单只做标注，未重写本文。
+
 > 用途：IKCH01「首页背景图/视频支持后台动态配置」子任务 **IKCH05【后端】** 的数据库迁移。
 > 测试库已应用（`prisma migrate deploy` 2026-09-01 成功，finished_at=2026-09-01 09:56:44）。
 > **生产库同步时执行本文档。** 迁移已随 PR !514 合入 master，代码已部署；生产只缺这一张表。

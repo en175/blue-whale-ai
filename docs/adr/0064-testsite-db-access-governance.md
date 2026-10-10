@@ -19,7 +19,7 @@
 
 采用三层访问模型，**禁止任何客户端以长期连接方式直连共享测试库**：
 
-1. **日常开发 → 本地自足栈**：disposable MySQL（`pnpm db:fresh` + `deploy/typescript-baseline` compose），数据随便重置，不与共享环境产生任何耦合。
+1. **日常开发 → 本地自足栈**：disposable MySQL（`prisma db push`（仅限一次性测试库；`pnpm db:fresh` 入口已不存在）+ 本地 Docker MySQL），数据随便重置，不与共享环境产生任何耦合。
 2. **调试测试站 → SSH 隧道（唯一应急通道）**：`scripts/tunnel-testsite-db.sh` 一条命令建立本地端口转发，用完即断。隧道走 SSH 认证（有身份、可审计），公网零暴露，连接生命周期与终端会话绑定，天然不会僵死堆积。
 3. **集成验收 → 只走 HTTP**：探针与人工验收仅调用公开 API，永不接触数据库（沿用 IK50GB-C 既定红线）。
 
