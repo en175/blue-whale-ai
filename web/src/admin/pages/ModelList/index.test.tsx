@@ -792,7 +792,7 @@ describe('ModelList 输出像素表 video_dimensions', () => {
     await openTab('尺寸与素材');
 
 
-    expect(document.body.textContent).toContain('输出像素表 video_dimensions（视频 · 只在预扣估 token 时用）');
+    expect(document.body.textContent).toContain('输出像素表 video_dimensions（视频 · 决定发给上游的输出像素）');
 
     expect(headers()).toEqual(['比例', '480P', '720P']);
     expect(bodyRows().map((cells) => cells[0])).toEqual(['16:9', '9:16']);

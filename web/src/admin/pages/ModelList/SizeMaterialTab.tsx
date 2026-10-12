@@ -209,8 +209,8 @@ export default function SizeMaterialTab({
             （内联图片 / 官方 openai images）。
             两件事绑成一个渠道是有意的：让它们各自自由组合能配出根本不成立的组合
             （banana 一维映射 × 官方协议必然被上游 400），要新组合就加一条渠道选项。
-            与视频行的「输出像素表 video_dimensions」不是一张：那张只在预扣估 token 时用，
-            这张决定真正发给上游的尺寸 / 映射。
+            与视频行的「输出像素表 video_dimensions」不是一张：那张决定视频真正发给上游的
+            输出像素，这张决定图片发给上游的尺寸 / 映射。
           </Hint></h3>
           <div style={LABEL}>渠道</div>
           <div>
@@ -344,13 +344,12 @@ export default function SizeMaterialTab({
       {}
       {type === 'video' && (
         <>
-          <h3 style={SECTION}>输出像素表 video_dimensions（视频 · 只在预扣估 token 时用） <Hint>
-            这张表与图片行的「出站尺寸映射」不是一张，它是<b>视频</b>行专用的：只在
-            <b>按 token 计费的预扣</b>里用——提交那一刻没有真实 token，服务端按这里配的宽高估一个
-            上限来冻结，结算仍按上游返回的真值。
+          <h3 style={SECTION}>输出像素表 video_dimensions（视频 · 决定发给上游的输出像素） <Hint>
+            这张表与图片行的「出站尺寸映射」不是一张，它是<b>视频</b>行专用的：提交时按
+            「分辨率档 × 宽高比」在这里查出输出像素，写进请求的 output_width / output_height
+            发给上游。
             行=比例选项，列=尺寸选项，格子填这个组合的输出像素（如 480P × 16:9 → 864x496），
-            官方对照表上抄。<b>留空 = 这条组合不能用</b>：含该档的提交会因「算不出上限」被拒，
-            不是「随便估一个」。
+            官方对照表上抄。<b>留空 = 该组合查不到输出像素</b>，提交不会带上宽高。
           </Hint></h3>
           <DimensionMatrix
             sizes={sizes.rows}
