@@ -9,46 +9,35 @@ import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
-import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
+import { nodeBoxOf, readRecoveryErrorReason, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
 import { defaultVideoModeFor, draftVideoModeOf } from './videoModes';
 import {
-  effectiveVideoParams,
   frameSlotCountOf,
   isFrameMode,
-  lockedDurationOf,
   normalizeVideoMode,
   type VideoMode,
 } from '@/lib/video-modes';
-import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
+import { imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
 import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from './planApplyEdges';
-import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
-import { audioRefItemMediaTypeOf, audioRefMediaTypeOf, audioRefSourceError, checkAddAudioRef } from './audioMediaRefs';
-import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
+import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from './textIndexSync';
+import { audioRefItemMediaTypeOf, audioRefSourceError } from './audioMediaRefs';
+import { PANEL_REF_MEDIA_TYPES } from './refSourceTypes';
 import { assetsPickerMediaTypes } from './assetsPickerTargets';
 import { hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   asVideoRefMediaType,
-  isLibraryOnlyVideoRef,
   readRefRole,
   readDraftMaterialRefs,
   mergedVideoMediaRefsOf,
-  videoRefConflict,
   videoRefSourceError,
-  checkAddVideoRef,
-  incomingVideoRefOccupied,
-  occupiedVideoRefIds,
   videoRefIdentityIds,
   type VideoMediaRef,
-  type VideoMediaRefs,
-  type VideoRefCapabilities,
   type VideoRefRole,
 } from './videoMediaRefs';
 import { AssetImageRefLimitProvider } from './modelCaps';
 import { imageReferenceMaxOf } from '@/lib/model-reference-limits';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { refOverflowToast } from '@/utils/ref-overflow';
-import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, compliancePatchFromMaterialStatus, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
 import { type MediaDims } from './components/MediaNode/mediaContentSize';
 import type { MediaNodeData } from './components/MediaNode';
@@ -90,24 +79,9 @@ import { VOCAL_SPLIT_EDGE_ORIGIN, buildVocalSplitPlaceholderNode } from './vocal
 import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from './sceneSplit';
 import { type SceneSplitSubmission } from './sceneSplitSession';
 import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from './smartMatting';
+import { imageEnhanceDraftPosition } from './imageEnhance';
+import { type VideoEnhanceIdentity } from './videoEnhance';
 import {
-  IMAGE_ENHANCE_EDGE_ORIGIN,
-  imageEnhanceDraftPosition,
-} from './imageEnhance';
-import {
-  VIDEO_ENHANCE_EDGE_ORIGIN,
-  videoEnhanceDraftPosition,
-  videoEnhanceGateReason,
-  type VideoEnhanceIdentity,
-} from './videoEnhance';
-import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';
-import {
-  FRAME_INTERPOLATION_DEFAULT_FPS,
-  FRAME_INTERPOLATION_EDGE_ORIGIN,
-  frameInterpolationDisplayName,
-  frameInterpolationDraftPosition,
-  frameInterpolationGateReason,
-  type FrameInterpolationFps,
   type FrameInterpolationIdentity,
 } from './frameInterpolation';
 import { IMAGE_ERASE_EDGE_ORIGIN, rasterizeMaskToPngFile } from './imageErase';
@@ -126,11 +100,8 @@ import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import type { VideoGenSeedParams } from './components/BottomDialog';
 import { type UploadedFile, type ImageTextAttachment } from './components/ImageDialog';
-import { composeImageSendPrompt } from './components/ImageDialog/composeImageSendPrompt';
 import ImageGenerationDockPanel from './imageGenerationDockPanel';
-import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-max-length';
-import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
-import { restorePromptDoc } from '@/lib/prompt-doc';
+import { promptMaxLengthOfModel } from '@/lib/prompt-max-length';
 import { type CanvasPickItem } from './components/AudioDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
 import LegacyHistoryModal from './components/LegacyHistoryModal';
@@ -160,7 +131,7 @@ import {
   touchProjectLastOpened,
   type SnapshotAsset,
 } from '@/api/projects';
-import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
+import { fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProject, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/assetUrlCache';
 import { referencePromptPlan, applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
@@ -174,9 +145,7 @@ import {
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
-import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
-import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from './livenessLibraryImport';
-import { buildImageJobReferences, buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
+import { buildImageJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
   availableGenKinds,
   canConnectSourcesToGen,
@@ -212,6 +181,11 @@ import { useCanvasRefStripOrder } from './hooks/useCanvasRefStripOrder';
 import { useCanvasCompliance } from './hooks/useCanvasCompliance';
 import { useCanvasProjects } from './hooks/useCanvasProjects';
 import { useCanvasClipboard } from './hooks/useCanvasClipboard';
+import { useCanvasUploadDrop } from './hooks/useCanvasUploadDrop';
+import { useCanvasPickSessionClick } from './hooks/useCanvasPickSessionClick';
+import { useCanvasAssetsPlacement } from './hooks/useCanvasAssetsPlacement';
+import { useCanvasUpdateGenerate } from './hooks/useCanvasUpdateGenerate';
+import { useCanvasToolDraftCreators } from './hooks/useCanvasToolDraftCreators';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   applyDraggedNodesToGroups,
@@ -647,6 +621,8 @@ export default function CanvasPage() {
   const [mediaNodes, setMediaNodes] = useState<Node[]>([]);
   const [productNodes, setProductNodes] = useState<Node[]>([]);
   const [assetNodes, setAssetNodes] = useState<Node[]>([]);
+  const mediaNodesRef = useRef<Node[]>([]);
+  mediaNodesRef.current = mediaNodes;
   const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);
   const [imageModels, setImageModels] = useState<GenerationModel[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
@@ -1663,233 +1639,43 @@ export default function CanvasPage() {
     }
     return true;
   };
-  const handleImagePickSessionClick = (node: Node) => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    if (typeof imagePickSession === 'string') {
-      if (!mediaNodesRef.current.some((n) => n.id === imagePickSession)) {
-        endImagePickSession();
-        return;
-      }
-      if (node.type === 'textNode') {
-        connectPair(node.id, imagePickSession);
-        return;
-      }
-      if (node.type === 'mediaNode') {
-        if (connectPair(node.id, imagePickSession)) return;
-        if (validateImageRefConnect(node.id, imagePickSession)) {
-          addCanvasEdge(node.id, imagePickSession);
-        }
-        return;
-      }
-      showToast('warn', '图片参考仅支持图片素材');
-      return;
-    }
-    if (node.type === 'textNode') {
-      showToast('warn', '文本参考需要绑定生成节点');
-      return;
-    }
-    const isReadyMedia = node.type === 'mediaNode' && typeof data.src === 'string' && !data.genStatus;
-    if (!isReadyMedia) {
-      showToast('warn', '图片参考仅支持图片素材');
-      return;
-    }
-    if (data.assetMissing) {
-      showToast('warn', '素材已被删除');
-      return;
-    }
-    if ((data.src as string).startsWith('blob:')) {
-      showToast('warn', '素材上传中，请稍候再选择');
-      return;
-    }
-    const typeErr = panelCanvasRefError('image', data.mediaType);
-    if (typeErr) {
-      showToast('warn', typeErr);
-      return;
-    }
-    setImagePickResult({
-      ts: Date.now(),
-      files: [{
-        id: `node-${node.id}`,
-        url: data.src as string,
-        type: 'image',
-        name: (data.fileName as string) || node.id,
-        assetId: readNodeAssetId(data),
-      }],
-    });
-  };
-  const checkVideoFrameReplace = (
-    node: Node,
-    refs: VideoMediaRefs,
-    role: 'first' | 'last',
-    caps?: VideoRefCapabilities | null,
-  ): { current: VideoMediaRef | undefined } | null => {
-    const err = videoRefSourceError(node, role);
-    if (err) {
-      showToast('warn', err);
-      return null;
-    }
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const assetId = readAssetId(data);
-    if (assetId == null) {
-      showToast('warn', '素材不存在');
-      return null;
-    }
-    const current = role === 'first' ? refs.first : refs.last;
-    const sourceMaterialId = typeof data.materialId === 'string' && data.materialId ? data.materialId : undefined;
-    if (current && incomingVideoRefOccupied({ reference: [current] }, [assetId, sourceMaterialId])) return null;
-    const sameIncoming = (r: VideoMediaRef) => incomingVideoRefOccupied({ reference: [r] }, [assetId, sourceMaterialId]);
-    const slotCleared: VideoMediaRefs = {
-      ...(role === 'first' ? { ...refs, first: undefined } : { ...refs, last: undefined }),
-      reference: refs.reference.filter((r) => !sameIncoming(r)),
-    };
-    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared, caps, [sourceMaterialId]);
-    if (msg) {
-      showToast('warn', msg);
-      return null;
-    }
-    return { current };
-  };
-  const replaceVideoFrameRefFromCanvas = (node: Node, targetId: string, role: 'first' | 'last'): boolean => {
-    const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    const check = checkVideoFrameReplace(node, refs, role, videoCapsOfDraft(targetId));
-    if (!check) return false;
-    if (check.current) {
-      if (isLibraryOnlyVideoRef(check.current)) {
-        removeDraftMaterialRef(targetId, check.current.materialId);
-      } else {
-        removeRefEdges(targetId, check.current.nodeId);
-      }
-    }
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const assetId = readAssetId(data);
-    const occupiedReference = refs.reference.find((r) => r.assetId === assetId);
-    if (occupiedReference && occupiedReference.nodeId !== node.id) {
-      if (isLibraryOnlyVideoRef(occupiedReference)) {
-        removeDraftMaterialRef(targetId, occupiedReference.materialId);
-      } else {
-        removeRefEdges(targetId, occupiedReference.nodeId);
-      }
-    }
-    addCanvasEdge(node.id, targetId, role);
-    return true;
-  };
-  const replaceVideoFreeFrameRef = (node: Node, role: 'first' | 'last') => {
-    if (!checkVideoFrameReplace(node, videoFreeRefs, role)) return;
-    const item = videoFreeRefItemOf(node);
-    generationDock.updateDraft('video', { freeReference: { operation: 'replace', item, role } });
-  };
-  const handleVideoPickSessionClick = (node: Node) => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const role = pickRefRole ?? 'reference';
-    const isFrameSession = role === 'first' || role === 'last';
-    if (typeof videoPickSession === 'string') {
-      if (!mediaNodesRef.current.some((n) => n.id === videoPickSession)) {
-        endVideoPickSession();
-        return;
-      }
-      if (node.type === 'textNode') {
-        if (isFrameSession) {
-          showToast('warn', '首尾帧仅支持图片素材');
-          return;
-        }
-        connectPair(node.id, videoPickSession);
-        return;
-      }
-      if (node.type === 'mediaNode') {
-        if (isFrameSession) {
-          if (replaceVideoFrameRefFromCanvas(node, videoPickSession, role)) {
-            const filledRefs = mergedVideoMediaRefsOf(videoPickSession, edgesRef.current, mediaNodesRef.current);
-            if (filledRefs.first && filledRefs.last) {
-              endVideoPickSession();
-              showToast('success', '首尾帧已就绪');
-            }
-          }
-          return;
-        }
-        if (pickMode === 'image' && data.mediaType !== 'image') {
-          showToast('warn', PANEL_REF_MEDIA_TYPES.videoText2Video.canvasRefError);
-          return;
-        }
-        if (validateVideoRefConnect(node.id, videoPickSession, 'reference')) {
-          addCanvasEdge(node.id, videoPickSession, 'reference');
-        }
-        return;
-      }
-      showToast('warn', '视频参考仅支持图片、视频或音频素材');
-      return;
-    }
-    if (node.type === 'textNode') {
-      showToast('warn', '文本参考需要绑定生成节点');
-      return;
-    }
-    if (node.type !== 'mediaNode') {
-      showToast('warn', '视频参考仅支持图片、视频或音频素材');
-      return;
-    }
-    if (isFrameSession) {
-      replaceVideoFreeFrameRef(node, role);
-      return;
-    }
-    if (pickMode === 'image' && data.mediaType !== 'image') {
-      showToast('warn', PANEL_REF_MEDIA_TYPES.videoText2Video.canvasRefError);
-      return;
-    }
-    const err = videoRefSourceError(node, 'reference');
-    if (err) {
-      showToast('warn', err);
-      return;
-    }
-    if (readAssetId(data) == null) return;
-    appendVideoFreeRef(videoFreeRefItemOf(node), 'reference');
-  };
-  const handleAudioPickSessionClick = (node: Node) => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    if (typeof audioPickSession === 'string') {
-      if (!mediaNodesRef.current.some((n) => n.id === audioPickSession)) {
-        endAudioPickSession();
-        return;
-      }
-      if (node.type === 'textNode') {
-        if (!validateAudioTextConnect(node.id, audioPickSession)) return;
-        addCanvasEdge(node.id, audioPickSession);
-        return;
-      }
-      if (node.type === 'mediaNode') {
-        if (validateAudioRefConnect(node.id, audioPickSession)) {
-          addCanvasEdge(node.id, audioPickSession);
-        }
-        return;
-      }
-      showToast('warn', PANEL_REF_MEDIA_TYPES.audio.canvasRefError);
-      return;
-    }
-    if (node.type === 'textNode') {
-      showToast('warn', '文本参考需要绑定生成节点');
-      return;
-    }
-    if (node.type !== 'mediaNode') {
-      showToast('warn', PANEL_REF_MEDIA_TYPES.audio.canvasRefError);
-      return;
-    }
-    const err = audioRefSourceError(node);
-    if (err) {
-      showToast('warn', err);
-      return;
-    }
-    const incomingType = audioRefMediaTypeOf(data) ?? 'audio';
-    setAudioPickResult({
-      ts: Date.now(),
-      item: {
-        id: node.id,
-        kind: incomingType,
-        mediaType: incomingType,
-        name: (data.fileName as string) || node.id,
-        src: data.src as string,
-        source: 'canvas',
-        assetId: readAssetId(data),
-      },
-    });
-  };
+  const {
+    handleImagePickSessionClick,
+    handleVideoPickSessionClick,
+    handleAudioPickSessionClick,
+    resetPickState,
+  } = useCanvasPickSessionClick({
+    mediaNodesRef,
+    showToast,
+    pickMode,
+    pickRefRole,
+    imagePickSession,
+    videoPickSession,
+    audioPickSession,
+    endImagePickSession,
+    endVideoPickSession,
+    endAudioPickSession,
+    connectPair,
+    addCanvasEdge,
+    validateImageRefConnect,
+    validateVideoRefConnect,
+    validateAudioRefConnect,
+    validateAudioTextConnect,
+    videoCapsOfDraft,
+    edgesRef,
+    videoFreeRefs,
+    removeRefEdges: (draftId, sourceNodeId) => removeRefEdges(draftId, sourceNodeId),
+    removeDraftMaterialRef: (draftId, materialId) => removeDraftMaterialRef(draftId, materialId),
+    appendVideoFreeRef: (item, role) => appendVideoFreeRef(item, role),
+    replaceFreeReference: (item, role) => generationDock.updateDraft('video', { freeReference: { operation: 'replace', item, role } }),
+    setPickMode,
+    setPickTarget,
+    setPickRefRole,
+    setPickProductId,
+    setPickAssetId,
+    setImagePickResult,
+    setAudioPickResult,
+  });
   const handleCanvasNodeClick = (node: Node) => {
     if (toolRuntime.onNodeClick(node.id, buildToolSessionDeps()) === 'consumed') return;
     if (showAgent && node.type === 'textNode') {
@@ -2045,12 +1831,6 @@ export default function CanvasPage() {
         setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
       }
     }
-    setPickMode(null);
-    setPickTarget(null);
-    setPickProductId(null);
-    setPickAssetId(null);
-  };
-  const resetPickState = () => {
     setPickMode(null);
     setPickTarget(null);
     setPickProductId(null);
@@ -2597,560 +2377,16 @@ export default function CanvasPage() {
       prev.map((n) => ({ ...n, data: { ...n.data, toolMode } }))
     );
   }, [toolMode]);
-  const placeFileOnCanvas = (
-    file: File,
-    opts?: { position?: { x: number; y: number }; replaceNodeId?: string },
-  ): Promise<{ asset_id: string; url: string; nodeId: string }> => {
-    const isImage = file.type.startsWith('image/');
-    const isVideo = file.type.startsWith('video/');
-    const isAudio = file.type.startsWith('audio/');
-    if (!isImage && !isVideo && !isAudio) {
-      return Promise.reject(new Error('只支持图片、视频或音频'));
-    }
-    const limit = UPLOAD_SIZE_LIMIT[isImage ? 'image' : isVideo ? 'video' : 'audio'];
-    if (file.size > limit) {
-      return Promise.reject(new Error(`文件超过 ${Math.round(limit / 1024 / 1024)}MB 上限`));
-    }
-    const nodeId = opts?.replaceNodeId ?? newNodeId('media');
-    const localSrc = URL.createObjectURL(file);
-    pendingNodeIdsRef.current.add(nodeId);
-    const mediaType = isVideo ? 'video' : isAudio ? 'audio' : 'image';
-    const mediaCallbacks = {
-      onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-      onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-      onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-      onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-      onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-      onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-      onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-      onFillEmptyShell: (id: string, next: File) => actionsRef.current.fillEmptyShell(id, next),
-      onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
-      onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-      onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
-      onDownload: (id: string) => actionsRef.current.download(id),
-      ...dockToolCallbacks,
-      onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-      onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-      onMediaDims: handleMediaDims,
-    };
-    if (opts?.replaceNodeId) {
-      setMediaNodes((prev) =>
-        prev.map((n) =>
-          n.id !== nodeId
-            ? n
-            : {
-                ...n,
-                data: {
-                  ...n.data,
-                  ...mediaCallbacks,
-                  emptyShell: false,
-                  src: localSrc,
-                  ...(hasCustomName(n) ? {} : { fileName: file.name }),
-                  mediaType,
-                  toolMode,
-                },
-              },
-        ),
-      );
-    } else {
-    setMediaNodes((prev) => [
-      ...prev,
-      {
-        id: nodeId,
-        type: 'mediaNode',
-        position: opts?.position ?? spawnPosition(),
-        data: {
-          src: localSrc,
-          fileName: file.name,
-          mediaType,
-          toolMode,
-          ...mediaCallbacks,
-        },
-      },
-    ]);
-    historyRef.current?.pushAddNodes([nodeId]);
-    }
-    return uploadAssetFile(file, { projectId: currentId || undefined })
-      .then((done) => {
-        const compliancePatch = compliancePatchFromMaterialStatus(
-          mediaType,
-          done.material_id,
-          done.material_status,
-        );
-        setMediaNodes((prev) =>
-          prev.map((n) => {
-            if (n.id !== nodeId) return n;
-            URL.revokeObjectURL(localSrc);
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                src: done.url || localSrc,
-                assetId: done.asset_id,
-                emptyShell: false,
-                mime: done.mime,
-                width: done.width,
-                height: done.height,
-                duration: done.duration ?? undefined,
-                size: done.size,
-                ...compliancePatch,
-              },
-            };
-          }),
-        );
-        if (done.asset_id && done.url && typeof upsertAssets === 'function') {
-          upsertAssets([{
-            asset_id: Number(done.asset_id),
-            type: mediaType,
-            access_url: done.url,
-            width: typeof done.width === 'number' ? done.width : null,
-            height: typeof done.height === 'number' ? done.height : null,
-            material_id: done.material_id ?? null,
-            material_status: done.material_status ?? null,
-          }]);
-        }
-        return { asset_id: done.asset_id, url: done.url, nodeId };
-      })
-      .catch((err) => {
-        console.warn(`画布上传登记失败（${file.name}）：`, err);
-        URL.revokeObjectURL(localSrc);
-        pendingNodeIdsRef.current.delete(nodeId);
-        if (opts?.replaceNodeId) {
-          setMediaNodes((prev) =>
-            prev.map((n) =>
-              n.id === nodeId ? { ...n, data: { ...n.data, emptyShell: true, src: undefined } } : n,
-            ),
-          );
-        } else {
-          setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
-        }
-        showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
-        throw err instanceof Error ? err : new Error('上传失败');
-      });
-  };
-  const handleUploadFile = (files: File[]) => {
-    files.forEach((file) => {
-      void placeFileOnCanvas(file).catch((err) => {
-        showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
-      });
-    });
-  };
-  const applyClipboardAtFlow = async (position: { x: number; y: number }) => {
-    const payload = await readCanvasClipboard();
-    if (!payload) {
-      showToast('warn', '剪贴板无可粘贴内容');
-      return;
-    }
-    if (payload.kind === 'image') {
-      try {
-        await placeFileOnCanvas(payload.file, { position });
-      } catch (err) {
-        showToast('error', err instanceof Error ? err.message : '粘贴失败');
-      }
-      return;
-    }
-    handleAddTextNode(position, payload.text);
-  };
-  const handleCopyImage = async (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    const src = node?.data?.src as string | undefined;
-    if (!src || (node?.data as { mediaType?: string })?.mediaType !== 'image') {
-      showToast('warn', '当前节点没有可复制的图片');
-      return;
-    }
-    try {
-      await copyImageToClipboard(src);
-      showToast('success', '已复制图片');
-    } catch {
-      showToast('error', '复制图片失败');
-    }
-  };
-  const handleFillEmptyShell = (id: string, file: File) => {
-    void placeFileOnCanvas(file, { replaceNodeId: id }).catch((err) => {
-      showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
-    });
-  };
-  actionsRef.current = {
-    ...actionsRef.current,
-    duplicate: handleDuplicateNode,
-    addToChat: handleAddToChatNode,
-    pasteAtNode: (id) => {
-      const node =
-        textNodesRef.current.find((n) => n.id === id) ?? mediaNodesRef.current.find((n) => n.id === id);
-      const position = node
-        ? { x: node.position.x + 40, y: node.position.y + 40 }
-        : spawnPosition();
-      void applyClipboardAtFlow(position);
-    },
-    copyImage: (id) => { void handleCopyImage(id); },
-    complianceCheck: (id) => { void complianceCheckRef.current?.(id); },
-    fillEmptyShell: handleFillEmptyShell,
-  };
-  const placeAssetsOnCanvas = (
-    selectedAssets: AssetRecord[],
-    opts?: { reuseExisting?: boolean },
-  ): string[] | null => {
-    if (!currentId) return null;
-    const adoptedIds: string[] = [];
-    const nodes: Node[] = [];
-    const reusedCompliance: Array<{ id: string; patch: Record<string, unknown> }> = [];
-    const complianceFromAsset = (asset: AssetRecord): Record<string, unknown> => {
-      if (asset.type === 'audio') return {};
-      const id = String(asset.id);
-      const fromLibrary = isMaterialLibraryId(id);
-      const materialId = fromLibrary
-        ? id
-        : (typeof asset.material_id === 'string' && asset.material_id ? asset.material_id : undefined);
-      if (isUnapprovedVideoMaterialStatus(asset.material_status)) {
-        return {
-          ...(materialId ? { materialId } : {}),
-          compliancePassed: false,
-          complianceFailed: true,
-        };
-      }
-      if (asset.material_status !== 'Active' && !fromLibrary) return {};
-      if (fromLibrary && asset.material_status !== 'Active') {
-        return materialId ? { materialId } : {};
-      }
-      return {
-        ...(materialId ? { materialId } : {}),
-        compliancePassed: true,
-        complianceFailed: false,
-      };
-    };
-    for (const asset of selectedAssets) {
-      const assetId = String(asset.id);
-      const mediaType = asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image';
-      if (opts?.reuseExisting) {
-        const libraryId = typeof asset.material_id === 'string' && asset.material_id ? asset.material_id : undefined;
-        const existing = mediaNodesRef.current.find(
-          (n) => {
-            if (n.type !== 'mediaNode') return false;
-            const data = (n.data ?? {}) as Record<string, unknown>;
-            if (data.mediaType !== mediaType || baseSourceError(n) !== null) return false;
-            const nodeAssetId = readAssetId(data);
-            if (nodeAssetId === assetId) return true;
-            if (libraryId && (data.materialId === libraryId || nodeAssetId === libraryId)) return true;
-            return false;
-          },
-        );
-        if (existing) {
-          const patch = complianceFromAsset(asset);
-          if (Object.keys(patch).length > 0) reusedCompliance.push({ id: existing.id, patch });
-          adoptedIds.push(existing.id);
-          continue;
-        }
-      }
-      const fileNameFromUrl = assetDisplayName(asset);
-      const nodeId = newNodeId('media');
-      nodes.push({
-        id: nodeId,
-        type: 'mediaNode' as const,
-        position: spawnPosition(),
-        data: {
-          src: asset.url,
-          fileName: fileNameFromUrl,
-          mediaType,
-          assetId,
-          ...complianceFromAsset(asset),
-          width: asset.width ?? undefined,
-          height: asset.height ?? undefined,
-          duration: asset.duration ?? undefined,
-          size: asset.size ?? undefined,
-          toolMode,
-          onDelete: (id: string) => {
-            setMediaNodes((prev) => prev.filter((n) => n.id !== id));
-          },
-          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-          onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onDownload: (id: string) => actionsRef.current.download(id),
-          ...dockToolCallbacks,
-          onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-          onMediaDims: handleMediaDims,
-        },
-      });
-    }
-    nodes.forEach((node) => pendingNodeIdsRef.current.add(node.id));
-    setMediaNodes((prev) => {
-      const patched = reusedCompliance.length === 0
-        ? prev
-        : prev.map((node) => {
-            const hit = reusedCompliance.find((item) => item.id === node.id);
-            return hit ? { ...node, data: { ...node.data, ...hit.patch } } : node;
-          });
-      return [...patched, ...nodes];
-    });
-    selectedAssets.forEach((asset) => {
-      if (isMaterialLibraryId(String(asset.id))) return;
-      linkAssetToProject(currentId, asset.id).catch((err) => {
-        console.warn('资产关联项目失败：', err);
-        showToast('warn', '资产关联项目失败，请稍后重试');
-      });
-    });
-    return [...adoptedIds, ...nodes.map((n) => n.id)];
-  };
-  const handleAssetsPickerSelect = async (selectedAssets: AssetRecord[]) => {
-    const target = assetsPickerTarget;
-    setShowAssetsPicker(false);
-    if (selectedAssets.length === 0) return;
-    if (!currentId) {
-      showToast('error', '项目未就绪，请稍后重试');
-      return;
-    }
-    if (selectedAssets.some(isPendingLivenessLibraryAsset)) {
-      showToast('warn', '正在导入真人人像库素材…');
-    }
-    const assets = await importLivenessLibraryAssets(selectedAssets, currentId, (name, message) => {
-      showToast('error', `「${name}」${message}`);
-    });
-    if (assets.length === 0) return;
-    if (target === 'videoDraft') {
-      const role = videoAssetPickRole;
-      const refs = videoDraftId
-        ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
-        : videoFreeRefs;
-      let accepted = assets.filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio');
-      const unapproved = accepted.filter((a) => isUnapprovedVideoMaterialStatus(a.material_status));
-      if (unapproved.length > 0) {
-        showToast('warn', VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
-        accepted = accepted.filter((a) => !isUnapprovedVideoMaterialStatus(a.material_status));
-        if (accepted.length === 0) return;
-      }
-      if (role === 'first' || role === 'last') {
-        if (refs[role]) {
-          showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
-          return;
-        }
-        accepted = accepted.filter((a) => a.type === 'image');
-        if (accepted.length === 0) return;
-        const otherRole: VideoRefRole = role === 'first' ? 'last' : 'first';
-        const frameRoles: VideoRefRole[] = refs[otherRole] ? [role] : [role, otherRole];
-        if (accepted.length > frameRoles.length) {
-          showToast('warn', frameRoles.length > 1
-            ? '首尾帧最多两张图片，已按选择顺序取前两张'
-            : '首尾帧仅支持一张图片，已取首张');
-        }
-        accepted = accepted.slice(0, frameRoles.length);
-        if (!videoDraftId) {
-          accepted.forEach((a, i) =>
-            appendVideoFreeRef(
-              {
-                nodeId: `asset-${a.id}`,
-                url: a.url,
-                name: assetDisplayName(a),
-                assetId: String(a.id),
-                mediaType: asVideoRefMediaType(a.type),
-                materialId: typeof a.material_id === 'string' && a.material_id
-                  ? a.material_id
-                  : (isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined),
-              },
-              frameRoles[i] ?? role,
-            ),
-          );
-          return;
-        }
-        for (let i = 0; i < accepted.length; i += 1) {
-          const nodeIds = placeAssetsOnCanvas([accepted[i]!], { reuseExisting: true });
-          if (!nodeIds) {
-            showToast('error', '项目未就绪，请稍后重试');
-            return;
-          }
-          if (validateVideoRefConnect(nodeIds[0]!, videoDraftId, frameRoles[i] ?? role)) {
-            addCanvasEdge(nodeIds[0]!, videoDraftId, frameRoles[i] ?? role);
-          }
-        }
-        return;
-      }
-      const caps = videoCapsOfDraft(videoDraftId);
-      const imageMax = caps?.imageMax ?? 9;
-      const videoMax = caps?.videoReferenceMax ?? 3;
-      const audioMax = caps?.audioReferenceMax ?? 3;
-      const known = occupiedVideoRefIds(refs);
-      let imgSlots = imageMax - refs.reference.filter((r) => r.mediaType === 'image').length;
-      let vidSlots = videoMax - refs.reference.filter((r) => r.mediaType === 'video').length;
-      let audSlots = audioMax - refs.reference.filter((r) => r.mediaType === 'audio').length;
-      const overflowKinds: Array<'image' | 'video' | 'audio'> = [];
-      let skippedDup = false;
-      const filtered: AssetRecord[] = [];
-      for (const a of accepted) {
-        const materialId = typeof a.material_id === 'string' && a.material_id ? a.material_id : undefined;
-        if (known.has(String(a.id)) || (materialId && known.has(materialId))) {
-          skippedDup = true;
-          continue;
-        }
-        const isImage = a.type === 'image';
-        const isVideo = a.type === 'video';
-        if ((isImage && imgSlots <= 0) || (isVideo && vidSlots <= 0) || (!isImage && !isVideo && audSlots <= 0)) {
-          overflowKinds.push(a.type as 'image' | 'video' | 'audio');
-          continue;
-        }
-        if (isImage) imgSlots -= 1;
-        else if (isVideo) vidSlots -= 1;
-        else audSlots -= 1;
-        known.add(String(a.id));
-        if (materialId) known.add(materialId);
-        filtered.push(a);
-      }
-      accepted = filtered;
-      if (skippedDup) showToast('warn', '重复的素材已跳过');
-      if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds, { image: imageMax, video: videoMax, audio: audioMax }));
-      if (accepted.length === 0) return;
-      if (!videoDraftId) {
-        accepted.forEach((a) =>
-          appendVideoFreeRef(
-            {
-              nodeId: `asset-${a.id}`,
-              url: a.url,
-              name: assetDisplayName(a),
-              assetId: String(a.id),
-              mediaType: asVideoRefMediaType(a.type),
-              materialId: typeof a.material_id === 'string' && a.material_id
-                ? a.material_id
-                : (isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined),
-            },
-            role,
-          ),
-        );
-        return;
-      }
-        const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
-        if (!nodeIds) {
-          showToast('error', '项目未就绪，请稍后重试');
-          return;
-        }
-        nodeIds.forEach((nid) => {
-          if (validateVideoRefConnect(nid, videoDraftId, role)) {
-            addCanvasEdge(nid, videoDraftId, role);
-          }
-        });
-      return;
-    }
-    if (target === 'audioDialog') {
-      if (!showAudioDialog || !audioAssetPickTarget || audioAssetPickTarget.nodeId !== audioDraftId
-        || audioAssetPickTarget.seed !== audioSeed?.ts || (audioDraftId && isGeneratingNode(audioDraftId))) return;
-      const mediaAssets = assets.filter(a => a.type === 'audio' || a.type === 'image');
-      if (!audioDraftId) {
-        setAudioAssetPickResult({ ts: Date.now(), items: mediaAssets.map(a => {
-          const kind = audioRefItemMediaTypeOf({ kind: a.type });
-          return {
-          id: `asset-${a.id}`,
-          kind,
-          mediaType: kind,
-          name: assetDisplayName(a), src: a.url,
-          source: 'canvas' as const, assetId: a.id,
-        }; }) });
-        return;
-      }
-      const current = [...mergedAudioRefsWithTextIndex(
-        audioDraftId,
-        edgesRef.current,
-        mediaNodesRef.current,
-        textNodesRef.current,
-      ).refs];
-      const accepted: AssetRecord[] = [];
-      for (const asset of mediaAssets) {
-        const id = String(asset.id);
-        const incomingType = audioRefItemMediaTypeOf({ kind: asset.type });
-        const error = checkAddAudioRef(id, current, 0, incomingType);
-        if (error) { showToast('warn', error); continue; }
-        current.push({ nodeId: `asset-${id}`, assetId: id, url: asset.url, name: assetDisplayName(asset), mediaType: incomingType });
-        accepted.push(asset);
-      }
-      if (!accepted.length) return;
-      const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
-      if (!nodeIds) { showToast('error', '项目未就绪，请稍后重试'); return; }
-      nodeIds.forEach(id => addCanvasEdge(id, audioDraftId));
-      return;
-    }
-    if (target === 'imageDialog') {
-      const images = assets.filter((a) => a.type === 'image');
-      if (images.length === 0) return;
-      if (imageDraftId) {
-        const current = imageMediaRefsOf(imageDraftId, edgesRef.current, mediaNodesRef.current);
-        const known = new Set(current.map((r) => r.assetId));
-        const imageMax = imageRefMaxOfDraft(imageDraftId);
-        const accepted: AssetRecord[] = [];
-        let skippedDup = false;
-        let overflow = false;
-        for (const a of images) {
-          const id = String(a.id);
-          if (known.has(id)) { skippedDup = true; continue; }
-          if (known.size >= imageMax) { overflow = true; break; }
-          known.add(id);
-          accepted.push(a);
-        }
-        if (skippedDup) showToast('warn', '重复的素材已跳过');
-        if (overflow) showToast('warn', refOverflowToast(['image'], { image: imageMax }));
-        if (accepted.length === 0) return;
-        const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
-        if (!nodeIds) {
-          showToast('error', '项目未就绪，请稍后重试');
-          return;
-        }
-        nodeIds.forEach((nid) => addCanvasEdge(nid, imageDraftId));
-        return;
-      }
-      const files: UploadedFile[] = images
-        .map((a) => ({ id: `asset-${a.id}`, url: a.url, type: 'image' as const, name: assetDisplayName(a), assetId: a.id }));
-      setImagePickResult({ ts: Date.now(), files });
-      return;
-    }
-    if (target === 'agentPanel') {
-      if (!placeAssetsOnCanvas(assets)) {
-        showToast('error', '项目未就绪，请稍后重试');
-        return;
-      }
-      const blocks: SessionContentBlock[] = assets
-        .filter((a) => a.type === 'image' || a.type === 'video')
-        .map((a) => ({
-          type: 'asset_ref',
-          url: a.url,
-          name: assetDisplayName(a),
-          media_type: (a.type === 'video' ? 'video' : 'image') as 'image' | 'video',
-          display_label: assetDisplayName(a),
-          asset_id: String(a.id),
-        }));
-      if (blocks.length > 0) setAgentAssetPicks({ ts: Date.now(), blocks });
-      return;
-    }
-    if (!placeAssetsOnCanvas(assets)) {
-      showToast('error', '项目未就绪，请稍后重试');
-    }
-  };
   const videoModelsRef = useRef<GenerationModel[]>([]);
   videoModelsRef.current = videoModels;
   const imageModelsRef = useRef<GenerationModel[]>([]);
   imageModelsRef.current = imageModels;
-  const mediaNodesRef = useRef<Node[]>([]);
-  mediaNodesRef.current = mediaNodes;
   const textNodesRef = useRef<Node[]>([]);
   textNodesRef.current = textNodes;
   const assetNodesRef = useRef<Node[]>([]);
   assetNodesRef.current = assetNodes;
   const productNodesRef = useRef<Node[]>([]);
   productNodesRef.current = productNodes;
-  const { handleCopySelectedNodes, handlePasteClipboard } = useCanvasClipboard({
-    currentId,
-    textNodesRef,
-    mediaNodesRef,
-    setTextNodes,
-    setMediaNodes,
-    pendingNodeIdsRef,
-    historyRef,
-    spawnPosRef,
-    attachCallbacks,
-    findCanvasNode,
-    syncTextIndexEdges,
-    setSelectManyRequest,
-    placeFileOnCanvas,
-    handleAddTextNode,
-  });
   const {
     assetDetailTarget,
     assetDetailLoading,
@@ -3320,6 +2556,94 @@ export default function CanvasPage() {
     if (Object.keys(patch).length === 0) return;
     patchMediaNode(nodeId, patch);
   };
+  const { handleAssetsPickerSelect } = useCanvasAssetsPlacement({
+    currentId,
+    toolMode,
+    mediaNodesRef,
+    textNodesRef,
+    edgesRef,
+    pendingNodeIdsRef,
+    actionsRef,
+    setMediaNodes,
+    spawnPosition,
+    dockToolCallbacks,
+    handleMediaDims,
+    handleSaveMediaToAssets,
+    addCanvasEdge,
+    validateVideoRefConnect,
+    videoCapsOfDraft,
+    imageRefMaxOfDraft,
+    videoFreeRefs,
+    appendVideoFreeRef: (item, role) => appendVideoFreeRef(item, role),
+    showToast,
+    assetsPickerTarget,
+    setShowAssetsPicker,
+    videoAssetPickRole,
+    videoDraftId,
+    audioDraftId,
+    audioAssetPickTarget,
+    audioSeed,
+    isGeneratingNode,
+    imageDraftId,
+    showAudioDialog,
+    setAudioAssetPickResult,
+    setImagePickResult,
+    setAgentAssetPicks,
+  });
+  const {
+    placeFileOnCanvas,
+    handleUploadFile,
+    handleCopyImage,
+    handleFillEmptyShell,
+    applyClipboardAtFlow,
+  } = useCanvasUploadDrop({
+    currentId,
+    toolMode,
+    spawnPosition,
+    handleMediaDims,
+    handleSaveMediaToAssets,
+    dockToolCallbacks,
+    actionsRef,
+    setMediaNodes,
+    pendingNodeIdsRef,
+    historyRef,
+    upsertAssets,
+    mediaNodesRef,
+    handleAddTextNode,
+    showToast,
+  });
+  actionsRef.current = {
+    ...actionsRef.current,
+    duplicate: handleDuplicateNode,
+    addToChat: handleAddToChatNode,
+    pasteAtNode: (id) => {
+      const node =
+        textNodesRef.current.find((n) => n.id === id) ?? mediaNodesRef.current.find((n) => n.id === id);
+      const position = node
+        ? { x: node.position.x + 40, y: node.position.y + 40 }
+        : spawnPosition();
+      void applyClipboardAtFlow(position);
+    },
+    copyImage: (id) => { void handleCopyImage(id); },
+    complianceCheck: (id) => { void complianceCheckRef.current?.(id); },
+    fillEmptyShell: handleFillEmptyShell,
+  };
+  const { handleCopySelectedNodes, handlePasteClipboard } = useCanvasClipboard({
+    currentId,
+    textNodesRef,
+    mediaNodesRef,
+    setTextNodes,
+    setMediaNodes,
+    pendingNodeIdsRef,
+    historyRef,
+    spawnPosRef,
+    attachCallbacks,
+    findCanvasNode,
+    syncTextIndexEdges,
+    setSelectManyRequest,
+    placeFileOnCanvas,
+    handleAddTextNode,
+  });
   const recoverFrameInterpolationRef = useRef<(nodeId: string, savedJobId?: unknown) => void>(() => {});
   const imageToolTargetOfNode = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -3969,75 +3293,20 @@ export default function CanvasPage() {
   const appendVideoFreeRef = (item: VideoMediaRef, role: VideoRefRole) => generationDock.updateDraft('video', { freeReference: { operation: 'add', item, role } });
   const removeVideoFreeRef = (key: string) => generationDock.updateDraft('video', { freeReference: { operation: 'remove', key } });
   const assignVideoFreeRefRoles = (assignments: Array<{ nodeId: string; role: VideoRefRole }>) => generationDock.updateDraft('video', { freeReference: { operation: 'assign', assignments } });
-  const handleNodeEnhanceImage = (id: string): string | undefined => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const err = imageRefSourceError(node);
-    if (err) {
-      showToast('warn', err);
-      return;
-    }
-    const sourceData = (node.data ?? {}) as Record<string, unknown>;
-    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-      fileName: '高清',
-      data: { imageEnhance: { sourceAssetId: readAssetId(sourceData) } },
-    });
-    addCanvasEdge(id, draftId, undefined, { origin: IMAGE_ENHANCE_EDGE_ORIGIN });
-    return draftId;
-  };
-  const handleNodeVideoEnhance = (id: string): string | undefined => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const gate = videoEnhanceGateReason((node.data ?? {}) as Record<string, unknown>);
-    if (gate) {
-      showToast('warn', gate);
-      return;
-    }
-    const sourceData = (node.data ?? {}) as Record<string, unknown>;
-    const draftId = createVideoDraftCard(undefined, videoEnhanceDraftPosition(node), {
-      fileName: 'HD',
-      data: { videoEnhance: { sourceAssetId: readAssetId(sourceData) } },
-    });
-    addCanvasEdge(id, draftId, undefined, { origin: VIDEO_ENHANCE_EDGE_ORIGIN });
-    return draftId;
-  };
-  const handleVideoEnhanceParamsChange = (nodeId: string, resolution: VideoEnhanceResolution) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const identity = ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as VideoEnhanceIdentity | undefined;
-    patchMediaNode(nodeId, {
-      videoEnhance: { ...identity, lastParams: { resolution } },
-    });
-  };
-  const handleNodeFrameInterpolation = (id: string): string | undefined => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const gate = frameInterpolationGateReason((node.data ?? {}) as Record<string, unknown>);
-    if (gate) {
-      showToast('warn', gate);
-      return;
-    }
-    const sourceData = (node.data ?? {}) as Record<string, unknown>;
-    const fps = FRAME_INTERPOLATION_DEFAULT_FPS;
-    const draftId = createVideoDraftCard(undefined, frameInterpolationDraftPosition(node), {
-      fileName: frameInterpolationDisplayName(fps),
-      data: {
-        frameInterpolation: {
-          sourceAssetId: readAssetId(sourceData),
-          lastParams: { fps },
-        } satisfies FrameInterpolationIdentity,
-      },
-    });
-    addCanvasEdge(id, draftId, undefined, { origin: FRAME_INTERPOLATION_EDGE_ORIGIN });
-    return draftId;
-  };
-  const handleFrameInterpolationParamsChange = (nodeId: string, fps: FrameInterpolationFps) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const identity = ((node?.data ?? {}) as Record<string, unknown>).frameInterpolation as FrameInterpolationIdentity | undefined;
-    patchMediaNode(nodeId, {
-      frameInterpolation: { ...identity, lastParams: { fps } },
-      ...(hasCustomName(node) ? {} : { fileName: frameInterpolationDisplayName(fps) }),
-    });
-  };
+  const {
+    handleNodeEnhanceImage,
+    handleNodeVideoEnhance,
+    handleVideoEnhanceParamsChange,
+    handleNodeFrameInterpolation,
+    handleFrameInterpolationParamsChange,
+  } = useCanvasToolDraftCreators({
+    mediaNodesRef,
+    showToast,
+    createImageDraftCard,
+    createVideoDraftCard,
+    addCanvasEdge,
+    patchMediaNode,
+  });
   const startFrameInterpolationJob = async (submission: FrameInterpolationSubmission): Promise<boolean> => {
     const { nodeId, payload: input, identity } = submission;
     const fps = input.fps;
@@ -5219,227 +4488,27 @@ export default function CanvasPage() {
       resources={{ followAnchor, dragHidden: isAnchoredOverlayDragHidden(textGenDraftId) }}
     />,
   };
-  const handleUpdateGenerate = async (nodeId: string, opts?: { ratioOverride?: string }) => {
-    if (applyingRef.current) return;
-    if (saveBlocked || saveStatus === 'error') {
-      showToast('warn', '保存失败，请重试');
-      return;
-    }
-    const node = mediaNodesRef.current.find((item) => item.id === nodeId);
-    if (!node || node.type !== 'mediaNode') return;
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    if (data.genStatus === 'generating') {
-      showToast('warn', '正在生成中');
-      return;
-    }
-    const mediaType = data.mediaType;
-    if (mediaType !== 'image' && mediaType !== 'video' && mediaType !== 'audio') return;
-    const modelId = typeof data.draftModelId === 'string' ? data.draftModelId : '';
-    if (!modelId) {
-      showToast('warn', '缺少模型参数，请先打开面板选择模型');
-      return;
-    }
-    const projectId = currentId;
-    if (!projectId) {
-      showToast('warn', '未选中项目，无法生成');
-      return;
-    }
-    const prompt = typeof data.prompt === 'string' ? data.prompt : '';
-    const promptDoc = restorePromptDoc(data.promptDoc, data.prompt);
-    const composedPrompt = composeImageSendPrompt(textAttachmentsOf(nodeId), prompt, promptDoc);
-    const updatePromptLimitError = composedPromptLimitError(
-      composedPrompt,
-      await promptMaxLengthOfModel(mediaType, modelId),
-    );
-    if (updatePromptLimitError) {
-      showToast('warn', updatePromptLimitError);
-      return;
-    }
-    if (mediaType === 'image') {
-      const size = typeof data.draftSize === 'string' ? data.draftSize : '';
-      const ratio = typeof data.draftRatio === 'string' ? data.draftRatio : '';
-      if (!size || !ratio) {
-        showToast('warn', '缺少分辨率或比例，请先打开面板确认参数');
-        return;
-      }
-      const syncError = imageTextIndexSendError(
-        nodeId,
-        edgesRef.current,
-        [...mediaNodesRef.current, ...textNodesRef.current],
-        DEFAULT_IMAGE_REFERENCE_LIMIT,
-      );
-      if (syncError) {
-        showToast('warn', syncError);
-        return;
-      }
-      applyingRef.current = true;
-      setSubmittingNodeId(nodeId);
-      try {
-        const inputAssetIds: string[] = [];
-        for (const ref of mergedImageRefsOf(nodeId, edgesRef.current, [...mediaNodesRef.current, ...textNodesRef.current])) {
-          if (!inputAssetIds.includes(ref.assetId)) inputAssetIds.push(ref.assetId);
-        }
-        if (!(await flushCanvasSave(projectId))) return;
-        if (activeProjectRef.current !== projectId) return;
-        const jobRefs = buildImageJobReferences(inputAssetIds);
-        const submitted = startGenerationJob(
-          'image',
-          { prompt, model_id: modelId, aspect_ratio: ratio, size },
-          undefined,
-          jobRefs.length > 0 ? { references: jobRefs } : undefined,
-          nodeId,
-          undefined,
-          promptDoc,
-        );
-        if (submitted && imageDraftId === nodeId) generationDock.submitted('image', nodeId);
-      } catch (error) {
-        showToast('error', '保存或提交失败，请重试');
-        console.warn('更新生成失败:', error);
-      } finally {
-        applyingRef.current = false;
-        setSubmittingNodeId(null);
-      }
-      return;
-    }
-    if (mediaType === 'video') {
-      const aspectRatio = opts?.ratioOverride ?? (typeof data.draftRatio === 'string' ? data.draftRatio : '');
-      const resolution = typeof data.draftSize === 'string' ? data.draftSize : '';
-      const duration = typeof data.draftDuration === 'number' ? data.draftDuration : Number(data.draftDuration);
-      const syncError = videoTextIndexSendError(
-        nodeId,
-        edgesRef.current,
-        mediaNodesRef.current,
-        textNodesRef.current,
-      );
-      if (syncError) {
-        showToast('warn', syncError);
-        return;
-      }
-      const sourceDraftRefs = mergedVideoRefsWithTextIndex(
-        nodeId,
-        edgesRef.current,
-        mediaNodesRef.current,
-        textNodesRef.current,
-      );
-      const savedStripOrder = data.referenceStripOrder;
-      const draftRefs = {
-        ...sourceDraftRefs,
-        reference: orderRefStripItems(
-          sourceDraftRefs.reference,
-          videoRefStripKey,
-          Array.isArray(savedStripOrder) ? savedStripOrder : [],
-        ),
-      };
-      const fallbackMode = draftVideoModeOf(data, draftRefs) ?? defaultVideoModeFor(draftRefs);
-      const modeFeatures = draftModelOf(nodeId, 'video')?.features;
-      const lockedDuration = lockedDurationOf(modeFeatures, fallbackMode);
-      const wireParams = effectiveVideoParams(modeFeatures, fallbackMode, {
-        aspectRatio,
-        duration,
-      });
-      if (
-        !wireParams.aspect_ratio ||
-        !resolution ||
-        !Number.isFinite(wireParams.duration) ||
-        (wireParams.duration <= 0 && wireParams.duration !== lockedDuration)
-      ) {
-        showToast('warn', '缺少视频参数，请先打开面板确认比例、分辨率和时长');
-        return;
-      }
-      const conflict = videoRefConflict(draftRefs, {
-        firstFrame: true,
-        lastFrame: true,
-        firstLastFrame: true,
-        referenceImage: true,
-      }, fallbackMode);
-      if (conflict) {
-        showToast('warn', conflict);
-        return;
-      }
-      const refGate = videoRefUnsupportedByModel(modelId, draftRefs);
-      if (refGate) {
-        showToast('warn', refGate);
-        return;
-      }
-      applyingRef.current = true;
-      setSubmittingNodeId(nodeId);
-      try {
-        if (!(await flushCanvasSave(projectId))) return;
-        if (activeProjectRef.current !== projectId) return;
-        const jobRefs = buildVideoJobReferences(draftRefs);
-        const submitted = startGenerationJob(
-          'video',
-          {
-            prompt,
-            model_id: modelId,
-            aspect_ratio: wireParams.aspect_ratio,
-            resolution,
-            duration: wireParams.duration,
-            mode: fallbackMode,
-            generate_audio: typeof data.draftGenerateAudio === 'boolean' ? data.draftGenerateAudio : true,
-          },
-          undefined,
-          jobRefs.length > 0 ? { references: jobRefs } : undefined,
-          nodeId,
-          { mode: fallbackMode, references: [] },
-          promptDoc,
-        );
-        if (submitted && videoDraftId === nodeId) generationDock.submitted('video', nodeId);
-      } catch (error) {
-        showToast('error', '保存或提交失败，请重试');
-        console.warn('更新生成失败:', error);
-      } finally {
-        applyingRef.current = false;
-        setSubmittingNodeId(null);
-      }
-      return;
-    }
-    const syncError = audioTextIndexSendError(
-      nodeId,
-      edgesRef.current,
-      mediaNodesRef.current,
-      textNodesRef.current,
-    );
-    if (syncError) {
-      showToast('warn', syncError);
-      return;
-    }
-    applyingRef.current = true;
-    setSubmittingNodeId(nodeId);
-    try {
-      const { refs } = mergedAudioRefsWithTextIndex(
-        nodeId,
-        edgesRef.current,
-        mediaNodesRef.current,
-        textNodesRef.current,
-      );
-      const resolved = refs.filter((ref) => ref.assetId);
-      if (!(await flushCanvasSave(projectId))) return;
-      if (activeProjectRef.current !== projectId) return;
-      const submitted = startGenerationJob(
-        'audio',
-        { prompt, model_id: modelId },
-        undefined,
-        resolved.length
-          ? { references: resolved.map((ref) => ({
-              role: 'reference' as const,
-              type: ref.mediaType,
-              asset_id: String(ref.assetId),
-            })) }
-          : undefined,
-        nodeId,
-        undefined,
-        promptDoc,
-      );
-      if (submitted && audioDraftId === nodeId) generationDock.submitted('audio', nodeId);
-    } catch (error) {
-      showToast('error', '保存或提交失败，请重试');
-      console.warn('更新生成失败:', error);
-    } finally {
-      applyingRef.current = false;
-      setSubmittingNodeId(null);
-    }
-  };
+  const { handleUpdateGenerate } = useCanvasUpdateGenerate({
+    currentId,
+    saveBlocked,
+    saveStatus,
+    mediaNodesRef,
+    textNodesRef,
+    edgesRef,
+    applyingRef,
+    activeProjectRef,
+    imageDraftId,
+    videoDraftId,
+    audioDraftId,
+    setSubmittingNodeId,
+    showToast,
+    flushCanvasSave,
+    startGenerationJob,
+    generationDock,
+    textAttachmentsOf,
+    draftModelOf,
+    videoRefUnsupportedByModel,
+  });
   updateGenerateRef.current = (nodeId) => {
     void handleUpdateGenerate(nodeId);
   };
