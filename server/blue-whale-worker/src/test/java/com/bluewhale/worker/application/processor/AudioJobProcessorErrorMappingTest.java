@@ -118,7 +118,7 @@ class AudioJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("TTS 额度耗尽 → quota_exhausted")
+    @DisplayName("TTS 额度耗尽 → platform_quota_exhausted")
     void quotaExhausted() {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "hello",
@@ -129,14 +129,14 @@ class AudioJobProcessorErrorMappingTest {
         when(upstreamCredential.requireKey()).thenReturn("sk-token");
         when(audioClient.generate(anyString(), anyString(), anyString(), any()))
                 .thenThrow(new AudioProviderError(
-                        GenerationError.ERROR_QUOTA_EXHAUSTED, "余额不足"));
+                        GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED, "余额不足"));
 
         processor.handle("100");
 
         ArgumentCaptor<String> codeCaptor = ArgumentCaptor.forClass(String.class);
         verify(finalizer).failJob(eq("100"), codeCaptor.capture(),
                 anyString(), any(), anyString(), anyLong());
-        assertThat(codeCaptor.getValue()).isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertThat(codeCaptor.getValue()).isEqualTo(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test

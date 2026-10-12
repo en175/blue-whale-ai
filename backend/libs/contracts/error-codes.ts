@@ -17,6 +17,7 @@ export const ERROR_INVALID_REFERENCE_MEDIA = "invalid_reference_media";
 export const ERROR_OUTPUT_COUNT_MISMATCH = "output_count_mismatch";
 
 export const ERROR_QUOTA_EXHAUSTED = "quota_exhausted";
+export const ERROR_PLATFORM_QUOTA_EXHAUSTED = "platform_quota_exhausted";
 export const ERROR_PROVIDER_CREDENTIAL_MISSING = "provider_credential_missing";
 export const ERROR_PROVIDER_CONFIG = "provider_config";
 export const ERROR_PROVIDER_FAILED = "provider_failed";
@@ -141,6 +142,7 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_FINALIZE_DEADLINE_EXCEEDED]: 1058,
   [ERROR_CONTENT_REJECTED_AUDIO]: 1059,
   [ERROR_TASK_TYPE_PARAM_CONSTRAINT]: 1060,
+  [ERROR_PLATFORM_QUOTA_EXHAUSTED]: 1061,
 };
 
 export function errorCodeToNumeric(code: string): number {
@@ -346,6 +348,7 @@ export const ERROR_CODES: Record<number, string> = {
   1058: "已超过样片转成片的截止时间，可重新生成样片后再试",
   1059: "生成的音频可能涉及版权限制，请调整提示词后重试",
   1060: "提示词包含修改、替换或延长原视频的意图，输出比例将自动跟随参考视频，请将比例切换为「自动」后重试",
+  1061: "生成服务额度不足，请联系平台管理员",
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",
   1103: "当前账号未设置密码",

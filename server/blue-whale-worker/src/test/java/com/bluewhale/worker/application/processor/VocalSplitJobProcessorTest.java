@@ -268,17 +268,17 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("submit quota_exhausted → 保留既有码投影（§5 信号）")
+    @DisplayName("submit platform_quota_exhausted → 保留既有码投影（§5 信号）")
     void submitQuotaExhausted_preserved() {
         stubSubmitClaim(input("audio"));
         stubSourceAsset("video");
         when(separateVoiceClient.submit(anyString(), anyString(), anyBoolean(), anyString(), anyString()))
-                .thenThrow(new VocalSplitError(GenerationError.ERROR_QUOTA_EXHAUSTED,
+                .thenThrow(new VocalSplitError(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED,
                         "人声背景分离任务提交失败: HTTP 402 剩余额度不足"));
 
         processor.handle("100");
 
-        assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertFailCode(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test
@@ -691,7 +691,7 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll failed + 额度信号 → quota_exhausted（§5 保留）")
+    @DisplayName("poll failed + 额度信号 → platform_quota_exhausted（§5 保留）")
     void pollFailedQuotaSignal_preserved() {
         stubPollClaim(input("audio"), 3, 7);
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
@@ -700,7 +700,7 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertFailCode(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test

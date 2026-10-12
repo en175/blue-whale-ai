@@ -43,7 +43,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
     private static final Logger log = LoggerFactory.getLogger(VideoMattingJobProcessor.class);
 
     private static final Set<String> PRESERVED_ERROR_CODES = Set.of(
-            GenerationError.ERROR_QUOTA_EXHAUSTED,
+            GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
@@ -540,7 +540,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
             return GenerationError.ERROR_CONTENT_REJECTED;
         }
         if (NewApiErrorClassifier.isQuotaSignal(text)) {
-            return GenerationError.ERROR_QUOTA_EXHAUSTED;
+            return GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED;
         }
         return VideoMattingContract.ERROR_VIDEO_MATTING_FAILED;
     }

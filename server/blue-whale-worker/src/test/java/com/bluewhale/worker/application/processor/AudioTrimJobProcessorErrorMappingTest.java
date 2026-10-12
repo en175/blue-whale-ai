@@ -265,17 +265,17 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("submit quota_exhausted → 保留既有码投影（§5 信号）")
+    @DisplayName("submit platform_quota_exhausted → 保留既有码投影（§5 信号）")
     void submitQuotaExhausted_preserved() {
         stubSubmitClaim(input());
         stubSourceAsset();
         when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
-                .thenThrow(new AudioTrimError(GenerationError.ERROR_QUOTA_EXHAUSTED,
+                .thenThrow(new AudioTrimError(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED,
                         "音频截取任务提交失败: HTTP 402 剩余额度不足"));
 
         processor.handle("100");
 
-        assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertFailCode(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test
@@ -674,7 +674,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("poll failed + 额度信号 → quota_exhausted（§5 保留）")
+    @DisplayName("poll failed + 额度信号 → platform_quota_exhausted（§5 保留）")
     void pollFailedQuotaSignal_preserved() {
         stubPollClaim(input(), 3, 7);
         when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
@@ -683,7 +683,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertFailCode(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test

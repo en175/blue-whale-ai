@@ -14,10 +14,18 @@ export function blockIfCreditsInsufficient(
   return true;
 }
 
+const PERSONAL_CREDITS_CODE = 1001;
+const PLATFORM_QUOTA_EXHAUSTED_CODE = 'platform_quota_exhausted';
+
 export function isCreditsExhaustedError(e: unknown): boolean {
   if (!isApiError(e)) return false;
   const code = String(e.code);
-  return e.status === 402 || code === 'payment_required' || code === 'quota_exhausted';
+  if (code === PLATFORM_QUOTA_EXHAUSTED_CODE) return false;
+  return (
+    (e.status === 402 && Number(e.code) === PERSONAL_CREDITS_CODE) ||
+    code === 'payment_required' ||
+    code === 'quota_exhausted'
+  );
 }
 
 export function openRechargeForCreditsError(e: unknown): boolean {

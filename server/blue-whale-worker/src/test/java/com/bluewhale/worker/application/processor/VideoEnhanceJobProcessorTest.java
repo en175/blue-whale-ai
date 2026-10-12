@@ -640,7 +640,7 @@ class VideoEnhanceJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll failed + 额度信号 → quota_exhausted（§5 保留）")
+    @DisplayName("poll failed + 额度信号 → platform_quota_exhausted（§5 保留）")
     void pollFailedQuotaSignal_preserved() {
         stubPollClaim(input("1080p"), 3);
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -649,7 +649,7 @@ class VideoEnhanceJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertFailCode(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
 

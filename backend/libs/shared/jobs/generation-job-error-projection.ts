@@ -4,13 +4,16 @@ import {
   ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
   ERROR_MEDIA_EXTRACT_FAILED,
+  ERROR_PLATFORM_QUOTA_EXHAUSTED,
   ERROR_PROVIDER_FAILED,
+  ERROR_QUOTA_EXHAUSTED,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
   ERROR_VIDEO_GENERATION_FAILED,
   ERROR_VOCAL_SPLIT_FAILED,
   GENERATION_ERROR_NUMERIC_CODES,
   errorCodeToNumeric,
+  isQuotaSignal,
   messageOf,
   type PublicGenerationError,
 } from "@lib/contracts";
@@ -46,6 +49,16 @@ export function messageFor(code: string, type: string): string {
   return messageOf(errorCodeToNumeric(fallbackErrorCode(type)));
 }
 
+function resolveLegacyQuotaOrigin(
+  code: string,
+  storedError: Record<string, unknown>,
+): string {
+  if (code !== ERROR_QUOTA_EXHAUSTED) return code;
+  const message = storedError.message;
+  if (typeof message !== "string" || !isQuotaSignal(message)) return code;
+  return ERROR_PLATFORM_QUOTA_EXHAUSTED;
+}
+
 export function projectPublicError(
   storedError: Record<string, unknown> | null,
   type: string,
@@ -54,6 +67,7 @@ export function projectPublicError(
   const rawCode = storedError.code;
   let code = rawCode == null ? fallbackErrorCode(type) : String(rawCode);
   code = resolveErrorCode(code);
+  code = resolveLegacyQuotaOrigin(code, storedError);
   if (!GENERATION_ERROR_CODES.has(code)) {
     code = fallbackErrorCode(type);
   }

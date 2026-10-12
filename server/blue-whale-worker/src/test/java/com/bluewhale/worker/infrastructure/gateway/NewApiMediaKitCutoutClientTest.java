@@ -183,7 +183,7 @@ class NewApiMediaKitCutoutClientTest {
     }
 
     @Test
-    @DisplayName("额度信号（余额不足文案）→ quota_exhausted（§5 分类保留）")
+    @DisplayName("额度信号（余额不足文案）→ platform_quota_exhausted（§5 分类保留）")
     void quotaSignalKept() {
         lastStatus.set(400);
         responseJson.set("{\"message\":\"剩余额度不足\"}");
@@ -191,7 +191,7 @@ class NewApiMediaKitCutoutClientTest {
         Throwable thrown = catchThrowable(this::callGeneralScene);
 
         assertThat(((ImageCutoutError) thrown).getCode())
-                .isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
+                .isEqualTo(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test

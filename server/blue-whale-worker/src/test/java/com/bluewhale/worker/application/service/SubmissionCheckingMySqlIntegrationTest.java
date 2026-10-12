@@ -287,7 +287,7 @@ class SubmissionCheckingMySqlIntegrationTest {
         long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "charged");
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId), "w1", 5L)).isTrue();
 
-        boolean failed = finalizer.failVideoJob(String.valueOf(jobId), "quota_exhausted",
+        boolean failed = finalizer.failVideoJob(String.valueOf(jobId), "platform_quota_exhausted",
                 "网关明确拒绝", null, "w1", 5L);
 
         assertThat(failed).isTrue();

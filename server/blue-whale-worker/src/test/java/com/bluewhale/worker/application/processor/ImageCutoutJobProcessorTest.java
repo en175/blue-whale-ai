@@ -328,18 +328,18 @@ class ImageCutoutJobProcessorTest {
     }
 
     @Test
-    @DisplayName("客户端 quota_exhausted → 保留既有码投影（§5 信号）")
+    @DisplayName("客户端 platform_quota_exhausted → 保留既有码投影（§5 信号）")
     void quotaExhausted_preserved() {
         stubClaim(generalSceneInput());
         stubSourceAsset();
         when(mediaKitCutoutClient.cutout(anyString(), anyString(), anyString(),
                 any(), any(), any(), any()))
-                .thenThrow(new ImageCutoutError(GenerationError.ERROR_QUOTA_EXHAUSTED,
+                .thenThrow(new ImageCutoutError(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED,
                         "图片抠图失败: HTTP 402 剩余额度不足"));
 
         processor.handle("100");
 
-        assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertFailCode(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test

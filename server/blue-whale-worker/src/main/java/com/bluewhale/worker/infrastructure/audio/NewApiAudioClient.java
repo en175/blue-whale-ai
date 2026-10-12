@@ -108,7 +108,7 @@ public class NewApiAudioClient {
                 String code = NewApiErrorClassifier.classifySuccessEnvelope(errText);
                 String message = switch (code) {
                     case GenerationError.ERROR_CONTENT_REJECTED -> "生成内容涉及版权或敏感信息";
-                    case GenerationError.ERROR_QUOTA_EXHAUSTED -> "new-api 音频生成余额不足";
+                    case GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED -> "new-api 音频生成余额不足";
                     default -> "new-api 音频生成业务失败";
                 };
                 throw new AudioProviderError(code, message);

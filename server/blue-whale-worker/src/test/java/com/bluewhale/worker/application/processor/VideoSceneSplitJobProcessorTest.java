@@ -253,17 +253,17 @@ class VideoSceneSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("submit quota_exhausted → 保留既有码投影（§5 信号）")
+    @DisplayName("submit platform_quota_exhausted → 保留既有码投影（§5 信号）")
     void submitQuotaExhausted_preserved() {
         stubSubmitClaim(input("standard"));
         stubSourceAsset();
         when(segmentScenesClient.submit(anyString(), anyString(), anyString()))
-                .thenThrow(new VideoSceneSplitError(GenerationError.ERROR_QUOTA_EXHAUSTED,
+                .thenThrow(new VideoSceneSplitError(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED,
                         "场景切分任务提交失败: HTTP 402 剩余额度不足"));
 
         processor.handle("100");
 
-        assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertFailCode(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test
@@ -662,7 +662,7 @@ class VideoSceneSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll failed + 额度信号 → quota_exhausted（§5 保留）")
+    @DisplayName("poll failed + 额度信号 → platform_quota_exhausted（§5 保留）")
     void pollFailedQuotaSignal_preserved() {
         stubPollClaim(input("standard"), 3);
         when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
@@ -671,7 +671,7 @@ class VideoSceneSplitJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertFailCode(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
 

@@ -7,7 +7,7 @@ public final class GenerationError {
 
     public static final String UNKNOWN = "unknown";
 
-    public static final String ERROR_QUOTA_EXHAUSTED = "quota_exhausted";
+    public static final String ERROR_PLATFORM_QUOTA_EXHAUSTED = "platform_quota_exhausted";
 
     public static final String ERROR_PROVIDER_CREDENTIAL_MISSING = "provider_credential_missing";
 

@@ -43,12 +43,23 @@ describe('blockIfCreditsInsufficient', () => {
 });
 
 describe('isCreditsExhaustedError', () => {
-  it('识别 402 / payment_required / quota_exhausted', () => {
+  it('识别个人余额不足（402 + 1001）/ payment_required / quota_exhausted', () => {
+    expect(isCreditsExhaustedError(new ApiError(402, '账户余额不足，请充值后重试', 1001))).toBe(true);
     expect(isCreditsExhaustedError(new ApiError(402, '余额不足', 'quota_exhausted'))).toBe(true);
     expect(isCreditsExhaustedError(new ApiError(402, '需支付', 'payment_required'))).toBe(true);
     expect(isCreditsExhaustedError(new ApiError(403, '余额不足', 'quota_exhausted'))).toBe(true);
     expect(isCreditsExhaustedError(new ApiError(400, '参数错误', 'bad_request'))).toBe(false);
     expect(isCreditsExhaustedError(new Error('network'))).toBe(false);
+  });
+
+  it('ADR-0128：平台额度不足不引导个人充值', () => {
+    expect(
+      isCreditsExhaustedError(
+        new ApiError(402, '生成服务额度不足，请联系平台管理员', 'platform_quota_exhausted'),
+      ),
+    ).toBe(false);
+    expect(isCreditsExhaustedError(new ApiError(402, '生成服务额度不足', 1061))).toBe(false);
+    expect(isCreditsExhaustedError(new ApiError(402, '上游拒绝', ''))).toBe(false);
   });
 });
 

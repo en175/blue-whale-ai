@@ -812,10 +812,10 @@ class VideoJobProcessorTest {
         }
 
         @Test
-        @DisplayName("quota_exhausted → 非瞬时")
+        @DisplayName("platform_quota_exhausted → 非瞬时")
         void quotaExhausted_notTransient() {
             VideoProviderError err = new VideoProviderError(
-                    GenerationError.ERROR_QUOTA_EXHAUSTED, "额度不足");
+                    GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED, "额度不足");
             assertThat(VideoJobProcessor.isTransientPollError(err)).isFalse();
         }
 
@@ -2088,14 +2088,14 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("149"), anyString());
         doReturn("token").when(upstreamCredential).requireKey();
-        doThrow(new VideoProviderError(GenerationError.ERROR_QUOTA_EXHAUSTED,
+        doThrow(new VideoProviderError(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED,
                 "new-api 成片提交失败: HTTP 403 body=quota",
                 new NewApiVideoClient.HttpStatusException(403)))
                 .when(videoClient).finalize(eq("token"), eq("task-sample-9"));
 
         processor.handle("149");
 
-        verify(finalizer).failVideoJob(eq("149"), eq(GenerationError.ERROR_QUOTA_EXHAUSTED),
+        verify(finalizer).failVideoJob(eq("149"), eq(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED),
                 anyString(), any(), eq("video-worker"), eq(1L));
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
     }

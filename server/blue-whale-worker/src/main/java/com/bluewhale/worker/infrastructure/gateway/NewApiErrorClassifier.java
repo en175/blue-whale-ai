@@ -41,7 +41,7 @@ public final class NewApiErrorClassifier {
             return GenerationError.ERROR_CONTENT_REJECTED;
         }
         if (httpStatus == 402 || isQuotaSignal(text)) {
-            return GenerationError.ERROR_QUOTA_EXHAUSTED;
+            return GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED;
         }
         return GenerationError.ERROR_PROVIDER_FAILED;
     }
@@ -54,7 +54,7 @@ public final class NewApiErrorClassifier {
             return GenerationError.ERROR_CONTENT_REJECTED;
         }
         if (isQuotaSignal(errorText)) {
-            return GenerationError.ERROR_QUOTA_EXHAUSTED;
+            return GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED;
         }
         return GenerationError.ERROR_PROVIDER_FAILED;
     }

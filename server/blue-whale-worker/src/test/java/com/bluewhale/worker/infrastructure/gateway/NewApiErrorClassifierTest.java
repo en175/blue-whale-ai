@@ -55,31 +55,31 @@ class NewApiErrorClassifierTest {
 
 
     @Test
-    @DisplayName("HTTP 402 → quota_exhausted")
+    @DisplayName("HTTP 402 → platform_quota_exhausted")
     void http402() {
         assertThat(NewApiErrorClassifier.classifyError("", 402))
-                .isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
+                .isEqualTo(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test
-    @DisplayName("余额不足 → quota_exhausted")
+    @DisplayName("余额不足 → platform_quota_exhausted")
     void balanceInsufficient_zh() {
         assertThat(NewApiErrorClassifier.classifyError("余额不足，请充值", 400))
-                .isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
+                .isEqualTo(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test
-    @DisplayName("预扣费额度失败 → quota_exhausted")
+    @DisplayName("预扣费额度失败 → platform_quota_exhausted")
     void prechargeFailed_zh() {
         assertThat(NewApiErrorClassifier.classifyError("预扣费额度失败", 400))
-                .isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
+                .isEqualTo(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test
-    @DisplayName("payment_required → quota_exhausted")
+    @DisplayName("payment_required → platform_quota_exhausted")
     void paymentRequired() {
         assertThat(NewApiErrorClassifier.classifyError("payment_required", 400))
-                .isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
+                .isEqualTo(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
 
@@ -121,10 +121,10 @@ class NewApiErrorClassifierTest {
     }
 
     @Test
-    @DisplayName("classifySuccessEnvelope: quota 信号 → quota_exhausted")
+    @DisplayName("classifySuccessEnvelope: quota 信号 → platform_quota_exhausted")
     void envelopeQuota() {
         assertThat(NewApiErrorClassifier.classifySuccessEnvelope("剩余额度不足"))
-                .isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
+                .isEqualTo(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test
