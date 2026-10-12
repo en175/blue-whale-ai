@@ -30,7 +30,6 @@ managed_block() {
   python3 - "$CONFIG" "$BEGIN_MARK" "$END_MARK" "$SNIPPET" "$1" "$PONYTAIL_DST" <<'PY'
 import sys
 import re
-import shlex
 import tomllib
 from pathlib import Path
 
@@ -103,15 +102,15 @@ if mode == "remove-ponytail":
     cleaned, removed = remove_known_hooks(block_content, ponytail)
     merged = pre + begin + cleaned + end + post
     remaining = tomllib.loads(merged)
-    referenced = any(token.endswith("hooks/ponytail-hook.js")
-                     for hook in remaining.get("hooks", [])
-                     for token in shlex.split(hook["command"]))
+    safety_hooks = [hook for hook in tomllib.loads(snippet_path.read_text(encoding="utf-8"))["hooks"]
+                    if hook not in ponytail]
+    unknown_hooks = any(hook not in safety_hooks for hook in remaining.get("hooks", []))
     config_path.write_text(merged, encoding="utf-8")
     print(f"已从 {config_path} 移除 {removed} 条受管理的 Ponytail Hook，保留安全 Hook。")
     shim_path = Path(sys.argv[6])
     if shim_path.is_file():
-        if referenced or not removed:
-            print("保留 Ponytail 入口，余留 Hook 仍可能引用或归属未确认，请核对未知来源。")
+        if unknown_hooks or not removed:
+            print("保留 Ponytail 入口，余留未知 Hook 或入口归属未确认，请核对来源及间接依赖。")
         else:
             shim_path.unlink()
             print(f"已移除 Ponytail 入口: {shim_path}")

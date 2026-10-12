@@ -110,6 +110,7 @@ class KimiPonytailHooksTest(PonytailConfigHarness):
         self.assertEqual(len(security), 17)
         shim_dir = Path(self.env['KIMI_CODE_HOME']) / 'hooks'
         security_shim = (shim_dir / 'blue-whale-hook.sh').read_bytes()
+        ponytail_shim = (shim_dir / 'ponytail-hook.js').read_bytes()
         default = self.home / 'config/ponytail/config.json'
         default.parent.mkdir(parents=True)
         default.write_text('{"defaultMode":"lite","preserved":true}')
@@ -117,18 +118,19 @@ class KimiPonytailHooksTest(PonytailConfigHarness):
         client_assets = {file: (self.root / file).read_bytes()
                          for file in ['.codex/hooks.json', '.claude/settings.json',
                                       '.agents/skills/ponytail/SKILL.md']}
-        self.install('--uninstall-ponytail')
+        self.assertIn('保留 Ponytail 入口', self.install('--uninstall-ponytail'))
         remaining = tomllib.loads(config.read_text())['hooks']
         self.assertEqual([hook for hook in remaining if 'blue-whale-hook.sh' in hook['command']], security)
         self.assertEqual(sum('hooks/ponytail-hook.js' in hook['command'] for hook in remaining), 0)
         self.assertIn(personal, config.read_text())
         self.assertIn(unknown, config.read_text())
         self.assertIn(installed[installed.index('[[hooks]]\nevent = "PreToolUse"'):], config.read_text())
-        self.assertFalse((shim_dir / 'ponytail-hook.js').exists())
+        self.assertEqual((shim_dir / 'ponytail-hook.js').read_bytes(), ponytail_shim)
         self.assertEqual((shim_dir / 'blue-whale-hook.sh').read_bytes(), security_shim)
         removed = config.read_bytes()
         self.install('--uninstall-ponytail')
         self.assertEqual(config.read_bytes(), removed)
+        self.assertEqual((shim_dir / 'ponytail-hook.js').read_bytes(), ponytail_shim)
         self.assertEqual((shim_dir / 'blue-whale-hook.sh').read_bytes(), security_shim)
         self.install()
         restored = config.read_bytes()
@@ -143,6 +145,25 @@ class KimiPonytailHooksTest(PonytailConfigHarness):
         self.assertEqual(default.read_bytes(), defaults)
         for file, content in client_assets.items():
             self.assertEqual((self.root / file).read_bytes(), content)
+
+    def test_ponytail_only_uninstall_cleans_shim_when_only_standard_security_hooks_remain(self):
+        config = Path(self.env['KIMI_CODE_HOME']) / 'config.toml'
+        personal = 'default_model = "personal-model"\n\n'
+        config.write_text(personal + config.read_text())
+        installed = config.read_text()
+        shim_dir = Path(self.env['KIMI_CODE_HOME']) / 'hooks'
+        security_shim = (shim_dir / 'blue-whale-hook.sh').read_bytes()
+        self.install('--uninstall-ponytail')
+        self.assertIn(personal, config.read_text())
+        self.assertIn(installed[installed.index('[[hooks]]\nevent = "PreToolUse"'):], config.read_text())
+        hooks = tomllib.loads(config.read_text())['hooks']
+        self.assertEqual(len(hooks), 17)
+        self.assertEqual(sum('blue-whale-hook.sh' in hook['command'] for hook in hooks), 17)
+        self.assertFalse((shim_dir / 'ponytail-hook.js').exists())
+        self.assertEqual((shim_dir / 'blue-whale-hook.sh').read_bytes(), security_shim)
+        removed = config.read_bytes()
+        self.install('--uninstall-ponytail')
+        self.assertEqual(config.read_bytes(), removed)
 
     def test_unknown_multiline_hook_is_preserved_during_exact_legacy_migration(self):
         config = Path(self.env['KIMI_CODE_HOME']) / 'config.toml'
@@ -220,6 +241,42 @@ class KimiPonytailHooksTest(PonytailConfigHarness):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, 'unknown custom shim still executes')
                 self.assertEqual(result.stderr, '')
+
+    def test_ponytail_only_uninstall_preserves_explicit_and_indirect_require_hooks(self):
+        config = Path(self.env['KIMI_CODE_HOME']) / 'config.toml'
+        managed = config.read_text()
+        shim = Path(self.env['KIMI_CODE_HOME']) / 'hooks/ponytail-hook.js'
+        original = shim.read_bytes()
+        helper = self.home / 'custom-helper.js'
+        helper.write_text('require(process.env.KIMI_CODE_HOME + "/hooks/ponytail-hook.js");')
+        commands = [
+            'node -e "require(process.env.KIMI_CODE_HOME + \'/hooks/ponytail-hook.js\')" shim UserPromptSubmit',
+            'node "$HOME/custom-helper.js" UserPromptSubmit',
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                unknown = ('\n[[hooks]]\nevent = "UserPromptSubmit"\ncommand = '
+                           + json.dumps(command) + '\ntimeout = 30\n')
+                config.write_text(managed + unknown)
+                shim.write_bytes(original)
+                for phase in ['before', 'after']:
+                    if phase == 'after':
+                        report = self.install('--uninstall-ponytail')
+                    hook = tomllib.loads(config.read_text())['hooks'][-1]
+                    result = subprocess.run(hook['command'], shell=True, cwd=self.root, env=self.env,
+                                            input=json.dumps({'cwd': str(self.root),
+                                                              'prompt': '/skill:ponytail lite'}),
+                                            text=True, capture_output=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, '')
+                    self.assert_mode(self.context_output('kimi', 'UserPromptSubmit', result.stdout), 'lite')
+                    if phase == 'after':
+                        self.assertIn('保留 Ponytail 入口', report)
+                self.assertEqual(shim.read_bytes(), original)
+                self.assertIn(unknown, config.read_text())
+                hooks = tomllib.loads(config.read_text())['hooks']
+                self.assertEqual(len(hooks), 18)
+                self.assertEqual(sum('blue-whale-hook.sh' in hook['command'] for hook in hooks), 17)
 
     def test_ponytail_only_uninstall_rejects_invalid_configuration_before_removing_shim(self):
         config = Path(self.env['KIMI_CODE_HOME']) / 'config.toml'

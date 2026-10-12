@@ -47,7 +47,11 @@ node "$HOME/.config/ponytail/kimi-hook.js" UserPromptSubmit
 bash scripts/install-kimi-hooks.sh --uninstall-ponytail
 ```
 
-该入口只移除受管理配置块内精确匹配的两个 Ponytail 事件。成功移除条目且剩余配置没有引用 Ponytail shim 时，才删除用户 Ponytail shim。余留 Hook 仍可能引用该入口、本次未识别到受管理 Ponytail 条目或没有管理块时，保留 shim 并报告，请成员核对归属。17 条安全 Hook、安全 shim、其他配置、未知 Ponytail 条目、共享默认值及其他客户端资产保留。重复卸载不会改变剩余配置；重跑无参数安装器恢复两条 Ponytail Hook。配置损坏或管理标记异常时退出，不改配置、不删 shim。
+该入口只移除受管理配置块内精确匹配的两个 Ponytail 事件。只有本次成功识别并移除条目，且剩余 Hook 全部属于配置片段声明的标准安全 Hook 时，才删除用户 Ponytail shim。
+
+剩余配置中只要还有任何未知 Hook，就保留 shim 并报告，包括看起来无关的个人命令。未知命令及其 helper 可能间接依赖入口，安装器不解析 Shell 或 JavaScript 来推测依赖。没有管理块或本次未识别到受管理 Ponytail 条目时也保留入口，请成员核对归属。保留 shim 不会恢复已移除的两条事件。
+
+17 条安全 Hook、安全 shim、个人配置、未知 Hook、共享默认值及其他客户端资产保留。重复卸载不会改变剩余配置；重跑无参数安装器恢复两条 Ponytail Hook。配置损坏或管理标记异常时退出，不改配置、不删 shim。
 
 卸载整包本仓受管理的 Kimi Hook：
 
@@ -59,7 +63,7 @@ bash scripts/install-kimi-hooks.sh --uninstall
 
 ## 验证记录与实机步骤
 
-2026-10-12，本机 `kimi --version` 为 0.42.0。临时 `KIMI_CODE_HOME` 下的 `kimi doctor` 接受完整受管理配置。统一配置链通过 subprocess 验证真实正文、四档、切换、关闭、裸命令恢复、default、一次性命令、跨客户端与项目及工作树隔离、首次与重复安装、更新、精确迁移、整轮一次正文注入和卸载。独立卸载回归检查 17 条安全 Hook 与安全 shim 原样保留、管理块内外未知来源保留、重复卸载无漂移、重装恢复，以及损坏配置失败时两个 shim 保留。余留 Hook 从真实配置执行并验证共享正文；没有管理块时，自定义同名 shim 的字节及执行行为保留。测试隔离 HOME 与配置，不读取真实个人状态。
+2026-10-12，本机 `kimi --version` 为 0.42.0。临时 `KIMI_CODE_HOME` 下的 `kimi doctor` 接受完整受管理配置。统一配置链通过 subprocess 验证真实正文、四档、切换、关闭、裸命令恢复、default、一次性命令、跨客户端与项目及工作树隔离、首次与重复安装、更新、精确迁移、整轮一次正文注入和卸载。独立卸载回归检查 17 条安全 Hook 与安全 shim 原样保留、管理块内外未知来源保留、重复卸载无漂移、重装恢复，以及损坏配置失败时两个 shim 保留。余留 Hook 的直接调用、显式 require 和 helper 间接依赖从真实配置执行并验证共享正文；没有管理块时，自定义同名 shim 的字节及执行行为保留。仅有标准安全 Hook 与个人非 Hook 设置时清理 shim；有个人 Hook 时保留并报告。测试隔离 HOME 与配置，不读取真实个人状态。
 
 ```bash
 python3 -m unittest discover -s scripts/tests -p 'test_*ponytail*.py' -v
