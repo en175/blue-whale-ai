@@ -14,7 +14,8 @@ import {
   type CanvasRecoveryPlan,
 } from "./generation-canvas-recovery-repo.js";
 import { assertPureJobInput } from "./job-input-purity.js";
-import { withBillingCompensation, type JobBilling } from "./job-billing.js";
+import { withBillingCompensation, type JobBilling, type JobBillingSource } from "./job-billing.js";
+import { createModelCapabilityRepo, serializePricingRule } from "./model-capability-repo.js";
 import { freezePlacementAnchor } from "./generation-job-placement-anchor.js";
 import {
   readCreateIdempotency,
@@ -84,6 +85,7 @@ export interface GenerationCommandRepo {
       jobType: string,
     ) => Promise<string | null>,
     canvasRecovery?: CanvasRecoveryAcceptance,
+    billing?: JobBillingSource,
   ): Promise<
     | (CreatedJob & { type: "image" | "video" | "audio" })
     | { kind: "idempotency_conflict" }
@@ -341,8 +343,39 @@ export function createGenerationCommandRepo(
       requestHash,
       guardInput,
       canvasRecovery,
+      billing,
     ) {
-      return transactionWithUniqueRetry(
+      let chargeContext: {
+        commandId: string;
+        modelId: string;
+        taskType: string;
+        input: Record<string, unknown>;
+        ruleSnapshot?: string;
+      } | null = null;
+      const jobBilling: JobBilling | undefined = billing
+        ? {
+            charge: async (jobId) => {
+              if (chargeContext === null) {
+                throw new Error("retry billing context 未初始化");
+              }
+              await billing.charge({
+                userId,
+                jobId,
+                commandId: chargeContext.commandId,
+                modelId: chargeContext.modelId,
+                taskType: chargeContext.taskType,
+                input: chargeContext.input,
+                ...(chargeContext.ruleSnapshot !== undefined
+                  ? { ruleSnapshot: chargeContext.ruleSnapshot }
+                  : {}),
+              });
+            },
+            release: (jobId, reason) =>
+              billing.release({ userId, jobId, reason }),
+          }
+        : undefined;
+      return withBillingCompensation(jobBilling, (billing) =>
+        transactionWithUniqueRetry(
         prisma,
         async (tx) => {
         const pid = BigInt(projectId);
@@ -370,10 +403,6 @@ export function createGenerationCommandRepo(
         ) {
           return { kind: "not_retryable_status" } as const;
         }
-
-        const originalReservation = await tx.cost_reservations.findFirst({
-          where: { generation_job_id: original.id },
-        });
 
         const operation = "generation.retry";
         const existing = idempotencyKey
@@ -508,27 +537,24 @@ export function createGenerationCommandRepo(
                 ? "generate_audio"
                 : "generate_image",
         };
-        await tx.cost_reservations.create({
-          data: costReservationCreateData(
-            originalReservation
-              ? {
-                  reserved_amount_fen:
-                    originalReservation.reserved_amount_fen ?? 0n,
-                  price_catalog_version:
-                    originalReservation.price_catalog_version,
-                  exchange_rate_version:
-                    originalReservation.exchange_rate_version,
-                  model_policy_version:
-                    originalReservation.model_policy_version,
-                  cost_rule_version: originalReservation.cost_rule_version,
-                }
-              : null,
-            retry.id,
-            original.user_id.toString(),
-            projectId,
-            retryInput,
-          ),
-        });
+        const retryModelId = String(retryInput.input.model_id ?? "");
+        let ruleSnapshot: string | undefined;
+        if (billing) {
+          const capability = (
+            await createModelCapabilityRepo(prisma).listEnabledByType(original.type)
+          ).find((m) => m.model_id === retryModelId);
+          ruleSnapshot = serializePricingRule(capability);
+        }
+        chargeContext = {
+          commandId: retryInput.actionIdentity,
+          modelId: retryModelId,
+          taskType: original.type,
+          input: retryInput.input,
+          ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
+        };
+        if (billing) {
+          await billing.charge(Number(retry.id));
+        }
         if (failedSlots.length > 0) {
           const recordIds = new Set<bigint>();
           for (const orig of failedSlots) {
@@ -630,6 +656,7 @@ export function createGenerationCommandRepo(
         };
         },
         { maxWait: 10_000, timeout: 30_000 },
+      ),
       );
     },
 

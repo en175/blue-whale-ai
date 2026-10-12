@@ -406,6 +406,7 @@ export class GenerationJobsController {
     const canvasBindingBody = typeof body === "object" && body !== null
       ? (body as { canvas_binding?: unknown }).canvas_binding
       : undefined;
+    const billing = this.billing();
     const result = await handleRetryGenerationJob(
       user.userId,
       projectId,
@@ -416,6 +417,7 @@ export class GenerationJobsController {
         projects: this.project,
         command: this.command.repo,
         materialGate: this.buildMaterialGate(user.userId),
+        billing,
       },
       canvasBindingBody,
     );

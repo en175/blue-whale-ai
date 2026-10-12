@@ -19,6 +19,7 @@ import {
 import type {
   CanvasRecoveryAcceptance,
   GenerationCommandRepo,
+  JobBillingSource,
   ProjectRepo,
 } from "@lib/shared/persistence/index.js";
 import type { MaterialGate } from "./handle-create-generation-job.js";
@@ -33,6 +34,7 @@ export async function handleRetryGenerationJob(
     projects: Pick<ProjectRepo, "findOwnedById">;
     command: Pick<GenerationCommandRepo, "retryJob" | "canvasBindingView">;
     materialGate?: MaterialGate;
+    billing?: JobBillingSource;
   },
   canvasBindingBody?: unknown,
 ) {
@@ -78,6 +80,7 @@ export async function handleRetryGenerationJob(
           gate.assertInputUsable({ userId, jobInput: input, jobType })
       : undefined,
     canvasRecovery,
+    deps.billing,
   );
   if (!retry) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   if ("generation_job_id" in retry) {

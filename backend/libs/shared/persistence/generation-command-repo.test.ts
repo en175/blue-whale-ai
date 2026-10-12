@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { BillingChargeContext } from "@lib/shared/billing/billing-charge.js";
+
 import {
   createGenerationCommandRepo,
   createJobWithinTx,
@@ -9,6 +11,48 @@ import {
   CREATE_GENERATION_JOB_OPERATION,
   type CreateJobResult,
 } from "./generation-job-idempotency.js";
+
+vi.mock("./model-capability-cache.js", () => ({
+  getModelCapabilityList: vi.fn().mockResolvedValue(null),
+  setModelCapabilityList: vi.fn().mockResolvedValue(undefined),
+}));
+
+const RETRY_PRICING = {
+  baseUnit: "usage.seconds",
+  basePrice: { kind: "const", value: 13000 },
+};
+
+function capabilityDelegate(rows: unknown[]) {
+  return { findMany: vi.fn().mockResolvedValue(rows) };
+}
+
+function capabilityRow(overrides: Record<string, unknown> = {}) {
+  return {
+    model_id: "seedance-2.0-pro",
+    capability_type: "video",
+    enabled: true,
+    is_delete: false,
+    provider_id: "volc",
+    model_label: "Seedance 2.0 Pro",
+    icon: null,
+    sort_order: 0,
+    supported_sizes: [],
+    supported_aspect_ratios: [],
+    supported_formats: [],
+    supported_durations: null,
+    default_size: "1k",
+    default_format: null,
+    default_aspect_ratio: "1:1",
+    default_duration: null,
+    features: {},
+    channel: null,
+    request_mapping: null,
+    is_default: false,
+    version: 1,
+    pricing: RETRY_PRICING,
+    ...overrides,
+  };
+}
 
 interface ExtraUpsertArg {
   where: {
@@ -322,6 +366,151 @@ describe("generation command repo retry", () => {
     expect(tx.command_idempotency.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ accepted_cursor: eventCursor }),
     });
+  });
+
+  it("★ 重试是新建任务 → 对新 job 扣一次费（提交即扣）", async () => {
+    const tx = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 300n,
+          project_id: 55n,
+          user_id: 9n,
+          type: "video",
+          source: "scene_card",
+          status: "failed",
+          input: { prompt: "whale", model_id: "seedance-2.0-pro" },
+        }),
+        create: vi.fn().mockResolvedValue({
+          id: 301n,
+          type: "video",
+          source: "scene_card",
+          status: "queued",
+          progress: 0,
+          version: 1,
+        }),
+      },
+      generation_output_slots: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      generation_job_extras: extrasDelegate(),
+      cost_reservations: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      command_idempotency: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      project_events: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+      },
+      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (client: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+      generation_model_capability: capabilityDelegate([capabilityRow()]),
+    };
+    const repo = createGenerationCommandRepo(prisma as never);
+    const charge = vi.fn(async () => {});
+    const release = vi.fn(async () => {});
+
+    const result = await repo.retryJob(
+      "300",
+      "55",
+      "9",
+      "retry-300",
+      "hash-300",
+      undefined,
+      undefined,
+      { charge, release },
+    );
+
+    expect(result).toMatchObject({ generation_job_id: "301" });
+    expect(charge).toHaveBeenCalledTimes(1);
+    expect(charge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "9",
+        jobId: 301,
+        taskType: "video",
+        modelId: "seedance-2.0-pro",
+        input: { prompt: "whale", model_id: "seedance-2.0-pro" },
+        ruleSnapshot: JSON.stringify(RETRY_PRICING),
+      }),
+    );
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("★ 重试扣费后事务失败 → 补偿返还（与创建路径同口径）", async () => {
+    const tx = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 300n,
+          project_id: 55n,
+          user_id: 9n,
+          type: "video",
+          source: "scene_card",
+          status: "failed",
+          input: { prompt: "whale", model_id: "seedance-2.0-pro" },
+        }),
+        create: vi.fn().mockResolvedValue({
+          id: 301n,
+          type: "video",
+          source: "scene_card",
+          status: "queued",
+          progress: 0,
+          version: 1,
+        }),
+      },
+      generation_output_slots: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      generation_job_extras: extrasDelegate(),
+      cost_reservations: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      command_idempotency: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      project_events: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+      },
+      generation_job_logs: {
+        create: vi
+          .fn()
+          .mockRejectedValue(
+            new Error("We could not serialize [object Function] value"),
+          ),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (client: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+      generation_model_capability: capabilityDelegate([capabilityRow()]),
+    };
+    const repo = createGenerationCommandRepo(prisma as never);
+    const charge = vi.fn(async () => {});
+    const release = vi.fn(async () => {});
+
+    await expect(
+      repo.retryJob("300", "55", "9", "retry-300", "hash-300", undefined, undefined, {
+        charge,
+        release,
+      }),
+    ).rejects.toThrow("could not serialize");
+
+    expect(charge).toHaveBeenCalledWith(expect.objectContaining({ jobId: 301 }));
+    expect(release).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 301 }),
+    );
   });
 
   it("再次重试根 Job 时只补仍失败的逻辑槽", async () => {
@@ -811,6 +1000,121 @@ describe("generation command repo retry", () => {
       expect(createJob).toHaveBeenCalledOnce();
       expect(result).toMatchObject({ generation_job_id: "302" });
     });
+  });
+});
+
+describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snapshot）", () => {
+  function retryHarness(capabilityRows: unknown[]) {
+    const tx = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 300n,
+          project_id: 55n,
+          user_id: 9n,
+          type: "video",
+          source: "scene_card",
+          status: "failed",
+          input: { prompt: "whale", model_id: "seedance-2.0-pro" },
+        }),
+        create: vi.fn().mockResolvedValue({
+          id: 301n,
+          type: "video",
+          source: "scene_card",
+          status: "queued",
+          progress: 0,
+          version: 1,
+        }),
+      },
+      generation_output_slots: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      generation_job_extras: extrasDelegate(),
+      cost_reservations: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      command_idempotency: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      project_events: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+      },
+      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (client: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+      generation_model_capability: capabilityDelegate(capabilityRows),
+    };
+    const repo = createGenerationCommandRepo(prisma as never);
+    const charge = vi.fn(async (_ctx: BillingChargeContext) => {});
+    const release = vi.fn(async () => {});
+    return { repo, charge, release, billing: { charge, release } };
+  }
+
+  it("★ charge 收到的 rule_snapshot 与能力行 pricing 的 JSON.stringify 逐字相同", async () => {
+    const { repo, charge, release, billing } = retryHarness([capabilityRow()]);
+
+    await repo.retryJob(
+      "300",
+      "55",
+      "9",
+      "retry-500",
+      "hash-500",
+      undefined,
+      undefined,
+      billing,
+    );
+
+    expect(charge).toHaveBeenCalledTimes(1);
+    const ctx = charge.mock.calls[0]![0];
+    expect(ctx.modelId).toBe("seedance-2.0-pro");
+    expect(ctx.ruleSnapshot).toBe(JSON.stringify(RETRY_PRICING));
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("★ 查不到能力行 → 不带 rule_snapshot（与创建路径同口径：交给 billing 拒单）", async () => {
+    const { repo, charge, billing } = retryHarness([]);
+
+    await repo.retryJob(
+      "300",
+      "55",
+      "9",
+      "retry-501",
+      "hash-501",
+      undefined,
+      undefined,
+      billing,
+    );
+
+    expect(charge).toHaveBeenCalledTimes(1);
+    expect(
+      Object.prototype.hasOwnProperty.call(charge.mock.calls[0]![0], "ruleSnapshot"),
+    ).toBe(false);
+  });
+
+  it("★ 能力行存在但没配价（pricing=null）→ 同样不带 rule_snapshot", async () => {
+    const { repo, charge, billing } = retryHarness([capabilityRow({ pricing: null })]);
+
+    await repo.retryJob(
+      "300",
+      "55",
+      "9",
+      "retry-502",
+      "hash-502",
+      undefined,
+      undefined,
+      billing,
+    );
+
+    expect(charge).toHaveBeenCalledTimes(1);
+    expect(
+      Object.prototype.hasOwnProperty.call(charge.mock.calls[0]![0], "ruleSnapshot"),
+    ).toBe(false);
   });
 });
 

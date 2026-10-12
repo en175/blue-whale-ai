@@ -3,6 +3,7 @@ import {
   createGenerationCommandRepo,
   createAssetOwnershipOps,
   createFinalizeCommandRepo,
+  type JobBillingSource,
 } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
@@ -52,6 +53,7 @@ export class GenerationCommandService {
       input: Record<string, unknown>,
       jobType: string,
     ) => Promise<string | null>,
+    billing?: JobBillingSource,
   ) {
     return this.repo.retryJob(
       jobId,
@@ -60,6 +62,8 @@ export class GenerationCommandService {
       idempotencyKey,
       requestHash,
       guardInput,
+      undefined,
+      billing,
     );
   }
 

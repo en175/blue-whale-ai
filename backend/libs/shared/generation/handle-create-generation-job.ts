@@ -80,6 +80,7 @@ import {
   DEFAULT_IMAGE_REFERENCE_MAX,
   CREATE_GENERATION_JOB_OPERATION,
   RecoveryContractError,
+  serializePricingRule,
   type CanvasRecoveryAcceptance,
   type CanvasRepo,
   type CreateJobIdempotency,
@@ -120,17 +121,7 @@ import {
 
 
 
-export function serializePricingRule(capability: ModelCapabilityView | undefined): string | undefined {
-  const pricing = capability?.pricing;
-  if (pricing === undefined || pricing === null) return undefined;
-  try {
-    return JSON.stringify(pricing);
-  } catch {
-
-
-    return undefined;
-  }
-}
+export { serializePricingRule };
 
 export interface GenerationParameters {
   prompt?: unknown;

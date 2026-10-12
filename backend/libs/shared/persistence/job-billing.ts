@@ -1,6 +1,14 @@
+import type { BillingCharge } from "@lib/shared/billing/billing-charge.js";
+import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
+
 export interface JobBilling {
   charge(jobId: number): Promise<void>;
   release(jobId: number, reason: string): Promise<void>;
+}
+
+export interface JobBillingSource {
+  charge: BillingCharge;
+  release: BillingRelease;
 }
 
 export async function withBillingCompensation<T>(
