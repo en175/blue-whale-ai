@@ -7,7 +7,6 @@ import { toast as globalToast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
-import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
 import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
@@ -26,6 +25,7 @@ import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMedi
 import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
 import { audioRefItemMediaTypeOf, audioRefMediaTypeOf, audioRefSourceError, checkAddAudioRef } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
+import { assetsPickerMediaTypes } from './assetsPickerTargets';
 import { hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   asVideoRefMediaType,
@@ -136,6 +136,10 @@ import SharedAssetsModal from './components/SharedAssetsModal';
 import LegacyHistoryModal from './components/LegacyHistoryModal';
 import AssetsPickerModal from './components/AssetsPickerModal';
 import CharacterLibraryModal from './components/CharacterLibraryModal';
+import CanvasToast from './components/CanvasToast';
+import CanvasBottomLeftActions from './components/CanvasBottomLeftActions';
+import CanvasPickHint from './components/CanvasPickHint';
+import CanvasPaneContextMenu from './components/CanvasPaneContextMenu';
 import type { MaterialAsset } from '@/api/material';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { AssetCardKind, AssetCardNodeData } from './components/AssetCardNode';
@@ -153,11 +157,7 @@ import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
 import {
   fetchProjects,
   createProject,
-  renameProject,
-  deleteProject,
   touchProjectLastOpened,
-  pinProject,
-  projectKeys,
   type SnapshotAsset,
 } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
@@ -174,7 +174,6 @@ import {
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
-import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
 import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from './livenessLibraryImport';
 import { buildImageJobReferences, buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
@@ -200,7 +199,6 @@ import { videoToolsTask, videoToolFrozenPayload, type VideoToolPayload } from '.
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
 import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
 import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
-import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
@@ -212,6 +210,8 @@ import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import { useCanvasSave, EMPTY_CLEAR_CONFLICT_TOAST, EMPTY_OVERWRITE_REJECTED_TOAST } from './hooks/useCanvasSave';
 import { useCanvasRefStripOrder } from './hooks/useCanvasRefStripOrder';
 import { useCanvasCompliance } from './hooks/useCanvasCompliance';
+import { useCanvasProjects } from './hooks/useCanvasProjects';
+import { useCanvasClipboard } from './hooks/useCanvasClipboard';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   applyDraggedNodesToGroups,
@@ -227,7 +227,6 @@ import {
   findLatestCreatedProjectId,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
-  shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
 import { createGenerationDockCoordinator } from './generationDockCoordinator';
@@ -1015,13 +1014,6 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
   const prevProjectIdRef = useRef(currentId);
-  interface CanvasClipboardSnapshot {
-    kind: 'text' | 'media';
-    position: { x: number; y: number };
-    data: Record<string, unknown>;
-  }
-  const clipboardSnapshotRef = useRef<CanvasClipboardSnapshot[]>([]);
-  const clipboardPasteOffsetRef = useRef(0);
   useEffect(() => {
     const prev = prevProjectIdRef.current;
     prevProjectIdRef.current = currentId;
@@ -1033,8 +1025,6 @@ export default function CanvasPage() {
     setAgentCandidate(null);
     setFocusViewport(undefined);
     historyRef.current?.clear();
-    clipboardSnapshotRef.current = [];
-    clipboardPasteOffsetRef.current = 0;
   }, [currentId, setAgentAssetPicks]);
   const { doc, assets: snapshotAssets, loadFailed: canvasLoadFailed, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
   const snapshotAssetsRef = useRef(snapshotAssets);
@@ -1505,85 +1495,6 @@ export default function CanvasPage() {
       historyRef.current?.pushAddNodes([copy.id]);
       setMediaNodes((prev) => [...prev, copy]);
     }
-  };
-  const CLIPBOARD_PASTE_STAIR_PX = 40;
-  const nextPasteAnchor = (): { x: number; y: number } => {
-    const stair = CLIPBOARD_PASTE_STAIR_PX * clipboardPasteOffsetRef.current;
-    clipboardPasteOffsetRef.current += 1;
-    const anchor = spawnPosRef.current();
-    return { x: anchor.x + stair, y: anchor.y + stair };
-  };
-  const handleCopySelectedNodes = (ids: string[]) => {
-    const idSet = new Set(ids);
-    const picked: Node[] = [
-      ...textNodesRef.current.filter((n) => idSet.has(n.id)),
-      ...mediaNodesRef.current.filter((n) => idSet.has(n.id)),
-    ];
-    if (picked.length === 0) return;
-    clipboardSnapshotRef.current = picked.map((n) => ({
-      kind: n.type === 'mediaNode' ? ('media' as const) : ('text' as const),
-      position: { ...n.position },
-      data: JSON.parse(JSON.stringify(n.data ?? {})) as Record<string, unknown>,
-    }));
-    clipboardPasteOffsetRef.current = 0;
-  };
-  const handlePasteClipboard = () => {
-    if (clipboardSnapshotRef.current.length === 0) {
-      void pasteFromSystemClipboard();
-      return;
-    }
-    const snapshot = clipboardSnapshotRef.current;
-    const anchor = nextPasteAnchor();
-    const minX = Math.min(...snapshot.map((s) => s.position.x));
-    const minY = Math.min(...snapshot.map((s) => s.position.y));
-    const textCopies: Node[] = [];
-    const mediaCopies: Node[] = [];
-    const newIds: string[] = [];
-    snapshot.forEach((s) => {
-      const position = {
-        x: Math.round(anchor.x + (s.position.x - minX)),
-        y: Math.round(anchor.y + (s.position.y - minY)),
-      };
-      const data = JSON.parse(JSON.stringify(s.data)) as Record<string, unknown>;
-      delete data.generationRecovery;
-      if (s.kind === 'text') {
-        delete data.promptSource;
-        delete data.promptMaterials;
-        delete data.promptMentions;
-        delete data.promptOriginalTitle;
-        const copy = attachCallbacks({ id: newNodeId('text'), type: 'textNode', position, data });
-        textCopies.push(copy);
-        newIds.push(copy.id);
-      } else {
-        const copy = attachCallbacks({ id: newNodeId('media'), type: 'mediaNode', position, data });
-        mediaCopies.push(copy);
-        newIds.push(copy.id);
-      }
-    });
-    newIds.forEach((id) => pendingNodeIdsRef.current.add(id));
-    historyRef.current?.pushAddNodes(newIds);
-    if (textCopies.length > 0) setTextNodes((prev) => [...prev, ...textCopies]);
-    if (mediaCopies.length > 0) setMediaNodes((prev) => [...prev, ...mediaCopies]);
-    textCopies.forEach((copy) => {
-      const mentionedSources = [...new Set(((copy.data.mediaMentions ?? []) as MediaMention[]).map(mention => mention.nodeId))]
-        .filter(source => findCanvasNode(source));
-      if (mentionedSources.length > 0) syncTextIndexEdges(copy.id, { added: mentionedSources, removed: [] });
-    });
-    setSelectManyRequest({ ids: newIds, ts: Date.now() });
-  };
-  const pasteFromSystemClipboard = async () => {
-    const payload = await readCanvasClipboard();
-    if (!payload) return;
-    const anchor = nextPasteAnchor();
-    const position = { x: Math.round(anchor.x), y: Math.round(anchor.y) };
-    if (payload.kind === 'image') {
-      await placeFileOnCanvas(payload.file, { position })
-        .then((done) => setSelectManyRequest({ ids: [done.nodeId], ts: Date.now() }))
-        .catch(() => undefined);
-      return;
-    }
-    const nodeId = handleAddTextNode(position, payload.text);
-    setSelectManyRequest({ ids: [nodeId], ts: Date.now() });
   };
   const renameCard = (id: string, name: string) => {
     if (textNodesRef.current.some((n) => n.id === id)) {
@@ -2686,52 +2597,6 @@ export default function CanvasPage() {
       prev.map((n) => ({ ...n, data: { ...n.data, toolMode } }))
     );
   }, [toolMode]);
-  const handleSelect = async (id: string) => {
-    if (!id || id === currentId) return;
-    if (!(await ensureSavedBeforeProjectSwitch())) return;
-    setCurrentId(id);
-  };
-  const handleRename = (id: string, newName: string) => {
-    renameProject(id, newName)
-      .then((updated) => {
-        setProjects((prev) =>
-          prev.map((p) => (p.id === id ? { ...p, name: updated.name } : p)),
-        );
-      })
-      .catch(() => undefined);
-  };
-  const handleToggleProjectPin = (id: string, pinned: boolean) => {
-    pinProject(id, pinned)
-      .then(() => fetchProjects())
-      .then((list) => {
-        setProjects(list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) })));
-        queryClient.invalidateQueries({ queryKey: projectKeys.all });
-      })
-      .catch(() => undefined);
-  };
-  const handleDelete = (id: string) => {
-    deleteProject(id)
-      .then(() => {
-        const remaining = projects.filter((p) => p.id !== id);
-        setProjects(remaining);
-        queryClient.removeQueries({ queryKey: projectKeys.all });
-        if (shouldReturnToProjectsAfterDelete(currentId, id)) {
-          navigate('/projects');
-          return;
-        }
-      })
-      .catch(() => undefined);
-  };
-  const handleNewProject = async () => {
-    if (!(await ensureSavedBeforeProjectSwitch())) return;
-    try {
-      const created = await createProject(defaultProjectName());
-      const item: CanvasProject = { id: String(created.id), name: created.name };
-      setProjects((prev) => [item, ...prev]);
-      setCurrentId(item.id);
-    } catch {
-    }
-  };
   const placeFileOnCanvas = (
     file: File,
     opts?: { position?: { x: number; y: number }; replaceNodeId?: string },
@@ -3270,6 +3135,22 @@ export default function CanvasPage() {
   assetNodesRef.current = assetNodes;
   const productNodesRef = useRef<Node[]>([]);
   productNodesRef.current = productNodes;
+  const { handleCopySelectedNodes, handlePasteClipboard } = useCanvasClipboard({
+    currentId,
+    textNodesRef,
+    mediaNodesRef,
+    setTextNodes,
+    setMediaNodes,
+    pendingNodeIdsRef,
+    historyRef,
+    spawnPosRef,
+    attachCallbacks,
+    findCanvasNode,
+    syncTextIndexEdges,
+    setSelectManyRequest,
+    placeFileOnCanvas,
+    handleAddTextNode,
+  });
   const {
     assetDetailTarget,
     assetDetailLoading,
@@ -3379,6 +3260,19 @@ export default function CanvasPage() {
     applyingRef,
     blockInvalidDraft,
     showToast,
+  });
+  const {
+    handleSelect,
+    handleRename,
+    handleToggleProjectPin,
+    handleDelete,
+    handleNewProject,
+  } = useCanvasProjects({
+    currentId,
+    setCurrentId,
+    projects,
+    setProjects,
+    ensureSavedBeforeProjectSwitch,
   });
   const { handleComplianceCheck } = useCanvasCompliance({
     setMediaNodes,
@@ -5648,9 +5542,38 @@ export default function CanvasPage() {
       })
       .map((n) => audioVideoMuxIdentityOf(n)!.sourceNodeId),
   );
+  const handleCharacterLibrarySelect = (assets: MaterialAsset[]) => {
+    const ts = Date.now();
+    if (characterLibraryTarget === 'image') {
+      const images = assets
+        .filter((a) => a.AssetType === 'Image')
+        .map((a) => ({
+          id: `char-${ts}-${a.Id}`,
+          url: a.URL,
+          type: 'image' as const,
+          name: `角色-${a.Name}`,
+          assetId: a.Id,
+        }));
+      if (images.length > 0) setImagePickResult({ ts, files: images });
+    } else if (characterLibraryTarget === 'asset') {
+      const image = assets.find((a) => a.AssetType === 'Image');
+      if (image) {
+        setAssetPickResult({
+          ts,
+          assetId: pickAssetId ?? '',
+          ref: {
+            id: `char-${ts}`,
+            src: image.URL,
+            type: 'image',
+            assetId: image.Id,
+          },
+        });
+      }
+    }
+  };
+
   return (
     <div className={styles.canvasPage}>
-      { }
       <CanvasHeader
         projects={projects}
         currentProjectId={currentId}
@@ -5676,7 +5599,6 @@ export default function CanvasPage() {
         onCancel={() => setPendingDeleteGroup(null)}
         onConfirm={confirmDeleteGroup}
       />
-      { }
       <div ref={canvasWrapperRef} data-canvas-stage className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
         {applying && <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 10000, cursor: 'wait' }}>正在保存画布引用…</div>}
       {
@@ -5812,55 +5734,38 @@ export default function CanvasPage() {
             onSelect={applyConnectType}
           />
         )}
-        {paneMenu && (
-          <CanvasContextMenu
-            x={paneMenu.x}
-            y={paneMenu.y}
-            items={[
-              { key: 'upload', label: '上传' },
-              {
-                key: 'addNode',
-                label: '添加节点',
-                children: [
-                  { key: 'add-text', label: '文本' },
-                  { key: 'add-image', label: '图片' },
-                  { key: 'add-video', label: '视频' },
-                  { key: 'add-audio', label: '音频' },
-                ],
-              },
-              { key: 'undo', label: '撤销', disabled: toolSessions.eraseHistory().active ? !toolSessions.eraseHistory().canUndo : !canvasHistory.canUndo },
-              { key: 'redo', label: '重做', disabled: toolSessions.eraseHistory().active ? !toolSessions.eraseHistory().canRedo : !canvasHistory.canRedo },
-            ]}
-            onClose={() => setPaneMenu(null)}
-            onSelect={(key) => {
-              const screen = { x: paneMenu.x, y: paneMenu.y };
-              const flow = spawnNearScreen(screen);
-              setPaneMenu(null);
-              if (key === 'upload') {
-                paneUploadPosRef.current = flow;
-                paneUploadRef.current?.click();
-              }               else if (key === 'add-text') handleAddTextNode(flow);
-              else if (key === 'add-image') {
-                if (!canOpenEditor()) return;
-                openImageDraftDialog(createImageDraftCard(flow, { recordHistory: true }));
-              } else if (key === 'add-video') {
-                if (!canOpenEditor()) return;
-                openVideoDraftDialog(createVideoDraftCard(undefined, flow, { recordHistory: true }));
-              } else if (key === 'add-audio') {
-                if (!canOpenEditor()) return;
-                openAudioDraftDialog(createAudioDraftCard(flow, { recordHistory: true }));
-              }
-              else if (key === 'undo') {
-                if (toolSessions.eraseHistory().active) toolSessions.eraseHistory().undo();
-                else canvasHistory.undo();
-              }
-              else if (key === 'redo') {
-                if (toolSessions.eraseHistory().active) toolSessions.eraseHistory().redo();
-                else canvasHistory.redo();
-              }
-            }}
-          />
-        )}
+        <CanvasPaneContextMenu
+          paneMenu={paneMenu}
+          canUndo={toolSessions.eraseHistory().active ? toolSessions.eraseHistory().canUndo : canvasHistory.canUndo}
+          canRedo={toolSessions.eraseHistory().active ? toolSessions.eraseHistory().canRedo : canvasHistory.canRedo}
+          onClose={() => setPaneMenu(null)}
+          onUpload={() => {
+            paneUploadPosRef.current = spawnNearScreen(paneMenu!);
+            paneUploadRef.current?.click();
+          }}
+          onAddNode={(kind) => {
+            const flow = spawnNearScreen(paneMenu!);
+            if (kind === 'text') handleAddTextNode(flow);
+            else if (kind === 'image') {
+              if (!canOpenEditor()) return;
+              openImageDraftDialog(createImageDraftCard(flow, { recordHistory: true }));
+            } else if (kind === 'video') {
+              if (!canOpenEditor()) return;
+              openVideoDraftDialog(createVideoDraftCard(undefined, flow, { recordHistory: true }));
+            } else if (kind === 'audio') {
+              if (!canOpenEditor()) return;
+              openAudioDraftDialog(createAudioDraftCard(flow, { recordHistory: true }));
+            }
+          }}
+          onUndo={() => {
+            if (toolSessions.eraseHistory().active) toolSessions.eraseHistory().undo();
+            else canvasHistory.undo();
+          }}
+          onRedo={() => {
+            if (toolSessions.eraseHistory().active) toolSessions.eraseHistory().redo();
+            else canvasHistory.redo();
+          }}
+        />
         <input
           ref={paneUploadRef}
           type="file"
@@ -5881,7 +5786,6 @@ export default function CanvasPage() {
             paneUploadPosRef.current = null;
           }}
         />
-        { }
         <CanvasToolbar
           mode={toolMode}
           onModeChange={setToolMode}
@@ -5916,89 +5820,41 @@ export default function CanvasPage() {
           onAddTextNode={() => handleAddTextNode()}
           onMenuSelect={handleToolMenuSelect}
         />
-        { }
-        <div className={styles.bottomLeftActions} data-canvas-chrome>
-          <button
-            className={styles.backHomeBtn}
-            onClick={async () => { if (await ensureSavedBeforeProjectSwitch()) navigate('/'); }}
-          >
-            <ArrowLeft size={14} strokeWidth={2} />
-            <span>返回首页</span>
-          </button>
-          <button
-            className={`${styles.mapBtn} ${showMiniMap ? styles.mapBtnActive : ''}`}
-            onClick={() => setShowMiniMap(!showMiniMap)}
-            title={showMiniMap ? '隐藏小地图' : '显示小地图'}
-          >
-            <MapIcon size={14} strokeWidth={2} />
-          </button>
-          <button
-            className={`${styles.mapBtn} ${showEdges ? styles.mapBtnActive : ''}`}
-            onClick={() => setShowEdges(!showEdges)}
-            title={showEdges ? '隐藏连线' : '显示连线'}
-          >
-            {showEdges ? <Link size={14} strokeWidth={2} /> : <Link2Off size={14} strokeWidth={2} />}
-          </button>
-          <button
-            className={`${styles.mapBtn} ${snapAlignmentOn ? styles.mapBtnActive : ''}`}
-            onClick={() => {
-              const next = !snapAlignmentOn;
-              setSnapAlignmentOn(next);
-              persistSnapAlignmentEnabled(next);
-            }}
-            title={snapAlignmentOn ? '关闭对齐吸附' : '开启对齐吸附'}
-          >
-            <Magnet size={14} strokeWidth={2} />
-          </button>
-          {saveStatus !== 'idle' && (
-            <span
-              data-gen-panel-territory
-              className={`${styles.saveStatus} ${saveStatus === 'error' ? styles.saveStatusError : ''}`}
-            >
-              {saveStatus === 'saving' && '保存中…'}
-              {saveStatus === 'saved' && `已保存 ${savedAt}`}
-              {saveStatus === 'error' && <>
-                保存失败，请重试 <button type="button" onClick={handleRetryCanvasSave}>重试保存</button>
-              </>}
-            </span>
-          )}
-        </div>
+        <CanvasBottomLeftActions
+          showMiniMap={showMiniMap}
+          showEdges={showEdges}
+          snapAlignmentOn={snapAlignmentOn}
+          saveStatus={saveStatus}
+          savedAt={savedAt}
+          onBackHome={() => { void ensureSavedBeforeProjectSwitch().then((ok) => { if (ok) navigate('/'); }); }}
+          onToggleMiniMap={() => setShowMiniMap(!showMiniMap)}
+          onToggleEdges={() => setShowEdges(!showEdges)}
+          onToggleSnap={() => {
+            const next = !snapAlignmentOn;
+            setSnapAlignmentOn(next);
+            persistSnapAlignmentEnabled(next);
+          }}
+          onRetrySave={handleRetryCanvasSave}
+        />
         {generationDock.render()}
         {toolSessions.render(generationDock.renderedToolKinds)}
         {
 }
-        {pickMode && pickTarget && (showImageDialog || showBottomDialog || showAudioDialog || pickMode === 'product' || pickMode === 'asset') && (
-          imagePickSessionActive ? (
-            <div className={`${styles.pickHint} ${styles.pickHintSession}`} data-gen-panel-territory>
-              <span>从节点添加素材：连续点击画布中的图片节点带入参考；点击空白、按 Esc 或点「完成选取」结束选取</span>
-              <button type="button" className={styles.pickHintFinish} onClick={endImagePickSession}>完成选取</button>
-            </div>
-          ) : videoPickSessionActive ? (
-            <div className={`${styles.pickHint} ${styles.pickHintSession}`} data-gen-panel-territory>
-              <span>{(pickRefRole === 'first' || pickRefRole === 'last')
-                ? '从节点添加素材：连续点击画布中的图片节点替换当前首帧/尾帧槽位；点击空白、按 Esc 或点「完成选取」结束选取'
-                : '从节点添加素材：连续点击画布中的图片、视频或音频节点带入参考；点击空白、按 Esc 或点「完成选取」结束选取'}</span>
-              <button type="button" className={styles.pickHintFinish} onClick={endVideoPickSession}>完成选取</button>
-            </div>
-          ) : audioPickSessionActive ? (
-            <div className={`${styles.pickHint} ${styles.pickHintSession}`} data-gen-panel-territory>
-              <span>从节点添加素材：连续点击画布中的图片或音频节点带入参考，点击文本卡带入创作上下文；点击空白、按 Esc 或点「完成选取」结束选取</span>
-              <button type="button" className={styles.pickHintFinish} onClick={endAudioPickSession}>完成选取</button>
-            </div>
-          ) : (
-          <div className={styles.pickHint} data-gen-panel-territory>
-            {pickMode === 'image' && ((pickRefRole === 'first' || pickRefRole === 'last')
-              ? '从节点添加素材：点击画布中的图片节点带入首帧/尾帧，点击空白处取消'
-              : '从节点添加素材：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消')}
-            {pickMode === 'video' && '从节点添加素材：点击画布中的图片、视频或音频节点带入参考，点击空白处取消'}
-            {pickMode === 'audio' && '到节点选择：点击画布中的图片或音频节点带入参考，点击文本卡带入创作上下文，点击空白处取消'}
-            {pickMode === 'product' && '到节点选择：点击画布中的图片节点带入商品图，点击空白处取消'}
-            {pickMode === 'asset' && '到节点选择：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消'}
-          </div>
-          )
-        )}
+        <CanvasPickHint
+          pickMode={pickMode}
+          pickTarget={pickTarget}
+          pickRefRole={pickRefRole}
+          imagePickSessionActive={imagePickSessionActive}
+          videoPickSessionActive={videoPickSessionActive}
+          audioPickSessionActive={audioPickSessionActive}
+          showImageDialog={showImageDialog}
+          showBottomDialog={showBottomDialog}
+          showAudioDialog={showAudioDialog}
+          onEndImagePick={endImagePickSession}
+          onEndVideoPick={endVideoPickSession}
+          onEndAudioPick={endAudioPickSession}
+        />
       </div>
-      { }
       {(showAgent || agentOpened) && (
         <AgentPanel
           key={currentId}
@@ -6021,33 +5877,17 @@ export default function CanvasPage() {
           externalAssetPicks={agentAssetPicks}
         />
       )}
-      { }
       {showAssetsPicker && (
         <AssetsPickerModal
           onClose={() => setShowAssetsPicker(false)}
           onSelect={handleAssetsPickerSelect}
-          mediaTypes={
-            assetsPickerTarget === 'imageDialog'
-              ? [...PANEL_REF_MEDIA_TYPES.image.types]
-              : assetsPickerTarget === 'audioDialog'
-                ? [...PANEL_REF_MEDIA_TYPES.audio.types]
-              : assetsPickerTarget === 'videoDraft'
-                ? videoAssetPickRole === 'first' || videoAssetPickRole === 'last'
-                  ? ['image']
-                  : videoAssetPickKind === 'image'
-                    ? [...PANEL_REF_MEDIA_TYPES.videoText2Video.types]
-                    : [...PANEL_REF_MEDIA_TYPES.videoAll.types]
-                : assetsPickerTarget === 'agentPanel'
-                  ? ['image', 'video']
-                  : undefined
-          }
+          mediaTypes={assetsPickerMediaTypes(assetsPickerTarget, videoAssetPickRole, videoAssetPickKind)}
           confirmText={assetsPickerTarget === 'toolbar' ? '插入画布' : '确定'}
           showLivenessTab={assetsPickerTarget === 'toolbar' || assetsPickerTarget === 'videoDraft'}
           showCharacterTab={assetsPickerTarget === 'videoDraft'}
           rejectUnapprovedForVideo={assetsPickerTarget === 'videoDraft'}
         />
       )}
-      { }
       {showAssetsModal && (
         <SharedAssetsModal
           onClose={() => setShowAssetsModal(false)}
@@ -6061,79 +5901,21 @@ export default function CanvasPage() {
           defaultCardFilter={assetsModalDefaultFilter as any}
         />
       )}
-      { }
       {showCharacterLibrary && (
         <CharacterLibraryModal
           onClose={() => {
             setShowCharacterLibrary(false);
             setCharacterLibraryTarget(null);
           }}
-          onSelectAssets={(assets: MaterialAsset[]) => {
-            const ts = Date.now();
-            if (characterLibraryTarget === 'image') {
-              const images = assets
-                .filter((a) => a.AssetType === 'Image')
-                .map((a) => ({
-                  id: `char-${ts}-${a.Id}`,
-                  url: a.URL,
-                  type: 'image' as const,
-                  name: `角色-${a.Name}`,
-                  assetId: a.Id,
-                }));
-              if (images.length > 0) setImagePickResult({ ts, files: images });
-            } else if (characterLibraryTarget === 'asset') {
-              const image = assets.find((a) => a.AssetType === 'Image');
-              if (image) {
-                setAssetPickResult({
-                  ts,
-                  assetId: pickAssetId ?? '',
-                  ref: {
-                    id: `char-${ts}`,
-                    src: image.URL,
-                    type: 'image',
-                    assetId: image.Id,
-                  },
-                });
-              }
-            }
-          }}
+          onSelectAssets={handleCharacterLibrarySelect}
         />
       )}
-      { }
       <LegacyHistoryModal
         open={showLegacyHistory}
         items={legacyHistory ?? []}
         onClose={() => setShowLegacyHistory(false)}
       />
-      { }
-      {toast && (
-        <div data-testid="canvas-toast" style={{
-          position: 'fixed',
-          top: '24px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '10px 20px',
-          borderRadius: '8px',
-          background: toast.type === 'success' ? '#1a3a1a' : toast.type === 'error' ? '#3a1a1a' : '#3a3a1a',
-          color: '#fff',
-          fontSize: '14px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-          border: `1px solid ${toast.type === 'success' ? '#2d7a2d' : toast.type === 'error' ? '#7a2d2d' : '#7a5a2d'}`,
-          animation: 'toastIn 0.2s ease',
-        }}>
-          {toast.type === 'success' && <CheckCircle size={16} />}
-          {toast.type === 'error' && <XCircle size={16} />}
-          {toast.type === 'warn' && <AlertTriangle size={16} />}
-          <span>{toast.msg}</span>
-        </div>
-      )}
-      <style>{`
-        @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
-      `}</style>
+      <CanvasToast toast={toast} />
     </div>
   );
 }
