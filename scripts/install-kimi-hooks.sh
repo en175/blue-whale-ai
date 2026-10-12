@@ -4,11 +4,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SNIPPET="$REPO_ROOT/.kimi-code/hooks.toml"
 SHIM_SRC="$REPO_ROOT/.kimi-code/hooks/blue-whale-hook.sh"
+PONYTAIL_SRC="$REPO_ROOT/.kimi-code/hooks/ponytail-hook.js"
 
 KIMI_HOME="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
 CONFIG="$KIMI_HOME/config.toml"
 SHIM_DIR="$KIMI_HOME/hooks"
 SHIM_DST="$SHIM_DIR/blue-whale-hook.sh"
+PONYTAIL_DST="$SHIM_DIR/ponytail-hook.js"
 
 BEGIN_MARK="# >>> blue-whale-ai kimi hooks (managed by scripts/install-kimi-hooks.sh) >>>"
 END_MARK="# <<< blue-whale-ai kimi hooks (managed by scripts/install-kimi-hooks.sh) <<<"
@@ -19,16 +21,25 @@ usage() {
 }
 
 [ "$#" -eq 0 ] || { [ "$#" -eq 1 ] && [ "$1" = "--uninstall" ]; } || usage
+python3 -c 'import tomllib' >/dev/null 2>&1 || {
+  echo "安装与卸载需要 PATH 中的 Python 3.11 以上版本。" >&2
+  exit 1
+}
 
 managed_block() {
   python3 - "$CONFIG" "$BEGIN_MARK" "$END_MARK" "$SNIPPET" "$1" <<'PY'
 import sys
+import re
+import tomllib
 from pathlib import Path
 
 config_path = Path(sys.argv[1])
 begin, end, snippet_path, mode = sys.argv[2], sys.argv[3], Path(sys.argv[4]), sys.argv[5]
 
 text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+if text.count(begin) != text.count(end) or text.count(begin) > 1:
+    raise SystemExit("受管理配置标记不完整或重复，保留原配置。")
+tomllib.loads(text)
 has_block = begin in text and end in text
 
 if mode == "remove":
@@ -37,8 +48,6 @@ if mode == "remove":
         raise SystemExit(0)
     pre, rest = text.split(begin, 1)
     _, post = rest.split(end, 1)
-    # 精确还原：upsert 追加时只多插入了 BEGIN 前的一个换行；
-    # END 后的换行在块位于 EOF 时随块一起移除。
     if pre.endswith("\n\n"):
         pre = pre[:-1]
     if post == "\n":
@@ -50,18 +59,57 @@ if mode == "remove":
     print(f"已从 {config_path} 移除 managed block")
     raise SystemExit(0)
 
-snippet = snippet_path.read_text(encoding="utf-8").strip("\n")
-block = f"{begin}\n{snippet}\n{end}\n"
 if has_block:
     pre, rest = text.split(begin, 1)
     _, post = rest.split(end, 1)
-    config_path.write_text(pre + block + post.lstrip("\n"), encoding="utf-8")
+else:
+    pre, post = text, ""
+
+legacy = [{"event": event,
+           "command": f'node "$HOME/.config/ponytail/kimi-hook.js" {event}',
+           "timeout": 5} for event in ("SessionStart", "UserPromptSubmit")]
+pattern = re.compile(r"(?m)^[ \t]*\[\[hooks\]\][ \t]*(?:#.*)?$")
+def migrate_hooks(part):
+    removals = []
+    tables = []
+    for table in re.finditer(r"(?m)^[ \t]*\[", part):
+        try:
+            tomllib.loads(part[:table.start()])
+        except tomllib.TOMLDecodeError:
+            continue
+        tables.append(table.start())
+    for match in pattern.finditer(part):
+        if match.start() not in tables:
+            continue
+        stop = next((start for start in tables if start > match.start()), len(part))
+        hook = tomllib.loads(part[match.start():stop])["hooks"][0]
+        if hook in legacy:
+            removals.append((match.start(), stop))
+        elif "ponytail" in hook.get("command", "").lower():
+            print("保留归属不明的 Ponytail Hook，请核对重复加载来源。")
+    for start, stop in reversed(removals):
+        part = part[:start] + part[stop:]
+    return part, len(removals)
+
+pre, migrated_before = migrate_hooks(pre)
+post, migrated_after = migrate_hooks(post)
+if migrated_before + migrated_after:
+    print(f"已迁移 {migrated_before + migrated_after} 条已确认的旧全局 Ponytail Hook。")
+
+snippet = snippet_path.read_text(encoding="utf-8").strip("\n")
+block = f"{begin}\n{snippet}\n{end}\n"
+if has_block:
+    merged = pre + block + post.lstrip("\n")
+    tomllib.loads(merged)
+    config_path.write_text(merged, encoding="utf-8")
     print(f"已更新 {config_path} 中的 managed block")
 else:
-    prefix = text if (not text or text.endswith("\n")) else text + "\n"
+    prefix = pre if (not pre or pre.endswith("\n")) else pre + "\n"
     if prefix.strip():
         prefix += "\n"
-    config_path.write_text(prefix + block, encoding="utf-8")
+    merged = prefix + block
+    tomllib.loads(merged)
+    config_path.write_text(merged, encoding="utf-8")
     print(f"已把 managed block 写入 {config_path}")
 PY
 }
@@ -72,16 +120,22 @@ if [ "${1:-}" = "--uninstall" ]; then
     rm -f "$SHIM_DST"
     echo "已移除 shim: $SHIM_DST"
   fi
+  if [ -f "$PONYTAIL_DST" ]; then
+    rm -f "$PONYTAIL_DST"
+    echo "已移除 Ponytail 入口: $PONYTAIL_DST"
+  fi
   echo "Kimi CLI hooks 已卸载。"
   exit 0
 fi
 
 [ -f "$SNIPPET" ] || { echo "缺少配置片段: $SNIPPET" >&2; exit 1; }
 [ -f "$SHIM_SRC" ] || { echo "缺少 shim 权威源: $SHIM_SRC" >&2; exit 1; }
+[ -f "$PONYTAIL_SRC" ] || { echo "缺少 Ponytail 权威源: $PONYTAIL_SRC" >&2; exit 1; }
 
 mkdir -p "$SHIM_DIR"
 cp "$SHIM_SRC" "$SHIM_DST"
 chmod +x "$SHIM_DST"
+cp "$PONYTAIL_SRC" "$PONYTAIL_DST"
 echo "已同步 shim: $SHIM_DST"
 
 managed_block upsert
