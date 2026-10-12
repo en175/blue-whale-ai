@@ -74,12 +74,7 @@ export interface QuoteJobPayload {
 
 
 
-export type GenerationQuote = StageQuoteView & {
-
-
-
-  duration_basis?: 'source_video';
-};
+export type GenerationQuote = StageQuoteView;
 
 
 
