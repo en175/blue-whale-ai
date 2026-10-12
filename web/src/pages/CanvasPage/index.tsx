@@ -79,24 +79,9 @@ import { VOCAL_SPLIT_EDGE_ORIGIN, buildVocalSplitPlaceholderNode } from './vocal
 import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from './sceneSplit';
 import { type SceneSplitSubmission } from './sceneSplitSession';
 import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from './smartMatting';
+import { imageEnhanceDraftPosition } from './imageEnhance';
+import { type VideoEnhanceIdentity } from './videoEnhance';
 import {
-  IMAGE_ENHANCE_EDGE_ORIGIN,
-  imageEnhanceDraftPosition,
-} from './imageEnhance';
-import {
-  VIDEO_ENHANCE_EDGE_ORIGIN,
-  videoEnhanceDraftPosition,
-  videoEnhanceGateReason,
-  type VideoEnhanceIdentity,
-} from './videoEnhance';
-import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';
-import {
-  FRAME_INTERPOLATION_DEFAULT_FPS,
-  FRAME_INTERPOLATION_EDGE_ORIGIN,
-  frameInterpolationDisplayName,
-  frameInterpolationDraftPosition,
-  frameInterpolationGateReason,
-  type FrameInterpolationFps,
   type FrameInterpolationIdentity,
 } from './frameInterpolation';
 import { IMAGE_ERASE_EDGE_ORIGIN, rasterizeMaskToPngFile } from './imageErase';
@@ -200,6 +185,7 @@ import { useCanvasUploadDrop } from './hooks/useCanvasUploadDrop';
 import { useCanvasPickSessionClick } from './hooks/useCanvasPickSessionClick';
 import { useCanvasAssetsPlacement } from './hooks/useCanvasAssetsPlacement';
 import { useCanvasUpdateGenerate } from './hooks/useCanvasUpdateGenerate';
+import { useCanvasToolDraftCreators } from './hooks/useCanvasToolDraftCreators';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   applyDraggedNodesToGroups,
@@ -3307,75 +3293,20 @@ export default function CanvasPage() {
   const appendVideoFreeRef = (item: VideoMediaRef, role: VideoRefRole) => generationDock.updateDraft('video', { freeReference: { operation: 'add', item, role } });
   const removeVideoFreeRef = (key: string) => generationDock.updateDraft('video', { freeReference: { operation: 'remove', key } });
   const assignVideoFreeRefRoles = (assignments: Array<{ nodeId: string; role: VideoRefRole }>) => generationDock.updateDraft('video', { freeReference: { operation: 'assign', assignments } });
-  const handleNodeEnhanceImage = (id: string): string | undefined => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const err = imageRefSourceError(node);
-    if (err) {
-      showToast('warn', err);
-      return;
-    }
-    const sourceData = (node.data ?? {}) as Record<string, unknown>;
-    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-      fileName: '高清',
-      data: { imageEnhance: { sourceAssetId: readAssetId(sourceData) } },
-    });
-    addCanvasEdge(id, draftId, undefined, { origin: IMAGE_ENHANCE_EDGE_ORIGIN });
-    return draftId;
-  };
-  const handleNodeVideoEnhance = (id: string): string | undefined => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const gate = videoEnhanceGateReason((node.data ?? {}) as Record<string, unknown>);
-    if (gate) {
-      showToast('warn', gate);
-      return;
-    }
-    const sourceData = (node.data ?? {}) as Record<string, unknown>;
-    const draftId = createVideoDraftCard(undefined, videoEnhanceDraftPosition(node), {
-      fileName: 'HD',
-      data: { videoEnhance: { sourceAssetId: readAssetId(sourceData) } },
-    });
-    addCanvasEdge(id, draftId, undefined, { origin: VIDEO_ENHANCE_EDGE_ORIGIN });
-    return draftId;
-  };
-  const handleVideoEnhanceParamsChange = (nodeId: string, resolution: VideoEnhanceResolution) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const identity = ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as VideoEnhanceIdentity | undefined;
-    patchMediaNode(nodeId, {
-      videoEnhance: { ...identity, lastParams: { resolution } },
-    });
-  };
-  const handleNodeFrameInterpolation = (id: string): string | undefined => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const gate = frameInterpolationGateReason((node.data ?? {}) as Record<string, unknown>);
-    if (gate) {
-      showToast('warn', gate);
-      return;
-    }
-    const sourceData = (node.data ?? {}) as Record<string, unknown>;
-    const fps = FRAME_INTERPOLATION_DEFAULT_FPS;
-    const draftId = createVideoDraftCard(undefined, frameInterpolationDraftPosition(node), {
-      fileName: frameInterpolationDisplayName(fps),
-      data: {
-        frameInterpolation: {
-          sourceAssetId: readAssetId(sourceData),
-          lastParams: { fps },
-        } satisfies FrameInterpolationIdentity,
-      },
-    });
-    addCanvasEdge(id, draftId, undefined, { origin: FRAME_INTERPOLATION_EDGE_ORIGIN });
-    return draftId;
-  };
-  const handleFrameInterpolationParamsChange = (nodeId: string, fps: FrameInterpolationFps) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const identity = ((node?.data ?? {}) as Record<string, unknown>).frameInterpolation as FrameInterpolationIdentity | undefined;
-    patchMediaNode(nodeId, {
-      frameInterpolation: { ...identity, lastParams: { fps } },
-      ...(hasCustomName(node) ? {} : { fileName: frameInterpolationDisplayName(fps) }),
-    });
-  };
+  const {
+    handleNodeEnhanceImage,
+    handleNodeVideoEnhance,
+    handleVideoEnhanceParamsChange,
+    handleNodeFrameInterpolation,
+    handleFrameInterpolationParamsChange,
+  } = useCanvasToolDraftCreators({
+    mediaNodesRef,
+    showToast,
+    createImageDraftCard,
+    createVideoDraftCard,
+    addCanvasEdge,
+    patchMediaNode,
+  });
   const startFrameInterpolationJob = async (submission: FrameInterpolationSubmission): Promise<boolean> => {
     const { nodeId, payload: input, identity } = submission;
     const fps = input.fps;
