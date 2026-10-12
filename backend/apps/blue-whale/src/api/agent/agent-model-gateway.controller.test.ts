@@ -68,13 +68,14 @@ function createGateway(controller: { proxy: (...args: never[]) => Promise<void> 
 async function post(
   port: number,
   headers: Record<string, string>,
+  body: string = JSON.stringify({ model: "test-model" }),
 ): Promise<Captured> {
   const response = await fetch(
     `http://127.0.0.1:${port}/api/internal/agent-model/v1/chat/completions`,
     {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify({ model: "test-model" }),
+      body,
     },
   );
   return { status: response.status, body: await response.json().catch(() => null) };
@@ -170,6 +171,22 @@ describe("AgentModelGatewayController 计费归属", () => {
     expect(seen[0]!["x-bw-subject-user-id"]).toBe("37");
     expect(seen[0]!.authorization).toBe(`Bearer ${BILLING_TOKEN}`);
     expect(seen[0]!["x-bw-agent-run-id"]).toBeUndefined();
+  });
+
+  // 网关把 req.body 重新序列化成最紧凑的 JSON 再转，原来那份不是最紧凑的写法（带空格、换行，或中文写成 \\uXXXX）
+  // 字节数就变了。以前把原请求的 content-length 照抄给 New API，上游按旧长度收不满，报 unexpected EOF，
+  // 网关回 502「NewAPI 不可用」——测试站 10-12 用脚本发带缩进的请求，五种写法只有最紧凑那种能过。
+  it.each([
+    ["带空格", JSON.stringify({ model: "test-model", messages: [{ role: "user", content: "你好" }] }, null, 1)],
+    ["中文转义", JSON.stringify({ model: "test-model", messages: [{ role: "user", content: "你好" }] }).replace("你好", "\\u4f60\\u597d")],
+  ])("请求体不是最紧凑的写法（%s）也照常转给上游", async (_name, body) => {
+    const result = await post(
+      port,
+      { "x-agent-service-token": AGENT_TOKEN, "x-blue-whale-project-id": "214" },
+      body,
+    );
+    expect(result.status).toBe(200);
+    expect(seen).toHaveLength(1);
   });
 
   it("同一项目的连续调用只查一次库", async () => {

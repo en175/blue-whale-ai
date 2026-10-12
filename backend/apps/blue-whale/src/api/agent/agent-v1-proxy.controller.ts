@@ -65,6 +65,8 @@ export class AgentV1ProxyController {
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(req.headers)) {
       if (!value || key === "authorization") continue;
+      // 请求体下面按 req.body 重新序列化，长度跟原请求不一定一样：照抄原长度，agent 会按旧长度收不满而报错
+      if (key === "content-length" || key === "transfer-encoding") continue;
       headers[key] = Array.isArray(value) ? value.join(", ") : value;
     }
     headers.authorization = `Bearer ${agentServiceToken()}`;
