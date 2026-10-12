@@ -17,7 +17,9 @@
 
 - **新增** `usage.referenceSeconds` —— 视频 2.5 系「秒数 = 生成 + 参考」的基准量。producer：提交时把被引用素材的时长之和写进规格键（后端已在校验处求和，见 `backend/libs/shared/.../reference-limits.ts`）。
 - **补 producer** `usage.characters` —— 现在只有枚举声明（`contractSource = null`），无任何产出方。音频按字数要求提交时从 `input.prompt` 数出码点数。
-- `usage.c` / `TokenEstimator` / `tokenEstimate` —— 视频不再按 token 计价，相关分支与配置键退役。
+- **退役** `pricing.tokenEstimate`（`divisor` / `fps` / `inputSecondsKey` / `minimumTokens`）、`unitDenominator = 1000000` 那套、`usage.c` 分支与 `TokenEstimator`（Java 与 TS 两侧）——视频不再按 token 计价，这些没有读方也不再有意义。
+  ⚠️ **不要连带删 `features.video_dimensions`**：它是**生成请求**用的（分辨率档 × 比例 → 输出宽高，`handle-create-generation-job.ts:798-806`、`handle-finalize-generation-job.ts:88-95`），与计费无关。`042_...sql` 注释③ 说"没有任何读方"的是**规则里那份副本**（`pricing.tokenEstimate.dimensions`），不是 features 里这份。
+- 价格表**仍然按分辨率档配系数**（`basePrice.by = ["resolution","video"]`）。
 
 ## 三、数据表
 
