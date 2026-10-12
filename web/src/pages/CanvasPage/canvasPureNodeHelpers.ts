@@ -15,6 +15,10 @@ import { asVideoRefMediaType, readRefRole, type VideoMediaRef, type VideoRefRole
 import { imageEnhanceDraftPosition } from './imageEnhance';
 import { fetchRemoteMedia } from './fetchRemoteMedia';
 import type { SpawnBox } from './draftSpawn';
+import { isConnectableSource, sourceKindOf } from './connectAbility';
+import type { AtMentionItem } from './atMention';
+import type { CanvasPickItem } from './components/AudioDialog';
+import type { GenerationCardBlock } from '@/api/agentSessions';
 
 export const nodeBoxOf = (n: Node): SpawnBox => {
   const d = (n.data ?? {}) as Record<string, unknown>;
@@ -147,3 +151,50 @@ export const complianceBlockedIds = (mediaNodes: Node[]): string[] =>
   mediaNodes
     .filter((n) => ((n.data ?? {}) as Record<string, unknown>).complianceFailed === true)
     .map((n) => n.id);
+
+export const canvasMediaOf = (mediaNodes: Node[]): CanvasPickItem[] =>
+  mediaNodes
+    .filter((n) => n.data?.src)
+    .map((n) => ({
+      id: n.id,
+      assetId: readAssetId(n.data),
+      src: n.data.src as string,
+      name: (n.data.fileName as string) || n.id,
+      mediaType: (n.data.mediaType as 'image' | 'video' | 'audio') ?? 'image',
+    }));
+
+export const atMentionItemsOf = (mediaNodes: Node[], textNodes: Node[]): AtMentionItem[] => {
+  const items: AtMentionItem[] = [];
+  for (const node of mediaNodes) {
+    if (!isConnectableSource(node)) continue;
+    const kind = sourceKindOf(node);
+    if (kind !== 'image' && kind !== 'video' && kind !== 'audio') continue;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    items.push({
+      id: node.id,
+      kind,
+      name: typeof data.fileName === 'string' && data.fileName
+        ? data.fileName
+        : kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频',
+      thumbUrl: typeof data.src === 'string' ? data.src : undefined,
+      assetId: readAssetId(data),
+    });
+  }
+  for (const node of textNodes) {
+    if (!isConnectableSource(node)) continue;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    items.push({
+      id: node.id,
+      kind: 'text',
+      name: typeof data.title === 'string' && data.title ? data.title : '文本节点',
+      searchText: extractTextNodeText(data),
+    });
+  }
+  return items;
+};
+
+export const appliedCardIdsOf = (textNodes: Node[]): Set<string> =>
+  new Set(textNodes.flatMap(node => {
+    const source = node.data.promptSource as GenerationCardBlock['source'];
+    return source ? [`${source.revisionId}#${source.shotNo}`] : [];
+  }));

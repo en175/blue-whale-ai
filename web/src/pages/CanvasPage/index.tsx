@@ -10,7 +10,7 @@ import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecov
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
-import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds } from './canvasPureNodeHelpers';
+import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
 import { defaultVideoModeFor, draftVideoModeOf } from './videoModes';
 import {
@@ -183,7 +183,6 @@ import {
   canConnectSourcesToGen,
   genKindOf,
   isConnectableSource,
-  sourceKindOf,
   wouldCreateCycle,
   type ConnectGenKind,
 } from './connectAbility';
@@ -4712,10 +4711,7 @@ export default function CanvasPage() {
   toolDepsRef.current = buildToolSessionDeps();
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
-  const appliedCardIds = useMemo(() => new Set(textNodes.flatMap(node => {
-    const source = node.data.promptSource as GenerationCardBlock['source'];
-    return source ? [`${source.revisionId}#${source.shotNo}`] : [];
-  })), [textNodes]);
+  const appliedCardIds = useMemo(() => appliedCardIdsOf(textNodes), [textNodes]);
   generationRuntimeHostRef.current = ({
     getProjectId: () => activeProjectRef.current,
     getLoadEpoch: () => docLoadEpochRef.current,
@@ -4927,48 +4923,8 @@ export default function CanvasPage() {
     }
     console.log('Tool menu select:', menu, item);
   };
-  const canvasMedia: CanvasPickItem[] = useMemo(
-    () =>
-      mediaNodes
-        .filter((n) => n.data?.src)
-        .map((n) => ({
-          id: n.id,
-          assetId: readAssetId(n.data),
-          src: n.data.src as string,
-          name: (n.data.fileName as string) || n.id,
-          mediaType: (n.data.mediaType as 'image' | 'video' | 'audio') ?? 'image',
-        })),
-    [mediaNodes],
-  );
-  const atMentionItems: AtMentionItem[] = useMemo(() => {
-    const items: AtMentionItem[] = [];
-    for (const node of mediaNodes) {
-      if (!isConnectableSource(node)) continue;
-      const kind = sourceKindOf(node);
-      if (kind !== 'image' && kind !== 'video' && kind !== 'audio') continue;
-      const data = (node.data ?? {}) as Record<string, unknown>;
-      items.push({
-        id: node.id,
-        kind,
-        name: typeof data.fileName === 'string' && data.fileName
-          ? data.fileName
-          : kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频',
-        thumbUrl: typeof data.src === 'string' ? data.src : undefined,
-        assetId: readAssetId(data),
-      });
-    }
-    for (const node of textNodes) {
-      if (!isConnectableSource(node)) continue;
-      const data = (node.data ?? {}) as Record<string, unknown>;
-      items.push({
-        id: node.id,
-        kind: 'text',
-        name: typeof data.title === 'string' && data.title ? data.title : '文本节点',
-        searchText: extractTextNodeText(data),
-      });
-    }
-    return items;
-  }, [mediaNodes, textNodes]);
+  const canvasMedia: CanvasPickItem[] = useMemo(() => canvasMediaOf(mediaNodes), [mediaNodes]);
+  const atMentionItems: AtMentionItem[] = useMemo(() => atMentionItemsOf(mediaNodes, textNodes), [mediaNodes, textNodes]);
   const handleImageAtMention = (item: AtMentionItem) => {
     generationDock.referencePicked('image');
     if (item.kind === 'text') {
