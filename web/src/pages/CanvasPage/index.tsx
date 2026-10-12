@@ -157,11 +157,7 @@ import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
 import {
   fetchProjects,
   createProject,
-  renameProject,
-  deleteProject,
   touchProjectLastOpened,
-  pinProject,
-  projectKeys,
   type SnapshotAsset,
 } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
@@ -203,7 +199,6 @@ import { videoToolsTask, videoToolFrozenPayload, type VideoToolPayload } from '.
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
 import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
 import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
-import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
@@ -215,6 +210,7 @@ import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import { useCanvasSave, EMPTY_CLEAR_CONFLICT_TOAST, EMPTY_OVERWRITE_REJECTED_TOAST } from './hooks/useCanvasSave';
 import { useCanvasRefStripOrder } from './hooks/useCanvasRefStripOrder';
 import { useCanvasCompliance } from './hooks/useCanvasCompliance';
+import { useCanvasProjects } from './hooks/useCanvasProjects';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   applyDraggedNodesToGroups,
@@ -230,7 +226,6 @@ import {
   findLatestCreatedProjectId,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
-  shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
 import { createGenerationDockCoordinator } from './generationDockCoordinator';
@@ -2689,52 +2684,6 @@ export default function CanvasPage() {
       prev.map((n) => ({ ...n, data: { ...n.data, toolMode } }))
     );
   }, [toolMode]);
-  const handleSelect = async (id: string) => {
-    if (!id || id === currentId) return;
-    if (!(await ensureSavedBeforeProjectSwitch())) return;
-    setCurrentId(id);
-  };
-  const handleRename = (id: string, newName: string) => {
-    renameProject(id, newName)
-      .then((updated) => {
-        setProjects((prev) =>
-          prev.map((p) => (p.id === id ? { ...p, name: updated.name } : p)),
-        );
-      })
-      .catch(() => undefined);
-  };
-  const handleToggleProjectPin = (id: string, pinned: boolean) => {
-    pinProject(id, pinned)
-      .then(() => fetchProjects())
-      .then((list) => {
-        setProjects(list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) })));
-        queryClient.invalidateQueries({ queryKey: projectKeys.all });
-      })
-      .catch(() => undefined);
-  };
-  const handleDelete = (id: string) => {
-    deleteProject(id)
-      .then(() => {
-        const remaining = projects.filter((p) => p.id !== id);
-        setProjects(remaining);
-        queryClient.removeQueries({ queryKey: projectKeys.all });
-        if (shouldReturnToProjectsAfterDelete(currentId, id)) {
-          navigate('/projects');
-          return;
-        }
-      })
-      .catch(() => undefined);
-  };
-  const handleNewProject = async () => {
-    if (!(await ensureSavedBeforeProjectSwitch())) return;
-    try {
-      const created = await createProject(defaultProjectName());
-      const item: CanvasProject = { id: String(created.id), name: created.name };
-      setProjects((prev) => [item, ...prev]);
-      setCurrentId(item.id);
-    } catch {
-    }
-  };
   const placeFileOnCanvas = (
     file: File,
     opts?: { position?: { x: number; y: number }; replaceNodeId?: string },
@@ -3382,6 +3331,19 @@ export default function CanvasPage() {
     applyingRef,
     blockInvalidDraft,
     showToast,
+  });
+  const {
+    handleSelect,
+    handleRename,
+    handleToggleProjectPin,
+    handleDelete,
+    handleNewProject,
+  } = useCanvasProjects({
+    currentId,
+    setCurrentId,
+    projects,
+    setProjects,
+    ensureSavedBeforeProjectSwitch,
   });
   const { handleComplianceCheck } = useCanvasCompliance({
     setMediaNodes,
