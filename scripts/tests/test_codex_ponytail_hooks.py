@@ -78,8 +78,6 @@ class PonytailConfigHarness(unittest.TestCase):
             return specific.get('additionalContext', '')
         return stdout
 
-
-class PonytailHooksTest(PonytailConfigHarness):
     def assert_mode(self, output, mode):
         self.assertIn('level: ' + mode, output)
         self.assertIn(BODY_PROBE, output)
@@ -90,6 +88,8 @@ class PonytailHooksTest(PonytailConfigHarness):
         for other in {'lite', 'full', 'ultra'} - {mode}:
             self.assertNotIn('| **' + other + '** |', output)
 
+
+class PonytailHooksTest(PonytailConfigHarness):
     def test_real_config_delivers_body_on_start_switch_and_subagent(self):
         for client in self.CLIENT_CONFIGS:
             with self.subTest(client=client):

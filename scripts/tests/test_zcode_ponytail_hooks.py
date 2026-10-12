@@ -29,16 +29,6 @@ class ZcodePonytailHooksTest(PonytailConfigHarness):
             self.assertIsInstance(specific['additionalContext'], str)
         return specific.get('additionalContext', '')
 
-    def assert_mode(self, output, mode):
-        self.assertIn('level: ' + mode, output)
-        self.assertIn(BODY_PROBE, output)
-        self.assertIn('完整处理受影响的调用方、测试和夹具', output)
-        self.assertIn('禁止新增普通代码注释', output)
-        self.assertIn('结构探索先走 CBM', output)
-        self.assertIn('| **' + mode + '** |', output)
-        for other in {'lite', 'full', 'ultra'} - {mode}:
-            self.assertNotIn('| **' + other + '** |', output)
-
     def test_real_config_delivers_json_body_on_start_and_switch(self):
         self.assert_mode(self.run_hook('zcode', 'SessionStart'), 'full')
         for mode in ['lite', 'ultra', 'full']:

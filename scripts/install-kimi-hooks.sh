@@ -16,11 +16,11 @@ BEGIN_MARK="# >>> blue-whale-ai kimi hooks (managed by scripts/install-kimi-hook
 END_MARK="# <<< blue-whale-ai kimi hooks (managed by scripts/install-kimi-hooks.sh) <<<"
 
 usage() {
-  echo "usage: install-kimi-hooks.sh [--uninstall]" >&2
+  echo "usage: install-kimi-hooks.sh [--uninstall|--uninstall-ponytail]" >&2
   exit 2
 }
 
-[ "$#" -eq 0 ] || { [ "$#" -eq 1 ] && [ "$1" = "--uninstall" ]; } || usage
+[ "$#" -eq 0 ] || { [ "$#" -eq 1 ] && { [ "$1" = "--uninstall" ] || [ "$1" = "--uninstall-ponytail" ]; }; } || usage
 python3 -c 'import tomllib' >/dev/null 2>&1 || {
   echo "安装与卸载需要 PATH 中的 Python 3.11 以上版本。" >&2
   exit 1
@@ -37,7 +37,8 @@ config_path = Path(sys.argv[1])
 begin, end, snippet_path, mode = sys.argv[2], sys.argv[3], Path(sys.argv[4]), sys.argv[5]
 
 text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
-if text.count(begin) != text.count(end) or text.count(begin) > 1:
+if (text.count(begin) != text.count(end) or text.count(begin) > 1
+        or (begin in text and text.index(begin) > text.index(end))):
     raise SystemExit("受管理配置标记不完整或重复，保留原配置。")
 tomllib.loads(text)
 has_block = begin in text and end in text
@@ -61,15 +62,15 @@ if mode == "remove":
 
 if has_block:
     pre, rest = text.split(begin, 1)
-    _, post = rest.split(end, 1)
+    block_content, post = rest.split(end, 1)
 else:
-    pre, post = text, ""
+    pre, block_content, post = text, "", ""
 
 legacy = [{"event": event,
            "command": f'node "$HOME/.config/ponytail/kimi-hook.js" {event}',
            "timeout": 5} for event in ("SessionStart", "UserPromptSubmit")]
 pattern = re.compile(r"(?m)^[ \t]*\[\[hooks\]\][ \t]*(?:#.*)?$")
-def migrate_hooks(part):
+def remove_known_hooks(part, known_hooks):
     removals = []
     tables = []
     for table in re.finditer(r"(?m)^[ \t]*\[", part):
@@ -83,7 +84,7 @@ def migrate_hooks(part):
             continue
         stop = next((start for start in tables if start > match.start()), len(part))
         hook = tomllib.loads(part[match.start():stop])["hooks"][0]
-        if hook in legacy:
+        if hook in known_hooks:
             removals.append((match.start(), stop))
         elif "ponytail" in hook.get("command", "").lower():
             print("保留归属不明的 Ponytail Hook，请核对重复加载来源。")
@@ -91,8 +92,22 @@ def migrate_hooks(part):
         part = part[:start] + part[stop:]
     return part, len(removals)
 
-pre, migrated_before = migrate_hooks(pre)
-post, migrated_after = migrate_hooks(post)
+if mode == "remove-ponytail":
+    ponytail = [{"event": event,
+                 "command": f'node "${{KIMI_CODE_HOME:-$HOME/.kimi-code}}/hooks/ponytail-hook.js" {event}',
+                 "timeout": 5} for event in ("SessionStart", "UserPromptSubmit")]
+    if not has_block:
+        print("managed block 不存在，无需移除 Ponytail 配置")
+        raise SystemExit(0)
+    cleaned, removed = remove_known_hooks(block_content, ponytail)
+    merged = pre + begin + cleaned + end + post
+    tomllib.loads(merged)
+    config_path.write_text(merged, encoding="utf-8")
+    print(f"已从 {config_path} 移除 {removed} 条受管理的 Ponytail Hook，保留安全 Hook。")
+    raise SystemExit(0)
+
+pre, migrated_before = remove_known_hooks(pre, legacy)
+post, migrated_after = remove_known_hooks(post, legacy)
 if migrated_before + migrated_after:
     print(f"已迁移 {migrated_before + migrated_after} 条已确认的旧全局 Ponytail Hook。")
 
@@ -113,6 +128,16 @@ else:
     print(f"已把 managed block 写入 {config_path}")
 PY
 }
+
+if [ "${1:-}" = "--uninstall-ponytail" ]; then
+  managed_block remove-ponytail
+  if [ -f "$PONYTAIL_DST" ]; then
+    rm -f "$PONYTAIL_DST"
+    echo "已移除 Ponytail 入口: $PONYTAIL_DST"
+  fi
+  echo "Ponytail 已卸载，Kimi 安全 Hook 与其他配置保留。"
+  exit 0
+fi
 
 if [ "${1:-}" = "--uninstall" ]; then
   managed_block remove
