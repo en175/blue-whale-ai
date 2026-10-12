@@ -275,6 +275,50 @@ class KimiPonytailHooksTest(PonytailConfigHarness):
         self.assertNotIn(BODY_PROBE, output)
         self.assertTrue(legacy.exists())
 
+    def test_four_clients_share_rules_without_sharing_runtime_modes(self):
+        market_root = ROOT / '.zcode/plugins'
+        market = json.loads((market_root / 'marketplace.json').read_text())
+        plugin = self.base / 'installed-zcode-plugin'
+        shutil.copytree(market_root / market['plugins'][0]['source'], plugin)
+        (self.root / '.zcode').mkdir()
+        shutil.copyfile(ROOT / '.zcode/ponytail.json', self.root / '.zcode/ponytail.json')
+        config = json.loads((plugin / 'hooks/hooks.json').read_text())
+
+        def run(client, event, prompt=''):
+            if client != 'zcode':
+                return self.run_hook(client, event, prompt)
+            handlers = [hook for entry in config['hooks'][event] for hook in entry['hooks']]
+            self.assertEqual(len(handlers), 1)
+            hook = handlers[0]
+            self.assertEqual(hook['type'], 'process')
+            args = [arg.replace('${ZCODE_PLUGIN_ROOT}', str(plugin)) for arg in hook['args']]
+            result = subprocess.run([hook['command'], *args], cwd=self.root, env=self.env,
+                                    input=json.dumps({'cwd': str(self.root), 'prompt': prompt}),
+                                    text=True, capture_output=True, check=True, timeout=10)
+            self.assertEqual(result.stderr, '')
+            output = json.loads(result.stdout)
+            specific = output.get('hookSpecificOutput', {})
+            if specific:
+                self.assertEqual(specific['hookEventName'], event)
+            return specific.get('additionalContext', '')
+
+        for client in ['codex', 'claude', 'kimi', 'zcode']:
+            run(client, 'SessionStart')
+        for client, command in [('codex', '$ponytail lite'), ('claude', '/ponytail ultra'),
+                                ('kimi', '/skill:ponytail off'), ('zcode', '$ponytail full')]:
+            output = run(client, 'UserPromptSubmit', command)
+            if client == 'zcode':
+                self.assert_mode(output, 'full')
+        for client, mode in [('codex', 'lite'), ('claude', 'ultra')]:
+            self.assert_mode(run(client, 'SubagentStart'), mode)
+        self.assertIn('level: full', run('zcode', 'UserPromptSubmit', '$ponytail'))
+        self.assertEqual(run('kimi', 'UserPromptSubmit', '继续开发'), '')
+        self.assertIn('PONYTAIL MODE OFF', run('zcode', 'UserPromptSubmit', '$ponytail off'))
+        self.assert_mode(run('kimi', 'UserPromptSubmit', '/skill:ponytail'), 'full')
+        self.assertEqual(run('zcode', 'UserPromptSubmit', '继续开发'), '')
+        self.assert_mode(run('codex', 'SubagentStart'), 'lite')
+        self.assert_mode(run('claude', 'SubagentStart'), 'ultra')
+
 
 if __name__ == '__main__':
     unittest.main()

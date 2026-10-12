@@ -10,7 +10,16 @@ license: MIT
 
 显示当前仓库的命令说明，保持运行档位，不写状态或配置。
 
-Codex 本地共享技能用 `$ponytail`、`$ponytail-review` 等美元符号形式；Claude Code 用 `/ponytail`、`/ponytail-review` 等斜杠形式。此处不是全局插件命名空间，避免使用旧 `@ponytail` 或 `$ponytail:ponytail` 安装说明。
+按客户端使用当前项目的共享技能。六个名称为 ponytail、ponytail-review、ponytail-audit、ponytail-debt、ponytail-gain、ponytail-help。
+
+| 客户端 | 调用与安装入口 |
+|------|----------------|
+| Codex CLI 与桌面端 | `$ponytail`、`$ponytail-review` 等。分别核对项目 Hook 信任和技能发现。 |
+| Claude Code | `/ponytail`、`/ponytail-review` 等，命令指向共享正文。 |
+| Kimi Code | `/skill:ponytail`、`/skill:ponytail-review` 等。安装、迁移与卸载读 [Kimi 说明](../../../docs/agents/ponytail-kimi.md)。 |
+| ZCode | 导入当前项目六技能后用 `$ponytail`、`$ponytail-review` 等。Hook 插件与技能分别安装，读 [ZCode 说明](../../../docs/agents/ponytail-zcode.md)。 |
+
+本仓使用项目共享入口。遇到旧全局插件命名空间时，按[维护说明](../../../docs/agents/ponytail.md)核对来源，保留归属不明的个人配置。
 
 | 操作 | 行为 |
 |------|------|

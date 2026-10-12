@@ -53,4 +53,4 @@ python3 scripts/check-hook-contracts.py
 | 配置链集成 | 从真实历史项目配置及插件标准配置执行处理器，验证默认值、切档、关闭、恢复、非法参数、一次性任务、项目及工作树隔离。不能证明 GUI 安装、信任或模型实际上下文。 |
 | 客户端实机 | 成员安装启用插件及项目技能后，取得客户端版本、Hook 来源、上下文和技能发现证据。此项单独验收。 |
 
-本票在 macOS 执行 Node/Python 配置链测试，未找到 `zcode` CLI，未取得 ZCode 桌面端版本或上下文证据。ZCode 实机及其他系统尚未验收，后续由整包验收记录结果。出现 `config_project_hooks_ignored` 时使用插件入口；出现 `hook.run.failed` 时核对 Node PATH、工作树启用设置及共享脚本是否存在，stdout 中的备用约束或脚本 exit 0 都不能替代真实正文验收。
+本轮在 macOS 执行 Node/Python 配置链测试。只读应用元数据确认已安装 ZCode 桌面端 3.14.5、build 3.14.5.7961，PATH 上未找到 `zcode` CLI。安装探针不能证明插件启用、技能导入或上下文注入；这些实机项目及其他系统仍未验收，详见[整包验收记录](../projects/IKL54X/ponytail-acceptance.md)。出现 `config_project_hooks_ignored` 时使用插件入口；出现 `hook.run.failed` 时核对 Node PATH、工作树启用设置及共享脚本是否存在，stdout 中的备用约束或脚本 exit 0 都不能替代真实正文验收。
