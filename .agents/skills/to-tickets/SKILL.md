@@ -43,9 +43,9 @@ Give each ticket its **blocking edges**: the other tickets that must complete be
 
 Present the proposed breakdown as a numbered list. For each ticket, show:
 
-- **Title**: short descriptive name
-- **Blocked by**: which other tickets (if any) must complete first
-- **What it delivers**: the end-to-end behaviour this ticket makes work
+- **标题**: short descriptive name
+- **前置工单**: which other tickets (if any) must complete first
+- **交付行为**: the end-to-end behaviour this ticket makes work
 
 Ask the user:
 
@@ -57,10 +57,16 @@ Iterate until the user approves the breakdown.
 
 ### 5. Publish the tickets to the configured tracker
 
+草稿展示和发布采用下方中文模板。按需增加“背景”“已确认的现场证据”“范围边界”，无内容的可选章节省略。发布前按序完成：
+
+1. 标题、章节名、说明和验收句子使用中文。代码标识、错误码、字段名、产品名、数值、链接、工单编号和标签保持原样；技术标识首次出现时用中文解释。
+2. 读取 [unslop](../unslop/SKILL.md)，按其规则改写表达。
+3. 对照已确认的来源逐项核对事实、触发条件、例外、范围、验收条件和依赖。保留“已确认”“推断”“未验证”的区别；正文自足、标识准确、条件完整后再发布。
+
 Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured; the tickets are the same either way, only the shape of the blocking edges changes:
 
-- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below: one ticket per file, never a single combined file.
-- **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. Apply the `ready-for-agent` triage label unless instructed otherwise; the tickets are agent-grabbable by construction.
+- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's “前置工单” lists the numbers/titles it depends on. Use the per-ticket file template below: one ticket per file, never a single combined file.
+- **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's “前置工单” to the blocking issues. Apply the `ready-for-agent` triage label unless instructed otherwise; the tickets are agent-grabbable by construction.
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
@@ -68,37 +74,47 @@ Do NOT close or modify any parent issue.
 
 <local-ticket-template>
 
-# <NN>: <Ticket title>
+# <NN>: <工单标题>
 
-**What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective, not a layer-by-layer implementation list.
+**状态：** ready-for-agent
 
-**Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
+## 关联工单
 
-**Status:** ready-for-agent
+父工单的编号或链接；来源不是已有工单时省略本节。
 
-- [ ] Acceptance criterion 1
-- [ ] Acceptance criterion 2
+## 要实现的行为
+
+从用户视角描述本工单完成后可使用的完整行为。
+
+## 验收标准
+
+- [ ] 可独立验证的验收条件 1
+- [ ] 可独立验证的验收条件 2
+
+## 前置工单
+
+- 必须先完成的工单编号和标题；没有时写“无，可直接开始”。
 
 </local-ticket-template>
 
 <issue-template>
 
-## Parent
+## 关联工单
 
-A reference to the parent issue on the tracker (if the source was an existing issue, otherwise omit this section).
+父工单的编号或链接；来源不是已有工单时省略本节。
 
-## What to build
+## 要实现的行为
 
-The end-to-end behaviour this ticket makes work, from the user's perspective, not layer-by-layer implementation.
+从用户视角描述本工单完成后可使用的完整行为。
 
-## Acceptance criteria
+## 验收标准
 
-- [ ] Criterion 1
-- [ ] Criterion 2
+- [ ] 可独立验证的验收条件 1
+- [ ] 可独立验证的验收条件 2
 
-## Blocked by
+## 前置工单
 
-- A reference to each blocking ticket, or "None (can start immediately)".
+- 每项前置工单的编号、标题和链接；没有时写“无，可直接开始”。
 
 </issue-template>
 
