@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { swallowStolenCanvasChromeHit } from './chromeHitGuard';
+import { canvasChromeAtPoint, swallowStolenCanvasChromeHit } from './chromeHitGuard';
 
 const POINT = { x: 120, y: 40 };
 
@@ -86,4 +86,21 @@ it('没有浮层时，叠在工具条上的画布点击仍转发给添加到对�
   const { canvas, onAddToChat } = mountChromeAndCanvas();
   expect(swallowStolenCanvasChromeHit(gesture('click', canvas))).toBe(true);
   expect(onAddToChat).toHaveBeenCalledTimes(1);
+});
+
+it('钉屏幕浮层领地内的 chrome 根不算画布 chrome（否则光标移入触发自卸载闪烁）', () => {
+  const territory = document.createElement('div');
+  territory.dataset.genPanelTerritory = '';
+  territory.dataset.canvasChrome = '';
+  document.body.append(territory);
+  stubRect(territory, box(80, 20, 160, 40));
+  expect(canvasChromeAtPoint(POINT.x, POINT.y)).toBeNull();
+});
+
+it('对照：非领地 chrome 根仍然命中', () => {
+  const chrome = document.createElement('div');
+  chrome.dataset.canvasChrome = '';
+  document.body.append(chrome);
+  stubRect(chrome, box(80, 20, 160, 40));
+  expect(canvasChromeAtPoint(POINT.x, POINT.y)).toBe(chrome);
 });
