@@ -108,7 +108,7 @@ export interface GenerationCommandRepo {
     code: string,
     message: string,
     details?: Record<string, unknown>,
-  ): Promise<void>;
+  ): Promise<boolean>;
 }
 
 export const SOURCE_BOTTOM_DOCK = "bottom_dock";
@@ -676,7 +676,7 @@ export function createGenerationCommandRepo(
     async markFailedQueued(jobId, code, message, details) {
       const error: Record<string, unknown> = { code, message };
       if (details !== undefined) error.details = details;
-      await prisma.generation_jobs.updateMany({
+      const result = await prisma.generation_jobs.updateMany({
         where: { id: BigInt(jobId), status: "queued" },
         data: {
           status: "failed",
@@ -685,6 +685,7 @@ export function createGenerationCommandRepo(
           version: { increment: 1 },
         },
       });
+      return result.count === 1;
     },
   };
 }

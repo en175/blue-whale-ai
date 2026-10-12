@@ -72,9 +72,8 @@ public class AudioJobProcessor implements JobProcessor {
         log.info("[audio] 已领取 jobId={} type={} token={}", job.id(), job.type(), job.fencingToken());
 
         if (job.cancelRequested()) {
-            log.info("[audio] 取消已执行(cancelRequested) jobId={}", job.id());
-            finalizer.failJob(job.id(), GenerationError.ERROR_PROVIDER_FAILED,
-                    "任务已取消", null, workerId, job.fencingToken());
+            log.info("[audio] 取消已执行(cancelJobBeforeDispatch) jobId={}", job.id());
+            stateMachine.cancelJobBeforeDispatch(job.id(), workerId, job.fencingToken());
             return;
         }
 

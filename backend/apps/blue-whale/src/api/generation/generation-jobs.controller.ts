@@ -134,11 +134,14 @@ export class GenerationJobsController {
   }
 
   private async failEnqueue(jobId: string, userId: string): Promise<void> {
-    await this.command
+    const transitioned = await this.command
       .markFailed(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
         raw: "RocketMQ 入队失败",
       })
-      .catch(() => {});
+      .catch(() => false);
+    if (!transitioned) {
+      return;
+    }
     await this.billing().release({
       userId,
       jobId: Number(jobId),

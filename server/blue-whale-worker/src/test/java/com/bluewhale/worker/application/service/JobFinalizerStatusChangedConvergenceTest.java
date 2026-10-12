@@ -124,7 +124,7 @@ class JobFinalizerStatusChangedConvergenceTest {
             }
         }
         assertThat(start)
-                .withFailMessage("%s 不见了——收敛点被删掉后 8 处会各发各的，钱就冻住了",
+                .withFailMessage("%s 不见了——收敛点被删掉后各路径会各发各的，钱就冻住了",
                         HELPER_SIG.trim())
                 .isNotEqualTo(-1);
 
