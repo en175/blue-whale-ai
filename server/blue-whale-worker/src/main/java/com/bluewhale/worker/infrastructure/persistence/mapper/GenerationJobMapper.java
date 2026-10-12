@@ -535,7 +535,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND fencing_token = #{fencingToken}
               AND provider_task_id IS NULL
             """)
-    int cancelVideoBeforeDispatch(
+    int cancelJobBeforeDispatch(
             @Param("jobId") Long jobId,
             @Param("workerId") String workerId,
             @Param("fencingToken") Long fencingToken

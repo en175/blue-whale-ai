@@ -29,7 +29,6 @@ import {
   type OutputSlotStatus,
 } from "./generation-output-slot-repo.js";
 import { appendProjectEvent } from "./product-event-repo.js";
-import { cancelImageJob } from "./generation-image-cancel.js";
 import {
   extraString,
   loadJobExtrasOne,
@@ -317,9 +316,8 @@ export function createGenerationCommandRepo(
     async requestCancel(jobId, userId) {
       const job = await prisma.generation_jobs.findFirst({
         where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
-        select: { id: true, status: true, type: true },
+        select: { status: true },
       });
-      if (job?.type === "image") return cancelImageJob(prisma, jobId, userId);
       if (!job || (job.status !== "queued" && job.status !== "processing"))
         return false;
       await prisma.generation_jobs.update({

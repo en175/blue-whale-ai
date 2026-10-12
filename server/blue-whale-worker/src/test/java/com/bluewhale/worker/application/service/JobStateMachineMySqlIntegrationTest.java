@@ -996,12 +996,12 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Test
-        @DisplayName("G13: cancelVideoBeforeDispatch 已提交（provider_task_id IS NOT NULL）→ false")
+        @DisplayName("G13: cancelJobBeforeDispatch 已提交（provider_task_id IS NOT NULL）→ false")
         void cancel_afterSubmit_false() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
             jdbc.update("UPDATE generation_jobs SET provider_task_id='t-1' WHERE id=?", id);
 
-            boolean ok = service.cancelVideoBeforeDispatch(
+            boolean ok = service.cancelJobBeforeDispatch(
                     String.valueOf(id), "worker-1", 5L);
 
             assertThat(ok).isFalse();
@@ -1009,11 +1009,11 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Test
-        @DisplayName("G12: cancelVideoBeforeDispatch 未提交 → cancelled, progress=0")
+        @DisplayName("G12: cancelJobBeforeDispatch 未提交 → cancelled, progress=0")
         void cancel_beforeDispatch_ok() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
 
-            boolean ok = service.cancelVideoBeforeDispatch(
+            boolean ok = service.cancelJobBeforeDispatch(
                     String.valueOf(id), "worker-1", 5L);
 
             assertThat(ok).isTrue();
@@ -1029,7 +1029,7 @@ class JobStateMachineMySqlIntegrationTest {
         void cancel_stale_false() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
 
-            boolean ok = service.cancelVideoBeforeDispatch(
+            boolean ok = service.cancelJobBeforeDispatch(
                     String.valueOf(id), "worker-1", 999L);
 
             assertThat(ok).isFalse();

@@ -201,6 +201,22 @@ model generation_job_extras {
   @@unique([generation_job_id, extra_key], map: "uk_generation_job_extras__job_key")
 }
 
+model generation_outbox {
+  id              BigInt    @id @default(autoincrement())
+  job_id          BigInt
+  user_id         BigInt
+  terminal_status String    @db.VarChar(32)
+  reason          String    @default("") @db.VarChar(512)
+  send_state      String    @default("pending") @db.VarChar(16)
+  attempts        Int       @default(0)
+  gmt_create      DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified    DateTime  @default(now()) @db.DateTime(0)
+  sent_at         DateTime? @db.DateTime(0)
+
+  @@index([send_state, id], map: "idx_generation_outbox__pending")
+  @@index([job_id], map: "idx_generation_outbox__job")
+}
+
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model generation_model_capability {
   id                      BigInt   @id @default(autoincrement())

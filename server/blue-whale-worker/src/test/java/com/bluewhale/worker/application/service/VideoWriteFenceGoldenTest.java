@@ -117,13 +117,13 @@ class VideoWriteFenceGoldenTest {
     }
 
     @Test
-    @DisplayName("G73: cancelVideoBeforeDispatch 成功不写日志行（video-ops.ts:306-343 无 log），SQL 清 next_action_at")
+    @DisplayName("G73: cancelJobBeforeDispatch 成功不写日志行（video-ops.ts:306-343 无 log），SQL 清 next_action_at")
     void g73_cancelNoLogRow() {
-        assertThat(updateSqlOf("cancelVideoBeforeDispatch"))
+        assertThat(updateSqlOf("cancelJobBeforeDispatch"))
                 .contains("next_action_at = NULL")
                 .doesNotContain("next_poll_at");
-        when(jobMapper.cancelVideoBeforeDispatch(300L, "w1", 5L)).thenReturn(1);
-        assertThat(service.cancelVideoBeforeDispatch("300", "w1", 5)).isTrue();
+        when(jobMapper.cancelJobBeforeDispatch(300L, "w1", 5L)).thenReturn(1);
+        assertThat(service.cancelJobBeforeDispatch("300", "w1", 5)).isTrue();
         verifyNoInteractions(jobLogMapper);
     }
 

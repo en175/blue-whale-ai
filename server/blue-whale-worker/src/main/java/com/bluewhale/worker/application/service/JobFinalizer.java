@@ -281,16 +281,16 @@ public class JobFinalizer {
                     "completeJob 守卫通过后任务 " + jobId + " 不存在，数据损坏");
         }
 
-        if (job.getProjectId() == null) {
-            return true;
-        }
-
         publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                         "type", job.getType(),
                         "source", job.getSource(),
                         "status", job.getStatus(),
                         "progress", job.getProgress(),
                         "output_asset_ids", assetIds));
+
+        if (job.getProjectId() == null) {
+            return true;
+        }
 
         for (int i = 0; i < assetIds.size(); i++) {
             GenerationOutputSlotEntity slot = i < slots.size() ? slots.get(i) : null;
@@ -370,13 +370,13 @@ public class JobFinalizer {
                 Map.of("code", errorCode, "message", errorMessage,
                         "details", details != null ? details : Map.of()));
 
+        publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+                        "type", job.getType(),
+                        "source", job.getSource(),
+                        "status", job.getStatus(),
+                        "progress", job.getProgress(),
+                        "error", Map.of("code", errorCode, "message", errorMessage)));
         if (job.getProjectId() != null) {
-            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)));
             for (GenerationOutputSlotEntity slot : slots) {
                 eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
                         "generation_job_output",
@@ -476,13 +476,15 @@ public class JobFinalizer {
                 Map.of("asset_ids", List.of(asset.getId().toString())));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
+        if (job != null) {
+            if (job.getProjectId() != null) {
+                eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                        asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                        Map.of("asset_id", asset.getId().toString(),
+                                "generation_job_id", job.getId().toString(),
+                                "type", asset.getType(),
+                                "access_url", asset.getUrl()));
+            }
             publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
@@ -549,13 +551,15 @@ public class JobFinalizer {
         insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
                 Map.of("code", errorCode, "message", errorMessage,
                         "details", details != null ? details : Map.of()));
-        if (job != null && job.getProjectId() != null) {
+        if (job != null) {
             publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
                             "error", Map.of("code", errorCode, "message", errorMessage)));
+        }
+        if (job != null && job.getProjectId() != null) {
             for (GenerationOutputSlotEntity slot : pendingSlots) {
                 eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
                         "generation_job_output",
@@ -642,6 +646,8 @@ public class JobFinalizer {
                                 "type", asset.getType(),
                                 "access_url", asset.getUrl()));
             }
+        }
+        if (job != null) {
             publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
@@ -774,6 +780,8 @@ public class JobFinalizer {
                                 "type", asset.getType(),
                                 "access_url", asset.getUrl()));
             }
+        }
+        if (job != null) {
             Map<String, Object> resultPayload = new java.util.LinkedHashMap<>();
             resultPayload.put(
                     com.bluewhale.worker.domain.contract.VideoSceneSplitContract.RESULT_KEY_DURATION,
@@ -848,13 +856,15 @@ public class JobFinalizer {
         insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, p.successMessage(), logPayload);
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
+        if (job != null) {
+            if (job.getProjectId() != null) {
+                eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                        asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                        Map.of("asset_id", asset.getId().toString(),
+                                "generation_job_id", job.getId().toString(),
+                                "type", asset.getType(),
+                                "access_url", asset.getUrl()));
+            }
             publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
@@ -910,7 +920,7 @@ public class JobFinalizer {
                         "details", details != null ? details : Map.of()));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        if (job != null && job.getProjectId() != null) {
+        if (job != null) {
             publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
@@ -923,19 +933,25 @@ public class JobFinalizer {
 
 
     private void publishStatusChanged(GenerationJobEntity job, Map<String, Object> payload) {
-        eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                payload);
+        if (job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    payload);
+        }
         settlementPublisher.publishTerminal(job, payload);
     }
 
     public void releaseHoldForCancelled(String jobId) {
         GenerationJobEntity job = jobMapper.selectById(Long.parseLong(jobId));
         if (job == null) {
-            log.warn("[cancel] 取不到 job，无法发布返还事件：jobId={}", jobId);
+            log.warn("[cancel] 取不到 job，无法发布终态事件：jobId={}", jobId);
             return;
         }
-        settlementPublisher.publishTerminal(job, Map.of("status", job.getStatus()));
+        publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+                "type", job.getType(),
+                "source", job.getSource(),
+                "status", job.getStatus(),
+                "progress", job.getProgress()));
     }
 
     private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,

@@ -62,17 +62,17 @@ class VideoJobProcessorTest {
 
 
     @Test
-    @DisplayName("G49: cancelRequested + providerTaskId==null → cancelVideoBeforeDispatch")
+    @DisplayName("G49: cancelRequested + providerTaskId==null → cancelJobBeforeDispatch")
     void cancelBeforeDispatch() {
         ClaimedVideoJobDto claim = videoClaim("100", true, null, 0, 0, null);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("100"), anyString());
         doReturn(true).when(stateMachine)
-                .cancelVideoBeforeDispatch(eq("100"), anyString(), eq(1L));
+                .cancelJobBeforeDispatch(eq("100"), anyString(), eq(1L));
 
         processor.handle("100");
 
-        verify(stateMachine).cancelVideoBeforeDispatch(eq("100"), anyString(), eq(1L));
+        verify(stateMachine).cancelJobBeforeDispatch(eq("100"), anyString(), eq(1L));
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
@@ -93,7 +93,7 @@ class VideoJobProcessorTest {
 
         processor.handle("101");
 
-        verify(stateMachine, never()).cancelVideoBeforeDispatch(anyString(), anyString(), anyLong());
+        verify(stateMachine, never()).cancelJobBeforeDispatch(anyString(), anyString(), anyLong());
     }
 
 

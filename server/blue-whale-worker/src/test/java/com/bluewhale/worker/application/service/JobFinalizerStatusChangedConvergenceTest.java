@@ -20,7 +20,7 @@ class JobFinalizerStatusChangedConvergenceTest {
     private static final String HELPER_SIG = "private void " + HELPER + "(";
     private static final String CALL = HELPER + "(job, Map.of(";
 
-    private static final int EXPECTED_CALL_SITES = 8;
+    private static final int EXPECTED_CALL_SITES = 9;
 
     @Test
     @DisplayName("★ status_changed 只准由 publishStatusChanged 一处发出")
@@ -59,8 +59,8 @@ class JobFinalizerStatusChangedConvergenceTest {
     }
 
     @Test
-    @DisplayName("8 个终态路径都接了收敛点（数量对账，少一处即为漏接）")
-    void 八处都接了() throws IOException {
+    @DisplayName("9 个收敛调用点（8 个终态路径 + 取消路径），数量对账")
+    void 九处都接了() throws IOException {
         long callSites = readSource().stream()
                 .filter(line -> line.contains(CALL))
                 .count();
@@ -72,7 +72,7 @@ class JobFinalizerStatusChangedConvergenceTest {
     }
 
     @Test
-    @DisplayName("★ 两条取消路径都接了预扣解冻（它们不走 8 个终态路径）")
+    @DisplayName("★ 四条取消路径都接了预扣解冻（它们不走 8 个终态路径）")
     void 取消路径接了解冻() throws IOException {
         Path machine = Path.of(
                 "src/main/java/com/bluewhale/worker/application/service/JobStateMachineService.java");
@@ -80,8 +80,10 @@ class JobFinalizerStatusChangedConvergenceTest {
         List<String> lines = Files.readAllLines(machine);
 
         for (String signature : List.of(
-                "public boolean cancelVideoBeforeDispatch(",
-                "public boolean cancelVideoFrameInterpolation(")) {
+                "public boolean cancelJobBeforeDispatch(",
+                "public boolean cancelVideoFrameInterpolation(",
+                "public boolean cancelAudioMixIfRequested(",
+                "public boolean cancelAudioVideoMuxIfRequested(")) {
             String body = methodBody(lines, signature);
             assertThat(body)
                     .withFailMessage("""

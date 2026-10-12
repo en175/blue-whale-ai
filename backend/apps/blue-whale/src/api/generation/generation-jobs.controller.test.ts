@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DomainError,
+  ERROR_ENQUEUE_FAILED,
   ERROR_INVALID_REFERENCE,
   ERROR_JOB_NOT_RETRYABLE_STATUS,
   errorCodeToNumeric,
@@ -37,6 +38,10 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
     }),
   };
 });
+vi.mock("@lib/shared/billing/billing-release.js", () => ({
+  createBillingRelease: () => vi.fn(async () => {}),
+  publishBillingJobTerminal: vi.fn(),
+}));
 vi.mock("@lib/infra/logging/blue-whale-logger.js", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
@@ -58,10 +63,12 @@ const { GenerationJobsController } = await import(
   "./generation-jobs.controller.js"
 );
 
+const commandMock = { repo: {}, markFailed: vi.fn(async () => {}) };
+
 function makeController() {
   return new GenerationJobsController(
     {} as never,
-    { repo: {} } as never,
+    commandMock as never,
     {} as never,
     {} as never,
     { materialStatusRepo: {} } as never,
@@ -81,6 +88,7 @@ beforeEach(() => {
   vi.mocked(enqueueVideoGenerationJob).mockReset().mockResolvedValue(undefined);
   vi.mocked(logger.error).mockClear();
   vi.mocked(logger.warn).mockClear();
+  vi.mocked(commandMock.markFailed).mockClear();
 });
 
 describe("GenerationJobsController.cancel 响应口径（IKIPWT）", () => {
@@ -158,6 +166,7 @@ describe("GenerationJobsController.create enqueue 日志分级（IKJ80Q）", () 
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("恢复扫描"));
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("jobId=88"));
     expect(logger.error).not.toHaveBeenCalled();
+    expect(commandMock.markFailed).not.toHaveBeenCalled();
   });
 
   it("真派发失败（其他错误）→ 保持 ERROR，请求仍不抛（回退路径语义不变）", async () => {
@@ -177,5 +186,11 @@ describe("GenerationJobsController.create enqueue 日志分级（IKJ80Q）", () 
       expect.stringContaining("enqueue video job failed"),
     );
     expect(logger.warn).not.toHaveBeenCalled();
+    expect(commandMock.markFailed).toHaveBeenCalledWith(
+      "89",
+      ERROR_ENQUEUE_FAILED,
+      "任务入队失败",
+      { raw: "RocketMQ 入队失败" },
+    );
   });
 });

@@ -133,6 +133,19 @@ export class GenerationJobsController {
     }
   }
 
+  private async failEnqueue(jobId: string, userId: string): Promise<void> {
+    await this.command
+      .markFailed(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
+        raw: "RocketMQ 入队失败",
+      })
+      .catch(() => {});
+    await this.billing().release({
+      userId,
+      jobId: Number(jobId),
+      reason: "任务入队失败",
+    });
+  }
+
   @Post()
   async create(
     @CurrentUser() user: AuthenticatedUser,
@@ -175,6 +188,9 @@ export class GenerationJobsController {
       } catch (error) {
         const log = enqueueFailureLog(error, { scope: "generation", kind: "video", jobId });
         logger[log.level](log.message);
+        if (log.level === "error") {
+          await this.failEnqueue(jobId, user.userId);
+        }
       }
     } else if (result.code === 200 && result.data && body.type === "image") {
       const jobId = String(result.data.generation_job_id);
@@ -183,20 +199,20 @@ export class GenerationJobsController {
       } catch (error) {
         const log = enqueueFailureLog(error, { scope: "generation", kind: "image", jobId });
         logger[log.level](log.message);
+        if (log.level === "error") {
+          await this.failEnqueue(jobId, user.userId);
+        }
       }
     } else if (result.code === 200 && result.data && body.type === "audio") {
       const jobId = String(result.data.generation_job_id);
       try {
         await enqueueAudioGenerationJob(jobId);
       } catch (error) {
-        logger.error(
-          `[generation] enqueue audio job failed: ${error instanceof Error ? error.message : "unknown"}`,
-        );
-        await this.command
-          .markFailed(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
-            raw: "RocketMQ 入队失败",
-          })
-          .catch(() => {});
+        const log = enqueueFailureLog(error, { scope: "generation", kind: "audio", jobId });
+        logger[log.level](log.message);
+        if (log.level === "error") {
+          await this.failEnqueue(jobId, user.userId);
+        }
       }
     }
     return result;
@@ -283,12 +299,19 @@ export class GenerationJobsController {
       throw new DomainError(result.code, result.msg ?? undefined);
     }
     if (result.data) {
+      const finalizeJobId = String(result.data.generation_job_id);
       try {
-        await enqueueVideoGenerationJob(String(result.data.generation_job_id));
+        await enqueueVideoGenerationJob(finalizeJobId);
       } catch (error) {
-        logger.error(
-          `[generation] enqueue finalize job failed: ${error instanceof Error ? error.message : "unknown"}`,
-        );
+        const log = enqueueFailureLog(error, {
+          scope: "generation",
+          kind: "finalize video",
+          jobId: finalizeJobId,
+        });
+        logger[log.level](log.message);
+        if (log.level === "error") {
+          await this.failEnqueue(finalizeJobId, user.userId);
+        }
       }
     }
     return result;
@@ -365,14 +388,19 @@ export class GenerationJobsController {
       throw new DomainError(result.code, result.msg ?? undefined);
     }
     if (result.data) {
+      const sampleJobId = String(result.data.generation_job_id);
       try {
-        await enqueueVideoGenerationJob(String(result.data.generation_job_id));
+        await enqueueVideoGenerationJob(sampleJobId);
       } catch (error) {
-        logger.error(
-          `[generation] enqueue regenerate-sample job failed: ${
-            error instanceof Error ? error.message : "unknown"
-          }`,
-        );
+        const log = enqueueFailureLog(error, {
+          scope: "generation",
+          kind: "regenerate-sample video",
+          jobId: sampleJobId,
+        });
+        logger[log.level](log.message);
+        if (log.level === "error") {
+          await this.failEnqueue(sampleJobId, user.userId);
+        }
       }
     }
     return result;
@@ -433,6 +461,9 @@ export class GenerationJobsController {
         } catch (error) {
           const log = enqueueFailureLog(error, { scope: "generation", kind: "retry video", jobId: newJobId });
           logger[log.level](log.message);
+          if (log.level === "error") {
+            await this.failEnqueue(newJobId, user.userId);
+          }
         }
       } else if (result.data.type === "image") {
         try {
@@ -440,19 +471,19 @@ export class GenerationJobsController {
         } catch (error) {
           const log = enqueueFailureLog(error, { scope: "generation", kind: "retry image", jobId: newJobId });
           logger[log.level](log.message);
+          if (log.level === "error") {
+            await this.failEnqueue(newJobId, user.userId);
+          }
         }
       } else if (result.data.type === "audio") {
         try {
           await enqueueAudioGenerationJob(newJobId);
         } catch (error) {
-          logger.error(
-            `[generation] enqueue retry audio job failed: ${error instanceof Error ? error.message : "unknown"}`,
-          );
-          await this.command
-            .markFailed(newJobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
-              raw: "RocketMQ 入队失败",
-            })
-            .catch(() => {});
+          const log = enqueueFailureLog(error, { scope: "generation", kind: "retry audio", jobId: newJobId });
+          logger[log.level](log.message);
+          if (log.level === "error") {
+            await this.failEnqueue(newJobId, user.userId);
+          }
         }
       }
     }

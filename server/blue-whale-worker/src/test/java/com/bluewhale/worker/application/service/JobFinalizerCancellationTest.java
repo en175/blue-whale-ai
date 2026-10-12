@@ -15,6 +15,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +44,9 @@ class JobFinalizerCancellationTest {
         job.setId(id);
         job.setUserId(42L);
         job.setProjectId(7L);
+        job.setType("video");
+        job.setSource("bottom_dock");
+        job.setProgress(0);
         job.setStatus("cancelled");
         return job;
     }
@@ -81,5 +86,21 @@ class JobFinalizerCancellationTest {
         assertThat(sent).hasSize(1);
         assertThat(sent.get(0)[0]).isEqualTo("generation-job-terminal");
         assertThat(sent.get(0)[1]).contains("\"status\":\"succeeded\"");
+    }
+
+    @Test
+    @DisplayName("★ project_id 为空的任务失败也发终态事件 —— 项目事件跳过，账务事件照发")
+    void 空项目也发终态事件() {
+        GenerationJobEntity job = cancelledJob(804);
+        job.setProjectId(null);
+        job.setStatus("failed");
+        when(jobMapper.failJobGuard(anyLong(), anyString(), anyLong(), anyString())).thenReturn(1);
+        when(jobMapper.selectById(804L)).thenReturn(job);
+
+        finalizer.failJob("804", "upstream_error", "上游挂了", null, "w1", 3L);
+
+        assertThat(sent).hasSize(1);
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-terminal");
+        assertThat(sent.get(0)[1]).contains("\"status\":\"failed\"").contains("\"refund\":true");
     }
 }
