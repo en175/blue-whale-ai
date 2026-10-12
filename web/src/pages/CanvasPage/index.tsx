@@ -9,7 +9,7 @@ import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
-import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
+import { nodeBoxOf, readRecoveryErrorReason, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
 import { defaultVideoModeFor, draftVideoModeOf } from './videoModes';
 import {
@@ -23,24 +23,19 @@ import {
 import { imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
 import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from './planApplyEdges';
 import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
-import { audioRefItemMediaTypeOf, audioRefMediaTypeOf, audioRefSourceError } from './audioMediaRefs';
-import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
+import { audioRefItemMediaTypeOf, audioRefSourceError } from './audioMediaRefs';
+import { PANEL_REF_MEDIA_TYPES } from './refSourceTypes';
 import { assetsPickerMediaTypes } from './assetsPickerTargets';
 import { hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   asVideoRefMediaType,
-  isLibraryOnlyVideoRef,
   readRefRole,
   readDraftMaterialRefs,
   mergedVideoMediaRefsOf,
   videoRefConflict,
   videoRefSourceError,
-  checkAddVideoRef,
-  incomingVideoRefOccupied,
   videoRefIdentityIds,
   type VideoMediaRef,
-  type VideoMediaRefs,
-  type VideoRefCapabilities,
   type VideoRefRole,
 } from './videoMediaRefs';
 import { AssetImageRefLimitProvider } from './modelCaps';
@@ -208,6 +203,7 @@ import { useCanvasCompliance } from './hooks/useCanvasCompliance';
 import { useCanvasProjects } from './hooks/useCanvasProjects';
 import { useCanvasClipboard } from './hooks/useCanvasClipboard';
 import { useCanvasUploadDrop } from './hooks/useCanvasUploadDrop';
+import { useCanvasPickSessionClick } from './hooks/useCanvasPickSessionClick';
 import { useCanvasAssetsPlacement } from './hooks/useCanvasAssetsPlacement';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
@@ -644,6 +640,8 @@ export default function CanvasPage() {
   const [mediaNodes, setMediaNodes] = useState<Node[]>([]);
   const [productNodes, setProductNodes] = useState<Node[]>([]);
   const [assetNodes, setAssetNodes] = useState<Node[]>([]);
+  const mediaNodesRef = useRef<Node[]>([]);
+  mediaNodesRef.current = mediaNodes;
   const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);
   const [imageModels, setImageModels] = useState<GenerationModel[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
@@ -1660,233 +1658,43 @@ export default function CanvasPage() {
     }
     return true;
   };
-  const handleImagePickSessionClick = (node: Node) => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    if (typeof imagePickSession === 'string') {
-      if (!mediaNodesRef.current.some((n) => n.id === imagePickSession)) {
-        endImagePickSession();
-        return;
-      }
-      if (node.type === 'textNode') {
-        connectPair(node.id, imagePickSession);
-        return;
-      }
-      if (node.type === 'mediaNode') {
-        if (connectPair(node.id, imagePickSession)) return;
-        if (validateImageRefConnect(node.id, imagePickSession)) {
-          addCanvasEdge(node.id, imagePickSession);
-        }
-        return;
-      }
-      showToast('warn', '图片参考仅支持图片素材');
-      return;
-    }
-    if (node.type === 'textNode') {
-      showToast('warn', '文本参考需要绑定生成节点');
-      return;
-    }
-    const isReadyMedia = node.type === 'mediaNode' && typeof data.src === 'string' && !data.genStatus;
-    if (!isReadyMedia) {
-      showToast('warn', '图片参考仅支持图片素材');
-      return;
-    }
-    if (data.assetMissing) {
-      showToast('warn', '素材已被删除');
-      return;
-    }
-    if ((data.src as string).startsWith('blob:')) {
-      showToast('warn', '素材上传中，请稍候再选择');
-      return;
-    }
-    const typeErr = panelCanvasRefError('image', data.mediaType);
-    if (typeErr) {
-      showToast('warn', typeErr);
-      return;
-    }
-    setImagePickResult({
-      ts: Date.now(),
-      files: [{
-        id: `node-${node.id}`,
-        url: data.src as string,
-        type: 'image',
-        name: (data.fileName as string) || node.id,
-        assetId: readNodeAssetId(data),
-      }],
-    });
-  };
-  const checkVideoFrameReplace = (
-    node: Node,
-    refs: VideoMediaRefs,
-    role: 'first' | 'last',
-    caps?: VideoRefCapabilities | null,
-  ): { current: VideoMediaRef | undefined } | null => {
-    const err = videoRefSourceError(node, role);
-    if (err) {
-      showToast('warn', err);
-      return null;
-    }
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const assetId = readAssetId(data);
-    if (assetId == null) {
-      showToast('warn', '素材不存在');
-      return null;
-    }
-    const current = role === 'first' ? refs.first : refs.last;
-    const sourceMaterialId = typeof data.materialId === 'string' && data.materialId ? data.materialId : undefined;
-    if (current && incomingVideoRefOccupied({ reference: [current] }, [assetId, sourceMaterialId])) return null;
-    const sameIncoming = (r: VideoMediaRef) => incomingVideoRefOccupied({ reference: [r] }, [assetId, sourceMaterialId]);
-    const slotCleared: VideoMediaRefs = {
-      ...(role === 'first' ? { ...refs, first: undefined } : { ...refs, last: undefined }),
-      reference: refs.reference.filter((r) => !sameIncoming(r)),
-    };
-    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared, caps, [sourceMaterialId]);
-    if (msg) {
-      showToast('warn', msg);
-      return null;
-    }
-    return { current };
-  };
-  const replaceVideoFrameRefFromCanvas = (node: Node, targetId: string, role: 'first' | 'last'): boolean => {
-    const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    const check = checkVideoFrameReplace(node, refs, role, videoCapsOfDraft(targetId));
-    if (!check) return false;
-    if (check.current) {
-      if (isLibraryOnlyVideoRef(check.current)) {
-        removeDraftMaterialRef(targetId, check.current.materialId);
-      } else {
-        removeRefEdges(targetId, check.current.nodeId);
-      }
-    }
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const assetId = readAssetId(data);
-    const occupiedReference = refs.reference.find((r) => r.assetId === assetId);
-    if (occupiedReference && occupiedReference.nodeId !== node.id) {
-      if (isLibraryOnlyVideoRef(occupiedReference)) {
-        removeDraftMaterialRef(targetId, occupiedReference.materialId);
-      } else {
-        removeRefEdges(targetId, occupiedReference.nodeId);
-      }
-    }
-    addCanvasEdge(node.id, targetId, role);
-    return true;
-  };
-  const replaceVideoFreeFrameRef = (node: Node, role: 'first' | 'last') => {
-    if (!checkVideoFrameReplace(node, videoFreeRefs, role)) return;
-    const item = videoFreeRefItemOf(node);
-    generationDock.updateDraft('video', { freeReference: { operation: 'replace', item, role } });
-  };
-  const handleVideoPickSessionClick = (node: Node) => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const role = pickRefRole ?? 'reference';
-    const isFrameSession = role === 'first' || role === 'last';
-    if (typeof videoPickSession === 'string') {
-      if (!mediaNodesRef.current.some((n) => n.id === videoPickSession)) {
-        endVideoPickSession();
-        return;
-      }
-      if (node.type === 'textNode') {
-        if (isFrameSession) {
-          showToast('warn', '首尾帧仅支持图片素材');
-          return;
-        }
-        connectPair(node.id, videoPickSession);
-        return;
-      }
-      if (node.type === 'mediaNode') {
-        if (isFrameSession) {
-          if (replaceVideoFrameRefFromCanvas(node, videoPickSession, role)) {
-            const filledRefs = mergedVideoMediaRefsOf(videoPickSession, edgesRef.current, mediaNodesRef.current);
-            if (filledRefs.first && filledRefs.last) {
-              endVideoPickSession();
-              showToast('success', '首尾帧已就绪');
-            }
-          }
-          return;
-        }
-        if (pickMode === 'image' && data.mediaType !== 'image') {
-          showToast('warn', PANEL_REF_MEDIA_TYPES.videoText2Video.canvasRefError);
-          return;
-        }
-        if (validateVideoRefConnect(node.id, videoPickSession, 'reference')) {
-          addCanvasEdge(node.id, videoPickSession, 'reference');
-        }
-        return;
-      }
-      showToast('warn', '视频参考仅支持图片、视频或音频素材');
-      return;
-    }
-    if (node.type === 'textNode') {
-      showToast('warn', '文本参考需要绑定生成节点');
-      return;
-    }
-    if (node.type !== 'mediaNode') {
-      showToast('warn', '视频参考仅支持图片、视频或音频素材');
-      return;
-    }
-    if (isFrameSession) {
-      replaceVideoFreeFrameRef(node, role);
-      return;
-    }
-    if (pickMode === 'image' && data.mediaType !== 'image') {
-      showToast('warn', PANEL_REF_MEDIA_TYPES.videoText2Video.canvasRefError);
-      return;
-    }
-    const err = videoRefSourceError(node, 'reference');
-    if (err) {
-      showToast('warn', err);
-      return;
-    }
-    if (readAssetId(data) == null) return;
-    appendVideoFreeRef(videoFreeRefItemOf(node), 'reference');
-  };
-  const handleAudioPickSessionClick = (node: Node) => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    if (typeof audioPickSession === 'string') {
-      if (!mediaNodesRef.current.some((n) => n.id === audioPickSession)) {
-        endAudioPickSession();
-        return;
-      }
-      if (node.type === 'textNode') {
-        if (!validateAudioTextConnect(node.id, audioPickSession)) return;
-        addCanvasEdge(node.id, audioPickSession);
-        return;
-      }
-      if (node.type === 'mediaNode') {
-        if (validateAudioRefConnect(node.id, audioPickSession)) {
-          addCanvasEdge(node.id, audioPickSession);
-        }
-        return;
-      }
-      showToast('warn', PANEL_REF_MEDIA_TYPES.audio.canvasRefError);
-      return;
-    }
-    if (node.type === 'textNode') {
-      showToast('warn', '文本参考需要绑定生成节点');
-      return;
-    }
-    if (node.type !== 'mediaNode') {
-      showToast('warn', PANEL_REF_MEDIA_TYPES.audio.canvasRefError);
-      return;
-    }
-    const err = audioRefSourceError(node);
-    if (err) {
-      showToast('warn', err);
-      return;
-    }
-    const incomingType = audioRefMediaTypeOf(data) ?? 'audio';
-    setAudioPickResult({
-      ts: Date.now(),
-      item: {
-        id: node.id,
-        kind: incomingType,
-        mediaType: incomingType,
-        name: (data.fileName as string) || node.id,
-        src: data.src as string,
-        source: 'canvas',
-        assetId: readAssetId(data),
-      },
-    });
-  };
+  const {
+    handleImagePickSessionClick,
+    handleVideoPickSessionClick,
+    handleAudioPickSessionClick,
+    resetPickState,
+  } = useCanvasPickSessionClick({
+    mediaNodesRef,
+    showToast,
+    pickMode,
+    pickRefRole,
+    imagePickSession,
+    videoPickSession,
+    audioPickSession,
+    endImagePickSession,
+    endVideoPickSession,
+    endAudioPickSession,
+    connectPair,
+    addCanvasEdge,
+    validateImageRefConnect,
+    validateVideoRefConnect,
+    validateAudioRefConnect,
+    validateAudioTextConnect,
+    videoCapsOfDraft,
+    edgesRef,
+    videoFreeRefs,
+    removeRefEdges: (draftId, sourceNodeId) => removeRefEdges(draftId, sourceNodeId),
+    removeDraftMaterialRef: (draftId, materialId) => removeDraftMaterialRef(draftId, materialId),
+    appendVideoFreeRef: (item, role) => appendVideoFreeRef(item, role),
+    replaceFreeReference: (item, role) => generationDock.updateDraft('video', { freeReference: { operation: 'replace', item, role } }),
+    setPickMode,
+    setPickTarget,
+    setPickRefRole,
+    setPickProductId,
+    setPickAssetId,
+    setImagePickResult,
+    setAudioPickResult,
+  });
   const handleCanvasNodeClick = (node: Node) => {
     if (toolRuntime.onNodeClick(node.id, buildToolSessionDeps()) === 'consumed') return;
     if (showAgent && node.type === 'textNode') {
@@ -2042,12 +1850,6 @@ export default function CanvasPage() {
         setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
       }
     }
-    setPickMode(null);
-    setPickTarget(null);
-    setPickProductId(null);
-    setPickAssetId(null);
-  };
-  const resetPickState = () => {
     setPickMode(null);
     setPickTarget(null);
     setPickProductId(null);
@@ -2598,8 +2400,6 @@ export default function CanvasPage() {
   videoModelsRef.current = videoModels;
   const imageModelsRef = useRef<GenerationModel[]>([]);
   imageModelsRef.current = imageModels;
-  const mediaNodesRef = useRef<Node[]>([]);
-  mediaNodesRef.current = mediaNodes;
   const textNodesRef = useRef<Node[]>([]);
   textNodesRef.current = textNodes;
   const assetNodesRef = useRef<Node[]>([]);
