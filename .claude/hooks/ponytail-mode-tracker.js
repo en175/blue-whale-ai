@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { getDefaultMode, isDeactivationCommand, writeDefaultMode } = require('./ponytail-config');
+const { getDefaultMode, isDeactivationCommand, writeDefaultMode, normalizeMode } = require('./ponytail-config');
 const {
   clearMode,
   cursorRuleNotice,
@@ -20,8 +20,9 @@ function finish() {
   if (done) return;
   done = true;
   try {
+
     const data = JSON.parse(input.replace(/^\uFEFF/, ''));
-    const prompt = (data.prompt || '').trim().toLowerCase();
+    const prompt = typeof data.prompt === 'string' ? data.prompt.trim().toLowerCase() : '';
 
     if (isCursor && (/^[/@$]ponytail/.test(prompt) || isDeactivationCommand(prompt))) {
       const rule = cursorRulePath();
@@ -41,55 +42,65 @@ function finish() {
       let mode = null;
       let isReportOnly = false;
 
-      if (cmd === '/ponytail-review' || cmd === '/ponytail:ponytail-review') {
-        mode = 'review';
-      } else if (cmd === '/ponytail' || cmd === '/ponytail:ponytail') {
+      if (cmd === '/ponytail' || cmd === '/ponytail:ponytail') {
+
         if (arg === 'default') {
-          const dmode = parts[2];
-          if (dmode === 'off' || dmode === 'lite' || dmode === 'full' || dmode === 'ultra') {
+          const dmode = normalizeMode(parts[2]);
+          if (parts.length === 3 && dmode) {
             writeDefaultMode(dmode);
-            writeHookOutput('UserPromptSubmit', dmode, 'PONYTAIL DEFAULT SET — new sessions start in ' + dmode + '.');
+            writeHookOutput('UserPromptSubmit', dmode, 'Ponytail 默认值已设置为 ' + dmode + '，新会话生效，当前档位保持不变。');
           }
           return;
         }
-        if (arg === 'lite') mode = 'lite';
-        else if (arg === 'full') mode = 'full';
-        else if (arg === 'ultra') mode = 'ultra';
-        else if (arg === 'off') mode = 'off';
-        else if (arg === '') {
-          isReportOnly = true;
-          mode = readMode() || getDefaultMode();
-        } else {
-          mode = getDefaultMode();
+        if (parts.length > 2) return;
+        if (arg) mode = normalizeMode(arg);
+        else {
+
+          const live = readMode();
+          if (live && live !== 'off') {
+            isReportOnly = true;
+            mode = live;
+          } else {
+            mode = getDefaultMode() === 'off' ? 'full' : getDefaultMode();
+          }
         }
       }
 
       if (isReportOnly) {
-        writeHookOutput(
-          'UserPromptSubmit',
-          mode,
-          'PONYTAIL MODE ACTIVE — level: ' + mode,
-        );
-      } else if (mode && mode !== 'off') {
-        setMode(mode);
-        modeSwitched = true;
+
         if (!isQoder) {
-          const header = 'PONYTAIL MODE CHANGED — level: ' + mode;
           writeHookOutput(
             'UserPromptSubmit',
             mode,
-            isCursor ? header + '\n\n' + getPonytailInstructions(mode) : header,
+            'PONYTAIL MODE ACTIVE，level: ' + mode,
+          );
+        }
+      } else if (mode && mode !== 'off') {
+        setMode(mode);
+        modeSwitched = true;
+
+        if (!isQoder) {
+
+          const header = 'PONYTAIL MODE CHANGED，level: ' + mode;
+          writeHookOutput(
+            'UserPromptSubmit',
+            mode,
+            header + '\n\n' + getPonytailInstructions(mode),
           );
         }
       } else if (mode === 'off') {
-        clearMode();
+        if (isQoder) setMode('off');
+        else clearMode();
+
         deactivated = true;
         writeHookOutput('UserPromptSubmit', 'off', 'PONYTAIL MODE OFF');
       }
     }
 
     if (!modeSwitched && !deactivated && isDeactivationCommand(prompt)) {
-      clearMode();
+      if (isQoder) setMode('off');
+      else clearMode();
+
       deactivated = true;
       writeHookOutput('UserPromptSubmit', 'off', 'PONYTAIL MODE OFF');
     }
@@ -97,24 +108,28 @@ function finish() {
     if (isQoder && !deactivated) {
       let currentMode = readMode();
       if (!currentMode) {
+
         currentMode = getDefaultMode();
         if (currentMode !== 'off') {
           try { setMode(currentMode); } catch (e) {}
         }
       }
       if (currentMode && currentMode !== 'off') {
+
         const header = modeSwitched
-          ? 'PONYTAIL MODE CHANGED — level: ' + currentMode + '\n\n'
+          ? 'PONYTAIL MODE CHANGED，level: ' + currentMode + '\n\n'
           : '';
         writeHookOutput('UserPromptSubmit', currentMode, header + getPonytailInstructions(currentMode));
       }
     }
   } catch (e) {
+
   }
 }
 
 process.stdin.on('data', chunk => { input += chunk; });
-process.stdin.on('end', finish);
+
+process.stdin.on('end', () => { finish(); process.exit(0); });
 
 process.stdin.on('error', () => { finish(); process.exit(0); });
-setTimeout(() => { finish(); process.exit(0); }, 1000).unref();
+setTimeout(() => { finish(); process.exit(0); }, 1000);

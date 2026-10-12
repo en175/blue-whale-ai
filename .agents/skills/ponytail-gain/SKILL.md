@@ -1,50 +1,26 @@
 ---
 name: ponytail-gain
 description: >
-  Show ponytail's measured impact as a compact scoreboard: less code, less
-  cost, more speed, from the benchmark medians. One-shot display, not a
-  persistent mode, and not a per-repo number. Trigger: /ponytail-gain,
-  "ponytail gain", "what does ponytail save", "show ponytail impact",
-  "ponytail scoreboard".
+  展示 Ponytail 5 的公开基准结果，适用于查看代码量、成本和速度收益。
+  一次性展示，不把基准数值称为本仓收益，不改持久档位。
+license: MIT
 ---
 
-# Ponytail Gain
+# Ponytail 基准收益
 
-Display this scoreboard when invoked. One-shot: do NOT change mode, write flag
-files, or persist anything.
+显示下列公开基准。一轮展示，不修改档位或文件。
 
-The figures are the published benchmark medians (5 everyday tasks: email
-validator, debounce, CSV sum, countdown timer, rate limiter; three models:
-Haiku, Sonnet, Opus). They are measured, not computed from the current repo.
-Source: `benchmarks/` and the README.
+数据来自 [v5.1.0 固定来源的基准记录](https://github.com/DietrichGebert/ponytail/blob/9cc65d03aa2da1db7121b912d03596409ee340b8/benchmarks/results/2026-10-07-agentic.md)。上游用无交互 Claude Code、Opus 5.5 默认推理档位测试 39 项任务，每项运行 5 次，比较有无技能。任务包含真实 FastAPI 与 React 仓库功能、修复、安全、隐私和小应用。其中 18 项有正确性与安全的隐藏检查。各项数据为每任务中位数的几何平均。
 
-## Scoreboard
+| 指标 | 无技能基线 | Ponytail |
+|------|------------|----------|
+| 代码行数 | 100% | 47%，减少 53% |
+| 输出 token | 100% | 55%，减少 45% |
+| 成本 | 100% | 74%，减少 26% |
+| 时间 | 100% | 59%，减少 41% |
+| 隐藏检查通过率 | 96% | 97% |
+| 需要检查的逻辑具备测试 | 68% | 98% |
 
-Render plain ASCII bars. The bar length shows the measured range; the label
-carries the exact figure:
+这些数值属于公开基准。当前仓库没有未实施版本作为对照，不能宣称本仓省了多少代码、token 或成本。需要本仓证据时读取 `ponytail-debt` 的实际清单或执行 `ponytail-audit`。
 
-```
-  ponytail gain                     benchmark median · 5 tasks · 3 models
-
-  Lines of code   no-skill  ████████████████████  100%
-                  ponytail  ██▌·················    6–20%   ▼ 80–94%
-  Cost            no-skill  ████████████████████  100%
-                  ponytail  █████▌··············   23–53%  ▼ 47–77%
-  Speed           ponytail  ▸ 3–6× faster
-
-  This repo:  /ponytail-debt  (shortcuts you deferred)
-              /ponytail-audit (what's still cuttable)
-```
-
-## Honesty boundary
-
-These are benchmark medians, not this repo. NEVER print a per-repo savings
-number ("you saved X lines/tokens here"): the unbuilt version was never
-written, so there is no real baseline to subtract from in a live repo. The
-only real per-repo figures come from `/ponytail-debt` (a counted ledger), and
-this card points there instead of inventing one.
-
-## Boundaries
-
-One-shot display. Edits nothing, changes no mode.
-"stop ponytail" or "normal mode": revert.
+所有说明使用中文。只展示，不编辑、不切档。

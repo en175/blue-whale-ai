@@ -1792,6 +1792,17 @@ test('CBM client adapters select control-plane verification', () => {
   assert.deepEqual(result.areas, ['control-plane']);
 });
 
+test('Ponytail runtime dependencies select control-plane verification', () => {
+  const files = ['.claude/hooks/ponytail-map.js', '.claude/hooks/ponytail-statusline.js',
+    '.claude/hooks/ponytail-statusline.sh', '.claude/hooks/ponytail-statusline.ps1',
+    'scripts/tests/test_codex_ponytail_hooks.py'];
+  for (const stage of ['completion', 'pr']) {
+    assert.deepEqual(classifyChanges(files, { stage }), {
+      tier: 'scoped', areas: ['control-plane'], reasons: ['control-plane changed'],
+    });
+  }
+});
+
 function createFrontendRepository({ localPublish = false } = {}) {
   const repository = createRepository();
   writeFileSync(join(repository, ".git", "info", "exclude"), "node_modules/\nscripts/\n.env.local\n.env.*.local\n");

@@ -1,57 +1,49 @@
 ---
 name: ponytail-review
 description: >
-  Code review focused exclusively on over-engineering. Finds what to delete:
-  reinvented standard library, unneeded dependencies, speculative abstractions,
-  dead flexibility. One line per finding: location, what to cut, what replaces
-  it. Use when the user says "review for over-engineering", "what can we
-  delete", "is this over-engineered", "simplify review", or invokes
-  /ponytail-review. Complements correctness-focused review, this one only
-  hunts complexity.
+  一次性质量审查，覆盖正确性、安全、实际负载、测试、性能和简化。
+  适用于审查改动、提交或 PR，以及判断过度设计。只报告，不改代码或持久档位。
+license: MIT
 ---
 
-Review diffs for unnecessary complexity. One line per finding: location, what
-to cut, what replaces it. The diff's best outcome is getting shorter.
+# Ponytail 改动审查
 
-## Format
+按正确、安全、承受预期负载、有检查、速度足够、代码简洁的顺序审查。用户要求的是完整报告，给出足以判断问题和修复方案的证据。
 
-`L<line>: <tag> <what>. <replacement>.`, or `<file>:L<line>: ...` for
-multi-file diffs.
+本技能补充团队审查。仓库要求的 `code-review` Standards/Spec 双轴审查、验证凭证和发布授权继续执行；本技能结果不能替代它们。
 
-Tags:
+## 确定范围
 
-- `delete:` dead code, unused flexibility, speculative feature. Replacement: nothing.
-- `stdlib:` hand-rolled thing the standard library ships. Name the function.
-- `native:` dependency or code doing what the platform already does. Name the feature.
-- `yagni:` abstraction with one implementation, config nobody sets, layer with one caller.
-- `shrink:` same logic, fewer lines. Show the shorter form.
+1. 审查用户指定的未提交内容、暂存内容、分支、PR 或文件。用户未指定时，审查未提交改动；没有未提交改动时审查最后一个提交。
+2. 读 diff。先通过 CBM 找改动函数的调用方与被调用方，再读源码、测试和相关文档。核对每个依赖文件的覆盖缺口，不将图谱零命中当作不存在。
+3. 跟踪输入、保存和输出。签名、返回值或行为变化时核对所有调用方，包含未修改的文件。
+4. 从部署、README 和运行配置确定预期负载，说明实际采用的假设。
 
-## Examples
+## 检查类别
 
-❌ "This EmailValidator class might be more complex than necessary, have you
-considered whether all these validation rules are needed at this stage?"
+| 类别 | 检查内容 |
+|------|----------|
+| 正确性 | 错误结果、崩溃、空值、零值、最后一项、舍入、时区、失效调用方和只修症状。 |
+| 安全与数据 | 注入、弱随机数、凭据、信任边界校验、吞错、写入顺序和事务。 |
+| 负载 | 先检查后写入的竞态、多进程重复工作、无界内存、逐项查询、平方复杂度和应共享的进程内状态。 |
+| 测试 | 风险逻辑是否有会在行为破坏时失败的检查。使用本仓已有框架；不按覆盖率凑测试。 |
+| 性能 | 会影响预期使用的明显变慢。小幅优化作为建议，说明所需证据。 |
+| 简化 | 无用代码、已有实现可复用、标准库和平台替代、只有一个实现的抽象、必须一起改的重复代码、混合无关职责的函数。 |
 
-✅ `L12-38: stdlib: 27-line validator class. "@" in email, 1 line, real validation is the confirmation mail.`
+## 核验发现
 
-✅ `L4: native: moment.js imported for one format call. Intl.DateTimeFormat, 0 deps.`
+每项问题必须给出具体输入或场景以及错误结果。重新核对真实调用方、可达空值和动态引用。无法证明的风险列为未核验，不当作缺陷。
 
-✅ `repo.py:L88: yagni: AbstractRepository with one implementation. Inline it until a second one exists.`
+存量 `shortcut:` 或 `ponytail:` 标记中已说明限制的决定，只有预期负载越过限制时才列为问题。禁止新增普通代码注释；必要说明放工单或维护文档。
 
-✅ `L52-71: delete: retry wrapper around an idempotent local call. Nothing replaces it.`
+给出能解决问题的最小修复。保留安全和校验，不因个人风格偏好增加层次、框架或配置。
 
-✅ `L30-44: shrink: manual loop builds dict. dict(zip(keys, values)), 1 line.`
+## 输出
 
-## Scoring
+使用中文短句，首次出现的技术词说明其含义。先说明改动产生的用户行为，再列问题。按必须修复、建议修复、可选优化分组，省略空组，编号贯穿各组。
 
-End with the only metric that matters: `net: -<N> lines possible.`
+每项写清所在文件与行号、这段代码的用途、具体问题、最小修复和不修的实际影响。不要只抛标签。
 
-If there is nothing to cut, say `Lean already. Ship.` and stop.
+最后给出可交付或须先修复哪些编号的判断。存在简化发现时给出可减少的行数；有重要未核验项时单独说明。没有发现时说明检查范围和结论。
 
-## Boundaries
-
-Scope: over-engineering and complexity only. Correctness bugs, security holes,
-and performance are explicitly out of scope. Route them to a normal review
-pass, not this one. A single smoke test or `assert`-based
-self-check is the ponytail minimum, not bloat, never flag it for deletion.
-Does not apply the fixes, only lists them.
-"stop ponytail-review" or "normal mode": revert to verbose review style.
+一次性报告。保持原持久档位，不修改代码、配置或状态文件。

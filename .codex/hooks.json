@@ -151,8 +151,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PLUGIN_DATA=\"$(git rev-parse --git-path ponytail-codex)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-activate.js\"",
-            "timeout": 5
+            "command": "PONYTAIL_CLIENT=codex PONYTAIL_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-activate.js\"",
+            "timeout": 5,
+            "additionalContextLimit": 6000
           }
         ],
         "matcher": "startup|resume|clear|compact"
@@ -172,8 +173,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PLUGIN_DATA=\"$(git rev-parse --git-path ponytail-codex)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-subagent.js\"",
-            "timeout": 5
+            "command": "PONYTAIL_CLIENT=codex PONYTAIL_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-subagent.js\"",
+            "timeout": 5,
+            "additionalContextLimit": 6000
           }
         ]
       }
@@ -183,8 +185,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PLUGIN_DATA=\"$(git rev-parse --git-path ponytail-codex)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-mode-tracker.js\"",
-            "timeout": 5
+            "command": "PONYTAIL_CLIENT=codex PONYTAIL_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-mode-tracker.js\"",
+            "timeout": 5,
+            "additionalContextLimit": 6000
           }
         ]
       }

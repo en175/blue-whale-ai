@@ -193,6 +193,10 @@ def normalized_contracts(
                         'node "${CLAUDE_PROJECT_DIR}"/.claude/hooks/ponytail-',
                         'PLUGIN_DATA="$(git rev-parse --git-path ponytail-codex)" '
                         'node "$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-',
+                        'PONYTAIL_CLIENT=claude PONYTAIL_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" '
+                        'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/ponytail-',
+                        'PONYTAIL_CLIENT=codex PONYTAIL_PROJECT_DIR="$(git rev-parse --show-toplevel)" '
+                        'node "$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-',
                     )
                 ):
                     continue

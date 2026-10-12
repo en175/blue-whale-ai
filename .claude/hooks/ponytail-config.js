@@ -5,8 +5,8 @@ const path = require('path');
 const os = require('os');
 
 const DEFAULT_MODE = 'full';
-const VALID_MODES = ['off', 'lite', 'full', 'ultra', 'review'];
 const RUNTIME_MODES = ['off', 'lite', 'full', 'ultra'];
+const VALID_MODES = RUNTIME_MODES;
 
 function normalizeMode(mode) {
   if (typeof mode !== 'string') return null;
@@ -15,13 +15,11 @@ function normalizeMode(mode) {
 }
 
 function normalizeConfigMode(mode) {
-  if (typeof mode !== 'string') return null;
-  const normalized = mode.trim().toLowerCase();
-  return VALID_MODES.includes(normalized) ? normalized : null;
+  return normalizeMode(mode);
 }
 
 function normalizePersistedMode(mode) {
-  return normalizeMode(mode) || normalizeConfigMode(mode);
+  return normalizeMode(mode);
 }
 
 function isDeactivationCommand(text) {
@@ -51,22 +49,27 @@ function getConfigPath() {
 }
 
 function getClaudeDir() {
+
   return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 }
 
 function getDefaultMode() {
-  const envMode = process.env.PONYTAIL_DEFAULT_MODE;
-  if (envMode && RUNTIME_MODES.includes(envMode.toLowerCase())) {
-    return envMode.toLowerCase();
+
+  const envMode = normalizeMode(process.env.PONYTAIL_DEFAULT_MODE);
+  if (envMode) {
+    return envMode;
   }
 
   try {
     const configPath = getConfigPath();
+
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
-    if (config.defaultMode && RUNTIME_MODES.includes(config.defaultMode.toLowerCase())) {
-      return config.defaultMode.toLowerCase();
+    const configMode = normalizeMode(config.defaultMode);
+    if (configMode) {
+      return configMode;
     }
   } catch (e) {
+
   }
 
   return DEFAULT_MODE;
@@ -101,6 +104,7 @@ function getHideStatus() {
 }
 
 function writeDefaultMode(mode) {
+
   const normalized = normalizeMode(mode);
   if (!normalized) return null;
 
