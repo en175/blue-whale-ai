@@ -271,3 +271,93 @@ export function parseGroupsFromNodes(docNodes: Node[]): {
   });
   return { groups, contentNodes };
 }
+
+export function applyDraggedNodesToGroups(
+  groups: CanvasGroup[],
+  before: Node[],
+  draggedNodes: Node[],
+  positions: Map<string, { x: number; y: number }>,
+): CanvasGroup[] {
+  if (groups.length === 0) return groups;
+  const expandByGroup = new Map<string, { x: number; y: number; x2: number; y2: number }>();
+  const ownerByNode = new Map<string, string>();
+  const beforeById = new Map(before.map((n) => [n.id, n]));
+  draggedNodes.forEach((n) => {
+    const w = n.measured?.width ?? 200;
+    const h = n.measured?.height ?? 120;
+    const nx = n.position.x, ny = n.position.y;
+    const startNode = beforeById.get(n.id) ?? n;
+    for (let i = groups.length - 1; i >= 0; i--) {
+      const g = groups[i]!;
+      const wasMember = isGroupMember(startNode, g);
+      if (wasMember) {
+        if (nodeInsideGroupBox(n, g.box)) {
+          ownerByNode.set(n.id, g.id);
+          break;
+        }
+        continue;
+      }
+      const intersects =
+        nx <= g.box.x + g.box.w && nx + w >= g.box.x && ny <= g.box.y + g.box.h && ny + h >= g.box.y;
+      if (!intersects) continue;
+      if (nodePressesGroupEdge(n, g.box)) {
+        const cur = expandByGroup.get(g.id);
+        const x = Math.min(nx, cur?.x ?? g.box.x);
+        const y = Math.min(ny, cur?.y ?? g.box.y);
+        const x2 = Math.max(nx + w, cur?.x2 ?? g.box.x + g.box.w);
+        const y2 = Math.max(ny + h, cur?.y2 ?? g.box.y + g.box.h);
+        expandByGroup.set(g.id, { x, y, x2, y2 });
+        ownerByNode.set(n.id, g.id);
+        break;
+      }
+      if (nodeInsideGroupBox(n, g.box) && !g.excludedIds.includes(n.id)) {
+        ownerByNode.set(n.id, g.id);
+        break;
+      }
+    }
+  });
+  const pad = GROUP_FRAME_PADDING;
+  const allAfter = before.map((n) => {
+    const p = positions.get(n.id);
+    return p ? { ...n, position: p } : n;
+  });
+  const boxes = new Map(
+    groups.map((g) => {
+      const e = expandByGroup.get(g.id);
+      if (!e) return [g.id, g.box] as const;
+      return [
+        g.id,
+        {
+          x: e.x - pad,
+          y: e.y - pad,
+          w: e.x2 - e.x + pad * 2,
+          h: e.y2 - e.y + pad * 2,
+        },
+      ] as const;
+    }),
+  );
+  const nextMeta = groups.map((g) => ({ ...g, box: boxes.get(g.id) ?? g.box }));
+  return nextMeta.map((g) => {
+    const excluded = new Set(g.excludedIds);
+    draggedNodes.forEach((n) => {
+      const owner = ownerByNode.get(n.id);
+      const inside = nodeInsideGroupBox(n, g.box);
+      if (!inside) excluded.delete(n.id);
+      else if (owner === g.id) excluded.delete(n.id);
+      else excluded.add(n.id);
+    });
+    if (expandByGroup.has(g.id)) {
+      allAfter.forEach((n) => {
+        if (positions.has(n.id)) return;
+        if (nodeInsideGroupBox(n, g.box) && isForeignGroupMember(n, g.id, nextMeta)) {
+          excluded.add(n.id);
+        }
+      });
+    }
+    const boxChanged = expandByGroup.has(g.id);
+    const excludedChanged =
+      excluded.size !== g.excludedIds.length || [...excluded].some((id) => !g.excludedIds.includes(id));
+    if (!boxChanged && !excludedChanged) return g;
+    return { ...g, box: g.box, excludedIds: [...excluded] };
+  });
+}
