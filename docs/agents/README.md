@@ -15,6 +15,7 @@
 | **Agent 任务区 / 本地集成 / task worktree 生命周期** | [worktree-workflow.md](worktree-workflow.md) |
 | **创建 / 跟进 Issue** | [issue-tracker.md](issue-tracker.md) |
 | **打 / 改标签** | [triage-labels.md](triage-labels.md) |
+| **改工单状态（需求 / 任务 / 缺陷）** | 人看 [gitee-workflow.md](gitee-workflow.md)；Agent 看 [gitee-workflow-agent.md](gitee-workflow-agent.md) |
 | **维护 / 新增 Claude Code 拦截器** | [hooks/README.md](hooks/README.md) |
 
 ---
