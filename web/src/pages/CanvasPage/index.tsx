@@ -213,24 +213,16 @@ import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import { useCanvasSave, EMPTY_CLEAR_CONFLICT_TOAST, EMPTY_OVERWRITE_REJECTED_TOAST } from './hooks/useCanvasSave';
 import { useCanvasRefStripOrder } from './hooks/useCanvasRefStripOrder';
 import { useCanvasCompliance } from './hooks/useCanvasCompliance';
+import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
-  applyIndependentGroupDrag,
-  bringGroupToFront,
-  exclusiveMembersInGroup,
-  groupFrameBBox,
   groupToNode,
-  isolateNewGroupMembers,
   isForeignGroupMember,
   isGroupMember,
   nodeInsideGroupBox,
   nodePressesGroupEdge,
   parseGroupsFromNodes,
-  selectionHasUngroupableCards,
-  selectionHasUngroupableGenNodes,
-  MIN_GROUP_MEMBERS,
   GROUP_FRAME_PADDING,
   type CanvasGroup,
-  type GroupFrameDragResult,
 } from './canvasGroups';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
@@ -3928,106 +3920,30 @@ export default function CanvasPage() {
     pickers: { setPickMode, setPickTarget, setPickProductId, setPickAssetId },
   });
   /* ============ 成组交互（IKD0JT A3/A4） ============ */
-  const handleCreateGroup = (selectedNodes: Node[]) => {
-    const members = selectedNodes.filter((n) => !(n.data as { emptyShell?: boolean } | undefined)?.emptyShell);
-    if (members.length < MIN_GROUP_MEMBERS) return;
-    if (selectionHasUngroupableCards(members)) {
-      showToast('warn', '风格卡、角色卡、物体卡、环境卡、商品卡无法成组');
-      return;
-    }
-    if (selectionHasUngroupableGenNodes(members)) {
-      showToast('warn', '待生成草稿、生成中节点无法成组');
-      return;
-    }
-    const box = groupFrameBBox(members);
-    if (!box) return;
-    const memberIds = new Set(members.map((n) => n.id));
-    const all = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
-    const group: CanvasGroup = { id: newNodeId('group'), box, excludedIds: [] };
-    const before = groupsRef.current;
-    const after = isolateNewGroupMembers(before, all, group, memberIds);
-    setGroups(after);
-    historyRef.current?.pushCreateGroup(after[after.length - 1] ?? group, before, after);
-  };
-  const handleGroupFrameDragStop = useCallback(
-    (res: GroupFrameDragResult) => {
-      const posNew = new Map(res.nodeNew.map((p) => [p.id, { x: p.x, y: p.y }]));
-      const nodesAfter = [
-        ...textNodesRef.current,
-        ...mediaNodesRef.current,
-        ...productNodesRef.current,
-        ...assetNodesRef.current,
-      ].map((n) => {
-        const p = posNew.get(n.id);
-        return p ? { ...n, position: { x: p.x, y: p.y } } : n;
-      });
-      const { groups: nextGroups, peerExclusions } = applyIndependentGroupDrag(
-        groupsRef.current,
-        nodesAfter,
-        res,
-      );
-      setGroups(nextGroups);
-      const recorded: GroupFrameDragResult = { ...res, peerExclusions };
-      if (res.nodeNew.length === 0) {
-        historyRef.current?.pushGroupMove(recorded);
-        return;
-      }
-      const applyPos = (prev: Node[]) =>
-        prev.map((n) => {
-          const p = posNew.get(n.id);
-          return p ? { ...n, position: { x: p.x, y: p.y } } : n;
-        });
-      setTextNodes(applyPos);
-      setMediaNodes(applyPos);
-      setProductNodes(applyPos);
-      setAssetNodes(applyPos);
-      historyRef.current?.pushGroupMove(recorded);
-    },
-    [setTextNodes, setMediaNodes, setProductNodes, setAssetNodes, setGroups],
-  );
-  const handleBringGroupToFront = (groupId: string) => {
-    setGroups((prev) => bringGroupToFront(prev, groupId));
-  };
-  const handleUngroup = (groupId: string) => {
-    const group = groupsRef.current.find((g) => g.id === groupId);
-    if (!group) return;
-    setGroups((prev) => prev.filter((g) => g.id !== groupId));
-    historyRef.current?.pushUngroup(group);
-  };
-  const handleDeleteGroup = (groupId: string) => {
-    const group = groupsRef.current.find((g) => g.id === groupId);
-    if (!group) return;
-    const all = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
-    const count = exclusiveMembersInGroup(all, group, groupsRef.current).length;
-    setPendingDeleteGroup({ id: groupId, count });
-  };
-  const confirmDeleteGroup = () => {
-    const pending = pendingDeleteGroup;
-    setPendingDeleteGroup(null);
-    if (!pending) return;
-    const group = groupsRef.current.find((g) => g.id === pending.id);
-    if (!group) return;
-    const all = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
-    const inside = exclusiveMembersInGroup(all, group, groupsRef.current).map((n) => n.id);
-    if (inside.length > 0) removeCanvasNodes(inside);
-    setGroups((prev) => prev.filter((g) => g.id !== pending.id));
-    historyRef.current?.pushDeleteGroup(group, all.filter((n) => inside.includes(n.id)), []);
-  };
+  const {
+    handleCreateGroup,
+    handleGroupFrameDragStop,
+    handleBringGroupToFront,
+    handleUngroup,
+    handleDeleteGroup,
+    confirmDeleteGroup,
+  } = useCanvasGroupActions({
+    setGroups,
+    groupsRef,
+    setTextNodes,
+    setMediaNodes,
+    setProductNodes,
+    setAssetNodes,
+    textNodesRef,
+    mediaNodesRef,
+    productNodesRef,
+    assetNodesRef,
+    historyRef,
+    pendingDeleteGroup,
+    setPendingDeleteGroup,
+    removeCanvasNodes,
+    showToast,
+  });
   const handleRemoveMediaNode = (nodeId: string) => {
     removeCanvasNodes([nodeId]);
   };
