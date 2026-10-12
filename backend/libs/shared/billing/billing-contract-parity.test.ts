@@ -82,7 +82,7 @@ describe("★ 计费契约对账：MQ topic", () => {
   });
 
   it("没有任何一边冒出这个之外的 generation-job-* topic", () => {
-    const EXPECTED = ["generation-job-failed"];
+    const EXPECTED = ["generation-job-terminal"];
     expect(billingDefaultTopics()).toEqual(EXPECTED);
     expect(workerDefaultTopics()).toEqual(EXPECTED);
   });

@@ -2,7 +2,7 @@ import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
 import { createBillingCharge, type BillingCharge } from "@lib/shared/billing/billing-charge.js";
 import {
   createBillingRelease,
-  publishBillingJobFailed,
+  publishBillingJobTerminal,
   type BillingRelease,
 } from "@lib/shared/billing/billing-release.js";
 import { createBillingQuote, type BillingQuote } from "@lib/shared/billing/billing-quote.js";
@@ -71,7 +71,7 @@ export class GenerationJobsController {
           logger,
         }),
         release: createBillingRelease({
-          publish: publishBillingJobFailed,
+          publish: publishBillingJobTerminal,
           logger,
         }),
       };

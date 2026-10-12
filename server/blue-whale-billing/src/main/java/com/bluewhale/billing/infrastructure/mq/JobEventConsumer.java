@@ -22,15 +22,15 @@ public class JobEventConsumer implements AutoCloseable {
 
     private final PushConsumer consumer;
     private final CreditService credits;
-    private final String failedTopic;
+    private final String terminalTopic;
     private final ObjectMapper json;
 
     public JobEventConsumer(ClientConfiguration clientConfiguration,
                             String consumerGroup,
-                            String failedTopic,
+                            String terminalTopic,
                             CreditService credits) throws Exception {
         this.credits = credits;
-        this.failedTopic = failedTopic;
+        this.terminalTopic = terminalTopic;
         this.json = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
@@ -39,11 +39,11 @@ public class JobEventConsumer implements AutoCloseable {
                 .setClientConfiguration(clientConfiguration)
                 .setConsumerGroup(consumerGroup)
                 .setSubscriptionExpressions(Map.of(
-                        failedTopic, new FilterExpression("*")))
+                        terminalTopic, new FilterExpression("*")))
                 .setMessageListener(this::onMessage)
                 .build();
 
-        log.info("计费事件消费者已启动：group={} 订阅 {}", consumerGroup, failedTopic);
+        log.info("计费事件消费者已启动：group={} 订阅 {}", consumerGroup, terminalTopic);
     }
 
     @Override
@@ -59,11 +59,13 @@ public class JobEventConsumer implements AutoCloseable {
         String topic = message.getTopic();
         String body = readBody(message);
         try {
-            if (failedTopic.equals(topic)) {
-                JobEventPayload.JobFailed event =
-                        json.readValue(body, JobEventPayload.JobFailed.class);
+            if (terminalTopic.equals(topic)) {
+                JobEventPayload.JobTerminal event =
+                        json.readValue(body, JobEventPayload.JobTerminal.class);
                 requireIdentifiable(event.jobId(), event.userId(), topic, body);
-                credits.refund(event.jobId(), event.reason());
+                if (event.refundable()) {
+                    credits.refund(event.jobId(), event.reason());
+                }
             } else {
                 log.warn("收到未订阅的 topic，已丢弃：{}", topic);
             }

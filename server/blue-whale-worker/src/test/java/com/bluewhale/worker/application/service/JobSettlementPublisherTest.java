@@ -19,7 +19,7 @@ class JobSettlementPublisherTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private static final String FAILED_TOPIC = "generation-job-failed";
+    private static final String TERMINAL_TOPIC = "generation-job-terminal";
 
     private final List<String[]> sent = new ArrayList<>();
 
@@ -37,6 +37,13 @@ class JobSettlementPublisherTest {
         return job;
     }
 
+    private static GenerationJobEntity dispatchedJob(long id, long userId, String status,
+                                                     String providerTaskId) {
+        GenerationJobEntity job = job(id, userId, status);
+        job.setProviderTaskId(providerTaskId);
+        return job;
+    }
+
     private JsonNode body(int index) throws Exception {
         return JSON.readTree(sent.get(index)[1]);
     }
@@ -50,31 +57,52 @@ class JobSettlementPublisherTest {
                         "error", Map.of("code", "UPSTREAM_ERROR", "message", "上游超时")));
 
         assertThat(sent).hasSize(1);
-        assertThat(sent.get(0)[0]).isEqualTo(FAILED_TOPIC);
+        assertThat(sent.get(0)[0]).isEqualTo(TERMINAL_TOPIC);
         JsonNode json = body(0);
         assertThat(json.get("jobId").asLong()).isEqualTo(101);
         assertThat(json.get("userId").asLong()).isEqualTo(42);
+        assertThat(json.get("status").asText()).isEqualTo("failed");
         assertThat(json.get("reason").asText()).isEqualTo("上游超时");
+        assertThat(json.get("refund").asBoolean()).isTrue();
     }
 
     @Test
-    @DisplayName("★ cancelled → 也发返还事件（尚未派发到上游，钱要退）")
-    void cancelled发返还事件() throws Exception {
+    @DisplayName("★ cancelled（未派发上游）→ refund=true（上游没干活，钱要退）")
+    void 未派发的取消要退() throws Exception {
         publisher.publishTerminal(job(102, 42, "cancelled"), Map.of("status", "cancelled"));
 
         assertThat(sent).hasSize(1);
-        assertThat(sent.get(0)[0]).isEqualTo(FAILED_TOPIC);
+        assertThat(sent.get(0)[0]).isEqualTo(TERMINAL_TOPIC);
+        assertThat(body(0).get("refund").asBoolean()).isTrue();
     }
 
     @Test
-    @DisplayName("★ succeeded / partially_succeeded → 不发任何事件（扣款在提交时已完成）")
-    void 成功不发事件() {
+    @DisplayName("★ cancelled（已派发上游）→ refund=false —— 上游可能真做成了，不能退")
+    void 已派发的取消不退() throws Exception {
+        publisher.publishTerminal(
+                dispatchedJob(112, 42, "cancelled", "upstream-task-9"),
+                Map.of("status", "cancelled"));
+
+        assertThat(sent).hasSize(1);
+        assertThat(body(0).get("status").asText()).isEqualTo("cancelled");
+        assertThat(body(0).get("refund").asBoolean()).isFalse();
+    }
+
+    @Test
+    @DisplayName("★ succeeded / partially_succeeded → 也各发一条终态事件（一个 job 一条）")
+    void 成功也发事件() throws Exception {
         publisher.publishTerminal(job(103, 42, "succeeded"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("7", "8", "9")));
         publisher.publishTerminal(job(104, 42, "partially_succeeded"),
                 Map.of("status", "partially_succeeded", "output_asset_ids", List.of("7")));
 
-        assertThat(sent).isEmpty();
+        assertThat(sent).hasSize(2);
+        assertThat(sent.get(0)[0]).isEqualTo(TERMINAL_TOPIC);
+        assertThat(body(0).get("status").asText()).isEqualTo("succeeded");
+        assertThat(body(0).get("reason").asText()).isEmpty();
+        assertThat(body(0).get("refund").asBoolean()).isFalse();
+        assertThat(body(1).get("status").asText()).isEqualTo("partially_succeeded");
+        assertThat(body(1).get("refund").asBoolean()).isFalse();
     }
 
     @Test
@@ -104,15 +132,15 @@ class JobSettlementPublisherTest {
     }
 
     @Test
-    @DisplayName("topic 可配：worker.billing.topic-failed")
+    @DisplayName("topic 可配：worker.billing.topic-terminal")
     void topic可配() {
         MockEnvironment env = new MockEnvironment()
-                .withProperty("worker.billing.topic-failed", "custom.failed");
+                .withProperty("worker.billing.topic-terminal", "custom.terminal");
         JobSettlementPublisher custom = new JobSettlementPublisher(producer, env);
 
         custom.publishTerminal(job(109, 42, "failed"), Map.of("status", "failed"));
 
-        assertThat(sent.get(0)[0]).isEqualTo("custom.failed");
+        assertThat(sent.get(0)[0]).isEqualTo("custom.terminal");
     }
 
     @Test

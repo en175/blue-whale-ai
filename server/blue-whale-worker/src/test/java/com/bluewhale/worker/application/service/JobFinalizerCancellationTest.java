@@ -47,15 +47,16 @@ class JobFinalizerCancellationTest {
     }
 
     @Test
-    @DisplayName("★ 取消后发返还事件 —— 不发的话那笔预扣永远冻着")
-    void 取消发返还事件() {
+    @DisplayName("★ 取消后发终态事件 —— 不发的话那笔退款永远发不出去")
+    void 取消发终态事件() {
         when(jobMapper.selectById(801L)).thenReturn(cancelledJob(801));
 
         finalizer.releaseHoldForCancelled("801");
 
         assertThat(sent).hasSize(1);
-        assertThat(sent.get(0)[0]).isEqualTo("generation-job-failed");
-        assertThat(sent.get(0)[1]).contains("\"jobId\":801").contains("\"userId\":42");
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-terminal");
+        assertThat(sent.get(0)[1]).contains("\"jobId\":801").contains("\"userId\":42")
+                .contains("\"status\":\"cancelled\"");
     }
 
     @Test
@@ -69,14 +70,16 @@ class JobFinalizerCancellationTest {
     }
 
     @Test
-    @DisplayName("成功状态走这条口子也不发事件（扣款在提交时已完成，成功无账务动作）")
-    void 成功状态不发事件() {
+    @DisplayName("成功状态走这条口子也发一条终态事件（一个 job 一条）")
+    void 成功状态发事件() {
         GenerationJobEntity succeeded = cancelledJob(803);
         succeeded.setStatus("succeeded");
         when(jobMapper.selectById(803L)).thenReturn(succeeded);
 
         finalizer.releaseHoldForCancelled("803");
 
-        assertThat(sent).isEmpty();
+        assertThat(sent).hasSize(1);
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-terminal");
+        assertThat(sent.get(0)[1]).contains("\"status\":\"succeeded\"");
     }
 }
