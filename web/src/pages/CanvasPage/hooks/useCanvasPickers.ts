@@ -5,7 +5,7 @@ import type { CanvasGalleryRef } from '../collectMediaBlocks';
 import type { SessionContentBlock } from '@/api/agentSessions';
 import type { VideoRefRole } from '../videoMediaRefs';
 
-type PickChannel = 'image' | 'video' | 'audio' | 'product' | 'asset';
+export type PickChannel = 'image' | 'video' | 'audio' | 'product' | 'asset';
 
 export function useCanvasPickers() {
   const [pickMode, setPickMode] = useState<PickChannel | null>(null);
