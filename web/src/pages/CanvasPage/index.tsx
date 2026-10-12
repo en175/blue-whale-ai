@@ -10,7 +10,7 @@ import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecov
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
-import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds } from './canvasPureNodeHelpers';
+import { nodeBoxOf, readRecoveryErrorReason, videoFreeRefItemOf, assetDisplayName, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
 import { defaultVideoModeFor, draftVideoModeOf } from './videoModes';
 import {
@@ -183,7 +183,6 @@ import {
   canConnectSourcesToGen,
   genKindOf,
   isConnectableSource,
-  sourceKindOf,
   wouldCreateCycle,
   type ConnectGenKind,
 } from './connectAbility';
@@ -213,24 +212,12 @@ import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import { useCanvasSave, EMPTY_CLEAR_CONFLICT_TOAST, EMPTY_OVERWRITE_REJECTED_TOAST } from './hooks/useCanvasSave';
 import { useCanvasRefStripOrder } from './hooks/useCanvasRefStripOrder';
 import { useCanvasCompliance } from './hooks/useCanvasCompliance';
+import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
-  applyIndependentGroupDrag,
-  bringGroupToFront,
-  exclusiveMembersInGroup,
-  groupFrameBBox,
+  applyDraggedNodesToGroups,
   groupToNode,
-  isolateNewGroupMembers,
-  isForeignGroupMember,
-  isGroupMember,
-  nodeInsideGroupBox,
-  nodePressesGroupEdge,
   parseGroupsFromNodes,
-  selectionHasUngroupableCards,
-  selectionHasUngroupableGenNodes,
-  MIN_GROUP_MEMBERS,
-  GROUP_FRAME_PADDING,
   type CanvasGroup,
-  type GroupFrameDragResult,
 } from './canvasGroups';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
@@ -2305,90 +2292,7 @@ export default function CanvasPage() {
     setProductNodes(applyDraggedPositions);
     setAssetNodes(applyDraggedPositions);
     if (groupsRef.current.length > 0) {
-      const expandByGroup = new Map<string, { x: number; y: number; x2: number; y2: number }>();
-      const ownerByNode = new Map<string, string>();
-      const beforeById = new Map(before.map((n) => [n.id, n]));
-      draggedNodes.forEach((n) => {
-        const w = n.measured?.width ?? 200;
-        const h = n.measured?.height ?? 120;
-        const nx = n.position.x, ny = n.position.y;
-        const startNode = beforeById.get(n.id) ?? n;
-        for (let i = groupsRef.current.length - 1; i >= 0; i--) {
-          const g = groupsRef.current[i];
-          const wasMember = isGroupMember(startNode, g);
-          if (wasMember) {
-            if (nodeInsideGroupBox(n, g.box)) {
-              ownerByNode.set(n.id, g.id);
-              break;
-            }
-            continue;
-          }
-          const intersects =
-            nx <= g.box.x + g.box.w && nx + w >= g.box.x && ny <= g.box.y + g.box.h && ny + h >= g.box.y;
-          if (!intersects) continue;
-          if (nodePressesGroupEdge(n, g.box)) {
-            const cur = expandByGroup.get(g.id);
-            const x = Math.min(nx, cur?.x ?? g.box.x);
-            const y = Math.min(ny, cur?.y ?? g.box.y);
-            const x2 = Math.max(nx + w, cur?.x2 ?? g.box.x + g.box.w);
-            const y2 = Math.max(ny + h, cur?.y2 ?? g.box.y + g.box.h);
-            expandByGroup.set(g.id, { x, y, x2, y2 });
-            ownerByNode.set(n.id, g.id);
-            break;
-          }
-          if (nodeInsideGroupBox(n, g.box) && !g.excludedIds.includes(n.id)) {
-            ownerByNode.set(n.id, g.id);
-            break;
-          }
-        }
-      });
-      const pad = GROUP_FRAME_PADDING;
-      const allAfter = before.map((n) => {
-        const p = positions.get(n.id);
-        return p ? { ...n, position: p } : n;
-      });
-      setGroups((prev) => {
-        const boxes = new Map(
-          prev.map((g) => {
-            const e = expandByGroup.get(g.id);
-            if (!e) return [g.id, g.box] as const;
-            return [
-              g.id,
-              {
-                x: e.x - pad,
-                y: e.y - pad,
-                w: e.x2 - e.x + pad * 2,
-                h: e.y2 - e.y + pad * 2,
-              },
-            ] as const;
-          }),
-        );
-        const nextMeta = prev.map((g) => ({ ...g, box: boxes.get(g.id) ?? g.box }));
-        return nextMeta.map((g) => {
-          const excluded = new Set(g.excludedIds);
-          draggedNodes.forEach((n) => {
-            const owner = ownerByNode.get(n.id);
-            const inside = nodeInsideGroupBox(n, g.box);
-            if (!inside) excluded.delete(n.id);
-            else if (owner === g.id) excluded.delete(n.id);
-            else excluded.add(n.id);
-          });
-          if (expandByGroup.has(g.id)) {
-            allAfter.forEach((n) => {
-              if (positions.has(n.id)) return;
-              if (nodeInsideGroupBox(n, g.box) && isForeignGroupMember(n, g.id, nextMeta)) {
-                excluded.add(n.id);
-              }
-            });
-          }
-          const e = expandByGroup.get(g.id);
-          const boxChanged = !!e;
-          const excludedChanged =
-            excluded.size !== g.excludedIds.length || [...excluded].some((id) => !g.excludedIds.includes(id));
-          if (!boxChanged && !excludedChanged) return g;
-          return { ...g, box: g.box, excludedIds: [...excluded] };
-        });
-      });
+      setGroups((prev) => applyDraggedNodesToGroups(prev, before, draggedNodes, positions));
     }
   };
   actionsRef.current.openImageDialog = () => generationDock.open('image', {});
@@ -2415,53 +2319,38 @@ export default function CanvasPage() {
   const openImageDraftDialog = (nodeId: string) => generationDock.open('image', { nodeId });
   useEffect(() => { generationDock.reconcile(); }, [generationDock, imageDraftId, imageSeed, mediaNodes]);
   useEffect(() => {
-    if (imagePickSession === undefined) return;
-    if (!showImageDialog) endImagePickSession();
-  }, [showImageDialog, imagePickSession, endImagePickSession]);
-  useEffect(() => {
     toolRuntime.reconcileSources(new Set(mediaNodes.map((node) => node.id)));
   }, [toolRuntime, mediaNodes]);
   useEffect(() => {
-    if (imagePickSession === undefined) return;
+    if (imagePickSession !== undefined && !showImageDialog) endImagePickSession();
+    if (videoPickSession !== undefined && !showBottomDialog) endVideoPickSession();
+    if (audioPickSession !== undefined && !showAudioDialog) endAudioPickSession();
+    if (
+      imagePickSession === undefined
+      && videoPickSession === undefined
+      && audioPickSession === undefined
+    ) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (isEditableKeyboardTarget(e.target)) return;
       e.preventDefault();
-      endImagePickSession();
+      if (imagePickSession !== undefined) endImagePickSession();
+      if (videoPickSession !== undefined) endVideoPickSession();
+      if (audioPickSession !== undefined) endAudioPickSession();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [imagePickSession, endImagePickSession]);
-  useEffect(() => {
-    if (videoPickSession === undefined) return;
-    if (!showBottomDialog) endVideoPickSession();
-  }, [showBottomDialog, videoPickSession, endVideoPickSession]);
-  useEffect(() => {
-    if (videoPickSession === undefined) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (isEditableKeyboardTarget(e.target)) return;
-      e.preventDefault();
-      endVideoPickSession();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [videoPickSession, endVideoPickSession]);
-  useEffect(() => {
-    if (audioPickSession === undefined) return;
-    if (!showAudioDialog) endAudioPickSession();
-  }, [showAudioDialog, audioPickSession, endAudioPickSession]);
-  useEffect(() => {
-    if (audioPickSession === undefined) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (isEditableKeyboardTarget(e.target)) return;
-      e.preventDefault();
-      endAudioPickSession();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [audioPickSession, endAudioPickSession]);
+  }, [
+    showImageDialog,
+    showBottomDialog,
+    showAudioDialog,
+    imagePickSession,
+    videoPickSession,
+    audioPickSession,
+    endImagePickSession,
+    endVideoPickSession,
+    endAudioPickSession,
+  ]);
   useEffect(() => { generationDock.reconcile(); }, [generationDock, textGenDraftId, textNodes]);
   const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => generationDock.open('video', { nodeId, preset });
   const createVideoDraftCard = (seed?: {
@@ -3943,106 +3832,30 @@ export default function CanvasPage() {
     pickers: { setPickMode, setPickTarget, setPickProductId, setPickAssetId },
   });
   /* ============ 成组交互（IKD0JT A3/A4） ============ */
-  const handleCreateGroup = (selectedNodes: Node[]) => {
-    const members = selectedNodes.filter((n) => !(n.data as { emptyShell?: boolean } | undefined)?.emptyShell);
-    if (members.length < MIN_GROUP_MEMBERS) return;
-    if (selectionHasUngroupableCards(members)) {
-      showToast('warn', '风格卡、角色卡、物体卡、环境卡、商品卡无法成组');
-      return;
-    }
-    if (selectionHasUngroupableGenNodes(members)) {
-      showToast('warn', '待生成草稿、生成中节点无法成组');
-      return;
-    }
-    const box = groupFrameBBox(members);
-    if (!box) return;
-    const memberIds = new Set(members.map((n) => n.id));
-    const all = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
-    const group: CanvasGroup = { id: newNodeId('group'), box, excludedIds: [] };
-    const before = groupsRef.current;
-    const after = isolateNewGroupMembers(before, all, group, memberIds);
-    setGroups(after);
-    historyRef.current?.pushCreateGroup(after[after.length - 1] ?? group, before, after);
-  };
-  const handleGroupFrameDragStop = useCallback(
-    (res: GroupFrameDragResult) => {
-      const posNew = new Map(res.nodeNew.map((p) => [p.id, { x: p.x, y: p.y }]));
-      const nodesAfter = [
-        ...textNodesRef.current,
-        ...mediaNodesRef.current,
-        ...productNodesRef.current,
-        ...assetNodesRef.current,
-      ].map((n) => {
-        const p = posNew.get(n.id);
-        return p ? { ...n, position: { x: p.x, y: p.y } } : n;
-      });
-      const { groups: nextGroups, peerExclusions } = applyIndependentGroupDrag(
-        groupsRef.current,
-        nodesAfter,
-        res,
-      );
-      setGroups(nextGroups);
-      const recorded: GroupFrameDragResult = { ...res, peerExclusions };
-      if (res.nodeNew.length === 0) {
-        historyRef.current?.pushGroupMove(recorded);
-        return;
-      }
-      const applyPos = (prev: Node[]) =>
-        prev.map((n) => {
-          const p = posNew.get(n.id);
-          return p ? { ...n, position: { x: p.x, y: p.y } } : n;
-        });
-      setTextNodes(applyPos);
-      setMediaNodes(applyPos);
-      setProductNodes(applyPos);
-      setAssetNodes(applyPos);
-      historyRef.current?.pushGroupMove(recorded);
-    },
-    [setTextNodes, setMediaNodes, setProductNodes, setAssetNodes, setGroups],
-  );
-  const handleBringGroupToFront = (groupId: string) => {
-    setGroups((prev) => bringGroupToFront(prev, groupId));
-  };
-  const handleUngroup = (groupId: string) => {
-    const group = groupsRef.current.find((g) => g.id === groupId);
-    if (!group) return;
-    setGroups((prev) => prev.filter((g) => g.id !== groupId));
-    historyRef.current?.pushUngroup(group);
-  };
-  const handleDeleteGroup = (groupId: string) => {
-    const group = groupsRef.current.find((g) => g.id === groupId);
-    if (!group) return;
-    const all = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
-    const count = exclusiveMembersInGroup(all, group, groupsRef.current).length;
-    setPendingDeleteGroup({ id: groupId, count });
-  };
-  const confirmDeleteGroup = () => {
-    const pending = pendingDeleteGroup;
-    setPendingDeleteGroup(null);
-    if (!pending) return;
-    const group = groupsRef.current.find((g) => g.id === pending.id);
-    if (!group) return;
-    const all = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
-    const inside = exclusiveMembersInGroup(all, group, groupsRef.current).map((n) => n.id);
-    if (inside.length > 0) removeCanvasNodes(inside);
-    setGroups((prev) => prev.filter((g) => g.id !== pending.id));
-    historyRef.current?.pushDeleteGroup(group, all.filter((n) => inside.includes(n.id)), []);
-  };
+  const {
+    handleCreateGroup,
+    handleGroupFrameDragStop,
+    handleBringGroupToFront,
+    handleUngroup,
+    handleDeleteGroup,
+    confirmDeleteGroup,
+  } = useCanvasGroupActions({
+    setGroups,
+    groupsRef,
+    setTextNodes,
+    setMediaNodes,
+    setProductNodes,
+    setAssetNodes,
+    textNodesRef,
+    mediaNodesRef,
+    productNodesRef,
+    assetNodesRef,
+    historyRef,
+    pendingDeleteGroup,
+    setPendingDeleteGroup,
+    removeCanvasNodes,
+    showToast,
+  });
   const handleRemoveMediaNode = (nodeId: string) => {
     removeCanvasNodes([nodeId]);
   };
@@ -4898,10 +4711,7 @@ export default function CanvasPage() {
   toolDepsRef.current = buildToolSessionDeps();
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
-  const appliedCardIds = useMemo(() => new Set(textNodes.flatMap(node => {
-    const source = node.data.promptSource as GenerationCardBlock['source'];
-    return source ? [`${source.revisionId}#${source.shotNo}`] : [];
-  })), [textNodes]);
+  const appliedCardIds = useMemo(() => appliedCardIdsOf(textNodes), [textNodes]);
   generationRuntimeHostRef.current = ({
     getProjectId: () => activeProjectRef.current,
     getLoadEpoch: () => docLoadEpochRef.current,
@@ -5113,48 +4923,8 @@ export default function CanvasPage() {
     }
     console.log('Tool menu select:', menu, item);
   };
-  const canvasMedia: CanvasPickItem[] = useMemo(
-    () =>
-      mediaNodes
-        .filter((n) => n.data?.src)
-        .map((n) => ({
-          id: n.id,
-          assetId: readAssetId(n.data),
-          src: n.data.src as string,
-          name: (n.data.fileName as string) || n.id,
-          mediaType: (n.data.mediaType as 'image' | 'video' | 'audio') ?? 'image',
-        })),
-    [mediaNodes],
-  );
-  const atMentionItems: AtMentionItem[] = useMemo(() => {
-    const items: AtMentionItem[] = [];
-    for (const node of mediaNodes) {
-      if (!isConnectableSource(node)) continue;
-      const kind = sourceKindOf(node);
-      if (kind !== 'image' && kind !== 'video' && kind !== 'audio') continue;
-      const data = (node.data ?? {}) as Record<string, unknown>;
-      items.push({
-        id: node.id,
-        kind,
-        name: typeof data.fileName === 'string' && data.fileName
-          ? data.fileName
-          : kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频',
-        thumbUrl: typeof data.src === 'string' ? data.src : undefined,
-        assetId: readAssetId(data),
-      });
-    }
-    for (const node of textNodes) {
-      if (!isConnectableSource(node)) continue;
-      const data = (node.data ?? {}) as Record<string, unknown>;
-      items.push({
-        id: node.id,
-        kind: 'text',
-        name: typeof data.title === 'string' && data.title ? data.title : '文本节点',
-        searchText: extractTextNodeText(data),
-      });
-    }
-    return items;
-  }, [mediaNodes, textNodes]);
+  const canvasMedia: CanvasPickItem[] = useMemo(() => canvasMediaOf(mediaNodes), [mediaNodes]);
+  const atMentionItems: AtMentionItem[] = useMemo(() => atMentionItemsOf(mediaNodes, textNodes), [mediaNodes, textNodes]);
   const handleImageAtMention = (item: AtMentionItem) => {
     generationDock.referencePicked('image');
     if (item.kind === 'text') {

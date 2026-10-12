@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import {
+  appliedCardIdsOf,
+  atMentionItemsOf,
+  canvasMediaOf,
   complianceBlockedIds,
   pendingPlanSyncsOf,
   pickMarkedIdsFor,
@@ -85,6 +88,42 @@ describe('canvasPureNodeHelpers 画布纯计算', () => {
     it('只返回 complianceFailed===true 的媒体节点 id', () => {
       const nodes = [mediaNode('a', { complianceFailed: true }), mediaNode('b', {}), mediaNode('c', { complianceFailed: false })];
       expect(complianceBlockedIds(nodes)).toEqual(['a']);
+    });
+  });
+
+  describe('canvasMediaOf', () => {
+    it('过滤无 src，取 fileName/assetId/mediaType 并回退默认', () => {
+      const nodes = [
+        mediaNode('m1', { src: 'u1', fileName: 'f1', mediaType: 'video', assetId: 'a1' }),
+        mediaNode('m2', { src: 'u2' }),
+        mediaNode('m3', {}),
+      ];
+      expect(canvasMediaOf(nodes)).toEqual([
+        { id: 'm1', assetId: 'a1', src: 'u1', name: 'f1', mediaType: 'video' },
+        { id: 'm2', assetId: undefined, src: 'u2', name: 'm2', mediaType: 'image' },
+      ]);
+    });
+  });
+
+  describe('atMentionItemsOf', () => {
+    it('媒体节点按 kind 命名，文本节点带 searchText', () => {
+      const media = [
+        { id: 'm1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { src: 'u', fileName: '图', mediaType: 'image' } } as Node,
+      ];
+      const texts = [{ id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { title: '标题', text: '正文' } } as Node];
+      const items = atMentionItemsOf(media, texts);
+      expect(items.find((i) => i.id === 'm1')).toMatchObject({ kind: 'image', name: '图', thumbUrl: 'u' });
+      expect(items.find((i) => i.id === 't1')).toMatchObject({ kind: 'text', name: '标题', searchText: '正文' });
+    });
+  });
+
+  describe('appliedCardIdsOf', () => {
+    it('无 promptSource 的文本节点不产出 id', () => {
+      const nodes = [
+        textNode('t1', { promptSource: { revisionId: 'r1', shotNo: 2 } }),
+        textNode('t2', {}),
+      ];
+      expect(appliedCardIdsOf(nodes)).toEqual(new Set(['r1#2']));
     });
   });
 });
