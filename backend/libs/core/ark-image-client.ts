@@ -71,7 +71,7 @@ export async function generateImages(
     const code = CONTENT_POLICY_SIGNAL.test(text)
       ? "content_rejected"
       : res.status === 402 || QUOTA_SIGNAL.test(text)
-        ? "quota_exhausted"
+        ? "platform_quota_exhausted"
         : "provider_failed";
     throw new ArkImageError(code, `生成服务返回 ${res.status}`);
   }

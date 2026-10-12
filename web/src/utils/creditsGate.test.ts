@@ -59,7 +59,7 @@ describe('isCreditsExhaustedError', () => {
       ),
     ).toBe(false);
     expect(isCreditsExhaustedError(new ApiError(402, '生成服务额度不足', 1061))).toBe(false);
-    expect(isCreditsExhaustedError(new ApiError(402, '上游拒绝', ''))).toBe(false);
+    expect(isCreditsExhaustedError(new ApiError(402, '积分不足'))).toBe(true);
   });
 });
 

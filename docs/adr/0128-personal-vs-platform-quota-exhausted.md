@@ -41,7 +41,7 @@
 
 ### 5. 前端充值判据收窄
 
-`web/src/utils/creditsGate.ts` 的 `isCreditsExhaustedError`：402 分支追加 `code === 1001` 约束，并显式排除 `platform_quota_exhausted`。这样任何来源的上游 402 都不再打开个人充值弹框。
+`web/src/utils/creditsGate.ts` 的 `isCreditsExhaustedError`：**显式排除**平台码 `platform_quota_exhausted`（字符串与数值 `1061` 两种形态）。**不加 `code === 1001` 约束**——试过，会把「提交 402 但响应没带 code」的路径从「草稿回退」打成「失败」（`useCanvasGenerationSubmission.ts` 用该函数决定回退，`audioDraft.test.tsx` 实测红）；而画布生成链路的平台额度错误本就**不经 HTTP 402** 到浏览器，是走 job 轮询的 `200 + code 1061` 信封，所以排除码即已覆盖。
 
 ### 6. 范围外
 
@@ -52,7 +52,8 @@
 - 前端 **零文案改动**：画布节点直接显示后端 `msg`（`MediaNode` 读 `detail.error.msg`），码变文案随之变。
 - 重试按钮不动：1061 仍可重试。平台调用账户是站外依赖，运营充值后重试是用户唯一不必重建卡片的自愈路径。
 - `GENERATION_ERROR_CODES` 白名单由数值表自动派生，新增 1061 后不会兜底成「生成失败」。
-- **Java 与 TS 两份码表手工维护、无 parity 测试**，改动必须两处同步，否则新码被白名单吞掉兜底。
+- **Java 与 TS 两份码表手工维护**：`generation-error-codes.test.ts` 里针对 `GenerationError.java` 的 parity 用例是唯一机械护栏（只覆盖 Java → TS 方向），改动仍须两处同步，否则新码被白名单吞掉兜底。
+- **旧记录的证据判据依赖上游文案，不是结构化字段**：`NEW_API_QUOTA_SIGNAL` 只认中英文额度词（**不含** `quota`／`insufficient`），所以只有 `{"error":{"code":"insufficient_user_quota"}}` 这类纯结构化码、message 里没有额度词的旧记录**不会被翻**，保持 `1001`。这是**有意为之的保守**（工单要求「证据不足时不推断来源」），不是遗漏；该判据与 Java 的 `QUOTA_PATTERN` 逐字同源，新旧口径落在同一判据上。
 - 积分返还链路不变：上游拒绝 → 任务失败 → 按「提交即扣 + 失败退款」全额退回（ADR-0127），画布的「本次未消耗积分，预扣已退回」由 `chargeState === 'released'` 驱动，与错误码无关。
 - **遗留**：运营侧目前没有「平台账户额度不足」的告警，只有各 processor 的 `log.warn(... code= ...)`，只能人肉 grep。
 
