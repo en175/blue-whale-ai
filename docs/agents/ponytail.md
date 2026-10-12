@@ -101,7 +101,7 @@ Claude 状态栏是可选项。Hook 只提示一次，不写用户 settings.json
 
 归属不明的配置保留并报告。排查输出只记录 Ponytail 来源、事件和结果，屏蔽令牌、环境变量值及无关个人设置。本轮已确认的旧来源与尚未取得的运行证据见[验收记录](../projects/IKL54X/ponytail-acceptance.md)。
 
-项目配置由 Git 维护。需要停用时先设置默认 off 或当前范围执行 ponytail off。卸载 Codex、Claude 项目 Ponytail 时只移除三类生命周期事件中的 Ponytail command 处理器以及自己添加的状态栏段，保留其他 Hook。Kimi 使用 `bash scripts/install-kimi-hooks.sh --uninstall-ponytail`，仅移除受管理块内的两条 Ponytail Hook 和 Ponytail shim，保留 17 条安全 Hook、安全 shim 及未知来源。原 `--uninstall` 仍移除整包本仓受管理 Hook，包括安全 Hook 和两个 shim。ZCode 在已安装插件中卸载本插件，项目技能链接单独移除。具体范围见两端说明。本轮没有迁移成员真实个人配置。
+项目配置由 Git 维护。需要停用时先设置默认 off 或当前范围执行 ponytail off。卸载 Codex、Claude 项目 Ponytail 时只移除三类生命周期事件中的 Ponytail command 处理器以及自己添加的状态栏段，保留其他 Hook。Kimi 使用 `bash scripts/install-kimi-hooks.sh --uninstall-ponytail`，仅移除受管理块内的两条 Ponytail Hook，保留 17 条安全 Hook、安全 shim 及未知来源。成功识别并移除条目且无余留引用时删除 Ponytail shim；没有管理块或归属未确认时保留入口并报告。原 `--uninstall` 仍移除整包本仓受管理 Hook，包括安全 Hook 和两个 shim。ZCode 在已安装插件中卸载本插件，项目技能链接单独移除。具体范围见两端说明。本轮没有迁移成员真实个人配置。
 
 ## 验证边界
 

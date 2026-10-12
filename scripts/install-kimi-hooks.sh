@@ -27,9 +27,10 @@ python3 -c 'import tomllib' >/dev/null 2>&1 || {
 }
 
 managed_block() {
-  python3 - "$CONFIG" "$BEGIN_MARK" "$END_MARK" "$SNIPPET" "$1" <<'PY'
+  python3 - "$CONFIG" "$BEGIN_MARK" "$END_MARK" "$SNIPPET" "$1" "$PONYTAIL_DST" <<'PY'
 import sys
 import re
+import shlex
 import tomllib
 from pathlib import Path
 
@@ -97,13 +98,23 @@ if mode == "remove-ponytail":
                  "command": f'node "${{KIMI_CODE_HOME:-$HOME/.kimi-code}}/hooks/ponytail-hook.js" {event}',
                  "timeout": 5} for event in ("SessionStart", "UserPromptSubmit")]
     if not has_block:
-        print("managed block 不存在，无需移除 Ponytail 配置")
+        print("managed block 不存在，保留 Ponytail 入口与配置，请核对归属。")
         raise SystemExit(0)
     cleaned, removed = remove_known_hooks(block_content, ponytail)
     merged = pre + begin + cleaned + end + post
-    tomllib.loads(merged)
+    remaining = tomllib.loads(merged)
+    referenced = any(token.endswith("hooks/ponytail-hook.js")
+                     for hook in remaining.get("hooks", [])
+                     for token in shlex.split(hook["command"]))
     config_path.write_text(merged, encoding="utf-8")
     print(f"已从 {config_path} 移除 {removed} 条受管理的 Ponytail Hook，保留安全 Hook。")
+    shim_path = Path(sys.argv[6])
+    if shim_path.is_file():
+        if referenced or not removed:
+            print("保留 Ponytail 入口，余留 Hook 仍可能引用或归属未确认，请核对未知来源。")
+        else:
+            shim_path.unlink()
+            print(f"已移除 Ponytail 入口: {shim_path}")
     raise SystemExit(0)
 
 pre, migrated_before = remove_known_hooks(pre, legacy)
@@ -131,11 +142,7 @@ PY
 
 if [ "${1:-}" = "--uninstall-ponytail" ]; then
   managed_block remove-ponytail
-  if [ -f "$PONYTAIL_DST" ]; then
-    rm -f "$PONYTAIL_DST"
-    echo "已移除 Ponytail 入口: $PONYTAIL_DST"
-  fi
-  echo "Ponytail 已卸载，Kimi 安全 Hook 与其他配置保留。"
+  echo "受管理的 Ponytail Hook 已处理，Kimi 安全 Hook 与其他配置保留。"
   exit 0
 fi
 

@@ -172,7 +172,10 @@ class KimiPonytailHooksTest(PonytailConfigHarness):
                      + outside + '\'\'\'\ntimeout = 6\n\n')
         marker = '# <<< blue-whale-ai kimi hooks (managed by scripts/install-kimi-hooks.sh) <<<'
         config.write_text(outside + config.read_text().replace(marker, unknown + multiline + marker))
-        self.assertIn('归属不明', self.install('--uninstall-ponytail'))
+        shim = Path(self.env['KIMI_CODE_HOME']) / 'hooks/ponytail-hook.js'
+        shim_bytes = shim.read_bytes()
+        report = self.install('--uninstall-ponytail')
+        self.assertIn('归属不明', report)
         remaining = config.read_bytes()
         self.assertIn(outside, config.read_text())
         self.assertIn(unknown, config.read_text())
@@ -180,11 +183,43 @@ class KimiPonytailHooksTest(PonytailConfigHarness):
         hooks = tomllib.loads(config.read_text())['hooks']
         self.assertEqual(len(hooks), 20)
         self.assertEqual(sum('blue-whale-hook.sh' in hook['command'] for hook in hooks), 17)
+        for hook in [hooks[0], next(hook for hook in hooks if hook.get('timeout') == 30)]:
+            result = subprocess.run(hook['command'], shell=True, cwd=self.root, env=self.env,
+                                    input=json.dumps({'cwd': str(self.root), 'prompt': '/skill:ponytail lite'}),
+                                    text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, '')
+            self.assert_mode(self.context_output('kimi', 'UserPromptSubmit', result.stdout), 'lite')
+        self.assertEqual(shim.read_bytes(), shim_bytes)
+        self.assertIn('保留 Ponytail 入口', report)
         self.install('--uninstall-ponytail')
         self.assertEqual(config.read_bytes(), remaining)
+        self.assertEqual(shim.read_bytes(), shim_bytes)
         config.write_text(outside)
         self.install('--uninstall-ponytail')
         self.assertEqual(config.read_text(), outside)
+        self.assertEqual(shim.read_bytes(), shim_bytes)
+
+    def test_ponytail_only_uninstall_without_managed_block_preserves_unknown_shim(self):
+        config = Path(self.env['KIMI_CODE_HOME']) / 'config.toml'
+        custom = ('[[hooks]]\nevent = "UserPromptSubmit"\n'
+                  'command = \'node "${KIMI_CODE_HOME:-$HOME/.kimi-code}/hooks/ponytail-hook.js"\'\n'
+                  'timeout = 30\n')
+        shim = Path(self.env['KIMI_CODE_HOME']) / 'hooks/ponytail-hook.js'
+        shim.write_text('process.stdout.write("unknown custom shim still executes");')
+        original = shim.read_bytes()
+        for text in [custom, 'default_model = "personal-model"\n', '']:
+            with self.subTest(config=text):
+                config.write_text(text)
+                self.assertIn('保留 Ponytail 入口', self.install('--uninstall-ponytail'))
+                self.assertEqual(config.read_text(), text)
+                self.assertEqual(shim.read_bytes(), original)
+                result = subprocess.run(tomllib.loads(custom)['hooks'][0]['command'], shell=True,
+                                        cwd=self.root, env=self.env, text=True, capture_output=True,
+                                        timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, 'unknown custom shim still executes')
+                self.assertEqual(result.stderr, '')
 
     def test_ponytail_only_uninstall_rejects_invalid_configuration_before_removing_shim(self):
         config = Path(self.env['KIMI_CODE_HOME']) / 'config.toml'
