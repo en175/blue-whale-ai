@@ -14,10 +14,10 @@ import {
   ListTransactionsRequestSchema,
   QueryBalanceRequestSchema,
   QuoteRequestSchema,
-  type HoldRequest,
+  type ChargeRequest,
 } from '../../contracts/gen/billing/v1/billing_pb.js';
 
-export interface BillingHoldRequest {
+export interface BillingChargeRequest {
   userId: number;
   commandId: string;
   jobId: number;
@@ -29,8 +29,8 @@ export interface BillingHoldRequest {
   ruleSnapshot?: string;
 }
 
-export interface BillingHoldResult {
-  reservedCredits: number;
+export interface BillingChargeResult {
+  chargedCredits: number;
   catalogVersion: number;
   duplicated: boolean;
 }
@@ -62,7 +62,6 @@ export interface BillingSourceCredits {
 
 export interface BillingBalance {
   availableCredits: number;
-  frozenCredits: number;
   expiring: BillingExpiringLot[];
   bySource: BillingSourceCredits[];
 }
@@ -97,7 +96,7 @@ export interface BillingListTransactionsQuery {
 }
 
 export interface BillingClient {
-  hold(request: BillingHoldRequest): Promise<BillingHoldResult>;
+  charge(request: BillingChargeRequest): Promise<BillingChargeResult>;
   quote(request: BillingQuoteRequest): Promise<BillingQuoteResult>;
   queryBalance(userId: number): Promise<BillingBalance>;
   listTransactions(query: BillingListTransactionsQuery): Promise<BillingTransactionPage>;
@@ -141,7 +140,7 @@ export function billingEndpoint(env: NodeJS.ProcessEnv = process.env): string {
   const url = (env[BILLING_URL_ENV] ?? "").trim();
   if (!url) {
     throw new BillingConfigError(
-      `计费服务地址未配置（缺环境变量 ${BILLING_URL_ENV}）：提交生成必须能预扣，` +
+      `计费服务地址未配置（缺环境变量 ${BILLING_URL_ENV}）：提交生成必须能扣款，` +
         `不能在没有计费服务的情况下放行`,
     );
   }
@@ -161,8 +160,8 @@ export function createBillingClient(baseUrl: string): BillingClient {
   );
 
   return {
-    async hold(request) {
-      const message: HoldRequest = {
+    async charge(request) {
+      const message: ChargeRequest = {
         userId: BigInt(request.userId),
         commandId: request.commandId,
         jobId: BigInt(request.jobId),
@@ -172,11 +171,11 @@ export function createBillingClient(baseUrl: string): BillingClient {
         tier: request.tier,
         title: request.title ?? '',
         ruleSnapshot: request.ruleSnapshot ?? '',
-      } as HoldRequest;
+      } as ChargeRequest;
 
-      const response = await client.hold(message);
+      const response = await client.charge(message);
       return {
-        reservedCredits: Number(response.reservedCredits),
+        chargedCredits: Number(response.chargedCredits),
         catalogVersion: response.catalogVersion,
         duplicated: response.duplicated,
       };
@@ -205,7 +204,6 @@ export function createBillingClient(baseUrl: string): BillingClient {
       );
       return {
         availableCredits: Number(response.availableCredits),
-        frozenCredits: Number(response.frozenCredits),
         expiring: response.expiring.map((lot) => ({
           credits: Number(lot.credits),
           expiresAt: lot.expiresAt,
@@ -314,7 +312,7 @@ const REASON_UNPRICEABLE = 'UNPRICEABLE';
 
 const BILLING_UNAVAILABLE_MESSAGE = '计费服务暂不可用，请稍后重试';
 
-export function toBillingHoldError(error: unknown): DomainError | NewApiError | null {
+export function toBillingChargeError(error: unknown): DomainError | NewApiError | null {
   if (!(error instanceof ConnectError)) return null;
 
   const reason = error.rawMessage.toUpperCase();

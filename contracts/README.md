@@ -20,9 +20,8 @@ contracts/
 ├── buf.gen.yaml                代码生成配置
 └── proto/
     ├── common/v1/types.proto       SpecAttrs · PageRequest/Response
-    ├── billing/v1/billing.proto    ★ RPC 面：Hold · QueryBalance · ListTransactions
-    ├── billing/v1/usage.proto      UsageLine（worker → billing，经 MQ）
-    ├── billing/v1/events.proto     MQ 事件：job.completed/failed · catalog.activated
+    ├── billing/v1/billing.proto    ★ RPC 面：Charge · QueryBalance · ListTransactions
+    ├── billing/v1/events.proto     MQ 事件：job.failed · catalog.activated
     └── identity/v1/identity.proto  VerifySession（应用层 Guard 调）
 ```
 
@@ -36,28 +35,30 @@ contracts/
 | 系数 | `int32` **万分比** | `9000` = 90% |
 | 时间 | RFC3339 字符串（**带时区**） | `2026-09-24T14:22:01+08:00` |
 
-### 2. RPC 面很小 —— **结算不走 RPC**
+### 2. RPC 面很小 —— **只有扣款在用户等待路径上**
 
 ```
-提交预扣  → 同步 gRPC（50ms 预算）      ← 唯一在用户等待路径上的
-完成结算  → MQ 事件                     ← 异步，不阻塞
-失败返还  → MQ 事件
+提交扣款  → 同步 gRPC（50ms 预算）      ← 唯一在用户等待路径上的，扣的就是最终金额
+成功      → 没有账务动作（ADR-0127）
+失败返还  → MQ 事件                     ← 异步，不阻塞
 余额查询  → gRPC（读）
 价格预览  → 本地算，不 RPC
 ```
 
-### 3. `usage` 维度枚举三方一致
+### 3. `usage` 维度枚举两方一致
 
-`usage.proto` 的 `quantities` key、catalog 的 `baseUnit`/`dims`、
-Java 侧 `QuantityRegistry` **必须是同一套值**。
+catalog 规则里 `baseUnit` / `dims` / `multipliers` 用的 key，
+与 Java 侧 `UsageDim` 的枚举值 **必须是同一套**（`usage.seconds`、
+`usage.characters`、`usage.referenceSeconds`、`usage.referenceCount`…）。
 
-这是「**配了某个维度但没人上报**」的结构性防线 —— 不是靠人检查。
+这是「**配了某个维度但没人产出**」的结构性防线 —— 不是靠人检查。
 
 | 事件 | topic（代码默认值） | 消费方动作 |
 |---|---|---|
-| `JobCompletedEvent` | `generation-job-completed` | billing → Settle（按成功 slot 计费） |
-| `JobFailedEvent` | `generation-job-failed` | billing → Refund（全额返还） |
+| `JobFailedEvent` | `generation-job-failed` | billing → Refund（按**实际结果**决定是否全额返还） |
 | `CatalogActivated` | `pricing.catalog.activated` | 各服务重载内存副本（生产者尚未落地） |
+
+⚠️ 没有「任务成功」事件：扣款在提交时就完成，成功不再触发任何账务（ADR-0127）。
 
 ## 生成
 

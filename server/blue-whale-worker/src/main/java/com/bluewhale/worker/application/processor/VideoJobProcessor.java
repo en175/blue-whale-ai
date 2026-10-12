@@ -423,7 +423,7 @@ public class VideoJobProcessor implements JobProcessor {
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
-                width, height, duration, observation.totalTokens(),
+                width, height, duration,
                 upstreamCreatedAtMs, finalizeDeadlineMs);
         if (published) {
             log.info("[video] 发布成功 jobId={} 上游token={} 样片截止={}", claim.id(),

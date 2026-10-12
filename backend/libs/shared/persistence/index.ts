@@ -81,6 +81,7 @@ export {
 } from "./conversation-repo.js";
 export {
   createModelCapabilityRepo,
+  serializePricingRule,
   DEFAULT_VIDEO_REFERENCE_MAX,
   DEFAULT_AUDIO_REFERENCE_MAX,
   DEFAULT_IMAGE_REFERENCE_MAX,
@@ -228,7 +229,7 @@ export {
   type FinalizeJobResult,
   type FinalizeSourceJob,
 } from "./generation-finalize-repo.js";
-export type { JobBilling } from "./job-billing.js";
+export type { JobBilling, JobBillingSource } from "./job-billing.js";
 export {
   aggregateSlotStatus,
   resolveLogicalSlots,

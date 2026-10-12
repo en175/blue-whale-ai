@@ -3,6 +3,7 @@ export {
   toGenerationParamCheckInput,
   resolveVideoMode,
   VIDEO_MODES,
+  EDIT_MODE_VIDEO_REFERENCE_MAX,
   isVideoMode,
   normalizeVideoMode,
   modeAllowedRatios,

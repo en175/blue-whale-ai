@@ -11,7 +11,7 @@
 
 
   <select id="lockActiveLots" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
+    SELECT id, user_id, source, source_priority, amount, remaining, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
     WHERE user_id = #{userId}
       AND (expires_at IS NULL OR expires_at > NOW())
@@ -25,7 +25,7 @@
 
 
   <select id="sumAvailable" resultType="long">
-    SELECT COALESCE(SUM(remaining - frozen), 0)
+    SELECT COALESCE(SUM(remaining), 0)
     FROM billing_credit_lots
     WHERE user_id = #{userId}
       AND (expires_at IS NULL OR expires_at > NOW())
@@ -33,7 +33,7 @@
 
 
   <select id="sumAvailableBySource" resultType="com.bluewhale.billing.infrastructure.persistence.row.SourceAvailableRow">
-    SELECT source, COALESCE(SUM(remaining - frozen), 0) AS credits
+    SELECT source, COALESCE(SUM(remaining), 0) AS credits
     FROM billing_credit_lots
     WHERE user_id = #{userId}
       AND (expires_at IS NULL OR expires_at > NOW())
@@ -44,7 +44,7 @@
 
 
   <select id="sumAvailableByUser" resultType="com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow">
-    SELECT user_id, COALESCE(SUM(remaining - frozen), 0) AS amount
+    SELECT user_id, COALESCE(SUM(remaining), 0) AS amount
     FROM billing_credit_lots
     WHERE user_id IN
       <foreach collection="userIds" item="uid" open="(" separator="," close=")">#{uid}</foreach>
@@ -69,30 +69,30 @@
 
 
   <select id="listDueLots" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
+    SELECT id, user_id, source, source_priority, amount, remaining, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
     WHERE expires_at IS NOT NULL
       AND expires_at &lt;= NOW()
-      AND remaining > frozen
+      AND remaining > 0
     ORDER BY expires_at ASC
     LIMIT #{limit}
   </select>
 
 
   <select id="lockById" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
+    SELECT id, user_id, source, source_priority, amount, remaining, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
     WHERE id = #{lotId}
     FOR UPDATE
   </select>
 
   <select id="listExpiring" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, amount, remaining, frozen, expires_at, version
+    SELECT id, user_id, source, amount, remaining, expires_at, version
     FROM billing_credit_lots
     WHERE user_id = #{userId}
       AND expires_at IS NOT NULL
       AND expires_at > NOW()
-      AND remaining > frozen
+      AND remaining > 0
     ORDER BY expires_at ASC
     LIMIT #{limit}
   </select>
@@ -104,9 +104,9 @@
 
 
 
-  <update id="addFrozen">
+  <update id="consume">
     UPDATE billing_credit_lots
-    SET frozen = frozen + #{amount},
+    SET remaining = remaining - #{amount},
         version = version + 1
     WHERE id = #{lotId}
   </update>
@@ -117,37 +117,12 @@
 
 
 
-  <update id="releaseFrozen">
+  <update id="restore">
     UPDATE billing_credit_lots
-    SET frozen = frozen - #{amount},
+    SET remaining = LEAST(amount, remaining + #{amount}),
         version = version + 1
     WHERE id = #{lotId}
   </update>
-
-
-
-
-
-
-
-
-
-  <update id="settle">
-    UPDATE billing_credit_lots
-    SET frozen = frozen - #{frozenTake},
-        remaining = remaining - #{actualTake},
-        version = version + 1
-    WHERE id = #{lotId}
-  </update>
-
-
-
-
-
-
-
-
-
 
 
 
@@ -169,7 +144,7 @@
 
 
   <select id="listUserLots" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at,
+    SELECT id, user_id, source, source_priority, amount, remaining, expires_at,
            biz_type, biz_id, version, gmt_create
     FROM billing_credit_lots
     <where>

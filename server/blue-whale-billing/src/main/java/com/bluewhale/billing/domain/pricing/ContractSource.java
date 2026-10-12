@@ -10,6 +10,4 @@ public sealed interface ContractSource {
             }
         }
     }
-
-    record Estimated() implements ContractSource {}
 }

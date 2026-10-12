@@ -7,11 +7,3 @@
   color: var(--color-text-tertiary);
   user-select: none;
 }
-
-.basisTag {
-  color: var(--color-text-tertiary);
-}
-.basisTag::before {
-  content: '·';
-  margin-right: var(--spacing-xs);
-}

@@ -11,7 +11,7 @@
   <sql id="latestLedgerBalance">
     SELECT e.user_id, e.account, MAX(e.id) AS max_id
     FROM billing_ledger_entries e
-    WHERE e.account IN ('wallet', 'frozen')
+    WHERE e.account IN ('wallet')
     GROUP BY e.user_id, e.account
   </sql>
 

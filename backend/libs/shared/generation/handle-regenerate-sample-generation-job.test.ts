@@ -138,7 +138,7 @@ function buildDeps(args: {
         }))),
     },
     billing: {
-      hold: vi.fn().mockResolvedValue(undefined),
+      charge: vi.fn().mockResolvedValue(undefined),
       release: vi.fn().mockResolvedValue(undefined),
     },
     ...(args.quote !== undefined ? { quote: args.quote } : {}),
@@ -298,7 +298,7 @@ describe("handleRegenerateSampleCreate（IKIZQF）", () => {
     expect(cmdInput.input.resolution).toBe("480p");
     expect(cmdInput.input.provider_credential).toBeUndefined();
     expect(options.billing).toBeDefined();
-    expect(options.billing.hold).toBeTypeOf("function");
+    expect(options.billing.charge).toBeTypeOf("function");
     expect(options.billing.release).toBeTypeOf("function");
     expect(cmdInput.input.references).toEqual(SAMPLE_INPUT.references);
   });
@@ -474,7 +474,7 @@ describe("handleRegenerateSampleCreate canvas_binding（IKJJR0）", () => {
           }))),
       },
       billing: {
-        hold: vi.fn().mockResolvedValue(undefined),
+        charge: vi.fn().mockResolvedValue(undefined),
         release: vi.fn().mockResolvedValue(undefined),
       },
       ...(args.quote !== undefined ? { quote: args.quote } : {}),
@@ -559,8 +559,8 @@ describe("handleRegenerateSampleCreate canvas_binding（IKJJR0）", () => {
     expect(res.data).toMatchObject({ generation_job_id: "311", cursor: 9, canvas_binding: BINDING_VIEW });
     expect(lookupCreateIdempotency).toHaveBeenCalledTimes(1);
     expect(createJob).not.toHaveBeenCalled();
-    const billing = (deps as { create: { billing?: { hold: ReturnType<typeof vi.fn> } } }).create.billing;
-    expect(billing?.hold).not.toHaveBeenCalled();
+    const billing = (deps as { create: { billing?: { charge: ReturnType<typeof vi.fn> } } }).create.billing;
+    expect(billing?.charge).not.toHaveBeenCalled();
   });
 
   it("★ 携旧承接版本抢占已归属节点 → 受理冲突信封（409）直返，不覆盖旧成片承接（AC4）", async () => {
@@ -592,7 +592,7 @@ describe("handleRegenerateSampleCreate canvas_binding（IKJJR0）", () => {
               material_id: null,
             }))),
         },
-        billing: { hold: vi.fn(), release: vi.fn() },
+        billing: { charge: vi.fn(), release: vi.fn() },
         quote,
       },
     } as never;

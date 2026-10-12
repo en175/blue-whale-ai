@@ -28,18 +28,10 @@ public record CatalogDocument(
             Long minCredits,
             Long maxCredits,
             String rounding,
-            TokenEstimate tokenEstimate,
             Integer schemaVersion
     ) {}
 
     public record DimPrice(Long unitMc, Boolean firstFree) {}
-
-    public record TokenEstimate(
-            Integer divisor,
-            Integer fps,
-            String inputSecondsKey,
-            Map<String, Long> minimumTokens
-    ) {}
 
     public record BasePrice(
             String kind,

@@ -139,28 +139,26 @@ class CreditExpirySweeperIntegrationTest {
 
 
     @Test
-    void 冻结部分不过期_解冻后下一轮再核销() {
+    void 已扣掉的量不再被核销_返还后下一轮再核销() {
         long jobId = 9901L;
         long lot = grant(CreditSource.GIFT, 500, FUTURE, "exp-7");
-        credits.hold(USER, "cmd-exp-7", jobId, 200, CATALOG_VERSION, NO_DISCOUNT, null, "视频生成 · 过期测试");
+        credits.charge(USER, "cmd-exp-7", jobId, 200, CATALOG_VERSION, NO_DISCOUNT, null, "视频生成 · 过期测试");
         backdateExpiry(lot, 1);
 
         CreditExpirySweeper.SweepResult first = sweeper.sweepOnce();
 
         assertThat(first.expiredCredits()).isEqualTo(300);
-        assertThat(remainingOf(lot)).isEqualTo(200);
-        assertThat(frozenOf(lot)).isEqualTo(200);
+        assertThat(remainingOf(lot)).isZero();
         assertThat(lots.availableCredits(USER)).isZero();
         assertInvariant();
 
         credits.refund(jobId, "上游任务失败");
-        assertThat(frozenOf(lot)).isZero();
         assertThat(remainingOf(lot)).isEqualTo(200);
 
         CreditExpirySweeper.SweepResult second = sweeper.sweepOnce();
 
         assertThat(second.expiredCredits())
-                .as("解冻回来的那部分仍是已过期积分，必须在下一轮被核销")
+                .as("返还回来的那部分仍是已过期积分，必须在下一轮被核销")
                 .isEqualTo(200);
         assertThat(remainingOf(lot)).isZero();
         assertThat(lots.availableCredits(USER)).isZero();
@@ -170,18 +168,17 @@ class CreditExpirySweeperIntegrationTest {
     }
 
     @Test
-    void 全部冻结的到期批次_本轮核销不动_也不占用下一轮的判断() {
+    void 全部扣完的到期批次_本轮核销不动_也不占用下一轮的判断() {
         long jobId = 9902L;
         long lot = grant(CreditSource.GIFT, 500, FUTURE, "exp-8");
-        credits.hold(USER, "cmd-exp-8", jobId, 500, CATALOG_VERSION, NO_DISCOUNT, null, "视频生成 · 全冻测试");
+        credits.charge(USER, "cmd-exp-8", jobId, 500, CATALOG_VERSION, NO_DISCOUNT, null, "视频生成 · 全扣测试");
         backdateExpiry(lot, 1);
 
         CreditExpirySweeper.SweepResult result = sweeper.sweepOnce();
 
         assertThat(result.due()).isEmpty();
         assertThat(result.expired()).isZero();
-        assertThat(remainingOf(lot)).isEqualTo(500);
-        assertThat(frozenOf(lot)).isEqualTo(500);
+        assertThat(remainingOf(lot)).isZero();
         assertInvariant();
     }
 
@@ -256,21 +253,14 @@ class CreditExpirySweeperIntegrationTest {
                 "SELECT COALESCE(SUM(remaining), 0) FROM billing_credit_lots WHERE user_id = ?",
                 Long.class, USER);
         long wallet = ledger.balanceOf(USER, Account.WALLET);
-        long frozen = ledger.balanceOf(USER, Account.FROZEN);
-        assertThat(wallet + frozen)
-                .as("核销是两侧等量减少，不得打破 Σ remaining == wallet + frozen"
-                        + "（wallet=%s frozen=%s）", wallet, frozen)
+        assertThat(wallet)
+                .as("核销是两侧等量减少，不得打破 Σ remaining == wallet（wallet=%s）", wallet)
                 .isEqualTo(remaining);
     }
 
     private long remainingOf(long lotId) {
         return jdbc.queryForObject(
                 "SELECT remaining FROM billing_credit_lots WHERE id = ?", Long.class, lotId);
-    }
-
-    private long frozenOf(long lotId) {
-        return jdbc.queryForObject(
-                "SELECT frozen FROM billing_credit_lots WHERE id = ?", Long.class, lotId);
     }
 
     private int ledgerEntryCount() {

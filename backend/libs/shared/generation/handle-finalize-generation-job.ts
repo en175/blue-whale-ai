@@ -29,7 +29,7 @@ import type {
   ProjectRepo,
 } from "@lib/shared/persistence/index.js";
 import type { BillingQuote } from "../billing/billing-quote.js";
-import type { BillingHold } from "../billing/billing-hold.js";
+import type { BillingCharge } from "../billing/billing-charge.js";
 import type { BillingRelease } from "../billing/billing-release.js";
 import type { JobBilling } from "../persistence/job-billing.js";
 import type { CreateJobIdempotency } from "../persistence/generation-job-idempotency.js";
@@ -47,7 +47,7 @@ export interface FinalizeGenerationJobDeps {
   models: Pick<ModelCapabilityRepo, "listEnabledByType">;
   command: FinalizeCommandRepo;
   quote?: BillingQuote;
-  billing?: { hold: BillingHold; release: BillingRelease };
+  billing?: { charge: BillingCharge; release: BillingRelease };
 }
 
 const EMPTY_QUOTE = { credits: null, quote_revision: null } as const;
@@ -304,8 +304,8 @@ export async function handleFinalizeGenerationJobCreate(
   const billingDep = deps.billing;
   const billing: JobBilling | undefined = billingDep
     ? {
-        hold: (newJobId) =>
-          billingDep.hold({
+        charge: (newJobId) =>
+          billingDep.charge({
             userId: String(userId),
             jobId: newJobId,
             commandId: actionIdentity,

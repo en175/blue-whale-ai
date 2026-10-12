@@ -85,7 +85,7 @@ function buildDeps(args: {
     command: { findFinalizeSourceJob, createFinalizeJob, lookupFinalizeIdempotency },
     ...(args.quote !== undefined ? { quote: args.quote } : {}),
     billing: {
-      hold: vi.fn().mockResolvedValue(undefined),
+      charge: vi.fn().mockResolvedValue(undefined),
       release: vi.fn().mockResolvedValue(undefined),
     },
   } as never;
@@ -378,7 +378,7 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
     expect(createInput.input.resolution).toBe("1080p");
     expect(createInput.input.sample_mode).toBeUndefined();
     expect(options.billing).toBeDefined();
-    expect(options.billing.hold).toBeTypeOf("function");
+    expect(options.billing.charge).toBeTypeOf("function");
     expect(result.credits).toBe(76n);
   });
 

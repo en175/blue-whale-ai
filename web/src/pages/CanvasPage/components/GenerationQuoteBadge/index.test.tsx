@@ -167,7 +167,7 @@ describe('GenerationQuoteBadge', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('★ IKJ797 标记 duration_basis=source_video → 徽标旁标注「按源视频时长预估」', async () => {
+  it('★ 徽标只报本次预计消耗，服务端仍带 duration_basis 也不再附注说明', async () => {
     fetchGuard.stub(vi.fn().mockResolvedValue(quoteResponseWithBasis(58)));
 
     await renderBadge({});
@@ -175,8 +175,8 @@ describe('GenerationQuoteBadge', () => {
     await vi.waitFor(() =>
       expect(container.textContent).toContain('本次预计消耗 58 积分'),
     );
-    expect(container.querySelector('[data-testid="generation-quote-basis"]')?.textContent)
-      .toBe('按源视频时长预估');
+    expect(container.textContent).not.toContain('按源视频时长预估');
+    expect(container.querySelector('[data-testid="generation-quote-basis"]')).toBeNull();
   });
 
   it('★ IKJGE6 草稿目标 → 请求体带 target_node_id（后端据此做画布文本带入合并）；换目标重新报价', async () => {

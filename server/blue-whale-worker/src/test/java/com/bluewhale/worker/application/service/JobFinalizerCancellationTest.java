@@ -69,14 +69,14 @@ class JobFinalizerCancellationTest {
     }
 
     @Test
-    @DisplayName("非取消状态走这条口子也不会误发结算（防守：这条口子只该被取消调用）")
-    void 非取消状态不会走结算分支() {
+    @DisplayName("成功状态走这条口子也不发事件（扣款在提交时已完成，成功无账务动作）")
+    void 成功状态不发事件() {
         GenerationJobEntity succeeded = cancelledJob(803);
         succeeded.setStatus("succeeded");
         when(jobMapper.selectById(803L)).thenReturn(succeeded);
 
         finalizer.releaseHoldForCancelled("803");
 
-        assertThat(sent.get(0)[0]).isEqualTo("generation-job-completed");
+        assertThat(sent).isEmpty();
     }
 }

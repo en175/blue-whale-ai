@@ -27,6 +27,8 @@
 
 
 
+import { FROZEN_VIDEO_MODE_KEY } from "@lib/contracts";
+
 export const DURATION_BASIS_KEY = "duration_basis_seconds";
 
 export const OMNI_TASK_TYPE_ALLOWED_KEY = "omni_reference_task_type_allowed";
@@ -126,8 +128,21 @@ export function extractSpecs(
 
 
   const videoInputSeconds = sumVideoInputSeconds(input.references);
-  if (videoInputSeconds !== null) specs.video_input_seconds = String(videoInputSeconds);
+  if (videoInputSeconds !== null) {
+    specs.reference_seconds = String(videoInputSeconds);
+  }
+
+  const prompt = input.prompt;
+  if (typeof prompt === 'string') {
+    specs.prompt_characters = String(countPromptCharacters(prompt));
+  }
+
+  if (input[FROZEN_VIDEO_MODE_KEY] === 'edit') specs.video_edit = '1';
   return specs;
+}
+
+export function countPromptCharacters(prompt: string): number {
+  return Array.from(prompt).filter((c) => !/\s/.test(c)).length;
 }
 
 

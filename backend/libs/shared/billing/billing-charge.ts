@@ -1,7 +1,7 @@
-import { toBillingHoldError, type BillingClient } from './billing-client.js';
+import { toBillingChargeError, type BillingClient } from './billing-client.js';
 import { extractSpecs } from './billing-specs.js';
 
-export interface BillingHoldContext {
+export interface BillingChargeContext {
   userId: string;
   jobId: number;
   commandId: string;
@@ -11,15 +11,15 @@ export interface BillingHoldContext {
   ruleSnapshot?: string;
 }
 
-export type BillingHold = (ctx: BillingHoldContext) => Promise<void>;
+export type BillingCharge = (ctx: BillingChargeContext) => Promise<void>;
 
-export interface BillingHoldDeps {
+export interface BillingChargeDeps {
   client: BillingClient;
   resolveTier: (userId: string) => Promise<string>;
   logger?: { warn: (message: string) => void };
 }
 
-export function createBillingHold(deps: BillingHoldDeps): BillingHold {
+export function createBillingCharge(deps: BillingChargeDeps): BillingCharge {
   return async (ctx) => {
     let tier = 'free';
     try {
@@ -33,7 +33,7 @@ export function createBillingHold(deps: BillingHoldDeps): BillingHold {
     }
 
     try {
-      await deps.client.hold({
+      await deps.client.charge({
         userId: Number(ctx.userId),
         commandId: ctx.commandId,
         jobId: ctx.jobId,
@@ -45,11 +45,11 @@ export function createBillingHold(deps: BillingHoldDeps): BillingHold {
       });
     } catch (error) {
       deps.logger?.warn(
-        `[billing] 预扣被拒（提交拒绝，fail closed）：user=${ctx.userId} job=${ctx.jobId} ` +
+        `[billing] 扣款被拒（提交拒绝，fail closed）：user=${ctx.userId} job=${ctx.jobId} ` +
           `model=${ctx.modelId} task=${ctx.taskType} ` +
           `${error instanceof Error ? error.message : String(error)}`,
       );
-      throw toBillingHoldError(error) ?? error;
+      throw toBillingChargeError(error) ?? error;
     }
   };
 }

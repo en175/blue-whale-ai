@@ -417,6 +417,33 @@ describe("resolveVideoMode（IKFPYX）", () => {
     expect(resolveVideoMode([ref("reference", "video")], "参考它的运镜")).toBe("omni");
   });
 
+  it("IKL406 编辑模式只数参考视频段数：1 段视频 + N 张图片 + 编辑词仍为 edit", () => {
+    expect(
+      resolveVideoMode(
+        [
+          ref("reference", "video"),
+          ref("reference", "image"),
+          ref("reference", "image"),
+        ],
+        "把背景改成海边",
+      ),
+    ).toBe("edit");
+
+    expect(
+      resolveVideoMode(
+        [ref("reference", "video"), ref("reference", "video"), ref("reference", "image")],
+        "把背景改成海边",
+      ),
+    ).toBe("omni");
+  });
+
+  it("IKL406 参考视频 > 1 段 → omni（个数判定先于意图词）", () => {
+    const twoVideos = [ref("reference", "video"), ref("reference", "video")];
+    expect(resolveVideoMode(twoVideos, "把背景改成海边")).toBe("omni");
+    expect(resolveVideoMode(twoVideos, "向后延长这个视频")).toBe("omni");
+    expect(resolveVideoMode(twoVideos, "")).toBe("omni");
+  });
+
   it("无参考视频（仅图片参考）→ default（即使提示词含编辑词）", () => {
     expect(resolveVideoMode([ref("reference", "image")], "修改一下")).toBe("image_reference");
   });

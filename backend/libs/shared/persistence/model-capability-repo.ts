@@ -77,6 +77,18 @@ export interface ModelCapabilityView {
   digest: string;
 }
 
+export function serializePricingRule(
+  capability: Pick<ModelCapabilityView, "pricing"> | undefined,
+): string | undefined {
+  const pricing = capability?.pricing;
+  if (pricing === undefined || pricing === null) return undefined;
+  try {
+    return JSON.stringify(pricing);
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ModelCapabilityRepo {
   listEnabledByType(capabilityType: string): Promise<ModelCapabilityView[]>;
 }

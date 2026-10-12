@@ -1,5 +1,5 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
-import { resolvePromptMaxLength, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
+import { resolvePromptMaxLength, normalizeVideoMode, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
 import { MISSING_PROMPT_REF_REASON, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
 import type { AssetOwnershipOps } from "../persistence/asset-ownership-types.js";
@@ -78,8 +78,9 @@ export async function freezePromptPlans(args: {
     });
     const identities = videoReferences.map(r => r.providerUrl);
     if (new Set(identities).size !== identities.length) planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "同一供应商素材存在重复索引，请调整引用");
-    validateVideoPlan(plans[0]!.nodeId, plans.flatMap(p => p.bindings), videoReferences, args.model, nodes.find(n => n.id === targetId)?.data?.draftMode);
-    try { validateReferences(args.model!.features, resolved.filter(a => refs.some(r => r.asset_id === a.id && r.role === "reference")), refs.filter(r => r.material_id && r.role === "reference").map(r => ({ id: r.material_id!, type: r.type }))); }
+    const draftMode = normalizeVideoMode(nodes.find(n => n.id === targetId)?.data?.draftMode);
+    validateVideoPlan(plans[0]!.nodeId, plans.flatMap(p => p.bindings), videoReferences, args.model, draftMode);
+    try { validateReferences(args.model!.features, resolved.filter(a => refs.some(r => r.asset_id === a.id && r.role === "reference")), refs.filter(r => r.material_id && r.role === "reference").map(r => ({ id: r.material_id!, type: r.type })), draftMode); }
     catch (error) { planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), error instanceof Error ? error.message : "素材不受支持"); }
     if (materials.some(m => !refs.some(r => r.material_id === m.materialId))) {
       planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "目标已有素材库参考缺失，请恢复参考清单");

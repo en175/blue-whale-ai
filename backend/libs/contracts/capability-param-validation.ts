@@ -38,6 +38,8 @@ export const VIDEO_MODES = [
 
 export type VideoMode = (typeof VIDEO_MODES)[number];
 
+export const EDIT_MODE_VIDEO_REFERENCE_MAX = 1;
+
 const LEGACY_VIDEO_MODE: Record<string, VideoMode> = {
   default: "text2video",
   prolong: "extend",
@@ -112,8 +114,9 @@ export function resolveVideoMode(
   if (hasFirst && hasLast) return "first_last_frame";
   if (hasFirst || hasLast) return "first_frame";
   const ordinary = references.filter((r) => r.role === "reference");
-  const hasVideoRef = ordinary.some((r) => r.type === "video");
-  if (hasVideoRef) {
+  const videoRefCount = ordinary.filter((r) => r.type === "video").length;
+  if (videoRefCount > 0) {
+    if (videoRefCount > EDIT_MODE_VIDEO_REFERENCE_MAX) return "omni";
     if (hasIntentKeyword(prompt, PROLONG_INTENT_KEYWORDS)) return "extend";
     if (hasIntentKeyword(prompt, EDIT_INTENT_KEYWORDS)) return "edit";
     return "omni";

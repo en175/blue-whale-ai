@@ -7,6 +7,9 @@
 >
 > **2026-09-25 修订二**：档位公式与 Node 侧记账换算两条**一并作废**——我们不再经由网关
 > 记账，代理侧也没有 `cost_reservations` 这个账本了。剩下的锚点只约束**网关自己**。
+>
+> **2026-10-12 修订三**：定价不再经元（[ADR-0127](../adr/0127-charge-on-submit-and-refund-on-failure.md)）——
+> 管理端定价输入单位由**元**改为**积分**，`creditsPerYuan` 退出定价路径，只剩**自定义充值报价**一处用途。
 
 > 本契约锁定蓝鲸（blue-whale-ai）与网关（blue-whale-api，new-api 二开）之间的计费单位口径。
 > 依据：`蓝鲸项目-扣费机制调查报告.md` §11 决策 3/7/8、`蓝鲸项目-扣费链路修复-design.md` 领域 0。
@@ -24,12 +27,16 @@
 | ~~档位公式~~ | ~~amount = 原价 × 500,000~~ | **作废（2026-09-25）**：档位到账积分改为 `原价 × creditsPerYuan`（读 billing 定价目录，当前 15），走我们自己的账本；网关的 Go 档位同步已是 no-op。见 ADR-0114。<br>**再作废（2026-09-27）**：到账积分改为读 `topup_tiers.base_credits` —— 那是**运营在后台直接填的配置值**（用户到手的那个数），与换算率**再无数学关系**：充值常有折扣，¥499 的档到账 7,500 而不是 7,485。`creditsPerYuan` 仍是定价目录字段，但只有**自定义充值**报价用它（`recharge-custom/constants.ts` 的 `customPriceFen`）。见 `backend/libs/shared/recharge/tier-order-spec.ts` 的 `buildTierOrderPlan`。 |
 | ~~Node 记账换算~~ | ~~`quotaToFen` = quota ÷ 500,000 × 7.3 × 100（→ 分）~~ | **作废（2026-09-25）**：`cost_reservations` 随 IKEF1K 退役，生成任务不再往它写金额（回到 `0 + 四版本 "dev"` 兜底），该函数已随之删除。见 ADR-0114。 |
 
-## 蓝鲸展示（1 元 = 15 积分，**配置项而非硬编码**）
+## 元 → 积分换算（**已退出定价路径**，[ADR-0127](../adr/0127-charge-on-submit-and-refund-on-failure.md)）
 
-- **积分 = 元 × creditsPerYuan，当前生效值 `creditsPerYuan = 15`，即 1 元 = 15 积分。**
-- 它是**定价目录 `billing_pricing_catalogs` 的配置字段**（`document.creditsPerYuan`），不是代码里的常量：
+> ⚠️ **as-built（2026-10-12，ADR-0127）**：**定价不再经元。**
+> 管理端「模型 → 定价」页的输入单位从**元**改为**积分**（允许小数），单价直接以积分配置，
+> 底层存储仍是 mc（1 积分 = 1000 mc），**库里已配的定价数据一行都不用迁移**。
+> `creditsPerYuan` **退出定价路径**——现在只剩**自定义充值报价**一处用途
+> （`recharge-custom/constants.ts` 的 `customPriceFen`）。
+
+- `creditsPerYuan` 仍是**定价目录 `billing_pricing_catalogs` 的配置字段**（`document.creditsPerYuan`，当前 15），不是代码里的常量：
   - 与目录一起**版本化**、可整体回滚；
-  - 随 job **冻结**——结算按冻结版本复现，改价不影响已提交任务；
   - 改口径 = 发一版新目录，不改代码、不重启（`POST /admin/catalogs`）；
   - 管理端可查当前值：`BillingAdminService.AdminGetActiveCatalog` → `credits_per_yuan`（发布接口回包同样带它；读接口 2026-09-26 迁到 gRPC，`GET /admin/catalogs/active` 已删）。
 - 编译期校验：`creditsPerYuan` ≤ 0 或 > 100000 的目录**发不出去**（`CatalogCompiler`）。
@@ -42,7 +49,7 @@
 ## 两条换算链路（禁止混用）
 
 ```
-元 ──×creditsPerYuan（目录配置，当前 15）──► 积分（蓝鲸计费账本与展示的唯一口径）
+元 ──×creditsPerYuan（目录配置，当前 15）──► 积分（**仅自定义充值报价**；定价已改按积分配置，不再经元）
 quota ──÷500,000 ×7.3 ×100──► 分 fen（仅网关侧 cost_reservations 记账：预留/实扣/释放）
 ```
 

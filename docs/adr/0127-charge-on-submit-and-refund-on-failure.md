@@ -53,7 +53,7 @@
 
 后者的基准量现在拿不到——`UsageDim` 只有 `usage.seconds`（生成秒数）与 `usage.referenceCount`（参考**张数**，`UsageDim.java`）。需新增使用维度 `usage.referenceSeconds`，并在提交时把被引用素材的时长之和写进规格键（该求和后端已在做，见 `reference-limits.ts` 的参考上限校验）。
 
-**编辑模式（`mode = edit`）另有一条**：秒数 = 参考视频秒数（编辑不选时长，产出时长跟着参考走），且**价格为该档基础价的 2 倍**。这个「最后 ×2」用规则里的 `multipliers` 表达——它正是管线里最后一步（`AbstractPricingCalculator.applyMultipliers`，在 `dimPrices` 之后、`clamp` 与舍入之前），需要新增一个「是否编辑模式」的标记维度承载它。判定依据是提交时冻结的 `input.video_mode`（`FROZEN_VIDEO_MODE_KEY`）。
+**编辑模式（`mode = edit`）另有一条**：**产出时长跟着参考视频走**（编辑不选时长），**价格为该档基础价的 2 倍**，而**数量口径与「含视频输入」完全一致**——2.5 系按 `生成秒数 + 参考总秒数`（产出时长=参考时长，故实际是参考秒数的两倍），2.0 系只按生成秒数（系数里已折进视频输入）。`reference_seconds` 在编辑模式下**照写**，不做特殊去重。这个「最后 ×2」用规则里的 `multipliers` 表达——它正是管线里最后一步（`AbstractPricingCalculator.applyMultipliers`，在 `dimPrices` 之后、`clamp` 与舍入之前），由新增的「是否编辑模式」标记维度承载。判定依据是提交时冻结的 `input.video_mode`（`FROZEN_VIDEO_MODE_KEY`）。
 
 编辑模式**只允许一段参考视频**；选第二段时模式切到 `omni`（全能参考）。这条是本次新加的产品规则——现有代码不按个数切（见改动清单）。
 

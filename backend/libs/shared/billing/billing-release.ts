@@ -34,7 +34,7 @@ export function createBillingRelease(deps: BillingReleaseDeps): BillingRelease {
       });
     } catch (error) {
       deps.logger?.error(
-        `[billing] 预扣补偿返还失败，这笔钱仍冻着：jobId=${ctx.jobId} 原因=${ctx.reason} ${
+        `[billing] 失败全额返还发布失败，这笔钱仍扣着：jobId=${ctx.jobId} 原因=${ctx.reason} ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

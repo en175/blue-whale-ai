@@ -39,9 +39,9 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   return {
     ...actual,
     sharedBillingClient: () => ({
-      hold: async () => ({ reservedCredits: 1, catalogVersion: 1, duplicated: false }),
+      charge: async () => ({ chargedCredits: 1, catalogVersion: 1, duplicated: false }),
       quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
-      queryBalance: async () => ({ availableCredits: 0, frozenCredits: 0, expiring: [] }),
+      queryBalance: async () => ({ availableCredits: 0, expiring: [] }),
       listTransactions: async () => ({ items: [], total: 0 }),
     }),
   };

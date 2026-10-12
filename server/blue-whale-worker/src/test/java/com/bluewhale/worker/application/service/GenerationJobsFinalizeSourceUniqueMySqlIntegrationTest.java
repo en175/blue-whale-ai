@@ -64,7 +64,7 @@ class GenerationJobsFinalizeSourceUniqueMySqlIntegrationTest {
                     "INSERT INTO generation_job_extras "
                             + "(generation_job_id, extra_key, value_type, value_text) "
                             + "VALUES (302, 'video_stage', 'string', 'sample'), "
-                            + "(302, 'charge_state', 'string', 'settled')");
+                            + "(302, 'charge_state', 'string', 'charged')");
         }
     }
 
@@ -133,7 +133,7 @@ class GenerationJobsFinalizeSourceUniqueMySqlIntegrationTest {
                     "INSERT INTO generation_job_extras "
                             + "(generation_job_id, extra_key, value_type, value_text) "
                             + "VALUES (303, 'video_stage', 'string', 'final'), "
-                            + "(303, 'charge_state', 'string', 'released')");
+                            + "(303, 'charge_state', 'string', 'refunded')");
         }
         try (Connection conn = DriverManager.getConnection(url(), "test", "test");
              PreparedStatement ps = conn.prepareStatement(INSERT_FINAL)) {

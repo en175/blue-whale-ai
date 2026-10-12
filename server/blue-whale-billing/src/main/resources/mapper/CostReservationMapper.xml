@@ -17,19 +17,9 @@
 
 
 
-  <update id="markSettled">
+  <update id="markRefunded">
     UPDATE billing_cost_reservations
-    SET status = 'settled',
-        actual_credits = #{actualCredits},
-        receivable_credits = #{receivableCredits},
-        version = version + 1
-    WHERE generation_job_id = #{jobId}
-  </update>
-
-  <update id="markReleased">
-    UPDATE billing_cost_reservations
-    SET status = 'released',
-        actual_credits = 0,
+    SET status = 'refunded',
         release_note = #{releaseNote},
         version = version + 1
     WHERE generation_job_id = #{jobId}
@@ -38,10 +28,10 @@
 
 
 
-  <select id="sumSettledActualCredits" resultType="long">
-    SELECT COALESCE(SUM(actual_credits), 0)
+  <select id="sumChargedCredits" resultType="long">
+    SELECT COALESCE(SUM(reserved_credits), 0)
     FROM billing_cost_reservations
-    WHERE status = 'settled'
+    WHERE status = 'charged'
       AND gmt_modified &gt;= #{from}
       AND gmt_modified &lt; #{to}
   </select>
@@ -49,32 +39,13 @@
 
 
 
-
-  <select id="sumSettledActualByUser" resultType="com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow">
-    SELECT user_id, COALESCE(SUM(actual_credits), 0) AS amount
+  <select id="sumChargedByUser" resultType="com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow">
+    SELECT user_id, COALESCE(SUM(reserved_credits), 0) AS amount
     FROM billing_cost_reservations
     WHERE user_id IN
       <foreach collection="userIds" item="uid" open="(" separator="," close=")">#{uid}</foreach>
-      AND status = 'settled'
+      AND status = 'charged'
     GROUP BY user_id
-  </select>
-
-
-
-
-
-
-  <select id="listStaleHeld" resultType="com.bluewhale.billing.infrastructure.persistence.row.StaleReservationRow">
-    SELECT id,
-           generation_job_id,
-           user_id,
-           reserved_credits,
-           TIMESTAMPDIFF(SECOND, gmt_modified, NOW()) AS held_seconds
-    FROM billing_cost_reservations
-    WHERE status = 'held'
-      AND gmt_modified &lt;= DATE_SUB(NOW(), INTERVAL #{seconds} SECOND)
-    ORDER BY gmt_modified ASC
-    LIMIT #{limit}
   </select>
 
 </mapper>

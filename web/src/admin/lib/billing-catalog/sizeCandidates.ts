@@ -226,7 +226,7 @@ export function parsePixels(spec: string): { width: number; height: number } | n
 
 export function defaultAxesForBaseUnit(baseUnit: string): string[] {
   switch (baseUnit.trim()) {
-    case 'usage.c':
+    case 'usage.seconds':
       return ['resolution', VIDEO_TIER_AXIS.name];
     case 'usage.succeededSlots':
       return ['size'];

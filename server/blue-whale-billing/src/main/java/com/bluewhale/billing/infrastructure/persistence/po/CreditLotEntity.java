@@ -22,8 +22,6 @@ public class CreditLotEntity {
 
     private Long remaining;
 
-    private Long frozen;
-
     private LocalDateTime expiresAt;
 
     private String bizType;
@@ -50,8 +48,6 @@ public class CreditLotEntity {
     public void setAmount(Long amount) { this.amount = amount; }
     public Long getRemaining() { return remaining; }
     public void setRemaining(Long remaining) { this.remaining = remaining; }
-    public Long getFrozen() { return frozen; }
-    public void setFrozen(Long frozen) { this.frozen = frozen; }
     public LocalDateTime getExpiresAt() { return expiresAt; }
     public void setExpiresAt(LocalDateTime expiresAt) { this.expiresAt = expiresAt; }
     public String getBizType() { return bizType; }

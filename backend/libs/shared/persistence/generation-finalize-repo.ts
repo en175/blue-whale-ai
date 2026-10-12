@@ -162,10 +162,10 @@ async function createFinalizeJobWithinTx(
   await setJobExtras(tx, job.id, {
     strategy_version: VIDEO_STRATEGY_VERSION,
     video_stage: "final",
-    charge_state: "held",
+    charge_state: "charged",
   });
   if (billing) {
-    await billing.hold(Number(job.id));
+    await billing.charge(Number(job.id));
   }
   await tx.generation_output_slots.create({
     data: {

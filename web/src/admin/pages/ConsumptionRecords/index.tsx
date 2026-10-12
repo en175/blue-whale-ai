@@ -10,7 +10,7 @@ import AdminQueryTable, {
   type OffsetPaginationState,
 } from '../../components/AdminQueryTable';
 import { useAppliedFilters, usePagedQuery } from '../../components/AdminQueryTable/useQueryFilters';
-import { Badge, Button, Hint, Input, MetaRow, Select, Tooltip } from '../../ui';
+import { Badge, Button, Hint, Input, MetaRow, Select, Tooltip, type BadgeTone } from '../../ui';
 import { taskTypeLabel } from '../../taskTypeLabels';
 
 const PAGE_SIZE = 20;
@@ -37,6 +37,11 @@ const PROMPT_TEXT = {
 } as const;
 
 const modelText = (row: AdminConsumptionRecord) => row.model_label ?? row.model_id ?? '—';
+
+const STATUS: Record<string, { label: string; tone: BadgeTone }> = {
+  done: { label: '已完成', tone: 'success' },
+  refunded: { label: '已退款', tone: 'neutral' },
+};
 
 const TYPE_OPTIONS = [
   { value: '', label: '全部类型' },
@@ -147,7 +152,10 @@ export default function ConsumptionRecords() {
             </Badge>
             {}
             {row.reserved_credits != null && row.reserved_credits !== row.credits && (
-              <span style={SECONDARY_TEXT}>预扣 {fmt(row.reserved_credits)}</span>
+              <span style={SECONDARY_TEXT}>
+                扣款 {fmt(row.reserved_credits)} · 已退{' '}
+                {fmt(row.reserved_credits - Math.abs(row.credits))}
+              </span>
             )}
           </div>
         );
@@ -156,11 +164,14 @@ export default function ConsumptionRecords() {
     {
       key: 'status',
       header: '状态',
-      render: (row) => (
-        <Badge dot tone={row.status === 'done' ? 'success' : 'warning'}>
-          {row.status === 'done' ? '已完成' : '处理中'}
-        </Badge>
-      ),
+      render: (row) => {
+        const status = STATUS[row.status];
+        return (
+          <Badge dot tone={status?.tone ?? 'warning'}>
+            {status?.label ?? '处理中'}
+          </Badge>
+        );
+      },
     },
     {
       key: 'settled_at',
@@ -183,14 +194,13 @@ export default function ConsumptionRecords() {
       title={
         <>
           积分记录{' '}
-          <Hint title="为什么有的行写着「预扣」">
-            {}
+          <Hint title="为什么有的行「扣款」与净额不一样">
             <div>
-              <b>提交任务时先按预计用量冻结，结算时按实际用量扣费，差额自动退回余额。</b>
-              所以余额会先降后回。这一页记的是<b>结算后</b>的账：一行「-1」旁边若不补出「预扣 12」，那 12 冻过、11 退回来这件事就没有任何一处交代得了。
+              <b>提交任务时就直接扣一笔（提交即扣）：任务成功不再动账，失败则全额退回原批次。</b>
+              所以失败的单会显示「净额 0」，旁边那一行交代它实际扣了多少、又退回了多少——净额正是两者的差。
             </div>
             <div>
-              只有两个数不一致的行才补这一行；处理中的行显示的金额本身就是预扣额，发放与人工调账没有预扣。
+              只有净额与扣款不一致的行才补这一行；发放与人工调账本来就没有扣款。
             </div>
           </Hint>
         </>

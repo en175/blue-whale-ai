@@ -3,7 +3,7 @@ package com.bluewhale.billing.application.command;
 import java.time.LocalDateTime;
 import java.util.Map;
 
-public record HoldCommand(
+public record ChargeCommand(
         long userId,
         String commandId,
         long jobId,
@@ -16,7 +16,7 @@ public record HoldCommand(
         String ruleSnapshot
 ) {
 
-    public HoldCommand {
+    public ChargeCommand {
         if (commandId == null || commandId.isBlank()) {
             throw new IllegalArgumentException("commandId 必填——它是幂等键的来源");
         }

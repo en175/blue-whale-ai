@@ -87,6 +87,29 @@ describe("handleRetryGenerationJob 素材状态门（IKF YHJ）", () => {
     expect(retryJob.mock.calls[0]![5]).toBeUndefined();
   });
 
+  it("把 billing dep 透传给 repo（重试是新建任务，也要扣费）", async () => {
+    const { retryJob, deps } = makeDeps({ retryResult: CREATED });
+    const billing = {
+      charge: vi.fn(async () => {}),
+      release: vi.fn(async () => {}),
+    };
+
+    await handleRetryGenerationJob("9", "55", "300", "retry-billing", "", {
+      ...deps,
+      billing,
+    } as never);
+
+    expect(retryJob.mock.calls[0]![7]).toBe(billing);
+  });
+
+  it("未接 billing 时不透传（repo 不扣费）", async () => {
+    const { retryJob, deps } = makeDeps({ retryResult: CREATED });
+
+    await handleRetryGenerationJob("9", "55", "300", "retry-no-billing", "", deps);
+
+    expect(retryJob.mock.calls[0]![7]).toBeUndefined();
+  });
+
   it("幂等键冲突仍是 409 口径，不被素材门改写", async () => {
     const { deps } = makeDeps({
       retryResult: { kind: "idempotency_conflict" },

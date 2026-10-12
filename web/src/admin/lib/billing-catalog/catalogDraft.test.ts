@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   BASE_UNIT_OPTIONS,
+  creditsToMc,
   describePriceInHuman,
   formFromRule,
   isCatalogDirty,
   mcToCredits,
-  mcToYuan,
-  mcToYuanText,
   priceUnitLabel,
-  yuanDecimals,
-  yuanToMc,
   parseCatalog,
   readCreditsPerYuan,
   readDiscountPolicy,
@@ -156,67 +153,50 @@ describe('isCatalogDirty', () => {
 });
 
 describe('单位换算', () => {
-  it('mc → 积分按四舍五入（与 billing 的 halfUp 同口径）', () => {
-    expect(mcToCredits(100000)).toBe(100);
-    expect(mcToCredits(500)).toBe(1);
-    expect(mcToCredits(499)).toBe(0);
+  it('mc → 积分文本：1 积分 = 1000 mc，小数按位留着', () => {
+    expect(mcToCredits(100000)).toBe('100');
+    expect(mcToCredits(1000)).toBe('1');
+    expect(mcToCredits(500)).toBe('0.5');
+    expect(mcToCredits(499)).toBe('0.499');
+    expect(mcToCredits(1)).toBe('0.001');
   });
 
-  it('mc → 元', () => {
-    expect(mcToYuan(15000, 15)).toBeCloseTo(1);
-    expect(mcToYuan(100000, 15)).toBeCloseTo(6.6666666, 6);
-    expect(mcToYuan(100000, null)).toBeNull();
-    expect(mcToYuan(100000, 0)).toBeNull();
+  it('积分 → mc', () => {
+    expect(creditsToMc(70)).toBe(70000);
+    expect(creditsToMc(1)).toBe(1000);
+    expect(creditsToMc(0.5)).toBe(500);
+    expect(creditsToMc(0.12)).toBe(120);
   });
 
-  it('元 → mc：官方价目表的元配上 unitDenominator 就是目录里的 mc', () => {
-    expect(yuanToMc(70, 15)).toBe(1050000);
-    expect(yuanToMc(42, 15)).toBe(630000);
-    expect(yuanToMc(77, 15)).toBe(1155000);
-    expect(yuanToMc(46, 15)).toBe(690000);
-    expect(yuanToMc(0.12, 15)).toBe(1800);
-    expect(yuanToMc(70, null)).toBeNull();
-    expect(yuanToMc(70, 0)).toBeNull();
-  });
-
-  it('★ 硬不变式：mc → 元文本 → 换回 mc 必须逐位相等（否则「打开→保存」会把价挪走）', () => {
+  it('★ 硬不变式：mc → 积分文本 → 换回 mc 必须逐位相等（否则「打开→保存」会把价挪走）', () => {
     const samples = [
       1, 2, 499, 500, 1000, 1800, 10000, 15000, 33333, 100000, 420000, 555000, 690000,
       765000, 1050000, 1155000, 999999, 1234567,
     ];
     for (const mc of samples) {
-      const text = mcToYuanText(mc, 15);
-      expect(yuanToMc(Number(text), 15), `mc=${mc} → ${text}`).toBe(mc);
+      const text = mcToCredits(mc);
+      expect(creditsToMc(Number(text)), `mc=${mc} → ${text}`).toBe(mc);
     }
   });
 
-  it('★ 换算率越大，元文本的小数位越多（位数不够就会漂）', () => {
-    expect(yuanDecimals(15)).toBe(6);
-    expect(yuanDecimals(100000)).toBeGreaterThanOrEqual(9);
-    for (const cpy of [1, 15, 100, 100000]) {
-      const text = mcToYuanText(765000, cpy);
-      expect(yuanToMc(Number(text), cpy), `cpy=${cpy} → ${text}`).toBe(765000);
-    }
+  it('积分数文本去掉尾随 0：整数积分显示成 1050，不是 1050.000', () => {
+    expect(mcToCredits(1050000)).toBe('1050');
+    expect(mcToCredits(630000)).toBe('630');
+    expect(mcToCredits(1800)).toBe('1.8');
   });
 
-  it('元文本去掉尾随 0：整数元显示成 70，不是 70.000000', () => {
-    expect(mcToYuanText(1050000, 15)).toBe('70');
-    expect(mcToYuanText(630000, 15)).toBe('42');
-    expect(mcToYuanText(1800, 15)).toBe('0.12');
-    expect(mcToYuanText(1050000, null)).toBe('');
+  it('人类可读的单价：直接用积分数表达', () => {
+    expect(describePriceInHuman(1050000, '百万 token')).toBe('1050 积分 / 百万 token');
+    expect(describePriceInHuman(1050000)).toBe('1050 积分');
+    expect(describePriceInHuman(13000)).toBe('13 积分');
   });
 
-  it('人类可读的单价：元在前（运营认的就是元），积分放括号里', () => {
-    expect(describePriceInHuman(1050000, 15, '百万 token')).toBe('70 元 / 百万 token（1050 积分）');
-    expect(describePriceInHuman(1050000, 15)).toBe('70 元（1050 积分）');
-    expect(describePriceInHuman(100000, null)).toBe('100 积分');
-  });
-
-  it('单价的量纲由 unitDenominator + baseUnit 一起决定（70 是每百万 token，0.12 是每张）', () => {
-    expect(priceUnitLabel({ baseUnit: 'usage.c', unitDenominator: 1000000 })).toBe('百万 token');
+  it('单价的量纲由 unitDenominator + baseUnit 一起决定', () => {
+    expect(priceUnitLabel({ baseUnit: 'usage.c', unitDenominator: 1000000 })).toBe('1000000 个单位');
     expect(priceUnitLabel({ baseUnit: 'constant:1', unitDenominator: 1 })).toBe('次');
     expect(priceUnitLabel({ baseUnit: 'usage.succeededSlots', unitDenominator: 1 })).toBe('张');
     expect(priceUnitLabel({ baseUnit: 'usage.seconds', unitDenominator: 1 })).toBe('秒');
+    expect(priceUnitLabel({ baseUnit: 'usage.characters', unitDenominator: 100 })).toBe('每 100 个字符');
   });
 });
 
@@ -230,70 +210,62 @@ describe('ruleFormError（只拦表单表达不出来的东西）', () => {
   });
 
   it('模型 / 任务类型 / 基准维度不能空', () => {
-    expect(ruleFormError(form({ modelId: ' ' }), 15)).toBe('模型 ID 必填');
-    expect(ruleFormError(form({ taskType: '' }), 15)).toBe('任务类型必填');
-    expect(ruleFormError(form({ baseUnit: '' }), 15)).toBe('基准维度必填');
+    expect(ruleFormError(form({ modelId: ' ' }))).toBe('模型 ID 必填');
+    expect(ruleFormError(form({ taskType: '' }))).toBe('任务类型必填');
+    expect(ruleFormError(form({ baseUnit: '' }))).toBe('基准维度必填');
   });
 
-  it('常数单价必须是数（元；整数报价与小数报价都收）', () => {
-    expect(ruleFormError(form({ priceValue: { value: '', originalMc: null } }), 15)).toBe(
-      '基准单价必填，且是一个数（单位：元 / 每 unitDenominator 个单位，如 70）',
+  it('常数单价必须是数（积分；整数报价与小数报价都收）', () => {
+    expect(ruleFormError(form({ priceValue: { value: '', originalMc: null } }))).toBe(
+      '基准单价必填，且是一个数（单位：积分 / 每 unitDenominator 个单位，如 70）',
     );
-    expect(ruleFormError(form({ priceValue: { value: '不是数', originalMc: null } }), 15)).toBe(
-      '基准单价必填，且是一个数（单位：元 / 每 unitDenominator 个单位，如 70）',
+    expect(ruleFormError(form({ priceValue: { value: '不是数', originalMc: null } }))).toBe(
+      '基准单价必填，且是一个数（单位：积分 / 每 unitDenominator 个单位，如 70）',
     );
-    expect(ruleFormError(form({ priceValue: { value: '-1', originalMc: null } }), 15)).toContain(
+    expect(ruleFormError(form({ priceValue: { value: '-1', originalMc: null } }))).toContain(
       '基准单价必填',
     );
-    expect(ruleFormError(form({ priceValue: { value: '70', originalMc: null } }), 15)).toBeNull();
-    expect(ruleFormError(form({ priceValue: { value: '0.12', originalMc: null } }), 15)).toBeNull();
-  });
-
-  it('★ 读不到换算率就拦下来：单价按元填、要换回 mc，换算率缺了写回去的只能是错的', () => {
-    expect(ruleFormError(form(), null)).toContain('读不到换算率');
-    expect(ruleFormError(form({ priceKind: 'table' }), null)).toContain('读不到换算率');
-    expect(ruleFormError(form({ priceKind: 'unset' }), null)).toBeNull();
+    expect(ruleFormError(form({ priceValue: { value: '70', originalMc: null } }))).toBeNull();
+    expect(ruleFormError(form({ priceValue: { value: '0.12', originalMc: null } }))).toBeNull();
   });
 
   it('查表方式至少要有一行，且键不能空', () => {
-    expect(ruleFormError(form({ priceKind: 'table', priceTable: [] }), 15)).toBe(
+    expect(ruleFormError(form({ priceKind: 'table', priceTable: [] }))).toBe(
       '价格表至少要有一行（规格键 → 单价）',
     );
     expect(
       ruleFormError(
         form({ priceKind: 'table', priceTable: [{ key: '', value: '10', originalMc: null }] }),
-        15,
       ),
     ).toBe('价格表的键不能为空');
   });
 
   it('★ 常数方式下不看价格表：收起来那一栏里的空行不该拦住保存', () => {
-    expect(ruleFormError(form(), 15)).toBeNull();
+    expect(ruleFormError(form())).toBeNull();
     expect(
       ruleFormError(
         form({ priceTable: [{ key: 'size=1k', value: '不是数字', originalMc: null }] }),
-        15,
       ),
     ).toBeNull();
   });
 
   it('键值行：键不能空，值必须是整数', () => {
-    expect(ruleFormError(form({ dims: [{ key: 'usage.seconds', value: 'abc' }] }), 15)).toBe(
+    expect(ruleFormError(form({ dims: [{ key: 'usage.seconds', value: 'abc' }] }))).toBe(
       '维度表「usage.seconds」的值必须是整数',
     );
     expect(
-      ruleFormError(form({ dims: [{ key: 'usage.seconds', value: '4000' }] }), 15),
+      ruleFormError(form({ dims: [{ key: 'usage.seconds', value: '4000' }] })),
     ).toBeNull();
-    expect(ruleFormError(form({ multipliers: [{ key: ' ', value: '1' }] }), 15)).toBe(
+    expect(ruleFormError(form({ multipliers: [{ key: ' ', value: '1' }] }))).toBe(
       '维度表的键不能为空',
     );
   });
 
   it('单位分母 / 上下限留空可以，填了就必须是整数', () => {
-    expect(ruleFormError(form({ unitDenominator: '' }), 15)).toBeNull();
-    expect(ruleFormError(form({ unitDenominator: 'x' }), 15)).toContain('单位分母必须是整数');
-    expect(ruleFormError(form({ maxCredits: '' }), 15)).toBeNull();
-    expect(ruleFormError(form({ maxCredits: '2.5' }), 15)).toContain('积分上限必须是整数');
+    expect(ruleFormError(form({ unitDenominator: '' }))).toBeNull();
+    expect(ruleFormError(form({ unitDenominator: 'x' }))).toContain('单位分母必须是整数');
+    expect(ruleFormError(form({ maxCredits: '' }))).toBeNull();
+    expect(ruleFormError(form({ maxCredits: '2.5' }))).toContain('积分上限必须是整数');
   });
 });
 
@@ -303,7 +275,7 @@ describe('ruleFromForm', () => {
     modelId: 'm',
     taskType: 't',
     baseUnit: 'usage.seconds',
-    priceValue: { value: '6.666667', originalMc: 100000 },
+    priceValue: { value: '100', originalMc: 100000 },
     unitDenominator: '1',
     minCredits: '1',
     maxCredits: '',
@@ -311,7 +283,7 @@ describe('ruleFromForm', () => {
   });
 
   it('常数单价：原 mc 写回，上限留空写 null（显式表达「不封顶」）', () => {
-    const rule = ruleFromForm(form(), {}, 15);
+    const rule = ruleFromForm(form(), {});
 
     expect(rule).toMatchObject({
       baseUnit: 'usage.seconds',
@@ -322,12 +294,12 @@ describe('ruleFromForm', () => {
     });
   });
 
-  it('★ 换算率算出来的元文本原样写回时，用的是**目录里的原 mc**（一位不差）', () => {
-    const unchanged = form({ priceValue: { value: mcToYuanText(100000, 15), originalMc: 100000 } });
-    expect(ruleFromForm(unchanged, {}, 15).basePrice).toMatchObject({ value: 100000 });
+  it('★ 积分文本原样写回时，用的是**目录里的原 mc**（一位不差）', () => {
+    const unchanged = form({ priceValue: { value: mcToCredits(100000), originalMc: 100000 } });
+    expect(ruleFromForm(unchanged, {}).basePrice).toMatchObject({ value: 100000 });
 
     const edited = form({ priceValue: { value: '70', originalMc: 100000 } });
-    expect(ruleFromForm(edited, {}, 15).basePrice).toMatchObject({ value: 1050000 });
+    expect(ruleFromForm(edited, {}).basePrice).toMatchObject({ value: 70000 });
   });
 
   it('不编辑的字段从原规则带过来（usageSemantic / by 不该被这次编辑抹掉）', () => {
@@ -337,7 +309,6 @@ describe('ruleFromForm', () => {
         usageSemantic: 'openai',
         basePrice: { by: ['size'] },
       },
-      15,
     );
 
     expect(rule.usageSemantic).toBe('openai');
@@ -350,17 +321,16 @@ describe('ruleFromForm', () => {
         priceKind: 'table',
         priceTable: [
           { key: 'size=1k', value: '70', originalMc: null },
-          { key: 'size=2k', value: '6.666667', originalMc: 100000 },
+          { key: 'size=2k', value: '100', originalMc: 100000 },
         ],
       }),
       {},
-      15,
     );
 
     expect(rule.basePrice).toMatchObject({
       kind: 'table',
       value: null,
-      table: { 'size=1k': 1050000, 'size=2k': 100000 },
+      table: { 'size=1k': 70000, 'size=2k': 100000 },
     });
     expect(rule).not.toHaveProperty('dims');
     expect(rule).not.toHaveProperty('multipliers');
@@ -376,7 +346,6 @@ describe('ruleFromForm', () => {
           ],
         }),
         {},
-        15,
       ),
     ).toThrow(/键重复/);
   });
@@ -392,7 +361,6 @@ describe('ruleFromForm', () => {
           ],
         }),
         {},
-        15,
       ),
     ).toThrow(/键重复/);
   });
@@ -404,7 +372,6 @@ describe('ruleFromForm', () => {
         multipliers: [{ key: 'usage.referenceCount', value: '12000' }],
       }),
       {},
-      15,
     );
 
     expect(rule.dims).toEqual({ 'usage.succeededSlots': 4000 });
@@ -417,9 +384,8 @@ describe('formFromRule → ruleFromForm 往返', () => {
     const original = DOC_RULE;
 
     const back = ruleFromForm(
-      formFromRule('seedance-2.5', 'text2video', original, 15),
+      formFromRule('seedance-2.5', 'text2video', original),
       original,
-      15,
     );
 
     expect(back).toEqual(original);
@@ -446,13 +412,13 @@ describe('formFromRule → ruleFromForm 往返', () => {
       rounding: 'halfUp',
     };
 
-    const back = ruleFromForm(formFromRule('m', 'video', rule, 15), rule, 15);
+    const back = ruleFromForm(formFromRule('m', 'video', rule), rule);
 
     expect(back.basePrice).toMatchObject({ kind: 'table', table: rule.basePrice.table });
   });
 
   it('空规则给出一份能直接编辑的默认表单', () => {
-    const form = formFromRule('m', 't', {}, 15);
+    const form = formFromRule('m', 't', {});
 
     expect(form).toMatchObject({
       baseUnit: '',
@@ -472,35 +438,11 @@ describe('token 计价的规则编辑', () => {
     minCredits: 1,
     maxCredits: null,
     rounding: 'halfUp',
-    tokenEstimate: {
-      divisor: 1024,
-      fps: 24,
-      inputSecondsKey: 'video_input_seconds',
-      dimensions: { 'resolution=720p|aspect_ratio=16:9': '1248x704' },
-    },
   };
-
-  it('★ 读出来再写回去：tokenEstimate 的**合法键**与价格表原样保留，退役的 dimensions 被丢掉', () => {
-    const tableBack = ruleFromForm(
-      formFromRule('seedance-2.0', 'video', TOKEN_RULE, 15),
-      TOKEN_RULE,
-      15,
-    );
-    const { dimensions: _retired, ...tokenKept } = TOKEN_RULE.tokenEstimate;
-    expect(tableBack).toMatchObject({ ...TOKEN_RULE, tokenEstimate: tokenKept });
-    expect(tableBack.tokenEstimate).toEqual(tokenKept);
-    expect(tableBack.tokenEstimate).not.toHaveProperty('dimensions');
-    expect(tableBack.basePrice).toMatchObject({ table: TOKEN_RULE.basePrice.table });
-
-    const unsetRule = { ...TOKEN_RULE, basePrice: { kind: 'unset', by: ['video'] } };
-    expect(
-      ruleFromForm(formFromRule('seedance-2.5', 'video', unsetRule, 15), unsetRule, 15),
-    ).toEqual({ ...unsetRule, tokenEstimate: tokenKept });
-  });
 
   it('★ 计价方式选「单价待配」→ 写入 kind=unset，且**不带任何价**', () => {
     const form = { ...emptyRuleForm(), modelId: 'seedance-2.5', taskType: 'video', priceKind: 'unset' as const };
-    const rule = ruleFromForm(form, TOKEN_RULE, 15);
+    const rule = ruleFromForm(form, TOKEN_RULE);
 
     expect(rule.basePrice).toEqual({ kind: 'unset', by: ['video'] });
     expect(rule.basePrice).not.toHaveProperty('table');
@@ -516,119 +458,11 @@ describe('token 计价的规则编辑', () => {
       priceTable: [],
     };
 
-    expect(ruleFormError(form, 15)).toBeNull();
+    expect(ruleFormError(form)).toBeNull();
   });
 
-  it('★ 勾了 token 估算就必须把除数 / 帧率配全（半配会发布失败）', () => {
-    const base: RuleForm = {
-      ...emptyRuleForm(),
-      modelId: 'm',
-      taskType: 'video',
-      baseUnit: 'usage.c',
-      priceKind: 'table',
-      priceTable: [{ key: 'resolution=720p|video=0', value: '37', originalMc: null }],
-      tokenEstimateEnabled: true,
-    };
-
-    expect(ruleFormError(base, 15)).toBeNull();
-    expect(ruleFormError({ ...base, tokenDivisor: '' }, 15)).toContain('除数');
-    expect(ruleFormError({ ...base, tokenFps: '0' }, 15)).toContain('帧率');
-  });
-
-  it('★ 取消勾选 → tokenEstimate 整块删掉（不留半配的残骸，那会发布失败）', () => {
-    const form = { ...formFromRule('m', 'video', TOKEN_RULE, 15), tokenEstimateEnabled: false };
-    const rule = ruleFromForm(form, TOKEN_RULE, 15);
-
-    expect(rule).not.toHaveProperty('tokenEstimate');
-  });
-
-  it('★ 清空输入时长键 → 明确不要那一项（不能因为原文档里有就留着）', () => {
-    const form = { ...formFromRule('m', 'video', TOKEN_RULE, 15), tokenInputSecondsKey: '  ' };
-    const rule = ruleFromForm(form, TOKEN_RULE, 15);
-
-    expect(rule.tokenEstimate).not.toHaveProperty('inputSecondsKey');
-    expect(rule.tokenEstimate?.divisor).toBe(1024);
-  });
-
-  it('★ 最低 token 用量表：读得出、写得回，往返无损', () => {
-    const withFloor = {
-      ...TOKEN_RULE,
-      tokenEstimate: {
-        ...TOKEN_RULE.tokenEstimate,
-        minimumTokens: { 'resolution=480p|aspect_ratio=16:9|duration=5': 200000 },
-      },
-    };
-    const form = formFromRule('seedance-2.0', 'video', withFloor, 15);
-
-    expect(form.tokenMinimumTokens).toEqual([
-      { key: 'resolution=480p|aspect_ratio=16:9|duration=5', value: '200000' },
-    ]);
-    const { dimensions: _retired2, ...floorTokenKept } = withFloor.tokenEstimate;
-    expect(ruleFromForm(form, withFloor, 15)).toMatchObject({ ...withFloor, tokenEstimate: floorTokenKept });
-    expect(ruleFromForm(form, withFloor, 15).tokenEstimate?.minimumTokens).toEqual(
-      withFloor.tokenEstimate.minimumTokens,
-    );
-  });
-
-  it('★ 最低 token 用量表整块删空 → 从文档里去掉（「我删了」必须真的删掉）', () => {
-    const withFloor = {
-      ...TOKEN_RULE,
-      tokenEstimate: {
-        ...TOKEN_RULE.tokenEstimate,
-        minimumTokens: { 'resolution=480p|aspect_ratio=16:9|duration=5': 200000 },
-      },
-    };
-    const form = { ...formFromRule('m', 'video', withFloor, 15), tokenMinimumTokens: [] };
-    const rule = ruleFromForm(form, withFloor, 15);
-
-    expect(rule.tokenEstimate).not.toHaveProperty('minimumTokens');
-    expect(rule.tokenEstimate?.divisor).toBe(1024);
-  });
-
-  it('★ 最低 token 用量的值必须是正整数（0 会静默失效，负数会让 max() 永远取估算值）', () => {
-    const base: RuleForm = {
-      ...emptyRuleForm(),
-      modelId: 'm',
-      taskType: 'video',
-      priceKind: 'unset' as const,
-      tokenEstimateEnabled: true,
-    };
-
-    expect(ruleFormError(base, 15)).toBeNull();
-    expect(ruleFormError({ ...base, tokenMinimumTokens: [{ key: 'k', value: '0' }] }, 15)).toContain(
-      '正整数',
-    );
-    expect(
-      ruleFormError({ ...base, tokenMinimumTokens: [{ key: 'k', value: '-1' }] }, 15),
-    ).toContain('正整数');
-    expect(
-      ruleFormError({ ...base, tokenMinimumTokens: [{ key: '', value: '100' }] }, 15),
-    ).toContain('规格键');
-    expect(
-      ruleFormError(
-        { ...base, tokenMinimumTokens: [{ key: 'resolution=480p', value: '100' }] },
-        15,
-      ),
-    ).toBeNull();
-  });
-
-  it('不勾 token 估算时，最低 token 用量表里的残行不该拦住保存（整块不写出去）', () => {
-    const form = {
-      ...emptyRuleForm(),
-      modelId: 'm',
-      taskType: 'image',
-      priceKind: 'const' as const,
-      priceValue: { value: '2', originalMc: null },
-      tokenEstimateEnabled: false,
-      tokenMinimumTokens: [{ key: '', value: '' }],
-    };
-
-    expect(ruleFormError(form, 15)).toBeNull();
-    expect(ruleFromForm(form, {}, 15)).not.toHaveProperty('tokenEstimate');
-  });
-
-  it('基准维度候选里有 usage.c（否则界面根本选不出「按 token 计价」）', () => {
-    expect(BASE_UNIT_OPTIONS.map((o) => o.value)).toContain('usage.c');
+  it('基准维度候选里不再有 usage.c（视频不再按 token 计价）', () => {
+    expect(BASE_UNIT_OPTIONS.map((o) => o.value)).not.toContain('usage.c');
   });
 
 });
@@ -662,13 +496,13 @@ describe('维度绝对加价 dimPrices', () => {
     ...patch,
   });
 
-  it('★ 读出来：单价渲染成元、原 mc 与「首张免费」一起带上', () => {
-    const read = formFromRule('m', 'image', DIM_PRICE_RULE, 15);
+  it('★ 读出来：单价渲染成积分数、原 mc 与「首张免费」一起带上', () => {
+    const read = formFromRule('m', 'image', DIM_PRICE_RULE);
 
     expect(read.dimPrices).toEqual([
       {
         key: 'usage.referenceCount',
-        value: '0.02',
+        value: '0.3',
         originalMc: 300,
         firstFree: true,
         originalSpec: { unitMc: 300, firstFree: true },
@@ -685,75 +519,71 @@ describe('维度绝对加价 dimPrices', () => {
       },
     };
 
-    const back = ruleFromForm(formFromRule('m', 'image', original, 15), original, 15);
+    const back = ruleFromForm(formFromRule('m', 'image', original), original);
 
     expect(back).toEqual(original);
     expect(back.dimPrices?.['usage.seconds']).toEqual({ unitMc: 1800, futureOpt: '别删我' });
   });
 
-  it('★ 没改过的那行原值写回，新填的按元换算成 mc', () => {
-    const read = formFromRule('m', 'image', DIM_PRICE_RULE, 15);
+  it('★ 没改过的那行原值写回，新填的按积分换算成 mc', () => {
+    const read = formFromRule('m', 'image', DIM_PRICE_RULE);
     const rule = ruleFromForm(
       {
         ...read,
         dimPrices: [...read.dimPrices, row({ key: 'usage.seconds', value: '0.03' })],
       },
       DIM_PRICE_RULE,
-      15,
     );
 
     expect(rule.dimPrices).toEqual({
       'usage.referenceCount': { unitMc: 300, firstFree: true },
-      'usage.seconds': { unitMc: 450 },
+      'usage.seconds': { unitMc: 30 },
     });
   });
 
   it('★ 整表删空 → 从文档里去掉（「我删了」必须真的删掉）', () => {
-    const read = formFromRule('m', 'image', DIM_PRICE_RULE, 15);
-    const rule = ruleFromForm({ ...read, dimPrices: [] }, DIM_PRICE_RULE, 15);
+    const read = formFromRule('m', 'image', DIM_PRICE_RULE);
+    const rule = ruleFromForm({ ...read, dimPrices: [] }, DIM_PRICE_RULE);
 
     expect(rule).not.toHaveProperty('dimPrices');
   });
 
   it('★ 维度重复直接报错，不悄悄覆盖（覆盖会丢掉一条本来生效的配置）', () => {
-    expect(() => ruleFromForm(form({ dimPrices: [row(), row({ value: '0.05' })] }), {}, 15)).toThrow(
+    expect(() => ruleFromForm(form({ dimPrices: [row(), row({ value: '0.05' })] }), {})).toThrow(
       /键重复/,
     );
   });
 
   it('单价必须是数，且折算回来必须 **> 0**（0 等于「这个维度免费」，该整行删掉）', () => {
-    expect(ruleFormError(form({ dimPrices: [row({ value: '白送' })] }), 15)).toContain(
+    expect(ruleFormError(form({ dimPrices: [row({ value: '白送' })] }))).toContain(
       '单价必须是一个数',
     );
-    expect(ruleFormError(form({ dimPrices: [row({ value: '0' })] }), 15)).toContain('必须大于 0');
-    expect(ruleFormError(form({ dimPrices: [row({ value: '-1' })] }), 15)).toContain(
+    expect(ruleFormError(form({ dimPrices: [row({ value: '0' })] }))).toContain('必须大于 0');
+    expect(ruleFormError(form({ dimPrices: [row({ value: '-1' })] }))).toContain(
       '单价必须是一个数',
     );
-    expect(ruleFormError(form({ dimPrices: [row({ value: '0.0000001' })] }), 15)).toContain(
+    expect(ruleFormError(form({ dimPrices: [row({ value: '0.0000001' })] }))).toContain(
       '必须大于 0',
     );
-    expect(ruleFormError(form({ dimPrices: [row()] }), 15)).toBeNull();
+    expect(ruleFormError(form({ dimPrices: [row()] }))).toBeNull();
   });
 
   it('维度不能空（下拉里选了才算配了这一行）', () => {
-    expect(ruleFormError(form({ dimPrices: [row({ key: '  ' })] }), 15)).toBe(
+    expect(ruleFormError(form({ dimPrices: [row({ key: '  ' })] }))).toBe(
       '维度绝对加价的维度不能为空',
     );
   });
 
   it('★ 与积分上限互斥（后端写闸门同一条）：上限计价算不到绝对加价，会少收且静默', () => {
-    expect(ruleFormError(form({ dimPrices: [row()], maxCredits: '50' }), 15)).toContain(
+    expect(ruleFormError(form({ dimPrices: [row()], maxCredits: '50' }))).toContain(
       '不能同时配',
     );
-    expect(ruleFormError(form({ dimPrices: [row()] }), 15)).toBeNull();
-    expect(ruleFormError(form({ maxCredits: '50' }), 15)).toBeNull();
+    expect(ruleFormError(form({ dimPrices: [row()] }))).toBeNull();
+    expect(ruleFormError(form({ maxCredits: '50' }))).toBeNull();
   });
 
-  it('★ 读不到换算率就拦下（unitMc 也按元填、要换回 mc）', () => {
-    expect(ruleFormError(form({ priceKind: 'unset', dimPrices: [row()] }), null)).toContain(
-      '读不到换算率',
-    );
-    expect(ruleFormError(form({ priceKind: 'unset', dimPrices: [row({ key: '' })] }), null)).toBe(
+  it('★ 单价待配时不看基准单价，但仍校验绝对加价的维度行', () => {
+    expect(ruleFormError(form({ priceKind: 'unset', dimPrices: [row({ key: '' })] }))).toBe(
       '维度绝对加价的维度不能为空',
     );
   });

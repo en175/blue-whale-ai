@@ -48,19 +48,9 @@ billing:
 
   mq:
     enabled: ${BILLING_MQ_ENABLED:true}
-    topic-completed: ${BILLING_MQ_TOPIC_COMPLETED:generation-job-completed}
     topic-failed: ${BILLING_MQ_TOPIC_FAILED:generation-job-failed}
 
   reconciliation:
-
-    sweeper:
-      fixed-delay: ${BILLING_SWEEP_FIXED_DELAY:PT10M}
-      initial-delay: ${BILLING_SWEEP_INITIAL_DELAY:PT1M}
-      warn-after: ${BILLING_SWEEP_WARN_AFTER:PT1H}
-      release-after: ${BILLING_SWEEP_RELEASE_AFTER:PT3H}
-      auto-release: ${BILLING_SWEEP_AUTO_RELEASE:true}
-      batch-size: ${BILLING_SWEEP_BATCH_SIZE:200}
-      sample-size: ${BILLING_SWEEP_SAMPLE_SIZE:10}
 
     self-check:
       cron: ${BILLING_SELF_CHECK_CRON:0 0 3 * * *}

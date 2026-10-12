@@ -1,5 +1,5 @@
 import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
-import { createBillingHold, type BillingHold } from "@lib/shared/billing/billing-hold.js";
+import { createBillingCharge, type BillingCharge } from "@lib/shared/billing/billing-charge.js";
 import {
   createBillingRelease,
   publishBillingJobFailed,
@@ -60,12 +60,12 @@ export class GenerationJobsController {
     private readonly identity: IdentityService,
   ) {}
 
-  private billingDep?: { hold: BillingHold; release: BillingRelease };
+  private billingDep?: { charge: BillingCharge; release: BillingRelease };
 
   private billing() {
     if (this.billingDep === undefined) {
       this.billingDep = {
-        hold: createBillingHold({
+        charge: createBillingCharge({
           client: sharedBillingClient(),
           resolveTier: (userId) => this.identity.resolveTier(userId),
           logger,
@@ -406,6 +406,7 @@ export class GenerationJobsController {
     const canvasBindingBody = typeof body === "object" && body !== null
       ? (body as { canvas_binding?: unknown }).canvas_binding
       : undefined;
+    const billing = this.billing();
     const result = await handleRetryGenerationJob(
       user.userId,
       projectId,
@@ -416,6 +417,7 @@ export class GenerationJobsController {
         projects: this.project,
         command: this.command.repo,
         materialGate: this.buildMaterialGate(user.userId),
+        billing,
       },
       canvasBindingBody,
     );

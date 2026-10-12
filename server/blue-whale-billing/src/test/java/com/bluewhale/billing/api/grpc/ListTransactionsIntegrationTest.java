@@ -9,7 +9,7 @@ import com.bluewhale.billing.domain.ledger.CreditSource;
 import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
 import com.bluewhale.billing.domain.ledger.Voucher;
 import com.bluewhale.contracts.billing.v1.BillingServiceGrpc;
-import com.bluewhale.contracts.billing.v1.HoldRequest;
+import com.bluewhale.contracts.billing.v1.ChargeRequest;
 import com.bluewhale.contracts.billing.v1.ListTransactionsRequest;
 import com.bluewhale.contracts.billing.v1.ListTransactionsResponse;
 import com.bluewhale.contracts.billing.v1.UserTransaction;
@@ -131,8 +131,8 @@ class ListTransactionsIntegrationTest {
 
 
     @Test
-    void 发放与预扣_各出一行_字段齐备() {
-        stub.hold(hold("cmd-1", 9_101L));
+    void 发放与扣款_各出一行_字段齐备() {
+        stub.charge(charge("cmd-1", 9_101L));
 
         List<UserTransaction> items = list(newPageRequest(20, 1), USER).getItemsList();
 
@@ -140,10 +140,10 @@ class ListTransactionsIntegrationTest {
 
         UserTransaction consume = rowOf(items, "consume");
         assertThat(consume.getDirection()).isEqualTo("out");
-        assertThat(consume.getStatus()).isEqualTo("pending");
+        assertThat(consume.getStatus()).isEqualTo("done");
         assertThat(consume.getAmount()).isEqualTo(100);
         assertThat(consume.getTitle()).isEqualTo(TITLE);
-        assertThat(consume.getSettledAt()).isEmpty();
+        assertThat(consume.getSettledAt()).isNotEmpty();
         assertThat(consume.getCreatedAt()).contains("+08:00");
         assertThat(consume.getId()).startsWith("res:");
 
@@ -157,18 +157,19 @@ class ListTransactionsIntegrationTest {
     }
 
     @Test
-    void 未结算_显示预计消耗且没有结算时刻() {
-        stub.hold(hold("cmd-2", 9_102L));
+    void 扣款行_金额与扣款时刻齐备() {
+        stub.charge(charge("cmd-2", 9_102L));
 
-        UserTransaction pending = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "consume");
+        UserTransaction charged = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "consume");
 
-        assertThat(pending.getStatus()).isEqualTo("pending");
-        assertThat(pending.getAmount()).isEqualTo(100);
+        assertThat(charged.getStatus()).isEqualTo("done");
+        assertThat(charged.getAmount()).isEqualTo(100);
+        assertThat(charged.getSettledAt()).isNotEmpty();
     }
 
     @Test
     void 别人的流水不会串进来() {
-        stub.hold(hold("cmd-3", 9_103L));
+        stub.charge(charge("cmd-3", 9_103L));
 
         List<UserTransaction> mine = list(newPageRequest(20, 1), USER).getItemsList();
         List<UserTransaction> theirs = list(newPageRequest(20, 1), OTHER_USER).getItemsList();
@@ -180,20 +181,18 @@ class ListTransactionsIntegrationTest {
 
 
     @Test
-    void 结算凭证多腿_流水里只出一行() {
-        stub.hold(hold("cmd-4", 9_104L));
-        credits.settle(9_104L, 30);
+    void 扣款凭证多腿_流水里只出一行() {
+        stub.charge(charge("cmd-4", 9_104L));
 
         List<UserTransaction> items = list(newPageRequest(20, 1), USER).getItemsList();
 
-        assertThat(ledgerLegsOf("hold:cmd-4")).isEqualTo(2);
-        assertThat(ledgerLegsOf("settle:9104")).isEqualTo(3);
+        assertThat(ledgerLegsOf("charge:9104")).isEqualTo(2);
         assertThat(items).hasSize(2);
         assertThat(items).filteredOn(item -> item.getType().equals("consume")).hasSize(1);
 
         UserTransaction consume = rowOf(items, "consume");
         assertThat(consume.getStatus()).isEqualTo("done");
-        assertThat(consume.getAmount()).isEqualTo(30);
+        assertThat(consume.getAmount()).isEqualTo(100);
         assertThat(consume.getSettledAt()).isNotEmpty();
         assertThat(consume.getTitle()).isEqualTo(TITLE);
 
@@ -201,10 +200,10 @@ class ListTransactionsIntegrationTest {
     }
 
     @Test
-    void 全额返还_那条pending行结算到0而不是消失() {
-        stub.hold(hold("cmd-5", 9_105L));
+    void 全额返还_那条扣款行归零而不是消失() {
+        stub.charge(charge("cmd-5", 9_105L));
 
-        String pendingId = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "consume").getId();
+        String chargedId = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "consume").getId();
 
         credits.refund(9_105L, "任务失败");
 
@@ -216,7 +215,7 @@ class ListTransactionsIntegrationTest {
         assertThat(consume.getDirection()).isEqualTo("out");
         assertThat(consume.getStatus()).isEqualTo("done");
         assertThat(consume.getAmount()).isEqualTo(0);
-        assertThat(consume.getId()).isEqualTo(pendingId);
+        assertThat(consume.getId()).isEqualTo(chargedId);
         assertThat(consume.getTitle()).isEqualTo(TITLE + " · 退回");
         assertThat(consume.getSettledAt()).isNotEmpty();
 
@@ -233,7 +232,7 @@ class ListTransactionsIntegrationTest {
         long b = credits.grant(USER, CreditSource.INVITE, 20, null, "grant", "i", "page-b");
         long c = credits.grant(USER, CreditSource.REDEEM, 30, null, "grant", "r", "page-c");
         long d = credits.grant(USER, CreditSource.BONUS, 40, null, "grant", "b", "page-d");
-        long res = holdAndReturnReservationId("cmd-6", 9_106L);
+        long res = chargeAndReturnReservationId("cmd-6", 9_106L);
         long seed = lotIdOf("seed-1");
         jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 6 HOUR WHERE id = ?", seed);
         jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 5 HOUR WHERE id = ?", a);
@@ -266,7 +265,7 @@ class ListTransactionsIntegrationTest {
     void 翻页_跨状态转换不重不漏() {
         long a = credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "tr-a");
         long b = credits.grant(USER, CreditSource.INVITE, 20, null, "grant", "i", "tr-b");
-        long res = holdAndReturnReservationId("cmd-tr", 9_120L);
+        long res = chargeAndReturnReservationId("cmd-tr", 9_120L);
         long seed = lotIdOf("seed-1");
         jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 4 HOUR WHERE id = ?", seed);
         jdbc.update("UPDATE billing_credit_lots SET gmt_create = NOW() - INTERVAL 3 HOUR WHERE id = ?", a);
@@ -277,7 +276,7 @@ class ListTransactionsIntegrationTest {
         assertThat(first.getItemsList()).extracting(UserTransaction::getId)
                 .containsExactly("res:" + res, "lot:" + b);
         assertThat(first.getItemsList().get(0).getType()).isEqualTo("consume");
-        assertThat(first.getItemsList().get(0).getStatus()).isEqualTo("pending");
+        assertThat(first.getItemsList().get(0).getStatus()).isEqualTo("done");
         assertThat(first.getPage().getTotal()).isEqualTo(4);
 
         credits.refund(9_120L, "任务失败");
@@ -311,7 +310,7 @@ class ListTransactionsIntegrationTest {
     @Test
     void 类型过滤_空字符串等于全部() {
         credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "filter-daily");
-        stub.hold(hold("cmd-7", 9_107L));
+        stub.charge(charge("cmd-7", 9_107L));
 
         List<String> types = list(newPageRequest(20, 1), USER).getItemsList().stream()
                 .map(UserTransaction::getType)
@@ -325,11 +324,11 @@ class ListTransactionsIntegrationTest {
     @Test
     void 类型过滤_只返回该类型() {
         credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "filter-daily");
-        stub.hold(hold("cmd-8", 9_108L));
+        stub.charge(charge("cmd-8", 9_108L));
 
         List<UserTransaction> consume = list("consume", USER).getItemsList();
         assertThat(consume).hasSize(1);
-        assertThat(consume.get(0).getStatus()).isEqualTo("pending");
+        assertThat(consume.get(0).getStatus()).isEqualTo("done");
 
         List<UserTransaction> daily = list("daily", USER).getItemsList();
         assertThat(daily).hasSize(1);
@@ -341,7 +340,7 @@ class ListTransactionsIntegrationTest {
     @Test
     void 类型过滤_可多值_一次取消耗与过期() {
         credits.grant(USER, CreditSource.DAILY, 10, null, "grant", "d", "filter-multi");
-        stub.hold(hold("cmd-9", 9_109L));
+        stub.charge(charge("cmd-9", 9_109L));
 
         List<String> types = list(List.of("consume", "expire"), newPageRequest(20, 1), USER)
                 .getItemsList().stream()
@@ -461,8 +460,8 @@ class ListTransactionsIntegrationTest {
 
     @Test
     void 任务id过滤_只取指定任务的流水() {
-        stub.hold(hold("cmd-j1", 9_301L));
-        stub.hold(hold("cmd-j2", 9_302L));
+        stub.charge(charge("cmd-j1", 9_301L));
+        stub.charge(charge("cmd-j2", 9_302L));
 
         assertThat(list(newPageRequest(20, 1), USER).getItemsList()).hasSize(3);
 
@@ -561,8 +560,8 @@ class ListTransactionsIntegrationTest {
         return matched.get(0);
     }
 
-    private HoldRequest hold(String commandId, long jobId) {
-        return HoldRequest.newBuilder()
+    private static ChargeRequest charge(String commandId, long jobId) {
+        return ChargeRequest.newBuilder()
                 .setUserId(USER)
                 .setCommandId(commandId)
                 .setJobId(jobId)
@@ -575,8 +574,8 @@ class ListTransactionsIntegrationTest {
                 .build();
     }
 
-    private long holdAndReturnReservationId(String commandId, long jobId) {
-        stub.hold(hold(commandId, jobId));
+    private long chargeAndReturnReservationId(String commandId, long jobId) {
+        stub.charge(charge(commandId, jobId));
         return jdbc.queryForObject(
                 "SELECT id FROM billing_cost_reservations WHERE generation_job_id = ?",
                 Long.class, jobId);

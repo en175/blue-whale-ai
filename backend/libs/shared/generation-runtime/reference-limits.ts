@@ -1,4 +1,6 @@
 
+import { EDIT_MODE_VIDEO_REFERENCE_MAX, type VideoMode } from "@lib/contracts";
+
 export interface ReferenceLimitFeatures {
   video_reference: boolean;
   video_reference_max: number;
@@ -8,10 +10,20 @@ export interface ReferenceLimitFeatures {
   max_reference_duration_sec: number | null;
 }
 
+export function videoReferenceMax(
+  videoReferenceMax: number,
+  mode?: VideoMode | null,
+): number {
+  return mode === "edit"
+    ? Math.min(EDIT_MODE_VIDEO_REFERENCE_MAX, videoReferenceMax)
+    : videoReferenceMax;
+}
+
 export function checkReferenceLimits(
   features: ReferenceLimitFeatures,
   references: Array<{ type: "image" | "video" | "audio"; duration?: number | undefined }>,
   kind: "image" | "video" | "audio",
+  mode?: VideoMode | null,
 ): string | null {
   if (kind === "image") {
     const imageCount = references.filter((r) => r.type === "image").length;
@@ -44,8 +56,9 @@ export function checkReferenceLimits(
     return "当前模型不支持视频素材参考";
   if (audioRefs.length > 0 && !features.audio_reference)
     return "当前模型不支持音频素材参考";
-  if (videoRefs.length > features.video_reference_max)
-    return `参考视频最多 ${features.video_reference_max} 个`;
+  const videoMax = videoReferenceMax(features.video_reference_max, mode);
+  if (videoRefs.length > videoMax)
+    return `参考视频最多 ${videoMax} 个`;
   if (audioRefs.length > features.audio_reference_max)
     return `参考音频最多 ${features.audio_reference_max} 个`;
   if (features.max_reference_duration_sec != null) {

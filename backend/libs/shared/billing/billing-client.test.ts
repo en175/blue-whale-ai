@@ -8,7 +8,7 @@ import {
   billingEndpoint,
   createBillingClient,
   missingBillingConfig,
-  toBillingHoldError,
+  toBillingChargeError,
 } from './billing-client.js';
 import {
   freshGrpcUrl,
@@ -68,13 +68,13 @@ describe('missingBillingConfig', () => {
   });
 });
 
-describe('toBillingHoldError（Hold 的三条失败语义）', () => {
+describe('toBillingChargeError（Charge 的三条失败语义）', () => {
   function rpc(rawMessage: string, code: Code): ConnectError {
     return new ConnectError(rawMessage, code);
   }
 
   it('★ 算不出价（UNPRICEABLE）→ 4xx + 人话，**不再是 500**', () => {
-    const mapped = toBillingHoldError(
+    const mapped = toBillingChargeError(
       rpc(
         'UNPRICEABLE: 未配置计价规则：doubao-seedream-5-0-pro-260628/image',
         Code.InvalidArgument,
@@ -87,7 +87,7 @@ describe('toBillingHoldError（Hold 的三条失败语义）', () => {
   });
 
   it('★ 原因词与内部细节不外泄 —— 用户看不懂 UNPRICEABLE，也不必知道是哪个模型漏配', () => {
-    const mapped = toBillingHoldError(
+    const mapped = toBillingChargeError(
       rpc(
         'UNPRICEABLE: 未配置计价规则：doubao-seedream-5-0-pro-260628/image',
         Code.InvalidArgument,
@@ -98,7 +98,7 @@ describe('toBillingHoldError（Hold 的三条失败语义）', () => {
   });
 
   it('余额不足（INSUFFICIENT_CREDITS）→ 402 + 码表里那句「账户余额不足，请充值后重试」', () => {
-    const mapped = toBillingHoldError(
+    const mapped = toBillingChargeError(
       rpc('INSUFFICIENT_CREDITS: 可用余额 0，本次需 100', Code.FailedPrecondition),
     );
 
@@ -108,7 +108,7 @@ describe('toBillingHoldError（Hold 的三条失败语义）', () => {
 
   it('billing 不可用（UNAVAILABLE / DeadlineExceeded）→ 503：运维问题，重试有意义', () => {
     for (const code of [Code.Unavailable, Code.DeadlineExceeded]) {
-      expect(toBillingHoldError(rpc('connection refused', code))).toMatchObject({
+      expect(toBillingChargeError(rpc('connection refused', code))).toMatchObject({
         status: 503,
         code: 'billing_unavailable',
       });
@@ -116,20 +116,20 @@ describe('toBillingHoldError（Hold 的三条失败语义）', () => {
   });
 
   it('★ 码与原因词**一起**判：别的 INVALID_ARGUMENT 不许被当成「算不出价」', () => {
-    const mapped = toBillingHoldError(rpc('duration 必须是正整数', Code.InvalidArgument));
+    const mapped = toBillingChargeError(rpc('duration 必须是正整数', Code.InvalidArgument));
 
     expect(mapped).toMatchObject({ status: 502, code: 'billing_error' });
   });
 
   it('billing 内部错误 → 502，既不是 500 也不是「算不出价」', () => {
-    expect(toBillingHoldError(rpc('billing 内部错误', Code.Internal))).toMatchObject({
+    expect(toBillingChargeError(rpc('billing 内部错误', Code.Internal))).toMatchObject({
       status: 502,
     });
   });
 
   it('认不出的错误返回 null —— 我们自己的 bug 不伪装成上游故障（照旧 500）', () => {
-    expect(toBillingHoldError(new Error('BigInt 转换炸了'))).toBeNull();
-    expect(toBillingHoldError('boom')).toBeNull();
+    expect(toBillingChargeError(new Error('BigInt 转换炸了'))).toBeNull();
+    expect(toBillingChargeError('boom')).toBeNull();
   });
 });
 
@@ -141,7 +141,6 @@ describe('queryBalance 的投影', () => {
         expect(Number(req.userId)).toBe(9001);
         return create(QueryBalanceResponseSchema, {
           availableCredits: 2_500n,
-          frozenCredits: 100n,
           expiring: [],
           bySource: [
             create(SourceCreditsSchema, { source: 'purchased', credits: 1_500n }),
@@ -154,7 +153,6 @@ describe('queryBalance 的投影', () => {
     const balance = await createBillingClient(billingEndpoint()).queryBalance(9001);
 
     expect(balance.availableCredits).toBe(2_500);
-    expect(balance.frozenCredits).toBe(100);
     expect(balance.bySource).toEqual([
       { source: 'purchased', credits: 1_500 },
       { source: 'bonus', credits: 1_000 },
@@ -165,7 +163,7 @@ describe('queryBalance 的投影', () => {
     freshGrpcUrl();
     grpcBillingService({
       queryBalance: () =>
-        create(QueryBalanceResponseSchema, { availableCredits: 7n, frozenCredits: 0n }),
+        create(QueryBalanceResponseSchema, { availableCredits: 7n }),
     });
 
     const balance = await createBillingClient(billingEndpoint()).queryBalance(9001);

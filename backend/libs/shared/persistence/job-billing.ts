@@ -1,6 +1,14 @@
+import type { BillingCharge } from "@lib/shared/billing/billing-charge.js";
+import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
+
 export interface JobBilling {
-  hold(jobId: number): Promise<void>;
+  charge(jobId: number): Promise<void>;
   release(jobId: number, reason: string): Promise<void>;
+}
+
+export interface JobBillingSource {
+  charge: BillingCharge;
+  release: BillingRelease;
 }
 
 export async function withBillingCompensation<T>(
@@ -11,8 +19,8 @@ export async function withBillingCompensation<T>(
   const held = { jobId: null as number | null };
   try {
     return await run({
-      hold: async (jobId) => {
-        await billing.hold(jobId);
+      charge: async (jobId) => {
+        await billing.charge(jobId);
         held.jobId = jobId;
       },
       release: billing.release,

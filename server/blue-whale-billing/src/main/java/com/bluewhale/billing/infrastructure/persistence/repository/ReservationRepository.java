@@ -3,7 +3,6 @@ package com.bluewhale.billing.infrastructure.persistence.repository;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bluewhale.billing.infrastructure.persistence.po.CostReservationEntity;
 import com.bluewhale.billing.infrastructure.persistence.mapper.CostReservationMapper;
-import com.bluewhale.billing.infrastructure.persistence.row.StaleReservationRow;
 import com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow;
 import com.bluewhale.billing.domain.ledger.Allocation;
 import com.bluewhale.billing.domain.ledger.Reservation;
@@ -11,7 +10,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Repository;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -27,14 +25,14 @@ public class ReservationRepository {
         this.mapper = mapper;
     }
 
-    public long insert(long jobId, long userId, long reservedCredits,
+    public long insert(long jobId, long userId, long chargedCredits,
                        int catalogVersion, int discountBp, String ruleSnapshot, String title,
                        List<Allocation> allocations) {
         CostReservationEntity entity = new CostReservationEntity();
         entity.setGenerationJobId(jobId);
         entity.setUserId(userId);
-        entity.setReservedCredits(reservedCredits);
-        entity.setStatus(Reservation.Status.HELD.key());
+        entity.setReservedCredits(chargedCredits);
+        entity.setStatus(Reservation.Status.CHARGED.key());
         entity.setAllocations(writeAllocations(allocations));
         entity.setCatalogVersion(catalogVersion);
         entity.setDiscountBp(discountBp);
@@ -55,38 +53,16 @@ public class ReservationRepository {
         return entity == null ? null : toReservation(entity);
     }
 
-    public void markSettled(long jobId, long actualCredits, long receivableCredits) {
-        mapper.markSettled(jobId, actualCredits, receivableCredits);
+    public void markRefunded(long jobId, String releaseNote) {
+        mapper.markRefunded(jobId, releaseNote);
     }
 
-    public void markReleased(long jobId, String releaseNote) {
-        mapper.markReleased(jobId, releaseNote);
+    public long sumChargedCredits(LocalDateTime from, LocalDateTime to) {
+        return mapper.sumChargedCredits(from, to);
     }
 
-    public long sumSettledActualCredits(LocalDateTime from, LocalDateTime to) {
-        return mapper.sumSettledActualCredits(from, to);
-    }
-
-    public Map<Long, Long> sumSettledActualByUser(List<Long> userIds) {
-        return UserAmountRow.toMap(mapper.sumSettledActualByUser(userIds));
-    }
-
-    public List<StaleHold> listStaleHeld(Duration olderThan, int limit) {
-        return mapper.listStaleHeld(olderThan.getSeconds(), limit).stream()
-                .map(ReservationRepository::toStaleHold)
-                .toList();
-    }
-
-    public record StaleHold(long jobId, long userId, long reservedCredits, long heldSeconds) {
-
-        public long heldHours() {
-            return heldSeconds / 3600;
-        }
-    }
-
-    private static StaleHold toStaleHold(StaleReservationRow row) {
-        return new StaleHold(row.getGenerationJobId(), row.getUserId(),
-                row.getReservedCredits(), row.getHeldSeconds());
+    public Map<Long, Long> sumChargedByUser(List<Long> userIds) {
+        return UserAmountRow.toMap(mapper.sumChargedByUser(userIds));
     }
 
     private static Reservation toReservation(CostReservationEntity entity) {

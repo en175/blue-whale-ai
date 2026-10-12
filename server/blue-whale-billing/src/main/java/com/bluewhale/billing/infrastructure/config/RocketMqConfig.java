@@ -1,6 +1,6 @@
 package com.bluewhale.billing.infrastructure.config;
 
-import com.bluewhale.billing.application.SettlementService;
+import com.bluewhale.billing.application.CreditService;
 import com.bluewhale.billing.infrastructure.mq.JobEventConsumer;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 import org.apache.rocketmq.client.apis.ClientConfigurationBuilder;
@@ -26,11 +26,11 @@ public class RocketMqConfig {
 
         if (props.endpoints().isBlank()) {
             throw new IllegalStateException("""
-                    ROCKETMQ_ENDPOINTS 未配置：结算/返还消费者无法启动。
-                      · 需要验结算/返还 → 注入 ROCKETMQ_ENDPOINTS（以及 AK/SK，若集群需要）
-                      · 只想在本地验 Hold → 设 BILLING_MQ_ENABLED=false 跳过整个消费者
-                    不能「静默跳过」：服务会照常起来、Hold 也照常工作，但任务跑完后
-                    没人结算也无人解冻，用户的钱一直冻着，而所有健康检查都是绿的。""");
+                    ROCKETMQ_ENDPOINTS 未配置：失败返还消费者无法启动。
+                      · 需要验返还 → 注入 ROCKETMQ_ENDPOINTS（以及 AK/SK，若集群需要）
+                      · 只想在本地验扣款 → 设 BILLING_MQ_ENABLED=false 跳过整个消费者
+                    不能「静默跳过」：服务会照常起来、扣款也照常工作，但任务失败后
+                    没人返还，用户被扣的钱收不回来，而所有健康检查都是绿的。""");
         }
 
         ClientConfigurationBuilder builder = ClientConfiguration.newBuilder()
@@ -46,13 +46,11 @@ public class RocketMqConfig {
 
     @Bean(destroyMethod = "close")
     public JobEventConsumer jobEventConsumer(ClientConfiguration clientConfiguration,
-                                             SettlementService settlement,
-                                             @Value("${billing.mq.topic-completed:generation-job-completed}")
-                                             String completedTopic,
+                                             CreditService credits,
                                              @Value("${billing.mq.topic-failed:generation-job-failed}")
                                              String failedTopic) throws Exception {
         return new JobEventConsumer(clientConfiguration, CONSUMER_GROUP,
-                completedTopic, failedTopic, settlement);
+                failedTopic, credits);
     }
 
     public record RocketMqProperties(String endpoints, String accessKey,

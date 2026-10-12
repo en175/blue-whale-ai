@@ -4,17 +4,17 @@ import com.bluewhale.billing.common.error.BillingErrorTaxonomy;
 import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
 import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.application.BillingApplicationService;
-import com.bluewhale.billing.application.command.HoldCommand;
+import com.bluewhale.billing.application.command.ChargeCommand;
 import com.bluewhale.billing.application.command.QuoteQuery;
 import com.bluewhale.billing.application.view.TransactionView;
-import com.bluewhale.billing.domain.ledger.HoldResult;
+import com.bluewhale.billing.domain.ledger.ChargeResult;
 import com.bluewhale.billing.domain.pricing.PricingResult;
 import com.bluewhale.billing.domain.pricing.Usage;
 import com.bluewhale.contracts.billing.v1.AppliedDiscount;
 import com.bluewhale.contracts.billing.v1.BillingServiceGrpc;
+import com.bluewhale.contracts.billing.v1.ChargeRequest;
+import com.bluewhale.contracts.billing.v1.ChargeResponse;
 import com.bluewhale.contracts.billing.v1.ExpiringLot;
-import com.bluewhale.contracts.billing.v1.HoldRequest;
-import com.bluewhale.contracts.billing.v1.HoldResponse;
 import com.bluewhale.contracts.billing.v1.ListLotsRequest;
 import com.bluewhale.contracts.billing.v1.ListLotsResponse;
 import com.bluewhale.contracts.billing.v1.ListTransactionsRequest;
@@ -56,11 +56,11 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
     }
 
     @Override
-    public void hold(HoldRequest request, StreamObserver<HoldResponse> observer) {
+    public void charge(ChargeRequest request, StreamObserver<ChargeResponse> observer) {
         try {
             LocalDateTime submittedAt = LocalDateTime.now();
 
-            HoldResult result = billing.hold(new HoldCommand(
+            ChargeResult result = billing.charge(new ChargeCommand(
                     request.getUserId(),
                     request.getCommandId(),
                     request.getJobId(),
@@ -72,8 +72,8 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                     submittedAt,
                     request.getRuleSnapshot()));
 
-            observer.onNext(HoldResponse.newBuilder()
-                    .setReservedCredits(result.reservedCredits())
+            observer.onNext(ChargeResponse.newBuilder()
+                    .setChargedCredits(result.chargedCredits())
                     .setCatalogVersion(result.catalogVersion())
                     .setDuplicated(result.duplicated())
                     .build());
@@ -89,8 +89,7 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
             BalanceView balance = billing.balance(request.getUserId());
 
             QueryBalanceResponse.Builder response = QueryBalanceResponse.newBuilder()
-                    .setAvailableCredits(balance.availableCredits())
-                    .setFrozenCredits(balance.frozenCredits());
+                    .setAvailableCredits(balance.availableCredits());
             for (BalanceView.ExpiringLot lot : balance.expiring()) {
                 response.addExpiring(ExpiringLot.newBuilder()
                         .setCredits(lot.credits())
@@ -204,33 +203,14 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
     public void quote(QuoteRequest request, StreamObserver<QuoteResponse> observer) {
         try {
             LocalDateTime pricedAt = LocalDateTime.now();
-            List<com.bluewhale.contracts.billing.v1.UsageLine> lines = request.getUsageList();
 
-            PricingResult priced;
-            long credits;
-            if (lines.isEmpty()) {
-                priced = billing.quote(new QuoteQuery(
-                        request.getUserId(), request.getModelId(), request.getTaskType(),
-                        Map.copyOf(request.getSpecs().getAttrsMap()), request.getTier(),
-                        Usage.empty(), pricedAt, request.getRuleSnapshot()));
-                credits = priced.credits();
-            } else {
-                long total = 0;
-                PricingResult first = null;
-                for (var line : lines) {
-                    PricingResult one = billing.quote(new QuoteQuery(
-                            request.getUserId(), line.getModelId(), line.getTaskType(),
-                            Map.copyOf(line.getSpecs().getAttrsMap()), request.getTier(),
-                            toUsage(line), pricedAt, ruleSnapshotForLine(request, line)));
-                    if (first == null) first = one;
-                    total += one.credits();
-                }
-                priced = first;
-                credits = total;
-            }
+            PricingResult priced = billing.quote(new QuoteQuery(
+                    request.getUserId(), request.getModelId(), request.getTaskType(),
+                    Map.copyOf(request.getSpecs().getAttrsMap()), request.getTier(),
+                    Usage.empty(), pricedAt, request.getRuleSnapshot()));
 
             QuoteResponse.Builder response = QuoteResponse.newBuilder()
-                    .setCredits(credits)
+                    .setCredits(priced.credits())
                     .setCatalogVersion(billing.catalogVersion())
                     .setDiscountBp(priced.discount().factorBp());
             for (var applied : priced.appliedDiscounts()) {
@@ -247,10 +227,6 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
         }
     }
 
-    private static Usage toUsage(com.bluewhale.contracts.billing.v1.UsageLine line) {
-        return Usage.ofKeys(line.getModelId(), line.getTaskType(), line.getQuantitiesMap());
-    }
-
     private static LocalDateTime parseBound(String raw, String field) {
         if (raw == null || raw.isEmpty()) {
             return null;
@@ -260,13 +236,6 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
         } catch (DateTimeParseException e) {
             throw new IllegalArgumentException("时间参数须为带偏移的 RFC3339（" + field + "）：" + raw);
         }
-    }
-
-    private static String ruleSnapshotForLine(QuoteRequest request,
-                                              com.bluewhale.contracts.billing.v1.UsageLine line) {
-        boolean sameKey = line.getModelId().equals(request.getModelId())
-                && line.getTaskType().equals(request.getTaskType());
-        return sameKey ? request.getRuleSnapshot() : "";
     }
 
     private Status toStatus(RuntimeException e) {

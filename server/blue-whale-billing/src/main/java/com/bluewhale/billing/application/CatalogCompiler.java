@@ -5,7 +5,6 @@ import com.bluewhale.billing.domain.pricing.BasePriceResolver;
 import com.bluewhale.billing.domain.pricing.CompiledRule;
 import com.bluewhale.billing.domain.pricing.PricingKeys;
 import com.bluewhale.billing.domain.pricing.RoundingPolicy;
-import com.bluewhale.billing.domain.pricing.TokenEstimator;
 import com.bluewhale.billing.domain.pricing.UsageDim;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -87,8 +86,7 @@ public final class CatalogCompiler {
                 rule.unitDenominator() == null ? 1L : rule.unitDenominator(),
                 rule.minCredits() == null ? 1L : rule.minCredits(),
                 rule.maxCredits(),
-                compileRounding(rule.rounding()),
-                compileTokenEstimate(rule.tokenEstimate()));
+                compileRounding(rule.rounding()));
     }
 
     static Map<UsageDim, CompiledRule.DimPrice> compileDimPrices(Map<String, CatalogDocument.DimPrice> raw) {
@@ -108,28 +106,6 @@ public final class CatalogCompiler {
                     price.unitMc(), Boolean.TRUE.equals(price.firstFree())));
         }
         return Map.copyOf(compiled);
-    }
-
-    private static TokenEstimator compileTokenEstimate(CatalogDocument.TokenEstimate estimate) {
-        if (estimate == null) {
-            return null;
-        }
-        if (estimate.divisor() == null) {
-            throw new CompileException("tokenEstimate.divisor 必填（官方 1024）");
-        }
-        if (estimate.fps() == null) {
-            throw new CompileException("tokenEstimate.fps 必填（官方对照表是 24）");
-        }
-        if (estimate.inputSecondsKey() != null && estimate.inputSecondsKey().isBlank()) {
-            throw new CompileException("tokenEstimate.inputSecondsKey 不能是空白串"
-                    + "（留空等于配了个查不到的键；要「不加输入时长那一项」就整个别写这个字段）");
-        }
-        try {
-            return TokenEstimator.from(estimate.divisor(), estimate.fps(),
-                    estimate.inputSecondsKey(), estimate.minimumTokens());
-        } catch (IllegalArgumentException e) {
-            throw new CompileException("tokenEstimate 不合法：" + e.getMessage(), e);
-        }
     }
 
     private static BasePriceResolver compileBasePrice(CatalogDocument.BasePrice price) {

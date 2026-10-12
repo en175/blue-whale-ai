@@ -26,9 +26,9 @@
 
 | 表 / 列 | 处置 |
 | --- | --- |
-| `billing_credit_lots.frozen` | 退役。列是否物理删除按[迁移策略](../adr/0061-prisma-persistence-and-migration-policy.md)走：镜像不做 `migrate deploy`，先上新镜像再迁库。 |
+| `billing_credit_lots.frozen` | 退役（已落地）。物理删除走 billing 自己的 Flyway 轨（`server/blue-whale-billing/src/main/resources/db/migration/V11__drop_lot_frozen.sql`：`DROP CHECK ck_lots__bounds` → `DROP COLUMN frozen` → `MODIFY COLUMN remaining … COMMENT '剩余总量（积分）'`（清掉 V3 遗留的「含冻结」过时文案）→ 按去 `frozen` 的口径重建 `ck_lots__bounds`）——`bw_billing` 由 Flyway 管 schema，**不走 Prisma 三轨**。镜像不做 `migrate deploy`，**先上新镜像（已摘掉 `frozen` 读写）再迁库**。 |
 | 账本科目 `FROZEN` / `RECEIVABLE` | 不再产生新分录。 |
-| `billing_cost_reservations` | **待定**：或改语义为「这单扣了多少、退没退」的记录（保留 `uk_reservation__job` 作防重复扣），或整体退役、把幂等全部压到账本 `charge:<jobId>`。倾向前者——那张唯一键是现在真正生效的防重防线。 |
+| `billing_cost_reservations` | **保留**：表名列名都不动，`uk_reservation__job` 继续作防重复扣的唯一键（现役防重防线）。语义收敛为「这单扣了多少、退没退」的记录，不再承担预扣预留。 |
 | `billing_ledger_entries` | 幂等基键改为 `charge:<jobId>` / `refund:<jobId>`（现在的 `"hold:" + commandId` 实际不命中）。 |
 | `billing_pricing_catalogs.document.creditsPerYuan` | 退出定价路径，只剩自定义充值报价一处用途。 |
 
@@ -90,8 +90,9 @@
   { "multipliers": { "usage.videoEdit": 20000 } }
   ```
 
-  数量取**参考视频秒数**（编辑模式产出时长 = 参考视频时长），单段参考。
-  例：2.5 / 480p，引用 10 秒视频做编辑 → `10 × 20 × 2 = 400 积分`。
+  数量口径与「含视频输入」一致：**2.5 系 = 生成秒数 + 参考总秒数**（产出时长跟参考走，所以生成秒数 = 参考秒数 → 实际是参考秒数的两倍），**2.0 系只算生成秒数**（系数里已折进视频输入）。`reference_seconds` 在编辑模式下**照写**，不做特殊去重。
+  例：2.5 / 480p，引用 10 秒视频做编辑 → 产出 10 秒 + 参考 10 秒 = 20 秒 → `20 × 20 × 2 = 800 积分`。
+  对照同模型「全能参考」：生成 5 秒 + 参考 10 秒 = 15 秒 → `15 × 20 = 300 积分`（无 ×2）。
 - 以上为**初始值**，运营在管理端可改。
 
 ### 图片（口径不变，只换单位）
@@ -107,10 +108,21 @@
 ```json
 {
   "baseUnit": "usage.characters",
-  "basePrice": { "kind": "const", "value": 10 },
-  "unitDenominator": 1,
+  "basePrice": { "kind": "const", "value": 1000 },
+  "unitDenominator": 100,
   "minCredits": 1
 }
 ```
 
-每字 10 mc = 0.01 积分 → **每 100 字 1 积分**。原按秒规则（`usage.seconds` / 75 mc / `maxCredits: 12`）整体替换，`maxCredits` 不再需要（字数提交时已知）。
+配置本身就读作「**每 100 字 1 积分**」：`unitDenominator` = 多少字算一个计费单位，`basePrice` = 该单位多少 mc（1000 mc = 1 积分）。等价于每字 10 mc，但与业务口径同形——管理端不必把它换算成「元 / 字符」那种读不懂、还显示成「0 积分」的形态。原按秒规则（`usage.seconds` / 75 mc / `maxCredits: 12`）整体替换，`maxCredits` 不再需要（字数提交时已知）。
+
+## 七、指标口径变化：管理端「总消耗」
+
+`AdminConsumedCredits`（以及用户面板/管理端用户列表里的「总消耗」）取数从 `billing_cost_reservations` 的 `status = 'settled'` 改为 `status = 'charged'`：
+
+- 旧口径：「**已结算的实际消耗**」——任务到终态、按上报用量结算后回填。
+- 新口径：「**已扣未退**」——提交即扣后，凡是扣款成功且尚未退款的单都计入；任务失败触发全额退款后该单转 `refunded`，从统计里剔除。
+
+由于本单**尚未上线、线上无历史数据**，这次口径切换**不做回填、也不追溯既有区间**：`billing_cost_reservations` 里不会有旧 `settled` 行残留可比。
+
+⚠️ 运营若发现「总消耗」这个数字的**口径**变了（例如同一时间窗口与改动前的报表对不上、或某笔失败任务不再计入），属**预期行为**，不是数据异常；需要的是按新口径重读，而不是修数。

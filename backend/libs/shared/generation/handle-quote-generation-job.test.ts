@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RESOURCE_NOT_FOUND_CODE } from "@lib/contracts";
 
 import type { BillingClient } from "../billing/billing-client.js";
-import { createBillingHold } from "../billing/billing-hold.js";
+import { createBillingCharge } from "../billing/billing-charge.js";
 import { createBillingQuote } from "../billing/billing-quote.js";
 import { handleCreateGenerationJob } from "./handle-create-generation-job.js";
 import {
@@ -47,14 +47,14 @@ const VIDEO_BODY = {
 };
 
 function fakeBilling() {
-  const hold = vi
+  const charge = vi
     .fn()
-    .mockResolvedValue({ reservedCredits: 0, catalogVersion: 1, duplicated: false });
+    .mockResolvedValue({ chargedCredits: 0, catalogVersion: 1, duplicated: false });
   const quote = vi.fn().mockResolvedValue({ credits: 42n, catalogVersion: 1 });
   const queryBalance = vi.fn();
   return {
-    client: { hold, quote, queryBalance } as unknown as BillingClient,
-    hold,
+    client: { charge, quote, queryBalance } as unknown as BillingClient,
+    charge,
     quote,
     queryBalance,
   };
@@ -113,9 +113,9 @@ function createDeps(
   const createJob = vi.fn(
     async (
       _input: unknown,
-      options?: { billing?: { hold: (jobId: number) => Promise<void> } },
+      options?: { billing?: { charge: (jobId: number) => Promise<void> } },
     ) => {
-      await options?.billing?.hold(1);
+      await options?.billing?.charge(1);
       return { generation_job_id: "1", cursor: 1 };
     },
   );
@@ -131,7 +131,7 @@ function createDeps(
         ),
       } as unknown),
     billing: {
-      hold: createBillingHold({ client, resolveTier, logger }),
+      charge: createBillingCharge({ client, resolveTier, logger }),
       release: vi.fn(async () => {}),
     },
   };
@@ -154,7 +154,7 @@ interface QuoteArgs {
 
 describe("handleQuoteGenerationJob", () => {
   it("★ 与 Hold 同一套 specs、同一个 tier —— 「预览价 = 实扣价」的唯一保证", async () => {
-    const { client, hold, quote, queryBalance } = fakeBilling();
+    const { client, charge, quote, queryBalance } = fakeBilling();
     const resolveTier = vi.fn().mockResolvedValue("pro");
 
     const created = await handleCreateGenerationJob(
@@ -173,7 +173,7 @@ describe("handleQuoteGenerationJob", () => {
       previewDeps(client, resolveTier),
     );
 
-    const holdArg = hold.mock.calls[0]?.[0] as unknown as HoldArgs;
+    const holdArg = charge.mock.calls[0]?.[0] as unknown as HoldArgs;
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
 
     const { prompt: _prompt, ...holdPricingSpecs } = holdArg.specs;
@@ -193,7 +193,7 @@ describe("handleQuoteGenerationJob", () => {
     expect(quoteArg.taskType).toBe(holdArg.taskType);
 
     expect(quote).toHaveBeenCalledTimes(1);
-    expect(hold).toHaveBeenCalledTimes(1);
+    expect(charge).toHaveBeenCalledTimes(1);
     expect(queryBalance).not.toHaveBeenCalled();
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
@@ -525,12 +525,12 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("13");
-    expect(quoteArg.specs.video_input_seconds).toBe("13");
+    expect(quoteArg.specs.reference_seconds).toBe("13");
     expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String), duration_basis: "source_video" });
   });
 
   it("★ 编辑单预扣同口径 —— 默认 4 秒档不再按 4 秒冻结（透支漏洞堵住）", async () => {
-    const { client, hold } = fakeBilling();
+    const { client, charge } = fakeBilling();
     const created = await handleCreateGenerationJob(
       USER_ID,
       PROJECT_ID,
@@ -544,13 +544,13 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
     );
     expect(created.code).toBe(200);
 
-    const holdArg = hold.mock.calls[0]?.[0] as unknown as HoldArgs;
+    const holdArg = charge.mock.calls[0]?.[0] as unknown as HoldArgs;
     expect(holdArg.specs.duration).toBe("13");
-    expect(holdArg.specs.video_input_seconds).toBe("13");
+    expect(holdArg.specs.reference_seconds).toBe("13");
   });
 
   it("★ 编辑单「预览价 = 实扣价」—— 同一请求体两路交给 billing 的规格逐字相等", async () => {
-    const { client, hold, quote } = fakeBilling();
+    const { client, charge, quote } = fakeBilling();
     const resolveTier = vi.fn().mockResolvedValue("pro");
     const body = video25Body("把背景替换成海边");
     const videoAssets = {
@@ -562,7 +562,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
     await handleCreateGenerationJob(USER_ID, PROJECT_ID, body, null, createDeps(client, resolveTier, videoAssets));
     await handleQuoteGenerationJob(USER_ID, PROJECT_ID, body, previewDeps(client, resolveTier));
 
-    const holdArg = hold.mock.calls[0]?.[0] as unknown as HoldArgs;
+    const holdArg = charge.mock.calls[0]?.[0] as unknown as HoldArgs;
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs).toEqual(holdArg.specs);
     expect(quoteArg.tier).toBe(holdArg.tier);
@@ -727,9 +727,9 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
     const createJob = vi.fn(
       async (
         _input: unknown,
-        options?: { billing?: { hold: (jobId: number) => Promise<void> } },
+        options?: { billing?: { charge: (jobId: number) => Promise<void> } },
       ) => {
-        await options?.billing?.hold(1);
+        await options?.billing?.charge(1);
         return { generation_job_id: "1", cursor: 1 };
       },
     );
@@ -740,7 +740,7 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
       canvas: { getByProject },
       assets: { resolveInputAssets },
       billing: {
-        hold: createBillingHold({ client, resolveTier, logger }),
+        charge: createBillingCharge({ client, resolveTier, logger }),
         release: vi.fn(async () => {}),
       },
       quote: createBillingQuote({ client, resolveTier, logger }),
@@ -749,7 +749,7 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
   }
 
   it("★ 触发场景：预览计价时长 = 源视频时长（edit 口径），报价与 Hold specs 同口径、带源时长标记", async () => {
-    const { client, hold, quote } = fakeBilling();
+    const { client, charge, quote } = fakeBilling();
     const resolveTier = vi.fn().mockResolvedValue("pro");
     const h = textRefHarness(client, resolveTier);
 
@@ -757,10 +757,10 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
     expect(created.code).toBe(200);
     const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, TEXT_REF_BODY, h.quoteDeps);
 
-    const holdArg = hold.mock.calls[0]?.[0] as unknown as HoldArgs;
+    const holdArg = charge.mock.calls[0]?.[0] as unknown as HoldArgs;
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("13");
-    expect(quoteArg.specs.video_input_seconds).toBe("13");
+    expect(quoteArg.specs.reference_seconds).toBe("13");
     expect(holdArg.specs.duration).toBe("13");
     const {
       prompt: _prompt,

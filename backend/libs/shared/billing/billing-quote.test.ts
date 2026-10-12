@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createBillingHold, type BillingHoldContext } from './billing-hold.js';
+import { createBillingCharge, type BillingChargeContext } from './billing-charge.js';
 import { createBillingQuote, type BillingQuoteContext } from './billing-quote.js';
 import type { BillingClient } from './billing-client.js';
 
 function fakeClient(quoteResult: unknown = { credits: 100n, catalogVersion: 3 }) {
-  const hold = vi.fn().mockResolvedValue({ reservedCredits: 100, catalogVersion: 3, duplicated: false });
+  const charge = vi.fn().mockResolvedValue({ chargedCredits: 100, catalogVersion: 3, duplicated: false });
   const quote = vi.fn().mockResolvedValue(quoteResult);
   const queryBalance = vi.fn();
   return {
-    client: { hold, quote, queryBalance } as unknown as BillingClient,
-    hold,
+    client: { charge, quote, queryBalance } as unknown as BillingClient,
+    charge,
     quote,
     queryBalance,
   };
@@ -25,15 +25,15 @@ const CTX: BillingQuoteContext = {
 
 describe('createBillingQuote', () => {
   it('★ 规格与 Hold 出自同一套归一 —— 两边看到的 specs 逐字相同', async () => {
-    const { client, hold, quote } = fakeClient();
+    const { client, charge, quote } = fakeClient();
 
     await createBillingQuote({ client, resolveTier: vi.fn().mockResolvedValue('pro') })(CTX);
-    await createBillingHold({ client, resolveTier: vi.fn().mockResolvedValue('pro') })(
-      CTX as unknown as BillingHoldContext,
+    await createBillingCharge({ client, resolveTier: vi.fn().mockResolvedValue('pro') })(
+      CTX as unknown as BillingChargeContext,
     );
 
     const quoteCall = quote.mock.calls[0]?.[0] as { specs?: Record<string, string> } | undefined;
-    const holdCall = hold.mock.calls[0]?.[0] as { specs?: Record<string, string> } | undefined;
+    const holdCall = charge.mock.calls[0]?.[0] as { specs?: Record<string, string> } | undefined;
     expect(quoteCall?.specs).toEqual(holdCall?.specs);
     expect(quoteCall?.specs).toEqual({
       size: '2k',
@@ -74,7 +74,7 @@ describe('createBillingQuote', () => {
     const warn = vi.fn();
 
     const result = await createBillingQuote({
-      client: { hold: vi.fn(), quote } as unknown as BillingClient,
+      client: { charge: vi.fn(), quote } as unknown as BillingClient,
       resolveTier: vi.fn().mockResolvedValue('free'),
       logger: { warn },
     })(CTX);
@@ -88,7 +88,7 @@ describe('createBillingQuote', () => {
     quote.mockRejectedValue(new Error('unavailable'));
 
     const result = await createBillingQuote({
-      client: { hold: vi.fn(), quote } as unknown as BillingClient,
+      client: { charge: vi.fn(), quote } as unknown as BillingClient,
       resolveTier: vi.fn().mockResolvedValue('free'),
       logger: { warn: vi.fn() },
     })(CTX);

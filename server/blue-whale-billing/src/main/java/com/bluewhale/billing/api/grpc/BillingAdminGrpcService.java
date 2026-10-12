@@ -4,7 +4,6 @@ import com.bluewhale.billing.common.error.BillingErrorTaxonomy;
 import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.view.TransactionView;
-import com.bluewhale.billing.application.CatalogCompiler;
 import com.bluewhale.billing.application.CatalogHolder;
 import com.bluewhale.contracts.billing.v1.AdminConsumedCreditsRequest;
 import com.bluewhale.contracts.billing.v1.AdminConsumedCreditsResponse;
@@ -82,7 +81,7 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
                 .setDirection(view.direction())
                 .setTitle(view.title())
                 .setAmount(view.amount())
-                .setStatus(view.status())
+                .setStatus(statusOf(view))
                 .setCreatedAt(RFC3339.format(view.createdAt().atZone(ZoneId.systemDefault())))
                 .setSettledAt(view.settledAt() == null
                         ? ""
@@ -96,6 +95,13 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
         return item.build();
     }
 
+    private static String statusOf(TransactionView view) {
+        boolean refunded = view.reservedCredits() != null
+                && view.reservedCredits() > 0
+                && view.amount() == 0;
+        return refunded ? "refunded" : view.status();
+    }
+
     @Override
     public void adminQueryBalance(AdminQueryBalanceRequest request,
                                   StreamObserver<AdminQueryBalanceResponse> observer) {
@@ -103,9 +109,7 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
             BalanceView balance = billing.balance(request.getUserId());
 
             AdminQueryBalanceResponse.Builder response = AdminQueryBalanceResponse.newBuilder()
-                    .setAvailableCredits(balance.availableCredits())
-                    .setFrozenCredits(balance.frozenCredits())
-                    .setReceivableCredits(balance.receivableCredits());
+                    .setAvailableCredits(balance.availableCredits());
             for (BalanceView.ExpiringLot lot : balance.expiring()) {
                 response.addExpiring(AdminExpiringLot.newBuilder()
                         .setCredits(lot.credits())

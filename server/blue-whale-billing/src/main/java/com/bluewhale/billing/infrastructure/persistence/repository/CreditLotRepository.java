@@ -39,10 +39,7 @@ public class CreditLotRepository {
 
 
     public record Lot(long id, long userId, CreditSource source, long amount,
-                      long remaining, long frozen, LocalDateTime expiresAt, int version) {
-        public long available() {
-            return remaining - frozen;
-        }
+                      long remaining, LocalDateTime expiresAt, int version) {
     }
 
 
@@ -216,13 +213,12 @@ public class CreditLotRepository {
 
     private static UserLot toUserLot(CreditLotEntity entity) {
         long remaining = entity.getRemaining() == null ? 0L : entity.getRemaining();
-        long frozen = entity.getFrozen() == null ? 0L : entity.getFrozen();
         return new UserLot(
                 entity.getId(),
                 CreditSource.of(entity.getSource()),
                 entity.getAmount() == null ? 0L : entity.getAmount(),
 
-                remaining - frozen,
+                remaining,
                 entity.getGmtCreate(),
                 entity.getExpiresAt(),
 
@@ -238,13 +234,13 @@ public class CreditLotRepository {
     }
 
 
-    public void addFrozen(long lotId, long amount) {
-        mapper.addFrozen(lotId, amount);
+    public void consume(long lotId, long amount) {
+        mapper.consume(lotId, amount);
     }
 
 
-    public void releaseFrozen(long lotId, long amount) {
-        mapper.releaseFrozen(lotId, amount);
+    public void restore(long lotId, long amount) {
+        mapper.restore(lotId, amount);
     }
 
 
@@ -263,16 +259,6 @@ public class CreditLotRepository {
 
 
 
-    public void settle(long lotId, long frozenTake, long actualTake) {
-        mapper.settle(lotId, frozenTake, actualTake);
-    }
-
-
-
-
-
-
-
     public long grant(long userId, CreditSource source, long amount, LocalDateTime expiresAt,
                       String bizType, String bizId, String grantKey) {
         CreditLotEntity entity = new CreditLotEntity();
@@ -282,7 +268,6 @@ public class CreditLotRepository {
         entity.setSourcePriority(source.priority());
         entity.setAmount(amount);
         entity.setRemaining(amount);
-        entity.setFrozen(0L);
         entity.setExpiresAt(expiresAt);
         entity.setBizType(bizType);
         entity.setBizId(bizId);
@@ -291,17 +276,6 @@ public class CreditLotRepository {
         mapper.insert(entity);
         return entity.getId();
     }
-
-
-    public long availableOf(long lotId) {
-        CreditLotEntity entity = mapper.selectById(lotId);
-        return entity == null ? 0L : entity.getRemaining() - entity.getFrozen();
-    }
-
-
-
-
-
 
 
     public CreditSource sourceOf(long lotId) {
@@ -319,7 +293,6 @@ public class CreditLotRepository {
                 CreditSource.of(entity.getSource()),
                 entity.getAmount(),
                 entity.getRemaining(),
-                entity.getFrozen(),
                 entity.getExpiresAt(),
 
 

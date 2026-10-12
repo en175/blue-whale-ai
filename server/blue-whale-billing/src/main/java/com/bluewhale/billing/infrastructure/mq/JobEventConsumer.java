@@ -1,8 +1,6 @@
 package com.bluewhale.billing.infrastructure.mq;
 
-import com.bluewhale.billing.application.command.SettlementCommand;
-import com.bluewhale.billing.application.SettlementService;
-import com.bluewhale.billing.application.command.SettlementUsageLine;
+import com.bluewhale.billing.application.CreditService;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
@@ -23,18 +21,15 @@ public class JobEventConsumer implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(JobEventConsumer.class);
 
     private final PushConsumer consumer;
-    private final SettlementService settlement;
-    private final String completedTopic;
+    private final CreditService credits;
     private final String failedTopic;
     private final ObjectMapper json;
 
     public JobEventConsumer(ClientConfiguration clientConfiguration,
                             String consumerGroup,
-                            String completedTopic,
                             String failedTopic,
-                            SettlementService settlement) throws Exception {
-        this.settlement = settlement;
-        this.completedTopic = completedTopic;
+                            CreditService credits) throws Exception {
+        this.credits = credits;
         this.failedTopic = failedTopic;
         this.json = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -44,13 +39,11 @@ public class JobEventConsumer implements AutoCloseable {
                 .setClientConfiguration(clientConfiguration)
                 .setConsumerGroup(consumerGroup)
                 .setSubscriptionExpressions(Map.of(
-                        completedTopic, new FilterExpression("*"),
                         failedTopic, new FilterExpression("*")))
                 .setMessageListener(this::onMessage)
                 .build();
 
-        log.info("计费事件消费者已启动：group={} 订阅 {} / {}",
-                consumerGroup, completedTopic, failedTopic);
+        log.info("计费事件消费者已启动：group={} 订阅 {}", consumerGroup, failedTopic);
     }
 
     @Override
@@ -66,16 +59,11 @@ public class JobEventConsumer implements AutoCloseable {
         String topic = message.getTopic();
         String body = readBody(message);
         try {
-            if (completedTopic.equals(topic)) {
-                JobEventPayload.JobCompleted event =
-                        json.readValue(body, JobEventPayload.JobCompleted.class);
-                requireIdentifiable(event.jobId(), event.userId(), topic, body);
-                settlement.settle(toCommand(event));
-            } else if (failedTopic.equals(topic)) {
+            if (failedTopic.equals(topic)) {
                 JobEventPayload.JobFailed event =
                         json.readValue(body, JobEventPayload.JobFailed.class);
                 requireIdentifiable(event.jobId(), event.userId(), topic, body);
-                settlement.refund(event.jobId(), event.reason());
+                credits.refund(event.jobId(), event.reason());
             } else {
                 log.warn("收到未订阅的 topic，已丢弃：{}", topic);
             }
@@ -84,18 +72,6 @@ public class JobEventConsumer implements AutoCloseable {
             log.error("处理计费事件失败，将重投：topic={} body={}", topic, body, e);
             return ConsumeResult.FAILURE;
         }
-    }
-
-    static SettlementCommand toCommand(JobEventPayload.JobCompleted event) {
-        return new SettlementCommand(
-                event.jobId(), event.userId(), event.status(), event.catalogVersion(),
-                event.succeededSlots(),
-                event.usage().stream().map(JobEventConsumer::toUsageLine).toList());
-    }
-
-    private static SettlementUsageLine toUsageLine(JobEventPayload.UsageLine line) {
-        return new SettlementUsageLine(
-                line.modelId(), line.taskType(), line.quantities(), line.specs());
     }
 
     static void requireIdentifiable(long jobId, long userId, String topic, String body) {

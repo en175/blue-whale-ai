@@ -238,12 +238,6 @@ public class JobFinalizer {
     @Transactional
     public boolean completeJob(String jobId, List<String> assetIds,
                                String workerId, long fencingToken) {
-        return completeJob(jobId, assetIds, workerId, fencingToken, null);
-    }
-
-    @Transactional
-    public boolean completeJob(String jobId, List<String> assetIds, String workerId,
-                               long fencingToken, Long upstreamSeconds) {
         Long jobIdLong = Long.parseLong(jobId);
 
         String outputAssetIdsJson = toJson(assetIds.stream().map(Long::parseLong).toList());
@@ -296,7 +290,7 @@ public class JobFinalizer {
                         "source", job.getSource(),
                         "status", job.getStatus(),
                         "progress", job.getProgress(),
-                        "output_asset_ids", assetIds), null, upstreamSeconds);
+                        "output_asset_ids", assetIds));
 
         for (int i = 0; i < assetIds.size(); i++) {
             GenerationOutputSlotEntity slot = i < slots.size() ? slots.get(i) : null;
@@ -382,7 +376,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)), null, null);
+                            "error", Map.of("code", errorCode, "message", errorMessage)));
             for (GenerationOutputSlotEntity slot : slots) {
                 eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
                         "generation_job_output",
@@ -432,10 +426,9 @@ public class JobFinalizer {
     public boolean publishVideoResult(String jobId, String projectId, String userId,
                                       String workerId, long fencingToken,
                                       String url, String storageKey, String mime, Long size, String md5,
-                                      Integer width, Integer height, double duration,
-                                      Long upstreamTotalTokens) {
+                                      Integer width, Integer height, double duration) {
         return publishVideoResult(jobId, projectId, userId, workerId, fencingToken,
-                url, storageKey, mime, size, md5, width, height, duration, upstreamTotalTokens,
+                url, storageKey, mime, size, md5, width, height, duration,
                 null, null);
     }
 
@@ -457,7 +450,6 @@ public class JobFinalizer {
                                       String workerId, long fencingToken,
                                       String url, String storageKey, String mime, Long size, String md5,
                                       Integer width, Integer height, double duration,
-                                      Long upstreamTotalTokens,
                                       Long upstreamCreatedAtMs, Long finalizeDeadlineMs) {
         Long jobIdLong = Long.parseLong(jobId);
 
@@ -472,9 +464,6 @@ public class JobFinalizer {
         }
         if (finalizeDeadlineMs != null) {
             upsertExtra(jobIdLong, "finalize_deadline_ms", "number", finalizeDeadlineMs.toString());
-        }
-        if (isTwoPhaseVideo(jobIdLong)) {
-            upsertExtra(jobIdLong, "charge_state", "string", "settled");
         }
 
         AssetEntity asset = buildAsset(jobIdLong, projectId, userId, "video",
@@ -499,8 +488,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())),
-                    upstreamTotalTokens, null);
+                            "output_asset_ids", List.of(asset.getId().toString())));
         }
 
         GenerationOutputSlotEntity videoSlot = slotMapper.findByJobId(jobIdLong).stream()
@@ -543,7 +531,7 @@ public class JobFinalizer {
         }
         int affected = jobMapper.failVideoGuard(jobIdLong, workerId, fencingToken, toJson(errorObj));
         if (affected == 1 && isTwoPhaseVideo(jobIdLong)) {
-            upsertExtra(jobIdLong, "charge_state", "string", "released");
+            upsertExtra(jobIdLong, "charge_state", "string", "refunded");
         }
         if (affected != 1) {
             log.warn("[video] failVideoJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={} errorCode={}",
@@ -567,7 +555,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)), null, null);
+                            "error", Map.of("code", errorCode, "message", errorMessage)));
             for (GenerationOutputSlotEntity slot : pendingSlots) {
                 eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
                         "generation_job_output",
@@ -659,7 +647,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "output_asset_ids", assetIds), null, null);
+                            "output_asset_ids", assetIds));
         }
         return true;
     }
@@ -799,7 +787,7 @@ public class JobFinalizer {
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
                             "output_asset_ids", assetIds,
-                            "result", resultPayload), null, null);
+                            "result", resultPayload));
         }
         return true;
     }
@@ -872,7 +860,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())), null, null);
+                            "output_asset_ids", List.of(asset.getId().toString())));
         }
         return true;
     }
@@ -928,24 +916,23 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)), null, null);
+                            "error", Map.of("code", errorCode, "message", errorMessage)));
         }
         return true;
     }
 
 
-    private void publishStatusChanged(GenerationJobEntity job, Map<String, Object> payload,
-                                      Long upstreamTotalTokens, Long upstreamSeconds) {
+    private void publishStatusChanged(GenerationJobEntity job, Map<String, Object> payload) {
         eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
                 "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
                 payload);
-        settlementPublisher.publishTerminal(job, payload, upstreamTotalTokens, upstreamSeconds);
+        settlementPublisher.publishTerminal(job, payload);
     }
 
     public void releaseHoldForCancelled(String jobId) {
         GenerationJobEntity job = jobMapper.selectById(Long.parseLong(jobId));
         if (job == null) {
-            log.warn("[cancel] 取不到 job，无法解冻预扣：jobId={}", jobId);
+            log.warn("[cancel] 取不到 job，无法发布返还事件：jobId={}", jobId);
             return;
         }
         settlementPublisher.publishTerminal(job, Map.of("status", job.getStatus()));

@@ -131,13 +131,13 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     expect(document.body.textContent).toContain('-30');
   });
 
-  it('预扣与实扣不一致时，金额下方补一行预扣', async () => {
+  it('净额与扣款不一致时，金额下方补一行交代扣款与已退', async () => {
     await renderPage();
 
-    expect(document.body.textContent).toContain('预扣 100');
+    expect(document.body.textContent).toContain('扣款 100 · 已退 70');
   });
 
-  it('两个数一致时**不**显示预扣 —— 写出来只是复读', async () => {
+  it('两个数一致时**不**显示副文案 —— 写出来只是复读', async () => {
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, credits: 5, reserved_credits: 5 }],
       total: 0,
@@ -146,10 +146,10 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('-5');
-    expect(document.body.textContent).not.toContain('预扣');
+    expect(document.body.textContent).not.toContain('已退');
   });
 
-  it('没有预扣的行（发放 / 人工调账）不显示预扣', async () => {
+  it('没有扣款的行（发放 / 人工调账）不显示副文案', async () => {
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [{ ...ITEM, id: 'lot:12', type: 'recharge', direction: 'in', credits: 500, reserved_credits: null }],
       total: 0,
@@ -158,7 +158,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('+500');
-    expect(document.body.textContent).not.toContain('预扣');
+    expect(document.body.textContent).not.toContain('已退');
   });
 
   it('后端比前端旧、**整个键都不回**时不崩 —— 「没有」的第二种形态', async () => {
@@ -181,7 +181,7 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('-30');
-    expect(document.body.textContent).not.toContain('预扣');
+    expect(document.body.textContent).not.toContain('已退');
     expect(document.body.textContent).not.toContain('Unexpected Application Error');
   });
 
@@ -194,25 +194,43 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     await renderPage();
 
     const cell = [...document.querySelectorAll('tbody tr td')].find((td) =>
-      td.textContent?.includes('预扣'),
+      td.textContent?.includes('已退'),
     );
     expect(cell?.textContent).toContain('0');
-    expect(cell?.textContent).toContain('预扣 12');
+    expect(cell?.textContent).toContain('扣款 12 · 已退 12');
     expect(cell?.textContent).not.toContain('-0');
     expect(cell?.textContent).not.toContain('+0');
   });
 
-  it('预扣与金额在**同一个单元格**里 —— 并排，不另起一行、也不单开一列', async () => {
+  it('副文案与金额在**同一个单元格**里 —— 并排，不另起一行、也不单开一列', async () => {
     api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], total: 0 });
 
     await renderPage();
 
     const holdCells = [...document.querySelectorAll('tbody tr td')].filter((td) =>
-      td.textContent?.includes('预扣'),
+      td.textContent?.includes('已退'),
     );
     expect(holdCells).toHaveLength(1);
     expect(holdCells[0]?.textContent).toContain('-30');
-    expect(holdCells[0]?.textContent).toContain('预扣 100');
+    expect(holdCells[0]?.textContent).toContain('扣款 100 · 已退 70');
+  });
+
+  it('状态列：done 是「已完成」、refunded 是「已退款」、其余是「处理中」', async () => {
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [
+        { ...ITEM, id: 'res:1', status: 'done' },
+        { ...ITEM, id: 'res:2', status: 'refunded', credits: 0 },
+        { ...ITEM, id: 'res:3', status: 'pending' },
+      ],
+      total: 0,
+    });
+
+    await renderPage();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('已完成');
+    expect(text).toContain('已退款');
+    expect(text).toContain('处理中');
   });
 
   it('点「下一页」页码 +1；「上一页」回到上一页（offset 分页，没有游标要存）', async () => {

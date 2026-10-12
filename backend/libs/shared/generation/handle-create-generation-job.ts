@@ -80,6 +80,7 @@ import {
   DEFAULT_IMAGE_REFERENCE_MAX,
   CREATE_GENERATION_JOB_OPERATION,
   RecoveryContractError,
+  serializePricingRule,
   type CanvasRecoveryAcceptance,
   type CanvasRepo,
   type CreateJobIdempotency,
@@ -93,10 +94,14 @@ import {
   type ProjectRepo,
   type AssetOwnershipOps,
 } from "@lib/shared/persistence/index.js";
-import type { BillingHold } from "@lib/shared/billing/billing-hold.js";
+import type { BillingCharge } from "@lib/shared/billing/billing-charge.js";
 import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
 import type { BillingQuote } from "@lib/shared/billing/billing-quote.js";
-import { DURATION_BASIS_KEY, OMNI_TASK_TYPE_ALLOWED_KEY } from "@lib/shared/billing/billing-specs.js";
+import {
+  countPromptCharacters,
+  DURATION_BASIS_KEY,
+  OMNI_TASK_TYPE_ALLOWED_KEY,
+} from "@lib/shared/billing/billing-specs.js";
 import { quoteRevisionOf } from "./handle-quote-generation-job.js";
 
 import {
@@ -116,17 +121,7 @@ import {
 
 
 
-export function serializePricingRule(capability: ModelCapabilityView | undefined): string | undefined {
-  const pricing = capability?.pricing;
-  if (pricing === undefined || pricing === null) return undefined;
-  try {
-    return JSON.stringify(pricing);
-  } catch {
-
-
-    return undefined;
-  }
-}
+export { serializePricingRule };
 
 export interface GenerationParameters {
   prompt?: unknown;
@@ -469,6 +464,9 @@ function validateVideo(
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
+  const videoMode = normalizeVideoMode(
+    (body.parameters as GenerationParameters | undefined)?.mode,
+  );
 
 
   const firstFrameAssetId = assetId(body.first_frame_asset_id);
@@ -541,6 +539,7 @@ function validateVideo(
           .filter((r) => r.role === "reference")
           .map((r) => ({ type: r.type, duration: r.duration })),
         "video",
+        videoMode,
       );
       if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
     }
@@ -622,6 +621,7 @@ function validateVideo(
       features,
       uniqueRefs.map((r) => ({ type: r.type })),
       "video",
+      videoMode,
     );
     if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
   }
@@ -994,6 +994,9 @@ export function projectQuoteInput(
     ...(capability ? { capability } : {}),
     ...(quoteVideoMode !== undefined ? { videoMode: quoteVideoMode } : {}),
   });
+  if (typeof input.prompt === "string") {
+    input.prompt_characters = String(countPromptCharacters(input.prompt));
+  }
   delete input.prompt;
 
   input.expected_output_count = Number(body.expected_output_count);
@@ -1240,6 +1243,9 @@ function resolveVideoTextIndexReferences(
     }
   | { ok: false; value: { message: string; code: string } } {
   const features = args.capability?.features;
+  const videoMode = normalizeVideoMode(
+    (args.body.parameters as GenerationParameters | undefined)?.mode,
+  );
 
   const acceptedMediaTypes: MediaMentionType[] = ["image"];
   if (!features || features.video_reference) acceptedMediaTypes.push("video");
@@ -1293,7 +1299,7 @@ function resolveVideoTextIndexReferences(
       };
     }
     const videoReferences = textProvidedVideoReferences([], index.refs);
-    const limitErr = videoReferenceLimitError(features, videoReferences);
+    const limitErr = videoReferenceLimitError(features, videoReferences, videoMode);
     if (limitErr) {
       return { ok: false, value: { message: limitErr, code: ERROR_INVALID_REFERENCE } };
     }
@@ -1310,6 +1316,7 @@ function resolveVideoTextIndexReferences(
   const mergedLimitErr = videoReferenceLimitError(
     features,
     videoReferences.filter((item) => item.role === "reference"),
+    videoMode,
   );
   if (mergedLimitErr) {
     return { ok: false, value: { message: mergedLimitErr, code: ERROR_INVALID_REFERENCE } };
@@ -1329,13 +1336,14 @@ function resolveVideoTextIndexReferences(
 function videoReferenceLimitError(
   features: ModelFeatures | undefined,
   references: ReadonlyArray<ReferenceItemInput | TextProvidedVideoReference>,
+  mode?: VideoMode | null,
 ): string | null {
   if (!features) return null;
   const items = references.map((item) => ({
     type: item.type,
     duration: "duration" in item && typeof item.duration === "number" ? item.duration : undefined,
   }));
-  return checkReferenceLimits(features, items, "video");
+  return checkReferenceLimits(features, items, "video", mode);
 }
 
 
@@ -1564,7 +1572,7 @@ interface GenerationDeps {
 
 
   billing?: {
-    hold: BillingHold;
+    charge: BillingCharge;
     release: BillingRelease;
   };
 
@@ -2288,8 +2296,8 @@ export async function handleCreateGenerationJob(
   const billingDep = deps.billing;
   const billing: JobBilling | undefined = billingDep
     ? {
-        hold: (jobId) =>
-          billingDep.hold({
+        charge: (jobId) =>
+          billingDep.charge({
             userId: String(userId),
             jobId,
             commandId: actionIdentity,

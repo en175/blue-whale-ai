@@ -11,8 +11,7 @@ public record CompiledRule(
         long unitDenominator,
         long minCredits,
         Long maxCredits,
-        RoundingPolicy rounding,
-        TokenEstimator tokenEstimator
+        RoundingPolicy rounding
 ) {
 
     public record DimPrice(long unitMc, boolean firstFree) {}
@@ -92,30 +91,25 @@ public record CompiledRule(
 
     public static CompiledRule of(UsageDim baseUnit, BasePriceResolver basePrice, long unitDenominator) {
         return new CompiledRule(baseUnit, basePrice, Map.of(), Map.of(), Map.of(), unitDenominator,
-                1L, null, new RoundingPolicy.HalfUp(), null);
-    }
-
-    public CompiledRule withTokenEstimator(TokenEstimator estimator) {
-        return new CompiledRule(baseUnit, basePrice, dims, multipliers, dimPrices, unitDenominator,
-                minCredits, maxCredits, rounding, estimator);
+                1L, null, new RoundingPolicy.HalfUp());
     }
 
     public CompiledRule withMultiplier(UsageDim dim, int permille) {
         var next = new java.util.LinkedHashMap<>(multipliers);
         next.put(dim, permille);
         return new CompiledRule(baseUnit, basePrice, dims, next, dimPrices, unitDenominator,
-                minCredits, maxCredits, rounding, tokenEstimator);
+                minCredits, maxCredits, rounding);
     }
 
     public CompiledRule withDimPrice(UsageDim dim, long unitMc, boolean firstFree) {
         var next = new java.util.LinkedHashMap<>(dimPrices);
         next.put(dim, new DimPrice(unitMc, firstFree));
         return new CompiledRule(baseUnit, basePrice, dims, multipliers, next, unitDenominator,
-                minCredits, maxCredits, rounding, tokenEstimator);
+                minCredits, maxCredits, rounding);
     }
 
     public CompiledRule withMaxCredits(long max) {
         return new CompiledRule(baseUnit, basePrice, dims, multipliers, dimPrices, unitDenominator,
-                minCredits, max, rounding, tokenEstimator);
+                minCredits, max, rounding);
     }
 }

@@ -2,9 +2,9 @@ import { useMemo } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import {
   BASE_UNIT_OPTIONS,
+  creditsToMc,
   describePriceInHuman,
   priceUnitLabel,
-  yuanToMc,
   type CatalogRuleView,
   type DimPriceRow,
   type KeyValueRow,
@@ -42,8 +42,6 @@ const ROUNDING_OPTIONS = [
 
 interface PricingTabProps {
   rule: CatalogRuleView | null;
-  creditsPerYuan: number | null;
-  rateNotice: string;
   modelId: string;
   taskType: string;
   channel: ChannelId;
@@ -54,8 +52,6 @@ interface PricingTabProps {
 
 export default function PricingTab({
   rule,
-  creditsPerYuan,
-  rateNotice,
   modelId,
   taskType,
   channel,
@@ -64,8 +60,6 @@ export default function PricingTab({
   onChange,
 }: PricingTabProps) {
   const patch = (next: Partial<RuleForm>) => onChange({ ...form, ...next });
-
-  const tokenEstimateApplies = channelOf(channel).media === 'video';
 
   const baseUnitOptions = BASE_UNIT_OPTIONS.some((o) => o.value === form.baseUnit)
     ? BASE_UNIT_OPTIONS
@@ -113,9 +107,11 @@ export default function PricingTab({
     [form.priceTable, priceCandidates],
   );
 
-  const priceYuan = form.priceValue.value.trim();
-  const priceMc = priceYuan === '' ? null : yuanToMc(Number(priceYuan), creditsPerYuan);
-  const humanPrice = priceMc === null ? '' : describePriceInHuman(priceMc, creditsPerYuan, unitLabel);
+  const priceCredits = form.priceValue.value.trim();
+  const parsedCredits = Number(priceCredits);
+  const priceMc =
+    priceCredits === '' || !Number.isFinite(parsedCredits) ? null : creditsToMc(parsedCredits);
+  const humanPrice = priceMc === null ? '' : describePriceInHuman(priceMc, unitLabel);
 
   return (
     <>
@@ -135,8 +131,6 @@ export default function PricingTab({
         </Alert>
       )}
 
-      {rateNotice && <Alert tone="warning" title="读不到换算率（1 元 = 多少积分）">{rateNotice}</Alert>}
-
       <div style={formGrid(2)}>
         <Field label="基准维度" hint="按哪个用量维度计费；constant:1 = 按次">
           <Select
@@ -151,8 +145,7 @@ export default function PricingTab({
           hint="常数单价、按规格查表，或「单价待配」留空"
           info={
             <>
-              单价按<b>元</b>填（官方价目表就是这个单位），保存时按定价目录里的换算率
-              <b> 1 元 = {creditsPerYuan ?? '—'} 积分 </b>折成 mc 写回 —— 引擎与账本用的始终是 mc。
+              单价按<b>积分</b>填（可填小数），保存时换算成 mc 写回 —— 引擎与账本用的始终是 mc。
               <div style={{ marginTop: 'var(--admin-space-2)' }}>
                 被改过的栏才重新换算：没动过的价<b>原值写回</b>，所以「打开看一眼、点保存」
                 不会把价格挪动哪怕 1 mc。
@@ -184,8 +177,8 @@ export default function PricingTab({
       <div style={{ marginTop: 'var(--admin-space-4)' }}>
         {form.priceKind === 'const' ? (
           <Field
-            label={`基准单价（元 / ${unitLabel}）`}
-            hint={humanPrice ? `保存后写回库里的是：${humanPrice}` : '按定价目录里的换算率折成 mc 写回'}
+            label={`基准单价（积分 / ${unitLabel}）`}
+            hint={humanPrice ? `保存后写回库里的是：${humanPrice}` : '填积分即可，保存时换算成 mc 写回'}
           >
             <Input
               aria-label="基准单价"
@@ -196,7 +189,7 @@ export default function PricingTab({
           </Field>
         ) : form.priceKind === 'table' ? (
           <Field
-            label={`价格表（规格键 → 单价，元 / ${unitLabel}）`}
+            label={`价格表（规格键 → 单价，积分 / ${unitLabel}）`}
             hint="行来自本行的尺寸与比例；这里只填价"
             info={
               <>
@@ -223,7 +216,7 @@ export default function PricingTab({
           </Field>
         ) : (
           <Alert tone="warning" title="单价还没填 —— 这个模型的提交会被拒绝">
-            这条规则只留了个空位：基准维度、token 估算参数、单位分母都配好了，差的就是单价。
+            这条规则只留了个空位：基准维度、单位分母都配好了，差的就是单价。
             在「单价待配」下提交任务是<b>直接失败</b>，不会按 0 免费生成（按 0 等于白送，
             而且账面上看不出来）。填好单价后把计价方式改成「按规格查表」或「常数单价」。
           </Alert>
@@ -232,8 +225,8 @@ export default function PricingTab({
 
       <div style={{ ...GRID3, marginTop: 'var(--admin-space-4)' }}>
         {}
-        {tokenEstimateApplies && (
-          <Field label="单位分母" hint="每多少个单位收这份单价：1 = 每秒/每张，1000000 = 每百万 token">
+        {channelOf(channel).media === 'video' && (
+          <Field label="单位分母" hint="每多少个单位收这份单价：1 = 每秒/每张">
             <Input
               aria-label="单位分母"
               value={form.unitDenominator}
@@ -269,73 +262,6 @@ export default function PricingTab({
       </div>
 
       {}
-      {tokenEstimateApplies && (
-        <>
-          <div style={{ marginTop: 'var(--admin-space-5)', borderTop: '1px solid var(--admin-border)', paddingTop: 'var(--admin-space-4)' }}>
-            <Checkbox
-              checked={form.tokenEstimateEnabled}
-              onChange={(tokenEstimateEnabled) => patch({ tokenEstimateEnabled })}
-              label="按 token 估算预扣（基准维度是 usage.c 的规则需要勾）"
-            />
-            <div style={{ fontSize: 'var(--admin-font-xs)', marginTop: 'var(--admin-space-2)', }}>
-              服务端按火山的官方公式（宽 × 高 × 帧率 × 时长 ÷ 除数）估一个 token 上限来冻结；
-              结算仍按上游返回的真实 token 计价。不勾 = 这条规则不做估算 ——
-              基准维度是 usage.c 而不勾，提交时会因「算不出契约量」被拒绝。
-            </div>
-          </div>
-
-          {form.tokenEstimateEnabled && (
-            <>
-              <div style={{ ...GRID3, marginTop: 'var(--admin-space-3)' }}>
-                <Field label="除数" hint="官方公式的除数字（火山对照表是 1024）">
-                  <Input
-                    aria-label="token 除数"
-                    value={form.tokenDivisor}
-                    onChange={(e) => patch({ tokenDivisor: e.target.value })}
-                  />
-                </Field>
-                <Field label="帧率" hint="官方对照表是 24；如实填，估低了预扣就冻少了">
-                  <Input
-                    aria-label="token 帧率"
-                    value={form.tokenFps}
-                    onChange={(e) => patch({ tokenFps: e.target.value })}
-                  />
-                </Field>
-                <Field
-                  label="输入时长的规格键（选填）"
-                  hint="填了公式就含「输入时长」那一项；留空 = 不含（含视频输入的任务预扣会偏低）"
-                >
-                  <Input
-                    aria-label="输入时长的规格键"
-                    value={form.tokenInputSecondsKey}
-                    placeholder="video_input_seconds"
-                    onChange={(e) => patch({ tokenInputSecondsKey: e.target.value })}
-                  />
-                </Field>
-              </div>
-              {}
-              <div style={{ marginTop: 'var(--admin-space-3)' }}>
-                <Field
-                  label="最低 token 用量表（规格键 → 最低 token 数，选填）"
-                  hint="火山官方规则：<b>含视频输入时</b>，估算 token ＜ 这一格的下限 ⇒ 按下限计费。
-                        键与价格表同一套语法，再带上输出时长（resolution=480p|aspect_ratio=16:9|duration=5）。
-                        整块留空 = 本规则不做下限；配了就必须配全 —— 某格查不到时提交会被拒绝"
-                >
-                  <KeyValueEditor
-                    rows={form.tokenMinimumTokens}
-                    ariaPrefix="最低 token 用量表"
-                    keyPlaceholder="resolution=480p|aspect_ratio=16:9|duration=5"
-                    valuePlaceholder="200000"
-                    makeRow={() => ({ key: '', value: '' })}
-                    onChange={(tokenMinimumTokens) => patch({ tokenMinimumTokens })}
-                  />
-                </Field>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
       <div style={{ ...formGrid(2), marginTop: 'var(--admin-space-4)' }}>
         <Field label="附加维度（万分比）" hint="按用量加权：10000 = 1 倍，4000 = 0.4 倍。留空表示不加权">
           <KeyValueEditor
@@ -362,15 +288,15 @@ export default function PricingTab({
       {}
       <div style={{ marginTop: 'var(--admin-space-4)' }}>
         <Field
-          label="维度绝对加价（元 / 每个单位）"
+          label="维度绝对加价（积分 / 每个单位）"
           hint={<>按维度收固定单价，<b>不乘</b>基准单价 —— 与上面的「附加维度」那种相对加价不同</>}
           info={
             <>
-              这里给的是<b>绝对值</b>：每个单位固定多少钱，与基准单价无关。所以它表达得了
-              「输出图分 0.3 / 0.6 两档，但参考图每张都是 0.02 元」——上面的「附加维度」是万分比，
+              这里给的是<b>绝对值</b>：每个单位固定多少积分，与基准单价无关。所以它表达得了
+              「输出图分 0.3 / 0.6 两档，但参考图每张都是 0.02 积分」——上面的「附加维度」是万分比，
               同一个数在两档下会算出两个价。
               <div style={{ marginTop: 'var(--admin-space-2)' }}>
-                每行一个维度（与基准维度同一份白名单）。单价按<b>元</b>填、写回是 mc，必须
+                每行一个维度（与基准维度同一份白名单）。单价按<b>积分</b>填、写回是 mc，必须
                 <b>大于 0</b>：要让某个维度免费就整行删掉，别写 0。勾上「首张免费」则第一个单位
                 不计费（火山 Seedream 5.0 Pro 的「首张参考图免费」就是它）。
               </div>
@@ -427,7 +353,7 @@ function DimPriceEditor({
           </div>
           <Input
             aria-label={`维度绝对加价第 ${index + 1} 行单价`}
-            placeholder="0.02"
+            placeholder="例如 1"
             value={row.value}
             onChange={(e) => patchRow(index, { value: e.target.value })}
             style={{ width: 120 }}

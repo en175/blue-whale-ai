@@ -60,7 +60,6 @@ public class LedgerSelfCheck {
             findings.add(new UserFinding(
                     imbalance.userId(), imbalance.lotsRemaining(), imbalance.ledgerTotal(),
                     ledger.balanceOf(imbalance.userId(), Account.WALLET),
-                    ledger.balanceOf(imbalance.userId(), Account.FROZEN),
                     scan));
         }
         return new Report(totals, findings, imbalances.size() >= userLimit);
@@ -69,18 +68,18 @@ public class LedgerSelfCheck {
     private void report(Report report) {
         ReconciliationRepository.GlobalTotals totals = report.totals();
         if (report.balanced()) {
-            log.info("账本自检通过：Σ lots.remaining = ledger(wallet+frozen) = {}", totals.ledgerTotal());
+            log.info("账本自检通过：Σ lots.remaining = ledger(wallet) = {}", totals.ledgerTotal());
             return;
         }
 
-        log.error("账本自检不平：Σ lots.remaining={} vs ledger(wallet+frozen)={}，差={}（正=批次多/账本少记）；"
+        log.error("账本自检不平：Σ lots.remaining={} vs ledger(wallet)={}，差={}（正=批次多/账本少记）；"
                         + "不平的用户 {} 个{}",
                 totals.lotsRemaining(), totals.ledgerTotal(), totals.diff(),
                 report.users().size(), report.truncated() ? "（已达上报上限，" + userLimit + " 个以外的未列出）" : "");
         for (UserFinding finding : report.users()) {
-            log.error("  用户 {}：批次 Σremaining={} / 账本 wallet+frozen={}（wallet={} frozen={}），差={}",
+            log.error("  用户 {}：批次 Σremaining={} / 账本 wallet={}，差={}",
                     finding.userId(), finding.lotsRemaining(), finding.ledgerTotal(),
-                    finding.walletBalance(), finding.frozenBalance(), finding.diff());
+                    finding.diff());
             if (finding.breaks().isEmpty()) {
                 log.error("    账本链自洽（审计窗口{}内无 balance_after 断裂）→ 差异在**批次侧**："
                                 + "批次被绕过账本直接改过（ADR-0115 决策 9 禁止的那件事），或某条写路径漏记了一腿",
@@ -120,7 +119,7 @@ public class LedgerSelfCheck {
     }
 
     public record UserFinding(long userId, long lotsRemaining, long ledgerTotal,
-                              long walletBalance, long frozenBalance,
+                              long walletBalance,
                               LedgerRepository.BreakScan scan) {
 
         public long diff() {

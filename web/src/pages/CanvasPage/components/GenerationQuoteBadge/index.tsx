@@ -40,10 +40,6 @@ function QuoteBadge({ projectId, type, parameters, references, targetNodeId }: G
     <span className={styles.badge} data-testid="generation-quote">
       <Zap size={12} strokeWidth={2} />
       <span>本次预计消耗 {credits} 积分</span>
-      {}
-      {data?.duration_basis === 'source_video' && (
-        <span className={styles.basisTag} data-testid="generation-quote-basis">按源视频时长预估</span>
-      )}
     </span>
   );
 }

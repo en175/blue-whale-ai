@@ -89,7 +89,7 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
 
         processor.handle("101");
 
@@ -263,13 +263,13 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
 
         processor.handle("104");
 
         verify(videoClient, never()).submit(anyString(), any());
         verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any(), any());
     }
 
     @Test
@@ -312,7 +312,7 @@ class VideoJobProcessorTest {
 
         verify(mediaRelay, never()).persist(anyString(), anyString());
         verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
         verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
         verify(stateMachine).markProviderSubmitted("117", "video-worker", 1L, "new-task-blank");
         verify(producer).enqueue("117", 5000L);
@@ -359,7 +359,7 @@ class VideoJobProcessorTest {
         verify(stateMachine).markProviderSubmitted("118", "video-worker", 1L, "new-task-expired");
         verify(producer).enqueue(eq("118"), eq(5000L));
         verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
@@ -375,7 +375,7 @@ class VideoJobProcessorTest {
         doReturn(new StoredVideo("http://tos/stale.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(false).when(finalizer).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
 
         processor.handle("114");
 
@@ -411,7 +411,7 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(false).doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
 
         staleProcessor.handle("115");
         newProcessor.handle("115");
@@ -421,13 +421,13 @@ class VideoJobProcessorTest {
         publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-old");
         publishOrder.verify(finalizer).publishVideoResult(eq("115"), eq("1"), eq("42"),
                 eq("video-worker-old"), eq(1L), anyString(), anyString(), anyString(),
-                any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
         publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-new");
         publishOrder.verify(finalizer).publishVideoResult(eq("115"), eq("1"), eq("42"),
                 eq("video-worker-new"), eq(2L), anyString(), anyString(), anyString(),
-                any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
         verify(finalizer, times(2)).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
@@ -621,14 +621,14 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
 
         processor.handle("108");
 
         verify(mediaRelay).persist(eq("http://video.mp4"), anyString());
         verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"),
-                eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any(), any());
     }
 
     @Test
@@ -646,13 +646,13 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(), anyString(), anyLong(),
-                        anyString(), anyString(), anyString(), any(), anyString(), isNull(), isNull(), anyDouble(), any(), any(), any());
+                        anyString(), anyString(), anyString(), any(), anyString(), isNull(), isNull(), anyDouble(), any(), any());
 
         processor.handle("109a");
 
         verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(), anyString(),
                 anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"), eq(1024L), eq("0123456789abcdef0123456789abcdef"),
-                isNull(), isNull(), anyDouble(), any(), any(), any());
+                isNull(), isNull(), anyDouble(), any(), any());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
@@ -1755,14 +1755,14 @@ class VideoJobProcessorTest {
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                        anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                        anyInt(), anyInt(), anyDouble(), any(), any());
 
         processor.handle("131");
 
         verify(finalizer).publishVideoResult(eq("131"), eq("1"), eq("42"),
                 anyString(), eq(1L), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"),
                 eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(),
-                eq(40_594L), eq(G06_UPSTREAM_CREATED_AT_MS), eq(G06_FINALIZE_DEADLINE_MS));
+                eq(G06_UPSTREAM_CREATED_AT_MS), eq(G06_FINALIZE_DEADLINE_MS));
     }
 
     @Test
@@ -1780,13 +1780,13 @@ class VideoJobProcessorTest {
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                        anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                        anyInt(), anyInt(), anyDouble(), any(), any());
 
         processor.handle("132");
 
         verify(finalizer).publishVideoResult(eq("132"), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                anyInt(), anyInt(), anyDouble(), any(), isNull(), isNull());
+                anyInt(), anyInt(), anyDouble(), isNull(), isNull());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
@@ -1808,7 +1808,7 @@ class VideoJobProcessorTest {
 
         verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyInt(), anyInt(), anyDouble(), any(), any());
         verify(finalizer).failVideoJob(eq("133"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                 anyString(), any(), eq("video-worker"), eq(1L));
     }
@@ -1827,13 +1827,13 @@ class VideoJobProcessorTest {
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), any(), any(), any(), any(),
-                        anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                        anyInt(), anyInt(), anyDouble(), any(), any());
 
         noRelayProcessor.handle("134");
 
         verify(finalizer).publishVideoResult(eq("134"), anyString(), anyString(),
                 anyString(), anyLong(), eq("http://provider-temp.mp4"), isNull(), isNull(),
-                isNull(), isNull(), anyInt(), anyInt(), anyDouble(), any(), isNull(), isNull());
+                isNull(), isNull(), anyInt(), anyInt(), anyDouble(), isNull(), isNull());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
@@ -1950,14 +1950,14 @@ class VideoJobProcessorTest {
                 .publishVideoResult(eq("142"), anyString(), anyString(), anyString(), anyLong(),
                         eq("https://tos/final.mp4"), eq("storage/final.mp4"), eq("video/mp4"),
                         eq(5L), eq("md5f"), anyInt(), anyInt(), anyDouble(),
-                        eq(118_000L), isNull(), isNull());
+                        isNull(), isNull());
 
         processor.handle("142");
 
         verify(finalizer).publishVideoResult(eq("142"), anyString(), anyString(), anyString(),
                 anyLong(), eq("https://tos/final.mp4"), eq("storage/final.mp4"), eq("video/mp4"),
                 eq(5L), eq("md5f"), anyInt(), anyInt(), anyDouble(),
-                eq(118_000L), isNull(), isNull());
+                isNull(), isNull());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
@@ -1979,7 +1979,7 @@ class VideoJobProcessorTest {
 
         verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyInt(), anyInt(), anyDouble(), any(), any());
         verify(finalizer).failVideoJob(eq("143"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                 anyString(), any(), eq("video-worker"), eq(1L));
     }
@@ -2001,7 +2001,7 @@ class VideoJobProcessorTest {
                 anyString(), any(), eq("video-worker"), eq(1L));
         verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyInt(), anyInt(), anyDouble(), any(), any());
     }
 
 

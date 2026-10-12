@@ -2,9 +2,11 @@ import {
   ERROR_INVALID_REFERENCE_MEDIA,
   ERROR_REFERENCE_LIMIT_EXCEEDED,
   ERROR_UNSUPPORTED_INPUT,
+  type VideoMode,
 } from "@lib/contracts";
 import type { MaterialReference } from "./material-reference.js";
 import { VideoInputError } from "./material-reference.js";
+import { videoReferenceMax } from "./reference-limits.js";
 import type { VideoWorkerInputAsset, VideoReference } from "./video-job-types.js";
 
 const DEFAULT_MAX_REFERENCE_VIDEO_BYTES = 200 * 1024 * 1024;
@@ -59,6 +61,7 @@ function validateReferences(
   limits: ReferenceLimits,
   assets: VideoWorkerInputAsset[],
   materials: MaterialReference[],
+  mode?: VideoMode | null,
 ): VideoReference[] {
   let imageCount = 0;
   let videoCount = 0;
@@ -110,10 +113,11 @@ function validateReferences(
   if (audioCount > 0 && !limits.audio_reference) {
     throw new VideoInputError(ERROR_UNSUPPORTED_INPUT, "当前模型不支持音频素材参考");
   }
-  if (videoCount > limits.video_reference_max) {
+  const videoMax = videoReferenceMax(limits.video_reference_max, mode);
+  if (videoCount > videoMax) {
     throw new VideoInputError(
       ERROR_REFERENCE_LIMIT_EXCEEDED,
-      `参考视频最多 ${limits.video_reference_max} 个`,
+      `参考视频最多 ${videoMax} 个`,
     );
   }
   if (audioCount > limits.audio_reference_max) {
