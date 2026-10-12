@@ -11,7 +11,7 @@
 
 
   <select id="lockActiveLots" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
+    SELECT id, user_id, source, source_priority, amount, remaining, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
     WHERE user_id = #{userId}
       AND (expires_at IS NULL OR expires_at > NOW())
@@ -69,7 +69,7 @@
 
 
   <select id="listDueLots" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
+    SELECT id, user_id, source, source_priority, amount, remaining, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
     WHERE expires_at IS NOT NULL
       AND expires_at &lt;= NOW()
@@ -80,14 +80,14 @@
 
 
   <select id="lockById" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id, version
+    SELECT id, user_id, source, source_priority, amount, remaining, expires_at, biz_type, biz_id, version
     FROM billing_credit_lots
     WHERE id = #{lotId}
     FOR UPDATE
   </select>
 
   <select id="listExpiring" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, amount, remaining, frozen, expires_at, version
+    SELECT id, user_id, source, amount, remaining, expires_at, version
     FROM billing_credit_lots
     WHERE user_id = #{userId}
       AND expires_at IS NOT NULL
@@ -144,7 +144,7 @@
 
 
   <select id="listUserLots" resultType="com.bluewhale.billing.infrastructure.persistence.po.CreditLotEntity">
-    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at,
+    SELECT id, user_id, source, source_priority, amount, remaining, expires_at,
            biz_type, biz_id, version, gmt_create
     FROM billing_credit_lots
     <where>

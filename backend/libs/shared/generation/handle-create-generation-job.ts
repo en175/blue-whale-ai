@@ -473,6 +473,9 @@ function validateVideo(
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
+  const videoMode = normalizeVideoMode(
+    (body.parameters as GenerationParameters | undefined)?.mode,
+  );
 
 
   const firstFrameAssetId = assetId(body.first_frame_asset_id);
@@ -545,6 +548,7 @@ function validateVideo(
           .filter((r) => r.role === "reference")
           .map((r) => ({ type: r.type, duration: r.duration })),
         "video",
+        videoMode,
       );
       if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
     }
@@ -626,6 +630,7 @@ function validateVideo(
       features,
       uniqueRefs.map((r) => ({ type: r.type })),
       "video",
+      videoMode,
     );
     if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
   }
@@ -1247,6 +1252,9 @@ function resolveVideoTextIndexReferences(
     }
   | { ok: false; value: { message: string; code: string } } {
   const features = args.capability?.features;
+  const videoMode = normalizeVideoMode(
+    (args.body.parameters as GenerationParameters | undefined)?.mode,
+  );
 
   const acceptedMediaTypes: MediaMentionType[] = ["image"];
   if (!features || features.video_reference) acceptedMediaTypes.push("video");
@@ -1300,7 +1308,7 @@ function resolveVideoTextIndexReferences(
       };
     }
     const videoReferences = textProvidedVideoReferences([], index.refs);
-    const limitErr = videoReferenceLimitError(features, videoReferences);
+    const limitErr = videoReferenceLimitError(features, videoReferences, videoMode);
     if (limitErr) {
       return { ok: false, value: { message: limitErr, code: ERROR_INVALID_REFERENCE } };
     }
@@ -1317,6 +1325,7 @@ function resolveVideoTextIndexReferences(
   const mergedLimitErr = videoReferenceLimitError(
     features,
     videoReferences.filter((item) => item.role === "reference"),
+    videoMode,
   );
   if (mergedLimitErr) {
     return { ok: false, value: { message: mergedLimitErr, code: ERROR_INVALID_REFERENCE } };
@@ -1336,13 +1345,14 @@ function resolveVideoTextIndexReferences(
 function videoReferenceLimitError(
   features: ModelFeatures | undefined,
   references: ReadonlyArray<ReferenceItemInput | TextProvidedVideoReference>,
+  mode?: VideoMode | null,
 ): string | null {
   if (!features) return null;
   const items = references.map((item) => ({
     type: item.type,
     duration: "duration" in item && typeof item.duration === "number" ? item.duration : undefined,
   }));
-  return checkReferenceLimits(features, items, "video");
+  return checkReferenceLimits(features, items, "video", mode);
 }
 
 

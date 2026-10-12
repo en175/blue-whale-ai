@@ -268,7 +268,6 @@ public class CreditLotRepository {
         entity.setSourcePriority(source.priority());
         entity.setAmount(amount);
         entity.setRemaining(amount);
-        entity.setFrozen(0L);
         entity.setExpiresAt(expiresAt);
         entity.setBizType(bizType);
         entity.setBizId(bizId);

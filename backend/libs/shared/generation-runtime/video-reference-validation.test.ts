@@ -59,9 +59,10 @@ function expectRejected(
   limitsValue: ReferenceLimits,
   assets: VideoWorkerInputAsset[],
   materials: MaterialReference[] = [],
+  mode?: "edit" | "omni" | "extend",
 ) {
   try {
-    validateReferences(limitsValue, assets, materials);
+    validateReferences(limitsValue, assets, materials, mode);
   } catch (error) {
     if (error instanceof VideoInputError) return error;
     throw error;
@@ -89,6 +90,28 @@ describe("validateReferences 参考上限读能力行（IKHBDO）", () => {
 
     expect(expectRejected(limits({ video_reference_max: 0 }), videos(1)).message)
       .toBe("参考视频最多 0 个");
+  });
+
+  it("IKL406 edit 模式参考视频上限收紧为 1：1 段放行、2 段拒绝", () => {
+    const config = limits({ video_reference_max: 5, max_reference_duration_sec: null });
+    expect(validateReferences(config, videos(1), [], "edit")).toHaveLength(1);
+
+    const error = expectRejected(config, videos(2), [], "edit");
+    expect(error.code).toBe("reference_limit_exceeded");
+    expect(error.message).toBe("参考视频最多 1 个");
+  });
+
+  it("IKL406 edit 模式只卡视频段数：1 段视频 + N 张图片仍放行", () => {
+    const config = limits({ video_reference_max: 5, max_reference_duration_sec: null });
+    expect(
+      validateReferences(config, [videoAsset(1, 5), imageAsset(1), imageAsset(2)], [], "edit"),
+    ).toHaveLength(3);
+  });
+
+  it("IKL406 非 edit 模式不受收紧影响（通用上限照旧）", () => {
+    const config = limits({ video_reference_max: 5, max_reference_duration_sec: null });
+    expect(validateReferences(config, videos(2), [])).toHaveLength(2);
+    expect(validateReferences(config, videos(2), [], "omni")).toHaveLength(2);
   });
 
   it("参考音频上限随 audio_reference_max 变化：2 个放行、3 个拒绝；配 0 = 禁用", () => {
