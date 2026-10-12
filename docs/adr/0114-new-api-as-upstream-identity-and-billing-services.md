@@ -119,11 +119,13 @@ new-api 从「我们的用户体系 + 计费平台」变成「带一把统一调
 ### 8. 上游调用面的边界
 
 按「只有 worker 与素材库能调 new-api」这条规则，`backend` 里剩下的模型调用
-（`/api/text/completions` 文生文、`/api/internal/agent-model/*` Agent 模型网关）
+（`/api/text/completions` 文生文**（已退役，见下方 ⚠️ 补记）**、`/api/internal/agent-model/*` Agent 模型网关）
 **保留在 business-api**。理由：`worker-java` 是 MQ 驱动的**异步作业执行器**
 （claim / 租约 / fencing / 终态写库 / 预扣-结算生命周期全围着一行 `generation_jobs`），
 而这两条是**同步流式**请求，没有 job 行。硬搬进去不是搬移，是塞一个异物；
 真要剥离，落点是单独一个 model-gateway 服务。
+
+> ⚠️ **2026-10-13 补记**：本节列的 `/api/text/completions`（文生文）**已退役**——两侧都没有调用方（本仓 0 引用、无测试、无 `docs/api/` 契约；`blue-whale-agent` 仓源码 0 引用，它的模型出口是 `BLUE_WHALE_MODEL_GATEWAY_BASE_URL` = `/api/internal/agent-model/*`）。这个端点是已废方案「Mastra 借浏览器登录态调模型」的产物，该仓自己也写明 legacy passthrough 不是新 Runtime 的兼容性要求。**同节列的 `/api/internal/agent-model/*` 不受影响，仍在役。**
 
 ### 9. 定价与像素表的归属：按「用它的那一刻谁在场」决定
 

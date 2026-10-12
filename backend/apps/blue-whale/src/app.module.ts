@@ -54,7 +54,6 @@ import { SharedAssetsApiModule } from "./api/shared-assets/shared-assets.module.
 import { SiteHomepageHeroesModule } from "./api/site/homepage-heroes.module.js";
 import { SkillsApiModule } from "./api/skills/skills.module.js";
 import { AgentTemplatesModule } from "./api/templates/templates.module.js";
-import { TextApiModule } from "./api/text/text.module.js";
 import { UsageModule } from "./api/usage/usage.module.js";
 import { VideoEnhancementsApiModule } from "./api/video-enhancements/video-enhancements.module.js";
 import { VideoFrameInterpolationsApiModule } from "./api/video-frame-interpolations/video-frame-interpolations.module.js";
@@ -124,7 +123,6 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     SharedAssetsApiModule,
     SiteHomepageHeroesModule,
     AgentTemplatesModule,
-    TextApiModule,
     AgentV1Module,
     CostSettlementModule,
     HealthModule,
