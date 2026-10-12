@@ -53,7 +53,7 @@ public class AudioMixJobProcessor implements JobProcessor {
                 return thread;
             });
     private static final Set<String> PRESERVED_CODES = Set.of(
-            GenerationError.ERROR_QUOTA_EXHAUSTED,
+            GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
@@ -286,7 +286,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         String signal = (code == null ? "" : code) + " " + message;
         if (NewApiErrorClassifier.isCopyrightSignal(signal)) return GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
         if (NewApiErrorClassifier.isContentPolicySignal(signal)) return GenerationError.ERROR_CONTENT_REJECTED;
-        if (NewApiErrorClassifier.isQuotaSignal(signal)) return GenerationError.ERROR_QUOTA_EXHAUSTED;
+        if (NewApiErrorClassifier.isQuotaSignal(signal)) return GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED;
         return AudioMixContract.ERROR_AUDIO_MIX_FAILED;
     }
 

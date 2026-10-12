@@ -759,7 +759,7 @@ class VideoFrameInterpolationJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll failed + 额度信号 → quota_exhausted（§5 保留）")
+    @DisplayName("poll failed + 额度信号 → platform_quota_exhausted（§5 保留）")
     void pollFailedQuotaSignal_preserved() {
         stubPollClaim(input(60), 3);
         when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -768,7 +768,7 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+        assertFailCode(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test

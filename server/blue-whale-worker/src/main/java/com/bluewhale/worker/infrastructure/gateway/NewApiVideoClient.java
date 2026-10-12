@@ -334,7 +334,7 @@ public class NewApiVideoClient {
                 } else if (NewApiErrorClassifier.isContentPolicySignal(upstreamText)) {
                     code = GenerationError.ERROR_CONTENT_REJECTED;
                 } else if (NewApiErrorClassifier.isQuotaSignal(upstreamText)) {
-                    code = GenerationError.ERROR_QUOTA_EXHAUSTED;
+                    code = GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED;
                 } else if (NewApiErrorClassifier.isTaskTypeSignal(upstreamText)) {
                     code = GenerationError.ERROR_TASK_TYPE_PARAM_CONSTRAINT;
                 } else {

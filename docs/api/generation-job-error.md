@@ -102,7 +102,7 @@ GET /api/jobs/:id
 | 数值码 | canonical 字符串码 | msg（中文） |
 |---|---|---|
 | **1000** | （未知/白名单外） | 按任务类型兜底：视频/音频/图像生成失败 |
-| **1001** | `quota_exhausted` | **账户余额不足，请充值后重试** |
+| **1001** | `quota_exhausted` | **账户余额不足，请充值后重试**——只表示**用户个人积分**不足 |
 | 1002 | `invalid_input` | 输入参数无效 |
 | 1003 | `unsupported_type` | 不支持的生成类型 |
 | 1004 | `unsupported_input` | 输入内容不支持 |
@@ -133,30 +133,38 @@ GET /api/jobs/:id
 | 1029-1043 | （后续工单新增细分码） | 能力目录/参考系/图像系（高清/擦除/扩图/抠图）/去字幕等兜底与细分码——单一来源 = `backend/libs/contracts/error-codes.ts` 数值表，此处不再逐行展开 |
 | **1044** | `media_extract_provider_failed` | 音频提取失败，请重试（音视频分离火山执行路径兜底；本地 ffmpeg 链路兜底仍为 1020，映射口径 = 迁移契约 §18.4） |
 
+| **1061** | `platform_quota_exhausted` | **生成服务额度不足，请联系平台管理员**——平台统一调用账户额度不足，用户个人积分没问题 |
+
 > **段位约定**（全项目统一，`packages/contracts/src/result.ts`）：
 > - `4xx`/`5xx`：HTTP 语义错误（参数/未授权/资源不存在等基础设施错误）
 > - `1xxxx`（100000+）：Java SystemCode 系全局业务码
-> - `1xxx`（1000-1999）：**领域错误码**——生成任务领域已用 1001-1028，其他领域（Agent/资产/支付等）从 1100+ 起扩展，每错一码、前端按码映射文案
+> - `1xxx`（1000-1999）：**领域错误码**——生成任务领域已用 1001-1061，其他领域（Agent/资产/支付等）从 1100+ 起扩展，每错一码、前端按码映射文案
 >
 > 历史旧码（`invalid_video_inputs` 等）由后端归一映射到 canonical 码再转数值码，前端无需处理。
 
 ---
 
-## 5. 余额不足识别（code=1001）
+## 5. 额度不足识别：个人（1001）与平台（1061）分开
 
-后端在四类 provider（图片/视频/音频/new-api 视频任务）识别**欠费信号** → `quota_exhausted` → 数值码 `1001`：
+额度不足有**两个主体**，必须分开处理（决策见 [ADR-0128](../adr/0128-personal-vs-platform-quota-exhausted.md)）：
 
-- HTTP **402**
-- 响应/body 含「预扣费|剩余额度|余额|额度不足」或 `quota`/`balance`/`insufficient` 关键词
+| 主体 | 码 | 什么时候出现 | 该做什么 |
+|---|---|---|---|
+| **用户个人积分** | `1001` `quota_exhausted` | 提交时预扣被拒，事务回滚、**不落 job** | 引导用户**本人充值** |
+| **平台统一调用账户** | `1061` `platform_quota_exhausted` | 上游 new-api 拒单（402 / `insufficient_user_quota` / 欠费文案），落 `job.error` | 提示「生成服务额度不足，请联系平台管理员」，**不引导个人充值** |
 
-**典型场景**（用户余额不足时，无论 HTTP 200+body 还是 402）：
+new-api 只有一份共享凭证（`system_settings.upstream.new_api_key`），所以上游的额度错误**必然是平台账户**，不可能是用户个人。
+
+**平台额度不足的典型响应**：
 ```json
-{ "code": 1001, "msg": "账户余额不足，请充值后重试", "data": { "job_id": "1585", "status": "failed", "progress": 0, "asset": null } }
+{ "code": 1061, "msg": "生成服务额度不足，请联系平台管理员", "data": { "job_id": "3369", "status": "failed", "progress": 0, "asset": null } }
 ```
 
-> ⚠️ 历史已失败 job（改版前落库的 `provider_failed` 欠费）**不会重算**，仍显示「视频/图像生成失败」；新产生的欠费 job 才会是 `1001`。
+**上游识别链**（worker 失败分类）：版权 → 内容政策 → **额度（HTTP 402 或响应含「预扣费额度失败|剩余额度|余额不足|额度不足|balance|payment_required」）→ `platform_quota_exhausted`** → 兜底 `provider_failed`。
 
-**前端建议**：`code === 1001` 时引导充值（弹充值框/充值入口），而非普通重试。
+> ⚠️ **旧记录按证据补救**：改版前落库的 `quota_exhausted` job，投影时若 `error.message`（上游原文）命中上面的额度信号词 → 显示为 `1061`；命中不上则保持 `1001`。改版前落库的 `provider_failed` 欠费**不重算**。
+
+**前端建议**：`code === 1001` 时引导充值；`code === 1061` 只展示 msg，**不要**弹充值框。
 
 ---
 
@@ -165,6 +173,7 @@ GET /api/jobs/:id
 | code | 建议 UI |
 |---|---|
 | `1001`（quota_exhausted） | 显示 msg + **引导充值** |
+| `1061`（platform_quota_exhausted） | 显示 msg（「请联系平台管理员」），**不引导个人充值** |
 | `1000`（未知兜底） | 显示 msg（按类型的中文兜底文案） |
 | 其他 | 展示 msg，失败节点显示「重试」按钮（当前所有失败都可手动重试，`POST /retry` 只看状态） |
 

@@ -17,6 +17,7 @@ import {
   ERROR_MEDIA_EXTRACT_FAILED,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_NO_RESULT,
+  ERROR_PLATFORM_QUOTA_EXHAUSTED,
   ERROR_PROVIDER_CONFIG,
   ERROR_PROVIDER_CREDENTIAL_MISSING,
   ERROR_PROVIDER_FAILED,
@@ -47,6 +48,7 @@ describe("error-codes", () => {
     expect(ERROR_INVALID_INPUT).toBe("invalid_input");
     expect(ERROR_PROVIDER_FAILED).toBe("provider_failed");
     expect(ERROR_QUOTA_EXHAUSTED).toBe("quota_exhausted");
+    expect(ERROR_PLATFORM_QUOTA_EXHAUSTED).toBe("platform_quota_exhausted");
   });
 
   it("全部常量都在 GENERATION_ERROR_CODES 白名单内", () => {
@@ -171,7 +173,7 @@ describe("projectPublicError", () => {
     expect("details" in out!).toBe(false);
   });
 
-  it("quota_exhausted：1001 + 码表文案（上游英文不回显）", () => {
+  it("quota_exhausted + 上游英文欠费原文：按证据翻成 1061，上游英文不回显", () => {
     const out = projectPublicError(
       {
         code: "quota_exhausted",
@@ -179,8 +181,8 @@ describe("projectPublicError", () => {
       },
       "image",
     );
-    expect(out!.code).toBe(1001);
-    expect(out!.message).toBe("账户余额不足，请充值后重试");
+    expect(out!.code).toBe(1061);
+    expect(out!.message).toBe("生成服务额度不足，请联系平台管理员");
   });
 
   it("旧码归一：历史 invalid_video_inputs → invalid_reference 数值码 1034 + 码表文案", () => {
@@ -303,5 +305,50 @@ describe("messageFor", () => {
 
   it("projectPublicError 对 null stored_error 不抛错", () => {
     expect(projectPublicError(null, "video")).toBeNull();
+  });
+});
+
+describe("platform_quota_exhausted（ADR-0128：平台额度不足与个人积分不足分离）", () => {
+  it("新码 platform_quota_exhausted → 1061 + 平台文案", () => {
+    const out = projectPublicError(
+      {
+        code: "platform_quota_exhausted",
+        message: "预扣费额度失败，当前分组负载剩余额度不足",
+      },
+      "video",
+    );
+    expect(out!.code).toBe(1061);
+    expect(out!.reason).toBe("platform_quota_exhausted");
+    expect(out!.message).toBe("生成服务额度不足，请联系平台管理员");
+  });
+
+  it("旧记录 quota_exhausted + 上游欠费原文 → 按证据翻成 1061", () => {
+    const out = projectPublicError(
+      {
+        code: "quota_exhausted",
+        message: "预扣费额度失败：当前分组负载剩余额度不足",
+      },
+      "video",
+    );
+    expect(out!.code).toBe(1061);
+    expect(out!.message).toBe("生成服务额度不足，请联系平台管理员");
+  });
+
+  it("旧记录 quota_exhausted 但无额度证据 → 保持 1001（证据不足不推断）", () => {
+    const out = projectPublicError(
+      { code: "quota_exhausted", message: "任务执行失败" },
+      "video",
+    );
+    expect(out!.code).toBe(1001);
+    expect(out!.message).toBe("账户余额不足，请充值后重试");
+  });
+
+  it("普通上游异常不误报余额不足", () => {
+    const out = projectPublicError(
+      { code: "provider_failed", message: "upstream gateway 502" },
+      "video",
+    );
+    expect(out!.code).toBe(1011);
+    expect(out!.message).toBe("生成服务响应异常");
   });
 });

@@ -14,9 +14,18 @@ export function blockIfCreditsInsufficient(
   return true;
 }
 
+const PLATFORM_QUOTA_EXHAUSTED_CODE = 'platform_quota_exhausted';
+const PLATFORM_QUOTA_EXHAUSTED_NUMERIC = 1061;
+
 export function isCreditsExhaustedError(e: unknown): boolean {
   if (!isApiError(e)) return false;
   const code = String(e.code);
+  if (
+    code === PLATFORM_QUOTA_EXHAUSTED_CODE ||
+    Number(e.code) === PLATFORM_QUOTA_EXHAUSTED_NUMERIC
+  ) {
+    return false;
+  }
   return e.status === 402 || code === 'payment_required' || code === 'quota_exhausted';
 }
 

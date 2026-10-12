@@ -147,7 +147,7 @@ class NewApiMediaKitExtractAudioClientTest {
     }
 
     @Test
-    @DisplayName("网关 402 额度信号 → quota_exhausted（§5 分类保留）")
+    @DisplayName("网关 402 额度信号 → platform_quota_exhausted（§5 分类保留）")
     void gateway402QuotaSignalKept() {
         lastStatus.set(402);
         responseJson.set("{\"message\":\"insufficient balance\"}");
@@ -155,7 +155,7 @@ class NewApiMediaKitExtractAudioClientTest {
         Throwable thrown = catchThrowable(() -> callSubmit("mp3"));
 
         assertThat(((MediaExtractError) thrown).getCode())
-                .isEqualTo(GenerationError.ERROR_QUOTA_EXHAUSTED);
+                .isEqualTo(GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED);
     }
 
     @Test

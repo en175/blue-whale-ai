@@ -39,7 +39,7 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
     private static final Logger log = LoggerFactory.getLogger(ImageOutpaintJobProcessor.class);
 
     private static final Set<String> PRESERVED_ERROR_CODES = Set.of(
-            GenerationError.ERROR_QUOTA_EXHAUSTED,
+            GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 

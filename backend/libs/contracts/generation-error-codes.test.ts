@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  ERROR_PLATFORM_QUOTA_EXHAUSTED,
   ERROR_QUOTA_EXHAUSTED,
   ERROR_INVALID_INPUT,
   ERROR_PROVIDER_FAILED,
@@ -12,6 +14,14 @@ import {
   isContentPolicySignal,
   isQuotaSignal,
 } from "./error-codes.js";
+
+const generationErrorJava = readFileSync(
+  new URL(
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/error/GenerationError.java",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("generation error numeric codes (external contract)", () => {
   it("关键映射稳定（前端契约）", () => {
@@ -96,5 +106,35 @@ describe("provider 错误信号（IKDAJN）", () => {
       ),
     ).toBe(false);
     expect(isQuotaSignal("gateway down", 503)).toBe(false);
+  });
+});
+
+describe("GenerationError.java ↔ TS 码表 parity（ADR-0128）", () => {
+  const javaConstants = new Map<string, string>();
+  for (const m of generationErrorJava.matchAll(
+    /String\s+(ERROR_[A-Z0-9_]+)\s*=\s*"([^"]*)"/g,
+  )) {
+    javaConstants.set(m[1]!, m[2]!);
+  }
+
+  it("平台额度不足：Java 字符串码与 TS 逐字一致，数值码 1061", () => {
+    expect(javaConstants.get("ERROR_PLATFORM_QUOTA_EXHAUSTED")).toBe(
+      ERROR_PLATFORM_QUOTA_EXHAUSTED,
+    );
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_PLATFORM_QUOTA_EXHAUSTED]).toBe(1061);
+  });
+
+  it("Java 侧不再有旧码 quota_exhausted（收窄为个人侧专属）", () => {
+    const values = [...javaConstants.values()];
+    expect(values).not.toContain(ERROR_QUOTA_EXHAUSTED);
+  });
+
+  it("Java 每个错误常量都在 TS 数值表里有映射（防漏同步）", () => {
+    for (const [name, value] of javaConstants) {
+      expect(
+        GENERATION_ERROR_NUMERIC_CODES[value],
+        `${name} = "${value}" 在 TS 数值表里没有映射`,
+      ).toBeTypeOf("number");
+    }
   });
 });
