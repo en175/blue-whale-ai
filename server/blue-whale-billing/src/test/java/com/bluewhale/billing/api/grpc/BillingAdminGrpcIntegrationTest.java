@@ -255,7 +255,7 @@ class BillingAdminGrpcIntegrationTest {
         AdminTransactionItem refund = consumes.get(0);
         assertThat(refund.getUserId()).isEqualTo(USER);
         assertThat(refund.getDirection()).isEqualTo("out");
-        assertThat(refund.getStatus()).isEqualTo("done");
+        assertThat(refund.getStatus()).isEqualTo("refunded");
         assertThat(refund.getAmount()).isEqualTo(0);
         assertThat(refund.getReservedCredits()).isEqualTo(100);
         assertThat(refund.getSettledAt()).isNotEmpty();

@@ -368,7 +368,7 @@ message AdminTransactionItem {
   //    这一行」（发放 / 账本行压根没有预扣）。前端靠这个区别决定显不显示 ——
   //    混成一个数就会出现「发放行显示预扣 0」。本文件第一次用 proto3 的 optional。
   optional int64 reserved_credits = 7;
-  string status     = 8; // pending | done
+  string status     = 8;
   string created_at = 9; // RFC3339
   string settled_at = 10; // RFC3339，未结算为空串
   // ★ 该行关联的生成任务（`billing_cost_reservations.generation_job_id`）。**只有消费行有值。**

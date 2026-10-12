@@ -81,7 +81,7 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
                 .setDirection(view.direction())
                 .setTitle(view.title())
                 .setAmount(view.amount())
-                .setStatus(view.status())
+                .setStatus(statusOf(view))
                 .setCreatedAt(RFC3339.format(view.createdAt().atZone(ZoneId.systemDefault())))
                 .setSettledAt(view.settledAt() == null
                         ? ""
@@ -93,6 +93,13 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
             item.setGenerationJobId(view.generationJobId());
         }
         return item.build();
+    }
+
+    private static String statusOf(TransactionView view) {
+        boolean refunded = view.reservedCredits() != null
+                && view.reservedCredits() > 0
+                && view.amount() == 0;
+        return refunded ? "refunded" : view.status();
     }
 
     @Override
