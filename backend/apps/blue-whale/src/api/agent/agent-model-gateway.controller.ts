@@ -205,7 +205,10 @@ export class AgentModelGatewayController implements BeforeApplicationShutdown {
         lower === "host" ||
         lower === "authorization" ||
         lower === SUBJECT_HEADER ||
-        lower === UPSTREAM_RUN_HEADER
+        lower === UPSTREAM_RUN_HEADER ||
+        // 请求体下面按 req.body 重新序列化，长度跟原请求不一定一样：照抄原长度，上游会按旧长度收不满而报错
+        lower === "content-length" ||
+        lower === "transfer-encoding"
       ) {
         continue;
       }

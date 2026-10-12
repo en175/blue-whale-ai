@@ -43,6 +43,8 @@ function createBff(
   options: {
     findOwnedById?: (projectId: string, userId: string) => Promise<unknown>;
     userId?: string;
+    /** 像全局 json body-parser 那样先把请求体读完解析好，再交给控制器。 */
+    parseBody?: boolean;
   } = {},
 ) {
   const controller = new AgentV1ProxyController({
@@ -67,8 +69,18 @@ function createBff(
       shim.setHeader("content-type", "application/json");
       shim.end(JSON.stringify(body));
     };
-    Object.assign(req, { originalUrl: req.url, body: undefined });
-    void controller.proxy(req as never, shim as never, { userId } as never);
+    if (!options.parseBody) {
+      Object.assign(req, { originalUrl: req.url, body: undefined });
+      void controller.proxy(req as never, shim as never, { userId } as never);
+      return;
+    }
+    const chunks: Buffer[] = [];
+    req.on("data", chunk => chunks.push(chunk as Buffer));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      Object.assign(req, { originalUrl: req.url, body: raw ? JSON.parse(raw) : undefined });
+      void controller.proxy(req as never, shim as never, { userId } as never);
+    });
   });
 }
 
@@ -246,5 +258,44 @@ describe("AgentV1ProxyController 链路标识透传（IKB29O）", () => {
     expect(headers["x-blue-whale-user-id"]).toBe("u1");
     expect(headers["x-blue-whale-project-id"]).toBe("p1");
     expect(headers["x-blue-whale-tenant-id"]).toBeTruthy();
+  });
+});
+
+// 控制器把 req.body 重新序列化成最紧凑的 JSON 再转，原请求不是最紧凑的写法时字节数就变了。以前把原请求的
+// content-length 照抄给 agent，agent 按旧长度收不满，这一次请求就失败（与模型网关同一个病，10-12 测试站复现）。
+describe("AgentV1ProxyController 转发请求体", () => {
+  let agent: Server | undefined;
+  let bff: Server | undefined;
+  let received: string[] = [];
+
+  afterEach(async () => {
+    await close(bff);
+    await close(agent);
+    delete process.env.AGENT_SERVICE_BASE_URL;
+  });
+
+  it("请求体不是最紧凑的写法也完整转给 agent", async () => {
+    received = [];
+    agent = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", chunk => chunks.push(chunk as Buffer));
+      req.on("end", () => {
+        received.push(Buffer.concat(chunks).toString("utf8"));
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      });
+    });
+    process.env.AGENT_SERVICE_BASE_URL = `http://127.0.0.1:${await listen(agent)}`;
+    bff = createBff({ parseBody: true });
+    const bffPort = await listen(bff);
+
+    const message = { message: "做一条 8 秒的咖啡拉花短视频" };
+    const response = await fetch(`http://127.0.0.1:${bffPort}/api/agent/v1/projects/p1/sessions/s1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(message, null, 2),
+    });
+    expect(response.status).toBe(200);
+    expect(received.map(body => JSON.parse(body))).toEqual([message]);
   });
 });
