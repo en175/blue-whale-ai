@@ -2,9 +2,9 @@ import { useMemo } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import {
   BASE_UNIT_OPTIONS,
+  creditsToMc,
   describePriceInHuman,
   priceUnitLabel,
-  yuanToMc,
   type CatalogRuleView,
   type DimPriceRow,
   type KeyValueRow,
@@ -42,8 +42,6 @@ const ROUNDING_OPTIONS = [
 
 interface PricingTabProps {
   rule: CatalogRuleView | null;
-  creditsPerYuan: number | null;
-  rateNotice: string;
   modelId: string;
   taskType: string;
   channel: ChannelId;
@@ -54,8 +52,6 @@ interface PricingTabProps {
 
 export default function PricingTab({
   rule,
-  creditsPerYuan,
-  rateNotice,
   modelId,
   taskType,
   channel,
@@ -111,9 +107,11 @@ export default function PricingTab({
     [form.priceTable, priceCandidates],
   );
 
-  const priceYuan = form.priceValue.value.trim();
-  const priceMc = priceYuan === '' ? null : yuanToMc(Number(priceYuan), creditsPerYuan);
-  const humanPrice = priceMc === null ? '' : describePriceInHuman(priceMc, creditsPerYuan, unitLabel);
+  const priceCredits = form.priceValue.value.trim();
+  const parsedCredits = Number(priceCredits);
+  const priceMc =
+    priceCredits === '' || !Number.isFinite(parsedCredits) ? null : creditsToMc(parsedCredits);
+  const humanPrice = priceMc === null ? '' : describePriceInHuman(priceMc, unitLabel);
 
   return (
     <>
@@ -133,8 +131,6 @@ export default function PricingTab({
         </Alert>
       )}
 
-      {rateNotice && <Alert tone="warning" title="读不到换算率（1 元 = 多少积分）">{rateNotice}</Alert>}
-
       <div style={formGrid(2)}>
         <Field label="基准维度" hint="按哪个用量维度计费；constant:1 = 按次">
           <Select
@@ -149,8 +145,7 @@ export default function PricingTab({
           hint="常数单价、按规格查表，或「单价待配」留空"
           info={
             <>
-              单价按<b>元</b>填（官方价目表就是这个单位），保存时按定价目录里的换算率
-              <b> 1 元 = {creditsPerYuan ?? '—'} 积分 </b>折成 mc 写回 —— 引擎与账本用的始终是 mc。
+              单价按<b>积分</b>填（可填小数），保存时换算成 mc 写回 —— 引擎与账本用的始终是 mc。
               <div style={{ marginTop: 'var(--admin-space-2)' }}>
                 被改过的栏才重新换算：没动过的价<b>原值写回</b>，所以「打开看一眼、点保存」
                 不会把价格挪动哪怕 1 mc。
@@ -182,8 +177,8 @@ export default function PricingTab({
       <div style={{ marginTop: 'var(--admin-space-4)' }}>
         {form.priceKind === 'const' ? (
           <Field
-            label={`基准单价（元 / ${unitLabel}）`}
-            hint={humanPrice ? `保存后写回库里的是：${humanPrice}` : '按定价目录里的换算率折成 mc 写回'}
+            label={`基准单价（积分 / ${unitLabel}）`}
+            hint={humanPrice ? `保存后写回库里的是：${humanPrice}` : '填积分即可，保存时换算成 mc 写回'}
           >
             <Input
               aria-label="基准单价"
@@ -194,7 +189,7 @@ export default function PricingTab({
           </Field>
         ) : form.priceKind === 'table' ? (
           <Field
-            label={`价格表（规格键 → 单价，元 / ${unitLabel}）`}
+            label={`价格表（规格键 → 单价，积分 / ${unitLabel}）`}
             hint="行来自本行的尺寸与比例；这里只填价"
             info={
               <>
@@ -293,15 +288,15 @@ export default function PricingTab({
       {}
       <div style={{ marginTop: 'var(--admin-space-4)' }}>
         <Field
-          label="维度绝对加价（元 / 每个单位）"
+          label="维度绝对加价（积分 / 每个单位）"
           hint={<>按维度收固定单价，<b>不乘</b>基准单价 —— 与上面的「附加维度」那种相对加价不同</>}
           info={
             <>
-              这里给的是<b>绝对值</b>：每个单位固定多少钱，与基准单价无关。所以它表达得了
-              「输出图分 0.3 / 0.6 两档，但参考图每张都是 0.02 元」——上面的「附加维度」是万分比，
+              这里给的是<b>绝对值</b>：每个单位固定多少积分，与基准单价无关。所以它表达得了
+              「输出图分 0.3 / 0.6 两档，但参考图每张都是 0.02 积分」——上面的「附加维度」是万分比，
               同一个数在两档下会算出两个价。
               <div style={{ marginTop: 'var(--admin-space-2)' }}>
-                每行一个维度（与基准维度同一份白名单）。单价按<b>元</b>填、写回是 mc，必须
+                每行一个维度（与基准维度同一份白名单）。单价按<b>积分</b>填、写回是 mc，必须
                 <b>大于 0</b>：要让某个维度免费就整行删掉，别写 0。勾上「首张免费」则第一个单位
                 不计费（火山 Seedream 5.0 Pro 的「首张参考图免费」就是它）。
               </div>
@@ -358,7 +353,7 @@ function DimPriceEditor({
           </div>
           <Input
             aria-label={`维度绝对加价第 ${index + 1} 行单价`}
-            placeholder="0.02"
+            placeholder="例如 1"
             value={row.value}
             onChange={(e) => patchRow(index, { value: e.target.value })}
             style={{ width: 120 }}

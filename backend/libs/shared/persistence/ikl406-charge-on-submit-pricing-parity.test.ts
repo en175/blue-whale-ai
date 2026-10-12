@@ -169,12 +169,12 @@ describe("IKL406 价目迁移：视频改按秒", () => {
 });
 
 describe("IKL406 价目迁移：音频改按字数", () => {
-  it("★ 基准维度是 usage.characters，每字 10 mc", () => {
+  it("★ 基准维度是 usage.characters，配置读作「每 100 字 1 积分」", () => {
     const block = blockOf("seed-audio-1.0");
     expect(block).toContain("`capability_type` = 'audio'");
     expect(block).toContain("'baseUnit', 'usage.characters'");
-    expect(block).toContain("'basePrice', JSON_OBJECT('kind', 'const', 'value', 10)");
-    expect(block).toContain("'unitDenominator', 1");
+    expect(block).toContain("'basePrice', JSON_OBJECT('kind', 'const', 'value', 1000)");
+    expect(block).toContain("'unitDenominator', 100");
     expect(block).toContain("'minCredits', 1");
   });
 

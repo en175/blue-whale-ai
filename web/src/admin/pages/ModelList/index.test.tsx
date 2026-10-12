@@ -556,17 +556,17 @@ describe('ModelList 按类型分表单', () => {
 
 
 describe('ModelList 定价 tab', () => {
-  it('已配的价按「元」显示，量纲由基准维度与单位分母推出来', async () => {
+  it('已配的价按「积分」显示，量纲由基准维度与单位分母推出来', async () => {
     api.fetchAdminModels.mockResolvedValue([videoPriced]);
     await renderPage();
     await openRowEdit('视频');
     await openTab('定价');
 
 
-    expect(inputByLabel('基准单价').value).toBe('1.333333');
-    expect(document.body.textContent).toContain('基准单价（元 / 秒）');
+    expect(inputByLabel('基准单价').value).toBe('20');
+    expect(document.body.textContent).toContain('基准单价（积分 / 秒）');
 
-    expect(document.body.textContent).not.toContain('1 元 = 15 积分');
+    expect(document.body.textContent).not.toContain('元');
   });
 
   it('★ 没碰过定价 tab：保存**完全不提交** pricing（库里那份原样保留）', async () => {
@@ -591,7 +591,7 @@ describe('ModelList 定价 tab', () => {
     await openTab('定价');
 
     await type(inputByLabel('基准单价'), '1.5');
-    await type(inputByLabel('基准单价'), '1.333333');
+    await type(inputByLabel('基准单价'), '20');
     await click(button('保存'));
 
     expect(api.updateAdminModel).not.toHaveBeenCalled();
@@ -615,7 +615,7 @@ describe('ModelList 定价 tab', () => {
 
     expect(payload.pricing).toEqual({
       baseUnit: 'constant:1',
-      basePrice: { kind: 'const', value: 30000 },
+      basePrice: { kind: 'const', value: 2000 },
       unitDenominator: 1,
       minCredits: 1,
       rounding: 'halfUp',
@@ -694,20 +694,20 @@ describe('ModelList 维度绝对加价 dimPrices', () => {
     return box;
   }
 
-  it('★ 已配的绝对加价按「元」显示，「首张免费」是勾着的', async () => {
+  it('★ 已配的绝对加价按「积分」显示，「首张免费」是勾着的', async () => {
     api.fetchAdminModels.mockResolvedValue([imageDimPriced]);
     await renderPage();
     await openRowEdit('图片');
     await openTab('定价');
 
 
-    expect(inputByLabel('维度绝对加价第 1 行单价').value).toBe('0.02');
+    expect(inputByLabel('维度绝对加价第 1 行单价').value).toBe('0.3');
     expect(checkboxByLabel('首张免费').getAttribute('aria-checked')).toBe('true');
 
-    expect(document.body.textContent).toContain('维度绝对加价（元 / 每个单位）');
+    expect(document.body.textContent).toContain('维度绝对加价（积分 / 每个单位）');
   });
 
-  it('★ 改单价：按元换算成 mc 写回，首张免费跟着走', async () => {
+  it('★ 改单价：按积分换算成 mc 写回，首张免费跟着走', async () => {
     api.fetchAdminModels.mockResolvedValue([imageDimPriced]);
     await renderPage();
     await openRowEdit('图片');
@@ -718,7 +718,7 @@ describe('ModelList 维度绝对加价 dimPrices', () => {
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { pricing: Record<string, unknown> };
 
     expect(payload.pricing.dimPrices).toEqual({
-      'usage.referenceCount': { unitMc: 750, firstFree: true },
+      'usage.referenceCount': { unitMc: 50, firstFree: true },
     });
   });
 
@@ -739,7 +739,7 @@ describe('ModelList 维度绝对加价 dimPrices', () => {
     await openTab('定价');
 
     await type(inputByLabel('维度绝对加价第 1 行单价'), '1');
-    await type(inputByLabel('维度绝对加价第 1 行单价'), '6.666667');
+    await type(inputByLabel('维度绝对加价第 1 行单价'), '100');
     await click(button('保存'));
 
     expect(api.updateAdminModel).not.toHaveBeenCalled();

@@ -37,14 +37,10 @@
 
 
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import type { AdminModel, CreateAdminModelParams } from '@/api/adminModels';
-import { billingCatalogOptions } from '@/api/adminBillingCatalog';
 import { isApiError } from '@/api/http';
 import {
   formFromRule,
-  parseCatalog,
-  readCreditsPerYuan,
   ruleFormError,
   ruleFromForm,
   type CatalogRuleView,
@@ -198,36 +194,17 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
 
   const originalPricing = (initial?.pricing ?? null) as CatalogRuleView | null;
   const [pricingForm, setPricingForm] = useState<RuleForm>(() =>
-    formFromRule(initial?.model_id ?? '', type, originalPricing ?? {}, null),
+    formFromRule(initial?.model_id ?? '', type, originalPricing ?? {}),
   );
 
   const [pricingTouched, setPricingTouched] = useState(false);
 
 
 
-
-
-  const catalog = useQuery(billingCatalogOptions());
-  const creditsPerYuan = useMemo(() => {
-    if (catalog.data === undefined) return null;
-    try {
-      return readCreditsPerYuan(parseCatalog(catalog.data.document));
-    } catch {
-      return null;
-    }
-  }, [catalog.data]);
-  const rateNotice = catalog.isError
-    ? isApiError(catalog.error)
-      ? catalog.error.message
-      : '获取定价目录失败'
-    : '';
-
-
-
   useEffect(() => {
     if (pricingTouched) return;
-    setPricingForm(formFromRule(initial?.model_id ?? '', type, originalPricing ?? {}, creditsPerYuan));
-  }, [pricingTouched, creditsPerYuan, initial, type, originalPricing]);
+    setPricingForm(formFromRule(initial?.model_id ?? '', type, originalPricing ?? {}));
+  }, [pricingTouched, initial, type, originalPricing]);
 
   const copyOptions = models.filter((m) => m.capability_type === type);
   const showSizeRatio = type === 'image' || type === 'video';
@@ -478,14 +455,14 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     if (pricingTouched) {
 
       const effective: RuleForm = { ...pricingForm, modelId: modelId.trim(), taskType: type };
-      const message = ruleFormError(effective, creditsPerYuan);
+      const message = ruleFormError(effective);
       if (message !== null) {
         setError(message);
         setTab('pricing');
         return;
       }
       try {
-        built.value.pricing = ruleFromForm(effective, originalPricing ?? {}, creditsPerYuan);
+        built.value.pricing = ruleFromForm(effective, originalPricing ?? {});
       } catch (e) {
         setError(e instanceof Error ? e.message : '定价规则不合法');
         setTab('pricing');
@@ -621,8 +598,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       {tab === 'pricing' && (
         <PricingTab
           rule={originalPricing}
-          creditsPerYuan={creditsPerYuan}
-          rateNotice={rateNotice}
           modelId={modelId.trim() || (initial?.model_id ?? '')}
           taskType={type}
           channel={channel}

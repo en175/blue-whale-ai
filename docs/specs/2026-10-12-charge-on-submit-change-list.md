@@ -107,10 +107,10 @@
 ```json
 {
   "baseUnit": "usage.characters",
-  "basePrice": { "kind": "const", "value": 10 },
-  "unitDenominator": 1,
+  "basePrice": { "kind": "const", "value": 1000 },
+  "unitDenominator": 100,
   "minCredits": 1
 }
 ```
 
-每字 10 mc = 0.01 积分 → **每 100 字 1 积分**。原按秒规则（`usage.seconds` / 75 mc / `maxCredits: 12`）整体替换，`maxCredits` 不再需要（字数提交时已知）。
+配置本身就读作「**每 100 字 1 积分**」：`unitDenominator` = 多少字算一个计费单位，`basePrice` = 该单位多少 mc（1000 mc = 1 积分）。等价于每字 10 mc，但与业务口径同形——管理端不必把它换算成「元 / 字符」那种读不懂、还显示成「0 积分」的形态。原按秒规则（`usage.seconds` / 75 mc / `maxCredits: 12`）整体替换，`maxCredits` 不再需要（字数提交时已知）。

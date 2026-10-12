@@ -94,8 +94,8 @@ WHERE `model_id` = 'doubao-seedance-2-5-260628'
 UPDATE `generation_model_capability`
 SET `pricing` = JSON_OBJECT(
       'baseUnit', 'usage.characters',
-      'basePrice', JSON_OBJECT('kind', 'const', 'value', 10),
-      'unitDenominator', 1,
+      'basePrice', JSON_OBJECT('kind', 'const', 'value', 1000),
+      'unitDenominator', 100,
       'minCredits', 1
     )
 WHERE `model_id` = 'seed-audio-1.0'
