@@ -1803,6 +1803,21 @@ test('Ponytail runtime dependencies select control-plane verification', () => {
   }
 });
 
+test('ZCode Ponytail plugin assets select control-plane verification', () => {
+  const files = ['.zcode/ponytail.json', '.zcode/plugins/marketplace.json',
+    '.zcode/plugins/ponytail/.zcode-plugin/plugin.json',
+    '.zcode/plugins/ponytail/hooks/hooks.json', '.zcode/plugins/ponytail/hooks/route.js'];
+  for (const stage of ['completion', 'pr']) {
+    for (const file of files) {
+      assert.deepEqual(classifyChanges([file], { stage }), {
+        tier: 'scoped', areas: ['control-plane'], reasons: ['control-plane changed'],
+      });
+    }
+    assert.throws(() => classifyChanges(['.zcode/plugins/unmanaged/hooks/route.js'], { stage }), /UNCLASSIFIED_PATH/);
+    assert.equal(classifyChanges([...files, 'backend/Dockerfile'], { stage }).tier, 'full');
+  }
+});
+
 function createFrontendRepository({ localPublish = false } = {}) {
   const repository = createRepository();
   writeFileSync(join(repository, ".git", "info", "exclude"), "node_modules/\nscripts/\n.env.local\n.env.*.local\n");
