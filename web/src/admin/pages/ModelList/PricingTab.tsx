@@ -65,8 +65,6 @@ export default function PricingTab({
 }: PricingTabProps) {
   const patch = (next: Partial<RuleForm>) => onChange({ ...form, ...next });
 
-  const tokenEstimateApplies = channelOf(channel).media === 'video';
-
   const baseUnitOptions = BASE_UNIT_OPTIONS.some((o) => o.value === form.baseUnit)
     ? BASE_UNIT_OPTIONS
     : [...BASE_UNIT_OPTIONS, { value: form.baseUnit, label: `${form.baseUnit}（库里的现值）` }];
@@ -223,7 +221,7 @@ export default function PricingTab({
           </Field>
         ) : (
           <Alert tone="warning" title="单价还没填 —— 这个模型的提交会被拒绝">
-            这条规则只留了个空位：基准维度、token 估算参数、单位分母都配好了，差的就是单价。
+            这条规则只留了个空位：基准维度、单位分母都配好了，差的就是单价。
             在「单价待配」下提交任务是<b>直接失败</b>，不会按 0 免费生成（按 0 等于白送，
             而且账面上看不出来）。填好单价后把计价方式改成「按规格查表」或「常数单价」。
           </Alert>
@@ -232,8 +230,8 @@ export default function PricingTab({
 
       <div style={{ ...GRID3, marginTop: 'var(--admin-space-4)' }}>
         {}
-        {tokenEstimateApplies && (
-          <Field label="单位分母" hint="每多少个单位收这份单价：1 = 每秒/每张，1000000 = 每百万 token">
+        {channelOf(channel).media === 'video' && (
+          <Field label="单位分母" hint="每多少个单位收这份单价：1 = 每秒/每张">
             <Input
               aria-label="单位分母"
               value={form.unitDenominator}
@@ -269,73 +267,6 @@ export default function PricingTab({
       </div>
 
       {}
-      {tokenEstimateApplies && (
-        <>
-          <div style={{ marginTop: 'var(--admin-space-5)', borderTop: '1px solid var(--admin-border)', paddingTop: 'var(--admin-space-4)' }}>
-            <Checkbox
-              checked={form.tokenEstimateEnabled}
-              onChange={(tokenEstimateEnabled) => patch({ tokenEstimateEnabled })}
-              label="按 token 估算预扣（基准维度是 usage.c 的规则需要勾）"
-            />
-            <div style={{ fontSize: 'var(--admin-font-xs)', marginTop: 'var(--admin-space-2)', }}>
-              服务端按火山的官方公式（宽 × 高 × 帧率 × 时长 ÷ 除数）估一个 token 上限来冻结；
-              结算仍按上游返回的真实 token 计价。不勾 = 这条规则不做估算 ——
-              基准维度是 usage.c 而不勾，提交时会因「算不出契约量」被拒绝。
-            </div>
-          </div>
-
-          {form.tokenEstimateEnabled && (
-            <>
-              <div style={{ ...GRID3, marginTop: 'var(--admin-space-3)' }}>
-                <Field label="除数" hint="官方公式的除数字（火山对照表是 1024）">
-                  <Input
-                    aria-label="token 除数"
-                    value={form.tokenDivisor}
-                    onChange={(e) => patch({ tokenDivisor: e.target.value })}
-                  />
-                </Field>
-                <Field label="帧率" hint="官方对照表是 24；如实填，估低了预扣就冻少了">
-                  <Input
-                    aria-label="token 帧率"
-                    value={form.tokenFps}
-                    onChange={(e) => patch({ tokenFps: e.target.value })}
-                  />
-                </Field>
-                <Field
-                  label="输入时长的规格键（选填）"
-                  hint="填了公式就含「输入时长」那一项；留空 = 不含（含视频输入的任务预扣会偏低）"
-                >
-                  <Input
-                    aria-label="输入时长的规格键"
-                    value={form.tokenInputSecondsKey}
-                    placeholder="video_input_seconds"
-                    onChange={(e) => patch({ tokenInputSecondsKey: e.target.value })}
-                  />
-                </Field>
-              </div>
-              {}
-              <div style={{ marginTop: 'var(--admin-space-3)' }}>
-                <Field
-                  label="最低 token 用量表（规格键 → 最低 token 数，选填）"
-                  hint="火山官方规则：<b>含视频输入时</b>，估算 token ＜ 这一格的下限 ⇒ 按下限计费。
-                        键与价格表同一套语法，再带上输出时长（resolution=480p|aspect_ratio=16:9|duration=5）。
-                        整块留空 = 本规则不做下限；配了就必须配全 —— 某格查不到时提交会被拒绝"
-                >
-                  <KeyValueEditor
-                    rows={form.tokenMinimumTokens}
-                    ariaPrefix="最低 token 用量表"
-                    keyPlaceholder="resolution=480p|aspect_ratio=16:9|duration=5"
-                    valuePlaceholder="200000"
-                    makeRow={() => ({ key: '', value: '' })}
-                    onChange={(tokenMinimumTokens) => patch({ tokenMinimumTokens })}
-                  />
-                </Field>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
       <div style={{ ...formGrid(2), marginTop: 'var(--admin-space-4)' }}>
         <Field label="附加维度（万分比）" hint="按用量加权：10000 = 1 倍，4000 = 0.4 倍。留空表示不加权">
           <KeyValueEditor

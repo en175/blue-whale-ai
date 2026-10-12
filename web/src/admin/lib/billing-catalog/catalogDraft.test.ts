@@ -212,8 +212,8 @@ describe('单位换算', () => {
     expect(describePriceInHuman(100000, null)).toBe('100 积分');
   });
 
-  it('单价的量纲由 unitDenominator + baseUnit 一起决定（70 是每百万 token，0.12 是每张）', () => {
-    expect(priceUnitLabel({ baseUnit: 'usage.c', unitDenominator: 1000000 })).toBe('百万 token');
+  it('单价的量纲由 unitDenominator + baseUnit 一起决定', () => {
+    expect(priceUnitLabel({ baseUnit: 'usage.c', unitDenominator: 1000000 })).toBe('1000000 个单位');
     expect(priceUnitLabel({ baseUnit: 'constant:1', unitDenominator: 1 })).toBe('次');
     expect(priceUnitLabel({ baseUnit: 'usage.succeededSlots', unitDenominator: 1 })).toBe('张');
     expect(priceUnitLabel({ baseUnit: 'usage.seconds', unitDenominator: 1 })).toBe('秒');
@@ -472,31 +472,7 @@ describe('token 计价的规则编辑', () => {
     minCredits: 1,
     maxCredits: null,
     rounding: 'halfUp',
-    tokenEstimate: {
-      divisor: 1024,
-      fps: 24,
-      inputSecondsKey: 'video_input_seconds',
-      dimensions: { 'resolution=720p|aspect_ratio=16:9': '1248x704' },
-    },
   };
-
-  it('★ 读出来再写回去：tokenEstimate 的**合法键**与价格表原样保留，退役的 dimensions 被丢掉', () => {
-    const tableBack = ruleFromForm(
-      formFromRule('seedance-2.0', 'video', TOKEN_RULE, 15),
-      TOKEN_RULE,
-      15,
-    );
-    const { dimensions: _retired, ...tokenKept } = TOKEN_RULE.tokenEstimate;
-    expect(tableBack).toMatchObject({ ...TOKEN_RULE, tokenEstimate: tokenKept });
-    expect(tableBack.tokenEstimate).toEqual(tokenKept);
-    expect(tableBack.tokenEstimate).not.toHaveProperty('dimensions');
-    expect(tableBack.basePrice).toMatchObject({ table: TOKEN_RULE.basePrice.table });
-
-    const unsetRule = { ...TOKEN_RULE, basePrice: { kind: 'unset', by: ['video'] } };
-    expect(
-      ruleFromForm(formFromRule('seedance-2.5', 'video', unsetRule, 15), unsetRule, 15),
-    ).toEqual({ ...unsetRule, tokenEstimate: tokenKept });
-  });
 
   it('★ 计价方式选「单价待配」→ 写入 kind=unset，且**不带任何价**', () => {
     const form = { ...emptyRuleForm(), modelId: 'seedance-2.5', taskType: 'video', priceKind: 'unset' as const };
@@ -519,116 +495,8 @@ describe('token 计价的规则编辑', () => {
     expect(ruleFormError(form, 15)).toBeNull();
   });
 
-  it('★ 勾了 token 估算就必须把除数 / 帧率配全（半配会发布失败）', () => {
-    const base: RuleForm = {
-      ...emptyRuleForm(),
-      modelId: 'm',
-      taskType: 'video',
-      baseUnit: 'usage.c',
-      priceKind: 'table',
-      priceTable: [{ key: 'resolution=720p|video=0', value: '37', originalMc: null }],
-      tokenEstimateEnabled: true,
-    };
-
-    expect(ruleFormError(base, 15)).toBeNull();
-    expect(ruleFormError({ ...base, tokenDivisor: '' }, 15)).toContain('除数');
-    expect(ruleFormError({ ...base, tokenFps: '0' }, 15)).toContain('帧率');
-  });
-
-  it('★ 取消勾选 → tokenEstimate 整块删掉（不留半配的残骸，那会发布失败）', () => {
-    const form = { ...formFromRule('m', 'video', TOKEN_RULE, 15), tokenEstimateEnabled: false };
-    const rule = ruleFromForm(form, TOKEN_RULE, 15);
-
-    expect(rule).not.toHaveProperty('tokenEstimate');
-  });
-
-  it('★ 清空输入时长键 → 明确不要那一项（不能因为原文档里有就留着）', () => {
-    const form = { ...formFromRule('m', 'video', TOKEN_RULE, 15), tokenInputSecondsKey: '  ' };
-    const rule = ruleFromForm(form, TOKEN_RULE, 15);
-
-    expect(rule.tokenEstimate).not.toHaveProperty('inputSecondsKey');
-    expect(rule.tokenEstimate?.divisor).toBe(1024);
-  });
-
-  it('★ 最低 token 用量表：读得出、写得回，往返无损', () => {
-    const withFloor = {
-      ...TOKEN_RULE,
-      tokenEstimate: {
-        ...TOKEN_RULE.tokenEstimate,
-        minimumTokens: { 'resolution=480p|aspect_ratio=16:9|duration=5': 200000 },
-      },
-    };
-    const form = formFromRule('seedance-2.0', 'video', withFloor, 15);
-
-    expect(form.tokenMinimumTokens).toEqual([
-      { key: 'resolution=480p|aspect_ratio=16:9|duration=5', value: '200000' },
-    ]);
-    const { dimensions: _retired2, ...floorTokenKept } = withFloor.tokenEstimate;
-    expect(ruleFromForm(form, withFloor, 15)).toMatchObject({ ...withFloor, tokenEstimate: floorTokenKept });
-    expect(ruleFromForm(form, withFloor, 15).tokenEstimate?.minimumTokens).toEqual(
-      withFloor.tokenEstimate.minimumTokens,
-    );
-  });
-
-  it('★ 最低 token 用量表整块删空 → 从文档里去掉（「我删了」必须真的删掉）', () => {
-    const withFloor = {
-      ...TOKEN_RULE,
-      tokenEstimate: {
-        ...TOKEN_RULE.tokenEstimate,
-        minimumTokens: { 'resolution=480p|aspect_ratio=16:9|duration=5': 200000 },
-      },
-    };
-    const form = { ...formFromRule('m', 'video', withFloor, 15), tokenMinimumTokens: [] };
-    const rule = ruleFromForm(form, withFloor, 15);
-
-    expect(rule.tokenEstimate).not.toHaveProperty('minimumTokens');
-    expect(rule.tokenEstimate?.divisor).toBe(1024);
-  });
-
-  it('★ 最低 token 用量的值必须是正整数（0 会静默失效，负数会让 max() 永远取估算值）', () => {
-    const base: RuleForm = {
-      ...emptyRuleForm(),
-      modelId: 'm',
-      taskType: 'video',
-      priceKind: 'unset' as const,
-      tokenEstimateEnabled: true,
-    };
-
-    expect(ruleFormError(base, 15)).toBeNull();
-    expect(ruleFormError({ ...base, tokenMinimumTokens: [{ key: 'k', value: '0' }] }, 15)).toContain(
-      '正整数',
-    );
-    expect(
-      ruleFormError({ ...base, tokenMinimumTokens: [{ key: 'k', value: '-1' }] }, 15),
-    ).toContain('正整数');
-    expect(
-      ruleFormError({ ...base, tokenMinimumTokens: [{ key: '', value: '100' }] }, 15),
-    ).toContain('规格键');
-    expect(
-      ruleFormError(
-        { ...base, tokenMinimumTokens: [{ key: 'resolution=480p', value: '100' }] },
-        15,
-      ),
-    ).toBeNull();
-  });
-
-  it('不勾 token 估算时，最低 token 用量表里的残行不该拦住保存（整块不写出去）', () => {
-    const form = {
-      ...emptyRuleForm(),
-      modelId: 'm',
-      taskType: 'image',
-      priceKind: 'const' as const,
-      priceValue: { value: '2', originalMc: null },
-      tokenEstimateEnabled: false,
-      tokenMinimumTokens: [{ key: '', value: '' }],
-    };
-
-    expect(ruleFormError(form, 15)).toBeNull();
-    expect(ruleFromForm(form, {}, 15)).not.toHaveProperty('tokenEstimate');
-  });
-
-  it('基准维度候选里有 usage.c（否则界面根本选不出「按 token 计价」）', () => {
-    expect(BASE_UNIT_OPTIONS.map((o) => o.value)).toContain('usage.c');
+  it('基准维度候选里不再有 usage.c（视频不再按 token 计价）', () => {
+    expect(BASE_UNIT_OPTIONS.map((o) => o.value)).not.toContain('usage.c');
   });
 
 });

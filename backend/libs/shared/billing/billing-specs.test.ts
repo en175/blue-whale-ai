@@ -68,7 +68,7 @@ describe('extractSpecs', () => {
     ).toEqual({
       reference_count: '1',
       video: '1',
-      video_input_seconds: '5',
+      reference_seconds: '5',
     });
 
     expect(
@@ -78,7 +78,7 @@ describe('extractSpecs', () => {
           { role: 'reference', type: 'video', asset_id: '3', duration: 8 },
         ],
       }),
-    ).toMatchObject({ video_input_seconds: '13' });
+    ).toMatchObject({ reference_seconds: '13' });
   });
 
   it('★ 量不到输入时长就整个键不写 —— 不许按 0 估', () => {
@@ -92,20 +92,39 @@ describe('extractSpecs', () => {
     ).toEqual({ reference_count: '2', video: '1' });
     expect(
       videoSpecs({ references: [{ role: 'reference', type: 'video', asset_id: '2' }] }),
-    ).not.toHaveProperty('video_input_seconds');
+    ).not.toHaveProperty('reference_seconds');
     expect(
       videoSpecs({
         references: [{ role: 'reference', type: 'image', asset_id: '2', duration: 5 }],
       }),
-    ).not.toHaveProperty('video_input_seconds');
+    ).not.toHaveProperty('reference_seconds');
   });
 
   it('★ 创作内容不进规格 —— prompt / title 被排除', () => {
     const specs = videoSpecs({ prompt: '一只猫', title: '我的视频', size: '2k' });
 
-    expect(specs).toEqual({ size: '2k', reference_count: '0', video: '0' });
+    expect(specs).toEqual({
+      size: '2k',
+      reference_count: '0',
+      video: '0',
+      prompt_characters: '3',
+    });
     expect(specs).not.toHaveProperty('prompt');
     expect(specs).not.toHaveProperty('title');
+  });
+
+  it('★ 编辑模式不写参考秒数 —— 产出时长已等于参考时长，再叠一次就翻倍', () => {
+    const specs = videoSpecs({
+      references: [{ role: 'reference', type: 'video', asset_id: '2', duration: 5 }],
+      video_mode: 'edit',
+    });
+
+    expect(specs).toMatchObject({ video: '1', video_edit: '1' });
+    expect(specs).not.toHaveProperty('reference_seconds');
+    expect(videoSpecs({ references: [{ type: 'video', duration: 5 }] })).toHaveProperty(
+      'reference_seconds',
+      '5',
+    );
   });
 
   it('大小写不敏感地排除内容字段', () => {

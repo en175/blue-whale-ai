@@ -457,7 +457,12 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
       modelId: "doubao-seedance-2-5-260628",
       modelLabel: "豆包 Seedance 2.5",
       prompt: "一只猫在草地上跑",
-      specs: { model_id: "doubao-seedance-2-5-260628", reference_count: "0", video: "0" },
+      specs: {
+        model_id: "doubao-seedance-2-5-260628",
+        reference_count: "0",
+        video: "0",
+        prompt_characters: "8",
+      },
     });
     expect(map.get("7")).not.toHaveProperty("input");
   });
@@ -484,7 +489,8 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
       resolution: "1080p",
       reference_count: "1",
       video: "1",
-      video_input_seconds: "3",
+      reference_seconds: "3",
+      prompt_characters: "3",
     });
     expect(map.get("11")?.specs).not.toHaveProperty("provider_credential");
     expect(map.get("11")?.specs).not.toHaveProperty("prompt");
@@ -511,7 +517,7 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
       modelId: null,
       modelLabel: null,
       prompt: "把背景抠掉",
-      specs: { reference_count: "0", video: "0" },
+      specs: { reference_count: "0", video: "0", prompt_characters: "5" },
     });
     expect(capFindMany).not.toHaveBeenCalled();
   });

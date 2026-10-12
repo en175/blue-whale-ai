@@ -478,14 +478,32 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
       channel: "seedream-video",
       model: "doubao-seedance-2-0-260128",
       pricing: {
-        baseUnit: "usage.c",
+        baseUnit: "usage.seconds",
         basePrice: {
           by: ["resolution", "video"],
           kind: "table",
-          table: { "resolution=4k|video=0": 390000, "resolution=480p|video=1": 420000 },
+          table: { "resolution=480p|video=0": 13000, "resolution=4k|video=1": 260000 },
         },
+        multipliers: { "usage.videoEdit": 20000 },
         minCredits: 1,
-        tokenEstimate: { fps: 24, divisor: 1024 },
+        unitDenominator: 1,
+      },
+    },
+    {
+      type: "video",
+      channel: "seedream-video",
+      model: "doubao-seedance-2-5-260628",
+      pricing: {
+        baseUnit: "usage.seconds",
+        basePrice: {
+          by: ["resolution", "video"],
+          kind: "table",
+          table: { "resolution=480p|video=0": 20000, "resolution=1080p|video=1": 110000 },
+        },
+        dims: { "usage.referenceSeconds": 10000 },
+        multipliers: { "usage.videoEdit": 20000 },
+        minCredits: 1,
+        unitDenominator: 1,
       },
     },
     {
@@ -499,11 +517,10 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
       channel: "seedream-audio",
       model: "seed-audio-1.0",
       pricing: {
-        baseUnit: "usage.seconds",
-        basePrice: { kind: "const", value: 75 },
+        baseUnit: "usage.characters",
+        basePrice: { kind: "const", value: 10 },
         minCredits: 1,
         unitDenominator: 1,
-        maxCredits: 12,
       },
     },
     {
@@ -595,39 +612,10 @@ describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
     basePrice: { kind: "const", value: 100 },
     tokenEstimate: { divisor: 1024, fps: 24 },
   };
-  const plainPricing = { baseUnit: "constant:1", basePrice: { kind: "const", value: 30000 } };
-
   const update = (pricing: unknown, type: "image" | "video", channel: string) =>
     parseModelUpdateBody({ pricing }, { capability_type: type, channel });
-
-  it("★ 图片渠道不许带 tokenEstimate（配了也没人读）", () => {
-    const parsed = update(tokenPricing, "image", "seedream-image");
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error).toContain("只在视频渠道上成立");
-  });
-
   it("★ 视频渠道照常放行（这条规则本来就是视频的）", () => {
     expect(update(tokenPricing, "video", "seedream-video").ok).toBe(true);
-  });
-
-  it("★ unitDenominator ≠ 1 必须与 tokenEstimate 同时出现（否则单价缩小一百万倍）", () => {
-    const parsed = update(
-      { ...plainPricing, unitDenominator: 1000000 },
-      "image",
-      "seedream-image",
-    );
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error).toContain("unitDenominator");
-  });
-
-  it("★ tokenEstimate 是封闭形状：退役的键（dimensions）存不进去", () => {
-    const parsed = update(
-      { ...tokenPricing, tokenEstimate: { divisor: 1024, fps: 24, dimensions: { "a": "1x1" } } },
-      "video",
-      "seedream-video",
-    );
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error).toContain("dimensions");
   });
 
   it("★ 渠道未知（历史行 / 未迁移行）→ 整段跳过，不因此拦下运营的编辑", () => {

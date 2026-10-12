@@ -170,9 +170,9 @@ const videoPriced: AdminModel = {
   default_duration: 5,
   features: {},
   pricing: {
-    baseUnit: 'usage.c',
+    baseUnit: 'usage.seconds',
     basePrice: { kind: 'const', value: 20000 },
-    unitDenominator: 1000000,
+    unitDenominator: 1,
     minCredits: 1,
     maxCredits: null,
     rounding: 'halfUp',
@@ -564,7 +564,7 @@ describe('ModelList 定价 tab', () => {
 
 
     expect(inputByLabel('基准单价').value).toBe('1.333333');
-    expect(document.body.textContent).toContain('基准单价（元 / 百万 token）');
+    expect(document.body.textContent).toContain('基准单价（元 / 秒）');
 
     expect(document.body.textContent).not.toContain('1 元 = 15 积分');
   });

@@ -11,13 +11,17 @@ public enum UsageDim {
 
     SECONDS("usage.seconds", new ContractSource.SpecKey("duration")),
 
-    CHARACTERS("usage.characters", null),
+    CHARACTERS("usage.characters", new ContractSource.SpecKey("prompt_characters")),
 
     REFERENCE_COUNT("usage.referenceCount", new ContractSource.SpecKey("reference_count")),
 
+    REFERENCE_SECONDS("usage.referenceSeconds", new ContractSource.SpecKey("reference_seconds")),
+
+    VIDEO_EDIT("usage.videoEdit", new ContractSource.SpecKey("video_edit")),
+
 
     PROMPT_TOKENS("usage.p", null),
-    COMPLETION_TOKENS("usage.c", new ContractSource.Estimated()),
+    COMPLETION_TOKENS("usage.c", null),
     CACHE_READ_TOKENS("usage.cr", null),
     CACHE_WRITE_5M_TOKENS("usage.cc5m", null),
     CACHE_WRITE_1H_TOKENS("usage.cc1h", null),

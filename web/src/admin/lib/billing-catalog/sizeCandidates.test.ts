@@ -181,8 +181,8 @@ describe('价格表候选键', () => {
 });
 
 describe('defaultAxesForBaseUnit（新建规则的初值）', () => {
-  it('按 token 计价 → 分辨率档 × 视频输入档；按张 → 尺寸档', () => {
-    expect(defaultAxesForBaseUnit('usage.c')).toEqual(['resolution', 'video']);
+  it('视频按秒 → 分辨率档 × 视频输入档；按张 → 尺寸档', () => {
+    expect(defaultAxesForBaseUnit('usage.seconds')).toEqual(['resolution', 'video']);
     expect(defaultAxesForBaseUnit('usage.succeededSlots')).toEqual(['size']);
     expect(defaultAxesForBaseUnit('constant:1')).toEqual([]);
   });

@@ -17,12 +17,6 @@ export interface CatalogRuleView {
   minCredits?: unknown;
   maxCredits?: unknown;
   rounding?: unknown;
-  tokenEstimate?: {
-    divisor?: unknown;
-    fps?: unknown;
-    inputSecondsKey?: unknown;
-    minimumTokens?: Record<string, unknown>;
-  };
 }
 
 
@@ -173,11 +167,6 @@ export interface RuleForm {
   minCredits: string;
   maxCredits: string;
   rounding: string;
-  tokenEstimateEnabled: boolean;
-  tokenDivisor: string;
-  tokenFps: string;
-  tokenInputSecondsKey: string;
-  tokenMinimumTokens: KeyValueRow[];
 }
 
 export const BASE_UNIT_OPTIONS = [
@@ -186,7 +175,8 @@ export const BASE_UNIT_OPTIONS = [
   { value: 'usage.seconds', label: 'usage.seconds（秒）' },
   { value: 'usage.characters', label: 'usage.characters（字符）' },
   { value: 'usage.referenceCount', label: 'usage.referenceCount（参考素材数）' },
-  { value: 'usage.c', label: 'usage.c（输出 token，视频按 token 计费用）' },
+  { value: 'usage.referenceSeconds', label: 'usage.referenceSeconds（参考视频秒数）' },
+  { value: 'usage.videoEdit', label: 'usage.videoEdit（编辑模式标记）' },
 ];
 
 const WHOLE_NUMBER = /^\d+$/;
@@ -269,22 +259,8 @@ export function ruleFormError(form: RuleForm, creditsPerYuan: number | null): st
       + '结算超出后只记应收（少收且静默）。二选一';
   }
 
-  if (form.tokenEstimateEnabled) {
-    const divisor = parseWhole(form.tokenDivisor);
-    if (divisor === null || divisor <= 0) return 'token 估算的除数必须是正整数（官方 1024）';
-    const fps = parseWhole(form.tokenFps);
-    if (fps === null || fps <= 0) return 'token 估算的帧率必须是正整数（官方对照表 24）';
-    for (const row of form.tokenMinimumTokens) {
-      if (!row.key.trim()) return '最低 token 用量表的规格键不能为空';
-      const floor = parseWhole(row.value);
-      if (floor === null || floor <= 0) {
-        return `最低 token 用量表「${row.key.trim()}」的值必须是正整数（token 数，如 200000）`;
-      }
-    }
-  }
-
   if (form.unitDenominator.trim() && parseWhole(form.unitDenominator) === null) {
-    return '单位分母必须是整数（1 = 每秒/每张，1000000 = 每百万 token）';
+    return '单位分母必须是整数（1 = 每秒/每张）';
   }
   if (form.minCredits.trim() && parseWhole(form.minCredits) === null) return '积分下限必须是整数';
   if (form.maxCredits.trim() && parseWhole(form.maxCredits) === null) return '积分上限必须是整数';
@@ -360,21 +336,6 @@ export function ruleFromForm(
   if (Object.keys(dimPrices).length > 0) rule.dimPrices = dimPrices;
   else delete rule.dimPrices;
 
-  if (form.tokenEstimateEnabled) {
-    const token: NonNullable<CatalogRuleView['tokenEstimate']> = {
-      divisor: parseWhole(form.tokenDivisor) ?? 0,
-      fps: parseWhole(form.tokenFps) ?? 0,
-    };
-    if (form.tokenInputSecondsKey.trim()) token.inputSecondsKey = form.tokenInputSecondsKey.trim();
-    else delete token.inputSecondsKey;
-    const minimumTokens = rowsToRecord(form.tokenMinimumTokens);
-    if (Object.keys(minimumTokens).length > 0) token.minimumTokens = minimumTokens;
-    else delete token.minimumTokens;
-    rule.tokenEstimate = token;
-  } else {
-    delete rule.tokenEstimate;
-  }
-
   rule.maxCredits = form.maxCredits.trim() ? parseWhole(form.maxCredits) : null;
 
   return rule;
@@ -396,7 +357,6 @@ export function formFromRule(
     const mc = typeof v === 'number' && Number.isFinite(v) ? v : null;
     return { value: mc === null ? '' : mcToYuanText(mc, creditsPerYuan), originalMc: mc };
   };
-  const token = rule.tokenEstimate;
 
   return {
     modelId,
@@ -415,12 +375,6 @@ export function formFromRule(
     minCredits: asText(rule.minCredits ?? 1),
     maxCredits: asText(rule.maxCredits),
     rounding: typeof rule.rounding === 'string' && rule.rounding ? rule.rounding : 'halfUp',
-    tokenEstimateEnabled: token !== undefined && token !== null,
-    tokenDivisor: asText(token?.divisor ?? DEFAULT_TOKEN_DIVISOR),
-    tokenFps: asText(token?.fps ?? DEFAULT_TOKEN_FPS),
-    tokenInputSecondsKey:
-      typeof token?.inputSecondsKey === 'string' ? token.inputSecondsKey : '',
-    tokenMinimumTokens: recordToRows(token?.minimumTokens),
   };
 }
 
@@ -439,16 +393,8 @@ export function emptyRuleForm(): RuleForm {
     minCredits: '1',
     maxCredits: '',
     rounding: 'halfUp',
-    tokenEstimateEnabled: false,
-    tokenDivisor: String(DEFAULT_TOKEN_DIVISOR),
-    tokenFps: String(DEFAULT_TOKEN_FPS),
-    tokenInputSecondsKey: '',
-    tokenMinimumTokens: [],
   };
 }
-
-export const DEFAULT_TOKEN_DIVISOR = 1024;
-export const DEFAULT_TOKEN_FPS = 24;
 
 function priceRowsToRecord(rows: PriceRow[], creditsPerYuan: number | null): Record<string, number> {
   const out: Record<string, number> = {};
@@ -514,7 +460,6 @@ export function priceUnitLabel(rule: CatalogRuleView): string {
     ? rule.unitDenominator
     : 1;
   const unit = typeof rule.baseUnit === 'string' ? rule.baseUnit : '';
-  if (unit === 'usage.c') return denom === 1_000_000 ? '百万 token' : `${denom} token`;
   if (unit === 'constant:1') return '次';
   if (unit === 'usage.seconds') return '秒';
   if (unit === 'usage.succeededSlots') return '张';

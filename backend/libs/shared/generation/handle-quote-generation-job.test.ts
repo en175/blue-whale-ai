@@ -525,7 +525,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("13");
-    expect(quoteArg.specs.video_input_seconds).toBe("13");
+    expect(quoteArg.specs).not.toHaveProperty("reference_seconds");
     expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String), duration_basis: "source_video" });
   });
 
@@ -546,7 +546,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const holdArg = charge.mock.calls[0]?.[0] as unknown as HoldArgs;
     expect(holdArg.specs.duration).toBe("13");
-    expect(holdArg.specs.video_input_seconds).toBe("13");
+    expect(holdArg.specs).not.toHaveProperty("reference_seconds");
   });
 
   it("★ 编辑单「预览价 = 实扣价」—— 同一请求体两路交给 billing 的规格逐字相等", async () => {
@@ -760,7 +760,7 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
     const holdArg = charge.mock.calls[0]?.[0] as unknown as HoldArgs;
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("13");
-    expect(quoteArg.specs.video_input_seconds).toBe("13");
+    expect(quoteArg.specs).not.toHaveProperty("reference_seconds");
     expect(holdArg.specs.duration).toBe("13");
     const {
       prompt: _prompt,

@@ -232,10 +232,10 @@ class BillingApplicationServiceTest {
         service();
 
         Usage.ContractQuantityUnavailableException thrown = catchThrowableOfType(
-                () -> charge(Map.of("voice", "female"), perCharsRule(2_000L, 50L)),
+                () -> charge(Map.of("voice", "female"), perPromptTokensRule(2_000L, 50L)),
                 Usage.ContractQuantityUnavailableException.class);
 
-        assertThat(thrown.baseUnit()).isEqualTo(UsageDim.CHARACTERS);
+        assertThat(thrown.baseUnit()).isEqualTo(UsageDim.PROMPT_TOKENS);
         verify(credits, never()).charge(anyLong(), anyString(), anyLong(), anyLong(),
                 anyInt(), anyInt(), anyString(), anyString());
     }
@@ -405,9 +405,9 @@ class BillingApplicationServiceTest {
     }
 
 
-    private static String perCharsRule(long mc, long maxCredits) {
+    private static String perPromptTokensRule(long mc, long maxCredits) {
         return """
-                {"baseUnit":"usage.characters",
+                {"baseUnit":"usage.p",
                  "basePrice":{"kind":"const","value":%d},
                  "unitDenominator":1,"minCredits":2,"maxCredits":%d}
                 """.formatted(mc, maxCredits);

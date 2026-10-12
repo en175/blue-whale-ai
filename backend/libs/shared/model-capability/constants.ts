@@ -350,6 +350,8 @@ const PRICING_BASE_UNITS = new Set([
   "usage.seconds",
   "usage.characters",
   "usage.referenceCount",
+  "usage.referenceSeconds",
+  "usage.videoEdit",
   "usage.p",
   "usage.c",
   "usage.cr",
@@ -366,14 +368,6 @@ const PRICING_ROUNDINGS = new Set(["halfUp", "ceil", "floor"]);
 
 
 const PRICING_KINDS = new Set(["const", "table", "unset"]);
-
-
-
-
-
-
-
-const TOKEN_ESTIMATE_KEYS = new Set(["divisor", "fps", "inputSecondsKey", "minimumTokens"]);
 
 
 
@@ -444,7 +438,7 @@ function pricingFieldErr(pricing: unknown, channel?: ChannelId): string | null {
   const denom = pricing.unitDenominator;
   if (denom !== undefined && denom !== null) {
     if (typeof denom !== "number" || !Number.isInteger(denom) || denom <= 0) {
-      return "计价规则(pricing).unitDenominator 须为正整数（1 = 每秒/每张，1000000 = 每百万 token）";
+      return "计价规则(pricing).unitDenominator 须为正整数（1 = 每秒/每张）";
     }
   }
   for (const key of ["minCredits", "maxCredits"] as const) {
@@ -524,63 +518,7 @@ function pricingFieldErr(pricing: unknown, channel?: ChannelId): string | null {
     }
   }
 
-  const est = pricing.tokenEstimate;
-  if (est !== undefined && est !== null) {
-    if (!isPlainObject(est)) return "计价规则(pricing).tokenEstimate 须为 JSON 对象";
-    for (const key of Object.keys(est)) {
-      if (!TOKEN_ESTIMATE_KEYS.has(key)) {
-        return `计价规则(pricing).tokenEstimate 不认识这个键：「${key}」`
-          + `（只收 ${[...TOKEN_ESTIMATE_KEYS].join(" / ")}）。`
-          + "已退役的键（如 dimensions —— 像素已搬进本行的 features.video_dimensions）请删掉";
-      }
-    }
-    for (const key of ["divisor", "fps"] as const) {
-      const v = est[key];
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        return `计价规则(pricing).tokenEstimate.${key} 必填且为正整数`;
-      }
-    }
-    const secKey = est.inputSecondsKey;
-    if (secKey !== undefined && secKey !== null) {
-      if (typeof secKey !== "string" || secKey.trim().length === 0) {
-        return "计价规则(pricing).tokenEstimate.inputSecondsKey 不能是空白串"
-          + "（要「不加输入时长那一项」就整个别写这个字段）";
-      }
-    }
-  }
-
-
-
-
-
-
-
-
   if (channel !== undefined) {
-
-
-
-    if (est != null && channelOf(channel).media !== "video") {
-      return `计价规则(pricing).tokenEstimate 只在视频渠道上成立（当前渠道「${channel}」不按 token 估算）；`
-        + "留着它等于一条没人读的配置，请整块删掉";
-    }
-
-
-    const denom = pricing.unitDenominator;
-    if (typeof denom === "number" && denom !== 1 && est == null) {
-      return "计价规则(pricing).unitDenominator ≠ 1 必须与 tokenEstimate 同时出现"
-        + "（分母是「每多少个单位收这份单价」，只有按 token 的规则才不是 1）";
-    }
-
-
-
-
-
-
-
-
-
-
 
     if (channelOf(channel).media === "audio" && baseUnit === "usage.seconds"
         && (pricing.maxCredits === undefined || pricing.maxCredits === null)) {

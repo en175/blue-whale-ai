@@ -1,9 +1,7 @@
 package com.bluewhale.billing.domain.pricing;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 public record Usage(
@@ -35,19 +33,8 @@ public record Usage(
 
     public static Usage contractFrom(CompiledRule rule, Map<String, String> specs) {
         Map<UsageDim, Long> fromSpecs = new LinkedHashMap<>();
-        List<UsageDim> estimatedDims = new ArrayList<>();
         for (UsageDim dim : UsageDim.values()) {
-            if (dim.contractSource() instanceof ContractSource.Estimated) {
-                estimatedDims.add(dim);
-                continue;
-            }
             Long quantity = contractQuantity(dim, specs);
-            if (quantity != null) {
-                fromSpecs.put(dim, quantity);
-            }
-        }
-        for (UsageDim dim : estimatedDims) {
-            Long quantity = estimatedQuantity(dim, rule, specs, fromSpecs);
             if (quantity != null) {
                 fromSpecs.put(dim, quantity);
             }
@@ -75,20 +62,6 @@ public record Usage(
         }
     }
 
-    private static Long estimatedQuantity(UsageDim dim, CompiledRule rule,
-                                          Map<String, String> specs, Map<UsageDim, Long> direct) {
-        return switch (dim) {
-            case COMPLETION_TOKENS -> rule.tokenEstimator() == null
-                    ? null
-                    : rule.tokenEstimator().estimateVideoTokens(
-                            specs,
-                            direct.get(UsageDim.SECONDS),
-                            direct.getOrDefault(UsageDim.SUCCEEDED_SLOTS, 1L));
-            default -> throw new IllegalStateException(
-                    "维度 " + dim.key() + " 登记为估算来源，但 estimatedQuantity 没有实现它");
-        };
-    }
-
     public static class ContractQuantityUnavailableException extends RuntimeException {
 
         public ContractQuantityUnavailableException(UsageDim baseUnit, Map<String, String> specs) {
@@ -105,7 +78,6 @@ public record Usage(
         private static String describeSource(ContractSource source) {
             return switch (source) {
                 case ContractSource.SpecKey specKey -> "读规格键 " + specKey.key();
-                case ContractSource.Estimated ignored -> "按规则的 tokenEstimate 估算";
             };
         }
 

@@ -96,7 +96,11 @@ import {
 import type { BillingCharge } from "@lib/shared/billing/billing-charge.js";
 import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
 import type { BillingQuote } from "@lib/shared/billing/billing-quote.js";
-import { DURATION_BASIS_KEY, OMNI_TASK_TYPE_ALLOWED_KEY } from "@lib/shared/billing/billing-specs.js";
+import {
+  countPromptCharacters,
+  DURATION_BASIS_KEY,
+  OMNI_TASK_TYPE_ALLOWED_KEY,
+} from "@lib/shared/billing/billing-specs.js";
 import { quoteRevisionOf } from "./handle-quote-generation-job.js";
 
 import {
@@ -994,6 +998,9 @@ export function projectQuoteInput(
     ...(capability ? { capability } : {}),
     ...(quoteVideoMode !== undefined ? { videoMode: quoteVideoMode } : {}),
   });
+  if (typeof input.prompt === "string") {
+    input.prompt_characters = String(countPromptCharacters(input.prompt));
+  }
   delete input.prompt;
 
   input.expected_output_count = Number(body.expected_output_count);
