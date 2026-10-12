@@ -71,7 +71,8 @@ nohup mvn -o -pl blue-whale-billing -am spring-boot:run > /tmp/bw-billing.log 2>
 
 ## ⚠️ 部署前必须做：预建 billing 的两个 MQ topic
 
-billing 的消费者订阅 `generation-job-completed` / `generation-job-failed`。
+billing 的消费者订阅 `generation-job-terminal`（2026-10-13 起；此前是
+`generation-job-completed` / `generation-job-failed`）。
 **RocketMQ 的消费者不会自动建 topic** —— 订阅一个不存在的 topic 会以
 `No topic route info in name server` 失败，消费者 bean 造不出来，**整个 billing 起不来**。
 （生产者的发送会触发 autoCreate，但消费者先启动时等不到那一次发送。）
@@ -82,11 +83,16 @@ billing 的消费者订阅 `generation-job-completed` / `generation-job-failed`�
 部署前建一次（一次性、幂等）：
 
 ```bash
-ssh root@14.103.43.52
-docker exec rmq-broker /home/rocketmq/rocketmq-5.3.1/bin/mqadmin updateTopic \
-  -n 127.0.0.1:9876 -c DefaultCluster -t generation-job-completed
-docker exec rmq-broker /home/rocketmq/rocketmq-5.3.1/bin/mqadmin updateTopic \
-  -n 127.0.0.1:9876 -c DefaultCluster -t generation-job-failed
+docker exec bw-rmq-broker sh -c '/home/rocketmq/rocketmq-5.3.1/bin/mqadmin updateTopic \
+  -n <namesrv-IP>:9876 -c DefaultCluster -t generation-job-terminal'
+```
+
+⚠️ **`-n` 要给 namesrv 容器的 IP，不是 `127.0.0.1`**：本地 namesrv 是**独立容器**
+（`bw-rmq-namesrv`），broker 容器里的 `127.0.0.1:9876` 够不到它，报错形如
+`RemotingConnectException: connect to null failed`。取法：
+
+```bash
+docker inspect bw-rmq-namesrv --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
 ```
 
 （topic 名的字符集限制见上面「计费服务」一节：**只能字母数字下划线连字符**，带点号会让服务直接起不来。）
