@@ -82,7 +82,7 @@ public class JobStateMachineService {
     public boolean cancelAudioMixIfRequested(String jobId, String workerId, long fencingToken) {
         boolean ok = jobMapper.cancelAudioMixIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
         if (ok) {
-            finalizer.releaseHoldForCancelled(jobId);
+            finalizer.cancelJob(jobId);
         }
         return ok;
     }
@@ -90,7 +90,7 @@ public class JobStateMachineService {
     public boolean cancelAudioVideoMuxIfRequested(String jobId, String workerId, long fencingToken) {
         boolean ok = jobMapper.cancelAudioVideoMuxIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
         if (ok) {
-            finalizer.releaseHoldForCancelled(jobId);
+            finalizer.cancelJob(jobId);
         }
         return ok;
     }
@@ -144,7 +144,7 @@ public class JobStateMachineService {
             log.warn("[video_frame_interpolation] cancel 守卫未命中(stale/已终态) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
         } else {
-            finalizer.releaseHoldForCancelled(jobId);
+            finalizer.cancelJob(jobId);
         }
         return ok;
     }
@@ -270,7 +270,7 @@ public class JobStateMachineService {
             log.warn("[video] cancelJobBeforeDispatch 守卫未命中(stale/已提交上游) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
         } else {
-            finalizer.releaseHoldForCancelled(jobId);
+            finalizer.cancelJob(jobId);
         }
         return ok;
     }

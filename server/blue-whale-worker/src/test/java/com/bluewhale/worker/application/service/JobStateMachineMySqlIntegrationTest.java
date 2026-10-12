@@ -1021,7 +1021,7 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getStatus()).isEqualTo("cancelled");
             assertThat(row.getProgress()).isEqualTo(0);
             assertThat(row.getLeaseOwner()).isNull();
-            assertThat(countLogs(id)).isEqualTo(0);
+            assertThat(countLogs(id)).isEqualTo(1);
         }
 
         @Test

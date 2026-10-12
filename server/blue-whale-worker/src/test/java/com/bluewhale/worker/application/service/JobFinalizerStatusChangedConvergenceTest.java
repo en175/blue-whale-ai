@@ -72,8 +72,8 @@ class JobFinalizerStatusChangedConvergenceTest {
     }
 
     @Test
-    @DisplayName("★ 四条取消路径都接了预扣解冻（它们不走 8 个终态路径）")
-    void 取消路径接了解冻() throws IOException {
+    @DisplayName("★ 四条取消路径都接了退款（它们不走 8 个终态路径）")
+    void 取消路径接了退款() throws IOException {
         Path machine = Path.of(
                 "src/main/java/com/bluewhale/worker/application/service/JobStateMachineService.java");
         assertThat(Files.exists(machine)).withFailMessage("找不到 %s", machine).isTrue();
@@ -87,11 +87,11 @@ class JobFinalizerStatusChangedConvergenceTest {
             String body = methodBody(lines, signature);
             assertThat(body)
                     .withFailMessage("""
-                            %s 里没有 releaseHoldForCancelled：
+                            %s 里没有 finalizer.cancelJob：
                             取消会成功（CAS 命中、status 落到 cancelled），但那条路径不经过
                             JobFinalizer 的终态路径，于是**没有任何人告诉 billing**——
-                            该 job 的预扣永远冻着，没有报错、没有红灯。""", signature.trim())
-                    .contains("releaseHoldForCancelled");
+                            该 job 的退款永远发不出去，没有报错、没有红灯。""", signature.trim())
+                    .contains("finalizer.cancelJob(");
         }
     }
 

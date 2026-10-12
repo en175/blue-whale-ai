@@ -941,17 +941,48 @@ public class JobFinalizer {
         settlementPublisher.publishTerminal(job, payload);
     }
 
-    public void releaseHoldForCancelled(String jobId) {
-        GenerationJobEntity job = jobMapper.selectById(Long.parseLong(jobId));
+    @Transactional
+    public void cancelJob(String jobId) {
+        Long jobIdLong = Long.parseLong(jobId);
+        List<GenerationOutputSlotEntity> slots = slotMapper.findPendingByJobId(jobIdLong);
+        for (GenerationOutputSlotEntity slot : slots) {
+            slotMapper.updateSlotStatus(slot.getId(), JobStatusEnum.FAILED.value());
+        }
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         if (job == null) {
             log.warn("[cancel] 取不到 job，无法发布终态事件：jobId={}", jobId);
             return;
         }
+
+        GenerationOutputSlotEntity firstFailSlot = slots.isEmpty() ? null : slots.get(0);
+        if (firstFailSlot != null && firstFailSlot.getSceneCardGenerationRecordId() != null) {
+            recordSync.sync(firstFailSlot.getSceneCardGenerationRecordId());
+        }
+        previewSync.sync(jobIdLong);
+
+        insertLog(jobIdLong, JobStatusEnum.CANCELLED, "用户取消", Map.of());
+
         publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                 "type", job.getType(),
                 "source", job.getSource(),
                 "status", job.getStatus(),
                 "progress", job.getProgress()));
+        if (job.getProjectId() != null) {
+            for (GenerationOutputSlotEntity slot : slots) {
+                eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
+                        "generation_job_output",
+                        job.getId().toString() + ":" + slot.getSlotIndex(), 0, "job_" + job.getId(),
+                        Map.of("job_id", job.getId().toString(),
+                                "slot_id", slot.getId().toString(),
+                                "slot_index", slot.getSlotIndex(),
+                                "status", JobStatusEnum.FAILED.value(),
+                                "asset_id", "",
+                                "retry_of_slot_id", slot.getRetryOfSlotId() != null
+                                        ? slot.getRetryOfSlotId().toString() : "",
+                                "initial_placement_status", "pending"));
+            }
+        }
     }
 
     private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,
