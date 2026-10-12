@@ -113,14 +113,13 @@ describe('extractSpecs', () => {
     expect(specs).not.toHaveProperty('title');
   });
 
-  it('★ 编辑模式不写参考秒数 —— 产出时长已等于参考时长，再叠一次就翻倍', () => {
+  it('★ 编辑模式照写参考秒数 —— 数量口径与含视频输入一致，价格由 videoEdit 倍率乘 2', () => {
     const specs = videoSpecs({
       references: [{ role: 'reference', type: 'video', asset_id: '2', duration: 5 }],
       video_mode: 'edit',
     });
 
-    expect(specs).toMatchObject({ video: '1', video_edit: '1' });
-    expect(specs).not.toHaveProperty('reference_seconds');
+    expect(specs).toMatchObject({ video: '1', video_edit: '1', reference_seconds: '5' });
     expect(videoSpecs({ references: [{ type: 'video', duration: 5 }] })).toHaveProperty(
       'reference_seconds',
       '5',

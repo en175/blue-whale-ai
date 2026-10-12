@@ -128,7 +128,7 @@ export function extractSpecs(
 
 
   const videoInputSeconds = sumVideoInputSeconds(input.references);
-  if (videoInputSeconds !== null && input[FROZEN_VIDEO_MODE_KEY] !== 'edit') {
+  if (videoInputSeconds !== null) {
     specs.reference_seconds = String(videoInputSeconds);
   }
 
