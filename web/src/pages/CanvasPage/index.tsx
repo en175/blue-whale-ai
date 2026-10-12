@@ -2415,53 +2415,38 @@ export default function CanvasPage() {
   const openImageDraftDialog = (nodeId: string) => generationDock.open('image', { nodeId });
   useEffect(() => { generationDock.reconcile(); }, [generationDock, imageDraftId, imageSeed, mediaNodes]);
   useEffect(() => {
-    if (imagePickSession === undefined) return;
-    if (!showImageDialog) endImagePickSession();
-  }, [showImageDialog, imagePickSession, endImagePickSession]);
-  useEffect(() => {
     toolRuntime.reconcileSources(new Set(mediaNodes.map((node) => node.id)));
   }, [toolRuntime, mediaNodes]);
   useEffect(() => {
-    if (imagePickSession === undefined) return;
+    if (imagePickSession !== undefined && !showImageDialog) endImagePickSession();
+    if (videoPickSession !== undefined && !showBottomDialog) endVideoPickSession();
+    if (audioPickSession !== undefined && !showAudioDialog) endAudioPickSession();
+    if (
+      imagePickSession === undefined
+      && videoPickSession === undefined
+      && audioPickSession === undefined
+    ) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (isEditableKeyboardTarget(e.target)) return;
       e.preventDefault();
-      endImagePickSession();
+      if (imagePickSession !== undefined) endImagePickSession();
+      if (videoPickSession !== undefined) endVideoPickSession();
+      if (audioPickSession !== undefined) endAudioPickSession();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [imagePickSession, endImagePickSession]);
-  useEffect(() => {
-    if (videoPickSession === undefined) return;
-    if (!showBottomDialog) endVideoPickSession();
-  }, [showBottomDialog, videoPickSession, endVideoPickSession]);
-  useEffect(() => {
-    if (videoPickSession === undefined) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (isEditableKeyboardTarget(e.target)) return;
-      e.preventDefault();
-      endVideoPickSession();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [videoPickSession, endVideoPickSession]);
-  useEffect(() => {
-    if (audioPickSession === undefined) return;
-    if (!showAudioDialog) endAudioPickSession();
-  }, [showAudioDialog, audioPickSession, endAudioPickSession]);
-  useEffect(() => {
-    if (audioPickSession === undefined) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (isEditableKeyboardTarget(e.target)) return;
-      e.preventDefault();
-      endAudioPickSession();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [audioPickSession, endAudioPickSession]);
+  }, [
+    showImageDialog,
+    showBottomDialog,
+    showAudioDialog,
+    imagePickSession,
+    videoPickSession,
+    audioPickSession,
+    endImagePickSession,
+    endVideoPickSession,
+    endAudioPickSession,
+  ]);
   useEffect(() => { generationDock.reconcile(); }, [generationDock, textGenDraftId, textNodes]);
   const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => generationDock.open('video', { nodeId, preset });
   const createVideoDraftCard = (seed?: {
