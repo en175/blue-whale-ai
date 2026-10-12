@@ -73,8 +73,6 @@
 
 .mapBtnActive {
   color: var(--color-accent-text);
-  border-color: var(--color-border-hover);
-  background-color: rgba(76, 110, 245, 0.1);
 }
 
 .saveStatus {
