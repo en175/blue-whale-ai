@@ -12,6 +12,7 @@ import {
   videoRefConflict,
   videoRefSourceError,
 } from './videoMediaRefs';
+import { videoModeAfterRefAdd } from './videoModes';
 
 
 function mediaNode(id: string, data: Record<string, unknown>): Node {
@@ -305,5 +306,41 @@ describe('checkAddVideoRef 参考素材累计时长上限', () => {
 
   it('首尾帧不做时长校验', () => {
     expect(checkAddVideoRef('first', 'image', 'a-new', { reference: [vid('v1', 999)] }, capsWithDuration, undefined, 999)).toBeNull();
+  });
+});
+
+describe('IKL406 编辑模式参考视频上限收紧为 1（与后端 videoReferenceMax 同口径）', () => {
+  const caps = { ...allCaps, videoReferenceMax: 3 };
+  const vid = (id: string): import('./videoMediaRefs').VideoMediaRef => ({
+    nodeId: id,
+    url: `http://vid/${id}.mp4`,
+    name: id,
+    assetId: `a-${id}`,
+    mediaType: 'video',
+  });
+
+  it('edit 模式：已有 1 段再加 → 拦，首段仍放行', () => {
+    expect(checkAddVideoRef('reference', 'video', 'a-new', { reference: [vid('v1')] }, caps, undefined, undefined, 'edit'))
+      .toBe('参考视频最多 1 个');
+    expect(checkAddVideoRef('reference', 'video', 'a-new', { reference: [] }, caps, undefined, undefined, 'edit'))
+      .toBeNull();
+  });
+
+  it('edit 模式只卡视频段数：加图片不受限', () => {
+    expect(checkAddVideoRef('reference', 'image', 'a-new', { reference: [vid('v1')] }, caps, undefined, undefined, 'edit'))
+      .toBeNull();
+  });
+
+  it('非 edit 模式不受影响，通用上限照旧（含缺省 mode）', () => {
+    expect(checkAddVideoRef('reference', 'video', 'a-new', { reference: [vid('v1')] }, caps, undefined, undefined, 'omni'))
+      .toBeNull();
+    expect(checkAddVideoRef('reference', 'video', 'a-new', { reference: [vid('v1')] }, caps))
+      .toBeNull();
+  });
+
+  it('加入第二段视频按切换后的全能参考算上限，不误拦', () => {
+    const refs = { reference: [vid('v1')] };
+    const mode = videoModeAfterRefAdd('edit', refs, 'video');
+    expect(checkAddVideoRef('reference', 'video', 'a-new', refs, caps, undefined, undefined, mode)).toBeNull();
   });
 });

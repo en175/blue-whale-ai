@@ -14,7 +14,7 @@ import type { VideoGenSeedParams, VideoDraftParamsPatch, VideoGenOptions } from 
 import type { MediaGenStatus } from './components/MediaNode';
 import { checkAddVideoRef, freshVideoCanvasRefs, videoRefConflict, type VideoMediaRef, type VideoMediaRefs, type VideoRefRole } from './videoMediaRefs';
 import { mergedVideoRefsWithTextIndex, videoTextIndexSendError } from './textIndexSync';
-import { draftVideoModeOf } from './videoModes';
+import { draftVideoModeOf, videoModeAfterRefAdd } from './videoModes';
 
 export interface VideoDockEntry { nodeId?: string; preset?: VideoGenSeedParams; intent?: 'manual' | 'selection' }
 export interface VideoDockPatch extends VideoDraftParamsPatch {
@@ -140,7 +140,8 @@ export function createVideoGenerationDock(getHost: () => VideoGenerationDockHost
       if (ref) {
         const previous = state.freeRefs;
         if (ref.operation === 'add') {
-          const error = checkAddVideoRef(ref.role!, ref.item!.mediaType, ref.item!.assetId, previous, undefined, [ref.item!.materialId], ref.item!.duration);
+          const mode = videoModeAfterRefAdd(state.seed?.params?.mode, previous, ref.item!.mediaType);
+          const error = checkAddVideoRef(ref.role!, ref.item!.mediaType, ref.item!.assetId, previous, undefined, [ref.item!.materialId], ref.item!.duration, mode);
           if (error) { getHost().toast('warn', error); return; }
           change({ freeRefs: ref.role === 'reference' ? { ...previous, reference: [...previous.reference, ref.item!] } : { ...previous, [ref.role!]: ref.item } });
         } else if (ref.operation === 'replace') {

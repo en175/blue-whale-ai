@@ -1,4 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
+import { DEFAULT_VIDEO_REFERENCE_MAX, videoReferenceMaxForMode } from '@/lib/model-reference-limits';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/lib/video-reference-compliance';
 import { baseSourceError, cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 
@@ -276,6 +277,7 @@ export function checkAddVideoRef(
   caps?: VideoRefCapabilities | null,
   relatedIds?: ReadonlyArray<string | undefined>,
   duration?: number,
+  mode?: string | null,
 ): string | null {
   if (role !== 'reference' && mediaType !== 'image') return '首尾帧仅支持图片素材';
   if (role === 'first' && refs.first) return '首帧已指定，请先移除现有首帧';
@@ -284,7 +286,7 @@ export function checkAddVideoRef(
     return role !== 'reference' ? '素材重复' : '重复的素材已跳过';
   }
   if (role === 'reference') {
-    const videoMax = caps?.videoReferenceMax ?? 3;
+    const videoMax = videoReferenceMaxForMode(caps?.videoReferenceMax ?? DEFAULT_VIDEO_REFERENCE_MAX, mode);
     const audioMax = caps?.audioReferenceMax ?? 3;
     const imageMax = caps?.imageMax ?? 9;
     if (mediaType === 'video') {

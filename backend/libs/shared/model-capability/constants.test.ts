@@ -703,6 +703,57 @@ describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
   });
 });
 
+describe("★ 非 1 的计费单位分母只允许按字符计费（分母 = 每多少个单位收这份单价）", () => {
+  const update = (pricing: unknown) => parseModelUpdateBody({ pricing }, { capability_type: "video" });
+
+  it("★ 按字符 + 分母 100（音频真实那条的形态）→ 放行", () => {
+    const parsed = update({
+      baseUnit: "usage.characters",
+      basePrice: { kind: "const", value: 10 },
+      minCredits: 1,
+      unitDenominator: 100,
+    });
+    expect(parsed.ok, parsed.ok ? "" : parsed.error).toBe(true);
+  });
+
+  it("★ 按秒/按张/按次 + 非 1 分母 → 拒：单价会被除小，每单只剩 minCredits", () => {
+    for (const baseUnit of ["usage.seconds", "usage.succeededSlots", "constant:1"] as const) {
+      const parsed = update({
+        baseUnit,
+        basePrice: { kind: "const", value: 100 },
+        minCredits: 1,
+        unitDenominator: 1_000_000,
+      });
+      expect(parsed.ok, `${baseUnit} 配非 1 分母应当被拒`).toBe(false);
+      if (!parsed.ok) {
+        expect(parsed.error).toContain("unitDenominator");
+        expect(parsed.error).toContain("按字符");
+      }
+    }
+  });
+
+  it("★ 分母为 1 或缺省都不受这条限制", () => {
+    for (const pricing of [
+      { baseUnit: "usage.seconds", basePrice: { kind: "const", value: 13000 }, minCredits: 1, unitDenominator: 1 },
+      { baseUnit: "usage.seconds", basePrice: { kind: "const", value: 13000 }, minCredits: 1 },
+    ]) {
+      expect(update(pricing).ok, JSON.stringify(pricing)).toBe(true);
+    }
+  });
+
+  it("★ 分母非法（0 / 负数 / 小数）仍走原来的正整数闸门", () => {
+    for (const denom of [0, -5, 1.5]) {
+      const parsed = update({
+        baseUnit: "usage.characters",
+        basePrice: { kind: "const", value: 10 },
+        unitDenominator: denom,
+      });
+      expect(parsed.ok, `unitDenominator=${denom}`).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("正整数");
+    }
+  });
+});
+
 describe("parseModelCreateBody · 比例档元素形态（ADR-0123）", () => {
   const base = {
     model_id: "gpt-image-2",

@@ -1124,6 +1124,28 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
     await expectMode('视频编辑');
   });
 
+  it('加入第二段参考视频：编辑收不下 → 自动切全能参考（不留提交冲突）', async () => {
+    apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.push({
+      id: 'v2',
+      type: 'mediaNode',
+      position: { x: 1000, y: 0 },
+      data: { src: 'http://vid/v2.mp4', mediaType: 'video', fileName: '参考视频二', assetId: 'a4' },
+    });
+    (canvasDocMock.current.assets as Record<string, unknown>).a4 = {
+      asset_id: 4, type: 'video', access_url: 'http://vid/v2.mp4', width: 100, height: 100,
+    };
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+    await expectMode('视频编辑');
+
+    await connect('v2', 'd1');
+    await expectMode('全能参考');
+  });
+
   it('视频编辑时撤掉唯一参考视频：模式收不下 → 自动切走，不留冲突', async () => {
     apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
     await renderPage();

@@ -11,6 +11,7 @@ import {
   type VideoRefRole,
 } from './videoMediaRefs';
 import { videoRefCapsOfModel } from './modelCaps';
+import { draftVideoModeOf, videoModeAfterRefAdd } from './videoModes';
 import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
 import {
   audioRefMediaTypeOf,
@@ -98,7 +99,8 @@ export function createConnectValidators(host: ConnectValidatorHost) {
       ? sourceData.materialId
       : undefined;
     const duration = typeof sourceData.duration === 'number' && sourceData.duration > 0 ? sourceData.duration : undefined;
-    const msg = checkAddVideoRef(role, mediaType, assetId, refs, videoCapsOfDraft(targetId), [materialId], duration);
+    const mode = videoModeAfterRefAdd(draftVideoModeOf(target?.data, refs), refs, mediaType);
+    const msg = checkAddVideoRef(role, mediaType, assetId, refs, videoCapsOfDraft(targetId), [materialId], duration, mode);
     if (msg) {
       host.showToast('warn', msg);
       return false;

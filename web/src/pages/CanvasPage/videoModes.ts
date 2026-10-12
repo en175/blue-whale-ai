@@ -50,7 +50,7 @@ export function enabledVideoModes(
         return noVideoOrAudio;
       case 'edit':
       case 'extend':
-        return videos >= 1;
+        return videos === 1;
       default:
         return false;
     }
@@ -59,7 +59,8 @@ export function enabledVideoModes(
 
 export function defaultVideoModeFor(refs: VideoMediaRefs): VideoMode {
   const { images, videos, audios } = videoRefsCompositionOf(refs);
-  if (videos > 0) return images > 0 ? 'omni' : 'edit';
+  if (videos > 1) return 'omni';
+  if (videos === 1) return 'edit';
   if (images > 0) return 'image_reference';
   if (audios > 0) return 'omni';
   return 'text2video';
@@ -101,6 +102,15 @@ export function nextVideoModeOnRefsChange(
   if (enabled.includes(current)) return null;
   const next = resolveVideoMode(defaultVideoModeFor(refs), enabled);
   return next === current ? null : next;
+}
+
+export function videoModeAfterRefAdd(
+  current: string | null | undefined,
+  refs: VideoMediaRefs,
+  mediaType: VideoMediaRef['mediaType'],
+): string | null {
+  if (mediaType === 'video' && videoRefsCompositionOf(refs).videos >= 1) return 'omni';
+  return current ?? null;
 }
 
 export function normalizeStoredVideoMode(

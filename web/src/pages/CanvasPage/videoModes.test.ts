@@ -13,9 +13,14 @@ import {
   normalizeStoredVideoMode,
   nextVideoModeOnRefsChange,
   resolveVideoMode,
+  videoModeAfterRefAdd,
   videoModeAcceptsRef,
   videoModeRefsSignature,
 } from './videoModes';
+import {
+  EDIT_MODE_VIDEO_REFERENCE_MAX,
+  videoReferenceMaxForMode,
+} from '@/lib/model-reference-limits';
 import type { VideoMediaRef, VideoMediaRefs } from './videoMediaRefs';
 
 const ref = (
@@ -147,6 +152,15 @@ describe('ADR-0124 门控（配置 ∩ 素材）enabledVideoModes', () => {
     ]);
   });
 
+  it('2 段视频：编辑/延长不可选（只允许 1 段），只剩全能参考', () => {
+    expect(enabledVideoModes(refsOf([ref('v1', 'video'), ref('v2', 'video')]), MODES_25)).toEqual([
+      'omni',
+    ]);
+    expect(
+      enabledVideoModes(refsOf([ref('v1', 'video'), ref('v2', 'video'), ref('m1')]), MODES_25),
+    ).toEqual(['omni']);
+  });
+
   it('只有音频：仅全能参考可选（音频不参与图片/帧/编辑判定）', () => {
     expect(enabledVideoModes(refsOf([ref('a1', 'audio')]), MODES_25)).toEqual(['omni']);
   });
@@ -206,8 +220,14 @@ describe('ADR-0124 默认模式表 defaultVideoModeFor', () => {
     expect(defaultVideoModeFor(refsOf([ref('v1', 'video')]))).toBe('edit');
   });
 
-  it('视频 + 图片 → 全能参考', () => {
-    expect(defaultVideoModeFor(refsOf([ref('v1', 'video'), ref('m1')]))).toBe('omni');
+  it('1 段视频 + N 张图片 → 视频编辑（参考图片不受限）', () => {
+    expect(defaultVideoModeFor(refsOf([ref('v1', 'video'), ref('m1')]))).toBe('edit');
+    expect(defaultVideoModeFor(refsOf([ref('v1', 'video'), ref('m1'), ref('m2')]))).toBe('edit');
+  });
+
+  it('2 段视频 → 全能参考（编辑只允许 1 段）', () => {
+    expect(defaultVideoModeFor(refsOf([ref('v1', 'video'), ref('v2', 'video')]))).toBe('omni');
+    expect(defaultVideoModeFor(refsOf([ref('v1', 'video'), ref('v2', 'video'), ref('m1')]))).toBe('omni');
   });
 
   it('帧槽不参与默认表：只有帧槽仍是空素材集口径', () => {
@@ -253,6 +273,12 @@ describe('ADR-0124 覆盖式自动切换 nextVideoModeOnRefsChange', () => {
     expect(
       nextVideoModeOnRefsChange('edit', refsOf([ref('v1', 'video'), ref('m1')]), MODES_25),
     ).toBeNull();
+  });
+
+  it('当前是编辑、加入第二段视频 → 编辑收不下，自动切全能参考', () => {
+    expect(
+      nextVideoModeOnRefsChange('edit', refsOf([ref('v1', 'video'), ref('v2', 'video')]), MODES_25),
+    ).toBe('omni');
   });
 
   it('当前模式不在白名单 → 切到兜底模式', () => {
@@ -411,5 +437,23 @@ describe('ADR-0124 参数锁读能力行配置', () => {
     expect(
       effectiveVideoParams(seed20, 'first_last_frame', { aspectRatio: '16:9', duration: 5 }),
     ).toEqual({ aspect_ratio: '16:9', duration: 5 });
+  });
+});
+
+describe('IKL406 编辑模式视频上限收紧（与后端 videoReferenceMax 同口径）', () => {
+  it('edit 收紧为 1，其余模式保持通用上限；上限为 0 时不反向放宽', () => {
+    expect(EDIT_MODE_VIDEO_REFERENCE_MAX).toBe(1);
+    expect(videoReferenceMaxForMode(3, 'edit')).toBe(1);
+    expect(videoReferenceMaxForMode(5, 'omni')).toBe(5);
+    expect(videoReferenceMaxForMode(3, null)).toBe(3);
+    expect(videoReferenceMaxForMode(3, undefined)).toBe(3);
+    expect(videoReferenceMaxForMode(0, 'edit')).toBe(0);
+  });
+
+  it('加入第二段视频时按切换后的全能参考算上限（不误判成编辑）', () => {
+    expect(videoModeAfterRefAdd('edit', refsOf([]), 'video')).toBe('edit');
+    expect(videoModeAfterRefAdd('edit', refsOf([ref('v1', 'video')]), 'video')).toBe('omni');
+    expect(videoModeAfterRefAdd('edit', refsOf([ref('m1')]), 'image')).toBe('edit');
+    expect(videoModeAfterRefAdd(null, refsOf([ref('v1', 'video')]), 'video')).toBe('omni');
   });
 });

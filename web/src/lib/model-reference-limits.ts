@@ -11,6 +11,10 @@ export const UNRESOLVED_IMAGE_REFERENCE_LIMIT = 10;
 export function videoReferenceMaxOf(features?: ModelFeatures | null): number {
   return features?.video_reference_max ?? DEFAULT_VIDEO_REFERENCE_MAX;
 }
+export const EDIT_MODE_VIDEO_REFERENCE_MAX = 1;
+export function videoReferenceMaxForMode(max: number, mode?: string | null): number {
+  return mode === 'edit' ? Math.min(EDIT_MODE_VIDEO_REFERENCE_MAX, max) : max;
+}
 export function audioReferenceMaxOf(features?: ModelFeatures | null): number {
   return features?.audio_reference_max ?? DEFAULT_AUDIO_REFERENCE_MAX;
 }
