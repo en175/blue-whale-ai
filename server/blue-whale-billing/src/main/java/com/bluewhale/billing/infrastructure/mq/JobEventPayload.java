@@ -5,9 +5,11 @@ public final class JobEventPayload {
     private JobEventPayload() {
     }
 
-    public record JobFailed(long jobId, long userId, String reason) {
+    public record JobTerminal(long jobId, long userId, String status, String reason,
+                              boolean refund) {
 
-        public JobFailed {
+        public JobTerminal {
+            status = status == null ? "" : status;
             reason = reason == null || reason.isBlank() ? "未提供原因" : reason;
         }
     }

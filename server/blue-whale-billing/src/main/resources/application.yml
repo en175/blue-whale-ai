@@ -48,7 +48,7 @@ billing:
 
   mq:
     enabled: ${BILLING_MQ_ENABLED:true}
-    topic-failed: ${BILLING_MQ_TOPIC_FAILED:generation-job-failed}
+    topic-terminal: ${BILLING_MQ_TOPIC_TERMINAL:generation-job-terminal}
 
   reconciliation:
 

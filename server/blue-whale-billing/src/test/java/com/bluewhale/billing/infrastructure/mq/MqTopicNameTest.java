@@ -37,6 +37,6 @@ class MqTopicNameTest {
     @Test
     @DisplayName("★ topic 的默认值只含合法字符 —— 含点号会让整个服务起不来")
     void 默认topic名合法() {
-        assertThat(defaultValueOf("topic-failed")).matches(ALLOWED);
+        assertThat(defaultValueOf("topic-terminal")).matches(ALLOWED);
     }
 }

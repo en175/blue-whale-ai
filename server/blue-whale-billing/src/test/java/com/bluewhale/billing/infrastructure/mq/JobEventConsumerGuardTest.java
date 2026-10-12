@@ -9,7 +9,7 @@ class JobEventConsumerGuardTest {
 
     private static String guard(long jobId, long userId) {
         try {
-            JobEventConsumer.requireIdentifiable(jobId, userId, "generation-job-failed", "{}");
+            JobEventConsumer.requireIdentifiable(jobId, userId, "generation-job-terminal", "{}");
             return null;
         } catch (IllegalArgumentException e) {
             return e.getMessage();

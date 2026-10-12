@@ -6,11 +6,12 @@ package billing.v1;
 option java_package = "com.bluewhale.contracts.billing.v1";
 option java_multiple_files = true;
 
-// topic: generation-job-failed —— billing 消费后触发 **Refund**（全额返还）。
-message JobFailedEvent {
+message JobTerminalEvent {
   int64  job_id  = 1;
   int64  user_id = 2;
-  string reason  = 3;
+  string status  = 3;
+  string reason  = 4;
+  bool   refund  = 5;
 }
 
 // topic: pricing.catalog.activated —— 各服务重载内存副本。

@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  BILLING_JOB_FAILED_TOPIC,
+  BILLING_JOB_TERMINAL_TOPIC,
   createBillingRelease,
 } from './billing-release.js';
 
 describe('createBillingRelease', () => {
-  it('发一条 generation-job-failed —— billing 按 job_id 幂等释放那笔预扣', async () => {
+  it('发一条 generation-job-terminal（status=failed）—— billing 按 job_id 幂等退款', async () => {
     const publish = vi.fn(async () => {});
     const release = createBillingRelease({ publish });
 
@@ -15,7 +15,9 @@ describe('createBillingRelease', () => {
     expect(publish).toHaveBeenCalledWith({
       jobId: 501,
       userId: 42,
+      status: 'failed',
       reason: '写库失败',
+      refund: true,
     });
   });
 
@@ -32,7 +34,7 @@ describe('createBillingRelease', () => {
     expect(error).toHaveBeenCalledWith(expect.stringContaining('仍扣着'));
   });
 
-  it('topic 是契约值（与 billing 的 topic-failed / worker 的默认值同名）', () => {
-    expect(BILLING_JOB_FAILED_TOPIC).toBe('generation-job-failed');
+  it('topic 是契约值（与 billing 的 topic-terminal / worker 的默认值同名）', () => {
+    expect(BILLING_JOB_TERMINAL_TOPIC).toBe('generation-job-terminal');
   });
 });
