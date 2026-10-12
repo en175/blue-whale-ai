@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
+import shlex
 import shutil
 import subprocess
 import sys
@@ -25,6 +27,7 @@ VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-pr-update.sh"
 CLEANUP_CHILD_SCRIPT = REPO_ROOT / "scripts" / "cleanup-implement-spec-child.py"
 CREATE_PR_HOOK = REPO_ROOT / ".claude" / "hooks" / "confirm-release-action.sh"
 BRANCH = "feature/测试已有PR更新流程"
+load_recovery = runpy.run_path(str(REPO_ROOT / "scripts/sync_recovery.py"))["load_recovery"]
 
 
 def run(*args: str, cwd: Path, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -641,6 +644,47 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertEqual(published.returncode, 0, published.stdout + published.stderr)
         self.assertEqual(self.response(published)["status"], "PUSHED_UPDATE_PR")
 
+    def test_shared_reader_accepts_both_real_linearization_write_stages(self) -> None:
+        child_branch, _ = self.implement_spec_child()
+        self.git("push", "origin", BRANCH)
+        snapshot = self.pr_snapshot()
+        marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        captured = self.root / "before-linearization.json"
+        real_git = shutil.which("git")
+        wrapper = self.fake_bin / "git"
+        wrapper.write_text(
+            "#!/bin/sh\ncase \" $* \" in\n"
+            "  *\" commit-tree \"*) cp {} {} ;;\nesac\nexec {} \"$@\"\n".format(
+                shlex.quote(str(marker)), shlex.quote(str(captured)), shlex.quote(real_git)),
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+
+        result = self.invoke_linearize(snapshot, child_branch, "--user-authorized")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        initial = load_recovery(captured)
+        self.assertNotIn("synced_head", initial)
+        self.assertNotIn("linearized_head", initial)
+        completed = load_recovery(marker)
+        self.assertEqual(completed["linearized_head"], self.git("rev-parse", "HEAD"))
+        self.assertNotIn("push_state", completed)
+        self.assertNotIn("verified_head", completed)
+
+    def finalize_after_backup_unlock(self) -> subprocess.CompletedProcess[str]:
+        marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        recovery = load_recovery(marker)
+        common = Path(self.git("rev-parse", "--git-common-dir"))
+        lock = common / (recovery["backup_ref"] + ".lock")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("locked", encoding="utf-8")
+        rejected = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertEqual(rejected.returncode, 1, rejected.stdout + rejected.stderr)
+        self.assertIn("backup ref", self.response(rejected)["detail"])
+        self.assertTrue(marker.exists())
+        lock.unlink()
+        return run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+
     def test_linearization_accepts_verified_child_inheritance_merge(self) -> None:
         child_branch, child_root = self.implement_spec_child(inherited=True)
         inherited = json.loads((Path(self.git("rev-parse", "--absolute-git-dir", cwd=child_root))
@@ -752,7 +796,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertNotEqual(rejected.returncode, 0)
         self.assertIn("保留引用", str(self.response(rejected)["detail"]))
         self.git("update-ref", lineage_ref, original_head)
-        finalized = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        finalized = self.finalize_after_backup_unlock()
         self.assertEqual(finalized.returncode, 0, finalized.stdout + finalized.stderr)
         cleaned = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(after),
                       "--json", cwd=child_root)
@@ -873,6 +917,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         recovery["push_state"] = "pushed"
         recovery["pushed_head"] = self.git("rev-parse", "HEAD")
         recovery["verified_head"] = recovery["pushed_head"]
+        recovery["verified_pr_iid"] = 65
         marker.write_text(json.dumps(recovery), encoding="utf-8")
         unfinalized = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
         self.assertNotEqual(unfinalized.returncode, 0)
@@ -902,6 +947,7 @@ class PublishReviewPackageTest(unittest.TestCase):
             "synced_head": resolved, "upstream_sha": self.git("rev-parse", "release/prod"),
             "target_branch": "release/prod", "remote_branch_sha": old_source,
             "backup_ref": backup_ref, "child_heads": {child_branch: child_head},
+            "created_at": 0,
         }), encoding="utf-8")
         marker.chmod(0o600)
         (self.main / "release.txt").write_text("release\n", encoding="utf-8")
@@ -989,7 +1035,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         lineage_dir = common / "blue-whale" / "implement-spec-rebase-lineage" / BRANCH.replace("/", "%")
         self.assertFalse((lineage_dir / f"{first_head}.json").exists())
         marker.write_text(original_recovery, encoding="utf-8")
-        finalized = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        finalized = self.finalize_after_backup_unlock()
         self.assertEqual(finalized.returncode, 0, finalized.stdout + finalized.stderr)
         self.assertEqual(len(list(lineage_dir.glob("*.json"))), 2)
         cleaned = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(after),
