@@ -1353,7 +1353,7 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(spiedFinalizer.publishVideoResult(retry, "99", "9",
                 "video-worker-old", 1L,
                 "http://cdn/video.mp4", "gen/video.mp4", "video/mp4", 500L,
-                "0123456789abcdef0123456789abcdef", 1280, 720, 5.0, null)).isFalse();
+                "0123456789abcdef0123456789abcdef", 1280, 720, 5.0)).isFalse();
         assertThat(readJob(retryId).getStatus()).isEqualTo("succeeded");
         assertThat(countAssets(retryId)).isEqualTo(1);
         assertThat(countLogs(retryId)).isEqualTo(1);
@@ -1367,10 +1367,10 @@ class JobStateMachineMySqlIntegrationTest {
         handoff.verify(spiedService).claimVideoJobById(retry, "video-worker-new");
         handoff.verify(spiedFinalizer).publishVideoResult(eq(retry), eq("99"), eq("9"),
                 eq("video-worker-new"), eq(2L), anyString(), anyString(), anyString(), any(),
-                anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
         handoff.verify(spiedFinalizer).publishVideoResult(eq(retry), eq("99"), eq("9"),
                 eq("video-worker-old"), eq(1L), anyString(), anyString(), anyString(), any(),
-                anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
+                anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
     }
 
     @Test

@@ -43,11 +43,7 @@ public interface CreditLotMapper extends BaseMapper<CreditLotEntity> {
                        @Param("createdFrom") LocalDateTime createdFrom,
                        @Param("createdTo") LocalDateTime createdTo);
 
-    int addFrozen(@Param("lotId") long lotId, @Param("amount") long amount);
+    int consume(@Param("lotId") long lotId, @Param("amount") long amount);
 
-    int releaseFrozen(@Param("lotId") long lotId, @Param("amount") long amount);
-
-    int settle(@Param("lotId") long lotId,
-               @Param("frozenTake") long frozenTake,
-               @Param("actualTake") long actualTake);
+    int restore(@Param("lotId") long lotId, @Param("amount") long amount);
 }

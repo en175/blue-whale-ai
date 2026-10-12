@@ -131,14 +131,12 @@ public class AudioJobProcessor implements JobProcessor {
         StoredMedia stored = persistAudioData(audio.data(), audio.url(), job.user_id());
         log.info("[audio] 转存完成 jobId={} storageKey={} size={}", job.id(), stored.storageKey(), stored.size());
 
-        Long audioSeconds = null;
         Integer durationMs = null;
         if (audio.duration() != null && audio.duration() > 0) {
-            audioSeconds = Math.max(1L, Math.round(audio.duration()));
             durationMs = (int) Math.round(audio.duration() * 1000);
         } else {
-            log.warn("[audio] 上游未返回 duration，结算将缺少 usage.seconds 而被拒：jobId={} —— "
-                    + "可用 billing 的 POST /admin/jobs/{id}/settle 人工补", job.id());
+            log.warn("[audio] 上游未返回 duration：jobId={} —— "
+                    + "可用 billing 的 POST /admin/credits/jobs/{id}/refund 兜底", job.id());
         }
 
         String assetId = stateMachine.createAsset(new JobStateMachineService.CreateAssetInput(
@@ -163,7 +161,7 @@ public class AudioJobProcessor implements JobProcessor {
         }
 
         boolean completed = finalizer.completeJob(
-                job.id(), List.of(assetId), workerId, job.fencingToken(), audioSeconds);
+                job.id(), List.of(assetId), workerId, job.fencingToken());
         if (completed) {
             log.info("[audio] 发布成功 jobId={} assetId={}", job.id(), assetId);
             stateMachine.appendLog(job.id(), "succeeded", "succeeded",

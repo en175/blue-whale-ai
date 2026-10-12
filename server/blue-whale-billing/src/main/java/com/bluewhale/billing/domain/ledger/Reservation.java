@@ -6,7 +6,7 @@ public record Reservation(
         long id,
         long jobId,
         long userId,
-        long reservedCredits,
+        long chargedCredits,
         Long actualCredits,
         long receivableCredits,
         Status status,
@@ -20,11 +20,9 @@ public record Reservation(
 
     public enum Status {
 
-        HELD("held"),
+        CHARGED("charged"),
 
-        SETTLED("settled"),
-
-        RELEASED("released");
+        REFUNDED("refunded");
 
         private final String key;
 
@@ -46,7 +44,7 @@ public record Reservation(
         }
     }
 
-    public boolean isPending() {
-        return status == Status.HELD;
+    public boolean isCharged() {
+        return status == Status.CHARGED;
     }
 }

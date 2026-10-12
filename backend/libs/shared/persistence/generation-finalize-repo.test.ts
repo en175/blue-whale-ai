@@ -95,11 +95,11 @@ const INPUT = {
 };
 
 describe("createFinalizeJob（IKIZQC）", () => {
-  it("★ 成片行落库：video_stage='final' + source_sample_job_id + charge_state='held'，并回写样片 final_job_id", async () => {
+  it("★ 成片行落库：video_stage='final' + source_sample_job_id + charge_state='charged'，并回写样片 final_job_id", async () => {
     const { prisma, tx, create, extras } = buildPrisma(jobRow());
-    const hold = vi.fn().mockResolvedValue(undefined);
+    const charge = vi.fn().mockResolvedValue(undefined);
 
-    const result = await createFinalizeJob(prisma, INPUT, { billing: { hold, release: vi.fn() } });
+    const result = await createFinalizeJob(prisma, INPUT, { billing: { charge, release: vi.fn() } });
 
     expect(result).toEqual({ generation_job_id: "305", cursor: 7 });
     expect(create.mock.calls[0]![0].data).toMatchObject({
@@ -108,15 +108,15 @@ describe("createFinalizeJob（IKIZQC）", () => {
       source_sample_job_id: 302n,
     });
     expectExtraWrite(extras.upsert, 305n, "video_stage", "string", "final");
-    expectExtraWrite(extras.upsert, 305n, "charge_state", "string", "held");
+    expectExtraWrite(extras.upsert, 305n, "charge_state", "string", "charged");
     expectExtraWrite(extras.upsert, 305n, "strategy_version", "string", "seedance-2.0-v1");
     expect(extras.findMany).toHaveBeenCalledWith({
       where: { generation_job_id: 302n },
       select: { extra_key: true, value_type: true, value_text: true },
     });
     expectExtraWrite(extras.upsert, 302n, "final_job_id", "number", "305");
-    expect(hold).toHaveBeenCalledTimes(1);
-    expect(hold).toHaveBeenCalledWith(305);
+    expect(charge).toHaveBeenCalledTimes(1);
+    expect(charge).toHaveBeenCalledWith(305);
     expect(tx.generation_job_logs.create).toHaveBeenCalled();
     expect(tx.cost_reservations.create).toHaveBeenCalled();
   });
@@ -145,12 +145,12 @@ describe("createFinalizeJob（IKIZQC）", () => {
         meta: { target: ["source_sample_job_id"] },
       }),
     );
-    const hold = vi.fn();
+    const charge = vi.fn();
 
-    const result = await createFinalizeJob(prisma, INPUT, { billing: { hold, release: vi.fn() } });
+    const result = await createFinalizeJob(prisma, INPUT, { billing: { charge, release: vi.fn() } });
 
     expect(result).toEqual({ kind: "finalize_already_attempted" });
-    expect(hold).not.toHaveBeenCalled();
+    expect(charge).not.toHaveBeenCalled();
     expect(findFirst).not.toHaveBeenCalled();
   });
 

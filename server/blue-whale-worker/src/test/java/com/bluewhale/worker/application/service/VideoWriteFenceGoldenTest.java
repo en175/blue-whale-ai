@@ -7,7 +7,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSl
 import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
-import com.bluewhale.worker.domain.entity.GenerationJobExtraEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import org.apache.ibatis.annotations.Update;
 import org.junit.jupiter.api.BeforeEach;
@@ -150,7 +149,7 @@ class VideoWriteFenceGoldenTest {
 
         boolean ok = finalizer.publishVideoResult("300", "42", "9", "w1", 5,
                 "https://x/v.mp4", "generated/9/video/abc.mp4", "video/mp4", 123L,
-                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5, null);
+                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5);
 
         assertThat(ok).isTrue();
         verify(slotMapper).updateSlot(88L, "succeeded", 777L);
@@ -168,55 +167,46 @@ class VideoWriteFenceGoldenTest {
                 .doesNotContain("charge_state");
 
         twoStagePublishFixture();
-        when(extraMapper.findByJobId(300L)).thenReturn(List.of());
 
         boolean ok = finalizer.publishVideoResult("300", "42", "9", "w1", 5,
                 "https://x/v.mp4", "generated/9/video/abc.mp4", "video/mp4", 123L,
-                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5, null, null, null);
+                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5, null, null);
 
         assertThat(ok).isTrue();
         verify(extraMapper, never()).upsert(anyLong(), anyString(), anyString(), anyString());
     }
 
     @Test
-    @DisplayName("G76: 两阶段成片 publish——守卫之外续写 upstream_created_at_ms/finalize_deadline_ms/charge_state=settled")
-    void g76_twoStagePublishWritesExtras() {
+    @DisplayName("G76: 两阶段成片 publish——守卫之外只续写 upstream_created_at_ms/finalize_deadline_ms，不再写 charge_state")
+    void g76_twoStagePublishWritesStageTimestampsWithoutChargeState() {
         twoStagePublishFixture();
-        GenerationJobExtraEntity stage = new GenerationJobExtraEntity();
-        stage.setExtraKey("video_stage");
-        stage.setValueText("final");
-        when(extraMapper.findByJobId(300L)).thenReturn(List.of(stage));
 
         boolean ok = finalizer.publishVideoResult("300", "42", "9", "w1", 5,
                 "https://x/v.mp4", "generated/9/video/abc.mp4", "video/mp4", 123L,
-                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5, null,
+                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5,
                 1790647200000L, 1790647800000L);
 
         assertThat(ok).isTrue();
         verify(extraMapper).upsert(300L, "upstream_created_at_ms", "number", "1790647200000");
         verify(extraMapper).upsert(300L, "finalize_deadline_ms", "number", "1790647800000");
-        verify(extraMapper).upsert(300L, "charge_state", "string", "settled");
+        verify(extraMapper, never()).upsert(anyLong(), eq("charge_state"), anyString(), anyString());
     }
 
     @Test
-    @DisplayName("G77: 两阶段成片 publish 未带阶段时刻（null）——只落 charge_state，不覆盖既有时刻")
-    void g77_twoStagePublishNullTimestampsKeepExisting() {
+    @DisplayName("G77: 两阶段成片 publish 未带阶段时刻（null）——不覆盖既有时刻，也不写 charge_state")
+    void g77_twoStagePublishNullTimestampsWriteNothing() {
         twoStagePublishFixture();
-        GenerationJobExtraEntity stage = new GenerationJobExtraEntity();
-        stage.setExtraKey("video_stage");
-        stage.setValueText("final");
-        when(extraMapper.findByJobId(300L)).thenReturn(List.of(stage));
 
         boolean ok = finalizer.publishVideoResult("300", "42", "9", "w1", 5,
                 "https://x/v.mp4", "generated/9/video/abc.mp4", "video/mp4", 123L,
-                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5, null, null, null);
+                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5, null, null);
 
         assertThat(ok).isTrue();
         verify(extraMapper, never())
                 .upsert(eq(300L), eq("upstream_created_at_ms"), anyString(), anyString());
         verify(extraMapper, never())
                 .upsert(eq(300L), eq("finalize_deadline_ms"), anyString(), anyString());
-        verify(extraMapper).upsert(300L, "charge_state", "string", "settled");
+        verify(extraMapper, never()).upsert(anyLong(), eq("charge_state"), anyString(), anyString());
     }
 
     private void twoStagePublishFixture() {

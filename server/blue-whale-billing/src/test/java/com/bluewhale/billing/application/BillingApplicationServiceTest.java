@@ -1,10 +1,9 @@
 package com.bluewhale.billing.application;
 
 import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
-import com.bluewhale.billing.application.command.HoldCommand;
+import com.bluewhale.billing.application.command.ChargeCommand;
 import com.bluewhale.billing.application.command.QuoteQuery;
-import com.bluewhale.billing.domain.ledger.HoldResult;
-import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.domain.ledger.ChargeResult;
 import com.bluewhale.billing.infrastructure.persistence.repository.ReservationRepository;
 import com.bluewhale.billing.infrastructure.persistence.repository.TransactionRepository;
 import com.bluewhale.billing.domain.pricing.AbstractPricingCalculator;
@@ -71,9 +70,9 @@ class BillingApplicationServiceTest {
     private final CatalogHolder catalog = mock(CatalogHolder.class);
 
 
-    private long reservedCredits() {
+    private long chargedCredits() {
         ArgumentCaptor<Long> amount = ArgumentCaptor.forClass(Long.class);
-        verify(credits).hold(eq(USER), eq(CMD), eq(JOB), amount.capture(),
+        verify(credits).charge(eq(USER), eq(CMD), eq(JOB), amount.capture(),
                 anyInt(), anyInt(), anyString(), anyString());
         return amount.getValue();
     }
@@ -81,26 +80,26 @@ class BillingApplicationServiceTest {
 
 
     @Test
-    @DisplayName("★ 按槽计价的规则按契约张数预扣 —— 冻的不是下限")
-    void 按槽计价_按契约张数预扣() {
+    @DisplayName("★ 按槽计价的规则按契约张数扣款 —— 扣的不是下限")
+    void 按槽计价_按契约张数扣款() {
 
         service();
 
 
-        hold(Map.of("expected_output_count", "4", "size", "2k"), perSlotRule(3_000L, 1L));
+        charge(Map.of("expected_output_count", "4", "size", "2k"), perSlotRule(3_000L, 1L));
 
-        assertThat(reservedCredits()).isEqualTo(12L);
+        assertThat(chargedCredits()).isEqualTo(12L);
     }
 
     @Test
-    @DisplayName("按秒计价的规则按契约时长预扣")
-    void 按秒计价_按契约时长预扣() {
+    @DisplayName("按秒计价的规则按契约时长扣款")
+    void 按秒计价_按契约时长扣款() {
 
         service();
 
-        hold(Map.of("duration", "5", "resolution", "1080p"), perSecondRule(2_000L, 2L));
+        charge(Map.of("duration", "5", "resolution", "1080p"), perSecondRule(2_000L, 2L));
 
-        assertThat(reservedCredits()).isEqualTo(10L);
+        assertThat(chargedCredits()).isEqualTo(10L);
     }
 
     @Test
@@ -108,9 +107,9 @@ class BillingApplicationServiceTest {
     void 按次计价_不受影响() {
         service();
 
-        hold(Map.of("resolution", "1080p"), perCallRule(100_000L));
+        charge(Map.of("resolution", "1080p"), perCallRule(100_000L));
 
-        assertThat(reservedCredits()).isEqualTo(100L);
+        assertThat(chargedCredits()).isEqualTo(100L);
     }
 
     @Test
@@ -120,20 +119,20 @@ class BillingApplicationServiceTest {
 
 
 
-        hold(Map.of("duration", "5.0"), perSecondRule(2_000L, 2L));
+        charge(Map.of("duration", "5.0"), perSecondRule(2_000L, 2L));
 
-        assertThat(reservedCredits()).isEqualTo(10L);
+        assertThat(chargedCredits()).isEqualTo(10L);
     }
 
     @Test
-    @DisplayName("★ 参考素材加价算进预扣 —— reference_count 也是契约量")
-    void 参考素材加价算进预扣() {
+    @DisplayName("★ 参考素材加价算进扣款 —— reference_count 也是契约量")
+    void 参考素材加价算进扣款() {
 
         service();
 
 
 
-        hold(Map.of("expected_output_count", "2", "size", "2k", "reference_count", "2"),
+        charge(Map.of("expected_output_count", "2", "size", "2k", "reference_count", "2"),
                 """
                 {"baseUnit":"usage.succeededSlots",
                  "basePrice":{"kind":"const","value":3000},
@@ -142,19 +141,19 @@ class BillingApplicationServiceTest {
                 """);
 
 
-        assertThat(reservedCredits()).isEqualTo(14L);
+        assertThat(chargedCredits()).isEqualTo(14L);
     }
 
 
 
     @Test
-    @DisplayName("★ 契约张数取不到 ⇒ 拒绝预扣，不按 0 落到下限")
-    void 缺契约张数_拒绝而不是冻下限() {
+    @DisplayName("★ 契约张数取不到 ⇒ 拒绝扣款，不按 0 落到下限")
+    void 缺契约张数_拒绝而不是扣下限() {
         service();
 
 
         Usage.ContractQuantityUnavailableException thrown = catchThrowableOfType(
-                () -> hold(Map.of("size", "2k"), perSlotRule(3_000L, 1L)),
+                () -> charge(Map.of("size", "2k"), perSlotRule(3_000L, 1L)),
                 Usage.ContractQuantityUnavailableException.class);
 
         assertThat(thrown.baseUnit()).isEqualTo(UsageDim.SUCCEEDED_SLOTS);
@@ -163,20 +162,20 @@ class BillingApplicationServiceTest {
                 .hasMessageContaining("expected_output_count");
 
 
-        verify(credits, never()).hold(anyLong(), anyString(), anyLong(), anyLong(),
+        verify(credits, never()).charge(anyLong(), anyString(), anyLong(), anyLong(),
                 anyInt(), anyInt(), anyString(), anyString());
     }
 
     @Test
-    @DisplayName("★ 自适应时长（duration=-1）没配上限 ⇒ 仍拒绝预扣")
-    void 自适应时长_没配上限_拒绝而不是冻下限() {
+    @DisplayName("★ 自适应时长（duration=-1）没配上限 ⇒ 仍拒绝扣款")
+    void 自适应时长_没配上限_拒绝而不是扣下限() {
         service();
 
 
 
 
         Usage.ContractQuantityUnavailableException thrown = catchThrowableOfType(
-                () -> hold(Map.of("duration", "-1"), perSecondRule(2_000L, 2L)),
+                () -> charge(Map.of("duration", "-1"), perSecondRule(2_000L, 2L)),
                 Usage.ContractQuantityUnavailableException.class);
 
         assertThat(thrown.baseUnit()).isEqualTo(UsageDim.SECONDS);
@@ -184,35 +183,35 @@ class BillingApplicationServiceTest {
     }
 
     @Test
-    @DisplayName("★ 契约张数缺失、规则配了上限 ⇒ 按上限冻结（与 duration=-1 同一判据）")
-    void 契约张数缺失_配了上限_按上限冻结() {
+    @DisplayName("★ 契约张数缺失、规则配了上限 ⇒ 按上限扣款（与 duration=-1 同一判据）")
+    void 契约张数缺失_配了上限_按上限扣款() {
         service();
 
 
 
 
-        hold(Map.of("size", "2k"), perSlotRule(3_000L, 1L, 30L));
+        charge(Map.of("size", "2k"), perSlotRule(3_000L, 1L, 30L));
 
-        assertThat(reservedCredits()).isEqualTo(30L);
+        assertThat(chargedCredits()).isEqualTo(30L);
     }
 
 
 
     @Test
-    @DisplayName("★ 自适应时长（duration=-1）配了上限 ⇒ 按上限冻结，不再拒绝提交")
-    void 自适应时长_配了上限_按上限冻结() {
+    @DisplayName("★ 自适应时长（duration=-1）配了上限 ⇒ 按上限扣款，不再拒绝提交")
+    void 自适应时长_配了上限_按上限扣款() {
 
 
         service();
 
-        hold(Map.of("duration", "-1", "resolution", "1080p"), perSecondRule(2_000L, 2L, 50L));
+        charge(Map.of("duration", "-1", "resolution", "1080p"), perSecondRule(2_000L, 2L, 50L));
 
-        assertThat(reservedCredits()).isEqualTo(50L);
+        assertThat(chargedCredits()).isEqualTo(50L);
     }
 
     @Test
-    @DisplayName("★ 上限冻结与预览同价 —— 预览 50，实冻也是 50")
-    void 上限冻结_报价与预扣同价() {
+    @DisplayName("★ 上限扣款与预览同价 —— 预览 50，实扣也是 50")
+    void 上限扣款_报价与扣款同价() {
         BillingApplicationService service = service();
         Map<String, String> specs = Map.of("duration", "-1", "resolution", "1080p");
         String rule = perSecondRule(2_000L, 2L, 50L);
@@ -220,9 +219,9 @@ class BillingApplicationServiceTest {
 
         long preview = service.quote(new QuoteQuery(USER, MODEL, TASK, specs, "free",
                 Usage.empty(), LocalDateTime.now(), rule)).credits();
-        hold(specs, rule);
+        charge(specs, rule);
 
-        assertThat(preview).isEqualTo(50L).isEqualTo(reservedCredits());
+        assertThat(preview).isEqualTo(50L).isEqualTo(chargedCredits());
     }
 
     @Test
@@ -233,11 +232,11 @@ class BillingApplicationServiceTest {
         service();
 
         Usage.ContractQuantityUnavailableException thrown = catchThrowableOfType(
-                () -> hold(Map.of("voice", "female"), perCharsRule(2_000L, 50L)),
+                () -> charge(Map.of("voice", "female"), perCharsRule(2_000L, 50L)),
                 Usage.ContractQuantityUnavailableException.class);
 
         assertThat(thrown.baseUnit()).isEqualTo(UsageDim.CHARACTERS);
-        verify(credits, never()).hold(anyLong(), anyString(), anyLong(), anyLong(),
+        verify(credits, never()).charge(anyLong(), anyString(), anyLong(), anyLong(),
                 anyInt(), anyInt(), anyString(), anyString());
     }
 
@@ -250,7 +249,7 @@ class BillingApplicationServiceTest {
 
 
         BasePriceResolver.UnpriceableSpecException thrown = catchThrowableOfType(
-                () -> hold(Map.of("duration", "-1", "resolution", "720p"), """
+                () -> charge(Map.of("duration", "-1", "resolution", "720p"), """
                         {"baseUnit":"usage.seconds",
                          "basePrice":{"kind":"table","table":{"resolution=1080p":2000}},
                          "unitDenominator":1,"minCredits":2,"maxCredits":50}
@@ -258,15 +257,15 @@ class BillingApplicationServiceTest {
                 BasePriceResolver.UnpriceableSpecException.class);
 
         assertThat(thrown.normalizedKey()).isEqualTo("resolution=720p");
-        verify(credits, never()).hold(anyLong(), anyString(), anyLong(), anyLong(),
+        verify(credits, never()).charge(anyLong(), anyString(), anyLong(), anyLong(),
                 anyInt(), anyInt(), anyString(), anyString());
     }
 
 
 
     @Test
-    @DisplayName("价格预览与预扣按同一份契约用量 —— 预览价 = 会冻的钱")
-    void 报价与预扣同一份契约用量() {
+    @DisplayName("价格预览与扣款按同一份契约用量 —— 预览价 = 会扣的钱")
+    void 报价与扣款同一份契约用量() {
         service();
         Map<String, String> specs = Map.of("expected_output_count", "4", "size", "2k");
         String rule = perSlotRule(3_000L, 1L);
@@ -274,9 +273,9 @@ class BillingApplicationServiceTest {
 
         long preview = service.quote(new QuoteQuery(USER, MODEL, TASK, specs, "free",
                 Usage.empty(), LocalDateTime.now(), rule)).credits();
-        hold(specs, rule);
+        charge(specs, rule);
 
-        assertThat(preview).isEqualTo(reservedCredits());
+        assertThat(preview).isEqualTo(chargedCredits());
     }
 
 
@@ -287,25 +286,25 @@ class BillingApplicationServiceTest {
         service();
         Map<String, String> specs = Map.of("expected_output_count", "4", "size", "2k");
 
-        hold(specs, snapshotJson("usage.succeededSlots", 5_000L));
+        charge(specs, snapshotJson("usage.succeededSlots", 5_000L));
 
 
-        assertThat(reservedCredits()).isEqualTo(20L);
+        assertThat(chargedCredits()).isEqualTo(20L);
     }
 
     @Test
-    @DisplayName("★ 快照与预览同源 —— 预览多少就冻多少")
-    void 快照_预览与预扣同价() {
+    @DisplayName("★ 快照与预览同源 —— 预览多少就扣多少")
+    void 快照_预览与扣款同价() {
         service();
         Map<String, String> specs = Map.of("expected_output_count", "4", "size", "2k");
         String snapshot = snapshotJson("usage.succeededSlots", 5_000L);
 
         long preview = service.quote(new QuoteQuery(USER, MODEL, TASK, specs, "free",
                 Usage.empty(), LocalDateTime.now(), snapshot)).credits();
-        hold(specs, snapshot);
+        charge(specs, snapshot);
 
 
-        assertThat(preview).isEqualTo(20L).isEqualTo(reservedCredits());
+        assertThat(preview).isEqualTo(20L).isEqualTo(chargedCredits());
     }
 
     @Test
@@ -314,12 +313,12 @@ class BillingApplicationServiceTest {
         service();
 
         CatalogCompiler.CompileException thrown = catchThrowableOfType(
-                () -> hold(Map.of("expected_output_count", "4", "size", "2k"), ""),
+                () -> charge(Map.of("expected_output_count", "4", "size", "2k"), ""),
                 CatalogCompiler.CompileException.class);
 
         assertThat(thrown).hasMessageContaining("规则快照");
 
-        verify(credits, never()).hold(anyLong(), anyString(), anyLong(), anyLong(),
+        verify(credits, never()).charge(anyLong(), anyString(), anyLong(), anyLong(),
                 anyInt(), anyInt(), anyString(), anyString());
 
         assertThatThrownBy(() -> service.quote(new QuoteQuery(USER, MODEL, TASK,
@@ -335,13 +334,13 @@ class BillingApplicationServiceTest {
 
 
         CatalogCompiler.CompileException thrown = catchThrowableOfType(
-                () -> hold(Map.of("expected_output_count", "4", "size", "2k"),
+                () -> charge(Map.of("expected_output_count", "4", "size", "2k"),
                         "{\"basePrice\":{\"kind\":\"const\",\"value\":5000}}"),
                 CatalogCompiler.CompileException.class);
 
         assertThat(thrown).hasMessageContaining("baseUnit");
 
-        verify(credits, never()).hold(anyLong(), anyString(), anyLong(), anyLong(),
+        verify(credits, never()).charge(anyLong(), anyString(), anyLong(), anyLong(),
                 anyInt(), anyInt(), anyString(), anyString());
     }
 
@@ -436,9 +435,9 @@ class BillingApplicationServiceTest {
 
     private BillingApplicationService service(CreditLotRepository lots) {
         when(catalog.currentVersion()).thenReturn(1);
-        when(credits.hold(anyLong(), anyString(), anyLong(), anyLong(), anyInt(), anyInt(),
+        when(credits.charge(anyLong(), anyString(), anyLong(), anyLong(), anyInt(), anyInt(),
                 any(), any()))
-                .thenAnswer(invocation -> HoldResult.fresh(invocation.getArgument(3),
+                .thenAnswer(invocation -> ChargeResult.fresh(invocation.getArgument(3),
                         invocation.getArgument(4)));
 
 
@@ -447,7 +446,6 @@ class BillingApplicationServiceTest {
                 calculator,
                 credits,
                 lots,
-                mock(LedgerRepository.class),
                 catalog,
                 new GrantPolicy(),
                 mock(TransactionRepository.class),
@@ -460,8 +458,8 @@ class BillingApplicationServiceTest {
 
 
 
-    private void hold(Map<String, String> specs, String ruleSnapshot) {
-        service.hold(new HoldCommand(USER, CMD, JOB, MODEL, TASK, specs, "free",
+    private void charge(Map<String, String> specs, String ruleSnapshot) {
+        service.charge(new ChargeCommand(USER, CMD, JOB, MODEL, TASK, specs, "free",
                 "生成任务", LocalDateTime.now(), ruleSnapshot));
     }
 }

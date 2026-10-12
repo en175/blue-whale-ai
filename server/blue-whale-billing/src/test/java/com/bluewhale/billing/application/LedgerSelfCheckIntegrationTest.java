@@ -35,7 +35,7 @@ class LedgerSelfCheckIntegrationTest {
     @Test
     void 平的账本_自检通过() {
         credits.grant(USER, CreditSource.GIFT, 100, null, "grant", "self-check", "self-check-a");
-        credits.hold(USER, "cmd-a", 701L, 40, CATALOG_VERSION, NO_DISCOUNT, null, "视频生成 · 自检");
+        credits.charge(USER, "cmd-a", 701L, 40, CATALOG_VERSION, NO_DISCOUNT, null, "视频生成 · 自检");
 
         LedgerSelfCheck.Report report = selfCheck.check();
 
@@ -64,7 +64,6 @@ class LedgerSelfCheckIntegrationTest {
         assertThat(finding.lotsRemaining()).isEqualTo(93);
         assertThat(finding.ledgerTotal()).isEqualTo(100);
         assertThat(finding.walletBalance()).isEqualTo(100);
-        assertThat(finding.frozenBalance()).isZero();
         assertThat(finding.breaks())
                 .as("账本自身没被改过 → 没有 balance_after 断裂；差异只可能在批次侧。"
                         + "日志必须把这两种原因分开说，处置动作完全不同")
@@ -94,7 +93,6 @@ class LedgerSelfCheckIntegrationTest {
 
         LedgerSelfCheck.UserFinding finding = report.users().get(0);
         assertThat(finding.walletBalance()).isEqualTo(107);
-        assertThat(finding.frozenBalance()).isZero();
 
         assertThat(finding.breaks()).hasSize(1);
         var breakPoint = finding.breaks().get(0);

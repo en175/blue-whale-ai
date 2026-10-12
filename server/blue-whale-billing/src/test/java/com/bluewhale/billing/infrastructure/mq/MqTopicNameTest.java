@@ -35,17 +35,8 @@ class MqTopicNameTest {
     }
 
     @Test
-    @DisplayName("★ 两个 topic 的默认值都只含合法字符 —— 含点号会让整个服务起不来")
+    @DisplayName("★ topic 的默认值只含合法字符 —— 含点号会让整个服务起不来")
     void 默认topic名合法() {
-        assertThat(defaultValueOf("topic-completed"))
-                .withFailMessage("topic 名含非法字符（RocketMQ 只收 [%%|a-zA-Z0-9_-]）：点号是最容易踩的")
-                .matches(ALLOWED);
         assertThat(defaultValueOf("topic-failed")).matches(ALLOWED);
-    }
-
-    @Test
-    @DisplayName("★ 两个 topic 必须不同 —— 同名的结果是「失败的也走结算」")
-    void 两个topic不同名() {
-        assertThat(defaultValueOf("topic-completed")).isNotEqualTo(defaultValueOf("topic-failed"));
     }
 }

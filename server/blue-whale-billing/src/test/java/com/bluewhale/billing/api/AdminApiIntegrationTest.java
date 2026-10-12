@@ -1,7 +1,7 @@
 package com.bluewhale.billing.api;
 
 import com.bluewhale.billing.application.BillingApplicationService;
-import com.bluewhale.billing.application.command.HoldCommand;
+import com.bluewhale.billing.application.command.ChargeCommand;
 import com.bluewhale.billing.application.CatalogHolder;
 import com.bluewhale.billing.application.CreditService;
 import com.bluewhale.billing.domain.ledger.CreditSource;
@@ -187,7 +187,6 @@ class AdminApiIntegrationTest {
         mvc.perform(get("/admin/credits/balances/9301"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.availableCredits").value(1000))
-                .andExpect(jsonPath("$.frozenCredits").value(0))
                 .andExpect(jsonPath("$.expiring[0].source").value("purchased"))
                 .andExpect(jsonPath("$.expiring[0].credits").value(1000));
     }
@@ -310,7 +309,7 @@ class AdminApiIntegrationTest {
 
 
     @Test
-    void 手动返还_能解掉卡住的冻结() throws Exception {
+    void 手动返还_能把扣掉的钱退回去() throws Exception {
 
 
 
@@ -318,42 +317,20 @@ class AdminApiIntegrationTest {
 
         seedHoldable();
         long jobId = 9_500L;
-        billing.hold(new HoldCommand(USER_HOLD, "cmd-lost", jobId, MODEL, TASK,
+        billing.charge(new ChargeCommand(USER_HOLD, "cmd-lost", jobId, MODEL, TASK,
                 Map.of(), "free", TITLE, LocalDateTime.now(), RULE));
 
         mvc.perform(post("/admin/credits/jobs/" + jobId + "/refund")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"reason":"事件进死信，人工释放"}
+                                {"reason":"事件进死信，人工返还"}
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("released"));
+                .andExpect(jsonPath("$.status").value("refunded"));
 
 
         mvc.perform(get("/admin/credits/balances/" + USER_HOLD))
-                .andExpect(jsonPath("$.availableCredits").value(1_000))
-                .andExpect(jsonPath("$.frozenCredits").value(0));
-    }
-
-    @Test
-    void 手动结算_按给定实际额扣减() throws Exception {
-        seedHoldable();
-        long jobId = 9_501L;
-        billing.hold(new HoldCommand(USER_HOLD, "cmd-stuck", jobId, MODEL, TASK,
-                Map.of(), "free", TITLE, LocalDateTime.now(), RULE));
-
-        mvc.perform(post("/admin/credits/jobs/" + jobId + "/settle")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"actualCredits":30}
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("settled"));
-
-
-        mvc.perform(get("/admin/credits/balances/" + USER_HOLD))
-                .andExpect(jsonPath("$.availableCredits").value(970))
-                .andExpect(jsonPath("$.frozenCredits").value(0));
+                .andExpect(jsonPath("$.availableCredits").value(1_000));
     }
 
 

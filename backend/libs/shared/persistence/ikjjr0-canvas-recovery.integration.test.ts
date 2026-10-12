@@ -166,7 +166,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
 
   async function regenerateCreate(
     acceptance: CanvasRecoveryAcceptance,
-    billing: { hold: (jobId: number) => Promise<void>; release: (jobId: number, reason: string) => Promise<void> },
+    billing: { charge: (jobId: number) => Promise<void>; release: (jobId: number, reason: string) => Promise<void> },
   ) {
     const repo = createGenerationCommandRepo(prisma);
     return repo.createJob(
@@ -436,7 +436,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
   it("★ R1 旧卡保留及独立新目标恢复：新意图绑新节点，旧 job/关联原样，恢复页双记录", async () => {
     const holdCalls: number[] = [];
     const billing = {
-      hold: async (jobId: number) => { holdCalls.push(jobId); },
+      charge: async (jobId: number) => { holdCalls.push(jobId); },
       release: async () => {},
     };
 
@@ -469,10 +469,10 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     expect(nodes).toEqual(["node-final", "node-regen"]);
   });
 
-  it("★ R2 并发冲突不预扣：同节点同承接版本并发 → 恰一胜，hold 恰一次，败者零写入", async () => {
+  it("★ R2 并发冲突不预扣：同节点同承接版本并发 → 恰一胜，charge 恰一次，败者零写入", async () => {
     const holds: number[] = [];
     const billing = {
-      hold: async (jobId: number) => { holds.push(jobId); },
+      charge: async (jobId: number) => { holds.push(jobId); },
       release: async () => {},
     };
     const attempts = await Promise.allSettled([
@@ -491,10 +491,10 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     expect(await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
   });
 
-  it("★ R3 预扣失败（hold 抛错）→ 整体失败零残留，不误发 release（钱没冻上不返还）", async () => {
+  it("★ R3 预扣失败（charge 抛错）→ 整体失败零残留，不误发 release（钱没冻上不返还）", async () => {
     const releases: number[] = [];
     const billing = {
-      hold: async () => { throw new Error("billing unavailable"); },
+      charge: async () => { throw new Error("billing unavailable"); },
       release: async (jobId: number) => { releases.push(jobId); },
     };
     const failed = await regenerateCreate(regenerateAcceptance("0a1b2c3d-0000-4000-8000-0000000000e1", "node-holdfail"), billing)
@@ -509,7 +509,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     expect(await prisma.cost_reservations.count({})).toBe(0);
   });
 
-  it("★ R4 预扣失败补偿：hold 成功后事务失败 → release(jobId)，零残留（资金不随库回滚丢）", async () => {
+  it("★ R4 预扣失败补偿：charge 成功后事务失败 → release(jobId)，零残留（资金不随库回滚丢）", async () => {
 
 
     await prisma.generation_canvas_submissions.create({
@@ -531,7 +531,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     const holds: number[] = [];
     const releases: number[] = [];
     const billing = {
-      hold: async (jobId: number) => { holds.push(jobId); },
+      charge: async (jobId: number) => { holds.push(jobId); },
       release: async (jobId: number) => { releases.push(jobId); },
     };
 
@@ -548,7 +548,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
   });
 
   it("★ R5 旧承接版本抢占旧成片节点 → 409，不覆盖旧承接（AC4）", async () => {
-    const billing = { hold: async () => {}, release: async () => {} };
+    const billing = { charge: async () => {}, release: async () => {} };
     const first = await regenerateCreate(regenerateAcceptance("0a1b2c3d-0000-4000-8000-000000001001", "node-old-final"), billing);
     expect(first).toMatchObject({ generation_job_id: expect.any(String) });
 

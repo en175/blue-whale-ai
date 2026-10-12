@@ -4,8 +4,8 @@ import com.bluewhale.billing.application.CatalogHolder;
 import com.bluewhale.billing.application.CreditService;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import com.bluewhale.contracts.billing.v1.BillingServiceGrpc;
-import com.bluewhale.contracts.billing.v1.HoldRequest;
-import com.bluewhale.contracts.billing.v1.HoldResponse;
+import com.bluewhale.contracts.billing.v1.ChargeRequest;
+import com.bluewhale.contracts.billing.v1.ChargeResponse;
 import com.bluewhale.contracts.billing.v1.QueryBalanceRequest;
 import com.bluewhale.contracts.billing.v1.QueryBalanceResponse;
 import com.bluewhale.contracts.billing.v1.QuoteRequest;
@@ -88,10 +88,10 @@ class BillingGrpcIntegrationTest {
 
 
     @Test
-    void 预扣成功_返回积分与定价版本_余额随之下降() {
-        HoldResponse response = stub.hold(hold("cmd-1", 9_001L, "free"));
+    void 扣款成功_返回积分与定价版本_余额随之下降() {
+        ChargeResponse response = stub.charge(charge("cmd-1", 9_001L, "free"));
 
-        assertThat(response.getReservedCredits()).isEqualTo(100);
+        assertThat(response.getChargedCredits()).isEqualTo(100);
         assertThat(response.getCatalogVersion()).isEqualTo(1);
         assertThat(response.getDuplicated()).isFalse();
 
@@ -99,13 +99,13 @@ class BillingGrpcIntegrationTest {
     }
 
     @Test
-    void 重复commandId_标记duplicated且不二次扣费() {
-        HoldResponse first = stub.hold(hold("cmd-2", 9_002L, "free"));
-        HoldResponse second = stub.hold(hold("cmd-2", 9_002L, "free"));
+    void 重复投递同一任务_标记duplicated且不二次扣费() {
+        ChargeResponse first = stub.charge(charge("cmd-2", 9_002L, "free"));
+        ChargeResponse second = stub.charge(charge("cmd-2", 9_002L, "free"));
 
         assertThat(first.getDuplicated()).isFalse();
         assertThat(second.getDuplicated()).isTrue();
-        assertThat(second.getReservedCredits()).isEqualTo(first.getReservedCredits());
+        assertThat(second.getChargedCredits()).isEqualTo(first.getChargedCredits());
 
         assertThat(availableCredits()).isEqualTo(900);
         assertThat(ledgerEntryCount()).isEqualTo(4);
@@ -116,7 +116,7 @@ class BillingGrpcIntegrationTest {
         jdbc.update("DELETE FROM billing_credit_lots WHERE user_id = ?", USER);
         jdbc.update("DELETE FROM billing_ledger_entries WHERE user_id = ?", USER);
 
-        assertThatThrownBy(() -> stub.hold(hold("cmd-3", 9_003L, "free")))
+        assertThatThrownBy(() -> stub.charge(charge("cmd-3", 9_003L, "free")))
                 .isInstanceOf(StatusRuntimeException.class)
                 .satisfies(thrown -> {
                     Status status = ((StatusRuntimeException) thrown).getStatus();
@@ -131,14 +131,14 @@ class BillingGrpcIntegrationTest {
 
     @Test
     void 未带规则快照的提交_映射成INVALID_ARGUMENT与UNPRICEABLE() {
-        HoldRequest request = HoldRequest.newBuilder()
+        ChargeRequest request = ChargeRequest.newBuilder()
                 .setUserId(USER).setCommandId("cmd-4").setJobId(9_004L)
                 .setModelId("从未配置过的模型").setTaskType(TASK)
                 .setSpecs(SpecAttrs.newBuilder().build())
                 .setTier("free")
                 .build();
 
-        assertThatThrownBy(() -> stub.hold(request))
+        assertThatThrownBy(() -> stub.charge(request))
                 .isInstanceOf(StatusRuntimeException.class)
                 .satisfies(thrown -> {
                     Status status = ((StatusRuntimeException) thrown).getStatus();
@@ -151,27 +151,26 @@ class BillingGrpcIntegrationTest {
     }
 
     @Test
-    void 会员折扣经引擎生效_预扣额按折后计() {
+    void 会员折扣经引擎生效_扣款额按折后计() {
         jdbc.update("INSERT INTO billing_member_discounts "
                 + "(tier, model_pattern, task_pattern, discount_bp, status) "
                 + "VALUES ('pro', '*', '*', 8000, 'enabled')");
 
-        HoldResponse response = stub.hold(hold("cmd-5", 9_005L, "pro"));
+        ChargeResponse response = stub.charge(charge("cmd-5", 9_005L, "pro"));
 
-        assertThat(response.getReservedCredits()).isEqualTo(80);
+        assertThat(response.getChargedCredits()).isEqualTo(80);
     }
 
     @Test
-    void 查余额_返回可用冻结与临期批次() {
+    void 查余额_返回可用与临期批次() {
         credits.grant(USER, CreditSource.DAILY, 300,
                 LocalDateTime.now().plus(5, ChronoUnit.DAYS), "grant", "d1", "d1");
-        stub.hold(hold("cmd-6", 9_006L, "free"));
+        stub.charge(charge("cmd-6", 9_006L, "free"));
 
         QueryBalanceResponse balance = stub.queryBalance(
                 QueryBalanceRequest.newBuilder().setUserId(USER).build());
 
         assertThat(balance.getAvailableCredits()).isEqualTo(1_200);
-        assertThat(balance.getFrozenCredits()).isEqualTo(100);
 
         assertThat(balance.getExpiringList()).hasSize(1);
         assertThat(balance.getExpiring(0).getCredits()).isEqualTo(200);
@@ -201,20 +200,20 @@ class BillingGrpcIntegrationTest {
 
 
     @Test
-    void 预扣_带规则快照时按快照计价_并把原文冻进预留行() {
-        HoldResponse response = stub.hold(holdWithSnapshot("cmd-snap", 9_007L, ruleSnapshot(300_000)));
+    void 扣款_带规则快照时按快照计价_并把原文冻进预留行() {
+        ChargeResponse response = stub.charge(chargeWithSnapshot("cmd-snap", 9_007L, ruleSnapshot(300_000)));
 
-        assertThat(response.getReservedCredits()).isEqualTo(300);
+        assertThat(response.getChargedCredits()).isEqualTo(300);
         assertThat(ruleSnapshotOf(9_007L)).isEqualTo(ruleSnapshot(300_000));
         assertThat(availableCredits()).isEqualTo(700);
     }
 
     @Test
-    void 预扣_规则快照编不过_映射成INVALID_ARGUMENT与UNPRICEABLE() {
-        HoldRequest request = holdWithSnapshot("cmd-bad", 9_008L,
+    void 扣款_规则快照编不过_映射成INVALID_ARGUMENT与UNPRICEABLE() {
+        ChargeRequest request = chargeWithSnapshot("cmd-bad", 9_008L,
                 "{\"basePrice\":{\"kind\":\"const\",\"value\":100000}}");
 
-        assertThatThrownBy(() -> stub.hold(request))
+        assertThatThrownBy(() -> stub.charge(request))
                 .isInstanceOf(StatusRuntimeException.class)
                 .satisfies(thrown -> {
                     Status status = ((StatusRuntimeException) thrown).getStatus();
@@ -286,21 +285,6 @@ class BillingGrpcIntegrationTest {
     }
 
     @Test
-    void 报价_带用量时按用量算() {
-        QuoteResponse quote = stub.quote(QuoteRequest.newBuilder()
-                .setUserId(USER).setModelId(MODEL).setTaskType(TASK)
-                .setTier("free")
-                .setRuleSnapshot(DEFAULT_RULE)
-                .addUsage(com.bluewhale.contracts.billing.v1.UsageLine.newBuilder()
-                        .setModelId(MODEL).setTaskType(TASK)
-                        .putQuantities("usage.seconds", 10)
-                        .build())
-                .build());
-
-        assertThat(quote.getCredits()).isEqualTo(100);
-    }
-
-    @Test
     void 报价_未带快照时报UNPRICEABLE() {
         assertThatThrownBy(() -> stub.quote(QuoteRequest.newBuilder()
                 .setUserId(USER).setModelId("从未配置过的模型").setTaskType(TASK)
@@ -344,8 +328,8 @@ class BillingGrpcIntegrationTest {
         return n == null ? 0 : n;
     }
 
-    private HoldRequest hold(String commandId, long jobId, String tier) {
-        return HoldRequest.newBuilder()
+    private ChargeRequest charge(String commandId, long jobId, String tier) {
+        return ChargeRequest.newBuilder()
                 .setUserId(USER)
                 .setCommandId(commandId)
                 .setJobId(jobId)
@@ -358,8 +342,8 @@ class BillingGrpcIntegrationTest {
                 .build();
     }
 
-    private HoldRequest holdWithSnapshot(String commandId, long jobId, String ruleSnapshot) {
-        return HoldRequest.newBuilder()
+    private ChargeRequest chargeWithSnapshot(String commandId, long jobId, String ruleSnapshot) {
+        return ChargeRequest.newBuilder()
                 .setUserId(USER)
                 .setCommandId(commandId)
                 .setJobId(jobId)
@@ -386,7 +370,7 @@ class BillingGrpcIntegrationTest {
 
     private long availableCredits() {
         Long value = jdbc.queryForObject(
-                "SELECT COALESCE(SUM(remaining - frozen), 0) FROM billing_credit_lots "
+                "SELECT COALESCE(SUM(remaining), 0) FROM billing_credit_lots "
                         + "WHERE user_id = ?", Long.class, USER);
         return value == null ? 0L : value;
     }

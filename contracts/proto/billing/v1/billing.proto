@@ -2,31 +2,23 @@ syntax = "proto3";
 
 // billing-svc 的**同步 RPC 面**。
 //
-// ⚠️ 结算 / 返还**不走 RPC**，走 MQ 事件（见 events.proto）——
-//    它们不该阻塞任何用户请求。**只有 Hold 在用户等待路径上。**
-//
 // ⚠️ 金额单位：int64 **整数积分**（账本单位，见《计费逻辑详细设计》§1）。
 //    管线内部用 mc（1 积分 = 1000 mc）保精度，出口一次性四舍五入成积分——
 //    所以**线上的金额字段一律是积分**，不是 mc。看到 mc 只可能是在讲单价/中间量。
 package billing.v1;
 
 import "common/v1/types.proto";
-import "billing/v1/usage.proto";
 
 option java_package = "com.bluewhale.contracts.billing.v1";
 option java_multiple_files = true;
 
 service BillingService {
 
-  // 预扣。**在用户等待路径上——调用方超时预算 50ms。**
-  //
-  // 幂等键 hold:{command_id}。重复请求返回首次结果 + duplicated=true（**不是错误**）。
-  //
   // 失败语义（调用方须 fail closed，见《架构设计》§11）：
   //   - 余额不足        → FAILED_PRECONDITION / INSUFFICIENT_CREDITS
   //   - 该组合算不出价  → INVALID_ARGUMENT / UNPRICEABLE（说明**定价漏配**）
   //   - billing 不可用  → UNAVAILABLE
-  rpc Hold(HoldRequest) returns (HoldResponse);
+  rpc Charge(ChargeRequest) returns (ChargeResponse);
 
   // 余额与持有批次（用户可见）。允许短缓存（Redis，写时失效）。
   rpc QueryBalance(QueryBalanceRequest) returns (QueryBalanceResponse);
@@ -46,36 +38,11 @@ service BillingService {
   rpc ListLots(ListLotsRequest) returns (ListLotsResponse);
 
   // 计价 —— **只算不扣**。切换前的影子模式与前端价格预览用。
-  //
-  // ⚠️ **不复用 Hold**：Hold 会真的冻结积分。影子模式每天要算成千上万次，
-  //    每次都冻一笔再退一笔，既不必要，也会把账本与对账搅浑——
-  //    影子期的意义正是「不碰钱也能知道算得对不对」（runbook §3.2）。
-  //
-  // 与 Hold 的另外两点差别：
-  //   · 不校验余额：报价是「这个组合多少钱」，与用户有多少钱无关
-  //   · 允许带真实用量报价（结算/影子场景），留空则按契约用量（提交前预览）
-  //
-  // 失败语义与 Hold 一致（算不出价 → INVALID_ARGUMENT / UNPRICEABLE）：
-  // 影子模式跑出来的 UNPRICEABLE 就是切换前要修掉的漏配清单。
   rpc Quote(QuoteRequest) returns (QuoteResponse);
 }
 
-message HoldRequest {
+message ChargeRequest {
   int64  user_id           = 1;
-  // 本次尝试的**因果标识**，用作预扣凭证键 `hold:{commandId}` 的幂等来源。
-  //
-  // ⚠️ **它不承担「重试不重复扣」这条保证** —— 曾有一条注释声称「客户端生成、重试时不变，
-  //    所以不需要跨服务补偿」，那个说法**与实现相反**，已删。实际语义是：
-  //
-  //    · 调用方（backend）用它关联审计链路，**每次尝试都不同**
-  //      （`handle-create-generation-job.ts` 的 actionSeed 里带 `Date.now()`）。
-  //    · 所以 `hold:{commandId}` 的幂等**基本不会命中**，它只挡住同一进程内的一次重放。
-  //    · 「重试不重复扣」真正落在两处：**调用方的幂等表**，以及
-  //      **`billing_cost_reservations` 上的 `uk_reservation__job`（按 job_id 唯一）**。
-  //    · ⚠️ 也正因如此，commandId **不能**做成稳定的 —— 若同一把 key 复用在两个新 job 上，
-  //      会命中永久幂等记录却查不到新 job 的预留，直接抛错（详见 backend 那段注释）。
-  //
-  // 结论：把它当**标识**用，别当**重试安全**用。要重试安全，靠 job_id 唯一索引与补偿事件。
   string command_id        = 2;
   int64  job_id            = 3;
   string model_id          = 4;
@@ -86,21 +53,12 @@ message HoldRequest {
   // ★ 用户等级：free | basic | pro | max（空 = free）。
   //
   // 为什么由调用方传、而不是 billing 反查 identity：
-  //   会员折扣与「限等级」的营销活动都要用它，而 Hold 在用户等待路径上（预算 50ms）。
   //   调用方在校验会话时**已经拿到** tier（identity.VerifySession 的返回值里就有），
   //   多传一个字段是零成本；让 billing 再发一次 RPC 则是在最热的路径上加一跳。
   //
   // ⚠️ 这是**由调用方断言**的输入：传错档位就能拿到不该有的折扣。
-  //    所以 Hold 只对该调用方（backend）开放，**不可由公网直达**。
   string tier              = 8;
 
-  // ★ 本条规则的**快照**（JSON 文本，形态 = 定价目录里 `models.<model_id>.<task_type>` 那一条）。
-  //
-  // 为什么随请求带过来、而不是让 billing 去查：
-  //   这条规则本来就是**模型的属性**（单价 / 计价方式 / 单位分母 / 上下限 / token 公式参数），
-  //   住在 backend 的 `generation_model_capability.pricing`。而 billing 读不到那个库
-  //   （ADR-0114：不共享库），所以由它的属主在 Hold 时一并送来。
-  //
   // ⚠️ **必填**。留空 = billing 算不出价，直接拒单（INVALID_ARGUMENT / UNPRICEABLE）。
   //    这里**没有**「回落去查目录」那条路：目录里的模型规则已经退场，它现在只装
   //    `creditsPerYuan` 与 `discountPolicy` 两项全局配置。
@@ -113,10 +71,8 @@ message HoldRequest {
   string rule_snapshot     = 9;
 }
 
-message HoldResponse {
-  int64 reserved_credits = 1; // 整数积分
-  // ★ 调用方须冻结进 generation_jobs（经 billing_cost_reservations），
-  //   结算时按它复现定价——改价不影响已提交任务。
+message ChargeResponse {
+  int64 charged_credits  = 1; // 整数积分
   int32 catalog_version  = 2;
   bool  duplicated       = 3; // 幂等命中
 }
@@ -127,12 +83,9 @@ message QuoteRequest {
   string task_type         = 3;
   common.v1.SpecAttrs specs = 4;
   // 用户等级：free | basic | pro | max（空 = free）。折扣解析用。
-  // 与 Hold 同理：由调用方传，避免在最热的路径上多一跳 RPC。
   string tier              = 5;
-  // 用量。留空 = 按契约用量报价（提交前预览）；
-  // 带上 = 按真实用量报价（结算、影子对账）。
-  repeated UsageLine usage = 6;
-  // 规则快照，语义与字段与 {@code HoldRequest.rule_snapshot} 逐条相同（**同样必填**）。
+  reserved 6;
+  reserved "usage";
   // 预览必须与实扣取到**同一份**规则——否则「预览一个价、实扣另一个价」。
   string rule_snapshot     = 7;
 }
@@ -156,8 +109,9 @@ message QueryBalanceRequest {
 }
 
 message QueryBalanceResponse {
-  int64 available_credits = 1; // 整数积分，Σ(remaining − frozen)
-  int64 frozen_credits    = 2; // 整数积分
+  reserved 2;
+  reserved "frozen_credits";
+  int64 available_credits = 1;
   repeated ExpiringLot expiring = 3; // 临期批次，前端展示「X 积分将于 Y 日过期」
 
   // 按来源拆分的**可用**积分（充值 / 充值赠送 / 每日赠送…）。
@@ -316,7 +270,6 @@ message UserCreditLot {
 //   网络策略**可以**按服务配，而不是按「这个端口上恰好都是运营接口」——
 //
 //   ⚠️ **但这个收益目前没有兑现**：`GrpcServerConfig` 把两个 service 挂在**同一个端口**，
-//      于是网络策略仍然无法区分「允许 backend 调 Hold」与「允许 backend 拉全站流水」。
 //      写在这里，是因为 2026-09-26 的架构评审正是拿这条理由反驳了那次实现 ——
 //      契约里承诺、代码里没做到，比压根不承诺更坏。要兑现就分端口；不打算分，就删掉上面那句。
 //
@@ -426,8 +379,6 @@ message AdminTransactionItem {
   // ⚠️ **它不是给用户看的，是给 backend 用的 join key。** billing 只存 id、不存任务的
   //    语义：任务类型在 `generation_jobs.type`，模型与提示词在 `input` 里，而那两个都在
   //    backend 自己的库（ADR-0114 决策 4：不共享库，billing 读不到 `blue_whale`）。
-  //    所以由 backend 拿到这批 id 回自己库批量查、解析后合并进 BFF 的响应——
-  //    与 `HoldRequest.rule_snapshot` 是同一条思路：谁拥有那份数据，谁在能拿到的时候负责。
   optional int64 generation_job_id = 11;
 }
 
@@ -436,24 +387,10 @@ message AdminQueryBalanceRequest {
 }
 
 message AdminQueryBalanceResponse {
+  reserved 2, 4;
+  reserved "frozen_credits", "receivable_credits";
   int64 available_credits = 1;
-  // 冻结的钱还在，只是动不了 —— 可用 + 冻结 = 总资产
-  int64 frozen_credits    = 2;
   repeated AdminExpiringLot expiring = 3;
-  // ★ 该用户的**欠费额**（整数积分）：他真实用掉、但平台没能从余额里收到的部分
-  //    （= Σ「实际 − 预扣」，见 `billing_cost_reservations.receivable_credits`）。
-  //    正数 = 欠多少；0 = 没有欠费。
-  //
-  // ⚠️ **只在运营面出现，用户面 `QueryBalanceResponse` 一个字都不带** ——
-  //    本仓硬规则「任何用户可见界面永远只出现一个金额」（《计费逻辑详细设计》§2.3.1）。
-  //    这条不是「字段多了会难看」，而是：欠费是**平台少收了多少**，不是用户的资产。
-  //    把它投影给用户，他会以为余额里多/少了一笔他看不懂的钱；而用户真正需要知道的
-  //    「这次扣了多少」早已由流水那一行的唯一金额表达完了。
-  //
-  // ⚠️ 这一列此前**没有任何出口**：超出预扣的部分只以一条借 RECEIVABLE 的分录躺在账本里，
-  //    全仓没有代码读它 —— 欠了多少钱只有翻账本能看见。产品已确认走「先欠费」
-  //    （只记录、只可见，不收款、不封禁、不拦截），这个字段就是「可见」那一半。
-  int64 receivable_credits = 4;
 }
 
 message AdminExpiringLot {

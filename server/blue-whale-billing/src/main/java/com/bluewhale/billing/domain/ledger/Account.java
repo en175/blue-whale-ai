@@ -4,13 +4,9 @@ public enum Account {
 
     WALLET("wallet", false),
 
-    FROZEN("frozen", false),
-
     REVENUE("revenue", false),
 
-    COST("cost", true),
-
-    RECEIVABLE("receivable", true);
+    COST("cost", true);
 
     private final String key;
     private final boolean normalDebit;

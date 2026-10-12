@@ -76,17 +76,17 @@
       SELECT CONCAT('res:', r.id) AS tx_id,
              'consume' AS type,
              'out'     AS direction,
-             CASE WHEN r.status = 'released'
+             CASE WHEN r.status = 'refunded'
                   THEN CASE WHEN r.title = '' THEN '生成退回'
                             ELSE CONCAT(r.title, ' · 退回') END
                   ELSE CASE WHEN r.title = '' THEN '生成消费' ELSE r.title END
              END AS title,
-             CASE WHEN r.status = 'held' THEN r.reserved_credits ELSE r.actual_credits END AS amount,
+             CASE WHEN r.status = 'refunded' THEN 0 ELSE r.reserved_credits END AS amount,
              r.reserved_credits AS reserved_credits,
              r.generation_job_id AS generation_job_id,
-             CASE WHEN r.status = 'held' THEN 'pending' ELSE 'done' END AS status,
+             'done' AS status,
              r.gmt_create AS created_at,
-             CASE WHEN r.status = 'held' THEN NULL ELSE r.gmt_modified END AS settled_at,
+             r.gmt_modified AS settled_at,
              'consume' AS kind,
              r.id AS src_id,
              r.user_id AS user_id,
@@ -123,7 +123,7 @@
       LEFT JOIN billing_credit_lots l2
              ON l2.id = CAST(e.biz_id AS UNSIGNED) AND l2.user_id = e.user_id
             AND e.biz_type = 'expire'
-      WHERE e.account IN ('wallet', 'frozen')
+      WHERE e.account IN ('wallet')
         AND e.idempotency_key LIKE CONCAT('%:', e.account)
         AND e.biz_type IN ('expire', 'adjust')
         <if test="userId != null">AND e.user_id = #{userId}</if>

@@ -40,8 +40,6 @@ const TS_PRICING_BASE_UNITS = (() => {
   return [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
 })();
 
-const PROTO_ONLY_DIMS = ["usage.audioOut", "usage.cc", "usage.imgOut"];
-
 describe("★ 计费契约对账：用量维度", () => {
   it("Java UsageDim 与 TS PRICING_BASE_UNITS 逐字一致", () => {
     expect(JAVA_USAGE_DIMS.length, "UsageDim 枚举没解析出任何一条，正则失效了").toBeGreaterThan(
@@ -50,58 +48,6 @@ describe("★ 计费契约对账：用量维度", () => {
     expect(TS_PRICING_BASE_UNITS.length, "PRICING_BASE_UNITS 没解析出任何一条").toBeGreaterThan(5);
 
     expect(TS_PRICING_BASE_UNITS).toEqual(JAVA_USAGE_DIMS);
-  });
-
-  it("proto 声明的维度里，多出来的必须正好是**已知欠着**的那几个", () => {
-    const proto = [
-      ...new Set(
-        [...read(`${PROTO}usage.proto`).matchAll(/usage\.[A-Za-z]+/g)].map((m) => m[0]),
-      ),
-    ].sort();
-    expect(proto.length, "usage.proto 里没解析出任何维度").toBeGreaterThan(5);
-
-    const protoOnly = proto.filter((dim) => !JAVA_USAGE_DIMS.includes(dim));
-    expect(protoOnly).toEqual(PROTO_ONLY_DIMS);
-  });
-});
-
-
-const TS_SPECS = read("backend/libs/shared/billing/billing-specs.ts");
-const JAVA_SETTLEMENT = stripComments(
-  read(`${JAVA_WORKER}domain/contract/SettlementUsageLines.java`),
-);
-
-function tsConst(source: string, name: string): string {
-  const m = source.match(new RegExp(`export const ${name}\\s*=\\s*['"]([^'"]+)['"]`));
-  expect(m, `没在 TS 里找到常量 ${name}，正则失效了`).not.toBeNull();
-  return m![1];
-}
-
-function javaConst(source: string, name: string): string {
-  const m = source.match(new RegExp(`String ${name}\\s*=\\s*"([^"]+)"`));
-  expect(m, `没在 Java 里找到常量 ${name}，正则失效了`).not.toBeNull();
-  return m![1];
-}
-
-describe("★ 计费契约对账：规格键", () => {
-  it("视频档的规格键与取值两边逐字一致", () => {
-    expect(tsConst(TS_SPECS, "VIDEO_TIER_KEY")).toBe(javaConst(JAVA_SETTLEMENT, "VIDEO_TIER"));
-    expect(javaConst(JAVA_SETTLEMENT, "VIDEO_TIER_WITH")).toBe(
-      TS_SPECS.match(/with:\s*'([^']+)'/)?.[1],
-    );
-    expect(javaConst(JAVA_SETTLEMENT, "VIDEO_TIER_WITHOUT")).toBe(
-      TS_SPECS.match(/without:\s*'([^']+)'/)?.[1],
-    );
-  });
-
-  it("输入视频时长（秒）的规格键两边逐字一致", () => {
-    expect(javaConst(JAVA_SETTLEMENT, "VIDEO_INPUT_SECONDS")).toBe("video_input_seconds");
-    expect(TS_SPECS).toContain("video_input_seconds");
-  });
-
-  it("参考素材数的规格键与预扣侧口径同源", () => {
-    expect(TS_SPECS).toContain("reference_count");
-    expect(JAVA_SETTLEMENT).toContain("referenceList");
   });
 });
 
@@ -130,13 +76,13 @@ describe("★ 计费契约对账：MQ topic", () => {
   it("生产者（worker）与消费者（billing）的 topic **默认值**完全相同", () => {
     const producer = workerDefaultTopics();
     const consumer = billingDefaultTopics();
-    expect(producer.length, "worker 侧没解析出 topic 默认值，正则失效了").toBe(2);
-    expect(consumer.length, "billing 侧没解析出 topic 默认值，正则失效了").toBe(2);
+    expect(producer.length, "worker 侧没解析出 topic 默认值，正则失效了").toBe(1);
+    expect(consumer.length, "billing 侧没解析出 topic 默认值，正则失效了").toBe(1);
     expect(consumer).toEqual(producer);
   });
 
-  it("没有任何一边冒出这两个之外的 generation-job-* topic", () => {
-    const EXPECTED = ["generation-job-completed", "generation-job-failed"];
+  it("没有任何一边冒出这个之外的 generation-job-* topic", () => {
+    const EXPECTED = ["generation-job-failed"];
     expect(billingDefaultTopics()).toEqual(EXPECTED);
     expect(workerDefaultTopics()).toEqual(EXPECTED);
   });

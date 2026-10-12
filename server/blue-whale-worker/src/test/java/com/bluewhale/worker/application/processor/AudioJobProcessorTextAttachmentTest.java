@@ -55,7 +55,7 @@ class AudioJobProcessorTextAttachmentTest {
         when(tosService.uploadBytes(any(), eq("audio/mpeg")))
                 .thenReturn(new TosMediaStorage.UploadResult("https://pub/a.mp3", "k", "audio/mpeg", 3L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.createAsset(any())).thenReturn("a1");
-        when(finalizer.completeJob(eq("100"), anyList(), anyString(), anyLong(), any()))
+        when(finalizer.completeJob(eq("100"), anyList(), anyString(), anyLong()))
                 .thenReturn(true);
     }
 
@@ -88,7 +88,7 @@ class AudioJobProcessorTextAttachmentTest {
 
         verify(audioClient).generate(eq("sk-token"), eq("seed-audio-1.0"),
                 eq("生成环境音"), any());
-        verify(finalizer).completeJob(eq("100"), eq(List.of("a1")), anyString(), eq(5L), eq(12L));
+        verify(finalizer).completeJob(eq("100"), eq(List.of("a1")), anyString(), eq(5L));
         ArgumentCaptor<JobStateMachineService.CreateAssetInput> assetCaptor =
                 ArgumentCaptor.forClass(JobStateMachineService.CreateAssetInput.class);
         verify(stateMachine).createAsset(assetCaptor.capture());

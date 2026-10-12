@@ -865,21 +865,21 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
   }
 
   function billingOf() {
-    const hold = vi.fn(async () => {});
+    const charge = vi.fn(async () => {});
     const release = vi.fn(async () => {});
-    return { hold, release, billing: { hold, release } };
+    return { charge, release, billing: { charge, release } };
   }
 
   it("★ 预扣成功但事务随后失败 → 补偿返还（钱不能留在 billing 那边）", async () => {
     const { prisma } = createTx({ failAtLog: true });
-    const { hold, release, billing } = billingOf();
+    const { charge, release, billing } = billingOf();
     const repo = createGenerationCommandRepo(prisma as never);
 
     await expect(repo.createJob(JOB_INPUT, { billing })).rejects.toThrow(
       "could not serialize",
     );
 
-    expect(hold).toHaveBeenCalledWith(501);
+    expect(charge).toHaveBeenCalledWith(501);
     expect(release).toHaveBeenCalledWith(
       501,
       expect.stringContaining("could not serialize"),
@@ -904,7 +904,7 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
     const { prisma } = createTx();
     const release = vi.fn(async () => {});
     const billing = {
-      hold: vi.fn().mockRejectedValue(new Error("INSUFFICIENT_CREDITS")),
+      charge: vi.fn().mockRejectedValue(new Error("INSUFFICIENT_CREDITS")),
       release,
     };
     const repo = createGenerationCommandRepo(prisma as never);
@@ -918,7 +918,7 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
 
   it("★ 入参混进函数 → 在预扣之前拦下（钱没动，也不会留下无主冻结）", async () => {
     const { tx, prisma } = createTx();
-    const { hold, release, billing } = billingOf();
+    const { charge, release, billing } = billingOf();
     const repo = createGenerationCommandRepo(prisma as never);
 
     await expect(
@@ -929,7 +929,7 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
     ).rejects.toThrow(/不可序列化/);
 
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
-    expect(hold).not.toHaveBeenCalled();
+    expect(charge).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
   });
 
@@ -994,9 +994,9 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
     const committedJobIds: bigint[] = [];
     let nextJobId = 500n;
 
-    const hold = vi.fn(async (_jobId: number) => {});
+    const charge = vi.fn(async (_jobId: number) => {});
     const release = vi.fn(async (_jobId: number, _reason: string) => {});
-    const billing = { hold, release };
+    const billing = { charge, release };
 
     const prisma = {
       async $transaction(callback: (tx: unknown) => Promise<CreateJobResult>) {
@@ -1093,7 +1093,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
       repo: createGenerationCommandRepo(prisma as never),
       committed,
       committedJobIds,
-      hold,
+      charge,
       release,
       billing,
     };
@@ -1116,7 +1116,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
       created(first).generation_job_id,
     );
     expect(h.committedJobIds).toHaveLength(1);
-    expect(h.hold).toHaveBeenCalledTimes(1);
+    expect(h.charge).toHaveBeenCalledTimes(1);
     expect(h.release).not.toHaveBeenCalled();
     const row = h.committed.get(`55|${CREATE_GENERATION_JOB_OPERATION}|key-1`);
     expect(row?.request_hash).toBe("hash-1");
@@ -1141,7 +1141,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
 
     expect(a).toEqual(b);
     expect(h.committedJobIds).toHaveLength(1);
-    expect(h.hold).toHaveBeenCalledTimes(2);
+    expect(h.charge).toHaveBeenCalledTimes(2);
     expect(h.release).toHaveBeenCalledTimes(1);
     expect(h.release.mock.calls[0]?.[0]).not.toBe(
       Number(h.committedJobIds[0]),
@@ -1162,7 +1162,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
 
     expect(conflict).toEqual({ kind: "idempotency_conflict" });
     expect(h.committedJobIds).toHaveLength(1);
-    expect(h.hold).toHaveBeenCalledTimes(1);
+    expect(h.charge).toHaveBeenCalledTimes(1);
     expect(h.release).not.toHaveBeenCalled();
   });
 
@@ -1174,7 +1174,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
 
     expect(created(a).generation_job_id).not.toBe(created(b).generation_job_id);
     expect(h.committedJobIds).toHaveLength(2);
-    expect(h.hold).toHaveBeenCalledTimes(2);
+    expect(h.charge).toHaveBeenCalledTimes(2);
     expect(h.committed.size).toBe(0);
   });
 
@@ -1212,7 +1212,7 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
     };
   }
 
-  it("videoStage='sample' → 扩展位带 video_stage 与 charge_state='held'（原主表列已删）", async () => {
+  it("videoStage='sample' → 扩展位带 video_stage 与 charge_state='charged'（原主表列已删）", async () => {
     const createJob = vi.fn().mockResolvedValue({ id: 300n, version: 1 });
     const tx = plainTx(createJob);
     await createJobWithinTx(tx as never, {
@@ -1235,7 +1235,7 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
     ]);
     expectExtraWrite(tx.generation_job_extras.upsert, 300n, "strategy_version", "string", "seedance-2.0-v1");
     expectExtraWrite(tx.generation_job_extras.upsert, 300n, "video_stage", "string", "sample");
-    expectExtraWrite(tx.generation_job_extras.upsert, 300n, "charge_state", "string", "held");
+    expectExtraWrite(tx.generation_job_extras.upsert, 300n, "charge_state", "string", "charged");
   });
 
   it("未传 videoStage（普通视频/图片/音频）→ 不写阶段两键（旧行为零变化）", async () => {

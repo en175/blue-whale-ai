@@ -2,7 +2,6 @@ package com.bluewhale.billing.infrastructure.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.bluewhale.billing.infrastructure.persistence.po.CostReservationEntity;
-import com.bluewhale.billing.infrastructure.persistence.row.StaleReservationRow;
 import com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -15,17 +14,10 @@ public interface CostReservationMapper extends BaseMapper<CostReservationEntity>
 
     CostReservationEntity lockByJobId(@Param("jobId") long jobId);
 
-    int markSettled(@Param("jobId") long jobId,
-                    @Param("actualCredits") long actualCredits,
-                    @Param("receivableCredits") long receivableCredits);
+    int markRefunded(@Param("jobId") long jobId, @Param("releaseNote") String releaseNote);
 
-    int markReleased(@Param("jobId") long jobId, @Param("releaseNote") String releaseNote);
+    long sumChargedCredits(@Param("from") LocalDateTime from,
+                           @Param("to") LocalDateTime to);
 
-    long sumSettledActualCredits(@Param("from") LocalDateTime from,
-                                 @Param("to") LocalDateTime to);
-
-    List<UserAmountRow> sumSettledActualByUser(@Param("userIds") List<Long> userIds);
-
-    List<StaleReservationRow> listStaleHeld(@Param("seconds") long seconds,
-                                            @Param("limit") int limit);
+    List<UserAmountRow> sumChargedByUser(@Param("userIds") List<Long> userIds);
 }

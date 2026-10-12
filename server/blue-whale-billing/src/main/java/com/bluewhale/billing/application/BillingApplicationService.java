@@ -1,16 +1,14 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.application.command.HoldCommand;
+import com.bluewhale.billing.application.command.ChargeCommand;
 import com.bluewhale.billing.application.command.QuoteQuery;
 import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.domain.ledger.TransactionType;
 import com.bluewhale.billing.application.view.TransactionView;
 import com.bluewhale.billing.application.view.UserStatsView;
-import com.bluewhale.billing.domain.ledger.Account;
 import com.bluewhale.billing.infrastructure.persistence.repository.CreditLotRepository;
 import com.bluewhale.billing.domain.ledger.CreditSource;
-import com.bluewhale.billing.domain.ledger.HoldResult;
-import com.bluewhale.billing.infrastructure.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.domain.ledger.ChargeResult;
 import com.bluewhale.billing.infrastructure.persistence.repository.ReservationRepository;
 import com.bluewhale.billing.infrastructure.persistence.repository.TransactionRepository;
 import com.bluewhale.billing.domain.pricing.AbstractPricingCalculator;
@@ -58,7 +56,6 @@ public class BillingApplicationService {
     private final AbstractPricingCalculator calculator;
     private final CreditService credits;
     private final CreditLotRepository lots;
-    private final LedgerRepository ledger;
     private final CatalogHolder catalog;
     private final GrantPolicy grantPolicy;
     private final TransactionRepository transactions;
@@ -67,7 +64,6 @@ public class BillingApplicationService {
     public BillingApplicationService(AbstractPricingCalculator calculator,
                                      CreditService credits,
                                      CreditLotRepository lots,
-                                     LedgerRepository ledger,
                                      CatalogHolder catalog,
                                      GrantPolicy grantPolicy,
                                      TransactionRepository transactions,
@@ -75,7 +71,6 @@ public class BillingApplicationService {
         this.calculator = calculator;
         this.credits = credits;
         this.lots = lots;
-        this.ledger = ledger;
         this.catalog = catalog;
         this.grantPolicy = grantPolicy;
         this.transactions = transactions;
@@ -134,7 +129,7 @@ public class BillingApplicationService {
 
 
 
-    public HoldResult hold(HoldCommand command) {
+    public ChargeResult charge(ChargeCommand command) {
         PricingRequest request = new PricingRequest(
                 command.userId(), command.modelId(), command.taskType(),
                 command.specs(), command.tier());
@@ -150,12 +145,12 @@ public class BillingApplicationService {
         if (priced.credits() == 0) {
 
 
-            log.info("计价为 0，不冻结：user={} {}/{} specs={}",
+            log.info("计价为 0，不扣款：user={} {}/{} specs={}",
                     command.userId(), command.modelId(), command.taskType(), command.specs());
-            return HoldResult.fresh(0, catalogVersion);
+            return ChargeResult.fresh(0, catalogVersion);
         }
 
-        return credits.hold(command.userId(), command.commandId(), command.jobId(),
+        return credits.charge(command.userId(), command.commandId(), command.jobId(),
                 priced.credits(), catalogVersion, priced.discount().factorBp(),
 
                 command.ruleSnapshot(), command.title());
@@ -310,9 +305,9 @@ public class BillingApplicationService {
     private PricingResult priceAtCap(PricingRequest request, PricingEngine engine,
                                      Usage.ContractQuantityUnavailableException cause, LocalDateTime at) {
         PricingResult priced = engine.computeAtCap(request, at);
-        log.info("契约用量取不到，改按规则上限冻结：{}/{} 的基准维度 {} 在本次规格里取不到"
-                        + "（specs={}）→ 冻结上限 {} 积分。"
-                        + "按实际上报用量结算、多冻的退回；未配上限的模型在这条路径上会直接拒绝提交",
+        log.info("契约用量取不到，改按规则上限扣款：{}/{} 的基准维度 {} 在本次规格里取不到"
+                        + "（specs={}）→ 扣款上限 {} 积分。"
+                        + "提交时取不到的基准量只能按上限定价；未配上限的模型在这条路径上会直接拒绝提交",
                 request.modelId(), request.taskType(), cause.baseUnit().key(),
                 request.specs(), priced.credits());
         return priced;
@@ -333,22 +328,9 @@ public class BillingApplicationService {
 
     public BalanceView balance(long userId) {
 
-
-        long frozen = ledger.balanceOf(userId, Account.FROZEN);
-
-
-
-
-
-
-
-
-
-        long receivable = ledger.balanceOf(userId, Account.RECEIVABLE);
-
         var expiring = lots.listExpiring(userId, EXPIRING_LIMIT).stream()
                 .map(lot -> new BalanceView.ExpiringLot(
-                        lot.available(), lot.expiresAt(), lot.source().key()))
+                        lot.remaining(), lot.expiresAt(), lot.source().key()))
                 .toList();
 
 
@@ -359,7 +341,7 @@ public class BillingApplicationService {
                 .map(item -> new BalanceView.SourceCredits(item.source().key(), item.credits()))
                 .toList();
 
-        return new BalanceView(lots.availableCredits(userId), frozen, receivable, expiring, bySource);
+        return new BalanceView(lots.availableCredits(userId), expiring, bySource);
     }
 
 
@@ -482,7 +464,7 @@ public class BillingApplicationService {
                     "统计区间的起点必须早于终点：from=" + from + " to=" + to);
         }
 
-        return reservations.sumSettledActualCredits(from, to);
+        return reservations.sumChargedCredits(from, to);
     }
 
 
@@ -511,7 +493,7 @@ public class BillingApplicationService {
         Map<Long, Long> available = lots.availableCreditsOf(userIds);
 
         Map<Long, Long> recharged = lots.grantedCreditsOf(userIds, CreditSource.PURCHASED);
-        Map<Long, Long> consumed = reservations.sumSettledActualByUser(userIds);
+        Map<Long, Long> consumed = reservations.sumChargedByUser(userIds);
 
 
         Map<Long, UserStatsView> result = new LinkedHashMap<>();

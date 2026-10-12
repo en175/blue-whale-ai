@@ -211,11 +211,11 @@ export async function createJobWithinTx(
   await setJobExtras(tx, job.id, {
     strategy_version: strategyVersionOf(input.type),
     ...(input.videoStage !== undefined
-      ? { video_stage: input.videoStage, charge_state: "held" }
+      ? { video_stage: input.videoStage, charge_state: "charged" }
       : {}),
   });
   if (billing) {
-    await billing.hold(Number(job.id));
+    await billing.charge(Number(job.id));
   }
 
   if (input.expectedOutputCount > 0) {

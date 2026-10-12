@@ -1,29 +1,10 @@
 syntax = "proto3";
 
 // MQ 事件（**不是 RPC**）。topic 名写在每条消息的注释里。
-//
-// 为什么结算/返还走 MQ 而不是 RPC：它们不该阻塞任何用户请求，
-// 且要能重投。只有 Hold 在用户等待路径上（见 billing.proto）。
 package billing.v1;
-
-import "billing/v1/usage.proto";
 
 option java_package = "com.bluewhale.contracts.billing.v1";
 option java_multiple_files = true;
-
-// topic: generation-job-completed —— billing 消费后触发 **Settle**。
-message JobCompletedEvent {
-  int64  job_id  = 1;
-  int64  user_id = 2;
-  string status  = 3; // succeeded | partially_succeeded
-  // ⚠️ 只有 succeeded / partially_succeeded 才发这个事件；
-  //    failed / cancelled 走 JobFailedEvent（触发全额返还）。
-  repeated UsageLine usage = 4;
-  // ★ job 提交时冻结的版本。billing 按它复现定价，**不按当前版本**。
-  int32  catalog_version = 5;
-  // ★ 决定 actualCredits（**按成功的 slot 计费**，不是按 job）。
-  int32  succeeded_slots = 6;
-}
 
 // topic: generation-job-failed —— billing 消费后触发 **Refund**（全额返还）。
 message JobFailedEvent {

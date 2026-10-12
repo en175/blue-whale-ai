@@ -159,7 +159,7 @@ describe("投影：阶段、来源、截止、费用", () => {
     source_sample_job_id: "302",
     final_job_id: null,
     finalize_deadline_at: null,
-    charge_state: "held",
+    charge_state: "charged",
     actual_credits: null,
   };
 
@@ -187,7 +187,7 @@ describe("投影：阶段、来源、截止、费用", () => {
       videoStageJobProjectionSchema.parse({ ...finalJob, video_stage: "draft" }),
     ).toThrow();
     expect(() =>
-      videoStageJobProjectionSchema.parse({ ...finalJob, charge_state: "refunded" }),
+      videoStageJobProjectionSchema.parse({ ...finalJob, charge_state: "unknown" }),
     ).toThrow();
   });
 
@@ -214,7 +214,7 @@ describe("可信截止时间公式（金标 G06）", () => {
 describe("枚举值冻结（跨语言对账锚点）", () => {
   it("阶段 / 费用状态 / 核对状态是封闭集合", () => {
     expect(VIDEO_STAGES).toEqual(["video", "sample", "final"]);
-    expect(CHARGE_STATES).toEqual(["held", "settled", "released"]);
+    expect(CHARGE_STATES).toEqual(["charged", "refunded"]);
     expect(JOB_STATUS_CHECKING).toBe("checking");
     expect(videoFinalizeCreateRequestSchema).toBe(confirmedSubmitFieldsSchema);
     expect(sampleRegenerateRequestSchema.shape.canvas_binding).toBeDefined();

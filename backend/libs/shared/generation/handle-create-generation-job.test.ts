@@ -2941,13 +2941,13 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
 
 
 describe("handleCreateGenerationJob 计费接线", () => {
-  it("hold 与 release 一起交给 repo；release 带上本次 userId 与失败原因", async () => {
+  it("charge 与 release 一起交给 repo；release 带上本次 userId 与失败原因", async () => {
     const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
-    const hold = vi.fn(async () => {});
+    const charge = vi.fn(async () => {});
     const release = vi.fn(async () => {});
     const withBilling = {
       ...deps,
-      billing: { hold, release },
+      billing: { charge, release },
     } as unknown as HandlerDeps;
 
     const result = await handleCreateGenerationJob(
@@ -2962,18 +2962,18 @@ describe("handleCreateGenerationJob 计费接线", () => {
 
     const [jobInput, options] = createJob.mock.calls.at(-1)!;
     expect(jobInput).not.toHaveProperty("billing");
-    expect(jobInput).not.toHaveProperty("billingHold");
+    expect(jobInput).not.toHaveProperty("billingCharge");
 
     const billing = (options as {
       billing: {
-        hold: (jobId: number) => Promise<void>;
+        charge: (jobId: number) => Promise<void>;
         release: (jobId: number, reason: string) => Promise<void>;
       };
     }).billing;
-    await billing.hold(501);
+    await billing.charge(501);
     await billing.release(501, "写库失败");
 
-    expect(hold).toHaveBeenCalledWith(
+    expect(charge).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "u1", jobId: 501, taskType: "video" }),
     );
     expect(release).toHaveBeenCalledWith({

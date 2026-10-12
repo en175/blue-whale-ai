@@ -15,7 +15,7 @@ import com.bluewhale.contracts.billing.v1.AdminQueryUserStatsResponse;
 import com.bluewhale.contracts.billing.v1.AdminTransactionItem;
 import com.bluewhale.contracts.billing.v1.BillingAdminServiceGrpc;
 import com.bluewhale.contracts.billing.v1.BillingServiceGrpc;
-import com.bluewhale.contracts.billing.v1.HoldRequest;
+import com.bluewhale.contracts.billing.v1.ChargeRequest;
 import com.bluewhale.contracts.billing.v1.UserTransaction;
 import com.bluewhale.contracts.common.v1.PageRequest;
 import com.bluewhale.contracts.common.v1.SpecAttrs;
@@ -107,8 +107,8 @@ class BillingAdminGrpcIntegrationTest {
 
     @Test
     void 全站流水_每一行都带得回它的主人() {
-        userFacing.hold(hold(USER, "adm-all-1", 9_201L));
-        userFacing.hold(hold(OTHER_USER, "adm-all-2", 9_202L));
+        userFacing.charge(charge(USER, "adm-all-1", 9_201L));
+        userFacing.charge(charge(OTHER_USER, "adm-all-2", 9_202L));
 
         AdminListTransactionsResponse response = admin.adminListTransactions(
                 AdminListTransactionsRequest.newBuilder().setUserId(0).setPageSize(50).build());
@@ -124,8 +124,8 @@ class BillingAdminGrpcIntegrationTest {
 
     @Test
     void 按用户过滤_只出这个人的流水() {
-        userFacing.hold(hold(USER, "adm-one-1", 9_203L));
-        userFacing.hold(hold(OTHER_USER, "adm-one-2", 9_204L));
+        userFacing.charge(charge(USER, "adm-one-1", 9_203L));
+        userFacing.charge(charge(OTHER_USER, "adm-one-2", 9_204L));
 
         AdminListTransactionsResponse response = admin.adminListTransactions(
                 AdminListTransactionsRequest.newBuilder().setUserId(USER).setPageSize(50).build());
@@ -148,7 +148,7 @@ class BillingAdminGrpcIntegrationTest {
 
     @Test
     void 合法类型过滤_只出该类型的行() {
-        userFacing.hold(hold(USER, "adm-type-1", 9_212L));
+        userFacing.charge(charge(USER, "adm-type-1", 9_212L));
 
         List<AdminTransactionItem> consumes = adminListTyped(USER, "consume");
         assertThat(consumes).hasSize(1);
@@ -161,7 +161,7 @@ class BillingAdminGrpcIntegrationTest {
 
     @Test
     void 偏移翻页_不重不漏() {
-        userFacing.hold(hold(USER, "adm-page-1", 9_213L));
+        userFacing.charge(charge(USER, "adm-page-1", 9_213L));
 
         AdminListTransactionsResponse first = admin.adminListTransactions(
                 AdminListTransactionsRequest.newBuilder()
@@ -178,7 +178,7 @@ class BillingAdminGrpcIntegrationTest {
 
     @Test
     void 运营面填total_且与用户面同一口径() {
-        userFacing.hold(hold(USER, "adm-total-1", 9_214L));
+        userFacing.charge(charge(USER, "adm-total-1", 9_214L));
 
         AdminListTransactionsResponse response = admin.adminListTransactions(
                 AdminListTransactionsRequest.newBuilder()
@@ -190,13 +190,12 @@ class BillingAdminGrpcIntegrationTest {
 
 
     @Test
-    void 预扣额_运营面看得见_用户面一个字都不带() {
-        userFacing.hold(hold(USER, "adm-hold-1", 9_205L));
-        credits.settle(9_205L, 30);
+    void 扣款额_运营面看得见_用户面一个字都不带() {
+        userFacing.charge(charge(USER, "adm-hold-1", 9_205L));
 
         AdminTransactionItem adminRow = rowOf(adminList(USER), "consume");
         assertThat(adminRow.getStatus()).isEqualTo("done");
-        assertThat(adminRow.getAmount()).isEqualTo(30);
+        assertThat(adminRow.getAmount()).isEqualTo(100);
         assertThat(adminRow.hasReservedCredits()).isTrue();
         assertThat(adminRow.getReservedCredits()).isEqualTo(100);
 
@@ -209,7 +208,7 @@ class BillingAdminGrpcIntegrationTest {
                 .filter(item -> item.getType().equals("consume"))
                 .findFirst()
                 .orElseThrow();
-        assertThat(userRow.getAmount()).isEqualTo(30);
+        assertThat(userRow.getAmount()).isEqualTo(100);
         assertThat(userRow.getStatus()).isEqualTo("done");
     }
 
@@ -224,8 +223,7 @@ class BillingAdminGrpcIntegrationTest {
 
     @Test
     void 消费行_带得出关联的生成任务_发放行是缺值() {
-        userFacing.hold(hold(USER, "adm-job-1", 9_207L));
-        credits.settle(9_207L, 30);
+        userFacing.charge(charge(USER, "adm-job-1", 9_207L));
 
         AdminTransactionItem consume = rowOf(adminList(USER), "consume");
         assertThat(consume.hasGenerationJobId()).isTrue();
@@ -235,20 +233,20 @@ class BillingAdminGrpcIntegrationTest {
     }
 
     @Test
-    void 未结算的消费行_预扣额仍是预扣时的那个数() {
-        userFacing.hold(hold(USER, "adm-pending-1", 9_206L));
+    void 扣款行_金额与预留列都是扣款时的那个数() {
+        userFacing.charge(charge(USER, "adm-charged-1", 9_206L));
 
-        AdminTransactionItem pending = rowOf(adminList(USER), "consume");
+        AdminTransactionItem charged = rowOf(adminList(USER), "consume");
 
-        assertThat(pending.getStatus()).isEqualTo("pending");
-        assertThat(pending.getAmount()).isEqualTo(100);
-        assertThat(pending.getReservedCredits()).isEqualTo(100);
-        assertThat(pending.getSettledAt()).isEmpty();
+        assertThat(charged.getStatus()).isEqualTo("done");
+        assertThat(charged.getAmount()).isEqualTo(100);
+        assertThat(charged.getReservedCredits()).isEqualTo(100);
+        assertThat(charged.getSettledAt()).isNotEmpty();
     }
 
     @Test
     void 任务退回的行_管理端也看得见() {
-        userFacing.hold(hold(USER, "adm-refund-1", 9_215L));
+        userFacing.charge(charge(USER, "adm-refund-1", 9_215L));
         credits.refund(9_215L, "任务失败");
 
         List<AdminTransactionItem> consumes = adminListTyped(USER, "consume");
@@ -267,34 +265,33 @@ class BillingAdminGrpcIntegrationTest {
 
 
     @Test
-    void 消耗合计_只算已结算的_在途的预扣不算() {
+    void 消耗合计_按已扣款计_退回的不算() {
         LocalDateTime from = LocalDateTime.now().minus(1, ChronoUnit.HOURS);
         LocalDateTime to = LocalDateTime.now().plus(1, ChronoUnit.HOURS);
 
-        userFacing.hold(hold(USER, "adm-cc-1", 9_207L));
-        assertThat(consumed(from, to)).isZero();
+        userFacing.charge(charge(USER, "adm-cc-1", 9_207L));
+        assertThat(consumed(from, to)).isEqualTo(100);
 
-        credits.settle(9_207L, 30);
-        assertThat(consumed(from, to)).isEqualTo(30);
+        credits.refund(9_207L, "任务失败");
+        assertThat(consumed(from, to)).as("退回的那笔不再计入消耗").isZero();
 
-        userFacing.hold(hold(OTHER_USER, "adm-cc-2", 9_208L));
-        assertThat(consumed(from, to)).isEqualTo(30);
+        userFacing.charge(charge(OTHER_USER, "adm-cc-2", 9_208L));
+        assertThat(consumed(from, to)).isEqualTo(100);
 
         assertThat(consumed(LocalDateTime.now().minus(2, ChronoUnit.DAYS),
                 LocalDateTime.now().minus(1, ChronoUnit.DAYS))).isZero();
     }
 
     @Test
-    void 消耗合计_半开区间且只算已结算() {
+    void 消耗合计_半开区间且只算已扣款() {
         LocalDateTime from = LocalDateTime.parse("2026-09-25T00:00:00");
         LocalDateTime to = LocalDateTime.parse("2026-09-26T00:00:00");
 
-        insertReservation(9_301L, "settled", 1L, "2026-09-24 23:59:59");
-        insertReservation(9_302L, "settled", 2L, "2026-09-25 00:00:00");
-        insertReservation(9_303L, "settled", 4L, "2026-09-25 23:59:59");
-        insertReservation(9_304L, "settled", 8L, "2026-09-26 00:00:00");
-        insertReservation(9_305L, "held", null, "2026-09-25 12:00:00");
-        insertReservation(9_306L, "released", 0L, "2026-09-25 12:00:00");
+        insertReservation(9_301L, "charged", 1L, "2026-09-24 23:59:59");
+        insertReservation(9_302L, "charged", 2L, "2026-09-25 00:00:00");
+        insertReservation(9_303L, "charged", 4L, "2026-09-25 23:59:59");
+        insertReservation(9_304L, "charged", 8L, "2026-09-26 00:00:00");
+        insertReservation(9_305L, "refunded", 16L, "2026-09-25 12:00:00");
 
         assertThat(consumed(from, to)).isEqualTo(6);
     }
@@ -329,14 +326,13 @@ class BillingAdminGrpcIntegrationTest {
 
 
     @Test
-    void 余额_冻结与可用分开报() {
-        userFacing.hold(hold(USER, "adm-bal-1", 9_209L));
+    void 余额_扣款后可用随之下降() {
+        userFacing.charge(charge(USER, "adm-bal-1", 9_209L));
 
         AdminQueryBalanceResponse balance = admin.adminQueryBalance(
                 AdminQueryBalanceRequest.newBuilder().setUserId(USER).build());
 
         assertThat(balance.getAvailableCredits()).isEqualTo(9_900);
-        assertThat(balance.getFrozenCredits()).isEqualTo(100);
     }
 
     @Test
@@ -345,33 +341,7 @@ class BillingAdminGrpcIntegrationTest {
                 AdminQueryBalanceRequest.newBuilder().setUserId(9_999L).build());
 
         assertThat(balance.getAvailableCredits()).isZero();
-        assertThat(balance.getFrozenCredits()).isZero();
         assertThat(balance.getExpiringList()).isEmpty();
-        assertThat(balance.getReceivableCredits())
-                .as("查无此人也没有欠费 —— 与「余额为 0」同口径，不是另一个哨兵值")
-                .isZero();
-    }
-
-    @Test
-    void 欠费_只在管理面可见_且用户实扣仍是预扣额() {
-        userFacing.hold(hold(USER, "adm-recv-1", 9_213L));
-        credits.settle(9_213L, 130);
-
-        AdminQueryBalanceResponse balance = admin.adminQueryBalance(
-                AdminQueryBalanceRequest.newBuilder().setUserId(USER).build());
-
-        assertThat(balance.getReceivableCredits())
-                .as("管理端必须看得见这笔欠费（= 实际 − 预扣 = 130 − 100）")
-                .isEqualTo(30);
-        assertThat(balance.getAvailableCredits())
-                .as("用户实扣仍只有预扣额 100：10000 − 100")
-                .isEqualTo(9_900);
-        assertThat(balance.getFrozenCredits()).isZero();
-
-        assertThat(admin.adminQueryBalance(AdminQueryBalanceRequest.newBuilder()
-                        .setUserId(OTHER_USER).build()).getReceivableCredits())
-                .as("没超扣过的用户是 0")
-                .isZero();
     }
 
     @Test
@@ -391,8 +361,8 @@ class BillingAdminGrpcIntegrationTest {
 
     @Test
     void 两面同源_同一批动作在两边的行数与金额一致() {
-        userFacing.hold(hold(USER, "adm-same-1", 9_210L));
-        userFacing.hold(hold(USER, "adm-same-2", 9_211L));
+        userFacing.charge(charge(USER, "adm-same-1", 9_210L));
+        userFacing.charge(charge(USER, "adm-same-2", 9_211L));
 
         List<AdminTransactionItem> adminRows = adminList(USER);
         List<UserTransaction> userRows = userFacing.listTransactions(
@@ -414,8 +384,7 @@ class BillingAdminGrpcIntegrationTest {
     void 批量三列_一次问一批_各归各的且查无此人是0() {
         credits.grant(USER, CreditSource.PURCHASED, 500, null, "recharge", "r-1", "gk-1");
         credits.grant(USER, CreditSource.BONUS, 100, null, "recharge", "r-1", "gk-2");
-        userFacing.hold(hold(USER, "adm-batch-1", 9_401L));
-        credits.settle(9_401L, 30);
+        userFacing.charge(charge(USER, "adm-batch-1", 9_401L));
 
         AdminQueryUserStatsResponse response = admin.adminQueryUserStats(
                 AdminQueryUserStatsRequest.newBuilder()
@@ -424,9 +393,9 @@ class BillingAdminGrpcIntegrationTest {
 
         assertThat(response.getStatsMap()).containsOnlyKeys(USER, OTHER_USER, 9_999L);
 
-        assertThat(response.getStatsOrThrow(USER).getAvailableCredits()).isEqualTo(10_570);
+        assertThat(response.getStatsOrThrow(USER).getAvailableCredits()).isEqualTo(10_500);
         assertThat(response.getStatsOrThrow(USER).getTotalRecharged()).isEqualTo(500);
-        assertThat(response.getStatsOrThrow(USER).getTotalConsumed()).isEqualTo(30);
+        assertThat(response.getStatsOrThrow(USER).getTotalConsumed()).isEqualTo(100);
 
         assertThat(response.getStatsOrThrow(OTHER_USER).getAvailableCredits()).isEqualTo(10_000);
         assertThat(response.getStatsOrThrow(OTHER_USER).getTotalRecharged()).isZero();
@@ -439,7 +408,7 @@ class BillingAdminGrpcIntegrationTest {
     @Test
     void 批量三列的可用_与单人余额是同一个数() {
         credits.grant(USER, CreditSource.PURCHASED, 500, null, "recharge", "r-2", "gk-3");
-        userFacing.hold(hold(USER, "adm-batch-2", 9_402L));
+        userFacing.charge(charge(USER, "adm-batch-2", 9_402L));
 
         long fromBatch = admin.adminQueryUserStats(AdminQueryUserStatsRequest.newBuilder()
                         .addUserIds(USER).build())
@@ -469,12 +438,12 @@ class BillingAdminGrpcIntegrationTest {
                 .getItemsList();
     }
 
-    private void insertReservation(long jobId, String status, Long actualCredits, String at) {
+    private void insertReservation(long jobId, String status, long reservedCredits, String at) {
         jdbc.update("INSERT INTO billing_cost_reservations "
-                        + "(generation_job_id, user_id, reserved_credits, actual_credits, status,"
+                        + "(generation_job_id, user_id, reserved_credits, status,"
                         + " allocations, catalog_version, gmt_create, gmt_modified) "
-                        + "VALUES (?, ?, 100, ?, ?, '[]', 1, ?, ?)",
-                jobId, USER, actualCredits, status, at, at);
+                        + "VALUES (?, ?, ?, ?, '[]', 1, ?, ?)",
+                jobId, USER, reservedCredits, status, at, at);
     }
 
     private long consumed(LocalDateTime from, LocalDateTime to) {
@@ -493,8 +462,8 @@ class BillingAdminGrpcIntegrationTest {
         return matched.get(0);
     }
 
-    private static HoldRequest hold(long userId, String commandId, long jobId) {
-        return HoldRequest.newBuilder()
+    private static ChargeRequest charge(long userId, String commandId, long jobId) {
+        return ChargeRequest.newBuilder()
                 .setUserId(userId)
                 .setCommandId(commandId)
                 .setJobId(jobId)

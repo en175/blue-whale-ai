@@ -230,12 +230,12 @@ class SubmissionCheckingMySqlIntegrationTest {
     @Test
     @DisplayName("提交中标记：CAS 落 checking；失租/换主/已提交的迟到写入被 fence 挡住")
     void submissionAttemptIsFenced() {
-        long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "held");
+        long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "charged");
 
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId), "w1", 5L)).isTrue();
         assertThat(row(jobId)).containsEntry("status", "checking");
 
-        long jobId2 = seedClaimedSubmitJob("final", "w1", 5L, null, "held");
+        long jobId2 = seedClaimedSubmitJob("final", "w1", 5L, null, "charged");
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId2), "other", 5L)).isFalse();
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId2), "w1", 9L)).isFalse();
         jdbc.update("UPDATE generation_jobs SET provider_task_id = 'task-x' WHERE id = ?", jobId2);
@@ -246,7 +246,7 @@ class SubmissionCheckingMySqlIntegrationTest {
     @Test
     @DisplayName("锁定：checking 行租约过期 + provider_task_id 为空也不被 claim 选中（不重提）")
     void checkingRowIsNotClaimableEvenWithExpiredLease() {
-        long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "held");
+        long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "charged");
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId), "w1", 5L)).isTrue();
         jdbc.update("""
                 UPDATE generation_jobs
@@ -264,7 +264,7 @@ class SubmissionCheckingMySqlIntegrationTest {
     @Test
     @DisplayName("明确成功恢复原任务：markProviderSubmitted 从 checking 回 processing 落句柄，claim 走 poll 相位")
     void submittedFromCheckingResumesPollPhase() {
-        long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "held");
+        long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "charged");
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId), "w1", 5L)).isTrue();
 
         assertThat(service.markProviderSubmitted(
@@ -282,9 +282,9 @@ class SubmissionCheckingMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("明确失败释放本阶段预扣：failVideoJob 从 checking 落 failed + charge released")
+    @DisplayName("明确失败释放本阶段预扣：failVideoJob 从 checking 落 failed + charge refunded")
     void definiteFailureFromCheckingReleasesHold() {
-        long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "held");
+        long jobId = seedClaimedSubmitJob("final", "w1", 5L, null, "charged");
         assertThat(service.markSubmissionAttempt(String.valueOf(jobId), "w1", 5L)).isTrue();
 
         boolean failed = finalizer.failVideoJob(String.valueOf(jobId), "quota_exhausted",
@@ -293,13 +293,13 @@ class SubmissionCheckingMySqlIntegrationTest {
         assertThat(failed).isTrue();
         assertThat(row(jobId))
                 .containsEntry("status", "failed")
-                .containsEntry("charge_state", "released");
+                .containsEntry("charge_state", "refunded");
     }
 
     @Test
     @DisplayName("重启后仍锁定：checking 状态跨「重启」持久（无内存态参与），普通视频同规")
     void checkingPersistsAcrossRestartForAnyStage() {
-        long sampleJob = seedClaimedSubmitJob("sample", "w1", 3L, null, "held");
+        long sampleJob = seedClaimedSubmitJob("sample", "w1", 3L, null, "charged");
         long plainJob = seedClaimedSubmitJob(null, "w1", 3L, null, null);
         assertThat(service.markSubmissionAttempt(String.valueOf(sampleJob), "w1", 3L)).isTrue();
         assertThat(service.markSubmissionAttempt(String.valueOf(plainJob), "w1", 3L)).isTrue();

@@ -2,9 +2,7 @@ package com.bluewhale.billing.domain.ledger;
 
 public enum BizType {
 
-    HOLD("hold"),
-
-    SETTLE("settle"),
+    CHARGE("charge"),
 
     REFUND("refund"),
 

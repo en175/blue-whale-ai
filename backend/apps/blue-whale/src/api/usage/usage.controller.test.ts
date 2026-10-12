@@ -25,7 +25,6 @@ describe("UsageController.token（billing 余额）", () => {
   it("返回可用余额的**积分**（不是 new-api 的 quota）", async () => {
     queryBalance.mockResolvedValue({
       availableCredits: 120,
-      frozenCredits: 30,
       expiring: [
         { credits: 50, expiresAt: "2026-12-01T00:00:00+08:00", source: "purchased" },
       ],
@@ -53,7 +52,6 @@ describe("UsageController.token（billing 余额）", () => {
   it("没有临期批次时 expiring 是空数组，不是缺键", async () => {
     queryBalance.mockResolvedValue({
       availableCredits: 0,
-      frozenCredits: 0,
       expiring: [],
       bySource: [],
     });

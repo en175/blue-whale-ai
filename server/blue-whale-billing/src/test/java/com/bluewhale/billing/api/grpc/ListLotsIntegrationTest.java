@@ -150,17 +150,6 @@ class ListLotsIntegrationTest {
 
 
     @Test
-    void 冻结中的部分不算在剩余里() {
-        long lot = credits.grant(USER, CreditSource.PURCHASED, 600, null, "recharge", "BW-5", "lot-frozen");
-        jdbc.update("UPDATE billing_credit_lots SET frozen = 100 WHERE id = ?", lot);
-
-        UserCreditLot row = list(USER, 20, 1).getItemsList().get(0);
-        assertThat(row.getAmount()).isEqualTo(600);
-        assertThat(row.getRemaining()).as("600 − 100 冻结").isEqualTo(500);
-    }
-
-
-    @Test
     void 分页_总数与切分正确() {
         for (int i = 0; i < 5; i++) {
             credits.grant(USER, CreditSource.GIFT, 10 + i, null, "grant", "g" + i, "lot-p" + i);

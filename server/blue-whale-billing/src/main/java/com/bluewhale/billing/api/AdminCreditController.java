@@ -3,7 +3,6 @@ package com.bluewhale.billing.api;
 import com.bluewhale.billing.api.dto.GrantRequest;
 import com.bluewhale.billing.api.dto.GrantResponse;
 import com.bluewhale.billing.api.dto.RefundRequest;
-import com.bluewhale.billing.api.dto.SettleRequest;
 import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.CreditService;
 import com.bluewhale.billing.application.view.BalanceView;
@@ -67,15 +66,9 @@ public class AdminCreditController {
         return billing.balance(userId);
     }
 
-    @PostMapping("/jobs/{jobId}/settle")
-    public Map<String, Object> settle(@PathVariable long jobId, @RequestBody SettleRequest request) {
-        credits.settle(jobId, request.actualCredits());
-        return Map.of("jobId", jobId, "actualCredits", request.actualCredits(), "status", "settled");
-    }
-
     @PostMapping("/jobs/{jobId}/refund")
     public Map<String, Object> refund(@PathVariable long jobId, @RequestBody RefundRequest request) {
         credits.refund(jobId, request.reason() == null ? "人工释放" : request.reason());
-        return Map.of("jobId", jobId, "status", "released");
+        return Map.of("jobId", jobId, "status", "refunded");
     }
 }

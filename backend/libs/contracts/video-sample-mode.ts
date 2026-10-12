@@ -83,7 +83,7 @@ export const sampleRegenerateRequestSchema = confirmedSubmitFieldsSchema.extend(
 export type SampleRegenerateRequest = z.infer<typeof sampleRegenerateRequestSchema>;
 
 
-export const CHARGE_STATES = ["held", "settled", "released"] as const;
+export const CHARGE_STATES = ["charged", "refunded"] as const;
 export const chargeStateSchema = z.enum(CHARGE_STATES);
 export type ChargeState = z.infer<typeof chargeStateSchema>;
 

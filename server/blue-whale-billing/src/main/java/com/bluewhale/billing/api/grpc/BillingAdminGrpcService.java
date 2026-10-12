@@ -4,7 +4,6 @@ import com.bluewhale.billing.common.error.BillingErrorTaxonomy;
 import com.bluewhale.billing.application.view.BalanceView;
 import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.view.TransactionView;
-import com.bluewhale.billing.application.CatalogCompiler;
 import com.bluewhale.billing.application.CatalogHolder;
 import com.bluewhale.contracts.billing.v1.AdminConsumedCreditsRequest;
 import com.bluewhale.contracts.billing.v1.AdminConsumedCreditsResponse;
@@ -103,9 +102,7 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
             BalanceView balance = billing.balance(request.getUserId());
 
             AdminQueryBalanceResponse.Builder response = AdminQueryBalanceResponse.newBuilder()
-                    .setAvailableCredits(balance.availableCredits())
-                    .setFrozenCredits(balance.frozenCredits())
-                    .setReceivableCredits(balance.receivableCredits());
+                    .setAvailableCredits(balance.availableCredits());
             for (BalanceView.ExpiringLot lot : balance.expiring()) {
                 response.addExpiring(AdminExpiringLot.newBuilder()
                         .setCredits(lot.credits())

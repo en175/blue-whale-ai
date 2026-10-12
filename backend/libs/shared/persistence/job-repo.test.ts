@@ -619,7 +619,7 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
         extraRow(302n, "video_stage", "string", "sample"),
         extraRow(302n, "final_job_id", "number", "305"),
         extraRow(302n, "finalize_deadline_ms", "number", String(finalizeDeadlineMs)),
-        extraRow(302n, "charge_state", "string", "settled"),
+        extraRow(302n, "charge_state", "string", "charged"),
         extraRow(302n, "actual_credits", "number", "4"),
       ]),
     } as never;
@@ -630,7 +630,7 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
     expect(view?.source_sample_job_id).toBeNull();
     expect(view?.final_job_id).toBe("305");
     expect(view?.finalize_deadline_at).toBe("2026-10-06T09:00:00+08:00");
-    expect(view?.charge_state).toBe("settled");
+    expect(view?.charge_state).toBe("charged");
     expect(view?.actual_credits).toBe(4);
   });
 
@@ -683,7 +683,7 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
       assets: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate([
         extraRow(303n, "video_stage", "string", "sample"),
-        extraRow(303n, "charge_state", "string", "held"),
+        extraRow(303n, "charge_state", "string", "charged"),
       ]),
     } as never;
 
@@ -691,7 +691,7 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
 
     expect(page.records[0]?.video_stage).toBe("sample");
     expect(page.records[0]?.finalize_deadline_at).toBeNull();
-    expect(page.records[0]?.charge_state).toBe("held");
+    expect(page.records[0]?.charge_state).toBe("charged");
   });
 });
 
@@ -718,7 +718,7 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
       },
       generation_job_extras: extrasDelegate([
         extraRow(305n, "video_stage", "string", "final"),
-        extraRow(305n, "charge_state", "string", "settled"),
+        extraRow(305n, "charge_state", "string", "charged"),
         extraRow(305n, "actual_credits", "number", "20"),
       ]),
     } as never;
@@ -749,7 +749,7 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
       assets: { findMany: assetsFindMany },
       generation_job_extras: extrasDelegate([
         extraRow(306n, "video_stage", "string", "final"),
-        extraRow(306n, "charge_state", "string", "released"),
+        extraRow(306n, "charge_state", "string", "refunded"),
       ]),
     } as never;
 
@@ -758,7 +758,7 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
     expect(view?.status).toBe("failed");
     expect(view?.video_stage).toBe("final");
     expect(view?.source_sample_job_id).toBe("302");
-    expect(view?.charge_state).toBe("released");
+    expect(view?.charge_state).toBe("refunded");
     expect(view?.stored_error).toMatchObject({ code: "provider_upstream_error" });
     expect(view?.asset).toBeNull();
     expect(assetsFindMany).not.toHaveBeenCalled();
@@ -796,7 +796,7 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
       assets: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate([
         extraRow(301n, "video_stage", "string", "sample"),
-        extraRow(301n, "charge_state", "string", "held"),
+        extraRow(301n, "charge_state", "string", "charged"),
       ]),
     } as never;
 
@@ -808,7 +808,7 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
     });
     expect(page.total).toBe(2);
     expect(page.records.map((r) => r.job_id)).toEqual(["301", "299"]);
-    expect(page.records[0]).toMatchObject({ video_stage: "sample", charge_state: "held" });
+    expect(page.records[0]).toMatchObject({ video_stage: "sample", charge_state: "charged" });
     expect(page.records[1]).toMatchObject({ video_stage: "video", source_sample_job_id: null });
     expect(page.records[1]?.stored_error).toMatchObject({ code: "provider_upstream_error" });
   });

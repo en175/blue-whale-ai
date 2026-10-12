@@ -1,5 +1,5 @@
 export interface JobBilling {
-  hold(jobId: number): Promise<void>;
+  charge(jobId: number): Promise<void>;
   release(jobId: number, reason: string): Promise<void>;
 }
 
@@ -11,8 +11,8 @@ export async function withBillingCompensation<T>(
   const held = { jobId: null as number | null };
   try {
     return await run({
-      hold: async (jobId) => {
-        await billing.hold(jobId);
+      charge: async (jobId) => {
+        await billing.charge(jobId);
         held.jobId = jobId;
       },
       release: billing.release,

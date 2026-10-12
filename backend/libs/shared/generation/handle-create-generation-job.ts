@@ -93,7 +93,7 @@ import {
   type ProjectRepo,
   type AssetOwnershipOps,
 } from "@lib/shared/persistence/index.js";
-import type { BillingHold } from "@lib/shared/billing/billing-hold.js";
+import type { BillingCharge } from "@lib/shared/billing/billing-charge.js";
 import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
 import type { BillingQuote } from "@lib/shared/billing/billing-quote.js";
 import { DURATION_BASIS_KEY, OMNI_TASK_TYPE_ALLOWED_KEY } from "@lib/shared/billing/billing-specs.js";
@@ -1564,7 +1564,7 @@ interface GenerationDeps {
 
 
   billing?: {
-    hold: BillingHold;
+    charge: BillingCharge;
     release: BillingRelease;
   };
 
@@ -2288,8 +2288,8 @@ export async function handleCreateGenerationJob(
   const billingDep = deps.billing;
   const billing: JobBilling | undefined = billingDep
     ? {
-        hold: (jobId) =>
-          billingDep.hold({
+        charge: (jobId) =>
+          billingDep.charge({
             userId: String(userId),
             jobId,
             commandId: actionIdentity,

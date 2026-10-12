@@ -29,7 +29,7 @@ describe('createBillingRelease', () => {
     ).resolves.toBeUndefined();
 
     expect(error).toHaveBeenCalledWith(expect.stringContaining('jobId=501'));
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('仍冻着'));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('仍扣着'));
   });
 
   it('topic 是契约值（与 billing 的 topic-failed / worker 的默认值同名）', () => {
