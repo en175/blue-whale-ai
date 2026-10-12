@@ -1,6 +1,8 @@
 export const CANVAS_CHROME_SELECTOR = '[data-canvas-chrome], .react-flow__minimap';
 export const CANVAS_OVERLAY_SELECTOR = '[data-canvas-overlay]';
 
+const CANVAS_TERRITORY_SELECTOR = '[data-gen-panel-territory]';
+
 const CHROME_INTERACTIVE = 'button, a, [role="button"], input';
 const registeredChrome = new Set<Element>();
 
@@ -31,6 +33,7 @@ function collectChromeRoots(): Element[] {
 
 export function canvasChromeAtPoint(clientX: number, clientY: number): Element | null {
   for (const root of collectChromeRoots()) {
+    if (root.closest(CANVAS_TERRITORY_SELECTOR)) continue;
     if (isFullViewportCover(root)) continue;
     const style = getComputedStyle(root);
     if (style.display === 'none' || style.visibility === 'hidden') continue;
