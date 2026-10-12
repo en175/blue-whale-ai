@@ -85,6 +85,12 @@ export class VocalSplitsService {
       outputFormat = body.output_format;
     }
 
+    if (idempotencyKey !== undefined && typeof idempotencyKey !== "string") {
+      return fail(400, "Idempotency-Key 必须为字符串", {
+        reason: RECOVERY_REASONS.invalidPayload,
+      });
+    }
+
     let canvasBinding: CanvasBinding | null = null;
     if (body.canvas_binding !== undefined && body.canvas_binding !== null) {
       const parsedBinding = canvasBindingSchema.safeParse(body.canvas_binding);

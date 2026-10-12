@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { ERROR_ENQUEUE_FAILED, ok } from "@lib/contracts";
+import { ERROR_ENQUEUE_FAILED, RECOVERY_REASONS, ok } from "@lib/contracts";
+import { VocalSplitsService } from "@lib/shared/vocal-splits/vocal-splits.service.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueVocalSplitJob: vi.fn(),
@@ -43,6 +44,25 @@ describe("VocalSplitsController.create", () => {
     });
     const result = await controller.create({ userId: "9" } as never, "55", {}, undefined);
     expect(result.code).toBe(400);
+    expect(enqueueVocalSplitJob).not.toHaveBeenCalled();
+  });
+
+  it("畸形幂等键由实际服务拒绝后不建任务、不入队", async () => {
+    const create = vi.fn();
+    const service = new VocalSplitsService(
+      { client: { generation_jobs: { create } } } as never,
+      { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) } as never,
+      { findOwnedSource: vi.fn().mockResolvedValue({ id: 88n, type: "video" }) } as never,
+    );
+    const controller = new VocalSplitsController(service);
+    const result = await Reflect.apply(controller.create, controller, [
+      { userId: "9" }, "55", { source_asset_id: "88" }, null,
+    ]);
+    expect(result).toMatchObject({
+      code: 400,
+      data: { reason: RECOVERY_REASONS.invalidPayload },
+    });
+    expect(create).not.toHaveBeenCalled();
     expect(enqueueVocalSplitJob).not.toHaveBeenCalled();
   });
 

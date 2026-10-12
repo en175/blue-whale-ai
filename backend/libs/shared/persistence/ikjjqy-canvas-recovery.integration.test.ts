@@ -29,6 +29,7 @@ import type { Pool } from "mariadb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildPoolConfig, getPrismaClient } from "./db.js";
 import {
+  IDEMPOTENCY_KEY_REUSED_CODE,
   RECOVERY_REASONS,
   TARGET_OUTPUT_KEY,
   recoveryItemId,
@@ -267,7 +268,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const first = await service.create(USER_ID, PROJECT_ID, {
       source_asset_id: "88", scene: "drama", output_format: "aac",
       canvas_binding: binding(UUID_A, "vocal-node-1", 0),
-    }, UUID_A);
+    }, ` \t${UUID_A}\n`);
     expect(first.code).toBe(200);
     expect(first.data).toMatchObject({
       status: "queued",
@@ -280,6 +281,20 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       canvas_binding: binding(UUID_A, "vocal-node-1", 0),
     }, UUID_A);
     expect(replay.data?.job_id).toBe(first.data?.job_id);
+    expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
+
+    const paddedReplay = await service.create(USER_ID, PROJECT_ID, {
+      source_asset_id: "88", scene: "drama", output_format: "aac",
+      canvas_binding: binding(UUID_A, "vocal-node-1", 0),
+    }, ` ${UUID_A} `);
+    expect(paddedReplay.code).toBe(200);
+    expect(paddedReplay.data?.job_id).toBe(first.data?.job_id);
+
+    const conflict = await service.create(USER_ID, PROJECT_ID, {
+      source_asset_id: "88", scene: "music", output_format: "aac",
+      canvas_binding: binding(UUID_A, "vocal-node-1", 0),
+    }, UUID_A);
+    expect(conflict.code).toBe(IDEMPOTENCY_KEY_REUSED_CODE);
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
 
     const mismatch = await service.create(USER_ID, PROJECT_ID, {

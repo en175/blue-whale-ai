@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { RECOVERY_REASONS } from "@lib/contracts";
 
 import { VocalSplitsService } from "./vocal-splits.service.js";
 
@@ -15,8 +16,10 @@ function makeService(overrides: {
     };
   const create = overrides.createJob ?? vi.fn().mockResolvedValue({ id: 400n });
   const costCreate = vi.fn();
+  const transaction = vi.fn();
   const prisma = {
     client: {
+      $transaction: transaction,
       generation_jobs: { create },
       cost_reservations: { create: costCreate },
     },
@@ -25,10 +28,58 @@ function makeService(overrides: {
     service: new VocalSplitsService(prisma as never, project as never, assets as never),
     create,
     costCreate,
+    transaction,
   };
 }
 
 describe("VocalSplitsService.create：参数校验", () => {
+  const canvasBinding = {
+    protocol_version: 1,
+    submission_id: "1a2b3c4d-0000-4000-8000-00000000a001",
+    target_node_id: "vocal-node-1",
+    expected_binding_revision: 0,
+    recovery_seed: {
+      target: { role: "result-placeholder", x: 0, y: 0, width: 100, height: 100, name: "" },
+      sources: [],
+    },
+  };
+
+  describe.each([false, true])("畸形幂等键，画布绑定=%s", (bound) => {
+    it.each([
+      { label: "数字", key: 42 },
+      { label: "布尔值", key: true },
+      { label: "对象", key: {} },
+      { label: "数组", key: [] },
+      { label: "null", key: null },
+    ])("返回业务 400，键=$label", async ({ key }) => {
+      const { service, create, transaction } = makeService();
+      await expect(Reflect.apply(service.create, service, [
+        "9", "55", { source_asset_id: "88", canvas_binding: bound ? canvasBinding : undefined }, key,
+      ])).resolves.toMatchObject({
+        code: 400,
+        data: { reason: RECOVERY_REASONS.invalidPayload },
+      });
+      expect(create).not.toHaveBeenCalled();
+      expect(transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([undefined, "", " \t ", "1a2b3c4d-0000-4000-8000-00000000b002"])(
+    "有绑定时拒绝缺失、空白或不匹配的幂等键（%s）",
+    async (idempotencyKey) => {
+      const { service, create, transaction } = makeService();
+      const result = await service.create("9", "55", {
+        source_asset_id: "88", canvas_binding: canvasBinding,
+      }, idempotencyKey);
+      expect(result).toMatchObject({
+        code: 400,
+        data: { reason: RECOVERY_REASONS.invalidPayload },
+      });
+      expect(create).not.toHaveBeenCalled();
+      expect(transaction).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects a missing source_asset_id", async () => {
     const { service, create } = makeService();
     const result = await service.create("9", "55", {});
