@@ -125,6 +125,8 @@ new-api 从「我们的用户体系 + 计费平台」变成「带一把统一调
 而这两条是**同步流式**请求，没有 job 行。硬搬进去不是搬移，是塞一个异物；
 真要剥离，落点是单独一个 model-gateway 服务。
 
+> ⚠️ **2026-10-13 补记**：本节列的 `/api/text/completions`（文生文）**已退役**——两侧都没有调用方（本仓 0 引用、无测试、无 `docs/api/` 契约；`blue-whale-agent` 仓源码 0 引用，它的模型出口是 `BLUE_WHALE_MODEL_GATEWAY_BASE_URL` = `/api/internal/agent-model/*`）。这个端点是已废方案「Mastra 借浏览器登录态调模型」的产物，该仓自己也写明 legacy passthrough 不是新 Runtime 的兼容性要求。**同节列的 `/api/internal/agent-model/*` 不受影响，仍在役。**
+
 ### 9. 定价与像素表的归属：按「用它的那一刻谁在场」决定
 
 **本决策修正决策 3 的一半**：模型的计价规则原先住在定价目录（billing 的库），
