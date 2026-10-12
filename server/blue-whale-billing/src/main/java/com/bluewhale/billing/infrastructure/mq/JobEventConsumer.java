@@ -63,7 +63,7 @@ public class JobEventConsumer implements AutoCloseable {
                 JobEventPayload.JobTerminal event =
                         json.readValue(body, JobEventPayload.JobTerminal.class);
                 requireIdentifiable(event.jobId(), event.userId(), topic, body);
-                if (event.refundable()) {
+                if (event.refund()) {
                     credits.refund(event.jobId(), event.reason());
                 }
             } else {

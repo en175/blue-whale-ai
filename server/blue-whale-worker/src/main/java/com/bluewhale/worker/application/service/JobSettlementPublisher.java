@@ -61,7 +61,7 @@ public class JobSettlementPublisher {
         body.put("jobId", job.getId());
         body.put("userId", job.getUserId());
         body.put("status", status);
-        body.put("reason", refund ? failureReason(payload) : "");
+        body.put("reason", refund ? failureReason(status, payload) : "");
         body.put("refund", refund);
         return toJson(body);
     }
@@ -77,7 +77,10 @@ public class JobSettlementPublisher {
         return false;
     }
 
-    private static String failureReason(Map<String, Object> payload) {
+    private static String failureReason(String status, Map<String, Object> payload) {
+        if (JobStatusEnum.CANCELLED.value().equals(status)) {
+            return "用户取消";
+        }
         if (payload.get("error") instanceof Map<?, ?> error) {
             Object message = error.get("message");
             if (message != null && !message.toString().isBlank()) {

@@ -55,10 +55,15 @@ catalog 规则里 `baseUnit` / `dims` / `multipliers` 用的 key，
 
 | 事件 | topic（代码默认值） | 消费方动作 |
 |---|---|---|
-| `JobFailedEvent` | `generation-job-failed` | billing → Refund（按**实际结果**决定是否全额返还） |
+| `JobTerminalEvent` | `generation-job-terminal` | billing → **仅当消息里的 `refund=true`** 才全额返还 |
 | `CatalogActivated` | `pricing.catalog.activated` | 各服务重载内存副本（生产者尚未落地） |
 
-⚠️ 没有「任务成功」事件：扣款在提交时就完成，成功不再触发任何账务（ADR-0127）。
+**一个 job 只发一条终态消息**：成功 / 失败 / 取消都发，消息带 `status` 与 `refund`。
+`refund` 由**生产端**按真实结果判定，消费端照着做、不再从 `status` 推导：
+失败退、未派发上游的取消退、**已派发上游的取消不退**（上游可能已经做成）、成功不退（扣款在提交时已完成，ADR-0127）。
+
+⚠️ `generation-job-terminal` 是**新 topic**，broker 上不存在时 billing 的 push consumer 起不来（订阅一个无路由的 topic 会直接抛错），
+部署前须先在 broker 上建好。
 
 ## 生成
 

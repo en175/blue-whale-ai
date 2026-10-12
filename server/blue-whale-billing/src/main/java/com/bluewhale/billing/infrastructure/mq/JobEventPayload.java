@@ -12,9 +12,5 @@ public final class JobEventPayload {
             status = status == null ? "" : status;
             reason = reason == null || reason.isBlank() ? "未提供原因" : reason;
         }
-
-        public boolean refundable() {
-            return refund;
-        }
     }
 }
