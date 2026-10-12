@@ -57,11 +57,11 @@ Iterate until the user approves the breakdown.
 
 ### 5. Publish the tickets to the configured tracker
 
-草稿展示和发布采用下方中文模板。按需增加“背景”“已确认的现场证据”“范围边界”，无内容的可选章节省略。发布前按序完成：
+Use the templates below for drafts and published tickets. Keep their Chinese headings and fixed phrases as written; replace the instructional placeholders with Chinese content. Add “背景”, “已确认的现场证据”, or “范围边界” when needed, and omit empty optional sections. Complete these checks in order before publishing:
 
-1. 标题、章节名、说明和验收句子使用中文。代码标识、错误码、字段名、产品名、数值、链接、工单编号和标签保持原样；技术标识首次出现时用中文解释。
-2. 读取 [unslop](../unslop/SKILL.md)，按其规则改写表达。
-3. 对照已确认的来源逐项核对事实、触发条件、例外、范围、验收条件和依赖。保留“已确认”“推断”“未验证”的区别；正文自足、标识准确、条件完整后再发布。
+1. Write ticket titles, headings, explanations, and acceptance criteria in Chinese. Preserve code identifiers, error codes, field names, product names, numbers, links, ticket identifiers, and labels exactly. Explain technical identifiers in Chinese on first use.
+2. Read [unslop](../unslop/SKILL.md) and apply its editing rules.
+3. Compare the draft with the source material. Account for every fact, trigger, exception, scope boundary, acceptance condition, and dependency. Preserve the distinction between confirmed, inferred, and unverified information. Publish only when the ticket is self-contained, identifiers are exact, and conditions are complete.
 
 Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured; the tickets are the same either way, only the shape of the blocking edges changes:
 
@@ -74,26 +74,26 @@ Do NOT close or modify any parent issue.
 
 <local-ticket-template>
 
-# <NN>: <工单标题>
+# <NN>: <Ticket title>
 
 **状态：** ready-for-agent
 
 ## 关联工单
 
-父工单的编号或链接；来源不是已有工单时省略本节。
+A reference to the parent ticket. Omit this section if the source was not an existing ticket.
 
 ## 要实现的行为
 
-从用户视角描述本工单完成后可使用的完整行为。
+The end-to-end behaviour this ticket makes work, from the user's perspective, not a layer-by-layer implementation list.
 
 ## 验收标准
 
-- [ ] 可独立验证的验收条件 1
-- [ ] 可独立验证的验收条件 2
+- [ ] Verifiable acceptance criterion 1
+- [ ] Verifiable acceptance criterion 2
 
 ## 前置工单
 
-- 必须先完成的工单编号和标题；没有时写“无，可直接开始”。
+- The numbers and titles of the tickets that gate this one, or “无，可直接开始”.
 
 </local-ticket-template>
 
@@ -101,20 +101,20 @@ Do NOT close or modify any parent issue.
 
 ## 关联工单
 
-父工单的编号或链接；来源不是已有工单时省略本节。
+A reference to the parent issue on the tracker. Omit this section if the source was not an existing issue.
 
 ## 要实现的行为
 
-从用户视角描述本工单完成后可使用的完整行为。
+The end-to-end behaviour this ticket makes work, from the user's perspective, not a layer-by-layer implementation list.
 
 ## 验收标准
 
-- [ ] 可独立验证的验收条件 1
-- [ ] 可独立验证的验收条件 2
+- [ ] Verifiable acceptance criterion 1
+- [ ] Verifiable acceptance criterion 2
 
 ## 前置工单
 
-- 每项前置工单的编号、标题和链接；没有时写“无，可直接开始”。
+- Each blocking ticket's identifier, title, and link, or “无，可直接开始”.
 
 </issue-template>
 
