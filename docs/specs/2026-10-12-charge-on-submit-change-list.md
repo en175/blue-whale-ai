@@ -20,6 +20,7 @@
 - **退役** `pricing.tokenEstimate`（`divisor` / `fps` / `inputSecondsKey` / `minimumTokens`）、`unitDenominator = 1000000` 那套、`usage.c` 分支与 `TokenEstimator`（Java 与 TS 两侧）——视频不再按 token 计价，这些没有读方也不再有意义。
   ⚠️ **不要连带删 `features.video_dimensions`**：它是**生成请求**用的（分辨率档 × 比例 → 输出宽高，`handle-create-generation-job.ts:798-806`、`handle-finalize-generation-job.ts:88-95`），与计费无关。`042_...sql` 注释③ 说"没有任何读方"的是**规则里那份副本**（`pricing.tokenEstimate.dimensions`），不是 features 里这份。
 - 价格表**仍然按分辨率档配系数**（`basePrice.by = ["resolution","video"]`）。
+- **新增** `usage.videoEdit`（标记维度，编辑模式 = 1、其余 = 0）—— 承载编辑模式的「最后 ×2」。`multipliers` 的机制正好合用：`mc = mc × (该维度量 × 万分比) / 10000`，量为 0 时按 10000（即 ×1）（`AbstractPricingCalculator.multiplierPermille`）。producer：提交时按冻结的 `input.video_mode === "edit"` 写 1。
 
 ## 三、数据表
 
@@ -37,6 +38,11 @@
 - backend：`billing-hold.ts` / `billing-release.ts` / `job-billing.ts`（失败补偿）；`agent-session-credits.controller.ts` 的 `quotaToCredits` 换算改读产品账本。
 - worker（`server/blue-whale-worker`）：`JobSettlementPublisher` 只剩 failed 事件；`SettlementUsageLines` 退役。
 - 管理端（`web/src/admin/pages/ModelList/`）：`PricingTab` 标签「基准单价（元 / …）」→「基准单价（积分 / …）」；`catalogDraft.ts` 的 `yuanToMc` / `mcToYuan` 换成 `creditsToMc` / `mcToCredits`。校验文案里的「元」全部换掉。
+- **新规则：编辑模式限单段参考视频**（本次新加，代码里没有）。`edit` 模式的参考视频上限从通用的 `features.video_reference_max` 收紧为 **1**；用户加第二段时模式自动切 `omni`。
+  落点：
+  - 前端 `web/src/pages/CanvasPage/videoModes.ts` —— `enabledVideoModes`（:34-57）与 `defaultVideoModeFor`（:60-66）现在按「有没有图片引用」切 `edit`/`omni`（`videos > 0 → images > 0 ? 'omni' : 'edit'`），要改成按**参考视频段数**切。
+  - 后端 `backend/libs/contracts/capability-param-validation.ts` —— `resolveVideoMode`（:106-121）现在只按提示词意图词推断（含编辑意图词 → `edit`、含续写意图词 → `extend`、否则 `omni`），**个数不参与**；需补一条「视频引用 > 1 段 → `omni`」，且要在意图词判定之前。
+  - 校验：`backend/libs/shared/generation-runtime/video-reference-validation.ts:113` 的 `videoCount > limits.video_reference_max` 需按模式收紧。
 
 ## 五、设计文档需改的章节
 
@@ -78,6 +84,14 @@
 
 - 2.5 系含视频输入那三行需额外配 `dims`：`usage.referenceSeconds` 按 100%（万分比 `10000`）加进数量。
 - 「Seedance 2.5 样片 / 480p」与 2.5 普通行同价 → **共用一条**（样片模式另有约束：分辨率固定、只允许单个输出）。
+- **编辑模式（`mode = edit`）**：价格 = 该档基础价 ×2。配在规则上而不是价格表里：
+
+  ```json
+  { "multipliers": { "usage.videoEdit": 20000 } }
+  ```
+
+  数量取**参考视频秒数**（编辑模式产出时长 = 参考视频时长），单段参考。
+  例：2.5 / 480p，引用 10 秒视频做编辑 → `10 × 20 × 2 = 400 积分`。
 - 以上为**初始值**，运营在管理端可改。
 
 ### 图片（口径不变，只换单位）
