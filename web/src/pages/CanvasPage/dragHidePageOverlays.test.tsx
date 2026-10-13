@@ -154,10 +154,20 @@ describe('IKJU9T 页面级锚定浮层出口机械护栏', () => {
 
       const wrapperFile = overlayWrapperModule(name);
       const wrapperBase = path.basename(wrapperFile, '.tsx');
-      const wrapperLocal = defaultImportLocalOf(indexFile, `./${wrapperBase}`);
-      expect(wrapperLocal, `${name} 的包装模块 ${wrapperBase} 未在 CanvasPage 中默认导入`).toBeTruthy();
+      const exitFile = tsxFilesDirectlyUnder(PAGE_DIR).find(
+        (file) => defaultImportLocalOf(file, `./${wrapperBase}`) != null,
+      );
+      expect(exitFile, `${name} 的包装模块 ${wrapperBase} 未在画布页出口模块中默认导入`).toBeTruthy();
+      const wrapperLocal = defaultImportLocalOf(exitFile!, `./${wrapperBase}`);
+      const exitSource = ts.createSourceFile(
+        exitFile!,
+        fs.readFileSync(exitFile!, 'utf8'),
+        ts.ScriptTarget.ESNext,
+        true,
+        ts.ScriptKind.TSX,
+      );
 
-      const pageSites = jsxElementsNamed(indexSource, wrapperLocal!);
+      const pageSites = jsxElementsNamed(exitSource, wrapperLocal!);
       expect(pageSites.length, `${name} 的包装 ${wrapperLocal} 未在 CanvasPage 出口渲染`).toBeGreaterThan(0);
       pageSites.forEach((site, i) => {
         expect(
