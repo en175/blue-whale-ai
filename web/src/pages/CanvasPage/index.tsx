@@ -9,14 +9,7 @@ import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
 import { nodeBoxOf, readRecoveryErrorReason, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
-import { draftVideoModeOf } from './videoModes';
-import {
-  frameSlotCountOf,
-  isFrameMode,
-  normalizeVideoMode,
-  type VideoMode,
-} from '@/lib/video-modes';
-import { imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
+import { normalizeVideoMode } from '@/lib/video-modes';import { imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
 import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from './textIndexSync';
 import { audioRefItemMediaTypeOf, audioRefSourceError } from './audioMediaRefs';
 import { assetsPickerMediaTypes } from './assetsPickerTargets';
@@ -65,7 +58,7 @@ import {
   buildAudioSpeedPlaceholderNode,
 } from './audioSpeed';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
-import { AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON, AUDIO_VIDEO_MUX_EDGE_ORIGIN, AUDIO_VIDEO_MUX_TITLE, audioVideoMuxIdentityOf, buildAudioVideoMuxIdentity, isAudioVideoMuxAudioEdge, isAudioVideoMuxBindEdge } from './audioVideoMux';
+import { AUDIO_VIDEO_MUX_EDGE_ORIGIN, AUDIO_VIDEO_MUX_TITLE, audioVideoMuxIdentityOf, buildAudioVideoMuxIdentity, isAudioVideoMuxBindEdge } from './audioVideoMux';
 import { VOCAL_SPLIT_EDGE_ORIGIN, buildVocalSplitPlaceholderNode } from './vocalSplit';
 import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from './sceneSplit';
 import { type SceneSplitSubmission } from './sceneSplitSession';
@@ -101,7 +94,7 @@ import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPasst
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
 import { createConnectValidators } from './canvasConnectValidation';
-import { useEdgesState, type Connection, type Edge, type Node, type Viewport } from '@xyflow/react';
+import { useEdgesState, type Edge, type Node, type Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
 import {
@@ -122,10 +115,7 @@ import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import {
   availableGenKinds,
-  canConnectSourcesToGen,
-  genKindOf,
   isConnectableSource,
-  wouldCreateCycle,
 } from './connectAbility';
 import ConnectTypeMenu from './components/ConnectTypeMenu';
 import { checkFileBeforeUpload, isFileRejected } from '@/utils/fileSignature';
@@ -177,6 +167,7 @@ import { useCanvasImageToolHosts } from './hooks/useCanvasImageToolHosts';
 import { useCanvasSelectionBridge } from './hooks/useCanvasSelectionBridge';
 import { useCanvasNodeDeletion } from './hooks/useCanvasNodeDeletion';
 import { useCanvasEdgeOps } from './hooks/useCanvasEdgeOps';
+import { useCanvasConnectPair } from './hooks/useCanvasConnectPair';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -368,96 +359,35 @@ export default function CanvasPage() {
     ?? textNodesRef.current.find((n) => n.id === id)
     ?? productNodesRef.current.find((n) => n.id === id)
     ?? assetNodesRef.current.find((n) => n.id === id);
-  const draftModeOfNode = (nodeId: string, data?: Record<string, unknown> | undefined): VideoMode | null =>
-    draftVideoModeOf(
-      data ?? (mediaNodesRef.current.find((n) => n.id === nodeId)?.data as Record<string, unknown> | undefined),
-      mergedVideoMediaRefsOf(nodeId, edgesRef.current, mediaNodesRef.current),
-    );
-  const videoEdgeRoleFor = (targetId: string, requested?: VideoRefRole | null): VideoRefRole => {
-    if (requested === 'first' || requested === 'last') return requested;
-    const slots = frameSlotCountOf(draftModeOfNode(targetId));
-    if (slots === 0) return 'reference';
-    const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    if (!refs.first) return 'first';
-    if (slots === 2 && !refs.last) return 'last';
-    return 'reference';
-  };
-  const connectPair = (source: string, target: string): boolean => {
-    if (applyingRef.current || !source || !target || source === target) return false;
-    if (isGeneratingNode(target)) {
-      showToast('warn', '生成中，输入连线只读');
-      return false;
-    }
-    const sourceNode = findCanvasNode(source);
-    const targetNode = findCanvasNode(target);
-    if (!sourceNode || !targetNode) return false;
-    const sourceData = sourceNode.data as Record<string, unknown> | undefined;
-    const targetData = targetNode.data as Record<string, unknown> | undefined;
-    if (sourceData?.emptyShell || targetData?.emptyShell) return false;
-    const toolConnection = toolSessions.connect(sourceNode, targetNode);
-    if (toolConnection !== null) return toolConnection;
-    const imageRefOk = genKindOf(targetNode) === 'image' && sourceNode.type === 'mediaNode'
-      && imageRefSourceError(sourceNode) === null;
-    if (!imageRefOk && !isConnectableSource(sourceNode)) return false;
-    if (wouldCreateCycle(source, target, edgesRef.current)) return false;
-    if (sourceNode.type === 'mediaNode' && targetNode.type === 'textNode') {
-      showToast('warn', '媒体到文本卡的关系线由正文 @ 索引建立');
-      return false;
-    }
-    const targetKind = genKindOf(targetNode);
-    const videoRole = targetKind === 'video' && sourceNode.type === 'mediaNode'
-      ? videoEdgeRoleFor(target)
-      : undefined;
-    if (targetKind) {
-      if (!imageRefOk && !canConnectSourcesToGen([sourceNode], targetKind)) return false;
-      if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
-        connectPlanToDraft(source, target);
-        return true;
-      }
-      if (!validateImageRefConnect(source, target)) return false;
-      if (targetKind === 'video' && videoRole === 'reference' && isFrameMode(draftModeOfNode(target, targetData))) {
-        const refs = mergedVideoMediaRefsOf(target, edgesRef.current, mediaNodesRef.current);
-        if (refs.first || refs.last) {
-          showToast('warn', '首帧和尾帧已指定，请先移除现有帧');
-          return false;
-        }
-      }
-      if (!validateVideoRefConnect(source, target, videoRole ?? 'reference')) return false;
-      if (sourceNode.type === 'textNode') {
-        if (!validateAudioTextConnect(source, target)) return false;
-      } else if (!validateAudioRefConnect(source, target)) return false;
-    }
-    addCanvasEdge(source, target, videoRole);
-    return true;
-  };
-  const handleConnect = useCallback(
-    (params: Connection) => {
-      if (!params.source || !params.target) return;
-      connectPair(params.source, params.target);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setEdges, submittingNodeId],
-  );
-  const handleConnectGroupToTarget = useCallback(
-    (memberIds: string[], targetId: string) => {
-      if (memberIds.length === 0 || !targetId) return;
-      withHistoryBatch(() => {
-        memberIds.forEach((m) => connectPair(m, targetId));
-      });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setEdges, submittingNodeId],
-  );
-  const handleConnectSourceToGroup = useCallback(
-    (sourceId: string, memberIds: string[]) => {
-      if (!sourceId || memberIds.length === 0) return;
-      withHistoryBatch(() => {
-        memberIds.forEach((m) => connectPair(sourceId, m));
-      });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setEdges, submittingNodeId],
-  );
+  const {
+    connectPair,
+    draftModeOfNode,
+    videoEdgeRoleFor,
+    handleConnect,
+    handleConnectGroupToTarget,
+    handleConnectSourceToGroup,
+    guardEdgesChange,
+  } = useCanvasConnectPair({
+    isApplying: () => applyingRef.current,
+    showToast: (type, msg) => showToast(type, msg),
+    isGeneratingNode: (id) => isGeneratingNode(id),
+    findCanvasNode: (id) => findCanvasNode(id),
+    edgesRef,
+    getMediaNodes: () => mediaNodesRef.current,
+    toolConnect: (source, target) => toolSessions.connect(source, target),
+    addCanvasEdge: (source, target, refRole, marker) => addCanvasEdge(source, target, refRole, marker),
+    connectPlanToDraft,
+    removeTargetInputs,
+    validateImageRefConnect,
+    validateVideoRefConnect,
+    validateAudioRefConnect,
+    validateAudioTextConnect,
+    withHistoryBatch,
+    patchMediaNode: (nodeId, patch) => patchMediaNode(nodeId, patch),
+    onEdgesChange,
+    setEdges,
+    submittingNodeId,
+  });
   const handleMediaIndexChange = (id: string, mediaMentions: MediaMention[], mediaRefs: MediaRef[], delta: { added: string[]; removed: string[] }) => {
     setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, mediaMentions, mediaRefs } } : n));
     syncTextIndexEdges(id, delta);
@@ -465,44 +395,6 @@ export default function CanvasPage() {
   const removePlanAttachment = (targetId: string | undefined, planNodeId: string) => {
     if (!targetId || isGeneratingNode(targetId)) return;
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === planNodeId && edge.target === targetId).map(edge => edge.id));
-  };
-  const guardEdgesChange: typeof onEdgesChange = (changes) => {
-    const allowed = changes.filter((c) => {
-      if (c.type !== 'remove') return true;
-      const edge = edgesRef.current.find((e) => e.id === c.id);
-      if (!edge) return true;
-      if (isGeneratingNode(edge.target)) return false;
-      const muxDraft = mediaNodesRef.current.find((n) => n.id === edge.target);
-      if (isAudioVideoMuxAudioEdge(edge, muxDraft)) return false;
-      return true;
-    });
-    if (allowed.length < changes.length) {
-      const blockedMuxAudioEdge = changes.some((c) => {
-        if (c.type !== 'remove') return false;
-        const edge = edgesRef.current.find((e) => e.id === c.id);
-        if (!edge) return false;
-        const muxDraft = mediaNodesRef.current.find((n) => n.id === edge.target);
-        return isAudioVideoMuxAudioEdge(edge, muxDraft);
-      });
-      showToast('warn', blockedMuxAudioEdge ? AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON : '生成中，输入连线只读');
-    }
-    const removedEdges: Edge[] = [];
-    for (const c of allowed) {
-      if (c.type !== 'remove') continue;
-      const edge = edgesRef.current.find((e) => e.id === c.id);
-      if (edge) removedEdges.push(edge);
-    }
-    if (removedEdges.length > 0) removeTargetInputs(removedEdges.map(edge => edge.id));
-    for (const edge of removedEdges) {
-      const muxDraft = mediaNodesRef.current.find((n) => n.id === edge.target);
-      const identity = audioVideoMuxIdentityOf(muxDraft);
-      if (!muxDraft || !identity || !isAudioVideoMuxBindEdge(edge, muxDraft)) continue;
-      const nextIdentity = { ...identity };
-      delete nextIdentity.video;
-      patchMediaNode(muxDraft.id, { audioVideoMux: nextIdentity });
-    }
-    const otherChanges = allowed.filter(change => change.type !== 'remove');
-    if (otherChanges.length > 0) onEdgesChange(otherChanges);
   };
   const [uploadedNodes] = useState<Node[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warn'; msg: string } | null>(null);
