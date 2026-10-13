@@ -46,7 +46,7 @@ import {
   mediaExtractNodeId,
 } from './mediaExtract';
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
-import { type ImageEnhanceSubmission, type VideoEnhanceSubmission } from './panelToolSessions';
+import { type ImageEnhanceSubmission } from './panelToolSessions';
 import { isSilentAuthError } from './toolSessionCapture';
 import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import {
@@ -181,7 +181,7 @@ import { useCanvasConnectHandlers } from './hooks/useCanvasConnectHandlers';
 import { useCanvasNodeDragHandlers } from './hooks/useCanvasNodeDragHandlers';
 import { useCanvasDraftRefActions } from './hooks/useCanvasDraftRefActions';
 import { useCanvasTextNodeFactories } from './hooks/useCanvasTextNodeFactories';
-import { useCanvasFrameInterpolation } from './hooks/useCanvasFrameInterpolation';
+import { useCanvasToolJobSubmissions } from './hooks/useCanvasToolJobSubmissions';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -2560,15 +2560,25 @@ export default function CanvasPage() {
     addCanvasEdge,
     patchMediaNode,
   });
-  const { handleStartFrameInterpolation: startFrameInterpolationJob, recoverFrameInterpolation } = useCanvasFrameInterpolation({
+  const {
+    handleStartFrameInterpolation: startFrameInterpolationJob,
+    recoverFrameInterpolation,
+    beginVideoEnhanceSubmission,
+    handleStartVideoEnhance: startVideoEnhanceJob,
+  } = useCanvasToolJobSubmissions({
     activeProjectRef,
     mediaNodesRef,
     activeJobByNodeRef,
     locallyRemovedGenerationNodesRef,
+    videoEnhanceInFlightRef,
+    docLoadEpochRef,
     generationRuntimeRef,
     queryClient,
     patchMediaNode,
-    toolRuntime: { reconcileSources: (ids) => toolRuntime.reconcileSources(ids) },
+    toolRuntime: {
+      reconcileSources: (ids) => toolRuntime.reconcileSources(ids),
+      notifyInFlight: (kind, targetId) => toolRuntime.notifyInFlight(kind, targetId),
+    },
     submitVideoToolTask: (payload, targetNodeId, options) => submitVideoToolTask(payload, targetNodeId, options),
     applyJobTerminal,
     settleCancelledNode,
@@ -2576,41 +2586,6 @@ export default function CanvasPage() {
     showToast,
   });
   recoverFrameInterpolationRef.current = recoverFrameInterpolation;
-  const beginVideoEnhanceSubmission = (nodeId: string) => {
-    const pending = videoEnhanceInFlightRef.current.get(nodeId) ?? new Set<{ projectId: string | null; loadEpoch: object }>();
-    const request = { projectId: activeProjectRef.current, loadEpoch: docLoadEpochRef.current };
-    pending.add(request);
-    videoEnhanceInFlightRef.current.set(nodeId, pending);
-    toolRuntime.notifyInFlight('videoEnhance', nodeId);
-    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    return () => {
-      if (!pending.delete(request)) return;
-      if (pending.size === 0) videoEnhanceInFlightRef.current.delete(nodeId);
-      toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    };
-  };
-  const startVideoEnhanceJob = async (submission: VideoEnhanceSubmission): Promise<void> => {
-    const { nodeId, payload: input, identity } = submission;
-    const finish = beginVideoEnhanceSubmission(nodeId);
-    return new Promise<void>((resolve, reject) => {
-      const submitted = submitVideoToolTask({ kind: 'videoEnhance', input }, nodeId, {
-        replaceSubmitting: true,
-        onAccepted: () => {
-          finish();
-          patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
-          patchMediaNode(nodeId, { videoEnhance: { ...identity, lastParams: { resolution: input.resolution } } });
-          resolve();
-        },
-        onCreateFailure: (e: unknown) => {
-          finish();
-          reject(e);
-          return true;
-        },
-        onStale: () => { finish(); resolve(); },
-      });
-      if (!submitted) { finish(); resolve(); }
-    });
-  };
   toolHostsRef.current.panels = {
     getProjectId: () => activeProjectRef.current,
     getNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),

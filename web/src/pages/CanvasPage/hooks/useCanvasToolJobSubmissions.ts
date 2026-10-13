@@ -4,20 +4,27 @@ import { isApiError } from '@/api/http';
 import type { QueryClient } from '@tanstack/react-query';
 import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
 import { fetchJobStatus, type JobDetail } from '@/api/jobs';
-import type { FrameInterpolationSubmission } from '../panelToolSessions';
+import type { FrameInterpolationSubmission, VideoEnhanceSubmission } from '../panelToolSessions';
 import type { FrameInterpolationIdentity } from '../frameInterpolation';
 import type { VideoToolPayload } from '../generationRuntime/videoTools';
 import type { GenerationRuntime } from '../generationRuntime/runtime';
 
-export interface CanvasFrameInterpolationHost {
+type InFlightRequest = { projectId: string | null; loadEpoch: object };
+
+export interface CanvasToolJobSubmissionsHost {
   activeProjectRef: RefObject<string>;
   mediaNodesRef: RefObject<Node[]>;
   activeJobByNodeRef: RefObject<Map<string, string>>;
   locallyRemovedGenerationNodesRef: RefObject<Set<string>>;
+  videoEnhanceInFlightRef: RefObject<Map<string, Set<InFlightRequest>>>;
+  docLoadEpochRef: RefObject<object>;
   generationRuntimeRef: RefObject<GenerationRuntime | null>;
   queryClient: QueryClient;
   patchMediaNode: (nodeId: string, patch: Record<string, unknown>) => void;
-  toolRuntime: { reconcileSources: (ids: Set<string>) => void };
+  toolRuntime: {
+    reconcileSources: (ids: Set<string>) => void;
+    notifyInFlight: (kind: string, targetId: string) => void;
+  };
   submitVideoToolTask: (
     payload: VideoToolPayload,
     targetNodeId: string,
@@ -29,17 +36,21 @@ export interface CanvasFrameInterpolationHost {
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
 
-export interface CanvasFrameInterpolationHandles {
+export interface CanvasToolJobSubmissionsHandles {
   handleStartFrameInterpolation: (submission: FrameInterpolationSubmission) => Promise<boolean>;
   recoverFrameInterpolation: (nodeId: string, savedJobId?: unknown) => void;
+  beginVideoEnhanceSubmission: (nodeId: string) => () => void;
+  handleStartVideoEnhance: (submission: VideoEnhanceSubmission) => Promise<void>;
 }
 
-export function useCanvasFrameInterpolation(host: CanvasFrameInterpolationHost): CanvasFrameInterpolationHandles {
+export function useCanvasToolJobSubmissions(host: CanvasToolJobSubmissionsHost): CanvasToolJobSubmissionsHandles {
   const {
     activeProjectRef,
     mediaNodesRef,
     activeJobByNodeRef,
     locallyRemovedGenerationNodesRef,
+    videoEnhanceInFlightRef,
+    docLoadEpochRef,
     generationRuntimeRef,
     queryClient,
     patchMediaNode,
@@ -147,6 +158,41 @@ export function useCanvasFrameInterpolation(host: CanvasFrameInterpolationHost):
         }
       });
   };
+  const beginVideoEnhanceSubmission = (nodeId: string) => {
+    const pending = videoEnhanceInFlightRef.current.get(nodeId) ?? new Set<InFlightRequest>();
+    const request = { projectId: activeProjectRef.current, loadEpoch: docLoadEpochRef.current };
+    pending.add(request);
+    videoEnhanceInFlightRef.current.set(nodeId, pending);
+    toolRuntime.notifyInFlight('videoEnhance', nodeId);
+    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
+    return () => {
+      if (!pending.delete(request)) return;
+      if (pending.size === 0) videoEnhanceInFlightRef.current.delete(nodeId);
+      toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
+    };
+  };
+  const handleStartVideoEnhance = async (submission: VideoEnhanceSubmission): Promise<void> => {
+    const { nodeId, payload: input, identity } = submission;
+    const finish = beginVideoEnhanceSubmission(nodeId);
+    return new Promise<void>((resolve, reject) => {
+      const submitted = submitVideoToolTask({ kind: 'videoEnhance', input }, nodeId, {
+        replaceSubmitting: true,
+        onAccepted: () => {
+          finish();
+          patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
+          patchMediaNode(nodeId, { videoEnhance: { ...identity, lastParams: { resolution: input.resolution } } });
+          resolve();
+        },
+        onCreateFailure: (e: unknown) => {
+          finish();
+          reject(e);
+          return true;
+        },
+        onStale: () => { finish(); resolve(); },
+      });
+      if (!submitted) { finish(); resolve(); }
+    });
+  };
 
-  return { handleStartFrameInterpolation, recoverFrameInterpolation };
+  return { handleStartFrameInterpolation, recoverFrameInterpolation, beginVideoEnhanceSubmission, handleStartVideoEnhance };
 }
