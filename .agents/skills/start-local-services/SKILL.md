@@ -77,22 +77,28 @@ billing 的消费者订阅 `generation-job-terminal`（2026-10-13 起；此前�
 `No topic route info in name server` 失败，消费者 bean 造不出来，**整个 billing 起不来**。
 （生产者的发送会触发 autoCreate，但消费者先启动时等不到那一次发送。）
 
-**2026-09-25 实测 52 的 broker**：只有 `generation-task` / `generation-video`（worker 队列）
-与 pay 的 `QUEUE_PAY_ORDER_MCH_NOTIFY`，**这两个都没有**。也就是说 billing 一部署就会起不来。
+**2026-10-13 实测**：本地 `bw-rmq-broker` 与测试站 52 的 `rmq-broker` **都只有旧的两个**——
+新 topic 两边都要建，否则那一侧 billing 一部署就起不来。
 
 部署前建一次（一次性、幂等）：
 
 ```bash
+# 测试站 / 生产（52）
+ssh root@14.103.43.52
+docker exec rmq-broker sh -c '/home/rocketmq/rocketmq-5.3.1/bin/mqadmin updateTopic \
+  -n <rmq-namesrv-IP>:9876 -c DefaultCluster -t generation-job-terminal'
+
+# 本地
 docker exec bw-rmq-broker sh -c '/home/rocketmq/rocketmq-5.3.1/bin/mqadmin updateTopic \
-  -n <namesrv-IP>:9876 -c DefaultCluster -t generation-job-terminal'
+  -n <bw-rmq-namesrv-IP>:9876 -c DefaultCluster -t generation-job-terminal'
 ```
 
-⚠️ **`-n` 要给 namesrv 容器的 IP，不是 `127.0.0.1`**：本地 namesrv 是**独立容器**
-（`bw-rmq-namesrv`），broker 容器里的 `127.0.0.1:9876` 够不到它，报错形如
+⚠️ **`-n` 要给 namesrv 容器的 IP，不是 `127.0.0.1`**：namesrv 与 broker 是**两个容器**，
+broker 容器里的 `127.0.0.1:9876` 够不到 namesrv，报错形如
 `RemotingConnectException: connect to null failed`。取法：
 
 ```bash
-docker inspect bw-rmq-namesrv --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+docker inspect <rmq-namesrv|bw-rmq-namesrv> --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
 ```
 
 （topic 名的字符集限制见上面「计费服务」一节：**只能字母数字下划线连字符**，带点号会让服务直接起不来。）
