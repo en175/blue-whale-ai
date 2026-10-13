@@ -57,7 +57,7 @@ import { type VocalSplitPayload, type AudioToolSubmission } from './audioToolSes
 import {
   type AudioTrimInput,
 } from '@lib/contracts/audio-trim';
-import { AUDIO_MIX_EDGE_ORIGIN, buildAudioMixPlaceholderNode, findAudioMixPosition, isAudioMixNodeId } from './audioMix';
+import { AUDIO_MIX_EDGE_ORIGIN, buildAudioMixPlaceholderNode, findAudioMixPosition } from './audioMix';
 import {
   AUDIO_SPEED_EDGE_ORIGIN,
   AUDIO_SPEED_NODE_PREFIX,
@@ -175,6 +175,7 @@ import { useCanvasTextNodeFactories } from './hooks/useCanvasTextNodeFactories';
 import { useCanvasToolJobSubmissions } from './hooks/useCanvasToolJobSubmissions';
 import { useCanvasImageToolHosts } from './hooks/useCanvasImageToolHosts';
 import { useCanvasSelectionBridge } from './hooks/useCanvasSelectionBridge';
+import { useCanvasNodeDeletion } from './hooks/useCanvasNodeDeletion';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -1999,24 +2000,25 @@ export default function CanvasPage() {
   toolHostsRef.current.subtitleErase = subtitleEraseHost;
   toolHostsRef.current.cutout = imageCutoutHost;
   const pendingDeleteJobNodesRef = useRef<Set<string>>(new Set());
-  const removeMediaNodeNow = (nodeId: string) => {
-    setMediaNodes((prev) => {
-      const target = prev.find((n) => n.id === nodeId);
-      const src = target?.data?.src;
-      if (typeof src === 'string' && src.startsWith('blob:')) URL.revokeObjectURL(src);
-      return prev.filter((n) => n.id !== nodeId);
-    });
-  };
-  const removeAudioMixCardNow = (nodeId: string) => {
-    const nextNodes = mediaNodesRef.current.filter((node) => node.id !== nodeId);
-    const nextEdges = edgesRef.current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
-    mediaNodesRef.current = nextNodes;
-    edgesRef.current = nextEdges;
-    setMediaNodes(nextNodes);
-    setEdges(nextEdges);
-    activeJobByNodeRef.current.delete(nodeId);
-    if (currentId) void flushCanvasSave(currentId).catch(() => {});
-  };
+  const { removeAudioMixCardNow, removeCanvasNodes, handleRemoveMediaNode } = useCanvasNodeDeletion({
+    currentId,
+    mediaNodesRef,
+    textNodesRef,
+    productNodesRef,
+    assetNodesRef,
+    edgesRef,
+    historyRef,
+    generationRuntimeRef,
+    activeJobByNodeRef,
+    pendingNodeIdsRef,
+    isGeneratingNode,
+    setTextNodes,
+    setMediaNodes,
+    setProductNodes,
+    setAssetNodes,
+    setEdges,
+    flushCanvasSave,
+  });
   const { applyJobTerminal, settleCancelledNode, jobResponseGuarded, rememberGeneratedAsset } =
     useCanvasGenerationTerminal({
       mediaNodesRef,
@@ -2078,67 +2080,6 @@ export default function CanvasPage() {
     handleSaveMediaToAssets: (nodeId) => handleSaveMediaToAssets(nodeId),
     dockCallbacks: dockToolCallbacks,
   });
-  const deleteGeneratingNode = (nodeId: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
-      generationRuntimeRef.current.remove(nodeId);
-      return;
-    }
-    removeMediaNodeNow(nodeId);
-  };
-  const removeCanvasNodes = (ids: string[]) => {
-    if (ids.length === 0) return;
-    const generating = ids.filter((id) => mediaNodesRef.current.some((n) => n.id === id) && isGeneratingNode(id));
-    generating.forEach((id) => void deleteGeneratingNode(id));
-    const idSet = new Set(ids.filter((id) => !generating.includes(id)));
-    if (idSet.size === 0) return;
-    const allNodes = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
-    const removedNodes = allNodes.filter((n) => idSet.has(n.id));
-    const removedEdges = edgesRef.current.filter((e) => idSet.has(e.source) || idSet.has(e.target));
-    const remainingEdges = releaseRemovedPromptSources(edgesRef.current, edgesRef.current.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)));
-    removedNodes.forEach((n) => {
-      const src = (n.data as Record<string, unknown> | undefined)?.src;
-      if (typeof src === 'string' && src.startsWith('blob:')) URL.revokeObjectURL(src);
-    });
-    const undoableNodes = removedNodes.filter((n) => {
-      const src = (n.data as Record<string, unknown> | undefined)?.src;
-      return !(typeof src === 'string' && src.startsWith('blob:'));
-    });
-    const undoableIds = new Set(undoableNodes.map((n) => n.id));
-    const survivingIds = new Set(allNodes.map((n) => n.id).filter((id) => !idSet.has(id)));
-    const undoableEdges = removedEdges.filter(
-      (e) =>
-        (undoableIds.has(e.source) || survivingIds.has(e.source)) &&
-        (undoableIds.has(e.target) || survivingIds.has(e.target)),
-    );
-    if (undoableNodes.length > 0) {
-      historyRef.current?.pushDelete(undoableNodes, undoableEdges, undefined, {
-        before: edgesRef.current.filter(e =>
-          (undoableIds.has(e.source) || survivingIds.has(e.source)) &&
-          (undoableIds.has(e.target) || survivingIds.has(e.target))),
-        after: remainingEdges,
-      });
-    }
-    idSet.forEach((id) => pendingNodeIdsRef.current.delete(id));
-    const filter = (prev: Node[]) => prev.filter((n) => !idSet.has(n.id));
-    setTextNodes(filter);
-    setMediaNodes(filter);
-    setProductNodes(filter);
-    setAssetNodes(filter);
-    if (removedEdges.length > 0) {
-      setEdges(remainingEdges);
-    }
-    if (Array.from(idSet).some(isAudioMixNodeId)) {
-      mediaNodesRef.current = filter(mediaNodesRef.current);
-      edgesRef.current = remainingEdges;
-      if (currentId) void flushCanvasSave(currentId).catch(() => {});
-    }
-  };
   const {
     handleCreateProduct,
     handleCreateAssetCard,
@@ -2194,9 +2135,6 @@ export default function CanvasPage() {
     removeCanvasNodes,
     showToast,
   });
-  const handleRemoveMediaNode = (nodeId: string) => {
-    removeCanvasNodes([nodeId]);
-  };
   const { handleRetryJob } = useCanvasRetryJob({
     currentId,
     mediaNodesRef,
