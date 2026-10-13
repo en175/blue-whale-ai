@@ -6,7 +6,6 @@ import { toast as globalToast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { newNodeId } from './nodeId';
-import { nextDraftPosition } from './draftSpawn';
 import { nodeBoxOf, readRecoveryErrorReason, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
 import { normalizeVideoMode } from '@/lib/video-modes';import { imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
@@ -168,6 +167,7 @@ import { useCanvasSelectionBridge } from './hooks/useCanvasSelectionBridge';
 import { useCanvasNodeDeletion } from './hooks/useCanvasNodeDeletion';
 import { useCanvasEdgeOps } from './hooks/useCanvasEdgeOps';
 import { useCanvasConnectPair } from './hooks/useCanvasConnectPair';
+import { useCanvasSpawn } from './hooks/useCanvasSpawn';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -568,28 +568,12 @@ export default function CanvasPage() {
     return () => observer.disconnect();
   }, []);
   useOverlayWheelPassthrough(canvasWrapperRef, { ignoreInsideReactFlow: true });
-  const spawnPosRef = useRef<(screenPt?: { x: number; y: number }) => { x: number; y: number }>(
-    () => ({ x: 300, y: 200 }),
-  );
-  const registerSpawnPosition = useCallback(
-    (fn: (screenPt?: { x: number; y: number }) => { x: number; y: number }) => {
-      spawnPosRef.current = fn;
-    },
-    [],
-  );
-  const spawnPosition = () => {
-    const c = spawnPosRef.current();
-    return {
-      x: Math.round(c.x + (Math.random() * 160 - 80)),
-      y: Math.round(c.y + (Math.random() * 160 - 80)),
-    };
-  };
-  const spawnNearScreen = (screenPt: { x: number; y: number }) => {
-    const center = spawnPosRef.current(screenPt);
-    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
-    return nextDraftPosition({ center, dockTop: center.y + 2000, nodes: nodes.map(nodeBoxOf) });
-  };
-  const DOCK_RESERVE_PX = 300;
+  const { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition } = useCanvasSpawn({
+    textNodesRef,
+    mediaNodesRef,
+    productNodesRef,
+    assetNodesRef,
+  });
   const followTargetId = showImageDialog && imageDraftId
     ? imageDraftId
     : showBottomDialog && videoDraftId
@@ -637,12 +621,6 @@ export default function CanvasPage() {
     ? assetNodes.find((n) => n.id === soloSelectedNodeId) ?? null
     : null;
   const assetToolbarNode = hoverAssetToolbarNode ?? soloAssetToolbarNode;
-  const spawnDraftPosition = () => {
-    const center = spawnPosRef.current();
-    const dockTop = spawnPosRef.current({ x: window.innerWidth / 2, y: window.innerHeight - DOCK_RESERVE_PX }).y;
-    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
-    return nextDraftPosition({ center, dockTop, nodes: nodes.map(nodeBoxOf) });
-  };
   const draftErrorsRef = useRef(new Map<string, string>());
   const handleDraftError = (id: string, error: string) => {
     if (error) draftErrorsRef.current.set(id, error);
