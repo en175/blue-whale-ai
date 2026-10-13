@@ -187,6 +187,7 @@ import { useCanvasAtMentionHandlers } from './hooks/useCanvasAtMentionHandlers';
 import { useCanvasConnectHandlers } from './hooks/useCanvasConnectHandlers';
 import { useCanvasNodeDragHandlers } from './hooks/useCanvasNodeDragHandlers';
 import { useCanvasDraftRefActions } from './hooks/useCanvasDraftRefActions';
+import { useCanvasTextNodeFactories } from './hooks/useCanvasTextNodeFactories';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -1318,69 +1319,24 @@ export default function CanvasPage() {
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch, rollbackPendingNodes, showToast]);
-  const handleAddTextNode = (position?: { x: number; y: number }, text?: string): string => {
-    const newNode: Node = {
-      id: newNodeId('text'),
-      type: 'textNode',
-      position: position ?? spawnPosition(),
-      data: {
-        text: text ?? '',
-        onDraftError: handleDraftError,
-        toolMode,
-        onDelete: (id: string) => removeCanvasNodes([id]),
-        onTextChange: (id: string, text: string) => {
-          setTextNodes((prev) =>
-            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n))
-          );
-        },
-        onMediaIndexChange: handleMediaIndexChange,
-        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-        onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
-        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-      },
-    };
-    pendingNodeIdsRef.current.add(newNode.id);
-    historyRef.current?.pushAddNodes([newNode.id]);
-    setTextNodes((prev) => [...prev, newNode]);
-    return newNode.id;
-  };
-  const handleDuplicateNode = (id: string) => {
-    const t = textNodesRef.current.find((n) => n.id === id);
-    if (t) {
-      const copy: Node = { ...t, id: newNodeId('text'), position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
-      delete copy.data.promptSource;
-      delete copy.data.promptMaterials;
-      delete copy.data.promptMentions;
-      delete copy.data.promptOriginalTitle;
-      pendingNodeIdsRef.current.add(copy.id);
-      historyRef.current?.pushAddNodes([copy.id]);
-      setTextNodes((prev) => [...prev, copy]);
-      const mentionedSources = [...new Set(((copy.data.mediaMentions ?? []) as MediaMention[]).map(mention => mention.nodeId))]
-        .filter(source => findCanvasNode(source));
-      if (mentionedSources.length > 0) syncTextIndexEdges(copy.id, { added: mentionedSources, removed: [] });
-      return;
-    }
-    const m = mediaNodesRef.current.find((n) => n.id === id);
-    if (m) {
-      const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
-      delete (copy.data as Record<string, unknown>).generationRecovery;
-      pendingNodeIdsRef.current.add(copy.id);
-      historyRef.current?.pushAddNodes([copy.id]);
-      setMediaNodes((prev) => [...prev, copy]);
-    }
-  };
-  const renameCard = (id: string, name: string) => {
-    if (textNodesRef.current.some((n) => n.id === id)) {
-      setTextNodes((prev) => prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, title: name, customName: true } } : n)));
-      return;
-    }
-    if (mediaNodesRef.current.some((n) => n.id === id)) {
-      setMediaNodes((prev) => prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, fileName: name, customName: true } } : n)));
-    }
-  };
+  const { handleAddTextNode, handleDuplicateNode, renameCard } = useCanvasTextNodeFactories({
+    toolMode,
+    textNodesRef,
+    mediaNodesRef,
+    pendingNodeIdsRef,
+    historyRef,
+    getActions: () => actionsRef.current,
+    spawnPosition,
+    findCanvasNode,
+    removeCanvasNodes: (ids) => removeCanvasNodes(ids),
+    handleDraftError,
+    handleSaveTextToAssets: (id) => handleSaveTextToAssets(id),
+    handleMediaIndexChange,
+    syncTextIndexEdges,
+    showToast,
+    setTextNodes,
+    setMediaNodes,
+  });
   const { addToChatNode: handleAddToChatNode, confirmAgentCandidate } = useCanvasChatQuote({
     currentId,
     textNodesRef,
