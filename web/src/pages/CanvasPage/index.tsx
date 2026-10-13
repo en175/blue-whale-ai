@@ -1,13 +1,12 @@
 import { promptBindingList, type PromptBinding } from '@lib/contracts/prompt-target';
 import { promptMentionSchema } from '@lib/contracts/prompt-preview';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
-import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { newNodeId } from './nodeId';
-import { nodeBoxOf, readRecoveryErrorReason, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
-import { computeFollowAnchor } from './followDialog';
-import { normalizeVideoMode } from '@/lib/video-modes';import { imageRefSourceError, isImageDraftNode } from './mediaRefs';
+import { nodeBoxOf, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
+import { normalizeVideoMode } from '@/lib/video-modes';import { imageRefSourceError } from './mediaRefs';
 import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from './textIndexSync';
 import { audioRefSourceError } from './audioMediaRefs';
 
@@ -24,48 +23,29 @@ import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
 import { type MediaDims } from './components/MediaNode/mediaContentSize';
 
-import { mediaCardToolbarVisible } from './components/MediaNode/toolbarVisibility';
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
 import { audioVideoMuxIdentityOf } from './audioVideoMux';
 import { type ToolSessionDeps } from './toolSessionCoordinator';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import type { VideoGenSeedParams } from './components/BottomDialog';
-import { type UploadedFile, type ImageTextAttachment } from './components/ImageDialog';
+import { type ImageTextAttachment } from './components/ImageDialog';
 
 import { type CanvasPickItem } from './components/AudioDialog';
-import type { MaterialAsset } from '@/api/material';
-import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
-import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
-import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
-import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
 import { createConnectValidators } from './canvasConnectValidation';
 import { useEdgesState, type Edge, type Node, type Viewport } from '@xyflow/react';
-import { useAuthStore } from '@/stores/auth';
-import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
-import {
-  fetchProjects,
-  createProject,
-  touchProjectLastOpened,
-} from '@/api/projects';
-import { fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProject, type AssetType, type UploadCompleteData } from '@/api/assets';
-import { rememberAssetUrl } from './components/AgentPanel/assetUrlCache';
-import { referencePromptPlan, applyPromptPreview, legacyCardHistoryOptions, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
-import { isApiError } from '@/api/http';
-import type { SessionContentBlock } from '@/api/agentSessions';
-import { probeMediaMeta } from '@/utils/upload';
+import { linkAssetToProject } from '@/api/assets';
+import { referencePromptPlan, applyPromptPreview, legacyCardHistoryOptions, serializeEdges, serializeNodes } from '@/api/canvas';
 import {
   availableGenKinds,
   isConnectableSource,
 } from './connectAbility';
-import { checkFileBeforeUpload } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
-import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
 import { mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
 import { createImageToolsTask } from './generationRuntime/imageTools';
-import { putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
+import { type RecoveryChange } from '@/api/canvasRecovery';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHydration } from './hooks/useCanvasHydration';
 import { syncCanvasNodeActions } from './hooks/patchCanvasNodeActions';
@@ -77,7 +57,13 @@ import { useCanvasGenerationTerminal } from './hooks/useCanvasGenerationTerminal
 import { useCanvasGenerationSubmission } from './hooks/useCanvasGenerationSubmission';
 import { useCanvasAssetActions } from './hooks/useCanvasAssetActions';
 import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
-import { useCanvasSave, EMPTY_CLEAR_CONFLICT_TOAST, EMPTY_OVERWRITE_REJECTED_TOAST } from './hooks/useCanvasSave';
+import { useCanvasSave } from './hooks/useCanvasSave';
+import { useCanvasSessionBootstrap } from './hooks/useCanvasSessionBootstrap';
+import { useCanvasFollowToolbar } from './hooks/useCanvasFollowToolbar';
+import { useCanvasHomeAgentInject } from './hooks/useCanvasHomeAgentInject';
+import { useCanvasOrphanEdges } from './hooks/useCanvasOrphanEdges';
+import { useCanvasUndoHotkeys } from './hooks/useCanvasUndoHotkeys';
+import { useCanvasChromeActions } from './hooks/useCanvasChromeActions';
 import { useCanvasRefStripOrder } from './hooks/useCanvasRefStripOrder';
 import { useCanvasCompliance } from './hooks/useCanvasCompliance';
 import { useCanvasProjects } from './hooks/useCanvasProjects';
@@ -103,6 +89,10 @@ import { useCanvasToolJobSubmissions } from './hooks/useCanvasToolJobSubmissions
 import { useCanvasImageToolHosts } from './hooks/useCanvasImageToolHosts';
 import { useCanvasCompoundToolHosts } from './hooks/useCanvasCompoundToolHosts';
 import { useGenerationRuntimeBinding } from './hooks/useGenerationRuntimeBinding';
+import { useGenerationDockBinding } from './hooks/useGenerationDockBinding';
+import { useGenerationDockChrome } from './hooks/useGenerationDockChrome';
+import { useCanvasAgentSurface } from './hooks/useCanvasAgentSurface';
+import { useCanvasGenerationUploads } from './hooks/useCanvasGenerationUploads';
 import { useCanvasSelectionBridge } from './hooks/useCanvasSelectionBridge';
 import { useCanvasNodeDeletion } from './hooks/useCanvasNodeDeletion';
 import { useCanvasEdgeOps } from './hooks/useCanvasEdgeOps';
@@ -117,19 +107,10 @@ import {
 } from './canvasGroups';
 import {
   canvasLocationSearch,
-  findLastOpenedProjectId,
-  findLatestCreatedProjectId,
-  pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
-import { createGenerationDockCoordinator } from './generationDockCoordinator';
 import { useGenerationDockHosts } from './generationDockHosts';
-import { createImageGenerationDock, type ImageGenerationDockHost } from './imageGenerationDock';
-import { createVideoGenerationDock, type VideoGenerationDockHost } from './videoGenerationDock';
-import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from './audioMusicGenerationDock';
-import { createTextGenerationDock, type TextGenerationDockHost } from './textGenerationDock';
-import { createToolGenerationDock } from './toolGenerationDock';
 import CanvasPageShell from './CanvasPageShell';
 type ToolMode = 'drag' | 'select';
 export default function CanvasPage() {
@@ -139,22 +120,13 @@ export default function CanvasPage() {
   const location = useLocation();
   const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [currentId, setCurrentId] = useState(() => readCanvasIdFromSearch(searchParams));
-  const [showAgent, setShowAgent] = useState(false);
-  const [agentOpened, setAgentOpened] = useState(false);
-  useEffect(() => { if (showAgent) setAgentOpened(true); }, [showAgent]);
-  const [agentCandidate, setAgentCandidate] = useState<SessionContentBlock[] | null>(null);
-  const cancelAgentCandidate = useCallback(() => setAgentCandidate(null), []);
-  useEffect(() => {
-    if (!showAgent) setAgentCandidate(null);
-  }, [showAgent]);
-  useEffect(() => {
-    if (!agentCandidate) return;
-    const cancel = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setAgentCandidate(null);
-    };
-    window.addEventListener('keydown', cancel);
-    return () => window.removeEventListener('keydown', cancel);
-  }, [agentCandidate]);
+  const {
+    showAgent, setShowAgent,
+    agentOpened, setAgentOpened,
+    agentCandidate, setAgentCandidate,
+    cancelAgentCandidate,
+    agentContext, setAgentContext,
+  } = useCanvasAgentSurface();
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
@@ -362,99 +334,45 @@ export default function CanvasPage() {
   const [showAssetsModal, setShowAssetsModal] = useState(false);
   const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
   const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<string | undefined>(undefined);
-  const [agentContext, setAgentContext] = useState<{
-    text: string;
-    label?: string;
-    skillId?: string;
-    skillName?: string;
-    ts: number;
-    mediaBlocks?: SessionContentBlock[];
-  } | null>(null);
-  useEffect(() => {
-    const state = location.state as { agentText?: string; skillId?: string; skillName?: string } | null;
-    if (!state?.agentText && !state?.skillId) return;
-    setAgentContext({
-      text: state.agentText ?? '',
-      skillId: state.skillId ?? '',
-      skillName: state.skillName ?? '',
-      ts: Date.now(),
-      mediaBlocks: undefined,
-    });
-    setShowAgent(true);
-    navigate(location.pathname + location.search, { replace: true, state: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state, location.pathname, location.search, navigate]);
-  const imageDockHostRef = useRef<ImageGenerationDockHost | null>(null);
-  const [imageDock] = useState(() => createImageGenerationDock(() => imageDockHostRef.current!));
-  const videoDockHostRef = useRef<VideoGenerationDockHost | null>(null);
-  const [videoDock] = useState(() => createVideoGenerationDock(() => videoDockHostRef.current!));
-  const audioDockHostRef = useRef<AudioGenerationDockHost | null>(null);
-  const musicDockHostRef = useRef<MusicGenerationDockHost | null>(null);
-  const [audioMusicDock] = useState(() => createAudioMusicGenerationDocks(() => audioDockHostRef.current!, () => musicDockHostRef.current!));
-  const textDockHostRef = useRef<TextGenerationDockHost | null>(null);
-  const [textDock] = useState(() => createTextGenerationDock(() => textDockHostRef.current!));
-  const [toolDocks] = useState(() => ({
-    imageEnhance: createToolGenerationDock(toolSessions.entries.imageEnhance.handle, {
-      createDraft: id => toolViewRef.current!.createEnhanceDraft(id),
-      getDeps: () => toolDepsRef.current!,
-      subscribe: toolRuntime.subscribe,
-      getVersion: toolRuntime.getVersion,
-      render: (): ReactNode => toolSessions.entries.imageEnhance.render({
-        close: () => generationDock.close('imageEnhance'),
-        submit: (value): boolean => generationDock.submit('imageEnhance', value),
-      }),
-    }),
-    videoEnhance: createToolGenerationDock(toolSessions.entries.videoEnhance.handle, {
-      createDraft: id => toolViewRef.current!.createVideoEnhanceDraft(id),
-      getDeps: () => toolDepsRef.current!,
-      subscribe: toolRuntime.subscribe,
-      getVersion: toolRuntime.getVersion,
-      updateDraft: input => toolViewRef.current!.changeVideoParams(input.nodeId, input.value),
-      render: (): ReactNode => toolSessions.entries.videoEnhance.render({
-        close: () => generationDock.close('videoEnhance'),
-        submit: (value): boolean => generationDock.submit('videoEnhance', value),
-        updateDraft: (nodeId, value) => generationDock.updateDraft('videoEnhance', { nodeId, value }),
-      }),
-    }),
-    frameInterpolation: createToolGenerationDock(toolSessions.entries.frameInterpolation.handle, {
-      createDraft: id => toolViewRef.current!.createFrameInterpolationDraft(id),
-      getDeps: () => toolDepsRef.current!,
-      subscribe: toolRuntime.subscribe,
-      getVersion: toolRuntime.getVersion,
-      updateDraft: input => toolViewRef.current!.changeFrameParams(input.nodeId, input.value),
-      render: (): ReactNode => toolSessions.entries.frameInterpolation.render({
-        close: () => generationDock.close('frameInterpolation'),
-        submit: (value): boolean => generationDock.submit('frameInterpolation', value),
-        updateDraft: (nodeId, value) => generationDock.updateDraft('frameInterpolation', { nodeId, value }),
-      }),
-    }),
-  }));
-  const [generationDock] = useState(() => createGenerationDockCoordinator({
-    image: imageDock,
-    video: videoDock,
-    audio: audioMusicDock.audio,
-    text: textDock,
-    music: audioMusicDock.music,
-    ...toolDocks,
-  }));
-  useSyncExternalStore(generationDock.subscribe, generationDock.getVersion);
-  const { visible: showImageDialog, boundId: imageDraftId, seed: imageSeed } = generationDock.panel('image');
-  const { visible: showBottomDialog, boundId: videoDraftId, seed: videoSeed, freeRefs: videoFreeRefs } = generationDock.panel('video');
-  const dockToolCallbacks = {
-    ...toolSessions.callbacks,
-    onEnhanceImage: (id: string) => generationDock.open('imageEnhance', { sourceId: id }),
-    onVideoEnhance: (id: string) => generationDock.open('videoEnhance', { sourceId: id }),
-    onFrameInterpolation: (id: string) => generationDock.open('frameInterpolation', { sourceId: id }),
-  };
-  const openCoordinatedToolDraft = (node: Node, open: () => void) => {
-    if (node.data.imageEnhance) generationDock.open('imageEnhance', { nodeId: node.id });
-    else if (node.data.videoEnhance) generationDock.open('videoEnhance', { nodeId: node.id });
-    else if (node.data.frameInterpolation) generationDock.open('frameInterpolation', { nodeId: node.id });
-    else open();
-  };
+  const {
+    generationDock,
+    imageDockHostRef,
+    videoDockHostRef,
+    audioDockHostRef,
+    musicDockHostRef,
+    textDockHostRef,
+    showImageDialog,
+    imageDraftId,
+    imageSeed,
+    showBottomDialog,
+    videoDraftId,
+    videoSeed,
+    videoFreeRefs,
+    dockToolCallbacks,
+    openCoordinatedToolDraft,
+    showAudioDialog,
+    audioDraftId,
+    audioSeed,
+    showTextGenDialog,
+    textGenDraftId,
+    closeVideoDialog,
+    closeAudioDialog,
+    closeTextGenDialog,
+    closeMusicDialog,
+    dismissGenPanels,
+    dismissAllGenPanels,
+    openImageDraftDialog,
+    openVideoDraftDialog,
+    openTextGenDialog,
+    openAudioDraftDialog,
+    openMediaDraftDialog,
+  } = useGenerationDockBinding({
+    toolSessions,
+    toolViewRef,
+    toolDepsRef,
+    mediaNodesRef,
+  });
   const editingTargetRef = useRef<string | null>(null);
-  const { visible: showAudioDialog, boundId: audioDraftId, seed: audioSeed } = generationDock.panel('audio');
-  const { visible: showTextGenDialog, boundId: textGenDraftId } = generationDock.panel('text');
   const [selectRequest, setSelectRequest] = useState<{ id: string; ts: number } | null>(null);
   const [selectManyRequest, setSelectManyRequest] = useState<{ ids: string[]; ts: number } | null>(null);
   const pendingGenRef = useRef<GenHandoff | null>(null);
@@ -512,29 +430,31 @@ export default function CanvasPage() {
   const { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition } = useCanvasSpawn({
     graph,
   });
-  const followTargetId = showImageDialog && imageDraftId
-    ? imageDraftId
-    : showBottomDialog && videoDraftId
-      ? videoDraftId
-      : showAudioDialog && audioDraftId
-        ? audioDraftId
-        : showTextGenDialog && textGenDraftId
-          ? textGenDraftId
-          : null;
-  const followNode = followTargetId
-    ? mediaNodes.find((n) => n.id === followTargetId) ?? textNodes.find((n) => n.id === followTargetId) ?? null
-    : null;
-  const followAnchor = followNode && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: followNode.position.x,
-        nodeY: followNode.position.y,
-        nodeWidth: nodeBoxOf(followNode).width,
-        nodeHeight: nodeBoxOf(followNode).height,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-      })
-    : null;
+  const {
+    followAnchor,
+    enhancePanelToolbarNode,
+    soloMediaToolbarNode,
+    showSoloMediaToolbar,
+    hoverAssetToolbarNode,
+    assetToolbarNode,
+  } = useCanvasFollowToolbar({
+    showImageDialog,
+    imageDraftId,
+    showBottomDialog,
+    videoDraftId,
+    showAudioDialog,
+    audioDraftId,
+    showTextGenDialog,
+    textGenDraftId,
+    mediaNodes,
+    textNodes,
+    assetNodes,
+    wrapperSize,
+    liveViewport,
+    soloSelectedNodeId,
+    hoveredAssetNodeId,
+    toolSessions,
+  });
   toolViewRef.current = {
     nodes: mediaNodes, viewport: liveViewport, size: wrapperSize, nodeBox: nodeBoxOf,
     projectId: currentId, submittingNodeId,
@@ -545,20 +465,6 @@ export default function CanvasPage() {
     changeVideoParams: (id, resolution) => handleVideoEnhanceParamsChange(id, resolution),
     changeFrameParams: (id, fps) => handleFrameInterpolationParamsChange(id, fps),
   };
-  const selectedMediaToolbarNode = soloSelectedNodeId
-    ? mediaNodes.find((n) => n.id === soloSelectedNodeId) ?? null
-    : null;
-  const enhancePanelToolbarNode = toolSessions.toolbarNode();
-  const soloMediaToolbarNode = enhancePanelToolbarNode ?? selectedMediaToolbarNode;
-  const showSoloMediaToolbar = soloMediaToolbarNode != null
-    && mediaCardToolbarVisible(soloMediaToolbarNode.data ?? {});
-  const hoverAssetToolbarNode = hoveredAssetNodeId
-    ? assetNodes.find((n) => n.id === hoveredAssetNodeId) ?? null
-    : null;
-  const soloAssetToolbarNode = soloSelectedNodeId
-    ? assetNodes.find((n) => n.id === soloSelectedNodeId) ?? null
-    : null;
-  const assetToolbarNode = hoverAssetToolbarNode ?? soloAssetToolbarNode;
   const draftErrorsRef = useRef(new Map<string, string>());
   const handleDraftError = (id: string, error: string) => {
     if (error) draftErrorsRef.current.set(id, error);
@@ -614,58 +520,13 @@ export default function CanvasPage() {
     graph.setAll((prev) => prev.filter((n) => !ids.has(n.id)));
     ids.forEach((id) => pendingNodeIdsRef.current.delete(id));
   }, [graph]);
-  const updateUser = useAuthStore((s) => s.updateUser);
-  const setUsage = useAuthStore((s) => s.setUsage);
   const productSeq = useRef(0);
-  useEffect(() => {
-    fetchMe()
-      .then((me) => updateUser(toSessionUser(me)))
-      .catch(() => undefined);
-  }, [updateUser]);
-  useEffect(() => {
-    let alive = true;
-    fetchCredits()
-      .then((d) => {
-        if (alive) setUsage(d);
-      })
-      .catch(() => {
-        if (alive) setUsage(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [setUsage]);
-  useEffect(() => {
-    let alive = true;
-    fetchProjects()
-      .then(async (list) => {
-        if (!alive) return;
-        const lastOpenedId = findLastOpenedProjectId(list);
-        const latestCreatedId = findLatestCreatedProjectId(list);
-        let mapped = list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) }));
-        if (mapped.length === 0) {
-          try {
-            const created = await createProject('未命名项目');
-            if (!alive) return;
-            mapped = [{ id: String(created.id), name: created.name, pinned: false }];
-          } catch {
-          }
-        }
-        setProjects(mapped);
-        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id), lastOpenedId, latestCreatedId));
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, []);
-  const lastTouchedProjectRef = useRef('');
-  useEffect(() => {
-    if (!currentId || lastTouchedProjectRef.current === currentId) return;
-    if (!projects.some((p) => p.id === currentId)) return;
-    lastTouchedProjectRef.current = currentId;
-    touchProjectLastOpened(currentId).catch(() => undefined);
-  }, [currentId, projects]);
+  useCanvasSessionBootstrap({
+    currentId,
+    projects,
+    setProjects,
+    setCurrentId,
+  });
   useEffect(() => {
     const fromQuery = readCanvasIdFromSearch(new URLSearchParams(location.search));
     if (fromQuery && audioMixInFlightRef.current && activeProjectRef.current && fromQuery !== activeProjectRef.current) {
@@ -706,7 +567,7 @@ export default function CanvasPage() {
     setAgentCandidate(null);
     setFocusViewport(undefined);
     historyRef.current?.clear();
-  }, [currentId, setAgentAssetPicks]);
+  }, [currentId, setAgentAssetPicks, setShowAgent, setAgentOpened, setAgentContext, setAgentCandidate]);
   const { doc, assets: snapshotAssets, loadFailed: canvasLoadFailed, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
   const snapshotAssetsRef = useRef(snapshotAssets);
   snapshotAssetsRef.current = snapshotAssets;
@@ -734,175 +595,13 @@ export default function CanvasPage() {
   const emptyClearConflictRef = useRef(false);
   const emptyOverwriteRejectedRef = useRef(false);
   const recoverySaveConflictRef = useRef(false);
-  const canvasNodeIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const ids = new Set(
-      [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes].map((n) => n.id),
-    );
-    const prevIds = canvasNodeIdsRef.current;
-    canvasNodeIdsRef.current = ids;
-    if (prevIds.size === 0) return;
-    const removed = new Set<string>();
-    prevIds.forEach((id) => {
-      if (!ids.has(id)) removed.add(id);
-    });
-    if (removed.size === 0) return;
-    setEdges((prev) => {
-      const next = prev.filter((e) => !removed.has(e.source) && !removed.has(e.target));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [textNodes, mediaNodes, productNodes, assetNodes, setEdges]);
-  const homeHandoffDoneRef = useRef(false);
-  useEffect(() => {
-    if (!doc) return;
-    if (homeHandoffDoneRef.current) return;
-    const attachments = takeAgentHandoff();
-    if (!attachments || attachments.length === 0) return;
-    homeHandoffDoneRef.current = true;
-    let cancelled = false;
-    const inject = async () => {
-      const blocks: SessionContentBlock[] = [];
-      for (const item of attachments) {
-        if (item.assetId != null) {
-          rememberAssetUrl(String(item.assetId), item.preview);
-          blocks.push({
-            type: 'asset_ref',
-            url: item.preview,
-            name: item.name,
-            media_type: item.kind,
-            display_label: item.name,
-            asset_id: String(item.assetId),
-          });
-        } else if (item.file) {
-          try {
-            const result = await placeFileOnCanvas(item.file);
-            if (cancelled) return;
-            rememberAssetUrl(result.asset_id, result.url);
-            blocks.push({
-              type: 'asset_ref',
-              url: result.url,
-              name: item.name,
-              media_type: item.kind,
-              display_label: item.name,
-              asset_id: result.asset_id,
-            });
-          } catch {
-          }
-          URL.revokeObjectURL(item.preview);
-        } else {
-          console.warn('首页附件缺少 file/assetId，已跳过:', item.name);
-        }
-      }
-      if (!cancelled && blocks.length > 0) {
-        setAgentAssetPicks({ ts: Date.now(), blocks });
-      }
-    };
-    void inject();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc]);
-  useEffect(() => {
-    if (!currentId || !doc || applyingRef.current) return;
-    const timer = window.setTimeout(() => {
-      if (applyingRef.current || savePromiseRef.current) return;
-      if (hydratedProjectRef.current === null) return;
-      if (textNodesRef.current.some(node => draftErrorsRef.current.has(node.id))) return;
-      const contentNodes = graph.allNodes();
-      const nodes = [...contentNodes, ...groups.map((g) => groupToNode(g))];
-      const sig = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edges);
-      if (sig === lastSavedRef.current) return;
-      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return;
-      if (import.meta.env.DEV) {
-        console.info(`[canvas] 自动保存：${nodes.length} 个节点 / ${edges.length} 条连线（version=${versionRef.current}）`);
-      }
-      lastSavedRef.current = sig;
-      setSaveStatus('saving');
-      const confirmEmpty = shouldConfirmEmptyClear(nodes);
-      const pendingSnapshot = new Set(pendingNodeIdsRef.current);
-      const plan = planRecoverySave(
-        currentId, sig, { viewport, nodes, edges, confirmEmpty },
-      );
-      const { recoveryFields, payload: recoveryPayload } = plan;
-      trackCanvasSave(
-        (recoveryFields
-          ? putCanvasDocWithRecovery(
-            currentId,
-            recoveryPayload,
-            plan.ifMatch,
-            { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
-          )
-          : saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
-        ).then((saved) => {
-          if (recoveryFields) {
-            generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
-            settleRetainedRecoverySave(currentId, recoveryFields.commandId);
-          }
-          return saved;
-        })
-          .then((saved) => {
-            versionRef.current = saved.version;
-            settleSavedCanvas(plan, sig, () => pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id)));
-            setSaveBlocked(false);
-            setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
-            setSaveEpoch(value => value + 1);
-            setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-          })
-          .catch((e) => {
-            lastSavedRef.current = '';
-            if (recoveryFields) settleRetainedRecoverySave(currentId, recoveryFields.commandId, e);
-            const hadPendingAdds = pendingSnapshot.size > 0 && plan.sentSignature === sig;
-            const recoveryReason = readRecoveryErrorReason(e);
-            if (recoveryFields && recoveryReason === 'recovery_item_conflict') {
-              void generationRuntimeRef.current?.reconcileConflictItems(currentId);
-              setSaveBlocked(true);
-              setSaveStatus('error');
-              showToast('warn', '任务状态已被其他操作更新，已同步最新状态，请重试保存');
-              return;
-            }
-            if (recoveryFields && recoveryReason != null) {
-              recoverySaveConflictRef.current = true;
-              setSaveBlocked(true);
-              setSaveStatus('error');
-              showToast('warn', '画布保存冲突，当前内容已保留，请刷新后复核');
-              return;
-            }
-            if (!recoveryFields && readRecoveryErrorReason(e) === 'recovery_protocol_required') {
-              void generationRuntimeRef.current?.recover(currentId);
-              setSaveBlocked(true);
-              setSaveStatus('error');
-              showToast('warn', '画布包含任务恢复保护内容，正在同步状态，请稍后重试保存');
-              return;
-            }
-            const aligned = adoptCanvasConflictVersion(e);
-            if (aligned) {
-              if (confirmEmpty) {
-                emptyClearConflictRef.current = true;
-                showToast('warn', EMPTY_CLEAR_CONFLICT_TOAST);
-              }
-              setSaveBlocked(true);
-              setSaveStatus('error');
-              return;
-            }
-            setSaveBlocked(true);
-            if (isApiError(e) && e.status === 412) {
-              setSaveStatus('error');
-              showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
-            } else if (isApiError(e) && e.status === 422) {
-              emptyOverwriteRejectedRef.current = true;
-              setSaveStatus('error');
-              showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
-            } else {
-              if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
-              setSaveStatus('error');
-              showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
-              console.warn('画布自动保存失败:', e);
-            }
-          }),
-      );
-    }, 800);
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch, rollbackPendingNodes, showToast]);
+  useCanvasOrphanEdges({
+    textNodes,
+    mediaNodes,
+    productNodes,
+    assetNodes,
+    setEdges,
+  });
   const { handleAddTextNode, handleDuplicateNode, renameCard } = useCanvasTextNodeFactories({
     toolMode,
     textNodesRef,
@@ -1042,12 +741,6 @@ export default function CanvasPage() {
     setProductPickResult,
     setAssetPickResult,
   });
-  const closeVideoDialog = () => generationDock.close('video');
-  const closeAudioDialog = () => generationDock.close('audio');
-  const closeTextGenDialog = () => generationDock.close('text');
-  const closeMusicDialog = () => generationDock.close('music');
-  const dismissGenPanels = () => generationDock.dismissAll('ordinary');
-  const dismissAllGenPanels = () => generationDock.dismissAll();
   const buildToolSessionDeps = (): ToolSessionDeps => ({
     dismissGenPanels,
     selectNode: (nodeId) => setSelectRequest({ id: nodeId, ts: Date.now() }),
@@ -1087,50 +780,6 @@ export default function CanvasPage() {
     selection: (input) => generationDock.selection(input),
     submittingNodeId,
   });
-  const anyGenPanelOpen = generationDock.view.activePanel !== null;
-  useEffect(() => {
-    if (!anyGenPanelOpen) return;
-    const CLICK_DRAG_SLOP_PX = 4;
-    let downAt: { x: number; y: number } | null = null;
-    const onMouseDown = (event: MouseEvent) => {
-      downAt = { x: event.clientX, y: event.clientY };
-    };
-    const onClick = (event: MouseEvent) => {
-      if (event.button !== 0) return;
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (target.closest('[data-gen-panel-territory]')) return;
-      if (target.closest('.react-flow')) return;
-      if (downAt && Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > CLICK_DRAG_SLOP_PX) return;
-      dismissAllGenPanels();
-    };
-    document.addEventListener('mousedown', onMouseDown, true);
-    document.addEventListener('click', onClick, true);
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown, true);
-      document.removeEventListener('click', onClick, true);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen]);
-  useEffect(() => {
-    if (!anyGenPanelOpen && !toolRuntime.hasEscExitSession()) return;
-    const onKeydown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
-      if (isEditableKeyboardTarget(event.target)) return;
-      if (toolRuntime.escDefersToToolSessionHandler()) return;
-      if (imagePickSessionActive || videoPickSessionActive || audioPickSessionActive) return;
-      if (pickMode || pickTarget) {
-        resetPickState();
-        return;
-      }
-      if (toolRuntime.onEscape()) return;
-      dismissAllGenPanels();
-    };
-    window.addEventListener('keydown', onKeydown);
-    return () => window.removeEventListener('keydown', onKeydown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, editSessionActive, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
   const { handleNodeDragStop } = useCanvasNodeDragHandlers({
     graph,
     groupsRef,
@@ -1150,51 +799,6 @@ export default function CanvasPage() {
     });
     if (stale) showToast('warn', '部分参考素材已失效，请恢复素材或移除引用后发送');
   };
-  const openMediaDraftDialog = (nodeId: string, mediaType: unknown, intent?: 'selection') => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const toolDraft = node && toolSessions.draft(node);
-    if (toolDraft) { openCoordinatedToolDraft(node!, toolDraft.open); return; }
-    if (mediaType === 'video') return generationDock.open('video', { nodeId, intent });
-    if (mediaType === 'audio') return generationDock.open('audio', { nodeId, intent });
-    return generationDock.open('image', { nodeId, intent });
-  };
-  const openImageDraftDialog = (nodeId: string) => generationDock.open('image', { nodeId });
-  useEffect(() => { generationDock.reconcile(); }, [generationDock, imageDraftId, imageSeed, mediaNodes]);
-  useEffect(() => {
-    toolRuntime.reconcileSources(new Set(mediaNodes.map((node) => node.id)));
-  }, [toolRuntime, mediaNodes]);
-  useEffect(() => {
-    if (imagePickSession !== undefined && !showImageDialog) endImagePickSession();
-    if (videoPickSession !== undefined && !showBottomDialog) endVideoPickSession();
-    if (audioPickSession !== undefined && !showAudioDialog) endAudioPickSession();
-    if (
-      imagePickSession === undefined
-      && videoPickSession === undefined
-      && audioPickSession === undefined
-    ) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (isEditableKeyboardTarget(e.target)) return;
-      e.preventDefault();
-      if (imagePickSession !== undefined) endImagePickSession();
-      if (videoPickSession !== undefined) endVideoPickSession();
-      if (audioPickSession !== undefined) endAudioPickSession();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [
-    showImageDialog,
-    showBottomDialog,
-    showAudioDialog,
-    imagePickSession,
-    videoPickSession,
-    audioPickSession,
-    endImagePickSession,
-    endVideoPickSession,
-    endAudioPickSession,
-  ]);
-  useEffect(() => { generationDock.reconcile(); }, [generationDock, textGenDraftId, textNodes]);
-  const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => generationDock.open('video', { nodeId, preset });
   const {
     createVideoDraftCard,
     createAudioDraftCard,
@@ -1222,9 +826,6 @@ export default function CanvasPage() {
     setAssetNodes,
     setSelectRequest,
   });
-  const openTextGenDialog = (nodeId: string, intent?: 'nodeClick') => generationDock.open('text', { nodeId, intent });
-  useEffect(() => { generationDock.reconcile(); }, [generationDock, videoDraftId, videoSeed, mediaNodes]);
-  const openAudioDraftDialog = (nodeId: string) => generationDock.open('audio', { nodeId });
   const { applyConnectType, handleConnectEnd, handleConnectGroupDrop, isValidCanvasConnection } = useCanvasConnectHandlers({
     connectMenu,
     connectingSourceRef,
@@ -1248,7 +849,36 @@ export default function CanvasPage() {
     openTextGenDialog,
     toolSessions: { wireStart: (id) => toolSessions.wireStart(id) },
   });
-  useEffect(() => { generationDock.reconcile(); }, [generationDock, audioDraftId, audioSeed, mediaNodes]);
+  useGenerationDockChrome({
+    generationDock,
+    toolRuntime,
+    mediaNodes,
+    textNodes,
+    showImageDialog,
+    showBottomDialog,
+    showAudioDialog,
+    imageDraftId,
+    imageSeed,
+    videoDraftId,
+    videoSeed,
+    audioDraftId,
+    audioSeed,
+    textGenDraftId,
+    imagePickSession,
+    videoPickSession,
+    audioPickSession,
+    imagePickSessionActive,
+    videoPickSessionActive,
+    audioPickSessionActive,
+    pickMode,
+    pickTarget,
+    editSessionActive,
+    resetPickState,
+    endImagePickSession,
+    endVideoPickSession,
+    endAudioPickSession,
+    dismissAllGenPanels,
+  });
   useEffect(() => {
     graph.setAll((prev) =>
       prev.map((n) => ({ ...n, data: { ...n.data, toolMode } }))
@@ -1292,32 +922,11 @@ export default function CanvasPage() {
     onNodesRemoved: (ids) => ids.forEach((id) => pendingNodeIdsRef.current.delete(id)),
   });
   historyRef.current = canvasHistory;
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (applyingRef.current) return;
-      const action = canvasUndoKeyAction({
-        key: e.key,
-        metaKey: e.metaKey,
-        ctrlKey: e.ctrlKey,
-        shiftKey: e.shiftKey,
-        target: e.target,
-        mentionMenuOpen: isMentionMenuOpen(),
-      });
-      if (action === 'ignore') return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (eraseHistoryRef.current.active) {
-        if (action === 'redo') eraseHistoryRef.current.redo();
-        else eraseHistoryRef.current.undo();
-        return;
-      }
-      if (action === 'redo') canvasHistory.redo();
-      else canvasHistory.undo();
-    };
-    document.addEventListener('keydown', handler, true);
-    return () => document.removeEventListener('keydown', handler, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasHistory.undo, canvasHistory.redo]);
+  useCanvasUndoHotkeys({
+    applyingRef,
+    eraseHistoryRef,
+    canvasHistory,
+  });
   const locallyRemovedGenerationNodesRef = useRef<Set<string>>(new Set());
   const settledExtractNodesRef = useRef<Set<string>>(new Set());
   const activeJobByNodeRef = useRef<Map<string, string>>(new Map());
@@ -1328,12 +937,6 @@ export default function CanvasPage() {
     handleRetryCanvasSave,
     ensureSavedBeforeProjectSwitch,
     blockedByPendingCanvasReview,
-    shouldConfirmEmptyClear,
-    planRecoverySave,
-    trackCanvasSave,
-    settleSavedCanvas,
-    adoptCanvasConflictVersion,
-    settleRetainedRecoverySave,
   } = useCanvasSave({
     activeProjectRef,
     hydratedProjectRef,
@@ -1367,6 +970,18 @@ export default function CanvasPage() {
     applyingRef,
     blockInvalidDraft,
     showToast,
+    graph,
+    groups,
+    viewport,
+    edges,
+    applying,
+    saveEpoch,
+    rollbackPendingNodes,
+    textNodes,
+    mediaNodes,
+    productNodes,
+    assetNodes,
+    refetch,
   });
   const {
     handleSelect,
@@ -1505,6 +1120,11 @@ export default function CanvasPage() {
     mediaNodesRef,
     handleAddTextNode,
     showToast,
+  });
+  useCanvasHomeAgentInject({
+    doc,
+    placeFileOnCanvas,
+    setAgentAssetPicks,
   });
   const { handleCopySelectedNodes, handlePasteClipboard } = useCanvasClipboard({
     currentId,
@@ -1954,28 +1574,17 @@ export default function CanvasPage() {
       showToast('error', error instanceof Error ? error.message : '方案引用失败，请重试');
     } finally { applyingRef.current = false; setApplying(false); }
   };
-  const handleToolMenuSelect = (menu: string, item: string) => {
-    if (menu === 'assets' && item === 'shared') {
-      setAssetsModalDefaultTab(undefined);
-      setAssetsModalDefaultFilter('all-assets');
-      setShowAssetsModal(true);
-      return;
-    }
-    if (menu === 'assets') {
-      handleCreateAssetCard(item as AssetCardKind);
-      return;
-    }
-    if (menu === 'goods' && item === 'create') {
-      handleCreateProduct();
-      return;
-    }
-    if (menu === 'goods' && item === 'import') {
-      setAssetsModalDefaultTab('goods');
-      setAssetsModalDefaultFilter(undefined);
-      setShowAssetsModal(true);
-      return;
-    }
-  };
+  const { handleToolMenuSelect, handleCharacterLibrarySelect } = useCanvasChromeActions({
+    setAssetsModalDefaultTab,
+    setAssetsModalDefaultFilter,
+    setShowAssetsModal,
+    handleCreateAssetCard,
+    handleCreateProduct,
+    characterLibraryTarget,
+    pickAssetId,
+    setImagePickResult,
+    setAssetPickResult,
+  });
   const canvasMedia: CanvasPickItem[] = useMemo(() => canvasMediaOf(mediaNodes), [mediaNodes]);
   const atMentionItems: AtMentionItem[] = useMemo(() => atMentionItemsOf(mediaNodes, textNodes), [mediaNodes, textNodes]);
   const { handleImageAtMention, handleVideoAtMention, handleAudioAtMention, handleMusicAtMention } = useCanvasAtMentionHandlers({
@@ -2000,68 +1609,15 @@ export default function CanvasPage() {
     setAudioPickResult,
     setMusicPickResult,
   });
-  const uploadFileToAsset = async (file: File, type: 'image' | 'video' | 'audio'): Promise<UploadCompleteData | null> => {
-    try {
-      const assetType: AssetType = type;
-      const rejection = await checkFileBeforeUpload(file, assetType);
-      if (rejection) {
-        showToast('warn', rejection);
-        return null;
-      }
-      const presign = await fetchUploadPresign({ type: assetType, mime: file.type, size: file.size });
-      await putToPresignedUrl(presign, file);
-      const meta = await probeMediaMeta(file, assetType).catch(() => ({}));
-      const complete = await completeUpload({
-        type: assetType,
-        mime: file.type,
-        size: file.size,
-        name: file.name,
-        storage_key: presign.storage_key,
-        project_id: currentId || undefined,
-        ...meta,
-      });
-      return complete;
-    } catch (e) {
-      console.warn('上传文件失败:', e);
-      return null;
-    }
-  };
-  const collectImageInputAssetIds = async (
-    targetNodeId: string | undefined,
-    files: UploadedFile[],
-    useEdgeRefs = false,
-  ): Promise<string[]> => {
-    if (
-      targetNodeId &&
-      (useEdgeRefs || textAttachmentsOf(targetNodeId).some(a => findCanvasNode(a.nodeId)?.data?.promptSource) || isImageDraftNode(mediaNodesRef.current.find((n) => n.id === targetNodeId)))
-    ) {
-      const ids: string[] = [];
-      for (const ref of mergedImageRefsOf(
-        targetNodeId,
-        edgesRef.current,
-        [...mediaNodesRef.current, ...textNodesRef.current],
-      )) {
-        if (!ids.includes(ref.assetId)) ids.push(ref.assetId);
-      }
-      return ids;
-    }
-    const ids: string[] = [];
-    for (const f of files.filter((item) => item.type === 'image')) {
-      if (f.assetId) {
-        ids.push(String(f.assetId));
-        continue;
-      }
-      let fileToUpload: File | null = f.file ?? null;
-      if (!fileToUpload && f.url.startsWith('http')) {
-        fileToUpload = await fetchUrlAsFile(f.url, f.name, 'image/*');
-      }
-      if (fileToUpload) {
-        const uploaded = await uploadFileToAsset(fileToUpload, 'image');
-        if (uploaded) ids.push(uploaded.asset_id);
-      }
-    }
-    return ids;
-  };
+  const { uploadFileToAsset, collectImageInputAssetIds } = useCanvasGenerationUploads({
+    currentId,
+    showToast,
+    mediaNodesRef,
+    textNodesRef,
+    edgesRef,
+    findCanvasNode,
+    textAttachmentsOf,
+  });
   useGenerationDockHosts(
     {
       isGeneratingNode: (id) => isGeneratingNode(id),
@@ -2220,36 +1776,6 @@ export default function CanvasPage() {
       })
       .map((n) => audioVideoMuxIdentityOf(n)!.sourceNodeId),
   );
-  const handleCharacterLibrarySelect = (assets: MaterialAsset[]) => {
-    const ts = Date.now();
-    if (characterLibraryTarget === 'image') {
-      const images = assets
-        .filter((a) => a.AssetType === 'Image')
-        .map((a) => ({
-          id: `char-${ts}-${a.Id}`,
-          url: a.URL,
-          type: 'image' as const,
-          name: `角色-${a.Name}`,
-          assetId: a.Id,
-        }));
-      if (images.length > 0) setImagePickResult({ ts, files: images });
-    } else if (characterLibraryTarget === 'asset') {
-      const image = assets.find((a) => a.AssetType === 'Image');
-      if (image) {
-        setAssetPickResult({
-          ts,
-          assetId: pickAssetId ?? '',
-          ref: {
-            id: `char-${ts}`,
-            src: image.URL,
-            type: 'image',
-            assetId: image.Id,
-          },
-        });
-      }
-    }
-  };
-
   const { handleAgentCardApply } = useCanvasApplyAgentCard({
     currentId,
     viewport,

@@ -1,4 +1,4 @@
-import type { Dispatch, RefObject, SetStateAction } from 'react';
+import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import {
   readCanvasConflictVersion,
@@ -61,6 +61,18 @@ export interface CanvasSaveHost {
   applyingRef: RefObject<boolean>;
   blockInvalidDraft: (ids: string[]) => boolean;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  graph?: { allNodes: () => Node[] };
+  groups?: CanvasGroup[];
+  viewport?: Viewport;
+  edges?: Edge[];
+  applying?: boolean;
+  saveEpoch?: number;
+  rollbackPendingNodes?: (ids: Set<string>) => void;
+  textNodes?: Node[];
+  mediaNodes?: Node[];
+  productNodes?: Node[];
+  assetNodes?: Node[];
+  refetch?: unknown;
 }
 
 export function useCanvasSave(host: CanvasSaveHost) {
@@ -73,6 +85,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
     assetNodesRef,
     groupsRef,
     edgesRef,
+    draftErrorsRef,
     versionRef,
     lastSavedRef,
     retainedRecoverySaveRef,
@@ -96,6 +109,18 @@ export function useCanvasSave(host: CanvasSaveHost) {
     applyingRef,
     blockInvalidDraft,
     showToast,
+    graph,
+    groups = [],
+    viewport,
+    edges = [],
+    applying,
+    saveEpoch,
+    rollbackPendingNodes,
+    textNodes,
+    mediaNodes,
+    productNodes,
+    assetNodes,
+    refetch,
   } = host;
 
   const adoptCanvasConflictVersion = (error: unknown): boolean => {
@@ -322,6 +347,110 @@ export function useCanvasSave(host: CanvasSaveHost) {
       applyingRef.current = false;
     }
   };
+
+  useEffect(() => {
+    if (!graph || !rollbackPendingNodes || viewport == null) return;
+    if (!currentId || !doc || applyingRef.current) return;
+    const timer = window.setTimeout(() => {
+      if (applyingRef.current || savePromiseRef.current) return;
+      if (hydratedProjectRef.current === null) return;
+      if (textNodesRef.current.some(node => draftErrorsRef.current.has(node.id))) return;
+      const contentNodes = graph.allNodes();
+      const nodes = [...contentNodes, ...groups.map((g) => groupToNode(g))];
+      const sig = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edges);
+      if (sig === lastSavedRef.current) return;
+      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return;
+      if (import.meta.env.DEV) {
+        console.info(`[canvas] 自动保存：${nodes.length} 个节点 / ${edges.length} 条连线（version=${versionRef.current}）`);
+      }
+      lastSavedRef.current = sig;
+      setSaveStatus('saving');
+      const confirmEmpty = shouldConfirmEmptyClear(nodes);
+      const pendingSnapshot = new Set(pendingNodeIdsRef.current);
+      const plan = planRecoverySave(
+        currentId, sig, { viewport, nodes, edges, confirmEmpty },
+      );
+      const { recoveryFields, payload: recoveryPayload } = plan;
+      trackCanvasSave(
+        (recoveryFields
+          ? putCanvasDocWithRecovery(
+            currentId,
+            recoveryPayload,
+            plan.ifMatch,
+            { recoveryProtocolVersion: 1, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges },
+          )
+          : saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
+        ).then((saved) => {
+          if (recoveryFields) {
+            generationRuntimeRef.current?.onSaveReceipt((saved as CanvasRecoverySaveData).recoveryReceipt);
+            settleRetainedRecoverySave(currentId, recoveryFields.commandId);
+          }
+          return saved;
+        })
+          .then((saved) => {
+            versionRef.current = saved.version;
+            settleSavedCanvas(plan, sig, () => pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id)));
+            setSaveBlocked(false);
+            setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
+            setSaveEpoch(value => value + 1);
+            setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+          })
+          .catch((e) => {
+            lastSavedRef.current = '';
+            if (recoveryFields) settleRetainedRecoverySave(currentId, recoveryFields.commandId, e);
+            const hadPendingAdds = pendingSnapshot.size > 0 && plan.sentSignature === sig;
+            const recoveryReason = readRecoveryErrorReason(e);
+            if (recoveryFields && recoveryReason === 'recovery_item_conflict') {
+              void generationRuntimeRef.current?.reconcileConflictItems(currentId);
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              showToast('warn', '任务状态已被其他操作更新，已同步最新状态，请重试保存');
+              return;
+            }
+            if (recoveryFields && recoveryReason != null) {
+              recoverySaveConflictRef.current = true;
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              showToast('warn', '画布保存冲突，当前内容已保留，请刷新后复核');
+              return;
+            }
+            if (!recoveryFields && readRecoveryErrorReason(e) === 'recovery_protocol_required') {
+              void generationRuntimeRef.current?.recover(currentId);
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              showToast('warn', '画布包含任务恢复保护内容，正在同步状态，请稍后重试保存');
+              return;
+            }
+            const aligned = adoptCanvasConflictVersion(e);
+            if (aligned) {
+              if (confirmEmpty) {
+                emptyClearConflictRef.current = true;
+                showToast('warn', EMPTY_CLEAR_CONFLICT_TOAST);
+              }
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              return;
+            }
+            setSaveBlocked(true);
+            if (isApiError(e) && e.status === 412) {
+              setSaveStatus('error');
+              showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
+            } else if (isApiError(e) && e.status === 422) {
+              emptyOverwriteRejectedRef.current = true;
+              setSaveStatus('error');
+              showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
+            } else {
+              if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
+              setSaveStatus('error');
+              showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
+              console.warn('画布自动保存失败:', e);
+            }
+          }),
+      );
+    }, 800);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch, rollbackPendingNodes, showToast, graph]);
 
   return {
     flushCanvasSave,
