@@ -24,11 +24,9 @@ import { assetsPickerMediaTypes } from './assetsPickerTargets';
 import { hasGenerationRecord } from './mediaReEdit';
 import {
   readRefRole,
-  readDraftMaterialRefs,
   mergedVideoMediaRefsOf,
   videoRefSourceError,
   videoRefIdentityIds,
-  type VideoMediaRef,
   type VideoRefRole,
 } from './videoMediaRefs';
 import { AssetImageRefLimitProvider } from './modelCaps';
@@ -188,6 +186,7 @@ import { useCanvasDraftCardCreators } from './hooks/useCanvasDraftCardCreators';
 import { useCanvasAtMentionHandlers } from './hooks/useCanvasAtMentionHandlers';
 import { useCanvasConnectHandlers } from './hooks/useCanvasConnectHandlers';
 import { useCanvasNodeDragHandlers } from './hooks/useCanvasNodeDragHandlers';
+import { useCanvasDraftRefActions } from './hooks/useCanvasDraftRefActions';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -2576,64 +2575,27 @@ export default function CanvasPage() {
     setFocusViewport({ x: window.innerWidth / 2 - (target.position.x + width / 2), y: window.innerHeight / 2 - (target.position.y + height / 2), zoom: 1 });
     setSelectRequest({ id: nodeId, ts: Date.now() });
   }, []);
-  const removeRefEdges = (draftId: string, sourceNodeId: string) => {
-    if (isGeneratingNode(draftId)) return;
-    removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
-  };
-  const handleAddAudioCanvasRef = (nodeId: string) => {
-    if (!audioDraftId) return;
-    if (!validateAudioRefConnect(nodeId, audioDraftId)) return;
-    addCanvasEdge(nodeId, audioDraftId);
-  };
-  const removeDraftMaterialRef = (draftId: string, materialId: string) => {
-    const existing = readDraftMaterialRefs(mediaNodesRef.current.find((n) => n.id === draftId));
-    patchMediaNode(draftId, {
-      draftMaterialRefs: existing.filter((m) => m.materialId !== materialId),
-    });
-  };
-  const assignVideoRefRoles = (
-    draftId: string,
-    assignments: Array<{ nodeId: string; role: VideoRefRole }>,
-  ) => {
-    if (assignments.length === 0) return;
-    const roleByKey = new Map(assignments.map((a) => [a.nodeId, a.role]));
-    const prevEdges = edgesRef.current;
-    let edgesChanged = false;
-    const nextEdges = prevEdges.map((e) => {
-      if (e.target !== draftId) return e;
-      const role = roleByKey.get(e.source);
-      if (!role) return e;
-      const currentRole = (e.data as Record<string, unknown> | undefined)?.refRole;
-      if (role === 'reference') {
-        if (currentRole === undefined) return e;
-        edgesChanged = true;
-        const { refRole: _drop, ...restData } = (e.data ?? {}) as Record<string, unknown>;
-        return { ...e, data: restData };
-      }
-      if (currentRole === role) return e;
-      edgesChanged = true;
-      return { ...e, data: { ...e.data, refRole: role } };
-    });
-    if (edgesChanged) {
-      historyRef.current?.pushReplaceEdges(prevEdges, nextEdges);
-      edgesRef.current = nextEdges;
-      setEdges(nextEdges);
-    }
-    const draftNode = mediaNodesRef.current.find((n) => n.id === draftId);
-    const existing = readDraftMaterialRefs(draftNode);
-    if (existing.length > 0) {
-      const nextMaterials = existing.map((m) => {
-        const role = roleByKey.get(m.materialId);
-        return role ? { ...m, role } : m;
-      });
-      if (nextMaterials.some((m, i) => m.role !== existing[i]!.role)) {
-        patchMediaNode(draftId, { draftMaterialRefs: nextMaterials });
-      }
-    }
-  };
-  const appendVideoFreeRef = (item: VideoMediaRef, role: VideoRefRole) => generationDock.updateDraft('video', { freeReference: { operation: 'add', item, role } });
-  const removeVideoFreeRef = (key: string) => generationDock.updateDraft('video', { freeReference: { operation: 'remove', key } });
-  const assignVideoFreeRefRoles = (assignments: Array<{ nodeId: string; role: VideoRefRole }>) => generationDock.updateDraft('video', { freeReference: { operation: 'assign', assignments } });
+  const {
+    removeRefEdges,
+    handleAddAudioCanvasRef,
+    removeDraftMaterialRef,
+    assignVideoRefRoles,
+    appendVideoFreeRef,
+    removeVideoFreeRef,
+    assignVideoFreeRefRoles,
+  } = useCanvasDraftRefActions({
+    audioDraftId,
+    mediaNodesRef,
+    edgesRef,
+    historyRef,
+    setEdges,
+    isGeneratingNode,
+    removeTargetInputs,
+    patchMediaNode,
+    validateAudioRefConnect,
+    addCanvasEdge: (source, target, refRole, marker) => addCanvasEdge(source, target, refRole, marker),
+    generationDock: { updateVideoDraft: (input) => generationDock.updateDraft('video', input) },
+  });
   const {
     handleNodeEnhanceImage,
     handleNodeVideoEnhance,
