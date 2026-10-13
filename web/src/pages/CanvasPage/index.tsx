@@ -101,7 +101,7 @@ import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPasst
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
 import { createConnectValidators } from './canvasConnectValidation';
-import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
+import { useEdgesState, type Connection, type Edge, type Node, type Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
 import {
@@ -174,6 +174,7 @@ import { useCanvasDraftRefActions } from './hooks/useCanvasDraftRefActions';
 import { useCanvasTextNodeFactories } from './hooks/useCanvasTextNodeFactories';
 import { useCanvasToolJobSubmissions } from './hooks/useCanvasToolJobSubmissions';
 import { useCanvasImageToolHosts } from './hooks/useCanvasImageToolHosts';
+import { useCanvasSelectionBridge } from './hooks/useCanvasSelectionBridge';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -1038,7 +1039,8 @@ export default function CanvasPage() {
       recoverySaveConflictRef.current = false;
       setSaveStatus('idle');
       return;
-    }    const docChanged = hydratedDocRef.current !== doc;
+    }
+    const docChanged = hydratedDocRef.current !== doc;
     hydratedDocRef.current = doc;
     if (!docChanged) {
       const refresh = (prev: Node[]) => {
@@ -1471,45 +1473,25 @@ export default function CanvasPage() {
     }
     dismissAllGenPanels();
   };
-  const handleSelectionChange = ({ nodes }: OnSelectionChangeParams) => {
-    const candidates = nodes.filter((n) => {
-      const m = mediaNodesRef.current.find((x) => x.id === n.id);
-      if (!m || m.selected !== false) return true;
-      return !nodes.some((other) => mediaNodesRef.current.find((x) => x.id === other.id)?.selected === true);
-    });
-    const soloId = candidates.length === 1 ? candidates[0]!.id : null;
-    setSoloSelectedNodeId(soloId);
-    if (pickMode || pickTarget) return;
-    if (toolRuntime.onSelectionChange(
-      { soloId, multiSelect: candidates.length > 1 },
-    )) return;
-    if (soloId && !editSessionActive) {
-      const mediaNode = mediaNodesRef.current.find((n) => n.id === soloId);
-      const mediaData = (mediaNode?.data ?? {}) as Record<string, unknown>;
-      const toolDraft = mediaNode && toolSessions.draft(mediaNode);
-      if (mediaNode && !mediaData.audioVideoMux && (
-        mediaData.draft === true
-        || hasGenerationRecord(mediaNode)
-        || Boolean(toolDraft)
-      )) {
-        const mediaType = mediaData.mediaType;
-        const panelHidden = toolDraft ? toolDraft.hidden : false;
-        const alreadyOpen = toolDraft ? toolDraft.visible
-          : mediaType === 'video' ? showBottomDialog && videoDraftId === soloId
-          : mediaType === 'audio' ? showAudioDialog && audioDraftId === soloId : showImageDialog && imageDraftId === soloId;
-        if (!alreadyOpen && !panelHidden) {
-          if (openMediaDraftDialog(soloId, mediaType, 'selection') !== false) return;
-        }
-      }
-    }
-    generationDock.selection({ soloId, multiSelect: candidates.length > 1, editing: editSessionActive, submittingNodeId });
-  };
-  const handleSelectionChangeRef = useRef(handleSelectionChange);
-  handleSelectionChangeRef.current = handleSelectionChange;
-  const handleSelectionChangeStable = useCallback(
-    (params: OnSelectionChangeParams) => handleSelectionChangeRef.current(params),
-    [],
-  );
+  const { handleSelectionChangeStable } = useCanvasSelectionBridge({
+    mediaNodesRef,
+    pickMode,
+    pickTarget,
+    onSelectionChange: (selection) => toolRuntime.onSelectionChange(selection),
+    editSessionActive,
+    draftOfNode: (node) => toolSessions.draft(node),
+    hasGenerationRecord,
+    showImageDialog,
+    showBottomDialog,
+    showAudioDialog,
+    imageDraftId,
+    videoDraftId,
+    audioDraftId,
+    openMediaDraftDialog: (nodeId, mediaType, intent) => openMediaDraftDialog(nodeId, mediaType, intent),
+    setSoloSelectedNodeId,
+    selection: (input) => generationDock.selection(input),
+    submittingNodeId,
+  });
   const anyGenPanelOpen = generationDock.view.activePanel !== null;
   useEffect(() => {
     if (!anyGenPanelOpen) return;
