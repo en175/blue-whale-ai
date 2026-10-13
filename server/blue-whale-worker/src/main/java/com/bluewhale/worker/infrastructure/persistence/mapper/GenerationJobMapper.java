@@ -645,6 +645,17 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     List<Long> listExpiredJobIds(@Param("limit") int limit);
 
+    @Update("""
+            UPDATE generation_jobs
+            SET next_action_at = DATE_ADD(NOW(), INTERVAL #{minutes} MINUTE),
+                version = version + 1
+            WHERE id = #{jobId}
+              AND is_delete = false
+              AND status IN ('queued', 'processing')
+              AND cancel_requested_at IS NULL
+            """)
+    int deferNextRequeue(@Param("jobId") Long jobId, @Param("minutes") int minutes);
+
     @Select("""
             SELECT id, type FROM generation_jobs
             WHERE is_delete = false

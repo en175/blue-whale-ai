@@ -119,7 +119,7 @@ class RecoveryServiceTest {
                 imageEnhanceProvider,
                 imageEraseProvider, imageCutoutProvider, imageOutpaintProvider,
                 videoSubtitleEraseProvider, videoEnhanceProvider, vocalSplitProvider,
-                videoSceneSplitProvider, videoMattingProvider, videoFrameInterpolationProvider);
+                videoSceneSplitProvider, videoMattingProvider, videoFrameInterpolationProvider, 60);
     }
 
     @Test
@@ -134,6 +134,39 @@ class RecoveryServiceTest {
         verify(imageProducer, times(2)).enqueue(idCaptor.capture(), delayCaptor.capture());
         assertThat(idCaptor.getAllValues()).containsExactly("1821", "1822");
         assertThat(delayCaptor.getAllValues()).containsExactly(1000L, 1000L);
+    }
+
+    @Test
+    @DisplayName("★ 投递成功后顺延 next_action_at —— 否则同一条任务每 60 秒被重投一次")
+    void defersAfterSuccessfulEnqueue() {
+        when(jobMapper.listDueImageJobIds(anyInt())).thenReturn(List.of(1821L));
+
+        service.recover();
+
+        verify(imageProducer).enqueue("1821", 1000L);
+        verify(jobMapper).deferNextRequeue(1821L, 60);
+    }
+
+    @Test
+    @DisplayName("★ 投递失败不顺延 —— 否则把生产失败也推迟一小时才重试")
+    void doesNotDeferWhenEnqueueFails() {
+        when(jobMapper.listDueImageJobIds(anyInt())).thenReturn(List.of(1821L));
+        doThrow(new RuntimeException("mq down")).when(imageProducer).enqueue(eq("1821"), anyLong());
+
+        service.recover();
+
+        verify(jobMapper, never()).deferNextRequeue(anyLong(), anyInt());
+    }
+
+    @Test
+    @DisplayName("★ 取消补投同样顺延")
+    void defersAfterCancelReenqueue() {
+        when(jobMapper.listCancelPendingJobs(100)).thenReturn(List.of(pendingJob(3307L, "video")));
+
+        service.recover();
+
+        verify(videoProducer).enqueue("3307", 1000L);
+        verify(jobMapper).deferNextRequeue(3307L, 60);
     }
 
     @Test

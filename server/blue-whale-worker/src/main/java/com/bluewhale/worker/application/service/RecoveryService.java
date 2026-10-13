@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -27,6 +28,7 @@ public class RecoveryService {
     private final JobFinalizer jobFinalizer;
     private final TerminalEventOutbox outbox;
     private final List<TypeScan> typeScans;
+    private final int deferMinutes;
 
     private record TypeScan(GenerationMqRouteEnum route,
                             ObjectProvider<GenerationMessageProducer> producer,
@@ -72,11 +74,13 @@ public class RecoveryService {
             @Qualifier("videoMattingRecoveryProducer")
             ObjectProvider<GenerationMessageProducer> videoMattingProducer,
             @Qualifier("videoFrameInterpolationRecoveryProducer")
-            ObjectProvider<GenerationMessageProducer> videoFrameInterpolationProducer
+            ObjectProvider<GenerationMessageProducer> videoFrameInterpolationProducer,
+            @Value("${GENERATION_RECOVERY_REENQUEUE_DEFER_MINUTES:60}") int deferMinutes
     ) {
         this.jobMapper = jobMapper;
         this.jobFinalizer = jobFinalizer;
         this.outbox = outbox;
+        this.deferMinutes = deferMinutes;
         this.typeScans = List.of(
                 new TypeScan(GenerationMqRouteEnum.VIDEO, videoProducer, jobMapper::listDueVideoJobIds),
                 new TypeScan(GenerationMqRouteEnum.IMAGE, imageProducer, jobMapper::listDueImageJobIds),
@@ -141,7 +145,17 @@ public class RecoveryService {
             } catch (Exception e) {
                 log.error("协调器重投 {} 任务 {} 失败（只记日志，任务上界由执行截止时间决定）：{}",
                         route.tag(), jobId, e.getMessage(), e);
+                continue;
             }
+            deferNextRequeue(jobId);
+        }
+    }
+
+    private void deferNextRequeue(Long jobId) {
+        try {
+            jobMapper.deferNextRequeue(jobId, deferMinutes);
+        } catch (Exception e) {
+            log.warn("重投已发出但顺延失败，下一轮会再投一次：jobId={} {}", jobId, e.getMessage(), e);
         }
     }
 
@@ -157,7 +171,9 @@ public class RecoveryService {
                 producer.enqueue(String.valueOf(job.getId()), REENQUEUE_DELAY_MS);
             } catch (Exception e) {
                 log.error("取消补投失败（只记日志）：jobId={} {}", job.getId(), e.getMessage(), e);
+                continue;
             }
+            deferNextRequeue(job.getId());
         }
     }
 

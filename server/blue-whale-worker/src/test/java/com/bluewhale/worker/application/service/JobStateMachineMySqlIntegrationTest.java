@@ -1189,7 +1189,7 @@ class JobStateMachineMySqlIntegrationTest {
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
-                recoveryProvider, recoveryProvider);
+                recoveryProvider, recoveryProvider, 60);
         recovery.recover();
         verify(recoveryProducer).enqueue(String.valueOf(retryId), 1000L);
 
@@ -1358,6 +1358,38 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(published).hasSize(2);
     }
 
+    @Test
+    @DisplayName("★ 顺延写入：投递后任务被推出扫描窗口；终态任务不写")
+    void deferNextRequeuePushesJobOutOfScanWindow() {
+        long jobId = seedJob(9L, "image", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        assertThat(jobMapper.listDueImageJobIds(100)).contains(jobId);
+
+        assertThat(jobMapper.deferNextRequeue(jobId, 60)).isEqualTo(1);
+
+        assertThat(jobMapper.listDueImageJobIds(100)).doesNotContain(jobId);
+        assertThat(jdbc.queryForObject(
+                "SELECT TIMESTAMPDIFF(MINUTE, NOW(), next_action_at) FROM generation_jobs WHERE id=?",
+                Integer.class, jobId)).isBetween(58, 60);
+
+        jdbc.update("UPDATE generation_jobs SET status='succeeded' WHERE id=?", jobId);
+        assertThat(jobMapper.deferNextRequeue(jobId, 60)).isZero();
+    }
+
+    @Test
+    @DisplayName("★ 已请求取消的任务不被顺延 —— 否则取消要等最长 60 分钟才生效")
+    void deferSkipsCancelRequestedJob() {
+        long jobId = seedJob(9L, "image", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        jdbc.update("UPDATE generation_jobs SET cancel_requested_at=NOW() WHERE id=?", jobId);
+
+        assertThat(jobMapper.deferNextRequeue(jobId, 60)).isZero();
+
+        assertThat(jobMapper.listCancelPendingJobs(100))
+                .extracting(GenerationJobEntity::getId)
+                .contains(jobId);
+    }
+
     private String sendStateOf(long jobId) {
         return jdbc.queryForObject("SELECT send_state FROM generation_outbox WHERE job_id=?",
                 String.class, jobId);
@@ -1400,7 +1432,7 @@ class JobStateMachineMySqlIntegrationTest {
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
-                recoveryProvider, recoveryProvider);
+                recoveryProvider, recoveryProvider, 60);
         recovery.recover();
         verify(recoveryProducer).enqueue(retry, 1000L);
 
