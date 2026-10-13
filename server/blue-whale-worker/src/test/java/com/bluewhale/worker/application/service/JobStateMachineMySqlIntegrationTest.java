@@ -25,6 +25,7 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtra
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
+import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutboxMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
@@ -33,6 +34,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioCli
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient.ExtractAudioTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoTaskObservation;
+import com.bluewhale.worker.infrastructure.mq.BillingEventPublisher;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
@@ -57,6 +59,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -125,6 +128,7 @@ class JobStateMachineMySqlIntegrationTest {
     static ProjectEventMapper projectEventMapper;
     static GenerationOutputSlotMapper slotMapper;
     static GenerationJobExtraMapper extraMapper;
+    static GenerationOutboxMapper outboxMapper;
 
     @Configuration
     static class TestConfig {
@@ -195,6 +199,11 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Bean
+        GenerationOutboxMapper outboxMapper(SqlSessionFactory sf) throws Exception {
+            return factory(GenerationOutboxMapper.class, sf).getObject();
+        }
+
+        @Bean
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 ProjectEventMapper pem, GenerationOutputSlotMapper sm,
@@ -208,13 +217,14 @@ class JobStateMachineMySqlIntegrationTest {
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
                 ProjectEventMapper pem,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
+                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
+                GenerationOutboxMapper om) {
             ProjectEventPublisher events = new ProjectEventPublisher(pem);
             return new JobFinalizer(jm, am, jlm, sm, em,
                     new SceneCardGenerationRecordSync(sm, rm, events),
                     new StoryboardPreviewSync(sm, pm, events),
                     events,
-                    JobSettlementPublisher.noop());
+                    new TerminalEventOutbox(om, jm, BillingEventPublisher.noop(), new MockEnvironment()));
         }
 
         @SuppressWarnings({"unchecked", "rawtypes"})
@@ -243,6 +253,7 @@ class JobStateMachineMySqlIntegrationTest {
         jobLogMapper = ctx.getBean(GenerationJobLogMapper.class);
         projectEventMapper = ctx.getBean(ProjectEventMapper.class);
         slotMapper = ctx.getBean(GenerationOutputSlotMapper.class);
+        outboxMapper = ctx.getBean(GenerationOutboxMapper.class);
     }
 
     @AfterAll
@@ -1136,7 +1147,7 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("audio_mix 恢复扫描包含创建超过两小时的待处理任务")
+    @DisplayName("audio_mix 恢复扫描不按创建时间过滤：创建超过两小时的待处理任务仍是候选")
     void audioMixRecoveryDoesNotLoseLongProcessingJob() {
         long jobId = seedJob(9L, "audio_mix", "dock", "processing", 7L,
                 LocalDateTime.now().minusSeconds(10), 99L,
@@ -1145,12 +1156,11 @@ class JobStateMachineMySqlIntegrationTest {
                 + "lease_owner=NULL, lease_expires_at=NULL, next_action_at=DATE_SUB(NOW(), INTERVAL 10 SECOND) "
                 + "WHERE id=?", jobId);
 
-        assertThat(jobMapper.listDueAudioMixJobIds(100, 120)).doesNotContain(jobId);
-        assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).contains(jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100)).contains(jobId);
     }
 
     @Test
-    @DisplayName("重试收割跨 120 分钟：恢复重投后重新领取父结果，发布一次且不重新提交")
+    @DisplayName("重试收割不看创建时间：恢复重投后重新领取父结果，发布一次且不重新提交")
     void retryHarvestHandoffAcrossRecoveryWindow() {
         long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
                 LocalDateTime.now().minusMinutes(130));
@@ -1162,23 +1172,23 @@ class JobStateMachineMySqlIntegrationTest {
                 + "lease_expires_at=DATE_ADD(NOW(), INTERVAL 7 MINUTE), "
                 + "gmt_create=DATE_SUB(NOW(), INTERVAL 119 MINUTE) WHERE id=?", parentId, retryId);
 
-        assertThat(jobMapper.listDueMediaExtractJobIds(100, 120)).doesNotContain(retryId);
+        assertThat(jobMapper.listDueMediaExtractJobIds(100)).doesNotContain(retryId);
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", retryId);
-        assertThat(jobMapper.listDueMediaExtractJobIds(100, 120)).contains(retryId);
+        assertThat(jobMapper.listDueMediaExtractJobIds(100)).contains(retryId);
 
         jdbc.update("UPDATE generation_jobs SET gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", retryId);
-        assertThat(jobMapper.listDueMediaExtractJobIds(100, 120)).contains(retryId);
+        assertThat(jobMapper.listDueMediaExtractJobIds(100)).contains(retryId);
 
         @SuppressWarnings("unchecked")
         ObjectProvider<GenerationMessageProducer> recoveryProvider = mock(ObjectProvider.class);
         GenerationMessageProducer recoveryProducer = mock(GenerationMessageProducer.class);
         when(recoveryProvider.getIfAvailable()).thenReturn(recoveryProducer);
-        var recovery = new RecoveryService(jobMapper,
+        var recovery = new RecoveryService(jobMapper, finalizer, TerminalEventOutbox.noop(),
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
-                recoveryProvider, recoveryProvider, 120);
+                recoveryProvider, recoveryProvider);
         recovery.recover();
         verify(recoveryProducer).enqueue(String.valueOf(retryId), 1000L);
 
@@ -1213,77 +1223,136 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("重试收割超过 130 分钟不复活；非重试与终态仍受原有条件约束")
-    void retryHarvestHandoffHasBoundedDeadline() {
+    @DisplayName("★ 协调器候选口径：不看创建时间也不看是否重试，只看是否还活着（排队或失联）")
+    void recoveryCandidatesIgnoreAgeAndHarvest() {
+        long queued = seedJob(9L, "media_extract", "dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        long stalledRetry = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                LocalDateTime.now().minusSeconds(10));
+        long stalledNonRetry = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                LocalDateTime.now().minusSeconds(10));
+        long submitted = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                LocalDateTime.now().minusSeconds(10));
+        long leased = seedClaimedJob(9L, "media_extract", "dock", "live-worker", 2L);
+        long succeeded = seedJob(9L, "media_extract", "dock", "succeeded", 1L,
+                LocalDateTime.now().minusSeconds(10));
+        long failed = seedJob(9L, "media_extract", "dock", "failed", 1L,
+                LocalDateTime.now().minusSeconds(10));
         long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
                 LocalDateTime.now().minusMinutes(140));
         jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
-        long expiredRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                LocalDateTime.now().minusSeconds(10));
-        long lastChanceRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                LocalDateTime.now().minusSeconds(10));
-        long submittedRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                LocalDateTime.now().minusSeconds(10));
-        long queuedRetryId = seedJob(9L, "media_extract", "dock", "queued", 1L,
-                LocalDateTime.now().minusSeconds(10));
-        long parentWithoutTaskId = seedJob(9L, "media_extract", "dock", "failed", 1L,
-                LocalDateTime.now().minusMinutes(140));
-        long retryWithoutParentTaskId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                LocalDateTime.now().minusSeconds(10));
-        long oldNonRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
-                LocalDateTime.now().minusSeconds(10));
-        long terminalRetryId = seedJob(9L, "media_extract", "dock", "succeeded", 1L,
-                LocalDateTime.now().minusSeconds(10));
-        long videoParentId = seedJob(9L, "video", "bottom_dock", "failed", 1L,
-                LocalDateTime.now().minusMinutes(140));
-        long videoRetryId = seedJob(9L, "video", "bottom_dock", "processing", 1L,
-                LocalDateTime.now().minusSeconds(10));
-        jdbc.update("UPDATE generation_jobs SET provider_task_id='video-parent' WHERE id=?", videoParentId);
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='own-task' WHERE id=?", submitted);
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
-                + "gmt_create=DATE_SUB(NOW(), INTERVAL 131 MINUTE) WHERE id=?", parentId, expiredRetryId);
-        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
-                + "gmt_create=DATE_SUB(NOW(), INTERVAL 129 MINUTE) WHERE id=?", parentId, lastChanceRetryId);
-        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, provider_task_id='own-task', "
-                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", parentId, submittedRetryId);
-        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
-                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", parentId, queuedRetryId);
-        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
-                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?",
-                parentWithoutTaskId, retryWithoutParentTaskId);
-        jdbc.update("UPDATE generation_jobs SET gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?",
-                oldNonRetryId);
-        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
-                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", parentId, terminalRetryId);
-        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
-                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", videoParentId, videoRetryId);
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 200 MINUTE) WHERE id IN (?, ?)",
+                parentId, stalledRetry, stalledNonRetry);
 
-        List<Long> due = jobMapper.listDueMediaExtractJobIds(100, 120);
-        assertThat(due).contains(lastChanceRetryId);
-        assertThat(due).doesNotContain(expiredRetryId, submittedRetryId, queuedRetryId,
-                retryWithoutParentTaskId, oldNonRetryId, terminalRetryId);
-        assertThat(jobMapper.listDueVideoJobIds(100, 120)).doesNotContain(videoRetryId);
+        List<Long> due = jobMapper.listDueMediaExtractJobIds(100);
+
+        assertThat(due).contains(queued, stalledRetry, stalledNonRetry, submitted);
+        assertThat(due).doesNotContain(leased, succeeded, failed);
     }
 
     @Test
-    @DisplayName("重试收割停止点晚于创建后 122 分钟仍被接手；超出租约接管期不收")
-    void retryHarvestHandoffIsLeaseAwareBeyondCreateDeadline() {
-        long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
-                LocalDateTime.now().minusMinutes(140));
-        jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
-        long handoffRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+    @DisplayName("★ 到期扫描：越过执行截止时间的排队/处理中任务是候选，没到点与没设截止的不动")
+    void expiredJobsAreCollectedByDeadline() {
+        long overdue = seedJob(9L, "video", "bottom_dock", "queued", 0L,
                 LocalDateTime.now().minusSeconds(10));
-        long missedRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+        long overdueProcessing = seedJob(9L, "video", "bottom_dock", "processing", 1L,
                 LocalDateTime.now().minusSeconds(10));
-        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
-                + "gmt_create=DATE_SUB(NOW(), INTERVAL 132 MINUTE), "
-                + "lease_expires_at=DATE_SUB(NOW(), INTERVAL 5 MINUTE) WHERE id=?", parentId, handoffRetryId);
-        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
-                + "gmt_create=DATE_SUB(NOW(), INTERVAL 132 MINUTE), "
-                + "lease_expires_at=DATE_SUB(NOW(), INTERVAL 20 MINUTE) WHERE id=?", parentId, missedRetryId);
+        long fresh = seedJob(9L, "video", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        long withoutDeadline = seedJob(9L, "video", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        jdbc.update("UPDATE generation_jobs SET execution_deadline_at=DATE_SUB(NOW(), INTERVAL 5 SECOND) "
+                + "WHERE id IN (?, ?)", overdue, overdueProcessing);
+        jdbc.update("UPDATE generation_jobs SET execution_deadline_at=DATE_ADD(NOW(), INTERVAL 1 HOUR) "
+                + "WHERE id=?", fresh);
 
-        List<Long> due = jobMapper.listDueMediaExtractJobIds(100, 120);
-        assertThat(due).contains(handoffRetryId);
-        assertThat(due).doesNotContain(missedRetryId);
+        assertThat(jobMapper.listExpiredJobIds(100))
+                .contains(overdue, overdueProcessing)
+                .doesNotContain(fresh, withoutDeadline);
+    }
+
+    @Test
+    @DisplayName("★ 到期收口：CAS 只命中越期的非终态任务，重复调用不再命中")
+    void expireJobGuardIsOneShot() {
+        long jobId = seedJob(9L, "video", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        jdbc.update("UPDATE generation_jobs SET execution_deadline_at=DATE_SUB(NOW(), INTERVAL 5 SECOND) "
+                + "WHERE id=?", jobId);
+
+        assertThat(finalizer.expireJob(String.valueOf(jobId))).isTrue();
+
+        GenerationJobEntity row = readJob(jobId);
+        assertThat(row.getStatus()).isEqualTo("failed");
+        assertThat(row.getNextActionAt()).isNull();
+        assertThat(row.getLeaseOwner()).isNull();
+        assertThat(finalizer.expireJob(String.valueOf(jobId))).isFalse();
+    }
+
+    @Test
+    @DisplayName("★ 取消补投扫描：排队中已请求取消的任务是候选，处理中与未请求的不是")
+    void cancelPendingJobsAreCollected() {
+        long requested = seedJob(9L, "video", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        long untouched = seedJob(9L, "video", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        long requestedProcessing = seedJob(9L, "video", "bottom_dock", "processing", 1L,
+                LocalDateTime.now().minusSeconds(10));
+        jdbc.update("UPDATE generation_jobs SET cancel_requested_at=NOW() WHERE id IN (?, ?)",
+                requested, requestedProcessing);
+
+        assertThat(jobMapper.listCancelPendingJobs(100))
+                .extracting(GenerationJobEntity::getId)
+                .contains(requested)
+                .doesNotContain(untouched, requestedProcessing);
+    }
+
+    @Test
+    @DisplayName("★ 发件箱真库闭环：终态落行→投递置 sent；投递失败保持 pending，恢复后下一轮重发")
+    void outboxRoundTrip() {
+        List<String[]> published = new CopyOnWriteArrayList<>();
+        TerminalEventOutbox wired = new TerminalEventOutbox(outboxMapper, jobMapper,
+                (topic, body) -> published.add(new String[]{topic, body}), new MockEnvironment());
+
+        long jobId = seedJob(9L, "video", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        jdbc.update("UPDATE generation_jobs SET execution_deadline_at=DATE_SUB(NOW(), INTERVAL 5 SECOND) "
+                + "WHERE id=?", jobId);
+        assertThat(finalizer.expireJob(String.valueOf(jobId))).isTrue();
+
+        wired.drain(100);
+
+        assertThat(published).hasSize(1);
+        assertThat(published.get(0)[0]).isEqualTo("generation-job-terminal");
+        assertThat(published.get(0)[1]).contains("\"jobId\":" + jobId).contains("\"refund\":true");
+        assertThat(sendStateOf(jobId)).isEqualTo("sent");
+
+        long brokenJobId = seedJob(9L, "video", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().minusSeconds(10));
+        jdbc.update("UPDATE generation_jobs SET execution_deadline_at=DATE_SUB(NOW(), INTERVAL 5 SECOND) "
+                + "WHERE id=?", brokenJobId);
+        assertThat(finalizer.expireJob(String.valueOf(brokenJobId))).isTrue();
+
+        TerminalEventOutbox broken = new TerminalEventOutbox(outboxMapper, jobMapper,
+                (topic, body) -> {
+                    throw new IllegalStateException("mq down");
+                }, new MockEnvironment());
+        broken.drain(100);
+
+        assertThat(sendStateOf(brokenJobId)).isEqualTo("pending");
+        assertThat(jdbc.queryForObject("SELECT attempts FROM generation_outbox WHERE job_id=?",
+                Integer.class, brokenJobId)).isEqualTo(1);
+
+        wired.drain(100);
+
+        assertThat(sendStateOf(brokenJobId)).isEqualTo("sent");
+        assertThat(published).hasSize(2);
+    }
+
+    private String sendStateOf(long jobId) {
+        return jdbc.queryForObject("SELECT send_state FROM generation_outbox WHERE job_id=?",
+                String.class, jobId);
     }
 
     @Test
@@ -1309,21 +1378,21 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(staleClaim.get().workerId()).isEqualTo("video-worker-old");
         assertThat(staleClaim.get().parentProviderTaskId()).isEqualTo("video-parent-task");
 
-        assertThat(jobMapper.listDueVideoJobIds(100, 120)).doesNotContain(retryId);
+        assertThat(jobMapper.listDueVideoJobIds(100)).doesNotContain(retryId);
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
                 retryId);
-        assertThat(jobMapper.listDueVideoJobIds(100, 120)).contains(retryId);
+        assertThat(jobMapper.listDueVideoJobIds(100)).contains(retryId);
 
         @SuppressWarnings("unchecked")
         ObjectProvider<GenerationMessageProducer> recoveryProvider = mock(ObjectProvider.class);
         GenerationMessageProducer recoveryProducer = mock(GenerationMessageProducer.class);
         when(recoveryProvider.getIfAvailable()).thenReturn(recoveryProducer);
-        var recovery = new RecoveryService(jobMapper,
+        var recovery = new RecoveryService(jobMapper, finalizer, TerminalEventOutbox.noop(),
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
-                recoveryProvider, recoveryProvider, 120);
+                recoveryProvider, recoveryProvider);
         recovery.recover();
         verify(recoveryProducer).enqueue(retry, 1000L);
 
@@ -1387,9 +1456,9 @@ class JobStateMachineMySqlIntegrationTest {
                 "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
                         + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'generation_jobs' "
                         + "AND COLUMN_NAME = 'next_poll_at'", String.class)).isEmpty();
-        assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).doesNotContain(jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100)).doesNotContain(jobId);
         jdbc.update("UPDATE generation_jobs SET next_action_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
-        assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).contains(jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100)).contains(jobId);
     }
 
     @Test
@@ -1432,7 +1501,7 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("收割慢转存耗尽租约后仍能收口：reserve 放行回退提交，脱离重投循环不双提交")
+    @DisplayName("收割慢转存耗尽租约后仍能收口：reserve 放行回退提交，已提交的任务不再被 reserve 接管")
     void parentReuseSlowTransferRecoversAfterLeaseExhaustion() {
         long parentId = seedJob(9L, "video", "bottom_dock", "processing", 0L,
                 LocalDateTime.now().minusMinutes(200));
@@ -1446,7 +1515,7 @@ class JobStateMachineMySqlIntegrationTest {
                 WHERE id=?
                 """, parentId, jobId);
 
-        assertThat(jobMapper.listDueVideoMattingJobIds(100, 120)).contains(jobId);
+        assertThat(jobMapper.listDueVideoMattingJobIds(100)).contains(jobId);
 
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "harvest-worker", 7L)).isTrue();
         assertThat(service.markProviderSubmitted(String.valueOf(jobId), "harvest-worker", 7L,
@@ -1457,7 +1526,7 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "harvest-worker", 7L)).isFalse();
 
         jdbc.update("UPDATE generation_jobs SET next_action_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
-        assertThat(jobMapper.listDueVideoMattingJobIds(100, 120)).doesNotContain(jobId);
+        assertThat(jobMapper.listDueVideoMattingJobIds(100)).contains(jobId);
     }
 
     @Test
@@ -1514,7 +1583,7 @@ class JobStateMachineMySqlIntegrationTest {
 
         jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
                 LocalDateTime.now().minusSeconds(10), jobId);
-        assertThat(jobMapper.listDueAudioMixJobIds(100, 120)).contains(jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100)).contains(jobId);
         var second = claimService.claim(
                 ClaimSpec.bySources(AudioMixContract.TAG, 420, List.of(AudioMixContract.SOURCE), jobMapper),
                 String.valueOf(jobId), "mix-worker");

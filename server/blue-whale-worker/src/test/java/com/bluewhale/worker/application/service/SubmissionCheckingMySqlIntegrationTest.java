@@ -148,7 +148,7 @@ class SubmissionCheckingMySqlIntegrationTest {
                     new SceneCardGenerationRecordSync(sm, rm, events),
                     new StoryboardPreviewSync(sm, pm, events),
                     events,
-                    JobSettlementPublisher.noop());
+                    TerminalEventOutbox.noop());
         }
 
         @SuppressWarnings({"unchecked", "rawtypes"})

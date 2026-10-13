@@ -34,7 +34,7 @@ class JobFinalizerAudioVideoMuxTest {
     @Mock SceneCardGenerationRecordSync recordSync;
     @Mock StoryboardPreviewSync previewSync;
     @Mock ProjectEventPublisher eventPublisher;
-    @Mock JobSettlementPublisher settlementPublisher;
+    @Mock TerminalEventOutbox settlementPublisher;
 
     private JobFinalizer finalizer;
 

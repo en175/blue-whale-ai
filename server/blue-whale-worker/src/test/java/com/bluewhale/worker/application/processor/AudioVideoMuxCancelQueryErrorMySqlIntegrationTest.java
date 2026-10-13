@@ -2,7 +2,7 @@ package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
-import com.bluewhale.worker.application.service.JobSettlementPublisher;
+import com.bluewhale.worker.application.service.TerminalEventOutbox;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.ProjectEventPublisher;
 import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
@@ -188,7 +188,7 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
                     new SceneCardGenerationRecordSync(sm, rm, events),
                     new StoryboardPreviewSync(sm, pm, events),
                     events,
-                    JobSettlementPublisher.noop());
+                    TerminalEventOutbox.noop());
         }
 
         private static <T> MapperFactoryBean<T> factory(Class<T> mapperIf, SqlSessionFactory sf)
