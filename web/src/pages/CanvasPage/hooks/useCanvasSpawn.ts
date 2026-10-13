@@ -1,15 +1,12 @@
 import { useCallback, useRef, type RefObject } from 'react';
-import type { Node } from '@xyflow/react';
 import { nextDraftPosition } from '../draftSpawn';
 import { nodeBoxOf } from '../canvasPureNodeHelpers';
+import type { CanvasGraph } from './useCanvasGraph';
 
 const DOCK_RESERVE_PX = 300;
 
 export interface CanvasSpawnHost {
-  textNodesRef: RefObject<Node[]>;
-  mediaNodesRef: RefObject<Node[]>;
-  productNodesRef: RefObject<Node[]>;
-  assetNodesRef: RefObject<Node[]>;
+  graph: CanvasGraph;
 }
 
 export interface CanvasSpawnHandles {
@@ -21,7 +18,7 @@ export interface CanvasSpawnHandles {
 }
 
 export function useCanvasSpawn(host: CanvasSpawnHost): CanvasSpawnHandles {
-  const { textNodesRef, mediaNodesRef, productNodesRef, assetNodesRef } = host;
+  const { graph } = host;
   const spawnPosRef = useRef<(screenPt?: { x: number; y: number }) => { x: number; y: number }>(
     () => ({ x: 300, y: 200 }),
   );
@@ -40,13 +37,13 @@ export function useCanvasSpawn(host: CanvasSpawnHost): CanvasSpawnHandles {
   };
   const spawnNearScreen = (screenPt: { x: number; y: number }) => {
     const center = spawnPosRef.current(screenPt);
-    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+    const nodes = graph.allNodes();
     return nextDraftPosition({ center, dockTop: center.y + 2000, nodes: nodes.map(nodeBoxOf) });
   };
   const spawnDraftPosition = () => {
     const center = spawnPosRef.current();
     const dockTop = spawnPosRef.current({ x: window.innerWidth / 2, y: window.innerHeight - DOCK_RESERVE_PX }).y;
-    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+    const nodes = graph.allNodes();
     return nextDraftPosition({ center, dockTop, nodes: nodes.map(nodeBoxOf) });
   };
 

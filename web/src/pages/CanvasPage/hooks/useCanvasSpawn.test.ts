@@ -9,16 +9,26 @@ vi.mock('../draftSpawn', () => ({ nextDraftPosition: (input: { dockTop: number }
 vi.mock('../canvasPureNodeHelpers', () => ({ nodeBoxOf: () => ({ width: 1, height: 1 }) }));
 
 import { useCanvasSpawn, type CanvasSpawnHost } from './useCanvasSpawn';
+import { createCanvasGraph } from './useCanvasGraph';
 
 function ref<T>(current: T): RefObject<T> {
   return { current } as RefObject<T>;
 }
-function buildHost(over: Partial<CanvasSpawnHost> = {}): CanvasSpawnHost {
-  return {
+function buildGraph() {
+  return createCanvasGraph({
     textNodesRef: ref<Node[]>([]),
     mediaNodesRef: ref<Node[]>([]),
     productNodesRef: ref<Node[]>([]),
     assetNodesRef: ref<Node[]>([]),
+    setTextNodes: () => {},
+    setMediaNodes: () => {},
+    setProductNodes: () => {},
+    setAssetNodes: () => {},
+  });
+}
+function buildHost(over: Partial<CanvasSpawnHost> = {}): CanvasSpawnHost {
+  return {
+    graph: buildGraph(),
     ...over,
   };
 }
