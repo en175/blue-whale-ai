@@ -11,7 +11,7 @@ import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
 import { nodeBoxOf, readRecoveryErrorReason, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
-import { defaultVideoModeFor, draftVideoModeOf } from './videoModes';
+import { draftVideoModeOf } from './videoModes';
 import {
   frameSlotCountOf,
   isFrameMode,
@@ -134,7 +134,7 @@ import {
 import { fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProject, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/assetUrlCache';
-import { referencePromptPlan, applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
+import { referencePromptPlan, applyPromptPreview, legacyCardHistoryOptions, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { openRechargeForCreditsError } from '@/utils/creditsGate';
@@ -186,6 +186,8 @@ import { useCanvasPickSessionClick } from './hooks/useCanvasPickSessionClick';
 import { useCanvasAssetsPlacement } from './hooks/useCanvasAssetsPlacement';
 import { useCanvasUpdateGenerate } from './hooks/useCanvasUpdateGenerate';
 import { useCanvasToolDraftCreators } from './hooks/useCanvasToolDraftCreators';
+import { useCanvasChatQuote } from './hooks/useCanvasChatQuote';
+import { useCanvasDraftCardCreators } from './hooks/useCanvasDraftCardCreators';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   applyDraggedNodesToGroups,
@@ -194,7 +196,7 @@ import {
   type CanvasGroup,
 } from './canvasGroups';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
-import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
+import { extractTextNodeText, quoteChipLabel } from './quoteConversation';
 import {
   canvasLocationSearch,
   findLastOpenedProjectId,
@@ -623,6 +625,12 @@ export default function CanvasPage() {
   const [assetNodes, setAssetNodes] = useState<Node[]>([]);
   const mediaNodesRef = useRef<Node[]>([]);
   mediaNodesRef.current = mediaNodes;
+  const textNodesRef = useRef<Node[]>([]);
+  textNodesRef.current = textNodes;
+  const productNodesRef = useRef<Node[]>([]);
+  productNodesRef.current = productNodes;
+  const assetNodesRef = useRef<Node[]>([]);
+  assetNodesRef.current = assetNodes;
   const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);
   const [imageModels, setImageModels] = useState<GenerationModel[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
@@ -863,7 +871,6 @@ export default function CanvasPage() {
     showToast('warn', `文本节点 ${id}：${draftErrorsRef.current.get(id)}，请修正后继续`);
     return true;
   };
-  const quoteMutation = useMutation({ mutationFn: createConversationQuote });
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
   const referencePlanMutation = useMutation({ mutationFn: (input: Parameters<typeof referencePromptPlan>[0]) => referencePromptPlan(input) });
   const linkAudioMixAssetsMutation = useMutation({
@@ -1481,133 +1488,19 @@ export default function CanvasPage() {
       setMediaNodes((prev) => prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, fileName: name, customName: true } } : n)));
     }
   };
-  const quoteTextIntoChat = async (input: QuoteConversationInput) => {
-    if (input.text.length > QUOTE_TEXT_LIMIT) {
-      showToast('warn', `正文超过 ${QUOTE_TEXT_LIMIT} 字上限，未添加到对话`);
-      return;
-    }
-    try {
-      const { quote } = await quoteMutation.mutateAsync({
-        projectId: currentId,
-        nodeId: input.nodeId,
-        title: input.title,
-        text: input.text,
-        source: input.source ?? null,
-      });
-      const label = quoteChipLabel(input.title, input.text);
-      const blocks = [textQuoteBlock({ nodeId: input.nodeId, chipId: String(input.ts), label, quote }), ...(input.extraBlocks ?? [])];
-      setAgentCandidate(candidate => candidate?.some(block => block.node_id === input.nodeId) ? null : candidate);
-      setAgentContext({ text: `@${label}`, label, ts: input.ts, mediaBlocks: blocks });
-      setShowAgent(true);
-    } catch (e) {
-      showToast('error', isApiError(e) ? `添加到对话失败：${e.message}` : '添加到对话失败，请检查网络后重试');
-    }
-  };
-  const confirmAgentCandidate = async (blocks: SessionContentBlock[]): Promise<SessionContentBlock[]> => {
-    const first = blocks[0];
-    if (first.type !== 'text') return blocks;
-    const node = textNodesRef.current.find((item) => item.id === first.node_id);
-    if (!node) throw new Error('源文本节点已删除，请取消后重新选择');
-    const draftError = draftErrorsRef.current.get(node.id);
-    if (draftError) throw new Error(draftError);
-    const text = extractTextNodeText(node.data);
-    if (!text) throw new Error('文本正文为空，请编辑后重试');
-    if (text.length > QUOTE_TEXT_LIMIT) throw new Error(`正文超过 ${QUOTE_TEXT_LIMIT} 字上限`);
-    const title = typeof node.data.title === 'string' ? node.data.title : '';
-    const { quote } = await quoteMutation.mutateAsync({
-      projectId: currentId, nodeId: node.id, title, text,
-      source: readPromptSource(node.data.promptSource),
-    });
-    return [textQuoteBlock({ nodeId: node.id, chipId: first.chip_id!, label: quoteChipLabel(title, text), quote })];
-  };
-  const handleAddToChatNode = (id: string) => {
-    const ts = Date.now();
-    const p = productNodesRef.current.find((n) => n.id === id);
-    if (p) {
-      const name = (p.data?.name as string) || '商品';
-      const mediaBlocks = collectMediaBlocks(p, String(ts));
-      console.log('[handleAddToChatNode] productNode, mediaBlocks:', mediaBlocks.length);
-      setAgentContext({
-        text: `@${name}`,
-        label: name,
-        ts,
-        mediaBlocks: mediaBlocks.length > 0 ? mediaBlocks : undefined,
-      });
-      setShowAgent(true);
-      return;
-    }
-    const t = textNodesRef.current.find((n) => n.id === id);
-    if (t) {
-      if (blockInvalidDraft([id])) return;
-      const text = extractTextNodeText(t.data as Record<string, unknown> | undefined);
-      if (text) {
-        void quoteTextIntoChat({
-          nodeId: t.id,
-          title: typeof t.data?.title === 'string' ? t.data.title : '',
-          text,
-          source: readPromptSource(t.data?.promptSource),
-          ts,
-        });
-      } else {
-        const label = typeof t.data?.title === 'string' && t.data.title.trim() ? t.data.title : '文本节点';
-        setAgentContext({ text: `@${label}`, label, ts });
-        setShowAgent(true);
-      }
-      return;
-    }
-    const m = mediaNodesRef.current.find((n) => n.id === id);
-    if (m) {
-      if (m.data?.assetMissing) {
-        showToast('warn', '素材已被删除');
-        return;
-      }
-      const type = m.data?.mediaType === 'video' ? '视频' : '图片';
-      const label = `[${type}] ${m.data?.fileName || ''}`;
-      const mediaBlocks = collectMediaBlocks(m, String(ts));
-      console.log('[handleAddToChatNode] mediaNode, mediaBlocks:', mediaBlocks.length);
-      setAgentContext({
-        text: label,
-        label,
-        ts,
-        mediaBlocks: mediaBlocks.length > 0 ? mediaBlocks : undefined,
-      });
-      setShowAgent(true);
-      return;
-    }
-    const a = assetNodesRef.current.find((n) => n.id === id);
-    if (a) {
-      const gc = a.data?.generationCard as { shotTitle?: string; prompt?: string } | undefined;
-      const kindTitle: Record<string, string> = {
-        style: '风格卡',
-        character: '角色卡',
-        object: '物体卡',
-        environment: '环境卡',
-        custom: '自定义卡',
-        generation: '生成卡',
-      };
-      const name = gc?.shotTitle || kindTitle[(a.data?.kind as string) ?? 'custom'] || '资产卡';
-      const prompt = typeof gc?.prompt === 'string' ? gc.prompt : '';
-      if (gc && prompt.trim()) {
-        void quoteTextIntoChat({
-          nodeId: a.id,
-          title: gc.shotTitle ?? '',
-          text: prompt,
-          ts,
-          extraBlocks: collectMediaBlocks(a, String(ts)),
-        });
-        return;
-      }
-      const mediaBlocks = collectMediaBlocks(a, String(ts));
-      console.log('[handleAddToChatNode] assetNode, mediaBlocks:', mediaBlocks.length, 'refs:', (a.data?.initialRefs as unknown[] | undefined)?.length ?? 0);
-      setAgentContext({
-        text: `@${name}`,
-        label: name,
-        ts,
-        mediaBlocks: mediaBlocks.length > 0 ? mediaBlocks : undefined,
-      });
-      setShowAgent(true);
-    }
-  };
+  const { addToChatNode: handleAddToChatNode, confirmAgentCandidate } = useCanvasChatQuote({
+    currentId,
+    textNodesRef,
+    mediaNodesRef,
+    productNodesRef,
+    assetNodesRef,
+    showToast,
+    blockInvalidDraft,
+    draftErrorsRef,
+    setAgentContext,
+    setShowAgent,
+    setAgentCandidate,
+  });
   const complianceCheckRef = useRef<((id: string) => void) | undefined>(undefined);
   const actionsRef = useRef({
     duplicate: handleDuplicateNode,
@@ -2044,195 +1937,33 @@ export default function CanvasPage() {
   ]);
   useEffect(() => { generationDock.reconcile(); }, [generationDock, textGenDraftId, textNodes]);
   const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => generationDock.open('video', { nodeId, preset });
-  const createVideoDraftCard = (seed?: {
-    modelId?: string;
-    ratio?: string;
-    size?: string;
-    duration?: number;
-    mode?: string;
-    generateAudio?: boolean;
-  }, position?: { x: number; y: number }, overrides?: { fileName?: string; data?: Record<string, unknown>; recordHistory?: boolean }): string => {
-    const nodeId = newNodeId('media-draft');
-    const node: Node = {
-      id: nodeId,
-      type: 'mediaNode',
-      position: position ?? spawnDraftPosition(),
-      selected: true,
-      data: {
-        src: '',
-        mediaType: 'video',
-        fileName: overrides?.fileName ?? '视频草稿',
-        genStatus: 'draft',
-        draft: true,
-        prompt: '',
-        ...(overrides?.data ?? {}),
-        toolMode,
-        ...(seed?.modelId != null ? { draftModelId: seed.modelId } : {}),
-        ...(seed?.ratio != null ? { draftRatio: seed.ratio, targetRatio: seed.ratio } : {}),
-        ...(seed?.size != null ? { draftSize: seed.size } : {}),
-        ...(seed?.duration != null ? { draftDuration: seed.duration } : {}),
-        draftMode: seed?.mode ?? defaultVideoModeFor({ reference: [] }),
-        ...(seed?.generateAudio != null ? { draftGenerateAudio: seed.generateAudio } : {}),
-        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
-        onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
-        onDownload: (id: string) => actionsRef.current.download(id),
-        ...dockToolCallbacks,
-        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-        onMediaDims: handleMediaDims,
-      },
-    };
-    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
-    setTextNodes(deselect);
-    setProductNodes(deselect);
-    setAssetNodes(deselect);
-    const nextMedia = [...deselect(mediaNodesRef.current), node];
-    mediaNodesRef.current = nextMedia;
-    setMediaNodes(nextMedia);
-    setSelectRequest({ id: nodeId, ts: Date.now() });
-    if (overrides?.recordHistory) historyRef.current?.pushAddNodes([nodeId]);
-    return nodeId;
-  };
-  const createAudioDraftCard = (
-    position?: { x: number; y: number },
-    opts?: { recordHistory?: boolean },
-  ): string => {
-    const nodeId = newNodeId('media-draft');
-    const node: Node = {
-      id: nodeId,
-      type: 'mediaNode',
-      position: position ?? spawnDraftPosition(),
-      selected: true,
-      data: {
-        src: '',
-        mediaType: 'audio',
-        fileName: '音频草稿',
-        genStatus: 'draft',
-        draft: true,
-        prompt: '',
-        toolMode,
-        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
-        onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
-        onDownload: (id: string) => actionsRef.current.download(id),
-        ...dockToolCallbacks,
-        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-        onMediaDims: handleMediaDims,
-      },
-    };
-    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
-    setTextNodes(deselect);
-    setProductNodes(deselect);
-    setAssetNodes(deselect);
-    const nextMedia = [...deselect(mediaNodesRef.current), node];
-    mediaNodesRef.current = nextMedia;
-    setMediaNodes(nextMedia);
-    setSelectRequest({ id: nodeId, ts: Date.now() });
-    if (opts?.recordHistory) historyRef.current?.pushAddNodes([nodeId]);
-    return nodeId;
-  };
-  const createImageDraftCard = (
-    position?: { x: number; y: number },
-    overrides?: { fileName?: string; data?: Record<string, unknown>; nodeId?: string; skipSelect?: boolean; recordHistory?: boolean },
-  ): string => {
-    const nodeId = overrides?.nodeId ?? newNodeId('media-draft');
-    const skipSelect = overrides?.skipSelect === true;
-    const node: Node = {
-      id: nodeId,
-      type: 'mediaNode',
-      position: position ?? spawnDraftPosition(),
-      selected: !skipSelect,
-      data: {
-        src: '',
-        mediaType: 'image',
-        fileName: overrides?.fileName ?? '图片草稿',
-        genStatus: 'draft',
-        draft: true,
-        prompt: '',
-        ...(overrides?.data ?? {}),
-        toolMode,
-        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
-        onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
-        onDownload: (id: string) => actionsRef.current.download(id),
-        ...dockToolCallbacks,
-        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-        onMediaDims: handleMediaDims,
-      },
-    };
-    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
-    if (skipSelect) {
-      const nextMedia = [...mediaNodesRef.current, node];
-      mediaNodesRef.current = nextMedia;
-      setMediaNodes(nextMedia);
-    } else {
-      setTextNodes(deselect);
-      setProductNodes(deselect);
-      setAssetNodes(deselect);
-      const nextMedia = [...deselect(mediaNodesRef.current), node];
-      mediaNodesRef.current = nextMedia;
-      setMediaNodes(nextMedia);
-      setSelectRequest({ id: nodeId, ts: Date.now() });
-    }
-    if (overrides?.recordHistory) historyRef.current?.pushAddNodes([nodeId]);
-    return nodeId;
-  };
-  const createTextGenDraft = (position?: { x: number; y: number }): string => {
-    const nodeId = newNodeId('text');
-    const node: Node = {
-      id: nodeId,
-      type: 'textNode',
-      position: position ?? spawnDraftPosition(),
-      selected: true,
-      data: {
-        text: '',
-        title: '文本生成',
-        textGen: true,
-        onDraftError: handleDraftError,
-        toolMode,
-        onDelete: (id: string) => removeCanvasNodes([id]),
-        onTextChange: (id: string, text: string) => {
-          setTextNodes((prev) =>
-            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n)),
-          );
-        },
-        onMediaIndexChange: handleMediaIndexChange,
-        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-        onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
-        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-        onWriteSelf: () => {
-          generationDock.writeSelf('text');
-        },
-      },
-    };
-    pendingNodeIdsRef.current.add(nodeId);
-    historyRef.current?.pushAddNodes([nodeId]);
-    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
-    setMediaNodes(deselect);
-    setProductNodes(deselect);
-    setAssetNodes(deselect);
-    setTextNodes((prev) => [...deselect(prev), node]);
-    setSelectRequest({ id: nodeId, ts: Date.now() });
-    return nodeId;
-  };
+  const {
+    createVideoDraftCard,
+    createAudioDraftCard,
+    createImageDraftCard,
+    createTextGenDraft,
+  } = useCanvasDraftCardCreators({
+    toolMode,
+    spawnDraftPosition,
+    mediaNodesRef,
+    actionsRef,
+    historyRef,
+    pendingNodeIdsRef,
+    dockToolCallbacks,
+    handleMediaDims: (id, dims) => handleMediaDims(id, dims),
+    handleMediaIndexChange: (id, mediaMentions, mediaRefs, delta) => handleMediaIndexChange(id, mediaMentions, mediaRefs, delta),
+    handleDraftError: (id, error) => handleDraftError(id, error),
+    removeCanvasNodes: (ids) => removeCanvasNodes(ids),
+    handleSaveMediaToAssets: (id) => { void handleSaveMediaToAssets(id); },
+    handleSaveTextToAssets: (id) => { void handleSaveTextToAssets(id); },
+    generationDock,
+    showToast,
+    setTextNodes,
+    setMediaNodes,
+    setProductNodes,
+    setAssetNodes,
+    setSelectRequest,
+  });
   const openTextGenDialog = (nodeId: string, intent?: 'nodeClick') => generationDock.open('text', { nodeId, intent });
   const openConnectTypeMenu = (sourceIds: string[], clientX: number, clientY: number) => {
     const sources = sourceIds.map(findCanvasNode).filter((n): n is Node => isConnectableSource(n));
@@ -2381,12 +2112,6 @@ export default function CanvasPage() {
   videoModelsRef.current = videoModels;
   const imageModelsRef = useRef<GenerationModel[]>([]);
   imageModelsRef.current = imageModels;
-  const textNodesRef = useRef<Node[]>([]);
-  textNodesRef.current = textNodes;
-  const assetNodesRef = useRef<Node[]>([]);
-  assetNodesRef.current = assetNodes;
-  const productNodesRef = useRef<Node[]>([]);
-  productNodesRef.current = productNodes;
   const {
     assetDetailTarget,
     assetDetailLoading,
