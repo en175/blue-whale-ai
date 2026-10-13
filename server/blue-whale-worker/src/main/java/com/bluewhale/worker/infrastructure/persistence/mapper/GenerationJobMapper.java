@@ -652,6 +652,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND is_delete = false
               AND status IN ('queued', 'processing')
+              AND cancel_requested_at IS NULL
             """)
     int deferNextRequeue(@Param("jobId") Long jobId, @Param("minutes") int minutes);
 
