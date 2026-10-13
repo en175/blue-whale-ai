@@ -143,7 +143,6 @@ import {
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
-import { buildImageJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
   availableGenKinds,
   canConnectSourcesToGen,
@@ -183,6 +182,7 @@ import { useCanvasUploadDrop } from './hooks/useCanvasUploadDrop';
 import { useCanvasPickSessionClick } from './hooks/useCanvasPickSessionClick';
 import { useCanvasNodeClickDispatch } from './hooks/useCanvasNodeClickDispatch';
 import { useCanvasNodeAttachCallbacks } from './hooks/useCanvasNodeAttachCallbacks';
+import { useCanvasHomeHandoff } from './hooks/useCanvasHomeHandoff';
 import { useCanvasAssetsPlacement } from './hooks/useCanvasAssetsPlacement';
 import { useCanvasUpdateGenerate } from './hooks/useCanvasUpdateGenerate';
 import { useCanvasToolDraftCreators } from './hooks/useCanvasToolDraftCreators';
@@ -4048,81 +4048,21 @@ export default function CanvasPage() {
     void handleUpdateGenerate(nodeId, { ratioOverride: 'adaptive' });
   };
   actionsRef.current.fixFollowVideo = handleFixFollowVideo;
-  const firePendingGen = () => {
-    const handoff = pendingGenRef.current;
-    if (!handoff) return;
-    if (!currentId) return;
-    if (!doc) return;
-    pendingGenRef.current = null;
-    const projectId = currentId;
-    (async () => {
-      const items = handoff.kind === 'image'
-        ? handoff.files.map(f => ({ url: f.url, name: f.name, mediaType: 'image' as const, file: f.file, assetId: f.assetId, role: 'reference' as VideoRefRole }))
-        : handoff.refs.map((r, i) => ({ url: r.preview, name: r.file?.name ?? `参考${i + 1}`, mediaType: r.type, file: r.file, assetId: r.assetId,
-            role: (isFrameMode(handoff.mode) ? (i === 0 ? 'first' : 'last') : 'reference') as VideoRefRole }));
-      const references: Array<{
-        assetId: string;
-        url: string;
-        name: string;
-        mediaType: 'image' | 'video';
-        role: VideoRefRole;
-        materialId?: string;
-      }> = [];
-      try {
-        for (const item of items) {
-          let assetId = item.assetId == null ? undefined : String(item.assetId);
-          let url = item.url;
-          if (!assetId) {
-            const file = item.file ?? await fetchUrlAsFile(url, item.name, item.mediaType);
-            const uploaded = file ? await uploadFileToAsset(file, item.mediaType) : null;
-            if (!uploaded) {
-              showToast('error', '参考素材上传失败，请重新发送');
-              return;
-            }
-            assetId = uploaded.asset_id;
-            url = uploaded.url;
-          }
-          await linkAssetToProject(projectId, assetId);
-          references.push({ assetId, url, name: item.name, mediaType: item.mediaType, role: item.role });
-        }
-        if (activeProjectRef.current !== projectId) return;
-        if (handoff.kind === 'image') {
-          const jobRefs = buildImageJobReferences(references.map(r => r.assetId));
-          startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
-            undefined, jobRefs.length > 0 ? { references: jobRefs } : undefined, undefined, { references });
-        } else {
-          startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
-            resolution: handoff.resolution, duration: handoff.duration, mode: handoff.mode,
-            generate_audio: handoff.generateAudio }, undefined,
-            { references: buildVideoJobReferencesFromList(references) },
-            undefined, { references, mode: handoff.mode });
-        }
-      } catch (error) {
-        console.warn('首页生成参考准备失败:', error);
-        showToast('error', '参考素材准备失败，请重新发送');
-      } finally {
-        items.forEach(item => { if (item.file) URL.revokeObjectURL(item.url); });
-      }
-    })();
-    navigate(location.pathname + location.search, { replace: true, state: null });
-  };
+  const { firePendingGen, firePendingVideoDraft } = useCanvasHomeHandoff({
+    currentId,
+    doc,
+    activeProjectRef,
+    pendingGenRef,
+    pendingVideoDraftSeedRef,
+    navigate,
+    location,
+    showToast,
+    uploadFileToAsset: (file, type) => uploadFileToAsset(file, type),
+    createVideoDraftCard: (seed, position, overrides) => createVideoDraftCard(seed, position, overrides),
+    openVideoDraftDialog: (nodeId, preset) => openVideoDraftDialog(nodeId, preset),
+    startGenerationJob: (type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft) => startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft),
+  });
   actionsRef.current.firePendingGen = firePendingGen;
-  const firePendingVideoDraft = () => {
-    const seed = pendingVideoDraftSeedRef.current;
-    if (!seed) return;
-    if (!currentId) return;
-    if (!doc) return;
-    pendingVideoDraftSeedRef.current = null;
-    const nodeId = createVideoDraftCard({
-      modelId: seed.modelId,
-      ratio: seed.aspectRatio,
-      size: seed.resolution,
-      duration: seed.duration,
-      mode: seed.mode,
-      generateAudio: seed.generateAudio,
-    }, undefined, { recordHistory: true });
-    openVideoDraftDialog(nodeId, seed);
-  };
   actionsRef.current.firePendingVideoDraft = firePendingVideoDraft;
   useEffect(() => {
     actionsRef.current.firePendingGen();
