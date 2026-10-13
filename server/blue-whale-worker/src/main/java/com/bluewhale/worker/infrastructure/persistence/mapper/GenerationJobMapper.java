@@ -23,7 +23,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND type = #{type}
               AND is_delete = false
-              AND next_action_at <= NOW()
               AND (
                 status = 'queued'
                 OR (
@@ -202,7 +201,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND type = 'audio'
               AND is_delete = false
-              AND next_action_at <= NOW()
               AND (
                 status = 'queued'
                 OR (
@@ -245,7 +243,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND source IN
               <foreach collection="sources" item="item" open="(" separator="," close=")">#{item}</foreach>
               AND is_delete = false
-              AND next_action_at &lt;= NOW()
               AND (
                 status = 'queued'
                 OR (
@@ -370,7 +367,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND type = 'video'
               AND source IN ('bottom_dock', 'plan_apply', 'plan', 'scene_card')
               AND is_delete = false
-              AND next_action_at <= NOW()
               AND (
                 status = 'queued'
                 OR (

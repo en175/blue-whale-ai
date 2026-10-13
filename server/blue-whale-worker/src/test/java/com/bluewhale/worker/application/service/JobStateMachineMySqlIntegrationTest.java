@@ -419,15 +419,16 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Test
-        @DisplayName("next_action_at 未来 → 候选过滤排除 → empty")
-        void claim_futureNextAction_empty() {
+        @DisplayName("★ next_action_at 在未来也照领 —— 消息到了就执行，退避不阻塞消费")
+        void claim_futureNextAction_stillClaimed() {
             long id = seedJob(7L, "image", "bottom_dock", "queued", 0L,
                     LocalDateTime.now().plusMinutes(5));
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
                     String.valueOf(id), "worker-1");
 
-            assertThat(result).isEmpty();
+            assertThat(result).isPresent();
+            assertThat(readJob(id).getStatus()).isEqualTo("processing");
         }
 
         @Test
@@ -575,14 +576,14 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Test
-        @DisplayName("next_action_at 未来 → 候选过滤排除 → empty")
-        void claimAudioTrim_futureNextAction_empty() {
+        @DisplayName("★ next_action_at 在未来也照领 —— 消息到了就执行")
+        void claimAudioTrim_futureNextAction_stillClaimed() {
             long id = seedJob(7L, "audio_trim", "dock", "queued", 0L,
                     LocalDateTime.now().plusMinutes(5));
 
             assertThat(claimService.claim(
                     ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
-                    String.valueOf(id), "w")).isEmpty();
+                    String.valueOf(id), "w")).isPresent();
         }
     }
 
