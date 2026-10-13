@@ -1,5 +1,5 @@
-import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '@lib/contracts/prompt-target';
-import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
+import { promptBindingList, type PromptBinding } from '@lib/contracts/prompt-target';
+import { promptMentionSchema } from '@lib/contracts/prompt-preview';
 import { replaceImageMentionsWithAssetTokens, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { toast as globalToast } from 'sonner';
@@ -57,7 +57,7 @@ import { type VocalSplitPayload, type AudioToolSubmission } from './audioToolSes
 import {
   type AudioTrimInput,
 } from '@lib/contracts/audio-trim';
-import { AUDIO_MIX_EDGE_ORIGIN, buildAudioMixPlaceholderNode, findAudioMixPosition, isAudioMixNodeId } from './audioMix';
+import { AUDIO_MIX_EDGE_ORIGIN, buildAudioMixPlaceholderNode, findAudioMixPosition } from './audioMix';
 import {
   AUDIO_SPEED_EDGE_ORIGIN,
   AUDIO_SPEED_NODE_PREFIX,
@@ -101,7 +101,7 @@ import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPasst
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
 import { createConnectValidators } from './canvasConnectValidation';
-import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
+import { useEdgesState, type Connection, type Edge, type Node, type Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
 import {
@@ -132,7 +132,7 @@ import { checkFileBeforeUpload, isFileRejected } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
-import { planBindingsCoveredBy, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
+import { mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
 import { normalGenerationTask } from './generationRuntime/normalGeneration';
 import { storyboardTask } from './generationRuntime/storyboardTasks';
 import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from './generationRuntime/mixMuxTasks';
@@ -174,6 +174,9 @@ import { useCanvasDraftRefActions } from './hooks/useCanvasDraftRefActions';
 import { useCanvasTextNodeFactories } from './hooks/useCanvasTextNodeFactories';
 import { useCanvasToolJobSubmissions } from './hooks/useCanvasToolJobSubmissions';
 import { useCanvasImageToolHosts } from './hooks/useCanvasImageToolHosts';
+import { useCanvasSelectionBridge } from './hooks/useCanvasSelectionBridge';
+import { useCanvasNodeDeletion } from './hooks/useCanvasNodeDeletion';
+import { useCanvasEdgeOps } from './hooks/useCanvasEdgeOps';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -327,85 +330,20 @@ export default function CanvasPage() {
     id === submittingNodeId || mediaNodesRef.current.some(
       (n) => n.id === id && (n.data as Record<string, unknown> | undefined)?.genStatus === 'generating',
     );
-  const addCanvasEdge = (source: string, target: string, refRole?: VideoRefRole, marker?: Record<string, unknown>) => {
-    const existing = edgesRef.current.find(e => e.target === target && (e.source === source || (
-      e.data?.inputSources && readAssetId((findCanvasNode(e.source)?.data ?? {}) as Record<string, unknown>) === readAssetId((findCanvasNode(source)?.data ?? {}) as Record<string, unknown>)
-    )));
-    if (existing) {
-      const sources = existing.data?.inputSources as { manual: boolean; planNodeIds: string[] } | undefined;
-      const markManual = !!(sources && !sources.manual);
-      const currentRole = (existing.data as Record<string, unknown> | undefined)?.refRole;
-      const nextRole = refRole && refRole !== 'reference' ? refRole : undefined;
-      const roleChanged = refRole === 'reference'
-        ? currentRole === 'first' || currentRole === 'last'
-        : Boolean(nextRole) && currentRole !== nextRole;
-      if (!markManual && !roleChanged) return;
-      const next = edgesRef.current.map((e) => {
-        if (e.id !== existing.id) return e;
-        const data: Record<string, unknown> = { ...(e.data ?? {}) };
-        if (markManual && sources) data.inputSources = { ...sources, manual: true };
-        if (refRole === 'reference') delete data.refRole;
-        else if (nextRole) data.refRole = nextRole;
-        return { ...e, data };
-      });
-      historyRef.current?.pushReplaceEdges(edgesRef.current, next);
-      edgesRef.current = next;
-      setEdges(next);
-      return;
-    }
-    const edgeData: Record<string, unknown> = {
-      ...(refRole && refRole !== 'reference' ? { refRole } : {}),
-      ...(marker ?? {}),
-    };
-    const edge: Edge = {
-      id: `e-${source}-${target}`,
-      source,
-      target,
-      sourceHandle: null,
-      targetHandle: null,
-      type: 'custom',
-      style: { stroke: '#444' },
-      ...(Object.keys(edgeData).length > 0 ? { data: edgeData } : {}),
-    };
-    historyRef.current?.pushAddEdges([edge]);
-    const next = [...edgesRef.current, edge];
-    edgesRef.current = next;
-    setEdges(next);
-  };
-  const connectPlanToDraft = (planNodeId: string, targetId: string) => {
-    const node = textNodesRef.current.find((n) => n.id === planNodeId);
-    const mentions = promptMentionSchema.array().safeParse(node?.data.promptMentions ?? []);
-    const marker = node && mentions.success && validPromptMentions(extractTextNodeText(node.data), mentions.data)
-      ? { promptReference: { bindings: promptBindingList(mentions.data) } }
-      : undefined;
-    addCanvasEdge(planNodeId, targetId, undefined, marker);
-    if (!marker) return;
-    const next = edgesRef.current.map((edge) => (
-      edge.source === planNodeId && edge.target === targetId
-        ? { ...edge, data: { ...edge.data, ...marker } }
-        : edge
-    ));
-    edgesRef.current = next;
-    setEdges(next);
-  };
-  const syncPlanEdgeBindingsOnShrink = (planNodeId: string, mentions: import('@lib/contracts/prompt-preview').PromptMention[]) => {
-    const nextBindings = promptBindingList(mentions);
-    let changed = false;
-    const next = edgesRef.current.map((edge) => {
-      if (edge.source !== planNodeId) return edge;
-      const confirmed = promptBindingsSchema.safeParse(
-        (edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings,
-      );
-      if (!confirmed.success) return edge;
-      if (JSON.stringify(confirmed.data) === JSON.stringify(nextBindings)) return edge;
-      if (!planBindingsCoveredBy(nextBindings, confirmed.data)) return edge;
-      changed = true;
-      return { ...edge, data: { ...edge.data, promptReference: { bindings: nextBindings } } };
-    });
-    if (!changed) return;
-    edgesRef.current = next;
-    setEdges(next);
-  };
+  const {
+    addCanvasEdge,
+    connectPlanToDraft,
+    syncPlanEdgeBindingsOnShrink,
+    removeTargetInputs,
+    syncTextIndexEdges,
+  } = useCanvasEdgeOps({
+    edgesRef,
+    setEdges,
+    historyRef,
+    isApplying: () => applyingRef.current,
+    findCanvasNode: (id) => findCanvasNode(id),
+    getTextNodes: () => textNodesRef.current,
+  });
   const {
     validateImageRefConnect,
     validateVideoRefConnect,
@@ -520,35 +458,6 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges, submittingNodeId],
   );
-  const removeTargetInputs = (edgeIds: string[]) => {
-    if (applyingRef.current) return;
-    const before = edgesRef.current;
-    const after = releaseRemovedPromptSources(before, before.filter(edge => !edgeIds.includes(edge.id)));
-    historyRef.current?.pushReplaceEdges(before, after);
-    edgesRef.current = after;
-    setEdges(after);
-  };
-  const syncTextIndexEdges = (textId: string, delta: { added: string[]; removed: string[] }) => {
-    if (applyingRef.current) return;
-    const removeIds = delta.removed.map(source => `e-${source}-${textId}`).filter(id => edgesRef.current.some(edge => edge.id === id));
-    if (removeIds.length > 0) removeTargetInputs(removeIds);
-    const additions = delta.added.filter(source => !edgesRef.current.some(edge => edge.source === source && edge.target === textId));
-    if (additions.length === 0) return;
-    const newEdges: Edge[] = additions.map(source => ({
-      id: `e-${source}-${textId}`,
-      source,
-      target: textId,
-      sourceHandle: null,
-      targetHandle: null,
-      type: 'custom',
-      style: { stroke: '#444' },
-      data: { textIndex: true },
-    }));
-    historyRef.current?.pushAddEdges(newEdges);
-    const next = [...edgesRef.current, ...newEdges];
-    edgesRef.current = next;
-    setEdges(next);
-  };
   const handleMediaIndexChange = (id: string, mediaMentions: MediaMention[], mediaRefs: MediaRef[], delta: { added: string[]; removed: string[] }) => {
     setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, mediaMentions, mediaRefs } } : n));
     syncTextIndexEdges(id, delta);
@@ -1038,7 +947,8 @@ export default function CanvasPage() {
       recoverySaveConflictRef.current = false;
       setSaveStatus('idle');
       return;
-    }    const docChanged = hydratedDocRef.current !== doc;
+    }
+    const docChanged = hydratedDocRef.current !== doc;
     hydratedDocRef.current = doc;
     if (!docChanged) {
       const refresh = (prev: Node[]) => {
@@ -1471,45 +1381,25 @@ export default function CanvasPage() {
     }
     dismissAllGenPanels();
   };
-  const handleSelectionChange = ({ nodes }: OnSelectionChangeParams) => {
-    const candidates = nodes.filter((n) => {
-      const m = mediaNodesRef.current.find((x) => x.id === n.id);
-      if (!m || m.selected !== false) return true;
-      return !nodes.some((other) => mediaNodesRef.current.find((x) => x.id === other.id)?.selected === true);
-    });
-    const soloId = candidates.length === 1 ? candidates[0]!.id : null;
-    setSoloSelectedNodeId(soloId);
-    if (pickMode || pickTarget) return;
-    if (toolRuntime.onSelectionChange(
-      { soloId, multiSelect: candidates.length > 1 },
-    )) return;
-    if (soloId && !editSessionActive) {
-      const mediaNode = mediaNodesRef.current.find((n) => n.id === soloId);
-      const mediaData = (mediaNode?.data ?? {}) as Record<string, unknown>;
-      const toolDraft = mediaNode && toolSessions.draft(mediaNode);
-      if (mediaNode && !mediaData.audioVideoMux && (
-        mediaData.draft === true
-        || hasGenerationRecord(mediaNode)
-        || Boolean(toolDraft)
-      )) {
-        const mediaType = mediaData.mediaType;
-        const panelHidden = toolDraft ? toolDraft.hidden : false;
-        const alreadyOpen = toolDraft ? toolDraft.visible
-          : mediaType === 'video' ? showBottomDialog && videoDraftId === soloId
-          : mediaType === 'audio' ? showAudioDialog && audioDraftId === soloId : showImageDialog && imageDraftId === soloId;
-        if (!alreadyOpen && !panelHidden) {
-          if (openMediaDraftDialog(soloId, mediaType, 'selection') !== false) return;
-        }
-      }
-    }
-    generationDock.selection({ soloId, multiSelect: candidates.length > 1, editing: editSessionActive, submittingNodeId });
-  };
-  const handleSelectionChangeRef = useRef(handleSelectionChange);
-  handleSelectionChangeRef.current = handleSelectionChange;
-  const handleSelectionChangeStable = useCallback(
-    (params: OnSelectionChangeParams) => handleSelectionChangeRef.current(params),
-    [],
-  );
+  const { handleSelectionChangeStable } = useCanvasSelectionBridge({
+    mediaNodesRef,
+    pickMode,
+    pickTarget,
+    onSelectionChange: (selection) => toolRuntime.onSelectionChange(selection),
+    editSessionActive,
+    draftOfNode: (node) => toolSessions.draft(node),
+    hasGenerationRecord,
+    showImageDialog,
+    showBottomDialog,
+    showAudioDialog,
+    imageDraftId,
+    videoDraftId,
+    audioDraftId,
+    openMediaDraftDialog: (nodeId, mediaType, intent) => openMediaDraftDialog(nodeId, mediaType, intent),
+    setSoloSelectedNodeId,
+    selection: (input) => generationDock.selection(input),
+    submittingNodeId,
+  });
   const anyGenPanelOpen = generationDock.view.activePanel !== null;
   useEffect(() => {
     if (!anyGenPanelOpen) return;
@@ -2017,24 +1907,25 @@ export default function CanvasPage() {
   toolHostsRef.current.subtitleErase = subtitleEraseHost;
   toolHostsRef.current.cutout = imageCutoutHost;
   const pendingDeleteJobNodesRef = useRef<Set<string>>(new Set());
-  const removeMediaNodeNow = (nodeId: string) => {
-    setMediaNodes((prev) => {
-      const target = prev.find((n) => n.id === nodeId);
-      const src = target?.data?.src;
-      if (typeof src === 'string' && src.startsWith('blob:')) URL.revokeObjectURL(src);
-      return prev.filter((n) => n.id !== nodeId);
-    });
-  };
-  const removeAudioMixCardNow = (nodeId: string) => {
-    const nextNodes = mediaNodesRef.current.filter((node) => node.id !== nodeId);
-    const nextEdges = edgesRef.current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
-    mediaNodesRef.current = nextNodes;
-    edgesRef.current = nextEdges;
-    setMediaNodes(nextNodes);
-    setEdges(nextEdges);
-    activeJobByNodeRef.current.delete(nodeId);
-    if (currentId) void flushCanvasSave(currentId).catch(() => {});
-  };
+  const { removeAudioMixCardNow, removeCanvasNodes, handleRemoveMediaNode } = useCanvasNodeDeletion({
+    currentId,
+    mediaNodesRef,
+    textNodesRef,
+    productNodesRef,
+    assetNodesRef,
+    edgesRef,
+    historyRef,
+    generationRuntimeRef,
+    activeJobByNodeRef,
+    pendingNodeIdsRef,
+    isGeneratingNode,
+    setTextNodes,
+    setMediaNodes,
+    setProductNodes,
+    setAssetNodes,
+    setEdges,
+    flushCanvasSave,
+  });
   const { applyJobTerminal, settleCancelledNode, jobResponseGuarded, rememberGeneratedAsset } =
     useCanvasGenerationTerminal({
       mediaNodesRef,
@@ -2096,67 +1987,6 @@ export default function CanvasPage() {
     handleSaveMediaToAssets: (nodeId) => handleSaveMediaToAssets(nodeId),
     dockCallbacks: dockToolCallbacks,
   });
-  const deleteGeneratingNode = (nodeId: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
-      generationRuntimeRef.current.remove(nodeId);
-      return;
-    }
-    removeMediaNodeNow(nodeId);
-  };
-  const removeCanvasNodes = (ids: string[]) => {
-    if (ids.length === 0) return;
-    const generating = ids.filter((id) => mediaNodesRef.current.some((n) => n.id === id) && isGeneratingNode(id));
-    generating.forEach((id) => void deleteGeneratingNode(id));
-    const idSet = new Set(ids.filter((id) => !generating.includes(id)));
-    if (idSet.size === 0) return;
-    const allNodes = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
-    const removedNodes = allNodes.filter((n) => idSet.has(n.id));
-    const removedEdges = edgesRef.current.filter((e) => idSet.has(e.source) || idSet.has(e.target));
-    const remainingEdges = releaseRemovedPromptSources(edgesRef.current, edgesRef.current.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)));
-    removedNodes.forEach((n) => {
-      const src = (n.data as Record<string, unknown> | undefined)?.src;
-      if (typeof src === 'string' && src.startsWith('blob:')) URL.revokeObjectURL(src);
-    });
-    const undoableNodes = removedNodes.filter((n) => {
-      const src = (n.data as Record<string, unknown> | undefined)?.src;
-      return !(typeof src === 'string' && src.startsWith('blob:'));
-    });
-    const undoableIds = new Set(undoableNodes.map((n) => n.id));
-    const survivingIds = new Set(allNodes.map((n) => n.id).filter((id) => !idSet.has(id)));
-    const undoableEdges = removedEdges.filter(
-      (e) =>
-        (undoableIds.has(e.source) || survivingIds.has(e.source)) &&
-        (undoableIds.has(e.target) || survivingIds.has(e.target)),
-    );
-    if (undoableNodes.length > 0) {
-      historyRef.current?.pushDelete(undoableNodes, undoableEdges, undefined, {
-        before: edgesRef.current.filter(e =>
-          (undoableIds.has(e.source) || survivingIds.has(e.source)) &&
-          (undoableIds.has(e.target) || survivingIds.has(e.target))),
-        after: remainingEdges,
-      });
-    }
-    idSet.forEach((id) => pendingNodeIdsRef.current.delete(id));
-    const filter = (prev: Node[]) => prev.filter((n) => !idSet.has(n.id));
-    setTextNodes(filter);
-    setMediaNodes(filter);
-    setProductNodes(filter);
-    setAssetNodes(filter);
-    if (removedEdges.length > 0) {
-      setEdges(remainingEdges);
-    }
-    if (Array.from(idSet).some(isAudioMixNodeId)) {
-      mediaNodesRef.current = filter(mediaNodesRef.current);
-      edgesRef.current = remainingEdges;
-      if (currentId) void flushCanvasSave(currentId).catch(() => {});
-    }
-  };
   const {
     handleCreateProduct,
     handleCreateAssetCard,
@@ -2212,9 +2042,6 @@ export default function CanvasPage() {
     removeCanvasNodes,
     showToast,
   });
-  const handleRemoveMediaNode = (nodeId: string) => {
-    removeCanvasNodes([nodeId]);
-  };
   const { handleRetryJob } = useCanvasRetryJob({
     currentId,
     mediaNodesRef,
