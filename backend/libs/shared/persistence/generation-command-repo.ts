@@ -72,7 +72,7 @@ export interface GenerationCommandRepo {
     projectId: string,
     idempotency: CreateJobIdempotency,
   ): Promise<CreateJobResult | null>;
-  requestCancel(jobId: string, userId: string): Promise<boolean>;
+  requestCancel(jobId: string, userId: string): Promise<CancelOutcome>;
   retryJob(
     originalJobId: string,
     projectId: string,
@@ -110,6 +110,8 @@ export interface GenerationCommandRepo {
     details?: Record<string, unknown>,
   ): Promise<boolean>;
 }
+
+export type CancelOutcome = "cancelled" | "not_found" | "not_cancelable";
 
 export const SOURCE_BOTTOM_DOCK = "bottom_dock";
 
@@ -314,23 +316,29 @@ export function createGenerationCommandRepo(
     },
 
     async requestCancel(jobId, userId) {
-      const job = await prisma.generation_jobs.findFirst({
-        where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
-        select: { status: true },
-      });
-      if (!job || (job.status !== "queued" && job.status !== "processing"))
-        return false;
-      await prisma.generation_jobs.update({
-        where: { id: BigInt(jobId) },
+      const updated = await prisma.generation_jobs.updateMany({
+        where: {
+          id: BigInt(jobId),
+          user_id: BigInt(userId),
+          is_delete: false,
+          status: "queued",
+        },
         data: { cancel_requested_at: new Date() },
       });
+      if (updated.count !== 1) {
+        const exists = await prisma.generation_jobs.findFirst({
+          where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
+          select: { status: true },
+        });
+        return exists ? "not_cancelable" : "not_found";
+      }
       await this.appendLog(
         jobId,
         "cancel_requested",
-        job.status,
+        "queued",
         "用户请求取消",
       );
-      return true;
+      return "cancelled";
     },
 
     retryJob(

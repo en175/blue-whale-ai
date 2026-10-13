@@ -63,6 +63,7 @@ export const ERROR_ENQUEUE_FAILED = "enqueue_failed";
 
 export const ERROR_JOB_NOT_RETRYABLE_STATUS = "job_not_retryable_status";
 export const ERROR_JOB_ALREADY_RETRIED = "job_already_retried";
+export const ERROR_JOB_NOT_CANCELABLE = "job_not_cancelable";
 
 export const ERROR_QUOTE_STALE = "quote_stale";
 export const ERROR_FINALIZE_ALREADY_ATTEMPTED = "finalize_already_attempted";
@@ -143,6 +144,7 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_CONTENT_REJECTED_AUDIO]: 1059,
   [ERROR_TASK_TYPE_PARAM_CONSTRAINT]: 1060,
   [ERROR_PLATFORM_QUOTA_EXHAUSTED]: 1061,
+  [ERROR_JOB_NOT_CANCELABLE]: 1062,
 };
 
 export function errorCodeToNumeric(code: string): number {
@@ -349,6 +351,7 @@ export const ERROR_CODES: Record<number, string> = {
   1059: "生成的音频可能涉及版权限制，请调整提示词后重试",
   1060: "提示词包含修改、替换或延长原视频的意图，输出比例将自动跟随参考视频，请将比例切换为「自动」后重试",
   1061: "生成服务额度不足，请联系平台管理员",
+  1062: "仅排队中的任务可取消",
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",
   1103: "当前账号未设置密码",
