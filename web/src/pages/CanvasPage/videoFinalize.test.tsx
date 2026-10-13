@@ -424,6 +424,19 @@ describe('IKIZQE 成片按钮（页面流）', () => {
     await vi.waitFor(() => expect(sampleNode().data?.finalizeCta).toBeUndefined());
   });
 
+  it('轮询 checking → processing：卡片文案随任务回到生成中，不保留「状态核对中」', async () => {
+    apiMocks.fetchJobStatus.mockImplementation(async () => defaultFinalDetail({ status: 'checking', charge_state: 'held', actual_credits: null, asset: null }));
+    await renderPage();
+    await waitForCta('ready');
+    await clickFinalize();
+    await vi.waitFor(() => expect(finalNodeOf()!.data?.genStatus).toBe('checking'));
+
+    apiMocks.fetchJobStatus.mockImplementation(async () => defaultFinalDetail({ status: 'processing', asset: null, progress: 42 }));
+    await vi.waitFor(() => expect(finalNodeOf()!.data?.genStatus).toBe('generating'), { timeout: 4000 });
+    expect(finalNodeOf()!.data?.progress).toBe(42);
+    await waitForCta('running');
+  });
+
   it('成片失败：失败原因 + 退费状态投影回填，不提供同 Draft ID 重试；样片不再渲染成片入口', async () => {
     apiMocks.fetchJobStatus.mockImplementation(async () => defaultFinalDetail({
       status: 'failed',
