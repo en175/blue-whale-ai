@@ -51,7 +51,7 @@ import {
 } from './mediaExtract';
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
 import { type ImageEnhanceSubmission, type VideoEnhanceSubmission, type FrameInterpolationSubmission } from './panelToolSessions';
-import { apiErrorMessage, isSilentAuthError } from './toolSessionCapture';
+import { isSilentAuthError } from './toolSessionCapture';
 import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import {
   AUDIO_TRIM_EDGE_ORIGIN,
@@ -77,7 +77,6 @@ import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from './scene
 import { type SceneSplitSubmission } from './sceneSplitSession';
 import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from './smartMatting';
 import { imageEnhanceDraftPosition } from './imageEnhance';
-import { type VideoEnhanceIdentity } from './videoEnhance';
 import {
   type FrameInterpolationIdentity,
 } from './frameInterpolation';
@@ -156,10 +155,10 @@ import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
 import { normalGenerationTask } from './generationRuntime/normalGeneration';
 import { storyboardTask } from './generationRuntime/storyboardTasks';
-import { createImageToolsTask, isImageToolsCard, imageToolsRetryPayloadOf, type ImageToolsPayload } from './generationRuntime/imageTools';
+import { createImageToolsTask, type ImageToolsPayload } from './generationRuntime/imageTools';
 import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from './generationRuntime/mixMuxTasks';
 import { sceneSplitTask, vocalSplitTask } from './generationRuntime/multiOutputTasks';
-import { videoToolsTask, videoToolFrozenPayload, type VideoToolPayload } from './generationRuntime/videoTools';
+import { videoToolsTask, type VideoToolPayload } from './generationRuntime/videoTools';
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
 import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
 import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
@@ -182,6 +181,7 @@ import { useCanvasNodeClickDispatch } from './hooks/useCanvasNodeClickDispatch';
 import { useCanvasNodeAttachCallbacks } from './hooks/useCanvasNodeAttachCallbacks';
 import { useCanvasHomeHandoff } from './hooks/useCanvasHomeHandoff';
 import { useCanvasApplyAgentCard } from './hooks/useCanvasApplyAgentCard';
+import { useCanvasRetryJob } from './hooks/useCanvasRetryJob';
 import { useCanvasAssetsPlacement } from './hooks/useCanvasAssetsPlacement';
 import { useCanvasUpdateGenerate } from './hooks/useCanvasUpdateGenerate';
 import { useCanvasToolDraftCreators } from './hooks/useCanvasToolDraftCreators';
@@ -2602,72 +2602,18 @@ export default function CanvasPage() {
   const handleRemoveMediaNode = (nodeId: string) => {
     removeCanvasNodes([nodeId]);
   };
-  const handleRetryJob = (nodeId: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const jobId = node?.data?.jobId as number | string | undefined;
-    if (node && (isAudioMixNodeId(nodeId) || audioVideoMuxIdentityOf(node) != null)) {
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法重试');
-        return;
-      }
-      const inFlight = generationRuntimeRef.current?.statusOf(nodeId);
-      if (inFlight && (inFlight.phase === 'submitting' || inFlight.phase === 'generating')) return;
-      generationRuntimeRef.current?.retry(nodeId);
-      return;
-    }
-    if (node && isImageToolsCard(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
-      if (jobId != null) {
-        generationRuntimeRef.current?.retry(nodeId);
-        return;
-      }
-      const payload = imageToolsRetryPayloadOf(nodeId, (node.data ?? {}) as Record<string, unknown>);
-      if (!payload) {
-        showToast('warn', '原任务输入已不可信，请重新编辑后再发送');
-        return;
-      }
-      const target = imageToolTargetOfNode(nodeId);
-      if (!target) return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '', errorCode: undefined });
-      dispatchImageToolTask(payload, target).catch(() => {});
-      return;
-    }
-    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法重试');
-        return;
-      }
-      const hdRetry = videoToolFrozenPayload(nodeId, (node.data ?? {}) as Record<string, unknown>)?.kind === 'videoEnhance';
-      if (hdRetry && (isVideoEnhanceCardInFlight(nodeId) || node.data.genStatus === 'generating' || node.data.genStatus === 'checking')) return;
-      const ownsHdSession = hdRetry ? toolRuntime.captureSessionOwnership('videoEnhance') : null;
-      const finishHd = hdRetry ? beginVideoEnhanceSubmission(nodeId) : null;
-      generationRuntimeRef.current.retry(nodeId, {
-        deferGeneratingUntilAccepted: hdRetry,
-        onStale: () => finishHd?.(),
-        onCreateFailure: hdRetry ? (error: unknown) => {
-          finishHd?.();
-          if (!isSilentAuthError(error) && ownsHdSession?.() && !isVideoEnhanceCardInFlight(nodeId)) {
-            if (isApiError(error)) globalToast.error(error.message);
-            showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
-          }
-          return false;
-        } : undefined,
-        onAccepted: () => {
-          finishHd?.();
-          const identityData = (mediaNodesRef.current.find((n) => n.id === nodeId)?.data ?? {}) as Record<string, unknown>;
-          const frozen = videoToolFrozenPayload(nodeId, identityData);
-          const frameIdentity = identityData.frameInterpolation as FrameInterpolationIdentity | undefined;
-          if (frameIdentity != null && frozen?.kind === 'frameInterpolation') {
-            patchMediaNode(nodeId, { frameInterpolation: { ...frameIdentity, frozenParams: { fps: frozen.input.fps } } });
-            return;
-          }
-          const hdIdentity = identityData.videoEnhance as VideoEnhanceIdentity | undefined;
-          if (hdIdentity != null && frozen?.kind === 'videoEnhance') {
-            patchMediaNode(nodeId, { videoEnhance: { ...hdIdentity, lastParams: { resolution: frozen.input.resolution } } });
-          }
-        },
-      });
-    }
-  };
+  const { handleRetryJob } = useCanvasRetryJob({
+    currentId,
+    mediaNodesRef,
+    generationRuntimeRef,
+    patchMediaNode,
+    isVideoEnhanceCardInFlight,
+    imageToolTargetOfNode: (nodeId) => imageToolTargetOfNode(nodeId),
+    dispatchImageToolTask: (payload, target) => dispatchImageToolTask(payload, target),
+    beginVideoEnhanceSubmission: (nodeId) => beginVideoEnhanceSubmission(nodeId),
+    captureSessionOwnership: (kind) => toolRuntime.captureSessionOwnership(kind),
+    showToast,
+  });
   actionsRef.current.cancelJob = handleCancelJob;
   actionsRef.current.retryJob = handleRetryJob;
   actionsRef.current.removeMediaNode = handleRemoveMediaNode;
