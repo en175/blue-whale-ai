@@ -194,7 +194,7 @@ export async function createJobWithinTx(
     }
   }
   const now = new Date();
-  const deadline = new Date(now.getTime() + 30 * 60 * 1000);
+  const deadline = new Date(now.getTime() + 90 * 60 * 1000);
   const frozenInput = await freezePlacementAnchor(tx, input);
   const jobInput = { ...frozenInput, expected_output_count: input.expectedOutputCount };
   const job = await tx.generation_jobs.create({
@@ -506,7 +506,7 @@ export function createGenerationCommandRepo(
         }
 
         const now = new Date();
-        const deadline = new Date(now.getTime() + 30 * 60 * 1000);
+        const deadline = new Date(now.getTime() + 90 * 60 * 1000);
         const retry = await tx.generation_jobs.create({
           data: {
             project_id: pid,
