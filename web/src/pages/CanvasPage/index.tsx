@@ -5,7 +5,6 @@ import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore
 import { toast as globalToast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
 import { nodeBoxOf, readRecoveryErrorReason, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
@@ -47,7 +46,7 @@ import {
   mediaExtractNodeId,
 } from './mediaExtract';
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
-import { type ImageEnhanceSubmission, type VideoEnhanceSubmission, type FrameInterpolationSubmission } from './panelToolSessions';
+import { type ImageEnhanceSubmission, type VideoEnhanceSubmission } from './panelToolSessions';
 import { isSilentAuthError } from './toolSessionCapture';
 import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import {
@@ -74,9 +73,6 @@ import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from './scene
 import { type SceneSplitSubmission } from './sceneSplitSession';
 import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from './smartMatting';
 import { imageEnhanceDraftPosition } from './imageEnhance';
-import {
-  type FrameInterpolationIdentity,
-} from './frameInterpolation';
 import { IMAGE_ERASE_EDGE_ORIGIN, rasterizeMaskToPngFile } from './imageErase';
 import { VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN } from '@lib/contracts/video-subtitle-erase';
 import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
@@ -131,9 +127,6 @@ import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { openRechargeForCreditsError } from '@/utils/creditsGate';
 import type { SessionContentBlock } from '@/api/agentSessions';
-import {
-  fetchJobStatus,
- } from '@/api/jobs';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -188,6 +181,7 @@ import { useCanvasConnectHandlers } from './hooks/useCanvasConnectHandlers';
 import { useCanvasNodeDragHandlers } from './hooks/useCanvasNodeDragHandlers';
 import { useCanvasDraftRefActions } from './hooks/useCanvasDraftRefActions';
 import { useCanvasTextNodeFactories } from './hooks/useCanvasTextNodeFactories';
+import { useCanvasFrameInterpolation } from './hooks/useCanvasFrameInterpolation';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -2566,102 +2560,21 @@ export default function CanvasPage() {
     addCanvasEdge,
     patchMediaNode,
   });
-  const startFrameInterpolationJob = async (submission: FrameInterpolationSubmission): Promise<boolean> => {
-    const { nodeId, payload: input, identity } = submission;
-    const fps = input.fps;
-    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
-    const sent = submitVideoToolTask({ kind: 'frameInterpolation', input }, nodeId, {
-      onAccepted: () => {
-        const current = (mediaNodesRef.current.find((node) => node.id === nodeId)?.data.frameInterpolation as FrameInterpolationIdentity | undefined);
-        patchMediaNode(nodeId, {
-          frameInterpolation: { ...identity, lastParams: current?.lastParams, frozenParams: { fps } },
-        });
-      },
-      onCreateFailure: (e: unknown) => {
-        const rollback = mediaNodesRef.current.find((n) => n.id === nodeId);
-        const isDraft = ((rollback?.data ?? {}) as Record<string, unknown>).draft === true;
-        patchMediaNode(nodeId, { genStatus: isDraft ? 'draft' : undefined, progress: undefined, errorText: undefined });
-        if (!(e as { _skipped?: boolean })._skipped) {
-          showToast('error', isApiError(e) ? e.message : '插帧任务创建失败，请重试');
-        }
-        return true;
-      },
-    });
-    toolRuntime.reconcileSources(new Set(mediaNodesRef.current.map((node) => node.id)));
-    return sent;
-  };
-  const recoverFrameInterpolation = (nodeId: string, savedJobId?: unknown) => {
-    const projectId = activeProjectRef.current;
-    if (!projectId) return;
-    const activeAtStart = activeJobByNodeRef.current.get(nodeId);
-    queryClient.fetchQuery(frameInterpolationRecoveryOptions(projectId, nodeId))
-      .then(({ current, input }) => {
-        if (activeProjectRef.current !== projectId) return;
-        const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-        if (!node) return;
-        const data = (node.data ?? {}) as Record<string, unknown>;
-        if (data.jobId !== savedJobId ||
-          activeJobByNodeRef.current.get(nodeId) !== activeAtStart ||
-          generationRuntimeRef.current?.statusOf(nodeId)?.phase === 'submitting' ||
-          locallyRemovedGenerationNodesRef.current.has(nodeId) || !data.frameInterpolation) return;
-        if (!current) return;
-        if (current.status === 'cancelled') {
-          activeJobByNodeRef.current.delete(nodeId);
-          settleCancelledNode(nodeId);
-          return;
-        }
-        const identity = data.frameInterpolation as FrameInterpolationIdentity;
-        if (input) patchMediaNode(nodeId, {
-          frameInterpolation: { ...identity, sourceAssetId: input.source_asset_id, frozenParams: { fps: input.fps }, recoveryBlocked: undefined },
-        });
-        else if (identity.recoveryBlocked) {
-          patchMediaNode(nodeId, { frameInterpolation: { ...identity, recoveryBlocked: undefined } });
-        }
-        if (current.status === 'queued' || current.status === 'processing') {
-          patchMediaNode(nodeId, {
-            genStatus: 'generating',
-            progress: current.progress,
-            errorText: undefined,
-            jobId: current.job_id,
-          });
-          generationRuntimeRef.current?.resumeFromHydration(nodeId, String(current.job_id), (node.data ?? {}) as Record<string, unknown>);
-          return;
-        }
-        activeJobByNodeRef.current.set(nodeId, String(current.job_id));
-        patchMediaNode(nodeId, { jobId: current.job_id });
-        void fetchJobStatus(current.job_id)
-          .then((detail) => {
-            if (!jobResponseGuarded(nodeId, current.job_id)) return;
-            if (applyJobTerminal(nodeId, current.job_id, detail) === 'processing') {
-              patchMediaNode(nodeId, {
-                genStatus: 'generating',
-                progress: detail.progress,
-                errorText: undefined,
-              });
-              generationRuntimeRef.current?.resumeFromHydration(nodeId, String(current.job_id), (node.data ?? {}) as Record<string, unknown>);
-            }
-          })
-          .catch(() => {
-            if (!jobResponseGuarded(nodeId, current.job_id)) return;
-            patchMediaNode(nodeId, {
-              genStatus: 'generating',
-              progress: current.progress,
-              errorText: undefined,
-            });
-            generationRuntimeRef.current?.resumeFromHydration(nodeId, String(current.job_id), (node.data ?? {}) as Record<string, unknown>);
-          });
-      })
-      .catch((e: unknown) => {
-        console.warn('[frame-interpolation] 恢复查询失败:', e);
-        const failedNode = mediaNodesRef.current.find((n) => n.id === nodeId);
-        const failedData = (failedNode?.data ?? {}) as Record<string, unknown>;
-        const failedIdentity = failedData.frameInterpolation as FrameInterpolationIdentity | undefined;
-        if (failedIdentity != null && !failedIdentity.recoveryBlocked) {
-          patchMediaNode(nodeId, { frameInterpolation: { ...failedIdentity, recoveryBlocked: true } });
-        }
-      });
-  };
+  const { handleStartFrameInterpolation: startFrameInterpolationJob, recoverFrameInterpolation } = useCanvasFrameInterpolation({
+    activeProjectRef,
+    mediaNodesRef,
+    activeJobByNodeRef,
+    locallyRemovedGenerationNodesRef,
+    generationRuntimeRef,
+    queryClient,
+    patchMediaNode,
+    toolRuntime: { reconcileSources: (ids) => toolRuntime.reconcileSources(ids) },
+    submitVideoToolTask: (payload, targetNodeId, options) => submitVideoToolTask(payload, targetNodeId, options),
+    applyJobTerminal,
+    settleCancelledNode,
+    jobResponseGuarded,
+    showToast,
+  });
   recoverFrameInterpolationRef.current = recoverFrameInterpolation;
   const beginVideoEnhanceSubmission = (nodeId: string) => {
     const pending = videoEnhanceInFlightRef.current.get(nodeId) ?? new Set<{ projectId: string | null; loadEpoch: object }>();
