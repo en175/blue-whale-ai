@@ -2,90 +2,46 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getDefaultMode, getClaudeDir, isShellSafe } = require('./ponytail-config');
+const { getDefaultMode, getClaudeDir } = require('./ponytail-config');
 const { getPonytailInstructions } = require('./ponytail-instructions');
 const {
-  clearMode,
-  cursorRuleNotice,
-  cursorRulePath,
-  isCodex,
-  isCopilot,
-  isCursor,
-  setMode,
-  writeHookOutput,
+  clearMode, cursorRuleNotice, cursorRulePath, isCodex, isCopilot, isCursor,
+  isCodeBuddy, setMode, writeHookOutput, projectDir, stateDirectory,
 } = require('./ponytail-runtime');
 
-const claudeDir = getClaudeDir();
-const settingsPath = path.join(claudeDir, 'settings.json');
-
 const mode = getDefaultMode();
-
 if (mode === 'off') {
   clearMode();
-  const hookOutput = (isCodex || isCopilot || isCursor) ? '' : 'OK';
-  writeHookOutput('SessionStart', 'off', hookOutput);
   process.exit(0);
 }
-
 if (isCursor) {
   const rule = cursorRulePath();
   if (rule) {
-    try {
-      writeHookOutput('SessionStart', mode, cursorRuleNotice(rule));
-    } catch (e) {
-    }
+    writeHookOutput('SessionStart', mode, cursorRuleNotice(rule));
     process.exit(0);
   }
 }
-
-try {
-  setMode(mode);
-} catch (e) {
-}
-
+try { setMode(mode); } catch (_) {}
 let output = getPonytailInstructions(mode);
+if (process.env.PONYTAIL_MAP !== '0') try {
+  const map = require('./ponytail-map').buildMap(projectDir);
+  if (map) output += '\n\n' + map;
+} catch (_) {}
 
-if (!isCodex && !isCopilot && !isCursor) try {
-  let hasStatusline = false;
-  if (fs.existsSync(settingsPath)) {
-    const raw = fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '');
-    const settings = JSON.parse(raw);
-    if (settings.statusLine) {
-      hasStatusline = true;
-    }
+if (!isCodex && !isCopilot && !isCursor && !isCodeBuddy &&
+    (!process.env.PONYTAIL_CLIENT || process.env.PONYTAIL_CLIENT === 'claude')) try {
+  const settingsPath = path.join(getClaudeDir(), 'settings.json');
+  let statusLine = null;
+  try { statusLine = JSON.parse(fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '')).statusLine; } catch (_) {}
+  const notice = path.join(stateDirectory, '.statusline-notice');
+  const script = path.join(__dirname, 'ponytail-statusline.js');
+  if (!statusLine && fs.existsSync(script) && !fs.existsSync(notice)) {
+    fs.mkdirSync(stateDirectory, { recursive: true });
+    fs.writeFileSync(notice, 'v5.1.0');
+    const command = 'PONYTAIL_CLIENT=claude node "$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-statusline.js"';
+    output += '\n\nPonytail 状态栏配置可选。脚本已随仓库提供，更新仓库后使用新版本。已有状态栏设置保持原样。\n' +
+      '需要时手动在 Claude 用户设置中配置：' + JSON.stringify({ statusLine: { type: 'command', command } });
   }
+} catch (_) {}
 
-  const nudgeFlagPath = path.join(claudeDir, '.ponytail-statusline-nudged');
-  if (!hasStatusline && !fs.existsSync(nudgeFlagPath)) {
-    try { fs.writeFileSync(nudgeFlagPath, ''); } catch (e) {  }
-    const isWindows = process.platform === 'win32';
-    const scriptName = isWindows ? 'ponytail-statusline.ps1' : 'ponytail-statusline.sh';
-    const scriptPath = path.join(__dirname, scriptName);
-    if (isShellSafe(scriptPath)) {
-      const command = isWindows
-        ? `powershell -ExecutionPolicy Bypass -File "${scriptPath}"`
-        : `bash "${scriptPath}"`;
-      const statusLineSnippet =
-        '"statusLine": { "type": "command", "command": ' + JSON.stringify(command) + ' }';
-      output += "\n\n" +
-        "STATUSLINE SETUP NEEDED: The ponytail plugin includes a statusline badge showing active mode " +
-        "(e.g. [PONYTAIL], [PONYTAIL:ULTRA]). It is not configured yet. " +
-        "To enable, add this to " + settingsPath + ": " +
-        statusLineSnippet + " " +
-        "Proactively offer to set this up for the user on first interaction.";
-    } else {
-      output += "\n\n" +
-        "STATUSLINE SETUP NEEDED: The ponytail plugin includes a statusline badge showing active mode. " +
-        "Its install path contains characters unsafe to embed in a shell command, so configure it manually: " +
-        "add a statusLine command of type \"command\" that runs " + scriptName +
-        " from the plugin's hooks directory to " + settingsPath + ", quoting/escaping the path for your shell. " +
-        "Proactively offer to set this up for the user on first interaction.";
-    }
-  }
-} catch (e) {
-}
-
-try {
-  writeHookOutput('SessionStart', mode, output);
-} catch (e) {
-}
+try { writeHookOutput('SessionStart', mode, output); } catch (_) {}

@@ -1,41 +1,22 @@
 ---
 name: ponytail-audit
 description: >
-  Whole-repo audit for over-engineering. Like ponytail-review, but scans the
-  entire codebase instead of a diff: a ranked list of what to delete, simplify,
-  or replace with stdlib/native equivalents. Use when the user says "audit this
-  codebase", "audit for over-engineering", "what can I delete from this repo",
-  "find bloat", "ponytail-audit", or "/ponytail-audit". One-shot report, does
-  not apply fixes.
+  一次性审计整个仓库或指定目录，排查正确性、安全、负载、测试、性能和多余代码。
+  适用于全仓审计、找复杂度或可删除内容。只报告，不改代码或持久档位。
+license: MIT
 ---
 
-ponytail-review, repo-wide. Scan the whole tree instead of a diff. Rank
-findings biggest cut first.
+# Ponytail 仓库审计
 
-## Tags
+读取 [改动审查](../ponytail-review/SKILL.md) 的检查类别、发现核验和中文输出格式。将审查范围改为用户指定目录、包或整个仓库；用户未指定时审计全仓。这份报告补充团队审查，不替代 Standards/Spec、验证凭证或发布流程。
 
-Same as ponytail-review:
+1. 通过 CBM 核对当前工作树索引，查架构、入口和主要调用链。读取 README、部署与构建配置、依赖和测试，说明预期负载。
+2. 精读错误成本最高的路径，包含用户输入、计费、鉴权、数据写入、后台任务和多进程共享状态。大仓库优先这些路径，并披露未读范围。
+3. 对候选发现核对覆盖缺口和实际源码。判定未使用前查齐测试、配置、夹具、字符串和动态引用。
+4. 按影响排序发现，采用改动审查的完整问题格式。主报告最多 20 项；还有较小发现时说明数量，用户要求完整清单时全部提供。
 
-- `delete:` dead code, unused flexibility, speculative feature. Replacement: nothing.
-- `stdlib:` hand-rolled thing the standard library ships. Name the function.
-- `native:` dependency or code doing what the platform already does. Name the feature.
-- `yagni:` abstraction with one implementation, config nobody sets, layer with one caller.
-- `shrink:` same logic, fewer lines. Show the shorter form.
+审计包含错误结果、安全和数据丢失、竞态与负载、缺少行为检查、慢路径，以及可删除、复用、合并或按职责拆分的代码。保留已有层次、输入校验和测试框架。存量债务标记有明确限制时按实际负载判断；禁止新增普通代码注释，说明放工单或维护文档。
 
-## Hunt
+先说明仓库用途和负载假设，最后给出健康判断或优先修复项。若有简化发现，说明可减少的行数和依赖数。列出未检查部分。
 
-Deps the stdlib or platform already ships, single-implementation interfaces,
-factories with one product, wrappers that only delegate, files exporting one
-thing, dead flags and config, hand-rolled stdlib.
-
-## Output
-
-One line per finding, ranked: `<tag> <what to cut>. <replacement>. [path]`.
-End with `net: -<N> lines, -<M> deps possible.` Nothing to cut: `Lean already. Ship.`
-
-## Boundaries
-
-Scope: over-engineering and complexity only. Correctness bugs, security holes,
-and performance are explicitly out of scope. Route them to a normal review
-pass. Lists findings, applies nothing. One-shot.
-"stop ponytail-audit" or "normal mode" to revert.
+一次性报告，保持持久档位，只读，不应用修复。

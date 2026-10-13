@@ -2,6 +2,7 @@
 
 const { getPonytailInstructions } = require('./ponytail-instructions');
 const { readMode, writeHookOutput } = require('./ponytail-runtime');
+const vm = require('vm');
 
 const mode = readMode();
 
@@ -13,6 +14,7 @@ function inject() {
   try {
     writeHookOutput('SubagentStart', mode, getPonytailInstructions(mode));
   } catch (e) {
+
   }
 }
 
@@ -39,16 +41,29 @@ function finish() {
 
   let agentType = '';
   try {
+
     agentType = String(JSON.parse(input.replace(/^\uFEFF/, '')).agent_type || '').trim();
   } catch (e) {
+
   }
-  if (agentType && !matcherRe.test(agentType)) {
+
+  let matches = true;
+  try {
+    if (agentType) {
+      matches = vm.runInNewContext('re.test(s)', { re: matcherRe, s: agentType }, { timeout: 100 });
+    }
+  } catch (e) {
+    matches = true;
+  }
+  if (!matches) {
     process.exit(0);
   }
   inject();
 }
 
 process.stdin.on('data', chunk => { input += chunk; });
-process.stdin.on('end', finish);
+
+process.stdin.on('end', () => { finish(); process.exit(0); });
+
 process.stdin.on('error', () => { finish(); process.exit(0); });
-setTimeout(() => { finish(); process.exit(0); }, 1000).unref();
+setTimeout(() => { finish(); process.exit(0); }, 1000);

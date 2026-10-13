@@ -1,5 +1,15 @@
 
 [[hooks]]
+event = "SessionStart"
+command = 'node "${KIMI_CODE_HOME:-$HOME/.kimi-code}/hooks/ponytail-hook.js" SessionStart'
+timeout = 5
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = 'node "${KIMI_CODE_HOME:-$HOME/.kimi-code}/hooks/ponytail-hook.js" UserPromptSubmit'
+timeout = 5
+
+[[hooks]]
 event = "PreToolUse"
 matcher = "Edit|Write"
 command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" block-master-edit.sh'

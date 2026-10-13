@@ -147,9 +147,9 @@
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/ponytail-activate.js",
+            "command": "PONYTAIL_CLIENT=claude PONYTAIL_PROJECT_DIR=\"${CLAUDE_PROJECT_DIR}\" node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/ponytail-activate.js\"",
             "timeout": 5,
-            "statusMessage": "Loading ponytail mode..."
+            "statusMessage": "加载 Ponytail 当前档位"
           }
         ]
       }
@@ -164,9 +164,9 @@
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/ponytail-subagent.js",
+            "command": "PONYTAIL_CLIENT=claude PONYTAIL_PROJECT_DIR=\"${CLAUDE_PROJECT_DIR}\" node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/ponytail-subagent.js\"",
             "timeout": 5,
-            "statusMessage": "Loading ponytail mode..."
+            "statusMessage": "加载 Ponytail 当前档位"
           }
         ]
       }
@@ -176,9 +176,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/ponytail-mode-tracker.js",
+            "command": "PONYTAIL_CLIENT=claude PONYTAIL_PROJECT_DIR=\"${CLAUDE_PROJECT_DIR}\" node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/ponytail-mode-tracker.js\"",
             "timeout": 5,
-            "statusMessage": "Tracking ponytail mode..."
+            "statusMessage": "加载 Ponytail 当前档位"
           }
         ]
       }

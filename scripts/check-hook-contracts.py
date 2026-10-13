@@ -146,6 +146,16 @@ def kimi_normalized_contracts(config: dict[str, object]) -> Counter[Contract]:
             raise ValueError(f"非法 Kimi hook 条目: {item!r}")
         event = item.get("event")
         matcher = item.get("matcher")
+        command = item.get("command", "")
+        if isinstance(command, str) and "ponytail-hook.js" in command:
+            expected = {
+                "event": event,
+                "command": 'node "${KIMI_CODE_HOME:-$HOME/.kimi-code}/hooks/ponytail-hook.js" ' + str(event),
+                "timeout": 5,
+            }
+            if event in ("SessionStart", "UserPromptSubmit") and item == expected:
+                continue
+            raise ValueError(f"非法 Kimi Ponytail 上下文 Hook: {item!r}")
         if event == "SessionStart":
             continue
         if event == "PreToolUse" and matcher == "Grep|Glob":
@@ -192,6 +202,10 @@ def normalized_contracts(
                     (
                         'node "${CLAUDE_PROJECT_DIR}"/.claude/hooks/ponytail-',
                         'PLUGIN_DATA="$(git rev-parse --git-path ponytail-codex)" '
+                        'node "$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-',
+                        'PONYTAIL_CLIENT=claude PONYTAIL_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" '
+                        'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/ponytail-',
+                        'PONYTAIL_CLIENT=codex PONYTAIL_PROJECT_DIR="$(git rev-parse --show-toplevel)" '
                         'node "$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-',
                     )
                 ):

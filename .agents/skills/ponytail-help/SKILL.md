@@ -1,71 +1,50 @@
 ---
 name: ponytail-help
 description: >
-  Quick-reference card for all ponytail modes, skills, and commands.
-  One-shot display, not a persistent mode. Trigger: /ponytail-help,
-  "ponytail help", "what ponytail commands", "how do I use ponytail".
+  查看 Ponytail 档位、一次性技能、关闭与默认值设置。
+  适用于 ponytail help 或使用说明。一次性展示，不改变持久档位。
+license: MIT
 ---
 
-# Ponytail Help
+# Ponytail 使用说明
 
-Display this reference card when invoked. One-shot, do NOT change mode,
-write flag files, or persist anything.
+显示当前仓库的命令说明，保持运行档位，不写状态或配置。
 
-## Levels
+按客户端使用当前项目的共享技能。六个名称为 ponytail、ponytail-review、ponytail-audit、ponytail-debt、ponytail-gain、ponytail-help。
 
-| Level | Trigger | What change |
-|-------|---------|-------------|
-| **Lite** | `/ponytail lite` | Build what's asked, name the lazier alternative in one line. |
-| **Full** | `/ponytail` | The ladder enforced: YAGNI → stdlib → native → one line → minimum. Default. |
-| **Ultra** | `/ponytail ultra` | YAGNI extremist. Deletion before addition. Challenges requirements before building. |
+| 客户端 | 调用与安装入口 |
+|------|----------------|
+| Codex CLI 与桌面端 | `$ponytail`、`$ponytail-review` 等。分别核对项目 Hook 信任和技能发现。 |
+| Claude Code | `/ponytail`、`/ponytail-review` 等，命令指向共享正文。 |
+| Kimi Code | `/skill:ponytail`、`/skill:ponytail-review` 等。安装、迁移与卸载读 [Kimi 说明](../../../docs/agents/ponytail-kimi.md)。 |
+| ZCode | 导入当前项目六技能后用 `$ponytail`、`$ponytail-review` 等。Hook 插件与技能分别安装，读 [ZCode 说明](../../../docs/agents/ponytail-zcode.md)。 |
 
-Level sticks until changed or session end.
+本仓使用项目共享入口。遇到旧全局插件命名空间时，按[维护说明](../../../docs/agents/ponytail.md)核对来源，保留归属不明的个人配置。
 
-## Skills
+| 操作 | 行为 |
+|------|------|
+| `ponytail lite` | 实现要求，并列出更小方案。 |
+| `ponytail full` | 最小完整改动，默认档位。 |
+| `ponytail ultra` | 实施前质疑缺少依据的需求。 |
+| 裸 `ponytail` | 激活时报告当前档位；关闭时恢复默认，默认 off 时恢复 full。 |
+| `ponytail off`、`stop ponytail`、`normal mode` | 关闭当前范围，普通输入不重新激活。 |
 
-| Skill | Trigger | What it does |
-|-------|---------|--------------|
-| **ponytail** | `/ponytail` | Lazy mode itself. Simplest solution that works. |
-| **ponytail-review** | `/ponytail-review` | Over-engineering review: `L42: yagni: factory, one product. Inline.` |
-| **ponytail-audit** | `/ponytail-audit` | Whole-repo over-engineering audit: ranked list of what to delete. |
-| **ponytail-debt** | `/ponytail-debt` | Harvest `ponytail:` shortcut comments into a tracked ledger. |
-| **ponytail-gain** | `/ponytail-gain` | Measured-impact scoreboard: less code, less cost, more speed. |
-| **ponytail-help** | `/ponytail-help` | This card. |
+review、audit、debt、gain、help 都是一次性命令，执行前后持久档位相同。review 检查改动；audit 检查全仓；debt 汇总存量标记；gain 展示公开基准；help 显示此说明。
 
-Codex uses `@ponytail`, `@ponytail-review`, and `@ponytail-help`; Claude Code
-and OpenCode use the slash-command forms above (OpenCode ships all six as
-slash commands).
+新会话默认值按环境变量、用户配置、full 顺序解析，支持 off、lite、full、ultra：
 
-## Deactivate
-
-Say "stop ponytail" or "normal mode". Resume anytime with `/ponytail`.
-`/ponytail off` also works.
-
-## Configure Default Mode
-
-Default mode = `full`, auto-active every session. Change it:
-
-**Environment variable** (highest priority):
 ```bash
 export PONYTAIL_DEFAULT_MODE=ultra
 ```
 
-**Config file** (`~/.config/ponytail/config.json`, Windows: `%APPDATA%\ponytail\config.json`):
+用户配置为 `$XDG_CONFIG_HOME/ponytail/config.json`，未设置 XDG 时为 `~/.config/ponytail/config.json`，Windows 为 `%APPDATA%\ponytail\config.json`：
+
 ```json
 { "defaultMode": "lite" }
 ```
 
-Set `"off"` to disable auto-activation on session start, activate manually
-with `/ponytail` when wanted.
+显式 `ponytail default lite` 设置后续会话默认值，保持当前档位。普通切档不写默认值。非法参数保持当前档位。
 
-Resolution: env var > config file > `full`.
+状态按客户端和工作树隔离，同一客户端同一工作树的并发会话共享最后写入档位。启动、恢复、清空和压缩事件重新应用默认值；不能把工作树隔离称为完整会话隔离。
 
-## Update
-
-Enable auto-update once: open `/plugin`, go to Marketplaces, pick ponytail, Enable auto-update. Claude Code then pulls new versions at startup (run `/reload-plugins` when it prompts). Manual refresh: `/plugin marketplace update ponytail` then `/reload-plugins`.
-
-If `/plugin` is not recognized, your Claude Code is out of date. Update it (`npm install -g @anthropic-ai/claude-code@latest`, or `brew upgrade claude-code`) and restart. Other hosts use their own update flow.
-
-## More
-
-Full docs + examples: https://github.com/DietrichGebert/ponytail
+本仓固定 v5.1.0，随经过团队审查的仓库更新，不自动跟随上游 main。安装、Node 可用性、Codex Hook 信任、子代理能力和实机验收边界见 [维护说明](../../../docs/agents/ponytail.md)。
