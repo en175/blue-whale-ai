@@ -20,7 +20,6 @@ import {
 import { imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
 import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from './textIndexSync';
 import { audioRefItemMediaTypeOf, audioRefSourceError } from './audioMediaRefs';
-import { PANEL_REF_MEDIA_TYPES } from './refSourceTypes';
 import { assetsPickerMediaTypes } from './assetsPickerTargets';
 import { hasGenerationRecord } from './mediaReEdit';
 import {
@@ -187,6 +186,7 @@ import { useCanvasUpdateGenerate } from './hooks/useCanvasUpdateGenerate';
 import { useCanvasToolDraftCreators } from './hooks/useCanvasToolDraftCreators';
 import { useCanvasChatQuote } from './hooks/useCanvasChatQuote';
 import { useCanvasDraftCardCreators } from './hooks/useCanvasDraftCardCreators';
+import { useCanvasAtMentionHandlers } from './hooks/useCanvasAtMentionHandlers';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   applyDraggedNodesToGroups,
@@ -3477,134 +3477,28 @@ export default function CanvasPage() {
   };
   const canvasMedia: CanvasPickItem[] = useMemo(() => canvasMediaOf(mediaNodes), [mediaNodes]);
   const atMentionItems: AtMentionItem[] = useMemo(() => atMentionItemsOf(mediaNodes, textNodes), [mediaNodes, textNodes]);
-  const handleImageAtMention = (item: AtMentionItem) => {
-    generationDock.referencePicked('image');
-    if (item.kind === 'text') {
-      if (imageDraftId) connectPair(item.id, imageDraftId);
-      else showToast('warn', '文本参考需要绑定生成节点');
-      return;
-    }
-    if (item.kind !== 'image' && item.kind !== 'video') {
-      showToast('warn', '图片生成不支持该类型参考');
-      return;
-    }
-    if (imageDraftId) {
-      if (item.kind !== 'image') {
-        showToast('warn', '图片参考仅支持图片素材');
-        return;
-      }
-      if (!validateImageRefConnect(item.id, imageDraftId) || !item.assetId || !item.thumbUrl) return;
-      addCanvasEdge(item.id, imageDraftId);
-      return;
-    }
-    setImagePickResult({
-      ts: Date.now(),
-      files: [{
-        id: `node-${item.id}`,
-        url: item.thumbUrl ?? '',
-        type: item.kind === 'video' ? 'video' : 'image',
-        name: item.name,
-        assetId: item.assetId,
-      }],
-    });
-  };
-  const handleVideoAtMention = (item: AtMentionItem) => {
-    if (item.kind === 'text') {
-      if (videoDraftId) connectPair(item.id, videoDraftId);
-      else showToast('warn', '文本参考需要绑定生成节点');
-      return;
-    }
-    if (item.kind === 'audio') {
-      showToast('warn', '视频生成暂不支持音频参考');
-      return;
-    }
-    if (item.kind !== 'image' && item.kind !== 'video') return;
-    if (item.disabled) return;
-    if (!item.assetId) return;
-    const sourceNode = findCanvasNode(item.id);
-    const roleCheck = videoDraftId ? videoEdgeRoleFor(videoDraftId) : 'reference';
-    const blocked = videoRefSourceError(sourceNode, roleCheck);
-    if (blocked) {
-      showToast('warn', blocked);
-      return;
-    }
-    const refItem: VideoMediaRef = {
-      nodeId: item.id,
-      url: item.thumbUrl ?? '',
-      name: item.name,
-      assetId: item.assetId,
-      mediaType: item.kind,
-    };
-    if (videoDraftId) {
-      const role = videoEdgeRoleFor(videoDraftId);
-      if (role === 'reference' && isFrameMode(draftModeOfNode(videoDraftId))) {
-        const refs = mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current);
-        if (refs.first || refs.last) {
-          showToast('warn', '首帧和尾帧已指定，请先移除现有帧');
-          return;
-        }
-      }
-      if (!validateVideoRefConnect(item.id, videoDraftId, role)) return;
-      addCanvasEdge(item.id, videoDraftId, role);
-      return;
-    }
-    const freeMode = normalizeVideoMode(videoSeed?.params?.mode);
-    const freeSlots = frameSlotCountOf(freeMode);
-    const freeRole: VideoRefRole = freeSlots > 0
-      ? (!videoFreeRefs.first ? 'first' : freeSlots === 2 && !videoFreeRefs.last ? 'last' : 'reference')
-      : 'reference';
-    if (freeRole === 'reference' && isFrameMode(freeMode) && (videoFreeRefs.first || videoFreeRefs.last)) {
-      showToast('warn', '首帧和尾帧已指定，请先移除现有帧');
-      return;
-    }
-    appendVideoFreeRef(refItem, freeRole);
-  };
-  const handleAudioAtMention = (item: AtMentionItem) => {
-    if (item.kind === 'text') {
-      if (audioDraftId) connectPair(item.id, audioDraftId);
-      else showToast('warn', '文本参考需要绑定生成节点');
-      return;
-    }
-    if ((item.kind !== 'audio' && item.kind !== 'image') || !item.thumbUrl) {
-      showToast('warn', PANEL_REF_MEDIA_TYPES.audio.canvasRefError);
-      return;
-    }
-    if (audioDraftId) {
-      if (validateAudioRefConnect(item.id, audioDraftId)) {
-        addCanvasEdge(item.id, audioDraftId);
-      }
-      return;
-    }
-    setAudioPickResult({
-      ts: Date.now(),
-      item: {
-        id: item.id,
-        kind: item.kind,
-        mediaType: item.kind,
-        name: item.name,
-        src: item.thumbUrl,
-        source: 'canvas',
-        assetId: item.assetId,
-      },
-    });
-  };
-  const handleMusicAtMention = (item: AtMentionItem) => {
-    if (item.kind !== 'audio' || !item.thumbUrl) {
-      showToast('warn', 'AI 音乐仅支持引用音频素材');
-      return;
-    }
-    setMusicPickResult({
-      ts: Date.now(),
-      item: {
-        id: item.id,
-        kind: 'audio',
-        name: item.name,
-        src: item.thumbUrl,
-        source: 'canvas',
-        assetId: item.assetId,
-      },
-    });
-  };
+  const { handleImageAtMention, handleVideoAtMention, handleAudioAtMention, handleMusicAtMention } = useCanvasAtMentionHandlers({
+    imageDraftId,
+    videoDraftId,
+    audioDraftId,
+    videoSeed,
+    videoFreeRefs,
+    findCanvasNode,
+    connectPair,
+    addCanvasEdge: (source, target, refRole) => addCanvasEdge(source, target, refRole),
+    validateImageRefConnect,
+    validateVideoRefConnect,
+    validateAudioRefConnect,
+    draftModeOfNode: (nodeId) => draftModeOfNode(nodeId),
+    videoEdgeRoleFor: (targetId) => videoEdgeRoleFor(targetId),
+    mergedVideoRefsOf: (targetId) => mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current),
+    appendVideoFreeRef,
+    generationDock: { referencePicked: (kind) => generationDock.referencePicked(kind) },
+    showToast,
+    setImagePickResult,
+    setAudioPickResult,
+    setMusicPickResult,
+  });
   const uploadFileToAsset = async (file: File, type: 'image' | 'video' | 'audio'): Promise<UploadCompleteData | null> => {
     try {
       const assetType: AssetType = type;
