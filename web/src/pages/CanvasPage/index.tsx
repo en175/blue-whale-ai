@@ -1,6 +1,6 @@
 import { promptBindingList, type PromptBinding } from '@lib/contracts/prompt-target';
 import { promptMentionSchema } from '@lib/contracts/prompt-preview';
-import { replaceImageMentionsWithAssetTokens, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
+import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { toast as globalToast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -168,13 +168,13 @@ import { useCanvasNodeDeletion } from './hooks/useCanvasNodeDeletion';
 import { useCanvasEdgeOps } from './hooks/useCanvasEdgeOps';
 import { useCanvasConnectPair } from './hooks/useCanvasConnectPair';
 import { useCanvasSpawn } from './hooks/useCanvasSpawn';
+import { textAttachmentsOf as textAttachmentsOfPure, textAttachmentsForSend as textAttachmentsForSendPure } from './textAttachments';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
   parseGroupsFromNodes,
   type CanvasGroup,
 } from './canvasGroups';
-import { extractTextNodeText } from './quoteConversation';
 import {
   canvasLocationSearch,
   findLastOpenedProjectId,
@@ -1928,33 +1928,9 @@ export default function CanvasPage() {
   actionsRef.current.retryJob = handleRetryJob;
   actionsRef.current.removeMediaNode = handleRemoveMediaNode;
   const textAttachmentsOf = (targetNodeId: string): ImageTextAttachment[] =>
-    edgesRef.current
-      .filter((e) => e.target === targetNodeId)
-      .map((e) => textNodesRef.current.find((n) => n.id === e.source))
-      .filter((n): n is Node => n?.type === 'textNode')
-      .map((n) => ({
-        nodeId: n.id,
-        isPromptPlan: Boolean(n.data.promptSource),
-        title: typeof n.data.title === 'string' && n.data.title ? (n.data.title as string) : '文本节点',
-        text: extractTextNodeText(n.data),
-      }));
+    textAttachmentsOfPure(targetNodeId, edgesRef.current, textNodesRef.current);
   const textAttachmentsForSend = (targetNodeId: string): ImageTextAttachment[] =>
-    textAttachmentsOf(targetNodeId).map((att) => {
-      const node = textNodesRef.current.find((n) => n.id === att.nodeId);
-      const mentions = Array.isArray(node?.data.mediaMentions) ? (node.data.mediaMentions as MediaMention[]) : [];
-      const refs = Array.isArray(node?.data.mediaRefs) ? (node.data.mediaRefs as MediaRef[]) : [];
-      const imageNodeIds = new Set(refs.filter((ref) => ref.mediaType === 'image').map((ref) => ref.nodeId));
-      const promptMentions = Array.isArray(node?.data.promptMentions) ? (node.data.promptMentions as Array<{ start: number; end: number; assetId: string }>) : [];
-      const promptMaterials = Array.isArray(node?.data.promptMaterials) ? (node.data.promptMaterials as Array<{ assetId: string; mediaType: 'image' | 'video' | 'audio' }>) : [];
-      const promptImageAssetIds = new Set(promptMaterials.filter((m) => m.mediaType === 'image').map((m) => m.assetId));
-      const promptMentionsAdapted: MediaMention[] = promptMentions.map((m) => ({ start: m.start, end: m.end, nodeId: m.assetId, assetId: m.assetId }));
-      const allMentions = [...mentions, ...promptMentionsAdapted];
-      const isImage = (mention: MediaMention) => imageNodeIds.has(mention.nodeId) || promptImageAssetIds.has(mention.assetId);
-      return {
-        ...att,
-        text: replaceImageMentionsWithAssetTokens(att.text, allMentions, isImage),
-      };
-    });
+    textAttachmentsForSendPure(targetNodeId, edgesRef.current, textNodesRef.current);
   const { reorderTargetEdges, refStripOrderOf, handleRefStripOrderChange, handleReorderAttachments, handleReorderVideoMediaRefs, reorderVideoFreeRefs } = useCanvasRefStripOrder({
     setEdges,
     edgesRef,
