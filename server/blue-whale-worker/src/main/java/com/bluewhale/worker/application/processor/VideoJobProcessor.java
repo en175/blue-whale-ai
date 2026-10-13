@@ -167,7 +167,7 @@ public class VideoJobProcessor implements JobProcessor {
 
         if (claim.cancelRequested() && claim.providerTaskId() == null) {
             log.info("[video] 取消已执行(cancelBeforeDispatch) jobId={}", claim.id());
-            stateMachine.cancelVideoBeforeDispatch(claim.id(), claim.workerId(), claim.fencingToken());
+            stateMachine.cancelJobBeforeDispatch(claim.id(), claim.workerId(), claim.fencingToken());
             return;
         }
 

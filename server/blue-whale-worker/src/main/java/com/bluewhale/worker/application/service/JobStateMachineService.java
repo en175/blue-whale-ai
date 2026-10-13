@@ -80,11 +80,19 @@ public class JobStateMachineService {
     }
 
     public boolean cancelAudioMixIfRequested(String jobId, String workerId, long fencingToken) {
-        return jobMapper.cancelAudioMixIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
+        boolean ok = jobMapper.cancelAudioMixIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
+        if (ok) {
+            finalizer.cancelJob(jobId);
+        }
+        return ok;
     }
 
     public boolean cancelAudioVideoMuxIfRequested(String jobId, String workerId, long fencingToken) {
-        return jobMapper.cancelAudioVideoMuxIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
+        boolean ok = jobMapper.cancelAudioVideoMuxIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
+        if (ok) {
+            finalizer.cancelJob(jobId);
+        }
+        return ok;
     }
 
     public Optional<ClaimedJobDto> claimAudioJobById(String jobId, String workerId) {
@@ -129,14 +137,14 @@ public class JobStateMachineService {
                                                  long fencingToken, String providerTaskId) {
         Long jobIdLong = Long.parseLong(jobId);
         int affected = providerTaskId == null
-                ? jobMapper.cancelVideoBeforeDispatch(jobIdLong, workerId, fencingToken)
+                ? jobMapper.cancelJobBeforeDispatch(jobIdLong, workerId, fencingToken)
                 : jobMapper.cancelVideoAfterDispatch(jobIdLong, workerId, fencingToken);
         boolean ok = affected == 1;
         if (!ok) {
             log.warn("[video_frame_interpolation] cancel 守卫未命中(stale/已终态) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
         } else {
-            finalizer.releaseHoldForCancelled(jobId);
+            finalizer.cancelJob(jobId);
         }
         return ok;
     }
@@ -255,14 +263,14 @@ public class JobStateMachineService {
         return affected == 1;
     }
 
-    public boolean cancelVideoBeforeDispatch(String jobId, String workerId, long fencingToken) {
+    public boolean cancelJobBeforeDispatch(String jobId, String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
-        boolean ok = jobMapper.cancelVideoBeforeDispatch(jobIdLong, workerId, fencingToken) == 1;
+        boolean ok = jobMapper.cancelJobBeforeDispatch(jobIdLong, workerId, fencingToken) == 1;
         if (!ok) {
-            log.warn("[video] cancelVideoBeforeDispatch 守卫未命中(stale/已提交上游) jobId={} workerId={} token={}",
+            log.warn("[video] cancelJobBeforeDispatch 守卫未命中(stale/已提交上游) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
         } else {
-            finalizer.releaseHoldForCancelled(jobId);
+            finalizer.cancelJob(jobId);
         }
         return ok;
     }

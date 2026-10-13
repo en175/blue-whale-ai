@@ -403,4 +403,19 @@ class ImageJobProcessorErrorMappingTest {
                 any(Map.class), anyString(), anyLong());
         assertThat(codeCaptor.getValue()).isEqualTo(expectedCode);
     }
+
+    @Test
+    @DisplayName("G49b: cancelRequested → 走 cancelJobBeforeDispatch（终态 cancelled），不再 failJob")
+    void cancelRequested() {
+        ClaimedJobDto job = new ClaimedJobDto(
+                "100", "1", "1", "image", Map.of(), 0, true, 1L);
+        when(stateMachine.claimImageJobById(eq("100"), anyString()))
+                .thenReturn(Optional.of(job));
+
+        processor.handle("100");
+
+        verify(stateMachine).cancelJobBeforeDispatch(eq("100"), anyString(), eq(1L));
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(),
+                any(Map.class), anyString(), anyLong());
+    }
 }

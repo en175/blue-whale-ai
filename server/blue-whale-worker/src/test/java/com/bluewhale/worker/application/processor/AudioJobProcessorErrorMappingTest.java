@@ -152,7 +152,7 @@ class AudioJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("cancelRequested → failJob")
+    @DisplayName("cancelRequested → cancelJobBeforeDispatch（终态 cancelled），不再 failJob")
     void cancelRequested() {
         ClaimedJobDto job = new ClaimedJobDto(
                 "100", "42", "9", "audio",
@@ -166,9 +166,9 @@ class AudioJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        verify(finalizer).failJob(eq("100"),
-                eq(GenerationError.ERROR_PROVIDER_FAILED),
-                anyString(), any(), anyString(), anyLong());
+        verify(stateMachine).cancelJobBeforeDispatch(eq("100"), anyString(), eq(5L));
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     private ClaimedJobDto claimWithInput(Map<String, Object> input) {

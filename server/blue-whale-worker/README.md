@@ -225,7 +225,7 @@ worker/
     - delay 下限 1000ms（GENERATION_MIN_DELAY_MS）
   - [x] processor `VideoJobProcessor`：完整视频编排（video-job-runner.ts:195-376 runVideoJobStep）
     - 多步状态机：每步 = 一次 MQ 消费（submit 或 poll）
-    - cancel-before-dispatch：cancelRequested + providerTaskId==null → cancelVideoBeforeDispatch
+    - cancel-before-dispatch：cancelRequested + providerTaskId==null → cancelJobBeforeDispatch
     - submit 阶段：buildSubmitRequest → submit → markProviderSubmitted → scheduleNext(5s)
     - IKEA26 parent-reuse 防双扣：retry job 先查父 task → SUCCESS → publish without submit
     - IKICD3 失租边界：收割发布守卫（CAS）未命中 = 失去执行权 → 停止（不 submit / 不记 provider_task_id / 不排轮询 / 不写迟到 Finalize），新 Worker 接手沿同路径收割；回退重新提交仅限父任务失败 / 不存在 / 查询失败 / 结果缺失（与八家族「守卫未命中回退提交」定版口径刻意不同）
@@ -241,7 +241,7 @@ worker/
     - `markProviderSubmitted` → boolean（provider_task_id + 释放租约 + next+5s）
     - `rescheduleProviderPoll` → boolean（poll_count+1 + 释放租约 + next+5s）
     - `publishVideoResult` → boolean（@Transactional：guard + asset + slots + events）
-    - `cancelVideoBeforeDispatch` → boolean（WHERE provider_task_id IS NULL + cancelled + log）
+    - `cancelJobBeforeDispatch` → boolean（WHERE provider_task_id IS NULL + cancelled + log）
   - [x] config `VideoEnabledCondition`：@Conditional 按 tag "step" 启停
   - [x] config `RocketMqConfig` 扩展：video consumer + producer + client + relay beans
   - [x] mapper `GenerationJobMapper` 扩展：视频 claim/submit/reschedule/publish/cancel SQL

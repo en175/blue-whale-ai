@@ -20,7 +20,7 @@ class JobFinalizerStatusChangedConvergenceTest {
     private static final String HELPER_SIG = "private void " + HELPER + "(";
     private static final String CALL = HELPER + "(job, Map.of(";
 
-    private static final int EXPECTED_CALL_SITES = 8;
+    private static final int EXPECTED_CALL_SITES = 9;
 
     @Test
     @DisplayName("★ status_changed 只准由 publishStatusChanged 一处发出")
@@ -59,8 +59,8 @@ class JobFinalizerStatusChangedConvergenceTest {
     }
 
     @Test
-    @DisplayName("8 个终态路径都接了收敛点（数量对账，少一处即为漏接）")
-    void 八处都接了() throws IOException {
+    @DisplayName("9 个收敛调用点（8 个终态路径 + 取消路径），数量对账")
+    void 九处都接了() throws IOException {
         long callSites = readSource().stream()
                 .filter(line -> line.contains(CALL))
                 .count();
@@ -72,24 +72,26 @@ class JobFinalizerStatusChangedConvergenceTest {
     }
 
     @Test
-    @DisplayName("★ 两条取消路径都接了预扣解冻（它们不走 8 个终态路径）")
-    void 取消路径接了解冻() throws IOException {
+    @DisplayName("★ 四条取消路径都接了退款（它们不走 8 个终态路径）")
+    void 取消路径接了退款() throws IOException {
         Path machine = Path.of(
                 "src/main/java/com/bluewhale/worker/application/service/JobStateMachineService.java");
         assertThat(Files.exists(machine)).withFailMessage("找不到 %s", machine).isTrue();
         List<String> lines = Files.readAllLines(machine);
 
         for (String signature : List.of(
-                "public boolean cancelVideoBeforeDispatch(",
-                "public boolean cancelVideoFrameInterpolation(")) {
+                "public boolean cancelJobBeforeDispatch(",
+                "public boolean cancelVideoFrameInterpolation(",
+                "public boolean cancelAudioMixIfRequested(",
+                "public boolean cancelAudioVideoMuxIfRequested(")) {
             String body = methodBody(lines, signature);
             assertThat(body)
                     .withFailMessage("""
-                            %s 里没有 releaseHoldForCancelled：
+                            %s 里没有 finalizer.cancelJob：
                             取消会成功（CAS 命中、status 落到 cancelled），但那条路径不经过
                             JobFinalizer 的终态路径，于是**没有任何人告诉 billing**——
-                            该 job 的预扣永远冻着，没有报错、没有红灯。""", signature.trim())
-                    .contains("releaseHoldForCancelled");
+                            该 job 的退款永远发不出去，没有报错、没有红灯。""", signature.trim())
+                    .contains("finalizer.cancelJob(");
         }
     }
 
@@ -122,7 +124,7 @@ class JobFinalizerStatusChangedConvergenceTest {
             }
         }
         assertThat(start)
-                .withFailMessage("%s 不见了——收敛点被删掉后 8 处会各发各的，钱就冻住了",
+                .withFailMessage("%s 不见了——收敛点被删掉后各路径会各发各的，钱就冻住了",
                         HELPER_SIG.trim())
                 .isNotEqualTo(-1);
 

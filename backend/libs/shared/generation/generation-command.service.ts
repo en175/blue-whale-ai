@@ -72,7 +72,7 @@ export class GenerationCommandService {
     code: string,
     message: string,
     details?: Record<string, unknown>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     return this.repo.markFailedQueued(jobId, code, message, details);
   }
 }

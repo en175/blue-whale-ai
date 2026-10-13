@@ -1,6 +1,8 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
+import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
+import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtraMapper;
@@ -15,8 +17,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import org.mockito.ArgumentCaptor;
 
 class JobFinalizerCancellationTest {
 
@@ -24,11 +31,15 @@ class JobFinalizerCancellationTest {
 
     private final GenerationJobMapper jobMapper = mock(GenerationJobMapper.class);
 
+    private final GenerationJobLogMapper logMapper = mock(GenerationJobLogMapper.class);
+
+    private final GenerationOutputSlotMapper slotMapper = mock(GenerationOutputSlotMapper.class);
+
     private final JobFinalizer finalizer = new JobFinalizer(
             jobMapper,
             mock(AssetMapper.class),
-            mock(GenerationJobLogMapper.class),
-            mock(GenerationOutputSlotMapper.class),
+            logMapper,
+            slotMapper,
             mock(GenerationJobExtraMapper.class),
             mock(SceneCardGenerationRecordSync.class),
             mock(StoryboardPreviewSync.class),
@@ -42,6 +53,9 @@ class JobFinalizerCancellationTest {
         job.setId(id);
         job.setUserId(42L);
         job.setProjectId(7L);
+        job.setType("video");
+        job.setSource("bottom_dock");
+        job.setProgress(0);
         job.setStatus("cancelled");
         return job;
     }
@@ -51,7 +65,7 @@ class JobFinalizerCancellationTest {
     void 取消发终态事件() {
         when(jobMapper.selectById(801L)).thenReturn(cancelledJob(801));
 
-        finalizer.releaseHoldForCancelled("801");
+        finalizer.cancelJob("801");
 
         assertThat(sent).hasSize(1);
         assertThat(sent.get(0)[0]).isEqualTo("generation-job-terminal");
@@ -64,7 +78,7 @@ class JobFinalizerCancellationTest {
     void 取不到job不炸() {
         when(jobMapper.selectById(802L)).thenReturn(null);
 
-        finalizer.releaseHoldForCancelled("802");
+        finalizer.cancelJob("802");
 
         assertThat(sent).isEmpty();
     }
@@ -76,10 +90,45 @@ class JobFinalizerCancellationTest {
         succeeded.setStatus("succeeded");
         when(jobMapper.selectById(803L)).thenReturn(succeeded);
 
-        finalizer.releaseHoldForCancelled("803");
+        finalizer.cancelJob("803");
 
         assertThat(sent).hasSize(1);
         assertThat(sent.get(0)[0]).isEqualTo("generation-job-terminal");
         assertThat(sent.get(0)[1]).contains("\"status\":\"succeeded\"");
+    }
+
+    @Test
+    @DisplayName("★ project_id 为空的任务失败也发终态事件 —— 项目事件跳过，账务事件照发")
+    void 空项目也发终态事件() {
+        GenerationJobEntity job = cancelledJob(804);
+        job.setProjectId(null);
+        job.setStatus("failed");
+        when(jobMapper.failJobGuard(anyLong(), anyString(), anyLong(), anyString())).thenReturn(1);
+        when(jobMapper.selectById(804L)).thenReturn(job);
+
+        finalizer.failJob("804", "upstream_error", "上游挂了", null, "w1", 3L);
+
+        assertThat(sent).hasSize(1);
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-terminal");
+        assertThat(sent.get(0)[1]).contains("\"status\":\"failed\"").contains("\"refund\":true");
+    }
+
+    @Test
+    @DisplayName("★ 取消把未决输出槽置 failed、写一条取消日志，并发出终态事件")
+    void 取消收口槽位与日志() {
+        GenerationOutputSlotEntity slot = new GenerationOutputSlotEntity();
+        slot.setId(55L);
+        slot.setSlotIndex(0);
+        when(jobMapper.selectById(805L)).thenReturn(cancelledJob(805));
+        when(slotMapper.findPendingByJobId(805L)).thenReturn(List.of(slot));
+
+        finalizer.cancelJob("805");
+
+        verify(slotMapper).updateSlotStatus(55L, "failed");
+        ArgumentCaptor<GenerationJobLogEntity> logCaptor =
+                ArgumentCaptor.forClass(GenerationJobLogEntity.class);
+        verify(logMapper).insert(logCaptor.capture());
+        assertThat(logCaptor.getValue().getMessage()).isEqualTo("用户取消");
+        assertThat(sent).hasSize(1);
     }
 }
