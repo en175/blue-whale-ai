@@ -17,6 +17,7 @@ import {
 } from "./generation-canvas-recovery-repo.js";
 import { saveCanvasWithRecovery } from "./canvas-recovery-save.js";
 import { createJobWithinTx } from "./generation-command-repo.js";
+import { outputSlotNodeId, slotOutputKey } from "./canvas-recovery-multi-output.js";
 import type { PrismaClient } from "@prisma/client";
 
 const databaseUrl = process.env.IKLBUF_DATABASE_URL;
@@ -28,10 +29,12 @@ describe.skipIf(!databaseUrl)("陈旧标记推进到持有者同提交的产物�
   const PROJECT_ID = "940002";
   const USER_ID = "940010";
   const NODE = "iklbuf-node";
+  const CARD = "iklbuf-card";
   const UUID_A = "7d1a2b3c-0000-4000-8000-00000000a001";
   const UUID_B = "7d1a2b3c-0000-4000-8000-00000000b002";
   const UUID_C = "7d1a2b3c-0000-4000-8000-00000000c003";
   const CMD = (suffix: string) => `7d1a2b3c-0000-4000-8000-0000000${suffix}`;
+  const TAMPERED_MSG = "未声明的受保护项被改动，须以显式恢复动作变更";
 
   function binding(submissionId: string, node: string, revision: number): CanvasBinding {
     return {
@@ -58,7 +61,7 @@ describe.skipIf(!databaseUrl)("陈旧标记推进到持有者同提交的产物�
     };
   }
 
-  async function acceptJob(args: { submissionId: string; node: string; revision?: number }) {
+  async function acceptJob(args: { submissionId: string; node: string; revision?: number; expectedOutputCount?: number }) {
     return prisma.$transaction(async (tx) => {
       const locked = await lockCanvasRecoveryForAcceptance(tx, acceptance(args.submissionId, args.node, args.revision ?? 0));
       if (locked.kind !== "plan") throw new Error(`受理未成计划：${locked.kind}`);
@@ -66,7 +69,7 @@ describe.skipIf(!databaseUrl)("陈旧标记推进到持有者同提交的产物�
         projectId: PROJECT_ID,
         userId: USER_ID,
         type: "image",
-        expectedOutputCount: 1,
+        expectedOutputCount: args.expectedOutputCount ?? 1,
         input: { prompt: "whale" },
         actionIdentity: `iklbuf-${args.submissionId}`,
         actionType: "generate_image",
@@ -123,12 +126,15 @@ describe.skipIf(!databaseUrl)("陈旧标记推进到持有者同提交的产物�
     });
   }
 
-  async function expectEnvelope(promise: Promise<unknown>, code: number, reason: string) {
+  async function expectEnvelope(promise: Promise<unknown>, code: number, reason: string, msg?: string) {
     return promise.then(
       () => { throw new Error("应拒绝"); },
       (error: unknown) => {
         expect(error).toBeInstanceOf(RecoveryContractError);
         expect((error as RecoveryContractError).envelope).toMatchObject({ code, data: { reason } });
+        if (msg !== undefined) {
+          expect((error as RecoveryContractError).envelope.msg).toBe(msg);
+        }
       },
     );
   }
@@ -174,6 +180,39 @@ describe.skipIf(!databaseUrl)("陈旧标记推进到持有者同提交的产物�
     const promoted = await seedPromotedCard();
     const second = await acceptJob({ submissionId: UUID_B, node: NODE, revision: 1 });
     return { promoted, jobB: BigInt(second.generation_job_id) };
+  }
+
+  async function seedSlotCard() {
+    const created = await acceptJob({ submissionId: UUID_A, node: CARD, expectedOutputCount: 2 });
+    const jobId = BigInt(created.generation_job_id);
+    const slots = await prisma.generation_output_slots.findMany({
+      where: { generation_job_id: jobId },
+      orderBy: { slot_index: "asc" },
+    });
+    await prisma.generation_output_slots.update({ where: { id: slots[0]!.id }, data: { status: "succeeded", asset_id: 601n } });
+    await prisma.generation_output_slots.update({ where: { id: slots[1]!.id }, data: { status: "succeeded", asset_id: 602n } });
+    await raw.query(
+      "UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST(? AS JSON) WHERE id = ?",
+      [JSON.stringify(["601", "602"]), Number(jobId)],
+    );
+    const slotKey0 = slotOutputKey(slots[0]!.id);
+    const slotNode0 = outputSlotNodeId(slots[0]!.id);
+    const base = await save({
+      commandId: CMD("50001"),
+      version: null,
+      nodes: [markerNode(CARD, UUID_A, TARGET_OUTPUT_KEY)],
+      changes: [],
+    });
+    const placed = await save({
+      commandId: CMD("50002"),
+      version: base.version,
+      nodes: [
+        markerNode(CARD, UUID_A, TARGET_OUTPUT_KEY),
+        markerNode(slotNode0, UUID_A, slotKey0, { assetId: "601" }),
+      ],
+      changes: [{ id: recoveryItemId(UUID_A, slotKey0), rev: 0, action: "apply" }],
+    });
+    return { placed, slotKey0, slotNode0 };
   }
 
   beforeAll(async () => {
@@ -235,6 +274,7 @@ describe.skipIf(!databaseUrl)("陈旧标记推进到持有者同提交的产物�
       }),
       422,
       RECOVERY_REASONS.documentMismatch,
+      TAMPERED_MSG,
     );
   });
 
@@ -250,6 +290,26 @@ describe.skipIf(!databaseUrl)("陈旧标记推进到持有者同提交的产物�
       }),
       422,
       RECOVERY_REASONS.documentMismatch,
+      TAMPERED_MSG,
+    );
+  });
+
+  it("★ 4. 多输出节点不放宽：陈旧槽位标记的资产被换走 → 422", async () => {
+    const { placed, slotKey0, slotNode0 } = await seedSlotCard();
+
+    await expectEnvelope(
+      save({
+        commandId: CMD("40001"),
+        version: placed.version,
+        nodes: [
+          markerNode(CARD, UUID_A, TARGET_OUTPUT_KEY),
+          markerNode(slotNode0, UUID_A, slotKey0, { assetId: "999" }),
+        ],
+        changes: [],
+      }),
+      422,
+      RECOVERY_REASONS.documentMismatch,
+      TAMPERED_MSG,
     );
   });
 });
