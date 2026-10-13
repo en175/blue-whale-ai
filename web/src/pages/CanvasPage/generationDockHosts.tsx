@@ -191,7 +191,7 @@ function createGenerationDockHostBag(
     reportError: (error) => console.warn('图片生成前准备失败:', error),
     render: () => {
       const input = inputRef.current;
-      const { generationDock, imageDraftId, imageSeed } = input;
+      const { generationDock, imageDraftId, imageSeed, isAnchoredOverlayDragHidden } = input;
       return (
         <ImageGenerationDockPanel
           view={generationDock.panel('image')}
@@ -236,7 +236,7 @@ function createGenerationDockHostBag(
             onMentionCanvas: input.imageAtMention,
             currentNodes: input.currentMediaNodes,
             followAnchor: imageDraftId ? input.followAnchor : null,
-            dragHidden: input.isAnchoredOverlayDragHidden(imageDraftId),
+            dragHidden: isAnchoredOverlayDragHidden(imageDraftId),
           }}
         />
       );
@@ -260,7 +260,7 @@ function createGenerationDockHostBag(
     reportError: (error) => console.warn('生成前画布落盘失败:', error),
     render: () => {
       const input = inputRef.current;
-      const { generationDock, videoDraftId, videoSeed } = input;
+      const { generationDock, videoDraftId, videoSeed, isAnchoredOverlayDragHidden } = input;
       return (
         <VideoGenerationDockPanel
           view={generationDock.panel('video')}
@@ -307,7 +307,7 @@ function createGenerationDockHostBag(
             }),
             onMentionCanvas: input.videoAtMention,
             followAnchor: videoDraftId ? input.followAnchor : null,
-            dragHidden: input.isAnchoredOverlayDragHidden(videoDraftId),
+            dragHidden: isAnchoredOverlayDragHidden(videoDraftId),
           }}
         />
       );
@@ -327,7 +327,7 @@ function createGenerationDockHostBag(
     reportError: (error) => console.warn('音频生成前准备失败:', error),
     render: () => {
       const input = inputRef.current;
-      const { generationDock, audioDraftId, audioSeed } = input;
+      const { generationDock, audioDraftId, audioSeed, isAnchoredOverlayDragHidden } = input;
       return (
         <AudioGenerationDockPanel
           view={generationDock.panel('audio')}
@@ -362,7 +362,7 @@ function createGenerationDockHostBag(
             mentionItems: input.atMentionItems.filter((item) => item.id !== audioDraftId),
             onMentionCanvas: input.audioAtMention,
             followAnchor: audioDraftId ? input.followAnchor : null,
-            dragHidden: input.isAnchoredOverlayDragHidden(audioDraftId),
+            dragHidden: isAnchoredOverlayDragHidden(audioDraftId),
             onRemoveAttachment: (id) => input.removePlanAttachment(audioDraftId ?? undefined, id),
             onReorderAttachments: audioDraftId ? (ids) => input.handleReorderAttachments(audioDraftId, ids) : undefined,
           }}
@@ -373,7 +373,7 @@ function createGenerationDockHostBag(
 
   const music: MusicGenerationDockHost = {
     beginEdit: () => inputRef.current.exitEditSessionForGenPanel(),
-    recordSend: () => {},
+    recordSend: (send) => { console.log('Music dialog send:', send.text, send.model, send.options, send.refs); },
     render: () => {
       const input = inputRef.current;
       return (
@@ -393,11 +393,12 @@ function createGenerationDockHostBag(
     patchNode: (id, data) => inputRef.current.setTextNodes((previous) => previous.map((node) => node.id === id ? { ...node, data: { ...node.data, ...data } } : node)),
     render: () => {
       const input = inputRef.current;
+      const { isAnchoredOverlayDragHidden } = input;
       return (
         <TextGenerationDockPanel
           view={input.generationDock.panel('text')}
           actions={{ close: input.closeTextGenDialog, updateDraft: (patch) => input.generationDock.updateDraft('text', patch), submit: (send) => input.generationDock.submit('text', send) }}
-          resources={{ followAnchor: input.followAnchor, dragHidden: input.isAnchoredOverlayDragHidden(input.textGenDraftId) }}
+          resources={{ followAnchor: input.followAnchor, dragHidden: isAnchoredOverlayDragHidden(input.textGenDraftId) }}
         />
       );
     },
