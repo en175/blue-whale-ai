@@ -2,13 +2,12 @@ import { promptBindingList, type PromptBinding } from '@lib/contracts/prompt-tar
 import { promptMentionSchema } from '@lib/contracts/prompt-preview';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, type ReactNode } from 'react';
-import { toast as globalToast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { newNodeId } from './nodeId';
 import { nodeBoxOf, readRecoveryErrorReason, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
-import { normalizeVideoMode } from '@/lib/video-modes';import { imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
+import { normalizeVideoMode } from '@/lib/video-modes';import { imageRefSourceError, isImageDraftNode } from './mediaRefs';
 import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from './textIndexSync';
 import { audioRefSourceError } from './audioMediaRefs';
 
@@ -18,7 +17,6 @@ import {
   mergedVideoMediaRefsOf,
   videoRefSourceError,
   videoRefIdentityIds,
-  type VideoRefRole,
 } from './videoMediaRefs';
 
 import { imageReferenceMaxOf } from '@/lib/model-reference-limits';
@@ -27,41 +25,8 @@ import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
 import { type MediaDims } from './components/MediaNode/mediaContentSize';
 
 import { mediaCardToolbarVisible } from './components/MediaNode/toolbarVisibility';
-import {
-  MEDIA_EXTRACT_EDGE_ORIGIN,
-  MEDIA_EXTRACT_NODE_PREFIX,
-  buildMediaExtractPlaceholderNode,
-  mediaExtractNodeId,
-} from './mediaExtract';
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
-import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
-import {
-  AUDIO_TRIM_EDGE_ORIGIN,
-  AUDIO_TRIM_NODE_PREFIX,
-  audioTrimNodeId,
-  buildAudioTrimPlaceholderNode,
-} from './audioTrim';
-import { type VocalSplitPayload, type AudioToolSubmission } from './audioToolSessions';
-import {
-  type AudioTrimInput,
-} from '@lib/contracts/audio-trim';
-import { AUDIO_MIX_EDGE_ORIGIN, buildAudioMixPlaceholderNode, findAudioMixPosition } from './audioMix';
-import {
-  AUDIO_SPEED_EDGE_ORIGIN,
-  AUDIO_SPEED_NODE_PREFIX,
-  audioSpeedNodeId,
-  buildAudioSpeedPlaceholderNode,
-} from './audioSpeed';
-import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
-import { AUDIO_VIDEO_MUX_EDGE_ORIGIN, AUDIO_VIDEO_MUX_TITLE, audioVideoMuxIdentityOf, buildAudioVideoMuxIdentity, isAudioVideoMuxBindEdge } from './audioVideoMux';
-import { VOCAL_SPLIT_EDGE_ORIGIN, buildVocalSplitPlaceholderNode } from './vocalSplit';
-import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from './sceneSplit';
-import { type SceneSplitSubmission } from './sceneSplitSession';
-import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from './smartMatting';
-import { imageEnhanceDraftPosition } from './imageEnhance';
-import { type SmartMattingSubmission } from './smartMattingSession';
-import { type CropHost } from './cropSession';
-import { IMAGE_CROP_EDGE_ORIGIN, type ImageCropIdentity } from './imageCrop';
+import { audioVideoMuxIdentityOf } from './audioVideoMux';
 import { type ToolSessionDeps } from './toolSessionCoordinator';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import type { VideoGenSeedParams } from './components/BottomDialog';
@@ -88,11 +53,8 @@ import { fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProje
 import { rememberAssetUrl } from './components/AgentPanel/assetUrlCache';
 import { referencePromptPlan, applyPromptPreview, legacyCardHistoryOptions, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
-import { useAuthPromptStore } from '@/stores/authPrompt';
-import { openRechargeForCreditsError } from '@/utils/creditsGate';
 import type { SessionContentBlock } from '@/api/agentSessions';
-import { newIdempotencyKey } from '@/api/idempotencyKey';
-import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
+import { probeMediaMeta } from '@/utils/upload';
 import {
   availableGenKinds,
   isConnectableSource,
@@ -100,20 +62,13 @@ import {
 import { checkFileBeforeUpload } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
-import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
+import { type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
 import { mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
-import { normalGenerationTask } from './generationRuntime/normalGeneration';
-import { storyboardTask } from './generationRuntime/storyboardTasks';
-import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from './generationRuntime/mixMuxTasks';
-import { sceneSplitTask, vocalSplitTask } from './generationRuntime/multiOutputTasks';
 import { createImageToolsTask } from './generationRuntime/imageTools';
-import { videoToolsTask } from './generationRuntime/videoTools';
-import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
-import type { RuntimeNodeView } from './generationRuntime/types';
-import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
+import { putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHydration } from './hooks/useCanvasHydration';
-import { patchCanvasNodeActions } from './hooks/patchCanvasNodeActions';
+import { syncCanvasNodeActions } from './hooks/patchCanvasNodeActions';
 import { useCanvasGraph } from './hooks/useCanvasGraph';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
@@ -146,6 +101,8 @@ import { useCanvasDraftRefActions } from './hooks/useCanvasDraftRefActions';
 import { useCanvasTextNodeFactories } from './hooks/useCanvasTextNodeFactories';
 import { useCanvasToolJobSubmissions } from './hooks/useCanvasToolJobSubmissions';
 import { useCanvasImageToolHosts } from './hooks/useCanvasImageToolHosts';
+import { useCanvasCompoundToolHosts } from './hooks/useCanvasCompoundToolHosts';
+import { useGenerationRuntimeBinding } from './hooks/useGenerationRuntimeBinding';
 import { useCanvasSelectionBridge } from './hooks/useCanvasSelectionBridge';
 import { useCanvasNodeDeletion } from './hooks/useCanvasNodeDeletion';
 import { useCanvasEdgeOps } from './hooks/useCanvasEdgeOps';
@@ -167,7 +124,7 @@ import {
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
 import { createGenerationDockCoordinator } from './generationDockCoordinator';
-import { buildGenerationDockHosts } from './generationDockHosts';
+import { useGenerationDockHosts } from './generationDockHosts';
 import { createImageGenerationDock, type ImageGenerationDockHost } from './imageGenerationDock';
 import { createVideoGenerationDock, type VideoGenerationDockHost } from './videoGenerationDock';
 import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from './audioMusicGenerationDock';
@@ -996,7 +953,6 @@ export default function CanvasPage() {
     firePendingVideoDraft: () => {},
     renameCard: (_id: string, _name: string) => {},
   });
-  actionsRef.current = patchCanvasNodeActions(actionsRef.current, { duplicate: handleDuplicateNode, addToChat: handleAddToChatNode, renameCard });
   const canOpenEditor = (nodeId?: string): boolean => {
     if (submittingNodeId && nodeId !== submittingNodeId) {
       showToast('warn', '正在保存并提交，请稍候');
@@ -1182,7 +1138,6 @@ export default function CanvasPage() {
     handleCanvasNodeClick,
     setGroups,
   });
-  actionsRef.current = patchCanvasNodeActions(actionsRef.current, { openImageDialog: () => generationDock.open('image', {}) });
   const warnStaleMediaRefs = (targetNodeId: string, kind: 'image' | 'video') => {
     const byId = new Map(mediaNodesRef.current.map((n) => [n.id, n]));
     const stale = edgesRef.current.some((e) => {
@@ -1551,20 +1506,6 @@ export default function CanvasPage() {
     handleAddTextNode,
     showToast,
   });
-  actionsRef.current = patchCanvasNodeActions(actionsRef.current, {
-    duplicate: handleDuplicateNode,
-    addToChat: handleAddToChatNode,
-    pasteAtNode: (id) => {
-      const node = graph.findNode(id);
-      const position = node
-        ? { x: node.position.x + 40, y: node.position.y + 40 }
-        : spawnPosition();
-      void applyClipboardAtFlow(position);
-    },
-    copyImage: (id) => { void handleCopyImage(id); },
-    complianceCheck: (id) => { void complianceCheckRef.current?.(id); },
-    fillEmptyShell: handleFillEmptyShell,
-  });
   const { handleCopySelectedNodes, handlePasteClipboard } = useCanvasClipboard({
     currentId,
     textNodesRef,
@@ -1792,11 +1733,6 @@ export default function CanvasPage() {
     captureSessionOwnership: (kind) => toolRuntime.captureSessionOwnership(kind),
     showToast,
   });
-  actionsRef.current = patchCanvasNodeActions(actionsRef.current, {
-    cancelJob: handleCancelJob,
-    retryJob: handleRetryJob,
-    removeMediaNode: handleRemoveMediaNode,
-  });
   const textAttachmentsOf = (targetNodeId: string): ImageTextAttachment[] =>
     textAttachmentsOfPure(targetNodeId, edgesRef.current, textNodesRef.current);
   const textAttachmentsForSend = (targetNodeId: string): ImageTextAttachment[] =>
@@ -1923,522 +1859,73 @@ export default function CanvasPage() {
     showToast,
   });
   recoverFrameInterpolationRef.current = recoverFrameInterpolation;
-  toolHostsRef.current.panels = {
-    getProjectId: () => activeProjectRef.current,
-    getNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    getNodes: () => mediaNodesRef.current,
-    canOpen: canOpenEditor,
-    activate(nodeId, toolbar) {
-      editingTargetRef.current = nodeId;
-      const node = mediaNodesRef.current.find((node) => node.id === nodeId);
-      if (toolbar && mediaCardToolbarVisible((node?.data ?? {}) as Record<string, unknown>)) {
-        setSoloSelectedNodeId(nodeId);
-        setSelectRequest({ id: nodeId, ts: Date.now() });
-      }
-    },
-    isValidTarget(nodeId, kind) {
-      const node = mediaNodesRef.current.find((node) => node.id === nodeId);
-      return Boolean(node && (node.data.draft === true || hasGenerationRecord(node)) && node.data[kind]);
-    },
-    isFrameInFlight: (nodeId) => generationRuntimeRef.current?.statusOf(nodeId)?.phase === 'submitting',
-    isVideoEnhanceInFlight: isVideoEnhanceCardInFlight,
-    startImage: (input) => startImageEnhanceJob(input, true),
-    startVideo: (input) => startVideoEnhanceJob(input),
-    startFrame: startFrameInterpolationJob,
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-    httpError: (message) => globalToast.error(message),
-  };
-  toolHostsRef.current.audioVideoMux = {
-    getProjectId: () => currentId,
-    getNode: (id) => mediaNodesRef.current.find((node) => node.id === id),
-    createDraft: (source) => {
-      const draftId = createVideoDraftCard(undefined, findAudioMixPosition(source, mediaNodesRef.current), {
-        fileName: AUDIO_VIDEO_MUX_TITLE,
-        data: { audioVideoMux: buildAudioVideoMuxIdentity(source.id, readAssetId(source.data)) },
-      });
-      addCanvasEdge(source.id, draftId, undefined, { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN });
-      return draftId;
-    },
-    patchIdentity: (draftId, identity) => patchMediaNode(draftId, { audioVideoMux: identity }),
-    removeBindEdges: (draft) => {
-      const stale = edgesRef.current.filter((edge) => isAudioVideoMuxBindEdge(edge, draft));
-      if (stale.length > 0) removeTargetInputs(stale.map((edge) => edge.id));
-    },
-    addVideoEdge: (sourceId, draftId) => addCanvasEdge(sourceId, draftId, undefined, { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN }),
-    isInFlight: () => audioVideoMuxInFlightRef.current,
-    setInFlight: (value) => { audioVideoMuxInFlightRef.current = value; },
-    canApply: (projectId) => activeProjectRef.current === projectId,
-    createTask: async ({ payload, draftId }) => {
-      const runtime = generationRuntimeRef.current;
-      if (!runtime) throw new Error('生成任务运行时未就绪，请刷新后重试');
-      const draft = mediaNodesRef.current.find((node) => node.id === draftId);
-      if (!draft) throw new Error('合成草稿卡不在画布上，无法发送');
-      const seedTarget = seedTargetOfNode(draft as unknown as RuntimeNodeView);
-      return await new Promise<{ job_id: string }>((resolve, reject) => {
-        const unwatch = watchMixSubmit(draftId, {
-          accepted: (jobId) => { unwatch(); resolve({ job_id: jobId }); },
-          failed: (error) => { unwatch(); reject(error); },
-        });
-        const issued = runtime.submit(
-          audioVideoMuxTask,
-          {
-            payload,
-            target: {
-              targetNodeId: draftId,
-              seedTarget,
-              seedSources: seedSourcesOfNode(draftId, generationRuntimeHostRef.current!),
-              expectedBindingRevision: runtime.bindingRevisionOf(draftId),
-            },
-          },
-          {
-            onCreateFailure: () => {
-              patchMediaNode(draftId, {
-                genStatus: 'draft', progress: undefined, errorText: undefined,
-                jobId: undefined, generationRecovery: undefined,
-              });
-              return true;
-            },
-            onStale: () => { unwatch(); reject(staleMixSubmitError()); },
-          },
-        );
-        if (!issued) {
-          unwatch();
-          reject(new Error('音视频合成任务未受理，请重试'));
-        }
-      });
-    },
-    handoff: async ({ projectId, draftId }) => {
-      if (mediaNodesRef.current.some((node) => node.id === draftId)) {
-        patchMediaNode(draftId, { genStatus: 'generating', progress: 0, errorText: undefined });
-      }
-      void flushCanvasSave(projectId).catch(() => {});
-    },
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  const handoffCropResult: CropHost['handoff'] = ({ source }, uploaded) => {
-    const draftId = createImageDraftCard(imageEnhanceDraftPosition(source), {
-      fileName: '裁切',
-      skipSelect: true,
-      data: {
-        src: uploaded.url,
-        assetId: uploaded.asset_id,
-        width: uploaded.width,
-        height: uploaded.height,
-        mime: uploaded.mime,
-        size: uploaded.size,
-        genStatus: undefined,
-        draft: undefined,
-        imageCrop: { sourceAssetId: String(uploaded.asset_id) } satisfies ImageCropIdentity,
-      },
-    });
-    addCanvasEdge(source.id, draftId, undefined, { origin: IMAGE_CROP_EDGE_ORIGIN });
-  };
-  toolHostsRef.current.crop = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    uploadFile: (file, projectId) => uploadAssetFile(file, { projectId, silent: true }),
-    handoff: handoffCropResult,
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  toolHostsRef.current.audioVideoSplit = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    startTask: (input: AudioVideoSplitSubmission): boolean => {
-      const { source: node, payload } = input;
-      const targetNodeId = mediaExtractNodeId(newIdempotencyKey());
-      const placeholder = attachCallbacks(
-        buildMediaExtractPlaceholderNode({
-          jobId: targetNodeId.slice(MEDIA_EXTRACT_NODE_PREFIX.length),
-          outputFormat: payload.output_format,
-          sourceAssetId: payload.source_asset_id,
-          source: node,
-        }) as Node,
-      );
-      const current = mediaNodesRef.current;
-      const next = current.some((item) => item.id === targetNodeId) ? current : [...current, placeholder];
-      mediaNodesRef.current = next;
-      setMediaNodes(next);
-      addCanvasEdge(node.id, targetNodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
-      return submitVideoToolTask({ kind: 'mediaExtract', input: payload }, targetNodeId);
-    },
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  toolHostsRef.current.audioTrim = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    startTask: (input: AudioToolSubmission<AudioTrimInput>): boolean => {
-      const { source: node, payload } = input;
-      const targetNodeId = audioTrimNodeId(newIdempotencyKey());
-      const placeholder = attachCallbacks(
-        buildAudioTrimPlaceholderNode({
-          jobId: targetNodeId.slice(AUDIO_TRIM_NODE_PREFIX.length),
-          outputFormat: payload.output_format,
-          timeParams: { start_time: payload.start_time, end_time: payload.end_time },
-          sourceAssetId: payload.source_asset_id,
-          source: node,
-        }) as Node,
-      );
-      const current = mediaNodesRef.current;
-      const next = current.some((item) => item.id === targetNodeId) ? current : [...current, placeholder];
-      mediaNodesRef.current = next;
-      setMediaNodes(next);
-      addCanvasEdge(node.id, targetNodeId, undefined, { origin: AUDIO_TRIM_EDGE_ORIGIN });
-      return submitVideoToolTask({ kind: 'audioTrim', input: payload }, targetNodeId);
-    },
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  toolHostsRef.current.audioSpeed = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    startTask: (input: AudioToolSubmission<AudioSpeedInput>): boolean => {
-      const { source: node, payload } = input;
-      const targetNodeId = audioSpeedNodeId(newIdempotencyKey());
-      const placeholder = attachCallbacks(
-        buildAudioSpeedPlaceholderNode({
-          jobId: targetNodeId.slice(AUDIO_SPEED_NODE_PREFIX.length),
-          speed: payload.speed ?? 1,
-          sourceAssetId: payload.source_asset_id,
-          source: node,
-        }) as Node,
-      );
-      const current = mediaNodesRef.current;
-      const next = current.some((item) => item.id === targetNodeId) ? current : [...current, placeholder];
-      mediaNodesRef.current = next;
-      setMediaNodes(next);
-      addCanvasEdge(node.id, targetNodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
-      return submitVideoToolTask({ kind: 'audioSpeed', input: payload }, targetNodeId);
-    },
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  const runVocalSplitTask = async (input: AudioToolSubmission<VocalSplitPayload>): Promise<void> => {
-    const { source: node, payload } = input;
-    const sourceNodeId = node.id;
-    const placeholderId = newNodeId('vocal-split');
-    const placeholder = attachCallbacks(
-      buildVocalSplitPlaceholderNode({
-        nodeId: placeholderId,
-        scene: payload.scene,
-        outputFormat: payload.output_format,
-        sourceAssetId: payload.source_asset_id,
-        source: node,
-      }) as Node,
-    );
-    const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN });
-    const runtime = generationRuntimeRef.current;
-    const placeholderView = mediaNodesRef.current.find((item) => item.id === placeholderId);
-    if (!runtime || !placeholderView) throw new Error('生成任务运行时未就绪');
-    const dispatched = runtime.submit(
-      vocalSplitTask,
-      {
-        payload: { source_asset_id: payload.source_asset_id, scene: payload.scene, output_format: payload.output_format },
-        target: {
-          targetNodeId: placeholderId,
-          seedTarget: seedTargetOfNode(placeholderView as unknown as RuntimeNodeView),
-          seedSources: seedSourcesOfNode(placeholderId, generationRuntimeHostRef.current!),
-          expectedBindingRevision: runtime.bindingRevisionOf(placeholderId),
-        },
-      },
-      {
-        onCreateFailure: (e: unknown) => {
-          patchMediaNode(placeholderId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : '人声背景分离任务创建失败，请重试',
-          });
-          return true;
-        },
-      },
-    );
-    if (!dispatched) throw new Error('人声背景分离任务提交被拒绝（无项目或在途防重入），请重试');
-  };
-  toolHostsRef.current.vocalSplit = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    runTask: runVocalSplitTask,
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  const runSceneSplitTask = async (input: SceneSplitSubmission): Promise<void> => {
-    const { source: node, payload } = input;
-    const sourceNodeId = node.id;
-    sceneSplitSendingRef.current = true;
-    const placeholderId = payload.target_node_id;
-    const placeholder = attachCallbacks(
-      buildSceneSplitPlaceholderNode({
-        nodeId: placeholderId,
-        granularity: payload.granularity,
-        sourceAssetId: payload.source_asset_id,
-        source: node,
-      }) as Node,
-    );
-    const current = mediaNodesRef.current;
-    const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
-    mediaNodesRef.current = next;
-    setMediaNodes(next);
-    addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SCENE_SPLIT_EDGE_ORIGIN });
-    try {
-      const runtime = generationRuntimeRef.current;
-      const placeholderView = mediaNodesRef.current.find((item) => item.id === placeholderId);
-      if (!runtime || !placeholderView) throw new Error('生成任务运行时未就绪');
-      const dispatched = runtime.submit(
-        sceneSplitTask,
-        {
-          payload: { source_asset_id: payload.source_asset_id, target_node_id: placeholderId, granularity: payload.granularity },
-          target: {
-            targetNodeId: placeholderId,
-            seedTarget: seedTargetOfNode(placeholderView as unknown as RuntimeNodeView),
-            seedSources: seedSourcesOfNode(placeholderId, generationRuntimeHostRef.current!),
-            expectedBindingRevision: runtime.bindingRevisionOf(placeholderId),
-          },
-        },
-        {
-          onCreateFailure: (e: unknown) => {
-            patchMediaNode(placeholderId, {
-              genStatus: 'failed',
-              errorText: isApiError(e) ? e.message : '场景切分任务创建失败，请重试',
-            });
-            return true;
-          },
-        },
-      );
-      if (!dispatched) throw new Error('场景切分任务提交被拒绝（无项目或在途防重入），请重试');
-    } finally {
-      sceneSplitSendingRef.current = false;
-    }
-  };
-  toolHostsRef.current.sceneSplit = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    newTargetId: () => newNodeId('scene-split'),
-    isSending: () => sceneSplitSendingRef.current,
-    runTask: runSceneSplitTask,
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  toolHostsRef.current.audioMix = {
-    getProjectId: () => currentId,
-    getNode: (id) => mediaNodesRef.current.find((node) => node.id === id),
-    isInFlight: () => audioMixInFlightRef.current,
-    setInFlight: (value) => { audioMixInFlightRef.current = value; },
-    canApply: (projectId) => activeProjectRef.current === projectId,
-    linkAssets: async (input) => {
-      await linkAudioMixAssetsMutation.mutateAsync({ projectId: input.projectId, assetIds: input.libraryAssetIds });
-    },
-    createTask: async ({ projectId, payload, source }) => {
-      const runtime = generationRuntimeRef.current;
-      if (!runtime) throw new Error('生成任务运行时未就绪，请刷新后重试');
-      const submitEpoch = docLoadEpochRef.current;
-      const payloadText = JSON.stringify(payload);
-      const previousCard = audioMixSubmitCardRef.current;
-      const nodeId = previousCard && previousCard.projectId === projectId
-        && previousCard.payload === payloadText && !previousCard.accepted
-        ? previousCard.nodeId
-        : newNodeId('audio-mix');
-      audioMixSubmitCardRef.current = { projectId, payload: payloadText, nodeId, accepted: false };
-      const occupied = [
-        ...mediaNodesRef.current,
-        ...textNodesRef.current,
-        ...productNodesRef.current,
-        ...assetNodesRef.current,
-      ];
-      const position = findAudioMixPosition(source, occupied);
-      const placeholder = attachCallbacks(buildAudioMixPlaceholderNode(nodeId, payload.output_format, position));
-      const current = mediaNodesRef.current;
-      mediaNodesRef.current = current.some((node) => node.id === nodeId) ? current : [...current, placeholder];
-      setMediaNodes(mediaNodesRef.current);
-      const liveNodeIds = new Set(current.map((node) => node.id));
-      for (const input of payload.inputs) {
-        if (input.node_id && liveNodeIds.has(input.node_id)) {
-          addCanvasEdge(input.node_id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
-        }
-      }
-      const rollbackPlaceholder = () => {
-        if (activeProjectRef.current !== projectId) return;
-        if (docLoadEpochRef.current !== submitEpoch) return;
-        const currentNode = mediaNodesRef.current.find((node) => node.id === nodeId);
-        if (!currentNode || currentNode.data?.jobId != null) return;
-        if (generationRuntimeRef.current?.statusOf(nodeId) != null) return;
-        const keepEdge = (edge: Edge) => !(edge.target === nodeId && edge.data?.origin === AUDIO_MIX_EDGE_ORIGIN);
-        mediaNodesRef.current = mediaNodesRef.current.filter((node) => node.id !== nodeId);
-        edgesRef.current = edgesRef.current.filter(keepEdge);
-        setMediaNodes((prev) => prev.filter((node) => node.id !== nodeId));
-        setEdges((prev) => prev.filter(keepEdge));
-      };
-      return await new Promise<{ job_id: string }>((resolve, reject) => {
-        const unwatch = watchMixSubmit(nodeId, {
-          accepted: (jobId) => {
-            const entry = audioMixSubmitCardRef.current;
-            if (entry?.nodeId === nodeId) audioMixSubmitCardRef.current = { ...entry, accepted: true };
-            unwatch();
-            resolve({ job_id: jobId });
-          },
-          failed: (error) => { unwatch(); reject(error); },
-        });
-        const issued = runtime.submit(
-          audioMixTask,
-          {
-            payload,
-            target: {
-              targetNodeId: nodeId,
-              seedTarget: {
-                role: 'result-placeholder',
-                x: position.x,
-                y: position.y,
-                width: 480,
-                height: 284,
-                name: `混合结果.${payload.output_format}`,
-              },
-              seedSources: seedSourcesOfNode(nodeId, generationRuntimeHostRef.current!),
-              expectedBindingRevision: runtime.bindingRevisionOf(nodeId),
-            },
-          },
-          {
-            onCreateFailure: () => { rollbackPlaceholder(); return true; },
-            onStale: () => { unwatch(); rollbackPlaceholder(); reject(staleMixSubmitError()); },
-          },
-        );
-        if (!issued) {
-          unwatch();
-          rollbackPlaceholder();
-          reject(new Error('音频混合任务未受理，请重试'));
-        }
-      });
-    },
-    handoff: async (_input, _task, context) => {
-      context.exitForSubmission();
-    },
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  const runSmartMattingTask = async (input: SmartMattingSubmission): Promise<void> => {
-    smartMattingSendingRef.current = true;
-    const { source: node, payload: lastInput } = input;
-    const sourceNodeId = node.id;
-    const placeholderId = lastInput.target_node_id;
-    try {
-      const placeholder = attachCallbacks(
-        buildSmartMattingPlaceholderNode({
-          nodeId: placeholderId,
-          mode: lastInput.mode,
-          sourceAssetId: lastInput.source_asset_id,
-          lastInput,
-          source: node,
-        }) as Node,
-      );
-      const current = mediaNodesRef.current;
-      const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
-      mediaNodesRef.current = next;
-      setMediaNodes(next);
-      addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SMART_MATTING_EDGE_ORIGIN });
-      if (!submitVideoToolTask({ kind: 'smartMatting', input: lastInput }, placeholderId)) {
-        patchMediaNode(placeholderId, { genStatus: 'failed', errorText: '智能抠像任务未发出，请重试' });
-      }
-    } finally {
-      smartMattingSendingRef.current = false;
-    }
-  };
-  toolHostsRef.current.smartMatting = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    newTargetId: () => newNodeId('smart-matting'),
-    isSending: () => smartMattingSendingRef.current,
-    runTask: runSmartMattingTask,
-    warn: (message) => showToast('warn', message),
-    error: (message) => globalToast.error(message),
-  };
-  toolDepsRef.current = buildToolSessionDeps();
-  actionsRef.current = patchCanvasNodeActions(actionsRef.current, {
-    download: handleNodeDownload,
-    showDetails: handleNodeShowDetails,
+  useCanvasCompoundToolHosts({
+    toolHostsRef,
+    toolDepsRef,
+    currentId,
+    canOpenEditor,
+    mediaNodesRef,
+    textNodesRef,
+    productNodesRef,
+    assetNodesRef,
+    edgesRef,
+    setMediaNodes,
+    setEdges,
+    activeProjectRef,
+    docLoadEpochRef,
+    generationRuntimeRef,
+    generationRuntimeHostRef,
+    editingTargetRef,
+    audioVideoMuxInFlightRef,
+    audioMixInFlightRef,
+    audioMixSubmitCardRef,
+    sceneSplitSendingRef,
+    smartMattingSendingRef,
+    attachCallbacks,
+    patchMediaNode,
+    addCanvasEdge,
+    removeTargetInputs,
+    createVideoDraftCard,
+    createImageDraftCard,
+    submitVideoToolTask,
+    startImageEnhanceJob,
+    startVideoEnhanceJob,
+    startFrameInterpolationJob,
+    isVideoEnhanceCardInFlight,
+    setSoloSelectedNodeId,
+    setSelectRequest,
+    flushCanvasSave,
+    linkAudioMixAssets: (vars) => linkAudioMixAssetsMutation.mutateAsync(vars),
+    showToast,
+    dismissGenPanels,
   });
   const appliedCardIds = useMemo(() => appliedCardIdsOf(textNodes), [textNodes]);
-  generationRuntimeHostRef.current = ({
-    getProjectId: () => activeProjectRef.current,
-    getLoadEpoch: () => docLoadEpochRef.current,
-    getMediaNodes: () => mediaNodesRef.current as unknown as RuntimeNodeView[],
-    findNode: (nodeId) => {
-      const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-      return node ? (node as unknown as RuntimeNodeView) : null;
-    },
-    patchNode: patchMediaNode,
-    insertMediaNode: (node) => {
-      const built = attachCallbacks({
-        id: node.id,
-        type: 'mediaNode',
-        position: node.position,
-        data: {
-          ...node.data,
-          onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-          onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
-          onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-          onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
-          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-          onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onDownload: (id: string) => actionsRef.current.download(id),
-          onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-          onMediaDims: handleMediaDims,
-        },
-      } as Node);
-      mediaNodesRef.current = [...mediaNodesRef.current, built];
-      setMediaNodes(mediaNodesRef.current);
-    },
-    removeMediaNode: (nodeId) => {
-      const next = mediaNodesRef.current.filter((n) => n.id !== nodeId);
-      mediaNodesRef.current = next;
-      setMediaNodes(next);
-      const nextEdges = edgesRef.current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
-      edgesRef.current = nextEdges;
-      setEdges(nextEdges);
-    },
-    getEdges: () => edgesRef.current.map((edge) => ({ source: edge.source, target: edge.target })),
-    addEdge: (source, target, role, marker) => { addCanvasEdge(source, target, role as VideoRefRole, marker); },
-    getActiveJob: (nodeId) => activeJobByNodeRef.current.get(nodeId),
-    setActiveJob: (nodeId, token) => { activeJobByNodeRef.current.set(nodeId, token); },
-    clearActiveJob: (nodeId) => { activeJobByNodeRef.current.delete(nodeId); },
-    isLocallyRemoved: (nodeId) => locallyRemovedGenerationNodesRef.current.has(nodeId),
-    markLocallyRemoved: (nodeId) => { locallyRemovedGenerationNodesRef.current.add(nodeId); },
-    registerPendingDelete: (nodeId) => { pendingDeleteJobNodesRef.current.add(nodeId); },
-    isPendingDelete: (nodeId) => pendingDeleteJobNodesRef.current.has(nodeId),
-    applyTerminal: (nodeId, jobId, detail) => applyJobTerminal(nodeId, jobId, detail),
-    settleCancelled: settleCancelledNode,
-    saveCanvas: (projectId) => flushCanvasSave(projectId),
-    fetchRecoveryPage: (projectId, options) => queryClient.fetchQuery(generationRecoveryPageOptions(projectId, options)),
-    toast: (kind, message) => showToast(kind, message),
-    openRechargeForCreditsError,
-    addAuthResume: (fn) => { useAuthPromptStore.getState().addResume(fn); },
-    rememberAsset: rememberGeneratedAsset,
-  } satisfies GenerationRuntimeHost);
-  if (generationRuntimeRef.current == null) {
-    const hostRef = generationRuntimeHostRef;
-    const forwardHost = new Proxy({} as GenerationRuntimeHost, {
-      get(_target, prop: string) {
-        const impl = hostRef.current as unknown as Record<string, unknown>;
-        const value = impl[prop];
-        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(impl) : value;
-      },
-    });
-    const runtime = createGenerationRuntime(forwardHost);
-    runtime.register(normalGenerationTask);
-    runtime.register(storyboardTask);
-    runtime.register(imageToolsTask);
-    runtime.register(audioMixTask);
-    runtime.register(audioVideoMuxTask);
-    runtime.register(sceneSplitTask);
-    runtime.register(vocalSplitTask);
-    runtime.register(videoToolsTask);
-    generationRuntimeRef.current = runtime;
-  }
+  useGenerationRuntimeBinding({
+    generationRuntimeHostRef,
+    generationRuntimeRef,
+    activeProjectRef,
+    docLoadEpochRef,
+    mediaNodesRef,
+    edgesRef,
+    activeJobByNodeRef,
+    locallyRemovedGenerationNodesRef,
+    pendingDeleteJobNodesRef,
+    actionsRef,
+    setMediaNodes,
+    setEdges,
+    patchMediaNode,
+    attachCallbacks,
+    handleSaveMediaToAssets,
+    handleMediaDims,
+    addCanvasEdge,
+    applyJobTerminal,
+    settleCancelledNode,
+    flushCanvasSave,
+    queryClient,
+    showToast,
+    rememberGeneratedAsset,
+    imageToolsTask,
+  });
   referencePlanRef.current = async (planNodeId, targetNodeId, syncBindings) => {
     const projectId = activeProjectRef.current;
     if (!projectId || applyingRef.current || isGeneratingNode(targetNodeId)) return;
@@ -2488,7 +1975,6 @@ export default function CanvasPage() {
       setShowAssetsModal(true);
       return;
     }
-    console.log('Tool menu select:', menu, item);
   };
   const canvasMedia: CanvasPickItem[] = useMemo(() => canvasMediaOf(mediaNodes), [mediaNodes]);
   const atMentionItems: AtMentionItem[] = useMemo(() => atMentionItemsOf(mediaNodes, textNodes), [mediaNodes, textNodes]);
@@ -2576,7 +2062,7 @@ export default function CanvasPage() {
     }
     return ids;
   };
-  buildGenerationDockHosts(
+  useGenerationDockHosts(
     {
       isGeneratingNode: (id) => isGeneratingNode(id),
       patchMediaNode: (nodeId, patch) => patchMediaNode(nodeId, patch),
@@ -2707,7 +2193,6 @@ export default function CanvasPage() {
     patchMediaNode(nodeId, { draftRatio: 'adaptive' });
     void handleUpdateGenerate(nodeId, { ratioOverride: 'adaptive' });
   };
-  actionsRef.current = patchCanvasNodeActions(actionsRef.current, { fixFollowVideo: handleFixFollowVideo });
   const { firePendingGen, firePendingVideoDraft } = useCanvasHomeHandoff({
     currentId,
     doc,
@@ -2722,7 +2207,6 @@ export default function CanvasPage() {
     openVideoDraftDialog: (nodeId, preset) => openVideoDraftDialog(nodeId, preset),
     startGenerationJob: (type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft) => startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft),
   });
-  actionsRef.current = patchCanvasNodeActions(actionsRef.current, { firePendingGen, firePendingVideoDraft });
   useEffect(() => {
     actionsRef.current.firePendingGen();
     actionsRef.current.firePendingVideoDraft();
@@ -2782,6 +2266,31 @@ export default function CanvasPage() {
     acceptDoc,
     upsertAssets,
     showToast,
+  });
+
+  syncCanvasNodeActions(actionsRef.current, {
+    duplicate: handleDuplicateNode,
+    addToChat: handleAddToChatNode,
+    renameCard,
+    openImageDialog: () => generationDock.open('image', {}),
+    pasteAtNode: (id) => {
+      const node = graph.findNode(id);
+      const position = node
+        ? { x: node.position.x + 40, y: node.position.y + 40 }
+        : spawnPosition();
+      void applyClipboardAtFlow(position);
+    },
+    copyImage: (id) => { void handleCopyImage(id); },
+    complianceCheck: (id) => { void complianceCheckRef.current?.(id); },
+    fillEmptyShell: handleFillEmptyShell,
+    cancelJob: handleCancelJob,
+    retryJob: handleRetryJob,
+    removeMediaNode: handleRemoveMediaNode,
+    download: handleNodeDownload,
+    showDetails: handleNodeShowDetails,
+    fixFollowVideo: handleFixFollowVideo,
+    firePendingGen,
+    firePendingVideoDraft,
   });
 
   return (

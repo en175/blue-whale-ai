@@ -1,3 +1,3 @@
-export function patchCanvasNodeActions<A>(current: A, patch: Partial<A>): A {
-  return { ...current, ...patch };
+export function syncCanvasNodeActions<A extends object>(target: A, patch: Partial<A>): void {
+  Object.assign(target, patch);
 }
