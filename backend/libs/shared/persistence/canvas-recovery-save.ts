@@ -587,6 +587,9 @@ export async function saveCanvasWithRecovery(
       const tampered = () => new RecoveryContractError(
         recoveryError(422, "未声明的受保护项被改动，须以显式恢复动作变更", RECOVERY_REASONS.documentMismatch),
       );
+      const incoming = markerOf(node);
+      if (incoming !== null && String(incoming.outputKey) !== TARGET_OUTPUT_KEY
+        && declaredKeys.has(`${String(incoming.submissionId)}:${String(incoming.outputKey)}`)) continue;
       if (supersededOwner !== null
         && markerMatches(markerOf(node), supersededOwner.submissionId, supersededOwner.outputKey)) continue;
       if (!markerMatches(markerOf(node), submissionId, outputKey) || !protectedCardKept(previousNode, node)) throw tampered();
