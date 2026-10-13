@@ -194,7 +194,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                     new SceneCardGenerationRecordSync(sm, rm, events),
                     new StoryboardPreviewSync(sm, pm, events),
                     events,
-                    JobSettlementPublisher.noop());
+                    TerminalEventOutbox.noop());
         }
 
         private static <T> MapperFactoryBean<T> factory(Class<T> mapperIf, SqlSessionFactory sf)

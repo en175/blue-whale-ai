@@ -63,7 +63,7 @@ public class JobStateMachineService {
                         new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,
                                 new ProjectEventPublisher(projectEventMapper)),
                         new ProjectEventPublisher(projectEventMapper),
-                        JobSettlementPublisher.noop()));
+                        TerminalEventOutbox.noop()));
     }
 
     @Autowired

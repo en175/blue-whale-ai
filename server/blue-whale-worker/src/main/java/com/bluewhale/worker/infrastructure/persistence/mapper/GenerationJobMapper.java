@@ -23,7 +23,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND type = #{type}
               AND is_delete = false
-              AND next_action_at <= NOW()
               AND (
                 status = 'queued'
                 OR (
@@ -202,7 +201,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND type = 'audio'
               AND is_delete = false
-              AND next_action_at <= NOW()
               AND (
                 status = 'queued'
                 OR (
@@ -245,7 +243,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND source IN
               <foreach collection="sources" item="item" open="(" separator="," close=")">#{item}</foreach>
               AND is_delete = false
-              AND next_action_at &lt;= NOW()
               AND (
                 status = 'queued'
                 OR (
@@ -370,7 +367,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND type = 'video'
               AND source IN ('bottom_dock', 'plan_apply', 'plan', 'scene_card')
               AND is_delete = false
-              AND next_action_at <= NOW()
               AND (
                 status = 'queued'
                 OR (
@@ -606,25 +602,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               <foreach collection="sources" item="item" open="(" separator="," close=")">#{item}</foreach>
             </if>
             AND is_delete = false
-            <if test="maxAgeMinutes > 0">
-              AND (
-                gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
-                OR (
-                    -- 收割八家族 type 清单：与各家族 Contract.TAG 及 ParentResultReuse 的八家族
-                    -- 调用方保持同步维护（防漂移互指）——三处任一变化须同步核对另两处
-                    type IN ('media_extract', 'audio_trim', 'vocal_split', 'video_enhance',
-                             'video_scene_split', 'video_subtitle_erase', 'video_matting',
-                             'video_frame_interpolation')
-                    AND retry_of_job_id IS NOT NULL AND status = 'processing'
-                    AND provider_task_id IS NULL
-                    AND EXISTS (SELECT 1 FROM generation_jobs parent
-                                WHERE parent.id = generation_jobs.retry_of_job_id
-                                  AND parent.provider_task_id IS NOT NULL
-                                  AND parent.provider_task_id != '')
-                    AND (gmt_create > (NOW() - INTERVAL (#{maxAgeMinutes} + 10) MINUTE)
-                         OR lease_expires_at > (NOW() - INTERVAL 10 MINUTE)))
-              )
-            </if>
             AND next_action_at &lt;= NOW()
             AND (
               status = 'queued'
@@ -637,102 +614,141 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     List<Long> listDueJobIdsByTypeAndSources(
             @Param("type") String type,
             @Param("sources") List<String> sources,
-            @Param("limit") int limit,
-            @Param("maxAgeMinutes") int maxAgeMinutes);
+            @Param("limit") int limit);
 
-    default List<Long> listDueVideoJobIds(int limit, int maxAgeMinutes) {
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'failed',
+                error = #{errorJson},
+                next_action_at = NULL,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND is_delete = false
+              AND status IN ('queued', 'processing')
+              AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+              AND execution_deadline_at IS NOT NULL
+              AND execution_deadline_at < NOW()
+            """)
+    int expireJobGuard(@Param("jobId") Long jobId, @Param("errorJson") String errorJson);
+
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE is_delete = false
+              AND status IN ('queued', 'processing')
+              AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+              AND execution_deadline_at IS NOT NULL
+              AND execution_deadline_at < NOW()
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<Long> listExpiredJobIds(@Param("limit") int limit);
+
+    @Select("""
+            SELECT id, type FROM generation_jobs
+            WHERE is_delete = false
+              AND status = 'queued'
+              AND cancel_requested_at IS NOT NULL
+              AND next_action_at <= NOW()
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<GenerationJobEntity> listCancelPendingJobs(@Param("limit") int limit);
+
+    default List<Long> listDueVideoJobIds(int limit) {
         return listDueJobIdsByTypeAndSources("video",
-                List.of("bottom_dock", "plan_apply", "plan", "scene_card"), limit, maxAgeMinutes);
+                List.of("bottom_dock", "plan_apply", "plan", "scene_card"), limit);
     }
 
-    default List<Long> listDueImageJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueImageJobIds(int limit) {
         return listDueJobIdsByTypeAndSources("image",
-                List.of("bottom_dock", "plan_apply", "storyboard_preview"), limit, maxAgeMinutes);
+                List.of("bottom_dock", "plan_apply", "storyboard_preview"), limit);
     }
 
-    default List<Long> listDueAudioJobIds(int limit, int maxAgeMinutes) {
-        return listDueJobIdsByTypeAndSources("audio", List.of(), limit, maxAgeMinutes);
+    default List<Long> listDueAudioJobIds(int limit) {
+        return listDueJobIdsByTypeAndSources("audio", List.of(), limit);
     }
 
-    default List<Long> listDueMediaExtractJobIds(int limit, int maxAgeMinutes) {
-        return listDueJobIdsByTypeAndSources("media_extract", List.of(), limit, maxAgeMinutes);
+    default List<Long> listDueMediaExtractJobIds(int limit) {
+        return listDueJobIdsByTypeAndSources("media_extract", List.of(), limit);
     }
 
-    default List<Long> listDueAudioTrimJobIds(int limit, int maxAgeMinutes) {
-        return listDueJobIdsByTypeAndSources("audio_trim", List.of(), limit, maxAgeMinutes);
+    default List<Long> listDueAudioTrimJobIds(int limit) {
+        return listDueJobIdsByTypeAndSources("audio_trim", List.of(), limit);
     }
 
-    default List<Long> listDueAudioMixJobIds(int limit, int maxAgeMinutes) {
-        return listDueJobIdsByTypeAndSources("audio_mix", List.of("dock"), limit, maxAgeMinutes);
+    default List<Long> listDueAudioMixJobIds(int limit) {
+        return listDueJobIdsByTypeAndSources("audio_mix", List.of("dock"), limit);
     }
 
-    default List<Long> listDueAudioVideoMuxJobIds(int limit, int maxAgeMinutes) {
-        return listDueJobIdsByTypeAndSources("audio_video_mux", List.of("dock"), limit, maxAgeMinutes);
+    default List<Long> listDueAudioVideoMuxJobIds(int limit) {
+        return listDueJobIdsByTypeAndSources("audio_video_mux", List.of("dock"), limit);
     }
 
-    default List<Long> listDueAudioSpeedJobIds(int limit, int maxAgeMinutes) {
-        return listDueJobIdsByTypeAndSources("audio_speed", List.of(), limit, maxAgeMinutes);
+    default List<Long> listDueAudioSpeedJobIds(int limit) {
+        return listDueJobIdsByTypeAndSources("audio_speed", List.of(), limit);
     }
 
-    default List<Long> listDueImageEnhanceJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueImageEnhanceJobIds(int limit) {
         return listDueJobIdsByTypeAndSources("image_enhance",
-                List.of("image_enhance"), limit, maxAgeMinutes);
+                List.of("image_enhance"), limit);
     }
 
-    default List<Long> listDueImageEraseJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueImageEraseJobIds(int limit) {
         return listDueJobIdsByTypeAndSources("image_erase",
-                List.of("image_erase"), limit, maxAgeMinutes);
+                List.of("image_erase"), limit);
     }
 
-    default List<Long> listDueImageOutpaintJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueImageOutpaintJobIds(int limit) {
         return listDueJobIdsByTypeAndSources("image_outpaint",
-                List.of("image_outpaint"), limit, maxAgeMinutes);
+                List.of("image_outpaint"), limit);
     }
 
-    default List<Long> listDueImageCutoutJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueImageCutoutJobIds(int limit) {
         return listDueJobIdsByTypeAndSources("image_cutout",
-                List.of("image_cutout"), limit, maxAgeMinutes);
+                List.of("image_cutout"), limit);
     }
 
-    default List<Long> listDueVideoSubtitleEraseJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueVideoSubtitleEraseJobIds(int limit) {
         return listDueJobIdsByTypeAndSources(
                 VideoSubtitleEraseContract.TAG,
                 List.of(VideoSubtitleEraseContract.SOURCE),
-                limit, maxAgeMinutes);
+                limit);
     }
 
-    default List<Long> listDueVideoEnhanceJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueVideoEnhanceJobIds(int limit) {
         return listDueJobIdsByTypeAndSources(
                 VideoEnhanceContract.TAG,
                 List.of(VideoEnhanceContract.SOURCE),
-                limit, maxAgeMinutes);
+                limit);
     }
 
-    default List<Long> listDueVocalSplitJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueVocalSplitJobIds(int limit) {
         return listDueJobIdsByTypeAndSources(
                 VocalSplitContract.TAG,
                 List.of(VocalSplitContract.SOURCE),
-                limit, maxAgeMinutes);
+                limit);
     }
 
-    default List<Long> listDueVideoSceneSplitJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueVideoSceneSplitJobIds(int limit) {
         return listDueJobIdsByTypeAndSources(
                 com.bluewhale.worker.domain.contract.VideoSceneSplitContract.TAG,
                 List.of(com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SOURCE),
-                limit, maxAgeMinutes);
+                limit);
     }
 
-    default List<Long> listDueVideoMattingJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueVideoMattingJobIds(int limit) {
         return listDueJobIdsByTypeAndSources(
                 com.bluewhale.worker.domain.contract.VideoMattingContract.TAG,
                 List.of(com.bluewhale.worker.domain.contract.VideoMattingContract.SOURCE),
-                limit, maxAgeMinutes);
+                limit);
     }
 
-    default List<Long> listDueVideoFrameInterpolationJobIds(int limit, int maxAgeMinutes) {
+    default List<Long> listDueVideoFrameInterpolationJobIds(int limit) {
         return listDueJobIdsByTypeAndSources(
                 VideoFrameInterpolationContract.TAG,
                 List.of(VideoFrameInterpolationContract.SOURCE),
-                limit, maxAgeMinutes);
+                limit);
     }
 }

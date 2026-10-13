@@ -32,6 +32,10 @@ public class JobFinalizer {
 
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
+    private static final String ERROR_TIMED_OUT = "timed_out";
+
+    private static final String ERROR_TIMED_OUT_MESSAGE = "任务执行超时";
+
     private final GenerationJobMapper jobMapper;
     private final AssetMapper assetMapper;
     private final GenerationJobLogMapper jobLogMapper;
@@ -41,7 +45,7 @@ public class JobFinalizer {
     private final SceneCardGenerationRecordSync recordSync;
     private final StoryboardPreviewSync previewSync;
     private final ProjectEventPublisher eventPublisher;
-    private final JobSettlementPublisher settlementPublisher;
+    private final TerminalEventOutbox outbox;
 
     public JobFinalizer(
             GenerationJobMapper jobMapper,
@@ -52,7 +56,7 @@ public class JobFinalizer {
             SceneCardGenerationRecordSync recordSync,
             StoryboardPreviewSync previewSync,
             ProjectEventPublisher eventPublisher,
-            JobSettlementPublisher settlementPublisher
+            TerminalEventOutbox outbox
     ) {
         this.jobMapper = jobMapper;
         this.assetMapper = assetMapper;
@@ -62,7 +66,7 @@ public class JobFinalizer {
         this.recordSync = recordSync;
         this.previewSync = previewSync;
         this.eventPublisher = eventPublisher;
-        this.settlementPublisher = settlementPublisher;
+        this.outbox = outbox;
     }
 
     @Transactional
@@ -336,19 +340,45 @@ public class JobFinalizer {
                            Map<String, Object> details,
                            String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
-        Map<String, Object> errorObj = new java.util.HashMap<>();
-        errorObj.put("code", errorCode);
-        errorObj.put("message", errorMessage);
-        if (details != null) {
-            errorObj.put("details", details);
-        }
-        int guardAffected = jobMapper.failJobGuard(jobIdLong, workerId, fencingToken, toJson(errorObj));
+        int guardAffected = jobMapper.failJobGuard(jobIdLong, workerId, fencingToken,
+                toJson(errorObject(errorCode, errorMessage, details)));
         if (guardAffected != 1) {
             log.warn("failJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={} errorCode={}",
                     jobId, workerId, fencingToken, errorCode);
             return false;
         }
 
+        finalizeFailure(jobId, jobIdLong, errorCode, errorMessage, details);
+        return true;
+    }
+
+    @Transactional
+    public boolean expireJob(String jobId) {
+        Long jobIdLong = Long.parseLong(jobId);
+        int guardAffected = jobMapper.expireJobGuard(jobIdLong,
+                toJson(errorObject(ERROR_TIMED_OUT, ERROR_TIMED_OUT_MESSAGE, Map.of())));
+        if (guardAffected != 1) {
+            return false;
+        }
+
+        log.info("协调器判定任务已越过执行截止时间，置失败：jobId={}", jobId);
+        finalizeFailure(jobId, jobIdLong, ERROR_TIMED_OUT, ERROR_TIMED_OUT_MESSAGE, Map.of());
+        return true;
+    }
+
+    private static Map<String, Object> errorObject(String errorCode, String errorMessage,
+                                                   Map<String, Object> details) {
+        Map<String, Object> errorObj = new java.util.HashMap<>();
+        errorObj.put("code", errorCode);
+        errorObj.put("message", errorMessage);
+        if (details != null) {
+            errorObj.put("details", details);
+        }
+        return errorObj;
+    }
+
+    private void finalizeFailure(String jobId, Long jobIdLong, String errorCode, String errorMessage,
+                                 Map<String, Object> details) {
         List<GenerationOutputSlotEntity> slots = slotMapper.findPendingByJobId(jobIdLong);
         for (GenerationOutputSlotEntity slot : slots) {
             slotMapper.updateSlotStatus(slot.getId(), JobStatusEnum.FAILED.value());
@@ -392,7 +422,6 @@ public class JobFinalizer {
                                 "error", Map.of("code", errorCode, "message", errorMessage)));
             }
         }
-        return true;
     }
 
     @Transactional
@@ -938,7 +967,7 @@ public class JobFinalizer {
                     "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
                     payload);
         }
-        settlementPublisher.publishTerminal(job, payload);
+        outbox.enqueue(job, payload);
     }
 
     @Transactional

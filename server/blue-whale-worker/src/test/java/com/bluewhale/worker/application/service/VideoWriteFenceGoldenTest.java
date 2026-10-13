@@ -50,7 +50,7 @@ class VideoWriteFenceGoldenTest {
                 new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper, events),
                 new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper, events),
                 events,
-                JobSettlementPublisher.noop());
+                TerminalEventOutbox.noop());
     }
 
     private static String updateSqlOf(String methodName) {

@@ -143,7 +143,7 @@ async function createFinalizeJobWithinTx(
 ): Promise<CreatedJob> {
   assertPureJobInput({ input: input.input });
   const now = new Date();
-  const deadline = new Date(now.getTime() + 30 * 60 * 1000);
+  const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const job = await tx.generation_jobs.create({
     data: {
       project_id: BigInt(input.projectId),

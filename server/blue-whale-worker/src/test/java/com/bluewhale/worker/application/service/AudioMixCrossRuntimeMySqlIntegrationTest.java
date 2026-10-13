@@ -95,7 +95,7 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
                 new StoryboardPreviewSync(slotMapper,
                         mapper(StoryboardPreviewMapper.class, session), events),
                 events,
-                JobSettlementPublisher.noop());
+                TerminalEventOutbox.noop());
     }
 
     @AfterAll

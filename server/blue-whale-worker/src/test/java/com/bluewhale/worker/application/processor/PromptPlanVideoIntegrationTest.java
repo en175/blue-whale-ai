@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
-import com.bluewhale.worker.application.service.JobSettlementPublisher;
+import com.bluewhale.worker.application.service.TerminalEventOutbox;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.ProjectEventPublisher;
 import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
@@ -74,7 +74,7 @@ class PromptPlanVideoIntegrationTest {
                     new SceneCardGenerationRecordSync(sm, rm, events),
                     new StoryboardPreviewSync(sm, pm, events),
                     events,
-                    JobSettlementPublisher.noop());
+                    TerminalEventOutbox.noop());
         }
     }
 

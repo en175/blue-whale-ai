@@ -90,7 +90,7 @@ class JobStateMachineServiceGoldenMirrorTest {
                 new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,
                         new ProjectEventPublisher(projectEventMapper)),
                 new ProjectEventPublisher(projectEventMapper),
-                JobSettlementPublisher.noop());
+                TerminalEventOutbox.noop());
         claimService = new JobClaimService(jobMapper, extraMapper);
     }
 
