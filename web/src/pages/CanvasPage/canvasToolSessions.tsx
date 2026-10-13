@@ -63,4 +63,3 @@ export function useCanvasToolSessionEffects(
     return () => window.removeEventListener('keydown', handler);
   }, [tools, dedicated]);
 }
-
