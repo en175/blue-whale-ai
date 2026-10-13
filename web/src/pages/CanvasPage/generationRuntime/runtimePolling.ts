@@ -29,7 +29,7 @@ export function createPolling(ctx: RuntimeContext) {
             host.patchNode(execution.nodeId, { genStatus: 'checking', progress: undefined });
           } else {
             execution.phase = 'generating';
-            host.patchNode(execution.nodeId, { progress: detail.progress });
+            host.patchNode(execution.nodeId, { genStatus: 'generating', progress: detail.progress });
           }
           timers.set(execution.nodeId, schedule(tick, POLL_INTERVAL_MS));
         })
