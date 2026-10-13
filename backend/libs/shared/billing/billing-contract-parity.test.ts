@@ -62,7 +62,7 @@ function billingDefaultTopics(): string[] {
 }
 
 function workerDefaultTopics(): string[] {
-  const src = read(`${JAVA_WORKER}application/service/JobSettlementPublisher.java`);
+  const src = read(`${JAVA_WORKER}application/service/TerminalEventOutbox.java`);
   return [
     ...new Set(
       [...src.matchAll(/getProperty\(\s*"worker\.billing\.topic-\w+"\s*,\s*"([^"]+)"\s*\)/g)].map(
