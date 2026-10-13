@@ -112,6 +112,8 @@ import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFac
 import type { RuntimeNodeView } from './generationRuntime/types';
 import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
+import { useCanvasHydration } from './hooks/useCanvasHydration';
+import { patchCanvasNodeActions } from './hooks/patchCanvasNodeActions';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
 import { useCanvasPickers } from './hooks/useCanvasPickers';
@@ -774,123 +776,6 @@ export default function CanvasPage() {
   const emptyClearConflictRef = useRef(false);
   const emptyOverwriteRejectedRef = useRef(false);
   const recoverySaveConflictRef = useRef(false);
-  useEffect(() => {
-    if (!doc) {
-      setTextNodes([]);
-      setMediaNodes([]);
-      setProductNodes([]);
-      setAssetNodes([]);
-      setEdges([]);
-      setGroups([]);
-      versionRef.current = null;
-      lastSavedRef.current = '';
-      hydratedDocRef.current = null;
-      hydratedProjectRef.current = null;
-      confirmedNonEmptyRef.current = false;
-      emptyClearConflictRef.current = false;
-      emptyOverwriteRejectedRef.current = false;
-      recoverySaveConflictRef.current = false;
-      setSaveStatus('idle');
-      return;
-    }
-    const docChanged = hydratedDocRef.current !== doc;
-    hydratedDocRef.current = doc;
-    if (!docChanged) {
-      const refresh = (prev: Node[]) => {
-        const next = prev.map((node) => resolveNodeAssets(node, snapshotAssets));
-        return next.some((node, index) => node !== prev[index]) ? next : prev;
-      };
-      setMediaNodes(refresh);
-      setProductNodes(refresh);
-      setAssetNodes(refresh);
-      return;
-    }
-    hydratedProjectRef.current = canvasLoadFailed ? null : currentId;
-    confirmedNonEmptyRef.current = doc.nodes.length > 0;
-    docLoadEpochRef.current = {};
-    generationRuntimeRef.current?.reset();
-    if (!canvasLoadFailed) {
-      emptyClearConflictRef.current = false;
-      emptyOverwriteRejectedRef.current = false;
-      recoverySaveConflictRef.current = false;
-    }
-    const t: Node[] = [];
-    const m: Node[] = [];
-    const p: Node[] = [];
-    const a: Node[] = [];
-    const { groups: hydratedGroups, contentNodes } = parseGroupsFromNodes(doc.nodes);
-    contentNodes.forEach((node) => {
-      if (node.type === 'textNode') t.push(attachCallbacks(node));
-      else if (node.type === 'mediaNode') m.push(attachCallbacks(resolveNodeAssets(node, snapshotAssets, true)));
-      else if (node.type === 'productNode') p.push(attachCallbacks(resolveNodeAssets(node, snapshotAssets)));
-      else if (node.type === 'assetNode') a.push(attachCallbacks(resolveNodeAssets(node, snapshotAssets)));
-      else {
-        const mapped = mapBackendNode(node, snapshotAssets);
-        if (mapped) {
-          const attached = attachCallbacks(resolveNodeAssets(mapped, snapshotAssets, true));
-          if (mapped.type === 'assetNode') a.push(attached);
-          else if (mapped.type === 'textNode') t.push(attached);
-          else m.push(attached);
-        } else if (import.meta.env.DEV) {
-          console.warn('[canvas] 无法映射的后端节点:', JSON.stringify(node).slice(0, 800));
-        }
-      }
-    });
-    productSeq.current = p.length;
-    if (import.meta.env.DEV) {
-      console.info(`[canvas] 水合节点：text ${t.length} / media ${m.length} / product ${p.length} / asset ${a.length}（version=${doc.version}）`);
-    }
-    setTextNodes(t);
-    setMediaNodes(m);
-    setProductNodes(p);
-    setAssetNodes(a);
-    setGroups(hydratedGroups);
-    if (import.meta.env.DEV && hydratedGroups.length > 0) {
-      console.info(`[canvas] 水合成组：${hydratedGroups.length} 个组`);
-    }
-    const hydratedIds = new Set([...t, ...m, ...p, ...a].map((n) => n.id));
-    const hydratedEdges: Edge[] = doc.edges
-      .filter((e) => hydratedIds.has(e.source) && hydratedIds.has(e.target))
-      .map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        type: 'custom',
-        style: { stroke: '#444' },
-        ...(e.data ? { data: e.data } : {}),
-      }));
-    setEdges(hydratedEdges);
-    versionRef.current = doc.version;
-    setViewport(doc.viewport);
-    const hydratedAll = [...t, ...m, ...p, ...a];
-    const upgradedTextNodes = contentNodes.some(
-      (node) => node.type === 'textNode' && typeof (node.data as Record<string, unknown> | undefined)?.html === 'string',
-    );
-    lastSavedRef.current = upgradedTextNodes
-      ? ''
-      : JSON.stringify(doc.viewport) +
-        serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
-        serializeEdges(hydratedEdges);
-    m
-      .filter(
-        (n) =>
-          (n.data.genStatus === 'generating' || n.data.genStatus === 'checking') &&
-          !((n.data ?? {}) as Record<string, unknown>).frameInterpolation &&
-          (typeof n.data.jobId === 'number' || typeof n.data.jobId === 'string') &&
-          !settledExtractNodesRef.current.has(n.id),
-      )
-      .forEach((n) => {
-        generationRuntimeRef.current?.resumeFromHydration(n.id, String(n.data.jobId), (n.data ?? {}) as Record<string, unknown>);
-      });
-    m
-      .filter(
-        (n) =>
-          ((n.data ?? {}) as Record<string, unknown>).frameInterpolation != null,
-      )
-      .forEach((n) => recoverFrameInterpolationRef.current(n.id, n.data.jobId));
-    if (currentId && !canvasLoadFailed) void generationRuntimeRef.current?.recover(currentId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, snapshotAssets]);
   const canvasNodeIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const ids = new Set(
@@ -1110,7 +995,7 @@ export default function CanvasPage() {
     firePendingVideoDraft: () => {},
     renameCard: (_id: string, _name: string) => {},
   });
-  actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode, renameCard };
+  actionsRef.current = patchCanvasNodeActions(actionsRef.current, { duplicate: handleDuplicateNode, addToChat: handleAddToChatNode, renameCard });
   const canOpenEditor = (nodeId?: string): boolean => {
     if (submittingNodeId && nodeId !== submittingNodeId) {
       showToast('warn', '正在保存并提交，请稍候');
@@ -1303,7 +1188,7 @@ export default function CanvasPage() {
     setAssetNodes,
     setGroups,
   });
-  actionsRef.current.openImageDialog = () => generationDock.open('image', {});
+  actionsRef.current = patchCanvasNodeActions(actionsRef.current, { openImageDialog: () => generationDock.open('image', {}) });
   const warnStaleMediaRefs = (targetNodeId: string, kind: 'image' | 'video') => {
     const byId = new Map(mediaNodesRef.current.map((n) => [n.id, n]));
     const stale = edgesRef.current.some((e) => {
@@ -1683,8 +1568,7 @@ export default function CanvasPage() {
     handleAddTextNode,
     showToast,
   });
-  actionsRef.current = {
-    ...actionsRef.current,
+  actionsRef.current = patchCanvasNodeActions(actionsRef.current, {
     duplicate: handleDuplicateNode,
     addToChat: handleAddToChatNode,
     pasteAtNode: (id) => {
@@ -1698,7 +1582,7 @@ export default function CanvasPage() {
     copyImage: (id) => { void handleCopyImage(id); },
     complianceCheck: (id) => { void complianceCheckRef.current?.(id); },
     fillEmptyShell: handleFillEmptyShell,
-  };
+  });
   const { handleCopySelectedNodes, handlePasteClipboard } = useCanvasClipboard({
     currentId,
     textNodesRef,
@@ -1716,6 +1600,40 @@ export default function CanvasPage() {
     handleAddTextNode,
   });
   const recoverFrameInterpolationRef = useRef<(nodeId: string, savedJobId?: unknown) => void>(() => {});
+  useCanvasHydration({
+    currentId,
+    doc,
+    snapshotAssets,
+    canvasLoadFailed,
+    recoverFrameInterpolationRef,
+    attachCallbacks,
+    resolveNodeAssets,
+    mapBackendNode,
+    parseGroupsFromNodes,
+    groupToNode,
+    serializeNodes,
+    serializeEdges,
+    generationRuntimeRef,
+    hydratedDocRef,
+    hydratedProjectRef,
+    confirmedNonEmptyRef,
+    emptyClearConflictRef,
+    emptyOverwriteRejectedRef,
+    recoverySaveConflictRef,
+    docLoadEpochRef,
+    productSeq,
+    versionRef,
+    lastSavedRef,
+    settledExtractNodesRef,
+    setTextNodes,
+    setMediaNodes,
+    setProductNodes,
+    setAssetNodes,
+    setEdges,
+    setGroups,
+    setViewport,
+    setSaveStatus,
+  });
   const {
     imageToolTargetOfNode,
     dispatchImageToolTask,
@@ -1899,9 +1817,11 @@ export default function CanvasPage() {
     captureSessionOwnership: (kind) => toolRuntime.captureSessionOwnership(kind),
     showToast,
   });
-  actionsRef.current.cancelJob = handleCancelJob;
-  actionsRef.current.retryJob = handleRetryJob;
-  actionsRef.current.removeMediaNode = handleRemoveMediaNode;
+  actionsRef.current = patchCanvasNodeActions(actionsRef.current, {
+    cancelJob: handleCancelJob,
+    retryJob: handleRetryJob,
+    removeMediaNode: handleRemoveMediaNode,
+  });
   const textAttachmentsOf = (targetNodeId: string): ImageTextAttachment[] =>
     textAttachmentsOfPure(targetNodeId, edgesRef.current, textNodesRef.current);
   const textAttachmentsForSend = (targetNodeId: string): ImageTextAttachment[] =>
@@ -2461,8 +2381,10 @@ export default function CanvasPage() {
     error: (message) => globalToast.error(message),
   };
   toolDepsRef.current = buildToolSessionDeps();
-  actionsRef.current.download = handleNodeDownload;
-  actionsRef.current.showDetails = handleNodeShowDetails;
+  actionsRef.current = patchCanvasNodeActions(actionsRef.current, {
+    download: handleNodeDownload,
+    showDetails: handleNodeShowDetails,
+  });
   const appliedCardIds = useMemo(() => appliedCardIdsOf(textNodes), [textNodes]);
   generationRuntimeHostRef.current = ({
     getProjectId: () => activeProjectRef.current,
@@ -2810,7 +2732,7 @@ export default function CanvasPage() {
     patchMediaNode(nodeId, { draftRatio: 'adaptive' });
     void handleUpdateGenerate(nodeId, { ratioOverride: 'adaptive' });
   };
-  actionsRef.current.fixFollowVideo = handleFixFollowVideo;
+  actionsRef.current = patchCanvasNodeActions(actionsRef.current, { fixFollowVideo: handleFixFollowVideo });
   const { firePendingGen, firePendingVideoDraft } = useCanvasHomeHandoff({
     currentId,
     doc,
@@ -2825,8 +2747,7 @@ export default function CanvasPage() {
     openVideoDraftDialog: (nodeId, preset) => openVideoDraftDialog(nodeId, preset),
     startGenerationJob: (type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft) => startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft),
   });
-  actionsRef.current.firePendingGen = firePendingGen;
-  actionsRef.current.firePendingVideoDraft = firePendingVideoDraft;
+  actionsRef.current = patchCanvasNodeActions(actionsRef.current, { firePendingGen, firePendingVideoDraft });
   useEffect(() => {
     actionsRef.current.firePendingGen();
     actionsRef.current.firePendingVideoDraft();
