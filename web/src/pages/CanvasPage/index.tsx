@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition } from './draftSpawn';
-import { nodeBoxOf, readRecoveryErrorReason, imageToolTargetBesideSource, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
+import { nodeBoxOf, readRecoveryErrorReason, fetchUrlAsFile, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { computeFollowAnchor } from './followDialog';
 import { draftVideoModeOf } from './videoModes';
 import {
@@ -46,8 +46,6 @@ import {
   mediaExtractNodeId,
 } from './mediaExtract';
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
-import { type ImageEnhanceSubmission } from './panelToolSessions';
-import { isSilentAuthError } from './toolSessionCapture';
 import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import {
   AUDIO_TRIM_EDGE_ORIGIN,
@@ -73,13 +71,7 @@ import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from './scene
 import { type SceneSplitSubmission } from './sceneSplitSession';
 import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from './smartMatting';
 import { imageEnhanceDraftPosition } from './imageEnhance';
-import { IMAGE_ERASE_EDGE_ORIGIN, rasterizeMaskToPngFile } from './imageErase';
-import { VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN } from '@lib/contracts/video-subtitle-erase';
-import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
-import { IMAGE_OUTPAINT_EDGE_ORIGIN, buildImageOutpaintInput, type ImageOutpaintIdentity } from './imageOutpaint';
-import { type OutpaintFrozenInput, type OutpaintTaskSubmission, type CutoutSubmission } from './imageToolSessions';
 import { type SmartMattingSubmission } from './smartMattingSession';
-import { type SubtitleEraseTaskSubmission, type ImageEraseTaskSubmission } from './maskToolSessions';
 import { type CropHost } from './cropSession';
 import { IMAGE_CROP_EDGE_ORIGIN, type ImageCropIdentity } from './imageCrop';
 import { type ToolSessionDeps } from './toolSessionCoordinator';
@@ -101,7 +93,6 @@ import CanvasBottomLeftActions from './components/CanvasBottomLeftActions';
 import CanvasPickHint from './components/CanvasPickHint';
 import CanvasPaneContextMenu from './components/CanvasPaneContextMenu';
 import type { MaterialAsset } from '@/api/material';
-import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { AssetCardKind, AssetCardNodeData } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
@@ -109,7 +100,6 @@ import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
-import { hasCustomName, planBindingsCoveredBy, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
 import { createConnectValidators } from './canvasConnectValidation';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
@@ -142,14 +132,15 @@ import { checkFileBeforeUpload, isFileRejected } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
+import { planBindingsCoveredBy, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
 import { normalGenerationTask } from './generationRuntime/normalGeneration';
 import { storyboardTask } from './generationRuntime/storyboardTasks';
-import { createImageToolsTask, type ImageToolsPayload } from './generationRuntime/imageTools';
 import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from './generationRuntime/mixMuxTasks';
 import { sceneSplitTask, vocalSplitTask } from './generationRuntime/multiOutputTasks';
-import { videoToolsTask, type VideoToolPayload } from './generationRuntime/videoTools';
+import { createImageToolsTask } from './generationRuntime/imageTools';
+import { videoToolsTask } from './generationRuntime/videoTools';
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
-import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
+import type { RuntimeNodeView } from './generationRuntime/types';
 import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
@@ -182,6 +173,7 @@ import { useCanvasNodeDragHandlers } from './hooks/useCanvasNodeDragHandlers';
 import { useCanvasDraftRefActions } from './hooks/useCanvasDraftRefActions';
 import { useCanvasTextNodeFactories } from './hooks/useCanvasTextNodeFactories';
 import { useCanvasToolJobSubmissions } from './hooks/useCanvasToolJobSubmissions';
+import { useCanvasImageToolHosts } from './hooks/useCanvasImageToolHosts';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -1989,105 +1981,27 @@ export default function CanvasPage() {
     handleAddTextNode,
   });
   const recoverFrameInterpolationRef = useRef<(nodeId: string, savedJobId?: unknown) => void>(() => {});
-  const imageToolTargetOfNode = (nodeId: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    if (!node) return null;
-    const host = generationRuntimeHostRef.current;
-    return {
-      targetNodeId: nodeId,
-      seedTarget: seedTargetOfNode(node as unknown as RuntimeNodeView),
-      seedSources: host ? seedSourcesOfNode(nodeId, host) : [],
-    };
-  };
-  const dispatchImageToolTask = (
-    payload: ImageToolsPayload,
-    target: { targetNodeId: string; seedTarget: RecoverySeedTarget; seedSources: RecoverySeedSource[] },
-  ): Promise<string> => {
-    const runtime = generationRuntimeRef.current;
-    if (!runtime) return Promise.reject(new Error('生成任务运行时未就绪'));
-    return new Promise<string>((resolve, reject) => {
-      imageToolsAcceptanceRef.current.set(target.targetNodeId, { resolve, reject });
-      const dispatched = runtime.submit(
-        imageToolsTask,
-        {
-          payload,
-          target: { ...target, expectedBindingRevision: runtime.bindingRevisionOf(target.targetNodeId) },
-        },
-        {
-          onCreateFailure: (e: unknown) => { reject(e); return false; },
-        },
-      );
-      if (!dispatched) {
-        imageToolsAcceptanceRef.current.delete(target.targetNodeId);
-        reject(new Error('任务提交中，请勿重复发送'));
-      }
-    });
-  };
-  const startImageEnhanceJob = async (submission: ImageEnhanceSubmission, silent = false): Promise<void> => {
-    const { nodeId, payload: input, identity } = submission;
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const isDraftTarget = ((node?.data ?? {}) as Record<string, unknown>).draft === true;
-    patchMediaNode(nodeId, {
-      genStatus: 'generating',
-      progress: 0,
-      errorText: undefined,
-      ...(isDraftTarget && !hasCustomName(node) ? { fileName: '高清生成中' } : {}),
-      imageEnhance: { ...identity, lastParams: input },
-    });
-    const target = imageToolTargetOfNode(nodeId);
-    if (!target) throw new Error('高清目标卡不存在');
-    try {
-      await dispatchImageToolTask({ kind: 'imageEnhance', input }, target);
-    } catch (error) {
-      if (!silent || !isSilentAuthError(error)) throw error;
-    }
-  };
-  const startImageOutpaintJob = async (
-    nodeId: string,
-    input: ImageOutpaintInput,
-    opts?: { projectId?: string; silent?: boolean },
-  ): Promise<void> => {
-    const projectId = opts?.projectId ?? currentId;
-    if (!projectId) {
-      showToast('warn', '未选中项目，无法发起扩图');
-      return;
-    }
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const identity = ((node?.data ?? {}) as Record<string, unknown>).imageOutpaint as ImageOutpaintIdentity | undefined;
-    const isDraftTarget = ((node?.data ?? {}) as Record<string, unknown>).draft === true;
-    patchMediaNode(nodeId, {
-      genStatus: 'generating',
-      progress: 0,
-      errorText: undefined,
-      ...(isDraftTarget && !hasCustomName(node) ? { fileName: '扩图生成中' } : {}),
-      imageOutpaint: { ...identity, lastParams: input },
-    });
-    const target = imageToolTargetOfNode(nodeId);
-    if (!target) throw new Error('扩图目标卡不存在');
-    try {
-      await dispatchImageToolTask({ kind: 'imageOutpaint', input }, target);
-    } catch (error) {
-      if (!opts?.silent || !isSilentAuthError(error)) throw error;
-    }
-  };
-  const prepareOutpaintTask = (frozen: OutpaintFrozenInput): OutpaintTaskSubmission | null => {
-    const { projectId, source: sourceNode, sourceAssetId, ratios } = frozen;
-    const draftId = createImageDraftCard(imageEnhanceDraftPosition(sourceNode), {
-      fileName: '扩图',
-      data: { imageOutpaint: { sourceAssetId } },
-    });
-    addCanvasEdge(sourceNode.id, draftId, undefined, { origin: IMAGE_OUTPAINT_EDGE_ORIGIN });
-    const input = buildImageOutpaintInput(sourceAssetId, draftId, ratios);
-    if (!input) {
-      removeCanvasNodes([draftId]);
-      showToast('warn', '扩图参数不合法，请调整后重试');
-      return null;
-    }
-    return { projectId, source: sourceNode, targetNodeId: draftId, payload: input };
-  };
-  toolHostsRef.current.outpaint = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
+  const {
+    imageToolTargetOfNode,
+    dispatchImageToolTask,
+    startImageEnhanceJob,
+    submitVideoToolTask,
+    handleCancelJob,
+    outpaint,
+    erase: imageEraseHost,
+    subtitleErase: subtitleEraseHost,
+    cutout: imageCutoutHost,
+  } = useCanvasImageToolHosts({
+    currentId,
+    mediaNodesRef,
+    generationRuntimeRef,
+    generationRuntimeHostRef,
+    imageToolsTask,
+    imageToolsAcceptanceRef,
+    creators: { createImageDraftCard },
+    addCanvasEdge,
+    removeCanvasNodes: (ids) => removeCanvasNodes(ids),
+    patchMediaNode,
     clearPickState: () => {
       if (imagePickSessionActive) endImagePickSession();
       if (videoPickSessionActive) endVideoPickSession();
@@ -2096,132 +2010,12 @@ export default function CanvasPage() {
         setPickMode(null); setPickTarget(null); setPickRefRole(null); setPickProductId(null); setPickAssetId(null);
       }
     },
-    prepareTask: prepareOutpaintTask,
-    startTask: ({ projectId, targetNodeId, payload }) => startImageOutpaintJob(targetNodeId, payload, { projectId, silent: true }),
-    warn: (message) => showToast('warn', message),
-    error: (message) => globalToast.error(message),
-  };
-  const handoffImageEraseTask = async (
-    submission: ImageEraseTaskSubmission,
-    created: { job_id: string },
-    skipSelect: boolean,
-  ): Promise<void> => {
-    const { source: node, payload: input } = submission;
-    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-      fileName: '擦除',
-      nodeId: input.target_node_id,
-      skipSelect,
-      data: {
-        imageErase: { sourceAssetId: input.source_asset_id, lastInput: input },
-        genStatus: 'generating',
-        progress: 0,
-        jobId: created.job_id,
-      },
-    });
-    addCanvasEdge(node.id, draftId, undefined, { origin: IMAGE_ERASE_EDGE_ORIGIN });
-  };
-  toolHostsRef.current.erase = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    newTargetId: () => newNodeId('media-draft'),
-    encodeMask: rasterizeMaskToPngFile,
-    uploadMask: (file, projectId) => uploadAssetFile(file, { projectId, assetSource: 'mask_erase', silent: true }),
-    createTask: ({ source, payload }) => {
-      const target = imageToolTargetBesideSource(source, '擦除', payload.target_node_id);
-      return dispatchImageToolTask({ kind: 'imageErase', input: payload }, target).then((job_id) => ({ job_id }));
-    },
-    handoff: handoffImageEraseTask,
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  const submitVideoToolTask = (
-    payload: VideoToolPayload,
-    targetNodeId: string,
-    options?: Parameters<GenerationRuntime['submit']>[2],
-  ): boolean => {
-    const runtime = generationRuntimeRef.current;
-    const host = generationRuntimeHostRef.current;
-    const node = mediaNodesRef.current.find((n) => n.id === targetNodeId);
-    if (!runtime || !host || !node) return false;
-    return runtime.submit(
-      videoToolsTask,
-      {
-        payload,
-        target: {
-          targetNodeId,
-          seedTarget: seedTargetOfNode(node as unknown as RuntimeNodeView),
-          seedSources: seedSourcesOfNode(targetNodeId, host),
-          expectedBindingRevision: runtime.bindingRevisionOf(targetNodeId),
-        },
-      },
-      options,
-    );
-  };
-  toolHostsRef.current.subtitleErase = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    newTargetId: () => newNodeId('media-draft'),
-    startTask: (input: SubtitleEraseTaskSubmission, skipSelect: boolean): boolean => {
-      const { source: node, payload } = input;
-      const targetNodeId = payload.target_node_id;
-      const sourceData = node.data;
-      createImageDraftCard(imageEnhanceDraftPosition(node), {
-        fileName: '去字幕',
-        nodeId: targetNodeId,
-        skipSelect,
-        data: {
-          mediaType: 'video',
-          ...(typeof sourceData.width === 'number' ? { width: sourceData.width } : {}),
-          ...(typeof sourceData.height === 'number' ? { height: sourceData.height } : {}),
-          videoSubtitleErase: { sourceAssetId: payload.source_asset_id, lastInput: payload },
-          genStatus: 'generating',
-          progress: 0,
-        },
-      });
-      addCanvasEdge(node.id, targetNodeId, undefined, { origin: VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN });
-      return submitVideoToolTask({ kind: 'subtitleErase', input: payload }, targetNodeId);
-    },
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  const handoffCutoutTask = async (
-    submission: CutoutSubmission,
-    created: { job_id: string },
-    skipSelect: boolean,
-  ): Promise<void> => {
-    const { source: node, payload: input } = submission;
-    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
-      fileName: '抠图',
-      nodeId: input.target_node_id,
-      skipSelect,
-      data: {
-        imageCutout: { sourceAssetId: input.source_asset_id, lastInput: input },
-        genStatus: 'generating',
-        progress: 0,
-        jobId: created.job_id,
-      },
-    });
-    addCanvasEdge(node.id, draftId, undefined, { origin: IMAGE_CUTOUT_EDGE_ORIGIN });
-  };
-  toolHostsRef.current.cutout = {
-    getProjectId: () => currentId,
-    getSourceNode: (nodeId) => mediaNodesRef.current.find((node) => node.id === nodeId),
-    newTargetId: () => newNodeId('media-draft'),
-    createTask: ({ source, payload }) => {
-      const target = imageToolTargetBesideSource(source, '抠图', payload.target_node_id);
-      return dispatchImageToolTask({ kind: 'imageCutout', input: payload }, target).then((job_id) => ({ job_id }));
-    },
-    handoff: handoffCutoutTask,
-    warn: (message) => showToast('warn', message),
-    error: (message) => showToast('error', message),
-  };
-  const handleCancelJob = (nodeId: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
-      generationRuntimeRef.current.cancel(nodeId);
-      return;
-    }
-  };
+    showToast,
+  });
+  toolHostsRef.current.outpaint = outpaint;
+  toolHostsRef.current.erase = imageEraseHost;
+  toolHostsRef.current.subtitleErase = subtitleEraseHost;
+  toolHostsRef.current.cutout = imageCutoutHost;
   const pendingDeleteJobNodesRef = useRef<Set<string>>(new Set());
   const removeMediaNodeNow = (nodeId: string) => {
     setMediaNodes((prev) => {
