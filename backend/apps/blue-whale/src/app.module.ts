@@ -3,7 +3,6 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { AuthGuard } from "@lib/infra/guard/auth.guard.js";
 import { TransformInterceptor } from "@lib/infra/interceptors/transform.interceptor.js";
-import { AccountModule } from "@lib/shared/account/account.module.js";
 import { AssetModule } from "@lib/shared/assets/assets.module.js";
 import { CanvasModule } from "@lib/shared/canvas/canvas.module.js";
 import { DashboardModule } from "@lib/shared/dashboard/index.js";
@@ -68,7 +67,6 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
 @Module({
   imports: [
     PrismaModule,
-    AccountModule,
     AssetModule,
     TopupTierModule,
     OperationLogModule,

@@ -166,11 +166,9 @@ export function attachCards(
   return next;
 }
 
-export function useAgentSession(projectId: string, agentModel?: string) {
+export function useAgentSession(projectId: string) {
   const [session, setSession] = useState<SessionState>(EMPTY_SESSION_STATE);
   const sessionRef = useRef<SessionState>(EMPTY_SESSION_STATE);
-  const agentModelRef = useRef<string | undefined>(agentModel);
-  agentModelRef.current = agentModel;
   const commit = useCallback((update: (prev: SessionState) => SessionState) => {
     const next = update(sessionRef.current);
     if (next === sessionRef.current) return;
@@ -711,7 +709,6 @@ export function useAgentSession(projectId: string, agentModel?: string) {
           forcedCreativeSkillId: forcedSkillId,
           resourceRef,
           skillRef,
-          ...(agentModelRef.current ? { model: agentModelRef.current } : {}),
         });
         if (connectionEpochRef.current !== connectionEpoch || sessionIdRef.current !== sid) return true;
         const message = ack.message;

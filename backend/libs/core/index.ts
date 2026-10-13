@@ -40,7 +40,6 @@ export {
   type NewApiVideoInput,
   type NewApiVideoSubmission,
   type NewApiVideoTask,
-  type NewApiAgentRunQuotaResult,
   type NewApiPricingItem,
   type NewApiPricingResult,
 } from "./new-api-client.js";

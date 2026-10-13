@@ -45,10 +45,6 @@ vi.mock('@/api/skills', () => ({
   fetchMySkills: vi.fn(async () => []),
 }));
 
-vi.mock('@/api/agentSessions', () => ({
-  fetchSessionCredits: vi.fn(async () => null),
-}));
-
 vi.mock('../ChipTextEditor', () => ({
   default: () => createElement('div', { 'data-testid': 'chip-editor' }),
 }));

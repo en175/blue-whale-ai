@@ -8,20 +8,16 @@ import {
   RotateCw,
   PictureInPicture2,
   BookText,
-  Coins,
   MessageSquare,
   Check,
   RotateCcw,
-  Package,
 } from 'lucide-react';
 import styles from './index.module.css';
-import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { fetchMySkills } from '@/api/skills';
 import { useAgentSession, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import {
-  fetchSessionCredits,
   type SessionContentBlock,
   type GenerationCardBlock,
   type OutboundAssetRef,
@@ -534,10 +530,6 @@ const quickQuestions = [
   },
 ];
 
-const CREDITS_RETRY_DELAYS = [2500, 6000, 15000] as const;
-
-const SHOW_SESSION_CREDIT_PILL: boolean = false;
-
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
 const DRAWER_SLIDE_MS = 240;
@@ -593,7 +585,6 @@ function quoteTooltipOfChip(blocks: SessionContentBlock[] | undefined, chipId: s
 export default function AgentPanel({ open = true, onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, candidateBlocks, onPrepareCandidate, onCancelCandidate }: AgentPanelProps) {
   useAssetUrlCache();
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
-  const [sessionCredits, setSessionCredits] = useState<number | null>(null);
 
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
   const composerHasText = !composedIsEmpty(composed);
@@ -629,9 +620,6 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
     });
   }, [candidateBlocks, open]);
   useEffect(() => { setReferenceNotice(''); }, [pendingReference]);
-  const [modelList, setModelList] = useState<GenerationModel[]>([]);
-  const [selectedModel, setSelectedModel] = useState('');
-  const [modelOpen, setModelOpen] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [floating, setFloating] = useState(false);
@@ -663,7 +651,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
     deleteError,
     dismissDeleteError,
     refreshSessions,
-  } = useAgentSession(projectId ?? '', selectedModel);
+  } = useAgentSession(projectId ?? '');
   const lastAccount = turns.length > 0 ? turns[turns.length - 1].account : null;
   const knownAssets = useMemo(() => collectKnownAssets(turns), [turns]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -671,7 +659,6 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
   const listRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
-  const modelRef = useRef<HTMLDivElement>(null);
   const uploadRef = useRef<HTMLDivElement>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const attachmentsRef = useRef<PendingAttachment[]>([]);
@@ -703,7 +690,6 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
       setPendingReference(null);
       preparedBlocksRef.current = null;
       setHistoryOpen(false);
-      setModelOpen(false);
       setShowUpload(false);
       setShowSkillModal(false);
       setDeleteTarget(null);
@@ -723,30 +709,6 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
       panelHeight: rect.height,
     };
   }, []);
-
-  const currentModel = modelList.find((m) => m.model_id === selectedModel);
-
-  useEffect(() => {
-    fetchGenerationModels('text')
-      .then((list) => {
-        setModelList(list);
-        if (list.length) {
-          const fallback = list.find((m) => m.is_default) ?? list[0];
-          setSelectedModel((prev) => prev || fallback.model_id);
-        }
-      })
-      .catch(() => undefined);
-  }, []);
-
-  const hydratedModelSessionRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!sessionId) return;
-    const record = sessions.find((item) => item.session_id === sessionId);
-    if (!record) return;
-    if (hydratedModelSessionRef.current === sessionId) return;
-    hydratedModelSessionRef.current = sessionId;
-    if (record.model) setSelectedModel(record.model);
-  }, [sessionId, sessions]);
 
   const lastInputVersionRef = useRef(0);
   const prevChipIdsRef = useRef<Set<string>>(new Set());
@@ -939,57 +901,18 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
   }, [floating]);
 
   useEffect(() => {
-    if (!SHOW_SESSION_CREDIT_PILL) return;
-    if (!projectId || !sessionId) {
-      setSessionCredits(null);
-      return;
-    }
-    let cancelled = false;
-    let timer: number | undefined;
-
-    const load = async (attempt = 0): Promise<void> => {
-      let result: Awaited<ReturnType<typeof fetchSessionCredits>> | null = null;
-      try {
-        result = await fetchSessionCredits(projectId, sessionId);
-      } catch (e) {
-        console.warn('拉取会话累计积分失败:', e);
-      }
-      if (cancelled) return;
-
-      if (result && result.credits !== null && !(result.matched === 0 && result.runCount > 0)) {
-        setSessionCredits(result.credits);
-        return;
-      }
-
-      const delay = CREDITS_RETRY_DELAYS[attempt];
-      if (delay === undefined) {
-        if (result?.credits != null) setSessionCredits(result.credits);
-        return;
-      }
-      timer = window.setTimeout(() => void load(attempt + 1), delay);
-    };
-
-    void load();
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [projectId, sessionId, turnOutcome]);
-
-  useEffect(() => {
-    if (!historyOpen && !modelOpen && !showUpload) return;
+    if (!historyOpen && !showUpload) return;
     const handleDocMouseDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (historyRef.current && !historyRef.current.contains(target)) {
         setHistoryOpen(false);
         dismissDeleteError();
       }
-      if (modelRef.current && !modelRef.current.contains(target)) setModelOpen(false);
       if (uploadRef.current && !uploadRef.current.contains(target)) setShowUpload(false);
     };
     document.addEventListener('mousedown', handleDocMouseDown);
     return () => document.removeEventListener('mousedown', handleDocMouseDown);
-  }, [historyOpen, modelOpen, showUpload, dismissDeleteError]);
+  }, [historyOpen, showUpload, dismissDeleteError]);
 
   const handleDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -1277,21 +1200,6 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
       <div className={`${styles.panelHeader} ${floating ? styles.panelHeaderFloating : ''}`}>
         <div className={styles.headerLeft}>
           {}
-          {SHOW_SESSION_CREDIT_PILL && (
-            <span
-              className={styles.creditPill}
-              title={
-                sessionCredits === null
-                  ? '正在统计本次对话累计消耗积分'
-                  : `目前 Agent 对话累计消耗积分：${sessionCredits} 积分`
-              }
-            >
-              <Coins size={12} strokeWidth={2} />
-              <span className={styles.creditValue}>
-                {sessionCredits === null ? '—' : sessionCredits}
-              </span>
-            </span>
-          )}
         </div>
         <div className={styles.headerCenter}>
           {}
@@ -1681,37 +1589,6 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
 
           {}
           <div className={styles.toolbarRight}>
-            <div className={styles.modelWrap} ref={modelRef}>
-              <button
-                className={`${styles.modelBtn} ${modelOpen ? styles.modelBtnActive : ''}`}
-                title={currentModel?.model_label ? `Agent 模型：${currentModel.model_label}` : '选择 Agent 模型'}
-                aria-label={currentModel?.model_label ? `Agent 模型：${currentModel.model_label}` : '选择 Agent 模型'}
-                onClick={() => setModelOpen(!modelOpen)}
-              >
-                {}
-                <Package size={16} strokeWidth={2} />
-              </button>
-              {modelOpen && (
-                <div className={styles.modelDropdown}>
-                  <div className={styles.modelDropdownHeader}>
-                    <span className={styles.modelDropdownTitle}>Agent 模型</span>
-                    <span className={styles.modelDropdownDesc}>选择驱动 Agent 的模型。</span>
-                  </div>
-                  {modelList.map((m) => (
-                    <button
-                      key={m.model_id}
-                      className={`${styles.modelOption} ${m.model_id === selectedModel ? styles.modelOptionActive : ''}`}
-                      onClick={() => {
-                        setSelectedModel(m.model_id);
-                        setModelOpen(false);
-                      }}
-                    >
-                      <span>{m.model_label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
 
             {failedRunId !== null && (
               <button

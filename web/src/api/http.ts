@@ -5,8 +5,6 @@ import { getSessionToken } from '@/api/sessionToken';
 export const API_PREFIX = '/api';
 export const API_REQUEST_TIMEOUT_MS = 10_000;
 
-const AGENT_BILLING_PREFIX = `${API_PREFIX}/agent/billing/`;
-
 const BACKEND_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
 export class ApiError extends Error {
@@ -103,7 +101,6 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   if (
     res.status === 401 &&
     !path.startsWith(`${API_PREFIX}/auth/`) &&
-    !path.startsWith(AGENT_BILLING_PREFIX) &&
     path !== `${API_PREFIX}/admin/session`
   ) {
     handleUnauthorized();

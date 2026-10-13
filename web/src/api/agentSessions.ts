@@ -1,6 +1,6 @@
 import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
 import { readSseResponse, type SseEvent } from './events';
-import { ApiError, apiRequest, isApiError } from './http';
+import { ApiError, isApiError } from './http';
 import { newIdempotencyKey } from './idempotencyKey';
 import { agentPath, agentUrl, agentMethod } from './agentRoutes';
 import { handleUnauthorized } from '@/utils/auth';
@@ -114,7 +114,6 @@ export interface SessionRecord {
   active_run_id?: string | null;
   active_creative_skill_ids?: string[];
   active_task_id?: string;
-  model?: string | null;
   created_at?: string;
   updated_at?: string;
   etag?: string;
@@ -467,10 +466,9 @@ export function sendSessionMessage(
     signal?: AbortSignal;
     resourceRef?: SessionContentBlock[];
     skillRef?: OutboundSkillRef;
-    model?: string;
   },
 ): Promise<SessionMessageAck> {
-  const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef, skillRef, model } = options ?? {};
+  const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef, skillRef } = options ?? {};
   const hasInlineReferences = content.some((block) => block.type !== 'text' || block.quote_id);
   const parts: Record<string, unknown>[] = [
     ...content.flatMap((block): Record<string, unknown>[] => {
@@ -488,9 +486,6 @@ export function sendSessionMessage(
   const body: Record<string, unknown> = { content: parts };
   if (forcedSkillId) {
     body.forced_creative_skill_id = forcedSkillId;
-  }
-  if (model) {
-    body.model = model;
   }
   return sessionRequest<SessionMessageAck>(
     agentPath('send_message', projectId, { session_id: sessionId }),
@@ -725,20 +720,4 @@ export function subscribeSessionEvents(
       hubs.delete(`${projectId}:${sessionId}`);
     }, IDLE_CLOSE_DELAY);
   };
-}
-
-
-export interface SessionCredits {
-  credits: number | null;
-  quota: number | null;
-  matched: number;
-  runCount: number;
-  truncated: boolean;
-}
-
-export function fetchSessionCredits(projectId: string, sessionId: string): Promise<SessionCredits> {
-  return apiRequest<SessionCredits>(
-    `/api/agent/billing/sessions/${encodeURIComponent(sessionId)}?project_id=${encodeURIComponent(projectId)}`,
-    { silent: true },
-  );
 }
