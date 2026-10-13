@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
+const path = require('path');
 const { getDefaultMode, isDeactivationCommand, writeDefaultMode, normalizeMode } = require('./ponytail-config');
 const {
   clearMode,
   cursorRuleNotice,
   cursorRulePath,
+  isCodex,
   isCursor,
   isQoder,
+  projectDir,
   readMode,
   setMode,
   writeHookOutput,
@@ -22,7 +25,13 @@ function finish() {
   try {
 
     const data = JSON.parse(input.replace(/^\uFEFF/, ''));
-    const prompt = typeof data.prompt === 'string' ? data.prompt.trim().toLowerCase() : '';
+    let prompt = typeof data.prompt === 'string' ? data.prompt.trim() : '';
+    if (isCodex) {
+      const reference = '[$ponytail](' + path.join(projectDir, '.agents/skills/ponytail/SKILL.md') + ')';
+      const suffix = prompt.slice(reference.length);
+      if (prompt.startsWith(reference) && /^(?:\s|$)/.test(suffix)) prompt = '$ponytail' + suffix;
+    }
+    prompt = prompt.toLowerCase();
 
     if (isCursor && (/^[/@$]ponytail/.test(prompt) || isDeactivationCommand(prompt))) {
       const rule = cursorRulePath();

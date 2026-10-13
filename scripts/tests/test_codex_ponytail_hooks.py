@@ -90,6 +90,64 @@ class PonytailConfigHarness(unittest.TestCase):
 
 
 class PonytailHooksTest(PonytailConfigHarness):
+    def test_codex_desktop_skill_reference_switches_reports_and_restores_current_mode(self):
+        root = self.install_project('桌面 中文工作树')
+        reference = '[$ponytail](' + str(root.resolve() / '.agents/skills/ponytail/SKILL.md') + ')'
+        self.assert_mode(self.run_hook('codex', 'SessionStart', root=root), 'full')
+        for mode in ['lite', 'full', 'ultra']:
+            self.assert_mode(self.run_hook('codex', 'UserPromptSubmit', reference + ' ' + mode + '\n',
+                                           root=root), mode)
+            self.assert_mode(self.run_hook('codex', 'SubagentStart', root=root), mode)
+        report = self.run_hook('codex', 'UserPromptSubmit', reference + '\n', root=root)
+        self.assertIn('level: ultra', report)
+        self.assertNotIn(BODY_PROBE, report)
+        self.env['PONYTAIL_DEFAULT_MODE'] = 'lite'
+        self.assertIn('PONYTAIL MODE OFF', self.run_hook('codex', 'UserPromptSubmit',
+                                                       reference + ' off\n', root=root))
+        self.assertEqual(self.run_hook('codex', 'UserPromptSubmit', '普通开发请求', root=root), '')
+        self.assertEqual(self.run_hook('codex', 'SubagentStart', root=root), '')
+        self.assert_mode(self.run_hook('codex', 'UserPromptSubmit', reference + '\n', root=root), 'lite')
+        self.env['PONYTAIL_DEFAULT_MODE'] = 'off'
+        self.assertEqual(self.run_hook('codex', 'SessionStart', root=root), '')
+        self.assert_mode(self.run_hook('codex', 'UserPromptSubmit', reference, root=root), 'full')
+        self.assert_mode(self.run_hook('codex', 'UserPromptSubmit', '$ponytail ultra', root=root), 'ultra')
+
+    def test_codex_desktop_skill_reference_rejects_wrong_targets_and_preserves_one_shot_modes(self):
+        skill = self.root.resolve() / '.agents/skills/ponytail/SKILL.md'
+        reference = '[$ponytail](' + str(skill) + ')'
+        other = self.install_project('其他 中文工作树')
+        self.run_hook('codex', 'SessionStart')
+        self.assert_mode(self.run_hook('codex', 'UserPromptSubmit', '$ponytail ultra'), 'ultra')
+        invalid = [
+            reference + ' bogus',
+            reference + ' full extra',
+            reference + ' default review',
+            reference + ' default lite extra',
+            reference + 'lite',
+            '[$ponytail](' + str(other.resolve() / '.agents/skills/ponytail/SKILL.md') + ') lite',
+            '[$ponytail](' + str(skill.with_name('skill.md')) + ') lite',
+            '[$ponytail](' + str(self.root.resolve() / '.agents/skills/ponytail-help/SKILL.md') + ') lite',
+            '请使用 ' + reference + ' lite',
+            '```text\n' + reference + ' lite\n```',
+            '<span>' + reference + ' lite</span>',
+        ]
+        for prompt in invalid:
+            with self.subTest(prompt=prompt):
+                self.assertEqual(self.run_hook('codex', 'UserPromptSubmit', prompt), '')
+                self.assert_mode(self.run_hook('codex', 'SubagentStart'), 'ultra')
+        for suffix in ['review', 'audit', 'debt', 'gain', 'help']:
+            target = self.root.resolve() / '.agents/skills' / ('ponytail-' + suffix) / 'SKILL.md'
+            prompt = '[$ponytail-' + suffix + '](' + str(target) + ')\n'
+            self.assertEqual(self.run_hook('codex', 'UserPromptSubmit', prompt), '')
+            self.assert_mode(self.run_hook('codex', 'SubagentStart'), 'ultra')
+        self.assert_mode(self.run_hook('claude', 'SessionStart'), 'full')
+        self.assertEqual(self.run_hook('claude', 'UserPromptSubmit', reference + ' lite'), '')
+        self.assert_mode(self.run_hook('claude', 'SubagentStart'), 'full')
+        self.assertIn('默认值已设置为 lite',
+                      self.run_hook('codex', 'UserPromptSubmit', reference + ' default lite'))
+        self.assert_mode(self.run_hook('codex', 'SubagentStart'), 'ultra')
+        self.assert_mode(self.run_hook('codex', 'SessionStart'), 'lite')
+
     def test_real_config_delivers_body_on_start_switch_and_subagent(self):
         for client in self.CLIENT_CONFIGS:
             with self.subTest(client=client):

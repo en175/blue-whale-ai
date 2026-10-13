@@ -46,11 +46,15 @@ python3 scripts/check-hook-contracts.py
 ## Codex 与 Claude Code
 
 1. 在当前工作树运行 `node --version`。Node 必须在 Hook 启动的非交互 PATH 中可用，不能只依赖交互式 shell 的别名。脚本只用 Node 标准库。
-2. Codex 在项目 `.codex` 层受信任后加载 `.codex/hooks.json`。CLI 用 `/hooks` 审查并信任当前 Hook 定义；定义更新后重新信任。项目层同时保留 inline `[hooks]` 和 `hooks.json` 会重复加载并提示警告，每层只选一种表示。桌面端按其 Hook 信任界面完成相同操作。
+2. Codex 在项目 `.codex` 层有效并受信任后加载项目配置。独立 CLI 在交付工作树用 `/hooks` 核对来源；桌面端在该工作树会话的 Hook 界面核对三类 Ponytail 生命周期处理器，按客户端当前提示由成员本人完成所需信任。项目层同时保留 inline `[hooks]` 和 `hooks.json` 会重复加载并提示警告，每层只选一种表示。项目层有效而 Hook 来源列表不一致时，保存发现入口及事件记录继续定位。
 3. Claude Code 从 `.claude/settings.json` 加载项目 Hook。保留 `.claude/skills -> ../.agents/skills` 的 Git 符号链接；平台未保留映射时先修复技能安装，不用备用规则代替验收。
 4. 更新后重载客户端或开启新会话。在新会话核对实际上下文正文、切档、关闭、裸命令恢复和支持的子代理注入。配置链脚本成功不等于实机上下文验收。
 
 Codex 用 `$ponytail`，Claude Code 用 `/ponytail`。六个共享技能位于 `.agents/skills`；六个 Claude 命令只指向共享正文。review、audit、debt、gain、help 是一次性任务，不写运行档位。质量审查增加正确性、安全、负载、测试、性能和简化检查，仍需执行团队 Standards/Spec 审查与测试凭证流程。
+
+Codex 桌面端选择当前工作树的 Ponytail 技能后，追加 lite、full、ultra 或 off 并人工发送。桌面实际用户输入可将技能表示为 `[$ponytail](<当前 Git 实际工作树根>/.agents/skills/ponytail/SKILL.md)`。本仓只规范化这个精确引用，支持路径中的空格和中文；引用目标须与运行时当前工作树技能路径一致。无参数引用沿用裸命令的报告或恢复规则，非法参数不改档。其他技能引用、错误目标和嵌在普通正文、HTML 或代码围栏中的链接保持普通输入。独立 CLI 的直接 `$ponytail` 命令继续可用。
+
+2026-10-13，桌面技能发现与完整正文进入模型已直接回读确认，Hook 实际执行仍缺证据。人工输入末条为显式 full，裸引用恢复尚未实机验收。保存实际事件来源及 `hookSpecificOutput.additionalContext` 中的档位标记后，再判断 Hook 生命周期结果；详细记录见[验收记录](../projects/IKL54X/ponytail-acceptance.md)。
 
 新会话默认值按 `PONYTAIL_DEFAULT_MODE`、用户配置、full 顺序解析。用户配置定位规则由 `ponytail-config.js` 维护。`ponytail default <档位>` 只改变下次启动默认值；普通切档只改变当前客户端、当前工作树的档位。启动、resume、clear、compact 重新应用默认值。
 
@@ -93,7 +97,7 @@ Claude 状态栏是可选项。Hook 只提示一次，不写用户 settings.json
 
 项目 Hook 与全局 Ponytail 插件同时生效时，一轮可能收到两份规则。按以下顺序核对。
 
-1. Codex 在 `/hooks` 中核对项目、用户、系统和启用插件的来源。用户 `~/.codex/hooks.json`、用户与项目 config.toml 的 inline hooks、项目 hooks.json 和插件均可能同时加载。同层 inline 与 JSON 只保留一个表示。成员本人停用已确认重复的 Ponytail 来源并重新审查信任。
+1. Codex 独立 CLI 在 `/hooks` 中核对来源，桌面端在当前工作树的 Hook 界面核对项目、用户、系统和启用插件。用户 `~/.codex/hooks.json`、用户与项目 config.toml 的 inline hooks、项目 hooks.json 和插件均可能同时加载。同层 inline 与 JSON 只保留一个表示。成员本人停用已确认重复的 Ponytail 来源，按客户端提示核对信任。
 2. Claude 在 `/hooks` 与插件设置中核对项目 `.claude/settings.json`、个人 settings、项目 settings.local.json 和启用插件。保留本仓三类生命周期处理器，停用已确认注入相同正文的旧 Ponytail 来源；原状态栏单独保留或组合。
 3. Kimi 按[精确迁移说明](ponytail-kimi.md)核对用户 config.toml。安装器迁移已确认的旧两条入口，报告未知条目；成员本人核对报告后再处理重复来源。
 4. ZCode 在「设置 → Hooks」核对用户 `~/.zcode/cli/config.json` 和插件来源。插件启用前核对旧用户 `ponytail-zcode-hook.js` 两条生命周期入口；确认冲突后停用旧 Ponytail 来源，保留其他 Hook。标准 hooks/hooks.json 自动加载，manifest 保持单次声明。

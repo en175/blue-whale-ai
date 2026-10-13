@@ -1,6 +1,6 @@
 # Ponytail 四端验收记录
 
-先在 Codex CLI 打开交付工作树，输入 `/hooks` 核对项目 Ponytail 三类生命周期处理器。需要信任时由成员本人审查，完成后新建会话。后续按本文场景保存实际来源与上下文证据。
+先在 Codex 桌面端打开交付工作树的新会话，核对当前工作树的 Ponytail Hook 来源列表。选择当前工作树的 Ponytail 技能，追加 lite 后人工发送，保存事件执行及额外上下文证据。独立 CLI 的 `/hooks` 验收另行记录。
 
 2026-10-12，IKL54X 三个实现票已合入本地集成分支；固定上游为 v5.1.0，提交 `9cc65d03aa2da1db7121b912d03596409ee340b8`。共享规则、安装与只读来源核对见[维护说明](../../agents/ponytail.md)。本记录将配置链证据与实机证据分开。四端真实证据尚未齐全，IKL5IU 与父需求保持开发中。
 
@@ -28,12 +28,12 @@ bash scripts/test-hooks.sh
 
 ## 实际安装与只读探针
 
-以下探针来自本轮真实机器，只证明安装、版本或配置存在。各行模型上下文均为 `NOT_RUN`。
+2026-10-12 的探针证明安装、版本或配置存在。2026-10-13 新增桌面技能发现与完整正文加载的直接回读；桌面 Hook 执行仍缺证据，其他四份客户端记录保持 `NOT_RUN`。
 
 | 客户端 | 版本与证据来源 | 真实上下文 |
 |------|----------------|------------|
 | Codex 独立 CLI | PATH 上的 CLI `--version` 返回 0.146.0。 | NOT_RUN，项目 Hook 信任、执行与技能发现尚无实机记录。 |
-| Codex 桌面端 | 只读进程探针确认 ChatGPT.app 宿主，Info.plist 版本 26.1007.30912、build 20156；其捆绑 CodexCLI `--version` 为 0.162.0-alpha.17.2。宿主版本、捆绑 CLI 与独立 CLI 分别记录。 | NOT_RUN，不能从当前 Agent 会话或版本推断 Ponytail 注入。 |
+| Codex 桌面端 | 只读进程探针确认 ChatGPT.app 宿主，Info.plist 版本 26.1007.30912、build 20156；其捆绑 CodexCLI `--version` 为 0.162.0-alpha.17.2。宿主版本、捆绑 CLI 与独立 CLI 分别记录。 | 技能发现与完整正文进入模型已直接回读。Hook 执行、持续切档、关闭、裸恢复及子代理仍为 NOT_RUN，完整验收未完成。 |
 | Claude Code | `--version` 返回 2.1.283。只读帮助显示非交互 print 会跳过 workspace trust dialog；本轮没有据此运行模型验收。 | NOT_RUN，项目配置加载、六命令发现、上下文与子代理待验。 |
 | Kimi Code | `--version` 返回 0.42.0。临时 KIMI_CODE_HOME 的 `doctor` 输出配置合法。 | NOT_RUN，doctor 不证明规则进入模型或技能展开顺序。 |
 | ZCode 桌面端 | 应用 Info.plist 版本 3.14.5、build 3.14.5.7961。PATH 未找到 CLI，桌面应用已安装。 | NOT_RUN，插件启用、项目技能软链和 JSON 实际注入待验。 |
@@ -42,13 +42,23 @@ bash scripts/test-hooks.sh
 
 本轮没有自动信任 Hook、启用插件、迁移真实个人配置或强制升级客户端。真实客户端验收从本人掌握的交互会话开始，保留既有安全流程。
 
+## Codex 桌面原始输入与待验入口
+
+2026-10-13，人工新会话的三条输入分别为技能引用加 lite、off、full。会话日志中的 `TurnInputRequest.UserInput.Text` 直接回读确认其 Markdown 技能引用形式，末条是显式 full，尚无裸引用恢复证据。完整技能正文进入模型已确认；模型回复遵从指令这一项不能证明 Hook 改写了持久档位。
+
+此前自动发送的三步被应用工具封装为 `functionCallOutput` 或 `codex_delegation`，没有形成用户消息，不能计为 UserPromptSubmit 验收。实际人工输入的原样载荷在隔离配置链复现了旧解析器的空输出，修订仅规范化当前工作树 Ponytail 技能的精确引用，再复用既有档位策略。配置链中的切档、关闭、报告、裸恢复和参数边界结果仍属于自动验证。
+
+只读 `config/read` 在集成工作树返回有效 project 层，`disabledReason=null`；同路径的 `hooks/list` 却列出主检出区的 18 条项目 Hook，Ponytail 为 0。仅在独立进程覆盖 `project_root_markers=[]` 后，发现结果仍相同。API 的来源不一致及事件实际执行仍待核对，现有证据不支持把 config.toml 缺失或信任记录差异定为根因。
+
+已回读的人工会话 developer 上下文没有 Ponytail 档位标记，默认状态根也未发现对应文件。GUI 环境可覆盖状态路径，两项仅表示证据缺失，不能据此确定 Hook 未执行。后续保存当前发现列表、事件执行记录及实际额外上下文，继续保留待验状态。
+
 ## 重复来源排查
 
 来源存在与实际重复执行分开记录。本轮只读提取 Ponytail 元数据，仓库不保存个人配置、凭据或机器绝对路径。
 
 | 客户端 | 已确认来源或待查项目 | 消除步骤与当前结果 |
 |------|----------------------|-------------------|
-| Codex | 仓库三类项目生命周期处理器已确认。个人 inline hooks、用户 hooks.json、系统与插件来源尚待客户端 `/hooks` 核对。 | 成员本人逐项查看来源，停用已确认重复的旧 Ponytail Hook。个人配置和信任未改，实际重复未证实。 |
+| Codex | 仓库三类项目生命周期处理器已确认。独立 CLI 的 `/hooks` 与桌面当前工作树 Hook 界面分别核对个人 inline hooks、用户 hooks.json、系统和插件来源；桌面 API 的发现来源不一致仍待定位。 | 成员本人逐项查看来源，停用已确认重复的旧 Ponytail Hook。个人配置和信任未改，实际重复未证实。 |
 | Claude Code | 仓库三类项目生命周期处理器及六条命令映射已确认。个人、settings.local 与全局插件的运行来源待 `/hooks` 及插件界面核对。 | 保留安全 Hook 和已有状态栏，停用已确认重复的 Ponytail 来源。实际重复未证实。 |
 | Kimi Code | 用户 config.toml 有 SessionStart、UserPromptSubmit 旧条目，两条均调用 `node "$HOME/.config/ponytail/kimi-hook.js" <事件>`、timeout=5。 | [受管理安装器](../../agents/ponytail-kimi.md)已在临时用户配置证明精确迁移。成员本人在真实用户配置运行并核对报告；本轮未执行迁移。 |
 | ZCode | 用户 `~/.zcode/cli/config.json` 的 hooks.enabled=true；两个生命周期事件有旧 `~/.zcode/hooks/ponytail-zcode-hook.js` 来源，末尾分别带 `ponytail-zcode-activate`、`ponytail-zcode-tracker` 标记。 | 新插件启用前，成员本人核对并停用已确认冲突的旧 Ponytail 来源。其他 Hook 与归属不明配置保留。旧来源实际执行与重复正文未证实。 |
@@ -61,7 +71,7 @@ bash scripts/test-hooks.sh
 
 1. 保存实际版本、仓库 HEAD、上游提交、Hook 来源及六技能或命令的发现列表。Kimi 按[安装说明](../../agents/ponytail-kimi.md)迁移，ZCode 按[插件与技能说明](../../agents/ponytail-zcode.md)分别启用。记录未知来源的处理结果。
 2. 以默认 full 启动，保存客户端可检查的上下文或调试记录，证实当前共享正文进入模型。默认 off、lite、ultra 分别新建会话核对。CLI 与 GUI 的 PATH 结果分别记录。
-3. 使用本端前缀切换 lite、ultra、full，关闭后输入普通请求，再用裸命令恢复。核对非法参数与 default 的行为，以及 review、audit、debt、gain、help 执行前后档位一致。一次性任务同时确认技能真正可发现。
+3. 使用本端前缀切换 lite、ultra、full，关闭后输入普通请求，再用裸命令恢复。Codex 桌面端选择当前工作树技能后追加参数并人工发送，裸恢复须单独发送不带参数的技能引用。核对非法参数与 default 的行为，以及 review、audit、debt、gain、help 执行前后档位一致。一次性任务同时确认技能真正可发现。
 4. 用另一个项目、linked worktree 和另一客户端核对隔离。Codex、Claude 保存子代理上下文；Kimi、ZCode 明确派单要求读取当前工作树共享技能、应用父档位，并保存实际读取记录。ZCode 不报告自动子代理注入。
 5. 记录来源与正文份数。Kimi 切档当轮只有一份正文；其他三端核对启动与切档正文，以及普通输入延续当前档位。缺可检查的上下文证据时填 NOT_RUN 或证据缺失，继续保留待办。
 
@@ -85,4 +95,4 @@ Hook 来源 / 插件版本 / 信任状态：
 
 完成条件为四端真实记录全部齐全，含 Codex CLI 与桌面端的独立记录，以及支持的子代理证据。父级当前 HEAD 的整包审查与正式验证也须通过。现阶段继续本地集成与审查；实机证据未齐时不转本票或父需求为完成态。
 
-下一步打开交付工作树的 Codex CLI，输入 `/hooks`，保存脱敏来源列表。
+下一步在 Codex 桌面端打开交付工作树，保存当前 Hook 来源列表及一条人工 lite 输入的事件执行证据。
