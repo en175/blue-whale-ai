@@ -316,20 +316,26 @@ export function createGenerationCommandRepo(
     },
 
     async requestCancel(jobId, userId) {
-      const job = await prisma.generation_jobs.findFirst({
-        where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
-        select: { status: true },
-      });
-      if (!job) return "not_found";
-      if (job.status !== "queued") return "not_cancelable";
-      await prisma.generation_jobs.update({
-        where: { id: BigInt(jobId) },
+      const updated = await prisma.generation_jobs.updateMany({
+        where: {
+          id: BigInt(jobId),
+          user_id: BigInt(userId),
+          is_delete: false,
+          status: "queued",
+        },
         data: { cancel_requested_at: new Date() },
       });
+      if (updated.count !== 1) {
+        const exists = await prisma.generation_jobs.findFirst({
+          where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
+          select: { status: true },
+        });
+        return exists ? "not_cancelable" : "not_found";
+      }
       await this.appendLog(
         jobId,
         "cancel_requested",
-        job.status,
+        "queued",
         "用户请求取消",
       );
       return "cancelled";

@@ -87,6 +87,11 @@ public class JobClaimService {
         return Optional.of(project(candidate, workerId));
     }
 
+    private boolean cancelRequestedAfterClaim(GenerationJobEntity candidate) {
+        GenerationJobEntity claimed = jobMapper.selectById(candidate.getId());
+        return claimed != null && claimed.getCancelRequestedAt() != null;
+    }
+
     private ClaimedJob project(GenerationJobEntity candidate, String workerId) {
         Map<String, Object> input = parseJson(candidate.getInput());
         return new ClaimedJob(
@@ -96,7 +101,7 @@ public class JobClaimService {
                 input != null ? input : Map.of(),
                 candidate.getType(),
                 candidate.getProviderTaskId(),
-                candidate.getCancelRequestedAt() != null,
+                cancelRequestedAfterClaim(candidate),
                 workerId,
                 candidate.getFencingToken() + 1,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
@@ -133,7 +138,7 @@ public class JobClaimService {
                 candidate.getType(),
                 input != null ? input : Map.of(),
                 candidate.getRetryCount() != null ? candidate.getRetryCount() : 0,
-                candidate.getCancelRequestedAt() != null,
+                cancelRequestedAfterClaim(candidate),
                 postIncrementToken));
     }
 
@@ -165,7 +170,7 @@ public class JobClaimService {
                 candidate.getType(),
                 input != null ? input : Map.of(),
                 candidate.getRetryCount() != null ? candidate.getRetryCount() : 0,
-                candidate.getCancelRequestedAt() != null,
+                cancelRequestedAfterClaim(candidate),
                 postIncrementToken));
     }
 
@@ -207,7 +212,7 @@ public class JobClaimService {
                 candidate.getUserId().toString(),
                 input != null ? input : Map.of(),
                 candidate.getProviderTaskId(),
-                candidate.getCancelRequestedAt() != null,
+                cancelRequestedAfterClaim(candidate),
                 workerId,
                 postIncrementToken,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
