@@ -10,8 +10,8 @@ import { nodeBoxOf, readRecoveryErrorReason, fetchUrlAsFile, planReferenceErrorF
 import { computeFollowAnchor } from './followDialog';
 import { normalizeVideoMode } from '@/lib/video-modes';import { imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
 import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from './textIndexSync';
-import { audioRefItemMediaTypeOf, audioRefSourceError } from './audioMediaRefs';
-import { assetsPickerMediaTypes } from './assetsPickerTargets';
+import { audioRefSourceError } from './audioMediaRefs';
+
 import { hasGenerationRecord } from './mediaReEdit';
 import {
   readRefRole,
@@ -20,16 +20,12 @@ import {
   videoRefIdentityIds,
   type VideoRefRole,
 } from './videoMediaRefs';
-import { AssetImageRefLimitProvider } from './modelCaps';
+
 import { imageReferenceMaxOf } from '@/lib/model-reference-limits';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
 import { type MediaDims } from './components/MediaNode/mediaContentSize';
-import type { MediaNodeData } from './components/MediaNode';
-import MediaNodeToolbar from './components/MediaNode/Toolbar';
-import NodeFollowToolbar from './components/NodeFollowToolbar';
-import AssetCardToolbar from './components/AssetCardNode/Toolbar';
-import { assetCardToolbarVisible } from './components/AssetCardNode/toolbarVisibility';
+
 import { mediaCardToolbarVisible } from './components/MediaNode/toolbarVisibility';
 import {
   MEDIA_EXTRACT_EDGE_ORIGIN,
@@ -68,26 +64,13 @@ import { type CropHost } from './cropSession';
 import { IMAGE_CROP_EDGE_ORIGIN, type ImageCropIdentity } from './imageCrop';
 import { type ToolSessionDeps } from './toolSessionCoordinator';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
-import CanvasHeader from './components/CanvasHeader';
-import AgentPanel from './components/AgentPanel';
-import CanvasToolbar from './components/CanvasToolbar';
 import type { VideoGenSeedParams } from './components/BottomDialog';
 import { type UploadedFile, type ImageTextAttachment } from './components/ImageDialog';
-import ImageGenerationDockPanel from './imageGenerationDockPanel';
-import { promptMaxLengthOfModel } from '@/lib/prompt-max-length';
+
 import { type CanvasPickItem } from './components/AudioDialog';
-import SharedAssetsModal from './components/SharedAssetsModal';
-import LegacyHistoryModal from './components/LegacyHistoryModal';
-import AssetsPickerModal from './components/AssetsPickerModal';
-import CharacterLibraryModal from './components/CharacterLibraryModal';
-import CanvasToast from './components/CanvasToast';
-import CanvasBottomLeftActions from './components/CanvasBottomLeftActions';
-import CanvasPickHint from './components/CanvasPickHint';
-import CanvasPaneContextMenu from './components/CanvasPaneContextMenu';
 import type { MaterialAsset } from '@/api/material';
-import type { AssetCardKind, AssetCardNodeData } from './components/AssetCardNode';
+import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
-import FlowCanvas from './components/Canvas';
 import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
@@ -102,7 +85,6 @@ import {
   touchProjectLastOpened,
 } from '@/api/projects';
 import { fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProject, type AssetType, type UploadCompleteData } from '@/api/assets';
-import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/assetUrlCache';
 import { referencePromptPlan, applyPromptPreview, legacyCardHistoryOptions, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
@@ -111,13 +93,11 @@ import { openRechargeForCreditsError } from '@/utils/creditsGate';
 import type { SessionContentBlock } from '@/api/agentSessions';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
-import ConfirmModal from '@/components/ConfirmModal';
 import {
   availableGenKinds,
   isConnectableSource,
 } from './connectAbility';
-import ConnectTypeMenu from './components/ConnectTypeMenu';
-import { checkFileBeforeUpload, isFileRejected } from '@/utils/fileSignature';
+import { checkFileBeforeUpload } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
@@ -184,18 +164,14 @@ import {
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
 import { createGenerationDockCoordinator } from './generationDockCoordinator';
+import { buildGenerationDockHosts } from './generationDockHosts';
 import { createImageGenerationDock, type ImageGenerationDockHost } from './imageGenerationDock';
 import { createVideoGenerationDock, type VideoGenerationDockHost } from './videoGenerationDock';
 import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from './audioMusicGenerationDock';
-import AudioGenerationDockPanel from './audioGenerationDockPanel';
-import MusicGenerationDockPanel from './musicGenerationDockPanel';
 import { createTextGenerationDock, type TextGenerationDockHost } from './textGenerationDock';
-import TextGenerationDockPanel from './textGenerationDockPanel';
 import { createToolGenerationDock } from './toolGenerationDock';
-import VideoGenerationDockPanel from './videoGenerationDockPanel';
-import styles from './index.module.css';
+import CanvasPageShell from './CanvasPageShell';
 type ToolMode = 'drag' | 'select';
-const ASSET_TOOLBAR_LIFT = 42;
 export default function CanvasPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -396,7 +372,6 @@ export default function CanvasPage() {
     if (!targetId || isGeneratingNode(targetId)) return;
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === planNodeId && edge.target === targetId).map(edge => edge.id));
   };
-  const [uploadedNodes] = useState<Node[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warn'; msg: string } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const showToast = useCallback((type: 'success' | 'error' | 'warn', msg: string) => {
@@ -919,7 +894,7 @@ export default function CanvasPage() {
   const canvasNodeIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const ids = new Set(
-      [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes, ...uploadedNodes].map((n) => n.id),
+      [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes].map((n) => n.id),
     );
     const prevIds = canvasNodeIdsRef.current;
     canvasNodeIdsRef.current = ids;
@@ -933,7 +908,7 @@ export default function CanvasPage() {
       const next = prev.filter((e) => !removed.has(e.source) && !removed.has(e.target));
       return next.length === prev.length ? prev : next;
     });
-  }, [textNodes, mediaNodes, productNodes, assetNodes, uploadedNodes, setEdges]);
+  }, [textNodes, mediaNodes, productNodes, assetNodes, setEdges]);
   const homeHandoffDoneRef = useRef(false);
   useEffect(() => {
     if (!doc) return;
@@ -2704,216 +2679,104 @@ export default function CanvasPage() {
     }
     return ids;
   };
-  imageDockHostRef.current = {
-    getNodes: () => [...mediaNodesRef.current, ...textNodesRef.current],
-    getEdges: () => edgesRef.current,
-    attachmentsOf: textAttachmentsOf,
-    canOpen: canOpenEditor,
-    beginEdit: nodeId => { if (nodeId) editingTargetRef.current = nodeId; exitEditSessionForGenPanel(); },
-    endPicking: endImagePickSession,
-    clearPickResult: () => setImagePickResult(null),
-    patchNode: patchMediaNode,
-    getAvailability: () => ({ submittingNodeId, saveFailed: saveBlocked || saveStatus === 'error' }),
-    getProjectId: () => currentId,
-    isApplying: () => applyingRef.current,
-    isSaveBlocked: () => saveBlocked,
-    setApplying: value => { applyingRef.current = value; },
-    setSubmittingNode: setSubmittingNodeId,
-    promptMaxLength: modelId => promptMaxLengthOfModel('image', modelId),
-    collectInputAssetIds: collectImageInputAssetIds,
-    save: flushCanvasSave,
-    isProjectCurrent: projectId => activeProjectRef.current === projectId,
-    startTask: input => startGenerationJob('image', {
-      prompt: input.text, model_id: input.modelId, aspect_ratio: input.ratio, size: input.size,
-    }, undefined, input.references.length ? { references: input.references } : undefined, input.targetNodeId, undefined, input.promptDoc),
-    toast: showToast,
-    reportError: error => console.warn('图片生成前准备失败:', error),
-    render: () => (
-      <ImageGenerationDockPanel
-        view={generationDock.panel('image')}
-        actions={{
-          close: () => generationDock.close('image'),
-          updateDraft: patch => generationDock.updateDraft('image', patch),
-          submit: input => generationDock.submit('image', input),
-        }}
-        resources={{
-          projectId: currentId ?? undefined,
-          stripOrder: refStripOrderOf(imageDraftId),
-          onStripOrderChange: imageDraftId ? keys => handleRefStripOrderChange(imageDraftId, keys) : undefined,
-          onRemoveAttachment: id => {
-            const targetId = imageDraftId ?? imageSeed?.targetNodeId;
-            if (targetId && isGeneratingNode(targetId)) return;
-            removePlanAttachment(targetId, id);
-            generationDock.updateDraft('image', { attachments: { targetNodeId: targetId, removeNodeId: id } });
-          },
-          pendingPlanSyncs: pendingPlanSyncs(imageSeed?.targetNodeId),
-          onSyncPlan: id => syncPlanToTarget(id, imageSeed?.targetNodeId),
-          syncingPlan: applying,
-          planReferenceError: planReferenceErrors.image,
-          onRemoveMediaRef: imageDraftId ? nodeId => removeRefEdges(imageDraftId, nodeId) : undefined,
-          onLocateTextSource: locateTextSource,
-          onReorderMediaRefs: imageDraftId ? ids => reorderTargetEdges(imageDraftId, ids) : undefined,
-          onReorderAttachments: imageSeed?.targetNodeId ? ids => handleReorderAttachments(imageSeed.targetNodeId!, ids) : undefined,
-          onPickFromCanvas: () => { setPickMode('image'); setPickTarget('image'); setImagePickSession(imageDraftId); },
-          onPickFromAssets: () => openAssetsPicker('imageDialog'),
-          pickMode: pickMode === 'image',
-          externalPick: imagePickResult,
-          onExternalPickConsumed: () => setImagePickResult(null),
-          onOpenCharacterLibrary: () => { setCharacterLibraryTarget('image'); setShowCharacterLibrary(true); },
-          onToast: showToast,
-          mentionItems: atMentionItems.filter(item => item.id !== imageDraftId),
-          onMentionCanvas: handleImageAtMention,
-          currentNodes: mediaNodes,
-          followAnchor: imageDraftId ? followAnchor : null,
-          dragHidden: isAnchoredOverlayDragHidden(imageDraftId),
-        }}
-      />
-    ),
-  };
-  videoDockHostRef.current = {
-    getNodes: () => [...mediaNodesRef.current, ...textNodesRef.current],
-    getEdges: () => edgesRef.current,
-    attachmentsOf: textAttachmentsOf,
-    canOpen: canOpenEditor,
-    beginEdit: id => { if (id) editingTargetRef.current = id; exitEditSessionForGenPanel(); },
-    endPicking: endVideoPickSession,
-    resetAssetPicking: () => { setVideoAssetPickRole('reference'); setVideoAssetPickKind('video'); },
-    warnStaleRefs: id => warnStaleMediaRefs(id, 'video'),
-    patchNode: patchMediaNode,
-    getAvailability: () => ({ submittingNodeId, saveFailed: saveBlocked || saveStatus === 'error' }),
-    getProjectId: () => currentId,
-    isApplying: () => applyingRef.current,
-    isSaveBlocked: () => saveBlocked,
-    setApplying: value => { applyingRef.current = value; },
-    setSubmittingNode: setSubmittingNodeId,
-    promptMaxLength: modelId => promptMaxLengthOfModel('video', modelId),
-    save: flushCanvasSave,
-    refUnsupported: videoRefUnsupportedByModel,
-    toast: showToast,
-    reportError: error => console.warn('生成前画布落盘失败:', error),
-    startTask: input => startGenerationJob('video', input.parameters, undefined,
-      input.references.length ? { references: input.references } : undefined,
-      input.targetNodeId,
-      { mode: input.options.mode, references: [], ...(input.options.sampleMode && input.options.expectedCredits != null && input.options.quoteRevision ? { expectedCredits: input.options.expectedCredits, quoteRevision: input.options.quoteRevision } : {}) },
-      input.promptDoc ?? undefined),
-    render: () => (
-      <VideoGenerationDockPanel
-        view={generationDock.panel('video')}
-        actions={{ close: closeVideoDialog, updateDraft: patch => generationDock.updateDraft('video', patch), submit: input => generationDock.submit('video', input) }}
-        resources={{
-          projectId: currentId ?? undefined,
-          stripOrder: refStripOrderOf(videoDraftId),
-          onStripOrderChange: videoDraftId ? keys => handleRefStripOrderChange(videoDraftId, keys) : undefined,
-          onRemoveAttachment: id => {
-            const targetId = videoDraftId ?? videoSeed?.targetNodeId;
-            if (targetId && isGeneratingNode(targetId)) return;
-            removePlanAttachment(targetId, id);
-            generationDock.updateDraft('video', { attachments: { targetNodeId: targetId, removeNodeId: id } });
-          },
-          pendingPlanSyncs: pendingPlanSyncs(videoSeed?.targetNodeId),
-          onSyncPlan: id => syncPlanToTarget(id, videoSeed?.targetNodeId),
-          syncingPlan: applying,
-          planReferenceError: planReferenceErrors.video,
-          planIndices: planReferenceErrors.videoIndices,
-          onLocateTextSource: locateTextSource,
-          onReorderAttachments: videoSeed?.targetNodeId ? ids => handleReorderAttachments(videoSeed.targetNodeId!, ids) : undefined,
-          onPickFromCanvas: (kind, role) => { endImagePickSession(); setPickMode(kind); setPickTarget('video'); setPickRefRole(role ?? null); setVideoPickSession(videoDraftId ?? null); },
-          onPickFromAssets: (kind, role) => { setVideoAssetPickRole(role ?? 'reference'); setVideoAssetPickKind(kind); openAssetsPicker('videoDraft'); },
-          pickMode: pickTarget === 'video' && pickMode !== 'audio' && pickMode !== 'product' && pickMode !== 'asset' ? pickMode : null,
-          pickLocked: videoPickSessionActive,
-          onRemoveVideoRef: videoDraftId ? id => removeRefEdges(videoDraftId, id) : removeVideoFreeRef,
-          onAssignRefRoles: videoDraftId ? assignments => assignVideoRefRoles(videoDraftId, assignments) : assignVideoFreeRefRoles,
-          onRemoveMaterialRef: videoDraftId ? id => removeDraftMaterialRef(videoDraftId, id) : removeVideoFreeRef,
-          onReorderMediaRefs: videoDraftId ? keys => handleReorderVideoMediaRefs(videoDraftId, keys) : reorderVideoFreeRefs,
-          onToast: showToast,
-          mentionItems: atMentionItems.filter(item => item.id !== videoDraftId).map(item => {
-            const node = mediaNodes.find(node => node.id === item.id);
-            return node?.data.complianceFailed === true ? { ...item, disabled: true } : item;
-          }),
-          onMentionCanvas: handleVideoAtMention,
-          followAnchor: videoDraftId ? followAnchor : null,
-          dragHidden: isAnchoredOverlayDragHidden(videoDraftId),
-        }}
-      />
-    ),
-  };
-  audioDockHostRef.current = {
-    getNodes: () => [...mediaNodesRef.current, ...textNodesRef.current],
-    getEdges: () => edgesRef.current,
-    attachmentsOf: textAttachmentsOf,
-    canOpen: canOpenEditor,
-    beginEdit: id => { if (id) editingTargetRef.current = id; exitEditSessionForGenPanel(); },
-    endPicking: endAudioPickSession,
-    clearPickResult: () => setAudioPickResult(null),
-    addReferenceEdge: (source, target) => addCanvasEdge(source, target),
-    patchNode: patchMediaNode,
-    getAvailability: () => ({ submittingNodeId, saveFailed: saveBlocked || saveStatus === 'error' }),
-    getProjectId: () => currentId,
-    isApplying: () => applyingRef.current,
-    isSaveBlocked: () => saveBlocked || saveStatus === 'error',
-    setApplying: value => { applyingRef.current = value; },
-    setSubmittingNode: setSubmittingNodeId,
-    promptMaxLength: modelId => promptMaxLengthOfModel('audio', modelId),
-    fetchFile: fetchUrlAsFile,
-    upload: uploadFileToAsset,
-    save: flushCanvasSave,
-    startTask: input => startGenerationJob('audio', { prompt: input.text, model_id: input.modelId }, undefined,
-      input.refs.length ? { references: input.refs.map(ref => ({ role: 'reference' as const, type: audioRefItemMediaTypeOf(ref), asset_id: String(ref.assetId) })) } : undefined,
-      input.targetNodeId, undefined, input.promptDoc),
-    toast: showToast,
-    reportError: error => console.warn('音频生成前准备失败:', error),
-    render: () => <AudioGenerationDockPanel
-      view={generationDock.panel('audio')}
-      actions={{ close: closeAudioDialog, updateDraft: patch => generationDock.updateDraft('audio', patch), submit: input => generationDock.submit('audio', input), switchToMusic: () => { generationDock.open('music', { fromAudio: true }); } }}
-      resources={{
-        projectId: currentId ?? undefined,
-        stripOrder: refStripOrderOf(audioDraftId),
-        onStripOrderChange: audioDraftId ? keys => handleRefStripOrderChange(audioDraftId, keys) : undefined,
-        onToast: showToast,
-        canvasMedia,
-        onPickFromCanvas: () => { endImagePickSession(); endVideoPickSession(); setPickMode('audio'); setPickTarget('audio'); setAudioPickSession(audioDraftId ?? null); },
-        onPickFromAssets: () => {
-          generationDock.referencePicked('audio');
-          setPickMode(null); setPickTarget(null);
-          setAudioAssetPickTarget({ nodeId: audioDraftId, seed: audioSeed?.ts });
-          openAssetsPicker('audioDialog');
-        },
-        externalAssetPick: audioAssetPickResult,
-        onAssetPickConsumed: () => setAudioAssetPickResult(null),
-        externalPick: audioPickResult,
-        pickMode: pickMode === 'audio',
-        onLocateTextSource: locateTextSource,
-        onRemoveDraftRef: audioDraftId ? nodeId => removeRefEdges(audioDraftId, nodeId) : undefined,
-        onAddCanvasRef: audioDraftId ? handleAddAudioCanvasRef : undefined,
-        mentionItems: atMentionItems.filter(item => item.id !== audioDraftId),
-        onMentionCanvas: handleAudioAtMention,
-        followAnchor: audioDraftId ? followAnchor : null,
-        dragHidden: isAnchoredOverlayDragHidden(audioDraftId),
-        onRemoveAttachment: id => removePlanAttachment(audioDraftId ?? undefined, id),
-        onReorderAttachments: audioDraftId ? ids => handleReorderAttachments(audioDraftId, ids) : undefined,
-      }}
-    />,
-  };
-  musicDockHostRef.current = {
-    beginEdit: exitEditSessionForGenPanel,
-    recordSend: input => console.log('Music dialog send:', input.text, input.model, input.options, input.refs),
-    render: () => <MusicGenerationDockPanel
-      actions={{ close: closeMusicDialog, submit: input => generationDock.submit('music', input), switchToAudio: () => { generationDock.open('audio', {}); } }}
-      resources={{ canvasMedia, mentionItems: atMentionItems, onMentionCanvas: handleMusicAtMention, externalPick: musicPickResult }}
-    />,
-  };
-  textDockHostRef.current = {
-    getNodes: () => textNodesRef.current,
-    getEdges: () => edgesRef.current,
-    attachmentsOf: textAttachmentsOf,
-    beginEdit: exitEditSessionForGenPanel,
-    patchNode: (id, data) => setTextNodes(previous => previous.map(node => node.id === id ? { ...node, data: { ...node.data, ...data } } : node)),
-    render: () => <TextGenerationDockPanel
-      view={generationDock.panel('text')}
-      actions={{ close: closeTextGenDialog, updateDraft: patch => generationDock.updateDraft('text', patch), submit: input => generationDock.submit('text', input) }}
-      resources={{ followAnchor, dragHidden: isAnchoredOverlayDragHidden(textGenDraftId) }}
-    />,
-  };
+  buildGenerationDockHosts(
+    {
+      isGeneratingNode: (id) => isGeneratingNode(id),
+      patchMediaNode: (nodeId, patch) => patchMediaNode(nodeId, patch),
+      setSubmittingNodeId: (id) => setSubmittingNodeId(id),
+      textAttachmentsOf: (targetNodeId) => textAttachmentsOf(targetNodeId),
+      mediaNodesRef,
+      textNodesRef,
+      edgesRef,
+    },
+    {
+      currentId,
+      pickMode,
+      pickTarget,
+      applying,
+      saveBlocked,
+      saveStatus,
+      submittingNodeId,
+      imageDraftId,
+      imageSeed,
+      imagePickResult,
+      setImagePickResult: (result) => setImagePickResult(result),
+      videoDraftId,
+      videoSeed,
+      videoPickSessionActive,
+      audioDraftId,
+      audioSeed,
+      audioPickResult,
+      setAudioPickResult: (result) => setAudioPickResult(result),
+      audioAssetPickResult,
+      audioAssetPickTarget,
+      setAudioAssetPickResult: (result) => setAudioAssetPickResult(result),
+      setAudioAssetPickTarget: (target) => setAudioAssetPickTarget(target),
+      musicPickResult,
+      textGenDraftId,
+      setTextNodes: (updater) => setTextNodes(updater),
+      setPickMode: (mode) => setPickMode(mode),
+      setPickTarget: (target) => setPickTarget(target),
+      setPickRefRole: (role) => setPickRefRole(role),
+      setImagePickSession: (id) => setImagePickSession(id),
+      setVideoPickSession: (id) => setVideoPickSession(id),
+      setAudioPickSession: (id) => setAudioPickSession(id),
+      setVideoAssetPickRole: (role) => setVideoAssetPickRole(role),
+      setVideoAssetPickKind,
+      setCharacterLibraryTarget: (target) => setCharacterLibraryTarget(target),
+      setShowCharacterLibrary: (show) => setShowCharacterLibrary(show),
+      endImagePickSession,
+      endVideoPickSession,
+      endAudioPickSession,
+      openAssetsPicker,
+      closeVideoDialog,
+      closeAudioDialog,
+      closeMusicDialog,
+      closeTextGenDialog,
+      exitEditSessionForGenPanel,
+      canOpenEditor,
+      isGeneratingNode: (id) => isGeneratingNode(id),
+      isAnchoredOverlayDragHidden,
+      warnStaleMediaRefs,
+      locateTextSource,
+      followAnchor,
+      planReferenceErrors,
+      atMentionItems,
+      refStripOrderOf,
+      handleRefStripOrderChange,
+      handleReorderAttachments,
+      handleReorderVideoMediaRefs,
+      removeRefEdges,
+      removePlanAttachment,
+      removeVideoFreeRef,
+      assignVideoRefRoles,
+      assignVideoFreeRefRoles,
+      removeDraftMaterialRef,
+      reorderTargetEdges,
+      reorderVideoFreeRefs,
+      pendingPlanSyncs,
+      syncPlanToTarget,
+      collectImageInputAssetIds,
+      handleAddAudioCanvasRef,
+      flushCanvasSave: (projectId) => flushCanvasSave(projectId),
+      startGenerationJob: startGenerationJob as never,
+      videoRefUnsupportedByModel,
+      editingTargetRef,
+      activeProjectRef,
+      applyingRef,
+      showToast,
+      generationDock: generationDock as never,
+      collectCanvasMedia: () => canvasMedia,
+      imageAtMention: (item) => handleImageAtMention(item),
+      videoAtMention: (item) => handleVideoAtMention(item),
+      audioAtMention: (item) => handleAudioAtMention(item),
+      musicAtMention: (item) => handleMusicAtMention(item),
+      currentMediaNodes: mediaNodes,
+      addCanvasEdge,
+      uploadFileToAsset,
+    },
+    { imageDockHostRef, videoDockHostRef, audioDockHostRef, musicDockHostRef, textDockHostRef },
+  );
   const { handleUpdateGenerate } = useCanvasUpdateGenerate({
     currentId,
     saveBlocked,
@@ -3025,351 +2888,80 @@ export default function CanvasPage() {
     showToast,
   });
 
-
   return (
-    <div className={styles.canvasPage}>
-      <CanvasHeader
-        projects={projects}
-        currentProjectId={currentId}
-        onSelectProject={handleSelect}
-        onRenameProject={handleRename}
-        onDeleteProject={handleDelete}
-        onTogglePinProject={handleToggleProjectPin}
-        onNewProject={handleNewProject}
-        onToggleAgent={() => setShowAgent(!showAgent)}
-        onShowLegacyHistory={legacyHistory && legacyHistory.length > 0 ? () => setShowLegacyHistory(true) : undefined}
-        hideAgentEntry={showAgent}
-      />
-      <AssetDetailModal
-        asset={assetDetailTarget}
-        loading={assetDetailLoading}
-        onClose={handleCloseAssetDetail}
-      />
-      <ConfirmModal
-        open={pendingDeleteGroup !== null}
-        title="删除组"
-        message={`确定要删除该组及组内 ${pendingDeleteGroup?.count ?? 0} 个节点吗？确认后组内全部内容将被删除。`}
-        confirmText="确认删除"
-        onCancel={() => setPendingDeleteGroup(null)}
-        onConfirm={confirmDeleteGroup}
-      />
-      <div ref={canvasWrapperRef} data-canvas-stage className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
-        {applying && <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 10000, cursor: 'wait' }}>正在保存画布引用…</div>}
-      {
-}
-      <AssetImageRefLimitProvider value={assetImageRefMax}>
-      <FlowCanvas
-          showMiniMap={showMiniMap}
-          toolMode={toolMode}
-          extraNodes={uploadedNodes}
-          textNodes={textNodes}
-          mediaNodes={mediaNodes.map((source) => {
-            const node = toolSessions.decorateNode(source);
-            const finalizeCta = finalizeCtaByNodeId.get(node.id);
-            const regenerateCta = regenerateCtaByNodeId.get(node.id);
-            if (node.id !== submittingNodeId && !audioVideoMuxInFlightSourceIds.has(node.id) && !finalizeCta && !regenerateCta) return node;
-            return { ...node, data: { ...node.data,
-              ...(node.id === submittingNodeId ? { submitting: true } : {}),
-              ...(audioVideoMuxInFlightSourceIds.has(node.id) ? { audioVideoMuxInFlight: true } : {}),
-              ...(finalizeCta ? { finalizeCta, onFinalizeSample: handleFinalizeSample } : {}),
-              ...(regenerateCta ? { regenerateCta, onRegenerateSample: handleRegenerateSample } : {}),
-            } };
-          })}
-          productNodes={productNodes}
-          assetNodes={assetNodes}
-          showEdges={showEdges}
-          snapAlignmentEnabled={snapAlignmentOn}
-          followToolbarLayer={
-            <>
-              {
-}
-              {soloMediaToolbarNode ? (
-                <NodeFollowToolbar
-                  nodeId={soloMediaToolbarNode.id}
-                  show={showSoloMediaToolbar && !toolSessions.isModal()}
-                  hovered={
-                    enhancePanelToolbarNode != null
-                    && enhancePanelToolbarNode.id === soloMediaToolbarNode.id
-                  }
-                >
-                  <MediaNodeToolbar
-                    id={soloMediaToolbarNode.id}
-                    data={{
-                      ...soloMediaToolbarNode.data,
-                      ...(audioVideoMuxInFlightSourceIds.has(soloMediaToolbarNode.id)
-                        ? { audioVideoMuxInFlight: true }
-                        : {}),
-                    } as MediaNodeData}
-                  />
-                </NodeFollowToolbar>
-              ) : null}
-              {
-}
-              {assetToolbarNode ? (
-                <NodeFollowToolbar
-                  nodeId={assetToolbarNode.id}
-                  hovered={hoverAssetToolbarNode != null}
-                  toolbarLift={ASSET_TOOLBAR_LIFT}
-                  show={assetCardToolbarVisible(
-                    ((assetToolbarNode.data ?? {}) as { kind?: AssetCardKind }).kind,
-                  )}
-                >
-                  <AssetCardToolbar
-                    id={assetToolbarNode.id}
-                    data={assetToolbarNode.data as AssetCardNodeData}
-                    onToolbarPointerEnter={handleToolbarPointerEnter}
-                    onToolbarPointerLeave={handleToolbarPointerLeave}
-                  />
-                </NodeFollowToolbar>
-              ) : null}
-            </>
-          }
-          {...toolSessions.canvasLayers()}
-          edges={edges}
-          onEdgesChange={guardEdgesChange}
-          onConnect={handleConnect}
-          onConnectStart={(nodeId) => {
-            connectingSourceRef.current = nodeId;
-            toolSessions.wireStart(nodeId);
-          }}
-          onConnectEnd={handleConnectEnd}
-          isValidConnection={isValidCanvasConnection}
-          viewport={focusViewport ?? doc?.viewport}
-          onViewportChange={setViewport}
-          onViewportLive={setLiveViewport}
-          registerSpawnPosition={registerSpawnPosition}
-          hideZoomControl={showAgent}
-          onNodeDragStop={handleNodeDragStop}
-          onNodeClick={handleCanvasNodeClick}
-          onPaneClick={handleCanvasPaneClick}
-          onSelectionChange={handleSelectionChangeStable}
-          refPickActive={imagePickSessionActive || videoPickSessionActive || audioPickSessionActive || toolSessions.blocksCanvasDrag()}
-          refPickMarkedIds={
-            audioPickSessionActive ? audioPickMarkedIds
-              : videoPickSessionActive ? videoPickMarkedIds
-                : imagePickMarkedIds
-          }
-          refPickBlockedIds={videoPickSessionActive ? videoPickBlockedIds : undefined}
-          selectRequest={selectRequest}
-          selectManyRequest={selectManyRequest}
-          productPickResult={productPickResult}
-          assetPickResult={assetPickResult}
-          onDeleteNode={(ids) => {
-            removeCanvasNodes(ids);
-          }}
-          onDuplicateSelected={(ids) => {
-            withHistoryBatch(() => {
-              ids.forEach((id) => actionsRef.current.duplicate(id));
-            });
-          }}
-          onCopySelected={handleCopySelectedNodes}
-          onPasteClipboard={handlePasteClipboard}
-          groups={groups}
-          onCreateGroup={handleCreateGroup}
-          onUngroupGroup={handleUngroup}
-          onDeleteGroup={handleDeleteGroup}
-          onDownloadGroup={handleDownloadGroupNodes}
-          onGroupFrameDragStop={handleGroupFrameDragStop}
-          onBringGroupToFront={handleBringGroupToFront}
-          onConnectGroupToTarget={handleConnectGroupToTarget}
-          onConnectGroupDrop={handleConnectGroupDrop}
-          onConnectSourceToGroup={handleConnectSourceToGroup}
-          onPaneContextMenu={(pt) => setPaneMenu({ x: pt.clientX, y: pt.clientY })}
-          onAnchoredOverlayDragHideChange={setAnchoredOverlayHiddenIds}
-          onUpdateGenerate={onUpdateGenerate}
-        />
-      </AssetImageRefLimitProvider>
-        {connectMenu && (
-          <ConnectTypeMenu
-            x={connectMenu.x}
-            y={connectMenu.y}
-            enabled={availableGenKinds(connectMenu.sourceIds.map(findCanvasNode).filter((n): n is Node => !!n))}
-            onClose={closeConnectMenu}
-            onSelect={applyConnectType}
-          />
-        )}
-        <CanvasPaneContextMenu
-          paneMenu={paneMenu}
-          canUndo={toolSessions.eraseHistory().active ? toolSessions.eraseHistory().canUndo : canvasHistory.canUndo}
-          canRedo={toolSessions.eraseHistory().active ? toolSessions.eraseHistory().canRedo : canvasHistory.canRedo}
-          onClose={() => setPaneMenu(null)}
-          onUpload={() => {
-            paneUploadPosRef.current = spawnNearScreen(paneMenu!);
-            paneUploadRef.current?.click();
-          }}
-          onAddNode={(kind) => {
-            const flow = spawnNearScreen(paneMenu!);
-            if (kind === 'text') handleAddTextNode(flow);
-            else if (kind === 'image') {
-              if (!canOpenEditor()) return;
-              openImageDraftDialog(createImageDraftCard(flow, { recordHistory: true }));
-            } else if (kind === 'video') {
-              if (!canOpenEditor()) return;
-              openVideoDraftDialog(createVideoDraftCard(undefined, flow, { recordHistory: true }));
-            } else if (kind === 'audio') {
-              if (!canOpenEditor()) return;
-              openAudioDraftDialog(createAudioDraftCard(flow, { recordHistory: true }));
-            }
-          }}
-          onUndo={() => {
-            if (toolSessions.eraseHistory().active) toolSessions.eraseHistory().undo();
-            else canvasHistory.undo();
-          }}
-          onRedo={() => {
-            if (toolSessions.eraseHistory().active) toolSessions.eraseHistory().redo();
-            else canvasHistory.redo();
-          }}
-        />
-        <input
-          ref={paneUploadRef}
-          type="file"
-          hidden
-          multiple
-          accept="image/*,video/*,audio/*"
-          onChange={(e) => {
-            const files = Array.from(e.target.files ?? []);
-            const pos = paneUploadPosRef.current;
-            files.forEach((file, index) => {
-              void placeFileOnCanvas(file, {
-                position: pos ? { x: pos.x + index * 24, y: pos.y + index * 24 } : undefined,
-              }).catch((err) => {
-                showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
-              });
-            });
-            e.target.value = '';
-            paneUploadPosRef.current = null;
-          }}
-        />
-        <CanvasToolbar
-          mode={toolMode}
-          onModeChange={setToolMode}
-          onUploadFile={handleUploadFile}
-          onOpenAssetsPicker={() => openAssetsPicker('toolbar')}
-          onToggleVideoDialog={() => {
-            if (!canOpenEditor()) return;
-            setPickMode(null);
-            setPickTarget(null);
-            setPickRefRole(null);
-            const draftId = createVideoDraftCard(undefined, undefined, { recordHistory: true });
-            openVideoDraftDialog(draftId);
-          }}
-          onToggleImageDialog={() => {
-            if (!canOpenEditor()) return;
-            setPickMode(null);
-            setPickTarget(null);
-            setImagePickResult(null);
-            const draftId = createImageDraftCard(undefined, { recordHistory: true });
-            openImageDraftDialog(draftId);
-          }}
-          onToggleAudioDialog={() => {
-            if (!canOpenEditor()) return;
-            setPickMode(null);
-            setPickTarget(null);
-            const draftId = createAudioDraftCard(undefined, { recordHistory: true });
-            openAudioDraftDialog(draftId);
-          }}
-          showVideoDialog={showBottomDialog}
-          showImageDialog={showImageDialog}
-          showAudioDialog={showAudioDialog}
-          onAddTextNode={() => handleAddTextNode()}
-          onMenuSelect={handleToolMenuSelect}
-        />
-        <CanvasBottomLeftActions
-          showMiniMap={showMiniMap}
-          showEdges={showEdges}
-          snapAlignmentOn={snapAlignmentOn}
-          saveStatus={saveStatus}
-          savedAt={savedAt}
-          onBackHome={() => { void ensureSavedBeforeProjectSwitch().then((ok) => { if (ok) navigate('/'); }); }}
-          onToggleMiniMap={() => setShowMiniMap(!showMiniMap)}
-          onToggleEdges={() => setShowEdges(!showEdges)}
-          onToggleSnap={() => {
-            const next = !snapAlignmentOn;
-            setSnapAlignmentOn(next);
-            persistSnapAlignmentEnabled(next);
-          }}
-          onRetrySave={handleRetryCanvasSave}
-        />
-        {generationDock.render()}
-        {toolSessions.render(generationDock.renderedToolKinds)}
-        {
-}
-        <CanvasPickHint
-          pickMode={pickMode}
-          pickTarget={pickTarget}
-          pickRefRole={pickRefRole}
-          imagePickSessionActive={imagePickSessionActive}
-          videoPickSessionActive={videoPickSessionActive}
-          audioPickSessionActive={audioPickSessionActive}
-          showImageDialog={showImageDialog}
-          showBottomDialog={showBottomDialog}
-          showAudioDialog={showAudioDialog}
-          onEndImagePick={endImagePickSession}
-          onEndVideoPick={endVideoPickSession}
-          onEndAudioPick={endAudioPickSession}
-        />
-      </div>
-      {(showAgent || agentOpened) && (
-        <AgentPanel
-          key={currentId}
-          open={showAgent}
-          onClose={() => setShowAgent(false)}
-          initialInput={agentContext?.text ?? ''}
-          initialCardLabel={agentContext?.label}
-          inputVersion={agentContext?.ts ?? 0}
-          projectId={currentId || undefined}
-          onApplyToDock={handleAgentCardApply}
-          appliedCardIds={appliedCardIds}
-          initialSkillId={agentContext?.skillId ?? ''}
-          initialSkillName={agentContext?.skillName ?? ''}
-          mediaBlocks={agentContext?.mediaBlocks}
-          candidateBlocks={agentCandidate}
-          onPrepareCandidate={confirmAgentCandidate}
-          onCancelCandidate={cancelAgentCandidate}
-          onPlaceFileOnCanvas={placeFileOnCanvas}
-          onPickFromAssets={() => openAssetsPicker('agentPanel')}
-          externalAssetPicks={agentAssetPicks}
-        />
-      )}
-      {showAssetsPicker && (
-        <AssetsPickerModal
-          onClose={() => setShowAssetsPicker(false)}
-          onSelect={handleAssetsPickerSelect}
-          mediaTypes={assetsPickerMediaTypes(assetsPickerTarget, videoAssetPickRole, videoAssetPickKind)}
-          confirmText={assetsPickerTarget === 'toolbar' ? '插入画布' : '确定'}
-          showLivenessTab={assetsPickerTarget === 'toolbar' || assetsPickerTarget === 'videoDraft'}
-          showCharacterTab={assetsPickerTarget === 'videoDraft'}
-          rejectUnapprovedForVideo={assetsPickerTarget === 'videoDraft'}
-        />
-      )}
-      {showAssetsModal && (
-        <SharedAssetsModal
-          onClose={() => setShowAssetsModal(false)}
-          projectId={currentId}
-          onAddItem={(item) => handleAddSharedAsset(item).then((ok) => {
-            if (ok) setShowAssetsModal(false);
-            return ok;
-          })}
-          onToast={showToast}
-          defaultTab={assetsModalDefaultTab}
-          defaultCardFilter={assetsModalDefaultFilter as any}
-        />
-      )}
-      {showCharacterLibrary && (
-        <CharacterLibraryModal
-          onClose={() => {
-            setShowCharacterLibrary(false);
-            setCharacterLibraryTarget(null);
-          }}
-          onSelectAssets={handleCharacterLibrarySelect}
-        />
-      )}
-      <LegacyHistoryModal
-        open={showLegacyHistory}
-        items={legacyHistory ?? []}
-        onClose={() => setShowLegacyHistory(false)}
-      />
-      <CanvasToast toast={toast} />
-    </div>
+    <CanvasPageShell
+      shellTop={{
+        canvasWrapperRef, currentId, applying, assetImageRefMax,
+        toast, toolSessions, handleCopySelectedNodes, handlePasteClipboard,
+        navigate, generationDock,
+      }}
+      canvas={{
+        showMiniMap, setShowMiniMap, toolMode, setToolMode,
+        textNodes, mediaNodes, productNodes, assetNodes,
+        showEdges, setShowEdges, snapAlignmentOn, setSnapAlignmentOn, edges,
+        guardEdgesChange, onConnect: handleConnect, connectingSourceRef, handleConnectEnd,
+        isValidCanvasConnection, focusViewport, docViewport: doc?.viewport,
+        setViewport, setLiveViewport, registerSpawnPosition, handleNodeDragStop,
+        handleCanvasNodeClick, handleCanvasPaneClick, handleSelectionChangeStable,
+        refPickActive: imagePickSessionActive || videoPickSessionActive || audioPickSessionActive || toolSessions.blocksCanvasDrag(),
+        refPickMarkedIds: audioPickSessionActive ? audioPickMarkedIds : videoPickSessionActive ? videoPickMarkedIds : imagePickMarkedIds,
+        refPickBlockedIds: videoPickSessionActive ? videoPickBlockedIds : undefined,
+        selectRequest, selectManyRequest, productPickResult, assetPickResult,
+        setAnchoredOverlayHiddenIds, onUpdateGenerate, withHistoryBatch,
+        removeCanvasNodes, actionsRef, handleConnect,
+      }}
+      menus={{
+        connectMenu, closeConnectMenu, applyConnectType, paneMenu, setPaneMenu, canvasHistory,
+        findCanvasNode, showToast,
+        spawnNearScreen, paneUploadRef, paneUploadPosRef, placeFileOnCanvas,
+        handleToolMenuSelect, handleUploadFile, placeNodeFile: (file) => placeFileOnCanvas(file),
+      }}
+      nodeActions={{
+        handleAddTextNode, canOpenEditor, openImageDraftDialog, createImageDraftCard,
+        openVideoDraftDialog, createVideoDraftCard, openAudioDraftDialog, createAudioDraftCard,
+      }}
+      pick={{
+        pickMode, setPickMode, pickTarget, setPickTarget, pickRefRole, setPickRefRole, setImagePickResult,
+        showImageDialog, showBottomDialog, showAudioDialog,
+        endImagePickSession, endVideoPickSession, endAudioPickSession,
+        videoPickSessionActive, audioPickSessionActive, imagePickSessionActive,
+        audioPickMarkedIds, videoPickMarkedIds, imagePickMarkedIds, videoPickBlockedIds,
+        videoDraftId, videoAssetPickRole, videoAssetPickKind, assetsPickerTarget,
+        openAssetsPicker, setVideoAssetPickRole, setVideoAssetPickKind,
+      }}
+      groupActions={{
+        groups, handleCreateGroup, handleUngroup, handleDeleteGroup, handleDownloadGroupNodes,
+        handleGroupFrameDragStop, handleBringGroupToFront, handleConnectGroupToTarget,
+        handleConnectGroupDrop, handleConnectSourceToGroup,
+      }}
+      save={{
+        saveStatus, savedAt, handleRetryCanvasSave, ensureSavedBeforeProjectSwitch,
+        persistSnapAlignmentEnabled,
+      }}
+      assetsPicker={{ showAssetsPicker, setShowAssetsPicker, handleAssetsPickerSelect }}
+      agent={{
+        showAgent, setShowAgent, agentOpened, agentContext, agentCandidate,
+        confirmAgentCandidate, cancelAgentCandidate, appliedCardIds, handleAgentCardApply, agentAssetPicks,
+      }}
+      mediaUpdates={{
+        submittingNodeId, audioVideoMuxInFlightSourceIds, finalizeCtaByNodeId,
+        regenerateCtaByNodeId, handleFinalizeSample, handleRegenerateSample,
+      }}
+      toolbars={{
+        soloMediaToolbarNode, showSoloMediaToolbar, enhancePanelToolbarNode,
+        assetToolbarNode, hoverAssetToolbarNode, handleToolbarPointerEnter, handleToolbarPointerLeave,
+      }}
+      projectHandlers={{
+        projects, handleSelect, handleRename, handleDelete, handleToggleProjectPin,
+        handleNewProject, legacyHistory, showLegacyHistory, setShowLegacyHistory,
+      }}
+      overlays={{
+        assetDetailTarget, assetDetailLoading, handleCloseAssetDetail,
+        pendingDeleteGroup, setPendingDeleteGroup, confirmDeleteGroup,
+        showAssetsModal, setShowAssetsModal, handleAddSharedAsset,
+        assetsModalDefaultTab, assetsModalDefaultFilter: assetsModalDefaultFilter as never, showCharacterLibrary,
+        setShowCharacterLibrary, setCharacterLibraryTarget, handleCharacterLibrarySelect,
+      }}
+    />
   );
 }
