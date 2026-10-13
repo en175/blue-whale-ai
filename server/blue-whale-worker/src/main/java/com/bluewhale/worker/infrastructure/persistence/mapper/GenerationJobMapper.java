@@ -631,6 +631,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND is_delete = false
               AND status IN ('queued', 'processing')
+              AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
               AND execution_deadline_at IS NOT NULL
               AND execution_deadline_at < NOW()
             """)
@@ -640,6 +641,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SELECT id FROM generation_jobs
             WHERE is_delete = false
               AND status IN ('queued', 'processing')
+              AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
               AND execution_deadline_at IS NOT NULL
               AND execution_deadline_at < NOW()
             ORDER BY id ASC
@@ -652,6 +654,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE is_delete = false
               AND status = 'queued'
               AND cancel_requested_at IS NOT NULL
+              AND next_action_at <= NOW()
             ORDER BY id ASC
             LIMIT #{limit}
             """)

@@ -1253,7 +1253,7 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("★ 到期扫描：越过执行截止时间的排队/处理中任务是候选，没到点与没设截止的不动")
+    @DisplayName("★ 到期扫描：越过执行截止时间的排队/处理中任务是候选，没到点、没设截止、仍在租约期内的不动")
     void expiredJobsAreCollectedByDeadline() {
         long overdue = seedJob(9L, "video", "bottom_dock", "queued", 0L,
                 LocalDateTime.now().minusSeconds(10));
@@ -1263,14 +1263,19 @@ class JobStateMachineMySqlIntegrationTest {
                 LocalDateTime.now().minusSeconds(10));
         long withoutDeadline = seedJob(9L, "video", "bottom_dock", "queued", 0L,
                 LocalDateTime.now().minusSeconds(10));
+        long leased = seedClaimedJob(9L, "video", "bottom_dock", "live-worker", 2L);
         jdbc.update("UPDATE generation_jobs SET execution_deadline_at=DATE_SUB(NOW(), INTERVAL 5 SECOND) "
-                + "WHERE id IN (?, ?)", overdue, overdueProcessing);
+                + "WHERE id IN (?, ?, ?)", overdue, overdueProcessing, leased);
         jdbc.update("UPDATE generation_jobs SET execution_deadline_at=DATE_ADD(NOW(), INTERVAL 1 HOUR) "
                 + "WHERE id=?", fresh);
 
         assertThat(jobMapper.listExpiredJobIds(100))
                 .contains(overdue, overdueProcessing)
-                .doesNotContain(fresh, withoutDeadline);
+                .doesNotContain(fresh, withoutDeadline, leased);
+
+        assertThat(finalizer.expireJob(String.valueOf(overdue))).isTrue();
+        assertThat(finalizer.expireJob(String.valueOf(leased))).isFalse();
+        assertThat(readJob(leased).getStatus()).isEqualTo("processing");
     }
 
     @Test
@@ -1291,7 +1296,7 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("★ 取消补投扫描：排队中已请求取消的任务是候选，处理中与未请求的不是")
+    @DisplayName("★ 取消补投扫描：排队中已到点且已请求取消的是候选，处理中、未请求、未到点的不收")
     void cancelPendingJobsAreCollected() {
         long requested = seedJob(9L, "video", "bottom_dock", "queued", 0L,
                 LocalDateTime.now().minusSeconds(10));
@@ -1299,13 +1304,15 @@ class JobStateMachineMySqlIntegrationTest {
                 LocalDateTime.now().minusSeconds(10));
         long requestedProcessing = seedJob(9L, "video", "bottom_dock", "processing", 1L,
                 LocalDateTime.now().minusSeconds(10));
-        jdbc.update("UPDATE generation_jobs SET cancel_requested_at=NOW() WHERE id IN (?, ?)",
-                requested, requestedProcessing);
+        long backoff = seedJob(9L, "video", "bottom_dock", "queued", 0L,
+                LocalDateTime.now().plusMinutes(5));
+        jdbc.update("UPDATE generation_jobs SET cancel_requested_at=NOW() WHERE id IN (?, ?, ?)",
+                requested, requestedProcessing, backoff);
 
         assertThat(jobMapper.listCancelPendingJobs(100))
                 .extracting(GenerationJobEntity::getId)
                 .contains(requested)
-                .doesNotContain(untouched, requestedProcessing);
+                .doesNotContain(untouched, requestedProcessing, backoff);
     }
 
     @Test

@@ -32,6 +32,8 @@ public class TerminalEventOutbox {
             JobStatusEnum.FAILED.value(),
             JobStatusEnum.CANCELLED.value());
 
+    private static final int REASON_MAX_LENGTH = 512;
+
     private final GenerationOutboxMapper outboxMapper;
     private final GenerationJobMapper jobMapper;
     private final BillingEventPublisher producer;
@@ -60,7 +62,7 @@ public class TerminalEventOutbox {
         row.setJobId(job.getId());
         row.setUserId(job.getUserId());
         row.setTerminalStatus(status);
-        row.setReason(reasonFor(status, statusPayload));
+        row.setReason(truncateReason(reasonFor(status, statusPayload)));
         row.setSendState(GenerationOutboxEntity.STATE_PENDING);
         row.setAttempts(0);
         outboxMapper.insert(row);
@@ -122,6 +124,16 @@ public class TerminalEventOutbox {
             }
         }
         return "未提供原因";
+    }
+
+    private static String truncateReason(String reason) {
+        if (reason.length() <= REASON_MAX_LENGTH) {
+            return reason;
+        }
+        int end = Character.isHighSurrogate(reason.charAt(REASON_MAX_LENGTH - 1))
+                ? REASON_MAX_LENGTH - 1
+                : REASON_MAX_LENGTH;
+        return reason.substring(0, end);
     }
 
     private static String toJson(Map<String, Object> body) {

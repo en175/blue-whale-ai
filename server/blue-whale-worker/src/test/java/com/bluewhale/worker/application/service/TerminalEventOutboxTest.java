@@ -8,6 +8,7 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutboxMa
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.mock.env.MockEnvironment;
 
 import java.util.ArrayList;
@@ -138,6 +139,23 @@ class TerminalEventOutboxTest {
         outbox.enqueue(job, java.util.Map.of());
 
         verify(outboxMapper, never()).insert(any(GenerationOutboxEntity.class));
+    }
+
+    @Test
+    @DisplayName("★ 超长错误信息截断到列宽 —— 否则 insert 抛错会连带回滚整笔终态写入，任务永远收不了口")
+    void 超长原因截断到列宽() {
+        GenerationJobEntity job = new GenerationJobEntity();
+        job.setId(900L);
+        job.setUserId(42L);
+        job.setStatus("failed");
+
+        outbox.enqueue(job, java.util.Map.of("error",
+                java.util.Map.of("message", "上游返回的整段响应体".repeat(80))));
+
+        ArgumentCaptor<GenerationOutboxEntity> captor =
+                ArgumentCaptor.forClass(GenerationOutboxEntity.class);
+        verify(outboxMapper).insert(captor.capture());
+        assertThat(captor.getValue().getReason()).hasSize(512);
     }
 
     @Test
