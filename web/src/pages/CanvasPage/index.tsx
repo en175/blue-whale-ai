@@ -1,6 +1,5 @@
 import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '@lib/contracts/prompt-target';
 import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
-import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import { replaceImageMentionsWithAssetTokens, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { toast as globalToast } from 'sonner';
@@ -19,14 +18,12 @@ import {
   type VideoMode,
 } from '@/lib/video-modes';
 import { imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
-import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from './planApplyEdges';
 import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from './textIndexSync';
 import { audioRefItemMediaTypeOf, audioRefSourceError } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES } from './refSourceTypes';
 import { assetsPickerMediaTypes } from './assetsPickerTargets';
-import { hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
+import { hasGenerationRecord } from './mediaReEdit';
 import {
-  asVideoRefMediaType,
   readRefRole,
   readDraftMaterialRefs,
   mergedVideoMediaRefsOf,
@@ -54,7 +51,7 @@ import {
 } from './mediaExtract';
 import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
 import { type ImageEnhanceSubmission, type VideoEnhanceSubmission, type FrameInterpolationSubmission } from './panelToolSessions';
-import { apiErrorMessage, isSilentAuthError } from './toolSessionCapture';
+import { isSilentAuthError } from './toolSessionCapture';
 import { type AudioVideoSplitSubmission } from './audioVideoSplitSession';
 import {
   AUDIO_TRIM_EDGE_ORIGIN,
@@ -80,7 +77,6 @@ import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from './scene
 import { type SceneSplitSubmission } from './sceneSplitSession';
 import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from './smartMatting';
 import { imageEnhanceDraftPosition } from './imageEnhance';
-import { type VideoEnhanceIdentity } from './videoEnhance';
 import {
   type FrameInterpolationIdentity,
 } from './frameInterpolation';
@@ -120,7 +116,7 @@ import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
-import { hasCustomName, planBindingsCoveredBy, readNodeAssetId, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
+import { hasCustomName, planBindingsCoveredBy, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
 import { createConnectValidators } from './canvasConnectValidation';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
@@ -129,7 +125,6 @@ import {
   fetchProjects,
   createProject,
   touchProjectLastOpened,
-  type SnapshotAsset,
 } from '@/api/projects';
 import { fetchUploadPresign, putToPresignedUrl, completeUpload, linkAssetToProject, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
@@ -138,14 +133,13 @@ import { referencePromptPlan, applyPromptPreview, legacyCardHistoryOptions, save
 import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { openRechargeForCreditsError } from '@/utils/creditsGate';
-import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
+import type { SessionContentBlock } from '@/api/agentSessions';
 import {
   fetchJobStatus,
  } from '@/api/jobs';
 import { newIdempotencyKey } from '@/api/idempotencyKey';
 import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
-import { buildImageJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
   availableGenKinds,
   canConnectSourcesToGen,
@@ -161,10 +155,10 @@ import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
 import { normalGenerationTask } from './generationRuntime/normalGeneration';
 import { storyboardTask } from './generationRuntime/storyboardTasks';
-import { createImageToolsTask, isImageToolsCard, imageToolsRetryPayloadOf, type ImageToolsPayload } from './generationRuntime/imageTools';
+import { createImageToolsTask, type ImageToolsPayload } from './generationRuntime/imageTools';
 import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from './generationRuntime/mixMuxTasks';
 import { sceneSplitTask, vocalSplitTask } from './generationRuntime/multiOutputTasks';
-import { videoToolsTask, videoToolFrozenPayload, type VideoToolPayload } from './generationRuntime/videoTools';
+import { videoToolsTask, type VideoToolPayload } from './generationRuntime/videoTools';
 import { seedTargetOfNode, seedSourcesOfNode } from './generationRuntime/seedFacts';
 import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from './generationRuntime/types';
 import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRecoverySaveData, type RecoveryChange } from '@/api/canvasRecovery';
@@ -183,6 +177,11 @@ import { useCanvasProjects } from './hooks/useCanvasProjects';
 import { useCanvasClipboard } from './hooks/useCanvasClipboard';
 import { useCanvasUploadDrop } from './hooks/useCanvasUploadDrop';
 import { useCanvasPickSessionClick } from './hooks/useCanvasPickSessionClick';
+import { useCanvasNodeClickDispatch } from './hooks/useCanvasNodeClickDispatch';
+import { useCanvasNodeAttachCallbacks } from './hooks/useCanvasNodeAttachCallbacks';
+import { useCanvasHomeHandoff } from './hooks/useCanvasHomeHandoff';
+import { useCanvasApplyAgentCard } from './hooks/useCanvasApplyAgentCard';
+import { useCanvasRetryJob } from './hooks/useCanvasRetryJob';
 import { useCanvasAssetsPlacement } from './hooks/useCanvasAssetsPlacement';
 import { useCanvasUpdateGenerate } from './hooks/useCanvasUpdateGenerate';
 import { useCanvasToolDraftCreators } from './hooks/useCanvasToolDraftCreators';
@@ -195,8 +194,7 @@ import {
   parseGroupsFromNodes,
   type CanvasGroup,
 } from './canvasGroups';
-import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
-import { extractTextNodeText, quoteChipLabel } from './quoteConversation';
+import { extractTextNodeText } from './quoteConversation';
 import {
   canvasLocationSearch,
   findLastOpenedProjectId,
@@ -1030,110 +1028,6 @@ export default function CanvasPage() {
     const failedText = `${failed.length} 张旧生成卡未能迁移（${detail}${failed.length > 2 ? ' 等' : ''}），原卡片已保留`;
     showToast('warn', migrated.length > 0 ? `已转换 ${migrated.length} 张旧生成卡；${failedText}` : failedText);
   }, [legacyMigration, showToast]);
-  const attachCallbacks = (node: Node): Node => {
-    const base: Node = { ...node, position: node.position ?? { x: 0, y: 0 }, data: { ...node.data, toolMode } };
-    switch (node.type) {
-      case 'textNode': {
-        if (typeof base.data.html === 'string') {
-          base.data.text = unifiedTextNodeText(base.data);
-          delete base.data.html;
-        }
-        base.data = {
-          ...base.data,
-          onDelete: (id: string) => removeCanvasNodes([id]),
-          onTitleChange: (id: string, title: string) => actionsRef.current.renameCard(id, title),
-          onDraftError: handleDraftError,
-          onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
-          onPromptChange: (id: string, text: string, promptMentions: import('@lib/contracts/prompt-preview').PromptMention[], promptMaterials?: Array<import('@lib/contracts/prompt-preview').PromptMaterial & { url: string }>) => {
-            setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n));
-            syncPlanEdgeBindingsOnShrink(id, promptMentions);
-          },
-          onMediaIndexChange: handleMediaIndexChange,
-          onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
-          onWriteSelf: () => {
-            generationDock.writeSelf('text');
-          },
-        };
-        break;
-      }
-      case 'mediaNode':
-        base.data = {
-          ...base.data,
-          onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-          onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
-          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
-          onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-          onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
-          onDownload: (id: string) => actionsRef.current.download(id),
-          ...dockToolCallbacks,
-          onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-          onMediaDims: handleMediaDims,
-          onLocateInputSource: (sourceNodeId: string) => locateTextSource(sourceNodeId),
-        };
-        break;
-      case 'productNode':
-        base.data = {
-          ...base.data,
-          projectId: currentId,
-          onDelete: (id: string) => {
-            removeCanvasNodes([id]);
-          },
-          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
-          onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string }>; detail?: string }) => handleProductChange(id, patch),
-          onPickFromCanvas: (id: string) => {
-            setPickMode('product');
-            setPickTarget('product');
-            setPickProductId(id);
-          },
-        };
-        break;
-      case 'assetNode':
-        base.data = {
-          ...base.data,
-          projectId: currentId,
-          onHoverChange: handleAssetHoverChange,
-          onDelete: (id: string) => {
-            setAssetNodes((prev) => prev.filter((n) => n.id !== id));
-          },
-          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onGenerateImage: () => actionsRef.current.openImageDialog(),
-          onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
-          onCardChange: (id: string, patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
-          onPickFromCanvas: (id: string) => {
-            setPickMode('asset');
-            setPickTarget('asset');
-            setPickAssetId(id);
-          },
-        };
-        break;
-      default:
-        break;
-    }
-    return base;
-  };
   const hydratedDocRef = useRef<typeof doc>(null);
   const hydratedProjectRef = useRef<string | null>(null);
   const confirmedNonEmptyRef = useRef(false);
@@ -1569,166 +1463,47 @@ export default function CanvasPage() {
     setImagePickResult,
     setAudioPickResult,
   });
-  const handleCanvasNodeClick = (node: Node) => {
-    if (toolRuntime.onNodeClick(node.id, buildToolSessionDeps()) === 'consumed') return;
-    if (showAgent && node.type === 'textNode') {
-      const text = extractTextNodeText(node.data);
-      if (text) setAgentCandidate([{
-        type: 'text', node_id: node.id, chip_id: `canvas:${node.id}`,
-        display_label: quoteChipLabel(typeof node.data.title === 'string' ? node.data.title : '', text),
-      }]);
-    }
-    if (showAgent && node.type === 'mediaNode') {
-      const data = node.data ?? {};
-      const blocks = collectMediaBlocks(node, `canvas:${node.id}`);
-      if (
-        !data.assetMissing &&
-        !['draft', 'generating', 'failed', 'cancelled'].includes(String(data.genStatus)) &&
-        blocks.length === 1 && blocks[0].asset_id &&
-        ['image', 'video', 'audio'].includes(blocks[0].type) &&
-        blocks[0].url && !blocks[0].url.startsWith('blob:')
-      ) setAgentCandidate(blocks);
-    }
-    if (imagePickSessionActive) {
-      handleImagePickSessionClick(node);
-      return;
-    }
-    if (videoPickSessionActive) {
-      handleVideoPickSessionClick(node);
-      return;
-    }
-    if (audioPickSessionActive) {
-      handleAudioPickSessionClick(node);
-      return;
-    }
-    if (!pickMode || !pickTarget) {
-      const data = (node.data ?? {}) as Record<string, unknown>;
-      if (
-        node.type === 'mediaNode' &&
-        isInPlaceRegenTarget(node) &&
-        (saveBlocked || saveStatus === 'error') &&
-        node.id !== editingTargetRef.current
-      ) {
-        showToast('warn', '保存失败，请重试');
-        return;
-      }
-      const toolDraft = toolSessions.draft(node);
-      if (toolDraft) {
-        openCoordinatedToolDraft(node, toolDraft.open);
-      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'image') {
-        openImageDraftDialog(node.id);
-      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video') {
-        openVideoDraftDialog(node.id);
-      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
-        openAudioDraftDialog(node.id);
-      } else if (node.type === 'textNode' && data.textGen === true) {
-        openTextGenDialog(node.id, 'nodeClick');
-      } else if (node.type === 'mediaNode' && hasGenerationRecord(node)) {
-        openMediaDraftDialog(node.id, data.mediaType);
-      }
-      return;
-    }
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    if (pickTarget === 'video' && (pickRefRole === 'first' || pickRefRole === 'last')
-      && (node.type !== 'mediaNode' || data.mediaType !== 'image')) {
-      showToast('warn', '首尾帧仅支持图片素材');
-      return;
-    }
-    if (node.type === 'textNode' && pickTarget === 'video') {
-      if (!videoDraftId) {
-        showToast('warn', '文本参考需要绑定生成节点');
-        return;
-      }
-      if (!connectPair(node.id, videoDraftId)) return;
-      generationDock.referencePicked('video');
-      setPickMode(null);
-      setPickTarget(null);
-      setPickRefRole(null);
-      return;
-    }
-    if (pickTarget === 'video' && (pickMode === 'image' || pickMode === 'video')) {
-      const isFrameSlot = pickRefRole === 'first' || pickRefRole === 'last';
-      if ((isFrameSlot || pickMode === 'image') && (node.type !== 'mediaNode' || data.mediaType !== 'image')) {
-        if (node.type === 'mediaNode') {
-          showToast('warn', isFrameSlot ? '首尾帧仅支持图片素材' : PANEL_REF_MEDIA_TYPES.videoText2Video.canvasRefError);
-          return;
-        }
-      } else if (videoDraftId) {
-        if (node.type === 'mediaNode' && validateVideoRefConnect(node.id, videoDraftId, pickRefRole ?? undefined)) {
-          addCanvasEdge(node.id, videoDraftId, pickRefRole ?? 'reference');
-        }
-      } else if (node.type === 'mediaNode') {
-        const role = pickRefRole ?? 'reference';
-        const err = videoRefSourceError(node, role);
-        if (err) {
-          showToast('warn', err);
-        } else {
-          const d = (node.data ?? {}) as Record<string, unknown>;
-          const assetId = readAssetId(d);
-          if (assetId != null) {
-            appendVideoFreeRef(
-              {
-                nodeId: node.id,
-                url: String(d.src ?? ''),
-                name: typeof d.fileName === 'string' && d.fileName ? d.fileName : node.id,
-                assetId: String(assetId),
-                mediaType: asVideoRefMediaType(d.mediaType),
-              },
-              role,
-            );
-          }
-        }
-      }
-      setPickMode(null);
-      setPickTarget(null);
-      setPickRefRole(null);
-      setPickProductId(null);
-      setPickAssetId(null);
-      generationDock.referencePicked('video');
-      return;
-    }
-    const isReadyMedia =
-      node.type === 'mediaNode' &&
-      typeof data.src === 'string' &&
-      !data.genStatus;
-    if (isReadyMedia && data.assetMissing) {
-      showToast('warn', '素材已被删除');
-      return;
-    }
-    if (isReadyMedia && (data.src as string).startsWith('blob:')) {
-      showToast('warn', '素材上传中，请稍候再选择');
-      return;
-    }
-    if (pickMode === 'product' && isReadyMedia && data.mediaType === 'image') {
-      const targetId = pickProductId;
-      if (targetId) {
-        const newImage = {
-          id: `node-${node.id}-${Date.now()}`,
-          src: data.src as string,
-          enabled: true,
-          type: 'image' as const,
-          ...(readNodeAssetId(data) ? { assetId: String(readNodeAssetId(data)!) } : {}),
-        };
-        setProductPickResult({ ts: Date.now(), productId: targetId, image: newImage });
-      }
-    } else if (pickMode === 'asset' && isReadyMedia && data.mediaType !== 'audio') {
-      const targetId = pickAssetId;
-      if (targetId) {
-        const mediaType: 'image' | 'video' = data.mediaType === 'video' ? 'video' : 'image';
-        const newRef = {
-          id: `node-${node.id}-${Date.now()}`,
-          src: data.src as string,
-          type: mediaType,
-          ...(readNodeAssetId(data) ? { assetId: String(readNodeAssetId(data)!) } : {}),
-        };
-        setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
-      }
-    }
-    setPickMode(null);
-    setPickTarget(null);
-    setPickProductId(null);
-    setPickAssetId(null);
-  };
+  const { handleCanvasNodeClick } = useCanvasNodeClickDispatch({
+    toolRuntime,
+    buildToolSessionDeps: () => buildToolSessionDeps(),
+    showAgent,
+    setAgentCandidate,
+    imagePickSessionActive,
+    videoPickSessionActive,
+    audioPickSessionActive,
+    handleImagePickSessionClick,
+    handleVideoPickSessionClick,
+    handleAudioPickSessionClick,
+    pickMode,
+    pickTarget,
+    pickRefRole,
+    pickProductId,
+    pickAssetId,
+    saveBlocked,
+    saveStatus,
+    editingTargetRef,
+    toolSessions,
+    openCoordinatedToolDraft: (node, open) => openCoordinatedToolDraft(node, open),
+    openImageDraftDialog: (nodeId) => openImageDraftDialog(nodeId),
+    openVideoDraftDialog: (nodeId) => openVideoDraftDialog(nodeId),
+    openAudioDraftDialog: (nodeId) => openAudioDraftDialog(nodeId),
+    openTextGenDialog: (nodeId, intent) => openTextGenDialog(nodeId, intent),
+    openMediaDraftDialog: (nodeId, mediaType, intent) => openMediaDraftDialog(nodeId, mediaType, intent),
+    videoDraftId,
+    connectPair,
+    addCanvasEdge,
+    validateVideoRefConnect,
+    appendVideoFreeRef: (item, role) => appendVideoFreeRef(item, role),
+    generationDock,
+    showToast,
+    setPickMode,
+    setPickTarget,
+    setPickRefRole,
+    setPickProductId,
+    setPickAssetId,
+    setProductPickResult,
+    setAssetPickResult,
+  });
   const closeVideoDialog = () => generationDock.close('video');
   const closeAudioDialog = () => generationDock.close('audio');
   const closeTextGenDialog = () => generationDock.close('text');
@@ -2281,6 +2056,31 @@ export default function CanvasPage() {
     if (Object.keys(patch).length === 0) return;
     patchMediaNode(nodeId, patch);
   };
+  const { attachCallbacks } = useCanvasNodeAttachCallbacks({
+    toolMode,
+    currentId,
+    actionsRef,
+    removeCanvasNodes: (ids) => removeCanvasNodes(ids),
+    handleDraftError,
+    setTextNodes,
+    setAssetNodes,
+    syncPlanEdgeBindingsOnShrink,
+    handleMediaIndexChange,
+    handleMediaDims,
+    handleAssetHoverChange,
+    handleSaveMediaToAssets: (id) => handleSaveMediaToAssets(id),
+    handleSaveTextToAssets: (id) => handleSaveTextToAssets(id),
+    handleSaveCardToAssets: (id) => handleSaveCardToAssets(id),
+    handleSaveGoodsToAssets: (id) => handleSaveGoodsToAssets(id),
+    handleProductChange: (id, patch) => handleProductChange(id, patch),
+    handleCardChange: (id, patch) => handleCardChange(id, patch),
+    generationDock,
+    dockToolCallbacks,
+    locateTextSource: (nodeId) => locateTextSource(nodeId),
+    showToast,
+    pickers: { setPickMode, setPickTarget, setPickProductId, setPickAssetId },
+  });
+
   const { handleAssetsPickerSelect } = useCanvasAssetsPlacement({
     currentId,
     toolMode,
@@ -2802,72 +2602,18 @@ export default function CanvasPage() {
   const handleRemoveMediaNode = (nodeId: string) => {
     removeCanvasNodes([nodeId]);
   };
-  const handleRetryJob = (nodeId: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const jobId = node?.data?.jobId as number | string | undefined;
-    if (node && (isAudioMixNodeId(nodeId) || audioVideoMuxIdentityOf(node) != null)) {
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法重试');
-        return;
-      }
-      const inFlight = generationRuntimeRef.current?.statusOf(nodeId);
-      if (inFlight && (inFlight.phase === 'submitting' || inFlight.phase === 'generating')) return;
-      generationRuntimeRef.current?.retry(nodeId);
-      return;
-    }
-    if (node && isImageToolsCard(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
-      if (jobId != null) {
-        generationRuntimeRef.current?.retry(nodeId);
-        return;
-      }
-      const payload = imageToolsRetryPayloadOf(nodeId, (node.data ?? {}) as Record<string, unknown>);
-      if (!payload) {
-        showToast('warn', '原任务输入已不可信，请重新编辑后再发送');
-        return;
-      }
-      const target = imageToolTargetOfNode(nodeId);
-      if (!target) return;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '', errorCode: undefined });
-      dispatchImageToolTask(payload, target).catch(() => {});
-      return;
-    }
-    if (node && generationRuntimeRef.current?.claims(nodeId, (node.data ?? {}) as Record<string, unknown>)) {
-      if (!currentId) {
-        showToast('warn', '未选中项目，无法重试');
-        return;
-      }
-      const hdRetry = videoToolFrozenPayload(nodeId, (node.data ?? {}) as Record<string, unknown>)?.kind === 'videoEnhance';
-      if (hdRetry && (isVideoEnhanceCardInFlight(nodeId) || node.data.genStatus === 'generating' || node.data.genStatus === 'checking')) return;
-      const ownsHdSession = hdRetry ? toolRuntime.captureSessionOwnership('videoEnhance') : null;
-      const finishHd = hdRetry ? beginVideoEnhanceSubmission(nodeId) : null;
-      generationRuntimeRef.current.retry(nodeId, {
-        deferGeneratingUntilAccepted: hdRetry,
-        onStale: () => finishHd?.(),
-        onCreateFailure: hdRetry ? (error: unknown) => {
-          finishHd?.();
-          if (!isSilentAuthError(error) && ownsHdSession?.() && !isVideoEnhanceCardInFlight(nodeId)) {
-            if (isApiError(error)) globalToast.error(error.message);
-            showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
-          }
-          return false;
-        } : undefined,
-        onAccepted: () => {
-          finishHd?.();
-          const identityData = (mediaNodesRef.current.find((n) => n.id === nodeId)?.data ?? {}) as Record<string, unknown>;
-          const frozen = videoToolFrozenPayload(nodeId, identityData);
-          const frameIdentity = identityData.frameInterpolation as FrameInterpolationIdentity | undefined;
-          if (frameIdentity != null && frozen?.kind === 'frameInterpolation') {
-            patchMediaNode(nodeId, { frameInterpolation: { ...frameIdentity, frozenParams: { fps: frozen.input.fps } } });
-            return;
-          }
-          const hdIdentity = identityData.videoEnhance as VideoEnhanceIdentity | undefined;
-          if (hdIdentity != null && frozen?.kind === 'videoEnhance') {
-            patchMediaNode(nodeId, { videoEnhance: { ...hdIdentity, lastParams: { resolution: frozen.input.resolution } } });
-          }
-        },
-      });
-    }
-  };
+  const { handleRetryJob } = useCanvasRetryJob({
+    currentId,
+    mediaNodesRef,
+    generationRuntimeRef,
+    patchMediaNode,
+    isVideoEnhanceCardInFlight,
+    imageToolTargetOfNode: (nodeId) => imageToolTargetOfNode(nodeId),
+    dispatchImageToolTask: (payload, target) => dispatchImageToolTask(payload, target),
+    beginVideoEnhanceSubmission: (nodeId) => beginVideoEnhanceSubmission(nodeId),
+    captureSessionOwnership: (kind) => toolRuntime.captureSessionOwnership(kind),
+    showToast,
+  });
   actionsRef.current.cancelJob = handleCancelJob;
   actionsRef.current.retryJob = handleRetryJob;
   actionsRef.current.removeMediaNode = handleRemoveMediaNode;
@@ -3706,88 +3452,6 @@ export default function CanvasPage() {
       showToast('error', error instanceof Error ? error.message : '方案引用失败，请重试');
     } finally { applyingRef.current = false; setApplying(false); }
   };
-  const handleAgentCardApply = async (payload: GenerationCardBlock) => {
-    if (applyingRef.current || !currentId || !payload.source) return;
-    const projectId = currentId;
-    applyingRef.current = true;
-    setApplying(true);
-    (document.activeElement as HTMLElement | null)?.blur();
-    try {
-      const missingNodeIds = new Set(
-        mediaNodesRef.current
-          .filter((node) => (node.data as { assetMissing?: boolean }).assetMissing === true)
-          .map((node) => node.id),
-      );
-      if (!(await flushCanvasSave(projectId))) return;
-      const result = await applyMutation.mutateAsync({ projectId, source: payload.source, position: spawnPosition() });
-      if (activeProjectRef.current !== projectId) return;
-      const savedNodes = JSON.parse(result.canvas.nodes ?? '[]') as Node[];
-      const savedEdges = JSON.parse(result.canvas.edges ?? '[]') as Edge[];
-      const savedViewport = JSON.parse(result.canvas.viewport ?? 'null') as Viewport | null;
-      const textNodeId = result.node.id;
-      const extraAssetIds = (payload.assetRefItems ?? []).map((item) => item.assetId);
-      const assetIds = appliedPlanAssetIds(result.node as Node, extraAssetIds);
-      const rebuilt = replaceMissingPlanMediaNodes({
-        textNodeId,
-        assetIds,
-        nodes: savedNodes.map((node) => (
-          node.id === result.node.id
-            ? { ...node, data: { ...(node.data ?? {}), ...((result.node as Node).data ?? {}) } }
-            : node
-        )),
-        missingNodeIds,
-        createNodeId: () => newNodeId('media'),
-      });
-      const keptEdges = savedEdges.filter((edge) => !rebuilt.removedNodeIds.has(edge.source) && !rebuilt.removedNodeIds.has(edge.target));
-      const oriented = dropReversedTextIndexEdges(textNodeId, keptEdges);
-      const indexEdges = textIndexEdgesForAppliedPlan(textNodeId, assetIds, rebuilt.nodes, oriented);
-      let nextNodes = rebuilt.nodes;
-      let nextEdges = [...oriented, ...indexEdges];
-      let nextVersion = result.canvas.version;
-      if (indexEdges.length > 0 || oriented.length !== savedEdges.length || rebuilt.replaced) {
-        try {
-          const persisted = await saveCanvasDoc(
-            projectId,
-            { viewport: savedViewport ?? viewport, nodes: nextNodes, edges: nextEdges },
-            result.canvas.version,
-          );
-          nextVersion = persisted.version;
-          nextNodes = JSON.parse(persisted.nodes ?? '[]') as Node[];
-          nextEdges = JSON.parse(persisted.edges ?? '[]') as Edge[];
-        } catch {
-        }
-      }
-      const newAssets: SnapshotAsset[] = [];
-      for (const n of nextNodes) {
-        if (n.type !== 'mediaNode') continue;
-        const d = (n.data ?? {}) as Record<string, unknown>;
-        const aid = d.assetId ?? d.asset_id ?? d.assetID;
-        if (aid == null || aid === '') continue;
-        const src = typeof d.src === 'string' ? d.src : '';
-        if (!src || src.startsWith('blob:')) continue;
-        const mediaType = d.mediaType;
-        if (mediaType !== 'image' && mediaType !== 'video' && mediaType !== 'audio') continue;
-        newAssets.push({
-          asset_id: Number(aid),
-          type: mediaType,
-          access_url: src,
-          width: typeof d.width === 'number' ? d.width : null,
-          height: typeof d.height === 'number' ? d.height : null,
-          material_id: null,
-          material_status: null,
-        });
-      }
-      upsertAssets(newAssets);
-      acceptDoc({ id: result.canvas.id, version: nextVersion, nodes: nextNodes, edges: nextEdges, viewport: savedViewport ?? viewport });
-      const target = result.node.position;
-      setFocusViewport({ x: window.innerWidth / 3 - target.x, y: window.innerHeight / 2 - target.y - 135, zoom: 1 });
-      setSaveStatus('saved');
-      setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-    } catch (error) {
-      setSaveStatus('error');
-      showToast('error', error instanceof Error ? error.message : '应用失败，请重试');
-    } finally { applyingRef.current = false; setApplying(false); }
-  };
   const handleToolMenuSelect = (menu: string, item: string) => {
     if (menu === 'assets' && item === 'shared') {
       setAssetsModalDefaultTab(undefined);
@@ -4247,81 +3911,21 @@ export default function CanvasPage() {
     void handleUpdateGenerate(nodeId, { ratioOverride: 'adaptive' });
   };
   actionsRef.current.fixFollowVideo = handleFixFollowVideo;
-  const firePendingGen = () => {
-    const handoff = pendingGenRef.current;
-    if (!handoff) return;
-    if (!currentId) return;
-    if (!doc) return;
-    pendingGenRef.current = null;
-    const projectId = currentId;
-    (async () => {
-      const items = handoff.kind === 'image'
-        ? handoff.files.map(f => ({ url: f.url, name: f.name, mediaType: 'image' as const, file: f.file, assetId: f.assetId, role: 'reference' as VideoRefRole }))
-        : handoff.refs.map((r, i) => ({ url: r.preview, name: r.file?.name ?? `参考${i + 1}`, mediaType: r.type, file: r.file, assetId: r.assetId,
-            role: (isFrameMode(handoff.mode) ? (i === 0 ? 'first' : 'last') : 'reference') as VideoRefRole }));
-      const references: Array<{
-        assetId: string;
-        url: string;
-        name: string;
-        mediaType: 'image' | 'video';
-        role: VideoRefRole;
-        materialId?: string;
-      }> = [];
-      try {
-        for (const item of items) {
-          let assetId = item.assetId == null ? undefined : String(item.assetId);
-          let url = item.url;
-          if (!assetId) {
-            const file = item.file ?? await fetchUrlAsFile(url, item.name, item.mediaType);
-            const uploaded = file ? await uploadFileToAsset(file, item.mediaType) : null;
-            if (!uploaded) {
-              showToast('error', '参考素材上传失败，请重新发送');
-              return;
-            }
-            assetId = uploaded.asset_id;
-            url = uploaded.url;
-          }
-          await linkAssetToProject(projectId, assetId);
-          references.push({ assetId, url, name: item.name, mediaType: item.mediaType, role: item.role });
-        }
-        if (activeProjectRef.current !== projectId) return;
-        if (handoff.kind === 'image') {
-          const jobRefs = buildImageJobReferences(references.map(r => r.assetId));
-          startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
-            undefined, jobRefs.length > 0 ? { references: jobRefs } : undefined, undefined, { references });
-        } else {
-          startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
-            resolution: handoff.resolution, duration: handoff.duration, mode: handoff.mode,
-            generate_audio: handoff.generateAudio }, undefined,
-            { references: buildVideoJobReferencesFromList(references) },
-            undefined, { references, mode: handoff.mode });
-        }
-      } catch (error) {
-        console.warn('首页生成参考准备失败:', error);
-        showToast('error', '参考素材准备失败，请重新发送');
-      } finally {
-        items.forEach(item => { if (item.file) URL.revokeObjectURL(item.url); });
-      }
-    })();
-    navigate(location.pathname + location.search, { replace: true, state: null });
-  };
+  const { firePendingGen, firePendingVideoDraft } = useCanvasHomeHandoff({
+    currentId,
+    doc,
+    activeProjectRef,
+    pendingGenRef,
+    pendingVideoDraftSeedRef,
+    navigate,
+    location,
+    showToast,
+    uploadFileToAsset: (file, type) => uploadFileToAsset(file, type),
+    createVideoDraftCard: (seed, position, overrides) => createVideoDraftCard(seed, position, overrides),
+    openVideoDraftDialog: (nodeId, preset) => openVideoDraftDialog(nodeId, preset),
+    startGenerationJob: (type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft) => startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft),
+  });
   actionsRef.current.firePendingGen = firePendingGen;
-  const firePendingVideoDraft = () => {
-    const seed = pendingVideoDraftSeedRef.current;
-    if (!seed) return;
-    if (!currentId) return;
-    if (!doc) return;
-    pendingVideoDraftSeedRef.current = null;
-    const nodeId = createVideoDraftCard({
-      modelId: seed.modelId,
-      ratio: seed.aspectRatio,
-      size: seed.resolution,
-      duration: seed.duration,
-      mode: seed.mode,
-      generateAudio: seed.generateAudio,
-    }, undefined, { recordHistory: true });
-    openVideoDraftDialog(nodeId, seed);
-  };
   actionsRef.current.firePendingVideoDraft = firePendingVideoDraft;
   useEffect(() => {
     actionsRef.current.firePendingGen();
@@ -4365,6 +3969,25 @@ export default function CanvasPage() {
       }
     }
   };
+
+  const { handleAgentCardApply } = useCanvasApplyAgentCard({
+    currentId,
+    viewport,
+    mediaNodesRef,
+    applyingRef,
+    activeProjectRef,
+    setApplying,
+    setSaveStatus,
+    setSavedAt,
+    setFocusViewport,
+    spawnPosition,
+    flushCanvasSave: (projectId) => flushCanvasSave(projectId),
+    applyMutation,
+    acceptDoc,
+    upsertAssets,
+    showToast,
+  });
+
 
   return (
     <div className={styles.canvasPage}>
