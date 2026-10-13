@@ -24,9 +24,8 @@ import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from './textIndexSync
 import { audioRefItemMediaTypeOf, audioRefSourceError } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES } from './refSourceTypes';
 import { assetsPickerMediaTypes } from './assetsPickerTargets';
-import { hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
+import { hasGenerationRecord } from './mediaReEdit';
 import {
-  asVideoRefMediaType,
   readRefRole,
   readDraftMaterialRefs,
   mergedVideoMediaRefsOf,
@@ -120,7 +119,7 @@ import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
-import { hasCustomName, planBindingsCoveredBy, readNodeAssetId, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
+import { hasCustomName, planBindingsCoveredBy, mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
 import { createConnectValidators } from './canvasConnectValidation';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
@@ -183,6 +182,7 @@ import { useCanvasProjects } from './hooks/useCanvasProjects';
 import { useCanvasClipboard } from './hooks/useCanvasClipboard';
 import { useCanvasUploadDrop } from './hooks/useCanvasUploadDrop';
 import { useCanvasPickSessionClick } from './hooks/useCanvasPickSessionClick';
+import { useCanvasNodeClickDispatch } from './hooks/useCanvasNodeClickDispatch';
 import { useCanvasAssetsPlacement } from './hooks/useCanvasAssetsPlacement';
 import { useCanvasUpdateGenerate } from './hooks/useCanvasUpdateGenerate';
 import { useCanvasToolDraftCreators } from './hooks/useCanvasToolDraftCreators';
@@ -195,8 +195,8 @@ import {
   parseGroupsFromNodes,
   type CanvasGroup,
 } from './canvasGroups';
-import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
-import { extractTextNodeText, quoteChipLabel } from './quoteConversation';
+import { type CanvasGalleryRef } from './collectMediaBlocks';
+import { extractTextNodeText } from './quoteConversation';
 import {
   canvasLocationSearch,
   findLastOpenedProjectId,
@@ -1569,166 +1569,47 @@ export default function CanvasPage() {
     setImagePickResult,
     setAudioPickResult,
   });
-  const handleCanvasNodeClick = (node: Node) => {
-    if (toolRuntime.onNodeClick(node.id, buildToolSessionDeps()) === 'consumed') return;
-    if (showAgent && node.type === 'textNode') {
-      const text = extractTextNodeText(node.data);
-      if (text) setAgentCandidate([{
-        type: 'text', node_id: node.id, chip_id: `canvas:${node.id}`,
-        display_label: quoteChipLabel(typeof node.data.title === 'string' ? node.data.title : '', text),
-      }]);
-    }
-    if (showAgent && node.type === 'mediaNode') {
-      const data = node.data ?? {};
-      const blocks = collectMediaBlocks(node, `canvas:${node.id}`);
-      if (
-        !data.assetMissing &&
-        !['draft', 'generating', 'failed', 'cancelled'].includes(String(data.genStatus)) &&
-        blocks.length === 1 && blocks[0].asset_id &&
-        ['image', 'video', 'audio'].includes(blocks[0].type) &&
-        blocks[0].url && !blocks[0].url.startsWith('blob:')
-      ) setAgentCandidate(blocks);
-    }
-    if (imagePickSessionActive) {
-      handleImagePickSessionClick(node);
-      return;
-    }
-    if (videoPickSessionActive) {
-      handleVideoPickSessionClick(node);
-      return;
-    }
-    if (audioPickSessionActive) {
-      handleAudioPickSessionClick(node);
-      return;
-    }
-    if (!pickMode || !pickTarget) {
-      const data = (node.data ?? {}) as Record<string, unknown>;
-      if (
-        node.type === 'mediaNode' &&
-        isInPlaceRegenTarget(node) &&
-        (saveBlocked || saveStatus === 'error') &&
-        node.id !== editingTargetRef.current
-      ) {
-        showToast('warn', '保存失败，请重试');
-        return;
-      }
-      const toolDraft = toolSessions.draft(node);
-      if (toolDraft) {
-        openCoordinatedToolDraft(node, toolDraft.open);
-      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'image') {
-        openImageDraftDialog(node.id);
-      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video') {
-        openVideoDraftDialog(node.id);
-      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
-        openAudioDraftDialog(node.id);
-      } else if (node.type === 'textNode' && data.textGen === true) {
-        openTextGenDialog(node.id, 'nodeClick');
-      } else if (node.type === 'mediaNode' && hasGenerationRecord(node)) {
-        openMediaDraftDialog(node.id, data.mediaType);
-      }
-      return;
-    }
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    if (pickTarget === 'video' && (pickRefRole === 'first' || pickRefRole === 'last')
-      && (node.type !== 'mediaNode' || data.mediaType !== 'image')) {
-      showToast('warn', '首尾帧仅支持图片素材');
-      return;
-    }
-    if (node.type === 'textNode' && pickTarget === 'video') {
-      if (!videoDraftId) {
-        showToast('warn', '文本参考需要绑定生成节点');
-        return;
-      }
-      if (!connectPair(node.id, videoDraftId)) return;
-      generationDock.referencePicked('video');
-      setPickMode(null);
-      setPickTarget(null);
-      setPickRefRole(null);
-      return;
-    }
-    if (pickTarget === 'video' && (pickMode === 'image' || pickMode === 'video')) {
-      const isFrameSlot = pickRefRole === 'first' || pickRefRole === 'last';
-      if ((isFrameSlot || pickMode === 'image') && (node.type !== 'mediaNode' || data.mediaType !== 'image')) {
-        if (node.type === 'mediaNode') {
-          showToast('warn', isFrameSlot ? '首尾帧仅支持图片素材' : PANEL_REF_MEDIA_TYPES.videoText2Video.canvasRefError);
-          return;
-        }
-      } else if (videoDraftId) {
-        if (node.type === 'mediaNode' && validateVideoRefConnect(node.id, videoDraftId, pickRefRole ?? undefined)) {
-          addCanvasEdge(node.id, videoDraftId, pickRefRole ?? 'reference');
-        }
-      } else if (node.type === 'mediaNode') {
-        const role = pickRefRole ?? 'reference';
-        const err = videoRefSourceError(node, role);
-        if (err) {
-          showToast('warn', err);
-        } else {
-          const d = (node.data ?? {}) as Record<string, unknown>;
-          const assetId = readAssetId(d);
-          if (assetId != null) {
-            appendVideoFreeRef(
-              {
-                nodeId: node.id,
-                url: String(d.src ?? ''),
-                name: typeof d.fileName === 'string' && d.fileName ? d.fileName : node.id,
-                assetId: String(assetId),
-                mediaType: asVideoRefMediaType(d.mediaType),
-              },
-              role,
-            );
-          }
-        }
-      }
-      setPickMode(null);
-      setPickTarget(null);
-      setPickRefRole(null);
-      setPickProductId(null);
-      setPickAssetId(null);
-      generationDock.referencePicked('video');
-      return;
-    }
-    const isReadyMedia =
-      node.type === 'mediaNode' &&
-      typeof data.src === 'string' &&
-      !data.genStatus;
-    if (isReadyMedia && data.assetMissing) {
-      showToast('warn', '素材已被删除');
-      return;
-    }
-    if (isReadyMedia && (data.src as string).startsWith('blob:')) {
-      showToast('warn', '素材上传中，请稍候再选择');
-      return;
-    }
-    if (pickMode === 'product' && isReadyMedia && data.mediaType === 'image') {
-      const targetId = pickProductId;
-      if (targetId) {
-        const newImage = {
-          id: `node-${node.id}-${Date.now()}`,
-          src: data.src as string,
-          enabled: true,
-          type: 'image' as const,
-          ...(readNodeAssetId(data) ? { assetId: String(readNodeAssetId(data)!) } : {}),
-        };
-        setProductPickResult({ ts: Date.now(), productId: targetId, image: newImage });
-      }
-    } else if (pickMode === 'asset' && isReadyMedia && data.mediaType !== 'audio') {
-      const targetId = pickAssetId;
-      if (targetId) {
-        const mediaType: 'image' | 'video' = data.mediaType === 'video' ? 'video' : 'image';
-        const newRef = {
-          id: `node-${node.id}-${Date.now()}`,
-          src: data.src as string,
-          type: mediaType,
-          ...(readNodeAssetId(data) ? { assetId: String(readNodeAssetId(data)!) } : {}),
-        };
-        setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
-      }
-    }
-    setPickMode(null);
-    setPickTarget(null);
-    setPickProductId(null);
-    setPickAssetId(null);
-  };
+  const { handleCanvasNodeClick } = useCanvasNodeClickDispatch({
+    toolRuntime,
+    buildToolSessionDeps: () => buildToolSessionDeps(),
+    showAgent,
+    setAgentCandidate,
+    imagePickSessionActive,
+    videoPickSessionActive,
+    audioPickSessionActive,
+    handleImagePickSessionClick,
+    handleVideoPickSessionClick,
+    handleAudioPickSessionClick,
+    pickMode,
+    pickTarget,
+    pickRefRole,
+    pickProductId,
+    pickAssetId,
+    saveBlocked,
+    saveStatus,
+    editingTargetRef,
+    toolSessions,
+    openCoordinatedToolDraft: (node, open) => openCoordinatedToolDraft(node, open),
+    openImageDraftDialog: (nodeId) => openImageDraftDialog(nodeId),
+    openVideoDraftDialog: (nodeId) => openVideoDraftDialog(nodeId),
+    openAudioDraftDialog: (nodeId) => openAudioDraftDialog(nodeId),
+    openTextGenDialog: (nodeId, intent) => openTextGenDialog(nodeId, intent),
+    openMediaDraftDialog: (nodeId, mediaType, intent) => openMediaDraftDialog(nodeId, mediaType, intent),
+    videoDraftId,
+    connectPair,
+    addCanvasEdge,
+    validateVideoRefConnect,
+    appendVideoFreeRef: (item, role) => appendVideoFreeRef(item, role),
+    generationDock,
+    showToast,
+    setPickMode,
+    setPickTarget,
+    setPickRefRole,
+    setPickProductId,
+    setPickAssetId,
+    setProductPickResult,
+    setAssetPickResult,
+  });
   const closeVideoDialog = () => generationDock.close('video');
   const closeAudioDialog = () => generationDock.close('audio');
   const closeTextGenDialog = () => generationDock.close('text');
