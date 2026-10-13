@@ -69,12 +69,6 @@ export interface NewApiVideoTask {
   error: { code: string | number | null; message: string } | null;
 }
 
-export interface NewApiAgentRunQuotaResult {
-  quota: number;
-  matched: number;
-  truncated: boolean;
-}
-
 export interface NewApiPricingItem {
   modelName: string;
   modelPrice?: number;

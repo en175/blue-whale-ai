@@ -60,7 +60,6 @@ const sessionMock = vi.hoisted(() => ({
 vi.mock('../../hooks/useAgentSession', () => ({ useAgentSession: () => sessionMock }));
 vi.mock('@/api/generation', () => ({ fetchGenerationModels: vi.fn(async () => []) }));
 vi.mock('@/api/skills', () => ({ fetchMySkills: vi.fn(async () => []) }));
-vi.mock('@/api/agentSessions', () => ({ fetchSessionCredits: vi.fn(async () => null) }));
 vi.mock('../ChipTextEditor', () => ({ default: () => createElement('div', { 'data-testid': 'chip-editor' }) }));
 
 let root: Root;

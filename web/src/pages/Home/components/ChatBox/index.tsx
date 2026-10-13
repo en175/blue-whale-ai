@@ -125,7 +125,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const toggleDropdown = (key: string) => setOpenDropdown((cur) => (cur === key ? null : key));
   const [creationModel, setCreationModel] = useState('');
-  const [reasoningModel, setReasoningModel] = useState('');
   const [underlineStyle, setUnderlineStyle] = useState<React.CSSProperties>({});
 
 
@@ -174,7 +173,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   >([]);
 
   const creationRef = useRef<HTMLDivElement>(null);
-  const reasoningRef = useRef<HTMLDivElement>(null);
   const tabBarRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const videoModelRef = useRef<HTMLDivElement>(null);
@@ -191,7 +189,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const lastSlotRef = useRef<HTMLButtonElement>(null);
 
 
-  const [textModels, setTextModels] = useState<GenerationModel[]>([]);
   const [videoModelList, setVideoModelList] = useState<GenerationModel[]>([]);
   const [imageModelList, setImageModelList] = useState<GenerationModel[]>([]);
 
@@ -265,14 +262,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
 
   useEffect(() => {
-    fetchGenerationModels('text')
-      .then((list) => {
-        setTextModels(list);
-        if (list.length) {
-          setReasoningModel((prev) => (list.some((m) => m.model_id === prev) ? prev : list[0].model_id));
-        }
-      })
-      .catch(() => undefined);
     fetchGenerationModels('video')
       .then((list) => {
         setVideoModelList(list);
@@ -311,7 +300,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   useDismissOnOutside([
     { open: openDropdown === 'creation', ref: creationRef, dismiss: () => setOpenDropdown(null) },
-    { open: openDropdown === 'reasoning', ref: reasoningRef, dismiss: () => setOpenDropdown(null) },
     { open: openDropdown === 'videoModel', ref: videoModelRef, dismiss: () => setOpenDropdown(null) },
     { open: openDropdown === 'videoMode', ref: videoModeRef, dismiss: () => setOpenDropdown(null) },
     { open: openDropdown === 'ratio', ref: ratioRef, dismiss: () => setOpenDropdown(null) },
@@ -559,7 +547,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const handleCompositionEnd = () => { composingRef.current = false; };
 
 
-  const agentModelOptions = textModels.map((m) => ({ key: m.model_id, label: m.model_label }));
   const videoModelOptions = videoModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
   const imageModelOptions = imageModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
 
@@ -567,8 +554,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const currentCreationModel =
     creationModelOptions.find((m) => m.key === creationModel)?.label ?? '';
-  const currentReasoningModel =
-    agentModelOptions.find((m) => m.key === reasoningModel)?.label ?? '';
 
   const currentVideoModel =
     videoModelOptions.find((m) => m.key === videoModel)?.label ?? '';
@@ -1604,33 +1589,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
               { }
               <div className={styles.toolbarRight}>
-                { }
-                <div className={styles.dropdownWrap} ref={reasoningRef}>
-                  <button
-                    className={styles.modelBtn}
-                    onClick={() => toggleDropdown('reasoning')}
-                  >
-                    <span>{currentReasoningModel}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {openDropdown === 'reasoning' && (
-                    <div className={styles.dropdownMenu}>
-                      {agentModelOptions.map((m) => (
-                        <button
-                          key={m.key}
-                          className={`${styles.dropdownItem} ${reasoningModel === m.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => {
-                            setReasoningModel(m.key);
-                            setOpenDropdown(null);
-                          }}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
                 { }
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}

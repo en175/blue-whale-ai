@@ -69,7 +69,9 @@
 
 ### 8. 范围
 
-计费域（billing-svc + backend 的 Hold 调用 + 管理端定价页）+ 清掉「网关 quota → 积分」的残留换算（`agent-session-credits.controller.ts` 改读产品账本；该清理 [ADR-0114](0114-new-api-as-upstream-identity-and-billing-services.md) 已列为待办）。充值侧与网关 quota 锚点不动。
+计费域（billing-svc + backend 的 Hold 调用 + 管理端定价页）+ 清掉「网关 quota → 积分」的残留换算（`agent-session-credits.controller.ts` 改读产品账本；该清理 [ADR-0114](0114-new-api-as-upstream-identity-and-billing-services.md) 已列为待办）。
+
+> 2026-10-13 补记：`agent-session-credits.controller.ts` 已整删（IKHCK4），不再改读产品账本——Agent 文本模型自 10-13 起不对外、不向用户计费（拍板见工单 IKL9N1），「本次对话累计消耗积分」不再有意义，前端那枚胶囊一并删除。充值侧与网关 quota 锚点不动。
 
 ## 后果
 

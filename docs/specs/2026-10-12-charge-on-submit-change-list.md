@@ -35,7 +35,7 @@
 ## 四、代码落点
 
 - `server/blue-whale-billing`：`CreditService.hold` → `charge`；`CreditService.settle` 与 `SettlementService` **整体退役**；`CreditService.refund` 保留（改为「失败全退」唯一触发点）；`ReservationSweeper` 退役（释放职责消失），`CreditExpirySweeper` 保留；`BasePriceResolver` / `AbstractPricingCalculator` 里的 token 分支退役。
-- backend：`billing-hold.ts` / `billing-release.ts` / `job-billing.ts`（失败补偿）；`agent-session-credits.controller.ts` 的 `quotaToCredits` 换算改读产品账本。
+- backend：`billing-hold.ts` / `billing-release.ts` / `job-billing.ts`（失败补偿）；`agent-session-credits.controller.ts` 的 `quotaToCredits` 换算改读产品账本。（10-13 补记：该接口已整删，见 IKHCK4——文本模型不再向用户计费。）
 - worker（`server/blue-whale-worker`）：`JobSettlementPublisher` 只剩 failed 事件；`SettlementUsageLines` 退役。
 - 管理端（`web/src/admin/pages/ModelList/`）：`PricingTab` 标签「基准单价（元 / …）」→「基准单价（积分 / …）」；`catalogDraft.ts` 的 `yuanToMc` / `mcToYuan` 换成 `creditsToMc` / `mcToCredits`。校验文案里的「元」全部换掉。
 - **新规则：编辑模式限单段参考视频**（本次新加，代码里没有）。`edit` 模式的参考视频上限从通用的 `features.video_reference_max` 收紧为 **1**；用户加第二段时模式自动切 `omni`。
