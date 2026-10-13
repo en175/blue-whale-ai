@@ -1,19 +1,13 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import { applyDraggedNodesToGroups, type CanvasGroup } from '../canvasGroups';
+import type { CanvasGraph } from './useCanvasGraph';
 
 export interface CanvasNodeDragHandlersHost {
-  mediaNodesRef: RefObject<Node[]>;
-  textNodesRef: RefObject<Node[]>;
-  productNodesRef: RefObject<Node[]>;
-  assetNodesRef: RefObject<Node[]>;
+  graph: CanvasGraph;
   groupsRef: RefObject<CanvasGroup[]>;
   historyRef: RefObject<{ pushMove: (positions: Array<{ id: string; x: number; y: number }>) => void } | null>;
   handleCanvasNodeClick: (node: Node) => void;
-  setTextNodes: Dispatch<SetStateAction<Node[]>>;
-  setMediaNodes: Dispatch<SetStateAction<Node[]>>;
-  setProductNodes: Dispatch<SetStateAction<Node[]>>;
-  setAssetNodes: Dispatch<SetStateAction<Node[]>>;
   setGroups: Dispatch<SetStateAction<CanvasGroup[]>>;
 }
 
@@ -23,24 +17,17 @@ export interface CanvasNodeDragHandlersHandles {
 
 export function useCanvasNodeDragHandlers(host: CanvasNodeDragHandlersHost): CanvasNodeDragHandlersHandles {
   const {
-    mediaNodesRef,
-    textNodesRef,
-    productNodesRef,
-    assetNodesRef,
+    graph,
     groupsRef,
     historyRef,
     handleCanvasNodeClick,
-    setTextNodes,
-    setMediaNodes,
-    setProductNodes,
-    setAssetNodes,
     setGroups,
   } = host;
 
   const handleNodeDragStop = (_node: Node, draggedNodes: Node[]) => {
     if (draggedNodes.length === 1) {
       const dragged = draggedNodes[0]!;
-      const before = mediaNodesRef.current.find((n) => n.id === dragged.id);
+      const before = graph.findNode(dragged.id);
       const data = (dragged.data ?? {}) as Record<string, unknown>;
       if (
         before
@@ -52,12 +39,7 @@ export function useCanvasNodeDragHandlers(host: CanvasNodeDragHandlersHost): Can
       }
     }
     const positions = new Map(draggedNodes.map((n) => [n.id, n.position]));
-    const before = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
+    const before = graph.allNodes();
     const oldPositions = before
       .filter((n) => {
         const next = positions.get(n.id);
@@ -70,10 +52,7 @@ export function useCanvasNodeDragHandlers(host: CanvasNodeDragHandlersHost): Can
         const position = positions.get(n.id);
         return position ? { ...n, position } : n;
       });
-    setTextNodes(applyDraggedPositions);
-    setMediaNodes(applyDraggedPositions);
-    setProductNodes(applyDraggedPositions);
-    setAssetNodes(applyDraggedPositions);
+    graph.setAll(applyDraggedPositions);
     if (groupsRef.current.length > 0) {
       setGroups((prev) => applyDraggedNodesToGroups(prev, before, draggedNodes, positions));
     }

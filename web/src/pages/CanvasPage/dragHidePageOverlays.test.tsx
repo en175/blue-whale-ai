@@ -124,7 +124,7 @@ function defaultImportLocalOf(file: string, moduleSpecifier: string): string | n
 describe('IKJU9T 页面级锚定浮层出口机械护栏', () => {
   const anchored = anchoredOverlayComponents();
   const sessions = defaultImportLocalsByComponentDir(
-    path.join(PAGE_DIR, 'canvasToolSessions.tsx'),
+    path.join(PAGE_DIR, 'canvasToolEntries.tsx'),
     new Set(anchored),
   );
   const pageLevel = anchored.filter((name) => !sessions.has(name));

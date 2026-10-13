@@ -2,6 +2,7 @@ import { type Dispatch, type RefObject, type SetStateAction, useCallback } from 
 import type { Node } from '@xyflow/react';
 import { newNodeId } from '../nodeId';
 import type { CanvasHistoryApi } from './useCanvasHistory';
+import type { CanvasGraph } from './useCanvasGraph';
 import {
   applyIndependentGroupDrag,
   bringGroupToFront,
@@ -16,16 +17,9 @@ import {
 } from '../canvasGroups';
 
 export interface CanvasGroupActionsHost {
+  graph: CanvasGraph;
   setGroups: Dispatch<SetStateAction<CanvasGroup[]>>;
   groupsRef: RefObject<CanvasGroup[]>;
-  setTextNodes: Dispatch<SetStateAction<Node[]>>;
-  setMediaNodes: Dispatch<SetStateAction<Node[]>>;
-  setProductNodes: Dispatch<SetStateAction<Node[]>>;
-  setAssetNodes: Dispatch<SetStateAction<Node[]>>;
-  textNodesRef: RefObject<Node[]>;
-  mediaNodesRef: RefObject<Node[]>;
-  productNodesRef: RefObject<Node[]>;
-  assetNodesRef: RefObject<Node[]>;
   historyRef: RefObject<CanvasHistoryApi | null>;
   pendingDeleteGroup: { id: string; count: number } | null;
   setPendingDeleteGroup: Dispatch<SetStateAction<{ id: string; count: number } | null>>;
@@ -35,16 +29,9 @@ export interface CanvasGroupActionsHost {
 
 export function useCanvasGroupActions(host: CanvasGroupActionsHost) {
   const {
+    graph,
     setGroups,
     groupsRef,
-    setTextNodes,
-    setMediaNodes,
-    setProductNodes,
-    setAssetNodes,
-    textNodesRef,
-    mediaNodesRef,
-    productNodesRef,
-    assetNodesRef,
     historyRef,
     pendingDeleteGroup,
     setPendingDeleteGroup,
@@ -66,12 +53,7 @@ export function useCanvasGroupActions(host: CanvasGroupActionsHost) {
     const box = groupFrameBBox(members);
     if (!box) return;
     const memberIds = new Set(members.map((n) => n.id));
-    const all = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
+    const all = graph.allNodes();
     const group: CanvasGroup = { id: newNodeId('group'), box, excludedIds: [] };
     const before = groupsRef.current;
     const after = isolateNewGroupMembers(before, all, group, memberIds);
@@ -81,12 +63,7 @@ export function useCanvasGroupActions(host: CanvasGroupActionsHost) {
 
   const handleGroupFrameDragStop = useCallback((res: GroupFrameDragResult) => {
     const posNew = new Map(res.nodeNew.map((p) => [p.id, { x: p.x, y: p.y }]));
-    const nodesAfter = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ].map((n) => {
+    const nodesAfter = graph.allNodes().map((n) => {
       const p = posNew.get(n.id);
       return p ? { ...n, position: { x: p.x, y: p.y } } : n;
     });
@@ -106,12 +83,9 @@ export function useCanvasGroupActions(host: CanvasGroupActionsHost) {
         const p = posNew.get(n.id);
         return p ? { ...n, position: { x: p.x, y: p.y } } : n;
       });
-    setTextNodes(applyPos);
-    setMediaNodes(applyPos);
-    setProductNodes(applyPos);
-    setAssetNodes(applyPos);
+    graph.setAll(applyPos);
     historyRef.current?.pushGroupMove(recorded);
-  }, [setTextNodes, setMediaNodes, setProductNodes, setAssetNodes, setGroups]);
+  }, [graph, setGroups]);
 
   const handleBringGroupToFront = (groupId: string) => {
     setGroups((prev) => bringGroupToFront(prev, groupId));
@@ -127,12 +101,7 @@ export function useCanvasGroupActions(host: CanvasGroupActionsHost) {
   const handleDeleteGroup = (groupId: string) => {
     const group = groupsRef.current.find((g) => g.id === groupId);
     if (!group) return;
-    const all = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
+    const all = graph.allNodes();
     const count = exclusiveMembersInGroup(all, group, groupsRef.current).length;
     setPendingDeleteGroup({ id: groupId, count });
   };
@@ -143,12 +112,7 @@ export function useCanvasGroupActions(host: CanvasGroupActionsHost) {
     if (!pending) return;
     const group = groupsRef.current.find((g) => g.id === pending.id);
     if (!group) return;
-    const all = [
-      ...textNodesRef.current,
-      ...mediaNodesRef.current,
-      ...productNodesRef.current,
-      ...assetNodesRef.current,
-    ];
+    const all = graph.allNodes();
     const inside = exclusiveMembersInGroup(all, group, groupsRef.current).map((n) => n.id);
     if (inside.length > 0) removeCanvasNodes(inside);
     setGroups((prev) => prev.filter((g) => g.id !== pending.id));

@@ -114,6 +114,7 @@ import { generationRecoveryPageOptions, putCanvasDocWithRecovery, type CanvasRec
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHydration } from './hooks/useCanvasHydration';
 import { patchCanvasNodeActions } from './hooks/patchCanvasNodeActions';
+import { useCanvasGraph } from './hooks/useCanvasGraph';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
 import { useCanvasPickers } from './hooks/useCanvasPickers';
@@ -332,11 +333,6 @@ export default function CanvasPage() {
     isGeneratingNode: (id) => isGeneratingNode(id),
     showToast: (type, msg) => showToast(type, msg),
   });
-  const findCanvasNode = (id: string): Node | undefined =>
-    mediaNodesRef.current.find((n) => n.id === id)
-    ?? textNodesRef.current.find((n) => n.id === id)
-    ?? productNodesRef.current.find((n) => n.id === id)
-    ?? assetNodesRef.current.find((n) => n.id === id);
   const {
     connectPair,
     draftModeOfNode,
@@ -393,6 +389,17 @@ export default function CanvasPage() {
   productNodesRef.current = productNodes;
   const assetNodesRef = useRef<Node[]>([]);
   assetNodesRef.current = assetNodes;
+  const graph = useCanvasGraph({
+    textNodesRef,
+    mediaNodesRef,
+    productNodesRef,
+    assetNodesRef,
+    setTextNodes,
+    setMediaNodes,
+    setProductNodes,
+    setAssetNodes,
+  });
+  const findCanvasNode = useCallback((id: string): Node | undefined => graph.findNode(id), [graph]);
   const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);
   const [imageModels, setImageModels] = useState<GenerationModel[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
@@ -546,10 +553,7 @@ export default function CanvasPage() {
   }, []);
   useOverlayWheelPassthrough(canvasWrapperRef, { ignoreInsideReactFlow: true });
   const { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition } = useCanvasSpawn({
-    textNodesRef,
-    mediaNodesRef,
-    productNodesRef,
-    assetNodesRef,
+    graph,
   });
   const followTargetId = showImageDialog && imageDraftId
     ? imageDraftId
@@ -644,18 +648,15 @@ export default function CanvasPage() {
   const pendingNodeIdsRef = useRef<Set<string>>(new Set());
   const rollbackPendingNodes = useCallback((ids: Set<string>) => {
     if (ids.size === 0) return;
-    [...mediaNodesRef.current, ...textNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current].forEach((n) => {
+    graph.allNodes().forEach((n) => {
       if (ids.has(n.id)) {
         const src = n.data?.src as string | undefined;
         if (src?.startsWith('blob:')) URL.revokeObjectURL(src);
       }
     });
-    setTextNodes((prev) => prev.filter((n) => !ids.has(n.id)));
-    setMediaNodes((prev) => prev.filter((n) => !ids.has(n.id)));
-    setProductNodes((prev) => prev.filter((n) => !ids.has(n.id)));
-    setAssetNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    graph.setAll((prev) => prev.filter((n) => !ids.has(n.id)));
     ids.forEach((id) => pendingNodeIdsRef.current.delete(id));
-  }, []);
+  }, [graph]);
   const updateUser = useAuthStore((s) => s.updateUser);
   const setUsage = useAuthStore((s) => s.setUsage);
   const productSeq = useRef(0);
@@ -849,7 +850,7 @@ export default function CanvasPage() {
       if (applyingRef.current || savePromiseRef.current) return;
       if (hydratedProjectRef.current === null) return;
       if (textNodesRef.current.some(node => draftErrorsRef.current.has(node.id))) return;
-      const contentNodes = [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes];
+      const contentNodes = graph.allNodes();
       const nodes = [...contentNodes, ...groups.map((g) => groupToNode(g))];
       const sig = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edges);
       if (sig === lastSavedRef.current) return;
@@ -1175,17 +1176,10 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyGenPanelOpen, editSessionActive, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
   const { handleNodeDragStop } = useCanvasNodeDragHandlers({
-    mediaNodesRef,
-    textNodesRef,
-    productNodesRef,
-    assetNodesRef,
+    graph,
     groupsRef,
     historyRef,
     handleCanvasNodeClick,
-    setTextNodes,
-    setMediaNodes,
-    setProductNodes,
-    setAssetNodes,
     setGroups,
   });
   actionsRef.current = patchCanvasNodeActions(actionsRef.current, { openImageDialog: () => generationDock.open('image', {}) });
@@ -1301,19 +1295,10 @@ export default function CanvasPage() {
   });
   useEffect(() => { generationDock.reconcile(); }, [generationDock, audioDraftId, audioSeed, mediaNodes]);
   useEffect(() => {
-    setTextNodes((prev) =>
+    graph.setAll((prev) =>
       prev.map((n) => ({ ...n, data: { ...n.data, toolMode } }))
     );
-    setMediaNodes((prev) =>
-      prev.map((n) => ({ ...n, data: { ...n.data, toolMode } }))
-    );
-    setProductNodes((prev) =>
-      prev.map((n) => ({ ...n, data: { ...n.data, toolMode } }))
-    );
-    setAssetNodes((prev) =>
-      prev.map((n) => ({ ...n, data: { ...n.data, toolMode } }))
-    );
-  }, [toolMode]);
+  }, [toolMode, graph]);
   const videoModelsRef = useRef<GenerationModel[]>([]);
   videoModelsRef.current = videoModels;
   const imageModelsRef = useRef<GenerationModel[]>([]);
@@ -1466,9 +1451,7 @@ export default function CanvasPage() {
     };
   }, []);
   const patchMediaNode = (nodeId: string, patch: Record<string, unknown>) => {
-    setMediaNodes((prev) =>
-      prev.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n)),
-    );
+    graph.patchNode(nodeId, patch);
   };
   const handleMediaDims = (nodeId: string, dims: MediaDims) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -1572,8 +1555,7 @@ export default function CanvasPage() {
     duplicate: handleDuplicateNode,
     addToChat: handleAddToChatNode,
     pasteAtNode: (id) => {
-      const node =
-        textNodesRef.current.find((n) => n.id === id) ?? mediaNodesRef.current.find((n) => n.id === id);
+      const node = graph.findNode(id);
       const position = node
         ? { x: node.position.x + 40, y: node.position.y + 40 }
         : spawnPosition();
@@ -1789,16 +1771,9 @@ export default function CanvasPage() {
     handleDeleteGroup,
     confirmDeleteGroup,
   } = useCanvasGroupActions({
+    graph,
     setGroups,
     groupsRef,
-    setTextNodes,
-    setMediaNodes,
-    setProductNodes,
-    setAssetNodes,
-    textNodesRef,
-    mediaNodesRef,
-    productNodesRef,
-    assetNodesRef,
     historyRef,
     pendingDeleteGroup,
     setPendingDeleteGroup,
@@ -1886,7 +1861,7 @@ export default function CanvasPage() {
     const height = (target as Node & { measured?: { height?: number } }).measured?.height ?? 270;
     setFocusViewport({ x: window.innerWidth / 2 - (target.position.x + width / 2), y: window.innerHeight / 2 - (target.position.y + height / 2), zoom: 1 });
     setSelectRequest({ id: nodeId, ts: Date.now() });
-  }, []);
+  }, [findCanvasNode]);
   const {
     removeRefEdges,
     handleAddAudioCanvasRef,
