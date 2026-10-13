@@ -333,7 +333,6 @@ export default function CanvasPage() {
     isGeneratingNode: (id) => isGeneratingNode(id),
     showToast: (type, msg) => showToast(type, msg),
   });
-  const findCanvasNode = (id: string): Node | undefined => graph.findNode(id);
   const {
     connectPair,
     draftModeOfNode,
@@ -400,6 +399,7 @@ export default function CanvasPage() {
     setProductNodes,
     setAssetNodes,
   });
+  const findCanvasNode = useCallback((id: string): Node | undefined => graph.findNode(id), [graph]);
   const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);
   const [imageModels, setImageModels] = useState<GenerationModel[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
@@ -1861,7 +1861,7 @@ export default function CanvasPage() {
     const height = (target as Node & { measured?: { height?: number } }).measured?.height ?? 270;
     setFocusViewport({ x: window.innerWidth / 2 - (target.position.x + width / 2), y: window.innerHeight / 2 - (target.position.y + height / 2), zoom: 1 });
     setSelectRequest({ id: nodeId, ts: Date.now() });
-  }, []);
+  }, [findCanvasNode]);
   const {
     removeRefEdges,
     handleAddAudioCanvasRef,
