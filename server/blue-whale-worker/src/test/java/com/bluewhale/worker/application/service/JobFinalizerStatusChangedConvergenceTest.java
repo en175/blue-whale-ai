@@ -48,14 +48,14 @@ class JobFinalizerStatusChangedConvergenceTest {
     }
 
     @Test
-    @DisplayName("helper 内部同时发两条：project_events 的 status_changed + billing 事件")
+    @DisplayName("helper 内部同时落两条：project_events 的 status_changed + billing 终态事件进发件箱")
     void helper同时发两条() throws IOException {
         List<String> lines = readSource();
         int[] helper = helperRange(lines);
         String body = String.join("\n", lines.subList(helper[0], helper[1] + 1));
 
         assertThat(body).contains("generation_job.status_changed");
-        assertThat(body).contains("settlementPublisher.publishTerminal(");
+        assertThat(body).contains("outbox.enqueue(");
     }
 
     @Test
