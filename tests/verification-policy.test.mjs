@@ -217,7 +217,7 @@ test("no path in a mixed real-world change set falls through unclassified", asyn
     "web/package-lock.json",
     "web/.env.test",
     "web/src/api/agent-rest-routes.v1.json",
-    "web/scripts/check-agent-routes.mjs",
+    "scripts/check-agent-routes.mjs",
     "backend/libs/core/new-api-billing-ops.ts",
   ];
   for (const file of files) {
@@ -488,7 +488,7 @@ test("classifies web tooling scripts as web", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
-    classifyChanges(["web/scripts/check-agent-routes.mjs"], { stage: "pr" }),
+    classifyChanges(["web/scripts/some-tool.mjs"], { stage: "pr" }),
     {
       tier: "scoped",
       areas: ["web"],
@@ -497,7 +497,7 @@ test("classifies web tooling scripts as web", async () => {
   );
 
   assert.deepEqual(
-    classifyChanges(["web/scripts/check-agent-routes.mjs", "web/src/api/agentRoutes.ts"], {
+    classifyChanges(["web/scripts/some-tool.mjs", "web/src/api/agentRoutes.ts"], {
       stage: "pr",
     }),
     {

@@ -15,7 +15,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "verify:bugfix": "npm run lint && npm test && npm run build:release",
-    "check:agent-routes": "node scripts/check-agent-routes.mjs"
+    "check:agent-routes": "node ../scripts/check-agent-routes.mjs"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.20",
