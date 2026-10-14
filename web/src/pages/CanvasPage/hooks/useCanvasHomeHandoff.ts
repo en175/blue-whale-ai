@@ -1,7 +1,7 @@
-import type { RefObject } from 'react';
+import { useEffect, type RefObject } from 'react';
 import type { CanvasDoc } from '@/api/canvas';
 import { linkAssetToProject, type UploadCompleteData } from '@/api/assets';
-import type { GenHandoff } from '@/utils/gen-handoff';
+import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import type { VideoGenSeedParams } from '../components/BottomDialog';
 import { isFrameMode } from '@/lib/video-modes';
 import type { VideoRefRole } from '../videoMediaRefs';
@@ -16,7 +16,8 @@ export interface CanvasHomeHandoffHost {
   pendingGenRef: RefObject<GenHandoff | null>;
   pendingVideoDraftSeedRef: RefObject<VideoGenSeedParams | null>;
   navigate: (path: string, options: { replace: boolean; state: null }) => void;
-  location: { pathname: string; search: string };
+  location: { pathname: string; search: string; state: unknown };
+  openImageFromHandoff: (params: { modelId?: string; ratio?: string; size?: string }) => void;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
   uploadFileToAsset: (file: File, type: 'image' | 'video' | 'audio') => Promise<UploadCompleteData | null>;
   createVideoDraftCard: (
@@ -42,6 +43,7 @@ export function useCanvasHomeHandoff(host: CanvasHomeHandoffHost): CanvasHomeHan
     pendingVideoDraftSeedRef,
     navigate,
     location,
+    openImageFromHandoff,
     showToast,
     uploadFileToAsset,
     createVideoDraftCard,
@@ -123,6 +125,42 @@ export function useCanvasHomeHandoff(host: CanvasHomeHandoffHost): CanvasHomeHan
     }, undefined, { recordHistory: true });
     openVideoDraftDialog(nodeId, seed);
   };
+
+  useEffect(() => {
+    const state = location.state as { genKind?: 'video' | 'image' } | null;
+    if (!state?.genKind) return;
+    const handoff = takeGenHandoff();
+    if (!handoff) {
+      navigate(location.pathname + location.search, { replace: true, state: null });
+      return;
+    }
+    if (handoff.kind === 'video') {
+      pendingVideoDraftSeedRef.current = {
+        modelId: handoff.modelId,
+        aspectRatio: handoff.aspectRatio,
+        resolution: handoff.resolution,
+        duration: handoff.duration,
+        mode: handoff.mode,
+        generateAudio: handoff.generateAudio,
+      };
+    } else {
+      openImageFromHandoff({
+        modelId: handoff.modelId,
+        ratio: handoff.ratio,
+        size: handoff.size,
+      });
+    }
+    pendingGenRef.current = handoff;
+    firePendingGen();
+    firePendingVideoDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    firePendingGen();
+    firePendingVideoDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, doc]);
 
   return { firePendingGen, firePendingVideoDraft };
 }
