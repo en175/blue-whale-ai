@@ -155,6 +155,7 @@ export function useCanvasConnectHandlers(host: CanvasConnectHandlersHost): Canva
     const fromId = state?.fromNode?.id ?? connectingSourceRef.current;
     connectingSourceRef.current = null;
     toolSessions.wireStart(null);
+    if (state?.isValid) return;
     const from = fromId ? findCanvasNode(fromId) ?? state?.fromNode ?? undefined : undefined;
     if (!from) return;
     const point = 'changedTouches' in event ? event.changedTouches[0] : event;
@@ -168,7 +169,6 @@ export function useCanvasConnectHandlers(host: CanvasConnectHandlersHost): Canva
       return;
     }
     if (!isConnectableSource(from)) return;
-    if (state?.isValid) return;
     openConnectTypeMenu([from.id], point.clientX, point.clientY);
   };
   const handleConnectGroupDrop = (
