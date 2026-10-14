@@ -30,11 +30,11 @@ Run commands from `web/`. Run `npm ci` before first use or after dependency chan
 A fresh task worktree also needs backend dependencies before Vite or Vitest will resolve: `web/vite.config.ts` aliases `@lib/*` to `../backend/libs` source, whose contracts import `zod`. Run `pnpm install` at the repository root (backend is the pnpm workspace member). The symptom when it is missing: Vite fails to resolve `zod` imported from `backend/libs/contracts`. Do not hand-install individual packages into `backend/` with `npm install --no-save`; that bypasses the root lockfile and leaves a state the next agent cannot reproduce.
 
 1. `npm run verify:bugfix` runs lint, the complete Vitest suite, and `build:release` in sequence. Stop delivery on any failure.
-2. Do not run `npm run smoke:bugfix`, install Chromium, invoke Playwright, or collect browser screenshots/evidence. These all use automated browser execution and are intentionally outside this workflow.
+2. Do not install Chromium, invoke Playwright or other browser automation, or collect browser screenshots/evidence. Automated browser execution is intentionally outside this workflow; browser regression is the human manual `dev:test` step in section 3.
 
 ## 3. Human regression
 
-Only `npm run dev:test` from `web/`. Do not start backend. Do not use `dev` / `release` / preview / smoke `dist/`. Fixture smoke does not skip this step.
+Only `npm run dev:test` from `web/`. Do not start backend. Do not use `dev` / `release` / preview `dist/`.
 
 After `verify:bugfix` passes:
 

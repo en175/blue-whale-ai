@@ -484,31 +484,6 @@ test("rejects unknown executable paths instead of escalating to full", async () 
   );
 });
 
-test("classifies web e2e specs and fixtures as web", async () => {
-  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
-
-  const expected = {
-    tier: "scoped",
-    areas: ["web"],
-    reasons: ["known source paths changed"],
-  };
-  assert.deepEqual(
-    classifyChanges(["web/e2e/media-node-layout.e2e.ts", "web/e2e/fixtures/media-node-layout.json"]),
-    expected,
-  );
-  assert.deepEqual(
-    classifyChanges(["web/e2e/media-node-layout.e2e.ts"], { stage: "pr" }),
-    expected,
-  );
-
-  assert.deepEqual(
-    classifyChanges(["web/e2e/media-node-layout.e2e.ts", "web/src/pages/CanvasPage/index.tsx"], {
-      stage: "pr",
-    }),
-    expected,
-  );
-});
-
 test("classifies web tooling scripts as web", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
