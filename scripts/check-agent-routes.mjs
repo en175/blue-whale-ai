@@ -10,7 +10,7 @@ if (!base) {
 }
 
 const local = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/api/agent-rest-routes.v1.json'), 'utf8'),
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../web/src/api/agent-rest-routes.v1.json'), 'utf8'),
 );
 
 const routesUrl = new URL(`${base.replace(/\/+$/, '')}/v1/routes`);
