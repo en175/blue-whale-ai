@@ -11,7 +11,7 @@ import {
   titleForPath,
 } from './site';
 
-const webRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
+const webRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 function attr(html: string, name: string): string | undefined {
   return html.match(new RegExp(`${name}="([^"]*)"`))?.[1];
