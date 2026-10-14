@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { selectPlayableHeroSlides, uploadHomepageHeroFile, type HomepageHeroPublic } from './homepageHeroes';
-import { putToPresignedUrl } from './assets';
+import { putToPresignedUrl } from '../../api/assets';
 import { http } from './http';
 
-vi.mock('./assets', () => ({
+vi.mock('../../api/assets', () => ({
   putToPresignedUrl: vi.fn(),
 }));
 
