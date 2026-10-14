@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { restorePromptDoc, type StoredPromptDoc, type PromptDoc } from '@/lib/prompt-doc';
-import { composedPromptLimitError } from '@/lib/prompt-max-length';
+import { restorePromptDoc, type StoredPromptDoc, type PromptDoc } from '@/utils/prompt-doc';
+import { composedPromptLimitError } from '@/utils/prompt-max-length';
 import type { UploadedFile } from './components/ImageDialog';
 import { composeImageSendPrompt } from './components/ImageDialog/composeImageSendPrompt';
 import type { GenerationRefItem } from '@/api/jobs';

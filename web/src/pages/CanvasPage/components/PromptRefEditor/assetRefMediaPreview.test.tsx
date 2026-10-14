@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PromptRefEditor from './index';
 import ReplaceRefMenu from './ReplaceRefMenu';
 import type { AssetRefMeta } from './AssetRefNode';
-import type { PromptDoc } from '@/lib/prompt-doc';
+import type { PromptDoc } from '@/utils/prompt-doc';
 import chipStyles from '../mediaChip.module.css';
 
 vi.mock('@floating-ui/react', () => ({

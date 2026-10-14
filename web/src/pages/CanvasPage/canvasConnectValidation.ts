@@ -12,7 +12,7 @@ import {
 } from './videoMediaRefs';
 import { videoRefCapsOfModel } from './modelCaps';
 import { draftVideoModeOf, videoModeAfterRefAdd } from './videoModes';
-import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
+import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/utils/model-reference-limits';
 import {
   audioRefMediaTypeOf,
   audioRefSourceError,

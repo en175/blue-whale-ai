@@ -31,7 +31,7 @@ import { isMultiNodeSelection } from '../../useSoloNodeSelected';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
-import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
+import { isTaskTypeParamConstraintCode } from '@/utils/video-reference-hints';
 import styles from './index.module.css';
 
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;

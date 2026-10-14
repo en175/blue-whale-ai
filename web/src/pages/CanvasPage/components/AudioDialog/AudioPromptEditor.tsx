@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { flattenPromptDocWith, type PromptDoc, type PromptRefKey } from '@/lib/prompt-doc';
+import { flattenPromptDocWith, type PromptDoc, type PromptRefKey } from '@/utils/prompt-doc';
 import PromptRefEditor, { type PromptRefEditorHandle, type MentionState } from '../PromptRefEditor';
 import type { AssetRefMeta } from '../PromptRefEditor/AssetRefNode';
 import AtMentionMenu from '../AtMentionMenu';

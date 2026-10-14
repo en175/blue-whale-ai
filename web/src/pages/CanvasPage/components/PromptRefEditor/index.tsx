@@ -30,7 +30,7 @@ import {
   type LexicalNode,
   type NodeKey,
 } from 'lexical';
-import { reconcilePromptDocWith, type PromptDoc, type PromptRefKey } from '@/lib/prompt-doc';
+import { reconcilePromptDocWith, type PromptDoc, type PromptRefKey } from '@/utils/prompt-doc';
 import { $createAssetRefNode, $isAssetRefNode, AssetRefNode, PromptRefContext, type AssetRefMeta } from './AssetRefNode';
 import { $applyReconciledRefs, $buildFromPromptDoc, $readPromptDoc, $restoreMentionSelection, matchMentionQuery } from './promptRefDoc';
 import styles from './index.module.css';

@@ -9,7 +9,7 @@ import {
   projectKeys,
   renameProject,
 } from '@/api/projects';
-import { defaultProjectName } from '@/lib/projectName';
+import { defaultProjectName } from '@/utils/projectName';
 import type { CanvasProject } from '../components/ProjectSelector';
 import { shouldReturnToProjectsAfterDelete } from '../canvasQuery';
 

@@ -17,7 +17,7 @@ import {
   type ProjectRecord,
 } from '@/api/projects';
 import { isApiError } from '@/api/http';
-import { defaultProjectName } from '@/lib/projectName';
+import { defaultProjectName } from '@/utils/projectName';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 

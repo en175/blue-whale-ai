@@ -17,7 +17,7 @@ import {
   type MaterialAssetType,
 } from '@/api/material';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
-import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/utils/video-reference-compliance';
 import AssetMasonry from '@/pages/Assets/components/AssetMasonry';
 import CharacterLibrary from '@/pages/Assets/components/CharacterLibrary';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';

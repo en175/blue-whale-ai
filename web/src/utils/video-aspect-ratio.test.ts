@@ -53,7 +53,7 @@ describe('IKJ4W6 显示映射消费点', () => {
 
   it.each(consumers)('%s 经 videoRatioLabel 渲染，并默认走 pickDefaultVideoRatio', (_name, rel) => {
     const src = readSrc(rel);
-    expect(src).toMatch(/import \{[^}]*videoRatioLabel[^}]*\} from '@\/lib\/video-aspect-ratio'/);
+    expect(src).toMatch(/import \{[^}]*videoRatioLabel[^}]*\} from '@\/utils\/video-aspect-ratio'/);
     expect((src.match(/videoRatioLabel\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(src).toMatch(/pickDefaultVideoRatio\(/);
   });

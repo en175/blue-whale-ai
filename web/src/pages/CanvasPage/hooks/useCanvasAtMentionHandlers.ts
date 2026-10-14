@@ -1,5 +1,5 @@
 import type { Node } from '@xyflow/react';
-import { isFrameMode, normalizeVideoMode, frameSlotCountOf, type VideoMode } from '@/lib/video-modes';
+import { isFrameMode, normalizeVideoMode, frameSlotCountOf, type VideoMode } from '@/utils/video-modes';
 import { videoRefSourceError, type VideoMediaRef, type VideoRefRole } from '../videoMediaRefs';
 import { PANEL_REF_MEDIA_TYPES } from '../refSourceTypes';
 import type { AtMentionItem } from '../atMention';

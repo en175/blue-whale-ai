@@ -15,7 +15,7 @@ import {
   PROMPT_DOC_VERSION,
   type PromptDoc,
   type PromptDocSegment,
-} from '@/lib/prompt-doc';
+} from '@/utils/prompt-doc';
 import { $createAssetRefNode, $isAssetRefNode, AssetRefNode } from './AssetRefNode';
 
 const BLOCK_SEPARATOR = '\n\n';

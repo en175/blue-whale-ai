@@ -5,7 +5,7 @@ import {
   lockedDurationOf,
   lockedRatioOf,
   normalizeVideoMode,
-} from '@/lib/video-modes';
+} from '@/utils/video-modes';
 import {
   defaultVideoModeFor,
   enabledVideoModes,
@@ -20,7 +20,7 @@ import {
 import {
   EDIT_MODE_VIDEO_REFERENCE_MAX,
   videoReferenceMaxForMode,
-} from '@/lib/model-reference-limits';
+} from '@/utils/model-reference-limits';
 import type { VideoMediaRef, VideoMediaRefs } from './videoMediaRefs';
 
 const ref = (

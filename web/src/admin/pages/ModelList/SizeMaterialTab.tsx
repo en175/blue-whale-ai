@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react';
-import type { KeyValueRow } from '../../lib/billing-catalog/catalogDraft';
+import type { KeyValueRow } from '../../utils/billing-catalog/catalogDraft';
 import {
   GPT_PROVIDER_SIZES,
   TASK_TYPE_KEYS,

@@ -11,8 +11,8 @@ import {
   type ImageJobParameters,
   type VideoJobParameters,
 } from '@/api/jobs';
-import { flattenPromptDocForSend, type PromptDoc } from '@/lib/prompt-doc';
-import { normalizeVideoMode, type VideoMode } from '@/lib/video-modes';
+import { flattenPromptDocForSend, type PromptDoc } from '@/utils/prompt-doc';
+import { normalizeVideoMode, type VideoMode } from '@/utils/video-modes';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/utils/creditsGate';
 import { composeImageSendPrompt } from '../components/ImageDialog/composeImageSendPrompt';

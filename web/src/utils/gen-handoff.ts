@@ -1,4 +1,4 @@
-import type { VideoMode } from '@/lib/video-modes';
+import type { VideoMode } from '@/utils/video-modes';
 
 
 

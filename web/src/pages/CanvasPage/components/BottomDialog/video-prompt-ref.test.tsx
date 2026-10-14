@@ -7,7 +7,7 @@ import { $getSelection, $isRangeSelection } from 'lexical';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BottomDialog from './index';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
-import type { PromptDoc } from '@/lib/prompt-doc';
+import type { PromptDoc } from '@/utils/prompt-doc';
 import { collapseCaretAt, promptRefCaretOffset, promptRefEditorInstance, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>

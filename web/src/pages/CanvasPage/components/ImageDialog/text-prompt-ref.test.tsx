@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment } from './index';
 import { composeImageSendPrompt } from './composeImageSendPrompt';
-import type { PromptDoc } from '@/lib/prompt-doc';
+import type { PromptDoc } from '@/utils/prompt-doc';
 import { readPromptRefText, typePromptRefRaw } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>

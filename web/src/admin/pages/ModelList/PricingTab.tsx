@@ -9,8 +9,8 @@ import {
   type DimPriceRow,
   type KeyValueRow,
   type RuleForm,
-} from '../../lib/billing-catalog/catalogDraft';
-import { filledPriceRows, planRows } from '../../lib/billing-catalog/rowPlan';
+} from '../../utils/billing-catalog/catalogDraft';
+import { filledPriceRows, planRows } from '../../utils/billing-catalog/rowPlan';
 import {
   configuredSizePixels,
   defaultAxesForBaseUnit,
@@ -18,7 +18,7 @@ import {
   priceTableCandidates,
   sizeOfSpecKey,
   type ModelCapabilityView,
-} from '../../lib/billing-catalog/sizeCandidates';
+} from '../../utils/billing-catalog/sizeCandidates';
 import {
   Alert,
   Button,

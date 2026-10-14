@@ -3,7 +3,7 @@ import type { CanvasDoc } from '@/api/canvas';
 import { linkAssetToProject, type UploadCompleteData } from '@/api/assets';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import type { VideoGenSeedParams } from '../components/BottomDialog';
-import { isFrameMode } from '@/lib/video-modes';
+import { isFrameMode } from '@/utils/video-modes';
 import type { VideoRefRole } from '../videoMediaRefs';
 import { fetchUrlAsFile } from '../canvasPureNodeHelpers';
 import { buildImageJobReferences, buildVideoJobReferencesFromList } from '../videoJobReferences';

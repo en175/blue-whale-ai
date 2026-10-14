@@ -7,7 +7,7 @@ import {
   saveAdminRechargeCustomConfig,
 } from '@/api/adminRechargeCustomConfig';
 import { isApiError } from '@/api/http';
-import { customPriceFen, formatCredits, formatPriceYuan } from '@/lib/customRecharge';
+import { customPriceFen, formatCredits, formatPriceYuan } from '@/utils/customRecharge';
 import { TIER_PERMISSION_LABEL } from '../RechargePlans/plan';
 import {
   Alert,

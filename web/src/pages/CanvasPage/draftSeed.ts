@@ -1,4 +1,4 @@
-import type { PromptDoc } from '@/lib/prompt-doc';
+import type { PromptDoc } from '@/utils/prompt-doc';
 import type { VideoGenSeedParams } from './components/BottomDialog';
 import type { ImageGenSeedParams, ImageTextAttachment, UploadedFile } from './components/ImageDialog';
 import type { AudioRefItem } from './components/AudioDialog';

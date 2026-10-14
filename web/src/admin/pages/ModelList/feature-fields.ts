@@ -5,7 +5,7 @@ import {
   readFeature,
   type ModelType,
 } from './model-form';
-import type { KeyValueRow } from '../../lib/billing-catalog/catalogDraft';
+import type { KeyValueRow } from '../../utils/billing-catalog/catalogDraft';
 
 export const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }> = {
   reference_image: { label: '参考图 reference_image', types: ['image', 'video'] },

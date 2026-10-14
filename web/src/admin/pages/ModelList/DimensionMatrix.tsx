@@ -1,5 +1,5 @@
 import { Trash2 } from 'lucide-react';
-import type { KeyValueRow } from '../../lib/billing-catalog/catalogDraft';
+import type { KeyValueRow } from '../../utils/billing-catalog/catalogDraft';
 import { Alert, Badge, Button, Input, Table } from '../../ui';
 import { buildDimensionGrid, setGridCell } from './dimensionGrid';
 import { FULL } from './formLayout';
