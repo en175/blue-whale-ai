@@ -6,7 +6,7 @@ import {
   formatPriceYuan,
   snapCredits,
   validateCredits,
-} from '@/lib/customRecharge';
+} from '@/utils/customRecharge';
 import styles from './index.module.css';
 
 export interface CustomRechargeProps {

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { isApiError } from '@/api/http';
-import { installChunkReloadGuard } from '@/lib/chunkReload';
+import { installChunkReloadGuard } from '@/utils/chunkReload';
 import '@/styles/global.css';
 
 installChunkReloadGuard();

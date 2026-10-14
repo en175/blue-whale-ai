@@ -1,4 +1,4 @@
-import { isPasswordSettable, PASSWORD_MIN_LENGTH } from '@/lib/password';
+import { isPasswordSettable, PASSWORD_MIN_LENGTH } from '@/utils/password';
 
 export { isPasswordSettable };
 

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment } from './index';
 import type { ImageMediaRef } from '../../mediaRefs';
 import type { AtMentionItem } from '../../atMention';
-import type { PromptDoc } from '@/lib/prompt-doc';
+import type { PromptDoc } from '@/utils/prompt-doc';
 import { AssetRefNode } from '../PromptRefEditor/AssetRefNode';
 import { collapseCaretAt, promptRefEditorInstance, promptRefCaretOffset, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 

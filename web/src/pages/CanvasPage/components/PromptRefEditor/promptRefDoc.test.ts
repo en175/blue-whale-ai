@@ -12,7 +12,7 @@ import {
   createEditor,
   type LexicalEditor,
 } from 'lexical';
-import type { PromptDoc } from '@/lib/prompt-doc';
+import type { PromptDoc } from '@/utils/prompt-doc';
 import { $createAssetRefNode, AssetRefNode } from './AssetRefNode';
 import { $buildFromPromptDoc, $readPromptDoc, matchMentionQuery } from './promptRefDoc';
 

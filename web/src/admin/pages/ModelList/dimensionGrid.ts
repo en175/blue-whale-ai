@@ -1,6 +1,6 @@
-import type { KeyValueRow } from '../../lib/billing-catalog/catalogDraft';
-import { normalizeKey } from '../../lib/billing-catalog/rowPlan';
-import { axisValueInKey } from '../../lib/billing-catalog/sizeCandidates';
+import type { KeyValueRow } from '../../utils/billing-catalog/catalogDraft';
+import { normalizeKey } from '../../utils/billing-catalog/rowPlan';
+import { axisValueInKey } from '../../utils/billing-catalog/sizeCandidates';
 
 export interface GridSize {
   id: string;

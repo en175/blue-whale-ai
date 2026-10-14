@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, SlidersHorizontal, X } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { promptMaxLengthOf } from '@/lib/prompt-max-length';
+import { promptMaxLengthOf } from '@/utils/prompt-max-length';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { ImageTextAttachment } from '../ImageDialog';

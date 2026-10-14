@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BottomDialog from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
-import type { PromptDoc } from '@/lib/prompt-doc';
+import type { PromptDoc } from '@/utils/prompt-doc';
 import { readPromptRefText, typePromptRefRaw } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>

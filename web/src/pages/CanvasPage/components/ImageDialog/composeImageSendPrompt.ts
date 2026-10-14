@@ -1,4 +1,4 @@
-import { promptCoveredByAttachmentParts, type PromptDoc } from '@/lib/prompt-doc';
+import { promptCoveredByAttachmentParts, type PromptDoc } from '@/utils/prompt-doc';
 import type { ImageTextAttachment } from './index';
 
 export function composeImageSendPrompt(

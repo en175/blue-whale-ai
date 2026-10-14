@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationModel } from '@/api/generation';
 import ChatBox from './index';
 import styles from './index.module.css';
-import { OMNI_REFERENCE_FOLLOW_HINT } from '@/lib/video-reference-hints';
+import { OMNI_REFERENCE_FOLLOW_HINT } from '@/utils/video-reference-hints';
 
 
 const { fetchGenerationModels, navigate, pickerOnSelect } = vi.hoisted(() => ({

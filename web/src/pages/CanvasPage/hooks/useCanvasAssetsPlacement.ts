@@ -6,7 +6,7 @@ import { refOverflowToast } from '@/utils/ref-overflow';
 import {
   VIDEO_REFERENCE_NOT_APPROVED_MESSAGE,
   isUnapprovedVideoMaterialStatus,
-} from '@/lib/video-reference-compliance';
+} from '@/utils/video-reference-compliance';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { AudioRefItem } from '../components/AudioDialog';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';

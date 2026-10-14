@@ -2,7 +2,7 @@ import {
   readCreditsPerYuan,
   readDiscountPolicy,
   type CatalogDocumentJson,
-} from '../../lib/billing-catalog/catalogDraft';
+} from '../../utils/billing-catalog/catalogDraft';
 
 export const MIN_CREDITS_PER_YUAN = 1;
 export const MAX_CREDITS_PER_YUAN = 100_000;

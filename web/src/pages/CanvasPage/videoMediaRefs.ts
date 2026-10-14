@@ -1,6 +1,6 @@
 import type { Edge, Node } from '@xyflow/react';
-import { DEFAULT_VIDEO_REFERENCE_MAX, videoReferenceMaxForMode } from '@/lib/model-reference-limits';
-import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/lib/video-reference-compliance';
+import { DEFAULT_VIDEO_REFERENCE_MAX, videoReferenceMaxForMode } from '@/utils/model-reference-limits';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/utils/video-reference-compliance';
 import { baseSourceError, cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 
 export type VideoRefRole = 'reference' | 'first' | 'last';

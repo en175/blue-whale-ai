@@ -3,7 +3,7 @@ import type { Node } from '@xyflow/react';
 import { UPLOAD_SIZE_LIMIT } from '@/api/assets';
 import type { SnapshotAsset } from '@/api/projects';
 import { uploadAssetFile } from '@/utils/upload';
-import { compliancePatchFromMaterialStatus } from '@/lib/video-reference-compliance';
+import { compliancePatchFromMaterialStatus } from '@/utils/video-reference-compliance';
 import { isFileRejected } from '@/utils/fileSignature';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
 import { copyImageToClipboard, readCanvasClipboard } from '../clipboardPaste';

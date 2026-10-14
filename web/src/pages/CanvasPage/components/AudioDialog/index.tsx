@@ -2,14 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { checkAddAudioRef, audioRefItemMediaTypeOf } from '../../audioMediaRefs';
-import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOfForAudio } from '@/lib/model-reference-limits';
+import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOfForAudio } from '@/utils/model-reference-limits';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { AtMentionItem } from '../../atMention';
-import { docHasAnyRef, docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
+import { docHasAnyRef, docHasInvalidRef, type PromptDoc } from '@/utils/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEditor';
 import RefThumbnail, { INSERT_REF_AT_SELECTION_TITLE } from '../RefThumbnail';
 import AttachmentActionBar from '../AttachmentActionBar';
@@ -21,7 +21,7 @@ import {
   isPromptOverLimit,
   promptCharCountLabel,
   promptMaxLengthOf,
-} from '@/lib/prompt-max-length';
+} from '@/utils/prompt-max-length';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import styles from './index.module.css';
 type RefKind = 'audio' | 'image';

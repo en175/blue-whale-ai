@@ -28,23 +28,23 @@ import {
   lockedDurationOf,
   lockedRatioOf,
   type VideoMode,
-} from '@/lib/video-modes';
+} from '@/utils/video-modes';
 import { type AssetRecord } from '@/api/assets';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { aspectRatioOptions, hasAspectRatio, pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
-import { pickDefaultVideoRatio, videoRatioLabel } from '@/lib/video-aspect-ratio';
+import { aspectRatioOptions, hasAspectRatio, pickRatioForSize, ratiosForSelectedSize } from '@/utils/image-size-ratios';
+import { pickDefaultVideoRatio, videoRatioLabel } from '@/utils/video-aspect-ratio';
 import { type SkillRecord } from '@/api/skills';
 import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
-import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supportsVideoReferenceOf, UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/lib/model-reference-limits';
-import { promptCharCountLabel, promptMaxLengthOf } from '@/lib/prompt-max-length';
-import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
-import { OMNI_REFERENCE_FOLLOW_HINT } from '@/lib/video-reference-hints';
+import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supportsVideoReferenceOf, UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/utils/model-reference-limits';
+import { promptCharCountLabel, promptMaxLengthOf } from '@/utils/prompt-max-length';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/utils/video-reference-compliance';
+import { OMNI_REFERENCE_FOLLOW_HINT } from '@/utils/video-reference-hints';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';

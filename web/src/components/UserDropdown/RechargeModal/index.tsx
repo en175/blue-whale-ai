@@ -16,7 +16,7 @@ import {
   type RechargeOrder,
   type RechargeTierCatalog,
 } from '@/api/recharge';
-import { customPriceFen } from '@/lib/customRecharge';
+import { customPriceFen } from '@/utils/customRecharge';
 import { useAuthStore } from '@/stores/auth';
 
 interface RechargeModalProps {

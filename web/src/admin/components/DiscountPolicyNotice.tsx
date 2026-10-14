@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { billingCatalogOptions } from '@/api/adminBillingCatalog';
 import { isApiError } from '@/api/http';
-import { parseCatalog, readDiscountPolicy } from '../lib/billing-catalog/catalogDraft';
+import { parseCatalog, readDiscountPolicy } from '../utils/billing-catalog/catalogDraft';
 import { describeFloor, describeStackMode, combineFactors, formatDiscount } from '../discountRules';
 import { Alert, Hint, MetaRow } from '../ui';
 

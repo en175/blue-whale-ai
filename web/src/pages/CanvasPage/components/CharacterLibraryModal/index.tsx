@@ -20,7 +20,7 @@ import {
 import { isApiError } from '@/api/http';
 import { toast } from 'sonner';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
-import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/lib/video-reference-compliance';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/utils/video-reference-compliance';
 import { resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 

@@ -15,7 +15,7 @@ import {
   serializeCatalog,
   siteCatalogDocument,
   type CatalogDocumentJson,
-} from '../../lib/billing-catalog/catalogDraft';
+} from '../../utils/billing-catalog/catalogDraft';
 import { combineFactors, describeFloor, describeStackMode, formatDiscount } from '../../discountRules';
 import {
   buildNote,

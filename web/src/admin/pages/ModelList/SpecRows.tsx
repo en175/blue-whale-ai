@@ -1,6 +1,6 @@
 import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
-import type { KeyValueRow } from '../../lib/billing-catalog/catalogDraft';
-import type { RowPlan } from '../../lib/billing-catalog/rowPlan';
+import type { KeyValueRow } from '../../utils/billing-catalog/catalogDraft';
+import type { RowPlan } from '../../utils/billing-catalog/rowPlan';
 import { Alert, Badge, Button, Input } from '../../ui';
 
 interface SpecRowsProps<T extends KeyValueRow> {

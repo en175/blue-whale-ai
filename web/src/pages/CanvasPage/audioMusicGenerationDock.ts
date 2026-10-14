@@ -1,17 +1,17 @@
 import type { ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import type { PromptDoc } from '@/lib/prompt-doc';
+import type { PromptDoc } from '@/utils/prompt-doc';
 import type { AudioRefItem } from './components/AudioDialog';
 import type { MusicGenOptions } from './components/MusicDialog';
 import { draftSeedEquals, type AudioDraftSeed } from './draftSeed';
-import { restorePromptDoc } from '@/lib/prompt-doc';
+import { restorePromptDoc } from '@/utils/prompt-doc';
 import { hasGenerationRecord } from './mediaReEdit';
 import type { MediaGenStatus } from './components/MediaNode';
 import { mergedAudioRefsWithTextIndex, audioTextIndexSendError } from './textIndexSync';
 import type { DockSelection } from './generationDockCoordinator';
 import { mediaDockSelectionVisibility, captureGenerationDockSubmission, holdGenerationDockSubmission, reportGenerationDockSubmissionError, type GenerationDockSubmissionHost } from './generationDockCoordinator';
 import { composeImageSendPrompt } from './components/ImageDialog/composeImageSendPrompt';
-import { composedPromptLimitError } from '@/lib/prompt-max-length';
+import { composedPromptLimitError } from '@/utils/prompt-max-length';
 import { audioRefItemMediaTypeOf } from './audioMediaRefs';
 
 export interface AudioDockEntry { nodeId?: string; intent?: 'manual' | 'selection' }

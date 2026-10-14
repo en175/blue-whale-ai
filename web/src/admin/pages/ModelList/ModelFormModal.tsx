@@ -46,9 +46,9 @@ import {
   type CatalogRuleView,
   type KeyValueRow,
   type RuleForm,
-} from '../../lib/billing-catalog/catalogDraft';
-import type { ModelCapabilityView } from '../../lib/billing-catalog/sizeCandidates';
-import { dimensionTableCandidates } from '../../lib/billing-catalog/sizeCandidates';
+} from '../../utils/billing-catalog/catalogDraft';
+import type { ModelCapabilityView } from '../../utils/billing-catalog/sizeCandidates';
+import { dimensionTableCandidates } from '../../utils/billing-catalog/sizeCandidates';
 import {
   DEFAULT_IMAGE_RATIOS,
   DEFAULT_IMAGE_SIZES,

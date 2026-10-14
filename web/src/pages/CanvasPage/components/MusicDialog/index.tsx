@@ -5,7 +5,7 @@ import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
 import type { AtMentionItem } from '../../atMention';
-import { docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
+import { docHasInvalidRef, type PromptDoc } from '@/utils/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from '../AudioDialog/AudioPromptEditor';
 import RefThumbnail from '../RefThumbnail';
 import { arrayMove, useRefStripDrag } from '../RefThumbnail/strip-dnd';

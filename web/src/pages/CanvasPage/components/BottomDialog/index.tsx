@@ -23,8 +23,8 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { pickDefaultVideoRatio, videoRatioLabel } from '@/lib/video-aspect-ratio';
-import { aspectRatioOptions, hasAspectRatio } from '@/lib/image-size-ratios';
+import { pickDefaultVideoRatio, videoRatioLabel } from '@/utils/video-aspect-ratio';
+import { aspectRatioOptions, hasAspectRatio } from '@/utils/image-size-ratios';
 import { generationQuoteOptions } from '@/api/generationQuote';
 import RatioIcon from '@/components/RatioIcon';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
@@ -39,7 +39,7 @@ import {
   type PromptDoc,
   type PromptRefKey,
   type StoredPromptDoc,
-} from '@/lib/prompt-doc';
+} from '@/utils/prompt-doc';
 import PromptRefEditor, {
   type MentionState,
   type PromptRefEditorHandle,
@@ -56,7 +56,7 @@ import {
   composedPromptLimitError,
   promptCharCountLabel,
   promptMaxLengthOf,
-} from '@/lib/prompt-max-length';
+} from '@/utils/prompt-max-length';
 import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
@@ -75,8 +75,8 @@ import {
   supportsAudioReferenceOf,
   supportsVideoReferenceOf,
   checkReferenceLimits,
-} from '@/lib/model-reference-limits';
-import { OMNI_REFERENCE_FOLLOW_HINT } from '@/lib/video-reference-hints';
+} from '@/utils/model-reference-limits';
+import { OMNI_REFERENCE_FOLLOW_HINT } from '@/utils/video-reference-hints';
 import AtMentionMenu from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
@@ -100,7 +100,7 @@ import {
   lockedRatioOf,
   normalizeVideoMode,
   type VideoMode,
-} from '@/lib/video-modes';
+} from '@/utils/video-modes';
 import styles from './index.module.css';
 
 
