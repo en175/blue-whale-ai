@@ -53,7 +53,7 @@ const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: Sh
 
 
 type CardKind = 'style' | 'character' | 'object' | 'environment';
-type CardFilter = 'all' | 'all-assets' | CardKind;
+export type CardFilter = 'all' | 'all-assets' | CardKind;
 const CARD_KINDS: CardKind[] = ['style', 'character', 'object', 'environment'];
 const CARD_KIND_LABEL: Record<CardKind, string> = {
   style: '风格',

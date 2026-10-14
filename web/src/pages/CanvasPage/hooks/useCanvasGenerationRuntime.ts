@@ -4,6 +4,8 @@ import { type GenerationRuntime, type GenerationRuntimeHost } from '../generatio
 
 export function useCanvasGenerationRuntime() {
   const locallyRemovedGenerationNodesRef = useRef<Set<string>>(new Set());
+  const pendingDeleteJobNodesRef = useRef<Set<string>>(new Set());
+  const recoverFrameInterpolationRef = useRef<(nodeId: string, savedJobId?: unknown) => void>(() => {});
   const settledExtractNodesRef = useRef<Set<string>>(new Set());
   const activeJobByNodeRef = useRef<Map<string, string>>(new Map());
   const generationRuntimeHostRef = useRef<GenerationRuntimeHost | null>(null);
@@ -26,6 +28,8 @@ export function useCanvasGenerationRuntime() {
   }, []);
   return {
     locallyRemovedGenerationNodesRef,
+    pendingDeleteJobNodesRef,
+    recoverFrameInterpolationRef,
     settledExtractNodesRef,
     activeJobByNodeRef,
     generationRuntimeHostRef,

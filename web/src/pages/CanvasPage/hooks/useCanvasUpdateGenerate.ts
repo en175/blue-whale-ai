@@ -18,6 +18,7 @@ import { lockedDurationOf, effectiveVideoParams, type VideoModeFeatures } from '
 import { videoRefConflict, type VideoMediaRefs } from '../videoMediaRefs';
 import { buildImageJobReferences, buildVideoJobReferences } from '../videoJobReferences';
 import type { ImageTextAttachment } from '../components/ImageDialog';
+import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
 import type { CanvasGenerationSubmissionHandles } from './useCanvasGenerationSubmission';
 
 export interface CanvasUpdateGenerateHost {
@@ -40,10 +41,13 @@ export interface CanvasUpdateGenerateHost {
   textAttachmentsOf: (nodeId: string) => ImageTextAttachment[];
   draftModelOf: (nodeId: string | null | undefined, kind: 'video' | 'image') => { features?: VideoModeFeatures | null } | undefined;
   videoRefUnsupportedByModel: (modelId: string, refs: VideoMediaRefs) => string | null;
+  patchMediaNode: (nodeId: string, patch: Record<string, unknown>) => void;
+  updateGenerateRef: RefObject<(nodeId: string) => void>;
 }
 
 export interface CanvasUpdateGenerateHandles {
   handleUpdateGenerate: (nodeId: string, opts?: { ratioOverride?: string }) => Promise<void>;
+  handleFixFollowVideo: (nodeId: string) => void;
 }
 
 export function useCanvasUpdateGenerate(host: CanvasUpdateGenerateHost): CanvasUpdateGenerateHandles {
@@ -67,6 +71,8 @@ export function useCanvasUpdateGenerate(host: CanvasUpdateGenerateHost): CanvasU
     textAttachmentsOf,
     draftModelOf,
     videoRefUnsupportedByModel,
+    patchMediaNode,
+    updateGenerateRef,
   } = host;
 
   const handleUpdateGenerate = async (nodeId: string, opts?: { ratioOverride?: string }) => {
@@ -291,5 +297,18 @@ export function useCanvasUpdateGenerate(host: CanvasUpdateGenerateHost): CanvasU
     }
   };
 
-  return { handleUpdateGenerate };
+  const handleFixFollowVideo = (nodeId: string) => {
+    const node = mediaNodesRef.current.find((item) => item.id === nodeId);
+    if (!node || node.type !== 'mediaNode') return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    if (data.genStatus !== 'failed' || data.mediaType !== 'video') return;
+    if (!isTaskTypeParamConstraintCode(data.errorCode as number | string | undefined)) return;
+    patchMediaNode(nodeId, { draftRatio: 'adaptive' });
+    void handleUpdateGenerate(nodeId, { ratioOverride: 'adaptive' });
+  };
+
+  updateGenerateRef.current = (nodeId) => {
+    void handleUpdateGenerate(nodeId);
+  };
+  return { handleUpdateGenerate, handleFixFollowVideo };
 }

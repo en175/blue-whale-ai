@@ -1,4 +1,4 @@
-import { useMemo, useRef, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
+import { useMemo, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { ImageTextAttachment, UploadedFile } from './components/ImageDialog';
 import type { AudioRefItem, CanvasPickItem } from './components/AudioDialog';
@@ -14,6 +14,8 @@ import type { ImageGenerationDockHost } from './imageGenerationDock';
 import type { VideoGenerationDockHost } from './videoGenerationDock';
 import type { AudioGenerationDockHost, MusicGenerationDockHost } from './audioMusicGenerationDock';
 import type { TextGenerationDockHost } from './textGenerationDock';
+import type { CanvasGenerationSubmissionHandles } from './hooks/useCanvasGenerationSubmission';
+import { useGenerationDockBinding } from './hooks/useGenerationDockBinding';
 import ImageGenerationDockPanel from './imageGenerationDockPanel';
 import VideoGenerationDockPanel from './videoGenerationDockPanel';
 import AudioGenerationDockPanel from './audioGenerationDockPanel';
@@ -36,20 +38,6 @@ export interface GenerationDockHostsTargets {
   audioDockHostRef: RefObject<AudioGenerationDockHost | null>;
   musicDockHostRef: RefObject<MusicGenerationDockHost | null>;
   textDockHostRef: RefObject<TextGenerationDockHost | null>;
-}
-
-interface GenerationDockRenderHost {
-  render: () => ReactNode;
-  renderedToolKinds: ReadonlySet<string>;
-}
-
-interface GenerationDockCore {
-  panel: (kind: string) => any;
-  open: (kind: string, input: any) => void;
-  close: (kind: string) => void;
-  updateDraft: (kind: string, patch: any) => void;
-  submit: (kind: string, input: any) => any;
-  referencePicked: (kind: string) => void;
 }
 
 type GenerationDockAtMention = (item: AtMentionItem) => void;
@@ -124,13 +112,13 @@ export interface GenerationDockHostsInput {
   collectImageInputAssetIds: (targetNodeId: string | undefined, files: UploadedFile[], useEdgeRefs: boolean) => Promise<string[]>;
   handleAddAudioCanvasRef: (id: string) => void;
   flushCanvasSave: (projectId: string) => Promise<boolean>;
-  startGenerationJob: (type: 'image' | 'video' | 'audio', parameters: any, inputAssetIds?: unknown, videoRefs?: unknown, targetNodeId?: string, initialDraft?: unknown, promptDoc?: unknown) => boolean;
+  startGenerationJob: CanvasGenerationSubmissionHandles['startGenerationJob'];
   videoRefUnsupportedByModel: (modelId: string, refs: VideoMediaRefs) => string | null;
   editingTargetRef: RefObject<string | null>;
   activeProjectRef: RefObject<string | null>;
   applyingRef: RefObject<boolean>;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
-  generationDock: GenerationDockCore & GenerationDockRenderHost;
+  generationDock: ReturnType<typeof useGenerationDockBinding>['generationDock'];
   collectCanvasMedia: () => CanvasPickItem[];
   imageAtMention: GenerationDockAtMention;
   videoAtMention: GenerationDockAtMention;

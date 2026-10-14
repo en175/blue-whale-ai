@@ -2,7 +2,9 @@ import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { promptBindingList } from '@lib/contracts/prompt-target';
 import { promptMentionSchema } from '@lib/contracts/prompt-preview';
 import type { Edge, Node, Viewport } from '@xyflow/react';
-import { planReferenceErrorFor, pickMarkedIdsFor, complianceBlockedIds, pendingPlanSyncsOf } from '../canvasPureNodeHelpers';
+import { planReferenceErrorFor, pickMarkedIdsFor, complianceBlockedIds, pendingPlanSyncsOf, canvasMediaOf, atMentionItemsOf } from '../canvasPureNodeHelpers';
+import type { CanvasPickItem } from '../components/AudioDialog';
+import type { AtMentionItem } from '../atMention';
 import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from '../textIndexSync';
 import { videoRefIdentityIds, type VideoRefRole } from '../videoMediaRefs';
 
@@ -83,6 +85,8 @@ export function useCanvasPlanMentions(input: {
     () => pickMarkedIdsFor(audioPickSession, audioPickSessionActive, edges, textNodes),
     [audioPickSessionActive, audioPickSession, edges, textNodes],
   );
+  const canvasMedia: CanvasPickItem[] = useMemo(() => canvasMediaOf(mediaNodes), [mediaNodes]);
+  const atMentionItems: AtMentionItem[] = useMemo(() => atMentionItemsOf(mediaNodes, textNodes), [mediaNodes, textNodes]);
   const locateTextSource = useCallback((nodeId: string) => {
     const target = findCanvasNode(nodeId);
     if (!target) return;
@@ -99,6 +103,8 @@ export function useCanvasPlanMentions(input: {
     videoPickMarkedIds,
     videoPickBlockedIds,
     audioPickMarkedIds,
+    canvasMedia,
+    atMentionItems,
     locateTextSource,
   };
 }

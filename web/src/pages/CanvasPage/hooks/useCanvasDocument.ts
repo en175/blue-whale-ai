@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEdgesState, type Edge, type Node } from '@xyflow/react';
 import { type MediaDims } from '../components/MediaNode/mediaContentSize';
+import { type ImageTextAttachment } from '../components/ImageDialog';
+import { textAttachmentsOf as textAttachmentsOfPure, textAttachmentsForSend as textAttachmentsForSendPure } from '../textAttachments';
 import { type CanvasGroup } from '../canvasGroups';
 import { useCanvasGraph } from './useCanvasGraph';
 import type { ToolMode } from './useCanvasWorkbenchChrome';
 
-export function useCanvasDocument(toolMode: ToolMode) {
+export function useCanvasDocument(toolMode: ToolMode, submittingNodeId: string | null) {
   const [textNodes, setTextNodes] = useState<Node[]>([]);
   const [mediaNodes, setMediaNodes] = useState<Node[]>([]);
   const [productNodes, setProductNodes] = useState<Node[]>([]);
@@ -43,6 +45,14 @@ export function useCanvasDocument(toolMode: ToolMode) {
   const patchMediaNode = (nodeId: string, patch: Record<string, unknown>) => {
     graph.patchNode(nodeId, patch);
   };
+  const isGeneratingNode = (id: string) =>
+    id === submittingNodeId || mediaNodesRef.current.some(
+      (n) => n.id === id && (n.data as Record<string, unknown> | undefined)?.genStatus === 'generating',
+    );
+  const textAttachmentsOf = (targetNodeId: string): ImageTextAttachment[] =>
+    textAttachmentsOfPure(targetNodeId, edgesRef.current, textNodesRef.current);
+  const textAttachmentsForSend = (targetNodeId: string): ImageTextAttachment[] =>
+    textAttachmentsForSendPure(targetNodeId, edgesRef.current, textNodesRef.current);
   const handleMediaDims = (nodeId: string, dims: MediaDims) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     if (!node) return;
@@ -67,6 +77,7 @@ export function useCanvasDocument(toolMode: ToolMode) {
     assetNodes, setAssetNodes, assetNodesRef,
     edges, setEdges, onEdgesChange, edgesRef,
     groups, setGroups, groupsRef,
-    graph, findCanvasNode, patchMediaNode, handleMediaDims,
+    graph, findCanvasNode, patchMediaNode, handleMediaDims, isGeneratingNode,
+    textAttachmentsOf, textAttachmentsForSend,
   };
 }

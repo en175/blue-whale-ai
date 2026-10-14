@@ -18,6 +18,7 @@ export interface CanvasHistoryHandles {
   setEdges: (updater: (prev: Edge[]) => Edge[]) => void;
   setGroups: (updater: (prev: CanvasGroup[]) => CanvasGroup[]) => void;
   onNodesRemoved?: (ids: string[]) => void;
+  historyRef?: { current: ReturnType<typeof useCanvasHistory> | null };
 }
 
 interface PositionRecord {
@@ -401,7 +402,7 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     [push],
   );
 
-  return {
+  const historyApi = {
     undo,
     redo,
     clear,
@@ -422,6 +423,8 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     canUndo: undoStack.current.length > 0,
     canRedo: redoStack.current.length > 0,
   };
+  if (handles.historyRef) handles.historyRef.current = historyApi;
+  return historyApi;
 }
 
 export type CanvasHistoryApi = ReturnType<typeof useCanvasHistory>;

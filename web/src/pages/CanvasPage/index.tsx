@@ -1,42 +1,31 @@
 import { type PromptBinding } from '@lib/contracts/prompt-target';
-import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useRef, useMemo } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { newNodeId } from './nodeId';
-import { nodeBoxOf, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
-import { normalizeVideoMode } from '@/lib/video-modes';import { imageRefSourceError } from './mediaRefs';
+import { nodeBoxOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
+import { imageRefSourceError } from './mediaRefs';
 import { audioRefSourceError } from './audioMediaRefs';
 
 import { hasGenerationRecord } from './mediaReEdit';
 import {
-  readRefRole,
   mergedVideoMediaRefsOf,
   videoRefSourceError,
 } from './videoMediaRefs';
 
-import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
-import { audioVideoMuxIdentityOf } from './audioVideoMux';
-import { type ToolSessionDeps } from './toolSessionCoordinator';
-import type { VideoGenSeedParams } from './components/BottomDialog';
-import { type ImageTextAttachment } from './components/ImageDialog';
-
-import { type CanvasPickItem } from './components/AudioDialog';
+import { audioVideoMuxInFlightSourceIdsOf } from './audioVideoMux';
 import type { CanvasProject } from './components/ProjectSelector';
-import { createConnectValidators } from './canvasConnectValidation';
-import { type Edge, type Node } from '@xyflow/react';
-import { linkAssetToProject } from '@/api/assets';
-import { referencePromptPlan, applyPromptPreview, legacyCardHistoryOptions, serializeEdges, serializeNodes } from '@/api/canvas';
+import { serializeEdges, serializeNodes } from '@/api/canvas';
 import {
   availableGenKinds,
   isConnectableSource,
 } from './connectAbility';
-import { type GenHandoff } from '@/utils/gen-handoff';
 import { mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
-import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHydration } from './hooks/useCanvasHydration';
-import { syncCanvasNodeActions } from './hooks/patchCanvasNodeActions';
 import { useCanvasHistory } from './hooks/useCanvasHistory';
+import { useCanvasPageMutations } from './hooks/useCanvasPageMutations';
+import { useCanvasPageDocument } from './hooks/useCanvasPageDocument';
+import { useCanvasNodeActions } from './hooks/useCanvasNodeActions';
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
 import { useCanvasPickers } from './hooks/useCanvasPickers';
 import { useCanvasGenerationTerminal } from './hooks/useCanvasGenerationTerminal';
@@ -50,7 +39,6 @@ import { useCanvasToast } from './hooks/useCanvasToast';
 import { useCanvasViewportSurface } from './hooks/useCanvasViewportSurface';
 import { useCanvasGenerationModels } from './hooks/useCanvasGenerationModels';
 import { useCanvasProjectRoute } from './hooks/useCanvasProjectRoute';
-import { useCanvasLegacyMigrationToast } from './hooks/useCanvasLegacyMigrationToast';
 import { useCanvasWorkbenchChrome } from './hooks/useCanvasWorkbenchChrome';
 import { useCanvasToolWorkspace } from './hooks/useCanvasToolWorkspace';
 import { useCanvasDocument } from './hooks/useCanvasDocument';
@@ -93,10 +81,11 @@ import { useCanvasAgentSurface } from './hooks/useCanvasAgentSurface';
 import { useCanvasGenerationUploads } from './hooks/useCanvasGenerationUploads';
 import { useCanvasSelectionBridge } from './hooks/useCanvasSelectionBridge';
 import { useCanvasNodeDeletion } from './hooks/useCanvasNodeDeletion';
-import { useCanvasEdgeOps } from './hooks/useCanvasEdgeOps';
-import { useCanvasConnectPair } from './hooks/useCanvasConnectPair';
+import { useCanvasConnectSurface } from './hooks/useCanvasConnectSurface';
+import { useCanvasJobFlight } from './hooks/useCanvasJobFlight';
+import { useCanvasReferencePlan } from './hooks/useCanvasReferencePlan';
+import { useCanvasPaneSession } from './hooks/useCanvasPaneSession';
 import { useCanvasSpawn } from './hooks/useCanvasSpawn';
-import { textAttachmentsOf as textAttachmentsOfPure, textAttachmentsForSend as textAttachmentsForSendPure } from './textAttachments';
 import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
@@ -105,7 +94,6 @@ import {
 import {
   readCanvasIdFromSearch,
 } from './canvasQuery';
-import type { AtMentionItem } from './atMention';
 import { useGenerationDockHosts } from './generationDockHosts';
 import CanvasPageShell from './CanvasPageShell';
 export default function CanvasPage() {
@@ -185,10 +173,15 @@ export default function CanvasPage() {
     videoAssetPickKind, setVideoAssetPickKind,
     agentAssetPicks, setAgentAssetPicks,
   } = useCanvasPickers();
-  const videoEnhanceInFlightRef = useRef(new Map<string, Set<{ projectId: string | null; loadEpoch: object }>>());
-  const isVideoEnhanceCardInFlight = (nodeId: string) =>
-    [...(videoEnhanceInFlightRef.current.get(nodeId) ?? [])].some((request) =>
-      request.projectId === activeProjectRef.current && request.loadEpoch === docLoadEpochRef.current);
+  const {
+    videoEnhanceInFlightRef,
+    audioMixInFlightRef,
+    audioVideoMuxInFlightRef,
+    audioMixSubmitCardRef,
+    sceneSplitSendingRef,
+    smartMattingSendingRef,
+    isVideoEnhanceCardInFlight: isVideoEnhanceCardInFlightFor,
+  } = useCanvasJobFlight();
   const {
     toolHostsRef,
     toolViewRef,
@@ -199,11 +192,6 @@ export default function CanvasPage() {
     historyRef,
     withHistoryBatch,
   } = useCanvasToolWorkspace(currentId);
-  const audioMixInFlightRef = useRef(false);
-  const audioVideoMuxInFlightRef = useRef(false);
-  const audioMixSubmitCardRef = useRef<{ projectId: string; payload: string; nodeId: string; accepted: boolean } | null>(null);
-  const sceneSplitSendingRef = useRef(false);
-  const smartMattingSendingRef = useRef(false);
   const {
     textNodes, setTextNodes, textNodesRef,
     mediaNodes, setMediaNodes, mediaNodesRef,
@@ -211,28 +199,16 @@ export default function CanvasPage() {
     assetNodes, setAssetNodes, assetNodesRef,
     edges, setEdges, onEdgesChange, edgesRef,
     groups, setGroups, groupsRef,
-    graph, findCanvasNode, patchMediaNode, handleMediaDims,
-  } = useCanvasDocument(toolMode);
+    graph, findCanvasNode, patchMediaNode, handleMediaDims, isGeneratingNode,
+    textAttachmentsOf, textAttachmentsForSend,
+  } = useCanvasDocument(toolMode, submittingNodeId);
   const referencePlanRef = useRef<(source: string, target: string, syncBindings?: PromptBinding[]) => Promise<void>>(async () => {});
-  const isGeneratingNode = (id: string) =>
-    id === submittingNodeId || mediaNodesRef.current.some(
-      (n) => n.id === id && (n.data as Record<string, unknown> | undefined)?.genStatus === 'generating',
-    );
   const {
     addCanvasEdge,
     connectPlanToDraft,
     syncPlanEdgeBindingsOnShrink,
     removeTargetInputs,
     syncTextIndexEdges,
-  } = useCanvasEdgeOps({
-    edgesRef,
-    setEdges,
-    historyRef,
-    isApplying: () => applyingRef.current,
-    findCanvasNode: (id) => findCanvasNode(id),
-    getTextNodes: () => textNodesRef.current,
-  });
-  const {
     validateImageRefConnect,
     validateVideoRefConnect,
     validateAudioRefConnect,
@@ -241,17 +217,6 @@ export default function CanvasPage() {
     videoCapsOfDraft,
     imageRefMaxOfDraft,
     videoRefUnsupportedByModel,
-  } = createConnectValidators({
-    getMediaNodes: () => mediaNodesRef.current,
-    getTextNodes: () => textNodesRef.current,
-    getEdges: () => edgesRef.current,
-    getVideoModels: () => videoModelsRef.current,
-    getImageModels: () => imageModelsRef.current,
-    findCanvasNode: (id) => findCanvasNode(id),
-    isGeneratingNode: (id) => isGeneratingNode(id),
-    showToast: (type, msg) => showToast(type, msg),
-  });
-  const {
     connectPair,
     draftModeOfNode,
     videoEdgeRoleFor,
@@ -259,35 +224,27 @@ export default function CanvasPage() {
     handleConnectGroupToTarget,
     handleConnectSourceToGroup,
     guardEdgesChange,
-  } = useCanvasConnectPair({
-    isApplying: () => applyingRef.current,
-    showToast: (type, msg) => showToast(type, msg),
-    isGeneratingNode: (id) => isGeneratingNode(id),
-    findCanvasNode: (id) => findCanvasNode(id),
+    handleMediaIndexChange,
+    removePlanAttachment,
+  } = useCanvasConnectSurface({
     edgesRef,
-    getMediaNodes: () => mediaNodesRef.current,
+    setEdges,
+    setTextNodes,
+    historyRef,
+    isApplying: () => applyingRef.current,
+    findCanvasNode: (id) => findCanvasNode(id),
+    textNodesRef,
+    mediaNodesRef,
+    videoModelsRef,
+    imageModelsRef,
+    isGeneratingNode: (id) => isGeneratingNode(id),
+    showToast: (type, msg) => showToast(type, msg),
     toolConnect: (source, target) => toolSessions.connect(source, target),
-    addCanvasEdge: (source, target, refRole, marker) => addCanvasEdge(source, target, refRole, marker),
-    connectPlanToDraft,
-    removeTargetInputs,
-    validateImageRefConnect,
-    validateVideoRefConnect,
-    validateAudioRefConnect,
-    validateAudioTextConnect,
     withHistoryBatch,
     patchMediaNode: (nodeId, patch) => patchMediaNode(nodeId, patch),
     onEdgesChange,
-    setEdges,
     submittingNodeId,
   });
-  const handleMediaIndexChange = (id: string, mediaMentions: MediaMention[], mediaRefs: MediaRef[], delta: { added: string[]; removed: string[] }) => {
-    setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, mediaMentions, mediaRefs } } : n));
-    syncTextIndexEdges(id, delta);
-  };
-  const removePlanAttachment = (targetId: string | undefined, planNodeId: string) => {
-    if (!targetId || isGeneratingNode(targetId)) return;
-    removeTargetInputs(edgesRef.current.filter(edge => edge.source === planNodeId && edge.target === targetId).map(edge => edge.id));
-  };
   const {
     generationDock,
     imageDockHostRef,
@@ -326,8 +283,6 @@ export default function CanvasPage() {
     toolDepsRef,
     mediaNodesRef,
   });
-  const pendingGenRef = useRef<GenHandoff | null>(null);
-  const pendingVideoDraftSeedRef = useRef<VideoGenSeedParams | null>(null);
   const { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition } = useCanvasSpawn({
     graph,
   });
@@ -392,14 +347,10 @@ export default function CanvasPage() {
     retainedRecoverySaveRef,
     pendingNodeIdsRef,
     rollbackPendingNodes,
-  } = useCanvasSaveSession({ currentId, graph, showToast });
+    canOpenEditor,
+  } = useCanvasSaveSession({ currentId, graph, showToast, submittingNodeId, editingTargetRef });
   const blockedByPendingCanvasReviewRef = useRef<() => boolean>(() => false);
-  const applyMutation = useMutation({ mutationFn: applyPromptPreview });
-  const referencePlanMutation = useMutation({ mutationFn: (input: Parameters<typeof referencePromptPlan>[0]) => referencePromptPlan(input) });
-  const linkAudioMixAssetsMutation = useMutation({
-    mutationFn: (vars: { projectId: string; assetIds: string[] }) =>
-      Promise.all(vars.assetIds.map((assetId) => linkAssetToProject(vars.projectId, assetId, { silent: true }))),
-  });
+  const { applyMutation, linkAudioMixAssets } = useCanvasPageMutations();
   useCanvasSessionBootstrap({
     currentId,
     projects,
@@ -424,12 +375,17 @@ export default function CanvasPage() {
       historyRef.current?.clear();
     },
   });
-  const { doc, assets: snapshotAssets, loadFailed: canvasLoadFailed, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
-  const snapshotAssetsRef = useRef(snapshotAssets);
-  snapshotAssetsRef.current = snapshotAssets;
-  const historyQuery = useQuery({ ...legacyCardHistoryOptions(currentId), enabled: Boolean(doc && currentId) });
-  const legacyHistory = historyQuery.data?.items;
-  useCanvasLegacyMigrationToast({ legacyMigration, showToast });
+  const {
+    doc,
+    snapshotAssets,
+    snapshotAssetsRef,
+    canvasLoadFailed,
+    refetch,
+    acceptDoc,
+    legacyHistory,
+    patchAsset,
+    upsertAssets,
+  } = useCanvasPageDocument(currentId, showToast);
   const {
     hydratedDocRef,
     hydratedProjectRef,
@@ -440,6 +396,8 @@ export default function CanvasPage() {
     productSeq,
     docLoadEpochRef,
   } = useCanvasHydrationFlags();
+  const isVideoEnhanceCardInFlight = (nodeId: string) =>
+    isVideoEnhanceCardInFlightFor(nodeId, activeProjectRef, docLoadEpochRef);
   useCanvasOrphanEdges({
     textNodes,
     mediaNodes,
@@ -479,45 +437,22 @@ export default function CanvasPage() {
     setAgentCandidate,
   });
   const complianceCheckRef = useRef<((id: string) => void) | undefined>(undefined);
-  const actionsRef = useRef({
-    duplicate: handleDuplicateNode,
-    addToChat: handleAddToChatNode,
-    pasteAtNode: (_id: string) => {},
-    copyImage: (_id: string) => {},
-    complianceCheck: (_id: string) => {},
-    fillEmptyShell: (_id: string, _file: File) => {},
-    openImageDialog: () => {},
-    cancelJob: (_id: string) => {},
-    retryJob: (_id: string) => {},
-    fixFollowVideo: (_id: string) => {},
-    removeMediaNode: (_id: string) => {},
-    download: (_id: string) => {},
-    showDetails: (_id: string) => {},
-    firePendingGen: () => {},
-    firePendingVideoDraft: () => {},
-    renameCard: (_id: string, _name: string) => {},
-  });
-  const canOpenEditor = (nodeId?: string): boolean => {
-    if (submittingNodeId && nodeId !== submittingNodeId) {
-      showToast('warn', '正在保存并提交，请稍候');
-      return false;
-    }
-    if ((saveBlocked || saveStatus === 'error') && nodeId !== editingTargetRef.current) {
-      showToast('warn', '保存失败，请重试');
-      return false;
-    }
-    return true;
-  };
+  const { actionsRef, bindActions } = useCanvasNodeActions();
   const {
     handleImagePickSessionClick,
     handleVideoPickSessionClick,
     handleAudioPickSessionClick,
     resetPickState,
+    clearPickState,
   } = useCanvasPickSessionClick({
     mediaNodesRef,
     showToast,
     pickMode,
+    pickTarget,
     pickRefRole,
+    imagePickSessionActive,
+    videoPickSessionActive,
+    audioPickSessionActive,
     imagePickSession,
     videoPickSession,
     audioPickSession,
@@ -544,6 +479,31 @@ export default function CanvasPage() {
     setPickAssetId,
     setImagePickResult,
     setAudioPickResult,
+  });
+  const {
+    buildToolSessionDeps,
+    editSessionActive,
+    exitEditSessionForGenPanel,
+    handleCanvasPaneClick,
+    warnStaleMediaRefs,
+  } = useCanvasPaneSession({
+    toolRuntime,
+    setSelectRequest,
+    dismissGenPanels,
+    cancelAgentCandidate,
+    imagePickSessionActive,
+    videoPickSessionActive,
+    audioPickSessionActive,
+    endImagePickSession,
+    endVideoPickSession,
+    endAudioPickSession,
+    pickMode,
+    pickTarget,
+    resetPickState,
+    dismissAllGenPanels,
+    mediaNodesRef,
+    edgesRef,
+    showToast,
   });
   const { handleCanvasNodeClick } = useCanvasNodeClickDispatch({
     toolRuntime,
@@ -586,26 +546,6 @@ export default function CanvasPage() {
     setProductPickResult,
     setAssetPickResult,
   });
-  const buildToolSessionDeps = (): ToolSessionDeps => ({
-    dismissGenPanels,
-    selectNode: (nodeId: string) => setSelectRequest({ id: nodeId, ts: Date.now() }),
-  });
-  const editSessionActive = toolRuntime.hasEditSession();
-  const exitEditSessionForGenPanel = () => {
-    toolRuntime.beforeGenPanel();
-  };
-  const handleCanvasPaneClick = () => {
-    cancelAgentCandidate();
-    if (toolRuntime.onPaneClick() === 'consumed') return;
-    if (imagePickSessionActive) { endImagePickSession(); return; }
-    if (videoPickSessionActive) { endVideoPickSession(); return; }
-    if (audioPickSessionActive) { endAudioPickSession(); return; }
-    if (pickMode || pickTarget) {
-      resetPickState();
-      return;
-    }
-    dismissAllGenPanels();
-  };
   const { handleSelectionChangeStable } = useCanvasSelectionBridge({
     mediaNodesRef,
     pickMode,
@@ -632,18 +572,6 @@ export default function CanvasPage() {
     handleCanvasNodeClick,
     setGroups,
   });
-  const warnStaleMediaRefs = (targetNodeId: string, kind: 'image' | 'video') => {
-    const byId = new Map(mediaNodesRef.current.map((n) => [n.id, n]));
-    const stale = edgesRef.current.some((e) => {
-      if (e.target !== targetNodeId) return false;
-      const source = byId.get(e.source);
-      if (!source || source.type !== 'mediaNode') return false;
-      return kind === 'image'
-        ? imageRefSourceError(source) !== null
-        : videoRefSourceError(source, readRefRole(e)) !== null;
-    });
-    if (stale) showToast('warn', '部分参考素材已失效，请恢复素材或移除引用后发送');
-  };
   const {
     createVideoDraftCard,
     createAudioDraftCard,
@@ -756,8 +684,8 @@ export default function CanvasPage() {
     setEdges: (updater) => setEdges(updater),
     setGroups: (updater) => setGroups(updater),
     onNodesRemoved: (ids) => ids.forEach((id) => pendingNodeIdsRef.current.delete(id)),
+    historyRef,
   });
-  historyRef.current = canvasHistory;
   useCanvasUndoHotkeys({
     applyingRef,
     eraseHistoryRef,
@@ -765,6 +693,8 @@ export default function CanvasPage() {
   });
   const {
     locallyRemovedGenerationNodesRef,
+    pendingDeleteJobNodesRef,
+    recoverFrameInterpolationRef,
     settledExtractNodesRef,
     activeJobByNodeRef,
     generationRuntimeHostRef,
@@ -776,7 +706,6 @@ export default function CanvasPage() {
     flushCanvasSave,
     handleRetryCanvasSave,
     ensureSavedBeforeProjectSwitch,
-    blockedByPendingCanvasReview,
   } = useCanvasSave({
     activeProjectRef,
     hydratedProjectRef,
@@ -822,8 +751,8 @@ export default function CanvasPage() {
     productNodes,
     assetNodes,
     refetch,
+    blockedByPendingCanvasReviewRef,
   });
-  blockedByPendingCanvasReviewRef.current = blockedByPendingCanvasReview;
   const {
     handleSelect,
     handleRename,
@@ -837,14 +766,14 @@ export default function CanvasPage() {
     setProjects,
     ensureSavedBeforeProjectSwitch,
   });
-  const { handleComplianceCheck } = useCanvasCompliance({
+  useCanvasCompliance({
     setMediaNodes,
     mediaNodesRef,
     snapshotAssetsRef,
     patchAsset,
     showToast,
+    complianceCheckRef,
   });
-  complianceCheckRef.current = (id) => { void handleComplianceCheck(id); };
   const { attachCallbacks } = useCanvasNodeAttachCallbacks({
     toolMode,
     currentId,
@@ -947,7 +876,6 @@ export default function CanvasPage() {
     placeFileOnCanvas,
     handleAddTextNode,
   });
-  const recoverFrameInterpolationRef = useRef<(nodeId: string, savedJobId?: unknown) => void>(() => {});
   useCanvasHydration({
     currentId,
     doc,
@@ -988,10 +916,6 @@ export default function CanvasPage() {
     startImageEnhanceJob,
     submitVideoToolTask,
     handleCancelJob,
-    outpaint,
-    erase: imageEraseHost,
-    subtitleErase: subtitleEraseHost,
-    cutout: imageCutoutHost,
   } = useCanvasImageToolHosts({
     currentId,
     mediaNodesRef,
@@ -1003,21 +927,10 @@ export default function CanvasPage() {
     addCanvasEdge,
     removeCanvasNodes: (ids) => removeCanvasNodes(ids),
     patchMediaNode,
-    clearPickState: () => {
-      if (imagePickSessionActive) endImagePickSession();
-      if (videoPickSessionActive) endVideoPickSession();
-      if (audioPickSessionActive) endAudioPickSession();
-      if (pickMode || pickTarget) {
-        setPickMode(null); setPickTarget(null); setPickRefRole(null); setPickProductId(null); setPickAssetId(null);
-      }
-    },
+    clearPickState,
+    toolHostsRef,
     showToast,
   });
-  toolHostsRef.current.outpaint = outpaint;
-  toolHostsRef.current.erase = imageEraseHost;
-  toolHostsRef.current.subtitleErase = subtitleEraseHost;
-  toolHostsRef.current.cutout = imageCutoutHost;
-  const pendingDeleteJobNodesRef = useRef<Set<string>>(new Set());
   const { removeAudioMixCardNow, removeCanvasNodes, handleRemoveMediaNode } = useCanvasNodeDeletion({
     currentId,
     mediaNodesRef,
@@ -1128,7 +1041,6 @@ export default function CanvasPage() {
     showToast,
     pickers: { setPickMode, setPickTarget, setPickProductId, setPickAssetId },
   });
-  /* ============ 成组交互（IKD0JT A3/A4） ============ */
   const {
     handleCreateGroup,
     handleGroupFrameDragStop,
@@ -1158,10 +1070,6 @@ export default function CanvasPage() {
     captureSessionOwnership: (kind) => toolRuntime.captureSessionOwnership(kind),
     showToast,
   });
-  const textAttachmentsOf = (targetNodeId: string): ImageTextAttachment[] =>
-    textAttachmentsOfPure(targetNodeId, edgesRef.current, textNodesRef.current);
-  const textAttachmentsForSend = (targetNodeId: string): ImageTextAttachment[] =>
-    textAttachmentsForSendPure(targetNodeId, edgesRef.current, textNodesRef.current);
   const { reorderTargetEdges, refStripOrderOf, handleRefStripOrderChange, handleReorderAttachments, handleReorderVideoMediaRefs, reorderVideoFreeRefs } = useCanvasRefStripOrder({
     setEdges,
     edgesRef,
@@ -1182,6 +1090,8 @@ export default function CanvasPage() {
     videoPickMarkedIds,
     videoPickBlockedIds,
     audioPickMarkedIds,
+    canvasMedia,
+    atMentionItems,
     locateTextSource,
   } = useCanvasPlanMentions({
     imageSeed,
@@ -1238,7 +1148,6 @@ export default function CanvasPage() {
   });
   const {
     handleStartFrameInterpolation: startFrameInterpolationJob,
-    recoverFrameInterpolation,
     beginVideoEnhanceSubmission,
     handleStartVideoEnhance: startVideoEnhanceJob,
   } = useCanvasToolJobSubmissions({
@@ -1260,8 +1169,8 @@ export default function CanvasPage() {
     settleCancelledNode,
     jobResponseGuarded,
     showToast,
+    recoverFrameInterpolationRef,
   });
-  recoverFrameInterpolationRef.current = recoverFrameInterpolation;
   useCanvasCompoundToolHosts({
     toolHostsRef,
     toolDepsRef,
@@ -1298,7 +1207,7 @@ export default function CanvasPage() {
     setSoloSelectedNodeId,
     setSelectRequest,
     flushCanvasSave,
-    linkAudioMixAssets: (vars) => linkAudioMixAssetsMutation.mutateAsync(vars),
+    linkAudioMixAssets,
     showToast,
     dismissGenPanels,
   });
@@ -1329,34 +1238,24 @@ export default function CanvasPage() {
     rememberGeneratedAsset,
     imageToolsTask,
   });
-  referencePlanRef.current = async (planNodeId, targetNodeId, syncBindings) => {
-    const projectId = activeProjectRef.current;
-    if (!projectId || applyingRef.current || isGeneratingNode(targetNodeId)) return;
-    applyingRef.current = true;
-    setApplying(true);
-    (document.activeElement as HTMLElement | null)?.blur();
-    try {
-      if (!(await flushCanvasSave(projectId)) || versionRef.current === null) return;
-      const saved = await referencePlanMutation.mutateAsync({ projectId, planNodeId, targetNodeId, expectedVersion: versionRef.current, ...(syncBindings !== undefined ? { syncBindings } : {}) });
-      if (activeProjectRef.current !== projectId) return;
-      const next = (JSON.parse(saved.edges ?? '[]') as Edge[]).map(edge => ({
-        ...edgesRef.current.find(old => old.id === edge.id), ...edge, type: 'custom',
-      }));
-      historyRef.current?.pushReplaceEdges(edgesRef.current, next);
-      edgesRef.current = next;
-      setEdges(next);
-      const savedNodes = JSON.parse(saved.nodes ?? '[]') as Node[];
-      const serverMode = normalizeVideoMode((savedNodes.find(n => n.id === targetNodeId)?.data as Record<string, unknown> | undefined)?.draftMode);
-      const localMode = normalizeVideoMode((mediaNodesRef.current.find(n => n.id === targetNodeId)?.data as Record<string, unknown> | undefined)?.draftMode);
-      if (serverMode && serverMode !== localMode) patchMediaNode(targetNodeId, { draftMode: serverMode });
-      versionRef.current = saved.version;
-      lastSavedRef.current = JSON.stringify(JSON.parse(saved.viewport ?? 'null')) + serializeNodes(savedNodes) + serializeEdges(next);
-      setSaveStatus('saved');
-      setSaveEpoch(value => value + 1);
-    } catch (error) {
-      showToast('error', error instanceof Error ? error.message : '方案引用失败，请重试');
-    } finally { applyingRef.current = false; setApplying(false); }
-  };
+  useCanvasReferencePlan({
+    referencePlanRef,
+    activeProjectRef,
+    applyingRef,
+    versionRef,
+    lastSavedRef,
+    edgesRef,
+    mediaNodesRef,
+    historyRef,
+    isGeneratingNode,
+    flushCanvasSave,
+    setApplying,
+    setEdges,
+    setSaveStatus,
+    setSaveEpoch,
+    patchMediaNode,
+    showToast,
+  });
   const { handleToolMenuSelect, handleCharacterLibrarySelect } = useCanvasChromeActions({
     setAssetsModalDefaultTab,
     setAssetsModalDefaultFilter,
@@ -1368,8 +1267,6 @@ export default function CanvasPage() {
     setImagePickResult,
     setAssetPickResult,
   });
-  const canvasMedia: CanvasPickItem[] = useMemo(() => canvasMediaOf(mediaNodes), [mediaNodes]);
-  const atMentionItems: AtMentionItem[] = useMemo(() => atMentionItemsOf(mediaNodes, textNodes), [mediaNodes, textNodes]);
   const { handleImageAtMention, handleVideoAtMention, handleAudioAtMention, handleMusicAtMention } = useCanvasAtMentionHandlers({
     imageDraftId,
     videoDraftId,
@@ -1481,13 +1378,13 @@ export default function CanvasPage() {
       collectImageInputAssetIds,
       handleAddAudioCanvasRef,
       flushCanvasSave: (projectId) => flushCanvasSave(projectId),
-      startGenerationJob: startGenerationJob as never,
+      startGenerationJob,
       videoRefUnsupportedByModel,
       editingTargetRef,
       activeProjectRef,
       applyingRef,
       showToast,
-      generationDock: generationDock as never,
+      generationDock,
       collectCanvasMedia: () => canvasMedia,
       imageAtMention: (item) => handleImageAtMention(item),
       videoAtMention: (item) => handleVideoAtMention(item),
@@ -1499,7 +1396,7 @@ export default function CanvasPage() {
     },
     { imageDockHostRef, videoDockHostRef, audioDockHostRef, musicDockHostRef, textDockHostRef },
   );
-  const { handleUpdateGenerate } = useCanvasUpdateGenerate({
+  const { handleFixFollowVideo } = useCanvasUpdateGenerate({
     currentId,
     saveBlocked,
     saveStatus,
@@ -1519,25 +1416,13 @@ export default function CanvasPage() {
     textAttachmentsOf,
     draftModelOf,
     videoRefUnsupportedByModel,
+    patchMediaNode,
+    updateGenerateRef,
   });
-  updateGenerateRef.current = (nodeId) => {
-    void handleUpdateGenerate(nodeId);
-  };
-  const handleFixFollowVideo = (nodeId: string) => {
-    const node = mediaNodesRef.current.find((item) => item.id === nodeId);
-    if (!node || node.type !== 'mediaNode') return;
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    if (data.genStatus !== 'failed' || data.mediaType !== 'video') return;
-    if (!isTaskTypeParamConstraintCode(data.errorCode as number | string | undefined)) return;
-    patchMediaNode(nodeId, { draftRatio: 'adaptive' });
-    void handleUpdateGenerate(nodeId, { ratioOverride: 'adaptive' });
-  };
   const { firePendingGen, firePendingVideoDraft } = useCanvasHomeHandoff({
     currentId,
     doc,
     activeProjectRef,
-    pendingGenRef,
-    pendingVideoDraftSeedRef,
     navigate,
     location,
     openImageFromHandoff: (params) => generationDock.open('image', {
@@ -1549,14 +1434,7 @@ export default function CanvasPage() {
     openVideoDraftDialog: (nodeId, preset) => openVideoDraftDialog(nodeId, preset),
     startGenerationJob: (type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft) => startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft),
   });
-  const audioVideoMuxInFlightSourceIds = new Set(
-    mediaNodes
-      .filter((n) => {
-        if ((n.data as Record<string, unknown>).genStatus !== 'generating') return false;
-        return audioVideoMuxIdentityOf(n) !== undefined;
-      })
-      .map((n) => audioVideoMuxIdentityOf(n)!.sourceNodeId),
-  );
+  const audioVideoMuxInFlightSourceIds = audioVideoMuxInFlightSourceIdsOf(mediaNodes);
   const { handleAgentCardApply } = useCanvasApplyAgentCard({
     currentId,
     viewport,
@@ -1575,7 +1453,7 @@ export default function CanvasPage() {
     showToast,
   });
 
-  syncCanvasNodeActions(actionsRef.current, {
+  bindActions({
     duplicate: handleDuplicateNode,
     addToChat: handleAddToChatNode,
     renameCard,
@@ -1671,7 +1549,7 @@ export default function CanvasPage() {
         assetDetailTarget, assetDetailLoading, handleCloseAssetDetail,
         pendingDeleteGroup, setPendingDeleteGroup, confirmDeleteGroup,
         showAssetsModal, setShowAssetsModal, handleAddSharedAsset,
-        assetsModalDefaultTab, assetsModalDefaultFilter: assetsModalDefaultFilter as never, showCharacterLibrary,
+        assetsModalDefaultTab, assetsModalDefaultFilter, showCharacterLibrary,
         setShowCharacterLibrary, setCharacterLibraryTarget, handleCharacterLibrarySelect,
       }}
     />

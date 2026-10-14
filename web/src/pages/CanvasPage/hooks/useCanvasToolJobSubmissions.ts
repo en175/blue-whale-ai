@@ -34,6 +34,7 @@ export interface CanvasToolJobSubmissionsHost {
   settleCancelledNode: (nodeId: string) => void;
   jobResponseGuarded: (nodeId: string, jobId: number | string) => boolean;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  recoverFrameInterpolationRef: RefObject<(nodeId: string, savedJobId?: unknown) => void>;
 }
 
 export interface CanvasToolJobSubmissionsHandles {
@@ -60,6 +61,7 @@ export function useCanvasToolJobSubmissions(host: CanvasToolJobSubmissionsHost):
     settleCancelledNode,
     jobResponseGuarded,
     showToast,
+    recoverFrameInterpolationRef,
   } = host;
 
   const handleStartFrameInterpolation = async (submission: FrameInterpolationSubmission): Promise<boolean> => {
@@ -194,5 +196,6 @@ export function useCanvasToolJobSubmissions(host: CanvasToolJobSubmissionsHost):
     });
   };
 
+  recoverFrameInterpolationRef.current = recoverFrameInterpolation;
   return { handleStartFrameInterpolation, recoverFrameInterpolation, beginVideoEnhanceSubmission, handleStartVideoEnhance };
 }

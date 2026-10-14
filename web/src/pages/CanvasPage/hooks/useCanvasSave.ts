@@ -73,6 +73,7 @@ export interface CanvasSaveHost {
   productNodes?: Node[];
   assetNodes?: Node[];
   refetch?: unknown;
+  blockedByPendingCanvasReviewRef?: RefObject<() => boolean>;
 }
 
 export function useCanvasSave(host: CanvasSaveHost) {
@@ -121,6 +122,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
     productNodes,
     assetNodes,
     refetch,
+    blockedByPendingCanvasReviewRef,
   } = host;
 
   const adoptCanvasConflictVersion = (error: unknown): boolean => {
@@ -452,6 +454,9 @@ export function useCanvasSave(host: CanvasSaveHost) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch, rollbackPendingNodes, showToast, graph]);
 
+  if (blockedByPendingCanvasReviewRef) {
+    blockedByPendingCanvasReviewRef.current = blockedByPendingCanvasReview;
+  }
   return {
     flushCanvasSave,
     handleRetryCanvasSave,

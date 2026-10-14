@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef } from 'react';
 import type { CanvasDoc } from '@/api/canvas';
 import { linkAssetToProject, type UploadCompleteData } from '@/api/assets';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
@@ -10,11 +10,9 @@ import { buildImageJobReferences, buildVideoJobReferencesFromList } from '../vid
 import type { CanvasGenerationSubmissionHandles } from './useCanvasGenerationSubmission';
 
 export interface CanvasHomeHandoffHost {
-  currentId: string;
+  currentId: string | null;
   doc: CanvasDoc | null;
-  activeProjectRef: RefObject<string>;
-  pendingGenRef: RefObject<GenHandoff | null>;
-  pendingVideoDraftSeedRef: RefObject<VideoGenSeedParams | null>;
+  activeProjectRef: { current: string | null };
   navigate: (path: string, options: { replace: boolean; state: null }) => void;
   location: { pathname: string; search: string; state: unknown };
   openImageFromHandoff: (params: { modelId?: string; ratio?: string; size?: string }) => void;
@@ -39,8 +37,6 @@ export function useCanvasHomeHandoff(host: CanvasHomeHandoffHost): CanvasHomeHan
     currentId,
     doc,
     activeProjectRef,
-    pendingGenRef,
-    pendingVideoDraftSeedRef,
     navigate,
     location,
     openImageFromHandoff,
@@ -50,6 +46,8 @@ export function useCanvasHomeHandoff(host: CanvasHomeHandoffHost): CanvasHomeHan
     openVideoDraftDialog,
     startGenerationJob,
   } = host;
+  const pendingGenRef = useRef<GenHandoff | null>(null);
+  const pendingVideoDraftSeedRef = useRef<VideoGenSeedParams | null>(null);
 
   const firePendingGen = () => {
     const handoff = pendingGenRef.current;

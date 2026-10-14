@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import type { MutableRefObject, RefObject } from 'react';
 import type { Node } from '@xyflow/react';
 import { toast as globalToast } from 'sonner';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
@@ -43,6 +43,7 @@ export interface CanvasImageToolHostsHost {
   removeCanvasNodes: (ids: string[]) => void;
   patchMediaNode: (nodeId: string, patch: Record<string, unknown>) => void;
   clearPickState: () => void;
+  toolHostsRef: MutableRefObject<Partial<CanvasToolHosts>>;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
 
@@ -71,6 +72,7 @@ export function useCanvasImageToolHosts(host: CanvasImageToolHostsHost): CanvasI
     removeCanvasNodes,
     patchMediaNode,
     clearPickState,
+    toolHostsRef,
     showToast,
   } = host;
   const { createImageDraftCard } = creators;
@@ -301,6 +303,10 @@ export function useCanvasImageToolHosts(host: CanvasImageToolHostsHost): CanvasI
       return;
     }
   };
+  toolHostsRef.current.outpaint = outpaint;
+  toolHostsRef.current.erase = erase;
+  toolHostsRef.current.subtitleErase = subtitleErase;
+  toolHostsRef.current.cutout = cutout;
 
   return { imageToolTargetOfNode, dispatchImageToolTask, startImageEnhanceJob, submitVideoToolTask, handleCancelJob, outpaint, erase, subtitleErase, cutout };
 }
