@@ -209,7 +209,7 @@ describe('IKH3OU 回调透传与只读', () => {
 });
 
 describe('IKH25A 单条跟随态 CSS 中心点锚', () => {
-  const css = readFileSync(resolve('src/pages/CanvasPage/components/VideoSubtitleEraseDialog/index.module.css'), 'utf-8');
+  const css = readFileSync(resolve('src/app/pages/CanvasPage/components/VideoSubtitleEraseDialog/index.module.css'), 'utf-8');
   const block = (selector: string) => css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
 
   it('基础 .sendBar 保留 translateX(-50%)：中心点锚的真居中由自身 transform 完成', () => {

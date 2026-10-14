@@ -165,6 +165,10 @@ export default defineConfig(({ command, mode }) => {
     },
     resolve: {
       alias: {
+        '@/pages': path.resolve(__dirname, './src/app/pages'),
+        '@/components': path.resolve(__dirname, './src/app/components'),
+        '@/layouts': path.resolve(__dirname, './src/app/layouts'),
+        '@/styles': path.resolve(__dirname, './src/app/styles'),
         '@': path.resolve(__dirname, './src'),
         '@lib': path.resolve(__dirname, '../backend/libs'),
       },

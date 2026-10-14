@@ -8,7 +8,7 @@ import type { JobDetail } from '@/api/jobs';
 import { apiMocks, canvasDocMock, flowProps, mediaNodes, renderPage, unmountPage } from './testing/canvasPageTestHarness';
 import { sceneSplitTask } from './generationRuntime/multiOutputTasks';
 
-const captured = JSON.parse(readFileSync(resolve('src/pages/CanvasPage/generationRuntime/ikjlxf-deleted-output.fixture.json'), 'utf8')) as {
+const captured = JSON.parse(readFileSync(resolve('src/app/pages/CanvasPage/generationRuntime/ikjlxf-deleted-output.fixture.json'), 'utf8')) as {
   page: { records: GenerationRecoveryRecord[] }; detail: JobDetail;
 };
 const recoveryApi = vi.hoisted(() => ({ page: { current: { records: [] as GenerationRecoveryRecord[] } }, put: vi.fn() }));

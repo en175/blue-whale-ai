@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createFetchGuard } from '../pages/CanvasPage/testing/fetchGuard';
+import { createFetchGuard } from '../app/pages/CanvasPage/testing/fetchGuard';
 
 describe('CanvasPage 受控测试 fetch 边界', () => {
   it('未声明请求被调用方捕获后，最终断言仍报告方法和 URL', async () => {

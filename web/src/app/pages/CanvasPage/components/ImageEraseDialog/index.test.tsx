@@ -212,7 +212,7 @@ describe('IKGOTB 发送门与两条发送路径', () => {
 });
 
 describe('IKH1WI 发送条跟随态 CSS 中心点锚', () => {
-  const css = readFileSync(resolve('src/pages/CanvasPage/components/ImageEraseDialog/index.module.css'), 'utf-8');
+  const css = readFileSync(resolve('src/app/pages/CanvasPage/components/ImageEraseDialog/index.module.css'), 'utf-8');
   const block = (selector: string) => css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
 
   it('基础 .sendBar 保留 translateX(-50%)：中心点锚的真居中由自身 transform 完成', () => {
