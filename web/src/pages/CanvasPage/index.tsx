@@ -1,13 +1,11 @@
-import { promptBindingList, type PromptBinding } from '@lib/contracts/prompt-target';
-import { promptMentionSchema } from '@lib/contracts/prompt-preview';
+import { type PromptBinding } from '@lib/contracts/prompt-target';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { newNodeId } from './nodeId';
-import { nodeBoxOf, planReferenceErrorFor, pendingPlanSyncsOf, pickMarkedIdsFor, complianceBlockedIds, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
+import { nodeBoxOf, canvasMediaOf, atMentionItemsOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { normalizeVideoMode } from '@/lib/video-modes';import { imageRefSourceError } from './mediaRefs';
-import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from './textIndexSync';
 import { audioRefSourceError } from './audioMediaRefs';
 
 import { hasGenerationRecord } from './mediaReEdit';
@@ -15,42 +13,30 @@ import {
   readRefRole,
   mergedVideoMediaRefsOf,
   videoRefSourceError,
-  videoRefIdentityIds,
 } from './videoMediaRefs';
 
-import { imageReferenceMaxOf } from '@/lib/model-reference-limits';
-import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { isTaskTypeParamConstraintCode } from '@/lib/video-reference-hints';
-import { type MediaDims } from './components/MediaNode/mediaContentSize';
-
-import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from './canvasToolSessions';
 import { audioVideoMuxIdentityOf } from './audioVideoMux';
 import { type ToolSessionDeps } from './toolSessionCoordinator';
-import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import type { VideoGenSeedParams } from './components/BottomDialog';
 import { type ImageTextAttachment } from './components/ImageDialog';
 
 import { type CanvasPickItem } from './components/AudioDialog';
 import type { CanvasProject } from './components/ProjectSelector';
-import { useOverlayWheelPassthrough } from './components/Canvas/canvasWheelPassthrough';
 import { createConnectValidators } from './canvasConnectValidation';
-import { useEdgesState, type Edge, type Node, type Viewport } from '@xyflow/react';
+import { type Edge, type Node } from '@xyflow/react';
 import { linkAssetToProject } from '@/api/assets';
 import { referencePromptPlan, applyPromptPreview, legacyCardHistoryOptions, serializeEdges, serializeNodes } from '@/api/canvas';
 import {
   availableGenKinds,
   isConnectableSource,
 } from './connectAbility';
-import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
-import { type GenerationRuntime, type GenerationRuntimeHost } from './generationRuntime/runtime';
+import { type GenHandoff } from '@/utils/gen-handoff';
 import { mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
-import { createImageToolsTask } from './generationRuntime/imageTools';
-import { type RecoveryChange } from '@/api/canvasRecovery';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHydration } from './hooks/useCanvasHydration';
 import { syncCanvasNodeActions } from './hooks/patchCanvasNodeActions';
-import { useCanvasGraph } from './hooks/useCanvasGraph';
-import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
+import { useCanvasHistory } from './hooks/useCanvasHistory';
 import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
 import { useCanvasPickers } from './hooks/useCanvasPickers';
 import { useCanvasGenerationTerminal } from './hooks/useCanvasGenerationTerminal';
@@ -58,7 +44,19 @@ import { useCanvasGenerationSubmission } from './hooks/useCanvasGenerationSubmis
 import { useCanvasAssetActions } from './hooks/useCanvasAssetActions';
 import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import { useCanvasSave } from './hooks/useCanvasSave';
+import { useCanvasSaveSession } from './hooks/useCanvasSaveSession';
 import { useCanvasSessionBootstrap } from './hooks/useCanvasSessionBootstrap';
+import { useCanvasToast } from './hooks/useCanvasToast';
+import { useCanvasViewportSurface } from './hooks/useCanvasViewportSurface';
+import { useCanvasGenerationModels } from './hooks/useCanvasGenerationModels';
+import { useCanvasProjectRoute } from './hooks/useCanvasProjectRoute';
+import { useCanvasLegacyMigrationToast } from './hooks/useCanvasLegacyMigrationToast';
+import { useCanvasWorkbenchChrome } from './hooks/useCanvasWorkbenchChrome';
+import { useCanvasToolWorkspace } from './hooks/useCanvasToolWorkspace';
+import { useCanvasDocument } from './hooks/useCanvasDocument';
+import { useCanvasGenerationRuntime } from './hooks/useCanvasGenerationRuntime';
+import { useCanvasHydrationFlags } from './hooks/useCanvasHydrationFlags';
+import { useCanvasPlanMentions } from './hooks/useCanvasPlanMentions';
 import { useCanvasFollowToolbar } from './hooks/useCanvasFollowToolbar';
 import { useCanvasHomeAgentInject } from './hooks/useCanvasHomeAgentInject';
 import { useCanvasOrphanEdges } from './hooks/useCanvasOrphanEdges';
@@ -103,16 +101,13 @@ import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
   parseGroupsFromNodes,
-  type CanvasGroup,
 } from './canvasGroups';
 import {
-  canvasLocationSearch,
   readCanvasIdFromSearch,
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
 import { useGenerationDockHosts } from './generationDockHosts';
 import CanvasPageShell from './CanvasPageShell';
-type ToolMode = 'drag' | 'select';
 export default function CanvasPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -127,21 +122,34 @@ export default function CanvasPage() {
     cancelAgentCandidate,
     agentContext, setAgentContext,
   } = useCanvasAgentSurface();
-  const [showMiniMap, setShowMiniMap] = useState(false);
-  const [toolMode, setToolMode] = useState<ToolMode>('select');
-  const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
-  const [connectMenu, setConnectMenu] = useState<{ sourceIds: string[]; x: number; y: number } | null>(null);
-  const closeConnectMenu = useCallback(() => setConnectMenu(null), []);
-  const connectingSourceRef = useRef<string | null>(null);
-  const paneUploadRef = useRef<HTMLInputElement>(null);
-  const paneUploadPosRef = useRef<{ x: number; y: number } | null>(null);
-  const [anchoredOverlayHiddenIds, setAnchoredOverlayHiddenIds] = useState<Set<string> | null>(null);
-  const isAnchoredOverlayDragHidden = (id: string | null | undefined) =>
-    id != null && (anchoredOverlayHiddenIds?.has(id) ?? false);
-  const canvasWrapperRef = useRef<HTMLDivElement>(null);
-  const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
-  const [liveViewport, setLiveViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
-  const [soloSelectedNodeId, setSoloSelectedNodeId] = useState<string | null>(null);
+  const { toast, showToast } = useCanvasToast();
+  const {
+    canvasWrapperRef,
+    wrapperSize,
+    viewport,
+    setViewport,
+    viewportRef,
+    liveViewport,
+    setLiveViewport,
+  } = useCanvasViewportSurface();
+  const { videoModelsRef, imageModelsRef, assetImageRefMax } = useCanvasGenerationModels();
+  const {
+    showMiniMap, setShowMiniMap,
+    toolMode, setToolMode,
+    paneMenu, setPaneMenu,
+    connectMenu, setConnectMenu, closeConnectMenu, connectingSourceRef,
+    paneUploadRef, paneUploadPosRef,
+    anchoredOverlayHiddenIds, setAnchoredOverlayHiddenIds, isAnchoredOverlayDragHidden,
+    soloSelectedNodeId, setSoloSelectedNodeId,
+    showCharacterLibrary, setShowCharacterLibrary, characterLibraryTarget, setCharacterLibraryTarget,
+    showAssetsModal, setShowAssetsModal, assetsModalDefaultTab, setAssetsModalDefaultTab,
+    assetsModalDefaultFilter, setAssetsModalDefaultFilter,
+    showEdges, setShowEdges, snapAlignmentOn, setSnapAlignmentOn, persistSnap: persistSnapAlignmentEnabled,
+    pendingDeleteGroup, setPendingDeleteGroup,
+    submittingNodeId, setSubmittingNodeId,
+    editingTargetRef, selectRequest, setSelectRequest, selectManyRequest, setSelectManyRequest,
+    showLegacyHistory, setShowLegacyHistory,
+  } = useCanvasWorkbenchChrome();
   const {
     hoveredAssetNodeId,
     handleAssetHoverChange,
@@ -177,54 +185,35 @@ export default function CanvasPage() {
     videoAssetPickKind, setVideoAssetPickKind,
     agentAssetPicks, setAgentAssetPicks,
   } = useCanvasPickers();
-  const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
-  const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
   const videoEnhanceInFlightRef = useRef(new Map<string, Set<{ projectId: string | null; loadEpoch: object }>>());
   const isVideoEnhanceCardInFlight = (nodeId: string) =>
     [...(videoEnhanceInFlightRef.current.get(nodeId) ?? [])].some((request) =>
       request.projectId === activeProjectRef.current && request.loadEpoch === docLoadEpochRef.current);
-  const toolHostsRef = useRef<Partial<CanvasToolHosts>>({});
-  const toolViewRef = useRef<CanvasToolView | null>(null);
-  const toolDepsRef = useRef<ToolSessionDeps | null>(null);
-  const [toolSessions] = useState(() => createCanvasToolSessions(
-    () => toolHostsRef.current,
-    () => toolViewRef.current!,
-    () => toolDepsRef.current!,
-  ));
-  const toolRuntime = toolSessions.runtime;
-  useCanvasToolSessionEffects(toolSessions);
-  toolRuntime.setProject(currentId);
+  const {
+    toolHostsRef,
+    toolViewRef,
+    toolDepsRef,
+    toolSessions,
+    toolRuntime,
+    eraseHistoryRef,
+    historyRef,
+    withHistoryBatch,
+  } = useCanvasToolWorkspace(currentId);
   const audioMixInFlightRef = useRef(false);
   const audioVideoMuxInFlightRef = useRef(false);
   const audioMixSubmitCardRef = useRef<{ projectId: string; payload: string; nodeId: string; accepted: boolean } | null>(null);
   const sceneSplitSendingRef = useRef(false);
   const smartMattingSendingRef = useRef(false);
-  const [showEdges, setShowEdges] = useState(true);
-  const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const {
+    textNodes, setTextNodes, textNodesRef,
+    mediaNodes, setMediaNodes, mediaNodesRef,
+    productNodes, setProductNodes, productNodesRef,
+    assetNodes, setAssetNodes, assetNodesRef,
+    edges, setEdges, onEdgesChange, edgesRef,
+    groups, setGroups, groupsRef,
+    graph, findCanvasNode, patchMediaNode, handleMediaDims,
+  } = useCanvasDocument(toolMode);
   const referencePlanRef = useRef<(source: string, target: string, syncBindings?: PromptBinding[]) => Promise<void>>(async () => {});
-  const edgesRef = useRef<Edge[]>([]);
-  edgesRef.current = edges;
-  const historyRef = useRef<CanvasHistoryApi | null>(null);
-  const withHistoryBatch = (fn: () => void) => {
-    historyRef.current?.beginBatch();
-    try {
-      fn();
-    } finally {
-      historyRef.current?.endBatch();
-    }
-  };
-  const eraseHistoryRef = useRef({
-    active: false,
-    undo: () => {},
-    redo: () => {},
-  });
-  eraseHistoryRef.current = toolSessions.eraseHistory();
-  const [groups, setGroups] = useState<CanvasGroup[]>([]);
-  const groupsRef = useRef<CanvasGroup[]>([]);
-  groupsRef.current = groups;
-  const [pendingDeleteGroup, setPendingDeleteGroup] = useState<{ id: string; count: number } | null>(null);
-  const [submittingNodeId, setSubmittingNodeId] = useState<string | null>(null);
   const isGeneratingNode = (id: string) =>
     id === submittingNodeId || mediaNodesRef.current.some(
       (n) => n.id === id && (n.data as Record<string, unknown> | undefined)?.genStatus === 'generating',
@@ -299,41 +288,6 @@ export default function CanvasPage() {
     if (!targetId || isGeneratingNode(targetId)) return;
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === planNodeId && edge.target === targetId).map(edge => edge.id));
   };
-  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warn'; msg: string } | null>(null);
-  const toastTimerRef = useRef<number | null>(null);
-  const showToast = useCallback((type: 'success' | 'error' | 'warn', msg: string) => {
-    setToast({ type, msg });
-    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 2500);
-  }, []);
-  const [textNodes, setTextNodes] = useState<Node[]>([]);
-  const [mediaNodes, setMediaNodes] = useState<Node[]>([]);
-  const [productNodes, setProductNodes] = useState<Node[]>([]);
-  const [assetNodes, setAssetNodes] = useState<Node[]>([]);
-  const mediaNodesRef = useRef<Node[]>([]);
-  mediaNodesRef.current = mediaNodes;
-  const textNodesRef = useRef<Node[]>([]);
-  textNodesRef.current = textNodes;
-  const productNodesRef = useRef<Node[]>([]);
-  productNodesRef.current = productNodes;
-  const assetNodesRef = useRef<Node[]>([]);
-  assetNodesRef.current = assetNodes;
-  const graph = useCanvasGraph({
-    textNodesRef,
-    mediaNodesRef,
-    productNodesRef,
-    assetNodesRef,
-    setTextNodes,
-    setMediaNodes,
-    setProductNodes,
-    setAssetNodes,
-  });
-  const findCanvasNode = useCallback((id: string): Node | undefined => graph.findNode(id), [graph]);
-  const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);
-  const [imageModels, setImageModels] = useState<GenerationModel[]>([]);
-  const [showAssetsModal, setShowAssetsModal] = useState(false);
-  const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
-  const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<string | undefined>(undefined);
   const {
     generationDock,
     imageDockHostRef,
@@ -372,61 +326,8 @@ export default function CanvasPage() {
     toolDepsRef,
     mediaNodesRef,
   });
-  const editingTargetRef = useRef<string | null>(null);
-  const [selectRequest, setSelectRequest] = useState<{ id: string; ts: number } | null>(null);
-  const [selectManyRequest, setSelectManyRequest] = useState<{ ids: string[]; ts: number } | null>(null);
   const pendingGenRef = useRef<GenHandoff | null>(null);
   const pendingVideoDraftSeedRef = useRef<VideoGenSeedParams | null>(null);
-  useEffect(() => {
-    const state = location.state as { genKind?: 'video' | 'image' } | null;
-    if (!state?.genKind) return;
-    const handoff = takeGenHandoff();
-    if (!handoff) {
-      navigate(location.pathname + location.search, { replace: true, state: null });
-      return;
-    }
-    if (handoff.kind === 'video') {
-      pendingVideoDraftSeedRef.current = {
-        modelId: handoff.modelId,
-        aspectRatio: handoff.aspectRatio,
-        resolution: handoff.resolution,
-        duration: handoff.duration,
-        mode: handoff.mode,
-        generateAudio: handoff.generateAudio,
-      };
-    } else {
-      generationDock.open('image', { seed: {
-        ts: Date.now(), text: '', files: [],
-        params: { modelId: handoff.modelId, ratio: handoff.ratio, size: handoff.size },
-      } });
-    }
-    pendingGenRef.current = handoff;
-    actionsRef.current.firePendingGen?.();
-    actionsRef.current.firePendingVideoDraft?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state, location.pathname, location.search, navigate]);
-  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
-  const viewportRef = useRef(viewport);
-  viewportRef.current = viewport;
-  useEffect(() => { setLiveViewport(viewport); }, [viewport]);
-  useEffect(() => {
-    fetchGenerationModels('video').then(setVideoModels).catch(() => undefined);
-    fetchGenerationModels('image').then(setImageModels).catch(() => undefined);
-  }, []);
-  const assetImageRefMax = imageReferenceMaxOf(
-    (imageModels.find((m) => m.is_default) ?? imageModels[0])?.features,
-  );
-  useEffect(() => {
-    const el = canvasWrapperRef.current;
-    if (!el) return;
-    const update = () => setWrapperSize({ width: el.clientWidth, height: el.clientHeight });
-    update();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  useOverlayWheelPassthrough(canvasWrapperRef, { ignoreInsideReactFlow: true });
   const { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition } = useCanvasSpawn({
     graph,
   });
@@ -465,136 +366,80 @@ export default function CanvasPage() {
     changeVideoParams: (id, resolution) => handleVideoEnhanceParamsChange(id, resolution),
     changeFrameParams: (id, fps) => handleFrameInterpolationParamsChange(id, fps),
   };
-  const draftErrorsRef = useRef(new Map<string, string>());
-  const handleDraftError = (id: string, error: string) => {
-    if (error) draftErrorsRef.current.set(id, error);
-    else draftErrorsRef.current.delete(id);
-    setSaveStatus(error ? 'error' : 'idle');
-    setSaveEpoch(value => value + 1);
-  };
-  const blockInvalidDraft = (ids: string[]) => {
-    const id = ids.find(id => draftErrorsRef.current.has(id));
-    if (!id) return false;
-    showToast('warn', `文本节点 ${id}：${draftErrorsRef.current.get(id)}，请修正后继续`);
-    return true;
-  };
+  const {
+    draftErrorsRef,
+    handleDraftError,
+    blockInvalidDraft,
+    applyingRef,
+    updateGenerateRef,
+    onUpdateGenerate,
+    applying,
+    setApplying,
+    saveEpoch,
+    setSaveEpoch,
+    savePromiseRef,
+    activeProjectRef,
+    focusViewport,
+    setFocusViewport,
+    saveStatus,
+    setSaveStatus,
+    saveBlocked,
+    setSaveBlocked,
+    savedAt,
+    setSavedAt,
+    versionRef,
+    lastSavedRef,
+    retainedRecoverySaveRef,
+    pendingNodeIdsRef,
+    rollbackPendingNodes,
+  } = useCanvasSaveSession({ currentId, graph, showToast });
+  const blockedByPendingCanvasReviewRef = useRef<() => boolean>(() => false);
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
   const referencePlanMutation = useMutation({ mutationFn: (input: Parameters<typeof referencePromptPlan>[0]) => referencePromptPlan(input) });
   const linkAudioMixAssetsMutation = useMutation({
     mutationFn: (vars: { projectId: string; assetIds: string[] }) =>
       Promise.all(vars.assetIds.map((assetId) => linkAssetToProject(vars.projectId, assetId, { silent: true }))),
   });
-  const applyingRef = useRef(false);
-  const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
-  const onUpdateGenerate = useCallback((nodeId: string) => {
-    updateGenerateRef.current(nodeId);
-  }, []);
-  const [applying, setApplying] = useState(false);
-  const [saveEpoch, setSaveEpoch] = useState(0);
-  const savePromiseRef = useRef<Promise<unknown> | null>(null);
-  const activeProjectRef = useRef(currentId);
-  activeProjectRef.current = currentId;
-  const [focusViewport, setFocusViewport] = useState<Viewport>();
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [saveBlocked, setSaveBlocked] = useState(false);
-  const [savedAt, setSavedAt] = useState('');
-  const versionRef = useRef<number | null>(null);
-  const lastSavedRef = useRef('');
-  const retainedRecoverySaveRef = useRef<{
-    projectId: string;
-    commandId: string;
-    recoveryChanges: RecoveryChange[];
-    payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean };
-    version: number | null;
-    signature: string;
-  } | null>(null);
-  const pendingNodeIdsRef = useRef<Set<string>>(new Set());
-  const rollbackPendingNodes = useCallback((ids: Set<string>) => {
-    if (ids.size === 0) return;
-    graph.allNodes().forEach((n) => {
-      if (ids.has(n.id)) {
-        const src = n.data?.src as string | undefined;
-        if (src?.startsWith('blob:')) URL.revokeObjectURL(src);
-      }
-    });
-    graph.setAll((prev) => prev.filter((n) => !ids.has(n.id)));
-    ids.forEach((id) => pendingNodeIdsRef.current.delete(id));
-  }, [graph]);
-  const productSeq = useRef(0);
   useCanvasSessionBootstrap({
     currentId,
     projects,
     setProjects,
     setCurrentId,
   });
-  useEffect(() => {
-    const fromQuery = readCanvasIdFromSearch(new URLSearchParams(location.search));
-    if (fromQuery && audioMixInFlightRef.current && activeProjectRef.current && fromQuery !== activeProjectRef.current) {
-      navigate({ pathname: location.pathname, search: canvasLocationSearch(new URLSearchParams(location.search), activeProjectRef.current) },
-        { replace: true, state: location.state });
-      return;
-    }
-    if (fromQuery && activeProjectRef.current && fromQuery !== activeProjectRef.current && blockedByPendingCanvasReview()) {
-      navigate({ pathname: location.pathname, search: canvasLocationSearch(new URLSearchParams(location.search), activeProjectRef.current) },
-        { replace: true, state: location.state });
-      return;
-    }
-    if (fromQuery) setCurrentId(fromQuery);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search, location.pathname, location.state, navigate]);
-  useEffect(() => {
-    if (!currentId) return;
-    const currentSearch = new URLSearchParams(location.search);
-    if (readCanvasIdFromSearch(currentSearch) === currentId) return;
-    navigate(
-      {
-        pathname: location.pathname,
-        search: canvasLocationSearch(currentSearch, currentId),
-      },
-      { replace: true, state: location.state },
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId]);
-  const prevProjectIdRef = useRef(currentId);
-  useEffect(() => {
-    const prev = prevProjectIdRef.current;
-    prevProjectIdRef.current = currentId;
-    if (!prev || prev === currentId) return;
-    setShowAgent(false);
-    setAgentOpened(false);
-    setAgentContext(null);
-    setAgentAssetPicks(null);
-    setAgentCandidate(null);
-    setFocusViewport(undefined);
-    historyRef.current?.clear();
-  }, [currentId, setAgentAssetPicks, setShowAgent, setAgentOpened, setAgentContext, setAgentCandidate]);
+  useCanvasProjectRoute({
+    currentId,
+    setCurrentId,
+    location,
+    navigate,
+    audioMixInFlightRef,
+    activeProjectRef,
+    blockedByPendingCanvasReviewRef,
+    onProjectSwitch: () => {
+      setShowAgent(false);
+      setAgentOpened(false);
+      setAgentContext(null);
+      setAgentAssetPicks(null);
+      setAgentCandidate(null);
+      setFocusViewport(undefined);
+      historyRef.current?.clear();
+    },
+  });
   const { doc, assets: snapshotAssets, loadFailed: canvasLoadFailed, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
   const snapshotAssetsRef = useRef(snapshotAssets);
   snapshotAssetsRef.current = snapshotAssets;
   const historyQuery = useQuery({ ...legacyCardHistoryOptions(currentId), enabled: Boolean(doc && currentId) });
   const legacyHistory = historyQuery.data?.items;
-  const [showLegacyHistory, setShowLegacyHistory] = useState(false);
-  const migrationToastRef = useRef('');
-  useEffect(() => {
-    if (!legacyMigration) return;
-    const signature = JSON.stringify(legacyMigration);
-    if (migrationToastRef.current === signature) return;
-    migrationToastRef.current = signature;
-    const { migrated, failed } = legacyMigration;
-    if (failed.length === 0) {
-      if (migrated.length > 0) showToast('success', `已将 ${migrated.length} 张旧生成卡转换为普通文本节点`);
-      return;
-    }
-    const detail = failed.slice(0, 2).map((item) => `「${item.title || item.nodeId}」${item.reason}`).join('；');
-    const failedText = `${failed.length} 张旧生成卡未能迁移（${detail}${failed.length > 2 ? ' 等' : ''}），原卡片已保留`;
-    showToast('warn', migrated.length > 0 ? `已转换 ${migrated.length} 张旧生成卡；${failedText}` : failedText);
-  }, [legacyMigration, showToast]);
-  const hydratedDocRef = useRef<typeof doc>(null);
-  const hydratedProjectRef = useRef<string | null>(null);
-  const confirmedNonEmptyRef = useRef(false);
-  const emptyClearConflictRef = useRef(false);
-  const emptyOverwriteRejectedRef = useRef(false);
-  const recoverySaveConflictRef = useRef(false);
+  useCanvasLegacyMigrationToast({ legacyMigration, showToast });
+  const {
+    hydratedDocRef,
+    hydratedProjectRef,
+    confirmedNonEmptyRef,
+    emptyClearConflictRef,
+    emptyOverwriteRejectedRef,
+    recoverySaveConflictRef,
+    productSeq,
+    docLoadEpochRef,
+  } = useCanvasHydrationFlags();
   useCanvasOrphanEdges({
     textNodes,
     mediaNodes,
@@ -743,7 +588,7 @@ export default function CanvasPage() {
   });
   const buildToolSessionDeps = (): ToolSessionDeps => ({
     dismissGenPanels,
-    selectNode: (nodeId) => setSelectRequest({ id: nodeId, ts: Date.now() }),
+    selectNode: (nodeId: string) => setSelectRequest({ id: nodeId, ts: Date.now() }),
   });
   const editSessionActive = toolRuntime.hasEditSession();
   const exitEditSessionForGenPanel = () => {
@@ -879,15 +724,6 @@ export default function CanvasPage() {
     endAudioPickSession,
     dismissAllGenPanels,
   });
-  useEffect(() => {
-    graph.setAll((prev) =>
-      prev.map((n) => ({ ...n, data: { ...n.data, toolMode } }))
-    );
-  }, [toolMode, graph]);
-  const videoModelsRef = useRef<GenerationModel[]>([]);
-  videoModelsRef.current = videoModels;
-  const imageModelsRef = useRef<GenerationModel[]>([]);
-  imageModelsRef.current = imageModels;
   const {
     assetDetailTarget,
     assetDetailLoading,
@@ -927,11 +763,15 @@ export default function CanvasPage() {
     eraseHistoryRef,
     canvasHistory,
   });
-  const locallyRemovedGenerationNodesRef = useRef<Set<string>>(new Set());
-  const settledExtractNodesRef = useRef<Set<string>>(new Set());
-  const activeJobByNodeRef = useRef<Map<string, string>>(new Map());
-  const generationRuntimeHostRef = useRef<GenerationRuntimeHost | null>(null);
-  const generationRuntimeRef = useRef<GenerationRuntime | null>(null);
+  const {
+    locallyRemovedGenerationNodesRef,
+    settledExtractNodesRef,
+    activeJobByNodeRef,
+    generationRuntimeHostRef,
+    generationRuntimeRef,
+    imageToolsAcceptanceRef,
+    imageToolsTask,
+  } = useCanvasGenerationRuntime();
   const {
     flushCanvasSave,
     handleRetryCanvasSave,
@@ -983,6 +823,7 @@ export default function CanvasPage() {
     assetNodes,
     refetch,
   });
+  blockedByPendingCanvasReviewRef.current = blockedByPendingCanvasReview;
   const {
     handleSelect,
     handleRename,
@@ -1004,42 +845,6 @@ export default function CanvasPage() {
     showToast,
   });
   complianceCheckRef.current = (id) => { void handleComplianceCheck(id); };
-  const docLoadEpochRef = useRef<object>({});
-  const imageToolsAcceptanceRef = useRef(new Map<string, { resolve: (jobId: string) => void; reject: (e: unknown) => void }>());
-  const imageToolsTask = useMemo(() => createImageToolsTask((nodeId, settled) => {
-    const pending = imageToolsAcceptanceRef.current.get(nodeId);
-    if (!pending) return;
-    imageToolsAcceptanceRef.current.delete(nodeId);
-    if ('jobId' in settled) pending.resolve(settled.jobId);
-    else pending.reject(settled.error);
-  }), []);
-  useEffect(() => {
-    const activeJobs = activeJobByNodeRef.current;
-    return () => {
-      activeJobs.clear();
-      generationRuntimeRef.current?.reset();
-    };
-  }, []);
-  const patchMediaNode = (nodeId: string, patch: Record<string, unknown>) => {
-    graph.patchNode(nodeId, patch);
-  };
-  const handleMediaDims = (nodeId: string, dims: MediaDims) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    if (!node) return;
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const patch: Record<string, unknown> = {};
-    if (typeof dims.width === 'number' && dims.width > 0 && data.width !== dims.width) {
-      patch.width = dims.width;
-    }
-    if (typeof dims.height === 'number' && dims.height > 0 && data.height !== dims.height) {
-      patch.height = dims.height;
-    }
-    if (typeof dims.duration === 'number' && dims.duration > 0 && typeof data.duration !== 'number') {
-      patch.duration = dims.duration;
-    }
-    if (Object.keys(patch).length === 0) return;
-    patchMediaNode(nodeId, patch);
-  };
   const { attachCallbacks } = useCanvasNodeAttachCallbacks({
     toolMode,
     currentId,
@@ -1369,55 +1174,33 @@ export default function CanvasPage() {
     textAttachmentsOf,
     generationDock,
   });
-  const planReferenceErrors = useMemo(() => {
-    const videoRefs = videoSeed?.targetNodeId
-      ? mergedVideoRefsWithTextIndex(videoSeed.targetNodeId, edges, mediaNodes, textNodes)
-      : { reference: [] };
-    const videoAvailableIds = [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])]
-      .flatMap((ref) => videoRefIdentityIds(ref));
-    return {
-      image: planReferenceErrorFor(
-        imageSeed?.targetNodeId,
-        imageSeed?.targetNodeId
-          ? mergedImageRefsOf(imageSeed.targetNodeId, edges, [...mediaNodes, ...textNodes]).map((ref) => ref.assetId)
-          : [],
-        edges,
-        textNodes,
-      ),
-      videoIndices: edges.filter(e => e.target === videoSeed?.targetNodeId).flatMap(e => {
-        const plan = textNodes.find(n => n.id === e.source && n.data.promptSource);
-        const mentions = promptMentionSchema.array().safeParse(plan?.data.promptMentions ?? []);
-        return mentions.success ? promptBindingList(mentions.data).map(m => `#${m.index}`) : [];
-      }).join('、'),
-      video: planReferenceErrorFor(videoSeed?.targetNodeId, videoAvailableIds, edges, textNodes),
-    };
-  }, [imageSeed?.targetNodeId, videoSeed?.targetNodeId, edges, mediaNodes, textNodes]);
-  const pendingPlanSyncs = (targetId: string | undefined) => pendingPlanSyncsOf(targetId, edges, textNodes);
-  const syncPlanToTarget = (planNodeId: string, targetId: string | undefined) => {
-    const pending = pendingPlanSyncs(targetId).find(plan => plan.nodeId === planNodeId);
-    if (pending && targetId) connectPlanToDraft(planNodeId, targetId);
-  };
-  const imagePickMarkedIds = useMemo(
-    () => pickMarkedIdsFor(imagePickSession, imagePickSessionActive, edges, textNodes),
-    [imagePickSessionActive, imagePickSession, edges, textNodes],
-  );
-  const videoPickMarkedIds = useMemo(
-    () => pickMarkedIdsFor(videoPickSession, videoPickSessionActive, edges, textNodes, pickRefRole ?? 'reference'),
-    [videoPickSessionActive, videoPickSession, pickRefRole, edges, textNodes],
-  );
-  const videoPickBlockedIds = useMemo(() => complianceBlockedIds(mediaNodes), [mediaNodes]);
-  const audioPickMarkedIds = useMemo(
-    () => pickMarkedIdsFor(audioPickSession, audioPickSessionActive, edges, textNodes),
-    [audioPickSessionActive, audioPickSession, edges, textNodes],
-  );
-  const locateTextSource = useCallback((nodeId: string) => {
-    const target = findCanvasNode(nodeId);
-    if (!target) return;
-    const width = (target as Node & { measured?: { width?: number } }).measured?.width ?? 360;
-    const height = (target as Node & { measured?: { height?: number } }).measured?.height ?? 270;
-    setFocusViewport({ x: window.innerWidth / 2 - (target.position.x + width / 2), y: window.innerHeight / 2 - (target.position.y + height / 2), zoom: 1 });
-    setSelectRequest({ id: nodeId, ts: Date.now() });
-  }, [findCanvasNode]);
+  const {
+    planReferenceErrors,
+    pendingPlanSyncs,
+    syncPlanToTarget,
+    imagePickMarkedIds,
+    videoPickMarkedIds,
+    videoPickBlockedIds,
+    audioPickMarkedIds,
+    locateTextSource,
+  } = useCanvasPlanMentions({
+    imageSeed,
+    videoSeed,
+    edges,
+    mediaNodes,
+    textNodes,
+    imagePickSession,
+    imagePickSessionActive,
+    videoPickSession,
+    videoPickSessionActive,
+    audioPickSession,
+    audioPickSessionActive,
+    pickRefRole,
+    findCanvasNode,
+    setFocusViewport,
+    setSelectRequest,
+    connectPlanToDraft,
+  });
   const {
     removeRefEdges,
     handleAddAudioCanvasRef,
@@ -1757,17 +1540,15 @@ export default function CanvasPage() {
     pendingVideoDraftSeedRef,
     navigate,
     location,
+    openImageFromHandoff: (params) => generationDock.open('image', {
+      seed: { ts: Date.now(), text: '', files: [], params },
+    }),
     showToast,
     uploadFileToAsset: (file, type) => uploadFileToAsset(file, type),
     createVideoDraftCard: (seed, position, overrides) => createVideoDraftCard(seed, position, overrides),
     openVideoDraftDialog: (nodeId, preset) => openVideoDraftDialog(nodeId, preset),
     startGenerationJob: (type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft) => startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft),
   });
-  useEffect(() => {
-    actionsRef.current.firePendingGen();
-    actionsRef.current.firePendingVideoDraft();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId, doc]);
   const audioVideoMuxInFlightSourceIds = new Set(
     mediaNodes
       .filter((n) => {
