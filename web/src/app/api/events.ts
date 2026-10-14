@@ -34,7 +34,7 @@ export async function readSseResponse(
     // eslint-disable-next-line no-console
     console.log(`[SSE raw] type=${type} id=${id}`, raw.length > 200 ? raw.slice(0, 200) + '...' : raw);
     // eslint-disable-next-line no-console
-    console.log(`[SSE parsed] type=${type}`, data); 
+    console.log(`[SSE parsed] type=${type}`, data);
     onEvent({ type, id, data });
   };
 
