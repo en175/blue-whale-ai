@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
-import { ApiError } from './http';
+import { ApiError } from '@/api/http';
 import {
   createGenerationJob,
   retryGenerationJob,
