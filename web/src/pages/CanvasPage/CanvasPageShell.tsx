@@ -600,7 +600,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           })}
           onToast={menus.showToast}
           defaultTab={overlays.assetsModalDefaultTab}
-          defaultCardFilter={overlays.assetsModalDefaultFilter as any}
+          defaultCardFilter={overlays.assetsModalDefaultFilter}
         />
       )}
       {overlays.showCharacterLibrary && (

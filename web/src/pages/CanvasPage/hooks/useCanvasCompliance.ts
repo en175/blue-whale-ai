@@ -17,10 +17,11 @@ export interface CanvasComplianceHost {
   snapshotAssetsRef: RefObject<Record<string, SnapshotAsset>>;
   patchAsset?: (assetId: string, patch: Partial<SnapshotAsset>) => void;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  complianceCheckRef?: RefObject<((id: string) => void) | undefined>;
 }
 
 export function useCanvasCompliance(host: CanvasComplianceHost) {
-  const { setMediaNodes, mediaNodesRef, snapshotAssetsRef, patchAsset, showToast } = host;
+  const { setMediaNodes, mediaNodesRef, snapshotAssetsRef, patchAsset, showToast, complianceCheckRef } = host;
 
   const patchNodeCompliance = (id: string, patch: Record<string, unknown>) => {
     setMediaNodes((prev) => {
@@ -147,5 +148,8 @@ export function useCanvasCompliance(host: CanvasComplianceHost) {
     await ensureMediaNodeCompliance(id, { toastSuccess: true });
   };
 
+  if (complianceCheckRef) {
+    complianceCheckRef.current = (id) => { void handleComplianceCheck(id); };
+  }
   return { patchNodeCompliance, startNodeCompliance, toastComplianceError, failNodeCompliance, ensureMediaNodeCompliance, handleComplianceCheck };
 }

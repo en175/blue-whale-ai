@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from '../snapPreference';
+import type { CardFilter } from '../components/SharedAssetsModal';
 
 export type ToolMode = 'drag' | 'select';
 
@@ -20,7 +21,7 @@ export function useCanvasWorkbenchChrome() {
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
   const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
-  const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<string | undefined>(undefined);
+  const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<CardFilter | undefined>(undefined);
   const [showEdges, setShowEdges] = useState(true);
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
   const [pendingDeleteGroup, setPendingDeleteGroup] = useState<{ id: string; count: number } | null>(null);

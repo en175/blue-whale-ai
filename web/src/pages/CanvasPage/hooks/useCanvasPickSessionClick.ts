@@ -25,7 +25,11 @@ export interface CanvasPickSessionClickHost {
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
 
   pickMode: PickChannel | null;
+  pickTarget: PickChannel | null;
   pickRefRole: VideoRefRole | null;
+  imagePickSessionActive: boolean;
+  videoPickSessionActive: boolean;
+  audioPickSessionActive: boolean;
   imagePickSession: string | null | undefined;
   videoPickSession: string | null | undefined;
   audioPickSession: string | null | undefined;
@@ -62,6 +66,7 @@ export interface CanvasPickSessionClickHandles {
   handleVideoPickSessionClick: (node: Node) => void;
   handleAudioPickSessionClick: (node: Node) => void;
   resetPickState: () => void;
+  clearPickState: () => void;
 }
 
 export function useCanvasPickSessionClick(host: CanvasPickSessionClickHost): CanvasPickSessionClickHandles {
@@ -102,6 +107,18 @@ export function useCanvasPickSessionClick(host: CanvasPickSessionClickHost): Can
     setPickTarget(null);
     setPickProductId(null);
     setPickAssetId(null);
+  };
+  const clearPickState = () => {
+    if (host.imagePickSessionActive) host.endImagePickSession();
+    if (host.videoPickSessionActive) host.endVideoPickSession();
+    if (host.audioPickSessionActive) host.endAudioPickSession();
+    if (host.pickMode || host.pickTarget) {
+      setPickMode(null);
+      setPickTarget(null);
+      host.setPickRefRole(null);
+      setPickProductId(null);
+      setPickAssetId(null);
+    }
   };
 
   const handleImagePickSessionClick = (node: Node) => {
@@ -335,5 +352,5 @@ export function useCanvasPickSessionClick(host: CanvasPickSessionClickHost): Can
     });
   };
 
-  return { handleImagePickSessionClick, handleVideoPickSessionClick, handleAudioPickSessionClick, resetPickState };
+  return { handleImagePickSessionClick, handleVideoPickSessionClick, handleAudioPickSessionClick, resetPickState, clearPickState };
 }

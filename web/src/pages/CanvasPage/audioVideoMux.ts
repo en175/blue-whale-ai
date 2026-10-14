@@ -51,6 +51,17 @@ export function buildAudioVideoMuxIdentity(sourceNodeId: string, sourceAssetId?:
   return { sourceNodeId, sourceAssetId, reserveAudio: true, sync: 'none' };
 }
 
+export function audioVideoMuxInFlightSourceIdsOf(nodes: Node[]): Set<string> {
+  return new Set(
+    nodes
+      .filter((n) => {
+        if ((n.data as Record<string, unknown>).genStatus !== 'generating') return false;
+        return audioVideoMuxIdentityOf(n) !== undefined;
+      })
+      .map((n) => audioVideoMuxIdentityOf(n)!.sourceNodeId),
+  );
+}
+
 export function audioVideoMuxIdentityOf(node: Node | undefined): AudioVideoMuxIdentity | undefined {
   if (!node || node.type !== 'mediaNode') return undefined;
   const identity = ((node.data ?? {}) as Record<string, unknown>).audioVideoMux;

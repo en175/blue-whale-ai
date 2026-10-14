@@ -3,10 +3,11 @@ import type { MaterialAsset } from '@/api/material';
 import type { AssetCardKind } from '../components/AssetCardNode';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { CanvasGalleryRef } from '../collectMediaBlocks';
+import type { CardFilter } from '../components/SharedAssetsModal';
 
 export function useCanvasChromeActions(input: {
   setAssetsModalDefaultTab: Dispatch<SetStateAction<string | undefined>>;
-  setAssetsModalDefaultFilter: Dispatch<SetStateAction<string | undefined>>;
+  setAssetsModalDefaultFilter: Dispatch<SetStateAction<CardFilter | undefined>>;
   setShowAssetsModal: Dispatch<SetStateAction<boolean>>;
   handleCreateAssetCard: (kind: AssetCardKind) => void;
   handleCreateProduct: () => void;
