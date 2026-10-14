@@ -7,7 +7,6 @@ const BACKEND_TOOLING_FILE = /^backend\/scripts\/.*\.mjs$/;
 const JAVA_SOURCE = /^server\/(?:blue-whale-worker\/|blue-whale-common\/|pom\.xml)/;
 const BILLING_SOURCE = /^server\/blue-whale-billing\//;
 const WEB_TOOLING_FILE = /^web\/scripts\/.*\.(?:mjs|cjs|js)$/;
-const WEB_E2E_FILE = /^web\/e2e\/.*\.(?:ts|json)$/;
 const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.claude\/skills$|\.claude\/settings\.json|\.codex\/hooks\.json|\.qoder\/settings\.json|\.kimi-code\/(?:hooks\.toml|hooks\/)|\.(?:claude|codex)\/hooks\/|\.zcode\/(?:config\.json|ponytail\.json$|plugins\/(?:marketplace\.json$|ponytail\/))|scripts\/(?:check-code-comments|check-contract-breaking|check-error-code-drift|check-hook-closed-loop|check-hook-contracts|check-project-skills|cleanup-implement-spec-child|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|manage-release-branch|merge-implement-spec-child|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|probe-zcode-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-implement-spec-skill|sync-release-line|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|compress-gallery-images|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|fix-ikij40-canvas-309-mojibake|import-brand-gallery-assets|reconcile-cost-reservations|recompress-gallery-videos|run-ik50gb-c-testsite-probe|run-real-canary|run-testsite-sql|tunnel-testsite-db|update-gallery-final)\./;
 const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|contracts\/|backend\/libs\/contracts\/|backend\/prisma\/|server\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
@@ -57,7 +56,7 @@ function sourceArea(file) {
   if (NODE_SOURCE.test(file)) return "node";
   if (BACKEND_SOURCE.test(file) || BACKEND_TOOLING_FILE.test(file) || /^backend\/prisma\//.test(file)) return "backend";
   if (JAVA_SOURCE.test(file)) return "worker-java";
-  if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) || WEB_E2E_FILE.test(file) ||
+  if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) ||
       (file.startsWith("web/") && !EXECUTABLE_FILE.test(file) && requiresFrontendBuild([file]))) return "web";
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
   if (OPERATIONS_FILE.test(file)) return "operations";

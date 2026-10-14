@@ -15,7 +15,6 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "verify:bugfix": "npm run lint && npm test && npm run build:release",
-    "smoke:bugfix": "node scripts/run-bugfix-smoke.mjs",
     "check:agent-routes": "node scripts/check-agent-routes.mjs"
   },
   "dependencies": {
@@ -42,7 +41,6 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
