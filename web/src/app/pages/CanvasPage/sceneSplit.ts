@@ -4,7 +4,7 @@ import {
   VIDEO_SCENE_SPLIT_GRANULARITIES,
   type VideoSceneSplitGranularity,
 } from '@lib/contracts/video-scene-split';
-import { readJobFailText } from '@/api/jobs';
+import { readJobFailText } from '@/app/api/jobs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import { overlaps, type SpawnBox } from './draftSpawn';
 

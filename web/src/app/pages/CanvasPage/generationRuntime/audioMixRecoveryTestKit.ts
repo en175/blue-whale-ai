@@ -1,8 +1,8 @@
 import { expect, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
-import { createAudioMix, type JobDetail } from '@/api/jobs';
+import { createAudioMix, type JobDetail } from '@/app/api/jobs';
 import { audioMixCreateSchema } from '@lib/contracts/audio-mix';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import { createGenerationRuntime } from './runtime';
 import { audioMixTask, staleMixSubmitError, watchMixSubmit } from './mixMuxTasks';
 import { seedSourcesOfNode } from './seedFacts';

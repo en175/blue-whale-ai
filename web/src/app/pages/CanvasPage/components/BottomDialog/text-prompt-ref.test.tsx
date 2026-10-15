@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BottomDialog from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
-import type { PromptDoc } from '@/utils/prompt-doc';
+import type { PromptDoc } from '@/app/utils/prompt-doc';
 import { readPromptRefText, typePromptRefRaw } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
@@ -31,7 +31,7 @@ const fetchGenerationModels = vi.hoisted(() =>
   ]),
 );
 
-vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
+vi.mock('@/app/api/generation', () => ({ fetchGenerationModels }));
 
 const IMG_A: VideoMediaRef = { nodeId: 'node-101', url: 'https://x/101', name: '素材101', assetId: '101', mediaType: 'image' };
 const ATT_STYLE: ImageTextAttachment = { nodeId: 'text-1-style', title: '风格要求', text: '胶片感' };

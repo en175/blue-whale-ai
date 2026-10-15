@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { apiRequest } from '@/api/http';
+import { apiRequest } from '@/shared/api/http';
 
 export const DASHBOARD_MAX_RANGE_DAYS = 30;
 

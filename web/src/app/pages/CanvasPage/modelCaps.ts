@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { GenerationModel } from '@/api/generation';
+import type { GenerationModel } from '@/app/api/generation';
 import {
   audioReferenceMaxOf,
   imageReferenceMaxOf,
@@ -8,7 +8,7 @@ import {
   supportsVideoReferenceOf,
   videoReferenceMaxOf,
   UNRESOLVED_IMAGE_REFERENCE_LIMIT,
-} from '@/utils/model-reference-limits';
+} from '@/app/utils/model-reference-limits';
 import type { VideoRefCapabilities } from './videoMediaRefs';
 
 export function videoRefCapsOfModel(model?: GenerationModel | null): VideoRefCapabilities | null {

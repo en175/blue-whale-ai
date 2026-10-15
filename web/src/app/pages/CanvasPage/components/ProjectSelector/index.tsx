@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Trash2, FolderOpen, SquarePen, FolderPlus, Pin, PinOff } from 'lucide-react';
-import { defaultProjectName } from '@/utils/projectName';
+import { defaultProjectName } from '@/app/utils/projectName';
 import styles from './index.module.css';
 
 export interface CanvasProject {

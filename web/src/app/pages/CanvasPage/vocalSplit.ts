@@ -9,7 +9,7 @@ import {
   type VocalSplitScene,
   type VocalSplitTrackType,
 } from '@lib/contracts/vocal-split';
-import { readJobFailText } from '@/api/jobs';
+import { readJobFailText } from '@/app/api/jobs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 
 

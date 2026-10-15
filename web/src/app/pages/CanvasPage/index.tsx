@@ -15,7 +15,7 @@ import {
 
 import { audioVideoMuxInFlightSourceIdsOf } from './audioVideoMux';
 import type { CanvasProject } from './components/ProjectSelector';
-import { serializeEdges, serializeNodes } from '@/api/canvas';
+import { serializeEdges, serializeNodes } from '@/app/api/canvas';
 import {
   availableGenKinds,
   isConnectableSource,

@@ -6,7 +6,7 @@ import type { Connection, Edge, Node } from '@xyflow/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('../videoModes', () => ({ draftVideoModeOf: () => null }));
-vi.mock('@/utils/video-modes', () => ({
+vi.mock('@/app/utils/video-modes', () => ({
   frameSlotCountOf: () => 0,
   isFrameMode: () => false,
 }));

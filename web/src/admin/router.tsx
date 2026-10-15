@@ -1,7 +1,7 @@
 import { Dashboard, RechargePlans, RechargeCustomConfig, Promotions, MemberDiscounts, RechargeRecords, ConsumptionRecords, JobRecords, TemplateManage, SkillManage, ModelList, UserManage, OperationLog, SystemConfig, SiteConfig } from './lazyPages';
 import { LazyPage as L } from './LazyPage';
 import { Navigate } from 'react-router-dom';
-import RequireAdmin from '@/router/guards';
+import RequireAdmin from '@/shared/router/guards';
 import AdminLayout from './layouts/AdminLayout';
 
 export const adminRoutes = {

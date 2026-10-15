@@ -1,6 +1,6 @@
 import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
-import type { SessionContentBlock } from '@/api/agentSessions';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
 import type { CanvasGalleryRef } from '../collectMediaBlocks';
 import { collectMediaBlocks } from '../collectMediaBlocks';
 import { extractTextNodeText, quoteChipLabel } from '../quoteConversation';

@@ -1,4 +1,4 @@
-import { apiRequest } from '@/api/http';
+import { apiRequest } from '@/shared/api/http';
 
 export interface TemplateTag {
   tag_code: string;

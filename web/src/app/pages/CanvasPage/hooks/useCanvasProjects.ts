@@ -8,8 +8,8 @@ import {
   pinProject,
   projectKeys,
   renameProject,
-} from '@/api/projects';
-import { defaultProjectName } from '@/utils/projectName';
+} from '@/app/api/projects';
+import { defaultProjectName } from '@/app/utils/projectName';
 import type { CanvasProject } from '../components/ProjectSelector';
 import { shouldReturnToProjectsAfterDelete } from '../canvasQuery';
 

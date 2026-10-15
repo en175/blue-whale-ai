@@ -14,10 +14,10 @@ import {
   type MaterialGroup,
   type MaterialAsset,
   type GroupType,
-} from '@/api/material';
-import { isApiError } from '@/api/http';
-import ConfirmModal from '@/components/ConfirmModal';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+} from '@/app/api/material';
+import { isApiError } from '@/shared/api/http';
+import ConfirmModal from '@/app/components/ConfirmModal';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { formatAssetCreatedAt } from '../AssetDetailModal/format';
 import styles from './index.module.css';
 

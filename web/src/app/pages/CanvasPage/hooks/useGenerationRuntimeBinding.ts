@@ -1,9 +1,9 @@
 import { useMemo, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { QueryClient } from '@tanstack/react-query';
-import { useAuthPromptStore } from '@/stores/authPrompt';
-import { openRechargeForCreditsError } from '@/utils/creditsGate';
-import { generationRecoveryPageOptions } from '@/api/canvasRecovery';
+import { useAuthPromptStore } from '@/shared/stores/authPrompt';
+import { openRechargeForCreditsError } from '@/app/utils/creditsGate';
+import { generationRecoveryPageOptions } from '@/app/api/canvasRecovery';
 import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from '../generationRuntime/runtime';
 import { normalGenerationTask } from '../generationRuntime/normalGeneration';
 import { storyboardTask } from '../generationRuntime/storyboardTasks';

@@ -3,7 +3,7 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@/api/http';
+import { ApiError } from '@/shared/api/http';
 import BillingTab from './BillingTab';
 import { creditsPerYuanError, floorFactorBpError } from './billingSiteParams';
 
@@ -12,8 +12,8 @@ const api = vi.hoisted(() => ({
   publishBillingCatalog: vi.fn(),
 }));
 
-vi.mock('@/api/adminBillingCatalog', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminBillingCatalog')>();
+vi.mock('@/admin/api/adminBillingCatalog', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminBillingCatalog')>();
   return {
     ...actual,
     fetchBillingCatalog: api.fetchBillingCatalog,

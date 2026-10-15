@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
-import { cancelGenerationJob, createAudioMix, createAudioVideoMux, type JobDetail } from '@/api/jobs';
+import { cancelGenerationJob, createAudioMix, createAudioVideoMux, type JobDetail } from '@/app/api/jobs';
 import { createGenerationRuntime } from './runtime';
 import { audioMixTask, audioVideoMuxTask, watchMixSubmit } from './mixMuxTasks';
 import { seedSourcesOfNode, seedTargetOfNode } from './seedFacts';
@@ -13,8 +13,8 @@ import type { ToolSessionDeps } from '../toolSessionCoordinator';
 import { buildAudioVideoMuxIdentity } from '../audioVideoMux';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 
-vi.mock('@/api/jobs', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/api/jobs')>(),
+vi.mock('@/app/api/jobs', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/app/api/jobs')>(),
   createAudioMix: vi.fn(),
   createAudioVideoMux: vi.fn(),
   retryAudioMix: vi.fn(),

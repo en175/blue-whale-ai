@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@/api/http';
-import { FileRejectedError } from '@/utils/fileSignature';
+import { ApiError } from '@/shared/api/http';
+import { FileRejectedError } from '@/app/utils/fileSignature';
 import { uploadMaterialLibraryFiles } from './characterLibraryUpload';
 
 const { createAsset, uploadAssetFile } = vi.hoisted(() => ({
@@ -8,8 +8,8 @@ const { createAsset, uploadAssetFile } = vi.hoisted(() => ({
   uploadAssetFile: vi.fn(),
 }));
 
-vi.mock('@/api/material', () => ({ createAsset }));
-vi.mock('@/utils/upload', () => ({ uploadAssetFile }));
+vi.mock('@/app/api/material', () => ({ createAsset }));
+vi.mock('@/app/utils/upload', () => ({ uploadAssetFile }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }));
 
 function imageFile(name = 'face.png') {

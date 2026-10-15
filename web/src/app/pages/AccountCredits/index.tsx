@@ -11,9 +11,9 @@ import {
   type CreditLotRow,
   type OrderRow,
   type OrderStatus,
-} from '@/api/accountCredits';
+} from '@/app/api/accountCredits';
 import { taskTypeLabel } from '@/admin/taskTypeLabels';
-import { useDocumentTitle } from '@/seo/useDocumentTitle';
+import { useDocumentTitle } from '@/shared/seo/useDocumentTitle';
 import { formatBeijingDateTime } from './format';
 import ExportDialog from './ExportDialog';
 import SummaryCards from './SummaryCards';

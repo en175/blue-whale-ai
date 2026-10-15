@@ -1,6 +1,6 @@
 import { Pause, Play } from 'lucide-react';
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export type AudioPlayerVariant = 'compact' | 'full';

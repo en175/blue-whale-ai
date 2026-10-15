@@ -5,7 +5,7 @@ import type {
   SessionContentBlock,
   SessionMessage,
   SessionRun,
-} from '@/api/agentSessions';
+} from '@/app/api/agentSessions';
 import { mergeConfirmedUser as mergeUserMessage, textOf } from './userMessageProjection';
 import type { PartialCardPreview } from './partialCardPreview';
 import { toPartialCardPreview } from './partialCardPreview';

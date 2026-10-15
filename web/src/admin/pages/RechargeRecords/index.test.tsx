@@ -3,14 +3,14 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@/api/http';
+import { ApiError } from '@/shared/api/http';
 import RechargeRecords from './index';
 
 
 const api = vi.hoisted(() => ({ fetchRecords: vi.fn(), retryGrant: vi.fn() }));
 
-vi.mock('@/api/adminRechargeRecords', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminRechargeRecords')>();
+vi.mock('@/admin/api/adminRechargeRecords', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminRechargeRecords')>();
   return {
     ...actual,
     adminRechargeRecordsOptions: (query: unknown) => ({

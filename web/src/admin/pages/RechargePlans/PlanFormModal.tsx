@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import type { TopupTierPermission, TopupTierStatus } from '@/api/adminTopupTiers';
-import { isApiError } from '@/api/http';
+import type { TopupTierPermission, TopupTierStatus } from '@/admin/api/adminTopupTiers';
+import { isApiError } from '@/shared/api/http';
 import {
   Button,
   Checkbox,

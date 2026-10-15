@@ -1,4 +1,4 @@
-import { readJobFailText } from '@/api/jobs';
+import { readJobFailText } from '@/app/api/jobs';
 import {
   AUDIO_SPEED_OUTPUT_FORMAT,
   buildAudioSpeedInput,

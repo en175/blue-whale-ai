@@ -1,4 +1,4 @@
-import { http } from '@/api/http';
+import { http } from '@/shared/api/http';
 
 export interface SkillRecord {
   creative_skill_id: string | null;

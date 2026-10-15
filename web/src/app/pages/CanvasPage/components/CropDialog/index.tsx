@@ -1,5 +1,5 @@
 import { ArrowUp } from 'lucide-react';
-import RatioIcon from '@/components/RatioIcon';
+import RatioIcon from '@/app/components/RatioIcon';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { CROP_PRESET_LABELS, CROP_PRESET_ORDER, type CropPresetKey } from '../../imageCrop';
 import styles from './index.module.css';

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectPageData, ProjectRecord } from '@/api/projects';
+import type { ProjectPageData, ProjectRecord } from '@/app/api/projects';
 import Projects from './index';
 
 const projectApi = vi.hoisted(() => ({
@@ -16,7 +16,7 @@ const projectApi = vi.hoisted(() => ({
   pinProject: vi.fn(),
 }));
 
-vi.mock('@/api/projects', () => ({
+vi.mock('@/app/api/projects', () => ({
   touchProjectLastOpened: vi.fn(async () => undefined),
   projectKeys: {
     all: ['projects'],

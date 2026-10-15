@@ -1,9 +1,9 @@
 import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
+import { isApiError } from '@/shared/api/http';
 import type { QueryClient } from '@tanstack/react-query';
-import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
-import { fetchJobStatus, type JobDetail } from '@/api/jobs';
+import { frameInterpolationRecoveryOptions } from '@/app/api/frameInterpolationRecovery';
+import { fetchJobStatus, type JobDetail } from '@/app/api/jobs';
 import type { FrameInterpolationSubmission, VideoEnhanceSubmission } from '../panelToolSessions';
 import type { FrameInterpolationIdentity } from '../frameInterpolation';
 import type { VideoToolPayload } from '../generationRuntime/videoTools';

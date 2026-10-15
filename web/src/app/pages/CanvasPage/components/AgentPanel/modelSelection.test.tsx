@@ -50,11 +50,11 @@ const DEFAULT_CATALOG = [
   { model_id: 'doubao-seed-evolving', model_label: 'doubao-seed-evolving' },
 ];
 
-vi.mock('@/api/generation', () => ({
+vi.mock('@/app/api/generation', () => ({
   fetchGenerationModels: vi.fn(async () => catalog.rows),
 }));
 
-vi.mock('@/api/skills', () => ({ fetchMySkills: vi.fn(async () => []) }));
+vi.mock('@/app/api/skills', () => ({ fetchMySkills: vi.fn(async () => []) }));
 vi.mock('../ChipTextEditor', () => ({
   default: () => createElement('div', { 'data-testid': 'chip-editor' }),
 }));
@@ -98,7 +98,7 @@ describe('Agent 面板不让选文本模型（IKHCK4）', () => {
 
     expect(container.querySelector('[aria-label*="Agent 模型"]')).toBeNull();
     expect(container.textContent).not.toContain('Agent 模型');
-    const { fetchGenerationModels } = await import('@/api/generation');
+    const { fetchGenerationModels } = await import('@/app/api/generation');
     expect(vi.mocked(fetchGenerationModels)).not.toHaveBeenCalledWith('text');
   });
 

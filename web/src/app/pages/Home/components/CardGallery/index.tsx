@@ -14,8 +14,8 @@ import {
   fetchTemplatePage,
   type TemplateTag,
   type TemplateRecord,
-} from '@/api/agent';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+} from '@/app/api/agent';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import {
   galleryCoverSrc,
   mediaKindFromTagCode,

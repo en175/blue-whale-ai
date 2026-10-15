@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import type { SessionContentBlock } from '@/api/agentSessions';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
 
 export function useCanvasAgentSurface() {
   const navigate = useNavigate();

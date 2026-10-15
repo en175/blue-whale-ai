@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment } from './index';
 import type { ImageMediaRef } from '../../mediaRefs';
 import type { AtMentionItem } from '../../atMention';
-import type { PromptDoc } from '@/utils/prompt-doc';
+import type { PromptDoc } from '@/app/utils/prompt-doc';
 import { AssetRefNode } from '../PromptRefEditor/AssetRefNode';
 import { collapseCaretAt, promptRefEditorInstance, promptRefCaretOffset, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
@@ -33,7 +33,7 @@ const fetchGenerationModels = vi.hoisted(() =>
   ]),
 );
 
-vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
+vi.mock('@/app/api/generation', () => ({ fetchGenerationModels }));
 
 const REF_A: ImageMediaRef = { nodeId: 'na', url: 'https://x/a.png', name: '角色图', assetId: '101' };
 const REF_B: ImageMediaRef = { nodeId: 'nb', url: 'https://x/b.png', name: '衣服图', assetId: '102' };

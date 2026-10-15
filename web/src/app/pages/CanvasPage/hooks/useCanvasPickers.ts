@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import type { AudioRefItem } from '../components/AudioDialog';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { CanvasGalleryRef } from '../collectMediaBlocks';
-import type { SessionContentBlock } from '@/api/agentSessions';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
 import type { VideoRefRole } from '../videoMediaRefs';
 
 export type PickChannel = 'image' | 'video' | 'audio' | 'product' | 'asset';

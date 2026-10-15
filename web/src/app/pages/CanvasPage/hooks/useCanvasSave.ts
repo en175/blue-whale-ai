@@ -5,13 +5,13 @@ import {
   saveCanvasDoc,
   serializeEdges,
   serializeNodes,
-} from '@/api/canvas';
-import { isApiError } from '@/api/http';
+} from '@/app/api/canvas';
+import { isApiError } from '@/shared/api/http';
 import {
   putCanvasDocWithRecovery,
   type CanvasRecoverySaveData,
   type RecoveryChange,
-} from '@/api/canvasRecovery';
+} from '@/app/api/canvasRecovery';
 import { readRecoveryErrorReason } from '../canvasPureNodeHelpers';
 import { groupToNode, type CanvasGroup } from '../canvasGroups';
 import type { GenerationRuntime } from '../generationRuntime/runtime';

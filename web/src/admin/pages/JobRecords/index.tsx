@@ -4,7 +4,7 @@ import {
   adminJobRecordsOptions,
   type AdminJobRecord,
   type AdminJobRecordQuery,
-} from '@/api/adminJobRecords';
+} from '@/admin/api/adminJobRecords';
 import { TASK_TYPE_OPTIONS } from '../../taskTypeLabels';
 import AdminQueryTable, {
   type Column,

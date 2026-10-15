@@ -3,15 +3,15 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/api/canvasRecovery';
-import { createAudioMix, retryAudioMix, type JobDetail } from '@/api/jobs';
+import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
+import { createAudioMix, retryAudioMix, type JobDetail } from '@/app/api/jobs';
 import MediaNode from '../components/MediaNode';
 import { audioMixTask, audioVideoMuxTask } from './mixMuxTasks';
 import { createGenerationRuntime } from './runtime';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 
-vi.mock('@/api/jobs', async importOriginal => ({
-  ...await importOriginal<typeof import('@/api/jobs')>(),
+vi.mock('@/app/api/jobs', async importOriginal => ({
+  ...await importOriginal<typeof import('@/app/api/jobs')>(),
   createAudioMix: vi.fn(), retryAudioMix: vi.fn(),
 }));
 

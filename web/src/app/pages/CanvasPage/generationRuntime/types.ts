@@ -1,7 +1,7 @@
 import type {
   CanvasBinding, GenerationRecoveryItem, GenerationRecoveryPage, GenerationRecoveryRecord,
-} from '@/api/canvasRecovery';
-import type { JobDetail } from '@/api/jobs';
+} from '@/app/api/canvasRecovery';
+import type { JobDetail } from '@/app/api/jobs';
 
 export interface RuntimeNodeView {
   id: string;
@@ -200,7 +200,7 @@ export interface GenerationRuntime {
   ): void;
   statusOf(nodeId: string): InFlightTaskState | null;
   bindingRevisionOf(nodeId: string): number;
-  composeSaveFields(): { commandId: string; recoveryChanges: import('@/api/canvasRecovery').RecoveryChange[] } | null;
+  composeSaveFields(): { commandId: string; recoveryChanges: import('@/app/api/canvasRecovery').RecoveryChange[] } | null;
   onSaveReceipt(receipt: { commandId: string; replayed: boolean; changes: Array<{ recoveryItemId: string; revision: number; nodeBindingRevision: number; state: string }> }): void;
   reconcileConflictItems(projectId: string): Promise<void>;
   reset(): void;

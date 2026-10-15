@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GenerationModel } from '@/api/generation';
+import type { GenerationModel } from '@/app/api/generation';
 import BottomDialog from './index';
 import styles from './index.module.css';
 import { typePromptRefText } from '../../testing/promptRefEditor';
@@ -17,7 +17,7 @@ const { fetchGenerationModels } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
 }));
 
-vi.mock('@/api/generation', () => ({
+vi.mock('@/app/api/generation', () => ({
   fetchGenerationModels,
 }));
 

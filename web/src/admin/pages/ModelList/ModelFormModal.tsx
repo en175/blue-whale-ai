@@ -37,8 +37,8 @@
 
 
 import { useEffect, useMemo, useState } from 'react';
-import type { AdminModel, CreateAdminModelParams } from '@/api/adminModels';
-import { isApiError } from '@/api/http';
+import type { AdminModel, CreateAdminModelParams } from '@/admin/api/adminModels';
+import { isApiError } from '@/shared/api/http';
 import {
   formFromRule,
   ruleFormError,

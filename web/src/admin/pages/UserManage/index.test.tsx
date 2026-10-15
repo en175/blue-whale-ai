@@ -11,8 +11,8 @@ const adminApi = vi.hoisted(() => ({
   fetchOperationLogs: vi.fn(),
 }));
 
-vi.mock('@/api/adminUsers', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminUsers')>();
+vi.mock('@/admin/api/adminUsers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminUsers')>();
   return {
     ...actual,
     ...adminApi,
@@ -23,8 +23,8 @@ vi.mock('@/api/adminUsers', async (importOriginal) => {
   };
 });
 
-vi.mock('@/api/adminOperationLogs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminOperationLogs')>();
+vi.mock('@/admin/api/adminOperationLogs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminOperationLogs')>();
   return {
     ...actual,
     operationLogsOptions: (params: Parameters<typeof actual.fetchOperationLogs>[0]) => ({

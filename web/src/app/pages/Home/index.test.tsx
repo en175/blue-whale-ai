@@ -2,10 +2,10 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useAuthStore, type SessionUser } from '@/stores/auth';
+import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
 import Home from './index';
 
-vi.mock('@/components/UserDropdown', () => ({
+vi.mock('@/app/components/UserDropdown', () => ({
   default: function MockUserDropdown() {
     return createElement('div', { 'data-testid': 'user-dropdown' });
   },

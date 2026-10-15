@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useAuthStore } from '@/stores/auth';
+import { useAuthStore } from '@/shared/stores/auth';
 import { useAuthPromptStore } from './authPrompt';
 
 const sampleUser = {

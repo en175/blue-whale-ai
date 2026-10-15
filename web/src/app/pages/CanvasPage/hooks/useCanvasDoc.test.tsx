@@ -2,12 +2,12 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { SnapshotAsset } from '@/api/projects';
+import type { SnapshotAsset } from '@/app/api/projects';
 import { useCanvasDoc } from './useCanvasDoc';
 
 const fetchSnapshot = vi.hoisted(() => vi.fn());
-vi.mock('@/api/projects', () => ({ fetchProjectSnapshot: fetchSnapshot }));
-vi.mock('@/api/canvas', () => ({ fetchCanvasDoc: vi.fn() }));
+vi.mock('@/app/api/projects', () => ({ fetchProjectSnapshot: fetchSnapshot }));
+vi.mock('@/app/api/canvas', () => ({ fetchCanvasDoc: vi.fn() }));
 
 function snapshot(projectId: string, version: number | null) {
   return {

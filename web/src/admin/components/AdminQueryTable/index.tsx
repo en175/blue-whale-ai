@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { isApiError } from "@/api/http";
+import { isApiError } from "@/shared/api/http";
 import { Alert, Button, Empty, Page, PageHeader, Pagination, Table, Toolbar } from "../../ui";
 
 export interface Column<T> {

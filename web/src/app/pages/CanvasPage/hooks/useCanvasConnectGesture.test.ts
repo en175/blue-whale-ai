@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { Edge, Node } from '@xyflow/react';
-import type { GenerationModel } from '@/api/generation';
+import type { GenerationModel } from '@/app/api/generation';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { availableGenKinds, isConnectableSource } from '../connectAbility';
 import { audioRefSourceError } from '../audioMediaRefs';

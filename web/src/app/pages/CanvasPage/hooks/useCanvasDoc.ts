@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
-import { fetchProjectSnapshot, type SnapshotAsset } from '@/api/projects';
-import { fetchCanvasDoc, type CanvasDoc, type LegacyMigrationReport } from '@/api/canvas';
+import { fetchProjectSnapshot, type SnapshotAsset } from '@/app/api/projects';
+import { fetchCanvasDoc, type CanvasDoc, type LegacyMigrationReport } from '@/app/api/canvas';
 
 const EMPTY_DOC: CanvasDoc = {
   id: null,

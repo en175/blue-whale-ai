@@ -1,4 +1,4 @@
-import { resolveMediaSrc } from '@/utils/remoteImageCors';
+import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 
 export function assetMediaDisplay(
   url: string,

@@ -1,8 +1,8 @@
 import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
-import { restorePromptDoc } from '@/utils/prompt-doc';
+import { restorePromptDoc } from '@/app/utils/prompt-doc';
 import { composeImageSendPrompt } from '../components/ImageDialog/composeImageSendPrompt';
-import { composedPromptLimitError, promptMaxLengthOfModel } from '@/utils/prompt-max-length';
+import { composedPromptLimitError, promptMaxLengthOfModel } from '@/app/utils/prompt-max-length';
 import {
   mergedImageRefsOf,
   imageTextIndexSendError,
@@ -14,11 +14,11 @@ import {
 } from '../textIndexSync';
 import { orderRefStripItems, videoRefStripKey } from '../components/RefThumbnail/strip-dnd';
 import { draftVideoModeOf, defaultVideoModeFor } from '../videoModes';
-import { lockedDurationOf, effectiveVideoParams, type VideoModeFeatures } from '@/utils/video-modes';
+import { lockedDurationOf, effectiveVideoParams, type VideoModeFeatures } from '@/app/utils/video-modes';
 import { videoRefConflict, type VideoMediaRefs } from '../videoMediaRefs';
 import { buildImageJobReferences, buildVideoJobReferences } from '../videoJobReferences';
 import type { ImageTextAttachment } from '../components/ImageDialog';
-import { isTaskTypeParamConstraintCode } from '@/utils/video-reference-hints';
+import { isTaskTypeParamConstraintCode } from '@/app/utils/video-reference-hints';
 import type { CanvasGenerationSubmissionHandles } from './useCanvasGenerationSubmission';
 
 export interface CanvasUpdateGenerateHost {

@@ -1,11 +1,11 @@
 import { X } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
-import type { AssetRecord } from '@/api/assets';
-import type { JobSourceTarget } from '@/components/JobSourceModal';
-import Modal from '@/components/Modal';
-import Skeleton from '@/components/Skeleton';
-import { formatFileSize } from '@/utils/format-file-size';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import type { AssetRecord } from '@/app/api/assets';
+import type { JobSourceTarget } from '@/app/components/JobSourceModal';
+import Modal from '@/app/components/Modal';
+import Skeleton from '@/app/components/Skeleton';
+import { formatFileSize } from '@/app/utils/format-file-size';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { assetAspectRatio } from '../../assetGrid';
 import AudioPlayer from '../AudioPlayer';
 import {

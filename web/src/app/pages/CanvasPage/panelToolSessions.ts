@@ -1,5 +1,5 @@
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
+import { isApiError } from '@/shared/api/http';
 import { buildImageEnhanceInput, restoreImageEnhanceParams, type ImageEnhanceIdentity, type ImageEnhancePanelParams } from './imageEnhance';
 import { buildVideoEnhanceInput, restoreVideoEnhanceResolution, type VideoEnhanceIdentity } from './videoEnhance';
 import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';

@@ -1,4 +1,4 @@
-import { fileToAssetType } from '@/utils/upload';
+import { fileToAssetType } from '@/app/utils/upload';
 
 export type AttachmentPlan =
   | { ok: true; mediaType: 'image' | 'video' }

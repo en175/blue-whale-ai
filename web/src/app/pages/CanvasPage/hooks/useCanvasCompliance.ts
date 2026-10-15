@@ -1,7 +1,7 @@
 import { type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
-import type { SnapshotAsset } from '@/api/projects';
+import { isApiError } from '@/shared/api/http';
+import type { SnapshotAsset } from '@/app/api/projects';
 import {
   COMPLIANCE_FAILED_TOAST,
   COMPLIANCE_SUCCESS_TOAST,

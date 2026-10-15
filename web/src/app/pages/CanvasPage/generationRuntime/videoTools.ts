@@ -6,8 +6,8 @@ import {
   type CreateMediaExtractionPayload, type CreateVideoEnhancementPayload,
   type CreateVideoMattingPayload, type CreateVideoSubtitleErasePayload,
   type MediaToolCanvasBindingView, readJobFailText,
-} from '@/api/jobs';
-import type { CanvasBinding, GenerationRecoveryRecord } from '@/api/canvasRecovery';
+} from '@/app/api/jobs';
+import type { CanvasBinding, GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import { isAudioSpeedNodeId } from '../audioSpeed';
 import { isAudioTrimNodeId } from '../audioTrim';
 import { isMediaExtractNodeId } from '../mediaExtract';

@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { useSyncExternalStore } from 'react';
 import { Navigate } from 'react-router-dom';
-import { isAdmin, isLoggedIn, subscribe } from '@/utils/auth';
+import { isAdmin, isLoggedIn, subscribe } from '@/shared/utils/auth';
 
 interface GuardProps {
   children: ReactElement;

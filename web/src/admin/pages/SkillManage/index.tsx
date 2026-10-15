@@ -8,9 +8,9 @@ import {
   renameAdminSkillCategory,
   deleteAdminSkillCategory,
   type AdminSkill,
-} from '@/api/adminSkills';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminSkills';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import {
   Alert,

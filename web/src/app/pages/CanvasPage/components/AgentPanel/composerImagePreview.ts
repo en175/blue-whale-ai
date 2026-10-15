@@ -1,4 +1,4 @@
-import type { SessionContentBlock } from '@/api/agentSessions';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
 
 export interface ComposerMediaPreview {
   url: string;

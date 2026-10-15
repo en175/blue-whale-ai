@@ -13,13 +13,13 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import styles from './index.module.css';
-import { fetchMySkills } from '@/api/skills';
+import { fetchMySkills } from '@/app/api/skills';
 import { useAgentSession } from '../../hooks/useAgentSession';
 import {
   type SessionContentBlock,
   type GenerationCardBlock,
   type OutboundAssetRef,
-} from '@/api/agentSessions';
+} from '@/app/api/agentSessions';
 import {
   commitSidebarAttachment,
   createAttachmentPreviewUrl,
@@ -31,8 +31,8 @@ import { composerImagePreview } from './composerImagePreview';
 import { ComposerAttachmentChip } from './ComposerAttachmentChip';
 import { MessageAssetPreview } from './MessageAssetPreview';
 import { isInlineMediaThumbnail, rememberAssetUrl, useAssetUrlCache } from './assetUrlCache';
-import SkillModal from '@/pages/Home/components/SkillModal';
-import ConfirmModal from '@/components/ConfirmModal';
+import SkillModal from '@/app/pages/Home/components/SkillModal';
+import ConfirmModal from '@/app/components/ConfirmModal';
 import ChipTextEditor, { type ChipRef, type ChipTextEditorHandle } from '../ChipTextEditor';
 import {
   EMPTY_COMPOSED,
@@ -106,10 +106,10 @@ interface AgentPanelProps {
   appliedCardIds?: ReadonlySet<string>;
   initialSkillId?: string;
   initialSkillName?: string;
-  mediaBlocks?: import('@/api/agentSessions').SessionContentBlock[];
+  mediaBlocks?: import('@/app/api/agentSessions').SessionContentBlock[];
   onPlaceFileOnCanvas: (file: File) => Promise<SidebarCanvasUpload>;
   onPickFromAssets?: () => void;
-  externalAssetPicks?: { ts: number; blocks: import('@/api/agentSessions').SessionContentBlock[] } | null;
+  externalAssetPicks?: { ts: number; blocks: import('@/app/api/agentSessions').SessionContentBlock[] } | null;
 }
 
 function hasInlineVisualMention(blocks: SessionContentBlock[] | undefined, chipId: string): boolean {
@@ -135,8 +135,8 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
 
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
   const composerHasText = !composedIsEmpty(composed);
-  const pendingMediaBlocksRef = useRef<import('@/api/agentSessions').SessionContentBlock[]>([]);
-  const [pendingMediaBlocksState, setPendingMediaBlocksState] = useState<import('@/api/agentSessions').SessionContentBlock[]>([]);
+  const pendingMediaBlocksRef = useRef<import('@/app/api/agentSessions').SessionContentBlock[]>([]);
+  const [pendingMediaBlocksState, setPendingMediaBlocksState] = useState<import('@/app/api/agentSessions').SessionContentBlock[]>([]);
   const syncMediaBlocks = () => {
     setPendingMediaBlocksState([...pendingMediaBlocksRef.current]);
   };
@@ -582,7 +582,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
       return;
     }
     const fullText = resolveComposed(composed).trim();
-    const uploadedBlocks: import('@/api/agentSessions').SessionContentBlock[] = readyAssets.map((asset) => {
+    const uploadedBlocks: import('@/app/api/agentSessions').SessionContentBlock[] = readyAssets.map((asset) => {
       const previewUrl = readyPreviewUrls.get(asset.asset_id);
       return {
         type: 'asset_ref',
@@ -710,7 +710,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
       return prev.filter((item) => item.key !== key);
     });
 
-  const removePendingMediaBlock = (block: import('@/api/agentSessions').SessionContentBlock) => {
+  const removePendingMediaBlock = (block: import('@/app/api/agentSessions').SessionContentBlock) => {
     pendingMediaBlocksRef.current = pendingMediaBlocksRef.current.filter((b) => b !== block);
     syncMediaBlocks();
   };

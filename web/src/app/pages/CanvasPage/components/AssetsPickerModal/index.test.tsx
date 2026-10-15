@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import AssetsPickerModal, { type AssetsPickerModalProps } from './index';
 import pickerStyles from './index.module.css';
-import libStyles from '@/pages/Assets/components/CharacterLibrary/index.module.css';
+import libStyles from '@/app/pages/Assets/components/CharacterLibrary/index.module.css';
 
 const { listAssetGroups, listAssets, assetPageFetch, deleteAssetApi, fetchAssetReferencesApi } = vi.hoisted(() => ({
   listAssetGroups: vi.fn(),
@@ -15,7 +15,7 @@ const { listAssetGroups, listAssets, assetPageFetch, deleteAssetApi, fetchAssetR
   fetchAssetReferencesApi: vi.fn(),
 }));
 
-vi.mock('@/api/assets', () => ({
+vi.mock('@/app/api/assets', () => ({
   assetKeys: { all: ['assets'] as const },
   assetPageQueryOptions: (type: string, size: number) => ({
     queryKey: ['asset-pages', type, size],
@@ -32,7 +32,7 @@ vi.mock('@/api/assets', () => ({
   }),
 }));
 
-vi.mock('@/pages/Assets/components/AssetMasonry', async () => {
+vi.mock('@/app/pages/Assets/components/AssetMasonry', async () => {
   const { createElement: h } = await import('react');
   return {
     default: (props: {
@@ -58,7 +58,7 @@ vi.mock('@/pages/Assets/components/AssetMasonry', async () => {
   };
 });
 
-vi.mock('@/pages/Assets/components/AssetDetailModal', async () => {
+vi.mock('@/app/pages/Assets/components/AssetDetailModal', async () => {
   const { createElement: h } = await import('react');
   return {
     default: ({ asset }: { asset: { id: string | number } | null }) => (
@@ -69,7 +69,7 @@ vi.mock('@/pages/Assets/components/AssetDetailModal', async () => {
   };
 });
 
-vi.mock('@/api/material', () => ({
+vi.mock('@/app/api/material', () => ({
   createAsset: vi.fn(),
   createAssetGroup: vi.fn(),
   createVisualValidateSession: vi.fn(),
@@ -80,9 +80,9 @@ vi.mock('@/api/material', () => ({
   listAssets,
 }));
 
-vi.mock('@/api/http', () => ({ isApiError: () => false }));
-vi.mock('@/utils/upload', () => ({ uploadAssetFile: vi.fn() }));
-vi.mock('@/utils/fileSignature', () => ({ isFileRejected: () => false }));
+vi.mock('@/shared/api/http', () => ({ isApiError: () => false }));
+vi.mock('@/app/utils/upload', () => ({ uploadAssetFile: vi.fn() }));
+vi.mock('@/app/utils/fileSignature', () => ({ isFileRejected: () => false }));
 
 let root: Root;
 let mountNode: HTMLDivElement;

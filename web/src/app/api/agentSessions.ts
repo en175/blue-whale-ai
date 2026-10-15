@@ -1,9 +1,9 @@
 import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
 import { readSseResponse, type SseEvent } from './events';
-import { ApiError, isApiError } from '@/api/http';
-import { newIdempotencyKey } from '@/api/idempotencyKey';
+import { ApiError, isApiError } from '@/shared/api/http';
+import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 import { agentPath, agentUrl, agentMethod } from './agentRoutes';
-import { handleUnauthorized } from '@/utils/auth';
+import { handleUnauthorized } from '@/shared/utils/auth';
 
 export type { SseEvent };
 

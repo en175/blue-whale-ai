@@ -2,8 +2,8 @@ import { useMutation } from '@tanstack/react-query';
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { PromptBinding } from '@lib/contracts/prompt-target';
-import { referencePromptPlan, serializeEdges, serializeNodes } from '@/api/canvas';
-import { normalizeVideoMode } from '@/utils/video-modes';
+import { referencePromptPlan, serializeEdges, serializeNodes } from '@/app/api/canvas';
+import { normalizeVideoMode } from '@/app/utils/video-modes';
 import type { CanvasHistoryApi } from './useCanvasHistory';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';

@@ -1,4 +1,4 @@
-import { readJobFailText } from '@/api/jobs';
+import { readJobFailText } from '@/app/api/jobs';
 import {
   AUDIO_TRIM_FALLBACK_OUTPUT_FORMAT,
   AUDIO_TRIM_OUTPUT_FORMATS,

@@ -16,8 +16,8 @@ import {
   type TemplateCard,
   type TemplateCardPayload,
   type AdminTemplateTag,
-} from '@/api/adminTemplateCards';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminTemplateCards';
+import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import {
   Alert,

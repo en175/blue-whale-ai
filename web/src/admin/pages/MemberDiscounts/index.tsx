@@ -9,8 +9,8 @@ import {
   updateMemberDiscount,
   type MemberDiscount,
   type MemberDiscountInput,
-} from '@/api/adminBillingDiscounts';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminBillingDiscounts';
+import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import DiscountPolicyNotice from '../../components/DiscountPolicyNotice';
 import {

@@ -11,7 +11,7 @@ const { listAssetGroups, listAssets, uploadMaterialLibraryFiles } = vi.hoisted((
   uploadMaterialLibraryFiles: vi.fn(),
 }));
 
-vi.mock('@/api/material', () => ({
+vi.mock('@/app/api/material', () => ({
   createAsset: vi.fn(),
   createAssetGroup: vi.fn(),
   deleteAssetGroup: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('@/api/material', () => ({
 
 vi.mock('../../characterLibraryUpload', () => ({ uploadMaterialLibraryFiles }));
 
-vi.mock('@/api/http', () => ({ isApiError: () => false }));
+vi.mock('@/shared/api/http', () => ({ isApiError: () => false }));
 
 let root: Root;
 let mountNode: HTMLDivElement;

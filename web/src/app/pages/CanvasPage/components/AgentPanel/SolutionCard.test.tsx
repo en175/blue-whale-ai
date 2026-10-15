@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AgentPanel from './index';
 import styles from './index.module.css';
-import type { RequirementUnderstanding } from '@/api/agentSessions';
+import type { RequirementUnderstanding } from '@/app/api/agentSessions';
 
 const card: RequirementUnderstanding['solution_card'] = {
   goal: '给新品耳机做一条 15 秒短视频',
@@ -58,8 +58,8 @@ const sessionMock = vi.hoisted(() => ({
 }));
 
 vi.mock('../../hooks/useAgentSession', () => ({ useAgentSession: () => sessionMock }));
-vi.mock('@/api/generation', () => ({ fetchGenerationModels: vi.fn(async () => []) }));
-vi.mock('@/api/skills', () => ({ fetchMySkills: vi.fn(async () => []) }));
+vi.mock('@/app/api/generation', () => ({ fetchGenerationModels: vi.fn(async () => []) }));
+vi.mock('@/app/api/skills', () => ({ fetchMySkills: vi.fn(async () => []) }));
 vi.mock('../ChipTextEditor', () => ({ default: () => createElement('div', { 'data-testid': 'chip-editor' }) }));
 
 let root: Root;

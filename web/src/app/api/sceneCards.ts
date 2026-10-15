@@ -1,5 +1,5 @@
-import { apiRequest } from '@/api/http';
-import { newIdempotencyKey } from '@/api/idempotencyKey';
+import { apiRequest } from '@/shared/api/http';
+import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 
 export interface SceneCardInfo {
   scene_card_id: number;

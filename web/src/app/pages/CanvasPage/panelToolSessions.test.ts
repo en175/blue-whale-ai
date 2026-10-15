@@ -1,6 +1,6 @@
 import { openOtherTool } from './testing/openOtherTool';
 import type { Node } from '@xyflow/react';
-import { ApiError } from '@/api/http';
+import { ApiError } from '@/shared/api/http';
 import { describe, expect, it } from 'vitest';
 import { createToolSessionRuntime } from './toolSessionRuntime';
 import type { ToolSessionDeps } from './toolSessionCoordinator';

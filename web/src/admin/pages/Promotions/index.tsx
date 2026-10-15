@@ -9,8 +9,8 @@ import {
   updatePromotion,
   type Promotion,
   type PromotionInput,
-} from '@/api/adminBillingPromotions';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminBillingPromotions';
+import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import DiscountPolicyNotice from '../../components/DiscountPolicyNotice';
 import {

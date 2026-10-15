@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { useAuthStore } from '@/stores/auth';
+import { useAuthStore } from '@/shared/stores/auth';
 import CreditsBadge from './index';
 
 let root: Root;

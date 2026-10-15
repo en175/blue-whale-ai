@@ -1,5 +1,5 @@
 import { Zap } from 'lucide-react';
-import { useAuthStore } from '@/stores/auth';
+import { useAuthStore } from '@/shared/stores/auth';
 import styles from './index.module.css';
 
 export default function CreditsBadge() {

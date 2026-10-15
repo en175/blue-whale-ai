@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGenerationRuntime, type GenerationRuntimeDeps } from './runtime';
 import { audioMixTask, audioVideoMuxTask, watchMixSubmit } from './mixMuxTasks';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
-import type { GenerationRecoveryPage } from '@/api/canvasRecovery';
+import type { GenerationRecoveryPage } from '@/app/api/canvasRecovery';
 
 const api = vi.hoisted(() => ({
   createAudioMix: vi.fn(),
@@ -12,7 +12,7 @@ const api = vi.hoisted(() => ({
   cancelGenerationJob: vi.fn(),
   fetchJobStatus: vi.fn(),
 }));
-vi.mock('@/api/jobs', () => ({
+vi.mock('@/app/api/jobs', () => ({
   createAudioMix: api.createAudioMix,
   retryAudioMix: api.retryAudioMix,
   createAudioVideoMux: api.createAudioVideoMux,

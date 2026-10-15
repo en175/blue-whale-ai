@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import type { AssetRecord } from '@/api/assets';
+import type { AssetRecord } from '@/app/api/assets';
 
 export const EMPTY_ASSET_DETAIL = '暂无数据';
 

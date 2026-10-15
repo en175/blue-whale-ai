@@ -6,7 +6,7 @@ import {
   type VideoFrameInterpolationFps,
   type VideoFrameInterpolationInput,
 } from '@lib/contracts/video-frame-interpolation';
-import { readJobFailText } from '@/api/jobs';
+import { readJobFailText } from '@/app/api/jobs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import { VIDEO_ENHANCE_MISSING_ASSET_REASON } from './videoEnhance';
 

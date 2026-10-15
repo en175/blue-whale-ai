@@ -6,8 +6,8 @@ import {
   adminDashboardOptions,
   beijingToday,
   validateRange,
-} from '@/api/adminDashboard';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminDashboard';
+import { isApiError } from '@/shared/api/http';
 import { taskTypeLabel } from '../../taskTypeLabels';
 import { Alert, Bar, Button, Card, Empty, Input, Page, PageHeader, Stat, Toolbar, type StatTone } from '../../ui';
 

@@ -1,4 +1,4 @@
-import type { AssetType } from '@/api/assets';
+import type { AssetType } from '@/app/api/assets';
 
 export type FilterKey = 'all' | AssetType | 'liveness';
 

@@ -1,8 +1,8 @@
 import { toast } from 'sonner';
-import { createAsset } from '@/api/material';
-import { isApiError } from '@/api/http';
-import { uploadAssetFile } from '@/utils/upload';
-import { isFileRejected } from '@/utils/fileSignature';
+import { createAsset } from '@/app/api/material';
+import { isApiError } from '@/shared/api/http';
+import { uploadAssetFile } from '@/app/utils/upload';
+import { isFileRejected } from '@/app/utils/fileSignature';
 
 export interface MaterialLibraryUploadResult {
   errors: string[];

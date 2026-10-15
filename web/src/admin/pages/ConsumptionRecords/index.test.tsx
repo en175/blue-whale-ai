@@ -3,18 +3,18 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AdminConsumptionRecord } from '@/api/adminConsumptionRecords';
+import type { AdminConsumptionRecord } from '@/admin/api/adminConsumptionRecords';
 import ConsumptionRecords from './index';
 
 const api = vi.hoisted(() => ({ fetchAdminConsumptionRecords: vi.fn() }));
 
-vi.mock('@/api/adminConsumptionRecords', async (importOriginal) => {
+vi.mock('@/admin/api/adminConsumptionRecords', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('@/api/adminConsumptionRecords')>();
+    await importOriginal<typeof import('@/admin/api/adminConsumptionRecords')>();
   return {
     ...actual,
     fetchAdminConsumptionRecords: api.fetchAdminConsumptionRecords,
-    adminConsumptionRecordsOptions: (query: import('@/api/adminConsumptionRecords').AdminConsumptionRecordQuery) => ({
+    adminConsumptionRecordsOptions: (query: import('@/admin/api/adminConsumptionRecords').AdminConsumptionRecordQuery) => ({
       queryKey: actual.adminConsumptionRecordKeys.list(query),
       queryFn: () => api.fetchAdminConsumptionRecords(query),
     }),

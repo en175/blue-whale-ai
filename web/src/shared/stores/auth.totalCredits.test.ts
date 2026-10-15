@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { totalCreditsOf } from './auth';
-import type { UsageTokenData } from '@/api/auth';
+import type { UsageTokenData } from '@/app/api/auth';
 
 describe('totalCreditsOf', () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

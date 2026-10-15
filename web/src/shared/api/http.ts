@@ -1,6 +1,6 @@
 import { toast } from 'sonner';
-import { handleUnauthorized } from '@/utils/auth';
-import { getSessionToken } from '@/api/sessionToken';
+import { handleUnauthorized } from '@/shared/utils/auth';
+import { getSessionToken } from '@/shared/api/sessionToken';
 
 export const API_PREFIX = '/api';
 export const API_REQUEST_TIMEOUT_MS = 10_000;

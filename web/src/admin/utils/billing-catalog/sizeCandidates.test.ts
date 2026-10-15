@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AdminModel } from '@/api/adminModels';
+import type { AdminModel } from '@/admin/api/adminModels';
 import {
   axisValueInKey,
   buildCapabilityIndex,

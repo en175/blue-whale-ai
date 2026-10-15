@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { ApiError } from '@/api/http';
+import { ApiError } from '@/shared/api/http';
 
 const apiMocks = vi.hoisted(() => ({
   finalizeVideoJob: vi.fn(),
@@ -7,7 +7,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchJobStatus: vi.fn(),
 }));
 
-vi.mock('@/api/jobs', () => ({
+vi.mock('@/app/api/jobs', () => ({
   finalizeVideoJob: apiMocks.finalizeVideoJob,
   regenerateSampleJob: apiMocks.regenerateSampleJob,
   fetchJobStatus: apiMocks.fetchJobStatus,
@@ -17,7 +17,7 @@ import { storyboardTask } from './storyboardTasks';
 import { createGenerationRuntime } from './runtime';
 import { normalGenerationTask } from './normalGeneration';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
-import type { GenerationRecoveryPage } from '@/api/canvasRecovery';
+import type { GenerationRecoveryPage } from '@/app/api/canvasRecovery';
 
 class ManualClock {
   private seq = 0;

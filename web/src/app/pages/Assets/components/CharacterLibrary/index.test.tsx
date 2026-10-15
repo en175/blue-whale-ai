@@ -11,7 +11,7 @@ const { listAssetGroups, listAssets, deleteMaterialAsset } = vi.hoisted(() => ({
   deleteMaterialAsset: vi.fn(),
 }));
 
-vi.mock('@/api/material', () => ({
+vi.mock('@/app/api/material', () => ({
   createAssetGroup: vi.fn(),
   createVisualValidateSession: vi.fn(),
   deleteAsset: deleteMaterialAsset,
@@ -21,7 +21,7 @@ vi.mock('@/api/material', () => ({
   listAssets,
 }));
 
-vi.mock('@/api/http', () => ({ isApiError: () => false }));
+vi.mock('@/shared/api/http', () => ({ isApiError: () => false }));
 
 let root: Root;
 let mountNode: HTMLDivElement;

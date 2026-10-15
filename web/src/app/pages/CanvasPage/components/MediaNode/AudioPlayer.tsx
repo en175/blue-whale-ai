@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Play, Pause } from 'lucide-react';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { formatTime } from './mediaPlayback';
 import styles from './index.module.css';
 export interface AudioPlayerTrimSelection {

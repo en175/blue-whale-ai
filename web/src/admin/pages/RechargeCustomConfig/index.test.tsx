@@ -3,7 +3,7 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@/api/http';
+import { ApiError } from '@/shared/api/http';
 import RechargeCustomConfig from './index';
 
 
@@ -12,8 +12,8 @@ const api = vi.hoisted(() => ({
   saveConfig: vi.fn(),
 }));
 
-vi.mock('@/api/adminRechargeCustomConfig', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminRechargeCustomConfig')>();
+vi.mock('@/admin/api/adminRechargeCustomConfig', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminRechargeCustomConfig')>();
   return {
     ...actual,
     saveAdminRechargeCustomConfig: api.saveConfig,

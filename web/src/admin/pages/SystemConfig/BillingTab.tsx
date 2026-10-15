@@ -4,8 +4,8 @@ import {
   billingCatalogKeys,
   billingCatalogOptions,
   publishBillingCatalog,
-} from '@/api/adminBillingCatalog';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminBillingCatalog';
+import { isApiError } from '@/shared/api/http';
 import { Alert, Badge, Button, Field, Input, Select, formGrid } from '../../ui';
 import {
   isCatalogDirty,

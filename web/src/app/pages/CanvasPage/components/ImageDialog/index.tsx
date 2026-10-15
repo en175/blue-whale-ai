@@ -10,14 +10,14 @@ import {
   SlidersHorizontal,
   ArrowUp,
 } from 'lucide-react';
-import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { videoReferenceMaxOf } from '@/utils/model-reference-limits';
+import { fetchGenerationModels, type GenerationModel } from '@/app/api/generation';
+import { videoReferenceMaxOf } from '@/app/utils/model-reference-limits';
 import {
   composedPromptLimitError,
   promptCharCountLabel,
   promptMaxLengthOf,
-} from '@/utils/prompt-max-length';
-import RatioIcon from '@/components/RatioIcon';
+} from '@/app/utils/prompt-max-length';
+import RatioIcon from '@/app/components/RatioIcon';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildImageJobReferences } from '../../videoJobReferences';
 import {
@@ -30,7 +30,7 @@ import {
   type PromptDoc,
   type PromptRefKey,
   type StoredPromptDoc,
-} from '@/utils/prompt-doc';
+} from '@/app/utils/prompt-doc';
 import PromptRefEditor, {
   type MentionState,
   type PromptRefEditorHandle,
@@ -38,8 +38,8 @@ import PromptRefEditor, {
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import RefThumbnail, { INSERT_REF_APPEND_TITLE } from '../RefThumbnail';
 import { useMixedRefStrip, orderRefStripItems, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
-import { pickRatioForSize, ratiosForSelectedSize } from '@/utils/image-size-ratios';
-import { refOverflowToast } from '@/utils/ref-overflow';
+import { pickRatioForSize, ratiosForSelectedSize } from '@/app/utils/image-size-ratios';
+import { refOverflowToast } from '@/app/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
 import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';

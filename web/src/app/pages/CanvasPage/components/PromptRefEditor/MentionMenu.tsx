@@ -1,5 +1,5 @@
 import { FileText, FolderOpen, Image as ImageIcon, MousePointerClick, AudioLines } from 'lucide-react';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export interface MentionRefItem {

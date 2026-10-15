@@ -3,9 +3,9 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import { AtSign, Upload, X, Box, MousePointerClick, ImageOff, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { uploadAssetFile } from '@/utils/upload';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
-import { isFileRejected } from '@/utils/fileSignature';
+import { uploadAssetFile } from '@/app/utils/upload';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import { isFileRejected } from '@/app/utils/fileSignature';
 import styles from './index.module.css';
 
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;

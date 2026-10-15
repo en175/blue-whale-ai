@@ -34,7 +34,7 @@ const fetchGenerationModels = vi.hoisted(() =>
   ]),
 );
 
-vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
+vi.mock('@/app/api/generation', () => ({ fetchGenerationModels }));
 
 let root: Root;
 let container: HTMLDivElement;

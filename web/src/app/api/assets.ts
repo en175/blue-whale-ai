@@ -1,5 +1,5 @@
 import { infiniteQueryOptions, queryOptions, skipToken, type QueryClient } from '@tanstack/react-query';
-import { apiRequest, silentInit, type ApiRequestInit } from '@/api/http';
+import { apiRequest, silentInit, type ApiRequestInit } from '@/shared/api/http';
 
 export type AssetType = 'image' | 'video' | 'audio' | 'character';
 

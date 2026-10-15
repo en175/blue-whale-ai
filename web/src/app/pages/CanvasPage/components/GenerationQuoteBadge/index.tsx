@@ -4,8 +4,8 @@ import {
   generationQuoteOptions,
   type GenerationJobType,
   type QuoteJobParameters,
-} from '@/api/generationQuote';
-import type { GenerationRefItem } from '@/api/jobs';
+} from '@/app/api/generationQuote';
+import type { GenerationRefItem } from '@/app/api/jobs';
 import styles from './index.module.css';
 
 interface GenerationQuoteBadgeProps {

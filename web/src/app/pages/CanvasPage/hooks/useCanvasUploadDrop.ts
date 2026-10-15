@@ -1,10 +1,10 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
-import { UPLOAD_SIZE_LIMIT } from '@/api/assets';
-import type { SnapshotAsset } from '@/api/projects';
-import { uploadAssetFile } from '@/utils/upload';
-import { compliancePatchFromMaterialStatus } from '@/utils/video-reference-compliance';
-import { isFileRejected } from '@/utils/fileSignature';
+import { UPLOAD_SIZE_LIMIT } from '@/app/api/assets';
+import type { SnapshotAsset } from '@/app/api/projects';
+import { uploadAssetFile } from '@/app/utils/upload';
+import { compliancePatchFromMaterialStatus } from '@/app/utils/video-reference-compliance';
+import { isFileRejected } from '@/app/utils/fileSignature';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
 import { copyImageToClipboard, readCanvasClipboard } from '../clipboardPaste';
 import { hasCustomName } from '../canvasNodeUtils';

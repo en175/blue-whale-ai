@@ -1,9 +1,9 @@
 import { useMemo, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { toast as globalToast } from 'sonner';
-import { isApiError } from '@/api/http';
-import { newIdempotencyKey } from '@/api/idempotencyKey';
-import { uploadAssetFile } from '@/utils/upload';
+import { isApiError } from '@/shared/api/http';
+import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
+import { uploadAssetFile } from '@/app/utils/upload';
 import { newNodeId } from '../nodeId';
 import { hasGenerationRecord } from '../mediaReEdit';
 import { readAssetId } from '../mediaRefs';

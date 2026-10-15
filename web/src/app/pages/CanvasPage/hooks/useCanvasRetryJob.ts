@@ -1,7 +1,7 @@
 import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
 import { toast as globalToast } from 'sonner';
-import { isApiError } from '@/api/http';
+import { isApiError } from '@/shared/api/http';
 import { apiErrorMessage, isSilentAuthError } from '../toolSessionCapture';
 import { isAudioMixNodeId } from '../audioMix';
 import { audioVideoMuxIdentityOf } from '../audioVideoMux';

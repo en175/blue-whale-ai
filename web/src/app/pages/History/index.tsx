@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import Skeleton from '@/components/Skeleton';
-import JobSourceModal, { type JobSourceTarget } from '@/components/JobSourceModal';
-import { chargeLabel, jobStatusLabel, stageBadgeLabel } from '@/components/JobSourceModal/labels';
+import Skeleton from '@/app/components/Skeleton';
+import JobSourceModal, { type JobSourceTarget } from '@/app/components/JobSourceModal';
+import { chargeLabel, jobStatusLabel, stageBadgeLabel } from '@/app/components/JobSourceModal/labels';
 import {
   videoHistoryOptions,
   HISTORY_JOBS_PER_PROJECT,
   type HistoryJobEntry,
-} from '@/api/generationHistory';
-import { isApiError } from '@/api/http';
-import { readJobFailText } from '@/api/jobs';
+} from '@/app/api/generationHistory';
+import { isApiError } from '@/shared/api/http';
+import { readJobFailText } from '@/app/api/jobs';
 import styles from './index.module.css';
 
 function sourceTargetOf(entry: HistoryJobEntry): JobSourceTarget | null {

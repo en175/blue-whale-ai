@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({
   fetchTemplateTags: vi.fn(),
 }));
 
-vi.mock('@/api/agent', () => api);
+vi.mock('@/app/api/agent', () => api);
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

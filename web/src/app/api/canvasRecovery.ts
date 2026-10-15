@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { apiRequest } from '@/api/http';
+import { apiRequest } from '@/shared/api/http';
 import type { CanvasBinding, RecoveryChange } from '@lib/contracts/canvas-recovery';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import { serializeEdges, serializeNodes } from './canvas';

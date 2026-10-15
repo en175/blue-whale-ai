@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import type { MaterialAsset } from '@/api/material';
+import type { MaterialAsset } from '@/app/api/material';
 import type { AssetCardKind } from '../components/AssetCardNode';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { CanvasGalleryRef } from '../collectMediaBlocks';

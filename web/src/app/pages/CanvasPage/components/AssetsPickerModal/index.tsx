@@ -10,22 +10,22 @@ import {
   fetchAssetReferences,
   type AssetRecord,
   type AssetType,
-} from '@/api/assets';
-import { isApiError } from '@/api/http';
+} from '@/app/api/assets';
+import { isApiError } from '@/shared/api/http';
 import {
   type MaterialAsset,
   type MaterialAssetType,
-} from '@/api/material';
+} from '@/app/api/material';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
-import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/utils/video-reference-compliance';
-import AssetMasonry from '@/pages/Assets/components/AssetMasonry';
-import CharacterLibrary from '@/pages/Assets/components/CharacterLibrary';
-import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
-import { appendUniqueAssets, typeLabel } from '@/pages/Assets/assetGrid';
-import { usePreviewAsset } from '@/pages/Assets/previewAsset';
-import assetStyles from '@/pages/Assets/index.module.css';
-import Skeleton from '@/components/Skeleton';
-import ConfirmModal from '@/components/ConfirmModal';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/app/utils/video-reference-compliance';
+import AssetMasonry from '@/app/pages/Assets/components/AssetMasonry';
+import CharacterLibrary from '@/app/pages/Assets/components/CharacterLibrary';
+import AssetDetailModal from '@/app/pages/Assets/components/AssetDetailModal';
+import { appendUniqueAssets, typeLabel } from '@/app/pages/Assets/assetGrid';
+import { usePreviewAsset } from '@/app/pages/Assets/previewAsset';
+import assetStyles from '@/app/pages/Assets/index.module.css';
+import Skeleton from '@/app/components/Skeleton';
+import ConfirmModal from '@/app/components/ConfirmModal';
 import styles from './index.module.css';
 
 export type PickerMediaType = 'image' | 'video' | 'audio';

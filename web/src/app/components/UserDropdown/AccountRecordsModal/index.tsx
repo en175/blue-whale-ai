@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Wallet, Wand2, ArrowDown, ArrowUp } from 'lucide-react';
-import { fetchConsumptions, type ConsumptionRecord } from '@/api/account';
+import { fetchConsumptions, type ConsumptionRecord } from '@/app/api/account';
 import styles from './index.module.css';
 
 interface AccountRecordsModalProps {

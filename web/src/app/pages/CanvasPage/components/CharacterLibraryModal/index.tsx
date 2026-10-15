@@ -16,12 +16,12 @@ import {
   listAssets,
   type MaterialGroup,
   type MaterialAsset,
-} from '@/api/material';
-import { isApiError } from '@/api/http';
+} from '@/app/api/material';
+import { isApiError } from '@/shared/api/http';
 import { toast } from 'sonner';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
-import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/utils/video-reference-compliance';
-import { resolveMediaSrc } from '@/utils/remoteImageCors';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/app/utils/video-reference-compliance';
+import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
 const TABS = [

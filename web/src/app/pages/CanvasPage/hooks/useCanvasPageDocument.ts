@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { legacyCardHistoryOptions } from '@/api/canvas';
+import { legacyCardHistoryOptions } from '@/app/api/canvas';
 import { useCanvasDoc } from './useCanvasDoc';
 import { useCanvasLegacyMigrationToast } from './useCanvasLegacyMigrationToast';
 

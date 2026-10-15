@@ -7,7 +7,7 @@ import { $getSelection, $isRangeSelection } from 'lexical';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BottomDialog from './index';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
-import type { PromptDoc } from '@/utils/prompt-doc';
+import type { PromptDoc } from '@/app/utils/prompt-doc';
 import { collapseCaretAt, promptRefCaretOffset, promptRefEditorInstance, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
@@ -32,7 +32,7 @@ const fetchGenerationModels = vi.hoisted(() =>
   ]),
 );
 
-vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
+vi.mock('@/app/api/generation', () => ({ fetchGenerationModels }));
 
 const ref = (id: string, mediaType: 'image' | 'video' | 'audio'): VideoMediaRef => ({
   nodeId: `node-${id}`,

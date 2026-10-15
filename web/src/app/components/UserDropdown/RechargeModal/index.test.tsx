@@ -18,9 +18,9 @@ const setUsage = vi.hoisted(() => vi.fn());
 
 const toastApi = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 
-vi.mock('@/api/recharge', () => rechargeApi);
-vi.mock('@/api/auth', () => authApi);
-vi.mock('@/stores/auth', () => {
+vi.mock('@/app/api/recharge', () => rechargeApi);
+vi.mock('@/app/api/auth', () => authApi);
+vi.mock('@/shared/stores/auth', () => {
   const store = Object.assign(
     <T,>(selector: (state: { credits: number | null }) => T) => selector({ credits: 500 }),
     { getState: () => ({ setUsage }) },

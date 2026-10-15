@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import Modal from '@/components/Modal';
-import Skeleton from '@/components/Skeleton';
-import { apiRequest, isApiError } from '@/api/http';
-import { readJobFailText, type JobDetail, type JobStatus } from '@/api/jobs';
+import Modal from '@/app/components/Modal';
+import Skeleton from '@/app/components/Skeleton';
+import { apiRequest, isApiError } from '@/shared/api/http';
+import { readJobFailText, type JobDetail, type JobStatus } from '@/app/api/jobs';
 import { chargeLabel, jobStatusLabel, stageBadgeLabel } from './labels';
 import styles from './index.module.css';
 

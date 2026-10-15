@@ -1,4 +1,4 @@
-import { readJobFailText } from '@/api/jobs';
+import { readJobFailText } from '@/app/api/jobs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import { AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT, type AudioVideoSplitFormat } from './audioVideoSplit';
 

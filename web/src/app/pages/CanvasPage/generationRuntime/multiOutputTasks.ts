@@ -1,7 +1,7 @@
-import { createVocalSplit, createVideoSceneSplit, cancelGenerationJob } from '@/api/jobs';
-import { newIdempotencyKey } from '@/api/idempotencyKey';
-import type { JobDetail } from '@/api/jobs';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import { createVocalSplit, createVideoSceneSplit, cancelGenerationJob } from '@/app/api/jobs';
+import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
+import type { JobDetail } from '@/app/api/jobs';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import {
   SCENE_SPLIT_EDGE_ORIGIN, SCENE_SPLIT_NODE_GAP, sceneSplitFanoutLayout, sceneSplitSegmentBox,
   sceneSplitSegmentLabel, type SceneSplitGranularity, type SceneSplitIdentity,

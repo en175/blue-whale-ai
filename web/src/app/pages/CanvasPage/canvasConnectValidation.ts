@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
-import type { GenerationModel } from '@/api/generation';
+import type { GenerationModel } from '@/app/api/generation';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
 import {
   mergedVideoMediaRefsOf,
@@ -12,7 +12,7 @@ import {
 } from './videoMediaRefs';
 import { videoRefCapsOfModel } from './modelCaps';
 import { draftVideoModeOf, videoModeAfterRefAdd } from './videoModes';
-import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/utils/model-reference-limits';
+import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/app/utils/model-reference-limits';
 import {
   audioRefMediaTypeOf,
   audioRefSourceError,
@@ -21,7 +21,7 @@ import {
   isAudioDraftNode,
 } from './audioMediaRefs';
 import { mergedAudioRefsWithTextIndex } from './textIndexSync';
-import { refOverflowToast } from '@/utils/ref-overflow';
+import { refOverflowToast } from '@/app/utils/ref-overflow';
 
 export interface ConnectValidatorHost {
   getMediaNodes: () => Node[];

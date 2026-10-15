@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { useAuthStore } from '@/stores/auth';
+import { useAuthStore } from '@/shared/stores/auth';
 
 interface AuthPromptState {
   open: boolean;

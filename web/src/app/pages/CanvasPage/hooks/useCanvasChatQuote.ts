@@ -1,8 +1,8 @@
 import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
-import type { SessionContentBlock } from '@/api/agentSessions';
-import { createConversationQuote } from '@/api/canvas';
-import { isApiError } from '@/api/http';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
+import { createConversationQuote } from '@/app/api/canvas';
+import { isApiError } from '@/shared/api/http';
 import { collectMediaBlocks } from '../collectMediaBlocks';
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from '../quoteConversation';
 

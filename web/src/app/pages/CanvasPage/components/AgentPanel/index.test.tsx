@@ -37,11 +37,11 @@ vi.mock('../../hooks/useAgentSession', () => ({
   useAgentSession: () => sessionMock,
 }));
 
-vi.mock('@/api/generation', () => ({
+vi.mock('@/app/api/generation', () => ({
   fetchGenerationModels: vi.fn(async () => []),
 }));
 
-vi.mock('@/api/skills', () => ({
+vi.mock('@/app/api/skills', () => ({
   fetchMySkills: vi.fn(async () => []),
 }));
 

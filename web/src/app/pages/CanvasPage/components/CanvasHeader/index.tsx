@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { Bot, History } from 'lucide-react';
-import RechargeModal from '@/components/UserDropdown/RechargeModal';
-import { useRechargeUiStore } from '@/stores/recharge';
+import RechargeModal from '@/app/components/UserDropdown/RechargeModal';
+import { useRechargeUiStore } from '@/app/stores/recharge';
 import ProjectSelector, { type CanvasProject } from '../ProjectSelector';
 import styles from './index.module.css';
 

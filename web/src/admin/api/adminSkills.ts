@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { http, apiRequest } from '@/api/http';
+import { http, apiRequest } from '@/shared/api/http';
 
 export interface AdminSkill {
   id: string;

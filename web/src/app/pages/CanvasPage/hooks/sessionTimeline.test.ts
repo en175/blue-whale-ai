@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fixture from '../__fixtures__/agent-session-replay-20260906.json';
-import type { SessionMessage, SessionRun } from '@/api/agentSessions';
+import type { SessionMessage, SessionRun } from '@/app/api/agentSessions';
 import {
   EMPTY_SESSION_STATE,
   accountOfRun,

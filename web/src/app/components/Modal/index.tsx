@@ -6,7 +6,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from 'react';
-import { joinClassNames } from '@/utils/class-names';
+import { joinClassNames } from '@/app/utils/class-names';
 import styles from './index.module.css';
 
 export type ModalSemanticDOM =

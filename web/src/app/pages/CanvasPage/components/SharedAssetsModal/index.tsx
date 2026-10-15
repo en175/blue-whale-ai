@@ -37,9 +37,9 @@ import {
   type SharedAssetGoodsSnapshot,
   type SharedAssetTextSnapshot,
   type SharedAssetSceneSnapshot,
-} from '@/api/sharedAssets';
-import { isApiError } from '@/api/http';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+} from '@/app/api/sharedAssets';
+import { isApiError } from '@/shared/api/http';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
 

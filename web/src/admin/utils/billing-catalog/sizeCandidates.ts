@@ -1,4 +1,4 @@
-import type { AdminModel } from '@/api/adminModels';
+import type { AdminModel } from '@/admin/api/adminModels';
 
 export interface CapabilitySize {
   id: string;

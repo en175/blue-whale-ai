@@ -8,7 +8,7 @@
 
 
 import { queryOptions } from '@tanstack/react-query';
-import { apiRequest, silentInit } from '@/api/http';
+import { apiRequest, silentInit } from '@/shared/api/http';
 import type { GenerationJobType, GenerationRefItem } from './jobs';
 import type { StageQuoteView } from '@lib/contracts/video-sample-mode';
 

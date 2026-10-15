@@ -13,7 +13,7 @@ import {
 } from '@floating-ui/react';
 import { X } from 'lucide-react';
 import { useAssetLookup } from './useAssetLookup';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export interface AssetChipProps {

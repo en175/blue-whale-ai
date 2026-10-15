@@ -1,4 +1,4 @@
-import type { SessionContentBlock } from '@/api/agentSessions';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
 
 export type CanvasGalleryRef = {
   id: string;

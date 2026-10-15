@@ -3,7 +3,7 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AdminModel } from '@/api/adminModels';
+import type { AdminModel } from '@/admin/api/adminModels';
 import ModelList from './index';
 
 const api = vi.hoisted(() => ({
@@ -17,8 +17,8 @@ const api = vi.hoisted(() => ({
 
 
 
-vi.mock('@/api/adminModels', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminModels')>();
+vi.mock('@/admin/api/adminModels', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminModels')>();
   return {
     ...actual,
     fetchAdminModels: api.fetchAdminModels,
@@ -34,8 +34,8 @@ vi.mock('@/api/adminModels', async (importOriginal) => {
 });
 
 
-vi.mock('@/api/adminBillingCatalog', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminBillingCatalog')>();
+vi.mock('@/admin/api/adminBillingCatalog', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminBillingCatalog')>();
   return {
     ...actual,
     billingCatalogOptions: () => ({

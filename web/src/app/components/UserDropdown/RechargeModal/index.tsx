@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { Check, CreditCard, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
-import Modal from '@/components/Modal';
-import CustomRecharge from '@/components/CustomRecharge';
+import Modal from '@/app/components/Modal';
+import CustomRecharge from '@/app/components/CustomRecharge';
 import styles from './index.module.css';
-import { fetchCredits } from '@/api/auth';
+import { fetchCredits } from '@/app/api/auth';
 import {
   createCustomRechargeOrder,
   createRechargeOrder,
@@ -15,9 +15,9 @@ import {
   type RechargeCustomConfig,
   type RechargeOrder,
   type RechargeTierCatalog,
-} from '@/api/recharge';
-import { customPriceFen } from '@/utils/customRecharge';
-import { useAuthStore } from '@/stores/auth';
+} from '@/app/api/recharge';
+import { customPriceFen } from '@/shared/utils/customRecharge';
+import { useAuthStore } from '@/shared/stores/auth';
 
 interface RechargeModalProps {
   onClose: () => void;

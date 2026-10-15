@@ -11,8 +11,8 @@ const mocks = vi.hoisted(() => ({
   apiRequest: vi.fn(),
   uploadAssetFile: vi.fn(),
 }));
-vi.mock('@/api/http', () => ({ apiRequest: mocks.apiRequest }));
-vi.mock('@/utils/upload', () => ({ uploadAssetFile: mocks.uploadAssetFile }));
+vi.mock('@/shared/api/http', () => ({ apiRequest: mocks.apiRequest }));
+vi.mock('@/app/utils/upload', () => ({ uploadAssetFile: mocks.uploadAssetFile }));
 
 const source: Node = {
   id: 'source', type: 'mediaNode', position: { x: 0, y: 0 },

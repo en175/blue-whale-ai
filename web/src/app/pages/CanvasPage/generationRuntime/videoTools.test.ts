@@ -12,8 +12,8 @@ const apiMocks = vi.hoisted(() => ({
   readJobFailText: vi.fn(() => ''),
 }));
 
-vi.mock('@/api/jobs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/jobs')>();
+vi.mock('@/app/api/jobs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/app/api/jobs')>();
   return {
     ...actual,
     createVideoSubtitleErase: apiMocks.createVideoSubtitleErase,
@@ -31,7 +31,7 @@ vi.mock('@/api/jobs', async (importOriginal) => {
 import {
   videoToolsTask, videoToolSpecOf, videoToolFrozenPayload, buildVideoToolRecoveryNode,
 } from './videoTools';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 
 const BINDING = {

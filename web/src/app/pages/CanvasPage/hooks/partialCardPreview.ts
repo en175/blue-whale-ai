@@ -1,4 +1,4 @@
-import type { PromptCardShot } from '@/api/agentSessions';
+import type { PromptCardShot } from '@/app/api/agentSessions';
 
 export interface PartialCardPreview {
   cardId: string;

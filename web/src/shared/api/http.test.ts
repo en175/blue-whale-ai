@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
 import { API_REQUEST_TIMEOUT_MS, ApiError, apiRequest, envelopeErrorCode, readApiErrorMessage } from './http';
-import { useAuthStore } from '@/stores/auth';
-import { useAuthPromptStore } from '@/stores/authPrompt';
+import { useAuthStore } from '@/shared/stores/auth';
+import { useAuthPromptStore } from '@/shared/stores/authPrompt';
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },

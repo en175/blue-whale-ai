@@ -1,7 +1,7 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
-import { useAuthStore } from '@/stores/auth';
-import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
-import { fetchProjects, createProject, touchProjectLastOpened } from '@/api/projects';
+import { useAuthStore } from '@/shared/stores/auth';
+import { fetchMe, fetchCredits, toSessionUser } from '@/app/api/auth';
+import { fetchProjects, createProject, touchProjectLastOpened } from '@/app/api/projects';
 import type { CanvasProject } from '../components/ProjectSelector';
 import {
   findLastOpenedProjectId,

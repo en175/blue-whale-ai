@@ -8,7 +8,7 @@ import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 import type { ImageTextAttachment } from '../ImageDialog';
 
 
-vi.mock('@/api/generation', () => ({
+vi.mock('@/app/api/generation', () => ({
   fetchGenerationModels: vi.fn(async () => []),
 }));
 

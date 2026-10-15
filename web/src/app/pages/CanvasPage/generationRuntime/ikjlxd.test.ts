@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { audioMixCreateSchema } from '@lib/contracts/audio-mix';
 import { canvasBindingSchema } from '@lib/contracts/canvas-recovery';
-import { createAudioMix, retryAudioMix, type JobDetail } from '@/api/jobs';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import { createAudioMix, retryAudioMix, type JobDetail } from '@/app/api/jobs';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import type { GenerationRuntimeDeps } from './runtime';
 import { audioMixTask } from './mixMuxTasks';
 import {
@@ -10,8 +10,8 @@ import {
   flush, bindingView, mixRecord, createControlledHost, createHarnessRuntime,
 } from './recoveryTestKit';
 
-vi.mock('@/api/jobs', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/api/jobs')>(),
+vi.mock('@/app/api/jobs', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/app/api/jobs')>(),
   createAudioMix: vi.fn(),
   retryAudioMix: vi.fn(),
 }));

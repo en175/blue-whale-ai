@@ -1,10 +1,10 @@
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
+import { isApiError } from '@/shared/api/http';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
 import { audioMixCandidate, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from './audioMix';
 import { readAssetId, cardNameOfNode } from './mediaRefs';
 import { apiErrorMessage, cloneSourceNode } from './toolSessionCapture';
-import type { CreateAudioVideoMuxPayload } from '@/api/jobs';
+import type { CreateAudioVideoMuxPayload } from '@/app/api/jobs';
 import { audioVideoMuxIdentityOf, audioVideoMuxSourceError, audioVideoMuxVideoError, isAudioVideoMuxDraftNode, type AudioVideoMuxIdentity, type AudioVideoMuxBoundVideo, type AudioVideoMuxSync } from './audioVideoMux';
 import type { ToolSessionDefinition, ToolSubmissionContext } from './toolSessionRuntime';
 
