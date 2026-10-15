@@ -12,7 +12,7 @@ import {
   type OrderRow,
   type OrderStatus,
 } from '@/custom/api/accountCredits';
-import { taskTypeLabel } from '@/admin/taskTypeLabels';
+import { taskTypeLabel } from '@/shared/enums/taskTypeLabels';
 import { useDocumentTitle } from '@/shared/seo/useDocumentTitle';
 import { formatBeijingDateTime } from './format';
 import ExportDialog from './ExportDialog';

@@ -1,18 +1,9 @@
 import { queryOptions } from '@tanstack/react-query';
 import { ApiError, API_PREFIX, apiRequest, readApiErrorMessage } from '@/shared/api/http';
 import { getSessionToken } from '@/shared/api/sessionToken';
+import type { UsageTokenData } from '@/shared/stores/auth';
 
-export interface UsageTokenLot {
-  credits: number;
-  expires_at: string;
-  source: string;
-}
-
-export interface UsageTokenData {
-  credits: number;
-  by_source?: { source: string; credits: number }[];
-  expiring?: UsageTokenLot[];
-}
+export type { UsageTokenData, UsageTokenLot } from '@/shared/stores/auth';
 
 export type OrderStatus =
   | 'pending'

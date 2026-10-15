@@ -1,6 +1,17 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { UsageTokenData } from '@/custom/api/auth';
+
+export interface UsageTokenLot {
+  credits: number;
+  expires_at: string;
+  source: string;
+}
+
+export interface UsageTokenData {
+  credits: number;
+  by_source?: { source: string; credits: number }[];
+  expiring?: UsageTokenLot[];
+}
 
 export function totalCreditsOf(data: UsageTokenData): number {
   const items = data.by_source;

@@ -8,7 +8,7 @@ import {
   validateRange,
 } from '@/admin/api/adminDashboard';
 import { isApiError } from '@/shared/api/http';
-import { taskTypeLabel } from '../../taskTypeLabels';
+import { taskTypeLabel } from '@/shared/enums/taskTypeLabels';
 import { Alert, Bar, Button, Card, Empty, Input, Page, PageHeader, Stat, Toolbar, type StatTone } from '../../ui';
 
 const fmtYuan = (fen: number) => `¥${(fen / 100).toLocaleString('zh-CN', {
