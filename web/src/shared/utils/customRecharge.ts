@@ -1,4 +1,4 @@
-import type { RechargeCustomConfig } from '@/app/api/recharge';
+import type { RechargeCustomConfig } from '@/custom/api/recharge';
 
 export type CustomCreditsRule = Pick<
   RechargeCustomConfig,

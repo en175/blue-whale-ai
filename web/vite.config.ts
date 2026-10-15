@@ -165,7 +165,7 @@ export default defineConfig(({ command, mode }) => {
     },
     resolve: {
       alias: {
-        '@/app': path.resolve(__dirname, './src/app'),
+        '@/custom': path.resolve(__dirname, './src/custom'),
         '@/admin': path.resolve(__dirname, './src/admin'),
         '@/shared': path.resolve(__dirname, './src/shared'),
         '@': path.resolve(__dirname, './src'),

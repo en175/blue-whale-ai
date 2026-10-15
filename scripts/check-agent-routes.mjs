@@ -10,7 +10,7 @@ if (!base) {
 }
 
 const local = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../web/src/app/api/agent-rest-routes.v1.json'), 'utf8'),
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../web/src/custom/api/agent-rest-routes.v1.json'), 'utf8'),
 );
 
 const routesUrl = new URL(`${base.replace(/\/+$/, '')}/v1/routes`);
@@ -44,7 +44,7 @@ if (local.version !== live.version) {
 if (problems.length) {
   console.error(`agent 路由副本与线上不一致（${problems.length} 处）：\n`);
   for (const problem of problems) console.error(`  - ${problem}`);
-  console.error('\n修法：把 agent 仓的 contracts/agent-rest-routes.v1.json 重新拷到 web/src/app/api/。');
+  console.error('\n修法：把 agent 仓的 contracts/agent-rest-routes.v1.json 重新拷到 web/src/custom/api/。');
   process.exit(1);
 }
 console.log(`agent 路由副本与线上一致：${live.routes.length} 条，v${live.version}`);
