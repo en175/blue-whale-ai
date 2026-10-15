@@ -1,6 +1,6 @@
+import { PANEL_REF_MEDIA_TYPES } from '@/custom/enums';
 import { describe, expect, it } from 'vitest';
 import { assetsPickerMediaTypes } from './assetsPickerTargets';
-import { PANEL_REF_MEDIA_TYPES } from './refSourceTypes';
 
 describe('assetsPickerMediaTypes（资产库弹窗媒体类型派生）', () => {
   it('toolbar 目标不限定媒体类型', () => {

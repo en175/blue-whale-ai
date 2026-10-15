@@ -1,3 +1,4 @@
+import { type MediaGenStatus, type VideoRefRole } from '@/custom/enums';
 import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
@@ -17,7 +18,7 @@ import { useAuthPromptStore } from '@/shared/stores/authPrompt';
 import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/custom/utils/creditsGate';
 import { composeImageSendPrompt } from '../components/ImageDialog/composeImageSendPrompt';
 import type { ImageTextAttachment } from '../components/ImageDialog';
-import type { MediaGenStatus, MediaNodeData } from '../components/MediaNode';
+import type { MediaNodeData } from '../components/MediaNode';
 import { mediaContentBox, type MediaDims } from '../components/MediaNode/mediaContentSize';
 import { sampleDeadlineExpired } from '../components/MediaNode/mediaPlayback';
 import type { createCanvasToolSessions } from '../canvasToolSessions';
@@ -28,7 +29,7 @@ import type { RecoverySeedSource, RecoverySeedTarget } from '../generationRuntim
 import { readAssetId } from '../mediaRefs';
 import { isInPlaceRegenTarget } from '../mediaReEdit';
 import { newNodeId } from '../nodeId';
-import { mergedVideoMediaRefsOf, videoRefSourceError, type VideoRefRole } from '../videoMediaRefs';
+import { mergedVideoMediaRefsOf, videoRefSourceError } from '../videoMediaRefs';
 import { draftVideoModeOf } from '../videoModes';
 import type { CanvasGenerationTerminalHost } from './useCanvasGenerationTerminal';
 

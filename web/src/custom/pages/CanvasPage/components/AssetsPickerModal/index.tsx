@@ -3,14 +3,7 @@ import { createPortal } from 'react-dom';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  assetKeys,
-  assetPageQueryOptions,
-  deleteAsset,
-  fetchAssetReferences,
-  type AssetRecord,
-  type AssetType,
-} from '@/custom/api/assets';
+import { assetKeys, assetPageQueryOptions, deleteAsset, fetchAssetReferences, type AssetRecord } from '@/custom/api/assets';
 import { isApiError } from '@/shared/api/http';
 import {
   type MaterialAsset,
@@ -27,8 +20,7 @@ import assetStyles from '@/custom/pages/Assets/index.module.css';
 import Skeleton from '@/custom/components/Skeleton';
 import ConfirmModal from '@/custom/components/ConfirmModal';
 import styles from './index.module.css';
-
-export type PickerMediaType = 'image' | 'video' | 'audio';
+import { type PickerMediaType, type AssetType } from '@/custom/enums';
 
 type MaterialSource = 'liveness' | 'character';
 

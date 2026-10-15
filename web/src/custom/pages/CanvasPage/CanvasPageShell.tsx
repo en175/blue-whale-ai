@@ -1,14 +1,13 @@
+import { type PickChannel as CanvasPickChannel, type VideoRefRole, type AssetsPickerTarget, type AssetCardKind } from '@/custom/enums';
 import type { ComponentProps, Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import { createCanvasToolSessions } from './canvasToolSessions';
 import type { CanvasHistoryApi } from './hooks/useCanvasHistory';
-import type { PickChannel as CanvasPickChannel } from './hooks/useCanvasPickers';
-import type { VideoRefRole } from './videoMediaRefs';
-import type { AssetsPickerTarget } from './assetsPickerTargets';
+
 import type { VideoGenSeedParams } from './components/BottomDialog';
 import type { MediaNodeData } from './components/MediaNode';
 import type { UploadedFile } from './components/ImageDialog';
-import type { AssetCardKind, AssetCardNodeData } from './components/AssetCardNode';
+import type { AssetCardNodeData } from './components/AssetCardNode';
 import CanvasHeader from './components/CanvasHeader';
 import CanvasToast, { type ToastState } from './components/CanvasToast';
 import CanvasToolbar from './components/CanvasToolbar';

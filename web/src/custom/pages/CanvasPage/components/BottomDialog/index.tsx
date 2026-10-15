@@ -1,15 +1,5 @@
+import { type MediaGenStatus, type VideoRefRole, VIDEO_MODE_LABEL } from '@/custom/enums';
 import PromptSyncActions from '../PromptSyncActions';
-
-
-
-
-
-
-
-
-
-
-
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -57,17 +47,8 @@ import {
   promptCharCountLabel,
   promptMaxLengthOf,
 } from '@/custom/utils/prompt-max-length';
-import type { MediaGenStatus } from '../MediaNode';
-import {
-  canAddRefRole,
-  hasAnyMediaRef,
-  videoRefConflict,
-  isLibraryOnlyVideoRef,
-  type VideoMediaRef,
-  type VideoMediaRefs,
-  type VideoRefCapabilities,
-  type VideoRefRole,
-} from '../../videoMediaRefs';
+
+import { canAddRefRole, hasAnyMediaRef, videoRefConflict, isLibraryOnlyVideoRef, type VideoMediaRef, type VideoMediaRefs, type VideoRefCapabilities } from '../../videoMediaRefs';
 import {
   audioReferenceMaxOf,
   videoReferenceMaxOf,
@@ -89,20 +70,8 @@ import {
   resolveVideoMode,
   videoModeRefsSignature,
 } from '../../videoModes';
-import {
-  VIDEO_MODE_LABEL,
-  configuredVideoModes,
-  effectiveVideoParams,
-  frameSlotCountOf,
-  isFrameMode,
-  isVideoMode,
-  lockedDurationOf,
-  lockedRatioOf,
-  normalizeVideoMode,
-  type VideoMode,
-} from '@/custom/utils/video-modes';
+import { configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, isVideoMode, lockedDurationOf, lockedRatioOf, normalizeVideoMode, type VideoMode } from '@/custom/utils/video-modes';
 import styles from './index.module.css';
-
 
 export interface VideoGenOptions {
 
@@ -114,17 +83,13 @@ export interface VideoGenOptions {
   duration: number;
   mode: string;
 
-
   generateAudio: boolean;
 
-
   sampleMode: boolean;
-
 
   expectedCredits?: number;
   quoteRevision?: string;
 }
-
 
 export interface VideoDraftParamsPatch {
   prompt?: string;
@@ -144,7 +109,6 @@ export interface VideoDraftParamsPatch {
 interface BottomDialogProps extends RefStripOrderProps {
   onClose: () => void;
 
-
   projectId?: string;
 
   onSend: (text: string, opts: VideoGenOptions, promptDoc?: PromptDoc | null) => void | Promise<void>;
@@ -157,7 +121,6 @@ interface BottomDialogProps extends RefStripOrderProps {
 
   attachments?: ImageTextAttachment[];
 
-
   onRemoveAttachment?: (nodeId: string) => void;
   planReferenceError?: string;
   pendingPlanSyncs?: Array<{ nodeId: string; title: string }>;
@@ -165,17 +128,13 @@ interface BottomDialogProps extends RefStripOrderProps {
   syncingPlan?: boolean;
   planIndices?: string;
 
-
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
-
-
 
   onPickFromCanvas?: (kind: 'image' | 'video', role?: VideoRefRole) => void;
 
   onPickFromAssets?: (kind: 'image' | 'video', role?: VideoRefRole) => void;
 
   pickMode?: 'image' | 'video' | null;
-
 
   pickLocked?: boolean;
 
@@ -199,12 +158,9 @@ interface BottomDialogProps extends RefStripOrderProps {
 
   onRemoveMaterialRef?: (materialId: string) => void;
 
-
-
   onReorderMediaRefs?: (orderedKeys: string[]) => void;
 
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
-
 
   targetNodeId?: string;
 
@@ -216,8 +172,6 @@ interface BottomDialogProps extends RefStripOrderProps {
 
   dragHidden?: boolean;
 }
-
-
 
 export interface VideoGenSeedParams {
 
@@ -248,7 +202,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
   const mentionMenuRef = useRef<HTMLDivElement>(null);
   const replaceMenuRef = useRef<HTMLDivElement>(null);
-
 
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
   const [selectedMode, setSelectedMode] = useState<VideoMode>(
@@ -292,7 +245,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
 
   const supportsAudio = currentModel?.features?.audio === true;
 
-
   const sampleSize480 = currentModel?.supported_sizes.find((s) => (s.api_value ?? s.id) === '480p');
   const supportsSampleMode = currentModel?.features?.sample_mode === true && sampleSize480 != null;
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
@@ -304,7 +256,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const durationRange = currentModel?.supported_durations ?? null;
   const currentSizeLabel =
     sizeOptions.find((s) => s.key === selectedSize)?.label ?? selectedSize;
-
 
   const quoteResolution = sampleMode
     ? '480p'
@@ -319,7 +270,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     duration,
   });
 
-
   const quoteParameters = useMemo(() => ({
     model_id: currentModel?.model_id ?? '',
     ...(quoteResolution ? { resolution: quoteResolution } : {}),
@@ -331,7 +281,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     ...(quotePrompt ? { prompt: quotePrompt } : {}),
     mode: selectedMode,
   }), [currentModel?.model_id, quoteResolution, wireParams.aspect_ratio, wireParams.duration, generateAudio, sampleMode, quotePrompt, selectedMode]);
-
 
   const readOnly = sending || videoDraftBinding.submitting || videoDraftBinding.status === 'generating';
 
@@ -374,9 +323,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       }
     : null;
 
-
-
-
   const referenceConflict = textIndexError ?? planReferenceError ?? (caps
     ? (checkReferenceLimits(
         currentModel?.features,
@@ -410,7 +356,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     ? `方案索引 ${planIndices}：${inputConflict}`
     : inputConflict;
   const canAddFirst = !!(caps && canAddRefRole('first', videoMediaRefs, caps));
-
 
   const canAddLast = !videoMediaRefs.last;
   const canAddReference = !!caps?.referenceImage;
@@ -446,7 +391,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     && supportsAdaptiveRatio
     && videoMediaRefs.reference.some((r) => r.mediaType === 'video');
 
-
   const readOnlyReason = sending || videoDraftBinding.submitting
     ? '正在保存并提交，参数与连线只读'
     : '生成中，参数与连线只读；可在画布卡片上取消生成';
@@ -455,8 +399,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
 
   const referencesFull = videoMediaRefs.reference.length >= referenceMaxTotal;
   const actionBarKind: 'image' | 'video' = isKeyframe || isImageReference ? 'image' : 'video';
-
-
 
   const actionBarDisabledReason = readOnly ? readOnlyReason
     : isKeyframe
@@ -467,17 +409,9 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       : referencesFull ? `普通参考最多 ${referenceMaxTotal} 条，已达上限`
       : null;
 
-
   const stripHasItems = videoMediaRefs.reference.length > 0 || (attachments?.length ?? 0) > 0;
 
-
-
-
-
   const quoteReferences = useMemo(() => buildVideoJobReferences(videoMediaRefs), [videoMediaRefs]);
-
-
-
 
   const sampleQuoteQuery = useQuery({
     ...generationQuoteOptions(projectId ?? '', {
@@ -485,7 +419,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       parameters: quoteParameters,
       expected_output_count: 1,
       ...(quoteReferences.length > 0 ? { references: quoteReferences } : {}),
-
 
       ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
     }),
@@ -505,9 +438,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     ...videoMediaRefs,
     reference: orderRefStripItems(videoMediaRefs.reference, videoRefStripKey, mixedStrip.order),
   }), [videoMediaRefs, mixedStrip.order]);
-
-
-
 
   const { labelOf: mediaLabelOf, refItems, numberMap: refNumberMap } = useMemo(() => videoLabelMapOf(orderedVideoMediaRefs, selectedMode), [orderedVideoMediaRefs, selectedMode]);
   const orderedTextNodeIds = useMemo(() => mixedStrip.order.filter(key => key.startsWith('text:')).map(key => key.slice(5)), [mixedStrip.order]);
@@ -548,15 +478,12 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const flatValue = useMemo(() => flattenPromptDocWith(promptDoc, (key) => refLabelOfStable.current(key)), [promptDoc, reconcileKey]);
 
-
-
   useEffect(() => {
     const timer = window.setTimeout(() => setQuotePrompt(flatValue), 600);
     return () => window.clearTimeout(timer);
   }, [flatValue]);
 
   const hasInvalidRef = docHasInvalidRef(promptDoc);
-
 
   const handleModeChange = (key: string) => {
     setModeOpen(false);
@@ -565,7 +492,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     const hasFrames = !!(videoMediaRefs.first || videoMediaRefs.last);
     const slots = frameSlotCountOf(key);
     if (slots > 0) {
-
 
       if (key === 'first_frame' && videoMediaRefs.last) {
         onToast?.('warn', '图生视频只使用首帧，请先移除尾帧');
@@ -637,14 +563,10 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     && sampleQuoteReady
     && (flatValue.trim().length > 0 || hasAttachmentText);
 
-
   const ticks: number[] = [];
   if (durationRange) {
     for (let v = durationRange.min; v <= durationRange.max; v += durationRange.step) ticks.push(v);
   }
-
-
-
 
   const applyModelDefaults = (m: GenerationModel) => {
     setSelectedModel(m.model_id);
@@ -672,10 +594,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     return { modelId: m.model_id, ratio: nextRatio, size: nextSize, duration: nextDuration, sampleMode: false };
   };
 
-
-
-
-
   useEffect(() => {
     let active = true;
     fetchGenerationModels('video')
@@ -688,7 +606,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           const restoredMode = normalizeStoredVideoMode(initialParams?.mode, videoMediaRefs) ?? 'text2video';
           setSelectedModel(initialParams?.modelId ?? '');
           const model = list.find(m => m.model_id === initialParams?.modelId);
-
 
           const restoredSampleMode = initialParams?.sampleMode === true
             && model?.features?.sample_mode === true
@@ -758,7 +675,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-
   const submit = async (text: string, options: VideoGenOptions, promptDocToSend: PromptDoc | null) => {
     if (sendingRef.current) return;
     sendingRef.current = true;
@@ -771,16 +687,12 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     }
   };
 
-
   const handleDocChange = (doc: PromptDoc) => {
     setPromptDoc(doc);
     pendingNewRefInsert.current = false;
     const flat = flattenPromptDocWith(doc, (key) => refLabelOfStable.current(key));
     syncDraftParams({ prompt: flat, promptDoc: { version: PROMPT_DOC_VERSION, segments: doc.segments, flat } });
   };
-
-
-
 
   const handleSend = () => {
     if (!canSend) return;
@@ -809,7 +721,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       return;
     }
 
-
     const sampleQuoteData = sampleMode ? sampleQuoteQuery.data : undefined;
     if (sampleMode && (sampleQuoteData?.credits == null || sampleQuoteData?.quote_revision == null)) {
       onToast?.('warn', '样片价格已变化，请确认新报价后再提交');
@@ -829,7 +740,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     }, docHasAnyRef(promptDoc) ? promptDoc : null);
   };
 
-
   const mentionItems = useMemo(() => {
     const out: Array<{ assetId: string; url: string; name: string; badge: string; mediaType: 'image' | 'video' | 'audio' | 'text'; searchText?: string }> = [];
     for (const item of [videoMediaRefs.first, videoMediaRefs.last, ...videoMediaRefs.reference]) {
@@ -839,7 +749,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       if (!badge) continue;
       out.push({ assetId: id, url: item.url, name: item.name, badge, mediaType: item.mediaType });
     }
-
 
     for (let i = 0; i < (attachments ?? []).length; i += 1) {
       const a = attachments![i]!;
@@ -859,18 +768,14 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     setMention({ open: false, query: '' });
   };
 
-
   const refKeyOf = (assetId: string): PromptRefKey => ({
     kind: orderedTextNodeIds.includes(assetId) ? 'text_ref' : 'asset_ref',
     id: assetId,
   });
 
-
-
   const insertRefByKey = (assetId: string) => {
     editorRef.current?.insertRefAtPending(refKeyOf(assetId), true);
   };
-
 
   const pendingNewRefInsert = useRef(false);
 
@@ -902,10 +807,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
 
-
-
-
-
   const renderSourceMenu = (kind: 'image' | 'video', role: VideoRefRole, label?: string) => (
     <RefSourceMenu
       onPickFromAssets={() => onPickFromAssets?.(kind, role)}
@@ -915,12 +816,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       entryTitle={label ? `添加${label}（从资产中选择 / 从节点添加素材）` : undefined}
     />
   );
-
-
-
-
-
-
 
   const renderRefThumb = (item: VideoMediaRef, key?: string, badgeText?: string, dragProps?: StripDragItemProps) => (
     <RefThumbnail
@@ -950,11 +845,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   };
   const stripDrag = useRefStripDrag({ disabled: readOnly, onReorder: handleStripReorder });
 
-
-
-
-
-
   const renderTextThumb = (a: ImageTextAttachment, stripIndex: number) => (
     <RefThumbnail
       key={a.nodeId}
@@ -974,12 +864,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     />
   );
   const textThumbsAt = (base: number) => (attachments ?? []).map((a, i) => renderTextThumb(a, base + i));
-
-
-
-
-
-
 
   const onDurationSliderKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Escape') return;
@@ -1017,7 +901,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
 
                 pickMentionRef(item.id);
               } else {
-
 
                 editorRef.current?.consumeMentionForPendingInsert();
                 pendingNewRefInsert.current = true;
@@ -1271,8 +1154,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {
 
-
-
 }
       <div className={styles.actionBarRow}>
         <AttachmentActionBar
@@ -1280,8 +1161,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           role={isKeyframe
             ? (selectedMode === 'first_frame' || !videoMediaRefs.first ? 'first' : 'last')
             : 'reference'}
-
-
 
           onPickFromCanvas={(kind, role) => { if (kind !== 'audio') onPickFromCanvas?.(kind, role); }}
           onPickFromAssets={(kind, role) => { if (kind !== 'audio') onPickFromAssets?.(kind, role); }}
@@ -1305,8 +1184,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       </div>
 
       {
-
-
 
 }
       {(isKeyframe || stripHasItems || (videoMediaRefs.invalid?.length ?? 0) > 0 || !!conflict || readOnly) && (

@@ -1,4 +1,4 @@
-import type { MediaGenStatus } from './index';
+import { type MediaGenStatus } from '@/custom/enums';
 
 export function mediaNodeFailHeadline(input: {
   genStatus?: MediaGenStatus;

@@ -8,21 +8,9 @@
 
 
 
+import { PANEL_REF_MEDIA_TYPES, type RefPanelKind } from '@/custom/enums';
+
 type MediaTypesEntry = { types: readonly string[]; canvasRefError?: string };
-
-
-export const PANEL_REF_MEDIA_TYPES = {
-  audio: { types: ['image', 'audio'], canvasRefError: '音频参考仅支持图片或音频素材' },
-  image: { types: ['image'], canvasRefError: '图片参考仅支持图片素材' },
-
-
-  videoAll: { types: ['image', 'video', 'audio'] },
-
-
-  videoText2Video: { types: ['image'], canvasRefError: '图片参考仅支持图片素材' },
-} as const;
-
-export type RefPanelKind = keyof typeof PANEL_REF_MEDIA_TYPES;
 
 
 

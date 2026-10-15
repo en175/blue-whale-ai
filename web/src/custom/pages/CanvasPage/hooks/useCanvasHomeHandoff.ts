@@ -1,10 +1,11 @@
+import { type VideoRefRole } from '@/custom/enums';
 import { useEffect, useRef } from 'react';
 import type { CanvasDoc } from '@/custom/api/canvas';
 import { linkAssetToProject, type UploadCompleteData } from '@/custom/api/assets';
 import { takeGenHandoff, type GenHandoff } from '@/custom/utils/gen-handoff';
 import type { VideoGenSeedParams } from '../components/BottomDialog';
 import { isFrameMode } from '@/custom/utils/video-modes';
-import type { VideoRefRole } from '../videoMediaRefs';
+
 import { fetchUrlAsFile } from '../canvasPureNodeHelpers';
 import { buildImageJobReferences, buildVideoJobReferencesFromList } from '../videoJobReferences';
 import type { CanvasGenerationSubmissionHandles } from './useCanvasGenerationSubmission';

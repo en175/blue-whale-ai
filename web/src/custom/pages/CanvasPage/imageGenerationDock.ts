@@ -1,3 +1,4 @@
+import { type MediaGenStatus } from '@/custom/enums';
 import type { ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { restorePromptDoc, type StoredPromptDoc, type PromptDoc } from '@/custom/utils/prompt-doc';
@@ -12,7 +13,6 @@ import { extractTextNodeText } from './quoteConversation';
 import { draftSeedEquals, type ImageDraftSeed } from './draftSeed';
 import { hasGenerationRecord } from './mediaReEdit';
 import { mediaDockSelectionVisibility, captureGenerationDockSubmission, runGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from './generationDockCoordinator';
-import type { MediaGenStatus } from './components/MediaNode';
 
 export interface ImageDockEntry { nodeId?: string; seed?: ImageDraftSeed | null; intent?: 'manual' | 'selection' }
 export interface ImageDockPatch { targetNodeId?: string; prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string; attachments?: { targetNodeId?: string; removeNodeId?: string; orderedNodeIds?: string[] } }

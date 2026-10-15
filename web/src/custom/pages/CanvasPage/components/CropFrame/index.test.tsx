@@ -1,16 +1,12 @@
 // @vitest-environment jsdom
+import { type CropPresetKey } from '@/custom/enums';
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider, useStoreApi, type Node } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CropFrame from './index';
 import GroupOverlay from '../GroupOverlay';
-import {
-  fullCropRect,
-  inscribeCropRect,
-  type CropPresetKey,
-  type CropRect,
-} from '../../imageCrop';
+import { fullCropRect, inscribeCropRect, type CropRect } from '../../imageCrop';
 
 const BOUNDS = { x: 1000, y: 500, width: 400, height: 300 };
 const MIN_SIDE = 32;

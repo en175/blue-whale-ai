@@ -1,7 +1,8 @@
+import { type VideoRefRole, PANEL_REF_MEDIA_TYPES } from '@/custom/enums';
 import type { Node } from '@xyflow/react';
 import { isFrameMode, normalizeVideoMode, frameSlotCountOf, type VideoMode } from '@/custom/utils/video-modes';
-import { videoRefSourceError, type VideoMediaRef, type VideoRefRole } from '../videoMediaRefs';
-import { PANEL_REF_MEDIA_TYPES } from '../refSourceTypes';
+import { videoRefSourceError, type VideoMediaRef } from '../videoMediaRefs';
+
 import type { AtMentionItem } from '../atMention';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { AudioRefItem } from '../components/AudioDialog';

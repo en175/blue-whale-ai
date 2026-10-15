@@ -1,3 +1,4 @@
+import { type RunOutcome } from '@/custom/enums';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { advanceReveal, hasPendingReveal } from './streamPacing';
 import {
@@ -27,7 +28,7 @@ import { cardsFromRevision, cardsOfRevision, taskLabelsOf } from '@/custom/api/p
 import { isApiError } from '@/shared/api/http';
 import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/custom/utils/creditsGate';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
-import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
+import type { RunContextCapacity, RunTokenUsage } from './runStatusLine';
 import { collectMissingQuoteIds, mergeConfirmedUser, patchQuoteTexts, projectMessage } from './userMessageProjection';
 import { listConversationQuotes } from '@/custom/api/canvas';
 import {
@@ -343,8 +344,6 @@ export function useAgentSession(projectId: string) {
         setStreamingText(text.slice(0, Math.floor(revealedRef.current)));
         return;
       }
-
-
 
       if (t === 'message.accepted') {
         if (after.runningRunId && after.runningRunId !== before.runningRunId) {
@@ -849,7 +848,6 @@ export function useAgentSession(projectId: string) {
     },
     [projectId, activeSkills.etag],
   );
-
 
   const confirmSolution = useCallback(
     async (understandingId: string, version: number) => {

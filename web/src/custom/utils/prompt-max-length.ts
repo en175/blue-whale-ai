@@ -1,4 +1,5 @@
-import { fetchGenerationModels, type ModelCapability } from '@/custom/api/generation';
+import { type ModelCapability } from '@/custom/enums';
+import { fetchGenerationModels } from '@/custom/api/generation';
 
 export function promptMaxLengthOf(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 1) return raw;

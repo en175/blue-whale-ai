@@ -1,7 +1,6 @@
 
 
-
-
+import { type AssetCardKind, KIND_META } from '@/custom/enums';
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageOff, Plus } from 'lucide-react';
@@ -13,7 +12,7 @@ import { isFileRejected } from '@/custom/utils/fileSignature';
 import type { UploadCompleteData } from '@/custom/api/assets';
 import type { CanvasGalleryRef } from '../../collectMediaBlocks';
 import { useAssetImageRefLimit } from '../../modelCaps';
-import { KIND_META, assetCardKindOf, type AssetCardKind } from './toolbarVisibility';
+import { assetCardKindOf } from './toolbarVisibility';
 import styles from './index.module.css';
 
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
@@ -37,14 +36,9 @@ function HandlePlus() {
   );
 }
 
-
-export type { AssetCardKind } from './toolbarVisibility';
-
+export type { AssetCardKind } from '@/custom/enums';
 
 const NOWHEEL = 'nowheel';
-
-
-
 
 export type GenerationCardNodeData = Partial<GenerationCardBlock>;
 
@@ -78,7 +72,6 @@ export interface AssetCardNodeData {
   generationCard?: GenerationCardNodeData;
 }
 
-
 const MAX_VOICE_FILES = 3;
 const MAX_VOICE_DURATION = 15;
 
@@ -103,8 +96,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
   const isSelect = data.toolMode === 'select';
   const isGeneration = (data.kind ?? 'custom') === 'generation';
 
-
-
   useEffect(() => {
     data.onCardChange?.(id, {
       refs,
@@ -113,7 +104,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refs, desc, voiceRefs, id]);
-
 
   useEffect(() => {
     const pickResult = (data as { assetPickResult?: { ts: number; assetId: string; ref: CanvasGalleryRef } }).assetPickResult;
@@ -129,7 +119,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [(data as { assetPickResult?: { ts: number } }).assetPickResult?.ts]);
 
-
   useEffect(() => {
     if (!contextMenu) return;
     const close = () => setContextMenu(null);
@@ -141,7 +130,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
     };
   }, [contextMenu]);
 
-
   useEffect(() => {
     if (!addMenu) return;
     const close = () => setAddMenu(false);
@@ -150,7 +138,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
       document.removeEventListener('click', close);
     };
   }, [addMenu]);
-
 
   useEffect(() => {
     const pendingUploads = pendingUploadsRef.current;
@@ -168,23 +155,11 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (data.toolMode !== 'select') return;
     e.preventDefault();
     e.stopPropagation();
   }, [data.toolMode]);
-
-
-
-
-
-
-
-
-
-
-
 
   const addFiles = (files: FileList | File[]) => {
     const imgs: { id: string; src: string; file: File; type: 'image' | 'video' }[] = [];
@@ -196,7 +171,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
         imgs.push({ id: refId, src: URL.createObjectURL(f), file: f, type: mediaType });
       });
     if (imgs.length === 0) return;
-
 
     const newRefs = imgs.map(({ id, src, type }) => ({ id, src, type }));
     setRefs((prev) => {
@@ -213,7 +187,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
       imgs.slice(remaining).forEach(({ src }) => URL.revokeObjectURL(src));
       return [...prev, ...toAdd];
     });
-
 
     imgs.slice(0, MAX_IMAGE_REFS).forEach(({ id: refId, file }) => {
 
@@ -246,7 +219,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
     });
   };
 
-
   const removeRef = (refId: string) => {
 
     const pending = pendingUploadsRef.current.get(refId);
@@ -260,7 +232,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
       return prev.filter((r) => r.id !== refId);
     });
   };
-
 
   const addVoiceFiles = async (files: FileList | File[]) => {
     const list = Array.from(files);
@@ -307,7 +278,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
     }
     if (results.length > 0) setVoiceRefs((prev) => [...prev, ...results]);
   };
-
 
   const removeVoiceRef = (voiceId: string) => {
     setVoiceRefs((prev) => {
@@ -356,7 +326,6 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
           style={isSelect || isGeneration ? undefined : { pointerEvents: 'none' }}
         >
           {isGeneration && data.generationCard ? (
-
 
             <div className={`${styles.body} ${NOWHEEL}`} onWheel={(e) => e.stopPropagation()}>
               <div className={styles.gcHeader}>

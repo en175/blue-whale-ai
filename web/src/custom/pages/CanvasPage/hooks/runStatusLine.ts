@@ -1,7 +1,7 @@
 
 export type RunPhase = 'dispatching' | 'working' | 'completed' | 'cancelled' | 'failed';
 
-export type RunOutcome = 'completed' | 'cancelled' | 'failed';
+import { type RunOutcome } from '@/custom/enums';
 
 export interface RunTokenUsage {
   input_tokens: number;

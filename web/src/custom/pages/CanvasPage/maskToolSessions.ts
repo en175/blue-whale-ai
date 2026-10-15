@@ -1,12 +1,13 @@
+import { type VideoSubtitleEraseMode, type EraseTool } from '@/custom/enums';
 import { apiErrorMessage, captureMediaSource } from './toolSessionCapture';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import type { Node } from '@xyflow/react';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import { EMPTY_MASK_EDIT, applyMaskOp, type MaskEditState, type MaskOp, type MaskPoint, type MaskCoordinateSpace } from './eraseMask';
-import { buildVideoSubtitleEraseInput, type VideoSubtitleEraseInput, type VideoSubtitleEraseMode } from './videoSubtitleErase';
+import { buildVideoSubtitleEraseInput, type VideoSubtitleEraseInput } from './videoSubtitleErase';
 import { EMPTY_SUBTITLE_BOX_EDIT, applySubtitleBox, canAddSubtitleBox, type SubtitleBoxEditState, type SubtitleBoxOp, type SubtitleBoxPoint } from './subtitleEraseBoxes';
 import { maskHasPaintArea } from './imageErase';
-import type { EraseTool } from './components/ImageEraseDialog';
+
 import type { ToolSessionDefinition } from './toolSessionRuntime';
 
 export interface ImageEraseState {

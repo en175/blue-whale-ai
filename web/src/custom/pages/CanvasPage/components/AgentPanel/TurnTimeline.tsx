@@ -1,21 +1,9 @@
+import { type ToolStatus } from '@/custom/enums';
 import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, ChevronUp, Clock, Loader2, Minus, X } from 'lucide-react';
 import styles from './index.module.css';
 import { formatElapsed, formatTokens } from '../../hooks/runStatusLine';
-import {
-  formatDuration,
-  phasesOf,
-  processItemElapsedMs,
-  processItemRunning,
-  settledStepLabel,
-  toolLabel,
-  withWriting,
-  type ProcessItem,
-  type ProcessPhase,
-  type TimelineItem,
-  type ToolStatus,
-  type TurnAccount,
-} from '../../hooks/sessionTimeline';
+import { formatDuration, phasesOf, processItemElapsedMs, processItemRunning, settledStepLabel, toolLabel, withWriting, type ProcessItem, type ProcessPhase, type TimelineItem, type TurnAccount } from '../../hooks/sessionTimeline';
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());

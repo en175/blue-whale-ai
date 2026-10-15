@@ -1,21 +1,6 @@
+import { SCENE_SPLIT_GRANULARITY_LABELS } from '@/custom/enums';
 import { describe, expect, it } from 'vitest';
-import {
-  SCENE_SPLIT_DEFAULT_GRANULARITY,
-  SCENE_SPLIT_EDGE_ORIGIN,
-  SCENE_SPLIT_ENTRY_HINT,
-  SCENE_SPLIT_GRANULARITIES,
-  SCENE_SPLIT_GRANULARITY_LABELS,
-  SCENE_SPLIT_MAX_DURATION_SECONDS,
-  SCENE_SPLIT_MISSING_ASSET_REASON,
-  SCENE_SPLIT_OVER_DURATION_REASON,
-  buildSceneSplitPlaceholderNode,
-  sceneSplitDisplayName,
-  sceneSplitErrorText,
-  sceneSplitFanoutLayout,
-  sceneSplitGateReason,
-  sceneSplitSegmentBox,
-  sceneSplitSegmentLabel,
-} from './sceneSplit';
+import { SCENE_SPLIT_DEFAULT_GRANULARITY, SCENE_SPLIT_EDGE_ORIGIN, SCENE_SPLIT_ENTRY_HINT, SCENE_SPLIT_GRANULARITIES, SCENE_SPLIT_MAX_DURATION_SECONDS, SCENE_SPLIT_MISSING_ASSET_REASON, SCENE_SPLIT_OVER_DURATION_REASON, buildSceneSplitPlaceholderNode, sceneSplitDisplayName, sceneSplitErrorText, sceneSplitFanoutLayout, sceneSplitGateReason, sceneSplitSegmentBox, sceneSplitSegmentLabel } from './sceneSplit';
 import type { SpawnBox } from './draftSpawn';
 import { overlaps as draftOverlaps } from './draftSpawn';
 

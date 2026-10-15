@@ -1,5 +1,5 @@
 
-export type GalleryMediaKind = 'video' | 'image';
+import { type GalleryMediaKind } from '@/custom/enums';
 
 export function mediaKindFromTagCode(tagCode: string): GalleryMediaKind {
   return tagCode === 'video' ? 'video' : 'image';

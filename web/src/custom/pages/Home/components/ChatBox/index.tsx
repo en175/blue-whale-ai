@@ -1,6 +1,6 @@
 
 
-
+import { PANEL_REF_MEDIA_TYPES, VIDEO_MODE_LABEL } from '@/custom/enums';
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDismissOnOutside } from '@/custom/pages/CanvasPage/hooks/useDismissOnOutside';
@@ -10,7 +10,7 @@ import SkillModal from '../SkillModal';
 import LoginModal from '@/custom/components/LoginModal';
 import RatioIcon from '@/custom/components/RatioIcon';
 import AssetsPickerModal from '@/custom/pages/CanvasPage/components/AssetsPickerModal';
-import { PANEL_REF_MEDIA_TYPES } from '@/custom/pages/CanvasPage/refSourceTypes';
+
 import {
   defaultVideoModeFor,
   enabledVideoModes,
@@ -19,16 +19,7 @@ import {
   videoModeRefsSignature,
 } from '@/custom/pages/CanvasPage/videoModes';
 import type { VideoMediaRef, VideoMediaRefs } from '@/custom/pages/CanvasPage/videoMediaRefs';
-import {
-  VIDEO_MODE_LABEL,
-  configuredVideoModes,
-  effectiveVideoParams,
-  frameSlotCountOf,
-  isFrameMode,
-  lockedDurationOf,
-  lockedRatioOf,
-  type VideoMode,
-} from '@/custom/utils/video-modes';
+import { configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, lockedDurationOf, lockedRatioOf, type VideoMode } from '@/custom/utils/video-modes';
 import { type AssetRecord } from '@/custom/api/assets';
 import { getCurrentUser, subscribe } from '@/shared/utils/auth';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
@@ -49,23 +40,19 @@ import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
 
-
 const tabItems = [
   { key: 'agent', label: '视频智能体' },
   { key: 'video', label: 'AI 视频' },
   { key: 'image', label: 'AI 图片' },
 ];
 
-
 type KeyframeRefItem = { file?: File; preview: string; type: 'image'; assetId?: string | number };
-
 
 function makeProjectName(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
-
 
 async function navigateToNewProject(navigate: ReturnType<typeof useNavigate>, state: unknown) {
   try {
@@ -98,8 +85,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const [armedSkill, setArmedSkill] = useState<{ id: string; name: string } | null>(null);
 
-
-
   useEffect(() => {
     if (draft?.ts) {
       setInputValue(draft.text);
@@ -115,7 +100,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [activeTab, inputValue]);
 
-
   const [agentFiles, setAgentFiles] = useState<
     { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string; file?: File; assetId?: string | number }[]
   >([]);
@@ -126,7 +110,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const toggleDropdown = (key: string) => setOpenDropdown((cur) => (cur === key ? null : key));
   const [creationModel, setCreationModel] = useState('');
   const [underlineStyle, setUnderlineStyle] = useState<React.CSSProperties>({});
-
 
   const [videoModel, setVideoModel] = useState('');
   const [videoMode, setVideoMode] = useState<VideoMode>('text2video');
@@ -163,7 +146,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     [],
   );
 
-
   const [imageModel, setImageModel] = useState('');
   const [imageAspectRatio, setImageAspectRatio] = useState('');
   const [imageResolution, setImageResolution] = useState('');
@@ -188,10 +170,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const firstSlotRef = useRef<HTMLButtonElement>(null);
   const lastSlotRef = useRef<HTMLButtonElement>(null);
 
-
   const [videoModelList, setVideoModelList] = useState<GenerationModel[]>([]);
   const [imageModelList, setImageModelList] = useState<GenerationModel[]>([]);
-
 
   const applyImageModel = (model: GenerationModel) => {
     setImageModel(model.model_id);
@@ -203,13 +183,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setImageAspectRatio(pickRatioForSize(model, nextSize, model.default_aspect_ratio));
   };
 
-
   useEffect(() => {
     if (!isKeyframe) return;
     const ok = keyframeRefs.first || keyframeRefs.last;
     if (!ok) showToast('首尾帧模式需至少上传一张图片（首帧或尾帧）');
   }, [isKeyframe, keyframeRefs, showToast]);
-
 
   useEffect(() => {
     const m = videoModelList.find((x) => x.model_id === videoModel);
@@ -260,7 +238,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoModelList, videoModel, isKeyframe, videoMode]);
 
-
   useEffect(() => {
     fetchGenerationModels('video')
       .then((list) => {
@@ -279,7 +256,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       .catch(() => undefined);
   }, []);
 
-
   const updateUnderline = useCallback(() => {
     const activeEl = tabRefs.current.get(activeTab);
     const barEl = tabBarRef.current;
@@ -297,7 +273,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     updateUnderline();
   }, [updateUnderline]);
 
-
   useDismissOnOutside([
     { open: openDropdown === 'creation', ref: creationRef, dismiss: () => setOpenDropdown(null) },
     { open: openDropdown === 'videoModel', ref: videoModelRef, dismiss: () => setOpenDropdown(null) },
@@ -310,8 +285,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     { open: openDropdown === 'imgRes', ref: imgResRef, dismiss: () => setOpenDropdown(null) },
     { open: refMenu !== null, ref: [refMenuRef, refCardRef], dismiss: () => setRefMenu(null) },
   ]);
-
-
 
   const goCanvasWithText = (text: string, skillId?: string, skillName?: string) => {
     setInputValue('');
@@ -336,7 +309,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
     navigateToNewProject(navigate, { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' });
   };
-
 
   const dispatchByTab = (text: string) => {
     if (activeTab === 'video') {
@@ -414,7 +386,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     goCanvasWithText(text, armedSkill?.id, armedSkill?.name);
   };
 
-
   const handleUseSkill = (skill: SkillRecord) => {
     setShowSkillModal(false);
 
@@ -444,7 +415,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     dispatchByTab(text);
   };
 
-
   const handleLoginClose = () => {
     setShowLogin(false);
     const pending = pendingAction.current;
@@ -467,7 +437,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         return;
     }
   };
-
 
   const handleAgentFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -515,7 +484,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     e.target.value = '';
   };
 
-
   const removeAgentFile = (id: string) => {
     setAgentFiles((prev) => {
       const target = prev.find((f) => f.id === id);
@@ -523,7 +491,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       return prev.filter((f) => f.id !== id);
     });
   };
-
 
   const composingRef = useRef(false);
 
@@ -542,10 +509,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     if (next.reachedLimit && activePromptCap != null) showToast(`输入内容最多 ${activePromptCap} 个字符`);
   };
 
-
   const handleCompositionStart = () => { composingRef.current = true; };
   const handleCompositionEnd = () => { composingRef.current = false; };
-
 
   const videoModelOptions = videoModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
   const imageModelOptions = imageModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
@@ -564,7 +529,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const currentImageModel =
     imageModelOptions.find((m) => m.key === imageModel)?.label ?? '';
 
-
   const selectedImageModel = imageModelList.find((m) => m.model_id === imageModel);
   const imageRatioOptions = selectedImageModel
     ? ratiosForSelectedSize(selectedImageModel, imageResolution)
@@ -575,7 +539,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     selectedImageModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
   const currentImageResolution =
     imageSizeItems.find((s) => s.key === imageResolution)?.label ?? imageResolution;
-
 
   const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
 
@@ -624,9 +587,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const supportsVideoAudio = selectedVideoModel?.features?.audio === true;
 
-
-
-
   const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
   const selectedPromptModel = isImageTab
     ? selectedImageModel
@@ -656,7 +616,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const videoImagesFull = videoRefImageCount >= videoMaxImages;
   const videoVideosFull = videoRefVideoCount >= videoMaxVideos;
 
-
   const keyframeSendHint = isKeyframe
     ? !keyframeRefs.first && !keyframeRefs.last
       ? '请补充首帧/尾帧'
@@ -667,16 +626,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           : ''
     : '';
 
-
   const imageMaxImages = imageReferenceMaxOf(selectedImageModel?.features);
-
-
-
 
   const showOmniFollowHint = videoMode === 'omni'
     && !!hasAspectRatio(selectedVideoModel?.supported_aspect_ratios, 'adaptive')
     && videoRefVideoCount > 0;
-
 
   const handleVideoModeChange = (key: VideoMode) => {
     setOpenDropdown(null);
@@ -777,7 +731,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     });
   };
 
-
   const handleImageRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     const remaining = Math.max(0, imageMaxImages - imageRefFiles.length);
@@ -801,9 +754,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     });
   };
 
-
-
-
   const assetPickName = (asset: AssetRecord): string => {
     try {
       const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
@@ -813,7 +763,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
   };
 
-
   const openAssetsPicker = (target: 'agent' | 'video' | 'image') => {
     if (!user) {
       setShowLogin(true);
@@ -821,7 +770,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
     setAssetsPickerTarget(target);
   };
-
 
   const toggleRefMenu = (key: 'agent' | 'video' | 'image') => {
     if (refMenu === key) {
@@ -834,7 +782,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setRefMenu(key);
   };
 
-
   const openKeyframeSlotMenu = (slot: 'first' | 'last') => {
     const el = slot === 'first' ? firstSlotRef.current : lastSlotRef.current;
     if (!el) return;
@@ -844,12 +791,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setRefMenu('video');
   };
 
-
   const removeKeyframeSlot = (slot: 'first' | 'last') => {
     setKeyframeRefs((prev) => (slot === 'first' ? { last: prev.last } : { first: prev.first }));
   };
-
-
 
   const handleAssetsPickerSelect = (assets: AssetRecord[]) => {
     const target = assetsPickerTarget;
@@ -952,7 +896,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       setRefFiles((prev) => [...prev, ...items]);
       return;
     }
-
 
     const existing = new Set(
       imageRefFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),

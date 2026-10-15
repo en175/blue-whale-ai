@@ -1,4 +1,4 @@
-import type { MediaGenStatus } from './index';
+import { type MediaGenStatus } from '@/custom/enums';
 
 export const HOVER_PREVIEW_DELAY_MS = 100;
 

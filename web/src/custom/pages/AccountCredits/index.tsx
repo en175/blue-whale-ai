@@ -1,7 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import {
-  ORDER_STATUS_LABEL,
   accountConsumptionsOptions,
   creditLotsOptions,
   ordersOptions,
@@ -10,8 +9,8 @@ import {
   type ConsumptionRow,
   type CreditLotRow,
   type OrderRow,
-  type OrderStatus,
 } from '@/custom/api/accountCredits';
+import { ORDER_STATUS_LABEL, type OrderStatus } from '@/custom/enums';
 import { taskTypeLabel } from '@/shared/enums/taskTypeLabels';
 import { useDocumentTitle } from '@/shared/seo/useDocumentTitle';
 import { formatBeijingDateTime } from './format';

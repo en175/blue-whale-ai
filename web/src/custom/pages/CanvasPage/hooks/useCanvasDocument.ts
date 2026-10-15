@@ -1,3 +1,4 @@
+import { type ToolMode } from '@/custom/enums';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEdgesState, type Edge, type Node } from '@xyflow/react';
 import { type MediaDims } from '../components/MediaNode/mediaContentSize';
@@ -5,7 +6,6 @@ import { type ImageTextAttachment } from '../components/ImageDialog';
 import { textAttachmentsOf as textAttachmentsOfPure, textAttachmentsForSend as textAttachmentsForSendPure } from '../textAttachments';
 import { type CanvasGroup } from '../canvasGroups';
 import { useCanvasGraph } from './useCanvasGraph';
-import type { ToolMode } from './useCanvasWorkbenchChrome';
 
 export function useCanvasDocument(toolMode: ToolMode, submittingNodeId: string | null) {
   const [textNodes, setTextNodes] = useState<Node[]>([]);

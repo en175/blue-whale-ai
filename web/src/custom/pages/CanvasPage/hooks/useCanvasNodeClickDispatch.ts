@@ -1,3 +1,4 @@
+import { type VideoRefRole, type PickChannel, PANEL_REF_MEDIA_TYPES } from '@/custom/enums';
 import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
 import type { SessionContentBlock } from '@/custom/api/agentSessions';
@@ -7,10 +8,9 @@ import { extractTextNodeText, quoteChipLabel } from '../quoteConversation';
 import { hasGenerationRecord, isInPlaceRegenTarget } from '../mediaReEdit';
 import { readNodeAssetId } from '../canvasNodeUtils';
 import { readAssetId } from '../mediaRefs';
-import { PANEL_REF_MEDIA_TYPES } from '../refSourceTypes';
-import { asVideoRefMediaType, videoRefSourceError, type VideoMediaRef, type VideoRefRole } from '../videoMediaRefs';
+
+import { asVideoRefMediaType, videoRefSourceError, type VideoMediaRef } from '../videoMediaRefs';
 import type { ToolSessionDeps } from '../toolSessionCoordinator';
-import type { PickChannel } from './useCanvasPickers';
 
 type ProductPickResult = { ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } };
 

@@ -1,7 +1,8 @@
+import { VIDEO_ENHANCE_RESOLUTION_LABELS } from '@/custom/enums';
 import { useState } from 'react';
 import { X, ArrowUp } from 'lucide-react';
 import { VIDEO_ENHANCE_RESOLUTIONS, type VideoEnhanceResolution } from '@lib/contracts/video-enhance';
-import { VIDEO_ENHANCE_RESOLUTION_LABELS } from '../../videoEnhance';
+
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import styles from './index.module.css';
 

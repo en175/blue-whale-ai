@@ -1,11 +1,8 @@
+import { type AtMentionKind } from '@/custom/enums';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlignJustify, AudioLines, ChevronRight, Image as ImageIcon, Search, Video } from 'lucide-react';
-import {
-  filterAtMentionItems,
-  type AtMentionItem,
-  type AtMentionKind,
-} from '../../atMention';
+import { filterAtMentionItems, type AtMentionItem } from '../../atMention';
 import { computeFlyoutOffset } from './flyoutAnchor';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';

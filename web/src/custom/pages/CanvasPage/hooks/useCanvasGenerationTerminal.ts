@@ -1,3 +1,4 @@
+import { type VideoRefRole } from '@/custom/enums';
 import { useCallback, useRef } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
@@ -26,7 +27,7 @@ import {
 } from '../sceneSplit';
 import { smartMattingErrorText, type SmartMattingIdentity } from '../smartMatting';
 import { nextUsedInputState } from '../textIndexSync';
-import type { VideoRefRole } from '../videoMediaRefs';
+
 import { videoEnhanceErrorText } from '../videoEnhance';
 import {
   VOCAL_SPLIT_DEFAULT_FORMAT,

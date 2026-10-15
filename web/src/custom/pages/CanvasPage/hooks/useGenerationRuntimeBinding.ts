@@ -1,3 +1,4 @@
+import { type VideoRefRole } from '@/custom/enums';
 import { useMemo, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { QueryClient } from '@tanstack/react-query';
@@ -11,7 +12,7 @@ import { audioMixTask, audioVideoMuxTask } from '../generationRuntime/mixMuxTask
 import { sceneSplitTask, vocalSplitTask } from '../generationRuntime/multiOutputTasks';
 import { videoToolsTask } from '../generationRuntime/videoTools';
 import type { RuntimeNodeView } from '../generationRuntime/types';
-import type { VideoRefRole } from '../videoMediaRefs';
+
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
 
 export interface GenerationRuntimeBindingInput {

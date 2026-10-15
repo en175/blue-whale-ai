@@ -9,15 +9,8 @@ import type {
 import { mergeConfirmedUser as mergeUserMessage, textOf } from './userMessageProjection';
 import type { PartialCardPreview } from './partialCardPreview';
 import { toPartialCardPreview } from './partialCardPreview';
-import {
-  parseRunContextCapacity,
-  parseRunTokenUsage,
-  type RunContextCapacity,
-  type RunOutcome,
-  type RunTokenUsage,
-} from './runStatusLine';
+import { parseRunContextCapacity, parseRunTokenUsage, type RunContextCapacity, type RunTokenUsage } from './runStatusLine';
 import type { ChatMessage } from './useAgentSession';
-
 
 const RUN_STATUS_OUTCOME: Readonly<Record<string, RunOutcome>> = {
   completed: 'completed',
@@ -45,8 +38,7 @@ export function msOf(value: unknown): number | null {
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
 
-
-export type ToolStatus = 'running' | 'completed' | 'failed' | 'rejected' | 'cancelled';
+import { type ToolStatus, type RunOutcome } from '@/custom/enums';
 
 export interface LiveSubstep {
   summary: string;
@@ -291,7 +283,6 @@ function liveBreaks(live: LiveRun): LiveBreak[] {
 
 const breakAt = (item: LiveBreak): number => (item.kind === 'tool' ? item.call.at : item.reasoning.at);
 
-
 export function blocksFromLive(live: LiveRun): SessionContentBlock[] {
   const blocks: SessionContentBlock[] = [];
   if (live.steps.length > 0) blocks.push({ type: 'thinking', thinking: { steps: live.steps } });
@@ -330,7 +321,6 @@ export function blocksFromLive(live: LiveRun): SessionContentBlock[] {
   if (tail.trim()) blocks.push({ type: 'text', text: tail });
   return blocks;
 }
-
 
 export interface TimelineSubstep {
   summary: string;
@@ -475,7 +465,6 @@ export function itemsFromLive(live: LiveRun, revealedText: string): TimelineItem
   return items;
 }
 
-
 export type TimelineProcessItem = Extract<TimelineItem, { kind: 'reasoning' | 'thought' | 'tool' | 'waiting' }>;
 export type ProcessItem = TimelineProcessItem | { kind: 'writing'; elapsedMs: number };
 
@@ -544,7 +533,6 @@ export function processItemElapsedMs(item: ProcessItem, now: number): number {
   return 0;
 }
 
-
 function stripProgressive(summary: string): string {
   return summary.startsWith('正在') ? summary.slice(2) : summary;
 }
@@ -577,7 +565,6 @@ export function formatDuration(ms: number): string {
   const rest = Math.round(seconds % 60);
   return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
 }
-
 
 export interface TurnAccount {
   batchId: string | null;
@@ -616,7 +603,6 @@ export function accountOfRun(run: SessionRun, fallbackFinishedAt: number | null 
     cardFailureRetryable: !NON_RETRYABLE_CARD_FAILURES.has(run.prompt_card_failure?.code ?? ''),
   };
 }
-
 
 export interface Turn {
   key: string;
@@ -726,7 +712,6 @@ export function buildTurns(
 export function showsTurnFooter(turn: Pick<Turn, 'account' | 'live'>): boolean {
   return turn.account !== null && (turn.live === null || turn.live.ended);
 }
-
 
 export interface SessionState {
   messages: ChatMessage[];

@@ -1,10 +1,11 @@
+import { type AssetCardKind } from '@/custom/enums';
 import { type RefObject, useRef, useState } from 'react';
 import type { Node } from '@xyflow/react';
 import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import { fetchAllAssets, fetchAssetDetail, type AssetRecord } from '@/custom/api/assets';
 import { isApiError } from '@/shared/api/http';
 import { saveSharedAsset, type SaveSharedAssetRequest } from '@/custom/api/sharedAssets';
-import type { AssetCardKind } from '../components/AssetCardNode';
+
 import { fetchRemoteMedia } from '../fetchRemoteMedia';
 import { downloadFileNameOf, resolveDownloadMime } from '../components/cardName';
 import { blobToUint8Array, buildStoreZip, sniffMediaMime, uniqueDownloadName } from '../groupDownloadZip';

@@ -1,10 +1,7 @@
+import { type GenerationJobType } from '@/custom/enums';
 import { useQuery } from '@tanstack/react-query';
 import { Zap } from 'lucide-react';
-import {
-  generationQuoteOptions,
-  type GenerationJobType,
-  type QuoteJobParameters,
-} from '@/custom/api/generationQuote';
+import { generationQuoteOptions, type QuoteJobParameters } from '@/custom/api/generationQuote';
 import type { GenerationRefItem } from '@/custom/api/jobs';
 import styles from './index.module.css';
 

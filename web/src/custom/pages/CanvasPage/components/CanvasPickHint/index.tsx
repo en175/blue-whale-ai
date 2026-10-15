@@ -1,6 +1,5 @@
+import { type PickChannel, type VideoRefRole } from '@/custom/enums';
 import styles from './index.module.css';
-import type { PickChannel } from '../../hooks/useCanvasPickers';
-import type { VideoRefRole } from '../../videoMediaRefs';
 
 interface CanvasPickHintProps {
   pickMode: PickChannel | null;

@@ -1,22 +1,6 @@
+import { VOCAL_SPLIT_SCENE_OPTIONS, VOCAL_SPLIT_TRACK_LABELS } from '@/custom/enums';
 import { describe, expect, it } from 'vitest';
-import {
-  VOCAL_SPLIT_NODE_PREFIX,
-  VOCAL_SPLIT_SCENE_OPTIONS,
-  VOCAL_SPLIT_TRACK_LABELS,
-  VOCAL_SPLIT_TRACK_NODE_PREFIX,
-  buildVocalSplitPlaceholderNode,
-  buildVocalSplitTrackNodes,
-  isVocalSplitNodeId,
-  vocalSplitDisplayName,
-  vocalSplitErrorText,
-  vocalSplitNodeId,
-  vocalSplitSceneHint,
-  vocalSplitSceneLabel,
-  vocalSplitSourceName,
-  vocalSplitTerminalPatch,
-  vocalSplitTrackDisplayName,
-  vocalSplitTrackNodeId,
-} from './vocalSplit';
+import { VOCAL_SPLIT_NODE_PREFIX, VOCAL_SPLIT_TRACK_NODE_PREFIX, buildVocalSplitPlaceholderNode, buildVocalSplitTrackNodes, isVocalSplitNodeId, vocalSplitDisplayName, vocalSplitErrorText, vocalSplitNodeId, vocalSplitSceneHint, vocalSplitSceneLabel, vocalSplitSourceName, vocalSplitTerminalPatch, vocalSplitTrackDisplayName, vocalSplitTrackNodeId } from './vocalSplit';
 import { VOCAL_SPLIT_SCENE_TRACKS, type VocalSplitTrackType } from '@lib/contracts/vocal-split';
 
 describe('场景四档：标签与产出轨数 hint', () => {

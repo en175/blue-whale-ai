@@ -3,9 +3,8 @@ import type { AudioRefItem } from '../components/AudioDialog';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { CanvasGalleryRef } from '../collectMediaBlocks';
 import type { SessionContentBlock } from '@/custom/api/agentSessions';
-import type { VideoRefRole } from '../videoMediaRefs';
 
-export type PickChannel = 'image' | 'video' | 'audio' | 'product' | 'asset';
+import { type PickChannel, type VideoRefRole } from '@/custom/enums';
 
 export function useCanvasPickers() {
   const [pickMode, setPickMode] = useState<PickChannel | null>(null);

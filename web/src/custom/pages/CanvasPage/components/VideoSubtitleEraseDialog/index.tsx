@@ -1,6 +1,7 @@
+import { type VideoSubtitleEraseMode } from '@/custom/enums';
 import { ArrowUp, HelpCircle, Redo2, RotateCcw, Square, Undo2, X, Zap } from 'lucide-react';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
-import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
+
 import styles from './index.module.css';
 
 interface VideoSubtitleEraseDialogProps {
@@ -42,7 +43,6 @@ export default function VideoSubtitleEraseDialog({
     if (disabled) return;
     dispatch();
   };
-
 
   const sendDisabled = readOnly || sendBlockedReason != null;
   const sendTitle = readOnly

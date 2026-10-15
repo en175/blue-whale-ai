@@ -1,3 +1,4 @@
+import { type VideoRefRole } from '@/custom/enums';
 import { useMemo, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { toast as globalToast } from 'sonner';
@@ -51,7 +52,7 @@ import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } 
 import { sceneSplitTask, vocalSplitTask } from '../generationRuntime/multiOutputTasks';
 import { seedTargetOfNode, seedSourcesOfNode } from '../generationRuntime/seedFacts';
 import type { RuntimeNodeView } from '../generationRuntime/types';
-import type { VideoRefRole } from '../videoMediaRefs';
+
 import type { CanvasDraftCardCreatorsHandles } from './useCanvasDraftCardCreators';
 import type { CanvasImageToolHostsHandles } from './useCanvasImageToolHosts';
 import type { CanvasToolJobSubmissionsHandles } from './useCanvasToolJobSubmissions';

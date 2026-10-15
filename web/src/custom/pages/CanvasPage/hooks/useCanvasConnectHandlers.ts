@@ -1,8 +1,9 @@
+import { type ConnectGenKind, type VideoRefRole } from '@/custom/enums';
 import type { RefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { canConnectSourcesToGen, genKindOf, wouldCreateCycle, type ConnectGenKind } from '../connectAbility';
+import { canConnectSourcesToGen, genKindOf, wouldCreateCycle } from '../connectAbility';
 import { audioVideoMuxVideoError, isAudioVideoMuxDraftNode } from '../audioVideoMux';
-import type { VideoRefRole } from '../videoMediaRefs';
+
 import type { CanvasDraftCardCreatorsHandles } from './useCanvasDraftCardCreators';
 
 type ToolSessionsWire = { wireStart: (id: string | null) => void };

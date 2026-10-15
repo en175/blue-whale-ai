@@ -14,16 +14,6 @@ export type VideoMode = (typeof VIDEO_MODE_KEYS)[number];
 
 export const VIDEO_MODE_ORDER: readonly VideoMode[] = VIDEO_MODE_KEYS;
 
-export const VIDEO_MODE_LABEL: Record<VideoMode, string> = {
-  text2video: '文生视频',
-  omni: '全能参考',
-  image_reference: '图片参考',
-  first_frame: '图生视频',
-  first_last_frame: '首尾帧',
-  edit: '视频编辑',
-  extend: '视频延长',
-};
-
 export const ORDINARY_VIDEO_MODE_ORDER: readonly VideoMode[] = [
   'text2video',
   'omni',

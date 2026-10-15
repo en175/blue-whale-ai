@@ -1,10 +1,11 @@
+import { type VideoRefRole } from '@/custom/enums';
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Connection, Edge, Node, OnEdgesChange } from '@xyflow/react';
 import { draftVideoModeOf } from '../videoModes';
 import { frameSlotCountOf, isFrameMode, type VideoMode } from '@/custom/utils/video-modes';
 import { canConnectSourcesToGen, genKindOf, isConnectableSource, wouldCreateCycle } from '../connectAbility';
 import { imageRefSourceError } from '../mediaRefs';
-import { mergedVideoMediaRefsOf, type VideoRefRole } from '../videoMediaRefs';
+import { mergedVideoMediaRefsOf } from '../videoMediaRefs';
 import {
   AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON,
   audioVideoMuxIdentityOf,

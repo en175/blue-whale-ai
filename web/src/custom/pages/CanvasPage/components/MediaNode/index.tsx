@@ -10,10 +10,11 @@ import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { ImageCropIdentity } from '../../imageCrop';
 import type { VideoEnhanceIdentity } from '../../videoEnhance';
+import { type MediaGenStatus, type VideoSubtitleEraseMode } from '@/custom/enums';
 import type { FrameInterpolationIdentity } from '../../frameInterpolation';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
-import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
+
 import type { SmartMattingMode } from '../../smartMatting';
 import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
@@ -104,8 +105,6 @@ function paintVideoFirstFrame(
     video.removeEventListener('seeked', handleSeeked);
   }
 }
-
-export type MediaGenStatus = 'draft' | 'generating' | 'checking' | 'failed' | 'cancelled';
 
 export interface MediaNodeData {
   src?: string;
@@ -363,7 +362,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     if (!file) return;
     data.onFillEmptyShell?.(id, file);
   }, [data, id]);
-
 
   const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const { naturalWidth: w, naturalHeight: h } = e.currentTarget;

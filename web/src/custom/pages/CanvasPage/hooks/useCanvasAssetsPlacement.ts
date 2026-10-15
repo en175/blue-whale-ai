@@ -1,3 +1,4 @@
+import { type VideoRefRole } from '@/custom/enums';
 import type { Dispatch, SetStateAction, RefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { linkAssetToProject, type AssetRecord } from '@/custom/api/assets';
@@ -13,14 +14,7 @@ import type { MediaDims } from '../components/MediaNode/mediaContentSize';
 import { assetDisplayName } from '../canvasPureNodeHelpers';
 import { newNodeId } from '../nodeId';
 import { baseSourceError, imageMediaRefsOf, isMaterialLibraryId, readAssetId } from '../mediaRefs';
-import {
-  asVideoRefMediaType,
-  mergedVideoMediaRefsOf,
-  occupiedVideoRefIds,
-  type VideoMediaRef,
-  type VideoMediaRefs,
-  type VideoRefRole,
-} from '../videoMediaRefs';
+import { asVideoRefMediaType, mergedVideoMediaRefsOf, occupiedVideoRefIds, type VideoMediaRef, type VideoMediaRefs } from '../videoMediaRefs';
 import { audioRefItemMediaTypeOf, checkAddAudioRef } from '../audioMediaRefs';
 import { mergedAudioRefsWithTextIndex } from '../textIndexSync';
 import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from '../livenessLibraryImport';

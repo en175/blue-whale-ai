@@ -1,12 +1,13 @@
+import { type PickChannel, type VideoRefRole, type AssetsPickerTarget } from '@/custom/enums';
 import { useMemo, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { ImageTextAttachment, UploadedFile } from './components/ImageDialog';
 import type { AudioRefItem, CanvasPickItem } from './components/AudioDialog';
-import type { PickChannel } from './hooks/useCanvasPickers';
+
 import type { AtMentionItem } from './atMention';
-import type { VideoRefRole, VideoMediaRefs } from './videoMediaRefs';
+import type { VideoMediaRefs } from './videoMediaRefs';
 import type { FollowDialogAnchor } from './followDialog';
-import type { AssetsPickerTarget } from './assetsPickerTargets';
+
 import { audioRefItemMediaTypeOf } from './audioMediaRefs';
 import { fetchUrlAsFile } from './canvasPureNodeHelpers';
 import { promptMaxLengthOfModel } from '@/custom/utils/prompt-max-length';

@@ -1,3 +1,4 @@
+import { type MediaGenStatus } from '@/custom/enums';
 import PromptSyncActions from '../PromptSyncActions';
 import { composeImageSendPrompt } from './composeImageSendPrompt';
 import { useState, useRef, useEffect, useMemo } from 'react';
@@ -42,7 +43,7 @@ import { pickRatioForSize, ratiosForSelectedSize } from '@/custom/utils/image-si
 import { refOverflowToast } from '@/custom/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
 import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
-import type { MediaGenStatus } from '../MediaNode';
+
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import AtMentionMenu from '../AtMentionMenu';
 import AttachmentActionBar from '../AttachmentActionBar';

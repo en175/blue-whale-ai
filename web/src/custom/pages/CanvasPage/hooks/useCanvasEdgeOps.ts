@@ -1,3 +1,4 @@
+import { type VideoRefRole } from '@/custom/enums';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { promptMentionSchema, validPromptMentions, type PromptMention } from '@lib/contracts/prompt-preview';
@@ -5,7 +6,7 @@ import { promptBindingList, promptBindingsSchema, releaseRemovedPromptSources } 
 import { readAssetId } from '../mediaRefs';
 import { extractTextNodeText } from '../quoteConversation';
 import { planBindingsCoveredBy } from '../canvasNodeUtils';
-import type { VideoRefRole } from '../videoMediaRefs';
+
 import type { CanvasHistoryApi } from './useCanvasHistory';
 
 export interface CanvasEdgeOpsHost {

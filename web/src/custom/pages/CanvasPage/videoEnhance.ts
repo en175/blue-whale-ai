@@ -21,12 +21,6 @@ export interface VideoEnhanceIdentity {
   lastParams?: Record<string, unknown>;
 }
 
-export const VIDEO_ENHANCE_RESOLUTION_LABELS: Record<VideoEnhanceResolution, string> = {
-  '1080p': '1080P',
-  '2k': '2K',
-  '4k': '4K',
-};
-
 export function videoEnhanceDraftPosition(source: {
   position?: { x?: number; y?: number };
   data?: Record<string, unknown>;

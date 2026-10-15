@@ -1,3 +1,4 @@
+import { type OutpaintPresetKey } from '@/custom/enums';
 import type { Node } from '@xyflow/react';
 import { apiErrorMessage, captureMediaSource, captureSourceAsset, cloneSourceNode, isSilentAuthError, requireProjectId } from './toolSessionCapture';
 import {
@@ -5,7 +6,7 @@ import {
   type ImageCutoutRequest, type ImageCutoutScene,
 } from './imageCutout';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
-import { ZERO_EXPANDS, outpaintGateReason, expandRatiosOf, presetExpands, maxExpandPerSide, type ExpandSides, type OutpaintPresetKey } from './imageOutpaint';
+import { ZERO_EXPANDS, outpaintGateReason, expandRatiosOf, presetExpands, maxExpandPerSide, type ExpandSides } from './imageOutpaint';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { ToolSessionDefinition } from './toolSessionRuntime';
 

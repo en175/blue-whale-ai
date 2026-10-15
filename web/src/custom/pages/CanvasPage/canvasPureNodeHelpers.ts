@@ -1,3 +1,4 @@
+import { type VideoRefRole } from '@/custom/enums';
 import type { Edge, Node } from '@xyflow/react';
 import { isApiError } from '@/shared/api/http';
 import type { AssetRecord } from '@/custom/api/assets';
@@ -11,7 +12,7 @@ import { extractTextNodeText } from '@lib/core/text-node-content';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import { readAssetId } from './mediaRefs';
 import { planBindingsCoveredBy } from './canvasNodeUtils';
-import { asVideoRefMediaType, readRefRole, type VideoMediaRef, type VideoRefRole } from './videoMediaRefs';
+import { asVideoRefMediaType, readRefRole, type VideoMediaRef } from './videoMediaRefs';
 import { imageEnhanceDraftPosition } from './imageEnhance';
 import { fetchRemoteMedia } from './fetchRemoteMedia';
 import type { SpawnBox } from './draftSpawn';

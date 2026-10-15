@@ -1,5 +1,6 @@
+import { type VideoRefRole } from '@/custom/enums';
 import type { GenerationRefItem } from '@/custom/api/jobs';
-import type { VideoMediaRef, VideoMediaRefs, VideoRefRole } from './videoMediaRefs';
+import type { VideoMediaRef, VideoMediaRefs } from './videoMediaRefs';
 
 function toJobRef(
   item: Pick<VideoMediaRef, 'assetId' | 'mediaType' | 'materialId' | 'duration'>,

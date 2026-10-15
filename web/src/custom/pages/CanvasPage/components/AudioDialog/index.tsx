@@ -1,3 +1,4 @@
+import { type MediaGenStatus } from '@/custom/enums';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/custom/api/generation';
@@ -6,7 +7,7 @@ import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOfForAudio 
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
-import type { MediaGenStatus } from '../MediaNode';
+
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { AtMentionItem } from '../../atMention';
 import { docHasAnyRef, docHasInvalidRef, type PromptDoc } from '@/custom/utils/prompt-doc';

@@ -50,16 +50,7 @@ export interface ImageEnhancePanelParams {
   enable_correct_color: boolean;
 }
 
-export const IMAGE_ENHANCE_TIER_LABELS: Record<ImageEnhanceVersionTier, string> = {
-  lite: 'Lite',
-  pro: 'Pro',
-  max: 'Max',
-};
-
-export const IMAGE_ENHANCE_MODE_LABELS: Record<ImageEnhancePanelParams['generative_enhance_mode'], string> = {
-  generative_first: '生成度优先',
-  fidelity_first: '保真度优先',
-};
+import { IMAGE_ENHANCE_TIER_LABELS } from '@/custom/enums';
 
 export function imageEnhanceTierGateReason(
   tier: ImageEnhanceVersionTier,

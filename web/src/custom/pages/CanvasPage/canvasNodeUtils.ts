@@ -1,7 +1,8 @@
+import { type AssetCardKind } from '@/custom/enums';
 import type { Node } from '@xyflow/react';
 import type { PromptBinding } from '@lib/contracts/prompt-target';
 import type { SnapshotAsset } from '@/custom/api/projects';
-import type { AssetCardKind } from './components/AssetCardNode';
+
 import { resolveCharacterLibraryMaterialId } from './characterLibraryDeposit';
 import { isMaterialLibraryId, readAssetId } from './mediaRefs';
 

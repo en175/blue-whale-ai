@@ -1,4 +1,5 @@
-import type { AssetRecord, AssetType } from '@/custom/api/assets';
+import { type AssetType } from '@/custom/enums';
+import type { AssetRecord } from '@/custom/api/assets';
 
 export const typeLabel: Record<AssetType, string> = {
   image: '图片',
