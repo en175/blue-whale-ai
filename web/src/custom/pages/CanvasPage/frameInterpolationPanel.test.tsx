@@ -334,7 +334,8 @@ describe('IKHLKR 关闭重开与刷新恢复', () => {
     await clickCard(draftId);
     expect(panelSend()).toBeTruthy();
     await act(async () => {
-      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
     });
     expect(panelSend()).toBeNull();
     expect(identityOf(mediaNode(draftId))).toEqual({ sourceAssetId: '5', lastParams: { fps: 30 } });

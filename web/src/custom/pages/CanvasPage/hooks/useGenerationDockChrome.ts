@@ -83,8 +83,9 @@ export function useGenerationDockChrome(input: GenerationDockChromeInput): void 
       if (!(target instanceof Element)) return;
       if (target.closest('[data-gen-panel-territory]')) return;
       if (target.closest('.react-flow')) return;
+      if (!downAt) return;
       if (downInTerritory) return;
-      if (downAt && Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > CLICK_DRAG_SLOP_PX) return;
+      if (Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > CLICK_DRAG_SLOP_PX) return;
       dismissAllGenPanels();
     };
     document.addEventListener('mousedown', onMouseDown, true);

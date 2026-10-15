@@ -907,4 +907,23 @@ describe('IKJUH5 注册扩展的真实页面契约', () => {
     });
     expect(addedDock.active()).toBe('added');
   });
+
+  it('无配对 mousedown 的重定向 click（Radix 触发器 preventDefault 抑制 mousedown）不收起面板', async () => {
+    await renderPage();
+    await act(async () => { addedDock.open(); });
+    await act(async () => {
+      document.documentElement.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(addedDock.active()).toBe('added');
+  });
+
+  it('真实点画布空白（有 mousedown 起点、不在领土内）仍收起面板', async () => {
+    await renderPage();
+    await act(async () => { addedDock.open(); });
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(addedDock.active()).toBeNull();
+  });
 });
