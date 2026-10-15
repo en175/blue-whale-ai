@@ -15,7 +15,8 @@ import {
 import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import ModelFormModal from './ModelFormModal';
-import { TYPE_TABS, typeName, type ModelType } from './model-form';
+import { typeName } from './model-form';
+import { TYPE_TABS, type ModelType } from '@/admin/enums';
 import { Alert, Badge, Button, Empty, Input, Page, PageHeader, Table, Tabs } from '../../ui';
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });

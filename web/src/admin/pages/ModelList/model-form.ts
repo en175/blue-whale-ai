@@ -1,14 +1,5 @@
 import type { AdminModel, CreateAdminModelParams, DurationRange, ModelSize } from '@/admin/api/adminModels';
-
-export type ModelType = 'image' | 'video' | 'text' | 'audio';
-
-
-
-
-
-
-
-
+import { TYPE_TABS, type ModelType } from '@/admin/enums';
 
 export interface SizeForm {
   id: string;
@@ -65,13 +56,6 @@ export const KNOWN_FEATURE_KEYS = [
 
 export const TASK_TYPE_KEYS = ['text2video', 'omni', 'image_reference', 'first_frame', 'first_last_frame', 'edit', 'extend'] as const;
 export type TaskTypeKey = (typeof TASK_TYPE_KEYS)[number];
-
-export const TYPE_TABS: { key: ModelType; label: string }[] = [
-  { key: 'image', label: '图片' },
-  { key: 'video', label: '视频' },
-  { key: 'text', label: '文生文' },
-  { key: 'audio', label: '音频' },
-];
 
 export const DEFAULT_PROVIDER_ID = 'new-api';
 

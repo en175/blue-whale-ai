@@ -13,9 +13,8 @@ import {
 import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import DiscountPolicyNotice from '../../components/DiscountPolicyNotice';
+import { MEMBER_STATUS_OPTIONS, TIER_OPTIONS } from '@/admin/enums';
 import {
-  MEMBER_STATUS_OPTIONS,
-  TIER_OPTIONS,
   formatDiscount,
   parseZheToBp,
   statusLabel,

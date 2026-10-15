@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiRequestWithMeta } from '@/shared/api/http';
-import type { TopupTierPermission } from './admin';
+import { type TopupTierPermission } from '@/admin/enums';
 
 export interface AdminRechargeCustomConfig {
   minCredits: number;

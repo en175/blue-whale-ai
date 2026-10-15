@@ -20,17 +20,19 @@ import {
   syncTopupTiersToGo,
   type TopupTier,
   type TopupTierList,
-  type TopupTierStatus,
 } from '@/admin/api/adminTopupTiers';
+import {
+  TIER_PERMISSION_LABEL,
+  TIER_STATUS_LABEL,
+  TIER_STATUS_TONE,
+  type TopupTierStatus,
+} from '@/admin/enums';
 import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import { Alert, Badge, Button, Empty, Page, PageHeader, Select, Table } from '../../ui';
 import PlanFormModal from './PlanFormModal';
 import PreviewModal from './PreviewModal';
 import {
-  TIER_PERMISSION_LABEL,
-  TIER_STATUS_LABEL,
-  TIER_STATUS_TONE,
   discountLabel,
   fmtMoney,
   fmtPoints,

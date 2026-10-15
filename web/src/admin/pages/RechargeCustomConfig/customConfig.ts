@@ -1,4 +1,4 @@
-import type { TopupTierPermission } from '@/admin/api/adminTopupTiers';
+import { type TopupTierPermission } from '@/admin/enums';
 import type {
   AdminRechargeCustomConfig,
   SaveRechargeCustomConfigParams,

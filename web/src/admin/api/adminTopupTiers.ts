@@ -1,9 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import { http, apiRequestWithMeta } from '@/shared/api/http';
-
-export type TopupTierStatus = 'draft' | 'active' | 'inactive';
-
-export type TopupTierPermission = 'all' | 'user_group' | 'member_tier';
+import { type TopupTierPermission, type TopupTierStatus } from '@/admin/enums';
 
 export interface TopupTier {
   id: string;

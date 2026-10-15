@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiRequest } from '@/shared/api/http';
 import { useAuthStore } from '@/shared/stores/auth';
+import { type UserManageAction } from '@/admin/enums';
 
 export interface AdminUserRow {
   userId: number;
@@ -34,8 +35,6 @@ export function fetchAdminUsers(
     headers: adminUserId !== undefined ? { 'New-Api-User': String(adminUserId) } : {},
   });
 }
-
-export type UserManageAction = 'freeze' | 'unfreeze' | 'adjustBalance';
 
 export interface AdjustBalanceResult {
   credits: number | null;
