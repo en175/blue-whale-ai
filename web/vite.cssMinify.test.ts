@@ -50,7 +50,7 @@ describe('production CSS minify', () => {
     );
     const cssTarget = config.build.cssTarget;
     const source = readFileSync(
-      join(webRoot, 'src/app/pages/Home/components/ChatBox/index.module.css'),
+      join(webRoot, 'src/custom/pages/Home/components/ChatBox/index.module.css'),
       'utf8',
     );
     const { code } = await transform(source, {

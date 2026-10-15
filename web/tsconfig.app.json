@@ -24,7 +24,7 @@
 
     /* Path aliases */
     "paths": {
-      "@/app/*": ["./src/app/*"],
+      "@/custom/*": ["./src/custom/*"],
       "@/admin/*": ["./src/admin/*"],
       "@/shared/*": ["./src/shared/*"],
       "@/*": ["./src/*"],
