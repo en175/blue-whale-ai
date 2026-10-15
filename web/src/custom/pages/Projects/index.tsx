@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { type InfiniteData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Check, ImageOff, MoreHorizontal, Pencil, Pin, PinOff, Plus, Trash2 } from 'lucide-react';
+import Empty from '@/custom/components/Empty';
 import Modal from '@/custom/components/Modal';
 import Skeleton from '@/custom/components/Skeleton';
 import {
@@ -71,10 +72,12 @@ function PreviewGallery({ project }: { project: ProjectRecord }) {
 
   if (previews.length === 0) {
     return (
-      <div className={styles.previewEmpty} aria-label="暂无图片预览">
-        <ImageOff size={28} strokeWidth={1.5} aria-hidden="true" />
-        <span>暂无图片预览</span>
-      </div>
+      <Empty
+        className={styles.previewEmpty}
+        aria-label="暂无图片预览"
+        icon={<ImageOff size={28} strokeWidth={1.5} aria-hidden="true" />}
+        title="暂无图片预览"
+      />
     );
   }
 
@@ -456,19 +459,24 @@ export default function Projects() {
           )}
 
           {hasInitialError && (
-            <div className={styles.empty} role="alert">
-              <p>{errorMessage(projectQueryError, '项目列表加载失败')}</p>
-              <button className={styles.retryBtn} type="button" onClick={() => void refetch()}>
-                重试
-              </button>
-            </div>
+            <Empty
+              className={styles.empty}
+              role="alert"
+              title={errorMessage(projectQueryError, '项目列表加载失败')}
+              action={(
+                <button className={styles.retryBtn} type="button" onClick={() => void refetch()}>
+                  重试
+                </button>
+              )}
+            />
           )}
 
           {!isInitialLoading && !hasInitialError && projects.length === 0 && (
-            <div className={styles.empty}>
-              <ImageOff size={32} strokeWidth={1.5} aria-hidden="true" />
-              <p>还没有项目，点击“新建项目”开始创作。</p>
-            </div>
+            <Empty
+              className={styles.empty}
+              icon={<ImageOff size={32} strokeWidth={1.5} aria-hidden="true" />}
+              title="还没有项目，点击“新建项目”开始创作。"
+            />
           )}
 
           {projects.length > 0 && (

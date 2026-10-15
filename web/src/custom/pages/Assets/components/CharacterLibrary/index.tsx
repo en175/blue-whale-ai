@@ -17,6 +17,7 @@ import {
 } from '@/custom/api/material';
 import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '@/custom/components/ConfirmModal';
+import Empty from '@/custom/components/Empty';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { formatAssetCreatedAt } from '../AssetDetailModal/format';
 import styles from './index.module.css';
@@ -543,7 +544,7 @@ function GroupDetail({
           />
         ))}
         {!onUpload && !onPickFiles && assets.length === 0 && (
-          <div className={styles.empty}>该分组暂无素材</div>
+          <Empty className={styles.empty} title="该分组暂无素材" />
         )}
       </div>
 
@@ -690,10 +691,10 @@ function AigcFlatView({
           />
         ))}
         {!onUpload && !onPickFiles && assets.length === 0 && !loading && !loadError && (
-          <div className={styles.empty}>暂无素材，请上传</div>
+          <Empty className={styles.empty} title="暂无素材，请上传" />
         )}
         {(onUpload || onPickFiles) && assets.length === 0 && !loading && !loadError && (
-          <div className={styles.empty}>点击上方上传素材</div>
+          <Empty className={styles.empty} title="点击上方上传素材" />
         )}
       </div>
 

@@ -1,7 +1,9 @@
 import { type AtMentionKind } from '@/custom/enums';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlignJustify, AudioLines, ChevronRight, Image as ImageIcon, Search, Video } from 'lucide-react';
+import { AlignJustify, AudioLines, ChevronRight, Image as ImageIcon, Video } from 'lucide-react';
+import Empty from '@/custom/components/Empty';
+import SearchInput from '@/custom/components/SearchInput';
 import { filterAtMentionItems, type AtMentionItem } from '../../atMention';
 import { computeFlyoutOffset } from './flyoutAnchor';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
@@ -199,16 +201,14 @@ export default function AtMentionMenu({
       onMouseLeave={() => setHovered(null)}
     >
       <div className={styles.panel} data-mention-main>
-        <label className={styles.search}>
-          <Search size={15} strokeWidth={2} />
-          <input
-            className={styles.searchInput}
-            value={query}
-            placeholder="搜索"
-            autoFocus
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
+        <SearchInput
+          className={styles.search}
+          variant="plain"
+          value={query}
+          placeholder="搜索"
+          autoFocus
+          onChange={setQuery}
+        />
 
         <div className={styles.results}>
         {matchedRefs.length > 0 && (
@@ -228,7 +228,7 @@ export default function AtMentionMenu({
         )}
         {searching ? (
           matched.length === 0 && matchedRefs.length === 0 ? (
-            <div className={styles.empty}>未找到匹配素材</div>
+            <Empty className={styles.empty} title="未找到匹配素材" />
           ) : (
             <div>
               {KIND_META.map(({ kind, label }) => {
@@ -297,7 +297,7 @@ export default function AtMentionMenu({
         >
         <div className={styles.flyout} data-mention-flyout>
           {flyoutItems.length === 0 ? (
-            <div className={styles.empty}>画布暂无该类型素材</div>
+            <Empty className={styles.empty} title="画布暂无该类型素材" />
           ) : (
             flyoutItems.map((item) => (
               <button

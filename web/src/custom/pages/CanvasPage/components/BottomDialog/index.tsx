@@ -15,7 +15,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/custom/api/genera
 import { pickDefaultVideoRatio, videoRatioLabel } from '@/custom/utils/video-aspect-ratio';
 import { aspectRatioOptions, hasAspectRatio } from '@/custom/utils/image-size-ratios';
 import { generationQuoteOptions } from '@/custom/api/generationQuote';
-import RatioIcon from '@/custom/components/RatioIcon';
+import RatioGroup from '@/custom/components/RatioGroup';
 import Select from '@/custom/components/Select';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildVideoJobReferences } from '../../videoJobReferences';
@@ -1052,23 +1052,21 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           {!ratioLocked && (
             <>
               <span className={styles.configLabel}>宽高比</span>
-              <div className={styles.ratioGroup}>
-                {ratioOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    className={`${styles.ratioBtn} ${option.id === selectedRatio ? styles.ratioBtnActive : ''}`}
-                    disabled={readOnly}
-                    onClick={() => {
-                      setSelectedRatio(option.id);
-                      syncDraftParams({ ratio: option.id });
-                    }}
-                  >
-                    <RatioIcon ratio={option.id} />
-                    { }
-                    <span>{videoRatioLabel(option.label)}</span>
-                  </button>
-                ))}
-              </div>
+              <RatioGroup
+                className={styles.ratioGroup}
+                variant="tiles"
+                value={selectedRatio}
+                disabled={readOnly}
+                ariaLabel="宽高比"
+                onChange={(id) => {
+                  setSelectedRatio(id);
+                  syncDraftParams({ ratio: id });
+                }}
+                options={ratioOptions.map((option) => ({
+                  value: option.id,
+                  label: videoRatioLabel(option.label),
+                }))}
+              />
             </>
           )}
 

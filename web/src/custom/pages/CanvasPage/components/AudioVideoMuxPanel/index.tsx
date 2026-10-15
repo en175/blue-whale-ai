@@ -7,6 +7,7 @@ import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { AUDIO_VIDEO_MUX_TITLE, type AudioVideoMuxBoundVideo, type AudioVideoMuxIdentity } from '../../audioVideoMux';
+import Empty from '@/custom/components/Empty';
 import styles from './index.module.css';
 
 interface AudioVideoMuxPanelProps {
@@ -37,7 +38,7 @@ function MuxVideoLibrary({ onPick }: { onPick: (video: AudioVideoMuxBoundVideo) 
         {library.isPending && <div className={styles.libraryHint}>载入视频素材…</div>}
         {library.isError && <div className={styles.libraryHint}>素材库加载失败，请重试</div>}
         {!library.isPending && !library.isError && records.length === 0 && (
-          <div className={styles.libraryHint}>素材库暂无视频，请先上传</div>
+          <Empty className={styles.libraryHint} title="素材库暂无视频，请先上传" />
         )}
         {records.map((asset) => {
           const name = asset.name?.trim() || `视频 #${asset.id}`;

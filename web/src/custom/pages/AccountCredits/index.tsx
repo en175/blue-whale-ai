@@ -14,6 +14,7 @@ import { ORDER_STATUS_LABEL, type OrderStatus } from '@/custom/enums';
 import { taskTypeLabel } from '@/shared/enums/taskTypeLabels';
 import { useDocumentTitle } from '@/shared/seo/useDocumentTitle';
 import { formatBeijingDateTime } from './format';
+import Empty from '@/custom/components/Empty';
 import ExportDialog from './ExportDialog';
 import SummaryCards from './SummaryCards';
 import styles from './index.module.css';
@@ -258,7 +259,7 @@ export default function AccountCredits() {
 function EmptyRow({ cols }: { cols: number }) {
   return (
     <tr>
-      <td colSpan={cols} className={styles.empty}>暂无记录</td>
+      <td colSpan={cols} className={styles.empty}><Empty title="暂无记录" /></td>
     </tr>
   );
 }

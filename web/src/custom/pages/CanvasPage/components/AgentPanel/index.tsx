@@ -12,6 +12,7 @@ import {
   Check,
   RotateCcw,
 } from 'lucide-react';
+import Empty from '@/custom/components/Empty';
 import styles from './index.module.css';
 import { fetchMySkills } from '@/custom/api/skills';
 import { useAgentSession } from '../../hooks/useAgentSession';
@@ -776,7 +777,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
                 </button>
                 <div className={styles.historyDivider} />
                 {sessions.length === 0 ? (
-                  <div className={styles.historyEmpty}>暂无历史会话</div>
+                  <Empty className={styles.historyEmpty} title="暂无历史会话" />
                 ) : (
                   sessions.map((s) => {
                     const failed = deleteError?.sessionId === s.session_id ? deleteError : null;

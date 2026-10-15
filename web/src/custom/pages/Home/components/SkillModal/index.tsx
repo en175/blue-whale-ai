@@ -4,7 +4,6 @@ import {
   X,
   MoreHorizontal,
   Eye,
-  Search,
   Store,
   BookMarked,
   AtSign,
@@ -30,6 +29,7 @@ import {
   type SkillRecord,
 } from '@/custom/api/skills';
 import { isApiError } from '@/shared/api/http';
+import SearchInput from '@/custom/components/SearchInput';
 import Select from '@/custom/components/Select';
 import Tabs from '@/custom/components/Tabs';
 import ConfirmModal from '@/custom/components/ConfirmModal';
@@ -347,18 +347,16 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
         {tab === 'library' && (
           <>
             <div className={styles.libToolbar}>
-              <div className={styles.searchWrap}>
-                <Search size={15} strokeWidth={2} className={styles.searchIcon} />
-                <input
-                  className={styles.searchInput}
-                  placeholder="搜索技能"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') setSearchQuery(searchInput);
-                  }}
-                />
-              </div>
+              <SearchInput
+                className={styles.searchWrap}
+                variant="field"
+                placeholder="搜索技能"
+                value={searchInput}
+                onChange={setSearchInput}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') setSearchQuery(searchInput);
+                }}
+              />
               <button className={styles.searchBtn} onClick={() => setSearchQuery(searchInput)}>
                 搜索
               </button>

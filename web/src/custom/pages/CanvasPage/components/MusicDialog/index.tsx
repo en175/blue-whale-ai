@@ -9,6 +9,7 @@ import { docHasInvalidRef, type PromptDoc } from '@/custom/utils/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from '../AudioDialog/AudioPromptEditor';
 import RefThumbnail from '../RefThumbnail';
 import { arrayMove, useRefStripDrag } from '../RefThumbnail/strip-dnd';
+import Empty from '@/custom/components/Empty';
 import Select from '@/custom/components/Select';
 import styles from './index.module.css';
 
@@ -193,7 +194,7 @@ export default function MusicDialog({
                 </button>
               </div>
               {canvasAudios.length === 0 ? (
-                <div className={styles.pickerEmpty}>画布暂无可选音频</div>
+                <Empty className={styles.pickerEmpty} title="画布暂无可选音频" />
               ) : (
                 <div className={styles.pickerList}>
                   {canvasAudios.map((it) => (

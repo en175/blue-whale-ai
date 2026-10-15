@@ -8,6 +8,7 @@ import {
   HISTORY_JOBS_PER_PROJECT,
   type HistoryJobEntry,
 } from '@/custom/api/generationHistory';
+import Empty from '@/custom/components/Empty';
 import { isApiError } from '@/shared/api/http';
 import { readJobFailText } from '@/custom/api/jobs';
 import styles from './index.module.css';
@@ -115,12 +116,13 @@ export default function History() {
             </ul>
           )}
           {history.isError && (
-            <div className={styles.empty}>
-              {isApiError(history.error) ? history.error.message : '生成历史加载失败，请刷新重试。'}
-            </div>
+            <Empty
+              className={styles.empty}
+              title={isApiError(history.error) ? history.error.message : '生成历史加载失败，请刷新重试。'}
+            />
           )}
           {history.data && history.data.length === 0 && (
-            <div className={styles.empty}>暂无视频生成历史</div>
+            <Empty className={styles.empty} title="暂无视频生成历史" />
           )}
           {history.data && history.data.length > 0 && (
             <ul className={styles.list}>

@@ -10,6 +10,7 @@ import { isFileRejected } from '@/custom/utils/fileSignature';
 import { toast } from '@/custom/components/Toast';
 import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '@/custom/components/ConfirmModal';
+import Empty from '@/custom/components/Empty';
 import Skeleton from '@/custom/components/Skeleton';
 import JobSourceModal, { type JobSourceTarget } from '@/custom/components/JobSourceModal';
 import AssetDetailModal from './components/AssetDetailModal';
@@ -256,7 +257,7 @@ export default function Assets() {
                 />
               )}
               {!loading && assetItems.length === 0 && (
-                <div className={styles.empty}>暂无素材</div>
+                <Empty className={styles.empty} title="暂无素材" />
               )}
               {!loading && loadingMore && (
                 <div className={styles.loadState} role="status">加载中…</div>

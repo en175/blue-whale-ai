@@ -17,7 +17,7 @@ import {
   promptCharCountLabel,
   promptMaxLengthOf,
 } from '@/custom/utils/prompt-max-length';
-import RatioIcon from '@/custom/components/RatioIcon';
+import RatioGroup from '@/custom/components/RatioGroup';
 import Select from '@/custom/components/Select';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildImageJobReferences } from '../../videoJobReferences';
@@ -566,22 +566,20 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
           {}
           <div className={styles.configSection}>
             <span className={styles.configLabel}>宽高比</span>
-            <div className={styles.ratioGroup}>
-              {ratioOptions.map((option) => (
-                <button
-                  key={option.id}
-                  className={`${styles.ratioBtn} ${option.id === selectedRatio ? styles.ratioBtnActive : ''}`}
-                  onClick={() => {
-                    setSelectedRatio(option.id);
-                    syncDraftParams({ ratio: option.id });
-                  }}
-                  disabled={readOnly}
-                >
-                  <RatioIcon ratio={option.id} />
-                  <span>{option.label}</span>
-                </button>
-              ))}
-            </div>
+            <RatioGroup
+              className={styles.ratioGroup}
+              value={selectedRatio}
+              disabled={readOnly}
+              ariaLabel="宽高比"
+              onChange={(id) => {
+                setSelectedRatio(id);
+                syncDraftParams({ ratio: id });
+              }}
+              options={ratioOptions.map((option) => ({
+                value: option.id,
+                label: option.label,
+              }))}
+            />
           </div>
         </div>
       )}

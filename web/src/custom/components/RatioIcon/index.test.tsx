@@ -98,13 +98,15 @@ describe('RatioIcon 接入点收敛', () => {
   const cropDialog = readSrc('pages/CanvasPage/components/CropDialog/index.tsx');
 
   it('ImageDialog 引用共享组件且不再保留本地实现', () => {
-    expect(imageDialog).toMatch(/import RatioIcon from '@\/custom\/components\/RatioIcon'/);
+    expect(imageDialog).toMatch(/import RatioGroup from '@\/custom\/components\/RatioGroup'/);
     expect(imageDialog).not.toMatch(/function RatioIcon/);
+    expect(imageDialog).not.toMatch(/import RatioIcon from '@\/custom\/components\/RatioIcon'/);
   });
 
   it('BottomDialog 引用共享组件且不再保留本地实现', () => {
-    expect(bottomDialog).toMatch(/import RatioIcon from '@\/custom\/components\/RatioIcon'/);
+    expect(bottomDialog).toMatch(/import RatioGroup from '@\/custom\/components\/RatioGroup'/);
     expect(bottomDialog).not.toMatch(/function RatioIcon/);
+    expect(bottomDialog).not.toMatch(/import RatioIcon from '@\/custom\/components\/RatioIcon'/);
   });
 
   it('ChatBox 引用共享组件并以 size={22} 调用，查表法已拆除', () => {
@@ -116,15 +118,15 @@ describe('RatioIcon 接入点收敛', () => {
   });
 
   it('CropDialog（IKGW1N 裁切比例选项）引用共享组件且不保留本地实现', () => {
-    expect(cropDialog).toMatch(/import RatioIcon from '@\/custom\/components\/RatioIcon'/);
+    expect(cropDialog).toMatch(/import RatioGroup from '@\/custom\/components\/RatioGroup'/);
     expect(cropDialog).not.toMatch(/function RatioIcon/);
+    expect(cropDialog).not.toMatch(/import RatioIcon from '@\/custom\/components\/RatioIcon'/);
   });
 
   it('画布接入不传 size，沿用默认 16px', () => {
-    for (const src of [imageDialog, bottomDialog, cropDialog]) {
-      const calls = src.match(/<RatioIcon [^/]*\/>/g) ?? [];
-      expect(calls.length).toBeGreaterThan(0);
-      for (const call of calls) expect(call).not.toContain('size');
-    }
+    const ratioGroup = readSrc('components/RatioGroup/index.tsx');
+    expect(ratioGroup).toMatch(/import RatioIcon from '@\/custom\/components\/RatioIcon'/);
+    expect(ratioGroup).toMatch(/<RatioIcon ratio=\{option\.value\} \/>/);
+    expect(ratioGroup).not.toMatch(/<RatioIcon ratio=\{option\.value\} size=/);
   });
 });
