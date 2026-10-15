@@ -1985,6 +1985,15 @@
   overflow-y: auto;
 }
 
+.solutionSegments {
+  margin: 0;
+  padding-left: 16px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .solutionActions {
   display: flex;
   align-items: center;

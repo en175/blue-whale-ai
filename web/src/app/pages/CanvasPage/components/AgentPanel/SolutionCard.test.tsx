@@ -152,6 +152,53 @@ describe('方案卡在对话里', () => {
     expect(text).toContain('9:16 · 25 秒');
   });
 
+  it('按段拆的卡逐段列出每段拍什么、几秒', () => {
+    sessionMock.turns = turnWith(
+      understanding({
+        solution_card: {
+          ...card!,
+          segments: [
+            { content: '清晨街道，红裙女孩走入画面', seconds: 5, segment_id: 'seg_1' },
+            { content: '正午咖啡馆窗边侧脸', seconds: 5, segment_id: 'seg_2' },
+          ],
+        },
+      }),
+    );
+    mount();
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).toContain('分几段拍');
+    expect(text).toContain('第 1 段：清晨街道，红裙女孩走入画面（5 秒）');
+    expect(text).toContain('第 2 段：正午咖啡馆窗边侧脸（5 秒）');
+    expect(solutionCard()!.querySelectorAll('ol li')).toHaveLength(2);
+  });
+
+  it('变更卡显示「这次改什么」：改之前 → 改之后，逐项列出', () => {
+    sessionMock.turns = turnWith(
+      understanding({
+        solution_card: {
+          ...card!,
+          scope: { kind: 'change', label: '加 1 段', effect: '在第 2 段「正午咖啡馆」和第 3 段「黄昏天桥」之间加 1 段——改完共 5 段、25 秒' },
+          segments: [{ content: '在第 2 段「正午咖啡馆」和第 3 段「黄昏天桥」之间加一段：她推门走出咖啡馆', seconds: 5 }],
+        },
+      }),
+    );
+    mount();
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).toContain('这次改什么');
+    expect(text).toContain('在第 2 段「正午咖啡馆」和第 3 段「黄昏天桥」之间加 1 段——改完共 5 段、25 秒');
+    expect(text).toContain('之间加一段：她推门走出咖啡馆（5 秒）');
+    expect(text).not.toContain('分几段拍');
+    expect(text).not.toContain('这张卡管的范围');
+  });
+
+  it('只有一段、或者老卡没有分段：和原来一样，不多出一栏', () => {
+    sessionMock.turns = turnWith(understanding({ solution_card: { ...card!, segments: [{ content: '一段拉花', seconds: 8 }] } }));
+    mount();
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).not.toContain('分几段拍');
+    expect(text).not.toContain('这次改什么');
+  });
+
   it('续写的卡显示「这张卡管的范围：第 2 段」，整条的卡不显示这一行', () => {
     sessionMock.turns = turnWith(
       understanding({ solution_card: { ...card!, scope: { kind: 'continuation', label: '第 2 段' } } }),
